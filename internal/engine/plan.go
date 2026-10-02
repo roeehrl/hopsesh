@@ -284,6 +284,17 @@ func planRepo(ctx context.Context, p *Plan, src Source, tgt Target, in Input, op
 	roots := append([]string{opt.ReposDir}, opt.ExtraRoots...)
 	roots = append(roots, repos.DefaultRoots(tgt.Home)...)
 	found := repos.FindLocal(g.Identity, roots)
+	// Coming home: if this session already has a copy here, its checkout comes first, even
+	// outside the usual folders.
+	if prev := previousCheckout(ctx, tgt, s.ID, g.Identity); prev != "" {
+		kept := []repos.Checkout{{Path: prev}}
+		for _, f := range found {
+			if filepath.Clean(f.Path) != filepath.Clean(prev) {
+				kept = append(kept, f)
+			}
+		}
+		found = kept
+	}
 	var top string
 	switch {
 	case len(found) > 0:

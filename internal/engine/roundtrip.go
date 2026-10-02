@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -9,10 +10,9 @@ import (
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/core/fsys"
+	"github.com/roeehrl/hopsesh/internal/core/repos"
 	"github.com/roeehrl/hopsesh/internal/core/rewrite"
 	"github.com/roeehrl/hopsesh/internal/core/sessions"
-
-	"github.com/roeehrl/hopsesh/internal/core/repos"
 )
 
 // Marking states in a plan.
@@ -173,4 +173,29 @@ func newSessionID() string {
 	b[8] = b[8]&0x3f | 0x80
 	h := hex.EncodeToString(b[:])
 	return h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:]
+}
+
+// previousCheckout returns the main checkout of the repository a copy of this session
+// already here was using, when it is a checkout of the same repository.
+func previousCheckout(ctx context.Context, tgt Target, sessionID, identity string) string {
+	loc := sessions.Locator{FS: fsys.Local{}, ConfigDir: tgt.ConfigDir}
+	dups, err := loc.Find(sessionID)
+	if err != nil {
+		return ""
+	}
+	for _, d := range dups {
+		sum, err := sessions.Summarize(fsys.Local{}, d)
+		if err != nil || sum.CWD == "" {
+			continue
+		}
+		states, err := repos.ProbeLocal(ctx, []string{sum.CWD})
+		if err != nil || len(states) == 0 || !states[0].IsRepo || states[0].Identity != identity {
+			continue
+		}
+		if states[0].MainWorktree != "" {
+			return states[0].MainWorktree
+		}
+		return states[0].Toplevel
+	}
+	return ""
 }
