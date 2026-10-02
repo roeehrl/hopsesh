@@ -19,7 +19,7 @@ import (
 
 const (
 	id           agent.ID = "claude"
-	home                  = "home"             // the config folder root
+	home                  = "home"              // the config folder root
 	worktreesDir          = ".claude/worktrees" // where Claude Code creates worktrees in a repo
 )
 
