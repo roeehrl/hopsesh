@@ -2,13 +2,22 @@
 package config
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 
 	"github.com/BurntSushi/toml"
 )
+
+// Schema is the configuration format. Files in another format are refused, never read:
+// hopsesh keeps no code for older formats.
+const Schema = 3
+
+// ErrOldConfig means the configuration file was written by an older hopsesh.
+var ErrOldConfig = errors.New("the configuration was written by an older hopsesh")
 
 // Host is one machine hopsesh knows about.
 type Host struct {
@@ -20,10 +29,6 @@ type Host struct {
 	// TailscaleName is the machine's MagicDNS name, used when Destination's own host
 	// name does not resolve (e.g. an alias pointing at a .local name on another network).
 	TailscaleName string `toml:"tailscale_name,omitempty"`
-	Helper        bool   `toml:"helper,omitempty"` // the user allowed deploying the remote helper
-	// HelperSHA256 pins the helper binary hopsesh uploaded; a helper that no longer
-	// matches is not run.
-	HelperSHA256 string `toml:"helper_sha256,omitempty"`
 	// Auth is "password" for a machine that logs in with a password (asked for, never
 	// stored in this file); "" means keys or the SSH agent.
 	Auth string `toml:"auth,omitempty"`
@@ -31,32 +36,47 @@ type Host struct {
 	Keychain bool `toml:"keychain,omitempty"`
 }
 
+// Agent is per-agent configuration, by module id.
+type Agent struct {
+	// Disabled leaves the agent out of scans and moves.
+	Disabled bool `toml:"disabled,omitempty"`
+	// RemoteControl turns the agent's own remote control on for continued sessions.
+	RemoteControl bool `toml:"remote_control,omitempty"`
+}
+
+// Peer is how this machine works with hopsesh on other machines.
+type Peer struct {
+	// Receive lets hopsesh on another machine send sessions here (off by default).
+	Receive bool `toml:"receive,omitempty"`
+}
+
 // Config is the user's configuration file.
 type Config struct {
-	ReposDir   string `toml:"repos_dir"`   // where clones go; default ~/git
-	Layout     string `toml:"layout"`      // flat | ghq
-	LivePolicy string `toml:"live_policy"` // handoff | fork
-	RemoteCtl  bool   `toml:"remote_control"`
+	Schema   int    `toml:"schema"`
+	ReposDir string `toml:"repos_dir"` // where clones go; default ~/git
+	Layout   string `toml:"layout"`    // flat | ghq
 	// UpdateCheck is "on" or "off" once the person has answered whether the app may
 	// look for new releases once a day ("" = not asked yet).
 	UpdateCheck string `toml:"update_check,omitempty"`
 	// Round trips. MarkMoved and SyncCode default to on (nil); PushSource to off.
-	MarkMoved  *bool `toml:"mark_moved,omitempty"`  // title the copy left behind "↪ moved to …"
+	MarkMoved  *bool `toml:"mark_moved,omitempty"`  // mark the copy left behind
 	SyncCode   *bool `toml:"sync_code,omitempty"`   // fetch and fast-forward the checkout here
 	PushSource bool  `toml:"push_source,omitempty"` // push unpushed commits on the source first
-	// SkillPrompt remembers the answer to "let Claude Code use hopsesh?": "" (not asked),
+	// SkillPrompt remembers the answer to "let your agents use hopsesh?": "" (not asked),
 	// "declined", or the skill revision last offered.
 	SkillPrompt string `toml:"skill_prompt,omitempty"`
 	// CLIPrompt is "declined" once the user said not now to linking the command-line tool
 	// from the app.
-	CLIPrompt string `toml:"cli_prompt,omitempty"`
-	Hosts     []Host `toml:"hosts"`
+	CLIPrompt string           `toml:"cli_prompt,omitempty"`
+	Agents    map[string]Agent `toml:"agents,omitempty"`
+	Peer      Peer             `toml:"peer"`
+	Hosts     []Host           `toml:"hosts"`
 }
 
 // Defaults returns the configuration used when no file exists.
 func Defaults() Config {
 	home, _ := os.UserHomeDir()
-	return Config{ReposDir: filepath.Join(home, "git"), Layout: "flat", LivePolicy: "handoff"}
+	return Config{Schema: Schema, ReposDir: filepath.Join(home, "git"), Layout: "flat"}
 }
 
 // Dir is the configuration directory: $XDG_CONFIG_HOME/hopsesh or ~/.config/hopsesh on
@@ -77,8 +97,9 @@ func Dir() string {
 	return filepath.Join(home, ".config", "hopsesh")
 }
 
-// StateDir holds the audit log, undo journal, staging area and hopsesh's own known_hosts:
-// $XDG_STATE_HOME/hopsesh or ~/.local/state/hopsesh; %LOCALAPPDATA%\hopsesh on Windows.
+// StateDir holds journals, lineage caches, the audit log, staging and hopsesh's own
+// known_hosts: $XDG_STATE_HOME/hopsesh or ~/.local/state/hopsesh; %LOCALAPPDATA%\hopsesh
+// on Windows.
 func StateDir() string {
 	if d := os.Getenv("HOPSESH_STATE_DIR"); d != "" {
 		return d
@@ -98,11 +119,25 @@ func StateDir() string {
 // Path is the configuration file.
 func Path() string { return filepath.Join(Dir(), "config.toml") }
 
-// Load reads the configuration, filling defaults for missing values.
+// Load reads the configuration, filling defaults for missing values. A file in another
+// format is refused with ErrOldConfig.
 func Load() (Config, error) {
 	c := Defaults()
-	if _, err := toml.DecodeFile(Path(), &c); err != nil && !errors.Is(err, os.ErrNotExist) {
+	b, err := os.ReadFile(Path())
+	if errors.Is(err, os.ErrNotExist) {
+		return c, nil
+	}
+	if err != nil {
 		return c, err
+	}
+	var probe struct {
+		Schema int `toml:"schema"`
+	}
+	if _, err := toml.NewDecoder(bytes.NewReader(b)).Decode(&probe); err != nil || probe.Schema != Schema {
+		return Defaults(), fmt.Errorf("%w: %s (move it aside; hopsesh starts fresh and you add your machines again)", ErrOldConfig, Path())
+	}
+	if _, err := toml.NewDecoder(bytes.NewReader(b)).Decode(&c); err != nil {
+		return Defaults(), err
 	}
 	d := Defaults()
 	if c.ReposDir == "" {
@@ -111,14 +146,12 @@ func Load() (Config, error) {
 	if c.Layout == "" {
 		c.Layout = d.Layout
 	}
-	if c.LivePolicy == "" {
-		c.LivePolicy = d.LivePolicy
-	}
 	return c, nil
 }
 
 // Save writes the configuration atomically with user-only permissions.
 func Save(c Config) error {
+	c.Schema = Schema
 	if err := os.MkdirAll(Dir(), 0o700); err != nil {
 		return err
 	}
@@ -150,14 +183,16 @@ func (c *Config) FindHost(name string) *Host {
 // UpsertHost adds or updates a host by name, keeping consent unless explicitly changed.
 func (c *Config) UpsertHost(h Host) {
 	if old := c.FindHost(h.Name); old != nil {
-		allowed, helper := old.Allowed, old.Helper
+		allowed := old.Allowed
 		*old = h
 		old.Allowed = old.Allowed || allowed
-		old.Helper = old.Helper || helper
 		return
 	}
 	c.Hosts = append(c.Hosts, h)
 }
+
+// AgentEnabled reports whether an agent module is in use.
+func (c Config) AgentEnabled(id string) bool { return !c.Agents[id].Disabled }
 
 // MarkMovedOn reports whether copies left behind are marked (default on).
 func (c Config) MarkMovedOn() bool { return c.MarkMoved == nil || *c.MarkMoved }
