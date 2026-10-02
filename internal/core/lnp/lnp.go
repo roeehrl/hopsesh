@@ -22,11 +22,9 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -52,17 +50,7 @@ const (
 const SettingsURL = "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension"
 
 // Gated reports whether this OS has local network privacy (macOS 15 or later).
-func Gated() bool {
-	if runtime.GOOS != "darwin" {
-		return false
-	}
-	v, err := syscall.Sysctl("kern.osproductversion")
-	if err != nil {
-		return true // assume a current macOS
-	}
-	major, _ := strconv.Atoi(strings.SplitN(v, ".", 2)[0])
-	return major >= 15
-}
+func Gated() bool { return gated() }
 
 // InApp reports whether this process is the main executable of a .app bundle, which is
 // the code macOS holds responsible for its network use.
