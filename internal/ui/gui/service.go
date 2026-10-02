@@ -269,7 +269,7 @@ func (a *App) Discover() []HostDTO {
 	cands, _ := hosts.Discover(ctx)
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	var out []HostDTO
+	out := []HostDTO{}
 	seen := map[string]bool{}
 	dto := func(d HostDTO, h *config.Host) HostDTO {
 		d.Auth, d.CanRemember = "key", secrets.Available()

@@ -88,7 +88,9 @@ async function showMachines() {
       "hopsesh found these machines. It connects only to the ones you turn on, using your own ",
       h("span", { class: "mono" }, "ssh"), " and keys, and only reads your coding agents' session folders",
       " until you choose to move a session. Machines owned by someone else stay off unless you turn them on."),
-    h("div", { class: "card" }, h("div", { class: "mrow h" }, h("span", {}, "Allow"), h("span", {}, "Machine"), h("span", {}, "Found via"), h("span", {}, "Status")), ...rows),
+    h("div", { class: "card" }, h("div", { class: "mrow h" }, h("span", {}, "Allow"), h("span", {}, "Machine"), h("span", {}, "Found via"), h("span", {}, "Status")),
+      ...(rows.length ? rows : [h("div", { class: "muted", style: "padding:14px 16px;font-size:12.5px" },
+        "No other machines found in Tailscale or ~/.ssh/config. Add one by its address, or scan just this machine (sessions can also move between agents here).")])),
     h("div", { style: "display:flex;gap:12px" }, h("span", { class: "spacer" }), add, h("button", { class: "btn primary", onclick: () => showSessions(true) }, "Scan allowed machines"))));
 }
 
@@ -257,6 +259,7 @@ function renderSessions() {
       (!f || [e.title, e.lastPrompt, e.cwd, g.name, e.machine, e.agentName].join(" ").toLowerCase().includes(f)));
     if (!entries.length) continue;
     const where = g.noRepo ? h("span", { class: "tag" }, "Sessions started outside a git checkout")
+      : g.noRemote ? h("span", { class: "tag" }, "A git checkout without a remote")
       : g.local ? h("span", { class: "ok", style: "font-size:11.5px" }, "cloned here · " + g.local)
       : g.remote ? h("span", { class: "warn", style: "font-size:11.5px" }, "not on this machine · clone needed") : null;
     cards.push(h("div", { class: "card" },
@@ -380,7 +383,8 @@ function renderPlan() {
       h("button", { class: "btn", onclick: async () => { const d = await api("ChooseFolder", "Where is your checkout?"); if (d) { o.targetDir = d; replan(); } } }, "I already have it…")));
   }
   if (r.action === "dir") repoItems.push(item("ok", `Continue in ${r.localPath}`, "Chosen by you."));
-  if (r.action === "none") repoItems.push(item("warn", "Not a git repository", p.sourceHost === state.info?.host ? "It stays in the same folder." : "hopsesh can't match or clone it; choose a folder."));
+  if (r.action === "none") repoItems.push(p.sourceCwd === p.targetCwd ? item("ok", "The same folder", "The session stays where it was started.")
+    : item("warn", "No repository to match", "The folder has no git remote, so hopsesh can't find or clone it here; choose a folder."));
   if (r.sourceBranch) {
     const where = r.sourceAgentWorktree ? "an agent worktree" : r.sourceInWorktree ? "a git worktree" : "the main folder";
     repoItems.push(item(r.sourceInWorktree ? "warn" : "ok", `Branch ${r.sourceBranch}: the session ran in ${where} on ${p.sourceHost}` + (r.sourceInWorktree && r.sourceMainBranch ? ` (its main folder is on ${r.sourceMainBranch})` : ""),
@@ -424,7 +428,7 @@ function renderPlan() {
     checks);
 
   const what = cont
-    ? [h("div", { class: "kv" }, h("span", {}, cont.relation === "append" ? `New work added to “${cont.appendTo}”` : `A new ${p.agent} session`), h("span", {}, cont.fidelity)),
+    ? [h("div", { class: "kv" }, h("span", {}, { append: `New work added to “${cont.appendTo}”`, new: `A new ${p.agent} session` }[cont.relation] || "Nothing (see the check below)"), h("span", {}, cont.fidelity)),
        h("div", { class: "kv muted" }, h("span", {}, cont.report.summary))]
     : [h("div", { class: "kv" }, h("span", {}, `${p.files} file(s)`), h("span", {}, fmtBytes(p.bytes))),
        p.setAside ? h("div", { class: "kv muted" }, h("span", {}, `${p.setAside} older copy here set aside (undo brings it back)`)) : null];
@@ -536,18 +540,20 @@ async function doApply() {
 
 function renderDone(d) {
   setTitlebar("done");
-  const facts = d.kind === "continue" ? [`continues in ${d.agent}`] : [`${d.paths} path(s) rewritten`, `${d.files} file(s), ${d.bytes}`];
+  const facts = d.kind === "continue" ? [] : [`${d.paths} path(s) rewritten`, `${d.files} file(s), ${d.bytes}`];
   if (d.cloned) facts.unshift("repository cloned");
   if (d.worktree) facts.push("worktree created");
   if (d.secrets) facts.push(`${d.secrets} likely secret(s) ${d.redacted ? "redacted" : "found"}`);
   const open = async () => { try { await api("OpenResult"); } catch (e) { toast(String(e.message || e)); } };
   view.replaceChildren(h("div", { class: "center" }, h("div", { class: "done" },
     h("div", { style: "display:flex;gap:14px;align-items:center" }, h("span", { class: "badge ok", style: "width:40px;height:40px;font-size:20px" }, "✓"),
-      h("div", {}, h("div", { style: "font-size:20px;font-weight:600" }, d.kind === "continue" ? `“${d.title}” continues in ${d.agent}` : `“${d.title}” is on this machine`), h("div", { class: "muted" }, facts.join(" · ")))),
+      h("div", {}, h("div", { style: "font-size:20px;font-weight:600" }, d.kind === "continue" ? `“${d.title}” continues in ${d.agent}` : `“${d.title}” is on this machine`), facts.length ? h("div", { class: "muted" }, facts.join(" · ")) : null)),
     h("div", { class: "card" }, h("div", { class: "sec" }, h("div", { style: "font-weight:600" }, "Start it"),
       h("div", { style: "display:flex;gap:8px" }, h("div", { class: "term" }, d.command), h("button", { class: "btn", onclick: async () => { await api("CopyText", d.command); toast("Copied"); } }, "Copy")),
       h("div", { style: "display:flex;gap:8px" }, h("button", { class: "btn primary", onclick: open }, d.inApp ? `Open in the ${d.agent} app` : "Open in Terminal")),
-      h("div", { class: "muted", style: "font-size:12px" }, `Its first message tells ${d.agent} where the session came from and asks it to check the repository, files, tools and environment before continuing.`))),
+      h("div", { class: "muted", style: "font-size:12px" }, d.kind === "continue"
+        ? `The conversation ends with a briefing that tells ${d.agent} where it came from and asks it to check the repository and files before continuing.`
+        : `Its first message tells ${d.agent} where the session came from and asks it to check the repository, files, tools and environment before continuing.`))),
     roundTripCard(d),
     d.notice ? h("div", { class: "card" }, h("div", { class: "sec" }, h("div", { style: "font-weight:600" }, `Tell the session on ${d.sourceHost}`),
       h("div", { class: "muted", style: "font-size:12px" }, "Paste this into the old session:"),

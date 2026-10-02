@@ -67,11 +67,12 @@ type EntryDTO struct {
 
 // GroupDTO is one repository.
 type GroupDTO struct {
-	Name    string     `json:"name"`
-	Remote  string     `json:"remote"`
-	Local   string     `json:"local"`
-	NoRepo  bool       `json:"noRepo"`
-	Entries []EntryDTO `json:"entries"`
+	Name     string     `json:"name"`
+	Remote   string     `json:"remote"`
+	Local    string     `json:"local"`
+	NoRepo   bool       `json:"noRepo"`   // not in a git checkout
+	NoRemote bool       `json:"noRemote"` // a checkout without a remote (matched by path only)
+	Entries  []EntryDTO `json:"entries"`
 }
 
 // ScanDTO is the result of a scan.
@@ -100,7 +101,7 @@ func (a *App) Scan() (*ScanDTO, error) {
 	a.inv, a.plan, a.res = inv, nil, nil
 	a.mu.Unlock()
 
-	out := &ScanDTO{Total: len(inv.Entries)}
+	out := &ScanDTO{Total: len(inv.Entries), Machines: []MachineDTO{}, Groups: []GroupDTO{}}
 	for _, m := range inv.Machines {
 		d := MachineDTO{Name: m.Name, Status: m.Status, Hint: m.Hint, Error: m.Error, OS: m.OS, Local: m.Local}
 		for _, e := range inv.Entries {
@@ -117,7 +118,7 @@ func (a *App) Scan() (*ScanDTO, error) {
 	}
 	targets := continueTargets(core, inv)
 	for _, g := range inv.Groups(core.LocalRoots()) {
-		gd := GroupDTO{Name: g.Name, Remote: g.Remote, Local: g.Local, NoRepo: g.Identity == "" || strings.HasPrefix(g.Identity, "local:")}
+		gd := GroupDTO{Name: g.Name, Remote: g.Remote, Local: g.Local, NoRepo: g.Identity == "", NoRemote: strings.HasPrefix(g.Identity, "local:")}
 		for _, it := range g.Items {
 			gd.Entries = append(gd.Entries, entryDTO(core, inv, it, targets))
 		}
@@ -377,6 +378,9 @@ func (a *App) Apply() (*DoneDTO, error) {
 		SourceHost: p.Source.Location, Stopped: res.Stopped, Pushed: res.Pushed, PushError: res.PushError, SyncNote: res.SyncNote,
 		Mark: res.Mark, MarkError: res.MarkError, Notice: res.Notice, Warnings: res.Warnings, InApp: p.Options.App,
 		AuditDir: filepath.Join(config.StateDir(), "log")}
+	if c := p.Continue; c != nil && c.AppendTo != nil && c.AppendTo.Title != "" {
+		d.Title = c.AppendTo.Title // the session it went back into
+	}
 	for _, n := range res.Rewrite.Replacements {
 		d.Paths += n
 	}

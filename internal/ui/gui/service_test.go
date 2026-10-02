@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/roeehrl/hopsesh/agents/claude"
 	"github.com/roeehrl/hopsesh/internal/agents/all"
@@ -53,6 +54,9 @@ func home(t *testing.T) (repo string) {
 func TestWindowContinuesInAnotherAgent(t *testing.T) {
 	repo := home(t)
 	a := NewApp(all.Registry())
+	if hosts := a.Discover(); hosts == nil {
+		t.Fatal("no machines is an empty list for the window, not null")
+	}
 	if info := a.Info(); info.ConfigError != "" || len(info.Agents) < 2 {
 		t.Fatalf("info: %+v", info)
 	}
@@ -116,6 +120,76 @@ func TestWindowContinuesInAnotherAgent(t *testing.T) {
 				t.Fatal("undo must remove the Codex session")
 			}
 		}
+	}
+}
+
+// Continue in Codex, work there, and continue back: the Claude Code original gets only the
+// new work, keeps its title, and the Codex thread is marked in Codex's own list.
+func TestWindowRoundTrip(t *testing.T) {
+	home(t)
+	a := NewApp(all.Registry())
+	scan, _ := a.Scan()
+	e := findEntry(t, scan, "claude/"+sid)
+	if _, err := a.Plan(e.Machine, e.Key, "codex", OptsDTO{Mark: true}); err != nil {
+		t.Fatal(err)
+	}
+	there, err := a.Apply()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rollouts, _ := filepath.Glob(filepath.Join(os.Getenv("HOME"), ".codex", "sessions", "*", "*", "*", "rollout-*.jsonl"))
+	if len(rollouts) != 1 {
+		t.Fatalf("rollouts: %v", rollouts)
+	}
+	f, _ := os.OpenFile(rollouts[0], os.O_APPEND|os.O_WRONLY, 0)
+	ts := time.Now().UTC().Add(-time.Minute).Format("2006-01-02T15:04:05.000Z")
+	for _, l := range []string{
+		`{"timestamp":"2030-01-01T00:00:00.000Z","type":"event_msg","payload":{"type":"user_message","message":"Now in uppercase","images":[]}}`,
+		`{"timestamp":"2030-01-01T00:00:00.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Now in uppercase"}]}}`,
+		`{"timestamp":"2030-01-01T00:00:00.000Z","type":"event_msg","payload":{"type":"agent_message","message":"PELICAN"}}`,
+		`{"timestamp":"2030-01-01T00:00:00.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"PELICAN"}]}}`,
+	} {
+		f.WriteString(strings.ReplaceAll(l, "2030-01-01T00:00:00.000Z", ts) + "\n")
+	}
+	f.Close()
+
+	scan, _ = a.Scan()
+	var cx EntryDTO
+	for _, g := range scan.Groups {
+		for _, x := range g.Entries {
+			if x.Agent == "codex" {
+				cx = x
+			}
+		}
+	}
+	if !strings.HasPrefix(cx.Title, there.Title) || cx.LastPrompt != "Now in uppercase" {
+		t.Fatalf("the Codex thread has the session's title and its real last prompt: %+v", cx)
+	}
+	p, err := a.Plan(cx.Machine, cx.Key, "claude", OptsDTO{Mark: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Continue.Relation != "append" || p.Continue.AppendTo == "" {
+		t.Fatalf("back: %+v", p.Continue)
+	}
+	back, err := a.Apply()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.Title != p.Continue.AppendTo || !strings.Contains(back.Command, sid) {
+		t.Fatalf("done: %+v", back)
+	}
+	scan, _ = a.Scan()
+	cl := findEntry(t, scan, "claude/"+sid)
+	if cl.LastPrompt != "Now in uppercase" || !cl.HereNewest {
+		t.Fatalf("the original is newest again, without hopsesh's briefing as its prompt: %+v", cl)
+	}
+	var marked bool
+	for _, c := range cl.Copies {
+		marked = marked || c.Agent == "codex" && c.Mark != nil && c.Mark.AgentName == "Claude Code"
+	}
+	if !marked {
+		t.Fatalf("the Codex thread is marked as continued in Claude Code: %+v", cl.Copies)
 	}
 }
 
