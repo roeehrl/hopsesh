@@ -62,6 +62,7 @@ jobs:
           go-version-file: go.mod
       - run: go build -o bin/hopsesh ./cmd/hopsesh
       - run: scripts/integration-test.sh
+      - run: scripts/roundtrip-test.sh
 
   install-scripts:
     runs-on: ubuntu-latest

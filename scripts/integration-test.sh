@@ -27,7 +27,9 @@ sudo install -o "$REMOTE_USER" -m 0600 "$WORK/session.jsonl" "$RHOME/.claude/pro
 mkdir -p ~/.ssh && chmod 700 ~/.ssh
 [ -f ~/.ssh/id_ed25519 ] || ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/id_ed25519
 sudo install -o "$REMOTE_USER" -m 0600 ~/.ssh/id_ed25519.pub "$RHOME/.ssh/authorized_keys"
-sudo systemctl start ssh 2>/dev/null || sudo service ssh start
+sudo systemctl start ssh 2>/dev/null || sudo service ssh start 2>/dev/null || {
+  sudo mkdir -p /run/sshd && sudo ssh-keygen -A >/dev/null && sudo /usr/sbin/sshd
+}
 
 "$BIN" hosts add box "$REMOTE_USER@127.0.0.1"
 "$BIN" trust box --yes
