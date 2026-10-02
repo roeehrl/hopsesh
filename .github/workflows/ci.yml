@@ -57,7 +57,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: shellcheck scripts/*.sh
+      - run: shellcheck scripts/*.sh demo/*.sh
       - shell: pwsh
         run: $null = [ScriptBlock]::Create((Get-Content -Raw scripts/install.ps1))
 

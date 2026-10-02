@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="100 100 824 824" width="128" height="128" role="img" aria-label="hopsesh">
+  <rect x="100" y="100" width="824" height="824" rx="220" fill="#0b6b62"/>
+  <path d="M330 640 A182 230 0 0 1 694 640" fill="none" stroke="#f6f5f1" stroke-width="40" stroke-linecap="round"/>
+  <circle cx="330" cy="680" r="62" fill="#f6f5f1"/>
+  <circle cx="694" cy="680" r="62" fill="#f6f5f1"/>
+</svg>
