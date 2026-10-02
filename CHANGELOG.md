@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+
+- README shell-completion setup for Bash, Zsh, Fish and PowerShell.
+
 ## [0.6.1] - 2026-10-21
 
 Compressed Codex sessions listed again, sizes, faster scans of other machines, undo that
