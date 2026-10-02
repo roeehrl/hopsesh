@@ -261,6 +261,47 @@ func (p remoteProcs) Terminate(ctx context.Context, pid int) error {
 	return err
 }
 
+func (p remoteProcs) Names(ctx context.Context, pids []int) (map[int]string, error) {
+	out := map[int]string{}
+	if len(pids) == 0 {
+		return out, nil
+	}
+	if p.m.Facts.OS == "windows" {
+		return nil, fmt.Errorf("%w: process names on Windows", agent.ErrUnsupported)
+	}
+	ids := make([]string, len(pids))
+	for i, id := range pids {
+		ids[i] = strconv.Itoa(id)
+	}
+	res, err := p.m.Conn.RunSh(ctx, `ps -o pid=,comm= -p "$1" 2>/dev/null; exit 0`, strings.Join(ids, ","))
+	if err != nil {
+		return nil, err
+	}
+	for _, line := range strings.Split(string(res), "\n") {
+		pid, comm, ok := strings.Cut(strings.TrimSpace(line), " ")
+		if n, err := strconv.Atoi(pid); ok && err == nil {
+			comm = strings.TrimSpace(comm)
+			out[n] = comm[strings.LastIndex(comm, "/")+1:]
+		}
+	}
+	return out, nil
+}
+
+// holdersScript prints "path<TAB>pid" for each process holding a lock on each path that is
+// locked: from /proc/locks on Linux, from lsof elsewhere.
+const holdersScript = `for p in "$@"; do
+  [ -e "$p" ] || continue
+  if [ -r /proc/locks ]; then
+    ino=$(stat -c %i "$p" 2>/dev/null) || continue
+    awk -v ino=":$ino" -v p="$p" '$2 != "->" && substr($6, length($6)-length(ino)+1) == ino { printf "%s\t%s\n", p, $5 }' /proc/locks
+  elif command -v lsof >/dev/null 2>&1; then
+    for pid in $(lsof -t -- "$p" 2>/dev/null); do printf '%s\t%s\n' "$p" "$pid"; done
+  else
+    printf '%s\tunsupported\n' "$p"
+  fi
+done
+exit 0`
+
 // lockScript probes advisory locks with perl's flock (the same flock(2) agents use), which
 // is on every macOS and nearly every Linux machine.
 const lockScript = `command -v perl >/dev/null 2>&1 || { for p in "$@"; do printf 'unknown\t%s\n' "$p"; done; exit 0; }
@@ -268,6 +309,46 @@ exec perl -e 'use Fcntl qw(:flock); for my $p (@ARGV) { if (!-e $p) { print "fre
 
 // remoteLocks probes lock files on a machine over SSH.
 type remoteLocks struct{ m *Machine }
+
+func (l remoteLocks) Holders(ctx context.Context, paths []string) (map[string][]int, error) {
+	out := map[string][]int{}
+	if len(paths) == 0 {
+		return out, nil
+	}
+	if l.m.Facts.OS == "windows" {
+		return nil, fmt.Errorf("%w: finding which program holds a lock on Windows", agent.ErrUnsupported)
+	}
+	states, err := l.Probe(ctx, paths)
+	if err != nil {
+		return nil, err
+	}
+	var held []string
+	for _, p := range paths {
+		if states[p] == agent.LockHeld {
+			held = append(held, p)
+		}
+	}
+	if len(held) == 0 {
+		return out, nil
+	}
+	res, err := l.m.Conn.RunSh(ctx, holdersScript, held...)
+	if err != nil {
+		return nil, err
+	}
+	for _, line := range strings.Split(string(res), "\n") {
+		p, pid, ok := strings.Cut(line, "\t")
+		if !ok {
+			continue
+		}
+		if pid == "unsupported" {
+			return nil, fmt.Errorf("%w: that machine has neither /proc/locks nor lsof", agent.ErrUnsupported)
+		}
+		if n, err := strconv.Atoi(pid); err == nil {
+			out[p] = append(out[p], n)
+		}
+	}
+	return out, nil
+}
 
 func (l remoteLocks) Probe(ctx context.Context, paths []string) (map[string]agent.LockState, error) {
 	out := map[string]agent.LockState{}

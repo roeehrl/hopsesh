@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -167,5 +168,60 @@ func TestCodexAccount(t *testing.T) {
 	}
 	if time.Since(start) > 15*time.Second {
 		t.Fatal("the probe should end as soon as Codex answers")
+	}
+}
+
+// Quitting a real Codex TUI that has a thread open: hopsesh finds the process holding the
+// thread's writer lock, checks it is codex and idle, and quits it; the rollout stays whole.
+func TestCodexStop(t *testing.T) {
+	bin := realAgents(t, "codex")
+	py, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 drives the TUI")
+	}
+	home, cwd := t.TempDir(), t.TempDir()
+	login := exec.Command(bin, "login", "--with-api-key")
+	login.Env = append(os.Environ(), "CODEX_HOME="+home)
+	login.Stdin = strings.NewReader("sk-hopsesh-test-not-a-real-key") // never used: no prompt is sent
+	if out, err := login.CombinedOutput(); err != nil {
+		t.Fatalf("login: %v %s", err, out)
+	}
+	m := &host.Machine{Name: "here", Local: true, Facts: host.Facts{OS: "darwin", Home: home, Env: map[string]string{"CODEX_HOME": home},
+		Binaries: map[string]agent.BinaryFact{"codex": {Path: bin}}}}
+	mod := codex.New()
+	in := agent.Install{Agent: "codex", Version: "0.153.2", Binary: bin, Roots: map[string]string{"home": home}, Present: true}
+	j, _ := journal.New(t.TempDir(), "test")
+	h, _ := m.For(context.Background(), mod.Spec(), in, j)
+	ctx := context.Background()
+	w, err := mod.Write(ctx, h, in, ir.WriteRequest{Mode: ir.WriteNew, Header: ir.Header{CWD: cwd, Title: "Stop me", Created: time.Now()},
+		Items: []ir.Item{{Role: ir.RoleUser, Text: "What is the codeword?"}, {Role: ir.RoleAgent, Text: "PLUM-7"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(w.Path)
+	tui := exec.Command(py, "testdata/codex_tui.py", bin, home, w.SessionID, cwd)
+	out, _ := tui.StdoutPipe()
+	if err := tui.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tui.Process.Kill(); _ = tui.Wait() }()
+	line, _ := bufio.NewReader(out).ReadString('\n')
+	if !strings.HasPrefix(line, "open ") {
+		t.Fatalf("Codex did not open the thread: %q", line)
+	}
+	sid := agent.SessionID(w.SessionID)
+	if live, _ := mod.Live(ctx, h, in, []agent.SessionID{sid}); live[sid].State != agent.Live || live[sid].Status != "idle" {
+		t.Fatalf("live: %+v", live[sid])
+	}
+	s := agent.Summary{Key: agent.SessionKey{Agent: "codex", Session: sid}, Path: w.Path}
+	if err := mod.Stop(ctx, h, in, s, 10*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if live, _ := mod.Live(ctx, h, in, []agent.SessionID{sid}); live[sid].State != agent.Ended {
+		t.Fatalf("after stop: %+v", live[sid])
+	}
+	after, _ := os.ReadFile(w.Path)
+	if !strings.HasPrefix(string(after), string(before)) {
+		t.Fatal("the rollout must stay whole")
 	}
 }
