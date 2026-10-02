@@ -27,16 +27,16 @@ worktree, paths and all. Then it gives you the `claude --resume` command.
 
 - **Finds your machines** from Tailscale and `~/.ssh/config`, and connects only to the ones you
   allow, with your own `ssh`, keys and agent. Nothing to install on the other machines.
-  Machines without SSH keys can log in with a password (v0.2.0).
+  Machines without SSH keys can log in with a password.
 - **Lists every session by repository**: machine, path, branch, worktree, last prompt, when it
   was last active, and whether it's running right now.
 - **Moves a session safely**: finds the repo here or clones it, recreates the worktree, warns
   about unpushed or uncommitted work, rewrites paths, and shows a plan first. `hopsesh undo`
   reverses a move.
-- **Moves back just as easily** (v0.2.0): the copy left behind is marked "↪ moved to …", listings show one
+- **Moves back just as easily**: the copy left behind is marked "↪ moved to …", listings show one
   row per session, and `hopsesh pull <id>` brings back the newest copy, code included. If both
   copies changed, it stops and asks; it never merges.
-- **Works from inside Claude Code** (v0.2.0): ask "bring my laptop session here" and Claude plans the move
+- **Works from inside Claude Code**: ask "bring my laptop session here" and Claude plans the move
   with hopsesh, then moves only after you say yes.
 - **Picks up where you left off**: the resumed session's first message tells Claude it was moved
   and asks it to check that nothing is missing. It can start with Remote Control on and tell
@@ -86,11 +86,11 @@ Or from scripts:
 
 ```sh
 hopsesh ls --json                          # every allowed machine, grouped by repo
-hopsesh plan studio:"fix flaky tests"      # read-only preview of a move (v0.2.0)
+hopsesh plan studio:"fix flaky tests"      # read-only preview of a move
 hopsesh pull studio:"fix flaky tests"      # plan, confirm, move, print the resume command
-hopsesh pull 7f3c2a1e                      # no machine name: the newest copy (v0.2.0)
+hopsesh pull 7f3c2a1e                      # no machine name: bring back the newest copy
 hopsesh pull studio:7f3c2a1e --clone --rc --notify --yes
-hopsesh hosts add nas alice@192.168.1.20 --password   # a machine without SSH keys (v0.2.0)
+hopsesh hosts add nas alice@192.168.1.20 --password   # a machine without SSH keys
 hopsesh doctor studio                      # SSH, host trust, Claude version, Remote Control
 hopsesh undo 7f3c2a1e
 ```
@@ -103,14 +103,11 @@ hopsesh undo 7f3c2a1e
 </picture>
 
 Same engine, with a preflight screen for each move: repository, worktree mode, what gets
-rewritten, and what's left behind on the other machine. From v0.2.0, its Settings screen can put the
+rewritten, and what's left behind on the other machine. Its Settings screen can put the
 `hopsesh` command on your PATH (a link into the app, no administrator password) and install
 the Claude Code skill.
 
 ## Round trips
-
-> **Coming in v0.2.0.** Until it's released, try it from source:
-> `go install github.com/roeehrl/hopsesh/cmd/hopsesh@main`
 
 Move a session to your laptop, work on it, and move it back later. hopsesh treats the session
 as living on one machine at a time:
@@ -131,9 +128,6 @@ as living on one machine at a time:
 Details: [docs/design.md §12](docs/design.md#12-round-trips-a--b--a).
 
 ## Use it from Claude Code
-
-> **Coming in v0.2.0.** Until it's released, try it from source:
-> `go install github.com/roeehrl/hopsesh/cmd/hopsesh@main`
 
 ```sh
 hopsesh skill install              # Claude asks before each hopsesh command
@@ -172,7 +166,7 @@ The details, including the Claude Code file-format traps hopsesh handles, are in
 - **Read-only until you say go.** Each machine needs your permission, and every move is shown
   as a plan first.
 - **Never moves credentials.** Logins, keys, live sockets and account data stay where they
-  are; each machine stays signed in on its own. A machine's SSH password (v0.2.0) is kept in
+  are; each machine stays signed in on its own. A machine's SSH password is kept in
   the macOS Keychain or asked for each time, and never written to hopsesh's files or a
   command line.
 - **Transcripts can hold secrets.** hopsesh scans for likely secrets while moving and can
@@ -223,7 +217,7 @@ doesn't resolve, hopsesh falls back to the machine's Tailscale name.
 <details>
 <summary><b>One of my machines logs in with a password, not an SSH key</b></summary>
 
-From v0.2.0: add it with `hopsesh hosts add <name> <destination> --password`, or switch an
+Add it with `hopsesh hosts add <name> <destination> --password`, or switch an
 existing one with `hopsesh hosts auth <machine> password`. In the app, use the "Login" button
 on the Machines screen, or tick "This machine logs in with a password" when adding it.
 
@@ -262,7 +256,7 @@ running on this machine.
 <details>
 <summary><b>I moved a session and kept using the old copy too. What happens?</b></summary>
 
-From v0.2.0, moving it again stops and explains: both copies changed, and hopsesh never merges them. Choose
+Moving it again stops and explains: both copies changed, and hopsesh never merges them. Choose
 `--keep-both` to bring the incoming copy in as a separate session, or `--replace` to set the
 copy here aside (`hopsesh undo` restores it).
 </details>
