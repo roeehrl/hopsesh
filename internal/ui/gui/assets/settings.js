@@ -1,4 +1,4 @@
-// Settings screen: Claude Code skill, command-line tool, moving defaults, updates, this Mac.
+// Settings screen: agents, the hopsesh skill, command-line tool, moving defaults, updates, this Mac.
 import { h, api, toast, view, setTitlebar } from "./app.js";
 
 const SKILL_TEXT = {
@@ -48,28 +48,31 @@ export async function showSettings() {
   setTitlebar("settings");
   const s = await api("Settings");
   const sk = s.skill || {};
+  const copies = sk.copies || [], rules = sk.rules || [];
   const [skText, skKind] = SKILL_TEXT[sk.state] || [sk.state, ""];
   const addRules = h("input", { type: "checkbox", checked: false });
+  const install = (force, withRules, done) => run(() => api("InstallSkill", force, withRules), done);
   const skillActions = [];
   switch (sk.state) {
     case "absent":
-      skillActions.push(h("button", { class: "btn primary", onclick: () => run(() => api("InstallSkill", false, addRules.checked), "Installed the hopsesh skill") }, "Install the skill"));
+      skillActions.push(h("button", { class: "btn primary", onclick: () => install(false, addRules.checked, "Installed the hopsesh skill") }, "Install the skill"));
       break;
     case "stale":
     case "broken":
-      skillActions.push(h("button", { class: "btn primary", onclick: () => run(() => api("InstallSkill", false, addRules.checked), "Updated the hopsesh skill") }, sk.state === "broken" ? "Repair" : "Update"));
+      skillActions.push(h("button", { class: "btn primary", onclick: () => install(false, addRules.checked, "Updated the hopsesh skill") }, sk.state === "broken" ? "Repair" : "Update"));
       break;
     case "modified":
-      skillActions.push(h("button", { class: "btn", onclick: () => run(() => api("InstallSkill", true, false), "Replaced it; your version is kept as a backup") }, "Replace with hopsesh's version"));
+      skillActions.push(h("button", { class: "btn", onclick: () => install(true, false, "Replaced it; your version is kept as a backup") }, "Replace with hopsesh's version"));
       break;
     case "foreign":
-      skillActions.push(h("button", { class: "btn", onclick: () => run(() => api("InstallSkill", true, addRules.checked), "Replaced it; the old one is kept as a backup") }, "Replace it (keeps a backup)"));
+      skillActions.push(h("button", { class: "btn", onclick: () => install(true, addRules.checked, "Replaced it; the old one is kept as a backup") }, "Replace it (keeps a backup)"));
       break;
   }
   if (sk.state && sk.state !== "absent" && sk.state !== "foreign") {
     skillActions.push(h("button", { class: "btn", onclick: () => run(() => api("RemoveSkill", sk.state === "modified"), "Removed the hopsesh skill") }, "Remove"));
   }
-  skillActions.push(h("button", { class: "btn", onclick: previewSkill }, "What it tells Claude"));
+  skillActions.push(h("button", { class: "btn", onclick: previewSkill }, "What it tells your agents"));
+  const missingRules = rules.filter((r) => !r.present);
 
   const c = s.cli || {};
   const [cliText, cliKind] = CLI_TEXT[c.state] || [c.state, ""];
@@ -87,32 +90,48 @@ export async function showSettings() {
   }
 
   const save = (patch) => run(() => api("SaveSettings", Object.assign({
-    layout: s.layout, livePolicy: s.livePolicy, remoteControl: s.remoteControl, markMoved: s.markMoved,
-    syncCode: s.syncCode, pushSource: s.pushSource, updateCheck: s.updateCheck || "off",
+    layout: s.layout, markMoved: s.markMoved, syncCode: s.syncCode, pushSource: s.pushSource, updateCheck: s.updateCheck || "off",
   }, patch)), "Saved");
   const toggle = (key, title, desc) => h("label", { class: "opt" },
     h("input", { type: "checkbox", checked: s[key], onchange: (e) => save({ [key]: e.target.checked }) }),
     h("span", {}, h("b", {}, title), h("span", { class: "muted" }, desc)));
+  const agentRow = (a) => {
+    const rc = (a.capabilities || []).includes("remote-control");
+    return h("div", { class: "sec", style: "border-bottom:1px solid var(--line2)" },
+      row(h("div", {}, h("span", { style: "font-weight:500" }, a.name), " ",
+        a.stability === "experimental" ? pill("experimental", "warn") : null),
+        h("label", { class: "opt" }, h("input", { type: "checkbox", checked: a.enabled,
+          onchange: (e) => run(() => api("SetAgent", a.id, e.target.checked, a.remoteControl), e.target.checked ? `${a.name} is on` : `${a.name} is off`) }), "On")),
+      rc && a.enabled ? h("label", { class: "opt" }, h("input", { type: "checkbox", checked: a.remoteControl,
+        onchange: (e) => run(() => api("SetAgent", a.id, a.enabled, e.target.checked), "Saved") }),
+        h("span", {}, h("b", {}, "Turn on Remote Control for sessions moved here"), h("span", { class: "muted" }, "Reach them from your phone or other machines. Needs the agent's own subscription login."))) : null);
+  };
 
   view.replaceChildren(h("div", { class: "settings" },
     h("div", { class: "settings-col" },
-      section("Claude Code",
-        row(h("div", {}, h("div", { style: "font-weight:500" }, "Let Claude Code use hopsesh"),
-          h("div", { class: "muted", style: "font-size:12px" }, "A skill that teaches Claude to find your sessions on other machines and bring one here. It shows you the plan and moves only after you say yes.")),
+      h("div", { class: "card" }, h("div", { class: "card-h" }, h("span", { class: "name" }, "Agents"),
+        h("span", { class: "muted", style: "font-size:12px" }, "hopsesh reads and moves sessions of the agents that are on")),
+        ...(s.agents || []).map(agentRow)),
+      section("Let your agents use hopsesh",
+        row(h("div", {}, h("div", { style: "font-weight:500" }, "The hopsesh skill"),
+          h("div", { class: "muted", style: "font-size:12px" }, "Teaches each installed agent to find your sessions, bring one here or continue it in another agent. It shows you the plan and acts only after you say yes. Every agent gets the same files.")),
           pill(skText, skKind)),
-        sk.state === "stale" ? h("div", { class: "muted", style: "font-size:12px" }, `Installed by hopsesh ${sk.installedVersion || "(older)"}; this is ${s.version}.`) : null,
-        sk.state === "modified" ? h("div", { class: "muted", style: "font-size:12px" }, `You edited ${(sk.changedFiles || []).join(", ")}, so hopsesh leaves it alone.`) : null,
+        ...copies.map((cp) => h("div", { class: "item" }, h("span", { class: "badge " + (cp.status.state === "current" ? "ok" : cp.status.state === "absent" ? "warn" : "err") }, cp.status.state === "current" ? "✓" : "!"),
+          h("div", {}, h("div", { style: "font-weight:500" }, (cp.agents || []).join(", ") + " · " + (SKILL_TEXT[cp.status.state] || [cp.status.state])[0]),
+            h("div", { class: "muted mono", style: "font-size:11px" }, cp.dir),
+            cp.status.state === "stale" ? h("div", { class: "muted", style: "font-size:12px" }, `Installed by hopsesh ${cp.status.installedVersion || "(older)"}; this is ${s.version}.`) : null,
+            cp.status.state === "modified" ? h("div", { class: "muted", style: "font-size:12px" }, `You edited ${(cp.status.changedFiles || []).join(", ")}, so hopsesh leaves it alone.`) : null))),
         sk.state === "absent" || sk.state === "stale" || sk.state === "broken" || sk.state === "foreign" ? h("label", { class: "opt" }, addRules,
-          h("span", {}, h("b", {}, "Let Claude run read-only hopsesh commands without asking"), h("span", { class: "muted" }, "Listing and planning; moving a session always asks. Without this, Claude asks you before every hopsesh command. Adds rules to Claude Code's settings."))) : null,
-        s.skillRules ? h("div", { class: "muted", style: "font-size:12px" }, "Read-only hopsesh commands are allowed in Claude Code's settings; moves ask.")
-          : sk.state === "current" || sk.state === "modified" ? h("div", { style: "display:flex;gap:8px;align-items:center" },
-            h("span", { class: "muted", style: "font-size:12px" }, "Claude asks you before every hopsesh command."),
-            h("button", { class: "btn", onclick: () => run(() => api("AddSkillRules"), "Claude can now list and plan without asking; moves still ask") }, "Allow read-only commands")) : null,
+          h("span", {}, h("b", {}, "Let agents run read-only hopsesh commands without asking"), h("span", { class: "muted" }, "Listing and planning; moving or continuing a session always asks. Adds rules to each agent's settings."))) : null,
+        rules.length && !missingRules.length ? h("div", { class: "muted", style: "font-size:12px" }, "Read-only hopsesh commands are allowed in " + rules.map((r) => r.agent).join(" and ") + "; moves ask.")
+          : missingRules.length && (sk.state === "current" || sk.state === "modified") ? h("div", { style: "display:flex;gap:8px;align-items:center" },
+            h("span", { class: "muted", style: "font-size:12px" }, missingRules.map((r) => r.agent).join(" and ") + " ask you before every hopsesh command."),
+            h("button", { class: "btn", onclick: () => install(sk.state === "modified", true, "Agents can now list and plan without asking; moves still ask") }, "Allow read-only commands")) : null,
         h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" }, ...skillActions),
-        h("div", { class: "muted mono", style: "font-size:11px" }, `${sk.dir || ""} · runs ${s.skillBin}`)),
+        h("div", { class: "muted mono", style: "font-size:11px" }, `runs ${s.skillBin}`)),
       section("Command-line tool",
         row(h("div", {}, h("div", { style: "font-weight:500" }, "The hopsesh command in Terminal"),
-          h("div", { class: "muted", style: "font-size:12px" }, "Links hopsesh into ~/.local/bin, so Terminal (and Claude Code) can run it. It updates with the app.")),
+          h("div", { class: "muted", style: "font-size:12px" }, "Links hopsesh into ~/.local/bin, so Terminal (and your agents) can run it. It updates with the app.")),
           pill(cliText, cliKind)),
         c.target ? h("div", { class: "muted mono", style: "font-size:11px" }, `${c.path} → ${c.target}`) : null,
         h("div", { style: "display:flex;gap:8px;flex-wrap:wrap;align-items:center" }, ...cliActions),
@@ -130,12 +149,9 @@ export async function showSettings() {
           h("button", { class: "btn", onclick: async () => { const d = await api("ChooseFolder", "Where should hopsesh clone repositories?"); if (d) run(() => api("SetReposDir", d), "Saved"); } }, "Change…")),
         row(h("span", {}, "Clone layout"), h("select", { onchange: (e) => save({ layout: e.target.value }) },
           h("option", { value: "flat", selected: s.layout === "flat" }, "<repos>/<name>"), h("option", { value: "ghq", selected: s.layout === "ghq" }, "<repos>/<host>/<owner>/<name>"))),
-        row(h("span", {}, "When the session is still running"), h("select", { onchange: (e) => save({ livePolicy: e.target.value }) },
-          h("option", { value: "handoff", selected: s.livePolicy === "handoff" }, "Hand off (the old one stops)"), h("option", { value: "fork", selected: s.livePolicy === "fork" }, "Fork (both continue)"))),
-        toggle("markMoved", "Mark the copy left behind as moved", "Its title becomes “↪ moved to <this Mac> · …”, so it isn't resumed by mistake."),
+        toggle("markMoved", "Mark the copy left behind", "Its title becomes “↪ moved to <this Mac> · …” (or “continued in …”), so it isn't resumed by mistake."),
         toggle("syncCode", "Bring the code along", "Fetch the session's commit (from the other machine if it wasn't pushed) and fast-forward a clean checkout."),
-        toggle("pushSource", "Push unpushed commits on the other machine first", "Off: commits are fetched straight from the other machine instead."),
-        toggle("remoteControl", "Turn on Remote Control for moved sessions", "Needs a claude.ai subscription login.")),
+        toggle("pushSource", "Push unpushed commits on the other machine first", "Off: commits are fetched straight from the other machine instead.")),
       section("Updates",
         h("label", { class: "opt" }, h("input", { type: "checkbox", checked: s.updateCheck === "on", onchange: (e) => save({ updateCheck: e.target.checked ? "on" : "off" }) }),
           h("span", {}, h("b", {}, "Check GitHub once a day for new versions"), h("span", { class: "muted" }, `You have hopsesh ${s.version}.`)))),
@@ -151,7 +167,7 @@ export async function showSettings() {
 async function previewSkill() {
   const text = await api("SkillPreview");
   const dlg = document.querySelector("#dlg"), body = document.querySelector("#dlg-body");
-  body.replaceChildren(h("div", { style: "font-weight:600" }, "What the skill tells Claude"),
+  body.replaceChildren(h("div", { style: "font-weight:600" }, "What the skill tells your agents"),
     h("pre", { class: "term", style: "max-height:60vh;overflow:auto;white-space:pre-wrap" }, text),
     h("div", { style: "display:flex;justify-content:flex-end" }, h("button", { class: "btn", value: "close" }, "Close")));
   dlg.showModal();

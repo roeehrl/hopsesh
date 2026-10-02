@@ -7,11 +7,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/audit"
 	"github.com/roeehrl/hopsesh/internal/core/secrets"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
-	"github.com/roeehrl/hopsesh/internal/inventory"
 )
 
 // PasswordEvent is the event the window gets when ssh asks for a machine's password.
@@ -81,8 +81,8 @@ func (a *App) passwordFor(h config.Host) transport.PasswordFunc {
 			}
 		}
 		emit := b.emit
-		if emit == nil && a.App != nil {
-			emit = func(r PasswordRequest) { a.App.Event.Emit(PasswordEvent, r) }
+		if emit == nil && a.Wails != nil {
+			emit = func(r PasswordRequest) { a.emit(PasswordEvent, r) }
 		}
 		if emit == nil {
 			return "", transport.ErrPasswordCancelled
@@ -155,9 +155,9 @@ func (a *App) ProvidePassword(id, password string, remember bool) error {
 	go func() {
 		a.mu.Lock()
 		defer a.mu.Unlock()
-		if h := a.cfg.FindHost(req.Machine); h != nil && h.Keychain != (remember && keyErr == nil && secrets.Available()) {
+		if h := a.core.Cfg.FindHost(req.Machine); h != nil && h.Keychain != (remember && keyErr == nil && secrets.Available()) {
 			h.Keychain = remember && keyErr == nil && secrets.Available()
-			_ = config.Save(a.cfg)
+			_ = a.save()
 		}
 	}()
 	return keyErr
@@ -181,7 +181,7 @@ func (a *App) CancelPassword(id string) {
 func (a *App) SetAuth(name, auth string, remember bool) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	h := a.cfg.FindHost(name)
+	h := a.core.Cfg.FindHost(name)
 	if h == nil {
 		return fmt.Errorf("unknown machine %q", name)
 	}
@@ -199,15 +199,15 @@ func (a *App) SetAuth(name, auth string, remember bool) error {
 		return fmt.Errorf("unknown login method %q", auth)
 	}
 	a.forget(h.Destination)
-	a.log.Write(audit.Entry{Action: "hosts.auth", Host: h.Name, Detail: map[string]any{"auth": auth, "keychain": h.Keychain}})
-	return config.Save(a.cfg)
+	a.core.Audit.Write(audit.Entry{Action: "hosts.auth", Host: h.Name, Detail: map[string]any{"auth": auth, "keychain": h.Keychain}})
+	return a.save()
 }
 
 // ForgetPassword removes a machine's remembered password (it is asked for again).
 func (a *App) ForgetPassword(name string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	h := a.cfg.FindHost(name)
+	h := a.core.Cfg.FindHost(name)
 	if h == nil {
 		return fmt.Errorf("unknown machine %q", name)
 	}
@@ -234,7 +234,7 @@ type KeyLoginDTO struct {
 // Mac has no key ssh would use (the window then asks before one is made).
 func (a *App) SetupKeyLogin(name string, createKey bool) (*KeyLoginDTO, error) {
 	a.mu.Lock()
-	h := a.cfg.FindHost(name)
+	h := a.core.Cfg.FindHost(name)
 	if h == nil {
 		a.mu.Unlock()
 		return nil, fmt.Errorf("unknown machine %q", name)
@@ -244,8 +244,8 @@ func (a *App) SetupKeyLogin(name string, createKey bool) (*KeyLoginDTO, error) {
 	hp.Auth = "password"
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	res, err := inventory.SetupKeyLogin(ctx, hp, a.passwordFor(hp), createKey, config.StateDir(), a.log)
-	if errors.Is(err, inventory.ErrNoLocalKey) {
+	res, err := a.snapshot().SetupKeyLogin(ctx, hp, createKey)
+	if errors.Is(err, app.ErrNoLocalKey) {
 		return nil, errors.New("no-key")
 	}
 	if err != nil {

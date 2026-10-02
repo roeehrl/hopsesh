@@ -459,12 +459,9 @@ func (m *model) viewBrowse(b *strings.Builder) {
 		}
 		e := r.item.Entry
 		s := e.Session
-		status := "ended"
-		switch {
-		case e.Live.State == agent.Live:
-			status = liveSt.Render("live " + e.Live.Status)
-		case s.Mark != nil:
-			status = strings.TrimPrefix(agent.MarkTitle(*s.Mark, ""), "↪ ")
+		status := e.Status()
+		if e.Live.State == agent.Live {
+			status = liveSt.Render(status)
 		}
 		line := fmt.Sprintf("  %-12s %-11s %-40s %-9s %s", truncate(e.Machine, 12), truncate(e.AgentName, 11), truncate(s.Title, 40), ago(s.LastActivity), status)
 		if i == m.cursor {
@@ -496,7 +493,7 @@ func (m *model) viewBrowse(b *strings.Builder) {
 				case c.Newest:
 					p += " (newest)"
 				case c.Mark != nil:
-					p += " (" + strings.TrimPrefix(agent.MarkTitle(*c.Mark, ""), "↪ ") + ")"
+					p += " (" + app.MarkWords(*c.Mark) + ")"
 				default:
 					p += " (older)"
 				}

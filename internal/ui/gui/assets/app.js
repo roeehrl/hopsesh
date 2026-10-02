@@ -3,7 +3,7 @@
 import { Call, Events } from "/wails/runtime.js";
 import { showSettings } from "./settings.js";
 
-const SVC = "github.com/roeehrl/hopsesh/internal/gui.App.";
+const SVC = "github.com/roeehrl/hopsesh/internal/ui/gui.App.";
 export const api = (method, ...args) => Call.ByName(SVC + method, ...args);
 
 const $ = (sel) => document.querySelector(sel);
@@ -48,7 +48,7 @@ function ago(iso) {
   return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }
 
-const state = { scan: null, machine: "", filter: "", info: null, sel: null, opts: {}, plan: null };
+const state = { scan: null, machine: "", filter: "", info: null, sel: null, target: "", opts: {}, plan: null };
 
 export function setTitlebar(mode) {
   $("#q").hidden = mode !== "sessions";
@@ -86,7 +86,7 @@ async function showMachines() {
   view.replaceChildren(h("div", { class: "machines" },
     h("div", { style: "max-width:820px;color:var(--ink2)" },
       "hopsesh found these machines. It connects only to the ones you turn on, using your own ",
-      h("span", { class: "mono" }, "ssh"), " and keys, and only reads ", h("span", { class: "mono" }, "~/.claude"),
+      h("span", { class: "mono" }, "ssh"), " and keys, and only reads your coding agents' session folders",
       " until you choose to move a session. Machines owned by someone else stay off unless you turn them on."),
     h("div", { class: "card" }, h("div", { class: "mrow h" }, h("span", {}, "Allow"), h("span", {}, "Machine"), h("span", {}, "Found via"), h("span", {}, "Status")), ...rows),
     h("div", { style: "display:flex;gap:12px" }, h("span", { class: "spacer" }), add, h("button", { class: "btn primary", onclick: () => showSessions(true) }, "Scan allowed machines"))));
@@ -247,14 +247,14 @@ function renderSessions() {
     ...s.machines.map((m) => h("button", { class: "mach" + (state.machine === m.name ? " sel" : ""), onclick: () => { state.machine = m.name; renderSessions(); } },
       h("span", { class: "dot " + machineDot(m) }),
       h("span", {}, h("span", { style: "font-weight:500" }, m.name + (m.local ? " (this one)" : "")),
-        h("small", { class: machineDot(m) === "ok" ? "" : machineDot(m) }, machineDot(m) === "ok" ? `${m.os || ""} · ${m.sessions} sessions` : (m.hint || m.status))))),
+        h("small", { class: machineDot(m) === "ok" ? "" : machineDot(m), title: (m.agents || []).join(", ") }, machineDot(m) === "ok" ? `${m.os || ""} · ${m.sessions} sessions` : (m.hint || m.status))))),
     h("span", { class: "spacer" }),
     h("div", { class: "muted", style: "font-size:11px;padding:10px 8px;border-top:1px solid var(--line)" }, "Repos folder: ", h("span", { class: "mono" }, state.info?.reposDir || "")));
   const f = state.filter.toLowerCase();
   const cards = [];
   for (const g of s.groups) {
     const entries = g.entries.filter((e) => (!state.machine || e.machine === state.machine) &&
-      (!f || [e.title, e.lastPrompt, e.cwd, g.name, e.machine].join(" ").toLowerCase().includes(f)));
+      (!f || [e.title, e.lastPrompt, e.cwd, g.name, e.machine, e.agentName].join(" ").toLowerCase().includes(f)));
     if (!entries.length) continue;
     const where = g.noRepo ? h("span", { class: "tag" }, "Sessions started outside a git checkout")
       : g.local ? h("span", { class: "ok", style: "font-size:11.5px" }, "cloned here · " + g.local)
@@ -289,15 +289,15 @@ function localNetworkBanner(machines) {
       h("button", { class: "btn", onclick: async () => { await api("RetryLocalNetwork"); state.info = await api("Info"); showSessions(true); } }, "Try again")));
 }
 
-// skillBanner offers the Claude Code skill once (until installed or dismissed), and an
-// update when the installed skill is out of date.
+// skillBanner offers the hopsesh skill once (until installed or dismissed), and an update
+// when a copy of it is out of date.
 function skillBanner() {
   const st = state.info?.skillState, prompt = state.info?.skillPrompt;
   const refresh = async () => { state.info = await api("Info"); renderSessions(); };
   if (st === "absent" && prompt !== "declined") {
     return h("div", { class: "card banner", role: "status" },
-      h("div", { style: "font-weight:600" }, "Let Claude Code use hopsesh"),
-      h("div", { style: "font-size:12.5px;line-height:1.5" }, "Ask Claude \u201cbring my laptop session here\u201d or \u201cwhat's running on the mini?\u201d. A small skill teaches Claude to use hopsesh: it shows you the plan and moves only after you say yes."),
+      h("div", { style: "font-weight:600" }, "Let your agents use hopsesh"),
+      h("div", { style: "font-size:12.5px;line-height:1.5" }, "Ask your agent \u201cbring my laptop session here\u201d or \u201ccontinue this in Codex\u201d. A small skill, the same for every agent, teaches it to use hopsesh: it shows you the plan and acts only after you say yes."),
       h("div", { style: "display:flex;gap:8px" },
         h("button", { class: "btn primary", onclick: async () => { try { await api("InstallSkill", false, false); toast("Installed the hopsesh skill"); } catch (e) { toast(String(e.message || e)); } refresh(); } }, "Install the skill"),
         h("button", { class: "btn", onclick: () => showSettings() }, "Options…"),
@@ -313,7 +313,7 @@ function skillBanner() {
   }
   if (st === "stale" || st === "broken") {
     return h("div", { class: "card banner", role: "status" },
-      h("div", { style: "font-weight:600" }, st === "stale" ? "The hopsesh skill for Claude Code is out of date" : "The hopsesh skill for Claude Code is damaged"),
+      h("div", { style: "font-weight:600" }, st === "stale" ? "The hopsesh skill is out of date" : "The hopsesh skill is damaged"),
       h("div", { style: "display:flex;gap:8px" },
         h("button", { class: "btn primary", onclick: async () => { try { await api("InstallSkill", false, false); toast("Updated the hopsesh skill"); } catch (e) { toast(String(e.message || e)); } refresh(); } }, st === "stale" ? "Update it" : "Repair it"),
         h("button", { class: "btn", onclick: () => showSettings() }, "Settings…")));
@@ -327,40 +327,50 @@ function sessionRow(e) {
   if (e.worktree && e.mainBranch) bits.push(`main folder on ${e.mainBranch}`);
   if (e.unpushed) bits.push(`+${e.unpushed} unpushed`);
   if (e.dirty) bits.push(`${e.dirty} uncommitted`);
-  const others = (e.copies || []).filter((c) => !c.newest);
-  if (others.length) bits.push("also on " + others.map((c) => c.machine + (c.local ? " (here)" : "") + (c.movedTo ? `, moved to ${c.movedTo}` : ", older")).join("; "));
-  const action = e.hereNewest
-    ? h("button", { class: "btn outline", style: "justify-self:end", title: "The newest copy is already on this machine", onclick: async () => { try { await api("OpenInTerminal", e.resumeCommand); } catch (err) { toast(String(err.message || err)); } } }, "Resume")
-    : h("button", { class: "btn outline", style: "justify-self:end", title: e.staleHere ? "An older copy is on this machine; bring the newest one back" : "", onclick: () => preflight(e) }, e.staleHere ? "Hop back" : "Hop here");
+  const others = (e.copies || []).filter((c) => !(c.machine === e.machine && c.key === e.key));
+  if (others.length) bits.push("also " + others.map((c) => `${c.agentName} on ${c.machine}${c.local ? " (here)" : ""}` + (c.newest ? ", newest" : c.mark ? "" : ", older")).join("; "));
+  const err = (x) => toast(String(x.message || x));
+  const main = e.hereNewest
+    ? h("button", { class: "btn outline", title: "The newest copy is on this machine", onclick: () => api("ResumeEntry", e.machine, e.key, false).catch(err) }, "Resume")
+    : h("button", { class: "btn outline", title: e.staleHere ? "An older copy is on this machine; bring the newest one back" : `Bring it here, in ${e.agentName}`, onclick: () => preflight(e, "") }, e.staleHere ? "Hop back" : "Hop here");
+  const cont = (e.continueIn || []).length ? h("select", { class: "cont", "aria-label": "Continue in another agent", onchange: (ev) => { const t = ev.target.value; ev.target.value = ""; if (t) preflight(e, t); } },
+    h("option", { value: "" }, "Continue in…"), ...e.continueIn.map((a) => h("option", { value: a.id }, a.name + (a.experimental ? " (experimental)" : "")))) : null;
   return h("div", { class: "row" },
-    h("div", {}, h("div", { class: "t", title: e.title }, e.title), h("div", { class: "s" }, bits.join(" · ") || " ")),
+    h("div", {}, h("div", { class: "t", title: e.title }, h("span", { class: "agent" }, e.agentName), e.title), h("div", { class: "s" }, bits.join(" · ") || " ")),
     h("div", { style: "font-size:12px;min-width:0" }, h("div", {}, e.machine), h("div", { class: "mono s", title: e.cwd }, e.cwd)),
     h("div", { class: "prompt", title: e.lastPrompt }, e.lastPrompt ? `“${e.lastPrompt}”` : ""),
     h("div", { style: "font-size:12px" }, h("span", { class: "pill" + (e.live ? " live" : "") }, e.status), h("div", { class: "s" }, ago(e.lastActive))),
-    action);
+    h("div", { class: "actions" }, main, cont));
 }
 
-// ---------- preflight ----------
-async function preflight(e, keepOpts = false) {
+// ---------- plan ----------
+async function preflight(e, target, keepOpts = false) {
   state.sel = e;
+  state.target = target;
   const dflt = state.info?.defaults || { markMoved: true, syncCode: true, pushSource: false };
-  if (!keepOpts) state.opts = { worktree: "auto", remoteControl: false, notifyOld: false, fork: false, redact: false, clone: false, otherAccount: false, memory: false, targetDir: "",
-    markSource: dflt.markMoved, syncCode: dflt.syncCode, pushSource: dflt.pushSource, stopLocal: false };
+  if (!keepOpts) state.opts = { worktree: "auto", remoteControl: false, notify: false, fork: false, redact: false, clone: false, targetDir: "",
+    mark: dflt.markMoved, syncCode: dflt.syncCode, push: dflt.pushSource, stopLocal: false, app: false, conflict: "",
+    fidelity: "history", native: false, note: "", go: false };
   setTitlebar("plan");
   loading("Working out the plan…");
-  try { state.plan = await api("Plan", e.machine, e.id, state.opts); } catch (err) { view.replaceChildren(h("div", { class: "loading err" }, String(err.message || err))); return; }
+  try { state.plan = await api("Plan", e.machine, e.key, target, state.opts); } catch (err) { planError(err); return; }
   renderPlan();
 }
 
+function planError(err) {
+  view.replaceChildren(h("div", { class: "loading" }, h("div", {}, h("div", { class: "err", style: "margin-bottom:12px" }, String(err.message || err)),
+    h("button", { class: "btn", onclick: () => showSessions() }, "Back to sessions"))));
+}
+
 function renderPlan() {
-  const { plan: p, kinds } = state.plan;
-  const r = p.repo, o = state.opts, e = state.sel;
-  const replan = () => preflight(e, true);
+  const p = state.plan;
+  const r = p.repo, o = state.opts, e = state.sel, cont = p.continue;
+  const replan = () => preflight(e, state.target, true);
   const opt = (key, title, desc) => h("label", { class: "opt" },
     h("input", { type: "checkbox", checked: o[key], onchange: (ev) => { o[key] = ev.target.checked; replan(); } }), h("span", {}, h("b", {}, title), h("span", { class: "muted" }, desc)));
 
   const repoItems = [];
-  if (r.action === "use") repoItems.push(item("ok", `Found on this machine at ${r.localPath}` + (r.localBranch ? ` (on ${r.localBranch})` : ""), `Matched by remote ${r.identity}.`));
+  if (r.action === "use") repoItems.push(item("ok", `Found on this machine at ${r.localPath}` + (r.localBranch ? ` (on ${r.localBranch})` : ""), r.identity ? `Matched by remote ${r.identity}.` : ""));
   if (r.action === "clone") repoItems.push(item("ok", `Will clone into ${r.localPath}`, `From ${r.remote}.`));
   if (r.action === "needs-clone") {
     const dest = h("input", { class: "field mono", style: "flex:1", value: r.localPath, "aria-label": "Clone into" });
@@ -369,12 +379,12 @@ function renderPlan() {
       h("button", { class: "btn primary", onclick: () => { o.clone = true; o.reposDir = dest.value.replace(/\/[^/]+\/?$/, ""); replan(); } }, "Clone for me"),
       h("button", { class: "btn", onclick: async () => { const d = await api("ChooseFolder", "Where is your checkout?"); if (d) { o.targetDir = d; replan(); } } }, "I already have it…")));
   }
-  if (r.action === "dir") repoItems.push(item("ok", `Resume in ${r.localPath}`, "Chosen by you."));
-  if (r.action === "none") repoItems.push(item("warn", "Not a git repository", "hopsesh can't match or clone it; choose a folder."));
+  if (r.action === "dir") repoItems.push(item("ok", `Continue in ${r.localPath}`, "Chosen by you."));
+  if (r.action === "none") repoItems.push(item("warn", "Not a git repository", p.sourceHost === state.info?.host ? "It stays in the same folder." : "hopsesh can't match or clone it; choose a folder."));
   if (r.sourceBranch) {
-    const where = r.sourceClaudeWorktree ? "a Claude worktree" : r.sourceInWorktree ? "a git worktree" : "the main folder";
-    repoItems.push(item(r.sourceInWorktree ? "warn" : "ok", `Branch ${r.sourceBranch} — the session ran in ${where} on ${p.sourceHost}` + (r.sourceInWorktree && r.sourceMainBranch ? ` (its main folder is on ${r.sourceMainBranch})` : ""),
-      r.worktree ? `A matching worktree will be created here: ${r.worktree}` : (r.sourceInWorktree ? "It will resume in the main checkout here." : "")));
+    const where = r.sourceAgentWorktree ? "an agent worktree" : r.sourceInWorktree ? "a git worktree" : "the main folder";
+    repoItems.push(item(r.sourceInWorktree ? "warn" : "ok", `Branch ${r.sourceBranch}: the session ran in ${where} on ${p.sourceHost}` + (r.sourceInWorktree && r.sourceMainBranch ? ` (its main folder is on ${r.sourceMainBranch})` : ""),
+      r.worktree ? `A matching worktree will be created here: ${r.worktree}` : (r.sourceInWorktree ? "It will continue in the main checkout here." : "")));
     repoItems.push(h("div", { style: "display:flex;gap:8px;align-items:center;padding-left:28px" }, h("span", { class: "muted", style: "font-size:12px" }, "Worktree"),
       h("select", { "aria-label": "Worktree mode", onchange: (ev) => { o.worktree = ev.target.value; replan(); } },
         ...[["auto", "Recreate it if the session used one"], ["create", "Always use a worktree on this branch"], ["main", "Use the main checkout"]].map(([v, t]) => h("option", { value: v, selected: o.worktree === v }, t)))));
@@ -386,69 +396,115 @@ function renderPlan() {
     repoItems.push(item(r.dirty || !(p.syncFromSource || p.push) ? "warn" : "ok", "Work on " + p.sourceHost, parts.join("; ") + "."));
   }
   if (p.sync) repoItems.push(item("ok", "Code", p.sync[0].toUpperCase() + p.sync.slice(1) + "."));
-  if (p.stopPid) repoItems.push(item("warn", `The copy running here (pid ${p.stopPid}) will be quit first`, "It gets the normal quit signal and saves its transcript before the newer copy replaces it."));
+  if (p.stopHere) repoItems.push(item("warn", "The copy open here will be quit first", "It gets the normal quit signal and saves its session before the newer copy replaces it."));
 
+  const blockers = p.blockers || [];
   const warnings = (p.warnings || []).filter((w) => !w.includes("unpushed") && !w.includes("worktree"));
+  const checks = warnings.length || blockers.length ? h("div", { class: "card" }, h("div", { class: "card-h" }, h("span", { class: "name" }, "Check before going ahead")),
+    h("div", { class: "sec" }, ...warnings.map((w) => item("warn", w, "")), ...blockers.map((b) => b.includes("open on this machine") || b.includes("running on this machine")
+      ? h("div", {}, item("err", b, ""), h("div", { style: "padding-left:28px" }, h("button", { class: "btn primary", onclick: () => { o.stopLocal = true; replan(); } }, "Quit it and continue")))
+      : p.conflict && b.startsWith(p.conflict)
+      ? h("div", {}, item("err", "Both copies changed: " + p.conflict, "Nothing is merged. Pick which to keep."),
+          h("div", { style: "display:flex;gap:8px;padding-left:28px" },
+            h("button", { class: "btn", onclick: () => { o.conflict = "keep-both"; replan(); } }, "Keep both (bring this one in separately)"),
+            h("button", { class: "btn", onclick: () => { o.conflict = "replace"; replan(); } }, "Replace the copy here"),
+            h("button", { class: "btn", onclick: () => showSessions() }, "Keep the copy here")))
+      : item("err", b, "")))) : null;
+
   const main = h("div", { class: "pre-main" },
     h("div", { class: "fromto" },
-      h("div", { class: "box" }, h("small", {}, "From"), h("span", { style: "font-weight:500" }, `${p.sourceHost}${p.sourceOs ? " (" + p.sourceOs + ")" : ""}`), h("span", { class: "mono", style: "font-size:11px" }, p.sourceCwd)),
+      h("div", { class: "box" }, h("small", {}, "From"), h("span", { style: "font-weight:500" }, `${p.fromAgent} on ${p.sourceHost}${p.sourceOs ? " (" + p.sourceOs + ")" : ""}`), h("span", { class: "mono", style: "font-size:11px" }, p.sourceCwd)),
       h("span", { style: "color:var(--accent);font-size:18px" }, "→"),
-      h("div", { class: "box to" }, h("small", {}, "To"), h("span", { style: "font-weight:500" }, "this machine"), h("span", { class: "mono", style: "font-size:11px" }, p.targetCwd))),
+      h("div", { class: "box to" }, h("small", {}, "To"), h("span", { style: "font-weight:500" }, `${p.agent} on this machine`), h("span", { class: "mono", style: "font-size:11px" }, p.targetCwd))),
+    cont ? continueCard(p, o, replan) : null,
     h("div", { class: "card" }, h("div", { class: "card-h" }, h("span", { class: "name" }, "Repository")), h("div", { class: "sec" }, ...repoItems)),
-    h("div", { class: "card" }, h("div", { class: "card-h" }, h("span", { class: "name" }, "Path rewrite")),
+    p.mappings.length ? h("div", { class: "card" }, h("div", { class: "card-h" }, h("span", { class: "name" }, "Paths")),
       h("div", { class: "sec" }, h("div", { class: "maprow" }, ...p.mappings.flatMap((m) => [h("span", {}, m.from), h("span", { style: "color:var(--accent)" }, "→"), h("span", {}, m.to)])),
-        h("div", { class: "muted", style: "font-size:11.5px" }, "Signed reasoning blocks, message ids and the session id are never changed."))),
-    warnings.length || (p.blockers || []).length ? h("div", { class: "card" }, h("div", { class: "card-h" }, h("span", { class: "name" }, "Check before hopping")),
-      h("div", { class: "sec" }, ...warnings.map((w) => item("warn", w, "")), ...(p.blockers || []).map((b) => b.includes("running on this machine")
-        ? h("div", {}, item("err", b, ""), h("div", { style: "padding-left:28px" }, h("button", { class: "btn primary", onclick: () => { o.stopLocal = true; replan(); } }, "Quit it and continue")))
-        : p.conflict && b.startsWith(p.conflict)
-        ? h("div", {}, item("err", "Both copies changed: " + p.conflict, "Nothing is merged. Pick which to keep."),
-            h("div", { style: "display:flex;gap:8px;padding-left:28px" },
-              h("button", { class: "btn", onclick: () => { o.conflict = "keep-both"; replan(); } }, "Keep both (bring this one in separately)"),
-              h("button", { class: "btn", onclick: () => { o.conflict = "replace"; replan(); } }, "Replace the copy here"),
-              h("button", { class: "btn", onclick: () => showSessions() }, "Keep the copy here")))
-        : item("err", b, ""))))
-      : null);
+        h("div", { class: "muted", style: "font-size:11.5px" }, cont ? "Paths in the conversation are mapped to this machine's." : "Signed and encrypted content, message ids and the session id are never changed."))) : null,
+    checks);
 
-  const blocked = (p.blockers || []).length > 0;
+  const what = cont
+    ? [h("div", { class: "kv" }, h("span", {}, cont.relation === "append" ? `New work added to “${cont.appendTo}”` : `A new ${p.agent} session`), h("span", {}, cont.fidelity)),
+       h("div", { class: "kv muted" }, h("span", {}, cont.report.summary))]
+    : [h("div", { class: "kv" }, h("span", {}, `${p.files} file(s)`), h("span", {}, fmtBytes(p.bytes))),
+       p.setAside ? h("div", { class: "kv muted" }, h("span", {}, `${p.setAside} older copy here set aside (undo brings it back)`)) : null];
   const side = h("div", { class: "pre-side" },
-    h("div", { style: "font-weight:600" }, "What gets moved"),
-    ...kinds.map((k) => h("div", { class: "kv" }, h("span", {}, k))),
-    h("div", { class: "kv muted" }, h("span", {}, `Total ${fmtBytes(p.totalBytes)}`), h("span", {}, "logins, keys, live sockets: never")),
+    h("div", { style: "font-weight:600" }, cont ? "What arrives" : "What gets moved"),
+    ...what,
+    h("div", { class: "kv muted" }, h("span", {}, "logins, keys, live sockets: never")),
     h("div", { style: "height:1px;background:var(--line)" }),
-    h("div", { style: "font-weight:600" }, "After the move"),
-    opt("remoteControl", "Turn on Remote Control", `Reach the new session from your phone or other machines, as ${p.newName}.`),
-    opt("notifyOld", "Tell the old session it moved", "The new session's first message asks Claude to notify it (needs Remote Control on both)."),
-    p.live ? opt("fork", "Keep the old session running", "Fork instead of handing off: both copies continue.") : null,
-    p.mark !== "off" || !o.markSource ? opt("markSource", `Mark the copy on ${p.sourceHost} as moved`,
-      p.mark === "when-stopped" ? `It is still running; once it stops, its title becomes “↪ moved to ${state.info?.host || "here"} · …” so it isn't resumed by mistake.`
-        : `Its title becomes “↪ moved to ${state.info?.host || "here"} · ${p.title}”, so Claude Code's resume list there shows it moved.`) : null,
+    h("div", { style: "font-weight:600" }, "Options"),
+    p.can.remoteControl ? opt("remoteControl", "Turn on Remote Control", `Reach the new session from your phone or other machines, as ${p.newName}.`) : null,
+    p.can.app ? opt("app", `Open it in the ${p.agent} desktop app`, "Instead of a terminal window.") : null,
+    !cont ? opt("notify", "Tell the old session it moved", p.can.notify ? "The new session's first message asks the agent to notify it (needs Remote Control on both)." : "You get a line to paste into the old session.") : null,
+    p.live && p.can.fork ? opt("fork", "Keep the old session running", "Fork instead of handing off: both copies continue.") : null,
+    p.mark !== "off" || !o.mark ? opt("mark", `Mark the copy on ${p.sourceHost}`,
+      p.mark === "when-stopped" ? "It is still open; once it ends, its title shows where the work went, so it isn't resumed by mistake."
+        : `Its title shows that it ${cont ? "continued in " + p.agent : "moved to " + (state.info?.host || "here")}, so it isn't resumed by mistake.`) : null,
     r.sourceHead ? opt("syncCode", "Bring the code here to the session's commit", "Fetches if needed; fast-forwards only a clean checkout on the same branch. Never merges.") : null,
-    r.unpushed && r.sourceUpstream ? opt("pushSource", `Push them first (${r.unpushed} commit(s) on ${p.sourceHost})`, `Runs git push on ${p.sourceHost} with its own credentials before copying.`) : null,
+    r.unpushed && r.sourceUpstream ? opt("push", `Push them first (${r.unpushed} commit(s) on ${p.sourceHost})`, `Runs git push on ${p.sourceHost} with its own credentials before copying.`) : null,
     opt("redact", "Redact likely secrets", "In this copy only."),
-    opt("otherAccount", "This machine uses a different Anthropic account", "Drops signed reasoning blocks, which only work under the original account."),
+    p.otherAccount ? h("div", { class: "muted", style: "font-size:11.5px" }, "This machine is signed in to another account: content bound to the original account is left out.") : null,
     h("span", { class: "spacer" }),
-    h("div", { class: "muted", style: "font-size:11.5px" }, "The new session starts with a message explaining the move and asking Claude to check that nothing is missing."),
-    h("button", { class: "btn primary big", disabled: blocked, onclick: doApply }, r.action === "clone" ? "Clone and hop" : "Hop here"),
+    h("div", { class: "muted", style: "font-size:11.5px" }, cont ? `${p.agent} is told where the work came from and asked to check the repository and files before continuing.`
+      : "The new session starts with a message explaining the move and asking the agent to check that nothing is missing."),
+    h("button", { class: "btn primary big", disabled: blockers.length > 0, onclick: doApply }, cont ? `Continue in ${p.agent}` : r.action === "clone" ? "Clone and hop" : "Hop here"),
     h("button", { class: "btn", onclick: () => showSessions() }, "Back"),
     h("div", { class: "muted", style: "font-size:11px;text-align:center" }, `The original on ${p.sourceHost} is not deleted.`));
   view.replaceChildren(h("div", { class: "pre" }, main, side));
+}
+
+// continueCard shows what a continuation in another agent carries over and what it loses,
+// and the choices that change it.
+function continueCard(p, o, replan) {
+  const c = p.continue, rep = c.report;
+  const lost = [];
+  if (rep.reasoningDropped) lost.push(`${rep.reasoningDropped} reasoning block(s) (private to ${c.from})`);
+  if (rep.stepsSummarised) lost.push(`${rep.stepsSummarised} oldest step(s) summarised to fit ${p.agent}'s context`);
+  if (rep.outputsShortened) lost.push(`${rep.outputsShortened} long tool output(s) shortened`);
+  if (rep.attachmentsAsPlaceholders) lost.push(`${rep.attachmentsAsPlaceholders} attachment(s) as placeholders`);
+  const relation = {
+    new: `A new ${p.agent} session with the conversation so far.`,
+    append: `The ${p.agent} session “${c.appendTo}” here gets only the new work since it was left; its own part stays exactly as it was.`,
+    same: "Nothing new on either side.",
+    behind: `Only the copy here changed; it is already the newest.`,
+    diverged: "Both copies changed since they parted.",
+  }[c.relation] || c.relation;
+  const note = h("textarea", { class: "field", rows: 3, placeholder: `Optional: a note for ${p.agent} (what you were doing, what's next)`, "aria-label": "Handoff note" });
+  note.value = o.note || "";
+  note.onchange = () => { o.note = note.value; replan(); };
+  const briefing = h("details", {}, h("summary", { class: "muted", style: "font-size:12px;cursor:pointer" }, `What ${p.agent} is told`),
+    h("pre", { class: "term", style: "max-height:240px;overflow:auto;white-space:pre-wrap;margin-top:8px" }, c.briefing));
+  return h("div", { class: "card" }, h("div", { class: "card-h" }, h("span", { class: "name" }, `From ${c.from} to ${p.agent}`)),
+    h("div", { class: "sec" },
+      item("ok", relation, rep.summary),
+      lost.length ? item("warn", "Not carried over exactly", lost.join("; ") + ".") : null,
+      h("div", { style: "display:flex;gap:8px;align-items:center" }, h("span", { class: "muted", style: "font-size:12px" }, "Carry"),
+        h("select", { "aria-label": "Fidelity", onchange: (ev) => { o.fidelity = ev.target.value; replan(); } },
+          h("option", { value: "history", selected: o.fidelity === "history" }, "The conversation (tool activity as text)"),
+          h("option", { value: "note", selected: o.fidelity === "note" }, "Only a briefing"))),
+      p.can.native ? h("label", { class: "opt" }, h("input", { type: "checkbox", checked: o.native, onchange: (ev) => { o.native = ev.target.checked; replan(); } }),
+        h("span", {}, h("b", {}, `Replay shell commands as ${p.agent}'s own (experimental)`), h("span", { class: "muted" }, "Exact commands and outputs instead of text; the rest stays text."))) : null,
+      h("label", { class: "opt" }, h("input", { type: "checkbox", checked: o.go, onchange: (ev) => { o.go = ev.target.checked; replan(); } }),
+        h("span", {}, h("b", {}, "Start working right away"), h("span", { class: "muted" }, `${p.agent} starts with “Continue.” instead of waiting for you.`))),
+      note, briefing));
 }
 
 // roundTripCard reports what happened around the move: quitting the copy here, pushing on
 // the source, bringing the code here, and marking the copy left behind.
 function roundTripCard(d) {
   const rows = [];
-  if (d.stoppedPid) rows.push(item("ok", `Quit the copy that was running here (pid ${d.stoppedPid})`, ""));
+  if (d.stopped) rows.push(item("ok", "Quit the copy that was open here", ""));
   if (d.pushError) rows.push(item("warn", `Could not push on ${d.sourceHost}`, d.pushError));
   else if (d.pushed) rows.push(item("ok", `Pushed the session's branch on ${d.sourceHost}`, ""));
   if (d.syncNote) {
     const ok = ["up-to-date", "fast-forwarded", "ahead"].includes(d.syncState);
     rows.push(item(ok ? "ok" : "warn", "Code: " + d.syncNote, ""));
   }
-  if (d.mark === "done") rows.push(item("ok", `The copy on ${d.sourceHost} is now titled “${d.markedTitle}”`, "Claude Code's resume list there shows that it moved."));
-  if (d.mark === "pending") rows.push(item("ok", `The copy on ${d.sourceHost} is still running`, "It will be marked as moved once it stops (hopsesh checks on its next scan)."));
-  if (d.mark === "failed") rows.push(item("warn", `Could not mark the copy on ${d.sourceHost} as moved`, d.markError || ""));
+  if (d.mark === "done") rows.push(item("ok", `The copy on ${d.sourceHost} is marked`, "Its session list there shows where the work went."));
+  if (d.mark === "pending") rows.push(item("ok", `The copy on ${d.sourceHost} is still open`, "It is marked once it ends (hopsesh checks on its next scan)."));
+  if (d.mark === "failed") rows.push(item("warn", `Could not mark the copy on ${d.sourceHost}`, d.markError || ""));
+  for (const w of d.warnings || []) rows.push(item("warn", w, ""));
   if (!rows.length) return null;
   return h("div", { class: "card" }, h("div", { class: "sec" }, ...rows));
 }
@@ -466,35 +522,38 @@ function fmtBytes(n) {
 }
 
 async function doApply() {
-  loading("Copying, rewriting and verifying…");
+  const steps = h("div", { class: "muted mono", style: "font-size:12px;margin-top:12px;min-height:1.5em" });
+  view.replaceChildren(h("div", { class: "loading" }, h("div", {}, state.plan.continue ? `Continuing in ${state.plan.agent}…` : "Copying, rewriting and verifying…"), steps));
+  const off = Events.On("hopsesh:progress", (ev) => { steps.textContent = String(ev.data); });
   try {
-    const d = await api("Apply");
-    renderDone(d);
+    renderDone(await api("Apply"));
   } catch (e) {
     view.replaceChildren(h("div", { class: "loading" }, h("div", {}, h("div", { class: "err", style: "margin-bottom:12px" }, String(e.message || e)), h("button", { class: "btn", onclick: () => renderPlan() }, "Back to the plan"))));
+  } finally {
+    if (typeof off === "function") off();
   }
 }
 
 function renderDone(d) {
   setTitlebar("done");
-  const facts = [`${d.paths} paths rewritten`, `${d.files} file(s), ${d.bytes}`];
+  const facts = d.kind === "continue" ? [`continues in ${d.agent}`] : [`${d.paths} path(s) rewritten`, `${d.files} file(s), ${d.bytes}`];
   if (d.cloned) facts.unshift("repository cloned");
   if (d.worktree) facts.push("worktree created");
-  if (d.secrets) facts.push(`${d.secrets} likely secret(s)`);
+  if (d.secrets) facts.push(`${d.secrets} likely secret(s) ${d.redacted ? "redacted" : "found"}`);
+  const open = async () => { try { await api("OpenResult"); } catch (e) { toast(String(e.message || e)); } };
   view.replaceChildren(h("div", { class: "center" }, h("div", { class: "done" },
     h("div", { style: "display:flex;gap:14px;align-items:center" }, h("span", { class: "badge ok", style: "width:40px;height:40px;font-size:20px" }, "✓"),
-      h("div", {}, h("div", { style: "font-size:20px;font-weight:600" }, `“${d.title}” is on this machine`), h("div", { class: "muted" }, facts.join(" · ")))),
+      h("div", {}, h("div", { style: "font-size:20px;font-weight:600" }, d.kind === "continue" ? `“${d.title}” continues in ${d.agent}` : `“${d.title}” is on this machine`), h("div", { class: "muted" }, facts.join(" · ")))),
     h("div", { class: "card" }, h("div", { class: "sec" }, h("div", { style: "font-weight:600" }, "Start it"),
       h("div", { style: "display:flex;gap:8px" }, h("div", { class: "term" }, d.command), h("button", { class: "btn", onclick: async () => { await api("CopyText", d.command); toast("Copied"); } }, "Copy")),
-      h("div", { style: "display:flex;gap:8px" }, h("button", { class: "btn primary", onclick: async () => { try { await api("OpenInTerminal", d.command); } catch (e) { toast(String(e.message || e)); } } }, "Open in Terminal"),
-        d.desktop ? h("button", { class: "btn", onclick: async () => { try { await api("OpenInDesktop"); } catch (e) { toast(String(e.message || e)); } } }, "Open in Claude desktop") : null),
-      h("div", { class: "muted", style: "font-size:12px" }, "Its first message tells Claude it was moved and asks it to check the repository, files, tools and environment before continuing."))),
+      h("div", { style: "display:flex;gap:8px" }, h("button", { class: "btn primary", onclick: open }, d.inApp ? `Open in the ${d.agent} app` : "Open in Terminal")),
+      h("div", { class: "muted", style: "font-size:12px" }, `Its first message tells ${d.agent} where the session came from and asks it to check the repository, files, tools and environment before continuing.`))),
     roundTripCard(d),
-    d.notifyOld && !d.remoteControl ? h("div", { class: "card" }, h("div", { class: "sec" }, h("div", { style: "font-weight:600" }, `Tell the session on ${d.sourceHost}`),
-      h("div", { class: "muted", style: "font-size:12px" }, "Automatic notification needs Remote Control on both sessions. Paste this into the old session instead:"),
-      h("div", { style: "display:flex;gap:8px" }, h("div", { class: "term" }, d.oldNotice), h("button", { class: "btn", onclick: async () => { await api("CopyText", d.oldNotice); toast("Copied"); } }, "Copy")))) : null,
+    d.notice ? h("div", { class: "card" }, h("div", { class: "sec" }, h("div", { style: "font-weight:600" }, `Tell the session on ${d.sourceHost}`),
+      h("div", { class: "muted", style: "font-size:12px" }, "Paste this into the old session:"),
+      h("div", { style: "display:flex;gap:8px" }, h("div", { class: "term" }, d.notice), h("button", { class: "btn", onclick: async () => { await api("CopyText", d.notice); toast("Copied"); } }, "Copy")))) : null,
     h("div", { style: "display:flex;gap:16px;font-size:12px" },
-      h("button", { class: "btn", onclick: async () => { await api("Undo", d.sessionId); toast("Undone"); showSessions(true); } }, "Undo this hop"),
+      h("button", { class: "btn", onclick: async () => { try { await api("Undo", d.journal); toast("Undone"); } catch (e) { toast(String(e.message || e)); } showSessions(true); } }, "Undo"),
       h("button", { class: "btn", onclick: () => showSessions(true) }, "Back to sessions"),
       h("span", { class: "muted", style: "align-self:center" }, "Audit log: ", h("span", { class: "mono" }, d.auditDir))))));
 }
@@ -506,11 +565,27 @@ $("#q").addEventListener("input", (e) => { state.filter = e.target.value; if (st
   for (const r of await api("PendingPasswords").catch(() => [])) askPassword(r);
   state.info = await api("Info");
   $("#subtitle").textContent = `Sessions on your machines · this is ${state.info.host}`;
+  if (state.info.configError) { showConfigError(); return; }
   if (state.info.hasHosts) showSessions(); else showMachines();
   if (state.info.updateCheck === "on") {
     try { state.update = await api("CheckUpdate"); if (state.update?.newer && state.scan) renderSessions(); } catch { /* offline */ }
   }
 })();
+
+// showConfigError explains a configuration an older hopsesh wrote; hopsesh keeps no code
+// for old formats, so it offers to set the file aside and start fresh.
+function showConfigError() {
+  setTitlebar("settings");
+  view.replaceChildren(h("div", { class: "center" }, h("div", { class: "done" },
+    h("div", { style: "font-size:18px;font-weight:600" }, "Your hopsesh settings are from an older version"),
+    h("div", { class: "muted", style: "line-height:1.5" }, "This version of hopsesh works with every coding agent and stores its settings differently. ",
+      "Start fresh to keep the old file next to the new one and add your machines again. Your sessions are not affected."),
+    h("div", { class: "mono muted", style: "font-size:11.5px" }, state.info.configError),
+    h("div", { style: "display:flex;gap:8px" }, h("button", { class: "btn primary", onclick: async () => {
+      try { const old = await api("StartFresh"); toast("Old settings kept at " + old); } catch (e) { toast(String(e.message || e)); return; }
+      state.info = await api("Info"); showMachines();
+    } }, "Start fresh")))));
+}
 
 // updateNote is the status-bar item about new releases: a one-time question, then a
 // quiet link when a newer release exists. Nothing is contacted until the person says yes.

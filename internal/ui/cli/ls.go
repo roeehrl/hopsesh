@@ -70,7 +70,7 @@ func lsCmd() *cobra.Command {
 					}
 					e := it.Entry
 					s := e.Session
-					fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\t%s\n", e.Machine, e.AgentName, truncate(s.Title, 40), statusOf(e), ago(s.LastActivity), shortID(s.Key.Session), truncate(s.CWD, 44))
+					fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\t%s\n", e.Machine, e.AgentName, truncate(s.Title, 40), e.Status(), ago(s.LastActivity), shortID(s.Key.Session), truncate(s.CWD, 44))
 					if len(it.Copies) > 1 {
 						fmt.Fprintf(tw, "  \t\t  %s\t\t\t\t\n", copiesLine(it))
 					}
@@ -164,7 +164,7 @@ func copiesLine(it app.Item) string {
 		case c.Newest:
 			p += ": newest"
 		case c.Mark != nil:
-			p += ": " + strings.TrimPrefix(agent.MarkTitle(*c.Mark, ""), "↪ ")
+			p += ": " + app.MarkWords(*c.Mark)
 		default:
 			p += ": older copy"
 		}
@@ -205,7 +205,7 @@ func showCmd() *cobra.Command {
 			r.printf("  machine      %s\n", e.Machine)
 			r.printf("  agent        %s %s\n", e.AgentName, s.AgentVersion)
 			r.printf("  session      %s\n", s.Key)
-			r.printf("  status       %s, last active %s\n", statusOf(e), ago(s.LastActivity))
+			r.printf("  status       %s, last active %s\n", e.Status(), ago(s.LastActivity))
 			r.printf("  directory    %s\n", s.CWD)
 			r.printf("  last prompt  “%s”\n", s.LastPrompt)
 			r.printf("  size         %d KB", s.Size/1024)

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -168,6 +169,16 @@ func Save(c Config) error {
 		return err
 	}
 	return os.Rename(tmp, Path())
+}
+
+// SetAside renames an older configuration file out of the way (to config.toml.old-<time>)
+// so hopsesh can start fresh; it returns the new name.
+func SetAside() (string, error) {
+	dst := Path() + ".old-" + time.Now().Format("20060102-150405")
+	if err := os.Rename(Path(), dst); err != nil {
+		return "", err
+	}
+	return dst, nil
 }
 
 // FindHost returns the configured host with this name.

@@ -137,17 +137,6 @@ func shortID(id agent.SessionID) string {
 	return string(id)
 }
 
-// statusOf is a session's state in words.
-func statusOf(e app.Entry) string {
-	switch {
-	case e.Live.State == agent.Live:
-		return "live " + nonEmpty(e.Live.Status, "running")
-	case e.Session.Mark != nil:
-		return strings.TrimPrefix(agent.MarkTitle(*e.Session.Mark, ""), "↪ ")
-	}
-	return "ended"
-}
-
 // branchInfo describes where a session sits in its repository.
 func branchInfo(g *repos.GitState) string {
 	if g == nil || !g.IsRepo {

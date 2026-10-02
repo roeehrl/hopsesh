@@ -7,27 +7,32 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
+	"github.com/roeehrl/hopsesh/internal/agents/all"
+	"github.com/roeehrl/hopsesh/internal/core/integrate"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
-	"github.com/roeehrl/hopsesh/internal/gui"
+	"github.com/roeehrl/hopsesh/internal/ui/gui"
 )
 
 func main() {
 	if transport.IsAskpass() {
 		os.Exit(transport.AskpassMain(os.Args[1:])) // ssh asking for a password, see transport
 	}
-	svc, err := gui.NewApp()
-	if err != nil {
-		log.Fatal(err)
-	}
+	reg := all.Registry()
+	// Started from Finder, the app lacks the login shell's agent variables (for example
+	// CLAUDE_CONFIG_DIR, CODEX_HOME); adopt them so scans, moves and the skill use the same
+	// folders as the agents in Terminal.
+	integrate.SetLoginVars(reg.LoginEnv())
+	integrate.AdoptLoginEnv()
+	svc := gui.NewApp(reg)
 	app := application.New(application.Options{
 		Name:        "hopsesh",
-		Description: "Continue your Claude Code sessions from your other machines here",
+		Description: "Continue your coding agent sessions from your other machines, or in another agent",
 		Services:    []application.Service{application.NewService(svc)},
 		Assets:      application.AssetOptions{Handler: application.BundledAssetFileServer(gui.Assets)},
 		Mac:         application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: true},
 		OnShutdown:  svc.Shutdown,
 	})
-	svc.App = app
+	svc.Wails = app
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:     "hopsesh",
 		Width:     1280,

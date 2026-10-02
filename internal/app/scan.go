@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/roeehrl/hopsesh/internal/config"
@@ -358,3 +359,21 @@ func saveRoute(stateDir, dest, via string) {
 	_ = os.MkdirAll(stateDir, 0o700)
 	_ = os.WriteFile(p, b, 0o600)
 }
+
+// Status is a session's state in words: "live …", where it went ("moved to studio"), or
+// "ended".
+func (e Entry) Status() string {
+	switch {
+	case e.Live.State == agent.Live:
+		if e.Live.Status == "" {
+			return "live running"
+		}
+		return "live " + e.Live.Status
+	case e.Session.Mark != nil:
+		return MarkWords(*e.Session.Mark)
+	}
+	return "ended"
+}
+
+// MarkWords is a mark in words ("moved to studio", "continued in Codex on studio").
+func MarkWords(m agent.Mark) string { return strings.TrimPrefix(agent.MarkTitle(m, ""), "↪ ") }

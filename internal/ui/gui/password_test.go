@@ -5,19 +5,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
 )
 
-// The password dialog round trip, while another call holds App.mu (as Plan does when it
-// connects): the answer must arrive without a deadlock, be cached, and a refusal must
-// ask again with retry set.
+// The password dialog round trip, while another call holds App.mu (as a settings change
+// might): the answer must arrive without a deadlock, be cached, and a refusal must ask
+// again with retry set.
 func TestPasswordBroker(t *testing.T) {
 	t.Setenv("HOPSESH_CONFIG_DIR", t.TempDir())
-	a := &App{}
+	a := &App{core: app.New(config.Defaults(), nil, t.TempDir(), nil)}
 	reqs := make(chan PasswordRequest, 4)
 	a.broker().emit = func(r PasswordRequest) { reqs <- r }
 	h := config.Host{Name: "nas", Destination: "me@nas", Auth: "password"}
-	a.cfg.Hosts = []config.Host{h}
+	a.core.Cfg.Hosts = []config.Host{h}
 	pf := a.passwordFor(h)
 
 	a.mu.Lock() // a connecting call holds the lock

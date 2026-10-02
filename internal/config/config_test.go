@@ -30,4 +30,14 @@ func TestLoadSaveAndRefuseOldFormat(t *testing.T) {
 	if _, err := Load(); !errors.Is(err, ErrOldConfig) {
 		t.Fatalf("an older config must be refused, got %v", err)
 	}
+	old, err = SetAside()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(old); err != nil {
+		t.Fatalf("the old file must be kept: %v", err)
+	}
+	if c, err := Load(); err != nil || len(c.Hosts) != 0 {
+		t.Fatalf("after setting it aside hopsesh starts fresh: %+v %v", c, err)
+	}
 }
