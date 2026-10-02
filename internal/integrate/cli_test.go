@@ -3,11 +3,15 @@ package integrate
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
 func TestPathBlock(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the command link and PATH block are for macOS and Linux")
+	}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("SHELL", "/bin/zsh")
@@ -30,6 +34,9 @@ func TestPathBlock(t *testing.T) {
 }
 
 func TestCheckCLIStates(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the command link is for macOS and Linux")
+	}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	link := LinkPath()
