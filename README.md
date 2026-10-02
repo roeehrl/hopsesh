@@ -57,9 +57,8 @@ irm https://raw.githubusercontent.com/roeehrl/hopsesh/main/scripts/install.ps1 |
 Both check the download against the release's `checksums.txt` and its signature, and
 `hopsesh update` installs later releases with the same checks.
 
-- **macOS app:** download the signed, notarized `.dmg` from the
-  [latest release](https://github.com/roeehrl/hopsesh/releases/latest) (macOS 13+, Apple
-  silicon and Intel).
+- **macOS app:** [download the signed, notarized `.dmg`](https://github.com/roeehrl/hopsesh/releases/latest/download/hopsesh-macos-universal.dmg)
+  (macOS 13+, Apple silicon and Intel).
 - **Linux packages:** `.deb`, `.rpm` and `.apk` for amd64 and arm64 are on the
   [release page](https://github.com/roeehrl/hopsesh/releases/latest), for example
   `sudo apt install ./hopsesh_<version>_linux_amd64.deb`.
