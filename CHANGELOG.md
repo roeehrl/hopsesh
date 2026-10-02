@@ -27,6 +27,12 @@ aside (the app offers this), and machines are added again.
   machine knows a session's copies and hops.
 - `hopsesh push <session> <machine>` sends a session to another machine's hopsesh, which
   receives it only after `hopsesh receive on` there; one `undo` reverses both sides.
+- Codex: hopsesh tells whether Codex is working or idle, can quit an idle Codex session
+  open here (`--stop-local`), and knows which account a machine's Codex is signed in to
+  (from Codex itself; `auth.json` is never read). Moving a Codex session to another
+  account drops the encrypted reasoning and compaction that only the old one can use.
+- Sending to and from Windows machines with `push`.
+- The app can send a session on this machine to another one ("Send to…").
 - `hopsesh agents` lists the supported agents and what each can do; `ls --agent` filters.
 - The skill is written to every installed agent (Claude Code and Codex) as identical
   files, with per-copy drift detection and approval rules for each agent.

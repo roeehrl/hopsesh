@@ -85,16 +85,16 @@ Optional interfaces add capabilities, computed from what a module implements (`a
 
 | Interface | Capability | Claude Code | Codex |
 |---|---|---|---|
-| `LiveDetector`, `Stopper` | `live`, `stop` | pid registry, SIGTERM | writer-lock probe (no stop yet) |
+| `LiveDetector`, `Stopper` | `live`, `stop` | pid registry, SIGTERM | writer-lock probe, working or idle from the last turn; quits only an idle thread's `codex` process (the lock's holder) |
 | `Marker` | `mark` | `custom-title` record | thread name in `session_index.jsonl` |
-| `AccountProber`, `Sanitizer` | `account`, `sanitize` | `claude auth status`; drop signed reasoning across accounts | not yet |
+| `AccountProber`, `Sanitizer` | `account`, `sanitize` | `claude auth status`; drop signed reasoning across accounts | Codex's own `account/read`; drop encrypted reasoning and compaction across accounts |
 | `Reader`, `Writer` | `read`, `write` | both; native replay of exact shell calls | both; history as text |
 | `Importer` | `import` | | Codex's own importer of Claude Code sessions |
 | `PostInstaller` | `post-install` | | makes Codex list the session (`thread/read`, `thread/name/set`) |
 | `Integrator` | `integrate` | skill folder, permission rules | `~/.agents/skills`, a `.rules` file |
 | `Notifier` | `notify` | the resumed session messages the old one | |
 
-**The Host** is a module's only way to reach a machine (`agent.Host`: facts, FS, Exec, Path, Locks, Procs). The core confines it to the module's Spec: writes only under its roots and only through the undo journal, its secrets never opened (globs allowed), only its own binaries run. The machine probe is generated from all Specs and runs in one round trip (POSIX shell or PowerShell).
+**The Host** is a module's only way to reach a machine (`agent.Host`: facts, FS, Exec, Path, Locks, Procs). Programs run with input on any machine, kept open until they answer (`codex app-server` stops at the end of its input); locks name their holders (`/proc/locks` on Linux, `lsof` elsewhere). The core confines it to the module's Spec: writes only under its roots and only through the undo journal, its secrets never opened (globs allowed), only its own binaries run. The machine probe is generated from all Specs and runs in one round trip (POSIX shell or PowerShell).
 
 **Conformance.** `sdk/agent/agenttest` runs every module against a fake host: Spec sanity, listing (lineage files ignored), bundles, identity move plans, confinement, and Reader/Writer round trips. A new module adds fixtures from a real install of a tested version and passes the suite.
 
@@ -155,7 +155,7 @@ hopsesh update [--check] · hopsesh version
 
 Listing and moving commands take `--json`; `--password-stdin` supplies a password machine's password (§16). Install with `curl -fsSL …/install.sh | sh` or `irm …/install.ps1 | iex`; both verify checksums and the release signature.
 
-**GUI:** machines and consent; sessions by repository with agent badges, **Resume**, **Hop here** / **Hop back**, and **Continue in…**; the plan (repository, code, paths, the conversion card with fidelity, native replay, the importer, the briefing preview and the loss report; options the target agent supports); progress; the result (start command, open in Terminal or the agent's app, undo). Settings has the agents (on or off, remote control), the skill in every agent, the command-line tool, moving defaults, receiving sessions, updates and folders. An older configuration is set aside on request (§9 config).
+**GUI:** machines and consent; sessions by repository with agent badges, **Resume**, **Hop here** / **Hop back**, and **Continue in…**; **Send to…** another machine for a session here; the plan (repository, code, paths, the conversion card with fidelity, native replay, the importer, the briefing preview and the loss report; options the target agent supports); progress; the result (start command, open in Terminal or the agent's app, undo). Settings has the agents (on or off, remote control), the skill in every agent, the command-line tool, moving defaults, receiving sessions, updates and folders. An older configuration is set aside on request (§9 config).
 
 **Config:** `config.toml` in `~/.config/hopsesh` (`%APPDATA%\hopsesh`), schema 3: `repos_dir`, `layout`, `mark_moved`, `sync_code`, `push_source`, `update_check`, `[agents.<id>]` (`disabled`, `remote_control`), `[peer] receive`, and the machines. A file in an older format is refused, never migrated; the app offers to set it aside and start fresh. State lives in `~/.local/state/hopsesh` (`%LOCALAPPDATA%\hopsesh`): the audit log, undo journals, staging, owed marks, hopsesh's own `known_hosts`, routes and start prompts. `HOPSESH_CONFIG_DIR`, `HOPSESH_STATE_DIR` and `HOPSESH_MACHINE` (this machine's name in marks and lineage) override.
 
@@ -186,7 +186,7 @@ hopsesh pulls by default, and the source machine needs only SSH. When the other 
 4. after your yes, the receiver applies with its own journal; writes meant for the sender's copy (the mark, the lineage) are returned, and so is a mark still owed;
 5. the sender replays those writes confined like a module's own, in its own journal, which also names the receiver's journal: `hopsesh undo <id>` on the sender undoes both machines.
 
-Windows peers are not supported yet.
+**Windows.** On a Windows machine hopsesh finds `hopsesh.exe` (its PATH, then where `install.ps1` puts it) and the shell its OpenSSH server uses, and starts the program directly in that shell's form, so the connection is its input and output. The wire is ASCII-only JSON (anything else escaped), so no code page can alter it.
 
 ## 12. Code follows the conversation
 
@@ -223,7 +223,7 @@ Keys are the default, but some machines only take a password. Such a machine is 
 - **Desktop backend:** the window's calls end to end (scan, continue, round trip, undo, starting fresh from an old configuration).
 - **Layering:** `internal/archtest`.
 - **Over real SSH** (Linux CI, a second local user behind the runner's sshd): `integration-test.sh` (pull, continue in Codex, push and undo both sides, refusal), `roundtrip-test.sh` (code follows, marks, hop back, conflict, keep-both), `password-test.sh` (a separate password-only sshd).
-- **Against the installed agents**, opt-in: `HOPSESH_REAL_AGENTS=1 go test ./internal/e2e` (Codex lists what hopsesh writes; Codex's importer route), and `HOPSESH_PAID_SMOKE=1 scripts/paid-smoke.sh`, a real Claude Code → Codex → Claude Code round trip with three short model calls.
+- **Against the installed agents**, opt-in: `HOPSESH_REAL_AGENTS=1 go test ./internal/e2e` (Codex lists what hopsesh writes; Codex's importer route; Codex's login; quitting a real Codex TUI found by its lock), and `HOPSESH_PAID_SMOKE=1 scripts/paid-smoke.sh`, a real Claude Code → Codex → Claude Code round trip with three short model calls.
 
 ## 18. Distribution, signing, updates
 
@@ -239,8 +239,8 @@ Keys are the default, but some machines only take a password. Such a machine is 
 **Planned:**
 - more modules, Reader first: OpenCode, Hermes, Gemini CLI, Goose, Amp, Crush, Cursor CLI;
 - sessions that live in an agent's cloud, as a module capability through the agent's own CLI;
-- Windows peers and a Windows GUI; a Windows OpenSSH CI job;
-- push from the app;
+- a Windows GUI; a Windows OpenSSH CI job;
+- quitting sessions and probing locks on Windows (no graceful signal there yet);
 - a compatibility matrix of pinned agent versions.
 
 ## 20. Risks and mitigations
