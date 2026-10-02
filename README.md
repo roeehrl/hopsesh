@@ -7,7 +7,6 @@
 **Find your Claude Code sessions on your other machines and continue one here.**
 
 [![CI](https://github.com/roeehrl/hopsesh/actions/workflows/ci.yml/badge.svg)](https://github.com/roeehrl/hopsesh/actions/workflows/ci.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/roeehrl/hopsesh)](https://goreportcard.com/report/github.com/roeehrl/hopsesh)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/roeehrl/hopsesh/badge)](https://scorecard.dev/viewer/?uri=github.com/roeehrl/hopsesh)
 [![Go Reference](https://pkg.go.dev/badge/github.com/roeehrl/hopsesh.svg)](https://pkg.go.dev/github.com/roeehrl/hopsesh)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
