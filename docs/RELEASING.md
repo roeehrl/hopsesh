@@ -61,7 +61,8 @@ Scoop manifest and a winget pull request. Without it those steps are skipped.
 
 ## Cutting a release
 
-1. Move the `CHANGELOG.md` entries from "Unreleased" to the new version, commit, push.
+1. Move the `CHANGELOG.md` entries from "Unreleased" to a `## [X.Y.Z] - date` section,
+   commit, push. That section becomes the release notes (the workflow fails without it).
 2. Tag and push: `git tag -a v0.1.0 -m "hopsesh 0.1.0" && git push origin v0.1.0`
    (use `-s` instead of `-a` if git has a signing key configured; only the repository admin
    can create `v*` tags).
