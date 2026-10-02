@@ -9,8 +9,8 @@ import (
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
-// Integration: the skill goes in <config>/skills; approval rules are permission rules in
-// <config>/settings.json, merged with what the user has there.
+// Integration says where things go: the skill in <config>/skills, and approval rules as
+// permission rules in <config>/settings.json, merged with what the user has there.
 func (m *Module) Integration(h agent.Host, in agent.Install) agent.Integration {
 	pa := h.Path()
 	return agent.Integration{

@@ -43,7 +43,7 @@ func (m *Module) AfterInstall(ctx context.Context, h agent.Host, in agent.Instal
 		Env: []string{"CODEX_HOME=" + in.Root(home)},
 	})
 	if err != nil {
-		return fmt.Errorf("asking Codex to list the session: %w", err)
+		return fmt.Errorf("asking codex app-server to list the session: %w", err)
 	}
 	want := map[int]bool{2: true}
 	if p.Name != "" {
@@ -62,12 +62,12 @@ func (m *Module) AfterInstall(ctx context.Context, h agent.Host, in agent.Instal
 			continue
 		}
 		if r.Error != nil {
-			return errors.New("Codex did not list the session: " + r.Error.Message)
+			return errors.New("codex app-server did not list the session: " + r.Error.Message)
 		}
 		delete(want, *r.ID)
 	}
 	if len(want) > 0 {
-		return errors.New("Codex did not answer in time; the session still opens with codex resume <id>")
+		return errors.New("no answer from codex app-server in time; the session still opens with codex resume <id>")
 	}
 	return nil
 }

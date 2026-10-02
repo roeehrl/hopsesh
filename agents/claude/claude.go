@@ -17,10 +17,11 @@ import (
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
+const id agent.ID = "claude"
+
 const (
-	id           agent.ID = "claude"
-	home                  = "home"              // the config folder root
-	worktreesDir          = ".claude/worktrees" // where Claude Code creates worktrees in a repo
+	home         = "home"              // the config folder root
+	worktreesDir = ".claude/worktrees" // where Claude Code creates worktrees in a repo
 )
 
 // Module is the Claude Code module.

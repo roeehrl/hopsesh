@@ -18,7 +18,7 @@ var _ agent.Writer = (*Module)(nil)
 // window is the context Claude Code's current models give a session (1M tokens).
 const window = 1_000_000
 
-// Profile: Claude Code takes long histories, and tool calls can be replayed natively.
+// Profile says Claude Code takes long histories, and tool calls can be replayed natively.
 func (m *Module) Profile(agent.Install) ir.Profile {
 	return ir.Profile{Window: window, NativeReplay: true}
 }

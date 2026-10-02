@@ -17,7 +17,7 @@ var _ agent.Writer = (*Module)(nil)
 // window is a conservative usable context for Codex's default models.
 const window = 272_000
 
-// Profile: Codex's own tool calls cannot be forged safely, so history arrives as text.
+// Profile says Codex's own tool calls cannot be forged safely, so history arrives as text.
 func (m *Module) Profile(agent.Install) ir.Profile { return ir.Profile{Window: window} }
 
 // Write emits a legacy-mode rollout (no ordinals): session_meta, then each message as a

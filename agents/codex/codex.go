@@ -22,10 +22,9 @@ import (
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
-const (
-	id   agent.ID = "codex"
-	home          = "home"
-)
+const id agent.ID = "codex"
+
+const home = "home"
 
 // Module is the Codex module.
 type Module struct{}
@@ -453,7 +452,7 @@ func (m *Module) PlanMove(src, dst agent.Install, s agent.Summary, b agent.Bundl
 	return mp, nil
 }
 
-// Verify: the staged rollout must start in the target folder, as the target thread.
+// Verify checks that the staged rollout starts in the target folder, as the target thread.
 func (m *Module) Verify(_ context.Context, h agent.Host, mp agent.MovePlan, staged map[string]string, p agent.Placement) error {
 	for _, f := range mp.Files {
 		if f.From.Role != agent.RoleMain {

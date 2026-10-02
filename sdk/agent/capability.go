@@ -227,7 +227,7 @@ func VersionOf(line string) string {
 	return ""
 }
 
-// Tested reports whether a version matches one of the Spec's tested version prefixes.
+// TestedWith reports whether a version matches one of the Spec's tested version prefixes.
 func (s Spec) TestedWith(version string) bool {
 	for _, t := range s.Tested {
 		if version == t || strings.HasPrefix(version, t+".") {

@@ -7,7 +7,7 @@ import (
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
-// Integration: Codex reads user skills from ~/.agents/skills, and approval rules from any
+// Integration says Codex reads user skills from ~/.agents/skills, and approval rules from any
 // .rules file under $CODEX_HOME/rules. hopsesh owns rules/hopsesh.rules outright (Codex
 // rewrites default.rules itself).
 func (m *Module) Integration(h agent.Host, in agent.Install) agent.Integration {
