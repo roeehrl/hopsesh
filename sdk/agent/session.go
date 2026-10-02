@@ -100,8 +100,11 @@ type Placement struct {
 	SourceID SessionID  `json:"sourceId"`
 	CWD      string     `json:"cwd"`   // the working directory on the target
 	Title    string     `json:"title"` // title to give the copy ("" keeps it)
-	Mappings []Mapping  `json:"mappings"`
-	Location string     `json:"location"` // where the session lands: this machine's name
+	// Name is the session's own name, for agents that keep names outside the session's
+	// files (they record it again after installing; "" when it has none).
+	Name     string    `json:"name,omitempty"`
+	Mappings []Mapping `json:"mappings"`
+	Location string    `json:"location"` // where the session lands: this machine's name
 	// OtherAccount: the target is signed in to another account than the source, so
 	// account-bound content must be removed (the module's Sanitizer policy applies).
 	OtherAccount bool `json:"otherAccount,omitempty"`

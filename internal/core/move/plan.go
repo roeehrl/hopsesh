@@ -212,6 +212,9 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	}
 	p.Target.CWD = cwd
 	p.Placement = agent.Placement{Key: s.Key, SourceID: s.Key.Session, CWD: cwd, Location: tgt.Machine.Name, Mappings: mappings(p, src, tgt), OtherAccount: p.Options.OtherAccount}
+	if s.TitleSource == "custom" {
+		p.Placement.Name = s.Title
+	}
 
 	srcHost, err := src.Machine.For(ctx, src.Module.Spec(), src.Install, nil)
 	if err != nil {

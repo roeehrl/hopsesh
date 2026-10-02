@@ -136,12 +136,35 @@ func (localExec) Run(ctx context.Context, argv []string, o agent.RunOptions) (ag
 	if len(o.Env) > 0 {
 		cmd.Env = append(os.Environ(), o.Env...)
 	}
-	if o.Stdin != nil {
+	var hold io.WriteCloser
+	if o.Stdin != nil && o.HoldStdin > 0 {
+		w, err := cmd.StdinPipe()
+		if err != nil {
+			return agent.Result{}, err
+		}
+		hold = w
+	} else if o.Stdin != nil {
 		cmd.Stdin = bytes.NewReader(o.Stdin)
 	}
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
-	err := cmd.Run()
+	if err := cmd.Start(); err != nil {
+		return agent.Result{}, err
+	}
+	if hold != nil {
+		exited := make(chan struct{})
+		defer close(exited)
+		go func() {
+			_, _ = hold.Write(o.Stdin)
+			select {
+			case <-time.After(o.HoldStdin):
+			case <-exited:
+			case <-ctx.Done():
+			}
+			hold.Close()
+		}()
+	}
+	err := cmd.Wait()
 	var ee *exec.ExitError
 	if errors.As(err, &ee) {
 		return agent.Result{Stdout: out.Bytes(), Stderr: errb.Bytes(), Code: ee.ExitCode()}, nil

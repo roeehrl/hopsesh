@@ -389,7 +389,9 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 		}
 	}
 	if pi, ok := tgt.Module.(agent.PostInstaller); ok {
-		if err := pi.AfterInstall(ctx, h, tgt.Install, p.Placement.Key, p.Placement); err != nil {
+		pl := p.Placement
+		pl.Name = cp.header.Title
+		if err := pi.AfterInstall(ctx, h, tgt.Install, pl.Key, pl); err != nil {
 			res.Warnings = append(res.Warnings, "after writing: "+err.Error())
 		}
 	}
