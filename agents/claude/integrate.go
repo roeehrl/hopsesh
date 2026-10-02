@@ -24,17 +24,19 @@ func (m *Module) Integration(h agent.Host, in agent.Install) agent.Integration {
 	}
 }
 
-// permission turns a command prefix into a Claude Code permission rule.
-func permission(bin string, prefix []string) string {
-	return "Bash(" + bin + " " + strings.Join(prefix, " ") + " *)"
+// permissions turn a command prefix into Claude Code permission rules: the command alone,
+// and with arguments.
+func permissions(bin string, prefix []string) []string {
+	cmd := bin + " " + strings.Join(prefix, " ")
+	return []string{"Bash(" + cmd + ")", "Bash(" + cmd + " *)"}
 }
 
 func rulesOf(r agent.Rules) (allow, ask []string) {
 	for _, p := range r.Allow {
-		allow = append(allow, permission(r.Bin, p))
+		allow = append(allow, permissions(r.Bin, p)...)
 	}
 	for _, p := range r.Ask {
-		ask = append(ask, permission(r.Bin, p))
+		ask = append(ask, permissions(r.Bin, p)...)
 	}
 	return
 }

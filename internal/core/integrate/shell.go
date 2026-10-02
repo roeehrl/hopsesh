@@ -1,23 +1,27 @@
 // Package integrate connects hopsesh to the rest of the user's machine: the command-line
-// tool on PATH (for app installs) and the hopsesh skill for Claude Code. Both are opt-in
-// and reversible, and neither ever replaces something hopsesh did not create.
+// tool on PATH (for app installs), the user's login environment, and the hopsesh skill
+// for every agent. All are opt-in and reversible, and none ever replaces something
+// hopsesh did not create.
 package integrate
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 )
 
-// loginEnv reads a few variables as the user's login shell sets them: apps started from
-// Finder do not inherit the shell's PATH or CLAUDE_CONFIG_DIR.
+// The login environment: apps started from Finder do not inherit the shell's PATH or
+// the variables that move an agent's data folder (CLAUDE_CONFIG_DIR, CODEX_HOME).
 var (
-	loginOnce sync.Once
+	loginMu   sync.Mutex
 	loginVars map[string]string
+	loginDone bool
 )
 
 func loginShell() string {
@@ -27,54 +31,63 @@ func loginShell() string {
 	return "/bin/zsh"
 }
 
-// LoginEnv returns PATH, CLAUDE_CONFIG_DIR and HOME from an interactive login shell
-// (cached; empty values when it cannot be read).
+// SetLoginVars names the variables (besides PATH) LoginEnv reads; call once at start-up,
+// before the first LoginEnv.
+func SetLoginVars(vars []string) {
+	loginMu.Lock()
+	defer loginMu.Unlock()
+	wanted = vars
+}
+
+var wanted []string
+
+var varName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// LoginEnv returns PATH and the SetLoginVars variables as an interactive login shell sets
+// them (cached; empty values when it cannot be read).
 func LoginEnv() map[string]string {
-	loginOnce.Do(func() {
-		loginVars = map[string]string{}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		script := `printf '\n__HOPSESH__PATH=%s\n__HOPSESH__CLAUDE_CONFIG_DIR=%s\n' "$PATH" "$CLAUDE_CONFIG_DIR"`
-		cmd := exec.CommandContext(ctx, loginShell(), "-lic", script)
-		cmd.Stdin = nil
-		out, err := cmd.Output()
-		if err != nil && len(out) == 0 {
-			return
+	loginMu.Lock()
+	defer loginMu.Unlock()
+	if loginDone {
+		return loginVars
+	}
+	loginDone = true
+	loginVars = map[string]string{}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var b strings.Builder
+	b.WriteString(`printf '\n__HOPSESH__PATH=%s\n' "$PATH"`)
+	for _, v := range wanted {
+		if varName.MatchString(v) {
+			fmt.Fprintf(&b, `; printf '__HOPSESH__%s=%%s\n' "${%s:-}"`, v, v)
 		}
-		for _, line := range strings.Split(string(out), "\n") {
-			if k, v, ok := strings.Cut(strings.TrimPrefix(line, "__HOPSESH__"), "="); ok && strings.HasPrefix(line, "__HOPSESH__") {
-				loginVars[k] = strings.TrimSpace(v)
-			}
+	}
+	cmd := exec.CommandContext(ctx, loginShell(), "-lic", b.String())
+	cmd.Stdin = nil
+	out, err := cmd.Output()
+	if err != nil && len(out) == 0 {
+		return loginVars
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if k, v, ok := strings.Cut(strings.TrimPrefix(line, "__HOPSESH__"), "="); ok && strings.HasPrefix(line, "__HOPSESH__") {
+			loginVars[k] = strings.TrimSpace(v)
 		}
-	})
+	}
 	return loginVars
 }
 
-// AdoptLoginEnv sets CLAUDE_CONFIG_DIR in this process from the login shell when the
-// process does not have it (an app started from Finder), so every part of hopsesh, and
-// the programs it starts, use the same Claude Code folder.
+// AdoptLoginEnv sets each SetLoginVars variable in this process from the login shell when
+// the process does not have it (an app started from Finder), so every part of hopsesh, and
+// the agents it starts, use the folders the user's shell would.
 func AdoptLoginEnv() { adoptLoginEnv(os.Getenv, LoginEnv) }
 
 func adoptLoginEnv(getenv func(string) string, login func() map[string]string) {
-	if getenv("CLAUDE_CONFIG_DIR") != "" {
-		return
+	env := login()
+	for _, v := range wanted {
+		if getenv(v) == "" && env[v] != "" {
+			_ = os.Setenv(v, expandHome(env[v]))
+		}
 	}
-	if d := login()["CLAUDE_CONFIG_DIR"]; d != "" {
-		_ = os.Setenv("CLAUDE_CONFIG_DIR", expandHome(d))
-	}
-}
-
-// ClaudeConfigDir is Claude Code's config folder: CLAUDE_CONFIG_DIR from this process or
-// the login shell, else ~/.claude.
-func ClaudeConfigDir() string {
-	if d := os.Getenv("CLAUDE_CONFIG_DIR"); d != "" {
-		return d
-	}
-	if d := LoginEnv()["CLAUDE_CONFIG_DIR"]; d != "" {
-		return expandHome(d)
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".claude")
 }
 
 // LoginPathHas reports whether dir is on the login shell's PATH (falling back to this

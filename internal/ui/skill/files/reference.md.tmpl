@@ -1,57 +1,55 @@
 # hopsesh reference (version {{.Version}})
 
-## Commands Claude may run without asking
+## Read-only commands
 
 | Command | Does |
 |---|---|
-| `{{.Bin}} ls --json [--host M] [--repo R] [--live] [--no-git] [--limit N]` | list sessions on allowed machines |
-| `{{.Bin}} show <ref> --json` | one session's details |
-| `{{.Bin}} plan <ref> --json [flags]` | what moving it would do; never writes |
-| `{{.Bin}} hosts --json` | discovered machines and whether each is allowed |
-| `{{.Bin}} doctor [machine] --json` | SSH, host trust, Claude Code version, Remote Control, skill |
+| `{{.Bin}} ls --json [--host M] [--agent A] [--repo R] [--live] [--no-git] [--limit N]` | list sessions |
+| `{{.Bin}} show <ref> --json` | one session's details and lineage |
+| `{{.Bin}} plan <ref> --json [--in A] [flags]` | what pulling it would do; never writes |
+| `{{.Bin}} agents --json` | the agents hopsesh supports and what is installed here |
+| `{{.Bin}} hosts --json` | known machines and whether each is allowed |
+| `{{.Bin}} doctor [machine] --json` | SSH, host trust, agents, skill |
 | `{{.Bin}} version` | the installed version |
 
 ## Needs the user's yes first
 
-`{{.Bin}} pull <ref> --json --yes [flags]` moves the session. `{{.Bin}} undo <id>` reverses a move.
+`{{.Bin}} pull <ref> --json --yes [flags]` moves the session here or continues it in another
+agent. `{{.Bin}} undo <id>` reverses it.
 
-## pull and plan flags
+## plan and pull flags
 
 | Flag | Meaning |
 |---|---|
+| `--in <{{.AgentIDs}}>` | continue in this agent (default: the session's own agent) |
+| `--fidelity history\|note` | another agent gets the whole conversation as text (default), or only a briefing |
+| `--native` | another agent that can replays exact tool calls as its own (experimental) |
+| `--note-file <path>` | a handoff note for the other agent's briefing |
+| `--go` | start the continued session with "Continue." |
 | `--clone` | clone the repository into the repos folder if it is not here |
-| `--to <dir>` | resume in this directory instead of matching the repository |
-| `--worktree auto\|create\|main` | recreate the session's worktree (auto), always use one, or use the main checkout |
-| `--fork` | the old session keeps running; both continue (default: hand off) |
-| `--rc` | start the moved session with Remote Control on |
-| `--notify` | the moved session tells the old one where the work went (both on Remote Control) |
+| `--to <dir>` | continue in this directory instead of matching the repository |
+| `--worktree auto\|create\|main` | recreate the session's worktree (auto), always use one, or the main checkout |
+| `--fork` | the old session keeps running; both continue |
+| `--rc` | turn the agent's remote control on, where it has one |
+| `--notify` | the moved session tells the old one where the work went (agents that can) |
 | `--redact` | redact likely secrets in the copy |
-| `--other-account` | this machine uses a different Claude account (drops signed reasoning) |
-| `--memory` | also merge the project's auto-memory folder |
-| `--stop-local` | quit a copy of this session running on this machine first |
-| `--keep-both` / `--replace` | when the copy here changed too: bring this one in separately / replace it |
-| `--no-sync` | leave the checkout here alone (default: fetch, and fast-forward when clean) |
-| `--no-mark` | do not title the copy left behind "↪ moved to <this machine>" |
-| `--push` | push the source branch's unpushed commits first (by default they are fetched straight from the other machine) |
+| `--stop-local` | quit a copy of this session open here first |
+| `--keep-both` / `--replace` | when both copies changed: keep both / replace the copy here |
+| `--no-sync` | leave the checkout alone (default: fetch, and fast-forward when clean) |
+| `--no-mark` | do not mark the copy left behind |
+| `--push` | push the source branch's unpushed commits first |
 
 ## JSON
 
-`plan --json` prints the plan. `pull --json --yes` prints
-`{"plan": …, "result": …, "resumeCommand": "…", "argv": […]}`. Useful plan fields:
-`sessionId`, `title`, `sourceHost`, `targetCwd`, `repo.action`, `repo.localPath`,
-`repo.worktree`, `repo.unpushed`, `repo.dirty`, `sync`, `mark` (`now`, `when-stopped`, `off`),
-`conflict`, `warnings`, `blockers`. Result fields: `syncNote`, `sync.state`, `pushed`,
-`pushError`, `mark` (`done`, `pending`, `off`, `failed`), `markError`, `undoId`.
+`plan --json` prints the plan: `kind` (`move` or `continue`), `key`, `title`, `agent`,
+`source`, `target.cwd`, `repo`, `sync`, `mark`, `conflict`, `warnings`, `blockers`, and for
+another agent `continue` (`relation`, `report`, `briefing`). `pull --json --yes` prints
+`{"plan": …, "result": …, "command": "…"}`; the result has `journal` (for undo), `syncNote`,
+`mark`, `markError`, `pushed`, `pushError`, `warnings`.
 
 ## Permissions and the sandbox
 
-hopsesh reads other machines over SSH and writes into `~/.claude/projects`, which Claude Code's
-sandbox does not allow. If the user runs Claude Code with the sandbox on, they can add to
-`~/.claude/settings.json`:
-
-```json
-{ "sandbox": { "excludedCommands": ["{{.Bin}} ls *", "{{.Bin}} show *", "{{.Bin}} plan *", "{{.Bin}} pull *"] } }
-```
-
-`{{.Bin}} skill install --add-rules` can also add permission rules: read-only commands allowed,
-and `pull`, `undo` and `import` always asking.
+hopsesh reads other machines over SSH and writes into the agents' data folders, which agent
+sandboxes usually block. `{{.Bin}} skill install --add-rules` adds approval rules for each agent:
+the read-only commands run without asking (and, in Codex, outside its sandbox), while `pull` and
+`undo` always ask.
