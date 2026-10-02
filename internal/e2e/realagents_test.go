@@ -148,3 +148,24 @@ func TestCodexImportRoute(t *testing.T) {
 		t.Fatal("undo removes the imported thread")
 	}
 }
+
+// Codex reports its login itself; a fresh home is not logged in.
+func TestCodexAccount(t *testing.T) {
+	bin := realAgents(t, "codex")
+	home := t.TempDir()
+	m := &host.Machine{Name: "here", Local: true, Facts: host.Facts{OS: "darwin", Home: home, Env: map[string]string{"CODEX_HOME": home},
+		Binaries: map[string]agent.BinaryFact{"codex": {Path: bin}}}}
+	in := agent.Install{Agent: "codex", Version: "0.153.2", Binary: bin, Roots: map[string]string{"home": home}, Present: true}
+	h, err := m.For(context.Background(), codex.New().Spec(), in, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	a, err := codex.New().Account(context.Background(), h, in)
+	if err != nil || a.Key != "" || a.Label != "not logged in" {
+		t.Fatalf("account: %+v %v", a, err)
+	}
+	if time.Since(start) > 15*time.Second {
+		t.Fatal("the probe should end as soon as Codex answers")
+	}
+}

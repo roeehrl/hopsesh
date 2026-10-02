@@ -84,7 +84,7 @@ type RunOptions struct {
 	Stdin []byte
 	// HoldStdin keeps standard input open this long after Stdin is written (or until the
 	// program exits, or its output contains StdinUntil), for programs that stop at the end
-	// of their input before answering it. Only on this machine.
+	// of their input before answering it.
 	HoldStdin  time.Duration
 	StdinUntil []byte
 	Timeout    time.Duration

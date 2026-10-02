@@ -126,10 +126,11 @@ func rewriteRecord(body []byte, maps []compiled, pol *policy, redact func([]byte
 		return body, true
 	}
 	for _, m := range pol.DropRecords {
-		if !bytes.Contains(body, []byte(`"`+m.Field+`"`)) {
+		last := m.Field[strings.LastIndex(m.Field, ".")+1:]
+		if !bytes.Contains(body, []byte(`"`+last+`"`)) {
 			continue
 		}
-		if v, ok := topString(trimmed, m.Field); ok && matches(v, m) {
+		if v, ok := pathString(trimmed, m.Field); ok && matches(v, m) {
 			st.DroppedRecords++
 			return nil, false
 		}
@@ -157,17 +158,24 @@ func matches(v string, m agent.FieldMatch) bool {
 	return false
 }
 
-// topString returns a top-level string field of a JSON object.
-func topString(body []byte, field string) (string, bool) {
-	var v map[string]json.RawMessage
-	if json.Unmarshal(body, &v) != nil {
-		return "", false
+// pathString returns the string at a dot path ("payload.type") in a JSON object.
+func pathString(body []byte, path string) (string, bool) {
+	raw := json.RawMessage(body)
+	for _, k := range strings.Split(path, ".") {
+		var v map[string]json.RawMessage
+		if json.Unmarshal(raw, &v) != nil {
+			return "", false
+		}
+		var ok bool
+		if raw, ok = v[k]; !ok {
+			return "", false
+		}
 	}
 	var s string
-	if raw, ok := v[field]; ok && json.Unmarshal(raw, &s) == nil {
-		return s, true
+	if json.Unmarshal(raw, &s) != nil {
+		return "", false
 	}
-	return "", false
+	return s, true
 }
 
 type frame struct {

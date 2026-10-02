@@ -8,9 +8,11 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/core/transport"
@@ -104,18 +106,31 @@ func (f remoteFS) MkdirAll(p string) error             { return f.r.Client().Mkd
 type remoteExec struct{ m *Machine }
 
 func (e remoteExec) Run(ctx context.Context, argv []string, o agent.RunOptions) (agent.Result, error) {
-	if o.Stdin != nil {
-		return agent.Result{}, fmt.Errorf("%w: input to a program on another machine", agent.ErrUnsupported)
-	}
 	if o.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, o.Timeout)
 		defer cancel()
 	}
-	var out []byte
-	var err error
+	line := e.commandLine(argv, o)
+	if o.Stdin != nil {
+		return e.runPiped(ctx, line, o)
+	}
+	out, err := e.m.Conn.Run(ctx, line)
+	var re *transport.RemoteError
+	if errors.As(err, &re) {
+		return agent.Result{Stdout: out, Stderr: []byte(re.Stderr), Code: re.Code}, nil
+	}
+	if err != nil {
+		return agent.Result{}, err
+	}
+	return agent.Result{Stdout: out}, nil
+}
+
+// commandLine is the remote command line for a program run: PowerShell on Windows, POSIX
+// sh elsewhere, everything quoted.
+func (e remoteExec) commandLine(argv []string, o agent.RunOptions) string {
+	var b strings.Builder
 	if e.m.Facts.OS == "windows" {
-		var b strings.Builder
 		if o.Dir != "" {
 			b.WriteString("Set-Location " + transport.PSQuote(o.Dir) + "; ")
 		}
@@ -128,35 +143,84 @@ func (e remoteExec) Run(ctx context.Context, argv []string, o agent.RunOptions) 
 			b.WriteString(" " + transport.PSQuote(a))
 		}
 		b.WriteString("; exit $LASTEXITCODE")
-		out, err = e.m.Conn.RunPowerShell(ctx, b.String())
-	} else {
-		var b strings.Builder
-		if o.Dir != "" {
-			b.WriteString("cd " + transport.ShQuote(o.Dir) + " && ")
-		}
-		if len(o.Env) > 0 {
-			b.WriteString("env")
-			for _, kv := range o.Env {
-				b.WriteString(" " + transport.ShQuote(kv))
-			}
-			b.WriteString(" ")
-		}
-		for i, a := range argv {
-			if i > 0 {
-				b.WriteByte(' ')
-			}
-			b.WriteString(transport.ShQuote(a))
-		}
-		out, err = e.m.Conn.Run(ctx, b.String())
+		return transport.PowerShellCommand(b.String())
 	}
-	var re *transport.RemoteError
-	if errors.As(err, &re) {
-		return agent.Result{Stdout: out, Stderr: []byte(re.Stderr), Code: re.Code}, nil
+	if o.Dir != "" {
+		b.WriteString("cd " + transport.ShQuote(o.Dir) + " && ")
 	}
+	if len(o.Env) > 0 {
+		b.WriteString("env")
+		for _, kv := range o.Env {
+			b.WriteString(" " + transport.ShQuote(kv))
+		}
+		b.WriteString(" ")
+	}
+	for i, a := range argv {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString(transport.ShQuote(a))
+	}
+	return b.String()
+}
+
+// runPiped runs a command with input: it writes o.Stdin, keeps the input open until the
+// output contains o.StdinUntil or o.HoldStdin passes, then waits for the program.
+func (e remoteExec) runPiped(ctx context.Context, line string, o agent.RunOptions) (agent.Result, error) {
+	p, err := e.m.Conn.StartPipe(ctx, line)
 	if err != nil {
 		return agent.Result{}, err
 	}
-	return agent.Result{Stdout: out}, nil
+	var mu sync.Mutex
+	var out bytes.Buffer
+	answered := make(chan struct{})
+	read := make(chan struct{})
+	go func() {
+		defer close(read)
+		buf := make([]byte, 32<<10)
+		hit := false
+		for {
+			n, rerr := p.Out.Read(buf)
+			mu.Lock()
+			out.Write(buf[:n])
+			if !hit && len(o.StdinUntil) > 0 && bytes.Contains(out.Bytes(), o.StdinUntil) {
+				hit = true
+				close(answered)
+			}
+			mu.Unlock()
+			if rerr != nil {
+				return
+			}
+		}
+	}()
+	if _, err := p.In.Write(o.Stdin); err != nil {
+		_ = p.Close()
+		return agent.Result{}, err
+	}
+	if o.HoldStdin > 0 {
+		select {
+		case <-time.After(o.HoldStdin):
+		case <-answered:
+		case <-read:
+		case <-ctx.Done():
+		}
+	}
+	werr := p.Close() // closes the input, waits for the program
+	<-read
+	mu.Lock()
+	res := agent.Result{Stdout: out.Bytes(), Stderr: []byte(p.Stderr())}
+	mu.Unlock()
+	var ee *exec.ExitError
+	switch {
+	case werr == nil:
+	case errors.As(werr, &ee) && ee.ExitCode() != 255:
+		res.Code = ee.ExitCode()
+	case ctx.Err() != nil:
+		return res, ctx.Err()
+	default:
+		return res, fmt.Errorf("%s: %w", strings.TrimSpace(p.Stderr()), werr)
+	}
+	return res, nil
 }
 
 // remoteProcs checks and stops processes on a machine over SSH.

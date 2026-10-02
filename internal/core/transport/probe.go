@@ -23,13 +23,18 @@ import (
 // RunPowerShell runs a PowerShell script on a Windows machine (whatever its default ssh
 // shell is) via -EncodedCommand, which avoids every cmd.exe quoting pitfall.
 func (c *Conn) RunPowerShell(ctx context.Context, script string) ([]byte, error) {
+	return c.Run(ctx, PowerShellCommand(script))
+}
+
+// PowerShellCommand is the command line that runs a PowerShell script on a Windows
+// machine through -EncodedCommand (valid whether its ssh shell is cmd.exe or PowerShell).
+func PowerShellCommand(script string) string {
 	u := utf16.Encode([]rune("$ProgressPreference='SilentlyContinue';" + script))
 	b := make([]byte, len(u)*2)
 	for i, v := range u {
 		b[2*i], b[2*i+1] = byte(v), byte(v>>8)
 	}
-	enc := base64.StdEncoding.EncodeToString(b)
-	return c.Run(ctx, "powershell -NoProfile -NonInteractive -EncodedCommand "+enc)
+	return "powershell -NoProfile -NonInteractive -EncodedCommand " + base64.StdEncoding.EncodeToString(b)
 }
 
 // ResolvedHost is what ssh -G says about a destination.
