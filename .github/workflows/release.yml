@@ -79,7 +79,7 @@ jobs:
           KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           ISSUER: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
         run: |
-          printf '%s\n' "$KEY" > "$RUNNER_TEMP/notary.p8"
+          printf '%s' "$KEY" | base64 --decode > "$RUNNER_TEMP/notary.p8"
           xcrun notarytool store-credentials hopsesh-ci --key "$RUNNER_TEMP/notary.p8" --key-id "$KEY_ID" --issuer "$ISSUER"
           rm -f "$RUNNER_TEMP/notary.p8"
           echo "NOTARY_PROFILE=hopsesh-ci" >> "$GITHUB_ENV"

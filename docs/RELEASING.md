@@ -45,8 +45,17 @@ Repository secrets:
 
 - `MACOS_SIGN_P12`: base64 of the Developer ID Application certificate and key (`.p12`)
 - `MACOS_SIGN_PASSWORD`: its password
-- `MACOS_NOTARY_KEY`, `MACOS_NOTARY_KEY_ID`, `MACOS_NOTARY_ISSUER_ID`: an App Store Connect
-  API key with the Developer role
+- `MACOS_NOTARY_KEY`: base64 of an App Store Connect API key (`AuthKey_<id>.p8`, Developer
+  role); `MACOS_NOTARY_KEY_ID`: its key id; `MACOS_NOTARY_ISSUER_ID`: the issuer id shown
+  above the key list in App Store Connect → Users and Access → Integrations
+
+```sh
+base64 -i hopsesh-devid.p12 | gh secret set MACOS_SIGN_P12
+gh secret set MACOS_SIGN_PASSWORD                  # prompts
+base64 -i AuthKey_<id>.p8 | gh secret set MACOS_NOTARY_KEY
+gh secret set MACOS_NOTARY_KEY_ID --body <id>
+gh secret set MACOS_NOTARY_ISSUER_ID               # prompts
+```
 
 GoReleaser signs and notarizes the darwin CLI binaries with them; the `macos-app` job signs
 the app with hardened runtime, notarizes and staples it.
