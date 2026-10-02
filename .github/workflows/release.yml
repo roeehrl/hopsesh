@@ -10,13 +10,15 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: write     # create the draft release
-  id-token: write     # build provenance
-  attestations: write
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write     # create the draft release
+      id-token: write     # build provenance
+      attestations: write
     steps:
       - uses: actions/checkout@v4
         with:
