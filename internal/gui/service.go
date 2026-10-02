@@ -53,6 +53,9 @@ func NewApp() (*App, error) {
 		return nil, err
 	}
 	log, _ := audit.Open(filepath.Join(config.StateDir(), "log"))
+	// Started from Finder, the app lacks the shell's CLAUDE_CONFIG_DIR; adopt it so
+	// scanning, moving and the skill all use the same Claude Code folder.
+	integrate.AdoptLoginEnv()
 	return &App{cfg: cfg, log: log}, nil
 }
 
@@ -587,7 +590,7 @@ func (a *App) Apply() (*DoneDTO, error) {
 	}
 	d := &DoneDTO{Title: p.Title, Command: p.Resume.Shell(link.DefaultShell()), Paths: n, Files: res.Copied, Bytes: engine.Human(res.Bytes),
 		Secrets: res.Secrets.Total, Cloned: res.Cloned, Worktree: res.Worktree, SessionID: p.SessionID,
-		OldNotice: link.OldSessionNotice(inventory.LocalHostName(), p.TargetCWD, p.NewName, p.Resume.Fork),
+		OldNotice: link.OldSessionNotice(p.StartContext.TargetHost, p.TargetCWD, p.NewName, p.Resume.Fork),
 		NewName:   p.NewName, RemoteCtl: p.Options.RemoteCtl, NotifyOld: p.Options.NotifyOld, SetAside: res.SetAside,
 		AuditDir: filepath.Join(config.StateDir(), "log"), TargetDir: p.TargetCWD, PromptFile: p.Resume.PromptFile, SourceHost: p.SourceHost,
 		Desktop: inventory.ClaudeSupports(ctx, inventory.LocalFacts(ctx).ClaudePath, "--desktop"),

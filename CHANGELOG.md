@@ -34,6 +34,10 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 - `install.sh` names the right profile file for your shell and no longer replaces a
   command linked by the app.
+- The text `pull` prints for pasting into the old session named the new session instead of
+  this machine.
+- The app opened from Finder now uses the `CLAUDE_CONFIG_DIR` set in your shell for
+  scanning and moving too, not only for the skill.
 
 ## [0.1.0] - 2026-10-02
 

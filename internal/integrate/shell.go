@@ -50,6 +50,20 @@ func LoginEnv() map[string]string {
 	return loginVars
 }
 
+// AdoptLoginEnv sets CLAUDE_CONFIG_DIR in this process from the login shell when the
+// process does not have it (an app started from Finder), so every part of hopsesh, and
+// the programs it starts, use the same Claude Code folder.
+func AdoptLoginEnv() { adoptLoginEnv(os.Getenv, LoginEnv) }
+
+func adoptLoginEnv(getenv func(string) string, login func() map[string]string) {
+	if getenv("CLAUDE_CONFIG_DIR") != "" {
+		return
+	}
+	if d := login()["CLAUDE_CONFIG_DIR"]; d != "" {
+		_ = os.Setenv("CLAUDE_CONFIG_DIR", expandHome(d))
+	}
+}
+
 // ClaudeConfigDir is Claude Code's config folder: CLAUDE_CONFIG_DIR from this process or
 // the login shell, else ~/.claude.
 func ClaudeConfigDir() string {
