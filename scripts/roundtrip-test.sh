@@ -25,14 +25,20 @@ HS=/usr/local/bin/hopsesh-rt
 for u in "$A" "$B"; do sudo useradd -m -s /bin/sh "$u" 2>/dev/null || true; done
 AHOME=$(getent passwd "$A" | cut -d: -f6)
 BHOME=$(getent passwd "$B" | cut -d: -f6)
-as_a() { sudo -u "$A" -H env HOPSESH_CONFIG_DIR="$AHOME/.hscfg" HOPSESH_STATE_DIR="$AHOME/.hsstate" "$@"; }
-as_b() { sudo -u "$B" -H env HOPSESH_CONFIG_DIR="$BHOME/.hscfg" HOPSESH_STATE_DIR="$BHOME/.hsstate" "$@"; }
-sh_a() { sudo -u "$A" -H sh -c "$1"; }
-sh_b() { sudo -u "$B" -H sh -c "$1"; }
+# Run as a test user with a clean environment (the caller's XDG_* paths must not leak).
+user_env() {
+  u=$1 h=$2
+  shift 2
+  sudo -u "$u" -H env -u XDG_CONFIG_HOME -u XDG_STATE_HOME -u XDG_CACHE_HOME -u XDG_DATA_HOME HOME="$h" "$@"
+}
+as_a() { user_env "$A" "$AHOME" HOPSESH_CONFIG_DIR="$AHOME/.hscfg" HOPSESH_STATE_DIR="$AHOME/.hsstate" "$@"; }
+as_b() { user_env "$B" "$BHOME" HOPSESH_CONFIG_DIR="$BHOME/.hscfg" HOPSESH_STATE_DIR="$BHOME/.hsstate" "$@"; }
+sh_a() { user_env "$A" "$AHOME" sh -c "$1"; }
+sh_b() { user_env "$B" "$BHOME" sh -c "$1"; }
 
 # Two-way SSH between the users.
 for u in "$A" "$B"; do
-  sudo -u "$u" -H sh -c 'mkdir -p ~/.ssh && chmod 700 ~/.ssh && { [ -f ~/.ssh/id_ed25519 ] || ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/id_ed25519; }'
+  sudo -u "$u" -H sh -c 'umask 077; mkdir -p ~/.ssh && chmod 700 ~/.ssh && { [ -f ~/.ssh/id_ed25519 ] || ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/id_ed25519; } && chmod 600 ~/.ssh/id_ed25519'
 done
 sudo cat "$AHOME/.ssh/id_ed25519.pub" | sudo -u "$B" -H sh -c 'cat >> ~/.ssh/authorized_keys; chmod 600 ~/.ssh/authorized_keys'
 sudo cat "$BHOME/.ssh/id_ed25519.pub" | sudo -u "$A" -H sh -c 'cat >> ~/.ssh/authorized_keys; chmod 600 ~/.ssh/authorized_keys'
