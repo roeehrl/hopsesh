@@ -4,6 +4,8 @@
 package journal
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,7 +28,7 @@ type Op string
 const (
 	OpCreate  Op = "create"  // undo: remove
 	OpReplace Op = "replace" // undo: put the backup back
-	OpAppend  Op = "append"  // undo: truncate to Size
+	OpAppend  Op = "append"  // undo: cut out the appended bytes (Size, Len, Sum)
 	OpRename  Op = "rename"  // undo: move back
 )
 
@@ -37,6 +39,8 @@ type Entry struct {
 	Path      string    `json:"path"`
 	From      string    `json:"from,omitempty"`   // OpRename
 	Size      int64     `json:"size,omitempty"`   // OpAppend: size before
+	Len       int64     `json:"len,omitempty"`    // OpAppend: bytes appended
+	Sum       string    `json:"sum,omitempty"`    // OpAppend: their SHA-256
 	Mtime     time.Time `json:"mtime,omitempty"`  // OpAppend: time before
 	Backup    string    `json:"backup,omitempty"` // OpReplace: copy of the old file
 	KeepMtime bool      `json:"keepMtime,omitempty"`
@@ -124,16 +128,69 @@ func (j *Journal) WriteFile(fsys host.FS, machine, p string, b []byte, perm fs.F
 	return fsys.WriteFile(p, b, perm)
 }
 
-// Append adds to a file, remembering its size.
+// Append adds to a file, remembering where and what, so undo can take out exactly these
+// bytes even after the agent appended more.
 func (j *Journal) Append(fsys host.FS, machine, p string, b []byte, o agent.AppendOptions) error {
 	fi, err := fsys.Stat(p)
 	if err != nil {
 		return err
 	}
-	if err := j.record(Entry{Op: OpAppend, Machine: machine, Path: p, Size: fi.Size(), Mtime: fi.ModTime(), KeepMtime: o.KeepMtime}); err != nil {
+	sum := sha256.Sum256(b)
+	if err := j.record(Entry{Op: OpAppend, Machine: machine, Path: p, Size: fi.Size(), Len: int64(len(b)), Sum: hex.EncodeToString(sum[:]),
+		Mtime: fi.ModTime(), KeepMtime: o.KeepMtime}); err != nil {
 		return err
 	}
 	return fsys.Append(p, b, o)
+}
+
+// undoAppend removes the bytes an Append added (and the newline Append may have put
+// before them). Whatever was written after them stays; if they changed, nothing is.
+func undoAppend(fsys host.FS, e Entry) error {
+	fi, err := fsys.Stat(e.Path)
+	if err != nil {
+		return err
+	}
+	data, err := fsys.ReadFile(e.Path, fi.Size()+1)
+	if err != nil {
+		return err
+	}
+	if int64(len(data)) < e.Size+e.Len {
+		return fmt.Errorf("%s is shorter than when hopsesh added to it; left as it is", e.Path)
+	}
+	rest := data[e.Size:]
+	n, lead := int64(-1), int64(0)
+	for _, lead = range []int64{0, 1} {
+		if lead == 1 && (len(rest) == 0 || rest[0] != '\n') {
+			continue
+		}
+		if e.Size+lead+e.Len > int64(len(data)) {
+			continue
+		}
+		if sum := sha256.Sum256(rest[lead : lead+e.Len]); hex.EncodeToString(sum[:]) == e.Sum {
+			n = lead + e.Len
+			break
+		}
+	}
+	if n < 0 {
+		return fmt.Errorf("what hopsesh added to %s has changed since; left as it is", e.Path)
+	}
+	if e.Size+n == int64(len(data)) {
+		if err := fsys.Truncate(e.Path, e.Size); err != nil {
+			return err
+		}
+	} else {
+		// Keep the newline Append put in front: it ends the line before, which later lines
+		// now follow.
+		kept := append(append([]byte{}, data[:e.Size+lead]...), rest[n:]...)
+		if err := fsys.WriteFile(e.Path, kept, fi.Mode().Perm()); err != nil {
+			return err
+		}
+		return nil // the file has newer content: its time stays current
+	}
+	if e.KeepMtime {
+		return fsys.Chtimes(e.Path, e.Mtime)
+	}
+	return nil
 }
 
 // Rename moves a file, remembering where from.
@@ -243,13 +300,7 @@ func undoEntry(fsys host.FS, e Entry) error {
 		}
 		return fsys.WriteFile(e.Path, b, 0o600)
 	case OpAppend:
-		if err := fsys.Truncate(e.Path, e.Size); err != nil {
-			return err
-		}
-		if e.KeepMtime {
-			return fsys.Chtimes(e.Path, e.Mtime)
-		}
-		return nil
+		return undoAppend(fsys, e)
 	case OpRename:
 		return fsys.Rename(e.Path, e.From)
 	}

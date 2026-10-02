@@ -59,6 +59,39 @@ func TestUndoEverything(t *testing.T) {
 	}
 }
 
+// Undoing an append takes out only hopsesh's bytes: lines the agent wrote afterwards stay,
+// and bytes that changed are left alone.
+func TestUndoAppendKeepsLaterWrites(t *testing.T) {
+	state, data := t.TempDir(), t.TempDir()
+	fsys := host.LocalFS()
+	idx := filepath.Join(data, "session_index.jsonl")
+	os.WriteFile(idx, []byte(`{"id":"a"}`), 0o644) // no trailing newline: Append adds one
+	j, _ := New(state, "title")
+	must(t, j.Append(fsys, "here", idx, []byte(`{"id":"b"}`+"\n"), agent.AppendOptions{NewLine: true}))
+	f, _ := os.OpenFile(idx, os.O_APPEND|os.O_WRONLY, 0)
+	f.WriteString(`{"id":"c"}` + "\n")
+	f.Close()
+	must(t, j.Undo(func(string) (host.FS, error) { return fsys, nil }))
+	if b, _ := os.ReadFile(idx); string(b) != `{"id":"a"}`+"\n"+`{"id":"c"}`+"\n" {
+		t.Fatalf("after undo: %q", b)
+	}
+	if fi, _ := os.Stat(idx); fi.Mode().Perm() != 0o644 {
+		t.Fatalf("mode %v", fi.Mode())
+	}
+
+	other := filepath.Join(data, "t.jsonl")
+	os.WriteFile(other, []byte("x\n"), 0o600)
+	j2, _ := New(state, "mark")
+	must(t, j2.Append(fsys, "here", other, []byte("mark\n"), agent.AppendOptions{}))
+	os.WriteFile(other, []byte("x\nMARK\n"), 0o600)
+	if err := j2.Undo(func(string) (host.FS, error) { return fsys, nil }); err == nil {
+		t.Fatal("changed bytes must not be cut out")
+	}
+	if b, _ := os.ReadFile(other); string(b) != "x\nMARK\n" {
+		t.Fatalf("a refused undo changes nothing: %q", b)
+	}
+}
+
 func must(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
