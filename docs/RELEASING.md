@@ -19,6 +19,7 @@ in GitHub:
 | `*.sbom.json` | syft in CI | `checksums.txt` |
 | `hopsesh_<ver>_darwin_{amd64,arm64}.tar.gz` | `release-sign.sh` | Developer ID signature, notarization, `checksums.txt` |
 | `hopsesh-<ver>-macos-universal.dmg` | `release-sign.sh` → `build-macos-app.sh` | Developer ID signature, notarization (stapled), `checksums.txt` |
+| `hopsesh-macos-universal.dmg` | `release-sign.sh` (a copy of the above) | same; a stable link for web pages: `releases/latest/download/hopsesh-macos-universal.dmg` |
 | `checksums.txt`, `checksums.txt.sig` | `release-sign.sh` | the release key (`packaging/release-key.pub`) |
 
 `hopsesh update` and the install scripts accept a download only when `checksums.txt` is
