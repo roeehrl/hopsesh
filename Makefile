@@ -1,4 +1,4 @@
-.PHONY: build test lint tidy snapshot
+.PHONY: build test lint tidy snapshot app
 
 build:
 	go build -trimpath -o bin/hopsesh ./cmd/hopsesh
@@ -15,3 +15,6 @@ tidy:
 
 snapshot:
 	goreleaser release --snapshot --clean
+
+app:
+	scripts/build-macos-app.sh
