@@ -53,3 +53,11 @@ func ParseMarkTitle(t string) (Mark, string, bool) {
 // MarkPrefixes are the beginnings of every mark title (for dropping marks from a copy
 // that moves on).
 func MarkPrefixes() []string { return []string{movedPrefix, continuedPrefix} }
+
+// NotePrefix begins every message hopsesh itself adds to a conversation (a move's first
+// prompt, a continuation's briefing). Session lists do not show such a message as the
+// user's last prompt.
+const NotePrefix = "[hopsesh] "
+
+// IsNote reports whether a user message is one hopsesh added.
+func IsNote(text string) bool { return strings.HasPrefix(strings.TrimSpace(text), NotePrefix) }

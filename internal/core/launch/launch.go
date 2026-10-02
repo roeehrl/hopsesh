@@ -36,7 +36,7 @@ type Context struct {
 // and a request to check the environment before continuing.
 func StartPrompt(c Context) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "[hopsesh] This conversation was moved here from another machine. ")
+	b.WriteString(agent.NotePrefix + "This conversation was moved here from another machine. ")
 	fmt.Fprintf(&b, "It ran on %s (%s", c.SourceLocation, nonEmpty(c.SourceOS, "unknown OS"))
 	if c.SourceVersion != "" {
 		fmt.Fprintf(&b, ", %s %s", c.AgentName, c.SourceVersion)

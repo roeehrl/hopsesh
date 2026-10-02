@@ -121,3 +121,33 @@ func TestPlanMoveAndRules(t *testing.T) {
 		t.Fatalf("fork: %v", c.Argv)
 	}
 }
+
+// Marks and titles are thread names in session_index.jsonl; hopsesh's own messages are
+// not shown as prompts, and a thread holding only a briefing is still listed.
+func TestMarkTitleAndNotes(t *testing.T) {
+	h, in, byID := setup(t)
+	m, ctx := New(), context.Background()
+	if err := m.Mark(ctx, h, in, byID[t3], agent.Mark{Kind: agent.MarkContinued, Agent: "claude", AgentName: "Claude Code", Location: "studio"}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := m.Write(ctx, h, in, ir.WriteRequest{Mode: ir.WriteNew, Header: ir.Header{CWD: "/home/u/git/demo", Title: "Fix the parser"},
+		Items: []ir.Item{{Role: ir.RoleUser, Text: agent.NotePrefix + "This conversation was moved from Claude Code."}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := m.List(ctx, h, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]agent.Summary{}
+	for _, s := range l.Sessions {
+		got[string(s.Key.Session)] = s
+	}
+	if s := got[t3]; s.Mark == nil || s.Mark.AgentName != "Claude Code" || s.Mark.Location != "studio" || s.Title != "README cleanup" {
+		t.Fatalf("marked thread: %+v %+v", s, s.Mark)
+	}
+	n, ok := got[res.SessionID]
+	if !ok || n.Title != "Fix the parser" || n.LastPrompt != "" {
+		t.Fatalf("a briefing-only thread is listed with its title and no prompt: %+v", n)
+	}
+}

@@ -288,7 +288,7 @@ func (res *Result) mapText(r Request, s string) string {
 func briefing(r Request, rep *Report) string {
 	bf := r.Briefing
 	var b strings.Builder
-	fmt.Fprintf(&b, "[hopsesh] This conversation was moved from %s", r.From)
+	fmt.Fprintf(&b, agent.NotePrefix+"This conversation was moved from %s", r.From)
 	if bf.FromVersion != "" {
 		fmt.Fprintf(&b, " %s", bf.FromVersion)
 	}

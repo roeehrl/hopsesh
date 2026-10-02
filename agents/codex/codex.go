@@ -127,6 +127,9 @@ func (m *Module) List(_ context.Context, h agent.Host, in agent.Install) (agent.
 		case s != nil:
 			if t := titles[string(s.Key.Session)]; t != "" {
 				s.Title, s.TitleSource = t, "custom"
+				if mk, orig, ok := agent.ParseMarkTitle(t); ok {
+					s.Mark, s.Title = &mk, orig
+				}
 			}
 			out.Sessions = append(out.Sessions, *s)
 		}
@@ -209,6 +212,26 @@ func names(h agent.Host, in agent.Install) map[string]string {
 	return out
 }
 
+// setName gives a thread a name the way Codex does: a line appended to
+// session_index.jsonl (the last line for an id wins).
+func setName(h agent.Host, in agent.Install, sid, name string) error {
+	line, err := marshal(map[string]any{"id": sid, "thread_name": name, "updated_at": stamp(time.Now())})
+	if err != nil {
+		return err
+	}
+	p := h.Path().Join(in.Root(home), "session_index.jsonl")
+	if _, err := h.FS().Stat(p); err != nil {
+		return h.FS().WriteFile(p, append(line, '\n'), 0o600)
+	}
+	return h.FS().Append(p, append(line, '\n'), agent.AppendOptions{NewLine: true})
+}
+
+// Mark names the thread left behind "↪ moved to …" (or "continued in …"), which Codex's
+// own thread list shows.
+func (m *Module) Mark(ctx context.Context, h agent.Host, in agent.Install, s agent.Summary, mk agent.Mark) error {
+	return setName(h, in, string(s.Key.Session), agent.MarkTitle(mk, s.Title))
+}
+
 // headChunk and tailChunk bound what a listing reads of each rollout.
 const (
 	headChunk = 256 << 10
@@ -247,8 +270,11 @@ func summarize(h agent.Host, r rollout) (*agent.Summary, error) {
 	if first.Git != nil {
 		s.GitBranch = first.Git.Branch
 	}
+	talked := false // any user message, hopsesh's own included
 	for _, l := range lines(head, false) {
-		if p := userPrompt(l); p != "" {
+		p := userPrompt(l)
+		talked = talked || p != ""
+		if p != "" && !agent.IsNote(p) {
 			s.Title, s.TitleSource = clip(p), "prompt"
 			break
 		}
@@ -263,7 +289,9 @@ func summarize(h agent.Host, r rollout) (*agent.Summary, error) {
 	}
 	tl := lines(tail, size > headChunk)
 	for i := len(tl) - 1; i >= 0; i-- {
-		if p := userPrompt(tl[i]); p != "" {
+		p := userPrompt(tl[i])
+		talked = talked || p != ""
+		if p != "" && !agent.IsNote(p) {
 			s.LastPrompt = clip(p)
 			break
 		}
@@ -276,7 +304,7 @@ func summarize(h agent.Host, r rollout) (*agent.Summary, error) {
 			break
 		}
 	}
-	if s.Title == "" && s.LastPrompt == "" {
+	if !talked {
 		return nil, nil // no conversation yet
 	}
 	return s, nil

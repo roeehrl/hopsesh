@@ -149,6 +149,7 @@ func TestRealPromptFilters(t *testing.T) {
 		{mk([]line{{"type": "text", "text": "block text"}}, nil), "block text"},
 		{mk("x", line{"origin": line{"kind": "task-notification"}}), ""},
 		{mk(`<scheduled-task name="daily">run it</scheduled-task>`, nil), ""},
+		{mk(agent.NotePrefix+"This conversation was moved here", nil), ""}, // hopsesh's own
 	}
 	for i, c := range cases {
 		if got := realPrompt(c.r); got != c.want {
