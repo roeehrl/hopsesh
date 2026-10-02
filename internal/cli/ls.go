@@ -124,6 +124,7 @@ func lsCmd() *cobra.Command {
 				a.printf("\n")
 			}
 			a.printf("Move one here: hopsesh pull <machine>:<id-or-title>\n")
+			a.offerSkill()
 			return nil
 		},
 	}

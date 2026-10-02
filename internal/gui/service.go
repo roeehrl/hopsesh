@@ -26,6 +26,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/repos"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
 	"github.com/roeehrl/hopsesh/internal/engine"
+	"github.com/roeehrl/hopsesh/internal/integrate"
 	"github.com/roeehrl/hopsesh/internal/inventory"
 	"github.com/roeehrl/hopsesh/internal/update"
 	"github.com/roeehrl/hopsesh/internal/version"
@@ -80,7 +81,10 @@ type Info struct {
 	} `json:"localNetwork"`
 	UpdateCheck string `json:"updateCheck"` // "", "on" or "off"
 	// Defaults for the round-trip choices on the preflight screen.
-	Defaults struct {
+	SkillState  string `json:"skillState"`  // absent | current | stale | modified | foreign | broken
+	SkillPrompt string `json:"skillPrompt"` // "declined" once the user said not now
+	CLIOffer    bool   `json:"cliOffer"`    // offer to link the command-line tool (app, not linked, not declined)
+	Defaults    struct {
 		MarkMoved  bool `json:"markMoved"`
 		SyncCode   bool `json:"syncCode"`
 		PushSource bool `json:"pushSource"`
@@ -101,6 +105,15 @@ func (a *App) Info() Info {
 	info := Info{Version: version.Version, Host: inventory.LocalHostName(), ReposDir: a.cfg.ReposDir,
 		AuditDir: filepath.Join(config.StateDir(), "log"), HasHosts: has, ClaudeVer: cv}
 	info.UpdateCheck = a.cfg.UpdateCheck
+	if st, err := integrate.SkillStatus(); err == nil {
+		info.SkillState = st.State
+	}
+	info.SkillPrompt = a.cfg.SkillPrompt
+	if a.cfg.CLIPrompt != "declined" {
+		if _, err := integrate.AppCLI(); err == nil && integrate.CheckCLI().State == integrate.CLIMissing {
+			info.CLIOffer = true
+		}
+	}
 	info.Defaults.MarkMoved, info.Defaults.SyncCode, info.Defaults.PushSource = a.cfg.MarkMovedOn(), a.cfg.SyncCodeOn(), a.cfg.PushSource
 	info.LocalNetwork.Gated = lnp.Gated()
 	info.LocalNetwork.FirstRun = lnp.FirstRun(config.StateDir())

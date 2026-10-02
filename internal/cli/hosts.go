@@ -10,10 +10,12 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/roeehrl/hopsesh/internal/claudeskill"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/hosts"
 	"github.com/roeehrl/hopsesh/internal/core/lnp"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
+	"github.com/roeehrl/hopsesh/internal/integrate"
 	"github.com/roeehrl/hopsesh/internal/inventory"
 )
 
@@ -247,6 +249,9 @@ func doctorCmd() *cobra.Command {
 					why = "available (" + nonEmpty(auth.Subscription, "claude.ai") + " login)"
 				}
 				add("this machine: Remote Control", rcOK && auth != nil, why)
+			}
+			if st, err := integrate.SkillStatus(); err == nil {
+				add("Claude Code skill", st.State == claudeskill.Current, skillLine(st))
 			}
 			if lnp.Gated() {
 				if who := lnp.Responsible(); who == "" {

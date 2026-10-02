@@ -42,7 +42,10 @@ type Config struct {
 	// SkillPrompt remembers the answer to "let Claude Code use hopsesh?": "" (not asked),
 	// "declined", or the skill revision last offered.
 	SkillPrompt string `toml:"skill_prompt,omitempty"`
-	Hosts       []Host `toml:"hosts"`
+	// CLIPrompt is "declined" once the user said not now to linking the command-line tool
+	// from the app.
+	CLIPrompt string `toml:"cli_prompt,omitempty"`
+	Hosts     []Host `toml:"hosts"`
 }
 
 // Defaults returns the configuration used when no file exists.

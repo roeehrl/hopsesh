@@ -2,10 +2,13 @@ package cli
 
 import (
 	"fmt"
+	"os/exec"
 
 	"github.com/spf13/cobra"
 
+	"github.com/roeehrl/hopsesh/internal/claudeskill"
 	"github.com/roeehrl/hopsesh/internal/core/audit"
+	"github.com/roeehrl/hopsesh/internal/integrate"
 	"github.com/roeehrl/hopsesh/internal/update"
 	"github.com/roeehrl/hopsesh/internal/version"
 )
@@ -55,6 +58,14 @@ func updateCmd() *cobra.Command {
 			}
 			a.log.Write(audit.Entry{Action: "update", Detail: map[string]any{"from": version.Version, "to": rel.Version}})
 			a.printf("Installed hopsesh %s at %s.\n", rel.Version, path)
+			// The new binary renders the skill; ask it to refresh an unedited one.
+			if st, err := integrate.SkillStatus(); err == nil && st.State != claudeskill.Absent {
+				if out, err := exec.Command(path, "skill", "install").CombinedOutput(); err == nil {
+					a.printf("Refreshed the hopsesh skill for Claude Code.\n")
+				} else if len(out) > 0 {
+					a.printf("The hopsesh skill was not refreshed: %s", out)
+				}
+			}
 			return nil
 		},
 	}

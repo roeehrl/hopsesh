@@ -68,11 +68,23 @@ else got=$(shasum -a 256 "$tmp/$archive" | cut -d' ' -f1); fi
 tar -xzf "$tmp/$archive" -C "$tmp" hopsesh
 dir="${HOPSESH_INSTALL_DIR:-$HOME/.local/bin}"
 mkdir -p "$dir"
+# A link into hopsesh.app belongs to the app (it updates with it): leave it alone.
+if [ -L "$dir/hopsesh" ] && [ -z "${HOPSESH_FORCE:-}" ]; then
+  case "$(readlink "$dir/hopsesh")" in
+    *.app/Contents/*) die "$dir/hopsesh comes from the hopsesh app, which keeps it up to date; update the app instead (or rerun with HOPSESH_FORCE=1 to replace it)" ;;
+  esac
+fi
 install -m 0755 "$tmp/hopsesh" "$dir/hopsesh.new" 2>/dev/null || { cp "$tmp/hopsesh" "$dir/hopsesh.new"; chmod 0755 "$dir/hopsesh.new"; }
 mv -f "$dir/hopsesh.new" "$dir/hopsesh"
 say "Installed $("$dir/hopsesh" version) at $dir/hopsesh"
 case ":$PATH:" in
   *":$dir:"*) ;;
-  *) say "Add $dir to your PATH, e.g.:  echo 'export PATH=\"$dir:\$PATH\"' >> ~/.profile" ;;
+  *)
+    case "$(basename "${SHELL:-sh}")" in
+      zsh) profile="$HOME/.zprofile" ;;
+      bash) profile="$HOME/.bash_profile" ;;
+      *) profile="$HOME/.profile" ;;
+    esac
+    say "Add $dir to your PATH, e.g.:  echo 'export PATH=\"$dir:\$PATH\"' >> $profile   (then open a new terminal)" ;;
 esac
 say "Start with: hopsesh   (or hopsesh --help)"
