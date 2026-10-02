@@ -127,6 +127,9 @@ func statusOf(s *inventory.Session) string {
 		}
 		return "live " + st
 	}
+	if s.MovedTo != "" {
+		return "moved to " + s.MovedTo
+	}
 	return "ended"
 }
 

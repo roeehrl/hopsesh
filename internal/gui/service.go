@@ -411,6 +411,8 @@ func (a *App) Scan() (*ScanDTO, error) {
 				LastPrompt: s.LastPrompt, CWD: s.CWD, SizeKB: s.Size / 1024}
 			if s.Live != nil {
 				ed.Live, ed.Status = true, "live "+s.Live.Status
+			} else if s.MovedTo != "" {
+				ed.Status = "moved to " + s.MovedTo
 			}
 			ed.Copies = e.Copies
 			for _, c := range e.Copies {
