@@ -24,6 +24,10 @@ var (
 	ErrAuth           = errors.New("SSH login was refused (no usable key, or the key needs a passphrase not loaded in your agent)")
 	ErrUnreachable    = errors.New("the machine is unreachable")
 	ErrNoSSH          = errors.New("no ssh client found on this machine")
+	ErrWrongPassword  = errors.New("the machine did not accept the password")
+	// ErrNoPasswordPrompt: login failed without the machine ever asking for a password
+	// (password login is probably turned off there).
+	ErrNoPasswordPrompt = errors.New("the machine refused the login without asking for a password (is password login turned off there?)")
 )
 
 // TailscaleCheckError means Tailscale SSH wants the user to re-authenticate in a browser.
@@ -48,6 +52,20 @@ type Conn struct {
 	controlDir string
 	lnMu       sync.Mutex // held while probing, so parallel commands wait for the answer
 	lnChecked  map[string][]gatedTarget
+
+	// Password, when set, makes this a password-login machine: ssh asks for the password
+	// through hopsesh (see askpass.go) and one connection is kept open and reused.
+	Password   PasswordFunc
+	pwMu       sync.Mutex
+	pwAskMu    sync.Mutex
+	pwToken    string
+	pwSock     string
+	pwRelease  func()
+	askpassExe string
+	pw         string
+	pwRetry    bool
+	pwAsked    bool
+	pwErr      error
 }
 
 // NewConn prepares a connection (nothing is opened until the first command).
@@ -80,19 +98,27 @@ func (c *Conn) KnownHostsFile() string { return filepath.Join(c.StateDir, "known
 func (c *Conn) baseArgs() []string {
 	home, _ := os.UserHomeDir()
 	userKH := filepath.Join(home, ".ssh", "known_hosts")
-	args := []string{
-		"-o", "BatchMode=yes",
+	batch := []string{"-o", "BatchMode=yes"}
+	persist := "60"
+	if c.Password != nil {
+		// Ask for the password (through hopsesh), once per connection attempt, and keep the
+		// authenticated connection open longer so later commands reuse it.
+		batch = []string{"-o", "BatchMode=no", "-o", "NumberOfPasswordPrompts=1",
+			"-o", "PreferredAuthentications=publickey,keyboard-interactive,password"}
+		persist = "600"
+	}
+	args := append(batch,
 		"-o", "ConnectTimeout=10",
 		"-o", "StrictHostKeyChecking=yes",
-		"-o", "UserKnownHostsFile=" + quoteList(userKH, c.KnownHostsFile()),
+		"-o", "UserKnownHostsFile="+quoteList(userKH, c.KnownHostsFile()),
 		"-o", "ForwardAgent=no",
 		"-o", "ForwardX11=no",
 		"-o", "ClearAllForwardings=yes",
 		"-o", "ServerAliveInterval=15",
 		"-o", "LogLevel=ERROR",
-	}
+	)
 	if c.controlDir != "" {
-		args = append(args, "-o", "ControlMaster=auto", "-o", "ControlPath="+filepath.Join(c.controlDir, "%C"), "-o", "ControlPersist=60")
+		args = append(args, "-o", "ControlMaster=auto", "-o", "ControlPath="+filepath.Join(c.controlDir, "%C"), "-o", "ControlPersist="+persist)
 	}
 	if c.override != "" {
 		args = append(args, "-o", "HostName="+c.override)
@@ -116,6 +142,35 @@ func quoteList(paths ...string) string {
 // destination's host name cannot be resolved, each fallback name is tried once and the
 // first that works is kept for the rest of the connection.
 func (c *Conn) Run(ctx context.Context, remoteCmd string) ([]byte, error) {
+	out, err := c.runRouted(ctx, remoteCmd)
+	if c.Password == nil || !errors.Is(err, ErrAuth) {
+		return out, err
+	}
+	if !c.passwordAsked() {
+		return out, ErrNoPasswordPrompt
+	}
+	// A refused password: forget it and ask again (twice), then give up. Declining to
+	// answer after a refusal still means the password was wrong.
+	for tries := 0; ; tries++ {
+		if c.passwordCancelled() {
+			if tries == 0 {
+				return out, ErrPasswordCancelled
+			}
+			return out, ErrWrongPassword
+		}
+		c.forgetPassword()
+		if tries == 2 {
+			return out, ErrWrongPassword
+		}
+		out, err = c.runRouted(ctx, remoteCmd)
+		if !errors.Is(err, ErrAuth) {
+			return out, err
+		}
+	}
+}
+
+// runRouted runs a command, trying the machine's other names when its own is unreachable.
+func (c *Conn) runRouted(ctx context.Context, remoteCmd string) ([]byte, error) {
 	out, err := c.run(ctx, remoteCmd)
 	if err != nil && c.override != "" && retryable(err) {
 		c.override = "" // a remembered fallback stopped working: try the destination itself
@@ -150,17 +205,28 @@ func (c *Conn) run(ctx context.Context, remoteCmd string) ([]byte, error) {
 	// Before the command's own timeout: the person may take a while to answer the
 	// macOS local network prompt.
 	gated := c.localNetworkPreflight(ctx)
+	env, err := c.passwordEnv(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if c.Timeout > 0 {
+		timeout := c.Timeout
+		if c.Password != nil && c.cachedPassword() == "" {
+			timeout += 5 * time.Minute // the person is typing the password
+		}
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, c.Timeout)
+		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
 	args := append(c.baseArgs(), c.Dest, "--", remoteCmd)
 	cmd := exec.CommandContext(ctx, c.sshBinary, args...)
+	if env != nil {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	start := time.Now()
-	err := cmd.Run()
+	err = cmd.Run()
 	c.Log.Write(audit.Entry{Action: "ssh.exec", Host: c.Dest, Detail: map[string]any{
 		"command": firstLine(remoteCmd), "ms": time.Since(start).Milliseconds(), "ok": err == nil}})
 	if err != nil {
@@ -191,11 +257,24 @@ func (c *Conn) sftpCommand(ctx context.Context) *exec.Cmd {
 	// ssh keeps the FIRST value of a repeated option, so these go before baseArgs.
 	args := append([]string{"-o", "Compression=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none"}, c.baseArgs()...)
 	args = append(args, "-s", c.Dest, "sftp")
-	return exec.CommandContext(ctx, c.sshBinary, args...)
+	cmd := exec.CommandContext(ctx, c.sshBinary, args...)
+	if env, err := c.passwordEnv(ctx); err == nil && env != nil {
+		cmd.Env = append(os.Environ(), env...)
+	}
+	return cmd
 }
 
 // Close ends the shared control connection, if any.
 func (c *Conn) Close() {
+	defer func() {
+		c.pwMu.Lock()
+		if c.pwRelease != nil {
+			c.pwRelease()
+			c.pwRelease, c.pwToken = nil, ""
+		}
+		c.pwMu.Unlock()
+		c.forgetPassword()
+	}()
 	if c.controlDir == "" {
 		return
 	}

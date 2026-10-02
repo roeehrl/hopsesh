@@ -24,6 +24,11 @@ type Host struct {
 	// HelperSHA256 pins the helper binary hopsesh uploaded; a helper that no longer
 	// matches is not run.
 	HelperSHA256 string `toml:"helper_sha256,omitempty"`
+	// Auth is "password" for a machine that logs in with a password (asked for, never
+	// stored in this file); "" means keys or the SSH agent.
+	Auth string `toml:"auth,omitempty"`
+	// Keychain: remember this machine's password in the macOS Keychain.
+	Keychain bool `toml:"keychain,omitempty"`
 }
 
 // Config is the user's configuration file.
@@ -159,3 +164,6 @@ func (c Config) MarkMovedOn() bool { return c.MarkMoved == nil || *c.MarkMoved }
 
 // SyncCodeOn reports whether the checkout is brought to the session's commit (default on).
 func (c Config) SyncCodeOn() bool { return c.SyncCode == nil || *c.SyncCode }
+
+// UsesPassword reports whether the machine logs in with a password.
+func (h Host) UsesPassword() bool { return h.Auth == "password" }

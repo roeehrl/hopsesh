@@ -42,6 +42,7 @@ Unofficial; not affiliated with or endorsed by Anthropic.`,
 			return a.runTUI()
 		},
 	}
+	root.PersistentFlags().Bool("password-stdin", false, "for machines that log in with a password: read it from standard input (for scripts)")
 	root.SetOut(out)
 	root.SetErr(out)
 	root.AddCommand(

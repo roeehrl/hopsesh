@@ -121,7 +121,8 @@ func (m *Machine) gitFetchFunc() func(string) *repos.FetchSource {
 	}
 	conn, name := m.conn, m.Name
 	return func(dir string) *repos.FetchSource {
-		return &repos.FetchSource{Name: name, URL: conn.GitURL(dir), Env: []string{"GIT_SSH_COMMAND=" + conn.GitSSHCommand()}}
+		env := append([]string{"GIT_SSH_COMMAND=" + conn.GitSSHCommand()}, conn.GitSSHEnv(context.Background())...)
+		return &repos.FetchSource{Name: name, URL: conn.GitURL(dir), Env: env}
 	}
 }
 

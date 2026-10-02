@@ -30,6 +30,7 @@ body { display: flex; flex-direction: column; }
 main { flex: 1; min-height: 0; display: flex; }
 .mono { font-family: var(--mono); }
 .muted { color: var(--muted); }
+[hidden] { display: none !important; }
 .visually-hidden { position: absolute; left: -9999px; }
 /* sessions view */
 .sidebar { width: 248px; flex-shrink: 0; padding: 16px 12px; border-right: 1px solid var(--line); background: var(--side); display: flex; flex-direction: column; gap: 4px; overflow: auto; }
@@ -84,7 +85,7 @@ select, .field { height: 30px; border: 1px solid var(--line); border-radius: 6px
 .mrow.h { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; padding: 10px 16px; }
 dialog { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); padding: 0; width: 520px; }
 dialog::backdrop { background: rgba(0,0,0,.35); }
-#dlg-body { padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+#dlg-body, #pwdlg-body { padding: 20px; display: flex; flex-direction: column; gap: 12px; }
 #toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 12px; opacity: 0; transition: opacity .2s; pointer-events: none; }
 #toast.show { opacity: 1; }
 .banner { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; }

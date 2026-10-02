@@ -28,6 +28,8 @@ type app struct {
 	jsonOut bool
 	yes     bool
 	in      io.Reader
+	pw      *passwords
+	pwStdin bool
 }
 
 func newApp(cmd *cobra.Command) (*app, error) {
@@ -39,6 +41,7 @@ func newApp(cmd *cobra.Command) (*app, error) {
 	a := &app{out: cmd.OutOrStdout(), cfg: cfg, log: log, in: cmd.InOrStdin()}
 	a.jsonOut, _ = cmd.Flags().GetBool("json")
 	a.yes, _ = cmd.Flags().GetBool("yes")
+	a.pwStdin, _ = cmd.Flags().GetBool("password-stdin")
 	return a, nil
 }
 
@@ -71,7 +74,7 @@ func (a *app) confirm(q string) bool {
 }
 
 func (a *app) scanner() *inventory.Scanner {
-	return &inventory.Scanner{StateDir: config.StateDir(), Log: a.log}
+	return &inventory.Scanner{StateDir: config.StateDir(), Log: a.log, Passwords: a.passwordFor}
 }
 
 func (a *app) localRoots() []string {

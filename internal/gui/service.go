@@ -24,6 +24,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/lnp"
 	"github.com/roeehrl/hopsesh/internal/core/moved"
 	"github.com/roeehrl/hopsesh/internal/core/repos"
+	"github.com/roeehrl/hopsesh/internal/core/secrets"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
 	"github.com/roeehrl/hopsesh/internal/engine"
 	"github.com/roeehrl/hopsesh/internal/integrate"
@@ -40,6 +41,8 @@ type App struct {
 	machines []*inventory.Machine
 	plan     *engine.Plan
 	planSrc  engine.Source
+	pw       *pwBroker
+	pwOnce   sync.Once
 	App      *application.App `json:"-"`
 }
 
@@ -63,6 +66,9 @@ type HostDTO struct {
 	OtherOwner  bool     `json:"otherOwner"`
 	Owner       string   `json:"owner"`
 	Allowed     bool     `json:"allowed"`
+	Auth        string   `json:"auth"`     // "key" or "password"
+	Keychain    bool     `json:"keychain"` // the password is remembered
+	CanRemember bool     `json:"canRemember"`
 }
 
 // Info is static information for the window.
@@ -208,8 +214,12 @@ func (a *App) Discover() []HostDTO {
 			continue
 		}
 		d := HostDTO{Name: c.Name, Destination: c.Destination, Via: c.Via, OS: c.OS, Online: c.Online, OtherOwner: c.OtherOwner, Owner: c.Owner}
+		d.Auth, d.CanRemember = "key", secrets.Available()
 		if h := a.cfg.FindHost(c.Name); h != nil {
 			d.Allowed = h.Allowed
+			if h.UsesPassword() {
+				d.Auth, d.Keychain = "password", h.Keychain
+			}
 			if h.TailscaleName == "" && c.DNSName != "" {
 				h.TailscaleName = c.DNSName
 			}
@@ -219,7 +229,11 @@ func (a *App) Discover() []HostDTO {
 	}
 	for _, h := range a.cfg.Hosts {
 		if !seen[h.Name] {
-			out = append(out, HostDTO{Name: h.Name, Destination: h.Destination, Via: []string{h.Via}, OS: h.OS, Allowed: h.Allowed})
+			d := HostDTO{Name: h.Name, Destination: h.Destination, Via: []string{h.Via}, OS: h.OS, Allowed: h.Allowed, Auth: "key", CanRemember: secrets.Available()}
+			if h.UsesPassword() {
+				d.Auth, d.Keychain = "password", h.Keychain
+			}
+			out = append(out, d)
 		}
 	}
 	return out
@@ -238,11 +252,16 @@ func (a *App) SetAllowed(name, destination string, allowed bool) error {
 	return config.Save(a.cfg)
 }
 
-// AddHost adds and allows a machine by ssh destination.
-func (a *App) AddHost(name, destination string) error {
+// AddHost adds and allows a machine by ssh destination. password: it logs in with a
+// password (asked for when hopsesh connects; remember keeps it in the Keychain).
+func (a *App) AddHost(name, destination string, password, remember bool) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.cfg.UpsertHost(config.Host{Name: name, Destination: destination, Via: "manual", Allowed: true})
+	h := config.Host{Name: name, Destination: destination, Via: "manual", Allowed: true}
+	if password {
+		h.Auth, h.Keychain = "password", remember && secrets.Available()
+	}
+	a.cfg.UpsertHost(h)
 	return config.Save(a.cfg)
 }
 
@@ -386,7 +405,7 @@ func (a *App) Scan() (*ScanDTO, error) {
 	a.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	sc := &inventory.Scanner{StateDir: config.StateDir(), Log: a.log}
+	sc := &inventory.Scanner{StateDir: config.StateDir(), Log: a.log, Passwords: a.passwordFor}
 	ms := sc.Scan(ctx, cfg.Hosts, true)
 	home, _ := os.UserHomeDir()
 	roots := append([]string{cfg.ReposDir}, repos.DefaultRoots(home)...)

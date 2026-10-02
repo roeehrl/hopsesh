@@ -11,8 +11,9 @@ import (
 )
 
 func (a *app) runTUI() error {
+	a.askPasswordsFirst()
 	exit, err := tui.Run(tui.Deps{
-		Config: a.cfg, StateDir: config.StateDir(), Log: a.log, Roots: a.localRoots(),
+		Config: a.cfg, StateDir: config.StateDir(), Log: a.log, Roots: a.localRoots(), Passwords: a.passwordFor,
 		Describe: func(s *inventory.Session) string { return branchInfo(s.Git) },
 	})
 	if err != nil || exit == nil {

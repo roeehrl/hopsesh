@@ -14,6 +14,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/hosts"
 	"github.com/roeehrl/hopsesh/internal/core/lnp"
+	"github.com/roeehrl/hopsesh/internal/core/secrets"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
 	"github.com/roeehrl/hopsesh/internal/integrate"
 	"github.com/roeehrl/hopsesh/internal/inventory"
@@ -36,8 +37,9 @@ merged with the ones you configured. Only machines you allow are ever contacted.
 			cands, _ := hosts.Discover(ctx)
 			type row struct {
 				hosts.Candidate
-				Allowed    bool `json:"allowed"`
-				Configured bool `json:"configured"`
+				Allowed    bool   `json:"allowed"`
+				Configured bool   `json:"configured"`
+				Auth       string `json:"auth,omitempty"`
 			}
 			var rows []row
 			seen := map[string]bool{}
@@ -47,21 +49,21 @@ merged with the ones you configured. Only machines you allow are ever contacted.
 				}
 				r := row{Candidate: c}
 				if h := a.cfg.FindHost(c.Name); h != nil {
-					r.Allowed, r.Configured = h.Allowed, true
+					r.Allowed, r.Configured, r.Auth = h.Allowed, true, authLabel(*h)
 				}
 				seen[c.Name] = true
 				rows = append(rows, r)
 			}
 			for _, h := range a.cfg.Hosts {
 				if !seen[h.Name] {
-					rows = append(rows, row{Candidate: hosts.Candidate{Name: h.Name, Destination: h.Destination, Via: []string{h.Via}, OS: h.OS}, Allowed: h.Allowed, Configured: true})
+					rows = append(rows, row{Candidate: hosts.Candidate{Name: h.Name, Destination: h.Destination, Via: []string{h.Via}, OS: h.OS}, Allowed: h.Allowed, Configured: true, Auth: authLabel(h)})
 				}
 			}
 			if a.jsonOut {
 				return a.emitJSON(rows)
 			}
 			tw := tabwriter.NewWriter(a.out, 0, 2, 2, ' ', 0)
-			fmt.Fprintln(tw, "ALLOWED\tMACHINE\tSSH DESTINATION\tFOUND VIA\tOS\tTAILSCALE")
+			fmt.Fprintln(tw, "ALLOWED\tMACHINE\tSSH DESTINATION\tLOGIN\tFOUND VIA\tOS\tTAILSCALE")
 			for _, r := range rows {
 				allowed := "no"
 				if r.Allowed {
@@ -74,7 +76,7 @@ merged with the ones you configured. Only machines you allow are ever contacted.
 						ts += " (shared: " + r.Owner + ")"
 					}
 				}
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", allowed, r.Name, r.Destination, strings.Join(r.Via, "+"), r.OS, ts)
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", allowed, r.Name, r.Destination, nonEmpty(r.Auth, "key"), strings.Join(r.Via, "+"), r.OS, ts)
 			}
 			tw.Flush()
 			a.printf("\nAllow machines with: hopsesh hosts allow <machine>...   (add others: hopsesh hosts add <name> <ssh-destination>)\n")
@@ -82,7 +84,7 @@ merged with the ones you configured. Only machines you allow are ever contacted.
 		},
 	}
 	cmd.Flags().Bool("json", false, "output JSON")
-	cmd.AddCommand(hostsAllowCmd(true), hostsAllowCmd(false), hostsAddCmd(), hostsHelperCmd())
+	cmd.AddCommand(hostsAllowCmd(true), hostsAllowCmd(false), hostsAddCmd(), hostsAuthCmd(), hostsSetupKeyCmd(), hostsHelperCmd())
 	return cmd
 }
 
@@ -134,20 +136,48 @@ func hostsAllowCmd(allow bool) *cobra.Command {
 }
 
 func hostsAddCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "add <name> <ssh-destination>",
 		Short: "Add and allow a machine by its ssh destination (alias, user@host or host)",
-		Args:  cobra.ExactArgs(2),
+		Long: `Adds and allows a machine. The destination is anything ssh accepts: an alias from
+~/.ssh/config, user@host, or a host name or address.
+
+For a machine that logs in with a password rather than a key, add --password. hopsesh
+asks for it when it connects and, on macOS, remembers it in the Keychain (--keychain=false
+to be asked every time). hopsesh hosts setup-key <name> later switches it to key login.`,
+		Example: `  hopsesh hosts add studio me@studio.local
+  hopsesh hosts add nas admin@192.168.1.20 --password`,
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a, err := newApp(cmd)
 			if err != nil {
 				return err
 			}
-			a.cfg.UpsertHost(config.Host{Name: args[0], Destination: args[1], Via: "manual", Allowed: true})
-			a.printf("%s → %s: added and allowed\n", args[0], args[1])
-			return config.Save(a.cfg)
+			h := config.Host{Name: args[0], Destination: args[1], Via: "manual", Allowed: true}
+			if pw, _ := cmd.Flags().GetBool("password"); pw {
+				h.Auth = "password"
+				h.Keychain = secrets.Available()
+				if cmd.Flags().Changed("keychain") {
+					h.Keychain, _ = cmd.Flags().GetBool("keychain")
+				}
+				if h.Keychain && !secrets.Available() {
+					return secrets.ErrUnavailable
+				}
+			}
+			a.cfg.UpsertHost(h)
+			if err := config.Save(a.cfg); err != nil {
+				return err
+			}
+			a.printf("%s → %s: added and allowed (login: %s)\n", args[0], args[1], authLabel(h))
+			if h.UsesPassword() {
+				a.checkLogin(a.cfg.FindHost(h.Name))
+			}
+			return nil
 		},
 	}
+	cmd.Flags().Bool("password", false, "the machine logs in with a password (asked for when hopsesh connects)")
+	cmd.Flags().Bool("keychain", false, "remember the password in the macOS Keychain (the default on macOS)")
+	return cmd
 }
 
 func trustCmd() *cobra.Command {
