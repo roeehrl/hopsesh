@@ -6,6 +6,44 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+hopsesh now works with more than one coding agent: Claude Code and Codex, each a module
+behind a small SDK. The configuration format changed; an older file is refused and set
+aside (the app offers this), and machines are added again.
+
+### Added
+- Codex sessions: listing, live state, moving between machines (paths rewritten,
+  encrypted content untouched), marks in Codex's own list, and Codex lists what hopsesh
+  installs right away.
+- Continuing a session in another agent, on another machine or the same one:
+  `pull --in codex` / `--in claude`. The conversation arrives as text history (oldest steps
+  summarised when long) or only a briefing (`--fidelity note`), with exact shell calls
+  replayed natively where the target can (`--native`), or through Codex's own importer
+  (`--via import`). Every plan shows a loss report and the briefing the other agent gets;
+  `--note-file` adds a handoff note and `--carry-rules` your instructions for every project.
+- Round trips across agents: going back adds only the new work to the original session,
+  whose earlier turns (and their signed reasoning) stay byte for byte. Continuing on
+  another machine also keeps the source agent's own copy there for that purpose.
+- Lineage beside each session (`<session>.hopsesh.json`) that travels with it, so any
+  machine knows a session's copies and hops.
+- `hopsesh push <session> <machine>` sends a session to another machine's hopsesh, which
+  receives it only after `hopsesh receive on` there; one `undo` reverses both sides.
+- `hopsesh agents` lists the supported agents and what each can do; `ls --agent` filters.
+- The skill is written to every installed agent (Claude Code and Codex) as identical
+  files, with per-copy drift detection and approval rules for each agent.
+- The app shows every agent's sessions, offers "Continue in…", previews the conversion,
+  and has per-agent settings and a switch for receiving sessions.
+- `HOPSESH_MACHINE` sets the name this machine has in marks and lineage.
+
+### Changed
+- `--desktop` is now `--app` (open in the agent's desktop app, where it has one).
+- Undoing an append removes only hopsesh's own bytes, so lines an agent wrote afterwards
+  stay.
+
+### Removed
+- The optional remote helper (`hosts helper`, `hopsesh agent`) and `hopsesh import`.
+- The `live_policy` and top-level `remote_control` settings (remote control is now per
+  agent).
+
 ## [0.2.0] - 2026-10-02
 
 ### Added
