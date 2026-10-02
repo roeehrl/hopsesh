@@ -1,16 +1,21 @@
 name: release
 
+# A v* tag builds the Linux and Windows files, attests them and creates a DRAFT release.
+# No signing key or Apple credential is used here: the maintainer completes the draft on
+# their Mac with scripts/release-sign.sh (macOS files, checksums.txt and its signature),
+# then publishes it. See docs/RELEASING.md.
+
 on:
   push:
     tags: ["v*"]
 
 permissions:
   contents: write     # create the draft release
-  id-token: write     # Sigstore keyless signing and build provenance
+  id-token: write     # build provenance
   attestations: write
 
 jobs:
-  cli:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,16 +24,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - uses: sigstore/cosign-installer@v3
       - uses: anchore/sbom-action/download-syft@v0
-      - name: release key
-        env:
-          KEY: ${{ secrets.HOPSESH_RELEASE_KEY }}
-        run: |
-          test -n "$KEY" || { echo "::error::HOPSESH_RELEASE_KEY secret is missing"; exit 1; }
-          umask 077
-          printf '%s\n' "$KEY" > "$RUNNER_TEMP/release-key.pem"
-          echo "HOPSESH_RELEASE_KEY_FILE=$RUNNER_TEMP/release-key.pem" >> "$GITHUB_ENV"
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
@@ -37,59 +33,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOPSESH_RELEASE_PUBKEY: ${{ vars.HOPSESH_RELEASE_PUBKEY }}
           TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
-          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
-          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
-          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
-          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
-          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+      # Provenance for every file this job built; scripts/release-sign.sh checks it with
+      # `gh attestation verify` before it signs checksums.txt.
       - uses: actions/attest-build-provenance@v2
         with:
-          subject-checksums: dist/checksums.txt
-      - if: always()
-        run: rm -f "$RUNNER_TEMP/release-key.pem"
-
-  macos-app:
-    needs: cli
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - name: signing keychain
-        env:
-          P12: ${{ secrets.MACOS_SIGN_P12 }}
-          P12_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
-        run: |
-          test -n "$P12" || { echo "::error::MACOS_SIGN_P12 secret is missing"; exit 1; }
-          KC="$RUNNER_TEMP/sign.keychain-db"; KCPW=$(uuidgen)
-          security create-keychain -p "$KCPW" "$KC"
-          security set-keychain-settings -lut 3600 "$KC"
-          security unlock-keychain -p "$KCPW" "$KC"
-          echo "$P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
-          security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$P12_PASSWORD" -T /usr/bin/codesign
-          rm -f "$RUNNER_TEMP/cert.p12"
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$KCPW" "$KC" >/dev/null
-          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
-          ID=$(security find-identity -v -p codesigning "$KC" | awk -F'"' '/Developer ID Application/{print $2; exit}')
-          echo "SIGN_IDENTITY=$ID" >> "$GITHUB_ENV"
-      - name: notary profile
-        env:
-          KEY: ${{ secrets.MACOS_NOTARY_KEY }}
-          KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
-          ISSUER: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
-        run: |
-          printf '%s' "$KEY" | base64 --decode > "$RUNNER_TEMP/notary.p8"
-          xcrun notarytool store-credentials hopsesh-ci --key "$RUNNER_TEMP/notary.p8" --key-id "$KEY_ID" --issuer "$ISSUER"
-          rm -f "$RUNNER_TEMP/notary.p8"
-          echo "NOTARY_PROFILE=hopsesh-ci" >> "$GITHUB_ENV"
-      - name: build, sign, notarize
-        env:
-          HOPSESH_RELEASE_PUBKEY: ${{ vars.HOPSESH_RELEASE_PUBKEY }}
-        run: VERSION="${GITHUB_REF_NAME#v}" scripts/build-macos-app.sh
-      - name: attach to the draft release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$GITHUB_REF_NAME" dist/macos/*.dmg --clobber
-      - if: always()
-        run: security delete-keychain "$RUNNER_TEMP/sign.keychain-db" || true
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.deb
+            dist/*.rpm
+            dist/*.apk

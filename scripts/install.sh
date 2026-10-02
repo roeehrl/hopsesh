@@ -12,8 +12,8 @@ REPO="roeehrl/hopsesh"
 # Public half of the key that signs checksums.txt (packaging/release-key.pub,
 # docs/RELEASING.md).
 RELEASE_PUBKEY="-----BEGIN PUBLIC KEY-----
-MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE/cHb0Z43BAAuPwXo1FIGBwLQkG2t
-/3e67djVXaZOLdam5L6sitdRDkXD+rm8EE9HtzBl9TuWmCluZoMEB2cxdw==
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEv/ATZNvxb7prYETkiikx+XrVirJJ
+rDHoF6azgJ5jvnMcjc6nMWhY25liChLfhNbvP0GTOftoE6OfFuH3claq/g==
 -----END PUBLIC KEY-----"
 
 say() { printf '%s\n' "$*" >&2; }

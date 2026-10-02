@@ -9,7 +9,7 @@
 $ErrorActionPreference = 'Stop'
 $Repo = 'roeehrl/hopsesh'
 # Public half of the key that signs checksums.txt (docs/RELEASING.md), base64 DER.
-$ReleasePubKey = 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE/cHb0Z43BAAuPwXo1FIGBwLQkG2t/3e67djVXaZOLdam5L6sitdRDkXD+rm8EE9HtzBl9TuWmCluZoMEB2cxdw=='
+$ReleasePubKey = 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEv/ATZNvxb7prYETkiikx+XrVirJJrDHoF6azgJ5jvnMcjc6nMWhY25liChLfhNbvP0GTOftoE6OfFuH3claq/g=='
 
 function Fail($msg) { Write-Error "hopsesh install: $msg"; exit 1 }
 
