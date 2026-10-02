@@ -353,7 +353,7 @@ async function preflight(e, target, keepOpts = false) {
   const dflt = state.info?.defaults || { markMoved: true, syncCode: true, pushSource: false };
   if (!keepOpts) state.opts = { worktree: "auto", remoteControl: false, notify: false, fork: false, redact: false, clone: false, targetDir: "",
     mark: dflt.markMoved, syncCode: dflt.syncCode, push: dflt.pushSource, stopLocal: false, app: false, conflict: "",
-    fidelity: "history", native: false, note: "", go: false };
+    fidelity: "history", native: false, note: "", go: false, carryRules: false };
   setTitlebar("plan");
   loading("Working out the plan…");
   try { state.plan = await api("Plan", e.machine, e.key, target, state.opts); } catch (err) { planError(err); return; }
@@ -490,6 +490,8 @@ function continueCard(p, o, replan) {
           h("option", { value: "note", selected: o.fidelity === "note" }, "Only a briefing"))),
       p.can.native ? h("label", { class: "opt" }, h("input", { type: "checkbox", checked: o.native, onchange: (ev) => { o.native = ev.target.checked; replan(); } }),
         h("span", {}, h("b", {}, `Replay shell commands as ${p.agent}'s own (experimental)`), h("span", { class: "muted" }, "Exact commands and outputs instead of text; the rest stays text."))) : null,
+      h("label", { class: "opt" }, h("input", { type: "checkbox", checked: o.carryRules, onchange: (ev) => { o.carryRules = ev.target.checked; replan(); } }),
+        h("span", {}, h("b", {}, `Bring your ${c.from} instructions along`), h("span", { class: "muted" }, `Your instructions for every ${c.from} project go into the briefing; you can read them under “What ${p.agent} is told”.`))),
       h("label", { class: "opt" }, h("input", { type: "checkbox", checked: o.go, onchange: (ev) => { o.go = ev.target.checked; replan(); } }),
         h("span", {}, h("b", {}, "Start working right away"), h("span", { class: "muted" }, `${p.agent} starts with “Continue.” instead of waiting for you.`))),
       note, briefing));

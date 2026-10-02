@@ -99,7 +99,9 @@ type Options struct {
 	Fidelity convert.Fidelity // history (default) or note
 	Native   bool             // render exact tool calls as the target's own (when it can)
 	Note     string           // a handoff note the source agent wrote
-	Go       bool             // start the continued session with "Continue."
+	// CarryRules adds the user's global instructions for the source agent to the briefing.
+	CarryRules bool
+	Go         bool // start the continued session with "Continue."
 }
 
 // Conflict choices when the copy here changed too.

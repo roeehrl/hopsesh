@@ -57,13 +57,14 @@ func (*Module) Spec() agent.Spec {
 			},
 			VersionArgs: []string{"--version"},
 		}},
-		Roots:        []agent.Root{{Name: home, Env: []string{"CLAUDE_CONFIG_DIR"}, Default: map[string]string{"*": "~/.claude"}}},
-		LoginEnv:     []string{"CLAUDE_CONFIG_DIR"},
-		Secrets:      []string{"{home}/.credentials.json", "{home}/sessions/*.key"},
-		Worktrees:    []string{worktreesDir},
-		Instructions: []string{"CLAUDE.md", "AGENTS.md"},
-		Tools:        "Bash, Read, Edit, Write, Grep, Glob, TodoWrite",
-		Features:     []agent.Capability{agent.CapFork, agent.CapRemoteControl, agent.CapApp},
+		Roots:              []agent.Root{{Name: home, Env: []string{"CLAUDE_CONFIG_DIR"}, Default: map[string]string{"*": "~/.claude"}}},
+		LoginEnv:           []string{"CLAUDE_CONFIG_DIR"},
+		Secrets:            []string{"{home}/.credentials.json", "{home}/sessions/*.key"},
+		Worktrees:          []string{worktreesDir},
+		Instructions:       []string{"CLAUDE.md", "AGENTS.md"},
+		GlobalInstructions: []string{"{home}/CLAUDE.md"},
+		Tools:              "Bash, Read, Edit, Write, Grep, Glob, TodoWrite",
+		Features:           []agent.Capability{agent.CapFork, agent.CapRemoteControl, agent.CapApp},
 	}
 }
 

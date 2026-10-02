@@ -23,6 +23,7 @@ func addPullFlags(cmd *cobra.Command) {
 	f.Bool("native", false, "for another agent that can: replay exact tool calls as its own (experimental)")
 	f.String("note-file", "", "a handoff note for the other agent's briefing")
 	f.Bool("go", false, "start the continued session with \"Continue.\"")
+	f.Bool("carry-rules", false, "for another agent: add your instructions for every project of the session's agent to the briefing")
 	f.String("to", "", "continue in this local directory instead of matching the repository")
 	f.Bool("clone", false, "clone the repository if it is not on this machine")
 	f.String("repos", "", "folder for clones (default from config, ~/git)")
@@ -66,6 +67,7 @@ func (r *run) pullOptions(cmd *cobra.Command) (move.Options, error) {
 	o.App, _ = f.GetBool("app")
 	o.Native, _ = f.GetBool("native")
 	o.Go, _ = f.GetBool("go")
+	o.CarryRules, _ = f.GetBool("carry-rules")
 	if v, _ := f.GetBool("no-mark"); v {
 		o.Mark = false
 	}

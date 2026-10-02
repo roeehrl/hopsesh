@@ -106,6 +106,7 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 			FromVersion: s.AgentVersion, SourceID: string(s.Key.Session), SourceLoc: src.Machine.Name, TargetLoc: tgt.Machine.Name,
 			When: time.Now(), Branch: p.Repo.SourceBranch, Head: short(p.Repo.SourceHead), Dirty: p.Repo.Dirty,
 			Missing: instructionGaps(src.Module.Spec(), spec, cwd), ToolNames: spec.Tools, Note: opt.Note,
+			Rules: globalRules(p, srcHost, src, spec.Name, opt.CarryRules),
 		},
 	})
 	cp.items, cp.Report = r.Items, r.Report
@@ -255,6 +256,33 @@ func continueMappings(p *Plan, src, tgt Side) []agent.Mapping {
 		}
 	}
 	return ms
+}
+
+// maxRules bounds each carried instruction file.
+const maxRules = 8000
+
+// globalRules reads the user's instructions for every project of the source agent: carried
+// into the briefing when asked, otherwise reported.
+func globalRules(p *Plan, h agent.Host, src Side, to string, carry bool) []convert.Rules {
+	spec := src.Module.Spec()
+	var out []convert.Rules
+	for _, g := range spec.GlobalInstructions {
+		path := agent.Expand(g, h.Facts().Home, src.Install.Roots, h.Path())
+		b, err := h.FS().ReadFile(path, 1<<20)
+		text := strings.TrimSpace(string(b))
+		if err != nil || text == "" {
+			continue
+		}
+		if !carry {
+			p.Warnings = append(p.Warnings, fmt.Sprintf("your instructions for every %s project (%s) do not carry over to %s; --carry-rules adds them to the briefing", spec.Name, path, to))
+			continue
+		}
+		if len(text) > maxRules {
+			text = strings.ToValidUTF8(text[:maxRules], "") + "\n[shortened]"
+		}
+		out = append(out, convert.Rules{File: path, Text: text})
+	}
+	return out
 }
 
 // instructionGaps reports instruction files the source agent read that the target does

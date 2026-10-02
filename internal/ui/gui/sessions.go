@@ -210,10 +210,11 @@ type OptsDTO struct {
 	Conflict      string `json:"conflict"` // "", "replace" or "keep-both"
 	App           bool   `json:"app"`
 	// Continuing in another agent.
-	Fidelity string `json:"fidelity"` // history | note
-	Native   bool   `json:"native"`
-	Note     string `json:"note"`
-	Go       bool   `json:"go"`
+	Fidelity   string `json:"fidelity"` // history | note
+	Native     bool   `json:"native"`
+	Note       string `json:"note"`
+	Go         bool   `json:"go"`
+	CarryRules bool   `json:"carryRules"`
 }
 
 func (o OptsDTO) options(d move.Options) move.Options {
@@ -224,6 +225,7 @@ func (o OptsDTO) options(d move.Options) move.Options {
 	d.Fork, d.RemoteControl, d.Notify, d.Redact, d.App = o.Fork, o.RemoteControl, o.Notify, o.Redact, o.App
 	d.Mark, d.SyncCode, d.Push, d.StopLocal, d.Conflict = o.Mark, o.SyncCode, o.Push, o.StopLocal, o.Conflict
 	d.Fidelity, d.Native, d.Note, d.Go = convert.Fidelity(nonEmpty(o.Fidelity, string(convert.History))), o.Native, strings.TrimSpace(o.Note), o.Go
+	d.CarryRules = o.CarryRules
 	return d
 }
 

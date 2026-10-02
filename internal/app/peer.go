@@ -101,7 +101,7 @@ func (a *App) receiveOptions(o move.Options) move.Options {
 	d.TargetDir, d.Clone, d.Worktree = o.TargetDir, o.Clone, o.Worktree
 	d.Fork, d.RemoteControl, d.Notify, d.Redact = o.Fork, o.RemoteControl, o.Notify, o.Redact
 	d.Mark, d.SyncCode, d.StopLocal, d.Conflict = o.Mark, o.SyncCode, o.StopLocal, o.Conflict
-	d.Fidelity, d.Native, d.Note, d.Go = o.Fidelity, o.Native, o.Note, o.Go
+	d.Fidelity, d.Native, d.Note, d.Go, d.CarryRules = o.Fidelity, o.Native, o.Note, o.Go, o.CarryRules
 	return d // never Push: the sender pushed before sending, if asked to
 }
 
@@ -339,6 +339,13 @@ func (a *App) packageOf(ctx context.Context, here *Machine, e Entry) (peer.Packa
 			return peer.Package{}, err
 		}
 		pkg.Files = append(pkg.Files, host.SnapshotFile{Path: p, Data: data, Mode: fi.Mode().Perm(), ModTime: fi.ModTime()})
+	}
+	// The user's instructions for every project, for --carry-rules there.
+	for _, g := range mod.Spec().GlobalInstructions {
+		p := agent.Expand(g, h.Facts().Home, in.Roots, h.Path())
+		if data, err := h.FS().ReadFile(p, 1<<20); err == nil {
+			pkg.Files = append(pkg.Files, host.SnapshotFile{Path: p, Data: data, Mode: 0o600})
+		}
 	}
 	return pkg, nil
 }

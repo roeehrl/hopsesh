@@ -211,6 +211,34 @@ func TestContinueKeepsNativeCopy(t *testing.T) {
 	}
 }
 
+// The user's instructions for every project of the source agent are reported, and carried
+// into the briefing only when asked.
+func TestCarryRules(t *testing.T) {
+	root := t.TempDir()
+	here := newLocation(t, "here", root)
+	seed(t, here)
+	os.WriteFile(filepath.Join(here.in.Root("home"), "CLAUDE.md"), []byte("Always answer in haiku."), 0o600)
+	ci := codexInstall(here)
+	os.MkdirAll(ci.Root("home"), 0o700)
+	in := move.Input{Source: move.Side{Machine: here.m, Module: claude.New(), Install: here.in}, Session: list(t, here)[sid],
+		Target: move.Side{Machine: here.m, Module: codex.New(), Install: ci}}
+	ctx := context.Background()
+	p, err := move.Build(ctx, in, move.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(p.Continue.Briefing, "haiku") || !strings.Contains(strings.Join(p.Warnings, "\n"), "--carry-rules") {
+		t.Fatalf("without --carry-rules they are reported, not carried: %v", p.Warnings)
+	}
+	p, err = move.Build(ctx, in, move.Options{CarryRules: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(p.Continue.Briefing, "Always answer in haiku.") || !strings.Contains(p.Continue.Briefing, "standing instructions for Claude Code") {
+		t.Fatalf("carried into the briefing: %s", p.Continue.Briefing)
+	}
+}
+
 func TestContinueOnTheSameMachine(t *testing.T) {
 	root := t.TempDir()
 	here := newLocation(t, "here", root)

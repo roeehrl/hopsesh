@@ -83,6 +83,13 @@ type Briefing struct {
 	Missing     []string // differences in instructions, skills, MCP servers
 	ToolNames   string   // the target's own tool names, to use instead of the history's
 	Note        string   // a handoff note the source agent wrote, if any
+	Rules       []Rules  // the user's instructions for every project, carried when asked
+}
+
+// Rules are the text of one global instruction file.
+type Rules struct {
+	File string
+	Text string
 }
 
 // Render turns nodes into items for the target writer.
@@ -344,6 +351,9 @@ func briefing(r Request, rep *Report) string {
 	}
 	for _, m := range bf.Missing {
 		b.WriteString("Note: " + m + "\n")
+	}
+	for _, rl := range bf.Rules {
+		fmt.Fprintf(&b, "The user's standing instructions for %s (%s), carried over at their request:\n%s\n", r.From, rl.File, rl.Text)
 	}
 	if bf.Note != "" {
 		fmt.Fprintf(&b, "%s's handoff note:\n%s\n", r.From, bf.Note)

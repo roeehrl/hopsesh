@@ -74,6 +74,9 @@ type Spec struct {
 	// preference ("CLAUDE.md", "AGENTS.md"). A session continued in another agent is told
 	// about files only the other agent read.
 	Instructions []string
+	// GlobalInstructions are the user's instructions for every project, root-relative
+	// ("{home}/CLAUDE.md"). A continued session reports them, and carries them when asked.
+	GlobalInstructions []string
 	// Tools names the agent's own tools for people and for a continued session's briefing
 	// ("shell, apply_patch, update_plan").
 	Tools string

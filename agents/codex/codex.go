@@ -54,12 +54,13 @@ func (*Module) Spec() agent.Spec {
 			},
 			VersionArgs: []string{"--version"},
 		}},
-		Roots:        []agent.Root{{Name: home, Env: []string{"CODEX_HOME"}, Default: map[string]string{"*": "~/.codex"}}},
-		LoginEnv:     []string{"CODEX_HOME"},
-		Secrets:      []string{"{home}/auth.json"},
-		Instructions: []string{"AGENTS.md"},
-		Tools:        "shell, apply_patch, update_plan",
-		Features:     []agent.Capability{agent.CapFork},
+		Roots:              []agent.Root{{Name: home, Env: []string{"CODEX_HOME"}, Default: map[string]string{"*": "~/.codex"}}},
+		LoginEnv:           []string{"CODEX_HOME"},
+		Secrets:            []string{"{home}/auth.json"},
+		Instructions:       []string{"AGENTS.md"},
+		GlobalInstructions: []string{"{home}/AGENTS.override.md", "{home}/AGENTS.md"},
+		Tools:              "shell, apply_patch, update_plan",
+		Features:           []agent.Capability{agent.CapFork},
 	}
 }
 
