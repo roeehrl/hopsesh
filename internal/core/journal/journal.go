@@ -121,6 +121,12 @@ func (j *Journal) AddRemote(machine, id string) error {
 	return j.saveLocked()
 }
 
+// Adopt records a file another program just created for this operation (an agent's own
+// importer), so undo removes it.
+func (j *Journal) Adopt(machine, p string) error {
+	return j.record(Entry{Op: OpCreate, Machine: machine, Path: p})
+}
+
 // Forget drops the entries for a machine whose own hopsesh journals those writes (the
 // sender of a push replays and journals them there).
 func (j *Journal) Forget(machine string) error {

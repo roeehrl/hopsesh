@@ -101,8 +101,14 @@ type Options struct {
 	Note     string           // a handoff note the source agent wrote
 	// CarryRules adds the user's global instructions for the source agent to the briefing.
 	CarryRules bool
-	Go         bool // start the continued session with "Continue."
+	// Via is how another agent gets the session: "" (hopsesh converts it) or ViaImport (the
+	// target agent's own importer converts it; hopsesh adds its briefing).
+	Via string
+	Go  bool // start the continued session with "Continue."
 }
+
+// ViaImport has the target agent's own importer convert the session.
+const ViaImport = "import"
 
 // Conflict choices when the copy here changed too.
 const (
@@ -155,9 +161,10 @@ type Plan struct {
 	Continue       *ContinuePlan `json:"continue,omitempty"`
 	NativeCopy     *NativeCopy   `json:"nativeCopy,omitempty"`
 
-	bundle   agent.Bundle
-	native   *Plan // the move that keeps NativeCopy
-	nativeIn Input
+	bundle     agent.Bundle
+	native     *Plan // the move that keeps NativeCopy
+	nativeIn   Input
+	resumeOpts agent.ResumeOptions
 }
 
 // Endpoint describes one end for people and JSON.

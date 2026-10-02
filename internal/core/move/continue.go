@@ -36,6 +36,7 @@ type ContinuePlan struct {
 	AppendTo *agent.Summary   `json:"appendTo,omitempty"`
 	Report   convert.Report   `json:"report"`
 	Briefing string           `json:"briefing"`
+	Via      string           `json:"via,omitempty"` // ViaImport: the target agent's importer converts it
 
 	items  []ir.Item
 	header ir.Header
@@ -58,6 +59,11 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	}
 	s := in.Session
 	spec := tgt.Module.Spec()
+	if opt.Via == ViaImport {
+		if imp, ok := tgt.Module.(agent.Importer); !ok || !imp.CanImport(src.Module.Spec().ID) {
+			return nil, fmt.Errorf("%w: %s cannot import %s sessions itself", agent.ErrUnsupported, spec.Name, src.Module.Spec().Name)
+		}
+	}
 	p := &Plan{
 		Kind: KindContinue, Key: s.Key, Title: s.Title, Agent: spec.Name,
 		Source:  Endpoint{Location: src.Machine.Name, OS: src.Machine.Facts.OS, CWD: s.CWD, Path: s.Path, Version: s.AgentVersion},
@@ -99,8 +105,12 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	if opt.Redact {
 		redact = scan.Redact
 	}
+	fidelity := opt.Fidelity
+	if opt.Via == ViaImport {
+		fidelity = convert.Note // the importer brings the history; hopsesh adds only its briefing
+	}
 	r := convert.Render(convert.Request{
-		Nodes: seg.Nodes, SkipBefore: skip, From: cp.From, To: spec.Name, Fidelity: opt.Fidelity,
+		Nodes: seg.Nodes, SkipBefore: skip, From: cp.From, To: spec.Name, Fidelity: fidelity,
 		Native: opt.Native && prof.NativeReplay, Window: prof.Window, Mappings: p.Placement.Mappings, Redact: redact,
 		Briefing: convert.Briefing{
 			FromVersion: s.AgentVersion, SourceID: string(s.Key.Session), SourceLoc: src.Machine.Name, TargetLoc: tgt.Machine.Name,
@@ -110,6 +120,13 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		},
 	})
 	cp.items, cp.Report = r.Items, r.Report
+	if opt.Via == ViaImport {
+		cp.Via = ViaImport
+		cp.Report.Summary = fmt.Sprintf("converted by %s's own importer; hopsesh adds its briefing", spec.Name)
+		if cp.Relation != RelationNew {
+			p.Blockers = append(p.Blockers, "--via import only starts a new session; leave it off to add the new work to the copy here")
+		}
+	}
 	for _, it := range r.Items {
 		if it.Node == "hopsesh/briefing" || strings.Contains(it.Text, "[hopsesh] This conversation was moved") {
 			cp.Briefing = it.Text[strings.LastIndex(it.Text, "[hopsesh] This conversation was moved"):]
@@ -125,11 +142,15 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	if opt.Go {
 		prompt = "Continue."
 	}
-	p.Resume = tgt.Module.Resume(tgt.Install, p.Placement.Key, p.Placement, agent.ResumeOptions{
+	p.resumeOpts = agent.ResumeOptions{
 		RemoteControl: opt.RemoteControl && agent.Has(tgt.Module, agent.CapRemoteControl), Name: p.NewName, Prompt: prompt,
 		App: opt.App && agent.Has(tgt.Module, agent.CapApp),
-	})
+	}
+	p.Resume = tgt.Module.Resume(tgt.Install, p.Placement.Key, p.Placement, p.resumeOpts)
 	planNative(ctx, p, in, opt)
+	if cp.Via == ViaImport && !(src.Machine.Local && src.Machine.Name == tgt.Machine.Name) && p.native == nil {
+		p.Blockers = append(p.Blockers, fmt.Sprintf("--via import reads the session on this machine, so %s must be installed here to keep its copy here first", src.Module.Spec().Name))
+	}
 	return p, nil
 }
 
@@ -322,6 +343,57 @@ func planContinueWarnings(p *Plan, in Input, opt Options) {
 	}
 }
 
+// importThen has the target agent's importer convert the session (from this machine:
+// the source itself, or the native copy just kept here), adopts the file it created for
+// undo, and appends hopsesh's briefing to it.
+func importThen(ctx context.Context, p *Plan, in Input, h agent.Host, j *journal.Journal, nativeDst string, step func(string)) (ir.WriteResult, error) {
+	tgt, cp := in.Target, p.Continue
+	path := in.Session.Path
+	if !in.Source.Machine.Local || in.Source.Machine.Name != tgt.Machine.Name {
+		path = nativeDst
+	}
+	if path == "" {
+		return ir.WriteResult{}, fmt.Errorf("the %s session is not on this machine to import", in.Source.Module.Spec().Name)
+	}
+	name := tgt.Module.Spec().Name
+	step(name + "'s importer is converting the session")
+	id, err := tgt.Module.(agent.Importer).Import(ctx, h, tgt.Install, in.Source.Module.Spec().ID, path, p.Target.CWD, cp.header.Title)
+	if err != nil {
+		return ir.WriteResult{}, err
+	}
+	l, err := tgt.Module.List(ctx, h, tgt.Install)
+	if err != nil {
+		return ir.WriteResult{}, err
+	}
+	var s *agent.Summary
+	for i := range l.Sessions {
+		if l.Sessions[i].Key.Session == id {
+			s = &l.Sessions[i]
+		}
+	}
+	if s == nil {
+		return ir.WriteResult{}, fmt.Errorf("%s imported the session as %s, but it is not in its list", name, id)
+	}
+	if err := j.Adopt(tgt.Machine.Name, s.Path); err != nil {
+		return ir.WriteResult{}, err
+	}
+	j.AddKey(s.Key)
+	p.Placement.Key = s.Key
+	p.Resume = tgt.Module.Resume(tgt.Install, s.Key, p.Placement, p.resumeOpts)
+	seg, err := tgt.Module.(agent.Reader).Read(ctx, h, tgt.Install, *s, ir.Cursor{})
+	if err != nil {
+		return ir.WriteResult{}, err
+	}
+	step("adding hopsesh's briefing")
+	w, err := tgt.Module.(agent.Writer).Write(ctx, h, tgt.Install, ir.WriteRequest{Mode: ir.WriteAppend, SessionID: string(id),
+		Expect: seg.Cursor, Header: cp.header, Items: cp.items})
+	if err != nil {
+		return w, fmt.Errorf("adding the briefing to the imported session: %w", err)
+	}
+	w.From = 0 // the whole file is written for this hop
+	return w, nil
+}
+
 // markNative marks the source agent's copy kept here as continued in the target agent, so
 // it is not resumed by mistake (returning to it with hopsesh clears the mark).
 func markNative(ctx context.Context, p *Plan, j *journal.Journal, path string, res *Result) {
@@ -362,19 +434,6 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 	if err != nil {
 		return res, err
 	}
-	req := ir.WriteRequest{Mode: ir.WriteNew, SessionID: string(p.Placement.Key.Session), Header: cp.header, Items: cp.items}
-	if cp.Relation == RelationAppend {
-		req.Mode, req.Expect = ir.WriteAppend, cp.expect
-	}
-	step(fmt.Sprintf("writing the session for %s", tgt.Module.Spec().Name))
-	w, err := tgt.Module.(agent.Writer).Write(ctx, h, tgt.Install, req)
-	if err != nil {
-		return res, err
-	}
-	res.Files, res.Bytes = 1, w.To-w.From
-	env.Audit.Write(audit.Entry{Action: "continue.write", Host: p.Source.Location, Session: p.Placement.Key.String(),
-		Detail: map[string]any{"from": p.Key.String(), "path": w.Path, "bytes": res.Bytes, "relation": cp.Relation, "journal": j.ID}})
-
 	// The source agent's own copy here too (planNative).
 	var nativeDst string
 	var nativeHead ir.Cursor
@@ -387,6 +446,24 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 			nativeDst, nativeHead = dst, nh
 		}
 	}
+
+	var w ir.WriteResult
+	if cp.Via == ViaImport {
+		w, err = importThen(ctx, p, in, h, j, nativeDst, step)
+	} else {
+		req := ir.WriteRequest{Mode: ir.WriteNew, SessionID: string(p.Placement.Key.Session), Header: cp.header, Items: cp.items}
+		if cp.Relation == RelationAppend {
+			req.Mode, req.Expect = ir.WriteAppend, cp.expect
+		}
+		step(fmt.Sprintf("writing the session for %s", tgt.Module.Spec().Name))
+		w, err = tgt.Module.(agent.Writer).Write(ctx, h, tgt.Install, req)
+	}
+	if err != nil {
+		return res, err
+	}
+	res.Files, res.Bytes = 1, w.To-w.From
+	env.Audit.Write(audit.Entry{Action: "continue.write", Host: p.Source.Location, Session: p.Placement.Key.String(),
+		Detail: map[string]any{"from": p.Key.String(), "path": w.Path, "bytes": res.Bytes, "relation": cp.Relation, "via": cp.Via, "journal": j.ID}})
 
 	// Lineage beside every copy.
 	m := in.Lineage

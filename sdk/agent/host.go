@@ -83,10 +83,11 @@ type RunOptions struct {
 	Env   []string // extra KEY=value pairs
 	Stdin []byte
 	// HoldStdin keeps standard input open this long after Stdin is written (or until the
-	// program exits), for programs that stop at the end of their input before answering
-	// it. Only on this machine.
-	HoldStdin time.Duration
-	Timeout   time.Duration
+	// program exits, or its output contains StdinUntil), for programs that stop at the end
+	// of their input before answering it. Only on this machine.
+	HoldStdin  time.Duration
+	StdinUntil []byte
+	Timeout    time.Duration
 }
 
 // Result is a finished command. A non-zero exit is not an error.

@@ -215,6 +215,7 @@ type OptsDTO struct {
 	Note       string `json:"note"`
 	Go         bool   `json:"go"`
 	CarryRules bool   `json:"carryRules"`
+	Via        string `json:"via"` // "" or "import"
 }
 
 func (o OptsDTO) options(d move.Options) move.Options {
@@ -226,6 +227,9 @@ func (o OptsDTO) options(d move.Options) move.Options {
 	d.Mark, d.SyncCode, d.Push, d.StopLocal, d.Conflict = o.Mark, o.SyncCode, o.Push, o.StopLocal, o.Conflict
 	d.Fidelity, d.Native, d.Note, d.Go = convert.Fidelity(nonEmpty(o.Fidelity, string(convert.History))), o.Native, strings.TrimSpace(o.Note), o.Go
 	d.CarryRules = o.CarryRules
+	if o.Via == move.ViaImport {
+		d.Via = move.ViaImport
+	}
 	return d
 }
 
@@ -236,6 +240,7 @@ type CanDTO struct {
 	App           bool `json:"app"`
 	Notify        bool `json:"notify"`
 	Native        bool `json:"native"`
+	Import        bool `json:"import"`
 }
 
 // ContinueDTO is the conversion part of a plan.
@@ -246,6 +251,7 @@ type ContinueDTO struct {
 	AppendTo string         `json:"appendTo,omitempty"` // the title of the copy here that gets the new work
 	Report   convert.Report `json:"report"`
 	Briefing string         `json:"briefing"`
+	Via      string         `json:"via,omitempty"`
 }
 
 // PlanDTO is a plan as the window shows it.
@@ -313,9 +319,10 @@ func planDTO(p *move.Plan, e app.Entry, tm agent.Module) *PlanDTO {
 		Warnings: p.Warnings, Blockers: p.Blockers, NewName: p.NewName, OtherAcct: p.Placement.OtherAccount,
 		SetAside: len(p.SetAside), NativeCopy: p.NativeCopy, Options: p.Options, SessionKey: p.Key, SourceAgent: e.Agent,
 		Can: CanDTO{Fork: agent.Has(tm, agent.CapFork), RemoteControl: agent.Has(tm, agent.CapRemoteControl),
-			App: agent.Has(tm, agent.CapApp), Notify: agent.Has(tm, agent.CapNotify), Native: agent.Has(tm, agent.CapNativeReplay)}}
+			App: agent.Has(tm, agent.CapApp), Notify: agent.Has(tm, agent.CapNotify), Native: agent.Has(tm, agent.CapNativeReplay),
+			Import: importsFrom(tm, e.Agent)}}
 	if c := p.Continue; c != nil {
-		d.Continue = &ContinueDTO{From: c.From, Fidelity: string(c.Fidelity), Relation: c.Relation, Report: c.Report, Briefing: c.Briefing}
+		d.Continue = &ContinueDTO{From: c.From, Fidelity: string(c.Fidelity), Relation: c.Relation, Report: c.Report, Briefing: c.Briefing, Via: c.Via}
 		if c.AppendTo != nil {
 			d.Continue.AppendTo = c.AppendTo.Title
 		}
@@ -324,6 +331,12 @@ func planDTO(p *move.Plan, e app.Entry, tm agent.Module) *PlanDTO {
 		d.Mappings = []agent.Mapping{}
 	}
 	return d
+}
+
+// importsFrom reports whether a module's own importer reads the source agent's sessions.
+func importsFrom(m agent.Module, from agent.ID) bool {
+	imp, ok := m.(agent.Importer)
+	return ok && imp.CanImport(from)
 }
 
 // DoneDTO reports a finished move or continuation.

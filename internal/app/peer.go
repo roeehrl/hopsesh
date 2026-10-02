@@ -101,7 +101,7 @@ func (a *App) receiveOptions(o move.Options) move.Options {
 	d.TargetDir, d.Clone, d.Worktree = o.TargetDir, o.Clone, o.Worktree
 	d.Fork, d.RemoteControl, d.Notify, d.Redact = o.Fork, o.RemoteControl, o.Notify, o.Redact
 	d.Mark, d.SyncCode, d.StopLocal, d.Conflict = o.Mark, o.SyncCode, o.StopLocal, o.Conflict
-	d.Fidelity, d.Native, d.Note, d.Go, d.CarryRules = o.Fidelity, o.Native, o.Note, o.Go, o.CarryRules
+	d.Fidelity, d.Native, d.Note, d.Go, d.CarryRules, d.Via = o.Fidelity, o.Native, o.Note, o.Go, o.CarryRules, o.Via
 	return d // never Push: the sender pushed before sending, if asked to
 }
 

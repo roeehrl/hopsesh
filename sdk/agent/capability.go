@@ -27,6 +27,7 @@ const (
 	CapRemoteControl Capability = "remote-control" // Resume honours ResumeOptions.RemoteControl (Spec.Features)
 	CapApp           Capability = "app"            // Resume honours ResumeOptions.App (Spec.Features)
 	CapNotify        Capability = "notify"         // Notifier: the resumed session tells the old one
+	CapImport        Capability = "import"         // Importer: the agent converts another agent's sessions itself
 )
 
 // LiveDetector reports which sessions are open right now.
@@ -68,6 +69,15 @@ type PostInstaller interface {
 // round trips).
 type Reader interface {
 	Read(ctx context.Context, h Host, in Install, s Summary, from ir.Cursor) (ir.Segment, error)
+}
+
+// Importer is the agent's own importer of another agent's sessions: it converts a native
+// session file itself, an alternative to the core's conversion through Writer.
+type Importer interface {
+	CanImport(from ID) bool
+	// Import converts the session file at path (on h's machine) into a new session of this
+	// agent and returns its id.
+	Import(ctx context.Context, h Host, in Install, from ID, path, cwd, title string) (SessionID, error)
 }
 
 // Writer writes IR into the agent's native format: a new session, or an append to one it
@@ -133,6 +143,7 @@ func Capabilities(m Module) []Capability {
 	w, write := m.(Writer)
 	_, integ := m.(Integrator)
 	_, notify := m.(Notifier)
+	_, imp := m.(Importer)
 	add(live, CapLive)
 	add(stop, CapStop)
 	add(mark, CapMark)
@@ -144,6 +155,7 @@ func Capabilities(m Module) []Capability {
 	add(write && w.Profile(Install{}).NativeReplay, CapNativeReplay)
 	add(integ, CapIntegrate)
 	add(notify, CapNotify)
+	add(imp, CapImport)
 	out = append(out, m.Spec().Features...)
 	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out

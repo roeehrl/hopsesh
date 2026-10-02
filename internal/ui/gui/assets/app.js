@@ -353,7 +353,7 @@ async function preflight(e, target, keepOpts = false) {
   const dflt = state.info?.defaults || { markMoved: true, syncCode: true, pushSource: false };
   if (!keepOpts) state.opts = { worktree: "auto", remoteControl: false, notify: false, fork: false, redact: false, clone: false, targetDir: "",
     mark: dflt.markMoved, syncCode: dflt.syncCode, push: dflt.pushSource, stopLocal: false, app: false, conflict: "",
-    fidelity: "history", native: false, note: "", go: false, carryRules: false };
+    fidelity: "history", native: false, note: "", go: false, carryRules: false, via: "" };
   setTitlebar("plan");
   loading("Working out the plan…");
   try { state.plan = await api("Plan", e.machine, e.key, target, state.opts); } catch (err) { planError(err); return; }
@@ -484,11 +484,13 @@ function continueCard(p, o, replan) {
       item("ok", relation, rep.summary),
       lost.length ? item("warn", "Not carried over exactly", lost.join("; ") + ".") : null,
       p.nativeCopy ? item("ok", `The ${p.nativeCopy.agent} session is kept here too, byte for byte`, `Going back to ${p.nativeCopy.agent} on this machine later adds only the new work to it.`) : null,
-      h("div", { style: "display:flex;gap:8px;align-items:center" }, h("span", { class: "muted", style: "font-size:12px" }, "Carry"),
+      o.via === "import" ? null : h("div", { style: "display:flex;gap:8px;align-items:center" }, h("span", { class: "muted", style: "font-size:12px" }, "Carry"),
         h("select", { "aria-label": "Fidelity", onchange: (ev) => { o.fidelity = ev.target.value; replan(); } },
           h("option", { value: "history", selected: o.fidelity === "history" }, "The conversation (tool activity as text)"),
           h("option", { value: "note", selected: o.fidelity === "note" }, "Only a briefing"))),
-      p.can.native ? h("label", { class: "opt" }, h("input", { type: "checkbox", checked: o.native, onchange: (ev) => { o.native = ev.target.checked; replan(); } }),
+      p.can.import ? h("label", { class: "opt" }, h("input", { type: "checkbox", checked: o.via === "import", onchange: (ev) => { o.via = ev.target.checked ? "import" : ""; replan(); } }),
+        h("span", {}, h("b", {}, `Let ${p.agent} convert it with its own importer`), h("span", { class: "muted" }, `Instead of hopsesh's conversion; hopsesh still adds its briefing. Starts a new ${p.agent} session.`))) : null,
+      p.can.native && o.via !== "import" ? h("label", { class: "opt" }, h("input", { type: "checkbox", checked: o.native, onchange: (ev) => { o.native = ev.target.checked; replan(); } }),
         h("span", {}, h("b", {}, `Replay shell commands as ${p.agent}'s own (experimental)`), h("span", { class: "muted" }, "Exact commands and outputs instead of text; the rest stays text."))) : null,
       h("label", { class: "opt" }, h("input", { type: "checkbox", checked: o.carryRules, onchange: (ev) => { o.carryRules = ev.target.checked; replan(); } }),
         h("span", {}, h("b", {}, `Bring your ${c.from} instructions along`), h("span", { class: "muted" }, `Your instructions for every ${c.from} project go into the briefing; you can read them under “What ${p.agent} is told”.`))),

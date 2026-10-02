@@ -11,9 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/roeehrl/hopsesh/agents/claude"
 	"github.com/roeehrl/hopsesh/agents/codex"
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/journal"
+	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 	"github.com/roeehrl/hopsesh/sdk/ir"
 )
@@ -94,5 +96,55 @@ func TestCodexListsWrittenThread(t *testing.T) {
 	got := codexList(t, bin, home)
 	if !strings.Contains(got, w.SessionID) || !strings.Contains(got, "Find the codeword") {
 		t.Fatalf("Codex's own list must show the thread under its name: %s", got)
+	}
+}
+
+// Continuing a Claude Code session in Codex through Codex's own importer: the history comes
+// from the importer, hopsesh's briefing is added, and undo removes the imported thread.
+func TestCodexImportRoute(t *testing.T) {
+	bin := realAgents(t, "codex")
+	root := t.TempDir()
+	here := newLocation(t, "here", root)
+	seed(t, here)
+	// Codex's importer takes only sessions it finds itself, in the Claude Code folder of
+	// the user it runs as.
+	t.Setenv("HOME", here.m.Facts.Home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	home := filepath.Join(root, "here", ".codex")
+	os.MkdirAll(filepath.Join(home, "sessions"), 0o700)
+	ci := agent.Install{Agent: "codex", Version: "0.153.2", Binary: bin, Roots: map[string]string{"home": home}, Present: true}
+	here.m.Facts.Binaries["codex"] = agent.BinaryFact{Path: bin}
+	in := move.Input{Source: move.Side{Machine: here.m, Module: claude.New(), Install: here.in}, Session: list(t, here)[sid],
+		Target: move.Side{Machine: here.m, Module: codex.New(), Install: ci}}
+	ctx := context.Background()
+	p, err := move.Build(ctx, in, move.Options{Via: move.ViaImport, Mark: true})
+	if err != nil || len(p.Blockers) > 0 || p.Continue.Via != move.ViaImport {
+		t.Fatalf("plan: %v %v", err, p)
+	}
+	env := move.Env{StateDir: t.TempDir()}
+	res, err := move.Apply(ctx, p, in, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	threads := listAgent(t, here, codex.New(), ci)
+	if len(threads) != 1 {
+		t.Fatalf("one imported thread: %+v", threads)
+	}
+	seg := readAll(t, here, codex.New(), ci, threads[0])
+	if !mentions(seg, "PLUM-7") || !mentions(seg, "moved from Claude Code") {
+		t.Fatalf("the importer's history and hopsesh's briefing: %+v", seg.Nodes)
+	}
+	if !strings.Contains(res.Command, string(threads[0].Key.Session)) {
+		t.Fatalf("the command resumes the imported thread: %s", res.Command)
+	}
+	j, err := journal.Load(env.StateDir, res.Journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Undo(func(string) (host.FS, error) { return host.LocalFS(), nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(threads[0].Path); !os.IsNotExist(err) {
+		t.Fatal("undo removes the imported thread")
 	}
 }

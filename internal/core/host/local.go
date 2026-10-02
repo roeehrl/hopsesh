@@ -147,7 +147,8 @@ func (localExec) Run(ctx context.Context, argv []string, o agent.RunOptions) (ag
 		cmd.Stdin = bytes.NewReader(o.Stdin)
 	}
 	var out, errb bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &errb
+	answered := make(chan struct{})
+	cmd.Stdout, cmd.Stderr = &watchWriter{buf: &out, until: o.StdinUntil, hit: answered}, &errb
 	if err := cmd.Start(); err != nil {
 		return agent.Result{}, err
 	}
@@ -158,6 +159,7 @@ func (localExec) Run(ctx context.Context, argv []string, o agent.RunOptions) (ag
 			_, _ = hold.Write(o.Stdin)
 			select {
 			case <-time.After(o.HoldStdin):
+			case <-answered:
 			case <-exited:
 			case <-ctx.Done():
 			}
@@ -173,6 +175,23 @@ func (localExec) Run(ctx context.Context, argv []string, o agent.RunOptions) (ag
 		return agent.Result{}, err
 	}
 	return agent.Result{Stdout: out.Bytes(), Stderr: errb.Bytes()}, nil
+}
+
+// watchWriter collects output and signals once it contains until.
+type watchWriter struct {
+	buf   *bytes.Buffer
+	until []byte
+	hit   chan struct{}
+	done  bool
+}
+
+func (w *watchWriter) Write(p []byte) (int, error) {
+	n, err := w.buf.Write(p)
+	if !w.done && len(w.until) > 0 && bytes.Contains(w.buf.Bytes(), w.until) {
+		w.done = true
+		close(w.hit)
+	}
+	return n, err
 }
 
 // localProcs checks and stops processes on this machine.

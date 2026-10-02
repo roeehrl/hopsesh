@@ -27,6 +27,7 @@ folder there). `{{.Bin}} undo <id>` reverses either, on both machines for a push
 | `--fidelity history\|note` | another agent gets the whole conversation as text (default), or only a briefing |
 | `--native` | another agent that can replays exact tool calls as its own (experimental) |
 | `--note-file <path>` | a handoff note for the other agent's briefing |
+| `--via import` | let the other agent's own importer convert the session (Codex reads Claude Code sessions); hopsesh still adds its briefing |
 | `--carry-rules` | add the user's instructions for every project of the session's agent to the briefing (only when the user asks) |
 | `--go` | start the continued session with "Continue." |
 | `--clone` | clone the repository into the repos folder if it is not here |
