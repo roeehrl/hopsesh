@@ -7,6 +7,7 @@ All notable changes to this project are documented here. The format follows
 ## Unreleased
 
 ### Added
+- README shell-completion setup for Bash, Zsh, Fish and PowerShell.
 - Round trips: after a handoff the copy left behind is titled "↪ moved to <machine> · <title>",
   so Claude Code's resume list there shows it moved (a running session is marked once it
   stops). Listings show one row per session with the newest copy, and `pull` without a
