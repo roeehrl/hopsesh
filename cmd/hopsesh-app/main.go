@@ -3,13 +3,18 @@ package main
 
 import (
 	"log"
+	"os"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
+	"github.com/roeehrl/hopsesh/internal/core/transport"
 	"github.com/roeehrl/hopsesh/internal/gui"
 )
 
 func main() {
+	if transport.IsAskpass() {
+		os.Exit(transport.AskpassMain(os.Args[1:])) // ssh asking for a password, see transport
+	}
 	svc, err := gui.NewApp()
 	if err != nil {
 		log.Fatal(err)

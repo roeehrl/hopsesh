@@ -1,6 +1,6 @@
 # hopsesh design
 
-*hopsesh is unofficial and not affiliated with Anthropic. §15 lists what is built and what is planned.*
+*hopsesh is unofficial and not affiliated with Anthropic. §16 lists what is built and what is planned.*
 
 ## 1. What it does, and what it deliberately doesn't
 
@@ -187,7 +187,7 @@ The trademark constraint first: Anthropic's Claude Code legal page forbids "Clau
 
 ```
 hopsesh                                 # interactive TUI: machines → repos → sessions
-hopsesh hosts [allow|deny|add|helper] / hopsesh trust <host> / hopsesh doctor [host]
+hopsesh hosts [allow|deny|add [--password]|auth|setup-key|helper] / hopsesh trust <host> / hopsesh doctor [host]
 hopsesh ls [--host H] [--repo R] [--live] [--no-local] [--no-git] [--limit N] [--json]
 hopsesh show <host>:<id|title>          # details, repository, branch and worktree state
 hopsesh plan [<host>:]<id|title>         # what a move would do; never writes
@@ -201,7 +201,7 @@ hopsesh update [--check]
 hopsesh version
 ```
 
-Exit codes and `--json` on the listing and moving commands make it scriptable. One-liner install:
+Exit codes and `--json` on the listing and moving commands make it scriptable; `--password-stdin` supplies a password machine's password (§15). One-liner install:
 - macOS/Linux: `curl -fsSL …/install.sh | sh`
 - Windows: `irm …/install.ps1 | iex`
 
@@ -224,7 +224,7 @@ On first use the app explains the macOS Local Network prompt, and shows a banner
   - hopsesh itself must never become a credential-movement tool.
 - **Controls:**
   - Copies go to a staging folder first; only the session's own files are read.
-  - Agent forwarding is off. hopsesh stores only its config, host-key trust, remembered routes and its own logs and undo data.
+  - Agent forwarding is off. hopsesh stores only its config, host-key trust, remembered routes and its own logs and undo data; a password is kept only in the macOS Keychain, and only when the person chooses (§15).
   - The helper deploys only with consent, is hash-pinned and checked before every run, listens on no port, and is removable.
   - Updates are signed (ECDSA over `checksums.txt`, verified by the binary; on macOS the new binary's signing team must match).
   - macOS local network privacy (TN3179): the app connects in-process first so macOS asks for hopsesh, waits for the answer, and explains a denial; Tailscale routes are not gated.
@@ -238,6 +238,7 @@ On first use the app explains the macOS Local Network prompt, and shows a banner
   - rewriter: escaping, Windows paths, partial-prefix traps, thinking-block preservation, `relocated` placement;
   - title and last-prompt extraction.
 - **End to end:** `internal/engine` tests run a full plan and apply (clone through an `insteadOf` remote, worktree recreation, undo) against temporary repositories.
+- **Password login:** `scripts/password-test.sh`, against a separate password-only sshd (§15).
 - **Transport integration:** a Linux CI job (`scripts/integration-test.sh`) creates a second user with a session, runs `hosts add`, `trust`, `ls`, `pull` and `undo` against the runner's own OpenSSH server, and checks the installed, rewritten transcript.
 - **Fuzzing:** the rewriter (output must stay valid JSON, including cross-OS separator conversion).
 - **Planned:** a compatibility matrix of pinned Claude Code versions, and a Windows OpenSSH job.
@@ -331,9 +332,52 @@ Following VS Code, Zed, GitHub Desktop, Docker and Claude Code's own installer:
   - Nothing is edited without a click.
 - **Shell environment:** GUI apps don't inherit the login shell's PATH or `CLAUDE_CONFIG_DIR`, so the app reads both from an interactive login shell.
 
-## 15. Status
+## 15. Password login
 
-**Built:** round trips with marked copies, merged listings, conflict handling and code sync (§12); the Claude Code skill (§13); the command-line tool from the app and a Settings screen (§14); discovery and consent, host-key trust, `doctor`; listing with git, branch and worktree state; `pull` with clone, worktree recreation, path rewriting (including Windows), secret scan and redaction, undo, start prompt, Remote Control eligibility and old-session notice, automatic handling of cross-account moves, desktop-app open; TUI; macOS app with local network privacy handling; optional helper; self-update; release pipeline. No release has been published yet.
+Keys are the default and the recommendation, but some machines (a NAS, a lab box, a fresh
+Linux install) only take a password. A machine can be marked as one (`hosts add … --password`,
+`hosts auth <m> password`, or the app's Login button); `auth = "password"` is the only thing
+written to the config.
+
+- **How ssh gets it:** hopsesh still runs the system `ssh`. For a password machine it sets
+  `SSH_ASKPASS` to its own binary with `SSH_ASKPASS_REQUIRE=force`, `BatchMode=no` and
+  `NumberOfPasswordPrompts=1`. ssh runs the binary with just the prompt; that helper asks the
+  hopsesh process that started ssh over a Unix socket in a 0700 folder, using a random token
+  per connection, and prints the answer. The same mechanism serves SFTP and git fetches.
+- **What it answers:** only account-password prompts. It refuses key passphrases, host-key
+  questions, and git's HTTPS credential prompts, so the password can only ever go to ssh.
+  git fetches also get `GIT_ASKPASS=` and `GIT_TERMINAL_PROMPT=0`.
+- **Where the password comes from:**
+  - the macOS Keychain (`security`, with the password on its standard input, never in
+    arguments), on by default on macOS and switchable per machine;
+  - otherwise a hidden prompt: in the terminal (only when one is attached, so an agent
+    running hopsesh through pipes never blocks), or a dialog in the app;
+  - `--password-stdin` for scripts.
+
+  The password stays in memory for that run. The authenticated connection is kept for
+  10 minutes (`ControlPersist`), so one prompt covers a scan and the move after it.
+- **Refused passwords:** a refused password is forgotten (and removed from the Keychain),
+  and the person is asked again, twice at most. The errors are distinct: wrong password,
+  no password entered, or the machine never asked for one (password login turned off there).
+- **Leaving passwords behind:** `hosts setup-key <m>` (and **Set up key login** in the app)
+  logs in once with the password and appends the public key that ssh would offer that
+  machine to `~/.ssh/authorized_keys` there (POSIX shells; Windows is refused with
+  instructions). It asks before creating `~/.ssh/id_ed25519` when there is no key. It then
+  proves key login works with a fresh, password-less connection, and only after that
+  switches the machine to keys and deletes the Keychain item.
+- **Claude Code:** the skill forbids `--password-stdin` and handling passwords. A password
+  machine without a remembered password shows as `auth`, and Claude asks the person to run
+  `hosts setup-key` themselves.
+- **Tests:** `scripts/password-test.sh` starts a separate sshd on 127.0.0.1:2222 (the
+  system one is not touched) that allows only a password user. It checks:
+  - no password, and a wrong one, are reported as such;
+  - `ls` and `pull` work with `--password-stdin`;
+  - the password never reaches hopsesh's files;
+  - `setup-key` switches the machine to key login.
+
+## 16. Status
+
+**Built:** password login with Keychain, prompts and key setup (§15); round trips with marked copies, merged listings, conflict handling and code sync (§12); the Claude Code skill (§13); the command-line tool from the app and a Settings screen (§14); discovery and consent, host-key trust, `doctor`; listing with git, branch and worktree state; `pull` with clone, worktree recreation, path rewriting (including Windows), secret scan and redaction, undo, start prompt, Remote Control eligibility and old-session notice, automatic handling of cross-account moves, desktop-app open; TUI; macOS app with local network privacy handling; optional helper; self-update; release pipeline. Released: 0.1.0.
 
 **Planned:**
 - bringing unpushed commits and uncommitted changes along (`git bundle` plus patch into a new worktree);
@@ -342,7 +386,7 @@ Following VS Code, Zed, GitHub Desktop, Docker and Claude Code's own installer:
 - a Claude Code plugin as a second way to get the skill (§13);
 - a compatibility matrix of pinned Claude Code versions.
 
-## 16. Risks and mitigations
+## 17. Risks and mitigations
 
 - **Format drift in Claude Code:** isolated locator and rewriter, every rewrite re-read before install, `relocated` written the way Claude itself writes it, a warning when the target version is older than the source; a pinned-version compatibility matrix is planned.
 - **Anthropic ships an official local → local move:** hopsesh still adds discovery across machines, git-aware repo and worktree reconstruction, no same-account requirement and no cloud relay. When an official path appears, hopsesh can call it as a backend.
@@ -350,7 +394,7 @@ Following VS Code, Zed, GitHub Desktop, Docker and Claude Code's own installer:
 - **Windows signing reputation:** SignPath or Azure, and document the SmartScreen step.
 - **Secrets in transcripts:** scan while moving, report counts, redaction option, never sent anywhere but your own machines.
 
-## 17. Decisions (2026-10-02)
+## 18. Decisions (2026-10-02)
 
 1. Name: **hopsesh** (availability research in §2).
 2. License: **Apache-2.0**.

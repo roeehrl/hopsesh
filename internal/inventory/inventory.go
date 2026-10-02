@@ -69,6 +69,9 @@ type Scanner struct {
 	Options  sessions.ListOptions
 	// SkipGit skips the git probe (faster listing).
 	SkipGit bool
+	// Passwords supplies the password for machines that log in with one (nil: such
+	// machines fail with an explanation).
+	Passwords func(h config.Host) transport.PasswordFunc
 }
 
 // Scan scans this machine (if includeLocal) and every allowed host concurrently. Machines
@@ -257,6 +260,13 @@ func (s *Scanner) ScanHost(ctx context.Context, h config.Host) *Machine {
 	if h.TailscaleName != "" && h.TailscaleName != h.Destination {
 		conn.Fallbacks = []string{h.TailscaleName}
 	}
+	if h.UsesPassword() {
+		if s.Passwords == nil {
+			m.Status, m.Error, m.Hint = StatusAuth, "this machine logs in with a password", "run hopsesh in a terminal (it asks for the password), or set up key login: hopsesh hosts setup-key "+h.Name
+			return m
+		}
+		conn.Password = s.Passwords(h)
+	}
 	routes := loadRoutes(s.StateDir)
 	if r := routes[h.Destination]; r != "" {
 		conn.Prefer(r)
@@ -326,8 +336,16 @@ func classifyErr(err error, h config.Host) (status, msg, hint string) {
 		return StatusHostKey, err.Error(), "confirm its host key: hopsesh trust " + h.Name
 	case errors.Is(err, transport.ErrHostKeyChanged):
 		return StatusKeyChanged, err.Error(), "the host key changed since you trusted it; verify the machine before fixing known_hosts"
+	case errors.Is(err, transport.ErrWrongPassword):
+		return StatusAuth, err.Error(), "check the password and try again"
+	case errors.Is(err, transport.ErrNoPasswordPrompt):
+		return StatusAuth, err.Error(), "the machine may only allow keys; set up key login from a machine that can reach it, or turn on password login there"
+	case errors.Is(err, transport.ErrPasswordCancelled):
+		return StatusAuth, err.Error(), "enter the password to scan this machine"
+	case errors.Is(err, transport.ErrAuth) && h.UsesPassword():
+		return StatusAuth, err.Error(), "check the password, or set up key login: hopsesh hosts setup-key " + h.Name
 	case errors.Is(err, transport.ErrAuth):
-		return StatusAuth, err.Error(), "make sure `ssh " + h.Destination + "` works without a prompt (add your key to the agent)"
+		return StatusAuth, err.Error(), "make sure `ssh " + h.Destination + "` works without a prompt (add your key to the agent), or if it logs in with a password: hopsesh hosts auth " + h.Name + " password"
 	case errors.As(err, &tc):
 		return StatusTSCheck, err.Error(), "open the URL, approve, then refresh"
 	case errors.Is(err, transport.ErrUnreachable):

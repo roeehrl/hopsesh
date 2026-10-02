@@ -22,6 +22,12 @@ All notable changes to this project are documented here. The format follows
   installed, out of date or edited by you, and never overwrites your edits.
 - The app can put the hopsesh command on your PATH (a link into the app, no password), and
   has a Settings screen for the skill, the command, moving defaults, updates and folders.
+- Password login for machines that don't take keys: `hosts add <name> <dest> --password`,
+  `hosts auth <machine> key|password`, and the app's Login button on the Machines screen.
+  ssh asks hopsesh, which answers from the macOS Keychain (on by default, per machine), a
+  hidden terminal prompt, a dialog in the app, or `--password-stdin`. The password is never
+  written to hopsesh's files or a command line. `hosts setup-key <machine>` (Set up key
+  login in the app) adds your key there and switches the machine to key login.
 
 ### Fixed
 - `install.sh` names the right profile file for your shell and no longer replaces a

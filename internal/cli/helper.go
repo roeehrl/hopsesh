@@ -110,6 +110,9 @@ func connectHost(ctx context.Context, a *app, h *config.Host) (*transport.Conn, 
 	if h.TailscaleName != "" && h.TailscaleName != h.Destination {
 		conn.Fallbacks = []string{h.TailscaleName}
 	}
+	if h.UsesPassword() {
+		conn.Password = a.passwordFor(*h)
+	}
 	facts, err := conn.Probe(ctx)
 	if err != nil {
 		conn.Close()

@@ -15,6 +15,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/audit"
 	"github.com/roeehrl/hopsesh/internal/core/link"
 	"github.com/roeehrl/hopsesh/internal/core/moved"
+	"github.com/roeehrl/hopsesh/internal/core/transport"
 	"github.com/roeehrl/hopsesh/internal/engine"
 	"github.com/roeehrl/hopsesh/internal/inventory"
 )
@@ -32,6 +33,8 @@ type Deps struct {
 	Log      *audit.Log
 	Roots    []string
 	Describe func(*inventory.Session) string // branch/worktree line
+	// Passwords answers ssh password questions for machines that log in with one.
+	Passwords func(config.Host) transport.PasswordFunc
 }
 
 type mode int
@@ -105,7 +108,7 @@ func (m *model) Init() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
-		sc := &inventory.Scanner{StateDir: d.StateDir, Log: d.Log}
+		sc := &inventory.Scanner{StateDir: d.StateDir, Log: d.Log, Passwords: d.Passwords}
 		return scanDone{sc.Scan(ctx, d.Config.Hosts, true)}
 	}
 }

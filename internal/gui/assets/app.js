@@ -1,6 +1,6 @@
 // hopsesh desktop frontend. Plain ES modules, no build step. All data from transcripts is
 // untrusted: it is only ever inserted with textContent (see h()).
-import { Call } from "/wails/runtime.js";
+import { Call, Events } from "/wails/runtime.js";
 import { showSettings } from "./settings.js";
 
 const SVC = "github.com/roeehrl/hopsesh/internal/gui.App.";
@@ -25,6 +25,11 @@ export function h(tag, attrs = {}, ...kids) {
     el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
   }
   return el;
+}
+
+// fill(el, ...children) replaces el's children, skipping the empty ones (as h() does).
+function fill(el, ...kids) {
+  el.replaceChildren(...kids.flat().filter((k) => k !== null && k !== undefined && k !== false));
 }
 
 export function toast(msg) {
@@ -73,7 +78,9 @@ async function showMachines() {
       h("span", {}, (m.via || []).join(" + ")),
       h("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap" },
         h("span", { class: "muted", style: "font-size:12px" }, online + (m.otherOwner ? ` · shared by ${m.owner}` : "")),
-        h("button", { class: "btn", onclick: () => trustDialog(m.name) }, "Check host key")));
+        h("button", { class: "btn", onclick: () => trustDialog(m.name) }, "Check host key"),
+        h("button", { class: "btn", title: "How hopsesh logs in to this machine", onclick: () => loginDialog(m) },
+          m.auth === "password" ? (m.keychain ? "Login: password (Keychain)" : "Login: password") : "Login: key")));
   });
   const add = h("button", { class: "btn", onclick: addDialog }, "Add by address…");
   view.replaceChildren(h("div", { class: "machines" },
@@ -109,11 +116,107 @@ function addDialog() {
   const dlg = $("#dlg"), body = $("#dlg-body");
   const name = h("input", { class: "field", placeholder: "name, e.g. build-box", "aria-label": "Name" });
   const dest = h("input", { class: "field mono", placeholder: "ssh destination, e.g. me@10.0.0.5 or an ssh alias", "aria-label": "SSH destination" });
+  const pw = h("input", { type: "checkbox" });
+  const remember = h("input", { type: "checkbox", checked: true });
+  const rememberRow = h("label", { class: "opt", hidden: true }, remember, " Remember the password in the Keychain");
+  pw.onchange = () => { rememberRow.hidden = !pw.checked; };
   body.replaceChildren(h("div", { style: "font-weight:600" }, "Add a machine"), name, dest,
+    h("label", { class: "opt" }, pw, " This machine logs in with a password (hopsesh asks for it when it connects)"),
+    rememberRow,
     h("div", { style: "display:flex;gap:8px;justify-content:flex-end" }, h("button", { class: "btn", value: "cancel" }, "Cancel"),
-      h("button", { class: "btn primary", onclick: async (e) => { e.preventDefault(); if (!name.value || !dest.value) return; await api("AddHost", name.value, dest.value); dlg.close(); showMachines(); } }, "Add and allow")));
+      h("button", { class: "btn primary", onclick: async (e) => { e.preventDefault(); if (!name.value || !dest.value) return; await api("AddHost", name.value, dest.value, pw.checked, remember.checked); dlg.close(); showMachines(); } }, "Add and allow")));
   dlg.showModal();
 }
+
+// loginDialog chooses how hopsesh logs in to a machine: keys (the default) or a password,
+// and offers to switch a password machine to key login for good.
+function loginDialog(m) {
+  const dlg = $("#dlg"), body = $("#dlg-body");
+  const key = h("input", { type: "radio", name: "auth", checked: m.auth !== "password" });
+  const pass = h("input", { type: "radio", name: "auth", checked: m.auth === "password" });
+  const remember = h("input", { type: "checkbox", checked: m.auth === "password" ? m.keychain : m.canRemember });
+  const rememberRow = h("label", { class: "opt", style: "margin-left:22px", hidden: m.auth !== "password" || !m.canRemember }, remember, " Remember it in the Keychain");
+  const sync = () => { rememberRow.hidden = !pass.checked || !m.canRemember; };
+  key.onchange = sync; pass.onchange = sync;
+  const msg = h("div", { class: "muted", style: "font-size:12px;line-height:1.5" });
+  const runSetup = async (createKey) => {
+    msg.className = "muted"; msg.replaceChildren(`Logging in to ${m.name} once with its password to add this Mac's SSH key…`);
+    try {
+      const r = await api("SetupKeyLogin", m.name, createKey);
+      dlg.close();
+      toast(r.created ? `Created ${r.publicKey}; ${m.name} now logs in with it` : `${m.name} now logs in with your key`);
+      showMachines();
+    } catch (err) {
+      const text = String(err.message || err);
+      if (text.includes("no-key")) {
+        msg.className = "warn";
+        msg.replaceChildren("This Mac has no SSH key that ssh would use for this machine. ",
+          h("button", { class: "btn", onclick: (e) => { e.preventDefault(); runSetup(true); } }, "Create ~/.ssh/id_ed25519 and continue"));
+      } else { msg.className = "err"; msg.replaceChildren(text); }
+    }
+  };
+  const setupKey = m.auth === "password" ? h("button", { class: "btn", onclick: (e) => { e.preventDefault(); runSetup(false); } }, "Set up key login") : null;
+  fill(body,
+    h("div", { style: "font-weight:600" }, `How hopsesh logs in to ${m.name}`),
+    h("label", { class: "opt" }, key, " SSH key or agent (recommended)"),
+    h("label", { class: "opt" }, pass, " Password: hopsesh asks for it when it connects"),
+    rememberRow,
+    m.auth === "password" ? h("div", { class: "muted", style: "font-size:12px;line-height:1.5" },
+      "Set up key login adds this Mac's public SSH key to the machine (one password login), checks that it works, and then stops using the password. macOS and Linux machines.") : null,
+    msg,
+    h("div", { style: "display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap" },
+      m.auth === "password" && m.keychain ? h("button", { class: "btn", onclick: async (e) => { e.preventDefault(); await api("ForgetPassword", m.name); toast("Remembered password removed"); dlg.close(); } }, "Forget password") : null,
+      setupKey,
+      h("span", { class: "spacer" }),
+      h("button", { class: "btn", value: "cancel" }, "Cancel"),
+      h("button", { class: "btn primary", onclick: async (e) => {
+        e.preventDefault();
+        await api("SetAuth", m.name, pass.checked ? "password" : "key", remember.checked);
+        dlg.close(); showMachines();
+      } }, "Save")));
+  dlg.showModal();
+}
+
+// ---------- passwords ----------
+// ssh asks for a password machine's password in the middle of a scan or a move; the
+// backend raises this dialog and waits. Questions come one at a time.
+const pwQueue = [];
+function askPassword(req) {
+  if (pwQueue.some((r) => r.id === req.id)) return;
+  pwQueue.push(req);
+  if (pwQueue.length === 1) showPasswordDialog();
+}
+function showPasswordDialog() {
+  const req = pwQueue[0];
+  if (!req) return;
+  const dlg = $("#pwdlg"), body = $("#pwdlg-body");
+  const input = h("input", { class: "field", type: "password", autocomplete: "off", "aria-label": `Password for ${req.machine}` });
+  const remember = h("input", { type: "checkbox", checked: req.remember });
+  const done = async (ok) => {
+    try {
+      if (ok) await api("ProvidePassword", req.id, input.value, remember.checked);
+      else await api("CancelPassword", req.id);
+    } catch (e) { toast(String(e.message || e)); }
+    input.value = "";
+    dlg.close();
+    pwQueue.shift();
+    showPasswordDialog();
+  };
+  fill(body,
+    h("div", { style: "font-weight:600" }, `Password for ${req.machine}`),
+    h("div", { class: "mono muted", style: "font-size:11px" }, req.destination),
+    req.retry ? h("div", { class: "err" }, "That password was not accepted. Try again.") : null,
+    input,
+    req.canRemember ? h("label", { class: "opt" }, remember, " Remember it in the Keychain") : null,
+    h("div", { class: "muted", style: "font-size:12px" }, "Given only to ssh for this machine. Skip leaves this machine out this time."),
+    h("div", { style: "display:flex;gap:8px;justify-content:flex-end" },
+      h("button", { class: "btn", onclick: (e) => { e.preventDefault(); done(false); } }, "Skip"),
+      h("button", { class: "btn primary", onclick: (e) => { e.preventDefault(); if (input.value) done(true); } }, "Log in")));
+  dlg.onkeydown = (e) => { if (e.key === "Escape") { e.preventDefault(); done(false); } };
+  dlg.showModal();
+  input.focus();
+}
+Events.On("hopsesh:password", (ev) => askPassword(ev.data));
 
 // ---------- sessions ----------
 async function showSessions(rescan = false) {
@@ -400,6 +503,7 @@ function renderDone(d) {
 $("#btn-refresh").onclick = () => showSessions(true);
 $("#q").addEventListener("input", (e) => { state.filter = e.target.value; if (state.scan) renderSessions(); });
 (async () => {
+  for (const r of await api("PendingPasswords").catch(() => [])) askPassword(r);
   state.info = await api("Info");
   $("#subtitle").textContent = `Sessions on your machines · this is ${state.info.host}`;
   if (state.info.hasHosts) showSessions(); else showMachines();
