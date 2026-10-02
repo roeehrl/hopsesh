@@ -55,3 +55,36 @@ type Slash struct{}
 
 func (Slash) Join(elem ...string) string { return path.Join(elem...) }
 func (Slash) Base(p string) string       { return path.Base(p) }
+
+// Appender is a filesystem that can append a record to a file without changing its
+// modification time (used only to mark a copy left behind; never on a live session).
+type Appender interface {
+	AppendKeepTime(name string, data []byte) error
+}
+
+// AppendKeepTime appends data, starting on a new line, and restores the file's times.
+func (Local) AppendKeepTime(name string, data []byte) error {
+	fi, err := os.Stat(name)
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(name, os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	size := fi.Size()
+	if size > 0 {
+		last := make([]byte, 1)
+		if _, err := f.ReadAt(last, size-1); err == nil && last[0] != '\n' {
+			data = append([]byte{'\n'}, data...)
+		}
+	}
+	if _, err := f.WriteAt(data, size); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Chtimes(name, fi.ModTime(), fi.ModTime())
+}

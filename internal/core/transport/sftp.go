@@ -78,6 +78,35 @@ func (r *RemoteFS) Stat(name string) (os.FileInfo, error)     { return r.client.
 func (r *RemoteFS) Open(name string) (fsys.File, error)       { return r.client.Open(r.ToSFTP(name)) }
 func (r *RemoteFS) Join(elem ...string) string                { return path.Join(elem...) }
 
+// AppendKeepTime appends data to a remote file, starting on a new line, and restores its
+// modification time (marking a copy left behind must not make it look newer).
+func (r *RemoteFS) AppendKeepTime(name string, data []byte) error {
+	p := r.ToSFTP(name)
+	fi, err := r.client.Stat(p)
+	if err != nil {
+		return err
+	}
+	f, err := r.client.OpenFile(p, os.O_RDWR)
+	if err != nil {
+		return err
+	}
+	size := fi.Size()
+	if size > 0 {
+		last := make([]byte, 1)
+		if _, err := f.ReadAt(last, size-1); err == nil && last[0] != '\n' {
+			data = append([]byte{'\n'}, data...)
+		}
+	}
+	if _, err := f.WriteAt(data, size); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return r.client.Chtimes(p, fi.ModTime(), fi.ModTime())
+}
+
 // WriteFile uploads data atomically (temp name, then rename); used to deploy the helper.
 func (r *RemoteFS) WriteFile(name string, data io.Reader, mode os.FileMode) error {
 	p := r.ToSFTP(name)

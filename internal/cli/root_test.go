@@ -28,7 +28,7 @@ func TestVersion(t *testing.T) {
 
 func TestCommandSurface(t *testing.T) {
 	root := NewRoot(&bytes.Buffer{})
-	for _, name := range []string{"hosts", "trust", "doctor", "ls", "show", "pull", "import", "undo", "agent", "version", "update"} {
+	for _, name := range []string{"hosts", "trust", "doctor", "ls", "show", "pull", "import", "undo", "agent", "version", "update", "plan"} {
 		if c, _, err := root.Find([]string{name}); err != nil || c.Name() != name {
 			t.Errorf("missing command %s", name)
 		}

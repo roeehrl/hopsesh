@@ -30,6 +30,9 @@ type Source struct {
 	ConfigDir string
 	Home      string
 	Auth      *link.Auth // the login there, when it could be read
+	// Push pushes the current branch of a directory there to its upstream (nil when the
+	// machine cannot run commands, e.g. a plain file import). It returns git's message.
+	Push func(ctx context.Context, dir string) (string, error)
 }
 
 // Target is this machine.
@@ -68,6 +71,11 @@ type Options struct {
 	DropThinking bool // the target uses a different Anthropic account
 	CopyMemory   bool // merge the project's auto-memory folder
 	ExtraRoots   []string
+	// Round trips.
+	MarkSource bool // after a handoff, title the copy left behind "↪ moved to <this host> · <title>"
+	SyncCode   bool // fetch the session's commit here and fast-forward a clean checkout to it
+	PushSource bool // first push the source branch's unpushed commits from the source machine
+	StopLocal  bool // quit a copy of this session that is running on this machine
 }
 
 // FileItem is one file to copy.
@@ -96,6 +104,8 @@ type RepoPlan struct {
 	Worktree     string   `json:"worktree,omitempty"`    // worktree to create
 	Unpushed     int      `json:"unpushed"`
 	Dirty        int      `json:"dirty"`
+	SourceHead   string   `json:"sourceHead,omitempty"`     // commit the session's checkout was at
+	HasUpstream  bool     `json:"sourceUpstream,omitempty"` // the source branch tracks a remote branch
 }
 
 // Plan is everything a transport will do. Front-ends render it before Apply.
@@ -123,6 +133,11 @@ type Plan struct {
 	NewName       string            `json:"newName"`
 	Resume        link.Resume       `json:"resume"`
 	StartContext  link.Context      `json:"-"`
+	// Round trips.
+	Mark    string `json:"mark"`              // what happens to the copy left behind: now | when-stopped | off
+	StopPID int    `json:"stopPid,omitempty"` // a local process of this session to quit first
+	Push    bool   `json:"push,omitempty"`    // push the source branch first
+	Sync    string `json:"sync,omitempty"`    // what code sync will do, in words ("" when not applicable)
 }
 
 // Input bundles what BuildPlan needs about the session.
@@ -191,7 +206,11 @@ func BuildPlan(ctx context.Context, src Source, tgt Target, in Input, opt Option
 		if live, err := loc.LiveRegistry(sessions.LocalAlive); err == nil {
 			for _, le := range live {
 				if le.SessionID == s.ID {
-					p.Blockers = append(p.Blockers, fmt.Sprintf("this session is running on this machine (pid %d, %s); stop it before replacing its transcript", le.PID, nonEmpty(le.Status, "live")))
+					if opt.StopLocal && src.Host != tgt.Host {
+						p.StopPID = le.PID
+					} else {
+						p.Blockers = append(p.Blockers, fmt.Sprintf("this session is running on this machine (pid %d, %s); quit it first, or let hopsesh quit it (--stop-local)", le.PID, nonEmpty(le.Status, "live")))
+					}
 					break
 				}
 			}
@@ -199,6 +218,7 @@ func BuildPlan(ctx context.Context, src Source, tgt Target, in Input, opt Option
 	}
 	planWarnings(p, src, tgt, in, opt)
 	p.Warnings = append(p.Warnings, authNotes...)
+	planRoundTrip(p, src, tgt, in, opt)
 
 	p.NewName = sessionName(s.Title, tgt.Host)
 	p.StartContext = link.Context{
@@ -294,6 +314,7 @@ func fillSourceRepo(r *RepoPlan, g *repos.GitState) {
 	r.SourceBranch, r.MainBranch = g.Branch, g.MainBranch
 	r.InWorktree, r.ClaudeWT = g.LinkedWorktree, g.ClaudeWorktree
 	r.Unpushed, r.Dirty = g.LeftBehind()
+	r.SourceHead, r.HasUpstream = g.Head, g.Upstream != ""
 	if r.SourceMain == "" {
 		r.SourceMain = g.Toplevel
 	}

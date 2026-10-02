@@ -14,6 +14,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/audit"
 	"github.com/roeehrl/hopsesh/internal/core/link"
+	"github.com/roeehrl/hopsesh/internal/core/moved"
 	"github.com/roeehrl/hopsesh/internal/engine"
 	"github.com/roeehrl/hopsesh/internal/inventory"
 )
@@ -48,6 +49,7 @@ type row struct {
 	header  string
 	machine *inventory.Machine
 	session *inventory.Session
+	copies  []inventory.Copy
 }
 
 type model struct {
@@ -85,7 +87,8 @@ type applyDone struct {
 func Run(d Deps) (*Exit, error) {
 	m := &model{deps: d, mode: modeLoading, started: time.Now(), opts: engine.Options{
 		ReposDir: d.Config.ReposDir, GHQLayout: d.Config.Layout == "ghq", Worktree: engine.WorktreeAuto,
-		Fork: d.Config.LivePolicy == "fork", RemoteCtl: d.Config.RemoteCtl}}
+		Fork: d.Config.LivePolicy == "fork", RemoteCtl: d.Config.RemoteCtl,
+		MarkSource: d.Config.MarkMovedOn(), SyncCode: d.Config.SyncCodeOn(), PushSource: d.Config.PushSource}}
 	final, err := tea.NewProgram(m).Run()
 	if err != nil {
 		return nil, err
@@ -122,7 +125,7 @@ func (m *model) buildRows() {
 			if f != "" && !strings.Contains(strings.ToLower(s.Title+" "+s.LastPrompt+" "+s.CWD+" "+g.Name+" "+e.Machine), f) {
 				continue
 			}
-			rows = append(rows, row{machine: byName[e.Machine], session: s})
+			rows = append(rows, row{machine: byName[e.Machine], session: s, copies: e.Copies})
 		}
 		if len(rows) == 0 {
 			continue
@@ -253,6 +256,18 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 			return m, m.planCmd()
 		case "x":
 			m.opts.Redact = !m.opts.Redact
+			return m, m.planCmd()
+		case "m":
+			m.opts.MarkSource = !m.opts.MarkSource
+			return m, m.planCmd()
+		case "s":
+			m.opts.SyncCode = !m.opts.SyncCode
+			return m, m.planCmd()
+		case "p":
+			m.opts.PushSource = !m.opts.PushSource
+			return m, m.planCmd()
+		case "k":
+			m.opts.StopLocal = !m.opts.StopLocal
 			return m, m.planCmd()
 		}
 	case modeDone:
@@ -431,6 +446,26 @@ func (m *model) viewBrowse(b *strings.Builder) {
 			}
 		}
 		fmt.Fprintf(b, "  %s\n", dim.Render(truncate("last prompt: “"+s.LastPrompt+"”", w-4)))
+		if len(r.copies) > 1 {
+			var parts []string
+			for _, c := range r.copies {
+				p := c.Machine
+				switch {
+				case c.Newest:
+					p += " (newest)"
+				case c.MovedTo != "":
+					p += " (moved to " + c.MovedTo + ")"
+				default:
+					p += " (older)"
+				}
+				parts = append(parts, p)
+			}
+			label := "copies: " + strings.Join(parts, ", ")
+			if r.machine != nil && !r.machine.Local {
+				label += " · enter brings the newest here"
+			}
+			fmt.Fprintf(b, "  %s\n", warnSt.Render(truncate(label, w-4)))
+		}
 	}
 	b.WriteString(dim.Render("\n  ↑↓ move · enter hop here · / search · r refresh · q quit\n"))
 }
@@ -463,6 +498,21 @@ func (m *model) viewPlan(b *strings.Builder) {
 		fmt.Fprintf(b, "  worktree → %s\n", r.Worktree)
 	}
 	fmt.Fprintf(b, "  files %d (%s) · %d path mapping(s)\n", len(p.Files), engine.Human(p.TotalBytes), len(p.Mappings))
+	if p.StopPID > 0 {
+		fmt.Fprintf(b, "  first quit the copy running here (pid %d)\n", p.StopPID)
+	}
+	if p.Push {
+		fmt.Fprintf(b, "  push  %d unpushed commit(s) on %s first\n", p.Repo.Unpushed, p.SourceHost)
+	}
+	if p.Sync != "" {
+		fmt.Fprintf(b, "  code  %s\n", p.Sync)
+	}
+	switch p.Mark {
+	case engine.MarkNow:
+		fmt.Fprintf(b, "  mark  the copy on %s becomes %q\n", p.SourceHost, moved.Title(p.StartContext.TargetHost, p.Title))
+	case engine.MarkWhenStopped:
+		fmt.Fprintf(b, "  mark  the copy on %s is running; marked moved once it stops\n", p.SourceHost)
+	}
 	for _, w := range p.Warnings {
 		b.WriteString("  " + warnSt.Render("! "+w) + "\n")
 	}
@@ -477,6 +527,8 @@ func (m *model) viewPlan(b *strings.Builder) {
 	}
 	fmt.Fprintf(b, "\n  [c] clone %s  [w] worktree %s  [r] Remote Control %s  [n] notify old %s  [f] fork %s  [x] redact %s\n",
 		on(m.opts.Clone), string(m.opts.Worktree), on(m.opts.RemoteCtl), on(m.opts.NotifyOld), on(m.opts.Fork), on(m.opts.Redact))
+	fmt.Fprintf(b, "  [m] mark old copy %s  [s] sync code %s  [p] push on %s %s  [k] quit copy running here %s\n",
+		on(m.opts.MarkSource), on(m.opts.SyncCode), p.SourceHost, on(m.opts.PushSource), on(m.opts.StopLocal))
 	if len(p.Blockers) == 0 {
 		b.WriteString(dim.Render("\n  y/enter: hop · esc: back\n"))
 	} else {
@@ -495,7 +547,24 @@ func (m *model) viewDone(b *strings.Builder) {
 	if res.Secrets.Total > 0 {
 		fmt.Fprintf(b, " · %d likely secret(s)", res.Secrets.Total)
 	}
-	b.WriteString("\n\n  Start it:\n\n")
+	b.WriteString("\n")
+	if res.PushError != "" {
+		b.WriteString("  " + warnSt.Render("! could not push on "+p.SourceHost+": "+res.PushError) + "\n")
+	} else if res.Pushed != "" {
+		fmt.Fprintf(b, "  pushed %s on %s\n", p.Repo.SourceBranch, p.SourceHost)
+	}
+	if res.SyncNote != "" {
+		fmt.Fprintf(b, "  code: %s\n", res.SyncNote)
+	}
+	switch res.Mark {
+	case "done":
+		fmt.Fprintf(b, "  the copy on %s is now marked moved\n", p.SourceHost)
+	case "pending":
+		fmt.Fprintf(b, "  the copy on %s will be marked moved once it stops running\n", p.SourceHost)
+	case "failed":
+		b.WriteString("  " + warnSt.Render("! could not mark the copy on "+p.SourceHost+": "+res.MarkError) + "\n")
+	}
+	b.WriteString("\n  Start it:\n\n")
 	family := link.DefaultShell()
 	for _, line := range wrapCommand(p.Resume.Shell(family), max(m.width, 80)-4, family) {
 		b.WriteString("  " + line + "\n")

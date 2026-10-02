@@ -8,6 +8,8 @@ import (
 	"io"
 	"sort"
 	"strings"
+
+	"github.com/roeehrl/hopsesh/internal/core/moved"
 )
 
 // Mapping replaces one absolute path prefix with another (unescaped paths).
@@ -30,6 +32,9 @@ type Options struct {
 	// StripBridge drops bridge-session records so the copy does not reattach to the source
 	// session's Remote Control link.
 	StripBridge bool
+	// DropMovedMarks drops the "↪ moved to …" title records hopsesh writes on a copy left
+	// behind, so a copy taken from such a machine shows its real title again.
+	DropMovedMarks bool
 	// AppendRelocated appends {"type":"relocated",...} the way Claude Code's /cd does, so
 	// readers of the last 64 KB see the new project directory.
 	SessionID    string
@@ -45,6 +50,7 @@ type Stats struct {
 	LinesChanged     int            `json:"linesChanged"`
 	Replacements     map[string]int `json:"replacements"` // by Mapping.From
 	DroppedBridge    int            `json:"droppedBridge"`
+	DroppedMarks     int            `json:"droppedMoveMarks,omitempty"`
 	DroppedThinking  int            `json:"droppedThinking"`
 	Redactions       int            `json:"redactions"`
 	AppendedRelocate bool           `json:"appendedRelocated"`
@@ -130,6 +136,15 @@ func rewriteRecord(body []byte, maps []compiled, opt Options, st *Stats) ([]byte
 	if opt.StripBridge && bytes.Contains(body, []byte(`"bridge-session"`)) && recordType(body) == "bridge-session" {
 		st.DroppedBridge++
 		return nil, false
+	}
+	if opt.DropMovedMarks && bytes.Contains(body, []byte(`"custom-title"`)) && recordType(body) == "custom-title" {
+		var r struct {
+			CustomTitle string `json:"customTitle"`
+		}
+		if json.Unmarshal(trimmed, &r) == nil && moved.IsTitle(r.CustomTitle) {
+			st.DroppedMarks++
+			return nil, false
+		}
 	}
 	if opt.DropThinking && (bytes.Contains(body, []byte(`"thinking"`)) || bytes.Contains(body, []byte(`"redacted_thinking"`))) {
 		if out, n, err := dropThinking(body); err == nil && n > 0 {

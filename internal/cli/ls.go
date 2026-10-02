@@ -113,6 +113,9 @@ func lsCmd() *cobra.Command {
 					n++
 					s := e.Session
 					fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\n", e.Machine, truncate(s.Title, 40), statusOf(s), ago(s.LastActivity), shortID(s.ID), truncate(s.CWD, 48))
+					if len(e.Copies) > 1 {
+						fmt.Fprintf(tw, "  \t  %s\t\t\t\t\n", copiesLine(e))
+					}
 					if bi := branchInfo(s.Git); bi != "" || s.LastPrompt != "" {
 						fmt.Fprintf(tw, "  \t  %s\t\t\t\t%s\n", truncate("“"+s.LastPrompt+"”", 60), bi)
 					}
@@ -213,6 +216,32 @@ func (a *app) resolveSession(cmd *cobra.Command, ref string) (*inventory.Machine
 			hits = append(hits, hit{m, s})
 		}
 	}
+	// Without a machine name, copies of one session on several machines (it was moved)
+	// resolve to the newest copy: the way to bring a session back.
+	if host == "" && len(hits) > 1 {
+		same := true
+		for _, h := range hits[1:] {
+			if h.s.ID != hits[0].s.ID {
+				same = false
+			}
+		}
+		if same {
+			ms := make([]*inventory.Machine, len(hits))
+			ss := make([]*inventory.Session, len(hits))
+			for i, h := range hits {
+				ms[i], ss[i] = h.m, h.s
+			}
+			pick := hits[inventory.NewestOf(ms, ss)]
+			if pick.m.Local {
+				for _, m := range machines {
+					m.Close()
+				}
+				return nil, nil, fmt.Errorf("the newest copy of %q is already on this machine (%s, %s); resume it with:\n  cd %s && claude --resume %s",
+					pick.s.Title, pick.s.CWD, ago(pick.s.LastActivity), shellQuoteArg(pick.s.CWD), pick.s.ID)
+			}
+			hits = []hit{pick}
+		}
+	}
 	for _, m := range machines {
 		if len(hits) == 1 && hits[0].m == m {
 			keep = m
@@ -242,4 +271,42 @@ func (a *app) resolveSession(cmd *cobra.Command, ref string) (*inventory.Machine
 		fmt.Fprintf(&b, "  %s:%s  %s  (%s)\n", h.m.Name, shortID(h.s.ID), h.s.Title, ago(h.s.LastActivity))
 	}
 	return nil, nil, fmt.Errorf("%s", strings.TrimRight(b.String(), "\n"))
+}
+
+// copiesLine describes the copies of a session that was moved between machines.
+func copiesLine(e inventory.GroupedEntry) string {
+	var parts []string
+	staleHere := false
+	for _, c := range e.Copies {
+		p := c.Machine
+		if c.Local {
+			p += " (this machine)"
+		}
+		switch {
+		case c.Newest:
+			p += ": newest"
+		case c.MovedTo != "":
+			p += ": moved to " + c.MovedTo
+		default:
+			p += ": older copy"
+		}
+		if !c.Newest && c.Local {
+			staleHere = true
+		}
+		parts = append(parts, p)
+	}
+	line := "copies: " + strings.Join(parts, ", ")
+	if staleHere {
+		line += "  → bring it back: hopsesh pull " + shortID(e.Session.ID)
+	}
+	return line
+}
+
+func shellQuoteArg(s string) string {
+	if s != "" && strings.IndexFunc(s, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("-_./:=@,+~", r))
+	}) < 0 {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
 }

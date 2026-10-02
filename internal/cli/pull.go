@@ -13,7 +13,9 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/fsys"
+	"github.com/roeehrl/hopsesh/internal/core/hops"
 	"github.com/roeehrl/hopsesh/internal/core/link"
+	"github.com/roeehrl/hopsesh/internal/core/moved"
 	"github.com/roeehrl/hopsesh/internal/core/repos"
 	"github.com/roeehrl/hopsesh/internal/core/sessions"
 	"github.com/roeehrl/hopsesh/internal/engine"
@@ -33,6 +35,10 @@ func addTransportFlags(cmd *cobra.Command) {
 	f.Bool("redact", false, "redact likely secrets in the copy")
 	f.Bool("other-account", false, "this machine uses a different Anthropic account (drops signed reasoning blocks)")
 	f.Bool("memory", false, "also merge the project's auto-memory folder")
+	f.Bool("stop-local", false, "if this session is running on this machine, quit it first (it gets SIGTERM and saves its transcript)")
+	f.Bool("no-mark", false, "do not title the copy left behind \"↪ moved to <this machine>\"")
+	f.Bool("no-sync", false, "do not fetch or fast-forward the checkout here to the session's commit")
+	f.Bool("push", false, "first push the session branch's unpushed commits from the other machine")
 	f.Bool("dry-run", false, "show the plan and stop")
 	f.Bool("run", false, "start claude in the new location when done")
 	f.Bool("desktop", false, "open it in the Claude desktop app instead of the terminal (needs a claude with --desktop)")
@@ -67,6 +73,19 @@ func (a *app) transportOptions(cmd *cobra.Command) engine.Options {
 	o.Redact, _ = f.GetBool("redact")
 	o.DropThinking, _ = f.GetBool("other-account")
 	o.CopyMemory, _ = f.GetBool("memory")
+	o.StopLocal, _ = f.GetBool("stop-local")
+	o.MarkSource = a.cfg.MarkMovedOn()
+	if v, _ := f.GetBool("no-mark"); v {
+		o.MarkSource = false
+	}
+	o.SyncCode = a.cfg.SyncCodeOn()
+	if v, _ := f.GetBool("no-sync"); v {
+		o.SyncCode = false
+	}
+	o.PushSource = a.cfg.PushSource
+	if v, _ := f.GetBool("push"); v {
+		o.PushSource = true
+	}
 	return o
 }
 
@@ -80,12 +99,19 @@ func expandHome(p string) string {
 
 func pullCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "pull <machine>:<id-or-title>",
+		Use:   "pull [<machine>:]<id-or-title>",
 		Short: "Move a session to this machine and print the command to resume it",
 		Long: `Moves a Claude Code session from another machine (or another folder on this one) to this
 machine. hopsesh finds or clones the repository, recreates a worktree if the session used
 one, copies the session, rewrites its paths, gives it a start prompt that explains the move
 and asks Claude to check that nothing is missing, and prints the command to resume it.
+
+Without a machine name, hopsesh looks on every allowed machine and takes the newest copy
+of the session, which is how you bring a session back after working on it elsewhere.
+
+After a handoff the copy left behind is titled "↪ moved to <this machine> · <title>", so
+Claude Code's own resume list shows that it moved (--no-mark to skip). The checkout here
+is fetched and, when clean, fast-forwarded to the session's commit (--no-sync to skip).
 
 The plan is shown first; nothing changes until you confirm (or pass --yes).`,
 		Args: cobra.ExactArgs(1),
@@ -105,6 +131,23 @@ The plan is shown first; nothing changes until you confirm (or pass --yes).`,
 		},
 	}
 	addTransportFlags(cmd)
+	return cmd
+}
+
+// planCmd is pull that only plans: it never changes anything, so it is safe to allow
+// without a prompt (the Claude Code skill relies on this).
+func planCmd() *cobra.Command {
+	cmd := pullCmd()
+	cmd.Use = "plan [<machine>:]<id-or-title>"
+	cmd.Short = "Show what moving a session here would do, without changing anything"
+	cmd.Long = "Same as pull --dry-run: resolves the session, plans the move and prints the plan (or JSON with --json). It never writes anything."
+	run := cmd.RunE
+	cmd.RunE = func(c *cobra.Command, args []string) error {
+		_ = c.Flags().Set("dry-run", "true")
+		_ = c.Flags().Set("yes", "false")
+		_ = c.Flags().Set("run", "false")
+		return run(c, args)
+	}
 	return cmd
 }
 
@@ -219,6 +262,30 @@ func (a *app) transport(cmd *cobra.Command, src engine.Source, sum sessions.Summ
 		}
 		a.printf(", %d likely secret(s) %s", res.Secrets.Total, verb)
 	}
+	if res.Stopped > 0 {
+		a.printf("\n  Quit the copy that was running here (pid %d).", res.Stopped)
+	}
+	switch {
+	case res.PushError != "":
+		a.printf("\n  ! Could not push on %s: %s", p.SourceHost, res.PushError)
+	case res.Pushed != "":
+		a.printf("\n  Pushed %s on %s.", p.Repo.SourceBranch, p.SourceHost)
+	}
+	if res.SyncNote != "" {
+		mark := "  "
+		if res.Sync != nil && (res.Sync.State == repos.SyncMissing || res.Sync.State == repos.SyncDiverged || res.Sync.State == repos.SyncDirty || res.Sync.State == repos.SyncOtherBranch || res.Sync.State == repos.SyncBehind) {
+			mark = "! "
+		}
+		a.printf("\n  %sCode: %s.", mark, res.SyncNote)
+	}
+	switch res.Mark {
+	case hops.MarkDone:
+		a.printf("\n  The copy on %s is now titled \"%s\".", p.SourceHost, moved.Title(p.StartContext.TargetHost, p.Title))
+	case hops.MarkPending:
+		a.printf("\n  The copy on %s is still running; it will be titled \"↪ moved to %s\" once it stops (on a later hopsesh scan).", p.SourceHost, p.StartContext.TargetHost)
+	case hops.MarkFailed:
+		a.printf("\n  ! Could not mark the copy on %s as moved: %s", p.SourceHost, res.MarkError)
+	}
 	a.printf("\n  Undo with: hopsesh undo %s\n\n", shortID(p.SessionID))
 	a.printf("Start it (the first message explains the move and asks Claude to check nothing is missing):\n\n  %s\n", p.Resume.Shell(shell))
 	if p.Options.NotifyOld && !p.Options.RemoteCtl {
@@ -320,6 +387,21 @@ func (a *app) renderPlan(p *engine.Plan) {
 	}
 	if len(opts) > 0 {
 		a.printf("  after  %s\n", strings.Join(opts, ", "))
+	}
+	if p.StopPID > 0 {
+		a.printf("  first  quit the copy of this session running here (pid %d)\n", p.StopPID)
+	}
+	if p.Push {
+		a.printf("  push   %d unpushed commit(s) on %s's %s, from %s\n", p.Repo.Unpushed, p.SourceHost, p.Repo.SourceBranch, p.SourceHost)
+	}
+	if p.Sync != "" {
+		a.printf("  code   %s\n", p.Sync)
+	}
+	switch p.Mark {
+	case engine.MarkNow:
+		a.printf("  mark   the copy on %s will be titled \"%s\"\n", p.SourceHost, moved.Title(p.StartContext.TargetHost, p.Title))
+	case engine.MarkWhenStopped:
+		a.printf("  mark   the copy on %s is running; it will be titled \"↪ moved to %s\" once it stops\n", p.SourceHost, p.StartContext.TargetHost)
 	}
 	for _, w := range p.Warnings {
 		a.printf("  ! %s\n", w)

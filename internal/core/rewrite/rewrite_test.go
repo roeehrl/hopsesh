@@ -119,6 +119,19 @@ func TestWindowsSeparatorTranslation(t *testing.T) {
 	}
 }
 
+func TestDropMovedMarks(t *testing.T) {
+	in := `{"type":"custom-title","customTitle":"fix tests","sessionId":"s"}` + "\n" +
+		`{"type":"custom-title","customTitle":"↪ moved to laptop · fix tests","sessionId":"s"}` + "\n"
+	out, st := run(t, in, Options{DropMovedMarks: true})
+	if st.DroppedMarks != 1 || strings.Contains(out, "moved to") || !strings.Contains(out, `"fix tests"`) {
+		t.Fatalf("got %q %+v", out, st)
+	}
+	out, _ = run(t, in, Options{})
+	if !strings.Contains(out, "moved to") {
+		t.Fatal("marks are kept unless asked")
+	}
+}
+
 func TestStripBridgeDropThinkingAndRelocated(t *testing.T) {
 	in := `{"type":"bridge-session","bridgeSessionId":"b1"}` + "\n" +
 		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"","signature":"s"},{"type":"text","text":"hi"}]},"z":1}` + "\n"
