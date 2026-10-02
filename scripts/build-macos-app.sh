@@ -2,7 +2,7 @@
 # Build hopsesh.app (universal arm64+x86_64) with the CLI embedded, then optionally sign,
 # notarize and package it as a DMG.
 #
-#   VERSION=0.1.0 scripts/build-macos-app.sh
+#   VERSION=0.1.0 scripts/build-macos-app.sh            (COMMIT and DATE default to HEAD and now)
 #   SIGN_IDENTITY="Developer ID Application: …" scripts/build-macos-app.sh   # sign (hardened runtime)
 #   NOTARY_PROFILE=hopsesh scripts/build-macos-app.sh                        # + notarize & staple
 #     (create the profile once: xcrun notarytool store-credentials hopsesh --apple-id … --team-id …)
@@ -11,7 +11,7 @@ cd "$(dirname "$0")/.."
 VERSION="${VERSION:-0.0.0-dev}"
 OUT="${OUT:-dist/macos}"
 APP="$OUT/hopsesh.app"
-LDFLAGS="-s -w -X github.com/roeehrl/hopsesh/internal/version.Version=$VERSION -X github.com/roeehrl/hopsesh/internal/version.Commit=$(git rev-parse --short HEAD 2>/dev/null || echo none) -X github.com/roeehrl/hopsesh/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ) -X github.com/roeehrl/hopsesh/internal/update.PublicKey=${HOPSESH_RELEASE_PUBKEY:-}"
+LDFLAGS="-s -w -X github.com/roeehrl/hopsesh/internal/version.Version=$VERSION -X github.com/roeehrl/hopsesh/internal/version.Commit=${COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || echo none)} -X github.com/roeehrl/hopsesh/internal/version.Date=${DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)} -X github.com/roeehrl/hopsesh/internal/update.PublicKey=${HOPSESH_RELEASE_PUBKEY:-}"
 export MACOSX_DEPLOYMENT_TARGET=13.0 CGO_CFLAGS="-mmacosx-version-min=13.0" CGO_LDFLAGS="-mmacosx-version-min=13.0"
 
 rm -rf "$APP" && mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/bin" "$OUT/tmp"
@@ -45,7 +45,8 @@ hdiutil create -quiet -volname "hopsesh $VERSION" -srcfolder "$APP" -ov -format 
 [ -n "${SIGN_IDENTITY:-}" ] && codesign --force --timestamp --sign "$SIGN_IDENTITY" "$DMG"
 
 if [ -n "${NOTARY_PROFILE:-}" ]; then
-  xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
+  status=$(xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait --output-format json | sed -n 's/.*"status" *: *"\([^"]*\)".*/\1/p')
+  [ "$status" = Accepted ] || { echo "notarization of $DMG ended with status '$status'" >&2; exit 1; }
   xcrun stapler staple "$DMG"
   xcrun stapler staple "$APP"
 fi

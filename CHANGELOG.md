@@ -22,5 +22,6 @@ All notable changes to this project are documented here. The format follows
 - Native macOS app (Wails), including macOS local network privacy handling.
 - Optional, hash-pinned remote helper (`hosts helper install|remove`).
 - `update` with checksum, release-key signature and macOS code-signature checks.
-- Release pipeline: signed checksums, Sigstore signatures, SBOMs, build provenance, signed and
-  notarized macOS binaries and app, install scripts, Homebrew/Scoop/winget and Linux packages.
+- Release pipeline: Linux and Windows builds with build provenance and SBOMs in CI; macOS
+  binaries and app signed and notarized on the maintainer's Mac; `checksums.txt` signed with
+  a release key that never leaves that Mac; install scripts; Scoop/winget and Linux packages.

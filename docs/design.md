@@ -239,12 +239,10 @@ On first use the app explains the macOS Local Network prompt, and shows a banner
 
 ## 11. Distribution, signing, updates
 
-- **Build:** GoReleaser for the CLI. Distribution:
-  - GitHub Releases;
-  - a Homebrew cask, Scoop and winget manifests;
-  - `.deb`/`.rpm`/`.apk` packages;
-  - SBOMs (syft), a release-key signature and a Sigstore keyless signature over `checksums.txt`, and GitHub build provenance.
-- **macOS:** darwin CLI binaries are signed and notarized by GoReleaser when the signing secrets are set; a separate macOS job builds, signs (hardened runtime), notarizes and staples the app (`scripts/build-macos-app.sh`). macOS 13 or later.
+- **Build:** two places, and no signing secret in GitHub (`docs/RELEASING.md`):
+  - CI (GoReleaser, on a `v*` tag): Linux and Windows archives, `.deb`/`.rpm`/`.apk` packages, SBOMs, GitHub build provenance for each file, a draft release, and optionally Scoop and winget manifests.
+  - The maintainer's Mac (`scripts/release-sign.sh`): verifies that provenance, builds the macOS CLI and app from the tagged commit, signs them with the Developer ID (hardened runtime), notarizes them (the app is stapled), writes `checksums.txt` for every file and signs it with the release key. macOS 13 or later.
+- **Planned:** a Homebrew tap.
 - **Windows GUI (v0.2):** SignPath Foundation (free for open source). SmartScreen warns until reputation builds.
 - **Updates:** `hopsesh update` (see §9). The app asks once whether it may check GitHub daily, then only shows a link.
 
