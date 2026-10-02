@@ -103,8 +103,11 @@ export async function showSettings() {
         sk.state === "stale" ? h("div", { class: "muted", style: "font-size:12px" }, `Installed by hopsesh ${sk.installedVersion || "(older)"}; this is ${s.version}.`) : null,
         sk.state === "modified" ? h("div", { class: "muted", style: "font-size:12px" }, `You edited ${(sk.changedFiles || []).join(", ")}, so hopsesh leaves it alone.`) : null,
         sk.state === "absent" || sk.state === "stale" || sk.state === "broken" || sk.state === "foreign" ? h("label", { class: "opt" }, addRules,
-          h("span", {}, h("b", {}, "Let Claude run read-only hopsesh commands without asking"), h("span", { class: "muted" }, "Listing and planning. Moving a session always asks. Adds rules to Claude Code's settings."))) : null,
-        s.skillRules ? h("div", { class: "muted", style: "font-size:12px" }, "Read-only hopsesh commands are allowed in Claude Code's settings; moves ask.") : null,
+          h("span", {}, h("b", {}, "Let Claude run read-only hopsesh commands without asking"), h("span", { class: "muted" }, "Listing and planning; moving a session always asks. Without this, Claude asks you before every hopsesh command. Adds rules to Claude Code's settings."))) : null,
+        s.skillRules ? h("div", { class: "muted", style: "font-size:12px" }, "Read-only hopsesh commands are allowed in Claude Code's settings; moves ask.")
+          : sk.state === "current" || sk.state === "modified" ? h("div", { style: "display:flex;gap:8px;align-items:center" },
+            h("span", { class: "muted", style: "font-size:12px" }, "Claude asks you before every hopsesh command."),
+            h("button", { class: "btn", onclick: () => run(() => api("AddSkillRules"), "Claude can now list and plan without asking; moves still ask") }, "Allow read-only commands")) : null,
         h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" }, ...skillActions),
         h("div", { class: "muted mono", style: "font-size:11px" }, `${sk.dir || ""} · runs ${s.skillBin}`)),
       section("Command-line tool",

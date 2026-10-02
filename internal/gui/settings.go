@@ -114,6 +114,12 @@ func (a *App) InstallSkill(force, addRules bool) (claudeskill.Status, error) {
 	return st, err
 }
 
+// AddSkillRules adds the permission rules (read-only hopsesh commands allowed, moves ask)
+// to Claude Code's settings.
+func (a *App) AddSkillRules() ([]string, error) {
+	return claudeskill.AddRules(integrate.ClaudeSettingsPath(), integrate.SkillBin())
+}
+
 // RemoveSkill removes the hopsesh skill.
 func (a *App) RemoveSkill(force bool) (claudeskill.Status, error) {
 	err := integrate.RemoveSkill(force)
