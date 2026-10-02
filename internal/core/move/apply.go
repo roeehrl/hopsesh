@@ -71,6 +71,9 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (*Result, error) {
 	if !tgt.Machine.Local {
 		return nil, errors.New("a move installs on this machine")
 	}
+	if p.Kind == KindContinue {
+		return applyContinue(ctx, p, in, env)
+	}
 	j, err := journal.New(env.StateDir, fmt.Sprintf("%s from %s", p.Title, p.Source.Location))
 	if err != nil {
 		return nil, err
@@ -212,7 +215,7 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (*Result, error) {
 	}
 
 	// 6. Mark the copy left behind, and save the start prompt.
-	markLeftBehind(ctx, p, in, j, env, srcHead, res)
+	markWith(ctx, p, in, j, env, srcHead, agent.Mark{Kind: agent.MarkMoved, Location: p.Target.Location}, res)
 	promptFile := filepath.Join(env.StateDir, "prompts", string(p.Placement.Key.Agent)+"-"+string(p.Placement.Key.Session)+".md")
 	if os.MkdirAll(filepath.Dir(promptFile), 0o700) == nil && os.WriteFile(promptFile, []byte(p.StartPrompt), 0o600) == nil {
 		res.PromptFile = promptFile
@@ -351,9 +354,12 @@ func recordLineage(ctx context.Context, p *Plan, in Input, j *journal.Journal, m
 	}
 }
 
-// markLeftBehind marks the source copy now, or records an owed mark when it is still open.
-func markLeftBehind(ctx context.Context, p *Plan, in Input, j *journal.Journal, env Env, src ir.Cursor, res *Result) {
-	mark := agent.Mark{Kind: agent.MarkMoved, Location: p.Target.Location}
+// markWith marks the copy left behind now, or records an owed mark when it is still open.
+func markWith(ctx context.Context, p *Plan, in Input, j *journal.Journal, env Env, src ir.Cursor, mark agent.Mark, res *Result) {
+	if m := in.Session.Mark; m != nil && *m == mark {
+		res.Mark = "done" // already marked so
+		return
+	}
 	switch p.Mark {
 	case MarkNow:
 		res.Mark = "done"

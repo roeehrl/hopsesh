@@ -70,6 +70,13 @@ type Spec struct {
 	// Worktrees are worktree folders the agent creates inside a repository
 	// (".claude/worktrees"); git status ignores them.
 	Worktrees []string
+	// Instructions are the project instruction files the agent reads, in its order of
+	// preference ("CLAUDE.md", "AGENTS.md"). A session continued in another agent is told
+	// about files only the other agent read.
+	Instructions []string
+	// Tools names the agent's own tools for people and for a continued session's briefing
+	// ("shell, apply_patch, update_plan").
+	Tools string
 	// Features are capabilities without a method of their own: the module honours the
 	// matching ResumeOptions (CapFork, CapRemoteControl) or start prompt (CapNotify).
 	Features []Capability

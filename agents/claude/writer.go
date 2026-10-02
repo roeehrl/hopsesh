@@ -133,7 +133,7 @@ func (w *writer) records(req ir.WriteRequest) []byte {
 			w.line(&b, it, "assistant", []any{map[string]any{"type": "text", "text": it.Text}}, "end_turn")
 		}
 	}
-	if req.Header.Title != "" && req.Mode == ir.WriteNew {
+	if req.Header.Title != "" { // on an append, this also clears a "continued in" mark
 		b.Write(encodeRecord(map[string]any{"type": "custom-title", "customTitle": req.Header.Title, "sessionId": w.session}))
 		b.WriteByte('\n')
 	}

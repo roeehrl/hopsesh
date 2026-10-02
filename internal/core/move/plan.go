@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/roeehrl/hopsesh/internal/core/convert"
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/launch"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
@@ -77,6 +78,11 @@ type Options struct {
 	StopLocal     bool // quit a copy of this session that is open here
 	Conflict      string
 	OtherAccount  bool // the target is signed in to another account (set by the planner)
+	// Continuing in another agent.
+	Fidelity convert.Fidelity // history (default) or note
+	Native   bool             // render exact tool calls as the target's own (when it can)
+	Note     string           // a handoff note the source agent wrote
+	Go       bool             // start the continued session with "Continue."
 }
 
 // Conflict choices when the copy here changed too.
@@ -92,8 +98,15 @@ const (
 	MarkOff         = "off"
 )
 
+// Kinds of plans.
+const (
+	KindMove     = "move"     // the same agent, another place
+	KindContinue = "continue" // another agent
+)
+
 // Plan is a move, worked out without changing anything.
 type Plan struct {
+	Kind      string           `json:"kind"`
 	Key       agent.SessionKey `json:"key"`
 	Title     string           `json:"title"`
 	Agent     string           `json:"agent"` // display name
@@ -120,6 +133,7 @@ type Plan struct {
 	StartPrompt    string        `json:"-"`
 	Options        Options       `json:"options"`
 	OldName        string        `json:"oldName,omitempty"`
+	Continue       *ContinuePlan `json:"continue,omitempty"`
 
 	bundle agent.Bundle
 }
@@ -138,7 +152,7 @@ type Endpoint struct {
 func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	src, tgt := in.Source, in.Target
 	if src.Module.Spec().ID != tgt.Module.Spec().ID {
-		return nil, fmt.Errorf("a move keeps the agent; %s to %s is a conversion", src.Module.Spec().Name, tgt.Module.Spec().Name)
+		return buildContinue(ctx, in, opt)
 	}
 	if opt.Worktree == "" {
 		opt.Worktree = WorktreeAuto
@@ -146,7 +160,7 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	s := in.Session
 	spec := tgt.Module.Spec()
 	p := &Plan{
-		Key: s.Key, Title: s.Title, Agent: spec.Name,
+		Kind: KindMove, Key: s.Key, Title: s.Title, Agent: spec.Name,
 		Source:  Endpoint{Location: src.Machine.Name, OS: src.Machine.Facts.OS, CWD: s.CWD, Path: s.Path, Version: s.AgentVersion},
 		Target:  Endpoint{Location: tgt.Machine.Name, OS: tgt.Machine.Facts.OS, Version: tgt.Install.Version},
 		Live:    in.Live.State == agent.Live,
@@ -332,9 +346,9 @@ func planWarnings(p *Plan, in Input, opt Options) {
 // planRoundTrip decides marking, pushing and code sync.
 func planRoundTrip(p *Plan, in Input, opt Options) {
 	switch {
-	case p.Placement.Key != p.Key:
+	case p.Kind == KindMove && p.Placement.Key != p.Key:
 		p.Mark = MarkOff // keep-both: both copies stay
-	case !opt.Mark || p.Source.Location == p.Target.Location:
+	case !opt.Mark || (p.Kind == KindMove && p.Source.Location == p.Target.Location):
 		p.Mark = MarkOff
 	case opt.Fork && p.Live:
 		p.Mark = MarkOff // both continue on purpose
