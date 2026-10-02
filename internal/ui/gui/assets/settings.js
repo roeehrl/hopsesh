@@ -90,7 +90,7 @@ export async function showSettings() {
   }
 
   const save = (patch) => run(() => api("SaveSettings", Object.assign({
-    layout: s.layout, markMoved: s.markMoved, syncCode: s.syncCode, pushSource: s.pushSource, updateCheck: s.updateCheck || "off",
+    layout: s.layout, markMoved: s.markMoved, syncCode: s.syncCode, pushSource: s.pushSource, updateCheck: s.updateCheck || "off", receive: s.receive,
   }, patch)), "Saved");
   const toggle = (key, title, desc) => h("label", { class: "opt" },
     h("input", { type: "checkbox", checked: s[key], onchange: (e) => save({ [key]: e.target.checked }) }),
@@ -151,7 +151,8 @@ export async function showSettings() {
           h("option", { value: "flat", selected: s.layout === "flat" }, "<repos>/<name>"), h("option", { value: "ghq", selected: s.layout === "ghq" }, "<repos>/<host>/<owner>/<name>"))),
         toggle("markMoved", "Mark the copy left behind", "Its title becomes “↪ moved to <this Mac> · …” (or “continued in …”), so it isn't resumed by mistake."),
         toggle("syncCode", "Bring the code along", "Fetch the session's commit (from the other machine if it wasn't pushed) and fast-forward a clean checkout."),
-        toggle("pushSource", "Push unpushed commits on the other machine first", "Off: commits are fetched straight from the other machine instead.")),
+        toggle("pushSource", "Push unpushed commits on the other machine first", "Off: commits are fetched straight from the other machine instead."),
+        toggle("receive", "Receive sessions from your other machines", "hopsesh on a machine that reaches this one over SSH may send sessions here (hopsesh push). Only the session's files arrive; hopsesh here installs them and keeps its own undo.")),
       section("Updates",
         h("label", { class: "opt" }, h("input", { type: "checkbox", checked: s.updateCheck === "on", onchange: (e) => save({ updateCheck: e.target.checked ? "on" : "off" }) }),
           h("span", {}, h("b", {}, "Check GitHub once a day for new versions"), h("span", { class: "muted" }, `You have hopsesh ${s.version}.`)))),

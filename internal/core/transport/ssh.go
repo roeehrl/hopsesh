@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -262,6 +263,72 @@ func (c *Conn) sftpCommand(ctx context.Context) *exec.Cmd {
 		cmd.Env = append(os.Environ(), env...)
 	}
 	return cmd
+}
+
+// Pipe is a remote command whose standard input and output are connected to hopsesh
+// (hopsesh peer).
+type Pipe struct {
+	In     io.WriteCloser
+	Out    io.Reader
+	cmd    *exec.Cmd
+	cancel context.CancelFunc
+	stderr *strings.Builder
+}
+
+// Stderr is what the remote command wrote to standard error so far.
+func (p *Pipe) Stderr() string { return p.stderr.String() }
+
+// Close ends the command.
+func (p *Pipe) Close() error {
+	_ = p.In.Close()
+	done := make(chan error, 1)
+	go func() { done <- p.cmd.Wait() }()
+	select {
+	case err := <-done:
+		p.cancel()
+		return err
+	case <-time.After(5 * time.Second):
+		p.cancel()
+		return <-done
+	}
+}
+
+// StartPipe runs a remote command line with its standard input and output connected, on
+// its own compressed connection (like SFTP), until Close. The command lives until Close,
+// not until ctx ends.
+func (c *Conn) StartPipe(ctx context.Context, remoteCmd string) (*Pipe, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	env, err := c.passwordEnv(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pctx, cancel := context.WithCancel(context.Background())
+	args := append([]string{"-o", "Compression=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none"}, c.baseArgs()...)
+	args = append(args, c.Dest, "--", remoteCmd)
+	cmd := exec.CommandContext(pctx, c.sshBinary, args...)
+	if env != nil {
+		cmd.Env = append(os.Environ(), env...)
+	}
+	in, err := cmd.StdinPipe()
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	p := &Pipe{In: in, Out: out, cmd: cmd, cancel: cancel, stderr: &strings.Builder{}}
+	cmd.Stderr = p.stderr
+	if err := cmd.Start(); err != nil {
+		cancel()
+		return nil, err
+	}
+	c.Log.Write(audit.Entry{Action: "ssh.pipe", Host: c.Dest, Detail: map[string]any{"command": firstLine(remoteCmd)}})
+	return p, nil
 }
 
 // Close ends the shared control connection, if any.

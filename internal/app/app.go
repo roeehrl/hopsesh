@@ -4,6 +4,7 @@
 package app
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"strings"
@@ -25,6 +26,8 @@ type App struct {
 	// Passwords answers ssh password questions for machines that log in with one (nil:
 	// such machines are reported, not scanned).
 	Passwords func(h config.Host) transport.PasswordFunc
+	// PeerDial reaches hopsesh on a configured machine (nil: over SSH).
+	PeerDial func(ctx context.Context, h config.Host) (*PeerConn, error)
 }
 
 // New returns an App for the modules and configuration.
@@ -62,8 +65,12 @@ func (a *App) Module(id agent.ID) (agent.Module, bool) {
 	return nil, false
 }
 
-// LocalName is this machine's short name.
+// LocalName is this machine's name in marks and lineage: $HOPSESH_MACHINE, else its short
+// host name.
 func LocalName() string {
+	if n := strings.TrimSpace(os.Getenv("HOPSESH_MACHINE")); n != "" {
+		return n
+	}
 	h, _ := os.Hostname()
 	return strings.TrimSuffix(strings.Split(h, ".")[0], ".local")
 }

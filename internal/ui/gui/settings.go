@@ -26,6 +26,7 @@ type SettingsDTO struct {
 	SyncCode   bool       `json:"syncCode"`
 	PushSource bool       `json:"pushSource"`
 	UpdateChk  string     `json:"updateCheck"`
+	Receive    bool       `json:"receive"` // other machines' hopsesh may push sessions here
 	Agents     []AgentDTO `json:"agents"`
 
 	CLI         integrate.CLIStatus `json:"cli"`
@@ -65,7 +66,7 @@ func (a *App) Settings() SettingsDTO {
 	cfg := a.core.Cfg
 	return SettingsDTO{Version: version.Version, ReposDir: cfg.ReposDir, Layout: nonEmpty(cfg.Layout, "flat"),
 		MarkMoved: cfg.MarkMovedOn(), SyncCode: cfg.SyncCodeOn(), PushSource: cfg.PushSource, UpdateChk: cfg.UpdateCheck,
-		Agents: a.agentsLocked(), CLI: integrate.CheckCLI(), Skill: rep, SkillBin: bin, SkillPrompt: cfg.SkillPrompt,
+		Receive: cfg.Peer.Receive, Agents: a.agentsLocked(), CLI: integrate.CheckCLI(), Skill: rep, SkillBin: bin, SkillPrompt: cfg.SkillPrompt,
 		LocalNetworkGated: lnp.Gated(), ConfigDir: config.Dir(), StateDir: config.StateDir()}
 }
 
@@ -76,6 +77,7 @@ type SettingsInput struct {
 	SyncCode   bool   `json:"syncCode"`
 	PushSource bool   `json:"pushSource"`
 	UpdateChk  string `json:"updateCheck"`
+	Receive    bool   `json:"receive"`
 }
 
 // SaveSettings stores the user's choices.
@@ -93,6 +95,7 @@ func (a *App) SaveSettings(in SettingsInput) error {
 	mark, sync := in.MarkMoved, in.SyncCode
 	a.core.Cfg.MarkMoved, a.core.Cfg.SyncCode = &mark, &sync
 	a.core.Cfg.PushSource = in.PushSource
+	a.core.Cfg.Peer.Receive = in.Receive
 	return a.save()
 }
 

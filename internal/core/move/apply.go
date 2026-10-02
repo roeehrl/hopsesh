@@ -55,6 +55,9 @@ type Result struct {
 	Command    string            `json:"command"` // to resume, for this machine's shell
 	Notice     string            `json:"notice,omitempty"`
 	Warnings   []string          `json:"warnings,omitempty"`
+	// Owed is a mark the source still needs once its open copy ends, when the source is a
+	// snapshot: its sender keeps it (on other sources hopsesh keeps it here).
+	Owed *lineage.Pending `json:"owed,omitempty"`
 }
 
 // Apply carries out a plan.
@@ -374,8 +377,11 @@ func markWith(ctx context.Context, p *Plan, in Input, j *journal.Journal, env En
 		}
 	case MarkWhenStopped:
 		res.Mark = "pending"
-		if err := lineage.AddPending(env.StateDir, lineage.Pending{Time: time.Now().UTC(), Location: p.Source.Location, Key: p.Key,
-			Path: in.Session.Path, Title: p.Title, Mark: mark, Head: string(src.Head)}); err != nil {
+		owed := lineage.Pending{Time: time.Now().UTC(), Location: p.Source.Location, Key: p.Key,
+			Path: in.Session.Path, Title: p.Title, Mark: mark, Head: string(src.Head)}
+		if in.Source.Machine.IsSnapshot() {
+			res.Owed = &owed
+		} else if err := lineage.AddPending(env.StateDir, owed); err != nil {
 			res.Mark, res.MarkError = "failed", err.Error()
 		}
 	default:

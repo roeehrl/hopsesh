@@ -65,6 +65,11 @@ It moves a session here in the same agent, or continues it in another agent. Run
 4. Report `result.syncNote`, `result.mark`, any `pushError`, the `command`, and that
    `{{.Bin}} undo <id>` reverses it.
 
+To send a session from *this* machine to another one instead (the user is leaving this
+machine), use `{{.Bin}} push <ref> <machine> --dry-run --json` to plan and, after a yes,
+`{{.Bin}} push <ref> <machine> --json --yes`. It works only when hopsesh on that machine
+receives sessions; if it refuses, tell the user, and do not change its settings.
+
 When continuing *this* session in another agent, you may first write a short handoff note
 (done, open plan, next step) to a file and pass `--note-file <path>`; it goes into the
 briefing the other agent reads.

@@ -162,6 +162,9 @@ func (a *App) Plan(ctx context.Context, inv *Inventory, e Entry, target agent.ID
 }
 
 func (a *App) account(ctx context.Context, m *Machine, mod agent.Module, in agent.Install) *agent.Account {
+	if m.account != nil {
+		return m.account
+	}
 	ap, ok := mod.(agent.AccountProber)
 	if !ok {
 		return nil

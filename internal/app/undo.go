@@ -14,6 +14,9 @@ import (
 // Journals lists what can be undone, newest first.
 func (a *App) Journals() ([]*journal.Journal, error) { return journal.List(a.StateDir) }
 
+// errNothingToUndo starts the error of an Undo that found nothing (also across peers).
+const errNothingToUndo = "nothing to undo"
+
 // Undo reverses a journal: by id, by a session id it concerns, or the newest when match
 // is "". Writes on other machines are undone over SSH.
 func (a *App) Undo(ctx context.Context, match string) (*journal.Journal, error) {
@@ -32,7 +35,13 @@ func (a *App) Undo(ctx context.Context, match string) (*journal.Journal, error) 
 		}
 	}
 	if j == nil {
-		return nil, errors.New("nothing to undo" + map[bool]string{true: "", false: " for " + match}[match == ""])
+		return nil, errors.New(errNothingToUndo + map[bool]string{true: "", false: " for " + match}[match == ""])
+	}
+	// The other machines' part first: when one cannot be undone, nothing here is either.
+	for _, r := range j.Remote {
+		if err := a.undoRemote(ctx, r); err != nil {
+			return j, fmt.Errorf("undo on %s failed, so nothing was undone here: %w", r.Machine, err)
+		}
 	}
 	machines := map[string]*host.Machine{}
 	defer func() {

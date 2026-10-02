@@ -36,7 +36,8 @@ type Facts struct {
 	HasGit   bool                        `json:"hasGit"`
 }
 
-// Machine is a place sessions live: this machine, or one reached over SSH.
+// Machine is a place sessions live: this machine, one reached over SSH, or a snapshot
+// another machine's hopsesh sent.
 type Machine struct {
 	Name  string
 	Local bool
@@ -44,9 +45,10 @@ type Machine struct {
 	Facts Facts
 	Log   *slog.Logger
 
-	mu  sync.Mutex
-	fs  FS
-	rfs *transport.RemoteFS
+	mu   sync.Mutex
+	fs   FS
+	rfs  *transport.RemoteFS
+	snap *memFS // a snapshot another machine's hopsesh sent (NewSnapshot)
 }
 
 // FS returns the machine's filesystem (opening SFTP on first use for a remote machine).
@@ -74,6 +76,9 @@ func (m *Machine) Path() agent.Path { return agent.PathFor(m.Facts.OS) }
 
 // Exec runs programs on the machine.
 func (m *Machine) Exec() agent.Exec {
+	if m.snap != nil {
+		return snapExec{}
+	}
 	if m.Local {
 		return localExec{}
 	}
@@ -82,6 +87,9 @@ func (m *Machine) Exec() agent.Exec {
 
 // Procs checks and stops processes on the machine.
 func (m *Machine) Procs() agent.Procs {
+	if m.snap != nil {
+		return snapProcs{}
+	}
 	if m.Local {
 		return localProcs{}
 	}
@@ -90,6 +98,9 @@ func (m *Machine) Procs() agent.Procs {
 
 // Locks probes lock files on the machine.
 func (m *Machine) Locks() agent.Locks {
+	if m.snap != nil {
+		return snapLocks{}
+	}
 	if m.Local {
 		return localLocks{}
 	}

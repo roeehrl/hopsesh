@@ -41,7 +41,8 @@ type Machine struct {
 	OS          string       `json:"os,omitempty"`
 	Agents      []AgentState `json:"agents"`
 
-	host *host.Machine
+	host    *host.Machine
+	account *agent.Account // reported by the machine's own hopsesh (a push)
 }
 
 // AgentState is an agent as found on a machine.

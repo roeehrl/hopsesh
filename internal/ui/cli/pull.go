@@ -235,10 +235,14 @@ func explainMissing(err error, inv *app.Inventory) error {
 }
 
 func (r *run) renderPlan(p *move.Plan) {
+	there := "here"
+	if p.Target.Location != app.LocalName() {
+		there = "on " + p.Target.Location
+	}
 	if p.Kind == move.KindContinue {
-		r.printf("Continue %q from %s on %s in %s here\n", p.Title, p.Continue.From, p.Source.Location, p.Agent)
+		r.printf("Continue %q from %s on %s in %s %s\n", p.Title, p.Continue.From, p.Source.Location, p.Agent, there)
 	} else {
-		r.printf("Move %q (%s) from %s to here\n", p.Title, p.Agent, p.Source.Location)
+		r.printf("Move %q (%s) from %s to %s\n", p.Title, p.Agent, p.Source.Location, strings.TrimPrefix(there, "on "))
 	}
 	r.printf("  from      %s (%s)\n", p.Source.CWD, p.Key)
 	r.printf("  to        %s\n", p.Target.CWD)

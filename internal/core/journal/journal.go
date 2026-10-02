@@ -54,6 +54,9 @@ type Journal struct {
 	Keys    []agent.SessionKey `json:"keys"` // the sessions it created or changed
 	Entries []Entry            `json:"entries"`
 	Undone  bool               `json:"undone,omitempty"`
+	// Remote are journals of the same operation kept by hopsesh on other machines (a push):
+	// undoing this one undoes them too.
+	Remote []Remote `json:"remote,omitempty"`
 
 	dir string
 	mu  sync.Mutex
@@ -102,6 +105,35 @@ func (j *Journal) saveLocked() error {
 		return err
 	}
 	return os.Rename(tmp, filepath.Join(j.dir, "journal.json"))
+}
+
+// Remote names a journal on another machine's hopsesh.
+type Remote struct {
+	Machine string `json:"machine"` // as this machine's configuration names it
+	ID      string `json:"id"`
+}
+
+// AddRemote records a journal the same operation left on another machine.
+func (j *Journal) AddRemote(machine, id string) error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.Remote = append(j.Remote, Remote{Machine: machine, ID: id})
+	return j.saveLocked()
+}
+
+// Forget drops the entries for a machine whose own hopsesh journals those writes (the
+// sender of a push replays and journals them there).
+func (j *Journal) Forget(machine string) error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	kept := j.Entries[:0]
+	for _, e := range j.Entries {
+		if e.Machine != machine {
+			kept = append(kept, e)
+		}
+	}
+	j.Entries = kept
+	return j.saveLocked()
 }
 
 // record writes an entry ahead of the operation it describes.

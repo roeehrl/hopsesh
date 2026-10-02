@@ -15,7 +15,9 @@
 ## Needs the user's yes first
 
 `{{.Bin}} pull <ref> --json --yes [flags]` moves the session here or continues it in another
-agent. `{{.Bin}} undo <id>` reverses it.
+agent. `{{.Bin}} push <ref> <machine> --json --yes [flags]` sends a session on this machine to
+another machine whose hopsesh receives sessions (same flags, `--dry-run` to plan; `--to` is a
+folder there). `{{.Bin}} undo <id>` reverses either, on both machines for a push.
 
 ## plan and pull flags
 
@@ -51,5 +53,5 @@ another agent `continue` (`relation`, `report`, `briefing`). `pull --json --yes`
 
 hopsesh reads other machines over SSH and writes into the agents' data folders, which agent
 sandboxes usually block. `{{.Bin}} skill install --add-rules` adds approval rules for each agent:
-the read-only commands run without asking (and, in Codex, outside its sandbox), while `pull` and
-`undo` always ask.
+the read-only commands run without asking (and, in Codex, outside its sandbox), while `pull`,
+`push` and `undo` always ask.
