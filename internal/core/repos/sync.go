@@ -2,6 +2,9 @@ package repos
 
 import (
 	"context"
+	"errors"
+	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 )
@@ -116,6 +119,26 @@ func Sync(ctx context.Context, dir, branch, commit string, fastForward bool, fro
 const PushScript = `cd "$1" || exit 2
 git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1 || { echo no-upstream; exit 3; }
 GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}" git push --quiet 2>&1`
+
+// Push pushes the current branch of a directory on this machine to its upstream without
+// prompting, as PushScript does (and with no shell, so on Windows too). Its output is
+// git's; a branch without an upstream returns ErrNoUpstream.
+func Push(ctx context.Context, dir string) (string, error) {
+	up := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+	if err := up.Run(); err != nil {
+		return "", ErrNoUpstream
+	}
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "push", "--quiet")
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never")
+	if os.Getenv("GIT_SSH_COMMAND") == "" {
+		cmd.Env = append(cmd.Env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes")
+	}
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// ErrNoUpstream means the branch tracks no remote branch.
+var ErrNoUpstream = errors.New("the branch has no upstream")
 
 func safeRefPart(s string) string {
 	b := []byte(s)
