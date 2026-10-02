@@ -1,0 +1,32 @@
+name: Bug report
+description: Something didn't work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please never paste transcript contents, tokens or keys here. Redact paths if you prefer.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+  - type: input
+    id: version
+    attributes:
+      label: hopsesh version (`hopsesh version`)
+    validations:
+      required: true
+  - type: input
+    id: claude
+    attributes:
+      label: Claude Code version on each machine (`claude --version`)
+  - type: input
+    id: os
+    attributes:
+      label: Operating systems (this machine → other machine)
