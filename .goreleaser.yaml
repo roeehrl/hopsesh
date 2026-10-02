@@ -98,13 +98,24 @@ winget:
     skip_upload: '{{ if isEnvSet "TAP_GITHUB_TOKEN" }}false{{ else }}true{{ end }}'
 
 changelog:
-  use: github
-  sort: asc
+  disable: true # release notes come from CHANGELOG.md (see release.yml)
 
 release:
   draft: true # scripts/release-sign.sh completes it; a person publishes it
   footer: |
-    Verify: `sha256sum -c checksums.txt --ignore-missing`, and the signature with
-    `openssl dgst -sha256 -verify release-key.pub -signature checksums.txt.sig checksums.txt`
-    with release-key.pub from https://github.com/roeehrl/hopsesh/blob/main/packaging/release-key.pub.
-    hopsesh is not affiliated with Anthropic.
+    ## Install
+
+    macOS and Linux: `curl -fsSL https://raw.githubusercontent.com/roeehrl/hopsesh/main/scripts/install.sh | sh`
+
+    Windows (PowerShell): `irm https://raw.githubusercontent.com/roeehrl/hopsesh/main/scripts/install.ps1 | iex`
+
+    macOS app: the `.dmg` below (signed and notarized; macOS 13 or later). Linux: `.deb`, `.rpm`, `.apk` below. Already installed: `hopsesh update`.
+
+    ## Verify
+
+    `openssl dgst -sha256 -verify release-key.pub -signature checksums.txt.sig checksums.txt`, then
+    `shasum -a 256 -c checksums.txt --ignore-missing`, with
+    [release-key.pub](https://github.com/roeehrl/hopsesh/blob/main/packaging/release-key.pub).
+    Linux and Windows files also carry build provenance: `gh attestation verify <file> --repo roeehrl/hopsesh`.
+
+    hopsesh is an independent project and is not affiliated with, endorsed by or sponsored by Anthropic.
