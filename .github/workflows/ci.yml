@@ -46,9 +46,12 @@ jobs:
   govulncheck:
     runs-on: ubuntu-latest
     steps:
-      - uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
   ssh-integration:
     runs-on: ubuntu-latest

@@ -1,3 +1,5 @@
+//go:build !windows
+
 // Command demoseed fills a demo machine with made-up git repositories and Claude Code
 // sessions, for the recordings in demo/. Every name, path and prompt is invented.
 //
@@ -5,7 +7,8 @@
 //	demoseed -role laptop   # the machine they are moved to
 //
 // Git remotes point at github.com/acme/*; a global insteadOf maps them to local bare
-// repositories, so cloning works without a network.
+// repositories, so cloning works without a network. The demo machines are Linux
+// containers, so this tool builds only on Unix-like systems.
 package main
 
 import (
