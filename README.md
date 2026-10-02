@@ -6,6 +6,7 @@
 
 **Find your Claude Code sessions on your other machines and continue one here.**
 
+[![Release](https://img.shields.io/github/v/release/roeehrl/hopsesh)](https://github.com/roeehrl/hopsesh/releases/latest)
 [![CI](https://github.com/roeehrl/hopsesh/actions/workflows/ci.yml/badge.svg)](https://github.com/roeehrl/hopsesh/actions/workflows/ci.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/roeehrl/hopsesh/badge)](https://scorecard.dev/viewer/?uri=github.com/roeehrl/hopsesh)
 [![Go Reference](https://pkg.go.dev/badge/github.com/roeehrl/hopsesh.svg)](https://pkg.go.dev/github.com/roeehrl/hopsesh)
@@ -41,27 +42,28 @@ worktree, paths and all. Then it gives you the `claude --resume` command.
 
 ## Install
 
-No release is published yet; until then, build from source (Go 1.26+):
+macOS and Linux:
 
 ```sh
-go install github.com/roeehrl/hopsesh/cmd/hopsesh@latest
-```
-
-From the first release on:
-
-```sh
-# macOS and Linux
 curl -fsSL https://raw.githubusercontent.com/roeehrl/hopsesh/main/scripts/install.sh | sh
 ```
 
+Windows (PowerShell):
+
 ```powershell
-# Windows (PowerShell)
 irm https://raw.githubusercontent.com/roeehrl/hopsesh/main/scripts/install.ps1 | iex
 ```
 
-Both check the download against the release's `checksums.txt` and its signature. Releases
-also include Scoop and winget manifests, `.deb`/`.rpm`/`.apk` packages and the signed,
-notarized macOS app. `hopsesh update` installs new releases with the same checks.
+Both check the download against the release's `checksums.txt` and its signature, and
+`hopsesh update` installs later releases with the same checks.
+
+- **macOS app:** download the signed, notarized `.dmg` from the
+  [latest release](https://github.com/roeehrl/hopsesh/releases/latest) (macOS 13+, Apple
+  silicon and Intel).
+- **Linux packages:** `.deb`, `.rpm` and `.apk` for amd64 and arm64 are on the
+  [release page](https://github.com/roeehrl/hopsesh/releases/latest), for example
+  `sudo apt install ./hopsesh_<version>_linux_amd64.deb`.
+- **From source** (Go 1.26+): `go install github.com/roeehrl/hopsesh/cmd/hopsesh@latest`
 
 The other machines need only an SSH server (Remote Login on macOS, OpenSSH on Windows) and
 their Claude Code sessions.
