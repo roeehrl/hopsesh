@@ -35,6 +35,12 @@ type Options struct {
 	// DropMovedMarks drops the "↪ moved to …" title records hopsesh writes on a copy left
 	// behind, so a copy taken from such a machine shows its real title again.
 	DropMovedMarks bool
+	// RenameSession gives the copy a new session id ({old, new}): sessionId fields and the
+	// id inside paths change; signed content and message ids do not. Used to keep both
+	// copies when two machines changed the same session.
+	RenameSession [2]string
+	// AppendTitle, when set, appends a custom-title record (after the relocated one).
+	AppendTitle string
 	// AppendRelocated appends {"type":"relocated",...} the way Claude Code's /cd does, so
 	// readers of the last 64 KB see the new project directory.
 	SessionID    string
@@ -51,6 +57,7 @@ type Stats struct {
 	Replacements     map[string]int `json:"replacements"` // by Mapping.From
 	DroppedBridge    int            `json:"droppedBridge"`
 	DroppedMarks     int            `json:"droppedMoveMarks,omitempty"`
+	RenamedIDs       int            `json:"renamedIds,omitempty"`
 	DroppedThinking  int            `json:"droppedThinking"`
 	Redactions       int            `json:"redactions"`
 	AppendedRelocate bool           `json:"appendedRelocated"`
@@ -109,6 +116,16 @@ func JSONL(r io.Reader, w io.Writer, opt Options) (Stats, error) {
 		}
 		st.AppendedRelocate = true
 	}
+	if opt.AppendTitle != "" {
+		rec, _ := json.Marshal(struct {
+			Type        string `json:"type"`
+			CustomTitle string `json:"customTitle"`
+			SessionID   string `json:"sessionId"`
+		}{"custom-title", opt.AppendTitle, opt.SessionID})
+		if _, err := bw.Write(append(rec, '\n')); err != nil {
+			return st, err
+		}
+	}
 	return st, bw.Flush()
 }
 
@@ -152,7 +169,11 @@ func rewriteRecord(body []byte, maps []compiled, opt Options, st *Stats) ([]byte
 			st.DroppedThinking += n
 		}
 	}
-	return rewriteStrings(body, maps, opt.Redact, st), true
+	var ren *[2][]byte
+	if opt.RenameSession[0] != "" && opt.RenameSession[1] != "" {
+		ren = &[2][]byte{[]byte(opt.RenameSession[0]), []byte(opt.RenameSession[1])}
+	}
+	return rewriteStrings(body, maps, opt.Redact, ren, st), true
 }
 
 func recordType(body []byte) string {
@@ -179,7 +200,7 @@ type frame struct {
 
 // rewriteStrings walks one JSON value and applies path mappings (and redaction) inside
 // string tokens, keys included, except under protected keys.
-func rewriteStrings(b []byte, maps []compiled, redact func([]byte) ([]byte, int), st *Stats) []byte {
+func rewriteStrings(b []byte, maps []compiled, redact func([]byte) ([]byte, int), ren *[2][]byte, st *Stats) []byte {
 	var out bytes.Buffer
 	out.Grow(len(b) + 64)
 	var stack []frame
@@ -213,8 +234,17 @@ func rewriteStrings(b []byte, maps []compiled, redact func([]byte) ([]byte, int)
 					ni, n = redact(ni)
 					st.Redactions += n
 				}
+				if ren != nil && bytes.Contains(ni, ren[0]) {
+					st.RenamedIDs += bytes.Count(ni, ren[0])
+					ni = bytes.ReplaceAll(ni, ren[0], ren[1])
+				}
 				out.WriteByte('"')
 				out.Write(ni)
+				out.WriteByte('"')
+			} else if ren != nil && !isKey && protectDepth < 0 && len(stack) > 0 && stack[len(stack)-1].lastKey == "sessionId" && bytes.Equal(tok[1:len(tok)-1], ren[0]) {
+				st.RenamedIDs++
+				out.WriteByte('"')
+				out.Write(ren[1])
 				out.WriteByte('"')
 			} else {
 				out.Write(tok)

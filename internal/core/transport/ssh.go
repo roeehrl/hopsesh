@@ -256,3 +256,16 @@ func firstLine(s string) string {
 	}
 	return s
 }
+
+// GitSSHCommand is a GIT_SSH_COMMAND that connects the way this Conn does (batch mode,
+// strict host keys against the same known_hosts files, any remembered host name).
+func (c *Conn) GitSSHCommand() string {
+	parts := []string{ShQuote(c.sshBinary)}
+	for _, a := range c.baseArgs() {
+		parts = append(parts, ShQuote(a))
+	}
+	return strings.Join(parts, " ")
+}
+
+// GitURL is an scp-style git URL for a repository path on this machine.
+func (c *Conn) GitURL(path string) string { return c.Dest + ":" + path }

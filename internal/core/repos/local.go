@@ -149,10 +149,15 @@ func (e *GitError) Unwrap() error { return e.Err }
 // runGit runs git without ever prompting: no terminal password prompts and SSH in batch
 // mode, so a missing credential fails fast with git's own message.
 func runGit(ctx context.Context, dir string, args ...string) (string, error) {
+	return runGitEnv(ctx, dir, nil, args...)
+}
+
+// runGitEnv is runGit with extra environment (e.g. GIT_SSH_COMMAND).
+func runGitEnv(ctx context.Context, dir string, env []string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never")
-	if os.Getenv("GIT_SSH_COMMAND") == "" {
+	cmd.Env = append(append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never"), env...)
+	if os.Getenv("GIT_SSH_COMMAND") == "" && !hasEnv(env, "GIT_SSH_COMMAND") {
 		cmd.Env = append(cmd.Env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes")
 	}
 	var stderr strings.Builder
@@ -263,4 +268,13 @@ func SwitchBranch(ctx context.Context, repo, branch string) error {
 		return err
 	}
 	return fmt.Errorf("branch %s exists neither locally nor on origin", branch)
+}
+
+func hasEnv(env []string, key string) bool {
+	for _, e := range env {
+		if strings.HasPrefix(e, key+"=") {
+			return true
+		}
+	}
+	return false
 }

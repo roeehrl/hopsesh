@@ -13,6 +13,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/hops"
 	"github.com/roeehrl/hopsesh/internal/core/moved"
 	"github.com/roeehrl/hopsesh/internal/core/repos"
+	"github.com/roeehrl/hopsesh/internal/core/sessions"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
 )
 
@@ -82,6 +83,18 @@ func (s *Scanner) applyPendingMarks(m *Machine) {
 		case sess.Live != nil:
 			continue // still running: try again on a later scan
 		}
+		// New turns after the move mean someone kept working there: do not call it moved.
+		// When it was told about the move, its reply to that notice does not count.
+		allowed := 0
+		if h.Notified {
+			allowed = 4
+		}
+		if n, err := sessions.TurnsSince(m.fs, sess.File, h.Time); err == nil && n > allowed {
+			_ = hops.Update(s.StateDir, h.SessionID, h.From, func(x *hops.Hop) {
+				x.Mark, x.MarkError = hops.MarkDiverged, fmt.Sprintf("%d message(s) were added there after the move", n)
+			})
+			continue
+		}
 		err := ap.AppendKeepTime(sess.File, moved.Record(h.SessionID, h.To, sess.Title))
 		_ = hops.Update(s.StateDir, h.SessionID, h.From, func(x *hops.Hop) {
 			x.Tries++
@@ -97,6 +110,18 @@ func (s *Scanner) applyPendingMarks(m *Machine) {
 			sess.MovedTo = h.To
 		}
 		s.Log.Write(audit.Entry{Action: "hop.mark", Host: m.Name, Session: h.SessionID, Detail: map[string]any{"deferred": true, "ok": err == nil}})
+	}
+}
+
+// gitFetchFunc returns how to fetch from a repository on this machine over SSH (nil for
+// this machine itself and for Windows machines).
+func (m *Machine) gitFetchFunc() func(string) *repos.FetchSource {
+	if m.Local || m.conn == nil || m.Facts == nil || m.Facts.OS == "windows" {
+		return nil
+	}
+	conn, name := m.conn, m.Name
+	return func(dir string) *repos.FetchSource {
+		return &repos.FetchSource{Name: name, URL: conn.GitURL(dir), Env: []string{"GIT_SSH_COMMAND=" + conn.GitSSHCommand()}}
 	}
 }
 

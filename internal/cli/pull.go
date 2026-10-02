@@ -39,6 +39,8 @@ func addTransportFlags(cmd *cobra.Command) {
 	f.Bool("no-mark", false, "do not title the copy left behind \"↪ moved to <this machine>\"")
 	f.Bool("no-sync", false, "do not fetch or fast-forward the checkout here to the session's commit")
 	f.Bool("push", false, "first push the session branch's unpushed commits from the other machine")
+	f.Bool("replace", false, "when the copy here changed too, replace it anyway (hopsesh undo brings it back)")
+	f.Bool("keep-both", false, "when the copy here changed too, bring this one in as a separate session")
 	f.Bool("dry-run", false, "show the plan and stop")
 	f.Bool("run", false, "start claude in the new location when done")
 	f.Bool("desktop", false, "open it in the Claude desktop app instead of the terminal (needs a claude with --desktop)")
@@ -74,6 +76,12 @@ func (a *app) transportOptions(cmd *cobra.Command) engine.Options {
 	o.DropThinking, _ = f.GetBool("other-account")
 	o.CopyMemory, _ = f.GetBool("memory")
 	o.StopLocal, _ = f.GetBool("stop-local")
+	if v, _ := f.GetBool("replace"); v {
+		o.Conflict = "replace"
+	}
+	if v, _ := f.GetBool("keep-both"); v {
+		o.Conflict = "keep-both"
+	}
 	o.MarkSource = a.cfg.MarkMovedOn()
 	if v, _ := f.GetBool("no-mark"); v {
 		o.MarkSource = false

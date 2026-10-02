@@ -112,7 +112,11 @@ func Apply(ctx context.Context, p *Plan, src Source, env Env) (*Result, error) {
 	// 1b. Bring the checkout to the session's commit.
 	if p.Sync != "" {
 		step("checking the code against the session's commit")
-		if r, err := repos.Sync(ctx, syncDir(p), p.Repo.SourceBranch, p.Repo.SourceHead, true); err == nil {
+		var from *repos.FetchSource
+		if src.GitFetch != nil && src.Host != p.StartContext.TargetHost {
+			from = src.GitFetch(nonEmpty(p.Repo.SourceMain, p.Repo.SourceTop))
+		}
+		if r, err := repos.Sync(ctx, syncDir(p), p.Repo.SourceBranch, p.Repo.SourceHead, true, from); err == nil {
 			res.Sync = &r
 			res.SyncNote = describeSync(r, p.Repo.SourceBranch, p.SourceHost)
 			env.Log.Write(audit.Entry{Action: "git.sync", Session: p.SessionID, Detail: map[string]any{"state": r.State, "commit": r.Commit, "behind": r.Behind}})
@@ -168,8 +172,14 @@ func Apply(ctx context.Context, p *Plan, src Source, env Env) (*Result, error) {
 		switch f.Rewrite {
 		case "jsonl":
 			opt := rewrite.Options{Mappings: p.Mappings, StripBridge: true, DropMovedMarks: true, DropThinking: p.Options.DropThinking, Redact: redact}
+			if p.OriginalID != "" {
+				opt.RenameSession = [2]string{p.OriginalID, p.SessionID}
+			}
 			if f.Kind == "transcript" {
 				opt.SessionID, opt.RelocatedCWD = p.SessionID, p.TargetCWD
+				if p.OriginalID != "" {
+					opt.AppendTitle = p.Title
+				}
 			}
 			var st rewrite.Stats
 			st, err = rewriteFile(in, dst, func(r io.Reader, w io.Writer) (rewrite.Stats, error) { return rewrite.JSONL(r, w, opt) })
@@ -271,7 +281,7 @@ func Apply(ctx context.Context, p *Plan, src Source, env Env) (*Result, error) {
 // scan once it has stopped; marking never fails the move.
 func markCopyLeftBehind(p *Plan, src Source, env Env, res *Result) {
 	h := hops.Hop{Time: time.Now().UTC(), SessionID: p.SessionID, Title: p.Title, From: p.SourceHost,
-		To: p.StartContext.TargetHost, Fork: p.Resume.Fork, SourceFile: p.SourceFile}
+		To: p.StartContext.TargetHost, Fork: p.Resume.Fork, SourceFile: p.SourceFile, Notified: p.Options.NotifyOld}
 	switch p.Mark {
 	case MarkNow:
 		if ap, ok := src.FS.(fsys.Appender); ok {

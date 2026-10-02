@@ -20,6 +20,9 @@ const (
 	MarkPending = "pending" // write it once the old session has stopped
 	MarkOff     = "off"     // not wanted (fork, or the user turned it off)
 	MarkFailed  = "failed"  // gave up (see MarkError)
+	// MarkDiverged: the old copy gained new turns after the move, so it is not marked;
+	// both copies exist and hopsesh shows them as diverged.
+	MarkDiverged = "diverged"
 )
 
 // Hop is one completed move to this machine.
@@ -30,6 +33,7 @@ type Hop struct {
 	From       string    `json:"from"` // machine name the copy came from
 	To         string    `json:"to"`   // this machine's name
 	Fork       bool      `json:"fork,omitempty"`
+	Notified   bool      `json:"notified,omitempty"` // the old session was told about the move
 	SourceFile string    `json:"sourceFile"`
 	Mark       string    `json:"mark"`
 	MarkError  string    `json:"markError,omitempty"`
