@@ -52,6 +52,7 @@ type row struct {
 
 type model struct {
 	deps     Deps
+	copied   bool // the resume command was copied on the done screen
 	mode     mode
 	width    int
 	height   int
@@ -260,6 +261,9 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 			argv := m.plan.Resume.Argv()
 			m.exit = &Exit{RunDir: m.plan.TargetCWD, RunArgv: argv}
 			return m, tea.Quit
+		case "c":
+			m.copied = true
+			return m, tea.SetClipboard(m.plan.Resume.Shell(link.DefaultShell()))
 		case "q", "esc":
 			return m, tea.Quit
 		}
@@ -491,8 +495,70 @@ func (m *model) viewDone(b *strings.Builder) {
 	if res.Secrets.Total > 0 {
 		fmt.Fprintf(b, " · %d likely secret(s)", res.Secrets.Total)
 	}
-	b.WriteString("\n\n  Start it:\n\n  " + p.Resume.Shell(link.DefaultShell()) + "\n")
-	b.WriteString(dim.Render("\n  enter: start claude there now · q: quit (undo with: hopsesh undo " + p.SessionID[:8] + ")\n"))
+	b.WriteString("\n\n  Start it:\n\n")
+	family := link.DefaultShell()
+	for _, line := range wrapCommand(p.Resume.Shell(family), max(m.width, 80)-4, family) {
+		b.WriteString("  " + line + "\n")
+	}
+	if m.copied {
+		b.WriteString(okSt.Render("\n  Copied to the clipboard.") + "\n")
+	}
+	b.WriteString(dim.Render("\n  enter: start claude there now · c: copy the command · q: quit (undo with: hopsesh undo " + p.SessionID[:8] + ")\n"))
+}
+
+// wrapCommand breaks a long shell command at spaces outside quotes, ending each broken
+// line with the shell's continuation character, so the command stays whole and
+// copyable on a narrow terminal.
+func wrapCommand(cmd string, width int, family string) []string {
+	cont := " \\"
+	if family == "powershell" {
+		cont = " `"
+	}
+	var tokens []string
+	var cur strings.Builder
+	var quote rune
+	depth := 0 // inside $( … )
+	for _, r := range cmd {
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			}
+		case r == '\'' || r == '"':
+			quote = r
+		case r == '(':
+			depth++
+		case r == ')' && depth > 0:
+			depth--
+		case r == ' ' && depth == 0:
+			if cur.Len() > 0 {
+				tokens = append(tokens, cur.String())
+				cur.Reset()
+			}
+			continue
+		}
+		cur.WriteRune(r)
+	}
+	if cur.Len() > 0 {
+		tokens = append(tokens, cur.String())
+	}
+	var lines []string
+	line := ""
+	for _, t := range tokens {
+		switch {
+		case line == "":
+			line = t
+		case len(line)+1+len(t)+len(cont) > width:
+			lines = append(lines, line+cont)
+			line = "    " + t
+		default:
+			line += " " + t
+		}
+	}
+	if line != "" {
+		lines = append(lines, line)
+	}
+	return lines
 }
 
 func ago(t time.Time) string {
