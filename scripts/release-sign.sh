@@ -61,6 +61,15 @@ FULL_COMMIT="$(git -C "$ROOT" rev-parse "$TAG^{commit}")"
 COMMIT="${FULL_COMMIT:0:7}"
 DATE="$(git -C "$ROOT" log -1 --format=%cI "$TAG^{commit}")"
 
+# Build with at least the toolchain go.mod asks for (older Go releases carry standard
+# library vulnerabilities that would ship in the binaries).
+WANT_GO="$(sed -n 's/^toolchain //p' "$WORK/src/go.mod")"
+HAVE_GO="$(cd "$WORK/src" && go env GOVERSION)"
+if [ -n "$WANT_GO" ] && [ "$(printf '%s\n%s\n' "$WANT_GO" "$HAVE_GO" | sort -V | head -n1)" != "$WANT_GO" ]; then
+  die "building $TAG needs $WANT_GO but go is $HAVE_GO"
+fi
+echo "building with $HAVE_GO"
+
 # The release key must be the one whose public half ships in the tagged source.
 openssl ec -in "$KEY" -pubout 2>/dev/null | diff -q - "$WORK/src/packaging/release-key.pub" >/dev/null \
   || die "$KEY does not match packaging/release-key.pub at $TAG"
