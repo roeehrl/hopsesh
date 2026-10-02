@@ -10,6 +10,8 @@
 set -eu
 
 BIN=${BIN:-$PWD/bin/hopsesh}
+case "$BIN" in /*) ;; *) BIN=$PWD/$BIN ;; esac
+cd / # the test users cannot read the caller's working directory (git checks it)
 B=hsremote # box
 A=hsback   # back
 ID=7c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d4e5
