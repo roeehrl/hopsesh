@@ -113,7 +113,8 @@ hopsesh undo                                   # undo the newest move (--list sh
 
 Same engine, with a preflight screen for each move: repository, worktree mode, what gets
 rewritten, and what's left behind on the other machine. Every session has **Continue in…**,
-with a preview of the conversion. Settings has per-agent options and a **Receive sessions**
+with a preview of the conversion, and sessions on this machine have **Send to…** another
+machine: it plans there, carries it out, and one Undo reverses both sides. Settings has per-agent options and a **Receive sessions**
 switch. It can also put the `hopsesh` command on your PATH (a link into the app, no
 administrator password) and install the skill into your agents.
 
@@ -181,8 +182,7 @@ hopsesh push 7f3c2a1e laptop     # on the machine that has the session
 The receiver plans with its own agents and settings against a read-only copy of that
 session's files; it can't read or run anything else on the sender. Nothing changes until you
 confirm, and `hopsesh undo` on the sender reverses both machines. Both sides must speak the same
-hopsesh protocol version (otherwise hopsesh asks you to update), and Windows machines can't
-receive yet. Details:
+hopsesh protocol version; otherwise hopsesh asks you to update. Details:
 [docs/design.md §11](docs/design.md#11-peers-working-with-hopsesh-on-the-other-machine).
 
 ## Use it from your agent
@@ -324,7 +324,10 @@ added to the original, so nothing in the original is lost.
 
 By default hopsesh copies it as it is and hands it off: the copy left behind is marked when
 that session ends. With `--fork`, both copies continue independently. hopsesh refuses to
-replace a session that's open on this machine, unless `--stop-local` quits it first.
+replace a session that's open on this machine, unless `--stop-local` quits it first. For
+Codex that works only between turns, because Codex has no graceful way to stop mid-turn: if
+it's working, hopsesh asks you to let it finish. Listings show running sessions as "live
+working" or "live idle".
 </details>
 
 <details>
@@ -344,11 +347,13 @@ left as they are and listed in the plan.
 </details>
 
 <details>
-<summary><b>Different Claude accounts on the two machines?</b></summary>
+<summary><b>Different accounts on the two machines?</b></summary>
 
-hopsesh reads `claude auth status` on both sides. If the accounts differ, it leaves out
-thinking blocks, because they're signed for the original account. Codex's encrypted content is
-never edited.
+hopsesh asks each agent which account it's signed in to: `claude auth status` for Claude Code,
+and Codex itself for Codex (its `auth.json` is never read). If the accounts differ, it leaves
+out what only the original account can use: Claude Code's signed thinking blocks, and Codex's
+encrypted reasoning and compaction records. These are removed whole, never edited, and the
+conversation itself stays.
 </details>
 
 <details>
