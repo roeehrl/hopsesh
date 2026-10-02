@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## [0.1.0] - 2026-10-02
+
+First public release.
+
 ### Added
 - Discovery of machines from Tailscale and `~/.ssh/config` (connects to nothing), per-machine
   consent, strict host-key trust (`hosts`, `trust`), and `doctor`.
@@ -25,3 +29,5 @@ All notable changes to this project are documented here. The format follows
 - Release pipeline: Linux and Windows builds with build provenance and SBOMs in CI; macOS
   binaries and app signed and notarized on the maintainer's Mac; `checksums.txt` signed with
   a release key that never leaves that Mac; install scripts; Scoop/winget and Linux packages.
+
+[0.1.0]: https://github.com/roeehrl/hopsesh/releases/tag/v0.1.0
