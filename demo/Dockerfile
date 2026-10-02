@@ -1,0 +1,29 @@
+# Demo environment for the README recordings: two made-up machines on one network.
+# See demo/README.md. Build context is the repository root.
+FROM golang:1.27-bookworm AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -o /out/hopsesh ./cmd/hopsesh \
+ && CGO_ENABLED=0 go build -trimpath -o /out/demoseed ./internal/devtools/demoseed \
+ && CGO_ENABLED=0 go build -trimpath -tags server -o /out/hopsesh-app ./cmd/hopsesh-app
+
+# "studio": the machine the sessions live on.
+FROM debian:bookworm-slim AS studio
+RUN apt-get update && apt-get install -y --no-install-recommends openssh-server git procps ca-certificates \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd -m -s /bin/bash alice && mkdir -p /run/sshd /srv/git && chown alice /srv/git
+COPY --from=build /out/demoseed /usr/local/bin/demoseed
+COPY demo/claude-stub.sh /usr/local/bin/claude
+COPY demo/studio-entrypoint.sh /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
+
+# "laptop": where hopsesh runs and VHS records.
+FROM ghcr.io/charmbracelet/vhs AS laptop
+RUN apt-get update && apt-get install -y --no-install-recommends openssh-client git procps \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd -m -s /bin/bash alice && mkdir -p /srv/git && chown alice /srv/git
+COPY --from=build /out/hopsesh /out/demoseed /out/hopsesh-app /usr/local/bin/
+COPY demo/claude-stub.sh /usr/local/bin/claude
+COPY demo/laptop-setup.sh /usr/local/bin/laptop-setup

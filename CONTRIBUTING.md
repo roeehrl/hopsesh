@@ -2,6 +2,23 @@
 
 Thanks for helping. A few ground rules keep the project safe and maintainable.
 
+## Start here (about 60 seconds)
+
+```sh
+git clone https://github.com/roeehrl/hopsesh && cd hopsesh
+make test                 # vet + tests
+go run ./cmd/hopsesh      # the TUI against your own machines
+demo/record.sh shell      # or: two made-up machines in Docker, no setup needed
+```
+
+- Not sure where to begin? Look at issues labelled
+  [good first issue](https://github.com/roeehrl/hopsesh/contribute) or
+  [help wanted](https://github.com/roeehrl/hopsesh/labels/help%20wanted), or ask in
+  [Discussions](https://github.com/roeehrl/hopsesh/discussions).
+- For anything bigger than a small fix, open an issue or discussion first so we can agree on
+  the approach before you spend time on it.
+- We try to reply to new issues and pull requests within a couple of days.
+
 ## Development
 
 ```sh
@@ -14,6 +31,9 @@ make app      # macOS only: builds dist/macos/hopsesh.app (unsigned unless SIGN_
 - Go 1.26+. On Linux the desktop-app packages need GTK 4 and WebKitGTK 6
   (`libgtk-4-dev libwebkitgtk-6.0-dev` on Debian/Ubuntu) for `go vet ./...` and the tests.
 - `scripts/integration-test.sh` runs a real SSH round trip (Linux, needs sudo; CI runs it).
+- `demo/record.sh shell` gives you two made-up machines (see [demo/README.md](demo/README.md)),
+  so you can test listing and moving sessions without a second computer. If you change what
+  the TUI or app shows, re-record the demo with `demo/record.sh`.
 - Keep dependencies few and permissively licensed (MIT, BSD, Apache-2.0).
 - Anything that depends on Claude Code's file formats goes in `internal/core/sessions` or
   `internal/core/rewrite`, with tests. Those formats are not a public API and change
