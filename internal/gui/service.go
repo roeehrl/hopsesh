@@ -443,6 +443,7 @@ type OptsDTO struct {
 	SyncCode     bool   `json:"syncCode"`
 	PushSource   bool   `json:"pushSource"`
 	StopLocal    bool   `json:"stopLocal"`
+	Conflict     string `json:"conflict"` // "", "replace" or "keep-both"
 }
 
 // PlanDTO is the rendered plan.
@@ -479,7 +480,7 @@ func (a *App) Plan(machine, sessionID string, o OptsDTO) (*PlanDTO, error) {
 	opt := engine.Options{TargetDir: o.TargetDir, Clone: o.Clone, ReposDir: nonEmpty(o.ReposDir, a.cfg.ReposDir), GHQLayout: a.cfg.Layout == "ghq",
 		Worktree: engine.WorktreeMode(nonEmpty(o.Worktree, "auto")), Fork: o.Fork, RemoteCtl: o.RemoteCtl, NotifyOld: o.NotifyOld,
 		Redact: o.Redact, DropThinking: o.OtherAccount, CopyMemory: o.Memory,
-		MarkSource: o.MarkSource, SyncCode: o.SyncCode, PushSource: o.PushSource, StopLocal: o.StopLocal}
+		MarkSource: o.MarkSource, SyncCode: o.SyncCode, PushSource: o.PushSource, StopLocal: o.StopLocal, Conflict: o.Conflict}
 	src := m.PlanSource(ctx)
 	p, err := engine.BuildPlan(ctx, src, tgt, engine.Input{Summary: &sess.Summary, Git: sess.Git, Live: sess.Live}, opt)
 	if err != nil {

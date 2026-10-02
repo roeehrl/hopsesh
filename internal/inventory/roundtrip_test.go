@@ -1,9 +1,13 @@
 package inventory
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/roeehrl/hopsesh/internal/core/fsys"
+	"github.com/roeehrl/hopsesh/internal/core/hops"
 	"github.com/roeehrl/hopsesh/internal/core/sessions"
 )
 
@@ -47,5 +51,42 @@ func TestGroupByRepoMergesCopies(t *testing.T) {
 	}
 	if n != 2 {
 		t.Fatalf("want 2 entries (one per session), got %d", n)
+	}
+}
+
+func TestPendingMarks(t *testing.T) {
+	st := t.TempDir()
+	dir := t.TempDir()
+	hopAt := time.Date(2026, 10, 2, 10, 0, 0, 0, time.UTC)
+	write := func(name, extra string) string {
+		f := filepath.Join(dir, name+".jsonl")
+		os.WriteFile(f, []byte(`{"type":"user","uuid":"u1","sessionId":"`+name+`","cwd":"/p","timestamp":"2026-10-02T09:00:00Z","message":{"role":"user","content":"hi"}}`+"\n"+extra), 0o600)
+		return f
+	}
+	quiet := write("quiet", "")
+	busy := write("busy", `{"type":"user","uuid":"u2","sessionId":"busy","timestamp":"2026-10-02T11:00:00Z","message":{"role":"user","content":"more"}}`+"\n")
+	running := write("running", "")
+	for _, id := range []string{"quiet", "busy", "running"} {
+		hops.Append(st, hops.Hop{Time: hopAt, SessionID: id, From: "laptop", To: "studio", Mark: hops.MarkPending})
+	}
+	mk := func(id, f string, live bool) Session {
+		s, _ := sessions.Summarize(fsys.Local{}, f)
+		out := Session{Summary: *s}
+		if live {
+			out.Live = &sessions.LiveEntry{PID: 1, SessionID: id}
+		}
+		return out
+	}
+	m := &Machine{Name: "laptop", fs: fsys.Local{}, Sessions: []Session{mk("quiet", quiet, false), mk("busy", busy, false), mk("running", running, true)}}
+	sc := &Scanner{StateDir: st}
+	sc.applyPendingMarks(m)
+	want := map[string]string{"quiet": hops.MarkDone, "busy": hops.MarkDiverged, "running": hops.MarkPending}
+	for id, w := range want {
+		if h, _ := hops.Last(st, id); h.Mark != w {
+			t.Errorf("%s: mark %s, want %s", id, h.Mark, w)
+		}
+	}
+	if s, _ := sessions.Summarize(fsys.Local{}, quiet); s.MovedTo != "studio" {
+		t.Fatalf("quiet copy not marked: %+v", s)
 	}
 }

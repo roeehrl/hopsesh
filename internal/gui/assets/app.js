@@ -239,8 +239,12 @@ function renderPlan() {
       h("select", { "aria-label": "Worktree mode", onchange: (ev) => { o.worktree = ev.target.value; replan(); } },
         ...[["auto", "Recreate it if the session used one"], ["create", "Always use a worktree on this branch"], ["main", "Use the main checkout"]].map(([v, t]) => h("option", { value: v, selected: o.worktree === v }, t)))));
   }
-  if (r.unpushed || r.dirty) repoItems.push(item("warn", "Work left behind on " + p.sourceHost,
-    `${r.unpushed} unpushed commit(s) and ${r.dirty} uncommitted file(s) won't be here.` + (r.unpushed && r.sourceUpstream ? " Tick “Push them first” to send the commits." : " Push or commit them there first, or hop anyway.")));
+  if (r.unpushed || r.dirty) {
+    const parts = [];
+    if (r.unpushed) parts.push(p.syncFromSource || p.push ? `${r.unpushed} unpushed commit(s) come along (${p.push ? "pushed first" : "fetched straight from " + p.sourceHost})` : `${r.unpushed} unpushed commit(s) won't be here`);
+    if (r.dirty) parts.push(`${r.dirty} uncommitted file(s) stay on ${p.sourceHost} (commit them there to bring them)`);
+    repoItems.push(item(r.dirty || !(p.syncFromSource || p.push) ? "warn" : "ok", "Work on " + p.sourceHost, parts.join("; ") + "."));
+  }
   if (p.sync) repoItems.push(item("ok", "Code", p.sync[0].toUpperCase() + p.sync.slice(1) + "."));
   if (p.stopPid) repoItems.push(item("warn", `The copy running here (pid ${p.stopPid}) will be quit first`, "It gets the normal quit signal and saves its transcript before the newer copy replaces it."));
 
@@ -257,6 +261,12 @@ function renderPlan() {
     warnings.length || (p.blockers || []).length ? h("div", { class: "card" }, h("div", { class: "card-h" }, h("span", { class: "name" }, "Check before hopping")),
       h("div", { class: "sec" }, ...warnings.map((w) => item("warn", w, "")), ...(p.blockers || []).map((b) => b.includes("running on this machine")
         ? h("div", {}, item("err", b, ""), h("div", { style: "padding-left:28px" }, h("button", { class: "btn primary", onclick: () => { o.stopLocal = true; replan(); } }, "Quit it and continue")))
+        : p.conflict && b.startsWith(p.conflict)
+        ? h("div", {}, item("err", "Both copies changed: " + p.conflict, "Nothing is merged. Pick which to keep."),
+            h("div", { style: "display:flex;gap:8px;padding-left:28px" },
+              h("button", { class: "btn", onclick: () => { o.conflict = "keep-both"; replan(); } }, "Keep both (bring this one in separately)"),
+              h("button", { class: "btn", onclick: () => { o.conflict = "replace"; replan(); } }, "Replace the copy here"),
+              h("button", { class: "btn", onclick: () => showSessions() }, "Keep the copy here")))
         : item("err", b, ""))))
       : null);
 

@@ -24,7 +24,9 @@ type SyncResult struct {
 	Commit  string `json:"commit"`            // the session's commit
 	Behind  int    `json:"behind,omitempty"`  // commits the checkout was missing
 	Fetched bool   `json:"fetched,omitempty"` // a fetch was needed to find the commit
-	Branch  string `json:"branch,omitempty"`  // branch checked out in dir
+	// FromSource: the commit came straight from the other machine (it was not pushed).
+	FromSource bool   `json:"fromSource,omitempty"`
+	Branch     string `json:"branch,omitempty"` // branch checked out in dir
 }
 
 // HasCommit reports whether dir's repository contains commit.
@@ -33,16 +35,36 @@ func HasCommit(ctx context.Context, dir, commit string) bool {
 	return err == nil
 }
 
-// Sync brings dir up to commit when that is safe: it fetches if the commit is not
-// there yet, and when fastForward is set it moves a clean checkout on branch forward
-// with --ff-only. It never merges, rebases, stashes or touches another branch.
-func Sync(ctx context.Context, dir, branch, commit string, fastForward bool) (SyncResult, error) {
+// FetchSource is the other machine's repository, reachable over SSH, to fetch commits
+// that were never pushed.
+type FetchSource struct {
+	Name string   // machine name (used in refs/hopsesh/<name>/<branch>)
+	URL  string   // scp-style URL, e.g. laptop:/Users/alice/git/app
+	Env  []string // e.g. GIT_SSH_COMMAND for the same SSH settings hopsesh uses
+}
+
+// Sync brings dir up to commit when that is safe: it fetches from origin if the commit
+// is not there yet, then from the other machine itself (from, when given) into
+// refs/hopsesh/<machine>/<branch>, and when fastForward is set it moves a clean checkout
+// on branch forward with --ff-only. It never merges, rebases, stashes or touches another
+// branch.
+func Sync(ctx context.Context, dir, branch, commit string, fastForward bool, from *FetchSource) (SyncResult, error) {
 	r := SyncResult{Commit: commit, Branch: CurrentBranch(ctx, dir)}
 	if !HasCommit(ctx, dir, commit) {
 		r.Fetched = true
 		_, _ = runGit(ctx, dir, "fetch", "--quiet", "origin")
 		if branch != "" {
 			_, _ = runGit(ctx, dir, "fetch", "--quiet", "origin", branch)
+		}
+		if !HasCommit(ctx, dir, commit) && from != nil && from.URL != "" {
+			srcRef, name := "HEAD", "HEAD"
+			if branch != "" {
+				srcRef, name = "refs/heads/"+branch, branch
+			}
+			ref := "refs/hopsesh/" + safeRefPart(from.Name) + "/" + name
+			if _, err := runGitEnv(ctx, dir, from.Env, "fetch", "--quiet", "--no-tags", from.URL, "+"+srcRef+":"+ref); err == nil {
+				r.FromSource = true
+			}
 		}
 		if !HasCommit(ctx, dir, commit) {
 			r.State = SyncMissing
@@ -94,3 +116,13 @@ func Sync(ctx context.Context, dir, branch, commit string, fastForward bool) (Sy
 const PushScript = `cd "$1" || exit 2
 git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1 || { echo no-upstream; exit 3; }
 GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}" git push --quiet 2>&1`
+
+func safeRefPart(s string) string {
+	b := []byte(s)
+	for i, c := range b {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.') {
+			b[i] = '-'
+		}
+	}
+	return strings.Trim(string(b), ".")
+}

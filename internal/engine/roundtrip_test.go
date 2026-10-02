@@ -176,3 +176,63 @@ func TestRoundTripLiveAndFork(t *testing.T) {
 		t.Fatalf("pending: %+v", got)
 	}
 }
+
+// TestHopBackConflicts: the copy here kept changing after it was marked moved. The move
+// is refused by default; --keep-both brings the incoming copy in under a new id, and
+// --replace sets the copy here aside.
+func TestHopBackConflicts(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX fixtures")
+	}
+	ctx := context.Background()
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	id := "aaaaaaaa-bbbb-cccc-dddd-ffffffffffff"
+	srcHome, tgtHome := filepath.Join(root, "studio"), filepath.Join(root, "laptop")
+	srcDir, tgtDir := filepath.Join(srcHome, "p"), filepath.Join(tgtHome, "p")
+	os.MkdirAll(srcDir, 0o755)
+	os.MkdirAll(tgtDir, 0o755)
+	srcCfg, tgtCfg := filepath.Join(srcHome, ".claude"), filepath.Join(tgtHome, ".claude")
+	srcFile := filepath.Join(srcCfg, "projects", sessions.Slug(srcDir), id+".jsonl")
+	writeJSONL(t, srcFile,
+		map[string]any{"type": "user", "uuid": "u1", "parentUuid": nil, "sessionId": id, "cwd": srcDir, "timestamp": "2026-10-02T09:00:00Z", "message": map[string]any{"role": "user", "content": "on the studio"}})
+	hereFile := filepath.Join(tgtCfg, "projects", sessions.Slug(tgtDir), id+".jsonl")
+	writeJSONL(t, hereFile,
+		map[string]any{"type": "user", "uuid": "u1", "parentUuid": nil, "sessionId": id, "cwd": tgtDir, "timestamp": "2026-10-01T09:00:00Z", "message": map[string]any{"role": "user", "content": "start"}},
+		map[string]any{"type": "custom-title", "customTitle": "↪ moved to studio · Work", "sessionId": id},
+		map[string]any{"type": "user", "uuid": "u9", "parentUuid": "u1", "sessionId": id, "cwd": tgtDir, "timestamp": "2026-10-02T10:00:00Z", "message": map[string]any{"role": "user", "content": "kept going on the laptop"}})
+	sum, _ := sessions.Summarize(fsys.Local{}, srcFile)
+	src := Source{Host: "studio", OS: "darwin", FS: fsys.Local{}, ConfigDir: srcCfg, Home: srcHome}
+	tgt := Target{Host: "laptop", OS: "darwin", ConfigDir: tgtCfg, Home: tgtHome, ClaudeVersion: "2.1.284"}
+	plan := func(conflict string) *Plan {
+		p, err := BuildPlan(ctx, src, tgt, Input{Summary: sum}, Options{TargetDir: tgtDir, MarkSource: true, Conflict: conflict})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	if p := plan(""); p.Conflict == "" || len(p.Blockers) == 0 {
+		t.Fatalf("diverged copy must block: %+v", p.Blockers)
+	}
+	p := plan("keep-both")
+	if len(p.Blockers) > 0 || p.OriginalID != id || p.SessionID == id || len(p.Duplicates) != 0 || p.Mark != MarkOff {
+		t.Fatalf("keep-both plan: %+v", p)
+	}
+	if _, err := Apply(ctx, p, src, Env{StateDir: filepath.Join(root, "state")}); err != nil {
+		t.Fatal(err)
+	}
+	kept, _ := sessions.Summarize(fsys.Local{}, hereFile)
+	if kept.LastPrompt != "kept going on the laptop" {
+		t.Fatal("keep-both must leave the copy here untouched")
+	}
+	other, err := sessions.Summarize(fsys.Local{}, p.TargetFile)
+	if err != nil || other.ID != p.SessionID || other.Title != "Work (from studio)" && other.Title != "on the studio (from studio)" {
+		t.Fatalf("incoming copy: %+v %v", other, err)
+	}
+	b, _ := os.ReadFile(p.TargetFile)
+	if strings.Contains(string(b), `"sessionId":"`+id+`"`) {
+		t.Fatal("the incoming copy still uses the old session id")
+	}
+	if p := plan("replace"); len(p.Blockers) > 0 || len(p.Duplicates) != 1 {
+		t.Fatalf("replace plan: %+v", p)
+	}
+}

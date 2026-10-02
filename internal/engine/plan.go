@@ -33,6 +33,9 @@ type Source struct {
 	// Push pushes the current branch of a directory there to its upstream (nil when the
 	// machine cannot run commands, e.g. a plain file import). It returns git's message.
 	Push func(ctx context.Context, dir string) (string, error)
+	// GitFetch describes how to fetch from a repository there over SSH (nil when not
+	// possible), so commits that were never pushed can still come along.
+	GitFetch func(repoDir string) *repos.FetchSource
 }
 
 // Target is this machine.
@@ -76,6 +79,9 @@ type Options struct {
 	SyncCode   bool // fetch the session's commit here and fast-forward a clean checkout to it
 	PushSource bool // first push the source branch's unpushed commits from the source machine
 	StopLocal  bool // quit a copy of this session that is running on this machine
+	// Conflict says what to do when the copy here changed too: "" refuses, "replace"
+	// sets it aside (undo keeps it), "keep-both" brings this copy in as a separate session.
+	Conflict string
 }
 
 // FileItem is one file to copy.
@@ -138,6 +144,12 @@ type Plan struct {
 	StopPID int    `json:"stopPid,omitempty"` // a local process of this session to quit first
 	Push    bool   `json:"push,omitempty"`    // push the source branch first
 	Sync    string `json:"sync,omitempty"`    // what code sync will do, in words ("" when not applicable)
+	// When the copy here changed as well: what changed, and the original id when this
+	// copy comes in under a new id (keep both).
+	Conflict   string `json:"conflict,omitempty"`
+	OriginalID string `json:"originalId,omitempty"`
+	// SyncFromSource: unpushed commits will be fetched straight from the source machine.
+	SyncFromSource bool `json:"syncFromSource,omitempty"`
 }
 
 // Input bundles what BuildPlan needs about the session.
@@ -216,6 +228,9 @@ func BuildPlan(ctx context.Context, src Source, tgt Target, in Input, opt Option
 			}
 		}
 	}
+	if src.Host != tgt.Host && len(p.Duplicates) > 0 {
+		planConflict(p, s, opt)
+	}
 	planWarnings(p, src, tgt, in, opt)
 	p.Warnings = append(p.Warnings, authNotes...)
 	planRoundTrip(p, src, tgt, in, opt)
@@ -229,7 +244,7 @@ func BuildPlan(ctx context.Context, src Source, tgt Target, in Input, opt Option
 		NotifyOld: opt.NotifyOld, OldName: p.OldName, NewName: p.NewName,
 	}
 	p.Resume = link.Resume{
-		Dir: p.TargetCWD, SessionID: s.ID, Fork: opt.Fork && p.Live, RemoteCtl: opt.RemoteCtl, Name: p.NewName,
+		Dir: p.TargetCWD, SessionID: p.SessionID, Fork: opt.Fork && p.Live, RemoteCtl: opt.RemoteCtl, Name: p.NewName,
 		StartPrompt: link.StartPrompt(p.StartContext),
 	}
 	return p, nil

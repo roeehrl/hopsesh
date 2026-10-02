@@ -269,6 +269,12 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		case "k":
 			m.opts.StopLocal = !m.opts.StopLocal
 			return m, m.planCmd()
+		case "R":
+			m.opts.Conflict = map[bool]string{true: "", false: "replace"}[m.opts.Conflict == "replace"]
+			return m, m.planCmd()
+		case "B":
+			m.opts.Conflict = map[bool]string{true: "", false: "keep-both"}[m.opts.Conflict == "keep-both"]
+			return m, m.planCmd()
 		}
 	case modeDone:
 		switch k {
@@ -529,6 +535,9 @@ func (m *model) viewPlan(b *strings.Builder) {
 		on(m.opts.Clone), string(m.opts.Worktree), on(m.opts.RemoteCtl), on(m.opts.NotifyOld), on(m.opts.Fork), on(m.opts.Redact))
 	fmt.Fprintf(b, "  [m] mark old copy %s  [s] sync code %s  [p] push on %s %s  [k] quit copy running here %s\n",
 		on(m.opts.MarkSource), on(m.opts.SyncCode), p.SourceHost, on(m.opts.PushSource), on(m.opts.StopLocal))
+	if p.Conflict != "" || m.opts.Conflict != "" {
+		fmt.Fprintf(b, "  the copy here changed too: [R] replace it %s  [B] keep both %s\n", on(m.opts.Conflict == "replace"), on(m.opts.Conflict == "keep-both"))
+	}
 	if len(p.Blockers) == 0 {
 		b.WriteString(dim.Render("\n  y/enter: hop · esc: back\n"))
 	} else {

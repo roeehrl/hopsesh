@@ -132,6 +132,21 @@ func TestDropMovedMarks(t *testing.T) {
 	}
 }
 
+func TestRenameSession(t *testing.T) {
+	old, nw := "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
+	in := `{"type":"user","sessionId":"` + old + `","uuid":"` + old + `","toolUseResult":{"persistedOutputPath":"/Users/alice/.claude/projects/p/` + old + `/tool-results/x.txt"},"message":{"content":[{"type":"thinking","thinking":"see ` + old + `","signature":"s"}]}}` + "\n"
+	out, st := run(t, in, Options{RenameSession: [2]string{old, nw}, SessionID: nw, AppendTitle: "x (from laptop)"})
+	if !strings.Contains(out, `"sessionId":"`+nw+`"`) || !strings.Contains(out, "/"+nw+"/tool-results") {
+		t.Fatalf("not renamed: %s", out)
+	}
+	if !strings.Contains(out, `"uuid":"`+old+`"`) || !strings.Contains(out, `"thinking":"see `+old+`"`) {
+		t.Fatalf("message ids and signed thinking must not change: %s", out)
+	}
+	if st.RenamedIDs != 2 || !strings.Contains(out, `{"type":"custom-title","customTitle":"x (from laptop)","sessionId":"`+nw+`"}`) {
+		t.Fatalf("renamed=%d\n%s", st.RenamedIDs, out)
+	}
+}
+
 func TestStripBridgeDropThinkingAndRelocated(t *testing.T) {
 	in := `{"type":"bridge-session","bridgeSessionId":"b1"}` + "\n" +
 		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"","signature":"s"},{"type":"text","text":"hi"}]},"z":1}` + "\n"

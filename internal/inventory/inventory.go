@@ -171,6 +171,7 @@ func (m *Machine) PlanSource(ctx context.Context) engine.Source {
 	}
 	src.Auth = m.auth
 	src.Push = m.pushFunc()
+	src.GitFetch = m.gitFetchFunc()
 	return src
 }
 
