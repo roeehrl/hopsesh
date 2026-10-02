@@ -14,25 +14,25 @@ import (
 // identity is the part of a node its id covers: what the model sees, never timestamps,
 // native ids or provenance.
 type identity struct {
-	Kind   Kind            `json:"k"`
-	Actor  Actor           `json:"a"`
-	Text   string          `json:"t,omitempty"`
-	Tool   string          `json:"tn,omitempty"`
-	Input  json.RawMessage `json:"ti,omitempty"`
-	Status ToolStatus      `json:"rs,omitempty"`
-	Exit   *int            `json:"rx,omitempty"`
-	Output string          `json:"ro,omitempty"`
-	Plan   []PlanEntry     `json:"pl,omitempty"`
-	Att    string          `json:"at,omitempty"` // SHA-256 of attachment data
-	Opaque bool            `json:"op,omitempty"`
-	Parent NodeID          `json:"p,omitempty"`
+	Kind   Kind        `json:"k"`
+	Actor  Actor       `json:"a"`
+	Text   string      `json:"t,omitempty"`
+	Tool   string      `json:"tn,omitempty"`
+	Input  string      `json:"ti,omitempty"` // the exact input bytes (numbers in it may be fractional)
+	Status ToolStatus  `json:"rs,omitempty"`
+	Exit   *int        `json:"rx,omitempty"`
+	Output string      `json:"ro,omitempty"`
+	Plan   []PlanEntry `json:"pl,omitempty"`
+	Att    string      `json:"at,omitempty"` // SHA-256 of attachment data
+	Opaque bool        `json:"op,omitempty"`
+	Parent NodeID      `json:"p,omitempty"`
 }
 
 // ComputeID returns a node's content address given its parent.
 func ComputeID(n Node, parent NodeID) NodeID {
 	id := identity{Kind: n.Kind, Actor: n.Actor, Text: n.Text, Parent: parent, Plan: n.Plan}
 	if n.Tool != nil {
-		id.Tool, id.Input = n.Tool.Name, n.Tool.Input
+		id.Tool, id.Input = n.Tool.Name, string(n.Tool.Input)
 	}
 	if n.Result != nil {
 		id.Status, id.Exit, id.Output = n.Result.Status, n.Result.ExitCode, n.Result.Output

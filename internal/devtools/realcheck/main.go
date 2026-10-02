@@ -1,61 +1,69 @@
-// Command realcheck validates the session reader against the real ~/.claude on this
-// machine: every project folder name must equal Slug(cwd) for the cwd its transcripts
-// record (or the relocated cwd), and summaries must have titles. Read-only.
+// Command realcheck reads every agent's real sessions on this machine with the compiled-in
+// modules: listing, the conversation reader and lineage, and reports anything a module
+// cannot read. Read-only.
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
-	"github.com/roeehrl/hopsesh/internal/core/fsys"
-	"github.com/roeehrl/hopsesh/internal/core/sessions"
+	"github.com/roeehrl/hopsesh/internal/agents/all"
+	"github.com/roeehrl/hopsesh/internal/app"
+	"github.com/roeehrl/hopsesh/internal/config"
+	"github.com/roeehrl/hopsesh/sdk/agent"
+	"github.com/roeehrl/hopsesh/sdk/ir"
 )
 
 func main() {
-	cfg, err := sessions.LocalConfigDir()
-	if err != nil {
-		panic(err)
-	}
-	loc := sessions.Locator{FS: fsys.Local{}, ConfigDir: cfg}
-	list, err := loc.List(sessions.ListOptions{})
-	if err != nil {
-		panic(err)
-	}
-	match, mismatch, noTitle, noPrompt := 0, 0, 0, 0
-	seenDirs := map[string]bool{}
-	for _, s := range list {
-		if s.Title == "" {
-			noTitle++
-		}
-		if s.LastPrompt == "" {
-			noPrompt++
-		}
-		if s.CWD == "" || seenDirs[s.ProjectDir+"|"+s.CWD] {
+	ctx := context.Background()
+	a := app.New(config.Defaults(), all.Registry(), os.TempDir(), nil)
+	inv := a.Scan(ctx, app.ScanOptions{Hosts: []string{app.LocalName()}, SkipGit: true})
+	defer inv.Close()
+	here := inv.Local()
+	bad := 0
+	for _, st := range here.Agents {
+		if !st.Install.Present {
+			fmt.Printf("%s: not installed\n", st.Name)
 			continue
 		}
-		seenDirs[s.ProjectDir+"|"+s.CWD] = true
-		if ok(s) {
-			match++
-		} else {
-			mismatch++
-			fmt.Printf("MISMATCH dir=%s slug(cwd)=%s cwd=%s\n", s.ProjectDir, sessions.Slug(s.CWD), s.CWD)
+		mod, _ := a.Module(st.Agent)
+		h, err := here.Host().For(ctx, mod.Spec(), st.Install, nil)
+		if err != nil {
+			panic(err)
+		}
+		l, err := mod.List(ctx, h, st.Install)
+		if err != nil {
+			fmt.Printf("%s: listing failed: %v\n", st.Name, err)
+			bad++
+			continue
+		}
+		read, readErr, nodes, noTitle := 0, 0, 0, 0
+		reader, canRead := mod.(agent.Reader)
+		for _, s := range l.Sessions {
+			if s.Title == "" {
+				noTitle++
+			}
+			if !canRead {
+				continue
+			}
+			seg, err := reader.Read(ctx, h, st.Install, s, ir.Cursor{})
+			if err != nil {
+				readErr++
+				fmt.Printf("  READ %s: %v\n", s.Key, err)
+				continue
+			}
+			read++
+			nodes += len(seg.Nodes)
+		}
+		bad += len(l.Errors) + readErr
+		fmt.Printf("%s %s: sessions=%d listErrors=%d read=%d readErrors=%d nodes=%d noTitle=%d\n",
+			st.Name, st.Install.Version, len(l.Sessions), len(l.Errors), read, readErr, nodes, noTitle)
+		for _, e := range l.Errors {
+			fmt.Printf("  LIST %v\n", e)
 		}
 	}
-	live, _ := loc.LiveRegistry(sessions.LocalAlive)
-	fmt.Printf("sessions=%d dir/cwd pairs: match=%d mismatch=%d  noTitle=%d noLastPrompt=%d  live=%d\n",
-		len(list), match, mismatch, noTitle, noPrompt, len(live))
-	if mismatch > 0 {
+	if bad > 0 {
 		os.Exit(1)
 	}
-}
-
-// ok accepts the two layouts Claude Code uses: the folder of the project cwd, or, for a
-// session that entered a Claude worktree later, the folder of the worktree's repo root.
-func ok(s *sessions.Summary) bool {
-	for _, c := range []string{s.CWD, s.WorktreeRoot} {
-		if c != "" && (sessions.ResolvedSlug(c) == s.ProjectDir || sessions.Slug(c) == s.ProjectDir) {
-			return true
-		}
-	}
-	return false
 }

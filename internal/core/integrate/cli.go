@@ -229,3 +229,25 @@ func RemovePathBlock() error {
 	s = s[:start] + s[end:]
 	return os.WriteFile(f, []byte(s), 0o644)
 }
+
+// SkillBin is how agents should run hopsesh: plain "hopsesh" when the user's login shell
+// finds it, otherwise an absolute path (the linked tool, the app's tool, or this program).
+func SkillBin() string {
+	if LookLoginPath("hopsesh") != "" {
+		return "hopsesh"
+	}
+	if st := CheckCLI(); st.State == CLIOurs || st.State == CLIOtherApp || st.State == CLIStandalone {
+		return st.Path
+	}
+	if cli, err := AppCLI(); err == nil {
+		return cli
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return "hopsesh"
+	}
+	if r, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = r
+	}
+	return exe
+}

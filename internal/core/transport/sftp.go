@@ -8,13 +8,10 @@ import (
 	"strings"
 
 	"github.com/pkg/sftp"
-
-	"github.com/roeehrl/hopsesh/internal/core/fsys"
 )
 
 // RemoteFS is a remote filesystem over SFTP, carried by the system ssh client.
 type RemoteFS struct {
-	fsys.Slash
 	client *sftp.Client
 	cancel context.CancelFunc
 	// Windows servers expose drive paths as /C:/Users/...; ToSFTP converts native paths.
@@ -74,40 +71,6 @@ func (r *RemoteFS) ToSFTP(p string) string {
 		p = "/" + p
 	}
 	return p
-}
-
-func (r *RemoteFS) ReadDir(dir string) ([]os.FileInfo, error) { return r.client.ReadDir(r.ToSFTP(dir)) }
-func (r *RemoteFS) Stat(name string) (os.FileInfo, error)     { return r.client.Stat(r.ToSFTP(name)) }
-func (r *RemoteFS) Open(name string) (fsys.File, error)       { return r.client.Open(r.ToSFTP(name)) }
-func (r *RemoteFS) Join(elem ...string) string                { return path.Join(elem...) }
-
-// AppendKeepTime appends data to a remote file, starting on a new line, and restores its
-// modification time (marking a copy left behind must not make it look newer).
-func (r *RemoteFS) AppendKeepTime(name string, data []byte) error {
-	p := r.ToSFTP(name)
-	fi, err := r.client.Stat(p)
-	if err != nil {
-		return err
-	}
-	f, err := r.client.OpenFile(p, os.O_RDWR)
-	if err != nil {
-		return err
-	}
-	size := fi.Size()
-	if size > 0 {
-		last := make([]byte, 1)
-		if _, err := f.ReadAt(last, size-1); err == nil && last[0] != '\n' {
-			data = append([]byte{'\n'}, data...)
-		}
-	}
-	if _, err := f.WriteAt(data, size); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	return r.client.Chtimes(p, fi.ModTime(), fi.ModTime())
 }
 
 // WriteFile uploads data atomically (temp name, then rename); used to deploy the helper.

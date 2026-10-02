@@ -40,3 +40,11 @@ func TestNodeIDs(t *testing.T) {
 		t.Fatal("different content must change the id; the same prefix must not")
 	}
 }
+
+func TestToolInputWithFractions(t *testing.T) {
+	n := []Node{{Kind: KindToolCall, Actor: Agent, Tool: &ToolCall{Name: "Bash", Input: []byte(`{"command":"sleep 1","timeout":0.6}`)}}}
+	Chain(n, "") // must not panic: tool inputs are hashed as bytes
+	if n[0].ID == "" {
+		t.Fatal("no id")
+	}
+}

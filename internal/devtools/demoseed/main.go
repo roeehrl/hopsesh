@@ -22,7 +22,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/roeehrl/hopsesh/internal/core/sessions"
+	"github.com/roeehrl/hopsesh/agents/claude"
 )
 
 const version = "2.1.284"
@@ -134,7 +134,7 @@ func clone(name, url, parent string) string {
 func session(cwd, branch, title string, age time.Duration, status, first, last, file string) {
 	id := uuid()
 	cfg := filepath.Join(home, ".claude")
-	dir := filepath.Join(cfg, "projects", sessions.Slug(cwd))
+	dir := filepath.Join(cfg, "projects", claude.Slug(cwd))
 	must(os.MkdirAll(dir, 0o755))
 	t0 := now.Add(-age - 40*time.Minute)
 	ts := func(d time.Duration) string { return t0.Add(d).Format(time.RFC3339Nano) }
