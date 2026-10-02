@@ -58,6 +58,19 @@ func planRoundTrip(p *Plan, src Source, tgt Target, in Input, opt Options) {
 			p.SyncFromSource = true
 			p.Sync += fmt.Sprintf("; the %d unpushed commit(s) are fetched straight from %s", r.Unpushed, src.Host)
 		}
+		if p.SyncFromSource || p.Push {
+			// The commits come along; only uncommitted files stay behind.
+			kept := p.Warnings[:0]
+			for _, w := range p.Warnings {
+				if !strings.Contains(w, "unpushed commit(s) and") {
+					kept = append(kept, w)
+				}
+			}
+			p.Warnings = kept
+			if r.Dirty > 0 {
+				p.Warnings = append(p.Warnings, fmt.Sprintf("on %s %d uncommitted file(s) stay behind; commit them there to bring them", src.Host, r.Dirty))
+			}
+		}
 	}
 }
 

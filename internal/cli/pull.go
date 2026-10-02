@@ -280,7 +280,7 @@ func (a *app) transport(cmd *cobra.Command, src engine.Source, sum sessions.Summ
 		a.printf("\n  Pushed %s on %s.", p.Repo.SourceBranch, p.SourceHost)
 	}
 	if res.SyncNote != "" {
-		mark := "  "
+		mark := ""
 		if res.Sync != nil && (res.Sync.State == repos.SyncMissing || res.Sync.State == repos.SyncDiverged || res.Sync.State == repos.SyncDirty || res.Sync.State == repos.SyncOtherBranch || res.Sync.State == repos.SyncBehind) {
 			mark = "! "
 		}
