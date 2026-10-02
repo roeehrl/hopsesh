@@ -71,8 +71,13 @@ Scoop manifest and a winget pull request. Without it those steps are skipped.
 5. Review the draft on GitHub, then publish: `gh release edit v0.1.0 --draft=false`.
 
 To test the whole pipeline without publishing, use a pre-release tag such as
-`v0.1.0-rc.1`, then delete the draft and the tag
-(`gh release delete v0.1.0-rc.1 --cleanup-tag`).
+`v0.1.0-rc.2`, then delete the draft and the tag
+(`gh release delete v0.1.0-rc.2 --cleanup-tag`).
+
+**Never reuse a tag name, even a deleted test tag.** The Go module proxy and checksum
+database cache every version they see, permanently (`v0.1.0-rc.1` is already cached). A
+reused name with different contents breaks `go install` for everyone with a checksum
+mismatch. Pick the next number instead.
 
 ## Verifying a release by hand
 
