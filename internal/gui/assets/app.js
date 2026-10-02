@@ -187,18 +187,25 @@ function sessionRow(e) {
   if (e.worktree && e.mainBranch) bits.push(`main folder on ${e.mainBranch}`);
   if (e.unpushed) bits.push(`+${e.unpushed} unpushed`);
   if (e.dirty) bits.push(`${e.dirty} uncommitted`);
+  const others = (e.copies || []).filter((c) => !c.newest);
+  if (others.length) bits.push("also on " + others.map((c) => c.machine + (c.local ? " (here)" : "") + (c.movedTo ? `, moved to ${c.movedTo}` : ", older")).join("; "));
+  const action = e.hereNewest
+    ? h("button", { class: "btn outline", style: "justify-self:end", title: "The newest copy is already on this machine", onclick: async () => { try { await api("OpenInTerminal", e.resumeCommand); } catch (err) { toast(String(err.message || err)); } } }, "Resume")
+    : h("button", { class: "btn outline", style: "justify-self:end", title: e.staleHere ? "An older copy is on this machine; bring the newest one back" : "", onclick: () => preflight(e) }, e.staleHere ? "Hop back" : "Hop here");
   return h("div", { class: "row" },
     h("div", {}, h("div", { class: "t", title: e.title }, e.title), h("div", { class: "s" }, bits.join(" · ") || " ")),
     h("div", { style: "font-size:12px;min-width:0" }, h("div", {}, e.machine), h("div", { class: "mono s", title: e.cwd }, e.cwd)),
     h("div", { class: "prompt", title: e.lastPrompt }, e.lastPrompt ? `“${e.lastPrompt}”` : ""),
     h("div", { style: "font-size:12px" }, h("span", { class: "pill" + (e.live ? " live" : "") }, e.status), h("div", { class: "s" }, ago(e.lastActive))),
-    h("button", { class: "btn outline", style: "justify-self:end", onclick: () => preflight(e) }, "Hop here"));
+    action);
 }
 
 // ---------- preflight ----------
 async function preflight(e, keepOpts = false) {
   state.sel = e;
-  if (!keepOpts) state.opts = { worktree: "auto", remoteControl: false, notifyOld: false, fork: false, redact: false, clone: false, otherAccount: false, memory: false, targetDir: "" };
+  const dflt = state.info?.defaults || { markMoved: true, syncCode: true, pushSource: false };
+  if (!keepOpts) state.opts = { worktree: "auto", remoteControl: false, notifyOld: false, fork: false, redact: false, clone: false, otherAccount: false, memory: false, targetDir: "",
+    markSource: dflt.markMoved, syncCode: dflt.syncCode, pushSource: dflt.pushSource, stopLocal: false };
   setTitlebar("plan");
   loading("Working out the plan…");
   try { state.plan = await api("Plan", e.machine, e.id, state.opts); } catch (err) { view.replaceChildren(h("div", { class: "loading err" }, String(err.message || err))); return; }
@@ -232,7 +239,10 @@ function renderPlan() {
       h("select", { "aria-label": "Worktree mode", onchange: (ev) => { o.worktree = ev.target.value; replan(); } },
         ...[["auto", "Recreate it if the session used one"], ["create", "Always use a worktree on this branch"], ["main", "Use the main checkout"]].map(([v, t]) => h("option", { value: v, selected: o.worktree === v }, t)))));
   }
-  if (r.unpushed || r.dirty) repoItems.push(item("warn", "Work left behind on " + p.sourceHost, `${r.unpushed} unpushed commit(s) and ${r.dirty} uncommitted file(s) won't be here. Push them there first, or hop anyway.`));
+  if (r.unpushed || r.dirty) repoItems.push(item("warn", "Work left behind on " + p.sourceHost,
+    `${r.unpushed} unpushed commit(s) and ${r.dirty} uncommitted file(s) won't be here.` + (r.unpushed && r.sourceUpstream ? " Tick “Push them first” to send the commits." : " Push or commit them there first, or hop anyway.")));
+  if (p.sync) repoItems.push(item("ok", "Code", p.sync[0].toUpperCase() + p.sync.slice(1) + "."));
+  if (p.stopPid) repoItems.push(item("warn", `The copy running here (pid ${p.stopPid}) will be quit first`, "It gets the normal quit signal and saves its transcript before the newer copy replaces it."));
 
   const warnings = (p.warnings || []).filter((w) => !w.includes("unpushed") && !w.includes("worktree"));
   const main = h("div", { class: "pre-main" },
@@ -245,7 +255,9 @@ function renderPlan() {
       h("div", { class: "sec" }, h("div", { class: "maprow" }, ...p.mappings.flatMap((m) => [h("span", {}, m.from), h("span", { style: "color:var(--accent)" }, "→"), h("span", {}, m.to)])),
         h("div", { class: "muted", style: "font-size:11.5px" }, "Signed reasoning blocks, message ids and the session id are never changed."))),
     warnings.length || (p.blockers || []).length ? h("div", { class: "card" }, h("div", { class: "card-h" }, h("span", { class: "name" }, "Check before hopping")),
-      h("div", { class: "sec" }, ...warnings.map((w) => item("warn", w, "")), ...(p.blockers || []).map((b) => item("err", b, ""))))
+      h("div", { class: "sec" }, ...warnings.map((w) => item("warn", w, "")), ...(p.blockers || []).map((b) => b.includes("running on this machine")
+        ? h("div", {}, item("err", b, ""), h("div", { style: "padding-left:28px" }, h("button", { class: "btn primary", onclick: () => { o.stopLocal = true; replan(); } }, "Quit it and continue")))
+        : item("err", b, ""))))
       : null);
 
   const blocked = (p.blockers || []).length > 0;
@@ -258,6 +270,11 @@ function renderPlan() {
     opt("remoteControl", "Turn on Remote Control", `Reach the new session from your phone or other machines, as ${p.newName}.`),
     opt("notifyOld", "Tell the old session it moved", "The new session's first message asks Claude to notify it (needs Remote Control on both)."),
     p.live ? opt("fork", "Keep the old session running", "Fork instead of handing off: both copies continue.") : null,
+    p.mark !== "off" || !o.markSource ? opt("markSource", `Mark the copy on ${p.sourceHost} as moved`,
+      p.mark === "when-stopped" ? `It is still running; once it stops, its title becomes “↪ moved to ${state.info?.host || "here"} · …” so it isn't resumed by mistake.`
+        : `Its title becomes “↪ moved to ${state.info?.host || "here"} · ${p.title}”, so Claude Code's resume list there shows it moved.`) : null,
+    r.sourceHead ? opt("syncCode", "Bring the code here to the session's commit", "Fetches if needed; fast-forwards only a clean checkout on the same branch. Never merges.") : null,
+    r.unpushed && r.sourceUpstream ? opt("pushSource", `Push them first (${r.unpushed} commit(s) on ${p.sourceHost})`, `Runs git push on ${p.sourceHost} with its own credentials before copying.`) : null,
     opt("redact", "Redact likely secrets", "In this copy only."),
     opt("otherAccount", "This machine uses a different Anthropic account", "Drops signed reasoning blocks, which only work under the original account."),
     h("span", { class: "spacer" }),
@@ -266,6 +283,24 @@ function renderPlan() {
     h("button", { class: "btn", onclick: () => showSessions() }, "Back"),
     h("div", { class: "muted", style: "font-size:11px;text-align:center" }, `The original on ${p.sourceHost} is not deleted.`));
   view.replaceChildren(h("div", { class: "pre" }, main, side));
+}
+
+// roundTripCard reports what happened around the move: quitting the copy here, pushing on
+// the source, bringing the code here, and marking the copy left behind.
+function roundTripCard(d) {
+  const rows = [];
+  if (d.stoppedPid) rows.push(item("ok", `Quit the copy that was running here (pid ${d.stoppedPid})`, ""));
+  if (d.pushError) rows.push(item("warn", `Could not push on ${d.sourceHost}`, d.pushError));
+  else if (d.pushed) rows.push(item("ok", `Pushed the session's branch on ${d.sourceHost}`, ""));
+  if (d.syncNote) {
+    const ok = ["up-to-date", "fast-forwarded", "ahead"].includes(d.syncState);
+    rows.push(item(ok ? "ok" : "warn", "Code: " + d.syncNote, ""));
+  }
+  if (d.mark === "done") rows.push(item("ok", `The copy on ${d.sourceHost} is now titled “${d.markedTitle}”`, "Claude Code's resume list there shows that it moved."));
+  if (d.mark === "pending") rows.push(item("ok", `The copy on ${d.sourceHost} is still running`, "It will be marked as moved once it stops (hopsesh checks on its next scan)."));
+  if (d.mark === "failed") rows.push(item("warn", `Could not mark the copy on ${d.sourceHost} as moved`, d.markError || ""));
+  if (!rows.length) return null;
+  return h("div", { class: "card" }, h("div", { class: "sec" }, ...rows));
 }
 
 function item(kind, title, desc) {
@@ -304,6 +339,7 @@ function renderDone(d) {
       h("div", { style: "display:flex;gap:8px" }, h("button", { class: "btn primary", onclick: async () => { try { await api("OpenInTerminal", d.command); } catch (e) { toast(String(e.message || e)); } } }, "Open in Terminal"),
         d.desktop ? h("button", { class: "btn", onclick: async () => { try { await api("OpenInDesktop"); } catch (e) { toast(String(e.message || e)); } } }, "Open in Claude desktop") : null),
       h("div", { class: "muted", style: "font-size:12px" }, "Its first message tells Claude it was moved and asks it to check the repository, files, tools and environment before continuing."))),
+    roundTripCard(d),
     d.notifyOld && !d.remoteControl ? h("div", { class: "card" }, h("div", { class: "sec" }, h("div", { style: "font-weight:600" }, `Tell the session on ${d.sourceHost}`),
       h("div", { class: "muted", style: "font-size:12px" }, "Automatic notification needs Remote Control on both sessions. Paste this into the old session instead:"),
       h("div", { style: "display:flex;gap:8px" }, h("div", { class: "term" }, d.oldNotice), h("button", { class: "btn", onclick: async () => { await api("CopyText", d.oldNotice); toast("Copied"); } }, "Copy")))) : null,

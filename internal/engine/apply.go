@@ -15,6 +15,8 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/core/audit"
 	"github.com/roeehrl/hopsesh/internal/core/fsys"
+	"github.com/roeehrl/hopsesh/internal/core/hops"
+	"github.com/roeehrl/hopsesh/internal/core/moved"
 	"github.com/roeehrl/hopsesh/internal/core/repos"
 	"github.com/roeehrl/hopsesh/internal/core/rewrite"
 	"github.com/roeehrl/hopsesh/internal/core/scan"
@@ -40,6 +42,14 @@ type Result struct {
 	Cloned     bool          `json:"cloned"`
 	Worktree   string        `json:"worktreeCreated,omitempty"`
 	SetAside   []string      `json:"setAside,omitempty"`
+	// Round trips.
+	Stopped   int               `json:"stoppedPid,omitempty"`
+	Pushed    string            `json:"pushed,omitempty"`    // git's message after pushing on the source
+	PushError string            `json:"pushError,omitempty"` // pushing failed; the move went on
+	Sync      *repos.SyncResult `json:"sync,omitempty"`
+	SyncNote  string            `json:"syncNote,omitempty"`
+	Mark      string            `json:"mark"` // done | pending | off | failed
+	MarkError string            `json:"markError,omitempty"`
 }
 
 // ErrBlocked means the plan has unresolved blockers.
@@ -56,6 +66,26 @@ func Apply(ctx context.Context, p *Plan, src Source, env Env) (*Result, error) {
 		}
 	}
 	res := &Result{TargetFile: p.TargetFile}
+
+	// 0. Round trip: quit a copy running here, push on the source.
+	if p.StopPID > 0 {
+		step(fmt.Sprintf("quitting the copy of this session running here (pid %d)", p.StopPID))
+		if err := sessions.StopLocal(p.Options.targetConfigDir(p), p.SessionID, p.StopPID, 15*time.Second); err != nil {
+			return nil, err
+		}
+		res.Stopped = p.StopPID
+		env.Log.Write(audit.Entry{Action: "session.stop", Session: p.SessionID, Detail: map[string]any{"pid": p.StopPID}})
+	}
+	if p.Push && src.Push != nil {
+		step("pushing " + p.Repo.SourceBranch + " on " + p.SourceHost)
+		msg, err := src.Push(ctx, p.SourceCWD)
+		if err != nil {
+			res.PushError = err.Error()
+		} else {
+			res.Pushed = nonEmpty(msg, "pushed")
+		}
+		env.Log.Write(audit.Entry{Action: "git.push", Host: p.SourceHost, Session: p.SessionID, Detail: map[string]any{"branch": p.Repo.SourceBranch, "ok": err == nil}})
+	}
 
 	// 1. Repository.
 	if p.Repo.Action == "clone" {
@@ -76,6 +106,18 @@ func Apply(ctx context.Context, p *Plan, src Source, env Env) (*Result, error) {
 			}
 			res.Worktree = p.Repo.Worktree
 			env.Log.Write(audit.Entry{Action: "git.worktree", Session: p.SessionID, Detail: map[string]any{"path": p.Repo.Worktree, "branch": p.Repo.SourceBranch}})
+		}
+	}
+
+	// 1b. Bring the checkout to the session's commit.
+	if p.Sync != "" {
+		step("checking the code against the session's commit")
+		if r, err := repos.Sync(ctx, syncDir(p), p.Repo.SourceBranch, p.Repo.SourceHead, true); err == nil {
+			res.Sync = &r
+			res.SyncNote = describeSync(r, p.Repo.SourceBranch, p.SourceHost)
+			env.Log.Write(audit.Entry{Action: "git.sync", Session: p.SessionID, Detail: map[string]any{"state": r.State, "commit": r.Commit, "behind": r.Behind}})
+		} else {
+			res.SyncNote = "could not compare the checkout with the session's commit: " + err.Error()
 		}
 	}
 
@@ -125,7 +167,7 @@ func Apply(ctx context.Context, p *Plan, src Source, env Env) (*Result, error) {
 		var err error
 		switch f.Rewrite {
 		case "jsonl":
-			opt := rewrite.Options{Mappings: p.Mappings, StripBridge: true, DropThinking: p.Options.DropThinking, Redact: redact}
+			opt := rewrite.Options{Mappings: p.Mappings, StripBridge: true, DropMovedMarks: true, DropThinking: p.Options.DropThinking, Redact: redact}
 			if f.Kind == "transcript" {
 				opt.SessionID, opt.RelocatedCWD = p.SessionID, p.TargetCWD
 			}
@@ -217,8 +259,40 @@ func Apply(ctx context.Context, p *Plan, src Source, env Env) (*Result, error) {
 	}
 	env.Log.Write(audit.Entry{Action: "pull.commit", Host: p.SourceHost, Session: p.SessionID, Detail: map[string]any{
 		"target": p.TargetFile, "files": res.Copied, "bytes": res.Bytes, "undo": id, "secrets": res.Secrets.Total}})
+
+	// 5. Record the hop and mark the copy left behind.
+	markCopyLeftBehind(p, src, env, res)
 	step("done")
 	return res, nil
+}
+
+// markCopyLeftBehind records the hop and, after a handoff, titles the source copy
+// "↪ moved to <this host> · <title>". A session still running there is marked by a later
+// scan once it has stopped; marking never fails the move.
+func markCopyLeftBehind(p *Plan, src Source, env Env, res *Result) {
+	h := hops.Hop{Time: time.Now().UTC(), SessionID: p.SessionID, Title: p.Title, From: p.SourceHost,
+		To: p.StartContext.TargetHost, Fork: p.Resume.Fork, SourceFile: p.SourceFile}
+	switch p.Mark {
+	case MarkNow:
+		if ap, ok := src.FS.(fsys.Appender); ok {
+			if err := ap.AppendKeepTime(p.SourceFile, moved.Record(p.SessionID, h.To, p.Title)); err != nil {
+				h.Mark, h.MarkError = hops.MarkFailed, err.Error()
+			} else {
+				h.Mark = hops.MarkDone
+			}
+		} else {
+			h.Mark, h.MarkError = hops.MarkFailed, "this machine's files cannot be written"
+		}
+	case MarkWhenStopped:
+		h.Mark = hops.MarkPending
+	default:
+		h.Mark = hops.MarkOff
+	}
+	res.Mark, res.MarkError = h.Mark, h.MarkError
+	if err := hops.Append(env.StateDir, h); err != nil && res.MarkError == "" {
+		res.MarkError = "could not record the move: " + err.Error()
+	}
+	env.Log.Write(audit.Entry{Action: "hop.mark", Host: p.SourceHost, Session: p.SessionID, Detail: map[string]any{"mark": h.Mark, "error": h.MarkError}})
 }
 
 func (o Options) targetConfigDir(p *Plan) string {

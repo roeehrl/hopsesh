@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/roeehrl/hopsesh/internal/core/fsys"
 )
@@ -189,5 +190,26 @@ func TestLocatorListFindAndRegistry(t *testing.T) {
 	live, err := loc.LiveRegistry(func(p []int) map[int]bool { return map[int]bool{123: true} })
 	if err != nil || len(live) != 1 || live[0].SessionID != "id1" || !live[0].Alive {
 		t.Errorf("live: %+v %v", live, err)
+	}
+}
+
+func TestMovedMark(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "s1.jsonl")
+	body := `{"type":"user","uuid":"u1","parentUuid":null,"sessionId":"s1","cwd":"/Users/alice/p","timestamp":"2026-10-01T10:00:00Z","message":{"role":"user","content":"hello"}}` + "\n" +
+		`{"type":"custom-title","customTitle":"fix tests","sessionId":"s1"}` + "\n" +
+		`{"type":"custom-title","customTitle":"↪ moved to laptop · fix tests","sessionId":"s1"}` + "\n"
+	if err := os.WriteFile(f, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Summarize(fsys.Local{}, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.MovedTo != "laptop" || s.Title != "fix tests" {
+		t.Fatalf("got movedTo=%q title=%q", s.MovedTo, s.Title)
+	}
+	if s.LastActivity.Format(time.RFC3339) != "2026-10-01T10:00:00Z" {
+		t.Fatalf("the mark must not change last activity: %v", s.LastActivity)
 	}
 }

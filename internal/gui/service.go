@@ -22,6 +22,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/hosts"
 	"github.com/roeehrl/hopsesh/internal/core/link"
 	"github.com/roeehrl/hopsesh/internal/core/lnp"
+	"github.com/roeehrl/hopsesh/internal/core/moved"
 	"github.com/roeehrl/hopsesh/internal/core/repos"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
 	"github.com/roeehrl/hopsesh/internal/engine"
@@ -78,6 +79,12 @@ type Info struct {
 		FirstRun bool `json:"firstRun"`
 	} `json:"localNetwork"`
 	UpdateCheck string `json:"updateCheck"` // "", "on" or "off"
+	// Defaults for the round-trip choices on the preflight screen.
+	Defaults struct {
+		MarkMoved  bool `json:"markMoved"`
+		SyncCode   bool `json:"syncCode"`
+		PushSource bool `json:"pushSource"`
+	} `json:"defaults"`
 }
 
 // Info returns app and machine information.
@@ -94,6 +101,7 @@ func (a *App) Info() Info {
 	info := Info{Version: version.Version, Host: inventory.LocalHostName(), ReposDir: a.cfg.ReposDir,
 		AuditDir: filepath.Join(config.StateDir(), "log"), HasHosts: has, ClaudeVer: cv}
 	info.UpdateCheck = a.cfg.UpdateCheck
+	info.Defaults.MarkMoved, info.Defaults.SyncCode, info.Defaults.PushSource = a.cfg.MarkMovedOn(), a.cfg.SyncCodeOn(), a.cfg.PushSource
 	info.LocalNetwork.Gated = lnp.Gated()
 	info.LocalNetwork.FirstRun = lnp.FirstRun(config.StateDir())
 	return info
@@ -331,6 +339,11 @@ type EntryDTO struct {
 	Unpushed   int    `json:"unpushed"`
 	Dirty      int    `json:"dirty"`
 	SizeKB     int64  `json:"sizeKB"`
+	// Copies of this session on other machines (it was moved); this entry is the newest.
+	Copies    []inventory.Copy `json:"copies,omitempty"`
+	HereNewer bool             `json:"hereNewest,omitempty"` // the newest copy is on this machine
+	StaleHere bool             `json:"staleHere,omitempty"`  // an older copy is on this machine
+	ResumeCmd string           `json:"resumeCommand,omitempty"`
 }
 
 // GroupDTO is one repository.
@@ -386,6 +399,17 @@ func (a *App) Scan() (*ScanDTO, error) {
 			if s.Live != nil {
 				ed.Live, ed.Status = true, "live "+s.Live.Status
 			}
+			ed.Copies = e.Copies
+			for _, c := range e.Copies {
+				if c.Local && c.Newest {
+					ed.HereNewer = true
+				} else if c.Local {
+					ed.StaleHere = true
+				}
+			}
+			if ed.HereNewer {
+				ed.ResumeCmd = link.Resume{Dir: s.CWD, SessionID: s.ID}.Shell(link.DefaultShell())
+			}
 			if gs := s.Git; gs != nil && gs.IsRepo {
 				ed.Branch, ed.MainBranch = gs.Branch, gs.MainBranch
 				switch {
@@ -415,6 +439,10 @@ type OptsDTO struct {
 	Redact       bool   `json:"redact"`
 	OtherAccount bool   `json:"otherAccount"`
 	Memory       bool   `json:"memory"`
+	MarkSource   bool   `json:"markSource"`
+	SyncCode     bool   `json:"syncCode"`
+	PushSource   bool   `json:"pushSource"`
+	StopLocal    bool   `json:"stopLocal"`
 }
 
 // PlanDTO is the rendered plan.
@@ -450,7 +478,8 @@ func (a *App) Plan(machine, sessionID string, o OptsDTO) (*PlanDTO, error) {
 	tgt := inventory.LocalTarget(ctx)
 	opt := engine.Options{TargetDir: o.TargetDir, Clone: o.Clone, ReposDir: nonEmpty(o.ReposDir, a.cfg.ReposDir), GHQLayout: a.cfg.Layout == "ghq",
 		Worktree: engine.WorktreeMode(nonEmpty(o.Worktree, "auto")), Fork: o.Fork, RemoteCtl: o.RemoteCtl, NotifyOld: o.NotifyOld,
-		Redact: o.Redact, DropThinking: o.OtherAccount, CopyMemory: o.Memory}
+		Redact: o.Redact, DropThinking: o.OtherAccount, CopyMemory: o.Memory,
+		MarkSource: o.MarkSource, SyncCode: o.SyncCode, PushSource: o.PushSource, StopLocal: o.StopLocal}
 	src := m.PlanSource(ctx)
 	p, err := engine.BuildPlan(ctx, src, tgt, engine.Input{Summary: &sess.Summary, Git: sess.Git, Live: sess.Live}, opt)
 	if err != nil {
@@ -491,6 +520,14 @@ type DoneDTO struct {
 	PromptFile  string   `json:"promptFile"`
 	SourceHost  string   `json:"sourceHost"`
 	Desktop     bool     `json:"desktop"` // the installed claude can open it in the desktop app
+	Stopped     int      `json:"stoppedPid,omitempty"`
+	Pushed      string   `json:"pushed,omitempty"`
+	PushError   string   `json:"pushError,omitempty"`
+	SyncNote    string   `json:"syncNote,omitempty"`
+	SyncState   string   `json:"syncState,omitempty"`
+	Mark        string   `json:"mark"`
+	MarkError   string   `json:"markError,omitempty"`
+	MarkedTitle string   `json:"markedTitle,omitempty"`
 	ResumeArgv  []string `json:"-"`
 	ResumeIntoD string   `json:"-"`
 }
@@ -513,12 +550,20 @@ func (a *App) Apply() (*DoneDTO, error) {
 	for _, v := range res.Rewrite.Replacements {
 		n += v
 	}
-	return &DoneDTO{Title: p.Title, Command: p.Resume.Shell(link.DefaultShell()), Paths: n, Files: res.Copied, Bytes: engine.Human(res.Bytes),
+	d := &DoneDTO{Title: p.Title, Command: p.Resume.Shell(link.DefaultShell()), Paths: n, Files: res.Copied, Bytes: engine.Human(res.Bytes),
 		Secrets: res.Secrets.Total, Cloned: res.Cloned, Worktree: res.Worktree, SessionID: p.SessionID,
 		OldNotice: link.OldSessionNotice(inventory.LocalHostName(), p.TargetCWD, p.NewName, p.Resume.Fork),
 		NewName:   p.NewName, RemoteCtl: p.Options.RemoteCtl, NotifyOld: p.Options.NotifyOld, SetAside: res.SetAside,
 		AuditDir: filepath.Join(config.StateDir(), "log"), TargetDir: p.TargetCWD, PromptFile: p.Resume.PromptFile, SourceHost: p.SourceHost,
-		Desktop: inventory.ClaudeSupports(ctx, inventory.LocalFacts(ctx).ClaudePath, "--desktop")}, nil
+		Desktop: inventory.ClaudeSupports(ctx, inventory.LocalFacts(ctx).ClaudePath, "--desktop"),
+		Stopped: res.Stopped, Pushed: res.Pushed, PushError: res.PushError, SyncNote: res.SyncNote, Mark: res.Mark, MarkError: res.MarkError}
+	if res.Sync != nil {
+		d.SyncState = res.Sync.State
+	}
+	if res.Mark == "done" {
+		d.MarkedTitle = moved.Title(p.StartContext.TargetHost, p.Title)
+	}
+	return d, nil
 }
 
 // OpenInDesktop opens the moved session in the Claude desktop app.

@@ -35,6 +35,13 @@ type Config struct {
 	// UpdateCheck is "on" or "off" once the person has answered whether the app may
 	// look for new releases once a day ("" = not asked yet).
 	UpdateCheck string `toml:"update_check,omitempty"`
+	// Round trips. MarkMoved and SyncCode default to on (nil); PushSource to off.
+	MarkMoved  *bool `toml:"mark_moved,omitempty"`  // title the copy left behind "↪ moved to …"
+	SyncCode   *bool `toml:"sync_code,omitempty"`   // fetch and fast-forward the checkout here
+	PushSource bool  `toml:"push_source,omitempty"` // push unpushed commits on the source first
+	// SkillPrompt remembers the answer to "let Claude Code use hopsesh?": "" (not asked),
+	// "declined", or the skill revision last offered.
+	SkillPrompt string `toml:"skill_prompt,omitempty"`
 	Hosts       []Host `toml:"hosts"`
 }
 
@@ -143,3 +150,9 @@ func (c *Config) UpsertHost(h Host) {
 	}
 	c.Hosts = append(c.Hosts, h)
 }
+
+// MarkMovedOn reports whether copies left behind are marked (default on).
+func (c Config) MarkMovedOn() bool { return c.MarkMoved == nil || *c.MarkMoved }
+
+// SyncCodeOn reports whether the checkout is brought to the session's commit (default on).
+func (c Config) SyncCodeOn() bool { return c.SyncCode == nil || *c.SyncCode }

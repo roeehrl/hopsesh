@@ -170,6 +170,7 @@ func (m *Machine) PlanSource(ctx context.Context) engine.Source {
 		}
 	}
 	src.Auth = m.auth
+	src.Push = m.pushFunc()
 	return src
 }
 
@@ -280,6 +281,7 @@ func (s *Scanner) ScanHost(ctx context.Context, h config.Host) *Machine {
 		list, err := runHelper(ctx, conn, facts, h.HelperSHA256)
 		if err == nil {
 			m.Sessions, m.Status = list, StatusOK
+			s.applyPendingMarks(m)
 			return m
 		}
 		m.Hint = "helper not used (" + err.Error() + "); scanned without it"
@@ -302,6 +304,7 @@ func (s *Scanner) ScanHost(ctx context.Context, h config.Host) *Machine {
 	}
 	m.Sessions = join(list, live, gitStates)
 	m.Status = StatusOK
+	s.applyPendingMarks(m)
 	if facts.ClaudeVersion == "" {
 		m.Hint = strings.TrimPrefix(m.Hint+"; claude is not on the PATH of non-interactive SSH sessions there (sessions are still listed)", "; ")
 	}
@@ -409,40 +412,67 @@ type Group struct {
 	Entries  []GroupedEntry `json:"entries"`
 }
 
-// GroupedEntry is one session in a group.
+// GroupedEntry is one session in a group. When the same session exists on several
+// machines (it was moved), the entry shows the newest copy and lists all of them.
 type GroupedEntry struct {
 	Machine string   `json:"machine"`
 	Session *Session `json:"session"`
+	Copies  []Copy   `json:"copies,omitempty"`
 }
 
 // GroupByRepo groups sessions by repository identity; sessions outside git go to a
 // "no repository" group (identity ""). localRoots are searched for local checkouts.
 func GroupByRepo(machines []*Machine, localRoots []string) []Group {
-	idx := map[string]int{}
-	var groups []Group
+	// Copies of one session on several machines collapse into one entry: the newest.
+	type ref struct {
+		m *Machine
+		s *Session
+	}
+	byID := map[string][]ref{}
+	var order []string
 	for _, m := range machines {
 		for i := range m.Sessions {
-			s := &m.Sessions[i]
-			id, remote, name := "", "", "No repository"
-			if s.Git != nil && s.Git.Identity != "" {
-				id, remote, name = s.Git.Identity, s.Git.Remote, repos.Name(s.Git.Identity)
-			} else if s.Git != nil && s.Git.IsRepo {
-				id, name = "local:"+m.Name+":"+s.Git.Toplevel, filepath.Base(s.Git.Toplevel)+" (no remote)"
+			id := m.Sessions[i].ID
+			if _, seen := byID[id]; !seen {
+				order = append(order, id)
 			}
-			gi, ok := idx[id]
-			if !ok {
-				g := Group{Identity: id, Name: name, Remote: remote}
-				if id != "" && !strings.HasPrefix(id, "local:") {
-					if found := repos.FindLocal(id, localRoots); len(found) > 0 {
-						g.Local = found[0].Path
-					}
-				}
-				groups = append(groups, g)
-				gi = len(groups) - 1
-				idx[id] = gi
-			}
-			groups[gi].Entries = append(groups[gi].Entries, GroupedEntry{Machine: m.Name, Session: s})
+			byID[id] = append(byID[id], ref{m, &m.Sessions[i]})
 		}
+	}
+	idx := map[string]int{}
+	var groups []Group
+	for _, sid := range order {
+		refs := byID[sid]
+		var copies []Copy
+		for _, r := range refs {
+			copies = append(copies, Copy{Machine: r.m.Name, Local: r.m.Local, LastActive: r.s.LastActivity, MovedTo: r.s.MovedTo, Live: r.s.Live != nil})
+		}
+		pick := newest(copies)
+		m, s := refs[pick].m, refs[pick].s
+		if len(copies) > 1 {
+			copies[pick].Newest = true
+		} else {
+			copies = nil
+		}
+		id, remote, name := "", "", "No repository"
+		if s.Git != nil && s.Git.Identity != "" {
+			id, remote, name = s.Git.Identity, s.Git.Remote, repos.Name(s.Git.Identity)
+		} else if s.Git != nil && s.Git.IsRepo {
+			id, name = "local:"+m.Name+":"+s.Git.Toplevel, filepath.Base(s.Git.Toplevel)+" (no remote)"
+		}
+		gi, ok := idx[id]
+		if !ok {
+			g := Group{Identity: id, Name: name, Remote: remote}
+			if id != "" && !strings.HasPrefix(id, "local:") {
+				if found := repos.FindLocal(id, localRoots); len(found) > 0 {
+					g.Local = found[0].Path
+				}
+			}
+			groups = append(groups, g)
+			gi = len(groups) - 1
+			idx[id] = gi
+		}
+		groups[gi].Entries = append(groups[gi].Entries, GroupedEntry{Machine: m.Name, Session: s, Copies: copies})
 	}
 	for i := range groups {
 		sort.SliceStable(groups[i].Entries, func(a, b int) bool {

@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/roeehrl/hopsesh/internal/core/fsys"
+	"github.com/roeehrl/hopsesh/internal/core/moved"
 )
 
 // liteChunk is how much of the head and the tail of a transcript is read, matching
@@ -35,9 +36,12 @@ type Summary struct {
 	File        string `json:"file"`
 	ProjectDir  string `json:"projectDir"`
 	Title       string `json:"title"`
-	TitleSource string `json:"titleSource"`       // custom | ai | summary | prompt | none
-	CWD         string `json:"cwd"`               // project directory: relocated cwd, else the launch cwd
-	LastCWD     string `json:"lastCwd,omitempty"` // shell cwd of the newest record (may be a subdirectory)
+	TitleSource string `json:"titleSource"` // custom | ai | summary | prompt | none
+	// MovedTo is set when this copy was left behind by a handoff: hopsesh marked it
+	// "↪ moved to <host> · <title>" (Title holds the original title).
+	MovedTo string `json:"movedTo,omitempty"`
+	CWD     string `json:"cwd"`               // project directory: relocated cwd, else the launch cwd
+	LastCWD string `json:"lastCwd,omitempty"` // shell cwd of the newest record (may be a subdirectory)
 	// WorktreeRoot is set when CWD is a Claude-managed worktree (<repo>/.claude/worktrees/<name>):
 	// such transcripts stay in the repo root's project folder.
 	WorktreeRoot string    `json:"worktreeRoot,omitempty"`
@@ -140,6 +144,13 @@ func SummarizeHint(fs fsys.FS, file string, info os.FileInfo, hasSidecar *bool) 
 			}
 		}
 		s.Subagents = countSubagents(fs, file, s.ID)
+	}
+	if host, title, ok := moved.Parse(s.Title); ok {
+		s.MovedTo = host
+		s.Title = title
+		if s.Title == "" {
+			s.Title = s.LastPrompt
+		}
 	}
 	return s, nil
 }
