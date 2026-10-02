@@ -27,6 +27,7 @@ worktree, paths and all. Then it gives you the `claude --resume` command.
 
 - **Finds your machines** from Tailscale and `~/.ssh/config`, and connects only to the ones you
   allow, with your own `ssh`, keys and agent. Nothing to install on the other machines.
+  Machines without SSH keys can log in with a password (v0.2.0).
 - **Lists every session by repository**: machine, path, branch, worktree, last prompt, when it
   was last active, and whether it's running right now.
 - **Moves a session safely**: finds the repo here or clones it, recreates the worktree, warns
@@ -89,6 +90,7 @@ hopsesh plan studio:"fix flaky tests"      # read-only preview of a move (v0.2.0
 hopsesh pull studio:"fix flaky tests"      # plan, confirm, move, print the resume command
 hopsesh pull 7f3c2a1e                      # no machine name: the newest copy (v0.2.0)
 hopsesh pull studio:7f3c2a1e --clone --rc --notify --yes
+hopsesh hosts add nas alice@192.168.1.20 --password   # a machine without SSH keys (v0.2.0)
 hopsesh doctor studio                      # SSH, host trust, Claude version, Remote Control
 hopsesh undo 7f3c2a1e
 ```
@@ -141,7 +143,8 @@ hopsesh skill install --add-rules  # read-only hopsesh commands run without aski
 Then ask Claude things like "bring my laptop session here" or "which sessions are running on
 the studio?". Claude plans first and **moves only after you say yes**. `--add-rules` allows the
 read-only commands (`ls`, `plan`, `show`, …) and adds "ask" rules for `pull`, `undo` and
-`import`, so moves always ask you, even in auto mode. The skill never starts another Claude.
+`import`, so moves always ask you, even in auto mode. The skill never starts another Claude and never handles passwords: for a machine that
+logs in with a password, Claude asks you to run `hopsesh hosts setup-key` yourself.
 `hopsesh skill remove` takes it out again. Details:
 [docs/design.md §13](docs/design.md#13-claude-code-integration-the-hopsesh-skill) and
 [§14](docs/design.md#14-the-command-line-tool-from-the-app).
@@ -169,7 +172,9 @@ The details, including the Claude Code file-format traps hopsesh handles, are in
 - **Read-only until you say go.** Each machine needs your permission, and every move is shown
   as a plan first.
 - **Never moves credentials.** Logins, keys, live sockets and account data stay where they
-  are; each machine stays signed in on its own.
+  are; each machine stays signed in on its own. A machine's SSH password (v0.2.0) is kept in
+  the macOS Keychain or asked for each time, and never written to hopsesh's files or a
+  command line.
 - **Transcripts can hold secrets.** hopsesh scans for likely secrets while moving and can
   redact the copy (`--redact`). Every remote action goes to a local audit log.
 - **Only Claude Code itself talks to the model.** hopsesh never calls the API.
@@ -213,6 +218,28 @@ telemetry, and it never calls the Anthropic API.
 No. Any machine you can `ssh` to works, including aliases, ProxyJump and ProxyCommand from
 your `~/.ssh/config`. Tailscale just makes machines easy to find. When an alias's LAN name
 doesn't resolve, hopsesh falls back to the machine's Tailscale name.
+</details>
+
+<details>
+<summary><b>One of my machines logs in with a password, not an SSH key</b></summary>
+
+From v0.2.0: add it with `hopsesh hosts add <name> <destination> --password`, or switch an
+existing one with `hopsesh hosts auth <machine> password`. In the app, use the "Login" button
+on the Machines screen, or tick "This machine logs in with a password" when adding it.
+
+hopsesh asks for the password when it connects:
+- **On macOS** it remembers it in the Keychain by default (`--keychain=false` to be asked each
+  time).
+- **Otherwise** it asks with a hidden prompt in the terminal, or a dialog in the app.
+- **In scripts**, `--password-stdin` reads it from standard input.
+
+It's never written to hopsesh's files or put on a command line.
+
+Better still, `hopsesh hosts setup-key <machine>` (in the app: "Set up key login") logs in once
+with the password and adds your SSH key there. It then checks that key login works, switches
+the machine to keys and forgets the password. This works for macOS and Linux machines.
+`hopsesh hosts` shows each machine's login method. Details:
+[docs/design.md §15](docs/design.md#15-password-login).
 </details>
 
 <details>
