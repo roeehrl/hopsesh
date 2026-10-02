@@ -9,18 +9,19 @@
 - checks SSH access to each one;
 - lists every Claude Code session on them, grouped by repository, showing:
   - the absolute path on each machine and the git remote URL;
-  - a one-line summary, last activity and the last prompt;
+  - the branch, and whether the session ran in a worktree;
+  - the title, last activity and the last prompt;
   - whether the session is live right now.
 
 You pick a session. hopsesh then:
 - finds the repo locally, or offers to clone it into your repos folder (default `~/git`, overridable). If cloning fails, it explains why and asks for a path or auto-detects one;
+- recreates the worktree if the session used one (or uses the main checkout, as you choose);
 - copies the session and rewrites its paths for this machine;
-- prints, or runs, the exact `claude --resume` command.
+- prints, or runs, the exact `claude --resume` command, with a first message that tells the resumed session it was moved and asks it to check that nothing is missing.
 
 Optionally it also:
 - turns on Remote Control for the new session;
-- tells the old session where it went;
-- keeps the two linked so they can message each other.
+- has the new session tell the old one where the work went (both on Remote Control), after which either can message the other with Claude Code's own cross-session messaging.
 
 **Doesn't:**
 - No cloud relay of transcripts; files move machine to machine over your own SSH.
@@ -34,7 +35,7 @@ Optionally it also:
 - cct and drev handle export/import bundles;
 - claude-sync syncs `~/.claude` in bulk.
 
-Two more appeared during the name research:
+Two more (as of 2026-10):
 - **CtxHop** (Go, MIT, 57★, created 2026-08-10): bind a project, sync its sessions through an encrypted storage backend you set up, and resume on authorized devices. That's a push-and-sync model with setup per project.
 - **sessport** (npm, 2026-09-30): converts sessions between Claude Code, Codex and Gemini on one machine.
 
@@ -51,37 +52,34 @@ The trademark constraint first: Anthropic's Claude Code legal page forbids "Clau
 ## 3. Principles (design rules every feature must pass)
 
 1. **Consent-first and read-only by default.** Discovery connects to nothing. Each machine needs explicit opt-in. Reads are limited to `<configDir>/**` and `git` metadata until you confirm a move.
-2. **Plan → confirm → apply.** Every write is a rendered plan first (dry run is the default in CLI one-liners unless `--yes`), and it is reversible (`undo`).
+2. **Plan → confirm → apply.** Every write is a rendered plan first (a non-interactive `pull` without `--yes` shows the plan and stops), and it is reversible (`undo`).
 3. **Use the user's own tools.** hopsesh drives system `ssh` (SFTP over it), `git`, `tailscale` and the unmodified `claude` binary, inheriting your keys, agents, ProxyJump, certificates and ControlMaster.
 4. **Small Claude-specific layer, tolerant of format changes.** The session format is reverse-engineered and changes between versions. It is isolated in `internal/core/sessions` and `internal/core/rewrite`, and every rewritten transcript is re-read with the same reader before it is installed.
 5. **Transcripts are secrets.** Encrypted transport only (SSH), a secret scan before moving, optional redaction, an append-only audit log.
-6. **Cross-platform from day one.** Windows remotes default to `cmd.exe`, paths use backslashes, line endings must never be converted.
+6. **Cross-platform from day one.** Windows remotes run PowerShell through `-EncodedCommand` (their OpenSSH default shell is `cmd.exe`), paths use backslashes, and line endings are never converted.
 
 ## 4. Architecture
 
 ```
-            ┌───────────── front-ends ─────────────┐
-            │  hopsesh (CLI: cobra + Bubble Tea v2)    │   hopsesh-app (GUI: Wails v3)
-            │  one-liners · --json · TUI            │   macOS + Windows
-            └───────────────┬──────────────────────┘
-                            │ same Go API: Discover → Plan → Apply
-┌───────────────────────────┴────────────────────────────────────────┐
-│ core (Go)                                                           │
-│  hosts      merge Tailscale + ~/.ssh/config · consent · OS/shell    │
-│  transport  system ssh + SFTP · ControlMaster · local network gate  │
-│  sessions   Claude locator: slug, config dir, 64 KB head/tail       │
-│             reader, live registry, sidecars · (Codex later)         │
-│  repos      remote-URL identity · local index · clone · worktree    │
-│  rewrite    line-preserving prefix map · thinking-block policy ·    │
-│             relocated record · bridge-session strip                 │
-│  scan       secret rules · redaction of the copy                    │
-│  plan       dry-run plan model rendered by every front-end          │
-│  audit      append-only JSONL log · undo journal                    │
-│  link       RC launch flags · notify-old-session prompt · names     │
-└──────────────────────────────────┬─────────────────────────────────┘
-                                   │ optional, consented
-                    hopsesh agent --json   (same binary, deployed to a remote:
-                                         a faster, exact enumerator)
+   ┌──────────────────────────── front-ends ─────────────────────────────┐
+   │ hopsesh (CLI: cobra, TUI: Bubble Tea v2)   hopsesh-app (Wails v3)    │
+   │ one-liners · --json · interactive TUI      macOS (Windows planned)   │
+   └──────────────────────────────────┬───────────────────────────────────┘
+                                      │ inventory (scan) → engine (plan, apply, undo)
+┌─────────────────────────────────────┴────────────────────────────────────────┐
+│ core (Go)                                                                     │
+│  hosts      Tailscale + ~/.ssh/config discovery (connects to nothing)         │
+│  transport  system ssh + SFTP · ControlMaster · host trust · Tailscale route  │
+│  lnp        macOS local network privacy: gated targets, in-process probe      │
+│  sessions   Claude locator: slug, config dir, head/tail reader, live registry │
+│  repos      remote identity · batched git probe · clone · worktrees           │
+│  rewrite    single-pass prefix map · separators · thinking · relocated record │
+│  scan       secret rules · redaction of the copy                              │
+│  link       resume command · start prompt · auth / Remote Control check       │
+│  audit      append-only JSONL log                                             │
+└──────────────────────────────────────┬───────────────────────────────────────┘
+               update (verified self-update) · optional, consented remote helper:
+               hopsesh agent --json (same binary, hash-pinned on the other machine)
 ```
 
 - **Why Go:**
@@ -101,48 +99,50 @@ The trademark constraint first: Anthropic's Claude Code legal page forbids "Clau
 
 **Probe (one round trip per host):**
 - Run with `BatchMode=yes`, `ConnectTimeout` and strict host-key checking.
-- A new host key goes to a trust screen. It shows the fingerprint and marks it green when it matches the `sshHostKeys` Tailscale reports for that host.
+- A new host key goes to a trust screen. It shows the fingerprint and marks it verified when it matches the `sshHostKeys` Tailscale reports for that host, or a key you already trust for it in `~/.ssh/known_hosts`.
 - A changed key is a hard stop.
-- The probe returns OS, shell, home, `CLAUDE_CONFIG_DIR` and `claude --version`.
+- The probe returns OS, architecture, home, Claude Code's config dir (`CLAUDE_CONFIG_DIR` or `~/.claude`), the `claude` path and version, and whether git is installed.
 
 **Sessions, per consented host, cheapest first:**
 1. Live state from the `<configDir>/sessions/<pid>.json` registry, with each pid checked on the machine.
 2. An SFTP walk of `<configDir>/projects/*/*.jsonl`. A `stat` plus head/tail range reads extract the title, last prompt, cwd, branch, last activity, size and the Claude version that wrote it. This uses the same title and last-prompt rules the official picker uses.
-3. One batched `git -C <cwd>` call per distinct cwd: toplevel, remote URL, branch, ahead/behind and dirty count.
+3. One batched git probe per machine covering every distinct cwd: toplevel, remote URL, branch, upstream, unpushed commits, uncommitted files and worktrees.
 
 **Optional remote helper:** with `hopsesh hosts helper install <machine>`, steps 1–3 run on the remote in one call (`hopsesh agent --json`), after its SHA-256 is checked against the pinned value. It is faster on hosts with long histories.
 
-**Output format** (simplified; `hopsesh ls --json` and `hopsesh agent --json` emit the full form):
+**Output format.** `hopsesh ls --json` prints `{"machines": [...], "groups": [...]}`. Abridged:
 
 ```json
 {
-  "schema": "hopsesh.session/v1",
-  "host": {"id": "studio", "os": "darwin", "via": "tailscale"},
-  "session": {
-    "id": "<session-id>", "title": "refactor auth", "summary": "…",
-    "status": "live-idle | live-busy | ended", "lastActive": "2026-10-02T10:44:00Z",
-    "lastPrompt": "run the migration tests again", "claudeVersion": "2.1.284",
-    "sizeBytes": 12688143, "subagents": 7, "entrypoint": "cli | claude-desktop"
-  },
-  "repo": {
-    "cwd": "/Users/alice/git/mine", "toplevel": "/Users/alice/git/mine", "subdir": "",
-    "remote": "https://github.com/OWNER/mine", "identity": "github.com/owner/mine",
-    "branch": "main", "ahead": 2, "dirty": 7
-  }
+  "machines": [{"name": "studio", "status": "ok",
+                "facts": {"os": "darwin", "home": "/Users/alice", "claudeVersion": "2.1.284"}}],
+  "groups": [{
+    "identity": "github.com/alice/app", "name": "app",
+    "remote": "git@github.com:alice/app.git", "localCheckout": "/Users/alice/git/app",
+    "entries": [{"machine": "studio", "session": {
+      "id": "<session-id>", "title": "refactor auth", "cwd": "/Users/alice/git/app",
+      "lastActive": "2026-10-02T10:44:00Z", "lastPrompt": "run the migration tests again",
+      "claudeVersion": "2.1.284", "sizeBytes": 12688143, "subagents": 7,
+      "live": {"status": "idle"},
+      "git": {"branch": "auth", "mainBranch": "main", "unpushed": 2, "dirty": 7}
+    }}]
+  }]
 }
 ```
 
-**Grouping.** Rows group by `repo.identity` plus `subdir`, showing each machine's absolute path. Sessions outside git go in "No repository".
+`hopsesh agent --json` (the helper) prints `{"schema": "hopsesh.agent/v1", "machine": {...}}` with the same session fields.
+
+**Grouping.** Sessions group by repository identity, showing each machine's absolute path. Sessions outside git go in "No repository".
 
 ## 6. Transport: the pipeline behind "Hop here"
 
 1. **Preflight:**
    - **Live source:** if the session is live, choose *handoff* (default: copy, then notify the old session to stop) or *fork* (`--fork-session`, both continue). A session running on this machine, or one already in the target folder, is refused.
-   - **Versions:** target `claude` ≥ source version.
+   - **Versions:** a warning when the `claude` here is older than the version that wrote the session.
    - **Account:** read from `claude auth status` on both machines. Across accounts, thinking blocks are dropped whole (removing only the signature makes the API reject it).
-   - **Size and retention:** warn on size, and on the 30-day cleanup.
+   - **Size and retention:** a warning for large sessions; the copy gets a fresh mtime so Claude Code's 30-day cleanup does not remove it.
 2. **Repo:**
-   - Match by normalized remote (ssh/https, `.git`, host aliases) among local checkouts.
+   - Match by normalized remote (ssh or https form, with or without `.git`) among local checkouts in the repos folder and other common folders.
    - If missing: offer to clone into `<reposDir>/<name>` (layout configurable: flat or `host/owner/repo` ghq style), using your git credential helpers non-interactively.
    - On failure: show git's reason and ask for a path, or rescan `reposDir`.
    - If the remote has unpushed commits or dirty files, warn before the move.
@@ -152,7 +152,7 @@ The trademark constraint first: Anthropic's Claude Code legal page forbids "Clau
    - optionally the project's memory folder, merged without overwriting newer files.
    - Live files keep growing, so a file is copied again until its size stops changing.
 4. **Rewrite:**
-   - **Prefix map, line by line:** source repo root, home and config dir map to the target's realpaths.
+   - **Prefix map, one pass per line:** source repo root (or worktree), home and config dir map to the target's real paths; JSON keys are rewritten too.
    - **JSON escaping:** handles escaped Windows backslashes, paths after JSON escapes, and converts separators below mapped folders between Windows and macOS/Linux.
    - **Leave alone:** `uuid`, `parentUuid` and `sessionId` are never touched; thinking blocks are left alone in same-account mode.
    - **Strip:** the `bridge-session` record, so the copy doesn't reattach to the old Remote Control link.
@@ -162,7 +162,7 @@ The trademark constraint first: Anthropic's Claude Code legal page forbids "Clau
 5. **Commit:**
    - **Location:** move into `<configDir>/projects/<slug(realpath(target cwd))>/`, using the exact slug algorithm (200-char cap plus hash, UTF-16 counting).
    - **Freshness:** set a fresh mtime.
-   - **Duplicates:** remove other copies of the same ID on the target, since two copies make resume fail with not-found.
+   - **Duplicates:** set aside other copies of the same ID on the target (restorable with `undo`), since two copies make resume fail with not-found.
    - **Undo:** write the undo journal.
    - **Validate:** re-read the installed transcript with the session reader before committing.
 6. **Launch:**
@@ -176,7 +176,7 @@ The trademark constraint first: Anthropic's Claude Code legal page forbids "Clau
   - Launch with `--remote-control "<title>@<host>"` after an eligibility check. It needs a claude.ai subscription login; an API key, Bedrock or Vertex rule it out.
   - If not eligible, hopsesh says why and continues without it.
 - **Telling the old session:** only possible when both are on Remote Control under the same account. hopsesh starts the new session with a short, visible first prompt asking Claude to `SendMessage` the old session: "This task continued on <host> as <name>; please stop editing." Otherwise hopsesh shows that text for you to paste.
-- **Two-way messaging:** ordinary `ListAgents`/`SendMessage` between the distinctively named sessions. Each side's `crossSessionInbound` rules decide delivery; held messages show as "held" in hopsesh.
+- **Two-way messaging:** ordinary `ListAgents`/`SendMessage` between the distinctively named sessions (`<title>@<host>`). Each side's own settings decide whether a message is delivered or held for approval.
 - **Planned: optional hook index.** A user-level `SessionStart`/`SessionEnd` hook could record session and Remote Control IDs to make live status exact (opt-in, removable).
 
 ## 8. Interfaces
@@ -186,15 +186,17 @@ The trademark constraint first: Anthropic's Claude Code legal page forbids "Clau
 ```
 hopsesh                                 # interactive TUI: machines → repos → sessions
 hopsesh hosts [allow|deny|add|helper] / hopsesh trust <host> / hopsesh doctor [host]
-hopsesh ls [--host H] [--repo R] [--live] [--json]
-hopsesh show <host>:<id|title>          # details, git state, size, secrets found
+hopsesh ls [--host H] [--repo R] [--live] [--no-local] [--no-git] [--limit N] [--json]
+hopsesh show <host>:<id|title>          # details, repository, branch and worktree state
 hopsesh pull <host>:<id|title> [--clone] [--repos ~/git] [--worktree auto|create|main] [--fork]
           [--rc] [--notify] [--redact] [--desktop] [--run] [--yes] [--dry-run]
-hopsesh undo <id>
+hopsesh import <file.jsonl>             # install a transcript copied by hand
+hopsesh undo [<id>]
 hopsesh update [--check]
+hopsesh version
 ```
 
-Exit codes and `--json` on every command make it scriptable. One-liner install:
+Exit codes and `--json` on the listing and moving commands make it scriptable. One-liner install:
 - macOS/Linux: `curl -fsSL …/install.sh | sh`
 - Windows: `irm …/install.ps1 | iex`
 
@@ -203,10 +205,12 @@ Both verify the checksum and the release-key signature of `checksums.txt` (docs/
 **GUI:**
 - 0 · machines and consent;
 - 1 · sessions by repo (machine sidebar, search, live badges);
-- 2 · preflight (repo match or clone, unpushed-work warning, path-rewrite preview, secret scan, what moves, after-move options);
-- 3 · ready (resume command, open in Terminal or desktop, link status, undo).
+- 2 · preflight (repository found, clone or choose a folder; work left behind; worktree mode; path-rewrite preview; warnings; after-move options);
+- 3 · ready (resume command, open in Terminal or the desktop app, text for the old session, undo).
 
-**Config:** `~/.config/hopsesh/config.toml` (`%APPDATA%\hopsesh` on Windows) holds `reposDir`, clone layout, consented hosts, trusted fingerprints and defaults. State (audit log, undo journal, known hosts) lives in `~/.local/state/hopsesh` (`%LOCALAPPDATA%\hopsesh` on Windows).
+On first use the app explains the macOS Local Network prompt, and shows a banner with a link to System Settings if access was denied. It asks once whether it may check GitHub daily for new versions.
+
+**Config:** `~/.config/hopsesh/config.toml` (`%APPDATA%\hopsesh` on Windows) holds `repos_dir`, `layout`, `live_policy`, `remote_control`, `update_check` and the machines you added or allowed (with any helper hash). State lives in `~/.local/state/hopsesh` (`%LOCALAPPDATA%\hopsesh` on Windows): the audit log, undo journal, staging area, hopsesh's own `known_hosts`, remembered routes and start prompts. `HOPSESH_CONFIG_DIR` and `HOPSESH_STATE_DIR` override both.
 
 ## 9. Security and privacy
 
@@ -215,7 +219,7 @@ Both verify the checksum and the release-key signature of `checksums.txt` (docs/
   - hopsesh itself must never become a credential-movement tool.
 - **Controls:**
   - Copies go to a staging folder first; only the session's own files are read.
-  - Agent forwarding is off and nothing is stored beyond host-key trust.
+  - Agent forwarding is off. hopsesh stores only its config, host-key trust, remembered routes and its own logs and undo data.
   - The helper deploys only with consent, is hash-pinned and checked before every run, listens on no port, and is removable.
   - Updates are signed (ECDSA over `checksums.txt`, verified by the binary; on macOS the new binary's signing team must match).
   - macOS local network privacy (TN3179): the app connects in-process first so macOS asks for hopsesh, waits for the answer, and explains a denial; Tailscale routes are not gated.
@@ -224,12 +228,12 @@ Both verify the checksum and the release-key signature of `checksums.txt` (docs/
 
 ## 10. Testing strategy
 
-- **Golden-file tests:**
+- **Unit tests:**
   - slug algorithm (macOS/Linux/Windows/Unicode/long paths);
   - rewriter: escaping, Windows paths, partial-prefix traps, thinking-block preservation, `relocated` placement;
   - title and last-prompt extraction.
 - **End to end:** `internal/engine` tests run a full plan and apply (clone through an `insteadOf` remote, worktree recreation, undo) against temporary repositories.
-- **Transport integration:** a Linux job runs `ls` and `pull` against an OpenSSH server in a container.
+- **Transport integration:** a Linux CI job (`scripts/integration-test.sh`) creates a second user with a session, runs `hosts add`, `trust`, `ls`, `pull` and `undo` against the runner's own OpenSSH server, and checks the installed, rewritten transcript.
 - **Fuzzing:** the rewriter (output must stay valid JSON, including cross-OS separator conversion).
 - **Planned:** a compatibility matrix of pinned Claude Code versions, and a Windows OpenSSH job.
 
@@ -240,13 +244,13 @@ Both verify the checksum and the release-key signature of `checksums.txt` (docs/
   - a Homebrew cask, Scoop and winget manifests;
   - `.deb`/`.rpm`/`.apk` packages;
   - SBOMs (syft), a release-key signature and a Sigstore keyless signature over `checksums.txt`, and GitHub build provenance.
-- **macOS:** darwin CLI binaries are signed and notarized by GoReleaser; a separate macOS job builds, signs (hardened runtime), notarizes and staples the app.
+- **macOS:** darwin CLI binaries are signed and notarized by GoReleaser when the signing secrets are set; a separate macOS job builds, signs (hardened runtime), notarizes and staples the app (`scripts/build-macos-app.sh`). macOS 13 or later.
 - **Windows GUI (v0.2):** SignPath Foundation (free for open source). SmartScreen warns until reputation builds.
 - **Updates:** `hopsesh update` (see §9). The app asks once whether it may check GitHub daily, then only shows a link.
 
 ## 12. Status
 
-**Built:** discovery and consent, host-key trust, `doctor`; listing with git, branch and worktree state; `pull` with clone, worktree recreation, path rewriting (including Windows), secret scan and redaction, undo, start prompt, Remote Control and old-session notice; TUI; macOS app; optional helper; self-update; release pipeline.
+**Built:** discovery and consent, host-key trust, `doctor`; listing with git, branch and worktree state; `pull` with clone, worktree recreation, path rewriting (including Windows), secret scan and redaction, undo, start prompt, Remote Control eligibility and old-session notice, automatic handling of cross-account moves, desktop-app open; TUI; macOS app with local network privacy handling; optional helper; self-update; release pipeline. No release has been published yet.
 
 **Planned:**
 - bringing unpushed commits and uncommitted changes along (`git bundle` plus patch into a new worktree);
@@ -256,11 +260,11 @@ Both verify the checksum and the release-key signature of `checksums.txt` (docs/
 
 ## 13. Risks and mitigations
 
-- **Format drift in Claude Code:** isolated locator and rewriter, a pinned-version compatibility matrix, `relocated` written the way Claude itself writes it, refusal when the target version is older than the source.
-- **Anthropic ships an official local → local move:** hopsesh still adds discovery across machines, git-aware repo reconstruction (including unpushed work), no same-account requirement and no cloud relay. When an official path appears, hopsesh can call it as a backend.
+- **Format drift in Claude Code:** isolated locator and rewriter, every rewrite re-read before install, `relocated` written the way Claude itself writes it, a warning when the target version is older than the source; a pinned-version compatibility matrix is planned.
+- **Anthropic ships an official local → local move:** hopsesh still adds discovery across machines, git-aware repo and worktree reconstruction, no same-account requirement and no cloud relay. When an official path appears, hopsesh can call it as a backend.
 - **Wails v3 beta:** keep the GUI thin, with Tauri v2 as the fallback.
 - **Windows signing reputation:** SignPath or Azure, and document the SmartScreen step.
-- **Secrets in transcripts:** scan before moving, show a preview, redaction option, never off-machine.
+- **Secrets in transcripts:** scan while moving, report counts, redaction option, never sent anywhere but your own machines.
 
 ## 14. Decisions (2026-10-02)
 

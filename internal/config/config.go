@@ -14,7 +14,7 @@ import (
 type Host struct {
 	Name        string `toml:"name"`        // label shown to the user, e.g. "studio"
 	Destination string `toml:"destination"` // what to pass to ssh: alias, user@host or host
-	Via         string `toml:"via"`         // tailscale | ssh-config | mdns | manual
+	Via         string `toml:"via"`         // tailscale | ssh-config | manual (or a "+" combination)
 	Allowed     bool   `toml:"allowed"`     // the user consented to hopsesh connecting
 	OS          string `toml:"os,omitempty"`
 	// TailscaleName is the machine's MagicDNS name, used when Destination's own host

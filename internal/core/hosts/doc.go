@@ -1,7 +1,8 @@
-// Package hosts discovers the user's machines and records consent.
+// Package hosts discovers the user's machines without connecting to any of them.
 //
-// Candidates come from three local sources that never open a connection:
-// `tailscale status --json`, `~/.ssh/config` aliases resolved with `ssh -G`, and
-// (opt-in) Bonjour `_ssh._tcp`. A host is only contacted after the user allows it;
-// trusted host-key fingerprints and cached OS/shell facts are stored per host.
+// Candidates come from `tailscale status --json` (phones and expired nodes dropped,
+// machines shared by other people marked) and from `~/.ssh/config` aliases (following
+// Include; Match blocks are left to ssh). The two lists are merged by address and name.
+// Consent and host-key trust are recorded elsewhere (config and package transport); a
+// machine is contacted only after the user allows it.
 package hosts

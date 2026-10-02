@@ -1,7 +1,8 @@
 // Package repos matches a session's working directory to a git repository.
 //
 // Identity is the normalized remote (host/owner/repo, ssh or https, with or without
-// .git), confirmed by the root commit when available. It finds local checkouts,
-// clones into the configured repos folder when asked, and reports unpushed or
-// uncommitted work on the source that a clone would not bring along.
+// .git, read without insteadOf rewriting). One batched probe per machine reports each
+// directory's branch, worktrees, upstream, unpushed commits and uncommitted files. It
+// finds local checkouts, clones into the configured repos folder when asked, and adds
+// worktrees or switches branches for the moved session.
 package repos
