@@ -128,7 +128,34 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		RemoteControl: opt.RemoteControl && agent.Has(tgt.Module, agent.CapRemoteControl), Name: p.NewName, Prompt: prompt,
 		App: opt.App && agent.Has(tgt.Module, agent.CapApp),
 	})
+	planNative(ctx, p, in, opt)
 	return p, nil
+}
+
+// planNative plans keeping the source agent's own copy of the session on the target too,
+// byte for byte, when the continuation crosses machines: a later return to that agent
+// there then adds only the new work to the original turns (whose signed reasoning stays
+// valid) instead of converting everything twice. Whatever is in its way skips it, never
+// the continuation.
+func planNative(ctx context.Context, p *Plan, in Input, opt Options) {
+	ns := in.Native
+	if ns == nil || in.Source.Machine.Name == in.Target.Machine.Name || len(p.Blockers) > 0 {
+		return
+	}
+	name := in.Source.Module.Spec().Name
+	nin := Input{Source: in.Source, Session: in.Session, Live: in.Live, Git: in.Git, Lineage: in.Lineage,
+		Target: ns.Target, Copies: ns.Copies, Worktrees: in.Worktrees}
+	np, err := Build(ctx, nin, Options{TargetDir: p.Target.CWD, Worktree: WorktreeMain, Redact: opt.Redact})
+	switch {
+	case err != nil:
+		p.Warnings = append(p.Warnings, fmt.Sprintf("the %s session is not also kept here: %v", name, err))
+		return
+	case len(np.Blockers) > 0:
+		p.Warnings = append(p.Warnings, fmt.Sprintf("the %s copy here is left as it is: %s", name, np.Blockers[0]))
+		return
+	}
+	p.native, p.nativeIn = np, nin
+	p.NativeCopy = &NativeCopy{Agent: name, Key: np.Placement.Key, Replaces: len(np.SetAside) > 0}
 }
 
 // relateContinue finds the session's earlier copy in the target agent here (from lineage)
@@ -267,6 +294,24 @@ func planContinueWarnings(p *Plan, in Input, opt Options) {
 	}
 }
 
+// markNative marks the source agent's copy kept here as continued in the target agent, so
+// it is not resumed by mistake (returning to it with hopsesh clears the mark).
+func markNative(ctx context.Context, p *Plan, j *journal.Journal, path string, res *Result) {
+	ns := p.nativeIn.Target
+	marker, ok := ns.Module.(agent.Marker)
+	if !ok {
+		return
+	}
+	h, err := ns.Machine.For(ctx, ns.Module.Spec(), ns.Install, j)
+	if err == nil {
+		s := agent.Summary{Key: p.native.Placement.Key, Title: p.Title, CWD: p.Target.CWD, Path: path}
+		err = marker.Mark(ctx, h, ns.Install, s, agent.Mark{Kind: agent.MarkContinued, Location: p.Target.Location, AgentName: p.Agent})
+	}
+	if err != nil {
+		res.Warnings = append(res.Warnings, "could not mark the native copy here: "+err.Error())
+	}
+}
+
 // applyContinue writes the converted session and records the hop.
 func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, error) {
 	step := func(s string) {
@@ -302,7 +347,20 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 	env.Audit.Write(audit.Entry{Action: "continue.write", Host: p.Source.Location, Session: p.Placement.Key.String(),
 		Detail: map[string]any{"from": p.Key.String(), "path": w.Path, "bytes": res.Bytes, "relation": cp.Relation, "journal": j.ID}})
 
-	// Lineage beside both copies.
+	// The source agent's own copy here too (planNative).
+	var nativeDst string
+	var nativeHead ir.Cursor
+	if np := p.native; np != nil {
+		name := src.Module.Spec().Name
+		step("keeping the " + name + " session here too")
+		if dst, _, nh, err := install(ctx, np, p.nativeIn, env, j, &Result{}, func(string) {}); err != nil {
+			res.Warnings = append(res.Warnings, fmt.Sprintf("the %s session was not also kept here: %v", name, err))
+		} else {
+			nativeDst, nativeHead = dst, nh
+		}
+	}
+
+	// Lineage beside every copy.
 	m := in.Lineage
 	if m == nil {
 		m = lineage.New(newID())
@@ -311,9 +369,19 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 	from := m.Upsert(lineage.Replica{Key: p.Key, Location: p.Source.Location, AgentVersion: p.Source.Version, Head: cp.head.Head, Offset: cp.head.Offset, Time: now})
 	to := m.Upsert(lineage.Replica{Key: p.Placement.Key, Location: p.Target.Location, AgentVersion: p.Target.Version, Head: w.Cursor.Head, Offset: w.Cursor.Offset, Time: now})
 	m.Hops = append(m.Hops, lineage.Hop{Time: now, From: from, To: to, Kind: lineage.HopContinue, Fork: p.Options.Fork, Fidelity: string(cp.Fidelity), Written: &lineage.Range{From: w.From, To: w.To}})
+	if nativeDst != "" {
+		n := m.Upsert(lineage.Replica{Key: p.native.Placement.Key, Location: p.Target.Location, AgentVersion: p.native.Target.Version, Head: nativeHead.Head, Offset: nativeHead.Offset, Time: now})
+		m.Hops = append(m.Hops, lineage.Hop{Time: now, From: from, To: n, Kind: lineage.HopMove})
+	}
 	body := m.Encode()
 	if err := j.WriteFile(host.LocalFS(), p.Target.Location, lineage.PathFor(w.Path), body, 0o600); err != nil {
 		res.Warnings = append(res.Warnings, "could not record the session's lineage here: "+err.Error())
+	}
+	if nativeDst != "" {
+		if err := j.WriteFile(host.LocalFS(), p.Target.Location, lineage.PathFor(nativeDst), body, 0o600); err != nil {
+			res.Warnings = append(res.Warnings, "could not record the lineage of the native copy here: "+err.Error())
+		}
+		markNative(ctx, p, j, nativeDst, res)
 	}
 	if srcFS, err := src.Machine.FS(ctx); err == nil {
 		if err := j.WriteFile(srcFS, p.Source.Location, lineage.PathFor(in.Session.Path), body, 0o600); err != nil {

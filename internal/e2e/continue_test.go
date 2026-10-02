@@ -149,6 +149,68 @@ func TestContinueInCodexAndBack(t *testing.T) {
 	}
 }
 
+// Continuing on another machine keeps the source agent's own copy there too, byte for
+// byte and marked; coming back to that agent there adds only the new work to it.
+func TestContinueKeepsNativeCopy(t *testing.T) {
+	root := t.TempDir()
+	box, here := newLocation(t, "box", root), newLocation(t, "here", root)
+	seed(t, box)
+	os.MkdirAll(here.in.Root("home"), 0o700)
+	env := move.Env{StateDir: t.TempDir()}
+	ctx := context.Background()
+	cl, cx := claude.New(), codex.New()
+	hereCodex := codexInstall(here)
+	os.MkdirAll(hereCodex.Root("home"), 0o700)
+
+	in := move.Input{Source: move.Side{Machine: box.m, Module: cl, Install: box.in}, Session: list(t, box)[sid],
+		Target: move.Side{Machine: here.m, Module: cx, Install: hereCodex},
+		Native: &move.NativeSide{Target: move.Side{Machine: here.m, Module: cl, Install: here.in}}}
+	p, err := move.Build(ctx, in, move.Options{TargetDir: here.repo, Mark: true})
+	if err != nil || len(p.Blockers) > 0 {
+		t.Fatalf("%v %v", err, p.Blockers)
+	}
+	if p.NativeCopy == nil || p.NativeCopy.Agent != "Claude Code" || p.NativeCopy.Key.Session != sid {
+		t.Fatalf("the plan keeps the Claude session here too: %+v", p.NativeCopy)
+	}
+	if _, err := move.Apply(ctx, p, in, env); err != nil {
+		t.Fatal(err)
+	}
+	native, ok := list(t, here)[sid]
+	if !ok || native.CWD != here.repo || native.Mark == nil || native.Mark.Kind != agent.MarkContinued || native.Mark.AgentName != "Codex" {
+		t.Fatalf("the native copy here: %+v %+v", native, native.Mark)
+	}
+	lin, _ := lineage.Read(host.LocalFS(), native.Path)
+	if lin == nil || len(lin.Replicas) != 3 {
+		t.Fatalf("lineage records the source, the Codex thread and the native copy: %+v", lin)
+	}
+
+	// Codex works on; then back to Claude Code here: the native copy gets only the new work.
+	th := listAgent(t, here, cx, hereCodex)[0]
+	appendCodexTurn(t, th.Path, "Now also check the second file.", "The second codeword is FIG-3.")
+	th = listAgent(t, here, cx, hereCodex)[0]
+	before, _ := os.ReadFile(native.Path)
+	tl, _ := lineage.Read(host.LocalFS(), th.Path)
+	backIn := move.Input{Source: move.Side{Machine: here.m, Module: cx, Install: hereCodex}, Session: th, Lineage: tl,
+		Target: move.Side{Machine: here.m, Module: cl, Install: here.in}, Copies: []move.Copy{{Summary: native, Lineage: lin}}}
+	back, err := move.Build(ctx, backIn, move.Options{Mark: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.Continue.Relation != move.RelationAppend || back.Placement.Key.Session != sid || len(back.Blockers) > 0 {
+		t.Fatalf("return to the native copy: %s %v %v", back.Continue.Relation, back.Placement.Key, back.Blockers)
+	}
+	if _, err := move.Apply(ctx, back, backIn, env); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.ReadFile(native.Path)
+	if !strings.HasPrefix(string(after), string(before)) {
+		t.Fatal("the native copy stays byte for byte; only new records are added")
+	}
+	if !mentions(readAll(t, here, cl, here.in, list(t, here)[sid]), "FIG-3") {
+		t.Fatal("the Codex work must arrive in the native copy")
+	}
+}
+
 func TestContinueOnTheSameMachine(t *testing.T) {
 	root := t.TempDir()
 	here := newLocation(t, "here", root)

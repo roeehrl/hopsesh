@@ -153,6 +153,16 @@ func (a *App) Plan(ctx context.Context, inv *Inventory, e Entry, target agent.ID
 	}
 	if target == e.Agent {
 		in.Source.Account, in.Target.Account = a.account(ctx, src, sm, sin), a.account(ctx, here, tm, tin)
+	} else if nin, ok := here.Install(e.Agent); ok && src.Name != here.Name {
+		// Continuing on another machine: keep the source agent's own copy here too.
+		in.Source.Account = a.account(ctx, src, sm, sin)
+		ns := &move.NativeSide{Target: move.Side{Machine: here.host, Module: sm, Install: nin, Account: a.account(ctx, here, sm, nin)}}
+		for _, c := range inv.Entries {
+			if c.Machine == here.Name && c.Agent == e.Agent && related[c.Session.Key] {
+				ns.Copies = append(ns.Copies, move.Copy{Summary: c.Session, Live: c.Live, Lineage: c.Lineage})
+			}
+		}
+		in.Native = ns
 	}
 	if rc := a.Cfg.Agents[string(target)].RemoteControl; rc && !opt.RemoteControl {
 		opt.RemoteControl = true

@@ -48,6 +48,23 @@ type Input struct {
 	// source's repository over SSH. Both are nil when the source is this machine.
 	Push     func(ctx context.Context, dir string) (string, error)
 	GitFetch func(dir string) *repos.FetchSource
+	// Native is the source's own agent on the target, for a continuation on another
+	// machine: the session is also kept there byte for byte (nil: it is not installed).
+	Native *NativeSide
+}
+
+// NativeSide is the source agent on the target and its copies of the session there.
+type NativeSide struct {
+	Target Side
+	Copies []Copy
+}
+
+// NativeCopy is the source agent's own copy kept next to a continuation, so a later return
+// to that agent there adds only the new work to the original turns.
+type NativeCopy struct {
+	Agent    string           `json:"agent"` // its name
+	Key      agent.SessionKey `json:"key"`
+	Replaces bool             `json:"replaces,omitempty"` // an older copy there makes way
 }
 
 // WorktreeMode chooses between the main checkout and a worktree.
@@ -134,8 +151,11 @@ type Plan struct {
 	Options        Options       `json:"options"`
 	OldName        string        `json:"oldName,omitempty"`
 	Continue       *ContinuePlan `json:"continue,omitempty"`
+	NativeCopy     *NativeCopy   `json:"nativeCopy,omitempty"`
 
-	bundle agent.Bundle
+	bundle   agent.Bundle
+	native   *Plan // the move that keeps NativeCopy
+	nativeIn Input
 }
 
 // Endpoint describes one end for people and JSON.

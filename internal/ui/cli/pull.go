@@ -273,6 +273,9 @@ func (r *run) renderPlan(p *move.Plan) {
 			r.printf("  session   a new %s session (%s)\n", p.Agent, c.Fidelity)
 		}
 		r.printf("  carries   %s\n", c.Report.Summary)
+		if n := p.NativeCopy; n != nil {
+			r.printf("  also      keeps the %s session there byte for byte, so going back to %s adds only the new work\n", n.Agent, n.Agent)
+		}
 	} else {
 		r.printf("  files     %d (%s)\n", len(p.Files.Files), move.Human(p.Bytes))
 	}

@@ -272,6 +272,7 @@ type PlanDTO struct {
 	NewName     string           `json:"newName"`
 	OtherAcct   bool             `json:"otherAccount"`
 	Continue    *ContinueDTO     `json:"continue,omitempty"`
+	NativeCopy  *move.NativeCopy `json:"nativeCopy,omitempty"`
 	Can         CanDTO           `json:"can"`
 	SetAside    int              `json:"setAside"`
 	Options     move.Options     `json:"-"`
@@ -308,7 +309,7 @@ func planDTO(p *move.Plan, e app.Entry, tm agent.Module) *PlanDTO {
 		Mappings: p.Placement.Mappings, Files: len(p.Files.Files), Bytes: p.Bytes, Mark: p.Mark, Sync: p.Sync,
 		FromSource: p.SyncFromSource, Push: p.Push, StopHere: p.StopHere, Conflict: p.Conflict,
 		Warnings: p.Warnings, Blockers: p.Blockers, NewName: p.NewName, OtherAcct: p.Placement.OtherAccount,
-		SetAside: len(p.SetAside), Options: p.Options, SessionKey: p.Key, SourceAgent: e.Agent,
+		SetAside: len(p.SetAside), NativeCopy: p.NativeCopy, Options: p.Options, SessionKey: p.Key, SourceAgent: e.Agent,
 		Can: CanDTO{Fork: agent.Has(tm, agent.CapFork), RemoteControl: agent.Has(tm, agent.CapRemoteControl),
 			App: agent.Has(tm, agent.CapApp), Notify: agent.Has(tm, agent.CapNotify), Native: agent.Has(tm, agent.CapNativeReplay)}}
 	if c := p.Continue; c != nil {

@@ -483,6 +483,7 @@ function continueCard(p, o, replan) {
     h("div", { class: "sec" },
       item("ok", relation, rep.summary),
       lost.length ? item("warn", "Not carried over exactly", lost.join("; ") + ".") : null,
+      p.nativeCopy ? item("ok", `The ${p.nativeCopy.agent} session is kept here too, byte for byte`, `Going back to ${p.nativeCopy.agent} on this machine later adds only the new work to it.`) : null,
       h("div", { style: "display:flex;gap:8px;align-items:center" }, h("span", { class: "muted", style: "font-size:12px" }, "Carry"),
         h("select", { "aria-label": "Fidelity", onchange: (ev) => { o.fidelity = ev.target.value; replan(); } },
           h("option", { value: "history", selected: o.fidelity === "history" }, "The conversation (tool activity as text)"),

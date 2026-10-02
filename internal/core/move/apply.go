@@ -70,7 +70,7 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (*Result, error) {
 			env.Progress(s)
 		}
 	}
-	src, tgt := in.Source, in.Target
+	tgt := in.Target
 	if !tgt.Machine.Local {
 		return nil, errors.New("a move installs on this machine")
 	}
@@ -117,94 +117,9 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (*Result, error) {
 		return res, err
 	}
 
-	// 2. Stage: copy every file here, complete records only.
-	stage := filepath.Join(env.StateDir, "staging", j.ID)
-	raw, out := filepath.Join(stage, "raw"), filepath.Join(stage, "out")
-	defer os.RemoveAll(stage)
-	srcFS, err := src.Machine.FS(ctx)
+	mainDst, srcHead, tgtHead, err := install(ctx, p, in, env, j, res, step)
 	if err != nil {
 		return res, err
-	}
-	step(fmt.Sprintf("copying %d file(s), %s", len(p.bundle.Files), Human(p.Bytes)))
-	for _, f := range p.Files.Files {
-		from := src.Machine.Path().Join(src.Install.Root(f.From.Root), fromSlash(src.Machine.Path(), f.From.Rel))
-		n, sum, err := copyStable(srcFS, from, filepath.Join(raw, f.From.Root, filepath.FromSlash(f.From.Rel)), f.From.Growable)
-		if err != nil {
-			return res, fmt.Errorf("copy %s: %w", from, err)
-		}
-		res.Files++
-		res.Bytes += n
-		env.Audit.Write(audit.Entry{Action: "copy", Host: p.Source.Location, Session: p.Key.String(), Detail: map[string]any{"src": from, "bytes": n, "sha256": sum}})
-	}
-
-	// 3. Scan, then rewrite with the module's policy.
-	pol := p.Files.Policy
-	if p.Options.OtherAccount {
-		san := tgt.Module.(agent.Sanitizer).Sanitize()
-		pol.DropElems = append(pol.DropElems, san.DropElems...)
-		pol.DropRecords = append(pol.DropRecords, san.DropRecords...)
-	}
-	var redact func([]byte) ([]byte, int)
-	if p.Options.Redact {
-		redact = scan.Redact
-	}
-	step("rewriting paths")
-	staged := map[string]string{}
-	for _, f := range p.Files.Files {
-		in := filepath.Join(raw, f.From.Root, filepath.FromSlash(f.From.Rel))
-		dst := filepath.Join(out, f.ToRoot, filepath.FromSlash(f.ToRel))
-		staged[agent.StagedKey(f)] = dst
-		if f.From.Rewrite != agent.RewriteNone {
-			if fh, err := os.Open(in); err == nil {
-				s, _ := scan.Reader(fh)
-				fh.Close()
-				res.Secrets.Merge(s)
-			}
-		}
-		st, err := rewriteFile(in, dst, f, p.Placement.Mappings, pol, redact)
-		if err != nil {
-			return res, fmt.Errorf("rewrite %s: %w", f.From.Rel, err)
-		}
-		if f.From.Role == agent.RoleMain {
-			res.Rewrite = st
-		}
-	}
-	stagedHost, err := tgt.Machine.For(ctx, tgt.Module.Spec(), agent.Install{}, nil)
-	if err != nil {
-		return res, err
-	}
-	if err := tgt.Module.Verify(ctx, stagedHost, p.Files, staged, p.Placement); err != nil {
-		return res, fmt.Errorf("verify: %w", err)
-	}
-	srcHead, tgtHead := heads(ctx, p, in, stagedHost, raw, staged)
-
-	// 4. Install, keeping what it replaces.
-	step("installing")
-	for _, c := range p.SetAside {
-		b, err := tgt.Module.Bundle(ctx, stagedHost, tgt.Install, c)
-		if err != nil {
-			continue
-		}
-		for _, f := range b.Files {
-			pth := filepath.Join(tgt.Install.Root(f.Root), filepath.FromSlash(f.Rel))
-			if err := j.SetAside(tgt.Machine.Name, pth); err != nil {
-				return res, fmt.Errorf("set aside %s: %w", pth, err)
-			}
-			res.SetAside = append(res.SetAside, pth)
-		}
-		_ = j.SetAside(tgt.Machine.Name, lineage.PathFor(c.Path))
-	}
-	var mainDst string
-	for _, f := range p.Files.Files {
-		dst := filepath.Join(tgt.Install.Root(f.ToRoot), filepath.FromSlash(f.ToRel))
-		if err := j.Place(tgt.Machine.Name, staged[agent.StagedKey(f)], dst, 0o600); err != nil {
-			return res, err
-		}
-		if f.From.Role == agent.RoleMain {
-			mainDst = dst
-			now := time.Now()
-			_ = os.Chtimes(dst, now, now) // fresh: agents clean up old sessions by date
-		}
 	}
 	env.Audit.Write(audit.Entry{Action: "move.install", Host: p.Source.Location, Session: p.Placement.Key.String(),
 		Detail: map[string]any{"target": mainDst, "files": res.Files, "bytes": res.Bytes, "journal": j.ID, "secrets": res.Secrets.Total}})
@@ -325,6 +240,104 @@ func heads(ctx context.Context, p *Plan, in Input, h agent.Host, raw string, sta
 		}
 	}
 	return
+}
+
+// install copies a session's bundle here, rewrites and verifies it, and installs it,
+// setting aside the copies it replaces (steps 2 to 4 of a move). It returns the installed
+// main file and the heads of the source and of the installed copy.
+func install(ctx context.Context, p *Plan, in Input, env Env, j *journal.Journal, res *Result, step func(string)) (string, ir.Cursor, ir.Cursor, error) {
+	src, tgt := in.Source, in.Target
+	var none ir.Cursor
+	// 2. Stage: copy every file here, complete records only.
+	stage := filepath.Join(env.StateDir, "staging", j.ID)
+	raw, out := filepath.Join(stage, "raw"), filepath.Join(stage, "out")
+	defer os.RemoveAll(stage)
+	srcFS, err := src.Machine.FS(ctx)
+	if err != nil {
+		return "", none, none, err
+	}
+	step(fmt.Sprintf("copying %d file(s), %s", len(p.bundle.Files), Human(p.Bytes)))
+	for _, f := range p.Files.Files {
+		from := src.Machine.Path().Join(src.Install.Root(f.From.Root), fromSlash(src.Machine.Path(), f.From.Rel))
+		n, sum, err := copyStable(srcFS, from, filepath.Join(raw, f.From.Root, filepath.FromSlash(f.From.Rel)), f.From.Growable)
+		if err != nil {
+			return "", none, none, fmt.Errorf("copy %s: %w", from, err)
+		}
+		res.Files++
+		res.Bytes += n
+		env.Audit.Write(audit.Entry{Action: "copy", Host: p.Source.Location, Session: p.Key.String(), Detail: map[string]any{"src": from, "bytes": n, "sha256": sum}})
+	}
+
+	// 3. Scan, then rewrite with the module's policy.
+	pol := p.Files.Policy
+	if p.Options.OtherAccount {
+		san := tgt.Module.(agent.Sanitizer).Sanitize()
+		pol.DropElems = append(pol.DropElems, san.DropElems...)
+		pol.DropRecords = append(pol.DropRecords, san.DropRecords...)
+	}
+	var redact func([]byte) ([]byte, int)
+	if p.Options.Redact {
+		redact = scan.Redact
+	}
+	step("rewriting paths")
+	staged := map[string]string{}
+	for _, f := range p.Files.Files {
+		in := filepath.Join(raw, f.From.Root, filepath.FromSlash(f.From.Rel))
+		dst := filepath.Join(out, f.ToRoot, filepath.FromSlash(f.ToRel))
+		staged[agent.StagedKey(f)] = dst
+		if f.From.Rewrite != agent.RewriteNone {
+			if fh, err := os.Open(in); err == nil {
+				s, _ := scan.Reader(fh)
+				fh.Close()
+				res.Secrets.Merge(s)
+			}
+		}
+		st, err := rewriteFile(in, dst, f, p.Placement.Mappings, pol, redact)
+		if err != nil {
+			return "", none, none, fmt.Errorf("rewrite %s: %w", f.From.Rel, err)
+		}
+		if f.From.Role == agent.RoleMain {
+			res.Rewrite = st
+		}
+	}
+	stagedHost, err := tgt.Machine.For(ctx, tgt.Module.Spec(), agent.Install{}, nil)
+	if err != nil {
+		return "", none, none, err
+	}
+	if err := tgt.Module.Verify(ctx, stagedHost, p.Files, staged, p.Placement); err != nil {
+		return "", none, none, fmt.Errorf("verify: %w", err)
+	}
+	srcHead, tgtHead := heads(ctx, p, in, stagedHost, raw, staged)
+
+	// 4. Install, keeping what it replaces.
+	step("installing")
+	for _, c := range p.SetAside {
+		b, err := tgt.Module.Bundle(ctx, stagedHost, tgt.Install, c)
+		if err != nil {
+			continue
+		}
+		for _, f := range b.Files {
+			pth := filepath.Join(tgt.Install.Root(f.Root), filepath.FromSlash(f.Rel))
+			if err := j.SetAside(tgt.Machine.Name, pth); err != nil {
+				return "", none, none, fmt.Errorf("set aside %s: %w", pth, err)
+			}
+			res.SetAside = append(res.SetAside, pth)
+		}
+		_ = j.SetAside(tgt.Machine.Name, lineage.PathFor(c.Path))
+	}
+	var mainDst string
+	for _, f := range p.Files.Files {
+		dst := filepath.Join(tgt.Install.Root(f.ToRoot), filepath.FromSlash(f.ToRel))
+		if err := j.Place(tgt.Machine.Name, staged[agent.StagedKey(f)], dst, 0o600); err != nil {
+			return "", none, none, err
+		}
+		if f.From.Role == agent.RoleMain {
+			mainDst = dst
+			now := time.Now()
+			_ = os.Chtimes(dst, now, now) // fresh: agents clean up old sessions by date
+		}
+	}
+	return mainDst, srcHead, tgtHead, nil
 }
 
 // recordLineage writes the session's lineage beside the new copy and beside the copy
