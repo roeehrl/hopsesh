@@ -1,0 +1,1 @@
+output of cat /home/u/git/demo/notes.txt
