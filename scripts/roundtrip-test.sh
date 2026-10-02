@@ -31,8 +31,8 @@ user_env() {
   shift 2
   sudo -u "$u" -H env -u XDG_CONFIG_HOME -u XDG_STATE_HOME -u XDG_CACHE_HOME -u XDG_DATA_HOME HOME="$h" "$@"
 }
-as_a() { user_env "$A" "$AHOME" HOPSESH_CONFIG_DIR="$AHOME/.hscfg" HOPSESH_STATE_DIR="$AHOME/.hsstate" "$@"; }
-as_b() { user_env "$B" "$BHOME" HOPSESH_CONFIG_DIR="$BHOME/.hscfg" HOPSESH_STATE_DIR="$BHOME/.hsstate" "$@"; }
+as_a() { user_env "$A" "$AHOME" HOPSESH_MACHINE=back HOPSESH_CONFIG_DIR="$AHOME/.hscfg" HOPSESH_STATE_DIR="$AHOME/.hsstate" "$@"; }
+as_b() { user_env "$B" "$BHOME" HOPSESH_MACHINE=box HOPSESH_CONFIG_DIR="$BHOME/.hscfg" HOPSESH_STATE_DIR="$BHOME/.hsstate" "$@"; }
 sh_a() { user_env "$A" "$AHOME" sh -c "$1"; }
 sh_b() { user_env "$B" "$BHOME" sh -c "$1"; }
 
@@ -67,6 +67,7 @@ JSONL
 sh_b "mkdir -p ~/.claude/projects/$SLUG_B"
 sudo install -o "$B" -m 0600 "$WORK/s.jsonl" "$BHOME/.claude/projects/$SLUG_B/$ID.jsonl"
 BFILE="$BHOME/.claude/projects/$SLUG_B/$ID.jsonl"
+sh_a "mkdir -p ~/.claude" # Claude Code has run on back once
 
 say "box → back"
 as_a "$HS" hosts add box "$B@127.0.0.1" >/dev/null
@@ -81,7 +82,7 @@ SLUG_A=$(sh_a 'cd ~/git/rt && pwd -P' | sed 's/[^A-Za-z0-9]/-/g')
 AFILE="$AHOME/.claude/projects/$SLUG_A/$ID.jsonl"
 sudo test -f "$AFILE" || fail "no copy on back at $AFILE"
 as_a "$HS" ls --json --no-git > "$WORK/ls.json"
-grep -q '"movedTo": *"' "$WORK/ls.json" || fail "the listing should show box's copy as moved"
+grep -q '"kind": *"moved"' "$WORK/ls.json" || fail "the listing should show box's copy as moved"
 
 say "work continues on back"
 sh_a "echo '{\"type\":\"user\",\"uuid\":\"u2\",\"parentUuid\":\"u1\",\"sessionId\":\"$ID\",\"cwd\":\"$AHOME/git/rt\",\"timestamp\":\"2026-10-02T12:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"continued on back\"}}' >> '$AFILE'"
@@ -105,7 +106,9 @@ if as_a "$HS" pull "box:$ID" --yes --json > "$WORK/pull3.json" 2>&1; then fail "
 grep -q "keep-both" "$WORK/pull3.json" || { cat "$WORK/pull3.json"; fail "the refusal should offer --keep-both"; }
 as_a "$HS" pull "box:$ID" --yes --json --keep-both > "$WORK/pull4.json" || { cat "$WORK/pull4.json"; fail "keep both"; }
 sudo grep -q "kept going on back after the move" "$AFILE" || fail "keep-both must not touch the copy here"
-grep -q '"originalId": *"'"$ID"'"' "$WORK/pull4.json" || fail "the incoming copy should get a new id"
+grep -q '"sourceId": *"'"$ID"'"' "$WORK/pull4.json" || fail "the incoming copy should record where it came from"
+python3 -c 'import json,sys; sys.exit(json.load(open(sys.argv[1]))["plan"]["placement"]["key"]["session"] == sys.argv[2])' "$WORK/pull4.json" "$ID" \
+  || fail "the incoming copy should get a new id"
 
 echo
 echo "round trip test passed"
