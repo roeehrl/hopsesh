@@ -4,7 +4,7 @@ import "strings"
 
 // PowerShellProbe returns a PowerShell script producing the same line format as the POSIX
 // probe, for Windows machines.
-func PowerShellProbe(dirs []string) string {
+func PowerShellProbe(dirs, excl []string) string {
 	var b strings.Builder
 	b.WriteString("$dirs = @(")
 	for i, d := range dirs {
@@ -28,7 +28,7 @@ func PowerShellProbe(dirs []string) string {
   $up = git -C $d rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>$null
   if ($LASTEXITCODE -eq 0 -and $up) { "upstream` + "`t" + `$up"; "aheadbehind` + "`t" + `$(git -C $d rev-list --left-right --count '@{u}...HEAD' 2>$null)" }
   else { "unpushed` + "`t" + `$(git -C $d rev-list --count HEAD --not --remotes 2>$null)" }
-  $dirty = @(git -C $d status --porcelain -- ':/' ':(top,exclude).claude/worktrees' 2>$null).Count
+  $dirty = @(git -C $d status --porcelain -- ':/'@EXCLUDES@ 2>$null).Count
   "dirty` + "`t" + `$dirty"
   "gitdir` + "`t" + `$(git -C $d rev-parse --absolute-git-dir 2>$null)"
   $cd = git -C $d rev-parse --path-format=absolute --git-common-dir 2>$null
@@ -37,5 +37,9 @@ func PowerShellProbe(dirs []string) string {
   git -C $d worktree list --porcelain 2>$null | ForEach-Object { "wt` + "`t" + `$_" }
 }
 `)
-	return b.String()
+	var ex strings.Builder
+	for _, p := range excludes(excl) {
+		ex.WriteString(" '" + strings.ReplaceAll(p, "'", "''") + "'")
+	}
+	return strings.Replace(b.String(), "@EXCLUDES@", ex.String(), 1)
 }

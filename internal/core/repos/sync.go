@@ -48,7 +48,7 @@ type FetchSource struct {
 // refs/hopsesh/<machine>/<branch>, and when fastForward is set it moves a clean checkout
 // on branch forward with --ff-only. It never merges, rebases, stashes or touches another
 // branch.
-func Sync(ctx context.Context, dir, branch, commit string, fastForward bool, from *FetchSource) (SyncResult, error) {
+func Sync(ctx context.Context, dir, branch, commit string, fastForward bool, from *FetchSource, excl []string) (SyncResult, error) {
 	r := SyncResult{Commit: commit, Branch: CurrentBranch(ctx, dir)}
 	if !HasCommit(ctx, dir, commit) {
 		r.Fetched = true
@@ -96,7 +96,7 @@ func Sync(ctx context.Context, dir, branch, commit string, fastForward bool, fro
 	case !fastForward:
 		r.State = SyncBehind
 	default:
-		if out, err := runGit(ctx, dir, "status", "--porcelain", "--untracked-files=no", "--", ":/", ":(top,exclude).claude/worktrees"); err != nil {
+		if out, err := runGit(ctx, dir, append([]string{"status", "--porcelain", "--untracked-files=no", "--", ":/"}, excludes(excl)...)...); err != nil {
 			return r, err
 		} else if out != "" {
 			r.State = SyncDirty

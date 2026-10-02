@@ -252,8 +252,8 @@ func AddWorktree(ctx context.Context, repo, branch, path string) error {
 }
 
 // SwitchBranch switches the main checkout to branch, only when it has no uncommitted changes.
-func SwitchBranch(ctx context.Context, repo, branch string) error {
-	if out, err := runGit(ctx, repo, "status", "--porcelain", "--", ":/", ":(top,exclude).claude/worktrees"); err != nil {
+func SwitchBranch(ctx context.Context, repo, branch string, excl []string) error {
+	if out, err := runGit(ctx, repo, append([]string{"status", "--porcelain", "--", ":/"}, excludes(excl)...)...); err != nil {
 		return err
 	} else if out != "" {
 		return errors.New("working tree has uncommitted changes; use a worktree instead")

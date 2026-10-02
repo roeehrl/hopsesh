@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/roeehrl/hopsesh/internal/core/repos"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
@@ -213,4 +214,28 @@ func (f moduleFS) Rename(from, to string) error {
 		return errReadOnly
 	}
 	return f.h.w.Rename(f.h.fs, f.h.m.Name, from, to)
+}
+
+// GitProbe returns the git state of folders on the machine. excl are agent-managed
+// worktree folders.
+func (m *Machine) GitProbe(ctx context.Context, dirs, excl []string) ([]repos.GitState, error) {
+	if len(dirs) == 0 || !m.Facts.HasGit {
+		return nil, nil
+	}
+	if m.Local {
+		return repos.ProbeLocal(ctx, dirs, excl)
+	}
+	if m.Facts.OS == "windows" {
+		out, err := m.Conn.RunPowerShell(ctx, repos.PowerShellProbe(dirs, excl))
+		if err != nil {
+			return nil, err
+		}
+		return repos.ParseProbe(out, excl), nil
+	}
+	script, args := repos.ProbeScript(dirs, excl)
+	out, err := m.Conn.RunSh(ctx, script, args[1:]...)
+	if err != nil {
+		return nil, err
+	}
+	return repos.ParseProbe(out, excl), nil
 }
