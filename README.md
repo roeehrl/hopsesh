@@ -4,7 +4,7 @@
 
 # hopsesh
 
-**Find your Claude Code sessions on your other machines and continue one here.**
+**Move coding-agent sessions between your machines, and between Claude Code and Codex.**
 
 [![Release](https://img.shields.io/github/v/release/roeehrl/hopsesh)](https://github.com/roeehrl/hopsesh/releases/latest)
 [![CI](https://github.com/roeehrl/hopsesh/actions/workflows/ci.yml/badge.svg)](https://github.com/roeehrl/hopsesh/actions/workflows/ci.yml)
@@ -13,7 +13,7 @@
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 ![macOS · Linux · Windows](https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-0b6b62)
 
-[Install](#install) · [Quick start](#quick-start) · [Round trips](#round-trips) · [Ask Claude](#use-it-from-claude-code) · [How it works](#how-it-works) · [Why not…?](#why-not) · [FAQ](#faq)
+[Install](#install) · [Quick start](#quick-start) · [Another agent](#continue-in-another-agent) · [Round trips](#round-trips) · [Push](#send-a-session-to-another-machine) · [Ask your agent](#use-it-from-your-agent) · [Why not…?](#why-not) · [FAQ](#faq)
 
 <img src="docs/assets/demo.gif" alt="hopsesh lists Claude Code sessions on two machines grouped by repository, then moves one to this machine, cloning its repository and printing the resume command" width="900">
 
@@ -21,30 +21,32 @@
 
 </div>
 
-You started something in Claude Code on your desktop, and now you're on your laptop. hopsesh
-shows every session on all your machines and moves the one you pick here: repository,
-worktree, paths and all. Then it gives you the `claude --resume` command.
+You started something in Claude Code on your desktop, and now you're on your laptop, or you
+want Codex to take over. hopsesh shows every session of every agent on all your machines and
+brings the one you pick here: in the same agent, or continued in the other one, with the
+repository, worktree and paths fixed up. Then it gives you the command to continue.
 
 - **Finds your machines** from Tailscale and `~/.ssh/config`, and connects only to the ones you
   allow, with your own `ssh`, keys and agent. Nothing to install on the other machines.
   Machines without SSH keys can log in with a password.
-- **Lists every session by repository**: machine, path, branch, worktree, last prompt, when it
-  was last active, and whether it's running right now.
-- **Moves a session safely**: finds the repo here or clones it, recreates the worktree, warns
-  about unpushed or uncommitted work, rewrites paths, and shows a plan first. `hopsesh undo`
-  reverses a move.
-- **Moves back just as easily**: the copy left behind is marked "↪ moved to …", listings show one
-  row per session, and `hopsesh pull <id>` brings back the newest copy, code included. If both
-  copies changed, it stops and asks; it never merges.
-- **Works from inside Claude Code**: ask "bring my laptop session here" and Claude plans the move
-  with hopsesh, then moves only after you say yes.
-- **Picks up where you left off**: the resumed session's first message tells Claude it was moved
-  and asks it to check that nothing is missing. It can start with Remote Control on and tell
-  the old session where the work went.
-- **CLI, TUI and a macOS app** on one engine. `--json` output everywhere it matters.
+- **Lists every session of every agent** (Claude Code and Codex) by repository: machine, agent,
+  path, branch, worktree, last prompt, last activity, whether it's running, and where else
+  it has been.
+- **Moves a session safely**: finds the repo here or clones it, recreates the worktree, brings
+  the code to the session's commit, rewrites paths, and shows a plan first. `hopsesh undo`
+  reverses it.
+- **Continues it in another agent**: `--in codex` or `--in claude`, on another machine or this
+  one. The plan shows exactly what carries over and what doesn't, plus the briefing the other
+  agent gets.
+- **Comes back intact**: a round trip adds only the new work to the original session, so a
+  Claude Code session's earlier turns, including its signed reasoning, stay byte for byte.
+  If both copies changed, it stops and asks; it never merges.
+- **Works from inside your agent**: ask Claude Code or Codex "bring my laptop session here" and
+  it plans with hopsesh, then moves only after you say yes.
+- **CLI, TUI and a macOS app** on one engine, with `--json` output everywhere it matters.
 
 > Status: alpha. It works end to end on macOS and Linux; Windows support is built but less
-> tested. hopsesh is an independent project, not affiliated with Anthropic.
+> tested. hopsesh is an independent project, not affiliated with Anthropic or OpenAI.
 
 ## Install
 
@@ -71,7 +73,11 @@ Both check the download against the release's `checksums.txt` and its signature,
 - **From source** (Go 1.26+): `go install github.com/roeehrl/hopsesh/cmd/hopsesh@latest`
 
 The other machines need only an SSH server (Remote Login on macOS, OpenSSH on Windows) and
-their Claude Code sessions.
+their sessions. To continue in another agent, that agent must be installed here.
+
+**Upgrading from 0.2:** 0.3 uses a new configuration format. hopsesh sets the old file aside
+(the app offers "Start fresh"), and you add your machines again. `--desktop` is now `--app`,
+and the remote helper (`hosts helper`) and `hopsesh import` are gone.
 
 ## Quick start
 
@@ -82,17 +88,20 @@ hopsesh trust studio          # confirm its SSH host key
 hopsesh                       # browse sessions and move one here
 ```
 
-Or from scripts:
+A session is named `[<machine>:][<agent>/]<id-or-title>`. Leave out the machine to take the
+newest copy anywhere, and leave out the agent when the title or id is unambiguous.
 
 ```sh
-hopsesh ls --json                          # every allowed machine, grouped by repo
-hopsesh plan studio:"fix flaky tests"      # read-only preview of a move
-hopsesh pull studio:"fix flaky tests"      # plan, confirm, move, print the resume command
-hopsesh pull 7f3c2a1e                      # no machine name: bring back the newest copy
-hopsesh pull studio:7f3c2a1e --clone --rc --notify --yes
+hopsesh agents                                 # supported agents and what's installed here
+hopsesh ls --agent codex --json                # sessions of one agent, grouped by repo
+hopsesh plan studio:"fix flaky tests"          # read-only preview of a move
+hopsesh pull studio:"fix flaky tests"          # plan, confirm, move, print the command
+hopsesh pull studio:claude/7f3c2a1e --in codex # continue a Claude Code session in Codex
+hopsesh pull 7f3c2a1e                          # no machine name: bring back the newest copy
+hopsesh push 7f3c2a1e laptop                   # send it to a machine that runs hopsesh
 hopsesh hosts add nas alice@192.168.1.20 --password   # a machine without SSH keys
-hopsesh doctor studio                      # SSH, host trust, Claude version, Remote Control
-hopsesh undo 7f3c2a1e
+hopsesh doctor studio                          # agents, SSH, host trust and the skill
+hopsesh undo                                   # undo the newest move (--list shows more)
 ```
 
 ### The macOS app
@@ -103,45 +112,95 @@ hopsesh undo 7f3c2a1e
 </picture>
 
 Same engine, with a preflight screen for each move: repository, worktree mode, what gets
-rewritten, and what's left behind on the other machine. Its Settings screen can put the
-`hopsesh` command on your PATH (a link into the app, no administrator password) and install
-the Claude Code skill.
+rewritten, and what's left behind on the other machine. Every session has **Continue in…**,
+with a preview of the conversion. Settings has per-agent options and a **Receive sessions**
+switch. It can also put the `hopsesh` command on your PATH (a link into the app, no
+administrator password) and install the skill into your agents.
+
+## Continue in another agent
+
+```sh
+hopsesh plan studio:"fix flaky tests" --in codex   # see what carries over, change nothing
+hopsesh pull studio:"fix flaky tests" --in codex   # then do it
+```
+
+hopsesh converts the conversation into the other agent's own session format, on another
+machine or this one:
+
+- **`--fidelity history`** (the default) brings the conversation as text. Tool activity is
+  labelled as the previous agent's, long outputs are shortened, and the oldest steps are
+  summarised when the history is long.
+- **`--fidelity note`** brings only a briefing.
+- **`--native`** (experimental) replays exact shell calls as the target agent's own, where it
+  can.
+- **`--via import`** lets Codex's own importer convert a Claude Code session; hopsesh adds its
+  briefing and keeps it undoable.
+
+Every plan shows a **loss report** (what was kept, what was shortened or summarised, which paths
+were mapped; reasoning from the other vendor is never carried). It also shows the **briefing**
+the other agent gets: where the session came from, what to verify first (git status, the
+commit at transfer time), the open plan, and instruction files only the previous agent read.
+`--note-file` adds your own handoff note, `--carry-rules` adds your instructions for every
+project, and `--go` starts the session with "Continue." Nothing is sent to a model unless you
+start it. Details: [docs/design.md §8](docs/design.md#8-continuing-in-another-agent).
+
 
 ## Round trips
 
-Move a session to your laptop, work on it, and move it back later. hopsesh treats the session
-as living on one machine at a time:
+Move a session to your laptop, or into Codex, work on it, and bring it back later:
 
-- **The copy left behind is marked.** Its title becomes `↪ moved to <machine> · <title>`, so
-  even Claude Code's own resume list on that machine shows that it moved.
-- **One row per session.** Listings combine the copies of a session across machines and show
-  the newest one. `hopsesh pull <id-or-title>` without a machine name brings that copy here,
+- **The copy left behind is marked** in its agent's own list: `↪ moved to <machine> · <title>`
+  or `↪ continued in Codex on <machine> · <title>`.
+- **One row per session.** Listings combine the copies of a session across machines and
+  agents. `hopsesh pull <id-or-title>` without a machine name brings back the newest one,
   into the folder it came from.
-- **It never merges.** If both copies changed since the move, the move is refused until you
-  choose `--keep-both` (the incoming copy becomes a separate session) or `--replace` (the
-  copy here is set aside and `hopsesh undo` brings it back).
+- **Coming back to the original agent adds only the new work.** The original session's own
+  turns, including Claude Code's signed reasoning, stay byte for byte.
+- **It never merges.** If both copies changed, the move stops until you choose `--keep-both`
+  (a separate session) or `--replace` (the copy here is set aside; `hopsesh undo` brings it
+  back).
 - **The code follows.** hopsesh fetches the session's commit, straight from the other machine
   if it was never pushed, and fast-forwards a clean checkout. It never merges, rebases or
-  stashes; if the checkout isn't clean or has diverged, it says exactly what's missing.
-- `hopsesh plan` shows all of this without changing anything.
+  stashes; otherwise it says exactly what's missing.
+- **The history travels with the session.** A small `<session>.hopsesh.json` beside it records
+  its copies and hops, so the next move works from any machine.
 
-Details: [docs/design.md §12](docs/design.md#12-round-trips-a--b--a).
+Details: [docs/design.md §10](docs/design.md#10-round-trips-and-lineage) and
+[§12](docs/design.md#12-code-follows-the-conversation).
 
-## Use it from Claude Code
+## Send a session to another machine
+
+`pull` needs only SSH on the other machine. When that machine runs hopsesh too, you can also
+send a session from here:
 
 ```sh
-hopsesh skill install              # Claude asks before each hopsesh command
+hopsesh receive on               # on the machine that receives (off by default)
+hopsesh push 7f3c2a1e laptop     # on the machine that has the session
+```
+
+The receiver plans with its own agents and settings against a read-only copy of that
+session's files; it can't read or run anything else on the sender. Nothing changes until you
+confirm, and `hopsesh undo` on the sender reverses both machines. Both sides must speak the same
+hopsesh protocol version (otherwise hopsesh asks you to update), and Windows machines can't
+receive yet. Details:
+[docs/design.md §11](docs/design.md#11-peers-working-with-hopsesh-on-the-other-machine).
+
+## Use it from your agent
+
+```sh
+hopsesh skill install              # your agent asks before each hopsesh command
 hopsesh skill install --add-rules  # read-only hopsesh commands run without asking
 ```
 
-Then ask Claude things like "bring my laptop session here" or "which sessions are running on
-the studio?". Claude plans first and **moves only after you say yes**. `--add-rules` allows the
-read-only commands (`ls`, `plan`, `show`, …) and adds "ask" rules for `pull`, `undo` and
-`import`, so moves always ask you, even in auto mode. The skill never starts another Claude and never handles passwords: for a machine that
-logs in with a password, Claude asks you to run `hopsesh hosts setup-key` yourself.
-`hopsesh skill remove` takes it out again. Details:
-[docs/design.md §13](docs/design.md#13-claude-code-integration-the-hopsesh-skill) and
-[§14](docs/design.md#14-the-command-line-tool-from-the-app).
+The skill goes into every installed agent (Claude Code and Codex) as identical files. Then ask
+things like "bring my laptop session here", "continue this in Codex" or "which sessions are
+running on the studio?". The agent plans first and **moves only after you say yes**.
+`--add-rules` lets the read-only commands (`ls`, `show`, `plan`, `agents`, `doctor`, …) run
+without asking, while `pull`, `push` and `undo` **always ask**, even in auto mode. The skill
+never starts another agent and never handles passwords: for a machine that logs in with a
+password, the agent asks you to run `hopsesh hosts setup-key` yourself. `hopsesh skill remove`
+takes it out again. Details: [docs/design.md §13](docs/design.md#13-the-hopsesh-skill-for-every-agent)
+and [§14](docs/design.md#14-the-command-line-tool-from-the-app).
 
 ## How it works
 
@@ -150,13 +209,16 @@ logs in with a password, Claude asks you to run `hopsesh hosts setup-key` yourse
 2. **Listing** connects with your system `ssh` (strict host-key checking, ControlMaster) and
    reads the head and tail of each transcript over SFTP. One batched `git` probe per machine
    adds branch, worktree and unpushed/uncommitted counts.
-3. **Moving** builds a plan, then copies the transcript and its side files into a staging
-   folder. It rewrites paths in one pass, so ids and signed thinking blocks are never
-   touched. It re-reads the result, installs it where Claude Code looks for it, and keeps an
-   undo journal.
+3. **Moving** builds a plan, then copies the session's files into a staging folder. It
+   rewrites paths in one pass, so ids, signatures and encrypted content are never touched.
+   It checks the result, installs it where the agent looks for it, and keeps an undo
+   journal.
+4. **Continuing in another agent** reads the session into a neutral form (a chain of
+   content-hashed steps), then writes it in the other agent's format with the loss report
+   and briefing.
 
-The details, including the Claude Code file-format traps hopsesh handles, are in
-[docs/design.md](docs/design.md).
+Each agent is a module behind a small SDK, so adding one doesn't touch the core. The details,
+including the file-format traps hopsesh handles, are in [docs/design.md](docs/design.md).
 
 ### How it treats your data
 
@@ -171,10 +233,13 @@ The details, including the Claude Code file-format traps hopsesh handles, are in
   command line.
 - **Transcripts can hold secrets.** hopsesh scans for likely secrets while moving and can
   redact the copy (`--redact`). Every remote action goes to a local audit log.
-- **Only Claude Code itself talks to the model.** hopsesh never calls the API.
+- **Only your agents talk to their models.** hopsesh never calls the Anthropic or OpenAI API.
 
 ## Why not…?
 
+- **Codex's own import of Claude Code sessions?** It converts on one machine. hopsesh uses it
+  when you ask (`--via import`) and adds machines, the repository, a loss report, a briefing
+  and a way home that keeps the original session intact.
 - **`claude --teleport`?** Teleport brings a session from Claude Code on the web to your
   machine. hopsesh moves sessions between your own machines.
 - **Remote Control?** Remote Control lets you drive a session that keeps running where it
@@ -196,6 +261,8 @@ Related projects, with different trade-offs:
 - [claude-nomad](https://github.com/funkadelic/claude-nomad) syncs your setup and history
   with path remapping.
 - [chronicle](https://github.com/geekmuse/chronicle) syncs history through git.
+- [sessport](https://www.npmjs.com/package/sessport) converts sessions between agents on one
+  machine.
 
 ## FAQ
 
@@ -203,7 +270,7 @@ Related projects, with different trade-offs:
 <summary><b>Does anything leave my machines?</b></summary>
 
 No. Sessions go directly between your machines over SSH. hopsesh has no server and no
-telemetry, and it never calls the Anthropic API.
+telemetry, and it never calls the Anthropic or OpenAI API.
 </details>
 
 <details>
@@ -233,24 +300,31 @@ Better still, `hopsesh hosts setup-key <machine>` (in the app: "Set up key login
 with the password and adds your SSH key there. It then checks that key login works, switches
 the machine to keys and forgets the password. This works for macOS and Linux machines.
 `hopsesh hosts` shows each machine's login method. Details:
-[docs/design.md §15](docs/design.md#15-password-login).
+[docs/design.md §16](docs/design.md#16-password-login).
 </details>
 
 <details>
 <summary><b>Does the other machine need hopsesh installed?</b></summary>
 
-No. It only needs an SSH server. There's an optional helper (`hopsesh hosts helper install
-<machine>`) that makes listing faster on machines with long histories. It's a copy of
-hopsesh pinned by SHA-256, checked before every run, listens on nothing, and is removed with
-`hopsesh hosts helper remove <machine>`.
+No. `pull` only needs an SSH server there. hopsesh on the other machine is needed only to
+`push` from here to there (it must also run `hopsesh receive on`).
+</details>
+
+<details>
+<summary><b>What gets lost when a session continues in another agent?</b></summary>
+
+The plan tells you before anything is written. Usually the conversation arrives as text, tool
+calls appear as the previous agent's activity, long outputs are shortened, and reasoning
+from the other vendor is left out. When you bring the session back, only the new work is
+added to the original, so nothing in the original is lost.
 </details>
 
 <details>
 <summary><b>What if the session is still running on the other machine?</b></summary>
 
-By default hopsesh copies it as it is and asks the old session to stop (handoff). With
-`--fork`, both copies continue independently. hopsesh refuses to overwrite a session that's
-running on this machine.
+By default hopsesh copies it as it is and hands it off: the copy left behind is marked when
+that session ends. With `--fork`, both copies continue independently. hopsesh refuses to
+replace a session that's open on this machine, unless `--stop-local` quits it first.
 </details>
 
 <details>
@@ -273,7 +347,8 @@ left as they are and listed in the plan.
 <summary><b>Different Claude accounts on the two machines?</b></summary>
 
 hopsesh reads `claude auth status` on both sides. If the accounts differ, it leaves out
-thinking blocks, because they're signed for the original account.
+thinking blocks, because they're signed for the original account. Codex's encrypted content is
+never edited.
 </details>
 
 <details>
@@ -288,8 +363,9 @@ and the command-line tool run from Terminal never needs this permission.
 <details>
 <summary><b>How do I undo a move?</b></summary>
 
-`hopsesh undo <session-id>` removes the copy and restores anything it set aside. `hopsesh undo`
-with no arguments lists recent moves.
+`hopsesh undo` reverses the newest move or continuation, and `hopsesh undo <id>` a specific
+one. It removes new files, restores replaced ones, cuts off appended records and brings back
+set-aside copies, on other machines too. `hopsesh undo --list` shows what can be undone.
 </details>
 
 ## Contributing
@@ -306,4 +382,5 @@ Report security issues privately as described in [SECURITY.md](SECURITY.md).
 ## License
 
 [Apache License 2.0](LICENSE). "Claude" and "Claude Code" are trademarks of Anthropic, PBC;
-hopsesh is not affiliated with, endorsed by or sponsored by Anthropic.
+"Codex" and "OpenAI" are trademarks of OpenAI. hopsesh is not affiliated with, endorsed by or
+sponsored by Anthropic or OpenAI.
