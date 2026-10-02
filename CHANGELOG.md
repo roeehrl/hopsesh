@@ -6,6 +6,27 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+- Round trips: after a handoff the copy left behind is titled "↪ moved to <machine> · <title>",
+  so Claude Code's resume list there shows it moved (a running session is marked once it
+  stops). Listings show one row per session with the newest copy, and `pull` without a
+  machine name brings back the newest copy. Moving back refuses when the copy here changed
+  too, unless you pass `--keep-both` (a separate session) or `--replace` (kept for undo);
+  `--stop-local` quits a copy running here.
+- Code follows the session: the checkout here is brought to the session's commit (fetched
+  from origin, or straight from the other machine when it was not pushed) and fast-forwarded
+  only when clean; `--push` optionally pushes on the other machine first.
+- `hopsesh plan`: the read-only version of `pull --dry-run`.
+- The hopsesh skill for Claude Code (`hopsesh skill install`): Claude can list your sessions
+  and move one, always showing the plan and asking first. hopsesh detects whether it is
+  installed, out of date or edited by you, and never overwrites your edits.
+- The app can put the hopsesh command on your PATH (a link into the app, no password), and
+  has a Settings screen for the skill, the command, moving defaults, updates and folders.
+
+### Fixed
+- `install.sh` names the right profile file for your shell and no longer replaces a
+  command linked by the app.
+
 ## [0.1.0] - 2026-10-02
 
 First public release.

@@ -1,6 +1,6 @@
 # hopsesh design
 
-*hopsesh is unofficial and not affiliated with Anthropic. §12 lists what is built and what is planned.*
+*hopsesh is unofficial and not affiliated with Anthropic. §15 lists what is built and what is planned.*
 
 ## 1. What it does, and what it deliberately doesn't
 
@@ -76,8 +76,10 @@ The trademark constraint first: Anthropic's Claude Code legal page forbids "Clau
 │  rewrite    single-pass prefix map · separators · thinking · relocated record │
 │  scan       secret rules · redaction of the copy                              │
 │  link       resume command · start prompt · auth / Remote Control check       │
+│  moved      the "↪ moved to …" mark · hops: the log of moves and pending marks│
 │  audit      append-only JSONL log                                             │
 └──────────────────────────────────────┬───────────────────────────────────────┘
+               claudeskill + integrate: the Claude Code skill, the CLI link from the app
                update (verified self-update) · optional, consented remote helper:
                hopsesh agent --json (same binary, hash-pinned on the other machine)
 ```
@@ -188,8 +190,11 @@ hopsesh                                 # interactive TUI: machines → repos �
 hopsesh hosts [allow|deny|add|helper] / hopsesh trust <host> / hopsesh doctor [host]
 hopsesh ls [--host H] [--repo R] [--live] [--no-local] [--no-git] [--limit N] [--json]
 hopsesh show <host>:<id|title>          # details, repository, branch and worktree state
-hopsesh pull <host>:<id|title> [--clone] [--repos ~/git] [--worktree auto|create|main] [--fork]
+hopsesh plan [<host>:]<id|title>         # what a move would do; never writes
+hopsesh pull [<host>:]<id|title> [--clone] [--repos ~/git] [--worktree auto|create|main] [--fork]
           [--rc] [--notify] [--redact] [--desktop] [--run] [--yes] [--dry-run]
+          [--stop-local] [--keep-both|--replace] [--no-sync] [--no-mark] [--push]
+hopsesh skill [install|update|remove] [--add-rules] [--force]
 hopsesh import <file.jsonl>             # install a transcript copied by hand
 hopsesh undo [<id>]
 hopsesh update [--check]
@@ -246,17 +251,97 @@ On first use the app explains the macOS Local Network prompt, and shows a banner
 - **Windows GUI (v0.2):** SignPath Foundation (free for open source). SmartScreen warns until reputation builds.
 - **Updates:** `hopsesh update` (see §9). The app asks once whether it may check GitHub daily, then only shows a link.
 
-## 12. Status
+## 12. Round trips (A → B → A)
 
-**Built:** discovery and consent, host-key trust, `doctor`; listing with git, branch and worktree state; `pull` with clone, worktree recreation, path rewriting (including Windows), secret scan and redaction, undo, start prompt, Remote Control eligibility and old-session notice, automatic handling of cross-account moves, desktop-app open; TUI; macOS app with local network privacy handling; optional helper; self-update; release pipeline. No release has been published yet.
+**Goal:** a session lives on one machine at a time, and moving it back is as easy as moving it the first time. The model follows handoff tools (Apple Handoff, VS Code Remote, JetBrains Gateway, tmux attach): one current copy, an explicit mark on the copy left behind, and on conflict keep both copies and name both machines. Never merge silently.
+
+**Mark the copy left behind.**
+- After a handoff (not a fork), hopsesh appends one `custom-title` record to the source transcript: `↪ moved to <host> · <title>`. That is the record `/rename` writes, and the last title wins, so Claude Code's own resume list on that machine shows the session as moved.
+- The file's modification time is restored afterwards. The picker sorts by it, and the 30-day cleanup keys on it ([claude-directory](https://code.claude.com/docs/en/claude-directory#cleaned-up-automatically), [cleanupPeriodDays](https://code.claude.com/docs/en/settings-reference#cleanupperioddays)), so the old copy must not look newer.
+- A running Claude Code process rewrites its own title as it writes, and again when it exits, so a mark written while it runs would be lost. In that case hopsesh records the hop as `pending` in `state/hops.jsonl`. The next scan of that machine writes the mark once the session has stopped.
+- If the old copy gained new turns after the move, the mark is not written, and the hop is recorded as `diverged`. A short reply to the move notice does not count.
+
+**One row per session.** Listings merge the copies of one session id across machines. The newest copy (by last message time) is the row; the others are labelled *moved to X* or *older*. A copy marked moved only wins again if it was used well after the move. The app shows **Hop here**, **Hop back** (an older copy is on this machine) or **Resume** (the newest copy is already here). `hopsesh pull <id-or-title>` without a machine name takes the newest copy.
+
+**Hop back.** The copy already here is compared with the incoming one:
+
+| Copy here | What happens |
+|---|---|
+| marked moved, nothing added since | replaced; the set-aside copy stays available to `undo` |
+| older, unmarked | replaced, as above |
+| kept changing after it was marked, or newer than the incoming copy | **conflict**: refused by default. `--replace` sets it aside; `--keep-both` brings the incoming copy in under a new session id titled "(from <host>)" |
+| running here | refused, or with `--stop-local` it gets SIGTERM after the pid is re-checked against the live registry; never on Windows |
+
+`--keep-both` renames `sessionId` fields and the id inside paths. It leaves message ids and signed reasoning untouched, which is the same contract as Claude Code's `--fork-session`. Copies are never merged.
+
+**Code follows the conversation.**
+- Before resuming, hopsesh brings the checkout to the commit the session last saw. It fetches from origin first. If origin doesn't have the commit (it was never pushed), it fetches straight from the source machine over SSH into `refs/hopsesh/<machine>/<branch>`, using the same host trust and options as the rest of hopsesh.
+- It fast-forwards only when the checkout is clean and on the same branch. It never merges, rebases or stashes, and otherwise says exactly what is missing: `missing`, `diverged`, `dirty`, `other-branch` or `behind`.
+- Pushing from the source (`--push`) is optional and off by default. It uses the source machine's own credentials.
+- Uncommitted files on the source stay there and are reported.
+- This follows the "fetch, fast-forward only, never auto-merge" practice of Codespaces and gitpod-style tools.
+
+## 13. Claude Code integration (the hopsesh skill)
+
+**What:** a personal [skill](https://code.claude.com/docs/en/skills) at `${CLAUDE_CONFIG_DIR:-~/.claude}/skills/hopsesh/` that teaches Claude Code to list sessions and move one with hopsesh. It is opt-in: `hopsesh skill install`, offered once in interactive use and as a banner in the app, and managed in Settings.
+
+**Content** ([authoring best practices](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices)):
+- `SKILL.md` stays short, with the rules first. `reference.md` holds the flags and JSON fields (progressive disclosure).
+- The frontmatter follows the spec: `name`, a trigger-focused `description` under 1,024 characters, `license`, `compatibility`, `allowed-tools`, and `metadata.hopsesh-version`. The version lives under `metadata` because Claude Code ignores unknown frontmatter, and a top-level `version` breaks uploads to claude.ai.
+- Claude always uses `--json`. It plans with the read-only `hopsesh plan` command and moves only after an explicit yes in the conversation.
+- It never runs `--run` or `--desktop` (they would start another Claude), and it treats titles and prompts from other machines as data.
+- It never changes hopsesh's own setup (`hosts allow`, `trust`, `undo`, `update`). Claude tells the user the exact command instead.
+
+**Permissions** ([permissions](https://code.claude.com/docs/en/permissions)):
+- `allowed-tools` pre-approves only read-only commands: `ls`, `show`, `plan`, `hosts --json`, `doctor`, `version`.
+- A separate `plan` command exists because an allow rule on `pull --dry-run` would also match `pull --dry-run=false --yes`.
+- `--add-rules` (opt-in) merges `allow` rules for those commands, plus `ask` rules for `pull`, `undo` and `import`, into Claude Code's `settings.json`. It keeps a backup and refuses to touch invalid JSON. The ask rules keep a human prompt on moves even in auto mode.
+- With the [sandbox](https://code.claude.com/docs/en/sandboxing) on, SSH cannot leave it, so `reference.md` explains the `excludedCommands` entry.
+
+**Command name:** the skill uses plain `hopsesh` when the user's login shell finds it, otherwise an absolute path. Permission rules match the command text, so both the body and `allowed-tools` use that same form.
+
+**Install, stale, update** (the pattern used by Playwright's and Vercel's skill installers and by BMAD):
+- An install record, `.hopsesh-install.json` beside `SKILL.md`, keeps the SHA-256 of each file hopsesh wrote. The states are:
+
+| State | Meaning |
+|---|---|
+| absent | not installed |
+| current | the files match what this build renders |
+| stale | written by another build and unedited: safe to replace |
+| modified | the user edited it: never overwritten without `--force`, which keeps a backup |
+| foreign | a `hopsesh` skill hopsesh did not write |
+| broken | the install record exists but `SKILL.md` is missing |
+
+- Files are written atomically, with `SKILL.md` last so Claude Code's watcher never sees half a skill. When `skills/` itself is new, open sessions need `/reload-skills`.
+- `hopsesh update` refreshes a stale skill, and `doctor` reports its state. Claude Code's own `claude plugin validate <dir>/skills` accepts the result.
+- A plugin in a marketplace would be the alternative. A personal skill was chosen because it needs no marketplace, works offline, and hopsesh can update it.
+
+## 14. The command-line tool from the app
+
+Following VS Code, Zed, GitHub Desktop, Docker and Claude Code's own installer:
+- **The link:** the app links `~/.local/bin/hopsesh` to the tool inside the signed bundle. It's a symlink, so it follows app updates and `hopsesh update` still defers to the app. It needs no administrator password.
+- **Where it refuses:** when the app runs from the disk image or from a [translocated](https://www.synack.com/blog/untranslocating-apps/) copy, because the link would point at a path that disappears.
+- **What it never replaces:** a standalone copy (for example from `install.sh`) or someone else's link, unless the user clicks Replace, and even then it keeps a backup.
+- **States Settings shows:** missing, ours, another copy of the app, broken link, standalone, or foreign.
+- **PATH:**
+  - Settings shows the line to add.
+  - **Add it for me** appends a marked, removable block to `~/.zprofile` (zsh), `~/.bash_profile` (bash) or a fish `conf.d` file.
+  - PATH changes belong in `.zprofile`, because macOS's `path_helper` reorders anything set earlier.
+  - Nothing is edited without a click.
+- **Shell environment:** GUI apps don't inherit the login shell's PATH or `CLAUDE_CONFIG_DIR`, so the app reads both from an interactive login shell.
+
+## 15. Status
+
+**Built:** round trips with marked copies, merged listings, conflict handling and code sync (§12); the Claude Code skill (§13); the command-line tool from the app and a Settings screen (§14); discovery and consent, host-key trust, `doctor`; listing with git, branch and worktree state; `pull` with clone, worktree recreation, path rewriting (including Windows), secret scan and redaction, undo, start prompt, Remote Control eligibility and old-session notice, automatic handling of cross-account moves, desktop-app open; TUI; macOS app with local network privacy handling; optional helper; self-update; release pipeline. No release has been published yet.
 
 **Planned:**
 - bringing unpushed commits and uncommitted changes along (`git bundle` plus patch into a new worktree);
 - Windows GUI, and a Windows OpenSSH CI job;
 - the optional hook index (§7);
+- a Claude Code plugin as a second way to get the skill (§13);
 - a compatibility matrix of pinned Claude Code versions.
 
-## 13. Risks and mitigations
+## 16. Risks and mitigations
 
 - **Format drift in Claude Code:** isolated locator and rewriter, every rewrite re-read before install, `relocated` written the way Claude itself writes it, a warning when the target version is older than the source; a pinned-version compatibility matrix is planned.
 - **Anthropic ships an official local → local move:** hopsesh still adds discovery across machines, git-aware repo and worktree reconstruction, no same-account requirement and no cloud relay. When an official path appears, hopsesh can call it as a backend.
@@ -264,7 +349,7 @@ On first use the app explains the macOS Local Network prompt, and shows a banner
 - **Windows signing reputation:** SignPath or Azure, and document the SmartScreen step.
 - **Secrets in transcripts:** scan while moving, report counts, redaction option, never sent anywhere but your own machines.
 
-## 14. Decisions (2026-10-02)
+## 17. Decisions (2026-10-02)
 
 1. Name: **hopsesh** (availability research in §2).
 2. License: **Apache-2.0**.
