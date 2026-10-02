@@ -1,15 +1,16 @@
 // hopsesh desktop frontend. Plain ES modules, no build step. All data from transcripts is
 // untrusted: it is only ever inserted with textContent (see h()).
 import { Call } from "/wails/runtime.js";
+import { showSettings } from "./settings.js";
 
 const SVC = "github.com/roeehrl/hopsesh/internal/gui.App.";
-const api = (method, ...args) => Call.ByName(SVC + method, ...args);
+export const api = (method, ...args) => Call.ByName(SVC + method, ...args);
 
 const $ = (sel) => document.querySelector(sel);
-const view = $("#view");
+export const view = $("#view");
 
 // h(tag, attrs, ...children): build DOM without innerHTML.
-function h(tag, attrs = {}, ...kids) {
+export function h(tag, attrs = {}, ...kids) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) {
     if (v === undefined || v === null || v === false) continue;
@@ -26,7 +27,7 @@ function h(tag, attrs = {}, ...kids) {
   return el;
 }
 
-function toast(msg) {
+export function toast(msg) {
   const t = $("#toast");
   t.textContent = msg;
   t.classList.add("show");
@@ -44,9 +45,11 @@ function ago(iso) {
 
 const state = { scan: null, machine: "", filter: "", info: null, sel: null, opts: {}, plan: null };
 
-function setTitlebar(mode) {
+export function setTitlebar(mode) {
   $("#q").hidden = mode !== "sessions";
   $("#btn-refresh").hidden = mode !== "sessions";
+  $("#btn-settings").hidden = mode === "settings";
+  $("#btn-settings").onclick = () => showSettings();
   $("#btn-machines").textContent = mode === "machines" ? "Sessions" : "Machines";
   $("#btn-machines").onclick = mode === "machines" ? () => showSessions() : () => showMachines();
 }
@@ -159,6 +162,8 @@ function renderSessions() {
   }
   const blocked = s.machines.filter((m) => m.status === "local-network");
   if (blocked.length) cards.unshift(localNetworkBanner(blocked));
+  const skillOffer = skillBanner();
+  if (skillOffer) cards.unshift(skillOffer);
   const content = h("div", { class: "content" },
     h("div", { class: "toolbar" }, h("span", { class: "muted", style: "font-size:12px" }, "Read-only scan · grouped by repository"), h("span", { class: "spacer" })),
     h("div", { class: "list" }, cards.length ? cards : h("div", { class: "loading" }, "No sessions match.")),
@@ -179,6 +184,38 @@ function localNetworkBanner(machines) {
     h("div", { style: "display:flex;gap:8px" },
       h("button", { class: "btn primary", onclick: () => api("OpenLocalNetworkSettings").catch(() => {}) }, "Open Privacy & Security"),
       h("button", { class: "btn", onclick: async () => { await api("RetryLocalNetwork"); state.info = await api("Info"); showSessions(true); } }, "Try again")));
+}
+
+// skillBanner offers the Claude Code skill once (until installed or dismissed), and an
+// update when the installed skill is out of date.
+function skillBanner() {
+  const st = state.info?.skillState, prompt = state.info?.skillPrompt;
+  const refresh = async () => { state.info = await api("Info"); renderSessions(); };
+  if (st === "absent" && prompt !== "declined") {
+    return h("div", { class: "card banner", role: "status" },
+      h("div", { style: "font-weight:600" }, "Let Claude Code use hopsesh"),
+      h("div", { style: "font-size:12.5px;line-height:1.5" }, "Ask Claude \u201cbring my laptop session here\u201d or \u201cwhat's running on the mini?\u201d. A small skill teaches Claude to use hopsesh: it shows you the plan and moves only after you say yes."),
+      h("div", { style: "display:flex;gap:8px" },
+        h("button", { class: "btn primary", onclick: async () => { try { await api("InstallSkill", false, false); toast("Installed the hopsesh skill"); } catch (e) { toast(String(e.message || e)); } refresh(); } }, "Install the skill"),
+        h("button", { class: "btn", onclick: () => showSettings() }, "Options…"),
+        h("button", { class: "btn", onclick: async () => { await api("DismissSkillOffer"); refresh(); } }, "Not now")));
+  }
+  if (state.info?.cliOffer) {
+    return h("div", { class: "card banner", role: "status" },
+      h("div", { style: "font-weight:600" }, "Use hopsesh in Terminal too"),
+      h("div", { style: "font-size:12.5px;line-height:1.5" }, "Link the hopsesh command into ~/.local/bin (no password needed). It always runs this app's version."),
+      h("div", { style: "display:flex;gap:8px" },
+        h("button", { class: "btn primary", onclick: async () => { try { await api("InstallCLI", false); toast("hopsesh is ready in Terminal"); } catch (e) { toast(String(e.message || e)); } refresh(); } }, "Install command"),
+        h("button", { class: "btn", onclick: async () => { await api("DismissCLIOffer"); refresh(); } }, "Not now")));
+  }
+  if (st === "stale" || st === "broken") {
+    return h("div", { class: "card banner", role: "status" },
+      h("div", { style: "font-weight:600" }, st === "stale" ? "The hopsesh skill for Claude Code is out of date" : "The hopsesh skill for Claude Code is damaged"),
+      h("div", { style: "display:flex;gap:8px" },
+        h("button", { class: "btn primary", onclick: async () => { try { await api("InstallSkill", false, false); toast("Updated the hopsesh skill"); } catch (e) { toast(String(e.message || e)); } refresh(); } }, st === "stale" ? "Update it" : "Repair it"),
+        h("button", { class: "btn", onclick: () => showSettings() }, "Settings…")));
+  }
+  return null;
 }
 
 function sessionRow(e) {

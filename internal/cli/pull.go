@@ -299,6 +299,7 @@ func (a *app) transport(cmd *cobra.Command, src engine.Source, sum sessions.Summ
 	if p.Options.NotifyOld && !p.Options.RemoteCtl {
 		a.printf("\nTo tell the old session yourself, paste this there:\n  %s\n", link.OldSessionNotice(p.Resume.Name, p.TargetCWD, p.NewName, p.Resume.Fork))
 	}
+	a.offerSkill()
 	if run, _ := cmd.Flags().GetBool("run"); run {
 		argv := p.Resume.Argv()
 		bin := tgt.ClaudePath
