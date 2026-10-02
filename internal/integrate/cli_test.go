@@ -67,3 +67,17 @@ func TestCheckCLIStates(t *testing.T) {
 		t.Fatal("a standalone copy is never removed by the app")
 	}
 }
+
+func TestAdoptLoginEnv(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	login := func() map[string]string { return map[string]string{"CLAUDE_CONFIG_DIR": "/tmp/claude-alt"} }
+	adoptLoginEnv(func(string) string { return "" }, login)
+	if got := os.Getenv("CLAUDE_CONFIG_DIR"); got != "/tmp/claude-alt" {
+		t.Fatalf("CLAUDE_CONFIG_DIR = %q", got)
+	}
+	// A value already in the process wins.
+	adoptLoginEnv(func(string) string { return "/mine" }, func() map[string]string { return map[string]string{"CLAUDE_CONFIG_DIR": "/other"} })
+	if got := os.Getenv("CLAUDE_CONFIG_DIR"); got != "/tmp/claude-alt" {
+		t.Fatalf("overwrote an existing value: %q", got)
+	}
+}

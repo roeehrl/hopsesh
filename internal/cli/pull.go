@@ -297,7 +297,7 @@ func (a *app) transport(cmd *cobra.Command, src engine.Source, sum sessions.Summ
 	a.printf("\n  Undo with: hopsesh undo %s\n\n", shortID(p.SessionID))
 	a.printf("Start it (the first message explains the move and asks Claude to check nothing is missing):\n\n  %s\n", p.Resume.Shell(shell))
 	if p.Options.NotifyOld && !p.Options.RemoteCtl {
-		a.printf("\nTo tell the old session yourself, paste this there:\n  %s\n", link.OldSessionNotice(p.Resume.Name, p.TargetCWD, p.NewName, p.Resume.Fork))
+		a.printf("\nTo tell the old session yourself, paste this there:\n  %s\n", link.OldSessionNotice(p.StartContext.TargetHost, p.TargetCWD, p.NewName, p.Resume.Fork))
 	}
 	a.offerSkill()
 	if run, _ := cmd.Flags().GetBool("run"); run {
