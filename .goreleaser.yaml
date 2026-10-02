@@ -1,0 +1,151 @@
+# GoReleaser configuration for the hopsesh CLI (the macOS app is built by the
+# macos-app job in .github/workflows/release.yml with scripts/build-macos-app.sh).
+#
+# Release secrets (see docs/RELEASING.md):
+#   HOPSESH_RELEASE_KEY_FILE  ECDSA P-256 private key; signs checksums.txt (required)
+#   HOPSESH_RELEASE_PUBKEY    matching public key, base64 DER; embedded for `hopsesh update`
+#   MACOS_SIGN_P12 / MACOS_SIGN_PASSWORD / MACOS_NOTARY_*   sign + notarize darwin binaries
+#   TAP_GITHUB_TOKEN          push the Homebrew cask, Scoop manifest and winget PR
+version: 2
+
+project_name: hopsesh
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: hopsesh
+    main: ./cmd/hopsesh
+    binary: hopsesh
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags:
+      - -s -w
+      - -X github.com/roeehrl/hopsesh/internal/version.Version={{.Version}}
+      - -X github.com/roeehrl/hopsesh/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/roeehrl/hopsesh/internal/version.Date={{.Date}}
+      - -X github.com/roeehrl/hopsesh/internal/update.PublicKey={{ envOrDefault "HOPSESH_RELEASE_PUBKEY" "" }}
+
+archives:
+  - id: default
+    # internal/update.ArchiveName depends on this exact pattern.
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files: [LICENSE, README.md, CHANGELOG.md]
+
+checksum:
+  name_template: checksums.txt
+
+signs:
+  # The signature `hopsesh update` and the install scripts verify (embedded public key).
+  - id: release-key
+    artifacts: checksum
+    signature: "${artifact}.sig"
+    cmd: sh
+    args:
+      - -c
+      - 'test -n "$HOPSESH_RELEASE_KEY_FILE" || { echo "HOPSESH_RELEASE_KEY_FILE is not set: releases must be signed" >&2; exit 1; }; openssl dgst -sha256 -sign "$HOPSESH_RELEASE_KEY_FILE" -out "$0" "$1"'
+      - "${signature}"
+      - "${artifact}"
+  # Sigstore keyless signature, tied to this repository's release workflow.
+  - id: cosign
+    artifacts: checksum
+    signature: "${artifact}.sigstore.json"
+    cmd: cosign
+    args: ["sign-blob", "--bundle=${signature}", "${artifact}", "--yes"]
+
+sboms:
+  - artifacts: archive
+
+notarize:
+  macos:
+    - enabled: '{{ isEnvSet "MACOS_SIGN_P12" }}'
+      ids: [hopsesh]
+      sign:
+        certificate: "{{ .Env.MACOS_SIGN_P12 }}"
+        password: "{{ .Env.MACOS_SIGN_PASSWORD }}"
+      notarize:
+        issuer_id: "{{ .Env.MACOS_NOTARY_ISSUER_ID }}"
+        key_id: "{{ .Env.MACOS_NOTARY_KEY_ID }}"
+        key: "{{ .Env.MACOS_NOTARY_KEY }}"
+        wait: true
+
+nfpms:
+  - id: packages
+    package_name: hopsesh
+    vendor: hopsesh contributors
+    homepage: https://github.com/roeehrl/hopsesh
+    maintainer: roeehrl <82368940+roeehrl@users.noreply.github.com>
+    description: Move Claude Code sessions between your machines (not affiliated with Anthropic).
+    license: Apache-2.0
+    formats: [deb, rpm, apk]
+    bindir: /usr/bin
+    dependencies: [openssh-client]
+    overrides:
+      rpm:
+        dependencies: [openssh-clients]
+      apk:
+        dependencies: [openssh-client]
+
+homebrew_casks:
+  - name: hopsesh
+    ids: [default]
+    repository:
+      owner: roeehrl
+      name: homebrew-tap
+      token: '{{ envOrDefault "TAP_GITHUB_TOKEN" "" }}'
+    homepage: https://github.com/roeehrl/hopsesh
+    description: Move Claude Code sessions between your machines
+    skip_upload: '{{ if isEnvSet "TAP_GITHUB_TOKEN" }}false{{ else }}true{{ end }}'
+
+scoops:
+  - name: hopsesh
+    ids: [default]
+    repository:
+      owner: roeehrl
+      name: scoop-bucket
+      token: '{{ envOrDefault "TAP_GITHUB_TOKEN" "" }}'
+    homepage: https://github.com/roeehrl/hopsesh
+    description: Move Claude Code sessions between your machines
+    license: Apache-2.0
+    skip_upload: '{{ if isEnvSet "TAP_GITHUB_TOKEN" }}false{{ else }}true{{ end }}'
+
+winget:
+  - name: hopsesh
+    publisher: roeehrl
+    short_description: Move Claude Code sessions between your machines
+    license: Apache-2.0
+    homepage: https://github.com/roeehrl/hopsesh
+    publisher_url: https://github.com/roeehrl
+    ids: [default]
+    repository:
+      owner: roeehrl
+      name: winget-pkgs
+      branch: "hopsesh-{{ .Version }}"
+      token: '{{ envOrDefault "TAP_GITHUB_TOKEN" "" }}'
+      pull_request:
+        enabled: true
+        base:
+          owner: microsoft
+          name: winget-pkgs
+          branch: master
+    skip_upload: '{{ if isEnvSet "TAP_GITHUB_TOKEN" }}false{{ else }}true{{ end }}'
+
+changelog:
+  use: github
+  sort: asc
+
+release:
+  draft: true # a person publishes it after the macOS app is attached
+  footer: |
+    Verify: `sha256sum -c checksums.txt --ignore-missing`, and the signature with
+    `openssl dgst -sha256 -verify release-key.pub -signature checksums.txt.sig checksums.txt`.
+    hopsesh is not affiliated with Anthropic.

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>hopsesh</string>
+  <key>CFBundleDisplayName</key><string>hopsesh</string>
+  <key>CFBundleIdentifier</key><string>io.github.roeehrl.hopsesh</string>
+  <key>CFBundleExecutable</key><string>hopsesh-app</string>
+  <key>CFBundleIconFile</key><string>hopsesh</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>@VERSION@</string>
+  <key>CFBundleVersion</key><string>@VERSION@</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
+  <key>NSLocalNetworkUsageDescription</key><string>hopsesh connects over SSH to your other computers on this network to list your Claude Code sessions and copy the one you choose.</string>
+  <key>NSAppleEventsUsageDescription</key><string>hopsesh opens Terminal to start the moved Claude Code session.</string>
+  <key>NSHumanReadableCopyright</key><string>Apache-2.0. Not affiliated with Anthropic.</string>
+</dict>
+</plist>

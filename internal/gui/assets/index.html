@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hopsesh</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="titlebar" style="--wails-draggable: drag">
+  <span class="brand">hopsesh</span>
+  <span class="sub" id="subtitle">Sessions on your machines</span>
+  <span class="spacer"></span>
+  <label class="visually-hidden" for="q">Search sessions</label>
+  <input id="q" type="search" placeholder="Search prompts, repos, titles" style="--wails-draggable: no-drag" hidden>
+  <button id="btn-refresh" class="btn" style="--wails-draggable: no-drag" hidden>Refresh</button>
+  <button id="btn-machines" class="btn primary" style="--wails-draggable: no-drag">Machines</button>
+</header>
+<main id="view"></main>
+<dialog id="dlg"><form method="dialog" id="dlg-body"></form></dialog>
+<div id="toast" role="status" aria-live="polite"></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

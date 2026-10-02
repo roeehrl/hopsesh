@@ -1,0 +1,18 @@
+version: "2"
+
+linters:
+  exclusions:
+    presets:
+      - std-error-handling # unchecked Close/Remove/Write in cleanup paths
+      - common-false-positives
+    rules:
+      - path: _test\.go
+        linters: [errcheck]
+  settings:
+    staticcheck:
+      checks:
+        - all
+        - -ST1000 # package comments on every package
+        - -ST1003 # initialisms in names
+        - -QF1001 # De Morgan rewrites (readability call)
+        - -QF1002 # tagged switch suggestions
