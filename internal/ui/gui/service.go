@@ -43,6 +43,7 @@ type App struct {
 	plan   *move.Plan
 	input  move.Input
 	res    *move.Result
+	push   *app.Push // a push planned on another machine, its connection open
 	pw     *pwBroker
 	pwOnce sync.Once
 	// Wails is the running application (events, clipboard, dialogs).
@@ -435,6 +436,7 @@ func (a *App) Shutdown() {
 	if a.inv != nil {
 		a.inv.Close()
 	}
+	a.closePushLocked()
 }
 
 // emit sends an event to the window (nothing without one).

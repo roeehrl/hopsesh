@@ -1,8 +1,10 @@
 package gui
 
 import (
+	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/roeehrl/hopsesh/agents/claude"
 	"github.com/roeehrl/hopsesh/internal/agents/all"
+	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
 )
 
@@ -231,4 +234,80 @@ func findEntry(t *testing.T, s *ScanDTO, key string) EntryDTO {
 	}
 	t.Fatalf("no %s in %+v", key, s)
 	return EntryDTO{}
+}
+
+// Sending a session from the window to another machine's hopsesh (a real `hopsesh peer
+// --stdio` process with its own home), and undoing both sides from here.
+func TestWindowSendsToAnotherMachine(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds hopsesh")
+	}
+	bin := filepath.Join(t.TempDir(), "hopsesh")
+	build := exec.Command("go", "build", "-o", bin, "./cmd/hopsesh")
+	build.Dir = "../../.."
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build: %v %s", err, out)
+	}
+	// The other machine: Claude Code has run there once, and it receives sessions.
+	box := t.TempDir()
+	box, _ = filepath.EvalSymlinks(box)
+	boxRepo := filepath.Join(box, "git", "demo")
+	os.MkdirAll(boxRepo, 0o700)
+	os.MkdirAll(filepath.Join(box, ".claude", "projects"), 0o700)
+	boxEnv := []string{"HOME=" + box, "PATH=/usr/bin:/bin", "HOPSESH_MACHINE=box", "HOPSESH_CONFIG_DIR=" + filepath.Join(box, "config"),
+		"HOPSESH_STATE_DIR=" + filepath.Join(box, "state"), "CLAUDE_CONFIG_DIR=", "CODEX_HOME="}
+	recv := exec.Command(bin, "receive", "on")
+	recv.Env = boxEnv
+	if out, err := recv.CombinedOutput(); err != nil {
+		t.Fatalf("receive on: %v %s", err, out)
+	}
+
+	home(t)
+	t.Setenv("HOPSESH_MACHINE", "here")
+	a := NewApp(all.Registry())
+	if err := a.AddHost("box", "box", false, false); err != nil {
+		t.Fatal(err)
+	}
+	a.core.PeerDial = func(ctx context.Context, _ config.Host) (*app.PeerConn, error) {
+		cmd := exec.Command(bin, "peer", "--stdio")
+		cmd.Env = boxEnv
+		in, _ := cmd.StdinPipe()
+		out, _ := cmd.StdoutPipe()
+		if err := cmd.Start(); err != nil {
+			return nil, err
+		}
+		return &app.PeerConn{Out: out, In: in, Close: func() { in.Close(); _ = cmd.Wait() }}, nil
+	}
+	if _, err := a.Scan(); err != nil {
+		t.Fatal(err)
+	}
+	p, err := a.PushPlan("claude/"+sid, "box", "", OptsDTO{Mark: true, TargetDir: boxRepo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Machine != "box" || p.TargetCWD != boxRepo || len(p.Blockers) > 0 {
+		t.Fatalf("plan: %+v", p)
+	}
+	d, err := a.PushApply()
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved := filepath.Join(box, ".claude", "projects", claude.Slug(boxRepo), sid+".jsonl")
+	if _, err := os.Stat(moved); err != nil || d.Machine != "box" || d.Journal == "" || !strings.Contains(d.Command, "claude") {
+		t.Fatalf("done: %+v (%v)", d, err)
+	}
+	scan, _ := a.Scan()
+	if e := findEntry(t, scan, "claude/"+sid); !strings.HasPrefix(e.Status, "moved to box") {
+		t.Fatalf("the copy here is marked: %+v", e.Status)
+	}
+	if err := a.Undo(d.Journal); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(moved); !os.IsNotExist(err) {
+		t.Fatal("undo removes the copy on box")
+	}
+	scan, _ = a.Scan()
+	if e := findEntry(t, scan, "claude/"+sid); e.Status != "ended" {
+		t.Fatalf("undo removes the mark here: %+v", e.Status)
+	}
 }
