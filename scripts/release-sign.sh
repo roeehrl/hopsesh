@@ -120,6 +120,9 @@ APP_NOTARY=""
 (cd "$WORK/src" && env VERSION="$VERSION" COMMIT="$COMMIT" DATE="$DATE" SIGN_IDENTITY="$SIGN_IDENTITY" \
   HOPSESH_RELEASE_PUBKEY="$PUBKEY" OUT="$WORK/app" NOTARY_PROFILE="$APP_NOTARY" scripts/build-macos-app.sh)
 cp "$WORK"/app/*.dmg "$WORK/out/"
+# A versionless copy, so .../releases/latest/download/hopsesh-macos-universal.dmg always
+# serves the newest app (for download links on web pages).
+cp "$WORK/out/hopsesh-$VERSION-macos-universal.dmg" "$WORK/out/hopsesh-macos-universal.dmg"
 
 say "checksums.txt and its signature"
 (cd "$WORK/out" && shasum -a 256 -- * | sort -k2 > "$WORK/checksums.txt")
