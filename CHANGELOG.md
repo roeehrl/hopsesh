@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## [0.2.0] - 2026-10-02
+
 ### Added
 - Round trips: after a handoff the copy left behind is titled "↪ moved to <machine> · <title>",
   so Claude Code's resume list there shows it moved (a running session is marked once it
@@ -57,4 +59,5 @@ First public release.
   binaries and app signed and notarized on the maintainer's Mac; `checksums.txt` signed with
   a release key that never leaves that Mac; install scripts; Scoop/winget and Linux packages.
 
+[0.2.0]: https://github.com/roeehrl/hopsesh/releases/tag/v0.2.0
 [0.1.0]: https://github.com/roeehrl/hopsesh/releases/tag/v0.1.0

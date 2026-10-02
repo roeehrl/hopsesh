@@ -249,7 +249,7 @@ On first use the app explains the macOS Local Network prompt, and shows a banner
   - CI (GoReleaser, on a `v*` tag): Linux and Windows archives, `.deb`/`.rpm`/`.apk` packages, SBOMs, GitHub build provenance for each file, a draft release, and optionally Scoop and winget manifests.
   - The maintainer's Mac (`scripts/release-sign.sh`): verifies that provenance, builds the macOS CLI and app from the tagged commit, signs them with the Developer ID (hardened runtime), notarizes them (the app is stapled), writes `checksums.txt` for every file and signs it with the release key. macOS 13 or later.
 - **Planned:** a Homebrew tap.
-- **Windows GUI (v0.2):** SignPath Foundation (free for open source). SmartScreen warns until reputation builds.
+- **Windows GUI (planned):** SignPath Foundation (free for open source). SmartScreen warns until reputation builds.
 - **Updates:** `hopsesh update` (see §9). The app asks once whether it may check GitHub daily, then only shows a link.
 
 ## 12. Round trips (A → B → A)
@@ -377,7 +377,7 @@ written to the config.
 
 ## 16. Status
 
-**Built:** password login with Keychain, prompts and key setup (§15); round trips with marked copies, merged listings, conflict handling and code sync (§12); the Claude Code skill (§13); the command-line tool from the app and a Settings screen (§14); discovery and consent, host-key trust, `doctor`; listing with git, branch and worktree state; `pull` with clone, worktree recreation, path rewriting (including Windows), secret scan and redaction, undo, start prompt, Remote Control eligibility and old-session notice, automatic handling of cross-account moves, desktop-app open; TUI; macOS app with local network privacy handling; optional helper; self-update; release pipeline. Released: 0.1.0.
+**Built:** password login with Keychain, prompts and key setup (§15); round trips with marked copies, merged listings, conflict handling and code sync (§12); the Claude Code skill (§13); the command-line tool from the app and a Settings screen (§14); discovery and consent, host-key trust, `doctor`; listing with git, branch and worktree state; `pull` with clone, worktree recreation, path rewriting (including Windows), secret scan and redaction, undo, start prompt, Remote Control eligibility and old-session notice, automatic handling of cross-account moves, desktop-app open; TUI; macOS app with local network privacy handling; optional helper; self-update; release pipeline. Released: 0.1.0 and 0.2.0.
 
 **Planned:**
 - bringing unpushed commits and uncommitted changes along (`git bundle` plus patch into a new worktree);
@@ -399,6 +399,6 @@ written to the config.
 1. Name: **hopsesh** (availability research in §2).
 2. License: **Apache-2.0**.
 3. Stack: **Go + Bubble Tea v2 + Wails v3**, with Tauri v2 as the GUI fallback.
-4. v0.1 scope: **CLI + TUI on macOS/Windows/Linux, GUI on macOS**; Windows GUI in v0.2.
+4. v0.1 scope: **CLI + TUI on macOS/Windows/Linux, GUI on macOS**; Windows GUI later (not in 0.2.0, which added round trips, the skill and password login).
 5. Signing: **Apple Developer ID**; Windows via **SignPath Foundation** (free for OSS).
 6. Defaults: live source → **handoff**; repos folder **~/git**, flat layout.
