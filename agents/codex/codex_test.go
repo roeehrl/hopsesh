@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/roeehrl/hopsesh/sdk/agent"
 	"github.com/roeehrl/hopsesh/sdk/agent/agenttest"
@@ -149,5 +150,52 @@ func TestMarkTitleAndNotes(t *testing.T) {
 	n, ok := got[res.SessionID]
 	if !ok || n.Title != "Fix the parser" || n.LastPrompt != "" {
 		t.Fatalf("a briefing-only thread is listed with its title and no prompt: %+v", n)
+	}
+}
+
+// Stop quits only an idle thread's codex process (the one holding its writer lock), and
+// Live says whether Codex is working.
+func TestStopAndStatus(t *testing.T) {
+	m := New()
+	fh := newHost(t)
+	lock := "/home/u/.codex/thread-writer-locks/" + t1 + ".lock"
+	fh.LockHolders[lock] = []int{4242}
+	fh.PIDs[4242], fh.PIDNames[4242] = true, "codex"
+	ctx := context.Background()
+	in, _ := m.Detect(ctx, fh)
+	h := agent.Confine(fh, m.Spec(), in)
+	var s agent.Summary
+	l, _ := m.List(ctx, h, in)
+	for _, x := range l.Sessions {
+		if string(x.Key.Session) == t1 {
+			s = x
+		}
+	}
+	if live, _ := m.Live(ctx, h, in, []agent.SessionID{t1}); live[t1].Status != "idle" {
+		t.Fatalf("a finished turn is idle: %+v", live[t1])
+	}
+	// Mid-turn: refused.
+	rollout := s.Path
+	b, _ := h.FS().ReadFile(rollout, 1<<20)
+	busy := append(append([]byte(nil), b...), []byte(`{"timestamp":"2026-10-01T10:05:00.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"t9"}}`+"\n")...)
+	fh.Put(rollout, busy, time.Now())
+	if live, _ := m.Live(ctx, h, in, []agent.SessionID{t1}); live[t1].Status != "working" {
+		t.Fatalf("an open turn is working: %+v", live[t1])
+	}
+	if err := m.Stop(ctx, h, in, s, time.Second); !errors.Is(err, ErrBusy) {
+		t.Fatalf("stopping mid-turn must be refused: %v", err)
+	}
+	fh.Put(rollout, b, time.Now())
+	// Another program holding the lock is never signalled.
+	fh.PIDNames[4242] = "vim"
+	if err := m.Stop(ctx, h, in, s, time.Second); err == nil || !fh.PIDs[4242] {
+		t.Fatalf("a non-codex holder must be left alone: %v", err)
+	}
+	fh.PIDNames[4242] = "codex"
+	if err := m.Stop(ctx, h, in, s, time.Second); err != nil || fh.PIDs[4242] {
+		t.Fatalf("stop: %v (alive %v)", err, fh.PIDs[4242])
+	}
+	if live, _ := m.Live(ctx, h, in, []agent.SessionID{t1}); live[t1].State != agent.Ended {
+		t.Fatalf("after stop: %+v", live[t1])
 	}
 }

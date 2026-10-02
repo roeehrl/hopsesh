@@ -48,7 +48,7 @@ function ago(iso) {
   return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }
 
-const state = { scan: null, machine: "", filter: "", info: null, sel: null, target: "", opts: {}, plan: null };
+const state = { scan: null, machine: "", filter: "", info: null, sel: null, target: "", sendTo: "", opts: {}, plan: null };
 
 export function setTitlebar(mode) {
   $("#q").hidden = mode !== "sessions";
@@ -335,15 +335,19 @@ function sessionRow(e) {
   const err = (x) => toast(String(x.message || x));
   const main = e.hereNewest
     ? h("button", { class: "btn outline", title: "The newest copy is on this machine", onclick: () => api("ResumeEntry", e.machine, e.key, false).catch(err) }, "Resume")
-    : h("button", { class: "btn outline", title: e.staleHere ? "An older copy is on this machine; bring the newest one back" : `Bring it here, in ${e.agentName}`, onclick: () => preflight(e, "") }, e.staleHere ? "Hop back" : "Hop here");
-  const cont = (e.continueIn || []).length ? h("select", { class: "cont", "aria-label": "Continue in another agent", onchange: (ev) => { const t = ev.target.value; ev.target.value = ""; if (t) preflight(e, t); } },
+    : h("button", { class: "btn outline", title: e.staleHere ? "An older copy is on this machine; bring the newest one back" : `Bring it here, in ${e.agentName}`, onclick: () => { state.sendTo = ""; preflight(e, ""); } }, e.staleHere ? "Hop back" : "Hop here");
+  const cont = (e.continueIn || []).length ? h("select", { class: "cont", "aria-label": "Continue in another agent", onchange: (ev) => { const t = ev.target.value; ev.target.value = ""; if (t) { state.sendTo = ""; preflight(e, t); } } },
     h("option", { value: "" }, "Continue in…"), ...e.continueIn.map((a) => h("option", { value: a.id }, a.name + (a.experimental ? " (experimental)" : "")))) : null;
+  const here = (state.scan.machines.find((m) => m.local) || {}).name;
+  const peers = e.machine === here ? (state.scan.peers || []) : [];
+  const send = peers.length ? h("select", { class: "cont", "aria-label": "Send to another machine", onchange: (ev) => { const m = ev.target.value; ev.target.value = ""; if (m) { state.sendTo = m; preflight(e, ""); } } },
+    h("option", { value: "" }, "Send to…"), ...peers.map((m) => h("option", { value: m }, m))) : null;
   return h("div", { class: "row" },
     h("div", {}, h("div", { class: "t", title: e.title }, h("span", { class: "agent" }, e.agentName), e.title), h("div", { class: "s" }, bits.join(" · ") || " ")),
     h("div", { style: "font-size:12px;min-width:0" }, h("div", {}, e.machine), h("div", { class: "mono s", title: e.cwd }, e.cwd)),
     h("div", { class: "prompt", title: e.lastPrompt }, e.lastPrompt ? `“${e.lastPrompt}”` : ""),
     h("div", { style: "font-size:12px" }, h("span", { class: "pill" + (e.live ? " live" : "") }, e.status), h("div", { class: "s" }, ago(e.lastActive))),
-    h("div", { class: "actions" }, main, cont));
+    h("div", { class: "actions" }, main, cont, send));
 }
 
 // ---------- plan ----------
@@ -356,7 +360,10 @@ async function preflight(e, target, keepOpts = false) {
     fidelity: "history", native: false, note: "", go: false, carryRules: false, via: "" };
   setTitlebar("plan");
   loading("Working out the plan…");
-  try { state.plan = await api("Plan", e.machine, e.key, target, state.opts); } catch (err) { planError(err); return; }
+  if (state.sendTo) loading(`Asking hopsesh on ${state.sendTo} to plan it…`);
+  try {
+    state.plan = state.sendTo ? await api("PushPlan", e.key, state.sendTo, target, state.opts) : await api("Plan", e.machine, e.key, target, state.opts);
+  } catch (err) { planError(err); return; }
   renderPlan();
 }
 
@@ -368,19 +375,20 @@ function planError(err) {
 function renderPlan() {
   const p = state.plan;
   const r = p.repo, o = state.opts, e = state.sel, cont = p.continue;
+  const there = p.machine ? `on ${p.machine}` : "on this machine";
   const replan = () => preflight(e, state.target, true);
   const opt = (key, title, desc) => h("label", { class: "opt" },
     h("input", { type: "checkbox", checked: o[key], onchange: (ev) => { o[key] = ev.target.checked; replan(); } }), h("span", {}, h("b", {}, title), h("span", { class: "muted" }, desc)));
 
   const repoItems = [];
-  if (r.action === "use") repoItems.push(item("ok", `Found on this machine at ${r.localPath}` + (r.localBranch ? ` (on ${r.localBranch})` : ""), r.identity ? `Matched by remote ${r.identity}.` : ""));
+  if (r.action === "use") repoItems.push(item("ok", `Found ${there} at ${r.localPath}` + (r.localBranch ? ` (on ${r.localBranch})` : ""), r.identity ? `Matched by remote ${r.identity}.` : ""));
   if (r.action === "clone") repoItems.push(item("ok", `Will clone into ${r.localPath}`, `From ${r.remote}.`));
   if (r.action === "needs-clone") {
     const dest = h("input", { class: "field mono", style: "flex:1", value: r.localPath, "aria-label": "Clone into" });
-    repoItems.push(item("warn", "Not found on this machine", `Matched by remote ${r.identity}. Searched your repos folder and the usual places.`));
+    repoItems.push(item("warn", `Not found ${there}`, `Matched by remote ${r.identity}. Searched the repos folder and the usual places.`));
     repoItems.push(h("div", { style: "display:flex;gap:8px;align-items:center;padding-left:28px" }, h("span", { class: "muted", style: "font-size:12px" }, "Clone into"), dest,
       h("button", { class: "btn primary", onclick: () => { o.clone = true; o.reposDir = dest.value.replace(/\/[^/]+\/?$/, ""); replan(); } }, "Clone for me"),
-      h("button", { class: "btn", onclick: async () => { const d = await api("ChooseFolder", "Where is your checkout?"); if (d) { o.targetDir = d; replan(); } } }, "I already have it…")));
+      p.machine ? null : h("button", { class: "btn", onclick: async () => { const d = await api("ChooseFolder", "Where is your checkout?"); if (d) { o.targetDir = d; replan(); } } }, "I already have it…")));
   }
   if (r.action === "dir") repoItems.push(item("ok", `Continue in ${r.localPath}`, "Chosen by you."));
   if (r.action === "none") repoItems.push(p.sourceCwd === p.targetCwd ? item("ok", "The same folder", "The session stays where it was started.")
@@ -419,7 +427,7 @@ function renderPlan() {
     h("div", { class: "fromto" },
       h("div", { class: "box" }, h("small", {}, "From"), h("span", { style: "font-weight:500" }, `${p.fromAgent} on ${p.sourceHost}${p.sourceOs ? " (" + p.sourceOs + ")" : ""}`), h("span", { class: "mono", style: "font-size:11px" }, p.sourceCwd)),
       h("span", { style: "color:var(--accent);font-size:18px" }, "→"),
-      h("div", { class: "box to" }, h("small", {}, "To"), h("span", { style: "font-weight:500" }, `${p.agent} on this machine`), h("span", { class: "mono", style: "font-size:11px" }, p.targetCwd))),
+      h("div", { class: "box to" }, h("small", {}, "To"), h("span", { style: "font-weight:500" }, `${p.agent} ${there}`), h("span", { class: "mono", style: "font-size:11px" }, p.targetCwd))),
     cont ? continueCard(p, o, replan) : null,
     h("div", { class: "card" }, h("div", { class: "card-h" }, h("span", { class: "name" }, "Repository")), h("div", { class: "sec" }, ...repoItems)),
     p.mappings.length ? h("div", { class: "card" }, h("div", { class: "card-h" }, h("span", { class: "name" }, "Paths")),
@@ -452,9 +460,9 @@ function renderPlan() {
     h("span", { class: "spacer" }),
     h("div", { class: "muted", style: "font-size:11.5px" }, cont ? `${p.agent} is told where the work came from and asked to check the repository and files before continuing.`
       : "The new session starts with a message explaining the move and asking the agent to check that nothing is missing."),
-    h("button", { class: "btn primary big", disabled: blockers.length > 0, onclick: doApply }, cont ? `Continue in ${p.agent}` : r.action === "clone" ? "Clone and hop" : "Hop here"),
+    h("button", { class: "btn primary big", disabled: blockers.length > 0, onclick: doApply }, p.machine ? `Send to ${p.machine}` : cont ? `Continue in ${p.agent}` : r.action === "clone" ? "Clone and hop" : "Hop here"),
     h("button", { class: "btn", onclick: () => showSessions() }, "Back"),
-    h("div", { class: "muted", style: "font-size:11px;text-align:center" }, `The original on ${p.sourceHost} is not deleted.`));
+    h("div", { class: "muted", style: "font-size:11px;text-align:center" }, p.machine ? "The original here is not deleted." : `The original on ${p.sourceHost} is not deleted.`));
   view.replaceChildren(h("div", { class: "pre" }, main, side));
 }
 
@@ -532,10 +540,10 @@ function fmtBytes(n) {
 
 async function doApply() {
   const steps = h("div", { class: "muted mono", style: "font-size:12px;margin-top:12px;min-height:1.5em" });
-  view.replaceChildren(h("div", { class: "loading" }, h("div", {}, state.plan.continue ? `Continuing in ${state.plan.agent}…` : "Copying, rewriting and verifying…"), steps));
+  view.replaceChildren(h("div", { class: "loading" }, h("div", {}, state.sendTo ? `Sending to ${state.sendTo}…` : state.plan.continue ? `Continuing in ${state.plan.agent}…` : "Copying, rewriting and verifying…"), steps));
   const off = Events.On("hopsesh:progress", (ev) => { steps.textContent = String(ev.data); });
   try {
-    renderDone(await api("Apply"));
+    renderDone(await api(state.sendTo ? "PushApply" : "Apply"));
   } catch (e) {
     view.replaceChildren(h("div", { class: "loading" }, h("div", {}, h("div", { class: "err", style: "margin-bottom:12px" }, String(e.message || e)), h("button", { class: "btn", onclick: () => renderPlan() }, "Back to the plan"))));
   } finally {
@@ -552,10 +560,10 @@ function renderDone(d) {
   const open = async () => { try { await api("OpenResult"); } catch (e) { toast(String(e.message || e)); } };
   view.replaceChildren(h("div", { class: "center" }, h("div", { class: "done" },
     h("div", { style: "display:flex;gap:14px;align-items:center" }, h("span", { class: "badge ok", style: "width:40px;height:40px;font-size:20px" }, "✓"),
-      h("div", {}, h("div", { style: "font-size:20px;font-weight:600" }, d.kind === "continue" ? `“${d.title}” continues in ${d.agent}` : `“${d.title}” is on this machine`), facts.length ? h("div", { class: "muted" }, facts.join(" · ")) : null)),
-    h("div", { class: "card" }, h("div", { class: "sec" }, h("div", { style: "font-weight:600" }, "Start it"),
+      h("div", {}, h("div", { style: "font-size:20px;font-weight:600" }, d.kind === "continue" ? `“${d.title}” continues in ${d.agent}${d.machine ? " on " + d.machine : ""}` : `“${d.title}” is on ${d.machine || "this machine"}`), facts.length ? h("div", { class: "muted" }, facts.join(" · ")) : null)),
+    h("div", { class: "card" }, h("div", { class: "sec" }, h("div", { style: "font-weight:600" }, d.machine ? `Start it on ${d.machine}` : "Start it"),
       h("div", { style: "display:flex;gap:8px" }, h("div", { class: "term" }, d.command), h("button", { class: "btn", onclick: async () => { await api("CopyText", d.command); toast("Copied"); } }, "Copy")),
-      h("div", { style: "display:flex;gap:8px" }, h("button", { class: "btn primary", onclick: open }, d.inApp ? `Open in the ${d.agent} app` : "Open in Terminal")),
+      d.machine ? null : h("div", { style: "display:flex;gap:8px" }, h("button", { class: "btn primary", onclick: open }, d.inApp ? `Open in the ${d.agent} app` : "Open in Terminal")),
       h("div", { class: "muted", style: "font-size:12px" }, d.kind === "continue"
         ? `The conversation ends with a briefing that tells ${d.agent} where it came from and asks it to check the repository and files before continuing.`
         : `Its first message tells ${d.agent} where the session came from and asks it to check the repository, files, tools and environment before continuing.`))),
@@ -564,7 +572,7 @@ function renderDone(d) {
       h("div", { class: "muted", style: "font-size:12px" }, "Paste this into the old session:"),
       h("div", { style: "display:flex;gap:8px" }, h("div", { class: "term" }, d.notice), h("button", { class: "btn", onclick: async () => { await api("CopyText", d.notice); toast("Copied"); } }, "Copy")))) : null,
     h("div", { style: "display:flex;gap:16px;font-size:12px" },
-      h("button", { class: "btn", onclick: async () => { try { await api("Undo", d.journal); toast("Undone"); } catch (e) { toast(String(e.message || e)); } showSessions(true); } }, "Undo"),
+      h("button", { class: "btn", title: d.machine ? `Undoes both machines: the copy on ${d.machine} and the mark here` : "", onclick: async () => { try { await api("Undo", d.journal); toast("Undone"); } catch (e) { toast(String(e.message || e)); } showSessions(true); } }, "Undo"),
       h("button", { class: "btn", onclick: () => showSessions(true) }, "Back to sessions"),
       h("span", { class: "muted", style: "align-self:center" }, "Audit log: ", h("span", { class: "mono" }, d.auditDir))))));
 }

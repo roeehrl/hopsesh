@@ -147,7 +147,7 @@ type RewritePolicy struct {
 // FieldMatch matches a record by a top-level string field: equal to one of Values, or
 // starting with one of Prefixes.
 type FieldMatch struct {
-	Field    string   `json:"field"`
+	Field    string   `json:"field"` // a dot path into the record ("payload.type")
 	Values   []string `json:"values,omitempty"`
 	Prefixes []string `json:"prefixes,omitempty"`
 }

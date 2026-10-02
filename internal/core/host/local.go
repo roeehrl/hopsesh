@@ -207,6 +207,10 @@ func (localProcs) Alive(_ context.Context, pids []int) (map[int]bool, error) {
 
 func (localProcs) Terminate(_ context.Context, pid int) error { return terminate(pid) }
 
+func (localProcs) Names(ctx context.Context, pids []int) (map[int]string, error) {
+	return processNames(ctx, pids)
+}
+
 // localLocks probes advisory locks on this machine.
 type localLocks struct{}
 
@@ -214,6 +218,21 @@ func (localLocks) Probe(_ context.Context, paths []string) (map[string]agent.Loc
 	out := make(map[string]agent.LockState, len(paths))
 	for _, p := range paths {
 		out[p] = probeLock(p)
+	}
+	return out, nil
+}
+
+func (localLocks) Holders(ctx context.Context, paths []string) (map[string][]int, error) {
+	out := map[string][]int{}
+	for _, p := range paths {
+		if probeLock(p) != agent.LockHeld {
+			continue
+		}
+		pids, err := lockHolders(ctx, p)
+		if err != nil {
+			return nil, err
+		}
+		out[p] = pids
 	}
 	return out, nil
 }

@@ -3,7 +3,9 @@
 package host
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"os"
 
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -27,3 +29,13 @@ func terminate(int) error {
 
 // probeLock is not available on Windows yet.
 func probeLock(string) agent.LockState { return agent.LockUnknown }
+
+// lockHolders is not available on Windows yet.
+func lockHolders(context.Context, string) ([]int, error) {
+	return nil, fmt.Errorf("%w: finding which program holds a lock on Windows", agent.ErrUnsupported)
+}
+
+// processNames is not needed on Windows, where hopsesh quits no session.
+func processNames(context.Context, []int) (map[int]string, error) {
+	return nil, fmt.Errorf("%w: process names on Windows", agent.ErrUnsupported)
+}

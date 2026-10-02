@@ -220,3 +220,15 @@ func TestPathsAfterJSONEscapes(t *testing.T) {
 		t.Errorf("got\n%s\nwant\n%s", out, want)
 	}
 }
+
+func TestDropRecordsByNestedField(t *testing.T) {
+	in := `{"type":"response_item","payload":{"type":"message","role":"user"}}
+{"type":"response_item","payload":{"type":"reasoning","encrypted_content":"gAAA"}}
+{"type":"compacted","payload":{"message":""}}
+`
+	out, st := run(t, in, Options{Policy: agent.RewritePolicy{DropRecords: []agent.FieldMatch{
+		{Field: "payload.type", Values: []string{"reasoning"}}, {Field: "type", Values: []string{"compacted"}}}}})
+	if st.DroppedRecords != 2 || strings.Contains(out, "reasoning") || strings.Contains(out, "compacted") || !strings.Contains(out, `"role":"user"`) {
+		t.Fatalf("dropped %d:\n%s", st.DroppedRecords, out)
+	}
+}

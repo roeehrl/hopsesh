@@ -28,6 +28,25 @@ done
 echo "hopsesh is not installed" >&2
 exit 127`
 
+// peerFindWindows prints where hopsesh.exe is on a Windows machine (its PATH, else where
+// install.ps1 puts it) and the shell its OpenSSH server runs commands with.
+const peerFindWindows = `$c = Get-Command hopsesh.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+$p = if ($c) { $c.Source } else { Join-Path $env:LOCALAPPDATA 'Programs\hopsesh\hopsesh.exe' }
+if (-not (Test-Path -LiteralPath $p)) { [Console]::Error.WriteLine('hopsesh is not installed'); exit 127 }
+$sh = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\OpenSSH' -Name DefaultShell -ErrorAction SilentlyContinue).DefaultShell
+Write-Output $p
+Write-Output $sh`
+
+// peerCommandWindows is the command line that starts hopsesh peer on a Windows machine,
+// in the form its ssh shell takes: cmd.exe (the default) or PowerShell. The program runs
+// directly, so its input and output are the connection's.
+func peerCommandWindows(exe, shell string) string {
+	if s := strings.ToLower(shell); strings.Contains(s, "powershell") || strings.Contains(s, "pwsh") {
+		return "& " + transport.PSQuote(exe) + " peer --stdio"
+	}
+	return `""` + exe + `" peer --stdio"` // cmd /c strips the outer quotes
+}
+
 // maxPackage bounds the files of one pushed session.
 const maxPackage = 2 << 30
 
@@ -291,11 +310,25 @@ func (a *App) sshPeer(ctx context.Context, to config.Host) (*PeerConn, error) {
 	if err != nil {
 		return nil, err
 	}
+	line := "sh -c " + transport.ShQuote(peerScript)
 	if m.Facts.OS == "windows" {
-		m.Close()
-		return nil, fmt.Errorf("%w: working with hopsesh on Windows machines is not supported yet", agent.ErrUnsupported)
+		out, err := m.Conn.RunPowerShell(ctx, peerFindWindows)
+		if err != nil {
+			m.Close()
+			var re *transport.RemoteError
+			if errors.As(err, &re) && re.Code == 127 {
+				return nil, fmt.Errorf("hopsesh is not installed on %s; install it there to send sessions to it", to.Name)
+			}
+			return nil, err
+		}
+		f := strings.SplitN(strings.ReplaceAll(strings.TrimSpace(string(out)), "\r", ""), "\n", 2)
+		shell := ""
+		if len(f) == 2 {
+			shell = strings.TrimSpace(f[1])
+		}
+		line = peerCommandWindows(strings.TrimSpace(f[0]), shell)
 	}
-	pipe, err := m.Conn.StartPipe(ctx, "sh -c "+transport.ShQuote(peerScript))
+	pipe, err := m.Conn.StartPipe(ctx, line)
 	if err != nil {
 		m.Close()
 		return nil, err

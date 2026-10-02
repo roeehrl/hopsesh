@@ -84,7 +84,7 @@ type RunOptions struct {
 	Stdin []byte
 	// HoldStdin keeps standard input open this long after Stdin is written (or until the
 	// program exits, or its output contains StdinUntil), for programs that stop at the end
-	// of their input before answering it. Only on this machine.
+	// of their input before answering it.
 	HoldStdin  time.Duration
 	StdinUntil []byte
 	Timeout    time.Duration
@@ -122,11 +122,17 @@ const (
 // Locks probes advisory file locks without taking them.
 type Locks interface {
 	Probe(ctx context.Context, paths []string) (map[string]LockState, error)
+	// Holders returns the processes holding each lock file (none when it is free). A machine
+	// that cannot tell returns ErrUnsupported.
+	Holders(ctx context.Context, paths []string) (map[string][]int, error)
 }
 
 // Procs checks and stops processes on the machine.
 type Procs interface {
 	Alive(ctx context.Context, pids []int) (map[int]bool, error)
+	// Names returns the program name of each running process ("codex"); exited ones are
+	// left out.
+	Names(ctx context.Context, pids []int) (map[int]string, error)
 	// Terminate asks a process to exit (SIGTERM; unsupported on Windows).
 	Terminate(ctx context.Context, pid int) error
 }

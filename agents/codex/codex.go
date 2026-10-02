@@ -499,17 +499,25 @@ func (m *Module) Resume(in agent.Install, key agent.SessionKey, p agent.Placemen
 func (m *Module) Live(ctx context.Context, h agent.Host, in agent.Install, ids []agent.SessionID) (map[agent.SessionID]agent.LiveInfo, error) {
 	paths := make([]string, len(ids))
 	for i, sid := range ids {
-		paths[i] = h.Path().Join(in.Root(home), "thread-writer-locks", string(sid)+".lock")
+		paths[i] = lockPath(h, in, sid)
 	}
 	states, err := h.Locks().Probe(ctx, paths)
 	if err != nil {
 		return nil, err
 	}
+	var files map[agent.SessionID]string
 	out := make(map[agent.SessionID]agent.LiveInfo, len(ids))
 	for i, sid := range ids {
 		switch states[paths[i]] {
 		case agent.LockHeld:
-			out[sid] = agent.LiveInfo{State: agent.Live}
+			if files == nil {
+				files = rolloutPaths(h, in)
+			}
+			status := "idle"
+			if busy, err := turnOpen(h, files[sid]); err == nil && busy {
+				status = "working"
+			}
+			out[sid] = agent.LiveInfo{State: agent.Live, Status: status}
 		case agent.LockFree:
 			out[sid] = agent.LiveInfo{State: agent.Ended}
 		default:
@@ -517,6 +525,127 @@ func (m *Module) Live(ctx context.Context, h agent.Host, in agent.Install, ids [
 		}
 	}
 	return out, nil
+}
+
+func lockPath(h agent.Host, in agent.Install, sid agent.SessionID) string {
+	return h.Path().Join(in.Root(home), "thread-writer-locks", string(sid)+".lock")
+}
+
+// rolloutPaths maps thread ids to their rollout files.
+func rolloutPaths(h agent.Host, in agent.Install) map[agent.SessionID]string {
+	out := map[agent.SessionID]string{}
+	files, _ := rollouts(h, in)
+	for _, r := range files {
+		// rollout-<local time>-<thread id>.jsonl; the id is the trailing UUID.
+		if n := strings.TrimSuffix(h.Path().Base(r.path), ".jsonl"); len(n) > 36 {
+			out[agent.SessionID(n[len(n)-36:])] = r.path
+		}
+	}
+	return out
+}
+
+// turnOpen reports whether the thread's last turn started and has not ended: Codex is
+// working on it right now.
+func turnOpen(h agent.Host, path string) (bool, error) {
+	if path == "" {
+		return false, fs.ErrNotExist
+	}
+	f, err := h.FS().Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return false, err
+	}
+	start := max(fi.Size()-tailChunk, 0)
+	tail := make([]byte, fi.Size()-start)
+	if _, err := f.ReadAt(tail, start); err != nil && err != io.EOF {
+		return false, err
+	}
+	open := false
+	for _, l := range lines(tail, start > 0) {
+		if l.Type != "event_msg" {
+			continue
+		}
+		var e struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(l.Payload, &e) != nil {
+			continue
+		}
+		switch e.Type {
+		case "task_started":
+			open = true
+		case "task_complete", "turn_aborted":
+			open = false
+		}
+	}
+	return open, nil
+}
+
+// ErrBusy means Codex is in the middle of a turn in that thread.
+var ErrBusy = errors.New("the Codex session is working right now; let it finish (or stop it with Esc), then try again")
+
+// ErrStillRunning means a stopped thread's process did not exit in time.
+var ErrStillRunning = errors.New("the Codex session did not exit in time; quit it yourself (Ctrl+C twice, or /quit), then try again")
+
+// Stop quits the Codex process that has the thread open. Codex installs no handler for
+// SIGTERM, so it is sent only between turns (Codex writes every item to the rollout as
+// it goes, so nothing finished is lost), and only to a process named codex that holds the
+// thread's writer lock.
+func (m *Module) Stop(ctx context.Context, h agent.Host, in agent.Install, s agent.Summary, grace time.Duration) error {
+	lock := lockPath(h, in, s.Key.Session)
+	holders, err := h.Locks().Holders(ctx, []string{lock})
+	if err != nil {
+		return err
+	}
+	pids := holders[lock]
+	if len(pids) == 0 {
+		return nil // already gone
+	}
+	path := s.Path
+	if path == "" {
+		path = rolloutPaths(h, in)[s.Key.Session]
+	}
+	if busy, err := turnOpen(h, path); err == nil && busy {
+		return ErrBusy
+	}
+	names, err := h.Procs().Names(ctx, pids)
+	if err != nil {
+		return err
+	}
+	var targets []int
+	for _, pid := range pids {
+		if strings.HasPrefix(names[pid], "codex") {
+			targets = append(targets, pid)
+		}
+	}
+	if len(targets) == 0 {
+		return fmt.Errorf("the session's lock is held by another program (%v), not codex; quit it yourself", names)
+	}
+	for _, pid := range targets {
+		if err := h.Procs().Terminate(ctx, pid); err != nil {
+			return err
+		}
+	}
+	deadline := time.Now().Add(grace)
+	for time.Now().Before(deadline) {
+		st, err := h.Locks().Probe(ctx, []string{lock})
+		if err != nil {
+			return err
+		}
+		if st[lock] != agent.LockHeld {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	return ErrStillRunning
 }
 
 func toSlash(p string) string { return strings.ReplaceAll(p, `\`, "/") }

@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -154,4 +156,60 @@ func (m *Module) Import(ctx context.Context, h agent.Host, in agent.Install, fro
 		return "", errors.New("the Codex importer did not import the session: " + strings.Join(fails, "; "))
 	}
 	return "", errors.New("the Codex importer did not finish in time")
+}
+
+// Account identifies the Codex login on a machine through Codex itself (account/read),
+// never by reading auth.json. ChatGPT logins are keyed by a hash of the account's email;
+// an API key or another provider has no identity to compare.
+func (m *Module) Account(ctx context.Context, h agent.Host, in agent.Install) (agent.Account, error) {
+	if in.Binary == "" {
+		return agent.Account{}, fmt.Errorf("%w: codex is not installed there", agent.ErrNotInstalled)
+	}
+	lines, err := appServer(ctx, h, in, []map[string]any{{"id": 2, "method": "account/read", "params": map[string]any{}}}, `{"id":2,`, 20*time.Second)
+	if err != nil {
+		return agent.Account{}, err
+	}
+	for _, l := range lines {
+		var r struct {
+			ID     *int `json:"id"`
+			Result struct {
+				Account *struct {
+					Type  string `json:"type"`
+					Email string `json:"email"`
+					Plan  string `json:"planType"`
+				} `json:"account"`
+			} `json:"result"`
+			Error *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if json.Unmarshal(l, &r) != nil || r.ID == nil || *r.ID != 2 {
+			continue
+		}
+		if r.Error != nil {
+			return agent.Account{}, errors.New("codex app-server: " + r.Error.Message)
+		}
+		a := r.Result.Account
+		switch {
+		case a == nil:
+			return agent.Account{Label: "not logged in"}, nil
+		case a.Type == "chatgpt" && a.Email != "":
+			sum := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(a.Email))))
+			return agent.Account{Key: "chatgpt:" + hex.EncodeToString(sum[:8]), Label: "ChatGPT " + a.Plan}, nil
+		default:
+			return agent.Account{Label: a.Type}, nil
+		}
+	}
+	return agent.Account{}, errors.New("no answer from codex app-server")
+}
+
+// Sanitize is the policy for a move to a machine signed in to another account: Codex's
+// encrypted reasoning and compaction are bound to the organization that produced them, and
+// replaying them under another one makes the session fail to resume, so those records go
+// (the conversation itself stays; Codex compacts again when it needs to).
+func (m *Module) Sanitize() agent.RewritePolicy {
+	return agent.RewritePolicy{DropRecords: []agent.FieldMatch{
+		{Field: "payload.type", Values: []string{"reasoning", "compaction", "compaction_summary"}},
+		{Field: "type", Values: []string{"compacted"}},
+	}}
 }

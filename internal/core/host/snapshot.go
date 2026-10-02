@@ -240,12 +240,18 @@ func (snapExec) Run(context.Context, []string, agent.RunOptions) (agent.Result, 
 
 type snapProcs struct{}
 
-func (snapProcs) Alive(context.Context, []int) (map[int]bool, error) { return map[int]bool{}, nil }
+func (snapProcs) Alive(context.Context, []int) (map[int]bool, error)   { return map[int]bool{}, nil }
+func (snapProcs) Names(context.Context, []int) (map[int]string, error) { return map[int]string{}, nil }
+
 func (snapProcs) Terminate(context.Context, int) error {
 	return fmt.Errorf("%w: no process runs on a snapshot", agent.ErrUnsupported)
 }
 
 type snapLocks struct{}
+
+func (snapLocks) Holders(context.Context, []string) (map[string][]int, error) {
+	return map[string][]int{}, nil
+}
 
 func (snapLocks) Probe(_ context.Context, paths []string) (map[string]agent.LockState, error) {
 	out := map[string]agent.LockState{}

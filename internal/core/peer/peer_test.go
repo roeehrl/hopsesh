@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 )
 
@@ -49,5 +50,24 @@ func TestRefusedIsClassified(t *testing.T) {
 	_ = c.Call(ctx, MethodHello, Hello{Protocol: Protocol}, nil)
 	if err := c.Call(ctx, MethodPlan, nil, nil); !errors.Is(err, ErrRefused) {
 		t.Fatalf("refused: %v", err)
+	}
+}
+
+// The wire is ASCII only, and decodes back to the same text.
+func TestASCIIOnTheWire(t *testing.T) {
+	var buf strings.Builder
+	enc := newEncoder(&buf)
+	in := map[string]string{"path": `C:\Users\Ünïcødé\プロジェクト`, "emoji": "done ✓ 🎉"}
+	if err := enc.Encode(in); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []byte(buf.String()) {
+		if c >= 0x80 {
+			t.Fatalf("non-ASCII byte in %q", buf.String())
+		}
+	}
+	var out map[string]string
+	if err := json.Unmarshal([]byte(buf.String()), &out); err != nil || out["path"] != in["path"] || out["emoji"] != in["emoji"] {
+		t.Fatalf("round trip: %v %v", out, err)
 	}
 }

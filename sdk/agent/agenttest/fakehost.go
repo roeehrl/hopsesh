@@ -29,9 +29,12 @@ type FakeHost struct {
 	// Programs answer Exec.Run by binary name (argv[0] after resolution is the fake path
 	// "/bin/<name>").
 	Programs map[string]func(argv []string, o agent.RunOptions) agent.Result
-	// LocksHeld and PIDs simulate lock files and processes.
-	LocksHeld map[string]bool
-	PIDs      map[int]bool
+	// LocksHeld and PIDs simulate lock files and processes; LockHolders and PIDNames say
+	// which process holds a lock and what it is (a terminated process releases its locks).
+	LocksHeld   map[string]bool
+	PIDs        map[int]bool
+	LockHolders map[string][]int
+	PIDNames    map[int]string
 	// Writes records every write, in order.
 	Writes []string
 }
@@ -46,11 +49,13 @@ type memFile struct {
 // NewFakeHost returns an empty machine with the given home folder.
 func NewFakeHost(home string) *FakeHost {
 	h := &FakeHost{
-		files:     map[string]*memFile{},
-		facts:     agent.Facts{Machine: "fake", Local: true, OS: "linux", Arch: "amd64", Home: home, Env: map[string]string{}, Binaries: map[string]agent.BinaryFact{}},
-		Programs:  map[string]func([]string, agent.RunOptions) agent.Result{},
-		LocksHeld: map[string]bool{},
-		PIDs:      map[int]bool{},
+		files:       map[string]*memFile{},
+		facts:       agent.Facts{Machine: "fake", Local: true, OS: "linux", Arch: "amd64", Home: home, Env: map[string]string{}, Binaries: map[string]agent.BinaryFact{}},
+		Programs:    map[string]func([]string, agent.RunOptions) agent.Result{},
+		LocksHeld:   map[string]bool{},
+		PIDs:        map[int]bool{},
+		LockHolders: map[string][]int{},
+		PIDNames:    map[int]string{},
 	}
 	h.mkdirAll(home)
 	return h
@@ -269,7 +274,27 @@ func (l memLocks) Probe(_ context.Context, paths []string) (map[string]agent.Loc
 	return out, nil
 }
 
+func (l memLocks) Holders(_ context.Context, paths []string) (map[string][]int, error) {
+	out := map[string][]int{}
+	for _, p := range paths {
+		if l.h.LocksHeld[p] {
+			out[p] = append([]int(nil), l.h.LockHolders[p]...)
+		}
+	}
+	return out, nil
+}
+
 type memProcs struct{ h *FakeHost }
+
+func (p memProcs) Names(_ context.Context, pids []int) (map[int]string, error) {
+	out := map[int]string{}
+	for _, id := range pids {
+		if p.h.PIDs[id] {
+			out[id] = p.h.PIDNames[id]
+		}
+	}
+	return out, nil
+}
 
 func (p memProcs) Alive(_ context.Context, pids []int) (map[int]bool, error) {
 	out := map[int]bool{}
@@ -281,5 +306,13 @@ func (p memProcs) Alive(_ context.Context, pids []int) (map[int]bool, error) {
 
 func (p memProcs) Terminate(_ context.Context, pid int) error {
 	delete(p.h.PIDs, pid)
+	for path, holders := range p.h.LockHolders {
+		for _, h := range holders {
+			if h == pid {
+				delete(p.h.LocksHeld, path)
+				delete(p.h.LockHolders, path)
+			}
+		}
+	}
 	return nil
 }

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -213,8 +212,11 @@ func pushFunc(m *Machine) func(context.Context, string) (string, error) {
 	switch {
 	case m.Local:
 		return func(ctx context.Context, dir string) (string, error) {
-			out, err := exec.CommandContext(ctx, "sh", "-c", repos.PushScript, "hopsesh", dir).CombinedOutput()
-			return pushResult(string(out), err)
+			out, err := repos.Push(ctx, dir)
+			if errors.Is(err, repos.ErrNoUpstream) {
+				return "", err
+			}
+			return pushResult(out, err)
 		}
 	case m.host != nil && m.host.Conn != nil && m.OS != "windows":
 		conn := m.host.Conn

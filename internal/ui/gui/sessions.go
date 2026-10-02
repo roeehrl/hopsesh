@@ -80,6 +80,7 @@ type ScanDTO struct {
 	Machines []MachineDTO `json:"machines"`
 	Groups   []GroupDTO   `json:"groups"`
 	Total    int          `json:"total"`
+	Peers    []string     `json:"peers"` // reached machines a session here can be sent to
 }
 
 // Scan reads this machine and every allowed machine, for every enabled agent.
@@ -99,9 +100,10 @@ func (a *App) Scan() (*ScanDTO, error) {
 		a.inv.Close()
 	}
 	a.inv, a.plan, a.res = inv, nil, nil
+	a.closePushLocked()
 	a.mu.Unlock()
 
-	out := &ScanDTO{Total: len(inv.Entries), Machines: []MachineDTO{}, Groups: []GroupDTO{}}
+	out := &ScanDTO{Total: len(inv.Entries), Machines: []MachineDTO{}, Groups: []GroupDTO{}, Peers: []string{}}
 	for _, m := range inv.Machines {
 		d := MachineDTO{Name: m.Name, Status: m.Status, Hint: m.Hint, Error: m.Error, OS: m.OS, Local: m.Local}
 		for _, e := range inv.Entries {
@@ -115,6 +117,9 @@ func (a *App) Scan() (*ScanDTO, error) {
 			}
 		}
 		out.Machines = append(out.Machines, d)
+		if !m.Local && m.Status == app.StatusOK {
+			out.Peers = append(out.Peers, m.Name)
+		}
 	}
 	targets := continueTargets(core, inv)
 	for _, g := range inv.Groups(core.LocalRoots()) {
@@ -286,6 +291,7 @@ type PlanDTO struct {
 	Options     move.Options     `json:"-"`
 	SessionKey  agent.SessionKey `json:"-"`
 	SourceAgent agent.ID         `json:"sourceAgent"`
+	Machine     string           `json:"machine,omitempty"` // a push: the machine it goes to
 }
 
 // Plan works out how a session comes here: in its own agent (target "") or continued in
@@ -363,7 +369,8 @@ type DoneDTO struct {
 	MarkError  string   `json:"markError"`
 	Notice     string   `json:"notice"`
 	Warnings   []string `json:"warnings"`
-	InApp      bool     `json:"inApp"` // it opens in the agent's desktop app
+	InApp      bool     `json:"inApp"`             // it opens in the agent's desktop app
+	Machine    string   `json:"machine,omitempty"` // a push: where it went (start it there)
 	AuditDir   string   `json:"auditDir"`
 }
 

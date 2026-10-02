@@ -9,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
+	"unicode/utf16"
 
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
@@ -146,9 +148,51 @@ type Client struct {
 
 // NewClient talks to a peer over r (its output) and w (its input).
 func NewClient(r io.Reader, w io.Writer) *Client {
-	enc := json.NewEncoder(w)
+	return &Client{enc: newEncoder(w), dec: json.NewDecoder(r)}
+}
+
+// newEncoder writes one JSON value per line in ASCII only: anything else is escaped
+// (\uXXXX), so a Windows shell between the two ends cannot alter it.
+func newEncoder(w io.Writer) *json.Encoder {
+	enc := json.NewEncoder(asciiWriter{w})
 	enc.SetEscapeHTML(false)
-	return &Client{enc: enc, dec: json.NewDecoder(r)}
+	return enc
+}
+
+// asciiWriter escapes non-ASCII characters of JSON text (they occur only inside strings,
+// where \uXXXX means the same).
+type asciiWriter struct{ w io.Writer }
+
+func (a asciiWriter) Write(p []byte) (int, error) {
+	if !hasNonASCII(p) {
+		return a.w.Write(p)
+	}
+	var b strings.Builder
+	b.Grow(len(p) + 64)
+	for _, r := range string(p) {
+		switch {
+		case r < 0x80:
+			b.WriteRune(r)
+		case r > 0xFFFF:
+			r1, r2 := utf16.EncodeRune(r)
+			fmt.Fprintf(&b, "\\u%04x\\u%04x", r1, r2)
+		default:
+			fmt.Fprintf(&b, "\\u%04x", r)
+		}
+	}
+	if _, err := io.WriteString(a.w, b.String()); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+func hasNonASCII(p []byte) bool {
+	for _, c := range p {
+		if c >= 0x80 {
+			return true
+		}
+	}
+	return false
 }
 
 // Call sends a request and decodes the reply into result (nil to ignore it).
@@ -212,8 +256,7 @@ type Handler func(ctx context.Context, method string, params json.RawMessage) (a
 // this Protocol; any other is refused.
 func Serve(ctx context.Context, r io.Reader, w io.Writer, h Handler) error {
 	dec := json.NewDecoder(r)
-	enc := json.NewEncoder(w)
-	enc.SetEscapeHTML(false)
+	enc := newEncoder(w)
 	greeted := false
 	for {
 		var m message
