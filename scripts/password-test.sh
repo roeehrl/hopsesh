@@ -14,7 +14,7 @@ export HOPSESH_CONFIG_DIR="$WORK/config" HOPSESH_STATE_DIR="$WORK/state" CLAUDE_
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 cleanup() {
-  [ -f "$WORK/sshd.pid" ] && sudo kill "$(cat "$WORK/sshd.pid")" 2>/dev/null || true
+  if [ -f "$WORK/sshd.pid" ]; then sudo kill "$(cat "$WORK/sshd.pid")" 2>/dev/null || true; fi
   rm -f "$WORK/password"
 }
 trap cleanup EXIT
