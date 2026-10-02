@@ -111,6 +111,8 @@ func skillStatus(cmd *cobra.Command) error {
 	a.printf("%s\n", skillLine(st))
 	if rules {
 		a.printf("Permission rules: read-only hopsesh commands are allowed; moves ask.\n")
+	} else if st.State != claudeskill.Absent {
+		a.printf("Claude asks before every hopsesh command; to allow the read-only ones: hopsesh skill install --add-rules\n")
 	}
 	return nil
 }
@@ -155,7 +157,7 @@ func (a *app) offerSkill() {
 			a.printf("OK. You can install it later with: hopsesh skill install\n")
 			return
 		}
-		rules := a.confirm("Also let Claude run hopsesh's read-only commands (ls, show, plan) without asking? Moves always ask.")
+		rules := a.confirm("Also let Claude run hopsesh's read-only commands (ls, show, plan) without asking? Otherwise Claude asks before every hopsesh command; moves always ask.")
 		if st, _, err := integrate.InstallSkill(false, rules); err != nil {
 			a.printf("Could not install the skill: %v\n", err)
 		} else {

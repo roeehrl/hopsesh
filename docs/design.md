@@ -295,6 +295,7 @@ On first use the app explains the macOS Local Network prompt, and shows a banner
 **Permissions** ([permissions](https://code.claude.com/docs/en/permissions)):
 - `allowed-tools` pre-approves only read-only commands: `ls`, `show`, `plan`, `hosts --json`, `doctor`, `version`.
 - A separate `plan` command exists because an allow rule on `pull --dry-run` would also match `pull --dry-run=false --yes`.
+- Tested with Claude Code 2.1.284: Claude picks the skill for questions about other machines and runs exactly the documented commands. The skill's `allowed-tools` did not pre-approve those commands, whether the skill was a project or a personal one. Permission rules in settings did. So the rules are the dependable way to skip prompts, and the skill tells Claude to suggest them when a command needs approval it cannot get.
 - `--add-rules` (opt-in) merges `allow` rules for those commands, plus `ask` rules for `pull`, `undo` and `import`, into Claude Code's `settings.json`. It keeps a backup and refuses to touch invalid JSON. The ask rules keep a human prompt on moves even in auto mode.
 - With the [sandbox](https://code.claude.com/docs/en/sandboxing) on, SSH cannot leave it, so `reference.md` explains the `excludedCommands` entry.
 

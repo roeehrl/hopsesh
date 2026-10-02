@@ -66,6 +66,10 @@ Other flags (see [reference.md](reference.md)): `--fork` (both copies continue),
 
 ## When something fails
 
+- "This command requires approval" and the user cannot approve it here (a non-interactive
+  run): tell them `{{.Bin}} skill install --add-rules` lets Claude Code run hopsesh's
+  read-only commands without asking (moves still ask).
+
 - "not confirmed": `--yes` was missing; ask the user first.
 - SSH, host key or "unreachable" errors: suggest `{{.Bin}} doctor <machine>`, and for a new host
   key `{{.Bin}} trust <machine>`, which the user runs and verifies.
