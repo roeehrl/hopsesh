@@ -54,6 +54,9 @@ func (c *Conn) OpenSFTP(ctx context.Context, windows bool) (*RemoteFS, error) {
 	return &RemoteFS{client: client, cancel: cancel, windows: windows}, nil
 }
 
+// Client is the SFTP client, for callers that need operations RemoteFS does not wrap.
+func (r *RemoteFS) Client() *sftp.Client { return r.client }
+
 // Close ends the SFTP session.
 func (r *RemoteFS) Close() error {
 	err := r.client.Close()

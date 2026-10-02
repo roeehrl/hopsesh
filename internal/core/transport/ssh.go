@@ -325,6 +325,9 @@ func ShQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
 }
 
+// PSQuote quotes a string for PowerShell.
+func PSQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
+
 func firstLine(s string) string {
 	s = strings.TrimSpace(s)
 	if i := strings.IndexByte(s, '\n'); i >= 0 {

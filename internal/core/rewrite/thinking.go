@@ -3,6 +3,9 @@ package rewrite
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
+
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 // kv is one member of a JSON object, kept in source order with its raw value.
@@ -56,57 +59,75 @@ func jsonQuote(s string) []byte {
 	return bytes.TrimSuffix(buf.Bytes(), []byte{'\n'})
 }
 
-// dropThinking removes thinking and redacted_thinking blocks from message.content,
-// preserving every other byte's order. Returns how many blocks were removed.
-func dropThinking(line []byte) ([]byte, int, error) {
-	top, err := parseObject(line)
-	if err != nil {
+// dropElems removes elements of the array at e.Array (a dot path from the record) whose
+// e.Field is one of e.Values, preserving every other byte's order. It returns how many
+// elements were removed.
+func dropElems(line []byte, e agent.ElemMatch) ([]byte, int, error) {
+	keys := strings.Split(e.Array, ".")
+	removed := 0
+	out, err := dropIn(line, keys, e, &removed)
+	if err != nil || removed == 0 {
 		return line, 0, err
 	}
-	removed := 0
-	for i, m := range top {
-		if m.key != "message" || len(m.val) == 0 || m.val[0] != '{' {
+	return out, removed, nil
+}
+
+func dropIn(obj []byte, keys []string, e agent.ElemMatch, removed *int) ([]byte, error) {
+	if len(obj) == 0 || obj[0] != '{' {
+		return obj, nil
+	}
+	members, err := parseObject(obj)
+	if err != nil {
+		return obj, err
+	}
+	for i, m := range members {
+		if m.key != keys[0] {
 			continue
 		}
-		msg, err := parseObject(m.val)
-		if err != nil {
-			return line, 0, err
+		if len(keys) > 1 {
+			v, err := dropIn(m.val, keys[1:], e, removed)
+			if err != nil {
+				return obj, err
+			}
+			members[i].val = v
+			continue
 		}
-		for j, mm := range msg {
-			if mm.key != "content" || len(mm.val) == 0 || mm.val[0] != '[' {
+		if len(m.val) == 0 || m.val[0] != '[' {
+			continue
+		}
+		var elems []json.RawMessage
+		if err := json.Unmarshal(m.val, &elems); err != nil {
+			return obj, err
+		}
+		kept := elems[:0]
+		for _, el := range elems {
+			var f map[string]json.RawMessage
+			var v string
+			if json.Unmarshal(el, &f) == nil && json.Unmarshal(f[e.Field], &v) == nil && contains(e.Values, v) {
+				*removed++
 				continue
 			}
-			var blocks []json.RawMessage
-			if err := json.Unmarshal(mm.val, &blocks); err != nil {
-				return line, 0, err
-			}
-			kept := blocks[:0]
-			for _, blk := range blocks {
-				var t struct {
-					Type string `json:"type"`
-				}
-				_ = json.Unmarshal(blk, &t)
-				if t.Type == "thinking" || t.Type == "redacted_thinking" {
-					removed++
-					continue
-				}
-				kept = append(kept, blk)
-			}
-			var arr bytes.Buffer
-			arr.WriteByte('[')
-			for k, blk := range kept {
-				if k > 0 {
-					arr.WriteByte(',')
-				}
-				arr.Write(blk)
-			}
-			arr.WriteByte(']')
-			msg[j].val = arr.Bytes()
+			kept = append(kept, el)
 		}
-		top[i].val = encodeObject(msg)
+		var arr bytes.Buffer
+		arr.WriteByte('[')
+		for k, el := range kept {
+			if k > 0 {
+				arr.WriteByte(',')
+			}
+			arr.Write(el)
+		}
+		arr.WriteByte(']')
+		members[i].val = arr.Bytes()
 	}
-	if removed == 0 {
-		return line, 0, nil
+	return encodeObject(members), nil
+}
+
+func contains(xs []string, s string) bool {
+	for _, x := range xs {
+		if x == s {
+			return true
+		}
 	}
-	return encodeObject(top), removed, nil
+	return false
 }
