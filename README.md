@@ -32,10 +32,10 @@ worktree, paths and all. Then it gives you the `claude --resume` command.
 - **Moves a session safely**: finds the repo here or clones it, recreates the worktree, warns
   about unpushed or uncommitted work, rewrites paths, and shows a plan first. `hopsesh undo`
   reverses a move.
-- **Moves back just as easily**: the copy left behind is marked "↪ moved to …", listings show one
+- **Moves back just as easily** (v0.2.0): the copy left behind is marked "↪ moved to …", listings show one
   row per session, and `hopsesh pull <id>` brings back the newest copy, code included. If both
   copies changed, it stops and asks; it never merges.
-- **Works from inside Claude Code**: ask "bring my laptop session here" and Claude plans the move
+- **Works from inside Claude Code** (v0.2.0): ask "bring my laptop session here" and Claude plans the move
   with hopsesh, then moves only after you say yes.
 - **Picks up where you left off**: the resumed session's first message tells Claude it was moved
   and asks it to check that nothing is missing. It can start with Remote Control on and tell
@@ -85,9 +85,9 @@ Or from scripts:
 
 ```sh
 hopsesh ls --json                          # every allowed machine, grouped by repo
-hopsesh plan studio:"fix flaky tests"      # read-only preview of a move
+hopsesh plan studio:"fix flaky tests"      # read-only preview of a move (v0.2.0)
 hopsesh pull studio:"fix flaky tests"      # plan, confirm, move, print the resume command
-hopsesh pull 7f3c2a1e                      # no machine name: bring back the newest copy
+hopsesh pull 7f3c2a1e                      # no machine name: the newest copy (v0.2.0)
 hopsesh pull studio:7f3c2a1e --clone --rc --notify --yes
 hopsesh doctor studio                      # SSH, host trust, Claude version, Remote Control
 hopsesh undo 7f3c2a1e
@@ -101,11 +101,14 @@ hopsesh undo 7f3c2a1e
 </picture>
 
 Same engine, with a preflight screen for each move: repository, worktree mode, what gets
-rewritten, and what's left behind on the other machine. Its Settings screen can put the
+rewritten, and what's left behind on the other machine. From v0.2.0, its Settings screen can put the
 `hopsesh` command on your PATH (a link into the app, no administrator password) and install
 the Claude Code skill.
 
 ## Round trips
+
+> **Coming in v0.2.0.** Until it's released, try it from source:
+> `go install github.com/roeehrl/hopsesh/cmd/hopsesh@main`
 
 Move a session to your laptop, work on it, and move it back later. hopsesh treats the session
 as living on one machine at a time:
@@ -126,6 +129,9 @@ as living on one machine at a time:
 Details: [docs/design.md §12](docs/design.md#12-round-trips-a--b--a).
 
 ## Use it from Claude Code
+
+> **Coming in v0.2.0.** Until it's released, try it from source:
+> `go install github.com/roeehrl/hopsesh/cmd/hopsesh@main`
 
 ```sh
 hopsesh skill install              # Claude asks before each hopsesh command
@@ -229,7 +235,7 @@ running on this machine.
 <details>
 <summary><b>I moved a session and kept using the old copy too. What happens?</b></summary>
 
-Moving it again stops and explains: both copies changed, and hopsesh never merges them. Choose
+From v0.2.0, moving it again stops and explains: both copies changed, and hopsesh never merges them. Choose
 `--keep-both` to bring the incoming copy in as a separate session, or `--replace` to set the
 copy here aside (`hopsesh undo` restores it).
 </details>
