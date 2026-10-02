@@ -9,9 +9,12 @@
 set -eu
 
 REPO="roeehrl/hopsesh"
-# Public half of the key that signs checksums.txt (docs/RELEASING.md). Empty until the
-# first signed release; then only the checksum is checked and a warning is printed.
-RELEASE_PUBKEY=""
+# Public half of the key that signs checksums.txt (packaging/release-key.pub,
+# docs/RELEASING.md).
+RELEASE_PUBKEY="-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE/cHb0Z43BAAuPwXo1FIGBwLQkG2t
+/3e67djVXaZOLdam5L6sitdRDkXD+rm8EE9HtzBl9TuWmCluZoMEB2cxdw==
+-----END PUBLIC KEY-----"
 
 say() { printf '%s\n' "$*" >&2; }
 die() { say "hopsesh install: $*"; exit 1; }

@@ -147,5 +147,6 @@ release:
   draft: true # a person publishes it after the macOS app is attached
   footer: |
     Verify: `sha256sum -c checksums.txt --ignore-missing`, and the signature with
-    `openssl dgst -sha256 -verify release-key.pub -signature checksums.txt.sig checksums.txt`.
+    `openssl dgst -sha256 -verify release-key.pub -signature checksums.txt.sig checksums.txt`
+    with release-key.pub from https://github.com/roeehrl/hopsesh/blob/main/packaging/release-key.pub.
     hopsesh is not affiliated with Anthropic.

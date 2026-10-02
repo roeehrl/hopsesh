@@ -30,9 +30,12 @@ openssl ec -in hopsesh-release.pem -pubout -outform DER | base64   # public key,
 - Store `hopsesh-release.pem` in the repository secret `HOPSESH_RELEASE_KEY` and in a safe
   place offline. Never commit it.
 - Store the one-line public key in the repository **variable** `HOPSESH_RELEASE_PUBKEY`
-  (it is embedded into release binaries), and paste it into `RELEASE_PUBKEY` in
-  `scripts/install.sh` (PEM form: `openssl ec -in hopsesh-release.pem -pubout`) and
-  `$ReleasePubKey` in `scripts/install.ps1` (the base64 DER line).
+  (it is embedded into release binaries), save the PEM form as `packaging/release-key.pub`,
+  and paste it into `RELEASE_PUBKEY` in `scripts/install.sh` (PEM form:
+  `openssl ec -in hopsesh-release.pem -pubout`) and `$ReleasePubKey` in
+  `scripts/install.ps1` (the base64 DER line).
+
+The current key is in `packaging/release-key.pub`.
 
 Rotating the key means a release whose binaries embed the new key, signed by the old one.
 
@@ -72,7 +75,7 @@ Homebrew cask, Scoop manifest and winget pull request. Without it those steps ar
 
 ```sh
 sha256sum -c checksums.txt --ignore-missing
-openssl dgst -sha256 -verify release-key.pub -signature checksums.txt.sig checksums.txt
+openssl dgst -sha256 -verify packaging/release-key.pub -signature checksums.txt.sig checksums.txt
 cosign verify-blob --bundle checksums.txt.sigstore.json \
   --certificate-identity-regexp '^https://github.com/roeehrl/hopsesh/.github/workflows/release.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com checksums.txt
