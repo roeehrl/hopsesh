@@ -13,7 +13,11 @@ eval "$(jq -r 'to_entries[] | "export \(.key)=\(.value | @sh)"' "$WORK/env.json"
 export PATH="/usr/bin:/bin:/usr/sbin:/sbin" HOPSESH_E2E_SCRIPT="$PWD/internal/devtools/webtest/real/selfcheck.js"
 CFG="$HOPSESH_CONFIG_DIR/config.toml"
 if [ "$(uname -s)" = Linux ]; then
-  xvfb-run -a -s "-screen 0 1280x1024x24" "$WORK/hopsesh-app" > "$WORK/app.log" 2>&1 &
+  # A virtual display with no GPU: WebKitGTK renders in software, in its own D-Bus session.
+  export WEBKIT_DISABLE_DMABUF_RENDERER=1 WEBKIT_DISABLE_COMPOSITING_MODE=1 LIBGL_ALWAYS_SOFTWARE=1
+  run=(xvfb-run -a -s "-screen 0 1280x1024x24")
+  command -v dbus-run-session >/dev/null && run+=(dbus-run-session --)
+  "${run[@]}" "$WORK/hopsesh-app" > "$WORK/app.log" 2>&1 &
 else
   "$WORK/hopsesh-app" > "$WORK/app.log" 2>&1 &
 fi
@@ -28,7 +32,8 @@ kill "$pid" 2>/dev/null || true
 pkill -f "$WORK/hopsesh-app" 2>/dev/null || true
 if [ -z "$ok" ]; then
   echo "the app did not list the demo sessions and answer through its backend in time" >&2
-  tail -n 50 "$WORK/app.log" >&2
+  echo "--- the app's log, first lines" >&2
+  head -n 60 "$WORK/app.log" >&2
   exit 1
 fi
 echo "the real app listed the demo sessions and saved a setting through its backend"
