@@ -98,3 +98,4 @@ $out = & $Bin push $id box --to $boxProj --yes --json 2>&1 | Out-String
 if ($LASTEXITCODE -eq 0) { Fail 'push to a machine that does not receive' }
 if (-not $out.Contains('does not receive sessions')) { Write-Host $out; Fail 'the refusal does not say why' }
 Write-Host 'windows peer test passed'
+exit 0 # the refused push above left a failing exit code
