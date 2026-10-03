@@ -227,7 +227,7 @@ func apply(s *info, head, tail []record) {
 		}
 	}
 	// Last prompt: newest last-prompt record, else newest real user prompt, else first.
-	if p := lastString(tail, func(r record) string { return pick(r.Type == "last-prompt", r.LastPrompt) }); p != "" && !agent.IsNote(p) {
+	if p := agent.OwnText(lastString(tail, func(r record) string { return pick(r.Type == "last-prompt", r.LastPrompt) })); p != "" {
 		s.LastPrompt = clip(oneLine(p))
 	} else {
 		for i := len(tail) - 1; i >= 0; i-- {
@@ -370,8 +370,8 @@ func realPrompt(r record) string {
 	if r.Origin != nil && r.Origin.Kind != "" && r.Origin.Kind != "human" {
 		return ""
 	}
-	text := contentText(r.Message.Content)
-	if text == "" || agent.IsNote(text) {
+	text := agent.OwnText(contentText(r.Message.Content))
+	if text == "" {
 		return ""
 	}
 	if m := commandNameRE.FindStringSubmatch(text); m != nil {

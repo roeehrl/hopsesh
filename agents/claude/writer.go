@@ -128,8 +128,8 @@ func (w *writer) records(req ir.WriteRequest) []byte {
 			w.line(&b, ir.Item{Node: it.Node + "/result", Time: it.Time}, "user", []any{res}, "")
 		case it.Role == ir.RoleUser:
 			w.line(&b, it, "user", it.Text, "")
-			if !agent.IsNote(it.Text) {
-				lastPrompt = it.Text
+			if own := agent.OwnText(it.Text); own != "" {
+				lastPrompt = own
 			}
 		default:
 			w.line(&b, it, "assistant", []any{map[string]any{"type": "text", "text": it.Text}}, "end_turn")

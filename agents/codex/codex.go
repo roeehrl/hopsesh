@@ -274,7 +274,7 @@ func summarize(h agent.Host, r rollout) (*agent.Summary, error) {
 	for _, l := range lines(head, false) {
 		p := userPrompt(l)
 		talked = talked || p != ""
-		if p != "" && !agent.IsNote(p) {
+		if p = agent.OwnText(p); p != "" {
 			s.Title, s.TitleSource = clip(p), "prompt"
 			break
 		}
@@ -291,7 +291,7 @@ func summarize(h agent.Host, r rollout) (*agent.Summary, error) {
 	for i := len(tl) - 1; i >= 0; i-- {
 		p := userPrompt(tl[i])
 		talked = talked || p != ""
-		if p != "" && !agent.IsNote(p) {
+		if p = agent.OwnText(p); p != "" {
 			s.LastPrompt = clip(p)
 			break
 		}

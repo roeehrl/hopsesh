@@ -86,6 +86,9 @@ func TestContinueInCodexAndBack(t *testing.T) {
 		t.Fatalf("codex threads: %+v", threads)
 	}
 	th := threads[0]
+	if strings.Contains(th.LastPrompt, agent.NotePrefix) || strings.Contains(th.Title, agent.NotePrefix) {
+		t.Fatalf("hopsesh's briefing is shown as the person's prompt: %q / %q", th.Title, th.LastPrompt)
+	}
 	seg := readAll(t, here, cx, hereCodex, th)
 	if !mentions(seg, "PLUM-7") || !mentions(seg, "[prior agent · Claude Code · execute]") || !mentions(seg, "moved from Claude Code") {
 		t.Fatalf("the Codex thread lacks the history or the briefing: %+v", seg.Nodes)

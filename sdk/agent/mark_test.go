@@ -29,3 +29,17 @@ func TestMarkTitles(t *testing.T) {
 		t.Error("an ordinary title is not a mark")
 	}
 }
+
+func TestOwnText(t *testing.T) {
+	for in, want := range map[string]string{
+		"fix the build": "fix the build",
+		NotePrefix + "This session was moved here": "",
+		"  " + NotePrefix + "briefing":             "",
+		"document the cursor format\n\n" + NotePrefix + "This conversation was moved from Claude Code": "document the cursor format",
+		"quote a note: " + NotePrefix + "inline":                                                       "quote a note: " + NotePrefix + "inline",
+	} {
+		if got := OwnText(in); got != want {
+			t.Errorf("OwnText(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

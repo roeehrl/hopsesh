@@ -59,5 +59,15 @@ func MarkPrefixes() []string { return []string{movedPrefix, continuedPrefix} }
 // user's last prompt.
 const NotePrefix = "[hopsesh] "
 
-// IsNote reports whether a user message is one hopsesh added.
-func IsNote(text string) bool { return strings.HasPrefix(strings.TrimSpace(text), NotePrefix) }
+// OwnText is the person's own part of a user message: "" for a message hopsesh added,
+// and the text before hopsesh's note when one was added to the person's last message (a
+// continuation's briefing joins it so that roles keep alternating).
+func OwnText(text string) string {
+	if strings.HasPrefix(strings.TrimSpace(text), NotePrefix) {
+		return ""
+	}
+	if i := strings.Index(text, "\n\n"+NotePrefix); i >= 0 {
+		text = text[:i]
+	}
+	return strings.TrimSpace(text)
+}

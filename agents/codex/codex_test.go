@@ -151,6 +151,21 @@ func TestMarkTitleAndNotes(t *testing.T) {
 	if !ok || n.Title != "Fix the parser" || n.LastPrompt != "" {
 		t.Fatalf("a briefing-only thread is listed with its title and no prompt: %+v", n)
 	}
+
+	// A history that ended on the person carries the briefing in their last message; the
+	// list shows only their part.
+	res, err = m.Write(ctx, h, in, ir.WriteRequest{Mode: ir.WriteNew, Header: ir.Header{CWD: "/home/u/git/demo"},
+		Items: []ir.Item{{Role: ir.RoleUser, Text: "document the cursor format\n\n" + agent.NotePrefix + "This conversation was moved from Claude Code."},
+			{Role: ir.RoleAgent, Text: "Understood."}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, _ = m.List(ctx, h, in)
+	for _, s := range l.Sessions {
+		if string(s.Key.Session) == res.SessionID && (s.LastPrompt != "document the cursor format" || s.Title != "document the cursor format") {
+			t.Fatalf("the briefing is shown as the person's prompt: %q / %q", s.Title, s.LastPrompt)
+		}
+	}
 }
 
 // Stop quits only an idle thread's codex process (the one holding its writer lock), and
