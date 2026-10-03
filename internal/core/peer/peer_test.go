@@ -57,7 +57,8 @@ func TestRefusedIsClassified(t *testing.T) {
 func TestASCIIOnTheWire(t *testing.T) {
 	var buf strings.Builder
 	enc := newEncoder(&buf)
-	in := map[string]string{"path": `C:\Users\Ünïcødé\プロジェクト`, "emoji": "done ✓ 🎉"}
+	in := map[string]string{"path": `C:\Users\Ünïcødé\プロジェクト`, "emoji": "done ✓ 🎉",
+		"hebrew": "תקן את הבאג בקובץ הראשי", "chinese": "修复主文件中的错误", "arabic": "أصلح الخطأ"}
 	if err := enc.Encode(in); err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +68,12 @@ func TestASCIIOnTheWire(t *testing.T) {
 		}
 	}
 	var out map[string]string
-	if err := json.Unmarshal([]byte(buf.String()), &out); err != nil || out["path"] != in["path"] || out["emoji"] != in["emoji"] {
-		t.Fatalf("round trip: %v %v", out, err)
+	if err := json.Unmarshal([]byte(buf.String()), &out); err != nil {
+		t.Fatal(err)
+	}
+	for k, v := range in {
+		if out[k] != v {
+			t.Fatalf("%s: %q came back as %q", k, v, out[k])
+		}
 	}
 }
