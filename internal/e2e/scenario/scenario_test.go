@@ -15,14 +15,15 @@ import (
 
 	"github.com/roeehrl/hopsesh/agents/claude"
 	"github.com/roeehrl/hopsesh/internal/agents/all"
+	"github.com/roeehrl/hopsesh/internal/testkit/fakeagent"
 	"github.com/roeehrl/hopsesh/internal/ui/cli"
 )
 
 func TestMain(m *testing.M) {
 	testscript.Main(m, map[string]func(){
 		"hopsesh": func() { os.Exit(hopsesh()) },
-		"claude":  func() { os.Exit(fakeClaude()) },
-		"codex":   func() { os.Exit(fakeCodex()) },
+		"claude":  func() { os.Exit(fakeagent.Claude()) },
+		"codex":   func() { os.Exit(fakeagent.Codex()) },
 	})
 }
 
