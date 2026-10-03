@@ -349,6 +349,18 @@ jobs:
       - name: install, start, reinstall and uninstall
         shell: pwsh
         run: ./scripts/windows-app-test.ps1 -Setup dist/windows/hopsesh-0.0.0-ci-windows-amd64-setup.exe -Version 0.0.0-ci
+      - name: screenshots of the installer's pages (run interactively)
+        continue-on-error: true
+        shell: pwsh
+        run: ./scripts/windows-installer-shots.ps1 -Setup dist/windows/hopsesh-0.0.0-ci-windows-amd64-setup.exe -Out "$env:RUNNER_TEMP\installer-shots"
+      - name: upload the installer screenshots
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-installer-shots
+          path: ${{ runner.temp }}/installer-shots/
+          retention-days: 30
+          if-no-files-found: ignore
       - name: test build of the app (debugging port; never released)
         shell: pwsh
         run: |
@@ -411,7 +423,7 @@ jobs:
       - run: shellcheck scripts/*.sh demo/*.sh
       - shell: pwsh
         run: |
-          foreach ($f in 'scripts/install.ps1', 'scripts/windows-app-test.ps1', 'scripts/windows-peer-test.ps1', 'scripts/windows-demo-studio.ps1', 'scripts/matrix-loopback.ps1', 'scripts/matrix-wsl.ps1') {
+          foreach ($f in 'scripts/install.ps1', 'scripts/windows-app-test.ps1', 'scripts/windows-peer-test.ps1', 'scripts/windows-demo-studio.ps1', 'scripts/matrix-loopback.ps1', 'scripts/matrix-wsl.ps1', 'scripts/windows-installer-shots.ps1') {
             $null = [ScriptBlock]::Create((Get-Content -Raw $f))
           }
 
