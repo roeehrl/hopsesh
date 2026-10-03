@@ -15,9 +15,12 @@
 
 [Install](#install) · [Quick start](#quick-start) · [Another agent](#continue-in-another-agent) · [Round trips](#round-trips) · [Push](#send-a-session-to-another-machine) · [Ask your agent](#use-it-from-your-agent) · [Why not…?](#why-not) · [FAQ](#faq)
 
-<img src="docs/assets/demo.gif" alt="hopsesh lists Claude Code sessions on two machines grouped by repository, then moves one to this machine, cloning its repository and printing the resume command" width="900">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hero-dark.gif">
+  <img src="docs/assets/hero-light.gif" alt="The hopsesh macOS app lists Claude Code and Codex sessions from two machines grouped by repository; a Claude Code session is continued in Codex after a plan shows what carries over, what changes and what's left out" width="880">
+</picture>
 
-<sub>Recorded with <a href="https://github.com/charmbracelet/vhs">VHS</a> from <a href="demo/hopsesh.tape">demo/hopsesh.tape</a>, with made-up machines and sessions.</sub>
+<sub>The macOS app, recorded with made-up machines and sessions (<a href="demo/README.md">demo/</a>).</sub>
 
 </div>
 
@@ -88,6 +91,10 @@ hopsesh trust studio          # confirm its SSH host key
 hopsesh                       # browse sessions and move one here
 ```
 
+<img src="docs/assets/demo.gif" alt="The hopsesh terminal UI lists Claude Code and Codex sessions on two machines grouped by repository, then brings a Claude Code session to this machine and prints the resume command" width="880">
+
+<sub>Recorded with <a href="https://github.com/charmbracelet/vhs">VHS</a> from <a href="demo/hopsesh.tape">demo/hopsesh.tape</a>.</sub>
+
 A session is named `[<machine>:][<agent>/]<id-or-title>`. Leave out the machine to take the
 newest copy anywhere, and leave out the agent when the title or id is unambiguous.
 
@@ -108,10 +115,10 @@ hopsesh undo                                   # undo the newest move (--list sh
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/app-dark.png">
-  <img src="docs/assets/app-light.png" alt="The hopsesh macOS app listing sessions from two machines, grouped by repository, each with a Hop here button" width="900">
+  <img src="docs/assets/app-light.png" alt="The hopsesh macOS app listing Claude Code and Codex sessions from two machines, grouped by repository, with live state and the last prompt" width="900">
 </picture>
 
-Same engine, with a preflight screen for each move: repository, worktree mode, what gets
+Same engine, with a plan sheet for each move: repository, worktree mode, what gets
 rewritten, and what's left behind on the other machine. Every session has **Continue in…**,
 with a preview of the conversion, and sessions on this machine have **Send to…** another
 machine: it plans there, carries it out, and one Undo reverses both sides. Settings has per-agent options and a **Receive sessions**
@@ -124,6 +131,11 @@ administrator password) and install the skill into your agents.
 hopsesh plan studio:"fix flaky tests" --in codex   # see what carries over, change nothing
 hopsesh pull studio:"fix flaky tests" --in codex   # then do it
 ```
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/plan-dark.png">
+  <img src="docs/assets/plan-light.png" alt="The plan for continuing a Claude Code session in Codex: carried over, changed and left out, the briefing Codex gets, and how the repository and code will be matched" width="900">
+</picture>
 
 hopsesh converts the conversation into the other agent's own session format, on another
 machine or this one:
@@ -383,6 +395,19 @@ drops you on one with hopsesh ready (see [demo/README.md](demo/README.md)).
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the 60-second dev setup, and use
 [Discussions](https://github.com/roeehrl/hopsesh/discussions) for questions and ideas.
 Report security issues privately as described in [SECURITY.md](SECURITY.md).
+
+### Add your agent
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/agents-dark.png">
+  <img src="docs/assets/agents-light.png" alt="Settings, Agents: Claude Code and Codex with the capabilities each module provides" width="720">
+</picture>
+
+Every agent is a module behind a small SDK (`sdk/agent`): implement listing, bundling,
+planning and resuming, add the capabilities your agent supports, and run the conformance
+kit. Claude Code and Codex are the two templates. See
+[Add an agent module](CONTRIBUTING.md#add-an-agent-module); OpenCode is an open
+[help wanted](https://github.com/roeehrl/hopsesh/issues/10) issue.
 
 ## License
 
