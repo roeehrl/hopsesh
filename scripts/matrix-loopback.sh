@@ -4,6 +4,7 @@
 # "here" is this user with hopsesh's own folders kept apart. Needs sudo, sshd and git.
 #
 #   scripts/matrix-loopback.sh <bin dir with hopsesh, hsmatrix, fakeagent> <label> <out dir> [hsmatrix flags]
+#   SETUP_ONLY=1 scripts/matrix-loopback.sh <bin dir> - -
 set -eu
 # shellcheck source=lib/testhost.sh
 . "$(dirname "$0")/lib/testhost.sh"
@@ -29,6 +30,8 @@ sudo install -o "$U" -m 0600 ~/.ssh/id_ed25519.pub "$UHOME/.ssh/authorized_keys"
 printf 'Host hsm-box\n  HostName 127.0.0.1\n  User %s\n' "$U" >> ~/.ssh/config
 chmod 600 ~/.ssh/config
 th_start_sshd
+# SETUP_ONLY=1: this machine as "there" for another runner (the mesh).
+[ "${SETUP_ONLY:-}" = 1 ] && exit 0
 
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
