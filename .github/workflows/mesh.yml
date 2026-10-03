@@ -18,7 +18,7 @@ permissions:
   actions: read # list and download this run's artifacts
 
 concurrency:
-  group: mesh-${{ github.head_ref || github.run_id }}
+  group: mesh-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 jobs:

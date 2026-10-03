@@ -84,18 +84,17 @@ func allCombos() [][]string {
 
 // pairwise picks rows greedily until every valid pair of values appears in one, the same
 // rows for the same seed.
-func pairwise(seed int64) []Row {
+func pairwise(seed int64) []Row { return covering(2, seed) }
+
+// covering picks rows greedily until every valid t-tuple of values (pairs for t=2, triples
+// for t=3) appears in one; the same rows for the same seed.
+func covering(t int, seed int64) []Row {
 	combos := allCombos()
-	type pair struct {
-		i, j int
-		a, b string
-	}
-	uncovered := map[pair]bool{}
+	pos := tuples(len(dims), t)
+	uncovered := map[string]bool{}
 	for _, c := range combos {
-		for i := 0; i < len(c); i++ {
-			for j := i + 1; j < len(c); j++ {
-				uncovered[pair{i, j, c[i], c[j]}] = true
-			}
+		for _, p := range pos {
+			uncovered[tkey(p, c)] = true
 		}
 	}
 	rnd := rand.New(rand.NewSource(seed))
@@ -105,11 +104,9 @@ func pairwise(seed int64) []Row {
 		best, bestN := -1, 0
 		for k, c := range combos {
 			n := 0
-			for i := 0; i < len(c); i++ {
-				for j := i + 1; j < len(c); j++ {
-					if uncovered[pair{i, j, c[i], c[j]}] {
-						n++
-					}
+			for _, p := range pos {
+				if uncovered[tkey(p, c)] {
+					n++
 				}
 			}
 			if n > bestN {
@@ -120,10 +117,8 @@ func pairwise(seed int64) []Row {
 			break
 		}
 		c := combos[best]
-		for i := 0; i < len(c); i++ {
-			for j := i + 1; j < len(c); j++ {
-				delete(uncovered, pair{i, j, c[i], c[j]})
-			}
+		for _, p := range pos {
+			delete(uncovered, tkey(p, c))
 		}
 		rows = append(rows, c)
 		combos = append(combos[:best], combos[best+1:]...)
@@ -134,6 +129,32 @@ func pairwise(seed int64) []Row {
 		out[i] = toRow(i+1, c)
 	}
 	return out
+}
+
+// tuples lists the t-sized sets of value positions in a row of n values.
+func tuples(n, t int) [][]int {
+	var out [][]int
+	var walk func(start int, cur []int)
+	walk = func(start int, cur []int) {
+		if len(cur) == t {
+			out = append(out, append([]int(nil), cur...))
+			return
+		}
+		for i := start; i < n; i++ {
+			walk(i+1, append(cur, i))
+		}
+	}
+	walk(0, nil)
+	return out
+}
+
+// tkey names the values of row c at positions pos.
+func tkey(pos []int, c []string) string {
+	var b strings.Builder
+	for _, i := range pos {
+		fmt.Fprintf(&b, "%d=%s|", i, c[i])
+	}
+	return b.String()
 }
 
 func every() []Row {
