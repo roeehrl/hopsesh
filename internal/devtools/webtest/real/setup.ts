@@ -48,6 +48,7 @@ function laptopWorld(home: string, env: Record<string, string>): Record<string, 
   execFileSync(join(tools, "demoseed" + exe), ["-role", "laptop", "-codex"], { env: { ...process.env, ...env, ...out } });
   // The settings demo/laptop-setup.sh leaves: offers answered, the agents' own marks, a
   // studio machine, and update checks on.
+  mkdirSync(env.HOPSESH_CONFIG_DIR, { recursive: true });
   writeFileSync(join(env.HOPSESH_CONFIG_DIR, "config.toml"), [
     "schema = 3",
     `repos_dir = '${join(home, "src")}'`,
