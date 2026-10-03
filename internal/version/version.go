@@ -4,7 +4,7 @@ package version
 import "fmt"
 
 var (
-	// Version is the semantic version, e.g. "0.1.0". "dev" for local builds.
+	// Version is the semantic version, e.g. "0.3.0". "dev" for local builds.
 	Version = "dev"
 	// Commit is the git commit the binary was built from.
 	Commit = "none"

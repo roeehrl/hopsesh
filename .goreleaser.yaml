@@ -99,7 +99,7 @@ winget:
 
 # Release notes are this version's CHANGELOG.md section, passed with --release-notes (see
 # release.yml), which replaces GoReleaser's own changelog. "changelog: disable: true" would
-# drop those notes too (0.2.0 and 0.3.0 went out with only the footer).
+# drop those notes too.
 
 release:
   draft: true # scripts/release-sign.sh completes it; a person publishes it
