@@ -134,6 +134,7 @@ func (a *App) Plan(ctx context.Context, inv *Inventory, e Entry, target agent.ID
 		Session:   e.Session,
 		Live:      e.Live,
 		Git:       e.Git,
+		GitErr:    e.GitError,
 		Lineage:   e.Lineage,
 		Target:    move.Side{Machine: here.host, Module: tm, Install: tin},
 		Worktrees: a.Reg.Worktrees(),
