@@ -63,7 +63,7 @@ mkdir -p ~/.ssh && chmod 700 ~/.ssh
 touch ~/.ssh/config && chmod 600 ~/.ssh/config
 printf '\nHost pwbox\n  HostName 127.0.0.1\n  Port %s\n  User %s\n' "$PORT" "$PW_USER" >> ~/.ssh/config
 
-"$BIN" hosts add pwbox pwbox --password
+"$BIN" hosts add pwbox pwbox --password --keychain=false # never this machine's real Keychain
 "$BIN" hosts --json | grep -q '"auth": *"password"' || fail "hosts does not show password login"
 "$BIN" trust pwbox --yes
 

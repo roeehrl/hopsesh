@@ -102,7 +102,7 @@ func TestBrowsePlanAndContinue(t *testing.T) {
 	tm.Type("a") // continue it in the next agent instead
 	scr.waitFor(t, "Continue in Codex")
 	tm.Type("y")
-	scr.waitFor(t, "codex resume")
+	scr.waitFor(t, "continues in Codex")
 
 	tm.Type("q")
 	fm := tm.FinalModel(t, teatest.WithFinalTimeout(10*time.Second)).(*model)
