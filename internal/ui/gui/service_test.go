@@ -61,8 +61,8 @@ func home(t *testing.T) (repo string) {
 func TestWindowContinuesInAnotherAgent(t *testing.T) {
 	repo := home(t)
 	a := NewApp(all.Registry())
-	if hosts := a.Discover(); hosts == nil {
-		t.Fatal("no machines is an empty list for the window, not null")
+	if m := a.Machines(); m.Machines == nil || m.Found == nil || m.Here.Name == "" {
+		t.Fatalf("empty lists for the window, not null: %+v", m)
 	}
 	if info := a.Info(); info.ConfigError != "" || len(info.Agents) < 2 {
 		t.Fatalf("info: %+v", info)
@@ -198,6 +198,66 @@ func TestWindowRoundTrip(t *testing.T) {
 	if !marked {
 		t.Fatalf("the Codex thread is marked as continued in Claude Code: %+v", cl.Copies)
 	}
+	if len(cl.History) < 2 || !strings.HasPrefix(cl.History[1].What, "Continued in Codex") {
+		t.Fatalf("history: %+v", cl.History)
+	}
+
+	// Activity: the way back can be undone; the first continuation was used since.
+	act, err := a.Activity()
+	if err != nil || len(act.Items) != 2 {
+		t.Fatalf("activity: %+v %v", act, err)
+	}
+	newest, first := act.Items[0], act.Items[1]
+	if newest.Kind != "continue" || !newest.CanUndo || first.CanUndo || first.Why == "" {
+		t.Fatalf("activity items: %+v", act.Items)
+	}
+	if title, err := a.UndoLast(); err != nil || title != newest.Title {
+		t.Fatalf("undo last: %q %v", title, err)
+	}
+	if err := a.Undo(first.ID, false); err == nil || !strings.Contains(err.Error(), "changed since") {
+		t.Fatalf("undoing work used since needs force: %v", err)
+	}
+	if err := a.Undo(first.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	act, _ = a.Activity()
+	for _, x := range act.Items {
+		if !x.Undone || x.CanUndo {
+			t.Fatalf("after undo: %+v", act.Items)
+		}
+	}
+	if _, err := a.UndoLast(); err == nil {
+		t.Fatal("nothing left to undo")
+	}
+}
+
+// The Machines screen: this machine receives only when asked, and machines are added and
+// removed without connecting to them.
+func TestWindowMachines(t *testing.T) {
+	home(t)
+	a := NewApp(all.Registry())
+	if m := a.Machines(); m.Here.Receive || a.Info().Receive || len(m.Machines) != 0 {
+		t.Fatalf("fresh: %+v", m)
+	}
+	if err := a.SetReceive(true); err != nil {
+		t.Fatal(err)
+	}
+	if !a.Machines().Here.Receive || !a.Info().Receive {
+		t.Fatal("receive is on")
+	}
+	if err := a.AddHost("box", "me@box.invalid", false, false); err != nil {
+		t.Fatal(err)
+	}
+	m := a.Machines()
+	if len(m.Machines) != 1 || m.Machines[0].Name != "box" || m.Machines[0].Scanned || m.Machines[0].Auth != "key" {
+		t.Fatalf("added: %+v", m.Machines)
+	}
+	if err := a.RemoveHost("box"); err != nil {
+		t.Fatal(err)
+	}
+	if m := a.Machines(); len(m.Machines) != 0 || a.Info().HasHosts {
+		t.Fatalf("removed: %+v", m.Machines)
+	}
 }
 
 // A configuration an older hopsesh wrote is never overwritten; StartFresh sets it aside.
@@ -284,6 +344,13 @@ func TestWindowSendsToAnotherMachine(t *testing.T) {
 	}
 	if _, err := a.Scan(); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := a.PushPlan("claude/"+sid, "box", "", OptsDTO{Mark: true, TargetDir: boxRepo}); err != nil {
+		t.Fatal(err)
+	}
+	a.ClosePlan() // the window closed the plan: its connection ends
+	if _, err := a.PushApply(); err == nil {
+		t.Fatal("a closed plan cannot be applied")
 	}
 	p, err := a.PushPlan("claude/"+sid, "box", "", OptsDTO{Mark: true, TargetDir: boxRepo})
 	if err != nil {

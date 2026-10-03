@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"maps"
 	"os"
 	"os/exec"
@@ -23,16 +22,17 @@ import (
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/audit"
-	"github.com/roeehrl/hopsesh/internal/core/hosts"
 	"github.com/roeehrl/hopsesh/internal/core/lnp"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/registry"
-	"github.com/roeehrl/hopsesh/internal/core/secrets"
-	"github.com/roeehrl/hopsesh/internal/core/transport"
 	"github.com/roeehrl/hopsesh/internal/update"
 	"github.com/roeehrl/hopsesh/internal/version"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
+
+// MenuEvent carries a menu-bar command to the window ("palette", "refresh", "sessions",
+// "activity", "machines", "settings", "undo-last").
+const MenuEvent = "hopsesh:menu"
 
 // App is the service bound to the frontend.
 type App struct {
@@ -87,6 +87,10 @@ type AgentDTO struct {
 	Stability     agent.Stability    `json:"stability"`
 	Enabled       bool               `json:"enabled"`
 	RemoteControl bool               `json:"remoteControl"`
+	Import        bool               `json:"import"`  // continued sessions go through its own importer
+	Version       string             `json:"version"` // installed here ("" when not)
+	Folder        string             `json:"folder"`  // its data folder here
+	Tested        []string           `json:"tested"`
 	Capabilities  []agent.Capability `json:"capabilities"`
 }
 
@@ -109,6 +113,7 @@ type Info struct {
 	SkillState  string `json:"skillState"`  // across every agent: absent | current | stale | modified | foreign | broken
 	SkillPrompt string `json:"skillPrompt"` // "declined" once the user said not now
 	CLIOffer    bool   `json:"cliOffer"`    // offer to link the command-line tool
+	Receive     bool   `json:"receive"`     // other machines' hopsesh may send sessions here
 	Defaults    struct {
 		MarkMoved  bool `json:"markMoved"`
 		SyncCode   bool `json:"syncCode"`
@@ -127,7 +132,7 @@ func (a *App) Info() Info {
 	cfg := a.core.Cfg
 	info := Info{Version: version.Version, Host: app.LocalName(), ReposDir: cfg.ReposDir,
 		AuditDir: filepath.Join(config.StateDir(), "log"), UpdateCheck: cfg.UpdateCheck,
-		SkillState: skill.State, SkillPrompt: cfg.SkillPrompt}
+		SkillState: skill.State, SkillPrompt: cfg.SkillPrompt, Receive: cfg.Peer.Receive}
 	if a.cfgErr != nil {
 		info.ConfigError = a.cfgErr.Error()
 	}
@@ -145,11 +150,27 @@ func (a *App) Info() Info {
 }
 
 func (a *App) agentsLocked() []AgentDTO {
+	var here map[agent.ID]app.AgentState
+	if a.inv != nil && a.inv.Local() != nil {
+		here = map[agent.ID]app.AgentState{}
+		for _, st := range a.inv.Local().Agents {
+			here[st.Agent] = st
+		}
+	}
 	var out []AgentDTO
 	for _, m := range a.core.Reg.All() {
 		s := m.Spec()
-		out = append(out, AgentDTO{ID: s.ID, Name: s.Name, Stability: s.Stability, Enabled: a.core.Cfg.AgentEnabled(string(s.ID)),
-			RemoteControl: a.core.Cfg.Agents[string(s.ID)].RemoteControl, Capabilities: agent.Capabilities(m)})
+		ac := a.core.Cfg.Agents[string(s.ID)]
+		d := AgentDTO{ID: s.ID, Name: s.Name, Stability: s.Stability, Enabled: !ac.Disabled, RemoteControl: ac.RemoteControl,
+			Import: ac.Import, Tested: s.Tested, Capabilities: agent.Capabilities(m)}
+		if st, ok := here[s.ID]; ok && (st.Install.Present || st.Install.Binary != "") {
+			d.Version = st.Install.Version
+			for _, r := range s.Roots {
+				d.Folder = st.Install.Root(r.Name)
+				break
+			}
+		}
+		out = append(out, d)
 	}
 	return out
 }
@@ -219,10 +240,11 @@ func (a *App) CheckUpdate() (*UpdateDTO, error) {
 	return &last.DTO, nil
 }
 
-// OpenURL opens a web page in the default browser (release notes only).
+// OpenURL opens a web page in the default browser: hopsesh's release pages, and
+// Tailscale's sign-in check for a machine.
 func (a *App) OpenURL(url string) error {
-	if !strings.HasPrefix(url, "https://github.com/"+update.Repo+"/") {
-		return errors.New("only hopsesh release pages can be opened")
+	if !strings.HasPrefix(url, "https://github.com/"+update.Repo+"/") && !strings.HasPrefix(url, "https://login.tailscale.com/") {
+		return errors.New("only hopsesh release pages and Tailscale sign-in can be opened")
 	}
 	switch runtime.GOOS {
 	case "darwin":
@@ -246,163 +268,6 @@ func (a *App) OpenLocalNetworkSettings() error {
 // just changed the setting or wants to answer a prompt they dismissed.
 func (a *App) RetryLocalNetwork() {
 	lnp.ResetWait(config.StateDir()) // each scan makes new connections, so nothing else is cached
-}
-
-// HostDTO is one machine on the consent screen.
-type HostDTO struct {
-	Name        string   `json:"name"`
-	Destination string   `json:"destination"`
-	Via         []string `json:"via"`
-	OS          string   `json:"os"`
-	Online      *bool    `json:"online"`
-	OtherOwner  bool     `json:"otherOwner"`
-	Owner       string   `json:"owner"`
-	Allowed     bool     `json:"allowed"`
-	Auth        string   `json:"auth"`     // "key" or "password"
-	Keychain    bool     `json:"keychain"` // the password is remembered
-	CanRemember bool     `json:"canRemember"`
-}
-
-// Discover lists machines (connecting to none) with their consent state.
-func (a *App) Discover() []HostDTO {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	cands, _ := hosts.Discover(ctx)
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	out := []HostDTO{}
-	seen := map[string]bool{}
-	dto := func(d HostDTO, h *config.Host) HostDTO {
-		d.Auth, d.CanRemember = "key", secrets.Available()
-		if h != nil {
-			d.Allowed = h.Allowed
-			if h.UsesPassword() {
-				d.Auth, d.Keychain = "password", h.Keychain
-			}
-		}
-		return d
-	}
-	for _, c := range cands {
-		if c.Self {
-			continue
-		}
-		h := a.core.Cfg.FindHost(c.Name)
-		if h != nil && h.TailscaleName == "" && c.DNSName != "" {
-			h.TailscaleName = c.DNSName
-		}
-		seen[c.Name] = true
-		out = append(out, dto(HostDTO{Name: c.Name, Destination: c.Destination, Via: c.Via, OS: c.OS, Online: c.Online, OtherOwner: c.OtherOwner, Owner: c.Owner}, h))
-	}
-	for i := range a.core.Cfg.Hosts {
-		h := &a.core.Cfg.Hosts[i]
-		if !seen[h.Name] {
-			out = append(out, dto(HostDTO{Name: h.Name, Destination: h.Destination, Via: []string{h.Via}, OS: h.OS}, h))
-		}
-	}
-	return out
-}
-
-// SetAllowed records consent for a machine.
-func (a *App) SetAllowed(name, destination string, allowed bool) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	h := a.core.Cfg.FindHost(name)
-	if h == nil {
-		a.core.Cfg.Hosts = append(a.core.Cfg.Hosts, config.Host{Name: name, Destination: destination, Via: "gui"})
-		h = a.core.Cfg.FindHost(name)
-	}
-	h.Allowed = allowed
-	return a.save()
-}
-
-// AddHost adds and allows a machine by ssh destination. password: it logs in with a
-// password (asked for when hopsesh connects; remember keeps it in the Keychain).
-func (a *App) AddHost(name, destination string, password, remember bool) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	h := config.Host{Name: name, Destination: destination, Via: "manual", Allowed: true}
-	if password {
-		h.Auth, h.Keychain = "password", remember && secrets.Available()
-	}
-	a.core.Cfg.UpsertHost(h)
-	return a.save()
-}
-
-// KeysDTO describes host keys awaiting confirmation.
-type KeysDTO struct {
-	Host         string   `json:"host"`
-	Address      string   `json:"address"`
-	Fingerprints []string `json:"fingerprints"`
-	Verified     string   `json:"verified"` // how it was verified, "" if not
-}
-
-func (a *App) conn(name string) (*transport.Conn, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	h := a.core.Cfg.FindHost(name)
-	dest := name
-	if h != nil {
-		dest = h.Destination
-	}
-	c, err := transport.NewConn(dest, config.StateDir(), a.core.Audit)
-	if err != nil {
-		return nil, err
-	}
-	if h != nil && h.TailscaleName != "" && h.TailscaleName != dest {
-		c.Fallbacks = []string{h.TailscaleName}
-	}
-	return c, nil
-}
-
-// ScanKeys fetches a machine's host keys for the trust dialog.
-func (a *App) ScanKeys(name string) (*KeysDTO, error) {
-	c, err := a.conn(name)
-	if err != nil {
-		return nil, err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second) // room for the macOS prompt
-	defer cancel()
-	keys, r, err := c.ScanHostKeys(ctx)
-	if err != nil {
-		var ln *transport.LocalNetworkError
-		if errors.As(err, &ln) {
-			return nil, fmt.Errorf("%v. %s", err, ln.Hint())
-		}
-		return nil, err
-	}
-	d := &KeysDTO{Host: name, Address: r.HostName + ":" + r.Port}
-	for _, k := range keys {
-		d.Fingerprints = append(d.Fingerprints, k.Type+" "+k.Fingerprint)
-	}
-	cands, _ := hosts.Discover(ctx)
-	for _, cd := range cands {
-		if cd.Name == name && transport.MatchesTailscale(keys, cd.SSHHostKeys) {
-			d.Verified = "matches the key Tailscale reports for this machine"
-		}
-	}
-	if d.Verified == "" {
-		home, _ := os.UserHomeDir()
-		if k := transport.KnownElsewhere(keys, filepath.Join(home, ".ssh", "known_hosts")); len(k) > 0 {
-			slices.Sort(k)
-			d.Verified = "matches a key you already trust for " + strings.Join(slices.Compact(k), ", ")
-		}
-	}
-	return d, nil
-}
-
-// TrustHost re-scans and records the machine's host keys (after the user confirmed).
-func (a *App) TrustHost(name string) error {
-	c, err := a.conn(name)
-	if err != nil {
-		return err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	keys, _, err := c.ScanHostKeys(ctx)
-	if err != nil {
-		return err
-	}
-	return c.Trust(keys)
 }
 
 // CopyText puts text on the clipboard.

@@ -86,6 +86,14 @@ func (a *App) PushApply() (*DoneDTO, error) {
 	return d, nil
 }
 
+// ClosePlan drops the plan the window closed, and ends a send's connection.
+func (a *App) ClosePlan() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.plan, a.input, a.res = nil, move.Input{}, nil
+	a.closePushLocked()
+}
+
 // closePushLocked ends an open push connection (callers hold a.mu).
 func (a *App) closePushLocked() {
 	if a.push != nil {

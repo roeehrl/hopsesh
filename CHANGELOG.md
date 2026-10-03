@@ -36,14 +36,21 @@ aside (the app offers this), and machines are added again.
 - `hopsesh agents` lists the supported agents and what each can do; `ls --agent` filters.
 - The skill is written to every installed agent (Claude Code and Codex) as identical
   files, with per-copy drift detection and approval rules for each agent.
-- The app shows every agent's sessions, offers "Continue in…", previews the conversion,
-  and has per-agent settings and a switch for receiving sessions.
+- A redesigned app: scopes (Needs you, each machine, each agent), sessions with their
+  state and copies, a details pane with the session's history, the plan as a sheet with
+  a summary and one-click fixes, a result page with the loss report, an Activity page
+  with undo, a Machines page (receiving, login, host keys, discovery), tabbed settings,
+  a ⌘K palette and keyboard control.
+- `[agents.<id>] import = true` sends continuations into that agent through its own
+  importer by default.
 - `HOPSESH_MACHINE` sets the name this machine has in marks and lineage.
 
 ### Changed
 - `--desktop` is now `--app` (open in the agent's desktop app, where it has one).
 - Undoing an append removes only hopsesh's own bytes, so lines an agent wrote afterwards
   stay.
+- `undo` refuses when a session it would change was used since (that work would be
+  lost); `undo --force`, or "Undo anyway" in the app, does it anyway.
 
 ### Removed
 - The optional remote helper (`hosts helper`, `hopsesh agent`) and `hopsesh import`.

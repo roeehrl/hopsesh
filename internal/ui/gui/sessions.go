@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/convert"
 	"github.com/roeehrl/hopsesh/internal/core/launch"
+	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/repos"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -31,7 +33,8 @@ type MachineDTO struct {
 	OS       string   `json:"os"`
 	Sessions int      `json:"sessions"`
 	Local    bool     `json:"local"`
-	Agents   []string `json:"agents"` // "Claude Code 2.1.284"
+	Agents   []string `json:"agents"`  // "Claude Code 2.1.284"
+	Hopsesh  string   `json:"hopsesh"` // hopsesh's version there ("" when not installed)
 }
 
 // AgentOpt is an agent a session can continue in here.
@@ -59,10 +62,29 @@ type EntryDTO struct {
 	Unpushed   int        `json:"unpushed"`
 	Dirty      int        `json:"dirty"`
 	SizeKB     int64      `json:"sizeKB"`
-	Copies     []app.Copy `json:"copies,omitempty"` // every copy, across machines and agents
+	Copies     []CopyDTO  `json:"copies,omitempty"` // every copy, across machines and agents
 	HereNewest bool       `json:"hereNewest"`       // the newest copy is on this machine
 	StaleHere  bool       `json:"staleHere"`        // an older copy is on this machine
 	ContinueIn []AgentOpt `json:"continueIn"`       // other agents here it can continue in
+	Needs      bool       `json:"needs"`            // the agent waits for the person (an approval)
+	History    []HopDTO   `json:"history"`          // where it has been, oldest first
+}
+
+// CopyDTO is one copy of a session, on some machine and in some agent.
+type CopyDTO struct {
+	Machine   string      `json:"machine"`
+	Agent     agent.ID    `json:"agent"`
+	AgentName string      `json:"agentName"`
+	Key       string      `json:"key"` // agent/session, as EntryDTO.Key
+	Local     bool        `json:"local"`
+	Mark      *agent.Mark `json:"mark,omitempty"`
+	Newest    bool        `json:"newest"`
+}
+
+// HopDTO is one step of a session's history.
+type HopDTO struct {
+	When string `json:"when"` // RFC 3339
+	What string `json:"what"`
 }
 
 // GroupDTO is one repository.
@@ -80,7 +102,8 @@ type ScanDTO struct {
 	Machines []MachineDTO `json:"machines"`
 	Groups   []GroupDTO   `json:"groups"`
 	Total    int          `json:"total"`
-	Peers    []string     `json:"peers"` // reached machines a session here can be sent to
+	Peers    []string     `json:"peers"`   // reached machines with hopsesh, a session here can be sent to
+	Updated  string       `json:"updated"` // when the scan finished (RFC 3339)
 }
 
 // Scan reads this machine and every allowed machine, for every enabled agent.
@@ -103,9 +126,9 @@ func (a *App) Scan() (*ScanDTO, error) {
 	a.closePushLocked()
 	a.mu.Unlock()
 
-	out := &ScanDTO{Total: len(inv.Entries), Machines: []MachineDTO{}, Groups: []GroupDTO{}, Peers: []string{}}
+	out := &ScanDTO{Total: len(inv.Entries), Machines: []MachineDTO{}, Groups: []GroupDTO{}, Peers: []string{}, Updated: time.Now().Format(time.RFC3339)}
 	for _, m := range inv.Machines {
-		d := MachineDTO{Name: m.Name, Status: m.Status, Hint: m.Hint, Error: m.Error, OS: m.OS, Local: m.Local}
+		d := MachineDTO{Name: m.Name, Status: m.Status, Hint: m.Hint, Error: m.Error, OS: m.OS, Local: m.Local, Hopsesh: m.Hopsesh, Agents: []string{}}
 		for _, e := range inv.Entries {
 			if e.Machine == m.Name {
 				d.Sessions++
@@ -117,7 +140,7 @@ func (a *App) Scan() (*ScanDTO, error) {
 			}
 		}
 		out.Machines = append(out.Machines, d)
-		if !m.Local && m.Status == app.StatusOK {
+		if !m.Local && m.Status == app.StatusOK && m.Hopsesh != "" {
 			out.Peers = append(out.Peers, m.Name)
 		}
 	}
@@ -153,11 +176,14 @@ func entryDTO(core *app.App, inv *app.Inventory, it app.Item, targets []AgentOpt
 	e, s := it.Entry, it.Entry.Session
 	d := EntryDTO{Machine: e.Machine, Agent: e.Agent, AgentName: e.AgentName, Key: s.Key.String(), Title: s.Title,
 		Status: e.Status(), Live: e.Live.State == agent.Live, LastActive: s.LastActivity.Format(time.RFC3339),
-		LastPrompt: s.LastPrompt, CWD: s.CWD, SizeKB: s.Size / 1024, Copies: it.Copies, ContinueIn: []AgentOpt{}}
+		LastPrompt: s.LastPrompt, CWD: s.CWD, SizeKB: s.Size / 1024, ContinueIn: []AgentOpt{},
+		Needs:   e.Live.State == agent.Live && strings.HasPrefix(e.Live.Status, "waiting"),
+		History: history(core, e.Lineage)}
 	if m := inv.Machine(e.Machine); m != nil && len(it.Copies) <= 1 {
 		d.HereNewest = m.Local
 	}
 	for _, c := range it.Copies {
+		d.Copies = append(d.Copies, CopyDTO{Machine: c.Machine, Agent: c.Agent, AgentName: c.AgentName, Key: c.Key.String(), Local: c.Local, Mark: c.Mark, Newest: c.Newest})
 		switch {
 		case c.Local && c.Newest:
 			d.HereNewest = true
@@ -183,6 +209,42 @@ func entryDTO(core *app.App, inv *app.Inventory, it app.Item, targets []AgentOpt
 		}
 	}
 	return d
+}
+
+// history tells a session's hops from its lineage, oldest first.
+func history(core *app.App, m *lineage.Manifest) []HopDTO {
+	out := []HopDTO{}
+	if m == nil {
+		return out
+	}
+	name := func(id agent.ID) string {
+		if mod, ok := core.Reg.Get(id); ok {
+			return mod.Spec().Name
+		}
+		return string(id)
+	}
+	hops := append([]lineage.Hop(nil), m.Hops...)
+	sort.Slice(hops, func(i, j int) bool { return hops[i].Time.Before(hops[j].Time) })
+	for i, h := range hops {
+		if h.From < 0 || h.From >= len(m.Replicas) || h.To < 0 || h.To >= len(m.Replicas) {
+			continue
+		}
+		from, to := m.Replicas[h.From], m.Replicas[h.To]
+		if i == 0 {
+			out = append(out, HopDTO{When: from.Time.Format(time.RFC3339), What: fmt.Sprintf("In %s on %s", name(from.Key.Agent), from.Location)})
+		}
+		what := fmt.Sprintf("Moved to %s", to.Location)
+		if h.Kind == lineage.HopContinue {
+			what = fmt.Sprintf("Continued in %s on %s", name(to.Key.Agent), to.Location)
+		} else if i > 0 && hops[i-1].Kind == lineage.HopContinue && hops[i-1].Time.Equal(h.Time) {
+			what = fmt.Sprintf("The %s copy kept on %s too", name(to.Key.Agent), to.Location) // the native copy
+		}
+		if h.Fork {
+			what += " (both kept going)"
+		}
+		out = append(out, HopDTO{When: h.Time.Format(time.RFC3339), What: what})
+	}
+	return out
 }
 
 // find returns a scanned session (callers hold a.mu).

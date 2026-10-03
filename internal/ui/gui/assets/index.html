@@ -9,17 +9,26 @@
 <body>
 <header class="titlebar" style="--wails-draggable: drag">
   <span class="brand">hopsesh</span>
-  <span class="sub" id="subtitle">Sessions on your machines</span>
+  <span class="where" id="where"></span>
+  <button id="btn-search" class="search" style="--wails-draggable: no-drag" aria-label="Search sessions or run a command" aria-keyshortcuts="Meta+K">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <span>Search sessions or run a command</span>
+    <span class="kbd" style="margin-left: auto">⌘K</span>
+  </button>
   <span class="spacer"></span>
-  <label class="visually-hidden" for="q">Search sessions</label>
-  <input id="q" type="search" placeholder="Search prompts, repos, titles" style="--wails-draggable: no-drag" hidden>
-  <button id="btn-refresh" class="btn" style="--wails-draggable: no-drag" hidden>Refresh</button>
-  <button id="btn-machines" class="btn primary" style="--wails-draggable: no-drag">Machines</button>
-  <button id="btn-settings" class="btn" style="--wails-draggable: no-drag" aria-label="Settings" title="Settings">Settings</button>
+  <span class="fresh" id="fresh" aria-live="off"></span>
+  <button id="btn-refresh" class="btn icon" style="--wails-draggable: no-drag" aria-label="Refresh" title="Refresh (⌘R)">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>
+  </button>
+  <button id="btn-settings" class="btn icon" style="--wails-draggable: no-drag" aria-label="Settings" title="Settings (⌘,)">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>
+  </button>
 </header>
 <main id="view"></main>
-<dialog id="dlg"><form method="dialog" id="dlg-body"></form></dialog>
-<dialog id="pwdlg"><form method="dialog" id="pwdlg-body"></form></dialog>
+<dialog id="sheet" class="sheet" aria-labelledby="sheet-title"></dialog>
+<dialog id="dlg" class="dlg"></dialog>
+<dialog id="pwdlg" class="dlg"></dialog>
+<dialog id="palette" class="palette" aria-label="Search or run a command"></dialog>
 <div id="toast" role="status" aria-live="polite"></div>
 <script type="module" src="app.js"></script>
 </body>
