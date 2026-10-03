@@ -219,7 +219,7 @@ if (mode === "stills") {
   await wait(3200);
   await caption(null);
   mark("end");
-  await card(`<div class="nm">${logo}hopsesh</div><div class="sm">Claude Code and Codex · CLI, TUI and macOS app</div><div class="tg">codonic.dev/apps/hopsesh/get-started</div><div class="fine">Unofficial; not affiliated with Anthropic or OpenAI.</div>`);
+  await card(`<div class="nm">${logo}hopsesh</div><div class="sm">Claude Code and Codex · CLI, TUI and an app for macOS and Windows</div><div class="tg">codonic.dev/apps/hopsesh/get-started</div><div class="fine">Unofficial; not affiliated with Anthropic or OpenAI.</div>`);
   await wait(5200);
   writeFileSync(`${out}/${tag}-${scheme}.marks.json`, JSON.stringify(marks, null, 1));
 } else if (mode === "undo") {

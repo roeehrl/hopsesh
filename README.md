@@ -46,10 +46,12 @@ repository, worktree and paths fixed up. Then it gives you the command to contin
   If both copies changed, it stops and asks; it never merges.
 - **Works from inside your agent**: ask Claude Code or Codex "bring my laptop session here" and
   it plans with hopsesh, then moves only after you say yes.
-- **CLI, TUI and a macOS app** on one engine, with `--json` output everywhere it matters.
+- **CLI, TUI and a desktop app for macOS and Windows** on one engine, with `--json` output
+  everywhere it matters. The apps update themselves.
 
-> Status: alpha. It works end to end on macOS and Linux; Windows support is built but less
-> tested. hopsesh is an independent project, not affiliated with Anthropic or OpenAI.
+> Status: alpha. It works end to end on macOS and Linux, and the Windows app and installer are
+> tested in CI on Windows Server 2025, including the real window. hopsesh is an independent
+> project, not affiliated with Anthropic or OpenAI.
 
 ## Install
 
@@ -70,6 +72,12 @@ Both check the download against the release's `checksums.txt` and its signature,
 
 - **macOS app:** [download the signed, notarized `.dmg`](https://github.com/roeehrl/hopsesh/releases/latest/download/hopsesh-macos-universal.dmg)
   (macOS 13+, Apple silicon and Intel).
+- **Windows app:** [download the installer](https://github.com/roeehrl/hopsesh/releases/latest/download/hopsesh-windows-amd64-setup.exe)
+  (Windows 10/11; [arm64](https://github.com/roeehrl/hopsesh/releases/latest/download/hopsesh-windows-arm64-setup.exe)).
+  It installs for your user only, no administrator rights, and adds the `hopsesh` command to
+  your PATH. The installer isn't code-signed yet, so Windows SmartScreen says "Windows
+  protected your PC": click **More info**, then **Run anyway**. A portable `.zip` of the app
+  is on the [release page](https://github.com/roeehrl/hopsesh/releases/latest).
 - **Linux packages:** `.deb`, `.rpm` and `.apk` for amd64 and arm64 are on the
   [release page](https://github.com/roeehrl/hopsesh/releases/latest), for example
   `sudo apt install ./hopsesh_<version>_linux_amd64.deb`.
@@ -111,19 +119,25 @@ hopsesh doctor studio                          # agents, SSH, host trust and the
 hopsesh undo                                   # undo the newest move (--list shows more)
 ```
 
-### The macOS app
+### The app
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/app-dark.png">
-  <img src="docs/assets/app-light.png" alt="The hopsesh macOS app listing Claude Code and Codex sessions from two machines, grouped by repository, with live state and the last prompt" width="900">
+  <img src="docs/assets/app-light.png" alt="The hopsesh app listing Claude Code and Codex sessions from two machines, grouped by repository, with live state and the last prompt" width="900">
 </picture>
 
 Same engine, with a plan sheet for each move: repository, worktree mode, what gets
 rewritten, and what's left behind on the other machine. Every session has **Continue in…**,
 with a preview of the conversion, and sessions on this machine have **Send to…** another
 machine: it plans there, carries it out, and one Undo reverses both sides. Settings has per-agent options and a **Receive sessions**
-switch. It can also put the `hopsesh` command on your PATH (a link into the app, no
-administrator password) and install the skill into your agents.
+switch. It can also put the `hopsesh` command on your PATH (no administrator password) and
+install the skill into your agents.
+
+The app is the same on macOS and Windows; on Windows it says "this PC", uses Ctrl where macOS
+uses ⌘, opens sessions in Windows Terminal (or PowerShell) and keeps passwords in Windows
+Credential Manager. It updates itself: **Settings → Updates → Install and restart** checks
+the release's signature and checksum (on macOS also the Apple developer and notarization),
+installs it and reopens.
 
 ## Continue in another agent
 
@@ -241,8 +255,8 @@ including the file-format traps hopsesh handles, are in [docs/design.md](docs/de
   as a plan first.
 - **Never moves credentials.** Logins, keys, live sockets and account data stay where they
   are; each machine stays signed in on its own. A machine's SSH password is kept in
-  the macOS Keychain or asked for each time, and never written to hopsesh's files or a
-  command line.
+  the macOS Keychain or Windows Credential Manager, or asked for each time, and never written
+  to hopsesh's files or a command line.
 - **Transcripts can hold secrets.** hopsesh scans for likely secrets while moving and can
   redact the copy (`--redact`). Every remote action goes to a local audit log.
 - **Only your agents talk to their models.** hopsesh never calls the Anthropic or OpenAI API.
@@ -301,8 +315,8 @@ existing one with `hopsesh hosts auth <machine> password`. In the app, use the "
 on the Machines screen, or tick "This machine logs in with a password" when adding it.
 
 hopsesh asks for the password when it connects:
-- **On macOS** it remembers it in the Keychain by default (`--keychain=false` to be asked each
-  time).
+- **On macOS and Windows** it remembers it in the Keychain or Windows Credential Manager by
+  default (`--keychain=false` to be asked each time).
 - **Otherwise** it asks with a hidden prompt in the terminal, or a dialog in the app.
 - **In scripts**, `--password-stdin` reads it from standard input.
 

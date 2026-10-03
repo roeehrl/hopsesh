@@ -31,6 +31,15 @@ make app      # macOS only: builds dist/macos/hopsesh.app (unsigned unless SIGN_
 - Go 1.26+. On Linux the desktop-app packages need GTK 4 and WebKitGTK 6
   (`libgtk-4-dev libwebkitgtk-6.0-dev` on Debian/Ubuntu) for `go vet ./...` and the tests.
 - `scripts/integration-test.sh` runs a real SSH round trip (Linux, needs sudo; CI runs it).
+- The Windows app: `scripts/build-windows-app.sh` builds `hopsesh-app.exe` and `hopsesh.exe`
+  for amd64 and arm64, the app `.zip` (what the app updates itself from) and the per-user
+  installer. It needs `makensis` (`apt install nsis`); Homebrew's makensis 3.13 crashes on
+  current macOS, so build it on Linux or let CI do it. `internal/devtools/winres` makes the
+  Windows resource file (icon, manifest, version information).
+- Window tests: `internal/devtools/webtest` drives the app's real window code in a browser
+  (Playwright). `playwright.real.config.ts` drives the real Windows window instead and needs
+  `HOPSESH_APP_EXE` pointing at a `-tags e2e` build. That build tag opens a debugging port:
+  never ship it.
 - `demo/record.sh shell` gives you two made-up machines (see [demo/README.md](demo/README.md)),
   so you can test listing and moving sessions without a second computer. If you change what
   the TUI or app shows, re-record the demo with `demo/record.sh`.
