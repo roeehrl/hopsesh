@@ -1,0 +1,14 @@
+# A session from the Claude desktop app's Claude Code (its own entry point and records) is
+# listed like any other and continues in Codex.
+git-repo proj https://github.com/example/proj.git
+claude-session -desktop 33333333-2222-4333-8444-555555555555 proj 'Desktop work' 'from the desktop app in'
+
+exec hopsesh ls --json --no-git
+stdout '"title": "Desktop work"'
+stdout '"lastPrompt": "from the desktop app in'
+
+exec hopsesh pull 33333333-2222-4333-8444-555555555555 --in codex --yes --json
+stdout '"kind": "continue"'
+exec hopsesh ls --json --no-git
+stdout '"agent": "codex",\s+"agentName"'
+stdout '"kind": "continued"'

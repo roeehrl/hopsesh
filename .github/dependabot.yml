@@ -3,12 +3,14 @@ updates:
   - package-ecosystem: gomod
     directory: /
     schedule: {interval: weekly}
+    cooldown: {default-days: 7} # a new release waits a week (supply-chain safety)
     groups:
       go-modules: {patterns: ["*"]}
     commit-message: {prefix: deps}
   - package-ecosystem: github-actions
     directory: /
     schedule: {interval: weekly}
+    cooldown: {default-days: 7}
     groups:
       actions: {patterns: ["*"]}
     commit-message: {prefix: ci}

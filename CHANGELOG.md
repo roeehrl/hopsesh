@@ -64,6 +64,14 @@ aside (the app offers this), and machines are added again.
 - The `live_policy` and top-level `remote_control` settings (remote control is now per
   agent).
 
+### Fixed
+- Continuing a session in another agent on the same machine uses the session's own
+  checkout wherever it is, instead of asking to clone it into the repos folder.
+- A session is recognised as already being in a folder reached through a symlink (such as
+  macOS's `/var`), instead of being moved onto itself.
+- The terminal UI no longer carries out a plan you pressed `y` on while a changed one was
+  still being worked out.
+
 ## [0.2.0] - 2026-10-02
 
 ### Added

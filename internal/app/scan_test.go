@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,5 +55,13 @@ func TestScanListsSessionInConfiguredFolder(t *testing.T) {
 	}
 	if len(inv.Entries) != 1 || inv.Entries[0].Session.Title != "テスト Windows 测试" || inv.Entries[0].Session.CWD != proj {
 		t.Fatalf("entries: %+v", inv.Entries)
+	}
+}
+
+// A connection the machine drops before login says why that may be.
+func TestClassifyDroppedBeforeLogin(t *testing.T) {
+	status, _, hint := classify(errors.New("ssh: exit status 255: kex_exchange_identification: read: Connection reset by peer"), config.Host{Name: "box"})
+	if status != StatusError || !strings.Contains(hint, "wait a minute") {
+		t.Fatalf("%s: %s", status, hint)
 	}
 }

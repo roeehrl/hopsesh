@@ -6,8 +6,10 @@
 # box → back: code comes along straight from box (never pushed), box's copy gets marked.
 # back → box: the marked copy on box is replaced by the newer one, back's copy gets marked.
 # Then both copies change and a move is refused until --keep-both.
-# Run by CI on Linux; needs sudo, sshd and git. The account running it is not changed.
+# Run by CI on Linux and macOS; needs sudo, sshd and git. The account running it is not changed.
 set -eu
+# shellcheck source=lib/testhost.sh
+. "$(dirname "$0")/lib/testhost.sh"
 
 BIN=${BIN:-$PWD/bin/hopsesh}
 case "$BIN" in /*) ;; *) BIN=$PWD/$BIN ;; esac
@@ -15,16 +17,17 @@ cd / # the test users cannot read the caller's working directory (git checks it)
 B=hsremote # box
 A=hsback   # back
 ID=7c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d4e5
-WORK=$(mktemp -d)
+WORK=$(mktemp -d /tmp/hopsesh-rt.XXXXXX)
 chmod 755 "$WORK"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 say() { printf '\n== %s\n' "$*"; }
 
-sudo install -m 0755 "$BIN" /usr/local/bin/hopsesh-rt
+sudo mkdir -p /usr/local/bin && sudo install -m 0755 "$BIN" /usr/local/bin/hopsesh-rt
 HS=/usr/local/bin/hopsesh-rt
-for u in "$A" "$B"; do sudo useradd -m -s /bin/sh "$u" 2>/dev/null || true; done
-AHOME=$(getent passwd "$A" | cut -d: -f6)
-BHOME=$(getent passwd "$B" | cut -d: -f6)
+for u in "$A" "$B"; do th_add_user "$u"; done
+th_clean_login_env
+AHOME=$(th_home "$A")
+BHOME=$(th_home "$B")
 # Run as a test user with a clean environment (the caller's XDG_* paths must not leak).
 user_env() {
   u=$1 h=$2
@@ -42,9 +45,7 @@ for u in "$A" "$B"; do
 done
 sudo cat "$AHOME/.ssh/id_ed25519.pub" | sudo -u "$B" -H sh -c 'cat >> ~/.ssh/authorized_keys; chmod 600 ~/.ssh/authorized_keys'
 sudo cat "$BHOME/.ssh/id_ed25519.pub" | sudo -u "$A" -H sh -c 'cat >> ~/.ssh/authorized_keys; chmod 600 ~/.ssh/authorized_keys'
-sudo systemctl start ssh 2>/dev/null || sudo service ssh start 2>/dev/null || {
-  sudo mkdir -p /run/sshd && sudo ssh-keygen -A >/dev/null && sudo /usr/sbin/sshd
-}
+th_start_sshd
 
 # One repository, an unreachable "origin" (so commits can only come from the other machine).
 say "setting up the repository on both machines"

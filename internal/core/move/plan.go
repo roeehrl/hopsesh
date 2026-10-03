@@ -240,7 +240,7 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		p.Bytes += f.Size
 	}
 
-	if src.Machine.Name == tgt.Machine.Name && s.CWD == cwd {
+	if src.Machine.Name == tgt.Machine.Name && (s.CWD == cwd || tgt.Machine.Local && realIntended(s.CWD) == cwd) {
 		p.Blockers = append(p.Blockers, "this session is already here, in this folder; to move it to another folder on this machine use --to <dir>")
 	}
 	relate(ctx, p, in, opt)

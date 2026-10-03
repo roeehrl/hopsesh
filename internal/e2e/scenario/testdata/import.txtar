@@ -1,0 +1,14 @@
+# Codex's own importer converts the session (--via import); hopsesh adds its briefing and
+# undo removes the imported thread.
+git-repo proj https://github.com/example/proj.git
+claude-session 22222222-2222-4333-8444-555555555555 proj 'Import me' 'imported prompt in'
+
+exec hopsesh pull 22222222-2222-4333-8444-555555555555 --in codex --via import --yes --json
+stdout '"via": "import"'
+grep 'codex app-server externalAgentConfig/import' $WORK/agents.log
+exec hopsesh ls --json --no-git
+stdout '"lastPrompt": "imported prompt in'
+
+exec hopsesh undo --yes
+exec hopsesh ls --json --no-git
+! stdout '"agent": "codex",\s+"agentName"'

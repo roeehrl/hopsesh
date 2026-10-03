@@ -7,3 +7,8 @@ coverage.*
 .idea/
 .vscode/
 /demo/out/
+
+# Browser tests of the window
+internal/devtools/webtest/node_modules/
+internal/devtools/webtest/test-results/
+internal/devtools/webtest/playwright-report/

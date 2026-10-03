@@ -1,0 +1,38 @@
+# The skill goes into every agent (Claude Code's folder and the shared ~/.agents for Codex),
+# is reported current, notices an edit and keeps it until --force, adds approval rules on
+# request, and comes out again.
+exec hopsesh skill install
+stdout 'current .*\.agents.skills.hopsesh \(Codex\)'
+stdout 'current .*\.claude.skills.hopsesh \(Claude Code\)'
+exists $HOME/.claude/skills/hopsesh/SKILL.md
+exists $HOME/.agents/skills/hopsesh/SKILL.md
+exec hopsesh skill --json
+stdout '"state": "current"'
+
+# An edit is noticed and kept.
+cp edited.md $HOME/.claude/skills/hopsesh/SKILL.md
+exec hopsesh skill --json
+stdout '"state": "modified"'
+! exec hopsesh skill install
+stderr 'was edited after hopsesh installed it'
+grep 'my own note' $HOME/.claude/skills/hopsesh/SKILL.md
+
+# --force replaces it (the edited copy is kept as a backup) and can add approval rules.
+exec hopsesh skill install --force --add-rules
+exec hopsesh skill --json
+! stdout '"state": "modified"'
+! grep 'my own note' $HOME/.claude/skills/hopsesh/SKILL.md
+stdout '"present": true'
+
+exec hopsesh skill remove
+exec hopsesh skill --json
+stdout '"state": "absent"'
+! exists $HOME/.claude/skills/hopsesh/SKILL.md
+! exists $HOME/.agents/skills/hopsesh/SKILL.md
+
+-- edited.md --
+---
+name: hopsesh
+description: edited by hand
+---
+my own note

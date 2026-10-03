@@ -48,26 +48,27 @@ type row struct {
 }
 
 type model struct {
-	deps    Deps
-	copied  bool // the resume command was copied on the done screen
-	mode    mode
-	width   int
-	height  int
-	inv     *app.Inventory
-	rows    []row
-	cursor  int
-	offset  int
-	filter  string
-	editing bool
-	opts    move.Options
-	target  agent.ID // the agent to continue in ("" = the session's own)
-	plan    *move.Plan
-	input   move.Input
-	sel     row
-	result  *move.Result
-	err     error
-	exit    *Exit
-	started time.Time
+	deps     Deps
+	copied   bool // the resume command was copied on the done screen
+	mode     mode
+	width    int
+	height   int
+	inv      *app.Inventory
+	rows     []row
+	cursor   int
+	offset   int
+	filter   string
+	editing  bool
+	opts     move.Options
+	target   agent.ID // the agent to continue in ("" = the session's own)
+	plan     *move.Plan
+	planning bool // a new plan is being worked out; the one shown is out of date
+	input    move.Input
+	sel      row
+	result   *move.Result
+	err      error
+	exit     *Exit
+	started  time.Time
 }
 
 type scanDone struct{ inv *app.Inventory }
@@ -161,6 +162,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mode = modeBrowse
 		m.buildRows()
 	case planDone:
+		m.planning = false
 		if msg.err != nil {
 			m.err, m.mode = msg.err, modeError
 		} else {
@@ -231,7 +233,7 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		case "esc", "q":
 			m.mode = modeBrowse
 		case "y", "enter":
-			if len(m.plan.Blockers) == 0 {
+			if !m.planning && len(m.plan.Blockers) == 0 { // never the plan being replaced
 				m.mode = modeApplying
 				return m, m.applyCmd()
 			}
@@ -304,6 +306,7 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) planCmd() tea.Cmd {
+	m.planning = true
 	a, inv, e, target, opts := m.deps.App, m.inv, m.sel.item.Entry, m.target, m.opts
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -512,6 +515,9 @@ func (m *model) viewPlan(b *strings.Builder) {
 		verb = "Continue in " + p.Agent
 	}
 	fmt.Fprintf(b, "\n  %s %q\n", bold.Render(verb), p.Title)
+	if m.planning {
+		b.WriteString("  updating the plan…\n")
+	}
 	fmt.Fprintf(b, "  from  %s  %s (%s)\n  to    this machine  %s\n", p.Source.Location, p.Source.CWD, p.Key.Agent, p.Target.CWD)
 	r := p.Repo
 	switch r.Action {
