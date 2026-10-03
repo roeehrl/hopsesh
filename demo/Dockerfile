@@ -14,8 +14,9 @@ FROM debian:bookworm-slim AS studio
 RUN apt-get update && apt-get install -y --no-install-recommends openssh-server git procps ca-certificates \
  && rm -rf /var/lib/apt/lists/* \
  && useradd -m -s /bin/bash alice && mkdir -p /run/sshd /srv/git && chown alice /srv/git
-COPY --from=build /out/demoseed /usr/local/bin/demoseed
+COPY --from=build /out/hopsesh /out/demoseed /usr/local/bin/
 COPY demo/claude-stub.sh /usr/local/bin/claude
+COPY demo/codex-stub.sh /usr/local/bin/codex
 COPY demo/studio-entrypoint.sh /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh"]
 
@@ -26,4 +27,5 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssh-client 
  && useradd -m -s /bin/bash alice && mkdir -p /srv/git && chown alice /srv/git
 COPY --from=build /out/hopsesh /out/demoseed /out/hopsesh-app /usr/local/bin/
 COPY demo/claude-stub.sh /usr/local/bin/claude
+COPY demo/codex-stub.sh /usr/local/bin/codex
 COPY demo/laptop-setup.sh /usr/local/bin/laptop-setup
