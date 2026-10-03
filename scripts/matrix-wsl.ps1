@@ -17,7 +17,8 @@ function WslPath([string]$p) { (wsl -d $distro -- wslpath -a ($p -replace '\\', 
 function InWsl([string]$script, [string]$user = 'root') {
   $file = Join-Path $env:TEMP ("wsl-" + [guid]::NewGuid() + ".sh")
   [IO.File]::WriteAllText($file, $script.Replace("`r", ""))
-  wsl -d $distro -u $user -- bash -e (WslPath $file)
+  # To the console: a function's output would become part of what it returns.
+  wsl -d $distro -u $user -- bash -e (WslPath $file) | Out-Host
   $code = $LASTEXITCODE
   Remove-Item $file
   return $code
