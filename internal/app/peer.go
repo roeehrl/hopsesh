@@ -48,7 +48,7 @@ func peerCommandWindows(exe, shell string) string {
 	case strings.HasSuffix(s, "bash.exe") || strings.HasSuffix(s, `\sh.exe`):
 		return transport.ShQuote(strings.ReplaceAll(exe, `\`, "/")) + " peer --stdio" // C:/… works there
 	}
-	return `""` + exe + `" peer --stdio"` // cmd /c strips the outer quotes
+	return `"` + exe + `" peer --stdio` // Windows OpenSSH quotes the whole line for cmd /c itself
 }
 
 // maxPackage bounds the files of one pushed session.
