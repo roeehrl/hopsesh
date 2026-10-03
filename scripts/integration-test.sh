@@ -2,13 +2,15 @@
 # End-to-end test over a real SSH server, with "another machine" played by a second local
 # user reached through sshd: list its Claude Code session and pull it here; continue it in
 # Codex here; and push it back with hopsesh on that machine receiving it, then undo both
-# sides at once. Run by CI on Linux; needs sudo.
+# sides at once. Run by CI on Linux and macOS; needs sudo.
 set -eu
+# shellcheck source=lib/testhost.sh
+. "$(dirname "$0")/lib/testhost.sh"
 
 BIN=${BIN:-$PWD/bin/hopsesh}
 REMOTE_USER=hsremote
 ID=0b6c6a8e-1d2f-4c3b-9a7e-5f4d3c2b1a00
-WORK=$(mktemp -d)
+WORK=$(mktemp -d /tmp/hopsesh-it.XXXXXX)
 export HOPSESH_CONFIG_DIR="$WORK/config" HOPSESH_STATE_DIR="$WORK/state" CLAUDE_CONFIG_DIR="$WORK/claude" CODEX_HOME="$WORK/codex"
 export HOPSESH_MACHINE=here # the other "machine" is this host too; it keeps the host name
 mkdir -p "$CODEX_HOME/sessions" "$CLAUDE_CONFIG_DIR" # both agents have run here once
@@ -16,11 +18,9 @@ mkdir -p "$CODEX_HOME/sessions" "$CLAUDE_CONFIG_DIR" # both agents have run here
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 # The "remote" machine: a user with one Claude Code session in ~/proj.
-sudo useradd -m -s /bin/sh "$REMOTE_USER" 2>/dev/null || true
-# GitHub's runners put the runner's own XDG folders in /etc/environment, which every SSH
-# login reads; the remote user must use its own.
-sudo sed -i '/^XDG_[A-Z_]*=/d' /etc/environment
-RHOME=$(getent passwd "$REMOTE_USER" | cut -d: -f6)
+th_add_user "$REMOTE_USER"
+th_clean_login_env
+RHOME=$(th_home "$REMOTE_USER")
 SLUG=$(printf '%s' "$RHOME/proj" | sed 's/[^A-Za-z0-9]/-/g')
 sudo -u "$REMOTE_USER" sh -c "mkdir -p ~/proj ~/.claude/projects/$SLUG ~/.ssh && chmod 700 ~/.ssh"
 cat > "$WORK/session.jsonl" <<JSONL
@@ -34,9 +34,7 @@ sudo install -o "$REMOTE_USER" -m 0600 "$WORK/session.jsonl" "$RHOME/.claude/pro
 mkdir -p ~/.ssh && chmod 700 ~/.ssh
 [ -f ~/.ssh/id_ed25519 ] || ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/id_ed25519
 sudo install -o "$REMOTE_USER" -m 0600 ~/.ssh/id_ed25519.pub "$RHOME/.ssh/authorized_keys"
-sudo systemctl start ssh 2>/dev/null || sudo service ssh start 2>/dev/null || {
-  sudo mkdir -p /run/sshd && sudo ssh-keygen -A >/dev/null && sudo /usr/sbin/sshd
-}
+th_start_sshd
 
 "$BIN" hosts add box "$REMOTE_USER@127.0.0.1"
 "$BIN" trust box --yes
@@ -67,7 +65,7 @@ grep -q "fix the build in $TARGET/main.go" "$ROLLOUT" || fail "the conversation 
 [ -f "$ROLLOUT" ] && fail "undo left the Codex rollout"
 
 # Push it back: hopsesh on box receives sessions.
-sudo install -m 0755 "$BIN" /usr/local/bin/hopsesh
+sudo mkdir -p /usr/local/bin && sudo install -m 0755 "$BIN" /usr/local/bin/hopsesh
 # The remote user's own environment: the caller's XDG_* paths must not leak in.
 as_remote() { sudo -u "$REMOTE_USER" -H env -u XDG_CONFIG_HOME -u XDG_STATE_HOME -u XDG_CACHE_HOME -u XDG_DATA_HOME HOME="$RHOME" "$@"; }
 as_remote /usr/local/bin/hopsesh receive on >/dev/null

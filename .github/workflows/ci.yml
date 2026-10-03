@@ -17,11 +17,14 @@ concurrency:
 
 jobs:
   test:
-    name: test (${{ matrix.os }})
+    name: test (${{ matrix.family }})
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15, windows-2025]
+        include:
+          - {family: linux, os: ubuntu-24.04}
+          - {family: macos, os: macos-15}
+          - {family: windows, os: windows-2025}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -42,13 +45,13 @@ jobs:
         shell: bash
         run: >-
           go run gotest.tools/gotestsum@v1.13.0 --format github-actions
-          --junitfile "junit-${{ matrix.os }}.xml" --rerun-fails=2 --rerun-fails-report reruns.txt
+          --junitfile "junit-${{ matrix.family }}.xml" --rerun-fails=2 --rerun-fails-report reruns.txt
           --packages ./... -- -race -count=1
       - name: test summary
         if: ${{ !cancelled() }}
         uses: test-summary/action@37b508cfee6d4d080eedd00b5bb240a6a784a6a5 # v2.6
         with:
-          paths: junit-${{ matrix.os }}.xml
+          paths: junit-${{ matrix.family }}.xml
       - name: tests that passed only on a rerun
         if: ${{ !cancelled() && hashFiles('reruns.txt') != '' }}
         shell: bash
@@ -56,8 +59,8 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
         with:
-          name: junit-${{ matrix.os }}
-          path: junit-${{ matrix.os }}.xml
+          name: junit-${{ matrix.family }}
+          path: junit-${{ matrix.family }}.xml
           retention-days: 7
       - name: build
         run: go build -trimpath ./cmd/hopsesh
@@ -110,8 +113,15 @@ jobs:
           advanced-security: false
           annotations: true
 
-  ssh-integration:
-    runs-on: ubuntu-24.04
+  ssh:
+    name: ssh (${{ matrix.family }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {family: linux, os: ubuntu-24.04}
+          - {family: macos, os: macos-15}
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
@@ -128,6 +138,7 @@ jobs:
       - run: scripts/password-test.sh
 
   windows-peer:
+    name: ssh (windows)
     runs-on: windows-2025
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1

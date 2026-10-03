@@ -2,14 +2,16 @@
 # End-to-end test of password login: a machine whose sshd accepts only passwords (a
 # separate sshd on 127.0.0.1:2222 with its own configuration; the system sshd is not
 # touched), reached with --password-stdin; a wrong password is reported as one; then
-# `hosts setup-key` moves it to key login. Run by CI on Linux; needs sudo.
+# `hosts setup-key` moves it to key login. Run by CI on Linux and macOS; needs sudo.
 set -eu
+# shellcheck source=lib/testhost.sh
+. "$(dirname "$0")/lib/testhost.sh"
 
 BIN=${BIN:-$PWD/bin/hopsesh}
 PW_USER=hspass
 PORT=2222
 ID=2c1d0e9f-3a4b-4c5d-8e6f-7a8b9c0d1e2f
-WORK=$(mktemp -d)
+WORK=$(mktemp -d /tmp/hopsesh-pw.XXXXXX)
 export HOPSESH_CONFIG_DIR="$WORK/config" HOPSESH_STATE_DIR="$WORK/state" CLAUDE_CONFIG_DIR="$WORK/claude"
 mkdir -p "$CLAUDE_CONFIG_DIR" # Claude Code has run here once
 
@@ -22,11 +24,11 @@ trap cleanup EXIT
 cd /
 
 # The machine: a user with a password, no keys, and one session.
-sudo useradd -m -s /bin/sh "$PW_USER" 2>/dev/null || true
 PW="pw-$(od -An -N9 -tx1 /dev/urandom | tr -d ' \n')"
 ( umask 077; printf '%s\n' "$PW" > "$WORK/password" )
-printf '%s:%s\n' "$PW_USER" "$PW" | sudo chpasswd
-RHOME=$(getent passwd "$PW_USER" | cut -d: -f6)
+th_add_user "$PW_USER" "$PW"
+th_clean_login_env
+RHOME=$(th_home "$PW_USER")
 SLUG=$(printf '%s' "$RHOME/proj" | sed 's/[^A-Za-z0-9]/-/g')
 sudo -u "$PW_USER" sh -c "mkdir -p ~/proj ~/.claude/projects/$SLUG && rm -rf ~/.ssh"
 cat > "$WORK/session.jsonl" <<JSONL
@@ -36,7 +38,7 @@ JSONL
 sudo install -o "$PW_USER" -m 0600 "$WORK/session.jsonl" "$RHOME/.claude/projects/$SLUG/$ID.jsonl"
 
 # Its own sshd: passwords and keys allowed, only this user, only on loopback.
-sudo mkdir -p /run/sshd
+th_privsep_dir
 sudo ssh-keygen -q -t ed25519 -N '' -f "$WORK/host_ed25519"
 cat > "$WORK/sshd_config" <<CONF
 Port $PORT
@@ -53,6 +55,7 @@ Subsystem sftp internal-sftp
 CONF
 sudo /usr/sbin/sshd -t -f "$WORK/sshd_config"
 sudo /usr/sbin/sshd -f "$WORK/sshd_config"
+th_wait_port "$PORT"
 
 # This user reaches it through an ssh alias (as people do).
 mkdir -p ~/.ssh && chmod 700 ~/.ssh
