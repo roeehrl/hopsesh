@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -233,29 +234,17 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 			continue
 		}
 		ch, err := hm.For(ctx, spec, st.Install, nil)
-		if err != nil {
-			continue
+		if err == nil {
+			var l agent.Listing
+			if l, err = mod.List(ctx, ch, st.Install); err == nil {
+				entries = append(entries, listedEntries(ctx, hm, fsys, mod, ch, st, l)...)
+				if n := len(l.Errors); n > 0 {
+					err = fmt.Errorf("%d session file(s) could not be read; the first, %s: %w", n, l.Errors[0].Path, l.Errors[0].Err)
+				}
+			}
 		}
-		l, err := mod.List(ctx, ch, st.Install)
 		if err != nil {
 			m.Agents[len(m.Agents)-1].Error = err.Error()
-			continue
-		}
-		live := map[agent.SessionID]agent.LiveInfo{}
-		if ld, ok := mod.(agent.LiveDetector); ok && len(l.Sessions) > 0 {
-			ids := make([]agent.SessionID, len(l.Sessions))
-			for i, s := range l.Sessions {
-				ids[i] = s.Key.Session
-			}
-			live, _ = ld.Live(ctx, ch, st.Install, ids)
-		}
-		manifests := readManifests(fsys, l.Sessions)
-		for i, s := range l.Sessions {
-			lv := live[s.Key.Session]
-			if lv.State == "" {
-				lv.State = agent.Unknown
-			}
-			entries = append(entries, Entry{Machine: hm.Name, Agent: spec.ID, AgentName: spec.Name, Session: s, Live: lv, Lineage: manifests[i]})
 		}
 	}
 	if !o.SkipGit {
@@ -393,3 +382,27 @@ func (e Entry) Status() string {
 
 // MarkWords is a mark in words ("moved to studio", "continued in Codex on studio").
 func MarkWords(m agent.Mark) string { return strings.TrimPrefix(agent.MarkTitle(m, ""), "↪ ") }
+
+// listedEntries are one agent's listed sessions on a machine, with their live state and
+// lineage.
+func listedEntries(ctx context.Context, hm *host.Machine, fsys host.FS, mod agent.Module, ch agent.Host, st AgentState, l agent.Listing) []Entry {
+	spec := mod.Spec()
+	var out []Entry
+	live := map[agent.SessionID]agent.LiveInfo{}
+	if ld, ok := mod.(agent.LiveDetector); ok && len(l.Sessions) > 0 {
+		ids := make([]agent.SessionID, len(l.Sessions))
+		for i, s := range l.Sessions {
+			ids[i] = s.Key.Session
+		}
+		live, _ = ld.Live(ctx, ch, st.Install, ids)
+	}
+	manifests := readManifests(fsys, l.Sessions)
+	for i, s := range l.Sessions {
+		lv := live[s.Key.Session]
+		if lv.State == "" {
+			lv.State = agent.Unknown
+		}
+		out = append(out, Entry{Machine: hm.Name, Agent: spec.ID, AgentName: spec.Name, Session: s, Live: lv, Lineage: manifests[i]})
+	}
+	return out
+}

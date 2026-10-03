@@ -21,6 +21,11 @@ import (
 
 const sid = "0b6c6a8e-1d2f-4c3b-9a7e-5f4d3c2b1a01"
 
+// resumes reports whether a start command (POSIX shell or PowerShell) resumes a session.
+func resumes(command, id string) bool {
+	return strings.Contains(command, "resume") && strings.Contains(command, id)
+}
+
 // jsonText is s as it appears inside a JSON string (a Windows path's backslashes doubled).
 func jsonText(s string) string {
 	b, _ := json.Marshal(s)
@@ -127,8 +132,8 @@ func TestMoveRoundTripAndUndo(t *testing.T) {
 	}
 	b, _ := os.ReadFile(moved.Path)
 	// Signed thinking keeps its text (it may still name the old path); everything else moves.
-	if strings.Count(string(b), box.repo) != 1 || !strings.Contains(string(b), `"thinking":"Read the file at `+box.repo) ||
-		!strings.Contains(string(b), `"relocatedCwd":"`+here.repo+`"`) {
+	if strings.Count(string(b), jsonText(box.repo)) != 1 || !strings.Contains(string(b), `"thinking":"Read the file at `+jsonText(box.repo)) ||
+		!strings.Contains(string(b), `"relocatedCwd":"`+jsonText(here.repo)+`"`) {
 		t.Fatalf("paths not rewritten:\n%s", b)
 	}
 	if !strings.Contains(string(b), `"signature":"c2lnbmF0dXJlL2hvbWUvdS9naXQvZGVtbw=="`) {
@@ -147,7 +152,7 @@ func TestMoveRoundTripAndUndo(t *testing.T) {
 			t.Fatalf("lineage beside %s: %+v %v", s.Path, m, err)
 		}
 	}
-	if !strings.Contains(res.Command, "claude --resume "+sid) {
+	if !resumes(res.Command, sid) {
 		t.Fatalf("command: %s", res.Command)
 	}
 
@@ -190,7 +195,7 @@ func TestMoveRoundTripAndUndo(t *testing.T) {
 	}
 	home := list(t, box)[sid]
 	b, _ = os.ReadFile(home.Path)
-	if home.Mark != nil || !strings.Contains(string(b), "a turn added on here") || !strings.Contains(string(b), `"cwd":"`+box.repo) {
+	if home.Mark != nil || !strings.Contains(string(b), "a turn added on here") || !strings.Contains(string(b), `"cwd":"`+jsonText(box.repo)) {
 		t.Fatalf("home copy: mark %+v\n%s", home.Mark, b)
 	}
 

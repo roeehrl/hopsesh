@@ -17,6 +17,9 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 
 # The "remote" machine: a user with one Claude Code session in ~/proj.
 sudo useradd -m -s /bin/sh "$REMOTE_USER" 2>/dev/null || true
+# GitHub's runners put the runner's own XDG folders in /etc/environment, which every SSH
+# login reads; the remote user must use its own.
+sudo sed -i '/^XDG_[A-Z_]*=/d' /etc/environment
 RHOME=$(getent passwd "$REMOTE_USER" | cut -d: -f6)
 SLUG=$(printf '%s' "$RHOME/proj" | sed 's/[^A-Za-z0-9]/-/g')
 sudo -u "$REMOTE_USER" sh -c "mkdir -p ~/proj ~/.claude/projects/$SLUG ~/.ssh && chmod 700 ~/.ssh"
@@ -71,7 +74,12 @@ as_remote /usr/local/bin/hopsesh receive on >/dev/null
 "$BIN" pull "box:$ID" --to "$TARGET" --yes --json > "$WORK/pull2.json" || { cat "$WORK/pull2.json"; fail "second pull failed"; }
 RFILE="$RHOME/.claude/projects/$SLUG/$ID.jsonl"
 sudo grep -q 'moved to here' "$RFILE" || fail "box's copy is not marked after the pull"
-"$BIN" push "$ID" box --to "$RHOME/proj" --yes --json > "$WORK/push.json" || { cat "$WORK/push.json"; fail "push failed"; }
+"$BIN" push "$ID" box --to "$RHOME/proj" --yes --json > "$WORK/push.json" || {
+  cat "$WORK/push.json"
+  # shellcheck disable=SC2016 # expands on box
+  ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@127.0.0.1" 'echo "box HOME=$HOME"; env | grep "^XDG_" || true' >&2
+  fail "push failed"
+}
 JOURNAL=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["result"]["journal"])' "$WORK/push.json")
 [ -n "$JOURNAL" ] || { cat "$WORK/push.json"; fail "push printed no journal"; }
 sudo grep -q 'moved to here' "$RFILE" && fail "the copy that went back to box still carries a mark"

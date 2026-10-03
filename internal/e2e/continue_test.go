@@ -93,7 +93,7 @@ func TestContinueInCodexAndBack(t *testing.T) {
 	if mentions(seg, box.repo) {
 		t.Fatal("paths must point here")
 	}
-	if !strings.Contains(res.Command, "codex resume "+string(th.Key.Session)) {
+	if !resumes(res.Command, string(th.Key.Session)) {
 		t.Fatalf("command: %s", res.Command)
 	}
 	left := list(t, box)[sid]

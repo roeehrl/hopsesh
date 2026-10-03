@@ -367,7 +367,7 @@ func replace(s []byte, maps []compiled, counts map[string]int) []byte {
 				continue
 			}
 			if out == nil {
-				out = make([]byte, 0, len(s)+32)
+				out = make([]byte, 0, len(s)) // append grows it
 			}
 			out = append(out, s[last:i]...)
 			out = append(out, m.to...)

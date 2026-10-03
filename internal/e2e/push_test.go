@@ -142,7 +142,7 @@ func TestPushToPeer(t *testing.T) {
 	moved := filepath.Join(box.home, ".claude", "projects", claude.Slug(box.repo), sid+".jsonl")
 	b, err := os.ReadFile(moved)
 	// (signed reasoning keeps its text, paths included: it is never rewritten)
-	if err != nil || !strings.Contains(string(b), `"cwd":"`+box.repo) || strings.Contains(string(b), `"cwd":"`+here.repo) {
+	if err != nil || !strings.Contains(string(b), `"cwd":"`+jsonText(box.repo)) || strings.Contains(string(b), `"cwd":"`+jsonText(here.repo)) {
 		t.Fatalf("the session is on box with box's paths: %v\n%s", err, b)
 	}
 	if res.Result.Mark != "done" {
