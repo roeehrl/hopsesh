@@ -9,6 +9,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/audit"
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/journal"
+	"github.com/roeehrl/hopsesh/internal/core/lineage"
 )
 
 // Journals lists what can be undone, newest first.
@@ -77,6 +78,9 @@ func (a *App) Undo(ctx context.Context, match string, force bool) (*journal.Jour
 	a.Audit.Write(audit.Entry{Action: "undo", Detail: map[string]any{"journal": j.ID, "ok": err == nil, "force": force}})
 	return j, err
 }
+
+// OwedMarks are the marks waiting for a copy left behind to end.
+func (a *App) OwedMarks() ([]lineage.Pending, error) { return lineage.LoadPending(a.StateDir) }
 
 // Activity is one operation hopsesh carried out, and whether it can be undone now.
 type Activity struct {

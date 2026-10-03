@@ -90,7 +90,7 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (*Result, error) {
 	if p.Kind == KindContinue {
 		return applyContinue(ctx, p, in, env)
 	}
-	j, err := journal.New(env.StateDir, fmt.Sprintf("%s from %s", p.Title, p.Source.Location))
+	j, err := journal.New(env.StateDir, journal.KindMove, fmt.Sprintf("%s from %s", p.Title, p.Source.Location))
 	if err != nil {
 		return nil, err
 	}

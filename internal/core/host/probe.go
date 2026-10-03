@@ -27,8 +27,19 @@ type probeWants struct {
 	bins []agent.Binary
 }
 
+// Hopsesh is hopsesh itself on a machine: the probe reports whether it is there (to work
+// with it as a peer) and its version.
+var Hopsesh = agent.Binary{
+	Name: "hopsesh",
+	Candidates: map[string][]string{
+		"*":       {"~/.local/bin/hopsesh", "/opt/homebrew/bin/hopsesh", "/usr/local/bin/hopsesh", "/Applications/hopsesh.app/Contents/Resources/bin/hopsesh"},
+		"windows": {"~/AppData/Local/Programs/hopsesh/hopsesh.exe"},
+	},
+	VersionArgs: []string{"version"},
+}
+
 func wants(specs []agent.Spec) probeWants {
-	var w probeWants
+	w := probeWants{bins: []agent.Binary{Hopsesh}}
 	seen := map[string]bool{}
 	for _, s := range specs {
 		for _, e := range SpecEnv(s) {

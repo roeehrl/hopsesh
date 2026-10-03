@@ -166,6 +166,14 @@ func (a *App) Plan(ctx context.Context, inv *Inventory, e Entry, target agent.ID
 	if rc := a.Cfg.Agents[string(target)].RemoteControl; rc && !opt.RemoteControl {
 		opt.RemoteControl = true
 	}
+	switch opt.Via {
+	case move.ViaHopsesh:
+		opt.Via = ""
+	case "":
+		if imp, ok := tm.(agent.Importer); ok && target != e.Agent && a.Cfg.Agents[string(target)].Import && imp.CanImport(e.Agent) {
+			opt.Via = move.ViaImport
+		}
+	}
 	p, err := move.Build(ctx, in, opt)
 	return p, in, err
 }

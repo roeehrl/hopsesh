@@ -43,6 +43,8 @@ type Agent struct {
 	Disabled bool `toml:"disabled,omitempty"`
 	// RemoteControl turns the agent's own remote control on for continued sessions.
 	RemoteControl bool `toml:"remote_control,omitempty"`
+	// Import has the agent's own importer convert sessions continued in it, by default.
+	Import bool `toml:"import,omitempty"`
 }
 
 // Peer is how this machine works with hopsesh on other machines.

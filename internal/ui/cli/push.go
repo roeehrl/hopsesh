@@ -35,7 +35,7 @@ Nothing changes until you confirm (or pass --yes). hopsesh undo <id> here undoes
 	f.Bool("native", false, "for another agent that can: replay exact tool calls as its own (experimental)")
 	f.String("note-file", "", "a handoff note for the other agent's briefing")
 	f.Bool("go", false, "start the continued session with \"Continue.\"")
-	f.String("via", "", "for another agent that has its own importer (Codex): import to let it convert the session; hopsesh adds its briefing")
+	f.String("via", "", "for another agent: import (its own importer converts the session, where it has one; hopsesh adds its briefing) or hopsesh (hopsesh converts it; the default unless that agent is set to import)")
 	f.Bool("carry-rules", false, "for another agent: add your instructions for every project of the session's agent to the briefing")
 	f.String("to", "", "continue in this directory on the other machine instead of matching the repository")
 	f.Bool("clone", false, "clone the repository there if it is missing")

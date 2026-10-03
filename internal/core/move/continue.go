@@ -421,7 +421,7 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 	}
 	cp := p.Continue
 	src, tgt := in.Source, in.Target
-	j, err := journal.New(env.StateDir, fmt.Sprintf("%s → %s", p.Title, tgt.Module.Spec().Name))
+	j, err := journal.New(env.StateDir, journal.KindContinue, fmt.Sprintf("%s → %s", p.Title, tgt.Module.Spec().Name))
 	if err != nil {
 		return nil, err
 	}

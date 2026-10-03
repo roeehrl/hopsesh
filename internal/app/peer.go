@@ -393,7 +393,7 @@ func (p *Push) Commit(ctx context.Context) (*PushResult, error) {
 	}
 	a, e := p.a, p.e
 	out := &PushResult{Result: reply.Result, Machine: p.to.Name, Pushed: p.Pushed}
-	j, err := journal.New(a.StateDir, fmt.Sprintf("%s to %s", e.Session.Title, p.to.Name))
+	j, err := journal.New(a.StateDir, journal.KindPush, fmt.Sprintf("%s to %s", e.Session.Title, p.to.Name))
 	if err != nil {
 		return out, err
 	}

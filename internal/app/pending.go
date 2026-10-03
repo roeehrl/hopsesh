@@ -57,7 +57,7 @@ func (a *App) applyPending(ctx context.Context, m *Machine, entries []Entry) {
 		if !ok {
 			continue
 		}
-		j, err := journal.New(a.StateDir, "mark "+p.Title+" on "+m.Name)
+		j, err := journal.New(a.StateDir, journal.KindMark, "mark "+p.Title+" on "+m.Name)
 		if err != nil {
 			continue
 		}

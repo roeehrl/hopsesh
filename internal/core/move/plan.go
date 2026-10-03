@@ -107,8 +107,12 @@ type Options struct {
 	Go  bool // start the continued session with "Continue."
 }
 
-// ViaImport has the target agent's own importer convert the session.
-const ViaImport = "import"
+// Via choices: the target agent's own importer, or hopsesh's conversion even when the
+// configuration prefers the importer.
+const (
+	ViaImport  = "import"
+	ViaHopsesh = "hopsesh"
+)
 
 // Conflict choices when the copy here changed too.
 const (

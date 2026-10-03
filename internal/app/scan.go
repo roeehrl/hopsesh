@@ -40,6 +40,8 @@ type Machine struct {
 	Hint        string       `json:"hint,omitempty"`
 	OS          string       `json:"os,omitempty"`
 	Agents      []AgentState `json:"agents"`
+	// Hopsesh is the version of hopsesh installed there ("" when none was found).
+	Hopsesh string `json:"hopsesh,omitempty"`
 
 	host    *host.Machine
 	account *agent.Account // reported by the machine's own hopsesh (a push)
@@ -208,7 +210,8 @@ var errNeedsPassword = errors.New("this machine logs in with a password")
 
 // scanMachine lists every enabled agent's sessions on a reached machine.
 func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o ScanOptions) (*Machine, []Entry) {
-	m := &Machine{Name: hm.Name, Destination: dest, Local: hm.Local, Status: StatusOK, OS: hm.Facts.OS, host: hm}
+	m := &Machine{Name: hm.Name, Destination: dest, Local: hm.Local, Status: StatusOK, OS: hm.Facts.OS, host: hm,
+		Hopsesh: hopseshVersion(hm.Facts.Binaries[host.Hopsesh.Name])}
 	fsys, err := hm.FS(ctx)
 	if err != nil {
 		m.Status, m.Error, m.Hint = StatusError, "SFTP: "+err.Error(), "the machine's SSH server must allow the sftp subsystem"
@@ -276,6 +279,18 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 	}
 	a.applyPending(ctx, m, entries)
 	return m, entries
+}
+
+// hopseshVersion reads "hopsesh 0.3.0 (commit …)" from the probe ("" when not found;
+// "installed" when it gave no version).
+func hopseshVersion(b agent.BinaryFact) string {
+	if b.Path == "" {
+		return ""
+	}
+	if f := strings.Fields(b.Version); len(f) >= 2 && f[0] == "hopsesh" {
+		return f[1]
+	}
+	return "installed"
 }
 
 // readManifests reads the lineage beside each session, in parallel.

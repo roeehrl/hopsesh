@@ -74,7 +74,7 @@ func TestCodexListsWrittenThread(t *testing.T) {
 		Binaries: map[string]agent.BinaryFact{"codex": {Path: bin}}}}
 	mod := codex.New()
 	in := agent.Install{Agent: "codex", Version: "0.153.2", Binary: bin, Roots: map[string]string{"home": home}, Present: true}
-	j, err := journal.New(t.TempDir(), "test")
+	j, err := journal.New(t.TempDir(), journal.KindMove, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestCodexStop(t *testing.T) {
 		Binaries: map[string]agent.BinaryFact{"codex": {Path: bin}}}}
 	mod := codex.New()
 	in := agent.Install{Agent: "codex", Version: "0.153.2", Binary: bin, Roots: map[string]string{"home": home}, Present: true}
-	j, _ := journal.New(t.TempDir(), "test")
+	j, _ := journal.New(t.TempDir(), journal.KindMove, "test")
 	h, _ := m.For(context.Background(), mod.Spec(), in, j)
 	ctx := context.Background()
 	w, err := mod.Write(ctx, h, in, ir.WriteRequest{Mode: ir.WriteNew, Header: ir.Header{CWD: cwd, Title: "Stop me", Created: time.Now()},

@@ -24,7 +24,7 @@ func TestUndoEverything(t *testing.T) {
 	past := time.Now().Add(-time.Hour).Truncate(time.Second)
 	os.Chtimes(marked, past, past)
 
-	j, err := New(state, "test move")
+	j, err := New(state, KindMove, "test move")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestUndoAppendKeepsLaterWrites(t *testing.T) {
 	fsys := host.LocalFS()
 	idx := filepath.Join(data, "session_index.jsonl")
 	os.WriteFile(idx, []byte(`{"id":"a"}`), 0o644) // no trailing newline: Append adds one
-	j, _ := New(state, "title")
+	j, _ := New(state, KindMove, "title")
 	must(t, j.Append(fsys, "here", idx, []byte(`{"id":"b"}`+"\n"), agent.AppendOptions{NewLine: true}))
 	f, _ := os.OpenFile(idx, os.O_APPEND|os.O_WRONLY, 0)
 	f.WriteString(`{"id":"c"}` + "\n")
@@ -83,7 +83,7 @@ func TestUndoAppendKeepsLaterWrites(t *testing.T) {
 
 	other := filepath.Join(data, "t.jsonl")
 	os.WriteFile(other, []byte("x\n"), 0o600)
-	j2, _ := New(state, "mark")
+	j2, _ := New(state, KindMove, "mark")
 	must(t, j2.Append(fsys, "here", other, []byte("mark\n"), agent.AppendOptions{}))
 	os.WriteFile(other, []byte("x\nMARK\n"), 0o600)
 	if err := j2.Undo(func(string) (host.FS, error) { return fsys, nil }, false); err == nil {
@@ -105,7 +105,7 @@ func must(t *testing.T, err error) {
 func TestUndoRefusesWhatWasUsedSince(t *testing.T) {
 	state, data := t.TempDir(), t.TempDir()
 	fsys := host.LocalFS()
-	j, _ := New(state, "move")
+	j, _ := New(state, KindMove, "move")
 	placed := filepath.Join(data, "s.jsonl")
 	must(t, j.WriteFile(fsys, "here", placed, []byte("moved\n"), 0o600))
 	here := func(string) (host.FS, error) { return fsys, nil }

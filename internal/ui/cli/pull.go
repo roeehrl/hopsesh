@@ -23,7 +23,7 @@ func addPullFlags(cmd *cobra.Command) {
 	f.Bool("native", false, "for another agent that can: replay exact tool calls as its own (experimental)")
 	f.String("note-file", "", "a handoff note for the other agent's briefing")
 	f.Bool("go", false, "start the continued session with \"Continue.\"")
-	f.String("via", "", "for another agent that has its own importer (Codex): import to let it convert the session; hopsesh adds its briefing")
+	f.String("via", "", "for another agent: import (its own importer converts the session, where it has one; hopsesh adds its briefing) or hopsesh (hopsesh converts it; the default unless that agent is set to import)")
 	f.Bool("carry-rules", false, "for another agent: add your instructions for every project of the session's agent to the briefing")
 	f.String("to", "", "continue in this local directory instead of matching the repository")
 	f.Bool("clone", false, "clone the repository if it is not on this machine")
@@ -70,11 +70,11 @@ func (r *run) pullOptions(cmd *cobra.Command) (move.Options, error) {
 	o.Go, _ = f.GetBool("go")
 	o.CarryRules, _ = f.GetBool("carry-rules")
 	switch via, _ := f.GetString("via"); via {
-	case "", "hopsesh":
-	case move.ViaImport:
-		o.Via = move.ViaImport
+	case "":
+	case move.ViaImport, move.ViaHopsesh:
+		o.Via = via
 	default:
-		return o, fmt.Errorf("--via is import (the other agent's own importer), not %q", via)
+		return o, fmt.Errorf("--via is import or hopsesh, not %q", via)
 	}
 	if v, _ := f.GetBool("no-mark"); v {
 		o.Mark = false

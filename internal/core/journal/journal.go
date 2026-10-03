@@ -49,6 +49,7 @@ type Entry struct {
 // Journal is the undo record of one operation (a move, a continuation, a mark).
 type Journal struct {
 	ID      string             `json:"id"`
+	Kind    string             `json:"kind"` // what kind of operation (Kind*)
 	Title   string             `json:"title"`
 	Time    time.Time          `json:"time"`
 	Keys    []agent.SessionKey `json:"keys"` // the sessions it created or changed
@@ -68,11 +69,19 @@ type Journal struct {
 // Dir is where journals live under the state folder.
 func Dir(stateDir string) string { return filepath.Join(stateDir, "journal") }
 
-// New starts a journal.
-func New(stateDir, title string) (*Journal, error) {
+// Kinds of operations.
+const (
+	KindMove     = "move"     // a session brought here in its own agent
+	KindContinue = "continue" // a session continued in another agent
+	KindPush     = "push"     // a session sent to another machine (its mark and lineage here)
+	KindMark     = "mark"     // a mark owed to a copy left behind
+)
+
+// New starts a journal of one operation.
+func New(stateDir, kind, title string) (*Journal, error) {
 	id := time.Now().UTC().Format("20060102T150405.000Z")
 	id = strings.ReplaceAll(id, ".", "")
-	j := &Journal{ID: id, Title: title, Time: time.Now().UTC(), dir: filepath.Join(Dir(stateDir), id)}
+	j := &Journal{ID: id, Kind: kind, Title: title, Time: time.Now().UTC(), dir: filepath.Join(Dir(stateDir), id)}
 	if err := os.MkdirAll(filepath.Join(j.dir, "backup"), 0o700); err != nil {
 		return nil, err
 	}
