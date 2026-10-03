@@ -1,0 +1,155 @@
+name: upstream drift
+
+# Weekly: did the latest Claude Code or Codex release change something hopsesh relies on?
+# probe gathers the facts with no secrets; review reads them with a model (the only job
+# that sees the API key, behind the drift-review environment, main only); report keeps a
+# single issue labelled upstream-drift up to date.
+
+on:
+  schedule:
+    - cron: "41 6 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: drift
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    if: github.repository == 'roeehrl/hopsesh'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: probe
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ci/drift/probe.sh intel
+          cat intel/probe.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: drift-intel
+          path: intel
+          retention-days: 30
+
+  review:
+    needs: probe
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: drift-review
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: drift-intel
+          path: intel
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: install Claude Code (the version hopsesh is tested with)
+        # The exact version the module's fixtures were recorded with, read from the repository.
+        run: | # zizmor: ignore[adhoc-packages]
+          version=$(find agents/claude/testdata -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort -V | tail -n 1)
+          npm install -g --silent --prefix "$RUNNER_TEMP/claude" "@anthropic-ai/claude-code@$version"
+          echo "$RUNNER_TEMP/claude/bin" >> "$GITHUB_PATH"
+      - name: review
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+        run: |
+          claude --bare -p "$(cat ci/drift/prompt.md)" \
+            --model sonnet \
+            --output-format json --json-schema "$(cat ci/drift/schema.json)" \
+            --tools "Read,Grep,Glob" --permission-mode dontAsk \
+            --max-budget-usd 1.50 --no-session-persistence > review.json || true
+          jq '{subtype, is_error, total_cost_usd, num_turns}' review.json || cat review.json
+          jq -e '.structured_output | type == "object"' review.json > /dev/null \
+            || { echo "::error::the review returned no report"; exit 1; }
+          jq '.structured_output' review.json > report.json
+          printf '\nReview cost: $%s\n' "$(jq -r .total_cost_usd review.json)" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: drift-report
+          path: report.json
+          retention-days: 90
+
+  report:
+    needs: review
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: drift-report
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: drift-intel
+          path: intel
+      - name: update the upstream-drift issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          # The report is model output built from third-party text: neutralise @mentions.
+          jq -r --slurpfile v intel/versions.json --arg run "$RUN_URL" '
+            def safe: gsub("@"; "@​");
+            def name: if . == "claude" then "Claude Code" else "Codex" end;
+            "## Summary\n\n\(.summary | safe)\n\n"
+            + "| | tested | latest |\n|---|---|---|\n"
+            + "| Claude Code | \($v[0].claude.tested) | \($v[0].claude.latest) |\n"
+            + "| Codex | \($v[0].codex.tested) | \($v[0].codex.latest) |\n\n"
+            + (if (.findings | length) == 0 then "No findings.\n" else
+                (.findings | sort_by({break: 0, risk: 1, info: 2}[.severity]) | map(
+                  "### \(.severity | ascii_upcase): \(.title | safe) (\(.agent | name))\n\n\(.evidence | safe)\n\n"
+                  + "- Source: \(.source | safe)\n"
+                  + (if (.affected | length) > 0 then "- Affected: \(.affected | map("`\(.)`") | join(", ") | safe)\n" else "" end)
+                  + (if .test != "" then "- Test: \(.test | safe)\n" else "" end)
+                ) | join("\n")) end)
+            + "\n---\nWeekly upstream-drift check. Facts, sources and the full report: \($run)\n"
+          ' report.json > body.md
+          cat body.md >> "$GITHUB_STEP_SUMMARY"
+
+          title="Upstream drift: Claude Code $(jq -r .claude.latest intel/versions.json), Codex $(jq -r .codex.latest intel/versions.json)"
+          count=$(jq '[.findings[] | select(.severity != "info")] | length' report.json)
+          gh label create upstream-drift --color FBCA04 --description "A Claude Code or Codex release may affect hopsesh" --force
+          open=$(gh issue list --label upstream-drift --state open --json number --jq '.[0].number // empty')
+          if [ "$count" = 0 ]; then
+            if [ -n "$open" ]; then
+              gh issue comment "$open" --body-file body.md
+              gh issue close "$open" --reason completed --comment "Nothing that affects hopsesh in the latest releases."
+            fi
+          elif [ -n "$open" ]; then
+            gh issue edit "$open" --title "$title" --body-file body.md
+            gh issue comment "$open" --body "Updated with this week's check: $RUN_URL"
+          else
+            gh issue create --title "$title" --body-file body.md --label upstream-drift
+          fi

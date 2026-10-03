@@ -1,0 +1,49 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "breaking", "findings"],
+  "properties": {
+    "summary": {
+      "type": "string",
+      "description": "Two or three plain sentences: what changed upstream since the tested versions and whether hopsesh is affected."
+    },
+    "breaking": {
+      "type": "boolean",
+      "description": "True only if at least one finding has severity break."
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["agent", "severity", "title", "evidence", "source", "affected", "test"],
+        "properties": {
+          "agent": { "type": "string", "enum": ["claude", "codex"] },
+          "severity": {
+            "type": "string",
+            "enum": ["break", "risk", "info"],
+            "description": "break: hopsesh does the wrong thing with the latest version. risk: plausibly affected, needs a check. info: a new feature hopsesh could support."
+          },
+          "title": { "type": "string" },
+          "evidence": {
+            "type": "string",
+            "description": "What changed upstream and which hopsesh code relies on the old behaviour. Paraphrase; quote at most a short phrase."
+          },
+          "source": {
+            "type": "string",
+            "description": "Where the change is documented: a changelog version, release tag, docs page URL or schema file."
+          },
+          "affected": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Repository paths, with a line number where useful (agents/codex/reader.go:120)."
+          },
+          "test": {
+            "type": "string",
+            "description": "A test or fixture that would catch this, or an empty string."
+          }
+        }
+      }
+    }
+  }
+}
