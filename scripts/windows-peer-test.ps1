@@ -89,7 +89,11 @@ if (Test-Path $got) { Fail 'undo left the copy on box' }
 $here = [IO.File]::ReadAllText((Join-Path $sessionDir "$id.jsonl"), [Text.Encoding]::UTF8)
 if ($here.Contains('moved to ')) { Fail 'undo left the mark here' }
 
+# box's own settings: without this machine's scratch configuration.
+$saved = @{}
+foreach ($v in 'HOPSESH_CONFIG_DIR', 'HOPSESH_STATE_DIR', 'CLAUDE_CONFIG_DIR', 'HOPSESH_MACHINE') { $saved[$v] = [Environment]::GetEnvironmentVariable($v); [Environment]::SetEnvironmentVariable($v, $null) }
 & $boxBin receive off | Out-Null
+foreach ($v in $saved.Keys) { [Environment]::SetEnvironmentVariable($v, $saved[$v]) }
 $out = & $Bin push $id box --to $boxProj --yes --json 2>&1 | Out-String
 if ($LASTEXITCODE -eq 0) { Fail 'push to a machine that does not receive' }
 if (-not $out.Contains('does not receive sessions')) { Write-Host $out; Fail 'the refusal does not say why' }
