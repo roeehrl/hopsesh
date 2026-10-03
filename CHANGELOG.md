@@ -7,6 +7,9 @@ All notable changes to this project are documented here. The format follows
 ## Unreleased
 
 ### Fixed
+- A Codex session that went to another machine and came back no longer keeps its "moved"
+  mark in Codex's own list: the mark is the thread's name in Codex's shared index, which
+  outlived the copy it marked.
 - Unpushed commits and never-pushed worktree branches now come along from Windows machines
   too, through a git bundle (git over ssh does not work against Windows' OpenSSH, which
   runs commands through cmd.exe); before, hopsesh asked you to push them first.
