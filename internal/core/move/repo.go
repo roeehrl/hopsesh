@@ -58,6 +58,12 @@ func planRepo(ctx context.Context, p *Plan, in Input, opt Options) (string, erro
 		}
 		return abs, nil
 	}
+	if g == nil && in.GitErr != "" {
+		// Unknown is not "no repository": guessing would place the session without its code.
+		p.Repo.Action = RepoNone
+		p.Blockers = append(p.Blockers, fmt.Sprintf("hopsesh could not read the session's git checkout on %s (%s); try again, or choose a folder here with --to", in.Source.Machine.Name, in.GitErr))
+		return s.CWD, nil
+	}
 	if g == nil || !g.IsRepo || g.Identity == "" {
 		p.Repo.Action = RepoNone
 		if in.Source.Machine.Name != in.Target.Machine.Name {

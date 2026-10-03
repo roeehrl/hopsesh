@@ -38,6 +38,7 @@ type Input struct {
 	Session agent.Summary
 	Live    agent.LiveInfo
 	Git     *repos.GitState // the session's checkout on the source (nil when unknown)
+	GitErr  string          // why the checkout could not be read ("" when it was)
 	Lineage *lineage.Manifest
 	Target  Side
 	// Copies are the target agent's sessions with the same key at the target.

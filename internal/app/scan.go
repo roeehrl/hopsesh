@@ -77,6 +77,7 @@ type Entry struct {
 	Session   agent.Summary     `json:"session"`
 	Live      agent.LiveInfo    `json:"live"`
 	Git       *repos.GitState   `json:"git,omitempty"`
+	GitError  string            `json:"gitError,omitempty"` // the checkout could not be read
 	Lineage   *lineage.Manifest `json:"lineage,omitempty"`
 }
 
@@ -256,13 +257,19 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 				dirs = append(dirs, d)
 			}
 		}
-		if states, err := hm.GitProbe(ctx, dirs, a.Reg.Worktrees()); err == nil {
-			by := map[string]*repos.GitState{}
-			for i := range states {
-				by[states[i].Dir] = &states[i]
-			}
-			for i := range entries {
-				entries[i].Git = by[entries[i].Session.CWD]
+		states, err := hm.GitProbe(ctx, dirs, a.Reg.Worktrees())
+		if err != nil && len(dirs) > 0 { // once more: a dropped connection is not "no repository"
+			states, err = hm.GitProbe(ctx, dirs, a.Reg.Worktrees())
+		}
+		by := map[string]*repos.GitState{}
+		for i := range states {
+			by[states[i].Dir] = &states[i]
+		}
+		for i := range entries {
+			if d := entries[i].Session.CWD; d != "" {
+				if entries[i].Git = by[d]; err != nil {
+					entries[i].GitError = err.Error()
+				}
 			}
 		}
 	}
