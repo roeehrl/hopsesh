@@ -4,10 +4,12 @@
 # agents' folders kept apart by the matrix runner. Used by CI.
 #
 #   ./scripts/matrix-loopback.ps1 -Bin bin -Label windows→windows -Out out [-- hsmatrix flags]
+#   ./scripts/matrix-loopback.ps1 -Bin bin -SetupOnly   (this machine as "there" for another)
 param(
   [Parameter(Mandatory)][string]$Bin,
-  [Parameter(Mandatory)][string]$Label,
-  [Parameter(Mandatory)][string]$Out,
+  [string]$Label,
+  [string]$Out,
+  [switch]$SetupOnly,
   [Parameter(ValueFromRemainingArguments)][string[]]$Rest
 )
 $ErrorActionPreference = 'Stop'
@@ -40,6 +42,7 @@ Get-Content "$key.pub" | Add-Content -Path $auth
 icacls $auth /inheritance:r /grant 'Administrators:F' /grant 'SYSTEM:F' | Out-Null
 Add-Content -Path (Join-Path $sshDir 'config') -Value "Host hsm-box`n  HostName localhost`n  User $env:USERNAME" -Encoding ascii
 
+if ($SetupOnly) { exit 0 }
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
 & (Join-Path $Bin 'hsmatrix.exe') run -hopsesh (Join-Path $Bin 'hopsesh.exe') -there "$env:USERNAME@localhost" -alias hsm-box -label $Label -out $Out @Rest
 exit $LASTEXITCODE
