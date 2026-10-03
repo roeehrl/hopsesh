@@ -224,7 +224,7 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		cwd = realIntended(cwd)
 	}
 	p.Target.CWD = cwd
-	p.Placement = agent.Placement{Key: s.Key, SourceID: s.Key.Session, CWD: cwd, Location: tgt.Machine.Name, Mappings: mappings(p, src, tgt), OtherAccount: p.Options.OtherAccount}
+	p.Placement = agent.Placement{Key: s.Key, SourceID: s.Key.Session, CWD: cwd, Location: tgt.Machine.Name, Mappings: withShortNames(ctx, src, mappings(p, src, tgt)), OtherAccount: p.Options.OtherAccount}
 	if s.TitleSource == "custom" {
 		p.Placement.Name = s.Title
 	}
@@ -486,6 +486,29 @@ func mappings(p *Plan, src, tgt Side) []agent.Mapping {
 		}
 		for i := range ms {
 			ms[i].ToSep = sep
+		}
+	}
+	return ms
+}
+
+// withShortNames adds, for a Windows source, each mapped folder's 8.3 short form
+// ("C:\Users\DAVIDC~1") mapped to the same place: a session may name a folder either
+// way. Sessions are always placed under long names.
+func withShortNames(ctx context.Context, src Side, ms []agent.Mapping) []agent.Mapping {
+	froms := make([]string, len(ms))
+	for i, m := range ms {
+		froms[i] = m.From
+	}
+	return addShortNames(ms, src.Machine.ShortNames(ctx, froms))
+}
+
+// addShortNames maps each folder's short form (shorts, by long form) where the long form
+// goes.
+func addShortNames(ms []agent.Mapping, shorts map[string]string) []agent.Mapping {
+	n := len(ms)
+	for i := 0; i < n; i++ {
+		if s, ok := shorts[ms[i].From]; ok {
+			ms = append(ms, agent.Mapping{From: s, To: ms[i].To, ToSep: ms[i].ToSep})
 		}
 	}
 	return ms

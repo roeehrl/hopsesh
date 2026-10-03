@@ -29,10 +29,14 @@ echo "hopsesh is not installed" >&2
 exit 127`
 
 // peerFindWindows prints where hopsesh.exe is on a Windows machine (its PATH, else where
-// install.ps1 puts it) and the shell its OpenSSH server runs commands with.
-const peerFindWindows = `$c = Get-Command hopsesh.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+// install.ps1 puts it) and the shell its OpenSSH server runs commands with. A path with
+// letters outside ASCII (a user name in Hebrew or Chinese) is given in its 8.3 short form
+// when it has one, so no shell or code page can garble it.
+const peerFindWindows = `[Console]::OutputEncoding = [Text.Encoding]::UTF8
+$c = Get-Command hopsesh.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
 $p = if ($c) { $c.Source } else { Join-Path $env:LOCALAPPDATA 'Programs\hopsesh\hopsesh.exe' }
 if (-not (Test-Path -LiteralPath $p)) { [Console]::Error.WriteLine('hopsesh is not installed'); exit 127 }
+if ($p -match '[^\x00-\x7F]') { $s = (New-Object -ComObject Scripting.FileSystemObject).GetFile($p).ShortPath; if ($s) { $p = $s } }
 $sh = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\OpenSSH' -Name DefaultShell -ErrorAction SilentlyContinue).DefaultShell
 Write-Output $p
 Write-Output $sh`

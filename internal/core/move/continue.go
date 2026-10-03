@@ -81,7 +81,7 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	}
 	p.Target.CWD = cwd
 	p.Placement = agent.Placement{Key: agent.SessionKey{Agent: spec.ID, Session: agent.SessionID(newID())}, SourceID: s.Key.Session,
-		CWD: cwd, Location: tgt.Machine.Name, Mappings: continueMappings(p, src, tgt)}
+		CWD: cwd, Location: tgt.Machine.Name, Mappings: withShortNames(ctx, src, continueMappings(p, src, tgt))}
 
 	srcHost, err := src.Machine.For(ctx, src.Module.Spec(), src.Install, nil)
 	if err != nil {

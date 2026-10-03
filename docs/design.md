@@ -112,7 +112,7 @@ Optional interfaces add capabilities, computed from what a module implements (`a
 
 1. **Plan:** the repository (match by remote among local checkouts, clone into the repos folder, or a folder you choose; worktree `auto|create|main`), the target agent installed here, the live state, the account (another account sanitizes, per the module), copies already here (§10), the code (§12), and the mark.
 2. **Copy:** every bundle file over SFTP into a staging folder; a file still growing is copied until its size settles.
-3. **Rewrite:** the module's policy over JSONL files: a one-pass prefix map (repository, worktree, home, data roots; separators converted across Windows and POSIX), protected keys untouched (signatures, encrypted content), records dropped or appended as the module says. The secret scan runs here, with optional redaction.
+3. **Rewrite:** the module's policy over JSONL files: a one-pass prefix map (repository, worktree, home, data roots; separators converted across Windows and POSIX; from a Windows machine, each folder's 8.3 short form too, while sessions are always placed under long names), protected keys untouched (signatures, encrypted content), records dropped or appended as the module says. The secret scan runs here, with optional redaction.
 4. **Verify:** the module checks the staged result.
 5. **Install:** copies here that make way are set aside (restorable by `undo`), files placed with a fresh modification time (agents clean up old sessions by date), lineage written beside both copies, the module's post-install step, the copy left behind marked.
 6. **Launch:** the module's resume command, with a first prompt telling the agent it was moved and asking it to check the repository, files, tools and environment.

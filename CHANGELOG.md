@@ -32,6 +32,10 @@ aside (the app offers this), and machines are added again.
   (from Codex itself; `auth.json` is never read). Moving a Codex session to another
   account drops the encrypted reasoning and compaction that only the old one can use.
 - Sending to and from Windows machines with `push`.
+- Windows: paths a session names by their 8.3 short form (`C:\Users\DAVIDC~1\…`) move
+  with their folder; hopsesh starts on a machine whose user name is in Hebrew or Chinese
+  through its short path; machines with Git for Windows on their PATH are recognised as
+  Windows.
 - The app can send a session on this machine to another one ("Send to…").
 - `hopsesh agents` lists the supported agents and what each can do; `ls --agent` filters.
 - The skill is written to every installed agent (Claude Code and Codex) as identical
