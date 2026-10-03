@@ -59,7 +59,11 @@ ss -ltn | grep -q ':22 ' || /usr/sbin/sshd
 if ($code -ne 0) { Fail "WSL setup exited with $code" }
 
 $ip = ((wsl -d $distro -- hostname -I) -split '\s+' | Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' } | Select-Object -First 1)
-$gw = (wsl -d $distro -- sh -c "ip route show default | awk '{print `$3}'").Trim()
+# The Windows host as the guest sees it: the default route's gateway (parsed here; quoting
+# an awk program through PowerShell and WSL's shell loses its $3).
+$route = (wsl -d $distro -- ip -4 route show default) -join ' '
+$gw = ($route -split '\s+' | Select-Object -Skip 1 -First 2 | Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' } | Select-Object -First 1)
+if (-not $gw) { Fail "no default gateway in the guest: $route" }
 Write-Host "Linux guest $ip, Windows host as seen from it $gw"
 Add-Content -Path (Join-Path $HOME '.ssh\config') -Value "Host hsm-wsl`n  HostName $ip`n  User hsremote" -Encoding ascii
 # The guest user's key may log in here (this account is an administrator).
