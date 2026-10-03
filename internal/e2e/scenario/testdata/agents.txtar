@@ -1,0 +1,8 @@
+# hopsesh finds both agents through the programs on the PATH and their data folders.
+exec hopsesh agents --json
+stdout '"id": "claude"'
+stdout '"version": "2.1.284"'
+stdout '"id": "codex"'
+stdout '"version": "0.153.2"'
+grep '^claude --version' $WORK/agents.log
+grep '^codex --version' $WORK/agents.log

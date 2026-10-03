@@ -68,6 +68,14 @@ func planRepo(ctx context.Context, p *Plan, in Input, opt Options) (string, erro
 		return s.CWD, nil
 	}
 	fillSource(&p.Repo, g)
+	if in.Source.Machine.Name == in.Target.Machine.Name {
+		// The same machine (another agent here): the session's own checkout, as it is.
+		// Nothing travels, so nothing is left behind or brought along.
+		r := &p.Repo
+		r.Action, r.LocalPath, r.LocalBranch = RepoUse, g.Toplevel, g.Branch
+		r.Unpushed, r.Dirty, r.SourceHead, r.InWorktree = 0, 0, "", false
+		return s.CWD, nil
+	}
 	roots := append([]string{opt.ReposDir}, opt.ExtraRoots...)
 	roots = append(roots, repos.DefaultRoots(in.Target.Machine.Facts.Home)...)
 	found := repos.FindLocal(g.Identity, roots)
