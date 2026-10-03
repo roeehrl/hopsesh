@@ -26,13 +26,14 @@ function InWsl([string]$script, [string]$user = 'root') {
 # This machine as "there" for Linux → Windows.
 & (Join-Path $PSScriptRoot 'matrix-loopback.ps1') -Bin $Bin -SetupOnly
 if ($LASTEXITCODE -ne 0) { Fail 'Windows setup failed' }
-# The guest reaches this machine's sshd through the WSL network: allow it in.
-New-NetFirewallRule -DisplayName 'hsmatrix-wsl-ssh' -Direction Inbound -InterfaceAlias 'vEthernet (WSL*)' -Action Allow -Protocol TCP -LocalPort 22 | Out-Null
 
 Write-Host "Installing $distro in WSL2"
 wsl --install -d $distro --no-launch --web-download
 if ($LASTEXITCODE -ne 0) { Fail "wsl --install exited with $LASTEXITCODE" }
 Start-Process -WindowStyle Hidden -FilePath wsl.exe -ArgumentList '-d', $distro, '-u', 'root', '--', 'sleep', 'infinity'
+# The guest reaches this machine's sshd through the WSL network: allow it in. (The WSL
+# adapter's name varies by WSL version, so the rule is by port; logins are by key only.)
+New-NetFirewallRule -DisplayName 'hsmatrix-wsl-ssh' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 22 | Out-Null
 
 $LinuxBin = (Resolve-Path $LinuxBin).Path
 $winPub = Get-Content (Join-Path $HOME '.ssh\id_ed25519.pub')
