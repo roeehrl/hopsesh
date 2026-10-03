@@ -6,20 +6,32 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
+
+	"golang.org/x/sys/windows"
 
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
-// On Windows os.FindProcess opens the process and fails when it does not exist.
+// processExists reports whether a process with exactly this id is running. Windows ignores
+// the low two bits of an id when opening a process (4242 opens 4240), and a handle can
+// outlive its process, so both are checked.
 func processExists(pid int) bool {
-	p, err := os.FindProcess(pid)
+	if pid <= 0 {
+		return false
+	}
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
 	if err != nil {
 		return false
 	}
-	_ = p.Release()
-	return true
+	defer windows.CloseHandle(h)
+	if id, err := windows.GetProcessId(h); err != nil || int(id) != pid {
+		return false
+	}
+	var code uint32
+	return windows.GetExitCodeProcess(h, &code) == nil && code == stillActive
 }
+
+const stillActive = 259 // STILL_ACTIVE: the process has not exited
 
 // terminate is not offered on Windows: there is no graceful signal for a console
 // program, and killing it could cut off its last write.

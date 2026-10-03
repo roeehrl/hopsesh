@@ -43,12 +43,15 @@ $id = '3a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d'
 $projJson = $proj.Replace('\', '\\')
 $sessionDir = Join-Path $env:CLAUDE_CONFIG_DIR ("projects\" + (Slug $proj))
 New-Item -ItemType Directory -Force -Path $sessionDir | Out-Null
+# Each line in parentheses: in PowerShell a comma binds tighter than +.
 $lines = @(
-  '{"type":"user","uuid":"u1","parentUuid":null,"sessionId":"' + $id + '","cwd":"' + $projJson + '","version":"2.1.284","timestamp":"2026-10-01T10:00:00Z","message":{"role":"user","content":"תקן את הבאג ב-' + $projJson + '\\main.go 修复错误"}}',
-  '{"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"' + $id + '","cwd":"' + $projJson + '","timestamp":"2026-10-01T10:00:05Z","message":{"role":"assistant","content":[{"type":"text","text":"תוקן. 已修复。"}]}}',
-  '{"type":"custom-title","customTitle":"בדיקת Windows 测试","sessionId":"' + $id + '"}'
+  ('{"type":"user","uuid":"u1","parentUuid":null,"sessionId":"' + $id + '","cwd":"' + $projJson + '","version":"2.1.284","timestamp":"2026-10-01T10:00:00Z","message":{"role":"user","content":"תקן את הבאג ב-' + $projJson + '\\main.go 修复错误"}}'),
+  ('{"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"' + $id + '","cwd":"' + $projJson + '","timestamp":"2026-10-01T10:00:05Z","message":{"role":"assistant","content":[{"type":"text","text":"תוקן. 已修复。"}]}}'),
+  ('{"type":"custom-title","customTitle":"בדיקת Windows 测试","sessionId":"' + $id + '"}')
 )
 [IO.File]::WriteAllText((Join-Path $sessionDir "$id.jsonl"), ($lines -join "`n") + "`n", (New-Object Text.UTF8Encoding $false))
+foreach ($l in $lines) { try { $null = $l | ConvertFrom-Json } catch { Fail "the test session has a line that is not JSON: $l" } }
+if ($lines.Count -ne 3) { Fail "the test session has $($lines.Count) lines, not 3" }
 
 & $Bin hosts add box "$env:USERNAME@127.0.0.1" | Out-Null
 if ($LASTEXITCODE -ne 0) { Fail 'hosts add' }
