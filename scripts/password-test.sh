@@ -58,6 +58,11 @@ AllowUsers $PW_USER
 LogLevel VERBOSE
 Subsystem sftp internal-sftp
 CONF
+# OpenSSH 9.8+ penalises a source after a failed login (the wrong password below would
+# block the right one that follows); turn that off where the option exists.
+if sudo /usr/sbin/sshd -t -f "$WORK/sshd_config" -o PerSourcePenalties=no 2>/dev/null; then
+  echo "PerSourcePenalties no" >> "$WORK/sshd_config"
+fi
 sudo /usr/sbin/sshd -t -f "$WORK/sshd_config"
 sudo /usr/sbin/sshd -f "$WORK/sshd_config" -E "$WORK/sshd.log"
 th_wait_port "$PORT"
