@@ -91,7 +91,11 @@ jobs:
           go-version-file: go.mod
       - name: GUI build dependencies and a virtual display (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev xvfb dbus jq
+        run: |
+          sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev xvfb dbus jq
+          # WebKitGTK sandboxes web content with bubblewrap, which needs unprivileged user
+          # namespaces; Ubuntu 24.04's AppArmor restricts them on this runner.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: the real window lists the demo sessions and calls its backend
         run: scripts/app-selfcheck.sh
 
