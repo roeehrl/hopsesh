@@ -329,6 +329,8 @@ func classify(err error, h config.Host) (status, msg, hint string) {
 		return StatusTSCheck, err.Error(), "open the URL, approve, then refresh"
 	case errors.Is(err, transport.ErrUnreachable):
 		return StatusUnreachable, err.Error(), "is it awake and on the network? (Remote Login / SSH server must be on)"
+	case strings.Contains(err.Error(), "kex_exchange_identification"):
+		return StatusError, err.Error(), "the machine closed the connection before login; OpenSSH 9.8 and later refuses new connections for a while after failed logins, so wait a minute and try again (otherwise its SSH server may be limiting connections)"
 	}
 	return StatusError, err.Error(), ""
 }
