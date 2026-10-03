@@ -1,5 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
 import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -20,7 +21,7 @@ export default async function setup() {
   const home = process.env.HOPSESH_DEMO_HOME || join(tmpdir(), `hopsesh-real-${process.pid}`);
   const env = JSON.parse(execFileSync("go", ["run", "./internal/devtools/webtest", "-home", home, "-prepare", "-world", laptop ? "empty" : "test"],
     { cwd: root, encoding: "utf8" }));
-  if (laptop) Object.assign(env, laptopWorld(home, env));
+  if (laptop) Object.assign(env, laptopWorld(home, env, dirname(exe)));
   const app = spawn(exe, [], { env: { ...process.env, ...env, HOPSESH_E2E_CDP_PORT: port }, stdio: "inherit" });
   app.on("exit", (code) => { if (code) console.error(`hopsesh-app exited with ${code}`); });
   for (let i = 0; i < 120; i++) {
@@ -35,7 +36,7 @@ export default async function setup() {
 
 // laptopWorld seeds demoseed's laptop (with Codex threads) into home and returns the
 // environment changes: the machine is "laptop", and a stand-in codex is on PATH.
-function laptopWorld(home: string, env: Record<string, string>): Record<string, string> {
+function laptopWorld(home: string, env: Record<string, string>, appDir: string): Record<string, string> {
   const exe = process.platform === "win32" ? ".exe" : "";
   const tools = join(tmpdir(), `hopsesh-tools-${process.pid}`);
   const bin = join(home, "bin");
@@ -66,6 +67,13 @@ function laptopWorld(home: string, env: Record<string, string>): Record<string, 
     'os = "linux"',
     "",
   ].join("\n"));
+  // studio: scripts/windows-demo-studio.ps1 made it (WSL2 Ubuntu over SSH) and wrote its
+  // ssh config entry; the demo home gets the entry too, and hopsesh trusts its host key.
+  if (process.env.DEMO_SSH_CONFIG) {
+    mkdirSync(join(home, ".ssh"), { recursive: true });
+    copyFileSync(process.env.DEMO_SSH_CONFIG, join(home, ".ssh", "config"));
+    execFileSync(join(appDir, "hopsesh" + exe), ["trust", "studio", "--yes"], { env: { ...process.env, ...env, ...out }, stdio: "inherit" });
+  }
   // An update on offer (the app reads the last check for a day): Settings shows Install
   // and restart. Nothing is installed; the screenshots never click it.
   mkdirSync(env.HOPSESH_STATE_DIR, { recursive: true });
