@@ -103,6 +103,8 @@ jobs:
         with:
           name: mesh-logs-${{ matrix.node }}
           path: |
-            ${{ runner.temp }}/mesh/
+            ${{ runner.temp }}/mesh/*/*.log
+            ${{ runner.temp }}/mesh/*/*.json
+            ${{ runner.temp }}/mesh/*/summary.md
             rdv/*.log
           retention-days: 7
