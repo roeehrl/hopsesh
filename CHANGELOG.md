@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## [0.3.1] - 2026-10-04
+
+Sessions from Windows machines now come over with their repository, the installers are
+friendlier, and a move stops instead of guessing when the other machine's checkout cannot
+be read.
+
+### Changed
+- The macOS disk image opens on a window: drag hopsesh to Applications.
+- The Windows installer has a welcome page that says what it will do, a progress page, and
+  a finish page that opens hopsesh and links to the getting-started guide. The licence page
+  is gone; the LICENSE file is still installed.
+
 ### Fixed
 - A Windows machine with more than a few dozen sessions lost its git details: the
   script that reads them, passed on the command line, outgrew cmd.exe's 8191-character
