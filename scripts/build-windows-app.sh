@@ -30,7 +30,7 @@ for arch in amd64 arm64; do
   cp LICENSE "$stage/LICENSE"
   (cd "$stage" && zip -q -X "../../hopsesh-$VERSION-windows-$arch-app.zip" hopsesh-app.exe hopsesh.exe LICENSE)
   makensis -V2 -DVERSION="$VERSION" -DNUMVERSION="$NUMVERSION" -DARCH="$arch" -DSRC="$(cd "$stage" && pwd)" \
-    -DICON="$(cd "$OUT/tmp" && pwd)/hopsesh.ico" -DOUT="$(cd "$OUT" && pwd)/hopsesh-$VERSION-windows-$arch-setup.exe" packaging/windows/hopsesh.nsi
+    -DICON="$(cd "$OUT/tmp" && pwd)/hopsesh.ico" -DART="$(pwd)/packaging/windows/art" -DOUT="$(cd "$OUT" && pwd)/hopsesh-$VERSION-windows-$arch-setup.exe" packaging/windows/hopsesh.nsi
 done
 rm -rf "$OUT/tmp"
 ls -l "$OUT"
