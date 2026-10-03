@@ -8,6 +8,8 @@ import { mkdirSync, renameSync, readdirSync, writeFileSync } from "node:fs";
 const url = process.env.APP_URL || "http://laptop:34115/";
 const mode = process.env.MODE || "stills";
 const scheme = process.env.SCHEME || "light";
+const tag = process.env.TAG || mode; // output name; e.g. TAG=story-vo for the narrated cut's picture
+const captions = process.env.CAPTIONS !== "off"; // off: the narrated cut adds its own, timed to the voice
 const out = process.env.OUT || "/demo/out/media";
 mkdirSync(out, { recursive: true });
 
@@ -75,6 +77,7 @@ async function keys(caps, action, hold = 900) {
 }
 // Story helpers: captions, eased zooms on the window (window coordinates), and full cards.
 async function caption(t) {
+  if (!captions) return;
   await page.evaluate((t) => { const c = document.getElementById("cap"); if (t) { c.textContent = t; c.classList.add("on"); } else c.classList.remove("on"); }, t);
 }
 async function zoom(x, y, s) {
@@ -109,7 +112,7 @@ let tStart = 0;
 const mark = (name) => { marks[name] = +((Date.now() - tStart) / 1000).toFixed(2); };
 if (mode === "story") {
   tStart = Date.now() - 300;
-  writeFileSync(`${out}/story-${scheme}.start`, String(Math.max(0, (tStart - t0) / 1000)));
+  writeFileSync(`${out}/${tag}-${scheme}.start`, String(Math.max(0, (tStart - t0) / 1000)));
   await page.evaluate(() => { document.getElementById("card").style.transition = ""; });
 }
 
@@ -218,7 +221,7 @@ if (mode === "stills") {
   mark("end");
   await card(`<div class="nm">${logo}hopsesh</div><div class="sm">Claude Code and Codex · CLI, TUI and macOS app</div><div class="tg">codonic.dev/apps/hopsesh/get-started</div><div class="fine">Unofficial; not affiliated with Anthropic or OpenAI.</div>`);
   await wait(5200);
-  writeFileSync(`${out}/story-${scheme}.marks.json`, JSON.stringify(marks, null, 1));
+  writeFileSync(`${out}/${tag}-${scheme}.marks.json`, JSON.stringify(marks, null, 1));
 } else if (mode === "undo") {
   await text("Fix flaky checkout tests").click();
   await app.getByRole("button", { name: /Continue in Codex/ }).first().click();
@@ -234,6 +237,6 @@ await ctx.close();
 await browser.close();
 if (mode !== "stills") {
   const raw = readdirSync(out + "/raw").filter((f) => f.endsWith(".webm"));
-  if (raw.length) renameSync(`${out}/raw/${raw[0]}`, `${out}/${mode}-${scheme}.webm`);
-  console.log("saved", `${mode}-${scheme}.webm`);
+  if (raw.length) renameSync(`${out}/raw/${raw[0]}`, `${out}/${tag}-${scheme}.webm`);
+  console.log("saved", `${tag}-${scheme}.webm`);
 }

@@ -38,7 +38,7 @@ start_app() { # the laptop serving the app's UI, reachable as http://laptop:3411
 }
 playwright() { # run a capture script from demo/capture against the app
   docker run --rm --network "$NET" -v "$PWD/demo:/demo" -w /demo/capture --ipc=host \
-    -e SCHEME="${SCHEME:-light}" -e MODE="${MODE:-}" -e LOGO_B64="$(base64 < docs/assets/logo.svg | tr -d '\n')" "$PLAYWRIGHT" \
+    -e SCHEME="${SCHEME:-light}" -e MODE="${MODE:-}" -e TAG="${TAG:-}" -e CAPTIONS="${CAPTIONS:-}" -e LOGO_B64="$(base64 < docs/assets/logo.svg | tr -d '\n')" "$PLAYWRIGHT" \
     sh -c "npm i --silent --no-save --no-audit --no-fund playwright@1.63.0 >/dev/null 2>&1 && node $1"
 }
 fresh() { # a fresh pair of demo machines with the app served (a capture changes their state)

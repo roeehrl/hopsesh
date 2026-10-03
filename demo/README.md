@@ -34,6 +34,12 @@ The containers and their network are removed when the script exits.
   window. `demo/record.sh media` records it in light and dark (`SCHEMES`) and in each mode
   (`MODES`, default `stills hero undo`; `story` is the launch video), then `encode.sh` makes the
   MP4s and GIFs. Everything lands in `demo/out/media/`.
+- The narrated cut of the launch video: record the picture without captions
+  (`TAG=story-vo CAPTIONS=off MODES=story demo/record.sh media`), generate the script in
+  `voiceover.txt` as one voice take with a pause between lines, then
+  `demo/narrate.sh take.mp3 [music.mp3]`. It places each line on its beat, renders captions
+  of the spoken words in the same style (`capture/captions.mjs`) and mixes the music under
+  the voice → `demo/out/media/story-narrated-<scheme>.mp4`.
 - `social-card.html` is the social preview and Open Graph card; `demo/cards.sh` renders it into
   `demo/out/cards/` from the plan stills.
 - `docs/assets/` holds the copies the README uses: `hero-*.gif`, and `app-*`, `plan-*` and
