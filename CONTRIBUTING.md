@@ -35,14 +35,76 @@ make app      # macOS only: builds dist/macos/hopsesh.app (unsigned unless SIGN_
   so you can test listing and moving sessions without a second computer. If you change what
   the TUI or app shows, re-record the demo with `demo/record.sh`.
 - Keep dependencies few and permissively licensed (MIT, BSD, Apache-2.0).
-- Anything that depends on Claude Code's file formats goes in `internal/core/sessions` or
-  `internal/core/rewrite`, with tests. Those formats are not a public API and change
-  between Claude Code versions.
+- Anything that depends on an agent's file formats goes in that agent's module under
+  `agents/<id>/` (see [Add an agent module](#add-an-agent-module)), with tests and fixtures.
+  Those formats are not public APIs and change between agent versions.
 - Test fixtures use made-up names, paths and addresses (alice, bob, `100.64.0.x`), never
   real ones from your machines.
-- Never add code that copies credentials, calls the Anthropic API directly, or writes into a
-  running session's socket. See the principles in [docs/design.md](docs/design.md).
+- Never add code that copies credentials, calls an agent vendor's API (Anthropic, OpenAI, …)
+  directly, or writes into a running session's socket. See the principles in [docs/design.md](docs/design.md).
 - Remote operations must be read-only unless they are part of a confirmed plan.
+
+## Add an agent module
+
+Each coding agent hopsesh supports (Claude Code and Codex today) is a module: a Go package under
+`agents/<id>/` behind a small SDK. Adding one, such as OpenCode
+([#10](https://github.com/roeehrl/hopsesh/issues/10)), doesn't touch the core. Please open an
+issue or discussion first so we can agree on the approach.
+
+**Start from a template:**
+- `agents/claude`: full-featured and stable.
+- `agents/codex`: experimental; talks to the agent through its `app-server` (JSON-RPC) and
+  uses its own importer.
+
+**The rules:**
+- A module imports only `sdk/agent` (and `sdk/ir` if it converts conversations).
+  `internal/archtest` enforces this.
+- Register it with one line in `Modules()` in `internal/agents/all/all.go`.
+- A module reaches machines only through `agent.Host` (facts, files, exec, paths, locks,
+  processes). It writes only under its own data folders, and every write is journaled so undo
+  can reverse it. It runs only its own binaries, and never opens the files it lists as secrets.
+
+**Required: `agent.Module`**
+
+| Method | What it does |
+|---|---|
+| `Spec` | id, name, vendor, stability (`experimental` until proven), tested version prefixes, binaries (with search paths and version arguments), data folders (env var plus default), login variables, secrets (never opened; globs allowed), instruction files |
+| `Detect` | turns a machine's facts into an install (most modules start from `DefaultInstall`) |
+| `List` | the sessions on a machine; one unreadable session is reported, not fatal |
+| `Bundle` | the files that make up one session |
+| `PlanMove` | where each file goes on the target and how it's rewritten (pure) |
+| `Verify` | checks the staged result before install |
+| `Resume` | the command that continues the session |
+
+**Optional capabilities.** Each one switches on matching features in the CLI and app:
+
+| Capability | Enables |
+|---|---|
+| `LiveDetector` | open / working / idle state |
+| `Stopper` | `--stop-local` (quit an open session) |
+| `Marker` | the "↪ moved to …" mark in the agent's own list |
+| `AccountProber`, `Sanitizer` | detecting the account, and moves across accounts |
+| `PostInstaller` | registering an installed session with the agent |
+| `Reader` | being the source of "continue in" |
+| `Writer` | being the target of "continue in" (a profile with context window and native replay) |
+| `Importer` | "use the agent's own importer" (`--via import`) |
+| `Integrator` | where the skill and approval rules go |
+| `Notifier` | telling the old session where the work went |
+
+**Required tests**
+- The conformance kit: `agenttest.Run(t, module, newHost)` from `sdk/agent/agenttest`. It
+  covers listing, bundle, move plan, verify, resume and a round trip; writers get the writer
+  checks too.
+- Fixtures copied from a real install into `agents/<id>/testdata/<version>/`, with all personal
+  data replaced (alice, `/home/alice/…`), and no credentials or account files.
+- Unit tests for the module, and a complete `Spec` (the registry tests check it).
+- An end-to-end scenario in `internal/e2e` for moves, plus a continuation in both directions if
+  the module is a `Reader` and `Writer`.
+- Optional: tests against the real installed agent, behind `HOPSESH_REAL_AGENTS=1` (never run
+  by default).
+
+**Then document it:** add the agent to the README, add an entry to `CHANGELOG.md`, and a line to
+`docs/design.md`.
 
 ## Pull requests
 
