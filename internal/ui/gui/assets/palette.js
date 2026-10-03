@@ -1,5 +1,5 @@
 // The ⌘K palette: find a session and act on it, or run any command, from the keyboard.
-import { api, h, fill, icon, ICONS, state, go, current, toast, fail, agentClass, short, entries, here, $ } from "./core.js";
+import { api, h, fill, icon, ICONS, state, go, current, toast, fail, agentBadge, entries, here, $ } from "./core.js";
 import { actionsFor, statusOf, render as renderSessions } from "./sessions.js";
 import { undoLast } from "./activity.js";
 
@@ -70,7 +70,7 @@ function paint() {
     if (it.group !== group) { group = it.group; kids.push(h("div", { class: "pal-grp", role: "presentation" }, group)); }
     kids.push(h("button", { class: "pal-item", role: "option", id: "pal-" + i, "aria-selected": i === sel ? "true" : "false", tabindex: "-1",
         onmousemove: () => { if (sel !== i) { sel = i; paint(); } }, onclick: () => runAt(i, false) },
-      it.session ? h("span", { class: agentClass(it.session.agent) }, short(it.session.agentName)) : icon(it.group === "Commands" ? ICONS.arrow : ICONS.chevron, 13),
+      it.session ? agentBadge(it.session.agent, it.session.agentName) : icon(it.group === "Commands" ? ICONS.arrow : ICONS.chevron, 13),
       h("span", { style: "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" }, it.label, it.sub ? h("span", { class: "muted" }, " · " + it.sub) : null),
       it.hint ? h("span", { class: "muted", style: "font-size:12px" }, it.hint) : null,
       i === sel && (it.run || it.second) ? h("span", { class: "kbd" }, "↩") : null));

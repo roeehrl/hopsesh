@@ -5,6 +5,7 @@ package claude
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -41,6 +42,12 @@ var (
 	_ agent.Integrator    = (*Module)(nil)
 )
 
+// iconSVG is the module's own mark for the window (drawn for hopsesh, not the vendor's
+// logo); the installed desktop app's icon is preferred.
+//
+//go:embed icon.svg
+var iconSVG string
+
 // Spec declares Claude Code.
 func (*Module) Spec() agent.Spec {
 	return agent.Spec{
@@ -65,6 +72,10 @@ func (*Module) Spec() agent.Spec {
 		GlobalInstructions: []string{"{home}/CLAUDE.md"},
 		Tools:              "Bash, Read, Edit, Write, Grep, Glob, TodoWrite",
 		Features:           []agent.Capability{agent.CapFork, agent.CapRemoteControl, agent.CapApp},
+		Icon: agent.Icon{SVG: iconSVG, Apps: map[string][]string{
+			"darwin":  {"/Applications/Claude.app", "~/Applications/Claude.app"},
+			"windows": {"~/AppData/Local/AnthropicClaude/claude.exe"},
+		}},
 	}
 }
 

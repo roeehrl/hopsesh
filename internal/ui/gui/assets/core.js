@@ -92,10 +92,18 @@ export function bytes(n) {
   if (n >= 1 << 10) return Math.round(n / 1024) + " KB";
   return n + " B";
 }
-// agentClass colours an agent's chip; agents without a colour get a plain chip.
-export const agentClass = (id) => "chip agent-" + id;
-// short is an agent's two-letter badge: its initials, or the start of a one-word name.
-export const short = (name) => { const w = (name || "").split(/\s+/).filter(Boolean); return (w.length > 1 ? w.map((x) => x[0]).join("") : w.join("")).slice(0, 2).toUpperCase(); };
+// agentBadge pictures an agent: its icon (the installed app's, else the module's mark), or
+// its initials on the agent's colour. agentChip adds the name.
+const agentClass = (id) => "chip agent-" + id;
+const short = (name) => { const w = (name || "").split(/\s+/).filter(Boolean); return (w.length > 1 ? w.map((x) => x[0]).join("") : w.join("")).slice(0, 2).toUpperCase(); };
+export function agentBadge(id, name) {
+  const src = agentInfo(id)?.icon;
+  return src ? h("img", { class: "agent-ico", src, alt: name, title: name }) : h("span", { class: agentClass(id), title: name }, short(name));
+}
+export function agentChip(id, name) {
+  const src = agentInfo(id)?.icon;
+  return h("span", { class: agentClass(id) }, src ? h("img", { class: "agent-ico small", src, alt: "" }) : null, name);
+}
 
 // machineStatus is a scan status as [dot kind, words].
 const STATUS = {

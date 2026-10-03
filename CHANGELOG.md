@@ -41,6 +41,9 @@ aside (the app offers this), and machines are added again.
   a summary and one-click fixes, a result page with the loss report, an Activity page
   with undo, a Machines page (receiving, login, host keys, discovery), tabbed settings,
   a ⌘K palette and keyboard control.
+- Agents are pictured by their installed desktop app's icon (read on this machine; turn it
+  off in Settings), else a mark the module draws, else their initials. Modules declare both
+  in `Spec.Icon`.
 - `[agents.<id>] import = true` sends continuations into that agent through its own
   importer by default.
 - `HOPSESH_MACHINE` sets the name this machine has in marks and lineage.

@@ -8,6 +8,7 @@ package codex
 import (
 	"bufio"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,6 +39,12 @@ var (
 	_ agent.Integrator   = (*Module)(nil)
 )
 
+// iconSVG is the module's own mark for the window (drawn for hopsesh, not the vendor's
+// logo); the installed desktop app's icon is preferred.
+//
+//go:embed icon.svg
+var iconSVG string
+
 // Spec declares Codex.
 func (*Module) Spec() agent.Spec {
 	return agent.Spec{
@@ -61,6 +68,9 @@ func (*Module) Spec() agent.Spec {
 		GlobalInstructions: []string{"{home}/AGENTS.override.md", "{home}/AGENTS.md"},
 		Tools:              "shell, apply_patch, update_plan",
 		Features:           []agent.Capability{agent.CapFork},
+		Icon: agent.Icon{SVG: iconSVG, Apps: map[string][]string{
+			"darwin": {"/Applications/Codex.app", "~/Applications/Codex.app"},
+		}},
 	}
 }
 

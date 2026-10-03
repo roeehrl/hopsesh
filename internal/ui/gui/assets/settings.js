@@ -1,5 +1,5 @@
 // The Settings screen, in tabs: General, Agents, Skill, Command line, Updates.
-import { api, h, fill, view, state, screen, go, loading, toast, fail, dialog } from "./core.js";
+import { api, h, fill, view, state, screen, go, loading, toast, fail, dialog, agentBadge } from "./core.js";
 
 const SKILL_TEXT = {
   absent: ["Not installed", "st-ended"],
@@ -39,7 +39,7 @@ async function run(fn, done) {
 }
 
 function save(patch) {
-  return run(() => api("SaveSettings", Object.assign({ layout: s.layout, markMoved: s.markMoved, syncCode: s.syncCode, pushSource: s.pushSource, updateCheck: s.updateCheck || "off" }, patch)), "Saved");
+  return run(() => api("SaveSettings", Object.assign({ layout: s.layout, markMoved: s.markMoved, syncCode: s.syncCode, pushSource: s.pushSource, updateCheck: s.updateCheck || "off", appIcons: s.appIcons }, patch)), "Saved");
 }
 
 function toggle(key, label, desc) {
@@ -58,6 +58,8 @@ function general() {
       toggle("markMoved", "Mark the copy left behind", "Its title says where the work went (“↪ moved to …”), so it isn't resumed by mistake."),
       toggle("syncCode", "Bring the code along", "Fetch the session's commit (from the other machine if it isn't pushed) and fast-forward a clean checkout."),
       toggle("pushSource", "Push unpushed commits on the other machine first", "Off: commits are fetched straight from the other machine.")),
+    card(h("span", { class: "sec-h" }, "Appearance"),
+      toggle("appIcons", "Show each agent's own app icon", "When the agent's desktop app is installed here, its icon pictures the agent; otherwise hopsesh's own mark does.")),
     card(h("span", { class: "sec-h" }, "This Mac"),
       h("div", { class: "set-row" }, title("Receiving sessions", state.info.receive ? "On: your other machines can send sessions here." : "Off: this Mac refuses sessions sent from other machines."),
         h("button", { class: "btn", onclick: () => go("machines") }, "Machines…")),
@@ -74,6 +76,7 @@ function agents() {
     const set = (enabled, rc, imp, done) => run(() => api("SetAgent", a.id, enabled, rc, imp), done);
     return card(
       h("div", { class: "set-row" },
+        agentBadge(a.id, a.name),
         title(a.name, a.version ? `${a.version} on this Mac${a.folder ? " · " + a.folder : ""}` : "Not installed on this Mac"),
         a.stability === "experimental" ? h("span", { class: "chip st-warn" }, "experimental") : null,
         h("button", { class: "switch", role: "switch", "aria-checked": a.enabled ? "true" : "false", "aria-label": `${a.name} on`,

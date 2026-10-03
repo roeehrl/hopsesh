@@ -5,6 +5,7 @@ package gui
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"maps"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
+	"github.com/roeehrl/hopsesh/internal/core/appicon"
 	"github.com/roeehrl/hopsesh/internal/core/audit"
 	"github.com/roeehrl/hopsesh/internal/core/lnp"
 	"github.com/roeehrl/hopsesh/internal/core/move"
@@ -36,16 +38,17 @@ const MenuEvent = "hopsesh:menu"
 
 // App is the service bound to the frontend.
 type App struct {
-	mu     sync.Mutex
-	core   *app.App // its Cfg is the saved configuration; calls work on snapshots
-	cfgErr error    // the configuration file could not be used (see StartFresh)
-	inv    *app.Inventory
-	plan   *move.Plan
-	input  move.Input
-	res    *move.Result
-	push   *app.Push // a push planned on another machine, its connection open
-	pw     *pwBroker
-	pwOnce sync.Once
+	mu       sync.Mutex
+	core     *app.App // its Cfg is the saved configuration; calls work on snapshots
+	cfgErr   error    // the configuration file could not be used (see StartFresh)
+	inv      *app.Inventory
+	plan     *move.Plan
+	input    move.Input
+	res      *move.Result
+	push     *app.Push // a push planned on another machine, its connection open
+	pw       *pwBroker
+	appIcons map[agent.ID]string // installed apps' icons, read once ("" when none)
+	pwOnce   sync.Once
 	// Wails is the running application (events, clipboard, dialogs).
 	Wails *application.App `json:"-"`
 }
@@ -92,6 +95,7 @@ type AgentDTO struct {
 	Folder        string             `json:"folder"`  // its data folder here
 	Tested        []string           `json:"tested"`
 	Capabilities  []agent.Capability `json:"capabilities"`
+	Icon          string             `json:"icon,omitempty"` // a data URL: the installed app's icon or the module's mark ("": initials)
 }
 
 // Info is static information for the window.
@@ -149,6 +153,29 @@ func (a *App) Info() Info {
 	return info
 }
 
+// iconLocked pictures an agent: its installed desktop app's icon (read once, when the
+// setting is on), else the module's mark, else nothing (the window shows initials).
+func (a *App) iconLocked(s agent.Spec) string {
+	if a.core.Cfg.AppIconsOn() {
+		if a.appIcons == nil {
+			a.appIcons = map[agent.ID]string{}
+		}
+		url, seen := a.appIcons[s.ID]
+		if !seen {
+			home, _ := os.UserHomeDir()
+			url, _ = appicon.Find(s.Icon.Apps, home)
+			a.appIcons[s.ID] = url
+		}
+		if url != "" {
+			return url
+		}
+	}
+	if s.Icon.SVG != "" {
+		return "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(s.Icon.SVG))
+	}
+	return ""
+}
+
 func (a *App) agentsLocked() []AgentDTO {
 	var here map[agent.ID]app.AgentState
 	if a.inv != nil && a.inv.Local() != nil {
@@ -162,7 +189,7 @@ func (a *App) agentsLocked() []AgentDTO {
 		s := m.Spec()
 		ac := a.core.Cfg.Agents[string(s.ID)]
 		d := AgentDTO{ID: s.ID, Name: s.Name, Stability: s.Stability, Enabled: !ac.Disabled, RemoteControl: ac.RemoteControl,
-			Import: ac.Import, Tested: s.Tested, Capabilities: agent.Capabilities(m)}
+			Import: ac.Import, Tested: s.Tested, Capabilities: agent.Capabilities(m), Icon: a.iconLocked(s)}
 		if st, ok := here[s.ID]; ok && (st.Install.Present || st.Install.Binary != "") {
 			d.Version = st.Install.Version
 			for _, r := range s.Roots {

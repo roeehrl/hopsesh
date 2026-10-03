@@ -16,6 +16,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/agents/all"
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 const sid = "0b6c6a8e-1d2f-4c3b-9a7e-5f4d3c2b1a01"
@@ -396,4 +397,53 @@ func exeSuffix() string {
 		return ".exe"
 	}
 	return ""
+}
+
+// Agents are pictured by their installed desktop app's icon (on by default), else the
+// module's own mark.
+func TestWindowAgentIcons(t *testing.T) {
+	home(t)
+	a := NewApp(all.Registry())
+	icons := func() map[string]string {
+		out := map[string]string{}
+		for _, ag := range a.Info().Agents {
+			out[string(ag.ID)] = ag.Icon
+		}
+		return out
+	}
+	installed := func(id string) bool { // a real app outside the test home (this machine's /Applications)
+		m, _ := all.Registry().Get(agent.ID(id))
+		for _, p := range m.Spec().Icon.Apps[runtime.GOOS] {
+			if _, err := os.Stat(p); err == nil && !strings.HasPrefix(p, "~") {
+				return true
+			}
+		}
+		return false
+	}
+	for id, icon := range icons() {
+		if !installed(id) && !strings.HasPrefix(icon, "data:image/svg+xml;base64,") {
+			t.Fatalf("%s without its app is pictured by its mark: %.40q", id, icon)
+		}
+	}
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	// A Claude desktop app in ~/Applications: its icon comes first.
+	app := filepath.Join(os.Getenv("HOME"), "Applications", "Claude.app", "Contents")
+	os.MkdirAll(filepath.Join(app, "Resources"), 0o700)
+	os.WriteFile(filepath.Join(app, "Info.plist"), []byte(`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIconFile</key><string>app.icns</string></dict></plist>`), 0o600)
+	png := append([]byte("\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR"), 0, 0, 0, 128, 0, 0, 0, 128)
+	entry := append(append([]byte("ic07"), 0, 0, 0, byte(8+len(png))), png...)
+	os.WriteFile(filepath.Join(app, "Resources", "app.icns"), append(append([]byte("icns"), 0, 0, 0, byte(8+len(entry))), entry...), 0o600)
+	a = NewApp(all.Registry())
+	if got := icons(); !strings.HasPrefix(got["claude"], "data:image/png;base64,") || !installed("codex") && !strings.HasPrefix(got["codex"], "data:image/svg+xml") {
+		t.Fatalf("the installed app's icon first: %.40q / %.40q", got["claude"], got["codex"])
+	}
+	s := a.Settings()
+	if err := a.SaveSettings(SettingsInput{Layout: s.Layout, MarkMoved: s.MarkMoved, SyncCode: s.SyncCode, UpdateChk: "off", AppIcons: false}); err != nil {
+		t.Fatal(err)
+	}
+	if got := icons(); !strings.HasPrefix(got["claude"], "data:image/svg+xml") {
+		t.Fatal("with app icons off, the module's mark")
+	}
 }

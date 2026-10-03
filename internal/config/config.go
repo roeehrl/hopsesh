@@ -70,10 +70,12 @@ type Config struct {
 	SkillPrompt string `toml:"skill_prompt,omitempty"`
 	// CLIPrompt is "declined" once the user said not now to linking the command-line tool
 	// from the app.
-	CLIPrompt string           `toml:"cli_prompt,omitempty"`
-	Agents    map[string]Agent `toml:"agents,omitempty"`
-	Peer      Peer             `toml:"peer"`
-	Hosts     []Host           `toml:"hosts"`
+	CLIPrompt string `toml:"cli_prompt,omitempty"`
+	// AppIcons shows an agent's installed desktop app icon in the app (default on).
+	AppIcons *bool            `toml:"app_icons,omitempty"`
+	Agents   map[string]Agent `toml:"agents,omitempty"`
+	Peer     Peer             `toml:"peer"`
+	Hosts    []Host           `toml:"hosts"`
 }
 
 // Defaults returns the configuration used when no file exists.
@@ -209,6 +211,9 @@ func (c Config) AgentEnabled(id string) bool { return !c.Agents[id].Disabled }
 
 // MarkMovedOn reports whether copies left behind are marked (default on).
 func (c Config) MarkMovedOn() bool { return c.MarkMoved == nil || *c.MarkMoved }
+
+// AppIconsOn reports whether installed desktop apps' icons picture the agents (default on).
+func (c Config) AppIconsOn() bool { return c.AppIcons == nil || *c.AppIcons }
 
 // SyncCodeOn reports whether the checkout is brought to the session's commit (default on).
 func (c Config) SyncCodeOn() bool { return c.SyncCode == nil || *c.SyncCode }

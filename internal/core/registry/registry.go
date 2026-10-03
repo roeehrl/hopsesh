@@ -3,9 +3,13 @@
 package registry
 
 import (
+	"encoding/xml"
+	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -32,6 +36,9 @@ func New(mods ...agent.Module) (*Registry, error) {
 			return nil, fmt.Errorf("two agent modules use the id %q", s.ID)
 		case s.Name == "" || len(s.Roots) == 0 || len(s.Binaries) == 0:
 			return nil, fmt.Errorf("agent module %s needs a name, roots and binaries", s.ID)
+		}
+		if err := checkSVG(s.Icon.SVG); err != nil {
+			return nil, fmt.Errorf("agent module %s: its icon %w", s.ID, err)
 		}
 		for _, c := range s.Experimental {
 			if !agent.Has(m, c) {
@@ -107,4 +114,40 @@ func (r *Registry) LoginEnv() []string {
 func As[T any](m agent.Module) (T, bool) {
 	t, ok := m.(T)
 	return t, ok
+}
+
+// checkSVG accepts an empty mark or a well-formed <svg> document with no scripts, event
+// handlers or references outside itself (the window shows it as an image).
+func checkSVG(svg string) error {
+	if svg == "" {
+		return nil
+	}
+	d := xml.NewDecoder(strings.NewReader(svg))
+	root := true
+	for {
+		tok, err := d.Token()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("is not well-formed SVG: %w", err)
+		}
+		el, ok := tok.(xml.StartElement)
+		if !ok {
+			continue
+		}
+		if root && el.Name.Local != "svg" {
+			return errors.New("must be an <svg> document")
+		}
+		root = false
+		if strings.EqualFold(el.Name.Local, "script") || strings.EqualFold(el.Name.Local, "foreignObject") {
+			return fmt.Errorf("may not contain <%s>", el.Name.Local)
+		}
+		for _, a := range el.Attr {
+			n, v := strings.ToLower(a.Name.Local), strings.TrimSpace(a.Value)
+			if strings.HasPrefix(n, "on") || n == "href" && !strings.HasPrefix(v, "#") {
+				return fmt.Errorf("may not use %s=%q", a.Name.Local, a.Value)
+			}
+		}
+	}
 }

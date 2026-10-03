@@ -74,6 +74,8 @@ textarea.field { height: auto; padding: 7px 9px; resize: vertical; line-height: 
 
 /* chips and status */
 .chip { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px; border-radius: 10px; font-size: 11px; font-weight: 500; white-space: nowrap; background: var(--hover); color: var(--ink2); }
+.agent-ico { display: block; flex: 0 0 auto; width: 22px; height: 22px; border-radius: 5px; object-fit: contain; }
+.agent-ico.small { width: 14px; height: 14px; border-radius: 3px; margin-left: -3px; }
 .chip.agent-claude { background: var(--claude-soft); color: var(--claude); }
 .chip.agent-codex { background: var(--codex-soft); color: var(--codex); }
 .chip.st-working, .chip.st-idle { background: var(--ok-soft); color: var(--ok); }

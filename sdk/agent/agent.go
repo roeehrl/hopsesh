@@ -86,6 +86,20 @@ type Spec struct {
 	// Experimental marks capabilities that are not yet trustworthy; the user interfaces
 	// say so and keep them opt-in.
 	Experimental []Capability
+	// Icon is how the user interfaces picture the agent (optional; its initials otherwise).
+	Icon Icon
+}
+
+// Icon pictures an agent. The installed desktop app's own icon comes first (unless the
+// user turns that off), then the module's mark, then the agent's initials.
+type Icon struct {
+	// SVG is a mark drawn for hopsesh: a complete <svg> document with no scripts or
+	// external references. It must not reproduce a vendor's logo or trademark.
+	SVG string
+	// Apps are where the agent's desktop app may be installed, by GOOS ("~" is the home
+	// folder): a macOS .app bundle or a Windows .exe. Its icon is read from this machine
+	// and never shipped.
+	Apps map[string][]string
 }
 
 // Binary is a program the module may run.

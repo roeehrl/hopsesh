@@ -1,7 +1,7 @@
 // The Sessions screen: scopes on the left, sessions by repository in the middle, the
 // selected session on the right. Every action on a session comes from actionsFor(), which
 // the palette uses too.
-import { api, h, fill, icon, ICONS, view, state, screen, go, loading, toast, fail, cap, ago, when, bytes, agentClass, short, machineStatus,
+import { api, h, fill, icon, ICONS, view, state, screen, go, loading, toast, fail, cap, ago, when, bytes, agentBadge, agentChip, machineStatus,
   entries, selected, here, agentInfo, $, count } from "./core.js";
 import { planFor } from "./plan.js";
 
@@ -106,7 +106,7 @@ function sidebar() {
     h("button", { class: "side-btn", style: "color:var(--accent)", onclick: () => go("machines") }, icon(ICONS.plus), machines.length ? "Add a machine" : "Add your other machines"),
     h("div", { class: "side-h" }, "Agents"),
     (state.info.agents || []).filter((a) => a.enabled).map((a) => h("button", { class: "side-btn", "aria-current": cur("agent", a.id), onclick: () => setScope({ kind: "agent", value: a.id }) },
-      h("span", { class: agentClass(a.id) }, short(a.name)), a.name, h("span", { class: "count" }, all.filter((e) => e.agent === a.id).length))),
+      agentBadge(a.id, a.name), a.name, h("span", { class: "count" }, all.filter((e) => e.agent === a.id).length))),
     h("div", { class: "side-foot" },
       h("button", { class: "side-btn", style: "padding:6px 0", onclick: () => go("activity") }, icon(ICONS.clock), "Activity",
         act ? h("span", { class: "count" }, act.items.filter((x) => x.canUndo).length + " can undo") : null),
@@ -168,7 +168,7 @@ function row(e) {
   const others = (e.copies || []).filter((c) => !(c.machine === e.machine && c.key === e.key));
   return h("div", { class: "row", role: "option", "aria-selected": sel ? "true" : "false", tabindex: sel ? "0" : "-1", "data-key": e.machine + "\u0000" + e.key,
       onclick: () => select(e), ondblclick: () => acts[0]?.run() },
-    h("span", { class: agentClass(e.agent) }, short(e.agentName)),
+    agentBadge(e.agent, e.agentName),
     h("div", { class: "main" }, h("span", { class: "t", title: e.title }, e.title), h("span", { class: "s" }, bits.join(" · ") || " "),
       others.length ? h("div", { class: "copies" }, others.map((c) => h("span", { class: "chip" + (c.newest ? " st-warn" : "") },
         `${c.newest ? "newest: " : "also "}${c.agentName} ${c.local ? "here" : "on " + c.machine}`))) : null),
@@ -195,7 +195,7 @@ function inspector() {
   if (local && !e.live && !e.hereNewest) note = "A newer copy is elsewhere; bring that one here instead.";
   return h("aside", { class: "inspector", "aria-label": "Session details" },
     h("div", { style: "display:flex;flex-direction:column;gap:6px" },
-      h("div", { style: "display:flex;gap:6px;flex-wrap:wrap" }, h("span", { class: agentClass(e.agent) }, e.agentName), h("span", { class: "chip st-" + k }, h("span", { class: "dot " + k }), words)),
+      h("div", { style: "display:flex;gap:6px;flex-wrap:wrap" }, agentChip(e.agent, e.agentName), h("span", { class: "chip st-" + k }, h("span", { class: "dot " + k }), words)),
       h("h2", {}, e.title),
       h("span", { class: "muted", style: "font-size:12px" }, `${local ? "On this Mac" : "On " + e.machine} · last active ${ago(e.lastActive)} · ${bytes(e.sizeKB * 1024)}`)),
     acts.length ? h("div", { style: "display:flex;flex-direction:column;gap:8px" },

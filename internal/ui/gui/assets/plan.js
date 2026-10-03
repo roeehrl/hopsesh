@@ -1,6 +1,6 @@
 // The plan sheet (what a hop, continuation or send will do, with its choices), its
 // progress, and the Done screen.
-import { api, on, h, fill, view, state, screen, go, current, toast, fail, errText, cap, agentClass, here, $, count } from "./core.js";
+import { api, on, h, fill, view, state, screen, go, current, toast, fail, errText, cap, agentChip, here, $, count } from "./core.js";
 import { undo } from "./activity.js";
 
 const sheet = $("#sheet");
@@ -228,9 +228,9 @@ function render() {
     h("header", { class: "sheet-head" },
       h("h2", { id: "sheet-title" }, title),
       h("div", { class: "fromto" },
-        h("span", { class: agentClass(p.sourceAgent) }, p.fromAgent), h("span", {}, `on ${p.sourceHost}`), h("span", { class: "mono muted", style: "font-size:11.5px" }, p.sourceCwd),
+        agentChip(p.sourceAgent, p.fromAgent), h("span", {}, `on ${p.sourceHost}`), h("span", { class: "mono muted", style: "font-size:11.5px" }, p.sourceCwd),
         h("span", { style: "color:var(--accent)", "aria-label": "to" }, "→"),
-        h("span", { class: agentClass(p.continue ? cur.target : p.sourceAgent) }, p.agent), h("span", {}, there), h("span", { class: "mono muted", style: "font-size:11.5px" }, p.targetCwd)),
+        agentChip(p.continue ? cur.target : p.sourceAgent, p.agent), h("span", {}, there), h("span", { class: "mono muted", style: "font-size:11.5px" }, p.targetCwd)),
       summary(p)),
     h("div", { class: "sheet-body" }, p.continue ? conversation(p) : null, repository(p), checks(p), options(p), paths(p)),
     h("footer", { class: "sheet-foot" },
