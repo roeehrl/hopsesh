@@ -115,7 +115,7 @@ func ProbeRemote(ctx context.Context, c *transport.Conn, specs []agent.Spec) (Fa
 	if err != nil && !errors.As(err, &re) {
 		return Facts{}, err // the connection itself failed
 	}
-	if err == nil && strings.TrimSpace(string(out)) != "" {
+	if err == nil && strings.TrimSpace(string(out)) != "" && !windowsUname(string(out)) {
 		out, err = c.RunSh(ctx, posixProbe(w))
 		if err != nil {
 			return Facts{}, err
@@ -233,6 +233,13 @@ func parseProbe(out []byte) Facts {
 		}
 	}
 	return f
+}
+
+// windowsUname reports a uname from a Unix layer on Windows (Git for Windows, MSYS2,
+// Cygwin): Windows OpenSSH runs commands in cmd or PowerShell, and the paths are Windows'.
+func windowsUname(s string) bool {
+	s = strings.ToUpper(strings.TrimSpace(s))
+	return strings.HasPrefix(s, "MINGW") || strings.HasPrefix(s, "MSYS") || strings.HasPrefix(s, "CYGWIN")
 }
 
 func normUname(s string) string {

@@ -38,11 +38,15 @@ Write-Output $p
 Write-Output $sh`
 
 // peerCommandWindows is the command line that starts hopsesh peer on a Windows machine,
-// in the form its ssh shell takes: cmd.exe (the default) or PowerShell. The program runs
-// directly, so its input and output are the connection's.
+// in the form its ssh shell takes: cmd.exe (the default), PowerShell, or a bash (Git Bash,
+// MSYS2). The program runs directly, so its input and output are the connection's.
 func peerCommandWindows(exe, shell string) string {
-	if s := strings.ToLower(shell); strings.Contains(s, "powershell") || strings.Contains(s, "pwsh") {
+	s := strings.ToLower(shell)
+	switch {
+	case strings.Contains(s, "powershell") || strings.Contains(s, "pwsh"):
 		return "& " + transport.PSQuote(exe) + " peer --stdio"
+	case strings.HasSuffix(s, "bash.exe") || strings.HasSuffix(s, `\sh.exe`):
+		return transport.ShQuote(strings.ReplaceAll(exe, `\`, "/")) + " peer --stdio" // C:/… works there
 	}
 	return `""` + exe + `" peer --stdio"` // cmd /c strips the outer quotes
 }

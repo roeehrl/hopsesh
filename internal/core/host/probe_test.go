@@ -33,3 +33,17 @@ func TestPosixProbe(t *testing.T) {
 		t.Fatalf("binary: %+v", sh)
 	}
 }
+
+// Git for Windows, MSYS2 and Cygwin answer uname on Windows; those machines are Windows.
+func TestWindowsUnameIsWindows(t *testing.T) {
+	for _, u := range []string{"MINGW64_NT-10.0-26100", "MSYS_NT-10.0", "CYGWIN_NT-10.0-26100\r\n"} {
+		if !windowsUname(u) {
+			t.Errorf("%q is Windows", u)
+		}
+	}
+	for _, u := range []string{"Linux", "Darwin", "FreeBSD"} {
+		if windowsUname(u) {
+			t.Errorf("%q is not Windows", u)
+		}
+	}
+}
