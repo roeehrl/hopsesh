@@ -86,7 +86,10 @@ func allCombos() [][]string {
 // rows for the same seed.
 func pairwise(seed int64) []Row {
 	combos := allCombos()
-	type pair struct{ i, j int; a, b string }
+	type pair struct {
+		i, j int
+		a, b string
+	}
 	uncovered := map[pair]bool{}
 	for _, c := range combos {
 		for i := 0; i < len(c); i++ {

@@ -7,6 +7,9 @@ All notable changes to this project are documented here. The format follows
 ## Unreleased
 
 ### Fixed
+- Unpushed commits and never-pushed worktree branches now come along from Windows machines
+  too, through a git bundle (git over ssh does not work against Windows' OpenSSH, which
+  runs commands through cmd.exe); before, hopsesh asked you to push them first.
 - Moving or continuing a session from a Windows machine now rewrites its paths when its
   folder is a git repository: git reports `C:/Users/…`, the agents record `C:\Users\…`,
   and the two never matched, so the copy kept the other machine's paths.

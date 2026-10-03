@@ -249,9 +249,9 @@ func AddWorktree(ctx context.Context, repo, branch, path string, from *FetchSour
 	case bs.Remote:
 		_, err := runGit(ctx, repo, "worktree", "add", "--track", "-b", branch, "--", path, "origin/"+branch)
 		return err
-	case from != nil && from.URL != "":
+	case from.usable():
 		ref := "refs/hopsesh/" + safeRefPart(from.Name) + "/" + branch
-		if _, err := runGitEnv(ctx, repo, from.Env, "fetch", "--quiet", "--no-tags", from.URL, "+refs/heads/"+branch+":"+ref); err != nil {
+		if err := from.fetch(ctx, repo, "refs/heads/"+branch, ref); err != nil {
 			return fmt.Errorf("branch %s is neither here nor on origin, and fetching it from %s failed: %w", branch, from.Name, err)
 		}
 		_, err := runGit(ctx, repo, "worktree", "add", "-b", branch, "--", path, ref)

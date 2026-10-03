@@ -78,6 +78,23 @@ func TestFindLocalCloneWorktree(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(wt4, "b")); err != nil {
 		t.Error("the fetched branch's commit is not checked out")
 	}
+	// The same through a bundle the other machine writes (how Windows machines are reached).
+	git(t, seed, "checkout", "-qb", "bundled")
+	os.WriteFile(filepath.Join(seed, "c"), []byte("c"), 0o644)
+	git(t, seed, "add", "c")
+	git(t, seed, "commit", "-qm", "3")
+	viaBundle := &FetchSource{Name: "pc", Bundle: func(ctx context.Context, ref string) (string, func(), error) {
+		f := filepath.Join(root, "x.bundle")
+		git(t, seed, "bundle", "create", f, ref)
+		return f, func() { os.Remove(f) }, nil
+	}}
+	wt5 := filepath.Join(dest, ".claude", "worktrees", "bundled")
+	if err := AddWorktree(ctx, dest, "bundled", wt5, viaBundle); err != nil {
+		t.Fatalf("a branch through a bundle: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wt5, "c")); err != nil {
+		t.Error("the bundled branch's commit is not checked out")
+	}
 	if err := SwitchBranch(ctx, dest, "main", []string{".claude/worktrees"}); err != nil {
 		t.Errorf("checkout main: %v", err)
 	}
