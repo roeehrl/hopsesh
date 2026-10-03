@@ -28,6 +28,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -69,6 +70,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -86,6 +88,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -102,6 +105,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -121,6 +125,7 @@ jobs:
         working-directory: internal/devtools/webtest
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -165,6 +170,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -191,6 +197,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -228,6 +235,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -259,6 +267,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -287,6 +296,7 @@ jobs:
     runs-on: windows-2025
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -304,6 +314,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -329,6 +340,7 @@ jobs:
     runs-on: windows-2025
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -403,6 +415,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -419,6 +432,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
