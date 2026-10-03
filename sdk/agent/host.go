@@ -53,7 +53,8 @@ type FS interface {
 	// WriteFile replaces a file atomically, creating parent folders. Journaled.
 	WriteFile(p string, b []byte, perm fs.FileMode) error
 	// Append adds bytes at the end of a file, creating it (and parent folders) when it does
-	// not exist. Journaled: undo takes out only these bytes.
+	// not exist. Journaled: undo takes out these bytes, and refuses while anything follows
+	// them unless they are Standalone.
 	Append(p string, b []byte, o AppendOptions) error
 	// Rename moves a file within the module's roots. Journaled.
 	Rename(from, to string) error
@@ -63,6 +64,11 @@ type FS interface {
 type AppendOptions struct {
 	NewLine   bool // start on a new line if the file does not end with one
 	KeepMtime bool // restore the modification time (marks must not look like activity)
+	// Standalone: nothing written after these bytes builds on them (a title record, a
+	// line in an index every session shares), so undo takes them out from between later
+	// lines. Otherwise (a session's new turns) later lines continue from them, and undo
+	// counts them as the file being used since.
+	Standalone bool
 }
 
 // File is an open file with random access.

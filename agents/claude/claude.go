@@ -388,7 +388,7 @@ func (m *Module) NotifyInstruction(oldName, oldLocation, newName string, fork bo
 // Claude Code's own resume list shows where it went. The file's time is kept.
 func (m *Module) Mark(_ context.Context, h agent.Host, in agent.Install, s agent.Summary, mk agent.Mark) error {
 	rec := encodeRecord(map[string]any{"type": "custom-title", "customTitle": agent.MarkTitle(mk, s.Title), "sessionId": string(s.Key.Session)})
-	return h.FS().Append(s.Path, append(rec, '\n'), agent.AppendOptions{NewLine: true, KeepMtime: true})
+	return h.FS().Append(s.Path, append(rec, '\n'), agent.AppendOptions{NewLine: true, KeepMtime: true, Standalone: true})
 }
 
 // record encodes a transcript record with its keys in a fixed order (type first), like

@@ -54,10 +54,11 @@ aside (the app offers this), and machines are added again.
 
 ### Changed
 - `--desktop` is now `--app` (open in the agent's desktop app, where it has one).
-- Undoing an append removes only hopsesh's own bytes, so lines an agent wrote afterwards
-  stay.
+- Undoing a mark or a line in an agent's shared index removes only hopsesh's own bytes,
+  so lines written afterwards stay.
 - `undo` refuses when a session it would change was used since (that work would be
-  lost); `undo --force`, or "Undo anyway" in the app, does it anyway.
+  lost), including a session that came back from another agent and was continued; `undo
+  --force`, or "Undo anyway" in the app, does it anyway.
 
 ### Removed
 - The optional remote helper (`hosts helper`, `hopsesh agent`) and `hopsesh import`.

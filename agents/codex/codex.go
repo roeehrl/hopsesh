@@ -232,7 +232,7 @@ func setName(h agent.Host, in agent.Install, sid, name string) error {
 	// Always an append, even to create it: the index is shared by every thread, and undo
 	// takes out only this line.
 	p := h.Path().Join(in.Root(home), "session_index.jsonl")
-	return h.FS().Append(p, append(line, '\n'), agent.AppendOptions{NewLine: true})
+	return h.FS().Append(p, append(line, '\n'), agent.AppendOptions{NewLine: true, Standalone: true})
 }
 
 // Mark names the thread left behind "↪ moved to …" (or "continued in …"), which Codex's

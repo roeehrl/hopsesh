@@ -69,7 +69,7 @@ func TestUndoAppendKeepsLaterWrites(t *testing.T) {
 	idx := filepath.Join(data, "session_index.jsonl")
 	os.WriteFile(idx, []byte(`{"id":"a"}`), 0o644) // no trailing newline: Append adds one
 	j, _ := New(state, KindMove, "title")
-	must(t, j.Append(fsys, "here", idx, []byte(`{"id":"b"}`+"\n"), agent.AppendOptions{NewLine: true}))
+	must(t, j.Append(fsys, "here", idx, []byte(`{"id":"b"}`+"\n"), agent.AppendOptions{NewLine: true, Standalone: true}))
 	f, _ := os.OpenFile(idx, os.O_APPEND|os.O_WRONLY, 0)
 	f.WriteString(`{"id":"c"}` + "\n")
 	f.Close()
@@ -84,7 +84,7 @@ func TestUndoAppendKeepsLaterWrites(t *testing.T) {
 	other := filepath.Join(data, "t.jsonl")
 	os.WriteFile(other, []byte("x\n"), 0o600)
 	j2, _ := New(state, KindMove, "mark")
-	must(t, j2.Append(fsys, "here", other, []byte("mark\n"), agent.AppendOptions{}))
+	must(t, j2.Append(fsys, "here", other, []byte("mark\n"), agent.AppendOptions{Standalone: true}))
 	os.WriteFile(other, []byte("x\nMARK\n"), 0o600)
 	if err := j2.Undo(func(string) (host.FS, error) { return fsys, nil }, false); err == nil {
 		t.Fatal("changed bytes must not be cut out")
@@ -139,10 +139,10 @@ func TestUndoAppendThatCreatedTheFile(t *testing.T) {
 	index := filepath.Join(data, "codex", "session_index.jsonl")
 
 	first, _ := New(state, KindContinue, "first")
-	must(t, first.Append(fsys, "here", index, []byte(`{"id":"a"}`+"\n"), agent.AppendOptions{NewLine: true}))
+	must(t, first.Append(fsys, "here", index, []byte(`{"id":"a"}`+"\n"), agent.AppendOptions{NewLine: true, Standalone: true}))
 	must(t, first.Seal(fsFor))
 	second, _ := New(state, KindContinue, "second")
-	must(t, second.Append(fsys, "here", index, []byte(`{"id":"b"}`+"\n"), agent.AppendOptions{NewLine: true}))
+	must(t, second.Append(fsys, "here", index, []byte(`{"id":"b"}`+"\n"), agent.AppendOptions{NewLine: true, Standalone: true}))
 	must(t, second.Seal(fsFor))
 
 	if err := first.Changed(fsFor); err != nil {
@@ -164,5 +164,35 @@ func TestUndoAppendThatCreatedTheFile(t *testing.T) {
 	must(t, third.Undo(fsFor, false))
 	if _, err := os.Stat(other); !os.IsNotExist(err) {
 		t.Fatal("a file an append created goes when its undo leaves it empty")
+	}
+}
+
+// New turns appended to a session build on what came before: once the agent wrote more
+// after them, undo refuses (that work would be lost), and a forced undo cuts the file
+// where hopsesh's turns began.
+func TestUndoSessionAppendUsedSince(t *testing.T) {
+	state, data := t.TempDir(), t.TempDir()
+	fsys := host.LocalFS()
+	here := func(string) (host.FS, error) { return fsys, nil }
+	s := filepath.Join(data, "s.jsonl")
+	os.WriteFile(s, []byte("turn 1\n"), 0o600)
+	j, _ := New(state, KindContinue, "back")
+	must(t, j.Append(fsys, "here", s, []byte("turn 2 (other agent)\n"), agent.AppendOptions{NewLine: true}))
+	must(t, j.Seal(here))
+	if err := j.Changed(here); err != nil {
+		t.Fatalf("nothing follows yet: %v", err)
+	}
+	f, _ := os.OpenFile(s, os.O_APPEND|os.O_WRONLY, 0)
+	f.WriteString("turn 3 (builds on turn 2)\n")
+	f.Close()
+	if err := j.Undo(here, false); !errors.Is(err, ErrChanged) {
+		t.Fatalf("undo must refuse: %v", err)
+	}
+	if b, _ := os.ReadFile(s); string(b) != "turn 1\nturn 2 (other agent)\nturn 3 (builds on turn 2)\n" {
+		t.Fatalf("a refused undo changes nothing: %q", b)
+	}
+	must(t, j.Undo(here, true))
+	if b, _ := os.ReadFile(s); string(b) != "turn 1\n" {
+		t.Fatalf("forced undo: %q", b)
 	}
 }

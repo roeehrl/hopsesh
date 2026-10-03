@@ -59,6 +59,7 @@ func TestScenarios(t *testing.T) {
 			return nil
 		},
 		Cmds: map[string]func(ts *testscript.TestScript, neg bool, args []string){
+			"agent-turn":     agentTurn,
 			"claude-session": claudeSession,
 			"git-repo":       gitRepo,
 		},
@@ -112,6 +113,43 @@ func claudeSession(ts *testscript.TestScript, neg bool, args []string) {
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 		ts.Fatalf("%v", err)
 	}
+}
+
+// agentTurn appends a turn to a session the way its agent does when you keep working in
+// it: agent-turn AGENT ID TEXT (claude or codex; ID may be a glob). It sets $SESSION to the
+// session's file.
+func agentTurn(ts *testscript.TestScript, neg bool, args []string) {
+	if neg || len(args) != 3 {
+		ts.Fatalf("usage: agent-turn AGENT ID TEXT")
+	}
+	home, id, text := ts.Getenv("HOME"), args[1], args[2]
+	rec := func(v map[string]any) string { b, _ := json.Marshal(v); return string(b) }
+	var pattern, line string
+	switch args[0] {
+	case "claude":
+		pattern = filepath.Join(home, ".claude", "projects", "*", id+".jsonl")
+		line = rec(map[string]any{"type": "user", "uuid": "turn-" + text, "sessionId": id, "timestamp": "2026-10-01T11:00:00Z",
+			"message": map[string]any{"role": "user", "content": text}})
+	case "codex":
+		pattern = filepath.Join(home, ".codex", "sessions", "*", "*", "*", "rollout-*-"+id+".jsonl")
+		line = rec(map[string]any{"timestamp": "2026-10-01T11:00:00Z", "type": "response_item",
+			"payload": map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_text", "text": text}}}})
+	default:
+		ts.Fatalf("agent-turn: unknown agent %q", args[0])
+	}
+	files, _ := filepath.Glob(pattern)
+	if len(files) != 1 {
+		ts.Fatalf("agent-turn: %d sessions match %s", len(files), pattern)
+	}
+	f, err := os.OpenFile(files[0], os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		ts.Fatalf("%v", err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(line + "\n"); err != nil {
+		ts.Fatalf("%v", err)
+	}
+	ts.Setenv("SESSION", files[0])
 }
 
 // gitRepo makes a git repository with one commit and a remote: git-repo DIR URL.

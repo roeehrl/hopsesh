@@ -1,0 +1,23 @@
+# A Claude Code session goes to Codex, gets work there and comes back: Codex's turns are
+# added to the original. Once Claude Code has continued from them, undoing the return
+# would cut that work out from under it: undo refuses, and --force takes the session back
+# to how it was before the return.
+git-repo proj https://github.com/example/proj.git
+claude-session 11111111-2222-4333-8444-555555555555 proj 'Fix the parser' 'please fix the parser in'
+
+exec hopsesh pull 11111111-2222-4333-8444-555555555555 --in codex --yes
+agent-turn codex * 'codex wrote the parser test'
+
+exec hopsesh pull 'codex/Fix the parser' --in claude --yes
+stdout 'continues in Claude Code'
+agent-turn claude 11111111-2222-4333-8444-555555555555 'claude continues from the test'
+grep 'codex wrote the parser test' $SESSION
+
+! exec hopsesh undo --yes
+stderr 'changed since'
+grep 'claude continues from the test' $SESSION
+
+exec hopsesh undo --yes --force
+! grep 'codex wrote the parser test' $SESSION
+! grep 'claude continues from the test' $SESSION
+grep 'please fix the parser in' $SESSION

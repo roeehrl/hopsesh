@@ -45,6 +45,8 @@ type Entry struct {
 	Backup    string    `json:"backup,omitempty"` // OpReplace: copy of the old file
 	KeepMtime bool      `json:"keepMtime,omitempty"`
 	Created   bool      `json:"created,omitempty"` // OpAppend: the append created the file
+	// OpAppend: lines written later do not build on these bytes (AppendOptions.Standalone).
+	Standalone bool `json:"standalone,omitempty"`
 }
 
 // Journal is the undo record of one operation (a move, a continuation, a mark).
@@ -174,8 +176,30 @@ func (j *Journal) Seal(fsFor func(machine string) (host.FS, error)) error {
 }
 
 // Changed reports the first file that changed since the operation (ErrChanged with what
-// changed), or nil. A file that is gone, or a machine fsFor cannot reach, does not count.
+// changed), or nil: one it created or replaced, or one it appended to (not Standalone) that
+// has more after its bytes. A file that is gone, or a machine fsFor cannot reach, does not
+// count.
 func (j *Journal) Changed(fsFor func(machine string) (host.FS, error)) error {
+	for i, e := range j.Entries {
+		if e.Op != OpAppend || e.Standalone || j.appendedAgain(i) {
+			continue
+		}
+		fsys, err := fsFor(e.Machine)
+		if err != nil {
+			continue
+		}
+		after, err := bytesAfter(fsys, e)
+		if err != nil {
+			continue
+		}
+		if after != 0 {
+			what := "what hopsesh added was changed"
+			if after > 0 {
+				what = fmt.Sprintf("%s were added after this", humanBytes(after))
+			}
+			return fmt.Errorf("%w: %s on %s (%s)", ErrChanged, filepath.Base(e.Path), e.Machine, what)
+		}
+	}
 	for _, a := range j.After {
 		fsys, err := fsFor(a.Machine)
 		if err != nil {
@@ -194,6 +218,35 @@ func (j *Journal) Changed(fsFor func(machine string) (host.FS, error)) error {
 		}
 	}
 	return nil
+}
+
+// appendedAgain reports whether a later entry of the journal appends to the same file: the
+// later one's bytes follow these, and its own check covers what comes after.
+func (j *Journal) appendedAgain(i int) bool {
+	for _, e := range j.Entries[i+1:] {
+		if e.Op == OpAppend && e.Machine == j.Entries[i].Machine && e.Path == j.Entries[i].Path {
+			return true
+		}
+	}
+	return false
+}
+
+// bytesAfter is how many bytes follow what an Append added, or -1 when those bytes are no
+// longer there.
+func bytesAfter(fsys host.FS, e Entry) (int64, error) {
+	fi, err := fsys.Stat(e.Path)
+	if err != nil {
+		return 0, err
+	}
+	data, err := fsys.ReadFile(e.Path, fi.Size()+1)
+	if err != nil {
+		return 0, err
+	}
+	at, lead, ok := findAppended(data, e)
+	if !ok {
+		return -1, nil
+	}
+	return int64(len(data)) - (at + lead + e.Len), nil
 }
 
 func humanBytes(n int64) string {
@@ -266,10 +319,10 @@ func (j *Journal) WriteFile(fsys host.FS, machine, p string, b []byte, perm fs.F
 }
 
 // Append adds to a file, remembering where and what, so undo can take out exactly these
-// bytes even after the agent appended more.
+// bytes, even from between lines written later when they are Standalone.
 func (j *Journal) Append(fsys host.FS, machine, p string, b []byte, o agent.AppendOptions) error {
 	sum := sha256.Sum256(b)
-	e := Entry{Op: OpAppend, Machine: machine, Path: p, Len: int64(len(b)), Sum: hex.EncodeToString(sum[:]), KeepMtime: o.KeepMtime}
+	e := Entry{Op: OpAppend, Machine: machine, Path: p, Len: int64(len(b)), Sum: hex.EncodeToString(sum[:]), KeepMtime: o.KeepMtime, Standalone: o.Standalone}
 	fi, err := fsys.Stat(p)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -286,7 +339,8 @@ func (j *Journal) Append(fsys host.FS, machine, p string, b []byte, o agent.Appe
 }
 
 // undoAppend removes the bytes an Append added (and the newline Append may have put
-// before them). Whatever was written after them stays; if they changed, nothing is.
+// before them); if they changed, nothing is. What was written after Standalone bytes
+// stays; after other bytes it built on them, so a forced undo cuts the file there.
 func undoAppend(fsys host.FS, e Entry) error {
 	fi, err := fsys.Stat(e.Path)
 	if err != nil {
@@ -301,6 +355,9 @@ func undoAppend(fsys host.FS, e Entry) error {
 		return fmt.Errorf("what hopsesh added to %s has changed since; left as it is", e.Path)
 	}
 	end := at + lead + e.Len
+	if !e.Standalone {
+		end = int64(len(data)) // Undo refused this unless forced
+	}
 	if end == int64(len(data)) {
 		if e.Created && at == 0 {
 			return fsys.Remove(e.Path) // nothing else is in it
