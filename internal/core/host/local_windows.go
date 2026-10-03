@@ -65,4 +65,3 @@ func shortPath(p string) string {
 	}
 	return windows.UTF16ToString(buf[:n])
 }
-

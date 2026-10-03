@@ -131,4 +131,3 @@ func processNames(ctx context.Context, pids []int) (map[int]string, error) {
 
 // shortPath: only Windows has short names.
 func shortPath(string) string { return "" }
-
