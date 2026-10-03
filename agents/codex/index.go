@@ -64,6 +64,19 @@ type reply struct {
 // `codex app-server` to (thread/read), and to record the name (thread/name/set). Codex
 // not installed here is not an error: it finds the session by id when resumed.
 func (m *Module) AfterInstall(ctx context.Context, h agent.Host, in agent.Install, key agent.SessionKey, p agent.Placement) error {
+	// A copy coming home replaces one hopsesh marked. Codex keeps the mark as the thread's
+	// name in the shared index, where it outlives the replaced file: name it again.
+	if cur := names(h, in)[string(key.Session)]; cur != "" {
+		if _, orig, ok := agent.ParseMarkTitle(cur); ok {
+			name := p.Name
+			if name == "" {
+				name = orig
+			}
+			if err := setName(h, in, string(key.Session), name); err != nil {
+				return fmt.Errorf("clearing the mark of the copy this replaced: %w", err)
+			}
+		}
+	}
 	if in.Binary == "" || !h.Facts().Local {
 		return nil
 	}

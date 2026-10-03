@@ -50,17 +50,50 @@ func TestFindLocalCloneWorktree(t *testing.T) {
 		t.Errorf("clone failure must carry git's reason: %v", err)
 	}
 	wt := filepath.Join(dest, ".claude", "worktrees", "feat")
-	if err := AddWorktree(ctx, dest, "feat", wt); err != nil {
+	if err := AddWorktree(ctx, dest, "feat", wt, nil); err != nil {
 		t.Fatal(err)
 	}
 	if CurrentBranch(ctx, wt) != "feat" {
 		t.Error("worktree not on feat")
 	}
-	if err := AddWorktree(ctx, dest, "feat", filepath.Join(root, "wt2")); err == nil {
+	if err := AddWorktree(ctx, dest, "feat", filepath.Join(root, "wt2"), nil); err == nil {
 		t.Error("checking out a branch twice must fail")
 	}
-	if err := AddWorktree(ctx, dest, "ghost", filepath.Join(root, "wt3")); err == nil {
+	if err := AddWorktree(ctx, dest, "ghost", filepath.Join(root, "wt3"), nil); err == nil {
 		t.Error("unknown branch must fail")
+	}
+	// A branch only the other machine has (never pushed) comes straight from it.
+	git(t, seed, "checkout", "-qb", "agent-only")
+	os.WriteFile(filepath.Join(seed, "b"), []byte("b"), 0o644)
+	git(t, seed, "add", "b")
+	git(t, seed, "commit", "-qm", "2")
+	from := &FetchSource{Name: "laptop", URL: seed}
+	wt4 := filepath.Join(dest, ".claude", "worktrees", "agent-only")
+	if err := AddWorktree(ctx, dest, "agent-only", wt4, from); err != nil {
+		t.Fatalf("a branch from the other machine: %v", err)
+	}
+	if CurrentBranch(ctx, wt4) != "agent-only" {
+		t.Error("worktree not on the fetched branch")
+	}
+	if _, err := os.Stat(filepath.Join(wt4, "b")); err != nil {
+		t.Error("the fetched branch's commit is not checked out")
+	}
+	// The same through a bundle the other machine writes (how Windows machines are reached).
+	git(t, seed, "checkout", "-qb", "bundled")
+	os.WriteFile(filepath.Join(seed, "c"), []byte("c"), 0o644)
+	git(t, seed, "add", "c")
+	git(t, seed, "commit", "-qm", "3")
+	viaBundle := &FetchSource{Name: "pc", Bundle: func(ctx context.Context, ref string) (string, func(), error) {
+		f := filepath.Join(root, "x.bundle")
+		git(t, seed, "bundle", "create", f, ref)
+		return f, func() { os.Remove(f) }, nil
+	}}
+	wt5 := filepath.Join(dest, ".claude", "worktrees", "bundled")
+	if err := AddWorktree(ctx, dest, "bundled", wt5, viaBundle); err != nil {
+		t.Fatalf("a branch through a bundle: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wt5, "c")); err != nil {
+		t.Error("the bundled branch's commit is not checked out")
 	}
 	if err := SwitchBranch(ctx, dest, "main", []string{".claude/worktrees"}); err != nil {
 		t.Errorf("checkout main: %v", err)

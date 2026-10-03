@@ -85,3 +85,18 @@ func TestParseProbeBranchElsewhere(t *testing.T) {
 		t.Errorf("elsewhere: %q", got)
 	}
 }
+
+// git on Windows reports C:/Users/…; the states use the form agents record (C:\Users\…), so
+// path mapping matches. Paths that are not drive paths are left alone.
+func TestWindowsPaths(t *testing.T) {
+	out := []byte("@@dir\tC:\\Users\\sam\\app\nexists\t1\nrepo\t1\ntop\tC:/Users/sam/app\n" +
+		"wt\tworktree C:/Users/sam/app\nwt\tbranch refs/heads/main\nwt\tworktree C:/Users/sam/app/.claude/worktrees/x\nwt\tbranch refs/heads/x\n")
+	s := WindowsPaths(ParseProbe(out, nil))
+	if len(s) != 1 || s[0].Toplevel != `C:\Users\sam\app` || s[0].MainWorktree != `C:\Users\sam\app` ||
+		s[0].Worktrees[1].Path != `C:\Users\sam\app\.claude\worktrees\x` {
+		t.Fatalf("%+v", s)
+	}
+	if windowsPath("/home/sam/app") != "/home/sam/app" {
+		t.Fatal("a POSIX path must stay as it is")
+	}
+}

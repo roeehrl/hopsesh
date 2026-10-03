@@ -178,6 +178,50 @@ jobs:
       - run: scripts/roundtrip-test.sh
       - run: scripts/password-test.sh
 
+  scenarios:
+    name: scenarios (${{ matrix.family }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {family: linux, os: ubuntu-24.04}
+          - {family: macos, os: macos-15}
+          - {family: windows, os: windows-2025}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: build hopsesh, the matrix runner and the stand-in agents
+        shell: bash
+        run: |
+          ext=""; [ "$RUNNER_OS" = Windows ] && ext=.exe
+          go build -o "bin/hopsesh$ext" ./cmd/hopsesh
+          go build -o "bin/hsmatrix$ext" ./internal/devtools/hsmatrix
+          go build -o "bin/fakeagent$ext" ./internal/devtools/fakeagent
+      - name: scenario matrix over loopback SSH
+        if: runner.os != 'Windows'
+        run: scripts/matrix-loopback.sh bin "${{ matrix.family }}→${{ matrix.family }}" "$RUNNER_TEMP/hsmatrix"
+      - name: scenario matrix over loopback SSH
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/matrix-loopback.ps1 -Bin bin -Label "windows→windows" -Out "$env:RUNNER_TEMP\hsmatrix"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ failure() }}
+        with:
+          name: scenarios-${{ matrix.family }}
+          path: |
+            ${{ runner.temp }}/hsmatrix/*.log
+            ${{ runner.temp }}/hsmatrix/*.json
+          retention-days: 7
+
   windows-peer:
     name: ssh (windows)
     runs-on: windows-2025
@@ -307,7 +351,7 @@ jobs:
       - run: shellcheck scripts/*.sh demo/*.sh
       - shell: pwsh
         run: |
-          foreach ($f in 'scripts/install.ps1', 'scripts/windows-app-test.ps1', 'scripts/windows-peer-test.ps1', 'scripts/windows-demo-studio.ps1') {
+          foreach ($f in 'scripts/install.ps1', 'scripts/windows-app-test.ps1', 'scripts/windows-peer-test.ps1', 'scripts/windows-demo-studio.ps1', 'scripts/matrix-loopback.ps1') {
             $null = [ScriptBlock]::Create((Get-Content -Raw $f))
           }
 

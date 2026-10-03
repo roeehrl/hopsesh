@@ -214,3 +214,35 @@ func TestStopAndStatus(t *testing.T) {
 		t.Fatalf("after stop: %+v", live[t1])
 	}
 }
+
+// A copy that comes home replaces a marked one; the mark lives in the shared index, so
+// installing names the thread again (its original title when the move carries none).
+func TestAfterInstallClearsTheMark(t *testing.T) {
+	h, in, byID := setup(t)
+	m := New()
+	ctx := context.Background()
+	if err := m.Mark(ctx, h, in, byID[t3], agent.Mark{Kind: agent.MarkMoved, Location: "laptop"}); err != nil {
+		t.Fatal(err)
+	}
+	if l, _ := m.List(ctx, h, in); find(l.Sessions, t3).Mark == nil {
+		t.Fatal("the thread should be marked")
+	}
+	noCodex := in
+	noCodex.Binary = "" // the mark is cleared without codex's app-server
+	if err := m.AfterInstall(ctx, h, noCodex, byID[t3].Key, agent.Placement{}); err != nil {
+		t.Fatal(err)
+	}
+	l, _ := m.List(ctx, h, in)
+	if s := find(l.Sessions, t3); s.Mark != nil || s.Title != "README cleanup" {
+		t.Fatalf("after coming home: mark %+v, title %q", s.Mark, s.Title)
+	}
+}
+
+func find(ss []agent.Summary, id string) agent.Summary {
+	for _, s := range ss {
+		if string(s.Key.Session) == id {
+			return s
+		}
+	}
+	return agent.Summary{}
+}

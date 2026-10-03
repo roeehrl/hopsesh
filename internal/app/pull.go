@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/repos"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
@@ -205,10 +206,15 @@ func (a *App) Apply(ctx context.Context, p *move.Plan, in move.Input, progress f
 // gitFetchFunc is how to fetch from a repository on a machine over SSH (nil for this
 // machine and for Windows).
 func gitFetchFunc(m *Machine) func(string) *repos.FetchSource {
-	if m.Local || m.host == nil || m.host.Conn == nil || m.OS == "windows" {
+	if m.Local || m.host == nil || m.host.Conn == nil {
 		return nil
 	}
 	conn, name := m.host.Conn, m.Name
+	if m.OS == "windows" {
+		return func(dir string) *repos.FetchSource {
+			return &repos.FetchSource{Name: name, Bundle: windowsBundle(m.host, dir)}
+		}
+	}
 	return func(dir string) *repos.FetchSource {
 		env := append([]string{"GIT_SSH_COMMAND=" + conn.GitSSHCommand()}, conn.GitSSHEnv(context.Background())...)
 		return &repos.FetchSource{Name: name, URL: conn.GitURL(dir), Env: env}
@@ -263,4 +269,44 @@ func pushResult(out string, err error) (string, error) {
 func (a *App) LocalRoots() []string {
 	home, _ := os.UserHomeDir()
 	return append([]string{a.Cfg.ReposDir}, repos.DefaultRoots(home)...)
+}
+
+// windowsBundle fetches from a Windows machine through a git bundle: git over ssh does not
+// work there (its OpenSSH runs commands through cmd.exe, which mangles git's quoting), so
+// the machine writes a bundle of the ref with PowerShell, and it comes over SFTP.
+func windowsBundle(h *host.Machine, dir string) func(context.Context, string) (string, func(), error) {
+	return func(ctx context.Context, ref string) (string, func(), error) {
+		ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+		defer cancel()
+		q := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
+		script := "$f = Join-Path $env:TEMP ('hopsesh-' + [guid]::NewGuid() + '.bundle')\n" +
+			"git -C " + q(dir) + " bundle create $f " + q(ref) + " 2>&1 | Out-Null\n" +
+			"if ($LASTEXITCODE -ne 0) { exit 1 }\n" +
+			"Write-Output $f\n"
+		out, err := h.Conn.RunPowerShell(ctx, script)
+		if err != nil {
+			return "", nil, fmt.Errorf("git bundle on %s: %w", h.Name, err)
+		}
+		remote := strings.TrimSpace(string(out))
+		fsys, err := h.FS(ctx)
+		if err != nil {
+			return "", nil, err
+		}
+		defer func() { _ = fsys.Remove(remote) }()
+		b, err := fsys.ReadFile(remote, 1<<30)
+		if err != nil {
+			return "", nil, fmt.Errorf("reading the bundle from %s: %w", h.Name, err)
+		}
+		f, err := os.CreateTemp("", "hopsesh-*.bundle")
+		if err != nil {
+			return "", nil, err
+		}
+		if _, err := f.Write(b); err != nil {
+			f.Close()
+			os.Remove(f.Name())
+			return "", nil, err
+		}
+		f.Close()
+		return f.Name(), func() { os.Remove(f.Name()) }, nil
+	}
 }

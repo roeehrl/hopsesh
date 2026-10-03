@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Fixed
+- A Codex session that went to another machine and came back no longer keeps its "moved"
+  mark in Codex's own list: the mark is the thread's name in Codex's shared index, which
+  outlived the copy it marked.
+- Unpushed commits and never-pushed worktree branches now come along from Windows machines
+  too, through a git bundle (git over ssh does not work against Windows' OpenSSH, which
+  runs commands through cmd.exe); before, hopsesh asked you to push them first.
+- Moving or continuing a session from a Windows machine now rewrites its paths when its
+  folder is a git repository: git reports `C:/Users/…`, the agents record `C:\Users\…`,
+  and the two never matched, so the copy kept the other machine's paths.
+- A session that ran in an agent worktree whose branch was never pushed now comes over
+  with its branch, fetched straight from the other machine like unpushed commits on the
+  checked-out branch (before, hopsesh stopped with "branch … exists neither locally nor on
+  origin").
+
 ## [0.3.0] - 2026-10-03
 
 hopsesh now works with more than one coding agent: Claude Code and Codex, each a module

@@ -241,7 +241,7 @@ func (m *Machine) GitProbe(ctx context.Context, dirs, excl []string) ([]repos.Gi
 		if err != nil {
 			return nil, err
 		}
-		return repos.ParseProbe(out, excl), nil
+		return repos.WindowsPaths(repos.ParseProbe(out, excl)), nil
 	}
 	script, args := repos.ProbeScript(dirs, excl)
 	out, err := m.Conn.RunSh(ctx, script, args[1:]...)

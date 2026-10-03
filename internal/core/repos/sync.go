@@ -45,7 +45,28 @@ type FetchSource struct {
 	Name string   // machine name (used in refs/hopsesh/<name>/<branch>)
 	URL  string   // scp-style URL, e.g. laptop:/Users/alice/git/app
 	Env  []string // e.g. GIT_SSH_COMMAND for the same SSH settings hopsesh uses
+	// Bundle, when set, is used instead of URL: the other machine writes a git bundle of
+	// ref, and Bundle returns a local copy of it (and how to remove it). For Windows,
+	// whose OpenSSH runs git's upload-pack command through cmd.exe, which mangles it.
+	Bundle func(ctx context.Context, ref string) (string, func(), error)
 }
+
+// fetch brings ref from the other machine into dst (refs/hopsesh/…).
+func (f *FetchSource) fetch(ctx context.Context, dir, ref, dst string) error {
+	if f.Bundle != nil {
+		path, done, err := f.Bundle(ctx, ref)
+		if err != nil {
+			return err
+		}
+		defer done()
+		_, err = runGit(ctx, dir, "fetch", "--quiet", "--no-tags", path, "+"+ref+":"+dst)
+		return err
+	}
+	_, err := runGitEnv(ctx, dir, f.Env, "fetch", "--quiet", "--no-tags", f.URL, "+"+ref+":"+dst)
+	return err
+}
+
+func (f *FetchSource) usable() bool { return f != nil && (f.URL != "" || f.Bundle != nil) }
 
 // Sync brings dir up to commit when that is safe: it fetches from origin if the commit
 // is not there yet, then from the other machine itself (from, when given) into
@@ -60,13 +81,13 @@ func Sync(ctx context.Context, dir, branch, commit string, fastForward bool, fro
 		if branch != "" {
 			_, _ = runGit(ctx, dir, "fetch", "--quiet", "origin", branch)
 		}
-		if !HasCommit(ctx, dir, commit) && from != nil && from.URL != "" {
+		if !HasCommit(ctx, dir, commit) && from.usable() {
 			srcRef, name := "HEAD", "HEAD"
 			if branch != "" {
 				srcRef, name = "refs/heads/"+branch, branch
 			}
 			ref := "refs/hopsesh/" + safeRefPart(from.Name) + "/" + name
-			if _, err := runGitEnv(ctx, dir, from.Env, "fetch", "--quiet", "--no-tags", from.URL, "+"+srcRef+":"+ref); err == nil {
+			if err := from.fetch(ctx, dir, srcRef, ref); err == nil {
 				r.FromSource = true
 			}
 		}
