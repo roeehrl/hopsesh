@@ -19,6 +19,10 @@ on:
 permissions:
   contents: read
 
+concurrency: # a newer push to the same pull request replaces the run; scheduled and tag runs never wait
+  group: nightly-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   real-agents:
     name: latest agents (${{ matrix.family }})
