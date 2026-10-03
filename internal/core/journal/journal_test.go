@@ -128,3 +128,41 @@ func TestUndoRefusesWhatWasUsedSince(t *testing.T) {
 		t.Fatal("forced undo removes it")
 	}
 }
+
+// An append that creates a shared file (an agent's index) is undone by taking out its
+// own line: later lines from other operations stay, and the file goes only when nothing
+// else is in it. Neither counts as the operation's session being used since.
+func TestUndoAppendThatCreatedTheFile(t *testing.T) {
+	state, data := t.TempDir(), t.TempDir()
+	fsys := host.LocalFS()
+	fsFor := func(string) (host.FS, error) { return fsys, nil }
+	index := filepath.Join(data, "codex", "session_index.jsonl")
+
+	first, _ := New(state, KindContinue, "first")
+	must(t, first.Append(fsys, "here", index, []byte(`{"id":"a"}`+"\n"), agent.AppendOptions{NewLine: true}))
+	must(t, first.Seal(fsFor))
+	second, _ := New(state, KindContinue, "second")
+	must(t, second.Append(fsys, "here", index, []byte(`{"id":"b"}`+"\n"), agent.AppendOptions{NewLine: true}))
+	must(t, second.Seal(fsFor))
+
+	if err := first.Changed(fsFor); err != nil {
+		t.Fatalf("another operation's line in a shared file is not a later use: %v", err)
+	}
+	must(t, first.Undo(fsFor, false))
+	if b, _ := os.ReadFile(index); string(b) != `{"id":"b"}`+"\n" {
+		t.Fatalf("undoing the first keeps the second's line: %q", b)
+	}
+	must(t, second.Undo(fsFor, false))
+	if b, err := os.ReadFile(index); err == nil && len(b) > 0 {
+		t.Fatalf("both lines are taken out: %q", b)
+	}
+
+	// Undone in the order they were made, the creating append removes the file.
+	third, _ := New(state, KindContinue, "third")
+	other := filepath.Join(data, "other", "index.jsonl")
+	must(t, third.Append(fsys, "here", other, []byte("x\n"), agent.AppendOptions{NewLine: true}))
+	must(t, third.Undo(fsFor, false))
+	if _, err := os.Stat(other); !os.IsNotExist(err) {
+		t.Fatal("a file an append created goes when its undo leaves it empty")
+	}
+}

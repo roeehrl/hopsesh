@@ -44,6 +44,7 @@ type Entry struct {
 	Mtime     time.Time `json:"mtime,omitempty"`  // OpAppend: time before
 	Backup    string    `json:"backup,omitempty"` // OpReplace: copy of the old file
 	KeepMtime bool      `json:"keepMtime,omitempty"`
+	Created   bool      `json:"created,omitempty"` // OpAppend: the append created the file
 }
 
 // Journal is the undo record of one operation (a move, a continuation, a mark).
@@ -267,13 +268,18 @@ func (j *Journal) WriteFile(fsys host.FS, machine, p string, b []byte, perm fs.F
 // Append adds to a file, remembering where and what, so undo can take out exactly these
 // bytes even after the agent appended more.
 func (j *Journal) Append(fsys host.FS, machine, p string, b []byte, o agent.AppendOptions) error {
-	fi, err := fsys.Stat(p)
-	if err != nil {
-		return err
-	}
 	sum := sha256.Sum256(b)
-	if err := j.record(Entry{Op: OpAppend, Machine: machine, Path: p, Size: fi.Size(), Len: int64(len(b)), Sum: hex.EncodeToString(sum[:]),
-		Mtime: fi.ModTime(), KeepMtime: o.KeepMtime}); err != nil {
+	e := Entry{Op: OpAppend, Machine: machine, Path: p, Len: int64(len(b)), Sum: hex.EncodeToString(sum[:]), KeepMtime: o.KeepMtime}
+	fi, err := fsys.Stat(p)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		e.Created, e.KeepMtime = true, false // undo removes it once nothing else is in it
+	case err != nil:
+		return err
+	default:
+		e.Size, e.Mtime = fi.Size(), fi.ModTime()
+	}
+	if err := j.record(e); err != nil {
 		return err
 	}
 	return fsys.Append(p, b, o)
@@ -290,34 +296,22 @@ func undoAppend(fsys host.FS, e Entry) error {
 	if err != nil {
 		return err
 	}
-	if int64(len(data)) < e.Size+e.Len {
-		return fmt.Errorf("%s is shorter than when hopsesh added to it; left as it is", e.Path)
-	}
-	rest := data[e.Size:]
-	n, lead := int64(-1), int64(0)
-	for _, lead = range []int64{0, 1} {
-		if lead == 1 && (len(rest) == 0 || rest[0] != '\n') {
-			continue
-		}
-		if e.Size+lead+e.Len > int64(len(data)) {
-			continue
-		}
-		if sum := sha256.Sum256(rest[lead : lead+e.Len]); hex.EncodeToString(sum[:]) == e.Sum {
-			n = lead + e.Len
-			break
-		}
-	}
-	if n < 0 {
+	at, lead, ok := findAppended(data, e)
+	if !ok {
 		return fmt.Errorf("what hopsesh added to %s has changed since; left as it is", e.Path)
 	}
-	if e.Size+n == int64(len(data)) {
-		if err := fsys.Truncate(e.Path, e.Size); err != nil {
+	end := at + lead + e.Len
+	if end == int64(len(data)) {
+		if e.Created && at == 0 {
+			return fsys.Remove(e.Path) // nothing else is in it
+		}
+		if err := fsys.Truncate(e.Path, at); err != nil {
 			return err
 		}
 	} else {
 		// Keep the newline Append put in front: it ends the line before, which later lines
 		// now follow.
-		kept := append(append([]byte{}, data[:e.Size+lead]...), rest[n:]...)
+		kept := append(append([]byte{}, data[:at+lead]...), data[end:]...)
 		if err := fsys.WriteFile(e.Path, kept, fi.Mode().Perm()); err != nil {
 			return err
 		}
@@ -327,6 +321,32 @@ func undoAppend(fsys host.FS, e Entry) error {
 		return fsys.Chtimes(e.Path, e.Mtime)
 	}
 	return nil
+}
+
+// findAppended locates the bytes an Append added: where it put them (after a newline
+// Append may have added first), else at the start of a line, for when an earlier append
+// to the same file was taken out since. It returns their offset and whether that
+// newline comes first.
+func findAppended(data []byte, e Entry) (at, lead int64, ok bool) {
+	match := func(from int64) bool {
+		if from < 0 || from+e.Len > int64(len(data)) {
+			return false
+		}
+		sum := sha256.Sum256(data[from : from+e.Len])
+		return hex.EncodeToString(sum[:]) == e.Sum
+	}
+	if match(e.Size) {
+		return e.Size, 0, true
+	}
+	if e.Size < int64(len(data)) && data[e.Size] == '\n' && match(e.Size+1) {
+		return e.Size, 1, true
+	}
+	for from := int64(0); from+e.Len <= int64(len(data)); from++ {
+		if (from == 0 || data[from-1] == '\n') && match(from) {
+			return from, 0, true
+		}
+	}
+	return 0, 0, false
 }
 
 // Rename moves a file, remembering where from.

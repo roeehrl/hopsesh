@@ -220,8 +220,13 @@ func (m memFS) Append(p string, b []byte, o agent.AppendOptions) error {
 	m.h.mu.Lock()
 	defer m.h.mu.Unlock()
 	f, ok := m.h.files[path.Clean(p)]
-	if !ok || f.dir {
-		return &fs.PathError{Op: "append", Path: p, Err: fs.ErrNotExist}
+	if ok && f.dir {
+		return &fs.PathError{Op: "append", Path: p, Err: fs.ErrInvalid}
+	}
+	if !ok {
+		m.h.mkdirAll(path.Dir(p))
+		f = &memFile{mode: 0o600, mtime: time.Now()}
+		m.h.files[path.Clean(p)] = f
 	}
 	if o.NewLine && len(f.data) > 0 && f.data[len(f.data)-1] != '\n' {
 		f.data = append(f.data, '\n')

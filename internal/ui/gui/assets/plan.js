@@ -1,6 +1,6 @@
 // The plan sheet (what a hop, continuation or send will do, with its choices), its
 // progress, and the Done screen.
-import { api, on, h, fill, view, state, screen, go, current, toast, fail, errText, cap, agentClass, here, $ } from "./core.js";
+import { api, on, h, fill, view, state, screen, go, current, toast, fail, errText, cap, agentClass, here, $, count } from "./core.js";
 import { undo } from "./activity.js";
 
 const sheet = $("#sheet");
@@ -77,7 +77,7 @@ function summary(p) {
   } else add.push(`1 ${p.agent} session ${there}`);
   if (r.action === "clone") add.push("1 clone");
   if (r.worktree) add.push("1 worktree");
-  if (p.setAside) chg.push(`${p.setAside} older copy set aside`);
+  if (p.setAside) chg.push(`${count(p.setAside, "older copy", "older copies")} set aside`);
   if (p.stopHere) chg.push("1 quit here first");
   if (p.mark !== "off") chg.push(`1 marked on ${p.sourceHost}${p.mark === "when-stopped" ? " when it ends" : ""}`);
   return h("div", { class: "summary", "aria-label": "What changes" },
@@ -88,12 +88,12 @@ function summary(p) {
 // boxes splits a conversion report into what is carried, changed and left out.
 function boxes(p) {
   const c = p.continue, rep = c.report;
-  const carried = rep.fidelity === "note" ? ["A briefing only"] : [`${rep.messages} messages`,
-    rep.nativeCalls ? `${rep.nativeCalls} commands as ${p.agent}'s own, ${rep.toolCalls - rep.nativeCalls} tool calls as text` : `${rep.toolCalls} tool calls, as text`];
-  const changed = [rep.outputsShortened && `${rep.outputsShortened} long outputs shortened`, rep.stepsSummarised && `${rep.stepsSummarised} oldest steps summarised to fit`,
-    rep.pathsMapped && `${rep.pathsMapped} paths mapped to ${p.machine || "this machine"}`, rep.redactions && `${rep.redactions} likely secrets redacted`,
-    rep.attachmentsAsPlaceholders && `${rep.attachmentsAsPlaceholders} attachments as placeholders`].filter(Boolean);
-  const lost = rep.reasoningDropped ? [`${rep.reasoningDropped} reasoning blocks`, `private to ${c.from}`] : ["Nothing"];
+  const carried = rep.fidelity === "note" ? ["A briefing only"] : [count(rep.messages, "message"),
+    rep.nativeCalls ? `${count(rep.nativeCalls, "command")} as ${p.agent}'s own, ${count(rep.toolCalls - rep.nativeCalls, "tool call")} as text` : `${count(rep.toolCalls, "tool call")}, as text`];
+  const changed = [rep.outputsShortened && `${count(rep.outputsShortened, "long output")} shortened`, rep.stepsSummarised && `${count(rep.stepsSummarised, "oldest step")} summarised to fit`,
+    rep.pathsMapped && `${count(rep.pathsMapped, "path")} mapped to ${p.machine || "this machine"}`, rep.redactions && `${count(rep.redactions, "likely secret")} redacted`,
+    rep.attachmentsAsPlaceholders && `${count(rep.attachmentsAsPlaceholders, "attachment")} as placeholders`].filter(Boolean);
+  const lost = rep.reasoningDropped ? [count(rep.reasoningDropped, "reasoning block"), `private to ${c.from}`] : ["Nothing"];
   const box = (cls, title, lines) => h("div", { class: "box " + cls }, h("b", {}, title), lines.map((l, i) => h("span", { class: i ? "muted" : "" }, l)));
   return h("div", { class: "three-boxes" }, box("kept", "Carried over", carried), box("changed", "Changed", changed.length ? changed : ["Nothing"]), box("lost", "Left out", lost));
 }
@@ -155,9 +155,9 @@ function repository(p) {
           [["auto", "Recreate one if the session used one"], ["create", "Always use a worktree on this branch"], ["main", "Use the main checkout"]].map(([v, t]) => h("option", { value: v, selected: o.worktree === v }, t))))));
   }
   if (r.unpushed) out.push(p.syncFromSource || p.push
-    ? item("ok", `${r.unpushed} unpushed commit(s) come along`, p.push ? `Pushed on ${p.sourceHost} first.` : `Fetched straight from ${p.sourceHost}.`)
-    : item("warn", `${r.unpushed} unpushed commit(s) stay on ${p.sourceHost}`, "Turn on “Bring the code” below to fetch them."));
-  if (r.dirty) out.push(item("warn", `${r.dirty} uncommitted file(s) stay on ${p.sourceHost}`, "Commit them there to bring them."));
+    ? item("ok", `${count(r.unpushed, "unpushed commit")} ${r.unpushed === 1 ? "comes" : "come"} along`, p.push ? `Pushed on ${p.sourceHost} first.` : `Fetched straight from ${p.sourceHost}.`)
+    : item("warn", `${count(r.unpushed, "unpushed commit")} ${r.unpushed === 1 ? "stays" : "stay"} on ${p.sourceHost}`, "Turn on “Bring the code” below to fetch them."));
+  if (r.dirty) out.push(item("warn", `${count(r.dirty, "uncommitted file")} ${r.dirty === 1 ? "stays" : "stay"} on ${p.sourceHost}`, "Commit them there to bring them."));
   if (p.sync) out.push(item("ok", "Code: " + p.sync, ""));
   if (p.stopHere) out.push(item("warn", "The copy open here is quit first", "It gets the normal quit signal and saves its session before the newer copy replaces it."));
   return h("section", { class: "sec", style: "gap:10px" }, h("span", { class: "sec-h" }, "Repository and code"), out);
@@ -194,7 +194,7 @@ function options(p) {
   const opts = [
     p.mark !== "off" || !o.mark ? check(`Mark the copy on ${p.sourceHost}`, "mark", markDesc) : null,
     r.sourceHead && !sameFolder(p) ? check("Bring the code to the session's commit", "syncCode", "Fetches if needed; fast-forwards only a clean checkout on the same branch.") : null,
-    r.unpushed && r.sourceUpstream && !sameFolder(p) ? check(`Push ${r.unpushed} commit(s) on ${p.sourceHost} first`, "push", "With that machine's own git credentials.") : null,
+    r.unpushed && r.sourceUpstream && !sameFolder(p) ? check(`Push ${count(r.unpushed, "commit")} on ${p.sourceHost} first`, "push", "With that machine's own git credentials.") : null,
     cont ? check("Start working right away", "go", `${p.agent} starts with “Continue.” instead of waiting for you.`) : null,
     p.can.remoteControl ? check("Turn on Remote Control", "remoteControl", `Reach it from your phone or other machines, as ${p.newName}.`) : null,
     p.can.app && !p.machine ? check(`Open it in the ${p.agent} app`, "app", "Instead of a terminal window.") : null,
@@ -208,7 +208,7 @@ function options(p) {
 
 function paths(p) {
   if (!p.mappings.length) return null;
-  return h("details", { class: "sec" }, h("summary", { style: "cursor:pointer;font-size:12.5px" }, `${p.mappings.length} folder(s) mapped to ${p.machine || "this machine"}`),
+  return h("details", { class: "sec" }, h("summary", { style: "cursor:pointer;font-size:12.5px" }, `${count(p.mappings.length, "folder")} mapped to ${p.machine || "this machine"}`),
     h("div", { class: "maprow", style: "margin-top:8px" }, p.mappings.flatMap((m) => [h("span", {}, m.from), h("span", { style: "color:var(--accent)" }, "→"), h("span", {}, m.to)])),
     h("span", { class: "muted", style: "font-size:11.5px" }, p.continue ? "Paths in the conversation are mapped too." : "Signed and encrypted content, message ids and the session id are never changed."));
 }
@@ -273,14 +273,14 @@ function happened(d, p) {
   const out = [];
   if (d.kind === "continue") {
     const rep = p.continue.report;
-    out.push(item("ok", `${d.agent} session written`, rep.fidelity === "note" ? "With a briefing only." : `${rep.messages} messages, ${rep.toolCalls} tool calls.`));
+    out.push(item("ok", `${d.agent} session written`, rep.fidelity === "note" ? "With a briefing only." : `${count(rep.messages, "message")}, ${count(rep.toolCalls, "tool call")}.`));
     if (p.nativeCopy) out.push(item("ok", `The ${p.nativeCopy.agent} session is kept ${d.machine ? "on " + d.machine : "here"} too`, `Coming back to ${p.nativeCopy.agent} later adds only the new work to it.`));
   } else {
-    out.push(item("ok", `${d.files} file(s), ${d.bytes} copied`, `${d.paths} path(s) rewritten.`));
+    out.push(item("ok", `${count(d.files, "file")}, ${d.bytes} copied`, `${count(d.paths, "path")} rewritten.`));
   }
   if (d.cloned) out.push(item("ok", "Repository cloned", ""));
   if (d.worktree) out.push(item("ok", "Worktree created", d.worktree));
-  if (d.secrets) out.push(item(d.redacted ? "ok" : "warn", `${d.secrets} likely secret(s) ${d.redacted ? "redacted" : "found in the copy"}`, ""));
+  if (d.secrets) out.push(item(d.redacted ? "ok" : "warn", `${count(d.secrets, "likely secret")} ${d.redacted ? "redacted" : "found in the copy"}`, ""));
   if (d.stopped) out.push(item("ok", "Quit the copy that was open here", ""));
   if (d.pushError) out.push(item("warn", `Could not push on ${d.sourceHost}`, d.pushError));
   else if (d.pushed) out.push(item("ok", `Pushed the session's branch on ${d.sourceHost}`, ""));

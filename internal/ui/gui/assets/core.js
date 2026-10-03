@@ -68,6 +68,8 @@ export function toast(msg, action) {
   t.onmouseleave = hide;
   hide();
 }
+// count is a number with its noun: count(1, "tool call") is "1 tool call", count(2, …) "2 tool calls".
+export const count = (n, one, many = one + "s") => `${n} ${n === 1 ? one : many}`;
 export const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 export const errText = (e) => String((e && e.message) || e);
 export const fail = (e) => toast(errText(e));

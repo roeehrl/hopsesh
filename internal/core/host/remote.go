@@ -64,6 +64,9 @@ func (f remoteFS) Append(p string, b []byte, o agent.AppendOptions) error {
 	c := f.r.Client()
 	sp := f.p(p)
 	fi, err := c.Stat(sp)
+	if errors.Is(err, fs.ErrNotExist) {
+		return f.WriteFile(p, b, 0o600)
+	}
 	if err != nil {
 		return err
 	}

@@ -193,8 +193,9 @@ func (f *memFS) Append(p string, b []byte, o agent.AppendOptions) error {
 	defer f.mu.Unlock()
 	p = f.pa.Clean(p)
 	sf, ok := f.files[p]
-	if !ok {
-		return notExist("append", p)
+	if !ok { // a new file: the sender's append creates it too
+		sf = &SnapshotFile{Path: p, Mode: 0o600, ModTime: time.Now()}
+		f.files[p] = sf
 	}
 	f.writes = append(f.writes, SnapshotWrite{Op: "append", Path: p, Data: append([]byte(nil), b...), Append: o})
 	if o.NewLine && len(sf.Data) > 0 && sf.Data[len(sf.Data)-1] != '\n' {

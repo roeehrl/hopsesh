@@ -219,10 +219,9 @@ func setName(h agent.Host, in agent.Install, sid, name string) error {
 	if err != nil {
 		return err
 	}
+	// Always an append, even to create it: the index is shared by every thread, and undo
+	// takes out only this line.
 	p := h.Path().Join(in.Root(home), "session_index.jsonl")
-	if _, err := h.FS().Stat(p); err != nil {
-		return h.FS().WriteFile(p, append(line, '\n'), 0o600)
-	}
 	return h.FS().Append(p, append(line, '\n'), agent.AppendOptions{NewLine: true})
 }
 

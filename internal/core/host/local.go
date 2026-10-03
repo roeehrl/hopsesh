@@ -81,8 +81,11 @@ func (localFS) WriteFile(p string, b []byte, perm fs.FileMode) error {
 	return os.Rename(tmp.Name(), p)
 }
 
-func (localFS) Append(p string, b []byte, o agent.AppendOptions) error {
+func (l localFS) Append(p string, b []byte, o agent.AppendOptions) error {
 	fi, err := os.Stat(p)
+	if errors.Is(err, fs.ErrNotExist) {
+		return l.WriteFile(p, b, 0o600)
+	}
 	if err != nil {
 		return err
 	}

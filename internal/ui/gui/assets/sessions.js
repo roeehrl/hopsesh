@@ -2,7 +2,7 @@
 // selected session on the right. Every action on a session comes from actionsFor(), which
 // the palette uses too.
 import { api, h, fill, icon, ICONS, view, state, screen, go, loading, toast, fail, cap, ago, when, bytes, agentClass, short, machineStatus,
-  entries, selected, here, agentInfo, $ } from "./core.js";
+  entries, selected, here, agentInfo, $, count } from "./core.js";
 import { planFor } from "./plan.js";
 
 // scan reads every machine again. The list stays while it runs.
@@ -208,7 +208,7 @@ function inspector() {
       e.group.noRepo ? h("span", { class: "muted" }, "Started outside a git checkout") : [
         h("span", { class: "mono", style: "font-size:12px" }, e.group.remote || e.group.name + " (no remote)"),
         e.branch ? h("span", {}, e.branch, e.worktree ? h("span", { class: "muted" }, ` in a ${e.worktree}` + (e.mainBranch ? ` · main folder on ${e.mainBranch}` : "")) : null) : null,
-        e.unpushed || e.dirty ? h("span", { class: "warn" }, [e.unpushed ? `${e.unpushed} unpushed commit(s)` : "", e.dirty ? `${e.dirty} uncommitted file(s)` : ""].filter(Boolean).join(" · ")) : null,
+        e.unpushed || e.dirty ? h("span", { class: "warn" }, [e.unpushed ? count(e.unpushed, "unpushed commit") : "", e.dirty ? count(e.dirty, "uncommitted file") : ""].filter(Boolean).join(" · ")) : null,
         e.group.local ? h("span", { class: "ok" }, "Cloned here at " + e.group.local) : e.group.remote ? h("span", { class: "muted" }, "Not on this Mac: hopsesh can clone it") : null],
       e.cwd !== e.group.local ? h("span", { class: "mono muted", style: "font-size:11px;overflow-wrap:anywhere" }, e.cwd) : null),
     others.length ? h("div", { class: "sec" }, h("span", { class: "sec-h" }, "Other copies"),

@@ -52,7 +52,8 @@ type FS interface {
 	ReadFile(p string, limit int64) ([]byte, error)
 	// WriteFile replaces a file atomically, creating parent folders. Journaled.
 	WriteFile(p string, b []byte, perm fs.FileMode) error
-	// Append adds bytes at the end of a file. Journaled.
+	// Append adds bytes at the end of a file, creating it (and parent folders) when it does
+	// not exist. Journaled: undo takes out only these bytes.
 	Append(p string, b []byte, o AppendOptions) error
 	// Rename moves a file within the module's roots. Journaled.
 	Rename(from, to string) error
