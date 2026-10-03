@@ -13,15 +13,12 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
-	"runtime"
-	"strings"
 	"sync"
 
-	"github.com/roeehrl/hopsesh/agents/claude"
 	"github.com/roeehrl/hopsesh/internal/agents/all"
+	"github.com/roeehrl/hopsesh/internal/testkit"
 	"github.com/roeehrl/hopsesh/internal/ui/gui"
 )
 
@@ -46,7 +43,6 @@ func main() {
 	if *home == "" {
 		log.Fatal("-home is required")
 	}
-	repo := repoRoot()
 	h, err := filepath.Abs(*home)
 	if err != nil {
 		log.Fatal(err)
@@ -65,7 +61,10 @@ func main() {
 		if err := os.RemoveAll(h); err != nil {
 			return err
 		}
-		if err := demoHome(repo, h); err != nil {
+		for k, v := range testkit.Env(h) {
+			os.Setenv(k, v)
+		}
+		if err := testkit.DemoHome(h); err != nil {
 			return err
 		}
 		svc = gui.NewApp(all.Registry())
@@ -142,66 +141,4 @@ func call(w http.ResponseWriter, r *http.Request, svc *gui.App) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
-}
-
-// repoRoot is the module's folder (this file's, three levels up).
-func repoRoot() string {
-	_, file, _, _ := runtime.Caller(0)
-	return filepath.Join(filepath.Dir(file), "..", "..", "..")
-}
-
-// demoHome makes a home with a git repository, Claude Code sessions and Codex threads (the
-// modules' fixtures, paths pointed at it), and points every agent and hopsesh at it.
-func demoHome(repo, h string) error {
-	for k, v := range map[string]string{
-		"HOME": h, "USERPROFILE": h, "HOPSESH_CONFIG_DIR": filepath.Join(h, "config"),
-		"HOPSESH_STATE_DIR": filepath.Join(h, "state"), "HOPSESH_MACHINE": "studio", "CLAUDE_CONFIG_DIR": "", "CODEX_HOME": "",
-		"HOPSESH_TAILSCALE": "off", // never show this machine's real tailnet
-	} {
-		os.Setenv(k, v)
-	}
-	demo := filepath.Join(h, "git", "demo")
-	if err := os.MkdirAll(demo, 0o700); err != nil {
-		return err
-	}
-	for _, args := range [][]string{
-		{"init", "-q", "-b", "main"},
-		{"remote", "add", "origin", "https://github.com/example/demo.git"},
-		{"-c", "user.name=demo", "-c", "user.email=demo@example.com", "commit", "-q", "--allow-empty", "-m", "init"},
-	} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = demo
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("git %v: %v %s", args, err, out)
-		}
-	}
-	esc, _ := json.Marshal(demo)
-	jsonDemo := string(esc[1 : len(esc)-1])
-	copyTree := func(src, dst string) error {
-		return filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() {
-				return err
-			}
-			rel, _ := filepath.Rel(src, p)
-			// No account files, and no running-session registry (it would look open).
-			if strings.Contains(rel, "auth.json") || strings.Contains(rel, "credentials") || strings.HasPrefix(filepath.ToSlash(rel), "sessions/4242") || strings.Contains(rel, "locks") {
-				return nil
-			}
-			b, err := os.ReadFile(p)
-			if err != nil {
-				return err
-			}
-			b = []byte(strings.ReplaceAll(string(b), "/home/u/git/demo", jsonDemo))
-			rel = strings.ReplaceAll(rel, "-home-u-git-demo", claude.Slug(demo))
-			out := filepath.Join(dst, rel)
-			if err := os.MkdirAll(filepath.Dir(out), 0o700); err != nil {
-				return err
-			}
-			return os.WriteFile(out, b, 0o600)
-		})
-	}
-	if err := copyTree(filepath.Join(repo, "agents", "claude", "testdata", "2.1.284"), filepath.Join(h, ".claude")); err != nil {
-		return err
-	}
-	return copyTree(filepath.Join(repo, "agents", "codex", "testdata", "0.153.2"), filepath.Join(h, ".codex"))
 }
