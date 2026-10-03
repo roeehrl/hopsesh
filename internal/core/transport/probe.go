@@ -23,9 +23,29 @@ import (
 )
 
 // RunPowerShell runs a PowerShell script on a Windows machine (whatever its default ssh
-// shell is) via -EncodedCommand, which avoids every cmd.exe quoting pitfall.
+// shell is) via -EncodedCommand, which avoids every cmd.exe quoting pitfall. A script too
+// long for a command line goes through standard input instead.
 func (c *Conn) RunPowerShell(ctx context.Context, script string) ([]byte, error) {
-	return c.Run(ctx, PowerShellCommand(script))
+	cmd, stdin := PowerShellInvocation(script)
+	return c.RunInput(ctx, cmd, stdin)
+}
+
+// maxCommandLine keeps a command line inside cmd.exe's limit (8191 characters), the shell
+// Windows' OpenSSH server uses unless told otherwise.
+const maxCommandLine = 8000
+
+// psFromStdin reads a base64 UTF-8 script from standard input and runs it.
+const psFromStdin = `$s = [Console]::In.ReadToEnd(); Invoke-Expression ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($s.Trim())))`
+
+// PowerShellInvocation is the command line for a script and what to send on its standard
+// input (nil when the script fits on the command line). -EncodedCommand triples a
+// script's length, so a script that grows with the number of sessions or folders soon
+// outgrows the command line: then a short fixed command reads it from standard input.
+func PowerShellInvocation(script string) (string, []byte) {
+	if cmd := PowerShellCommand(script); len(cmd) <= maxCommandLine {
+		return cmd, nil
+	}
+	return PowerShellCommand(psFromStdin), []byte(base64.StdEncoding.EncodeToString([]byte(script)) + "\n")
 }
 
 // PowerShellCommand is the command line that runs a PowerShell script on a Windows

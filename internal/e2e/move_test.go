@@ -236,3 +236,31 @@ func appendTurn(t *testing.T, file, text string) {
 	f.WriteString(rec)
 	f.Close()
 }
+
+// A source checkout that could not be read is not "no repository": the move stops instead
+// of placing the session where the source's path happens to exist here.
+func TestUnreadCheckoutBlocks(t *testing.T) {
+	root := t.TempDir()
+	box, here := newLocation(t, "box", root), newLocation(t, "here", root)
+	seed(t, box)
+	ctx := context.Background()
+
+	in := input(t, box, here)
+	in.GitErr = "connection lost"
+	p, err := move.Build(ctx, in, move.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Blockers) != 1 || !strings.Contains(p.Blockers[0], "could not read the session's git checkout on box (connection lost)") {
+		t.Fatalf("blockers: %v", p.Blockers)
+	}
+
+	// Choosing the folder needs no checkout.
+	p, err = move.Build(ctx, in, move.Options{TargetDir: here.repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Blockers) > 0 {
+		t.Fatalf("blockers with --to: %v", p.Blockers)
+	}
+}

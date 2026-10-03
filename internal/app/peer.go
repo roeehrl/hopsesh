@@ -154,7 +154,7 @@ func (s *peerSession) planReceive(ctx context.Context, req peer.PlanRequest) (*p
 	in.Present = true
 	src := &Machine{Name: pkg.Location, Status: StatusOK, OS: pkg.Facts.OS, host: s.snap, account: pkg.Account,
 		Agents: []AgentState{{Agent: pkg.Agent, Name: mod.Spec().Name, Install: in}}}
-	e := Entry{Machine: pkg.Location, Agent: pkg.Agent, AgentName: mod.Spec().Name, Session: pkg.Session, Live: pkg.Live, Git: pkg.Git, Lineage: pkg.Lineage}
+	e := Entry{Machine: pkg.Location, Agent: pkg.Agent, AgentName: mod.Spec().Name, Session: pkg.Session, Live: pkg.Live, Git: pkg.Git, GitError: pkg.GitError, Lineage: pkg.Lineage}
 	inv.Machines = append(inv.Machines, src)
 	inv.Entries = append(inv.Entries, e)
 	p, input, err := s.a.Plan(ctx, inv, e, req.Target, s.a.receiveOptions(req.Options))
@@ -364,7 +364,7 @@ func (a *App) packageOf(ctx context.Context, here *Machine, e Entry) (peer.Packa
 	}
 	f := here.host.Facts
 	pkg := peer.Package{Location: here.Name, Facts: host.Facts{OS: f.OS, Arch: f.Arch, Home: f.Home}, Agent: e.Agent, Install: in,
-		Session: e.Session, Live: e.Live, Git: e.Git, Lineage: e.Lineage, Account: a.account(ctx, here, mod, in)}
+		Session: e.Session, Live: e.Live, Git: e.Git, GitError: e.GitError, Lineage: e.Lineage, Account: a.account(ctx, here, mod, in)}
 	var size int64
 	for _, bf := range b.Files {
 		p := h.Path().Join(in.Root(bf.Root), bf.Rel)

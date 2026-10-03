@@ -98,6 +98,7 @@ type Package struct {
 	Session  agent.Summary       `json:"session"`
 	Live     agent.LiveInfo      `json:"live"`
 	Git      *repos.GitState     `json:"git,omitempty"`
+	GitError string              `json:"gitError,omitempty"`
 	Lineage  *lineage.Manifest   `json:"lineage,omitempty"`
 	Account  *agent.Account      `json:"account,omitempty"`
 	Files    []host.SnapshotFile `json:"files"`

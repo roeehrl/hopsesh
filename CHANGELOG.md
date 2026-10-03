@@ -7,6 +7,14 @@ All notable changes to this project are documented here. The format follows
 ## Unreleased
 
 ### Fixed
+- A Windows machine with more than a few dozen sessions lost its git details: the
+  script that reads them, passed on the command line, outgrew cmd.exe's 8191-character
+  limit. Long PowerShell scripts now go through standard input, and sessions from that
+  machine come over with their repository again.
+- When hopsesh cannot read the session's git checkout on the other machine (a dropped
+  connection, say), it now tries once more and then stops and says so. Before, it took
+  the folder for one without a repository: where the same path existed here (the same
+  home folder on both machines), the session arrived without its branch or unpushed work.
 - A Codex session that went to another machine and came back no longer keeps its "moved"
   mark in Codex's own list: the mark is the thread's name in Codex's shared index, which
   outlived the copy it marked.

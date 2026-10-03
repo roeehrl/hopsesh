@@ -308,6 +308,11 @@ jobs:
       - run: go build -o bin/hopsesh.exe ./cmd/hopsesh
       - shell: pwsh
         run: ./scripts/windows-peer-test.ps1 -Bin bin/hopsesh.exe
+      - name: a PowerShell script longer than a command line, over the same server
+        shell: pwsh
+        run: |
+          $env:HOPSESH_TEST_WINDOWS_SSH = "$env:USERNAME@127.0.0.1"
+          go test ./internal/core/transport -run TestRunPowerShellOverSSH -v -count=1
 
   windows-app-build:
     name: windows app (build)
