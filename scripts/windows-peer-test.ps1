@@ -80,7 +80,7 @@ $text = [IO.File]::ReadAllText($got, [Text.Encoding]::UTF8)
 foreach ($want in @('תקן את הבאג', '修复错误', 'תוקן. 已修复。', $boxProj.Replace('\', '\\'))) {
   if (-not $text.Contains($want)) { Write-Host $text; Fail "the session on box lacks: $want" }
 }
-if ($text.Contains($projJson)) { Fail 'the old path is still in the session on box' }
+if ($text.Contains($projJson)) { Write-Host $text; Fail 'the old path is still in the session on box' }
 $here = [IO.File]::ReadAllText((Join-Path $sessionDir "$id.jsonl"), [Text.Encoding]::UTF8)
 if (-not $here.Contains('moved to ')) { Fail 'the copy here is not marked' }
 

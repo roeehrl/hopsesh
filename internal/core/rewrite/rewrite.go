@@ -352,7 +352,7 @@ func replace(s []byte, maps []compiled, counts map[string]int) []byte {
 	last := 0
 	escaped := maps[0].escaped
 	for i := 0; i < len(s); i++ {
-		if i > 0 && segmentByte(s[i-1]) && !(escaped && afterEscape(s, i)) {
+		if i > 0 && segmentByte(s[i-1]) && !(escaped && afterEscape(s, i)) && !prefixHyphen(s, i) {
 			continue
 		}
 		if escaped && i > 0 && oddBackslashes(s, i-1) {
@@ -427,6 +427,16 @@ func isHex(c byte) bool {
 }
 
 // segmentByte reports whether c continues a path segment name.
+// prefixHyphen reports a hyphen before s[i] that joins a word to the path rather than
+// continuing a name: Hebrew attaches prepositions so ("ב-/home/…", "ל-C:\…"), and a lone
+// hyphen after a space or at the start is no name either.
+func prefixHyphen(s []byte, i int) bool {
+	if s[i-1] != '-' {
+		return false
+	}
+	return i == 1 || s[i-2] == ' ' || s[i-2] == '"' || s[i-2] >= 0x80
+}
+
 func segmentByte(c byte) bool {
 	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '_' || c == '-' || c >= 0x80
 }

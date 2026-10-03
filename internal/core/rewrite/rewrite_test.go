@@ -232,3 +232,15 @@ func TestDropRecordsByNestedField(t *testing.T) {
 		t.Fatalf("dropped %d:\n%s", st.DroppedRecords, out)
 	}
 }
+
+// Hebrew joins a preposition to the next word with a hyphen ("ב-" is "in"): a path there
+// moves too; a hyphen inside a name still stops a match.
+func TestPathAfterHebrewPrefix(t *testing.T) {
+	maps := []Mapping{{From: "/home/alice/proj", To: "/Users/bob/proj"}, {From: `C:\Users\alice\proj`, To: `D:\work\proj`}}
+	in := `{"a":"תקן ב-/home/alice/proj/main.go","b":"ראה ל-C:\\Users\\alice\\proj\\main.go","c":"/srv/x-/home/alice/proj"}` + "\n"
+	out, _ := run(t, in, Options{Mappings: maps})
+	want := `{"a":"תקן ב-/Users/bob/proj/main.go","b":"ראה ל-D:\\work\\proj\\main.go","c":"/srv/x-/home/alice/proj"}` + "\n"
+	if out != want {
+		t.Errorf("got\n%s\nwant\n%s", out, want)
+	}
+}
