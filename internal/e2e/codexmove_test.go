@@ -23,7 +23,7 @@ func seedCodex(t *testing.T, l location) agent.Install {
 		}
 		rel, _ := filepath.Rel(fix, p)
 		b, _ := os.ReadFile(p)
-		b = []byte(strings.ReplaceAll(string(b), "/home/u/git/demo", l.repo))
+		b = []byte(strings.ReplaceAll(string(b), "/home/u/git/demo", jsonText(l.repo)))
 		dst := filepath.Join(in.Root("home"), rel)
 		os.MkdirAll(filepath.Dir(dst), 0o700)
 		return os.WriteFile(dst, b, 0o600)

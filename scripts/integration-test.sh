@@ -65,7 +65,9 @@ grep -q "fix the build in $TARGET/main.go" "$ROLLOUT" || fail "the conversation 
 
 # Push it back: hopsesh on box receives sessions.
 sudo install -m 0755 "$BIN" /usr/local/bin/hopsesh
-sudo -u "$REMOTE_USER" -H /usr/local/bin/hopsesh receive on >/dev/null
+# The remote user's own environment: the caller's XDG_* paths must not leak in.
+as_remote() { sudo -u "$REMOTE_USER" -H env -u XDG_CONFIG_HOME -u XDG_STATE_HOME -u XDG_CACHE_HOME -u XDG_DATA_HOME HOME="$RHOME" "$@"; }
+as_remote /usr/local/bin/hopsesh receive on >/dev/null
 "$BIN" pull "box:$ID" --to "$TARGET" --yes --json > "$WORK/pull2.json" || { cat "$WORK/pull2.json"; fail "second pull failed"; }
 RFILE="$RHOME/.claude/projects/$SLUG/$ID.jsonl"
 sudo grep -q 'moved to here' "$RFILE" || fail "box's copy is not marked after the pull"
@@ -80,7 +82,7 @@ tail -n 2 "$GOT" | grep -q 'moved to ' && fail "undo left the mark here"
 sudo grep -q 'moved to here' "$RFILE" || fail "undo did not restore box's own copy"
 
 # A machine that does not receive refuses.
-sudo -u "$REMOTE_USER" -H /usr/local/bin/hopsesh receive off >/dev/null
+as_remote /usr/local/bin/hopsesh receive off >/dev/null
 if "$BIN" push "$ID" box --to "$RHOME/proj" --yes --json > "$WORK/refused.json" 2>&1; then fail "push to a machine that does not receive"; fi
 grep -q 'does not receive sessions' "$WORK/refused.json" || { cat "$WORK/refused.json"; fail "the refusal does not say why"; }
 echo "integration test passed"

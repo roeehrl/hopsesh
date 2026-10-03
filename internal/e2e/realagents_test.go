@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -69,7 +70,7 @@ func TestCodexListsWrittenThread(t *testing.T) {
 	if got := codexList(t, bin, home); strings.Contains(got, `"id"`) { // builds the index (empty)
 		t.Fatalf("a fresh home lists nothing: %s", got)
 	}
-	m := &host.Machine{Name: "here", Local: true, Facts: host.Facts{OS: "darwin", Home: home, Env: map[string]string{"CODEX_HOME": home},
+	m := &host.Machine{Name: "here", Local: true, Facts: host.Facts{OS: runtime.GOOS, Home: home, Env: map[string]string{"CODEX_HOME": home},
 		Binaries: map[string]agent.BinaryFact{"codex": {Path: bin}}}}
 	mod := codex.New()
 	in := agent.Install{Agent: "codex", Version: "0.153.2", Binary: bin, Roots: map[string]string{"home": home}, Present: true}
@@ -110,6 +111,7 @@ func TestCodexImportRoute(t *testing.T) {
 	// Codex's importer takes only sessions it finds itself, in the Claude Code folder of
 	// the user it runs as.
 	t.Setenv("HOME", here.m.Facts.Home)
+	t.Setenv("USERPROFILE", here.m.Facts.Home)
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	home := filepath.Join(root, "here", ".codex")
 	os.MkdirAll(filepath.Join(home, "sessions"), 0o700)
@@ -154,7 +156,7 @@ func TestCodexImportRoute(t *testing.T) {
 func TestCodexAccount(t *testing.T) {
 	bin := realAgents(t, "codex")
 	home := t.TempDir()
-	m := &host.Machine{Name: "here", Local: true, Facts: host.Facts{OS: "darwin", Home: home, Env: map[string]string{"CODEX_HOME": home},
+	m := &host.Machine{Name: "here", Local: true, Facts: host.Facts{OS: runtime.GOOS, Home: home, Env: map[string]string{"CODEX_HOME": home},
 		Binaries: map[string]agent.BinaryFact{"codex": {Path: bin}}}}
 	in := agent.Install{Agent: "codex", Version: "0.153.2", Binary: bin, Roots: map[string]string{"home": home}, Present: true}
 	h, err := m.For(context.Background(), codex.New().Spec(), in, nil)
@@ -186,7 +188,7 @@ func TestCodexStop(t *testing.T) {
 	if out, err := login.CombinedOutput(); err != nil {
 		t.Fatalf("login: %v %s", err, out)
 	}
-	m := &host.Machine{Name: "here", Local: true, Facts: host.Facts{OS: "darwin", Home: home, Env: map[string]string{"CODEX_HOME": home},
+	m := &host.Machine{Name: "here", Local: true, Facts: host.Facts{OS: runtime.GOOS, Home: home, Env: map[string]string{"CODEX_HOME": home},
 		Binaries: map[string]agent.BinaryFact{"codex": {Path: bin}}}}
 	mod := codex.New()
 	in := agent.Install{Agent: "codex", Version: "0.153.2", Binary: bin, Roots: map[string]string{"home": home}, Present: true}

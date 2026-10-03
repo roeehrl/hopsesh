@@ -19,6 +19,7 @@ import (
 func TestSkillInEveryAgentWithoutDrift(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // the home folder on Windows
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, "claude-config"))
 	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	for _, d := range []string{"claude-config", ".codex"} {

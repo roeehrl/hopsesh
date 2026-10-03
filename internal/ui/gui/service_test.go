@@ -2,10 +2,12 @@ package gui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -25,11 +27,12 @@ func home(t *testing.T) (repo string) {
 	h := t.TempDir()
 	h, _ = filepath.EvalSymlinks(h)
 	t.Setenv("HOME", h)
+	t.Setenv("USERPROFILE", h) // the home folder on Windows
 	t.Setenv("HOPSESH_CONFIG_DIR", filepath.Join(h, "config"))
 	t.Setenv("HOPSESH_STATE_DIR", filepath.Join(h, "state"))
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("CODEX_HOME", "")
-	t.Setenv("PATH", "/usr/bin:/bin") // git, and no real agent binaries
+	t.Setenv("PATH", testPath()) // git, and no real agent binaries
 	repo = filepath.Join(h, "git", "demo")
 	os.MkdirAll(repo, 0o700)
 	os.MkdirAll(filepath.Join(h, ".codex", "sessions"), 0o700)
@@ -40,7 +43,8 @@ func home(t *testing.T) (repo string) {
 		}
 		rel, _ := filepath.Rel(fix, p)
 		b, _ := os.ReadFile(p)
-		b = []byte(strings.ReplaceAll(string(b), "/home/u/git/demo", repo))
+		esc, _ := json.Marshal(repo)
+		b = []byte(strings.ReplaceAll(string(b), "/home/u/git/demo", string(esc[1:len(esc)-1])))
 		rel = strings.ReplaceAll(rel, "-home-u-git-demo", claude.Slug(repo))
 		dst := filepath.Join(h, ".claude", rel)
 		os.MkdirAll(filepath.Dir(dst), 0o700)
@@ -242,7 +246,7 @@ func TestWindowSendsToAnotherMachine(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds hopsesh")
 	}
-	bin := filepath.Join(t.TempDir(), "hopsesh")
+	bin := filepath.Join(t.TempDir(), "hopsesh"+exeSuffix())
 	build := exec.Command("go", "build", "-o", bin, "./cmd/hopsesh")
 	build.Dir = "../../.."
 	if out, err := build.CombinedOutput(); err != nil {
@@ -254,7 +258,7 @@ func TestWindowSendsToAnotherMachine(t *testing.T) {
 	boxRepo := filepath.Join(box, "git", "demo")
 	os.MkdirAll(boxRepo, 0o700)
 	os.MkdirAll(filepath.Join(box, ".claude", "projects"), 0o700)
-	boxEnv := []string{"HOME=" + box, "PATH=/usr/bin:/bin", "HOPSESH_MACHINE=box", "HOPSESH_CONFIG_DIR=" + filepath.Join(box, "config"),
+	boxEnv := []string{"HOME=" + box, "USERPROFILE=" + box, "PATH=" + testPath(), "HOPSESH_MACHINE=box", "HOPSESH_CONFIG_DIR=" + filepath.Join(box, "config"),
 		"HOPSESH_STATE_DIR=" + filepath.Join(box, "state"), "CLAUDE_CONFIG_DIR=", "CODEX_HOME="}
 	recv := exec.Command(bin, "receive", "on")
 	recv.Env = boxEnv
@@ -310,4 +314,19 @@ func TestWindowSendsToAnotherMachine(t *testing.T) {
 	if e := findEntry(t, scan, "claude/"+sid); e.Status != "ended" {
 		t.Fatalf("undo removes the mark here: %+v", e.Status)
 	}
+}
+
+// testPath keeps git but no agent binaries: the system folders only (on Windows, as is).
+func testPath() string {
+	if runtime.GOOS == "windows" {
+		return os.Getenv("PATH")
+	}
+	return "/usr/bin:/bin"
+}
+
+func exeSuffix() string {
+	if runtime.GOOS == "windows" {
+		return ".exe"
+	}
+	return ""
 }

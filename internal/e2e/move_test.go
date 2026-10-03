@@ -3,8 +3,10 @@ package e2e
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +20,12 @@ import (
 )
 
 const sid = "0b6c6a8e-1d2f-4c3b-9a7e-5f4d3c2b1a01"
+
+// jsonText is s as it appears inside a JSON string (a Windows path's backslashes doubled).
+func jsonText(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b[1 : len(b)-1])
+}
 
 // location is one place sessions live, simulated by its own folders on this machine.
 type location struct {
@@ -34,7 +42,7 @@ func newLocation(t *testing.T, name, root string) location {
 		t.Fatal(err)
 	}
 	repo, _ = filepath.EvalSymlinks(repo)
-	m := &host.Machine{Name: name, Local: true, Facts: host.Facts{OS: "darwin", Home: home, Env: map[string]string{}, Binaries: map[string]agent.BinaryFact{}}}
+	m := &host.Machine{Name: name, Local: true, Facts: host.Facts{OS: runtime.GOOS, Home: home, Env: map[string]string{}, Binaries: map[string]agent.BinaryFact{}}}
 	in := agent.Install{Agent: "claude", Version: "2.1.284", Roots: map[string]string{"home": filepath.Join(home, ".claude")}, Present: true}
 	return location{m: m, in: in, repo: repo}
 }
@@ -49,7 +57,7 @@ func seed(t *testing.T, l location) {
 		}
 		rel, _ := filepath.Rel(fix, p)
 		b, _ := os.ReadFile(p)
-		b = []byte(strings.ReplaceAll(string(b), "/home/u/git/demo", l.repo))
+		b = []byte(strings.ReplaceAll(string(b), "/home/u/git/demo", jsonText(l.repo)))
 		rel = strings.ReplaceAll(rel, "-home-u-git-demo", claude.Slug(l.repo))
 		dst := filepath.Join(l.in.Root("home"), rel)
 		os.MkdirAll(filepath.Dir(dst), 0o700)

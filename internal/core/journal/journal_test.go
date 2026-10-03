@@ -3,6 +3,7 @@ package journal
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -75,7 +76,7 @@ func TestUndoAppendKeepsLaterWrites(t *testing.T) {
 	if b, _ := os.ReadFile(idx); string(b) != `{"id":"a"}`+"\n"+`{"id":"c"}`+"\n" {
 		t.Fatalf("after undo: %q", b)
 	}
-	if fi, _ := os.Stat(idx); fi.Mode().Perm() != 0o644 {
+	if fi, _ := os.Stat(idx); runtime.GOOS != "windows" && fi.Mode().Perm() != 0o644 {
 		t.Fatalf("mode %v", fi.Mode())
 	}
 

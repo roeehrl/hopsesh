@@ -349,7 +349,9 @@ func (c *Conn) Close() {
 	_ = exec.Command(c.sshBinary, args...).Run()
 }
 
-var tsCheckURL = regexp.MustCompile(`https://login\.tailscale\.com/\S+`)
+// tsCheckURL finds the Tailscale SSH check link ssh prints: at the start of the output or
+// after whitespace, never inside another URL.
+var tsCheckURL = regexp.MustCompile(`(?:^|\s)(https://login\.tailscale\.com/\S+)`)
 
 func classify(err error, stderr string) error {
 	var ee *exec.ExitError
@@ -366,7 +368,7 @@ func classify(err error, stderr string) error {
 	case strings.Contains(low, "host key verification failed"), strings.Contains(low, "no ") && strings.Contains(low, "host key is known"):
 		return ErrHostKeyUnknown
 	case tsCheckURL.MatchString(stderr):
-		return &TailscaleCheckError{URL: tsCheckURL.FindString(stderr)}
+		return &TailscaleCheckError{URL: tsCheckURL.FindStringSubmatch(stderr)[1]}
 	case strings.Contains(low, "permission denied"), strings.Contains(low, "too many authentication failures"):
 		return ErrAuth
 	case strings.Contains(low, "could not resolve hostname"), strings.Contains(low, "connection timed out"),

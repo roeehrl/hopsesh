@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -40,7 +41,7 @@ func newMachineHome(t *testing.T, root, name string, withSession bool) machineHo
 			}
 			rel, _ := filepath.Rel(fix, p)
 			b, _ := os.ReadFile(p)
-			b = []byte(strings.ReplaceAll(string(b), "/home/u/git/demo", m.repo))
+			b = []byte(strings.ReplaceAll(string(b), "/home/u/git/demo", jsonText(m.repo)))
 			rel = strings.ReplaceAll(rel, "-home-u-git-demo", claude.Slug(m.repo))
 			dst := filepath.Join(m.home, ".claude", rel)
 			os.MkdirAll(filepath.Dir(dst), 0o700)
@@ -51,7 +52,7 @@ func newMachineHome(t *testing.T, root, name string, withSession bool) machineHo
 }
 
 func (m machineHome) env() []string {
-	return []string{"HOME=" + m.home, "PATH=/usr/bin:/bin", "HOPSESH_MACHINE=" + m.name,
+	return []string{"HOME=" + m.home, "USERPROFILE=" + m.home, "PATH=" + testPath(), "HOPSESH_MACHINE=" + m.name,
 		"HOPSESH_CONFIG_DIR=" + filepath.Join(m.home, "config"), "HOPSESH_STATE_DIR=" + filepath.Join(m.home, "state"),
 		"CLAUDE_CONFIG_DIR=", "CODEX_HOME="}
 }
@@ -70,7 +71,7 @@ func (m machineHome) writeConfig(t *testing.T, c config.Config) {
 // buildHopsesh builds the command once per test run.
 func buildHopsesh(t *testing.T) string {
 	t.Helper()
-	bin := filepath.Join(t.TempDir(), "hopsesh")
+	bin := filepath.Join(t.TempDir(), "hopsesh"+exeSuffix())
 	cmd := exec.Command("go", "build", "-o", bin, "./cmd/hopsesh")
 	cmd.Dir = "../.."
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -195,4 +196,19 @@ func TestPushToPeer(t *testing.T) {
 	if _, err := a.StartPush(ctx, inv, e, cfg.Hosts[0], "", move.Options{TargetDir: box.repo}); !errors.Is(err, peer.ErrRefused) {
 		t.Fatalf("refused: %v", err)
 	}
+}
+
+// testPath keeps git but no agent binaries: the system folders only (on Windows, as is).
+func testPath() string {
+	if runtime.GOOS == "windows" {
+		return os.Getenv("PATH")
+	}
+	return "/usr/bin:/bin"
+}
+
+func exeSuffix() string {
+	if runtime.GOOS == "windows" {
+		return ".exe"
+	}
+	return ""
 }

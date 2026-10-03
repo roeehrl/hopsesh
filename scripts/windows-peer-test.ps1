@@ -58,7 +58,13 @@ $ls = & $Bin ls --host box --no-local --json | Out-String
 if ($LASTEXITCODE -ne 0) { Write-Host $ls; Fail 'ls of box over SSH' }
 
 $out = & $Bin push $id box --to $boxProj --yes --json 2>&1 | Out-String
-if ($LASTEXITCODE -ne 0) { Write-Host $out; Fail 'push' }
+if ($LASTEXITCODE -ne 0) {
+  Write-Host $out
+  Write-Host '--- agents here:'; & $Bin agents
+  Write-Host '--- sessions here:'; & $Bin ls --host local --json | Out-String | Write-Host
+  Get-ChildItem -Recurse $env:CLAUDE_CONFIG_DIR | Select-Object -ExpandProperty FullName | Write-Host
+  Fail 'push'
+}
 $journal = ($out | ConvertFrom-Json).result.journal
 $got = Join-Path $HOME (".claude\projects\" + (Slug $boxProj) + "\$id.jsonl")
 if (-not (Test-Path $got)) { Write-Host $out; Fail "nothing installed at $got" }
