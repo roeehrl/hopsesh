@@ -1,6 +1,8 @@
 package transport
 
 import (
+	"bytes"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -14,7 +16,9 @@ func TestHostKeyViaSSH(t *testing.T) {
 		t.Skip("the stand-in ssh is a shell script")
 	}
 	dir := t.TempDir()
-	key := "AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
+	// A made-up ed25519 public key blob: the type name, then 32 bytes of 0x07.
+	blob := append([]byte("\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20"), bytes.Repeat([]byte{7}, 32)...)
+	key := base64.StdEncoding.EncodeToString(blob)
 	fake := filepath.Join(dir, "ssh")
 	// Like ssh with StrictHostKeyChecking=accept-new: write the key, then fail the login.
 	script := "#!/bin/sh\nfor a; do case \"$a\" in UserKnownHostsFile=*) f=\"${a#UserKnownHostsFile=}\";; esac; done\n" +
