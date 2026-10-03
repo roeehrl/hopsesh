@@ -3,7 +3,7 @@
 // (MODE=stills) or as a recorded flow with keycap overlays (MODE=hero or MODE=undo).
 // Run by demo/record.sh; every name and path on screen is made-up demo data.
 import { chromium } from "playwright";
-import { mkdirSync, renameSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 
 const url = process.env.APP_URL || "http://laptop:34115/";
 const mode = process.env.MODE || "stills";
@@ -233,10 +233,11 @@ if (mode === "stills") {
   await wait(4000);
 }
 
+// Take this page's own recording (a failed earlier run can leave other files in raw/).
+const video = mode !== "stills" ? page.video() : null;
 await ctx.close();
 await browser.close();
-if (mode !== "stills") {
-  const raw = readdirSync(out + "/raw").filter((f) => f.endsWith(".webm"));
-  if (raw.length) renameSync(`${out}/raw/${raw[0]}`, `${out}/${tag}-${scheme}.webm`);
+if (video) {
+  renameSync(await video.path(), `${out}/${tag}-${scheme}.webm`);
   console.log("saved", `${tag}-${scheme}.webm`);
 }
