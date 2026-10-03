@@ -3,7 +3,7 @@
 // (MODE=stills) or as a recorded flow with keycap overlays (MODE=hero or MODE=undo).
 // Run by demo/record.sh; every name and path on screen is made-up demo data.
 import { chromium } from "playwright";
-import { mkdirSync, renameSync, readdirSync } from "node:fs";
+import { mkdirSync, renameSync, readdirSync, writeFileSync } from "node:fs";
 
 const url = process.env.APP_URL || "http://laptop:34115/";
 const mode = process.env.MODE || "stills";
@@ -17,18 +17,39 @@ const frameHTML = `<!doctype html><html><head><style>
   html,body{margin:0;width:${W + 2 * PAD}px;height:${H + 2 * PAD}px;overflow:hidden;
     background:${mode === "stills" ? "transparent" : dark ? "radial-gradient(circle at 30% 20%,#1c2a28,#0d1312)" : "radial-gradient(circle at 30% 20%,#f3f7f6,#dfe9e6)"};
     font-family:-apple-system,"SF Pro Text","Inter",system-ui,sans-serif}
+  #stage{position:absolute;inset:0;transform-origin:0 0;transition:transform 1.4s cubic-bezier(.45,0,.25,1)}
   #win{position:absolute;left:${PAD}px;top:${PAD}px;width:${W}px;height:${H}px;border-radius:12px;overflow:hidden;
     box-shadow:0 0 0 1px ${dark ? "rgba(255,255,255,.12)" : "rgba(0,0,0,.14)"},0 28px 70px rgba(0,0,0,${dark ? ".55" : ".28"}),0 8px 20px rgba(0,0,0,.12)}
   #app{width:100%;height:100%;border:0;display:block}
   #lights{position:absolute;left:${PAD + 18}px;top:${PAD + 17}px;display:flex;gap:8px;pointer-events:none}
   #lights i{width:12px;height:12px;border-radius:50%;display:block;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.18)}
+  #cap{position:absolute;left:50%;bottom:${PAD / 2 + 34}px;transform:translateX(-50%);max-width:1000px;padding:12px 22px;border-radius:14px;
+    background:rgba(18,22,21,.82);color:#f4f6f5;font:600 26px/1.3 -apple-system,"SF Pro Display",system-ui,sans-serif;text-align:center;
+    opacity:0;transition:opacity .35s;backdrop-filter:blur(8px)}
+  #cap.on{opacity:1}
+  #card{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;
+    background:${dark ? "#0f1514" : "#f3f6f5"};color:${dark ? "#ecebe5" : "#1d1c19"};opacity:0;transition:opacity .7s;pointer-events:none;text-align:center}
+  #card.on{opacity:1}
+  #card .nm{display:flex;align-items:center;gap:22px;font:500 72px/1 "SF Mono",ui-monospace,monospace;letter-spacing:-1px}
+  #card .nm img{width:96px;height:96px}
+  #card .tg{font:600 40px/1.25 -apple-system,"SF Pro Display",system-ui,sans-serif;max-width:1000px}
+  #card .sm{font:400 22px/1.4 -apple-system,system-ui,sans-serif;opacity:.7}
+  #card .fine{font:400 15px/1.4 -apple-system,system-ui,sans-serif;opacity:.5;margin-top:20px}
+  .ghost{position:absolute;border:2px dashed #2bb3a3;border-radius:10px;color:#2bb3a3;display:flex;align-items:center;justify-content:center;
+    font:600 20px -apple-system,system-ui,sans-serif;background:${dark ? "rgba(43,179,163,.08)" : "rgba(11,107,98,.06)"};opacity:0;
+    transform:translateY(16px);transition:opacity .6s,transform .6s}
+  .ghost.on{opacity:1;transform:none}
   #keys{position:absolute;left:50%;bottom:${PAD / 2 - 6}px;transform:translateX(-50%);display:flex;gap:6px;opacity:0;transition:opacity .18s}
   #keys.on{opacity:1}
   #keys kbd{min-width:34px;padding:6px 10px;border-radius:8px;text-align:center;font:600 17px/1 -apple-system,system-ui,sans-serif;
     background:${dark ? "#f4f6f5" : "#1f2422"};color:${dark ? "#1f2422" : "#f4f6f5"};box-shadow:0 2px 0 rgba(0,0,0,.25)}
 </style></head><body>
-  <div id="win"><iframe id="app" src="${url}"></iframe></div>
-  <div id="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>
+  <div id="stage">
+    <div id="win"><iframe id="app" src="${url}"></iframe></div>
+    <div id="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>
+  </div>
+  <div id="cap"></div>
+  <div id="card"></div>
   <div id="keys"></div>
 </body></html>`;
 
@@ -56,6 +77,20 @@ async function keys(caps, action, hold = 900) {
   await wait(hold);
   await page.evaluate(() => document.getElementById("keys").classList.remove("on"));
 }
+// Story helpers: captions, eased zooms on the window (window coordinates), and full cards.
+async function caption(t) {
+  await page.evaluate((t) => { const c = document.getElementById("cap"); if (t) { c.textContent = t; c.classList.add("on"); } else c.classList.remove("on"); }, t);
+}
+async function zoom(x, y, s) {
+  await page.evaluate(([x, y, s, pad, vw, vh]) => {
+    const st = document.getElementById("stage");
+    const cx = x + pad, cy = y + pad;
+    st.style.transform = s === 1 ? "none" : `translate(${vw / 2 - cx * s}px, ${vh / 2 - cy * s}px) scale(${s})`;
+  }, [x, y, s, PAD, W + 2 * PAD, H + 2 * PAD]);
+}
+async function card(html) {
+  await page.evaluate((h) => { const c = document.getElementById("card"); if (h) { c.innerHTML = h; c.classList.add("on"); } else c.classList.remove("on"); }, html);
+}
 async function still(name) {
   await wait(700);
   await page.screenshot({ path: `${out}/${name}-${scheme}.png`, omitBackground: true });
@@ -63,9 +98,18 @@ async function still(name) {
 }
 const text = (t) => app.getByText(t, { exact: false }).first();
 
+// The story opens on its title card while the app loads; encode.sh trims the wait.
+const t0 = Date.now();
+const titleCard = () => `<div class="nm"><img src="data:image/svg+xml;base64,${process.env.LOGO_B64 || ""}">hopsesh</div><div class="tg">Continue any coding-agent session — on any machine, in any agent.</div>`;
+if (mode === "story") await page.evaluate((h) => { const c = document.getElementById("card"); c.style.transition = "none"; c.innerHTML = h; c.classList.add("on"); }, titleCard());
+
 // Ready: the session list has loaded.
 await text("Fix flaky checkout tests").waitFor({ timeout: 90000 });
 await wait(1500);
+if (mode === "story") {
+  writeFileSync(`${out}/story-${scheme}.start`, String(Math.max(0, (Date.now() - t0) / 1000 - 0.3)));
+  await page.evaluate(() => { document.getElementById("card").style.transition = ""; });
+}
 
 // openPalette clicks the search field, which is what ⌘K does in the native app.
 async function openPalette() { await app.getByText("Search sessions or run a command").first().click(); await wait(400); }
@@ -120,6 +164,68 @@ if (mode === "stills") {
   await keys(["⌘", "↩"], () => page.keyboard.press("Control+Enter"), 300);
   await text("continues in Codex").waitFor({ timeout: 120000 });
   await wait(3500);
+} else if (mode === "story") {
+  // The launch video (cut A, captions only); see launch/VIDEO-0.3.md for the storyboard.
+  const logo = `<img src="data:image/svg+xml;base64,${process.env.LOGO_B64 || ""}">`;
+  await wait(3200);
+  await card(null);
+  await wait(500);
+  await caption("Every session. Every agent. Every machine.");
+  await zoom(470, 380, 1.3);
+  await wait(3200);
+  await zoom(640, 400, 1);
+  await wait(900);
+  await caption("Pick one. Continue it in Codex.");
+  await keys(["⌘", "K"], openPalette, 400);
+  await page.keyboard.type("flaky", { delay: 110 });
+  await wait(500);
+  await paletteTo("Continue in Codex", true);
+  await keys(["↩"], () => page.keyboard.press("Enter"), 200);
+  await text("Carried over").waitFor({ timeout: 60000 });
+  await caption("See what carries over — before anything changes.");
+  await wait(600);
+  await zoom(640, 290, 1.55);
+  await wait(3600);
+  await zoom(640, 600, 1.3);
+  await wait(2400);
+  await zoom(640, 400, 1);
+  await wait(900);
+  await caption("Repo matched. Code synced. Codex briefed.");
+  await keys(["⌘", "↩"], () => page.keyboard.press("Control+Enter"), 300);
+  await text("continues in Codex").waitFor({ timeout: 120000 });
+  await wait(3000);
+  await caption("Changed your mind? Undo — on every machine.");
+  await text("Back to sessions").click();
+  await openPalette();
+  await page.keyboard.type("activity");
+  await page.keyboard.press("Enter");
+  await text("Everything hopsesh changed").waitFor({ timeout: 30000 });
+  await wait(1200);
+  await app.getByRole("button", { name: /^Undo$/ }).first().click();
+  await wait(700);
+  const confirm = app.getByRole("dialog").getByRole("button", { name: /^Undo/ });
+  if (await confirm.count()) await confirm.first().click();
+  await wait(2600);
+  await caption("Claude Code and Codex today. Your agent next — one small SDK.");
+  await openPalette();
+  await page.keyboard.type("settings");
+  await page.keyboard.press("Enter");
+  await app.getByText("Agents", { exact: true }).first().click();
+  await wait(900);
+  // The dashed "+ your agent" card goes just below the last agent's card.
+  const last = await app.getByText("Continue in Codex with its own importer").first().boundingBox();
+  const first = await app.getByText("Tested with", { exact: false }).first().boundingBox();
+  await page.evaluate(([y, x]) => {
+    const g = document.createElement("div");
+    g.className = "ghost"; g.textContent = "+ your agent";
+    Object.assign(g.style, { left: x + "px", top: y + "px", width: "482px", height: "64px" });
+    document.getElementById("stage").appendChild(g);
+    requestAnimationFrame(() => g.classList.add("on"));
+  }, [Math.round(last.y + last.height + 52), Math.round(first.x - 18)]);
+  await wait(4200);
+  await caption(null);
+  await card(`<div class="nm">${logo}hopsesh</div><div class="sm">open source · CLI, TUI and macOS app</div><div class="tg">github.com/roeehrl/hopsesh</div><div class="fine">Unofficial; not affiliated with Anthropic or OpenAI.</div>`);
+  await wait(4800);
 } else if (mode === "undo") {
   await text("Fix flaky checkout tests").click();
   await app.getByRole("button", { name: /Continue in Codex/ }).first().click();
