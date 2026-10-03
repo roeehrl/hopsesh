@@ -15,7 +15,11 @@ WORK=$(mktemp -d /tmp/hopsesh-pw.XXXXXX)
 export HOPSESH_CONFIG_DIR="$WORK/config" HOPSESH_STATE_DIR="$WORK/state" CLAUDE_CONFIG_DIR="$WORK/claude"
 mkdir -p "$CLAUDE_CONFIG_DIR" # Claude Code has run here once
 
-fail() { echo "FAIL: $*" >&2; exit 1; }
+fail() {
+  echo "FAIL: $*" >&2
+  if [ -f "$WORK/sshd.log" ]; then echo "--- sshd log" >&2; sudo tail -n 40 "$WORK/sshd.log" >&2; fi
+  exit 1
+}
 cleanup() {
   if [ -f "$WORK/sshd.pid" ]; then sudo kill "$(cat "$WORK/sshd.pid")" 2>/dev/null || true; fi
   rm -f "$WORK/password"
@@ -51,10 +55,11 @@ PubkeyAuthentication yes
 AuthorizedKeysFile .ssh/authorized_keys
 UsePAM yes
 AllowUsers $PW_USER
+LogLevel VERBOSE
 Subsystem sftp internal-sftp
 CONF
 sudo /usr/sbin/sshd -t -f "$WORK/sshd_config"
-sudo /usr/sbin/sshd -f "$WORK/sshd_config"
+sudo /usr/sbin/sshd -f "$WORK/sshd_config" -E "$WORK/sshd.log"
 th_wait_port "$PORT"
 
 # This user reaches it through an ssh alias (as people do).
