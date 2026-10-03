@@ -92,10 +92,11 @@ func (m *Module) List(_ context.Context, h agent.Host, in agent.Install) (agent.
 	}
 	const workers = 16 // a remote filesystem answers in parallel
 	var (
-		mu   sync.Mutex
-		jobs []job
-		wg   sync.WaitGroup
-		sem  = make(chan struct{}, workers)
+		mu         sync.Mutex
+		jobs       []job
+		unreadable []agent.SessionError // project folders that could not be read
+		wg         sync.WaitGroup
+		sem        = make(chan struct{}, workers)
 	)
 	for _, d := range dirs {
 		if !d.IsDir() {
@@ -108,6 +109,9 @@ func (m *Module) List(_ context.Context, h agent.Host, in agent.Install) (agent.
 			defer func() { <-sem; wg.Done() }()
 			entries, err := fsys.ReadDir(dir)
 			if err != nil {
+				mu.Lock()
+				unreadable = append(unreadable, agent.SessionError{Path: dir, Err: err})
+				mu.Unlock()
 				return
 			}
 			subdirs := map[string]bool{}
@@ -151,7 +155,7 @@ func (m *Module) List(_ context.Context, h agent.Host, in agent.Install) (agent.
 	close(next)
 	wg.Wait()
 
-	var out agent.Listing
+	out := agent.Listing{Errors: unreadable}
 	for i, s := range infos {
 		if errs[i] != nil {
 			out.Errors = append(out.Errors, agent.SessionError{Path: jobs[i].file, Err: errs[i]})

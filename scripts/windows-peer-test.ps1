@@ -66,6 +66,8 @@ if ($LASTEXITCODE -ne 0) {
   Write-Host '--- agents here:'; & $Bin agents
   Write-Host '--- sessions here:'; & $Bin ls --host local --json | Out-String | Write-Host
   Get-ChildItem -Recurse $env:CLAUDE_CONFIG_DIR | Select-Object -ExpandProperty FullName | Write-Host
+  $bytes = [IO.File]::ReadAllBytes((Join-Path $sessionDir "$id.jsonl"))
+  Write-Host "--- the session file: $($bytes.Length) bytes, starting" (($bytes[0..23] | ForEach-Object { $_.ToString('x2') }) -join ' ')
   Fail 'push'
 }
 $journal = ($out | ConvertFrom-Json).result.journal
