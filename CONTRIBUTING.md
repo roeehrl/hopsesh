@@ -68,7 +68,7 @@ issue or discussion first so we can agree on the approach.
 
 | Method | What it does |
 |---|---|
-| `Spec` | id, name, vendor, stability (`experimental` until proven), tested version prefixes, binaries (with search paths and version arguments), data folders (env var plus default), login variables, secrets (never opened; globs allowed), instruction files, global instruction files (carried by `--carry-rules`), features |
+| `Spec` | id, name, vendor, stability (`experimental` until proven), tested version prefixes, binaries (with search paths and version arguments), data folders (env var plus default), login variables, secrets (never opened; globs allowed), instruction files, global instruction files (carried by `--carry-rules`), features, icon (below) |
 | `Detect` | turns a machine's facts into an install (most modules start from `DefaultInstall`) |
 | `List` | the sessions on a machine; one unreadable session is reported, not fatal |
 | `Bundle` | the files that make up one session |
@@ -96,6 +96,16 @@ issue or discussion first so we can agree on the approach.
 (`Fork`, `RemoteControl`, `App`). These turn on "Keep the old session running too", "Turn on
 Remote Control" and "Open it in the <agent> app" in the plan. Native replay is part of the
 `Writer`'s profile (`Profile.NativeReplay`).
+
+**The agent's icon (`Spec.Icon`)**, shown in session rows, the sidebar, the plan's from → to
+chips, the palette and Settings → Agents. The app picks the first of these that's available:
+1. The icon of the agent's own desktop app, read from the user's machine at run time and never
+   shipped. `Icon.Apps` lists where it may be installed, by `GOOS` (a macOS `.app` bundle or a
+   Windows `.exe`). Users can turn this off in Settings (`app_icons`).
+2. `Icon.SVG`, a mark drawn for hopsesh. It must be a complete `<svg>` with no scripts, event
+   handlers, `foreignObject` or external `href`s (the registry rejects them), and it must not
+   reproduce a vendor's logo or trademark.
+3. The agent's two-letter initials.
 
 **Required tests**
 - The conformance kit: `agenttest.Run(t, module, newHost)` from `sdk/agent/agenttest`. It

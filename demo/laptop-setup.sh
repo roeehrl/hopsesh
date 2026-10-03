@@ -10,7 +10,7 @@ printf 'Host studio\n  User alice\n  IdentityFile ~/.ssh/id_ed25519\n' > /home/a
 chown alice /home/alice/.ssh/config
 su - alice -c 'hopsesh hosts add studio studio >/dev/null && hopsesh trust studio --yes >/dev/null'
 sed -i 's|^repos_dir = .*|repos_dir = "/home/alice/src"|' /home/alice/.config/hopsesh/config.toml
-for kv in 'update_check = "off"' 'skill_prompt = "declined"' 'cli_prompt = "declined"'; do
+for kv in 'update_check = "off"' 'skill_prompt = "declined"' 'cli_prompt = "declined"' 'app_icons = false'; do
   k=${kv%% *}
   grep -q "^$k" /home/alice/.config/hopsesh/config.toml || sed -i "1i $kv" /home/alice/.config/hopsesh/config.toml
 done
