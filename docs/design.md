@@ -234,7 +234,7 @@ Keys are the default, but some machines only take a password. Such a machine is 
 
 ## 19. Status
 
-**Built:** the module SDK with Claude Code and Codex modules; moves, continuations both ways (history, note, native replay, Codex's importer), the briefing and loss report, `--carry-rules`, the native copy; lineage manifests, marks and owed marks, round trips with append, conflicts and keep-both; code sync; peers and push; the skill in every agent with approval rules; CLI, TUI and the desktop app on macOS and Windows; password login (Keychain, Windows Credential Manager); self-update of the CLI and both apps; the release pipeline. Released: 0.1.0 and 0.2.0 (Claude Code only); this design is 0.3.0.
+**Built:** the module SDK with Claude Code and Codex modules; moves, continuations both ways (history, note, native replay, Codex's importer), the briefing and loss report, `--carry-rules`, the native copy; lineage manifests, marks and owed marks, round trips with append, conflicts and keep-both; code sync; peers and push; the skill in every agent with approval rules; CLI, TUI and the desktop app on macOS and Windows; password login (Keychain, Windows Credential Manager); self-update of the CLI and both apps; the release pipeline. Released: 0.3.0.
 
 **Planned:**
 - more modules, Reader first: OpenCode, Hermes, Gemini CLI, Goose, Amp, Crush, Cursor CLI;
@@ -252,23 +252,22 @@ Keys are the default, but some machines only take a password. Such a machine is 
 
 ## 21. Decisions
 
-From 2026-10-02 (0.1 and 0.2): name **hopsesh**; **Apache-2.0**; **Go + Bubble Tea v2 + Wails v3**; GUI on macOS first; Apple Developer ID, SignPath for Windows; repos folder `~/git`, flat layout.
+From the start (2026-10-02): name **hopsesh**; **Apache-2.0**; **Go + Bubble Tea v2 + Wails v3**; GUI on macOS first; Apple Developer ID, SignPath for Windows; repos folder `~/git`, flat layout.
 
 The redesign (approved 2026-10-02):
-1. 0.2.0 tagged before the redesign.
-2. Older configuration is refused and set aside, never migrated.
-3. The SDK is public (`sdk/`), in the same module, v0.
-4. Modules are compiled in.
-5. Pull by default; peers over SSH when the other machine runs hopsesh, push only to a machine that opted in.
-6. Default fidelity: history within 30% of the target's window, plus the briefing; `--fidelity note` one flag away.
-7. hopsesh's writer is the default Claude → Codex route; Codex's importer is `--via import`.
-8. Native replay is a module capability; the app offers it for every target that declares it.
-9. The source agent's own copy is kept next to a continuation (the native copy): a round trip resumes the latest state, and the earlier turns come back byte for byte.
-10. Lineage lives in a manifest beside each session and travels with it; content-hash ids let it be recomputed.
-11. Canonical hashing: RFC 8785 + SHA-256.
-12. The local journal and audit log are a cache and a trail, not the source of truth.
-13. The briefing is an in-transcript note plus an acknowledgement; no automatic prompt (`--go`).
-14. Codex lists installed sessions at once (on for this machine).
-15. One skill, identical bytes in every agent's folder, with per-copy status and no drift.
-16. Global instructions are reported; `--carry-rules` carries them.
-17. Next modules Reader-first (OpenCode, Hermes, Gemini, Goose, Amp, Crush, Cursor); "coding-agent sessions" wording with a notice naming both vendors.
+1. Older configuration is refused and set aside, never migrated.
+2. The SDK is public (`sdk/`), in the same module, v0.
+3. Modules are compiled in.
+4. Pull by default; peers over SSH when the other machine runs hopsesh, push only to a machine that opted in.
+5. Default fidelity: history within 30% of the target's window, plus the briefing; `--fidelity note` one flag away.
+6. hopsesh's writer is the default Claude → Codex route; Codex's importer is `--via import`.
+7. Native replay is a module capability; the app offers it for every target that declares it.
+8. The source agent's own copy is kept next to a continuation (the native copy): a round trip resumes the latest state, and the earlier turns come back byte for byte.
+9. Lineage lives in a manifest beside each session and travels with it; content-hash ids let it be recomputed.
+10. Canonical hashing: RFC 8785 + SHA-256.
+11. The local journal and audit log are a cache and a trail, not the source of truth.
+12. The briefing is an in-transcript note plus an acknowledgement; no automatic prompt (`--go`).
+13. Codex lists installed sessions at once (on for this machine).
+14. One skill, identical bytes in every agent's folder, with per-copy status and no drift.
+15. Global instructions are reported; `--carry-rules` carries them.
+16. Next modules Reader-first (OpenCode, Hermes, Gemini, Goose, Amp, Crush, Cursor); "coding-agent sessions" wording with a notice naming both vendors.

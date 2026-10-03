@@ -2,7 +2,7 @@
 # Complete a draft hopsesh release on the maintainer's Mac. No signing key or Apple
 # credential ever leaves this machine.
 #
-#   scripts/release-sign.sh v0.1.0
+#   scripts/release-sign.sh v0.3.0
 #
 # 1. checks the draft release that the release workflow made for the tag, and verifies
 #    GitHub's build provenance for every file it contains;

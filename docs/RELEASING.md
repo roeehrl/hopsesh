@@ -68,20 +68,20 @@ Scoop manifest and a winget pull request. Without it those steps are skipped.
 
 1. Move the `CHANGELOG.md` entries from "Unreleased" to a `## [X.Y.Z] - date` section,
    commit, push. That section becomes the release notes (the workflow fails without it).
-2. Tag and push: `git tag -a v0.1.0 -m "hopsesh 0.1.0" && git push origin v0.1.0`
+2. Tag and push: `git tag -a v0.3.0 -m "hopsesh 0.3.0" && git push origin v0.3.0`
    (use `-s` instead of `-a` if git has a signing key configured; only the repository admin
    can create `v*` tags).
 3. Wait for the release workflow to finish (`gh run watch`).
-4. On the Mac: `scripts/release-sign.sh v0.1.0`. A rehearsal that notarizes nothing and
-   uploads nothing: `DRY_RUN=1 scripts/release-sign.sh v0.1.0`.
-5. Review the draft on GitHub, then publish: `gh release edit v0.1.0 --draft=false`.
+4. On the Mac: `scripts/release-sign.sh v0.3.0`. A rehearsal that notarizes nothing and
+   uploads nothing: `DRY_RUN=1 scripts/release-sign.sh v0.3.0`.
+5. Review the draft on GitHub, then publish: `gh release edit v0.3.0 --draft=false --latest`.
 
 To test the whole pipeline without publishing, use a pre-release tag such as
-`v0.1.0-rc.2`, then delete the draft and the tag
-(`gh release delete v0.1.0-rc.2 --cleanup-tag`).
+`v0.4.0-rc.1`, then delete the draft and the tag
+(`gh release delete v0.4.0-rc.1 --cleanup-tag`).
 
 **Never reuse a tag name, even a deleted test tag.** The Go module proxy and checksum
-database cache every version they see, permanently (`v0.1.0-rc.1` is already cached). A
+database cache every version they see, permanently. A
 reused name with different contents breaks `go install` for everyone with a checksum
 mismatch. Pick the next number instead.
 
@@ -90,6 +90,6 @@ mismatch. Pick the next number instead.
 ```sh
 openssl dgst -sha256 -verify packaging/release-key.pub -signature checksums.txt.sig checksums.txt
 shasum -a 256 -c checksums.txt --ignore-missing
-gh attestation verify hopsesh_0.1.0_linux_amd64.tar.gz --repo roeehrl/hopsesh   # Linux/Windows files
-spctl -a -vv -t install hopsesh-0.1.0-macos-universal.dmg                         # macOS app
+gh attestation verify hopsesh_0.3.0_linux_amd64.tar.gz --repo roeehrl/hopsesh   # Linux/Windows files
+spctl -a -vv -t install hopsesh-0.3.0-macos-universal.dmg                         # macOS app
 ```

@@ -97,8 +97,9 @@ winget:
           branch: master
     skip_upload: '{{ if isEnvSet "TAP_GITHUB_TOKEN" }}false{{ else }}true{{ end }}'
 
-changelog:
-  disable: true # release notes come from CHANGELOG.md (see release.yml)
+# Release notes are this version's CHANGELOG.md section, passed with --release-notes (see
+# release.yml), which replaces GoReleaser's own changelog. "changelog: disable: true" would
+# drop those notes too.
 
 release:
   draft: true # scripts/release-sign.sh completes it; a person publishes it

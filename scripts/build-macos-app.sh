@@ -2,7 +2,7 @@
 # Build hopsesh.app (universal arm64+x86_64) with the CLI embedded, then optionally sign,
 # notarize and package it as a DMG.
 #
-#   VERSION=0.1.0 scripts/build-macos-app.sh            (COMMIT and DATE default to HEAD and now)
+#   VERSION=0.3.0 scripts/build-macos-app.sh            (COMMIT and DATE default to HEAD and now)
 #   SIGN_IDENTITY="Developer ID Application: …" scripts/build-macos-app.sh   # sign (hardened runtime)
 #   NOTARY_PROFILE=hopsesh scripts/build-macos-app.sh                        # + notarize & staple
 #     (create the profile once: xcrun notarytool store-credentials hopsesh --apple-id … --team-id …)
