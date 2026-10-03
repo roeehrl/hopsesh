@@ -17,13 +17,18 @@ import (
 )
 
 // Env is the environment that points hopsesh and both agents at a demo home h: its own
-// configuration, this machine named "studio", and Tailscale left out of discovery.
+// configuration, this machine named "studio", Tailscale left out of discovery, and (outside
+// Windows) a PATH of system folders only, so no real agent program runs.
 func Env(h string) map[string]string {
-	return map[string]string{
+	env := map[string]string{
 		"HOME": h, "USERPROFILE": h, "HOPSESH_CONFIG_DIR": filepath.Join(h, "config"),
 		"HOPSESH_STATE_DIR": filepath.Join(h, "state"), "HOPSESH_MACHINE": "studio", "CLAUDE_CONFIG_DIR": "", "CODEX_HOME": "",
 		"HOPSESH_TAILSCALE": "off", // never show this machine's real tailnet
 	}
+	if runtime.GOOS != "windows" {
+		env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin" // git and ssh, no agents
+	}
+	return env
 }
 
 // DemoHome fills h (which should be empty) with a repository at git/demo whose remote is
