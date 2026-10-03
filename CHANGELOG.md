@@ -4,11 +4,12 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## [0.3.0] - 2026-10-03
 
 hopsesh now works with more than one coding agent: Claude Code and Codex, each a module
-behind a small SDK. The configuration format changed; an older file is refused and set
-aside (the app offers this), and machines are added again.
+behind a small SDK, and continues a session in the other agent. The desktop app comes to
+Windows, and both apps update themselves. The configuration format changed; an older file
+is refused and set aside (the app offers this), and machines are added again.
 
 ### Added
 - The desktop app on Windows (amd64 and arm64): a per-user installer (no administrator
@@ -142,5 +143,6 @@ First public release.
   binaries and app signed and notarized on the maintainer's Mac; `checksums.txt` signed with
   a release key that never leaves that Mac; install scripts; Scoop/winget and Linux packages.
 
+[0.3.0]: https://github.com/roeehrl/hopsesh/releases/tag/v0.3.0
 [0.2.0]: https://github.com/roeehrl/hopsesh/releases/tag/v0.2.0
 [0.1.0]: https://github.com/roeehrl/hopsesh/releases/tag/v0.1.0
