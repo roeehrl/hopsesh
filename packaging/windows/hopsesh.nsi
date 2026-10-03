@@ -52,7 +52,7 @@ VIAddVersionKey "LegalCopyright" "hopsesh authors, Apache License 2.0"
 !define MUI_UNWELCOMEFINISHPAGE_BITMAP "${ART}\sidebar.bmp"
 
 !define MUI_WELCOMEPAGE_TITLE "Install hopsesh"
-!define MUI_WELCOMEPAGE_TEXT "hopsesh moves coding-agent sessions between your machines, and between Claude Code and Codex.$\r$\n$\r$\nIt installs for you only, with no administrator rights:$\r$\n$\r$\n  •  into $LOCALAPPDATA\Programs\hopsesh$\r$\n  •  with a Start menu entry$\r$\n  •  and the hopsesh command on your PATH$\r$\n$\r$\nThe app keeps itself up to date."
+!define MUI_WELCOMEPAGE_TEXT "hopsesh moves coding-agent sessions between your machines, and between Claude Code and Codex.$\r$\n$\r$\nIt installs for you only, with no administrator rights:$\r$\n$\r$\n  •  into AppData\Local\Programs\hopsesh$\r$\n  •  with a Start menu entry$\r$\n  •  and the hopsesh command on your PATH$\r$\n$\r$\nThe app keeps itself up to date."
 !define MUI_PAGE_CUSTOMFUNCTION_SHOW WelcomeShow
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_INSTFILES
