@@ -22,7 +22,7 @@ th_add_user "$REMOTE_USER"
 th_clean_login_env
 RHOME=$(th_home "$REMOTE_USER")
 SLUG=$(printf '%s' "$RHOME/proj" | sed 's/[^A-Za-z0-9]/-/g')
-sudo -u "$REMOTE_USER" sh -c "mkdir -p ~/proj ~/.claude/projects/$SLUG ~/.ssh && chmod 700 ~/.ssh"
+sudo -u "$REMOTE_USER" -H sh -c "mkdir -p ~/proj ~/.claude/projects/$SLUG ~/.ssh && chmod 700 ~/.ssh"
 cat > "$WORK/session.jsonl" <<JSONL
 {"type":"user","uuid":"u1","parentUuid":null,"sessionId":"$ID","cwd":"$RHOME/proj","version":"2.1.284","timestamp":"2026-10-01T10:00:00Z","message":{"role":"user","content":"fix the build in $RHOME/proj/main.go"}}
 {"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"$ID","cwd":"$RHOME/proj","timestamp":"2026-10-01T10:00:05Z","message":{"role":"assistant","content":[{"type":"text","text":"Edited $RHOME/proj/main.go"}]}}

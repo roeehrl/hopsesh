@@ -30,7 +30,7 @@ th_add_user "$PW_USER" "$PW"
 th_clean_login_env
 RHOME=$(th_home "$PW_USER")
 SLUG=$(printf '%s' "$RHOME/proj" | sed 's/[^A-Za-z0-9]/-/g')
-sudo -u "$PW_USER" sh -c "mkdir -p ~/proj ~/.claude/projects/$SLUG && rm -rf ~/.ssh"
+sudo -u "$PW_USER" -H sh -c "mkdir -p ~/proj ~/.claude/projects/$SLUG && rm -rf ~/.ssh"
 cat > "$WORK/session.jsonl" <<JSONL
 {"type":"user","uuid":"u1","parentUuid":null,"sessionId":"$ID","cwd":"$RHOME/proj","version":"2.1.284","timestamp":"2026-10-01T10:00:00Z","message":{"role":"user","content":"hello from a password machine"}}
 {"type":"custom-title","customTitle":"password login test","sessionId":"$ID"}
