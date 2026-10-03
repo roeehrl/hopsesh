@@ -3,12 +3,14 @@
 # stand-in agents on the system PATH; "here" is the same account with hopsesh's and the
 # agents' folders kept apart by the matrix runner. Used by CI.
 #
-#   ./scripts/matrix-loopback.ps1 -Bin bin -Label windows→windows -Out out [-- hsmatrix flags]
+#   ./scripts/matrix-loopback.ps1 -Bin bin -Label windows→windows -Out out [-Strength 3] [-Shard 1/2] [-- hsmatrix flags]
 #   ./scripts/matrix-loopback.ps1 -Bin bin -SetupOnly   (this machine as "there" for another)
 param(
   [Parameter(Mandatory)][string]$Bin,
   [string]$Label,
   [string]$Out,
+  [int]$Strength = 2,
+  [string]$Shard = '1/1',
   [switch]$SetupOnly,
   [Parameter(ValueFromRemainingArguments)][string[]]$Rest
 )
@@ -44,5 +46,5 @@ Add-Content -Path (Join-Path $sshDir 'config') -Value "Host hsm-box`n  HostName 
 
 if ($SetupOnly) { exit 0 }
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
-& (Join-Path $Bin 'hsmatrix.exe') run -hopsesh (Join-Path $Bin 'hopsesh.exe') -there "$env:USERNAME@localhost" -alias hsm-box -label $Label -out $Out @Rest
+& (Join-Path $Bin 'hsmatrix.exe') run -hopsesh (Join-Path $Bin 'hopsesh.exe') -there "$env:USERNAME@localhost" -alias hsm-box -label $Label -out $Out -t $Strength -shard $Shard @Rest
 exit $LASTEXITCODE

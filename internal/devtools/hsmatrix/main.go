@@ -39,9 +39,10 @@ func main() {
 	case "rows":
 		fl := flag.NewFlagSet("rows", flag.ExitOnError)
 		all := fl.Bool("all", false, "every combination, not pairwise")
+		strength := fl.Int("t", 2, "coverage: 2 = pairs, 3 = triples")
 		seedN := fl.Int64("seed", 1, "pairwise seed")
 		_ = fl.Parse(os.Args[2:])
-		rows := pairwise(*seedN)
+		rows := covering(*strength, *seedN)
 		if *all {
 			rows = every()
 		}
@@ -65,8 +66,10 @@ func runMain(args []string) int {
 	label := fl.String("label", "", "what the run covers, for the summary (e.g. linux→windows)")
 	out := fl.String("out", "hsmatrix-out", "folder for results and logs")
 	all := fl.Bool("all", false, "every combination, not pairwise")
+	strength := fl.Int("t", 2, "coverage: 2 = every pair of values (pull requests), 3 = every triple (releases)")
 	seedN := fl.Int64("seed", 1, "pairwise seed")
 	only := fl.String("only", "", "comma-separated row numbers or ops to run")
+	shard := fl.String("shard", "", "k/n: run every n-th row starting at the k-th (1-based), to split a long run across jobs")
 	_ = fl.Parse(args)
 	if *there == "" {
 		fmt.Fprintln(os.Stderr, "-there is required")
@@ -124,7 +127,7 @@ func runMain(args []string) int {
 		return 1
 	}
 
-	rows := pairwise(*seedN)
+	rows := covering(*strength, *seedN)
 	if *all {
 		rows = every()
 	}
@@ -136,6 +139,20 @@ func runMain(args []string) int {
 		var sel []Row
 		for _, row := range rows {
 			if keep[strconv.Itoa(row.N)] || keep[row.Op] {
+				sel = append(sel, row)
+			}
+		}
+		rows = sel
+	}
+	if *shard != "" {
+		var k, n int
+		if _, err := fmt.Sscanf(*shard, "%d/%d", &k, &n); err != nil || n < 1 || k < 1 || k > n {
+			fmt.Fprintln(os.Stderr, "-shard wants k/n with 1 <= k <= n, got", *shard)
+			return 2
+		}
+		var sel []Row
+		for i, row := range rows {
+			if i%n == k-1 {
 				sel = append(sel, row)
 			}
 		}

@@ -144,15 +144,24 @@ func artifact(name, dest string) (bool, error) {
 
 func waitFor(name, dest string, d time.Duration) error {
 	deadline := time.Now().Add(d)
+	failures := 0
+	var last error
 	for time.Now().Before(deadline) {
 		ok, err := artifact(name, dest)
-		if err != nil {
-			return err
-		}
 		if ok {
 			return nil
 		}
+		if err != nil {
+			// GitHub's API answers 5xx now and then: a download that keeps failing is the error.
+			if failures++; failures == 5 {
+				return err
+			}
+			last = err
+		}
 		time.Sleep(10 * time.Second)
+	}
+	if last != nil {
+		return fmt.Errorf("%s never arrived (waited %s); the last try: %w", name, d, last)
 	}
 	return fmt.Errorf("%s never appeared (waited %s)", name, d)
 }
