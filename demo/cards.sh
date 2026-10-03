@@ -8,6 +8,7 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p out/cards
 for spec in "1280 640 light github-social" "1200 630 dark og-dark" "1200 630 light og-light"; do
+  # shellcheck disable=SC2086 # split the spec into its four fields
   set -- $spec
   rm -f "out/cards/$4.png"
   "$C" --headless=new --user-data-dir="$tmp/$4" --hide-scrollbars --window-size="$1,$2" \
