@@ -76,3 +76,15 @@ Match host foo
 		t.Error("self not marked")
 	}
 }
+
+// HOPSESH_TAILSCALE names the Tailscale CLI, or turns Tailscale discovery off.
+func TestTailscaleBinarySetting(t *testing.T) {
+	t.Setenv("HOPSESH_TAILSCALE", "off")
+	if b := tailscaleBinary(); b != "" {
+		t.Fatalf("off: %q", b)
+	}
+	t.Setenv("HOPSESH_TAILSCALE", "/opt/ts/bin/tailscale")
+	if b := tailscaleBinary(); b != "/opt/ts/bin/tailscale" {
+		t.Fatalf("named: %q", b)
+	}
+}

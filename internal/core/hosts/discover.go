@@ -116,7 +116,16 @@ func parseTailscale(out []byte) ([]Candidate, error) {
 	return res, nil
 }
 
+// tailscaleBinary finds the Tailscale CLI: HOPSESH_TAILSCALE names it ("off" skips
+// Tailscale), else PATH, else where the apps install it.
 func tailscaleBinary() string {
+	switch v := os.Getenv("HOPSESH_TAILSCALE"); v {
+	case "off":
+		return ""
+	case "":
+	default:
+		return v
+	}
 	if p, err := exec.LookPath("tailscale"); err == nil {
 		return p
 	}

@@ -113,6 +113,47 @@ jobs:
           advanced-security: false
           annotations: true
 
+  gui:
+    name: gui (browser)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: internal/devtools/webtest
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: internal/devtools/webtest/package-lock.json
+      - name: GUI build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium webkit
+      - name: window tests (Chromium and WebKit, the real service on a demo home)
+        run: npx playwright test
+      - name: test summary
+        if: ${{ !cancelled() }}
+        uses: test-summary/action@37b508cfee6d4d080eedd00b5bb240a6a784a6a5 # v2.6
+        with:
+          paths: internal/devtools/webtest/test-results/junit.xml
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ failure() }}
+        with:
+          name: gui-report
+          path: |
+            internal/devtools/webtest/playwright-report/
+            internal/devtools/webtest/test-results/
+          retention-days: 7
+
   ssh:
     name: ssh (${{ matrix.family }})
     strategy:

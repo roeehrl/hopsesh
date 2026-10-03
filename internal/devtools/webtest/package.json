@@ -1,0 +1,11 @@
+{
+  "name": "hopsesh-webtest",
+  "private": true,
+  "description": "Browser tests of hopsesh's desktop window against the real service",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}
