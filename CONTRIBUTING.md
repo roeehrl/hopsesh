@@ -68,7 +68,7 @@ issue or discussion first so we can agree on the approach.
 
 | Method | What it does |
 |---|---|
-| `Spec` | id, name, vendor, stability (`experimental` until proven), tested version prefixes, binaries (with search paths and version arguments), data folders (env var plus default), login variables, secrets (never opened; globs allowed), instruction files |
+| `Spec` | id, name, vendor, stability (`experimental` until proven), tested version prefixes, binaries (with search paths and version arguments), data folders (env var plus default), login variables, secrets (never opened; globs allowed), instruction files, global instruction files (carried by `--carry-rules`), features |
 | `Detect` | turns a machine's facts into an install (most modules start from `DefaultInstall`) |
 | `List` | the sessions on a machine; one unreadable session is reported, not fatal |
 | `Bundle` | the files that make up one session |
@@ -90,6 +90,12 @@ issue or discussion first so we can agree on the approach.
 | `Importer` | "use the agent's own importer" (`--via import`) |
 | `Integrator` | where the skill and approval rules go |
 | `Notifier` | telling the old session where the work went |
+
+**Features declared in `Spec.Features`** rather than as interfaces: `fork`, `remote-control` and
+`app`. When a module declares one, `Resume` must honour the matching `ResumeOptions` field
+(`Fork`, `RemoteControl`, `App`). These turn on "Keep the old session running too", "Turn on
+Remote Control" and "Open it in the <agent> app" in the plan. Native replay is part of the
+`Writer`'s profile (`Profile.NativeReplay`).
 
 **Required tests**
 - The conformance kit: `agenttest.Run(t, module, newHost)` from `sdk/agent/agenttest`. It
