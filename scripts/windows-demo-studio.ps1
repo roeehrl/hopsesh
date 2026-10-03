@@ -56,7 +56,16 @@ install -o alice -m 600 '$pubWsl' /home/alice/.ssh/authorized_keys
 sed -i 's/^#\?Port .*/Port 2222/' /etc/ssh/sshd_config
 ssh-keygen -A
 mkdir -p /run/sshd
-service ssh restart || /usr/sbin/sshd
+# Ubuntu 24.04 under systemd starts sshd from ssh.socket, which takes its port from
+# sshd_config only after a reload; without systemd, start sshd itself.
+if [ -d /run/systemd/system ]; then
+  systemctl daemon-reload
+  systemctl restart ssh.socket ssh.service || true
+fi
+for i in 1 2 3 4 5; do ss -ltn | grep -q ':2222 ' && break; sleep 1; done
+ss -ltn | grep -q ':2222 ' || /usr/sbin/sshd -p 2222
+for i in 1 2 3 4 5; do ss -ltn | grep -q ':2222 ' && break; sleep 1; done
+ss -ltn | grep ':2222 '
 "@
 InWsl 'export HOME=/home/alice; cd ~ && demoseed -role studio' 'alice'
 
@@ -74,6 +83,11 @@ $mine = Join-Path $HOME '.ssh'
 New-Item -ItemType Directory -Force -Path $mine | Out-Null
 Add-Content -Path (Join-Path $mine 'config') -Value $cfg -Encoding ascii
 
+# WSL forwards localhost:2222 to the guest; give it a moment.
+for ($i = 0; $i -lt 20; $i++) {
+  if ((Test-NetConnection -ComputerName localhost -Port 2222 -WarningAction SilentlyContinue).TcpTestSucceeded) { break }
+  Start-Sleep -Seconds 1
+}
 $out = ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL studio 'echo studio-ok; ls ~/.claude/projects | wc -l'
 Write-Host $out
 if ("$out" -notmatch 'studio-ok') { Fail 'ssh studio did not answer' }
