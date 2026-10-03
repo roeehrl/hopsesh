@@ -41,6 +41,8 @@ func main() {
 	git("", "config", "--global", "user.name", "Alice Example")
 	git("", "config", "--global", "user.email", "alice@example.com")
 	git("", "config", "--global", "init.defaultBranch", "main")
+	// The two demo images give alice different user ids; the shared repositories are hers.
+	git("", "config", "--global", "--add", "safe.directory", "*")
 	git("", "config", "--global", "url."+bareDir+"/.insteadOf", "https://github.com/acme/")
 	git("", "config", "--global", "--add", "url."+bareDir+"/.insteadOf", "git@github.com:acme/")
 	for _, r := range []string{"webapp", "api", "infra"} {
