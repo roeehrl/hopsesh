@@ -5,9 +5,12 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -o /out/hopsesh ./cmd/hopsesh \
+# The version the recordings show (override with --build-arg VERSION=…).
+ARG VERSION=0.3.0
+RUN LD="-X github.com/roeehrl/hopsesh/internal/version.Version=${VERSION}" \
+ && CGO_ENABLED=0 go build -trimpath -ldflags "$LD" -o /out/hopsesh ./cmd/hopsesh \
  && CGO_ENABLED=0 go build -trimpath -o /out/demoseed ./internal/devtools/demoseed \
- && CGO_ENABLED=0 go build -trimpath -tags server -o /out/hopsesh-app ./cmd/hopsesh-app
+ && CGO_ENABLED=0 go build -trimpath -ldflags "$LD" -tags server -o /out/hopsesh-app ./cmd/hopsesh-app
 
 # "studio": the machine the sessions live on.
 FROM debian:bookworm-slim AS studio
