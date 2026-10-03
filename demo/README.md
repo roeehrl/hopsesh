@@ -40,6 +40,10 @@ The containers and their network are removed when the script exits.
   `demo/narrate.sh take.mp3 [music.mp3]`. It places each line on its beat, renders captions
   of the spoken words in the same style (`capture/captions.mjs`) and mixes the music under
   the voice → `demo/out/media/story-narrated-<scheme>.mp4`.
+- Windows screenshots come from CI: the "windows app (install, real window)" job saves the
+  real window on a demo home (`windows-shots` artifact, 2560×1600). `capture/winframe.mjs`
+  draws a Windows 11 title bar around them (`IN=… OUT=… node winframe.mjs` in the Playwright
+  image); `docs/assets/windows-app-*.png` is `01-sessions` scaled to 1600 px.
 - `social-card.html` is the social preview and Open Graph card; `demo/cards.sh` renders it into
   `demo/out/cards/` from the plan stills.
 - `docs/assets/` holds the copies the README uses: `hero-*.gif`, and `app-*`, `plan-*` and

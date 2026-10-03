@@ -86,10 +86,6 @@ Both check the download against the release's `checksums.txt` and its signature,
 The other machines need only an SSH server (Remote Login on macOS, OpenSSH on Windows) and
 their sessions. To continue in another agent, that agent must be installed here.
 
-**Upgrading from 0.2:** 0.3 uses a new configuration format. hopsesh sets the old file aside
-(the app offers "Start fresh"), and you add your machines again. `--desktop` is now `--app`,
-and the remote helper (`hosts helper`) and `hopsesh import` are gone.
-
 ## Quick start
 
 ```sh
@@ -138,6 +134,11 @@ uses ⌘, opens sessions in Windows Terminal (or PowerShell) and keeps passwords
 Credential Manager. It updates itself: **Settings → Updates → Install and restart** checks
 the release's signature and checksum (on macOS also the Apple developer and notarization),
 installs it and reopens.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/windows-app-dark.png">
+  <img src="docs/assets/windows-app-light.png" alt="The hopsesh app on Windows listing Claude Code and Codex sessions from this PC and from studio, a Linux machine, grouped by repository" width="900">
+</picture>
 
 ## Continue in another agent
 
