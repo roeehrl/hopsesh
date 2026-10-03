@@ -78,6 +78,9 @@ Both check the download against the release's `checksums.txt` and its signature,
   your PATH. The installer isn't code-signed yet, so Windows SmartScreen says "Windows
   protected your PC": click **More info**, then **Run anyway**. A portable `.zip` of the app
   is on the [release page](https://github.com/roeehrl/hopsesh/releases/latest).
+  On Windows 11 with **Smart App Control** turned on (mostly on new PCs), Windows blocks
+  programs that aren't code-signed, with no "Run anyway" option. hopsesh isn't code-signed
+  yet, so it won't run on those PCs until it is.
 - **Linux packages:** `.deb`, `.rpm` and `.apk` for amd64 and arm64 are on the
   [release page](https://github.com/roeehrl/hopsesh/releases/latest), for example
   `sudo apt install ./hopsesh_<version>_linux_amd64.deb`.
