@@ -41,7 +41,15 @@ fi
 
 DMG="$OUT/hopsesh-$VERSION-macos-universal.dmg"
 rm -f "$DMG"
-hdiutil create -quiet -volname "hopsesh $VERSION" -srcfolder "$APP" -ov -format UDZO "$DMG"
+# The window shows hopsesh.app, a link to Applications and a background with the drag between
+# them (packaging/macos/dmg). dmgbuild writes the window layout itself, without Finder, so this
+# works over SSH; it is pinned, and uvx caches it after the first run.
+DMGBUILD=${DMGBUILD:-uvx --quiet --from dmgbuild==1.6.7 dmgbuild}
+BG="$OUT/background.tiff"
+tiffutil -cathidpicheck packaging/macos/dmg/background.png packaging/macos/dmg/background@2x.png -out "$BG" 2>/dev/null
+$DMGBUILD -s packaging/macos/dmg/settings.py -D app="$APP" -D background="$BG" \
+  -D icon="$APP/Contents/Resources/hopsesh.icns" hopsesh "$DMG" >/dev/null
+rm -f "$BG"
 [ -n "${SIGN_IDENTITY:-}" ] && codesign --force --timestamp --sign "$SIGN_IDENTITY" "$DMG"
 
 if [ -n "${NOTARY_PROFILE:-}" ]; then

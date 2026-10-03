@@ -1,0 +1,24 @@
+<!doctype html><html><head><meta charset="utf-8">
+<!-- The DMG window's background, 540×380 points. Rendered at 1x and 2x into background.png and
+     background@2x.png by packaging/macos/dmg/render.sh. Finder draws the icons on top: hopsesh.app
+     at (140, 170) and the Applications link at (400, 170), 128 pt, with black labels (Finder always
+     uses black labels over a background image, so the background stays light). -->
+<style>
+  html,body{margin:0;width:540px;height:380px;overflow:hidden}
+  body{background:radial-gradient(120% 90% at 50% 0%,#ffffff 0%,#f7f6f2 55%,#efeee8 100%);
+    font-family:-apple-system,"SF Pro Text","Helvetica Neue",sans-serif;-webkit-font-smoothing:antialiased}
+  svg{position:absolute;left:0;top:0}
+  .cap{position:absolute;left:0;right:0;top:292px;text-align:center;font-size:13px;letter-spacing:.1px;color:#6e6e73}
+  .cap b{font-weight:600;color:#0b6b62}
+</style></head><body>
+<svg width="540" height="380" viewBox="0 0 540 380">
+  <defs>
+    <linearGradient id="g" x1="0" x2="1"><stop offset="0" stop-color="#0b6b62" stop-opacity=".55"/><stop offset="1" stop-color="#0b6b62"/></linearGradient>
+  </defs>
+  <!-- the hop: from the app over to Applications, like the arc in hopsesh's logo -->
+  <path d="M 216 122 C 246 66, 294 66, 324 122" fill="none" stroke="url(#g)" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="1 7.5"/>
+  <circle cx="216" cy="122" r="4.5" fill="#0b6b62" fill-opacity=".55"/>
+  <path d="M 325 110 L 325 123 L 314 117" fill="none" stroke="#0b6b62" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
+<div class="cap">Drag <b>hopsesh</b> to Applications</div>
+</body></html>
