@@ -86,10 +86,6 @@ Both check the download against the release's `checksums.txt` and its signature,
 The other machines need only an SSH server (Remote Login on macOS, OpenSSH on Windows) and
 their sessions. To continue in another agent, that agent must be installed here.
 
-**Upgrading from 0.2:** 0.3 uses a new configuration format. hopsesh sets the old file aside
-(the app offers "Start fresh"), and you add your machines again. `--desktop` is now `--app`,
-and the remote helper (`hosts helper`) and `hopsesh import` are gone.
-
 ## Quick start
 
 ```sh
