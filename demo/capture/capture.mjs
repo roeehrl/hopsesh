@@ -35,10 +35,6 @@ const frameHTML = `<!doctype html><html><head><style>
   #card .tg{font:600 40px/1.25 -apple-system,"SF Pro Display",system-ui,sans-serif;max-width:1000px}
   #card .sm{font:400 22px/1.4 -apple-system,system-ui,sans-serif;opacity:.7}
   #card .fine{font:400 15px/1.4 -apple-system,system-ui,sans-serif;opacity:.5;margin-top:20px}
-  .ghost{position:absolute;border:2px dashed #2bb3a3;border-radius:10px;color:#2bb3a3;display:flex;align-items:center;justify-content:center;
-    font:600 20px -apple-system,system-ui,sans-serif;background:${dark ? "rgba(43,179,163,.08)" : "rgba(11,107,98,.06)"};opacity:0;
-    transform:translateY(16px);transition:opacity .6s,transform .6s}
-  .ghost.on{opacity:1;transform:none}
   #keys{position:absolute;left:50%;bottom:${PAD / 2 - 6}px;transform:translateX(-50%);display:flex;gap:6px;opacity:0;transition:opacity .18s}
   #keys.on{opacity:1}
   #keys kbd{min-width:34px;padding:6px 10px;border-radius:8px;text-align:center;font:600 17px/1 -apple-system,system-ui,sans-serif;
@@ -106,8 +102,14 @@ if (mode === "story") await page.evaluate((h) => { const c = document.getElement
 // Ready: the session list has loaded.
 await text("Fix flaky checkout tests").waitFor({ timeout: 90000 });
 await wait(1500);
+// mark records when each story beat starts (seconds into the trimmed video), so the
+// voiceover lines of cut B can be placed on their beats.
+const marks = {};
+let tStart = 0;
+const mark = (name) => { marks[name] = +((Date.now() - tStart) / 1000).toFixed(2); };
 if (mode === "story") {
-  writeFileSync(`${out}/story-${scheme}.start`, String(Math.max(0, (Date.now() - t0) / 1000 - 0.3)));
+  tStart = Date.now() - 300;
+  writeFileSync(`${out}/story-${scheme}.start`, String(Math.max(0, (tStart - t0) / 1000)));
   await page.evaluate(() => { document.getElementById("card").style.transition = ""; });
 }
 
@@ -167,14 +169,17 @@ if (mode === "stills") {
 } else if (mode === "story") {
   // The launch video (cut A, captions only); see launch/VIDEO-0.3.md for the storyboard.
   const logo = `<img src="data:image/svg+xml;base64,${process.env.LOGO_B64 || ""}">`;
+  mark("title");
   await wait(3200);
   await card(null);
   await wait(500);
+  mark("sessions");
   await caption("Every session. Every agent. Every machine.");
   await zoom(470, 380, 1.3);
   await wait(3200);
   await zoom(640, 400, 1);
   await wait(900);
+  mark("pick");
   await caption("Pick one. Continue it in Codex.");
   await keys(["⌘", "K"], openPalette, 400);
   await page.keyboard.type("flaky", { delay: 110 });
@@ -182,6 +187,7 @@ if (mode === "stills") {
   await paletteTo("Continue in Codex", true);
   await keys(["↩"], () => page.keyboard.press("Enter"), 200);
   await text("Carried over").waitFor({ timeout: 60000 });
+  mark("plan");
   await caption("See what carries over — before anything changes.");
   await wait(600);
   await zoom(640, 290, 1.55);
@@ -190,10 +196,12 @@ if (mode === "stills") {
   await wait(2400);
   await zoom(640, 400, 1);
   await wait(900);
+  mark("result");
   await caption("Repo matched. Code synced. Codex briefed.");
   await keys(["⌘", "↩"], () => page.keyboard.press("Control+Enter"), 300);
   await text("continues in Codex").waitFor({ timeout: 120000 });
   await wait(3000);
+  mark("undo");
   await caption("Changed your mind? Undo — on every machine.");
   await text("Back to sessions").click();
   await openPalette();
@@ -205,27 +213,12 @@ if (mode === "stills") {
   await wait(700);
   const confirm = app.getByRole("dialog").getByRole("button", { name: /^Undo/ });
   if (await confirm.count()) await confirm.first().click();
-  await wait(2600);
-  await caption("Claude Code and Codex today. Your agent next — one small SDK.");
-  await openPalette();
-  await page.keyboard.type("settings");
-  await page.keyboard.press("Enter");
-  await app.getByText("Agents", { exact: true }).first().click();
-  await wait(900);
-  // The dashed "+ your agent" card goes just below the last agent's card.
-  const last = await app.getByText("Continue in Codex with its own importer").first().boundingBox();
-  const first = await app.getByText("Tested with", { exact: false }).first().boundingBox();
-  await page.evaluate(([y, x]) => {
-    const g = document.createElement("div");
-    g.className = "ghost"; g.textContent = "+ your agent";
-    Object.assign(g.style, { left: x + "px", top: y + "px", width: "482px", height: "64px" });
-    document.getElementById("stage").appendChild(g);
-    requestAnimationFrame(() => g.classList.add("on"));
-  }, [Math.round(last.y + last.height + 52), Math.round(first.x - 18)]);
-  await wait(4200);
+  await wait(3200);
   await caption(null);
-  await card(`<div class="nm">${logo}hopsesh</div><div class="sm">open source · CLI, TUI and macOS app</div><div class="tg">github.com/roeehrl/hopsesh</div><div class="fine">Unofficial; not affiliated with Anthropic or OpenAI.</div>`);
-  await wait(4800);
+  mark("end");
+  await card(`<div class="nm">${logo}hopsesh</div><div class="sm">Claude Code and Codex · CLI, TUI and macOS app</div><div class="tg">codonic.dev/apps/hopsesh/get-started</div><div class="fine">Unofficial; not affiliated with Anthropic or OpenAI.</div>`);
+  await wait(5200);
+  writeFileSync(`${out}/story-${scheme}.marks.json`, JSON.stringify(marks, null, 1));
 } else if (mode === "undo") {
   await text("Fix flaky checkout tests").click();
   await app.getByRole("button", { name: /Continue in Codex/ }).first().click();
