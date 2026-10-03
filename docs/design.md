@@ -234,7 +234,7 @@ Keys are the default, but some machines only take a password. Such a machine is 
 
 ## 19. Status
 
-**Built:** the module SDK with Claude Code and Codex modules; moves, continuations both ways (history, note, native replay, Codex's importer), the briefing and loss report, `--carry-rules`, the native copy; lineage manifests, marks and owed marks, round trips with append, conflicts and keep-both; code sync; peers and push; the skill in every agent with approval rules; CLI, TUI and the desktop app on macOS and Windows; password login (Keychain, Windows Credential Manager); self-update of the CLI and both apps; the release pipeline. Released: 0.3.0.
+**Built:** the module SDK with Claude Code and Codex modules; moves, continuations both ways (history, note, native replay, Codex's importer), the briefing and loss report, `--carry-rules`, the native copy; lineage manifests, marks and owed marks, round trips with append, conflicts and keep-both; code sync; peers and push; the skill in every agent with approval rules; CLI, TUI and the desktop app on macOS and Windows; password login (Keychain, Windows Credential Manager); self-update of the CLI and both apps; the release pipeline. Released: 0.3.1.
 
 **Planned:**
 - more modules, Reader first: OpenCode, Hermes, Gemini CLI, Goose, Amp, Crush, Cursor CLI;
