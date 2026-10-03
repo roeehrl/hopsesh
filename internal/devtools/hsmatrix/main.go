@@ -39,9 +39,10 @@ func main() {
 	case "rows":
 		fl := flag.NewFlagSet("rows", flag.ExitOnError)
 		all := fl.Bool("all", false, "every combination, not pairwise")
+		strength := fl.Int("t", 2, "coverage: 2 = pairs, 3 = triples")
 		seedN := fl.Int64("seed", 1, "pairwise seed")
 		_ = fl.Parse(os.Args[2:])
-		rows := pairwise(*seedN)
+		rows := covering(*strength, *seedN)
 		if *all {
 			rows = every()
 		}
@@ -65,6 +66,7 @@ func runMain(args []string) int {
 	label := fl.String("label", "", "what the run covers, for the summary (e.g. linux→windows)")
 	out := fl.String("out", "hsmatrix-out", "folder for results and logs")
 	all := fl.Bool("all", false, "every combination, not pairwise")
+	strength := fl.Int("t", 2, "coverage: 2 = every pair of values (pull requests), 3 = every triple (releases)")
 	seedN := fl.Int64("seed", 1, "pairwise seed")
 	only := fl.String("only", "", "comma-separated row numbers or ops to run")
 	_ = fl.Parse(args)
@@ -124,7 +126,7 @@ func runMain(args []string) int {
 		return 1
 	}
 
-	rows := pairwise(*seedN)
+	rows := covering(*strength, *seedN)
 	if *all {
 		rows = every()
 	}

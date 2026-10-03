@@ -1,0 +1,151 @@
+name: nightly
+
+# What changes under hopsesh without a commit, and what is too slow for every pull request:
+# the latest Claude Code and Codex (no model calls), the real desktop app on macOS and
+# Linux, the terminal UI in a real pseudo-terminal (ConPTY on Windows), and the scenario
+# matrix at triple coverage. No secrets.
+
+on:
+  schedule:
+    - cron: "11 2 * * *"
+  workflow_dispatch:
+  pull_request: # changes to these runs are tested before they land
+    paths:
+      - .github/workflows/nightly.yml
+      - scripts/app-selfcheck.sh
+      - internal/devtools/webtest/real/selfcheck.js
+      - internal/e2e/tuipty/**
+
+permissions:
+  contents: read
+
+jobs:
+  real-agents:
+    name: latest agents (${{ matrix.family }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {family: linux, os: ubuntu-24.04}
+          - {family: macos, os: macos-15}
+          - {family: windows, os: windows-2025}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: install the latest Claude Code and Codex
+        run: npm install -g --silent @anthropic-ai/claude-code@latest @openai/codex@latest # zizmor: ignore[adhoc-packages]
+      - name: hopsesh finds them and reads their versions
+        run: |
+          ext=""; [ "$RUNNER_OS" = Windows ] && ext=.exe
+          go build -o "bin/hopsesh$ext" ./cmd/hopsesh
+          export HOPSESH_CONFIG_DIR="$RUNNER_TEMP/cfg" HOPSESH_STATE_DIR="$RUNNER_TEMP/state"
+          mkdir -p ~/.claude ~/.codex/sessions # both have run here once
+          "bin/hopsesh$ext" agents --json > agents.json
+          for a in claude:@anthropic-ai/claude-code codex:@openai/codex; do
+            id=${a%%:*}; want=$(npm ls -g "${a#*:}" --json | jq -r ".dependencies[\"${a#*:}\"].version")
+            got=$(jq -r ".[] | select(.id == \"$id\") | .install.version // empty" agents.json)
+            echo "$id: npm $want, hopsesh read $got from $(jq -r ".[] | select(.id == \"$id\") | .install.binary" agents.json)"
+            [ "$got" = "$want" ] || { echo "::error::hopsesh read $id $got, npm installed $want"; exit 1; }
+          done
+      - name: real-agent tests (no model calls)
+        if: runner.os != 'Windows'
+        env:
+          HOPSESH_REAL_AGENTS: "1"
+        run: go test ./internal/e2e/ -run 'Codex' -count=1 -v
+
+  app:
+    name: real app (${{ matrix.family }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {family: linux, os: ubuntu-24.04}
+          - {family: macos, os: macos-15}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: GUI build dependencies and a virtual display (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev xvfb jq
+      - name: the real window lists the demo sessions and calls its backend
+        run: scripts/app-selfcheck.sh
+
+  tui:
+    name: terminal UI in a pseudo-terminal (${{ matrix.family }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {family: linux, os: ubuntu-24.04}
+          - {family: macos, os: macos-15}
+          - {family: windows, os: windows-2025}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        if: runner.os != 'Windows'
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: hopsesh's TUI in ConPTY (Windows) or a pty
+        env:
+          HOPSESH_PTY: "1"
+        run: go test ./internal/e2e/tuipty/ -count=1 -v
+
+  matrix-triples:
+    name: scenario matrix, every triple (linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: |
+          for p in cmd/hopsesh:hopsesh internal/devtools/hsmatrix:hsmatrix internal/devtools/fakeagent:fakeagent; do
+            go build -o "bin/${p#*:}" "./${p%%:*}"
+          done
+      - run: scripts/matrix-loopback.sh bin "linux→linux, triples" "$RUNNER_TEMP/hsmatrix" -t 3
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ failure() }}
+        with:
+          name: nightly-matrix
+          path: |
+            ${{ runner.temp }}/hsmatrix/*.log
+            ${{ runner.temp }}/hsmatrix/*.json
+          retention-days: 7

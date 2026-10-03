@@ -42,7 +42,7 @@ func main() {
 	})
 	svc.Wails = app
 	app.Menu.Set(menu(func(cmd string) { app.Event.Emit(gui.MenuEvent, cmd) }))
-	app.Window.NewWithOptions(application.WebviewWindowOptions{
+	win := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:     "hopsesh",
 		Width:     1280,
 		Height:    820,
@@ -54,6 +54,7 @@ func main() {
 			InvisibleTitleBarHeight: 44,
 		},
 	})
+	testHook(win)
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
 	}
