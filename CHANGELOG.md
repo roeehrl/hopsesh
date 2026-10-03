@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Fixed
+- A session that ran in an agent worktree whose branch was never pushed now comes over
+  with its branch, fetched straight from the other machine like unpushed commits on the
+  checked-out branch (before, hopsesh stopped with "branch … exists neither locally nor on
+  origin").
+
 ## [0.3.0] - 2026-10-03
 
 hopsesh now works with more than one coding agent: Claude Code and Codex, each a module

@@ -231,8 +231,10 @@ func CurrentBranch(ctx context.Context, dir string) string {
 }
 
 // AddWorktree creates a worktree at path for branch: from the local branch if it exists,
-// otherwise tracking origin/<branch>. It never moves an existing checkout.
-func AddWorktree(ctx context.Context, repo, branch, path string) error {
+// otherwise tracking origin/<branch>, otherwise (from, when given) from the branch on the
+// other machine, fetched straight from it because it was never pushed. It never moves an
+// existing checkout.
+func AddWorktree(ctx context.Context, repo, branch, path string, from *FetchSource) error {
 	bs := InspectBranch(ctx, repo, branch)
 	if bs.CheckedOut != "" {
 		return fmt.Errorf("branch %s is already checked out at %s", branch, bs.CheckedOut)
@@ -246,6 +248,13 @@ func AddWorktree(ctx context.Context, repo, branch, path string) error {
 		return err
 	case bs.Remote:
 		_, err := runGit(ctx, repo, "worktree", "add", "--track", "-b", branch, "--", path, "origin/"+branch)
+		return err
+	case from != nil && from.URL != "":
+		ref := "refs/hopsesh/" + safeRefPart(from.Name) + "/" + branch
+		if _, err := runGitEnv(ctx, repo, from.Env, "fetch", "--quiet", "--no-tags", from.URL, "+refs/heads/"+branch+":"+ref); err != nil {
+			return fmt.Errorf("branch %s is neither here nor on origin, and fetching it from %s failed: %w", branch, from.Name, err)
+		}
+		_, err := runGit(ctx, repo, "worktree", "add", "-b", branch, "--", path, ref)
 		return err
 	default:
 		return fmt.Errorf("branch %s exists neither locally nor on origin (was it pushed?)", branch)

@@ -173,10 +173,15 @@ func applyRepo(ctx context.Context, p *Plan, in Input, env Env, res *Result, ste
 		res.Cloned = true
 		env.Audit.Write(audit.Entry{Action: "git.clone", Session: p.Key.String(), Detail: map[string]any{"remote": r.Remote, "dest": r.LocalPath}})
 	}
+	// The other machine's repository, for commits and branches that were never pushed.
+	var from *repos.FetchSource
+	if in.GitFetch != nil && p.Source.Location != p.Target.Location {
+		from = in.GitFetch(nonEmpty(r.SourceMain, r.SourceTop))
+	}
 	if r.Worktree != "" {
 		if _, err := os.Stat(r.Worktree); err != nil {
 			step("creating worktree " + r.Worktree + " on " + r.SourceBranch)
-			if err := repos.AddWorktree(ctx, r.LocalPath, r.SourceBranch, r.Worktree); err != nil {
+			if err := repos.AddWorktree(ctx, r.LocalPath, r.SourceBranch, r.Worktree, from); err != nil {
 				return fmt.Errorf("worktree: %w", err)
 			}
 			res.Worktree = r.Worktree
@@ -187,10 +192,6 @@ func applyRepo(ctx context.Context, p *Plan, in Input, env Env, res *Result, ste
 		return nil
 	}
 	step("checking the code against the session's commit")
-	var from *repos.FetchSource
-	if in.GitFetch != nil && p.Source.Location != p.Target.Location {
-		from = in.GitFetch(nonEmpty(r.SourceMain, r.SourceTop))
-	}
 	dir := p.Target.CWD
 	if r.Worktree != "" {
 		dir = r.Worktree
