@@ -16,13 +16,14 @@ DEST="${RUNNER_TEMP:-/tmp}/dumbpipe"
 mkdir -p "$DEST"
 F="$DEST/dumbpipe.$E"
 curl -fsSL --retry 3 -o "$F" "https://github.com/n0-computer/dumbpipe/releases/download/$V/dumbpipe-$V-$A.$E"
-if command -v sha256sum >/dev/null; then got=$(sha256sum "$F" | cut -d' ' -f1); else got=$(shasum -a 256 "$F" | cut -d' ' -f1); fi
+# From stdin: Git Bash's sha256sum escapes a path with backslashes (and the hash with it).
+if command -v sha256sum >/dev/null; then got=$(sha256sum < "$F" | cut -d' ' -f1); else got=$(shasum -a 256 < "$F" | cut -d' ' -f1); fi
 [ "$got" = "$S" ] || { echo "dumbpipe checksum mismatch: $got" >&2; exit 1; }
 if [ "$E" = zip ]; then unzip -q -o "$F" -d "$DEST"; else tar -xzf "$F" -C "$DEST"; fi
 BIN=$(find "$DEST" -type f \( -name dumbpipe -o -name dumbpipe.exe \) | head -n 1)
 [ -n "$BIN" ] || { echo "no dumbpipe binary in the archive" >&2; exit 1; }
 chmod +x "$BIN"
-"$BIN" --version
+echo "dumbpipe $V at $BIN"
 dir=$(dirname "$BIN")
 if [ -n "${GITHUB_PATH:-}" ]; then
   if command -v cygpath >/dev/null; then cygpath -w "$dir" >> "$GITHUB_PATH"; else echo "$dir" >> "$GITHUB_PATH"; fi
