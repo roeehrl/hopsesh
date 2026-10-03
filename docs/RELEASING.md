@@ -75,6 +75,10 @@ Scoop manifest and a winget pull request. Without it those steps are skipped.
 4. On the Mac: `scripts/release-sign.sh v0.3.0`. A rehearsal that notarizes nothing and
    uploads nothing: `DRY_RUN=1 scripts/release-sign.sh v0.3.0`.
 5. Review the draft on GitHub, then publish: `gh release edit v0.3.0 --draft=false --latest`.
+6. The website: bump `softwareVersion` in the hopsesh entry of `src/data/apps.ts` in
+   [codonic-site](https://github.com/roeehrl/codonic-site) and merge it. It's the only place
+   the site writes the version; its download links use `releases/latest/download/…` and
+   follow the release by themselves.
 
 To test the whole pipeline without publishing, use a pre-release tag such as
 `v0.4.0-rc.1`, then delete the draft and the tag
