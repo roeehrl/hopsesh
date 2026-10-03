@@ -87,6 +87,9 @@ FunctionEnd
 
 Function FinishShow
   !insertmacro HiDpiImage $mui.FinishPage.Image "sidebar@2x.bmp"
+  ; Focus on Finish, not on the checkbox, so "Open hopsesh" shows no dotted focus box.
+  GetDlgItem $0 $HWNDPARENT 1
+  SendMessage $HWNDPARENT ${WM_NEXTDLGCTL} $0 1
 FunctionEnd
 
 Function .onInit
