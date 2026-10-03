@@ -110,7 +110,7 @@ release:
 
     Windows (PowerShell): `irm https://raw.githubusercontent.com/roeehrl/hopsesh/main/scripts/install.ps1 | iex`
 
-    macOS app: the `.dmg` below (signed and notarized; macOS 13 or later). Windows app: the `-setup.exe` below for your processor (amd64 or arm64; installs for you only, no administrator rights). It is not code-signed yet, so Windows SmartScreen asks first: More info, then Run anyway. Linux: `.deb`, `.rpm`, `.apk` below. Both apps update themselves; from the command line, `hopsesh update`.
+    macOS app: the `.dmg` below (signed and notarized; macOS 13 or later). Windows app: the `-setup.exe` below for your processor (amd64 or arm64; installs for you only, no administrator rights). It is not code-signed yet, so Windows SmartScreen asks first: More info, then Run anyway. On Windows 11 with Smart App Control on, Windows blocks programs that aren't code-signed, so the app won't run there until it is. Linux: `.deb`, `.rpm`, `.apk` below. Both apps update themselves; from the command line, `hopsesh update`.
 
     ## Verify
 
@@ -119,4 +119,4 @@ release:
     [release-key.pub](https://github.com/roeehrl/hopsesh/blob/main/packaging/release-key.pub).
     Linux and Windows files also carry build provenance: `gh attestation verify <file> --repo roeehrl/hopsesh`.
 
-    hopsesh is an independent project and is not affiliated with, endorsed by or sponsored by Anthropic.
+    hopsesh is an independent project and is not affiliated with, endorsed by or sponsored by Anthropic or OpenAI.
