@@ -75,6 +75,9 @@ aside (the app offers this), and machines are added again.
   agent).
 
 ### Fixed
+- On Windows, `hopsesh trust` (and adding a machine in the app) works with servers whose
+  host keys Windows' `ssh-keyscan` cannot read, such as Ubuntu 24.04's OpenSSH: the key is
+  then read through one ssh connection and still shown for confirmation.
 - Continuing a session in another agent on the same machine uses the session's own
   checkout wherever it is, instead of asking to clone it into the repos folder.
 - A session is recognised as already being in a folder reached through a symlink (such as

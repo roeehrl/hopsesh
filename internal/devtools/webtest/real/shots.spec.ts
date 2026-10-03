@@ -4,8 +4,9 @@ import { join } from "node:path";
 import { port } from "./setup";
 
 // Screenshots of the real Windows window for the README and the product pages, on
-// demoseed's made-up laptop (HOPSESH_DEMO_WORLD=laptop): 1280×800 at 100% and 200%,
-// light and dark. Runs only when SHOTS_DIR is set.
+// demoseed's made-up laptop (HOPSESH_DEMO_WORLD=laptop) with its studio in WSL2 over SSH
+// (scripts/windows-demo-studio.ps1): 1280×800 at 100% and 200%, light and dark. Runs
+// only when SHOTS_DIR is set.
 const dir = process.env.SHOTS_DIR || "";
 const looks = [
   { theme: "light", scale: 1 }, { theme: "light", scale: 2 },
@@ -46,9 +47,9 @@ async function shoot(name: string) {
 test("screenshots of the real window", async () => {
   test.setTimeout(300_000);
   await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible({ timeout: 60_000 });
-  await expect(row("Dark mode color tokens")).toBeVisible({ timeout: 60_000 });
+  await expect(row("Fix flaky checkout tests")).toBeVisible({ timeout: 90_000 }); // studio, over SSH
   await expect(row("Storybook stories for the header")).toBeVisible();
-  await row("Dark mode color tokens").click();
+  await row("Fix flaky checkout tests").click();
   await expect(page.getByRole("complementary", { name: "Session details" })).toBeVisible();
   await shoot("01-sessions");
 
@@ -65,13 +66,20 @@ test("screenshots of the real window", async () => {
   await shoot("07-settings-agents");
 
   await page.keyboard.press("Control+1");
-  await row("Dark mode color tokens").click();
+  await page.keyboard.press("Control+K");
+  const input = page.getByRole("combobox", { name: "Search sessions or run a command" });
+  await input.fill("checkout");
+  await expect(page.locator(".pal-item", { hasText: "Continue in" }).first()).toBeVisible();
+  await shoot("08-palette");
+  await input.press("Escape");
+
+  await row("Fix flaky checkout tests").click();
   await page.getByRole("complementary", { name: "Session details" }).getByRole("button", { name: "Continue in Codex" }).click();
   const sheet = page.locator("#sheet");
-  await expect(sheet.getByRole("heading", { name: "Continue “Dark mode color tokens” in Codex" })).toBeVisible({ timeout: 30_000 });
+  await expect(sheet.getByRole("heading", { name: "Continue “Fix flaky checkout tests” in Codex" })).toBeVisible({ timeout: 60_000 });
   await shoot("02-continue-plan");
   await sheet.getByRole("button", { name: /Continue in Codex/ }).click();
-  await expect(page.getByRole("heading", { name: "“Dark mode color tokens” continues in Codex" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("heading", { name: "“Fix flaky checkout tests” continues in Codex" })).toBeVisible({ timeout: 60_000 });
   await shoot("03-continue-result");
 
   await page.keyboard.press("Control+2");

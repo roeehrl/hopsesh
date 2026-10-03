@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -118,13 +119,6 @@ func (c *Conn) ScanHostKeys(ctx context.Context) ([]HostKey, *ResolvedHost, erro
 	var ksErr bytes.Buffer
 	ks.Stderr = &ksErr
 	out, err := ks.Output()
-	if len(out) == 0 {
-		why := strings.TrimSpace(ksErr.String())
-		if why == "" && err != nil {
-			why = err.Error()
-		}
-		return nil, r, c.explainLocalNetwork(fmt.Errorf("%w: ssh-keyscan %s: %s", ErrUnreachable, r.HostName, firstLine(why)), gated)
-	}
 	name := r.HostName
 	if r.HostKeyAlias != "" {
 		name = r.HostKeyAlias
@@ -132,6 +126,28 @@ func (c *Conn) ScanHostKeys(ctx context.Context) ([]HostKey, *ResolvedHost, erro
 	if r.Port != "22" {
 		name = "[" + name + "]:" + r.Port
 	}
+	keys := parseHostKeys(out, name)
+	if len(keys) == 0 {
+		// Windows' ssh-keyscan returns only the banner from some OpenSSH servers (Ubuntu's
+		// 9.6, for one); ssh itself still reads the key.
+		keys = parseHostKeys(c.hostKeyViaSSH(ctx), name)
+	}
+	if len(keys) == 0 {
+		why := strings.TrimSpace(ksErr.String())
+		if why == "" && err != nil {
+			why = err.Error()
+		}
+		if why == "" {
+			why = "no host keys"
+		}
+		return nil, r, c.explainLocalNetwork(fmt.Errorf("%w: ssh-keyscan %s: %s", ErrUnreachable, r.HostName, firstLine(why)), gated)
+	}
+	return keys, r, nil
+}
+
+// parseHostKeys reads known_hosts-style lines ("host type key"; comments skipped) as the
+// keys of name.
+func parseHostKeys(out []byte, name string) []HostKey {
 	var keys []HostKey
 	sc := bufio.NewScanner(bytes.NewReader(out))
 	for sc.Scan() {
@@ -145,10 +161,35 @@ func (c *Conn) ScanHostKeys(ctx context.Context) ([]HostKey, *ResolvedHost, erro
 		}
 		keys = append(keys, HostKey{Line: name + " " + f[1] + " " + f[2], Type: f[1], Fingerprint: fp, Key: f[1] + " " + f[2]})
 	}
-	if len(keys) == 0 {
-		return nil, r, fmt.Errorf("%w: no host keys from %s", ErrUnreachable, r.HostName)
+	return keys
+}
+
+// hostKeyViaSSH reads the machine's host key the way ssh records it: one connection, as
+// hopsesh would make it (the destination's user, keys and settings), with a throwaway
+// known_hosts file that accepts the new key. Nothing is trusted by this; the caller shows
+// the key for confirmation. Returns that file's lines.
+func (c *Conn) hostKeyViaSSH(ctx context.Context) []byte {
+	dir, err := os.MkdirTemp("", "hopsesh-hostkey-")
+	if err != nil {
+		return nil
 	}
-	return keys, r, nil
+	defer os.RemoveAll(dir)
+	kh := filepath.Join(dir, "known_hosts")
+	null := "/dev/null"
+	if runtime.GOOS == "windows" {
+		null = "NUL"
+	}
+	args := []string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+		"-o", "StrictHostKeyChecking=accept-new", "-o", "UserKnownHostsFile=" + quoteList(kh), "-o", "GlobalKnownHostsFile=" + null,
+		"-o", "HashKnownHosts=no", "-o", "ControlPath=none", "-o", "ForwardAgent=no", "-o", "ClearAllForwardings=yes", "-o", "LogLevel=ERROR"}
+	if c.override != "" {
+		args = append(args, "-o", "HostName="+c.override)
+	}
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	_ = proc.CommandContext(ctx, c.sshBinary, append(args, c.Dest, "exit")...).Run() // the login may fail; the key is recorded first
+	b, _ := os.ReadFile(kh)
+	return b
 }
 
 // Fingerprint returns the OpenSSH SHA256 fingerprint of a base64 key blob.
