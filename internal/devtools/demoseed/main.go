@@ -28,7 +28,7 @@ const version = "2.1.284"
 
 var (
 	home    string
-	bareDir string
+	bareDir string // shared by both demo machines in demo/
 	now     = time.Now().UTC()
 	codex   *bool
 )
@@ -36,7 +36,7 @@ var (
 func main() {
 	role := flag.String("role", "studio", "studio or laptop")
 	codex = flag.Bool("codex", false, "laptop: also write Codex threads")
-	flag.StringVar(&bareDir, "bare", "", "where the acme repositories live (default /srv/git/acme; on Windows ~/demo-git/acme)")
+	flag.StringVar(&bareDir, "bare", envOr("DEMO_BARE", ""), "where the acme repositories live (default $DEMO_BARE, else /srv/git/acme; on Windows ~/demo-git/acme)")
 	flag.Parse()
 	home, _ = os.UserHomeDir()
 	if bareDir == "" {
@@ -50,6 +50,8 @@ func main() {
 	git("", "config", "--global", "user.name", "Alice Example")
 	git("", "config", "--global", "user.email", "alice@example.com")
 	git("", "config", "--global", "init.defaultBranch", "main")
+	// The two demo images give alice different user ids; the shared repositories are hers.
+	git("", "config", "--global", "--add", "safe.directory", "*")
 	git("", "config", "--global", "url."+base+".insteadOf", "https://github.com/acme/")
 	git("", "config", "--global", "--add", "url."+base+".insteadOf", "git@github.com:acme/")
 	for _, r := range []string{"webapp", "api", "infra"} {
@@ -215,7 +217,26 @@ func session(cwd, branch, title string, age time.Duration, status, first, last, 
 		"message": map[string]any{"role": "user", "content": []any{
 			map[string]any{"type": "tool_result", "tool_use_id": "toolu_" + id[:8], "content": "(file contents)"},
 		}}})
-	add(map[string]any{"type": "assistant", "uuid": a2, "parentUuid": u2, "timestamp": ts(30 * time.Minute),
+	parent := u2
+	for i, st := range richSteps(cwd)[title] {
+		a, u, tid := uuid(), uuid(), fmt.Sprintf("toolu_%s%02d", id[:6], i)
+		var content []any
+		if st.thinking != "" {
+			content = append(content, map[string]any{"type": "thinking", "thinking": st.thinking, "signature": "demo-signature-" + id[:8]})
+		}
+		content = append(content, map[string]any{"type": "text", "text": st.text},
+			map[string]any{"type": "tool_use", "id": tid, "name": st.tool, "input": st.input})
+		at := time.Duration(3+i*5) * time.Minute
+		add(map[string]any{"type": "assistant", "uuid": a, "parentUuid": parent, "timestamp": ts(at),
+			"message": map[string]any{"role": "assistant", "content": content}})
+		add(map[string]any{"type": "user", "uuid": u, "parentUuid": a, "timestamp": ts(at + time.Minute),
+			"toolUseResult": map[string]any{"stdout": st.result},
+			"message": map[string]any{"role": "user", "content": []any{
+				map[string]any{"type": "tool_result", "tool_use_id": tid, "content": st.result},
+			}}})
+		parent = u
+	}
+	add(map[string]any{"type": "assistant", "uuid": a2, "parentUuid": parent, "timestamp": ts(30 * time.Minute),
 		"message": map[string]any{"role": "assistant", "content": []any{
 			map[string]any{"type": "text", "text": "Done. I changed " + full + " and ran the tests in " + cwd + "."},
 		}}})
@@ -264,6 +285,46 @@ func uuid() string {
 	b[6] = b[6]&0x0f | 0x40
 	b[8] = b[8]&0x3f | 0x80
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+}
+
+func envOr(k, def string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return def
+}
+
+// step is one tool round in a longer made-up session: optional reasoning, a line of text,
+// one tool call and its result.
+type step struct {
+	thinking, text, tool string
+	input                map[string]any
+	result               string
+}
+
+// richSteps make the hero session long enough that the loss report has something to say
+// (reasoning blocks are left out when a session continues in another vendor's agent).
+func richSteps(cwd string) map[string][]step {
+	spec := filepath.Join(cwd, "src", "checkout", "cart.spec.ts")
+	return map[string][]step{"Fix flaky checkout tests": {
+		{thinking: "One failure in ten points at timing, not logic. Run the suite repeatedly to see which test flakes.",
+			text: "Let me reproduce it first.", tool: "Bash",
+			input:  map[string]any{"command": "npx playwright test src/checkout --repeat-each 20", "description": "Run the checkout tests 20 times"},
+			result: "38 passed, 2 failed\n  checkout › applies a coupon: timed out waiting for text \"Total: $90.00\""},
+		{text: "Only the coupon test fails. Reading it.", tool: "Read", input: map[string]any{"file_path": spec},
+			result: "await page.click('#apply-coupon');\nawait expect(page.locator('.total')).toHaveText('Total: $90.00');"},
+		{thinking: "The click fires before the coupon request resolves, and the assertion reads the old total when the response is slow.",
+			text: "The test asserts before the coupon request finishes. I'll wait for that response.", tool: "Edit",
+			input: map[string]any{"file_path": spec, "old_string": "await page.click('#apply-coupon');",
+				"new_string": "const applied = page.waitForResponse('**/api/coupons/apply');\nawait page.click('#apply-coupon');\nawait applied;"},
+			result: "The file " + spec + " has been updated."},
+		{text: "Running it 20 more times.", tool: "Bash",
+			input:  map[string]any{"command": "npx playwright test src/checkout --repeat-each 20"},
+			result: "40 passed"},
+		{thinking: "Stable now. Check the diff is limited to the test.",
+			text: "Stable. Checking the change is limited to the test.", tool: "Bash", input: map[string]any{"command": "git diff --stat"},
+			result: " src/checkout/cart.spec.ts | 4 +++-\n 1 file changed, 3 insertions(+), 1 deletion(-)"},
+	}}
 }
 
 func must(err error) {

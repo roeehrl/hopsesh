@@ -1,0 +1,10 @@
+# The narrated cut's script: beat <TAB> spoken line <TAB> caption ("-" for none; empty = the spoken line).
+# Beats match the marks capture.mjs writes for MODE=story. Generate the voice as one take with a
+# 1.2 s pause between lines (ElevenLabs: <break time="1.2s" />), then run demo/narrate.sh.
+title	Your coding sessions live on different machines, in different agents.	
+sessions	hopsesh finds all of them, grouped by repository.	
+pick	Pick one, and continue it in another agent.	
+plan	Before anything changes, you see exactly what carries over, what changes, and what's left out.	
+result	The repo is matched, the code synced, and Codex gets a briefing.	
+undo	Changed your mind? Undo works on every machine it touched.	
+end	hopsesh. Get started at codonic dot dev.	-

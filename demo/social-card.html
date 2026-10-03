@@ -1,23 +1,42 @@
 <!doctype html><html><head><meta charset="utf-8">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;600&display=swap" rel="stylesheet">
+<!-- Social preview / Open Graph card. Open as social-card.html?w=1280&h=640&theme=light
+     (GitHub) or ?w=1200&h=630&theme=dark (codonic.dev) and screenshot at that size.
+     Uses demo/out/media/plan-<theme>.png from `demo/record.sh media`. No vendor logos. -->
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-html,body{margin:0;width:1280px;height:640px;overflow:hidden}
-body{background:#f6f5f1;font-family:'IBM Plex Sans',system-ui,sans-serif;color:#1d1c19;display:flex}
-.left{width:490px;padding:0 0 0 72px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;gap:22px}
-.name{display:flex;align-items:center;gap:20px;font-family:'IBM Plex Mono',monospace;font-size:58px;font-weight:500;letter-spacing:-1px}
-.name img{width:84px;height:84px}
-.tag{font-size:34px;line-height:1.25;font-weight:600}
-.sub{font-size:21px;line-height:1.45;color:#4f4c45}
-.pills{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px}
-.pills span{font-size:16px;padding:6px 12px;border-radius:999px;background:#dfeeeb;color:#0b6b62;font-weight:600}
-.right{flex:1;display:flex;align-items:center;padding-right:48px}
-.shot{width:100%;border-radius:14px;box-shadow:0 22px 50px rgba(20,30,28,.28);border:1px solid #2a2b3c}
+:root{--bg:#f6f5f1;--ink:#1d1c19;--sub:#4f4c45;--teal:#0b6b62;--chip:#dfeeeb;--line:#cfd9d6}
+:root.dark{--bg:#111716;--ink:#ecebe5;--sub:#a3a69f;--teal:#2bb3a3;--chip:#173a36;--line:#2c3a37}
+html,body{margin:0;overflow:hidden}
+body{background:var(--bg);font-family:'IBM Plex Sans',system-ui,sans-serif;color:var(--ink);display:flex;box-sizing:border-box}
+.left{width:46%;padding:0 0 0 64px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;gap:20px;position:relative;z-index:1}
+.name{display:flex;align-items:center;gap:18px;font-family:'IBM Plex Mono',monospace;font-size:52px;font-weight:500;letter-spacing:-1px}
+.name img{width:72px;height:72px}
+.tag{font-size:33px;line-height:1.22;font-weight:600;letter-spacing:-.3px}
+.flow{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:600;flex-wrap:wrap}
+.flow b{padding:7px 13px;border-radius:9px;background:var(--chip);color:var(--teal);font-weight:600}
+.flow i{font-style:normal;color:var(--sub);font-size:20px}
+.flow em{font-style:normal;padding:6px 12px;border-radius:9px;border:1.5px dashed var(--teal);color:var(--teal);font-weight:500}
+.sub{font-size:19px;line-height:1.45;color:var(--sub);max-width:520px}
+.pills{display:flex;gap:8px;flex-wrap:wrap}
+.pills span{font-size:15px;padding:5px 11px;border-radius:999px;border:1px solid var(--line);color:var(--sub)}
+.right{flex:1;position:relative}
+.shot{position:absolute;left:-30px;top:50%;transform:translateY(-50%);width:880px}
 </style></head><body>
 <div class="left">
   <div class="name"><img src="../docs/assets/logo.svg" alt="">hopsesh</div>
-  <div class="tag">Continue your Claude Code session on another machine.</div>
-  <div class="sub">Finds sessions on your other machines over SSH or Tailscale, then moves one here with its repo, worktree and paths fixed up.</div>
-  <div class="pills"><span>CLI + TUI</span><span>macOS app</span><span>open source</span></div>
+  <div class="tag">Continue any coding-agent session, on any machine, in any agent.</div>
+  <div class="flow"><b>Claude Code</b><i>⇄</i><b>Codex</b><em>+ your agent</em></div>
+  <div class="sub">Moves a session between your machines or continues it in another agent, with the repo, worktree and code. A loss report shows what carries over; undo works on every machine.</div>
+  <div class="pills"><span>CLI + TUI</span><span>macOS &amp; Windows app</span><span>agent SDK</span><span>open source</span></div>
 </div>
-<div class="right"><img class="shot" src="out/tui-browse.png" alt=""></div>
+<div class="right"><img class="shot" id="shot" alt=""></div>
+<script>
+  const q = new URLSearchParams(location.search);
+  const w = +(q.get("w") || 1280), h = +(q.get("h") || 640), theme = q.get("theme") || "light";
+  document.documentElement.classList.toggle("dark", theme === "dark");
+  document.body.style.width = w + "px"; document.body.style.height = h + "px";
+  const shot = document.getElementById("shot");
+  shot.src = "out/media/plan-" + theme + ".png";
+  shot.style.width = Math.round(w * 0.66) + "px";
+</script>
 </body></html>
