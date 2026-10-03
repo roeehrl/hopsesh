@@ -69,10 +69,15 @@ ss -ltn | grep ':2222 '
 "@
 InWsl 'export HOME=/home/alice; cd ~ && demoseed -role studio' 'alice'
 
+# The guest's own address: WSL's localhost relay drops ssh-keyscan's extra connections.
+$ip = ((wsl -d $distro -- hostname -I) -split '\s+' | Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' } | Select-Object -First 1)
+if (-not $ip) { Fail 'no IPv4 address for the WSL guest' }
+Write-Host "studio is the WSL guest at $ip"
+
 # ~/.ssh/config: here (the profile ssh reads) and for the demo home.
 $cfg = @"
 Host studio
-  HostName localhost
+  HostName $ip
   Port 2222
   User alice
   IdentityFile $($Key -replace '\\', '/')
@@ -83,11 +88,14 @@ $mine = Join-Path $HOME '.ssh'
 New-Item -ItemType Directory -Force -Path $mine | Out-Null
 Add-Content -Path (Join-Path $mine 'config') -Value $cfg -Encoding ascii
 
-# WSL forwards localhost:2222 to the guest; give it a moment.
 for ($i = 0; $i -lt 20; $i++) {
-  if ((Test-NetConnection -ComputerName localhost -Port 2222 -WarningAction SilentlyContinue).TcpTestSucceeded) { break }
+  if ((Test-NetConnection -ComputerName $ip -Port 2222 -WarningAction SilentlyContinue).TcpTestSucceeded) { break }
   Start-Sleep -Seconds 1
 }
+# What hopsesh trust will see.
+Write-Host '--- ssh-keyscan'
+ssh-keyscan -T 5 -p 2222 $ip 2>&1 | ForEach-Object { Write-Host $_ }
+Write-Host '---'
 $out = ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL studio 'echo studio-ok; ls ~/.claude/projects | wc -l'
 Write-Host $out
 if ("$out" -notmatch 'studio-ok') { Fail 'ssh studio did not answer' }
