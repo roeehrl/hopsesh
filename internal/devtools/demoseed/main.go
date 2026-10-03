@@ -1,5 +1,3 @@
-//go:build !windows
-
 // Command demoseed fills a demo machine with made-up git repositories and Claude Code
 // sessions, for the recordings in demo/. Every name, path and prompt is invented.
 //
@@ -8,7 +6,8 @@
 //
 // Git remotes point at github.com/acme/*; a global insteadOf maps them to local bare
 // repositories, so cloning works without a network. The demo machines are Linux
-// containers, so this tool builds only on Unix-like systems.
+// containers; the Windows screenshots in CI seed the laptop on Windows (-codex adds
+// Codex threads there, so both agents show).
 package main
 
 import (
@@ -19,7 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"syscall"
+	"runtime"
 	"time"
 
 	"github.com/roeehrl/hopsesh/agents/claude"
@@ -29,22 +28,32 @@ const version = "2.1.284"
 
 var (
 	home    string
-	bareDir = envOr("DEMO_BARE", "/srv/git/acme") // shared by both demo machines in demo/
+	bareDir string // shared by both demo machines in demo/
 	now     = time.Now().UTC()
+	codex   *bool
 )
 
 func main() {
 	role := flag.String("role", "studio", "studio or laptop")
+	codex = flag.Bool("codex", false, "laptop: also write Codex threads")
+	flag.StringVar(&bareDir, "bare", envOr("DEMO_BARE", ""), "where the acme repositories live (default $DEMO_BARE, else /srv/git/acme; on Windows ~/demo-git/acme)")
 	flag.Parse()
 	home, _ = os.UserHomeDir()
+	if bareDir == "" {
+		bareDir = "/srv/git/acme"
+		if runtime.GOOS == "windows" {
+			bareDir = filepath.Join(home, "demo-git", "acme")
+		}
+	}
 	must(os.MkdirAll(bareDir, 0o755))
+	base := filepath.ToSlash(bareDir) + "/"
 	git("", "config", "--global", "user.name", "Alice Example")
 	git("", "config", "--global", "user.email", "alice@example.com")
 	git("", "config", "--global", "init.defaultBranch", "main")
 	// The two demo images give alice different user ids; the shared repositories are hers.
 	git("", "config", "--global", "--add", "safe.directory", "*")
-	git("", "config", "--global", "url."+bareDir+"/.insteadOf", "https://github.com/acme/")
-	git("", "config", "--global", "--add", "url."+bareDir+"/.insteadOf", "git@github.com:acme/")
+	git("", "config", "--global", "url."+base+".insteadOf", "https://github.com/acme/")
+	git("", "config", "--global", "--add", "url."+base+".insteadOf", "git@github.com:acme/")
 	for _, r := range []string{"webapp", "api", "infra"} {
 		bare(r)
 	}
@@ -105,6 +114,52 @@ func laptop() {
 	session(api, "main", "Paginate /v2/orders", 2*24*time.Hour, "",
 		"add cursor pagination to /v2/orders",
 		"document the cursor format in the OpenAPI spec", "api/openapi.yaml")
+	if *codex {
+		thread(web, "main", "Storybook stories for the header", 50*time.Minute,
+			"write Storybook stories for the header in both themes", "src/header/Header.stories.tsx")
+		thread(api, "main", "Speed up the orders query", 30*time.Hour,
+			"the /v2/orders query is slow for big accounts, find out why", "internal/orders/query.go")
+	}
+}
+
+// thread writes one made-up Codex thread (a rollout and its name in the session index).
+func thread(cwd, branch, title string, age time.Duration, prompt, file string) {
+	id := uuid()
+	t0 := now.Add(-age - 20*time.Minute)
+	ts := func(d time.Duration) string { return t0.Add(d).Format("2006-01-02T15:04:05.000Z") }
+	dir := filepath.Join(home, ".codex", "sessions", t0.Format("2006"), t0.Format("01"), t0.Format("02"))
+	must(os.MkdirAll(dir, 0o755))
+	full := filepath.Join(cwd, file)
+	recs := []map[string]any{
+		{"timestamp": ts(0), "type": "session_meta", "payload": map[string]any{"id": id, "timestamp": ts(0), "cwd": cwd,
+			"originator": "codex_cli_rs", "cli_version": "0.153.2", "source": "cli", "model_provider": "openai", "history_mode": "paginated",
+			"git": map[string]any{"branch": branch, "repository_url": "https://github.com/acme/" + filepath.Base(cwd) + ".git"}}},
+		{"timestamp": ts(time.Second), "type": "event_msg", "payload": map[string]any{"type": "task_started", "turn_id": "t1"}},
+		{"timestamp": ts(2 * time.Second), "type": "turn_context", "payload": map[string]any{"cwd": cwd, "approval_policy": "on-request",
+			"sandbox_policy": map[string]any{"type": "workspace-write", "writable_roots": []string{cwd}, "network_access": false}, "model": "gpt-5.6", "summary": "auto"}},
+		{"timestamp": ts(3 * time.Second), "type": "response_item", "payload": map[string]any{"type": "message", "role": "user",
+			"content": []any{map[string]any{"type": "input_text", "text": prompt}}}},
+		{"timestamp": ts(10 * time.Minute), "type": "response_item", "payload": map[string]any{"type": "message", "role": "assistant",
+			"content": []any{map[string]any{"type": "output_text", "text": "Done: I changed " + full + " and ran the tests."}}}},
+		{"timestamp": ts(10*time.Minute + time.Second), "type": "event_msg", "payload": map[string]any{"type": "task_complete", "turn_id": "t1"}},
+	}
+	path := filepath.Join(dir, "rollout-"+t0.Format("2006-01-02T15-04-05")+"-"+id+".jsonl")
+	f, err := os.Create(path)
+	must(err)
+	enc := json.NewEncoder(f)
+	enc.SetEscapeHTML(false)
+	for _, r := range recs {
+		must(enc.Encode(r))
+	}
+	must(f.Close())
+	end := now.Add(-age)
+	must(os.Chtimes(path, end, end))
+	idx, err := os.OpenFile(filepath.Join(home, ".codex", "session_index.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	must(err)
+	b, _ := json.Marshal(map[string]any{"id": id, "thread_name": title, "updated_at": end.Format(time.RFC3339)})
+	_, err = idx.Write(append(b, '\n'))
+	must(err)
+	must(idx.Close())
 }
 
 // bare creates the "remote" repository behind github.com/acme/<name>.
@@ -202,8 +257,7 @@ func session(cwd, branch, title string, age time.Duration, status, first, last, 
 	if status == "" {
 		return
 	}
-	sleep := exec.Command("sleep", "infinity")
-	sleep.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	sleep := sleeper()
 	must(sleep.Start())
 	live := filepath.Join(cfg, "sessions")
 	must(os.MkdirAll(live, 0o755))

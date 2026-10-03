@@ -40,6 +40,7 @@ func main() {
 	addr := flag.String("addr", "127.0.0.1:8765", "where to listen")
 	home := flag.String("home", "", "the demo home (made afresh; anything there is removed)")
 	prepare := flag.Bool("prepare", false, "only make the demo home and print its environment as JSON (the real-window tests start the app on it)")
+	world := flag.String("world", "test", "with -prepare: test (the fixtures' sessions) or empty (for demoseed to fill)")
 	flag.Parse()
 	if *home == "" {
 		log.Fatal("-home is required")
@@ -56,7 +57,12 @@ func main() {
 		for k, v := range env {
 			os.Setenv(k, v)
 		}
-		if err := testkit.DemoHome(h); err != nil {
+		if *world == "empty" {
+			err = os.MkdirAll(h, 0o700)
+		} else {
+			err = testkit.DemoHome(h)
+		}
+		if err != nil {
 			log.Fatal(err)
 		}
 		if err := json.NewEncoder(os.Stdout).Encode(env); err != nil {

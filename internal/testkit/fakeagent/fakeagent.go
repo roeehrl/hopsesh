@@ -1,4 +1,6 @@
-package scenario
+// Package fakeagent is the stand-in Claude Code and Codex the tests (and the Windows
+// screenshots in CI) run in place of the real agents.
+package fakeagent
 
 import (
 	"bufio"
@@ -25,8 +27,8 @@ func logCall(line string) {
 	}
 }
 
-// fakeClaude answers --version; anything else is logged and succeeds.
-func fakeClaude() int {
+// Claude answers --version; anything else is logged and succeeds.
+func Claude() int {
 	logCall("claude " + strings.Join(os.Args[1:], " "))
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
 		fmt.Println("2.1.284 (Claude Code)")
@@ -34,8 +36,8 @@ func fakeClaude() int {
 	return 0
 }
 
-// fakeCodex answers --version and runs app-server.
-func fakeCodex() int {
+// Codex answers --version and runs app-server.
+func Codex() int {
 	logCall("codex " + strings.Join(os.Args[1:], " "))
 	switch {
 	case len(os.Args) > 1 && os.Args[1] == "--version":
@@ -50,6 +52,10 @@ func fakeCodex() int {
 // ChatGPT account it is signed in to ("": not signed in).
 func appServer() int {
 	home := os.Getenv("CODEX_HOME")
+	if home == "" {
+		h, _ := os.UserHomeDir()
+		home = filepath.Join(h, ".codex")
+	}
 	out := json.NewEncoder(os.Stdout)
 	sc := bufio.NewScanner(os.Stdin)
 	sc.Buffer(make([]byte, 1<<20), 64<<20)

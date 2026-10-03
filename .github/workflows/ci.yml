@@ -250,7 +250,9 @@ jobs:
         run: |
           go run ./internal/devtools/icon "$env:RUNNER_TEMP/icon.png"
           go run ./internal/devtools/winres -icon "$env:RUNNER_TEMP/icon.png" -arch amd64 -version 0.3.0 -out cmd/hopsesh-app/rsrc_windows_amd64.syso
-          go build -tags e2e -ldflags "-H windowsgui -X github.com/roeehrl/hopsesh/internal/version.Version=0.3.0" -o "$env:RUNNER_TEMP/e2e/hopsesh-app.exe" ./cmd/hopsesh-app
+          # The release public key, so the app offers to install updates (the shots show it).
+          $key = (Get-Content packaging/release-key.pub | Where-Object { $_ -notmatch '-----' }) -join ''
+          go build -tags e2e -ldflags "-H windowsgui -X github.com/roeehrl/hopsesh/internal/version.Version=0.3.0 -X github.com/roeehrl/hopsesh/internal/update.PublicKey=$key" -o "$env:RUNNER_TEMP/e2e/hopsesh-app.exe" ./cmd/hopsesh-app
           go build -o "$env:RUNNER_TEMP/e2e/hopsesh.exe" ./cmd/hopsesh
       - name: the real window (WebView2 driven over CDP)
         shell: pwsh
@@ -258,10 +260,18 @@ jobs:
         run: |
           npm ci
           $env:HOPSESH_APP_EXE = "$env:RUNNER_TEMP/e2e/hopsesh-app.exe"
+          npx playwright test -c playwright.real.config.ts real/app.spec.ts
+      - name: screenshots of the real window (the made-up laptop)
+        shell: pwsh
+        working-directory: internal/devtools/webtest
+        run: |
+          $env:HOPSESH_APP_EXE = "$env:RUNNER_TEMP/e2e/hopsesh-app.exe"
+          $env:HOPSESH_DEMO_WORLD = "laptop"
+          $env:HOPSESH_DEMO_HOME = "C:\Users\alice"
           $env:SHOTS_DIR = "$env:RUNNER_TEMP/windows-shots"
-          $env:HOPSESH_DEMO_HOME = "C:\Users\demo"
-          npx playwright test -c playwright.real.config.ts
-      - name: screenshots of the real window (demo home)
+          npx playwright test -c playwright.real.config.ts real/shots.spec.ts
+      - name: upload the screenshots
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows-shots
