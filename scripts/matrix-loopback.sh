@@ -20,6 +20,9 @@ for a in claude codex; do sudo install -m 0755 "$BIN/fakeagent" "/usr/local/bin/
 mkdir -p ~/.ssh && chmod 700 ~/.ssh
 [ -f ~/.ssh/id_ed25519 ] || ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/id_ed25519
 sudo -u "$U" -H sh -c 'umask 077; mkdir -p ~/.ssh'
+# Commands over ssh get a minimal PATH (macOS: no /usr/local/bin); the user's shell adds it,
+# as a Homebrew user's own setup does.
+sudo -u "$U" -H sh -c 'for f in ~/.zshenv ~/.bashrc; do echo "export PATH=/usr/local/bin:\$PATH" >> "$f"; done'
 sudo install -o "$U" -m 0600 ~/.ssh/id_ed25519.pub "$UHOME/.ssh/authorized_keys"
 # The same machine by an ssh alias (naming=alias rows).
 printf 'Host hsm-box\n  HostName 127.0.0.1\n  User %s\n' "$U" >> ~/.ssh/config

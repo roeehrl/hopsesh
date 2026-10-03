@@ -7,6 +7,9 @@ All notable changes to this project are documented here. The format follows
 ## Unreleased
 
 ### Fixed
+- Moving or continuing a session from a Windows machine now rewrites its paths when its
+  folder is a git repository: git reports `C:/Users/…`, the agents record `C:\Users\…`,
+  and the two never matched, so the copy kept the other machine's paths.
 - A session that ran in an agent worktree whose branch was never pushed now comes over
   with its branch, fetched straight from the other machine like unpushed commits on the
   checked-out branch (before, hopsesh stopped with "branch … exists neither locally nor on

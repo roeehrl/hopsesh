@@ -162,8 +162,8 @@ func runMain(args []string) int {
 	_ = os.WriteFile(filepath.Join(outDir, "summary.md"), []byte(summary), 0o644)
 	if p := os.Getenv("GITHUB_STEP_SUMMARY"); p != "" {
 		if f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
-			f.WriteString(summary)
-			f.Close()
+			_, _ = f.WriteString(summary)
+			_ = f.Close()
 		}
 	}
 	fmt.Printf("\n%d of %d rows passed (%s)\n", len(results)-failed, len(results), *label)

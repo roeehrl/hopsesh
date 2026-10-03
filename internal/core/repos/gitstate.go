@@ -233,6 +233,28 @@ func ParseProbe(out []byte, excl []string) []GitState {
 	return res
 }
 
+// WindowsPaths gives the folders in states the form Windows programs use: git reports
+// C:/Users/…, agents record C:\Users\…, and the two must match when paths are mapped.
+func WindowsPaths(states []GitState) []GitState {
+	for i := range states {
+		s := &states[i]
+		s.Toplevel = windowsPath(s.Toplevel)
+		s.MainWorktree = windowsPath(s.MainWorktree)
+		for j := range s.Worktrees {
+			s.Worktrees[j].Path = windowsPath(s.Worktrees[j].Path)
+		}
+	}
+	return states
+}
+
+// windowsPath turns a drive-letter path with forward slashes (git's) into backslashes.
+func windowsPath(p string) string {
+	if len(p) >= 3 && p[1] == ':' && (p[2] == '/' || p[2] == '\\') {
+		return strings.ReplaceAll(p, "/", `\`)
+	}
+	return p
+}
+
 // ProbeLocal runs the probe on this machine.
 func ProbeLocal(ctx context.Context, dirs, excl []string) ([]GitState, error) {
 	if len(dirs) == 0 {
@@ -247,6 +269,9 @@ func ProbeLocal(ctx context.Context, dirs, excl []string) ([]GitState, error) {
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git probe: %w", err)
+	}
+	if runtime.GOOS == "windows" {
+		return WindowsPaths(ParseProbe(out, excl)), nil
 	}
 	return ParseProbe(out, excl), nil
 }
