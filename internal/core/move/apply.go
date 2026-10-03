@@ -60,6 +60,19 @@ type Result struct {
 	Owed *lineage.Pending `json:"owed,omitempty"`
 }
 
+// machinesOf reaches the two machines of a move by name, for the journal.
+func machinesOf(ctx context.Context, in Input) func(string) (host.FS, error) {
+	return func(name string) (host.FS, error) {
+		switch name {
+		case in.Target.Machine.Name:
+			return in.Target.Machine.FS(ctx)
+		case in.Source.Machine.Name:
+			return in.Source.Machine.FS(ctx)
+		}
+		return nil, fmt.Errorf("%s is not part of this move", name)
+	}
+}
+
 // Apply carries out a plan.
 func Apply(ctx context.Context, p *Plan, in Input, env Env) (*Result, error) {
 	if len(p.Blockers) > 0 {
@@ -142,6 +155,9 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (*Result, error) {
 	if p.Options.Notify && (!agent.Has(tgt.Module, agent.CapNotify) || !p.Options.RemoteControl) {
 		// The agent cannot tell the old session itself: the user pastes this there.
 		res.Notice = launch.OldSessionNotice(tgt.Machine.Name, p.Target.CWD, p.NewName, p.Options.Fork && p.Live)
+	}
+	if err := j.Seal(machinesOf(ctx, in)); err != nil {
+		res.Warnings = append(res.Warnings, "could not record what this changed, for a safe undo: "+err.Error())
 	}
 	step("done")
 	return res, nil

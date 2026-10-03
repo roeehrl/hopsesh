@@ -156,7 +156,7 @@ func TestMoveRoundTripAndUndo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := j.Undo(func(string) (host.FS, error) { return host.LocalFS(), nil }); err != nil {
+	if err := j.Undo(func(string) (host.FS, error) { return host.LocalFS(), nil }, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := list(t, here)[sid]; ok {

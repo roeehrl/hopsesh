@@ -156,7 +156,7 @@ func TestPushToPeer(t *testing.T) {
 	}
 
 	// One undo here undoes both machines.
-	if _, err := a.Undo(ctx, res.Journal); err != nil {
+	if _, err := a.Undo(ctx, res.Journal, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(moved); !os.IsNotExist(err) {

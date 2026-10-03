@@ -126,6 +126,7 @@ type ApplyReply struct {
 // UndoRequest asks a peer to undo one of its journals.
 type UndoRequest struct {
 	Journal string `json:"journal"`
+	Force   bool   `json:"force,omitempty"` // undo even what was used since
 }
 
 // message is one line on the wire: a request (Method set) or a reply (to ID).

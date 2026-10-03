@@ -113,7 +113,7 @@ func TestWindowContinuesInAnotherAgent(t *testing.T) {
 		t.Fatalf("codex entry: %+v", cx)
 	}
 
-	if err := a.Undo(d.Journal); err != nil {
+	if err := a.Undo(d.Journal, false); err != nil {
 		t.Fatal(err)
 	}
 	scan, _ = a.Scan()
@@ -304,7 +304,7 @@ func TestWindowSendsToAnotherMachine(t *testing.T) {
 	if e := findEntry(t, scan, "claude/"+sid); !strings.HasPrefix(e.Status, "moved to box") {
 		t.Fatalf("the copy here is marked: %+v", e.Status)
 	}
-	if err := a.Undo(d.Journal); err != nil {
+	if err := a.Undo(d.Journal, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(moved); !os.IsNotExist(err) {

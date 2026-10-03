@@ -503,6 +503,9 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 	mark := agent.Mark{Kind: agent.MarkContinued, Location: p.Target.Location, AgentName: tgt.Module.Spec().Name}
 	markWith(ctx, p, in, j, env, cp.head, mark, res)
 	res.Command = launch.Shell(p.Resume, "", launch.DefaultShell())
+	if err := j.Seal(machinesOf(ctx, in)); err != nil {
+		res.Warnings = append(res.Warnings, "could not record what this changed, for a safe undo: "+err.Error())
+	}
 	step("done")
 	return res, nil
 }

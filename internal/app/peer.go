@@ -93,7 +93,7 @@ func (s *peerSession) handle(ctx context.Context, method string, params json.Raw
 		if err := json.Unmarshal(params, &req); err != nil {
 			return nil, err
 		}
-		_, err := s.a.Undo(ctx, req.Journal)
+		_, err := s.a.Undo(ctx, req.Journal, req.Force)
 		return struct{}{}, err
 	}
 	return nil, fmt.Errorf("unknown request %q", method)
@@ -405,6 +405,9 @@ func (p *Push) Commit(ctx context.Context) (*PushResult, error) {
 	if err := a.replay(ctx, e, j, reply.Writes); err != nil {
 		reply.Result.Warnings = append(reply.Result.Warnings, "could not update the copy here: "+err.Error())
 	}
+	if err := j.Seal(func(string) (host.FS, error) { return host.LocalFS(), nil }); err != nil {
+		reply.Result.Warnings = append(reply.Result.Warnings, "could not record what this changed here, for a safe undo: "+err.Error())
+	}
 	if o := reply.Result.Owed; o != nil {
 		if err := lineage.AddPending(a.StateDir, *o); err != nil {
 			reply.Result.Mark, reply.Result.MarkError = "failed", err.Error()
@@ -469,7 +472,7 @@ func (p *Push) Close() {
 
 // undoRemote undoes a journal another machine's hopsesh keeps. One already undone there
 // counts as done.
-func (a *App) undoRemote(ctx context.Context, r journal.Remote) error {
+func (a *App) undoRemote(ctx context.Context, r journal.Remote, force bool) error {
 	h := a.Cfg.FindHost(r.Machine)
 	if h == nil {
 		return fmt.Errorf("%s is not a configured machine", r.Machine)
@@ -479,7 +482,7 @@ func (a *App) undoRemote(ctx context.Context, r journal.Remote) error {
 		return err
 	}
 	defer closeFn()
-	err = c.Call(ctx, peer.MethodUndo, peer.UndoRequest{Journal: r.ID}, nil)
+	err = c.Call(ctx, peer.MethodUndo, peer.UndoRequest{Journal: r.ID, Force: force}, nil)
 	if err != nil && strings.HasPrefix(err.Error(), errNothingToUndo) {
 		return nil
 	}

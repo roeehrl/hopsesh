@@ -449,11 +449,12 @@ func (a *App) ResumeEntry(machine, key string, inApp bool) error {
 	return openTerminal(launch.Shell(c, "", launch.DefaultShell()))
 }
 
-// Undo reverses a move or continuation by its journal id.
-func (a *App) Undo(journal string) error {
+// Undo reverses a move or continuation by its journal id; force undoes it even when the
+// session was used since.
+func (a *App) Undo(journal string, force bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	_, err := a.snapshot().Undo(ctx, journal)
+	_, err := a.snapshot().Undo(ctx, journal, force)
 	return err
 }
 

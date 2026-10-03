@@ -57,6 +57,9 @@ type Journal struct {
 	// Remote are journals of the same operation kept by hopsesh on other machines (a push):
 	// undoing this one undoes them too.
 	Remote []Remote `json:"remote,omitempty"`
+	// After is the state the operation left each file it created or replaced in (Seal), so
+	// undo can tell when one was used afterwards and refuse to lose that work.
+	After []State `json:"after,omitempty"`
 
 	dir string
 	mu  sync.Mutex
@@ -105,6 +108,92 @@ func (j *Journal) saveLocked() error {
 		return err
 	}
 	return os.Rename(tmp, filepath.Join(j.dir, "journal.json"))
+}
+
+// State is a file's size and SHA-256.
+type State struct {
+	Machine string `json:"machine"`
+	Path    string `json:"path"`
+	Size    int64  `json:"size"`
+	Sum     string `json:"sum"`
+}
+
+// ErrChanged means a file the operation wrote changed since: undoing it would lose that
+// later work.
+var ErrChanged = errors.New("changed since")
+
+func fileState(fsys host.FS, machine, p string) (State, error) {
+	f, err := fsys.Open(p)
+	if err != nil {
+		return State{}, err
+	}
+	defer f.Close()
+	h := sha256.New()
+	n, err := io.Copy(h, f)
+	if err != nil {
+		return State{}, err
+	}
+	return State{Machine: machine, Path: p, Size: n, Sum: hex.EncodeToString(h.Sum(nil))}, nil
+}
+
+// Seal records the state the operation left each file it created or replaced in. Files on
+// machines fsFor cannot reach are left out (their undo is not checked).
+func (j *Journal) Seal(fsFor func(machine string) (host.FS, error)) error {
+	j.mu.Lock()
+	entries := append([]Entry(nil), j.Entries...)
+	j.mu.Unlock()
+	var after []State
+	seen := map[string]bool{}
+	for _, e := range entries {
+		if e.Op != OpCreate && e.Op != OpReplace || seen[e.Machine+"\x00"+e.Path] {
+			continue
+		}
+		seen[e.Machine+"\x00"+e.Path] = true
+		fsys, err := fsFor(e.Machine)
+		if err != nil {
+			continue
+		}
+		if st, err := fileState(fsys, e.Machine, e.Path); err == nil {
+			after = append(after, st)
+		}
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.After = after
+	return j.saveLocked()
+}
+
+// Changed reports the first file that changed since the operation (ErrChanged with what
+// changed), or nil. A file that is gone, or a machine fsFor cannot reach, does not count.
+func (j *Journal) Changed(fsFor func(machine string) (host.FS, error)) error {
+	for _, a := range j.After {
+		fsys, err := fsFor(a.Machine)
+		if err != nil {
+			continue
+		}
+		now, err := fileState(fsys, a.Machine, a.Path)
+		if err != nil {
+			continue
+		}
+		if now.Sum != a.Sum {
+			what := "it was used after this"
+			if now.Size > a.Size {
+				what = fmt.Sprintf("%s were added after this", humanBytes(now.Size-a.Size))
+			}
+			return fmt.Errorf("%w: %s on %s (%s)", ErrChanged, filepath.Base(a.Path), a.Machine, what)
+		}
+	}
+	return nil
+}
+
+func humanBytes(n int64) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%d KB", n>>10)
+	}
+	return fmt.Sprintf("%d bytes", n)
 }
 
 // Remote names a journal on another machine's hopsesh.
@@ -304,7 +393,14 @@ func (j *Journal) backup(fsys host.FS, p string) (string, error) {
 
 // Undo reverses a journal's entries, newest first. fsFor returns the filesystem of a
 // machine by name (an error when it cannot be reached; such entries are reported).
-func (j *Journal) Undo(fsFor func(machine string) (host.FS, error)) error {
+// Unless force, it refuses (ErrChanged) when a file the operation wrote changed since:
+// undoing would lose that later work.
+func (j *Journal) Undo(fsFor func(machine string) (host.FS, error), force bool) error {
+	if !force {
+		if err := j.Changed(fsFor); err != nil {
+			return err
+		}
+	}
 	var problems []string
 	for i := len(j.Entries) - 1; i >= 0; i-- {
 		e := j.Entries[i]
