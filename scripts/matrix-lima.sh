@@ -23,6 +23,7 @@ for a in claude codex; do sudo install -m 0755 "$BIN/fakeagent" "/usr/local/bin/
 mkdir -p ~/.ssh && chmod 700 ~/.ssh
 [ -f ~/.ssh/id_ed25519 ] || ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/id_ed25519
 sudo -u "$U" -H sh -c 'umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys'
+sudo dscl . -create "/Users/$U" UserShell /bin/zsh # as any Mac user; it reads ~/.zshenv
 sudo -u "$U" -H sh -c 'for f in ~/.zshenv ~/.bashrc; do echo "export PATH=/usr/local/bin:\$PATH" >> "$f"; done'
 th_start_sshd
 
