@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/roeehrl/hopsesh/internal/integrate"
+	"github.com/roeehrl/hopsesh/internal/core/integrate"
 )
 
 func main() {

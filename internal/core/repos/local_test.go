@@ -62,7 +62,7 @@ func TestFindLocalCloneWorktree(t *testing.T) {
 	if err := AddWorktree(ctx, dest, "ghost", filepath.Join(root, "wt3")); err == nil {
 		t.Error("unknown branch must fail")
 	}
-	if err := SwitchBranch(ctx, dest, "main"); err != nil {
+	if err := SwitchBranch(ctx, dest, "main", []string{".claude/worktrees"}); err != nil {
 		t.Errorf("checkout main: %v", err)
 	}
 }

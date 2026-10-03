@@ -42,12 +42,12 @@ func TestSync(t *testing.T) {
 	two := gitOut(t, other, "rev-parse", "HEAD")
 
 	// Not pushed yet: missing even after fetch.
-	if r, err := Sync(ctx, here, "main", two, true, nil); err != nil || r.State != SyncMissing || !r.Fetched {
+	if r, err := Sync(ctx, here, "main", two, true, nil, nil); err != nil || r.State != SyncMissing || !r.Fetched {
 		t.Fatalf("unpushed: %+v %v", r, err)
 	}
 	// Still unpushed, but fetched straight from the other machine's repository.
 	from := &FetchSource{Name: "other", URL: other}
-	if r, err := Sync(ctx, here, "main", two, false, from); err != nil || !r.FromSource || r.State != SyncBehind {
+	if r, err := Sync(ctx, here, "main", two, false, from, nil); err != nil || !r.FromSource || r.State != SyncBehind {
 		t.Fatalf("from source: %+v %v", r, err)
 	}
 	if gitOut(t, here, "rev-parse", "refs/hopsesh/other/main") != two {
@@ -55,27 +55,27 @@ func TestSync(t *testing.T) {
 	}
 	gitOut(t, other, "push", "--quiet", "origin", "HEAD:main")
 	// Without fast-forward: behind.
-	if r, _ := Sync(ctx, here, "main", two, false, nil); r.State != SyncBehind || r.Behind != 1 {
+	if r, _ := Sync(ctx, here, "main", two, false, nil, nil); r.State != SyncBehind || r.Behind != 1 {
 		t.Fatalf("behind: %+v", r)
 	}
 	// Dirty checkout is left alone.
 	os.WriteFile(filepath.Join(here, "a.txt"), []byte("local edit"), 0o644)
-	if r, _ := Sync(ctx, here, "main", two, true, nil); r.State != SyncDirty {
+	if r, _ := Sync(ctx, here, "main", two, true, nil, nil); r.State != SyncDirty {
 		t.Fatalf("dirty: %+v", r)
 	}
 	gitOut(t, here, "checkout", "--quiet", "--", "a.txt")
 	// Clean: fast-forwarded.
-	if r, err := Sync(ctx, here, "main", two, true, nil); err != nil || r.State != SyncFastForwarded {
+	if r, err := Sync(ctx, here, "main", two, true, nil, nil); err != nil || r.State != SyncFastForwarded {
 		t.Fatalf("ff: %+v %v", r, err)
 	}
-	if r, _ := Sync(ctx, here, "main", two, true, nil); r.State != SyncUpToDate {
+	if r, _ := Sync(ctx, here, "main", two, true, nil, nil); r.State != SyncUpToDate {
 		t.Fatalf("up to date: %+v", r)
 	}
 	// Local commit on top: ahead.
 	os.WriteFile(filepath.Join(here, "b.txt"), []byte("x"), 0o644)
 	gitOut(t, here, "add", ".")
 	gitOut(t, here, "commit", "--quiet", "-m", "local")
-	if r, _ := Sync(ctx, here, "main", two, true, nil); r.State != SyncAhead {
+	if r, _ := Sync(ctx, here, "main", two, true, nil, nil); r.State != SyncAhead {
 		t.Fatalf("ahead: %+v", r)
 	}
 	// The other machine moves on too: diverged.
@@ -84,13 +84,13 @@ func TestSync(t *testing.T) {
 	gitOut(t, other, "commit", "--quiet", "-m", "three")
 	gitOut(t, other, "push", "--quiet", "origin", "HEAD:main")
 	three := gitOut(t, other, "rev-parse", "HEAD")
-	if r, _ := Sync(ctx, here, "main", three, true, nil); r.State != SyncDiverged {
+	if r, _ := Sync(ctx, here, "main", three, true, nil, nil); r.State != SyncDiverged {
 		t.Fatalf("diverged: %+v", r)
 	}
 	// A different branch checked out: left alone.
 	gitOut(t, here, "checkout", "--quiet", "-b", "feat")
 	gitOut(t, here, "reset", "--quiet", "--hard", two)
-	if r, _ := Sync(ctx, here, "main", three, true, nil); r.State != SyncOtherBranch {
+	if r, _ := Sync(ctx, here, "main", three, true, nil, nil); r.State != SyncOtherBranch {
 		t.Fatalf("other branch: %+v", r)
 	}
 }

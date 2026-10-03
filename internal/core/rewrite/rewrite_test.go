@@ -5,7 +5,12 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
+
+// protect is a Claude-like policy (the core knows no agent; this is test data).
+var protect = agent.RewritePolicy{Protect: []string{"thinking", "signature", "data", "uuid", "parentUuid", "sessionId"}}
 
 func run(t *testing.T, in string, opt Options) (string, Stats) {
 	t.Helper()
@@ -27,7 +32,7 @@ func TestRewritesCwdToolInputsAndKeys(t *testing.T) {
 	in := `{"type":"user","cwd":"/Users/alice/git/proj","uuid":"u1","message":{"content":[{"type":"tool_use","input":{"file_path":"/Users/alice/git/proj/a.go","command":"cd /Users/alice/git/proj && ls ~/x"}}]}}` + "\n" +
 		`{"type":"file-history-snapshot","snapshot":{"trackedFileBackups":{"/Users/alice/git/proj/b.go":{"realParentDir":"/Users/alice/git/proj"}}}}` + "\n" +
 		`{"type":"user","toolUseResult":{"persistedOutputPath":"/Users/alice/.claude/projects/-Users-alice-git-proj/s/tool-results/x.txt"}}` + "\n"
-	out, st := run(t, in, Options{Mappings: macToMac})
+	out, st := run(t, in, Options{Mappings: macToMac, Policy: protect})
 	for _, want := range []string{
 		`"cwd":"/Users/bob/src/proj"`,
 		`"file_path":"/Users/bob/src/proj/a.go"`,
@@ -56,7 +61,7 @@ func TestBoundariesAndNoDoubleReplace(t *testing.T) {
 
 func TestThinkingSignatureAndIDsUntouched(t *testing.T) {
 	in := `{"type":"assistant","uuid":"/Users/alice","message":{"content":[{"type":"thinking","thinking":"look in /Users/alice/git/proj","signature":"sig/Users/alice"},{"type":"redacted_thinking","data":{"x":"/Users/alice"}},{"type":"text","text":"see /Users/alice/git/proj"}]}}` + "\n"
-	out, _ := run(t, in, Options{Mappings: macToMac})
+	out, _ := run(t, in, Options{Mappings: macToMac, Policy: protect})
 	if !strings.Contains(out, `"thinking":"look in /Users/alice/git/proj"`) || !strings.Contains(out, `"signature":"sig/Users/alice"`) ||
 		!strings.Contains(out, `"data":{"x":"/Users/alice"}`) || !strings.Contains(out, `"uuid":"/Users/alice"`) {
 		t.Errorf("protected values changed:\n%s", out)
@@ -68,7 +73,7 @@ func TestThinkingSignatureAndIDsUntouched(t *testing.T) {
 
 func TestUnchangedLinesAreByteIdentical(t *testing.T) {
 	in := `{"type":"x",  "spaced" : "keep   this",  "n": 1.50, "u":"\u00e9\/"}` + "\r\n" + `not json` + "\n" + `{"last":"no newline"}`
-	out, st := run(t, in, Options{Mappings: macToMac})
+	out, st := run(t, in, Options{Mappings: macToMac, Policy: protect})
 	if out != `{"type":"x",  "spaced" : "keep   this",  "n": 1.50, "u":"\u00e9\/"}`+"\n"+`not json`+"\n"+`{"last":"no newline"}` {
 		t.Errorf("bytes changed:\n%q", out)
 	}
@@ -122,8 +127,8 @@ func TestWindowsSeparatorTranslation(t *testing.T) {
 func TestDropMovedMarks(t *testing.T) {
 	in := `{"type":"custom-title","customTitle":"fix tests","sessionId":"s"}` + "\n" +
 		`{"type":"custom-title","customTitle":"↪ moved to laptop · fix tests","sessionId":"s"}` + "\n"
-	out, st := run(t, in, Options{DropMovedMarks: true})
-	if st.DroppedMarks != 1 || strings.Contains(out, "moved to") || !strings.Contains(out, `"fix tests"`) {
+	out, st := run(t, in, Options{Policy: agent.RewritePolicy{DropRecords: []agent.FieldMatch{{Field: "customTitle", Prefixes: agent.MarkPrefixes()}}}})
+	if st.DroppedRecords != 1 || strings.Contains(out, "moved to") || !strings.Contains(out, `"fix tests"`) {
 		t.Fatalf("got %q %+v", out, st)
 	}
 	out, _ = run(t, in, Options{})
@@ -135,31 +140,34 @@ func TestDropMovedMarks(t *testing.T) {
 func TestRenameSession(t *testing.T) {
 	old, nw := "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
 	in := `{"type":"user","sessionId":"` + old + `","uuid":"` + old + `","toolUseResult":{"persistedOutputPath":"/Users/alice/.claude/projects/p/` + old + `/tool-results/x.txt"},"message":{"content":[{"type":"thinking","thinking":"see ` + old + `","signature":"s"}]}}` + "\n"
-	out, st := run(t, in, Options{RenameSession: [2]string{old, nw}, SessionID: nw, AppendTitle: "x (from laptop)"})
+	pol := protect
+	pol.Rename, pol.RenameKeys = [2]string{old, nw}, []string{"sessionId"}
+	out, st := run(t, in, Options{Policy: pol})
 	if !strings.Contains(out, `"sessionId":"`+nw+`"`) || !strings.Contains(out, "/"+nw+"/tool-results") {
 		t.Fatalf("not renamed: %s", out)
 	}
 	if !strings.Contains(out, `"uuid":"`+old+`"`) || !strings.Contains(out, `"thinking":"see `+old+`"`) {
 		t.Fatalf("message ids and signed thinking must not change: %s", out)
 	}
-	if st.RenamedIDs != 2 || !strings.Contains(out, `{"type":"custom-title","customTitle":"x (from laptop)","sessionId":"`+nw+`"}`) {
+	if st.RenamedIDs != 2 {
 		t.Fatalf("renamed=%d\n%s", st.RenamedIDs, out)
 	}
 }
 
-func TestStripBridgeDropThinkingAndRelocated(t *testing.T) {
+func TestDropRecordsAndElements(t *testing.T) {
 	in := `{"type":"bridge-session","bridgeSessionId":"b1"}` + "\n" +
 		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"","signature":"s"},{"type":"text","text":"hi"}]},"z":1}` + "\n"
-	out, st := run(t, in, Options{StripBridge: true, DropThinking: true, SessionID: "sid", RelocatedCWD: "/Users/bob/src/proj"})
+	pol := agent.RewritePolicy{
+		DropRecords: []agent.FieldMatch{{Field: "type", Values: []string{"bridge-session"}}},
+		DropElems:   []agent.ElemMatch{{Array: "message.content", Field: "type", Values: []string{"thinking", "redacted_thinking"}}},
+	}
+	out, st := run(t, in, Options{Policy: pol})
 	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if len(lines) != 2 || st.DroppedBridge != 1 || st.DroppedThinking != 1 || !st.AppendedRelocate {
+	if len(lines) != 1 || st.DroppedRecords != 1 || st.DroppedElems != 1 {
 		t.Fatalf("stats %+v\n%s", st, out)
 	}
 	if lines[0] != `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hi"}]},"z":1}` {
 		t.Errorf("thinking drop must keep key order: %s", lines[0])
-	}
-	if lines[1] != `{"type":"relocated","sessionId":"sid","relocatedCwd":"/Users/bob/src/proj"}` {
-		t.Errorf("relocated: %s", lines[1])
 	}
 }
 
@@ -169,7 +177,7 @@ func TestRedactHook(t *testing.T) {
 		n := bytes.Count(b, []byte("sk-ant-123"))
 		return bytes.ReplaceAll(b, []byte("sk-ant-123"), []byte("[REDACTED]")), n
 	}
-	out, st := run(t, in, Options{Redact: red})
+	out, st := run(t, in, Options{Redact: red, Policy: protect})
 	if out != `{"t":"key [REDACTED]","thinking":"sk-ant-123"}`+"\n" || st.Redactions != 1 {
 		t.Errorf("redact: %s %+v", out, st)
 	}
@@ -206,8 +214,32 @@ func FuzzRewriteKeepsValidJSON(f *testing.F) {
 
 func TestPathsAfterJSONEscapes(t *testing.T) {
 	in := `{"o":"line\n/Users/alice/git/proj/x\t/Users/alice/y\u0027/Users/alice/z","w":"C:\\nope/Users/alice/q"}` + "\n"
-	out, _ := run(t, in, Options{Mappings: macToMac})
+	out, _ := run(t, in, Options{Mappings: macToMac, Policy: protect})
 	want := `{"o":"line\n/Users/bob/src/proj/x\t/Users/bob/y\u0027/Users/bob/z","w":"C:\\nope/Users/alice/q"}` + "\n"
+	if out != want {
+		t.Errorf("got\n%s\nwant\n%s", out, want)
+	}
+}
+
+func TestDropRecordsByNestedField(t *testing.T) {
+	in := `{"type":"response_item","payload":{"type":"message","role":"user"}}
+{"type":"response_item","payload":{"type":"reasoning","encrypted_content":"gAAA"}}
+{"type":"compacted","payload":{"message":""}}
+`
+	out, st := run(t, in, Options{Policy: agent.RewritePolicy{DropRecords: []agent.FieldMatch{
+		{Field: "payload.type", Values: []string{"reasoning"}}, {Field: "type", Values: []string{"compacted"}}}}})
+	if st.DroppedRecords != 2 || strings.Contains(out, "reasoning") || strings.Contains(out, "compacted") || !strings.Contains(out, `"role":"user"`) {
+		t.Fatalf("dropped %d:\n%s", st.DroppedRecords, out)
+	}
+}
+
+// Some languages join a word to the next with a hyphen ("で-" here): a path there
+// moves too; a hyphen inside a name still stops a match.
+func TestPathAfterJoinedWord(t *testing.T) {
+	maps := []Mapping{{From: "/home/alice/proj", To: "/Users/bob/proj"}, {From: `C:\Users\alice\proj`, To: `D:\work\proj`}}
+	in := `{"a":"直す-/home/alice/proj/main.go","b":"見て-C:\\Users\\alice\\proj\\main.go","c":"/srv/x-/home/alice/proj"}` + "\n"
+	out, _ := run(t, in, Options{Mappings: maps})
+	want := `{"a":"直す-/Users/bob/proj/main.go","b":"見て-D:\\work\\proj\\main.go","c":"/srv/x-/home/alice/proj"}` + "\n"
 	if out != want {
 		t.Errorf("got\n%s\nwant\n%s", out, want)
 	}

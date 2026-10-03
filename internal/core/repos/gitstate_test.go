@@ -43,7 +43,7 @@ func TestProbeLocalWorktreesAndState(t *testing.T) {
 	wt := filepath.Join(repo, ".claude", "worktrees", "feat")
 	git(t, repo, "worktree", "add", "-q", "-b", "feat", wt)
 
-	states, err := ProbeLocal(context.Background(), []string{repo, wt, filepath.Join(root, "missing"), root})
+	states, err := ProbeLocal(context.Background(), []string{repo, wt, filepath.Join(root, "missing"), root}, []string{".claude/worktrees"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestProbeLocalWorktreesAndState(t *testing.T) {
 	if len(m.Worktrees) != 2 || m.MainBranch != "main" || m.MainWorktree != repo {
 		t.Errorf("worktrees: %+v", m.Worktrees)
 	}
-	if !w.LinkedWorktree || !w.ClaudeWorktree || w.Branch != "feat" || w.Unpushed != 0 && w.Upstream == "" && w.Unpushed != 1 {
+	if !w.LinkedWorktree || !w.AgentWorktree || w.Branch != "feat" || w.Unpushed != 0 && w.Upstream == "" && w.Unpushed != 1 {
 		t.Errorf("worktree: %+v", w)
 	}
 	if w.MainWorktree != repo || w.MainBranch != "main" {
@@ -77,7 +77,7 @@ func TestProbeLocalWorktreesAndState(t *testing.T) {
 func TestParseProbeBranchElsewhere(t *testing.T) {
 	out := "@@dir\t/r\nexists\t1\nrepo\t1\ntop\t/r\nbranch\tfeat\nremote\tgit@github.com:o/r.git\n" +
 		"wt\tworktree /r\nwt\tHEAD abc\nwt\tbranch refs/heads/main\nwt\t\nwt\tworktree /r/.claude/worktrees/x\nwt\tHEAD def\nwt\tbranch refs/heads/feat\n"
-	s := ParseProbe([]byte(out))[0]
+	s := ParseProbe([]byte(out), nil)[0]
 	if s.Identity != "github.com/o/r" || s.MainBranch != "main" {
 		t.Errorf("%+v", s)
 	}

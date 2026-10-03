@@ -11,6 +11,7 @@ PORT=2222
 ID=2c1d0e9f-3a4b-4c5d-8e6f-7a8b9c0d1e2f
 WORK=$(mktemp -d)
 export HOPSESH_CONFIG_DIR="$WORK/config" HOPSESH_STATE_DIR="$WORK/state" CLAUDE_CONFIG_DIR="$WORK/claude"
+mkdir -p "$CLAUDE_CONFIG_DIR" # Claude Code has run here once
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 cleanup() {
@@ -73,7 +74,7 @@ grep -q 'did not accept the password' "$WORK/wrong.json" || { cat "$WORK/wrong.j
 
 # The right one lists the session and pulls it.
 "$BIN" ls --host pwbox --no-local --json --password-stdin < "$WORK/password" > "$WORK/ls.json"
-grep -q "\"id\": *\"$ID\"" "$WORK/ls.json" || { cat "$WORK/ls.json"; fail "ls did not list the session"; }
+grep -q "\"session\": *\"$ID\"" "$WORK/ls.json" || { cat "$WORK/ls.json"; fail "ls did not list the session"; }
 TARGET="$WORK/here/proj"
 mkdir -p "$TARGET"
 "$BIN" pull "pwbox:$ID" --to "$TARGET" --yes --json --password-stdin < "$WORK/password" > "$WORK/pull.json" \
@@ -87,5 +88,5 @@ grep -rq "$PW" "$HOPSESH_CONFIG_DIR" "$HOPSESH_STATE_DIR" && fail "the password 
 "$BIN" hosts --json | grep -q '"auth": *"key"' || fail "setup-key did not switch to key login"
 sudo grep -qF "$(cut -d' ' -f1-2 ~/.ssh/id_ed25519.pub)" "$RHOME/.ssh/authorized_keys" || fail "key not installed"
 "$BIN" ls --host pwbox --no-local --json < /dev/null > "$WORK/key.json"
-grep -q "\"id\": *\"$ID\"" "$WORK/key.json" || { cat "$WORK/key.json"; fail "key login did not work"; }
+grep -q "\"session\": *\"$ID\"" "$WORK/key.json" || { cat "$WORK/key.json"; fail "key login did not work"; }
 echo "password test passed"

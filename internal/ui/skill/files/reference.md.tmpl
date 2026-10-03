@@ -1,0 +1,59 @@
+# hopsesh reference (version {{.Version}})
+
+## Read-only commands
+
+| Command | Does |
+|---|---|
+| `{{.Bin}} ls --json [--host M] [--agent A] [--repo R] [--live] [--no-git] [--limit N]` | list sessions |
+| `{{.Bin}} show <ref> --json` | one session's details and lineage |
+| `{{.Bin}} plan <ref> --json [--in A] [flags]` | what pulling it would do; never writes |
+| `{{.Bin}} agents --json` | the agents hopsesh supports and what is installed here |
+| `{{.Bin}} hosts --json` | known machines and whether each is allowed |
+| `{{.Bin}} doctor [machine] --json` | SSH, host trust, agents, skill |
+| `{{.Bin}} version` | the installed version |
+
+## Needs the user's yes first
+
+`{{.Bin}} pull <ref> --json --yes [flags]` moves the session here or continues it in another
+agent. `{{.Bin}} push <ref> <machine> --json --yes [flags]` sends a session on this machine to
+another machine whose hopsesh receives sessions (same flags, `--dry-run` to plan; `--to` is a
+folder there). `{{.Bin}} undo <id>` reverses either, on both machines for a push.
+
+## plan and pull flags
+
+| Flag | Meaning |
+|---|---|
+| `--in <{{.AgentIDs}}>` | continue in this agent (default: the session's own agent) |
+| `--fidelity history\|note` | another agent gets the whole conversation as text (default), or only a briefing |
+| `--native` | another agent that can replays exact tool calls as its own (experimental) |
+| `--note-file <path>` | a handoff note for the other agent's briefing |
+| `--via import` | let the other agent's own importer convert the session (Codex reads Claude Code sessions); hopsesh still adds its briefing |
+| `--carry-rules` | add the user's instructions for every project of the session's agent to the briefing (only when the user asks) |
+| `--go` | start the continued session with "Continue." |
+| `--clone` | clone the repository into the repos folder if it is not here |
+| `--to <dir>` | continue in this directory instead of matching the repository |
+| `--worktree auto\|create\|main` | recreate the session's worktree (auto), always use one, or the main checkout |
+| `--fork` | the old session keeps running; both continue |
+| `--rc` | turn the agent's remote control on, where it has one |
+| `--notify` | the moved session tells the old one where the work went (agents that can) |
+| `--redact` | redact likely secrets in the copy |
+| `--stop-local` | quit a copy of this session open here first |
+| `--keep-both` / `--replace` | when both copies changed: keep both / replace the copy here |
+| `--no-sync` | leave the checkout alone (default: fetch, and fast-forward when clean) |
+| `--no-mark` | do not mark the copy left behind |
+| `--push` | push the source branch's unpushed commits first |
+
+## JSON
+
+`plan --json` prints the plan: `kind` (`move` or `continue`), `key`, `title`, `agent`,
+`source`, `target.cwd`, `repo`, `sync`, `mark`, `conflict`, `warnings`, `blockers`, and for
+another agent `continue` (`relation`, `report`, `briefing`). `pull --json --yes` prints
+`{"plan": …, "result": …, "command": "…"}`; the result has `journal` (for undo), `syncNote`,
+`mark`, `markError`, `pushed`, `pushError`, `warnings`.
+
+## Permissions and the sandbox
+
+hopsesh reads other machines over SSH and writes into the agents' data folders, which agent
+sandboxes usually block. `{{.Bin}} skill install --add-rules` adds approval rules for each agent:
+the read-only commands run without asking (and, in Codex, outside its sandbox), while `pull`,
+`push` and `undo` always ask.

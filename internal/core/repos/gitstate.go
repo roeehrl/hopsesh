@@ -39,10 +39,10 @@ type GitState struct {
 	Unpushed int    `json:"unpushed"`
 	Dirty    int    `json:"dirty"` // changed + untracked files
 	// Worktrees: whether Dir is a linked worktree (not the main checkout), whether it is one
-	// of Claude Code's managed worktrees (<repo>/.claude/worktrees/<name>), the main
+	// of an agent's own managed worktrees (<repo>/.claude/worktrees/<name>), the main
 	// checkout's path and branch, and every worktree of the repository.
 	LinkedWorktree bool       `json:"linkedWorktree,omitempty"`
-	ClaudeWorktree bool       `json:"claudeWorktree,omitempty"`
+	AgentWorktree  bool       `json:"agentWorktree,omitempty"`
 	MainWorktree   string     `json:"mainWorktree,omitempty"`
 	MainBranch     string     `json:"mainBranch,omitempty"`
 	Worktrees      []Worktree `json:"worktrees,omitempty"`
@@ -96,7 +96,7 @@ for d in "$@"; do
   else
     printf 'unpushed\t%s\n' "$(git -C "$d" rev-list --count HEAD --not --remotes 2>/dev/null)"
   fi
-  printf 'dirty\t%s\n' "$(git -C "$d" status --porcelain -- ':/' ':(top,exclude).claude/worktrees' 2>/dev/null | wc -l | tr -d ' ')"
+  printf 'dirty\t%s\n' "$(git -C "$d" status --porcelain -- ':/'@EXCLUDES@ 2>/dev/null | wc -l | tr -d ' ')"
   gd=$(git -C "$d" rev-parse --absolute-git-dir 2>/dev/null)
   cd_=$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
   [ -z "$cd_" ] && cd_=$(cd "$d" && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd)
@@ -107,12 +107,38 @@ done
 `
 
 // ProbeScript returns the shell program and its arguments for the given directories.
-func ProbeScript(dirs []string) (script string, args []string) {
-	return probeScript, append([]string{"--"}, dirs...)
+// excl are agent-managed worktree folders (".claude/worktrees") that never count as
+// uncommitted changes.
+func ProbeScript(dirs, excl []string) (script string, args []string) {
+	var b strings.Builder
+	for _, p := range excludes(excl) {
+		b.WriteString(" '" + strings.ReplaceAll(p, "'", `'"'"'`) + "'")
+	}
+	return strings.Replace(probeScript, "@EXCLUDES@", b.String(), 1), append([]string{"--"}, dirs...)
+}
+
+// excludes turns agent worktree folders into git pathspecs.
+func excludes(excl []string) []string {
+	out := make([]string, len(excl))
+	for i, e := range excl {
+		out[i] = ":(top,exclude)" + e
+	}
+	return out
+}
+
+// isAgentWorktree reports whether a checkout is inside an agent-managed worktree folder.
+func isAgentWorktree(top string, excl []string) bool {
+	t := strings.ReplaceAll(top, `\`, "/")
+	for _, e := range excl {
+		if strings.Contains(t, "/"+e+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // ParseProbe parses ProbeScript output.
-func ParseProbe(out []byte) []GitState {
+func ParseProbe(out []byte, excl []string) []GitState {
 	var res []GitState
 	var cur *GitState
 	var gitDir, commonDir string
@@ -136,7 +162,7 @@ func ParseProbe(out []byte) []GitState {
 		if gitDir != "" && commonDir != "" && !samePath(gitDir, commonDir) {
 			cur.LinkedWorktree = true
 		}
-		cur.ClaudeWorktree = strings.Contains(cur.Toplevel, "/.claude/worktrees/") || strings.Contains(cur.Toplevel, `\.claude\worktrees\`)
+		cur.AgentWorktree = isAgentWorktree(cur.Toplevel, excl)
 		cur.Identity = Identity(cur.Remote)
 		res = append(res, *cur)
 	}
@@ -206,7 +232,7 @@ func ParseProbe(out []byte) []GitState {
 }
 
 // ProbeLocal runs the probe on this machine.
-func ProbeLocal(ctx context.Context, dirs []string) ([]GitState, error) {
+func ProbeLocal(ctx context.Context, dirs, excl []string) ([]GitState, error) {
 	if len(dirs) == 0 {
 		return nil, nil
 	}
@@ -214,13 +240,13 @@ func ProbeLocal(ctx context.Context, dirs []string) ([]GitState, error) {
 	if err != nil {
 		return nil, err
 	}
-	script, args := ProbeScript(dirs)
+	script, args := ProbeScript(dirs, excl)
 	cmd := exec.CommandContext(ctx, sh, append([]string{"-c", script, "hopsesh-probe"}, args[1:]...)...)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git probe: %w", err)
 	}
-	return ParseProbe(out), nil
+	return ParseProbe(out, excl), nil
 }
 
 func findSh() (string, error) {

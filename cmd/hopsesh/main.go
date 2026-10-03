@@ -1,24 +1,24 @@
-// Command hopsesh finds Claude Code sessions on your other machines and continues one here.
+// Command hopsesh moves coding-agent sessions between your machines, and between agents.
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
 
-	"github.com/roeehrl/hopsesh/internal/cli"
+	"github.com/roeehrl/hopsesh/internal/agents/all"
+	"github.com/roeehrl/hopsesh/internal/core/integrate"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
+	"github.com/roeehrl/hopsesh/internal/ui/cli"
 )
 
 func main() {
 	if transport.IsAskpass() {
 		os.Exit(transport.AskpassMain(os.Args[1:])) // ssh asking for a password, see transport
 	}
-	if err := cli.NewRoot(os.Stdout).Execute(); err != nil {
+	reg := all.Registry()
+	integrate.SetLoginVars(reg.LoginEnv())
+	if err := cli.NewRoot(os.Stdout, reg).Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
-		if errors.Is(err, cli.ErrNotImplemented) {
-			os.Exit(cli.ExitNotImplemented)
-		}
 		os.Exit(1)
 	}
 }

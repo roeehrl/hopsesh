@@ -9,42 +9,17 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/roeehrl/hopsesh/internal/core/moved"
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 // Mapping replaces one absolute path prefix with another (unescaped paths).
-type Mapping struct {
-	From string `json:"from"`
-	To   string `json:"to"`
-	// ToSep, when set ("/" or `\`), also converts the path separators that follow a
-	// match (for moves between Windows and macOS/Linux). The rest of the path ends at the
-	// first byte that cannot be part of a file name segment, such as a space or quote.
-	ToSep string `json:"toSep,omitempty"`
-}
+type Mapping = agent.Mapping
 
-// Options controls a transcript rewrite.
+// Options controls a rewrite.
 type Options struct {
 	Mappings []Mapping
-	// DropThinking removes thinking / redacted_thinking blocks entirely. Required when the
-	// target machine is signed in to a different Anthropic account: those blocks carry
-	// signatures bound to the original account, and removing only the signature fails.
-	DropThinking bool
-	// StripBridge drops bridge-session records so the copy does not reattach to the source
-	// session's Remote Control link.
-	StripBridge bool
-	// DropMovedMarks drops the "↪ moved to …" title records hopsesh writes on a copy left
-	// behind, so a copy taken from such a machine shows its real title again.
-	DropMovedMarks bool
-	// RenameSession gives the copy a new session id ({old, new}): sessionId fields and the
-	// id inside paths change; signed content and message ids do not. Used to keep both
-	// copies when two machines changed the same session.
-	RenameSession [2]string
-	// AppendTitle, when set, appends a custom-title record (after the relocated one).
-	AppendTitle string
-	// AppendRelocated appends {"type":"relocated",...} the way Claude Code's /cd does, so
-	// readers of the last 64 KB see the new project directory.
-	SessionID    string
-	RelocatedCWD string
+	// Policy is the agent module's: protected keys, dropped records and elements, renames.
+	Policy agent.RewritePolicy
 	// Redact, if set, is applied to every rewritable string token (raw JSON bytes) after path
 	// mapping; it returns the new bytes and how many secrets it replaced.
 	Redact func(raw []byte) ([]byte, int)
@@ -52,15 +27,13 @@ type Options struct {
 
 // Stats reports what a rewrite changed.
 type Stats struct {
-	Lines            int            `json:"lines"`
-	LinesChanged     int            `json:"linesChanged"`
-	Replacements     map[string]int `json:"replacements"` // by Mapping.From
-	DroppedBridge    int            `json:"droppedBridge"`
-	DroppedMarks     int            `json:"droppedMoveMarks,omitempty"`
-	RenamedIDs       int            `json:"renamedIds,omitempty"`
-	DroppedThinking  int            `json:"droppedThinking"`
-	Redactions       int            `json:"redactions"`
-	AppendedRelocate bool           `json:"appendedRelocated"`
+	Lines          int            `json:"lines"`
+	LinesChanged   int            `json:"linesChanged"`
+	Replacements   map[string]int `json:"replacements"` // by Mapping.From
+	DroppedRecords int            `json:"droppedRecords,omitempty"`
+	DroppedElems   int            `json:"droppedElements,omitempty"`
+	RenamedIDs     int            `json:"renamedIds,omitempty"`
+	Redactions     int            `json:"redactions"`
 }
 
 // maxLine bounds a single transcript line (Claude Code lines with large attachments can be
@@ -72,6 +45,7 @@ const maxLine = 256 << 20
 func JSONL(r io.Reader, w io.Writer, opt Options) (Stats, error) {
 	st := Stats{Replacements: map[string]int{}}
 	maps := compile(opt.Mappings, true)
+	pol := compilePolicy(opt.Policy)
 	br := bufio.NewReaderSize(r, 1<<20)
 	bw := bufio.NewWriterSize(w, 1<<20)
 	for {
@@ -83,7 +57,7 @@ func JSONL(r io.Reader, w io.Writer, opt Options) (Stats, error) {
 			st.Lines++
 			nl := bytes.HasSuffix(line, []byte{'\n'})
 			body := bytes.TrimRight(line, "\r\n")
-			out, keep := rewriteRecord(body, maps, opt, &st)
+			out, keep := rewriteRecord(body, maps, pol, opt.Redact, &st)
 			if keep {
 				if !bytes.Equal(out, body) {
 					st.LinesChanged++
@@ -102,27 +76,6 @@ func JSONL(r io.Reader, w io.Writer, opt Options) (Stats, error) {
 			break
 		}
 		if err != nil {
-			return st, err
-		}
-	}
-	if opt.RelocatedCWD != "" {
-		rec, _ := json.Marshal(struct {
-			Type         string `json:"type"`
-			SessionID    string `json:"sessionId"`
-			RelocatedCWD string `json:"relocatedCwd"`
-		}{"relocated", opt.SessionID, opt.RelocatedCWD})
-		if _, err := bw.Write(append(rec, '\n')); err != nil {
-			return st, err
-		}
-		st.AppendedRelocate = true
-	}
-	if opt.AppendTitle != "" {
-		rec, _ := json.Marshal(struct {
-			Type        string `json:"type"`
-			CustomTitle string `json:"customTitle"`
-			SessionID   string `json:"sessionId"`
-		}{"custom-title", opt.AppendTitle, opt.SessionID})
-		if _, err := bw.Write(append(rec, '\n')); err != nil {
 			return st, err
 		}
 	}
@@ -145,51 +98,84 @@ func Text(r io.Reader, w io.Writer, mappings []Mapping) (int, error) {
 	return n, err
 }
 
-func rewriteRecord(body []byte, maps []compiled, opt Options, st *Stats) ([]byte, bool) {
+// policy is a RewritePolicy prepared for the walker.
+type policy struct {
+	agent.RewritePolicy
+	protect    map[string]bool
+	renameKeys map[string]bool
+	ren        *[2][]byte
+}
+
+func compilePolicy(p agent.RewritePolicy) *policy {
+	c := &policy{RewritePolicy: p, protect: map[string]bool{}, renameKeys: map[string]bool{}}
+	for _, k := range p.Protect {
+		c.protect[k] = true
+	}
+	for _, k := range p.RenameKeys {
+		c.renameKeys[k] = true
+	}
+	if p.Rename[0] != "" && p.Rename[1] != "" && p.Rename[0] != p.Rename[1] {
+		c.ren = &[2][]byte{[]byte(p.Rename[0]), []byte(p.Rename[1])}
+	}
+	return c
+}
+
+func rewriteRecord(body []byte, maps []compiled, pol *policy, redact func([]byte) ([]byte, int), st *Stats) ([]byte, bool) {
 	trimmed := bytes.TrimSpace(body)
 	if len(trimmed) == 0 || trimmed[0] != '{' {
 		return body, true
 	}
-	if opt.StripBridge && bytes.Contains(body, []byte(`"bridge-session"`)) && recordType(body) == "bridge-session" {
-		st.DroppedBridge++
-		return nil, false
-	}
-	if opt.DropMovedMarks && bytes.Contains(body, []byte(`"custom-title"`)) && recordType(body) == "custom-title" {
-		var r struct {
-			CustomTitle string `json:"customTitle"`
+	for _, m := range pol.DropRecords {
+		last := m.Field[strings.LastIndex(m.Field, ".")+1:]
+		if !bytes.Contains(body, []byte(`"`+last+`"`)) {
+			continue
 		}
-		if json.Unmarshal(trimmed, &r) == nil && moved.IsTitle(r.CustomTitle) {
-			st.DroppedMarks++
+		if v, ok := pathString(trimmed, m.Field); ok && matches(v, m) {
+			st.DroppedRecords++
 			return nil, false
 		}
 	}
-	if opt.DropThinking && (bytes.Contains(body, []byte(`"thinking"`)) || bytes.Contains(body, []byte(`"redacted_thinking"`))) {
-		if out, n, err := dropThinking(body); err == nil && n > 0 {
+	for _, e := range pol.DropElems {
+		if out, n, err := dropElems(body, e); err == nil && n > 0 {
 			body = out
-			st.DroppedThinking += n
+			st.DroppedElems += n
 		}
 	}
-	var ren *[2][]byte
-	if opt.RenameSession[0] != "" && opt.RenameSession[1] != "" {
-		ren = &[2][]byte{[]byte(opt.RenameSession[0]), []byte(opt.RenameSession[1])}
-	}
-	return rewriteStrings(body, maps, opt.Redact, ren, st), true
+	return rewriteStrings(body, maps, redact, pol, st), true
 }
 
-func recordType(body []byte) string {
-	var v struct {
-		Type string `json:"type"`
+func matches(v string, m agent.FieldMatch) bool {
+	for _, x := range m.Values {
+		if v == x {
+			return true
+		}
 	}
-	_ = json.Unmarshal(body, &v)
-	return v.Type
+	for _, p := range m.Prefixes {
+		if strings.HasPrefix(v, p) {
+			return true
+		}
+	}
+	return false
 }
 
-// protectedKeys are object keys whose values (including nested containers) are never
-// modified: signed thinking content, opaque redacted-thinking data, and identifiers.
-var protectedKeys = map[string]bool{
-	"thinking": true, "signature": true, "data": true,
-	"uuid": true, "parentUuid": true, "sessionId": true, "leafUuid": true,
-	"messageId": true, "promptId": true, "requestId": true, "logicalParentUuid": true,
+// pathString returns the string at a dot path ("payload.type") in a JSON object.
+func pathString(body []byte, path string) (string, bool) {
+	raw := json.RawMessage(body)
+	for _, k := range strings.Split(path, ".") {
+		var v map[string]json.RawMessage
+		if json.Unmarshal(raw, &v) != nil {
+			return "", false
+		}
+		var ok bool
+		if raw, ok = v[k]; !ok {
+			return "", false
+		}
+	}
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		return "", false
+	}
+	return s, true
 }
 
 type frame struct {
@@ -200,7 +186,8 @@ type frame struct {
 
 // rewriteStrings walks one JSON value and applies path mappings (and redaction) inside
 // string tokens, keys included, except under protected keys.
-func rewriteStrings(b []byte, maps []compiled, redact func([]byte) ([]byte, int), ren *[2][]byte, st *Stats) []byte {
+func rewriteStrings(b []byte, maps []compiled, redact func([]byte) ([]byte, int), pol *policy, st *Stats) []byte {
+	ren := pol.ren
 	var out bytes.Buffer
 	out.Grow(len(b) + 64)
 	var stack []frame
@@ -241,7 +228,7 @@ func rewriteStrings(b []byte, maps []compiled, redact func([]byte) ([]byte, int)
 				out.WriteByte('"')
 				out.Write(ni)
 				out.WriteByte('"')
-			} else if ren != nil && !isKey && protectDepth < 0 && len(stack) > 0 && stack[len(stack)-1].lastKey == "sessionId" && bytes.Equal(tok[1:len(tok)-1], ren[0]) {
+			} else if ren != nil && !isKey && protectDepth < 0 && len(stack) > 0 && pol.renameKeys[stack[len(stack)-1].lastKey] && bytes.Equal(tok[1:len(tok)-1], ren[0]) {
 				st.RenamedIDs++
 				out.WriteByte('"')
 				out.Write(ren[1])
@@ -271,7 +258,7 @@ func rewriteStrings(b []byte, maps []compiled, redact func([]byte) ([]byte, int)
 			if len(stack) > 0 && stack[len(stack)-1].obj {
 				top := &stack[len(stack)-1]
 				top.expectKey = false
-				pendingProtected = protectDepth < 0 && protectedKeys[top.lastKey]
+				pendingProtected = protectDepth < 0 && pol.protect[top.lastKey]
 			}
 		case ',':
 			if len(stack) > 0 && stack[len(stack)-1].obj {
@@ -365,7 +352,7 @@ func replace(s []byte, maps []compiled, counts map[string]int) []byte {
 	last := 0
 	escaped := maps[0].escaped
 	for i := 0; i < len(s); i++ {
-		if i > 0 && segmentByte(s[i-1]) && !(escaped && afterEscape(s, i)) {
+		if i > 0 && segmentByte(s[i-1]) && !(escaped && afterEscape(s, i)) && !prefixHyphen(s, i) {
 			continue
 		}
 		if escaped && i > 0 && oddBackslashes(s, i-1) {
@@ -380,7 +367,7 @@ func replace(s []byte, maps []compiled, counts map[string]int) []byte {
 				continue
 			}
 			if out == nil {
-				out = make([]byte, 0, len(s)+32)
+				out = make([]byte, 0, len(s)) // append grows it
 			}
 			out = append(out, s[last:i]...)
 			out = append(out, m.to...)
@@ -440,6 +427,16 @@ func isHex(c byte) bool {
 }
 
 // segmentByte reports whether c continues a path segment name.
+// prefixHyphen reports a hyphen before s[i] that joins a word to the path rather than
+// continuing a name: a word joined to the path that way ("で-/home/…", "へ-C:\…"), and a lone
+// hyphen after a space or at the start is no name either.
+func prefixHyphen(s []byte, i int) bool {
+	if s[i-1] != '-' {
+		return false
+	}
+	return i == 1 || s[i-2] == ' ' || s[i-2] == '"' || s[i-2] >= 0x80
+}
+
 func segmentByte(c byte) bool {
 	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '_' || c == '-' || c >= 0x80
 }

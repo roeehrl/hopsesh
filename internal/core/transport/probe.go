@@ -18,179 +18,23 @@ import (
 	"unicode/utf16"
 
 	"github.com/roeehrl/hopsesh/internal/core/lnp"
-	"github.com/roeehrl/hopsesh/internal/core/repos"
 )
-
-// Facts describes a remote machine, learned with one probe.
-type Facts struct {
-	OS            string `json:"os"` // darwin | linux | windows
-	Arch          string `json:"arch,omitempty"`
-	Home          string `json:"home"`
-	ConfigDir     string `json:"configDir"` // Claude Code's config dir there
-	ClaudePath    string `json:"claudePath,omitempty"`
-	ClaudeVersion string `json:"claudeVersion,omitempty"`
-	HasGit        bool   `json:"hasGit"`
-}
-
-const posixFacts = `
-printf 'os\t%s\n' "$(uname -s 2>/dev/null)"
-printf 'arch\t%s\n' "$(uname -m 2>/dev/null)"
-printf 'home\t%s\n' "$HOME"
-printf 'claudeconfig\t%s\n' "${CLAUDE_CONFIG_DIR:-}"
-for c in "$(command -v claude 2>/dev/null)" "$HOME/.local/bin/claude" "$HOME/.claude/local/claude" /opt/homebrew/bin/claude /usr/local/bin/claude; do
-  if [ -n "$c" ] && [ -x "$c" ]; then
-    printf 'claude\t%s\n' "$c"
-    printf 'claudever\t%s\n' "$("$c" --version 2>/dev/null | head -n1)"
-    break
-  fi
-done
-command -v git >/dev/null 2>&1 && printf 'git\t1\n'
-exit 0
-`
-
-const windowsFacts = `
-$h = $env:USERPROFILE
-"os` + "`t" + `windows"
-"arch` + "`t" + `$env:PROCESSOR_ARCHITECTURE"
-"home` + "`t" + `$h"
-"claudeconfig` + "`t" + `$env:CLAUDE_CONFIG_DIR"
-$c = (Get-Command claude -ErrorAction SilentlyContinue).Source
-if (-not $c) { foreach ($p in @("$h\.local\bin\claude.exe", "$env:LOCALAPPDATA\Programs\claude\claude.exe")) { if (Test-Path $p) { $c = $p; break } } }
-if ($c) { "claude` + "`t" + `$c"; $v = (& $c --version 2>$null | Select-Object -First 1); "claudever` + "`t" + `$v" }
-if (Get-Command git -ErrorAction SilentlyContinue) { "git` + "`t" + `1" }
-`
-
-// Probe learns the remote machine's OS, home, Claude config dir and Claude version.
-func (c *Conn) Probe(ctx context.Context) (*Facts, error) {
-	out, err := c.Run(ctx, "uname -s")
-	var re *RemoteError
-	if err != nil && !errors.As(err, &re) {
-		return nil, err // connection-level failure
-	}
-	if err == nil && strings.TrimSpace(string(out)) != "" {
-		out, err = c.RunSh(ctx, posixFacts)
-		if err != nil {
-			return nil, err
-		}
-		f := parseFacts(out)
-		f.OS = normUname(f.OS)
-		if f.ConfigDir == "" {
-			f.ConfigDir = f.Home + "/.claude"
-		}
-		return f, nil
-	}
-	out, err = c.RunPowerShell(ctx, windowsFacts)
-	if err != nil {
-		return nil, fmt.Errorf("could not identify the remote system: %w", err)
-	}
-	f := parseFacts(out)
-	f.OS = "windows"
-	if f.ConfigDir == "" {
-		f.ConfigDir = f.Home + `\.claude`
-	}
-	return f, nil
-}
 
 // RunPowerShell runs a PowerShell script on a Windows machine (whatever its default ssh
 // shell is) via -EncodedCommand, which avoids every cmd.exe quoting pitfall.
 func (c *Conn) RunPowerShell(ctx context.Context, script string) ([]byte, error) {
+	return c.Run(ctx, PowerShellCommand(script))
+}
+
+// PowerShellCommand is the command line that runs a PowerShell script on a Windows
+// machine through -EncodedCommand (valid whether its ssh shell is cmd.exe or PowerShell).
+func PowerShellCommand(script string) string {
 	u := utf16.Encode([]rune("$ProgressPreference='SilentlyContinue';" + script))
 	b := make([]byte, len(u)*2)
 	for i, v := range u {
 		b[2*i], b[2*i+1] = byte(v), byte(v>>8)
 	}
-	enc := base64.StdEncoding.EncodeToString(b)
-	return c.Run(ctx, "powershell -NoProfile -NonInteractive -EncodedCommand "+enc)
-}
-
-func parseFacts(out []byte) *Facts {
-	f := &Facts{}
-	sc := bufio.NewScanner(bytes.NewReader(out))
-	for sc.Scan() {
-		k, v, _ := strings.Cut(strings.TrimRight(sc.Text(), "\r"), "\t")
-		switch k {
-		case "os":
-			f.OS = v
-		case "arch":
-			f.Arch = strings.ToLower(v)
-		case "home":
-			f.Home = v
-		case "claudeconfig":
-			f.ConfigDir = v
-		case "claude":
-			f.ClaudePath = v
-		case "claudever":
-			f.ClaudeVersion = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(v), "(Claude Code)"))
-		case "git":
-			f.HasGit = v == "1"
-		}
-	}
-	return f
-}
-
-func normUname(s string) string {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "darwin":
-		return "darwin"
-	case "linux":
-		return "linux"
-	}
-	if strings.Contains(strings.ToLower(s), "mingw") || strings.Contains(strings.ToLower(s), "msys") || strings.Contains(strings.ToLower(s), "cygwin") {
-		return "windows"
-	}
-	return strings.ToLower(strings.TrimSpace(s))
-}
-
-// Alive reports which pids are running on the remote machine.
-func (c *Conn) Alive(ctx context.Context, f *Facts, pids []int) map[int]bool {
-	out := map[int]bool{}
-	if len(pids) == 0 {
-		return out
-	}
-	var res []byte
-	var err error
-	if f.OS == "windows" {
-		ids := make([]string, len(pids))
-		for i, p := range pids {
-			ids[i] = strconv.Itoa(p)
-		}
-		res, err = c.RunPowerShell(ctx, "Get-Process -Id "+strings.Join(ids, ",")+" -ErrorAction SilentlyContinue | ForEach-Object { $_.Id }")
-	} else {
-		args := make([]string, len(pids))
-		for i, p := range pids {
-			args[i] = strconv.Itoa(p)
-		}
-		res, err = c.RunSh(ctx, `for p in "$@"; do kill -0 "$p" 2>/dev/null && echo "$p"; done; exit 0`, args...)
-	}
-	if err != nil {
-		return out
-	}
-	for _, line := range strings.Fields(string(res)) {
-		if n, err := strconv.Atoi(line); err == nil {
-			out[n] = true
-		}
-	}
-	return out
-}
-
-// GitProbe returns the git state of directories on the remote machine.
-func (c *Conn) GitProbe(ctx context.Context, f *Facts, dirs []string) ([]repos.GitState, error) {
-	if len(dirs) == 0 || !f.HasGit {
-		return nil, nil
-	}
-	if f.OS == "windows" {
-		out, err := c.RunPowerShell(ctx, repos.PowerShellProbe(dirs))
-		if err != nil {
-			return nil, err
-		}
-		return repos.ParseProbe(out), nil
-	}
-	script, args := repos.ProbeScript(dirs)
-	out, err := c.RunSh(ctx, script, args[1:]...)
-	if err != nil {
-		return nil, err
-	}
-	return repos.ParseProbe(out), nil
+	return "powershell -NoProfile -NonInteractive -EncodedCommand " + base64.StdEncoding.EncodeToString(b)
 }
 
 // ResolvedHost is what ssh -G says about a destination.

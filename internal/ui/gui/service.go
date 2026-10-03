@@ -1,0 +1,339 @@
+// Package gui is the backend of the hopsesh desktop app (Wails v3). The frontend in
+// assets/ calls these methods; every use case is the app layer's, as for the command
+// line.
+package gui
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"maps"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"slices"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
+
+	"github.com/roeehrl/hopsesh/internal/app"
+	"github.com/roeehrl/hopsesh/internal/config"
+	"github.com/roeehrl/hopsesh/internal/core/appicon"
+	"github.com/roeehrl/hopsesh/internal/core/audit"
+	"github.com/roeehrl/hopsesh/internal/core/lnp"
+	"github.com/roeehrl/hopsesh/internal/core/move"
+	"github.com/roeehrl/hopsesh/internal/core/registry"
+	"github.com/roeehrl/hopsesh/internal/update"
+	"github.com/roeehrl/hopsesh/internal/version"
+	"github.com/roeehrl/hopsesh/sdk/agent"
+)
+
+// MenuEvent carries a menu-bar command to the window ("palette", "refresh", "sessions",
+// "activity", "machines", "settings", "undo-last").
+const MenuEvent = "hopsesh:menu"
+
+// App is the service bound to the frontend.
+type App struct {
+	mu       sync.Mutex
+	core     *app.App // its Cfg is the saved configuration; calls work on snapshots
+	cfgErr   error    // the configuration file could not be used (see StartFresh)
+	inv      *app.Inventory
+	plan     *move.Plan
+	input    move.Input
+	res      *move.Result
+	push     *app.Push // a push planned on another machine, its connection open
+	pw       *pwBroker
+	appIcons map[agent.ID]string // installed apps' icons, read once ("" when none)
+	pwOnce   sync.Once
+	// Wails is the running application (events, clipboard, dialogs).
+	Wails *application.App `json:"-"`
+}
+
+// NewApp loads the configuration for the modules in reg. A configuration an older hopsesh
+// wrote is reported by Info, not returned: the window offers to start fresh.
+func NewApp(reg *registry.Registry) *App {
+	cfg, err := config.Load()
+	log, _ := audit.Open(filepath.Join(config.StateDir(), "log"))
+	a := &App{cfgErr: err}
+	a.core = app.New(cfg, reg, config.StateDir(), log)
+	a.core.Passwords = a.passwordFor
+	return a
+}
+
+// snapshot is the app layer with a private copy of the configuration, for calls that run
+// while the window changes settings.
+func (a *App) snapshot() *app.App {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	c := *a.core
+	c.Cfg.Hosts = slices.Clone(a.core.Cfg.Hosts)
+	c.Cfg.Agents = maps.Clone(a.core.Cfg.Agents)
+	return &c
+}
+
+// save stores the configuration (callers hold a.mu).
+func (a *App) save() error {
+	if a.cfgErr != nil {
+		return a.cfgErr // never overwrite a file the user has not set aside
+	}
+	return config.Save(a.core.Cfg)
+}
+
+// AgentDTO is one agent module.
+type AgentDTO struct {
+	ID            agent.ID           `json:"id"`
+	Name          string             `json:"name"`
+	Stability     agent.Stability    `json:"stability"`
+	Enabled       bool               `json:"enabled"`
+	RemoteControl bool               `json:"remoteControl"`
+	Import        bool               `json:"import"`  // continued sessions go through its own importer
+	Version       string             `json:"version"` // installed here ("" when not)
+	Folder        string             `json:"folder"`  // its data folder here
+	Tested        []string           `json:"tested"`
+	Capabilities  []agent.Capability `json:"capabilities"`
+	Icon          string             `json:"icon,omitempty"` // a data URL: the installed app's icon or the module's mark ("": initials)
+}
+
+// Info is static information for the window.
+type Info struct {
+	Version     string     `json:"version"`
+	Host        string     `json:"host"`
+	ReposDir    string     `json:"reposDir"`
+	AuditDir    string     `json:"auditDir"`
+	HasHosts    bool       `json:"hasHosts"`
+	ConfigError string     `json:"configError,omitempty"`
+	Agents      []AgentDTO `json:"agents"`
+	// LocalNetwork describes macOS local network privacy: gated (macOS 15+) and firstRun
+	// (the prompt has probably not been answered yet).
+	LocalNetwork struct {
+		Gated    bool `json:"gated"`
+		FirstRun bool `json:"firstRun"`
+	} `json:"localNetwork"`
+	UpdateCheck string `json:"updateCheck"` // "", "on" or "off"
+	SkillState  string `json:"skillState"`  // across every agent: absent | current | stale | modified | foreign | broken
+	SkillPrompt string `json:"skillPrompt"` // "declined" once the user said not now
+	CLIOffer    bool   `json:"cliOffer"`    // offer to link the command-line tool
+	Receive     bool   `json:"receive"`     // other machines' hopsesh may send sessions here
+	Defaults    struct {
+		MarkMoved  bool `json:"markMoved"`
+		SyncCode   bool `json:"syncCode"`
+		PushSource bool `json:"pushSource"`
+	} `json:"defaults"`
+}
+
+// Info returns app and machine information.
+func (a *App) Info() Info {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	files, bin := a.skillFiles()
+	skill := a.snapshot().Skill(ctx, files, bin)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	cfg := a.core.Cfg
+	info := Info{Version: version.Version, Host: app.LocalName(), ReposDir: cfg.ReposDir,
+		AuditDir: filepath.Join(config.StateDir(), "log"), UpdateCheck: cfg.UpdateCheck,
+		SkillState: skill.State, SkillPrompt: cfg.SkillPrompt, Receive: cfg.Peer.Receive}
+	if a.cfgErr != nil {
+		info.ConfigError = a.cfgErr.Error()
+	}
+	for _, h := range cfg.Hosts {
+		info.HasHosts = info.HasHosts || h.Allowed
+	}
+	info.Agents = a.agentsLocked()
+	if cfg.CLIPrompt != "declined" {
+		info.CLIOffer = cliOffer()
+	}
+	info.Defaults.MarkMoved, info.Defaults.SyncCode, info.Defaults.PushSource = cfg.MarkMovedOn(), cfg.SyncCodeOn(), cfg.PushSource
+	info.LocalNetwork.Gated = lnp.Gated()
+	info.LocalNetwork.FirstRun = lnp.FirstRun(config.StateDir())
+	return info
+}
+
+// iconLocked pictures an agent: its installed desktop app's icon (read once, when the
+// setting is on), else the module's mark, else nothing (the window shows initials).
+func (a *App) iconLocked(s agent.Spec) string {
+	if a.core.Cfg.AppIconsOn() {
+		if a.appIcons == nil {
+			a.appIcons = map[agent.ID]string{}
+		}
+		url, seen := a.appIcons[s.ID]
+		if !seen {
+			home, _ := os.UserHomeDir()
+			url, _ = appicon.Find(s.Icon.Apps, home)
+			a.appIcons[s.ID] = url
+		}
+		if url != "" {
+			return url
+		}
+	}
+	if s.Icon.SVG != "" {
+		return "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(s.Icon.SVG))
+	}
+	return ""
+}
+
+func (a *App) agentsLocked() []AgentDTO {
+	var here map[agent.ID]app.AgentState
+	if a.inv != nil && a.inv.Local() != nil {
+		here = map[agent.ID]app.AgentState{}
+		for _, st := range a.inv.Local().Agents {
+			here[st.Agent] = st
+		}
+	}
+	var out []AgentDTO
+	for _, m := range a.core.Reg.All() {
+		s := m.Spec()
+		ac := a.core.Cfg.Agents[string(s.ID)]
+		d := AgentDTO{ID: s.ID, Name: s.Name, Stability: s.Stability, Enabled: !ac.Disabled, RemoteControl: ac.RemoteControl,
+			Import: ac.Import, Tested: s.Tested, Capabilities: agent.Capabilities(m), Icon: a.iconLocked(s)}
+		if st, ok := here[s.ID]; ok && (st.Install.Present || st.Install.Binary != "") {
+			d.Version = st.Install.Version
+			for _, r := range s.Roots {
+				d.Folder = st.Install.Root(r.Name)
+				break
+			}
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
+// StartFresh sets aside a configuration file an older hopsesh wrote and starts with
+// defaults (machines are added again). It returns where the old file went.
+func (a *App) StartFresh() (string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !errors.Is(a.cfgErr, config.ErrOldConfig) {
+		return "", errors.New("the configuration is in use; nothing to set aside")
+	}
+	old, err := config.SetAside()
+	if err != nil {
+		return "", err
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return old, err
+	}
+	a.core.Cfg, a.cfgErr = cfg, nil
+	return old, nil
+}
+
+// SetUpdateCheck records whether the app may look for new releases once a day.
+func (a *App) SetUpdateCheck(on bool) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.core.Cfg.UpdateCheck = map[bool]string{true: "on", false: "off"}[on]
+	return a.save()
+}
+
+// UpdateDTO is the result of an update check.
+type UpdateDTO struct {
+	Latest string `json:"latest"`
+	Newer  bool   `json:"newer"`
+	URL    string `json:"url"`
+}
+
+// CheckUpdate looks for a newer release, at most once a day, and only when allowed.
+func (a *App) CheckUpdate() (*UpdateDTO, error) {
+	a.mu.Lock()
+	on := a.core.Cfg.UpdateCheck == "on"
+	a.mu.Unlock()
+	if !on {
+		return &UpdateDTO{}, nil
+	}
+	stamp := filepath.Join(config.StateDir(), "update-check.json")
+	var last struct {
+		At  time.Time `json:"at"`
+		DTO UpdateDTO `json:"result"`
+	}
+	if b, err := os.ReadFile(stamp); err == nil && json.Unmarshal(b, &last) == nil && time.Since(last.At) < 24*time.Hour {
+		last.DTO.Newer = update.Newer(last.DTO.Latest, version.Version)
+		return &last.DTO, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	rel, err := update.Latest(ctx)
+	if err != nil {
+		return &UpdateDTO{}, nil // quiet: offline or nothing published
+	}
+	last.At, last.DTO = time.Now(), UpdateDTO{Latest: rel.Version, URL: rel.URL, Newer: update.Newer(rel.Version, version.Version)}
+	if b, err := json.Marshal(last); err == nil {
+		_ = os.WriteFile(stamp, b, 0o600)
+	}
+	return &last.DTO, nil
+}
+
+// OpenURL opens a web page in the default browser: hopsesh's release pages, and
+// Tailscale's sign-in check for a machine.
+func (a *App) OpenURL(url string) error {
+	if !strings.HasPrefix(url, "https://github.com/"+update.Repo+"/") && !strings.HasPrefix(url, "https://login.tailscale.com/") {
+		return errors.New("only hopsesh release pages and Tailscale sign-in can be opened")
+	}
+	switch runtime.GOOS {
+	case "darwin":
+		return exec.Command("open", url).Run()
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Run()
+	}
+	return exec.Command("xdg-open", url).Run()
+}
+
+// OpenLocalNetworkSettings opens System Settings at Privacy & Security, where the Local
+// Network list is (macOS offers no link to the list itself).
+func (a *App) OpenLocalNetworkSettings() error {
+	if runtime.GOOS != "darwin" {
+		return errors.New("only macOS has a Local Network setting")
+	}
+	return exec.Command("open", lnp.SettingsURL).Run()
+}
+
+// RetryLocalNetwork makes the next scan wait for the macOS prompt again, for someone who
+// just changed the setting or wants to answer a prompt they dismissed.
+func (a *App) RetryLocalNetwork() {
+	lnp.ResetWait(config.StateDir()) // each scan makes new connections, so nothing else is cached
+}
+
+// CopyText puts text on the clipboard.
+func (a *App) CopyText(text string) bool {
+	if a.Wails == nil {
+		return false
+	}
+	return a.Wails.Clipboard.SetText(text)
+}
+
+// ChooseFolder asks for a directory.
+func (a *App) ChooseFolder(title string) (string, error) {
+	if a.Wails == nil {
+		return "", errors.New("no window")
+	}
+	return a.Wails.Dialog.OpenFile().CanChooseDirectories(true).CanChooseFiles(false).SetTitle(title).PromptForSingleSelection()
+}
+
+// SetReposDir changes the clone folder.
+func (a *App) SetReposDir(dir string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.core.Cfg.ReposDir = dir
+	return a.save()
+}
+
+// Shutdown closes connections.
+func (a *App) Shutdown() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.inv != nil {
+		a.inv.Close()
+	}
+	a.closePushLocked()
+}
+
+// emit sends an event to the window (nothing without one).
+func (a *App) emit(name string, data any) {
+	if a.Wails != nil {
+		a.Wails.Event.Emit(name, data)
+	}
+}
