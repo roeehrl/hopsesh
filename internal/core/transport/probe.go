@@ -51,6 +51,10 @@ type ResolvedHost struct {
 func (c *Conn) Resolve(ctx context.Context) (*ResolvedHost, error) {
 	out, err := proc.CommandContext(ctx, c.sshBinary, "-G", c.Dest).Output()
 	if err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && len(bytes.TrimSpace(ee.Stderr)) > 0 {
+			return nil, fmt.Errorf("ssh cannot read the settings for %s: %s", c.Dest, firstLine(strings.TrimSpace(string(ee.Stderr))))
+		}
 		return nil, err
 	}
 	r := &ResolvedHost{Port: "22"}

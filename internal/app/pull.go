@@ -292,7 +292,7 @@ func windowsBundle(h *host.Machine, dir string) func(context.Context, string) (s
 		if err != nil {
 			return "", nil, err
 		}
-		defer fsys.Remove(remote)
+		defer func() { _ = fsys.Remove(remote) }()
 		b, err := fsys.ReadFile(remote, 1<<30)
 		if err != nil {
 			return "", nil, fmt.Errorf("reading the bundle from %s: %w", h.Name, err)
