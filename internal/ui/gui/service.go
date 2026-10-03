@@ -8,9 +8,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -26,6 +26,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/audit"
 	"github.com/roeehrl/hopsesh/internal/core/lnp"
 	"github.com/roeehrl/hopsesh/internal/core/move"
+	"github.com/roeehrl/hopsesh/internal/core/proc"
 	"github.com/roeehrl/hopsesh/internal/core/registry"
 	"github.com/roeehrl/hopsesh/internal/update"
 	"github.com/roeehrl/hopsesh/internal/version"
@@ -101,6 +102,7 @@ type AgentDTO struct {
 // Info is static information for the window.
 type Info struct {
 	Version     string     `json:"version"`
+	OS          string     `json:"os"` // runtime.GOOS: the window words things for its system
 	Host        string     `json:"host"`
 	ReposDir    string     `json:"reposDir"`
 	AuditDir    string     `json:"auditDir"`
@@ -134,7 +136,7 @@ func (a *App) Info() Info {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	cfg := a.core.Cfg
-	info := Info{Version: version.Version, Host: app.LocalName(), ReposDir: cfg.ReposDir,
+	info := Info{Version: version.Version, OS: runtime.GOOS, Host: app.LocalName(), ReposDir: cfg.ReposDir,
 		AuditDir: filepath.Join(config.StateDir(), "log"), UpdateCheck: cfg.UpdateCheck,
 		SkillState: skill.State, SkillPrompt: cfg.SkillPrompt, Receive: cfg.Peer.Receive}
 	if a.cfgErr != nil {
@@ -235,6 +237,46 @@ type UpdateDTO struct {
 	Latest string `json:"latest"`
 	Newer  bool   `json:"newer"`
 	URL    string `json:"url"`
+	// CanInstall: this app can install the update itself (a release build, not managed by
+	// a package manager); otherwise the window offers the release page.
+	CanInstall bool `json:"canInstall"`
+}
+
+// canInstall reports whether this app updates itself.
+func canInstall() bool {
+	t, err := update.Current()
+	if err != nil || t.Kind == update.KindCLI || update.PublicKey == "" {
+		return false
+	}
+	who, _ := update.ManagedBy()
+	return who == ""
+}
+
+// InstallUpdate downloads the newest release, verifies it (release signature and
+// checksum; on macOS also the same Apple developer and notarization), installs it over
+// this app, opens the new version and quits this one.
+func (a *App) InstallUpdate() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	rel, err := update.Latest(ctx)
+	if err != nil {
+		return fmt.Errorf("could not check for updates: %w", err)
+	}
+	if !update.Newer(rel.Version, version.Version) {
+		return errors.New("this is already the newest version")
+	}
+	t, err := update.Install(ctx, rel)
+	if err != nil {
+		return err
+	}
+	a.core.Audit.Write(audit.Entry{Action: "update", Detail: map[string]any{"from": version.Version, "to": rel.Version, "what": string(t.Kind)}})
+	if err := update.Relaunch(t); err != nil {
+		return fmt.Errorf("installed hopsesh %s; quit and reopen the app to use it (%w)", rel.Version, err)
+	}
+	if a.Wails != nil {
+		go func() { time.Sleep(300 * time.Millisecond); a.Wails.Quit() }()
+	}
+	return nil
 }
 
 // CheckUpdate looks for a newer release, at most once a day, and only when allowed.
@@ -252,6 +294,7 @@ func (a *App) CheckUpdate() (*UpdateDTO, error) {
 	}
 	if b, err := os.ReadFile(stamp); err == nil && json.Unmarshal(b, &last) == nil && time.Since(last.At) < 24*time.Hour {
 		last.DTO.Newer = update.Newer(last.DTO.Latest, version.Version)
+		last.DTO.CanInstall = canInstall()
 		return &last.DTO, nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -260,7 +303,7 @@ func (a *App) CheckUpdate() (*UpdateDTO, error) {
 	if err != nil {
 		return &UpdateDTO{}, nil // quiet: offline or nothing published
 	}
-	last.At, last.DTO = time.Now(), UpdateDTO{Latest: rel.Version, URL: rel.URL, Newer: update.Newer(rel.Version, version.Version)}
+	last.At, last.DTO = time.Now(), UpdateDTO{Latest: rel.Version, URL: rel.URL, Newer: update.Newer(rel.Version, version.Version), CanInstall: canInstall()}
 	if b, err := json.Marshal(last); err == nil {
 		_ = os.WriteFile(stamp, b, 0o600)
 	}
@@ -275,11 +318,11 @@ func (a *App) OpenURL(url string) error {
 	}
 	switch runtime.GOOS {
 	case "darwin":
-		return exec.Command("open", url).Run()
+		return proc.Command("open", url).Run()
 	case "windows":
-		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Run()
+		return proc.Command("rundll32", "url.dll,FileProtocolHandler", url).Run()
 	}
-	return exec.Command("xdg-open", url).Run()
+	return proc.Command("xdg-open", url).Run()
 }
 
 // OpenLocalNetworkSettings opens System Settings at Privacy & Security, where the Local
@@ -288,7 +331,7 @@ func (a *App) OpenLocalNetworkSettings() error {
 	if runtime.GOOS != "darwin" {
 		return errors.New("only macOS has a Local Network setting")
 	}
-	return exec.Command("open", lnp.SettingsURL).Run()
+	return proc.Command("open", lnp.SettingsURL).Run()
 }
 
 // RetryLocalNetwork makes the next scan wait for the macOS prompt again, for someone who

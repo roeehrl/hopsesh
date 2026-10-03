@@ -17,6 +17,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/launch"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/internal/core/move"
+	"github.com/roeehrl/hopsesh/internal/core/proc"
 	"github.com/roeehrl/hopsesh/internal/core/repos"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
@@ -525,7 +526,7 @@ func start(c agent.Command) error {
 	if len(c.Argv) == 0 {
 		return errors.New("no command")
 	}
-	cmd := exec.Command(c.Argv[0], c.Argv[1:]...)
+	cmd := proc.Command(c.Argv[0], c.Argv[1:]...)
 	cmd.Dir = c.Dir
 	if err := cmd.Start(); err != nil {
 		return err
@@ -540,13 +541,13 @@ func openTerminal(line string) error {
 	switch runtime.GOOS {
 	case "darwin":
 		script := fmt.Sprintf("tell application \"Terminal\"\n\tactivate\n\tdo script %s\nend tell", appleScriptString(line))
-		return exec.Command("osascript", "-e", script).Run()
+		return proc.Command("osascript", "-e", script).Run()
 	case "windows":
-		return exec.Command("cmd", "/c", "start", "powershell", "-NoExit", "-Command", line).Run()
+		return openWindowsTerminal(line)
 	}
 	for _, t := range [][]string{{"x-terminal-emulator", "-e"}, {"gnome-terminal", "--"}, {"konsole", "-e"}, {"xterm", "-e"}} {
 		if _, err := exec.LookPath(t[0]); err == nil {
-			return exec.Command(t[0], append(t[1:], "sh", "-c", line+"; exec $SHELL")...).Start()
+			return proc.Command(t[0], append(t[1:], "sh", "-c", line+"; exec $SHELL")...).Start()
 		}
 	}
 	return errors.New("no terminal emulator found; copy the command instead")

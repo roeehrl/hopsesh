@@ -195,6 +195,23 @@ func askpassQuery(sock, tok, prompt string) (string, bool) {
 	return resp.Answer, true
 }
 
+// askpassProgram is the program ssh runs to ask for the password: this one, except that
+// the Windows app (a window program, which ssh cannot read an answer from reliably) hands
+// it to the hopsesh.exe beside it, which answers the same way.
+func askpassProgram() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	if runtime.GOOS == "windows" && strings.EqualFold(filepath.Base(exe), "hopsesh-app.exe") {
+		cli := filepath.Join(filepath.Dir(exe), "hopsesh.exe")
+		if _, err := os.Stat(cli); err == nil {
+			return cli, nil
+		}
+	}
+	return exe, nil
+}
+
 // passwordEnv returns the environment that makes ssh ask this Conn for the password.
 func (c *Conn) passwordEnv(ctx context.Context) ([]string, error) {
 	if c.Password == nil {
@@ -207,7 +224,7 @@ func (c *Conn) passwordEnv(ctx context.Context) ([]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("cannot ask for the password: %w", err)
 		}
-		exe, err := os.Executable()
+		exe, err := askpassProgram()
 		if err != nil {
 			return nil, err
 		}

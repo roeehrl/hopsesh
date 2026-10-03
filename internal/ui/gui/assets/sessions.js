@@ -1,7 +1,7 @@
 // The Sessions screen: scopes on the left, sessions by repository in the middle, the
 // selected session on the right. Every action on a session comes from actionsFor(), which
 // the palette uses too.
-import { api, h, fill, icon, ICONS, view, state, screen, go, loading, toast, fail, cap, ago, when, bytes, agentBadge, agentChip, machineStatus,
+import { api, h, fill, icon, ICONS, view, state, screen, go, loading, toast, fail, cap, ago, when, bytes, agentBadge, agentChip, machineStatus, sys, keys, cliHow,
   entries, selected, here, agentInfo, $, count } from "./core.js";
 import { planFor } from "./plan.js";
 
@@ -12,7 +12,7 @@ export async function scan() {
   state.stale = false;
   freshness();
   if (!state.scan) {
-    loading("Reading this Mac and your machines…");
+    loading(`Reading ${sys.here} and your machines…`);
     if (state.info?.localNetwork?.gated && state.info.localNetwork.firstRun) {
       view.firstChild.append(h("div", { class: "muted", style: "font-size:12px;max-width:520px;line-height:1.5" },
         "macOS may ask whether hopsesh can find devices on your local network. Choose Allow to reach machines on this network; machines over Tailscale work either way."));
@@ -79,7 +79,7 @@ function scoped() {
 
 function scopeTitle() {
   const sc = state.scope;
-  return { all: "All sessions", needs: "Needs you", here: "On this Mac", machine: sc.value, agent: agentInfo(sc.value)?.name || sc.value }[sc.kind];
+  return { all: "All sessions", needs: "Needs you", here: `On ${sys.here}`, machine: sc.value, agent: agentInfo(sc.value)?.name || sc.value }[sc.kind];
 }
 
 function setScope(sc) { state.scope = sc; render(); }
@@ -96,7 +96,7 @@ function sidebar() {
       h("span", { class: "dot" + (needs ? " needs" : "") }), h("span", { style: needs ? "font-weight:600" : "" }, "Needs you"),
       needs ? h("span", { class: "chip st-needs", style: "margin-left:auto" }, needs) : h("span", { class: "count" }, "0")),
     h("button", { class: "side-btn", "aria-current": cur("all"), onclick: () => setScope({ kind: "all" }) }, icon(ICONS.all), "All sessions", h("span", { class: "count" }, all.length)),
-    h("button", { class: "side-btn", "aria-current": cur("here"), onclick: () => setScope({ kind: "here" }) }, icon(ICONS.here), "On this Mac",
+    h("button", { class: "side-btn", "aria-current": cur("here"), onclick: () => setScope({ kind: "here" }) }, icon(ICONS.here), `On ${sys.here}`,
       h("span", { class: "count" }, all.filter((e) => e.machine === here()).length)),
     h("div", { class: "side-h" }, "Machines"),
     machines.map((m) => h("button", { class: "side-btn", "aria-current": cur("machine", m.name), onclick: () => setScope({ kind: "machine", value: m.name }) },
@@ -121,7 +121,7 @@ function updateNote() {
     const answer = async (yes) => { await api("SetUpdateCheck", yes).catch(fail); state.info = await api("Info"); if (yes) state.update = await api("CheckUpdate").catch(() => null); render(); };
     return h("span", {}, "Check GitHub daily for new versions? ", h("button", { class: "link", onclick: () => answer(true) }, "Yes"), " · ", h("button", { class: "link", onclick: () => answer(false) }, "No"));
   }
-  if (state.update?.newer) return h("button", { class: "link", style: "text-align:left", onclick: () => api("OpenURL", state.update.url).catch(fail) }, `hopsesh ${state.update.latest} is available`);
+  if (state.update?.newer) return h("button", { class: "link", style: "text-align:left", onclick: () => go("settings", "updates") }, `hopsesh ${state.update.latest} is available`);
   return null;
 }
 
@@ -140,7 +140,7 @@ function notices() {
     h("button", { class: "btn", onclick: () => api("OpenLocalNetworkSettings").catch(fail) }, "Open Privacy & Security"),
     h("button", { class: "btn", onclick: async () => { await api("RetryLocalNetwork"); scan().then(render); } }, "Try again")));
   if (!i.hasHosts) out.push(h("div", { class: "card notice" },
-    h("div", { style: "flex:1 1 360px" }, h("b", {}, "These are this Mac's sessions"), h("div", { class: "muted", style: "font-size:12.5px" }, "Add your other machines to see and bring over their sessions too.")),
+    h("div", { style: "flex:1 1 360px" }, h("b", {}, `These are ${sys.here}'s sessions`), h("div", { class: "muted", style: "font-size:12.5px" }, "Add your other machines to see and bring over their sessions too.")),
     h("button", { class: "btn primary", onclick: () => go("machines") }, "Add machines")));
   if (i.skillState === "absent" && i.skillPrompt !== "declined") out.push(h("div", { class: "card notice" },
     h("div", { style: "flex:1 1 360px" }, h("b", {}, "Let your agents use hopsesh"), h("div", { class: "muted", style: "font-size:12.5px" }, "Ask an agent “bring my laptop session here” or “continue this in Codex”. It shows you the plan and acts only after you say yes.")),
@@ -150,8 +150,8 @@ function notices() {
     h("b", { style: "flex:1 1 360px" }, i.skillState === "stale" ? "The hopsesh skill is out of date" : "The hopsesh skill is damaged"),
     h("button", { class: "btn primary", onclick: async () => { try { await api("InstallSkill", false, false); toast("Updated the hopsesh skill"); } catch (e) { fail(e); } state.info = await api("Info"); render(); } }, i.skillState === "stale" ? "Update it" : "Repair it")));
   if (i.cliOffer) out.push(h("div", { class: "card notice" },
-    h("div", { style: "flex:1 1 360px" }, h("b", {}, "Use hopsesh in Terminal too"), h("div", { class: "muted", style: "font-size:12.5px" }, "Links the hopsesh command into ~/.local/bin (no password). It always runs this app's version.")),
-    h("button", { class: "btn primary", onclick: async () => { try { await api("InstallCLI", false); toast("hopsesh is ready in Terminal"); } catch (e) { fail(e); } state.info = await api("Info"); render(); } }, "Install command"),
+    h("div", { style: "flex:1 1 360px" }, h("b", {}, `Use hopsesh in ${sys.terminal} too`), h("div", { class: "muted", style: "font-size:12.5px" }, `${cliHow()}. It always runs this app's version.`)),
+    h("button", { class: "btn primary", onclick: async () => { try { await api("InstallCLI", false); toast(sys.win ? "hopsesh is ready in new terminal windows" : "hopsesh is ready in Terminal"); } catch (e) { fail(e); } state.info = await api("Info"); render(); } }, "Install command"),
     h("button", { class: "btn", onclick: async () => { await api("DismissCLIOffer"); state.info = await api("Info"); render(); } }, "Not now")));
   return out;
 }
@@ -197,10 +197,10 @@ function inspector() {
     h("div", { style: "display:flex;flex-direction:column;gap:6px" },
       h("div", { style: "display:flex;gap:6px;flex-wrap:wrap" }, agentChip(e.agent, e.agentName), h("span", { class: "chip st-" + k }, h("span", { class: "dot " + k }), words)),
       h("h2", {}, e.title),
-      h("span", { class: "muted", style: "font-size:12px" }, `${local ? "On this Mac" : "On " + e.machine} · last active ${ago(e.lastActive)} · ${bytes(e.sizeKB * 1024)}`)),
+      h("span", { class: "muted", style: "font-size:12px" }, `${local ? "On " + sys.here : "On " + e.machine} · last active ${ago(e.lastActive)} · ${bytes(e.sizeKB * 1024)}`)),
     acts.length ? h("div", { style: "display:flex;flex-direction:column;gap:8px" },
       h("button", { class: "btn primary big", onclick: acts[0].run }, acts[0].label, h("span", { class: "kbd" }, "↩")),
-      acts.slice(1).map((a, i) => h("button", { class: "btn", onclick: a.run }, a.label, i === 0 ? h("span", { class: "kbd" }, "⌘↩") : null)),
+      acts.slice(1).map((a, i) => h("button", { class: "btn", onclick: a.run }, a.label, i === 0 ? h("span", { class: "kbd" }, keys("mod+enter")) : null)),
       note ? h("span", { class: "muted", style: "font-size:11.5px" }, note) : null)
       : h("span", { class: "muted", style: "font-size:12px" }, note),
     e.lastPrompt ? h("div", { class: "sec" }, h("span", { class: "sec-h" }, "Last prompt"), h("span", { style: "font-style:italic;color:var(--ink2)" }, `“${e.lastPrompt}”`)) : null,
@@ -209,10 +209,10 @@ function inspector() {
         h("span", { class: "mono", style: "font-size:12px" }, e.group.remote || e.group.name + " (no remote)"),
         e.branch ? h("span", {}, e.branch, e.worktree ? h("span", { class: "muted" }, ` in a ${e.worktree}` + (e.mainBranch ? ` · main folder on ${e.mainBranch}` : "")) : null) : null,
         e.unpushed || e.dirty ? h("span", { class: "warn" }, [e.unpushed ? count(e.unpushed, "unpushed commit") : "", e.dirty ? count(e.dirty, "uncommitted file") : ""].filter(Boolean).join(" · ")) : null,
-        e.group.local ? h("span", { class: "ok" }, "Cloned here at " + e.group.local) : e.group.remote ? h("span", { class: "muted" }, "Not on this Mac: hopsesh can clone it") : null],
+        e.group.local ? h("span", { class: "ok" }, "Cloned here at " + e.group.local) : e.group.remote ? h("span", { class: "muted" }, `Not on ${sys.here}: hopsesh can clone it`) : null],
       e.cwd !== e.group.local ? h("span", { class: "mono muted", style: "font-size:11px;overflow-wrap:anywhere" }, e.cwd) : null),
     others.length ? h("div", { class: "sec" }, h("span", { class: "sec-h" }, "Other copies"),
-      others.map((c) => h("span", {}, `${c.agentName} on ${c.local ? "this Mac" : c.machine}`, h("span", { class: "muted" }, c.newest ? " · newest" : c.mark ? " · marked" : " · older")))) : null,
+      others.map((c) => h("span", {}, `${c.agentName} on ${c.local ? sys.here : c.machine}`, h("span", { class: "muted" }, c.newest ? " · newest" : c.mark ? " · marked" : " · older")))) : null,
     e.history.length ? h("div", { class: "sec" }, h("span", { class: "sec-h" }, "Where it has been"),
       e.history.map((x, i) => h("div", { class: "hop" }, h("span", { class: "dot" + (i === e.history.length - 1 ? " ok" : "") }),
         h("div", {}, h("div", {}, x.what), h("div", { class: "muted", style: "font-size:11px" }, when(x.when)))))) : null);
@@ -238,13 +238,13 @@ export function render() {
       groups.length ? groups.map(({ g, rows }) => h("div", { class: "card", role: "listbox", "aria-label": g.name },
         h("div", { class: "card-h" }, h("span", { class: "name" }, g.name), g.remote ? h("span", { class: "mono muted", style: "font-size:11.5px" }, g.remote) : null, h("span", { class: "spacer" }),
           h("span", { style: "font-size:11.5px", class: g.local ? "ok" : g.noRepo || g.noRemote ? "muted" : "warn" },
-            g.noRepo ? "Outside a git checkout" : g.noRemote ? "A checkout without a remote" : g.local ? "Cloned here" : "Not on this Mac")),
+            g.noRepo ? "Outside a git checkout" : g.noRemote ? "A checkout without a remote" : g.local ? "Cloned here" : `Not on ${sys.here}`)),
         rows.map(row)))
       : h("div", { class: "empty" }, state.scope.kind === "needs" ? "Nothing needs you right now." : "No sessions here.")));
   fill(view, h("div", { class: "three" }, sidebar(), content, inspector()));
 }
 
-// Keyboard: ↑/↓ move through the list, ↩ runs the main action, ⌘↩ the second.
+// Keyboard: ↑/↓ move through the list, ↩ runs the main action, ⌘↩ (Ctrl+Enter) the second.
 document.addEventListener("keydown", (ev) => {
   if (!state.scan || document.querySelector("dialog[open]") || /INPUT|TEXTAREA|SELECT/.test(ev.target.tagName)) return;
   if (!view.querySelector(".three")) return;

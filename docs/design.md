@@ -227,19 +227,18 @@ Keys are the default, but some machines only take a password. Such a machine is 
 
 ## 18. Distribution, signing, updates
 
-- **CI** (GoReleaser on a `v*` tag): Linux and Windows archives, packages, SBOMs, build provenance, a draft release.
+- **CI** (GoReleaser on a `v*` tag): Linux and Windows archives, packages, SBOMs, the Windows app (an app zip and a per-user NSIS installer, amd64 and arm64, built on Linux), build provenance, a draft release.
 - **The maintainer's Mac** (`scripts/release-sign.sh`): verifies the provenance, builds the macOS CLI and app from the tag, signs (Developer ID, hardened runtime), notarizes and staples, writes and signs `checksums.txt`. No signing secret is in GitHub (`docs/RELEASING.md`).
-- **Updates:** `hopsesh update`; the app asks once whether it may check GitHub daily.
-- **Planned:** a Homebrew tap; Windows GUI signing through SignPath Foundation.
+- **Updates:** `hopsesh update`; the app asks once whether it may check GitHub daily, and installs an update itself (the whole `hopsesh.app` from the disk image, after the same team and notarization checks; on Windows both programs, the running ones moved aside).
+- **Planned:** a Homebrew tap; Windows code signing through SignPath Foundation (0.3.0 ships the Windows app unsigned); winget.
 
 ## 19. Status
 
-**Built:** the module SDK with Claude Code and Codex modules; moves, continuations both ways (history, note, native replay, Codex's importer), the briefing and loss report, `--carry-rules`, the native copy; lineage manifests, marks and owed marks, round trips with append, conflicts and keep-both; code sync; peers and push; the skill in every agent with approval rules; CLI, TUI and the macOS app; password login; self-update; the release pipeline. Released: 0.1.0 and 0.2.0 (Claude Code only); this design is 0.3.0.
+**Built:** the module SDK with Claude Code and Codex modules; moves, continuations both ways (history, note, native replay, Codex's importer), the briefing and loss report, `--carry-rules`, the native copy; lineage manifests, marks and owed marks, round trips with append, conflicts and keep-both; code sync; peers and push; the skill in every agent with approval rules; CLI, TUI and the desktop app on macOS and Windows; password login (Keychain, Windows Credential Manager); self-update of the CLI and both apps; the release pipeline. Released: 0.1.0 and 0.2.0 (Claude Code only); this design is 0.3.0.
 
 **Planned:**
 - more modules, Reader first: OpenCode, Hermes, Gemini CLI, Goose, Amp, Crush, Cursor CLI;
 - sessions that live in an agent's cloud, as a module capability through the agent's own CLI;
-- a Windows GUI; a Windows OpenSSH CI job;
 - quitting sessions and probing locks on Windows (no graceful signal there yet);
 - a compatibility matrix of pinned agent versions.
 

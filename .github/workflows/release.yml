@@ -1,6 +1,7 @@
 name: release
 
-# A v* tag builds the Linux and Windows files, attests them and creates a DRAFT release.
+# A v* tag builds the Linux and Windows files (the CLI, and the Windows app with its
+# installer), attests them and creates a DRAFT release.
 # No signing key or Apple credential is used here: the maintainer completes the draft on
 # their Mac with scripts/release-sign.sh (macOS files, checksums.txt and its signature),
 # then publishes it. See docs/RELEASING.md.
@@ -48,6 +49,20 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOPSESH_RELEASE_PUBKEY: ${{ vars.HOPSESH_RELEASE_PUBKEY }}
           TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+      - name: Windows app (app zip and installer, amd64 and arm64)
+        env:
+          HOPSESH_RELEASE_PUBKEY: ${{ vars.HOPSESH_RELEASE_PUBKEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OUT: dist/windows
+        run: |
+          sudo apt-get update && sudo apt-get install -y nsis zip
+          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="$VERSION" scripts/build-windows-app.sh
+          # Versionless copies, so .../releases/latest/download/... always serves the newest.
+          for arch in amd64 arm64; do
+            cp "dist/windows/hopsesh-$VERSION-windows-$arch-setup.exe" "dist/windows/hopsesh-windows-$arch-setup.exe"
+          done
+          gh release upload "$GITHUB_REF_NAME" dist/windows/*.zip dist/windows/*.exe --repo "$GITHUB_REPOSITORY"
       # Provenance for every file this job built; scripts/release-sign.sh checks it with
       # `gh attestation verify` before it signs checksums.txt.
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
@@ -58,3 +73,5 @@ jobs:
             dist/*.deb
             dist/*.rpm
             dist/*.apk
+            dist/windows/*.zip
+            dist/windows/*.exe

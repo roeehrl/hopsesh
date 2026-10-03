@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/roeehrl/hopsesh/internal/core/proc"
 )
 
 // Sync states for a checkout compared with the commit a session last saw.
@@ -124,11 +125,11 @@ GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-
 // prompting, as PushScript does (and with no shell, so on Windows too). Its output is
 // git's; a branch without an upstream returns ErrNoUpstream.
 func Push(ctx context.Context, dir string) (string, error) {
-	up := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+	up := proc.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
 	if err := up.Run(); err != nil {
 		return "", ErrNoUpstream
 	}
-	cmd := exec.CommandContext(ctx, "git", "-C", dir, "push", "--quiet")
+	cmd := proc.CommandContext(ctx, "git", "-C", dir, "push", "--quiet")
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never")
 	if os.Getenv("GIT_SSH_COMMAND") == "" {
 		cmd.Env = append(cmd.Env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes")

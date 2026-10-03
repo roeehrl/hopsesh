@@ -6,10 +6,13 @@
 //     checksums.txt must then carry a valid signature (checksums.txt.sig, ASN.1 DER,
 //     made with `openssl dgst -sha256 -sign`). This holds even if the GitHub account
 //     or a CDN were compromised. Builds without a key can check but not install.
-//  3. On macOS, when the running binary is code-signed, the new one must be signed by
-//     the same team.
+//  3. On macOS, when the running program is code-signed, the new one must be signed by
+//     the same team (and an app must pass Gatekeeper, so it is notarized).
 //
-// Copies installed by Homebrew, Scoop or inside hopsesh.app are left to those.
+// What is replaced follows what is running: the command-line tool, the macOS app (the
+// whole hopsesh.app, from the release's disk image) or the Windows app (hopsesh-app.exe
+// and hopsesh.exe together, from the release's app zip). Copies installed by Homebrew,
+// Scoop or winget are left to those.
 package update
 
 import (
@@ -31,13 +34,14 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/roeehrl/hopsesh/internal/core/proc"
 )
 
 // Repo is the GitHub repository releases come from.
@@ -138,8 +142,66 @@ func ArchiveName(version string) string {
 	return fmt.Sprintf("hopsesh_%s_%s_%s.%s", version, runtime.GOOS, runtime.GOARCH, ext)
 }
 
-// ManagedBy names the package manager or app that owns the running binary, with the
-// command to update it, or "" when hopsesh may replace itself.
+// Kind is what an update replaces.
+type Kind string
+
+const (
+	KindCLI        Kind = "cli"         // the hopsesh program
+	KindMacApp     Kind = "mac-app"     // hopsesh.app, with the command-line tool inside
+	KindWindowsApp Kind = "windows-app" // the folder with hopsesh-app.exe and hopsesh.exe
+)
+
+// Target is the install the running program belongs to.
+type Target struct {
+	Kind Kind
+	Path string // the program, the .app bundle, or the Windows app's folder
+}
+
+// Current is the install the running program belongs to.
+func Current() (Target, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return Target{}, err
+	}
+	if r, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = r
+	}
+	return targetFor(exe, runtime.GOOS), nil
+}
+
+func targetFor(exe, goos string) Target {
+	switch goos {
+	case "darwin":
+		if i := strings.Index(exe, ".app/Contents/"); i >= 0 {
+			return Target{KindMacApp, exe[:i+len(".app")]}
+		}
+	case "windows":
+		dir := filepath.Dir(exe)
+		if isFile(filepath.Join(dir, "hopsesh-app.exe")) && isFile(filepath.Join(dir, "hopsesh.exe")) {
+			return Target{KindWindowsApp, dir}
+		}
+	}
+	return Target{KindCLI, exe}
+}
+
+func isFile(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && fi.Mode().IsRegular()
+}
+
+// AssetName is the release file an update of t comes from (matches the release scripts).
+func AssetName(t Target, version string) string {
+	switch t.Kind {
+	case KindMacApp:
+		return fmt.Sprintf("hopsesh-%s-macos-universal.dmg", version)
+	case KindWindowsApp:
+		return fmt.Sprintf("hopsesh-%s-windows-%s-app.zip", version, runtime.GOARCH)
+	}
+	return ArchiveName(version)
+}
+
+// ManagedBy names the package manager that owns the running program, with the command to
+// update it, or "" when hopsesh may replace itself.
 func ManagedBy() (string, string) {
 	exe, err := os.Executable()
 	if err != nil {
@@ -148,8 +210,6 @@ func ManagedBy() (string, string) {
 	exe, _ = filepath.EvalSymlinks(exe)
 	low := strings.ToLower(filepath.ToSlash(exe))
 	switch {
-	case strings.Contains(low, ".app/contents/"):
-		return "hopsesh.app", "download the new app from https://github.com/" + Repo + "/releases/latest"
 	case strings.Contains(low, "/cellar/") || strings.Contains(low, "/homebrew/") || strings.Contains(low, "/linuxbrew/"):
 		return "Homebrew", "brew upgrade hopsesh"
 	case strings.Contains(low, "/scoop/apps/"):
@@ -166,70 +226,183 @@ var ErrNoReleases = errors.New("no hopsesh release is published yet")
 // ErrNoKey means this build has no release key, so it will not install updates.
 var ErrNoKey = errors.New("this build has no release signing key, so it cannot verify and install updates; reinstall from a release")
 
-// Install downloads, verifies and installs rel over the running binary. It returns the
-// installed path.
-func Install(ctx context.Context, rel *Release) (string, error) {
+// Install downloads, verifies and installs rel over the install the running program
+// belongs to (Current). It returns what it replaced: the program, the app or its folder.
+func Install(ctx context.Context, rel *Release) (Target, error) {
+	t, err := Current()
+	if err != nil {
+		return t, err
+	}
 	if PublicKey == "" {
-		return "", ErrNoKey
+		return t, ErrNoKey
 	}
 	if who, how := ManagedBy(); who != "" {
-		return "", fmt.Errorf("this copy is managed by %s; update with: %s", who, how)
+		return t, fmt.Errorf("this copy is managed by %s; update with: %s", who, how)
 	}
-	name := ArchiveName(rel.Version)
-	archURL, sumURL, sigURL := rel.Assets[name], rel.Assets["checksums.txt"], rel.Assets["checksums.txt.sig"]
-	if archURL == "" || sumURL == "" {
-		return "", fmt.Errorf("release %s has no %s or checksums.txt", rel.Tag, name)
+	name := AssetName(t, rel.Version)
+	data, err := download(ctx, rel, name)
+	if err != nil {
+		return t, err
+	}
+	switch t.Kind {
+	case KindMacApp:
+		err = installMacApp(ctx, t.Path, data)
+	case KindWindowsApp:
+		err = installWindowsApp(t.Path, data, rel.Version)
+	default:
+		err = installCLI(t.Path, data, name)
+	}
+	return t, err
+}
+
+// download fetches a release file and checks it against checksums.txt, whose signature
+// must verify with the embedded release key.
+func download(ctx context.Context, rel *Release, name string) ([]byte, error) {
+	fileURL, sumURL, sigURL := rel.Assets[name], rel.Assets["checksums.txt"], rel.Assets["checksums.txt.sig"]
+	if fileURL == "" || sumURL == "" {
+		return nil, fmt.Errorf("release %s has no %s or checksums.txt", rel.Tag, name)
 	}
 	if sigURL == "" {
-		return "", fmt.Errorf("release %s is not signed (no checksums.txt.sig); not installing", rel.Tag)
+		return nil, fmt.Errorf("release %s is not signed (no checksums.txt.sig); not installing", rel.Tag)
 	}
 	sums, err := fetch(ctx, sumURL, 1<<20)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	sig, err := fetch(ctx, sigURL, 4<<10)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if err := VerifySignature(sums, sig, PublicKey); err != nil {
-		return "", err
+		return nil, err
 	}
 	want, err := checksumFor(sums, name)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	arch, err := fetch(ctx, archURL, 200<<20)
+	data, err := fetch(ctx, fileURL, 300<<20)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	got := sha256.Sum256(arch)
+	got := sha256.Sum256(data)
 	if hex.EncodeToString(got[:]) != want {
-		return "", fmt.Errorf("%s does not match checksums.txt; not installing", name)
+		return nil, fmt.Errorf("%s does not match checksums.txt; not installing", name)
 	}
+	return data, nil
+}
+
+// installCLI replaces the hopsesh program exe with the one in a release archive.
+func installCLI(exe string, arch []byte, name string) error {
 	bin, err := extract(arch, name)
 	if err != nil {
-		return "", err
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		return "", err
-	}
-	if exe, err = filepath.EvalSymlinks(exe); err != nil {
-		return "", err
+		return err
 	}
 	tmp := exe + ".new"
 	if err := os.WriteFile(tmp, bin, 0o755); err != nil {
-		return "", fmt.Errorf("cannot write next to %s (%w); reinstall with the install script instead", exe, err)
+		return fmt.Errorf("cannot write next to %s (%w); reinstall with the install script instead", exe, err)
 	}
 	if err := sameSigner(exe, tmp); err != nil {
 		os.Remove(tmp)
-		return "", err
+		return err
 	}
 	if err := swap(exe, tmp); err != nil {
 		os.Remove(tmp)
-		return "", err
+		return err
 	}
-	return exe, nil
+	return nil
+}
+
+// installWindowsApp replaces hopsesh-app.exe and hopsesh.exe in the app's folder with the
+// ones in the release's app zip; both running programs are moved aside, and CleanUp
+// removes them later.
+func installWindowsApp(dir string, zipData []byte, version string) error {
+	zr, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
+	if err != nil {
+		return err
+	}
+	names := []string{"hopsesh-app.exe", "hopsesh.exe"}
+	files := map[string][]byte{}
+	for _, f := range zr.File {
+		for _, n := range names {
+			if f.Name == n && !f.FileInfo().IsDir() {
+				rc, err := f.Open()
+				if err != nil {
+					return err
+				}
+				b, err := io.ReadAll(io.LimitReader(rc, 200<<20))
+				rc.Close()
+				if err != nil {
+					return err
+				}
+				files[n] = b
+			}
+		}
+	}
+	for _, n := range names {
+		if files[n] == nil {
+			return fmt.Errorf("%s is missing from the app zip; not installing", n)
+		}
+		if err := os.WriteFile(filepath.Join(dir, n+".new"), files[n], 0o755); err != nil {
+			return fmt.Errorf("cannot write to %s (%w); run the installer from the release page instead", dir, err)
+		}
+	}
+	for i, n := range names {
+		if err := swap(filepath.Join(dir, n), filepath.Join(dir, n+".new")); err != nil {
+			for _, m := range names[i:] {
+				os.Remove(filepath.Join(dir, m+".new"))
+			}
+			return err
+		}
+	}
+	setInstalledVersion(version)
+	return nil
+}
+
+// CleanUp removes what an earlier update left behind: the programs Windows moved aside,
+// and a macOS update's work folder. Best effort; call it at start-up.
+func CleanUp() {
+	t, err := Current()
+	if err != nil {
+		return
+	}
+	switch t.Kind {
+	case KindWindowsApp:
+		for _, n := range []string{"hopsesh-app.exe.old", "hopsesh.exe.old"} {
+			_ = os.Remove(filepath.Join(t.Path, n))
+		}
+	case KindMacApp:
+		old, _ := filepath.Glob(filepath.Join(filepath.Dir(t.Path), ".hopsesh-update-*"))
+		for _, d := range old {
+			if fi, err := os.Stat(d); err == nil && time.Since(fi.ModTime()) > time.Hour {
+				_ = os.RemoveAll(d)
+			}
+		}
+	default:
+		_ = os.Remove(t.Path + ".old")
+	}
+}
+
+// CLIPath is the hopsesh command-line program of an install.
+func CLIPath(t Target) string {
+	switch t.Kind {
+	case KindMacApp:
+		return filepath.Join(t.Path, "Contents", "Resources", "bin", "hopsesh")
+	case KindWindowsApp:
+		return filepath.Join(t.Path, "hopsesh.exe")
+	}
+	return t.Path
+}
+
+// Relaunch starts the app at t again (after an update), for the running one to quit.
+func Relaunch(t Target) error {
+	switch t.Kind {
+	case KindMacApp:
+		// After a moment, so this copy has quit and macOS opens the new one.
+		return proc.Command("/bin/sh", "-c", `sleep 1; exec open -n "$0"`, t.Path).Start()
+	case KindWindowsApp:
+		return proc.Command(filepath.Join(t.Path, "hopsesh-app.exe")).Start()
+	}
+	return errors.New("not an app")
 }
 
 // VerifySignature checks an ASN.1 ECDSA signature over data with a base64 PKIX key.
@@ -309,8 +482,8 @@ func extract(archive []byte, name string) ([]byte, error) {
 	}
 }
 
-// sameSigner requires, on macOS, that a signed running binary is replaced only by one
-// signed by the same team.
+// sameSigner requires, on macOS, that a signed running program (or app) is replaced only
+// by one signed by the same team.
 func sameSigner(current, next string) error {
 	if runtime.GOOS != "darwin" {
 		return nil
@@ -319,7 +492,11 @@ func sameSigner(current, next string) error {
 	if cur == "" {
 		return nil // unsigned build: nothing to compare
 	}
-	if exec.Command("codesign", "--verify", "--strict", next).Run() != nil {
+	args := []string{"--verify", "--strict"}
+	if strings.HasSuffix(next, ".app") {
+		args = append(args, "--deep")
+	}
+	if proc.Command("codesign", append(args, next)...).Run() != nil {
 		return errors.New("the downloaded binary's code signature is not valid; not installing")
 	}
 	if got := teamID(next); got != cur {
@@ -329,7 +506,7 @@ func sameSigner(current, next string) error {
 }
 
 func teamID(path string) string {
-	out, _ := exec.Command("codesign", "-dv", "--verbose=2", path).CombinedOutput()
+	out, _ := proc.Command("codesign", "-dv", "--verbose=2", path).CombinedOutput()
 	for _, l := range strings.Split(string(out), "\n") {
 		if v, ok := strings.CutPrefix(l, "TeamIdentifier="); ok && v != "not set" {
 			return strings.TrimSpace(v)

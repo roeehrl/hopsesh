@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/roeehrl/hopsesh/internal/core/proc"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
@@ -70,7 +71,7 @@ func ProbeLocal(ctx context.Context, specs []agent.Spec) Facts {
 		bf := agent.BinaryFact{Path: p}
 		if len(b.VersionArgs) > 0 {
 			vctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-			out, _ := exec.CommandContext(vctx, p, b.VersionArgs...).Output()
+			out, _ := proc.CommandContext(vctx, p, b.VersionArgs...).Output()
 			cancel()
 			bf.Version = firstLine(string(out))
 		}

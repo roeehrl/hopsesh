@@ -172,7 +172,7 @@ to be asked every time). hopsesh hosts setup-key <name> later switches it to key
 		},
 	}
 	cmd.Flags().Bool("password", false, "the machine logs in with a password (asked for when hopsesh connects)")
-	cmd.Flags().Bool("keychain", false, "remember the password in the macOS Keychain (the default on macOS)")
+	cmd.Flags().Bool("keychain", false, "remember the password in the macOS Keychain or Windows Credential Manager (the default there)")
 	return cmd
 }
 

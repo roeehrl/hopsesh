@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/roeehrl/hopsesh/internal/core/proc"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -134,7 +135,7 @@ func (localExec) Run(ctx context.Context, argv []string, o agent.RunOptions) (ag
 		ctx, cancel = context.WithTimeout(ctx, o.Timeout)
 		defer cancel()
 	}
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd := proc.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = o.Dir
 	if len(o.Env) > 0 {
 		cmd.Env = append(os.Environ(), o.Env...)

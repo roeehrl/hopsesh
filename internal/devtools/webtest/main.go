@@ -39,6 +39,7 @@ window.__emit = (name, data) => (listeners[name] || []).forEach((f) => f({ data 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8765", "where to listen")
 	home := flag.String("home", "", "the demo home (made afresh; anything there is removed)")
+	prepare := flag.Bool("prepare", false, "only make the demo home and print its environment as JSON (the real-window tests start the app on it)")
 	flag.Parse()
 	if *home == "" {
 		log.Fatal("-home is required")
@@ -46,6 +47,22 @@ func main() {
 	h, err := filepath.Abs(*home)
 	if err != nil {
 		log.Fatal(err)
+	}
+	if *prepare {
+		if err := os.RemoveAll(h); err != nil {
+			log.Fatal(err)
+		}
+		env := testkit.Env(h)
+		for k, v := range env {
+			os.Setenv(k, v)
+		}
+		if err := testkit.DemoHome(h); err != nil {
+			log.Fatal(err)
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(env); err != nil {
+			log.Fatal(err)
+		}
+		return
 	}
 	var (
 		mu  sync.Mutex

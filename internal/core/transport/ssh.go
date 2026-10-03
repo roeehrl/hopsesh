@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/core/audit"
+	"github.com/roeehrl/hopsesh/internal/core/proc"
 )
 
 // Errors classified from ssh's own output (ssh exits 255 for every connection problem).
@@ -220,7 +221,7 @@ func (c *Conn) run(ctx context.Context, remoteCmd string) ([]byte, error) {
 		defer cancel()
 	}
 	args := append(c.baseArgs(), c.Dest, "--", remoteCmd)
-	cmd := exec.CommandContext(ctx, c.sshBinary, args...)
+	cmd := proc.CommandContext(ctx, c.sshBinary, args...)
 	if env != nil {
 		cmd.Env = append(os.Environ(), env...)
 	}
@@ -258,7 +259,7 @@ func (c *Conn) sftpCommand(ctx context.Context) *exec.Cmd {
 	// ssh keeps the FIRST value of a repeated option, so these go before baseArgs.
 	args := append([]string{"-o", "Compression=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none"}, c.baseArgs()...)
 	args = append(args, "-s", c.Dest, "sftp")
-	cmd := exec.CommandContext(ctx, c.sshBinary, args...)
+	cmd := proc.CommandContext(ctx, c.sshBinary, args...)
 	if env, err := c.passwordEnv(ctx); err == nil && env != nil {
 		cmd.Env = append(os.Environ(), env...)
 	}
@@ -307,7 +308,7 @@ func (c *Conn) StartPipe(ctx context.Context, remoteCmd string) (*Pipe, error) {
 	pctx, cancel := context.WithCancel(context.Background())
 	args := append([]string{"-o", "Compression=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none"}, c.baseArgs()...)
 	args = append(args, c.Dest, "--", remoteCmd)
-	cmd := exec.CommandContext(pctx, c.sshBinary, args...)
+	cmd := proc.CommandContext(pctx, c.sshBinary, args...)
 	if env != nil {
 		cmd.Env = append(os.Environ(), env...)
 	}
@@ -346,7 +347,7 @@ func (c *Conn) Close() {
 		return
 	}
 	args := append(c.baseArgs(), "-O", "exit", c.Dest)
-	_ = exec.Command(c.sshBinary, args...).Run()
+	_ = proc.Command(c.sshBinary, args...).Run()
 }
 
 // tsCheckURL finds the Tailscale SSH check link ssh prints: at the start of the output or

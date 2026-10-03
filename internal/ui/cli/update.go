@@ -2,12 +2,12 @@ package cli
 
 import (
 	"fmt"
-	"os/exec"
 
 	"github.com/spf13/cobra"
 
 	"github.com/roeehrl/hopsesh/internal/core/audit"
 	"github.com/roeehrl/hopsesh/internal/core/integrate"
+	"github.com/roeehrl/hopsesh/internal/core/proc"
 	"github.com/roeehrl/hopsesh/internal/update"
 	"github.com/roeehrl/hopsesh/internal/version"
 )
@@ -51,16 +51,20 @@ func updateCmd() *cobra.Command {
 			if !r.confirm(fmt.Sprintf("Install hopsesh %s (you have %s)?", rel.Version, version.Version)) {
 				return nil
 			}
-			path, err := update.Install(ctx, rel)
+			t, err := update.Install(ctx, rel)
 			if err != nil {
 				return err
 			}
-			r.app.Audit.Write(audit.Entry{Action: "update", Detail: map[string]any{"from": version.Version, "to": rel.Version}})
-			r.printf("Installed hopsesh %s at %s.\n", rel.Version, path)
+			r.app.Audit.Write(audit.Entry{Action: "update", Detail: map[string]any{"from": version.Version, "to": rel.Version, "what": string(t.Kind)}})
+			r.printf("Installed hopsesh %s at %s.\n", rel.Version, t.Path)
+			if t.Kind != update.KindCLI {
+				r.printf("If the hopsesh app is open, quit and reopen it to use the new version.\n")
+			}
+			path := update.CLIPath(t)
 			// The new binary renders the skill; ask it to refresh unedited copies.
 			files, bin := r.skillFiles()
 			if rep := r.app.Skill(ctx, files, bin); rep.State != integrate.Absent {
-				if out, err := exec.Command(path, "skill", "install").CombinedOutput(); err == nil {
+				if out, err := proc.Command(path, "skill", "install").CombinedOutput(); err == nil {
 					r.printf("Refreshed the hopsesh skill.\n")
 				} else if len(out) > 0 {
 					r.printf("The hopsesh skill was not refreshed: %s", out)

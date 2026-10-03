@@ -8,12 +8,14 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/roeehrl/hopsesh/internal/core/proc"
 )
 
 // The login environment: apps started from Finder do not inherit the shell's PATH or
@@ -53,6 +55,9 @@ func LoginEnv() map[string]string {
 	}
 	loginDone = true
 	loginVars = map[string]string{}
+	if runtime.GOOS == "windows" {
+		return loginVars // programs inherit the user's environment there; see loginPATH
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	var b strings.Builder
@@ -62,7 +67,7 @@ func LoginEnv() map[string]string {
 			fmt.Fprintf(&b, `; printf '__HOPSESH__%s=%%s\n' "${%s:-}"`, v, v)
 		}
 	}
-	cmd := exec.CommandContext(ctx, loginShell(), "-lic", b.String())
+	cmd := proc.CommandContext(ctx, loginShell(), "-lic", b.String())
 	cmd.Stdin = nil
 	out, err := cmd.Output()
 	if err != nil && len(out) == 0 {
@@ -90,34 +95,35 @@ func adoptLoginEnv(getenv func(string) string, login func() map[string]string) {
 	}
 }
 
-// LoginPathHas reports whether dir is on the login shell's PATH (falling back to this
-// process's PATH when the shell cannot be read).
+// LoginPathHas reports whether dir is on the PATH a new terminal gets.
 func LoginPathHas(dir string) bool {
-	p := LoginEnv()["PATH"]
-	if p == "" {
-		p = os.Getenv("PATH")
-	}
-	for _, e := range filepath.SplitList(p) {
-		if filepath.Clean(expandHome(e)) == filepath.Clean(dir) {
+	for _, e := range filepath.SplitList(loginPATH()) {
+		if samePath(expandHome(e), dir) {
 			return true
 		}
 	}
 	return false
 }
 
-// LookLoginPath finds a command on the login shell's PATH.
+// LookLoginPath finds a command on the PATH a new terminal gets.
 func LookLoginPath(name string) string {
-	p := LoginEnv()["PATH"]
-	if p == "" {
-		p = os.Getenv("PATH")
-	}
-	for _, d := range filepath.SplitList(p) {
-		f := filepath.Join(expandHome(d), name)
-		if fi, err := os.Stat(f); err == nil && !fi.IsDir() && fi.Mode()&0o111 != 0 {
+	for _, d := range filepath.SplitList(loginPATH()) {
+		if d == "" {
+			continue
+		}
+		if f := lookIn(expandHome(d), name); f != "" {
 			return f
 		}
 	}
 	return ""
+}
+
+func samePath(a, b string) bool {
+	a, b = filepath.Clean(a), filepath.Clean(b)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
 }
 
 func expandHome(p string) string {

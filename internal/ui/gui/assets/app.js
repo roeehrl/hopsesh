@@ -1,6 +1,6 @@
 // hopsesh's window: boot, the menu's commands, and ssh's password questions. Plain ES
 // modules, no build step.
-import { api, on, h, fill, view, state, go, current, toast, fail, errText, $ } from "./core.js";
+import { api, on, h, fill, view, state, go, current, toast, fail, errText, $, sys, setSystem } from "./core.js";
 import "./sessions.js";
 import "./plan.js";
 import "./machines.js";
@@ -13,7 +13,8 @@ $("#btn-refresh").onclick = () => go("sessions", true);
 $("#btn-settings").onclick = () => go("settings");
 
 // The app menu (and its shortcuts) sends these.
-on("hopsesh:menu", (cmd) => {
+on("hopsesh:menu", menuCommand);
+function menuCommand(cmd) {
   if (document.querySelector("#sheet[open]") && cmd !== "palette") return; // a plan is open
   switch (cmd) {
     case "palette": openPalette(); break;
@@ -24,6 +25,16 @@ on("hopsesh:menu", (cmd) => {
     case "settings": go("settings"); break;
     case "undo-last": undoLast(); break;
   }
+}
+
+// Windows has no menu bar: the window takes the menu's shortcuts itself.
+document.addEventListener("keydown", (ev) => {
+  if (sys.mac || !ev.ctrlKey || ev.metaKey) return;
+  const k = ev.key.toLowerCase();
+  const cmd = ev.altKey ? (k === "z" ? "undo-last" : "") : { k: "palette", r: "refresh", 1: "sessions", 2: "activity", 3: "machines", ",": "settings" }[k];
+  if (!cmd) return;
+  ev.preventDefault();
+  menuCommand(cmd);
 });
 
 // ssh asks for a password machine's password in the middle of a scan or a hop; the
@@ -58,7 +69,7 @@ function showPassword() {
     h("div", { class: "mono muted", style: "font-size:11px" }, req.destination),
     req.retry ? h("div", { class: "err", role: "alert" }, "That password was not accepted. Try again.") : null,
     h("label", { for: "pw", class: "visually-hidden" }, `Password for ${req.machine}`), input,
-    req.canRemember ? h("label", { class: "opt" }, remember, h("span", {}, "Remember it in the Keychain")) : null,
+    req.canRemember ? h("label", { class: "opt" }, remember, h("span", {}, `Remember it in ${sys.vault}`)) : null,
     h("div", { class: "muted", style: "font-size:12px" }, "Given only to ssh for this machine. Skip leaves the machine out this time."),
     h("div", { class: "dlg-foot" }, h("button", { class: "btn", type: "button", onclick: () => done(false) }, "Skip"), h("button", { class: "btn primary", type: "submit" }, "Log in"))));
   dlg.oncancel = (e) => { e.preventDefault(); done(false); };
@@ -84,6 +95,7 @@ function configError() {
 (async () => {
   for (const r of await api("PendingPasswords").catch(() => [])) askPassword(r);
   try { state.info = await api("Info"); } catch (e) { fill(view, h("div", { class: "loading err" }, errText(e))); return; }
+  setSystem(state.info.os);
   if (state.info.configError) { configError(); return; }
   await go("sessions", true);
   if (state.info.updateCheck === "on") {

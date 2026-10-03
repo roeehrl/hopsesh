@@ -1,6 +1,6 @@
 // The Activity screen: what hopsesh did here, newest first, with Undo, and the marks still
 // waiting for a copy left behind to end.
-import { api, h, fill, icon, ICONS, view, state, screen, go, loading, toast, fail, errText, ago, when, ask } from "./core.js";
+import { api, h, fill, icon, ICONS, view, state, screen, go, loading, toast, fail, errText, ago, when, ask, sys } from "./core.js";
 
 // undo reverses an operation. When the session was used since, it says what changed and
 // asks before throwing that work away.
@@ -21,7 +21,7 @@ export async function undo(id, title) {
   return true;
 }
 
-// undoLast undoes the newest operation that can be undone (⌥⌘Z).
+// undoLast undoes the newest operation that can be undone (⌥⌘Z, Ctrl+Alt+Z).
 export async function undoLast() {
   try {
     const title = await api("UndoLast");
@@ -61,7 +61,7 @@ async function render(reload = false) {
   fill(view, h("div", { class: "page" }, h("div", { class: "page-in" },
     h("div", { style: "display:flex;align-items:baseline;gap:12px;flex-wrap:wrap" }, h("h1", {}, "Activity"), h("span", { class: "spacer" }),
       h("button", { class: "btn", onclick: () => go("sessions") }, "Back to sessions")),
-    h("span", { class: "muted" }, "Everything hopsesh changed on this Mac. Undo puts it back, on every machine it touched; if a session was used since, hopsesh asks first."),
+    h("span", { class: "muted" }, `Everything hopsesh changed on ${sys.here}. Undo puts it back, on every machine it touched; if a session was used since, hopsesh asks first.`),
     a.owed.length ? h("section", { class: "card" },
       h("div", { class: "card-h" }, h("span", { class: "name" }, "Waiting to mark"), h("span", { class: "muted", style: "font-size:12px" }, "Copies left open elsewhere: hopsesh marks them on its next scan after they end.")),
       a.owed.map((o) => h("div", { class: "line-item" }, h("span", { class: "ico mark" }, icon(ICONS.clock, 15)),

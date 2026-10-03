@@ -18,6 +18,7 @@ import (
 	"unicode/utf16"
 
 	"github.com/roeehrl/hopsesh/internal/core/lnp"
+	"github.com/roeehrl/hopsesh/internal/core/proc"
 )
 
 // RunPowerShell runs a PowerShell script on a Windows machine (whatever its default ssh
@@ -47,7 +48,7 @@ type ResolvedHost struct {
 
 // Resolve asks the local ssh client how it would connect to dest.
 func (c *Conn) Resolve(ctx context.Context) (*ResolvedHost, error) {
-	out, err := exec.CommandContext(ctx, c.sshBinary, "-G", c.Dest).Output()
+	out, err := proc.CommandContext(ctx, c.sshBinary, "-G", c.Dest).Output()
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +114,7 @@ func (c *Conn) ScanHostKeys(ctx context.Context) ([]HostKey, *ResolvedHost, erro
 			gated = append(gated, t)
 		}
 	}
-	ks := exec.CommandContext(ctx, bin, "-T", "5", "-p", r.Port, r.HostName)
+	ks := proc.CommandContext(ctx, bin, "-T", "5", "-p", r.Port, r.HostName)
 	var ksErr bytes.Buffer
 	ks.Stderr = &ksErr
 	out, err := ks.Output()

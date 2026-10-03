@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/roeehrl/hopsesh/internal/core/proc"
 )
 
 // Candidate is a machine found by discovery. Discovery never connects to anything.
@@ -69,7 +71,7 @@ func Tailscale(ctx context.Context) ([]Candidate, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, bin, "status", "--json").Output()
+	out, err := proc.CommandContext(ctx, bin, "status", "--json").Output()
 	if err != nil {
 		return nil, err
 	}

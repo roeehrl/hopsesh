@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -12,6 +11,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/core/convert"
 	"github.com/roeehrl/hopsesh/internal/core/move"
+	"github.com/roeehrl/hopsesh/internal/core/proc"
 	"github.com/roeehrl/hopsesh/internal/core/repos"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
@@ -215,10 +215,10 @@ func pull(cmd *cobra.Command, refArg string) error {
 	}
 	r.renderResult(p, res)
 	if run, _ := cmd.Flags().GetBool("run"); run {
-		c := exec.Command(p.Resume.Argv[0], p.Resume.Argv[1:]...)
+		c := proc.Command(p.Resume.Argv[0], p.Resume.Argv[1:]...)
 		if res.PromptFile != "" {
 			if b, err := os.ReadFile(res.PromptFile); err == nil && len(p.Resume.Argv) > 0 {
-				c = exec.Command(p.Resume.Argv[0], append(p.Resume.Argv[1:len(p.Resume.Argv)-1], string(b))...)
+				c = proc.Command(p.Resume.Argv[0], append(p.Resume.Argv[1:len(p.Resume.Argv)-1], string(b))...)
 			}
 		}
 		c.Dir, c.Stdin, c.Stdout, c.Stderr = p.Resume.Dir, os.Stdin, os.Stdout, os.Stderr

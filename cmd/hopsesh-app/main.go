@@ -4,19 +4,23 @@ package main
 import (
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
 	"github.com/roeehrl/hopsesh/internal/agents/all"
+	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/integrate"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
 	"github.com/roeehrl/hopsesh/internal/ui/gui"
+	"github.com/roeehrl/hopsesh/internal/update"
 )
 
 func main() {
 	if transport.IsAskpass() {
 		os.Exit(transport.AskpassMain(os.Args[1:])) // ssh asking for a password, see transport
 	}
+	update.CleanUp() // what an earlier update moved aside
 	reg := all.Registry()
 	// Started from Finder, the app lacks the login shell's agent variables (for example
 	// CLAUDE_CONFIG_DIR, CODEX_HOME); adopt them so scans, moves and the skill use the same
@@ -30,7 +34,11 @@ func main() {
 		Services:    []application.Service{application.NewService(svc)},
 		Assets:      application.AssetOptions{Handler: application.BundledAssetFileServer(gui.Assets)},
 		Mac:         application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: true},
-		OnShutdown:  svc.Shutdown,
+		Windows: application.WindowsOptions{
+			WebviewUserDataPath:   filepath.Join(config.StateDir(), "webview"),
+			AdditionalBrowserArgs: testBrowserArgs(),
+		},
+		OnShutdown: svc.Shutdown,
 	})
 	svc.Wails = app
 	app.Menu.Set(menu(func(cmd string) { app.Event.Emit(gui.MenuEvent, cmd) }))

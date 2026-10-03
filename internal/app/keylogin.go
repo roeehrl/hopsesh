@@ -5,12 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/audit"
+	"github.com/roeehrl/hopsesh/internal/core/proc"
 )
 
 // KeyLogin is what SetupKeyLogin did.
@@ -92,7 +92,7 @@ func localPublicKey(ctx context.Context, dest string, create bool) (string, bool
 		return "", false, err
 	}
 	var candidates []string
-	if out, err := exec.CommandContext(ctx, "ssh", "-G", dest).Output(); err == nil {
+	if out, err := proc.CommandContext(ctx, "ssh", "-G", dest).Output(); err == nil {
 		for _, line := range strings.Split(string(out), "\n") {
 			if f, ok := strings.CutPrefix(line, "identityfile "); ok {
 				f = strings.TrimSpace(f)
@@ -128,7 +128,7 @@ func localPublicKey(ctx context.Context, dest string, create bool) (string, bool
 		return "", false, err
 	}
 	host, _ := os.Hostname()
-	cmd := exec.CommandContext(ctx, "ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "hopsesh@"+host, "-f", p)
+	cmd := proc.CommandContext(ctx, "ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "hopsesh@"+host, "-f", p)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return "", false, fmt.Errorf("creating an SSH key: %v: %s", err, strings.TrimSpace(string(out)))
 	}

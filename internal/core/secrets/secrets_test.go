@@ -7,11 +7,11 @@ import (
 	"time"
 )
 
-// TestKeychainRoundTrip uses the real login Keychain, so it only runs when asked
-// (HOPSESH_TEST_KEYCHAIN=1) on a Mac.
-func TestKeychainRoundTrip(t *testing.T) {
+// TestStoreRoundTrip uses the real password store (the login Keychain, or Windows
+// Credential Manager), so it only runs when asked: HOPSESH_TEST_KEYCHAIN=1.
+func TestStoreRoundTrip(t *testing.T) {
 	if os.Getenv("HOPSESH_TEST_KEYCHAIN") == "" || !Available() {
-		t.Skip("set HOPSESH_TEST_KEYCHAIN=1 on a Mac to run")
+		t.Skip("set HOPSESH_TEST_KEYCHAIN=1 on a Mac or Windows to run")
 	}
 	acct := fmt.Sprintf("test-%d nobody@example.invalid", time.Now().UnixNano())
 	pw := `a "quoted" pass\word with spaces`

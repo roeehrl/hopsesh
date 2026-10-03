@@ -2,6 +2,7 @@ package update
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"crypto/ecdsa"
@@ -10,10 +11,14 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/pem"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -106,5 +111,110 @@ func TestInstallRefusesWithoutKey(t *testing.T) {
 	PublicKey = ""
 	if _, err := Install(t.Context(), &Release{}); err != ErrNoKey {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestTargetFor(t *testing.T) {
+	cases := []struct {
+		exe, goos string
+		want      Target
+	}{
+		{"/Applications/hopsesh.app/Contents/MacOS/hopsesh-app", "darwin", Target{KindMacApp, "/Applications/hopsesh.app"}},
+		{"/Applications/hopsesh.app/Contents/Resources/bin/hopsesh", "darwin", Target{KindMacApp, "/Applications/hopsesh.app"}},
+		{"/usr/local/bin/hopsesh", "darwin", Target{KindCLI, "/usr/local/bin/hopsesh"}},
+		{"/usr/local/bin/hopsesh", "linux", Target{KindCLI, "/usr/local/bin/hopsesh"}},
+	}
+	for _, c := range cases {
+		if got := targetFor(c.exe, c.goos); got != c.want {
+			t.Errorf("%s on %s: %+v, want %+v", c.exe, c.goos, got, c.want)
+		}
+	}
+	// A Windows folder with both programs is the app; a lone hopsesh.exe is the CLI.
+	dir := t.TempDir()
+	cli := filepath.Join(dir, "hopsesh.exe")
+	os.WriteFile(cli, []byte("MZ"), 0o755)
+	if got := targetFor(cli, "windows"); got.Kind != KindCLI {
+		t.Errorf("lone hopsesh.exe: %+v", got)
+	}
+	os.WriteFile(filepath.Join(dir, "hopsesh-app.exe"), []byte("MZ"), 0o755)
+	if got := targetFor(cli, "windows"); got != (Target{KindWindowsApp, dir}) {
+		t.Errorf("app folder: %+v", got)
+	}
+	if n := AssetName(Target{Kind: KindMacApp}, "0.3.0"); n != "hopsesh-0.3.0-macos-universal.dmg" {
+		t.Error(n)
+	}
+	if n := AssetName(Target{Kind: KindWindowsApp}, "0.3.0"); !strings.HasPrefix(n, "hopsesh-0.3.0-windows-") || !strings.HasSuffix(n, "-app.zip") {
+		t.Error(n)
+	}
+}
+
+func zipOf(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, body := range files {
+		w, _ := zw.Create(name)
+		w.Write([]byte(body))
+	}
+	zw.Close()
+	return buf.Bytes()
+}
+
+// Both programs of the Windows app are replaced together, or neither.
+func TestInstallWindowsApp(t *testing.T) {
+	dir := t.TempDir()
+	for _, n := range []string{"hopsesh-app.exe", "hopsesh.exe"} {
+		os.WriteFile(filepath.Join(dir, n), []byte("old "+n), 0o755)
+	}
+	if err := installWindowsApp(dir, zipOf(t, map[string]string{"hopsesh-app.exe": "new app"}), "0.3.0"); err == nil {
+		t.Fatal("a zip without hopsesh.exe must be refused")
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "hopsesh-app.exe")); string(b) != "old hopsesh-app.exe" {
+		t.Fatalf("a refused update changes nothing: %q", b)
+	}
+	if err := installWindowsApp(dir, zipOf(t, map[string]string{"hopsesh-app.exe": "new app", "hopsesh.exe": "new cli", "LICENSE": "MIT"}), "0.3.0"); err != nil {
+		t.Fatal(err)
+	}
+	for n, want := range map[string]string{"hopsesh-app.exe": "new app", "hopsesh.exe": "new cli"} {
+		if b, _ := os.ReadFile(filepath.Join(dir, n)); string(b) != want {
+			t.Errorf("%s: %q", n, b)
+		}
+		if _, err := os.Stat(filepath.Join(dir, n+".new")); err == nil {
+			t.Errorf("%s.new left behind", n)
+		}
+	}
+}
+
+// A release file is installed only when it matches checksums.txt and checksums.txt
+// carries the release key's signature.
+func TestDownloadVerifies(t *testing.T) {
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	der, _ := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	PublicKey = base64.StdEncoding.EncodeToString(der)
+	defer func() { PublicKey = "" }()
+	body := []byte("the app zip")
+	sum := sha256.Sum256(body)
+	sums := []byte(hex.EncodeToString(sum[:]) + "  hopsesh-0.3.0-windows-amd64-app.zip\n")
+	h := sha256.Sum256(sums)
+	sig, _ := ecdsa.SignASN1(rand.Reader, key, h[:])
+	served := map[string][]byte{"/sums": sums, "/sig": sig, "/file": body}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(served[r.URL.Path]) }))
+	defer srv.Close()
+	oldAPI := API
+	API = srv.URL // a local test server may serve plain HTTP
+	defer func() { API = oldAPI }()
+	rel := &Release{Tag: "v0.3.0", Assets: map[string]string{"checksums.txt": srv.URL + "/sums", "checksums.txt.sig": srv.URL + "/sig",
+		"hopsesh-0.3.0-windows-amd64-app.zip": srv.URL + "/file"}}
+	got, err := download(t.Context(), rel, "hopsesh-0.3.0-windows-amd64-app.zip")
+	if err != nil || string(got) != string(body) {
+		t.Fatalf("%q %v", got, err)
+	}
+	served["/file"] = []byte("tampered")
+	if _, err := download(t.Context(), rel, "hopsesh-0.3.0-windows-amd64-app.zip"); err == nil {
+		t.Fatal("a file that does not match checksums.txt must be refused")
+	}
+	served["/file"], served["/sig"] = body, []byte("not a signature")
+	if _, err := download(t.Context(), rel, "hopsesh-0.3.0-windows-amd64-app.zip"); err == nil {
+		t.Fatal("checksums.txt without a valid signature must be refused")
 	}
 }

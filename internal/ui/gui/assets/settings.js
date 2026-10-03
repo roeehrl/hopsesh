@@ -1,5 +1,5 @@
 // The Settings screen, in tabs: General, Agents, Skill, Command line, Updates.
-import { api, h, fill, view, state, screen, go, loading, toast, fail, dialog, agentBadge } from "./core.js";
+import { api, h, fill, view, state, screen, go, loading, toast, fail, dialog, agentBadge, sys, cliHow } from "./core.js";
 
 const SKILL_TEXT = {
   absent: ["Not installed", "st-ended"],
@@ -14,7 +14,7 @@ const CLI_TEXT = {
   ours: ["Installed, runs this app's hopsesh", "st-idle"],
   "other-app": ["Points to another copy of hopsesh.app", "st-warn"],
   dangling: ["Broken link: the app moved or was removed", "st-error"],
-  standalone: ["A separately installed hopsesh is there", "st-warn"],
+  standalone: ["A separately installed hopsesh is there", "st-warn"], // Windows: comes first on PATH
   foreign: ["Points to a different program", "st-warn"],
 };
 const CAPS = {
@@ -60,8 +60,8 @@ function general() {
       toggle("pushSource", "Push unpushed commits on the other machine first", "Off: commits are fetched straight from the other machine.")),
     card(h("span", { class: "sec-h" }, "Appearance"),
       toggle("appIcons", "Show each agent's own app icon", "When the agent's desktop app is installed here, its icon pictures the agent; otherwise hopsesh's own mark does.")),
-    card(h("span", { class: "sec-h" }, "This Mac"),
-      h("div", { class: "set-row" }, title("Receiving sessions", state.info.receive ? "On: your other machines can send sessions here." : "Off: this Mac refuses sessions sent from other machines."),
+    card(h("span", { class: "sec-h" }, sys.Here),
+      h("div", { class: "set-row" }, title("Receiving sessions", state.info.receive ? "On: your other machines can send sessions here." : `Off: ${sys.here} refuses sessions sent from other machines.`),
         h("button", { class: "btn", onclick: () => go("machines") }, "Machines…")),
       s.localNetworkGated ? h("div", { class: "set-row" }, title("Local network access", "macOS asks before hopsesh reaches machines on your local network. Machines on Tailscale don't need it."),
         h("button", { class: "btn", onclick: () => api("OpenLocalNetworkSettings").catch(fail) }, "Privacy & Security…")) : null,
@@ -77,7 +77,7 @@ function agents() {
     return card(
       h("div", { class: "set-row" },
         agentBadge(a.id, a.name),
-        title(a.name, a.version ? `${a.version} on this Mac${a.folder ? " · " + a.folder : ""}` : "Not installed on this Mac"),
+        title(a.name, a.version ? `${a.version} on ${sys.here}${a.folder ? " · " + a.folder : ""}` : `Not installed on ${sys.here}`),
         a.stability === "experimental" ? h("span", { class: "chip st-warn" }, "experimental") : null,
         h("button", { class: "switch", role: "switch", "aria-checked": a.enabled ? "true" : "false", "aria-label": `${a.name} on`,
           onclick: () => set(!a.enabled, a.remoteControl, a.import, a.enabled ? `${a.name} is off` : `${a.name} is on`) })),
@@ -126,29 +126,46 @@ function cli() {
   if (c.cannotInstall && c.state !== "ours") acts.push(h("span", { class: "muted", style: "font-size:12px" }, c.cannotInstall));
   else if (["missing", "other-app", "dangling"].includes(c.state)) acts.push(h("button", { class: "btn primary", onclick: () => run(() => api("InstallCLI", false), "The hopsesh command now runs this app's version") },
     c.state === "missing" ? "Install command" : c.state === "dangling" ? "Repair" : "Use this app's version"));
-  else if (c.state === "standalone" || c.state === "foreign") acts.push(h("button", { class: "btn", onclick: () => run(() => api("InstallCLI", true), "Replaced; the previous one is kept as a backup") }, "Replace with this app's (keeps a backup)"));
+  else if (c.state === "standalone" || c.state === "foreign") acts.push(h("button", { class: "btn", onclick: () => run(() => api("InstallCLI", true), sys.win ? "New terminal windows now run this app's hopsesh" : "Replaced; the previous one is kept as a backup") },
+    sys.win ? "Use this app's first" : "Replace with this app's (keeps a backup)"));
   if (["ours", "other-app", "dangling"].includes(c.state)) acts.push(h("button", { class: "btn", onclick: () => run(() => api("UninstallCLI"), "Removed the hopsesh command") }, "Uninstall command"));
   return [card(
-    h("div", { class: "set-row" }, title("The hopsesh command in Terminal", "Links hopsesh into ~/.local/bin, so Terminal, your agents and your other machines can run it. It updates with the app."), chip(CLI_TEXT[c.state] || [c.state, ""])),
-    c.target ? h("span", { class: "muted mono", style: "font-size:11px;overflow-wrap:anywhere" }, `${c.path} → ${c.target}`) : null,
+    h("div", { class: "set-row" }, title(`The hopsesh command in ${sys.terminal}`, `${cliHow()}, so your terminal, your agents and your other machines can run it. It updates with the app.`), chip(CLI_TEXT[c.state] || [c.state, ""])),
+    c.target && !sys.win ? h("span", { class: "muted mono", style: "font-size:11px;overflow-wrap:anywhere" }, `${c.path} → ${c.target}`) : null,
     h("div", { style: "display:flex;gap:8px;flex-wrap:wrap;align-items:center" }, acts),
-    !c.dirOnPath ? h("div", { class: "item" }, h("span", { class: "badge warn" }, "!"),
+    !c.dirOnPath && !sys.win ? h("div", { class: "item" }, h("span", { class: "badge warn" }, "!"),
       h("div", { style: "display:flex;flex-direction:column;gap:6px;min-width:0" }, h("span", {}, "~/.local/bin is not on your PATH"),
         h("span", { class: "muted", style: "font-size:12px" }, c.pathAdded ? `hopsesh added it to ${c.profile}; new terminal windows pick it up.` : `Add this line to ${c.profile}, or let hopsesh add it:`),
         c.pathAdded ? null : h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" }, h("div", { class: "term", style: "flex:1 1 260px" }, c.pathLine),
           h("button", { class: "btn", onclick: async () => { await api("CopyText", c.pathLine); toast("Copied"); } }, "Copy"),
           h("button", { class: "btn", onclick: () => run(() => api("AddCLIToPath"), "Added; open a new terminal window") }, "Add it for me")))) : null,
-    c.resolves ? h("span", { class: "muted", style: "font-size:12px" }, "In Terminal, hopsesh runs ", h("span", { class: "mono" }, c.resolves)) : null)];
+    c.resolves ? h("span", { class: "muted", style: "font-size:12px" }, `In ${sys.terminal}, hopsesh runs `, h("span", { class: "mono" }, c.resolves)) : null)];
 }
 
 function updates() {
   const u = state.update;
   return [card(
     h("div", { class: "set-row" }, title(`hopsesh ${s.version}`, u?.newer ? `hopsesh ${u.latest} is available.` : u ? "This is the newest version." : ""),
-      u?.newer ? h("button", { class: "btn primary", onclick: () => api("OpenURL", u.url).catch(fail) }, "See what's new") : null,
+      u?.newer && u.canInstall ? h("button", { class: "btn primary", onclick: (ev) => installUpdate(ev.currentTarget, u) }, "Install and restart") : null,
+      u?.newer ? h("button", { class: u.canInstall ? "btn" : "btn primary", onclick: () => api("OpenURL", u.url).catch(fail) }, "See what's new") : null,
       s.updateCheck === "on" ? h("button", { class: "btn", onclick: async () => { try { state.update = await api("CheckUpdate"); } catch (e) { fail(e); } render(); } }, "Check now") : null),
     h("label", { class: "opt" }, h("input", { type: "checkbox", checked: s.updateCheck === "on", onchange: (e) => save({ updateCheck: e.target.checked ? "on" : "off" }) }),
       h("span", {}, h("b", {}, "Check GitHub once a day for new versions"), h("span", { class: "muted" }, "Only the release list is fetched; nothing about you is sent."))))];
+}
+
+// installUpdate installs the new version over this app (the backend verifies it first),
+// which then reopens.
+async function installUpdate(btn, u) {
+  btn.disabled = true;
+  fill(btn, `Downloading and checking ${u.latest}…`);
+  try {
+    await api("InstallUpdate");
+    fill(btn, "Restarting…");
+  } catch (e) {
+    fail(e);
+    btn.disabled = false;
+    fill(btn, "Install and restart");
+  }
 }
 
 async function preview() {

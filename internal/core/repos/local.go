@@ -6,9 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/roeehrl/hopsesh/internal/core/proc"
 )
 
 // DefaultRoots are the folders searched for existing checkouts, in order, after the
@@ -154,7 +155,7 @@ func runGit(ctx context.Context, dir string, args ...string) (string, error) {
 
 // runGitEnv is runGit with extra environment (e.g. GIT_SSH_COMMAND).
 func runGitEnv(ctx context.Context, dir string, env []string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := proc.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	cmd.Env = append(append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never"), env...)
 	if os.Getenv("GIT_SSH_COMMAND") == "" && !hasEnv(env, "GIT_SSH_COMMAND") {

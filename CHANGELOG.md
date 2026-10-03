@@ -11,6 +11,15 @@ behind a small SDK. The configuration format changed; an older file is refused a
 aside (the app offers this), and machines are added again.
 
 ### Added
+- The desktop app on Windows (amd64 and arm64): a per-user installer (no administrator
+  rights) with a Start menu entry, the hopsesh command on your PATH and an uninstaller.
+  Passwords can be remembered in Windows Credential Manager, sessions open in Windows
+  Terminal (or PowerShell), and the window uses Ctrl shortcuts. Not code-signed yet, so
+  Windows SmartScreen asks before the first run.
+- Both apps update themselves: Settings → Updates → Install and restart, after the same
+  checks as `hopsesh update` (release signature and checksum; on macOS also the same
+  Apple developer and notarization). `hopsesh update` run from inside an app updates
+  the whole app.
 - Codex sessions: listing, live state, moving between machines (paths rewritten,
   encrypted content untouched), marks in Codex's own list, and Codex lists what hopsesh
   installs right away.

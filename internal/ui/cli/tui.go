@@ -2,9 +2,9 @@ package cli
 
 import (
 	"os"
-	"os/exec"
 
 	"github.com/roeehrl/hopsesh/internal/app"
+	"github.com/roeehrl/hopsesh/internal/core/proc"
 	"github.com/roeehrl/hopsesh/internal/ui/tui"
 )
 
@@ -20,7 +20,7 @@ func (r *run) runTUI() error {
 			argv = append(argv[:len(argv)-1:len(argv)-1], string(b))
 		}
 	}
-	c := exec.Command(argv[0], argv[1:]...)
+	c := proc.Command(argv[0], argv[1:]...)
 	c.Dir = exit.RunDir
 	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return c.Run()

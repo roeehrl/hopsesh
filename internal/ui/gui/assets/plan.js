@@ -1,6 +1,6 @@
 // The plan sheet (what a hop, continuation or send will do, with its choices), its
 // progress, and the Done screen.
-import { api, on, h, fill, view, state, screen, go, current, toast, fail, errText, cap, agentChip, here, $, count } from "./core.js";
+import { api, on, h, fill, view, state, screen, go, current, toast, fail, errText, cap, agentChip, here, $, count, sys, keys } from "./core.js";
 import { undo } from "./activity.js";
 
 const sheet = $("#sheet");
@@ -221,7 +221,7 @@ function verb(p) {
 
 function render() {
   const p = cur.plan;
-  const there = p.machine ? `on ${p.machine}` : "on this Mac";
+  const there = p.machine ? `on ${p.machine}` : `on ${sys.here}`;
   const title = p.machine ? `Send “${p.title}” to ${p.machine}` : p.continue ? `Continue “${p.title}” in ${p.agent}` : `Bring “${p.title}” here`;
   const blocked = (p.blockers || []).length > 0;
   fill(sheet, h("div", { class: "sheet-in" },
@@ -234,9 +234,9 @@ function render() {
       summary(p)),
     h("div", { class: "sheet-body" }, p.continue ? conversation(p) : null, repository(p), checks(p), options(p), paths(p)),
     h("footer", { class: "sheet-foot" },
-      h("span", { class: "muted", style: "font-size:12px;flex:1 1 260px" }, `Nothing changes until you ${p.continue ? "continue" : p.machine ? "send it" : "hop"}. The original on ${p.machine ? "this Mac" : p.sourceHost} is never deleted.`),
+      h("span", { class: "muted", style: "font-size:12px;flex:1 1 260px" }, `Nothing changes until you ${p.continue ? "continue" : p.machine ? "send it" : "hop"}. The original on ${p.machine ? sys.here : p.sourceHost} is never deleted.`),
       h("button", { class: "btn", onclick: () => sheet.close() }, "Cancel"),
-      h("button", { class: "btn primary big", id: "go", disabled: blocked, onclick: apply }, h("span", {}, verb(p)), h("span", { class: "kbd" }, "⌘↩")))));
+      h("button", { class: "btn primary big", id: "go", disabled: blocked, onclick: apply }, h("span", {}, verb(p)), h("span", { class: "kbd" }, keys("mod+enter"))))));
 }
 
 async function apply() {
@@ -293,7 +293,7 @@ function happened(d, p) {
 }
 
 screen("done", (d, p, o) => {
-  const where = d.machine ? `on ${d.machine}` : "on this Mac";
+  const where = d.machine ? `on ${d.machine}` : `on ${sys.here}`;
   const open = () => api("OpenResult").catch(fail);
   const copy = async () => { await api("CopyText", d.command); toast("Copied"); };
   const doUndo = async () => { if (await undo(d.journal, d.title)) go("sessions", true); };
@@ -303,7 +303,7 @@ screen("done", (d, p, o) => {
         h("div", { class: "muted" }, `${cap(where)}, in `, h("span", { class: "mono" }, p.targetCwd)))),
     h("div", { class: "card" }, h("div", { class: "dlg-body" },
       d.machine ? h("b", {}, `Start it on ${d.machine}`) : h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" },
-        h("button", { class: "btn primary big", id: "open", onclick: open }, d.inApp ? `Open in the ${d.agent} app` : "Open in Terminal", h("span", { class: "kbd" }, "↩")),
+        h("button", { class: "btn primary big", id: "open", onclick: open }, d.inApp ? `Open in the ${d.agent} app` : `Open in ${sys.terminal}`, h("span", { class: "kbd" }, "↩")),
         h("button", { class: "btn big", onclick: copy }, "Copy the command")),
       h("div", { style: "display:flex;gap:8px;align-items:flex-start" }, h("div", { class: "term", style: "flex:1" }, d.command), d.machine ? h("button", { class: "btn", onclick: copy }, "Copy") : null),
       h("span", { class: "muted", style: "font-size:12px" }, d.kind === "continue" ? `${d.agent} reads hopsesh's briefing at the end of the history, then ${o.go ? "starts working" : "waits for you"}.`
@@ -315,7 +315,7 @@ screen("done", (d, p, o) => {
       h("div", { style: "display:flex;gap:8px;align-items:flex-start" }, h("div", { class: "term", style: "flex:1" }, d.notice),
         h("button", { class: "btn", onclick: async () => { await api("CopyText", d.notice); toast("Copied"); } }, "Copy")))) : null,
     h("div", { style: "display:flex;gap:10px;align-items:center;flex-wrap:wrap" },
-      h("button", { class: "btn", title: d.machine ? `Undoes both machines: the copy on ${d.machine} and the mark here` : "", onclick: doUndo }, "Undo", h("span", { class: "kbd" }, "⌥⌘Z")),
+      h("button", { class: "btn", title: d.machine ? `Undoes both machines: the copy on ${d.machine} and the mark here` : "", onclick: doUndo }, "Undo", h("span", { class: "kbd" }, keys("mod+alt+Z"))),
       h("button", { class: "btn", onclick: () => go("sessions", true) }, "Back to sessions", h("span", { class: "kbd" }, "esc")),
       h("span", { class: "muted", style: "font-size:12px" }, "Undo stays in Activity for as long as nothing happens on top of it. ",
         h("button", { class: "link", onclick: () => api("Reveal", d.auditDir).catch(fail) }, "Audit log"))))));

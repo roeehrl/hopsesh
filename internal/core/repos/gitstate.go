@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"github.com/roeehrl/hopsesh/internal/core/proc"
 )
 
 // Worktree is one entry of `git worktree list`.
@@ -241,7 +243,7 @@ func ProbeLocal(ctx context.Context, dirs, excl []string) ([]GitState, error) {
 		return nil, err
 	}
 	script, args := ProbeScript(dirs, excl)
-	cmd := exec.CommandContext(ctx, sh, append([]string{"-c", script, "hopsesh-probe"}, args[1:]...)...)
+	cmd := proc.CommandContext(ctx, sh, append([]string{"-c", script, "hopsesh-probe"}, args[1:]...)...)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git probe: %w", err)

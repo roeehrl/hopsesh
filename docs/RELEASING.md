@@ -4,8 +4,8 @@ A release is built in two places, and no signing key or Apple credential is ever
 in GitHub:
 
 1. **GitHub Actions** (`.github/workflows/release.yml`), on a `v*` tag: builds the Linux and
-   Windows files with GoReleaser, records build provenance for each of them, and creates a
-   **draft** release.
+   Windows files with GoReleaser and the Windows app with `scripts/build-windows-app.sh`,
+   records build provenance for each of them, and creates a **draft** release.
 2. **The maintainer's Mac** (`scripts/release-sign.sh`): verifies that provenance, builds
    the macOS CLI and app from the tagged commit, signs and notarizes them, writes
    `checksums.txt` for every file, signs it with the release key, and uploads the result to
@@ -16,14 +16,18 @@ in GitHub:
 | File | Made by | Checked by |
 |---|---|---|
 | `hopsesh_<ver>_linux_*.tar.gz`, `hopsesh_<ver>_windows_*.zip`, `.deb`/`.rpm`/`.apk` | GoReleaser in CI | build provenance (`gh attestation verify`), `checksums.txt` |
+| `hopsesh-<ver>-windows-{amd64,arm64}-setup.exe` | `build-windows-app.sh` in CI (NSIS) | build provenance, `checksums.txt`; not code-signed yet (SmartScreen asks) |
+| `hopsesh-windows-{amd64,arm64}-setup.exe` | CI (a copy of the above) | same; a stable link: `releases/latest/download/hopsesh-windows-amd64-setup.exe` |
+| `hopsesh-<ver>-windows-{amd64,arm64}-app.zip` | `build-windows-app.sh` in CI | build provenance, `checksums.txt`; what the Windows app updates itself from |
 | `*.sbom.json` | syft in CI | `checksums.txt` |
 | `hopsesh_<ver>_darwin_{amd64,arm64}.tar.gz` | `release-sign.sh` | Developer ID signature, notarization, `checksums.txt` |
 | `hopsesh-<ver>-macos-universal.dmg` | `release-sign.sh` → `build-macos-app.sh` | Developer ID signature, notarization (stapled), `checksums.txt` |
 | `hopsesh-macos-universal.dmg` | `release-sign.sh` (a copy of the above) | same; a stable link for web pages: `releases/latest/download/hopsesh-macos-universal.dmg` |
 | `checksums.txt`, `checksums.txt.sig` | `release-sign.sh` | the release key (`packaging/release-key.pub`) |
 
-`hopsesh update` and the install scripts accept a download only when `checksums.txt` is
-signed by the release key and the file matches it.
+`hopsesh update`, the apps' own updates and the install scripts accept a download only when
+`checksums.txt` is signed by the release key and the file matches it. The macOS app also
+requires the same Apple Developer ID team and a notarized app before it replaces itself.
 
 ## One-time setup on the Mac
 

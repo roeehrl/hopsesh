@@ -80,7 +80,7 @@ gh release download "$TAG" -R "$REPO" -D "$WORK/ci"
 n=0
 for f in "$WORK"/ci/*; do
   case "$f" in
-    *.tar.gz | *.zip | *.deb | *.rpm | *.apk)
+    *.tar.gz | *.zip | *.deb | *.rpm | *.apk | *.exe)
       gh attestation verify "$f" --repo "$REPO" --signer-workflow "$WORKFLOW" \
         --source-ref "refs/tags/$TAG" --source-digest "$FULL_COMMIT" --deny-self-hosted-runners >/dev/null \
         || die "no valid build provenance for $(basename "$f"); not signing"

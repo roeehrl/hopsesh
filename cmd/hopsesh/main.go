@@ -9,12 +9,14 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/integrate"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
 	"github.com/roeehrl/hopsesh/internal/ui/cli"
+	"github.com/roeehrl/hopsesh/internal/update"
 )
 
 func main() {
 	if transport.IsAskpass() {
 		os.Exit(transport.AskpassMain(os.Args[1:])) // ssh asking for a password, see transport
 	}
+	update.CleanUp() // what an earlier update moved aside
 	reg := all.Registry()
 	integrate.SetLoginVars(reg.LoginEnv())
 	if err := cli.NewRoot(os.Stdout, reg).Execute(); err != nil {

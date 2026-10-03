@@ -109,7 +109,7 @@ release:
 
     Windows (PowerShell): `irm https://raw.githubusercontent.com/roeehrl/hopsesh/main/scripts/install.ps1 | iex`
 
-    macOS app: the `.dmg` below (signed and notarized; macOS 13 or later). Linux: `.deb`, `.rpm`, `.apk` below. Already installed: `hopsesh update`.
+    macOS app: the `.dmg` below (signed and notarized; macOS 13 or later). Windows app: the `-setup.exe` below for your processor (amd64 or arm64; installs for you only, no administrator rights). It is not code-signed yet, so Windows SmartScreen asks first: More info, then Run anyway. Linux: `.deb`, `.rpm`, `.apk` below. Both apps update themselves; from the command line, `hopsesh update`.
 
     ## Verify
 

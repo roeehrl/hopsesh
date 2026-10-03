@@ -1,5 +1,5 @@
-// The ⌘K palette: find a session and act on it, or run any command, from the keyboard.
-import { api, h, fill, icon, ICONS, state, go, current, toast, fail, agentBadge, entries, here, $ } from "./core.js";
+// The command palette (⌘K, Ctrl+K): find a session and act on it, or run any command, from the keyboard.
+import { api, h, fill, icon, ICONS, state, go, current, toast, fail, agentBadge, entries, here, $, sys, keys } from "./core.js";
 import { actionsFor, statusOf, render as renderSessions } from "./sessions.js";
 import { undoLast } from "./activity.js";
 
@@ -16,15 +16,15 @@ function show(e) {
 function commands() {
   const i = state.info || {};
   return [
-    { label: "Sessions", hint: "⌘1", run: () => go("sessions") },
-    { label: "Activity and undo", hint: "⌘2", run: () => go("activity") },
-    { label: "Machines", hint: "⌘3", run: () => go("machines") },
-    { label: "Settings", hint: "⌘,", run: () => go("settings", "general") },
-    { label: "Refresh: read every machine again", hint: "⌘R", run: () => go("sessions", true) },
-    { label: "Undo the last hop", hint: "⌥⌘Z", run: undoLast },
+    { label: "Sessions", hint: keys("mod+1"), run: () => go("sessions") },
+    { label: "Activity and undo", hint: keys("mod+2"), run: () => go("activity") },
+    { label: "Machines", hint: keys("mod+3"), run: () => go("machines") },
+    { label: "Settings", hint: keys("mod+,"), run: () => go("settings", "general") },
+    { label: "Refresh: read every machine again", hint: keys("mod+R"), run: () => go("sessions", true) },
+    { label: "Undo the last hop", hint: keys("mod+alt+Z"), run: undoLast },
     { label: "Add a machine", run: () => go("machines") },
     { label: i.receive ? "Stop receiving sessions from my other machines" : "Receive sessions from my other machines",
-      run: async () => { try { await api("SetReceive", !i.receive); state.info = await api("Info"); toast(state.info.receive ? "This Mac now receives sessions" : "This Mac no longer receives sessions"); } catch (e) { fail(e); } if (current === "sessions") renderSessions(); } },
+      run: async () => { try { await api("SetReceive", !i.receive); state.info = await api("Info"); toast(state.info.receive ? `${sys.Here} now receives sessions` : `${sys.Here} no longer receives sessions`); } catch (e) { fail(e); } if (current === "sessions") renderSessions(); } },
     { label: "Settings: agents", run: () => go("settings", "agents") },
     { label: "Settings: the hopsesh skill", run: () => go("settings", "skill") },
     { label: "Settings: the command-line tool", run: () => go("settings", "cli") },
@@ -38,7 +38,7 @@ const matches = (text, ws) => { const t = text.toLowerCase(); return ws.every((w
 function sessionItem(e, group) {
   const acts = actionsFor(e);
   const [, st] = statusOf(e);
-  return { group, session: e, label: e.title, sub: `${e.machine === here() ? "this Mac" : e.machine} · ${st.toLowerCase()}`, hint: acts[0]?.label || "Show",
+  return { group, session: e, label: e.title, sub: `${e.machine === here() ? sys.here : e.machine} · ${st.toLowerCase()}`, hint: acts[0]?.label || "Show",
     run: acts[0] ? acts[0].run : () => show(e), second: acts[1]?.run };
 }
 
@@ -96,7 +96,7 @@ export function openPalette() {
   fill(pal,
     h("div", { class: "pal-in" }, icon(["M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14z", "m20 20-3.5-3.5"], 16), input),
     h("div", { class: "pal-list", id: "pal-list", role: "listbox" }),
-    h("div", { class: "pal-foot" }, h("span", {}, "↑↓ move"), h("span", {}, "↩ run"), h("span", {}, "⌘↩ second action"), h("span", {}, "esc close"), h("span", { class: "spacer" }), h("span", {}, "⌥⌘Z undo the last hop")));
+    h("div", { class: "pal-foot" }, h("span", {}, "↑↓ move"), h("span", {}, "↩ run"), h("span", {}, `${keys("mod+enter")} second action`), h("span", {}, "esc close"), h("span", { class: "spacer" }), h("span", {}, `${keys("mod+alt+Z")} undo the last hop`)));
   input.addEventListener("input", () => { items = build(input.value); sel = 0; paint(); });
   input.addEventListener("keydown", (e) => {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {

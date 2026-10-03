@@ -18,7 +18,7 @@ func authLabel(h config.Host) string {
 	case !h.UsesPassword():
 		return "key"
 	case h.Keychain:
-		return "password (Keychain)"
+		return "password (remembered)"
 	default:
 		return "password"
 	}
@@ -88,8 +88,8 @@ Better still, let hopsesh set that up for you: hopsesh hosts setup-key <machine>
 			return nil
 		},
 	}
-	cmd.Flags().Bool("keychain", false, "remember the password in the macOS Keychain (the default on macOS)")
-	cmd.Flags().Bool("forget", false, "remove the password remembered in the Keychain")
+	cmd.Flags().Bool("keychain", false, "remember the password in the macOS Keychain or Windows Credential Manager (the default there)")
+	cmd.Flags().Bool("forget", false, "remove the remembered password")
 	return cmd
 }
 
@@ -110,7 +110,7 @@ func (r *run) checkLogin(h *config.Host) {
 	m.Close()
 	msg := "✓ Logged in."
 	if h.Keychain {
-		msg += " The password is in the Keychain."
+		msg += " The password is in " + secrets.StoreName() + "."
 	}
 	r.printf("%s Tip: hopsesh hosts setup-key %s switches it to key login.\n", msg, h.Name)
 }

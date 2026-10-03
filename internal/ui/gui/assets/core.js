@@ -130,6 +130,32 @@ export const state = {
   activity: null, // the last Activity list, for the sidebar's undo count
 };
 
+// sys words things and spells shortcuts for the system the app runs on (setSystem, once
+// Info has loaded): "this Mac" and ⌘K on macOS, "this PC" and Ctrl+K on Windows.
+export const sys = { mac: true, win: false, os: "darwin", here: "this Mac", Here: "This Mac", vault: "the Keychain", terminal: "Terminal" };
+export function setSystem(os) {
+  const mac = os === "darwin", win = os === "windows";
+  Object.assign(sys, { mac, win, os, here: mac ? "this Mac" : win ? "this PC" : "this computer",
+    vault: mac ? "the Keychain" : win ? "Windows Credential Manager" : "the keyring", terminal: mac ? "Terminal" : "a terminal" });
+  sys.Here = cap(sys.here);
+  document.documentElement.dataset.os = os;
+  for (const el of document.querySelectorAll("[data-keys]")) el.textContent = keys(el.dataset.keys);
+  for (const el of document.querySelectorAll("[data-keys-title]")) el.title = `${el.dataset.label} (${keys(el.dataset.keysTitle)})`;
+  for (const el of document.querySelectorAll("[aria-keyshortcuts]")) el.setAttribute("aria-keyshortcuts", mac ? "Meta+K" : "Control+K");
+}
+// Until Info says, go by the browser's own report (so the first paint fits the system).
+setSystem(/Windows/.test(navigator.userAgent) ? "windows" : /Mac/.test(navigator.userAgent) ? "darwin" : "linux");
+
+// cliHow says what installing the hopsesh command does here.
+export const cliHow = () => (sys.win ? "Puts the app's folder on your PATH (no admin rights)" : "Links the hopsesh command into ~/.local/bin (no password)");
+
+// keys spells a shortcut written as "mod+K", "mod+alt+Z" or "mod+enter".
+export function keys(spec) {
+  const parts = spec.split("+");
+  if (sys.mac) return parts.map((p) => ({ mod: "⌘", alt: "⌥", enter: "↩" })[p] || p).sort((a, b) => (a === "⌥" ? -1 : b === "⌥" ? 1 : 0)).join("");
+  return parts.map((p) => ({ mod: "Ctrl", alt: "Alt", enter: "Enter" })[p] || p).join("+");
+}
+
 // Screens register themselves; go(name) shows one.
 const screens = {};
 export function screen(name, fn) { screens[name] = fn; }

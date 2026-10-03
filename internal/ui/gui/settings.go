@@ -12,6 +12,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/integrate"
 	"github.com/roeehrl/hopsesh/internal/core/lnp"
+	"github.com/roeehrl/hopsesh/internal/core/proc"
 	"github.com/roeehrl/hopsesh/internal/ui/skill"
 	"github.com/roeehrl/hopsesh/internal/version"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -199,7 +200,7 @@ func (a *App) DismissCLIOffer() error {
 	return a.save()
 }
 
-// Reveal shows a file or folder in Finder (or the system file manager).
+// Reveal shows a file or folder in Finder, Explorer or the system file manager.
 func (a *App) Reveal(path string) error {
 	if path == "" {
 		return errors.New("no path")
@@ -207,9 +208,14 @@ func (a *App) Reveal(path string) error {
 	path = filepath.Clean(path)
 	switch runtime.GOOS {
 	case "darwin":
-		return exec.Command("open", "-R", path).Run()
+		return proc.Command("open", "-R", path).Run()
 	case "windows":
-		return exec.Command("explorer", "/select,", path).Run()
+		// Explorer exits with 1 even when it opened the window.
+		var exit *exec.ExitError
+		if err := proc.Command("explorer", "/select,", path).Run(); err != nil && !(errors.As(err, &exit) && exit.ExitCode() == 1) {
+			return err
+		}
+		return nil
 	}
-	return exec.Command("xdg-open", filepath.Dir(path)).Run()
+	return proc.Command("xdg-open", filepath.Dir(path)).Run()
 }

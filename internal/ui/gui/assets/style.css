@@ -40,6 +40,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 /* title bar */
 .titlebar { height: 48px; flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 0 14px 0 86px; background: var(--bar); border-bottom: 1px solid var(--line); }
+/* Windows and Linux have their own title bar above: no room for traffic lights needed. */
+:root:not([data-os="darwin"]) .titlebar { height: 44px; padding-left: 14px; }
 .brand { font-weight: 600; font-size: 14px; }
 .where { color: var(--muted); font-size: 13px; }
 .search { flex: 1 1 280px; max-width: 520px; height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--muted); cursor: pointer; text-align: left; }

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/roeehrl/hopsesh/internal/core/proc"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -70,7 +71,7 @@ func lockHolders(ctx context.Context, p string) ([]int, error) {
 		defer f.Close()
 		return parseProcLocks(bufio.NewScanner(f), st.Ino), nil
 	}
-	out, err := exec.CommandContext(ctx, "lsof", "-t", "--", p).Output()
+	out, err := proc.CommandContext(ctx, "lsof", "-t", "--", p).Output()
 	var ee *exec.ExitError
 	if err != nil && !(errors.As(err, &ee) && ee.ExitCode() == 1) { // 1: nobody has it open
 		return nil, err
@@ -115,7 +116,7 @@ func processNames(ctx context.Context, pids []int) (map[int]string, error) {
 	for i, p := range pids {
 		ids[i] = strconv.Itoa(p)
 	}
-	b, err := exec.CommandContext(ctx, "ps", "-o", "pid=,comm=", "-p", strings.Join(ids, ",")).Output()
+	b, err := proc.CommandContext(ctx, "ps", "-o", "pid=,comm=", "-p", strings.Join(ids, ",")).Output()
 	var ee *exec.ExitError
 	if err != nil && !(errors.As(err, &ee) && ee.ExitCode() == 1) { // 1: none of them exist
 		return nil, err

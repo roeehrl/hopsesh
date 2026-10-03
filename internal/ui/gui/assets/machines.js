@@ -1,6 +1,6 @@
-// The Machines screen: this Mac (and whether it receives sessions), the machines you
+// The Machines screen: this machine (and whether it receives sessions), the machines you
 // added, and the ones discovery found. hopsesh connects only to machines you added.
-import { api, h, fill, icon, ICONS, view, state, screen, go, loading, toast, fail, errText, cap, dialog, ask, machineStatus } from "./core.js";
+import { api, h, fill, icon, ICONS, view, state, screen, go, loading, toast, fail, errText, cap, dialog, ask, machineStatus, sys } from "./core.js";
 
 let data = null;
 let changed = false; // machines changed since the last scan
@@ -31,7 +31,7 @@ function statusCell(m) {
 }
 
 function machineRow(m) {
-  const login = m.auth === "password" ? (m.keychain ? "Password, in the Keychain" : "Password, asked each time") : "SSH key";
+  const login = m.auth === "password" ? (m.keychain ? `Password, in ${sys.vault}` : "Password, asked each time") : "SSH key";
   return h("div", { class: "mgrid" },
     h("div", { style: "min-width:0" }, h("div", { style: "font-weight:500" }, m.name), h("div", { class: "mono muted", style: "font-size:11px;overflow-wrap:anywhere" }, m.destination + (m.os ? ` · ${m.os}` : ""))),
     h("div", {}, h("button", { class: "btn small", title: "How hopsesh logs in to this machine", onclick: () => loginDialog(m) }, login)),
@@ -64,7 +64,7 @@ function render() {
   const receive = h("button", { class: "switch", role: "switch", "aria-checked": d.here.receive ? "true" : "false", "aria-label": "Receive sessions from my other machines",
     onclick: async () => {
       try { await api("SetReceive", !d.here.receive); } catch (e) { fail(e); return; }
-      toast(!d.here.receive ? "This Mac now receives sessions" : "This Mac no longer receives sessions");
+      toast(!d.here.receive ? `${sys.Here} now receives sessions` : `${sys.Here} no longer receives sessions`);
       after(false);
     } });
   fill(view, h("div", { class: "page" }, h("div", { class: "page-in" },
@@ -74,11 +74,11 @@ function render() {
     h("section", { class: "card" }, h("div", { class: "line-item" },
       h("span", { class: "ico push" }, icon(ICONS.here, 15)),
       h("div", { style: "flex:1 1 300px;min-width:0;display:flex;flex-direction:column;gap:3px" },
-        h("b", { style: "font-weight:500" }, `This Mac · ${d.here.name}`),
+        h("b", { style: "font-weight:500" }, `${sys.Here} · ${d.here.name}`),
         h("span", { class: "muted", style: "font-size:12px" }, [`hopsesh ${d.here.hopsesh}`, ...d.here.agents].join(" · "))),
       h("label", { style: "display:flex;gap:10px;align-items:center;max-width:380px" },
         h("span", { style: "display:flex;flex-direction:column;gap:2px" }, h("span", {}, "Receive sessions from my other machines"),
-          h("span", { class: "muted", style: "font-size:12px" }, d.here.receive ? "On: “Send to…” on your other machines can deliver sessions here." : "Off: this Mac refuses sessions sent from other machines.")),
+          h("span", { class: "muted", style: "font-size:12px" }, d.here.receive ? "On: “Send to…” on your other machines can deliver sessions here." : `Off: ${sys.here} refuses sessions sent from other machines.`)),
         receive))),
     h("section", { class: "card" },
       h("div", { class: "card-h" }, h("span", { class: "name" }, "Your machines"), h("span", { class: "spacer" }), h("button", { class: "btn small", onclick: addDialog }, icon(ICONS.plus, 12), "Add by address…")),
@@ -108,7 +108,7 @@ function addDialog() {
   const dest = h("input", { class: "field mono", id: "add-dest", placeholder: "me@10.0.0.5 or an ssh alias" });
   const pw = h("input", { type: "checkbox" });
   const remember = h("input", { type: "checkbox", checked: true });
-  const rememberRow = h("label", { class: "opt", style: "margin-left:24px", hidden: true }, remember, h("span", {}, "Remember it in the Keychain"));
+  const rememberRow = h("label", { class: "opt", style: "margin-left:24px", hidden: true }, remember, h("span", {}, `Remember it in ${sys.vault}`));
   const msg = h("div", { class: "err", role: "alert" });
   pw.onchange = () => { rememberRow.hidden = !pw.checked; };
   const d = dialog(
@@ -131,13 +131,13 @@ function loginDialog(m) {
   const key = h("input", { type: "radio", name: "auth", checked: m.auth !== "password" });
   const pass = h("input", { type: "radio", name: "auth", checked: m.auth === "password" });
   const remember = h("input", { type: "checkbox", checked: m.auth === "password" ? m.keychain : m.canRemember });
-  const rememberRow = h("label", { class: "opt", style: "margin-left:24px", hidden: m.auth !== "password" || !m.canRemember }, remember, h("span", {}, "Remember it in the Keychain"));
+  const rememberRow = h("label", { class: "opt", style: "margin-left:24px", hidden: m.auth !== "password" || !m.canRemember }, remember, h("span", {}, `Remember it in ${sys.vault}`));
   const sync = () => { rememberRow.hidden = !pass.checked || !m.canRemember; };
   key.onchange = sync; pass.onchange = sync;
   const msg = h("div", { class: "muted", style: "font-size:12px;line-height:1.5", role: "status" });
   const setup = async (createKey) => {
     msg.className = "muted";
-    fill(msg, `Logging in to ${m.name} once with its password to add this Mac's SSH key…`);
+    fill(msg, `Logging in to ${m.name} once with its password to add ${sys.here}'s SSH key…`);
     try {
       const r = await api("SetupKeyLogin", m.name, createKey);
       d.close();
@@ -146,7 +146,7 @@ function loginDialog(m) {
     } catch (e) {
       if (errText(e).includes("no-key")) {
         msg.className = "warn";
-        fill(msg, "This Mac has no SSH key that ssh would use for this machine. ", h("button", { class: "btn small", onclick: () => setup(true) }, "Create ~/.ssh/id_ed25519 and continue"));
+        fill(msg, `${sys.Here} has no SSH key that ssh would use for this machine. `, h("button", { class: "btn small", onclick: () => setup(true) }, "Create ~/.ssh/id_ed25519 and continue"));
       } else { msg.className = "err"; fill(msg, errText(e)); }
     }
   };
@@ -156,7 +156,7 @@ function loginDialog(m) {
     h("label", { class: "opt" }, pass, h("span", {}, h("b", {}, "Password"), h("span", { class: "muted" }, "hopsesh asks for it when it connects."))),
     rememberRow,
     m.auth === "password" ? h("div", { class: "muted", style: "font-size:12px;line-height:1.5" },
-      "Set up key login adds this Mac's public SSH key to the machine (one password login), checks that it works, then stops using the password.") : null,
+      `Set up key login adds ${sys.here}'s public SSH key to the machine (one password login), checks that it works, then stops using the password.`) : null,
     msg,
     h("div", { class: "dlg-foot" },
       m.auth === "password" && m.keychain ? h("button", { class: "btn", onclick: async () => { try { await api("ForgetPassword", m.name); toast("Forgot the remembered password"); } catch (e) { fail(e); } d.close(); after(); } }, "Forget password") : null,
