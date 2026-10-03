@@ -139,6 +139,11 @@ Credential Manager. It updates itself: **Settings → Updates → Install and re
 the release's signature and checksum (on macOS also the Apple developer and notarization),
 installs it and reopens.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/windows-app-dark.png">
+  <img src="docs/assets/windows-app-light.png" alt="The hopsesh app on Windows listing Claude Code and Codex sessions from this PC and from studio, a Linux machine, grouped by repository" width="900">
+</picture>
+
 ## Continue in another agent
 
 ```sh
