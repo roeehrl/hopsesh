@@ -222,6 +222,66 @@ jobs:
             ${{ runner.temp }}/hsmatrix/*.json
           retention-days: 7
 
+  os-pairs-windows-linux:
+    name: os pairs (windows↔linux)
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: build for Windows and for Linux
+        shell: bash
+        run: |
+          for p in cmd/hopsesh:hopsesh internal/devtools/hsmatrix:hsmatrix internal/devtools/fakeagent:fakeagent; do
+            go build -o "bin/${p#*:}.exe" "./${p%%:*}"
+            CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "bin-linux/${p#*:}" "./${p%%:*}"
+          done
+      - name: scenario matrix, Windows → Linux (WSL2) and Linux → Windows
+        shell: pwsh
+        run: ./scripts/matrix-wsl.ps1 -Bin bin -LinuxBin bin-linux -Out "$env:RUNNER_TEMP\hsmatrix"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ failure() }}
+        with:
+          name: os-pairs-windows-linux
+          path: ${{ runner.temp }}/hsmatrix/
+          retention-days: 7
+
+  os-pairs-macos-linux:
+    name: os pairs (macos↔linux)
+    runs-on: macos-15-intel
+    timeout-minutes: 60
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: build for macOS and for Linux
+        run: |
+          for p in cmd/hopsesh:hopsesh internal/devtools/hsmatrix:hsmatrix internal/devtools/fakeagent:fakeagent; do
+            go build -o "bin/${p#*:}" "./${p%%:*}"
+            CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "bin-linux/${p#*:}" "./${p%%:*}"
+          done
+      - name: scenario matrix, macOS → Linux (Lima VM) and Linux → macOS
+        run: scripts/matrix-lima.sh bin bin-linux "$RUNNER_TEMP/hsmatrix"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ failure() }}
+        with:
+          name: os-pairs-macos-linux
+          path: ${{ runner.temp }}/hsmatrix/
+          retention-days: 7
+
   windows-peer:
     name: ssh (windows)
     runs-on: windows-2025
@@ -351,7 +411,7 @@ jobs:
       - run: shellcheck scripts/*.sh demo/*.sh
       - shell: pwsh
         run: |
-          foreach ($f in 'scripts/install.ps1', 'scripts/windows-app-test.ps1', 'scripts/windows-peer-test.ps1', 'scripts/windows-demo-studio.ps1', 'scripts/matrix-loopback.ps1') {
+          foreach ($f in 'scripts/install.ps1', 'scripts/windows-app-test.ps1', 'scripts/windows-peer-test.ps1', 'scripts/windows-demo-studio.ps1', 'scripts/matrix-loopback.ps1', 'scripts/matrix-wsl.ps1') {
             $null = [ScriptBlock]::Create((Get-Content -Raw $f))
           }
 
