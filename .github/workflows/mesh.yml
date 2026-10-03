@@ -1,0 +1,108 @@
+name: mesh
+
+# The scenario matrix across separate runners: each runner's sshd is reached through
+# dumbpipe (iroh: direct where the network allows, else n0's free public relays; no account
+# and no secret), and the runners swap tickets and keys through this run's artifacts
+# (internal/devtools/meshrdv). Pull requests run macOS ↔ Windows, the one pair no single
+# runner covers, without blocking the PR (public relays are best effort); the nightly run
+# covers all three systems and blocks.
+
+on:
+  pull_request:
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read # list and download this run's artifacts
+
+concurrency:
+  group: mesh-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  mesh:
+    name: mesh (${{ matrix.node }})
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ${{ fromJSON(github.event_name == 'pull_request' && '["macos","windows"]' || '["linux","windows","macos"]') }}
+    runs-on: ${{ fromJSON('{"linux":"ubuntu-24.04","windows":"windows-2025","macos":"macos-15"}')[matrix.node] }}
+    timeout-minutes: 75
+    env:
+      NODE: ${{ matrix.node }}
+      NODES: ${{ github.event_name == 'pull_request' && 'macos windows' || 'linux windows macos' }}
+      GH_TOKEN: ${{ github.token }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: build
+        run: |
+          ext=""; [ "$RUNNER_OS" = Windows ] && ext=.exe
+          for p in cmd/hopsesh:hopsesh internal/devtools/hsmatrix:hsmatrix internal/devtools/fakeagent:fakeagent internal/devtools/meshrdv:meshrdv; do
+            go build -o "bin/${p#*:}$ext" "./${p%%:*}"
+          done
+      - name: sshd and the account peers log in as
+        if: runner.os != 'Windows'
+        run: SETUP_ONLY=1 scripts/matrix-loopback.sh bin - -
+      - name: sshd and the account peers log in as
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/matrix-loopback.ps1 -Bin bin -SetupOnly
+      - name: dumbpipe
+        run: scripts/mesh/install-dumbpipe.sh
+      - name: listen
+        run: |
+          user=hsremote; [ "$RUNNER_OS" = Windows ] && user=$USERNAME
+          bin/meshrdv listen -node "$NODE" -user "$user" -out rdv/public
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: peer-${{ matrix.node }}
+          path: rdv/public/
+          retention-days: 1
+      - name: connect to the other runners
+        id: connect
+        run: |
+          peers=""; for p in $NODES; do [ "$p" != "$NODE" ] && peers="$peers $p"; done
+          echo "peers=$peers" >> "$GITHUB_ENV"
+          bin/meshrdv connect -node "$NODE" -peers "$peers" -dir rdv
+      - name: scenario matrix from this runner to each other one
+        run: |
+          failed=0
+          for p in $peers; do
+            echo "== $NODE → $p"
+            bin/hsmatrix run -hopsesh "$PWD/bin/hopsesh" -there "hs-$p" -alias "hs-$p" -label "$NODE→$p (mesh)" -out "$RUNNER_TEMP/mesh/$p" || failed=$((failed + 1))
+          done
+          exit "$failed"
+      - name: done marker
+        if: always()
+        run: mkdir -p rdv/done-me && date -u > rdv/done-me/at
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: done-${{ matrix.node }}
+          path: rdv/done-me/
+          retention-days: 1
+      - name: wait for the other runners (they may still be using this one)
+        if: always() && steps.connect.outcome == 'success'
+        run: bin/meshrdv barrier -node "$NODE" -peers "$peers" -dir rdv -wait 30m
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: mesh-logs-${{ matrix.node }}
+          path: |
+            ${{ runner.temp }}/mesh/
+            rdv/*.log
+          retention-days: 7
