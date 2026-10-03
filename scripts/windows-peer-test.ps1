@@ -12,6 +12,9 @@ function Fail($msg) { Write-Host "FAIL: $msg"; exit 1 }
 if (-not (Get-Service sshd -ErrorAction SilentlyContinue)) {
   Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 | Out-Null
 }
+# Windows' own default shell for ssh commands (cmd.exe): GitHub's runners set Git Bash.
+$shell = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\OpenSSH' -Name DefaultShell -ErrorAction SilentlyContinue).DefaultShell
+if ($shell) { Write-Host "OpenSSH DefaultShell was $shell; using cmd.exe"; Remove-ItemProperty -Path 'HKLM:\SOFTWARE\OpenSSH' -Name DefaultShell }
 Start-Service sshd
 $sshDir = Join-Path $HOME '.ssh'
 New-Item -ItemType Directory -Force -Path $sshDir | Out-Null
