@@ -28,7 +28,9 @@ jobs:
         include:
           - {label: linux triples, os: ubuntu-24.04, t: 3}
           - {label: macos triples, os: macos-15, t: 3}
-          - {label: windows triples, os: windows-2025, t: 3}
+          # Windows runs a row in about 40 s: two halves stay well inside the job limit.
+          - {label: windows triples 1/2, os: windows-2025, t: 3, shard: 1/2}
+          - {label: windows triples 2/2, os: windows-2025, t: 3, shard: 2/2}
           - {label: windows 2022, os: windows-2022, t: 2}
           - {label: macos 26, os: macos-26, t: 2}
           - {label: linux arm64, os: ubuntu-24.04-arm, t: 2}
@@ -59,14 +61,16 @@ jobs:
         env:
           LABEL: ${{ matrix.label }}
           T: ${{ matrix.t }}
-        run: scripts/matrix-loopback.sh bin "$LABEL" "$RUNNER_TEMP/hsmatrix" -t "$T"
+          SHARD: ${{ matrix.shard || '1/1' }}
+        run: scripts/matrix-loopback.sh bin "$LABEL" "$RUNNER_TEMP/hsmatrix" -t "$T" -shard "$SHARD"
       - name: scenario matrix over loopback SSH
         if: runner.os == 'Windows'
         shell: pwsh
         env:
           LABEL: ${{ matrix.label }}
           T: ${{ matrix.t }}
-        run: ./scripts/matrix-loopback.ps1 -Bin bin -Label $env:LABEL -Out "$env:RUNNER_TEMP\hsmatrix" -Strength $env:T
+          SHARD: ${{ matrix.shard || '1/1' }}
+        run: ./scripts/matrix-loopback.ps1 -Bin bin -Label $env:LABEL -Out "$env:RUNNER_TEMP\hsmatrix" -Strength $env:T -Shard $env:SHARD
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ failure() }}
         with:
