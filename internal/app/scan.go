@@ -14,6 +14,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
+	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/repos"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -72,8 +73,8 @@ func (m *Machine) Install(id agent.ID) (agent.Install, bool) {
 
 // Entry is one session at one location: a machine, or a cloud.
 type Entry struct {
-	// Location is where the session lives. Machine is the machine whose files hold it
-	// ("" for a cloud session).
+	// Location is where the session lives. Machine is the machine whose files hold it, or
+	// the cloud's name for a cloud session (so "claude-cloud:<id>" names one).
 	Location  agent.Location    `json:"location"`
 	Machine   string            `json:"machine"`
 	Agent     agent.ID          `json:"agent"`
@@ -85,6 +86,10 @@ type Entry struct {
 	Lineage   *lineage.Manifest `json:"lineage,omitempty"`
 	// Cloud is a cloud session as its cloud listed it.
 	Cloud *agent.CloudSession `json:"cloud,omitempty"`
+	// Checkout is a cloud session's repository checked out here, when known.
+	Checkout string `json:"checkout,omitempty"`
+	// Original is the session a cloud session was handed off from ("machine:agent/id").
+	Original string `json:"original,omitempty"`
 }
 
 // Inventory is the result of a scan.
@@ -92,6 +97,10 @@ type Inventory struct {
 	Machines []*Machine `json:"machines"`
 	Clouds   []*Cloud   `json:"clouds"`
 	Entries  []Entry    `json:"entries"`
+	// Adopted are sessions brought from a cloud that this scan found and adopted (their
+	// driver wrote them since); Waiting, the ones still waiting for it.
+	Adopted []*move.Fetch `json:"adopted,omitempty"`
+	Waiting []*move.Fetch `json:"waiting,omitempty"`
 }
 
 // Close ends every connection the scan opened.
@@ -154,8 +163,12 @@ func (a *App) Scan(ctx context.Context, o ScanOptions) *Inventory {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			adopted, waiting := a.adoptWaiting(ctx, local())
 			m, es := a.scanMachine(ctx, local(), "", o)
 			add(m, es)
+			mu.Lock()
+			inv.Adopted, inv.Waiting = adopted, waiting
+			mu.Unlock()
 			localEntries <- es
 		}()
 	} else {
@@ -171,7 +184,8 @@ func (a *App) Scan(ctx context.Context, o ScanOptions) *Inventory {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			cs, es := a.scanClouds(ctx, local(), clouds, knownCloudIDs(<-localEntries, clouds))
+			mine := <-localEntries
+			cs, es := a.scanClouds(ctx, local(), clouds, knownClouds(mine, clouds, a.Pasted()), mine)
 			mu.Lock()
 			inv.Clouds = cs
 			inv.Entries = append(inv.Entries, es...)
@@ -409,10 +423,15 @@ func saveRoute(stateDir, dest, via string) {
 	_ = os.WriteFile(p, b, 0o600)
 }
 
-// Status is a session's state in words: "live …", where it went ("moved to studio"), or
-// "ended".
+// Status is a session's state in words: "live …", where it went ("moved to studio"),
+// "ended", or a cloud session's state ("running", "state unknown").
 func (e Entry) Status() string {
 	switch {
+	case e.Cloud != nil:
+		if e.Cloud.State == agent.CloudUnknown || e.Cloud.State == "" {
+			return "state unknown"
+		}
+		return string(e.Cloud.State)
 	case e.Live.State == agent.Live:
 		if e.Live.Status == "" {
 			return "live running"

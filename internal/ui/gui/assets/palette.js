@@ -1,6 +1,6 @@
 // The command palette (⌘K, Ctrl+K): find a session and act on it, or run any command, from the keyboard.
-import { api, h, fill, icon, ICONS, state, go, current, toast, fail, agentBadge, entries, here, $, sys, keys } from "./core.js";
-import { actionsFor, statusOf, render as renderSessions } from "./sessions.js";
+import { api, h, fill, icon, ICONS, state, go, current, toast, fail, agentBadge, entries, here, $, sys, keys, clouds } from "./core.js";
+import { actionsFor, statusOf, render as renderSessions, pasteDialog } from "./sessions.js";
 import { undoLast } from "./activity.js";
 
 const pal = $("#palette");
@@ -23,6 +23,11 @@ function commands() {
     { label: "Refresh: read every machine again", hint: keys("mod+R"), run: () => go("sessions", true) },
     { label: "Undo the last hop", hint: keys("mod+alt+Z"), run: undoLast },
     { label: "Add a machine", run: () => go("machines") },
+    ...(clouds().some((c) => c.fetchable) ? [
+      { label: "Bring from cloud…", sub: clouds().filter((c) => c.fetchable).map((c) => c.title).join(", "), run: bringFromCloud },
+      { label: "Paste a cloud link…", sub: "claude.ai/code/…, session_…, cse_…", run: () => pasteDialog() },
+    ] : []),
+    { label: "Machines: Clouds", sub: "allow, sign in, test", run: () => go("machines") },
     { label: i.receive ? "Stop receiving sessions from my other machines" : "Receive sessions from my other machines",
       run: async () => { try { await api("SetReceive", !i.receive); state.info = await api("Info"); toast(state.info.receive ? `${sys.Here} now receives sessions` : `${sys.Here} no longer receives sessions`); } catch (e) { fail(e); } if (current === "sessions") renderSessions(); } },
     { label: "Settings: agents", run: () => go("settings", "agents") },
@@ -32,13 +37,20 @@ function commands() {
   ];
 }
 
+// bringFromCloud shows the first cloud sessions can come from.
+function bringFromCloud() {
+  const c = clouds().find((x) => x.fetchable && x.allowed) || clouds().find((x) => x.fetchable);
+  state.scope = c ? { kind: "cloud", value: c.name } : { kind: "incloud" };
+  if (current === "sessions") renderSessions(); else go("sessions");
+}
+
 const words = (q) => q.toLowerCase().split(/\s+/).filter(Boolean);
 const matches = (text, ws) => { const t = text.toLowerCase(); return ws.every((w) => t.includes(w)); };
 
 function sessionItem(e, group) {
   const acts = actionsFor(e);
   const [, st] = statusOf(e);
-  return { group, session: e, label: e.title, sub: `${e.machine === here() ? sys.here : e.machine} · ${st.toLowerCase()}`, hint: acts[0]?.label || "Show",
+  return { group, session: e, label: e.title, sub: [e.machine === here() ? sys.here : e.machine, st.toLowerCase(), e.cloud?.pr ? "PR " + e.cloud.pr : ""].filter(Boolean).join(" · "), hint: acts[0]?.short || acts[0]?.label || "Show",
     run: acts[0] ? acts[0].run : () => show(e), second: acts[1]?.run };
 }
 

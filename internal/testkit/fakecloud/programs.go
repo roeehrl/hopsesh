@@ -11,13 +11,16 @@ import (
 // Programs are the stand-in claude, codex and fakecloud for agenttest.FakeHost.Programs
 // (and agenttest.RunCloud): they answer --version and the cloud verbs, in this process,
 // with the store in dir. A run's RunOptions.Env (FAKE_CLOUD_FAIL, say) is its environment
-// on top of vars.
+// on top of vars, without its RunOptions.Unset.
 func Programs(dir string, vars map[string]string) map[string]func(argv []string, o agent.RunOptions) agent.Result {
 	run := func(main func(Proc) int) func([]string, agent.RunOptions) agent.Result {
 		return func(argv []string, o agent.RunOptions) agent.Result {
 			v := map[string]string{"FAKE_CLOUD_DIR": dir}
 			for k, x := range vars {
 				v[k] = x
+			}
+			for _, k := range o.Unset {
+				v[k] = "" // as unset: Proc.Env reads Vars before the process's own environment
 			}
 			for _, kv := range o.Env {
 				if k, x, ok := strings.Cut(kv, "="); ok {

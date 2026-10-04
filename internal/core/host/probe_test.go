@@ -1,7 +1,9 @@
 package host
 
 import (
+	"context"
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -45,5 +47,24 @@ func TestWindowsUnameIsWindows(t *testing.T) {
 		if windowsUname(u) {
 			t.Errorf("%q is not Windows", u)
 		}
+	}
+}
+
+// A cloud driver runs without the variables its cloud must not inherit.
+func TestUnsetting(t *testing.T) {
+	t.Setenv("HOPSESH_TEST_MARKER", "set")
+	m := &Machine{Name: "here", Local: true}
+	h := Unsetting(&moduleHost{m: m}, []string{"HOPSESH_TEST_MARKER"})
+	argv := []string{"sh", "-c", "echo marker=${HOPSESH_TEST_MARKER-unset}"}
+	if runtime.GOOS == "windows" {
+		argv = []string{"cmd", "/c", "set HOPSESH_TEST_MARKER"}
+	}
+	r, err := h.Exec().Run(context.Background(), argv, agent.RunOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(r.Stdout)
+	if strings.Contains(out, "set") && !strings.Contains(out, "unset") || runtime.GOOS != "windows" && !strings.Contains(out, "marker=unset") {
+		t.Fatalf("the variable reached the program: %q", out)
 	}
 }

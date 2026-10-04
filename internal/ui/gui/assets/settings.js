@@ -22,7 +22,20 @@ const CAPS = {
   sanitize: "moves between accounts", read: "continues in other agents", write: "takes sessions from other agents",
   "native-replay": "replays commands natively", integrate: "can use the hopsesh skill", fork: "can fork", "remote-control": "remote control",
   app: "desktop app", notify: "tells the old session", import: "has its own importer", "post-install": "registers moved sessions",
+  "cloud-list": "cloud list", "cloud-send": "cloud send", "cloud-fetch": "cloud bring", "cloud-follow": "follow-up", "cloud-archive": "cloud archive",
 };
+
+// cloudRow is one of an agent's clouds: what hopsesh can do there, in blue chips.
+function cloudRow(a, c) {
+  const order = ["cloud-list", "cloud-send", "cloud-fetch", "cloud-follow", "cloud-archive"];
+  const caps = [...c.capabilities].sort((x, y) => order.indexOf(x) - order.indexOf(y)).map((cp) => cp === "cloud-list" && c.partial ? ["cloud list: only what hopsesh knows", "can part"] : [CAPS[cp] || cp, "can cl"]);
+  const note = !caps.length ? `hopsesh does not reach ${c.title} yet.`
+    : c.partial ? `${a.name} has no list command; Find in ${a.name} shows the rest. Archive is on the vendor's site only.`
+    : c.fidelity === "native" ? "The whole conversation comes back." : "";
+  return h("div", { class: "cloud-row" }, h("span", { style: "font-size:12.5px;font-weight:500" }, c.title),
+    h("div", { style: "display:flex;gap:5px;flex-wrap:wrap" }, caps.map(([t, cls]) => h("span", { class: cls }, t))),
+    note ? h("span", { class: "muted", style: "font-size:12px" }, note) : null);
+}
 
 let tab = "general";
 let s = null;
@@ -81,7 +94,8 @@ function agents() {
         a.stability === "experimental" ? h("span", { class: "chip st-warn" }, "experimental") : null,
         h("button", { class: "switch", role: "switch", "aria-checked": a.enabled ? "true" : "false", "aria-label": `${a.name} on`,
           onclick: () => set(!a.enabled, a.remoteControl, a.import, a.enabled ? `${a.name} is off` : `${a.name} is on`) })),
-      h("div", { style: "display:flex;gap:5px;flex-wrap:wrap" }, caps.map((c) => CAPS[c] || c).sort().map((c) => h("span", { class: "cap" }, c))),
+      h("div", { style: "display:flex;gap:5px;flex-wrap:wrap" }, caps.filter((c) => !c.startsWith("cloud-")).map((c) => CAPS[c] || c).sort().map((c) => h("span", { class: "cap" }, c))),
+      (a.clouds || []).map((c) => cloudRow(a, c)),
       a.tested?.length ? h("span", { class: "muted", style: "font-size:12px" }, "Tested with " + a.tested.join(", ")) : null,
       a.enabled && caps.includes("remote-control") ? h("label", { class: "opt" }, h("input", { type: "checkbox", checked: a.remoteControl, onchange: (e) => set(true, e.target.checked, a.import, "Saved") }),
         h("span", {}, h("b", {}, `Turn on Remote Control for sessions hopped into ${a.name}`), h("span", { class: "muted" }, "Reach them from your phone or other machines. Needs the agent's own subscription login."))) : null,

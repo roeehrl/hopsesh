@@ -1,6 +1,6 @@
 // The Machines screen: this machine (and whether it receives sessions), the machines you
 // added, and the ones discovery found. hopsesh connects only to machines you added.
-import { api, h, fill, icon, ICONS, view, state, screen, go, loading, toast, fail, errText, cap, dialog, ask, machineStatus, sys } from "./core.js";
+import { api, h, fill, icon, ICONS, view, state, screen, go, loading, toast, fail, errText, cap, dialog, ask, machineStatus, sys, when } from "./core.js";
 
 let data = null;
 let changed = false; // machines changed since the last scan
@@ -58,6 +58,44 @@ function foundRow(f) {
     } }, "Add")));
 }
 
+// cloudCard is one of the agents' clouds: consent, the driver, the login, what comes back,
+// and a read-only test.
+function cloudCard(c) {
+  const allow = h("button", { class: "switch", role: "switch", "aria-checked": c.allowed ? "true" : "false", "aria-label": `Allow ${c.title}`,
+    onclick: async () => {
+      try { await api("SetCloudAllowed", c.name, !c.allowed); } catch (e) { fail(e); return; }
+      toast(!c.allowed ? `${c.title} is allowed` : `hopsesh leaves ${c.title} alone`);
+      after();
+    } });
+  const kv = (label, ...value) => [h("dt", {}, label), h("dd", {}, ...value)];
+  const t = c.test;
+  const signed = t ? (t.ok || t.account ? t.account : h("span", { class: "warn" }, t.error || "Not signed in"))
+    : c.status === "signed-out" || c.status === "not-eligible" ? h("span", { class: "warn" }, cap(c.hint || c.error)) : c.allowed ? h("span", { class: "muted" }, "Test it to see") : h("span", { class: "muted" }, "Not checked while it is off");
+  const result = h("span", { style: "font-size:12px", role: "status" });
+  const show = (r) => fill(result, h("b", { class: r.ok ? "ok" : "err", style: "font-weight:600" }, r.ok ? "✓ " : "✕ "),
+    h("span", { class: r.ok ? "ok" : "err" }, (r.checks.length ? r.checks.map((x) => x.text).join(" · ") : r.error) + " · " + when(r.at)));
+  if (t) show(t);
+  const brings = c.fidelity === "native" ? `The whole conversation, copied by ${c.agentName}; hopsesh checks the message count` : c.fidelity === "code" ? "The code, title and summary" : "The messages, as text";
+  return h("section", { class: "card cloud-card", "aria-labelledby": "cc-" + c.name },
+    h("div", { class: "set-row" }, h("span", { style: "color:var(--cloud)" }, icon(ICONS.cloud, 16)), h("h3", { id: "cc-" + c.name, style: "margin:0;font-size:15px" }, c.title),
+      h("span", { class: "spacer" }), h("span", { style: "font-size:12.5px;font-weight:500" }, "Allow"), allow),
+    h("dl", { class: "kv wide" },
+      kv("Driver", c.version ? h("span", { class: "mono", style: "font-size:12px" }, `${c.driver} ${c.version}`) : h("span", { class: "warn" }, `${c.title} is reached through the `, h("span", { class: "mono" }, c.driver), " command, which isn't installed here"),
+        c.version ? [" ", h("span", { class: "chip " + (c.tested ? "st-idle" : "st-warn") }, c.tested ? "tested" : "untested"), c.tested ? null : h("span", { class: "muted", style: "font-size:12px" }, ` hopsesh tested ${c.testedOn}`)] : null),
+      kv("Signed in", signed),
+      kv("Brings back", brings),
+      c.vendorPrefix ? kv("Branches", c.rename ? [h("span", { class: "mono", style: "font-size:12px" }, c.vendorPrefix + "…"), " kept here as ", h("span", { class: "mono", style: "font-size:12px" }, `hopsesh/from/${c.name}/…`)] : "Kept as the cloud names them") : null,
+      kv("Listing", c.partial ? `Only what hopsesh started or brought here, and Remote Control mirrors: ${c.agentName} has no list command` : "Every session the cloud lists")),
+    h("div", { class: "set-row", style: "padding-top:10px;border-top:1px solid var(--line2)" },
+      h("button", { class: "btn", disabled: !c.allowed, title: c.allowed ? "A read-only look: the login and the flags hopsesh uses" : "Allow it first", onclick: async (ev) => {
+        const btn = ev.currentTarget;
+        btn.disabled = true;
+        fill(result, h("span", { class: "muted" }, "Checking…"));
+        try { await api("TestCloud", c.name); } catch (e) { fill(result, h("span", { class: "err" }, errText(e))); btn.disabled = false; return; }
+        reload();
+      } }, "Test"), result));
+}
+
 function render() {
   const d = data;
   if (!d) return;
@@ -86,7 +124,10 @@ function render() {
         : h("div", { class: "empty" }, "No machines yet. Add one found below, or by its address.")),
     h("section", { class: "card" },
       h("div", { class: "card-h" }, h("span", { class: "name" }, "Found on your network"), h("span", { class: "muted", style: "font-size:12px" }, "From Tailscale and ~/.ssh/config. Nothing is contacted until you add it.")),
-      d.found.length ? d.found.map(foundRow) : h("div", { class: "empty" }, "No other machines found. Add one by its address.")))));
+      d.found.length ? d.found.map(foundRow) : h("div", { class: "empty" }, "No other machines found. Add one by its address.")),
+    d.clouds.length ? [h("div", { style: "display:flex;flex-direction:column;gap:4px;margin-top:8px" }, h("h2", { style: "margin:0;font-size:17px" }, "Clouds"),
+      h("span", { class: "muted", style: "font-size:12.5px" }, "hopsesh reaches each cloud through that agent's own command, signed in as you. Nothing goes to a cloud you haven't allowed.")),
+      h("div", { class: "cloud-cards" }, d.clouds.map(cloudCard))] : null)));
 }
 
 function trustDialog(name) {

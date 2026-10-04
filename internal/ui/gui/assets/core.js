@@ -49,6 +49,8 @@ export const ICONS = {
   send: "M7 17 17 7M8 7h9v9",
   mark: "M6 3h12v18l-6-4-6 4z",
   chevron: "m6 9 6 6 6-6",
+  cloud: "M7 18h10a4 4 0 0 0 .5-7.97A6 6 0 0 0 6.1 9.1 4.5 4.5 0 0 0 7 18z",
+  external: ["M14 4h6v6", "M20 4l-9 9", "M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"],
 };
 
 export function fill(el, ...kids) {
@@ -123,7 +125,7 @@ export const state = {
   info: null,
   scan: null, scanning: false,
   stale: false, // something changed the machines since the last scan
-  scope: { kind: "all" }, // all | needs | here | machine (value) | agent (value)
+  scope: { kind: "all" }, // all | needs | here | incloud | machine (value) | cloud (value) | agent (value)
   filter: { agent: "", live: false },
   sel: null, // { machine, key }
   update: null,
@@ -162,7 +164,7 @@ export function screen(name, fn) { screens[name] = fn; }
 export let current = "";
 export function go(name, ...args) {
   current = name;
-  $("#where").textContent = { sessions: "", activity: "Activity", machines: "Machines", settings: "Settings", done: "" }[name] ?? "";
+  $("#where").textContent = { sessions: "", activity: "Activity", machines: "Machines", settings: "Settings", done: "", brought: "" }[name] ?? "";
   return screens[name](...args);
 }
 
@@ -179,6 +181,22 @@ export function selected() {
   return s ? entries().find((e) => e.machine === s.machine && e.key === s.key) || null : null;
 }
 export const here = () => (state.scan?.machines.find((m) => m.local) || {}).name || state.info?.host;
+export const clouds = () => state.scan?.clouds || [];
+export const cloudOf = (name) => clouds().find((c) => c.name === name);
+// cloudState is a cloud's state in the sidebar: [dot, one word].
+export function cloudState(c) {
+  if (!c.allowed) return ["off", "off"];
+  switch (c.status) {
+    case "ready": return [c.partial ? "half" : "ok", "ready"];
+    case "cli-old": return ["warn", "untested"];
+    case "signed-out": return ["warn-hollow", "sign in"];
+    case "cli-missing": return ["off", "not installed"];
+    case "not-eligible": return ["off", "not available"];
+  }
+  return ["err", "error"];
+}
+// cloudChip names a cloud with its glyph.
+export const cloudChip = (name) => h("span", { class: "chip cloud" }, icon(ICONS.cloud, 12), name);
 export const agentInfo = (id) => (state.info?.agents || []).find((a) => a.id === id);
 
 // dialog fills the small dialog and shows it; close() hides it.

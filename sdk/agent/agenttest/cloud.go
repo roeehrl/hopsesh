@@ -28,15 +28,37 @@ var tokenLike = regexp.MustCompile(`sk-ant-|sk-(?:proj|svcacct|admin)-|\bgh[pous
 // credentialVar matches variable names that hold credentials.
 var credentialVar = regexp.MustCompile(`(?i)(API_KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)`)
 
+// CloudOptions adapt RunCloud to a cloud whose CLI can neither start a session from
+// hopsesh nor list them on its own (Claude Code's teleport needs to be told which).
+type CloudOptions struct {
+	// Seed adds a session to the programs' cloud, as if the user had started it there, and
+	// returns its id; RunCloud then passes it in CloudQuery.Known. For a module without
+	// CloudSender.
+	Seed func(cloud string) agent.SessionID
+}
+
+// unreadableKnown is an id no vendor issues: a listing told about it reports it in
+// CloudListing.Errors (or ignores it) and still lists the rest.
+const unreadableKnown agent.SessionID = "?not-a-session (conformance)"
+
 // RunCloud checks a module's clouds against the contract, with programs standing in for
 // its drivers (they answer the binaries' version arguments too). Every module with
 // Spec.Clouds runs it; a module that declares clouds as data only passes the Spec checks.
 // For each cloud and each capability the module implements, it starts a session (or uses
-// the first listed), lists it, follows up, fetches and archives it, then checks that the
-// vendor's refusals map onto ErrSignedOut, ErrNotEligible and ErrRepoUnsupported and that a
-// listing survives an unreadable record. Throughout, the drivers run only through the
-// confined Host, with no credential in an argument or a variable.
+// a seeded one, or the first listed), lists it, follows up, fetches and archives it, then
+// checks that the vendor's refusals map onto ErrSignedOut, ErrNotEligible and
+// ErrRepoUnsupported and that a listing survives an unreadable record. A module that
+// adopts what its driver writes reports nothing before the driver ran; a module that
+// reads links reads back its own; a module that tests its cloud refuses a login the cloud
+// cannot use. Throughout, the drivers run only through the confined Host, with no
+// credential in an argument or a variable.
 func RunCloud(t *testing.T, m agent.Module, programs Programs) {
+	t.Helper()
+	RunCloudWith(t, m, programs, CloudOptions{})
+}
+
+// RunCloudWith is RunCloud with options.
+func RunCloudWith(t *testing.T, m agent.Module, programs Programs, o CloudOptions) {
 	t.Helper()
 	ctx := context.Background()
 	spec := m.Spec()
@@ -75,6 +97,9 @@ func RunCloud(t *testing.T, m agent.Module, programs Programs) {
 	fetcher, okF := m.(agent.CloudFetcher)
 	follower, okW := m.(agent.CloudFollower)
 	archiver, okA := m.(agent.CloudArchiver)
+	adopter, okD := m.(agent.CloudAdopter)
+	linker, okK := m.(agent.CloudLinker)
+	tester, okT := m.(agent.CloudTester)
 	if !okL && !okS && !okF && !okW && !okA {
 		return
 	}
@@ -129,6 +154,8 @@ func RunCloud(t *testing.T, m agent.Module, programs Programs) {
 				}
 				checkSession(t, spec, c, cs)
 				id = cs.Key.Session
+			} else if o.Seed != nil {
+				id = o.Seed(c.Name)
 			}
 			if okL {
 				var known []agent.SessionID
@@ -173,6 +200,31 @@ func RunCloud(t *testing.T, m agent.Module, programs Programs) {
 					t.Fatalf("FetchCloud: %v", err)
 				}
 				checkFetched(t, spec, c, f)
+				if f.Adopt != nil && !okD {
+					t.Error("FetchCloud returns an Adopt, so the module implements CloudAdopter")
+				}
+				if f.Adopt != nil && okD {
+					if _, err := adopter.Adopted(ctx, h, in, *f.Adopt); !errors.Is(err, agent.ErrNotFound) {
+						t.Errorf("before the driver ran, Adopted reports ErrNotFound, not %v", err)
+					}
+				}
+			}
+			if okK {
+				url := linker.CloudURL(c.Name, id)
+				for _, s := range []string{url, string(id)} {
+					if cl, got, ok := linker.ParseCloudLink(s); !ok || cl != c.Name || got != id {
+						t.Errorf("ParseCloudLink(%q) = %s, %s, %v; want %s, %s", s, cl, got, ok, c.Name, id)
+					}
+				}
+				if _, _, ok := linker.ParseCloudLink("not a link"); ok {
+					t.Error("ParseCloudLink reads anything as a link")
+				}
+			}
+			if okT {
+				ct, err := tester.TestCloud(ctx, h, in, c.Name)
+				if err != nil || len(ct.Checks) == 0 {
+					t.Errorf("TestCloud: %+v %v", ct, err)
+				}
 			}
 			if okA {
 				if err := archiver.Archive(ctx, h, in, id); err != nil {
@@ -205,6 +257,11 @@ func RunCloud(t *testing.T, m agent.Module, programs Programs) {
 						t.Errorf("SendCloud while %s: want %v, got %v", fail, want, err)
 					}
 				}
+				if okT {
+					if _, err := tester.TestCloud(ctx, h, in, c.Name); !errors.Is(err, want) {
+						t.Errorf("TestCloud while %s: want %v, got %v", fail, want, err)
+					}
+				}
 			}
 			if okS {
 				h, in := setup(t, "repo-mismatch")
@@ -220,7 +277,7 @@ func RunCloud(t *testing.T, m agent.Module, programs Programs) {
 					}
 				}
 				h, in = setup(t, "bad-record")
-				l, err := lister.ListCloud(ctx, h, in, agent.CloudQuery{Cloud: c.Name})
+				l, err := lister.ListCloud(ctx, h, in, agent.CloudQuery{Cloud: c.Name, Known: []agent.SessionID{unreadableKnown}})
 				if err != nil {
 					t.Fatalf("one unreadable record must not fail a listing: %v", err)
 				}

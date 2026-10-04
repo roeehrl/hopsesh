@@ -19,28 +19,39 @@ type Row struct {
 	Content string `json:"content"` // the conversation's language, or large
 	Repo    string `json:"repo"`    // the source checkout's state
 	Naming  string `json:"naming"`  // how the other machine is named: address | alias
+	// Location is where the session starts: on the other machine, or in a cloud (fetch
+	// rows; repo unpushed: the cloud session never pushed its work).
+	Location string `json:"location"`
 }
 
 func (r Row) String() string {
-	return fmt.Sprintf("#%d %s %s→%s %s %s %s", r.N, r.Op, r.From, r.To, r.Content, r.Repo, r.Naming)
+	return fmt.Sprintf("#%d %s %s→%s %s %s %s %s", r.N, r.Op, r.From, r.To, r.Content, r.Repo, r.Naming, r.Location)
 }
 
 var dims = []struct {
 	name   string
 	values []string
 }{
-	{"op", []string{"move", "continue", "push", "roundtrip", "conflict", "undo-used", "skill"}},
+	{"op", []string{"move", "continue", "push", "roundtrip", "conflict", "undo-used", "skill", "fetch"}},
 	{"agents", []string{"claude>claude", "codex>codex", "claude>codex", "codex>claude"}},
 	{"content", []string{"ascii", "zh", "ja", "ar", "el", "large"}},
 	{"repo", []string{"clean", "unpushed", "uncommitted", "worktree", "none"}},
 	{"naming", []string{"address", "alias"}},
+	{"location", []string{"machine", "claude-cloud"}},
 }
 
 // valid rules out combinations that cannot happen.
 func valid(v []string) bool {
-	op, agents, repo := v[0], v[1], v[3]
+	op, agents, repo, naming, location := v[0], v[1], v[3], v[4], v[5]
 	same := agents == "claude>claude" || agents == "codex>codex"
+	if (op == "fetch") != (location == "claude-cloud") {
+		return false // only a fetch starts in a cloud
+	}
 	switch op {
+	case "fetch":
+		// A Claude Code cloud session comes here in Claude Code, or on into Codex; its
+		// branch was pushed (clean) or never (unpushed). No other machine takes part.
+		return (agents == "claude>claude" || agents == "claude>codex") && (repo == "clean" || repo == "unpushed") && naming == "address"
 	case "continue":
 		if same {
 			return false
@@ -61,7 +72,7 @@ func valid(v []string) bool {
 
 func toRow(n int, v []string) Row {
 	from, to, _ := strings.Cut(v[1], ">")
-	return Row{N: n, Op: v[0], From: from, To: to, Content: v[2], Repo: v[3], Naming: v[4]}
+	return Row{N: n, Op: v[0], From: from, To: to, Content: v[2], Repo: v[3], Naming: v[4], Location: v[5]}
 }
 
 func allCombos() [][]string {

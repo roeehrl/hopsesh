@@ -103,8 +103,12 @@ func (a *App) DefaultOptions() move.Options {
 	}
 }
 
-// Plan works out how a session comes here, in the same agent or (target set) another.
+// Plan works out how a session comes here, in the same agent or (target set) another. A
+// cloud session is brought from its cloud (a fetch).
 func (a *App) Plan(ctx context.Context, inv *Inventory, e Entry, target agent.ID, opt move.Options) (*move.Plan, move.Input, error) {
+	if e.Location.IsCloud() {
+		return a.planFetch(ctx, inv, e, target, opt)
+	}
 	src := inv.Machine(e.Machine)
 	here := inv.Local()
 	if src == nil || src.host == nil {

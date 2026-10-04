@@ -13,9 +13,21 @@ import (
 )
 
 // Claude answers Claude Code's cloud flags: --cloud, -p … --cloud [<id>] [--output-format
-// json] and --teleport <id>. handled is false for any other call (the stand-in claude
-// answers those itself).
+// json] and --teleport <id>, and what hopsesh asks before using them: auth status --json
+// and --help. handled is false for any other call (the stand-in claude answers those
+// itself).
 func Claude(p Proc) (handled bool, code int) {
+	switch strings.Join(p.Args, " ") {
+	case "auth status --json":
+		return true, claudeAuth(p)
+	case "--help":
+		// The lines hopsesh looks for, as 2.1.284's help words them.
+		fmt.Fprintln(p.Stdout, "Usage: claude [options] [command] [prompt]")
+		fmt.Fprintln(p.Stdout, "  --cloud [description|session_id|url]  Create a cloud session, or send a message to one with -p")
+		fmt.Fprintln(p.Stdout, "  --teleport [session]                  Resume a teleport session, optionally specify session ID")
+		fmt.Fprintln(p.Stdout, "  -r, --resume [value]                  Resume a conversation by session ID")
+		return true, 0
+	}
 	var (
 		print, jsonOut, cloud, teleport bool
 		cloudArg, teleportArg           string
@@ -66,6 +78,26 @@ func Claude(p Proc) (handled bool, code int) {
 		prompt = cloudArg
 	}
 	return true, claudeCreate(p, prompt, jsonOut)
+}
+
+// claudeAuth answers auth status --json in the fields hopsesh reads: a claude.ai Max login
+// of the organisation $FAKE_CLAUDE_ORG (org-fake-0001 by default); signed-out is an API key
+// login and not-eligible a free plan (both unverified wordings of the real output).
+func claudeAuth(p Proc) int {
+	org := p.Env("FAKE_CLAUDE_ORG")
+	if org == "" {
+		org = "org-fake-0001"
+	}
+	st := map[string]any{"loggedIn": true, "authMethod": "claude.ai", "apiProvider": "firstParty", "orgId": org, "subscriptionType": "max"}
+	switch p.fail() {
+	case "signed-out":
+		st = map[string]any{"loggedIn": true, "authMethod": "api-key", "apiProvider": "firstParty"}
+	case "not-eligible":
+		st["subscriptionType"] = "free"
+	}
+	b, _ := json.Marshal(st)
+	fmt.Fprintln(p.Stdout, string(b))
+	return 0
 }
 
 // claudeRefused prints why the cloud refused (unverified wording; the API-key case is the
@@ -160,12 +192,14 @@ func claudeFollowUp(p Proc, id, text string, jsonOut bool) int {
 // teleported-from record (the record and its messageCount were seen in an issue; the local
 // session id scheme is unverified, so it is a new UUID here). FAKE_CLOUD_FAIL=partial
 // writes only the first message, empty none (both with the record), no-branch skips the
-// checkout with the message an issue quotes.
+// checkout with the message an issue quotes. As the issues report, an inherited
+// CLAUDE_CODE_CHILD_SESSION marker saves nothing and an ANTHROPIC_API_KEY fails it.
 func claudeTeleport(p Proc, arg string) int {
 	if arg == "" {
 		return p.errorf(1, "Error: --teleport without a session opens a picker, which needs a terminal.")
 	}
-	if p.fail() == "signed-out" {
+	if p.fail() == "signed-out" || p.Env("ANTHROPIC_API_KEY") != "" {
+		// Documented: teleport with an API key fails so.
 		return p.errorf(1, "Error: Unable to get organization UUID")
 	}
 	st, err := p.store()
@@ -208,6 +242,11 @@ func claudeTeleport(p Proc, arg string) int {
 	count := len(s.Messages)
 	if p.fail() == "empty" {
 		count = 0
+	}
+	if p.Env("CLAUDE_CODE_CHILD_SESSION") != "" {
+		// Seen in anthropics/claude-code#93892: inside another session it saves nothing.
+		fmt.Fprintln(p.Stdout, "Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker")
+		return 0
 	}
 	cfg := p.Env("CLAUDE_CONFIG_DIR")
 	if cfg == "" {

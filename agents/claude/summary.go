@@ -49,6 +49,7 @@ type info struct {
 	IsSidechain  bool
 	HasMessages  bool
 	Subagents    int
+	Mirror       *agent.CloudLink
 }
 
 // record is the subset of transcript fields the summary needs.
@@ -77,6 +78,9 @@ type record struct {
 	Summary      string `json:"summary"`
 	LastPrompt   string `json:"lastPrompt"`
 	RelocatedCWD string `json:"relocatedCwd"`
+	// A Remote Control link (bridge-session): the claude.ai copy, in cse_ form, and its owner.
+	BridgeSessionID string `json:"bridgeSessionId"`
+	OwnerOrg        string `json:"ownerOrganizationUuid"`
 }
 
 // summarize reads the head and tail of a transcript and derives what Claude Code's picker
@@ -268,6 +272,14 @@ func apply(s *info, head, tail []record) {
 	for _, r := range all {
 		if r.Type == "user" || r.Type == "assistant" {
 			s.HasMessages = true
+			break
+		}
+	}
+	// Remote Control: the newest bridge record names the session's copy on claude.ai.
+	for i := len(all) - 1; i >= 0; i-- {
+		if r := all[i]; r.Type == "bridge-session" && canonical(r.BridgeSessionID) != "" {
+			cid := agent.SessionID(canonical(r.BridgeSessionID))
+			s.Mirror = &agent.CloudLink{Cloud: cloudName, ID: cid, URL: "https://claude.ai/code/" + string(cid), Account: accountKey(r.OwnerOrg)}
 			break
 		}
 	}

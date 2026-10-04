@@ -51,6 +51,10 @@ func (inv *Inventory) Items() []Item {
 		local[m.Name] = m.Local
 	}
 	id := func(e Entry) string {
+		if e.Location.IsCloud() {
+			// A cloud session is a row of its own, next to its relatives here.
+			return "C:" + e.Location.Name + ":" + e.Session.Key.String()
+		}
 		if e.Lineage != nil && e.Lineage.Logical != "" {
 			return "L:" + e.Lineage.Logical
 		}

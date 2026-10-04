@@ -9,15 +9,19 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/roeehrl/hopsesh/internal/app"
+	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 func lsCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "ls",
-		Short: "List sessions of every agent on this and the allowed machines, grouped by repository",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Use:   "ls [<cloud>:]",
+		Short: "List sessions of every agent on this and the allowed machines and clouds, grouped by repository",
+		Long: `Lists the sessions of every agent on this machine, the machines you allowed and the clouds you
+allowed, grouped by repository. --cloud (or a cloud's name with a colon, claude-cloud:)
+shows the cloud sessions only, with the local sessions their vendor mirrors.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
 			r, err := newRun(cmd)
 			if err != nil {
 				return err
@@ -28,12 +32,22 @@ func lsCmd() *cobra.Command {
 			liveOnly, _ := cmd.Flags().GetBool("live")
 			noGit, _ := cmd.Flags().GetBool("no-git")
 			limit, _ := cmd.Flags().GetInt("limit")
+			cloudOnly, _ := cmd.Flags().GetBool("cloud")
+			if len(args) == 1 {
+				name := strings.TrimSuffix(args[0], ":")
+				if !r.app.IsCloud(name) {
+					return fmt.Errorf("unknown cloud %q (see hopsesh clouds)", name)
+				}
+				cloudOnly, host = true, name
+			}
 			inv := r.scan(cmd, host, noGit)
 			defer inv.Close()
 			kept := inv.Entries[:0]
 			for _, e := range inv.Entries {
+				mirrored := e.Session.Mirror != nil && (host == "" || r.app.IsCloud(host) && e.Session.Mirror.Cloud == host)
 				switch {
-				case host != "" && host != "local" && host != "." && e.Machine != host:
+				case cloudOnly && !e.Location.IsCloud() && !mirrored:
+				case host != "" && host != "local" && host != "." && e.Machine != host && !(cloudOnly && mirrored):
 				case agentID != "" && string(e.Agent) != agentID:
 				case liveOnly && e.Live.State != agent.Live:
 				case repo != "" && !strings.Contains(strings.ToLower(identity(e)+" "+e.Session.CWD), strings.ToLower(repo)):
@@ -44,10 +58,49 @@ func lsCmd() *cobra.Command {
 			inv.Entries = kept
 			groups := inv.Groups(r.app.LocalRoots())
 			if r.jsonOut {
-				return r.emitJSON(map[string]any{"machines": inv.Machines, "groups": groups})
+				out := map[string]any{"machines": inv.Machines, "clouds": inv.Clouds, "groups": groups}
+				var adopted, waiting []app.Brought
+				for _, f := range inv.Adopted {
+					adopted = append(adopted, r.app.Brought(f))
+				}
+				for _, f := range inv.Waiting {
+					waiting = append(waiting, r.app.Brought(f))
+				}
+				if adopted != nil {
+					out["adopted"] = adopted
+				}
+				if waiting != nil {
+					out["waiting"] = waiting
+				}
+				return r.emitJSON(out)
 			}
 			for _, m := range inv.Machines {
-				r.printf("%s\n", machineLine(m, inv))
+				if !cloudOnly {
+					r.printf("%s\n", machineLine(m, inv))
+				}
+			}
+			for _, c := range inv.Clouds {
+				if c.Listable || c.Fetchable {
+					line := fmt.Sprintf("%s: %s", c.Name, cloudWords(c))
+					if n := cloudCount(c); n != "–" {
+						line += " · " + n + " session(s)"
+					}
+					if h := cloudHint(c); h != "" && (cloudOnly || c.Status != app.CloudReady) {
+						line += " — " + h
+					}
+					r.printf("%s\n", line)
+				}
+			}
+			for _, f := range inv.Adopted {
+				b := r.app.Brought(f)
+				r.printf("\nBrought “%s” from %s: %s. %s\n", b.Title, b.CloudTitle, b.Outcome, b.Message)
+				if b.Outcome != move.FetchEmpty {
+					r.printf("  Continue it: %s\n", b.Command)
+				}
+			}
+			for _, f := range inv.Waiting {
+				b := r.app.Brought(f)
+				r.printf("\nWaiting for %s to copy “%s” here: %s\n", b.Agent, b.Title, b.Command)
 			}
 			r.printf("\n")
 			for _, g := range groups {
@@ -74,14 +127,22 @@ func lsCmd() *cobra.Command {
 					if len(it.Copies) > 1 {
 						fmt.Fprintf(tw, "  \t\t  %s\t\t\t\t\n", copiesLine(it))
 					}
-					if bi := branchInfo(e.Git); bi != "" || s.LastPrompt != "" {
+					if e.Cloud != nil {
+						fmt.Fprintf(tw, "  \t\t  %s\t\t\t\t%s\n", e.Cloud.URL, cloudBranchInfo(e))
+					} else if bi := branchInfo(e.Git); bi != "" || s.LastPrompt != "" {
 						fmt.Fprintf(tw, "  \t\t  %s\t\t\t\t%s\n", truncate("“"+s.LastPrompt+"”", 60), bi)
+					}
+					if mr := s.Mirror; mr != nil {
+						fmt.Fprintf(tw, "  \t\t  mirrored on %s\t\t\t\t%s\n", mr.Cloud, mr.URL)
 					}
 				}
 				tw.Flush()
 				r.printf("\n")
 			}
 			r.printf("Move one here: hopsesh pull [<machine>:]<id-or-title>   Continue in another agent: add --in <%s>\n", strings.Join(agentIDs(), "|"))
+			if cloudOnly {
+				r.printf("Bring one from a cloud: hopsesh pull <cloud>:<id> (or its link)\n")
+			}
 			r.offerSkill()
 			return nil
 		},
@@ -92,6 +153,7 @@ func lsCmd() *cobra.Command {
 	cmd.Flags().Bool("live", false, "only open sessions")
 	cmd.Flags().Bool("no-git", false, "skip the git probe (faster)")
 	cmd.Flags().Bool("no-local", false, "skip this machine")
+	cmd.Flags().Bool("cloud", false, "only cloud sessions (and the local sessions their vendor mirrors)")
 	cmd.Flags().Int("limit", 8, "sessions shown per repository (0 = all)")
 	cmd.Flags().Bool("json", false, "output JSON")
 	return cmd
@@ -106,6 +168,18 @@ func agentIDs() []string {
 		out = append(out, string(id))
 	}
 	return out
+}
+
+// cloudBranchInfo is a cloud session's branch and state.
+func cloudBranchInfo(e app.Entry) string {
+	var parts []string
+	if b := e.Cloud.Branch; b != "" {
+		parts = append(parts, b)
+	}
+	if e.Cloud.PR != "" {
+		parts = append(parts, "PR "+e.Cloud.PR)
+	}
+	return strings.Join(parts, " · ")
 }
 
 func identity(e app.Entry) string {

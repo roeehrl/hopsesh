@@ -11,4 +11,4 @@ stdout '"lastPrompt": "imported prompt in'
 
 exec hopsesh undo --yes
 exec hopsesh ls --json --no-git
-! stdout '"agent": "codex",\s+"agentName"'
+! stdout '"agent": "codex",\s+"agentName": "Codex",\s+"session"'

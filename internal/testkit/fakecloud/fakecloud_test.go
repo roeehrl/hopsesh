@@ -36,7 +36,8 @@ func newWorld(t *testing.T) *world {
 	gitConfig := filepath.Join(dir, "gitconfig")
 	w.vars = map[string]string{"HOME": w.home, "FAKE_CLOUD_DIR": w.store, "FAKE_AGENT_LOG": w.log, "GIT_CONFIG_GLOBAL": gitConfig,
 		"GIT_CONFIG_NOSYSTEM": "1", "GIT_AUTHOR_NAME": "Sam Doe", "GIT_AUTHOR_EMAIL": "sam@example.com",
-		"GIT_COMMITTER_NAME": "Sam Doe", "GIT_COMMITTER_EMAIL": "sam@example.com", "CLAUDE_CONFIG_DIR": ""}
+		"GIT_COMMITTER_NAME": "Sam Doe", "GIT_COMMITTER_EMAIL": "sam@example.com", "CLAUDE_CONFIG_DIR": "",
+		"CLAUDE_CODE_CHILD_SESSION": "", "ANTHROPIC_API_KEY": ""} // the tests may run inside an agent's session
 	for k, v := range w.vars {
 		t.Setenv(k, v)
 	}

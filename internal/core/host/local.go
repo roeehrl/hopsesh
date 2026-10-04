@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/core/proc"
@@ -137,8 +139,8 @@ func (localExec) Run(ctx context.Context, argv []string, o agent.RunOptions) (ag
 	}
 	cmd := proc.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = o.Dir
-	if len(o.Env) > 0 {
-		cmd.Env = append(os.Environ(), o.Env...)
+	if len(o.Env) > 0 || len(o.Unset) > 0 {
+		cmd.Env = append(Without(os.Environ(), o.Unset), o.Env...)
 	}
 	var hold io.WriteCloser
 	if o.Stdin != nil && o.HoldStdin > 0 {
@@ -179,6 +181,25 @@ func (localExec) Run(ctx context.Context, argv []string, o agent.RunOptions) (ag
 		return agent.Result{}, err
 	}
 	return agent.Result{Stdout: out.Bytes(), Stderr: errb.Bytes()}, nil
+}
+
+// Without is an environment (KEY=value pairs) without the named variables.
+func Without(env, unset []string) []string {
+	if len(unset) == 0 {
+		return env
+	}
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		k, _, _ := strings.Cut(kv, "=")
+		drop := false
+		for _, u := range unset {
+			drop = drop || k == u || runtime.GOOS == "windows" && strings.EqualFold(k, u)
+		}
+		if !drop {
+			out = append(out, kv)
+		}
+	}
+	return out
 }
 
 // watchWriter collects output and signals once it contains until.

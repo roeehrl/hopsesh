@@ -40,6 +40,18 @@ func TestShellQuoting(t *testing.T) {
 	}
 }
 
+// A cloud driver's command runs without the variables its cloud must not inherit.
+func TestShellUnset(t *testing.T) {
+	c := agent.Command{Dir: "/w", Argv: []string{"claude", "--teleport", "session_01x"}, Unset: []string{"CLAUDE_CODE_CHILD_SESSION", "ANTHROPIC_API_KEY"}}
+	if sh := Shell(c, "", "posix"); sh != `cd /w && env -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY claude --teleport session_01x` {
+		t.Errorf("posix: %s", sh)
+	}
+	want := `Set-Location '/w'; Remove-Item -ErrorAction SilentlyContinue 'Env:CLAUDE_CODE_CHILD_SESSION'; Remove-Item -ErrorAction SilentlyContinue 'Env:ANTHROPIC_API_KEY'; & 'claude' '--teleport' 'session_01x'`
+	if ps := Shell(c, "", "powershell"); ps != want {
+		t.Errorf("powershell: %s", ps)
+	}
+}
+
 func TestSessionName(t *testing.T) {
 	if got := SessionName("Fix the flaky test!", "Laptop.local"); got != "fix-the-flaky-test@laptop" {
 		t.Errorf("got %q", got)

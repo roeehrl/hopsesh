@@ -42,7 +42,7 @@ Unofficial; not affiliated with or endorsed by Anthropic or OpenAI.`,
 	root.SetOut(out)
 	root.SetErr(out)
 	root.AddCommand(
-		versionCmd(), updateCmd(), agentsCmd(), hostsCmd(), trustCmd(), doctorCmd(),
+		versionCmd(), updateCmd(), agentsCmd(), hostsCmd(), cloudsCmd(), trustCmd(), doctorCmd(),
 		lsCmd(), showCmd(), pullCmd(), planCmd(), pushCmd(), receiveCmd(), peerCmd(), undoCmd(), skillCmd(),
 	)
 	return root

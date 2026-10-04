@@ -58,6 +58,9 @@ type MachinesDTO struct {
 	Here     HereDTO      `json:"here"`
 	Machines []MachineRow `json:"machines"`
 	Found    []FoundRow   `json:"found"`
+	// Clouds are the agents' clouds hopsesh can do something with, as the last scan found
+	// them (nil before a scan).
+	Clouds []CloudDTO `json:"clouds"`
 }
 
 // Machines lists this machine, the machines you added (with the last scan's findings) and
@@ -69,7 +72,14 @@ func (a *App) Machines() MachinesDTO {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	out := MachinesDTO{Here: HereDTO{Name: app.LocalName(), Hopsesh: version.Version, Receive: a.core.Cfg.Peer.Receive, Agents: []string{}},
-		Machines: []MachineRow{}, Found: []FoundRow{}}
+		Machines: []MachineRow{}, Found: []FoundRow{}, Clouds: []CloudDTO{}}
+	if a.inv != nil {
+		core := *a.core
+		out.Clouds = shownClouds(&core, a.inv)
+		for i := range out.Clouds {
+			out.Clouds[i].Allowed = a.core.Cfg.CloudAllowed(out.Clouds[i].Name) // as set since the scan
+		}
+	}
 	var scanned map[string]*app.Machine
 	if a.inv != nil {
 		scanned = map[string]*app.Machine{}

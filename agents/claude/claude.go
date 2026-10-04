@@ -197,6 +197,7 @@ func (s *info) summary() agent.Summary {
 		Subagents:    s.Subagents,
 		Mark:         s.Mark,
 		Path:         s.File,
+		Mirror:       s.Mirror,
 	}
 }
 

@@ -25,7 +25,9 @@ func addPullFlags(cmd *cobra.Command) {
 	f.Bool("go", false, "start the continued session with \"Continue.\"")
 	f.String("via", "", "for another agent: import (its own importer converts the session, where it has one; hopsesh adds its briefing) or hopsesh (hopsesh converts it; the default unless that agent is set to import)")
 	f.Bool("carry-rules", false, "for another agent: add your instructions for every project of the session's agent to the briefing")
-	f.String("to", "", "continue in this local directory instead of matching the repository")
+	f.String("to", "", "continue in this local directory instead of matching the repository (from a cloud: the repository's checkout here)")
+	f.Bool("code-only", false, "from a cloud: the session's branch only, in a worktree, without the conversation")
+	f.Bool("append", false, "from a cloud: add its work to the session it was handed off from, when that is as it was left")
 	f.Bool("clone", false, "clone the repository if it is not on this machine")
 	f.String("repos", "", "folder for clones (default from config, ~/git)")
 	f.Bool("ghq", false, "clone into <repos>/<host>/<owner>/<repo>")
@@ -112,7 +114,7 @@ func flagSet(v bool, _ error) bool { return v }
 
 func pullCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "pull [<machine>:][<agent>/]<id-or-title>",
+		Use:   "pull [<machine>:][<agent>/]<id-or-title> | <cloud>:<id> | <cloud link>",
 		Short: "Bring a session here, in its own agent or (--in) another, and print the command to continue",
 		Long: `Moves a session from another machine (or folder) to this machine, or continues it in another
 agent (--in). hopsesh finds or clones the repository, recreates a worktree if the session
@@ -125,7 +127,13 @@ and back gets only the new work added to its original, which stays byte for byte
 
 The copy left behind is marked (--no-mark to skip). The checkout here is fetched and, when
 clean, fast-forwarded to the session's commit (--no-sync to skip). Nothing changes until
-you confirm (or pass --yes).`,
+you confirm (or pass --yes).
+
+From a cloud (claude-cloud:<id>, or the session's link): hopsesh makes a worktree of the
+repository (your checkout stays as it is) and prints the agent's own command that brings
+the conversation, for your terminal (--run runs it here). Once its copy appears, hopsesh
+checks its message count, keeps the cloud's branch under hopsesh/from/<cloud>/, and
+records it for undo. Allow the cloud first: hopsesh clouds allow <cloud>.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error { return pull(cmd, args[0]) },
 	}
@@ -136,7 +144,7 @@ you confirm (or pass --yes).`,
 // planCmd is pull that only plans: it never writes, so agents may run it without asking.
 func planCmd() *cobra.Command {
 	cmd := pullCmd()
-	cmd.Use = "plan [<machine>:][<agent>/]<id-or-title>"
+	cmd.Use = "plan [<machine>:][<agent>/]<id-or-title> | <cloud>:<id> | <cloud link>"
 	cmd.Short = "Show what pulling a session would do, without changing anything"
 	cmd.Long = "Same as pull --dry-run: finds the session, plans the move or continuation and prints the plan (or JSON with --json). It never writes."
 	cmd.RunE = func(c *cobra.Command, args []string) error {
@@ -156,6 +164,9 @@ func pull(cmd *cobra.Command, refArg string) error {
 	opt, err := r.pullOptions(cmd)
 	if err != nil {
 		return err
+	}
+	if cloud, id, ok := r.cloudRef(refArg); ok {
+		return r.pullCloud(cmd, cloud, id, opt)
 	}
 	in, _ := cmd.Flags().GetString("in")
 	ref := app.ParseRef(refArg)
