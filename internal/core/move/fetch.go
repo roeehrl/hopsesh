@@ -470,7 +470,7 @@ func applyFetch(ctx context.Context, p *Plan, env Env) (*Result, error) {
 		env.Audit.Write(audit.Entry{Action: "cloud.fetch", Session: p.Key.String(), Detail: map[string]any{"cloud": fp.Cloud, "code": true, "journal": j.ID}})
 	} else {
 		pf := &Fetch{Journal: j.ID, Time: time.Now().UTC(), Machine: machine, Agent: in.Module.Spec().ID, Cloud: fp.Cloud, CloudTitle: fp.CloudTitle,
-			Session: fp.Session, URL: fp.URL, Title: p.Title, Repo: fp.Repo, Checkout: top, Worktree: fp.Worktree, Base: base,
+			Session: fp.Session, URL: fp.URL, Title: p.Title, Untitled: in.Session.Title == "", Repo: fp.Repo, Checkout: top, Worktree: fp.Worktree, Base: base,
 			CloudBranch: fp.CloudBranch, VendorPrefix: in.Cloud.VendorPrefix, Rename: fp.Rename, Lineage: in.Lineage,
 			Continue: fp.ContinueIn, ContinueName: fp.ContinueName, Command: fp.Command, Run: fp.Run, Problems: in.Cloud.Problems,
 			Mirror: in.Session.Mirror, MirrorOf: in.MirrorOf}

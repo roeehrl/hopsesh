@@ -34,10 +34,12 @@ type Fetch struct {
 	Session    agent.SessionID `json:"session,omitempty"` // "" until the vendor's picker chose
 	URL        string          `json:"url,omitempty"`
 	Title      string          `json:"title"`
-	Repo       string          `json:"repo,omitempty"`
-	Checkout   string          `json:"checkout"`
-	Worktree   string          `json:"worktree"`
-	Base       string          `json:"base"`
+	// Untitled: hopsesh knew no title for it before the copy came (Title is made up).
+	Untitled bool   `json:"untitled,omitempty"`
+	Repo     string `json:"repo,omitempty"`
+	Checkout string `json:"checkout"`
+	Worktree string `json:"worktree"`
+	Base     string `json:"base"`
 	// CloudBranch is the cloud's branch, when known before the driver ran.
 	CloudBranch  string `json:"cloudBranch,omitempty"`
 	VendorPrefix string `json:"vendorPrefix,omitempty"`
@@ -197,6 +199,9 @@ func AdoptFetch(ctx context.Context, f *Fetch, side Side, env Env, exited bool) 
 	j.AddKey(a.Session.Key)
 	if f.Session == "" {
 		f.Session = a.Remote
+	}
+	if t := a.Session.Title; t != "" && f.Untitled {
+		f.Title = t // the copy names it better than its id did
 	}
 	if f.Session != "" {
 		j.AddKey(agent.SessionKey{Agent: f.Agent, Session: f.Session})

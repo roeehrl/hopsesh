@@ -23,12 +23,19 @@ type Exit struct {
 	RunDir  string   // start the agent here...
 	RunArgv []string // ...with these arguments
 	Prompt  string   // a file holding the last argument, if any
+	// Unset are variables the program runs without (a cloud driver's).
+	Unset []string
+	// Adopt is a fetch (its journal) the program brings a session for: once it ends, the
+	// caller adopts what it wrote and opens the TUI again on what came back (Deps.Adopted).
+	Adopt string
 }
 
 // Deps are what the TUI needs from the CLI.
 type Deps struct {
 	App      *app.App
 	Describe func(app.Entry) string // branch/worktree line
+	// Adopted is a fetch (its journal) to show first: what came back from a cloud.
+	Adopted string
 }
 
 type mode int
@@ -40,6 +47,7 @@ const (
 	modeApplying
 	modeDone
 	modeError
+	modeBrought // what came back from a cloud
 )
 
 type row struct {
@@ -69,6 +77,13 @@ type model struct {
 	err      error
 	exit     *Exit
 	started  time.Time
+	// Clouds: a session planned from a pasted link or the vendor's picker (not a row), what
+	// came back from a cloud, and the link being pasted.
+	picked  *app.Entry
+	brought *app.Brought
+	pasting bool
+	paste   string
+	notice  string
 }
 
 type scanDone struct{ inv *app.Inventory }
@@ -161,6 +176,24 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.inv = msg.inv
 		m.mode = modeBrowse
 		m.buildRows()
+		if j := m.deps.Adopted; j != "" {
+			m.deps.Adopted = ""
+			if f, err := m.deps.App.Adopt(context.Background(), j, false); err == nil {
+				b := m.deps.App.Brought(f)
+				m.brought, m.mode = &b, modeBrought
+			}
+		}
+	case pickedDone:
+		e := msg.entry
+		m.picked = &e
+		return m.Update(msg.plan)
+	case undoDone:
+		if msg.err != nil {
+			m.err, m.mode = msg.err, modeError
+			return m, nil
+		}
+		m.brought, m.notice, m.mode = nil, "", modeLoading
+		return m, m.Init()
 	case planDone:
 		m.planning = false
 		if msg.err != nil {
@@ -183,6 +216,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *model) key(k string) (tea.Model, tea.Cmd) {
 	if k == "ctrl+c" {
 		return m, tea.Quit
+	}
+	if m.pasting {
+		return m.pasteKey(k)
+	}
+	if m.mode == modeBrought {
+		return m.broughtKeys(k)
 	}
 	if m.editing {
 		switch k {
@@ -224,11 +263,32 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 			return m, m.Init()
 		case "enter":
 			if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil {
-				m.sel, m.target = m.rows[m.cursor], ""
+				m.sel, m.target, m.picked = m.rows[m.cursor], "", nil
 				return m, m.planCmd()
+			}
+		case "i":
+			if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil {
+				m.sel, m.target, m.picked = m.rows[m.cursor], "", nil
+				if m.target = m.nextAgent(); m.target != "" {
+					return m, m.planCmd()
+				}
+			}
+		case "p":
+			if m.partialCloud() != nil {
+				m.pasting, m.paste = true, ""
+			}
+		case "f":
+			if c := m.partialCloud(); c != nil {
+				m.target = ""
+				return m, m.fetchCmd(c.Name, "")
 			}
 		}
 	case modePlan:
+		if m.plan.Kind == move.KindFetch && !m.planning {
+			if mm, cmd, ok := m.fetchKeys(k); ok {
+				return mm, cmd
+			}
+		}
 		switch k {
 		case "esc", "q":
 			m.mode = modeBrowse
@@ -279,6 +339,24 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 			return m, m.planCmd()
 		}
 	case modeDone:
+		if m.plan.Kind == move.KindFetch {
+			switch k {
+			case "enter":
+				if m.result.Fetch.Outcome == move.FetchWaiting {
+					r := m.plan.Fetch.Run
+					m.exit = &Exit{RunDir: r.Dir, RunArgv: r.Argv, Unset: r.Unset, Adopt: m.result.Journal}
+					return m, tea.Quit
+				}
+			case "c":
+				m.copied = true
+				return m, tea.SetClipboard(m.result.Command)
+			case "u":
+				return m, m.undoCmd(m.result.Journal)
+			case "q", "esc":
+				return m, tea.Quit
+			}
+			return m, nil
+		}
 		switch k {
 		case "enter":
 			m.exit = &Exit{RunDir: m.plan.Resume.Dir, RunArgv: m.plan.Resume.Argv, Prompt: m.result.PromptFile}
@@ -306,6 +384,9 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) planCmd() tea.Cmd {
+	if m.picked != nil {
+		return m.replan()
+	}
 	m.planning = true
 	a, inv, e, target, opts := m.deps.App, m.inv, m.sel.item.Entry, m.target, m.opts
 	return func() tea.Msg {
@@ -402,11 +483,25 @@ func (m *model) View() tea.View {
 	case modeBrowse:
 		m.viewBrowse(&b)
 	case modePlan:
-		m.viewPlan(&b)
+		if m.plan.Kind == move.KindFetch {
+			m.viewFetchPlan(&b)
+		} else {
+			m.viewPlan(&b)
+		}
 	case modeApplying:
-		fmt.Fprintf(&b, "\n  Moving %q… (copying or converting, rewriting, verifying)\n", m.plan.Title)
+		if m.plan.Kind == move.KindFetch {
+			fmt.Fprintf(&b, "\n  Preparing a worktree for %q…\n", m.plan.Title)
+		} else {
+			fmt.Fprintf(&b, "\n  Moving %q… (copying or converting, rewriting, verifying)\n", m.plan.Title)
+		}
 	case modeDone:
-		m.viewDone(&b)
+		if m.plan.Kind == move.KindFetch {
+			m.viewFetchDone(&b)
+		} else {
+			m.viewDone(&b)
+		}
+	case modeBrought:
+		m.viewBrought(&b)
 	case modeError:
 		fmt.Fprintf(&b, "\n  %s\n\n  %s\n", errSt.Render("Error"), m.err)
 		b.WriteString(dim.Render("\n  any key: back · q: quit\n"))
@@ -441,14 +536,23 @@ func (m *model) viewBrowse(b *strings.Builder) {
 			mach = append(mach, errSt.Render("●")+" "+mc.Name+" "+mc.Status)
 		}
 	}
+	for _, c := range m.shownClouds() {
+		mach = append(mach, cloudHeader(c))
+	}
 	b.WriteString(dim.Render(fmt.Sprintf("%d sessions · ", len(m.inv.Entries))) + strings.Join(mach, "   ") + "\n")
-	if m.editing || m.filter != "" {
+	switch pc := m.partialCloud(); {
+	case m.pasting:
+		b.WriteString("  paste a link: " + m.paste + "▏" + dim.Render("  (enter: plan it · esc: cancel)") + "\n")
+	case m.editing || m.filter != "":
 		cur := ""
 		if m.editing {
 			cur = "▏"
 		}
 		b.WriteString("  / " + m.filter + cur + "\n")
-	} else {
+	case pc != nil:
+		b.WriteString(dim.Render(truncate(fmt.Sprintf("  %s: the sessions hopsesh started or brought here, and Remote Control mirrors · %s shows the rest: f find in %s · p paste a link",
+			pc.Name, pc.AgentName, pc.AgentName), max(m.width, 80)-1)) + "\n")
+	default:
 		b.WriteString("\n")
 	}
 	h := m.listHeight()
@@ -463,8 +567,14 @@ func (m *model) viewBrowse(b *strings.Builder) {
 		e := r.item.Entry
 		s := e.Session
 		status := e.Status()
-		if e.Live.State == agent.Live {
+		switch {
+		case e.Live.State == agent.Live:
 			status = liveSt.Render(status)
+		case e.Cloud != nil:
+			status = cloudSt.Render(status)
+		}
+		if mr := s.Mirror; mr != nil {
+			status += dim.Render(" · " + mirrorWords(mr))
 		}
 		line := fmt.Sprintf("  %-12s %-11s %-40s %-9s %s", truncate(e.Machine, 12), truncate(e.AgentName, 11), truncate(s.Title, 40), ago(s.LastActivity), status)
 		if i == m.cursor {
@@ -481,6 +591,26 @@ func (m *model) viewBrowse(b *strings.Builder) {
 		s := e.Session
 		b.WriteString(dim.Render(strings.Repeat("─", min(w, 120))) + "\n")
 		fmt.Fprintf(b, "  %s  %s\n", bold.Render(truncate(s.Title, w-24)), dim.Render(s.Key.String()))
+		if c := e.Cloud; c != nil {
+			head := e.Location.Name + " · " + e.AgentName + " · " + e.Status() + "  "
+			fmt.Fprintf(b, "  %s%s\n", cloudSt.Render(head), link(c.URL, truncate(c.URL, w-6-len([]rune(head)))))
+			var bits []string
+			if c.Repo != "" {
+				bits = append(bits, c.Repo)
+			}
+			if c.Branch != "" {
+				bits = append(bits, "branch "+c.Branch)
+			}
+			if e.Checkout != "" {
+				bits = append(bits, "here at "+e.Checkout)
+			}
+			if len(bits) > 0 {
+				fmt.Fprintf(b, "  %s\n", dim.Render(truncate(strings.Join(bits, " · "), w-4)))
+			}
+			fmt.Fprintf(b, "  %s\n", dim.Render("enter: bring it here · i: and continue in another agent"))
+			b.WriteString(dim.Render("\n  ↑↓ move · enter bring here · i bring and continue in · / search · r refresh · q quit\n"))
+			return
+		}
 		fmt.Fprintf(b, "  %s  %s %s  %s\n", e.Machine, e.AgentName, s.AgentVersion, s.CWD)
 		if m.deps.Describe != nil {
 			if d := m.deps.Describe(e); d != "" {
@@ -505,7 +635,11 @@ func (m *model) viewBrowse(b *strings.Builder) {
 			fmt.Fprintf(b, "  %s\n", warnSt.Render(truncate("copies: "+strings.Join(parts, ", "), w-4)))
 		}
 	}
-	b.WriteString(dim.Render("\n  ↑↓ move · enter bring here (a: in another agent) · / search · r refresh · q quit\n"))
+	hint := "\n  ↑↓ move · enter bring here · i continue in · / search · r refresh · q quit"
+	if m.partialCloud() != nil {
+		hint = "\n  ↑↓ move · enter resume/bring · i continue in · p paste a cloud link · f find in a cloud · / search · r refresh · q quit"
+	}
+	b.WriteString(dim.Render(hint) + "\n")
 }
 
 func (m *model) viewPlan(b *strings.Builder) {

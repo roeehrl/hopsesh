@@ -46,6 +46,9 @@ type screen struct {
 func watch(t *testing.T, tm *teatest.TestModel, w, h int) *screen {
 	t.Helper()
 	s := &screen{em: vt.NewEmulator(w, h)}
+	// New-line mode: a line feed also returns the carriage, as a terminal's own output
+	// processing does (the program does not get a real terminal here).
+	_, _ = s.em.Write([]byte("\x1b[20h"))
 	done := make(chan struct{})
 	t.Cleanup(func() { close(done) })
 	go func() { _, _ = io.Copy(io.Discard, s.em) }() // the terminal's replies to queries
