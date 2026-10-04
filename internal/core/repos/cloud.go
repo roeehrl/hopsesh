@@ -78,6 +78,39 @@ func AddWorktreeAt(ctx context.Context, repo, path, branch, commit string) error
 	return err
 }
 
+// AddWorktreeOn adds a worktree at path for the checkout repo, on an existing branch.
+func AddWorktreeOn(ctx context.Context, repo, path, branch string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	_, err := runGit(ctx, repo, "worktree", "add", "--", path, branch)
+	return err
+}
+
+// IsAncestor reports whether commit a is b or one of its ancestors, in dir.
+func IsAncestor(ctx context.Context, dir, a, b string) bool {
+	_, err := runGit(ctx, dir, "merge-base", "--is-ancestor", a, b)
+	return err == nil
+}
+
+// CheckedOutAt is the worktree of dir's repository that has branch checked out ("" when
+// none does).
+func CheckedOutAt(ctx context.Context, dir, branch string) string {
+	out, err := runGit(ctx, dir, "worktree", "list", "--porcelain")
+	if err != nil {
+		return ""
+	}
+	path := ""
+	for _, line := range strings.Split(out, "\n") {
+		if p, ok := strings.CutPrefix(line, "worktree "); ok {
+			path = p
+		} else if line == "branch refs/heads/"+branch {
+			return path
+		}
+	}
+	return ""
+}
+
 // BranchExists reports whether a local branch exists in dir.
 func BranchExists(ctx context.Context, dir, branch string) bool {
 	_, err := runGit(ctx, dir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)

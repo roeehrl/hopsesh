@@ -321,10 +321,40 @@ func TestBringCodeOnly(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(p.Fetch.Worktree, "cloud-work", w.session.ID+".md")); err != nil {
 		t.Fatal("the cloud's work is not in the worktree")
 	}
+	// The cloud works on; the code again moves the same branch forward (its first worktree
+	// gone, the branch kept), and undo moves it back.
+	first, branch := p.Fetch.Worktree, p.Fetch.LocalBranch
+	before := w.git(w.repo, "rev-parse", branch)
+	w.git(w.repo, "worktree", "remove", first)
+	s, _ := fakecloud.Open(w.store).Get(w.session.ID)
+	s.Branch = s.Result
+	if err := fakecloud.Open(w.store).Put(s); err != nil {
+		t.Fatal(err)
+	}
+	if err := fakecloud.Work(fakecloud.Proc{Vars: map[string]string{}}, w.session.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	p2, _, err := a.Plan(ctx, inv, e, "", move.Options{CodeOnly: true})
+	if err != nil || len(p2.Blockers) > 0 || !p2.Fetch.FastForward || p2.Fetch.LocalBranch != branch {
+		t.Fatalf("again: %+v %v", p2.Fetch, err)
+	}
+	res2, err := a.Apply(ctx, p2, move.Input{}, nil)
+	if err != nil || !res2.Fetch.FastForwarded || res2.Fetch.Branch != branch {
+		t.Fatalf("again: %+v %v", res2.Fetch, err)
+	}
+	if now := w.git(w.repo, "rev-parse", branch); now == before || now != res2.Fetch.Base {
+		t.Fatalf("%s did not move forward: %s → %s", branch, before, now)
+	}
+	if _, err := a.Undo(ctx, res2.Journal, false); err != nil {
+		t.Fatal(err)
+	}
+	if now := w.git(w.repo, "rev-parse", branch); now != before {
+		t.Fatalf("undo leaves %s at %s", branch, now)
+	}
 	if _, err := a.Undo(ctx, res.Journal, false); err != nil {
 		t.Fatal(err)
 	}
-	if repos.BranchExists(ctx, w.repo, p.Fetch.LocalBranch) {
+	if repos.BranchExists(ctx, w.repo, branch) {
 		t.Fatal("undo leaves the branch")
 	}
 }

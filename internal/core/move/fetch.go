@@ -96,7 +96,10 @@ type FetchPlan struct {
 	Worktree     string `json:"worktree"`
 	// LocalBranch is the branch the code is on here: the cloud's branch renamed under
 	// hopsesh/from/<cloud>/ (Rename), or kept.
-	LocalBranch string        `json:"localBranch,omitempty"`
+	LocalBranch string `json:"localBranch,omitempty"`
+	// FastForward: LocalBranch is here already, from an earlier fetch of the code: it moves
+	// forward to the cloud's work (fast-forward only; a new branch when it cannot).
+	FastForward bool          `json:"fastForward,omitempty"`
 	Rename      bool          `json:"rename"`
 	CodeOnly    bool          `json:"codeOnly,omitempty"`
 	Run         agent.Command `json:"run"`
@@ -274,6 +277,9 @@ func planFetchBranch(ctx context.Context, in FetchInput, fp *FetchPlan, opt Opti
 			name = repos.FromBranch(in.Cloud.Name, b, in.Cloud.VendorPrefix)
 		}
 		fp.LocalBranch = repos.FreeBranchName(ctx, top, name)
+		if fp.CodeOnly && repos.BranchExists(ctx, top, name) && repos.CheckedOutAt(ctx, top, name) == "" {
+			fp.LocalBranch, fp.FastForward = name, true
+		}
 	}
 }
 
@@ -407,8 +413,10 @@ type FetchResult struct {
 	Outcome  string `json:"outcome"` // waiting, or code (the code only)
 	Worktree string `json:"worktree"`
 	Branch   string `json:"branch,omitempty"` // the branch the code is on (code only)
-	Ref      string `json:"ref,omitempty"`
-	Base     string `json:"base"`
+	// FastForwarded: that branch was here already and moved forward to the cloud's work.
+	FastForwarded bool   `json:"fastForwarded,omitempty"`
+	Ref           string `json:"ref,omitempty"`
+	Base          string `json:"base"`
 }
 
 // applyFetch fetches the cloud's branch (when known) into refs/hopsesh/<cloud>/…, makes
@@ -445,14 +453,35 @@ func applyFetch(ctx context.Context, p *Plan, env Env) (*Result, error) {
 		base, res.Fetch.Ref = sha, ref
 		res.Fetch.Base = sha
 	}
-	branch := ""
+	branch, existing := "", false
 	if fp.CodeOnly {
 		branch = fp.LocalBranch
 		if branch == "" {
 			return res, errors.New("no branch to bring the code on")
 		}
-		if err := j.Ref(machine, top, "refs/heads/"+branch, base, ""); err != nil {
-			return res, err
+		ref := "refs/heads/" + branch
+		if fp.FastForward {
+			// The branch an earlier fetch made moves forward, when the cloud only added to it.
+			prev, _ := repos.LocalGit{}.Ref(ctx, top, ref)
+			if prev != "" && repos.IsAncestor(ctx, top, prev, base) && repos.CheckedOutAt(ctx, top, branch) == "" {
+				step("fast-forwarding " + branch)
+				if err := j.Ref(machine, top, ref, base, prev); err != nil {
+					return res, err
+				}
+				if err := (repos.LocalGit{}).SetRef(ctx, top, ref, base, prev); err != nil {
+					return res, err
+				}
+				existing, res.Fetch.FastForwarded = true, true
+			} else {
+				branch = repos.FreeBranchName(ctx, top, branch)
+				ref = "refs/heads/" + branch
+				res.Warnings = append(res.Warnings, fp.LocalBranch+" could not move forward to the cloud's work, so the code is on "+branch)
+			}
+		}
+		if !existing {
+			if err := j.Ref(machine, top, ref, base, ""); err != nil {
+				return res, err
+			}
 		}
 		res.Fetch.Branch = branch
 	}
@@ -460,7 +489,11 @@ func applyFetch(ctx context.Context, p *Plan, env Env) (*Result, error) {
 	if err := j.Worktree(machine, top, fp.Worktree); err != nil {
 		return res, err
 	}
-	if err := repos.AddWorktreeAt(ctx, top, fp.Worktree, branch, base); err != nil {
+	add := func() error { return repos.AddWorktreeAt(ctx, top, fp.Worktree, branch, base) }
+	if existing {
+		add = func() error { return repos.AddWorktreeOn(ctx, top, fp.Worktree, branch) }
+	}
+	if err := add(); err != nil {
 		return res, fmt.Errorf("worktree: %w", err)
 	}
 	res.Worktree = fp.Worktree

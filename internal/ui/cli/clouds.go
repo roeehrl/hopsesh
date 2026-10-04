@@ -404,9 +404,12 @@ func (r *run) renderFetchPlan(p *move.Plan) {
 	if fp.Worktree != "" {
 		r.printf("  worktree  %s (a new one, at %s)\n", fp.Worktree, short7(fp.Base))
 	}
-	if fp.LocalBranch != "" && fp.LocalBranch != fp.CloudBranch {
+	switch {
+	case fp.FastForward:
+		r.printf("  local     %s, here already: it moves forward to the cloud's work\n", fp.LocalBranch)
+	case fp.LocalBranch != "" && fp.LocalBranch != fp.CloudBranch:
 		r.printf("  local     %s, renamed from %s\n", fp.LocalBranch, fp.CloudBranch)
-	} else if fp.Rename && !fp.CodeOnly {
+	case fp.Rename && !fp.CodeOnly:
 		r.printf("  local     a claude/… branch is renamed under hopsesh/from/%s/\n", fp.Cloud)
 	}
 	if fp.Command != "" {

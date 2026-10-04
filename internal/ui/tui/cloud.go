@@ -232,9 +232,12 @@ func (m *model) viewFetchPlan(b *strings.Builder) {
 	case move.BranchMissing:
 		fmt.Fprintf(b, "  branch  %s is not on origin\n", fp.CloudBranch)
 	}
-	if fp.LocalBranch != "" && fp.LocalBranch != fp.CloudBranch {
+	switch {
+	case fp.FastForward:
+		fmt.Fprintf(b, "  local branch  %s, here already: it moves forward to the cloud's work\n", fp.LocalBranch)
+	case fp.LocalBranch != "" && fp.LocalBranch != fp.CloudBranch:
 		fmt.Fprintf(b, "  local branch  %s (renamed from %s)\n", fp.LocalBranch, fp.CloudBranch)
-	} else if fp.Rename && !fp.CodeOnly {
+	case fp.Rename && !fp.CodeOnly:
 		fmt.Fprintf(b, "  local branch  a claude/… branch is renamed under hopsesh/from/%s/\n", fp.Cloud)
 	}
 	if fp.Command != "" {

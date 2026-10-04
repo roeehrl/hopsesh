@@ -327,7 +327,15 @@ func Work(p Proc, id string, sameBranch bool) error {
 	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
 		return err
 	}
-	if err := os.WriteFile(file, []byte("Work done by "+s.Cloud+" session "+s.ID+".\n"), 0o600); err != nil {
+	f, err := os.OpenFile(file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) // more work, more lines
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(f, "Work done by %s session %s (turn %d).\n", s.Cloud, s.ID, len(s.Messages))
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
 		return err
 	}
 	if _, err := git(env, work, "add", "-A"); err != nil {

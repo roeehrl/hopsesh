@@ -70,7 +70,7 @@ function cloudCard(c) {
   const kv = (label, ...value) => [h("dt", {}, label), h("dd", {}, ...value)];
   const t = c.test;
   const signed = t ? (t.ok || t.account ? t.account : h("span", { class: "warn" }, t.error || "Not signed in"))
-    : c.status === "signed-out" ? h("span", { class: "warn" }, cap(c.hint)) : c.allowed ? h("span", { class: "muted" }, "Test it to see") : h("span", { class: "muted" }, "Not checked while it is off");
+    : c.status === "signed-out" || c.status === "not-eligible" ? h("span", { class: "warn" }, cap(c.hint || c.error)) : c.allowed ? h("span", { class: "muted" }, "Test it to see") : h("span", { class: "muted" }, "Not checked while it is off");
   const result = h("span", { style: "font-size:12px", role: "status" });
   const show = (r) => fill(result, h("b", { class: r.ok ? "ok" : "err", style: "font-weight:600" }, r.ok ? "✓ " : "✕ "),
     h("span", { class: r.ok ? "ok" : "err" }, (r.checks.length ? r.checks.map((x) => x.text).join(" · ") : r.error) + " · " + when(r.at)));
