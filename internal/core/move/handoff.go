@@ -105,6 +105,11 @@ type HandoffInput struct {
 	// Terminal: the front end can run a terminal step (Env.Step); a cloud whose driver needs
 	// one (NeedTerminal) cannot be handed off without it.
 	Terminal bool
+	// FromBranch is the branch on the remote the session's code came from, when it was
+	// brought from a cloud (claude/…, copilot/…, kept here under another name): when the
+	// checkout is still exactly that branch, the next cloud clones it as it is and nothing
+	// is pushed.
+	FromBranch string
 }
 
 // EnvChoice is a cloud environment the user can pick for a hand-off.
@@ -315,37 +320,7 @@ func BuildHandoff(ctx context.Context, in HandoffInput, opt Options) (*Plan, err
 		check("err", fmt.Sprintf("hopsesh leaves %s alone until you allow it (hopsesh clouds allow %s)", cl.Title, cl.Name))
 	}
 
-	// The driver and its login.
-	switch v := in.Install.Version; {
-	case in.Install.Binary == "":
-		check("err", fmt.Sprintf("%s is reached through the `%s` command, which isn't installed here", cl.Title, cl.Driver))
-	case v != "" && !cl.TestedWith(v):
-		check("warn", fmt.Sprintf("%s %s hasn't been tested for cloud hand-off; hopsesh tested %s. You can still go ahead", target.Name, v, strings.Join(cl.Tested, ", ")))
-	case v != "":
-		check("ok", cl.Driver+" "+v)
-	}
-	if t, ok := in.Module.(agent.CloudTester); ok && in.Install.Binary != "" {
-		test := in.Tester
-		if test == nil {
-			test = func(ctx context.Context) (agent.CloudTest, error) {
-				return t.TestCloud(ctx, in.Host, in.Install, cl.Name)
-			}
-		}
-		ct, err := test(ctx)
-		switch {
-		case err != nil:
-			check("err", refusal(err, target, cl))
-		default:
-			if ct.Account != "" {
-				check("ok", "Signed in with "+ct.Account)
-			}
-			for _, c := range ct.Checks[1:] {
-				if !c.OK {
-					check("warn", c.Text)
-				}
-			}
-		}
-	}
+	checkHandoffDriver(ctx, in, check)
 
 	// The repository.
 	g := in.Git
@@ -422,7 +397,8 @@ func BuildHandoff(ctx context.Context, in HandoffInput, opt Options) (*Plan, err
 	}
 
 	hp.Cleanup = nonEmpty(opt.Cleanup, nonEmpty(in.Settings.DeleteBranch, CleanupAfterMerge))
-	hp.Cleanups = []Choice{{CleanupAfterMerge, "Delete it after I bring the work back and it is merged"}, {CleanupOnUndo, "Delete it only if I undo"}, {CleanupNever, "Keep it"}}
+	hp.Cleanups = []Choice{{CleanupAfterMerge, "Offer to delete it once its work is merged (and on undo)"}, {CleanupOnUndo, "Delete it only if I undo"},
+		{CleanupNever, "Keep it, even on undo"}}
 	if hp.HistoryFile {
 		hp.Notes = append(hp.Notes, "Private history is safer in a cloud environment whose network access is None or Trusted; hopsesh never changes environment settings")
 	}
@@ -435,6 +411,41 @@ func BuildHandoff(ctx context.Context, in HandoffInput, opt Options) (*Plan, err
 	}
 	hp.Loss = handoffLoss(hp, spec)
 	return p, nil
+}
+
+// checkHandoffDriver checks the cloud's driver here and its login (read-only).
+func checkHandoffDriver(ctx context.Context, in HandoffInput, check func(string, string)) {
+	cl, target := in.Cloud, in.Module.Spec()
+	switch v := in.Install.Version; {
+	case in.Install.Binary == "":
+		check("err", fmt.Sprintf("%s is reached through the `%s` command, which isn't installed here", cl.Title, cl.Driver))
+	case v != "" && !cl.TestedWith(v):
+		check("warn", fmt.Sprintf("%s %s hasn't been tested for cloud hand-off; hopsesh tested %s. You can still go ahead", target.Name, v, strings.Join(cl.Tested, ", ")))
+	case v != "":
+		check("ok", cl.Driver+" "+v)
+	}
+	if t, ok := in.Module.(agent.CloudTester); ok && in.Install.Binary != "" {
+		test := in.Tester
+		if test == nil {
+			test = func(ctx context.Context) (agent.CloudTest, error) {
+				return t.TestCloud(ctx, in.Host, in.Install, cl.Name)
+			}
+		}
+		ct, err := test(ctx)
+		switch {
+		case err != nil:
+			check("err", refusal(err, target, cl))
+		default:
+			if ct.Account != "" {
+				check("ok", "Signed in with "+ct.Account)
+			}
+			for _, c := range ct.Checks[1:] {
+				if !c.OK {
+					check("warn", c.Text)
+				}
+			}
+		}
+	}
 }
 
 // planHandoffCode decides how the code goes: the session's branch as it is when it is
@@ -452,18 +463,25 @@ func planHandoffCode(ctx context.Context, p *Plan, in HandoffInput, opt Options,
 	hp.Tracked, hp.Untracked, hp.Offered, hp.Withheld = sp.Tracked, sp.Untracked, sp.Offered, sp.Withheld
 	unpushed, _ := g.LeftBehind()
 	hp.Unpushed = unpushed
-	onRemote := ""
+	onRemote, branch := "", g.Branch
 	if g.Branch != "" {
 		onRemote, err = repos.RemoteRef(ctx, in.Runner, top, hp.Remote, "refs/heads/"+g.Branch)
 		if err != nil {
 			check("warn", "hopsesh could not ask the remote about "+g.Branch+": "+firstLine(err.Error()))
 		}
 	}
-	clean := g.Branch != "" && onRemote == sp.Head
+	if fb := in.FromBranch; onRemote != sp.Head && fb != "" && fb != g.Branch && g.Branch != "" {
+		// The code came from a cloud's branch, kept here under hopsesh's name: that branch, as
+		// it is on the remote, is what the next cloud clones.
+		if sha, err := repos.RemoteRef(ctx, in.Runner, top, hp.Remote, "refs/heads/"+fb); err == nil && sha == sp.Head {
+			onRemote, branch = sha, fb
+		}
+	}
+	clean := branch != "" && onRemote == sp.Head
 	if clean && sp.Changes() && !hp.HistoryFile && hp.Code == agent.ViaBranch && hasWay(in.Cloud.CodeUp, agent.ViaStartingDiff) && sp.Bytes <= maxStartingDiff {
 		hp.CanStartingDiff = true
 		hp.StartingDiffOffer = fmt.Sprintf("%s is on %s as it is here, so the %s can go with the %s as a starting diff instead of on a new branch",
-			g.Branch, nonEmpty(hp.Host, "the remote"), plural(len(sp.Tracked)+len(sp.Untracked), "changed file"), in.Cloud.SessionNoun())
+			branch, nonEmpty(hp.Host, "the remote"), plural(len(sp.Tracked)+len(sp.Untracked), "changed file"), in.Cloud.SessionNoun())
 	}
 	switch {
 	case opt.StartingDiff && !hasWay(in.Cloud.CodeUp, agent.ViaStartingDiff):
@@ -480,12 +498,15 @@ func planHandoffCode(ctx context.Context, p *Plan, in HandoffInput, opt Options,
 		}
 		check("err", "A starting diff needs a branch already on the remote and a few changed files; here "+why)
 	case opt.StartingDiff:
-		hp.Code, hp.Branch, hp.Unpushed = agent.ViaStartingDiff, g.Branch, 0
+		hp.Code, hp.Branch, hp.Unpushed = agent.ViaStartingDiff, branch, 0
 	}
 	if hp.Code == agent.ViaStartingDiff {
 		// The branch is the session's own; the changes go with the session.
-	} else if g.Branch != "" && onRemote == sp.Head && !sp.Changes() && !hp.HistoryFile {
-		hp.Reuse, hp.Branch, hp.Unpushed = true, g.Branch, 0
+	} else if clean && !sp.Changes() && !hp.HistoryFile {
+		hp.Reuse, hp.Branch, hp.Unpushed = true, branch, 0
+		if branch != g.Branch {
+			hp.Notes = append(hp.Notes, fmt.Sprintf("The code is %s on %s as the last cloud left it (%s here), so nothing is pushed", branch, nonEmpty(hp.Host, "the remote"), g.Branch))
+		}
 	} else {
 		name := repos.HandoffBranch(in.Settings.BranchPrefix, time.Now().Format("20060102"), string(p.Key.Session))
 		hp.Branch = repos.FreeRemoteBranch(ctx, in.Runner, top, hp.Remote, name)
@@ -705,6 +726,9 @@ func hasWay(ws []agent.CodeWay, w agent.CodeWay) bool {
 	return false
 }
 
+// Plural is "1 message", "3 messages".
+func Plural(n int, one string) string { return plural(n, one) }
+
 func plural(n int, one string) string {
 	if n == 1 {
 		return "1 " + one
@@ -803,7 +827,11 @@ func applyHandoff(ctx context.Context, p *Plan, env Env) (*Result, error) {
 	ref := "refs/heads/" + hp.Branch
 	if hp.Code == agent.ViaBranch && !hp.Reuse {
 		step(StepPush, StepTodo, "")
-		if err := j.PushRef(machine, top, hp.Remote, ref, sha); err != nil {
+		record := j.PushRef
+		if hp.Cleanup == CleanupNever {
+			record = j.KeepPushed // the user keeps the branch, even through undo
+		}
+		if err := record(machine, top, hp.Remote, ref, sha); err != nil {
 			return fail(StepPush, "Nothing went to the remote: "+err.Error(), err)
 		}
 		if err := repos.PushRef(ctx, in.Runner, top, hp.Remote, sha, ref); err != nil {

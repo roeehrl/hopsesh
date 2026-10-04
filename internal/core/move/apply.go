@@ -91,6 +91,9 @@ type Result struct {
 	Fetch *FetchResult `json:"fetch,omitempty"`
 	// Handoff is what a hand-off to a cloud did (also when a step failed).
 	Handoff *HandoffResult `json:"handoff,omitempty"`
+	// Hop is where a hop from one cloud to another stands (Fetch is its first leg's result,
+	// Handoff its second's).
+	Hop *HopResult `json:"hop,omitempty"`
 }
 
 // machinesOf reaches the two machines of a move by name, for the journal.

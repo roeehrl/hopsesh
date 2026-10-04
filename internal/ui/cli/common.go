@@ -48,6 +48,7 @@ func newRun(cmd *cobra.Command) (*run, error) {
 	r.yes, _ = cmd.Flags().GetBool("yes")
 	r.pwStdin, _ = cmd.Flags().GetBool("password-stdin")
 	r.app.Steps = r.stepRunner()
+	r.app.RunHere = r.runHere
 	return r, nil
 }
 

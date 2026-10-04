@@ -486,6 +486,13 @@ func BroughtOf(f *move.Fetch, agentName string) Brought {
 		known = fmt.Sprintf(" This is a known %s problem (%s).", agentName, b.IssueRef)
 	}
 	switch {
+	case ad.Written && ad.Appended && f.Original != nil:
+		b.Message = fmt.Sprintf("What came of the %s was added to “%s”, the %s session it was handed off from", nonEmpty(f.Noun, "session"), f.Original.Title, b.Agent)
+		if ad.Branch != "" {
+			b.Message += "; its code is on " + ad.Branch
+		}
+		b.Message += "."
+		return b
 	case ad.Written:
 		b.Message = fmt.Sprintf("“%s” is here in %s", f.Title, b.Agent)
 		switch ad.Fidelity {

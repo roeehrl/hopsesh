@@ -56,7 +56,7 @@ only through that agent's own command, signed in as you, and never one you have 
 		},
 	}
 	cmd.Flags().Bool("json", false, "output JSON")
-	cmd.AddCommand(cloudsAllowCmd(true), cloudsAllowCmd(false), cloudsTestCmd(), cloudsEnvCmd())
+	cmd.AddCommand(cloudsAllowCmd(true), cloudsAllowCmd(false), cloudsTestCmd(), cloudsEnvCmd(), cloudsCleanupCmd(), cloudsContinueCmd())
 	return cmd
 }
 
@@ -206,6 +206,139 @@ func cloudsTestCmd() *cobra.Command {
 				return errors.New("a cloud check failed")
 			}
 			return nil
+		},
+	}
+	cmd.Flags().Bool("json", false, "output JSON")
+	return cmd
+}
+
+func cloudsCleanupCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "cleanup",
+		Short: "List the branches cloud hand-offs left on your remotes, and delete the merged ones when you say so",
+		Long: `Lists the handoff branches hopsesh pushed (hopsesh/handoff/…) and the clouds' own branches it
+brought home (claude/…, copilot/…), and asks each remote, read-only, whether their work is
+merged into its default branch: the branch's commit is in its history, the work brought
+here is, or (where gh is installed) GitHub says a pull request from it was merged. The
+merged ones whose cloud's delete_branch is after-merge (the default) are offered for
+deletion; on-undo and never keep them. Nothing is deleted until you confirm (or pass
+--yes). Each deletion is a lease (only while the branch is where hopsesh saw it), and
+hopsesh undo pushes the branches back.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			r, err := newRun(cmd)
+			if err != nil {
+				return err
+			}
+			ctx, cancel := ctxTimeout(5)
+			defer cancel()
+			cands := r.app.CleanupCandidates(ctx)
+			var offer []string
+			for _, c := range cands {
+				if c.Offer {
+					offer = append(offer, c.ID)
+				}
+			}
+			if !r.jsonOut {
+				if len(cands) == 0 {
+					r.printf("No branches from cloud hand-offs on your remotes.\n")
+					return nil
+				}
+				tw := tabwriter.NewWriter(r.out, 0, 2, 2, ' ', 0)
+				fmt.Fprintln(tw, "\tBRANCH\tREPOSITORY\tCLOUD\tSTATE")
+				for _, c := range cands {
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", map[bool]string{true: "✓", false: " "}[c.Offer], c.Branch, nonEmpty(c.Repo, c.Checkout), c.Cloud, c.Why)
+				}
+				tw.Flush()
+			}
+			list, _ := cmd.Flags().GetBool("list")
+			if len(offer) == 0 || list {
+				if r.jsonOut {
+					return r.emitJSON(map[string]any{"branches": cands})
+				}
+				if len(offer) == 0 {
+					r.printf("\nNone is merged and set to be deleted after merge, so there is nothing to delete.\n")
+				}
+				return nil
+			}
+			if !r.confirm(fmt.Sprintf("Delete the %d merged branch(es) marked ✓ on their remotes?", len(offer))) {
+				if r.jsonOut {
+					return r.emitJSON(map[string]any{"branches": cands})
+				}
+				if !r.interactive() && !r.yes {
+					r.printf("\nNothing deleted: run it interactively, or pass --yes to delete them.\n")
+					return nil
+				}
+				return errors.New("cancelled")
+			}
+			res, err := r.app.DeleteBranches(ctx, offer)
+			if r.jsonOut {
+				out := map[string]any{"branches": cands, "result": res}
+				if err != nil {
+					out["error"] = err.Error()
+				}
+				if jerr := r.emitJSON(out); jerr != nil {
+					return jerr
+				}
+				return err
+			}
+			if res != nil {
+				for _, c := range res.Deleted {
+					r.printf("✓ Deleted %s on %s (it was at %s)\n", c.Branch, nonEmpty(c.Repo, c.Remote), short7(c.Sha))
+				}
+				for b, why := range res.Failed {
+					r.printf("! Kept %s: %s\n", b, why)
+				}
+				if res.Journal != "" {
+					r.printf("Undo with: hopsesh undo %s\n", res.Journal)
+				}
+			}
+			return err
+		},
+	}
+	cmd.Flags().Bool("list", false, "only list them; delete nothing")
+	cmd.Flags().Bool("yes", false, "delete the offered branches without asking")
+	cmd.Flags().Bool("json", false, "output JSON")
+	return cmd
+}
+
+func cloudsContinueCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "continue <hop>",
+		Short: "Take a hop from one cloud to another on, once its session is here",
+		Long: `A hop from one cloud to another whose first leg waited for your terminal (Claude Code's
+teleport, started from the app or the terminal UI) goes on here: once the copy is here,
+hopsesh hands it off to the second cloud with the choices the hop was planned with.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			r, err := newRun(cmd)
+			if err != nil {
+				return err
+			}
+			ctx, cancel := ctxTimeout(30)
+			defer cancel()
+			progress := func(s string) { r.printf("  • %s\n", s) }
+			if r.jsonOut {
+				progress = nil
+			}
+			res, err := r.app.ContinueHop(ctx, args[0], progress)
+			if res != nil && res.Hop != nil && res.Hop.Remembered {
+				_ = config.Save(r.app.Cfg)
+			}
+			if r.jsonOut {
+				out := map[string]any{"result": res}
+				if err != nil {
+					out["error"] = err.Error()
+				}
+				if jerr := r.emitJSON(out); jerr != nil {
+					return jerr
+				}
+				return err
+			}
+			if res != nil {
+				r.renderHop(res)
+			}
+			return err
 		},
 	}
 	cmd.Flags().Bool("json", false, "output JSON")
@@ -567,6 +700,9 @@ func (r *run) renderBrought(b app.Brought, journal string) {
 		r.printf("  · %s\n", l)
 	}
 	r.printf("  Undo with: hopsesh undo %s\n", journal)
+	if b.Renamed != "" || b.Branch != "" && !b.Written {
+		r.printf("  Once its work is merged, hopsesh clouds cleanup offers to delete the cloud's branches (it asks first).\n")
+	}
 	if b.Outcome != move.FetchEmpty {
 		r.printf("\nContinue it:\n\n  %s\n", b.Command)
 		if b.ContinueName != "" && !b.Written {

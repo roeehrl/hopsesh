@@ -50,6 +50,11 @@ const (
 	// branch hopsesh renamed has From (its name before); Created says the operation made
 	// that branch too. Undo puts it back while it still points at Sha.
 	OpRef Op = "ref"
+	// OpDeletedRef is a branch hopsesh deleted on a git remote once its work was merged (a
+	// clean-up): Path is the checkout, Remote the remote's name there, Ref the full ref and
+	// Sha the commit it pointed at. Undo pushes it back, and refuses when the remote has a
+	// branch of that name again.
+	OpDeletedRef Op = "deleted-ref"
 )
 
 // Entry is one journaled write.
@@ -80,6 +85,9 @@ type Entry struct {
 	URL     string            `json:"url,omitempty"`
 	Updated time.Time         `json:"updated,omitempty"`
 	// OpAdopt uses Size and Sum for the whole file as adopted.
+	// Keep (OpPushRef): the user chose to keep the branch (delete_branch = "never"), so undo
+	// leaves it where it is and says so.
+	Keep bool `json:"keep,omitempty"`
 }
 
 // Journal is the undo record of one operation (a move, a continuation, a mark).
@@ -100,6 +108,14 @@ type Journal struct {
 	// Manual are steps undo could not take, which the user owes: a cloud session hopsesh
 	// cannot archive stays in the vendor's list until the user archives it there.
 	Manual []Manual `json:"manual,omitempty"`
+	// Kept are the branches undo left on their remotes because the user chose to keep them
+	// ("origin hopsesh/handoff/…").
+	Kept []string `json:"kept,omitempty"`
+	// Parts are the journals of the legs of a composite operation (a cloud-to-cloud hop:
+	// the fetch, then the hand-off), in order; undoing it undoes them, last first. PartOf
+	// is the composite operation a leg belongs to.
+	Parts  []string `json:"parts,omitempty"`
+	PartOf string   `json:"partOf,omitempty"`
 
 	dir string
 	mu  sync.Mutex
@@ -116,12 +132,29 @@ const (
 	KindMark     = "mark"     // a mark owed to a copy left behind
 	KindHandoff  = "handoff"  // a session handed off to a cloud (a branch, a cloud session, marks)
 	KindFetch    = "fetch"    // a session brought from a cloud (a worktree, an adopted session)
+	KindHop      = "hop"      // a cloud session handed on to another cloud through this machine (Parts)
+	KindCleanup  = "cleanup"  // branches deleted on a remote once their work was merged
 )
 
 // New starts a journal of one operation.
 func New(stateDir, kind, title string) (*Journal, error) {
-	id := time.Now().UTC().Format("20060102T150405.000Z")
-	id = strings.ReplaceAll(id, ".", "")
+	base := strings.ReplaceAll(time.Now().UTC().Format("20060102T150405.000Z"), ".", "")
+	if err := os.MkdirAll(Dir(stateDir), 0o700); err != nil {
+		return nil, err
+	}
+	// Two operations in the same millisecond (the legs of a hop) get ids of their own; a
+	// later one sorts after an earlier one.
+	id := base
+	for n := 2; ; n++ {
+		err := os.Mkdir(filepath.Join(Dir(stateDir), id), 0o700)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, fs.ErrExist) || n > 999 {
+			return nil, err
+		}
+		id = fmt.Sprintf("%s-%03d", base, n)
+	}
 	j := &Journal{ID: id, Kind: kind, Title: title, Time: time.Now().UTC(), dir: filepath.Join(Dir(stateDir), id)}
 	if err := os.MkdirAll(filepath.Join(j.dir, "backup"), 0o700); err != nil {
 		return nil, err
@@ -141,6 +174,9 @@ func (j *Journal) AddKey(k agent.SessionKey) {
 	j.Keys = append(j.Keys, k)
 	_ = j.saveLocked()
 }
+
+// Save writes the journal as it is now.
+func (j *Journal) Save() error { return j.save() }
 
 func (j *Journal) save() error {
 	j.mu.Lock()
@@ -218,8 +254,29 @@ func (j *Journal) Seal(fsFor func(machine string) (host.FS, error)) error {
 // that has more after its bytes; a file a vendor's CLI wrote that grew; a ref it pushed
 // that moved on; a cloud session with activity since. What r cannot reach (a machine, a
 // remote, a cloud) does not count, nor does a file or a ref that is gone.
-func (j *Journal) Changed(ctx context.Context, r Reach) error {
+func (j *Journal) Changed(ctx context.Context, r Reach) error { return j.changed(ctx, r, nil) }
+
+// ChangedBesides is Changed for an operation later ones built on (the first leg of a hop):
+// a file a later journal wrote too is left to that journal's own check, since undoing the
+// later one first puts it back.
+func (j *Journal) ChangedBesides(ctx context.Context, r Reach, later []*Journal) error {
+	touched := map[string]bool{}
+	for _, l := range later {
+		for _, e := range l.Entries {
+			touched[e.Machine+"\x00"+e.Path] = true
+		}
+	}
+	return j.changed(ctx, r, func(machine, p string) bool { return touched[machine+"\x00"+p] })
+}
+
+func (j *Journal) changed(ctx context.Context, r Reach, skip func(machine, p string) bool) error {
+	if skip == nil {
+		skip = func(string, string) bool { return false }
+	}
 	for i, e := range j.Entries {
+		if (e.Op == OpAppend || e.Op == OpAdopt) && skip(e.Machine, e.Path) {
+			continue
+		}
 		switch e.Op {
 		case OpAppend:
 			if e.Standalone || j.appendedAgain(i) {
@@ -253,11 +310,18 @@ func (j *Journal) Changed(ctx context.Context, r Reach) error {
 				return fmt.Errorf("%w: %s on %s (%s)", ErrChanged, filepath.Base(e.Path), e.Machine, what)
 			}
 		case OpPushRef:
-			if r.Refs == nil {
+			if r.Refs == nil || e.Keep {
 				continue
 			}
 			if now, err := r.Refs.RemoteRef(ctx, e.Machine, e.Path, e.Remote, e.Ref); err == nil && now != "" && now != e.Sha {
 				return fmt.Errorf("%w: %s on %s moved on from what hopsesh pushed (%s is now %s)", ErrChanged, shortRef(e.Ref), e.Remote, short(e.Sha), short(now))
+			}
+		case OpDeletedRef:
+			if r.Refs == nil {
+				continue
+			}
+			if now, err := r.Refs.RemoteRef(ctx, e.Machine, e.Path, e.Remote, e.Ref); err == nil && now != "" {
+				return fmt.Errorf("%w: %s on %s is there again (at %s)", ErrChanged, shortRef(e.Ref), e.Remote, short(now))
 			}
 		case OpCloud:
 			if r.Clouds == nil || e.Key == nil {
@@ -283,6 +347,9 @@ func (j *Journal) Changed(ctx context.Context, r Reach) error {
 		}
 	}
 	for _, a := range j.After {
+		if skip(a.Machine, a.Path) {
+			continue
+		}
 		fsys, err := r.fs(a.Machine)
 		if err != nil {
 			continue
@@ -408,6 +475,9 @@ type Refs interface {
 	// DeleteRef deletes ref on remote if it still points at expect (a lease), and refuses
 	// otherwise.
 	DeleteRef(ctx context.Context, machine, dir, remote, ref, expect string) error
+	// RestoreRef pushes sha to ref on remote again, and refuses when the remote has a ref of
+	// that name.
+	RestoreRef(ctx context.Context, machine, dir, remote, ref, sha string) error
 }
 
 // Clouds reaches the sessions an operation started in vendor clouds, through the modules'
@@ -428,6 +498,34 @@ var ErrManual = errors.New("only the user can archive it, on its page")
 // undo can delete it again (only while it still points at sha).
 func (j *Journal) PushRef(machine, dir, remote, ref, sha string) error {
 	return j.record(Entry{Op: OpPushRef, Machine: machine, Path: dir, Remote: remote, Ref: ref, Sha: sha})
+}
+
+// KeepPushed records a ref about to be pushed that undo must leave where it is: the user
+// chose to keep it (it is reported in Kept).
+func (j *Journal) KeepPushed(machine, dir, remote, ref, sha string) error {
+	return j.record(Entry{Op: OpPushRef, Machine: machine, Path: dir, Remote: remote, Ref: ref, Sha: sha, Keep: true})
+}
+
+// DeletedRef records a branch about to be deleted on remote (it points at sha), so undo
+// pushes it back.
+func (j *Journal) DeletedRef(machine, dir, remote, ref, sha string) error {
+	return j.record(Entry{Op: OpDeletedRef, Machine: machine, Path: dir, Remote: remote, Ref: ref, Sha: sha})
+}
+
+// AddPart records the journal of a leg of this composite operation (in order).
+func (j *Journal) AddPart(id string) error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.Parts = append(j.Parts, id)
+	return j.saveLocked()
+}
+
+// SetPartOf records the composite operation this journal is a leg of.
+func (j *Journal) SetPartOf(id string) error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.PartOf = id
+	return j.saveLocked()
 }
 
 // Cloud records a session the operation started in a cloud (machine ran the driver).
@@ -699,7 +797,7 @@ func (j *Journal) Undo(ctx context.Context, r Reach, force bool) error {
 			return err
 		}
 	}
-	var problems []string
+	var problems, kept []string
 	var manual []Manual
 	// Worktrees go first: a branch is only renamed or deleted once no worktree hopsesh made
 	// has it checked out.
@@ -721,7 +819,18 @@ func (j *Journal) Undo(ctx context.Context, r Reach, force bool) error {
 			}
 			continue
 		case OpPushRef:
+			if e.Keep {
+				kept = append(kept, e.Remote+" "+shortRef(e.Ref))
+				continue
+			}
 			if err := undoPushRef(ctx, r, e, force); err != nil {
+				problems = append(problems, fmt.Sprintf("%s on %s: %v", shortRef(e.Ref), e.Remote, err))
+			}
+			continue
+		case OpDeletedRef:
+			if r.Refs == nil {
+				problems = append(problems, fmt.Sprintf("%s on %s: the remote cannot be reached from here", shortRef(e.Ref), e.Remote))
+			} else if err := r.Refs.RestoreRef(ctx, e.Machine, e.Path, e.Remote, e.Ref, e.Sha); err != nil {
 				problems = append(problems, fmt.Sprintf("%s on %s: %v", shortRef(e.Ref), e.Remote, err))
 			}
 			continue
@@ -756,7 +865,7 @@ func (j *Journal) Undo(ctx context.Context, r Reach, force bool) error {
 		}
 	}
 	j.mu.Lock()
-	j.Undone, j.Manual = true, manual
+	j.Undone, j.Manual, j.Kept = true, manual, kept
 	err := j.saveLocked()
 	j.mu.Unlock()
 	if err != nil {

@@ -187,6 +187,7 @@ type Plan struct {
 	NativeCopy     *NativeCopy   `json:"nativeCopy,omitempty"`
 	Fetch          *FetchPlan    `json:"fetch,omitempty"`
 	Handoff        *HandoffPlan  `json:"handoff,omitempty"`
+	Hop            *HopPlan      `json:"hop,omitempty"`
 
 	bundle     agent.Bundle
 	native     *Plan // the move that keeps NativeCopy

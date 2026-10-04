@@ -92,6 +92,9 @@ func writeFetched(ctx context.Context, p *Plan, env Env, j *journal.Journal, bas
 		return err
 	}
 	head, _ := repos.Head(ctx, fp.Worktree)
+	if fp.Append && fp.Original != nil {
+		return appendWritten(ctx, p, env, j, nodes, base, branch, res)
+	}
 	prof := writer.Profile(tin)
 	r := convert.Render(convert.Request{Nodes: nodes, From: fp.CloudTitle, To: spec.Name, Fidelity: convert.History, Window: prof.Window,
 		Briefing: convert.Briefing{SourceID: string(fp.Session), SourceLoc: fp.Cloud, TargetLoc: machine, When: time.Now(), Branch: branch,
@@ -126,7 +129,7 @@ func writeFetched(ctx context.Context, p *Plan, env Env, j *journal.Journal, bas
 		URL: fp.URL, Branch: fp.CloudBranch})
 	to := m.Upsert(lineage.Replica{Key: key, Location: machine, AgentVersion: tin.Version, Head: w.Cursor.Head, Offset: w.Cursor.Offset, Time: now})
 	m.Hops = append(m.Hops, lineage.Hop{Time: now, From: from, To: to, Kind: lineage.HopFetch, Fidelity: string(fp.Fidelity),
-		Written: &lineage.Range{From: w.From, To: w.To}, Code: &lineage.CodeHop{Way: way, Remote: fp.Repo, Branch: nonEmpty(branch, fp.CloudBranch), Base: base}})
+		Written: &lineage.Range{From: w.From, To: w.To}, Code: &lineage.CodeHop{Way: way, Remote: fp.Repo, Branch: codeBranch(fp, branch), Base: base}})
 	if err := j.WriteFile(host.LocalFS(), machine, lineage.PathFor(w.Path), m.Encode(), 0o600); err != nil {
 		res.Warnings = append(res.Warnings, "could not record the session's lineage here: "+err.Error())
 	}
@@ -148,5 +151,89 @@ func writeFetched(ctx context.Context, p *Plan, env Env, j *journal.Journal, bas
 		"branch": branch, "journal": j.ID}})
 	env.Audit.Write(audit.Entry{Action: "cloud.write", Host: machine, Session: key.String(), Detail: map[string]any{"from": string(fp.Session),
 		"cloud": fp.Cloud, "path": w.Path, "messages": fp.Messages, "fidelity": string(fp.Fidelity), "journal": j.ID}})
+	return nil
+}
+
+// codeBranch is the branch a fetch's lineage names for its code: the cloud's own branch on
+// the remote when the code came on one (a hand-off from here can reuse it), else the branch
+// it is on here.
+func codeBranch(fp *FetchPlan, local string) string {
+	if !fp.Diff && fp.CloudBranch != "" {
+		return fp.CloudBranch
+	}
+	return nonEmpty(local, fp.CloudBranch)
+}
+
+// appendWritten adds what the cloud brought to the session it was handed off from (as it
+// was left: a delta append, so the original's own turns stay exactly as they were), instead
+// of writing a new session; the original is then what resumes. The briefing hopsesh sent
+// is left out: the original holds what it summed up.
+func appendWritten(ctx context.Context, p *Plan, env Env, j *journal.Journal, nodes []ir.Node, base, branch string, res *Result) error {
+	fp, in := p.Fetch, p.fetchIn
+	tm, tin := in.Module, in.Install
+	if in.Continue != nil {
+		tm, tin = in.Continue, in.ContinueInstall
+	}
+	spec, o := tm.Spec(), *fp.Original
+	writer := tm.(agent.Writer)
+	h, err := in.Machine.For(ctx, spec, tin, j)
+	if err != nil {
+		return err
+	}
+	skip := 0
+	for i, n := range nodes {
+		if n.Kind == ir.KindMessage && n.Actor == ir.User && strings.HasPrefix(strings.TrimSpace(n.Text), agent.NotePrefix) {
+			skip = i + 1
+			break
+		}
+	}
+	machine := in.Machine.Name
+	head, _ := repos.Head(ctx, fp.Worktree)
+	r := convert.Render(convert.Request{Nodes: nodes, SkipBefore: skip, From: fp.CloudTitle, To: spec.Name, Fidelity: convert.History, Window: writer.Profile(tin).Window,
+		Briefing: convert.Briefing{SourceID: string(fp.Session), SourceLoc: fp.Cloud, TargetLoc: machine, When: time.Now(), Branch: branch, Head: short(head), ToolNames: spec.Tools}})
+	if env.Progress != nil {
+		env.Progress("adding the " + fp.Noun + "'s work to “" + o.Title + "”")
+	}
+	w, err := writer.Write(ctx, h, tin, ir.WriteRequest{Mode: ir.WriteAppend, SessionID: string(o.Key.Session), Expect: fp.originalHead,
+		Header: ir.Header{CWD: o.CWD, Title: o.Title, GitBranch: branch}, Items: r.Items})
+	if err != nil {
+		return fmt.Errorf("adding to %s: %w", o.Title, err)
+	}
+	j.AddKey(o.Key)
+	m := in.Lineage
+	if m == nil {
+		m = lineage.New(newID())
+	}
+	now := time.Now().UTC()
+	way := agent.ViaBranch
+	if fp.Diff {
+		way = agent.ViaDiff
+	}
+	from := m.Upsert(lineage.Replica{Key: agent.SessionKey{Agent: in.Module.Spec().ID, Session: fp.Session}, Location: fp.Cloud, Time: now, URL: fp.URL, Branch: fp.CloudBranch})
+	to := m.Upsert(lineage.Replica{Key: o.Key, Location: machine, AgentVersion: tin.Version, Head: w.Cursor.Head, Offset: w.Cursor.Offset, Time: now})
+	m.Hops = append(m.Hops, lineage.Hop{Time: now, From: from, To: to, Kind: lineage.HopFetch, Fidelity: string(fp.Fidelity),
+		Written: &lineage.Range{From: w.From, To: w.To}, Code: &lineage.CodeHop{Way: way, Remote: fp.Repo, Branch: codeBranch(fp, branch), Base: base}})
+	if err := j.WriteFile(host.LocalFS(), machine, lineage.PathFor(o.Path), m.Encode(), 0o600); err != nil {
+		res.Warnings = append(res.Warnings, "could not record the session's lineage here: "+err.Error())
+	}
+	pl := agent.Placement{Key: o.Key, SourceID: o.Key.Session, CWD: o.CWD, Location: machine, Name: o.Title}
+	resume := tm.Resume(tin, o.Key, pl, agent.ResumeOptions{})
+	ad := &Adopted{Time: now, Outcome: FetchComplete, Key: o.Key, Path: o.Path, Restored: fp.Messages, Branch: branch, Resume: resume,
+		Command: launch.Shell(resume, "", launch.DefaultShell()), Written: true, Appended: true, Fidelity: string(fp.Fidelity), Changes: fp.Changes, Warnings: res.Warnings}
+	pf := &Fetch{Journal: j.ID, Time: now, Machine: machine, Agent: in.Module.Spec().ID, Cloud: fp.Cloud, CloudTitle: fp.CloudTitle,
+		Session: fp.Session, URL: fp.URL, Title: p.Title, Repo: fp.Repo, Checkout: fp.Checkout, Worktree: fp.Worktree, Base: base,
+		CloudBranch: fp.CloudBranch, Lineage: m, Adopted: ad, Loss: fp.Loss, Noun: fp.Noun, Original: &o, OriginalHead: fp.originalHead}
+	if in.Continue != nil {
+		pf.Continue, pf.ContinueName = fp.ContinueIn, fp.ContinueName
+	}
+	if err := SaveFetch(env.StateDir, pf); err != nil {
+		return err
+	}
+	res.Fetch.Outcome, res.Fetch.Branch, res.Fetch.Key = FetchComplete, branch, o.Key.String()
+	res.Command = ad.Command
+	env.Audit.Write(audit.Entry{Action: "cloud.fetch", Session: p.Key.String(), Detail: map[string]any{"cloud": fp.Cloud, "worktree": fp.Worktree,
+		"branch": branch, "journal": j.ID, "appended": true}})
+	env.Audit.Write(audit.Entry{Action: "cloud.write", Host: machine, Session: o.Key.String(), Detail: map[string]any{"from": string(fp.Session),
+		"cloud": fp.Cloud, "path": o.Path, "messages": fp.Messages, "fidelity": string(fp.Fidelity), "journal": j.ID, "appended": true}})
 	return nil
 }

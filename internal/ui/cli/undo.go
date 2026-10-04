@@ -18,7 +18,9 @@ func undoCmd() *cobra.Command {
 files come back, appended records are cut off, set-aside copies return. Writes on other
 machines are undone over SSH. Clones and worktrees are kept. A hand-off's branch is deleted
 (only while it is as hopsesh pushed it) and its mark taken off; the cloud session stays in
-the cloud, to archive there. --list shows what can be undone.
+the cloud, to archive there (with delete_branch = never the branch stays too). A hop from
+one cloud to another is undone as a whole, its hand-off first; a branch clean-up pushes the
+branches back. --list shows what can be undone.
 
 A move whose session was used afterwards is not undone, since that later work would be
 lost; --force undoes it anyway.`,
@@ -65,6 +67,12 @@ lost; --force undoes it anyway.`,
 				return err
 			}
 			r.printf("Undid %q (%d change(s)).\n", j.Title, len(j.Entries))
+			for _, k := range j.Kept {
+				r.printf("Kept the branch %s, as you chose (delete_branch = never).\n", k)
+			}
+			if len(j.Parts) > 0 {
+				r.printf("Both legs of the hop were undone.\n")
+			}
 			for _, m := range j.Manual {
 				r.printf("The %s session %s stays in the cloud; archive it there if you want it gone: %s\n", m.Cloud, m.Key.Session, m.URL)
 			}

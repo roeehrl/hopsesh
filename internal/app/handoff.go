@@ -9,6 +9,7 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/core/audit"
 	"github.com/roeehrl/hopsesh/internal/core/host"
+	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/repos"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
@@ -136,7 +137,7 @@ func (a *App) PlanHandoff(ctx context.Context, inv *Inventory, e Entry, cloud st
 		Source: move.Side{Machine: src.host, Module: sm, Install: sin}, Session: e.Session, Live: e.Live, Git: e.Git, GitErr: e.GitError,
 		Lineage: e.Lineage, Runner: gitOn(src), Here: here.host, Module: mod, Install: in, Host: h, Cloud: cl,
 		Settings: move.HandoffSettings{Code: set.Code, Untracked: set.Untracked, BranchPrefix: set.BranchPrefix, DeleteBranch: set.DeleteBranch},
-		Allowed:  a.Cfg.CloudAllowed(cloud), Worktrees: a.Reg.Worktrees(), Terminal: a.Steps != nil,
+		Allowed:  a.Cfg.CloudAllowed(cloud), Worktrees: a.Reg.Worktrees(), Terminal: a.Steps != nil, FromBranch: broughtBranch(e),
 	}
 	if t, ok := mod.(agent.CloudTester); ok {
 		hin.Tester = func(ctx context.Context) (agent.CloudTest, error) {
@@ -295,4 +296,23 @@ func (g sshGit) Remove(ctx context.Context, p string) error {
 		return err
 	}
 	return nil
+}
+
+// broughtBranch is the cloud branch a session's code came on, when it was brought here from
+// a cloud ("" otherwise): its lineage's last fetch into this copy.
+func broughtBranch(e Entry) string {
+	l := e.Lineage
+	if l == nil {
+		return ""
+	}
+	b := ""
+	for _, h := range l.Hops {
+		if h.Kind != lineage.HopFetch || h.Code == nil || h.To < 0 || h.To >= len(l.Replicas) {
+			continue
+		}
+		if to := l.Replicas[h.To]; to.Key == e.Session.Key && to.Location == e.Machine {
+			b = h.Code.Branch
+		}
+	}
+	return b
 }

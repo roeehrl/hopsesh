@@ -28,7 +28,7 @@ func addHandoffFlags(cmd *cobra.Command) {
 
 func handoffCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "handoff [<machine>:][<agent>/]<id-or-title> --to <cloud>",
+		Use:   "handoff [<machine>:][<agent>/]<id-or-title> | <cloud>:<id> | <cloud link> --to <cloud>",
 		Short: "Hand a session off to an agent's cloud: a briefing and the code, never the conversation",
 		Long: `Starts a session in an agent's cloud (claude-cloud: Claude Code on the web; codex-cloud: a Codex cloud
 task; copilot-cloud: a GitHub Copilot cloud agent task, through gh; jules, devin, amp: a
@@ -59,7 +59,14 @@ tasks are reachable: the new Codex Cloud has no command line yet.
 
 The Copilot cloud agent starts from the handoff branch (gh agent-task create --base) and
 opens its pull request against it. The jules, devin and amp commands can't name the branch
-a session starts from, so the briefing asks the cloud agent to check it out first.`,
+a session starts from, so the briefing asks the cloud agent to check it out first.
+
+A cloud session hands on to another cloud through this machine (claude-cloud:<id> --to
+codex-cloud, codex-cloud:<id> --to claude-cloud, …): hopsesh brings it here first, as
+hopsesh pull does (Claude Code's teleport runs in this terminal: send a message in the
+copy, then exit), keeps that copy, and hands it off from here. The plan shows both legs and
+what the trip loses; hopsesh undo takes both legs back. --in chooses the agent the session
+is in here (where the cloud's text is written), --to-dir the repository's checkout here.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			to, _ := cmd.Flags().GetString("to")
@@ -74,6 +81,8 @@ a session starts from, so the briefing asks the cloud agent to check it out firs
 	f.Bool("dry-run", false, "show the plan and stop")
 	f.Bool("yes", false, "do not ask for confirmation")
 	f.Bool("json", false, "output JSON")
+	f.String("in", "", "from a cloud: the agent the session is in here between the two clouds (default: as hopsesh pull)")
+	f.String("to-dir", "", "from a cloud: the repository's checkout here (default: the one hopsesh finds)")
 	addHandoffFlags(cmd)
 	_ = cmd.MarkFlagRequired("to")
 	return cmd
@@ -142,6 +151,9 @@ func handoff(cmd *cobra.Command, refArg, cloud string) error {
 	opt, err := r.handoffOptions(cmd, cloud)
 	if err != nil {
 		return err
+	}
+	if from, id, ok := r.cloudRef(refArg); ok {
+		return r.hop(cmd, from, id, cloud, opt)
 	}
 	ref := app.ParseRef(refArg)
 	inv := r.scanFor(cmd, ref.Machine, ref)
@@ -412,4 +424,156 @@ func capital(s string) string {
 		return s
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// hop hands a cloud session on to another cloud through this machine: the plan of both
+// legs, then the bring-back (the driver's terminal command runs here) and the hand-off.
+func (r *run) hop(cmd *cobra.Command, from string, id agent.SessionID, to string, opt move.Options) error {
+	if id == "" {
+		return fmt.Errorf("name the %s session: %s:<id> or its link", from, from)
+	}
+	via := ""
+	if f := cmd.Flags().Lookup("in"); f != nil {
+		via = f.Value.String()
+	}
+	if f := cmd.Flags().Lookup("to-dir"); f != nil && f.Value.String() != "" {
+		opt.TargetDir = expandHome(f.Value.String())
+	} else if wd, err := os.Getwd(); err == nil && isCheckout(wd) {
+		opt.TargetDir = wd
+	}
+	inv := r.scanWith(cmd, "", app.ScanOptions{Hosts: []string{app.LocalName(), from, to}, GitFor: r.app.GitFor(app.Ref{Query: string(id)})})
+	defer inv.Close()
+	e, err := inv.CloudEntry(r.app, from, id)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := ctxTimeout(30)
+	defer cancel()
+	p, err := r.app.PlanHop(ctx, inv, e, to, agent.ID(via), opt)
+	if err != nil {
+		return err
+	}
+	dry, _ := cmd.Flags().GetBool("dry-run")
+	if r.jsonOut && dry {
+		return r.emitJSON(p)
+	}
+	if !r.jsonOut {
+		r.renderHopPlan(p)
+	}
+	if len(p.Blockers) > 0 {
+		return fmt.Errorf("cannot hand on: %s", strings.Join(p.Blockers, "; "))
+	}
+	if dry {
+		return nil
+	}
+	if !r.confirm("Hand it on?") {
+		if !r.interactive() && !r.yes {
+			return errors.New("not confirmed: run interactively or pass --yes (hopsesh plan … --to <cloud> shows the plan only)")
+		}
+		return errors.New("cancelled")
+	}
+	progress := func(s string) { r.printf("  • %s\n", s) }
+	if r.jsonOut {
+		progress = nil
+	}
+	res, applyErr := r.app.Apply(ctx, p, move.Input{}, progress)
+	if res != nil && res.Hop != nil && res.Hop.Remembered {
+		if err := config.Save(r.app.Cfg); err != nil && !r.jsonOut {
+			r.printf("  ! Could not remember the environment: %v\n", err)
+		}
+	}
+	if r.jsonOut {
+		out := map[string]any{"plan": p, "result": res}
+		if res != nil {
+			out["hop"], out["handoff"] = res.Hop, res.Handoff
+		}
+		if applyErr != nil {
+			out["error"] = applyErr.Error()
+		}
+		if err := r.emitJSON(out); err != nil {
+			return err
+		}
+		return applyErr
+	}
+	if res != nil {
+		r.renderHop(res)
+	}
+	return applyErr
+}
+
+func (r *run) renderHopPlan(p *move.Plan) {
+	hp := p.Hop
+	r.printf("Hand %q on from %s to %s, through %s\n", p.Title, hp.FromTitle, hp.ToTitle, hp.Via)
+	for i, l := range hp.Legs {
+		r.printf("  %d. %-10s %s → %s (%s): %s\n", i+1, l.Verb, l.From, l.To, l.Fidelity, l.Words)
+	}
+	r.printf("  carries   %s\n", hp.Conversation)
+	r.printf("  code      %s\n", hp.Code)
+	if fp := hp.Bring.Fetch; fp != nil {
+		if fp.Worktree != "" {
+			r.printf("  here      %s, a new worktree of %s\n", fp.Worktree, nonEmpty(fp.Checkout, fp.Repo))
+		}
+		if fp.Command != "" {
+			r.printf("  runs      %s\n", fp.Command)
+		}
+	}
+	if hp.Terminal != "" {
+		r.printf("  ! %s\n", hp.Terminal)
+	}
+	if t := hp.Then; t != nil {
+		if t.EnvNeeded {
+			if t.Env != "" {
+				r.printf("  env       %s\n", t.EnvName)
+			} else {
+				for _, e := range t.Envs {
+					r.printf("  env?      --env %s   %s\n", e.Value, e.Label)
+				}
+			}
+		}
+		if p.Mark == move.MarkNow {
+			r.printf("  mark      the copy here becomes %q\n", t.MarkTitle)
+		}
+		if t.Terminal != "" {
+			r.printf("  terminal  %s\n", t.Terminal)
+		}
+	}
+	checks := append([]move.Check(nil), hp.Bring.Fetch.Checks...)
+	if hp.Then != nil {
+		checks = append(checks, hp.Then.Checks...)
+	}
+	for _, c := range checks {
+		mark := map[string]string{"ok": "✓", "warn": "!", "err": "✗"}[c.State]
+		r.printf("  %s %s\n", mark, c.Text)
+	}
+	for _, l := range hp.Loss {
+		r.printf("  · %s\n", l)
+	}
+	if hp.Then != nil {
+		r.printf("  · %s\n", hp.Then.Usage)
+	}
+}
+
+func (r *run) renderHop(res *move.Result) {
+	h := res.Hop
+	if h == nil {
+		return
+	}
+	switch h.State {
+	case move.HopWaiting:
+		r.printf("\n%s\n  Run it in your terminal:\n\n  %s\n\n  Then: hopsesh clouds continue %s\n", h.Message, h.Command, res.Journal)
+		return
+	case move.HopFailed:
+		if res.Handoff != nil {
+			r.renderHandedOff(res)
+		}
+		r.printf("\n✗ %s\n", h.Message)
+		return
+	}
+	if res.Fetch != nil {
+		r.printf("\n✓ Here: %s (%s)\n", nonEmpty(h.Key, res.Fetch.Key), res.Fetch.Worktree)
+	}
+	if res.Handoff != nil {
+		r.renderHandedOff(res)
+	}
+	r.printf("  Undo both legs with: hopsesh undo %s\n", res.Journal)
 }

@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,7 +12,10 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/move"
+	"github.com/roeehrl/hopsesh/internal/core/proc"
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 // Terminal steps on the command line: a cloud driver that starts a session only in a
@@ -65,4 +69,21 @@ func terminalStepCmd() *cobra.Command {
 			return r.app.RunStepFile(args[0], os.Stdin, os.Stdout)
 		},
 	}
+}
+
+// runHere runs a driver's command in this terminal and waits for it (a hop's teleport), as
+// pull --run does; with --json it writes to standard error.
+func (r *run) runHere(_ context.Context, run agent.Command) error {
+	if len(run.Argv) == 0 {
+		return errors.New("no command to run")
+	}
+	c := proc.Command(run.Argv[0], run.Argv[1:]...)
+	c.Dir, c.Env = run.Dir, host.Without(os.Environ(), run.Unset)
+	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if r.jsonOut {
+		c.Stdout = os.Stderr // standard output is the JSON
+	} else {
+		r.printf("\nRunning %s here; hopsesh hands the copy on when it ends.\n\n", strings.Join(run.Argv, " "))
+	}
+	return c.Run()
 }
