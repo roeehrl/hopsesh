@@ -21,6 +21,27 @@ All notable changes to this project are documented here. The format follows
   here**, a plan sheet and a done screen for bringing one back, a card per cloud under
   Machines (Allow, Test), and **Paste a cloud link** and **Find in Claude Code**. In the
   terminal UI: clouds in the header and as rows; enter brings one here.
+- Hand a session off to Claude Code cloud: `hopsesh handoff <session> --to claude-cloud`
+  (`hopsesh plan <session> --to claude-cloud` shows the plan first) starts a cloud session
+  whose first prompt is a briefing of about 2,000 tokens, with likely secrets masked. A
+  clean branch already on GitHub goes as it is; otherwise hopsesh pushes a
+  `hopsesh/handoff/<date>-<id>` branch with a snapshot of the unpushed commits and changed
+  files, leaving your checkout, index and branch as they were. Untracked files go only when
+  you name them (`--untracked`); files that look like credentials never go. `--bundle`
+  lets Claude Code upload the repository instead (for one that isn't on GitHub);
+  `--history-file` also commits the conversation as `.hopsesh/handoff.md`. The session here
+  is marked, the hop is recorded in its lineage, and `hopsesh undo` deletes the branch (only
+  while the cloud hasn't pushed to it) and the mark. Works for sessions on your other
+  machines too: the snapshot and the push happen there, over SSH.
+- `hopsesh followup claude-cloud:<id> "<text>"` sends a cloud session a message.
+- In the app: **Hand off ▸** on a session (every cloud, a disabled one with its reason),
+  the hand-off sheet (the editable briefing, the branch, what stays on this Mac, the
+  options), the steps as they run (and which one failed), and a done screen with the link,
+  Undo and **Send a follow-up**; *Hand off to…* in the command palette; hand-offs in
+  Activity. In the terminal UI: `c` hands the selected session off.
+- The skill handles "hand this off to Claude Code cloud" (it plans first and asks), and its
+  approval rules let `clouds --json` and `clouds test` run without asking while `handoff`
+  and `followup` always ask.
 - Four cloud-only agents: the GitHub Copilot cloud agent (through `gh agent-task` and
   `gh pr`), Jules (`jules remote`), Devin (`devin list --format json`) and Amp
   (`amp threads`). Once allowed, each lists its sessions in `hopsesh clouds`, `hopsesh ls

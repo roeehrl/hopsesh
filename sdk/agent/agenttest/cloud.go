@@ -35,6 +35,9 @@ type CloudOptions struct {
 	// returns its id; RunCloud then passes it in CloudQuery.Known. For a module without
 	// CloudSender.
 	Seed func(cloud string) agent.SessionID
+	// Request is the hand-off RunCloud sends, for a driver that starts from a real checkout
+	// (claude --cloud clones the current branch of Dir's repository); nil: a made-up one.
+	Request func(c agent.Cloud) agent.SendRequest
 }
 
 // unreadableKnown is an id no vendor issues: a listing told about it reports it in
@@ -148,7 +151,7 @@ func RunCloudWith(t *testing.T, m agent.Module, programs Programs, o CloudOption
 			h, in := setup(t, "")
 			var id agent.SessionID
 			if okS {
-				cs, err := sender.SendCloud(ctx, h, in, sendRequest(c))
+				cs, err := sender.SendCloud(ctx, h, in, o.request(c))
 				if err != nil {
 					t.Fatalf("SendCloud: %v", err)
 				}
@@ -253,7 +256,7 @@ func RunCloudWith(t *testing.T, m agent.Module, programs Programs, o CloudOption
 					}
 				}
 				if okS {
-					if _, err := sender.SendCloud(ctx, h, in, sendRequest(c)); !errors.Is(err, want) {
+					if _, err := sender.SendCloud(ctx, h, in, o.request(c)); !errors.Is(err, want) {
 						t.Errorf("SendCloud while %s: want %v, got %v", fail, want, err)
 					}
 				}
@@ -265,14 +268,14 @@ func RunCloudWith(t *testing.T, m agent.Module, programs Programs, o CloudOption
 			}
 			if okS {
 				h, in := setup(t, "repo-mismatch")
-				if _, err := sender.SendCloud(ctx, h, in, sendRequest(c)); !errors.Is(err, agent.ErrRepoUnsupported) {
+				if _, err := sender.SendCloud(ctx, h, in, o.request(c)); !errors.Is(err, agent.ErrRepoUnsupported) {
 					t.Errorf("SendCloud to a repository the cloud cannot clone: want ErrRepoUnsupported, got %v", err)
 				}
 			}
 			if okL {
 				h, in := setup(t, "")
 				if okS {
-					if _, err := sender.SendCloud(ctx, h, in, sendRequest(c)); err != nil {
+					if _, err := sender.SendCloud(ctx, h, in, o.request(c)); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -306,6 +309,14 @@ func RunCloudWith(t *testing.T, m agent.Module, programs Programs, o CloudOption
 			}
 		}
 	})
+}
+
+// request is the hand-off to send: the module's own (Request), or a made-up one.
+func (o CloudOptions) request(c agent.Cloud) agent.SendRequest {
+	if o.Request != nil {
+		return o.Request(c)
+	}
+	return sendRequest(c)
 }
 
 // sendRequest is a handoff as the core would prepare it.

@@ -60,6 +60,8 @@ type Result struct {
 	Owed *lineage.Pending `json:"owed,omitempty"`
 	// Fetch is what a fetch from a cloud did.
 	Fetch *FetchResult `json:"fetch,omitempty"`
+	// Handoff is what a hand-off to a cloud did (also when a step failed).
+	Handoff *HandoffResult `json:"handoff,omitempty"`
 }
 
 // machinesOf reaches the two machines of a move by name, for the journal.
@@ -80,8 +82,11 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (*Result, error) {
 	if len(p.Blockers) > 0 {
 		return nil, fmt.Errorf("%w: %s", ErrBlocked, strings.Join(p.Blockers, "; "))
 	}
-	if p.Kind == KindFetch {
+	switch p.Kind {
+	case KindFetch:
 		return applyFetch(ctx, p, env)
+	case KindHandoff:
+		return applyHandoff(ctx, p, env)
 	}
 	step := func(s string) {
 		if env.Progress != nil {

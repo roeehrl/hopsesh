@@ -274,6 +274,9 @@ type SendRequest struct {
 	Diff  []byte // only with ViaStartingDiff
 	Env   string // the vendor's environment id, when the cloud has NeedEnvironment
 	Title string
+	// Code is how the code goes up: ViaBranch (Branch is pushed; the default) or ViaBundle
+	// (the driver uploads the repository from Dir itself, and nothing is pushed).
+	Code CodeWay
 }
 
 // CloudFetcher brings a cloud session to this machine (Claude Code's teleport, codex

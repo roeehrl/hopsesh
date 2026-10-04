@@ -17,8 +17,9 @@ import (
 const cloudName = "claude-cloud"
 
 // cloud declares Claude Code's cloud sessions (Claude Code on the web) as data: the
-// module reaches them through the claude binary only (--teleport <id>; later --cloud and
-// -p … --cloud <id>), never through Anthropic's web backend.
+// module reaches them through the claude binary only (-p … --cloud to start one, -p …
+// --cloud <id> to follow one up, --teleport <id> to bring one here), never through
+// Anthropic's web backend.
 func cloud() agent.Cloud {
 	return agent.Cloud{
 		Name:   cloudName,
@@ -58,7 +59,7 @@ func cloud() agent.Cloud {
 			Grep:  `teleport|--cloud|--remote|Remote Control|bridge|cloud session|cse_|self-hosted|Continue in|environment|sessions:|deprecat`,
 			// `claude remote-control --help` needs a claude.ai login, so it is not run.
 			Help:   [][]string{{"claude", "--help"}},
-			Relies: []string{"--cloud", "--remote", "--teleport", "--environment", "--remote-control", "--session-id", "--fork-session", "--resume"},
+			Relies: []string{"--cloud", "--teleport", "--print", "--output-format", "--environment", "--remote-control", "--session-id", "--fork-session", "--resume"},
 			Issues: []string{
 				"anthropics/claude-code#66373", // local → cloud handoff from the CLI
 				"anthropics/claude-code#97813", // attach to a running cloud session

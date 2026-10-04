@@ -9,6 +9,9 @@
 | `{{.Bin}} plan <ref> --json [--in A] [flags]` | what pulling it would do; never writes |
 | `{{.Bin}} agents --json` | the agents hopsesh supports and what is installed here |
 | `{{.Bin}} hosts --json` | known machines and whether each is allowed |
+| `{{.Bin}} clouds --json` | the agents' clouds, whether each is allowed, and their state |
+| `{{.Bin}} clouds test [cloud]` | check a cloud's login and flags, read-only |
+| `{{.Bin}} plan <ref> --to <cloud> --json [flags]` | what handing it off to a cloud would do; never writes |
 | `{{.Bin}} doctor [machine] --json` | SSH, host trust, agents, skill |
 | `{{.Bin}} version` | the installed version |
 
@@ -17,7 +20,24 @@
 `{{.Bin}} pull <ref> --json --yes [flags]` moves the session here or continues it in another
 agent. `{{.Bin}} push <ref> <machine> --json --yes [flags]` sends a session on this machine to
 another machine whose hopsesh receives sessions (same flags, `--dry-run` to plan; `--to` is a
-folder there). `{{.Bin}} undo <id>` reverses either, on both machines for a push.
+folder there). `{{.Bin}} handoff <ref> --to <cloud> --json --yes [flags]` starts a cloud session
+that continues it (a briefing and a branch). `{{.Bin}} followup <cloud>:<id> "<text>" --yes`
+sends a cloud session one message (a paid turn). `{{.Bin}} undo <id>` reverses a pull, a push
+or a hand-off (a cloud session itself stays in the cloud).
+
+## handoff flags
+
+| Flag | Meaning |
+|---|---|
+| `--to <cloud>` | the cloud (`claude-cloud`) |
+| `--untracked <path or glob>` | carry this untracked file (repeat it); credential-like files never go |
+| `--bundle` | the agent uploads the repository instead of hopsesh pushing a branch (a repository not on GitHub; results can't be pushed back) |
+| `--history-file` | also commit the conversation as `.hopsesh/handoff.md` (only when the user asks: anyone who can see the branch can read it) |
+| `--note-file <path>` | a handoff note for the briefing |
+| `--brief-file <path>` | the briefing the user wrote, instead of hopsesh's |
+| `--carry-rules` | add the user's instructions for every project to the briefing (only when the user asks) |
+| `--cleanup after-merge\|on-undo\|never` | when hopsesh deletes the handoff branch |
+| `--no-mark` | do not mark the session here |
 
 ## plan and pull flags
 
@@ -49,11 +69,13 @@ folder there). `{{.Bin}} undo <id>` reverses either, on both machines for a push
 `source`, `target.cwd`, `repo`, `sync`, `mark`, `conflict`, `warnings`, `blockers`, and for
 another agent `continue` (`relation`, `report`, `briefing`). `pull --json --yes` prints
 `{"plan": …, "result": …, "command": "…"}`; the result has `journal` (for undo), `syncNote`,
-`mark`, `markError`, `pushed`, `pushError`, `warnings`.
+`mark`, `markError`, `pushed`, `pushError`, `warnings`. `handoff --json --yes` prints
+`{"plan": …, "result": …, "handoff": …}` (and `error` when a step failed); `handoff` has
+`session`, `url`, `branch`, `steps`, `stayed`, `failed`, `message` and `manual`.
 
 ## Permissions and the sandbox
 
 hopsesh reads other machines over SSH and writes into the agents' data folders, which agent
 sandboxes usually block. `{{.Bin}} skill install --add-rules` adds approval rules for each agent:
 the read-only commands run without asking (and, in Codex, outside its sandbox), while `pull`,
-`push` and `undo` always ask.
+`push`, `handoff`, `followup` and `undo` always ask.

@@ -162,12 +162,14 @@ func cloudWorld(ts *testscript.TestScript, neg bool, args []string) {
 	if neg || len(args) != 1 {
 		ts.Fatalf("usage: cloud-world DIR")
 	}
-	for _, k := range []string{"HOME", "GIT_CONFIG_GLOBAL", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {
-		os.Setenv(k, ts.Getenv(k)) // fakecloud runs git in this process
-	}
+	// fakecloud runs git in this process, which scripts share: the script's own
+	// environment goes in the run's variables.
 	store := ts.MkAbs("cloud")
 	ts.Setenv("FAKE_CLOUD_DIR", store)
-	os.Setenv("FAKE_CLOUD_DIR", store)
+	vars := map[string]string{"FAKE_CLOUD_DIR": store}
+	for _, k := range []string{"HOME", "GIT_CONFIG_GLOBAL", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {
+		vars[k] = ts.Getenv(k)
+	}
 	o, err := fakecloud.NewOrigin(ts.MkAbs("origins"), "https://github.com/example/demo.git")
 	ts.Check(err)
 	ts.Check(o.Redirect(ts.Getenv("GIT_CONFIG_GLOBAL")))
@@ -176,6 +178,10 @@ func cloudWorld(ts *testscript.TestScript, neg bool, args []string) {
 	for _, a := range [][]string{{"push", "-q", "origin", "main"}} {
 		cmd := exec.Command("git", a...)
 		cmd.Dir = dir
+		cmd.Env = os.Environ()
+		for k, v := range vars {
+			cmd.Env = append(cmd.Env, k+"="+v)
+		}
 		if out, err := cmd.CombinedOutput(); err != nil {
 			ts.Fatalf("git %v: %v\n%s", a, err, out)
 		}
@@ -184,7 +190,7 @@ func cloudWorld(ts *testscript.TestScript, neg bool, args []string) {
 		CloneURL: o.FileURL(), Branch: "main", Code: "branch",
 		Messages: []fakecloud.Message{{Role: "user", Text: "[hopsesh] add rate limiting to search"}, {Role: "assistant", Text: "On it."}}})
 	ts.Check(err)
-	ts.Check(fakecloud.Work(fakecloud.Proc{Vars: map[string]string{}}, s.ID, false))
+	ts.Check(fakecloud.Work(fakecloud.Proc{Vars: vars}, s.ID, false))
 	ts.Setenv("CLOUDID", s.ID)
 }
 

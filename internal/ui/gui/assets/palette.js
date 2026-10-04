@@ -1,5 +1,6 @@
 // The command palette (⌘K, Ctrl+K): find a session and act on it, or run any command, from the keyboard.
-import { api, h, fill, icon, ICONS, state, go, current, toast, fail, agentBadge, entries, here, $, sys, keys, clouds } from "./core.js";
+import { api, h, fill, icon, ICONS, state, go, current, toast, fail, agentBadge, entries, here, $, sys, keys, clouds, selected } from "./core.js";
+import { pickHandoff } from "./handoff.js";
 import { actionsFor, statusOf, render as renderSessions, pasteDialog } from "./sessions.js";
 import { undoLast } from "./activity.js";
 
@@ -23,6 +24,7 @@ function commands() {
     { label: "Refresh: read every machine again", hint: keys("mod+R"), run: () => go("sessions", true) },
     { label: "Undo the last hop", hint: keys("mod+alt+Z"), run: undoLast },
     { label: "Add a machine", run: () => go("machines") },
+    ...handOff(),
     ...(clouds().some((c) => c.fetchable) ? [
       { label: "Bring from cloud…", sub: clouds().filter((c) => c.fetchable).map((c) => c.title).join(", "), run: bringFromCloud },
       { label: "Paste a cloud link…", sub: "claude.ai/code/…, session_…, cse_…", run: () => pasteDialog() },
@@ -35,6 +37,15 @@ function commands() {
     { label: "Settings: the command-line tool", run: () => go("settings", "cli") },
     { label: "Settings: updates", run: () => go("settings", "updates") },
   ];
+}
+
+// handOff is "Hand off to…" for the selected session (or the newest one), when it can go
+// to a cloud.
+function handOff() {
+  const sel = selected();
+  const e = sel && !sel.cloud ? sel : entries().filter((x) => !x.cloud).sort((a, b) => (b.lastActive > a.lastActive ? 1 : -1))[0];
+  if (!e || !(e.handoff || []).length) return [];
+  return [{ label: "Hand off to…", sub: `“${e.title}”`, hint: "Pick a cloud", run: () => pickHandoff(e) }];
 }
 
 // bringFromCloud shows the first cloud sessions can come from.

@@ -19,8 +19,9 @@ type Row struct {
 	Content string `json:"content"` // the conversation's language, or large
 	Repo    string `json:"repo"`    // the source checkout's state
 	Naming  string `json:"naming"`  // how the other machine is named: address | alias
-	// Location is where the session starts: on the other machine, or in a cloud (fetch
-	// rows; repo unpushed: the cloud session never pushed its work).
+	// Location is the cloud a row involves, or machine: a fetch starts there (repo
+	// unpushed: the cloud session never pushed its work), a hand-off goes there from this
+	// machine, and a cloud round trip goes there and comes back.
 	Location string `json:"location"`
 }
 
@@ -32,7 +33,7 @@ var dims = []struct {
 	name   string
 	values []string
 }{
-	{"op", []string{"move", "continue", "push", "roundtrip", "conflict", "undo-used", "skill", "fetch"}},
+	{"op", []string{"move", "continue", "push", "roundtrip", "conflict", "undo-used", "skill", "fetch", "handoff", "cloud-roundtrip"}},
 	{"agents", []string{"claude>claude", "codex>codex", "claude>codex", "codex>claude"}},
 	{"content", []string{"ascii", "zh", "ja", "ar", "el", "large"}},
 	{"repo", []string{"clean", "unpushed", "uncommitted", "worktree", "none"}},
@@ -44,10 +45,17 @@ var dims = []struct {
 func valid(v []string) bool {
 	op, agents, repo, naming, location := v[0], v[1], v[3], v[4], v[5]
 	same := agents == "claude>claude" || agents == "codex>codex"
-	if (op == "fetch") != (location == "claude-cloud") {
-		return false // only a fetch starts in a cloud
+	if cloudOp(op) != (location == "claude-cloud") {
+		return false // only a fetch, a hand-off and a cloud round trip involve a cloud
 	}
 	switch op {
+	case "handoff":
+		// A Claude Code or Codex session here goes to Claude Code cloud (always a Claude
+		// Code session there), in each state of its checkout (none: refused).
+		return (agents == "claude>claude" || agents == "codex>claude") && naming == "address" && (repo != "worktree" || agents == "claude>claude")
+	case "cloud-roundtrip":
+		// There and back: handed off, worked on in the cloud, brought home in Claude Code.
+		return agents == "claude>claude" && (repo == "clean" || repo == "uncommitted") && naming == "address"
 	case "fetch":
 		// A Claude Code cloud session comes here in Claude Code, or on into Codex; its
 		// branch was pushed (clean) or never (unpushed). No other machine takes part.
@@ -69,6 +77,9 @@ func valid(v []string) bool {
 	}
 	return true
 }
+
+// cloudOp reports whether an op involves a cloud.
+func cloudOp(op string) bool { return op == "fetch" || op == "handoff" || op == "cloud-roundtrip" }
 
 func toRow(n int, v []string) Row {
 	from, to, _ := strings.Cut(v[1], ">")

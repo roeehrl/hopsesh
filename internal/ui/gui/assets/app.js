@@ -4,6 +4,7 @@ import { api, on, h, fill, view, state, go, current, toast, fail, errText, $, sy
 import "./sessions.js";
 import "./plan.js";
 import "./brought.js";
+import "./handoff.js";
 import "./machines.js";
 import "./settings.js";
 import { undoLast } from "./activity.js";
