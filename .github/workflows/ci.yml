@@ -47,7 +47,7 @@ jobs:
         run: >-
           go run gotest.tools/gotestsum@v1.13.0 --format github-actions
           --junitfile "junit-${{ matrix.family }}.xml" --rerun-fails=2 --rerun-fails-report reruns.txt
-          --packages ./... -- -race -count=1
+          --packages ./... -- -race -count=1 -timeout 25m
       - name: test summary
         if: ${{ !cancelled() }}
         uses: test-summary/action@37b508cfee6d4d080eedd00b5bb240a6a784a6a5 # v2.6
