@@ -18,6 +18,10 @@ func TestTargets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	cloudOnly := map[string]bool{}
+	for _, m := range modules() {
+		cloudOnly[string(m.ID)] = m.cloudOnly()
+	}
 	issue := regexp.MustCompile(`^[\w.-]+/[\w.-]+#\d+$`)
 	seen := map[string]bool{}
 	used := map[string]bool{}
@@ -37,7 +41,7 @@ func TestTargets(t *testing.T) {
 		if !slices.Contains([]string{"agent", "cloud", "standard"}, x.Kind) || !slices.Contains([]string{"high", "low"}, x.Priority) {
 			t.Errorf("%s: kind %q or priority %q", where, x.Kind, x.Priority)
 		}
-		if x.Module != "" && x.Tested == "" {
+		if x.Module != "" && x.Tested == "" && !cloudOnly[x.Module] {
 			t.Errorf("%s: driven by %s, which has no fixture folder to give the tested version", where, x.Module)
 		}
 		switch x.Latest.From {
@@ -104,7 +108,7 @@ func TestTargets(t *testing.T) {
 	}
 	declared := map[string]bool{}
 	for _, m := range modules() {
-		if !seen[string(m.ID)] {
+		if !seen[string(m.ID)] && !m.cloudOnly() {
 			t.Errorf("module %s is not watched", m.ID)
 		}
 		for _, c := range m.clouds {
@@ -114,9 +118,9 @@ func TestTargets(t *testing.T) {
 			}
 		}
 	}
-	for name := range cloudGroups {
+	for name := range cloudReviews {
 		if !declared[name] {
-			t.Errorf("cloudGroups names %s, which no module declares", name)
+			t.Errorf("cloudReviews names %s, which no module declares", name)
 		}
 	}
 	for _, x := range clouds {

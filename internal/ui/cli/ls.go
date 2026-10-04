@@ -212,6 +212,8 @@ func machineLine(m *app.Machine, inv *app.Inventory) string {
 	var agents []string
 	for _, a := range m.Agents {
 		switch {
+		case len(a.Install.Roots) == 0:
+			// a cloud-only module: its cloud's line says whether its driver is here
 		case a.Install.Present:
 			agents = append(agents, strings.TrimSpace(a.Name+" "+a.Install.Version))
 		case a.Install.Binary != "":
@@ -355,10 +357,15 @@ func agentsCmd() *cobra.Command {
 			}
 			tw := tabwriter.NewWriter(r.out, 0, 2, 2, ' ', 0)
 			fmt.Fprintln(tw, "AGENT\tNAME\tHERE\tDATA FOLDER\tCAN")
-			for _, rw := range rows {
+			for i, rw := range rows {
 				here, folder := "not installed", ""
+				s := r.app.Reg.All()[i].Spec()
 				if rw.Install != nil {
 					switch {
+					case len(s.Roots) == 0 && rw.Install.Binary != "":
+						here = "cloud only, through " + s.Binaries[0].Name + " " + rw.Install.Version
+					case len(s.Roots) == 0:
+						here = "cloud only; " + s.Binaries[0].Name + " not installed"
 					case rw.Install.Binary != "":
 						here = rw.Install.Version
 					case rw.Install.Present:

@@ -340,7 +340,7 @@ func (a *App) CheckUpdate() (*UpdateDTO, error) {
 // sign-in check for a machine, a cloud session's page, and an upstream problem a cloud
 // points to.
 func (a *App) OpenURL(url string) error {
-	if !strings.HasPrefix(url, "https://github.com/"+update.Repo+"/") && !strings.HasPrefix(url, "https://login.tailscale.com/") && !cloudPage(a.snapshot(), url) {
+	if !strings.HasPrefix(url, "https://github.com/"+update.Repo+"/") && !strings.HasPrefix(url, "https://login.tailscale.com/") && !cloudPage(a.snapshot(), url) && !a.listedPage(url) {
 		return errors.New("only hopsesh release pages, Tailscale sign-in and cloud sessions' pages can be opened")
 	}
 	switch runtime.GOOS {

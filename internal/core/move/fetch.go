@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -99,14 +100,17 @@ type FetchPlan struct {
 	LocalBranch string `json:"localBranch,omitempty"`
 	// FastForward: LocalBranch is here already, from an earlier fetch of the code: it moves
 	// forward to the cloud's work (fast-forward only; a new branch when it cannot).
-	FastForward bool          `json:"fastForward,omitempty"`
-	Rename      bool          `json:"rename"`
-	CodeOnly    bool          `json:"codeOnly,omitempty"`
-	Run         agent.Command `json:"run"`
-	Command     string        `json:"command,omitempty"` // Run for the user's shell
-	Adopt       *agent.Adopt  `json:"adopt,omitempty"`
-	Loss        []string      `json:"loss,omitempty"`
-	Checks      []Check       `json:"checks"`
+	FastForward bool `json:"fastForward,omitempty"`
+	// Diff: the code comes as the cloud's patch (CodeDown ViaDiff; a session with no
+	// branch), committed on LocalBranch in the new worktree.
+	Diff     bool          `json:"diff,omitempty"`
+	Rename   bool          `json:"rename"`
+	CodeOnly bool          `json:"codeOnly,omitempty"`
+	Run      agent.Command `json:"run"`
+	Command  string        `json:"command,omitempty"` // Run for the user's shell
+	Adopt    *agent.Adopt  `json:"adopt,omitempty"`
+	Loss     []string      `json:"loss,omitempty"`
+	Checks   []Check       `json:"checks"`
 	// ContinueIn is the agent it continues in once it is here ("" : its own).
 	ContinueIn   agent.ID `json:"continueIn,omitempty"`
 	ContinueName string   `json:"continueName,omitempty"`
@@ -182,7 +186,9 @@ func BuildFetch(ctx context.Context, in FetchInput, opt Options) (*Plan, error) 
 		case err != nil:
 			check("err", refusal(err, spec, cl))
 		case f.Run == nil:
-			return nil, fmt.Errorf("%s asked nothing of the user to bring the session", spec.Name)
+			// A driver that needs no terminal brings the code (and perhaps the messages as
+			// text, which are not written into an agent here yet): only the code comes home.
+			check("err", fmt.Sprintf("hopsesh brings only the code of %s sessions so far; the conversation stays in the cloud. Choose the code only", cl.Title))
 		default:
 			fp.Run = *f.Run
 			fp.Run.Unset = union(fp.Run.Unset, cl.Unset)
@@ -260,7 +266,12 @@ func planFetchBranch(ctx context.Context, in FetchInput, fp *FetchPlan, opt Opti
 			check("ok", "Branch "+b+" is pushed")
 		}
 	} else if fp.CodeOnly {
-		check("err", "hopsesh doesn't know this session's branch; bring it with its conversation and "+in.Module.Spec().Name+" fetches the branch itself")
+		if _, ok := in.Module.(agent.CloudFetcher); ok && fp.Session != "" && slices.Contains(in.Cloud.CodeDown, agent.ViaDiff) {
+			fp.Diff = true
+			check("ok", in.Cloud.Title+"'s changes come as a patch, committed on a new branch here")
+		} else {
+			check("err", "hopsesh doesn't know this session's branch; bring it with its conversation and "+in.Module.Spec().Name+" fetches the branch itself")
+		}
 	}
 	if fp.Base == "" {
 		head, err := repos.Head(ctx, top)
@@ -270,6 +281,9 @@ func planFetchBranch(ctx context.Context, in FetchInput, fp *FetchPlan, opt Opti
 		}
 		fp.Base = head
 		fp.BaseNote = fmt.Sprintf("%s here is at %s", nonEmpty(repos.CurrentBranch(ctx, top), "the checkout"), short(head))
+	}
+	if fp.Diff {
+		fp.LocalBranch = repos.FreeBranchName(ctx, top, repos.FromBranch(in.Cloud.Name, worktreeName(in.Session, in.Cloud), ""))
 	}
 	if b := fp.CloudBranch; b != "" {
 		name := b
@@ -478,7 +492,7 @@ func applyFetch(ctx context.Context, p *Plan, env Env) (*Result, error) {
 				res.Warnings = append(res.Warnings, fp.LocalBranch+" could not move forward to the cloud's work, so the code is on "+branch)
 			}
 		}
-		if !existing {
+		if !existing && !fp.Diff { // a patch's branch is made once the patch is committed
 			if err := j.Ref(machine, top, ref, base, ""); err != nil {
 				return res, err
 			}
@@ -490,11 +504,20 @@ func applyFetch(ctx context.Context, p *Plan, env Env) (*Result, error) {
 		return res, err
 	}
 	add := func() error { return repos.AddWorktreeAt(ctx, top, fp.Worktree, branch, base) }
-	if existing {
+	switch {
+	case existing:
 		add = func() error { return repos.AddWorktreeOn(ctx, top, fp.Worktree, branch) }
+	case fp.Diff:
+		add = func() error { return repos.AddWorktreeAt(ctx, top, fp.Worktree, "", base) }
 	}
 	if err := add(); err != nil {
 		return res, fmt.Errorf("worktree: %w", err)
+	}
+	if fp.Diff {
+		step("committing " + fp.CloudTitle + "'s patch on " + branch)
+		if err := commitPatch(ctx, p, j, branch); err != nil {
+			return res, err
+		}
 	}
 	res.Worktree = fp.Worktree
 	env.Audit.Write(audit.Entry{Action: "git.worktree", Session: p.Key.String(), Detail: map[string]any{"path": fp.Worktree, "commit": base, "branch": branch}})
@@ -530,6 +553,31 @@ func applyFetch(ctx context.Context, p *Plan, env Env) (*Result, error) {
 	}
 	step("done")
 	return res, nil
+}
+
+// commitPatch asks the driver for the session's patch, applies it in the fetch's worktree
+// (detached at the base), commits it, records the branch and puts the worktree on it.
+func commitPatch(ctx context.Context, p *Plan, j *journal.Journal, branch string) error {
+	fp, in := p.Fetch, p.fetchIn
+	fetcher, ok := in.Module.(agent.CloudFetcher)
+	if !ok {
+		return fmt.Errorf("%w: %s cannot bring code", agent.ErrUnsupported, in.Module.Spec().Name)
+	}
+	f, err := fetcher.FetchCloud(ctx, in.Host, in.Install, fp.Session, agent.FetchTarget{Dir: fp.Worktree, Code: agent.ViaDiff})
+	if err != nil {
+		return fmt.Errorf("%s: %w", fp.CloudTitle, err)
+	}
+	if len(f.Code.Diff) == 0 && !f.Code.Applied {
+		return fmt.Errorf("%s brought no patch for %s", fp.CloudTitle, fp.Session)
+	}
+	sha, err := repos.CommitPatch(ctx, fp.Worktree, f.Code.Diff, f.Code.Applied, fmt.Sprintf("%s session %s", fp.CloudTitle, fp.Session))
+	if err != nil {
+		return fmt.Errorf("%s's patch does not apply on %s: %w", fp.CloudTitle, short(fp.Base), err)
+	}
+	if err := j.Ref(in.Machine.Name, fp.Checkout, "refs/heads/"+branch, sha, ""); err != nil {
+		return err
+	}
+	return repos.SwitchNew(ctx, fp.Worktree, branch)
 }
 
 func union(a, b []string) []string {

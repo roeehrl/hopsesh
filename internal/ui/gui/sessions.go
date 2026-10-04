@@ -148,7 +148,7 @@ func (a *App) Scan() (*ScanDTO, error) {
 			}
 		}
 		for _, st := range m.Agents {
-			if st.Install.Present || st.Install.Binary != "" {
+			if hasAgent(st) {
 				d.Agents = append(d.Agents, strings.TrimSpace(st.Name+" "+st.Install.Version))
 			}
 		}

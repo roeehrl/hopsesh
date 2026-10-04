@@ -44,6 +44,11 @@ type CloudDTO struct {
 	VendorPrefix string `json:"vendorPrefix"`
 	// Fidelity is what comes back of a conversation (native, code, text).
 	Fidelity string `json:"fidelity"`
+	// CodeOnly: hopsesh brings only the code of this cloud's sessions (it writes a
+	// conversation here only from a native copy, so far); CodeDown says how the code comes
+	// (pr, branch, diff).
+	CodeOnly bool     `json:"codeOnly"`
+	CodeDown []string `json:"codeDown"`
 	// Test is the last read-only probe of it, when there was one.
 	Test *CloudTestDTO `json:"test,omitempty"`
 }
@@ -85,12 +90,16 @@ var (
 )
 
 func cloudDTO(core *app.App, c *app.Cloud) CloudDTO {
-	d := CloudDTO{Name: c.Name, Title: c.Title, Agent: string(c.Agent), AgentName: c.AgentName, Driver: c.Driver, Version: c.Version,
+	d := CloudDTO{CodeDown: []string{}, Name: c.Name, Title: c.Title, Agent: string(c.Agent), AgentName: c.AgentName, Driver: c.Driver, Version: c.Version,
 		Tested: c.Tested, Status: c.Status, Hint: c.Hint, Error: c.Error, Allowed: c.Allowed, Sessions: c.Sessions, Mirrors: c.Mirrors,
 		Partial: c.Partial, Listable: c.Listable, Fetchable: c.Fetchable, Rename: *core.Cfg.CloudSettings(c.Name).RenameVendorBranches}
 	if m, ok := core.Module(c.Agent); ok {
 		if cl, ok := m.Spec().FindCloud(c.Name); ok {
 			d.TestedOn, d.VendorPrefix, d.Fidelity = strings.Join(cl.Tested, ", "), cl.VendorPrefix, string(cl.Down)
+			d.CodeOnly = cl.Down != agent.FidNative
+			for _, w := range cl.CodeDown {
+				d.CodeDown = append(d.CodeDown, string(w))
+			}
 		}
 	}
 	testsMu.Lock()
@@ -292,6 +301,25 @@ func (a *App) OpenBrought(journal string) error {
 
 // cloudPage reports whether url is a page hopsesh may open for a cloud: a session's page
 // as its module makes it, or an upstream problem a cloud declares.
+// listedPage reports whether url is the page of a cloud session the last scan listed (a
+// cloud's module gave it, as for a Copilot task's pull request).
+func (a *App) listedPage(url string) bool {
+	if !strings.HasPrefix(url, "https://") {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.inv == nil {
+		return false
+	}
+	for _, e := range a.inv.Entries {
+		if e.Cloud != nil && e.Cloud.URL == url {
+			return true
+		}
+	}
+	return false
+}
+
 func cloudPage(core *app.App, url string) bool {
 	if _, cl, id, ok := core.ParseCloudLink(url); ok {
 		if m, c, ok := cloudModuleOf(core, cl); ok {

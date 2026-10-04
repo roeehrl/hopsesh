@@ -75,7 +75,10 @@ function cloudCard(c) {
   const show = (r) => fill(result, h("b", { class: r.ok ? "ok" : "err", style: "font-weight:600" }, r.ok ? "✓ " : "✕ "),
     h("span", { class: r.ok ? "ok" : "err" }, (r.checks.length ? r.checks.map((x) => x.text).join(" · ") : r.error) + " · " + when(r.at)));
   if (t) show(t);
-  const brings = c.fidelity === "native" ? `The whole conversation, copied by ${c.agentName}; hopsesh checks the message count` : c.fidelity === "code" ? "The code, title and summary" : "The messages, as text";
+  const brings = c.fidelity === "native" ? `The whole conversation, copied by ${c.agentName}; hopsesh checks the message count`
+    : !(c.codeDown || []).length ? "Nothing yet: the conversation stays in the cloud"
+    : c.codeOnly ? `The code (${c.codeDown.includes("diff") ? "its patch, committed on a new branch" : "its branch"}); the conversation stays in the cloud for now`
+    : c.fidelity === "code" ? "The code, title and summary" : "The messages, as text";
   return h("section", { class: "card cloud-card", "aria-labelledby": "cc-" + c.name },
     h("div", { class: "set-row" }, h("span", { style: "color:var(--cloud)" }, icon(ICONS.cloud, 16)), h("h3", { id: "cc-" + c.name, style: "margin:0;font-size:15px" }, c.title),
       h("span", { class: "spacer" }), h("span", { style: "font-size:12.5px;font-weight:500" }, "Allow"), allow),

@@ -1,6 +1,6 @@
 // The plan sheet (what a hop, continuation or send will do, with its choices), its
 // progress, and the Done screen.
-import { api, on, h, fill, view, state, screen, go, current, toast, fail, errText, cap, agentChip, here, $, count, sys, keys, cloudChip } from "./core.js";
+import { api, on, h, fill, view, state, screen, go, current, toast, fail, errText, cap, agentChip, here, $, count, sys, keys, cloudChip, cloudOf } from "./core.js";
 import { undo } from "./activity.js";
 
 const sheet = $("#sheet");
@@ -297,7 +297,7 @@ function renderFetch(p) {
       h("div", { class: "fromto" },
         cloudChip(f.cloud), f.session ? h("span", { class: "mono", style: "font-size:12px" }, f.session) : h("span", { class: "muted" }, `chosen in ${p.fromAgent}'s own picker`),
         h("span", { style: "color:var(--accent)", "aria-label": "to" }, "→"),
-        agentChip(target.id, target.name), h("span", {}, `on ${here()} (${sys.here}), in a new worktree`)),
+        f.codeOnly ? null : agentChip(target.id, target.name), h("span", {}, `on ${here()} (${sys.here}), in a new worktree`)),
       h("div", { class: "summary", "aria-label": "What changes" },
         add.map((x) => h("span", { class: "add" }, "+ " + x)), h("span", { class: "none" }, "The cloud session is not changed"),
         h("span", { class: "spacer" }), h("span", { class: "muted" }, "Undo any time from Activity"))),
@@ -314,16 +314,19 @@ function renderFetch(p) {
           kv("Repository", f.repo ? h("span", { class: "mono", style: "font-size:12px" }, f.repo) : h("span", { class: "muted" }, "Not known yet"),
             f.checkout ? h("span", { class: "muted mono", style: "font-size:11.5px" }, " · " + f.checkout) : null,
             " ", h("button", { class: "link", onclick: chooseCheckout }, f.checkout ? "Another checkout…" : "Choose its checkout…")),
-          kv("Cloud branch", f.cloudBranch ? h("span", { class: "mono", style: "font-size:12px" }, f.cloudBranch) : h("span", { class: "muted" }, `The session's own; ${p.fromAgent} fetches and checks it out`),
+          kv("Cloud branch", f.cloudBranch ? h("span", { class: "mono", style: "font-size:12px" }, f.cloudBranch)
+            : f.diff ? h("span", { class: "muted" }, `None: ${f.cloudTitle} gives its changes as a patch`) : h("span", { class: "muted" }, `The session's own; ${p.fromAgent} fetches and checks it out`),
             f.branchState === "pushed" ? h("span", { class: "muted" }, " · fetched into " + f.ref) : null),
           f.worktree ? kv("New worktree", h("span", { class: "mono", style: "font-size:12px" }, f.worktree)) : null,
           kv("Local branch", f.fastForward ? [h("span", { class: "mono", style: "font-size:12px" }, f.localBranch), h("span", { class: "muted" }, " is here already: it moves forward to the cloud's work")]
+            : f.diff ? [h("span", { class: "mono", style: "font-size:12px" }, f.localBranch), h("span", { class: "muted" }, " new, with the patch committed on it")]
             : f.localBranch && f.localBranch !== f.cloudBranch ? [h("span", { class: "mono", style: "font-size:12px" }, f.localBranch), h("span", { class: "muted" }, " renamed from " + f.cloudBranch)]
             : f.rename ? h("span", {}, "A claude/… branch is renamed to ", h("span", { class: "mono", style: "font-size:12px" }, `hopsesh/from/${f.cloud}/…`)) : h("span", { class: "muted" }, "Kept as the cloud names it")),
           f.base ? kv("Starts at", h("span", { class: "ok", style: "font-weight:600" }, "✓ "), f.baseNote || h("span", { class: "mono" }, f.base.slice(0, 7))) : null),
         f.command ? h("div", { class: "runbox" }, h("span", { style: "font-size:12px;font-weight:500" }, `Runs in ${sys.terminal}`), h("span", { class: "mono", style: "font-size:11.5px;overflow-wrap:anywhere" }, f.command)) : null),
       h("section", { class: "sec", style: "gap:10px" }, h("span", { class: "sec-h" }, "Options"),
-        f.cloudBranch || o.codeOnly ? check("Fetch the cloud branch only, without the conversation", "codeOnly", "Into a new worktree; nothing runs in a terminal.")
+        cloudOf(f.cloud)?.codeOnly ? h("span", { class: "muted", style: "font-size:12px" }, `Only the code comes from ${f.cloudTitle}; its conversation stays there for now.`)
+        : f.cloudBranch || o.codeOnly ? check("Fetch the cloud branch only, without the conversation", "codeOnly", "Into a new worktree; nothing runs in a terminal.")
           : h("label", { class: "opt", style: "cursor:default" }, h("input", { type: "checkbox", disabled: true }),
             h("span", {}, h("b", { class: "muted" }, "Fetch the cloud branch only, without the conversation"), h("span", { class: "muted" }, "hopsesh knows its branch once it has been brought with its conversation."))),
         f.canAppend ? check(`Add the cloud's work to “${f.original.title}” instead`, "append", "It is as it was handed off, so only the new turns are added; its own turns stay exactly as they were.") : null),

@@ -22,8 +22,8 @@ func cloudsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "clouds",
 		Short: "List the agents' clouds, and which ones hopsesh may use",
-		Long: `Lists the vendor clouds the installed agents reach (Claude Code cloud, Codex cloud), whether
-you allowed hopsesh to use each, and what a read-only look found. hopsesh reaches a cloud
+		Long: `Lists the vendor clouds the agent modules reach (Claude Code cloud, Codex cloud, Copilot cloud
+agent, Jules, Devin, Amp), whether you allowed hopsesh to use each, and what a read-only look found. hopsesh reaches a cloud
 only through that agent's own command, signed in as you, and never one you have not allowed.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -407,6 +407,8 @@ func (r *run) renderFetchPlan(p *move.Plan) {
 	switch {
 	case fp.FastForward:
 		r.printf("  local     %s, here already: it moves forward to the cloud's work\n", fp.LocalBranch)
+	case fp.Diff:
+		r.printf("  local     %s, a new branch with the cloud's patch committed on it\n", fp.LocalBranch)
 	case fp.LocalBranch != "" && fp.LocalBranch != fp.CloudBranch:
 		r.printf("  local     %s, renamed from %s\n", fp.LocalBranch, fp.CloudBranch)
 	case fp.Rename && !fp.CodeOnly:

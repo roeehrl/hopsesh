@@ -2,6 +2,7 @@ package repos
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -155,7 +156,19 @@ func runGit(ctx context.Context, dir string, args ...string) (string, error) {
 
 // runGitEnv is runGit with extra environment (e.g. GIT_SSH_COMMAND).
 func runGitEnv(ctx context.Context, dir string, env []string, args ...string) (string, error) {
+	return runGitWith(ctx, dir, env, nil, args...)
+}
+
+// runGitStdin is runGit with standard input.
+func runGitStdin(ctx context.Context, dir string, stdin []byte, args ...string) (string, error) {
+	return runGitWith(ctx, dir, nil, stdin, args...)
+}
+
+func runGitWith(ctx context.Context, dir string, env []string, stdin []byte, args ...string) (string, error) {
 	cmd := proc.CommandContext(ctx, "git", args...)
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
 	cmd.Dir = dir
 	cmd.Env = append(append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never"), env...)
 	if os.Getenv("GIT_SSH_COMMAND") == "" && !hasEnv(env, "GIT_SSH_COMMAND") {
