@@ -19,6 +19,7 @@ func cloud() agent.Cloud {
 		// summary (the CLI prints no messages).
 		Up:       agent.FidBrief,
 		Down:     agent.FidCode,
+		Summary:  true,
 		CodeUp:   []agent.CodeWay{agent.ViaBranch, agent.ViaStartingDiff},
 		CodeDown: []agent.CodeWay{agent.ViaDiff},
 		Needs:    []agent.Need{agent.NeedSubscriptionLogin, agent.NeedGitHub, agent.NeedPushedBranch, agent.NeedEnvironment},

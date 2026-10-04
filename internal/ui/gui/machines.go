@@ -130,10 +130,17 @@ func (a *App) Machines() MachinesDTO {
 	return out
 }
 
+// hasAgent reports whether an agent is on a machine: its data or its program. A cloud-only
+// module (no data folders anywhere) has only its cloud's driver there, which the Clouds
+// cards show.
+func hasAgent(st app.AgentState) bool {
+	return len(st.Install.Roots) > 0 && (st.Install.Present || st.Install.Binary != "")
+}
+
 func agentNames(m *app.Machine) []string {
 	out := []string{}
 	for _, st := range m.Agents {
-		if st.Install.Present || st.Install.Binary != "" {
+		if hasAgent(st) {
 			out = append(out, strings.TrimSpace(st.Name+" "+st.Install.Version))
 		}
 	}

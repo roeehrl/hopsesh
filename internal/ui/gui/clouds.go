@@ -44,6 +44,9 @@ type CloudDTO struct {
 	VendorPrefix string `json:"vendorPrefix"`
 	// Fidelity is what comes back of a conversation (native, code, text).
 	Fidelity string `json:"fidelity"`
+	// CodeOnly: hopsesh brings only the code of this cloud's sessions (the cloud gives no
+	// words back to write here as a session, or, for a cloud-only module, not yet).
+	CodeOnly bool `json:"codeOnly"`
 	// Test is the last read-only probe of it, when there was one.
 	Test *CloudTestDTO `json:"test,omitempty"`
 	// Noun is what the cloud calls its sessions ("task"); Limits, what hopsesh cannot reach
@@ -116,6 +119,10 @@ func cloudDTO(core *app.App, inv *app.Inventory, c *app.Cloud) CloudDTO {
 	if m, ok := core.Module(c.Agent); ok {
 		if cl, ok := m.Spec().FindCloud(c.Name); ok {
 			d.TestedOn, d.VendorPrefix, d.Fidelity = strings.Join(cl.Tested, ", "), cl.VendorPrefix, string(cl.Down)
+			// Code only: the cloud brings no words back (a text cloud's messages, or a code
+			// cloud's task summary, are written here as a session).
+			_, writes := m.(agent.Writer) // a cloud-only module's text is not written here yet
+			d.CodeOnly = !writes || cl.Down == agent.FidNone || cl.Down == agent.FidCode && !cl.Summary
 			for _, w := range cl.CodeUp {
 				d.CodeUp = append(d.CodeUp, string(w))
 			}
@@ -345,6 +352,25 @@ func (a *App) OpenBrought(journal string) error {
 
 // cloudPage reports whether url is a page hopsesh may open for a cloud: a session's page
 // as its module makes it, or an upstream problem a cloud declares.
+// listedPage reports whether url is the page of a cloud session the last scan listed (a
+// cloud's module gave it, as for a Copilot task's pull request).
+func (a *App) listedPage(url string) bool {
+	if !strings.HasPrefix(url, "https://") {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.inv == nil {
+		return false
+	}
+	for _, e := range a.inv.Entries {
+		if e.Cloud != nil && e.Cloud.URL == url {
+			return true
+		}
+	}
+	return false
+}
+
 func cloudPage(core *app.App, url string) bool {
 	if _, cl, id, ok := core.ParseCloudLink(url); ok {
 		if m, c, ok := cloudModuleOf(core, cl); ok {

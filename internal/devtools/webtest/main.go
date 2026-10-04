@@ -2,12 +2,13 @@
 // the real assets and the real service (internal/ui/gui) on a demo home made from the
 // agents' test fixtures, with a stand-in for the Wails runtime. It is not shipped.
 //
-// The demo home also has stand-in Claude Code and Codex clouds: this program, run as claude
-// or codex, is the stand-in claude or codex; the demo repository's GitHub remote is a local
-// bare repository; POST /cloud adds a cloud session (?cloud=codex-cloud: a Codex cloud task,
-// with ?env=; it sets the failure the next driver call plays); POST /dirty
-// leaves work in progress in the demo repository, for a hand-off; and a command
-// the window opens "in a terminal" runs in the background instead.
+// The demo home also has stand-in Claude Code and Codex clouds and a Copilot cloud agent:
+// this program, run as claude, codex or gh, is the stand-in claude, codex or gh; the demo
+// repository's GitHub remote is a local bare repository; POST /cloud adds a cloud session
+// (?cloud=copilot-cloud for a Copilot task, ?cloud=codex-cloud for a Codex cloud task with
+// ?env=; it sets the failure the next driver call plays); POST /dirty leaves work in
+// progress in the demo repository, for a hand-off; and a command the window opens "in a
+// terminal" runs in the background instead.
 //
 //	go run ./internal/devtools/webtest -addr 127.0.0.1:8765 -home /tmp/demo
 package main
@@ -49,11 +50,15 @@ window.__emit = (name, data) => (listeners[name] || []).forEach((f) => f({ data 
 `
 
 func main() {
-	switch strings.TrimSuffix(strings.ToLower(filepath.Base(os.Args[0])), ".exe") {
+	name := strings.TrimSuffix(strings.ToLower(filepath.Base(os.Args[0])), ".exe")
+	switch name {
 	case "claude":
 		os.Exit(fakeagent.Claude())
 	case "codex":
 		os.Exit(fakeagent.Codex())
+	}
+	if code, ok := fakeagent.Vendor(name); ok {
+		os.Exit(code)
 	}
 	addr := flag.String("addr", "127.0.0.1:8765", "where to listen")
 	home := flag.String("home", "", "the demo home (made afresh; anything there is removed)")
@@ -139,7 +144,7 @@ func main() {
 		mu.Lock()
 		defer mu.Unlock()
 		q := r.URL.Query()
-		seed := seedCloud
+		seed := func(title string, work bool) (string, error) { return seedCloud(q.Get("cloud"), title, work) }
 		if q.Get("cloud") == fakecloud.CodexCloud {
 			seed = func(title string, work bool) (string, error) { return seedCodex(title, q.Get("env"), work) }
 		}
@@ -233,7 +238,7 @@ func cloudWorld(h string) error {
 	if err != nil {
 		return err
 	}
-	for _, name := range []string{"claude", "codex"} {
+	for _, name := range []string{"claude", "codex", "gh"} {
 		if runtime.GOOS == "windows" {
 			b, err := os.ReadFile(self)
 			if err == nil {
@@ -264,13 +269,17 @@ func cloudWorld(h string) error {
 	return nil
 }
 
-// seedCloud adds a Claude Code cloud session on the demo repository (worked: it pushed its
-// work to a claude/… branch) and returns its id.
-func seedCloud(title string, work bool) (string, error) {
+// seedCloud adds a session of a cloud (Claude Code cloud by default, or copilot-cloud) on
+// the demo repository (worked: it pushed its work to a claude/… or copilot/… branch) and
+// returns its id.
+func seedCloud(cloud, title string, work bool) (string, error) {
 	if title == "" {
 		title = "Add rate limiting"
 	}
-	s, err := fakecloud.Open(os.Getenv("FAKE_CLOUD_DIR")).Seed(fakecloud.Session{Cloud: fakecloud.ClaudeCloud, Title: title, Repo: "github.com/example/demo",
+	if cloud == "" {
+		cloud = fakecloud.ClaudeCloud
+	}
+	s, err := fakecloud.Open(os.Getenv("FAKE_CLOUD_DIR")).Seed(fakecloud.Session{Cloud: cloud, Title: title, Repo: "github.com/example/demo",
 		CloneURL: origin.FileURL(), Branch: "main", Code: "branch",
 		Messages: []fakecloud.Message{{Role: "user", Text: "[hopsesh] " + title}, {Role: "assistant", Text: "On it."}}})
 	if err != nil || !work {

@@ -19,13 +19,18 @@ import (
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
-// The test binary is the stand-in claude when it runs under that name.
+// The test binary is the stand-in claude (or gh, jules, devin, amp) when it runs under
+// that name.
 func TestMain(m *testing.M) {
-	switch strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") {
+	name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
+	switch name {
 	case "claude":
 		os.Exit(fakeagent.Claude())
 	case "codex":
 		os.Exit(fakeagent.Codex())
+	}
+	if code, ok := fakeagent.Vendor(name); ok {
+		os.Exit(code)
 	}
 	os.Exit(m.Run())
 }
@@ -34,9 +39,9 @@ func TestMain(m *testing.M) {
 // GitHub remote is a local bare repository, and a Claude Code cloud session that pushed
 // its work to a claude/… branch.
 type cloudWorld struct {
-	t                 *testing.T
-	home, repo, store string
-	session           fakecloud.Session
+	t                      *testing.T
+	home, repo, store, bin string
+	session                fakecloud.Session
 }
 
 func newCloudWorld(t *testing.T, work bool) *cloudWorld {
@@ -49,6 +54,7 @@ func newCloudWorld(t *testing.T, work bool) *cloudWorld {
 	w := &cloudWorld{t: t, home: filepath.Join(root, "home"), store: filepath.Join(root, "cloud")}
 	w.repo = filepath.Join(w.home, "git", "demo")
 	bin := filepath.Join(root, "bin")
+	w.bin = bin
 	self, _ := os.Executable()
 	for _, d := range []string{bin, w.repo, filepath.Join(w.home, ".claude", "projects")} {
 		if err := os.MkdirAll(d, 0o700); err != nil {

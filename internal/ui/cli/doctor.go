@@ -55,6 +55,9 @@ func doctorCmd() *cobra.Command {
 					add(where+": ssh + sftp", true, "reached ("+m.OS+")")
 				}
 				for _, a := range m.Agents {
+					if mod, ok := r.app.Module(a.Agent); ok && len(mod.Spec().Roots) == 0 {
+						continue // a cloud-only module: `hopsesh clouds` checks its driver
+					}
 					spec := ""
 					if mod, ok := r.app.Module(a.Agent); ok && a.Install.Version != "" && !mod.Spec().TestedWith(a.Install.Version) {
 						spec = " (not tested with hopsesh yet)"

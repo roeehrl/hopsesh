@@ -1,6 +1,6 @@
 // The plan sheet (what a hop, continuation or send will do, with its choices), its
 // progress, and the Done screen.
-import { api, on, h, fill, view, state, screen, go, current, toast, fail, errText, cap, agentChip, here, $, count, sys, keys, cloudChip } from "./core.js";
+import { api, on, h, fill, view, state, screen, go, current, toast, fail, errText, cap, agentChip, here, $, count, sys, keys, cloudChip, cloudOf } from "./core.js";
 import { undo } from "./activity.js";
 
 const sheet = $("#sheet");
@@ -298,7 +298,7 @@ function renderFetch(p) {
       h("div", { class: "fromto" },
         cloudChip(f.cloud), f.session ? h("span", { class: "mono", style: "font-size:12px" }, f.session) : h("span", { class: "muted" }, `chosen in ${p.fromAgent}'s own picker`),
         h("span", { style: "color:var(--accent)", "aria-label": "to" }, "→"),
-        agentChip(target.id, target.name), h("span", {}, `on ${here()} (${sys.here}), in a new worktree`)),
+        f.codeOnly ? null : agentChip(target.id, target.name), h("span", {}, `on ${here()} (${sys.here}), in a new worktree`)),
       h("div", { class: "summary", "aria-label": "What changes" },
         add.map((x) => h("span", { class: "add" }, "+ " + x)), h("span", { class: "none" }, `The cloud ${noun} is not changed`),
         h("span", { class: "spacer" }), h("span", { class: "muted" }, "Undo any time from Activity"))),
@@ -328,7 +328,8 @@ function renderFetch(p) {
           f.base ? kv("Starts at", h("span", { class: "ok", style: "font-weight:600" }, "✓ "), f.baseNote || h("span", { class: "mono" }, f.base.slice(0, 7))) : null),
         f.command ? h("div", { class: "runbox" }, h("span", { style: "font-size:12px;font-weight:500" }, `Runs in ${sys.terminal}`), h("span", { class: "mono", style: "font-size:11.5px;overflow-wrap:anywhere" }, f.command)) : null),
       h("section", { class: "sec", style: "gap:10px" }, h("span", { class: "sec-h" }, "Options"),
-        f.diff ? check("Get the code only, without the conversation", "codeOnly", `The ${noun}'s patch, committed on a new branch in a new worktree.`)
+        cloudOf(f.cloud)?.codeOnly ? h("span", { class: "muted", style: "font-size:12px" }, `Only the code comes from ${f.cloudTitle}; its conversation stays there for now.`)
+        : f.diff ? check("Get the code only, without the conversation", "codeOnly", `The ${noun}'s patch, committed on a new branch in a new worktree.`)
         : f.cloudBranch || o.codeOnly ? check("Fetch the cloud branch only, without the conversation", "codeOnly", "Into a new worktree; nothing runs in a terminal.")
           : h("label", { class: "opt", style: "cursor:default" }, h("input", { type: "checkbox", disabled: true }),
             h("span", {}, h("b", { class: "muted" }, "Fetch the cloud branch only, without the conversation"), h("span", { class: "muted" }, "hopsesh knows its branch once it has been brought with its conversation."))),

@@ -253,6 +253,12 @@ func BuildFetch(ctx context.Context, in FetchInput, opt Options) (*Plan, error) 
 // title and summary, beside its code. Any module that writes sessions can take it.
 func planFetchWrite(in FetchInput, p *Plan, f *agent.Fetched, opt Options, check func(string, string)) {
 	fp, cl := p.Fetch, in.Cloud
+	if _, own := in.Module.(agent.Writer); !own {
+		// A cloud-only module (Copilot's log, Amp's thread): which local agent its text goes
+		// into is still to be decided, so only the code comes home for now.
+		check("err", fmt.Sprintf("hopsesh brings only the code of %s sessions so far; the conversation stays in the cloud. Choose the code only", cl.Title))
+		return
+	}
 	tm := in.Module
 	if in.Continue != nil {
 		tm = in.Continue
@@ -600,7 +606,7 @@ func applyFetch(ctx context.Context, p *Plan, env Env) (*Result, error) {
 				res.Warnings = append(res.Warnings, fp.LocalBranch+" could not move forward to the cloud's work, so the code is on "+branch)
 			}
 		}
-		if !existing {
+		if !existing && !fp.Diff { // a patch's branch is made once the patch is committed
 			if err := j.Ref(machine, top, ref, base, ""); err != nil {
 				return res, err
 			}

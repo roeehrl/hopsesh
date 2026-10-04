@@ -8,7 +8,8 @@ import (
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
-// Programs are the stand-in claude, codex and fakecloud for agenttest.FakeHost.Programs
+// Programs are the stand-in claude, codex, gh, jules, devin, amp and fakecloud for
+// agenttest.FakeHost.Programs
 // (and agenttest.RunCloud): they answer --version and the cloud verbs, in this process,
 // with the store in dir. A run's RunOptions.Env (FAKE_CLOUD_FAIL, say) is its environment
 // on top of vars, without its RunOptions.Unset.
@@ -52,6 +53,28 @@ func Programs(dir string, vars map[string]string) map[string]func(argv []string,
 			_, code := Codex(p)
 			return code
 		}),
+		"gh":        run(logged("gh", Gh)),
+		"jules":     run(logged("jules", Jules)),
+		"devin":     run(logged("devin", Devin)),
+		"amp":       run(logged("amp", Amp)),
 		"fakecloud": run(Main),
 	}
+}
+
+// logged logs a call to a stand-in vendor CLI before answering it.
+func logged(name string, main func(Proc) int) func(Proc) int {
+	return func(p Proc) int {
+		p.Log(name + " " + strings.Join(p.Args, " "))
+		return main(p)
+	}
+}
+
+// Vendor is the stand-in program for a second-wave vendor CLI by name (gh, jules, devin,
+// amp), logged; nil for any other name.
+func Vendor(name string) func(Proc) int {
+	m := map[string]func(Proc) int{"gh": Gh, "jules": Jules, "devin": Devin, "amp": Amp}[name]
+	if m == nil {
+		return nil
+	}
+	return logged(name, m)
 }

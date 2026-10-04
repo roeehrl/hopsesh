@@ -10,7 +10,9 @@ import (
 
 // What the weekly drift check watches. A cloud a module reaches is declared in that
 // module's Spec.Clouds (its Watch says what to watch); this file adds how each is reviewed,
-// the agents' own watch lists, and the clouds and standards no module reaches yet.
+// the agents' own watch lists, and the clouds and standards no module reaches yet. A
+// cloud-only module (no data folders: Copilot, Jules, Devin, Amp) is watched through its
+// clouds alone.
 
 // A target is one upstream surface the drift check watches: an agent a module drives
 // today, a vendor cloud hopsesh plans to reach, or a standard it may adopt.
@@ -142,59 +144,30 @@ var agentWatch = map[agent.ID]target{
 	},
 }
 
-// cloudGroups are the reviews of the clouds the modules declare (Spec.Clouds). A declared
-// cloud without one fails the tests.
-var cloudGroups = map[string]string{
-	"claude-cloud": "anthropic-cloud",
-	"codex-cloud":  "openai-cloud",
+// review is how the drift check reviews a cloud a module declares (Spec.Clouds, which
+// says what to watch). Latest and Package are for a cloud-only module's driver; a cloud
+// an agent module drives takes them from the agent's watch list.
+type review struct {
+	Group   string
+	Latest  latest
+	Package string
+}
+
+// cloudReviews are the reviews of the clouds the modules declare. A declared cloud
+// without one fails the tests.
+var cloudReviews = map[string]review{
+	"claude-cloud":  {Group: "anthropic-cloud"},
+	"codex-cloud":   {Group: "openai-cloud"},
+	"copilot-cloud": {Group: "third-party-cloud", Latest: latest{From: "github-release", Ref: "cli/cli"}},
+	"jules":         {Group: "third-party-cloud", Latest: latest{From: "json", Ref: julesDiscovery, Field: ".revision"}, Package: "@google/jules"},
+	// The Devin CLI installs from a download script, not a package.
+	"devin": {Group: "third-party-cloud", Latest: latest{From: "json", Ref: devinOpenAPI, Field: ".info.version"}},
+	"amp":   {Group: "third-party-cloud", Latest: latest{From: "npm", Ref: "@sourcegraph/amp"}, Package: "@sourcegraph/amp"},
 }
 
 // clouds are the vendor clouds and standards no module reaches yet, in review order;
 // they are watched so the cloud design learns of changes before it is built.
 var clouds = []target{
-	{
-		ID: "copilot-cloud", Name: "Copilot cloud agent", Kind: "cloud", Group: "third-party-cloud", Vendor: "GitHub",
-		Surface:  "agent tasks through `gh agent-task` and the REST agent-tasks API (its X-GitHub-Api-Version date)",
-		Priority: "high",
-		Latest:   latest{From: "github-release", Ref: "cli/cli"},
-		Watch: watch{
-			Docs: githubDocs("rest/agent-tasks/agent-tasks", "copilot/how-tos/copilot-cli/use-copilot-cli/delegate-tasks-to-cca",
-				"copilot/concepts/agents/coding-agent/about-coding-agent"),
-			Feeds: []feed{
-				{Kind: "feed", URL: "https://github.blog/changelog/feed/"},
-				{Kind: "feed", URL: "https://github.com/cli/cli/releases.atom"},
-			},
-			Grep:   `copilot|agent.task|agent-task|coding agent|cloud agent|X-GitHub-Api-Version`,
-			Help:   [][]string{{"gh", "agent-task", "--help"}, {"gh", "agent-task", "create", "--help"}, {"gh", "agent-task", "list", "--help"}, {"gh", "agent-task", "view", "--help"}},
-			Relies: []string{"create", "list", "view"},
-		},
-	},
-	{
-		ID: "jules", Name: "Jules", Kind: "cloud", Group: "third-party-cloud", Vendor: "Google",
-		Surface:  "Jules sessions through the v1alpha REST API (its discovery document) and `jules remote`",
-		Priority: "high",
-		Latest:   latest{From: "json", Ref: julesDiscovery, Field: ".revision"},
-		Package:  "@google/jules",
-		Watch: watch{
-			Docs:   []string{julesDiscovery, "https://jules.google/docs/cli/reference.md"},
-			Feeds:  []feed{{Kind: "markdown", URL: "https://jules.google/docs/changelog.md"}},
-			Grep:   `session|activit|remote|pull|teleport|api|deprecat`,
-			Help:   [][]string{{"jules", "--help"}, {"jules", "remote", "--help"}},
-			Relies: []string{"remote", "list", "pull"},
-		},
-	},
-	{
-		ID: "devin", Name: "Devin", Kind: "cloud", Group: "third-party-cloud", Vendor: "Cognition",
-		Surface: "Devin sessions through the v3 REST API (its OpenAPI document) and the Devin CLI's cloud and handoff commands",
-		// The Devin CLI installs from a download script, not a package, so its help is not run.
-		Priority: "high",
-		Latest:   latest{From: "json", Ref: devinOpenAPI, Field: ".info.version"},
-		Watch: watch{
-			Docs:  []string{devinOpenAPI, "https://docs.devin.ai/llms.txt", "https://docs.devin.ai/cli/handoff.md", "https://docs.devin.ai/cli/cloud.md"},
-			Feeds: []feed{{Kind: "markdown", URL: "https://docs.devin.ai/cli/changelog/stable.md"}},
-			Grep:  `session|handoff|cloud|--cloud|teleport|pull|api|deprecat`,
-		},
-	},
 	{
 		ID: "cursor", Name: "Cursor cloud agents", Kind: "cloud", Group: "third-party-cloud", Vendor: "Anysphere",
 		Surface:  "the cloud-agent API (docs only; no plan to drive it yet)",
@@ -204,17 +177,6 @@ var clouds = []target{
 			Docs:  []string{"https://cursor.com/docs/cloud-agent.md", "https://cursor.com/docs/cloud-agent/api/endpoints.md", "https://cursor.com/docs/cloud-agent/api/v0.md"},
 			Feeds: []feed{{Kind: "feed", URL: "https://cursor.com/changelog/rss.xml"}},
 			Grep:  `cloud agent|background agent|api|conversation|handoff|deprecat`,
-		},
-	},
-	{
-		ID: "amp", Name: "Amp", Kind: "cloud", Group: "third-party-cloud", Vendor: "Sourcegraph",
-		Surface:  "threads, orbs and the SDK (docs only; no plan to drive it yet)",
-		Priority: "low",
-		Latest:   latest{From: "none"},
-		Watch: watch{
-			Docs:  []string{"https://ampcode.com/manual.md", "https://ampcode.com/manual/orbs.md", "https://ampcode.com/manual/sdk.md"},
-			Feeds: []feed{{Kind: "feed", URL: "https://ampcode.com/news.rss"}},
-			Grep:  `thread|orb|sdk|cloud|handoff|deprecat`,
 		},
 	},
 	{
@@ -244,11 +206,6 @@ func codexDocs(pages ...string) []string {
 	return prefixed("https://learn.chatgpt.com/docs/", ".md", pages)
 }
 
-// githubDocs are docs.github.com articles as Markdown, through the docs site's own API.
-func githubDocs(pages ...string) []string {
-	return prefixed("https://docs.github.com/api/article/body?pathname=/en/", "", pages)
-}
-
 func prefixed(pre, suf string, pages []string) []string {
 	out := make([]string, len(pages))
 	for i, p := range pages {
@@ -264,6 +221,9 @@ func buildTargets(mods []module) ([]target, error) {
 	tested := map[string]string{}
 	var out []target
 	for _, m := range mods {
+		if m.cloudOnly() {
+			continue // no agent here: its clouds are its targets
+		}
 		t, ok := agentWatch[m.ID]
 		if !ok {
 			return nil, fmt.Errorf("module %s has no drift watch list in internal/devtools/driftmanifest/targets.go", m.ID)
@@ -298,22 +258,36 @@ func buildTargets(mods []module) ([]target, error) {
 	return out, nil
 }
 
-// declaredCloud is the target for a cloud a module declares. Its driver is the module's
-// agent, so the latest version and the package come from the agent's own watch list.
+// declaredCloud is the target for a cloud a module declares. When the module's agent
+// drives it, the latest version and the package come from the agent's own watch list; a
+// cloud-only module's driver has them in its review.
 func declaredCloud(m module, c agent.Cloud) (target, error) {
-	group, ok := cloudGroups[c.Name]
+	rv, ok := cloudReviews[c.Name]
 	if !ok {
-		return target{}, fmt.Errorf("cloud %s (module %s) has no review group in internal/devtools/driftmanifest/targets.go", c.Name, m.ID)
-	}
-	a := agentWatch[m.ID]
-	if len(m.Binaries) == 0 || c.Driver != m.Binaries[0].Name {
-		return target{}, fmt.Errorf("cloud %s is driven by %s, not by %s's agent: give it a latest-version source", c.Name, c.Driver, m.ID)
+		return target{}, fmt.Errorf("cloud %s (module %s) has no review in internal/devtools/driftmanifest/targets.go", c.Name, m.ID)
 	}
 	w := c.Watch
 	t := target{
-		ID: c.Name, Name: c.Title, Kind: "cloud", Group: group, Vendor: m.Vendor, Surface: w.Surface, Priority: "high",
-		Module: string(m.ID), Tested: newest(m.Fixtures), Latest: a.Latest, Package: a.Package,
+		ID: c.Name, Name: c.Title, Kind: "cloud", Group: rv.Group, Vendor: m.Vendor, Surface: w.Surface, Priority: "high",
+		Module: string(m.ID), Tested: newest(m.Fixtures),
 		Watch: watch{Docs: w.Docs, Grep: w.Grep, Help: w.Help, Relies: w.Relies, Issues: w.Issues, Searches: w.Searches},
+	}
+	switch {
+	case m.cloudOnly():
+		if rv.Latest.From == "" {
+			return target{}, fmt.Errorf("cloud %s is driven by %s: give its review a latest-version source", c.Name, c.Driver)
+		}
+		t.Latest, t.Package = rv.Latest, rv.Package
+		for _, b := range m.Binaries {
+			if b.Name == c.Driver {
+				t.VersionArgv = append([]string{b.Name}, b.VersionArgs...)
+			}
+		}
+	case len(m.Binaries) == 0 || c.Driver != m.Binaries[0].Name:
+		return target{}, fmt.Errorf("cloud %s is driven by %s, not by %s's agent: give it a latest-version source", c.Name, c.Driver, m.ID)
+	default:
+		a := agentWatch[m.ID]
+		t.Latest, t.Package = a.Latest, a.Package
 	}
 	for _, f := range w.Feeds {
 		t.Watch.Feeds = append(t.Watch.Feeds, feed{Kind: string(f.Kind), URL: f.URL, Repo: f.Repo, Tag: f.Tag})

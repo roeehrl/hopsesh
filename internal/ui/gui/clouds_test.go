@@ -46,9 +46,25 @@ func TestCloudInTheWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(scan.Clouds) != 2 || scan.Clouds[0].Name != "claude-cloud" || scan.Clouds[0].Allowed || scan.Clouds[0].Status != "not-allowed" ||
-		scan.Clouds[1].Name != "codex-cloud" || scan.Clouds[1].Allowed {
-		t.Fatalf("clouds before consent: %+v", scan.Clouds)
+	// Every cloud a module can list or fetch is shown, each off until allowed.
+	var names []string
+	codeOnly := map[string]bool{}
+	for _, c := range scan.Clouds {
+		names = append(names, c.Name)
+		codeOnly[c.Name] = c.CodeOnly
+		if c.Allowed || c.Status != "not-allowed" {
+			t.Errorf("%s before consent: %+v", c.Name, c)
+		}
+	}
+	if strings.Join(names, " ") != "claude-cloud codex-cloud copilot-cloud jules devin amp" {
+		t.Fatalf("clouds: %v", names)
+	}
+	// Code only: every cloud-only module so far (their text is not written here yet);
+	// Codex cloud's task summary is written as a session.
+	for name, want := range map[string]bool{"claude-cloud": false, "codex-cloud": false, "copilot-cloud": true, "jules": true, "devin": true, "amp": true} {
+		if codeOnly[name] != want {
+			t.Errorf("%s code only: %v", name, codeOnly[name])
+		}
 	}
 	if err := a.SetCloudAllowed("claude-cloud", true); err != nil {
 		t.Fatal(err)
@@ -75,8 +91,14 @@ func TestCloudInTheWindow(t *testing.T) {
 	if row == nil || row.Machine != "claude-cloud" || row.Location != "cloud" || row.Cloud.ID != "session_01PastedAbc123" || row.Cloud.URL == "" || row.Cloud.Checkout == "" {
 		t.Fatalf("cloud row: %+v", row)
 	}
-	if m := a.Machines(); len(m.Clouds) != 2 || !m.Clouds[0].Allowed || m.Clouds[1].Allowed {
+	if m := a.Machines(); len(m.Clouds) != 6 || !m.Clouds[0].Allowed || m.Clouds[1].Allowed {
 		t.Fatalf("machines: %+v", m.Clouds)
+	} else {
+		for _, n := range m.Here.Agents {
+			if !strings.HasPrefix(n, "Claude Code") && !strings.HasPrefix(n, "Codex") {
+				t.Errorf("a cloud-only module is listed as an agent here: %q", n)
+			}
+		}
 	}
 	// Codex cloud's card: its noun, what it cannot reach, and an environment per repository.
 	if err := a.SetCloudEnvironment("codex-cloud", "github.com/example/demo", "env_api"); err != nil {

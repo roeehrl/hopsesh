@@ -75,7 +75,11 @@ function cloudCard(c) {
   const show = (r) => fill(result, h("b", { class: r.ok ? "ok" : "err", style: "font-weight:600" }, r.ok ? "✓ " : "✕ "),
     h("span", { class: r.ok ? "ok" : "err" }, (r.checks.length ? r.checks.map((x) => x.text).join(" · ") : r.error) + " · " + when(r.at)));
   if (t) show(t);
-  const brings = c.fidelity === "native" ? `The whole conversation, copied by ${c.agentName}; hopsesh checks the message count` : c.fidelity === "code" ? "The code, title and summary" : "The messages, as text";
+  const brings = c.fidelity === "native" ? `The whole conversation, copied by ${c.agentName}; hopsesh checks the message count`
+    : c.codeOnly ? (!(c.codeDown || []).length ? "Nothing yet: the conversation stays in the cloud"
+      : `The code (${c.codeDown.includes("diff") ? "its patch, committed on a new branch" : "its branch"}); the conversation stays in the cloud for now`)
+    : c.fidelity === "code" ? "The code, title and summary"
+    : !(c.codeDown || []).length ? "The messages, as text (no code)" : "The messages, as text, and the code";
   const ways = { branch: "a handoff branch", bundle: "an upload when the remote isn't GitHub", "starting-diff": "a starting diff for a few changes on a pushed branch" };
   const up = (c.codeUp || []).map((w) => ways[w]).filter(Boolean);
   const hosts = (c.hosts || []).map((x) => (x === "github.com" ? "GitHub" : x)).join(", ");

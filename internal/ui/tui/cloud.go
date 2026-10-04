@@ -243,6 +243,8 @@ func (m *model) viewFetchPlan(b *strings.Builder) {
 		fmt.Fprintf(b, "  code  the %s's patch%s, committed on %s\n", fp.Noun, changes, fp.LocalBranch)
 	case fp.FastForward:
 		fmt.Fprintf(b, "  local branch  %s, here already: it moves forward to the cloud's work\n", fp.LocalBranch)
+	case fp.Diff:
+		fmt.Fprintf(b, "  local branch  %s, new, with the cloud's patch committed on it\n", fp.LocalBranch)
 	case fp.LocalBranch != "" && fp.LocalBranch != fp.CloudBranch:
 		fmt.Fprintf(b, "  local branch  %s (renamed from %s)\n", fp.LocalBranch, fp.CloudBranch)
 	case fp.Rename && !fp.CodeOnly:

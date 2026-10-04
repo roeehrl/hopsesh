@@ -120,6 +120,10 @@ type Cloud struct {
 	// the user interfaces show beside the cloud (the hand-off menu, its card, `hopsesh clouds
 	// test`), so a missing path is said, never faked.
 	Limits []string
+	// Summary: a cloud whose Down is FidCode still brings the task's own words back (its
+	// title and what came of it, in Fetched.Segment), which the core writes as a local
+	// session beside the code.
+	Summary bool
 	// EnvHint says how the user makes an environment, for a cloud with NeedEnvironment
 	// ("open `codex cloud` once to create one").
 	EnvHint string
