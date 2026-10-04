@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/app"
+	"github.com/roeehrl/hopsesh/internal/core/move"
 )
 
 // ActivityDTO is one operation in the Activity list.
@@ -22,6 +23,19 @@ type ActivityDTO struct {
 	Why     string   `json:"why,omitempty"` // why it cannot be undone now
 	// Fetch is what a fetch from a cloud brought (kind fetch).
 	Fetch *BroughtDTO `json:"fetch,omitempty"`
+	// Handoff is where a hand-off went (kind handoff).
+	Handoff *HandoffActivityDTO `json:"handoff,omitempty"`
+}
+
+// HandoffActivityDTO is a hand-off in the Activity list.
+type HandoffActivityDTO struct {
+	Cloud      string `json:"cloud"`
+	CloudTitle string `json:"cloudTitle"`
+	Machine    string `json:"machine"`
+	Session    string `json:"session"`
+	URL        string `json:"url"`
+	Branch     string `json:"branch"`
+	Pushed     bool   `json:"pushed"`
 }
 
 // OwedDTO is a mark waiting for a copy left behind to end.
@@ -64,6 +78,15 @@ func (a *App) Activity() (*ActivityListDTO, error) {
 			Remote: []string{}, CanUndo: x.CanUndo, Undone: j.Undone, Why: x.Why}
 		for _, r := range j.Remote {
 			d.Remote = append(d.Remote, r.Machine)
+		}
+		if j.Kind == "handoff" {
+			if ho, err := move.LoadHandoff(core.StateDir, j.ID); err == nil {
+				d.Handoff = &HandoffActivityDTO{Cloud: ho.Cloud, CloudTitle: ho.Cloud, Machine: ho.Machine, Session: string(ho.Session.Session), URL: ho.URL,
+					Branch: ho.Branch, Pushed: ho.Pushed}
+				if _, cl, ok := cloudModuleOf(core, ho.Cloud); ok {
+					d.Handoff.CloudTitle = cl.Title
+				}
+			}
 		}
 		if b, ok := fetches[j.ID]; ok {
 			d.Fetch = &b

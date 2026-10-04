@@ -252,3 +252,31 @@ dialog::backdrop { background: rgba(30,29,26,.5); }
 .ico.cloud { background: var(--cloud-soft); color: var(--cloud); }
 .outcome > .btn { align-self: flex-start; }
 .btn.wrap { height: auto; min-height: 30px; padding: 4px 12px; white-space: normal; flex-wrap: wrap; }
+/* Hand off to a cloud: the menu, the plan sheet, the steps, the done screen. */
+.menu { display: flex; flex-direction: column; gap: 2px; padding: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 28px rgba(29, 28, 25, .14); }
+.menu-h { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 4px 8px; }
+.menu-item { display: flex; gap: 10px; align-items: flex-start; width: 100%; padding: 7px 8px; border: 0; border-radius: 6px; background: transparent; text-align: left; cursor: pointer; }
+.menu-item:hover:not([disabled]), .menu-item:focus-visible { background: var(--hover); }
+.menu-item[disabled] { cursor: not-allowed; }
+.menu-item[disabled] .menu-t { color: var(--muted); }
+.menu-t { font-size: 13px; font-weight: 500; }
+.brief-box { border: 1px solid var(--line2); border-radius: 8px; display: flex; flex-direction: column; background: var(--bg); }
+.brief-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--line2); flex-wrap: wrap; }
+.brief-box .masked { padding: 8px 12px 0; }
+textarea.brief { border: 0; background: transparent; padding: 10px 12px; font-size: 11.5px; line-height: 1.55; color: var(--ink2); resize: vertical; min-height: 140px; }
+.chk { display: flex; gap: 10px; font-size: 12.5px; align-items: baseline; }
+.stays { border: 1.5px solid var(--err-dot); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; background: color-mix(in srgb, var(--err-soft) 40%, var(--panel)); }
+.stays b { font-size: 12.5px; color: var(--err); }
+.stays .link { color: var(--err); }
+.file-chip { font-size: 12px; padding: 2px 8px; border: 1px solid color-mix(in srgb, var(--err-dot) 35%, var(--line)); border-radius: 5px; background: var(--panel); }
+.blockbox { border: 1.5px solid var(--err-dot); background: color-mix(in srgb, var(--err-soft) 40%, var(--panel)); border-radius: 8px; padding: 10px 12px; font-size: 12.5px; color: var(--err); display: flex; flex-direction: column; gap: 8px; }
+.checks-line { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12.5px; align-items: center; }
+.checks-line > span { display: inline-flex; gap: 6px; align-items: center; }
+.steps { display: flex; flex-direction: column; }
+.step { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--line2); font-size: 13px; }
+.step-ic { flex: 0 0 auto; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; border: 1.5px solid var(--line); }
+.step-ic.ok { background: var(--ok-soft); color: var(--ok); border: 0; }
+.step-ic.err { background: var(--err-dot); color: #fff; border: 0; }
+.step-ic.run { border: 2px solid var(--accent); color: var(--accent); }
+.failbox { padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--err-dot) 40%, var(--line)); background: color-mix(in srgb, var(--err-soft) 45%, var(--panel)); border-radius: 8px; font-size: 13px; color: var(--err); }
+.hint { display: flex; gap: 10px; align-items: center; padding: 10px 14px; border-radius: 8px; background: var(--cloud-band); color: var(--cloud); font-size: 12.5px; }

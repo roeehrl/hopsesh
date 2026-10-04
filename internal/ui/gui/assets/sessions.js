@@ -3,6 +3,7 @@
 // the palette uses too.
 import { api, h, fill, icon, ICONS, view, state, screen, go, loading, toast, fail, cap, ago, when, bytes, agentBadge, agentChip, machineStatus, sys, keys, cliHow,
   entries, selected, here, agentInfo, $, count, clouds, cloudOf, cloudState, cloudChip, dialog, errText } from "./core.js";
+import { handoffMenu } from "./handoff.js";
 import { planFor, planPicked } from "./plan.js";
 
 // scan reads every machine again. The list stays while it runs.
@@ -312,6 +313,7 @@ function mirrorChip(m) {
 
 function select(e) {
   state.sel = { machine: e.machine, key: e.key };
+  state.handoffOpen = null;
   render();
   view.querySelector('.row[aria-selected="true"]')?.focus();
 }
@@ -375,6 +377,12 @@ function inspector() {
       acts.slice(1).map((a, i) => h("button", { class: "btn", onclick: a.run }, a.label, i === 0 ? h("span", { class: "kbd" }, keys("mod+enter")) : null)),
       note ? h("span", { class: "muted", style: "font-size:11.5px" }, note) : null)
       : h("span", { class: "muted", style: "font-size:12px" }, note),
+    handoffMenu(e, state.handoffOpen === e.machine + "\u0000" + e.key, () => {
+      const k = e.machine + "\u0000" + e.key;
+      state.handoffOpen = state.handoffOpen === k ? null : k;
+      render();
+      view.querySelector('[role="menu"] [role="menuitem"]:not([disabled])')?.focus();
+    }),
     e.lastPrompt ? h("div", { class: "sec" }, h("span", { class: "sec-h" }, "Last prompt"), h("span", { style: "font-style:italic;color:var(--ink2)" }, `“${e.lastPrompt}”`)) : null,
     h("div", { class: "sec" }, h("span", { class: "sec-h" }, "Repository"),
       e.group.noRepo ? h("span", { class: "muted" }, "Started outside a git checkout") : [

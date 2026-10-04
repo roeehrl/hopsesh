@@ -36,7 +36,20 @@ const KINDS = {
   push: { label: "Sent", ico: ICONS.send, cls: "push" },
   mark: { label: "Marked", ico: ICONS.mark, cls: "mark" },
   fetch: { label: "Brought", ico: ICONS.cloud, cls: "cloud" },
+  handoff: { label: "Handed off", ico: ICONS.send, cls: "cloud" },
 };
+
+// handoffText words a hand-off to a cloud: where it went, and what undo does and doesn't.
+function handoffText(x) {
+  const o = x.handoff;
+  if (!o) return { title: x.title, detail: "", note: "" };
+  const tail = " to " + o.cloudTitle;
+  return {
+    title: x.title.endsWith(tail) ? `“${x.title.slice(0, -tail.length)}”${tail}` : x.title,
+    detail: [`${o.machine} → ${o.cloud}`, o.session, o.branch ? "branch " + o.branch : ""].filter(Boolean).join(" · "),
+    note: `Undo ${o.pushed ? "deletes the branch and " : "removes "}the mark. The session stays in ${o.cloudTitle}; archive it there if you want it gone.`,
+  };
+}
 
 // fetchText words a fetch from a cloud: its title, what came back, and what undo does.
 function fetchText(x) {
@@ -53,7 +66,7 @@ function fetchText(x) {
 
 function row(x) {
   const k = KINDS[x.kind] || KINDS.move;
-  const ft = x.kind === "fetch" ? fetchText(x) : null;
+  const ft = x.kind === "fetch" ? fetchText(x) : x.kind === "handoff" ? handoffText(x) : null;
   const act = x.undone ? h("span", { class: "chip st-ended" }, "Undone")
     : x.canUndo ? h("button", { class: "btn", onclick: async () => { if (await undo(x.id, x.title)) render(true); } }, "Undo")
     : h("button", { class: "btn", title: "Asks before throwing work away", onclick: async () => { if (await undo(x.id, x.title)) render(true); } }, "Undo anyway…");
@@ -62,7 +75,7 @@ function row(x) {
     h("div", { style: "flex:1 1 300px;min-width:0;display:flex;flex-direction:column;gap:3px" },
       h("div", {}, h("b", { style: "font-weight:500" }, k.label), " · ", ft ? ft.title : x.title),
       h("span", { class: "muted", style: "font-size:12px" }, ft?.detail || [`${x.changes} change${x.changes === 1 ? "" : "s"}`, x.remote.length ? `also on ${x.remote.join(", ")}` : ""].filter(Boolean).join(" · ")),
-      ft?.note && !x.undone ? h("span", { class: x.fetch.outcome === "partial" ? "warn" : "muted", style: "font-size:12px" }, ft.note) : null,
+      ft?.note && !x.undone ? h("span", { class: x.fetch?.outcome === "partial" || x.kind === "handoff" ? "warn" : "muted", style: "font-size:12px" }, ft.note) : null,
       !x.canUndo && !x.undone && x.why ? h("span", { class: "warn", style: "font-size:12px" }, "Used since: " + x.why) : null),
     h("span", { class: "muted", style: "font-size:12px;flex:0 0 auto", title: when(x.when) }, ago(x.when)),
     h("div", { style: "flex:0 0 auto" }, act));
