@@ -215,6 +215,28 @@ confirm, and `hopsesh undo` on the sender reverses both machines. Both sides mus
 hopsesh protocol version; otherwise hopsesh asks you to update. Details:
 [docs/design.md §11](docs/design.md#11-peers-working-with-hopsesh-on-the-other-machine).
 
+## Bring a session from Claude Code cloud
+
+A session that ran in Claude Code's cloud (Claude Code on the web) can come to this machine
+in Claude Code, or on into Codex. hopsesh does it through Claude Code's own
+`claude --teleport`, signed in as you, and only once you allow it:
+
+```sh
+hopsesh clouds allow claude-cloud            # off until you allow it
+hopsesh clouds test                          # read-only: the login and the flags hopsesh uses
+hopsesh pull claude-cloud:session_01… --run  # or paste the session's link; --in codex
+```
+
+hopsesh makes a new worktree of the session's repository (your checkout stays as it is) and
+runs the teleport there, in your terminal. When the copy appears, hopsesh checks its message
+count against the number Claude Code says it sent, keeps the cloud's `claude/…` branch as
+`hopsesh/from/claude-cloud/…`, and records it for undo. Teleport sometimes restores only part
+of a conversation, or nothing of a Remote Control session; hopsesh says so instead of
+handing you a short copy. Claude Code has no command that lists cloud sessions, so hopsesh
+lists the ones it brought here or that you pasted, and the local sessions Remote Control
+mirrors (`hopsesh ls --cloud`); `claude --teleport` with no id shows the rest. In the app:
+**Clouds** in the sidebar, **Bring here** on a cloud session.
+
 ## Use it from your agent
 
 ```sh
@@ -264,6 +286,9 @@ including the file-format traps hopsesh handles, are in [docs/design.md](docs/de
 - **Transcripts can hold secrets.** hopsesh scans for likely secrets while moving and can
   redact the copy (`--redact`). Every remote action goes to a local audit log.
 - **Only your agents talk to their models.** hopsesh never calls the Anthropic or OpenAI API.
+- **Clouds only through your agents.** A vendor's cloud is reached only through that agent's
+  own command, signed in as you, and only once you allow it; hopsesh never reads its login
+  or calls its servers.
 
 ## Why not…?
 

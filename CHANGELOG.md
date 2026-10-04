@@ -6,6 +6,22 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+- Bring a session from Claude Code cloud: `hopsesh pull claude-cloud:<id>` (or the session's
+  link) makes a new worktree of its repository and runs `claude --teleport` there, in your
+  terminal (`--run`, or the command to paste). Once the copy appears, hopsesh checks its
+  message count (complete, partial or empty, with the known Claude Code problem), keeps the
+  cloud's `claude/…` branch as `hopsesh/from/claude-cloud/…`, records lineage, and `hopsesh
+  undo` takes it all back. `--in codex` continues it in Codex, `--code-only` brings the
+  branch alone.
+- `hopsesh clouds` lists the agents' clouds; `clouds allow` and `deny` record whether hopsesh
+  may use one, and `clouds test` checks one read-only. `hopsesh ls --cloud` (or
+  `ls claude-cloud:`) shows cloud sessions and the local sessions Remote Control mirrors.
+- In the app: a **Clouds** group and an **In the cloud** scope, cloud sessions with **Bring
+  here**, a plan sheet and a done screen for bringing one back, a card per cloud under
+  Machines (Allow, Test), and **Paste a cloud link** and **Find in Claude Code**. In the
+  terminal UI: clouds in the header and as rows; enter brings one here.
+
 ### Fixed
 - Reading a Windows machine with many sessions could stall for 30 seconds and then fail:
   the long script hopsesh sent there over standard input sometimes never arrived, because
