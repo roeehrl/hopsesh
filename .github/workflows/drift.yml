@@ -1,9 +1,13 @@
 name: upstream drift
 
-# Weekly: did the latest Claude Code or Codex release change something hopsesh relies on?
-# probe gathers the facts with no secrets; review reads them with a model (the only job
-# that sees the API key, behind the drift-review environment, main only); report keeps a
-# single issue labelled upstream-drift up to date.
+# Weekly: did an agent release or a vendor cloud change something hopsesh relies on, or
+# that its cloud design does? The targets (agents and clouds) and what is watched for each
+# come from internal/devtools/driftmanifest. probe gathers the facts with no secrets;
+# review reads them with a model, one run per group of targets (the only job that sees
+# the API key, behind the drift-review environment, main only); report merges the reviews
+# and keeps a single issue labelled upstream-drift up to date. Nothing here signs in to a
+# vendor or calls a cloud: the CLIs only print their help, and the reviewer runs on an
+# API key.
 
 on:
   schedule:
@@ -20,9 +24,10 @@ jobs:
   probe:
     if: github.repository == 'roeehrl/hopsesh'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: read
+      actions: read # last week's drift-intel artifact, the baseline for docs, help, issues and canaries
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
@@ -39,6 +44,7 @@ jobs:
       - name: probe
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           ci/drift/probe.sh intel
           cat intel/probe.md >> "$GITHUB_STEP_SUMMARY"
@@ -55,6 +61,20 @@ jobs:
     environment: drift-review
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      # One review per group of targets, each with its own budget. The groups are those in
+      # internal/devtools/driftmanifest/targets.go, whose test checks this list.
+      matrix:
+        include:
+          - group: local
+            budget: "1.50"
+          - group: anthropic-cloud
+            budget: "1.00"
+          - group: openai-cloud
+            budget: "1.00"
+          - group: third-party-cloud
+            budget: "0.75"
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
@@ -79,25 +99,31 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+          GROUP: ${{ matrix.group }}
+          BUDGET: ${{ matrix.budget }}
         run: |
-          claude --safe-mode -p "$(cat ci/drift/prompt.md)" \
+          ci/drift/prompt.sh "$GROUP" intel > "$RUNNER_TEMP/prompt.md"
+          claude --safe-mode -p "$(cat "$RUNNER_TEMP/prompt.md")" \
             --model sonnet \
             --output-format json --json-schema "$(cat ci/drift/schema.json)" \
             --tools "Read,Grep,Glob" --permission-mode dontAsk \
-            --max-budget-usd 1.50 --no-session-persistence > review.json || true
+            --max-budget-usd "$BUDGET" --no-session-persistence > review.json || true
           jq '{subtype, is_error, total_cost_usd, num_turns}' review.json || cat review.json
           jq -e '.structured_output | type == "object"' review.json > /dev/null \
-            || { echo "::error::the review returned no report"; exit 1; }
-          jq '.structured_output' review.json > report.json
-          printf '\nReview cost: $%s\n' "$(jq -r .total_cost_usd review.json)" >> "$GITHUB_STEP_SUMMARY"
+            || { echo "::error::the $GROUP review returned no report"; exit 1; }
+          jq --arg g "$GROUP" '.structured_output + {group: $g}' review.json > "report-$GROUP.json"
+          printf '\nReview cost (%s): $%s\n' "$GROUP" "$(jq -r .total_cost_usd review.json)" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: drift-report
-          path: report.json
+          name: drift-report-${{ matrix.group }}
+          path: report-${{ matrix.group }}.json
           retention-days: 90
 
   report:
-    needs: review
+    needs: [probe, review]
+    # Also when a review failed: the others' findings still count, and the issue says
+    # which groups went unchecked.
+    if: ${{ !cancelled() && needs.probe.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -108,48 +134,77 @@ jobs:
           egress-policy: audit
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: drift-report
+          pattern: drift-report-*
+          merge-multiple: true
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: drift-intel
           path: intel
+      - name: merge the reviews
+        run: |
+          # The groups come from the manifest, in its order; a review with no report is named.
+          missing=
+          echo '[]' > reports.json
+          for g in $(jq -r 'reduce .targets[].group as $g ([]; if index([$g]) then . else . + [$g] end) | .[]' intel/manifest.json); do
+            if [ -f "report-$g.json" ]; then
+              jq --slurpfile r "report-$g.json" '. + $r' reports.json > merged.json && mv merged.json reports.json
+            else
+              missing="$missing $g"
+            fi
+          done
+          echo "MISSING=${missing# }" >> "$GITHUB_ENV"
+          jq -e 'length > 0' reports.json > /dev/null || { echo "::error::no review returned a report"; exit 1; }
       - name: update the upstream-drift issue
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          # The report is model output built from third-party text: neutralise @mentions.
-          jq -r --slurpfile v intel/versions.json --arg run "$RUN_URL" '
+          # The reports are model output built from third-party text: neutralise @mentions.
+          # Names and versions come from the manifest and versions.json, not the model.
+          jq -r --slurpfile m intel/manifest.json --slurpfile v intel/versions.json --arg run "$RUN_URL" --arg missing "$MISSING" '
             def safe: gsub("@"; "@​");
-            def name: if . == "claude" then "Claude Code" else "Codex" end;
-            "## Summary\n\n\(.summary | safe)\n\n"
+            def dash: if . == "" then "—" else . end;
+            ($m[0].targets | map({(.id): .name}) | add) as $names
+            | ($m[0].targets | group_by(.group) | map({(.[0].group): (map(.name) | join(", "))}) | add) as $members
+            | "## Summary\n\n"
+            + (map("- **\(.group)** (\($members[.group] // "")): \(.summary | safe)") | join("\n")) + "\n\n"
+            + (if $missing == "" then "" else "No report from the \($missing) review this week; its targets went unchecked.\n\n" end)
             + "| | tested | latest |\n|---|---|---|\n"
-            + "| Claude Code | \($v[0].claude.tested) | \($v[0].claude.latest) |\n"
-            + "| Codex | \($v[0].codex.tested) | \($v[0].codex.latest) |\n\n"
-            + (if (.findings | length) == 0 then "No findings.\n" else
-                (.findings | sort_by({break: 0, risk: 1, info: 2}[.severity]) | map(
-                  "### \(.severity | ascii_upcase): \(.title | safe) (\(.agent | name))\n\n\(.evidence | safe)\n\n"
+            + ($v[0] | map("| \(.name) | \(.tested | dash) | \(.latest | dash) |") | join("\n")) + "\n\n"
+            + ([.[].findings[]] as $f | if ($f | length) == 0 then "No findings.\n" else
+                ($f | sort_by({break: 0, risk: 1, info: 2}[.severity]) | map(
+                  "### \(.severity | ascii_upcase): \(.title | safe) (\($names[.target] // .target), \(.surface))\n\n\(.evidence | safe)\n\n"
                   + "- Source: \(.source | safe)\n"
                   + (if (.affected | length) > 0 then "- Affected: \(.affected | map("`\(.)`") | join(", ") | safe)\n" else "" end)
                   + (if .test != "" then "- Test: \(.test | safe)\n" else "" end)
                 ) | join("\n")) end)
-            + "\n---\nWeekly upstream-drift check. Facts, sources and the full report: \($run)\n"
-          ' report.json > body.md
+            + "\n---\nWeekly upstream-drift check. Facts, sources and the full reports: \($run)\n"
+          ' reports.json > body.md
           cat body.md >> "$GITHUB_STEP_SUMMARY"
 
-          title="Upstream drift: Claude Code $(jq -r .claude.latest intel/versions.json), Codex $(jq -r .codex.latest intel/versions.json)"
-          count=$(jq '[.findings[] | select(.severity != "info")] | length' report.json)
-          gh label create upstream-drift --color FBCA04 --description "A Claude Code or Codex release may affect hopsesh" --force
+          # The title names the targets with findings that matter, at most three of them.
+          title=$(jq -r --slurpfile v intel/versions.json '
+            ([.[].findings[] | select(.severity != "info") | .target] | unique) as $ids
+            | [$v[0][] | select(.id as $i | $ids | index($i)) | .name + (if .latest == "" then "" else " " + .latest end)]
+            | if length > 3 then .[:3] + ["\(length - 3) more"] else . end
+            | if length == 0 then "Upstream drift" else "Upstream drift: " + join(", ") end' reports.json)
+          count=$(jq '[.[].findings[] | select(.severity != "info")] | length' reports.json)
+          gh label create upstream-drift --color FBCA04 --description "An upstream agent or cloud change may affect hopsesh" --force
           open=$(gh issue list --label upstream-drift --state open --json number --jq '.[0].number // empty')
           if [ "$count" = 0 ]; then
             if [ -n "$open" ]; then
               gh issue comment "$open" --body-file body.md
-              gh issue close "$open" --reason completed --comment "Nothing that affects hopsesh in the latest releases."
+              # Close only when every group was reviewed.
+              [ -n "$MISSING" ] || gh issue close "$open" --reason completed --comment "Nothing that affects hopsesh in the latest upstream changes."
             fi
           elif [ -n "$open" ]; then
             gh issue edit "$open" --title "$title" --body-file body.md
             gh issue comment "$open" --body "Updated with this week's check: $RUN_URL"
           else
             gh issue create --title "$title" --body-file body.md --label upstream-drift
+          fi
+          if [ -n "$MISSING" ]; then
+            echo "::error::no report from:$MISSING"
+            exit 1
           fi
