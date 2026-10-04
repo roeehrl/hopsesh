@@ -83,7 +83,7 @@ on("hopsesh:password", askPassword);
 function configError() {
   fill(view, h("div", { class: "page" }, h("div", { class: "page-in", style: "max-width:620px;padding-top:12vh" },
     h("h1", {}, "Your hopsesh settings are from an older version"),
-    h("span", { class: "muted", style: "line-height:1.5" }, "This version works with every coding agent and stores its settings differently. Start fresh to keep the old file next to the new one and add your machines again. Your sessions are not affected."),
+    h("span", { class: "muted", style: "line-height:1.5" }, "This version stores its settings differently. Start fresh to keep the old file next to the new one and add your machines again. Your sessions are not affected."),
     h("span", { class: "mono muted", style: "font-size:11.5px" }, state.info.configError),
     h("div", {}, h("button", { class: "btn primary big", onclick: async () => {
       try { toast("Old settings kept at " + await api("StartFresh")); } catch (e) { fail(e); return; }
