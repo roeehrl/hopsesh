@@ -84,6 +84,8 @@ type model struct {
 	pasting bool
 	paste   string
 	notice  string
+	// ho is a hand-off to a cloud being chosen or planned.
+	ho handoff
 }
 
 type scanDone struct{ inv *app.Inventory }
@@ -201,7 +203,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.plan, m.input, m.mode = msg.plan, msg.input, modePlan
 		}
+	case briefEdited:
+		return m.briefDone(msg)
 	case applyDone:
+		if msg.res != nil && msg.res.Handoff != nil {
+			m.result, m.mode = msg.res, modeDone // a failed step is shown with the steps
+			return m, nil
+		}
 		if msg.err != nil {
 			m.err, m.mode = msg.err, modeError
 		} else {
@@ -222,6 +230,15 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 	}
 	if m.mode == modeBrought {
 		return m.broughtKeys(k)
+	}
+	if m.ho.picking {
+		return m.pickKeys(k)
+	}
+	if m.mode == modePlan && m.plan.Kind == move.KindHandoff {
+		return m.handoffKeys(k)
+	}
+	if m.mode == modeDone && m.plan.Kind == move.KindHandoff {
+		return m.handoffDoneKeys(k)
 	}
 	if m.editing {
 		switch k {
@@ -263,12 +280,14 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 			return m, m.Init()
 		case "enter":
 			if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil {
-				m.sel, m.target, m.picked = m.rows[m.cursor], "", nil
+				m.sel, m.target, m.picked, m.ho = m.rows[m.cursor], "", nil, handoff{}
 				return m, m.planCmd()
 			}
+		case "c":
+			m.openHandoff()
 		case "i":
 			if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil {
-				m.sel, m.target, m.picked = m.rows[m.cursor], "", nil
+				m.sel, m.target, m.picked, m.ho = m.rows[m.cursor], "", nil, handoff{}
 				if m.target = m.nextAgent(); m.target != "" {
 					return m, m.planCmd()
 				}
@@ -384,6 +403,9 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) planCmd() tea.Cmd {
+	if m.ho.cloud != "" {
+		return m.handoffPlanCmd()
+	}
 	if m.picked != nil {
 		return m.replan()
 	}
@@ -483,21 +505,30 @@ func (m *model) View() tea.View {
 	case modeBrowse:
 		m.viewBrowse(&b)
 	case modePlan:
-		if m.plan.Kind == move.KindFetch {
+		switch m.plan.Kind {
+		case move.KindFetch:
 			m.viewFetchPlan(&b)
-		} else {
+		case move.KindHandoff:
+			m.viewHandoffPlan(&b)
+		default:
 			m.viewPlan(&b)
 		}
 	case modeApplying:
-		if m.plan.Kind == move.KindFetch {
+		switch m.plan.Kind {
+		case move.KindHandoff:
+			fmt.Fprintf(&b, "\n  Handing %q off to %s… (snapshot, push, start the cloud session)\n", m.plan.Title, m.plan.Handoff.CloudTitle)
+		case move.KindFetch:
 			fmt.Fprintf(&b, "\n  Preparing a worktree for %q…\n", m.plan.Title)
-		} else {
+		default:
 			fmt.Fprintf(&b, "\n  Moving %q… (copying or converting, rewriting, verifying)\n", m.plan.Title)
 		}
 	case modeDone:
-		if m.plan.Kind == move.KindFetch {
+		switch m.plan.Kind {
+		case move.KindHandoff:
+			m.viewHandoffDone(&b)
+		case move.KindFetch:
 			m.viewFetchDone(&b)
-		} else {
+		default:
 			m.viewDone(&b)
 		}
 	case modeBrought:
@@ -635,9 +666,13 @@ func (m *model) viewBrowse(b *strings.Builder) {
 			fmt.Fprintf(b, "  %s\n", warnSt.Render(truncate("copies: "+strings.Join(parts, ", "), w-4)))
 		}
 	}
-	hint := "\n  ↑↓ move · enter bring here · i continue in · / search · r refresh · q quit"
+	if m.ho.picking {
+		m.viewPicker(b)
+		return
+	}
+	hint := "\n  ↑↓ move · enter bring here · i continue in · c hand off · / search · r refresh · q quit"
 	if m.partialCloud() != nil {
-		hint = "\n  ↑↓ move · enter resume/bring · i continue in · p paste a cloud link · f find in a cloud · / search · r refresh · q quit"
+		hint = "\n  ↑↓ move · enter resume/bring · i continue in · c hand off · p paste a cloud link · f find in a cloud · / search · r refresh · q quit"
 	}
 	b.WriteString(dim.Render(hint) + "\n")
 }

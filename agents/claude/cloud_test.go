@@ -3,6 +3,9 @@ package claude_test
 import (
 	"context"
 	"errors"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -13,20 +16,126 @@ import (
 	"github.com/roeehrl/hopsesh/sdk/agent/agenttest"
 )
 
-// Claude Code's cloud passes the cloud conformance kit against the stand-in cloud: it lists
-// what it is told about (Claude Code has no list command), fetches with a teleport the
-// user runs, reads its links back, and maps a login the cloud cannot use.
+// Claude Code's cloud passes the cloud conformance kit against the stand-in cloud: it starts
+// a session from a briefing in a checkout of a repository on the stand-in GitHub, follows
+// it up, lists what it is told about (Claude Code has no list command), fetches with a
+// teleport the user runs, reads its links back, and maps a login the cloud cannot use.
 func TestCloudConformance(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in origin's hook needs a POSIX shell")
+	}
 	dir := t.TempDir()
+	repo := demoRepo(t)
 	agenttest.RunCloudWith(t, claude.New(), fakecloud.Programs(dir, nil), agenttest.CloudOptions{
-		Seed: func(cloud string) agent.SessionID {
-			s, err := fakecloud.Open(dir).Seed(fakecloud.Session{Cloud: fakecloud.ClaudeCloud, Title: "seeded", Repo: "github.com/example/demo", Branch: "main"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			return agent.SessionID(s.ID)
+		Request: func(c agent.Cloud) agent.SendRequest {
+			return agent.SendRequest{Cloud: c.Name, Dir: repo, Repo: "github.com/example/demo", Branch: "main", Brief: agent.NotePrefix + "This task continues a session (conformance).", Title: "conformance"}
 		},
 	})
+}
+
+// demoRepo is a checkout of github.com/example/demo, whose remote is a local bare
+// repository standing in for GitHub, with main pushed.
+func demoRepo(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	gitConfig := filepath.Join(root, "gitconfig")
+	for k, v := range map[string]string{"GIT_CONFIG_GLOBAL": gitConfig, "GIT_CONFIG_NOSYSTEM": "1", "GIT_AUTHOR_NAME": "Sam Doe", "GIT_AUTHOR_EMAIL": "sam@example.com",
+		"GIT_COMMITTER_NAME": "Sam Doe", "GIT_COMMITTER_EMAIL": "sam@example.com", "FAKE_CLOUD_FAIL": "", "CCR_FORCE_BUNDLE": ""} {
+		t.Setenv(k, v)
+	}
+	o, err := fakecloud.NewOrigin(root, "https://github.com/example/demo.git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Redirect(gitConfig); err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(root, "demo")
+	for _, args := range [][]string{{"init", "-q", "-b", "main", repo}, {"-C", repo, "remote", "add", "origin", o.URL},
+		{"-C", repo, "commit", "-q", "--allow-empty", "-m", "init"}, {"-C", repo, "push", "-q", "origin", "main"}} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	return repo
+}
+
+// SendCloud starts a session with the briefing as the prompt, from the handoff branch's
+// worktree, without the variables the cloud must not inherit; with the bundle, it sets
+// CCR_FORCE_BUNDLE=1. FollowUp queues a message in the documented form. Both read the
+// session's link when the reply is not JSON.
+func TestSendAndFollowUp(t *testing.T) {
+	var runs []agent.RunOptions
+	var argvs []string
+	reply := `{"ok":true,"session_id":"cse_01NewSession42","url":"https://claude.ai/code/session_01NewSession42"}`
+	fh := agenttest.NewFakeHost(home)
+	fh.AddBinary("claude", "2.1.284 (Claude Code)")
+	fh.Programs["claude"] = func(argv []string, o agent.RunOptions) agent.Result {
+		if strings.Join(argv[1:], " ") == "auth status --json" {
+			return agent.Result{Stdout: []byte(maxLogin)}
+		}
+		runs, argvs = append(runs, o), append(argvs, strings.Join(argv, " "))
+		return agent.Result{Stdout: []byte(reply)}
+	}
+	fh.Put(home+"/.claude/projects/.keep", nil, time.Now())
+	m := claude.New()
+	in, _ := m.Detect(context.Background(), fh)
+	h := agent.Confine(fh, m.Spec(), in)
+	ctx := context.Background()
+	r := agent.SendRequest{Cloud: "claude-cloud", Dir: "/tmp/hopsesh-handoff-1/demo", Repo: "github.com/example/demo", Branch: "hopsesh/handoff/20261004-0b6c6a8e",
+		Base: "4c1e9a2", Brief: agent.NotePrefix + "This task continues a Claude Code session.", Title: "Fix the parser"}
+	cs, err := m.SendCloud(ctx, h, in, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if argvs[0] != "/bin/claude -p "+r.Brief+" --cloud --output-format json" || runs[0].Dir != r.Dir || len(runs[0].Env) != 0 ||
+		strings.Join(runs[0].Unset, " ") != "CLAUDE_CODE_CHILD_SESSION ANTHROPIC_API_KEY" {
+		t.Errorf("send: %s %+v", argvs[0], runs[0])
+	}
+	if cs.Key.Session != "session_01NewSession42" || cs.Cloud != "claude-cloud" || cs.URL != "https://claude.ai/code/session_01NewSession42" ||
+		cs.State != agent.CloudRunning || cs.Branch != r.Branch || cs.Title != "Fix the parser" {
+		t.Errorf("session: %+v", cs)
+	}
+	r.Code = agent.ViaBundle
+	if cs, err = m.SendCloud(ctx, h, in, r); err != nil || strings.Join(runs[1].Env, " ") != "CCR_FORCE_BUNDLE=1" || cs.Branch != "" {
+		t.Errorf("bundle: %+v %+v %v", runs[1], cs, err)
+	}
+	if _, err := m.SendCloud(ctx, h, in, agent.SendRequest{Brief: "no prefix"}); err == nil {
+		t.Error("a briefing without hopsesh's prefix is refused")
+	}
+	reply = "Sent to the cloud session: https://claude.ai/code/session_01NewSession42\n"
+	cs, err = m.FollowUp(ctx, h, in, "cse_01NewSession42", "Also add a test.")
+	if err != nil || cs.Key.Session != "session_01NewSession42" || argvs[2] != "/bin/claude -p Also add a test. --cloud session_01NewSession42 --output-format json" {
+		t.Errorf("follow-up: %+v %v %s", cs, err, argvs[2])
+	}
+	if _, err := m.FollowUp(ctx, h, in, "not-an-id", "x"); !errors.Is(err, agent.ErrNotFound) {
+		t.Errorf("a bad id: %v", err)
+	}
+}
+
+// The cloud's refusals map onto the SDK's errors.
+func TestSendRefusals(t *testing.T) {
+	for stderr, want := range map[string]error{
+		"Error: Unable to get organization UUID":                                                agent.ErrSignedOut,
+		"Error: Claude Code on the web is not available for your plan or organization.":         agent.ErrNotEligible,
+		"Error: Claude Code can't send this repository to the cloud: it is inside a submodule.": agent.ErrRepoUnsupported,
+	} {
+		fh := agenttest.NewFakeHost(home)
+		fh.AddBinary("claude", "2.1.284 (Claude Code)")
+		fh.Programs["claude"] = func(argv []string, _ agent.RunOptions) agent.Result {
+			if strings.Join(argv[1:], " ") == "auth status --json" {
+				return agent.Result{Stdout: []byte(maxLogin)}
+			}
+			return agent.Result{Stderr: []byte(stderr), Code: 1}
+		}
+		m := claude.New()
+		in, _ := m.Detect(context.Background(), fh)
+		h := agent.Confine(fh, m.Spec(), in)
+		_, err := m.SendCloud(context.Background(), h, in, agent.SendRequest{Brief: agent.NotePrefix + "x", Dir: "/w"})
+		if !errors.Is(err, want) {
+			t.Errorf("%s: %v", stderr, err)
+		}
+	}
 }
 
 const home = "/home/u"

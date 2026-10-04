@@ -66,6 +66,10 @@ func Claude(p Proc) (handled bool, code int) {
 	if fail := p.fail(); fail == "signed-out" || fail == "not-eligible" {
 		return true, claudeRefused(p, fail)
 	}
+	if p.Env("ANTHROPIC_API_KEY") != "" {
+		// An API key in the environment takes the place of the claude.ai login.
+		return true, claudeRefused(p, "signed-out")
+	}
 	if isClaudeID(cloudArg) {
 		if !print {
 			// Documented: an existing session can only be attached from the web.
@@ -150,7 +154,12 @@ func claudeCreate(p Proc, prompt string, jsonOut bool) int {
 	}
 	s := Session{Cloud: ClaudeCloud, Title: clip(prompt, 60), Repo: repo, CloneURL: cloneURL, Branch: branch, Base: head, Code: "branch",
 		Messages: []Message{{Role: "user", Text: prompt, Time: time.Now().UTC()}}}
-	if p.fail() == "repo-mismatch" || !strings.HasPrefix(repo, "github.com/") || p.Env("CCR_FORCE_BUNDLE") == "1" {
+	if p.fail() == "repo-mismatch" {
+		// Unverified wording: a layout the bundle refuses (a submodule, say), on a remote the
+		// cloud cannot clone.
+		return p.errorf(1, "Error: Claude Code can't send this repository to the cloud: it is inside a submodule.")
+	}
+	if !strings.HasPrefix(repo, "github.com/") || p.Env("CCR_FORCE_BUNDLE") == "1" {
 		s.Code = "bundle"
 	} else if !onRemote(env, p.Dir, branch) {
 		// Documented: the cloud clones "your current branch, not your local checkout, so

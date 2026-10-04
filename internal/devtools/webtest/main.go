@@ -4,7 +4,8 @@
 //
 // The demo home also has a stand-in Claude Code cloud: this program, run as claude, is the
 // stand-in claude; the demo repository's GitHub remote is a local bare repository; POST
-// /cloud adds a cloud session (and sets the failure the next teleport plays); and a command
+// /cloud adds a cloud session (and sets the failure the next teleport plays); POST /dirty
+// leaves work in progress in the demo repository, for a hand-off; and a command
 // the window opens "in a terminal" runs in the background instead.
 //
 //	go run ./internal/devtools/webtest -addr 127.0.0.1:8765 -home /tmp/demo
@@ -141,6 +142,17 @@ func main() {
 		os.Setenv("FAKE_CLOUD_FAIL", r.URL.Query().Get("fail"))
 		_ = json.NewEncoder(w).Encode(map[string]string{"id": id})
 	})
+	http.HandleFunc("/dirty", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if err := dirty(h); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	})
 	http.HandleFunc("/reset", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "POST only", http.StatusMethodNotAllowed)
@@ -253,6 +265,26 @@ func seedCloud(title string, work bool) (string, error) {
 		return s.ID, err
 	}
 	return s.ID, fakecloud.Work(fakecloud.Proc{Vars: map[string]string{}}, s.ID, false)
+}
+
+// dirty leaves work in progress in the demo repository, as a hand-off finds it: a commit
+// not pushed, an untracked note and files that look like credentials (POST /dirty).
+func dirty(h string) error {
+	demo := filepath.Join(h, "git", "demo")
+	for p, s := range map[string]string{"parser.go": "package demo\n", "docs/notes.md": "notes\n", ".env": "TOKEN=not-a-real-one\n", "certs/dev.pem": "not a real key\n"} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(demo, p)), 0o700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(demo, p), []byte(s), 0o600); err != nil {
+			return err
+		}
+	}
+	for _, args := range [][]string{{"add", "parser.go"}, {"commit", "-q", "-m", "work in progress"}} {
+		if out, err := exec.Command("git", append([]string{"-C", demo}, args...)...).CombinedOutput(); err != nil {
+			return fmt.Errorf("git %v: %v: %s", args, err, out)
+		}
+	}
+	return nil
 }
 
 // background runs a command line the window would open in a terminal, as that terminal

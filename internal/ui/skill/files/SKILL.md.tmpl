@@ -5,7 +5,8 @@ description: >-
   one here, or continues it in another agent, with the hopsesh CLI: paths are rewritten and
   the repository, worktree and code are set up. Use when the user wants to continue, pull,
   hand off, bring back or resume a session from another computer, to continue a session in a
-  different agent ("continue this in Codex", "take my Claude session to Codex"), asks which
+  different agent ("continue this in Codex", "take my Claude session to Codex"), to hand a
+  session off to an agent's cloud ("hand this off to Claude Code cloud"), asks which
   sessions are open elsewhere, or mentions hopsesh.
 license: Apache-2.0
 compatibility: Requires the hopsesh CLI; other machines need SSH access.
@@ -29,8 +30,8 @@ It moves a session here in the same agent, or continues it in another agent. Run
 3. **Do not start the moved session yourself.** Give the user the `command` from the result to
    run in a new terminal tab.
 4. **Do not change hopsesh's setup for the user**: `hosts allow`, `hosts add`, `hosts auth`,
-   `hosts setup-key`, `trust`, `skill`, `undo` and `update` are the user's to run. Tell them the
-   exact command instead.
+   `hosts setup-key`, `clouds allow`, `clouds deny`, `trust`, `skill`, `undo` and `update` are
+   the user's to run. Tell them the exact command instead.
 5. **Never ask for, accept or pass a password.** Do not use `--password-stdin`. If the user types
    a password into the conversation, do not use it; suggest they change it.
 
@@ -73,6 +74,33 @@ receives sessions; if it refuses, tell the user, and do not change its settings.
 When continuing *this* session in another agent, you may first write a short handoff note
 (done, open plan, next step) to a file and pass `--note-file <path>`; it goes into the
 briefing the other agent reads.
+
+## Hand a session off to an agent's cloud
+
+No cloud takes a conversation: the cloud agent gets a briefing (about 2,000 tokens, secrets
+masked) as its first prompt and the code on a branch. Only `claude-cloud` (Claude Code on
+the web) can be reached for now; `{{.Bin}} clouds --json` lists the clouds and their state.
+
+1. `{{.Bin}} plan <ref> --to claude-cloud --json`. Summarise `handoff.conversation` (what is
+   lost: `handoff.stays`, `handoff.loss`), the code (`handoff.reuse` means the session's own
+   branch goes as it is; otherwise `handoff.branch` is a new branch with
+   `handoff.unpushed` commits and `handoff.tracked` files), what stays on the machine
+   (`handoff.withheld`, `handoff.offered`), `handoff.markTitle`, `handoff.checks`,
+   `warnings` and `blockers`, and that it uses the user's plan allowance. Offer to show
+   `handoff.brief`.
+2. Resolve blockers by asking: the cloud is not allowed (the user runs
+   `{{.Bin}} clouds allow claude-cloud`); the repository is not on GitHub (`--bundle` uploads it
+   instead, and results can't be pushed back); untracked files go only with `--untracked <path>`.
+   Never add `--history-file` (it commits the conversation to the branch) unless the user asks.
+3. After a clear yes: `{{.Bin}} handoff <ref> --to claude-cloud --json --yes` with the same flags.
+4. Report `handoff.url`, `handoff.branch`, what stayed (`handoff.stayed`), and that
+   `{{.Bin}} undo <result.journal>` deletes the branch and the mark but leaves the cloud session
+   to archive on the web. If `error` is set, report `handoff.message` and the failed step.
+
+To bring it back later: `{{.Bin}} plan claude-cloud:<id> --json`, then (after a yes)
+`{{.Bin}} pull claude-cloud:<id> --json --yes`. A message to a running cloud session
+(`{{.Bin}} followup claude-cloud:<id> "<text>" --yes`) starts a paid turn there: only when the
+user asks for it, with the exact text.
 
 Other flags are in [reference.md](reference.md).
 

@@ -173,8 +173,11 @@ func (r *runner) scenario(row Row) error {
 	if row.Op == "skill" {
 		return r.skill()
 	}
-	if row.Op == "fetch" {
+	switch row.Op {
+	case "fetch":
 		return r.fetch(row)
+	case "handoff", "cloud-roundtrip":
+		return r.handoff(row)
 	}
 	s := &sc{row: row, id: newID(), host: r.hosts[row.Naming]}
 	s.marker = fmt.Sprintf("hsm%03dx%s", row.N, s.id[:6])
@@ -614,6 +617,189 @@ func (r *runner) fetch(row Row) error {
 	}
 	if left, _ := git(sr.Cwd, nil, "branch", "--list", "hopsesh/from/*", "claude/*"); left != "" {
 		return fmt.Errorf("undo left branches: %s", left)
+	}
+	return nil
+}
+
+// cloudWorld points git and the stand-in cloud at a world of their own for one row (a bare
+// repository standing in for the repository on GitHub, and the cloud's store), and returns
+// the stand-in remote and a function that restores this machine's settings.
+func (r *runner) cloudWorld(name string) (fakecloud.Origin, func(), error) {
+	world := filepath.Join(r.out, "work", "cloud")
+	gitConfig := filepath.Join(world, "gitconfig")
+	var restore []func()
+	done := func() {
+		for _, f := range restore {
+			f()
+		}
+	}
+	for k, v := range map[string]string{"GIT_CONFIG_GLOBAL": gitConfig, "FAKE_CLOUD_DIR": filepath.Join(world, "store"), "FAKE_CLOUD_FAIL": ""} {
+		old, had := os.LookupEnv(k)
+		os.Setenv(k, v)
+		restore = append(restore, func() {
+			if had {
+				os.Setenv(k, old)
+			} else {
+				os.Unsetenv(k)
+			}
+		})
+	}
+	o, err := fakecloud.NewOrigin(world, "https://github.com/hsm-matrix/"+name+".git")
+	if err == nil {
+		err = o.Redirect(gitConfig)
+	}
+	return o, done, err
+}
+
+// handoff hands a session here off to Claude Code cloud (a stand-in cloud plays it): the
+// plan's code (the branch as it is when clean and pushed, else a snapshot on a handoff
+// branch, with the untracked draft when asked), the briefing with the session's words,
+// the checkout left as it was, the mark; a cloud round trip then lets the cloud work and
+// brings the session home through the bring-back path. Undo takes it all back (the branch
+// with a lease; the cloud session stays, as a step owed).
+func (r *runner) handoff(row Row) error {
+	if runtime.GOOS == "windows" {
+		r.log.printf("skipped: the stand-in cloud's repository hook needs a POSIX shell\n")
+		return nil
+	}
+	id := newID()
+	marker := fmt.Sprintf("hsm%03dx%s", row.N, id[:6])
+	text := contents[row.Content] + " " + marker
+	name := fmt.Sprintf("r%03d", row.N)
+	var sr SeedRes
+	if err := r.here.do("seed", SeedReq{Agent: row.From, ID: id, Title: fmt.Sprintf("matrix row %d", row.N), Text: text, Large: row.Content == "large",
+		Repo: name, State: row.Repo, Session: true}, &sr); err != nil {
+		return fmt.Errorf("seeding the session: %w", err)
+	}
+	o, restore, err := r.cloudWorld(name)
+	defer restore()
+	if err != nil {
+		return err
+	}
+	if _, err := r.hs(true, "clouds", "allow", "claude-cloud"); err != nil {
+		return err
+	}
+	ref := row.From + "/" + id
+	if row.Repo == "none" {
+		out, err := r.hs(false, "handoff", ref, "--to", "claude-cloud", "--yes")
+		if err != nil {
+			return err
+		}
+		if !strings.Contains(out, "isn't in a git repository with a remote") {
+			return fmt.Errorf("the refusal does not say why:\n%s", tail(out, 600))
+		}
+		return nil
+	}
+	first, err := git(sr.Cwd, nil, "rev-list", "--max-parents=0", "HEAD")
+	if err != nil {
+		return err
+	}
+	if _, err := git(sr.Cwd, nil, "remote", "set-url", "origin", o.URL); err != nil {
+		return err
+	}
+	if _, err := git(sr.Cwd, nil, "push", "-q", "origin", strings.TrimSpace(first)+":refs/heads/main"); err != nil {
+		return err
+	}
+	before, _ := git(sr.Cwd, nil, "--no-optional-locks", "status", "--porcelain")
+	head, _ := git(sr.Cwd, nil, "rev-parse", "HEAD")
+	args := []string{"handoff", ref, "--to", "claude-cloud", "--yes", "--json"}
+	if row.Repo == "uncommitted" {
+		args = append(args, "--untracked", "draft-*")
+	}
+	out, err := r.hs(true, args...)
+	if err != nil {
+		return err
+	}
+	var res struct {
+		Result  struct{ Journal string } `json:"result"`
+		Handoff struct {
+			Session, Branch, Snapshot string
+			Reuse, Pushed             bool
+			MarkText                  string `json:"markText"`
+		} `json:"handoff"`
+	}
+	if i := strings.Index(out, "{\n"); i < 0 || json.Unmarshal([]byte(out[i:]), &res) != nil {
+		return fmt.Errorf("handoff --json printed no result:\n%s", tail(out, 800))
+	}
+	h := res.Handoff
+	switch {
+	case row.Repo == "clean" && (!h.Reuse || h.Branch != "main" || h.Pushed):
+		return fmt.Errorf("a clean pushed branch goes as it is: %+v", h)
+	case row.Repo != "clean" && (h.Reuse || !strings.HasPrefix(h.Branch, "hopsesh/handoff/") || !h.Pushed || h.Snapshot == ""):
+		return fmt.Errorf("work in progress goes on a handoff branch: %+v", h)
+	}
+	if row.Repo == "uncommitted" {
+		tree, _ := git(sr.Cwd, nil, "ls-tree", "-r", "--name-only", h.Snapshot)
+		if !strings.Contains(tree, "draft-"+id[:8]+".txt") {
+			return fmt.Errorf("the chosen untracked file is not in the snapshot:\n%s", tree)
+		}
+	}
+	if after, _ := git(sr.Cwd, nil, "--no-optional-locks", "status", "--porcelain"); after != before {
+		return fmt.Errorf("the checkout changed:\n%s\n---\n%s", before, after)
+	}
+	if now, _ := git(sr.Cwd, nil, "rev-parse", "HEAD"); now != head {
+		return fmt.Errorf("HEAD moved: %s → %s", head, now)
+	}
+	cs, err := fakecloud.Open(os.Getenv("FAKE_CLOUD_DIR")).Get(h.Session)
+	if err != nil {
+		return err
+	}
+	if len(cs.Messages) == 0 || !strings.HasPrefix(cs.Messages[0].Text, "[hopsesh] ") || !strings.Contains(cs.Messages[0].Text, marker) || cs.Branch != h.Branch {
+		return fmt.Errorf("the cloud session: branch %s, first message %q", cs.Branch, tail(cs.Messages[0].Text, 300))
+	}
+	var fs []Found
+	if err := r.here.do("find", FindReq{Marker: marker}, &fs); err != nil {
+		return err
+	}
+	marked := false
+	for _, f := range fs {
+		marked = marked || f.ID == id && strings.Contains(f.Mark, "on claude-cloud")
+	}
+	if !marked {
+		return fmt.Errorf("the session here is not marked (%+v)", fs)
+	}
+	undos := 1
+	if row.Op == "cloud-roundtrip" {
+		if err := fakecloud.Work(fakecloud.Proc{Vars: map[string]string{}}, h.Session, false); err != nil {
+			return err
+		}
+		top, _ := git(sr.Cwd, nil, "rev-parse", "--show-toplevel")
+		out, err := r.hs(true, "pull", "claude-cloud:"+h.Session, "--to", strings.TrimSpace(top), "--yes", "--run", "--json")
+		if err != nil {
+			return err
+		}
+		var back struct {
+			Brought struct{ Outcome, Branch, Worktree string } `json:"brought"`
+		}
+		if i := strings.Index(out, "{\n"); i < 0 || json.Unmarshal([]byte(out[i:]), &back) != nil {
+			return fmt.Errorf("pull --json printed no result:\n%s", tail(out, 800))
+		}
+		if back.Brought.Outcome != "complete" || !strings.HasPrefix(back.Brought.Branch, "hopsesh/from/claude-cloud/") {
+			return fmt.Errorf("the way back: %+v", back.Brought)
+		}
+		if _, err := os.Stat(filepath.Join(back.Brought.Worktree, "cloud-work", h.Session+".md")); err != nil {
+			return fmt.Errorf("the cloud's work did not come back")
+		}
+		undos = 2 // the fetch, then the hand-off
+	}
+	for i := 0; i < undos; i++ {
+		if _, err := r.hs(true, "undo", "--yes"); err != nil {
+			return err
+		}
+	}
+	if h.Pushed {
+		if left, _ := git(o.Bare, nil, "for-each-ref", "refs/heads/"+h.Branch); left != "" {
+			return fmt.Errorf("undo left the handoff branch: %s", left)
+		}
+	}
+	fs = nil
+	if err := r.here.do("find", FindReq{Marker: marker}, &fs); err != nil {
+		return err
+	}
+	for _, f := range fs {
+		if f.ID == id && f.Mark != "" {
+			return fmt.Errorf("undo left the mark %q", f.Mark)
+		}
 	}
 	return nil
 }

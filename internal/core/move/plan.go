@@ -110,6 +110,12 @@ type Options struct {
 	CodeOnly       bool // the cloud's branch only, without the conversation
 	RenameVendor   bool // the cloud's own branch (claude/…) comes home as hopsesh/from/<cloud>/…
 	AppendOriginal bool // add the cloud's work to the session it was handed off from
+	// Handing a session off to a cloud.
+	Bundle      bool     // the cloud's driver uploads the repository; nothing is pushed
+	HistoryFile bool     // also commit the conversation as .hopsesh/handoff.md
+	Untracked   []string // untracked files (globs) to carry
+	Brief       string   // the briefing as the user edited it ("": hopsesh's)
+	Cleanup     string   // when the handoff branch is deleted (Cleanup*)
 }
 
 // Via choices: the target agent's own importer, or hopsesh's conversion even when the
@@ -136,7 +142,8 @@ const (
 const (
 	KindMove     = "move"     // the same agent, another place
 	KindContinue = "continue" // another agent
-	// KindFetch (fetch.go) brings a session from a cloud.
+	// KindFetch (fetch.go) brings a session from a cloud; KindHandoff (handoff.go) hands
+	// one off to a cloud.
 )
 
 // Plan is a move, worked out without changing anything.
@@ -171,12 +178,14 @@ type Plan struct {
 	Continue       *ContinuePlan `json:"continue,omitempty"`
 	NativeCopy     *NativeCopy   `json:"nativeCopy,omitempty"`
 	Fetch          *FetchPlan    `json:"fetch,omitempty"`
+	Handoff        *HandoffPlan  `json:"handoff,omitempty"`
 
 	bundle     agent.Bundle
 	native     *Plan // the move that keeps NativeCopy
 	nativeIn   Input
 	resumeOpts agent.ResumeOptions
 	fetchIn    *FetchInput
+	handoffIn  *HandoffInput
 }
 
 // Endpoint describes one end for people and JSON.

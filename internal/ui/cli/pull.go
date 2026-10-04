@@ -25,7 +25,7 @@ func addPullFlags(cmd *cobra.Command) {
 	f.Bool("go", false, "start the continued session with \"Continue.\"")
 	f.String("via", "", "for another agent: import (its own importer converts the session, where it has one; hopsesh adds its briefing) or hopsesh (hopsesh converts it; the default unless that agent is set to import)")
 	f.Bool("carry-rules", false, "for another agent: add your instructions for every project of the session's agent to the briefing")
-	f.String("to", "", "continue in this local directory instead of matching the repository (from a cloud: the repository's checkout here)")
+	f.String("to", "", "continue in this local directory instead of matching the repository (from a cloud: the repository's checkout here; plan only: a cloud, to plan a hand-off)")
 	f.Bool("code-only", false, "from a cloud: the session's branch only, in a worktree, without the conversation")
 	f.Bool("append", false, "from a cloud: add its work to the session it was handed off from, when that is as it was left")
 	f.Bool("clone", false, "clone the repository if it is not on this machine")
@@ -147,6 +147,8 @@ func planCmd() *cobra.Command {
 	cmd.Use = "plan [<machine>:][<agent>/]<id-or-title> | <cloud>:<id> | <cloud link>"
 	cmd.Short = "Show what pulling a session would do, without changing anything"
 	cmd.Long = "Same as pull --dry-run: finds the session, plans the move or continuation and prints the plan (or JSON with --json). It never writes."
+	cmd.Long += "\n\nWith --to <cloud> (claude-cloud) it plans a hand-off to that cloud instead, as hopsesh handoff --dry-run does."
+	addHandoffFlags(cmd)
 	cmd.RunE = func(c *cobra.Command, args []string) error {
 		_ = c.Flags().Set("dry-run", "true")
 		_ = c.Flags().Set("yes", "false")
@@ -160,6 +162,12 @@ func pull(cmd *cobra.Command, refArg string) error {
 	r, err := newRun(cmd)
 	if err != nil {
 		return err
+	}
+	if to, _ := cmd.Flags().GetString("to"); r.app.IsCloud(to) {
+		if dry, _ := cmd.Flags().GetBool("dry-run"); !dry {
+			return fmt.Errorf("to hand a session off to %s, use: hopsesh handoff %s --to %s", to, refArg, to)
+		}
+		return handoff(cmd, refArg, to)
 	}
 	opt, err := r.pullOptions(cmd)
 	if err != nil {

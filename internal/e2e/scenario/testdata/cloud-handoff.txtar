@@ -1,0 +1,60 @@
+# A session here goes to Claude Code cloud: planned with --json (a briefing, a handoff
+# branch with the unpushed commit and the changed file, the .env withheld), handed off
+# (the checkout untouched, the driver run without the variables an agent's own session
+# passes on), marked, followed up, and undone (the branch deleted, the cloud session owed).
+[windows] skip 'the stand-in origin needs a POSIX shell'
+env CLAUDE_CODE_CHILD_SESSION=1
+env ANTHROPIC_API_KEY=sk-ant-not-a-real-key
+cloud-world demo
+claude-session 11111111-2222-4333-8444-555555555555 demo 'Fix the parser' 'fix the quoting in'
+exec git -C demo commit -q --allow-empty -m 'not pushed yet'
+cp notes.txt demo/notes.txt
+cp env demo/.env
+
+! exec hopsesh handoff claude/11111111 --to claude-cloud --yes
+stderr 'hopsesh clouds allow claude-cloud'
+exec hopsesh clouds allow claude-cloud
+
+exec hopsesh plan claude/11111111 --to claude-cloud --json --untracked notes.txt
+stdout '"kind": "handoff"'
+stdout '"branch": "hopsesh/handoff/\d{8}-11111111"'
+stdout '"brief": "\[hopsesh\] This task continues a Claude Code session'
+stdout '"untracked": \[\s*"notes.txt"'
+stdout '"path": ".env"'
+stdout '"markTitle": "↪ continued in Claude Code on claude-cloud"'
+! grep 'cloud' $WORK/agents.log
+
+exec git -C demo status --porcelain
+cp stdout status-before
+exec hopsesh handoff claude/11111111 --to claude-cloud --untracked notes.txt --yes
+stdout '✓ Handed off to Claude Code cloud'
+stdout 'Session session_01\w+ is running'
+stdout 'https://claude.ai/code/session_01'
+stdout 'Branch hopsesh/handoff/\d{8}-11111111 on github.com/example/demo'
+stdout 'Stayed here: .env'
+stdout 'This session is now marked "↪ continued in Claude Code on claude-cloud"'
+grep 'claude -p \[hopsesh\] This task continues' $WORK/agents.log
+exec git -C demo status --porcelain
+cmp stdout status-before
+exec git -C demo branch --show-current
+stdout '^main$'
+exec git -C origins/origins/demo.git branch --list 'hopsesh/handoff/*'
+stdout 'hopsesh/handoff/'
+
+exec hopsesh ls --json
+stdout '"kind": "continued"'
+stdout '"location": "claude-cloud"'
+
+! exec hopsesh followup claude-cloud:session_01Nope000000 'and add a test'
+stderr 'not confirmed'
+
+exec hopsesh undo --yes
+stdout 'Undid'
+stdout 'The claude-cloud session session_01\w+ stays in the cloud; archive it there if you want it gone: https://claude.ai/code/session_01'
+exec git -C origins/origins/demo.git branch --list 'hopsesh/handoff/*'
+! stdout .
+
+-- notes.txt --
+the plan, untracked
+-- env --
+TOKEN=not-a-real-one
