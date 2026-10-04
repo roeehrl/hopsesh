@@ -290,12 +290,12 @@ func markdownSegment(sid string, b []byte) *ir.Segment {
 // ParseCloudLink reads a thread's link (https://ampcode.com/threads/T-…) or its id.
 func (m *Module) ParseCloudLink(s string) (string, agent.SessionID, bool) {
 	s = strings.TrimSpace(s)
-	if rest, ok := strings.CutPrefix(strings.TrimPrefix(strings.TrimPrefix(s, "https://"), "http://"), "ampcode.com/threads/"); ok {
-		s = rest
-		if i := strings.IndexAny(s, "/?#"); i >= 0 {
-			s = s[:i]
+	if u, ok := agent.LinkOn(s, "ampcode.com"); ok {
+		// https://ampcode.com/threads/<id>[.md][/…][?…]
+		s = ""
+		if p := agent.PathParts(u); len(p) >= 2 && p[0] == "threads" {
+			s = strings.TrimSuffix(p[1], ".md")
 		}
-		s = strings.TrimSuffix(s, ".md")
 	}
 	if !threadID.MatchString(s) {
 		return cloudName, "", false

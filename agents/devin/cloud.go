@@ -143,7 +143,6 @@ type pullRequest struct {
 var (
 	devinID = regexp.MustCompile(`^devin-[0-9a-f]{16,64}$`)
 	hexID   = regexp.MustCompile(`^[0-9a-f]{16,64}$`)
-	prLink  = regexp.MustCompile(`^https://([^/]+)/([^/]+)/([^/]+)/pull/(\d+)`)
 )
 
 // sid is the record's session id in the devin-<hex> form ("" when it has none).
@@ -205,11 +204,29 @@ func (r record) repo() string {
 		}
 	}
 	for _, p := range r.prs() {
-		if m := prLink.FindStringSubmatch(nonEmpty(p.URL, p.PRURL)); m != nil && m[1] == "github.com" {
-			return m[2] + "/" + m[3]
+		if owner, repo, _, ok := pullLink(nonEmpty(p.URL, p.PRURL)); ok {
+			return owner + "/" + repo
 		}
 	}
 	return ""
+}
+
+// pullLink reads a pull request's link on GitHub, https://github.com/<owner>/<repo>/pull/<n>
+// (on that host only: a link to another host names no pull request here).
+func pullLink(s string) (owner, repo string, n int, ok bool) {
+	u, ok := agent.LinkOn(s, "github.com")
+	if !ok {
+		return "", "", 0, false
+	}
+	p := agent.PathParts(u)
+	if len(p) < 4 || p[2] != "pull" {
+		return "", "", 0, false
+	}
+	n, err := strconv.Atoi(p[3])
+	if err != nil || n <= 0 {
+		return "", "", 0, false
+	}
+	return p[0], p[1], n, true
 }
 
 func (r record) prs() []pullRequest {
@@ -224,8 +241,8 @@ func (r record) branch() (string, string) {
 	for _, p := range r.prs() {
 		b := nonEmpty(p.Branch, p.HeadRef)
 		n := p.Number
-		if m := prLink.FindStringSubmatch(nonEmpty(p.URL, p.PRURL)); m != nil && n == 0 {
-			n, _ = strconv.Atoi(m[4])
+		if _, _, num, ok := pullLink(nonEmpty(p.URL, p.PRURL)); ok && n == 0 {
+			n = num
 		}
 		pr := ""
 		if n > 0 {
@@ -398,13 +415,15 @@ func (m *Module) ParseCloudLink(s string) (string, agent.SessionID, bool) {
 // idOfLink reads https://app.devin.ai/sessions/<hex> (unverified: that the link holds the
 // id without its devin- prefix; both are read).
 func idOfLink(s string) (string, bool) {
-	rest, ok := strings.CutPrefix(strings.TrimPrefix(strings.TrimPrefix(s, "https://"), "http://"), "app.devin.ai/sessions/")
+	u, ok := agent.LinkOn(s, "app.devin.ai")
 	if !ok {
 		return "", false
 	}
-	if i := strings.IndexAny(rest, "/?#"); i >= 0 {
-		rest = rest[:i]
+	p := agent.PathParts(u)
+	if len(p) < 2 || p[0] != "sessions" {
+		return "", false
 	}
+	rest := p[1]
 	switch {
 	case devinID.MatchString(rest):
 		return rest, true

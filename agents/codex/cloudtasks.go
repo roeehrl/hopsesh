@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -39,7 +40,10 @@ var (
 const cloudName = "codex-cloud"
 
 // taskBase is where a task's page is: util::task_url for the default backend.
-const taskBase = "https://chatgpt.com/codex/tasks/"
+const taskBase = "https://" + taskHost + "/codex/tasks/"
+
+// taskHost is the only host a task's link is read from.
+const taskHost = "chatgpt.com"
 
 // maxStartingDiff bounds a diff sent with a task in CODEX_STARTING_DIFF: it travels in the
 // environment of one process, and a larger change goes better on a branch.
@@ -54,14 +58,8 @@ var taskID = regexp.MustCompile(`^task_[A-Za-z0-9_-]{4,120}$`)
 // ParseCloudLink reads a task's link (chatgpt.com/codex/tasks/<id>) or its task_… id.
 func (m *Module) ParseCloudLink(s string) (string, agent.SessionID, bool) {
 	s = strings.TrimSpace(s)
-	for _, p := range []string{"https://", "http://"} {
-		s = strings.TrimPrefix(s, p)
-	}
-	if rest, ok := strings.CutPrefix(s, "chatgpt.com/codex/tasks/"); ok {
-		s = rest
-		if i := strings.IndexAny(s, "?#/"); i >= 0 {
-			s = s[:i]
-		}
+	if u, ok := agent.LinkOn(s, taskHost); ok {
+		s = taskOfLink(u)
 	}
 	if !taskID.MatchString(s) {
 		return cloudName, "", false
@@ -542,14 +540,26 @@ func (m *Module) SendCloud(ctx context.Context, h agent.Host, _ agent.Install, r
 		Repo: r.Repo, Branch: r.Branch, Base: r.Base, State: agent.CloudRunning, Updated: time.Now().UTC(), Attempts: max(r.Attempts, 1), Env: r.Env}}, nil
 }
 
-var taskLink = regexp.MustCompile(`https?://\S+/tasks/(task_[A-Za-z0-9_-]{4,120})`)
+// taskOfLink is the task a link on chatgpt.com names: /codex/tasks/<id>[/…] ("" otherwise).
+func taskOfLink(u *url.URL) string {
+	p := agent.PathParts(u)
+	if len(p) < 3 || p[0] != "codex" || p[1] != "tasks" || !taskID.MatchString(p[2]) {
+		return ""
+	}
+	return p[2]
+}
 
-// createdTask finds the new task in exec's output: its link (the last one), else a bare id.
+// createdTask finds the new task in exec's output: its link on chatgpt.com (the last one;
+// a link to any other host is not the task's), else a bare id.
 func createdTask(out string) (tid, url string) {
 	out = stripANSI(out)
-	if mm := taskLink.FindAllStringSubmatch(out, -1); len(mm) > 0 {
-		last := mm[len(mm)-1]
-		return last[1], last[0]
+	for _, u := range agent.LinksIn(out, taskHost) {
+		if id := taskOfLink(u); id != "" {
+			tid, url = id, taskBase+id
+		}
+	}
+	if tid != "" {
+		return tid, url
 	}
 	for _, f := range strings.Fields(out) {
 		if taskID.MatchString(f) {

@@ -225,7 +225,9 @@ func TestParseCloudLink(t *testing.T) {
 			t.Errorf("%q: %s %s %v", in, cl, id, ok)
 		}
 	}
-	for _, bad := range []string{"", "session_", "https://example.com/code/session_01ABCdef234", "0b6c6a8e-1d2f-4c3b-9a7e-5f4d3c2b1a01", "session_01 x"} {
+	for _, bad := range []string{"", "session_", "https://example.com/code/session_01ABCdef234", "0b6c6a8e-1d2f-4c3b-9a7e-5f4d3c2b1a01", "session_01 x",
+		"http://claude.ai/code/session_01ABCdef234", "https://claude.ai.evil.example/code/session_01ABCdef234", "https://user@claude.ai/code/session_01ABCdef234",
+		"https://claude.ai:8443/code/session_01ABCdef234", "https://evil.example/claude.ai/code/session_01ABCdef234", "https://claude.ai/share/session_01ABCdef234"} {
 		if _, _, ok := m.ParseCloudLink(bad); ok {
 			t.Errorf("%q read as a link", bad)
 		}

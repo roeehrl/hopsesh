@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"runtime"
 	"strings"
 	"testing"
@@ -227,5 +228,41 @@ func TestSessionInHostileHosts(t *testing.T) {
 		if got, _ := sessionIn(in); string(got) != want {
 			t.Errorf("sessionIn(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// A session's pull request counts only on github.com, and a pasted session link only on
+// app.devin.ai.
+func TestHostileLinks(t *testing.T) {
+	for in, want := range map[string]string{
+		"https://github.com/acme/api/pull/7":                         "acme/api#7",
+		"https://github.com/acme/api/pull/7/files":                   "acme/api#7",
+		"https://github.com.evil.example/acme/api/pull/7":            "",
+		"https://evil.example/github.com/acme/api/pull/7":            "",
+		"https://user@github.com/acme/api/pull/7":                    "",
+		"https://github.com:8443/acme/api/pull/7":                    "",
+		"http://github.com/acme/api/pull/7":                          "",
+		"https://github.com/acme/api/issues/7":                       "",
+		"https://github.com/acme/api/pull/x":                         "",
+		"https://evil.example/?u=https://github.com/acme/api/pull/7": "",
+	} {
+		got := ""
+		if o, r, n, ok := pullLink(in); ok {
+			got = fmt.Sprintf("%s/%s#%d", o, r, n)
+		}
+		if got != want {
+			t.Errorf("pullLink(%q) = %q, want %q", in, got, want)
+		}
+	}
+	m := New()
+	hex := "0123456789abcdef0123456789abcdef"
+	for _, bad := range []string{"http://app.devin.ai/sessions/" + hex, "https://app.devin.ai.evil.example/sessions/" + hex, "https://u@app.devin.ai/sessions/" + hex,
+		"https://evil.example/app.devin.ai/sessions/" + hex} {
+		if _, sid, ok := m.ParseCloudLink(bad); ok {
+			t.Errorf("ParseCloudLink(%q) = %s", bad, sid)
+		}
+	}
+	if _, sid, ok := m.ParseCloudLink("https://app.devin.ai/sessions/" + hex + "?tab=x"); !ok || sid != agent.SessionID("devin-"+hex) {
+		t.Errorf("a real link: %s %v", sid, ok)
 	}
 }

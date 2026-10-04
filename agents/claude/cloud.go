@@ -114,14 +114,13 @@ func canonical(id string) string {
 // ParseCloudLink reads a claude.ai/code link, a session_… id or its cse_… form.
 func (m *Module) ParseCloudLink(s string) (string, agent.SessionID, bool) {
 	s = strings.TrimSpace(s)
-	for _, p := range []string{"https://", "http://"} {
-		s = strings.TrimPrefix(s, p)
-	}
-	if rest, ok := strings.CutPrefix(s, "claude.ai/code/"); ok {
-		s = rest
-		if i := strings.IndexAny(s, "?#/"); i >= 0 {
-			s = s[:i]
+	if u, ok := agent.LinkOn(s, "claude.ai"); ok {
+		// https://claude.ai/code/<id>[/…][?…]
+		p := agent.PathParts(u)
+		if len(p) < 2 || p[0] != "code" {
+			return cloudName, "", false
 		}
+		s = p[1]
 	}
 	id := canonical(s)
 	return cloudName, agent.SessionID(id), id != ""
