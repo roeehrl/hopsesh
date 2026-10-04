@@ -2,6 +2,11 @@
 // the real assets and the real service (internal/ui/gui) on a demo home made from the
 // agents' test fixtures, with a stand-in for the Wails runtime. It is not shipped.
 //
+// The demo home also has a stand-in Claude Code cloud: this program, run as claude, is the
+// stand-in claude; the demo repository's GitHub remote is a local bare repository; POST
+// /cloud adds a cloud session (and sets the failure the next teleport plays); and a command
+// the window opens "in a terminal" runs in the background instead.
+//
 //	go run ./internal/devtools/webtest -addr 127.0.0.1:8765 -home /tmp/demo
 package main
 
@@ -13,12 +18,17 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"strings"
 	"sync"
 
 	"github.com/roeehrl/hopsesh/internal/agents/all"
 	"github.com/roeehrl/hopsesh/internal/testkit"
+	"github.com/roeehrl/hopsesh/internal/testkit/fakeagent"
+	"github.com/roeehrl/hopsesh/internal/testkit/fakecloud"
 	"github.com/roeehrl/hopsesh/internal/ui/gui"
 )
 
@@ -37,6 +47,9 @@ window.__emit = (name, data) => (listeners[name] || []).forEach((f) => f({ data 
 `
 
 func main() {
+	if strings.TrimSuffix(strings.ToLower(filepath.Base(os.Args[0])), ".exe") == "claude" {
+		os.Exit(fakeagent.Claude())
+	}
 	addr := flag.String("addr", "127.0.0.1:8765", "where to listen")
 	home := flag.String("home", "", "the demo home (made afresh; anything there is removed)")
 	prepare := flag.Bool("prepare", false, "only make the demo home and print its environment as JSON (the real-window tests start the app on it)")
@@ -71,7 +84,7 @@ func main() {
 		return
 	}
 	var (
-		mu  sync.Mutex
+		mu  sync.RWMutex // calls read-lock it: a reset waits for the calls still running (a scan runs git in the demo home)
 		svc *gui.App
 	)
 	// fresh starts over from a new demo home (POST /reset, so tests are independent).
@@ -90,9 +103,13 @@ func main() {
 		if err := testkit.DemoHome(h); err != nil {
 			return err
 		}
+		if err := cloudWorld(h); err != nil {
+			return err
+		}
 		svc = gui.NewApp(all.Registry())
 		return nil
 	}
+	gui.SetTerminal(background)
 	if err := fresh(); err != nil {
 		log.Fatal(err)
 	}
@@ -105,10 +122,24 @@ func main() {
 		fmt.Fprint(w, shim)
 	})
 	http.HandleFunc("/call", func(w http.ResponseWriter, r *http.Request) {
+		mu.RLock()
+		defer mu.RUnlock()
+		call(w, r, svc)
+	})
+	http.HandleFunc("/cloud", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
 		mu.Lock()
-		s := svc
-		mu.Unlock()
-		call(w, r, s)
+		defer mu.Unlock()
+		id, err := seedCloud(r.URL.Query().Get("title"), r.URL.Query().Get("work") != "0")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		os.Setenv("FAKE_CLOUD_FAIL", r.URL.Query().Get("fail"))
+		_ = json.NewEncoder(w).Encode(map[string]string{"id": id})
 	})
 	http.HandleFunc("/reset", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -164,4 +195,77 @@ func call(w http.ResponseWriter, r *http.Request, svc *gui.App) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
+}
+
+// origin is the demo repository's stand-in GitHub remote.
+var origin fakecloud.Origin
+
+// cloudWorld puts the stand-in claude first on PATH and points the demo repository's
+// GitHub remote at a local bare repository, with main pushed there.
+func cloudWorld(h string) error {
+	bin := filepath.Join(h, "bin")
+	if err := os.MkdirAll(bin, 0o700); err != nil {
+		return err
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if runtime.GOOS == "windows" {
+		b, err := os.ReadFile(self)
+		if err == nil {
+			err = os.WriteFile(filepath.Join(bin, "claude.exe"), b, 0o700)
+		}
+		if err != nil {
+			return err
+		}
+	} else if err := os.Symlink(self, filepath.Join(bin, "claude")); err != nil {
+		return err
+	}
+	gitConfig := filepath.Join(h, "gitconfig")
+	for k, v := range map[string]string{"PATH": bin + string(os.PathListSeparator) + os.Getenv("PATH"), "GIT_CONFIG_GLOBAL": gitConfig,
+		"GIT_CONFIG_NOSYSTEM": "1", "FAKE_CLOUD_DIR": filepath.Join(h, "cloud"), "FAKE_CLOUD_FAIL": "",
+		"GIT_AUTHOR_NAME": "Sam Doe", "GIT_AUTHOR_EMAIL": "sam@example.com", "GIT_COMMITTER_NAME": "Sam Doe", "GIT_COMMITTER_EMAIL": "sam@example.com"} {
+		os.Setenv(k, v)
+	}
+	if origin, err = fakecloud.NewOrigin(h, "https://github.com/example/demo.git"); err != nil {
+		return err
+	}
+	if err := origin.Redirect(gitConfig); err != nil {
+		return err
+	}
+	if out, err := exec.Command("git", "-C", filepath.Join(h, "git", "demo"), "push", "-q", "origin", "main").CombinedOutput(); err != nil {
+		return fmt.Errorf("push: %v: %s", err, out)
+	}
+	return nil
+}
+
+// seedCloud adds a Claude Code cloud session on the demo repository (worked: it pushed its
+// work to a claude/… branch) and returns its id.
+func seedCloud(title string, work bool) (string, error) {
+	if title == "" {
+		title = "Add rate limiting"
+	}
+	s, err := fakecloud.Open(os.Getenv("FAKE_CLOUD_DIR")).Seed(fakecloud.Session{Cloud: fakecloud.ClaudeCloud, Title: title, Repo: "github.com/example/demo",
+		CloneURL: origin.FileURL(), Branch: "main", Code: "branch",
+		Messages: []fakecloud.Message{{Role: "user", Text: "[hopsesh] " + title}, {Role: "assistant", Text: "On it."}}})
+	if err != nil || !work {
+		return s.ID, err
+	}
+	return s.ID, fakecloud.Work(fakecloud.Proc{Vars: map[string]string{}}, s.ID, false)
+}
+
+// background runs a command line the window would open in a terminal, as that terminal
+// would: in the background, with this program's environment.
+func background(line string) error {
+	cmd := exec.Command("sh", "-c", line)
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("powershell", "-NoProfile", "-Command", line)
+	}
+	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go func() { _ = cmd.Wait() }()
+	return nil
 }

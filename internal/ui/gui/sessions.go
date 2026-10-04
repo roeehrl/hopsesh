@@ -69,6 +69,11 @@ type EntryDTO struct {
 	ContinueIn []AgentOpt `json:"continueIn"`       // other agents here it can continue in
 	Needs      bool       `json:"needs"`            // the agent waits for the person (an approval)
 	History    []HopDTO   `json:"history"`          // where it has been, oldest first
+	// Location is "machine" or "cloud"; a cloud session's row has Cloud (Machine is the
+	// cloud's name), and a session the vendor mirrors (Remote Control) has Mirror.
+	Location string         `json:"location"`
+	Cloud    *CloudEntryDTO `json:"cloud,omitempty"`
+	Mirror   *MirrorDTO     `json:"mirror,omitempty"`
 }
 
 // CopyDTO is one copy of a session, on some machine and in some agent.
@@ -105,6 +110,9 @@ type ScanDTO struct {
 	Total    int          `json:"total"`
 	Peers    []string     `json:"peers"`   // reached machines with hopsesh, a session here can be sent to
 	Updated  string       `json:"updated"` // when the scan finished (RFC 3339)
+	Clouds   []CloudDTO   `json:"clouds"`  // the clouds hopsesh can do something with
+	// Adopted are copies brought from a cloud that this scan picked up.
+	Adopted []BroughtDTO `json:"adopted"`
 }
 
 // Scan reads this machine and every allowed machine, for every enabled agent.
@@ -127,7 +135,11 @@ func (a *App) Scan() (*ScanDTO, error) {
 	a.closePushLocked()
 	a.mu.Unlock()
 
-	out := &ScanDTO{Total: len(inv.Entries), Machines: []MachineDTO{}, Groups: []GroupDTO{}, Peers: []string{}, Updated: time.Now().Format(time.RFC3339)}
+	out := &ScanDTO{Total: len(inv.Entries), Machines: []MachineDTO{}, Groups: []GroupDTO{}, Peers: []string{}, Updated: time.Now().Format(time.RFC3339),
+		Clouds: shownClouds(core, inv), Adopted: []BroughtDTO{}}
+	for _, f := range inv.Adopted {
+		out.Adopted = append(out.Adopted, core.Brought(f))
+	}
 	for _, m := range inv.Machines {
 		d := MachineDTO{Name: m.Name, Status: m.Status, Hint: m.Hint, Error: m.Error, OS: m.OS, Local: m.Local, Hopsesh: m.Hopsesh, Agents: []string{}}
 		for _, e := range inv.Entries {
@@ -179,7 +191,7 @@ func entryDTO(core *app.App, inv *app.Inventory, it app.Item, targets []AgentOpt
 		Status: e.Status(), Live: e.Live.State == agent.Live, LastActive: s.LastActivity.Format(time.RFC3339),
 		LastPrompt: s.LastPrompt, CWD: s.CWD, SizeKB: s.Size / 1024, ContinueIn: []AgentOpt{},
 		Needs:   e.Live.State == agent.Live && strings.HasPrefix(e.Live.Status, "waiting"),
-		History: history(core, e.Lineage)}
+		History: history(core, e.Lineage), Location: string(e.Location.Kind), Cloud: cloudEntryDTO(core, e), Mirror: mirrorDTO(s.Mirror)}
 	if m := inv.Machine(e.Machine); m != nil && len(it.Copies) <= 1 {
 		d.HereNewest = m.Local
 	}
@@ -235,6 +247,12 @@ func history(core *app.App, m *lineage.Manifest) []HopDTO {
 			out = append(out, HopDTO{When: from.Time.Format(time.RFC3339), What: fmt.Sprintf("In %s on %s", name(from.Key.Agent), from.Location)})
 		}
 		what := fmt.Sprintf("Moved to %s", to.Location)
+		switch {
+		case h.Kind == lineage.HopFetch:
+			what = fmt.Sprintf("Brought from %s to %s", from.Location, to.Location)
+		case h.Kind == lineage.HopHandoff:
+			what = fmt.Sprintf("Handed off to %s", to.Location)
+		}
 		if h.Kind == lineage.HopContinue {
 			what = fmt.Sprintf("Continued in %s on %s", name(to.Key.Agent), to.Location)
 		} else if i > 0 && hops[i-1].Kind == lineage.HopContinue && hops[i-1].Time.Equal(h.Time) {
@@ -284,6 +302,10 @@ type OptsDTO struct {
 	Go         bool   `json:"go"`
 	CarryRules bool   `json:"carryRules"`
 	Via        string `json:"via"` // "" or "import"
+	// Bringing a session from a cloud: the branch only; add its work to the session it was
+	// handed off from.
+	CodeOnly bool `json:"codeOnly"`
+	Append   bool `json:"append"`
 }
 
 func (o OptsDTO) options(d move.Options) move.Options {
@@ -294,7 +316,7 @@ func (o OptsDTO) options(d move.Options) move.Options {
 	d.Fork, d.RemoteControl, d.Notify, d.Redact, d.App = o.Fork, o.RemoteControl, o.Notify, o.Redact, o.App
 	d.Mark, d.SyncCode, d.Push, d.StopLocal, d.Conflict = o.Mark, o.SyncCode, o.Push, o.StopLocal, o.Conflict
 	d.Fidelity, d.Native, d.Note, d.Go = convert.Fidelity(nonEmpty(o.Fidelity, string(convert.History))), o.Native, strings.TrimSpace(o.Note), o.Go
-	d.CarryRules = o.CarryRules
+	d.CarryRules, d.CodeOnly, d.AppendOriginal = o.CarryRules, o.CodeOnly, o.Append
 	if o.Via == move.ViaImport {
 		d.Via = move.ViaImport
 	}
@@ -355,6 +377,7 @@ type PlanDTO struct {
 	SessionKey  agent.SessionKey `json:"-"`
 	SourceAgent agent.ID         `json:"sourceAgent"`
 	Machine     string           `json:"machine,omitempty"` // a push: the machine it goes to
+	Fetch       *move.FetchPlan  `json:"fetch,omitempty"`   // bringing it from a cloud
 }
 
 // Plan works out how a session comes here: in its own agent (target "") or continued in
@@ -368,15 +391,28 @@ func (a *App) Plan(machine, key, target string, o OptsDTO) (*PlanDTO, error) {
 	if err != nil {
 		return nil, err
 	}
+	return a.planEntry(core, inv, e, target, o)
+}
+
+// planEntry plans a session (a row, or a cloud session not listed) and keeps the plan for
+// Apply.
+func (a *App) planEntry(core *app.App, inv *app.Inventory, e app.Entry, target string, o OptsDTO) (*PlanDTO, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	p, in, err := core.Plan(ctx, inv, e, agent.ID(target), o.options(core.DefaultOptions()))
+	opts := o.options(core.DefaultOptions())
+	if e.Location.IsCloud() {
+		opts.TargetDir = nonEmpty(o.TargetDir, e.Checkout) // the repository's checkout here
+	}
+	p, in, err := core.Plan(ctx, inv, e, agent.ID(target), opts)
 	if err != nil {
 		return nil, err
 	}
 	a.mu.Lock()
 	a.plan, a.input, a.res = p, in, nil
 	a.mu.Unlock()
+	if p.Kind == move.KindFetch {
+		return fetchPlanDTO(p, e), nil
+	}
 	return planDTO(p, e, in.Target.Module), nil
 }
 
@@ -435,6 +471,9 @@ type DoneDTO struct {
 	InApp      bool     `json:"inApp"`             // it opens in the agent's desktop app
 	Machine    string   `json:"machine,omitempty"` // a push: where it went (start it there)
 	AuditDir   string   `json:"auditDir"`
+	// Fetch is a session brought from a cloud: waiting for the user's terminal, or the
+	// code only.
+	Fetch *BroughtDTO `json:"fetch,omitempty"`
 }
 
 // Apply carries out the last plan, sending each step to the window.
@@ -473,6 +512,14 @@ func (a *App) Apply() (*DoneDTO, error) {
 	if res.Sync != nil {
 		d.SyncState = res.Sync.State
 	}
+	if p.Kind == move.KindFetch {
+		b := BroughtDTO{Journal: res.Journal, Cloud: p.Fetch.Cloud, CloudTitle: p.Fetch.CloudTitle, Session: string(p.Fetch.Session), URL: p.Fetch.URL,
+			Title: p.Title, Agent: p.Agent, Worktree: res.Worktree, Outcome: res.Fetch.Outcome, Branch: res.Fetch.Branch, Command: res.Command}
+		if f, err := move.LoadFetch(core.StateDir, res.Journal); err == nil {
+			b = core.Brought(f)
+		}
+		d.Fetch = &b
+	}
 	return d, nil
 }
 
@@ -488,7 +535,10 @@ func (a *App) OpenResult() error {
 	if p.Options.App {
 		return start(p.Resume)
 	}
-	return openTerminal(res.Command)
+	if res.Command == "" {
+		return errors.New("there is nothing to open")
+	}
+	return terminal(res.Command)
 }
 
 // ResumeEntry continues a session that is already on this machine, in a terminal or (inApp)
@@ -509,7 +559,7 @@ func (a *App) ResumeEntry(machine, key string, inApp bool) error {
 	if inApp {
 		return start(c)
 	}
-	return openTerminal(launch.Shell(c, "", launch.DefaultShell()))
+	return terminal(launch.Shell(c, "", launch.DefaultShell()))
 }
 
 // Undo reverses a move or continuation by its journal id; force undoes it even when the

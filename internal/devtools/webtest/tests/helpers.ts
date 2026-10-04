@@ -3,7 +3,7 @@ import { expect, type Page } from "@playwright/test";
 // fresh starts every test from a new demo home and waits for the first scan.
 export async function fresh(page: Page) {
   const r = await page.request.post("/reset");
-  expect(r.ok()).toBeTruthy();
+  expect(r.ok(), await r.text()).toBeTruthy();
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible({ timeout: 30_000 });
 }

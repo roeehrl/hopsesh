@@ -125,7 +125,7 @@ func BuildFetch(ctx context.Context, in FetchInput, opt Options) (*Plan, error) 
 	if title == "" {
 		title = "a session from " + cl.Title
 		if s.Key.Session != "" {
-			title = "cloud session " + shortID(string(s.Key.Session))
+			title = "Session " + string(s.Key.Session) // as its row names it
 		}
 	}
 	fp := &FetchPlan{Cloud: cl.Name, CloudTitle: cl.Title, Session: s.Key.Session, URL: s.URL, Fidelity: cl.Down, Repo: s.Repo,
@@ -519,13 +519,6 @@ func contains(xs []string, x string) bool {
 }
 
 func firstLine(s string) string { return strings.SplitN(strings.TrimSpace(s), "\n", 2)[0] }
-
-func shortID(id string) string {
-	if len(id) > 14 {
-		return id[:14] + "…"
-	}
-	return id
-}
 
 var issueNumber = regexp.MustCompile(`/issues/(\d+)$`)
 

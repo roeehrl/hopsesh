@@ -1,6 +1,6 @@
 // The plan sheet (what a hop, continuation or send will do, with its choices), its
 // progress, and the Done screen.
-import { api, on, h, fill, view, state, screen, go, current, toast, fail, errText, cap, agentChip, here, $, count, sys, keys } from "./core.js";
+import { api, on, h, fill, view, state, screen, go, current, toast, fail, errText, cap, agentChip, here, $, count, sys, keys, cloudChip } from "./core.js";
 import { undo } from "./activity.js";
 
 const sheet = $("#sheet");
@@ -10,14 +10,24 @@ function defaults() {
   const d = state.info.defaults;
   return { worktree: "auto", remoteControl: false, notify: false, fork: false, redact: false, clone: false, targetDir: "", reposDir: "",
     mark: d.markMoved, syncCode: d.syncCode, push: d.pushSource, stopLocal: false, app: false, conflict: "",
-    fidelity: "history", native: false, note: "", go: false, carryRules: false, via: "" };
+    fidelity: "history", native: false, note: "", go: false, carryRules: false, via: "", codeOnly: false, append: false };
 }
 
-// planFor opens the sheet for a session: target "" keeps its agent, sendTo pushes it.
-export async function planFor(e, { target = "", sendTo = "" }) {
-  cur = { e, target, sendTo, opts: defaults(), plan: null, busy: false, applying: false };
+// planFor opens the sheet for a session: target "" keeps its agent, sendTo pushes it;
+// codeOnly brings a cloud session's branch alone.
+export async function planFor(e, { target = "", sendTo = "", codeOnly = false }) {
+  cur = { e, target, sendTo, opts: Object.assign(defaults(), { codeOnly }), plan: null, busy: false, applying: false };
   fill(sheet, h("div", { class: "sheet-in" }, h("div", { class: "loading", role: "status", style: "min-height:240px" },
     sendTo ? `Asking hopsesh on ${sendTo} to plan it…` : "Working out the plan…")));
+  if (!sheet.open) sheet.showModal();
+  await replan();
+}
+
+// planPicked opens the sheet for a cloud session that is not a row: id "" leaves the
+// choice to the vendor's own picker, in a new worktree of the checkout chosen here.
+export async function planPicked(cloud, id, checkout, target = "") {
+  cur = { e: null, picked: { cloud, id, checkout }, target, sendTo: "", opts: Object.assign(defaults(), { targetDir: checkout }), plan: null, busy: false, applying: false };
+  fill(sheet, h("div", { class: "sheet-in" }, h("div", { class: "loading", role: "status", style: "min-height:240px" }, "Working out the plan…")));
   if (!sheet.open) sheet.showModal();
   await replan();
 }
@@ -28,7 +38,8 @@ async function replan() {
   const btn = sheet.querySelector("#go");
   if (btn) { btn.disabled = true; btn.firstChild.textContent = "Updating the plan…"; }
   try {
-    const p = c.sendTo ? await api("PushPlan", c.e.key, c.sendTo, c.target, c.opts) : await api("Plan", c.e.machine, c.e.key, c.target, c.opts);
+    const p = c.picked ? await api("PlanPicked", c.picked.cloud, c.picked.id, c.opts.targetDir || c.picked.checkout, c.target, c.opts)
+      : c.sendTo ? await api("PushPlan", c.e.key, c.sendTo, c.target, c.opts) : await api("Plan", c.e.machine, c.e.key, c.target, c.opts);
     if (cur !== c) return;
     c.plan = p;
     c.busy = false;
@@ -221,6 +232,7 @@ function verb(p) {
 
 function render() {
   const p = cur.plan;
+  if (p.kind === "fetch") return renderFetch(p);
   const there = p.machine ? `on ${p.machine}` : `on ${sys.here}`;
   const title = p.machine ? `Send “${p.title}” to ${p.machine}` : p.continue ? `Continue “${p.title}” in ${p.agent}` : `Bring “${p.title}” here`;
   const blocked = (p.blockers || []).length > 0;
@@ -242,6 +254,7 @@ function render() {
 async function apply() {
   const c = cur;
   if (!c?.plan || c.busy || c.applying || (c.plan.blockers || []).length) return;
+  if (c.plan.kind === "fetch") return applyFetch(c);
   c.applying = true;
   const steps = h("span", { class: "mono muted", style: "font-size:12px" }, "starting");
   sheet.querySelector(".sheet-body").inert = true;
@@ -254,6 +267,107 @@ async function apply() {
     state.stale = true;
     sheet.close();
     go("done", d, c.plan, c.opts);
+  } catch (err) {
+    c.applying = false;
+    problem(errText(err), { label: "Back to the plan", run: () => replan() });
+  } finally {
+    off();
+  }
+}
+
+// ---- Bringing a session from a cloud ----
+const FID = { native: ["Full", "ok"], text: ["Lossy", "warn"], code: ["Code only", "warn"], brief: ["Lossy", "warn"] };
+
+function renderFetch(p) {
+  const f = p.fetch, o = cur.opts;
+  const blocked = (p.blockers || []).length > 0;
+  const own = { id: p.sourceAgent, name: p.fromAgent };
+  const targets = [own, ...((cur.e && cur.e.continueIn) || [])];
+  const target = targets.find((t) => t.id === (cur.target || own.id)) || own;
+  const [fidLabel, fidKind] = f.codeOnly ? ["Code only", "warn"] : f.continueIn ? ["Lossy", "warn"] : FID[f.fidelity] || ["Lossy", "warn"];
+  const add = [];
+  if (!f.codeOnly) add.push(f.append ? `the cloud's work added to “${f.original.title}”` : `1 ${p.agent} session here`);
+  add.push("1 worktree");
+  if (f.codeOnly) add.push("1 branch");
+  const kv = (label, ...value) => [h("dt", {}, label), h("dd", {}, ...value)];
+  const checks = (f.checks || []).map((c) => checkItem(p, c));
+  fill(sheet, h("div", { class: "sheet-in" },
+    h("header", { class: "sheet-head" },
+      h("h2", { id: "sheet-title" }, f.codeOnly ? `Bring the code of “${p.title}” here from ${f.cloudTitle}` : `Bring “${p.title}” here from ${f.cloudTitle}`),
+      h("div", { class: "fromto" },
+        cloudChip(f.cloud), f.session ? h("span", { class: "mono", style: "font-size:12px" }, f.session) : h("span", { class: "muted" }, `chosen in ${p.fromAgent}'s own picker`),
+        h("span", { style: "color:var(--accent)", "aria-label": "to" }, "→"),
+        agentChip(target.id, target.name), h("span", {}, `on ${here()} (${sys.here}), in a new worktree`)),
+      h("div", { class: "summary", "aria-label": "What changes" },
+        add.map((x) => h("span", { class: "add" }, "+ " + x)), h("span", { class: "none" }, "The cloud session is not changed"),
+        h("span", { class: "spacer" }), h("span", { class: "muted" }, "Undo any time from Activity"))),
+    h("div", { class: "sheet-body" },
+      f.codeOnly ? null : h("section", { class: "sec", style: "border:0;padding:0;gap:12px" },
+        h("div", { style: "display:flex;align-items:center;gap:10px;flex-wrap:wrap" }, h("span", { class: "sec-h" }, "The conversation"), h("span", { class: "spacer" }),
+          targets.length > 1 ? [h("span", { class: "muted", style: "font-size:12px" }, "Continue in"),
+            h("div", { class: "seg", role: "radiogroup", "aria-label": "Continue in" }, targets.map((t) => h("button", { role: "radio", "aria-checked": t.id === target.id ? "true" : "false",
+              onclick: () => { cur.target = t.id === own.id ? "" : t.id; replan(); } }, t.name)))] : null),
+        h("div", { class: "fid " + fidKind }, h("b", {}, fidLabel), h("span", {}, f.conversation)),
+        !f.continueIn && targets.length > 1 ? h("span", { class: "muted", style: "font-size:12px" }, `In ${targets[1].name} instead: copied by ${p.fromAgent}, then converted (tool calls become text).`) : null),
+      h("section", { class: "sec", style: "gap:10px" }, h("span", { class: "sec-h" }, "Repository and code"),
+        h("dl", { class: "kv wide" },
+          kv("Repository", f.repo ? h("span", { class: "mono", style: "font-size:12px" }, f.repo) : h("span", { class: "muted" }, "Not known yet"),
+            f.checkout ? h("span", { class: "muted mono", style: "font-size:11.5px" }, " · " + f.checkout) : null,
+            " ", h("button", { class: "link", onclick: chooseCheckout }, f.checkout ? "Another checkout…" : "Choose its checkout…")),
+          kv("Cloud branch", f.cloudBranch ? h("span", { class: "mono", style: "font-size:12px" }, f.cloudBranch) : h("span", { class: "muted" }, `The session's own; ${p.fromAgent} fetches and checks it out`),
+            f.branchState === "pushed" ? h("span", { class: "muted" }, " · fetched into " + f.ref) : null),
+          f.worktree ? kv("New worktree", h("span", { class: "mono", style: "font-size:12px" }, f.worktree)) : null,
+          kv("Local branch", f.localBranch && f.localBranch !== f.cloudBranch ? [h("span", { class: "mono", style: "font-size:12px" }, f.localBranch), h("span", { class: "muted" }, " renamed from " + f.cloudBranch)]
+            : f.rename ? h("span", {}, "A claude/… branch is renamed to ", h("span", { class: "mono", style: "font-size:12px" }, `hopsesh/from/${f.cloud}/…`)) : h("span", { class: "muted" }, "Kept as the cloud names it")),
+          f.base ? kv("Starts at", h("span", { class: "ok", style: "font-weight:600" }, "✓ "), f.baseNote || h("span", { class: "mono" }, f.base.slice(0, 7))) : null),
+        f.command ? h("div", { class: "runbox" }, h("span", { style: "font-size:12px;font-weight:500" }, `Runs in ${sys.terminal}`), h("span", { class: "mono", style: "font-size:11.5px;overflow-wrap:anywhere" }, f.command)) : null),
+      h("section", { class: "sec", style: "gap:10px" }, h("span", { class: "sec-h" }, "Options"),
+        f.cloudBranch || o.codeOnly ? check("Fetch the cloud branch only, without the conversation", "codeOnly", "Into a new worktree; nothing runs in a terminal.")
+          : h("label", { class: "opt", style: "cursor:default" }, h("input", { type: "checkbox", disabled: true }),
+            h("span", {}, h("b", { class: "muted" }, "Fetch the cloud branch only, without the conversation"), h("span", { class: "muted" }, "hopsesh knows its branch once it has been brought with its conversation."))),
+        f.canAppend ? check(`Add the cloud's work to “${f.original.title}” instead`, "append", "It is as it was handed off, so only the new turns are added; its own turns stay exactly as they were.") : null),
+      checks.length ? h("section", { class: "sec", style: "gap:8px" }, h("span", { class: "sec-h" }, "Checks"), checks) : null,
+      (f.loss || []).length ? h("details", { class: "sec" }, h("summary", { style: "cursor:pointer;font-size:12.5px" }, "What stays in the cloud"),
+        h("ul", { style: "margin:6px 0 0;padding-left:18px;font-size:12.5px" }, f.loss.map((l) => h("li", {}, cap(l))))) : null),
+    h("footer", { class: "sheet-foot" },
+      h("span", { class: "muted", style: "font-size:12px;flex:1 1 260px" }, f.codeOnly ? "The code comes into a new worktree; your checkout stays as it is."
+        : `${p.fromAgent} copies it in your terminal; hopsesh picks it up when it appears.`),
+      h("button", { class: "btn", onclick: () => sheet.close() }, "Cancel"),
+      h("button", { class: "btn primary big", id: "go", disabled: blocked, onclick: apply }, h("span", {}, f.codeOnly ? "Get the code" : `Bring here in ${sys.terminal}`), h("span", { class: "kbd" }, keys("mod+enter"))))));
+}
+
+function checkItem(p, c) {
+  const kind = c.state === "err" ? "err" : c.state === "warn" ? "warn" : "ok";
+  const fix = [];
+  if (/^You continued the local session/.test(c.text) && kind === "err") fix.push(h("button", { class: "btn primary small", onclick: () => set("conflict", "keep-both") }, "Keep both"));
+  if (/choose its checkout here/.test(c.text)) fix.push(h("button", { class: "btn small", onclick: chooseCheckout }, "Choose its checkout…"));
+  if (/no code to bring/.test(c.text) && cur.opts.codeOnly) fix.push(h("button", { class: "btn small", onclick: () => set("codeOnly", false) }, "Bring the conversation only"));
+  if (/claude\.ai login/.test(c.text)) fix.push(h("span", { class: "muted", style: "font-size:12px" }, "Run ", h("span", { class: "mono" }, "claude /login"), ", then Refresh"));
+  return item(kind, cap(c.text), "", fix.length ? h("div", { style: "display:flex;gap:8px;flex-wrap:wrap;align-items:center" }, fix) : null);
+}
+
+// chooseCheckout picks the repository checkout a cloud session comes into.
+async function chooseCheckout() {
+  const ks = await api("Checkouts").catch(() => []);
+  const sel = h("select", { style: "width:100%", "aria-label": "Repository" }, ks.map((k) => h("option", { value: k.path }, `${k.name} · ${k.identity}`)));
+  const box = h("div", { class: "item" }, sel, h("button", { class: "btn small", onclick: () => { cur.opts.targetDir = sel.value; replan(); } }, "Use it"),
+    h("button", { class: "btn small", onclick: async () => { const d = await api("ChooseFolder", "The repository's checkout").catch(fail); if (d) { cur.opts.targetDir = d; replan(); } } }, "Another folder…"));
+  sheet.querySelector(".sheet-body")?.prepend(box);
+}
+
+async function applyFetch(c) {
+  c.applying = true;
+  const steps = h("span", { class: "mono muted", style: "font-size:12px" }, "starting");
+  sheet.querySelector(".sheet-body").inert = true;
+  fill(sheet.querySelector(".sheet-foot"), h("div", { role: "status", style: "display:flex;flex-direction:column;gap:2px;flex:1" }, h("b", {}, "Preparing the worktree…"), steps));
+  const off = on("hopsesh:progress", (s) => { steps.textContent = String(s); });
+  try {
+    const d = await api("Apply");
+    cur = null;
+    state.stale = true;
+    sheet.close();
+    if (d.fetch.outcome === "waiting") await api("OpenResult").catch(fail);
+    go("brought", d.fetch, c.plan);
   } catch (err) {
     c.applying = false;
     problem(errText(err), { label: "Back to the plan", run: () => replan() });

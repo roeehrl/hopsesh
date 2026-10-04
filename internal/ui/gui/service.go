@@ -97,6 +97,18 @@ type AgentDTO struct {
 	Tested        []string           `json:"tested"`
 	Capabilities  []agent.Capability `json:"capabilities"`
 	Icon          string             `json:"icon,omitempty"` // a data URL: the installed app's icon or the module's mark ("": initials)
+	// Clouds are the vendor clouds the agent reaches, with what hopsesh can do there.
+	Clouds []AgentCloudDTO `json:"clouds"`
+}
+
+// AgentCloudDTO is one of an agent's clouds in Settings: the cloud capabilities its
+// module has (cloud-list, cloud-fetch, …), and whether its listing is partial.
+type AgentCloudDTO struct {
+	Name         string             `json:"name"`
+	Title        string             `json:"title"`
+	Capabilities []agent.Capability `json:"capabilities"`
+	Partial      bool               `json:"partial"`
+	Fidelity     string             `json:"fidelity"` // what comes back of a conversation
 }
 
 // Info is static information for the window.
@@ -191,7 +203,21 @@ func (a *App) agentsLocked() []AgentDTO {
 		s := m.Spec()
 		ac := a.core.Cfg.Agents[string(s.ID)]
 		d := AgentDTO{ID: s.ID, Name: s.Name, Stability: s.Stability, Enabled: !ac.Disabled, RemoteControl: ac.RemoteControl,
-			Import: ac.Import, Tested: s.Tested, Capabilities: agent.Capabilities(m), Icon: a.iconLocked(s)}
+			Import: ac.Import, Tested: s.Tested, Capabilities: agent.Capabilities(m), Icon: a.iconLocked(s), Clouds: []AgentCloudDTO{}}
+		for _, c := range s.Clouds {
+			ac := AgentCloudDTO{Name: c.Name, Title: c.Title, Capabilities: []agent.Capability{}, Fidelity: string(c.Down)}
+			for _, cp := range d.Capabilities {
+				if agent.IsCloudCapability(cp) {
+					ac.Capabilities = append(ac.Capabilities, cp)
+				}
+			}
+			if a.inv != nil {
+				if sc := a.inv.Cloud(c.Name); sc != nil {
+					ac.Partial = sc.Partial
+				}
+			}
+			d.Clouds = append(d.Clouds, ac)
+		}
 		if st, ok := here[s.ID]; ok && (st.Install.Present || st.Install.Binary != "") {
 			d.Version = st.Install.Version
 			for _, r := range s.Roots {
@@ -310,11 +336,12 @@ func (a *App) CheckUpdate() (*UpdateDTO, error) {
 	return &last.DTO, nil
 }
 
-// OpenURL opens a web page in the default browser: hopsesh's release pages, and
-// Tailscale's sign-in check for a machine.
+// OpenURL opens a web page in the default browser: hopsesh's release pages, Tailscale's
+// sign-in check for a machine, a cloud session's page, and an upstream problem a cloud
+// points to.
 func (a *App) OpenURL(url string) error {
-	if !strings.HasPrefix(url, "https://github.com/"+update.Repo+"/") && !strings.HasPrefix(url, "https://login.tailscale.com/") {
-		return errors.New("only hopsesh release pages and Tailscale sign-in can be opened")
+	if !strings.HasPrefix(url, "https://github.com/"+update.Repo+"/") && !strings.HasPrefix(url, "https://login.tailscale.com/") && !cloudPage(a.snapshot(), url) {
+		return errors.New("only hopsesh release pages, Tailscale sign-in and cloud sessions' pages can be opened")
 	}
 	switch runtime.GOOS {
 	case "darwin":
