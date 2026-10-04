@@ -12,26 +12,30 @@ import (
 	"github.com/roeehrl/hopsesh/agents/claude"
 )
 
-// Claude answers Claude Code's cloud flags: --cloud, -p … --cloud [<id>] [--output-format
-// json] and --teleport <id>, and what hopsesh asks before using them: auth status --json
-// and --help. handled is false for any other call (the stand-in claude answers those
-// itself).
+// Claude answers Claude Code's cloud flags as 2.1.284 does (live probes, 2026-10-04):
+// --cloud with -p is refused ("--cloud cannot be combined with --print"), and --cloud
+// without a terminal too ("--cloud requires an interactive terminal"); in a terminal it asks
+// whether a folder it has not seen is trusted (when FAKE_CLAUDE_TRUSTED names the file of
+// trusted folders), then prints the three lines of a new session and exits. --cloud <id>
+// (attaching) is refused as the docs say. It also answers --teleport <id>, and what
+// hopsesh asks before using them: auth status --json and --help. handled is false for any
+// other call (the stand-in claude answers those itself).
 func Claude(p Proc) (handled bool, code int) {
 	switch strings.Join(p.Args, " ") {
 	case "auth status --json":
 		return true, claudeAuth(p)
 	case "--help":
-		// The lines hopsesh looks for, as 2.1.284's help words them.
+		// The lines hopsesh looks for, as 2.1.289's help words them.
 		fmt.Fprintln(p.Stdout, "Usage: claude [options] [command] [prompt]")
-		fmt.Fprintln(p.Stdout, "  --cloud [description|session_id|url]  Create a cloud session, or send a message to one with -p")
+		fmt.Fprintln(p.Stdout, "  --cloud [description|session_id|url]  Create a cloud session with the given description, or attach to an existing one by session ID or claude.ai/code URL")
 		fmt.Fprintln(p.Stdout, "  --teleport [session]                  Resume a teleport session, optionally specify session ID")
 		fmt.Fprintln(p.Stdout, "  -r, --resume [value]                  Resume a conversation by session ID")
 		return true, 0
 	}
 	var (
-		print, jsonOut, cloud, teleport bool
-		cloudArg, teleportArg           string
-		positional                      []string
+		print, cloud, teleport bool
+		cloudArg, teleportArg  string
+		positional             []string
 	)
 	for i := 0; i < len(p.Args); i++ {
 		a := p.Args[i]
@@ -46,7 +50,7 @@ func Claude(p Proc) (handled bool, code int) {
 		case "-p", "--print":
 			print = true
 		case "--output-format":
-			jsonOut = next() == "json"
+			next()
 		case "--cloud", "--remote":
 			cloud, cloudArg = true, next()
 		case "--teleport":
@@ -63,6 +67,15 @@ func Claude(p Proc) (handled bool, code int) {
 	if teleport {
 		return true, claudeTeleport(p, teleportArg)
 	}
+	if print {
+		return true, p.errorf(1, "Error: --cloud cannot be combined with --print.")
+	}
+	if !p.TTY {
+		return true, p.errorf(1, "Error: --cloud requires an interactive terminal. Non-interactive invocations (piped stdout, --init-only, --sdk-url) run locally and would silently ignore --cloud. Drop --cloud, or run from a TTY.")
+	}
+	if code, ok := claudeTerminal(p); !ok {
+		return true, code
+	}
 	if fail := p.fail(); fail == "signed-out" || fail == "not-eligible" {
 		return true, claudeRefused(p, fail)
 	}
@@ -71,17 +84,122 @@ func Claude(p Proc) (handled bool, code int) {
 		return true, claudeRefused(p, "signed-out")
 	}
 	if isClaudeID(cloudArg) {
-		if !print {
-			// Documented: an existing session can only be attached from the web.
-			return true, p.errorf(1, "Attaching to an existing cloud session is not enabled for your account.")
-		}
-		return true, claudeFollowUp(p, claudeID(cloudArg), strings.Join(positional, " "), jsonOut)
+		// Documented: attaching to an existing session is not enabled for accounts.
+		return true, p.errorf(1, "Attaching to an existing cloud session is not enabled for your account.")
 	}
 	prompt := strings.Join(positional, " ")
 	if prompt == "" {
 		prompt = cloudArg
 	}
-	return true, claudeCreate(p, prompt, jsonOut)
+	return true, claudeCreate(p, prompt)
+}
+
+// claudeTerminal plays what Claude Code does in a terminal before it starts a cloud
+// session: it asks the terminal what it is (DA1, which the user's terminal answers; it
+// waits a second for that), then, in a folder not in FAKE_CLAUDE_TRUSTED's list (when that
+// names a file), asks whether the folder is trusted. Enter, 1 or y is yes (the folder
+// joins the list), 2, n or Esc is no, Ctrl-C stops it. FAKE_CLOUD_FAIL=trust-no plays a
+// user who answers no. ok is false when it stops there, with the exit code.
+func claudeTerminal(p Proc) (code int, ok bool) {
+	if p.In == nil {
+		if p.fail() == "trust-no" {
+			dir, _ := filepath.Abs(p.Dir)
+			trustDialog(p, dir)
+			return 1, false
+		}
+		return 0, true
+	}
+	restore := func() {}
+	if p.Raw != nil {
+		restore = p.Raw()
+	}
+	defer restore()
+	keys := make(chan byte, 64)
+	go func() {
+		b := make([]byte, 1)
+		for {
+			n, err := p.In.Read(b)
+			if n > 0 {
+				keys <- b[0]
+			}
+			if err != nil {
+				close(keys)
+				return
+			}
+		}
+	}()
+	fmt.Fprint(p.Stdout, "\x1b[c")
+	reply := ""
+	var typed []byte // keys the user typed meanwhile, for the question
+	deadline := time.After(time.Second)
+query:
+	for !strings.HasSuffix(reply, "c") {
+		select {
+		case k, open := <-keys:
+			switch {
+			case !open:
+				break query
+			case reply == "" && k != 0x1b:
+				typed = append(typed, k)
+				break query
+			}
+			reply += string(k)
+		case <-deadline:
+			break query
+		}
+	}
+	if strings.HasPrefix(reply, "\x1b[?") {
+		p.Log("claude: the terminal answered DA1")
+	}
+	list := p.Env("FAKE_CLAUDE_TRUSTED")
+	if list == "" && p.fail() != "trust-no" {
+		return 0, true
+	}
+	dir, _ := filepath.Abs(p.Dir)
+	if b, err := os.ReadFile(list); err == nil && p.fail() != "trust-no" {
+		for _, l := range strings.Split(string(b), "\n") {
+			if l == dir {
+				return 0, true
+			}
+		}
+	}
+	trustDialog(p, dir)
+	if p.fail() == "trust-no" {
+		return 1, false
+	}
+	next := func() (byte, bool) {
+		if len(typed) > 0 {
+			k := typed[0]
+			typed = typed[1:]
+			return k, true
+		}
+		k, open := <-keys
+		return k, open
+	}
+	for k, open := next(); open; k, open = next() {
+		switch k {
+		case '\r', '\n', '1', 'y':
+			if f, err := os.OpenFile(list, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+				fmt.Fprintln(f, dir)
+				f.Close()
+			}
+			fmt.Fprint(p.Stdout, "\x1b[2J\x1b[H")
+			return 0, true
+		case '2', 'n', 0x1b:
+			return 1, false
+		case 0x03:
+			return 130, false
+		}
+	}
+	return 1, false // the terminal closed
+}
+
+// trustDialog is Claude Code's question whether a folder is trusted (its words seen in
+// 2.1.284; the layout is the fake's).
+func trustDialog(p Proc, dir string) {
+	p.Log("claude: asked whether " + dir + " is trusted")
+	fmt.Fprint(p.Stdout, "\x1b[2J\x1b[H\x1b[1mQuick safety check: Is this a project you created or one you trust?\x1b[22m\r\n\r\n")
+	fmt.Fprintf(p.Stdout, " %s\r\n\r\n \x1b[36m❯ 1. Yes, I trust this folder\x1b[39m\r\n   2. No, exit\r\n\r\n Enter to confirm · Esc to cancel\r\n", dir)
 }
 
 // claudeAuth answers auth status --json in the fields hopsesh reads: a claude.ai Max login
@@ -127,22 +245,10 @@ func claudeID(s string) string {
 	return s
 }
 
-// claudeOut prints a cloud result: {ok, session_id, url} with --output-format json
-// (documented for follow-ups), a line otherwise (unverified).
-func claudeOut(p Proc, s Session, jsonOut bool, what string) int {
-	if jsonOut {
-		b, _ := json.Marshal(map[string]any{"ok": true, "session_id": s.ID, "url": s.URL()})
-		fmt.Fprintln(p.Stdout, string(b))
-		return 0
-	}
-	fmt.Fprintf(p.Stdout, "%s: %s\n", what, s.URL())
-	return 0
-}
-
 // claudeCreate starts a cloud session from the folder's GitHub remote, at its current
 // branch (which must be pushed), or as an uploaded bundle when there is no GitHub remote
 // or CCR_FORCE_BUNDLE=1.
-func claudeCreate(p Proc, prompt string, jsonOut bool) int {
+func claudeCreate(p Proc, prompt string) int {
 	st, err := p.store()
 	if err != nil {
 		return p.errorf(1, "%v", err)
@@ -170,29 +276,38 @@ func claudeCreate(p Proc, prompt string, jsonOut bool) int {
 	if err != nil {
 		return p.errorf(1, "%v", err)
 	}
-	return claudeOut(p, s, jsonOut, "Created a cloud session")
+	// As 2.1.284 prints it; FAKE_CLAUDE_WRAP=1 puts the link where the terminal's width cuts
+	// it, as a program that breaks long lines would.
+	view := "\x1b[1mView:\x1b[22m " + s.URL() + "?from=cli&m=0"
+	if p.Width > 30 && p.Env("FAKE_CLAUDE_WRAP") == "1" {
+		view = hardWrap(strings.Repeat("·", p.Width-30)+" "+view, p.Width)
+	}
+	fmt.Fprintf(p.Stdout, "Created cloud session: Session ready\r\n%s\r\n\x1b[2mResume with:\x1b[22m claude --teleport %s\r\n", view, s.ID)
+	return 0
 }
 
-// claudeFollowUp queues one message in a session.
-func claudeFollowUp(p Proc, id, text string, jsonOut bool) int {
-	st, err := p.store()
-	if err != nil {
-		return p.errorf(1, "%v", err)
+// hardWrap breaks s into lines of width visible characters (escape sequences take none).
+func hardWrap(s string, width int) string {
+	var b strings.Builder
+	col, esc := 0, false
+	for _, r := range s {
+		switch {
+		case r == 0x1b:
+			esc = true
+		case esc:
+			if r >= '@' && r <= '~' && r != '[' {
+				esc = false
+			}
+		default:
+			if col == width {
+				b.WriteString("\r\n")
+				col = 0
+			}
+			col++
+		}
+		b.WriteRune(r)
 	}
-	s, err := st.Get(id)
-	if err != nil {
-		return p.errorf(1, "Error: %v", err)
-	}
-	if s.State == StateArchived || p.fail() == "archived" {
-		return p.errorf(1, "Error: This session is archived and can't take new messages.") // unverified wording
-	}
-	now := time.Now().UTC()
-	s.Messages = append(s.Messages, Message{Role: "user", Text: text, Time: now})
-	s.State, s.Updated = StateRunning, now
-	if err := st.Put(s); err != nil {
-		return p.errorf(1, "%v", err)
-	}
-	return claudeOut(p, s, jsonOut, "Sent to the cloud session")
+	return b.String()
 }
 
 // claudeTeleport brings a cloud session here as Claude Code does: in a checkout of the same

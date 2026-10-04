@@ -127,7 +127,13 @@ type Cloud struct {
 	// EnvHint says how the user makes an environment, for a cloud with NeedEnvironment
 	// ("open `codex cloud` once to create one").
 	EnvHint string
-	Watch   Watch
+	// NoFollowUp says, for people, why hopsesh sends this cloud's sessions no follow-up
+	// and where the user can ("Claude Code has no command that sends one without its own
+	// terminal session; open the session on claude.ai to write to it"). The user interfaces
+	// show it in place of a follow-up. "" for a cloud whose module is a CloudFollower, or
+	// where nothing needs saying.
+	NoFollowUp string
+	Watch      Watch
 }
 
 // Watch is what the weekly upstream-drift check watches for a cloud (read by
@@ -285,9 +291,40 @@ type CloudListing struct {
 }
 
 // CloudSender starts a cloud session from a briefing and code the core prepared
-// (claude -p … --cloud, codex cloud exec, gh agent-task create).
+// (codex cloud exec, gh agent-task create), or says what the user runs to start it where
+// the driver needs a terminal (claude --cloud "<briefing>").
 type CloudSender interface {
-	SendCloud(ctx context.Context, h Host, in Install, r SendRequest) (CloudSession, error)
+	SendCloud(ctx context.Context, h Host, in Install, r SendRequest) (Sent, error)
+}
+
+// Sent is what SendCloud did: the session it started, or, when the driver starts one only
+// in a terminal, the command for it.
+type Sent struct {
+	// Session is the session started (empty when Run is set).
+	Session CloudSession
+	// Run is a command for the user's terminal (claude --cloud "<briefing>" in
+	// SendRequest.Dir). The core runs it where the user sees it and answers what it asks
+	// (Claude Code's question whether the folder is trusted); hopsesh never types into it.
+	// It watches only what the command prints and its exit code, and the module reads the
+	// session from them (CloudStepReader, which it then implements).
+	Run *Command
+}
+
+// StepOutput is what a terminal step (Sent.Run) printed, as hopsesh saw it go by: plain
+// text with the terminal's control sequences taken out, at most its last 64 KB; the
+// terminal's width (a line that wide may go on in the next one, where the program broke
+// it); and the exit code (-1 when it is unknown).
+type StepOutput struct {
+	Text  string
+	Width int
+	Code  int
+}
+
+// CloudStepReader reads the session a terminal step started (a SendCloud's Sent.Run) from
+// what it printed, or maps its refusal onto the cloud sentinels. A step that printed no
+// session and no refusal returns an error that says what was seen.
+type CloudStepReader interface {
+	ReadStep(cloud string, out StepOutput) (CloudSession, error)
 }
 
 // SendRequest is a cloud session to start.
@@ -413,8 +450,8 @@ type CloudCheck struct {
 	Text string `json:"text"`
 }
 
-// CloudFollower sends a follow-up message to a cloud session
-// (claude -p "<text>" --cloud <id> --output-format json).
+// CloudFollower sends a follow-up message to a cloud session (fakecloud remote message;
+// none of the vendors' CLIs hopsesh drives has a non-interactive one as of 2026-10).
 type CloudFollower interface {
 	FollowUp(ctx context.Context, h Host, in Install, id SessionID, text string) (CloudSession, error)
 }
@@ -434,6 +471,10 @@ var (
 	// ErrNoEnvironment: the cloud has no environment of that name or id for this account,
 	// or none at all (for clouds with NeedEnvironment).
 	ErrNoEnvironment = errors.New("the cloud has no such environment")
+	// ErrNoSession: a terminal step ended without starting a session and without a
+	// refusal hopsesh knows (the user left it, or answered no). The user interfaces offer
+	// to paste the session's link, in case one started that hopsesh did not see.
+	ErrNoSession = errors.New("no cloud session started")
 )
 
 // NoLocal is embedded by a cloud-only module (no data folders on any machine) for the

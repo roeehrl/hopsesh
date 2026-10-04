@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/term"
+
 	"github.com/roeehrl/hopsesh/internal/testkit/fakecloud"
 )
 
@@ -72,10 +74,23 @@ func Vendor(name string) (code int, ok bool) {
 // own cloud CLI (fakecloud remote).
 func Cloud() int { return fakecloud.Main(proc()) }
 
-// proc is this run, for the stand-in clouds.
+// proc is this run, for the stand-in clouds: with its terminal, when it has one.
 func proc() fakecloud.Proc {
 	dir, _ := os.Getwd()
-	return fakecloud.Proc{Args: os.Args[1:], Dir: dir, Stdout: os.Stdout, Stderr: os.Stderr}
+	p := fakecloud.Proc{Args: os.Args[1:], Dir: dir, Stdout: os.Stdout, Stderr: os.Stderr}
+	in, out := int(os.Stdin.Fd()), int(os.Stdout.Fd())
+	if term.IsTerminal(in) && term.IsTerminal(out) {
+		p.TTY, p.In = true, os.Stdin
+		p.Width, _, _ = term.GetSize(out)
+		p.Raw = func() func() {
+			st, err := term.MakeRaw(in)
+			if err != nil {
+				return func() {}
+			}
+			return func() { _ = term.Restore(in, st) }
+		}
+	}
+	return p
 }
 
 // appServer answers JSON-RPC lines on stdin until it ends. $FAKE_CODEX_EMAIL is the

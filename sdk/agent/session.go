@@ -179,6 +179,9 @@ type Command struct {
 	// Unset are environment variables the program must run without (a cloud driver's
 	// Cloud.Unset); the core leaves them out of the shell line and the process.
 	Unset []string `json:"unset,omitempty"`
+	// Env are variables ("NAME=value") the program runs with on top of the user's
+	// (CCR_FORCE_BUNDLE=1); never a credential.
+	Env []string `json:"env,omitempty"`
 }
 
 // Liveness says whether a session is open right now.

@@ -248,7 +248,7 @@ func (a *App) account(ctx context.Context, m *Machine, mod agent.Module, in agen
 
 // Apply carries out a plan.
 func (a *App) Apply(ctx context.Context, p *move.Plan, in move.Input, progress func(string)) (*move.Result, error) {
-	return move.Apply(ctx, p, in, move.Env{StateDir: a.StateDir, Audit: a.Audit, Progress: progress})
+	return move.Apply(ctx, p, in, move.Env{StateDir: a.StateDir, Audit: a.Audit, Progress: progress, Step: a.Steps})
 }
 
 // gitFetchFunc is how to fetch from a repository on a machine over SSH (nil for this

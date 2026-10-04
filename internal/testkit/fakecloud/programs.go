@@ -3,8 +3,11 @@ package fakecloud
 import (
 	"bytes"
 	"fmt"
+	"io"
+	"path/filepath"
 	"strings"
 
+	"github.com/roeehrl/hopsesh/internal/core/term"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -77,4 +80,35 @@ func Vendor(name string) func(Proc) int {
 		return nil
 	}
 	return logged(name, m)
+}
+
+// TerminalStep runs a terminal step (a SendCloud's Sent.Run) with the stand-in claude in
+// this process, as at a terminal 100 columns wide whose user types typed (nil: nothing),
+// with the store in dir: for agenttest.CloudOptions.Step. Like Programs, the command's Env
+// goes on top of vars, without its Unset.
+func TerminalStep(dir string, vars map[string]string, typed io.Reader) func(agent.Command) agent.StepOutput {
+	return func(c agent.Command) agent.StepOutput {
+		v := map[string]string{"FAKE_CLOUD_DIR": dir}
+		for k, x := range vars {
+			v[k] = x
+		}
+		for _, k := range c.Unset {
+			v[k] = ""
+		}
+		for _, kv := range c.Env {
+			if k, x, ok := strings.Cut(kv, "="); ok {
+				v[k] = x
+			}
+		}
+		var out bytes.Buffer
+		p := Proc{Args: c.Argv[1:], Vars: v, Dir: c.Dir, Stdout: &out, Stderr: &out, TTY: true, In: typed, Width: 100}
+		code := -1
+		if strings.TrimSuffix(filepath.Base(c.Argv[0]), ".exe") == "claude" {
+			p.Log("claude " + strings.Join(p.Args, " "))
+			_, code = Claude(p)
+		} else {
+			fmt.Fprintf(&out, "the fake has no terminal program %s\n", c.Argv[0])
+		}
+		return agent.StepOutput{Text: term.Plain(out.Bytes()), Width: 100, Code: code}
+	}
 }

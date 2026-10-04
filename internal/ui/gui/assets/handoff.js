@@ -203,6 +203,8 @@ function checks(p) {
       /claude\.ai login/.test(b) ? h("span", { class: "muted", style: "font-size:12px" }, " Run ", mono("claude /login"), ", then Refresh") : null,
       /ChatGPT login/.test(b) ? h("span", { class: "muted", style: "font-size:12px" }, " Run ", mono("codex login"), ", then Refresh") : null)),
     h("span", { style: "font-size:12px" }, x.usage),
+    x.terminal ? h("span", { class: "muted", id: "ho-terminal", style: "font-size:12px;line-height:1.5" }, envNoteWords(x.terminal),
+      x.folder ? [" The folder: ", h("span", { class: "mono", style: "font-size:11.5px;word-break:break-all" }, x.folder)] : null) : null,
     (x.notes || []).map((n) => h("span", { class: "muted", style: "font-size:12px" }, n)),
     (x.limits || []).map((n) => h("span", { class: "muted", style: "font-size:12px" }, n)));
 }
@@ -251,9 +253,18 @@ async function apply() {
     fill(body, steps(x.steps, states));
     fill(foot, h("span", { class: "muted", style: "font-size:12px" }, i >= 0 ? `Step ${i + 1} of ${x.steps.length}` : ""), h("span", { class: "spacer" }), h("button", { class: "btn", disabled: true }, "Close"));
   };
+  const term = h("div", { class: "sheet-body", id: "ho-term", hidden: true, style: "border-top:1px solid var(--line)" });
   fill(sheet, h("div", { class: "sheet-in" }, h("header", { class: "sheet-head" }, h("span", { class: "sec-h" }, "While it applies"),
-    h("h2", { id: "sheet-title" }, `Handing off to ${x.cloudTitle}…`), h("span", { class: "muted", style: "font-size:12.5px" }, `“${p.title}”${x.repo ? " · " + x.repo : ""}`)), body, foot));
+    h("h2", { id: "sheet-title" }, `Handing off to ${x.cloudTitle}…`), h("span", { class: "muted", style: "font-size:12.5px" }, `“${p.title}”${x.repo ? " · " + x.repo : ""}`)), body, term, foot));
   paint();
+  // A cloud whose driver starts the session in a terminal: hopsesh opened one; say what
+  // happens there, and take the session's link by hand when hopsesh sees none.
+  let shown = "";
+  const poll = setInterval(async () => {
+    const st = await api("HandoffStep").catch(() => null);
+    const key = st ? `${st.state}|${st.message || ""}` : "";
+    if (key !== shown) { shown = key; stepBox(term, st); }
+  }, 500);
   const off = on("hopsesh:progress", (label) => {
     const n = Object.keys(STEP).find((k) => STEP[k] === label);
     if (!n) return;
@@ -274,7 +285,34 @@ async function apply() {
     problem(errText(err));
   } finally {
     off();
+    clearInterval(poll);
   }
+}
+
+// stepBox shows the terminal step the hand-off waits for: what happens in the terminal,
+// and a field for the session's link.
+function stepBox(box, st) {
+  if (!st) { box.hidden = true; fill(box); return; }
+  box.hidden = false;
+  const input = h("input", { class: "field mono", id: "ho-link", placeholder: "https://claude.ai/code/session_…", autocomplete: "off", spellcheck: "false", style: "flex:1 1 320px" });
+  const msg = h("div", { class: "err", role: "alert", style: "font-size:12.5px" });
+  const use = async () => {
+    if (!input.value.trim()) { msg.textContent = "Paste the session's link first."; return; }
+    try { await api("HandoffPasteLink", input.value.trim()); msg.textContent = ""; } catch (e) { msg.textContent = errText(e); }
+  };
+  input.onkeydown = (ev) => { if (ev.key === "Enter") { ev.preventDefault(); use(); } };
+  const lead = st.state === "waiting"
+    ? [h("b", {}, `${st.cloudTitle} is starting the session in your terminal`),
+      h("span", { style: "font-size:12.5px;line-height:1.5" }, "hopsesh opened a terminal window that runs ", mono(`${st.driver} --cloud`), " in its hand-off folder for this repository. If it asks whether you trust this folder, answer it there; hopsesh picks up the session's link once it is printed."),
+      h("span", { class: "mono muted", style: "font-size:11.5px;word-break:break-all" }, st.folder)]
+    : st.state === "no-link"
+      ? [h("b", {}, "hopsesh saw no session link"), h("span", { style: "font-size:12.5px;line-height:1.5" }, `No session started: ${st.message.replace(/\.$/, "")}. If one did, paste its link; otherwise stop, and Undo removes what the hand-off did.`)]
+      : [h("b", {}, "No terminal"), h("span", { class: "err", style: "font-size:12.5px;line-height:1.5" }, st.message)];
+  fill(box, h("div", { role: "group", "aria-label": "In your terminal", style: "display:flex;flex-direction:column;gap:8px" }, lead,
+    h("label", { for: "ho-link", style: "font-size:12.5px;font-weight:500" }, "Paste the link"),
+    h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" }, input, h("button", { class: "btn", onclick: use }, "Use this link"),
+      h("button", { class: "btn", onclick: () => api("HandoffStopWaiting").catch(fail) }, "Stop waiting")),
+    msg));
 }
 
 // failed shows the step that stopped the hand-off and what had happened by then.
@@ -338,6 +376,7 @@ screen("handedoff", (d) => {
       r.envName ? h("span", { style: "font-size:12.5px" }, "Environment ", mono(r.envName)) : null)),
     h("section", { class: "card" }, h("div", { class: "dlg-body" }, h("span", { class: "sec-h" }, "What happened"),
       h("div", { class: "item" }, tick("ok"), h("span", {}, `Briefing sent · ${thousands(r.tokens)} tokens${r.masked ? `, ${count(r.masked, "secret")} masked` : ""}`)),
+      r.pasted ? h("div", { class: "item" }, tick("ok"), h("span", {}, "The session's link is the one you pasted")) : null,
       r.pushed ? h("div", { class: "item" }, tick("ok"), h("span", {}, "Branch pushed")) : r.code === "bundle" ? h("div", { class: "item" }, tick("ok"), h("span", {}, "Uploaded by the agent; nothing pushed"))
         : r.code === "starting-diff" ? h("div", { class: "item" }, tick("ok"), h("span", {}, "The changes went with it as a starting diff, on ", mono(r.branch), "; nothing pushed")) : null,
       (r.stayed || []).length ? h("div", { class: "item" }, h("span", { class: "badge warn" }, "•"), h("span", {}, `Stayed on ${sys.here}: `, r.stayed.map((s, i) => [i ? ", " : "", s]))) : null,
@@ -346,8 +385,10 @@ screen("handedoff", (d) => {
     h("div", { class: "hint", role: "note" }, r.hint),
     h("div", { style: "display:flex;gap:10px;align-items:center;flex-wrap:wrap" },
       h("button", { class: "btn", onclick: doUndo }, "Undo"),
-      r.follow ? h("button", { class: "btn", onclick: () => followUp(r.cloud, r.session, d.title) }, "Send a follow-up…") : null,
-      h("button", { class: "btn", onclick: () => go("sessions", true) }, "Back to sessions", h("span", { class: "kbd" }, "esc"))))));
+      r.follow ? h("button", { class: "btn", onclick: () => followUp(r.cloud, r.session, d.title) }, "Send a follow-up…")
+        : r.noFollowUp ? h("button", { class: "btn", disabled: true, "aria-describedby": "ho-nofollow", title: r.noFollowUp }, "Send a follow-up…") : null,
+      h("button", { class: "btn", onclick: () => go("sessions", true) }, "Back to sessions", h("span", { class: "kbd" }, "esc"))),
+    !r.follow && r.noFollowUp ? h("span", { id: "ho-nofollow", class: "muted", style: "font-size:12px" }, r.noFollowUp) : null)));
   view.querySelector("#ho-open")?.focus();
 });
 

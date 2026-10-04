@@ -326,7 +326,7 @@ func TestDriverDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := stateOf(t, work)
-	dir, done, err := repos.DriverDir(ctx, work, "", branch, "", false)
+	dir, done, err := repos.DriverDir(ctx, repos.DriverOptions{Checkout: work, Branch: branch})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,7 +346,7 @@ func TestDriverDir(t *testing.T) {
 	after := stateOf(t, work)
 	sameState(t, before, after)
 	// The checkout's own branch, checked out there already.
-	dir, done, err = repos.DriverDir(ctx, work, "", "main", "", false)
+	dir, done, err = repos.DriverDir(ctx, repos.DriverOptions{Checkout: work, Branch: "main"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,5 +356,122 @@ func TestDriverDir(t *testing.T) {
 	done()
 	if !repos.BranchExists(ctx, work, "main") || !bytes.Equal([]byte(repos.CurrentBranch(ctx, work)), []byte("main")) {
 		t.Error("the user's branch must stay")
+	}
+}
+
+// The repository's hand-off folder is the same folder each time (so a driver that asks
+// whether a folder is trusted asks once): reset to the branch, with nothing the last driver
+// left; done leaves it detached, without the branch made for it, and the user's checkout
+// as it was. One hand-off at a time uses it; another waits.
+func TestStableDriverFolder(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX paths in the fixture")
+	}
+	origin, work := handoffRepo(t)
+	ctx := context.Background()
+	g := repos.Here{}
+	state := t.TempDir()
+	folder := repos.HandoffFolder(state, "github.com/example/demo")
+	if want := filepath.Join(state, "handoff", "github.com", "example", "demo"); folder != want {
+		t.Fatalf("folder %s", folder)
+	}
+	if f := repos.HandoffFolder(state, "../../etc/x y"); !strings.HasPrefix(f, filepath.Join(state, "handoff")+string(filepath.Separator)) || strings.Contains(f, "..") {
+		t.Fatalf("an identity stays inside the hand-off folders: %s", f)
+	}
+	push := func(name string) {
+		p, _ := repos.PlanSnapshot(ctx, g, work, repos.SnapshotOptions{})
+		sha, _ := repos.Snapshot(ctx, g, work, p, repos.SnapshotMessage("x"))
+		if err := repos.PushRef(ctx, g, work, "origin", sha, "refs/heads/"+name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	push("hopsesh/handoff/one")
+	push("hopsesh/handoff/two")
+	before := stateOf(t, work)
+
+	dir, done, err := repos.DriverDir(ctx, repos.DriverOptions{Folder: folder, Checkout: work, Branch: "hopsesh/handoff/one"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dir != folder || repos.CurrentBranch(ctx, dir) != "hopsesh/handoff/one" {
+		t.Fatalf("%s on %s", dir, repos.CurrentBranch(ctx, dir))
+	}
+	if up := gitIn(t, dir, "rev-parse", "--abbrev-ref", "@{u}"); up != "origin/hopsesh/handoff/one" {
+		t.Errorf("upstream %s", up)
+	}
+	// Another hand-off of the repository waits for this one.
+	waited := make(chan struct{})
+	second := make(chan error, 1)
+	go func() {
+		d2, done2, err := repos.DriverDir(ctx, repos.DriverOptions{Folder: folder, Checkout: work, Branch: "hopsesh/handoff/two", Waiting: func() { close(waited) }})
+		if err == nil {
+			if b := repos.CurrentBranch(ctx, d2); b != "hopsesh/handoff/two" {
+				err = errors.New("the second is on " + b)
+			}
+			if _, serr := os.Stat(filepath.Join(d2, "left-behind.txt")); serr == nil {
+				err = errors.New("what the last driver left stays")
+			}
+			done2()
+		}
+		second <- err
+	}()
+	<-waited
+	if err := os.WriteFile(filepath.Join(dir, "left-behind.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("changed by the driver"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	done()
+	if err := <-second; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(folder); err != nil {
+		t.Fatal("the folder stays for the next hand-off")
+	}
+	if b := repos.CurrentBranch(ctx, folder); b != "" {
+		t.Errorf("done leaves the folder detached, not on %s", b)
+	}
+	for _, b := range []string{"hopsesh/handoff/one", "hopsesh/handoff/two"} {
+		if repos.BranchExists(ctx, work, b) {
+			t.Errorf("the branch made for the driver stays: %s", b)
+		}
+	}
+	sameState(t, before, stateOf(t, work))
+
+	// The checkout's own branch, checked out there already.
+	dir, done, err = repos.DriverDir(ctx, repos.DriverOptions{Folder: folder, Checkout: work, Branch: "main"})
+	if err != nil || repos.CurrentBranch(ctx, dir) != "main" {
+		t.Fatalf("main: %v", err)
+	}
+	done()
+	if repos.CurrentBranch(ctx, work) != "main" || !repos.BranchExists(ctx, work, "main") {
+		t.Error("the user's branch must stay")
+	}
+
+	// A folder that belongs to another checkout of the repository is made again.
+	other := filepath.Join(t.TempDir(), "other")
+	gitIn(t, filepath.Dir(other), "clone", "-q", origin, other)
+	dir, done, err = repos.DriverDir(ctx, repos.DriverOptions{Folder: folder, Checkout: other, Branch: "hopsesh/handoff/one"})
+	if err != nil || repos.CurrentBranch(ctx, dir) != "hopsesh/handoff/one" {
+		t.Fatalf("another checkout: %v", err)
+	}
+	done()
+	if out := gitIn(t, work, "worktree", "list", "--porcelain"); strings.Contains(out, folder) {
+		t.Errorf("the first checkout still lists the folder:\n%s", out)
+	}
+
+	// Without a checkout here: a shallow clone, reused.
+	cloned := repos.HandoffFolder(state, "github.com/example/cloned")
+	for _, b := range []string{"hopsesh/handoff/one", "hopsesh/handoff/two"} {
+		dir, done, err = repos.DriverDir(ctx, repos.DriverOptions{Folder: cloned, RemoteURL: origin, Branch: b})
+		if err != nil || dir != cloned || repos.CurrentBranch(ctx, dir) != b {
+			t.Fatalf("clone %s: %v", b, err)
+		}
+		_ = os.WriteFile(filepath.Join(dir, "left-behind.txt"), []byte("x"), 0o600)
+		done()
+	}
+	if _, err := os.Stat(filepath.Join(cloned, "left-behind.txt")); err != nil {
+		t.Fatal("the last driver's file is removed only by the next hand-off")
 	}
 }

@@ -10,14 +10,20 @@
 #   you type one.
 #
 # handoff <local session> [<checkout>]: hopsesh hands a local Claude Code session off to the
-#   cloud with a codeword in its briefing (claude -p … --cloud … --output-format json, no
-#   terminal needed), asks the cloud session to recall the codeword without reading files
-#   (claude -p … --cloud <id>, no terminal needed), waits, brings it back with the teleport
-#   (this one step needs your terminal: /exit once the conversation shows), and checks the
-#   message count and that the recall is in the copy. It starts two model turns in the
-#   cloud on your plan. Use a throwaway session in a checkout of a GitHub repository the
-#   Claude GitHub App can reach; its work in progress goes up on a hopsesh/handoff/ branch.
-#   HANDOFF_WAIT (seconds, default 240) is how long it waits for the cloud's turns.
+#   cloud with a codeword in its briefing, which asks the cloud session to reply with the
+#   codeword only. Claude Code starts a cloud session only in a terminal, so hopsesh runs
+#   `claude --cloud "<briefing>"` in this one, in its hand-off folder for the repository
+#   (here in the script's scratch folder, so Claude Code asks every run whether you trust
+#   that folder; hopsesh's own folder is asked about once per repository). Answer it
+#   yourself (hopsesh never does); the script goes on once claude --cloud exits, and
+#   checks the session id hopsesh read from what it printed. It waits, brings the session
+#   back with the teleport (in this terminal too: once the conversation shows, leave it with
+#   /exit and the script goes on), and checks the message count and that the codeword reply
+#   is in the copy. It starts one model turn in the cloud on your plan (there is no
+#   follow-up: Claude Code has no command hopsesh could send one with). Use a throwaway
+#   session in a checkout of a GitHub repository the Claude GitHub App can reach; its work
+#   in progress goes up on a hopsesh/handoff/ branch. HANDOFF_WAIT (seconds, default 240) is
+#   how long it waits for the cloud's turn.
 #
 # codex <environment> [<checkout>]: starts a tiny Codex cloud task in the environment you
 #   name (its id or name, as `codex cloud` shows it) on the checkout's current branch, which
@@ -30,7 +36,8 @@
 #   status, diff) under the scratch folder and prints it, to check the shapes the module
 #   reads from source against the real ones.
 #
-# Everything hopsesh makes is undone at the end (worktrees, branches, the copy, the mark);
+# Everything hopsesh makes is undone at the end (worktrees, branches, the copy, the mark, and
+# the hand-off folder, which lives in the scratch folder);
 # a cloud session or task stays in the vendor's list (the script prints its link to archive
 # it). hopsesh's own settings go to a scratch folder.
 #
@@ -58,7 +65,15 @@ git -C "$CHECKOUT" rev-parse --git-dir >/dev/null 2>&1 || { echo "$CHECKOUT is n
 WORK=$(mktemp -d)
 export HOPSESH_CONFIG_DIR="$WORK/config" HOPSESH_STATE_DIR="$WORK/state"
 fail() { echo "FAIL: $*" >&2; exit 1; }
-json() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); exec("for k in sys.argv[2].split(\".\"): d=d.get(k, \"\")"); print(d)' "$1" "$2"; }
+# json prints a field of a JSON file ("" when the file or the field is missing).
+json() { python3 -c 'import json,sys
+try:
+    d=json.load(open(sys.argv[1]))
+except (OSError, ValueError):
+    d={}
+for k in sys.argv[2].split("."):
+    d=d.get(k, "") if isinstance(d, dict) else ""
+print(d)' "$1" "$2"; }
 
 JOURNAL=""
 HANDOFF=""
@@ -68,6 +83,8 @@ cleanup() {
   if [ -n "$HANDOFF" ]; then "$BIN" undo "$HANDOFF" --yes --force >/dev/null 2>&1 || echo "note: could not undo the hand-off $HANDOFF" >&2; fi
   if [ -n "$CLOUDURL" ]; then echo "The cloud session or task stays in the vendor's list; archive it there: $CLOUDURL"; fi
   rm -rf "$WORK"
+  # The hand-off folder was a worktree of the checkout, in the scratch folder just removed.
+  git -C "$CHECKOUT" worktree prune 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -105,8 +122,10 @@ if [ "$MODE" = codex ]; then
 
   echo "== 4. the plan (read-only), then back with hopsesh: the diff committed, the task written as a Codex session"
   "$BIN" plan "codex-cloud:$TASK" --to "$CHECKOUT" --json > "$WORK/plan.json" || { cat "$WORK/plan.json"; fail "the plan has a blocker"; }
-  "$BIN" pull "codex-cloud:$TASK" --to "$CHECKOUT" --yes --json > "$WORK/pull.json" || { cat "$WORK/pull.json"; fail "pull"; }
-  JOURNAL=$(json "$WORK/pull.json" result.journal)
+  status=0
+  "$BIN" pull "codex-cloud:$TASK" --to "$CHECKOUT" --yes --json > "$WORK/pull.json" || status=$?
+  JOURNAL=$(json "$WORK/pull.json" result.journal) # before failing: cleanup undoes what it made
+  [ "$status" -eq 0 ] || { cat "$WORK/pull.json"; fail "pull (exit $status)"; }
   OUTCOME=$(json "$WORK/pull.json" brought.outcome)
   WRITTEN=$(json "$WORK/pull.json" brought.written)
   BRANCH_HERE=$(json "$WORK/pull.json" brought.branch)
@@ -133,7 +152,7 @@ if [ "$MODE" = handoff ]; then
   CODEWORD="hsm-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
   cat > "$WORK/note.md" <<NOTE
 This is a connectivity check of hopsesh's hand-off: there is no open work, so do not change, commit or push anything.
-The codeword for this check is $CODEWORD. Remember it; you will be asked for it.
+The codeword for this check is $CODEWORD. Reply with only the codeword. Do not read, run or change anything.
 NOTE
 
   echo "== 1. the login and the flags, read-only"
@@ -144,24 +163,33 @@ NOTE
   "$BIN" plan "claude/$SESSION" --to claude-cloud --note-file "$WORK/note.md" --json > "$WORK/plan.json" || { cat "$WORK/plan.json"; fail "the plan has a blocker"; }
   grep -q "$CODEWORD" "$WORK/plan.json" || fail "the codeword is not in the briefing"
 
-  echo "== 3. the hand-off (claude -p … --cloud … --output-format json; no terminal needed)"
-  "$BIN" handoff "claude/$SESSION" --to claude-cloud --note-file "$WORK/note.md" --yes --json > "$WORK/handoff.json" || { cat "$WORK/handoff.json"; fail "handoff"; }
+  echo "== 3. the hand-off: claude --cloud runs HERE, in your terminal. If Claude Code asks whether you trust"
+  echo "   hopsesh's hand-off folder, answer it (yes starts the session); the script goes on when claude exits."
+  status=0
+  "$BIN" handoff "claude/$SESSION" --to claude-cloud --note-file "$WORK/note.md" --yes --json > "$WORK/handoff.json" || status=$?
+  # Read the journal before anything can fail: cleanup then undoes a branch already pushed.
   HANDOFF=$(json "$WORK/handoff.json" result.journal)
-  CLOUDID=$(json "$WORK/handoff.json" handoff.session)
   CLOUDURL=$(json "$WORK/handoff.json" handoff.url)
-  echo "session: $CLOUDID ($CLOUDURL); branch: $(json "$WORK/handoff.json" handoff.branch)"
-  case "$CLOUDID" in session_*) ;; *) fail "claude printed no session id hopsesh could read; update the module's notes on the reply's shape" ;; esac
+  if [ "$status" -ne 0 ]; then
+    cat "$WORK/handoff.json"
+    fail "handoff (exit $status): $(json "$WORK/handoff.json" handoff.message)"
+  fi
+  CLOUDID=$(json "$WORK/handoff.json" handoff.session)
+  echo "session: $CLOUDID ($CLOUDURL); branch: $(json "$WORK/handoff.json" handoff.branch); link pasted: $(json "$WORK/handoff.json" handoff.pasted)"
+  case "$CLOUDID" in session_*) ;; *) fail "hopsesh read no session id from what claude --cloud printed; update the module's notes on its output" ;; esac
+  [ "$(json "$WORK/handoff.json" handoff.pasted)" != True ] || echo "note: the link was pasted by hand; hopsesh did not see it in claude's output"
 
-  echo "== 4. the recall (claude -p … --cloud <id>; no terminal needed)"
-  "$BIN" followup "claude-cloud:$CLOUDID" "Reply with only the codeword from the hopsesh note at the start of this session. Do not read, run or change anything." --yes \
-    || fail "the follow-up was refused"
+  echo "== 4. no follow-up: Claude Code cloud takes none from hopsesh"
+  if "$BIN" followup "claude-cloud:$CLOUDID" "x" --yes >/dev/null 2>&1; then fail "a follow-up was sent; Claude Code has no command for one"; fi
   WAIT=${HANDOFF_WAIT:-240}
-  echo "waiting ${WAIT}s for the cloud's turns (HANDOFF_WAIT)…"
+  echo "waiting ${WAIT}s for the cloud's turn (HANDOFF_WAIT)…"
   sleep "$WAIT"
 
-  echo "== 5. back with the teleport (THIS STEP NEEDS YOUR TERMINAL: /exit once the conversation shows)"
-  "$BIN" pull "claude-cloud:$CLOUDID" --to "$CHECKOUT" --yes --run --json > "$WORK/pull.json" || { cat "$WORK/pull.json"; fail "pull"; }
-  JOURNAL=$(json "$WORK/pull.json" result.journal)
+  echo "== 5. back with the teleport (THIS STEP NEEDS YOUR TERMINAL: leave Claude Code with /exit once the conversation shows)"
+  status=0
+  "$BIN" pull "claude-cloud:$CLOUDID" --to "$CHECKOUT" --yes --run --json > "$WORK/pull.json" || status=$?
+  JOURNAL=$(json "$WORK/pull.json" result.journal) # before failing: cleanup undoes what it made
+  [ "$status" -eq 0 ] || { cat "$WORK/pull.json"; fail "pull (exit $status)"; }
   OUTCOME=$(json "$WORK/pull.json" brought.outcome)
   RESTORED=$(json "$WORK/pull.json" brought.restored)
   EXPECTED=$(json "$WORK/pull.json" brought.expected)
@@ -170,7 +198,7 @@ NOTE
   [ "$OUTCOME" = complete ] || fail "the copy is $OUTCOME: $(json "$WORK/pull.json" brought.message)"
   "$BIN" show "$KEY" --json > "$WORK/show.json" || fail "the copy is not listed"
   COPY=$(json "$WORK/show.json" session.path)
-  python3 - "$COPY" "$CODEWORD" <<'PY' || fail "the cloud session did not recall the codeword (or the copy lacks its reply)"
+  python3 - "$COPY" "$CODEWORD" <<'PY' || fail "the cloud session did not reply with the codeword (or the copy lacks its reply)"
 import json, sys
 path, word = sys.argv[1], sys.argv[2]
 for line in open(path, encoding="utf-8"):
@@ -198,8 +226,10 @@ echo "== 2. the plan"
 "$BIN" plan "$SESSION" --to "$CHECKOUT" || fail "the plan has a blocker"
 
 echo "== 3. the teleport (leave Claude Code with /exit once the conversation shows)"
-"$BIN" pull "$SESSION" --to "$CHECKOUT" --yes --run --json > "$WORK/pull.json" || { cat "$WORK/pull.json"; fail "pull"; }
-JOURNAL=$(json "$WORK/pull.json" result.journal)
+status=0
+"$BIN" pull "$SESSION" --to "$CHECKOUT" --yes --run --json > "$WORK/pull.json" || status=$?
+JOURNAL=$(json "$WORK/pull.json" result.journal) # before failing: cleanup undoes what it made
+[ "$status" -eq 0 ] || { cat "$WORK/pull.json"; fail "pull (exit $status)"; }
 OUTCOME=$(json "$WORK/pull.json" brought.outcome)
 RESTORED=$(json "$WORK/pull.json" brought.restored)
 EXPECTED=$(json "$WORK/pull.json" brought.expected)

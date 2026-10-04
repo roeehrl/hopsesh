@@ -1,10 +1,14 @@
 # A session here goes to Claude Code cloud: planned with --json (a briefing, a handoff
-# branch with the unpushed commit and the changed file, the .env withheld), handed off
-# (the checkout untouched, the driver run without the variables an agent's own session
-# passes on), marked, followed up, and undone (the branch deleted, the cloud session owed).
+# branch with the unpushed commit and the changed file, the .env withheld), handed off in a
+# terminal (claude --cloud runs there through hopsesh's relay: the user answers Claude Code's
+# question whether hopsesh's hand-off folder is trusted, and hopsesh reads the session's
+# link; the checkout untouched, the driver run without the variables an agent's own session
+# passes on), marked, refused a follow-up with the reason, and undone (the branch deleted,
+# the cloud session owed). Without a terminal, as an agent runs it, the plan says why not.
 [windows] skip 'the stand-in origin needs a POSIX shell'
 env CLAUDE_CODE_CHILD_SESSION=1
 env ANTHROPIC_API_KEY=sk-ant-not-a-real-key
+env FAKE_CLAUDE_TRUSTED=$WORK/trusted-folders
 cloud-world demo
 claude-session 11111111-2222-4333-8444-555555555555 demo 'Fix the parser' 'fix the quoting in'
 exec git -C demo commit -q --allow-empty -m 'not pushed yet'
@@ -13,6 +17,7 @@ cp env demo/.env
 
 ! exec hopsesh handoff claude/11111111 --to claude-cloud --yes
 stderr 'hopsesh clouds allow claude-cloud'
+stderr 'Claude Code starts the session only in a terminal you can answer, and this has none'
 exec hopsesh clouds allow claude-cloud
 
 exec hopsesh plan claude/11111111 --to claude-cloud --json --untracked notes.txt
@@ -22,18 +27,27 @@ stdout '"brief": "\[hopsesh\] This task continues a Claude Code session'
 stdout '"untracked": \[\s*"notes.txt"'
 stdout '"path": ".env"'
 stdout '"markTitle": "↪ continued in Claude Code on claude-cloud"'
+stdout '"terminal": "Claude Code starts the session in a terminal'
+stdout '"folder": ".*hopsesh-state/handoff/github.com/example/demo"'
+stdout '"noFollowUp": "hopsesh can.t send a Claude Code cloud session a message'
 ! grep 'cloud' $WORK/agents.log
 
 exec git -C demo status --porcelain
 cp stdout status-before
-exec hopsesh handoff claude/11111111 --to claude-cloud --untracked notes.txt --yes
+at-terminal -answer yes hopsesh handoff claude/11111111 --to claude-cloud --untracked notes.txt --yes
+stdout 'Claude Code cloud starts the session here, in hopsesh.s hand-off folder for this repository'
+stdout 'Quick safety check: Is this a project you created or one you trust\?'
+stdout 'View: https://claude.ai/code/session_01\w+\?from=cli'
 stdout '✓ Handed off to Claude Code cloud'
 stdout 'Session session_01\w+ is running'
-stdout 'https://claude.ai/code/session_01'
 stdout 'Branch hopsesh/handoff/\d{8}-11111111 on github.com/example/demo'
 stdout 'Stayed here: .env'
 stdout 'This session is now marked "↪ continued in Claude Code on claude-cloud"'
-grep 'claude -p \[hopsesh\] This task continues' $WORK/agents.log
+stdout 'Follow-ups: hopsesh can.t send a Claude Code cloud session a message'
+grep 'claude --cloud \[hopsesh\] This task continues' $WORK/agents.log
+grep 'claude: the terminal answered DA1' $WORK/agents.log
+grep 'claude: asked whether .*hopsesh-state/handoff/github.com/example/demo is trusted' $WORK/agents.log
+! grep 'claude -p' $WORK/agents.log
 exec git -C demo status --porcelain
 cmp stdout status-before
 exec git -C demo branch --show-current
@@ -47,6 +61,8 @@ stdout '"location": "claude-cloud"'
 
 ! exec hopsesh followup claude-cloud:session_01Nope000000 'and add a test'
 stderr 'not confirmed'
+! exec hopsesh followup claude-cloud:session_01Nope000000 'and add a test' --yes
+stderr 'hopsesh can.t send a Claude Code cloud session a message: Claude Code 2.1 has no command'
 
 exec hopsesh undo --yes
 stdout 'Undid'

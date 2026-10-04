@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -501,13 +502,218 @@ func FreeRemoteBranch(ctx context.Context, g Git, dir, remote, name string) stri
 // ErrNoCheckout means there is no checkout here to start a cloud's driver from.
 var ErrNoCheckout = errors.New("no checkout of the repository here")
 
-// DriverDir is a folder whose current branch is branch, for a cloud driver that starts
-// from "your current branch" (claude --cloud): a new worktree of the checkout here. A local
-// branch of that name is used as it is (even when another worktree has it checked out:
-// nothing is committed in this one); otherwise one is made at start (the fetched remote
-// branch when it is there) and, unless keep, deleted again by done. Without a checkout here
-// (checkout ""), it is a shallow clone of remoteURL's branch in a temporary folder.
-func DriverDir(ctx context.Context, checkout, remoteURL, branch, start string, keep bool) (dir string, done func(), err error) {
+// DriverOptions say where a cloud's driver starts and on which branch.
+type DriverOptions struct {
+	// Folder is the repository's hand-off folder (HandoffFolder): the same folder hand-off
+	// after hand-off, so a driver that asks whether the folder is trusted (Claude Code)
+	// asks once per repository. "" is a new temporary folder each time.
+	Folder string
+	// Checkout is a checkout of the repository here ("": none, so the folder is a clone of
+	// RemoteURL's branch).
+	Checkout  string
+	RemoteURL string
+	Branch    string
+	// Start is where a branch made for the driver starts ("": the fetched remote branch);
+	// Keep keeps such a branch afterwards (an upload's, which undo deletes).
+	Start string
+	Keep  bool
+	// Waiting is called once when another hand-off of the repository holds the folder,
+	// before this one waits for it.
+	Waiting func()
+}
+
+// DriverDir is a folder whose current branch is o.Branch, for a cloud driver that starts
+// from "your current branch" (claude --cloud), and done, which the caller runs once the
+// driver ended. With a checkout here it is a worktree of it: a local branch of that name
+// is used as it is (even when another worktree has it checked out: nothing is committed
+// in this one); otherwise one is made at Start (the fetched remote branch when it is
+// there) and, unless Keep, deleted again by done. Without a checkout here, it is a shallow
+// clone of RemoteURL's branch. The user's checkout, index and branch never change.
+//
+// A stable o.Folder is reset to the branch each time (anything the last driver left in it
+// is removed), and done leaves its worktree detached, so it holds no branch. Only one
+// hand-off of a repository uses its folder at a time: another waits until done.
+func DriverDir(ctx context.Context, o DriverOptions) (dir string, done func(), err error) {
+	if o.Folder == "" {
+		return tempDriverDir(ctx, o)
+	}
+	if err := os.MkdirAll(filepath.Dir(o.Folder), 0o700); err != nil {
+		return "", nil, err
+	}
+	unlock, err := lockFolder(ctx, o.Folder+".lock", o.Waiting)
+	if err != nil {
+		return "", nil, err
+	}
+	dir, reset, err := stableDriverDir(ctx, o)
+	if err != nil {
+		unlock()
+		return "", nil, err
+	}
+	return dir, func() { reset(); unlock() }, nil
+}
+
+// HandoffFolder is a repository's hand-off folder under hopsesh's state folder:
+// <state>/handoff/<host>/<owner>/<repo>, from the repository's identity, so the folder a
+// driver names (Claude Code's trust question shows it) says whose it is.
+func HandoffFolder(stateDir, identity string) string {
+	parts := []string{stateDir, "handoff"}
+	for _, p := range strings.Split(identity, "/") {
+		p = unsafeFolder.ReplaceAllString(p, "-")
+		if p == "" || p == "." || p == ".." {
+			continue
+		}
+		parts = append(parts, p)
+	}
+	if len(parts) == 2 {
+		parts = append(parts, "repo")
+	}
+	return filepath.Join(parts...)
+}
+
+var unsafeFolder = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
+
+// stableDriverDir puts the repository's hand-off folder on the branch.
+func stableDriverDir(ctx context.Context, o DriverOptions) (string, func(), error) {
+	g, dir := Here{}, o.Folder
+	if o.Checkout == "" {
+		return dir, func() {}, cloneDriverDir(ctx, o)
+	}
+	start := o.Start
+	if _, err := g.Run(ctx, o.Checkout, pushEnv, "fetch", "--quiet", "--no-tags", "origin", "+refs/heads/"+o.Branch+":refs/remotes/origin/"+o.Branch); err == nil && start == "" {
+		start = "refs/remotes/origin/" + o.Branch
+	}
+	exists := BranchExists(ctx, o.Checkout, o.Branch)
+	if !exists && start == "" {
+		return "", nil, fmt.Errorf("branch %s is neither here nor on origin", o.Branch)
+	}
+	if !worktreeOf(ctx, dir, o.Checkout) {
+		if err := dropFolder(ctx, dir); err != nil {
+			return "", nil, err
+		}
+		_, _ = g.Run(ctx, o.Checkout, nil, "worktree", "prune")
+		at := start
+		if exists {
+			at = "refs/heads/" + o.Branch
+		}
+		if _, err := g.Run(ctx, o.Checkout, nil, "worktree", "add", "--detach", "--quiet", "--", dir, at); err != nil {
+			return "", nil, err
+		}
+	}
+	// Whatever the last driver left, the folder is the branch as it is.
+	for _, args := range [][]string{{"reset", "--hard", "--quiet"}, {"clean", "-ffdxq"}} {
+		if _, err := g.Run(ctx, dir, nil, args...); err != nil {
+			return "", nil, err
+		}
+	}
+	created := false
+	if exists {
+		if _, err := g.Run(ctx, dir, nil, "checkout", "--force", "--quiet", "--ignore-other-worktrees", o.Branch); err != nil {
+			return "", nil, err
+		}
+	} else {
+		if _, err := g.Run(ctx, dir, nil, "checkout", "--force", "--quiet", "-b", o.Branch, start); err != nil {
+			return "", nil, err
+		}
+		created = true
+		_, _ = g.Run(ctx, dir, nil, "branch", "--quiet", "--set-upstream-to=origin/"+o.Branch, o.Branch)
+	}
+	done := func() {
+		c := context.WithoutCancel(ctx)
+		_, _ = g.Run(c, dir, nil, "checkout", "--detach", "--quiet")
+		if created && !o.Keep {
+			_, _ = g.Run(c, o.Checkout, nil, "branch", "--quiet", "-D", o.Branch)
+		}
+	}
+	return dir, done, nil
+}
+
+// cloneDriverDir makes the folder a shallow clone of o.RemoteURL on o.Branch, reusing the
+// clone of an earlier hand-off.
+func cloneDriverDir(ctx context.Context, o DriverOptions) error {
+	g, dir := Here{}, o.Folder
+	if url, err := g.Run(ctx, dir, nil, "remote", "get-url", "origin"); err == nil && strings.TrimSpace(url) == o.RemoteURL && isTop(ctx, dir) {
+		ref := "refs/remotes/origin/" + o.Branch
+		if _, err := g.Run(ctx, dir, pushEnv, "fetch", "--quiet", "--depth", "1", "--no-tags", "origin", "+refs/heads/"+o.Branch+":"+ref); err == nil {
+			for _, args := range [][]string{{"reset", "--hard", "--quiet"}, {"clean", "-ffdxq"}, {"checkout", "--force", "--quiet", "-B", o.Branch, ref}} {
+				if _, err = g.Run(ctx, dir, nil, args...); err != nil {
+					break
+				}
+			}
+			if err == nil {
+				return nil
+			}
+		}
+	}
+	if err := dropFolder(ctx, dir); err != nil {
+		return err
+	}
+	_, err := g.Run(ctx, filepath.Dir(dir), pushEnv, "clone", "--quiet", "--depth", "1", "--single-branch", "--branch", o.Branch, "--", o.RemoteURL, dir)
+	return err
+}
+
+// worktreeOf reports whether dir is a worktree (at its top) of checkout's repository.
+func worktreeOf(ctx context.Context, dir, checkout string) bool {
+	if !isTop(ctx, dir) {
+		return false
+	}
+	a, b := commonDir(ctx, dir), commonDir(ctx, checkout)
+	return a != "" && a == b
+}
+
+// isTop reports whether dir is the top of a git working tree.
+func isTop(ctx context.Context, dir string) bool {
+	if _, err := os.Stat(dir); err != nil {
+		return false
+	}
+	top, err := Here{}.Run(ctx, dir, nil, "rev-parse", "--show-toplevel")
+	return err == nil && sameFolder(strings.TrimSpace(top), dir)
+}
+
+// commonDir is the repository's own .git folder (shared by its worktrees), resolved.
+func commonDir(ctx context.Context, dir string) string {
+	out, err := Here{}.Run(ctx, dir, nil, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return ""
+	}
+	p := strings.TrimSpace(out)
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(dir, p)
+	}
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		p = r
+	}
+	return filepath.Clean(p)
+}
+
+func sameFolder(a, b string) bool {
+	ra, err1 := filepath.EvalSymlinks(a)
+	rb, err2 := filepath.EvalSymlinks(b)
+	if err1 != nil || err2 != nil {
+		return filepath.Clean(a) == filepath.Clean(b)
+	}
+	return filepath.Clean(ra) == filepath.Clean(rb)
+}
+
+// dropFolder removes a hand-off folder that is not what it should be (a worktree of
+// another checkout, a broken one), and the registration its repository has of it.
+func dropFolder(ctx context.Context, dir string) error {
+	if _, err := os.Stat(dir); err != nil {
+		return nil
+	}
+	old := commonDir(ctx, dir)
+	if err := os.RemoveAll(dir); err != nil {
+		return err
+	}
+	if old != "" {
+		_, _ = Here{}.Run(ctx, filepath.Dir(dir), nil, "--git-dir="+old, "worktree", "prune")
+	}
+	return nil
+}
+
+// tempDriverDir is a new worktree (or shallow clone) in a temporary folder, removed by
+// done.
+func tempDriverDir(ctx context.Context, o DriverOptions) (dir string, done func(), err error) {
+	checkout, remoteURL, branch, start, keep := o.Checkout, o.RemoteURL, o.Branch, o.Start, o.Keep
 	tmp, err := os.MkdirTemp("", "hopsesh-handoff-")
 	if err != nil {
 		return "", nil, err

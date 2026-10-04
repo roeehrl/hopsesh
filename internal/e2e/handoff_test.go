@@ -2,6 +2,8 @@ package e2e
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -9,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/roeehrl/hopsesh/internal/app"
+	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/repos"
@@ -24,6 +27,17 @@ import (
 type handoffWorld struct {
 	*cloudWorld
 	origin fakecloud.Origin
+	// user is at the terminal where claude --cloud runs; trusted lists the folders the
+	// stand-in claude trusts.
+	user    *atTerminal
+	trusted string
+}
+
+// app is the App with the terminal the user answers in.
+func (w *handoffWorld) app() *app.App {
+	a := w.cloudWorld.app()
+	a.Steps = w.user.runner(a)
+	return a
 }
 
 const demoSession = "0b6c6a8e-1d2f-4c3b-9a7e-5f4d3c2b1a01"
@@ -35,7 +49,8 @@ func newHandoffWorld(t *testing.T) *handoffWorld {
 	}
 	root := t.TempDir()
 	root, _ = filepath.EvalSymlinks(root)
-	w := &handoffWorld{cloudWorld: &cloudWorld{t: t, home: filepath.Join(root, "home"), store: filepath.Join(root, "cloud")}}
+	w := &handoffWorld{cloudWorld: &cloudWorld{t: t, home: filepath.Join(root, "home"), store: filepath.Join(root, "cloud")},
+		user: &atTerminal{answer: "\r"}, trusted: filepath.Join(root, "trusted-folders")}
 	w.repo = filepath.Join(w.home, "git", "demo")
 	if err := testkit.DemoHome(w.home); err != nil {
 		t.Fatal(err)
@@ -51,7 +66,7 @@ func newHandoffWorld(t *testing.T) *handoffWorld {
 	gitConfig := filepath.Join(root, "gitconfig")
 	env := testkit.Env(w.home)
 	for k, v := range map[string]string{"PATH": bin + ":" + testPath(), "HOPSESH_MACHINE": "here", "FAKE_CLOUD_DIR": w.store, "FAKE_CLOUD_FAIL": "",
-		"FAKE_AGENT_LOG": filepath.Join(root, "agents.log"), "GIT_CONFIG_GLOBAL": gitConfig, "GIT_CONFIG_NOSYSTEM": "1",
+		"FAKE_AGENT_LOG": filepath.Join(root, "agents.log"), "GIT_CONFIG_GLOBAL": gitConfig, "GIT_CONFIG_NOSYSTEM": "1", "FAKE_CLAUDE_TRUSTED": w.trusted,
 		"GIT_AUTHOR_NAME": "Sam Doe", "GIT_AUTHOR_EMAIL": "sam@example.com", "GIT_COMMITTER_NAME": "Sam Doe", "GIT_COMMITTER_EMAIL": "sam@example.com",
 		// As inside another agent's session: the driver must run without these.
 		"CLAUDE_CODE_CHILD_SESSION": "1", "ANTHROPIC_API_KEY": "sk-ant-not-a-real-key", "CCR_FORCE_BUNDLE": ""} {
@@ -177,8 +192,15 @@ func TestHandoffToClaudeCloudAndBack(t *testing.T) {
 	if s.Branch != hp.Branch || s.Base != hr.Snapshot || s.Code != "branch" || !strings.HasPrefix(s.Messages[0].Text, "[hopsesh] ") {
 		t.Fatalf("the cloud session: %+v", s)
 	}
-	if log, _ := os.ReadFile(os.Getenv("FAKE_AGENT_LOG")); !strings.Contains(string(log), "claude -p [hopsesh] This task continues") || !strings.Contains(string(log), "--cloud --output-format json") {
+	log, _ := os.ReadFile(os.Getenv("FAKE_AGENT_LOG"))
+	if !strings.Contains(string(log), "claude --cloud [hopsesh] This task continues") || strings.Contains(string(log), "claude -p") ||
+		!strings.Contains(string(log), "claude: the terminal answered DA1") {
 		t.Fatalf("the driver ran as: %s", log)
+	}
+	// The user answered Claude Code's question about hopsesh's hand-off folder, once.
+	folder := repos.HandoffFolder(config.StateDir(), "github.com/example/demo")
+	if w.user.asked != 1 || !strings.Contains(string(log), "asked whether "+folder+" is trusted") || hr.Pasted {
+		t.Fatalf("the trust question: asked %d times; log: %s", w.user.asked, log)
 	}
 	tree := w.git(w.repo, "ls-tree", "-r", "--name-only", hr.Snapshot)
 	if !strings.Contains(tree, "docs/plan.md") || !strings.Contains(tree, "parser.go") || strings.Contains(tree, ".env") || strings.Contains(tree, "dev.pem") {
@@ -190,8 +212,8 @@ func TestHandoffToClaudeCloudAndBack(t *testing.T) {
 	if repos.BranchExists(ctx, w.repo, hp.Branch) {
 		t.Fatal("the driver's local branch stays")
 	}
-	if out := w.git(w.repo, "worktree", "list"); strings.Count(out, "\n") != 0 {
-		t.Fatalf("the driver's worktree stays: %s", out)
+	if b := repos.CurrentBranch(ctx, folder); b != "" {
+		t.Fatalf("the hand-off folder holds the branch %s", b)
 	}
 
 	// The scan: the session here is marked and points at the cloud session, which is
@@ -451,4 +473,110 @@ func findEntry(t *testing.T, inv *app.Inventory) app.Entry {
 		t.Fatal(err)
 	}
 	return e
+}
+
+// Claude Code starts a cloud session only in a terminal the user answers: the hand-off runs
+// claude --cloud there through hopsesh's relay, in the repository's own hand-off folder.
+// Claude Code asks once whether that folder is trusted (the user answers; hopsesh never
+// does), so a second hand-off of the repository is not asked again; a user who answers no
+// ends with no session and an undo that removes the pushed branch, unless they paste the
+// link of a session that did start; a link broken where the terminal ends is still read;
+// and without a terminal the plan says so before anything changes.
+func TestHandoffTerminalStep(t *testing.T) {
+	ctx := context.Background()
+	t.Run("asked once per repository", func(t *testing.T) {
+		w := newHandoffWorld(t)
+		a := w.app()
+		var folders []string
+		for i := 0; i < 2; i++ {
+			w.git(w.repo, "commit", "-q", "--allow-empty", "-m", fmt.Sprintf("more work %d", i))
+			inv, p := w.planHandoff(a, a.HandoffDefaults("claude-cloud"))
+			if len(p.Blockers) > 0 || !strings.Contains(p.Handoff.Terminal, "may first ask whether you trust that folder") {
+				t.Fatalf("plan: %v %q", p.Blockers, p.Handoff.Terminal)
+			}
+			folders = append(folders, p.Handoff.Folder)
+			res, err := a.Apply(ctx, p, move.Input{}, nil)
+			inv.Close()
+			if err != nil || !strings.HasPrefix(res.Handoff.Session, "session_01") {
+				t.Fatalf("hand-off %d: %v %+v", i+1, err, res.Handoff)
+			}
+		}
+		if folders[0] != folders[1] || folders[0] != repos.HandoffFolder(config.StateDir(), "github.com/example/demo") {
+			t.Fatalf("folders: %v", folders)
+		}
+		if w.user.steps != 2 || w.user.asked != 1 {
+			t.Fatalf("two hand-offs, %d steps: the trust question was asked %d times", w.user.steps, w.user.asked)
+		}
+	})
+	t.Run("trust refused", func(t *testing.T) {
+		w := newHandoffWorld(t)
+		w.dirty()
+		w.user.answer = "2"
+		a := w.app()
+		inv, p := w.planHandoff(a, a.HandoffDefaults("claude-cloud"))
+		defer inv.Close()
+		res, err := a.Apply(ctx, p, move.Input{}, nil)
+		if err == nil || res.Handoff.Failed != move.StepStart || !res.Handoff.Pushed ||
+			err.Error() != "The branch was pushed, but no session started: Claude Code asked whether you trust hopsesh's hand-off folder and ended without starting a cloud session (it starts one only after a yes). Undo removes the branch." {
+			t.Fatalf("refused: %v %+v", err, res.Handoff)
+		}
+		if !strings.Contains(w.user.last, "Quick safety check") {
+			t.Fatalf("the user saw:\n%s", w.user.last)
+		}
+		if s, _ := fakecloud.Open(w.store).List(fakecloud.ClaudeCloud); len(s) != 0 {
+			t.Fatalf("a session started: %+v", s)
+		}
+		if _, err := a.Undo(ctx, res.Journal, false); err != nil {
+			t.Fatal(err)
+		}
+		if out := w.git(w.origin.Bare, "for-each-ref", "refs/heads/"+p.Handoff.Branch); out != "" {
+			t.Fatal("undo leaves the pushed branch")
+		}
+	})
+	t.Run("pasted link", func(t *testing.T) {
+		w := newHandoffWorld(t)
+		s, err := fakecloud.Open(w.store).Seed(fakecloud.Session{Cloud: fakecloud.ClaudeCloud, Title: "started by hand", Repo: "github.com/example/demo",
+			CloneURL: w.origin.FileURL(), Branch: "main", Code: "branch"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		w.user.answer, w.user.paste = "2", "https://claude.ai/code/"+s.ID+"?from=cli&m=0"
+		a := w.app()
+		inv, p := w.planHandoff(a, a.HandoffDefaults("claude-cloud"))
+		defer inv.Close()
+		res, err := a.Apply(ctx, p, move.Input{}, nil)
+		if err != nil || res.Handoff.Session != s.ID || !res.Handoff.Pasted || res.Handoff.URL != "https://claude.ai/code/"+s.ID {
+			t.Fatalf("pasted: %v %+v", err, res.Handoff)
+		}
+	})
+	t.Run("link broken at the terminal's edge", func(t *testing.T) {
+		w := newHandoffWorld(t)
+		t.Setenv("FAKE_CLAUDE_WRAP", "1")
+		a := w.app()
+		inv, p := w.planHandoff(a, a.HandoffDefaults("claude-cloud"))
+		defer inv.Close()
+		res, err := a.Apply(ctx, p, move.Input{}, nil)
+		if err != nil || !strings.HasPrefix(res.Handoff.Session, "session_01") || !strings.Contains(w.user.last, "View: https://claude.ai/code/\n") {
+			t.Fatalf("wrapped: %v %+v\n%s", err, res.Handoff, w.user.last)
+		}
+		if _, err := fakecloud.Open(w.store).Get(res.Handoff.Session); err != nil {
+			t.Fatalf("read a session that does not exist: %v", err)
+		}
+	})
+	t.Run("no terminal", func(t *testing.T) {
+		w := newHandoffWorld(t)
+		w.dirty()
+		a := w.cloudWorld.app() // as an agent runs hopsesh: no terminal
+		inv, p := w.planHandoff(a, a.HandoffDefaults("claude-cloud"))
+		defer inv.Close()
+		if !hasBlocker(p, "Claude Code starts the session only in a terminal you can answer, and this has none") {
+			t.Fatalf("blockers: %v", p.Blockers)
+		}
+		if _, err := a.Apply(ctx, p, move.Input{}, nil); !errors.Is(err, move.ErrBlocked) {
+			t.Fatalf("apply: %v", err)
+		}
+		if out := w.git(w.origin.Bare, "for-each-ref", "refs/heads/hopsesh/"); out != "" {
+			t.Fatalf("something was pushed: %s", out)
+		}
+	})
 }

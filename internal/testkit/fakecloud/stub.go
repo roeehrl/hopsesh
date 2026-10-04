@@ -108,16 +108,16 @@ func (s stub) ListCloud(ctx context.Context, h agent.Host, _ agent.Install, q ag
 	return l, nil
 }
 
-func (s stub) SendCloud(ctx context.Context, h agent.Host, _ agent.Install, r agent.SendRequest) (agent.CloudSession, error) {
+func (s stub) SendCloud(ctx context.Context, h agent.Host, _ agent.Install, r agent.SendRequest) (agent.Sent, error) {
 	out, err := s.run(ctx, h, r.Dir, "new", "--repo", r.Repo, "--branch", r.Branch, "--title", r.Title, r.Brief)
 	if err != nil {
-		return agent.CloudSession{}, err
+		return agent.Sent{}, err
 	}
 	var x Session
 	if err := json.Unmarshal(out, &x); err != nil {
-		return agent.CloudSession{}, err
+		return agent.Sent{}, err
 	}
-	return s.session(x), nil
+	return agent.Sent{Session: s.session(x)}, nil
 }
 
 func (s stub) FetchCloud(ctx context.Context, h agent.Host, _ agent.Install, id agent.SessionID, t agent.FetchTarget) (agent.Fetched, error) {

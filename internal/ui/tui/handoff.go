@@ -298,6 +298,12 @@ func (m *model) viewHandoffPlan(b *strings.Builder) {
 		b.WriteString("  " + errSt.Render("✗ "+bl) + "\n")
 	}
 	b.WriteString("  " + dim.Render(hp.Usage) + "\n")
+	if hp.Terminal != "" {
+		b.WriteString("  " + dim.Render(hp.Terminal) + "\n")
+		if hp.Folder != "" {
+			b.WriteString("  " + dim.Render("The folder: "+hp.Folder) + "\n")
+		}
+	}
 	for _, l := range hp.Limits {
 		b.WriteString("  " + dim.Render("· "+l) + "\n")
 	}
@@ -379,7 +385,13 @@ func (m *model) viewHandoffDone(b *strings.Builder) {
 	for _, w := range m.result.Warnings {
 		b.WriteString("   " + warnSt.Render("! "+w) + "\n")
 	}
+	if r.Pasted {
+		b.WriteString("   " + dim.Render("(from the link you pasted)") + "\n")
+	}
 	fmt.Fprintf(b, "\n   When it finishes: select the %s row and press enter to bring it here.\n", r.Cloud)
+	if !r.Follow && r.NoFollowUp != "" {
+		b.WriteString("   " + dim.Render(r.NoFollowUp) + "\n")
+	}
 	if m.ho.notice != "" {
 		b.WriteString("\n   " + okSt.Render(m.ho.notice) + "\n")
 	}

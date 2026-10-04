@@ -812,7 +812,12 @@ func (r *runner) handoff(row Row) error {
 	if row.Repo == "uncommitted" {
 		args = append(args, "--untracked", "draft-*")
 	}
-	out, err := r.hs(true, args...)
+	run := r.hs
+	if cloud == "claude-cloud" {
+		// Claude Code starts the session only in a terminal the user answers.
+		run = func(_ bool, args ...string) (string, error) { return r.hsTerminal(args...) }
+	}
+	out, err := run(true, args...)
 	if err != nil {
 		return err
 	}
