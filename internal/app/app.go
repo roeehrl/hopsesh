@@ -12,6 +12,7 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/audit"
+	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/registry"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -31,6 +32,10 @@ type App struct {
 	PeerDial func(ctx context.Context, h config.Host) (*PeerConn, error)
 	// CloudTimeout bounds one cloud's listing in a scan (0: DefaultCloudTimeout).
 	CloudTimeout time.Duration
+	// Steps runs a cloud driver's terminal step where the user answers it (the command
+	// line's and the terminal UI's relay, the app's terminal window); nil: this front end
+	// has none, and a hand-off to a cloud that needs one is blocked with the reason.
+	Steps move.StepRunner
 	// tests keeps the clouds' recent read-only probes, so replanning a hand-off does not ask
 	// the vendor again each time (shared by copies of the App; nil: never kept).
 	tests *cloudTests

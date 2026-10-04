@@ -32,6 +32,35 @@ type Env struct {
 	StateDir string
 	Audit    *audit.Log
 	Progress func(step string)
+	// Step runs a driver's terminal step (a hand-off's Sent.Run) where the user sees and
+	// answers it, and returns the session it started, as the module read it from what the
+	// step printed (or as the user pasted its link). nil: this front end has no terminal for
+	// it, and the plan said so.
+	Step StepRunner
+}
+
+// StepRunner runs a terminal step (Env.Step).
+type StepRunner func(ctx context.Context, s TermStep) (StepResult, error)
+
+// StepResult is the session a terminal step started.
+type StepResult struct {
+	Session agent.CloudSession
+	// Pasted: the user pasted its link (hopsesh saw none in what the step printed).
+	Pasted bool
+}
+
+// TermStep is a cloud driver's command that needs the user's terminal (claude --cloud
+// "<briefing>"): the user sees it and answers what it asks; hopsesh only watches what it
+// prints and its exit code, and the module reads the session from them.
+type TermStep struct {
+	Agent      agent.ID `json:"agent"` // the module that reads what it printed
+	Cloud      string   `json:"cloud"`
+	CloudTitle string   `json:"cloudTitle"`
+	Title      string   `json:"title"` // the session handed off, for people
+	// Run is the command; its Argv[0] is the driver's path here when hopsesh found it.
+	Run agent.Command `json:"run"`
+	// Folder is the hand-off folder it runs in, which the driver may ask the user to trust.
+	Folder string `json:"folder"`
 }
 
 // Result is what a move did.

@@ -17,16 +17,17 @@ import (
 const cloudName = "claude-cloud"
 
 // cloud declares Claude Code's cloud sessions (Claude Code on the web) as data: the
-// module reaches them through the claude binary only (-p … --cloud to start one, -p …
-// --cloud <id> to follow one up, --teleport <id> to bring one here), never through
-// Anthropic's web backend.
+// module reaches them through the claude binary only (--cloud "<briefing>" in the user's
+// terminal to start one, --teleport <id> to bring one here), never through Anthropic's web
+// backend.
 func cloud() agent.Cloud {
 	return agent.Cloud{
 		Name:   cloudName,
 		Title:  "Claude Code cloud",
 		Driver: "claude",
-		// The cloud flags were read from 2.1.284's help; they run against the stand-in
-		// cloud in the tests, and scripts/cloud-smoke.sh checks a real teleport by hand.
+		// The cloud flags were read from 2.1.284's and 2.1.289's help, and --cloud's
+		// terminal behaviour seen in 2.1.284; they run against the stand-in cloud in the
+		// tests, and scripts/cloud-smoke.sh checks a real hand-off and teleport by hand.
 		Tested: []string{"2.1"},
 		Hosts:  []string{"github.com"},
 		// Up is always a briefing: Claude Code cannot push a terminal session to the cloud.
@@ -49,17 +50,21 @@ func cloud() agent.Cloud {
 		// Run from inside another Claude Code session, teleport inherits its marker and saves
 		// no transcript (anthropics/claude-code#93892); an API key in the environment takes
 		// the place of the claude.ai login teleport needs.
-		Unset: []string{"CLAUDE_CODE_CHILD_SESSION", "ANTHROPIC_API_KEY"},
+		Unset:      []string{"CLAUDE_CODE_CHILD_SESSION", "ANTHROPIC_API_KEY"},
+		NoFollowUp: noFollowUp,
 		Watch: agent.Watch{
-			Surface: "cloud sessions started with `claude --cloud` or `--remote` (and `-p … --cloud --output-format json`), brought back with `claude --teleport <id>`, Remote Control, cloud environments, and the transcript records a teleport or bridge leaves",
+			Surface: "cloud sessions started with `claude --cloud \"<briefing>\"` in the user's terminal (its workspace-trust question, then the `View: https://claude.ai/code/session_…` and `Resume with: claude --teleport session_…` lines hopsesh reads, and its refusals without a terminal or with --print), brought back with `claude --teleport <id>`, Remote Control, cloud environments, and the transcript records a teleport or bridge leaves",
 			Docs: append(docs("claude-code-on-the-web", "web-quickstart", "cloud-environments", "remote-control", "desktop",
 				"sessions", "routines", "self-hosted-environments", "env-vars", "feature-availability", "data-usage", "legal-and-compliance"),
 				"https://code.claude.com/docs/llms.txt"),
 			Feeds: []agent.Feed{{Kind: agent.FeedMarkdown, URL: "https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md"}},
-			Grep:  `teleport|--cloud|--remote|Remote Control|bridge|cloud session|cse_|self-hosted|Continue in|environment|sessions:|deprecat`,
+			// The canaries of the terminal step are in it: the lines ReadStep reads and the
+			// refusals it maps.
+			Grep: `teleport|--cloud|--remote|Remote Control|bridge|cloud session|cse_|self-hosted|Continue in|environment|sessions:|deprecat|` +
+				`Created cloud session|View:|Resume with|interactive terminal|combined with --print|safety check|trust this folder|attach`,
 			// `claude remote-control --help` needs a claude.ai login, so it is not run.
 			Help:   [][]string{{"claude", "--help"}},
-			Relies: []string{"--cloud", "--teleport", "--print", "--output-format", "--environment", "--remote-control", "--session-id", "--fork-session", "--resume"},
+			Relies: []string{"--cloud", "--teleport", "--environment", "--remote-control", "--session-id", "--fork-session", "--resume"},
 			Issues: []string{
 				"anthropics/claude-code#66373", // local → cloud handoff from the CLI
 				"anthropics/claude-code#97813", // attach to a running cloud session

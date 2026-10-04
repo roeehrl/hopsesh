@@ -136,7 +136,7 @@ func (a *App) PlanHandoff(ctx context.Context, inv *Inventory, e Entry, cloud st
 		Source: move.Side{Machine: src.host, Module: sm, Install: sin}, Session: e.Session, Live: e.Live, Git: e.Git, GitErr: e.GitError,
 		Lineage: e.Lineage, Runner: gitOn(src), Here: here.host, Module: mod, Install: in, Host: h, Cloud: cl,
 		Settings: move.HandoffSettings{Code: set.Code, Untracked: set.Untracked, BranchPrefix: set.BranchPrefix, DeleteBranch: set.DeleteBranch},
-		Allowed:  a.Cfg.CloudAllowed(cloud), Worktrees: a.Reg.Worktrees(),
+		Allowed:  a.Cfg.CloudAllowed(cloud), Worktrees: a.Reg.Worktrees(), Terminal: a.Steps != nil,
 	}
 	if t, ok := mod.(agent.CloudTester); ok {
 		hin.Tester = func(ctx context.Context) (agent.CloudTest, error) {
@@ -144,6 +144,7 @@ func (a *App) PlanHandoff(ctx context.Context, inv *Inventory, e Entry, cloud st
 		}
 	}
 	if g := e.Git; g != nil && g.Identity != "" {
+		hin.Folder = repos.HandoffFolder(a.StateDir, g.Identity)
 		if needsEnv(cl) {
 			hin.Env, hin.Envs = set.Environments[g.Identity], a.EnvChoices(inv, cloud, g.Identity)
 		}
@@ -188,6 +189,9 @@ func (a *App) FollowUp(ctx context.Context, cloud string, id agent.SessionID, te
 	}
 	f, ok := mod.(agent.CloudFollower)
 	if !ok {
+		if cl.NoFollowUp != "" {
+			return agent.CloudSession{}, fmt.Errorf("%w: %s", agent.ErrUnsupported, cl.NoFollowUp)
+		}
 		return agent.CloudSession{}, fmt.Errorf("%w: hopsesh cannot send %s sessions a message", agent.ErrUnsupported, cl.Title)
 	}
 	h, in, err := cloudHost(ctx, a.localMachine(ctx), mod, cl)

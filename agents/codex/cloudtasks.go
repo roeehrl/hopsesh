@@ -492,18 +492,18 @@ func parseStatus(out string) (taskStatus, bool) {
 // CODEX_STARTING_DIFF (on a branch that is already on the remote). It prints the task's link
 // (from source: util::task_url). GitHub only; an environment is needed (`codex cloud` makes
 // one; the CLI cannot).
-func (m *Module) SendCloud(ctx context.Context, h agent.Host, _ agent.Install, r agent.SendRequest) (agent.CloudSession, error) {
+func (m *Module) SendCloud(ctx context.Context, h agent.Host, _ agent.Install, r agent.SendRequest) (agent.Sent, error) {
 	switch host, _, _ := strings.Cut(r.Repo, "/"); {
 	case !strings.HasPrefix(r.Brief, agent.NotePrefix):
-		return agent.CloudSession{}, fmt.Errorf("the briefing must start with %q", agent.NotePrefix)
+		return agent.Sent{}, fmt.Errorf("the briefing must start with %q", agent.NotePrefix)
 	case r.Repo != "" && host != "github.com":
-		return agent.CloudSession{}, fmt.Errorf("%w: this repository's remote is %s. Codex cloud needs GitHub", agent.ErrRepoUnsupported, host)
+		return agent.Sent{}, fmt.Errorf("%w: this repository's remote is %s. Codex cloud needs GitHub", agent.ErrRepoUnsupported, host)
 	case strings.TrimSpace(r.Env) == "":
-		return agent.CloudSession{}, fmt.Errorf("%w: pick a Codex cloud environment for %s. If you have none, open `codex cloud` once to create one", agent.ErrNoEnvironment, nonEmpty(r.Repo, "this repository"))
+		return agent.Sent{}, fmt.Errorf("%w: pick a Codex cloud environment for %s. If you have none, open `codex cloud` once to create one", agent.ErrNoEnvironment, nonEmpty(r.Repo, "this repository"))
 	case r.Branch == "":
-		return agent.CloudSession{}, errors.New("no branch given: Codex cloud starts a task from a branch on the remote")
+		return agent.Sent{}, errors.New("no branch given: Codex cloud starts a task from a branch on the remote")
 	case r.Attempts < 0 || r.Attempts > 4:
-		return agent.CloudSession{}, fmt.Errorf("attempts: Codex cloud runs 1 to 4, not %d", r.Attempts)
+		return agent.Sent{}, fmt.Errorf("attempts: Codex cloud runs 1 to 4, not %d", r.Attempts)
 	}
 	args := []string{"cloud", "exec", "--env", r.Env, "--branch", r.Branch}
 	if r.Attempts > 1 {
@@ -515,31 +515,31 @@ func (m *Module) SendCloud(ctx context.Context, h agent.Host, _ agent.Install, r
 	case agent.ViaStartingDiff:
 		switch {
 		case len(r.Diff) == 0:
-			return agent.CloudSession{}, errors.New("a starting diff was asked for, but there is no diff")
+			return agent.Sent{}, errors.New("a starting diff was asked for, but there is no diff")
 		case len(r.Diff) > maxStartingDiff:
-			return agent.CloudSession{}, fmt.Errorf("the changes are %d KB; a starting diff takes up to %d KB, so put them on a branch", len(r.Diff)>>10, maxStartingDiff>>10)
+			return agent.Sent{}, fmt.Errorf("the changes are %d KB; a starting diff takes up to %d KB, so put them on a branch", len(r.Diff)>>10, maxStartingDiff>>10)
 		}
 		o.Env = append(o.Env, "CODEX_STARTING_DIFF="+string(r.Diff))
 	case "", agent.ViaBranch:
 	default:
-		return agent.CloudSession{}, fmt.Errorf("%w: Codex cloud takes the code on a branch or as a starting diff, not as %s", agent.ErrUnsupported, r.Code)
+		return agent.Sent{}, fmt.Errorf("%w: Codex cloud takes the code on a branch or as a starting diff, not as %s", agent.ErrUnsupported, r.Code)
 	}
 	res, err := cloudRun(ctx, h, o, args...)
 	if err != nil {
-		return agent.CloudSession{}, err
+		return agent.Sent{}, err
 	}
 	if res.Code != 0 {
-		return agent.CloudSession{}, refused(output(res))
+		return agent.Sent{}, refused(output(res))
 	}
 	tid, url := createdTask(string(res.Stdout))
 	if tid == "" {
-		return agent.CloudSession{}, &agent.FormatError{Path: "codex cloud exec", Err: fmt.Errorf("no task link in its output: %q", firstLine(stripANSI(string(res.Stdout))))}
+		return agent.Sent{}, &agent.FormatError{Path: "codex cloud exec", Err: fmt.Errorf("no task link in its output: %q", firstLine(stripANSI(string(res.Stdout))))}
 	}
 	if url == "" {
 		url = m.CloudURL(cloudName, agent.SessionID(tid))
 	}
-	return agent.CloudSession{Key: agent.SessionKey{Agent: id, Session: agent.SessionID(tid)}, Cloud: cloudName, URL: url, Title: r.Title,
-		Repo: r.Repo, Branch: r.Branch, Base: r.Base, State: agent.CloudRunning, Updated: time.Now().UTC(), Attempts: max(r.Attempts, 1), Env: r.Env}, nil
+	return agent.Sent{Session: agent.CloudSession{Key: agent.SessionKey{Agent: id, Session: agent.SessionID(tid)}, Cloud: cloudName, URL: url, Title: r.Title,
+		Repo: r.Repo, Branch: r.Branch, Base: r.Base, State: agent.CloudRunning, Updated: time.Now().UTC(), Attempts: max(r.Attempts, 1), Env: r.Env}}, nil
 }
 
 var taskLink = regexp.MustCompile(`https?://\S+/tasks/(task_[A-Za-z0-9_-]{4,120})`)
