@@ -46,10 +46,7 @@ func (a *App) Undo(ctx context.Context, match string, force bool) (*journal.Jour
 			m.Close()
 		}
 	}()
-	fsFor := func(name string) (host.FS, error) {
-		if name == LocalName() {
-			return host.LocalFS(), nil
-		}
+	connect := func(name string) (*host.Machine, error) {
 		m, ok := machines[name]
 		if !ok {
 			h := a.Cfg.FindHost(name)
@@ -62,9 +59,19 @@ func (a *App) Undo(ctx context.Context, match string, force bool) (*journal.Jour
 			}
 			machines[name], m = hm, hm
 		}
+		return m, nil
+	}
+	fsFor := func(name string) (host.FS, error) {
+		if name == LocalName() {
+			return host.LocalFS(), nil
+		}
+		m, err := connect(name)
+		if err != nil {
+			return nil, err
+		}
 		return m.FS(ctx)
 	}
-	reach := journal.Reach{FS: fsFor, Clouds: a.undoClouds(), Git: repos.LocalGit{}}
+	reach := journal.Reach{FS: fsFor, Refs: a.refsReach(connect), Clouds: a.undoClouds(), Git: repos.LocalGit{}}
 	if !force {
 		if err := j.Changed(ctx, reach); err != nil {
 			return j, err
