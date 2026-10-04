@@ -237,6 +237,24 @@ lists the ones it brought here or that you pasted, and the local sessions Remote
 mirrors (`hopsesh ls --cloud`); `claude --teleport` with no id shows the rest. In the app:
 **Clouds** in the sidebar, **Bring here** on a cloud session.
 
+### Copilot, Jules, Devin and Amp: the code comes home
+
+hopsesh also lists the sessions of four agents that live only in their vendors' clouds,
+through each vendor's own command line, signed in as you: the GitHub Copilot cloud agent
+(`gh agent-task`), Jules (`jules remote`), Devin (`devin list`) and Amp (`amp threads`).
+Bringing one back brings its code into a new worktree, undone by `hopsesh undo`: Copilot's
+and Devin's pull request branch, or Jules's patch committed on a `hopsesh/from/jules/…`
+branch. Their conversations stay in their clouds for now, and so does the code of an Amp orb.
+
+```sh
+hopsesh clouds allow copilot-cloud                  # each is off until you allow it
+hopsesh ls copilot-cloud:                           # the agent's tasks, with their branches
+hopsesh pull copilot-cloud:<session id> --code-only
+```
+
+Most of these commands' output is undocumented; hopsesh reads it defensively and so far has
+been tested only against stand-ins of them.
+
 ## Use it from your agent
 
 ```sh
