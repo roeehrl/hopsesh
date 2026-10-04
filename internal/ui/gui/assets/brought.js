@@ -94,6 +94,8 @@ function render(b) {
         (b.loss || []).length ? h("details", { class: "sec" }, h("summary", { style: "cursor:pointer;font-size:12.5px" }, "What stays in the cloud"),
           h("ul", { style: "margin:6px 0 0;padding-left:18px;font-size:12.5px" }, b.loss.map((l) => h("li", {}, l[0].toUpperCase() + l.slice(1))))) : null,
         b.url ? h("div", {}, linkBtn(`Open the ${b.noun || "session"} in the browser`, b.url)) : null,
+        b.renamed || (b.branch && !b.written) ? h("div", { class: "hint", role: "note", id: "cleanup-hint" }, "Once its work is merged, hopsesh can delete the cloud's branch for you: ",
+          h("button", { class: "link", onclick: () => go("activity") }, "Activity → Look for merged branches"), ". It asks first.") : null,
         h("div", { class: "out-acts" }, h("button", { class: "btn", onclick: () => doUndo(b) }, "Undo", h("span", { class: "kbd" }, keys("mod+alt+Z"))), back));
       break;
     case "partial":

@@ -4,7 +4,7 @@
 
 # hopsesh
 
-**Move coding-agent sessions between your machines, and between Claude Code and Codex.**
+**Move coding-agent sessions between your machines, between Claude Code and Codex, and to and from their clouds.**
 
 [![Release](https://img.shields.io/github/v/release/roeehrl/hopsesh)](https://github.com/roeehrl/hopsesh/releases/latest)
 [![CI](https://github.com/roeehrl/hopsesh/actions/workflows/ci.yml/badge.svg)](https://github.com/roeehrl/hopsesh/actions/workflows/ci.yml)
@@ -13,7 +13,7 @@
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 ![macOS · Linux · Windows](https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-0b6b62)
 
-[Install](#install) · [Quick start](#quick-start) · [Another agent](#continue-in-another-agent) · [Round trips](#round-trips) · [Push](#send-a-session-to-another-machine) · [Ask your agent](#use-it-from-your-agent) · [Why not…?](#why-not) · [FAQ](#faq)
+[Install](#install) · [Quick start](#quick-start) · [Another agent](#continue-in-another-agent) · [Round trips](#round-trips) · [Push](#send-a-session-to-another-machine) · [Cloud sessions](#cloud-sessions) · [Ask your agent](#use-it-from-your-agent) · [Why not…?](#why-not) · [FAQ](#faq)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hero-dark.gif">
@@ -44,6 +44,9 @@ repository, worktree and paths fixed up. Then it gives you the command to contin
 - **Comes back intact**: a round trip adds only the new work to the original session, so a
   Claude Code session's earlier turns, including its signed reasoning, stay byte for byte.
   If both copies changed, it stops and asks; it never merges.
+- **Works with the agents' clouds**: hands a session to Claude Code on the web, Codex cloud,
+  Copilot, Jules, Devin or Amp, brings their sessions home, and hands one cloud's session on
+  to another, all through the vendors' own commands, signed in as you.
 - **Works from inside your agent**: ask Claude Code or Codex "bring my laptop session here" and
   it plans with hopsesh, then moves only after you say yes.
 - **CLI, TUI and a desktop app for macOS and Windows** on one engine, with `--json` output
@@ -215,128 +218,117 @@ confirm, and `hopsesh undo` on the sender reverses both machines. Both sides mus
 hopsesh protocol version; otherwise hopsesh asks you to update. Details:
 [docs/design.md §11](docs/design.md#11-peers-working-with-hopsesh-on-the-other-machine).
 
-## Bring a session from Claude Code cloud
+## Cloud sessions
 
-A session that ran in Claude Code's cloud (Claude Code on the web) can come to this machine
-in Claude Code, or on into Codex. hopsesh does it through Claude Code's own
-`claude --teleport`, signed in as you, and only once you allow it:
-
-```sh
-hopsesh clouds allow claude-cloud            # off until you allow it
-hopsesh clouds test                          # read-only: the login and the flags hopsesh uses
-hopsesh pull claude-cloud:session_01… --run  # or paste the session's link; --in codex
-```
-
-hopsesh makes a new worktree of the session's repository (your checkout stays as it is) and
-runs the teleport there, in your terminal. When the copy appears, hopsesh checks its message
-count against the number Claude Code says it sent, keeps the cloud's `claude/…` branch as
-`hopsesh/from/claude-cloud/…`, and records it for undo. Teleport sometimes restores only part
-of a conversation, or nothing of a Remote Control session; hopsesh says so instead of
-handing you a short copy. Claude Code has no command that lists cloud sessions, so hopsesh
-lists the ones it brought here or that you pasted, and the local sessions Remote Control
-mirrors (`hopsesh ls --cloud`); `claude --teleport` with no id shows the rest. In the app:
-**Clouds** in the sidebar, **Bring here** on a cloud session.
-
-### Copilot, Jules, Devin and Amp
-
-hopsesh also reaches four agents that live only in their vendors' clouds, through each
-vendor's own command line, signed in as you: the GitHub Copilot cloud agent
-(`gh agent-task`), Jules (`jules remote`), Devin (`devin`) and Amp (`amp`). Each is off
-until you allow it.
+hopsesh works with the agents' own clouds: Claude Code on the web, Codex cloud, the GitHub
+Copilot cloud agent, Jules, Devin and Amp. It hands a session on this machine (or on another
+of yours) to a cloud, brings a cloud session home into Claude Code or Codex, and hands one
+cloud's session on to another vendor's cloud through this machine. It does this with the
+vendors' own commands (`claude --cloud`, `claude --teleport`, `codex cloud`, `gh agent-task`,
+`jules remote`, `devin`, `amp`), run here, signed in as you: the cloud sessions it starts
+are yours, on your plan, and hopsesh never reads a login or calls a vendor's servers. Each
+cloud is off until you allow it.
 
 ```sh
-hopsesh clouds allow copilot-cloud                  # each is off until you allow it
-hopsesh ls copilot-cloud:                           # the agent's tasks, with their branches
-hopsesh handoff claude/<id> --to copilot-cloud      # or jules, devin, amp
-hopsesh pull copilot-cloud:<session id> [--in codex] [--code-only]
-```
-
-**Up**, a session goes as for Claude Code cloud (below): a briefing and the code on a handoff
-branch. Copilot starts from that branch (`gh agent-task create --base`, the briefing on
-standard input) and opens its pull request against it. Jules (`jules remote new`), Devin
-(`devin --cloud -p`, from a worktree on the branch) and Amp (`amp -ox`, a new orb thread on
-the repository's project) can't be told which branch to start from, so the briefing asks
-the cloud agent to check it out first, and the plan says so.
-
-**Down**, the code comes into a new worktree, undone by `hopsesh undo`: Copilot's and Devin's
-pull request branch, or Jules's patch committed on a `hopsesh/from/jules/<id>` branch.
-Copilot's session log and Amp's thread come as text, written as a new session of the agent
-the session was handed off from, or Claude Code (`--in codex` picks Codex); their tool calls
-come only as the log's words. Jules's and Devin's messages stay in their clouds (their
-CLIs don't print them), and so does the code of an Amp orb.
-
-Most of these commands' output is undocumented; hopsesh reads it defensively and so far has
-been tested only against stand-ins of them.
-
-## Hand a session off to Claude Code cloud
-
-A session here (or on another of your machines) can carry on in Claude Code's cloud. No
-cloud takes a conversation, so the cloud session starts from a **briefing**: about 2,000
-tokens on what was done, what is open and your latest requests, with likely secrets masked.
-Tool calls, tool output and hidden reasoning stay here. The code goes on a branch the cloud
-clones:
-
-```sh
-hopsesh plan claude/<id> --to claude-cloud     # what goes, what stays; changes nothing
-hopsesh handoff claude/<id> --to claude-cloud  # asks first; Claude Code then starts it in this terminal
-```
-
-Claude Code starts a cloud session only in a terminal, so the hand-off runs
-`claude --cloud "<briefing>"` in yours, in hopsesh's hand-off folder for the repository (one
-folder per repository, a worktree of your checkout that hopsesh resets each time). The first
-time, Claude Code asks whether you trust that folder: you answer it, hopsesh never does and
-never changes Claude Code's settings to skip it. hopsesh only reads the session's link Claude
-Code prints, and if it sees none (you said no, or something else went wrong) it asks you to
-paste the link, or stops so that undo can remove the branch. The terminal UI hands the
-terminal over for that step and comes back afterwards; the app opens a terminal window for
-it, waits for the link, and takes a pasted one too. Run from an agent, without a terminal,
-the plan says that you have to run it yourself.
-
-When your branch is clean and already on GitHub, the cloud takes it as it is. Otherwise
-hopsesh pushes a `hopsesh/handoff/<date>-<id>` branch with a snapshot of the unpushed commits
-and changed files, without touching your checkout, index or branch. Untracked files go only
-when you name them (`--untracked docs/plan.md`), and files that look like credentials
-(`.env`, `*.pem`, `*.key`, `id_rsa`, …) never go. A repository that isn't on GitHub can go as
-an upload instead (`--bundle`); the cloud then can't push its work back. The conversation
-itself goes on the branch only if you ask (`--history-file`, which writes
-`.hopsesh/handoff.md`: anyone who can see the branch can read it).
-
-The session here is marked "↪ continued in Claude Code on claude-cloud". `hopsesh undo`
-deletes the branch (only while the cloud hasn't pushed to it) and the mark; the cloud session
-itself stays in Claude Code on the web until you archive it there. hopsesh sends a Claude Code
-cloud session no follow-ups: Claude Code has no command for one outside its own terminal
-session, so write to it on its page. In the app: **Hand off ▸** on a session, or *Hand off
-to…* in the command palette; in the terminal UI, `c`. Bring the work home later as above.
-
-## Codex cloud, both ways
-
-A session here can also go to a Codex cloud task, and a task can come back, through your own
-`codex` (signed in with ChatGPT: Codex cloud has no API-key login), only once you allow it:
-
-```sh
-hopsesh clouds allow codex-cloud
-hopsesh clouds test codex-cloud                          # read-only: login, commands, a listing
+hopsesh clouds                                        # the clouds, and what a read-only look found
+hopsesh clouds allow claude-cloud                     # each is off until you allow it
+hopsesh clouds test claude-cloud                      # read-only: the login and the commands hopsesh uses
+hopsesh plan claude/<id> --to codex-cloud --env acme-api   # what goes and what stays; changes nothing
 hopsesh handoff claude/<id> --to codex-cloud --env acme-api
-hopsesh ls codex-cloud:                                  # your tasks, with their environment
-hopsesh pull codex-cloud:task_e_… [--in claude]          # the task's code and words, here
+hopsesh ls --cloud                                    # cloud sessions hopsesh knows of
+hopsesh pull claude-cloud:session_01… --run           # bring one home (or paste its link); --in codex
+hopsesh handoff claude-cloud:session_01… --to codex-cloud --env acme-api   # cloud to cloud
+hopsesh clouds cleanup                                # branches whose work is merged, deleted when you say so
 ```
 
-Codex cloud runs every task in an **environment** you made on the web (open `codex cloud`
-once if you have none). Name it with `--env` (its id or its name); the plan lists the ones
-your recent tasks used, and hopsesh remembers the one you pick for the repository
-(`hopsesh clouds env codex-cloud` shows and sets them). The briefing and the branch go up as
-for Claude Code cloud (GitHub only); a few changes on a branch that is already pushed can go
-with the task as a **starting diff** instead (`--starting-diff`). `--attempts` asks for
-several attempts at once.
+In the app: **Clouds** in the sidebar, **Hand off ▸** on a session (on a cloud session too),
+**Bring here** on a cloud session, and the cards under **Machines**. In the terminal UI, `c`
+hands off and `enter` brings a cloud session here.
 
-Coming back, Codex shows only a task's title, its state and its diff: its messages and steps
-stay in the cloud. hopsesh applies the diff in a new worktree and commits it on
-`hopsesh/from/codex-cloud/<id>` (so undo is deleting a branch), and writes the task as a new
-Codex session there (or a Claude Code one with `--in claude`): the briefing hopsesh sent, when
-it sent the task, and what came of it. Only Codex cloud (legacy) tasks can be reached: the
-new Codex Cloud (DevDay 2026) has no command line yet. In the app: **Codex cloud** under
-Clouds, the environment picker in the hand-off sheet, and an environment per repository on
-its card under Machines.
+### What goes up: a briefing and the code
+
+No vendor's cloud takes a conversation, so a cloud session starts from a **briefing**: about
+2,000 tokens on what was done, what is open and your latest requests, written by hopsesh
+(never by a model), with likely secrets masked. Tool calls, tool output and hidden reasoning
+stay here. The plan shows the briefing, and you can edit it.
+
+The code goes on a branch the cloud clones. A branch that is clean and already on GitHub
+goes as it is (so does a cloud's own branch that a session was brought home on). Otherwise
+hopsesh pushes a `hopsesh/handoff/<date>-<id>` branch with a snapshot of the unpushed commits
+and changed files, without touching your checkout, index or branch. Codex cloud can take a
+few changes on an already pushed branch as a starting diff instead (`--starting-diff`), and
+Claude Code can take a repository that isn't on GitHub as its own upload (`--bundle`; the
+cloud then can't push its work back). Jules, Devin and Amp can't be told which branch to
+start from, so their briefing asks the cloud agent to check it out first.
+
+### What comes back
+
+| Cloud | Through | The conversation comes back | The code comes back |
+|---|---|---|---|
+| Claude Code cloud | `claude --teleport`, in your terminal | Whole, as Claude Code's own copy | Its `claude/…` branch, kept here as `hopsesh/from/claude-cloud/…` |
+| Codex cloud (legacy tasks) | `codex cloud status`, `codex cloud diff` | The task's title and what came of it, written as a session | Its diff, committed on `hopsesh/from/codex-cloud/<id>` |
+| GitHub Copilot cloud agent | `gh agent-task view --log` | Its session log, as text | Its pull request's branch |
+| Amp | `amp threads markdown` | Its thread, as text | Stays in the orb |
+| Jules | `jules remote pull` | Stays in Jules | Its patch, committed on `hopsesh/from/jules/<id>` |
+| Devin | `devin list` | Stays in Devin | Its pull request's branch |
+
+The code always comes into a new worktree beside your checkout, which stays as it is. Text
+is written as a new session of the agent it was handed off from (else Claude Code; `--in
+codex` picks Codex), or, with `--append`, added to the session it was handed off from when
+that is as you left it. Only Codex cloud (legacy) tasks can be reached: the new Codex Cloud
+has no command line yet. Codex cloud runs every task in an **environment** you made on the
+web: name it with `--env`; the plan suggests the ones your recent tasks used, and hopsesh
+remembers your pick for the repository (`hopsesh clouds env codex-cloud`).
+
+### Claude Code's steps in your terminal
+
+Claude Code starts a cloud session, and copies one home, only in a terminal you can answer,
+so both steps run in yours (the app opens a terminal window; the terminal UI hands its
+terminal over and comes back). Starting one runs `claude --cloud "<briefing>"` in hopsesh's
+hand-off folder for the repository. The first time, Claude Code asks whether you trust that
+folder: you answer it, once per repository, and hopsesh never answers it or changes Claude
+Code's settings to skip it. hopsesh only reads the session's link Claude Code prints, and asks
+you to paste it if it sees none. Bringing one home runs `claude --teleport <id>` in a new
+worktree. **Claude Code saves its copy only after you send a message in it**: send one (even
+"ok"), then exit (`/exit`), and hopsesh picks the copy up. It checks the copy against the
+briefing hopsesh sent, when hopsesh started that cloud session; otherwise it says how many
+messages came, since Claude Code gives no count to check them against.
+
+### Cloud to cloud
+
+A cloud session can go on to another vendor's cloud. No cloud hands one to another, so
+hopsesh brings it here first (the copy stays here, whole for Claude Code), then hands that
+copy off: `hopsesh handoff claude-cloud:<id> --to codex-cloud` starts the Codex cloud task
+from the `claude/…` branch as it is, and `hopsesh handoff codex-cloud:<id> --to claude-cloud`
+commits the task's diff here and pushes it on a handoff branch for Claude Code. The plan
+shows both legs and what the trip loses; the copy's lineage records both; one undo takes
+both back.
+
+### Undo and branch clean-up
+
+`hopsesh undo` takes back what a hand-off did here: the handoff branch (only while the cloud
+hasn't pushed to it, and not when you chose to keep it) and the mark on the session. The
+cloud session itself stays in the vendor's list, for you to archive there: no vendor's
+command line can archive one. Undoing a bring-back removes the worktree, the copy and the
+branches it made. Once a hand-off's work is merged into the default branch,
+`hopsesh clouds cleanup` (or **Activity → Look for merged branches** in the app) offers to
+delete the handoff branch and the cloud's own `claude/…` or `copilot/…` branch: it asks the
+remote, read-only, and deletes only what you confirm, each only while it is where hopsesh
+saw it. Undo pushes them back. `delete_branch = "never"` or `"on-undo"` under
+`[clouds.<name>]` keeps them.
+
+### Privacy
+
+- A cloud gets the briefing and the branch, nothing else. Credential-like files (`.env*`,
+  `*.tfvars`, `id_rsa*` and other SSH keys, `*.pem`, `*.key`, `*.p12`, `.npmrc`), Git LFS
+  files and files over 50 MB never go, whatever you pick. Untracked files go only when you
+  name them (`--untracked docs/plan.md`).
+- The conversation itself goes on the branch only if you ask (`--history-file`, which
+  commits `.hopsesh/handoff.md`): anyone who can see the branch can read it.
+- Secret masking is best effort, not a guarantee; the plan shows what it masked.
+- What a cloud session holds is kept under that vendor's terms. Most of these commands'
+  output is undocumented: hopsesh reads it defensively, and has been tested against
+  stand-ins of them and by hand.
 
 ## Use it from your agent
 
@@ -380,7 +372,7 @@ including the file-format traps hopsesh handles, are in [docs/design.md](docs/de
 ### How it treats your data
 
 - **Your machines only.** Sessions travel over your own SSH. There's no hopsesh server, no
-  cloud relay and no telemetry. The app can check GitHub once a day for new versions, only
+  relay and no telemetry. A session goes to a vendor's cloud only when you hand it off. The app can check GitHub once a day for new versions, only
   if you say yes.
 - **Read-only until you say go.** Each machine needs your permission, and every move is shown
   as a plan first.
@@ -402,8 +394,10 @@ including the file-format traps hopsesh handles, are in [docs/design.md](docs/de
 - **Codex's own import of Claude Code sessions?** It converts on one machine. hopsesh uses it
   when you ask (`--via import`) and adds machines, the repository, a loss report, a briefing
   and a way home that keeps the original session intact.
-- **`claude --teleport`?** Teleport brings a session from Claude Code on the web to your
-  machine. hopsesh moves sessions between your own machines.
+- **`claude --teleport`, `claude --cloud`, Codex cloud?** hopsesh uses them. They move a
+  session between a vendor's cloud and the machine you're on, in that vendor's agent.
+  hopsesh runs them for you and adds the rest: a session on another machine, the other
+  vendor's agent or cloud, a briefing and a loss report, the branches, lineage and undo.
 - **Remote Control?** Remote Control lets you drive a session that keeps running where it
   is. hopsesh moves the session, so it continues on the machine you're at, with that
   machine's files and tools. It can turn Remote Control on for the moved session.
@@ -431,8 +425,10 @@ Related projects, with different trade-offs:
 <details>
 <summary><b>Does anything leave my machines?</b></summary>
 
-No. Sessions go directly between your machines over SSH. hopsesh has no server and no
-telemetry, and it never calls the Anthropic or OpenAI API.
+Only what you hand off to a cloud. Sessions go directly between your machines over SSH.
+hopsesh has no server and no telemetry, and it never calls the Anthropic or OpenAI API. A
+hand-off sends a briefing and a branch to the cloud you chose, through that vendor's own
+command, signed in as you (see [Cloud sessions](#cloud-sessions)).
 </details>
 
 <details>

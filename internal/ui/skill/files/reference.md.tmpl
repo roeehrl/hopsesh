@@ -11,6 +11,8 @@
 | `{{.Bin}} hosts --json` | known machines and whether each is allowed |
 | `{{.Bin}} clouds --json` | the agents' clouds, whether each is allowed, and their state |
 | `{{.Bin}} clouds test [cloud]` | check a cloud's login and flags, read-only |
+| `{{.Bin}} clouds cleanup [--list] [--yes]` | branches hand-offs left on the remotes, and which are merged; deletes the merged ones when confirmed |
+| `{{.Bin}} clouds continue <hop>` | take a hop whose first leg waited for a terminal on to the next cloud |
 | `{{.Bin}} plan <ref> --to <cloud> --json [flags]` | what handing it off to a cloud would do; never writes |
 | `{{.Bin}} doctor [machine] --json` | SSH, host trust, agents, skill |
 | `{{.Bin}} version` | the installed version |
@@ -87,4 +89,4 @@ lists each repository's Codex cloud environment.
 hopsesh reads other machines over SSH and writes into the agents' data folders, which agent
 sandboxes usually block. `{{.Bin}} skill install --add-rules` adds approval rules for each agent:
 the read-only commands run without asking (and, in Codex, outside its sandbox), while `pull`,
-`push`, `handoff`, `followup` and `undo` always ask.
+`push`, `handoff`, `followup`, `undo`, `clouds cleanup` and `clouds continue` always ask.

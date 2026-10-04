@@ -399,3 +399,40 @@ func TestBringCodexTaskIntoTheOriginal(t *testing.T) {
 		t.Fatal("undo must give the original back byte for byte")
 	}
 }
+
+// A second-wave cloud whose session comes back as text hops too: a Copilot task's log comes
+// here as a Claude Code session on the pull request's branch, and Codex cloud starts from
+// that copilot/… branch as it is.
+func TestHopCopilotToCodexCloud(t *testing.T) {
+	w := newVendorWorld(t, "copilot-cloud", "codex-cloud")
+	t.Setenv("FAKE_CODEX_ENVS", "env_api=acme-api")
+	w.dirty()
+	ctx := context.Background()
+	a := w.app()
+	inv, p := planTo(t, a, "copilot-cloud", a.HandoffDefaults("copilot-cloud"))
+	defer inv.Close()
+	res, err := a.Apply(ctx, p, move.Input{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fakecloud.Work(fakecloud.Proc{Vars: map[string]string{}}, res.Handoff.Session, false); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := fakecloud.Open(w.store).Get(res.Handoff.Session)
+	inv2 := a.Scan(ctx, app.ScanOptions{})
+	defer inv2.Close()
+	e := cloudEntryFor(t, inv2, "copilot-cloud", res.Handoff.Session)
+	opt := a.HandoffDefaults("codex-cloud")
+	opt.Env = "env_api"
+	hp, err := a.PlanHop(ctx, inv2, e, "codex-cloud", "", opt)
+	if err != nil || len(hp.Blockers) > 0 || hp.Hop.Fidelity != "text → brief" || hp.Hop.Agent != "Claude Code" {
+		t.Fatalf("plan: %+v %v", hp, err)
+	}
+	hres, err := a.Apply(ctx, hp, move.Input{}, nil)
+	if err != nil || hres.Hop.State != move.HopDone || !hres.Handoff.Reuse || hres.Handoff.Branch != s.Result {
+		t.Fatalf("hop: %v %+v %+v", err, hres.Hop, hres.Handoff)
+	}
+	if _, err := a.Undo(ctx, hres.Journal, false); err != nil {
+		t.Fatal(err)
+	}
+}

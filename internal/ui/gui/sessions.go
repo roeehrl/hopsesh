@@ -79,8 +79,10 @@ type EntryDTO struct {
 	Cloud    *CloudEntryDTO `json:"cloud,omitempty"`
 	Mirror   *MirrorDTO     `json:"mirror,omitempty"`
 	// Handoff are the clouds it can be handed off to (every cloud; a disabled one with its
-	// reason).
+	// reason); Hop, for a cloud session, the other clouds it can be handed on to through
+	// this machine.
 	Handoff []app.HandoffTarget `json:"handoff"`
+	Hop     []app.HandoffTarget `json:"hop"`
 }
 
 // CopyDTO is one copy of a session, on some machine and in some agent.
@@ -199,9 +201,12 @@ func entryDTO(core *app.App, inv *app.Inventory, it app.Item, targets []AgentOpt
 		LastPrompt: s.LastPrompt, CWD: s.CWD, SizeKB: s.Size / 1024, ContinueIn: []AgentOpt{},
 		Needs:   e.Live.State == agent.Live && strings.HasPrefix(e.Live.Status, "waiting"),
 		History: history(core, e.Lineage), Location: string(e.Location.Kind), Cloud: cloudEntryDTO(core, e), Mirror: mirrorDTO(s.Mirror)}
-	d.Handoff = core.HandoffTargets(inv, e)
+	d.Handoff, d.Hop = core.HandoffTargets(inv, e), core.HopTargets(inv, e)
 	if d.Handoff == nil {
 		d.Handoff = []app.HandoffTarget{}
+	}
+	if d.Hop == nil {
+		d.Hop = []app.HandoffTarget{}
 	}
 	if m := inv.Machine(e.Machine); m != nil && len(it.Copies) <= 1 {
 		d.HereNewest = m.Local

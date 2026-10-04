@@ -5,6 +5,7 @@ import "./sessions.js";
 import "./plan.js";
 import "./brought.js";
 import "./handoff.js";
+import "./hop.js";
 import "./machines.js";
 import "./settings.js";
 import { undoLast } from "./activity.js";

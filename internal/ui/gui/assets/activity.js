@@ -37,7 +37,21 @@ const KINDS = {
   mark: { label: "Marked", ico: ICONS.mark, cls: "mark" },
   fetch: { label: "Brought", ico: ICONS.cloud, cls: "cloud" },
   handoff: { label: "Handed off", ico: ICONS.send, cls: "cloud" },
+  hop: { label: "Handed on", ico: ICONS.cloud, cls: "cloud" },
+  cleanup: { label: "Cleaned up", ico: ICONS.mark, cls: "" },
 };
+
+// hopText words a hop from one cloud to another: both legs, and what undo does.
+function hopText(x) {
+  const o = x.hop;
+  if (!o) return { title: x.title, detail: "", note: "" };
+  return {
+    title: x.title,
+    detail: [`${o.from} → ${sys.here} → ${o.to}`, o.key, o.state === "done" ? "" : o.state].filter(Boolean).join(" · "),
+    note: o.state === "waiting" ? o.message : o.state === "failed" ? o.message
+      : `Undo takes both legs back: the hand-off, then the copy here. Both cloud sessions stay where they are.`,
+  };
+}
 
 // handoffText words a hand-off to a cloud: where it went, and what undo does and doesn't.
 function handoffText(x) {
@@ -68,7 +82,7 @@ function fetchText(x) {
 
 function row(x) {
   const k = KINDS[x.kind] || KINDS.move;
-  const ft = x.kind === "fetch" ? fetchText(x) : x.kind === "handoff" ? handoffText(x) : null;
+  const ft = x.kind === "fetch" ? fetchText(x) : x.kind === "handoff" ? handoffText(x) : x.kind === "hop" ? hopText(x) : null;
   const act = x.undone ? h("span", { class: "chip st-ended" }, "Undone")
     : x.canUndo ? h("button", { class: "btn", onclick: async () => { if (await undo(x.id, x.title)) render(true); } }, "Undo")
     : h("button", { class: "btn", title: "Asks before throwing work away", onclick: async () => { if (await undo(x.id, x.title)) render(true); } }, "Undo anyway…");
@@ -77,7 +91,10 @@ function row(x) {
     h("div", { style: "flex:1 1 300px;min-width:0;display:flex;flex-direction:column;gap:3px" },
       h("div", {}, h("b", { style: "font-weight:500" }, k.label), " · ", ft ? ft.title : x.title),
       h("span", { class: "muted", style: "font-size:12px" }, ft?.detail || [`${x.changes} change${x.changes === 1 ? "" : "s"}`, x.remote.length ? `also on ${x.remote.join(", ")}` : ""].filter(Boolean).join(" · ")),
-      ft?.note && !x.undone ? h("span", { class: x.fetch?.outcome === "partial" || x.kind === "handoff" ? "warn" : "muted", style: "font-size:12px" }, ft.note) : null,
+      ft?.note && !x.undone ? h("span", { class: x.fetch?.outcome === "partial" || x.kind === "handoff" || x.hop?.state === "failed" ? "warn" : "muted", style: "font-size:12px" }, ft.note) : null,
+      x.hop?.state === "waiting" && !x.undone ? h("div", { style: "display:flex;gap:8px" },
+        h("button", { class: "btn small", onclick: async () => { try { const d = await api("ContinueHop", x.id); toast(d.hop?.state === "done" ? "Handed on" : d.hop?.message || "Still waiting for the copy"); render(true); } catch (e) { fail(e); } } }, "Go on"),
+        h("button", { class: "btn small", onclick: () => api("OpenHop", x.id).catch(fail) }, `Open in ${sys.terminal} again`)) : null,
       !x.canUndo && !x.undone && x.why ? h("span", { class: "warn", style: "font-size:12px" }, "Used since: " + x.why) : null),
     h("span", { class: "muted", style: "font-size:12px;flex:0 0 auto", title: when(x.when) }, ago(x.when)),
     h("div", { style: "flex:0 0 auto" }, act));
@@ -103,7 +120,48 @@ async function render(reload = false) {
       a.owed.map((o) => h("div", { class: "line-item" }, h("span", { class: "ico mark" }, icon(ICONS.clock, 15)),
         h("div", { style: "flex:1 1 300px;min-width:0" }, h("div", {}, o.title), h("span", { class: "muted", style: "font-size:12px" }, `${o.location} · will say “${o.mark}”`)),
         h("span", { class: "muted", style: "font-size:12px" }, "since " + ago(o.since))))) : null,
-    h("section", { class: "card" }, a.items.length ? a.items.map(row) : h("div", { class: "empty" }, "Nothing yet. Hops, continuations and sends show up here, with Undo.")))));
+    branchesCard(),
+    h("section", { class: "card" }, a.items.length ? a.items.filter((x) => !x.part).map(row) : h("div", { class: "empty" }, "Nothing yet. Hops, continuations and sends show up here, with Undo.")))));
+}
+
+// branchesCard is the clean-up of the branches cloud hand-offs left on the remotes: hopsesh
+// asks the remotes (read-only) only when the user says so, and deletes only what the user
+// picks, among the branches whose work is merged.
+function branchesCard() {
+  const b = state.branches;
+  const look = async () => {
+    state.branches = { busy: true, list: [] };
+    render();
+    try { state.branches = { list: await api("CleanupBranches") }; } catch (e) { state.branches = null; fail(e); }
+    render();
+  };
+  const del = async (list) => {
+    const yes = await ask({ title: list.length === 1 ? `Delete ${list[0].branch}?` : `Delete ${list.length} merged branches?`, ok: "Delete", danger: true,
+      body: `Their work is merged into the default branch. hopsesh deletes ${list.length === 1 ? "it" : "them"} on the remote only while ${list.length === 1 ? "it is" : "they are"} where hopsesh saw ${list.length === 1 ? "it" : "them"}; Undo in Activity pushes ${list.length === 1 ? "it" : "them"} back.` });
+    if (!yes) return;
+    try {
+      const r = await api("DeleteBranches", list.map((c) => c.id));
+      toast(`Deleted ${r.deleted.length} branch${r.deleted.length === 1 ? "" : "es"}`);
+    } catch (e) { fail(e); }
+    state.branches = null;
+    render(true);
+  };
+  const offered = (b?.list || []).filter((c) => c.offer);
+  return h("section", { class: "card", "aria-label": "Branches on your remotes" },
+    h("div", { class: "card-h" }, h("span", { class: "name" }, "Branches cloud hand-offs left"),
+      h("span", { class: "muted", style: "font-size:12px" }, "Handoff branches and the clouds' own branches, offered for deletion once their work is merged."),
+      h("span", { class: "spacer" }),
+      offered.length > 1 ? h("button", { class: "btn small", onclick: () => del(offered) }, `Delete ${offered.length} merged`) : null,
+      h("button", { class: "btn small", id: "look-branches", disabled: !!b?.busy, onclick: look }, b ? "Look again" : "Look for merged branches")),
+    b?.busy ? h("div", { class: "loading", role: "status" }, "Asking the remotes…")
+      : b && !b.list.length ? h("div", { class: "empty" }, "No branches from cloud hand-offs on your remotes.")
+      : (b?.list || []).map((c) => h("div", { class: "line-item branch-item", "data-branch": c.branch },
+        h("span", { class: "ico cloud" }, icon(ICONS.cloud, 15)),
+        h("div", { style: "flex:1 1 300px;min-width:0;display:flex;flex-direction:column;gap:3px" },
+          h("span", { class: "mono", style: "font-size:12.5px" }, c.branch),
+          h("span", { class: "muted", style: "font-size:12px" }, [c.repo || c.checkout, c.cloudTitle, c.kind === "handoff" ? "handoff branch" : "the cloud's own branch"].filter(Boolean).join(" · ")),
+          h("span", { class: c.offer ? "ok" : "muted", style: "font-size:12px" }, c.why)),
+        c.offer ? h("button", { class: "btn", onclick: () => del([c]) }, "Delete") : null)));
 }
 
 screen("activity", () => render(true));

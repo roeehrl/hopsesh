@@ -30,6 +30,7 @@ type handoff struct {
 	opts     move.Options
 	showLoss bool
 	notice   string
+	hop      bool // from a cloud row: the hop through this machine
 }
 
 type briefEdited struct {
@@ -43,11 +44,12 @@ func (m *model) openHandoff() {
 		return
 	}
 	e := m.rows[m.cursor].item.Entry
-	if e.Location.IsCloud() {
-		return
-	}
 	m.sel, m.picked = m.rows[m.cursor], nil
-	m.ho = handoff{picking: true, targets: m.deps.App.HandoffTargets(m.inv, e)}
+	if e.Location.IsCloud() {
+		m.ho = handoff{picking: true, hop: true, targets: m.deps.App.HopTargets(m.inv, e)}
+	} else {
+		m.ho = handoff{picking: true, targets: m.deps.App.HandoffTargets(m.inv, e)}
+	}
 	for i, t := range m.ho.targets {
 		if t.OK {
 			m.ho.at = i
@@ -70,6 +72,10 @@ func (m *model) pickKeys(k string) (tea.Model, tea.Cmd) {
 			t := m.ho.targets[m.ho.at]
 			m.ho.picking, m.ho.cloud = false, t.Cloud
 			m.ho.opts = m.deps.App.HandoffDefaults(t.Cloud)
+			if m.ho.hop {
+				m.ho.opts.Bundle = false
+				return m, m.planCmd()
+			}
 			m.ho.opts.Bundle = m.ho.opts.Bundle || t.Bundle
 			return m, m.planCmd()
 		}
@@ -79,6 +85,9 @@ func (m *model) pickKeys(k string) (tea.Model, tea.Cmd) {
 
 // handoffPlanCmd plans the hand-off with the current choices.
 func (m *model) handoffPlanCmd() tea.Cmd {
+	if m.ho.hop {
+		return m.hopPlanCmd()
+	}
 	m.planning = true
 	a, inv, e, cloud, opts := m.deps.App, m.inv, m.sel.item.Entry, m.ho.cloud, m.ho.opts
 	return func() tea.Msg {
@@ -185,7 +194,11 @@ func (m *model) briefDone(msg briefEdited) (tea.Model, tea.Cmd) {
 
 // viewPicker is the Hand off to ▸ picker, under the list.
 func (m *model) viewPicker(b *strings.Builder) {
-	b.WriteString("\n  " + bold.Render("Hand off to ▸") + dim.Render("  a cloud gets a briefing, not this conversation") + "\n")
+	sub := "  a cloud gets a briefing, not this conversation"
+	if m.ho.hop {
+		sub = "  it comes here first; the next cloud gets a briefing"
+	}
+	b.WriteString("\n  " + bold.Render("Hand off to ▸") + dim.Render(sub) + "\n")
 	for i, t := range m.ho.targets {
 		cur := "  "
 		if i == m.ho.at {

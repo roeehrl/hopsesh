@@ -291,7 +291,7 @@ async function apply() {
 
 // stepBox shows the terminal step the hand-off waits for: what happens in the terminal,
 // and a field for the session's link.
-function stepBox(box, st) {
+export function stepBox(box, st) {
   if (!st) { box.hidden = true; fill(box); return; }
   box.hidden = false;
   const input = h("input", { class: "field mono", id: "ho-link", placeholder: "https://claude.ai/code/session_…", autocomplete: "off", spellcheck: "false", style: "flex:1 1 320px" });
@@ -358,7 +358,8 @@ screen("handedoff", (d) => {
   const open = () => api("OpenURL", r.url).catch(fail);
   const copy = async () => { await api("CopyText", r.url); toast("Copied"); };
   const doUndo = async () => {
-    const what = r.pushed ? `This deletes the branch ${r.branch}${r.markText ? " and the mark on the session here" : ""}.` : r.markText ? "This takes the mark off the session here." : "There is nothing of hopsesh's to remove here.";
+    let what = r.pushed ? `This deletes the branch ${r.branch}${r.markText ? " and the mark on the session here" : ""}.` : r.markText ? "This takes the mark off the session here." : "There is nothing of hopsesh's to remove here.";
+    if (d.via) what = `This undoes both legs: the hand-off (${what.replace(/^This /, "").replace(/\.$/, "")}), then the copy brought here from ${d.via.fromTitle} and its worktree.`;
     const yes = await ask({ title: "Undo the hand-off?", ok: "Undo hand-off", body: `${what} ${r.manual}` });
     if (yes && await undo(d.journal, d.title)) go("sessions", true);
   };
@@ -380,6 +381,7 @@ screen("handedoff", (d) => {
       r.pushed ? h("div", { class: "item" }, tick("ok"), h("span", {}, "Branch pushed")) : r.code === "bundle" ? h("div", { class: "item" }, tick("ok"), h("span", {}, "Uploaded by the agent; nothing pushed"))
         : r.code === "starting-diff" ? h("div", { class: "item" }, tick("ok"), h("span", {}, "The changes went with it as a starting diff, on ", mono(r.branch), "; nothing pushed")) : null,
       (r.stayed || []).length ? h("div", { class: "item" }, h("span", { class: "badge warn" }, "•"), h("span", {}, `Stayed on ${sys.here}: `, r.stayed.map((s, i) => [i ? ", " : "", s]))) : null,
+      d.via ? h("div", { class: "item", id: "ho-via" }, tick("ok"), h("span", {}, `Brought here from ${d.via.fromTitle} first: `, mono(d.via.key || ""), d.via.worktree ? [" in ", mono(d.via.worktree)] : null)) : null,
       r.markText ? h("div", { class: "item" }, tick("ok"), h("span", {}, `The session here is marked “${markWords(r.markText)}”`)) : null,
       (d.warnings || []).map((w) => h("div", { class: "item" }, tick("warn"), h("span", {}, cap(w)))))),
     h("div", { class: "hint", role: "note" }, r.hint),

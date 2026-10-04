@@ -29,6 +29,9 @@ type Exit struct {
 	// Adopt is a fetch (its journal) the program brings a session for: once it ends, the
 	// caller adopts what it wrote and opens the TUI again on what came back (Deps.Adopted).
 	Adopt string
+	// Hop is the hop (its journal) whose first leg the program is: once it ends, the caller
+	// adopts the copy, takes the hop on, and opens the TUI on it (Deps.Hop).
+	Hop string
 }
 
 // Deps are what the TUI needs from the CLI.
@@ -37,6 +40,8 @@ type Deps struct {
 	Describe func(app.Entry) string // branch/worktree line
 	// Adopted is a fetch (its journal) to show first: what came back from a cloud.
 	Adopted string
+	// Hop is a hop (its journal) to show first.
+	Hop string
 }
 
 type mode int
@@ -188,7 +193,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.inv = msg.inv
 		m.mode = modeBrowse
 		m.buildRows()
-		if j := m.deps.Adopted; j != "" {
+		if j := m.deps.Hop; j != "" {
+			m.deps.Hop = ""
+			m.showHop(j)
+		} else if j := m.deps.Adopted; j != "" {
 			m.deps.Adopted = ""
 			if f, err := m.deps.App.Adopt(context.Background(), j, false); err == nil {
 				b := m.deps.App.Brought(f)
@@ -224,6 +232,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.stepPaste.text += strings.TrimSpace(msg.Content)
 		}
 	case applyDone:
+		if msg.res != nil && msg.res.Hop != nil {
+			m.result, m.mode = msg.res, modeDone // waiting, done, or stopped: the hop's view says
+			return m, nil
+		}
 		if msg.res != nil && msg.res.Handoff != nil {
 			m.result, m.mode = msg.res, modeDone // a failed step is shown with the steps
 			return m, nil
@@ -264,6 +276,12 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 	}
 	if m.mode == modePlan && m.plan.Kind == move.KindHandoff {
 		return m.handoffKeys(k)
+	}
+	if m.mode == modePlan && m.plan.Kind == move.KindHop {
+		return m.hopKeys(k)
+	}
+	if m.mode == modeDone && m.plan.Kind == move.KindHop {
+		return m.hopDoneKeys(k)
 	}
 	if m.mode == modeDone && m.plan.Kind == move.KindHandoff {
 		return m.handoffDoneKeys(k)
@@ -557,6 +575,8 @@ func (m *model) View() tea.View {
 			m.viewFetchPlan(&b)
 		case move.KindHandoff:
 			m.viewHandoffPlan(&b)
+		case move.KindHop:
+			m.viewHopPlan(&b)
 		default:
 			m.viewPlan(&b)
 		}
@@ -573,11 +593,19 @@ func (m *model) View() tea.View {
 			}
 		case move.KindFetch:
 			fmt.Fprintf(&b, "\n  Preparing a worktree for %q…\n", m.plan.Title)
+		case move.KindHop:
+			if m.stepPaste != nil {
+				m.viewStepPaste(&b)
+				break
+			}
+			fmt.Fprintf(&b, "\n  Handing %q on to %s: bringing it here first…\n", m.plan.Title, m.plan.Hop.ToTitle)
 		default:
 			fmt.Fprintf(&b, "\n  Moving %q… (copying or converting, rewriting, verifying)\n", m.plan.Title)
 		}
 	case modeDone:
 		switch m.plan.Kind {
+		case move.KindHop:
+			m.viewHopDone(&b)
 		case move.KindHandoff:
 			m.viewHandoffDone(&b)
 		case move.KindFetch:
@@ -692,8 +720,12 @@ func (m *model) viewBrowse(b *strings.Builder) {
 			if len(bits) > 0 {
 				fmt.Fprintf(b, "  %s\n", dim.Render(truncate(strings.Join(bits, " · "), w-4)))
 			}
-			fmt.Fprintf(b, "  %s\n", dim.Render("enter: bring it here · i: and continue in another agent"))
-			b.WriteString(dim.Render("\n  ↑↓ move · enter bring here · i bring and continue in · / search · r refresh · q quit\n"))
+			fmt.Fprintf(b, "  %s\n", dim.Render("enter: bring it here · i: and continue in another agent · c: hand it on to another cloud"))
+			if m.ho.picking {
+				m.viewPicker(b)
+				return
+			}
+			b.WriteString(dim.Render("\n  ↑↓ move · enter bring here · i bring and continue in · c hand on · / search · r refresh · q quit\n"))
 			return
 		}
 		fmt.Fprintf(b, "  %s  %s %s  %s\n", e.Machine, e.AgentName, s.AgentVersion, s.CWD)

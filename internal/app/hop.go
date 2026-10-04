@@ -360,7 +360,9 @@ func (a *App) continueHop(ctx context.Context, rec *Hop, hj *journal.Journal, re
 	if progress != nil {
 		progress(fmt.Sprintf("Handing it on to %s", rec.ToTitle))
 	}
-	inv := a.Scan(ctx, ScanOptions{Hosts: []string{LocalName()}, GitFor: func(e Entry) bool { return e.Session.Key == key }})
+	// This machine for the copy, and the next cloud for what its listing names (the
+	// environments' names).
+	inv := a.Scan(ctx, ScanOptions{Hosts: []string{LocalName(), rec.To}, GitFor: func(e Entry) bool { return e.Session.Key == key }})
 	defer inv.Close()
 	var e *Entry
 	for i := range inv.Entries {

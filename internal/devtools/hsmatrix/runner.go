@@ -1015,7 +1015,7 @@ func (r *runner) cloudHop(row Row) error {
 	case res.Hop.State != "done" || res.Hop.Fetch == "" || res.Hop.Handoff == "" || h.Session == "":
 		return fmt.Errorf("the hop: %+v %+v", res.Hop, h)
 	case from == "claude-cloud" && (!h.Reuse || h.Branch != cs.Result || h.Pushed):
-		return fmt.Errorf("Codex cloud starts from the claude/… branch as it is: %+v", h)
+		return fmt.Errorf("the Codex cloud task must start from the claude/… branch as it is: %+v", h)
 	case from == "codex-cloud" && (!h.Pushed || !strings.HasPrefix(h.Branch, "hopsesh/handoff/")):
 		return fmt.Errorf("the task's work goes up on a handoff branch: %+v", h)
 	}

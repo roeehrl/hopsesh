@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/roeehrl/hopsesh/internal/app"
+	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/proc"
 	"github.com/roeehrl/hopsesh/internal/ui/tui"
@@ -36,6 +37,15 @@ func (r *run) runTUI() error {
 		// show what came back.
 		if _, err := r.app.Adopt(context.Background(), exit.Adopt, true); err != nil {
 			return err
+		}
+		if exit.Hop != "" {
+			// The first leg of a hop: take it on to the next cloud, and show where it stands.
+			res, _ := r.app.ContinueHop(context.Background(), exit.Hop, nil)
+			if res != nil && res.Hop != nil && res.Hop.Remembered {
+				_ = config.Save(r.app.Cfg)
+			}
+			deps.Hop = exit.Hop
+			continue
 		}
 		deps.Adopted = exit.Adopt
 	}
