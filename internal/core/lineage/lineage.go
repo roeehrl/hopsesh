@@ -18,39 +18,65 @@ import (
 // Suffix names a manifest: the session's main file name plus Suffix.
 const Suffix = ".hopsesh.json"
 
-// format is the manifest format; other formats are not read.
-const format = "lineage/1"
+// format is the manifest format; other formats are not read (hopsesh keeps no code for
+// older ones).
+const format = "lineage/2"
 
 // maxSize bounds a manifest read.
 const maxSize = 4 << 20
 
 // Replica is one copy of the session, as it was when a hop recorded it.
 type Replica struct {
-	Key          agent.SessionKey `json:"key"`
-	Location     string           `json:"location"` // a machine name (later also a cloud)
-	AgentVersion string           `json:"agentVersion,omitempty"`
-	Head         ir.NodeID        `json:"head,omitempty"`   // the last conversation node then
-	Offset       int64            `json:"offset,omitempty"` // the main file's size then
-	Time         time.Time        `json:"time"`
+	Key agent.SessionKey `json:"key"`
+	// Location is a machine's name, or a cloud's ("codex-cloud"). A cloud replica has no
+	// file to sit beside: it is recorded in the manifests of the copies it hopped from or to.
+	Location     string    `json:"location"`
+	AgentVersion string    `json:"agentVersion,omitempty"`
+	Head         ir.NodeID `json:"head,omitempty"`   // the last conversation node then ("" for a cloud copy hopsesh cannot read)
+	Offset       int64     `json:"offset,omitempty"` // the main file's size then
+	Time         time.Time `json:"time"`
+	// URL is a cloud copy's page. Manifests stay in the agents' folders, never in a
+	// repository.
+	URL    string `json:"url,omitempty"`
+	Branch string `json:"branch,omitempty"` // a cloud copy's branch
 }
 
 // Kinds of hops.
 const (
 	HopMove     = "move"     // the same agent, another location
 	HopContinue = "continue" // another agent (a conversion)
+	HopHandoff  = "handoff"  // up to a cloud: a briefing and the code
+	HopFetch    = "fetch"    // down from a cloud
 )
 
-// Hop is one move or conversion between two replicas.
+// Hop is one move, conversion, handoff or fetch between two replicas.
 type Hop struct {
-	Time     time.Time `json:"time"`
-	From     int       `json:"from"` // index into Replicas
-	To       int       `json:"to"`
-	Kind     string    `json:"kind"`
-	Fork     bool      `json:"fork,omitempty"` // both copies continue on purpose
-	Fidelity string    `json:"fidelity,omitempty"`
+	Time time.Time `json:"time"`
+	From int       `json:"from"` // index into Replicas
+	To   int       `json:"to"`
+	Kind string    `json:"kind"`
+	Fork bool      `json:"fork,omitempty"` // both copies continue on purpose
+	// Fidelity is what the hop carried: history or note between agents on machines; a
+	// cloud's fidelity (brief, native, code, text) for a handoff or a fetch.
+	Fidelity string `json:"fidelity,omitempty"`
 	// Written is the byte range hopsesh wrote into the To replica's file (conversions):
 	// those nodes are never read back as the other agent's work.
 	Written *Range `json:"written,omitempty"`
+	// Code is how the code went with a handoff or a fetch.
+	Code *CodeHop `json:"code,omitempty"`
+}
+
+// CodeHop is the code side of a handoff or a fetch.
+type CodeHop struct {
+	Way      agent.CodeWay `json:"way"`
+	Remote   string        `json:"remote,omitempty"` // the repository's identity (host/owner/repo)
+	Branch   string        `json:"branch,omitempty"` // the handoff branch, or the cloud's branch
+	Base     string        `json:"base,omitempty"`   // the commit it built on
+	Snapshot string        `json:"snapshot,omitempty"`
+	// Withheld are files that stayed on the machine (credential-like, or not chosen).
+	Withheld []string `json:"withheld,omitempty"`
+	// Redactions is how many secrets the scanner masked in the briefing.
+	Redactions int `json:"redactions,omitempty"`
 }
 
 // Range is a byte range of a file.

@@ -1,10 +1,12 @@
 package journal
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -39,7 +41,7 @@ func TestUndoEverything(t *testing.T) {
 	if err != nil || len(back.Entries) != 4 || back.Keys[0].Session != "s1" {
 		t.Fatalf("reload: %+v %v", back, err)
 	}
-	must(t, back.Undo(func(string) (host.FS, error) { return fsys, nil }, false))
+	must(t, back.Undo(ctx, Files(func(string) (host.FS, error) { return fsys, nil }), false))
 	if _, err := os.Stat(created); !os.IsNotExist(err) {
 		t.Error("created file must be removed")
 	}
@@ -73,7 +75,7 @@ func TestUndoAppendKeepsLaterWrites(t *testing.T) {
 	f, _ := os.OpenFile(idx, os.O_APPEND|os.O_WRONLY, 0)
 	f.WriteString(`{"id":"c"}` + "\n")
 	f.Close()
-	must(t, j.Undo(func(string) (host.FS, error) { return fsys, nil }, false))
+	must(t, j.Undo(ctx, Files(func(string) (host.FS, error) { return fsys, nil }), false))
 	if b, _ := os.ReadFile(idx); string(b) != `{"id":"a"}`+"\n"+`{"id":"c"}`+"\n" {
 		t.Fatalf("after undo: %q", b)
 	}
@@ -86,7 +88,7 @@ func TestUndoAppendKeepsLaterWrites(t *testing.T) {
 	j2, _ := New(state, KindMove, "mark")
 	must(t, j2.Append(fsys, "here", other, []byte("mark\n"), agent.AppendOptions{Standalone: true}))
 	os.WriteFile(other, []byte("x\nMARK\n"), 0o600)
-	if err := j2.Undo(func(string) (host.FS, error) { return fsys, nil }, false); err == nil {
+	if err := j2.Undo(ctx, Files(func(string) (host.FS, error) { return fsys, nil }), false); err == nil {
 		t.Fatal("changed bytes must not be cut out")
 	}
 	if b, _ := os.ReadFile(other); string(b) != "x\nMARK\n" {
@@ -110,20 +112,20 @@ func TestUndoRefusesWhatWasUsedSince(t *testing.T) {
 	must(t, j.WriteFile(fsys, "here", placed, []byte("moved\n"), 0o600))
 	here := func(string) (host.FS, error) { return fsys, nil }
 	must(t, j.Seal(here))
-	if err := j.Changed(here); err != nil {
+	if err := j.Changed(ctx, Files(here)); err != nil {
 		t.Fatalf("nothing changed yet: %v", err)
 	}
 	f, _ := os.OpenFile(placed, os.O_APPEND|os.O_WRONLY, 0)
 	f.WriteString("new turn\n")
 	f.Close()
-	err := j.Undo(here, false)
+	err := j.Undo(ctx, Files(here), false)
 	if !errors.Is(err, ErrChanged) {
 		t.Fatalf("undo must refuse: %v", err)
 	}
 	if b, _ := os.ReadFile(placed); string(b) != "moved\nnew turn\n" {
 		t.Fatal("a refused undo changes nothing")
 	}
-	must(t, j.Undo(here, true))
+	must(t, j.Undo(ctx, Files(here), true))
 	if _, err := os.Stat(placed); !os.IsNotExist(err) {
 		t.Fatal("forced undo removes it")
 	}
@@ -145,14 +147,14 @@ func TestUndoAppendThatCreatedTheFile(t *testing.T) {
 	must(t, second.Append(fsys, "here", index, []byte(`{"id":"b"}`+"\n"), agent.AppendOptions{NewLine: true, Standalone: true}))
 	must(t, second.Seal(fsFor))
 
-	if err := first.Changed(fsFor); err != nil {
+	if err := first.Changed(ctx, Files(fsFor)); err != nil {
 		t.Fatalf("another operation's line in a shared file is not a later use: %v", err)
 	}
-	must(t, first.Undo(fsFor, false))
+	must(t, first.Undo(ctx, Files(fsFor), false))
 	if b, _ := os.ReadFile(index); string(b) != `{"id":"b"}`+"\n" {
 		t.Fatalf("undoing the first keeps the second's line: %q", b)
 	}
-	must(t, second.Undo(fsFor, false))
+	must(t, second.Undo(ctx, Files(fsFor), false))
 	if b, err := os.ReadFile(index); err == nil && len(b) > 0 {
 		t.Fatalf("both lines are taken out: %q", b)
 	}
@@ -161,7 +163,7 @@ func TestUndoAppendThatCreatedTheFile(t *testing.T) {
 	third, _ := New(state, KindContinue, "third")
 	other := filepath.Join(data, "other", "index.jsonl")
 	must(t, third.Append(fsys, "here", other, []byte("x\n"), agent.AppendOptions{NewLine: true}))
-	must(t, third.Undo(fsFor, false))
+	must(t, third.Undo(ctx, Files(fsFor), false))
 	if _, err := os.Stat(other); !os.IsNotExist(err) {
 		t.Fatal("a file an append created goes when its undo leaves it empty")
 	}
@@ -179,20 +181,152 @@ func TestUndoSessionAppendUsedSince(t *testing.T) {
 	j, _ := New(state, KindContinue, "back")
 	must(t, j.Append(fsys, "here", s, []byte("turn 2 (other agent)\n"), agent.AppendOptions{NewLine: true}))
 	must(t, j.Seal(here))
-	if err := j.Changed(here); err != nil {
+	if err := j.Changed(ctx, Files(here)); err != nil {
 		t.Fatalf("nothing follows yet: %v", err)
 	}
 	f, _ := os.OpenFile(s, os.O_APPEND|os.O_WRONLY, 0)
 	f.WriteString("turn 3 (builds on turn 2)\n")
 	f.Close()
-	if err := j.Undo(here, false); !errors.Is(err, ErrChanged) {
+	if err := j.Undo(ctx, Files(here), false); !errors.Is(err, ErrChanged) {
 		t.Fatalf("undo must refuse: %v", err)
 	}
 	if b, _ := os.ReadFile(s); string(b) != "turn 1\nturn 2 (other agent)\nturn 3 (builds on turn 2)\n" {
 		t.Fatalf("a refused undo changes nothing: %q", b)
 	}
-	must(t, j.Undo(here, true))
+	must(t, j.Undo(ctx, Files(here), true))
 	if b, _ := os.ReadFile(s); string(b) != "turn 1\n" {
 		t.Fatalf("forced undo: %q", b)
+	}
+}
+
+var ctx = context.Background()
+
+// fakeRefs is a remote's refs, as undo sees them.
+type fakeRefs struct {
+	refs    map[string]string
+	deleted []string
+}
+
+func (f *fakeRefs) RemoteRef(_ context.Context, machine, dir, remote, ref string) (string, error) {
+	return f.refs[ref], nil
+}
+
+func (f *fakeRefs) DeleteRef(_ context.Context, machine, dir, remote, ref, expect string) error {
+	if f.refs[ref] != expect {
+		return errors.New("stale lease")
+	}
+	delete(f.refs, ref)
+	f.deleted = append(f.deleted, ref)
+	return nil
+}
+
+// fakeClouds is a cloud that can archive (or not), with its sessions' last activity.
+type fakeClouds struct {
+	updated  map[agent.SessionID]time.Time
+	canArch  bool
+	archived []agent.SessionID
+}
+
+func (f *fakeClouds) Updated(_ context.Context, cloud string, key agent.SessionKey) (time.Time, error) {
+	return f.updated[key.Session], nil
+}
+
+func (f *fakeClouds) Archive(_ context.Context, cloud string, key agent.SessionKey) error {
+	if !f.canArch {
+		return ErrManual
+	}
+	f.archived = append(f.archived, key.Session)
+	return nil
+}
+
+// A handoff's journal: the pushed branch is deleted with a lease, a cloud that cannot
+// archive leaves a step for the user, and a session file the vendor's CLI wrote is set
+// aside.
+func TestUndoHandoff(t *testing.T) {
+	state, data := t.TempDir(), t.TempDir()
+	fsys := host.LocalFS()
+	here := Files(func(string) (host.FS, error) { return fsys, nil })
+	t0 := time.Date(2026, 10, 4, 9, 0, 0, 0, time.UTC)
+	const ref = "refs/heads/hopsesh/handoff/20261004-aaaaaaaa"
+	teleported := filepath.Join(data, "projects", "p", "t1.jsonl")
+	must(t, os.MkdirAll(filepath.Dir(teleported), 0o700))
+	must(t, os.WriteFile(teleported, []byte(`{"type":"teleported-from"}`+"\n"), 0o600))
+
+	j, err := New(state, KindHandoff, "hand off")
+	if err != nil {
+		t.Fatal(err)
+	}
+	must(t, j.PushRef("here", data, "origin", ref, "1111111"))
+	key := agent.SessionKey{Agent: "codex", Session: "task_e_1"}
+	must(t, j.Cloud("here", agent.CloudSession{Key: key, Cloud: "codex-cloud", URL: "https://chatgpt.com/codex/tasks/task_e_1", Updated: t0}))
+	must(t, j.Adopt(fsys, "here", teleported))
+
+	refs := &fakeRefs{refs: map[string]string{ref: "1111111"}}
+	clouds := &fakeClouds{updated: map[agent.SessionID]time.Time{"task_e_1": t0}}
+	r := Reach{FS: here.FS, Refs: refs, Clouds: clouds}
+
+	// The cloud pushed past the snapshot: refused without force.
+	refs.refs[ref] = "2222222"
+	if err := j.Changed(ctx, r); !errors.Is(err, ErrChanged) || !strings.Contains(err.Error(), "moved on") {
+		t.Fatalf("a branch the cloud pushed to must count as changed: %v", err)
+	}
+	refs.refs[ref] = "1111111"
+	// The cloud session has new activity: refused without force.
+	clouds.updated["task_e_1"] = t0.Add(time.Minute)
+	if err := j.Undo(ctx, r, false); !errors.Is(err, ErrChanged) || !strings.Contains(err.Error(), "new activity") {
+		t.Fatalf("a cloud session used since must count as changed: %v", err)
+	}
+	clouds.updated["task_e_1"] = t0
+	// The adopted file grew: refused without force.
+	must(t, os.WriteFile(teleported, []byte(`{"type":"teleported-from"}`+"\n"+`{"type":"user"}`+"\n"), 0o600))
+	if err := j.Changed(ctx, r); !errors.Is(err, ErrChanged) || !strings.Contains(err.Error(), "were added after this") {
+		t.Fatalf("an adopted file that grew must count as changed: %v", err)
+	}
+	must(t, os.WriteFile(teleported, []byte(`{"type":"teleported-from"}`+"\n"), 0o600))
+
+	must(t, j.Undo(ctx, r, false))
+	if len(refs.deleted) != 1 || len(refs.refs) != 0 {
+		t.Fatalf("the branch must be deleted: %+v", refs)
+	}
+	if _, err := os.Stat(teleported); !os.IsNotExist(err) {
+		t.Fatal("the adopted file must be set aside")
+	}
+	back, err := Load(state, j.ID)
+	if err != nil || !back.Undone || len(back.Manual) != 1 || back.Manual[0].Key != key || back.Manual[0].URL == "" {
+		t.Fatalf("a cloud that cannot archive leaves a step for the user: %+v %v", back, err)
+	}
+	set, _ := filepath.Glob(filepath.Join(Dir(state), j.ID, "backup", "adopted-*"))
+	if len(set) != 1 {
+		t.Fatalf("the adopted file is kept in the journal: %v", set)
+	}
+}
+
+// Forced, undo deletes the branch where it points now and archives a cloud session that
+// was used since, where the cloud can.
+func TestUndoHandoffForced(t *testing.T) {
+	state := t.TempDir()
+	here := Files(func(string) (host.FS, error) { return host.LocalFS(), nil })
+	const ref = "refs/heads/hopsesh/handoff/x"
+	j, err := New(state, KindHandoff, "hand off")
+	if err != nil {
+		t.Fatal(err)
+	}
+	must(t, j.PushRef("here", "/repo", "origin", ref, "1111111"))
+	must(t, j.Cloud("here", agent.CloudSession{Key: agent.SessionKey{Agent: "fake", Session: "s1"}, Cloud: "fake-cloud"}))
+	refs := &fakeRefs{refs: map[string]string{ref: "3333333"}}
+	clouds := &fakeClouds{updated: map[agent.SessionID]time.Time{"s1": time.Now()}, canArch: true}
+	r := Reach{FS: here.FS, Refs: refs, Clouds: clouds}
+	if err := j.Undo(ctx, r, false); !errors.Is(err, ErrChanged) {
+		t.Fatalf("want a refusal, got %v", err)
+	}
+	must(t, j.Undo(ctx, r, true))
+	if len(refs.refs) != 0 || len(clouds.archived) != 1 || len(j.Manual) != 0 {
+		t.Fatalf("forced undo: refs %v, archived %v, manual %v", refs.refs, clouds.archived, j.Manual)
+	}
+	// Without a way to reach the remote, the branch is reported, not silently kept.
+	j2, _ := New(state, KindHandoff, "again")
+	must(t, j2.PushRef("here", "/repo", "origin", ref, "1111111"))
+	if err := j2.Undo(ctx, here, false); err == nil || !strings.Contains(err.Error(), "remote cannot be reached") {
+		t.Fatalf("an unreachable remote must be reported: %v", err)
 	}
 }

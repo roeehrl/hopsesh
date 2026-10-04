@@ -374,7 +374,7 @@ func importThen(ctx context.Context, p *Plan, in Input, h agent.Host, j *journal
 	if s == nil {
 		return ir.WriteResult{}, fmt.Errorf("%s imported the session as %s, but it is not in its list", name, id)
 	}
-	if err := j.Adopt(tgt.Machine.Name, s.Path); err != nil {
+	if err := j.RecordCreated(tgt.Machine.Name, s.Path); err != nil {
 		return ir.WriteResult{}, err
 	}
 	j.AddKey(s.Key)
