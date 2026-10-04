@@ -113,7 +113,7 @@ if [ "$MODE" = codex ]; then
   WORKTREE=$(json "$WORK/pull.json" brought.worktree)
   KEY=$(json "$WORK/pull.json" brought.key)
   echo "outcome: $OUTCOME; written: $WRITTEN; branch: $BRANCH_HERE; worktree: $WORKTREE"
-  [ "$OUTCOME" = complete ] && [ "$WRITTEN" = True ] || fail "the task did not come back: $(json "$WORK/pull.json" brought.message)"
+  if [ "$OUTCOME" != complete ] || [ "$WRITTEN" != True ]; then fail "the task did not come back: $(json "$WORK/pull.json" brought.message)"; fi
   [ "$BRANCH_HERE" = "hopsesh/from/codex-cloud/$TASK" ] || fail "the diff is not on hopsesh/from/codex-cloud/$TASK"
   grep -qx "$CODEWORD" "$WORKTREE/hopsesh-smoke-$CODEWORD.txt" || fail "the task's file is not in the worktree"
   [ -z "$(git -C "$CHECKOUT" status --porcelain --untracked-files=no)" ] || echo "note: your checkout has changes of its own; hopsesh did not touch it"

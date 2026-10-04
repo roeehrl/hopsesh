@@ -2,6 +2,7 @@ package move
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -47,7 +48,10 @@ func commitPatch(ctx context.Context, p *Plan, j *journal.Journal, branch string
 		return fmt.Errorf("%s brought no patch for %s", fp.CloudTitle, fp.Session)
 	}
 	sha, err := repos.CommitPatch(ctx, fp.Worktree, f.Code.Diff, f.Code.Applied, fmt.Sprintf("%s %s %s", fp.CloudTitle, fp.Noun, fp.Session))
-	if err != nil {
+	switch {
+	case errors.Is(err, repos.ErrCommit):
+		return fmt.Errorf("%s's patch: %w", fp.CloudTitle, err)
+	case err != nil:
 		return fmt.Errorf("%s's patch does not apply on %s: %w", fp.CloudTitle, short(fp.Base), err)
 	}
 	if err := j.Ref(in.Machine.Name, fp.Checkout, "refs/heads/"+branch, sha, ""); err != nil {

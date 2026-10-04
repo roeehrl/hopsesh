@@ -215,11 +215,19 @@ func CommitPatch(ctx context.Context, worktree string, diff []byte, applied bool
 	if _, err := runGit(ctx, worktree, "add", "-A"); err != nil {
 		return "", err
 	}
-	if _, err := runGit(ctx, worktree, "commit", "-q", "--no-verify", "-m", message); err != nil {
-		return "", err
+	var id []string
+	if _, err := runGit(ctx, worktree, "var", "GIT_COMMITTER_IDENT"); err != nil {
+		// No identity configured here: the commit is still the user's, under a plain name.
+		id = []string{"GIT_AUTHOR_NAME=hopsesh", "GIT_AUTHOR_EMAIL=hopsesh@localhost", "GIT_COMMITTER_NAME=hopsesh", "GIT_COMMITTER_EMAIL=hopsesh@localhost"}
+	}
+	if _, err := runGitEnv(ctx, worktree, id, "commit", "-q", "--no-verify", "--no-gpg-sign", "-m", message); err != nil {
+		return "", fmt.Errorf("%w: %w", ErrCommit, err)
 	}
 	return Head(ctx, worktree)
 }
+
+// ErrCommit means a patch applied but could not be committed.
+var ErrCommit = errors.New("the patch applied, but committing it failed")
 
 // SwitchNew puts a worktree on a new branch at its HEAD.
 func SwitchNew(ctx context.Context, worktree, branch string) error {

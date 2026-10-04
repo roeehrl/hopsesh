@@ -100,3 +100,40 @@ func TestCloudBranchHomeAndUndo(t *testing.T) {
 		t.Fatalf("the user's checkout moved to %s", b)
 	}
 }
+
+// A cloud's patch is applied and committed in a worktree as one commit, under a plain name
+// when no git identity is configured; one that does not apply leaves the worktree as it was.
+func TestCommitPatch(t *testing.T) {
+	ctx := context.Background()
+	repo := t.TempDir()
+	gitIn(t, repo, "init", "-q", "-b", "main")
+	gitIn(t, repo, "commit", "-q", "--allow-empty", "-m", "start")
+	// No identity at all: none configured, none in the environment, none guessed.
+	empty := filepath.Join(t.TempDir(), "gitconfig")
+	if err := os.WriteFile(empty, []byte("[user]\n\tuseConfigOnly = true\n"), 0o600); err != nil { // never guess one from the system
+		t.Fatal(err)
+	}
+	for k, v := range map[string]string{"GIT_CONFIG_GLOBAL": empty, "GIT_CONFIG_NOSYSTEM": "1", "GIT_AUTHOR_NAME": "", "GIT_AUTHOR_EMAIL": "",
+		"GIT_COMMITTER_NAME": "", "GIT_COMMITTER_EMAIL": "", "EMAIL": "", "HOME": t.TempDir()} {
+		t.Setenv(k, v)
+	}
+	os.Unsetenv("GIT_AUTHOR_NAME")
+	os.Unsetenv("GIT_AUTHOR_EMAIL")
+	os.Unsetenv("GIT_COMMITTER_NAME")
+	os.Unsetenv("GIT_COMMITTER_EMAIL")
+	os.Unsetenv("EMAIL")
+	patch := "diff --git a/note.md b/note.md\nnew file mode 100644\n--- /dev/null\n+++ b/note.md\n@@ -0,0 +1 @@\n+from the cloud\n"
+	sha, err := repos.CommitPatch(ctx, repo, []byte(patch), false, "Codex cloud task task_e_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := gitIn(t, repo, "log", "-1", "--format=%s|%an", sha); got != "Codex cloud task task_e_1|hopsesh" {
+		t.Fatalf("commit: %s", got)
+	}
+	if _, err := repos.CommitPatch(ctx, repo, []byte(patch), false, "again"); err == nil || errors.Is(err, repos.ErrCommit) {
+		t.Fatalf("a patch that does not apply: %v", err)
+	}
+	if st := gitIn(t, repo, "status", "--porcelain"); st != "" {
+		t.Fatalf("the worktree changed: %s", st)
+	}
+}
