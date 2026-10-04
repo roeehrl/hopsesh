@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"testing"
 
 	"github.com/roeehrl/hopsesh/internal/agents/all"
@@ -62,4 +63,30 @@ func TestEnvChoices(t *testing.T) {
 
 func gitState(identity string) *repos.GitState {
 	return &repos.GitState{IsRepo: true, Identity: identity}
+}
+
+// A probe stands for a little while for the hand-off plans; a scan forgets it.
+func TestRecentCloudTest(t *testing.T) {
+	cloudEnv(t)
+	a := cloudApp(t, all.Registry())
+	n := 0
+	run := func(context.Context) (agent.CloudTest, error) { n++; return agent.CloudTest{Account: "ChatGPT"}, nil }
+	for i := 0; i < 3; i++ {
+		if ct, err := a.recentTest(context.Background(), "codex-cloud", run); err != nil || ct.Account != "ChatGPT" {
+			t.Fatal(ct, err)
+		}
+	}
+	if n != 1 {
+		t.Fatalf("probed %d times", n)
+	}
+	a.Scan(context.Background(), ScanOptions{SkipGit: true, Hosts: []string{"here"}})
+	_, _ = a.recentTest(context.Background(), "codex-cloud", run)
+	if n != 2 {
+		t.Fatalf("a scan forgets the probe: %d", n)
+	}
+	b := *a // the window's snapshots share it
+	_, _ = b.recentTest(context.Background(), "codex-cloud", run)
+	if n != 2 {
+		t.Fatalf("a copy of the App shares the probes: %d", n)
+	}
 }

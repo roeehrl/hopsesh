@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/core/audit"
@@ -285,7 +286,7 @@ func (a *App) KeepPartial(journal string) error {
 func (a *App) Fetches() ([]*move.Fetch, error) { return move.LoadFetches(a.StateDir) }
 
 // TestCloud probes a cloud through its module, read-only: the login and the driver's
-// flags.
+// flags. The result is kept for a little while for the hand-off plans.
 func (a *App) TestCloud(ctx context.Context, name string) (agent.CloudTest, error) {
 	mod, cl, ok := a.cloudModule(name)
 	if !ok {
@@ -299,7 +300,64 @@ func (a *App) TestCloud(ctx context.Context, name string) (agent.CloudTest, erro
 	if err != nil {
 		return agent.CloudTest{}, err
 	}
-	return t.TestCloud(ctx, h, in, name)
+	ct, err := t.TestCloud(ctx, h, in, name)
+	a.tests.keep(name, ct, err)
+	return ct, err
+}
+
+// cloudTestTTL is how long a probe stands for the hand-off plans (a scan forgets it).
+const cloudTestTTL = 90 * time.Second
+
+// cloudTests are recent probes by cloud.
+type cloudTests struct {
+	mu sync.Mutex
+	m  map[string]cloudTest
+}
+
+type cloudTest struct {
+	at  time.Time
+	t   agent.CloudTest
+	err error
+}
+
+func (c *cloudTests) keep(name string, t agent.CloudTest, err error) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.m[name] = cloudTest{time.Now(), t, err}
+}
+
+func (c *cloudTests) recent(name string) (cloudTest, bool) {
+	if c == nil {
+		return cloudTest{}, false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	x, ok := c.m[name]
+	return x, ok && time.Since(x.at) < cloudTestTTL
+}
+
+func (c *cloudTests) forget() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	clear(c.m)
+}
+
+// recentTest is a probe of the cloud from the last little while, or a new one.
+func (a *App) recentTest(ctx context.Context, name string, run func(context.Context) (agent.CloudTest, error)) (agent.CloudTest, error) {
+	if x, ok := a.tests.recent(name); ok {
+		return x.t, x.err
+	}
+	t, err := run(ctx)
+	if ctx.Err() == nil {
+		a.tests.keep(name, t, err)
+	}
+	return t, err
 }
 
 // Brought is a fetch from a cloud as every front end shows it (and the command line's

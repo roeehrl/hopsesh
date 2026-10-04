@@ -138,6 +138,11 @@ func (a *App) PlanHandoff(ctx context.Context, inv *Inventory, e Entry, cloud st
 		Settings: move.HandoffSettings{Code: set.Code, Untracked: set.Untracked, BranchPrefix: set.BranchPrefix, DeleteBranch: set.DeleteBranch},
 		Allowed:  a.Cfg.CloudAllowed(cloud), Worktrees: a.Reg.Worktrees(),
 	}
+	if t, ok := mod.(agent.CloudTester); ok {
+		hin.Tester = func(ctx context.Context) (agent.CloudTest, error) {
+			return a.recentTest(ctx, cloud, func(ctx context.Context) (agent.CloudTest, error) { return t.TestCloud(ctx, h, in, cloud) })
+		}
+	}
 	if g := e.Git; g != nil && g.Identity != "" {
 		if needsEnv(cl) {
 			hin.Env, hin.Envs = set.Environments[g.Identity], a.EnvChoices(inv, cloud, g.Identity)

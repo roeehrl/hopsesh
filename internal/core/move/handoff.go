@@ -96,6 +96,9 @@ type HandoffInput struct {
 	// ones the cloud's listing shows (suggestions), for a cloud that needs one.
 	Env  string
 	Envs []EnvChoice
+	// Tester probes the cloud read-only in the module's place (a recent probe, so replanning
+	// does not ask the vendor each time); nil: the module's CloudTester runs.
+	Tester func(context.Context) (agent.CloudTest, error)
 }
 
 // EnvChoice is a cloud environment the user can pick for a hand-off.
@@ -304,7 +307,13 @@ func BuildHandoff(ctx context.Context, in HandoffInput, opt Options) (*Plan, err
 		check("ok", cl.Driver+" "+v)
 	}
 	if t, ok := in.Module.(agent.CloudTester); ok && in.Install.Binary != "" {
-		ct, err := t.TestCloud(ctx, in.Host, in.Install, cl.Name)
+		test := in.Tester
+		if test == nil {
+			test = func(ctx context.Context) (agent.CloudTest, error) {
+				return t.TestCloud(ctx, in.Host, in.Install, cl.Name)
+			}
+		}
+		ct, err := test(ctx)
 		switch {
 		case err != nil:
 			check("err", refusal(err, target, cl))
