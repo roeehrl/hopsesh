@@ -43,6 +43,10 @@ type module struct {
 	clouds []agent.Cloud // become targets (targets.go)
 }
 
+// cloudOnly reports whether the module has no agent on machines (no data folders), only
+// clouds.
+func (m module) cloudOnly() bool { return len(m.Roots) == 0 && len(m.clouds) > 0 }
+
 func main() {
 	if len(os.Args) == 4 && os.Args[1] == "feed" {
 		if err := printFeed(os.Stdout, os.Args[2], os.Args[3]); err != nil {

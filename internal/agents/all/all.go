@@ -3,14 +3,20 @@
 package all
 
 import (
+	"github.com/roeehrl/hopsesh/agents/amp"
 	"github.com/roeehrl/hopsesh/agents/claude"
 	"github.com/roeehrl/hopsesh/agents/codex"
+	"github.com/roeehrl/hopsesh/agents/copilot"
+	"github.com/roeehrl/hopsesh/agents/devin"
+	"github.com/roeehrl/hopsesh/agents/jules"
 	"github.com/roeehrl/hopsesh/internal/core/registry"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 // Modules returns every compiled-in module, in display order.
-func Modules() []agent.Module { return []agent.Module{claude.New(), codex.New()} }
+func Modules() []agent.Module {
+	return []agent.Module{claude.New(), codex.New(), copilot.New(), jules.New(), devin.New(), amp.New()}
+}
 
 // Registry checks and registers the modules. A module with an incomplete Spec is a
 // programming error, caught by the tests.

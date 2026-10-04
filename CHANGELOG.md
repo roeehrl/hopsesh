@@ -42,6 +42,16 @@ All notable changes to this project are documented here. The format follows
 - The skill handles "hand this off to Claude Code cloud" (it plans first and asks), and its
   approval rules let `clouds --json` and `clouds test` run without asking while `handoff`
   and `followup` always ask.
+- Four cloud-only agents: the GitHub Copilot cloud agent (through `gh agent-task` and
+  `gh pr`), Jules (`jules remote`), Devin (`devin list --format json`) and Amp
+  (`amp threads`). Once allowed, each lists its sessions in `hopsesh clouds`, `hopsesh ls
+  --cloud` and the app's Clouds group, and `hopsesh clouds test` checks it read-only.
+  Bringing one back brings its code into a new worktree (`hopsesh pull <cloud>:<id>
+  --code-only`, or **Get the code** in the app): Copilot's and Devin's pull request branch,
+  or Jules's patch committed on a `hopsesh/from/jules/…` branch; `hopsesh undo` takes it
+  back. Their conversations stay in the cloud for now, and an Amp orb's code (`amp sync`)
+  is not brought. These CLIs' output is mostly undocumented: hopsesh reads it defensively,
+  and was tested against stand-ins only.
 
 ### Fixed
 - Reading a Windows machine with many sessions could stall for 30 seconds and then fail:

@@ -95,3 +95,40 @@ test("a partial copy comes back amber, with the known problem and what to do", a
   await expect(act).toBeVisible();
   await expect(act).toContainText("1 of 3 messages restored, partial copy kept");
 });
+
+test("a cloud-only module: Copilot's tasks are listed, and only their code comes home", async ({ page }) => {
+  const r = await page.request.post("/cloud?cloud=copilot-cloud&title=" + encodeURIComponent("Fix the search index"));
+  expect(r.ok()).toBeTruthy();
+  const sidebar = page.getByRole("navigation", { name: "Scopes" });
+  for (const title of ["Copilot cloud agent", "Jules", "Devin", "Amp"]) {
+    await expect(sidebar.locator(".side-off", { hasText: title }).getByRole("button", { name: "Turn on" })).toBeVisible();
+  }
+  await sidebar.locator(".side-off", { hasText: "Copilot cloud agent" }).getByRole("button", { name: "Turn on" }).click();
+  await expect(sidebar.getByRole("button", { name: /Copilot cloud agent/ })).toContainText("ready", { timeout: 30_000 });
+  await expect(sidebar.getByRole("button", { name: /Copilot cloud agent/ })).toContainText("1");
+
+  const task = row(page, "Fix the search index");
+  await expect(task).toBeVisible({ timeout: 30_000 });
+  await expect(task.locator(".chip.cloud")).toContainText("copilot-cloud");
+  await expect(task).toContainText("copilot/fix-the-search-index");
+  await expect(task.locator(".chip.st-done")).toHaveText("Done");
+  await task.click();
+  const details = page.getByRole("complementary", { name: "Cloud session details" });
+  await expect(details.getByRole("button", { name: /Get the code/ })).toBeEnabled();
+  await expect(details.getByRole("button", { name: /Bring here/ })).toHaveCount(0);
+  await expect(details).toContainText("the conversation stays in Copilot cloud agent for now");
+
+  await details.getByRole("button", { name: /Get the code/ }).click();
+  const sheet = page.locator("#sheet");
+  await expect(sheet.getByRole("heading", { name: "Bring the code of “Fix the search index” here from Copilot cloud agent" })).toBeVisible({ timeout: 30_000 });
+  await expect(sheet).toContainText("hopsesh/from/copilot-cloud/fix-the-search-index");
+  await expect(sheet).toContainText("Only the code comes from Copilot cloud agent");
+  await sheet.getByRole("button", { name: /Get the code/ }).click();
+  await expect(page.locator(".outcome.ok")).toContainText("The code of “Fix the search index” is here", { timeout: 30_000 });
+
+  await menu(page, "machines");
+  await expect(page.getByRole("heading", { name: "Machines" })).toBeVisible();
+  const card = page.locator(".cloud-card", { hasText: "Copilot cloud agent" });
+  await expect(card).toContainText("The code (its branch); the conversation stays in the cloud for now", { timeout: 30_000 });
+  await expect(page.locator(".cloud-card", { hasText: "Amp" })).toContainText("Nothing yet: the conversation stays in the cloud", { timeout: 30_000 });
+});

@@ -46,8 +46,25 @@ func TestCloudInTheWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(scan.Clouds) != 1 || scan.Clouds[0].Name != "claude-cloud" || scan.Clouds[0].Allowed || scan.Clouds[0].Status != "not-allowed" {
-		t.Fatalf("clouds before consent: %+v", scan.Clouds)
+	// Every cloud a module can list or fetch is shown, each off until allowed (Codex cloud
+	// has no capability yet, so it is not).
+	var names []string
+	for _, c := range scan.Clouds {
+		names = append(names, c.Name)
+		if c.Allowed || c.Status != "not-allowed" {
+			t.Errorf("%s before consent: %+v", c.Name, c)
+		}
+	}
+	if strings.Join(names, " ") != "claude-cloud copilot-cloud jules devin amp" {
+		t.Fatalf("clouds: %v", names)
+	}
+	for _, c := range scan.Clouds[1:] {
+		if !c.CodeOnly || c.Fidelity == "native" {
+			t.Errorf("%s brings only the code so far: %+v", c.Name, c)
+		}
+	}
+	if scan.Clouds[0].CodeOnly {
+		t.Error("Claude Code cloud brings the conversation")
 	}
 	if err := a.SetCloudAllowed("claude-cloud", true); err != nil {
 		t.Fatal(err)
@@ -74,8 +91,14 @@ func TestCloudInTheWindow(t *testing.T) {
 	if row == nil || row.Machine != "claude-cloud" || row.Location != "cloud" || row.Cloud.ID != "session_01PastedAbc123" || row.Cloud.URL == "" || row.Cloud.Checkout == "" {
 		t.Fatalf("cloud row: %+v", row)
 	}
-	if m := a.Machines(); len(m.Clouds) != 1 || !m.Clouds[0].Allowed {
+	if m := a.Machines(); len(m.Clouds) != 5 || !m.Clouds[0].Allowed || m.Clouds[1].Allowed {
 		t.Fatalf("machines: %+v", m.Clouds)
+	} else {
+		for _, n := range m.Here.Agents {
+			if !strings.HasPrefix(n, "Claude Code") && !strings.HasPrefix(n, "Codex") {
+				t.Errorf("a cloud-only module is listed as an agent here: %q", n)
+			}
+		}
 	}
 	ct, err := a.TestCloud("claude-cloud")
 	if err != nil || !ct.OK || ct.Account != "claude.ai · max" {

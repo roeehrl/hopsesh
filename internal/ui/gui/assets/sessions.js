@@ -63,11 +63,25 @@ export function cloudBlock(c) {
   return cap(c.error && c.status === "signed-out" ? c.error.replace(/^.*?: /, "") : c.hint || c.error || c.status);
 }
 
+// noCode says why a code-only cloud's session has no code to bring yet ("" when it has).
+function noCode(e, cl) {
+  if (!(cl.codeDown || []).length) return `hopsesh can't bring the code of ${cl.title} sessions here yet.`;
+  if (e.cloud.branch || cl.codeDown.includes("diff")) return "";
+  return `${cl.title} has not pushed a branch for this session yet.`;
+}
+
 // actionsFor lists what can be done with a session: the first is its main action.
 export function actionsFor(e) {
   const out = [];
   if (e.cloud) {
-    const why = cloudBlock(cloudOf(e.machine));
+    const cl = cloudOf(e.machine);
+    const why = cloudBlock(cl);
+    if (cl?.codeOnly) {
+      // Only the code comes home from this cloud (its conversation stays there for now).
+      const no = why || noCode(e, cl);
+      const code = { id: "code", label: "Get the code", short: "Get the code", why: no, run: () => planFor(e, { target: "", codeOnly: true }) };
+      return [no ? Object.assign(code, { run: () => toast(no) }) : code];
+    }
     out.push({ id: "bring", label: `Bring here (${e.agentName})`, short: "Bring here", why, run: () => planFor(e, { target: "" }) });
     for (const t of e.continueIn) out.push({ id: "bring:" + t.id, label: `Bring here and continue in ${t.name}`, why, run: () => planFor(e, { target: t.id }) });
     return why ? out.map((a) => Object.assign(a, { run: () => toast(why) })) : out;
@@ -336,15 +350,16 @@ function cloudInspector(e) {
       h("button", { class: "btn", style: "align-self:flex-start", onclick: () => api("OpenURL", c.url).catch(fail) }, icon(ICONS.external, 13), "Open in browser")),
     h("div", { style: "display:flex;flex-direction:column;gap:8px" },
       h("button", { class: "btn primary big", disabled: !!why, onclick: acts[0].run }, acts[0].label, h("span", { class: "kbd" }, "↩")),
-      acts.slice(1).map((a) => h("button", { class: "btn wrap", disabled: !!why, onclick: a.run }, "Bring here and continue in ▸ ", agentChip(a.id.slice(6), a.label.replace(/^.* in /, "")))),
-      h("button", { class: "btn", disabled: !!why || !c.branch, title: c.branch ? "" : "hopsesh doesn't know its branch yet: bring it with its conversation once", onclick: () => planFor(e, { target: "", codeOnly: true }) }, "Get the code only"),
+      cl?.codeOnly ? null : acts.slice(1).map((a) => h("button", { class: "btn wrap", disabled: !!why, onclick: a.run }, "Bring here and continue in ▸ ", agentChip(a.id.slice(6), a.label.replace(/^.* in /, "")))),
+      cl?.codeOnly ? null : h("button", { class: "btn", disabled: !!why || !c.branch, title: c.branch ? "" : "hopsesh doesn't know its branch yet: bring it with its conversation once", onclick: () => planFor(e, { target: "", codeOnly: true }) }, "Get the code only"),
       h("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap" }, h("button", { class: "btn", disabled: true, "aria-describedby": "arch-why" }, "Archive"),
         h("span", { id: "arch-why", class: "muted", style: "font-size:11.5px" }, `${e.agentName} archives only on ${host}`)),
       why ? h("span", { class: "warn", style: "font-size:12px" }, why) : null),
     h("div", { class: "sec" }, h("span", { class: "sec-h" }, "Repository"),
       h("dl", { class: "kv" },
         kv("Repository", c.repo ? h("span", { class: "mono", style: "font-size:12px" }, c.repo) : h("span", { class: "muted" }, "Not known yet")),
-        kv("Branch", c.branch ? h("span", { class: "mono", style: "font-size:12px" }, c.branch) : h("span", { class: "muted" }, `${e.agentName} fetches it when it brings the session`)),
+        kv("Branch", c.branch ? h("span", { class: "mono", style: "font-size:12px" }, c.branch)
+          : h("span", { class: "muted" }, cl?.codeOnly ? ((cl.codeDown || []).includes("diff") ? `None: ${cl.title}'s patch is committed on a new branch here` : "None yet") : `${e.agentName} fetches it when it brings the session`)),
         c.base ? kv("Base", h("span", { class: "mono", style: "font-size:12px" }, c.base.slice(0, 7))) : null,
         c.pr ? kv("PR", c.pr) : null,
         kv("State", [words, e.lastActive ? h("span", { class: "muted" }, ` · ${ago(e.lastActive)}`) : null]),
@@ -352,7 +367,9 @@ function cloudInspector(e) {
     e.history.length ? h("div", { class: "sec" }, h("span", { class: "sec-h" }, "Lineage"),
       e.history.map((x, i) => h("div", { class: "hop" }, h("span", { class: "dot" + (i === e.history.length - 1 ? " ok" : "") }),
         h("div", {}, h("div", {}, x.what), h("div", { class: "muted", style: "font-size:11px" }, when(x.when)))))) : null,
-    cl && !cl.listable ? null : h("span", { class: "muted", style: "font-size:11.5px" }, `Bringing it here makes a new worktree; ${e.agentName} copies the conversation in ${sys.terminal}. The cloud session is not changed.`));
+    cl && !cl.listable ? null : h("span", { class: "muted", style: "font-size:11.5px" }, cl?.codeOnly
+      ? `hopsesh brings its code into a new worktree; the conversation stays in ${cl.title} for now. The cloud session is not changed.`
+      : `Bringing it here makes a new worktree; ${e.agentName} copies the conversation in ${sys.terminal}. The cloud session is not changed.`));
 }
 
 function inspector() {

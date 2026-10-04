@@ -2,11 +2,12 @@
 // the real assets and the real service (internal/ui/gui) on a demo home made from the
 // agents' test fixtures, with a stand-in for the Wails runtime. It is not shipped.
 //
-// The demo home also has a stand-in Claude Code cloud: this program, run as claude, is the
-// stand-in claude; the demo repository's GitHub remote is a local bare repository; POST
-// /cloud adds a cloud session (and sets the failure the next teleport plays); POST /dirty
-// leaves work in progress in the demo repository, for a hand-off; and a command
-// the window opens "in a terminal" runs in the background instead.
+// The demo home also has a stand-in Claude Code cloud and Copilot cloud agent: this
+// program, run as claude or gh, is the stand-in claude or gh; the demo repository's GitHub
+// remote is a local bare repository; POST /cloud adds a cloud session (?cloud=copilot-cloud
+// for a Copilot task; and sets the failure the next teleport plays); POST /dirty leaves work
+// in progress in the demo repository, for a hand-off; and a command the window opens "in a
+// terminal" runs in the background instead.
 //
 //	go run ./internal/devtools/webtest -addr 127.0.0.1:8765 -home /tmp/demo
 package main
@@ -48,8 +49,12 @@ window.__emit = (name, data) => (listeners[name] || []).forEach((f) => f({ data 
 `
 
 func main() {
-	if strings.TrimSuffix(strings.ToLower(filepath.Base(os.Args[0])), ".exe") == "claude" {
+	name := strings.TrimSuffix(strings.ToLower(filepath.Base(os.Args[0])), ".exe")
+	if name == "claude" {
 		os.Exit(fakeagent.Claude())
+	}
+	if code, ok := fakeagent.Vendor(name); ok {
+		os.Exit(code)
 	}
 	addr := flag.String("addr", "127.0.0.1:8765", "where to listen")
 	home := flag.String("home", "", "the demo home (made afresh; anything there is removed)")
@@ -134,7 +139,7 @@ func main() {
 		}
 		mu.Lock()
 		defer mu.Unlock()
-		id, err := seedCloud(r.URL.Query().Get("title"), r.URL.Query().Get("work") != "0")
+		id, err := seedCloud(r.URL.Query().Get("cloud"), r.URL.Query().Get("title"), r.URL.Query().Get("work") != "0")
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -223,16 +228,18 @@ func cloudWorld(h string) error {
 	if err != nil {
 		return err
 	}
-	if runtime.GOOS == "windows" {
-		b, err := os.ReadFile(self)
-		if err == nil {
-			err = os.WriteFile(filepath.Join(bin, "claude.exe"), b, 0o700)
-		}
-		if err != nil {
+	for _, name := range []string{"claude", "gh"} {
+		if runtime.GOOS == "windows" {
+			b, err := os.ReadFile(self)
+			if err == nil {
+				err = os.WriteFile(filepath.Join(bin, name+".exe"), b, 0o700)
+			}
+			if err != nil {
+				return err
+			}
+		} else if err := os.Symlink(self, filepath.Join(bin, name)); err != nil {
 			return err
 		}
-	} else if err := os.Symlink(self, filepath.Join(bin, "claude")); err != nil {
-		return err
 	}
 	gitConfig := filepath.Join(h, "gitconfig")
 	for k, v := range map[string]string{"PATH": bin + string(os.PathListSeparator) + os.Getenv("PATH"), "GIT_CONFIG_GLOBAL": gitConfig,
@@ -252,13 +259,17 @@ func cloudWorld(h string) error {
 	return nil
 }
 
-// seedCloud adds a Claude Code cloud session on the demo repository (worked: it pushed its
-// work to a claude/… branch) and returns its id.
-func seedCloud(title string, work bool) (string, error) {
+// seedCloud adds a session of a cloud (Claude Code cloud by default, or copilot-cloud) on
+// the demo repository (worked: it pushed its work to a claude/… or copilot/… branch) and
+// returns its id.
+func seedCloud(cloud, title string, work bool) (string, error) {
 	if title == "" {
 		title = "Add rate limiting"
 	}
-	s, err := fakecloud.Open(os.Getenv("FAKE_CLOUD_DIR")).Seed(fakecloud.Session{Cloud: fakecloud.ClaudeCloud, Title: title, Repo: "github.com/example/demo",
+	if cloud == "" {
+		cloud = fakecloud.ClaudeCloud
+	}
+	s, err := fakecloud.Open(os.Getenv("FAKE_CLOUD_DIR")).Seed(fakecloud.Session{Cloud: cloud, Title: title, Repo: "github.com/example/demo",
 		CloneURL: origin.FileURL(), Branch: "main", Code: "branch",
 		Messages: []fakecloud.Message{{Role: "user", Text: "[hopsesh] " + title}, {Role: "assistant", Text: "On it."}}})
 	if err != nil || !work {

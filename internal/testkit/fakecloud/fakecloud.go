@@ -37,6 +37,11 @@ const (
 	ClaudeCloud = "claude-cloud"
 	CodexCloud  = "codex-cloud"
 	FakeCloud   = "fake-cloud" // the third-party-style cloud of `fakecloud remote`
+
+	CopilotCloud = "copilot-cloud" // gh agent-task
+	JulesCloud   = "jules"         // jules remote
+	DevinCloud   = "devin"         // devin list
+	AmpCloud     = "amp"           // amp threads
 )
 
 // States, in the fake's own words (each vendor's verbs map them to theirs).
@@ -62,6 +67,7 @@ type Session struct {
 	Code     string `json:"code"`             // how the code came up: branch or bundle
 	Diff     string `json:"diff,omitempty"`   // a starting diff sent with it, then the task's diff (codex)
 	Result   string `json:"result,omitempty"` // the branch the cloud pushed its work to
+	PR       int    `json:"pr,omitempty"`     // the pull request it opened for Result (copilot, devin)
 	Env      string `json:"env,omitempty"`
 	Attempts int    `json:"attempts"`
 	State    string `json:"state"`
@@ -86,6 +92,17 @@ func (s Session) URL() string {
 		return "https://claude.ai/code/" + s.ID
 	case CodexCloud:
 		return "https://chatgpt.com/codex/tasks/" + s.ID
+	case CopilotCloud:
+		if s.PR == 0 {
+			return "https://github.com/copilot/agents" // unverified: the agents page, until there is a pull request
+		}
+		return fmt.Sprintf("https://%s/pull/%d/agent-sessions/%s", s.Repo, s.PR, s.ID) // gh agent-task's documented form
+	case JulesCloud:
+		return "https://jules.google.com/session/" + s.ID // unverified
+	case DevinCloud:
+		return "https://app.devin.ai/sessions/" + strings.TrimPrefix(s.ID, "devin-") // unverified: the id in the link
+	case AmpCloud:
+		return "https://ampcode.com/threads/" + s.ID
 	}
 	return "https://cloud.example.com/sessions/" + s.ID
 }
@@ -212,8 +229,9 @@ func (s Store) Seed(x Session) (Session, error) {
 	return x, s.Put(x)
 }
 
-// newID makes an id in the vendor's form: session_01… (Claude Code), task_e_… (Codex),
-// fk-… (the fake's own cloud).
+// newID makes an id in the vendor's form: session_01… (Claude Code), task_e_… (Codex), a
+// UUID (Copilot's session ids), a long number (Jules), devin-<32 hex> (Devin), T-<UUID>
+// (Amp), fk-… (the fake's own cloud).
 func newID(cloud string) string {
 	var b [16]byte
 	_, _ = rand.Read(b[:])
@@ -228,6 +246,18 @@ func newID(cloud string) string {
 		return string(id)
 	case CodexCloud:
 		return "task_e_" + h
+	case CopilotCloud:
+		return newUUID()
+	case JulesCloud:
+		n := uint64(0)
+		for _, c := range b[:8] {
+			n = n<<8 | uint64(c)
+		}
+		return fmt.Sprint(n%9000000000000000000 + 1000000000000000000)
+	case DevinCloud:
+		return "devin-" + h
+	case AmpCloud:
+		return "T-" + newUUID()
 	}
 	return "fk-" + h[:12]
 }
@@ -292,9 +322,9 @@ func git(env []string, dir string, args ...string) (string, error) {
 
 // Work plays the cloud agent on a session: it clones the session's branch, commits a
 // change, and, as its cloud does, pushes it to a branch of its own (claude/web-session-…
-// for Claude Code, fake/… for the fake's own cloud; sameBranch pushes back to the branch
-// it started from) or keeps it as the task's diff (Codex). The session then waits for the
-// user (Claude Code) or is done.
+// for Claude Code, copilot/… and devin/… with a pull request, fake/… for the fake's own
+// cloud; sameBranch pushes back to the branch it started from) or keeps it as the task's
+// diff (Codex, Jules). The session then waits for the user (Claude Code) or is done.
 func Work(p Proc, id string, sameBranch bool) error {
 	st, err := p.store()
 	if err != nil {
@@ -303,6 +333,13 @@ func Work(p Proc, id string, sameBranch bool) error {
 	s, err := st.Get(id)
 	if err != nil {
 		return err
+	}
+	if s.Cloud == AmpCloud {
+		// An Amp thread's work stays in its orb (amp sync mirrors it); the fake adds a turn.
+		now := time.Now().UTC()
+		s.Messages = append(s.Messages, Message{Role: "assistant", Text: "I ran the tests in the orb; they pass.", Time: now})
+		s.State, s.Updated = StateIdle, now
+		return st.Put(s)
 	}
 	if s.CloneURL == "" {
 		return fmt.Errorf("%s has no repository to clone", id)
@@ -346,7 +383,7 @@ func Work(p Proc, id string, sameBranch bool) error {
 	}
 	now := time.Now().UTC()
 	switch s.Cloud {
-	case CodexCloud:
+	case CodexCloud, JulesCloud:
 		diff, err := git(env, work, "diff", s.Base, "HEAD")
 		if err != nil {
 			return err
@@ -356,9 +393,15 @@ func Work(p Proc, id string, sameBranch bool) error {
 	default:
 		branch := s.Branch
 		if !sameBranch {
-			branch = "fake/" + s.ID
-			if s.Cloud == ClaudeCloud {
+			switch s.Cloud {
+			case ClaudeCloud:
 				branch = "claude/web-session-" + strings.ToLower(s.ID[len(s.ID)-6:])
+			case CopilotCloud:
+				branch = "copilot/" + slug(s.Title, s.ID)
+			case DevinCloud:
+				branch = "devin/" + strings.TrimPrefix(s.ID, "devin-")[:10] + "-" + slug(s.Title, "work")
+			default:
+				branch = "fake/" + s.ID
 			}
 		}
 		if _, err := git(env, work, "push", "-q", "origin", "HEAD:refs/heads/"+branch); err != nil {
@@ -367,6 +410,9 @@ func Work(p Proc, id string, sameBranch bool) error {
 			return err
 		}
 		s.Result, s.State = branch, StateDone
+		if (s.Cloud == CopilotCloud || s.Cloud == DevinCloud) && s.PR == 0 {
+			s.PR = st.nextPR()
+		}
 		if s.Cloud == ClaudeCloud {
 			s.State = StateIdle // a Claude Code cloud session stays open after it pushes
 		}
@@ -404,4 +450,39 @@ func repoOf(env []string, dir string) (identity, cloneURL, branch, head string, 
 func onRemote(env []string, dir, branch string) bool {
 	out, err := git(env, dir, "ls-remote", "--heads", "origin", branch)
 	return err == nil && out != ""
+}
+
+// nextPR is a pull request number no session in the store uses yet.
+func (s Store) nextPR() int {
+	n := 100
+	files, _ := filepath.Glob(filepath.Join(s.Dir, "sessions", "*.json"))
+	for _, f := range files {
+		if x, err := s.Get(strings.TrimSuffix(filepath.Base(f), ".json")); err == nil && x.PR >= n {
+			n = x.PR + 1
+		}
+	}
+	return n
+}
+
+// slug is a title as a branch name's last part ("Add rate limiting" → add-rate-limiting).
+func slug(title, fallback string) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range strings.ToLower(title) {
+		switch {
+		case r >= 'a' && r <= 'z' || r >= '0' && r <= '9':
+			b.WriteRune(r)
+			dash = false
+		case !dash && b.Len() > 0:
+			b.WriteByte('-')
+			dash = true
+		}
+		if b.Len() >= 30 {
+			break
+		}
+	}
+	if out := strings.Trim(b.String(), "-"); out != "" {
+		return out
+	}
+	return fallback
 }
