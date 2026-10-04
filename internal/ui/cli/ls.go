@@ -33,6 +33,7 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 			noGit, _ := cmd.Flags().GetBool("no-git")
 			limit, _ := cmd.Flags().GetInt("limit")
 			cloudOnly, _ := cmd.Flags().GetBool("cloud")
+			env, _ := cmd.Flags().GetString("env")
 			if len(args) == 1 {
 				name := strings.TrimSuffix(args[0], ":")
 				if !r.app.IsCloud(name) {
@@ -51,6 +52,7 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 				case agentID != "" && string(e.Agent) != agentID:
 				case liveOnly && e.Live.State != agent.Live:
 				case repo != "" && !strings.Contains(strings.ToLower(identity(e)+" "+e.Session.CWD), strings.ToLower(repo)):
+				case env != "" && (e.Cloud == nil || e.Cloud.Env != env && !strings.EqualFold(e.Cloud.EnvLabel, env)):
 				default:
 					kept = append(kept, e)
 				}
@@ -154,6 +156,7 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 	cmd.Flags().Bool("no-git", false, "skip the git probe (faster)")
 	cmd.Flags().Bool("no-local", false, "skip this machine")
 	cmd.Flags().Bool("cloud", false, "only cloud sessions (and the local sessions their vendor mirrors)")
+	cmd.Flags().String("env", "", "only cloud sessions run in this environment (its id or name)")
 	cmd.Flags().Int("limit", 8, "sessions shown per repository (0 = all)")
 	cmd.Flags().Bool("json", false, "output JSON")
 	return cmd
@@ -178,6 +181,12 @@ func cloudBranchInfo(e app.Entry) string {
 	}
 	if e.Cloud.PR != "" {
 		parts = append(parts, "PR "+e.Cloud.PR)
+	}
+	if env := nonEmpty(e.Cloud.EnvLabel, e.Cloud.Env); env != "" {
+		parts = append(parts, "env "+env)
+	}
+	if e.Cloud.Changes != "" {
+		parts = append(parts, e.Cloud.Changes)
 	}
 	return strings.Join(parts, " · ")
 }

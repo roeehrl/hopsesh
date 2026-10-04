@@ -38,6 +38,8 @@ function message(b) {
 }
 
 function codeLine(b) {
+  if (b.written) return h("span", { class: "muted", style: "font-size:12.5px" }, "The code is here: ", h("span", { class: "mono", style: "font-size:11.5px" }, b.worktree),
+    b.branch ? [" on ", h("span", { class: "mono", style: "font-size:11.5px" }, b.branch)] : null, b.changes ? ` (${b.changes})` : null, `. The cloud ${b.noun || "session"} is untouched.`);
   if (b.noBranch) return h("span", { class: "muted", style: "font-size:12.5px" }, "The cloud session never pushed its work, so there is no code to bring. ", h("span", { class: "mono", style: "font-size:11.5px" }, b.worktree));
   return h("span", { class: "muted", style: "font-size:12.5px" }, "The code is here in full: ", h("span", { class: "mono", style: "font-size:11.5px" }, b.worktree),
     b.branch ? [" on ", h("span", { class: "mono", style: "font-size:11.5px" }, b.branch)] : null, b.renamed ? ` (renamed from ${b.renamed})` : null, ". The cloud session is untouched.");
@@ -78,13 +80,17 @@ function render(b) {
     case "complete":
       body = h("section", { class: "outcome ok", "aria-labelledby": "out-h" }, h("span", { class: "sec-h ok" }, "Complete"),
         h("div", { class: "out-head" }, badge("ok", "✓"), h("div", {}, h("h2", { id: "out-h" }, `“${b.title}” is here in ${b.agent}`),
-          h("span", { class: "muted", style: "font-size:12px" }, b.stated ? `${b.restored} of ${b.expected} messages · checked` : `${b.restored} messages`))),
+          h("span", { class: "muted", style: "font-size:12px" }, b.written ? (b.fidelity === "code" ? `The ${b.noun || "session"}'s title and what came of it, written by hopsesh` : `${b.restored} messages, as text`)
+            : b.stated ? `${b.restored} of ${b.expected} messages · checked` : `${b.restored} messages`))),
         h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" },
-          b.continueName ? h("button", { class: "btn primary", onclick: () => continueIn(b) }, `Continue in ${b.continueName}`) : null,
-          h("button", { class: "btn" + (b.continueName ? "" : " primary"), id: "open", onclick: () => api("OpenBrought", b.journal).catch(fail) }, `Open in ${sys.terminal}`),
+          b.continueName && !b.written ? h("button", { class: "btn primary", onclick: () => continueIn(b) }, `Continue in ${b.continueName}`) : null,
+          h("button", { class: "btn" + (b.continueName && !b.written ? "" : " primary"), id: "open", onclick: () => api("OpenBrought", b.journal).catch(fail) }, `Open in ${sys.terminal}`),
           h("button", { class: "btn", onclick: async () => { await api("CopyText", b.command); toast("Copied"); } }, "Copy the command")),
         h("div", { class: "term" }, b.command), codeLine(b),
         (b.warnings || []).map((w) => h("span", { class: "warn", style: "font-size:12px" }, w)),
+        (b.loss || []).length ? h("details", { class: "sec" }, h("summary", { style: "cursor:pointer;font-size:12.5px" }, "What stays in the cloud"),
+          h("ul", { style: "margin:6px 0 0;padding-left:18px;font-size:12.5px" }, b.loss.map((l) => h("li", {}, l[0].toUpperCase() + l.slice(1))))) : null,
+        b.url ? h("div", {}, linkBtn(`Open the ${b.noun || "session"} in the browser`, b.url)) : null,
         h("div", { class: "out-acts" }, h("button", { class: "btn", onclick: () => doUndo(b) }, "Undo", h("span", { class: "kbd" }, keys("mod+alt+Z"))), back));
       break;
     case "partial":

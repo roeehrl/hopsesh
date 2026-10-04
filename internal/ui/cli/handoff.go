@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/roeehrl/hopsesh/internal/app"
+	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
@@ -20,13 +21,17 @@ func addHandoffFlags(cmd *cobra.Command) {
 	f.Bool("bundle", false, "let the agent upload the repository itself instead of pushing a branch (where the cloud takes one)")
 	f.String("brief-file", "", "use this text as the briefing instead of hopsesh's (it is checked for secrets too)")
 	f.String("cleanup", "", "when hopsesh deletes the handoff branch: after-merge, on-undo or never (default from config)")
+	f.String("env", "", "the cloud environment to run in, for a cloud that needs one (codex-cloud: its id or name; default: the one set for the repository)")
+	f.Int("attempts", 0, "ask the cloud for this many attempts at once, where it runs them (codex-cloud: 1 to 4)")
+	f.Bool("starting-diff", false, "send the changes with the cloud task as a starting diff instead of pushing a branch (codex-cloud; the session's branch must be on the remote as it is here)")
 }
 
 func handoffCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "handoff [<machine>:][<agent>/]<id-or-title> --to <cloud>",
 		Short: "Hand a session off to an agent's cloud: a briefing and the code, never the conversation",
-		Long: `Starts a session in an agent's cloud (claude-cloud: Claude Code on the web) that continues this one.
+		Long: `Starts a session in an agent's cloud (claude-cloud: Claude Code on the web; codex-cloud: a Codex cloud
+task) that continues this one.
 No cloud takes a conversation, so the cloud agent gets a briefing (about 2,000 tokens, secrets
 masked) as its first prompt, and the code on a branch: the session's own branch when it is
 clean and already on GitHub, otherwise a new hopsesh/handoff/… branch with a snapshot of
@@ -37,7 +42,13 @@ credentials (.env, *.pem, *.key, …) never go.
 The session here is marked "continued in … on <cloud>" (--no-mark to skip). Nothing changes
 until you confirm (or pass --yes). hopsesh undo deletes the branch and the mark; the cloud
 session itself stays in the cloud until you archive it there. Allow the cloud first:
-hopsesh clouds allow <cloud>. The cloud session uses your plan's allowance.`,
+hopsesh clouds allow <cloud>. The cloud session uses your plan's allowance.
+
+Codex cloud runs each task in an environment you made on the web: name it with --env (its
+id or its name; hopsesh lists the ones your recent tasks used, and remembers the one you
+pick for the repository). A small change on a branch already pushed can go with the task as
+a starting diff (--starting-diff) instead of on a new branch. Only Codex cloud (legacy)
+tasks are reachable: the new Codex Cloud has no command line yet.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			to, _ := cmd.Flags().GetString("to")
@@ -86,6 +97,9 @@ func (r *run) handoffOptions(cmd *cobra.Command, cloud string) (move.Options, er
 		o.Mark = false
 	}
 	o.CarryRules, _ = f.GetBool("carry-rules")
+	o.Env, _ = f.GetString("env")
+	o.Attempts, _ = f.GetInt("attempts")
+	o.StartingDiff, _ = f.GetBool("starting-diff")
 	if c, _ := f.GetString("cleanup"); c != "" {
 		switch c {
 		case move.CleanupAfterMerge, move.CleanupOnUndo, move.CleanupNever:
@@ -171,6 +185,13 @@ func handoff(cmd *cobra.Command, refArg, cloud string) error {
 	if res != nil && res.Handoff != nil {
 		r.renderHandedOff(res)
 	}
+	if applyErr == nil && r.app.RememberEnv(p) {
+		if err := config.Save(r.app.Cfg); err != nil {
+			r.printf("  ! Could not remember the environment for %s: %v\n", p.Handoff.Repo, err)
+		} else if !r.jsonOut {
+			r.printf("  The environment %s is now %s's (hopsesh clouds env).\n", p.Handoff.EnvName, p.Handoff.Repo)
+		}
+	}
 	return applyErr
 }
 
@@ -191,6 +212,8 @@ func (r *run) renderHandoffPlan(p *move.Plan) {
 	}
 	switch {
 	case hp.Branch == "":
+	case hp.Code == agent.ViaStartingDiff:
+		r.printf("  code      %d changed file(s) as a starting diff, on branch %s (nothing is pushed)\n", len(hp.Tracked)+len(hp.Untracked), hp.Branch)
 	case hp.Code == agent.ViaBundle:
 		r.printf("  code      an upload by %s from branch %s (nothing is pushed)\n", hp.Agent, hp.Branch)
 	case hp.Reuse:
@@ -224,12 +247,31 @@ func (r *run) renderHandoffPlan(p *move.Plan) {
 	case move.MarkWhenStopped:
 		r.printf("  mark      %q once it ends (it is still open)\n", hp.MarkTitle)
 	}
+	if hp.EnvNeeded {
+		switch {
+		case hp.Env != "":
+			r.printf("  env       %s\n", hp.EnvName)
+		default:
+			for _, e := range hp.Envs {
+				r.printf("  env?      --env %s   %s\n", e.Value, e.Label)
+			}
+		}
+	}
+	if hp.Attempts > 1 {
+		r.printf("  attempts  %d at once\n", hp.Attempts)
+	}
 	for _, c := range hp.Checks {
 		mark := map[string]string{"ok": "✓", "warn": "!", "err": "✗"}[c.State]
 		r.printf("  %s %s\n", mark, c.Text)
 	}
 	if hp.BundleOffer != "" && hp.Code != agent.ViaBundle {
 		r.printf("  → hand it off as an upload: add --bundle\n")
+	}
+	if hp.CanStartingDiff && hp.Code != agent.ViaStartingDiff {
+		r.printf("  → %s: add --starting-diff\n", hp.StartingDiffOffer)
+	}
+	for _, l := range hp.Limits {
+		r.printf("  · %s\n", l)
 	}
 	for _, n := range hp.Notes {
 		r.printf("  · %s\n", n)
@@ -259,9 +301,15 @@ func (r *run) renderHandedOff(res *move.Result) {
 		return
 	}
 	r.printf("\n✓ Handed off to %s\n", hr.CloudTitle)
-	r.printf("  Session %s is running.\n\n  %s\n\n", hr.Session, hr.URL)
-	if hr.Branch != "" && hr.Code == string(agent.ViaBranch) {
+	r.printf("  %s %s is running.\n\n  %s\n\n", capital(nonEmpty(hr.Noun, "session")), hr.Session, hr.URL)
+	switch {
+	case hr.Branch != "" && hr.Code == string(agent.ViaBranch):
 		r.printf("  Branch %s on %s\n", hr.Branch, hr.Repo)
+	case hr.Code == string(agent.ViaStartingDiff):
+		r.printf("  The changes went with it as a starting diff, on %s\n", hr.Branch)
+	}
+	if hr.EnvName != "" {
+		r.printf("  Environment %s\n", hr.EnvName)
 	}
 	if len(hr.Stayed) > 0 {
 		r.printf("  Stayed here: %s\n", strings.Join(hr.Stayed, ", "))
@@ -278,7 +326,9 @@ func (r *run) renderHandedOff(res *move.Result) {
 		r.printf("  ! %s\n", w)
 	}
 	r.printf("  When it finishes: hopsesh pull %s:%s brings it here.\n", hr.Cloud, hr.Session)
-	r.printf("  Send it a message: hopsesh followup %s:%s \"…\"\n", hr.Cloud, hr.Session)
+	if hr.Follow {
+		r.printf("  Send it a message: hopsesh followup %s:%s \"…\"\n", hr.Cloud, hr.Session)
+	}
 	r.printf("  Undo with: hopsesh undo %s (%s)\n", res.Journal, hr.Manual)
 }
 
@@ -328,4 +378,12 @@ allowance. Nothing is sent until you confirm (or pass --yes).`,
 	cmd.Flags().Bool("yes", false, "do not ask for confirmation")
 	cmd.Flags().Bool("json", false, "output JSON")
 	return cmd
+}
+
+// capital is s with its first letter in upper case.
+func capital(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }

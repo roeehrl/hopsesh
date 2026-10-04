@@ -2,25 +2,37 @@ package codex
 
 import "github.com/roeehrl/hopsesh/sdk/agent"
 
-// cloud declares Codex cloud (the legacy cloud the open-source CLI talks to) as data: the
-// module reaches it through the codex binary only (codex cloud exec, list, status, diff,
-// apply), never through the ChatGPT backend. The capability methods come later; the
-// declaration already drives the drift check and the location model.
+// cloud declares Codex cloud (the legacy cloud the open-source CLI talks to): the module
+// reaches it through the codex binary only (codex cloud exec, list, status, diff; codex
+// login status), never through the ChatGPT backend.
 func cloud() agent.Cloud {
 	return agent.Cloud{
-		Name:   "codex-cloud",
+		Name:   cloudName,
 		Title:  "Codex cloud",
 		Driver: "codex",
-		// The cloud commands were read from 0.153.2's help; they run against the stand-in
-		// cloud in the tests until a real round trip is checked by hand.
+		// The cloud commands were read from 0.153.2's help and their output from openai/codex's
+		// source; they run against the stand-in cloud in the tests, and scripts/cloud-smoke.sh
+		// checks a real round trip by hand.
 		Tested: []string{"0.153"},
 		Hosts:  []string{"github.com"},
-		// Up is a briefing in the task's prompt; down is the task's diff, title and summary.
+		// Up is a briefing in the task's prompt; down is the task's diff, its title and a
+		// summary (the CLI prints no messages).
 		Up:       agent.FidBrief,
 		Down:     agent.FidCode,
+		Summary:  true,
 		CodeUp:   []agent.CodeWay{agent.ViaBranch, agent.ViaStartingDiff},
-		CodeDown: []agent.CodeWay{agent.ViaDiff, agent.ViaPR},
+		CodeDown: []agent.CodeWay{agent.ViaDiff},
 		Needs:    []agent.Need{agent.NeedSubscriptionLogin, agent.NeedGitHub, agent.NeedPushedBranch, agent.NeedEnvironment},
+		Noun:     "task",
+		// The new VM-based Codex Cloud (DevDay, 2026-09-29) is used from the web, the phone and
+		// the desktop app only; its native client (ThreadService, openai/codex#50113) is not
+		// released.
+		Limits: []string{
+			"Codex cloud (legacy) tasks only: the new Codex Cloud has no command line yet",
+			"A task comes back as its title and its diff; its messages stay in the cloud",
+		},
+		// The CLI cannot list or create environments; its picker shows them.
+		EnvHint: "open `codex cloud` once to create one",
 		Watch: agent.Watch{
 			Surface: "cloud tasks through `codex cloud exec --env --branch` (with CODEX_STARTING_DIFF), `codex cloud list --json`, `status`, `diff` and `apply`, `codex apply`, the cloud environments, and the docs sentence that a handoff to a Codex cloud environment isn't supported",
 			// Never the 2.9 MB codex-manual.md.
@@ -35,10 +47,10 @@ func cloud() agent.Cloud {
 			Help: [][]string{
 				{"codex", "--help"}, {"codex", "cloud", "--help"}, {"codex", "cloud", "exec", "--help"}, {"codex", "cloud", "list", "--help"},
 				{"codex", "cloud", "status", "--help"}, {"codex", "cloud", "diff", "--help"}, {"codex", "cloud", "apply", "--help"},
-				{"codex", "apply", "--help"}, {"codex", "features", "list"},
+				{"codex", "apply", "--help"}, {"codex", "login", "status", "--help"}, {"codex", "features", "list"},
 			},
 			// A new resume, attach or pull subcommand would show in the help diffs.
-			Relies: []string{"cloud", "exec", "list", "status", "diff", "apply", "--env", "--branch", "--json", "--limit"},
+			Relies: []string{"cloud", "exec", "list", "status", "diff", "--env", "--branch", "--attempts", "--json", "--limit", "--cursor", "login status"},
 			Issues: []string{"openai/codex#50113"},
 			Code: &agent.WatchCode{
 				Repo: "openai/codex",

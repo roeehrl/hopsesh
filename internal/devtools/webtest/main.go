@@ -2,11 +2,12 @@
 // the real assets and the real service (internal/ui/gui) on a demo home made from the
 // agents' test fixtures, with a stand-in for the Wails runtime. It is not shipped.
 //
-// The demo home also has a stand-in Claude Code cloud and Copilot cloud agent: this
-// program, run as claude or gh, is the stand-in claude or gh; the demo repository's GitHub
-// remote is a local bare repository; POST /cloud adds a cloud session (?cloud=copilot-cloud
-// for a Copilot task; and sets the failure the next teleport plays); POST /dirty leaves work
-// in progress in the demo repository, for a hand-off; and a command the window opens "in a
+// The demo home also has stand-in Claude Code and Codex clouds and a Copilot cloud agent:
+// this program, run as claude, codex or gh, is the stand-in claude, codex or gh; the demo
+// repository's GitHub remote is a local bare repository; POST /cloud adds a cloud session
+// (?cloud=copilot-cloud for a Copilot task, ?cloud=codex-cloud for a Codex cloud task with
+// ?env=; it sets the failure the next driver call plays); POST /dirty leaves work in
+// progress in the demo repository, for a hand-off; and a command the window opens "in a
 // terminal" runs in the background instead.
 //
 //	go run ./internal/devtools/webtest -addr 127.0.0.1:8765 -home /tmp/demo
@@ -50,8 +51,11 @@ window.__emit = (name, data) => (listeners[name] || []).forEach((f) => f({ data 
 
 func main() {
 	name := strings.TrimSuffix(strings.ToLower(filepath.Base(os.Args[0])), ".exe")
-	if name == "claude" {
+	switch name {
+	case "claude":
 		os.Exit(fakeagent.Claude())
+	case "codex":
+		os.Exit(fakeagent.Codex())
 	}
 	if code, ok := fakeagent.Vendor(name); ok {
 		os.Exit(code)
@@ -139,7 +143,12 @@ func main() {
 		}
 		mu.Lock()
 		defer mu.Unlock()
-		id, err := seedCloud(r.URL.Query().Get("cloud"), r.URL.Query().Get("title"), r.URL.Query().Get("work") != "0")
+		q := r.URL.Query()
+		seed := func(title string, work bool) (string, error) { return seedCloud(q.Get("cloud"), title, work) }
+		if q.Get("cloud") == fakecloud.CodexCloud {
+			seed = func(title string, work bool) (string, error) { return seedCodex(title, q.Get("env"), work) }
+		}
+		id, err := seed(q.Get("title"), q.Get("work") != "0")
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -217,8 +226,9 @@ func call(w http.ResponseWriter, r *http.Request, svc *gui.App) {
 // origin is the demo repository's stand-in GitHub remote.
 var origin fakecloud.Origin
 
-// cloudWorld puts the stand-in claude first on PATH and points the demo repository's
-// GitHub remote at a local bare repository, with main pushed there.
+// cloudWorld puts the stand-in claude and codex first on PATH (the account has the Codex
+// cloud environments env_api, "acme-api", and env_web, "acme-web") and points the demo
+// repository's GitHub remote at a local bare repository, with main pushed there.
 func cloudWorld(h string) error {
 	bin := filepath.Join(h, "bin")
 	if err := os.MkdirAll(bin, 0o700); err != nil {
@@ -228,7 +238,7 @@ func cloudWorld(h string) error {
 	if err != nil {
 		return err
 	}
-	for _, name := range []string{"claude", "gh"} {
+	for _, name := range []string{"claude", "codex", "gh"} {
 		if runtime.GOOS == "windows" {
 			b, err := os.ReadFile(self)
 			if err == nil {
@@ -243,7 +253,7 @@ func cloudWorld(h string) error {
 	}
 	gitConfig := filepath.Join(h, "gitconfig")
 	for k, v := range map[string]string{"PATH": bin + string(os.PathListSeparator) + os.Getenv("PATH"), "GIT_CONFIG_GLOBAL": gitConfig,
-		"GIT_CONFIG_NOSYSTEM": "1", "FAKE_CLOUD_DIR": filepath.Join(h, "cloud"), "FAKE_CLOUD_FAIL": "",
+		"GIT_CONFIG_NOSYSTEM": "1", "FAKE_CLOUD_DIR": filepath.Join(h, "cloud"), "FAKE_CLOUD_FAIL": "", "FAKE_CODEX_ENVS": "env_api=acme-api,env_web=acme-web",
 		"GIT_AUTHOR_NAME": "Sam Doe", "GIT_AUTHOR_EMAIL": "sam@example.com", "GIT_COMMITTER_NAME": "Sam Doe", "GIT_COMMITTER_EMAIL": "sam@example.com"} {
 		os.Setenv(k, v)
 	}
@@ -272,6 +282,29 @@ func seedCloud(cloud, title string, work bool) (string, error) {
 	s, err := fakecloud.Open(os.Getenv("FAKE_CLOUD_DIR")).Seed(fakecloud.Session{Cloud: cloud, Title: title, Repo: "github.com/example/demo",
 		CloneURL: origin.FileURL(), Branch: "main", Code: "branch",
 		Messages: []fakecloud.Message{{Role: "user", Text: "[hopsesh] " + title}, {Role: "assistant", Text: "On it."}}})
+	if err != nil || !work {
+		return s.ID, err
+	}
+	return s.ID, fakecloud.Work(fakecloud.Proc{Vars: map[string]string{}}, s.ID, false)
+}
+
+// seedCodex adds a Codex cloud task on the demo repository's main in an environment
+// (worked: done, with a diff) and returns its id.
+func seedCodex(title, env string, work bool) (string, error) {
+	if title == "" {
+		title = "Add a changelog entry"
+	}
+	if env == "" {
+		env = "env_api"
+	}
+	label := map[string]string{"env_api": "acme-api", "env_web": "acme-web"}[env]
+	head, err := exec.Command("git", "-C", filepath.Dir(origin.Bare), "--git-dir", origin.Bare, "rev-parse", "main").Output()
+	if err != nil {
+		return "", err
+	}
+	s, err := fakecloud.Open(os.Getenv("FAKE_CLOUD_DIR")).Seed(fakecloud.Session{Cloud: fakecloud.CodexCloud, Title: title, Repo: "github.com/example/demo",
+		CloneURL: origin.FileURL(), Branch: "main", Base: strings.TrimSpace(string(head)), Code: "branch", Env: env, EnvLabel: label,
+		Messages: []fakecloud.Message{{Role: "user", Text: title}}})
 	if err != nil || !work {
 		return s.ID, err
 	}

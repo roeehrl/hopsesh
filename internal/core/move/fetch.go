@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
 
@@ -76,6 +75,11 @@ type FetchInput struct {
 	// MirrorOf is the session a Remote Control mirror mirrors ("machine:agent/id"), when
 	// the cloud session is one.
 	MirrorOf string
+	// ContinueInstall is Continue's install here.
+	ContinueInstall agent.Install
+	// Prompt is the first prompt the cloud session got, when hopsesh started it (a cloud
+	// that brings back no prompt of its own shows its title in its place).
+	Prompt string
 }
 
 // FetchPlan is the cloud part of a fetch plan.
@@ -101,9 +105,22 @@ type FetchPlan struct {
 	// FastForward: LocalBranch is here already, from an earlier fetch of the code: it moves
 	// forward to the cloud's work (fast-forward only; a new branch when it cannot).
 	FastForward bool `json:"fastForward,omitempty"`
-	// Diff: the code comes as the cloud's patch (CodeDown ViaDiff; a session with no
-	// branch), committed on LocalBranch in the new worktree.
-	Diff     bool          `json:"diff,omitempty"`
+	// Diff: the code comes as the cloud's patch (CodeDown ViaDiff), committed on LocalBranch
+	// in the new worktree, on top of the branch the session started from (or of the
+	// checkout's HEAD when hopsesh does not know it).
+	Diff bool `json:"diff,omitempty"`
+	// Write: the driver needs no terminal and brings the conversation as text (or, for a
+	// code-only cloud, the task's title and summary); hopsesh writes it here as a new
+	// session of the agent it goes to (Writer), with Messages messages.
+	Write    bool   `json:"write,omitempty"`
+	Writer   string `json:"writer,omitempty"` // the agent that gets it ("Codex")
+	Messages int    `json:"messages,omitempty"`
+	// Changes sums up the patch ("+12 −3 · 2 files").
+	Changes string `json:"changes,omitempty"`
+	Noun    string `json:"noun"` // what the cloud calls its sessions ("task")
+	// Terminal: the driver needs the user's terminal (Claude Code's teleport); otherwise
+	// hopsesh brings it all by itself.
+	Terminal bool          `json:"terminal,omitempty"`
 	Rename   bool          `json:"rename"`
 	CodeOnly bool          `json:"codeOnly,omitempty"`
 	Run      agent.Command `json:"run"`
@@ -122,6 +139,7 @@ type FetchPlan struct {
 	Relation  string         `json:"relation"`
 
 	originalHead ir.Cursor
+	fetched      *agent.Fetched // what the driver brought while planning (Write)
 }
 
 // BuildFetch works out a fetch. It asks git and the driver read-only questions; it writes
@@ -136,7 +154,11 @@ func BuildFetch(ctx context.Context, in FetchInput, opt Options) (*Plan, error) 
 		}
 	}
 	fp := &FetchPlan{Cloud: cl.Name, CloudTitle: cl.Title, Session: s.Key.Session, URL: s.URL, Fidelity: cl.Down, Repo: s.Repo,
-		CloudBranch: s.Branch, BranchState: BranchUnknown, Rename: opt.RenameVendor, CodeOnly: opt.CodeOnly, Relation: RelationNew}
+		CloudBranch: s.Branch, BranchState: BranchUnknown, Rename: opt.RenameVendor, CodeOnly: opt.CodeOnly, Relation: RelationNew,
+		Noun: cl.SessionNoun(), Changes: s.Changes, Terminal: needs(cl, agent.NeedTerminal)}
+	if _, canFetch := in.Module.(agent.CloudFetcher); canFetch && s.Key.Session != "" && diffDown(cl, s.Branch) {
+		fp.Diff = true // the code comes as the cloud's patch, whichever checkout it lands in
+	}
 	p := &Plan{Kind: KindFetch, Key: s.Key, Title: title, Agent: spec.Name, Source: Endpoint{Location: cl.Name},
 		Target: Endpoint{Location: in.Machine.Name, OS: in.Machine.Facts.OS, Version: in.Install.Version}, Options: opt, Mark: MarkOff,
 		Fetch: fp, fetchIn: &in}
@@ -165,7 +187,11 @@ func BuildFetch(ctx context.Context, in FetchInput, opt Options) (*Plan, error) 
 	top := planFetchRepo(ctx, in, fp, check)
 	if top != "" {
 		planFetchBranch(ctx, in, fp, opt, top, check)
-		fp.Worktree = freePath(filepath.Join(filepath.Dir(top), filepath.Base(top)+"-"+worktreeName(s, cl)))
+		named := s
+		if fp.Diff {
+			named.Branch = "" // the branch it started from, not its own: name the worktree after the task
+		}
+		fp.Worktree = freePath(filepath.Join(filepath.Dir(top), filepath.Base(top)+"-"+worktreeName(named, cl)))
 		if in.Machine.Local {
 			fp.Worktree = realIntended(fp.Worktree)
 		}
@@ -181,14 +207,19 @@ func BuildFetch(ctx context.Context, in FetchInput, opt Options) (*Plan, error) 
 		if !ok {
 			return nil, fmt.Errorf("%w: hopsesh cannot bring %s sessions to %s yet", agent.ErrUnsupported, cl.Title, spec.Name)
 		}
-		f, err := fetcher.FetchCloud(ctx, in.Host, in.Install, s.Key.Session, agent.FetchTarget{Dir: fp.Worktree, Code: agent.ViaBranch})
+		code := agent.ViaBranch
+		if fp.Diff {
+			code = agent.ViaDiff
+		}
+		f, err := fetcher.FetchCloud(ctx, in.Host, in.Install, s.Key.Session, agent.FetchTarget{Dir: fp.Worktree, Code: code})
 		switch {
 		case err != nil:
 			check("err", refusal(err, spec, cl))
+		case f.Run == nil && f.Segment != nil:
+			planFetchWrite(in, p, &f, opt, check)
 		case f.Run == nil:
-			// A driver that needs no terminal brings the code (and perhaps the messages as
-			// text, which are not written into an agent here yet): only the code comes home.
-			check("err", fmt.Sprintf("hopsesh brings only the code of %s sessions so far; the conversation stays in the cloud. Choose the code only", cl.Title))
+			// A driver that needs no terminal and brings no conversation brings the code only.
+			check("err", fmt.Sprintf("hopsesh brings only the code of %s sessions; the conversation stays in the cloud. Choose the code only", cl.Title))
 		default:
 			fp.Run = *f.Run
 			fp.Run.Unset = union(fp.Run.Unset, cl.Unset)
@@ -208,18 +239,96 @@ func BuildFetch(ctx context.Context, in FetchInput, opt Options) (*Plan, error) 
 			}
 		}
 	}
-	if s.State == agent.CloudRunning {
-		check("warn", "The session is still running in the cloud. You get the conversation as it is now")
+	if s.State == agent.CloudRunning && !fp.Write {
+		check("warn", fmt.Sprintf("The %s is still running in the cloud. You get the conversation as it is now", fp.Noun))
 	}
-	relateFetch(ctx, in, p, opt, check)
+	if !fp.Write {
+		relateFetch(ctx, in, p, opt, check)
+	}
 	return p, nil
+}
+
+// planFetchWrite plans writing what a driver brought without a terminal as a new session
+// of the agent it goes to: the conversation as text, or (a code-only cloud) the task's
+// title and summary, beside its code. Any module that writes sessions can take it.
+func planFetchWrite(in FetchInput, p *Plan, f *agent.Fetched, opt Options, check func(string, string)) {
+	fp, cl := p.Fetch, in.Cloud
+	if _, own := in.Module.(agent.Writer); !own {
+		// A cloud-only module (Copilot's log, Amp's thread): which local agent its text goes
+		// into is still to be decided, so only the code comes home for now.
+		check("err", fmt.Sprintf("hopsesh brings only the code of %s sessions so far; the conversation stays in the cloud. Choose the code only", cl.Title))
+		return
+	}
+	tm := in.Module
+	if in.Continue != nil {
+		tm = in.Continue
+	}
+	if _, ok := tm.(agent.Writer); !ok {
+		check("err", fmt.Sprintf("hopsesh can't write %s sessions yet; choose the code only", tm.Spec().Name))
+		return
+	}
+	fp.Write, fp.Writer, fp.fetched, fp.Loss = true, tm.Spec().Name, f, f.Loss
+	p.Agent = fp.Writer
+	for _, n := range f.Segment.Nodes {
+		if n.Kind == ir.KindMessage {
+			fp.Messages++
+		}
+	}
+	if t := f.Segment.Header.Title; t != "" && in.Session.Title == "" {
+		p.Title = t
+	}
+	if fp.Diff {
+		switch {
+		case len(f.Code.Diff) == 0 && !f.Code.Applied && in.Session.State == agent.CloudRunning:
+			check("err", fmt.Sprintf("The %s is still running in %s, so there is no code to bring yet. Try again when it is done", fp.Noun, cl.Title))
+		case len(f.Code.Diff) == 0 && !f.Code.Applied:
+			check("err", fmt.Sprintf("%s has no diff for this %s, so there is no code to bring", cl.Title, fp.Noun))
+		default:
+			fp.Changes = nonEmpty(fp.Changes, diffWords(f.Code.Diff))
+			check("ok", fmt.Sprintf("%s's changes (%s) are committed on %s in the new worktree", cl.Title, fp.Changes, fp.LocalBranch))
+		}
+	}
+	if opt.AppendOriginal {
+		check("err", fmt.Sprintf("This comes as a new %s session; it can't be added to the original", fp.Writer))
+	}
+	check("ok", fmt.Sprintf("Written here as a new %s session (%s)", fp.Writer, plural(fp.Messages, "message")))
+}
+
+// diffWords sums up a unified diff for people: "+12 −3 · 2 files".
+func diffWords(diff []byte) string {
+	files, added, removed := 0, 0, 0
+	for _, l := range strings.Split(string(diff), "\n") {
+		switch {
+		case strings.HasPrefix(l, "diff --git "):
+			files++
+		case strings.HasPrefix(l, "+++ "), strings.HasPrefix(l, "--- "):
+		case strings.HasPrefix(l, "+"):
+			added++
+		case strings.HasPrefix(l, "-"):
+			removed++
+		}
+	}
+	unit := "files"
+	if files == 1 {
+		unit = "file"
+	}
+	return fmt.Sprintf("+%d −%d · %d %s", added, removed, files, unit)
+}
+
+// diffDown reports whether a cloud's code comes down as a patch for this session: the
+// cloud prefers it, or (a cloud that can bring either) the session has no branch.
+func diffDown(cl agent.Cloud, branch string) bool {
+	if len(cl.CodeDown) == 0 {
+		return false
+	}
+	return cl.CodeDown[0] == agent.ViaDiff || branch == "" && hasWay(cl.CodeDown, agent.ViaDiff)
 }
 
 // planFetchRepo checks the checkout the worktree comes from and returns its main folder
 // ("" when there is none to use).
 func planFetchRepo(ctx context.Context, in FetchInput, fp *FetchPlan, check func(string, string)) string {
 	if in.Checkout == "" {
-		check("err", "hopsesh doesn't know which repository this cloud session works on; choose its checkout here")
+		check("err", fmt.Sprintf("hopsesh doesn't know which repository this cloud %s works on; choose its checkout here", fp.Noun))
 		return ""
 	}
 	states, err := repos.ProbeLocal(ctx, []string{in.Checkout}, in.Worktrees)
@@ -254,6 +363,8 @@ func planFetchBranch(ctx context.Context, in FetchInput, fp *FetchPlan, opt Opti
 		switch {
 		case err != nil:
 			check("warn", "hopsesh could not ask origin about "+b+": "+firstLine(err.Error()))
+		case sha == "" && fp.Diff:
+			check("warn", fmt.Sprintf("%s, the branch the %s started from, is no longer on origin; its changes go on the checkout's HEAD here", b, fp.Noun))
 		case sha == "":
 			fp.BranchState = BranchMissing
 			if fp.CodeOnly {
@@ -261,17 +372,18 @@ func planFetchBranch(ctx context.Context, in FetchInput, fp *FetchPlan, opt Opti
 			} else {
 				check("warn", noCode+"; only the conversation comes back")
 			}
+		case fp.Diff:
+			fp.BranchState, fp.Base, fp.Ref = BranchPushed, sha, repos.CloudRef(in.Cloud.Name, b)
+			check("ok", fmt.Sprintf("The %s started from %s, which is on origin", fp.Noun, b))
 		default:
 			fp.BranchState, fp.Base, fp.Ref = BranchPushed, sha, repos.CloudRef(in.Cloud.Name, b)
 			check("ok", "Branch "+b+" is pushed")
 		}
-	} else if fp.CodeOnly {
-		if _, ok := in.Module.(agent.CloudFetcher); ok && fp.Session != "" && slices.Contains(in.Cloud.CodeDown, agent.ViaDiff) {
-			fp.Diff = true
-			check("ok", in.Cloud.Title+"'s changes come as a patch, committed on a new branch here")
-		} else {
-			check("err", "hopsesh doesn't know this session's branch; bring it with its conversation and "+in.Module.Spec().Name+" fetches the branch itself")
-		}
+	} else if fp.CodeOnly && !fp.Diff {
+		check("err", "hopsesh doesn't know this session's branch; bring it with its conversation and "+in.Module.Spec().Name+" fetches the branch itself")
+	}
+	if fp.Diff && fp.CodeOnly {
+		check("ok", in.Cloud.Title+"'s changes come as a patch, committed on a new branch here")
 	}
 	if fp.Base == "" {
 		head, err := repos.Head(ctx, top)
@@ -283,9 +395,9 @@ func planFetchBranch(ctx context.Context, in FetchInput, fp *FetchPlan, opt Opti
 		fp.BaseNote = fmt.Sprintf("%s here is at %s", nonEmpty(repos.CurrentBranch(ctx, top), "the checkout"), short(head))
 	}
 	if fp.Diff {
-		fp.LocalBranch = repos.FreeBranchName(ctx, top, repos.FromBranch(in.Cloud.Name, worktreeName(in.Session, in.Cloud), ""))
+		fp.LocalBranch = repos.FreeBranchName(ctx, top, repos.FromBranch(in.Cloud.Name, string(fp.Session), ""))
 	}
-	if b := fp.CloudBranch; b != "" {
+	if b := fp.CloudBranch; b != "" && !fp.Diff {
 		name := b
 		if opt.RenameVendor && in.Cloud.VendorPrefix != "" && strings.HasPrefix(b, in.Cloud.VendorPrefix) {
 			name = repos.FromBranch(in.Cloud.Name, b, in.Cloud.VendorPrefix)
@@ -376,7 +488,7 @@ func conversationWords(spec agent.Spec, cl agent.Cloud, fp *FetchPlan) string {
 // refusal is a driver's refusal in words.
 func refusal(err error, spec agent.Spec, cl agent.Cloud) string {
 	msg := err.Error()
-	for _, e := range []error{agent.ErrSignedOut, agent.ErrNotEligible, agent.ErrRepoUnsupported, agent.ErrNotInstalled} {
+	for _, e := range []error{agent.ErrSignedOut, agent.ErrNotEligible, agent.ErrRepoUnsupported, agent.ErrNoEnvironment, agent.ErrNotInstalled} {
 		if errors.Is(err, e) {
 			msg = strings.TrimPrefix(msg, e.Error()+": ")
 		}
@@ -384,7 +496,7 @@ func refusal(err error, spec agent.Spec, cl agent.Cloud) string {
 	switch {
 	case errors.Is(err, agent.ErrNotInstalled):
 		return fmt.Sprintf("%s is reached through the `%s` command, which isn't installed here", cl.Title, cl.Driver)
-	case errors.Is(err, agent.ErrSignedOut), errors.Is(err, agent.ErrNotEligible):
+	case errors.Is(err, agent.ErrSignedOut), errors.Is(err, agent.ErrNotEligible), errors.Is(err, agent.ErrRepoUnsupported), errors.Is(err, agent.ErrNoEnvironment):
 		return msg
 	}
 	return fmt.Sprintf("%s could not be asked about the session: %s", spec.Name, firstLine(msg))
@@ -431,6 +543,8 @@ type FetchResult struct {
 	FastForwarded bool   `json:"fastForwarded,omitempty"`
 	Ref           string `json:"ref,omitempty"`
 	Base          string `json:"base"`
+	// Key is the session hopsesh wrote here (agent/session), when it wrote one.
+	Key string `json:"key,omitempty"`
 }
 
 // applyFetch fetches the cloud's branch (when known) into refs/hopsesh/<cloud>/…, makes
@@ -468,7 +582,7 @@ func applyFetch(ctx context.Context, p *Plan, env Env) (*Result, error) {
 		res.Fetch.Base = sha
 	}
 	branch, existing := "", false
-	if fp.CodeOnly {
+	if (fp.CodeOnly || fp.Write) && !fp.Diff && (fp.CodeOnly || fp.LocalBranch != "") {
 		branch = fp.LocalBranch
 		if branch == "" {
 			return res, errors.New("no branch to bring the code on")
@@ -514,17 +628,28 @@ func applyFetch(ctx context.Context, p *Plan, env Env) (*Result, error) {
 		return res, fmt.Errorf("worktree: %w", err)
 	}
 	if fp.Diff {
+		branch = fp.LocalBranch
 		step("committing " + fp.CloudTitle + "'s patch on " + branch)
 		if err := commitPatch(ctx, p, j, branch); err != nil {
+			_ = j.Seal(func(string) (host.FS, error) { return host.LocalFS(), nil })
 			return res, err
+		}
+		if fp.CodeOnly {
+			res.Fetch.Branch = branch
 		}
 	}
 	res.Worktree = fp.Worktree
 	env.Audit.Write(audit.Entry{Action: "git.worktree", Session: p.Key.String(), Detail: map[string]any{"path": fp.Worktree, "commit": base, "branch": branch}})
-	if fp.CodeOnly {
+	switch {
+	case fp.CodeOnly:
 		res.Fetch.Outcome = FetchCode
 		env.Audit.Write(audit.Entry{Action: "cloud.fetch", Session: p.Key.String(), Detail: map[string]any{"cloud": fp.Cloud, "code": true, "journal": j.ID}})
-	} else {
+	case fp.Write:
+		if err := writeFetched(ctx, p, env, j, base, branch, res); err != nil {
+			_ = j.Seal(func(string) (host.FS, error) { return host.LocalFS(), nil })
+			return res, err
+		}
+	default:
 		pf := &Fetch{Journal: j.ID, Time: time.Now().UTC(), Machine: machine, Agent: in.Module.Spec().ID, Cloud: fp.Cloud, CloudTitle: fp.CloudTitle,
 			Session: fp.Session, URL: fp.URL, Title: p.Title, Untitled: in.Session.Title == "", Repo: fp.Repo, Checkout: top, Worktree: fp.Worktree, Base: base,
 			CloudBranch: fp.CloudBranch, VendorPrefix: in.Cloud.VendorPrefix, Rename: fp.Rename, Lineage: in.Lineage,
@@ -553,31 +678,6 @@ func applyFetch(ctx context.Context, p *Plan, env Env) (*Result, error) {
 	}
 	step("done")
 	return res, nil
-}
-
-// commitPatch asks the driver for the session's patch, applies it in the fetch's worktree
-// (detached at the base), commits it, records the branch and puts the worktree on it.
-func commitPatch(ctx context.Context, p *Plan, j *journal.Journal, branch string) error {
-	fp, in := p.Fetch, p.fetchIn
-	fetcher, ok := in.Module.(agent.CloudFetcher)
-	if !ok {
-		return fmt.Errorf("%w: %s cannot bring code", agent.ErrUnsupported, in.Module.Spec().Name)
-	}
-	f, err := fetcher.FetchCloud(ctx, in.Host, in.Install, fp.Session, agent.FetchTarget{Dir: fp.Worktree, Code: agent.ViaDiff})
-	if err != nil {
-		return fmt.Errorf("%s: %w", fp.CloudTitle, err)
-	}
-	if len(f.Code.Diff) == 0 && !f.Code.Applied {
-		return fmt.Errorf("%s brought no patch for %s", fp.CloudTitle, fp.Session)
-	}
-	sha, err := repos.CommitPatch(ctx, fp.Worktree, f.Code.Diff, f.Code.Applied, fmt.Sprintf("%s session %s", fp.CloudTitle, fp.Session))
-	if err != nil {
-		return fmt.Errorf("%s's patch does not apply on %s: %w", fp.CloudTitle, short(fp.Base), err)
-	}
-	if err := j.Ref(in.Machine.Name, fp.Checkout, "refs/heads/"+branch, sha, ""); err != nil {
-		return err
-	}
-	return repos.SwitchNew(ctx, fp.Worktree, branch)
 }
 
 func union(a, b []string) []string {

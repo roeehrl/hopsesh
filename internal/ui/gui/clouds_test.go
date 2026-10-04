@@ -46,25 +46,25 @@ func TestCloudInTheWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Every cloud a module can list or fetch is shown, each off until allowed (Codex cloud
-	// has no capability yet, so it is not).
+	// Every cloud a module can list or fetch is shown, each off until allowed.
 	var names []string
+	codeOnly := map[string]bool{}
 	for _, c := range scan.Clouds {
 		names = append(names, c.Name)
+		codeOnly[c.Name] = c.CodeOnly
 		if c.Allowed || c.Status != "not-allowed" {
 			t.Errorf("%s before consent: %+v", c.Name, c)
 		}
 	}
-	if strings.Join(names, " ") != "claude-cloud copilot-cloud jules devin amp" {
+	if strings.Join(names, " ") != "claude-cloud codex-cloud copilot-cloud jules devin amp" {
 		t.Fatalf("clouds: %v", names)
 	}
-	for _, c := range scan.Clouds[1:] {
-		if !c.CodeOnly || c.Fidelity == "native" {
-			t.Errorf("%s brings only the code so far: %+v", c.Name, c)
+	// Code only: every cloud-only module so far (their text is not written here yet);
+	// Codex cloud's task summary is written as a session.
+	for name, want := range map[string]bool{"claude-cloud": false, "codex-cloud": false, "copilot-cloud": true, "jules": true, "devin": true, "amp": true} {
+		if codeOnly[name] != want {
+			t.Errorf("%s code only: %v", name, codeOnly[name])
 		}
-	}
-	if scan.Clouds[0].CodeOnly {
-		t.Error("Claude Code cloud brings the conversation")
 	}
 	if err := a.SetCloudAllowed("claude-cloud", true); err != nil {
 		t.Fatal(err)
@@ -91,7 +91,7 @@ func TestCloudInTheWindow(t *testing.T) {
 	if row == nil || row.Machine != "claude-cloud" || row.Location != "cloud" || row.Cloud.ID != "session_01PastedAbc123" || row.Cloud.URL == "" || row.Cloud.Checkout == "" {
 		t.Fatalf("cloud row: %+v", row)
 	}
-	if m := a.Machines(); len(m.Clouds) != 5 || !m.Clouds[0].Allowed || m.Clouds[1].Allowed {
+	if m := a.Machines(); len(m.Clouds) != 6 || !m.Clouds[0].Allowed || m.Clouds[1].Allowed {
 		t.Fatalf("machines: %+v", m.Clouds)
 	} else {
 		for _, n := range m.Here.Agents {
@@ -99,6 +99,18 @@ func TestCloudInTheWindow(t *testing.T) {
 				t.Errorf("a cloud-only module is listed as an agent here: %q", n)
 			}
 		}
+	}
+	// Codex cloud's card: its noun, what it cannot reach, and an environment per repository.
+	if err := a.SetCloudEnvironment("codex-cloud", "github.com/example/demo", "env_api"); err != nil {
+		t.Fatal(err)
+	}
+	cx := a.Machines().Clouds[1]
+	if cx.Noun != "task" || !cx.NeedsEnv || len(cx.Limits) == 0 || cx.EnvHint == "" || strings.Join(cx.CodeUp, ",") != "branch,starting-diff" ||
+		strings.Join(cx.CodeDown, ",") != "diff" || len(cx.Repos) != 1 || cx.Repos[0].Env != "env_api" || len(cx.Envs) != 1 {
+		t.Fatalf("codex card: %+v", cx)
+	}
+	if err := a.SetCloudEnvironment("nope", "github.com/example/demo", "x"); err == nil {
+		t.Fatal("an unknown cloud")
 	}
 	ct, err := a.TestCloud("claude-cloud")
 	if err != nil || !ct.OK || ct.Account != "claude.ai · max" {

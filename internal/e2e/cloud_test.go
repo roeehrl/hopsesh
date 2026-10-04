@@ -23,8 +23,11 @@ import (
 // that name.
 func TestMain(m *testing.M) {
 	name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
-	if name == "claude" {
+	switch name {
+	case "claude":
 		os.Exit(fakeagent.Claude())
+	case "codex":
+		os.Exit(fakeagent.Codex())
 	}
 	if code, ok := fakeagent.Vendor(name); ok {
 		os.Exit(code)

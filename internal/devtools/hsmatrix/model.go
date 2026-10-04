@@ -38,15 +38,18 @@ var dims = []struct {
 	{"content", []string{"ascii", "zh", "ja", "ar", "el", "large"}},
 	{"repo", []string{"clean", "unpushed", "uncommitted", "worktree", "none"}},
 	{"naming", []string{"address", "alias"}},
-	{"location", []string{"machine", "claude-cloud"}},
+	{"location", []string{"machine", "claude-cloud", "codex-cloud"}},
 }
 
 // valid rules out combinations that cannot happen.
 func valid(v []string) bool {
 	op, agents, repo, naming, location := v[0], v[1], v[3], v[4], v[5]
 	same := agents == "claude>claude" || agents == "codex>codex"
-	if cloudOp(op) != (location == "claude-cloud") {
+	if cloudOp(op) != (location != "machine") {
 		return false // only a fetch, a hand-off and a cloud round trip involve a cloud
+	}
+	if location == "codex-cloud" {
+		return validCodex(op, agents, repo, naming)
 	}
 	switch op {
 	case "handoff":
@@ -76,6 +79,25 @@ func valid(v []string) bool {
 		return false // agent worktrees are Claude Code's
 	}
 	return true
+}
+
+// validCodex rules the Codex cloud rows: a session here (Claude Code or Codex) goes to
+// Codex cloud (always Codex there) in each state of its checkout (none: refused); a round
+// trip comes home in Codex; a task comes here in Codex or on into Claude Code, done (clean)
+// or still running (unpushed: refused, there is no diff yet).
+func validCodex(op, agents, repo, naming string) bool {
+	if naming != "address" {
+		return false
+	}
+	switch op {
+	case "handoff":
+		return (agents == "claude>codex" || agents == "codex>codex") && (repo != "worktree" || agents == "claude>codex")
+	case "cloud-roundtrip":
+		return (agents == "claude>codex" || agents == "codex>codex") && (repo == "clean" || repo == "uncommitted")
+	case "fetch":
+		return (agents == "codex>codex" || agents == "codex>claude") && (repo == "clean" || repo == "unpushed")
+	}
+	return false
 }
 
 // cloudOp reports whether an op involves a cloud.

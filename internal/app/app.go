@@ -31,11 +31,14 @@ type App struct {
 	PeerDial func(ctx context.Context, h config.Host) (*PeerConn, error)
 	// CloudTimeout bounds one cloud's listing in a scan (0: DefaultCloudTimeout).
 	CloudTimeout time.Duration
+	// tests keeps the clouds' recent read-only probes, so replanning a hand-off does not ask
+	// the vendor again each time (shared by copies of the App; nil: never kept).
+	tests *cloudTests
 }
 
 // New returns an App for the modules and configuration.
 func New(cfg config.Config, reg *registry.Registry, stateDir string, log *audit.Log) *App {
-	return &App{Cfg: cfg, Reg: reg, StateDir: stateDir, Audit: log, Log: slog.Default()}
+	return &App{Cfg: cfg, Reg: reg, StateDir: stateDir, Audit: log, Log: slog.Default(), tests: &cloudTests{m: map[string]cloudTest{}}}
 }
 
 // Modules returns the enabled modules.

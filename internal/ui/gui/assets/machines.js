@@ -76,9 +76,13 @@ function cloudCard(c) {
     h("span", { class: r.ok ? "ok" : "err" }, (r.checks.length ? r.checks.map((x) => x.text).join(" · ") : r.error) + " · " + when(r.at)));
   if (t) show(t);
   const brings = c.fidelity === "native" ? `The whole conversation, copied by ${c.agentName}; hopsesh checks the message count`
-    : !(c.codeDown || []).length ? "Nothing yet: the conversation stays in the cloud"
-    : c.codeOnly ? `The code (${c.codeDown.includes("diff") ? "its patch, committed on a new branch" : "its branch"}); the conversation stays in the cloud for now`
-    : c.fidelity === "code" ? "The code, title and summary" : "The messages, as text";
+    : c.codeOnly ? (!(c.codeDown || []).length ? "Nothing yet: the conversation stays in the cloud"
+      : `The code (${c.codeDown.includes("diff") ? "its patch, committed on a new branch" : "its branch"}); the conversation stays in the cloud for now`)
+    : c.fidelity === "code" ? "The code, title and summary"
+    : !(c.codeDown || []).length ? "The messages, as text (no code)" : "The messages, as text, and the code";
+  const ways = { branch: "a handoff branch", bundle: "an upload when the remote isn't GitHub", "starting-diff": "a starting diff for a few changes on a pushed branch" };
+  const up = (c.codeUp || []).map((w) => ways[w]).filter(Boolean);
+  const hosts = (c.hosts || []).map((x) => (x === "github.com" ? "GitHub" : x)).join(", ");
   return h("section", { class: "card cloud-card", "aria-labelledby": "cc-" + c.name },
     h("div", { class: "set-row" }, h("span", { style: "color:var(--cloud)" }, icon(ICONS.cloud, 16)), h("h3", { id: "cc-" + c.name, style: "margin:0;font-size:15px" }, c.title),
       h("span", { class: "spacer" }), h("span", { style: "font-size:12.5px;font-weight:500" }, "Allow"), allow),
@@ -86,9 +90,13 @@ function cloudCard(c) {
       kv("Driver", c.version ? h("span", { class: "mono", style: "font-size:12px" }, `${c.driver} ${c.version}`) : h("span", { class: "warn" }, `${c.title} is reached through the `, h("span", { class: "mono" }, c.driver), " command, which isn't installed here"),
         c.version ? [" ", h("span", { class: "chip " + (c.tested ? "st-idle" : "st-warn") }, c.tested ? "tested" : "untested"), c.tested ? null : h("span", { class: "muted", style: "font-size:12px" }, ` hopsesh tested ${c.testedOn}`)] : null),
       kv("Signed in", signed),
+      up.length ? kv("Code goes up as", up[0], up.length > 1 ? h("span", { class: "muted" }, " · " + up.slice(1).join(" · ")) : null,
+        !(c.codeUp || []).includes("bundle") && hosts ? h("span", { class: "muted" }, ` · ${hosts} only`) : null) : null,
       kv("Brings back", brings),
       c.vendorPrefix ? kv("Branches", c.rename ? [h("span", { class: "mono", style: "font-size:12px" }, c.vendorPrefix + "…"), " kept here as ", h("span", { class: "mono", style: "font-size:12px" }, `hopsesh/from/${c.name}/…`)] : "Kept as the cloud names them") : null,
-      kv("Listing", c.partial ? `Only what hopsesh started or brought here, and Remote Control mirrors: ${c.agentName} has no list command` : "Every session the cloud lists")),
+      kv("Listing", c.partial ? `Only what hopsesh started or brought here, and Remote Control mirrors: ${c.agentName} has no list command` : `Every ${c.noun || "session"} the cloud lists`)),
+    c.needsEnv ? envTable(c) : null,
+    (c.limits || []).length ? h("div", { style: "display:flex;flex-direction:column;gap:2px" }, c.limits.map((l) => h("span", { class: "muted", style: "font-size:12px" }, l))) : null,
     h("div", { class: "set-row", style: "padding-top:10px;border-top:1px solid var(--line2)" },
       h("button", { class: "btn", disabled: !c.allowed, title: c.allowed ? "A read-only look: the login and the flags hopsesh uses" : "Allow it first", onclick: async (ev) => {
         const btn = ev.currentTarget;
@@ -97,6 +105,51 @@ function cloudCard(c) {
         try { await api("TestCloud", c.name); } catch (e) { fill(result, h("span", { class: "err" }, errText(e))); btn.disabled = false; return; }
         reload();
       } }, "Test"), result));
+}
+
+async function setEnv(c, r, v) {
+  try { await api("SetCloudEnvironment", c.name, r.repo, v); } catch (e) { fail(e); return; }
+  toast(v ? `${r.repo} runs in ${v}` : `${r.repo}: ask each time`);
+  reload();
+}
+
+// otherEnv asks for an environment hopsesh has not seen a task use.
+function otherEnv(c, r) {
+  const field = h("input", { id: "env-other", class: "field", placeholder: "Environment id or name", style: "width:100%" });
+  const d = dialog(h("h2", { style: "margin:0;font-size:16px" }, `${c.title} environment for ${r.repo}`),
+    h("label", { for: "env-other", class: "muted", style: "font-size:12.5px" }, "Its id or its name, as Codex shows it."), field,
+    h("div", { class: "dlg-foot" }, h("button", { class: "btn", onclick: () => d.close() }, "Cancel"),
+      h("button", { class: "btn primary", onclick: async () => { const v = field.value.trim(); if (!v) return; d.close(); await setEnv(c, r, v); } }, "Save")));
+  field.focus();
+}
+
+// envTable is a cloud's environment per repository (Codex cloud runs every task in one):
+// what each repository's hand-offs run in, or "Ask each time".
+function envTable(c) {
+  const choices = c.envs || [];
+  const row = (r) => {
+    const cell = r.unsupported ? h("td", { class: "muted" }, r.unsupported) : (() => {
+      const known = choices.map((e) => ({ value: e.value, label: e.name }));
+      if (r.env && !known.some((e) => e.value === r.env || e.label === r.env)) known.unshift({ value: r.env, label: r.env });
+      const id = "env-" + r.repo.replace(/[^a-z0-9]+/gi, "-");
+      const sel = h("select", { id, onchange: async (ev) => {
+        const v = ev.target.value;
+        if (v === "__other__") { ev.target.value = r.env || ""; otherEnv(c, r); return; }
+        await setEnv(c, r, v);
+      } }, h("option", { value: "", selected: !r.env }, "Ask each time"),
+        known.map((e) => h("option", { value: e.value, selected: e.value === r.env || e.label === r.env }, e.label)),
+        h("option", { value: "__other__" }, "Other…"));
+      return h("td", {}, h("label", { for: id, class: "sr-only" }, `Environment for ${r.repo}`), sel);
+    })();
+    return h("tr", {}, h("td", { class: "mono" }, r.repo), cell);
+  };
+  return h("div", { style: "display:flex;flex-direction:column;gap:6px" },
+    h("span", { style: "font-size:12px;font-weight:500" }, "Environment per repository"),
+    (c.repos || []).length ? h("div", { class: "env-table" }, h("table", { "aria-label": `${c.title} environment per repository` },
+      h("thead", {}, h("tr", {}, h("th", {}, "Repository"), h("th", {}, "Environment"))),
+      h("tbody", {}, c.repos.map(row))))
+      : h("span", { class: "muted", style: "font-size:12px" }, "No repository yet: hopsesh asks for one when you hand a session off."),
+    c.envHint ? h("span", { class: "muted", style: "font-size:11.5px" }, `No environment yet? ${c.envHint[0].toUpperCase() + c.envHint.slice(1)}.`) : null);
 }
 
 function render() {

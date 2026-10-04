@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/core/audit"
@@ -106,6 +107,9 @@ func (inv *Inventory) CloudEntry(a *App, cloud string, id agent.SessionID) (Entr
 	return cloudEntry(mod.Spec(), cl, s, nil), nil
 }
 
+// CloudModule is the enabled module that reaches a cloud, with the cloud's declaration.
+func (a *App) CloudModule(name string) (agent.Module, agent.Cloud, bool) { return a.cloudModule(name) }
+
 // cloudModule is the enabled module that reaches a cloud.
 func (a *App) cloudModule(name string) (agent.Module, agent.Cloud, bool) {
 	for _, r := range a.clouds() {
@@ -174,10 +178,17 @@ func (a *App) planFetch(ctx context.Context, inv *Inventory, e Entry, target age
 		if !ok || !agent.Has(tm, agent.CapWrite) {
 			return nil, move.Input{}, fmt.Errorf("there is no %q agent here that can take a session", target)
 		}
-		if _, ok := here.Install(target); !ok {
+		tin, ok := here.Install(target)
+		if !ok {
 			return nil, move.Input{}, fmt.Errorf("%w: %s has no data folder on this machine yet; start it here once, then try again", agent.ErrNotInstalled, tm.Spec().Name)
 		}
-		fin.Continue = tm
+		fin.Continue, fin.ContinueInstall = tm, tin
+	}
+	if h := move.FindHandoff(a.StateDir, cl.Name, s.Key.Session); h != nil && s.Key.Session != "" {
+		fin.Prompt = h.Brief
+		if fin.Session.Repo == "" {
+			fin.Session.Repo = h.Repo
+		}
 	}
 	if e.Original != "" {
 		for _, x := range inv.Entries {
@@ -275,7 +286,7 @@ func (a *App) KeepPartial(journal string) error {
 func (a *App) Fetches() ([]*move.Fetch, error) { return move.LoadFetches(a.StateDir) }
 
 // TestCloud probes a cloud through its module, read-only: the login and the driver's
-// flags.
+// flags. The result is kept for a little while for the hand-off plans.
 func (a *App) TestCloud(ctx context.Context, name string) (agent.CloudTest, error) {
 	mod, cl, ok := a.cloudModule(name)
 	if !ok {
@@ -289,7 +300,64 @@ func (a *App) TestCloud(ctx context.Context, name string) (agent.CloudTest, erro
 	if err != nil {
 		return agent.CloudTest{}, err
 	}
-	return t.TestCloud(ctx, h, in, name)
+	ct, err := t.TestCloud(ctx, h, in, name)
+	a.tests.keep(name, ct, err)
+	return ct, err
+}
+
+// cloudTestTTL is how long a probe stands for the hand-off plans (a scan forgets it).
+const cloudTestTTL = 90 * time.Second
+
+// cloudTests are recent probes by cloud.
+type cloudTests struct {
+	mu sync.Mutex
+	m  map[string]cloudTest
+}
+
+type cloudTest struct {
+	at  time.Time
+	t   agent.CloudTest
+	err error
+}
+
+func (c *cloudTests) keep(name string, t agent.CloudTest, err error) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.m[name] = cloudTest{time.Now(), t, err}
+}
+
+func (c *cloudTests) recent(name string) (cloudTest, bool) {
+	if c == nil {
+		return cloudTest{}, false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	x, ok := c.m[name]
+	return x, ok && time.Since(x.at) < cloudTestTTL
+}
+
+func (c *cloudTests) forget() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	clear(c.m)
+}
+
+// recentTest is a probe of the cloud from the last little while, or a new one.
+func (a *App) recentTest(ctx context.Context, name string, run func(context.Context) (agent.CloudTest, error)) (agent.CloudTest, error) {
+	if x, ok := a.tests.recent(name); ok {
+		return x.t, x.err
+	}
+	t, err := run(ctx)
+	if ctx.Err() == nil {
+		a.tests.keep(name, t, err)
+	}
+	return t, err
 }
 
 // Brought is a fetch from a cloud as every front end shows it (and the command line's
@@ -322,7 +390,15 @@ type Brought struct {
 	Issue    string `json:"issue,omitempty"`
 	IssueRef string `json:"issueRef,omitempty"`
 	MirrorOf string `json:"mirrorOf,omitempty"`
-	Continue string `json:"continue,omitempty"` // the agent to continue in now (id)
+	// Written: hopsesh wrote the copy from what the driver brought as text, at Fidelity;
+	// Changes sums up the code; Loss is what stayed in the cloud; Noun, what the cloud calls
+	// its sessions.
+	Written  bool     `json:"written,omitempty"`
+	Fidelity string   `json:"fidelity,omitempty"`
+	Changes  string   `json:"changes,omitempty"`
+	Loss     []string `json:"loss,omitempty"`
+	Noun     string   `json:"noun,omitempty"`
+	Continue string   `json:"continue,omitempty"` // the agent to continue in now (id)
 	// ContinueName is that agent's name.
 	ContinueName string   `json:"continueName,omitempty"`
 	Appended     bool     `json:"appended,omitempty"`
@@ -343,12 +419,35 @@ func BroughtOf(f *move.Fetch, agentName string) Brought {
 	b.Outcome, b.Restored, b.Expected, b.Stated = ad.Outcome, ad.Restored, ad.Expected, ad.Stated
 	b.Branch, b.Renamed, b.NoBranch, b.Appended, b.Warnings = ad.Branch, ad.Renamed, ad.NoBranch, ad.Appended, ad.Warnings
 	b.Command, b.Run, b.Key, b.Issue = ad.Command, ad.Resume, ad.Key.String(), ad.Issue
+	b.Written, b.Fidelity, b.Changes, b.Loss, b.Noun = ad.Written, ad.Fidelity, ad.Changes, f.Loss, f.Noun
+	if f.ContinueName != "" && ad.Written {
+		b.Agent = f.ContinueName // written straight into the agent it continues in
+	}
 	if ad.Issue != "" {
 		b.IssueRef = move.IssueRef(ad.Issue)
 	}
 	known := ""
 	if b.IssueRef != "" {
 		known = fmt.Sprintf(" This is a known %s problem (%s).", agentName, b.IssueRef)
+	}
+	switch {
+	case ad.Written:
+		b.Message = fmt.Sprintf("“%s” is here in %s", f.Title, b.Agent)
+		switch ad.Fidelity {
+		case string(agent.FidCode):
+			b.Message += fmt.Sprintf(": the %s's title and what came of it", nonEmpty(f.Noun, "session"))
+			if ad.Branch != "" {
+				b.Message += ", with its code on " + ad.Branch
+			}
+			b.Message += ". Its messages and steps stay in " + f.CloudTitle + "."
+		default:
+			b.Message += fmt.Sprintf(": %d messages, as text", ad.Restored)
+			if ad.Branch != "" {
+				b.Message += ", with its code on " + ad.Branch
+			}
+			b.Message += "."
+		}
+		return b
 	}
 	switch ad.Outcome {
 	case move.FetchComplete:

@@ -26,7 +26,7 @@ test("the Hand off menu lists every cloud, and a disabled one says why", async (
   await expect(claude).toContainText("Claude Code cloud: turned off. Turn it on in Machines.");
   const codex = menu.getByRole("menuitem", { name: /Codex cloud/ });
   await expect(codex).toBeDisabled();
-  await expect(codex).toContainText("Codex cloud: hopsesh does not reach Codex cloud yet");
+  await expect(codex).toContainText("Codex cloud: turned off. Turn it on in Machines.");
   await expect(menu).toContainText("A cloud gets a briefing, not this conversation.");
 
   await turnOn(page);
@@ -41,7 +41,7 @@ test("the Hand off menu lists every cloud, and a disabled one says why", async (
   await page.locator(".pal-item", { hasText: "Hand off to…" }).click();
   const picker = page.locator("#dlg").getByRole("menu", { name: "Hand off to" });
   await expect(picker.getByRole("menuitem", { name: /Claude Code cloud/ })).toBeEnabled();
-  await expect(picker.getByRole("menuitem", { name: /Codex cloud/ })).toContainText("hopsesh does not reach Codex cloud yet");
+  await expect(picker.getByRole("menuitem", { name: /Codex cloud/ })).toContainText("Codex cloud: turned off. Turn it on in Machines.");
 });
 
 test("the hand-off sheet: briefing, branch, what stays, options; done, then undo", async ({ page }) => {

@@ -48,10 +48,33 @@ All notable changes to this project are documented here. The format follows
   --cloud` and the app's Clouds group, and `hopsesh clouds test` checks it read-only.
   Bringing one back brings its code into a new worktree (`hopsesh pull <cloud>:<id>
   --code-only`, or **Get the code** in the app): Copilot's and Devin's pull request branch,
-  or Jules's patch committed on a `hopsesh/from/jules/…` branch; `hopsesh undo` takes it
+  or Jules's patch committed on a `hopsesh/from/jules/<id>` branch; `hopsesh undo` takes it
   back. Their conversations stay in the cloud for now, and an Amp orb's code (`amp sync`)
   is not brought. These CLIs' output is mostly undocumented: hopsesh reads it defensively,
   and was tested against stand-ins only.
+
+- Codex cloud, both ways. `hopsesh handoff <session> --to codex-cloud --env <environment>`
+  starts a Codex cloud task with the briefing and the code on a branch (`codex cloud exec`),
+  or with a few changes as a starting diff on a branch already pushed (`--starting-diff`);
+  `--attempts` asks for several attempts. The plan lists the environments your recent tasks
+  used and waits for your pick ("If you have none, open `codex cloud` once to create one");
+  the one you pick is remembered for the repository, and `hopsesh clouds env codex-cloud`
+  shows and sets them. `hopsesh ls codex-cloud:` lists tasks (`codex cloud list --json`,
+  `--env` to filter). `hopsesh pull codex-cloud:<id>` brings a task back: its diff committed
+  on `hopsesh/from/codex-cloud/<id>` in a new worktree, and the task's title and what came
+  of it written as a new Codex session there (`--in claude` writes a Claude Code session);
+  undo removes the session, the branch and the worktree. hopsesh drives only your own
+  `codex`, signed in with ChatGPT (`codex login status`), never reads its login and never
+  calls the ChatGPT backend. Only Codex cloud (legacy) tasks are reachable: the new Codex
+  Cloud has no command line, and hopsesh says so.
+- A cloud whose driver brings a conversation back as text (or a task's words) is written
+  into a local agent of your choice through the same pieces as a continuation, beside the
+  cloud's code.
+- In the app: Codex cloud under Clouds, in **Hand off ▸** (with what hopsesh cannot reach
+  there), the environment picker and the starting-diff choice in the hand-off sheet, a done
+  screen with the task's link, a bring-back sheet and done screen for a task, and an
+  environment per repository on its card under Machines. In the terminal UI: `e` picks the
+  environment, `S` the starting diff. The skill handles "hand this off to Codex cloud".
 
 ### Fixed
 - Reading a Windows machine with many sessions could stall for 30 seconds and then fail:

@@ -226,13 +226,21 @@ func (m *model) viewFetchPlan(b *strings.Builder) {
 	if fp.Checkout != "" {
 		fmt.Fprintf(b, "  repo  %s at %s\n", fp.Repo, fp.Checkout)
 	}
-	switch fp.BranchState {
-	case move.BranchPushed:
+	switch {
+	case fp.Diff && fp.BranchState == move.BranchPushed:
+		fmt.Fprintf(b, "  base  %s (the branch the %s started from) → %s\n", fp.CloudBranch, fp.Noun, fp.Ref)
+	case fp.BranchState == move.BranchPushed:
 		fmt.Fprintf(b, "  branch  %s → %s\n", fp.CloudBranch, fp.Ref)
-	case move.BranchMissing:
+	case fp.BranchState == move.BranchMissing:
 		fmt.Fprintf(b, "  branch  %s is not on origin\n", fp.CloudBranch)
 	}
 	switch {
+	case fp.Diff:
+		changes := ""
+		if fp.Changes != "" {
+			changes = " (" + fp.Changes + ")"
+		}
+		fmt.Fprintf(b, "  code  the %s's patch%s, committed on %s\n", fp.Noun, changes, fp.LocalBranch)
 	case fp.FastForward:
 		fmt.Fprintf(b, "  local branch  %s, here already: it moves forward to the cloud's work\n", fp.LocalBranch)
 	case fp.Diff:
@@ -244,6 +252,9 @@ func (m *model) viewFetchPlan(b *strings.Builder) {
 	}
 	if fp.Command != "" {
 		fmt.Fprintf(b, "  runs in this terminal  %s\n", fp.Command)
+	}
+	if fp.Write && !fp.CodeOnly {
+		fmt.Fprintf(b, "  writes  a new %s session (%d messages) in the worktree\n", fp.Writer, fp.Messages)
 	}
 	for _, c := range fp.Checks {
 		switch c.State {
@@ -320,6 +331,8 @@ func (m *model) viewBrought(b *strings.Builder) {
 		switch {
 		case r.NoBranch:
 			fmt.Fprintf(b, "   The cloud session never pushed its work, so there is no code to bring. The worktree: %s\n", r.Worktree)
+		case r.Written && r.Branch != "":
+			fmt.Fprintf(b, "   The code is here: %s (branch %s). The cloud %s is untouched.\n", r.Worktree, r.Branch, nonEmpty(r.Noun, "session"))
 		case r.Renamed != "":
 			fmt.Fprintf(b, "   The code is here in full: %s (branch %s, renamed from %s). The cloud session is untouched.\n", r.Worktree, r.Branch, r.Renamed)
 		case r.Branch != "":
@@ -336,6 +349,9 @@ func (m *model) viewBrought(b *strings.Builder) {
 	for _, w := range r.Warnings {
 		b.WriteString("   " + warnSt.Render("! "+w) + "\n")
 	}
+	for _, l := range r.Loss {
+		b.WriteString("   " + dim.Render("· "+l) + "\n")
+	}
 	if r.Outcome == move.FetchComplete || r.Outcome == move.FetchPartial {
 		fmt.Fprintf(b, "\n   %s\n", r.Command)
 	}
@@ -346,7 +362,7 @@ func (m *model) viewBrought(b *strings.Builder) {
 	switch r.Outcome {
 	case move.FetchComplete, move.FetchPartial:
 		keys = append(keys, "r resume it now")
-		if r.ContinueName != "" {
+		if r.ContinueName != "" && !r.Written {
 			keys = append(keys, "i continue in "+r.ContinueName)
 		}
 	}
@@ -386,7 +402,7 @@ func (m *model) broughtKeys(k string) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 	case "i":
-		if r.ContinueName != "" && (r.Outcome == move.FetchComplete || r.Outcome == move.FetchPartial) {
+		if r.ContinueName != "" && !r.Written && (r.Outcome == move.FetchComplete || r.Outcome == move.FetchPartial) {
 			key, err := agent.ParseKey(r.Key)
 			if err != nil {
 				return m, nil

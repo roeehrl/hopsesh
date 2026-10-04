@@ -92,7 +92,30 @@ type HandoffInput struct {
 	Settings  HandoffSettings
 	Allowed   bool
 	Worktrees []string
+	// Env is the cloud environment configured for the repository ("" for none); Envs, the
+	// ones the cloud's listing shows (suggestions), for a cloud that needs one.
+	Env  string
+	Envs []EnvChoice
+	// Tester probes the cloud read-only in the module's place (a recent probe, so replanning
+	// does not ask the vendor each time); nil: the module's CloudTester runs.
+	Tester func(context.Context) (agent.CloudTest, error)
 }
+
+// EnvChoice is a cloud environment the user can pick for a hand-off.
+type EnvChoice struct {
+	Value string `json:"value"` // what the driver gets: the id, else the name
+	Name  string `json:"name"`  // for people: "acme-api"
+	// Label is the choice in a list: "acme-api (used by your last 3 tasks)".
+	Label string `json:"label"`
+	// Tasks is how many of the listed sessions ran in it.
+	Tasks int `json:"tasks,omitempty"`
+	// Configured: the configuration names it for this repository.
+	Configured bool `json:"configured,omitempty"`
+}
+
+// maxStartingDiff bounds the changes offered as a starting diff (they travel with the
+// cloud session itself; more go on a branch).
+const maxStartingDiff = 256 << 10
 
 // HandoffPlan is the cloud part of a hand-off plan.
 type HandoffPlan struct {
@@ -151,6 +174,27 @@ type HandoffPlan struct {
 	// (a repository it cannot clone), "" when the branch works.
 	CanBundle   bool   `json:"canBundle"`
 	BundleOffer string `json:"bundleOffer,omitempty"`
+	// CanStartingDiff: the session's branch is on the remote as it is here and the changes
+	// are small, so they can go with the cloud session as a starting diff instead of on a
+	// new branch (Options.StartingDiff); StartingDiffOffer says so for people.
+	CanStartingDiff   bool   `json:"canStartingDiff,omitempty"`
+	StartingDiffOffer string `json:"startingDiffOffer,omitempty"`
+	// EnvNeeded: the cloud runs in an environment the user picks (Env, its name EnvName);
+	// Envs are the choices hopsesh knows of; EnvNote says what to do when none is picked.
+	EnvNeeded bool        `json:"envNeeded,omitempty"`
+	Env       string      `json:"env,omitempty"`
+	EnvName   string      `json:"envName,omitempty"`
+	Envs      []EnvChoice `json:"envs,omitempty"`
+	EnvNote   string      `json:"envNote,omitempty"`
+	// Remember: the picked environment becomes the repository's in the configuration once
+	// the hand-off works (none was configured).
+	Remember bool `json:"remember,omitempty"`
+	Attempts int  `json:"attempts,omitempty"` // asked of the cloud (0: its default)
+	// Noun is what the cloud calls its sessions ("task"); Follow: it takes follow-ups from
+	// hopsesh; Limits are what hopsesh cannot reach there.
+	Noun   string   `json:"noun"`
+	Follow bool     `json:"follow,omitempty"`
+	Limits []string `json:"limits,omitempty"`
 	// Steps are what applying does, in order (Step*).
 	Steps []string `json:"steps"`
 	// Loss is everything that stays here, for the loss list.
@@ -206,6 +250,13 @@ type HandoffResult struct {
 	Manual   string `json:"manual"`
 	MarkText string `json:"markText,omitempty"`
 	Hint     string `json:"hint"`
+	// Noun is what the cloud calls its sessions ("task"); Follow: it takes follow-ups.
+	Noun   string `json:"noun"`
+	Follow bool   `json:"follow,omitempty"`
+	// Env and EnvName are the environment it runs in; Attempts, how many were asked for.
+	Env      string `json:"env,omitempty"`
+	EnvName  string `json:"envName,omitempty"`
+	Attempts int    `json:"attempts,omitempty"`
 }
 
 var stepLabels = map[string]string{StepSnapshot: "Snapshot", StepPush: "Push branch", StepStart: "Start cloud session",
@@ -220,10 +271,12 @@ func BuildHandoff(ctx context.Context, in HandoffInput, opt Options) (*Plan, err
 	}
 	src, s := in.Source, in.Session
 	spec, target := src.Module.Spec(), in.Module.Spec()
+	_, follows := in.Module.(agent.CloudFollower)
 	hp := &HandoffPlan{Cloud: cl.Name, CloudTitle: cl.Title, Agent: target.Name, Fidelity: cl.Up, Code: agent.ViaBranch, Remote: "origin",
 		HistoryFile: opt.HistoryFile, HistoryPath: HistoryPath, CanBundle: hasWay(cl.CodeUp, agent.ViaBundle),
 		Conversation: "The cloud agent receives a briefing, not this conversation. Tool calls and hidden reasoning stay here.",
-		Usage:        "Cloud sessions use your plan's allowance."}
+		Usage:        fmt.Sprintf("Cloud %ss use your plan's allowance.", cl.SessionNoun()), Noun: cl.SessionNoun(), Follow: follows,
+		Limits: cl.Limits, Attempts: opt.Attempts}
 	p := &Plan{Kind: KindHandoff, Key: s.Key, Title: s.Title, Agent: spec.Name, Live: in.Live.State == agent.Live, Options: opt,
 		Source:  Endpoint{Location: src.Machine.Name, OS: src.Machine.Facts.OS, CWD: s.CWD, Path: s.Path, Version: s.AgentVersion},
 		Target:  Endpoint{Location: cl.Name, Version: in.Install.Version},
@@ -254,7 +307,13 @@ func BuildHandoff(ctx context.Context, in HandoffInput, opt Options) (*Plan, err
 		check("ok", cl.Driver+" "+v)
 	}
 	if t, ok := in.Module.(agent.CloudTester); ok && in.Install.Binary != "" {
-		ct, err := t.TestCloud(ctx, in.Host, in.Install, cl.Name)
+		test := in.Tester
+		if test == nil {
+			test = func(ctx context.Context) (agent.CloudTest, error) {
+				return t.TestCloud(ctx, in.Host, in.Install, cl.Name)
+			}
+		}
+		ct, err := test(ctx)
 		switch {
 		case err != nil:
 			check("err", refusal(err, target, cl))
@@ -314,6 +373,7 @@ func BuildHandoff(ctx context.Context, in HandoffInput, opt Options) (*Plan, err
 	if len(p.Blockers) == 0 {
 		planHandoffCode(ctx, p, in, opt, check)
 	}
+	planHandoffEnv(p, in, opt, check)
 
 	// The conversation.
 	planBrief(ctx, p, in, opt, check)
@@ -342,7 +402,7 @@ func BuildHandoff(ctx context.Context, in HandoffInput, opt Options) (*Plan, err
 	}
 	for _, st := range []string{StepSnapshot, StepPush, StepStart, StepLineage, StepMark} {
 		switch {
-		case st == StepSnapshot && hp.Reuse, st == StepPush && (hp.Reuse || hp.Code == agent.ViaBundle), st == StepMark && p.Mark == MarkOff:
+		case st == StepSnapshot && hp.Reuse, st == StepPush && (hp.Reuse || hp.Code != agent.ViaBranch), st == StepMark && p.Mark == MarkOff:
 			continue
 		}
 		hp.Steps = append(hp.Steps, st)
@@ -373,18 +433,80 @@ func planHandoffCode(ctx context.Context, p *Plan, in HandoffInput, opt Options,
 			check("warn", "hopsesh could not ask the remote about "+g.Branch+": "+firstLine(err.Error()))
 		}
 	}
-	if g.Branch != "" && onRemote == sp.Head && !sp.Changes() && !hp.HistoryFile {
+	clean := g.Branch != "" && onRemote == sp.Head
+	if clean && sp.Changes() && !hp.HistoryFile && hp.Code == agent.ViaBranch && hasWay(in.Cloud.CodeUp, agent.ViaStartingDiff) && sp.Bytes <= maxStartingDiff {
+		hp.CanStartingDiff = true
+		hp.StartingDiffOffer = fmt.Sprintf("%s is on %s as it is here, so the %s can go with the %s as a starting diff instead of on a new branch",
+			g.Branch, nonEmpty(hp.Host, "the remote"), plural(len(sp.Tracked)+len(sp.Untracked), "changed file"), in.Cloud.SessionNoun())
+	}
+	switch {
+	case opt.StartingDiff && !hasWay(in.Cloud.CodeUp, agent.ViaStartingDiff):
+		check("err", in.Cloud.Title+" takes no starting diff; hand it off over a branch")
+	case opt.StartingDiff && !hp.CanStartingDiff:
+		why := "the changes are too large"
+		switch {
+		case !clean:
+			why = "the session's branch is not on the remote as it is here"
+		case !sp.Changes():
+			why = "there are no changes to send"
+		case hp.HistoryFile:
+			why = "the conversation file goes on a branch"
+		}
+		check("err", "A starting diff needs a branch already on the remote and a few changed files; here "+why)
+	case opt.StartingDiff:
+		hp.Code, hp.Branch, hp.Unpushed = agent.ViaStartingDiff, g.Branch, 0
+	}
+	if hp.Code == agent.ViaStartingDiff {
+		// The branch is the session's own; the changes go with the session.
+	} else if g.Branch != "" && onRemote == sp.Head && !sp.Changes() && !hp.HistoryFile {
 		hp.Reuse, hp.Branch, hp.Unpushed = true, g.Branch, 0
 	} else {
 		name := repos.HandoffBranch(in.Settings.BranchPrefix, time.Now().Format("20060102"), string(p.Key.Session))
 		hp.Branch = repos.FreeRemoteBranch(ctx, in.Runner, top, hp.Remote, name)
 	}
-	if hp.Code == agent.ViaBranch && hp.Host == "github.com" {
+	if hp.Code != agent.ViaBundle && hp.Host == "github.com" {
 		hp.BranchURL = "https://github.com/" + strings.TrimPrefix(hp.Repo, "github.com/") + "/tree/" + hp.Branch
 	}
 	if sp.Bytes > 50<<20 {
 		check("warn", fmt.Sprintf("The snapshot carries %s of changes", Human(sp.Bytes)))
 	}
+}
+
+// planHandoffEnv picks the cloud's environment, for a cloud that needs one: the one asked
+// for, else the one configured for the repository. With neither, the plan waits for the
+// user's pick among the environments the cloud's listing shows.
+func planHandoffEnv(p *Plan, in HandoffInput, opt Options, check func(string, string)) {
+	hp, cl := p.Handoff, in.Cloud
+	if !needs(cl, agent.NeedEnvironment) {
+		return
+	}
+	hp.EnvNeeded, hp.Envs = true, in.Envs
+	env := strings.TrimSpace(nonEmpty(opt.Env, in.Env))
+	hp.Env, hp.EnvName = env, env
+	for _, e := range in.Envs {
+		if env != "" && (e.Value == env || strings.EqualFold(e.Name, env)) {
+			hp.Env, hp.EnvName = e.Value, e.Name
+		}
+	}
+	hp.Remember = env != "" && in.Env == "" && hp.Repo != ""
+	if env != "" {
+		check("ok", "Environment "+hp.EnvName)
+		return
+	}
+	hp.EnvNote = fmt.Sprintf("Pick a %s environment for %s.", cl.Title, nonEmpty(hp.Repo, "this repository"))
+	if cl.EnvHint != "" {
+		hp.EnvNote += " If you have none, " + cl.EnvHint + "."
+	}
+	check("err", hp.EnvNote)
+}
+
+func needs(cl agent.Cloud, n agent.Need) bool {
+	for _, x := range cl.Needs {
+		if x == n {
+			return true
+		}
+	}
+	return false
 }
 
 // planBrief renders the briefing (or takes the user's edit), and sums up what the
@@ -507,10 +629,13 @@ func handoffLoss(hp *HandoffPlan, spec agent.Spec) []string {
 	for _, c := range hp.Offered {
 		out = append(out, c.Path+" stays (untracked; tick it to carry it)")
 	}
-	if hp.Code == agent.ViaBundle {
+	switch hp.Code {
+	case agent.ViaBundle:
 		out = append(out, "An upload can't push results back to the remote; the cloud's work comes back with teleport")
+	case agent.ViaStartingDiff:
+		out = append(out, fmt.Sprintf("The changes go with the %s as a starting diff; nothing is pushed", hp.Noun))
 	}
-	return out
+	return append(out, hp.Limits...)
 }
 
 var redactedRule = regexp.MustCompile(`\[REDACTED:([^\]]+)\]`)
@@ -584,8 +709,9 @@ func applyHandoff(ctx context.Context, p *Plan, env Env) (*Result, error) {
 	j.AddKey(p.Key)
 	hr := &HandoffResult{Cloud: cl.Name, CloudTitle: cl.Title, Agent: target.Name, Repo: hp.Repo, Branch: hp.Branch, BranchURL: hp.BranchURL,
 		Code: string(hp.Code), Reuse: hp.Reuse, Tokens: hp.Tokens, Masked: hp.Masked, Snapshot: "",
-		Manual: fmt.Sprintf("The session stays in %s; archive it there if you want it gone.", cloudPlace(cl)),
-		Hint:   fmt.Sprintf("When it finishes: Clouds → %s → Bring here", cl.Title)}
+		Manual: fmt.Sprintf("The %s stays in %s; archive it there if you want it gone.", hp.Noun, cloudPlace(cl)),
+		Hint:   fmt.Sprintf("When it finishes: Clouds → %s → Bring here", cl.Title),
+		Noun:   hp.Noun, Follow: hp.Follow, Env: hp.Env, EnvName: hp.EnvName, Attempts: hp.Attempts}
 	for _, st := range hp.Steps {
 		hr.Steps = append(hr.Steps, HandoffStep{Name: st, Label: stepLabels[st], State: StepTodo})
 	}
@@ -684,15 +810,21 @@ func applyHandoff(ctx context.Context, p *Plan, env Env) (*Result, error) {
 	if in.Git != nil {
 		remoteURL = in.Git.Remote
 	}
+	var diff []byte
+	if hp.Code == agent.ViaStartingDiff {
+		if diff, err = repos.DiffCommits(ctx, in.Runner, top, hp.Base, sha); err != nil {
+			return fail(StepStart, startFailed(hr, target, cl, "hopsesh could not make the starting diff: "+firstLine(err.Error())), err)
+		}
+	}
 	dir, done, err := repos.DriverDir(ctx, checkout, remoteURL, hp.Branch, start, keep)
 	if err != nil {
-		return fail(StepStart, startFailed(hr, target, "hopsesh could not prepare a worktree for it: "+firstLine(err.Error())), err)
+		return fail(StepStart, startFailed(hr, target, cl, "hopsesh could not prepare a worktree for it: "+firstLine(err.Error())), err)
 	}
 	cs, err := in.Module.(agent.CloudSender).SendCloud(ctx, in.Host, in.Install, agent.SendRequest{Cloud: cl.Name, Dir: dir, Repo: hp.Repo,
-		Branch: hp.Branch, Base: sha, Brief: hp.Brief, Title: p.Title, Code: hp.Code})
+		Branch: hp.Branch, Base: sha, Brief: hp.Brief, Title: p.Title, Code: hp.Code, Diff: diff, Env: hp.Env, Attempts: hp.Attempts})
 	done()
 	if err != nil {
-		return fail(StepStart, startFailed(hr, target, refusal(err, target, cl)), err)
+		return fail(StepStart, startFailed(hr, target, cl, refusal(err, target, cl)), err)
 	}
 	cs.Cloud, cs.Key.Agent = cl.Name, target.ID
 	if err := j.Cloud(in.Here.Name, cs); err != nil {
@@ -707,7 +839,13 @@ func applyHandoff(ctx context.Context, p *Plan, env Env) (*Result, error) {
 	step(StepLineage, StepTodo, "")
 	now := time.Now().UTC()
 	from := lin.Upsert(lineage.Replica{Key: s.Key, Location: machine, AgentVersion: s.AgentVersion, Head: hp.head.Head, Offset: hp.head.Offset, Time: now})
-	to := lin.Upsert(lineage.Replica{Key: cs.Key, Location: cl.Name, AgentVersion: in.Install.Version, Time: now, URL: cs.URL})
+	cloudCopy := lineage.Replica{Key: cs.Key, Location: cl.Name, AgentVersion: in.Install.Version, Time: now, URL: cs.URL}
+	if len(cl.CodeDown) > 0 && cl.CodeDown[0] == agent.ViaDiff {
+		// The cloud works on this branch and brings back a diff of it: the branch is where the
+		// diff applies when it comes back.
+		cloudCopy.Branch = hp.Branch
+	}
+	to := lin.Upsert(cloudCopy)
 	var withheld []string
 	for _, w := range hp.Withheld {
 		withheld = append(withheld, w.Path)
@@ -757,7 +895,8 @@ func applyHandoff(ctx context.Context, p *Plan, env Env) (*Result, error) {
 	}
 	hr.Message = fmt.Sprintf("Handed off to %s", cl.Title)
 	if err := SaveHandoff(env.StateDir, &Handoff{Journal: j.ID, Time: now, Machine: machine, Checkout: top, Remote: hp.Remote, Branch: hp.Branch,
-		Snapshot: hr.Snapshot, Pushed: hr.Pushed, Cleanup: hp.Cleanup, Cloud: cl.Name, Session: cs.Key, URL: cs.URL, Title: p.Title}); err != nil {
+		Snapshot: hr.Snapshot, Pushed: hr.Pushed, Cleanup: hp.Cleanup, Cloud: cl.Name, Session: cs.Key, URL: cs.URL, Title: p.Title,
+		Brief: hp.Brief, Env: hp.Env, Repo: hp.Repo}); err != nil {
 		res.Warnings = append(res.Warnings, "could not keep the hand-off's record: "+err.Error())
 	}
 	if err := j.Seal(fsys); err != nil {
@@ -767,11 +906,12 @@ func applyHandoff(ctx context.Context, p *Plan, env Env) (*Result, error) {
 }
 
 // startFailed says what happened when the cloud session could not start.
-func startFailed(hr *HandoffResult, target agent.Spec, why string) string {
+func startFailed(hr *HandoffResult, target agent.Spec, cl agent.Cloud, why string) string {
+	why = strings.TrimSuffix(why, ".")
 	if hr.Pushed {
-		return fmt.Sprintf("The branch was pushed, but %s refused the session: %s. Undo removes the branch.", target.Name, why)
+		return fmt.Sprintf("The branch was pushed, but %s refused the %s: %s. Undo removes the branch.", target.Name, cl.SessionNoun(), why)
 	}
-	return fmt.Sprintf("%s refused the session: %s. Nothing went to the cloud.", target.Name, why)
+	return fmt.Sprintf("%s refused the %s: %s. Nothing went to the cloud.", target.Name, cl.SessionNoun(), why)
 }
 
 func describeSnapshot(hp *HandoffPlan, sha string) string {
@@ -791,8 +931,11 @@ func hostName(h string) string {
 
 // cloudPlace is where the user manages a cloud's sessions.
 func cloudPlace(cl agent.Cloud) string {
-	if cl.Name == "claude-cloud" {
+	switch cl.Name {
+	case "claude-cloud":
 		return "Claude Code on the web"
+	case "codex-cloud":
+		return "your Codex cloud list"
 	}
 	return cl.Title
 }
@@ -826,6 +969,26 @@ type Handoff struct {
 	Session  agent.SessionKey `json:"session"`
 	URL      string           `json:"url,omitempty"`
 	Title    string           `json:"title"`
+	// Brief is the first prompt the cloud got (kept here only, never pushed), so a cloud that
+	// brings back no prompt of its own can show it; Env is the environment it ran in; Repo,
+	// the repository's identity.
+	Brief string `json:"brief,omitempty"`
+	Env   string `json:"env,omitempty"`
+	Repo  string `json:"repo,omitempty"`
+}
+
+// FindHandoff is the hand-off that started a cloud session, when it was made here (nil
+// otherwise).
+func FindHandoff(stateDir, cloud string, id agent.SessionID) *Handoff {
+	files, _ := filepath.Glob(filepath.Join(stateDir, "handoffs", "*.json"))
+	var found *Handoff
+	for _, f := range files {
+		var h Handoff
+		if loadJSON(f, &h) == nil && h.Cloud == cloud && h.Session.Session == id && (found == nil || h.Time.After(found.Time)) {
+			found = &h
+		}
+	}
+	return found
 }
 
 func handoffFile(stateDir, journal string) string {

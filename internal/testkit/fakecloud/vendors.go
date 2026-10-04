@@ -292,8 +292,12 @@ func claudeTeleport(p Proc, arg string) int {
 	return 0
 }
 
-// Codex answers Codex's cloud commands: codex cloud exec|list|status|diff|apply and codex
-// apply. handled is false for any other call.
+// Codex answers Codex's cloud commands as codex-cli prints them: codex cloud
+// exec|list|status|diff|apply, codex apply and codex login status. The output shapes and
+// wordings are read from openai/codex (codex-rs/cloud-tasks/src/lib.rs and cli.rs,
+// cloud-tasks-client/src/api.rs and http.rs, cli/src/login.rs) on 2026-10-04; none was seen
+// from a real task, so each is "from source", not verified. handled is false for any other
+// call.
 func Codex(p Proc) (handled bool, code int) {
 	if len(p.Args) == 0 {
 		return false, 0
@@ -305,9 +309,26 @@ func Codex(p Proc) (handled bool, code int) {
 		}
 		return true, codexCloud(p, p.Args[1], p.Args[2:])
 	case "apply", "a":
-		return true, codexApply(p, p.Args[1:])
+		return true, codexApply(p, p.Args[1:], false)
+	case "login":
+		if len(p.Args) == 2 && p.Args[1] == "status" {
+			return true, codexLoginStatus(p)
+		}
 	}
 	return false, 0
+}
+
+// codexLoginStatus answers `codex login status` on standard error, as login.rs does: a
+// ChatGPT login, or (FAKE_CLOUD_FAIL=signed-out) an API key, shown masked; with
+// FAKE_CODEX_LOGIN=none, not logged in.
+func codexLoginStatus(p Proc) int {
+	switch {
+	case p.Env("FAKE_CODEX_LOGIN") == "none":
+		return p.errorf(1, "Not logged in")
+	case p.fail() == "signed-out":
+		return p.errorf(0, "Logged in using an API key - sk-proj-***XXXX")
+	}
+	return p.errorf(0, "Logged in using ChatGPT")
 }
 
 // codexFlags reads --name value flags and positional arguments.
@@ -337,8 +358,8 @@ func codexFlags(args []string, valued ...string) (map[string]string, []string) {
 	return flags, pos
 }
 
-// codexStatus is a task's status as `codex cloud list --json` spells it (pending, ready,
-// applied, error, from the client's TaskStatus; the JSON spelling is unverified).
+// codexStatus is a task's status as `codex cloud list --json` spells it: the client's
+// TaskStatus in kebab case (pending, ready, applied, error).
 func codexStatus(s Session) string {
 	switch {
 	case s.Applied:
@@ -351,13 +372,60 @@ func codexStatus(s Session) string {
 	return "ready"
 }
 
+// codexEnvs are the environments the fake account has: FAKE_CODEX_ENVS, a comma-separated
+// list of ids or id=label pairs ("" : any id is one, named after itself).
+func codexEnvs(p Proc) map[string]string {
+	v := p.Env("FAKE_CODEX_ENVS")
+	if v == "" {
+		return nil
+	}
+	out := map[string]string{}
+	for _, e := range strings.Split(v, ",") {
+		id, label, ok := strings.Cut(strings.TrimSpace(e), "=")
+		if !ok {
+			label = id
+		}
+		out[id] = label
+	}
+	return out
+}
+
+// codexEnv resolves --env as exec does: an id, else a label (case-insensitive).
+func codexEnv(p Proc, want string) (id, label string, ok bool) {
+	envs := codexEnvs(p)
+	if p.fail() == "no-env" {
+		return "", "", false
+	}
+	if envs == nil {
+		return want, want, want != ""
+	}
+	if l, ok := envs[want]; ok {
+		return want, l, true
+	}
+	for id, l := range envs {
+		if strings.EqualFold(l, want) {
+			return id, l, true
+		}
+	}
+	return "", "", false
+}
+
 func codexCloud(p Proc, cmd string, args []string) int {
+	if cmd == "--help" {
+		// The commands as 0.153.2's help lists them (clap's layout).
+		fmt.Fprint(p.Stdout, "[EXPERIMENTAL] Browse tasks from Codex Cloud and apply changes locally\n\nUsage: codex cloud [OPTIONS] [COMMAND]\n\nCommands:\n"+
+			"  exec    Submit a new Codex Cloud task without launching the TUI\n  status  Show the status of a Codex Cloud task\n"+
+			"  list    List Codex Cloud tasks\n  apply   Apply the diff for a Codex Cloud task locally\n  diff    Show the unified diff for a Codex Cloud task\n"+
+			"  help    Print this message or the help of the given subcommand(s)\n")
+		return 0
+	}
 	switch fail := p.fail(); fail {
 	case "signed-out":
-		// Documented: cloud tasks need a ChatGPT login. The wording is unverified.
-		return p.errorf(1, "Error: Not signed in with ChatGPT. Run `codex login` to use Codex cloud.")
+		// From source (init_backend): an API-key login is not a ChatGPT one either.
+		return p.errorf(1, "Not signed in. Please run 'codex login' to sign in with ChatGPT, then re-run 'codex cloud'.")
 	case "not-eligible":
-		return p.errorf(1, "Error: Codex cloud is not available on your plan.")
+		// Unverified: what a plan without cloud tasks gets (an HTTP error through the client).
+		return p.errorf(1, "Error: http error: list_tasks failed: 403 Forbidden: Codex cloud is not available on your plan")
 	}
 	st, err := p.store()
 	if err != nil {
@@ -369,8 +437,20 @@ func codexCloud(p Proc, cmd string, args []string) int {
 		if flags["--env"] == "" {
 			return p.errorf(2, "error: the following required arguments were not provided:\n  --env <ENV_ID>")
 		}
-		if ok := p.Env("FAKE_CODEX_ENVS"); p.fail() == "no-env" || ok != "" && !contains(strings.Split(ok, ","), flags["--env"]) {
-			return p.errorf(1, "Error: environment %s not found", flags["--env"]) // unverified wording
+		attempts := 1
+		if a := flags["--attempts"]; a != "" {
+			n, err := strconv.Atoi(a)
+			if err != nil || n < 1 || n > 4 {
+				return p.errorf(2, "error: invalid value '%s' for '--attempts <ATTEMPTS>': attempts must be between 1 and 4", a)
+			}
+			attempts = n
+		}
+		envID, envLabel, ok := codexEnv(p, flags["--env"])
+		if !ok {
+			if p.fail() == "no-env" && p.Env("FAKE_CODEX_ENVS") == "none" {
+				return p.errorf(1, "Error: no cloud environments are available for this workspace")
+			}
+			return p.errorf(1, "Error: environment '%s' not found; run `codex cloud` to list available environments", flags["--env"])
 		}
 		env := p.environ()
 		repo, cloneURL, branch, _, err := repoOf(env, p.Dir)
@@ -378,27 +458,30 @@ func codexCloud(p Proc, cmd string, args []string) int {
 			return p.errorf(1, "Error: %v", err)
 		}
 		if p.fail() == "repo-mismatch" || !strings.HasPrefix(repo, "github.com/") {
-			return p.errorf(1, "Error: the environment is not connected to %s", repo) // unverified wording
+			// Unverified: the environment decides the repository; a branch it cannot find fails.
+			return p.errorf(1, "Error: http error: create_task failed: 400 Bad Request: the environment's repository is not connected to %s", repo)
 		}
 		if b := flags["--branch"]; b != "" {
 			branch = b
 		}
 		if !onRemote(env, p.Dir, branch) {
-			return p.errorf(1, "Error: branch %s is not on the remote", branch) // unverified wording
+			return p.errorf(1, "Error: http error: create_task failed: 400 Bad Request: branch %s not found", branch) // unverified wording
 		}
 		base, err := git(env, p.Dir, "ls-remote", "origin", "refs/heads/"+branch)
 		if err != nil {
 			return p.errorf(1, "Error: %v", err)
 		}
-		attempts, _ := strconv.Atoi(flags["--attempts"])
 		prompt := strings.Join(pos, " ")
+		if prompt == "" {
+			return p.errorf(1, "Error: no query provided. Pass one as an argument or pipe it via stdin.")
+		}
 		s, err := st.Seed(Session{Cloud: CodexCloud, Title: clip(prompt, 60), Repo: repo, CloneURL: cloneURL, Branch: branch,
-			Base: strings.Fields(base)[0], Code: "branch", Env: flags["--env"], Attempts: max(attempts, 1), Diff: p.Env("CODEX_STARTING_DIFF"),
+			Base: strings.Fields(base)[0], Code: "branch", Env: envID, EnvLabel: envLabel, Attempts: attempts, Diff: p.Env("CODEX_STARTING_DIFF"),
 			Messages: []Message{{Role: "user", Text: prompt, Time: time.Now().UTC()}}})
 		if err != nil {
 			return p.errorf(1, "%v", err)
 		}
-		fmt.Fprintln(p.Stdout, s.URL()) // unverified: the task's link
+		fmt.Fprintln(p.Stdout, s.URL()) // from source: util::task_url
 		return 0
 	case "list":
 		flags, _ := codexFlags(args, "--env", "--limit", "--cursor")
@@ -409,33 +492,58 @@ func codexCloud(p Proc, cmd string, args []string) int {
 		if err != nil {
 			return p.errorf(1, "%v", err)
 		}
-		limit, _ := strconv.Atoi(flags["--limit"])
-		if limit <= 0 || limit > 20 {
-			limit = 20
-		}
-		var tasks []any
-		for _, s := range all {
-			if e := flags["--env"]; e != "" && s.Env != e {
-				continue
+		limit := 20
+		if l := flags["--limit"]; l != "" {
+			n, err := strconv.Atoi(l)
+			if err != nil || n < 1 || n > 20 {
+				return p.errorf(2, "error: invalid value '%s' for '--limit <N>': limit must be between 1 and 20", l)
 			}
+			limit = n
+		}
+		envID := ""
+		if e := flags["--env"]; e != "" {
+			id, _, ok := codexEnv(p, e)
+			if !ok {
+				return p.errorf(1, "Error: environment '%s' not found; run `codex cloud` to list available environments", e)
+			}
+			envID = id
+		}
+		var mine []Session
+		for _, s := range all {
+			if envID == "" || s.Env == envID {
+				mine = append(mine, s)
+			}
+		}
+		from := 0
+		if c := flags["--cursor"]; c != "" {
+			from, _ = strconv.Atoi(strings.TrimPrefix(c, "fake-cursor-"))
+		}
+		tasks := []any{}
+		var cursor any
+		for i := from; i < len(mine); i++ {
 			if len(tasks) == limit {
+				cursor = fmt.Sprintf("fake-cursor-%d", i)
 				break
 			}
-			tasks = append(tasks, codexTask(s))
+			tasks = append(tasks, codexTask(mine[i]))
 		}
 		if p.fail() == "bad-record" {
 			tasks = append(tasks, map[string]any{"id": 42, "status": []int{}})
 		}
 		if flags["--json"] == "" {
-			for _, t := range tasks {
-				if m, ok := t.(map[string]any); ok {
-					fmt.Fprintf(p.Stdout, "%v  %v  %v\n", m["id"], m["status"], m["title"]) // unverified layout
+			if len(tasks) == 0 {
+				fmt.Fprintln(p.Stdout, "No tasks found.")
+			}
+			for _, s := range mine[from:min(from+limit, len(mine))] {
+				fmt.Fprintln(p.Stdout, s.URL())
+				for _, l := range codexStatusLines(s) {
+					fmt.Fprintln(p.Stdout, "  "+l)
 				}
 			}
 			return 0
 		}
-		// Documented: a tasks array and an optional cursor.
-		b, _ := json.Marshal(map[string]any{"tasks": tasks, "cursor": nil})
+		// From source: pretty-printed {"tasks": [...], "cursor": ...}.
+		b, _ := json.MarshalIndent(map[string]any{"tasks": tasks, "cursor": cursor}, "", "  ")
 		fmt.Fprintln(p.Stdout, string(b))
 		return 0
 	case "status":
@@ -443,47 +551,108 @@ func codexCloud(p Proc, cmd string, args []string) int {
 		if len(pos) == 0 {
 			return p.errorf(2, "error: the following required arguments were not provided:\n  <TASK_ID>")
 		}
-		s, err := st.Get(pos[0])
-		if err != nil {
-			return p.errorf(1, "Error: task %s not found", pos[0])
+		s, err := st.Get(codexTaskID(pos[0]))
+		if err != nil || s.Cloud != CodexCloud {
+			return p.errorf(1, "Error: http error: get_task_details failed: 404 Not Found")
 		}
-		// Unverified layout: the help names the command only.
-		fmt.Fprintf(p.Stdout, "%s\nstatus: %s\n%s\n", s.Title, codexStatus(s), s.URL())
+		for _, l := range codexStatusLines(s) {
+			fmt.Fprintln(p.Stdout, l)
+		}
+		if codexStatus(s) != "ready" {
+			return 1 // from source: status exits 1 unless the task is READY
+		}
 		return 0
 	case "diff":
-		_, pos := codexFlags(args, "--attempt")
+		flags, pos := codexFlags(args, "--attempt")
 		if len(pos) == 0 {
 			return p.errorf(2, "error: the following required arguments were not provided:\n  <TASK_ID>")
 		}
-		s, err := st.Get(pos[0])
-		if err != nil {
-			return p.errorf(1, "Error: task %s not found", pos[0])
+		s, err := st.Get(codexTaskID(pos[0]))
+		if err != nil || s.Cloud != CodexCloud {
+			return p.errorf(1, "Error: http error: get_task_details failed: 404 Not Found")
 		}
 		if s.State == StateRunning || s.Diff == "" {
-			return p.errorf(1, "Error: task %s has no diff yet", s.ID) // unverified wording
+			return p.errorf(1, "Error: No diff available for task %s; it may still be running.", s.ID)
+		}
+		if a := flags["--attempt"]; a != "" && a != "1" {
+			return p.errorf(1, "Error: Attempt %s not available; only 1 attempt(s) found", a)
 		}
 		fmt.Fprint(p.Stdout, s.Diff)
 		return 0
 	case "apply":
-		return codexApply(p, args)
+		return codexApply(p, args, true)
 	}
 	return p.errorf(2, "error: unrecognized subcommand '%s'", cmd)
 }
 
-// codexTask is a task in `codex cloud list --json`'s documented fields.
-func codexTask(s Session) map[string]any {
-	summary := ""
-	if n := len(s.Messages); n > 0 && s.Messages[n-1].Role == "assistant" {
-		summary = s.Messages[n-1].Text
-	}
-	return map[string]any{"id": s.ID, "url": s.URL(), "title": s.Title, "status": codexStatus(s),
-		"updated_at": s.Updated.UTC().Format(time.RFC3339), "environment_id": s.Env, "environment_label": s.Env + " (fake)",
-		"summary": summary, "is_review": false, "attempt_total": s.Attempts}
+// codexTaskID is a task id, or the id at the end of its link (parse_task_id).
+func codexTaskID(raw string) string {
+	raw, _, _ = strings.Cut(strings.TrimSpace(raw), "#")
+	raw, _, _ = strings.Cut(raw, "?")
+	return raw[strings.LastIndex(raw, "/")+1:]
 }
 
-// codexApply applies a task's diff to the folder with git apply (documented: it exits
-// non-zero when git apply fails).
-func codexApply(p Proc, args []string) int {
+// codexDiffSummary counts a unified diff's files and lines, as the backend's summary does.
+func codexDiffSummary(diff string) (files, added, removed int) {
+	for _, l := range strings.Split(diff, "\n") {
+		switch {
+		case strings.HasPrefix(l, "diff --git "):
+			files++
+		case strings.HasPrefix(l, "+++"), strings.HasPrefix(l, "---"):
+		case strings.HasPrefix(l, "+"):
+			added++
+		case strings.HasPrefix(l, "-"):
+			removed++
+		}
+	}
+	return files, added, removed
+}
+
+// codexStatusLines are a task's status lines as format_task_status_lines prints them
+// without colour: "[READY] title", "label  •  3m ago", "+3/-1 • 2 files" (or "no diff").
+func codexStatusLines(s Session) []string {
+	label := s.EnvLabel
+	if label == "" {
+		label = s.Env
+	}
+	ago := time.Since(s.Updated)
+	when := fmt.Sprintf("%ds ago", int(ago.Seconds()))
+	if ago >= time.Minute {
+		when = fmt.Sprintf("%dm ago", int(ago.Minutes()))
+	}
+	meta := when
+	if label != "" {
+		meta = label + "  •  " + when
+	}
+	stat := "no diff"
+	if s.State != StateRunning {
+		if f, a, r := codexDiffSummary(s.Diff); f+a+r > 0 {
+			stat = fmt.Sprintf("+%d/-%d • %d file%s", a, r, f, map[bool]string{true: "", false: "s"}[f == 1])
+		}
+	}
+	return []string{"[" + strings.ToUpper(codexStatus(s)) + "] " + s.Title, meta, stat}
+}
+
+// codexTask is a task in `codex cloud list --json`'s fields (from source: run_list_command).
+func codexTask(s Session) map[string]any {
+	files, added, removed := 0, 0, 0
+	if s.State != StateRunning {
+		files, added, removed = codexDiffSummary(s.Diff)
+	}
+	var envID, envLabel any
+	if s.Env != "" {
+		envID, envLabel = s.Env, nonEmpty(s.EnvLabel, s.Env)
+	}
+	return map[string]any{"id": s.ID, "url": s.URL(), "title": s.Title, "status": codexStatus(s),
+		"updated_at": s.Updated.UTC().Format(time.RFC3339Nano), "environment_id": envID, "environment_label": envLabel,
+		"summary":   map[string]any{"files_changed": files, "lines_added": added, "lines_removed": removed},
+		"is_review": false, "attempt_total": s.Attempts}
+}
+
+// codexApply applies a task's diff to the folder with git apply, as `codex cloud apply` and
+// `codex apply` do (both exit non-zero when git apply fails); cloud: the cloud command's
+// wording.
+func codexApply(p Proc, args []string, cloud bool) int {
 	_, pos := codexFlags(args, "--attempt")
 	if len(pos) == 0 {
 		return p.errorf(2, "error: the following required arguments were not provided:\n  <TASK_ID>")
@@ -492,16 +661,26 @@ func codexApply(p Proc, args []string) int {
 	if err != nil {
 		return p.errorf(1, "%v", err)
 	}
-	s, err := st.Get(pos[0])
+	id := codexTaskID(pos[0])
+	s, err := st.Get(id)
 	if err != nil || s.Diff == "" || s.State == StateRunning {
-		return p.errorf(1, "Error: task %s has no diff to apply", pos[0])
+		return p.errorf(1, "Error: No diff available for task %s; it may still be running.", id)
 	}
+	files, _, _ := codexDiffSummary(s.Diff)
 	if err := applyDiff(p.environ(), p.Dir, s.Diff); err != nil {
-		return p.errorf(1, "Error: %v", err)
+		if cloud {
+			fmt.Fprintf(p.Stdout, "Apply failed for task %s (applied=0, skipped=0, conflicts=%d)\n", id, files)
+			return 1
+		}
+		return p.errorf(1, "Error: Git apply failed (applied=0, skipped=0, conflicts=%d)\nstderr:\n%v", files, err)
 	}
 	s.Applied = true
 	_ = st.Put(s)
-	fmt.Fprintln(p.Stdout, "Successfully applied diff") // unverified wording
+	if cloud {
+		fmt.Fprintf(p.Stdout, "Applied task %s locally (%d files)\n", id, files)
+	} else {
+		fmt.Fprintln(p.Stdout, "Successfully applied diff")
+	}
 	return 0
 }
 

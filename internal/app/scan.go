@@ -144,6 +144,7 @@ type ScanOptions struct {
 // clouds are listed through this machine once its own sessions are listed (their lineage
 // names the cloud copies hopsesh made), alongside the other machines.
 func (a *App) Scan(ctx context.Context, o ScanOptions) *Inventory {
+	a.tests.forget() // a sign-in since shows on the next plan
 	inv := &Inventory{}
 	var mu sync.Mutex
 	var wg sync.WaitGroup

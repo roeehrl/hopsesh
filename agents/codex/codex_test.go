@@ -29,9 +29,6 @@ func newHost(t *testing.T) *agenttest.FakeHost {
 
 func TestConformance(t *testing.T) { agenttest.Run(t, New(), newHost) }
 
-// The cloud is declared as data for now: the kit checks the declaration.
-func TestCloudConformance(t *testing.T) { agenttest.RunCloud(t, New(), nil) }
-
 func setup(t *testing.T) (agent.Host, agent.Install, map[string]agent.Summary) {
 	m := New()
 	fh := newHost(t)

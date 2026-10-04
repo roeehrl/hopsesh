@@ -172,21 +172,22 @@ func TestScanCloudStatuses(t *testing.T) {
 	}
 }
 
-// Codex's cloud is declared but not listable yet, Claude Code's lists what hopsesh knows:
-// off until allowed, then ready (Codex with nothing asked; Claude Code after checking its
-// login), and no cloud verb runs.
+// Both clouds list once allowed: off until then, then ready (Codex after a listing,
+// Claude Code after checking its login), and no cloud verb that changes anything runs.
 func TestScanDeclaredClouds(t *testing.T) {
 	_, log := cloudEnv(t, "codex", "claude")
 	inv := cloudApp(t, all.Registry(), "codex-cloud", "claude-cloud").Scan(context.Background(), ScanOptions{SkipGit: true})
 	codex, claude := inv.Cloud("codex-cloud"), inv.Cloud("claude-cloud")
-	if codex == nil || codex.Status != CloudReady || codex.Listable || codex.Sessions != 0 || codex.Version != "0.153.2" || !codex.Tested || codex.Title != "Codex cloud" {
+	if codex == nil || codex.Status != CloudReady || !codex.Listable || !codex.Fetchable || codex.Partial || codex.Sessions != 0 || codex.Version != "0.153.2" ||
+		!codex.Tested || codex.Title != "Codex cloud" {
 		t.Fatalf("codex-cloud: %+v", codex)
 	}
 	if claude == nil || claude.Status != CloudReady || !claude.Listable || !claude.Fetchable || !claude.Partial || claude.Sessions != 0 || !claude.Allowed {
 		t.Fatalf("claude-cloud: %+v", claude)
 	}
-	if got := calls(log); !strings.Contains(got, "claude auth status --json") || strings.Contains(got, "codex cloud") || strings.Contains(got, "--teleport") || strings.Contains(got, "--cloud") {
-		t.Fatalf("only the login check may run: %s", got)
+	if got := calls(log); !strings.Contains(got, "claude auth status --json") || !strings.Contains(got, "codex cloud list --json") ||
+		strings.Contains(got, "codex cloud exec") || strings.Contains(got, "--teleport") || strings.Contains(got, "--cloud") {
+		t.Fatalf("only the login check and the listing may run: %s", got)
 	}
 	if c := cloudApp(t, all.Registry()).Scan(context.Background(), ScanOptions{SkipGit: true}).Cloud("codex-cloud"); c.Status != CloudNotAllowed || c.Allowed {
 		t.Fatalf("off until allowed: %+v", c)

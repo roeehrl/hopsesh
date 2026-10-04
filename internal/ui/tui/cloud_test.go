@@ -25,8 +25,11 @@ import (
 
 // The test binary is the stand-in claude when it runs under that name.
 func TestMain(m *testing.M) {
-	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == "claude" {
+	switch strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") {
+	case "claude":
 		os.Exit(fakeagent.Claude())
+	case "codex":
+		os.Exit(fakeagent.Codex())
 	}
 	os.Exit(m.Run())
 }

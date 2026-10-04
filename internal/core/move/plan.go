@@ -116,6 +116,14 @@ type Options struct {
 	Untracked   []string // untracked files (globs) to carry
 	Brief       string   // the briefing as the user edited it ("": hopsesh's)
 	Cleanup     string   // when the handoff branch is deleted (Cleanup*)
+	// Env is the cloud's environment (an id or a name), for a cloud that needs one ("": the
+	// one configured for the repository).
+	Env string
+	// Attempts asks the cloud for that many attempts at once (0: its default).
+	Attempts int
+	// StartingDiff sends the changes with the cloud session as a starting diff, on a branch
+	// already on the remote, instead of pushing a handoff branch.
+	StartingDiff bool
 }
 
 // Via choices: the target agent's own importer, or hopsesh's conversion even when the

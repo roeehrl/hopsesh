@@ -69,6 +69,7 @@ type Session struct {
 	Result   string `json:"result,omitempty"` // the branch the cloud pushed its work to
 	PR       int    `json:"pr,omitempty"`     // the pull request it opened for Result (copilot, devin)
 	Env      string `json:"env,omitempty"`
+	EnvLabel string `json:"envLabel,omitempty"`
 	Attempts int    `json:"attempts"`
 	State    string `json:"state"`
 	// Applied: codex apply ran for this task.

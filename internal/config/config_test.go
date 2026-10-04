@@ -96,6 +96,17 @@ allowed = false
 	if err != nil || !back.CloudAllowed("codex-cloud") || !back.CloudAllowed("jules") || back.CloudSettings("codex-cloud").Environments["github.com/acme/api"] != "env_1" {
 		t.Fatalf("round trip: %+v %v", back.Clouds, err)
 	}
+	back.SetCloudEnvironment("codex-cloud", "github.com/acme/web", "acme-web")
+	back.SetCloudEnvironment("codex-cloud", "github.com/acme/api", "")
+	back.SetCloudEnvironment("claude-cloud", "github.com/acme/api", "x")
+	if e := back.Clouds["codex-cloud"].Environments; len(e) != 1 || e["github.com/acme/web"] != "acme-web" || !back.CloudAllowed("codex-cloud") ||
+		back.Clouds["claude-cloud"].Environments["github.com/acme/api"] != "x" {
+		t.Fatalf("set environments: %+v", back.Clouds)
+	}
+	back.SetCloudEnvironment("claude-cloud", "github.com/acme/api", "")
+	if back.Clouds["claude-cloud"].Environments != nil {
+		t.Fatalf("the last environment forgotten: %+v", back.Clouds["claude-cloud"])
+	}
 	bad := "schema = 4\n[clouds.claude-cloud]\ncode = \"zip\"\n"
 	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(bad), 0o600); err != nil {
 		t.Fatal(err)

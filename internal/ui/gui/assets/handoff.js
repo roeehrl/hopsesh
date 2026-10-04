@@ -24,7 +24,8 @@ export function handoffMenu(e, open, toggle) {
           onclick: () => { if (t.ok) planHandoff(e, t.cloud, t.bundle); } },
         cloudChip(t.cloud), h("span", { style: "display:flex;flex-direction:column;gap:2px;min-width:0" },
           h("span", { class: "menu-t" }, t.title),
-          t.ok ? h("span", { class: "muted", style: "font-size:11.5px" }, t.note) : h("span", { class: "err", style: "font-size:11.5px" }, `${t.title}: ${t.why}`)))),
+          t.ok ? h("span", { class: "muted", style: "font-size:11.5px" }, t.note) : h("span", { class: "err", style: "font-size:11.5px" }, `${t.title}: ${t.why}`),
+          (t.limits || []).length ? h("span", { class: "muted", style: "font-size:11px" }, t.limits[0]) : null))),
       h("div", { class: "muted", role: "presentation", style: "font-size:11.5px;padding:4px 8px" }, "A cloud gets a briefing, not this conversation.")));
 }
 
@@ -35,7 +36,8 @@ export function pickHandoff(e) {
       (e.handoff || []).map((t) => h("button", { class: "menu-item", role: "menuitem", "aria-disabled": t.ok ? null : "true", disabled: !t.ok,
           onclick: () => { d.close(); planHandoff(e, t.cloud, t.bundle); } },
         cloudChip(t.cloud), h("span", { style: "display:flex;flex-direction:column;gap:2px" }, h("span", { class: "menu-t" }, t.title),
-          h("span", { class: t.ok ? "muted" : "err", style: "font-size:11.5px" }, t.ok ? t.note : `${t.title}: ${t.why}`))))),
+          h("span", { class: t.ok ? "muted" : "err", style: "font-size:11.5px" }, t.ok ? t.note : `${t.title}: ${t.why}`),
+          (t.limits || []).length ? h("span", { class: "muted", style: "font-size:11px" }, t.limits[0]) : null)))),
     h("div", { class: "dlg-foot" }, h("button", { class: "btn", onclick: () => d.close() }, "Cancel")));
 }
 
@@ -43,7 +45,8 @@ export function pickHandoff(e) {
 export async function planHandoff(e, cloud, bundle = false) {
   let d = {};
   try { d = await api("HandoffDefaults", cloud); } catch { /* the defaults below */ }
-  hc = { e, cloud, opts: { untracked: [], historyFile: !!d.historyFile, bundle: bundle || !!d.bundle, mark: d.mark !== false, cleanup: d.cleanup || "", brief: "", note: "", carryRules: false },
+  hc = { e, cloud, opts: { untracked: [], historyFile: !!d.historyFile, bundle: bundle || !!d.bundle, mark: d.mark !== false, cleanup: d.cleanup || "", brief: "", note: "", carryRules: false,
+    env: "", startingDiff: false },
     plan: null, busy: false, applying: false };
   fill(sheet, h("div", { class: "sheet-in" }, h("div", { class: "loading", role: "status", style: "min-height:240px" }, "Working out the hand-off…")));
   if (!sheet.open) sheet.showModal();
@@ -82,14 +85,15 @@ const markWords = (t) => t.replace(/^↪\s*/, "");
 
 function summary(p) {
   const x = p.handoff;
-  const add = [`1 ${x.cloudTitle} session`];
+  const add = [`1 ${x.cloudTitle} ${x.noun || "session"}`];
   if (x.code === "bundle") add.push("1 upload");
+  else if (x.code === "starting-diff") add.push("1 starting diff");
   else if (!x.reuse && x.branch) add.push(`1 branch on ${x.host}`);
   const chg = p.mark !== "off" ? ["this session marked" + (p.mark === "when-stopped" ? " when it ends" : "")] : [];
   return h("div", { class: "summary", "aria-label": "What changes" },
     add.map((s) => h("span", { class: "add" }, "+ " + s)), chg.map((s) => h("span", { class: "chg" }, "~ " + s)),
     h("span", { class: "none" }, "0 removed"), h("span", { class: "spacer" }),
-    h("span", { class: "muted" }, `Undo from Activity removes ${x.reuse || x.code === "bundle" ? "" : "the branch and "}the mark`));
+    h("span", { class: "muted" }, `Undo from Activity removes ${x.reuse || x.code !== "branch" ? "" : "the branch and "}the mark`));
 }
 
 function conversation(p) {
@@ -122,7 +126,10 @@ function repository(p) {
   if (x.unpushed) carries.push(count(x.unpushed, "unpushed commit"));
   const files = [...(x.tracked || []), ...(x.untracked || [])];
   if (files.length) carries.push(count(files.length, "changed file"));
-  if (x.branch) {
+  if (x.branch && x.code === "starting-diff") {
+    items.push(h("div", { class: "chk" }, tick("ok"), h("span", {}, `Sends the changes with the ${x.noun} as a starting diff, on `, mono(x.branch), `, already on ${x.host}. Nothing is pushed.`)));
+    if (files.length) items.push(h("div", { class: "chk" }, tick("ok"), h("span", {}, `Carries ${count(files.length, "changed file")}: `, files.slice(0, 6).map((f, i) => [i ? ", " : "", mono(f)]), files.length > 6 ? ` and ${files.length - 6} more` : "")));
+  } else if (x.branch) {
     if (x.reuse) items.push(h("div", { class: "chk" }, tick("ok"), h("span", {}, x.code === "bundle" ? ["Uploads ", mono(x.branch), " as it is. Your checkout here is not touched."]
       : ["Uses branch ", mono(x.branch), `, already on ${x.host}. Nothing is pushed.`])));
     else items.push(h("div", { class: "chk" }, tick("ok"), h("span", {}, x.code === "bundle" ? ["Uploads a snapshot from ", mono(x.base.slice(0, 7)), ` (${x.baseBranch}), kept here as `, mono(x.branch), ". Nothing is pushed."]
@@ -146,9 +153,36 @@ function repository(p) {
       h("button", { class: "btn", style: "align-self:flex-start", onclick: () => set("bundle", true) }, `Hand off to ${x.cloudTitle} as an upload`)) : null);
 }
 
+// envPicker chooses the cloud's environment (Codex cloud runs every task in one): the ones
+// recent tasks used, the repository's own first; Other… takes an id or a name.
+function envPicker(x) {
+  const known = (x.envs || []).map((e) => ({ value: e.value, label: e.label }));
+  if (x.env && !known.some((e) => e.value === x.env)) known.unshift({ value: x.env, label: x.envName || x.env });
+  const other = h("input", { id: "ho-env-other", class: "field", placeholder: "Environment id or name", "aria-label": "Another environment", hidden: true, style: "flex:1 1 220px;max-width:300px",
+    onkeydown: (ev) => { if (ev.key === "Enter" && ev.target.value.trim()) { ev.preventDefault(); set("env", ev.target.value.trim()); } },
+    onchange: (ev) => { if (ev.target.value.trim()) set("env", ev.target.value.trim()); } });
+  const sel = h("select", { id: "ho-env", style: "flex:1 1 320px;max-width:460px", class: x.env ? "" : "needs",
+    onchange: (ev) => { if (ev.target.value === "__other__") { other.hidden = false; other.focus(); } else if (ev.target.value) set("env", ev.target.value); } },
+    x.env ? null : h("option", { value: "", selected: true }, "Pick an environment…"),
+    known.map((e) => h("option", { value: e.value, selected: e.value === x.env }, e.label)),
+    h("option", { value: "__other__" }, "Other…"));
+  return h("div", { style: "display:flex;flex-direction:column;gap:6px" },
+    h("div", { style: "display:flex;align-items:center;gap:12px;flex-wrap:wrap" },
+      h("label", { for: "ho-env", style: "font-size:12.5px;font-weight:500;flex:0 0 100px" }, "Environment"), sel, other),
+    x.envNote ? h("span", { class: "warn", id: "ho-env-note", style: "font-size:12px" }, envNoteWords(x.envNote)) : null);
+}
+
+// envNoteWords sets a command in the note in monospace.
+function envNoteWords(text) {
+  return text.split(/(`[^`]+`)/).map((part) => part.startsWith("`") ? mono(part.slice(1, -1)) : part);
+}
+
 function options(p) {
   const x = p.handoff, o = hc.opts;
   return h("section", { class: "sec", style: "gap:12px" }, h("span", { class: "sec-h" }, "Options"),
+    x.envNeeded ? envPicker(x) : null,
+    x.canStartingDiff ? h("label", { class: "opt" }, h("input", { type: "checkbox", checked: x.code === "starting-diff", onchange: (ev) => set("startingDiff", ev.target.checked) }),
+      h("span", {}, h("b", {}, `Send the changes with the ${x.noun} as a starting diff instead of a branch`), h("span", { class: "muted", style: "display:block;font-size:12px" }, x.startingDiffOffer + "."))) : null,
     h("label", { class: "opt" }, h("input", { type: "checkbox", checked: x.historyFile, onchange: (ev) => set("historyFile", ev.target.checked) }),
       h("span", {}, h("b", {}, "Also commit the conversation as ", mono(x.historyPath)), h("span", { class: "warn", style: "display:block;font-size:12px" }, x.historyWarning))),
     h("label", { class: "opt" }, h("input", { type: "checkbox", checked: p.mark !== "off" && o.mark, onchange: (ev) => set("mark", ev.target.checked) }),
@@ -165,10 +199,12 @@ function checks(p) {
   const x = p.handoff;
   return h("section", { class: "sec", style: "gap:8px" }, h("span", { class: "sec-h" }, "Checks"),
     h("div", { class: "checks-line" }, (x.checks || []).filter((c) => c.state !== "err").map((c) => h("span", {}, tick(c.state === "warn" ? "warn" : "ok"), " ", c.text))),
-    (p.blockers || []).map((b) => h("div", { class: "item" }, tick("err"), h("span", { class: "err" }, cap(b)),
-      /claude\.ai login/.test(b) ? h("span", { class: "muted", style: "font-size:12px" }, " Run ", mono("claude /login"), ", then Refresh") : null)),
+    (p.blockers || []).filter((b) => b !== x.envNote).map((b) => h("div", { class: "item" }, tick("err"), h("span", { class: "err" }, cap(b)),
+      /claude\.ai login/.test(b) ? h("span", { class: "muted", style: "font-size:12px" }, " Run ", mono("claude /login"), ", then Refresh") : null,
+      /ChatGPT login/.test(b) ? h("span", { class: "muted", style: "font-size:12px" }, " Run ", mono("codex login"), ", then Refresh") : null)),
     h("span", { style: "font-size:12px" }, x.usage),
-    (x.notes || []).map((n) => h("span", { class: "muted", style: "font-size:12px" }, n)));
+    (x.notes || []).map((n) => h("span", { class: "muted", style: "font-size:12px" }, n)),
+    (x.limits || []).map((n) => h("span", { class: "muted", style: "font-size:12px" }, n)));
 }
 
 function render() {
@@ -291,24 +327,26 @@ screen("handedoff", (d) => {
   fill(view, h("div", { class: "page" }, h("div", { class: "page-in", style: "max-width:760px" },
     h("div", { style: "display:flex;gap:14px;align-items:center" }, h("span", { class: "badge ok", style: "width:40px;height:40px;font-size:20px" }, "✓"),
       h("div", {}, h("h1", {}, `Handed off to ${r.cloudTitle}`),
-        h("div", { class: "muted" }, "Session ", h("span", { class: "mono", style: "font-size:12px" }, r.session), ` is running · “${d.title}”`))),
+        h("div", { class: "muted" }, cap(r.noun || "session") + " ", h("span", { class: "mono", style: "font-size:12px" }, r.session), ` is running · “${d.title}”`))),
     h("section", { class: "card" }, h("div", { class: "dlg-body" },
       h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" }, h("button", { class: "btn primary big", id: "ho-open", onclick: open }, "Open in browser"),
         h("button", { class: "btn big", onclick: copy }, "Copy link")),
       h("div", { class: "term" }, r.url),
-      r.branch && r.code === "branch" ? h("span", { style: "font-size:12.5px" }, "Branch ",
+      r.branch && (r.code === "branch" || r.code === "starting-diff") ? h("span", { style: "font-size:12.5px" }, "Branch ",
         r.branchUrl ? h("button", { class: "link mono", style: "font-size:12px", onclick: () => api("OpenURL", r.branchUrl).catch(fail) }, r.branch) : mono(r.branch),
-        r.repo ? ` on ${r.repo}` : "") : null)),
+        r.repo ? ` on ${r.repo}` : "") : null,
+      r.envName ? h("span", { style: "font-size:12.5px" }, "Environment ", mono(r.envName)) : null)),
     h("section", { class: "card" }, h("div", { class: "dlg-body" }, h("span", { class: "sec-h" }, "What happened"),
       h("div", { class: "item" }, tick("ok"), h("span", {}, `Briefing sent · ${thousands(r.tokens)} tokens${r.masked ? `, ${count(r.masked, "secret")} masked` : ""}`)),
-      r.pushed ? h("div", { class: "item" }, tick("ok"), h("span", {}, "Branch pushed")) : r.code === "bundle" ? h("div", { class: "item" }, tick("ok"), h("span", {}, "Uploaded by the agent; nothing pushed")) : null,
+      r.pushed ? h("div", { class: "item" }, tick("ok"), h("span", {}, "Branch pushed")) : r.code === "bundle" ? h("div", { class: "item" }, tick("ok"), h("span", {}, "Uploaded by the agent; nothing pushed"))
+        : r.code === "starting-diff" ? h("div", { class: "item" }, tick("ok"), h("span", {}, "The changes went with it as a starting diff, on ", mono(r.branch), "; nothing pushed")) : null,
       (r.stayed || []).length ? h("div", { class: "item" }, h("span", { class: "badge warn" }, "•"), h("span", {}, `Stayed on ${sys.here}: `, r.stayed.map((s, i) => [i ? ", " : "", s]))) : null,
       r.markText ? h("div", { class: "item" }, tick("ok"), h("span", {}, `The session here is marked “${markWords(r.markText)}”`)) : null,
       (d.warnings || []).map((w) => h("div", { class: "item" }, tick("warn"), h("span", {}, cap(w)))))),
     h("div", { class: "hint", role: "note" }, r.hint),
     h("div", { style: "display:flex;gap:10px;align-items:center;flex-wrap:wrap" },
       h("button", { class: "btn", onclick: doUndo }, "Undo"),
-      h("button", { class: "btn", onclick: () => followUp(r.cloud, r.session, d.title) }, "Send a follow-up…"),
+      r.follow ? h("button", { class: "btn", onclick: () => followUp(r.cloud, r.session, d.title) }, "Send a follow-up…") : null,
       h("button", { class: "btn", onclick: () => go("sessions", true) }, "Back to sessions", h("span", { class: "kbd" }, "esc"))))));
   view.querySelector("#ho-open")?.focus();
 });

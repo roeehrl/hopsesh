@@ -130,5 +130,6 @@ test("a cloud-only module: Copilot's tasks are listed, and only their code comes
   await expect(page.getByRole("heading", { name: "Machines" })).toBeVisible();
   const card = page.locator(".cloud-card", { hasText: "Copilot cloud agent" });
   await expect(card).toContainText("The code (its branch); the conversation stays in the cloud for now", { timeout: 30_000 });
-  await expect(page.locator(".cloud-card", { hasText: "Amp" })).toContainText("Nothing yet: the conversation stays in the cloud", { timeout: 30_000 });
+  // By its heading: "Amp" alone would also match "example" on the Codex cloud card's table.
+  await expect(page.getByRole("region", { name: "Amp", exact: true })).toContainText("Nothing yet: the conversation stays in the cloud", { timeout: 30_000 });
 });

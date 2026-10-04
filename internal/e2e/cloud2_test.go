@@ -138,7 +138,7 @@ func TestBringFromJules(t *testing.T) {
 	}
 	head := w.git(w.repo, "rev-parse", "HEAD")
 	p, _, err := a.Plan(ctx, inv, e, "", move.Options{CodeOnly: true, TargetDir: w.repo})
-	if err != nil || len(p.Blockers) > 0 || !p.Fetch.Diff || p.Fetch.LocalBranch != "hopsesh/from/jules/write-unit-tests" || p.Fetch.Base != head {
+	if err != nil || len(p.Blockers) > 0 || !p.Fetch.Diff || p.Fetch.LocalBranch != "hopsesh/from/jules/"+s.ID || p.Fetch.Base != head {
 		t.Fatalf("plan: %+v %v", p.Fetch, err)
 	}
 	res, err := a.Apply(ctx, p, move.Input{}, nil)
