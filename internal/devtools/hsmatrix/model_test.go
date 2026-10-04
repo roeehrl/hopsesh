@@ -7,7 +7,9 @@ import "testing"
 func TestPairwiseCoversEveryValidPair(t *testing.T) {
 	rows := pairwise(1)
 	key := func(i, j int, a, b string) string { return string(rune('0'+i)) + string(rune('0'+j)) + a + "|" + b }
-	values := func(r Row) []string { return []string{r.Op, r.From + ">" + r.To, r.Content, r.Repo, r.Naming} }
+	values := func(r Row) []string {
+		return []string{r.Op, r.From + ">" + r.To, r.Content, r.Repo, r.Naming, r.Location}
+	}
 	have := map[string]bool{}
 	for _, r := range rows {
 		v := values(r)
@@ -34,5 +36,23 @@ func TestPairwiseCoversEveryValidPair(t *testing.T) {
 		if rows[i] != again[i] {
 			t.Fatal("the same seed must give the same rows")
 		}
+	}
+}
+
+// Fetch rows start in Claude Code's cloud and come into Claude Code or Codex here; no
+// other row starts in a cloud. The pull-request tier stays small.
+func TestFetchRows(t *testing.T) {
+	rows := pairwise(1)
+	n := 0
+	for _, r := range rows {
+		if (r.Op == "fetch") != (r.Location == "claude-cloud") || r.Op == "fetch" && r.From != "claude" {
+			t.Fatalf("row %s", r)
+		}
+		if r.Op == "fetch" {
+			n++
+		}
+	}
+	if n < 2 || len(rows) > 60 {
+		t.Fatalf("%d fetch rows of %d", n, len(rows))
 	}
 }

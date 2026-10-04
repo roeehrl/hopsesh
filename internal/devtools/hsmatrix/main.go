@@ -71,7 +71,43 @@ func runMain(args []string) int {
 	only := fl.String("only", "", "comma-separated row numbers or ops to run")
 	shard := fl.String("shard", "", "k/n: run every n-th row starting at the k-th (1-based), to split a long run across jobs")
 	_ = fl.Parse(args)
-	if *there == "" {
+	rows := covering(*strength, *seedN)
+	if *all {
+		rows = every()
+	}
+	if *only != "" {
+		keep := map[string]bool{}
+		for _, s := range strings.Split(*only, ",") {
+			keep[strings.TrimSpace(s)] = true
+		}
+		var sel []Row
+		for _, row := range rows {
+			if keep[strconv.Itoa(row.N)] || keep[row.Op] {
+				sel = append(sel, row)
+			}
+		}
+		rows = sel
+	}
+	if *shard != "" {
+		var k, n int
+		if _, err := fmt.Sscanf(*shard, "%d/%d", &k, &n); err != nil || n < 1 || k < 1 || k > n {
+			fmt.Fprintln(os.Stderr, "-shard wants k/n with 1 <= k <= n, got", *shard)
+			return 2
+		}
+		var sel []Row
+		for i, row := range rows {
+			if i%n == k-1 {
+				sel = append(sel, row)
+			}
+		}
+		rows = sel
+	}
+	// Rows that start in a cloud, and the skill row, need no other machine.
+	needThere := false
+	for _, row := range rows {
+		needThere = needThere || row.Location != "claude-cloud" && row.Op != "skill"
+	}
+	if *there == "" && needThere {
 		fmt.Fprintln(os.Stderr, "-there is required")
 		return 2
 	}
@@ -121,43 +157,14 @@ func runMain(args []string) int {
 		}
 		return nil
 	}
-	if err := setup(); err != nil {
-		_ = os.WriteFile(filepath.Join(outDir, "setup-FAIL.log"), []byte(r.log.b.String()+"\n"+err.Error()), 0o644)
-		fmt.Fprintln(os.Stderr, "setup:", err)
-		return 1
+	if needThere {
+		if err := setup(); err != nil {
+			_ = os.WriteFile(filepath.Join(outDir, "setup-FAIL.log"), []byte(r.log.b.String()+"\n"+err.Error()), 0o644)
+			fmt.Fprintln(os.Stderr, "setup:", err)
+			return 1
+		}
 	}
 
-	rows := covering(*strength, *seedN)
-	if *all {
-		rows = every()
-	}
-	if *only != "" {
-		keep := map[string]bool{}
-		for _, s := range strings.Split(*only, ",") {
-			keep[strings.TrimSpace(s)] = true
-		}
-		var sel []Row
-		for _, row := range rows {
-			if keep[strconv.Itoa(row.N)] || keep[row.Op] {
-				sel = append(sel, row)
-			}
-		}
-		rows = sel
-	}
-	if *shard != "" {
-		var k, n int
-		if _, err := fmt.Sscanf(*shard, "%d/%d", &k, &n); err != nil || n < 1 || k < 1 || k > n {
-			fmt.Fprintln(os.Stderr, "-shard wants k/n with 1 <= k <= n, got", *shard)
-			return 2
-		}
-		var sel []Row
-		for i, row := range rows {
-			if i%n == k-1 {
-				sel = append(sel, row)
-			}
-		}
-		rows = sel
-	}
 	var results []result
 	failed := 0
 	for _, row := range rows {
@@ -208,14 +215,14 @@ func grid(label string, results []result) string {
 		}
 	}
 	fmt.Fprintf(&b, "### Scenario matrix %s: %d of %d passed\n\n", label, ok, len(results))
-	b.WriteString("| # | op | agents | content | repo | naming | result | s |\n|---|---|---|---|---|---|---|---|\n")
+	b.WriteString("| # | op | agents | content | repo | naming | location | result | s |\n|---|---|---|---|---|---|---|---|---|\n")
 	for _, r := range results {
 		mark := "✅"
 		if !r.OK {
 			mark = "❌ " + strings.ReplaceAll(firstLines(r.Error, 1), "|", "\\|")
 		}
-		fmt.Fprintf(&b, "| %d | %s | %s→%s | %s | %s | %s | %s | %.0f |\n", r.Row.N, r.Row.Op, r.Row.From, r.Row.To,
-			r.Row.Content, r.Row.Repo, r.Row.Naming, mark, r.Seconds)
+		fmt.Fprintf(&b, "| %d | %s | %s→%s | %s | %s | %s | %s | %s | %.0f |\n", r.Row.N, r.Row.Op, r.Row.From, r.Row.To,
+			r.Row.Content, r.Row.Repo, r.Row.Naming, r.Row.Location, mark, r.Seconds)
 	}
 	b.WriteString("\n")
 	return b.String()

@@ -8,8 +8,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
+
+	"github.com/roeehrl/hopsesh/internal/testkit/fakecloud"
 )
 
 // side is one machine of a scenario: here (in-process) or there (the helper over ssh).
@@ -169,6 +172,9 @@ type sc struct {
 func (r *runner) scenario(row Row) error {
 	if row.Op == "skill" {
 		return r.skill()
+	}
+	if row.Op == "fetch" {
+		return r.fetch(row)
 	}
 	s := &sc{row: row, id: newID(), host: r.hosts[row.Naming]}
 	s.marker = fmt.Sprintf("hsm%03dx%s", row.N, s.id[:6])
@@ -480,6 +486,134 @@ func (r *runner) skill() error {
 	}
 	if _, err := os.Stat(filepath.Join(claudeDir(), "skills", "hopsesh")); !errors.Is(err, os.ErrNotExist) {
 		return errors.New("the skill is still there after remove")
+	}
+	return nil
+}
+
+// fetch brings a Claude Code cloud session here. A stand-in cloud plays it (the fake's
+// store, and a bare repository standing in for its GitHub repository); hopsesh plans it,
+// runs the teleport in a new worktree (--run), checks the copy's message count and keeps the
+// cloud's branch under hopsesh/from/claude-cloud/ (or says none was pushed), continues it in
+// Codex for claude→codex rows, and undo takes it all back.
+func (r *runner) fetch(row Row) error {
+	if runtime.GOOS == "windows" {
+		r.log.printf("skipped: the stand-in cloud's repository hook needs a POSIX shell\n")
+		return nil
+	}
+	id := newID()
+	marker := fmt.Sprintf("hsm%03dx%s", row.N, id[:6])
+	text := contents[row.Content] + " " + marker
+	name := fmt.Sprintf("r%03d", row.N)
+	var sr SeedRes
+	if err := r.here.do("seed", SeedReq{ID: id, Repo: name, State: "clean"}, &sr); err != nil {
+		return fmt.Errorf("seeding the repository: %w", err)
+	}
+	world := filepath.Join(r.out, "work", "cloud")
+	gitConfig := filepath.Join(world, "gitconfig")
+	for k, v := range map[string]string{"GIT_CONFIG_GLOBAL": gitConfig, "FAKE_CLOUD_DIR": filepath.Join(world, "store"), "FAKE_CLOUD_FAIL": ""} {
+		old, had := os.LookupEnv(k)
+		os.Setenv(k, v)
+		defer func() { // the other rows run with this machine's own settings
+			if had {
+				os.Setenv(k, old)
+			} else {
+				os.Unsetenv(k)
+			}
+		}()
+	}
+	o, err := fakecloud.NewOrigin(world, "https://github.com/hsm-matrix/"+name+".git")
+	if err != nil {
+		return err
+	}
+	if err := o.Redirect(gitConfig); err != nil {
+		return err
+	}
+	if _, err := git(sr.Cwd, nil, "remote", "set-url", "origin", o.URL); err != nil {
+		return err
+	}
+	if _, err := git(sr.Cwd, nil, "push", "-q", "origin", "main"); err != nil {
+		return err
+	}
+	msgs := []fakecloud.Message{{Role: "user", Text: text}, {Role: "assistant", Text: "On it."}}
+	if row.Content == "large" {
+		for i, p := range padding(SeedReq{Large: true})[:300] {
+			msgs = append(msgs, fakecloud.Message{Role: "assistant", Text: fmt.Sprintf("%d %s", i, p)})
+		}
+	}
+	cs, err := fakecloud.Open(os.Getenv("FAKE_CLOUD_DIR")).Seed(fakecloud.Session{Cloud: fakecloud.ClaudeCloud, Title: fmt.Sprintf("matrix row %d", row.N),
+		Repo: "github.com/hsm-matrix/" + name, CloneURL: o.FileURL(), Branch: "main", Code: "branch", Messages: msgs})
+	if err != nil {
+		return err
+	}
+	if row.Repo == "unpushed" {
+		os.Setenv("FAKE_CLOUD_FAIL", "no-branch") // the cloud session never pushed its work
+	} else if err := fakecloud.Work(fakecloud.Proc{Vars: map[string]string{}}, cs.ID, false); err != nil {
+		return err
+	}
+	if _, err := r.hs(true, "clouds", "allow", "claude-cloud"); err != nil {
+		return err
+	}
+	args := []string{"pull", "claude-cloud:" + cs.ID, "--to", sr.Cwd, "--yes", "--run", "--json"}
+	if row.To != row.From {
+		args = append(args, "--in", row.To)
+	}
+	out, err := r.hs(true, args...)
+	if err != nil {
+		return err
+	}
+	var res struct {
+		Brought struct {
+			Outcome, Branch, Worktree string
+			NoBranch                  bool `json:"noBranch"`
+			Restored, Expected        int
+		} `json:"brought"`
+		Continued *struct {
+			Result *struct{ Journal string } `json:"result"`
+		} `json:"continued"`
+	}
+	if i := strings.Index(out, "{\n"); i < 0 || json.Unmarshal([]byte(out[i:]), &res) != nil {
+		return fmt.Errorf("pull --json printed no result:\n%s", tail(out, 800))
+	}
+	b := res.Brought
+	want := len(msgs) + 1 // and the cloud's report of its work
+	if row.Repo == "unpushed" {
+		want = len(msgs)
+	}
+	switch {
+	case b.Outcome != "complete" || b.Restored != want:
+		return fmt.Errorf("the copy: %+v", b)
+	case row.Repo == "unpushed" && !b.NoBranch:
+		return fmt.Errorf("a session that never pushed reports a branch: %+v", b)
+	case row.Repo != "unpushed" && !strings.HasPrefix(b.Branch, "hopsesh/from/claude-cloud/"):
+		return fmt.Errorf("the cloud's branch was not renamed: %+v", b)
+	case row.To != row.From && (res.Continued == nil || res.Continued.Result == nil):
+		return fmt.Errorf("it did not continue in %s", row.To)
+	}
+	var fs []Found
+	if err := r.here.do("find", FindReq{Marker: marker, Needles: []string{text, b.Worktree}}, &fs); err != nil {
+		return err
+	}
+	ok := false
+	for _, f := range fs {
+		ok = ok || f.Agent == row.To && f.Mark == "" && f.Has[text] && f.Has[b.Worktree]
+	}
+	if !ok {
+		return fmt.Errorf("here: no %s session with the conversation in %s (%+v)", row.To, b.Worktree, fs)
+	}
+	undos := 1
+	if row.To != row.From {
+		undos = 2 // the continuation, then the fetch
+	}
+	for i := 0; i < undos; i++ {
+		if _, err := r.hs(true, "undo", "--yes"); err != nil {
+			return err
+		}
+	}
+	if _, err := os.Stat(b.Worktree); !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("undo left the worktree %s", b.Worktree)
+	}
+	if left, _ := git(sr.Cwd, nil, "branch", "--list", "hopsesh/from/*", "claude/*"); left != "" {
+		return fmt.Errorf("undo left branches: %s", left)
 	}
 	return nil
 }

@@ -279,10 +279,14 @@ func (r *run) pullCloud(cmd *cobra.Command, cloud string, id agent.SessionID, op
 	}
 	run, _ := cmd.Flags().GetBool("run")
 	if run && res.Fetch.Outcome == move.FetchWaiting {
-		r.printf("\nRunning %s here; hopsesh checks what it brought when it ends.\n\n", strings.Join(p.Fetch.Run.Argv, " "))
 		c := proc.Command(p.Fetch.Run.Argv[0], p.Fetch.Run.Argv[1:]...)
 		c.Dir, c.Env = p.Fetch.Run.Dir, host.Without(os.Environ(), p.Fetch.Run.Unset)
 		c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
+		if r.jsonOut {
+			c.Stdout = os.Stderr // standard output is the JSON
+		} else {
+			r.printf("\nRunning %s here; hopsesh checks what it brought when it ends.\n\n", strings.Join(p.Fetch.Run.Argv, " "))
+		}
 		runErr := c.Run()
 		f, err := r.app.Adopt(context.Background(), res.Journal, true)
 		if err != nil {
@@ -293,25 +297,34 @@ func (r *run) pullCloud(cmd *cobra.Command, cloud string, id agent.SessionID, op
 			return fmt.Errorf("%s ended without bringing the session (%v); undo the worktree with: hopsesh undo %s", p.Fetch.Run.Argv[0], runErr, res.Journal)
 		}
 	}
-	if r.jsonOut {
-		return r.emitJSON(map[string]any{"plan": p, "result": res, "brought": b})
+	if !r.jsonOut {
+		r.renderBrought(b, res.Journal)
 	}
-	r.renderBrought(b, res.Journal)
+	out := map[string]any{"plan": p, "result": res, "brought": b}
 	if run && b.Continue != "" && (b.Outcome == move.FetchComplete || b.Outcome == move.FetchPartial) {
-		return r.continueBrought(cmd, b, opt)
+		cp, cres, err := r.continueBrought(cmd, b, opt)
+		if err != nil {
+			return err
+		}
+		out["continued"] = map[string]any{"plan": cp, "result": cres}
+	}
+	if r.jsonOut {
+		return r.emitJSON(out)
 	}
 	return nil
 }
 
 // continueBrought continues a copy just brought from a cloud in another agent, as pull
 // --in does for any session here.
-func (r *run) continueBrought(cmd *cobra.Command, b app.Brought, opt move.Options) error {
-	r.printf("\n")
+func (r *run) continueBrought(cmd *cobra.Command, b app.Brought, opt move.Options) (*move.Plan, *move.Result, error) {
+	if !r.jsonOut {
+		r.printf("\n")
+	}
 	inv := r.scan(cmd, "local", false)
 	defer inv.Close()
 	k, err := agent.ParseKey(b.Key)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	var e *app.Entry
 	for i := range inv.Entries {
@@ -320,28 +333,36 @@ func (r *run) continueBrought(cmd *cobra.Command, b app.Brought, opt move.Option
 		}
 	}
 	if e == nil {
-		return fmt.Errorf("the copy %s is not listed here yet; continue it with: hopsesh pull %s --in %s", b.Key, b.Key, b.Continue)
+		return nil, nil, fmt.Errorf("the copy %s is not listed here yet; continue it with: hopsesh pull %s --in %s", b.Key, b.Key, b.Continue)
 	}
 	opt.TargetDir, opt.CodeOnly, opt.AppendOriginal = "", false, false
 	ctx, cancel := ctxTimeout(30)
 	defer cancel()
 	p, input, err := r.app.Plan(ctx, inv, *e, agent.ID(b.Continue), opt)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	r.renderPlan(p)
+	if !r.jsonOut {
+		r.renderPlan(p)
+	}
 	if len(p.Blockers) > 0 {
-		return fmt.Errorf("cannot continue: %s", strings.Join(p.Blockers, "; "))
+		return p, nil, fmt.Errorf("cannot continue: %s", strings.Join(p.Blockers, "; "))
 	}
 	if !r.confirm("Continue it in " + p.Agent + "?") {
-		return nil
+		return p, nil, nil
 	}
-	res, err := r.app.Apply(ctx, p, input, func(s string) { r.printf("  • %s\n", s) })
+	progress := func(s string) { r.printf("  • %s\n", s) }
+	if r.jsonOut {
+		progress = nil
+	}
+	res, err := r.app.Apply(ctx, p, input, progress)
 	if err != nil {
-		return err
+		return p, nil, err
 	}
-	r.renderResult(p, res)
-	return nil
+	if !r.jsonOut {
+		r.renderResult(p, res)
+	}
+	return p, res, nil
 }
 
 // isCheckout reports whether dir is in a git checkout.
