@@ -133,7 +133,7 @@ func handoff(cmd *cobra.Command, refArg, cloud string) error {
 		return err
 	}
 	ref := app.ParseRef(refArg)
-	inv := r.scan(cmd, ref.Machine, false)
+	inv := r.scanFor(cmd, ref.Machine, ref)
 	defer inv.Close()
 	e, err := inv.Find(ref)
 	if err != nil {

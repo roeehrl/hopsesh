@@ -49,16 +49,12 @@ func (inv *Inventory) Find(r Ref) (Entry, error) {
 			cands = inv.copiesOf(it)
 		}
 		for _, e := range cands {
-			if r.Machine != "" && e.Machine != r.Machine || r.Agent != "" && e.Agent != r.Agent {
-				continue
-			}
-			sid := string(e.Session.Key.Session)
-			switch {
-			case sid == r.Query || strings.ToLower(e.Session.Title) == q:
+			switch r.match(q, e) {
+			case matchExact:
 				exact = append(exact, e)
-			case len(r.Query) >= 4 && strings.HasPrefix(sid, r.Query):
+			case matchPrefix:
 				prefix = append(prefix, e)
-			case q != "" && strings.Contains(strings.ToLower(e.Session.Title), q):
+			case matchTitle:
 				title = append(title, e)
 			}
 		}
@@ -77,6 +73,53 @@ func (inv *Inventory) Find(r Ref) (Entry, error) {
 		return Entry{}, fmt.Errorf("%w: %s", ErrAmbiguous, strings.Join(names, ", "))
 	}
 	return Entry{}, fmt.Errorf("%w: no session matches %q", agent.ErrNotFound, r.Query)
+}
+
+// How a reference matches a session, best first.
+const (
+	matchNone = iota
+	matchExact
+	matchPrefix
+	matchTitle
+)
+
+// match is how r names e (q is r.Query in lower case).
+func (r Ref) match(q string, e Entry) int {
+	if r.Machine != "" && e.Machine != r.Machine || r.Agent != "" && e.Agent != r.Agent {
+		return matchNone
+	}
+	sid := string(e.Session.Key.Session)
+	switch {
+	case sid == r.Query || strings.ToLower(e.Session.Title) == q:
+		return matchExact
+	case len(r.Query) >= 4 && strings.HasPrefix(sid, r.Query):
+		return matchPrefix
+	case q != "" && strings.Contains(strings.ToLower(e.Session.Title), q):
+		return matchTitle
+	}
+	return matchNone
+}
+
+// GitFor narrows a scan's git probe (ScanOptions.GitFor) to what working with the sessions
+// r names needs: the folders of every session r could match, and of the sessions whose
+// lineage names a cloud copy (a cloud session's repository and checkout come from them).
+// Other folders are left alone, so one that git cannot read in time (offloaded to a cloud
+// drive, say) does not hold up a command about another session.
+func (a *App) GitFor(r Ref) func(Entry) bool {
+	q := strings.ToLower(r.Query)
+	return func(e Entry) bool {
+		if r.match(q, e) != matchNone {
+			return true
+		}
+		if e.Lineage != nil {
+			for _, rep := range e.Lineage.Replicas {
+				if a.IsCloud(rep.Location) {
+					return true
+				}
+			}
+		}
+		return false
+	}
 }
 
 // copiesOf returns every entry of an item (all its copies).
