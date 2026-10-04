@@ -266,6 +266,36 @@ itself stays in Claude Code on the web until you archive it there. A follow-up s
 in the cloud, on your plan. In the app: **Hand off ▸** on a session, or *Hand off to…* in the
 command palette; in the terminal UI, `c`. Bring the work home later as above.
 
+## Codex cloud, both ways
+
+A session here can also go to a Codex cloud task, and a task can come back, through your own
+`codex` (signed in with ChatGPT: Codex cloud has no API-key login), only once you allow it:
+
+```sh
+hopsesh clouds allow codex-cloud
+hopsesh clouds test codex-cloud                          # read-only: login, commands, a listing
+hopsesh handoff claude/<id> --to codex-cloud --env acme-api
+hopsesh ls codex-cloud:                                  # your tasks, with their environment
+hopsesh pull codex-cloud:task_e_… [--in claude]          # the task's code and words, here
+```
+
+Codex cloud runs every task in an **environment** you made on the web (open `codex cloud`
+once if you have none). Name it with `--env` (its id or its name); the plan lists the ones
+your recent tasks used, and hopsesh remembers the one you pick for the repository
+(`hopsesh clouds env codex-cloud` shows and sets them). The briefing and the branch go up as
+for Claude Code cloud (GitHub only); a few changes on a branch that is already pushed can go
+with the task as a **starting diff** instead (`--starting-diff`). `--attempts` asks for
+several attempts at once.
+
+Coming back, Codex shows only a task's title, its state and its diff: its messages and steps
+stay in the cloud. hopsesh applies the diff in a new worktree and commits it on
+`hopsesh/from/codex-cloud/<id>` (so undo is deleting a branch), and writes the task as a new
+Codex session there (or a Claude Code one with `--in claude`): the briefing hopsesh sent, when
+it sent the task, and what came of it. Only Codex cloud (legacy) tasks can be reached: the
+new Codex Cloud (DevDay 2026) has no command line yet. In the app: **Codex cloud** under
+Clouds, the environment picker in the hand-off sheet, and an environment per repository on
+its card under Machines.
+
 ## Use it from your agent
 
 ```sh
@@ -278,8 +308,9 @@ things like "bring my laptop session here", "continue this in Codex" or "which s
 running on the studio?". The agent plans first and **moves only after you say yes**.
 `--add-rules` lets the read-only commands (`ls`, `show`, `plan`, `agents`, `clouds`, `doctor`, …)
 run without asking, while `pull`, `push`, `handoff`, `followup` and `undo` **always ask**, even
-in auto mode. "Hand this off to Claude Code cloud" works the same way: the agent shows the
-plan and what stays behind, then hands it off after your yes. The skill
+in auto mode. "Hand this off to Claude Code cloud" (or "to Codex cloud") works the same way:
+the agent shows the plan and what stays behind, asks you for the environment Codex cloud
+needs, then hands it off after your yes. The skill
 never starts another agent and never handles passwords: for a machine that logs in with a
 password, the agent asks you to run `hopsesh hosts setup-key` yourself. `hopsesh skill remove`
 takes it out again. Details: [docs/design.md §13](docs/design.md#13-the-hopsesh-skill-for-every-agent)
