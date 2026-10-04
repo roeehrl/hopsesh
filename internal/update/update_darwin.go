@@ -29,10 +29,10 @@ func installMacApp(ctx context.Context, bundle string, dmg []byte) error {
 	if err := os.Mkdir(mnt, 0o700); err != nil {
 		return err
 	}
-	if out, err := proc.CommandContext(ctx, "hdiutil", "attach", "-nobrowse", "-readonly", "-noautoopen", "-mountpoint", mnt, image).CombinedOutput(); err != nil {
-		return fmt.Errorf("cannot open the disk image: %s", strings.TrimSpace(string(out)))
+	if err := attachImage(ctx, image, mnt); err != nil {
+		return err
 	}
-	defer proc.Command("hdiutil", "detach", "-force", mnt).Run()
+	defer detachImage(mnt)
 	src := filepath.Join(mnt, "hopsesh.app")
 	if _, err := os.Stat(src); err != nil {
 		return errors.New("the disk image has no hopsesh.app; not installing")
@@ -61,3 +61,22 @@ func installMacApp(ctx context.Context, bundle string, dmg []byte) error {
 }
 
 func setInstalledVersion(string) {}
+
+// attachImage mounts a disk image read-only at mnt, hidden from Finder. macOS 27 deprecates
+// hdiutil attach for diskutil image attach, which older systems lack.
+func attachImage(ctx context.Context, image, mnt string) error {
+	if proc.CommandContext(ctx, "diskutil", "image", "attach", "--readOnly", "--nobrowse", "--mountPoint", mnt, image).Run() == nil {
+		return nil
+	}
+	if out, err := proc.CommandContext(ctx, "hdiutil", "attach", "-nobrowse", "-readonly", "-noautoopen", "-mountpoint", mnt, image).CombinedOutput(); err != nil {
+		return fmt.Errorf("cannot open the disk image: %s", strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// detachImage ejects what attachImage mounted.
+func detachImage(mnt string) {
+	if proc.Command("diskutil", "eject", mnt).Run() != nil {
+		_ = proc.Command("hdiutil", "detach", "-force", mnt).Run()
+	}
+}

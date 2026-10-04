@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Changed
+- The macOS app's self-update opens the new disk image with `diskutil image attach` (on
+  macOS 27, which deprecates `hdiutil attach`), and with hdiutil on earlier systems.
+
 ## [0.3.1] - 2026-10-04
 
 Sessions from Windows machines now come over with their repository, the installers are
