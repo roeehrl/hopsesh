@@ -71,6 +71,7 @@ func (*Module) Spec() agent.Spec {
 		Icon: agent.Icon{SVG: iconSVG, Apps: map[string][]string{
 			"darwin": {"/Applications/Codex.app", "~/Applications/Codex.app"},
 		}},
+		Clouds: []agent.Cloud{cloud()},
 	}
 }
 

@@ -1,8 +1,9 @@
 // Command driftmanifest prints, as JSON, what hopsesh's agent modules rely on in each
 // agent: its spec (versions tested, programs, data folders, secrets, instruction files),
 // its capabilities, its test fixtures and its source files. It also prints the targets
-// the weekly upstream-drift check watches (targets.go): the agents and the vendor clouds,
-// each with its docs, feeds, help commands, issues and code canaries. The probe reads the
+// the weekly upstream-drift check watches (targets.go): the agents, the vendor clouds the
+// modules declare (Spec.Clouds) and the ones no module reaches yet, each with its docs,
+// feeds, help commands, issues and code canaries. The probe reads the
 // targets; the review reads all of it next to the vendors' changelogs and docs.
 //
 // `driftmanifest feed FILE SINCE` prints the items of an RSS or Atom file published
@@ -38,6 +39,8 @@ type module struct {
 	Capabilities       []agent.Capability  `json:"capabilities"`
 	Fixtures           []string            `json:"fixtureVersions"`
 	Sources            []string            `json:"sourceFiles"`
+
+	clouds []agent.Cloud // become targets (targets.go)
 }
 
 func main() {
@@ -70,7 +73,8 @@ func modules() []module {
 		dir := filepath.Join("agents", string(s.ID))
 		d := module{ID: s.ID, Name: s.Name, Vendor: s.Vendor, Stability: s.Stability, Tested: s.Tested, Binaries: s.Binaries,
 			Roots: s.Roots, LoginEnv: s.LoginEnv, Secrets: s.Secrets, Worktrees: s.Worktrees, Instructions: s.Instructions,
-			GlobalInstructions: s.GlobalInstructions, DesktopApps: s.Icon.Apps, Capabilities: agent.Capabilities(m)}
+			GlobalInstructions: s.GlobalInstructions, DesktopApps: s.Icon.Apps, Capabilities: agent.Capabilities(m),
+			clouds: s.Clouds}
 		if es, err := os.ReadDir(filepath.Join(dir, "testdata")); err == nil {
 			for _, e := range es {
 				if e.IsDir() {

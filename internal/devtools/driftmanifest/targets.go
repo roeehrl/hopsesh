@@ -8,10 +8,9 @@ import (
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
-// What the weekly drift check watches lives here as data until the cloud capability lands.
-// Then each agent's watch list moves into its module's Spec, and each cloud's into the
-// Spec.Clouds entry of the module whose CLI drives it, and this file keeps only the clouds
-// that no module drives yet.
+// What the weekly drift check watches. A cloud a module reaches is declared in that
+// module's Spec.Clouds (its Watch says what to watch); this file adds how each is reviewed,
+// the agents' own watch lists, and the clouds and standards no module reaches yet.
 
 // A target is one upstream surface the drift check watches: an agent a module drives
 // today, a vendor cloud hopsesh plans to reach, or a standard it may adopt.
@@ -143,72 +142,16 @@ var agentWatch = map[agent.ID]target{
 	},
 }
 
-// clouds are the vendor clouds and standards, in review order. None has hopsesh code yet;
+// cloudGroups are the reviews of the clouds the modules declare (Spec.Clouds). A declared
+// cloud without one fails the tests.
+var cloudGroups = map[string]string{
+	"claude-cloud": "anthropic-cloud",
+	"codex-cloud":  "openai-cloud",
+}
+
+// clouds are the vendor clouds and standards no module reaches yet, in review order;
 // they are watched so the cloud design learns of changes before it is built.
 var clouds = []target{
-	{
-		ID: "claude-cloud", Name: "Claude Code cloud", Kind: "cloud", Group: "anthropic-cloud", Vendor: "Anthropic",
-		Surface:  "cloud sessions started with `claude --cloud` or `--remote` (and `-p … --cloud --output-format json`), brought back with `claude --teleport <id>`, Remote Control, cloud environments, and the transcript records a teleport or bridge leaves",
-		Priority: "high",
-		Module:   "claude",
-		Latest:   latest{From: "npm", Ref: "@anthropic-ai/claude-code"},
-		Package:  "@anthropic-ai/claude-code",
-		Watch: watch{
-			Docs: append(claudeDocs("claude-code-on-the-web", "web-quickstart", "cloud-environments", "remote-control", "desktop",
-				"sessions", "routines", "self-hosted-environments", "env-vars", "feature-availability", "data-usage", "legal-and-compliance"),
-				"https://code.claude.com/docs/llms.txt"),
-			Feeds: []feed{{Kind: "markdown", URL: claudeChangelog}},
-			Grep:  `teleport|--cloud|--remote|Remote Control|bridge|cloud session|cse_|self-hosted|Continue in|environment|sessions:|deprecat`,
-			// `claude remote-control --help` needs a claude.ai login, so it is not run.
-			Help:   [][]string{{"claude", "--help"}},
-			Relies: []string{"--cloud", "--remote", "--teleport", "--environment", "--remote-control", "--session-id", "--fork-session", "--resume"},
-			Issues: []string{
-				"anthropics/claude-code#66373", // local → cloud handoff from the CLI
-				"anthropics/claude-code#97813", // attach to a running cloud session
-				"anthropics/claude-code#97446", // archive a cloud session from the CLI
-				"anthropics/claude-code#93892", // Remote Control teleport
-				"anthropics/claude-code#95873", // Remote Control teleport
-				"anthropics/claude-code#94836", // partial teleport
-				"anthropics/claude-code#92734", // web → desktop, prompt history
-			},
-			Searches: []string{"repo:anthropics/claude-code is:issue teleport", "repo:anthropics/claude-code is:issue \"cloud session\""},
-		},
-	},
-	{
-		ID: "codex-cloud", Name: "Codex cloud", Kind: "cloud", Group: "openai-cloud", Vendor: "OpenAI",
-		Surface:  "cloud tasks through `codex cloud exec --env --branch` (with CODEX_STARTING_DIFF), `codex cloud list --json`, `status`, `diff` and `apply`, `codex apply`, the cloud environments, and the docs sentence that a handoff to a Codex cloud environment isn't supported",
-		Priority: "high",
-		Module:   "codex",
-		Latest:   latest{From: "npm", Ref: "@openai/codex"},
-		Package:  "@openai/codex",
-		Watch: watch{
-			// Never the 2.9 MB codex-manual.md.
-			Docs: append(codexDocs("cloud", "environments/cloud-environments", "environments/cloud-environment", "environments/modes",
-				"developer-commands", "remote-connections", "import", "auth", "pricing", "third-party/github"),
-				"https://developers.openai.com/codex/llms.txt"),
-			Feeds: []feed{
-				{Kind: "feed", URL: "https://developers.openai.com/codex/changelog/rss.xml"},
-				{Kind: "feed", URL: "https://github.com/openai/codex/releases.atom"},
-			},
-			Grep: `cloud|handoff|wham|thread/|ThreadService|paginated|rollout|Legacy|environment|apply|deprecat`,
-			Help: [][]string{
-				{"codex", "--help"}, {"codex", "cloud", "--help"}, {"codex", "cloud", "exec", "--help"}, {"codex", "cloud", "list", "--help"},
-				{"codex", "cloud", "status", "--help"}, {"codex", "cloud", "diff", "--help"}, {"codex", "cloud", "apply", "--help"},
-				{"codex", "apply", "--help"}, {"codex", "features", "list"},
-			},
-			// A new resume, attach or pull subcommand would show in the help diffs.
-			Relies: []string{"cloud", "exec", "list", "status", "diff", "apply", "--env", "--branch", "--json", "--limit"},
-			Issues: []string{"openai/codex#50113"},
-			Code: &code{
-				Repo: "openai/codex",
-				Paths: []string{"codex-rs/cloud-tasks", "codex-rs/cloud-tasks-client", "codex-rs/cloud-client", "codex-rs/backend-client",
-					"codex-rs/chatgpt", "codex-rs/app-server-protocol/src/protocol/v2/thread.rs", "codex-rs/history/src/rollout_payload.rs",
-					"codex-rs/protocol/src/protocol.rs", "codex-rs/thread-store"},
-				Canaries: []string{"/wham/tasks", "CODEX_STARTING_DIFF", "pre_apply_patch", "ThreadService/Resume", "ThreadService/Attach",
-					"thread/resume.history", ".jsonl.zst"},
-			},
-		},
-	},
 	{
 		ID: "copilot-cloud", Name: "Copilot cloud agent", Kind: "cloud", Group: "third-party-cloud", Vendor: "GitHub",
 		Surface:  "agent tasks through `gh agent-task` and the REST agent-tasks API (its X-GitHub-Api-Version date)",
@@ -314,8 +257,9 @@ func prefixed(pre, suf string, pages []string) []string {
 	return out
 }
 
-// buildTargets returns the agents, from their modules, then the clouds. Tested comes
-// from the driving module's newest fixture folder.
+// buildTargets returns the agents, from their modules, then the clouds the modules
+// declare, then the other clouds. Tested comes from the driving module's newest fixture
+// folder.
 func buildTargets(mods []module) ([]target, error) {
 	tested := map[string]string{}
 	var out []target
@@ -332,6 +276,15 @@ func buildTargets(mods []module) ([]target, error) {
 		tested[t.ID] = t.Tested
 		out = append(out, t)
 	}
+	for _, m := range mods {
+		for _, c := range m.clouds {
+			t, err := declaredCloud(m, c)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, t)
+		}
+	}
 	for _, c := range clouds {
 		if c.Module != "" {
 			v, ok := tested[c.Module]
@@ -343,6 +296,32 @@ func buildTargets(mods []module) ([]target, error) {
 		out = append(out, c)
 	}
 	return out, nil
+}
+
+// declaredCloud is the target for a cloud a module declares. Its driver is the module's
+// agent, so the latest version and the package come from the agent's own watch list.
+func declaredCloud(m module, c agent.Cloud) (target, error) {
+	group, ok := cloudGroups[c.Name]
+	if !ok {
+		return target{}, fmt.Errorf("cloud %s (module %s) has no review group in internal/devtools/driftmanifest/targets.go", c.Name, m.ID)
+	}
+	a := agentWatch[m.ID]
+	if len(m.Binaries) == 0 || c.Driver != m.Binaries[0].Name {
+		return target{}, fmt.Errorf("cloud %s is driven by %s, not by %s's agent: give it a latest-version source", c.Name, c.Driver, m.ID)
+	}
+	w := c.Watch
+	t := target{
+		ID: c.Name, Name: c.Title, Kind: "cloud", Group: group, Vendor: m.Vendor, Surface: w.Surface, Priority: "high",
+		Module: string(m.ID), Tested: newest(m.Fixtures), Latest: a.Latest, Package: a.Package,
+		Watch: watch{Docs: w.Docs, Grep: w.Grep, Help: w.Help, Relies: w.Relies, Issues: w.Issues, Searches: w.Searches},
+	}
+	for _, f := range w.Feeds {
+		t.Watch.Feeds = append(t.Watch.Feeds, feed{Kind: string(f.Kind), URL: f.URL, Repo: f.Repo, Tag: f.Tag})
+	}
+	if w.Code != nil {
+		t.Watch.Code = &code{Repo: w.Code.Repo, Paths: w.Code.Paths, Canaries: w.Code.Canaries}
+	}
+	return t, nil
 }
 
 // newest is the highest of dotted numeric versions ("0.153.2" beats "0.99.0").
