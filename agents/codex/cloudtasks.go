@@ -501,9 +501,9 @@ func (m *Module) SendCloud(ctx context.Context, h agent.Host, _ agent.Install, r
 	case strings.TrimSpace(r.Env) == "":
 		return agent.CloudSession{}, fmt.Errorf("%w: pick a Codex cloud environment for %s. If you have none, open `codex cloud` once to create one", agent.ErrNoEnvironment, nonEmpty(r.Repo, "this repository"))
 	case r.Branch == "":
-		return agent.CloudSession{}, errors.New("Codex cloud starts a task from a branch on the remote; none was given")
+		return agent.CloudSession{}, errors.New("no branch given: Codex cloud starts a task from a branch on the remote")
 	case r.Attempts < 0 || r.Attempts > 4:
-		return agent.CloudSession{}, fmt.Errorf("Codex cloud runs 1 to 4 attempts, not %d", r.Attempts)
+		return agent.CloudSession{}, fmt.Errorf("attempts: Codex cloud runs 1 to 4, not %d", r.Attempts)
 	}
 	args := []string{"cloud", "exec", "--env", r.Env, "--branch", r.Branch}
 	if r.Attempts > 1 {
