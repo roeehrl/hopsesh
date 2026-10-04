@@ -109,8 +109,8 @@ func TestSendCloud(t *testing.T) {
 		"Session ID: 5770320746137305562\nWorking on it…\n": "5770320746137305562",
 	} {
 		got := ""
-		if mm := newLink.FindStringSubmatch(in); mm != nil {
-			got = mm[1]
+		if id, ok := linkIn(in); ok {
+			got = id
 		} else if mm := newWords.FindStringSubmatch(in); mm != nil {
 			got = mm[1]
 		}
@@ -215,6 +215,26 @@ func TestPatchOf(t *testing.T) {
 	} {
 		if got := string(patchOf([]byte(in))); got != want {
 			t.Errorf("patchOf(%q) = %q", in, got)
+		}
+	}
+}
+
+// A session link counts only on Jules's own host: another host before or after it, user
+// info or a port does not.
+func TestLinkInHostileHosts(t *testing.T) {
+	for in, want := range map[string]string{
+		"https://jules.google.com/session/1234567890\n":                   "1234567890",
+		"Open https://jules.google/session/1234567890.\n":                 "1234567890",
+		"https://jules.google.com.evil.example/session/1234567890\n":      "",
+		"https://evil.example/jules.google.com/session/1234567890\n":      "",
+		"https://evil.example/?next=https://jules.google.com/session/123": "",
+		"https://user@jules.google.com/session/1234567890\n":              "",
+		"https://jules.google.com:444/session/1234567890\n":               "",
+		"http://jules.google.com/session/1234567890\n":                    "",
+		"https://evil-jules.google.com/session/1234567890\n":              "",
+	} {
+		if got, _ := linkIn(in); got != want {
+			t.Errorf("linkIn(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

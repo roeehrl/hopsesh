@@ -15,7 +15,6 @@ var _ agent.CloudSender = (*Module)(nil)
 var (
 	// Unverified: what `jules remote new` prints. A session link, or the words "session" and
 	// an id, are read; the reference shows neither.
-	newLink   = regexp.MustCompile(`https://jules\.google(?:\.com)?/session/([A-Za-z0-9_-]{4,})`)
 	newWords  = regexp.MustCompile(`(?i)\bsession(?:\s+id)?[\s:#]+([0-9]{6,}|[A-Za-z0-9_-]*[0-9][A-Za-z0-9_-]{5,})\b`)
 	repoWords = regexp.MustCompile(`(?i)repo(?:sitory)?\b[^\n]*(not connected|not found|not installed|no access|isn't connected|is not a source)|install the jules (?:github )?app`)
 )
@@ -63,8 +62,8 @@ func (m *Module) SendCloud(ctx context.Context, h agent.Host, _ agent.Install, r
 	}
 	out := string(r2.Stdout)
 	sid := ""
-	if mm := newLink.FindStringSubmatch(out); mm != nil {
-		sid = mm[1]
+	if id, ok := linkIn(out); ok {
+		sid = id
 	} else if mm := newWords.FindStringSubmatch(out); mm != nil {
 		sid = mm[1]
 	}
@@ -88,6 +87,17 @@ func (m *Module) SendCloud(ctx context.Context, h agent.Host, _ agent.Install, r
 	}
 	return agent.CloudSession{Key: agent.SessionKey{Agent: id, Session: agent.SessionID(sid)}, Cloud: cloudName, URL: URL(agent.SessionID(sid)), Title: title,
 		Repo: strings.ToLower(r.Repo), Branch: r.Branch, Base: r.Base, State: agent.CloudRunning, Updated: time.Now().UTC()}, nil
+}
+
+// linkIn finds a session's link in a command's output, on jules.google.com (or
+// jules.google) exactly: https://jules.google.com/session/<id>. Its id.
+func linkIn(out string) (string, bool) {
+	for _, u := range agent.LinksIn(out, "jules.google.com", "jules.google") {
+		if p := agent.PathParts(u); len(p) == 2 && p[0] == "session" && idCell.MatchString(p[1]) {
+			return p[1], true
+		}
+	}
+	return "", false
 }
 
 func nonEmpty(a, b string) string {

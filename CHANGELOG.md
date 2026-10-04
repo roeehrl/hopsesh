@@ -96,7 +96,7 @@ All notable changes to this project are documented here. The format follows
 - SDK: `Cloud.BriefBranch` declares a cloud whose driver cannot name the branch a session
   starts from (the core's briefing then asks the cloud agent to check it out), and
   `agenttest.CloudOptions.Work` plays the cloud's agent between the conformance kit's send
-  and fetch.
+  and fetch, and `agent.LinksIn` reads a driver's links on an exact host only.
 
 ### Fixed
 - Reading a Windows machine with many sessions could stall for 30 seconds and then fail:

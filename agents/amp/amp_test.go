@@ -158,3 +158,25 @@ func TestSendCloud(t *testing.T) {
 		}
 	}
 }
+
+// A thread link counts only on ampcode.com itself.
+func TestLinkInHostileHosts(t *testing.T) {
+	m := New()
+	id := "T-0b6c6a8e-1d2f-4c3b-9a7e-5f4d3c2b1a01"
+	for in, want := range map[string]string{
+		"https://ampcode.com/threads/" + id + "\n":                    id,
+		"Thread: <https://ampcode.com/threads/" + id + ">":            id,
+		"https://ampcode.com.evil.example/threads/" + id:              "",
+		"https://evil.example/ampcode.com/threads/" + id:              "",
+		"https://evil.example/?u=https://ampcode.com/threads/" + id:   "",
+		"https://me@ampcode.com/threads/" + id:                        "",
+		"https://ampcode.com:8443/threads/" + id:                      "",
+		"http://ampcode.com/threads/" + id:                            "",
+		"https://notampcode.com/threads/" + id:                        "",
+		"https://ampcode.com/threads/" + id + "/../../other/T-abcdef": "",
+	} {
+		if got, _ := m.linkIn(in); string(got) != want {
+			t.Errorf("linkIn(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

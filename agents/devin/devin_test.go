@@ -210,3 +210,22 @@ func TestRecordShapes(t *testing.T) {
 		}
 	}
 }
+
+// A session link counts only on app.devin.ai itself; a bare devin-… id still does.
+func TestSessionInHostileHosts(t *testing.T) {
+	hex := "0123456789abcdef0123456789abcdef"
+	for in, want := range map[string]string{
+		"Started: https://app.devin.ai/sessions/" + hex:                "devin-" + hex,
+		"Session devin-" + hex + " is running":                         "devin-" + hex,
+		"https://app.devin.ai.evil.example/sessions/" + hex:            "",
+		"https://evil.example/app.devin.ai/sessions/" + hex:            "",
+		"https://evil.example/?u=https://app.devin.ai/sessions/" + hex: "",
+		"https://me@app.devin.ai/sessions/" + hex:                      "",
+		"http://app.devin.ai/sessions/" + hex:                          "",
+		"https://xapp.devin.ai/sessions/" + hex:                        "",
+	} {
+		if got, _ := sessionIn(in); string(got) != want {
+			t.Errorf("sessionIn(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

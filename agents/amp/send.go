@@ -13,7 +13,6 @@ import (
 var _ agent.CloudSender = (*Module)(nil)
 
 var (
-	threadLink = regexp.MustCompile(`https://ampcode\.com/threads/(T-[A-Za-z0-9][A-Za-z0-9-]{3,})`)
 	// Unverified: how the CLI words a repository with no Amp project.
 	repoWords = regexp.MustCompile(`(?i)no (amp )?project|project\b[^\n]*(not found|does not exist|no access)|unknown project`)
 )
@@ -65,8 +64,8 @@ func (m *Module) SendCloud(ctx context.Context, h agent.Host, _ agent.Install, r
 	}
 	cs := agent.CloudSession{Key: agent.SessionKey{Agent: id}, Cloud: cloudName, Title: r.Title, Repo: strings.ToLower(r.Repo), Base: r.Base,
 		State: agent.CloudRunning, Updated: time.Now().UTC()}
-	if mm := threadLink.FindStringSubmatch(string(res.Stdout)); mm != nil {
-		cs.Key.Session = agent.SessionID(mm[1])
+	if sid, ok := m.linkIn(string(res.Stdout)); ok {
+		cs.Key.Session = sid
 	} else {
 		listed, err := run(ctx, h, "threads", "list")
 		if err != nil {
@@ -86,6 +85,17 @@ func (m *Module) SendCloud(ctx context.Context, h agent.Host, _ agent.Install, r
 	}
 	cs.URL = m.CloudURL(cloudName, cs.Key.Session)
 	return cs, nil
+}
+
+// linkIn finds a thread's link in a command's output, on ampcode.com exactly:
+// https://ampcode.com/threads/T-….
+func (m *Module) linkIn(out string) (agent.SessionID, bool) {
+	for _, u := range agent.LinksIn(out, "ampcode.com") {
+		if p := agent.PathParts(u); len(p) == 2 && p[0] == "threads" && threadID.MatchString(p[1]) {
+			return agent.SessionID(p[1]), true
+		}
+	}
+	return "", false
 }
 
 // clipTitle keeps a thread's title short.

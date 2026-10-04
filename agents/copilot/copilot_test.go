@@ -289,3 +289,28 @@ func TestActiveLogin(t *testing.T) {
 		}
 	}
 }
+
+// The agent session's link counts only on github.com itself and for the task's repository.
+func TestCreatedLinkHostileHosts(t *testing.T) {
+	sid := "0b6c6a8e-1d2f-4c3b-9a7e-5f4d3c2b1a01"
+	for in, want := range map[string]struct {
+		sid string
+		pr  int
+	}{
+		"https://github.com/example/demo/pull/12/agent-sessions/" + sid + "\n":       {sid, 12},
+		"https://github.com/example/demo/pull/12\n":                                  {"", 12},
+		"https://github.com.evil.example/example/demo/pull/12/agent-sessions/" + sid: {"", 0},
+		"https://evil.example/github.com/example/demo/pull/12/agent-sessions/" + sid: {"", 0},
+		"https://evil.example/?u=https://github.com/example/demo/pull/12":            {"", 0},
+		"https://me@github.com/example/demo/pull/12/agent-sessions/" + sid:           {"", 0},
+		"https://github.com:444/example/demo/pull/12/agent-sessions/" + sid:          {"", 0},
+		"http://github.com/example/demo/pull/12/agent-sessions/" + sid:               {"", 0},
+		"https://github.com/other/repo/pull/12/agent-sessions/" + sid:                {"", 0},
+		"https://github.com/example/demo/pull/12/agent-sessions/not-a-uuid":          {"", 0},
+	} {
+		s, _, pr := createdLink(in, "example/demo")
+		if s != want.sid || pr != want.pr {
+			t.Errorf("createdLink(%q) = %q, %d; want %q, %d", in, s, pr, want.sid, want.pr)
+		}
+	}
+}

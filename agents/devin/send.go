@@ -20,7 +20,7 @@ var sendWait = 3 * time.Minute
 var (
 	// Unverified: how the CLI words a repository Devin cannot reach.
 	repoWords = regexp.MustCompile(`(?i)repo(?:sitory)?\b[^\n]*(not connected|not found|no access|not indexed|isn't connected|not set up)|connect (?:the|your) repo`)
-	devinLink = regexp.MustCompile(`https://app\.devin\.ai/sessions/([0-9a-f]{16,64})|\b(devin-[0-9a-f]{16,64})\b`)
+	devinWord = regexp.MustCompile(`\b(devin-[0-9a-f]{16,64})\b`)
 )
 
 // SendCloud starts a Devin Cloud session with the briefing as its first prompt:
@@ -74,8 +74,8 @@ func (m *Module) SendCloud(ctx context.Context, h agent.Host, _ agent.Install, r
 	}
 	cs := agent.CloudSession{Key: agent.SessionKey{Agent: id}, Cloud: cloudName, Title: r.Title, Repo: strings.ToLower(r.Repo), Branch: "",
 		Base: r.Base, State: agent.CloudRunning, Updated: time.Now().UTC()}
-	if mm := devinLink.FindStringSubmatch(string(res.Stdout)); mm != nil {
-		cs.Key.Session = agent.SessionID(nonEmpty(mm[2], "devin-"+mm[1]))
+	if sid, ok := sessionIn(string(res.Stdout)); ok {
+		cs.Key.Session = sid
 	} else {
 		recs, _, err := listIn(ctx, h, r.Dir)
 		if err != nil {
@@ -100,4 +100,20 @@ func (m *Module) SendCloud(ctx context.Context, h agent.Host, _ agent.Install, r
 		cs.URL = m.CloudURL(cloudName, cs.Key.Session)
 	}
 	return cs, nil
+}
+
+// sessionIn finds the new session in Devin's reply: its link on app.devin.ai exactly
+// (https://app.devin.ai/sessions/<hex>), else a devin-<hex> id.
+func sessionIn(out string) (agent.SessionID, bool) {
+	for _, u := range agent.LinksIn(out, "app.devin.ai") {
+		if p := agent.PathParts(u); len(p) == 2 && p[0] == "sessions" {
+			if sid, ok := idOfLink("https://app.devin.ai/sessions/" + p[1]); ok {
+				return agent.SessionID(sid), true
+			}
+		}
+	}
+	if mm := devinWord.FindStringSubmatch(out); mm != nil {
+		return agent.SessionID(mm[1]), true
+	}
+	return "", false
 }

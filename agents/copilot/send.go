@@ -19,11 +19,9 @@ var _ agent.CloudSender = (*Module)(nil)
 const createTimeout = 2 * time.Minute
 
 var (
-	// sessionLink is the agent session's page gh prints once the task has its pull request
-	// (agentSessionWebURL in gh's pkg/cmd/agent-task/create); prLink, the same without a
-	// session id; queued, what it prints when the pull request has not appeared yet.
-	sessionLink = regexp.MustCompile(`https://github\.com/([^/\s]+)/([^/\s]+)/pull/(\d+)/agent-sessions/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\b`)
-	prOnlyLink  = regexp.MustCompile(`https://github\.com/([^/\s]+)/([^/\s]+)/pull/(\d+)\b`)
+	// sessionUUID is an agent session's id (gh's shared.IsSessionID); queued, what gh prints
+	// when the pull request has not appeared yet.
+	sessionUUID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 	queued      = regexp.MustCompile(`(?i)job (\S+) queued`)
 	// Unverified: how gh words a repository the cloud agent cannot work on, or a base branch
 	// it cannot find.
@@ -72,15 +70,11 @@ func (m *Module) SendCloud(ctx context.Context, h agent.Host, _ agent.Install, r
 	out := string(ansi.ReplaceAll(res.Stdout, nil))
 	cs := agent.CloudSession{Key: agent.SessionKey{Agent: id}, Cloud: cloudName, Title: r.Title, Repo: strings.ToLower(r.Repo), Base: r.Base,
 		State: agent.CloudRunning, Updated: time.Now().UTC()}
-	pr := 0
-	switch mm := sessionLink.FindStringSubmatch(out); {
-	case mm != nil:
-		cs.Key.Session, cs.URL = agent.SessionID(mm[4]), mm[0]
-		pr, _ = strconv.Atoi(mm[3])
+	sid, link, pr := createdLink(out, repo)
+	switch {
+	case sid != "":
+		cs.Key.Session, cs.URL = agent.SessionID(sid), link
 	default:
-		if mm := prOnlyLink.FindStringSubmatch(out); mm != nil {
-			pr, _ = strconv.Atoi(mm[3])
-		}
 		t, ok, err := newTask(ctx, h, before, repo, pr)
 		if err != nil {
 			return agent.CloudSession{}, err
@@ -106,6 +100,31 @@ func (m *Module) SendCloud(ctx context.Context, h agent.Host, _ agent.Install, r
 		}
 	}
 	return cs, nil
+}
+
+// createdLink reads what gh agent-task create printed: the agent session's link on
+// github.com exactly, for this repository (agentSessionWebURL in gh's source:
+// https://github.com/OWNER/REPO/pull/N/agent-sessions/<uuid>), or the pull request's link
+// without a session. sid is "" when there is no session link; pr is 0 without a pull
+// request.
+func createdLink(out, repo string) (sid, link string, pr int) {
+	for _, u := range agent.LinksIn(out, "github.com") {
+		p := agent.PathParts(u)
+		if len(p) < 4 || !strings.EqualFold(p[0]+"/"+p[1], repo) || p[2] != "pull" {
+			continue
+		}
+		n, err := strconv.Atoi(p[3])
+		if err != nil || n <= 0 {
+			continue
+		}
+		if len(p) == 6 && p[4] == "agent-sessions" && sessionUUID.MatchString(p[5]) {
+			return p[5], u.String(), n
+		}
+		if len(p) == 4 && pr == 0 {
+			pr = n
+		}
+	}
+	return "", "", pr
 }
 
 // taskIDs are the ids of the agent tasks gh lists now (the newest 100).
