@@ -13,10 +13,12 @@ import (
 func undoCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "undo [<journal-id or session-id>]",
-		Short: "Undo a move or continuation (the newest one, or the one named)",
+		Short: "Undo a move, continuation or hand-off (the newest one, or the one named)",
 		Long: `Reverses everything a move, continuation or mark wrote: new files are removed, replaced
 files come back, appended records are cut off, set-aside copies return. Writes on other
-machines are undone over SSH. Clones and worktrees are kept. --list shows what can be undone.
+machines are undone over SSH. Clones and worktrees are kept. A hand-off's branch is deleted
+(only while it is as hopsesh pushed it) and its mark taken off; the cloud session stays in
+the cloud, to archive there. --list shows what can be undone.
 
 A move whose session was used afterwards is not undone, since that later work would be
 lost; --force undoes it anyway.`,
@@ -63,6 +65,9 @@ lost; --force undoes it anyway.`,
 				return err
 			}
 			r.printf("Undid %q (%d change(s)).\n", j.Title, len(j.Entries))
+			for _, m := range j.Manual {
+				r.printf("The %s session %s stays in the cloud; archive it there if you want it gone: %s\n", m.Cloud, m.Key.Session, m.URL)
+			}
 			return nil
 		},
 	}
