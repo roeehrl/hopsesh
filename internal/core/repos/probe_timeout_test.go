@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -24,13 +25,24 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// standInGit (Windows) is git, except for a folder named "offloaded", where it never answers (like
-// git waiting on files a cloud drive has not downloaded).
+// standInGit (Windows) is git, except that it never answers for a folder named
+// "offloaded" (like git waiting on files a cloud drive has not downloaded) and answers
+// slowly for one named "busy" (a cold disk). It logs each call to HOPSESH_TEST_GIT_LOG.
 func standInGit(real string) int {
+	start := time.Now()
+	defer func() {
+		if f, err := os.OpenFile(os.Getenv("HOPSESH_TEST_GIT_LOG"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+			_, _ = fmt.Fprintf(f, "%s %s: %v\n", start.Format("15:04:05.000"), time.Since(start).Round(time.Millisecond), os.Args[1:])
+			_ = f.Close()
+		}
+	}()
 	for _, a := range os.Args[1:] {
-		if strings.Contains(a, "offloaded") {
+		switch {
+		case strings.Contains(a, "offloaded"):
 			time.Sleep(time.Minute)
 			return 1
+		case strings.Contains(a, "busy"):
+			time.Sleep(busyCall)
 		}
 	}
 	cmd := exec.Command(real, os.Args[1:]...)
@@ -45,9 +57,21 @@ func standInGit(real string) int {
 	return 0
 }
 
-// slowWorld puts the stand-in git first on PATH and makes three folders: a repository,
-// one the stand-in never answers for, and a missing one.
-func slowWorld(t *testing.T) (repo, offloaded, missing string) {
+// busyCall is how long each git call takes in the busy folder: well inside the limit, but
+// the folder's dozen calls together take longer than it.
+const busyCall = 500 * time.Millisecond
+
+type slowFolders struct {
+	repo, busy, offloaded, missing string
+	log                            string // the stand-in's calls (Windows)
+}
+
+func (w slowFolders) dirs() []string { return []string{w.repo, w.busy, w.offloaded, w.missing} }
+
+// slowWorld puts the stand-in git first on PATH and makes four folders: a repository, a
+// repository the stand-in answers for slowly, a folder it never answers for, and a
+// missing one.
+func slowWorld(t *testing.T) slowFolders {
 	t.Helper()
 	real, err := exec.LookPath("git")
 	if err != nil {
@@ -55,17 +79,18 @@ func slowWorld(t *testing.T) (repo, offloaded, missing string) {
 	}
 	root := t.TempDir()
 	root, _ = filepath.EvalSymlinks(root)
-	repo = filepath.Join(root, "repo")
-	offloaded = filepath.Join(root, "Cloud Drive", "offloaded")
-	missing = filepath.Join(root, "missing")
-	for _, d := range []string{repo, offloaded} {
+	w := slowFolders{repo: filepath.Join(root, "repo"), busy: filepath.Join(root, "busy"),
+		offloaded: filepath.Join(root, "Cloud Drive", "offloaded"), missing: filepath.Join(root, "missing"), log: filepath.Join(root, "git.log")}
+	for _, d := range []string{w.repo, w.busy, w.offloaded} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
-	git(t, repo, "init", "-q", "-b", "main")
-	git(t, repo, "remote", "add", "origin", "https://example.com/alice/demo.git")
-	git(t, repo, "commit", "-q", "--allow-empty", "-m", "one")
+	for _, d := range []string{w.repo, w.busy} {
+		git(t, d, "init", "-q", "-b", "main")
+		git(t, d, "remote", "add", "origin", "https://example.com/alice/demo.git")
+		git(t, d, "commit", "-q", "--allow-empty", "-m", "one")
+	}
 
 	// The stand-in: a shell script where there is sh (fast), else this test binary. Not
 	// under t.TempDir: on Windows a stand-in still running for the offloaded folder (the
@@ -84,16 +109,17 @@ func slowWorld(t *testing.T) (repo, offloaded, missing string) {
 		}
 		copyFile(t, self, filepath.Join(bin, "git.exe"))
 		t.Setenv("HOPSESH_TEST_REAL_GIT", real)
-		ProbeTimeout = 10 * time.Second // the stand-in starts slowly, and runs for every git call
+		t.Setenv("HOPSESH_TEST_GIT_LOG", w.log)
+		ProbeTimeout = 15 * time.Second // the stand-in is a large program, started for every call
 	} else {
-		script := "#!/bin/sh\ncase \"$*\" in *offloaded*) exec sleep 60 ;; esac\nexec '" + real + "' \"$@\"\n"
+		script := "#!/bin/sh\ncase \"$*\" in *offloaded*) exec sleep 60 ;; *busy*) sleep 0.5 ;; esac\nexec '" + real + "' \"$@\"\n"
 		if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		ProbeTimeout = 2 * time.Second
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	return repo, offloaded, missing
+	return w
 }
 
 func copyFile(t *testing.T, from, to string) {
@@ -115,38 +141,51 @@ func copyFile(t *testing.T, from, to string) {
 	}
 }
 
-// checkSlowStates: the offloaded folder is reported as unreadable, the others as usual.
-func checkSlowStates(t *testing.T, states []GitState, took time.Duration, repo, offloaded, missing string) {
+// check: only the offloaded folder is reported as unreadable; the busy one, slower in all
+// than the limit, is read in full.
+func (w slowFolders) check(t *testing.T, states []GitState, took time.Duration) {
 	t.Helper()
-	// The stand-in sleeps a minute; the probe gives the folder ProbeTimeout.
-	if took > ProbeTimeout+20*time.Second {
-		t.Fatalf("the probe took %s", took)
+	defer func() {
+		if t.Failed() {
+			b, _ := os.ReadFile(w.log)
+			t.Logf("the stand-in's calls:\n%s", b)
+		}
+	}()
+	// The stand-in sleeps a minute; the probe waits ProbeTimeout for it.
+	if took > ProbeTimeout+40*time.Second {
+		t.Errorf("the probe took %s", took)
 	}
-	if len(states) != 3 {
+	if len(states) != 4 {
 		t.Fatalf("got %d states: %+v", len(states), states)
 	}
-	r, o, m := states[0], states[1], states[2]
-	if r.Dir != repo || !r.IsRepo || r.Error != "" || r.Branch != "main" || r.Identity != "example.com/alice/demo" {
-		t.Errorf("repository: %+v", r)
+	r, b, o, m := states[0], states[1], states[2], states[3]
+	for _, g := range []GitState{r, b} {
+		if !g.IsRepo || g.Error != "" || g.Branch != "main" || g.Identity != "example.com/alice/demo" || g.Unpushed != 1 || g.RootCommit == "" || len(g.Worktrees) != 1 {
+			t.Errorf("repository: %+v", g)
+		}
 	}
-	if o.Dir != offloaded || o.IsRepo || o.Error != TimeoutError(strconv.Itoa(probeSeconds())) {
+	if r.Dir != w.repo || b.Dir != w.busy {
+		t.Errorf("folders: %s, %s", r.Dir, b.Dir)
+	}
+	if o.Dir != w.offloaded || o.IsRepo || o.Error != TimeoutError(strconv.Itoa(seconds(ProbeTimeout))) {
 		t.Errorf("offloaded folder: %+v", o)
 	}
-	if m.Dir != missing || m.Exists || m.Error != "" {
+	if m.Dir != w.missing || m.Exists || m.Error != "" {
 		t.Errorf("missing folder: %+v", m)
 	}
 }
 
 // A folder git does not answer for no longer holds up the probe: it gets its own state,
-// and the folders after it are probed as usual.
+// and the folders after it are probed as usual. The limit is per git call: a folder that
+// answers slowly is never cut off.
 func TestProbeLocalSlowFolder(t *testing.T) {
-	repo, offloaded, missing := slowWorld(t)
+	w := slowWorld(t)
 	start := time.Now()
-	states, err := ProbeLocal(context.Background(), []string{repo, offloaded, missing}, nil)
+	states, err := ProbeLocal(context.Background(), w.dirs(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	checkSlowStates(t, states, time.Since(start), repo, offloaded, missing)
+	w.check(t, states, time.Since(start))
 }
 
 // The same for the PowerShell probe Windows machines run.
@@ -154,8 +193,8 @@ func TestPowerShellProbeSlowFolder(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("runs Windows PowerShell")
 	}
-	repo, offloaded, missing := slowWorld(t)
-	script := "$ProgressPreference='SilentlyContinue';" + PowerShellProbe([]string{repo, offloaded, missing}, nil)
+	w := slowWorld(t)
+	script := "$ProgressPreference='SilentlyContinue';" + PowerShellProbe(w.dirs(), nil, ProbeTimeout)
 	u := utf16.Encode([]rune(script))
 	b := make([]byte, len(u)*2)
 	for i, v := range u {
@@ -168,7 +207,7 @@ func TestPowerShellProbeSlowFolder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v: %s", err, out)
 	}
-	checkSlowStates(t, WindowsPaths(ParseProbe(out, nil)), time.Since(start), repo, offloaded, missing)
+	w.check(t, WindowsPaths(ParseProbe(out, nil)), time.Since(start))
 }
 
 // A folder that ran out of time keeps only the reason, whatever it printed before.
@@ -196,11 +235,8 @@ func TestParseProbeTimeout(t *testing.T) {
 
 // The limit reaches both scripts, in whole seconds.
 func TestProbeScriptsCarryTheLimit(t *testing.T) {
-	old := ProbeTimeout
-	t.Cleanup(func() { ProbeTimeout = old })
-	ProbeTimeout = 1500 * time.Millisecond
-	sh, _ := ProbeScript([]string{"/w/a"}, nil)
-	ps := PowerShellProbe([]string{`C:\w\a`}, nil)
+	sh, _ := ProbeScript([]string{"/w/a"}, nil, 1500*time.Millisecond)
+	ps := PowerShellProbe([]string{`C:\w\a`}, nil, 1500*time.Millisecond)
 	if !strings.Contains(sh, "hp_limit=2\n") || !strings.Contains(ps, "$hpLimit = 2\n") {
 		t.Fatalf("limit missing:\n%s\n%s", sh, ps)
 	}

@@ -3,18 +3,19 @@ package repos
 import (
 	"strconv"
 	"strings"
+	"time"
 )
 
 // PowerShellProbe returns a PowerShell script producing the same line format as the POSIX
 // probe, for Windows machines.
 //
-// git runs through hp-git, which gives each folder ProbeTimeout in all: a git still running
-// when the folder's time is up is killed, and the folder prints "timeout" instead of its
-// partial output (each folder's lines are collected and written only once it is done).
+// git runs through hp-git, which gives each git call limit (RemoteProbeTimeout) to answer:
+// one still running then is killed, and the folder prints "timeout" instead of its partial
+// output (each folder's lines are collected and written only once it is done).
 // hp-git reads git's output in the console's encoding, as PowerShell does for a native
 // command, so paths come out as they did before. Its arguments are quoted where they start
 // with a dash: PowerShell would take a bare "--" for itself.
-func PowerShellProbe(dirs, excl []string) string {
+func PowerShellProbe(dirs, excl []string, limit time.Duration) string {
 	var b strings.Builder
 	b.WriteString("$dirs = @(")
 	for i, d := range dirs {
@@ -32,8 +33,7 @@ function hp-quote([string]$s) {
   '"' + (($s -replace '(\\*)"', '$1$1\"') -replace '(\\+)$', '$1$1') + '"'
 }
 function hp-git {
-  $ms = [int][Math]::Ceiling(($hpEnd - [DateTime]::UtcNow).TotalMilliseconds)
-  if ($ms -le 0) { throw 'hopsesh-timeout' }
+  $ms = $hpLimit * 1000
   $si = New-Object System.Diagnostics.ProcessStartInfo
   $si.FileName = $hpGit
   $si.Arguments = (@('-C', $d) + $args | ForEach-Object { hp-quote ([string]$_) }) -join ' '
@@ -48,7 +48,6 @@ function hp-git {
   $o = $p.StandardOutput.ReadToEndAsync()
   $null = $p.StandardError.ReadToEndAsync()
   if (-not $p.WaitForExit($ms)) { try { $p.Kill() } catch {}; throw 'hopsesh-timeout' }
-  $ms = [Math]::Max(1, [int][Math]::Ceiling(($hpEnd - [DateTime]::UtcNow).TotalMilliseconds))
   if (-not $o.Wait($ms)) { throw 'hopsesh-timeout' }
   $global:LASTEXITCODE = $p.ExitCode
   $t = $o.Result.TrimEnd([char[]]"` + "`r`n" + `")
@@ -56,7 +55,6 @@ function hp-git {
 }
 foreach ($d in $dirs) {
   "@@dir` + "`t" + `$d"
-  $hpEnd = [DateTime]::UtcNow.AddSeconds($hpLimit)
   try {
     $lines = & {
       if (-not (Test-Path -LiteralPath $d -PathType Container)) { "exists` + "`t" + `0"; return }
@@ -91,5 +89,5 @@ foreach ($d in $dirs) {
 		ex.WriteString(" '" + strings.ReplaceAll(p, "'", "''") + "'")
 	}
 	s := strings.Replace(b.String(), "@EXCLUDES@", ex.String(), 1)
-	return strings.Replace(s, "@LIMIT@", strconv.Itoa(probeSeconds()), 1)
+	return strings.Replace(s, "@LIMIT@", strconv.Itoa(seconds(limit)), 1)
 }
