@@ -248,6 +248,9 @@ func (a *App) account(ctx context.Context, m *Machine, mod agent.Module, in agen
 
 // Apply carries out a plan.
 func (a *App) Apply(ctx context.Context, p *move.Plan, in move.Input, progress func(string)) (*move.Result, error) {
+	if p.Kind == move.KindHop {
+		return a.applyHop(ctx, p, progress)
+	}
 	return move.Apply(ctx, p, in, move.Env{StateDir: a.StateDir, Audit: a.Audit, Progress: progress, Step: a.Steps})
 }
 

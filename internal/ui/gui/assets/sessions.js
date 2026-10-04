@@ -4,6 +4,7 @@
 import { api, h, fill, icon, ICONS, view, state, screen, go, loading, toast, fail, cap, ago, when, bytes, agentBadge, agentChip, machineStatus, sys, keys, cliHow,
   entries, selected, here, agentInfo, $, count, clouds, cloudOf, cloudState, cloudChip, dialog, errText } from "./core.js";
 import { handoffMenu } from "./handoff.js";
+import { hopMenu } from "./hop.js";
 import { planFor, planPicked } from "./plan.js";
 
 // scan reads every machine again. The list stays while it runs.
@@ -371,6 +372,12 @@ function cloudInspector(e) {
       cl?.codeOnly ? null : acts.slice(1).map((a) => h("button", { class: "btn wrap", disabled: !!why, onclick: a.run }, e.bringIn ? "Bring here into ▸ " : "Bring here and continue in ▸ ",
         agentChip(a.id.slice(6), a.label.replace(/^.* in(to)? /, "")))),
       cl?.codeOnly || !(cl?.codeDown || []).length ? null : h("button", { class: "btn", disabled: !!why || !(c.branch || diffDown), title: c.branch || diffDown ? "" : "hopsesh doesn't know its branch yet: bring it with its conversation once", onclick: () => planFor(e, { target: "", codeOnly: true }) }, "Get the code only"),
+      hopMenu(e, state.handoffOpen === e.machine + "\u0000" + e.key, () => {
+        const k = e.machine + "\u0000" + e.key;
+        state.handoffOpen = state.handoffOpen === k ? null : k;
+        render();
+        view.querySelector('[role="menu"] [role="menuitem"]:not([disabled])')?.focus();
+      }),
       h("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap" }, h("button", { class: "btn", disabled: true, "aria-describedby": "arch-why" }, "Archive"),
         h("span", { id: "arch-why", class: "muted", style: "font-size:11.5px" }, `${e.agentName} archives only on ${host}`)),
       why ? h("span", { class: "warn", style: "font-size:12px" }, why) : null),

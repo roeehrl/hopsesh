@@ -225,7 +225,9 @@ func TestParseCloudLink(t *testing.T) {
 			t.Errorf("%q: %s %s %v", in, cl, id, ok)
 		}
 	}
-	for _, bad := range []string{"", "session_", "https://example.com/code/session_01ABCdef234", "0b6c6a8e-1d2f-4c3b-9a7e-5f4d3c2b1a01", "session_01 x"} {
+	for _, bad := range []string{"", "session_", "https://example.com/code/session_01ABCdef234", "0b6c6a8e-1d2f-4c3b-9a7e-5f4d3c2b1a01", "session_01 x",
+		"http://claude.ai/code/session_01ABCdef234", "https://claude.ai.evil.example/code/session_01ABCdef234", "https://user@claude.ai/code/session_01ABCdef234",
+		"https://claude.ai:8443/code/session_01ABCdef234", "https://evil.example/claude.ai/code/session_01ABCdef234", "https://claude.ai/share/session_01ABCdef234"} {
 		if _, _, ok := m.ParseCloudLink(bad); ok {
 			t.Errorf("%q read as a link", bad)
 		}
@@ -352,5 +354,41 @@ func TestAdopted(t *testing.T) {
 	a.Session = ""
 	if got, err = m.Adopted(context.Background(), h, in, a); err != nil || got.Remote == "session_01Old000000" {
 		t.Fatalf("picker: %+v %v", got, err)
+	}
+}
+
+// Claude Code 2.1.289's copy: a new session with no teleported-from record, the cloud's
+// conversation, an isMeta "continued from another machine" record, then the user's new
+// turn. Adopted takes it by that record, counts only the cloud's messages, reads the first
+// user message, and states no count.
+func TestAdoptedContinuedCopy(t *testing.T) {
+	fh, h, in := host(t, maxLogin)
+	m := claude.New()
+	since := time.Now().Add(-time.Minute)
+	a := agent.Adopt{Root: "home", Dir: "projects/-w", Since: since, Session: "session_01ABCdef234"}
+	rec := func(kind, u, extra string) string {
+		return `{"type":"` + kind + `","uuid":"` + u + `","sessionId":"c1","cwd":"/w","timestamp":"2026-10-04T10:00:00Z"` + extra + `}`
+	}
+	user := func(u, text string) string { return rec("user", u, `,"message":{"role":"user","content":"`+text+`"}`) }
+	asst := func(u, id string) string {
+		return rec("assistant", u, `,"message":{"id":"`+id+`","role":"assistant","content":[{"type":"text","text":"done"}]}`)
+	}
+	meta := rec("user", "m", `,"isMeta":true,"message":{"role":"user","content":"This session is being continued from another machine. Application state may have changed. The updated working directory is /w"}`)
+	resumed := rec("system", "s", `,"subtype":"informational","content":"Session resumed without branch: Failed to checkout branch 'claude/web-session-x'"`)
+	turn := rec("system", "d", `,"subtype":"turn_duration","messageCount":7`)
+	// A session the user started in the folder before: not a copy, and not the only one.
+	fh.Put(home+"/.claude/projects/-w/mine.jsonl", []byte(user("x", "something else")+"\n"), time.Now())
+	fh.Put(home+"/.claude/projects/-w/c1.jsonl", []byte(strings.Join([]string{user("u1", "[hopsesh] the briefing"), asst("a1", "m1"), asst("a2", "m1"), asst("a3", "m2"),
+		meta, resumed, user("u2", "ok"), asst("a4", "m3"), turn}, "\n")+"\n"), time.Now())
+	got, err := m.Adopted(context.Background(), h, in, a)
+	if err != nil || got.Session.Key.Session != "c1" || got.Restored != 3 || got.Replies != 2 || got.Stated || got.First != "[hopsesh] the briefing" ||
+		got.Remote != "session_01ABCdef234" {
+		t.Fatalf("adopted: %+v %v", got, err)
+	}
+	// Nothing until the user sends a message: the error says so.
+	fh2, h2, in2 := host(t, maxLogin)
+	_ = fh2
+	if _, err := m.Adopted(context.Background(), h2, in2, a); !errors.Is(err, agent.ErrNotFound) || !strings.Contains(err.Error(), "send a message") {
+		t.Fatalf("no copy yet: %v", err)
 	}
 }

@@ -1,6 +1,7 @@
 # A session from Claude Code cloud comes here: allowed first, checked read-only, then
 # planned, its teleport run in a new worktree (without the variables an agent's own
-# session passes on), adopted with its message count, its claude/… branch kept under
+# session passes on), adopted once the user sends a message in it (Claude Code saves its
+# copy only then, and gives no count), its claude/… branch kept under
 # hopsesh/from/claude-cloud/, listed, and undone.
 [windows] skip 'the stand-in origin needs a POSIX shell'
 env CLAUDE_CODE_CHILD_SESSION=1
@@ -24,8 +25,16 @@ stdout '"kind": "fetch"'
 stdout 'env -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY claude --teleport '$CLOUDID
 ! grep 'teleport' $WORK/agents.log
 
+# No message sent in the copy: nothing is saved, and hopsesh says what to do.
+env FAKE_CLAUDE_SAYS=
 exec hopsesh pull https://claude.ai/code/$CLOUDID --to $WORK/demo --yes --run
-stdout 'is here in Claude Code: 3 of 3 messages, checked'
+stdout 'Claude Code saves its copy only after you send a message in it'
+stdout 'Waiting for Claude Code|Bring it here in your terminal'
+exec hopsesh undo --yes
+env FAKE_CLAUDE_SAYS=ok
+
+exec hopsesh pull https://claude.ai/code/$CLOUDID --to $WORK/demo --yes --run
+stdout 'is here in Claude Code: 3 messages restored. Claude Code gives no count to check them against.'
 stdout 'on hopsesh/from/claude-cloud/web-session-\w+ \(renamed from claude/web-session-\w+\)'
 stdout 'claude --resume'
 exec git -C demo branch --show-current
@@ -39,7 +48,7 @@ stdout 'Undid'
 exec git -C demo branch --list 'hopsesh/*'
 ! stdout .
 
-# A partial copy says so, and where the problem is known.
+# A session hopsesh did not start has nothing to check a short copy against: it says so.
 env FAKE_CLOUD_FAIL=partial
 exec hopsesh pull claude-cloud:$CLOUDID --to $WORK/demo --yes --run
-stdout '! Claude Code restored 1 of 3 messages. This is a known Claude Code problem \(#94836\).'
+stdout 'is here in Claude Code: 1 message restored. Claude Code gives no count to check them against.'

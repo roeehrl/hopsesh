@@ -172,6 +172,7 @@ func cloudWorld(ts *testscript.TestScript, neg bool, args []string) {
 	// environment goes in the run's variables.
 	store := ts.MkAbs("cloud")
 	ts.Setenv("FAKE_CLOUD_DIR", store)
+	ts.Setenv("FAKE_CLAUDE_SAYS", "ok") // the user sends a message in the teleported copy
 	vars := map[string]string{"FAKE_CLOUD_DIR": store}
 	for _, k := range []string{"HOME", "GIT_CONFIG_GLOBAL", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {
 		vars[k] = ts.Getenv(k)

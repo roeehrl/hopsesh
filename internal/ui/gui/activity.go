@@ -25,6 +25,12 @@ type ActivityDTO struct {
 	Fetch *BroughtDTO `json:"fetch,omitempty"`
 	// Handoff is where a hand-off went (kind handoff).
 	Handoff *HandoffActivityDTO `json:"handoff,omitempty"`
+	// Part: a leg of a hop, undone with it (PartOf); Parts, a hop's legs.
+	Part   bool     `json:"part,omitempty"`
+	PartOf string   `json:"partOf,omitempty"`
+	Parts  []string `json:"parts,omitempty"`
+	// Hop is a hop from one cloud to another (kind hop).
+	Hop *move.HopResult `json:"hop,omitempty"`
 }
 
 // HandoffActivityDTO is a hand-off in the Activity list.
@@ -76,7 +82,13 @@ func (a *App) Activity() (*ActivityListDTO, error) {
 	for _, x := range acts {
 		j := x.Journal
 		d := ActivityDTO{ID: j.ID, Kind: j.Kind, Title: j.Title, When: j.Time.Format(time.RFC3339), Changes: len(j.Entries),
-			Remote: []string{}, CanUndo: x.CanUndo, Undone: j.Undone, Why: x.Why}
+			Remote: []string{}, CanUndo: x.CanUndo, Undone: j.Undone, Why: x.Why, Part: x.Part, PartOf: j.PartOf, Parts: j.Parts}
+		if j.Kind == "hop" {
+			if hop, err := core.LoadHop(j.ID); err == nil {
+				r := hop.Result
+				d.Hop = &r
+			}
+		}
 		for _, r := range j.Remote {
 			d.Remote = append(d.Remote, r.Machine)
 		}
@@ -115,7 +127,7 @@ func (a *App) UndoLast() (string, error) {
 		return "", err
 	}
 	for _, x := range acts {
-		if x.CanUndo {
+		if x.CanUndo && !x.Part { // a hop's leg goes with its hop
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer cancel()
 			_, err := core.Undo(ctx, x.Journal.ID, false)

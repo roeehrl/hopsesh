@@ -71,6 +71,11 @@ type Fetch struct {
 	// its sessions.
 	Loss []string `json:"loss,omitempty"`
 	Noun string   `json:"noun,omitempty"`
+	// Note is what the user must do in the driver's terminal for the copy to be saved;
+	// Brief, the first prompt hopsesh sent the cloud session (state folder only), which the
+	// copy must begin with when the vendor states no count.
+	Note  string `json:"note,omitempty"`
+	Brief string `json:"brief,omitempty"`
 }
 
 // Adopted is what a fetch brought, once the driver wrote it.
@@ -82,6 +87,10 @@ type Adopted struct {
 	Restored int              `json:"restored"`
 	Expected int              `json:"expected"`
 	Stated   bool             `json:"stated"` // the cloud said how many it sent
+	// Check says how the copy was checked, when the vendor stated no count: against the
+	// briefing hopsesh sent, or not at all; Why says what is missing from a partial copy.
+	Check string `json:"check,omitempty"`
+	Why   string `json:"why,omitempty"`
 	// Branch is the branch the code is on here; Renamed, the cloud's own name for it
 	// (before hopsesh renamed it); NoBranch: the driver checked out none.
 	Branch   string `json:"branch,omitempty"`
@@ -209,21 +218,14 @@ func AdoptFetch(ctx context.Context, f *Fetch, side Side, env Env, exited bool) 
 	if f.Session == "" {
 		f.Session = a.Remote
 	}
-	if t := a.Session.Title; t != "" && f.Untitled {
+	if t := nonEmpty(a.Title, a.Session.Title); t != "" && f.Untitled {
 		f.Title = t // the copy names it better than its id did
 	}
 	if f.Session != "" {
 		j.AddKey(agent.SessionKey{Agent: f.Agent, Session: f.Session})
 	}
 	ad := &Adopted{Time: time.Now().UTC(), Key: a.Session.Key, Path: a.Session.Path, Restored: a.Restored, Expected: a.Expected, Stated: a.Stated}
-	switch {
-	case a.Restored == 0:
-		ad.Outcome = FetchEmpty
-	case a.Stated && a.Restored < a.Expected:
-		ad.Outcome = FetchPartial
-	default:
-		ad.Outcome = FetchComplete
-	}
+	judgeCopy(f, a, ad)
 	ad.Issue = f.Problems[ad.Outcome]
 	cloudBranch := adoptBranch(ctx, f, j, ad)
 	recordFetchLineage(ctx, f, side, j, a, ad, cloudBranch)
@@ -244,6 +246,47 @@ func AdoptFetch(ctx context.Context, f *Fetch, side Side, env Env, exited bool) 
 	env.Audit.Write(audit.Entry{Action: "cloud.adopt", Host: f.Cloud, Session: ad.Key.String(),
 		Detail: map[string]any{"from": string(f.Session), "outcome": ad.Outcome, "restored": ad.Restored, "expected": ad.Expected, "journal": f.Journal}})
 	return ad, nil
+}
+
+// Checks of a copy whose vendor states no count.
+const (
+	CheckedBrief = "brief" // it begins with the briefing hopsesh sent
+	CheckedNone  = "none"  // nothing to check it against
+)
+
+// HasCopy reports whether a fetch's outcome left a copy here to resume (complete,
+// partial or unchecked).
+func HasCopy(outcome string) bool {
+	return outcome == FetchComplete || outcome == FetchPartial || outcome == FetchUnchecked
+}
+
+// judgeCopy tells a complete copy from a partial or an empty one. Where the vendor states
+// how many messages it sent, the count decides. Claude Code's teleport states none: a copy
+// of a session hopsesh handed off must begin with the briefing hopsesh sent and hold a
+// reply after it; any other copy is reported with its count and nothing to check it
+// against.
+func judgeCopy(f *Fetch, a agent.Adoption, ad *Adopted) {
+	switch {
+	case a.Restored == 0:
+		ad.Outcome = FetchEmpty
+	case a.Stated && a.Restored < a.Expected:
+		ad.Outcome = FetchPartial
+	case a.Stated:
+		ad.Outcome = FetchComplete
+	case strings.TrimSpace(f.Brief) == "":
+		ad.Outcome, ad.Check = FetchUnchecked, CheckedNone
+	case !sameText(a.First, f.Brief):
+		ad.Outcome, ad.Check, ad.Why = FetchPartial, CheckedBrief, "it does not begin with the briefing hopsesh sent"
+	case a.Replies == 0:
+		ad.Outcome, ad.Check, ad.Why = FetchPartial, CheckedBrief, "it holds only the briefing hopsesh sent, none of the cloud's replies"
+	default:
+		ad.Outcome, ad.Check = FetchComplete, CheckedBrief
+	}
+}
+
+// sameText reports whether two texts read the same, whatever their white space.
+func sameText(a, b string) bool {
+	return strings.Join(strings.Fields(a), " ") == strings.Join(strings.Fields(b), " ")
 }
 
 // adoptBranch finds the branch the driver checked out in the worktree and renames the

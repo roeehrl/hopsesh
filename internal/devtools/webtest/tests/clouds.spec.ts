@@ -5,8 +5,8 @@ test.beforeEach(async ({ page }) => fresh(page));
 
 // cloudSession adds a Claude Code cloud session on the demo repository (fail: what the next
 // teleport plays) and returns its id.
-async function cloudSession(page: Page, fail = ""): Promise<string> {
-  const r = await page.request.post("/cloud?fail=" + fail);
+async function cloudSession(page: Page, fail = "", handed = false): Promise<string> {
+  const r = await page.request.post("/cloud?fail=" + fail + (handed ? "&handed=1" : ""));
   expect(r.ok()).toBeTruthy();
   return (await r.json()).id;
 }
@@ -61,7 +61,7 @@ test("the bring-back sheet says what comes back and where, and switches to Codex
   await expect(sheet.getByLabel("What changes")).toContainText("+ 1 Claude Code session here");
   await expect(sheet.getByLabel("What changes")).toContainText("The cloud session is not changed");
   await expect(sheet.locator(".fid")).toContainText("Full");
-  await expect(sheet.locator(".fid")).toContainText("Claude Code copies the whole conversation; hopsesh checks the message count.");
+  await expect(sheet.locator(".fid")).toContainText("Claude Code copies the whole conversation, once you send a message in it; hopsesh checks the copy.");
   await expect(sheet).toContainText("New worktree");
   await expect(sheet).toContainText(`claude --teleport ${id}`);
   await expect(sheet).toContainText("Clean worktree (hopsesh uses a new one)");
@@ -74,7 +74,7 @@ test("the bring-back sheet says what comes back and where, and switches to Codex
 });
 
 test("a partial copy comes back amber, with the known problem and what to do", async ({ page }) => {
-  const id = await cloudSession(page, "partial");
+  const id = await cloudSession(page, "partial", true);
   await turnOnAndPaste(page, id);
   await page.getByRole("complementary", { name: "Cloud session details" }).getByRole("button", { name: /Bring here \(Claude Code\)/ }).click();
   const sheet = page.locator("#sheet");
@@ -83,7 +83,7 @@ test("a partial copy comes back amber, with the known problem and what to do", a
   const outcome = page.locator(".outcome.partial");
   await expect(outcome).toBeVisible({ timeout: 30_000 });
   await expect(outcome.getByRole("heading", { name: "Only part of the conversation came back" })).toBeVisible();
-  await expect(outcome).toContainText("Claude Code restored 1 of 3 messages. This is a known Claude Code problem (#94836).");
+  await expect(outcome).toContainText("Claude Code restored 1 message, but it holds only the briefing hopsesh sent, none of the cloud's replies. This is a known Claude Code problem (#94836).");
   await expect(outcome).toContainText("The code is here in full");
   await expect(outcome.getByRole("button", { name: "Open the session in the browser" })).toBeVisible();
   await expect(outcome.getByRole("button", { name: "Undo" })).toBeVisible();
@@ -93,7 +93,7 @@ test("a partial copy comes back amber, with the known problem and what to do", a
   await menu(page, "activity");
   const act = page.locator(".line-item", { hasText: "from Claude Code cloud: partial" });
   await expect(act).toBeVisible();
-  await expect(act).toContainText("1 of 3 messages restored, partial copy kept");
+  await expect(act).toContainText("1 message restored, partial copy kept");
 });
 
 test("a cloud-only module: Copilot's tasks are listed, their code comes home, and their log is written into Claude Code", async ({ page }) => {

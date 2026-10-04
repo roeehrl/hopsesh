@@ -178,6 +178,8 @@ func (r *runner) scenario(row Row) error {
 		return r.fetch(row)
 	case "handoff", "cloud-roundtrip":
 		return r.handoff(row)
+	case "cloud-hop":
+		return r.cloudHop(row)
 	}
 	s := &sc{row: row, id: newID(), host: r.hosts[row.Naming]}
 	s.marker = fmt.Sprintf("hsm%03dx%s", row.N, s.id[:6])
@@ -495,7 +497,7 @@ func (r *runner) skill() error {
 
 // fetch brings a Claude Code cloud session here. A stand-in cloud plays it (the fake's
 // store, and a bare repository standing in for its GitHub repository); hopsesh plans it,
-// runs the teleport in a new worktree (--run), checks the copy's message count and keeps the
+// runs the teleport in a new worktree (--run), checks the copy and keeps the
 // cloud's branch under hopsesh/from/claude-cloud/ (or says none was pushed), continues it in
 // Codex for claude→codex rows, and undo takes it all back.
 func (r *runner) fetch(row Row) error {
@@ -516,7 +518,7 @@ func (r *runner) fetch(row Row) error {
 	}
 	world := filepath.Join(r.out, "work", "cloud")
 	gitConfig := filepath.Join(world, "gitconfig")
-	for k, v := range map[string]string{"GIT_CONFIG_GLOBAL": gitConfig, "FAKE_CLOUD_DIR": filepath.Join(world, "store"), "FAKE_CLOUD_FAIL": ""} {
+	for k, v := range map[string]string{"GIT_CONFIG_GLOBAL": gitConfig, "FAKE_CLOUD_DIR": filepath.Join(world, "store"), "FAKE_CLOUD_FAIL": "", "FAKE_CLAUDE_SAYS": "ok"} {
 		old, had := os.LookupEnv(k)
 		os.Setenv(k, v)
 		defer func() { // the other rows run with this machine's own settings
@@ -586,7 +588,7 @@ func (r *runner) fetch(row Row) error {
 		want = len(msgs)
 	}
 	switch {
-	case b.Outcome != "complete" || b.Restored != want:
+	case b.Outcome != "unchecked" || b.Restored != want: // hopsesh did not start it: no briefing to check against
 		return fmt.Errorf("the copy: %+v", b)
 	case row.Repo == "unpushed" && !b.NoBranch:
 		return fmt.Errorf("a session that never pushed reports a branch: %+v", b)
@@ -733,7 +735,7 @@ func (r *runner) cloudWorld(name string) (fakecloud.Origin, func(), error) {
 			f()
 		}
 	}
-	for k, v := range map[string]string{"GIT_CONFIG_GLOBAL": gitConfig, "FAKE_CLOUD_DIR": filepath.Join(world, "store"), "FAKE_CLOUD_FAIL": ""} {
+	for k, v := range map[string]string{"GIT_CONFIG_GLOBAL": gitConfig, "FAKE_CLOUD_DIR": filepath.Join(world, "store"), "FAKE_CLOUD_FAIL": "", "FAKE_CLAUDE_SAYS": "ok"} {
 		old, had := os.LookupEnv(k)
 		os.Setenv(k, v)
 		restore = append(restore, func() {
@@ -918,6 +920,126 @@ func (r *runner) handoff(row Row) error {
 	for _, f := range fs {
 		if f.ID == id && f.Mark != "" {
 			return fmt.Errorf("undo left the mark %q", f.Mark)
+		}
+	}
+	return nil
+}
+
+// cloudHop hands a cloud session on to the other vendor's cloud through this machine (a
+// stand-in cloud plays both): a Claude Code cloud session comes here by teleport and goes
+// on to Codex cloud from the claude/… branch as it is, or a Codex cloud task comes here as
+// its diff and a Codex thread and goes on to Claude Code cloud from a handoff branch (in
+// this terminal, where Claude Code starts it). The second cloud's briefing carries the
+// row's words; one undo takes both legs back.
+func (r *runner) cloudHop(row Row) error {
+	if runtime.GOOS == "windows" {
+		r.log.printf("skipped: the stand-in cloud's repository hook needs a POSIX shell\n")
+		return nil
+	}
+	id := newID()
+	marker := fmt.Sprintf("hsm%03dx%s", row.N, id[:6])
+	title := contents[row.Content] + " " + marker
+	name := fmt.Sprintf("r%03d", row.N)
+	var sr SeedRes
+	if err := r.here.do("seed", SeedReq{ID: id, Repo: name, State: "clean"}, &sr); err != nil {
+		return fmt.Errorf("seeding the repository: %w", err)
+	}
+	o, restore, err := r.cloudWorld(name)
+	defer restore()
+	if err != nil {
+		return err
+	}
+	if _, err := git(sr.Cwd, nil, "remote", "set-url", "origin", o.URL); err != nil {
+		return err
+	}
+	if _, err := git(sr.Cwd, nil, "push", "-q", "origin", "main"); err != nil {
+		return err
+	}
+	head, _ := git(sr.Cwd, nil, "rev-parse", "HEAD")
+	from, to := row.Location, map[string]string{"claude-cloud": "codex-cloud", "codex-cloud": "claude-cloud"}[row.Location]
+	seed := fakecloud.Session{Cloud: fakecloud.ClaudeCloud, Title: title, Repo: "github.com/hsm-matrix/" + name, CloneURL: o.FileURL(), Branch: "main",
+		Base: strings.TrimSpace(head), Code: "branch", Messages: []fakecloud.Message{{Role: "user", Text: title}, {Role: "assistant", Text: "On it."}}} // started on the web
+	if from == "codex-cloud" {
+		seed.Cloud, seed.Env, seed.EnvLabel, seed.Messages = fakecloud.CodexCloud, "env_hsm", "hsm", []fakecloud.Message{{Role: "user", Text: title}}
+	}
+	cs, err := fakecloud.Open(os.Getenv("FAKE_CLOUD_DIR")).Seed(seed)
+	if err != nil {
+		return err
+	}
+	if err := fakecloud.Work(fakecloud.Proc{Vars: map[string]string{}}, cs.ID, false); err != nil {
+		return err
+	}
+	cs, _ = fakecloud.Open(os.Getenv("FAKE_CLOUD_DIR")).Get(cs.ID)
+	for _, c := range []string{from, to} {
+		if _, err := r.hs(true, "clouds", "allow", c); err != nil {
+			return err
+		}
+	}
+	if from == "codex-cloud" {
+		if _, err := r.hs(true, "clouds", "env", "codex-cloud", "github.com/hsm-matrix/"+name, "env_hsm"); err != nil {
+			return err
+		}
+	} else if _, err := r.hs(true, "plan", "https://claude.ai/code/"+cs.ID, "--to", sr.Cwd, "--json"); err != nil {
+		return err
+	}
+	args := []string{"handoff", from + ":" + cs.ID, "--to", to, "--to-dir", sr.Cwd, "--yes", "--json"}
+	if to == "codex-cloud" {
+		args = append(args, "--env", "env_hsm")
+	}
+	run := r.hs
+	if to == "claude-cloud" {
+		run = func(_ bool, args ...string) (string, error) { return r.hsTerminal(args...) }
+	}
+	out, err := run(true, args...)
+	if err != nil {
+		return err
+	}
+	var res struct {
+		Result struct {
+			Journal string
+			Fetch   struct{ Worktree string }
+		} `json:"result"`
+		Hop struct {
+			State, Fetch, Handoff string
+		} `json:"hop"`
+		Handoff struct {
+			Session, Branch string
+			Reuse, Pushed   bool
+		} `json:"handoff"`
+	}
+	if i := strings.Index(out, "{\n"); i < 0 || json.Unmarshal([]byte(out[i:]), &res) != nil {
+		return fmt.Errorf("handoff --json printed no result:\n%s", tail(out, 800))
+	}
+	h := res.Handoff
+	switch {
+	case res.Hop.State != "done" || res.Hop.Fetch == "" || res.Hop.Handoff == "" || h.Session == "":
+		return fmt.Errorf("the hop: %+v %+v", res.Hop, h)
+	case from == "claude-cloud" && (!h.Reuse || h.Branch != cs.Result || h.Pushed):
+		return fmt.Errorf("the Codex cloud task must start from the claude/… branch as it is: %+v", h)
+	case from == "codex-cloud" && (!h.Pushed || !strings.HasPrefix(h.Branch, "hopsesh/handoff/")):
+		return fmt.Errorf("the task's work goes up on a handoff branch: %+v", h)
+	}
+	next, err := fakecloud.Open(os.Getenv("FAKE_CLOUD_DIR")).Get(h.Session)
+	if err != nil {
+		return err
+	}
+	if len(next.Messages) == 0 || !strings.HasPrefix(next.Messages[0].Text, "[hopsesh] ") || !strings.Contains(next.Messages[0].Text, marker) {
+		return fmt.Errorf("the second cloud's briefing lacks the row's words: %q", tail(next.Messages[0].Text, 300))
+	}
+	if _, err := r.hs(true, "undo", "--yes"); err != nil {
+		return err
+	}
+	if wt := res.Result.Fetch.Worktree; wt != "" {
+		if _, err := os.Stat(wt); !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("undo left the worktree %s", wt)
+		}
+	}
+	if left, _ := git(sr.Cwd, nil, "branch", "--list", "hopsesh/*", "claude/*"); left != "" {
+		return fmt.Errorf("undo left branches: %s", left)
+	}
+	if h.Pushed {
+		if left, _ := git(o.Bare, nil, "for-each-ref", "refs/heads/"+h.Branch); left != "" {
+			return fmt.Errorf("undo left the handoff branch: %s", left)
 		}
 	}
 	return nil

@@ -59,7 +59,7 @@ func cloudEnv(t *testing.T, programs ...string) (store, log string) {
 	store, log = filepath.Join(work, "cloud"), filepath.Join(work, "agents.log")
 	for k, v := range map[string]string{"HOME": work, "USERPROFILE": work, "CLAUDE_CONFIG_DIR": "", "CODEX_HOME": "",
 		"HOPSESH_CONFIG_DIR": filepath.Join(work, "config"), "HOPSESH_STATE_DIR": filepath.Join(work, "state"), "HOPSESH_MACHINE": "here",
-		"PATH": bin, "FAKE_CLOUD_DIR": store, "FAKE_AGENT_LOG": log, "FAKE_CLOUD_FAIL": ""} {
+		"PATH": bin, "FAKE_CLOUD_DIR": store, "FAKE_AGENT_LOG": log, "FAKE_CLOUD_FAIL": "", "FAKE_CLAUDE_SAYS": "ok"} {
 		t.Setenv(k, v)
 	}
 	return store, log

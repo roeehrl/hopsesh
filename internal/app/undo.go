@@ -40,6 +40,12 @@ func (a *App) Undo(ctx context.Context, match string, force bool) (*journal.Jour
 	if j == nil {
 		return nil, errors.New(errNothingToUndo + map[bool]string{true: "", false: " for " + match}[match == ""])
 	}
+	if j.PartOf != "" && j.ID != match {
+		// A leg of a hop: undo the whole hop (a leg named by its own id is undone alone).
+		if hop, err := journal.Load(a.StateDir, j.PartOf); err == nil && !hop.Undone {
+			j = hop
+		}
+	}
 	machines := map[string]*host.Machine{}
 	defer func() {
 		for _, m := range machines {
@@ -72,6 +78,11 @@ func (a *App) Undo(ctx context.Context, match string, force bool) (*journal.Jour
 		return m.FS(ctx)
 	}
 	reach := journal.Reach{FS: fsFor, Refs: a.refsReach(connect), Clouds: a.undoClouds(), Git: repos.LocalGit{}}
+	if len(j.Parts) > 0 {
+		err := a.undoHop(ctx, j, reach, force)
+		a.Audit.Write(audit.Entry{Action: "undo", Detail: map[string]any{"journal": j.ID, "ok": err == nil, "force": force, "parts": j.Parts}})
+		return j, err
+	}
 	if !force {
 		if err := j.Changed(ctx, reach); err != nil {
 			return j, err
@@ -96,6 +107,8 @@ type Activity struct {
 	Journal *journal.Journal `json:"journal"`
 	CanUndo bool             `json:"canUndo"`
 	Why     string           `json:"why,omitempty"` // why not: undone, or what changed since
+	// Part: it is a leg of a hop (Journal.PartOf), undone with it.
+	Part bool `json:"part,omitempty"`
 }
 
 // Activities lists what hopsesh did, newest first. Whether each can still be undone is
@@ -113,13 +126,32 @@ func (a *App) Activities() ([]Activity, error) {
 		return nil, errors.New("not this machine")
 	}
 	out := make([]Activity, 0, len(js))
+	byID := map[string]*journal.Journal{}
 	for _, j := range js {
-		act := Activity{Journal: j, CanUndo: !j.Undone}
+		byID[j.ID] = j
+	}
+	reach := journal.Reach{FS: local, Git: repos.LocalGit{}}
+	for _, j := range js {
+		act := Activity{Journal: j, CanUndo: !j.Undone, Part: j.PartOf != ""}
 		switch {
 		case j.Undone:
 			act.Why = "undone"
+		case len(j.Parts) > 0:
+			// A hop can be undone while each of its legs can.
+			var later []*journal.Journal
+			for i := len(j.Parts) - 1; i >= 0; i-- {
+				leg := byID[j.Parts[i]]
+				if leg == nil || leg.Undone {
+					continue
+				}
+				if err := leg.ChangedBesides(context.Background(), reach, later); err != nil {
+					act.CanUndo, act.Why = false, strings.TrimPrefix(err.Error(), journal.ErrChanged.Error()+": ")
+					break
+				}
+				later = append(later, leg)
+			}
 		default:
-			if err := j.Changed(context.Background(), journal.Reach{FS: local, Git: repos.LocalGit{}}); err != nil {
+			if err := j.Changed(context.Background(), reach); err != nil {
 				act.CanUndo, act.Why = false, strings.TrimPrefix(err.Error(), journal.ErrChanged.Error()+": ")
 			}
 		}

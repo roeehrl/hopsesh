@@ -1,6 +1,7 @@
 package fakecloud
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -311,11 +312,13 @@ func hardWrap(s string, width int) string {
 }
 
 // claudeTeleport brings a cloud session here as Claude Code does: in a checkout of the same
-// repository with a clean tree, it fetches and checks out the session's branch and writes
-// the conversation as a new local transcript under projects/<slug of the folder>, with a
-// teleported-from record (the record and its messageCount were seen in an issue; the local
-// session id scheme is unverified, so it is a new UUID here). FAKE_CLOUD_FAIL=partial
-// writes only the first message, empty none (both with the record), no-branch skips the
+// repository with a clean tree, it fetches and checks out the session's branch; once the
+// user sends a message (FAKE_CLAUDE_SAYS, else a line on standard input; without one it
+// writes nothing, as 2.1.289 does) it writes the conversation as a new local session under
+// projects/<slug of the folder>: the cloud's messages, an isMeta "continued from another
+// machine" record, the "Session resumed without branch" record when there is no branch, and
+// the new turn, with no teleported-from record (as seen on a real teleport, 2026-10-04).
+// FAKE_CLOUD_FAIL=partial copies only the first message, empty none, no-branch skips the
 // checkout with the message an issue quotes. As the issues report, an inherited
 // CLAUDE_CODE_CHILD_SESSION marker saves nothing and an ANTHROPIC_API_KEY fails it.
 func claudeTeleport(p Proc, arg string) int {
@@ -363,9 +366,21 @@ func claudeTeleport(p Proc, arg string) int {
 	case "empty":
 		msgs = nil
 	}
-	count := len(s.Messages)
-	if p.fail() == "empty" {
-		count = 0
+	resumed := ""
+	if p.fail() == "no-branch" || s.Result == "" && s.Code == "bundle" {
+		resumed = "Session resumed without branch: Failed to checkout branch 'claude/web-session-" + strings.ToLower(s.ID[len(s.ID)-6:]) + "'"
+	}
+	fmt.Fprintf(p.Stdout, "Teleported %s (%d message(s)). Send a message to continue here.\n", s.ID, len(msgs)) // unverified wording
+	// As Claude Code 2.1.289 does: the conversation is shown, but nothing is written until
+	// the user sends a message here (FAKE_CLAUDE_SAYS, else a line typed on standard input).
+	said := p.Env("FAKE_CLAUDE_SAYS")
+	if said == "" && p.Stdin != nil {
+		line, _ := bufio.NewReader(p.Stdin).ReadString('\n')
+		said = strings.TrimSpace(line)
+	}
+	if said == "" {
+		fmt.Fprintln(p.Stdout, "Nothing sent; no local copy saved.") // unverified wording
+		return 0
 	}
 	if p.Env("CLAUDE_CODE_CHILD_SESSION") != "" {
 		// Seen in anthropics/claude-code#93892: inside another session it saves nothing.
@@ -380,30 +395,49 @@ func claudeTeleport(p Proc, arg string) int {
 	if real, err := filepath.EvalSymlinks(cwd); err == nil {
 		cwd = real
 	}
+	// A new local session: its own id, every record carrying this folder. There is no
+	// teleported-from record and the cloud session's id appears nowhere (seen on a real
+	// teleport, 2026-10-04).
 	local := newUUID()
 	path := filepath.Join(cfg, "projects", claude.Slug(cwd), local+".jsonl")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return p.errorf(1, "%v", err)
 	}
 	rec := func(v map[string]any) string { b, _ := json.Marshal(v); return string(b) }
-	lines := []string{rec(map[string]any{"type": "teleported-from", "remoteSessionId": s.ID, "messageCount": count, "sessionId": local})}
+	var lines []string
 	parent := any(nil)
-	for i, m := range msgs {
-		uuid := fmt.Sprintf("t%d-%s", i, local[:8])
-		r := map[string]any{"type": m.Role, "uuid": uuid, "parentUuid": parent, "sessionId": local, "cwd": cwd, "version": "2.1.284",
-			"gitBranch": branch, "timestamp": m.Time.UTC().Format(time.RFC3339)}
-		if m.Role == "user" {
-			r["message"] = map[string]any{"role": "user", "content": m.Text}
-		} else {
-			r["message"] = map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "text", "text": m.Text}}}
+	add := func(kind string, r map[string]any) {
+		uuid := fmt.Sprintf("t%d-%s", len(lines), local[:8])
+		r["type"], r["uuid"], r["parentUuid"], r["sessionId"], r["cwd"], r["version"], r["gitBranch"] = kind, uuid, parent, local, cwd, "2.1.289", branch
+		if _, ok := r["timestamp"]; !ok {
+			r["timestamp"] = time.Now().UTC().Format(time.RFC3339)
 		}
 		lines = append(lines, rec(r))
 		parent = uuid
 	}
+	text := func(role, t string) map[string]any {
+		if role == "user" {
+			return map[string]any{"message": map[string]any{"role": "user", "content": t}}
+		}
+		return map[string]any{"message": map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "text", "text": t}}}}
+	}
+	for _, m := range msgs {
+		r := text(m.Role, m.Text)
+		r["timestamp"] = m.Time.UTC().Format(time.RFC3339)
+		add(m.Role, r)
+	}
+	meta := text("user", "This session is being continued from another machine. Application state may have changed. The updated working directory is "+cwd)
+	meta["isMeta"] = true
+	add("user", meta)
+	if resumed != "" {
+		add("system", map[string]any{"subtype": "informational", "content": resumed, "level": "info"})
+	}
+	add("user", text("user", said))
+	add("assistant", text("assistant", "Noted."))
+	add("system", map[string]any{"subtype": "turn_duration", "durationMs": 1200, "messageCount": len(msgs) + 2})
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 		return p.errorf(1, "%v", err)
 	}
-	fmt.Fprintf(p.Stdout, "Teleported %s: %d message(s) restored (%s)\n", s.ID, len(msgs), local) // unverified wording
 	return 0
 }
 

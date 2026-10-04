@@ -4,10 +4,10 @@
 #
 # bring <session id or link> [<checkout>] (the default): hopsesh brings a cloud session you
 #   name here with the real `claude --teleport`, in a new worktree of its repository, then
-#   checks the message count the teleport reports against the copy it wrote, and the branch
-#   it brought. The teleport is Claude Code's own interactive session: once it shows the
-#   conversation, leave it (/exit) and the script goes on. It starts no model turn unless
-#   you type one.
+#   checks the copy it wrote and the branch it brought. The teleport is Claude Code's own
+#   interactive session, and Claude Code 2.1.289 saves its copy only once you send a message
+#   in it: send one (even "ok"), then leave it (/exit) and the script goes on. That message
+#   starts one model turn, on this machine.
 #
 # handoff <local session> [<checkout>]: hopsesh hands a local Claude Code session off to the
 #   cloud with a codeword in its briefing, which asks the cloud session to reply with the
@@ -17,9 +17,9 @@
 #   that folder; hopsesh's own folder is asked about once per repository). Answer it
 #   yourself (hopsesh never does); the script goes on once claude --cloud exits, and
 #   checks the session id hopsesh read from what it printed. It waits, brings the session
-#   back with the teleport (in this terminal too: once the conversation shows, leave it with
-#   /exit and the script goes on), and checks the message count and that the codeword reply
-#   is in the copy. It starts one model turn in the cloud on your plan (there is no
+#   back with the teleport (in this terminal too: once the conversation shows, send a message
+#   so Claude Code saves its copy, then leave it with /exit and the script goes on), and
+#   checks that the copy begins with the briefing hopsesh sent and holds the codeword reply. It starts one model turn in the cloud on your plan (there is no
 #   follow-up: Claude Code has no command hopsesh could send one with). Use a throwaway
 #   session in a checkout of a GitHub repository the Claude GitHub App can reach; its work
 #   in progress goes up on a hopsesh/handoff/ branch. HANDOFF_WAIT (seconds, default 240) is
@@ -185,7 +185,7 @@ NOTE
   echo "waiting ${WAIT}s for the cloud's turn (HANDOFF_WAIT)…"
   sleep "$WAIT"
 
-  echo "== 5. back with the teleport (THIS STEP NEEDS YOUR TERMINAL: leave Claude Code with /exit once the conversation shows)"
+  echo "== 5. back with the teleport (THIS STEP NEEDS YOUR TERMINAL: once the conversation shows, send a message (\"ok\") so Claude Code saves its copy, then /exit)"
   status=0
   "$BIN" pull "claude-cloud:$CLOUDID" --to "$CHECKOUT" --yes --run --json > "$WORK/pull.json" || status=$?
   JOURNAL=$(json "$WORK/pull.json" result.journal) # before failing: cleanup undoes what it made
@@ -194,7 +194,9 @@ NOTE
   RESTORED=$(json "$WORK/pull.json" brought.restored)
   EXPECTED=$(json "$WORK/pull.json" brought.expected)
   KEY=$(json "$WORK/pull.json" brought.key)
-  echo "outcome: $OUTCOME; restored $RESTORED of $EXPECTED"
+  CHECK=$(json "$WORK/pull.json" brought.check)
+  echo "outcome: $OUTCOME; restored $RESTORED (stated: ${EXPECTED:-none}; checked against: ${CHECK:-the count})"
+  [ "$OUTCOME" != waiting ] || fail "Claude Code saved no copy: send a message in the teleported session before /exit"
   [ "$OUTCOME" = complete ] || fail "the copy is $OUTCOME: $(json "$WORK/pull.json" brought.message)"
   "$BIN" show "$KEY" --json > "$WORK/show.json" || fail "the copy is not listed"
   COPY=$(json "$WORK/show.json" session.path)
@@ -225,7 +227,7 @@ echo "== 1. the login and the flags, read-only"
 echo "== 2. the plan"
 "$BIN" plan "$SESSION" --to "$CHECKOUT" || fail "the plan has a blocker"
 
-echo "== 3. the teleport (leave Claude Code with /exit once the conversation shows)"
+echo "== 3. the teleport (once the conversation shows, send a message (\"ok\") so Claude Code saves its copy, then /exit)"
 status=0
 "$BIN" pull "$SESSION" --to "$CHECKOUT" --yes --run --json > "$WORK/pull.json" || status=$?
 JOURNAL=$(json "$WORK/pull.json" result.journal) # before failing: cleanup undoes what it made
@@ -237,9 +239,10 @@ STATED=$(json "$WORK/pull.json" brought.stated)
 BRANCH=$(json "$WORK/pull.json" brought.branch)
 echo "outcome: $OUTCOME; restored $RESTORED of $EXPECTED (stated by Claude Code: $STATED); branch: ${BRANCH:-none}"
 
-[ "$OUTCOME" != waiting ] || fail "Claude Code wrote no copy hopsesh could find (did the teleport fail?)"
-[ "$STATED" = True ] || echo "note: the copy has no teleported-from record, so the count is unchecked; update the module's notes"
-[ "$OUTCOME" = complete ] || fail "the copy is $OUTCOME: $(json "$WORK/pull.json" brought.message)"
+[ "$OUTCOME" != waiting ] || fail "Claude Code wrote no copy hopsesh could find (send a message in the teleported session before /exit; did the teleport fail?)"
+[ "$STATED" != True ] || echo "note: the copy has a teleported-from record with a count again; update the module's notes"
+# A session hopsesh did not start has no briefing to check against: unchecked is expected.
+case "$OUTCOME" in complete|unchecked) ;; *) fail "the copy is $OUTCOME: $(json "$WORK/pull.json" brought.message)" ;; esac
 case "$BRANCH" in hopsesh/from/claude-cloud/*|"") ;; *) fail "the cloud's branch was not renamed: $BRANCH" ;; esac
 
 echo

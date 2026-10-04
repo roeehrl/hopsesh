@@ -220,6 +220,14 @@ func (f *fakeRefs) DeleteRef(_ context.Context, machine, dir, remote, ref, expec
 	return nil
 }
 
+func (f *fakeRefs) RestoreRef(_ context.Context, machine, dir, remote, ref, sha string) error {
+	if f.refs[ref] != "" {
+		return errors.New("already exists")
+	}
+	f.refs[ref] = sha
+	return nil
+}
+
 // fakeClouds is a cloud that can archive (or not), with its sessions' last activity.
 type fakeClouds struct {
 	updated  map[agent.SessionID]time.Time
@@ -328,5 +336,66 @@ func TestUndoHandoffForced(t *testing.T) {
 	must(t, j2.PushRef("here", "/repo", "origin", ref, "1111111"))
 	if err := j2.Undo(ctx, here, false); err == nil || !strings.Contains(err.Error(), "remote cannot be reached") {
 		t.Fatalf("an unreachable remote must be reported: %v", err)
+	}
+}
+
+// A branch the user chose to keep stays on its remote through undo, and is reported; a
+// branch a clean-up deleted comes back on undo, unless the remote has one of that name
+// again.
+func TestUndoKeepsAndRestoresBranches(t *testing.T) {
+	state := t.TempDir()
+	here := Files(func(string) (host.FS, error) { return host.LocalFS(), nil })
+	const kept, gone = "refs/heads/hopsesh/handoff/kept", "refs/heads/claude/web-session-x"
+	j, err := New(state, KindHandoff, "hand off, keep the branch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	must(t, j.KeepPushed("here", "/repo", "origin", kept, "1111111"))
+	refs := &fakeRefs{refs: map[string]string{kept: "2222222"}}
+	r := Reach{FS: here.FS, Refs: refs}
+	// Moved on since, but kept: nothing to refuse, nothing deleted.
+	must(t, j.Undo(ctx, r, false))
+	if refs.refs[kept] != "2222222" || len(refs.deleted) != 0 || strings.Join(j.Kept, ",") != "origin hopsesh/handoff/kept" {
+		t.Fatalf("a kept branch: %+v %v", refs, j.Kept)
+	}
+
+	c, err := New(state, KindCleanup, "clean up")
+	if err != nil {
+		t.Fatal(err)
+	}
+	must(t, c.DeletedRef("here", "/repo", "origin", gone, "3333333"))
+	refs.refs[gone] = "4444444" // someone pushed a branch of that name since
+	if err := c.Undo(ctx, r, false); !errors.Is(err, ErrChanged) || !strings.Contains(err.Error(), "is there again") {
+		t.Fatalf("a deleted branch that is back: %v", err)
+	}
+	delete(refs.refs, gone)
+	must(t, c.Undo(ctx, r, false))
+	if refs.refs[gone] != "3333333" {
+		t.Fatalf("undo must push the branch back: %+v", refs.refs)
+	}
+}
+
+// A composite operation names its legs, and each leg its operation.
+func TestParts(t *testing.T) {
+	state := t.TempDir()
+	hop, _ := New(state, KindHop, "hop")
+	leg, _ := New(state, KindFetch, "leg")
+	if hop.ID == leg.ID || leg.ID < hop.ID {
+		t.Fatalf("two journals at once: %s then %s", hop.ID, leg.ID)
+	}
+	for i := 0; i < 20; i++ {
+		if _, err := New(state, KindMark, "many"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if js, _ := List(state); len(js) != 22 {
+		t.Fatalf("every journal is kept: %d", len(js))
+	}
+	must(t, hop.AddPart(leg.ID))
+	must(t, leg.SetPartOf(hop.ID))
+	h, _ := Load(state, hop.ID)
+	l, _ := Load(state, leg.ID)
+	if strings.Join(h.Parts, ",") != leg.ID || l.PartOf != hop.ID {
+		t.Fatalf("parts: %+v %+v", h, l)
 	}
 }

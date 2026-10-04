@@ -31,3 +31,27 @@ func TestLinksIn(t *testing.T) {
 		t.Errorf("PathParts = %v", p)
 	}
 }
+
+// A pasted link counts only on the named host, over https, without user info or a port;
+// a link with no scheme is read as https.
+func TestLinkOn(t *testing.T) {
+	for s, want := range map[string]bool{
+		"https://chatgpt.com/codex/tasks/task_e_1":          true,
+		"  chatgpt.com/codex/tasks/task_e_1  ":              true,
+		"https://ChatGPT.com/codex/tasks/task_e_1?tab=diff": true,
+		"http://chatgpt.com/codex/tasks/task_e_1":           false,
+		"https://chatgpt.com.evil.example/codex/tasks/x":    false,
+		"https://evil.example/chatgpt.com/codex/tasks/x":    false,
+		"https://user@chatgpt.com/codex/tasks/x":            false,
+		"https://chatgpt.com:8443/codex/tasks/x":            false,
+		"https://evilchatgpt.com/codex/tasks/x":             false,
+		"javascript:chatgpt.com/codex":                      false,
+		"https://chatgpt.com/a https://evil.example/":       false,
+		"task_e_1": false,
+		"":         false,
+	} {
+		if _, ok := LinkOn(s, "chatgpt.com"); ok != want {
+			t.Errorf("LinkOn(%q) = %v, want %v", s, ok, want)
+		}
+	}
+}

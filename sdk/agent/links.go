@@ -32,6 +32,30 @@ func LinksIn(text string, hosts ...string) []*url.URL {
 	return out
 }
 
+// LinkOn reads one link the user gave (a session's link, pasted): https on exactly one of
+// hosts, with no user info and no port. A link without a scheme ("claude.ai/code/…") is read
+// as https; plain http, another host, or a host before or after the named one is not a
+// link here. A module reads a pasted link this way, never by cutting a prefix off a string.
+func LinkOn(s string, hosts ...string) (*url.URL, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" || strings.ContainsAny(s, " \t\r\n") {
+		return nil, false
+	}
+	if !strings.Contains(s, "://") {
+		s = "https://" + s
+	}
+	u, err := url.Parse(s)
+	if err != nil || u.Scheme != "https" || u.User != nil || u.Port() != "" || u.Opaque != "" || u.Host != u.Hostname() {
+		return nil, false
+	}
+	for _, h := range hosts {
+		if strings.EqualFold(u.Hostname(), h) {
+			return u, true
+		}
+	}
+	return nil, false
+}
+
 // PathParts are a link's path segments, without empty ones ("/a/b/" → a, b).
 func PathParts(u *url.URL) []string {
 	var out []string

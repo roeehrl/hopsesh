@@ -253,6 +253,9 @@ func (m *model) viewFetchPlan(b *strings.Builder) {
 	if fp.Command != "" {
 		fmt.Fprintf(b, "  runs in this terminal  %s\n", fp.Command)
 	}
+	if fp.Note != "" {
+		fmt.Fprintf(b, "  %s\n", warnSt.Render("! "+fp.Note))
+	}
 	if fp.Write && !fp.CodeOnly {
 		fmt.Fprintf(b, "  writes  a new %s session (%d messages) in the worktree\n", fp.Writer, fp.Messages)
 	}
@@ -301,7 +304,10 @@ func (m *model) viewFetchDone(b *strings.Builder) {
 	for _, line := range wrapCommand(res.Command, max(m.width, 80)-4, launch.DefaultShell()) {
 		b.WriteString("  " + line + "\n")
 	}
-	b.WriteString("\n  hopsesh then checks its message count and renames the cloud's branch.\n")
+	if p.Fetch.Note != "" {
+		b.WriteString("\n  " + warnSt.Render(p.Fetch.Note+".") + "\n")
+	}
+	b.WriteString("\n  hopsesh then checks the copy and renames the cloud's branch.\n")
 	if m.copied {
 		b.WriteString(okSt.Render("\n  Copied to the clipboard.") + "\n")
 	}
@@ -317,7 +323,7 @@ func (m *model) viewBrought(b *strings.Builder) {
 	switch r.Outcome {
 	case move.FetchWaiting:
 		fmt.Fprintf(b, "\n  %s\n  %s\n", r.Message, dim.Render("It runs in this terminal: "+r.Command))
-	case move.FetchComplete:
+	case move.FetchComplete, move.FetchUnchecked:
 		fmt.Fprintf(b, "\n  %s %s\n", okSt.Render("✓"), bold.Render("Brought “"+r.Title+"” from "+r.CloudTitle))
 		fmt.Fprintf(b, "   %s\n", r.Message)
 	case move.FetchPartial:
@@ -352,7 +358,7 @@ func (m *model) viewBrought(b *strings.Builder) {
 	for _, l := range r.Loss {
 		b.WriteString("   " + dim.Render("· "+l) + "\n")
 	}
-	if r.Outcome == move.FetchComplete || r.Outcome == move.FetchPartial {
+	if move.HasCopy(r.Outcome) {
 		fmt.Fprintf(b, "\n   %s\n", r.Command)
 	}
 	if m.notice != "" {
@@ -360,7 +366,7 @@ func (m *model) viewBrought(b *strings.Builder) {
 	}
 	var keys []string
 	switch r.Outcome {
-	case move.FetchComplete, move.FetchPartial:
+	case move.FetchComplete, move.FetchPartial, move.FetchUnchecked:
 		keys = append(keys, "r resume it now")
 		if r.ContinueName != "" && !r.Written {
 			keys = append(keys, "i continue in "+r.ContinueName)
@@ -397,12 +403,12 @@ func (m *model) broughtKeys(k string) (tea.Model, tea.Cmd) {
 		m.brought, m.notice, m.mode = nil, "", modeLoading
 		return m, m.Init()
 	case "r":
-		if r.Outcome == move.FetchComplete || r.Outcome == move.FetchPartial {
+		if move.HasCopy(r.Outcome) {
 			m.exit = &Exit{RunDir: r.Run.Dir, RunArgv: r.Run.Argv}
 			return m, tea.Quit
 		}
 	case "i":
-		if r.ContinueName != "" && !r.Written && (r.Outcome == move.FetchComplete || r.Outcome == move.FetchPartial) {
+		if r.ContinueName != "" && !r.Written && (move.HasCopy(r.Outcome)) {
 			key, err := agent.ParseKey(r.Key)
 			if err != nil {
 				return m, nil

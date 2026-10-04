@@ -98,8 +98,49 @@ All notable changes to this project are documented here. The format follows
   starts from (the core's briefing then asks the cloud agent to check it out), and
   `agenttest.CloudOptions.Work` plays the cloud's agent between the conformance kit's send
   and fetch, and `agent.LinksIn` reads a driver's links on an exact host only.
+- Hand a cloud session on to another cloud, through this machine: `hopsesh handoff
+  claude-cloud:<id> --to codex-cloud` (or `codex-cloud:<id> --to claude-cloud`, and any cloud
+  whose sessions come back as a session to any cloud that takes a hand-off) brings it here
+  first, as `hopsesh pull` does, keeps that copy, and hands it off from here. Codex cloud
+  starts from Claude Code cloud's `claude/…` branch as it is when the copy is still exactly
+  that; a Codex cloud task's diff is committed here and goes up on a handoff branch. The plan
+  (`hopsesh plan <cloud>:<id> --to <cloud>`) shows both legs and what the trip loses, the
+  copy's lineage records both hops, and one `hopsesh undo` takes both back, the hand-off
+  first. In the app, **Hand off ▸** on a cloud session opens the same plan and waits while
+  Claude Code's teleport runs in a terminal; in the terminal UI, `c` on a cloud row.
+  `hopsesh clouds continue <hop>` takes on a hop whose first leg ran in another terminal.
+- Branch clean-up after merge: `hopsesh clouds cleanup` lists the handoff branches hopsesh
+  pushed and the clouds' own branches it brought home, asks each remote (read-only) whether
+  their work is in its default branch (by history, through the branch brought here, or a
+  merged pull request where `gh` is installed), and deletes the merged ones only when you
+  confirm, each only while it is where hopsesh saw it. Undo pushes them back. In the app:
+  **Activity → Look for merged branches**, and a pointer to it on the bring-back's done
+  screen. `delete_branch = "on-undo"` and `"never"` keep them.
+- A cloud's text or task summary can be added to the session it was handed off from, when
+  that session is as it was left (`hopsesh pull <cloud>:<id> --append`): a delta append, so
+  the session's own turns stay byte for byte, and undo cuts the addition off again.
+- `agent.LinkOn` reads a link the user pasted on an exact host only (https, no user info,
+  no port).
 
 ### Fixed
+- Bringing a session from Claude Code cloud adopts the copy the real Claude Code writes.
+  Claude Code 2.1.289's teleport saves nothing until you send a message in the teleported
+  session, then writes a new session with the cloud's conversation and a "continued from
+  another machine" record, with no `teleported-from` record and no message count. hopsesh
+  now finds the copy by that record (and still by a `teleported-from` record where one
+  appears), counts only the cloud's messages, checks the copy against the briefing hopsesh
+  sent when hopsesh started that cloud session, and otherwise says how many messages came
+  with nothing to check them against, instead of calling it complete. Every bring-back plan
+  and done screen (command line, terminal UI and app) says that Claude Code saves its copy
+  only after you send a message in it, then exit.
+- Codex cloud: the new task's link is read on chatgpt.com only. A link to any other host
+  that ended in `/tasks/task_…` was taken for the task's. Pasted links of Claude Code,
+  Codex, Amp and Devin sessions, and Devin's pull request links, are read on their exact
+  hosts too.
+- `delete_branch = "never"` now keeps the handoff branch through undo; undo deleted it
+  whatever the setting said.
+- Two operations started in the same millisecond could share a journal, so one's undo record
+  overwrote the other's.
 - Handing a session off to Claude Code cloud works with the real Claude Code. hopsesh ran
   `claude -p <briefing> --cloud --output-format json` through pipes, which Claude Code
   2.1.28x refuses ("--cloud cannot be combined with --print", and without a terminal
@@ -152,6 +193,12 @@ All notable changes to this project are documented here. The format follows
 - Lineage manifests (the `.hopsesh.json` file beside each session hopsesh moved) have a new
   format that can record cloud copies. Manifests from earlier versions are not read: a
   session moved with 0.3 is treated as if hopsesh had not moved it before.
+- The README presents cloud sessions as working with the vendors' clouds (one "Cloud
+  sessions" section: what goes up, what comes back from each cloud, Claude Code's terminal
+  steps, cloud to cloud, undo and clean-up, privacy), and docs/design.md lists cloud
+  sessions as built.
+- The hand-off's branch choice reads "Offer to delete it once its work is merged (and on
+  undo)", "Delete it only if I undo" and "Keep it, even on undo".
 
 ## [0.3.1] - 2026-10-04
 

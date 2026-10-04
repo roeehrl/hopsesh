@@ -78,10 +78,13 @@ function render(b) {
         codeLine(b), h("div", { class: "out-acts" }, h("button", { class: "btn", onclick: () => doUndo(b) }, "Undo"), back));
       break;
     case "complete":
-      body = h("section", { class: "outcome ok", "aria-labelledby": "out-h" }, h("span", { class: "sec-h ok" }, "Complete"),
+    case "unchecked":
+      body = h("section", { class: "outcome ok", "aria-labelledby": "out-h" }, h("span", { class: "sec-h ok" }, b.outcome === "unchecked" ? "Brought" : "Complete"),
         h("div", { class: "out-head" }, badge("ok", "✓"), h("div", {}, h("h2", { id: "out-h" }, `“${b.title}” is here in ${b.agent}`),
           h("span", { class: "muted", style: "font-size:12px" }, b.written ? (b.fidelity === "code" ? `The ${b.noun || "session"}'s title and what came of it, written by hopsesh` : `${b.restored} messages, as text`)
-            : b.stated ? `${b.restored} of ${b.expected} messages · checked` : `${b.restored} messages`))),
+            : b.stated ? `${b.restored} of ${b.expected} messages · checked`
+            : b.check === "brief" ? `${b.restored} messages · it begins with the briefing hopsesh sent`
+            : b.check === "none" ? `${b.restored} messages · ${b.agent} gives no count to check against` : `${b.restored} messages`))),
         h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" },
           b.continueName && !b.written ? h("button", { class: "btn primary", onclick: () => continueIn(b) }, `Continue in ${b.continueName}`) : null,
           h("button", { class: "btn" + (b.continueName && !b.written ? "" : " primary"), id: "open", onclick: () => api("OpenBrought", b.journal).catch(fail) }, `Open in ${sys.terminal}`),
@@ -91,6 +94,8 @@ function render(b) {
         (b.loss || []).length ? h("details", { class: "sec" }, h("summary", { style: "cursor:pointer;font-size:12.5px" }, "What stays in the cloud"),
           h("ul", { style: "margin:6px 0 0;padding-left:18px;font-size:12.5px" }, b.loss.map((l) => h("li", {}, l[0].toUpperCase() + l.slice(1))))) : null,
         b.url ? h("div", {}, linkBtn(`Open the ${b.noun || "session"} in the browser`, b.url)) : null,
+        b.renamed || (b.branch && !b.written) ? h("div", { class: "hint", role: "note", id: "cleanup-hint" }, "Once its work is merged, hopsesh can delete the cloud's branch for you: ",
+          h("button", { class: "link", onclick: () => go("activity") }, "Activity → Look for merged branches"), ". It asks first.") : null,
         h("div", { class: "out-acts" }, h("button", { class: "btn", onclick: () => doUndo(b) }, "Undo", h("span", { class: "kbd" }, keys("mod+alt+Z"))), back));
       break;
     case "partial":

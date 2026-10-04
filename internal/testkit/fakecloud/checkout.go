@@ -15,7 +15,7 @@ func DemoCheckout(tb testing.TB) string {
 	root := tb.TempDir()
 	gitConfig := filepath.Join(root, "gitconfig")
 	for k, v := range map[string]string{"GIT_CONFIG_GLOBAL": gitConfig, "GIT_CONFIG_NOSYSTEM": "1", "GIT_AUTHOR_NAME": "Sam Doe", "GIT_AUTHOR_EMAIL": "sam@example.com",
-		"GIT_COMMITTER_NAME": "Sam Doe", "GIT_COMMITTER_EMAIL": "sam@example.com", "FAKE_CLOUD_FAIL": ""} {
+		"GIT_COMMITTER_NAME": "Sam Doe", "GIT_COMMITTER_EMAIL": "sam@example.com", "FAKE_CLOUD_FAIL": "", "FAKE_CLAUDE_SAYS": "ok"} {
 		tb.Setenv(k, v)
 	}
 	o, err := NewOrigin(root, "https://github.com/example/demo.git")

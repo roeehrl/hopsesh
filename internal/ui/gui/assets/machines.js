@@ -75,7 +75,7 @@ function cloudCard(c) {
   const show = (r) => fill(result, h("b", { class: r.ok ? "ok" : "err", style: "font-weight:600" }, r.ok ? "✓ " : "✕ "),
     h("span", { class: r.ok ? "ok" : "err" }, (r.checks.length ? r.checks.map((x) => x.text).join(" · ") : r.error) + " · " + when(r.at)));
   if (t) show(t);
-  const brings = c.fidelity === "native" ? `The whole conversation, copied by ${c.agentName}; hopsesh checks the message count`
+  const brings = c.fidelity === "native" ? `The whole conversation, copied by ${c.agentName}; it saves the copy once you send a message in it`
     : c.codeOnly ? (!(c.codeDown || []).length ? "Nothing yet: the conversation stays in the cloud"
       : `The code (${c.codeDown.includes("diff") ? "its patch, committed on a new branch" : "its branch"}); the conversation stays in the cloud for now`)
     : c.fidelity === "code" ? "The code, title and summary"

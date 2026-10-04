@@ -331,7 +331,8 @@ function renderFetch(p) {
             : f.localBranch && f.localBranch !== f.cloudBranch ? [h("span", { class: "mono", style: "font-size:12px" }, f.localBranch), h("span", { class: "muted" }, " renamed from " + f.cloudBranch)]
             : f.rename ? h("span", {}, "A claude/… branch is renamed to ", h("span", { class: "mono", style: "font-size:12px" }, `hopsesh/from/${f.cloud}/…`)) : h("span", { class: "muted" }, "Kept as the cloud names it")),
           f.base ? kv("Starts at", h("span", { class: "ok", style: "font-weight:600" }, "✓ "), f.baseNote || h("span", { class: "mono" }, f.base.slice(0, 7))) : null),
-        f.command ? h("div", { class: "runbox" }, h("span", { style: "font-size:12px;font-weight:500" }, `Runs in ${sys.terminal}`), h("span", { class: "mono", style: "font-size:11.5px;overflow-wrap:anywhere" }, f.command)) : null),
+        f.command ? h("div", { class: "runbox" }, h("span", { style: "font-size:12px;font-weight:500" }, `Runs in ${sys.terminal}`), h("span", { class: "mono", style: "font-size:11.5px;overflow-wrap:anywhere" }, f.command),
+          f.note ? h("span", { class: "warn", id: "copy-note", style: "font-size:12px" }, f.note + ".") : null) : null),
       h("section", { class: "sec", style: "gap:10px" }, h("span", { class: "sec-h" }, "Options"),
         cloudOf(f.cloud)?.codeOnly ? h("span", { class: "muted", style: "font-size:12px" }, `Only the code comes from ${f.cloudTitle}; its conversation stays there for now.`)
         : !(cloudOf(f.cloud)?.codeDown || []).length ? h("span", { class: "muted", style: "font-size:12px" }, `${f.cloudTitle} brings no code here; only its messages come.`)

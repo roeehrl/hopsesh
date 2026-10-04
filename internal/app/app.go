@@ -36,6 +36,10 @@ type App struct {
 	// line's and the terminal UI's relay, the app's terminal window); nil: this front end
 	// has none, and a hand-off to a cloud that needs one is blocked with the reason.
 	Steps move.StepRunner
+	// RunHere runs a driver's command in this front end's terminal and waits for it (the
+	// teleport that brings a hop's session here); nil: the front end opens it itself, and the
+	// hop waits for ContinueHop.
+	RunHere RunHere
 	// tests keeps the clouds' recent read-only probes, so replanning a hand-off does not ask
 	// the vendor again each time (shared by copies of the App; nil: never kept).
 	tests *cloudTests

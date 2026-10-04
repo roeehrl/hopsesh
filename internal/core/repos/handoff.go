@@ -781,6 +781,15 @@ func (r Refs) RemoteRef(ctx context.Context, machine, dir, remote, ref string) (
 	return RemoteRef(ctx, g, dir, remote, ref)
 }
 
+// RestoreRef pushes sha to ref on remote again (never over a ref of that name).
+func (r Refs) RestoreRef(ctx context.Context, machine, dir, remote, ref, sha string) error {
+	g, err := r.Machines(ctx, machine)
+	if err != nil {
+		return err
+	}
+	return PushRef(ctx, g, dir, remote, sha, ref)
+}
+
 // DeleteRef deletes ref on remote while it points at expect.
 func (r Refs) DeleteRef(ctx context.Context, machine, dir, remote, ref, expect string) error {
 	g, err := r.Machines(ctx, machine)

@@ -112,13 +112,29 @@ func TestLoginKind(t *testing.T) {
 
 func TestCreatedTask(t *testing.T) {
 	for out, want := range map[string]string{
-		"https://chatgpt.com/codex/tasks/task_e_68f2c41a9b7c81909d3e\n":                "task_e_68f2c41a9b7c81909d3e",
-		"Reading query from stdin...\nhttps://example.com/codex/tasks/task_e_abcdef12": "task_e_abcdef12",
-		"Created task_e_abcdef12\n": "task_e_abcdef12",
-		"Something else\n":          "",
+		"https://chatgpt.com/codex/tasks/task_e_68f2c41a9b7c81909d3e\n": "task_e_68f2c41a9b7c81909d3e",
+		"Created task_e_abcdef12\n":                                     "task_e_abcdef12",
+		"Something else\n":                                              "",
+		// The link codex printed comes last; a link on any other host is not the task's.
+		"https://chatgpt.com/codex/tasks/task_e_first1\nhttps://chatgpt.com/codex/tasks/task_e_second2": "task_e_second2",
+		"Reading query from stdin...\nhttps://example.com/codex/tasks/task_e_abcdef12":                  "",
+		"https://chatgpt.com.evil.example/codex/tasks/task_e_evil1234":                                  "",
+		"https://evil.example/https://chatgpt.com/codex/tasks/task_e_evil1234":                          "",
+		"https://evil.example/?next=https://chatgpt.com/codex/tasks/task_e_evil1234":                    "",
+		"https://user@chatgpt.com/codex/tasks/task_e_evil1234":                                          "",
+		"https://chatgpt.com:8443/codex/tasks/task_e_evil1234":                                          "",
+		"http://chatgpt.com/codex/tasks/task_e_evil1234":                                                "",
+		"https://xn--chtgpt-9ya.com/codex/tasks/task_e_evil1234":                                        "",
+		"https://chatgpt.com/other/tasks/task_e_evil1234":                                               "",
+		// A hostile link beside the real one never wins, wherever it is.
+		"https://chatgpt.com/codex/tasks/task_e_real1234 https://evil.example/codex/tasks/task_e_evil1234": "task_e_real1234",
 	} {
-		if id, _ := createdTask(out); id != want {
+		id, url := createdTask(out)
+		if id != want {
 			t.Errorf("%q: %q", out, id)
+		}
+		if id != "" && strings.Contains(out, "://") && url != "https://chatgpt.com/codex/tasks/"+id {
+			t.Errorf("%q: the link is %q", out, url)
 		}
 	}
 }

@@ -21,7 +21,8 @@ type Row struct {
 	Naming  string `json:"naming"`  // how the other machine is named: address | alias
 	// Location is the cloud a row involves, or machine: a fetch starts there (repo
 	// unpushed: the cloud session never pushed its work), a hand-off goes there from this
-	// machine, and a cloud round trip goes there and comes back.
+	// machine, a cloud round trip goes there and comes back, and a cloud hop starts there
+	// and goes on to the other cloud through this machine.
 	Location string `json:"location"`
 }
 
@@ -33,7 +34,7 @@ var dims = []struct {
 	name   string
 	values []string
 }{
-	{"op", []string{"move", "continue", "push", "roundtrip", "conflict", "undo-used", "skill", "fetch", "handoff", "cloud-roundtrip"}},
+	{"op", []string{"move", "continue", "push", "roundtrip", "conflict", "undo-used", "skill", "fetch", "handoff", "cloud-roundtrip", "cloud-hop"}},
 	{"agents", []string{"claude>claude", "codex>codex", "claude>codex", "codex>claude"}},
 	{"content", []string{"ascii", "zh", "ja", "ar", "el", "large"}},
 	{"repo", []string{"clean", "unpushed", "uncommitted", "worktree", "none"}},
@@ -47,6 +48,13 @@ func valid(v []string) bool {
 	same := agents == "claude>claude" || agents == "codex>codex"
 	if cloudOp(op) != (location != "machine") {
 		return false // only a fetch, a hand-off and a cloud round trip involve a cloud
+	}
+	if op == "cloud-hop" {
+		// A cloud session goes on to the other vendor's cloud through this machine: Claude
+		// Code cloud → Codex cloud (claude>codex) or Codex cloud → Claude Code cloud
+		// (codex>claude), from a session that pushed its work.
+		return naming == "address" && repo == "clean" &&
+			(location == "claude-cloud" && agents == "claude>codex" || location == "codex-cloud" && agents == "codex>claude")
 	}
 	if location == "codex-cloud" {
 		return validCodex(op, agents, repo, naming)
@@ -101,7 +109,9 @@ func validCodex(op, agents, repo, naming string) bool {
 }
 
 // cloudOp reports whether an op involves a cloud.
-func cloudOp(op string) bool { return op == "fetch" || op == "handoff" || op == "cloud-roundtrip" }
+func cloudOp(op string) bool {
+	return op == "fetch" || op == "handoff" || op == "cloud-roundtrip" || op == "cloud-hop"
+}
 
 func toRow(n int, v []string) Row {
 	from, to, _ := strings.Cut(v[1], ">")

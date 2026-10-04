@@ -379,11 +379,14 @@ type Fetched struct {
 	Adopt *Adopt
 	// Segment is the conversation in the IR when no native copy exists (text-only clouds).
 	Segment *ir.Segment
-	// Expected is how many messages the vendor says it restored, when it says (a
-	// teleported-from record's messageCount), so the core can tell a partial copy.
+	// Expected is how many messages the vendor says it restored, when it says, so the core
+	// can tell a partial copy (Claude Code 2.1.289's teleport says nothing).
 	Expected int
 	// Loss names what stays in the cloud: "tool calls stay in the cloud".
 	Loss []string
+	// Note is what the user must do in Run's terminal for the copy to be saved ("Claude
+	// Code saves its copy only after you send a message in it"), shown with the command.
+	Note string
 }
 
 // CodeResult is the code a fetch brought.
@@ -399,7 +402,7 @@ type CodeResult struct {
 
 // Adopt says where a driver writes a session file: under the install's root Root, in
 // folder Dir (root-relative, slash-separated), a file created after Since that names
-// Session (or a teleported-from record of it).
+// Session, or holds the vendor's own sign that it is a copy of it.
 type Adopt struct {
 	Root    string
 	Dir     string
@@ -426,6 +429,13 @@ type Adoption struct {
 	Restored int
 	Expected int
 	Stated   bool
+	// Replies is how many of the restored messages are the agent's; First is the copy's
+	// first user message, as it reads, so the core can check the copy begins where the
+	// session began (the briefing hopsesh sent) when the vendor states no count.
+	Replies int
+	First   string
+	// Title names the cloud conversation ("" : the copy's own title stands).
+	Title string
 }
 
 // CloudLinker reads a cloud session's link or id as the vendor shows it ("Paste a link"),

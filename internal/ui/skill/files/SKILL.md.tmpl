@@ -128,6 +128,19 @@ cloud takes follow-ups from hopsesh: Claude Code has no command that sends one o
 own terminal session (`handoff.noFollowUp` says so), so the user writes to a Claude Code
 cloud session on its page (`handoff.url`).
 
+A cloud session goes on to another cloud ("hand this Claude Code cloud session on to Codex
+cloud") through this machine: `{{.Bin}} plan <cloud>:<id> --to <other cloud> --json` shows
+both legs (`hop.legs`, `hop.loss`, and `hop.then` for the second cloud's checks and
+environment). After a clear yes, the user runs `{{.Bin}} handoff <cloud>:<id> --to <other
+cloud>` in their own terminal when the first leg is Claude Code's teleport (`hop.terminal`
+says so: they send a message in the copy, then exit); otherwise
+`{{.Bin}} handoff <cloud>:<id> --to <other cloud> --json --yes`. `{{.Bin}} undo
+<result.journal>` takes both legs back.
+
+Branches a hand-off left on the remote: `{{.Bin}} clouds cleanup --list --json` lists them
+and which are merged (`offer`, `why`); deleting them (`{{.Bin}} clouds cleanup --yes`) always
+asks the user first.
+
 Other flags are in [reference.md](reference.md).
 
 ## When something fails
