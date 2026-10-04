@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/roeehrl/hopsesh/internal/core/repos"
+	"github.com/roeehrl/hopsesh/internal/core/term"
 	"github.com/roeehrl/hopsesh/sdk/agent/agenttest"
 )
 
@@ -85,6 +86,21 @@ func (w *world) run(fail string, main func(Proc) int, args ...string) (string, s
 	return out.String(), errOut.String(), code
 }
 
+// tty runs a stand-in program as in a terminal 100 columns wide, whose user types typed.
+func (w *world) tty(fail, typed string, main func(Proc) int, args ...string) (string, int) {
+	var out bytes.Buffer
+	vars := map[string]string{}
+	if fail != "" {
+		vars["FAKE_CLOUD_FAIL"] = fail
+	}
+	p := Proc{Args: args, Vars: vars, Dir: w.repo, Stdout: &out, Stderr: &out, TTY: true, Width: 100}
+	if typed != "" {
+		p.In = strings.NewReader(typed)
+	}
+	code := main(p)
+	return term.Plain(out.Bytes()), code
+}
+
 func claudeMain(p Proc) int { _, code := Claude(p); return code }
 func codexMain(p Proc) int  { _, code := Codex(p); return code }
 
@@ -103,29 +119,53 @@ func TestOriginKeepsTheGitHubIdentity(t *testing.T) {
 // claude/… branch, and teleports: whole, partial, empty and without a branch.
 func TestClaudeCloudRoundTrip(t *testing.T) {
 	w := newWorld(t)
-	out, _, code := w.run("", claudeMain, "-p", "[hopsesh] fix the bug", "--cloud", "--output-format", "json")
-	var created struct {
-		OK        bool   `json:"ok"`
-		SessionID string `json:"session_id"`
-		URL       string `json:"url"`
+	// As 2.1.284: no --print with --cloud, and no --cloud without a terminal.
+	if _, stderr, code := w.run("", claudeMain, "-p", "[hopsesh] fix the bug", "--cloud", "--output-format", "json"); code != 1 ||
+		!strings.Contains(stderr, "Error: --cloud cannot be combined with --print.") {
+		t.Fatalf("-p with --cloud: %d %s", code, stderr)
 	}
-	if code != 0 || json.Unmarshal([]byte(out), &created) != nil || !created.OK || !strings.HasPrefix(created.SessionID, "session_01") {
-		t.Fatalf("create: %d %s", code, out)
+	if _, stderr, code := w.run("", claudeMain, "--cloud", "[hopsesh] fix the bug"); code != 1 || !strings.Contains(stderr, "Error: --cloud requires an interactive terminal.") {
+		t.Fatalf("--cloud without a terminal: %d %s", code, stderr)
 	}
-	id := created.SessionID
-	if _, stderr, code := w.run("", claudeMain, "--cloud", id); code == 0 || !strings.Contains(stderr, "Attaching to an existing cloud session is not enabled") {
-		t.Fatalf("--cloud <id> without -p must refuse: %d %s", code, stderr)
+	out, code := w.tty("", "", claudeMain, "--cloud", "[hopsesh] fix the bug")
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if code != 0 || len(lines) != 3 || lines[0] != "Created cloud session: Session ready" || !strings.HasPrefix(lines[1], "View: https://claude.ai/code/session_01") ||
+		!strings.HasSuffix(lines[1], "?from=cli&m=0") || !strings.HasPrefix(lines[2], "Resume with: claude --teleport session_01") {
+		t.Fatalf("create: %d %q", code, out)
 	}
-	cse := "cse_" + strings.TrimPrefix(id, "session_")
-	if out, _, code := w.run("", claudeMain, "-p", "and add a test", "--cloud", cse, "--output-format", "json"); code != 0 || !strings.Contains(out, id) {
-		t.Fatalf("a follow-up by the cse_ form of the id: %d %s", code, out)
+	id := strings.TrimPrefix(lines[2], "Resume with: claude --teleport ")
+	if lines[1] != "View: https://claude.ai/code/"+id+"?from=cli&m=0" {
+		t.Fatalf("the two lines name one session: %q", out)
 	}
-	if _, stderr, code := w.run("archived", claudeMain, "-p", "more", "--cloud", id); code == 0 || !strings.Contains(stderr, "archived") {
-		t.Fatalf("an archived session refuses follow-ups: %s", stderr)
+	if out, code := w.tty("", "", claudeMain, "--cloud", id); code == 0 || !strings.Contains(out, "Attaching to an existing cloud session is not enabled") {
+		t.Fatalf("--cloud <id> must refuse: %d %s", code, out)
 	}
+	if _, stderr, code := w.run("", claudeMain, "-p", "and add a test", "--cloud", "cse_"+strings.TrimPrefix(id, "session_")); code != 1 || !strings.Contains(stderr, "--print") {
+		t.Fatalf("a follow-up with -p is refused: %d %s", code, stderr)
+	}
+	// The folder's trust: asked in a folder not on the list; yes adds it, no ends there.
+	trusted := filepath.Join(t.TempDir(), "trusted")
+	t.Setenv("FAKE_CLAUDE_TRUSTED", trusted)
+	if out, code := w.tty("", "2", claudeMain, "--cloud", "[hopsesh] x"); code != 1 || !strings.Contains(out, "Quick safety check: Is this a project you created or one you trust?") ||
+		strings.Contains(out, "Created cloud session") {
+		t.Fatalf("trust refused: %d %q", code, out)
+	}
+	if out, code := w.tty("", "\x03", claudeMain, "--cloud", "[hopsesh] x"); code != 130 || strings.Contains(out, "Created cloud session") {
+		t.Fatalf("Ctrl-C at the question: %d %q", code, out)
+	}
+	if out, code := w.tty("", "\r", claudeMain, "--cloud", "[hopsesh] x"); code != 0 || !strings.Contains(out, "Quick safety check") || !strings.Contains(out, "Created cloud session") {
+		t.Fatalf("trusted: %d %q", code, out)
+	}
+	if out, code := w.tty("", "", claudeMain, "--cloud", "[hopsesh] x"); code != 0 || strings.Contains(out, "Quick safety check") {
+		t.Fatalf("asked again in a trusted folder: %d %q", code, out)
+	}
+	if out, code := w.tty("trust-no", "", claudeMain, "--cloud", "[hopsesh] x"); code != 1 || !strings.Contains(out, "Quick safety check") {
+		t.Fatalf("a user who says no: %d %q", code, out)
+	}
+	t.Setenv("FAKE_CLAUDE_TRUSTED", "")
 	must(t, Work(Proc{Vars: map[string]string{}}, id, false))
 	s, _ := Open(w.store).Get(id)
-	if s.State != StateIdle || !strings.HasPrefix(s.Result, "claude/web-session-") || len(s.Messages) != 3 {
+	if s.State != StateIdle || !strings.HasPrefix(s.Result, "claude/web-session-") || len(s.Messages) != 2 {
 		t.Fatalf("after work: %+v", s)
 	}
 
@@ -155,14 +195,14 @@ func TestClaudeCloudRoundTrip(t *testing.T) {
 		return out, recs
 	}
 	_, recs := teleport("")
-	if recs[0]["type"] != "teleported-from" || recs[0]["messageCount"] != float64(3) || len(recs) != 4 {
+	if recs[0]["type"] != "teleported-from" || recs[0]["messageCount"] != float64(2) || len(recs) != 3 {
 		t.Fatalf("a whole teleport: %v", recs)
 	}
 	if w.git("rev-parse", "--abbrev-ref", "HEAD") != s.Result {
 		t.Fatal("teleport checks out the cloud's branch")
 	}
-	if _, recs = teleport("partial"); recs[0]["messageCount"] != float64(3) || len(recs) != 2 {
-		t.Fatalf("a partial teleport restores one message of three: %v", recs)
+	if _, recs = teleport("partial"); recs[0]["messageCount"] != float64(2) || len(recs) != 2 {
+		t.Fatalf("a partial teleport restores one message of two: %v", recs)
 	}
 	if _, recs = teleport("empty"); recs[0]["messageCount"] != float64(0) || len(recs) != 1 {
 		t.Fatalf("an empty teleport: %v", recs)
@@ -192,15 +232,15 @@ func mustStat(t *testing.T, p string) os.FileInfo {
 func TestClaudeCloudNeedsAPushedBranch(t *testing.T) {
 	w := newWorld(t)
 	w.git("checkout", "-q", "-b", "local-only")
-	if _, stderr, code := w.run("", claudeMain, "--cloud", "do it"); code == 0 || !strings.Contains(stderr, "push it first") {
-		t.Fatalf("an unpushed branch: %d %s", code, stderr)
+	if out, code := w.tty("", "", claudeMain, "--cloud", "do it"); code == 0 || !strings.Contains(out, "push it first") {
+		t.Fatalf("an unpushed branch: %d %s", code, out)
 	}
 	w.git("checkout", "-q", "main")
-	out, _, code := w.run("", claudeMain, "--cloud", "do it")
+	out, code := w.tty("", "", claudeMain, "--cloud", "do it")
 	if code != 0 {
 		t.Fatal(out)
 	}
-	id := strings.TrimSpace(out[strings.LastIndex(out, "/")+1:])
+	id := strings.TrimSpace(out[strings.LastIndex(out, " ")+1:])
 	err := Work(Proc{Vars: map[string]string{"FAKE_CLOUD_FAIL": "push-refused"}}, id, false)
 	if err == nil || !strings.Contains(err.Error(), "branch protection") {
 		t.Fatalf("a refused push: %v", err)
