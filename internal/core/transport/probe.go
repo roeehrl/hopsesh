@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -24,30 +26,56 @@ import (
 
 // RunPowerShell runs a PowerShell script on a Windows machine (whatever its default ssh
 // shell is) via -EncodedCommand, which avoids every cmd.exe quoting pitfall. A script too
-// long for a command line goes through standard input instead.
+// long for a command line is uploaded over SFTP and run from the file.
 func (c *Conn) RunPowerShell(ctx context.Context, script string) ([]byte, error) {
-	cmd, stdin := PowerShellInvocation(script)
-	return c.RunInput(ctx, cmd, stdin)
+	if cmd := PowerShellCommand(script); len(cmd) <= maxCommandLine {
+		return c.Run(ctx, cmd)
+	}
+	name := psScriptName()
+	fs, err := c.OpenSFTP(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+	err = upload(fs, name, script)
+	_ = fs.Close()
+	if err != nil {
+		return nil, fmt.Errorf("uploading a PowerShell script: %w", err)
+	}
+	return c.Run(ctx, PowerShellCommand(psFromFile(name)))
+}
+
+// upload writes the script as a new file (no rename: not every SFTP server has
+// posix-rename).
+func upload(fs *RemoteFS, name, script string) error {
+	f, err := fs.Client().OpenFile(fs.ToSFTP(name), os.O_CREATE|os.O_EXCL|os.O_WRONLY)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write([]byte(script)); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 // maxCommandLine keeps a command line inside cmd.exe's limit (8191 characters), the shell
 // Windows' OpenSSH server uses unless told otherwise.
 const maxCommandLine = 8000
 
-// psFromStdin reads a base64 UTF-8 script from standard input and runs it. It reads one
-// line, not to the end: Windows' OpenSSH server does not always pass the end of input on
-// to the command, and waiting for it hung until the timeout.
-const psFromStdin = `$s = [Console]::In.ReadLine(); Invoke-Expression ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($s.Trim())))`
+// psScriptName is a file in the remote user's home folder, where SFTP starts. Standard
+// input is no way in: PowerShell with redirected input sometimes read it first, and the
+// script waited for it until the timeout.
+func psScriptName() string {
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	return ".hopsesh-" + hex.EncodeToString(b[:]) + ".ps1"
+}
 
-// PowerShellInvocation is the command line for a script and what to send on its standard
-// input (nil when the script fits on the command line). -EncodedCommand triples a
-// script's length, so a script that grows with the number of sessions or folders soon
-// outgrows the command line: then a short fixed command reads it from standard input.
-func PowerShellInvocation(script string) (string, []byte) {
-	if cmd := PowerShellCommand(script); len(cmd) <= maxCommandLine {
-		return cmd, nil
-	}
-	return PowerShellCommand(psFromStdin), []byte(base64.StdEncoding.EncodeToString([]byte(script)) + "\n")
+// psFromFile runs an uploaded script and removes it. The script runs as a script block,
+// not as a .ps1 file (a machine's execution policy may refuse those), in its own scope:
+// its variables cannot overwrite the path the cleanup removes.
+func psFromFile(name string) string {
+	return `$hopseshScriptFile = Join-Path $HOME ` + PSQuote(name) + `; try { & ([scriptblock]::Create([IO.File]::ReadAllText($hopseshScriptFile))) } finally { Remove-Item -LiteralPath $hopseshScriptFile -ErrorAction SilentlyContinue }`
 }
 
 // PowerShellCommand is the command line that runs a PowerShell script on a Windows
