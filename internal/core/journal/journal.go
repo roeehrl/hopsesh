@@ -1,9 +1,12 @@
 // Package journal makes every write hopsesh does undoable. Before a file is created,
 // replaced, appended to or moved, the journal records how to reverse it (and keeps a copy
-// of what is replaced), on disk, so an interrupted move can still be undone.
+// of what is replaced), on disk, so an interrupted move can still be undone. Beyond files,
+// it records a branch pushed to a git remote, a session started in a vendor's cloud and a
+// session file a vendor's CLI wrote; their undo runs git or the module, through Reach.
 package journal
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -30,6 +33,15 @@ const (
 	OpReplace Op = "replace" // undo: put the backup back
 	OpAppend  Op = "append"  // undo: cut out the appended bytes (Size, Len, Sum)
 	OpRename  Op = "rename"  // undo: move back
+	// OpPushRef is a ref pushed to a git remote. Undo deletes it, with a lease: only while it
+	// still points at what hopsesh pushed (Sha).
+	OpPushRef Op = "push-ref"
+	// OpCloud is a session started in a vendor's cloud. Undo archives it where the cloud
+	// can; otherwise archiving it is a step the user owes (Journal.Manual).
+	OpCloud Op = "cloud"
+	// OpAdopt is a session file a vendor's CLI wrote for the operation (a teleported
+	// transcript). Undo sets it aside in the journal, and refuses when it grew since.
+	OpAdopt Op = "adopt"
 )
 
 // Entry is one journaled write.
@@ -47,6 +59,18 @@ type Entry struct {
 	Created   bool      `json:"created,omitempty"` // OpAppend: the append created the file
 	// OpAppend: lines written later do not build on these bytes (AppendOptions.Standalone).
 	Standalone bool `json:"standalone,omitempty"`
+	// OpPushRef: Path is the checkout it was pushed from, Remote the remote's name there,
+	// Ref the full ref name and Sha the commit pushed.
+	Remote string `json:"remote,omitempty"`
+	Ref    string `json:"ref,omitempty"`
+	Sha    string `json:"sha,omitempty"`
+	// OpCloud: the cloud, the session (its key: the module and the vendor's id), its page,
+	// and when it last changed as hopsesh left it. Machine is the one that ran the driver.
+	Cloud   string            `json:"cloud,omitempty"`
+	Key     *agent.SessionKey `json:"key,omitempty"`
+	URL     string            `json:"url,omitempty"`
+	Updated time.Time         `json:"updated,omitempty"`
+	// OpAdopt uses Size and Sum for the whole file as adopted.
 }
 
 // Journal is the undo record of one operation (a move, a continuation, a mark).
@@ -64,6 +88,9 @@ type Journal struct {
 	// After is the state the operation left each file it created or replaced in (Seal), so
 	// undo can tell when one was used afterwards and refuse to lose that work.
 	After []State `json:"after,omitempty"`
+	// Manual are steps undo could not take, which the user owes: a cloud session hopsesh
+	// cannot archive stays in the vendor's list until the user archives it there.
+	Manual []Manual `json:"manual,omitempty"`
 
 	dir string
 	mu  sync.Mutex
@@ -78,6 +105,8 @@ const (
 	KindContinue = "continue" // a session continued in another agent
 	KindPush     = "push"     // a session sent to another machine (its mark and lineage here)
 	KindMark     = "mark"     // a mark owed to a copy left behind
+	KindHandoff  = "handoff"  // a session handed off to a cloud (a branch, a cloud session, marks)
+	KindFetch    = "fetch"    // a session brought from a cloud (a worktree, an adopted session)
 )
 
 // New starts a journal of one operation.
@@ -175,33 +204,63 @@ func (j *Journal) Seal(fsFor func(machine string) (host.FS, error)) error {
 	return j.saveLocked()
 }
 
-// Changed reports the first file that changed since the operation (ErrChanged with what
-// changed), or nil: one it created or replaced, or one it appended to (not Standalone) that
-// has more after its bytes. A file that is gone, or a machine fsFor cannot reach, does not
-// count.
-func (j *Journal) Changed(fsFor func(machine string) (host.FS, error)) error {
+// Changed reports the first thing that changed since the operation (ErrChanged with what
+// changed), or nil: a file it created or replaced, or one it appended to (not Standalone)
+// that has more after its bytes; a file a vendor's CLI wrote that grew; a ref it pushed
+// that moved on; a cloud session with activity since. What r cannot reach (a machine, a
+// remote, a cloud) does not count, nor does a file or a ref that is gone.
+func (j *Journal) Changed(ctx context.Context, r Reach) error {
 	for i, e := range j.Entries {
-		if e.Op != OpAppend || e.Standalone || j.appendedAgain(i) {
-			continue
-		}
-		fsys, err := fsFor(e.Machine)
-		if err != nil {
-			continue
-		}
-		after, err := bytesAfter(fsys, e)
-		if err != nil {
-			continue
-		}
-		if after != 0 {
-			what := "what hopsesh added was changed"
-			if after > 0 {
-				what = fmt.Sprintf("%s were added after this", humanBytes(after))
+		switch e.Op {
+		case OpAppend:
+			if e.Standalone || j.appendedAgain(i) {
+				continue
 			}
-			return fmt.Errorf("%w: %s on %s (%s)", ErrChanged, filepath.Base(e.Path), e.Machine, what)
+			fsys, err := r.fs(e.Machine)
+			if err != nil {
+				continue
+			}
+			after, err := bytesAfter(fsys, e)
+			if err != nil {
+				continue
+			}
+			if after != 0 {
+				what := "what hopsesh added was changed"
+				if after > 0 {
+					what = fmt.Sprintf("%s were added after this", humanBytes(after))
+				}
+				return fmt.Errorf("%w: %s on %s (%s)", ErrChanged, filepath.Base(e.Path), e.Machine, what)
+			}
+		case OpAdopt:
+			fsys, err := r.fs(e.Machine)
+			if err != nil {
+				continue
+			}
+			if now, err := fileState(fsys, e.Machine, e.Path); err == nil && now.Sum != e.Sum {
+				what := "it was used after this"
+				if now.Size > e.Size {
+					what = fmt.Sprintf("%s were added after this", humanBytes(now.Size-e.Size))
+				}
+				return fmt.Errorf("%w: %s on %s (%s)", ErrChanged, filepath.Base(e.Path), e.Machine, what)
+			}
+		case OpPushRef:
+			if r.Refs == nil {
+				continue
+			}
+			if now, err := r.Refs.RemoteRef(ctx, e.Machine, e.Path, e.Remote, e.Ref); err == nil && now != "" && now != e.Sha {
+				return fmt.Errorf("%w: %s on %s moved on from what hopsesh pushed (%s is now %s)", ErrChanged, shortRef(e.Ref), e.Remote, short(e.Sha), short(now))
+			}
+		case OpCloud:
+			if r.Clouds == nil || e.Key == nil {
+				continue
+			}
+			if now, err := r.Clouds.Updated(ctx, e.Cloud, *e.Key); err == nil && now.After(e.Updated) {
+				return fmt.Errorf("%w: the %s session %s has new activity", ErrChanged, e.Cloud, e.Key.Session)
+			}
 		}
 	}
 	for _, a := range j.After {
-		fsys, err := fsFor(a.Machine)
+		fsys, err := r.fs(a.Machine)
 		if err != nil {
 			continue
 		}
@@ -218,6 +277,23 @@ func (j *Journal) Changed(fsFor func(machine string) (host.FS, error)) error {
 		}
 	}
 	return nil
+}
+
+func (r Reach) fs(machine string) (host.FS, error) {
+	if r.FS == nil {
+		return nil, errors.New("no machine can be reached")
+	}
+	return r.FS(machine)
+}
+
+// shortRef is a ref without refs/heads/.
+func shortRef(ref string) string { return strings.TrimPrefix(ref, "refs/heads/") }
+
+func short(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
 }
 
 // appendedAgain reports whether a later entry of the journal appends to the same file: the
@@ -259,6 +335,74 @@ func humanBytes(n int64) string {
 	return fmt.Sprintf("%d bytes", n)
 }
 
+// Manual is a cloud session undo could not archive: the user archives it on its page.
+type Manual struct {
+	Cloud string           `json:"cloud"`
+	Key   agent.SessionKey `json:"key"`
+	URL   string           `json:"url,omitempty"`
+}
+
+// Reach is how undo gets at what an operation changed.
+type Reach struct {
+	// FS returns a machine's filesystem by name (an error when it cannot be reached; such
+	// entries are reported).
+	FS func(machine string) (host.FS, error)
+	// Refs reaches git remotes (nil: pushed refs are reported, not deleted).
+	Refs Refs
+	// Clouds reaches vendor clouds (nil: their sessions become steps the user owes).
+	Clouds Clouds
+}
+
+// Files is a Reach of files only.
+func Files(fsFor func(machine string) (host.FS, error)) Reach { return Reach{FS: fsFor} }
+
+// Refs reads and deletes refs on a checkout's git remote, for undo; the repos package
+// implements it.
+type Refs interface {
+	// RemoteRef returns the commit ref points at on remote, as the checkout dir on machine
+	// sees it ("" when there is no such ref).
+	RemoteRef(ctx context.Context, machine, dir, remote, ref string) (string, error)
+	// DeleteRef deletes ref on remote if it still points at expect (a lease), and refuses
+	// otherwise.
+	DeleteRef(ctx context.Context, machine, dir, remote, ref, expect string) error
+}
+
+// Clouds reaches the sessions an operation started in vendor clouds, through the modules'
+// cloud capabilities.
+type Clouds interface {
+	// Updated is when the session last changed, as the cloud lists it (zero when the
+	// cloud does not say).
+	Updated(ctx context.Context, cloud string, key agent.SessionKey) (time.Time, error)
+	// Archive archives the session, or returns ErrManual when the cloud cannot.
+	Archive(ctx context.Context, cloud string, key agent.SessionKey) error
+}
+
+// ErrManual means a cloud cannot archive its sessions from hopsesh: the user does it on
+// the session's page.
+var ErrManual = errors.New("only the user can archive it, on its page")
+
+// PushRef records a ref about to be pushed from the checkout dir on machine to remote, so
+// undo can delete it again (only while it still points at sha).
+func (j *Journal) PushRef(machine, dir, remote, ref, sha string) error {
+	return j.record(Entry{Op: OpPushRef, Machine: machine, Path: dir, Remote: remote, Ref: ref, Sha: sha})
+}
+
+// Cloud records a session the operation started in a cloud (machine ran the driver).
+func (j *Journal) Cloud(machine string, s agent.CloudSession) error {
+	key := s.Key
+	return j.record(Entry{Op: OpCloud, Machine: machine, Cloud: s.Cloud, Key: &key, URL: s.URL, Updated: s.Updated})
+}
+
+// Adopt records a session file a vendor's CLI just wrote on machine for this operation
+// (its state now), so undo sets it aside, unless it grew since.
+func (j *Journal) Adopt(fsys host.FS, machine, p string) error {
+	st, err := fileState(fsys, machine, p)
+	if err != nil {
+		return err
+	}
+	return j.record(Entry{Op: OpAdopt, Machine: machine, Path: p, Size: st.Size, Sum: st.Sum})
+}
+
 // Remote names a journal on another machine's hopsesh.
 type Remote struct {
 	Machine string `json:"machine"` // as this machine's configuration names it
@@ -273,9 +417,9 @@ func (j *Journal) AddRemote(machine, id string) error {
 	return j.saveLocked()
 }
 
-// Adopt records a file another program just created for this operation (an agent's own
-// importer), so undo removes it.
-func (j *Journal) Adopt(machine, p string) error {
+// RecordCreated records a file another program just created for this operation (an
+// agent's own importer), so undo removes it.
+func (j *Journal) RecordCreated(machine, p string) error {
 	return j.record(Entry{Op: OpCreate, Machine: machine, Path: p})
 }
 
@@ -461,52 +605,118 @@ func (j *Journal) backupName(p string) string {
 
 func (j *Journal) backup(fsys host.FS, p string) (string, error) {
 	dst := j.backupName(p)
+	return dst, copyOut(fsys, p, dst)
+}
+
+// copyOut copies a file from a machine to a local file.
+func copyOut(fsys host.FS, p, dst string) error {
 	src, err := fsys.Open(p)
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer src.Close()
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
-		return "", err
+		return err
 	}
 	if _, err := io.Copy(out, src); err != nil {
 		out.Close()
-		return "", err
+		return err
 	}
-	return dst, out.Close()
+	return out.Close()
 }
 
-// Undo reverses a journal's entries, newest first. fsFor returns the filesystem of a
-// machine by name (an error when it cannot be reached; such entries are reported).
-// Unless force, it refuses (ErrChanged) when a file the operation wrote changed since:
-// undoing would lose that later work.
-func (j *Journal) Undo(fsFor func(machine string) (host.FS, error), force bool) error {
+// Undo reverses a journal's entries, newest first, reaching machines, remotes and clouds
+// through r (what it cannot reach is reported). Unless force, it refuses (ErrChanged) when
+// something the operation did changed since: undoing would lose that later work. A forced
+// undo deletes a pushed ref wherever it points now. A cloud session undo cannot archive is
+// recorded in Manual, for the user.
+func (j *Journal) Undo(ctx context.Context, r Reach, force bool) error {
 	if !force {
-		if err := j.Changed(fsFor); err != nil {
+		if err := j.Changed(ctx, r); err != nil {
 			return err
 		}
 	}
 	var problems []string
+	var manual []Manual
 	for i := len(j.Entries) - 1; i >= 0; i-- {
 		e := j.Entries[i]
-		fsys, err := fsFor(e.Machine)
+		switch e.Op {
+		case OpPushRef:
+			if err := undoPushRef(ctx, r, e, force); err != nil {
+				problems = append(problems, fmt.Sprintf("%s on %s: %v", shortRef(e.Ref), e.Remote, err))
+			}
+			continue
+		case OpCloud:
+			if e.Key == nil {
+				continue
+			}
+			err := ErrManual
+			if r.Clouds != nil {
+				err = r.Clouds.Archive(ctx, e.Cloud, *e.Key)
+			}
+			switch {
+			case errors.Is(err, ErrManual):
+				manual = append(manual, Manual{Cloud: e.Cloud, Key: *e.Key, URL: e.URL})
+			case err != nil:
+				problems = append(problems, fmt.Sprintf("the %s session %s: %v", e.Cloud, e.Key.Session, err))
+			}
+			continue
+		}
+		fsys, err := r.fs(e.Machine)
 		if err != nil {
 			problems = append(problems, fmt.Sprintf("%s on %s: %v", e.Path, e.Machine, err))
 			continue
 		}
-		if err := undoEntry(fsys, e); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if e.Op == OpAdopt {
+			err = j.setAside(fsys, i, e.Path)
+		} else {
+			err = undoEntry(fsys, e)
+		}
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			problems = append(problems, fmt.Sprintf("%s: %v", e.Path, err))
 		}
 	}
-	j.Undone = true
-	if err := j.save(); err != nil {
+	j.mu.Lock()
+	j.Undone, j.Manual = true, manual
+	err := j.saveLocked()
+	j.mu.Unlock()
+	if err != nil {
 		problems = append(problems, err.Error())
 	}
 	if len(problems) > 0 {
 		return fmt.Errorf("undo was incomplete:\n  %s", strings.Join(problems, "\n  "))
 	}
 	return nil
+}
+
+// undoPushRef deletes a pushed ref while it still points at what was pushed; forced, at
+// whatever it points at now. A ref that is gone already is fine.
+func undoPushRef(ctx context.Context, r Reach, e Entry, force bool) error {
+	if r.Refs == nil {
+		return errors.New("the remote cannot be reached from here")
+	}
+	expect := e.Sha
+	if force {
+		now, err := r.Refs.RemoteRef(ctx, e.Machine, e.Path, e.Remote, e.Ref)
+		if err != nil {
+			return err
+		}
+		if now == "" {
+			return nil
+		}
+		expect = now
+	}
+	return r.Refs.DeleteRef(ctx, e.Machine, e.Path, e.Remote, e.Ref, expect)
+}
+
+// setAside moves the file of entry i (on any machine) into the journal's backup folder.
+func (j *Journal) setAside(fsys host.FS, i int, p string) error {
+	dst := filepath.Join(j.dir, "backup", fmt.Sprintf("adopted-%04d-%s", i, filepath.Base(p)))
+	if err := copyOut(fsys, p, dst); err != nil {
+		return err
+	}
+	return fsys.Remove(p)
 }
 
 func undoEntry(fsys host.FS, e Entry) error {

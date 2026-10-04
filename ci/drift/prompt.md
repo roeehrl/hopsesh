@@ -47,9 +47,11 @@ Rules:
 1. Only report changes that came after the tested version, or since last week for targets
    with no tested version. Ignore anything hopsesh doesn't use or plan to use, cosmetic UI
    changes and model announcements.
-2. Every finding must name the upstream source and the hopsesh code it touches. A cloud
-   target has no code yet: cite its entry in `internal/devtools/driftmanifest/targets.go`
-   instead. If you can't point at either, it is not a break; make it a risk or leave it out.
+2. Every finding must name the upstream source and the hopsesh code it touches. A cloud a
+   module declares is in that module's `cloud.go` (`agents/<module>/cloud.go`); a cloud no
+   module reaches yet has no code: cite its entry in
+   `internal/devtools/driftmanifest/targets.go` instead. If you can't point at either, it is
+   not a break; make it a risk or leave it out.
 3. A failing real-agent test is a break. So is a flag or subcommand in a target's
    `watch.relies` that was in the tested help (or last week's) and is gone from the latest;
    `probe.md` marks it "Relied on and gone". A renamed flag shows in the help diff as a

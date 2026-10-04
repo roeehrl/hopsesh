@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/audit"
@@ -28,6 +29,8 @@ type App struct {
 	Passwords func(h config.Host) transport.PasswordFunc
 	// PeerDial reaches hopsesh on a configured machine (nil: over SSH).
 	PeerDial func(ctx context.Context, h config.Host) (*PeerConn, error)
+	// CloudTimeout bounds one cloud's listing in a scan (0: DefaultCloudTimeout).
+	CloudTimeout time.Duration
 }
 
 // New returns an App for the modules and configuration.

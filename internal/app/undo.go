@@ -63,8 +63,9 @@ func (a *App) Undo(ctx context.Context, match string, force bool) (*journal.Jour
 		}
 		return m.FS(ctx)
 	}
+	reach := journal.Reach{FS: fsFor, Clouds: a.undoClouds()}
 	if !force {
-		if err := j.Changed(fsFor); err != nil {
+		if err := j.Changed(ctx, reach); err != nil {
 			return j, err
 		}
 	}
@@ -74,7 +75,7 @@ func (a *App) Undo(ctx context.Context, match string, force bool) (*journal.Jour
 			return j, fmt.Errorf("undo on %s failed, so nothing was undone here: %w", r.Machine, err)
 		}
 	}
-	err = j.Undo(fsFor, force)
+	err = j.Undo(ctx, reach, force)
 	a.Audit.Write(audit.Entry{Action: "undo", Detail: map[string]any{"journal": j.ID, "ok": err == nil, "force": force}})
 	return j, err
 }
@@ -90,7 +91,8 @@ type Activity struct {
 }
 
 // Activities lists what hopsesh did, newest first. Whether each can still be undone is
-// checked on this machine's files only (other machines are checked when undoing).
+// checked on this machine's files only (other machines, remotes and clouds are checked
+// when undoing).
 func (a *App) Activities() ([]Activity, error) {
 	js, err := a.Journals()
 	if err != nil {
@@ -109,7 +111,7 @@ func (a *App) Activities() ([]Activity, error) {
 		case j.Undone:
 			act.Why = "undone"
 		default:
-			if err := j.Changed(local); err != nil {
+			if err := j.Changed(context.Background(), journal.Files(local)); err != nil {
 				act.CanUndo, act.Why = false, strings.TrimPrefix(err.Error(), journal.ErrChanged.Error()+": ")
 			}
 		}

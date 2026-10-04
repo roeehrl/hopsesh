@@ -102,9 +102,26 @@ func TestTargets(t *testing.T) {
 			}
 		}
 	}
+	declared := map[string]bool{}
 	for _, m := range modules() {
 		if !seen[string(m.ID)] {
 			t.Errorf("module %s is not watched", m.ID)
+		}
+		for _, c := range m.clouds {
+			declared[c.Name] = true
+			if !seen[c.Name] {
+				t.Errorf("cloud %s of module %s is not watched", c.Name, m.ID)
+			}
+		}
+	}
+	for name := range cloudGroups {
+		if !declared[name] {
+			t.Errorf("cloudGroups names %s, which no module declares", name)
+		}
+	}
+	for _, x := range clouds {
+		if declared[x.ID] {
+			t.Errorf("cloud %s is declared by a module and listed in clouds too", x.ID)
 		}
 	}
 	// Every group has a target, and a review in drift.yml's matrix.

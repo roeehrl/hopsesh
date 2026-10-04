@@ -144,7 +144,7 @@ func TestCodexImportRoute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := j.Undo(func(string) (host.FS, error) { return host.LocalFS(), nil }, false); err != nil {
+	if err := j.Undo(ctx, journal.Files(func(string) (host.FS, error) { return host.LocalFS(), nil }), false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(threads[0].Path); !os.IsNotExist(err) {

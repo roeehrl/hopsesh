@@ -60,7 +60,7 @@ type Spec struct {
 	// Binaries the module may run through Host.Exec (the first is the agent itself).
 	Binaries []Binary
 	// Roots are the agent's data folders. The first is the main one; writes are allowed
-	// only under a root.
+	// only under a root. A cloud-only module has none.
 	Roots []Root
 	// LoginEnv are environment variables a GUI app must adopt from the user's login shell
 	// (an app started from Finder does not inherit them).
@@ -88,6 +88,9 @@ type Spec struct {
 	Experimental []Capability
 	// Icon is how the user interfaces picture the agent (optional; its initials otherwise).
 	Icon Icon
+	// Clouds are the vendor clouds the module reaches through its agent's CLI. A module
+	// with clouds may have no Roots (a cloud-only module, see NoLocal).
+	Clouds []Cloud
 }
 
 // Icon pictures an agent. The installed desktop app's own icon comes first (unless the

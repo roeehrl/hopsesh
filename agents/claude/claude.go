@@ -76,6 +76,7 @@ func (*Module) Spec() agent.Spec {
 			"darwin":  {"/Applications/Claude.app", "~/Applications/Claude.app"},
 			"windows": {"~/AppData/Local/AnthropicClaude/claude.exe"},
 		}},
+		Clouds: []agent.Cloud{cloud()},
 	}
 }
 

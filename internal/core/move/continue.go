@@ -112,12 +112,7 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	r := convert.Render(convert.Request{
 		Nodes: seg.Nodes, SkipBefore: skip, From: cp.From, To: spec.Name, Fidelity: fidelity,
 		Native: opt.Native && prof.NativeReplay, Window: prof.Window, Mappings: p.Placement.Mappings, Redact: redact,
-		Briefing: convert.Briefing{
-			FromVersion: s.AgentVersion, SourceID: string(s.Key.Session), SourceLoc: src.Machine.Name, TargetLoc: tgt.Machine.Name,
-			When: time.Now(), Branch: p.Repo.SourceBranch, Head: short(p.Repo.SourceHead), Dirty: p.Repo.Dirty,
-			Missing: instructionGaps(src.Module.Spec(), spec, cwd), ToolNames: spec.Tools, Note: opt.Note,
-			Rules: globalRules(p, srcHost, src, spec.Name, opt.CarryRules),
-		},
+		Briefing: briefingFor(p, srcHost, src, s, spec, tgt.Machine.Name, cwd, opt),
 	})
 	cp.items, cp.Report = r.Items, r.Report
 	if opt.Via == ViaImport {
@@ -152,6 +147,19 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		p.Blockers = append(p.Blockers, fmt.Sprintf("--via import reads the session on this machine, so %s must be installed here to keep its copy here first", src.Module.Spec().Name))
 	}
 	return p, nil
+}
+
+// briefingFor is what a briefing says about the source session: where it was, its code,
+// the instruction files the target agent does not read, the target's own tools, the
+// user's note and the instructions carried at their request (or a warning that they are
+// not). It needs no target writer: a handoff to a cloud briefs from the same facts.
+func briefingFor(p *Plan, srcHost agent.Host, src Side, s agent.Summary, to agent.Spec, targetLoc, cwd string, opt Options) convert.Briefing {
+	return convert.Briefing{
+		FromVersion: s.AgentVersion, SourceID: string(s.Key.Session), SourceLoc: src.Machine.Name, TargetLoc: targetLoc,
+		When: time.Now(), Branch: p.Repo.SourceBranch, Head: short(p.Repo.SourceHead), Dirty: p.Repo.Dirty,
+		Missing: instructionGaps(src.Module.Spec(), to, cwd), ToolNames: to.Tools, Note: opt.Note,
+		Rules: globalRules(p, srcHost, src, to.Name, opt.CarryRules),
+	}
 }
 
 // planNative plans keeping the source agent's own copy of the session on the target too,
@@ -374,7 +382,7 @@ func importThen(ctx context.Context, p *Plan, in Input, h agent.Host, j *journal
 	if s == nil {
 		return ir.WriteResult{}, fmt.Errorf("%s imported the session as %s, but it is not in its list", name, id)
 	}
-	if err := j.Adopt(tgt.Machine.Name, s.Path); err != nil {
+	if err := j.RecordCreated(tgt.Machine.Name, s.Path); err != nil {
 		return ir.WriteResult{}, err
 	}
 	j.AddKey(s.Key)

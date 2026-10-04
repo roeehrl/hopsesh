@@ -1,7 +1,8 @@
 // Package convert renders a conversation read from one agent for another agent's writer:
 // what the receiving agent should see (its own words and the user's as messages, the
 // other agent's tool activity as clearly labelled text), within a budget, with a report of
-// everything left out and a briefing at the end. It never calls a model.
+// everything left out and a briefing at the end. Brief renders a briefing alone, for a
+// target hopsesh cannot write to (a cloud session's first prompt). It never calls a model.
 package convert
 
 import (
@@ -84,6 +85,12 @@ type Briefing struct {
 	ToolNames   string   // the target's own tool names, to use instead of the history's
 	Note        string   // a handoff note the source agent wrote, if any
 	Rules       []Rules  // the user's instructions for every project, carried when asked
+	// For a cloud briefing (Brief with BriefCloud):
+	Title       string   // the session's title
+	Unpushed    int      // commits the cloud gets that were not on the remote
+	Withheld    []string // files that stay on the machine (credential-like, or not chosen)
+	NotCarried  []string // anything else the cloud does not get ("the user's personal CLAUDE.md")
+	HistoryFile string   // the conversation committed on the branch (".hopsesh/handoff.md"), if it is
 }
 
 // Rules are the text of one global instruction file.
@@ -98,15 +105,9 @@ func Render(r Request) Result {
 	if r.Window == 0 {
 		res.Report.Budget = 200_000
 	}
-	var latestPlan []ir.PlanEntry
 	nodes := r.Nodes
-	for _, n := range nodes {
-		if n.Kind == ir.KindPlan {
-			latestPlan = n.Plan
-		}
-	}
 	if len(r.Briefing.Plan) == 0 {
-		r.Briefing.Plan = latestPlan
+		r.Briefing.Plan = latestPlan(nodes)
 	}
 	var items []ir.Item
 	if r.Fidelity != Note {

@@ -33,14 +33,15 @@ const (
 
 // Machine is a scanned machine.
 type Machine struct {
-	Name        string       `json:"name"`
-	Destination string       `json:"destination,omitempty"`
-	Local       bool         `json:"local"`
-	Status      string       `json:"status"`
-	Error       string       `json:"error,omitempty"`
-	Hint        string       `json:"hint,omitempty"`
-	OS          string       `json:"os,omitempty"`
-	Agents      []AgentState `json:"agents"`
+	Kind        agent.LocationKind `json:"kind"` // always agent.AtMachine (clouds are in Inventory.Clouds)
+	Name        string             `json:"name"`
+	Destination string             `json:"destination,omitempty"`
+	Local       bool               `json:"local"`
+	Status      string             `json:"status"`
+	Error       string             `json:"error,omitempty"`
+	Hint        string             `json:"hint,omitempty"`
+	OS          string             `json:"os,omitempty"`
+	Agents      []AgentState       `json:"agents"`
 	// Hopsesh is the version of hopsesh installed there ("" when none was found).
 	Hopsesh string `json:"hopsesh,omitempty"`
 
@@ -69,8 +70,11 @@ func (m *Machine) Install(id agent.ID) (agent.Install, bool) {
 	return agent.Install{}, false
 }
 
-// Entry is one session on one machine.
+// Entry is one session at one location: a machine, or a cloud.
 type Entry struct {
+	// Location is where the session lives. Machine is the machine whose files hold it
+	// ("" for a cloud session).
+	Location  agent.Location    `json:"location"`
 	Machine   string            `json:"machine"`
 	Agent     agent.ID          `json:"agent"`
 	AgentName string            `json:"agentName"`
@@ -79,11 +83,14 @@ type Entry struct {
 	Git       *repos.GitState   `json:"git,omitempty"`
 	GitError  string            `json:"gitError,omitempty"` // the checkout could not be read
 	Lineage   *lineage.Manifest `json:"lineage,omitempty"`
+	// Cloud is a cloud session as its cloud listed it.
+	Cloud *agent.CloudSession `json:"cloud,omitempty"`
 }
 
 // Inventory is the result of a scan.
 type Inventory struct {
 	Machines []*Machine `json:"machines"`
+	Clouds   []*Cloud   `json:"clouds"`
 	Entries  []Entry    `json:"entries"`
 }
 
@@ -118,13 +125,15 @@ func (inv *Inventory) Local() *Machine {
 
 // ScanOptions narrow a scan.
 type ScanOptions struct {
-	Hosts   []string // only these machines ("" or none: every allowed one)
+	Hosts   []string // only these machines and clouds ("" or none: every allowed one)
 	NoLocal bool     // leave this machine out
 	SkipGit bool     // no git state (faster)
 }
 
-// Scan reads this machine and the allowed machines in parallel. A machine that cannot be
-// read is returned with a status and a hint, not an error.
+// Scan reads this machine, the allowed machines and the clouds in parallel. A machine or
+// a cloud that cannot be read is returned with a status and a hint, not an error. The
+// clouds are listed through this machine once its own sessions are listed (their lineage
+// names the cloud copies hopsesh made), alongside the other machines.
 func (a *App) Scan(ctx context.Context, o ScanOptions) *Inventory {
 	inv := &Inventory{}
 	var mu sync.Mutex
@@ -139,9 +148,35 @@ func (a *App) Scan(ctx context.Context, o ScanOptions) *Inventory {
 	for _, h := range o.Hosts {
 		want[h] = true
 	}
+	local := sync.OnceValue(func() *host.Machine { return a.localMachine(ctx) })
+	localEntries := make(chan []Entry, 1)
 	if !o.NoLocal && (len(want) == 0 || want[LocalName()]) {
 		wg.Add(1)
-		go func() { defer wg.Done(); add(a.scanMachine(ctx, a.localMachine(ctx), "", o)) }()
+		go func() {
+			defer wg.Done()
+			m, es := a.scanMachine(ctx, local(), "", o)
+			add(m, es)
+			localEntries <- es
+		}()
+	} else {
+		localEntries <- nil
+	}
+	var clouds []cloudRef
+	for _, r := range a.clouds() {
+		if len(want) == 0 || want[r.cloud.Name] {
+			clouds = append(clouds, r)
+		}
+	}
+	if len(clouds) > 0 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cs, es := a.scanClouds(ctx, local(), clouds, knownCloudIDs(<-localEntries, clouds))
+			mu.Lock()
+			inv.Clouds = cs
+			inv.Entries = append(inv.Entries, es...)
+			mu.Unlock()
+		}()
 	}
 	for _, h := range a.Cfg.Hosts {
 		if !h.Allowed || (len(want) > 0 && !want[h.Name]) {
@@ -152,7 +187,7 @@ func (a *App) Scan(ctx context.Context, o ScanOptions) *Inventory {
 			defer wg.Done()
 			hm, err := a.Connect(ctx, h)
 			if err != nil {
-				m := &Machine{Name: h.Name, Destination: h.Destination}
+				m := &Machine{Kind: agent.AtMachine, Name: h.Name, Destination: h.Destination}
 				m.Status, m.Error, m.Hint = classify(err, h)
 				add(m, nil)
 				return
@@ -212,7 +247,7 @@ var errNeedsPassword = errors.New("this machine logs in with a password")
 
 // scanMachine lists every enabled agent's sessions on a reached machine.
 func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o ScanOptions) (*Machine, []Entry) {
-	m := &Machine{Name: hm.Name, Destination: dest, Local: hm.Local, Status: StatusOK, OS: hm.Facts.OS, host: hm,
+	m := &Machine{Kind: agent.AtMachine, Name: hm.Name, Destination: dest, Local: hm.Local, Status: StatusOK, OS: hm.Facts.OS, host: hm,
 		Hopsesh: hopseshVersion(hm.Facts.Binaries[host.Hopsesh.Name])}
 	fsys, err := hm.FS(ctx)
 	if err != nil {
@@ -411,7 +446,7 @@ func listedEntries(ctx context.Context, hm *host.Machine, fsys host.FS, mod agen
 		if lv.State == "" {
 			lv.State = agent.Unknown
 		}
-		out = append(out, Entry{Machine: hm.Name, Agent: spec.ID, AgentName: spec.Name, Session: s, Live: lv, Lineage: manifests[i]})
+		out = append(out, Entry{Location: agent.MachineLocation(hm.Name), Machine: hm.Name, Agent: spec.ID, AgentName: spec.Name, Session: s, Live: lv, Lineage: manifests[i]})
 	}
 	return out
 }

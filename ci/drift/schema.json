@@ -45,7 +45,7 @@
           "affected": {
             "type": "array",
             "items": { "type": "string" },
-            "description": "Repository paths, with a line number where useful (agents/codex/reader.go:120); for a cloud target, its entry in internal/devtools/driftmanifest/targets.go."
+            "description": "Repository paths, with a line number where useful (agents/codex/reader.go:120); for a cloud target, the declaring module's cloud.go (agents/claude/cloud.go), or its entry in internal/devtools/driftmanifest/targets.go when no module reaches it."
           },
           "test": {
             "type": "string",

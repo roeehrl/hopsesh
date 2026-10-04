@@ -38,7 +38,7 @@ const (
 // Mark describes a copy left behind.
 type Mark struct {
 	Kind     MarkKind `json:"kind"`
-	Location string   `json:"location,omitempty"` // where it went: a machine name (later also a cloud)
+	Location string   `json:"location,omitempty"` // where it went: a machine's or a cloud's name
 	Agent    ID       `json:"agent,omitempty"`    // the agent it continues in (MarkContinued)
 	// AgentName is that agent's display name, as a mark title carries it (the core
 	// resolves Agent from it).

@@ -101,7 +101,7 @@ func runMain(args []string) int {
 	}
 	q := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
 	_ = os.WriteFile(filepath.Join(env["HOPSESH_CONFIG_DIR"], "config.toml"),
-		[]byte("schema = 3\nrepos_dir = "+q(env["HSMATRIX_BASE"])+"\nlayout = \"flat\"\nupdate_check = \"off\"\n"), 0o644)
+		[]byte("schema = 4\nrepos_dir = "+q(env["HSMATRIX_BASE"])+"\nlayout = \"flat\"\nupdate_check = \"off\"\n"), 0o644)
 
 	r := &runner{hopsesh: *hs, there: remoteSide{dest: *there, helper: *helper}, out: outDir, log: &rowLog{},
 		hosts: map[string]string{"address": "box", "alias": "boxa"}}

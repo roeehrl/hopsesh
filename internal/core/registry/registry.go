@@ -19,14 +19,15 @@ var idSyntax = regexp.MustCompile(`^[a-z][a-z0-9]{1,15}$`)
 
 // Registry is the set of agent modules.
 type Registry struct {
-	mods  []agent.Module
-	byID  map[agent.ID]agent.Module
-	names map[string]agent.ID
+	mods   []agent.Module
+	byID   map[agent.ID]agent.Module
+	names  map[string]agent.ID
+	clouds map[string]agent.ID // cloud name → the module that reaches it
 }
 
 // New checks and registers modules (in display order).
 func New(mods ...agent.Module) (*Registry, error) {
-	r := &Registry{byID: map[agent.ID]agent.Module{}, names: map[string]agent.ID{}}
+	r := &Registry{byID: map[agent.ID]agent.Module{}, names: map[string]agent.ID{}, clouds: map[string]agent.ID{}}
 	for _, m := range mods {
 		s := m.Spec()
 		switch {
@@ -34,8 +35,17 @@ func New(mods ...agent.Module) (*Registry, error) {
 			return nil, fmt.Errorf("agent module id %q is not valid", s.ID)
 		case r.byID[s.ID] != nil:
 			return nil, fmt.Errorf("two agent modules use the id %q", s.ID)
-		case s.Name == "" || len(s.Roots) == 0 || len(s.Binaries) == 0:
-			return nil, fmt.Errorf("agent module %s needs a name, roots and binaries", s.ID)
+		case s.Name == "" || len(s.Binaries) == 0 || len(s.Roots) == 0 && len(s.Clouds) == 0:
+			return nil, fmt.Errorf("agent module %s needs a name, binaries, and roots or clouds", s.ID)
+		}
+		if err := agent.CheckClouds(m); err != nil {
+			return nil, fmt.Errorf("agent module %s: %w", s.ID, err)
+		}
+		for _, c := range s.Clouds {
+			if other, ok := r.clouds[c.Name]; ok {
+				return nil, fmt.Errorf("agent modules %s and %s both declare the cloud %s", other, s.ID, c.Name)
+			}
+			r.clouds[c.Name] = s.ID
 		}
 		if err := checkSVG(s.Icon.SVG); err != nil {
 			return nil, fmt.Errorf("agent module %s: its icon %w", s.ID, err)
@@ -65,6 +75,17 @@ func (r *Registry) Get(id agent.ID) (agent.Module, bool) {
 func (r *Registry) ByName(name string) (agent.ID, bool) {
 	id, ok := r.names[name]
 	return id, ok
+}
+
+// Cloud returns the module that reaches a cloud, and the cloud.
+func (r *Registry) Cloud(name string) (agent.Module, agent.Cloud, bool) {
+	id, ok := r.clouds[name]
+	if !ok {
+		return nil, agent.Cloud{}, false
+	}
+	m := r.byID[id]
+	c, _ := m.Spec().FindCloud(name)
+	return m, c, true
 }
 
 // Specs returns every module's Spec.
