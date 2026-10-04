@@ -8,8 +8,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 - Reading a Windows machine with many sessions could stall for 30 seconds and then fail:
-  the long script hopsesh sends there waited for an end of input that Windows' OpenSSH
-  does not always pass on. It now reads a single line.
+  the long script hopsesh sent there over standard input sometimes never arrived, because
+  PowerShell with redirected input can read it first. Such a script is now uploaded over
+  SFTP, run from the file and removed.
 
 ### Changed
 - The macOS app's self-update opens the new disk image with `diskutil image attach` (on
