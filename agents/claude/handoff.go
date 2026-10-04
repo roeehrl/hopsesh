@@ -3,7 +3,6 @@ package claude
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -50,13 +49,6 @@ const (
 
 // noFollowUp is said where a follow-up would be.
 const noFollowUp = "hopsesh can't send a Claude Code cloud session a message: Claude Code 2.1 has no command that does it outside its own terminal session. Open the session on claude.ai to write to it."
-
-// sessionLink finds a session's link in text output; resumeWith, the id in the teleport
-// command Claude Code suggests.
-var (
-	sessionLink = regexp.MustCompile(`https://claude\.ai/code/((?:session|cse)_[A-Za-z0-9]{6,64})`)
-	resumeWith  = regexp.MustCompile(`--teleport\s+((?:session|cse)_[A-Za-z0-9]{6,64})`)
-)
 
 // SendCloud checks the login, then returns the command that starts the cloud session with
 // the briefing as its first prompt: `claude --cloud <brief>` in r.Dir, whose current
@@ -116,18 +108,19 @@ func readCloudOutput(text string, width int) (sid, refusal string, trust bool) {
 		if strings.Contains(l, trustAsked) {
 			trust = true
 		}
-		if mm := sessionLink.FindAllStringSubmatch(l, -1); len(mm) > 0 {
-			view = mm[len(mm)-1][1]
+		for _, u := range linksIn(l, "claude.ai") {
+			if id := sessionOf(u); id != "" {
+				view = id
+			}
 		}
-		if mm := resumeWith.FindAllStringSubmatch(l, -1); len(mm) > 0 {
-			resume = mm[len(mm)-1][1]
+		if id := teleportID(l); id != "" {
+			resume = id
 		}
 		t := strings.TrimSpace(l)
 		if strings.HasPrefix(t, "Error:") || strings.Contains(t, refusedNoTTY) || strings.Contains(t, refusedPrint) {
 			refusal = t
 		}
 	}
-	view, resume = canonical(view), canonical(resume)
 	switch {
 	case view == "":
 		sid = resume
@@ -139,6 +132,19 @@ func readCloudOutput(text string, width int) (sid, refusal string, trust bool) {
 		sid = view
 	}
 	return sid, refusal, trust
+}
+
+// teleportID is the session in a "claude --teleport <id>" command on the line ("" for
+// none): the word after a --teleport word.
+func teleportID(line string) string {
+	f := strings.Fields(line)
+	id := ""
+	for i := 0; i+1 < len(f); i++ {
+		if f[i] == "--teleport" {
+			id = canonical(strings.TrimRight(f[i+1], ".,;:)]}>\"'"))
+		}
+	}
+	return id
 }
 
 // unwrap joins a line exactly as wide as the terminal with the next one: where a program

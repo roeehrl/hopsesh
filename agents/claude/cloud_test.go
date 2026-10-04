@@ -137,6 +137,8 @@ func TestReadStep(t *testing.T) {
 		"repository":        {raw: "Error: Claude Code can't send this repository to the cloud: it is inside a submodule.\n", code: 1, err: agent.ErrRepoUnsupported},
 		"trust, no":         {raw: "Quick safety check: Is this a project you created or one you trust?\n❯ 1. Yes, I trust this folder\n  2. No, exit\n", code: 1, err: agent.ErrNoSession, words: "asked whether you trust"},
 		"stopped":           {raw: "Quick safety check: Is this a project you created or one you trust?\n", code: 130, err: agent.ErrNoSession, words: "stopped"},
+		"another host":      {raw: "View: https://claude.ai.evil.example/code/" + id + "\n", err: agent.ErrNoSession, words: "without printing a session link"},
+		"a nested link":     {raw: "View: \x1b]8;;https://evil.example/?u=https://claude.ai/code/" + id + "\x1b\\open\x1b]8;;\x1b\\\n", err: agent.ErrNoSession, words: "without printing a session link"},
 		"nothing":           {raw: "", code: 0, err: agent.ErrNoSession, words: "without printing a session link"},
 		"something else":    {raw: "something unexpected\n", code: 3, err: agent.ErrNoSession, words: "exit status 3"},
 	} {
