@@ -31,7 +31,8 @@ func handoffCmd() *cobra.Command {
 		Use:   "handoff [<machine>:][<agent>/]<id-or-title> --to <cloud>",
 		Short: "Hand a session off to an agent's cloud: a briefing and the code, never the conversation",
 		Long: `Starts a session in an agent's cloud (claude-cloud: Claude Code on the web; codex-cloud: a Codex cloud
-task) that continues this one.
+task; copilot-cloud: a GitHub Copilot cloud agent task, through gh; jules, devin, amp: a
+session in Jules, Devin Cloud or an Amp orb, through their own CLIs) that continues this one.
 No cloud takes a conversation, so the cloud agent gets a briefing (about 2,000 tokens, secrets
 masked) as its first prompt, and the code on a branch: the session's own branch when it is
 clean and already on GitHub, otherwise a new hopsesh/handoff/… branch with a snapshot of
@@ -48,7 +49,11 @@ Codex cloud runs each task in an environment you made on the web: name it with -
 id or its name; hopsesh lists the ones your recent tasks used, and remembers the one you
 pick for the repository). A small change on a branch already pushed can go with the task as
 a starting diff (--starting-diff) instead of on a new branch. Only Codex cloud (legacy)
-tasks are reachable: the new Codex Cloud has no command line yet.`,
+tasks are reachable: the new Codex Cloud has no command line yet.
+
+The Copilot cloud agent starts from the handoff branch (gh agent-task create --base) and
+opens its pull request against it. The jules, devin and amp commands can't name the branch
+a session starts from, so the briefing asks the cloud agent to check it out first.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			to, _ := cmd.Flags().GetString("to")

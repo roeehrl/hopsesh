@@ -69,6 +69,10 @@ type EntryDTO struct {
 	ContinueIn []AgentOpt `json:"continueIn"`       // other agents here it can continue in
 	Needs      bool       `json:"needs"`            // the agent waits for the person (an approval)
 	History    []HopDTO   `json:"history"`          // where it has been, oldest first
+	// BringIn is the agent here a cloud-only module's session (Copilot's log, Amp's thread)
+	// is written into by default: the one it was handed off from, else Claude Code;
+	// ContinueIn then lists the others.
+	BringIn *AgentOpt `json:"bringIn,omitempty"`
 	// Location is "machine" or "cloud"; a cloud session's row has Cloud (Machine is the
 	// cloud's name), and a session the vendor mirrors (Remote Control) has Mirror.
 	Location string         `json:"location"`
@@ -227,8 +231,24 @@ func entryDTO(core *app.App, inv *app.Inventory, it app.Item, targets []AgentOpt
 				d.ContinueIn = append(d.ContinueIn, t)
 			}
 		}
+	} else if ok && e.Location.IsCloud() && !agent.Has(src, agent.CapWrite) && writesText(src, e.Location.Name) {
+		def := core.BringTarget(inv, e)
+		for _, t := range targets {
+			if t.ID == def {
+				d.BringIn = &t
+			} else {
+				d.ContinueIn = append(d.ContinueIn, t)
+			}
+		}
 	}
 	return d
+}
+
+// writesText reports whether a cloud's sessions come back with words to write here as a
+// session: its messages as text, or a code cloud's task summary.
+func writesText(m agent.Module, cloud string) bool {
+	cl, ok := m.Spec().FindCloud(cloud)
+	return ok && (cl.Down == agent.FidText || cl.Down == agent.FidNative || cl.Down == agent.FidCode && cl.Summary)
 }
 
 // history tells a session's hops from its lineage, oldest first.

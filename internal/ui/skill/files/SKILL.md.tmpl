@@ -79,10 +79,12 @@ briefing the other agent reads.
 ## Hand a session off to an agent's cloud
 
 No cloud takes a conversation: the cloud agent gets a briefing (about 2,000 tokens, secrets
-masked) as its first prompt and the code on a branch. Two clouds can be reached:
-`claude-cloud` (Claude Code on the web) and `codex-cloud` (a Codex cloud task; only Codex
-cloud (legacy) tasks: the new Codex Cloud has no command line yet). `{{.Bin}} clouds --json`
-lists the clouds and their state.
+masked) as its first prompt and the code on a branch. The clouds: `claude-cloud` (Claude
+Code on the web), `codex-cloud` (a Codex cloud task; only Codex cloud (legacy) tasks: the new
+Codex Cloud has no command line yet), `copilot-cloud` (a GitHub Copilot cloud agent task,
+through `gh`), `jules`, `devin` and `amp` (an Amp orb thread). Jules, Devin and Amp can't be
+told the starting branch, so the briefing asks them to check it out (`handoff.notes` says
+so). `{{.Bin}} clouds --json` lists the clouds and their state.
 
 1. `{{.Bin}} plan <ref> --to <cloud> --json`. Summarise `handoff.conversation` (what is
    lost: `handoff.stays`, `handoff.loss`), the code (`handoff.reuse` means the session's own
@@ -112,7 +114,10 @@ To bring it back later: `{{.Bin}} plan <cloud>:<id> --json`, then (after a yes)
 `{{.Bin}} pull <cloud>:<id> --json --yes` (`--in <agent>` writes it into another agent). A
 Codex cloud task comes back as its code, committed on a `hopsesh/from/codex-cloud/<id>`
 branch in a new worktree, and its title and what came of it as a new local session; its
-messages and steps stay in the cloud (`fetch.loss`). A message to a running Claude Code cloud
+messages and steps stay in the cloud (`fetch.loss`). A Copilot session's log and an Amp
+thread come back as text, written as a new session of the agent they were handed off from
+(else Claude Code; `--in <agent>` if the user names another), with Copilot's pull request
+branch in a new worktree. Jules and Devin bring back their code only: pass `--code-only`. A message to a running Claude Code cloud
 session (`{{.Bin}} followup claude-cloud:<id> "<text>" --yes`) starts a paid turn there: only
 when the user asks for it, with the exact text. Codex cloud takes no follow-ups from hopsesh.
 

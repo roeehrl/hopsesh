@@ -127,7 +127,12 @@ type Cloud struct {
 	// EnvHint says how the user makes an environment, for a cloud with NeedEnvironment
 	// ("open `codex cloud` once to create one").
 	EnvHint string
-	Watch   Watch
+	// BriefBranch: the driver cannot choose the branch a new session starts from (the cloud
+	// clones the repository's default branch, or one hopsesh cannot name), so the core's
+	// briefing asks the cloud agent to check out the handoff branch first, and the plan says
+	// so.
+	BriefBranch bool
+	Watch       Watch
 }
 
 // Watch is what the weekly upstream-drift check watches for a cloud (read by

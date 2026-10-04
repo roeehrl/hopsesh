@@ -66,6 +66,22 @@ func TestBriefCloud(t *testing.T) {
 	}
 }
 
+// A cloud whose driver cannot name the starting branch gets the checkout as the first
+// thing to do, with the repository; without a branch there is nothing to ask for.
+func TestBriefCloudCheckout(t *testing.T) {
+	bf := Briefing{Branch: "hopsesh/handoff/20261004-cd282b16", Head: "4c1e9a2", Checkout: true, Repo: "github.com/example/demo"}
+	b := Brief(session(), BriefRequest{Profile: BriefCloud, From: "Claude Code", To: "Jules", Briefing: bf})
+	want := "Code: branch hopsesh/handoff/20261004-cd282b16 = 4c1e9a2.\nYou may have started on another branch: before anything else, check this one out in a clone of github.com/example/demo: " +
+		"`git fetch origin hopsesh/handoff/20261004-cd282b16 && git checkout hopsesh/handoff/20261004-cd282b16`.\n"
+	if !strings.Contains(b.Text, want) {
+		t.Errorf("the briefing lacks the checkout:\n%s", b.Text)
+	}
+	bf.Branch = ""
+	if b := Brief(session(), BriefRequest{Profile: BriefCloud, From: "Claude Code", To: "Jules", Briefing: bf}); strings.Contains(b.Text, "git checkout") {
+		t.Errorf("no branch, no checkout:\n%s", b.Text)
+	}
+}
+
 // A long session, note and instructions are cut, oldest and least important first, to
 // the budget; the frame always stays.
 func TestBriefCloudBudget(t *testing.T) {

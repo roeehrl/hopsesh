@@ -16,8 +16,9 @@ const cloudName = "jules"
 
 // cloud declares Jules as data. Down is the code only: the CLI prints a session's patch
 // (jules remote pull); its plan, messages and command output are in the Jules API, which
-// needs an API key, so they stay in the cloud. Up (jules remote new) comes with the
-// handoff branch.
+// needs an API key, so they stay in the cloud. Up is a briefing through jules remote new,
+// which cannot name a starting branch: the briefing asks Jules to check out the handoff
+// branch (BriefBranch).
 func cloud() agent.Cloud {
 	return agent.Cloud{
 		Name:   cloudName,
@@ -33,13 +34,18 @@ func cloud() agent.Cloud {
 		CodeUp:   []agent.CodeWay{agent.ViaBranch},
 		CodeDown: []agent.CodeWay{agent.ViaDiff},
 		Needs:    []agent.Need{agent.NeedGitHub, agent.NeedPushedBranch},
+		Limits: []string{
+			"The jules CLI can't choose the branch a session starts from: the briefing asks Jules to check out the handoff branch first",
+			"Jules's plan and messages stay in Jules: the jules CLI prints only a session's patch",
+		},
+		BriefBranch: true,
 		Watch: agent.Watch{
-			Surface: "Jules sessions through `jules remote list --session` (a table: ID, description, repo, last active, status), `jules remote list --repo` and `jules remote pull --session <id>` (the session's patch), and the v1alpha REST API (its discovery document) for what the CLI leaves out",
+			Surface: "Jules sessions through `jules remote new --repo <owner/repo> --session <prompt>` (its output, unverified), `jules remote list --session` (a table: ID, description, repo, last active, status), `jules remote list --repo` and `jules remote pull --session <id>` (the session's patch), and the v1alpha REST API (its discovery document) for what the CLI leaves out",
 			Docs:    []string{julesDiscovery, "https://jules.google/docs/cli/reference.md"},
 			Feeds:   []agent.Feed{{Kind: agent.FeedMarkdown, URL: "https://jules.google/docs/changelog.md"}},
 			Grep:    `session|activit|remote|pull|teleport|api|deprecat`,
-			Help:    [][]string{{"jules", "--help"}, {"jules", "remote", "--help"}},
-			Relies:  []string{"remote", "list", "pull", "--session", "--repo"},
+			Help:    [][]string{{"jules", "--help"}, {"jules", "remote", "--help"}, {"jules", "remote", "new", "--help"}},
+			Relies:  []string{"remote", "new", "list", "pull", "--session", "--repo"},
 		},
 	}
 }
@@ -68,6 +74,11 @@ func run(ctx context.Context, h agent.Host, timeout time.Duration, args ...strin
 	if err != nil {
 		return nil, err
 	}
+	return mapped(r, strings.Join(args[:min(2, len(args))], " "))
+}
+
+// mapped is a jules run's output, or its refusal as one of the SDK's errors.
+func mapped(r agent.Result, what string) ([]byte, error) {
 	if r.Code != 0 {
 		text := string(r.Stderr) + "\n" + string(r.Stdout)
 		msg := firstLine(text)
@@ -79,7 +90,7 @@ func run(ctx context.Context, h agent.Host, timeout time.Duration, args ...strin
 		case notFoundWords.MatchString(text):
 			return nil, fmt.Errorf("%w: %s", agent.ErrNotFound, msg)
 		}
-		return nil, fmt.Errorf("jules %s: exit %d: %s", strings.Join(args[:min(2, len(args))], " "), r.Code, msg)
+		return nil, fmt.Errorf("jules %s: exit %d: %s", what, r.Code, msg)
 	}
 	return r.Stdout, nil
 }
@@ -349,7 +360,7 @@ func (m *Module) TestCloud(ctx context.Context, h agent.Host, _ agent.Install, _
 		return t, err
 	}
 	help := string(r.Stdout) + string(r.Stderr)
-	for _, w := range []string{"list", "pull", "--session"} {
+	for _, w := range []string{"new", "list", "pull", "--session"} {
 		if strings.Contains(help, w) {
 			t.Checks = append(t.Checks, agent.CloudCheck{OK: true, Text: "jules remote " + w + " found"})
 		} else {

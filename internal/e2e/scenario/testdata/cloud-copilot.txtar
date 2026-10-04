@@ -1,0 +1,29 @@
+# A session here goes to the Copilot cloud agent and comes back: gh agent-task create
+# starts the task from the handoff branch with the briefing on standard input; the pull
+# request's branch comes back in a new worktree, and the session log is written as a Claude
+# Code session (the agent it was handed off from); both undone.
+[windows] skip 'the stand-in origin needs a POSIX shell'
+cloud-world demo
+claude-session 11111111-2222-4333-8444-555555555555 demo 'Fix the parser' 'fix the quoting in'
+exec git -C demo commit -q --allow-empty -m 'not pushed yet'
+
+exec hopsesh clouds allow copilot-cloud
+stdout 'copilot-cloud: allowed'
+exec hopsesh clouds test copilot-cloud
+stdout 'example-user'
+
+exec hopsesh handoff claude/11111111 --to copilot-cloud --yes
+stdout 'Handed off to Copilot cloud agent'
+stdout 'https://github.com/example/demo/pull/\d+/agent-sessions/'
+grep 'gh agent-task create -F - --base hopsesh/handoff/\d{8}-11111111 -R example/demo' $WORK/agents.log
+
+cloud-work copilot-cloud
+exec hopsesh pull copilot-cloud:$TASKID --yes
+stdout 'writes    a new Claude Code session \(2 message\(s\)\) in the worktree'
+stdout 'is here in Claude Code: 2 messages, as text, with its code on hopsesh/from/copilot-cloud/'
+stdout 'claude --resume'
+exec git -C demo branch --show-current
+stdout '^main$'
+
+exec hopsesh undo --yes
+stdout 'Undid'

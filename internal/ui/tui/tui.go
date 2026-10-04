@@ -457,6 +457,22 @@ func (m *model) nextAgent() agent.ID {
 		cands = append(cands, a.Agent)
 	}
 	cur := m.target
+	if om, ok := m.deps.App.Module(own); ok && !agent.Has(om, agent.CapWrite) {
+		// A cloud-only agent keeps nothing here: its text goes into one of the others, the
+		// plan's (its default) first.
+		if cur == "" && m.plan != nil && m.plan.Fetch != nil {
+			cur = m.plan.Fetch.ContinueIn
+		}
+		for i, id := range cands {
+			if id == cur {
+				return cands[(i+1)%len(cands)]
+			}
+		}
+		if len(cands) > 0 {
+			return cands[0]
+		}
+		return ""
+	}
 	if cur == "" {
 		cur = own
 	}

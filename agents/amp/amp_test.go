@@ -110,3 +110,51 @@ func TestMarkdownSegment(t *testing.T) {
 		}
 	}
 }
+
+// SendCloud starts an orb thread with `amp -ox`, on the repository's project and with the
+// session's title, and reads the thread's link (or, failing that, finds it in the listing);
+// refusals map onto the SDK's errors.
+func TestSendCloud(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	m := New()
+	var argv []string
+	quiet := false
+	fake := agenttest.NewFakeHost("/home/u")
+	fake.AddBinary("amp", "0.0.1791107882-gfe04cc")
+	progs := fakecloud.Programs(dir, nil)
+	fake.Programs["amp"] = func(a []string, o agent.RunOptions) agent.Result {
+		r := progs["amp"](a, o)
+		if len(a) > 1 && a[1] == "-ox" {
+			argv = a
+			if quiet {
+				r.Stdout = []byte("Thread started.\n")
+			}
+		}
+		return r
+	}
+	in, _ := m.Detect(ctx, fake)
+	h := agent.Confine(fake, m.Spec(), in)
+	r := agent.SendRequest{Cloud: cloudName, Dir: "/home/u/git/demo", Repo: "github.com/example/demo", Branch: "hopsesh/handoff/20261004-x",
+		Brief: agent.NotePrefix + "This task continues a session.", Title: "Speed up the importer"}
+	cs, err := m.SendCloud(ctx, h, in, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(argv) != 7 || argv[2] != r.Brief || argv[3] != "--project" || argv[4] != "example/demo" || argv[5] != "--title" || argv[6] != r.Title {
+		t.Fatalf("amp ran as %q", argv)
+	}
+	if !threadID.MatchString(string(cs.Key.Session)) || cs.URL != m.CloudURL(cloudName, cs.Key.Session) || cs.Repo != "github.com/example/demo" || cs.State != agent.CloudRunning {
+		t.Errorf("session: %+v", cs)
+	}
+	quiet = true
+	if cs2, err := m.SendCloud(ctx, h, in, r); err != nil || cs2.Key.Session == "" || cs2.Key.Session == cs.Key.Session {
+		t.Errorf("found by the listing: %+v %v", cs2, err)
+	}
+	for fail, want := range map[string]error{"signed-out": agent.ErrSignedOut, "not-eligible": agent.ErrNotEligible, "repo-mismatch": agent.ErrRepoUnsupported} {
+		h, in := host(t, dir, fail)
+		if _, err := m.SendCloud(ctx, h, in, r); !errors.Is(err, want) {
+			t.Errorf("%s: %v", fail, err)
+		}
+	}
+}

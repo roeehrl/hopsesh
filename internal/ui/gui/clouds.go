@@ -45,7 +45,7 @@ type CloudDTO struct {
 	// Fidelity is what comes back of a conversation (native, code, text).
 	Fidelity string `json:"fidelity"`
 	// CodeOnly: hopsesh brings only the code of this cloud's sessions (the cloud gives no
-	// words back to write here as a session, or, for a cloud-only module, not yet).
+	// words back to write here as a session).
 	CodeOnly bool `json:"codeOnly"`
 	// Test is the last read-only probe of it, when there was one.
 	Test *CloudTestDTO `json:"test,omitempty"`
@@ -120,9 +120,9 @@ func cloudDTO(core *app.App, inv *app.Inventory, c *app.Cloud) CloudDTO {
 		if cl, ok := m.Spec().FindCloud(c.Name); ok {
 			d.TestedOn, d.VendorPrefix, d.Fidelity = strings.Join(cl.Tested, ", "), cl.VendorPrefix, string(cl.Down)
 			// Code only: the cloud brings no words back (a text cloud's messages, or a code
-			// cloud's task summary, are written here as a session).
-			_, writes := m.(agent.Writer) // a cloud-only module's text is not written here yet
-			d.CodeOnly = !writes || cl.Down == agent.FidNone || cl.Down == agent.FidCode && !cl.Summary
+			// cloud's task summary, are written here as a session: a cloud-only module's into
+			// the local agent the user picks).
+			d.CodeOnly = !writesText(m, c.Name)
 			for _, w := range cl.CodeUp {
 				d.CodeUp = append(d.CodeUp, string(w))
 			}

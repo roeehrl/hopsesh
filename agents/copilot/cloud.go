@@ -21,8 +21,9 @@ import (
 const cloudName = "copilot-cloud"
 
 // cloud declares the Copilot cloud agent as data. Down is the session log as text (gh
-// agent-task view --log; its layout is unverified) and the pull request's branch; up (a
-// briefing through gh agent-task create) comes with the handoff branch.
+// agent-task view --log; its layout is unverified), which the core writes into a local agent,
+// and the pull request's branch; up is a briefing through gh agent-task create, starting
+// from the handoff branch (--base).
 func cloud() agent.Cloud {
 	return agent.Cloud{
 		Name:   cloudName,
@@ -39,7 +40,7 @@ func cloud() agent.Cloud {
 		Needs:        []agent.Need{agent.NeedGitHub, agent.NeedPushedBranch},
 		VendorPrefix: "copilot/",
 		Watch: agent.Watch{
-			Surface: "agent tasks through `gh agent-task list --json`, `gh agent-task view --json` and `view --log`, the pull requests on copilot/… branches through `gh pr list|view --json`, `gh auth status --json hosts`, and the REST agent-tasks API (its X-GitHub-Api-Version date)",
+			Surface: "agent tasks through `gh agent-task create -F - --base <branch> -R <repo>` (and the agent-session link it prints), `gh agent-task list --json`, `gh agent-task view --json` and `view --log`, the pull requests on copilot/… branches through `gh pr list|view --json`, `gh auth status --json hosts`, and the REST agent-tasks API (its X-GitHub-Api-Version date)",
 			Docs: githubDocs("rest/agent-tasks/agent-tasks", "copilot/how-tos/copilot-cli/use-copilot-cli/delegate-tasks-to-cca",
 				"copilot/concepts/agents/coding-agent/about-coding-agent"),
 			Feeds: []agent.Feed{
@@ -49,8 +50,8 @@ func cloud() agent.Cloud {
 			Grep: `copilot|agent.task|agent-task|coding agent|cloud agent|X-GitHub-Api-Version`,
 			Help: [][]string{{"gh", "agent-task", "--help"}, {"gh", "agent-task", "create", "--help"}, {"gh", "agent-task", "list", "--help"},
 				{"gh", "agent-task", "view", "--help"}},
-			Relies: []string{"create", "list", "view", "--json", "--log", "--limit", "id", "name", "state", "repository", "pullRequestNumber",
-				"pullRequestUrl", "updatedAt"},
+			Relies: []string{"create", "list", "view", "--json", "--log", "--limit", "--base", "--from-file", "--repo", "id", "name", "state", "repository",
+				"pullRequestNumber", "pullRequestUrl", "createdAt", "updatedAt"},
 		},
 	}
 }
@@ -501,7 +502,8 @@ func (m *Module) TestCloud(ctx context.Context, h agent.Host, _ agent.Install, _
 	}
 	t.Checks = append(t.Checks, agent.CloudCheck{OK: true, Text: "the Copilot cloud agent answers for this account"})
 	for _, c := range []struct{ argv, want []string }{
-		{[]string{"agent-task", "--help"}, []string{"list", "view"}},
+		{[]string{"agent-task", "--help"}, []string{"create", "list", "view"}},
+		{[]string{"agent-task", "create", "--help"}, []string{"--base", "--from-file", "--repo"}},
 		{[]string{"agent-task", "view", "--help"}, []string{"--log", "--json"}},
 	} {
 		r, err := h.Exec().Run(ctx, append([]string{"gh"}, c.argv...), agent.RunOptions{Timeout: 20 * time.Second})

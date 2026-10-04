@@ -557,6 +557,11 @@ func planBrief(ctx context.Context, p *Plan, in HandoffInput, opt Options, check
 	if hp.Code == agent.ViaBundle {
 		bf.Branch = "" // uploaded: there is no such branch on the remote
 	}
+	if in.Cloud.BriefBranch && bf.Branch != "" {
+		// The driver cannot choose the branch the session starts from: the briefing asks for it.
+		bf.Checkout, bf.Repo = true, hp.Repo
+		hp.Notes = append(hp.Notes, fmt.Sprintf("%s can't be told which branch to start from, so the briefing asks it to check out %s first", in.Cloud.Title, bf.Branch))
+	}
 	r := convert.Brief(hp.nodes, convert.BriefRequest{Profile: convert.BriefCloud, From: spec.Name, To: target.Name, Briefing: bf})
 	hp.Brief, hp.Tokens, hp.Masked, hp.Shortened = r.Text, r.Tokens, r.Masked, r.Shortened
 	// The cloud has its own checkout: paths in the checkout here become relative to it, and

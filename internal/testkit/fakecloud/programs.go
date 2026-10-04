@@ -29,7 +29,7 @@ func Programs(dir string, vars map[string]string) map[string]func(argv []string,
 				}
 			}
 			var out, errOut bytes.Buffer
-			p := Proc{Args: argv[1:], Vars: v, Dir: o.Dir, Stdout: &out, Stderr: &errOut}
+			p := Proc{Args: argv[1:], Vars: v, Dir: o.Dir, Stdin: bytes.NewReader(o.Stdin), Stdout: &out, Stderr: &errOut}
 			code := main(p)
 			return agent.Result{Stdout: out.Bytes(), Stderr: errOut.Bytes(), Code: code}
 		}

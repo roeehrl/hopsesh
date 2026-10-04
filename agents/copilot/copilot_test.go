@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -27,12 +28,111 @@ func seeded(t *testing.T, dir string) fakecloud.Session {
 	return s
 }
 
-// The Copilot cloud agent passes the cloud conformance kit against the stand-in gh.
+// The Copilot cloud agent passes the cloud conformance kit against the stand-in gh: a task
+// started from a checkout's handoff branch, worked on, listed and fetched.
 func TestCloudConformance(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in origin's hook needs a POSIX shell")
+	}
 	dir := t.TempDir()
+	repo := fakecloud.DemoCheckout(t)
 	agenttest.RunCloudWith(t, New(), fakecloud.Programs(dir, nil), agenttest.CloudOptions{
-		Seed: func(string) agent.SessionID { return agent.SessionID(seeded(t, dir).ID) },
+		Request: func(c agent.Cloud) agent.SendRequest { return sendRequest(c.Name, repo) },
+		Work: func(_ string, id agent.SessionID) {
+			if err := fakecloud.Work(fakecloud.Proc{Vars: map[string]string{"FAKE_CLOUD_DIR": dir}}, string(id), false); err != nil {
+				t.Fatal(err)
+			}
+		},
 	})
+}
+
+// sendRequest is a hand-off from a checkout as the core prepares it.
+func sendRequest(cloud, repo string) agent.SendRequest {
+	return agent.SendRequest{Cloud: cloud, Dir: repo, Repo: "github.com/example/demo", Branch: "hopsesh/handoff/20261004-conform",
+		Base: "0123456789abcdef0123456789abcdef01234567", Brief: agent.NotePrefix + "This task continues a session (conformance).\nOpen: finish it.", Title: "Finish it"}
+}
+
+// SendCloud runs gh agent-task create with the briefing on standard input, the handoff
+// branch as the base and the repository named; it reads the agent session's link gh prints.
+// When gh prints only that the job is queued, the new task is the one the listing did not
+// have before. Refusals map onto the SDK's errors.
+func TestSendCloud(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in origin's hook needs a POSIX shell")
+	}
+	listRetry = time.Millisecond
+	dir := t.TempDir()
+	repo := fakecloud.DemoCheckout(t)
+	seeded(t, dir)
+	ctx := context.Background()
+	m := New()
+	var calls []string
+	var stdin string
+	fake := agenttest.NewFakeHost("/home/u")
+	fake.AddBinary("gh", "gh version 2.97.0 (2026-07-31)")
+	progs := fakecloud.Programs(dir, nil)
+	fake.Programs["gh"] = func(argv []string, o agent.RunOptions) agent.Result {
+		calls = append(calls, strings.Join(argv[1:], " "))
+		if len(argv) > 2 && argv[2] == "create" {
+			stdin = string(o.Stdin)
+		}
+		return progs["gh"](argv, o)
+	}
+	in, _ := m.Detect(ctx, fake)
+	h := agent.Confine(fake, m.Spec(), in)
+	r := sendRequest(cloudName, repo)
+	cs, err := m.SendCloud(ctx, h, in, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "agent-task create -F - --base hopsesh/handoff/20261004-conform -R example/demo"; !contains(calls, want) || stdin != r.Brief {
+		t.Fatalf("gh ran as %q with %q", calls, stdin)
+	}
+	st, err := fakecloud.Open(dir).Get(string(cs.Key.Session))
+	if err != nil || st.Branch != r.Branch || st.Messages[0].Text != r.Brief {
+		t.Fatalf("the task: %+v %v", st, err)
+	}
+	if cs.Key.Agent != id || cs.Cloud != cloudName || cs.State != agent.CloudRunning || cs.Repo != "github.com/example/demo" || cs.PR == "" ||
+		cs.URL != "https://github.com/example/demo/pull/"+strings.TrimPrefix(cs.PR, "#")+"/agent-sessions/"+st.ID {
+		t.Errorf("session: %+v", cs)
+	}
+
+	// Queued: no link, so the listing finds the new task.
+	hq, inq := host(t, dir, "queued")
+	cs, err = m.SendCloud(ctx, hq, inq, r)
+	if err != nil || cs.Key.Session == "" || cs.PR != "" {
+		t.Fatalf("queued: %+v %v", cs, err)
+	}
+	if st, err := fakecloud.Open(dir).Get(string(cs.Key.Session)); err != nil || st.PR != 0 {
+		t.Errorf("queued task: %+v %v", st, err)
+	}
+
+	for fail, want := range map[string]error{"signed-out": agent.ErrSignedOut, "not-eligible": agent.ErrNotEligible, "repo-mismatch": agent.ErrRepoUnsupported} {
+		h, in := host(t, dir, fail)
+		if _, err := m.SendCloud(ctx, h, in, r); !errors.Is(err, want) {
+			t.Errorf("%s: %v", fail, err)
+		}
+	}
+	bad := r
+	bad.Branch = "nope/not-pushed"
+	if _, err := m.SendCloud(ctx, h, in, bad); !errors.Is(err, agent.ErrRepoUnsupported) {
+		t.Errorf("a base branch GitHub does not have: %v", err)
+	}
+	for _, x := range []agent.SendRequest{{Repo: "gitlab.com/x/y", Branch: "b", Brief: r.Brief}, {Repo: r.Repo, Brief: r.Brief}, {Repo: r.Repo, Branch: "b", Brief: "no prefix"},
+		{Repo: r.Repo, Branch: "b", Brief: r.Brief, Code: agent.ViaBundle}} {
+		if _, err := m.SendCloud(ctx, h, in, x); err == nil {
+			t.Errorf("sent %+v", x)
+		}
+	}
+}
+
+func contains(xs []string, x string) bool {
+	for _, y := range xs {
+		if y == x {
+			return true
+		}
+	}
+	return false
 }
 
 func host(t *testing.T, dir string, fail string) (agent.Host, agent.Install) {

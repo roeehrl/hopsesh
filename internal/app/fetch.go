@@ -13,6 +13,7 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/core/audit"
 	"github.com/roeehrl/hopsesh/internal/core/host"
+	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/repos"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -153,6 +154,10 @@ func (a *App) planFetch(ctx context.Context, inv *Inventory, e Entry, target age
 	}
 	set := a.Cfg.CloudSettings(cl.Name)
 	opt.RenameVendor = *set.RenameVendorBranches
+	hand := move.FindHandoff(a.StateDir, cl.Name, s.Key.Session)
+	if hand != nil && s.Key.Session != "" && s.Repo == "" {
+		s.Repo = hand.Repo // a listing that names no repository (Amp's threads)
+	}
 	checkout := opt.TargetDir
 	if checkout == "" {
 		checkout = e.Checkout
@@ -173,6 +178,10 @@ func (a *App) planFetch(ctx context.Context, inv *Inventory, e Entry, target age
 			fin.Account = &acct
 		}
 	}
+	if _, own := mod.(agent.Writer); !own && target == "" && !opt.CodeOnly {
+		// A cloud-only module keeps no sessions here: its text goes into a local agent.
+		target = a.BringTarget(inv, e)
+	}
 	if target != "" && target != e.Agent {
 		tm, ok := a.Module(target)
 		if !ok || !agent.Has(tm, agent.CapWrite) {
@@ -184,11 +193,8 @@ func (a *App) planFetch(ctx context.Context, inv *Inventory, e Entry, target age
 		}
 		fin.Continue, fin.ContinueInstall = tm, tin
 	}
-	if h := move.FindHandoff(a.StateDir, cl.Name, s.Key.Session); h != nil && s.Key.Session != "" {
-		fin.Prompt = h.Brief
-		if fin.Session.Repo == "" {
-			fin.Session.Repo = h.Repo
-		}
+	if hand != nil && s.Key.Session != "" {
+		fin.Prompt = hand.Brief
 	}
 	if e.Original != "" {
 		for _, x := range inv.Entries {
@@ -210,6 +216,45 @@ func (a *App) planFetch(ctx context.Context, inv *Inventory, e Entry, target age
 		p.Blockers = append([]string{fmt.Sprintf("hopsesh leaves %s alone until you allow it (hopsesh clouds allow %s)", cl.Title, cl.Name)}, p.Blockers...)
 	}
 	return p, move.Input{}, err
+}
+
+// BringTarget is the local agent that gets a cloud-only module's session (Copilot's log,
+// Amp's thread) when the user names none: the agent it was handed off from, by its lineage,
+// else Claude Code, else the first agent here that takes sessions; "" when none here can.
+func (a *App) BringTarget(inv *Inventory, e Entry) agent.ID {
+	here := inv.Local()
+	if here == nil {
+		return ""
+	}
+	takes := func(id agent.ID) bool {
+		m, ok := a.Module(id)
+		if !ok || !agent.Has(m, agent.CapWrite) {
+			return false
+		}
+		_, ok = here.Install(id)
+		return ok
+	}
+	if l := e.Lineage; l != nil {
+		for _, h := range l.Hops {
+			if h.Kind != lineage.HopHandoff || h.From < 0 || h.From >= len(l.Replicas) || h.To < 0 || h.To >= len(l.Replicas) {
+				continue
+			}
+			if to := l.Replicas[h.To]; to.Location == e.Location.Name && to.Key.Session == e.Session.Key.Session {
+				if from := l.Replicas[h.From].Key.Agent; takes(from) {
+					return from
+				}
+			}
+		}
+	}
+	if takes("claude") {
+		return "claude"
+	}
+	for _, st := range here.Agents {
+		if takes(st.Agent) {
+			return st.Agent
+		}
+	}
+	return ""
 }
 
 // adoptWaiting adopts what drivers wrote for fetches on this machine since: the fetches it

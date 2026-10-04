@@ -25,6 +25,10 @@ func TestMain(m *testing.M) {
 		"hopsesh": func() { os.Exit(hopsesh()) },
 		"claude":  func() { os.Exit(fakeagent.Claude()) },
 		"codex":   func() { os.Exit(fakeagent.Codex()) },
+		"gh": func() {
+			code, _ := fakeagent.Vendor("gh")
+			os.Exit(code)
+		},
 	})
 }
 

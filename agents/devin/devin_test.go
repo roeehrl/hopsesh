@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/roeehrl/hopsesh/internal/testkit/fakecloud"
@@ -24,12 +26,97 @@ func seeded(t *testing.T, dir string, pr bool) fakecloud.Session {
 	return s
 }
 
-// Devin passes the cloud conformance kit against the stand-in devin.
+// Devin passes the cloud conformance kit against the stand-in devin: a session started from
+// a checkout with `devin --cloud -p`, worked on (a pull request), listed and fetched.
 func TestCloudConformance(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in origin's hook needs a POSIX shell")
+	}
 	dir := t.TempDir()
+	repo := fakecloud.DemoCheckout(t)
 	agenttest.RunCloudWith(t, New(), fakecloud.Programs(dir, nil), agenttest.CloudOptions{
-		Seed: func(string) agent.SessionID { return agent.SessionID(seeded(t, dir, true).ID) },
+		Request: func(agent.Cloud) agent.SendRequest { return sendRequest(repo) },
+		Work: func(_ string, id agent.SessionID) {
+			if err := fakecloud.Work(fakecloud.Proc{Vars: map[string]string{"FAKE_CLOUD_DIR": dir}}, string(id), false); err != nil {
+				t.Fatal(err)
+			}
+		},
 	})
+}
+
+func sendRequest(repo string) agent.SendRequest {
+	b := "hopsesh/handoff/20261004-conform"
+	return agent.SendRequest{Cloud: cloudName, Dir: repo, Repo: "github.com/example/demo", Branch: b, Base: "0123456789abcdef0123456789abcdef01234567",
+		Brief: agent.NotePrefix + "This task continues a session (conformance).\nYou may have started on another branch: before anything else, check this one out in a clone of github.com/example/demo: `git fetch origin " + b + " && git checkout " + b + "`.\n",
+		Title: "conformance"}
+}
+
+// SendCloud runs `devin --cloud -p` in the handoff worktree without asking about workspace
+// trust, and finds the new session in the listing (the reply names none); a session link
+// in the reply is read when there is one; a reply it stopped waiting for still finds the
+// session; refusals map onto the SDK's errors.
+func TestSendCloud(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in origin's hook needs a POSIX shell")
+	}
+	dir := t.TempDir()
+	repo := fakecloud.DemoCheckout(t)
+	ctx := context.Background()
+	m := New()
+	var argv []string
+	var dirs []string
+	reply := ""
+	code := 0
+	fake := agenttest.NewFakeHost("/home/u")
+	fake.AddBinary("devin", "devin 2026.9.24")
+	progs := fakecloud.Programs(dir, nil)
+	fake.Programs["devin"] = func(a []string, o agent.RunOptions) agent.Result {
+		r := progs["devin"](a, o)
+		dirs = append(dirs, o.Dir)
+		if len(a) > 1 && a[1] == "--cloud" {
+			argv = a
+			if reply != "" {
+				r.Stdout = []byte(reply)
+			}
+			if code != 0 {
+				r.Code = code
+			}
+		}
+		return r
+	}
+	in, _ := m.Detect(ctx, fake)
+	h := agent.Confine(fake, m.Spec(), in)
+	r := sendRequest(repo)
+	cs, err := m.SendCloud(ctx, h, in, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(argv[1:6], " ") != "--cloud --respect-workspace-trust false -p --" || argv[6] != r.Brief {
+		t.Fatalf("devin ran as %q", argv)
+	}
+	for _, d := range dirs {
+		if d != repo {
+			t.Errorf("devin ran in %q, not the handoff worktree", d)
+		}
+	}
+	st, err := fakecloud.Open(dir).Get(string(cs.Key.Session))
+	if err != nil || st.Branch != r.Branch || cs.URL != m.CloudURL(cloudName, cs.Key.Session) || cs.State != agent.CloudRunning || cs.Repo != "github.com/example/demo" {
+		t.Fatalf("session %+v, in the cloud %+v %v", cs, st, err)
+	}
+	reply = "Started: https://app.devin.ai/sessions/0123456789abcdef0123456789abcdef\n"
+	if cs, err := m.SendCloud(ctx, h, in, r); err != nil || cs.Key.Session != "devin-0123456789abcdef0123456789abcdef" {
+		t.Errorf("a link in the reply: %+v %v", cs, err)
+	}
+	reply, code = "", -1 // hopsesh stopped waiting for the reply
+	if cs, err := m.SendCloud(ctx, h, in, r); err != nil || !strings.HasPrefix(string(cs.Key.Session), "devin-") {
+		t.Errorf("a reply not waited for: %+v %v", cs, err)
+	}
+	for fail, want := range map[string]error{"signed-out": agent.ErrSignedOut, "not-eligible": agent.ErrNotEligible, "repo-mismatch": agent.ErrRepoUnsupported} {
+		h, in := host(t, dir, fail)
+		if _, err := m.SendCloud(ctx, h, in, r); !errors.Is(err, want) {
+			t.Errorf("%s: %v", fail, err)
+		}
+	}
 }
 
 func host(t *testing.T, dir, fail string) (agent.Host, agent.Install) {

@@ -18,7 +18,10 @@ const cloudName = "devin"
 
 // cloud declares Devin's cloud sessions as data. Down is the code only: the session's pull
 // request branch, which the core fetches into a worktree. Devin's messages are in its API
-// (which needs a key) and in the CLI's interactive sessions, so they stay in the cloud.
+// (which needs a key) and in the CLI's interactive sessions, so they stay in the cloud. Up
+// is a briefing through `devin --cloud -p`, the CLI's documented non-interactive start,
+// from a worktree on the handoff branch; it chooses no repository or branch itself, so the
+// briefing names them (BriefBranch).
 func cloud() agent.Cloud {
 	return agent.Cloud{
 		Name:   cloudName,
@@ -35,13 +38,18 @@ func cloud() agent.Cloud {
 		Needs:    []agent.Need{agent.NeedGitHub, agent.NeedPushedBranch},
 		// Unverified: Devin names its branches devin/<timestamp>-<topic>.
 		VendorPrefix: "devin/",
+		Limits: []string{
+			"`devin --cloud -p` can't choose a repository or branch (the Devin CLI does that only interactively, with /repo): hopsesh starts it in a worktree on the handoff branch, and the briefing names both",
+			"Devin's messages stay in Devin: the Devin CLI shows them only in its interactive session",
+		},
+		BriefBranch: true,
 		Watch: agent.Watch{
-			Surface: "Devin cloud sessions through `devin list --format json` (that it lists cloud sessions, and its fields, are unverified) and `devin auth status`, the CLI's cloud and handoff commands (`devin --cloud`, `/pickup`, `/handoff`), and the v3 REST API (its OpenAPI document) for the messages the CLI does not print",
+			Surface: "Devin cloud sessions started with `devin --cloud --respect-workspace-trust false -p -- <prompt>` (what it prints, and which repository it works on, are unverified), listed through `devin list --format json` (that it lists cloud sessions, and its fields, are unverified) and `devin auth status`, the CLI's cloud and handoff commands (`devin --cloud`, `/pickup`, `/handoff`), and the v3 REST API (its OpenAPI document) for the messages the CLI does not print",
 			// The Devin CLI installs from a download script, not a package, so its help is not run.
 			Docs: []string{devinOpenAPI, "https://docs.devin.ai/llms.txt", "https://docs.devin.ai/cli/handoff.md", "https://docs.devin.ai/cli/cloud.md",
 				"https://docs.devin.ai/cli/reference/commands.md"},
 			Feeds: []agent.Feed{{Kind: agent.FeedMarkdown, URL: "https://docs.devin.ai/cli/changelog/stable.md"}},
-			Grep:  `session|handoff|pickup|cloud|--cloud|list|--format|auth status|teleport|pull|api|deprecat`,
+			Grep:  `session|handoff|pickup|cloud|--cloud|--print|--prompt-file|--respect-workspace-trust|/repo|list|--format|auth status|teleport|pull|api|deprecat`,
 		},
 	}
 }
@@ -65,7 +73,12 @@ var (
 // run runs devin and maps a refusal onto the SDK's errors. The CLI holds the login;
 // hopsesh never reads it.
 func run(ctx context.Context, h agent.Host, args ...string) ([]byte, error) {
-	r, err := h.Exec().Run(ctx, append([]string{"devin"}, args...), agent.RunOptions{Timeout: 30 * time.Second, Stdin: []byte{}})
+	return runIn(ctx, h, "", args...)
+}
+
+// runIn is run in a folder (devin list lists the sessions of the current directory).
+func runIn(ctx context.Context, h agent.Host, dir string, args ...string) ([]byte, error) {
+	r, err := h.Exec().Run(ctx, append([]string{"devin"}, args...), agent.RunOptions{Dir: dir, Timeout: 30 * time.Second, Stdin: []byte{}})
 	if err != nil {
 		return nil, err
 	}
@@ -269,7 +282,12 @@ func stamp(raw json.RawMessage) time.Time {
 // list reads `devin list --format json`: an array of sessions, or an object holding one
 // under "sessions" or "data" (unverified).
 func list(ctx context.Context, h agent.Host) ([]record, []agent.SessionError, error) {
-	out, err := run(ctx, h, "list", "--format", "json")
+	return listIn(ctx, h, "")
+}
+
+// listIn is list in a folder.
+func listIn(ctx context.Context, h agent.Host, dir string) ([]record, []agent.SessionError, error) {
+	out, err := runIn(ctx, h, dir, "list", "--format", "json")
 	if err != nil {
 		return nil, nil, err
 	}

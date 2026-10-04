@@ -75,7 +75,7 @@ func Cloud() int { return fakecloud.Main(proc()) }
 // proc is this run, for the stand-in clouds.
 func proc() fakecloud.Proc {
 	dir, _ := os.Getwd()
-	return fakecloud.Proc{Args: os.Args[1:], Dir: dir, Stdout: os.Stdout, Stderr: os.Stderr}
+	return fakecloud.Proc{Args: os.Args[1:], Dir: dir, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}
 }
 
 // appServer answers JSON-RPC lines on stdin until it ends. $FAKE_CODEX_EMAIL is the

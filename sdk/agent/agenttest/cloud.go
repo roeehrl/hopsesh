@@ -39,6 +39,10 @@ type CloudOptions struct {
 	// Request is the hand-off RunCloud sends, for a driver that starts from a real checkout
 	// (claude --cloud clones the current branch of Dir's repository); nil: a made-up one.
 	Request func(c agent.Cloud) agent.SendRequest
+	// Work plays the cloud's agent on the session SendCloud started, before RunCloud fetches
+	// it: a cloud that has nothing to bring until its agent worked (a patch) needs it; nil
+	// fetches the session as it was sent.
+	Work func(cloud string, id agent.SessionID)
 }
 
 // unreadableKnown is an id no vendor issues: a listing told about it reports it in
@@ -184,6 +188,9 @@ func RunCloudWith(t *testing.T, m agent.Module, programs Programs, o CloudOption
 			}
 			if id == "" {
 				t.Fatal("RunCloud needs a session: implement CloudSender, or have the programs list one")
+			}
+			if okS && o.Work != nil {
+				o.Work(c.Name, id)
 			}
 			if okW {
 				cs, err := follower.FollowUp(ctx, h, in, id, agent.NotePrefix+"a follow-up from the conformance kit")

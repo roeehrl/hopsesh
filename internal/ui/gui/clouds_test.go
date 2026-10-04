@@ -59,9 +59,10 @@ func TestCloudInTheWindow(t *testing.T) {
 	if strings.Join(names, " ") != "claude-cloud codex-cloud copilot-cloud jules devin amp" {
 		t.Fatalf("clouds: %v", names)
 	}
-	// Code only: every cloud-only module so far (their text is not written here yet);
-	// Codex cloud's task summary is written as a session.
-	for name, want := range map[string]bool{"claude-cloud": false, "codex-cloud": false, "copilot-cloud": true, "jules": true, "devin": true, "amp": true} {
+	// Code only: the clouds whose words do not come back (Jules's and Devin's CLIs print
+	// none); Copilot's log and Amp's thread are written into an agent here, and Codex cloud's
+	// task summary is written as a session.
+	for name, want := range map[string]bool{"claude-cloud": false, "codex-cloud": false, "copilot-cloud": false, "jules": true, "devin": true, "amp": false} {
 		if codeOnly[name] != want {
 			t.Errorf("%s code only: %v", name, codeOnly[name])
 		}
