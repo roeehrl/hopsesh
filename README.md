@@ -237,6 +237,35 @@ lists the ones it brought here or that you pasted, and the local sessions Remote
 mirrors (`hopsesh ls --cloud`); `claude --teleport` with no id shows the rest. In the app:
 **Clouds** in the sidebar, **Bring here** on a cloud session.
 
+## Hand a session off to Claude Code cloud
+
+A session here (or on another of your machines) can carry on in Claude Code's cloud. No
+cloud takes a conversation, so the cloud session starts from a **briefing**: about 2,000
+tokens on what was done, what is open and your latest requests, with likely secrets masked.
+Tool calls, tool output and hidden reasoning stay here. The code goes on a branch the cloud
+clones:
+
+```sh
+hopsesh plan claude/<id> --to claude-cloud     # what goes, what stays; changes nothing
+hopsesh handoff claude/<id> --to claude-cloud  # asks first (--yes for scripts)
+hopsesh followup claude-cloud:session_01… "also add a test"
+```
+
+When your branch is clean and already on GitHub, the cloud takes it as it is. Otherwise
+hopsesh pushes a `hopsesh/handoff/<date>-<id>` branch with a snapshot of the unpushed commits
+and changed files, without touching your checkout, index or branch. Untracked files go only
+when you name them (`--untracked docs/plan.md`), and files that look like credentials
+(`.env`, `*.pem`, `*.key`, `id_rsa`, …) never go. A repository that isn't on GitHub can go as
+an upload instead (`--bundle`); the cloud then can't push its work back. The conversation
+itself goes on the branch only if you ask (`--history-file`, which writes
+`.hopsesh/handoff.md`: anyone who can see the branch can read it).
+
+The session here is marked "↪ continued in Claude Code on claude-cloud". `hopsesh undo`
+deletes the branch (only while the cloud hasn't pushed to it) and the mark; the cloud session
+itself stays in Claude Code on the web until you archive it there. A follow-up starts a turn
+in the cloud, on your plan. In the app: **Hand off ▸** on a session, or *Hand off to…* in the
+command palette; in the terminal UI, `c`. Bring the work home later as above.
+
 ## Use it from your agent
 
 ```sh
@@ -247,8 +276,10 @@ hopsesh skill install --add-rules  # read-only hopsesh commands run without aski
 The skill goes into every installed agent (Claude Code and Codex) as identical files. Then ask
 things like "bring my laptop session here", "continue this in Codex" or "which sessions are
 running on the studio?". The agent plans first and **moves only after you say yes**.
-`--add-rules` lets the read-only commands (`ls`, `show`, `plan`, `agents`, `doctor`, …) run
-without asking, while `pull`, `push` and `undo` **always ask**, even in auto mode. The skill
+`--add-rules` lets the read-only commands (`ls`, `show`, `plan`, `agents`, `clouds`, `doctor`, …)
+run without asking, while `pull`, `push`, `handoff`, `followup` and `undo` **always ask**, even
+in auto mode. "Hand this off to Claude Code cloud" works the same way: the agent shows the
+plan and what stays behind, then hands it off after your yes. The skill
 never starts another agent and never handles passwords: for a machine that logs in with a
 password, the agent asks you to run `hopsesh hosts setup-key` yourself. `hopsesh skill remove`
 takes it out again. Details: [docs/design.md §13](docs/design.md#13-the-hopsesh-skill-for-every-agent)
@@ -288,7 +319,9 @@ including the file-format traps hopsesh handles, are in [docs/design.md](docs/de
 - **Only your agents talk to their models.** hopsesh never calls the Anthropic or OpenAI API.
 - **Clouds only through your agents.** A vendor's cloud is reached only through that agent's
   own command, signed in as you, and only once you allow it; hopsesh never reads its login
-  or calls its servers.
+  or calls its servers. A hand-off sends a briefing (secrets masked, best effort) and a
+  branch; credential-like files never go, and the snapshot commit names nothing but an
+  opaque id.
 
 ## Why not…?
 
