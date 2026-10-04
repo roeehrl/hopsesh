@@ -21,9 +21,11 @@
 agent. `{{.Bin}} push <ref> <machine> --json --yes [flags]` sends a session on this machine to
 another machine whose hopsesh receives sessions (same flags, `--dry-run` to plan; `--to` is a
 folder there). `{{.Bin}} handoff <ref> --to <cloud> --json --yes [flags]` starts a cloud session
-that continues it (a briefing and a branch). `{{.Bin}} followup <cloud>:<id> "<text>" --yes`
-sends a cloud session one message (a paid turn). `{{.Bin}} undo <id>` reverses a pull, a push
-or a hand-off (a cloud session itself stays in the cloud).
+that continues it (a briefing and a branch); for `claude-cloud` only the user can run it, in
+their own terminal (Claude Code starts the session there and may ask them a question).
+`{{.Bin}} followup <cloud>:<id> "<text>" --yes` sends a cloud session one message (a paid
+turn), where the cloud takes one (neither `claude-cloud` nor `codex-cloud` does). `{{.Bin}}
+undo <id>` reverses a pull, a push or a hand-off (a cloud session itself stays in the cloud).
 
 ## handoff flags
 
@@ -74,8 +76,8 @@ another agent `continue` (`relation`, `report`, `briefing`). `pull --json --yes`
 `{"plan": …, "result": …, "command": "…"}`; the result has `journal` (for undo), `syncNote`,
 `mark`, `markError`, `pushed`, `pushError`, `warnings`. `handoff --json --yes` prints
 `{"plan": …, "result": …, "handoff": …}` (and `error` when a step failed); `handoff` has
-`session`, `url`, `branch`, `env`, `noun`, `steps`, `stayed`, `failed`, `message` and
-`manual`. A pull from a cloud prints `{"plan": …, "result": …, "brought": …}`; `brought`
+`session`, `url`, `branch`, `env`, `noun`, `steps`, `stayed`, `failed`, `message`, `manual`,
+`pasted` (the user gave the session's link by hand) and `noFollowUp`. A pull from a cloud prints `{"plan": …, "result": …, "brought": …}`; `brought`
 has `outcome`, `message`, `branch`, `worktree`, `command`, `written` (hopsesh wrote the
 session from what the cloud gave back) and `loss`. `{{.Bin}} clouds env codex-cloud --json`
 lists each repository's Codex cloud environment.

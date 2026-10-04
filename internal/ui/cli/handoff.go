@@ -44,6 +44,12 @@ until you confirm (or pass --yes). hopsesh undo deletes the branch and the mark;
 session itself stays in the cloud until you archive it there. Allow the cloud first:
 hopsesh clouds allow <cloud>. The cloud session uses your plan's allowance.
 
+Claude Code starts a cloud session only in a terminal: after the push, hopsesh runs
+claude --cloud "<briefing>" in this one (on standard error with --json), in its hand-off
+folder for the repository, and reads the session's link Claude Code prints. The first time,
+Claude Code asks whether you trust that folder: answer it there. If hopsesh sees no link, it
+asks you to paste it. Without a terminal (run by an agent), the plan says so.
+
 Codex cloud runs each task in an environment you made on the web: name it with --env (its
 id or its name; hopsesh lists the ones your recent tasks used, and remembers the one you
 pick for the repository). A small change on a branch already pushed can go with the task as
@@ -270,6 +276,12 @@ func (r *run) renderHandoffPlan(p *move.Plan) {
 	if hp.CanStartingDiff && hp.Code != agent.ViaStartingDiff {
 		r.printf("  → %s: add --starting-diff\n", hp.StartingDiffOffer)
 	}
+	if hp.Terminal != "" {
+		r.printf("  terminal  %s\n", hp.Terminal)
+		if hp.Folder != "" {
+			r.printf("            the folder: %s\n", hp.Folder)
+		}
+	}
 	for _, l := range hp.Limits {
 		r.printf("  · %s\n", l)
 	}
@@ -302,6 +314,9 @@ func (r *run) renderHandedOff(res *move.Result) {
 	}
 	r.printf("\n✓ Handed off to %s\n", hr.CloudTitle)
 	r.printf("  %s %s is running.\n\n  %s\n\n", capital(nonEmpty(hr.Noun, "session")), hr.Session, hr.URL)
+	if hr.Pasted {
+		r.printf("  (from the link you pasted)\n")
+	}
 	switch {
 	case hr.Branch != "" && hr.Code == string(agent.ViaBranch):
 		r.printf("  Branch %s on %s\n", hr.Branch, hr.Repo)
@@ -328,6 +343,8 @@ func (r *run) renderHandedOff(res *move.Result) {
 	r.printf("  When it finishes: hopsesh pull %s:%s brings it here.\n", hr.Cloud, hr.Session)
 	if hr.Follow {
 		r.printf("  Send it a message: hopsesh followup %s:%s \"…\"\n", hr.Cloud, hr.Session)
+	} else if hr.NoFollowUp != "" {
+		r.printf("  Follow-ups: %s\n", hr.NoFollowUp)
 	}
 	r.printf("  Undo with: hopsesh undo %s (%s)\n", res.Journal, hr.Manual)
 }
@@ -336,9 +353,13 @@ func followupCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "followup <cloud>:<id> | <cloud link> <text>",
 		Short: "Send a message to a cloud session (it starts a turn there, on your plan)",
-		Long: `Queues one message in a cloud session through its agent's own command (claude -p … --cloud <id>)
-and returns at once. The message starts a model turn in the cloud, which uses your plan's
-allowance. Nothing is sent until you confirm (or pass --yes).`,
+		Long: `Queues one message in a cloud session through its agent's own command and returns at once, for
+a cloud whose command line can send one. The message starts a model turn in the cloud, which
+uses your plan's allowance. Nothing is sent until you confirm (or pass --yes).
+
+Claude Code cloud takes none from hopsesh: Claude Code 2.1 has no command that sends one
+outside its own terminal session, so open the session on claude.ai to write to it. Codex
+cloud takes none either.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			r, err := newRun(cmd)
