@@ -49,12 +49,14 @@ func TestCloudRows(t *testing.T) {
 	for _, r := range rows {
 		own := map[string]string{"claude-cloud": "claude", "codex-cloud": "codex"}[r.Location]
 		if cloudOp(r.Op) != (r.Location != "machine") || r.Op == "fetch" && r.From != own || r.Op == "handoff" && r.To != own ||
-			r.Op == "cloud-roundtrip" && r.To != own || r.Location == "claude-cloud" && r.Op == "cloud-roundtrip" && r.From != "claude" {
+			r.Op == "cloud-roundtrip" && r.To != own || r.Location == "claude-cloud" && r.Op == "cloud-roundtrip" && r.From != "claude" ||
+			r.Op == "cloud-hop" && (r.From != own || r.To == own) {
 			t.Fatalf("row %s", r)
 		}
 		n[r.Op+"@"+r.Location]++
 	}
-	for _, k := range []string{"fetch@claude-cloud", "handoff@claude-cloud", "cloud-roundtrip@claude-cloud", "fetch@codex-cloud", "handoff@codex-cloud", "cloud-roundtrip@codex-cloud"} {
+	for _, k := range []string{"fetch@claude-cloud", "handoff@claude-cloud", "cloud-roundtrip@claude-cloud", "fetch@codex-cloud", "handoff@codex-cloud", "cloud-roundtrip@codex-cloud",
+		"cloud-hop@claude-cloud", "cloud-hop@codex-cloud"} {
 		if n[k] < 1 {
 			t.Fatalf("no %s row: %v", k, n)
 		}

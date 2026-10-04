@@ -1,0 +1,49 @@
+# A Claude Code cloud session hands on to Codex cloud through this machine: the plan shows
+# both legs, the teleport runs in this terminal (the user sends a message, so Claude Code
+# saves its copy), and Codex cloud starts from the claude/… branch as the cloud pushed it.
+# The clean-up offers the cloud's branch only once its work is merged, deletes it on --yes,
+# and undo pushes it back; one undo takes both legs of the hop back.
+[windows] skip 'the stand-in origin needs a POSIX shell'
+env FAKE_CODEX_ENVS=env_api=acme-api,env_web=acme-web
+cloud-world demo
+exec hopsesh clouds allow claude-cloud
+exec hopsesh clouds allow codex-cloud
+
+cd demo
+exec hopsesh plan claude-cloud:$CLOUDID --to codex-cloud --env acme-api
+stdout 'Hand "Session \w+" on from Claude Code cloud to Codex cloud, through \S+'
+stdout '1. Bring here +claude-cloud → \S+ \(native\)'
+stdout '2. Hand off +\S+ → codex-cloud \(brief\)'
+stdout 'Codex cloud starts from the claude/… branch Claude Code cloud pushed'
+stdout 'Claude Code saves its copy only after you send a message in it'
+stdout 'Both cloud sessions stay where they are'
+! grep 'codex cloud exec' $WORK/agents.log
+cd $WORK
+
+exec hopsesh handoff claude-cloud:$CLOUDID --to codex-cloud --env acme-api --to-dir $WORK/demo --yes
+stdout '✓ Handed off to Codex cloud'
+stdout 'Branch claude/web-session-\w+ on github.com/example/demo'
+stdout 'Undo both legs with: hopsesh undo \S+'
+grep 'codex cloud exec --env acme-api --branch claude/web-session-\w+ \[hopsesh\] This task continues a Claude Code session' $WORK/agents.log
+exec git -C demo branch --show-current
+stdout '^main$'
+
+# The cloud's branch: kept until its work is merged.
+exec hopsesh clouds cleanup
+stdout 'claude/web-session-\w+ +github.com/example/demo +claude-cloud +not merged into main yet'
+stdout 'nothing to delete'
+exec sh -c 'git -C demo push -q origin "$(git -C demo for-each-ref --format="%(refname:short)" refs/heads/hopsesh/from/)":main'
+exec hopsesh clouds cleanup --list
+stdout '✓ +claude/web-session-\w+ .*merged into main \(in its history\)'
+exec hopsesh clouds cleanup --yes
+stdout '✓ Deleted claude/web-session-\w+ on github.com/example/demo'
+exec hopsesh undo --yes
+stdout 'Undid "deleted 1 merged branch\(es\)"'
+exec hopsesh clouds cleanup --list
+stdout 'merged into main'
+
+exec hopsesh undo --yes
+stdout 'Both legs of the hop were undone.'
+stdout 'The codex-cloud session task_e_\w+ stays in the cloud'
+exec git -C demo branch --list 'hopsesh/*'
+! stdout .
