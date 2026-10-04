@@ -42,6 +42,14 @@ const (
 	// OpAdopt is a session file a vendor's CLI wrote for the operation (a teleported
 	// transcript). Undo sets it aside in the journal, and refuses when it grew since.
 	OpAdopt Op = "adopt"
+	// OpWorktree is a worktree hopsesh added to a checkout on this machine (Path: the
+	// worktree; From: the checkout). Undo removes it, and refuses while it holds changes.
+	OpWorktree Op = "worktree"
+	// OpRef is a ref hopsesh made or moved in a checkout on this machine (Path: the
+	// checkout; Ref; Sha: what hopsesh set it to; Prev: what it was, "" for a new one). A
+	// branch hopsesh renamed has From (its name before); Created says the operation made
+	// that branch too. Undo puts it back while it still points at Sha.
+	OpRef Op = "ref"
 )
 
 // Entry is one journaled write.
@@ -64,6 +72,7 @@ type Entry struct {
 	Remote string `json:"remote,omitempty"`
 	Ref    string `json:"ref,omitempty"`
 	Sha    string `json:"sha,omitempty"`
+	Prev   string `json:"prev,omitempty"` // OpRef: what the ref was before ("" for a new one)
 	// OpCloud: the cloud, the session (its key: the module and the vendor's id), its page,
 	// and when it last changed as hopsesh left it. Machine is the one that ran the driver.
 	Cloud   string            `json:"cloud,omitempty"`
@@ -257,6 +266,20 @@ func (j *Journal) Changed(ctx context.Context, r Reach) error {
 			if now, err := r.Clouds.Updated(ctx, e.Cloud, *e.Key); err == nil && now.After(e.Updated) {
 				return fmt.Errorf("%w: the %s session %s has new activity", ErrChanged, e.Cloud, e.Key.Session)
 			}
+		case OpWorktree:
+			if r.Git == nil {
+				continue
+			}
+			if dirty, err := r.Git.WorktreeDirty(ctx, e.Path); err == nil && dirty {
+				return fmt.Errorf("%w: the worktree %s has changes that are not committed", ErrChanged, e.Path)
+			}
+		case OpRef:
+			if r.Git == nil {
+				continue
+			}
+			if now, err := r.Git.Ref(ctx, e.Path, e.Ref); err == nil && now != "" && now != e.Sha {
+				return fmt.Errorf("%w: %s moved on from what hopsesh left (%s is now %s)", ErrChanged, shortRef(e.Ref), short(e.Sha), short(now))
+			}
 		}
 	}
 	for _, a := range j.After {
@@ -288,6 +311,23 @@ func (r Reach) fs(machine string) (host.FS, error) {
 
 // shortRef is a ref without refs/heads/.
 func shortRef(ref string) string { return strings.TrimPrefix(ref, "refs/heads/") }
+
+// Git reaches checkouts on this machine, for the worktrees and refs an operation made; the
+// repos package implements it.
+type Git interface {
+	// Ref returns the commit ref points at in the checkout dir ("" when there is no such
+	// ref, or no such checkout any more).
+	Ref(ctx context.Context, dir, ref string) (string, error)
+	// SetRef sets ref to sha ("" deletes it) if it still points at expect (a lease).
+	SetRef(ctx context.Context, dir, ref, sha, expect string) error
+	// RenameBranch renames a branch (full ref names).
+	RenameBranch(ctx context.Context, dir, from, to string) error
+	// WorktreeDirty reports whether a worktree has changes that are not committed (false
+	// when it is gone).
+	WorktreeDirty(ctx context.Context, worktree string) (bool, error)
+	// RemoveWorktree removes a worktree of the checkout dir (force: with its changes).
+	RemoveWorktree(ctx context.Context, dir, worktree string, force bool) error
+}
 
 func short(sha string) string {
 	if len(sha) > 7 {
@@ -351,6 +391,9 @@ type Reach struct {
 	Refs Refs
 	// Clouds reaches vendor clouds (nil: their sessions become steps the user owes).
 	Clouds Clouds
+	// Git reaches checkouts on this machine (nil: worktrees and refs are reported, not
+	// undone).
+	Git Git
 }
 
 // Files is a Reach of files only.
@@ -401,6 +444,25 @@ func (j *Journal) Adopt(fsys host.FS, machine, p string) error {
 		return err
 	}
 	return j.record(Entry{Op: OpAdopt, Machine: machine, Path: p, Size: st.Size, Sum: st.Sum})
+}
+
+// Worktree records a worktree hopsesh added at path to the checkout dir on machine, so
+// undo removes it.
+func (j *Journal) Worktree(machine, dir, path string) error {
+	return j.record(Entry{Op: OpWorktree, Machine: machine, Path: path, From: dir})
+}
+
+// Ref records a ref hopsesh set to sha in the checkout dir on machine (prev: what it was,
+// "" when new), so undo puts it back.
+func (j *Journal) Ref(machine, dir, ref, sha, prev string) error {
+	return j.record(Entry{Op: OpRef, Machine: machine, Path: dir, Ref: ref, Sha: sha, Prev: prev})
+}
+
+// RenamedBranch records a branch renamed from from to ref (both full ref names) at sha in
+// the checkout dir; created: the operation made the branch too, so undo deletes it rather
+// than giving back the old name.
+func (j *Journal) RenamedBranch(machine, dir, from, ref, sha string, created bool) error {
+	return j.record(Entry{Op: OpRef, Machine: machine, Path: dir, From: from, Ref: ref, Sha: sha, Created: created})
 }
 
 // Remote names a journal on another machine's hopsesh.
@@ -639,9 +701,25 @@ func (j *Journal) Undo(ctx context.Context, r Reach, force bool) error {
 	}
 	var problems []string
 	var manual []Manual
+	// Worktrees go first: a branch is only renamed or deleted once no worktree hopsesh made
+	// has it checked out.
+	for i := len(j.Entries) - 1; i >= 0; i-- {
+		if e := j.Entries[i]; e.Op == OpWorktree {
+			if err := undoWorktree(ctx, r, e, force); err != nil {
+				problems = append(problems, fmt.Sprintf("the worktree %s: %v", e.Path, err))
+			}
+		}
+	}
 	for i := len(j.Entries) - 1; i >= 0; i-- {
 		e := j.Entries[i]
 		switch e.Op {
+		case OpWorktree:
+			continue
+		case OpRef:
+			if err := undoRef(ctx, r, e, force); err != nil {
+				problems = append(problems, fmt.Sprintf("%s: %v", shortRef(e.Ref), err))
+			}
+			continue
 		case OpPushRef:
 			if err := undoPushRef(ctx, r, e, force); err != nil {
 				problems = append(problems, fmt.Sprintf("%s on %s: %v", shortRef(e.Ref), e.Remote, err))
@@ -708,6 +786,36 @@ func undoPushRef(ctx context.Context, r Reach, e Entry, force bool) error {
 		expect = now
 	}
 	return r.Refs.DeleteRef(ctx, e.Machine, e.Path, e.Remote, e.Ref, expect)
+}
+
+// undoWorktree removes a worktree hopsesh added (one already gone is fine).
+func undoWorktree(ctx context.Context, r Reach, e Entry, force bool) error {
+	if r.Git == nil {
+		return errors.New("git cannot be reached from here")
+	}
+	return r.Git.RemoveWorktree(ctx, e.From, e.Path, force)
+}
+
+// undoRef puts a ref back while it points at what hopsesh left; forced, wherever it points.
+// A ref that is gone already is fine.
+func undoRef(ctx context.Context, r Reach, e Entry, force bool) error {
+	if r.Git == nil {
+		return errors.New("git cannot be reached from here")
+	}
+	now, err := r.Git.Ref(ctx, e.Path, e.Ref)
+	if err != nil || now == "" {
+		return err
+	}
+	if now != e.Sha && !force {
+		return fmt.Errorf("it moved on to %s", short(now))
+	}
+	switch {
+	case e.From != "" && !e.Created:
+		return r.Git.RenameBranch(ctx, e.Path, e.Ref, e.From)
+	case e.Prev == "":
+		return r.Git.SetRef(ctx, e.Path, e.Ref, "", now)
+	}
+	return r.Git.SetRef(ctx, e.Path, e.Ref, e.Prev, now)
 }
 
 // setAside moves the file of entry i (on any machine) into the journal's backup folder.

@@ -106,6 +106,10 @@ type Options struct {
 	// target agent's own importer converts it; hopsesh adds its briefing).
 	Via string
 	Go  bool // start the continued session with "Continue."
+	// Bringing a session from a cloud.
+	CodeOnly       bool // the cloud's branch only, without the conversation
+	RenameVendor   bool // the cloud's own branch (claude/…) comes home as hopsesh/from/<cloud>/…
+	AppendOriginal bool // add the cloud's work to the session it was handed off from
 }
 
 // Via choices: the target agent's own importer, or hopsesh's conversion even when the
@@ -132,6 +136,7 @@ const (
 const (
 	KindMove     = "move"     // the same agent, another place
 	KindContinue = "continue" // another agent
+	// KindFetch (fetch.go) brings a session from a cloud.
 )
 
 // Plan is a move, worked out without changing anything.
@@ -165,11 +170,13 @@ type Plan struct {
 	OldName        string        `json:"oldName,omitempty"`
 	Continue       *ContinuePlan `json:"continue,omitempty"`
 	NativeCopy     *NativeCopy   `json:"nativeCopy,omitempty"`
+	Fetch          *FetchPlan    `json:"fetch,omitempty"`
 
 	bundle     agent.Bundle
 	native     *Plan // the move that keeps NativeCopy
 	nativeIn   Input
 	resumeOpts agent.ResumeOptions
+	fetchIn    *FetchInput
 }
 
 // Endpoint describes one end for people and JSON.

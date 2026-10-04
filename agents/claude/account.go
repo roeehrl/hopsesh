@@ -34,12 +34,18 @@ func (m *Module) Account(ctx context.Context, h agent.Host, in agent.Install) (a
 	return account(a), nil
 }
 
-func account(a authStatus) agent.Account {
-	acct := agent.Account{Label: a.Subscription}
-	if a.OrgID != "" {
-		sum := sha256.Sum256([]byte("claude:" + a.OrgID))
-		acct.Key = hex.EncodeToString(sum[:8])
+// accountKey fingerprints an organisation id ("" for none): the same for a login and for
+// the owner a Remote Control record names.
+func accountKey(org string) string {
+	if org == "" {
+		return ""
 	}
+	sum := sha256.Sum256([]byte("claude:" + org))
+	return hex.EncodeToString(sum[:8])
+}
+
+func account(a authStatus) agent.Account {
+	acct := agent.Account{Label: a.Subscription, Key: accountKey(a.OrgID)}
 	// Remote Control needs a claude.ai subscription login with Anthropic as the provider.
 	switch {
 	case !a.LoggedIn:

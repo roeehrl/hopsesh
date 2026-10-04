@@ -86,8 +86,11 @@ type Exec interface {
 
 // RunOptions control Exec.Run.
 type RunOptions struct {
-	Dir   string
-	Env   []string // extra KEY=value pairs
+	Dir string
+	Env []string // extra KEY=value pairs
+	// Unset are variables removed from the program's environment (a cloud driver's
+	// Cloud.Unset).
+	Unset []string
 	Stdin []byte
 	// HoldStdin keeps standard input open this long after Stdin is written (or until the
 	// program exits, or its output contains StdinUntil), for programs that stop at the end

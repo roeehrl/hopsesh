@@ -10,6 +10,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/journal"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
+	"github.com/roeehrl/hopsesh/internal/core/repos"
 )
 
 // Journals lists what can be undone, newest first.
@@ -63,7 +64,7 @@ func (a *App) Undo(ctx context.Context, match string, force bool) (*journal.Jour
 		}
 		return m.FS(ctx)
 	}
-	reach := journal.Reach{FS: fsFor, Clouds: a.undoClouds()}
+	reach := journal.Reach{FS: fsFor, Clouds: a.undoClouds(), Git: repos.LocalGit{}}
 	if !force {
 		if err := j.Changed(ctx, reach); err != nil {
 			return j, err
@@ -111,7 +112,7 @@ func (a *App) Activities() ([]Activity, error) {
 		case j.Undone:
 			act.Why = "undone"
 		default:
-			if err := j.Changed(context.Background(), journal.Files(local)); err != nil {
+			if err := j.Changed(context.Background(), journal.Reach{FS: local, Git: repos.LocalGit{}}); err != nil {
 				act.CanUndo, act.Why = false, strings.TrimPrefix(err.Error(), journal.ErrChanged.Error()+": ")
 			}
 		}

@@ -101,7 +101,8 @@ func OldSessionNotice(targetLocation, targetCWD, newName string, fork bool) stri
 
 // Shell renders a command for a shell family ("posix" or "powershell"). When promptFile
 // is set, the command's last argument (the prompt) is read from that file instead of
-// being inlined.
+// being inlined. The command's Unset variables are removed for it (env -u, or Remove-Item
+// in PowerShell, which opens a window of its own for it).
 func Shell(c agent.Command, promptFile, family string) string {
 	argv := c.Argv
 	if promptFile != "" && len(argv) > 0 {
@@ -115,7 +116,11 @@ func Shell(c agent.Command, promptFile, family string) string {
 		if promptFile != "" {
 			parts = append(parts, "(Get-Content -Raw "+PSQuote(promptFile)+")")
 		}
-		return "Set-Location " + PSQuote(c.Dir) + "; & " + strings.Join(parts, " ")
+		unset := ""
+		for _, k := range c.Unset {
+			unset += "Remove-Item -ErrorAction SilentlyContinue " + PSQuote("Env:"+k) + "; "
+		}
+		return "Set-Location " + PSQuote(c.Dir) + "; " + unset + "& " + strings.Join(parts, " ")
 	}
 	parts := make([]string, len(argv))
 	for i, a := range argv {
@@ -124,7 +129,15 @@ func Shell(c agent.Command, promptFile, family string) string {
 	if promptFile != "" {
 		parts = append(parts, `"$(cat `+ShQuote(promptFile)+`)"`)
 	}
-	return "cd " + ShQuote(c.Dir) + " && " + strings.Join(parts, " ")
+	env := ""
+	if len(c.Unset) > 0 {
+		env = "env"
+		for _, k := range c.Unset {
+			env += " -u " + ShQuote(k)
+		}
+		env += " "
+	}
+	return "cd " + ShQuote(c.Dir) + " && " + env + strings.Join(parts, " ")
 }
 
 // DefaultShell is this machine's shell family.

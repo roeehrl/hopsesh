@@ -107,7 +107,7 @@ func TestScanListsAllowedCloud(t *testing.T) {
 			e = &inv.Entries[i]
 		}
 	}
-	if e == nil || e.Location.Name != fakecloud.FakeCloud || e.Machine != "" || e.Cloud == nil || string(e.Session.Key.Session) != seeded.ID ||
+	if e == nil || e.Location.Name != fakecloud.FakeCloud || e.Machine != fakecloud.FakeCloud || e.Cloud == nil || string(e.Session.Key.Session) != seeded.ID ||
 		e.Session.Title != "Fix the parser" || e.Cloud.State != agent.CloudDone {
 		t.Fatalf("cloud entry: %+v", e)
 	}
@@ -172,32 +172,33 @@ func TestScanCloudStatuses(t *testing.T) {
 	}
 }
 
-// Claude Code's and Codex's clouds are declared but not listable yet: off until allowed,
-// then ready with no sessions when the driver is here, and nothing is run.
+// Codex's cloud is declared but not listable yet, Claude Code's lists what hopsesh knows:
+// off until allowed, then ready (Codex with nothing asked; Claude Code after checking its
+// login), and no cloud verb runs.
 func TestScanDeclaredClouds(t *testing.T) {
-	_, log := cloudEnv(t, "codex")
+	_, log := cloudEnv(t, "codex", "claude")
 	inv := cloudApp(t, all.Registry(), "codex-cloud", "claude-cloud").Scan(context.Background(), ScanOptions{SkipGit: true})
 	codex, claude := inv.Cloud("codex-cloud"), inv.Cloud("claude-cloud")
 	if codex == nil || codex.Status != CloudReady || codex.Listable || codex.Sessions != 0 || codex.Version != "0.153.2" || !codex.Tested || codex.Title != "Codex cloud" {
 		t.Fatalf("codex-cloud: %+v", codex)
 	}
-	// claude is not on PATH, but may be in one of its usual folders on this machine.
-	if claude == nil || claude.Status == CloudNotAllowed || claude.Status == CloudError || claude.Listable {
+	if claude == nil || claude.Status != CloudReady || !claude.Listable || !claude.Fetchable || !claude.Partial || claude.Sessions != 0 || !claude.Allowed {
 		t.Fatalf("claude-cloud: %+v", claude)
 	}
-	if strings.Contains(calls(log), "cloud") {
-		t.Fatalf("no cloud verb may run: %s", calls(log))
+	if got := calls(log); !strings.Contains(got, "claude auth status --json") || strings.Contains(got, "codex cloud") || strings.Contains(got, "--teleport") || strings.Contains(got, "--cloud") {
+		t.Fatalf("only the login check may run: %s", got)
 	}
-	if c := cloudApp(t, all.Registry()).Scan(context.Background(), ScanOptions{SkipGit: true}).Cloud("codex-cloud"); c.Status != CloudNotAllowed {
+	if c := cloudApp(t, all.Registry()).Scan(context.Background(), ScanOptions{SkipGit: true}).Cloud("codex-cloud"); c.Status != CloudNotAllowed || c.Allowed {
 		t.Fatalf("off until allowed: %+v", c)
 	}
 }
 
-// The cloud copies the lineage records are passed to the cloud's listing as Known.
-func TestKnownCloudIDs(t *testing.T) {
+// What the lineage here and the pasted links name in a cloud is known to its listing,
+// once each, with the title and repository of the copy here.
+func TestKnownClouds(t *testing.T) {
 	m := lineage.New("L")
 	m.Upsert(lineage.Replica{Key: agent.SessionKey{Agent: "claude", Session: "a"}, Location: "here"})
-	m.Upsert(lineage.Replica{Key: agent.SessionKey{Agent: "claude", Session: "session_01x"}, Location: "claude-cloud"})
+	m.Upsert(lineage.Replica{Key: agent.SessionKey{Agent: "claude", Session: "session_01x"}, Location: "claude-cloud", Branch: "claude/web-session-x"})
 	m.Upsert(lineage.Replica{Key: agent.SessionKey{Agent: "codex", Session: "task_e_1"}, Location: "codex-cloud"})
 	m.Upsert(lineage.Replica{Key: agent.SessionKey{Agent: "codex", Session: "nope"}, Location: "claude-cloud"}) // not claude's
 	reg := all.Registry()
@@ -207,9 +208,11 @@ func TestKnownCloudIDs(t *testing.T) {
 			refs = append(refs, cloudRef{mod, c})
 		}
 	}
-	got := knownCloudIDs([]Entry{{Lineage: m}, {Lineage: m}, {}}, refs)
-	if len(got["claude-cloud"]) != 1 || got["claude-cloud"][0] != "session_01x" || len(got["codex-cloud"]) != 1 {
-		t.Fatalf("%v", got)
+	e := Entry{Lineage: m, Session: agent.Summary{Title: "Fix it"}}
+	got := knownClouds([]Entry{e, e, {}}, refs, []Pasted{{Cloud: "claude-cloud", ID: "session_01y", Repo: "github.com/example/demo"}, {Cloud: "nowhere", ID: "z"}})
+	c := got["claude-cloud"]
+	if len(c) != 2 || c[0].ID != "session_01x" || c[0].Title != "Fix it" || c[0].Branch != "claude/web-session-x" || c[1].ID != "session_01y" || c[1].Repo != "github.com/example/demo" || len(got["codex-cloud"]) != 1 {
+		t.Fatalf("%+v", got)
 	}
 }
 

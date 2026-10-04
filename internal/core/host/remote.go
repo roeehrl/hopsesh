@@ -137,6 +137,9 @@ func (e remoteExec) commandLine(argv []string, o agent.RunOptions) string {
 		if o.Dir != "" {
 			b.WriteString("Set-Location " + transport.PSQuote(o.Dir) + "; ")
 		}
+		for _, k := range o.Unset {
+			b.WriteString("Remove-Item -ErrorAction SilentlyContinue " + transport.PSQuote("Env:"+k) + "; ")
+		}
 		for _, kv := range o.Env {
 			k, v, _ := strings.Cut(kv, "=")
 			b.WriteString("$env:" + k + "=" + transport.PSQuote(v) + "; ")
@@ -151,8 +154,11 @@ func (e remoteExec) commandLine(argv []string, o agent.RunOptions) string {
 	if o.Dir != "" {
 		b.WriteString("cd " + transport.ShQuote(o.Dir) + " && ")
 	}
-	if len(o.Env) > 0 {
+	if len(o.Env) > 0 || len(o.Unset) > 0 {
 		b.WriteString("env")
+		for _, k := range o.Unset {
+			b.WriteString(" -u " + transport.ShQuote(k))
+		}
 		for _, kv := range o.Env {
 			b.WriteString(" " + transport.ShQuote(kv))
 		}

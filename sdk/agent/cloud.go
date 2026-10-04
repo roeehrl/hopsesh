@@ -101,7 +101,19 @@ type Cloud struct {
 	CodeUp   []CodeWay
 	CodeDown []CodeWay
 	Needs    []Need
-	Watch    Watch
+	// VendorPrefix starts the names of the branches the cloud's agent pushes ("claude/").
+	// Brought home, such a branch is renamed under hopsesh/from/<cloud>/ (unless the user
+	// turned that off).
+	VendorPrefix string
+	// Problems are upstream issues that explain a fetch's known failures, by outcome
+	// ("partial", "empty"), for the user interfaces to point to.
+	Problems map[string]string
+	// Unset are environment variables the driver must not inherit: a marker that makes it
+	// save nothing (a nested session's), or an API key that would take the place of the
+	// subscription login. The core removes them from every run of the cloud capabilities
+	// and from a command the user runs (Fetched.Run).
+	Unset []string
+	Watch Watch
 }
 
 // Watch is what the weekly upstream-drift check watches for a cloud (read by
@@ -186,6 +198,21 @@ type CloudSession struct {
 	Attempts int        `json:"attempts,omitempty"`
 	// Mirror: a local session mirrored to the vendor (Remote Control), not a cloud run.
 	Mirror bool `json:"mirror,omitempty"`
+	// Local is the session a Mirror mirrors, on the machine running hopsesh.
+	Local SessionID `json:"local,omitempty"`
+	// Account is the module's fingerprint of the account that owns the session (Account.Key's
+	// form), when the module knows it.
+	Account string `json:"account,omitempty"`
+}
+
+// CloudLink is the vendor's cloud copy of a session that runs on a machine (Claude Code's
+// Remote Control keeps one on claude.ai while it is connected).
+type CloudLink struct {
+	Cloud string    `json:"cloud"`
+	ID    SessionID `json:"id"`
+	URL   string    `json:"url,omitempty"`
+	// Account is the module's fingerprint of the account that owns it, when recorded.
+	Account string `json:"account,omitempty"`
 }
 
 // Cloud capabilities. Each is carried out by running the cloud's Driver through
@@ -210,6 +237,10 @@ type CloudQuery struct {
 	// Known are ids hopsesh recorded for this cloud (lineage, marks): refresh them even
 	// when the vendor's own listing leaves them out.
 	Known []SessionID
+	// Local are the module's sessions on this machine from the same scan, so a module can
+	// find mirrors among them (Summary.Mirror) without listing again; nil: it lists them
+	// itself when it needs them.
+	Local []Summary
 	Limit int
 }
 
@@ -295,6 +326,54 @@ type Adopt struct {
 	Dir     string
 	Since   time.Time
 	Session SessionID
+}
+
+// CloudAdopter finds the session a driver wrote for a fetch once it is there
+// (Fetched.Adopt), so the core can journal it and tell a complete copy from a partial one. A
+// module whose FetchCloud returns an Adopt implements it.
+type CloudAdopter interface {
+	// Adopted returns the session, or ErrNotFound while the driver has not written it.
+	Adopted(ctx context.Context, h Host, in Install, a Adopt) (Adoption, error)
+}
+
+// Adoption is a session a driver wrote for a fetch.
+type Adoption struct {
+	Session Summary
+	// Remote is the cloud session it copies (the vendor's own picker chose it when the Adopt
+	// named none).
+	Remote SessionID
+	// Restored is how many messages the copy holds; Expected, how many the vendor said it
+	// restored, when it said (Stated).
+	Restored int
+	Expected int
+	Stated   bool
+}
+
+// CloudLinker reads a cloud session's link or id as the vendor shows it ("Paste a link"),
+// and makes its page's link.
+type CloudLinker interface {
+	ParseCloudLink(s string) (cloud string, id SessionID, ok bool)
+	CloudURL(cloud string, id SessionID) string
+}
+
+// CloudTester probes a cloud through its driver without changing anything or starting a
+// model turn: the login it uses, and that the driver still has what the module relies on.
+// A login the cloud cannot use returns ErrSignedOut or ErrNotEligible, with the checks so
+// far.
+type CloudTester interface {
+	TestCloud(ctx context.Context, h Host, in Install, cloud string) (CloudTest, error)
+}
+
+// CloudTest is what a probe found.
+type CloudTest struct {
+	Account string       `json:"account,omitempty"` // the login, for people: "claude.ai · max"
+	Checks  []CloudCheck `json:"checks"`
+}
+
+// CloudCheck is one finding of a probe.
+type CloudCheck struct {
+	OK   bool   `json:"ok"`
+	Text string `json:"text"`
 }
 
 // CloudFollower sends a follow-up message to a cloud session

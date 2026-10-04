@@ -25,6 +25,9 @@ type Summary struct {
 	// Account is the module's opaque account fingerprint for the session, when the agent
 	// records one (bound reasoning cannot cross accounts).
 	Account string `json:"account,omitempty"`
+	// Mirror is the vendor's cloud copy of this session while it runs here (Claude Code's
+	// Remote Control), when the agent records one: the session is still this one.
+	Mirror *CloudLink `json:"mirror,omitempty"`
 }
 
 // MarkKind says why a copy was left behind.
@@ -173,6 +176,9 @@ type ResumeOptions struct {
 type Command struct {
 	Argv []string `json:"argv"`
 	Dir  string   `json:"dir"`
+	// Unset are environment variables the program must run without (a cloud driver's
+	// Cloud.Unset); the core leaves them out of the shell line and the process.
+	Unset []string `json:"unset,omitempty"`
 }
 
 // Liveness says whether a session is open right now.

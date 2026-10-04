@@ -58,6 +58,8 @@ type Result struct {
 	// Owed is a mark the source still needs once its open copy ends, when the source is a
 	// snapshot: its sender keeps it (on other sources hopsesh keeps it here).
 	Owed *lineage.Pending `json:"owed,omitempty"`
+	// Fetch is what a fetch from a cloud did.
+	Fetch *FetchResult `json:"fetch,omitempty"`
 }
 
 // machinesOf reaches the two machines of a move by name, for the journal.
@@ -77,6 +79,9 @@ func machinesOf(ctx context.Context, in Input) func(string) (host.FS, error) {
 func Apply(ctx context.Context, p *Plan, in Input, env Env) (*Result, error) {
 	if len(p.Blockers) > 0 {
 		return nil, fmt.Errorf("%w: %s", ErrBlocked, strings.Join(p.Blockers, "; "))
+	}
+	if p.Kind == KindFetch {
+		return applyFetch(ctx, p, env)
 	}
 	step := func(s string) {
 		if env.Progress != nil {
