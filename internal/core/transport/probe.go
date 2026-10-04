@@ -34,8 +34,10 @@ func (c *Conn) RunPowerShell(ctx context.Context, script string) ([]byte, error)
 // Windows' OpenSSH server uses unless told otherwise.
 const maxCommandLine = 8000
 
-// psFromStdin reads a base64 UTF-8 script from standard input and runs it.
-const psFromStdin = `$s = [Console]::In.ReadToEnd(); Invoke-Expression ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($s.Trim())))`
+// psFromStdin reads a base64 UTF-8 script from standard input and runs it. It reads one
+// line, not to the end: Windows' OpenSSH server does not always pass the end of input on
+// to the command, and waiting for it hung until the timeout.
+const psFromStdin = `$s = [Console]::In.ReadLine(); Invoke-Expression ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($s.Trim())))`
 
 // PowerShellInvocation is the command line for a script and what to send on its standard
 // input (nil when the script fits on the command line). -EncodedCommand triples a

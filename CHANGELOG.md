@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Fixed
+- Reading a Windows machine with many sessions could stall for 30 seconds and then fail:
+  the long script hopsesh sends there waited for an end of input that Windows' OpenSSH
+  does not always pass on. It now reads a single line.
+
 ### Changed
 - The macOS app's self-update opens the new disk image with `diskutil image attach` (on
   macOS 27, which deprecates `hdiutil attach`), and with hdiutil on earlier systems.
