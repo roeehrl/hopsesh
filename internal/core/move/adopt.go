@@ -67,6 +67,10 @@ type Fetch struct {
 	// ("machine:agent/id"), when known.
 	Mirror   bool   `json:"mirror,omitempty"`
 	MirrorOf string `json:"mirrorOf,omitempty"`
+	// Loss is what stayed in the cloud, for a copy hopsesh wrote; Noun, what the cloud calls
+	// its sessions.
+	Loss []string `json:"loss,omitempty"`
+	Noun string   `json:"noun,omitempty"`
 }
 
 // Adopted is what a fetch brought, once the driver wrote it.
@@ -89,6 +93,11 @@ type Adopted struct {
 	Command  string        `json:"command"` // Resume for the user's shell
 	Issue    string        `json:"issue,omitempty"`
 	Warnings []string      `json:"warnings,omitempty"`
+	// Written: hopsesh wrote the copy itself from what the driver brought as text, at
+	// Fidelity (text, or code: the task's title and summary); Changes sums up the code.
+	Written  bool   `json:"written,omitempty"`
+	Fidelity string `json:"fidelity,omitempty"`
+	Changes  string `json:"changes,omitempty"`
 }
 
 // Waiting reports whether the fetch still waits for the driver.

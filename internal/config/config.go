@@ -292,6 +292,27 @@ func (c *Config) SetCloudAllowed(name string, allowed bool) {
 	c.Clouds[name] = cl
 }
 
+// SetCloudEnvironment records the cloud environment a repository's hand-offs run in
+// ("" forgets it), keeping the cloud's other settings.
+func (c *Config) SetCloudEnvironment(name, repo, env string) {
+	if c.Clouds == nil {
+		c.Clouds = map[string]Cloud{}
+	}
+	cl := c.Clouds[name]
+	if env == "" {
+		delete(cl.Environments, repo)
+		if len(cl.Environments) == 0 {
+			cl.Environments = nil
+		}
+	} else {
+		if cl.Environments == nil {
+			cl.Environments = map[string]string{}
+		}
+		cl.Environments[repo] = env
+	}
+	c.Clouds[name] = cl
+}
+
 // Check reports settings hopsesh cannot act on.
 func (c Config) Check() error {
 	for name, cl := range c.Clouds {

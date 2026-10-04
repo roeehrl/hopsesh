@@ -88,7 +88,7 @@ func cloudRun(ctx context.Context, h agent.Host, o agent.RunOptions, args ...str
 // the environment does not hold are guesses at the backend's words.
 func refused(msg string) error {
 	l := strings.ToLower(msg)
-	first := firstLine(msg)
+	first := strings.TrimPrefix(firstLine(msg), "Error: ")
 	switch {
 	case strings.Contains(l, "not signed in"), strings.Contains(l, "not logged in"), strings.Contains(l, "codex login"),
 		httpCode(l, "401"), strings.Contains(l, "unauthorized"):

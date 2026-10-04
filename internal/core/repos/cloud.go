@@ -202,3 +202,27 @@ func (LocalGit) RemoveWorktree(ctx context.Context, dir, worktree string, force 
 	_, err := runGit(ctx, dir, append(args, "--", worktree)...)
 	return err
 }
+
+// CommitPatch applies a unified diff in a worktree (unless the driver applied it there
+// already) and commits the worktree's changes as one commit, without running the
+// repository's hooks; it returns the commit.
+func CommitPatch(ctx context.Context, worktree string, diff []byte, applied bool, message string) (string, error) {
+	if !applied {
+		if _, err := runGitStdin(ctx, worktree, diff, "apply", "--index", "--whitespace=nowarn", "-"); err != nil {
+			return "", err
+		}
+	}
+	if _, err := runGit(ctx, worktree, "add", "-A"); err != nil {
+		return "", err
+	}
+	if _, err := runGit(ctx, worktree, "commit", "-q", "--no-verify", "-m", message); err != nil {
+		return "", err
+	}
+	return Head(ctx, worktree)
+}
+
+// SwitchNew puts a worktree on a new branch at its HEAD.
+func SwitchNew(ctx context.Context, worktree, branch string) error {
+	_, err := runGit(ctx, worktree, "switch", "-q", "-c", branch)
+	return err
+}

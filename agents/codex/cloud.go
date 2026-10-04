@@ -30,6 +30,8 @@ func cloud() agent.Cloud {
 			"Codex cloud (legacy) tasks only: the new Codex Cloud has no command line yet",
 			"A task comes back as its title and its diff; its messages stay in the cloud",
 		},
+		// The CLI cannot list or create environments; its picker shows them.
+		EnvHint: "open `codex cloud` once to create one",
 		Watch: agent.Watch{
 			Surface: "cloud tasks through `codex cloud exec --env --branch` (with CODEX_STARTING_DIFF), `codex cloud list --json`, `status`, `diff` and `apply`, `codex apply`, the cloud environments, and the docs sentence that a handoff to a Codex cloud environment isn't supported",
 			// Never the 2.9 MB codex-manual.md.

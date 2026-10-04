@@ -356,6 +356,19 @@ func Snapshot(ctx context.Context, g Git, dir string, p SnapshotPlan, msg string
 	return trimmed(g.Run(ctx, dir, id, "commit-tree", tree, "-p", p.Head, "--no-gpg-sign", "-m", strings.TrimRight(msg, "\n")))
 }
 
+// DiffCommits is the binary-safe unified diff from one commit to another (a snapshot's
+// changes, sent with a cloud task as its starting diff).
+func DiffCommits(ctx context.Context, g Git, dir, from, to string) ([]byte, error) {
+	out, err := g.Run(ctx, dir, nil, "diff", "--binary", "--no-color", "--no-ext-diff", from, to)
+	if err != nil {
+		return nil, err
+	}
+	if out != "" && !strings.HasSuffix(out, "\n") {
+		out += "\n"
+	}
+	return []byte(out), nil
+}
+
 // Errors of pushing and deleting a ref.
 var (
 	// ErrRefExists means the remote already has a ref of that name (PushRef never

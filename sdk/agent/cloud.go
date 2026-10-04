@@ -120,7 +120,10 @@ type Cloud struct {
 	// the user interfaces show beside the cloud (the hand-off menu, its card, `hopsesh clouds
 	// test`), so a missing path is said, never faked.
 	Limits []string
-	Watch  Watch
+	// EnvHint says how the user makes an environment, for a cloud with NeedEnvironment
+	// ("open `codex cloud` once to create one").
+	EnvHint string
+	Watch   Watch
 }
 
 // Watch is what the weekly upstream-drift check watches for a cloud (read by

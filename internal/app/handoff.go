@@ -29,6 +29,8 @@ type HandoffTarget struct {
 	// cannot do here.
 	Note   string `json:"note,omitempty"`
 	Bundle bool   `json:"bundle,omitempty"` // it goes as an upload (the remote is not one the cloud clones)
+	// Limits are what hopsesh cannot reach in that cloud (agent.Cloud.Limits), said beside it.
+	Limits []string `json:"limits,omitempty"`
 }
 
 // HandoffTargets are the clouds a session could be handed off to, each enabled or with its
@@ -40,7 +42,7 @@ func (a *App) HandoffTargets(inv *Inventory, e Entry) []HandoffTarget {
 	var out []HandoffTarget
 	for _, r := range a.clouds() {
 		cl := r.cloud
-		t := HandoffTarget{Cloud: cl.Name, Title: cl.Title, Agent: r.mod.Spec().Name}
+		t := HandoffTarget{Cloud: cl.Name, Title: cl.Title, Agent: r.mod.Spec().Name, Limits: cl.Limits}
 		c := inv.Cloud(cl.Name)
 		src := inv.Machine(e.Machine)
 		host := ""
@@ -65,7 +67,7 @@ func (a *App) HandoffTargets(inv *Inventory, e Entry) []HandoffTarget {
 		case src != nil && !src.Local && src.OS == "windows":
 			t.Why = "hopsesh can't snapshot code on a Windows machine yet; bring the session here first"
 		case !containsStr(cl.Hosts, host) && !bundle:
-			t.Why = "this repository isn't on " + strings.Join(cl.Hosts, ", ")
+			t.Why = "this repository isn't on " + hostsWords(cl.Hosts)
 		case !containsStr(cl.Hosts, host) && src != nil && !src.Local:
 			t.Why = "the remote is " + host + ", so it goes as an upload, from this machine only; bring the session here first"
 		case !containsStr(cl.Hosts, host):
@@ -137,6 +139,9 @@ func (a *App) PlanHandoff(ctx context.Context, inv *Inventory, e Entry, cloud st
 		Allowed:  a.Cfg.CloudAllowed(cloud), Worktrees: a.Reg.Worktrees(),
 	}
 	if g := e.Git; g != nil && g.Identity != "" {
+		if needsEnv(cl) {
+			hin.Env, hin.Envs = set.Environments[g.Identity], a.EnvChoices(inv, cloud, g.Identity)
+		}
 		if src.Local {
 			hin.Checkout = nonEmpty(g.MainWorktree, g.Toplevel)
 		} else if found := repos.FindLocal(g.Identity, a.LocalRoots()); len(found) > 0 {
@@ -152,6 +157,18 @@ func (a *App) HandoffDefaults(cloud string) move.Options {
 	set := a.Cfg.CloudSettings(cloud)
 	o.HistoryFile, o.Bundle, o.Cleanup = set.HistoryFile, set.Code == "bundle", set.DeleteBranch
 	return o
+}
+
+// RememberEnv records, after a hand-off worked, the environment it ran in as its
+// repository's, when the configuration named none (the caller saves the configuration). It
+// reports whether it changed anything.
+func (a *App) RememberEnv(p *move.Plan) bool {
+	hp := p.Handoff
+	if hp == nil || !hp.Remember || hp.Env == "" || hp.Repo == "" || a.Cfg.CloudSettings(hp.Cloud).Environments[hp.Repo] != "" {
+		return false
+	}
+	a.Cfg.SetCloudEnvironment(hp.Cloud, hp.Repo, hp.Env)
+	return true
 }
 
 // FollowUp sends a message to a cloud session through its module (it starts a model turn

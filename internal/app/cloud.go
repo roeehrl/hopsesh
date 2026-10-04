@@ -58,6 +58,13 @@ type Cloud struct {
 	Mirrors int `json:"mirrors,omitempty"`
 	// Allowed: the user allowed hopsesh to use this cloud.
 	Allowed bool `json:"allowed"`
+	// Noun is what the cloud calls its sessions ("task"); Limits, what hopsesh cannot reach
+	// there; NeedsEnv: a hand-off runs in an environment the user picks (EnvHint says how to
+	// make one).
+	Noun     string   `json:"noun"`
+	Limits   []string `json:"limits,omitempty"`
+	NeedsEnv bool     `json:"needsEnv,omitempty"`
+	EnvHint  string   `json:"envHint,omitempty"`
 }
 
 // Cloud returns a scanned cloud by name.
@@ -121,7 +128,8 @@ func (a *App) scanClouds(ctx context.Context, lm *host.Machine, refs []cloudRef,
 
 func (a *App) scanCloud(ctx context.Context, lm *host.Machine, r cloudRef, known []*knownCloud, local []agent.Summary) (*Cloud, []Entry) {
 	spec, cl := r.mod.Spec(), r.cloud
-	c := &Cloud{Name: cl.Name, Title: cl.Title, Agent: spec.ID, AgentName: spec.Name, Driver: cl.Driver, Status: CloudReady, Allowed: a.Cfg.CloudAllowed(cl.Name)}
+	c := &Cloud{Name: cl.Name, Title: cl.Title, Agent: spec.ID, AgentName: spec.Name, Driver: cl.Driver, Status: CloudReady, Allowed: a.Cfg.CloudAllowed(cl.Name),
+		Noun: cl.SessionNoun(), Limits: cl.Limits, NeedsEnv: needsEnv(cl), EnvHint: cl.EnvHint}
 	_, c.Listable = r.mod.(agent.CloudLister)
 	_, c.Fetchable = r.mod.(agent.CloudFetcher)
 	if !a.Cfg.CloudAllowed(cl.Name) {
@@ -179,6 +187,10 @@ func (a *App) scanCloud(ctx context.Context, lm *host.Machine, r cloudRef, known
 		}
 		s.Cloud = cl.Name
 		s.Key.Agent = spec.ID
+		if s.Repo == "" && (s.Env != "" || s.EnvLabel != "") && byID[s.Key.Session] == nil {
+			// The cloud lists the environment, not the repository: the configuration may say.
+			s.Repo = repoForEnv(a.Cfg.CloudSettings(cl.Name).Environments, s)
+		}
 		es = append(es, cloudEntry(spec, cl, s, byID[s.Key.Session]))
 	}
 	return c, es
