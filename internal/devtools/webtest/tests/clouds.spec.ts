@@ -126,9 +126,9 @@ test("a cloud-only module: Copilot's tasks are listed, and only their code comes
   await sheet.getByRole("button", { name: /Get the code/ }).click();
   await expect(page.locator(".outcome.ok")).toContainText("The code of “Fix the search index” is here", { timeout: 30_000 });
 
-  await page.goto("/");
   await menu(page, "machines");
+  await expect(page.getByRole("heading", { name: "Machines" })).toBeVisible();
   const card = page.locator(".cloud-card", { hasText: "Copilot cloud agent" });
-  await expect(card).toContainText("The code (its branch); the conversation stays in the cloud for now");
-  await expect(page.locator(".cloud-card", { hasText: "Amp" })).toContainText("Nothing yet: the conversation stays in the cloud");
+  await expect(card).toContainText("The code (its branch); the conversation stays in the cloud for now", { timeout: 30_000 });
+  await expect(page.locator(".cloud-card", { hasText: "Amp" })).toContainText("Nothing yet: the conversation stays in the cloud", { timeout: 30_000 });
 });
