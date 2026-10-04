@@ -219,8 +219,9 @@ func TestSnapshotAndPushLeaveTheCheckoutAlone(t *testing.T) {
 	if got := gitIn(t, work, "show", sha+":.env"); got != "TOKEN=one" {
 		t.Errorf("the tracked .env keeps HEAD's content, not the change: %q", got)
 	}
-	if got := gitIn(t, work, "show", sha+":big.bin"); got != "pointer" {
-		t.Errorf("the LFS file keeps HEAD's content: %q", got)
+	// HEAD's blob: a pointer where git-lfs is installed, the file itself where it is not.
+	if got, want := gitIn(t, work, "rev-parse", sha+":big.bin"), gitIn(t, work, "rev-parse", "HEAD:big.bin"); got != want {
+		t.Errorf("the LFS file keeps HEAD's content: %s, not %s", got, want)
 	}
 	if refs := gitIn(t, work, "for-each-ref", "--contains", sha); refs != "" {
 		t.Errorf("no ref holds the snapshot before the push: %s", refs)
