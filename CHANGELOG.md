@@ -14,6 +14,15 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 - The macOS app's self-update opens the new disk image with `diskutil image attach` (on
   macOS 27, which deprecates `hdiutil attach`), and with hdiutil on earlier systems.
+- The configuration format is now schema 4, with room for the cloud sessions to come
+  (`[clouds.<name>]`: whether hopsesh may use a vendor's cloud, and how code goes up). A
+  configuration file from an earlier version is refused, never converted: the app offers
+  to set it aside and start fresh (the old file stays next to the new one), the command
+  line names the file to move aside, and you add your machines again. Sessions are not
+  affected.
+- Lineage manifests (the `.hopsesh.json` file beside each session hopsesh moved) have a new
+  format that can record cloud copies. Manifests from earlier versions are not read: a
+  session moved with 0.3 is treated as if hopsesh had not moved it before.
 
 ## [0.3.1] - 2026-10-04
 
