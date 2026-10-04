@@ -1,51 +1,31 @@
 package transport
 
 import (
-	"encoding/base64"
 	"fmt"
 	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
 
-// A script that fits goes on the command line; a longer one through standard input, behind
-// a short command that stays inside cmd.exe's limit.
-func TestPowerShellInvocation(t *testing.T) {
-	cmd, stdin := PowerShellInvocation("Get-Date")
-	if stdin != nil || !strings.HasPrefix(cmd, "powershell ") {
-		t.Fatalf("a short script: %q, stdin %q", cmd, stdin)
+// A long script is uploaded and run from a file in the home folder, by a short command
+// that stays inside cmd.exe's limit and removes the file afterwards.
+func TestPowerShellFromFile(t *testing.T) {
+	if len(PowerShellCommand(longScript(400))) <= maxCommandLine {
+		t.Fatal("the test script fits on a command line; it tests nothing")
 	}
-	long := longScript(400)
-	cmd, stdin = PowerShellInvocation(long)
-	if len(cmd) > maxCommandLine {
-		t.Fatalf("the command line is %d characters", len(cmd))
+	name := psScriptName()
+	if !strings.HasPrefix(name, ".hopsesh-") || !strings.HasSuffix(name, ".ps1") || name == psScriptName() {
+		t.Fatalf("script name %q", name)
 	}
-	got, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(stdin)))
-	if err != nil || string(got) != long {
-		t.Fatalf("standard input does not carry the script (%v)", err)
-	}
-}
-
-// What RunInput is given reaches the remote command's standard input.
-func TestRunInputSendsStdin(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the stand-in ssh is a shell script")
-	}
-	fake := filepath.Join(t.TempDir(), "ssh")
-	if err := os.WriteFile(fake, []byte("#!/bin/sh\ncat\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	c := &Conn{Dest: "box", sshBinary: fake}
-	out, err := c.RunInput(t.Context(), "anything", []byte("hello\n"))
-	if err != nil || string(out) != "hello\n" {
-		t.Fatalf("got %q, %v", out, err)
+	run := psFromFile(name)
+	if len(PowerShellCommand(run)) > maxCommandLine || !strings.Contains(run, "'"+name+"'") || !strings.Contains(run, "Remove-Item") {
+		t.Fatalf("the runner: %s", run)
 	}
 }
 
 // Against a real Windows OpenSSH server (cmd.exe as its shell), set by CI's Windows job:
-// a script far over the command-line limit runs whole, non-ASCII output intact.
+// a script far over the command-line limit runs whole, non-ASCII output intact, and its
+// uploaded file is gone afterwards.
 func TestRunPowerShellOverSSH(t *testing.T) {
 	dest := os.Getenv("HOPSESH_TEST_WINDOWS_SSH")
 	if dest == "" {
@@ -71,6 +51,10 @@ func TestRunPowerShellOverSSH(t *testing.T) {
 		if len(lines) != n || lines[n-1] != fmt.Sprintf("フォルダ-%d:False", n-1) {
 			t.Fatalf("%d folders: got %d lines, the last %q", n, len(lines), lines[len(lines)-1])
 		}
+	}
+	left, err := c.RunPowerShell(t.Context(), "@(Get-ChildItem -Force -LiteralPath $HOME -Filter '.hopsesh-*.ps1').Count")
+	if err != nil || strings.TrimSpace(string(left)) != "0" {
+		t.Fatalf("uploaded scripts left in the home folder: %q, %v", left, err)
 	}
 }
 

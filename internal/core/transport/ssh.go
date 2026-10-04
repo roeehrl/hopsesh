@@ -144,12 +144,7 @@ func quoteList(paths ...string) string {
 // destination's host name cannot be resolved, each fallback name is tried once and the
 // first that works is kept for the rest of the connection.
 func (c *Conn) Run(ctx context.Context, remoteCmd string) ([]byte, error) {
-	return c.RunInput(ctx, remoteCmd, nil)
-}
-
-// RunInput is Run with bytes for the command's standard input.
-func (c *Conn) RunInput(ctx context.Context, remoteCmd string, stdin []byte) ([]byte, error) {
-	out, err := c.runRouted(ctx, remoteCmd, stdin)
+	out, err := c.runRouted(ctx, remoteCmd)
 	if c.Password == nil || !errors.Is(err, ErrAuth) {
 		return out, err
 	}
@@ -169,7 +164,7 @@ func (c *Conn) RunInput(ctx context.Context, remoteCmd string, stdin []byte) ([]
 		if tries == 2 {
 			return out, ErrWrongPassword
 		}
-		out, err = c.runRouted(ctx, remoteCmd, stdin)
+		out, err = c.runRouted(ctx, remoteCmd)
 		if !errors.Is(err, ErrAuth) {
 			return out, err
 		}
@@ -177,18 +172,18 @@ func (c *Conn) RunInput(ctx context.Context, remoteCmd string, stdin []byte) ([]
 }
 
 // runRouted runs a command, trying the machine's other names when its own is unreachable.
-func (c *Conn) runRouted(ctx context.Context, remoteCmd string, stdin []byte) ([]byte, error) {
-	out, err := c.run(ctx, remoteCmd, stdin)
+func (c *Conn) runRouted(ctx context.Context, remoteCmd string) ([]byte, error) {
+	out, err := c.run(ctx, remoteCmd)
 	if err != nil && c.override != "" && retryable(err) {
 		c.override = "" // a remembered fallback stopped working: try the destination itself
-		out, err = c.run(ctx, remoteCmd, stdin)
+		out, err = c.run(ctx, remoteCmd)
 	}
 	if err == nil || c.override != "" || len(c.Fallbacks) == 0 || !retryable(err) {
 		return out, err
 	}
 	for _, fb := range c.Fallbacks {
 		c.override = fb
-		if out2, err2 := c.run(ctx, remoteCmd, stdin); !retryable(err2) {
+		if out2, err2 := c.run(ctx, remoteCmd); !retryable(err2) {
 			return out2, err2
 		}
 	}
@@ -208,7 +203,7 @@ func unresolvable(err error) bool {
 	return err != nil && errors.Is(err, ErrUnreachable) && strings.Contains(strings.ToLower(err.Error()), "could not resolve")
 }
 
-func (c *Conn) run(ctx context.Context, remoteCmd string, stdin []byte) ([]byte, error) {
+func (c *Conn) run(ctx context.Context, remoteCmd string) ([]byte, error) {
 	// Before the command's own timeout: the person may take a while to answer the
 	// macOS local network prompt.
 	gated := c.localNetworkPreflight(ctx)
@@ -229,9 +224,6 @@ func (c *Conn) run(ctx context.Context, remoteCmd string, stdin []byte) ([]byte,
 	cmd := proc.CommandContext(ctx, c.sshBinary, args...)
 	if env != nil {
 		cmd.Env = append(os.Environ(), env...)
-	}
-	if stdin != nil {
-		cmd.Stdin = bytes.NewReader(stdin)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
