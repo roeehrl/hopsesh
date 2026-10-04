@@ -47,7 +47,7 @@ function handoffText(x) {
   return {
     title: x.title.endsWith(tail) ? `“${x.title.slice(0, -tail.length)}”${tail}` : x.title,
     detail: [`${o.machine} → ${o.cloud}`, o.session, o.branch ? "branch " + o.branch : ""].filter(Boolean).join(" · "),
-    note: `Undo ${o.pushed ? "deletes the branch and " : "removes "}the mark. The session stays in ${o.cloudTitle}; archive it there if you want it gone.`,
+    note: `Undo ${o.pushed ? "deletes the branch and " : "removes "}the mark. The ${o.noun || "session"} stays in ${o.cloudTitle}; archive it there if you want it gone.`,
   };
 }
 

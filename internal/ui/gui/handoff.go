@@ -26,6 +26,10 @@ type HandoffOptsDTO struct {
 	Brief       string   `json:"brief"` // the user's edit of the briefing ("" : hopsesh's)
 	Note        string   `json:"note"`
 	CarryRules  bool     `json:"carryRules"`
+	// Env is the cloud environment picked ("": the repository's); StartingDiff sends the
+	// changes with the cloud session instead of on a branch.
+	Env          string `json:"env"`
+	StartingDiff bool   `json:"startingDiff"`
 }
 
 // HandoffDefaultsDTO are the sheet's first choices for a cloud, from the configuration.
@@ -72,6 +76,7 @@ func (a *App) PlanHandoff(machine, key, cloud string, o HandoffOptsDTO) (*Handof
 	opt := core.HandoffDefaults(cloud)
 	opt.Untracked, opt.HistoryFile, opt.Bundle, opt.Mark = o.Untracked, o.HistoryFile, o.Bundle, o.Mark
 	opt.Brief, opt.Note, opt.CarryRules = o.Brief, o.Note, o.CarryRules
+	opt.Env, opt.StartingDiff = o.Env, o.StartingDiff
 	if o.Cleanup != "" {
 		opt.Cleanup = o.Cleanup
 	}
@@ -133,6 +138,11 @@ func (a *App) ApplyHandoff() (*HandedOffDTO, error) {
 	}
 	a.mu.Lock()
 	a.res = res
+	if err == nil && a.core.RememberEnv(p) {
+		if serr := a.save(); serr != nil {
+			res.Warnings = append(res.Warnings, "could not remember the environment for "+p.Handoff.Repo+": "+serr.Error())
+		}
+	}
 	a.mu.Unlock()
 	d := &HandedOffDTO{Journal: res.Journal, Title: p.Title, Agent: p.Agent, Mark: res.Mark, Warnings: res.Warnings, Handoff: res.Handoff}
 	if d.Warnings == nil {

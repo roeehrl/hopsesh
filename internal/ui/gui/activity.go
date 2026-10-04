@@ -36,6 +36,7 @@ type HandoffActivityDTO struct {
 	URL        string `json:"url"`
 	Branch     string `json:"branch"`
 	Pushed     bool   `json:"pushed"`
+	Noun       string `json:"noun"` // what the cloud calls its sessions ("task")
 }
 
 // OwedDTO is a mark waiting for a copy left behind to end.
@@ -82,9 +83,9 @@ func (a *App) Activity() (*ActivityListDTO, error) {
 		if j.Kind == "handoff" {
 			if ho, err := move.LoadHandoff(core.StateDir, j.ID); err == nil {
 				d.Handoff = &HandoffActivityDTO{Cloud: ho.Cloud, CloudTitle: ho.Cloud, Machine: ho.Machine, Session: string(ho.Session.Session), URL: ho.URL,
-					Branch: ho.Branch, Pushed: ho.Pushed}
+					Branch: ho.Branch, Pushed: ho.Pushed, Noun: "session"}
 				if _, cl, ok := cloudModuleOf(core, ho.Cloud); ok {
-					d.Handoff.CloudTitle = cl.Title
+					d.Handoff.CloudTitle, d.Handoff.Noun = cl.Title, cl.SessionNoun()
 				}
 			}
 		}

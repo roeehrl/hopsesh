@@ -46,6 +46,21 @@ type CloudDTO struct {
 	Fidelity string `json:"fidelity"`
 	// Test is the last read-only probe of it, when there was one.
 	Test *CloudTestDTO `json:"test,omitempty"`
+	// Noun is what the cloud calls its sessions ("task"); Limits, what hopsesh cannot reach
+	// there; CodeUp and CodeDown, how code travels each way; Hosts, the repository hosts it
+	// takes.
+	Noun     string   `json:"noun"`
+	Limits   []string `json:"limits"`
+	CodeUp   []string `json:"codeUp"`
+	CodeDown []string `json:"codeDown"`
+	Hosts    []string `json:"hosts"`
+	// NeedsEnv: a hand-off runs in an environment (Codex cloud); Repos are the repositories
+	// hopsesh knows with the environment set for each, Envs the environments to choose from,
+	// EnvHint how to make one.
+	NeedsEnv bool             `json:"needsEnv"`
+	Repos    []app.RepoEnv    `json:"repos"`
+	Envs     []move.EnvChoice `json:"envs"`
+	EnvHint  string           `json:"envHint,omitempty"`
 }
 
 // CloudEntryDTO is what a cloud row adds to a session row.
@@ -60,6 +75,11 @@ type CloudEntryDTO struct {
 	Base     string `json:"base,omitempty"`
 	Repo     string `json:"repo,omitempty"`
 	Checkout string `json:"checkout,omitempty"`
+	// EnvLabel is the environment it runs in; Changes sums up its code; Noun, what its
+	// cloud calls it ("task").
+	EnvLabel string `json:"envLabel,omitempty"`
+	Changes  string `json:"changes,omitempty"`
+	Noun     string `json:"noun"`
 }
 
 // MirrorDTO is a local session's copy on the vendor's site (Remote Control).
@@ -84,14 +104,32 @@ var (
 	tests   = map[string]*CloudTestDTO{}
 )
 
-func cloudDTO(core *app.App, c *app.Cloud) CloudDTO {
+func cloudDTO(core *app.App, inv *app.Inventory, c *app.Cloud) CloudDTO {
 	d := CloudDTO{Name: c.Name, Title: c.Title, Agent: string(c.Agent), AgentName: c.AgentName, Driver: c.Driver, Version: c.Version,
 		Tested: c.Tested, Status: c.Status, Hint: c.Hint, Error: c.Error, Allowed: c.Allowed, Sessions: c.Sessions, Mirrors: c.Mirrors,
-		Partial: c.Partial, Listable: c.Listable, Fetchable: c.Fetchable, Rename: *core.Cfg.CloudSettings(c.Name).RenameVendorBranches}
+		Partial: c.Partial, Listable: c.Listable, Fetchable: c.Fetchable, Rename: *core.Cfg.CloudSettings(c.Name).RenameVendorBranches,
+		Noun: c.Noun, Limits: c.Limits, CodeUp: []string{}, CodeDown: []string{}, Hosts: []string{}, NeedsEnv: c.NeedsEnv, EnvHint: c.EnvHint,
+		Repos: []app.RepoEnv{}, Envs: []move.EnvChoice{}}
+	if d.Limits == nil {
+		d.Limits = []string{}
+	}
 	if m, ok := core.Module(c.Agent); ok {
 		if cl, ok := m.Spec().FindCloud(c.Name); ok {
 			d.TestedOn, d.VendorPrefix, d.Fidelity = strings.Join(cl.Tested, ", "), cl.VendorPrefix, string(cl.Down)
+			for _, w := range cl.CodeUp {
+				d.CodeUp = append(d.CodeUp, string(w))
+			}
+			for _, w := range cl.CodeDown {
+				d.CodeDown = append(d.CodeDown, string(w))
+			}
+			d.Hosts = append(d.Hosts, cl.Hosts...)
 		}
+	}
+	if c.NeedsEnv {
+		if rs := core.RepoEnvs(inv, c.Name); rs != nil {
+			d.Repos = rs
+		}
+		d.Envs = core.EnvChoices(inv, c.Name, "")
 	}
 	testsMu.Lock()
 	d.Test = tests[c.Name]
@@ -104,7 +142,7 @@ func shownClouds(core *app.App, inv *app.Inventory) []CloudDTO {
 	out := []CloudDTO{}
 	for _, c := range inv.Clouds {
 		if c.Listable || c.Fetchable {
-			out = append(out, cloudDTO(core, c))
+			out = append(out, cloudDTO(core, inv, c))
 		}
 	}
 	return out
@@ -128,10 +166,10 @@ func cloudEntryDTO(core *app.App, e app.Entry) *CloudEntryDTO {
 		return nil
 	}
 	d := &CloudEntryDTO{Name: e.Location.Name, Title: e.Location.Name, ID: string(c.Key.Session), URL: c.URL, State: string(c.State), PR: c.PR,
-		Branch: c.Branch, Base: c.Base, Repo: c.Repo, Checkout: e.Checkout}
+		Branch: c.Branch, Base: c.Base, Repo: c.Repo, Checkout: e.Checkout, EnvLabel: nonEmptyStr(c.EnvLabel, c.Env), Changes: c.Changes, Noun: "session"}
 	if m, ok := core.Module(e.Agent); ok {
 		if cl, ok := m.Spec().FindCloud(e.Location.Name); ok {
-			d.Title = cl.Title
+			d.Title, d.Noun = cl.Title, cl.SessionNoun()
 		}
 	}
 	return d
@@ -152,6 +190,21 @@ func (a *App) SetCloudAllowed(name string, allowed bool) error {
 	return a.save()
 }
 
+// SetCloudEnvironment sets the environment a repository's hand-offs to a cloud run in (""
+// forgets it): the Machines page's table.
+func (a *App) SetCloudEnvironment(name, repo, env string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.core.IsCloud(name) {
+		return fmt.Errorf("unknown cloud %q", name)
+	}
+	if strings.TrimSpace(repo) == "" {
+		return errors.New("which repository?")
+	}
+	a.core.Cfg.SetCloudEnvironment(name, repo, strings.TrimSpace(env))
+	return a.save()
+}
+
 // TestCloud probes a cloud through its agent's command, read-only (the Test button).
 func (a *App) TestCloud(name string) (*CloudTestDTO, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -166,7 +219,7 @@ func (a *App) TestCloud(name string) (*CloudTestDTO, error) {
 	}
 	if err != nil {
 		d.Error = err.Error()
-		for _, e := range []error{agent.ErrSignedOut, agent.ErrNotEligible, agent.ErrUnsupported} {
+		for _, e := range []error{agent.ErrSignedOut, agent.ErrNotEligible, agent.ErrUnsupported, agent.ErrNoEnvironment} {
 			d.Error = strings.TrimPrefix(d.Error, e.Error()+": ")
 		}
 	}
@@ -327,3 +380,10 @@ var terminal = openTerminal
 
 // SetTerminal replaces how the window opens a command in a terminal.
 func SetTerminal(f func(line string) error) { terminal = f }
+
+func nonEmptyStr(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}

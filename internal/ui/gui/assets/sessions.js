@@ -288,6 +288,7 @@ function row(e) {
   if (e.cloud) {
     bits.length = 0;
     if (e.cloud.branch) bits.push(e.cloud.branch);
+    if (e.cloud.changes) bits.push(e.cloud.changes);
     const last = e.history[e.history.length - 1];
     bits.push(last ? `${last.what.toLowerCase()} ${ago(last.when)}` : "from a pasted link");
   }
@@ -327,7 +328,9 @@ function cloudInspector(e) {
   const why = acts[0]?.why;
   const host = (c.url.match(/^https:\/\/([^/]+)/) || [])[1] || "its site";
   const kv = (label, value) => [h("dt", {}, label), h("dd", {}, value)];
-  return h("aside", { class: "inspector", "aria-label": "Cloud session details" },
+  const diffDown = (cl?.codeDown || [])[0] === "diff";
+  const noun = c.noun || "session";
+  return h("aside", { class: "inspector", "aria-label": `Cloud ${noun} details` },
     h("div", { style: "display:flex;flex-direction:column;gap:6px" },
       h("div", { style: "display:flex;gap:6px;flex-wrap:wrap;align-items:center" }, agentChip(e.agent, e.agentName), cloudChip(e.machine),
         h("span", { class: "chip st-" + k }, h("span", { class: "dot " + k }), words)),
@@ -337,14 +340,17 @@ function cloudInspector(e) {
     h("div", { style: "display:flex;flex-direction:column;gap:8px" },
       h("button", { class: "btn primary big", disabled: !!why, onclick: acts[0].run }, acts[0].label, h("span", { class: "kbd" }, "↩")),
       acts.slice(1).map((a) => h("button", { class: "btn wrap", disabled: !!why, onclick: a.run }, "Bring here and continue in ▸ ", agentChip(a.id.slice(6), a.label.replace(/^.* in /, "")))),
-      h("button", { class: "btn", disabled: !!why || !c.branch, title: c.branch ? "" : "hopsesh doesn't know its branch yet: bring it with its conversation once", onclick: () => planFor(e, { target: "", codeOnly: true }) }, "Get the code only"),
+      h("button", { class: "btn", disabled: !!why || !(c.branch || diffDown), title: c.branch || diffDown ? "" : "hopsesh doesn't know its branch yet: bring it with its conversation once", onclick: () => planFor(e, { target: "", codeOnly: true }) }, "Get the code only"),
       h("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap" }, h("button", { class: "btn", disabled: true, "aria-describedby": "arch-why" }, "Archive"),
         h("span", { id: "arch-why", class: "muted", style: "font-size:11.5px" }, `${e.agentName} archives only on ${host}`)),
       why ? h("span", { class: "warn", style: "font-size:12px" }, why) : null),
     h("div", { class: "sec" }, h("span", { class: "sec-h" }, "Repository"),
       h("dl", { class: "kv" },
         kv("Repository", c.repo ? h("span", { class: "mono", style: "font-size:12px" }, c.repo) : h("span", { class: "muted" }, "Not known yet")),
-        kv("Branch", c.branch ? h("span", { class: "mono", style: "font-size:12px" }, c.branch) : h("span", { class: "muted" }, `${e.agentName} fetches it when it brings the session`)),
+        diffDown ? kv("Started from", c.branch ? h("span", { class: "mono", style: "font-size:12px" }, c.branch) : h("span", { class: "muted" }, "Not known: its patch goes on your checkout's HEAD"))
+          : kv("Branch", c.branch ? h("span", { class: "mono", style: "font-size:12px" }, c.branch) : h("span", { class: "muted" }, `${e.agentName} fetches it when it brings the session`)),
+        c.envLabel ? kv("Environment", h("span", { class: "mono", style: "font-size:12px" }, c.envLabel)) : null,
+        c.changes ? kv("Changes", c.changes) : null,
         c.base ? kv("Base", h("span", { class: "mono", style: "font-size:12px" }, c.base.slice(0, 7))) : null,
         c.pr ? kv("PR", c.pr) : null,
         kv("State", [words, e.lastActive ? h("span", { class: "muted" }, ` · ${ago(e.lastActive)}`) : null]),
@@ -352,7 +358,10 @@ function cloudInspector(e) {
     e.history.length ? h("div", { class: "sec" }, h("span", { class: "sec-h" }, "Lineage"),
       e.history.map((x, i) => h("div", { class: "hop" }, h("span", { class: "dot" + (i === e.history.length - 1 ? " ok" : "") }),
         h("div", {}, h("div", {}, x.what), h("div", { class: "muted", style: "font-size:11px" }, when(x.when)))))) : null,
-    cl && !cl.listable ? null : h("span", { class: "muted", style: "font-size:11.5px" }, `Bringing it here makes a new worktree; ${e.agentName} copies the conversation in ${sys.terminal}. The cloud session is not changed.`));
+    cl && !cl.listable ? null : h("span", { class: "muted", style: "font-size:11.5px" }, cl?.fidelity === "native"
+      ? `Bringing it here makes a new worktree; ${e.agentName} copies the conversation in ${sys.terminal}. The cloud session is not changed.`
+      : `Bringing it here makes a new worktree with its code; hopsesh writes ${cl?.fidelity === "code" ? `the ${noun}'s title and what came of it` : "its messages"} as a new session. The cloud ${noun} is not changed.`),
+    (cl?.limits || []).map((l) => h("span", { class: "muted", style: "font-size:11.5px" }, l)));
 }
 
 function inspector() {

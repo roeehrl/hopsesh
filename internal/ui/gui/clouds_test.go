@@ -78,6 +78,18 @@ func TestCloudInTheWindow(t *testing.T) {
 	if m := a.Machines(); len(m.Clouds) != 2 || !m.Clouds[0].Allowed || m.Clouds[1].Allowed {
 		t.Fatalf("machines: %+v", m.Clouds)
 	}
+	// Codex cloud's card: its noun, what it cannot reach, and an environment per repository.
+	if err := a.SetCloudEnvironment("codex-cloud", "github.com/example/demo", "env_api"); err != nil {
+		t.Fatal(err)
+	}
+	cx := a.Machines().Clouds[1]
+	if cx.Noun != "task" || !cx.NeedsEnv || len(cx.Limits) == 0 || cx.EnvHint == "" || strings.Join(cx.CodeUp, ",") != "branch,starting-diff" ||
+		strings.Join(cx.CodeDown, ",") != "diff" || len(cx.Repos) != 1 || cx.Repos[0].Env != "env_api" || len(cx.Envs) != 1 {
+		t.Fatalf("codex card: %+v", cx)
+	}
+	if err := a.SetCloudEnvironment("nope", "github.com/example/demo", "x"); err == nil {
+		t.Fatal("an unknown cloud")
+	}
 	ct, err := a.TestCloud("claude-cloud")
 	if err != nil || !ct.OK || ct.Account != "claude.ai · max" {
 		t.Fatalf("test: %+v %v", ct, err)

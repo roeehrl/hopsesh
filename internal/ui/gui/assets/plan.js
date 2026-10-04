@@ -286,9 +286,10 @@ function renderFetch(p) {
   const target = targets.find((t) => t.id === (cur.target || own.id)) || own;
   const [fidLabel, fidKind] = f.codeOnly ? ["Code only", "warn"] : f.continueIn ? ["Lossy", "warn"] : FID[f.fidelity] || ["Lossy", "warn"];
   const add = [];
+  const noun = f.noun || "session";
   if (!f.codeOnly) add.push(f.append ? `the cloud's work added to “${f.original.title}”` : `1 ${p.agent} session here`);
   add.push("1 worktree");
-  if (f.codeOnly) add.push("1 branch");
+  if (f.codeOnly || f.diff) add.push("1 branch");
   const kv = (label, ...value) => [h("dt", {}, label), h("dd", {}, ...value)];
   const checks = (f.checks || []).map((c) => checkItem(p, c));
   fill(sheet, h("div", { class: "sheet-in" },
@@ -299,7 +300,7 @@ function renderFetch(p) {
         h("span", { style: "color:var(--accent)", "aria-label": "to" }, "→"),
         agentChip(target.id, target.name), h("span", {}, `on ${here()} (${sys.here}), in a new worktree`)),
       h("div", { class: "summary", "aria-label": "What changes" },
-        add.map((x) => h("span", { class: "add" }, "+ " + x)), h("span", { class: "none" }, "The cloud session is not changed"),
+        add.map((x) => h("span", { class: "add" }, "+ " + x)), h("span", { class: "none" }, `The cloud ${noun} is not changed`),
         h("span", { class: "spacer" }), h("span", { class: "muted" }, "Undo any time from Activity"))),
     h("div", { class: "sheet-body" },
       f.codeOnly ? null : h("section", { class: "sec", style: "border:0;padding:0;gap:12px" },
@@ -308,22 +309,27 @@ function renderFetch(p) {
             h("div", { class: "seg", role: "radiogroup", "aria-label": "Continue in" }, targets.map((t) => h("button", { role: "radio", "aria-checked": t.id === target.id ? "true" : "false",
               onclick: () => { cur.target = t.id === own.id ? "" : t.id; replan(); } }, t.name)))] : null),
         h("div", { class: "fid " + fidKind }, h("b", {}, fidLabel), h("span", {}, f.conversation)),
-        !f.continueIn && targets.length > 1 ? h("span", { class: "muted", style: "font-size:12px" }, `In ${targets[1].name} instead: copied by ${p.fromAgent}, then converted (tool calls become text).`) : null),
+        !f.continueIn && targets.length > 1 && f.terminal ? h("span", { class: "muted", style: "font-size:12px" }, `In ${targets[1].name} instead: copied by ${p.fromAgent}, then converted (tool calls become text).`) : null,
+        f.write ? h("span", { class: "muted", style: "font-size:12px" }, `hopsesh writes it as a new ${f.writer} session (${count(f.messages, "message")}), in the worktree with the ${noun}'s code.`) : null),
       h("section", { class: "sec", style: "gap:10px" }, h("span", { class: "sec-h" }, "Repository and code"),
         h("dl", { class: "kv wide" },
           kv("Repository", f.repo ? h("span", { class: "mono", style: "font-size:12px" }, f.repo) : h("span", { class: "muted" }, "Not known yet"),
             f.checkout ? h("span", { class: "muted mono", style: "font-size:11.5px" }, " · " + f.checkout) : null,
             " ", h("button", { class: "link", onclick: chooseCheckout }, f.checkout ? "Another checkout…" : "Choose its checkout…")),
-          kv("Cloud branch", f.cloudBranch ? h("span", { class: "mono", style: "font-size:12px" }, f.cloudBranch) : h("span", { class: "muted" }, `The session's own; ${p.fromAgent} fetches and checks it out`),
+          f.diff ? kv("Started from", f.cloudBranch ? h("span", { class: "mono", style: "font-size:12px" }, f.cloudBranch) : h("span", { class: "muted" }, "Not known: the patch goes on the checkout's HEAD"),
+            f.branchState === "pushed" ? h("span", { class: "muted" }, " · fetched into " + f.ref) : null)
+          : kv("Cloud branch", f.cloudBranch ? h("span", { class: "mono", style: "font-size:12px" }, f.cloudBranch) : h("span", { class: "muted" }, `The session's own; ${p.fromAgent} fetches and checks it out`),
             f.branchState === "pushed" ? h("span", { class: "muted" }, " · fetched into " + f.ref) : null),
           f.worktree ? kv("New worktree", h("span", { class: "mono", style: "font-size:12px" }, f.worktree)) : null,
-          kv("Local branch", f.fastForward ? [h("span", { class: "mono", style: "font-size:12px" }, f.localBranch), h("span", { class: "muted" }, " is here already: it moves forward to the cloud's work")]
+          kv("Local branch", f.diff ? [h("span", { class: "mono", style: "font-size:12px" }, f.localBranch || `hopsesh/from/${f.cloud}/${f.session}`), h("span", { class: "muted" }, ` · the ${noun}'s patch${f.changes ? " (" + f.changes + ")" : ""}, committed`)]
+            : f.fastForward ? [h("span", { class: "mono", style: "font-size:12px" }, f.localBranch), h("span", { class: "muted" }, " is here already: it moves forward to the cloud's work")]
             : f.localBranch && f.localBranch !== f.cloudBranch ? [h("span", { class: "mono", style: "font-size:12px" }, f.localBranch), h("span", { class: "muted" }, " renamed from " + f.cloudBranch)]
             : f.rename ? h("span", {}, "A claude/… branch is renamed to ", h("span", { class: "mono", style: "font-size:12px" }, `hopsesh/from/${f.cloud}/…`)) : h("span", { class: "muted" }, "Kept as the cloud names it")),
           f.base ? kv("Starts at", h("span", { class: "ok", style: "font-weight:600" }, "✓ "), f.baseNote || h("span", { class: "mono" }, f.base.slice(0, 7))) : null),
         f.command ? h("div", { class: "runbox" }, h("span", { style: "font-size:12px;font-weight:500" }, `Runs in ${sys.terminal}`), h("span", { class: "mono", style: "font-size:11.5px;overflow-wrap:anywhere" }, f.command)) : null),
       h("section", { class: "sec", style: "gap:10px" }, h("span", { class: "sec-h" }, "Options"),
-        f.cloudBranch || o.codeOnly ? check("Fetch the cloud branch only, without the conversation", "codeOnly", "Into a new worktree; nothing runs in a terminal.")
+        f.diff ? check("Get the code only, without the conversation", "codeOnly", `The ${noun}'s patch, committed on a new branch in a new worktree.`)
+        : f.cloudBranch || o.codeOnly ? check("Fetch the cloud branch only, without the conversation", "codeOnly", "Into a new worktree; nothing runs in a terminal.")
           : h("label", { class: "opt", style: "cursor:default" }, h("input", { type: "checkbox", disabled: true }),
             h("span", {}, h("b", { class: "muted" }, "Fetch the cloud branch only, without the conversation"), h("span", { class: "muted" }, "hopsesh knows its branch once it has been brought with its conversation."))),
         f.canAppend ? check(`Add the cloud's work to “${f.original.title}” instead`, "append", "It is as it was handed off, so only the new turns are added; its own turns stay exactly as they were.") : null),
@@ -332,9 +338,10 @@ function renderFetch(p) {
         h("ul", { style: "margin:6px 0 0;padding-left:18px;font-size:12.5px" }, f.loss.map((l) => h("li", {}, cap(l))))) : null),
     h("footer", { class: "sheet-foot" },
       h("span", { class: "muted", style: "font-size:12px;flex:1 1 260px" }, f.codeOnly ? "The code comes into a new worktree; your checkout stays as it is."
+        : !f.terminal ? "Nothing runs in a terminal; your checkout stays as it is."
         : `${p.fromAgent} copies it in your terminal; hopsesh picks it up when it appears.`),
       h("button", { class: "btn", onclick: () => sheet.close() }, "Cancel"),
-      h("button", { class: "btn primary big", id: "go", disabled: blocked, onclick: apply }, h("span", {}, f.codeOnly ? "Get the code" : `Bring here in ${sys.terminal}`), h("span", { class: "kbd" }, keys("mod+enter"))))));
+      h("button", { class: "btn primary big", id: "go", disabled: blocked, onclick: apply }, h("span", {}, f.codeOnly ? "Get the code" : f.terminal ? `Bring here in ${sys.terminal}` : "Bring here"), h("span", { class: "kbd" }, keys("mod+enter"))))));
 }
 
 function checkItem(p, c) {
@@ -344,6 +351,7 @@ function checkItem(p, c) {
   if (/choose its checkout here/.test(c.text)) fix.push(h("button", { class: "btn small", onclick: chooseCheckout }, "Choose its checkout…"));
   if (/no code to bring/.test(c.text) && cur.opts.codeOnly) fix.push(h("button", { class: "btn small", onclick: () => set("codeOnly", false) }, "Bring the conversation only"));
   if (/claude\.ai login/.test(c.text)) fix.push(h("span", { class: "muted", style: "font-size:12px" }, "Run ", h("span", { class: "mono" }, "claude /login"), ", then Refresh"));
+  if (/ChatGPT login/.test(c.text)) fix.push(h("span", { class: "muted", style: "font-size:12px" }, "Run ", h("span", { class: "mono" }, "codex login"), ", then Refresh"));
   return item(kind, cap(c.text), "", fix.length ? h("div", { style: "display:flex;gap:8px;flex-wrap:wrap;align-items:center" }, fix) : null);
 }
 

@@ -116,8 +116,11 @@ type FetchPlan struct {
 	Writer   string `json:"writer,omitempty"` // the agent that gets it ("Codex")
 	Messages int    `json:"messages,omitempty"`
 	// Changes sums up the patch ("+12 −3 · 2 files").
-	Changes  string        `json:"changes,omitempty"`
-	Noun     string        `json:"noun"` // what the cloud calls its sessions ("task")
+	Changes string `json:"changes,omitempty"`
+	Noun    string `json:"noun"` // what the cloud calls its sessions ("task")
+	// Terminal: the driver needs the user's terminal (Claude Code's teleport); otherwise
+	// hopsesh brings it all by itself.
+	Terminal bool          `json:"terminal,omitempty"`
 	Rename   bool          `json:"rename"`
 	CodeOnly bool          `json:"codeOnly,omitempty"`
 	Run      agent.Command `json:"run"`
@@ -152,7 +155,10 @@ func BuildFetch(ctx context.Context, in FetchInput, opt Options) (*Plan, error) 
 	}
 	fp := &FetchPlan{Cloud: cl.Name, CloudTitle: cl.Title, Session: s.Key.Session, URL: s.URL, Fidelity: cl.Down, Repo: s.Repo,
 		CloudBranch: s.Branch, BranchState: BranchUnknown, Rename: opt.RenameVendor, CodeOnly: opt.CodeOnly, Relation: RelationNew,
-		Noun: cl.SessionNoun(), Changes: s.Changes}
+		Noun: cl.SessionNoun(), Changes: s.Changes, Terminal: needs(cl, agent.NeedTerminal)}
+	if _, canFetch := in.Module.(agent.CloudFetcher); canFetch && s.Key.Session != "" && diffDown(cl, s.Branch) {
+		fp.Diff = true // the code comes as the cloud's patch, whichever checkout it lands in
+	}
 	p := &Plan{Kind: KindFetch, Key: s.Key, Title: title, Agent: spec.Name, Source: Endpoint{Location: cl.Name},
 		Target: Endpoint{Location: in.Machine.Name, OS: in.Machine.Facts.OS, Version: in.Install.Version}, Options: opt, Mark: MarkOff,
 		Fetch: fp, fetchIn: &in}
@@ -316,7 +322,7 @@ func diffDown(cl agent.Cloud, branch string) bool {
 // ("" when there is none to use).
 func planFetchRepo(ctx context.Context, in FetchInput, fp *FetchPlan, check func(string, string)) string {
 	if in.Checkout == "" {
-		check("err", "hopsesh doesn't know which repository this cloud session works on; choose its checkout here")
+		check("err", fmt.Sprintf("hopsesh doesn't know which repository this cloud %s works on; choose its checkout here", fp.Noun))
 		return ""
 	}
 	states, err := repos.ProbeLocal(ctx, []string{in.Checkout}, in.Worktrees)
@@ -346,8 +352,6 @@ func planFetchRepo(ctx context.Context, in FetchInput, fp *FetchPlan, check func
 // starts at and the branch the code ends up on.
 func planFetchBranch(ctx context.Context, in FetchInput, fp *FetchPlan, opt Options, top string, check func(string, string)) {
 	noCode := "The cloud session never pushed its work, so there is no code to bring"
-	_, canFetch := in.Module.(agent.CloudFetcher)
-	fp.Diff = canFetch && fp.Session != "" && diffDown(in.Cloud, fp.CloudBranch)
 	if b := fp.CloudBranch; b != "" {
 		sha, err := repos.RemoteBranch(ctx, top, b)
 		switch {
