@@ -116,7 +116,7 @@ func TestTargets(t *testing.T) {
 		if !used[g] {
 			t.Errorf("group %s has no targets", g)
 		}
-		if !strings.Contains(string(wf), "- group: "+g+"\n") {
+		if !strings.Contains(strings.ReplaceAll(string(wf), "\r\n", "\n"), "- group: "+g+"\n") { // Windows checks out CRLF
 			t.Errorf("group %s has no review in drift.yml", g)
 		}
 	}
