@@ -23,7 +23,16 @@ var (
 	devinWord = regexp.MustCompile(`\b(devin-[0-9a-f]{16,64})\b`)
 )
 
-// SendCloud starts a Devin Cloud session with the briefing as its first prompt:
+// SendCloud starts the session without a terminal (send) and returns it.
+func (m *Module) SendCloud(ctx context.Context, h agent.Host, _ agent.Install, r agent.SendRequest) (agent.Sent, error) {
+	cs, err := m.send(ctx, h, r)
+	if err != nil {
+		return agent.Sent{}, err
+	}
+	return agent.Sent{Session: cs}, nil
+}
+
+// send starts a Devin Cloud session with the briefing as its first prompt:
 // `devin --cloud --respect-workspace-trust false -p -- <briefing>` in r.Dir, a worktree on
 // the handoff branch. The docs say `--cloud -p` "starts a session, sends one prompt, prints
 // Devin's response to stdout, and exits. The session persists". `--respect-workspace-trust
@@ -36,7 +45,7 @@ var (
 // the reply is read; otherwise the session is the cloud session `devin list --format json`
 // (in r.Dir) shows that it did not show before. A reply that takes longer than sendWait is
 // not waited for: the session is looked up the same way.
-func (m *Module) SendCloud(ctx context.Context, h agent.Host, _ agent.Install, r agent.SendRequest) (agent.CloudSession, error) {
+func (m *Module) send(ctx context.Context, h agent.Host, r agent.SendRequest) (agent.CloudSession, error) {
 	host, repo, _ := strings.Cut(r.Repo, "/")
 	switch {
 	case !strings.HasPrefix(r.Brief, agent.NotePrefix):

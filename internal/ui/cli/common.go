@@ -47,6 +47,7 @@ func newRun(cmd *cobra.Command) (*run, error) {
 	r.jsonOut, _ = cmd.Flags().GetBool("json")
 	r.yes, _ = cmd.Flags().GetBool("yes")
 	r.pwStdin, _ = cmd.Flags().GetBool("password-stdin")
+	r.app.Steps = r.stepRunner()
 	return r, nil
 }
 
@@ -86,9 +87,19 @@ func ctxTimeout(minutes int) (context.Context, context.CancelFunc) {
 // scan reads the machines a command needs: one host (and always this machine, which is
 // where sessions arrive), or every allowed machine.
 func (r *run) scan(cmd *cobra.Command, only string, skipGit bool) *app.Inventory {
+	return r.scanWith(cmd, only, app.ScanOptions{SkipGit: skipGit})
+}
+
+// scanFor is scan for a command about the sessions ref names: git is asked only about
+// their folders (see App.GitFor), so an unrelated folder git is slow to read does not
+// hold the command up.
+func (r *run) scanFor(cmd *cobra.Command, only string, ref app.Ref) *app.Inventory {
+	return r.scanWith(cmd, only, app.ScanOptions{GitFor: r.app.GitFor(ref)})
+}
+
+func (r *run) scanWith(cmd *cobra.Command, only string, o app.ScanOptions) *app.Inventory {
 	ctx, cancel := ctxTimeout(3)
 	defer cancel()
-	o := app.ScanOptions{SkipGit: skipGit}
 	if only != "" && only != "local" && only != "." {
 		o.Hosts = []string{only, app.LocalName()}
 		if h := r.app.Cfg.FindHost(only); h != nil && !h.Allowed {

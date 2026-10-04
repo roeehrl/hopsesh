@@ -105,6 +105,12 @@ so). `{{.Bin}} clouds --json` lists the clouds and their state.
    changes could go with the task (`--starting-diff`) instead of on a new branch; mention it,
    and add it only if the user wants it.
 3. After a clear yes: `{{.Bin}} handoff <ref> --to <cloud> --json --yes` with the same flags.
+   `claude-cloud` is the exception: Claude Code starts a cloud session only in a terminal the
+   user answers (`handoff.terminal`; it may ask whether they trust hopsesh's hand-off folder,
+   `handoff.folder`), so from here the plan has a blocker saying so. You cannot run that
+   step and must not try: give the user the command to run in their own terminal,
+   `{{.Bin}} handoff <ref> --to claude-cloud` with the same flags (or the app's Hand off ▸),
+   and let them answer Claude Code there.
 4. Report `handoff.url`, `handoff.branch`, what stayed (`handoff.stayed`), and that
    `{{.Bin}} undo <result.journal>` deletes the branch and the mark but leaves the cloud
    session (or Codex cloud task) to archive on the web. If `error` is set, report
@@ -117,9 +123,10 @@ branch in a new worktree, and its title and what came of it as a new local sessi
 messages and steps stay in the cloud (`fetch.loss`). A Copilot session's log and an Amp
 thread come back as text, written as a new session of the agent they were handed off from
 (else Claude Code; `--in <agent>` if the user names another), with Copilot's pull request
-branch in a new worktree. Jules and Devin bring back their code only: pass `--code-only`. A message to a running Claude Code cloud
-session (`{{.Bin}} followup claude-cloud:<id> "<text>" --yes`) starts a paid turn there: only
-when the user asks for it, with the exact text. Codex cloud takes no follow-ups from hopsesh.
+branch in a new worktree. Jules and Devin bring back their code only: pass `--code-only`. No
+cloud takes follow-ups from hopsesh: Claude Code has no command that sends one outside its
+own terminal session (`handoff.noFollowUp` says so), so the user writes to a Claude Code
+cloud session on its page (`handoff.url`).
 
 Other flags are in [reference.md](reference.md).
 

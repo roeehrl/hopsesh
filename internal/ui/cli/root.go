@@ -44,6 +44,7 @@ Unofficial; not affiliated with or endorsed by Anthropic or OpenAI.`,
 	root.AddCommand(
 		versionCmd(), updateCmd(), agentsCmd(), hostsCmd(), cloudsCmd(), trustCmd(), doctorCmd(),
 		lsCmd(), showCmd(), pullCmd(), planCmd(), pushCmd(), handoffCmd(), followupCmd(), receiveCmd(), peerCmd(), undoCmd(), skillCmd(),
+		terminalStepCmd(),
 	)
 	return root
 }

@@ -66,6 +66,7 @@ func TestScenarios(t *testing.T) {
 		},
 		Cmds: map[string]func(ts *testscript.TestScript, neg bool, args []string){
 			"agent-turn":     agentTurn,
+			"at-terminal":    atTerminal,
 			"claude-session": claudeSession,
 			"cloud-world":    cloudWorld,
 			"cloud-work":     cloudWork,

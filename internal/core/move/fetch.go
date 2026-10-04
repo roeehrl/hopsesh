@@ -341,6 +341,10 @@ func planFetchRepo(ctx context.Context, in FetchInput, fp *FetchPlan, check func
 		return ""
 	}
 	states, err := repos.ProbeLocal(ctx, []string{in.Checkout}, in.Worktrees)
+	if err == nil && len(states) == 1 && states[0].Error != "" {
+		check("err", fmt.Sprintf("hopsesh could not read %s (%s); try again", in.Checkout, states[0].Error))
+		return ""
+	}
 	if err != nil || len(states) == 0 || !states[0].IsRepo {
 		check("err", in.Checkout+" is not a git checkout")
 		return ""

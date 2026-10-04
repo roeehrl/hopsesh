@@ -276,7 +276,7 @@ func showCmd() *cobra.Command {
 				return err
 			}
 			ref := app.ParseRef(args[0])
-			inv := r.scan(cmd, ref.Machine, false)
+			inv := r.scanFor(cmd, ref.Machine, ref)
 			defer inv.Close()
 			e, err := inv.Find(ref)
 			if err != nil {
@@ -304,6 +304,8 @@ func showCmd() *cobra.Command {
 				if g.LinkedWorktree {
 					r.printf("  worktree of  %s (main folder on %s)\n", g.MainWorktree, nonEmpty(g.MainBranch, "detached"))
 				}
+			} else if e.GitError != "" {
+				r.printf("  repository   unknown: %s\n", e.GitError)
 			}
 			if l := e.Lineage; l != nil {
 				r.printf("  lineage      %d cop(ies), %d hop(s)\n", len(l.Replicas), len(l.Hops))

@@ -33,12 +33,13 @@ All notable changes to this project are documented here. The format follows
   is marked, the hop is recorded in its lineage, and `hopsesh undo` deletes the branch (only
   while the cloud hasn't pushed to it) and the mark. Works for sessions on your other
   machines too: the snapshot and the push happen there, over SSH.
-- `hopsesh followup claude-cloud:<id> "<text>"` sends a cloud session a message.
+- `hopsesh followup <cloud>:<id> "<text>"` sends a cloud session a message, for a cloud
+  whose command line can send one (Claude Code's and Codex's cannot; see Fixed).
 - In the app: **Hand off ▸** on a session (every cloud, a disabled one with its reason),
   the hand-off sheet (the editable briefing, the branch, what stays on this Mac, the
-  options), the steps as they run (and which one failed), and a done screen with the link,
-  Undo and **Send a follow-up**; *Hand off to…* in the command palette; hand-offs in
-  Activity. In the terminal UI: `c` hands the selected session off.
+  options), the steps as they run (and which one failed), and a done screen with the link
+  and Undo; *Hand off to…* in the command palette; hand-offs in Activity. In the terminal
+  UI: `c` hands the selected session off.
 - The skill handles "hand this off to Claude Code cloud" (it plans first and asks), and its
   approval rules let `clouds --json` and `clouds test` run without asking while `handoff`
   and `followup` always ask.
@@ -99,10 +100,45 @@ All notable changes to this project are documented here. The format follows
   and fetch, and `agent.LinksIn` reads a driver's links on an exact host only.
 
 ### Fixed
+- Handing a session off to Claude Code cloud works with the real Claude Code. hopsesh ran
+  `claude -p <briefing> --cloud --output-format json` through pipes, which Claude Code
+  2.1.28x refuses ("--cloud cannot be combined with --print", and without a terminal
+  "--cloud requires an interactive terminal"). The hand-off now runs `claude --cloud
+  "<briefing>"` in your terminal, after the snapshot and the push, and reads the session's
+  link Claude Code prints (`View: https://claude.ai/code/session_…`); the link and id go
+  into the journal and the lineage as before. Claude Code may first ask whether you trust
+  the folder: you answer it (hopsesh never does, and never changes Claude Code's settings to
+  skip it). The folder is hopsesh's hand-off folder for the repository, the same each time
+  (a worktree of your checkout, reset to the handoff branch for each hand-off, one hand-off
+  at a time), so Claude Code asks once per repository; your checkout stays as it is. If
+  hopsesh sees no link (you said no, or Claude Code stopped), it asks you to paste it, or
+  stops at "Start cloud session" with a message that says what happened, and undo removes
+  the pushed branch. The command line relays the terminal (with `--json`, on standard
+  error); the terminal UI hands the terminal over for the step and comes back afterwards
+  instead of quitting; the app opens a terminal window for the step, shows what happens
+  there, waits for the link and also takes a pasted one. Without a terminal (an agent
+  running hopsesh), the plan says you have to run the hand-off yourself.
+- "Send a follow-up" to a Claude Code cloud session is gone: Claude Code has no command that
+  sends one outside its own terminal session (its `-p … --cloud <id>` form is refused like
+  the hand-off's was). The app's done screen, the command line and the skill say so and
+  point to the session's page instead.
+- `scripts/cloud-smoke.sh`: a hand-off or a bring-back that failed after it pushed a branch
+  now leaves the journal for the cleanup, which undoes it (the branch had to be deleted by
+  hand). The hand-off check runs `claude --cloud` in your terminal (answer its trust
+  question; the script goes on when it exits) and no longer sends a follow-up.
 - Reading a Windows machine with many sessions could stall for 30 seconds and then fail:
   the long script hopsesh sent there over standard input sometimes never arrived, because
   PowerShell with redirected input can read it first. Such a script is now uploaded over
   SFTP, run from the file and removed.
+- One session folder that git could not read quickly, such as a folder in iCloud Drive
+  whose files are not downloaded, made every scan wait for it, and with it `hopsesh ls`,
+  `plan`, `pull` and `handoff`, sometimes for minutes. Each git call hopsesh makes to read a
+  folder now gets 20 seconds to answer (30 seconds on another machine over SSH), on macOS,
+  Linux and Windows; a folder that is slow but answers is still read in full. A folder
+  where git does not answer in time is reported as such, not as one without a repository:
+  moving or handing off that session stops and says why, and the other sessions are not
+  affected. `pull`, `plan`, `handoff`, `push` and `show` now ask git only about the folders
+  of the session they name.
 
 ### Changed
 - The macOS app's self-update opens the new disk image with `diskutil image attach` (on

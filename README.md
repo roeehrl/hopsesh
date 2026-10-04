@@ -278,9 +278,19 @@ clones:
 
 ```sh
 hopsesh plan claude/<id> --to claude-cloud     # what goes, what stays; changes nothing
-hopsesh handoff claude/<id> --to claude-cloud  # asks first (--yes for scripts)
-hopsesh followup claude-cloud:session_01… "also add a test"
+hopsesh handoff claude/<id> --to claude-cloud  # asks first; Claude Code then starts it in this terminal
 ```
+
+Claude Code starts a cloud session only in a terminal, so the hand-off runs
+`claude --cloud "<briefing>"` in yours, in hopsesh's hand-off folder for the repository (one
+folder per repository, a worktree of your checkout that hopsesh resets each time). The first
+time, Claude Code asks whether you trust that folder: you answer it, hopsesh never does and
+never changes Claude Code's settings to skip it. hopsesh only reads the session's link Claude
+Code prints, and if it sees none (you said no, or something else went wrong) it asks you to
+paste the link, or stops so that undo can remove the branch. The terminal UI hands the
+terminal over for that step and comes back afterwards; the app opens a terminal window for
+it, waits for the link, and takes a pasted one too. Run from an agent, without a terminal,
+the plan says that you have to run it yourself.
 
 When your branch is clean and already on GitHub, the cloud takes it as it is. Otherwise
 hopsesh pushes a `hopsesh/handoff/<date>-<id>` branch with a snapshot of the unpushed commits
@@ -293,9 +303,10 @@ itself goes on the branch only if you ask (`--history-file`, which writes
 
 The session here is marked "↪ continued in Claude Code on claude-cloud". `hopsesh undo`
 deletes the branch (only while the cloud hasn't pushed to it) and the mark; the cloud session
-itself stays in Claude Code on the web until you archive it there. A follow-up starts a turn
-in the cloud, on your plan. In the app: **Hand off ▸** on a session, or *Hand off to…* in the
-command palette; in the terminal UI, `c`. Bring the work home later as above.
+itself stays in Claude Code on the web until you archive it there. hopsesh sends a Claude Code
+cloud session no follow-ups: Claude Code has no command for one outside its own terminal
+session, so write to it on its page. In the app: **Hand off ▸** on a session, or *Hand off
+to…* in the command palette; in the terminal UI, `c`. Bring the work home later as above.
 
 ## Codex cloud, both ways
 
@@ -341,7 +352,8 @@ running on the studio?". The agent plans first and **moves only after you say ye
 run without asking, while `pull`, `push`, `handoff`, `followup` and `undo` **always ask**, even
 in auto mode. "Hand this off to Claude Code cloud" (or to Codex cloud, Copilot, Jules, Devin
 or Amp) works the same way: the agent shows the plan and what stays behind, asks you for the
-environment Codex cloud needs, then hands it off after your yes. The skill
+environment Codex cloud needs, then hands it off after your yes (to Claude Code cloud, it
+gives you the command to run in your own terminal, where Claude Code starts the session). The skill
 never starts another agent and never handles passwords: for a machine that logs in with a
 password, the agent asks you to run `hopsesh hosts setup-key` yourself. `hopsesh skill remove`
 takes it out again. Details: [docs/design.md §13](docs/design.md#13-the-hopsesh-skill-for-every-agent)

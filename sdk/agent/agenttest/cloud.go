@@ -39,6 +39,11 @@ type CloudOptions struct {
 	// Request is the hand-off RunCloud sends, for a driver that starts from a real checkout
 	// (claude --cloud clones the current branch of Dir's repository); nil: a made-up one.
 	Request func(c agent.Cloud) agent.SendRequest
+	// Step runs a terminal step (a SendCloud's Sent.Run) the way the user's terminal would,
+	// answering what the driver asks as the user would, and returns what it printed. For
+	// a module whose SendCloud returns one; RunCloud adds FailEnv to the command's Env when
+	// it plays a failure.
+	Step func(c agent.Command) agent.StepOutput
 	// Work plays the cloud's agent on the session SendCloud started, before RunCloud fetches
 	// it: a cloud that has nothing to bring until its agent worked (a patch) needs it; nil
 	// fetches the session as it was sent.
@@ -151,12 +156,48 @@ func RunCloudWith(t *testing.T, m agent.Module, programs Programs, o CloudOption
 		return agent.Confine(fh, spec, in), in
 	}
 
+	reader, okR := m.(agent.CloudStepReader)
+	// send starts a session: SendCloud, then its terminal step when it returns one.
+	send := func(t *testing.T, h agent.Host, in agent.Install, c agent.Cloud, r agent.SendRequest, fail string) (agent.CloudSession, error) {
+		t.Helper()
+		sent, err := sender.SendCloud(ctx, h, in, r)
+		if err != nil || sent.Run == nil {
+			return sent.Session, err
+		}
+		run := *sent.Run
+		switch {
+		case !okR:
+			t.Fatal("SendCloud returns a terminal step, so the module implements CloudStepReader")
+		case len(run.Argv) == 0 || run.Argv[0] != c.Driver:
+			t.Fatalf("a terminal step runs the cloud's driver %s, not %v", c.Driver, run.Argv)
+		case run.Dir != r.Dir:
+			t.Errorf("the terminal step runs in %q, not in the request's folder %q", run.Dir, r.Dir)
+		case o.Step == nil:
+			t.Fatal("SendCloud returns a terminal step: give RunCloudWith a Step that runs it")
+		}
+		for _, a := range append(append([]string(nil), run.Argv...), run.Env...) {
+			if tokenLike.MatchString(a) {
+				t.Errorf("a terminal step carries something that looks like a credential: %q", a)
+			}
+		}
+		if !strings.Contains(strings.Join(run.Argv, " "), r.Brief) {
+			t.Error("the terminal step does not carry the briefing")
+		}
+		if fail != "" {
+			run.Env = append(append([]string(nil), run.Env...), FailEnv+"="+fail)
+		}
+		mu.Lock()
+		calls = append(calls, strings.Join(run.Argv, " ")+" | "+strings.Join(run.Env, " "))
+		mu.Unlock()
+		return reader.ReadStep(c.Name, o.Step(run))
+	}
+
 	for _, c := range spec.Clouds {
 		t.Run(c.Name, func(t *testing.T) {
 			h, in := setup(t, "")
 			var id agent.SessionID
 			if okS {
-				cs, err := sender.SendCloud(ctx, h, in, o.request(c))
+				cs, err := send(t, h, in, c, o.request(c), "")
 				if err != nil {
 					t.Fatalf("SendCloud: %v", err)
 				}
@@ -264,7 +305,7 @@ func RunCloudWith(t *testing.T, m agent.Module, programs Programs, o CloudOption
 					}
 				}
 				if okS {
-					if _, err := sender.SendCloud(ctx, h, in, o.request(c)); !errors.Is(err, want) {
+					if _, err := send(t, h, in, c, o.request(c), fail); !errors.Is(err, want) {
 						t.Errorf("SendCloud while %s: want %v, got %v", fail, want, err)
 					}
 				}
@@ -276,25 +317,25 @@ func RunCloudWith(t *testing.T, m agent.Module, programs Programs, o CloudOption
 			}
 			if okS && needs(c, agent.NeedEnvironment) {
 				h, in := setup(t, "no-env")
-				if _, err := sender.SendCloud(ctx, h, in, o.request(c)); !errors.Is(err, agent.ErrNoEnvironment) {
+				if _, err := send(t, h, in, c, o.request(c), "no-env"); !errors.Is(err, agent.ErrNoEnvironment) {
 					t.Errorf("SendCloud to an environment the cloud does not have: want ErrNoEnvironment, got %v", err)
 				}
 				r := o.request(c)
 				r.Env = ""
-				if _, err := sender.SendCloud(ctx, h, in, r); !errors.Is(err, agent.ErrNoEnvironment) {
+				if _, err := send(t, h, in, c, r, "no-env"); !errors.Is(err, agent.ErrNoEnvironment) {
 					t.Errorf("SendCloud without an environment: want ErrNoEnvironment, got %v", err)
 				}
 			}
 			if okS {
 				h, in := setup(t, "repo-mismatch")
-				if _, err := sender.SendCloud(ctx, h, in, o.request(c)); !errors.Is(err, agent.ErrRepoUnsupported) {
+				if _, err := send(t, h, in, c, o.request(c), "repo-mismatch"); !errors.Is(err, agent.ErrRepoUnsupported) {
 					t.Errorf("SendCloud to a repository the cloud cannot clone: want ErrRepoUnsupported, got %v", err)
 				}
 			}
 			if okL {
 				h, in := setup(t, "")
 				if okS {
-					if _, err := sender.SendCloud(ctx, h, in, o.request(c)); err != nil {
+					if _, err := send(t, h, in, c, o.request(c), ""); err != nil {
 						t.Fatal(err)
 					}
 				}

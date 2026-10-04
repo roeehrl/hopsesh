@@ -18,6 +18,7 @@ func TestLinksIn(t *testing.T) {
 		"http://ampcode.com/threads/T-7",
 		"https://evilampcode.com/threads/T-8",
 		"(see https://AmpCode.com/threads/T-9)",
+		"evil.example/x=https://ampcode.com/threads/T-10",
 	}, "\n")
 	var got []string
 	for _, u := range LinksIn(text, "ampcode.com") {

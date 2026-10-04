@@ -99,6 +99,12 @@ type HandoffInput struct {
 	// Tester probes the cloud read-only in the module's place (a recent probe, so replanning
 	// does not ask the vendor each time); nil: the module's CloudTester runs.
 	Tester func(context.Context) (agent.CloudTest, error)
+	// Folder is the repository's hand-off folder here, where the driver runs
+	// (repos.HandoffFolder; "": a temporary one).
+	Folder string
+	// Terminal: the front end can run a terminal step (Env.Step); a cloud whose driver needs
+	// one (NeedTerminal) cannot be handed off without it.
+	Terminal bool
 }
 
 // EnvChoice is a cloud environment the user can pick for a hand-off.
@@ -191,10 +197,15 @@ type HandoffPlan struct {
 	Remember bool `json:"remember,omitempty"`
 	Attempts int  `json:"attempts,omitempty"` // asked of the cloud (0: its default)
 	// Noun is what the cloud calls its sessions ("task"); Follow: it takes follow-ups from
-	// hopsesh; Limits are what hopsesh cannot reach there.
-	Noun   string   `json:"noun"`
-	Follow bool     `json:"follow,omitempty"`
-	Limits []string `json:"limits,omitempty"`
+	// hopsesh, else NoFollowUp may say why; Limits are what hopsesh cannot reach there.
+	Noun       string   `json:"noun"`
+	Follow     bool     `json:"follow,omitempty"`
+	NoFollowUp string   `json:"noFollowUp,omitempty"`
+	Limits     []string `json:"limits,omitempty"`
+	// Terminal says, for a cloud whose driver starts the session in the user's terminal,
+	// what happens there (the driver may ask whether Folder is trusted; the user answers).
+	Terminal string `json:"terminal,omitempty"`
+	Folder   string `json:"folder,omitempty"`
 	// Steps are what applying does, in order (Step*).
 	Steps []string `json:"steps"`
 	// Loss is everything that stays here, for the loss list.
@@ -250,9 +261,13 @@ type HandoffResult struct {
 	Manual   string `json:"manual"`
 	MarkText string `json:"markText,omitempty"`
 	Hint     string `json:"hint"`
-	// Noun is what the cloud calls its sessions ("task"); Follow: it takes follow-ups.
-	Noun   string `json:"noun"`
-	Follow bool   `json:"follow,omitempty"`
+	// Noun is what the cloud calls its sessions ("task"); Follow: it takes follow-ups, else
+	// NoFollowUp may say why.
+	Noun       string `json:"noun"`
+	Follow     bool   `json:"follow,omitempty"`
+	NoFollowUp string `json:"noFollowUp,omitempty"`
+	// Pasted: the session's link came from the user, not from what the driver printed.
+	Pasted bool `json:"pasted,omitempty"`
 	// Env and EnvName are the environment it runs in; Attempts, how many were asked for.
 	Env      string `json:"env,omitempty"`
 	EnvName  string `json:"envName,omitempty"`
@@ -276,7 +291,10 @@ func BuildHandoff(ctx context.Context, in HandoffInput, opt Options) (*Plan, err
 		HistoryFile: opt.HistoryFile, HistoryPath: HistoryPath, CanBundle: hasWay(cl.CodeUp, agent.ViaBundle),
 		Conversation: "The cloud agent receives a briefing, not this conversation. Tool calls and hidden reasoning stay here.",
 		Usage:        fmt.Sprintf("Cloud %ss use your plan's allowance.", cl.SessionNoun()), Noun: cl.SessionNoun(), Follow: follows,
-		Limits: cl.Limits, Attempts: opt.Attempts}
+		Limits: cl.Limits, Attempts: opt.Attempts, Folder: in.Folder}
+	if !follows {
+		hp.NoFollowUp = cl.NoFollowUp
+	}
 	p := &Plan{Kind: KindHandoff, Key: s.Key, Title: s.Title, Agent: spec.Name, Live: in.Live.State == agent.Live, Options: opt,
 		Source:  Endpoint{Location: src.Machine.Name, OS: src.Machine.Facts.OS, CWD: s.CWD, Path: s.Path, Version: s.AgentVersion},
 		Target:  Endpoint{Location: cl.Name, Version: in.Install.Version},
@@ -374,6 +392,14 @@ func BuildHandoff(ctx context.Context, in HandoffInput, opt Options) (*Plan, err
 		planHandoffCode(ctx, p, in, opt, check)
 	}
 	planHandoffEnv(p, in, opt, check)
+	// The driver's terminal, after the code is planned (the plan still shows it).
+	if needs(cl, agent.NeedTerminal) {
+		hp.Terminal = fmt.Sprintf("%s starts the %s in a terminal: it runs `%s` in hopsesh's hand-off folder for this repository, where it may first ask whether you trust that folder. You answer it there; hopsesh only reads the %s's link it prints.",
+			target.Name, cl.SessionNoun(), cl.Driver, cl.SessionNoun())
+		if !in.Terminal {
+			check("err", fmt.Sprintf("%s starts the %s only in a terminal you can answer, and this has none: run the hand-off in your own terminal (hopsesh handoff … --to %s), or from the app", target.Name, cl.SessionNoun(), cl.Name))
+		}
+	}
 
 	// The conversation.
 	planBrief(ctx, p, in, opt, check)
@@ -716,7 +742,7 @@ func applyHandoff(ctx context.Context, p *Plan, env Env) (*Result, error) {
 		Code: string(hp.Code), Reuse: hp.Reuse, Tokens: hp.Tokens, Masked: hp.Masked, Snapshot: "",
 		Manual: fmt.Sprintf("The %s stays in %s; archive it there if you want it gone.", hp.Noun, cloudPlace(cl)),
 		Hint:   fmt.Sprintf("When it finishes: Clouds → %s → Bring here", cl.Title),
-		Noun:   hp.Noun, Follow: hp.Follow, Env: hp.Env, EnvName: hp.EnvName, Attempts: hp.Attempts}
+		Noun:   hp.Noun, Follow: hp.Follow, NoFollowUp: hp.NoFollowUp, Env: hp.Env, EnvName: hp.EnvName, Attempts: hp.Attempts}
 	for _, st := range hp.Steps {
 		hr.Steps = append(hr.Steps, HandoffStep{Name: st, Label: stepLabels[st], State: StepTodo})
 	}
@@ -821,15 +847,39 @@ func applyHandoff(ctx context.Context, p *Plan, env Env) (*Result, error) {
 			return fail(StepStart, startFailed(hr, target, cl, "hopsesh could not make the starting diff: "+firstLine(err.Error())), err)
 		}
 	}
-	dir, done, err := repos.DriverDir(ctx, checkout, remoteURL, hp.Branch, start, keep)
+	waiting := func() {
+		if env.Progress != nil {
+			env.Progress("Waiting for another hand-off of " + nonEmpty(hp.Repo, "this repository") + " to finish with its folder")
+		}
+	}
+	dir, done, err := repos.DriverDir(ctx, repos.DriverOptions{Folder: in.Folder, Checkout: checkout, RemoteURL: remoteURL, Branch: hp.Branch,
+		Start: start, Keep: keep, Waiting: waiting})
 	if err != nil {
 		return fail(StepStart, startFailed(hr, target, cl, "hopsesh could not prepare a worktree for it: "+firstLine(err.Error())), err)
 	}
-	cs, err := in.Module.(agent.CloudSender).SendCloud(ctx, in.Host, in.Install, agent.SendRequest{Cloud: cl.Name, Dir: dir, Repo: hp.Repo,
+	sent, err := in.Module.(agent.CloudSender).SendCloud(ctx, in.Host, in.Install, agent.SendRequest{Cloud: cl.Name, Dir: dir, Repo: hp.Repo,
 		Branch: hp.Branch, Base: sha, Brief: hp.Brief, Title: p.Title, Code: hp.Code, Diff: diff, Env: hp.Env, Attempts: hp.Attempts})
+	cs := sent.Session
+	if err == nil && sent.Run != nil {
+		var sr StepResult
+		sr, err = runStep(ctx, env, in, p, *sent.Run, dir)
+		cs, hr.Pasted = sr.Session, sr.Pasted
+	}
 	done()
+	if errors.Is(err, agent.ErrNoSession) {
+		return fail(StepStart, noSessionStarted(hr, cl, err), err)
+	}
 	if err != nil {
 		return fail(StepStart, startFailed(hr, target, cl, refusal(err, target, cl)), err)
+	}
+	if cs.Title == "" {
+		cs.Title = p.Title
+	}
+	if cs.Repo == "" {
+		cs.Repo, cs.Branch, cs.Base = hp.Repo, hp.Branch, sha
+		if hp.Code == agent.ViaBundle {
+			cs.Branch = "" // uploaded: the cloud has no branch of it on the remote
+		}
 	}
 	cs.Cloud, cs.Key.Agent = cl.Name, target.ID
 	if err := j.Cloud(in.Here.Name, cs); err != nil {
@@ -917,6 +967,35 @@ func startFailed(hr *HandoffResult, target agent.Spec, cl agent.Cloud, why strin
 		return fmt.Sprintf("The branch was pushed, but %s refused the %s: %s. Undo removes the branch.", target.Name, cl.SessionNoun(), why)
 	}
 	return fmt.Sprintf("%s refused the %s: %s. Nothing went to the cloud.", target.Name, cl.SessionNoun(), why)
+}
+
+// noSessionStarted says what happened when a terminal step ended without a session
+// (agent.ErrNoSession).
+func noSessionStarted(hr *HandoffResult, cl agent.Cloud, err error) string {
+	why := strings.TrimSuffix(strings.TrimPrefix(err.Error(), agent.ErrNoSession.Error()+": "), ".")
+	if hr.Pushed {
+		return fmt.Sprintf("The branch was pushed, but no %s started: %s. Undo removes the branch.", cl.SessionNoun(), why)
+	}
+	return fmt.Sprintf("No %s started: %s. Nothing went to the cloud.", cl.SessionNoun(), why)
+}
+
+// runStep runs the driver's terminal step for the hand-off, where the user answers it.
+func runStep(ctx context.Context, env Env, in *HandoffInput, p *Plan, run agent.Command, dir string) (StepResult, error) {
+	cl, target := in.Cloud, in.Module.Spec()
+	if env.Step == nil {
+		return StepResult{}, fmt.Errorf("%s starts the %s only in a terminal you answer, and hopsesh has none here", target.Name, cl.SessionNoun())
+	}
+	if run.Dir == "" {
+		run.Dir = dir
+	}
+	if len(run.Argv) > 0 && run.Argv[0] == cl.Driver && in.Install.Binary != "" {
+		run.Argv = append([]string{in.Install.Binary}, run.Argv[1:]...)
+	}
+	run.Unset = append(append([]string(nil), run.Unset...), cl.Unset...)
+	if env.Progress != nil {
+		env.Progress(fmt.Sprintf("Starting the %s in your terminal (%s)", cl.SessionNoun(), cl.Driver))
+	}
+	return env.Step(ctx, TermStep{Agent: target.ID, Cloud: cl.Name, CloudTitle: cl.Title, Title: p.Title, Run: run, Folder: dir})
 }
 
 func describeSnapshot(hp *HandoffPlan, sha string) string {

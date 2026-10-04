@@ -17,7 +17,16 @@ var (
 	repoWords = regexp.MustCompile(`(?i)no (amp )?project|project\b[^\n]*(not found|does not exist|no access)|unknown project`)
 )
 
-// SendCloud starts an Amp thread in an orb with the briefing as its prompt:
+// SendCloud starts the session without a terminal (send) and returns it.
+func (m *Module) SendCloud(ctx context.Context, h agent.Host, _ agent.Install, r agent.SendRequest) (agent.Sent, error) {
+	cs, err := m.send(ctx, h, r)
+	if err != nil {
+		return agent.Sent{}, err
+	}
+	return agent.Sent{Session: cs}, nil
+}
+
+// send starts an Amp thread in an orb with the briefing as its prompt:
 // `amp -ox <briefing> --project <owner/repo> --title <title>`, in r.Dir. The orbs manual
 // says `amp -ox` "creates a new thread whose agent runs in an orb on Amp's servers, prints
 // the thread URL, and exits right away", and that --project takes a GitHub owner/repo.
@@ -27,7 +36,7 @@ var (
 // Unverified: the exact output (the thread link is read; failing that, the thread `amp
 // threads list` shows that it did not show before) and the refusal wordings. The manual
 // suggests AMP_API_KEY for scripts; hopsesh sets none and uses the CLI's own login.
-func (m *Module) SendCloud(ctx context.Context, h agent.Host, _ agent.Install, r agent.SendRequest) (agent.CloudSession, error) {
+func (m *Module) send(ctx context.Context, h agent.Host, r agent.SendRequest) (agent.CloudSession, error) {
 	host, repo, _ := strings.Cut(r.Repo, "/")
 	switch {
 	case !strings.HasPrefix(r.Brief, agent.NotePrefix):

@@ -118,6 +118,12 @@ type Proc struct {
 	Stdin  io.Reader // nil: empty
 	Stdout io.Writer
 	Stderr io.Writer
+	// TTY: the run has a terminal (claude --cloud needs one); In is what is typed there
+	// (nil: nothing), Width its width, Raw puts it in raw mode and returns how to put it back.
+	TTY   bool
+	In    io.Reader
+	Width int
+	Raw   func() (restore func())
 }
 
 // input is the run's standard input.

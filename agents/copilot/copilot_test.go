@@ -81,7 +81,7 @@ func TestSendCloud(t *testing.T) {
 	in, _ := m.Detect(ctx, fake)
 	h := agent.Confine(fake, m.Spec(), in)
 	r := sendRequest(cloudName, repo)
-	cs, err := m.SendCloud(ctx, h, in, r)
+	cs, err := m.send(ctx, h, r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,8 +98,8 @@ func TestSendCloud(t *testing.T) {
 	}
 
 	// Queued: no link, so the listing finds the new task.
-	hq, inq := host(t, dir, "queued")
-	cs, err = m.SendCloud(ctx, hq, inq, r)
+	hq, _ := host(t, dir, "queued")
+	cs, err = m.send(ctx, hq, r)
 	if err != nil || cs.Key.Session == "" || cs.PR != "" {
 		t.Fatalf("queued: %+v %v", cs, err)
 	}
@@ -108,19 +108,19 @@ func TestSendCloud(t *testing.T) {
 	}
 
 	for fail, want := range map[string]error{"signed-out": agent.ErrSignedOut, "not-eligible": agent.ErrNotEligible, "repo-mismatch": agent.ErrRepoUnsupported} {
-		h, in := host(t, dir, fail)
-		if _, err := m.SendCloud(ctx, h, in, r); !errors.Is(err, want) {
+		h, _ := host(t, dir, fail)
+		if _, err := m.send(ctx, h, r); !errors.Is(err, want) {
 			t.Errorf("%s: %v", fail, err)
 		}
 	}
 	bad := r
 	bad.Branch = "nope/not-pushed"
-	if _, err := m.SendCloud(ctx, h, in, bad); !errors.Is(err, agent.ErrRepoUnsupported) {
+	if _, err := m.send(ctx, h, bad); !errors.Is(err, agent.ErrRepoUnsupported) {
 		t.Errorf("a base branch GitHub does not have: %v", err)
 	}
 	for _, x := range []agent.SendRequest{{Repo: "gitlab.com/x/y", Branch: "b", Brief: r.Brief}, {Repo: r.Repo, Brief: r.Brief}, {Repo: r.Repo, Branch: "b", Brief: "no prefix"},
 		{Repo: r.Repo, Branch: "b", Brief: r.Brief, Code: agent.ViaBundle}} {
-		if _, err := m.SendCloud(ctx, h, in, x); err == nil {
+		if _, err := m.send(ctx, h, x); err == nil {
 			t.Errorf("sent %+v", x)
 		}
 	}

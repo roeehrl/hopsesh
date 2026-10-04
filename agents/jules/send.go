@@ -19,7 +19,16 @@ var (
 	repoWords = regexp.MustCompile(`(?i)repo(?:sitory)?\b[^\n]*(not connected|not found|not installed|no access|isn't connected|is not a source)|install the jules (?:github )?app`)
 )
 
-// SendCloud starts a Jules session with the briefing as its prompt:
+// SendCloud starts the session without a terminal (send) and returns it.
+func (m *Module) SendCloud(ctx context.Context, h agent.Host, _ agent.Install, r agent.SendRequest) (agent.Sent, error) {
+	cs, err := m.send(ctx, h, r)
+	if err != nil {
+		return agent.Sent{}, err
+	}
+	return agent.Sent{Session: cs}, nil
+}
+
+// send starts a Jules session with the briefing as its prompt:
 // `jules remote new --repo <owner/repo> --session <briefing>`, in r.Dir (a worktree on the
 // handoff branch). The CLI takes no starting branch: its reference lists --repo, --session
 // and --parallel only, and the API's startingBranch needs an API key hopsesh does not use.
@@ -28,7 +37,7 @@ var (
 //
 // Unverified: the output. A session link or "session <id>" is read; failing both, the new
 // session is the one `jules remote list --session` shows that it did not show before.
-func (m *Module) SendCloud(ctx context.Context, h agent.Host, _ agent.Install, r agent.SendRequest) (agent.CloudSession, error) {
+func (m *Module) send(ctx context.Context, h agent.Host, r agent.SendRequest) (agent.CloudSession, error) {
 	host, repo, _ := strings.Cut(r.Repo, "/")
 	switch {
 	case !strings.HasPrefix(r.Brief, agent.NotePrefix):

@@ -32,6 +32,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/testkit"
 	"github.com/roeehrl/hopsesh/internal/testkit/fakeagent"
 	"github.com/roeehrl/hopsesh/internal/testkit/fakecloud"
+	"github.com/roeehrl/hopsesh/internal/ui/cli"
 	"github.com/roeehrl/hopsesh/internal/ui/gui"
 )
 
@@ -59,6 +60,15 @@ func main() {
 	}
 	if code, ok := fakeagent.Vendor(name); ok {
 		os.Exit(code)
+	}
+	if len(os.Args) > 1 && os.Args[1] == "terminal-step" {
+		// The line the window opens "in a terminal" for a hand-off's step: the command line's
+		// own verb, which this program carries.
+		if err := cli.NewRoot(os.Stdout, all.Registry()).Execute(); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		return
 	}
 	addr := flag.String("addr", "127.0.0.1:8765", "where to listen")
 	home := flag.String("home", "", "the demo home (made afresh; anything there is removed)")
@@ -120,6 +130,9 @@ func main() {
 		return nil
 	}
 	gui.SetTerminal(background)
+	if self, err := os.Executable(); err == nil {
+		gui.SetStepProgram(self)
+	}
 	if err := fresh(); err != nil {
 		log.Fatal(err)
 	}
@@ -332,8 +345,12 @@ func dirty(h string) error {
 }
 
 // background runs a command line the window would open in a terminal, as that terminal
-// would: in the background, with this program's environment.
+// would: in the background, with this program's environment. With FAKE_CLOUD_FAIL=hold,
+// a hand-off's terminal step is left alone, as by a user who has not answered yet.
 func background(line string) error {
+	if os.Getenv("FAKE_CLOUD_FAIL") == "hold" && strings.Contains(line, "terminal-step") {
+		return nil
+	}
 	cmd := exec.Command("sh", "-c", line)
 	if runtime.GOOS == "windows" {
 		cmd = exec.Command("powershell", "-NoProfile", "-Command", line)

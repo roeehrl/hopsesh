@@ -28,7 +28,16 @@ var (
 	repoWords = regexp.MustCompile(`(?i)could not resolve to a repository|repository .*(not found|not accessible|is archived)|base (branch|ref) .*(not found|does not exist)|HTTP 422`)
 )
 
-// SendCloud starts a Copilot cloud agent task with the briefing as its description:
+// SendCloud starts the session without a terminal (send) and returns it.
+func (m *Module) SendCloud(ctx context.Context, h agent.Host, _ agent.Install, r agent.SendRequest) (agent.Sent, error) {
+	cs, err := m.send(ctx, h, r)
+	if err != nil {
+		return agent.Sent{}, err
+	}
+	return agent.Sent{Session: cs}, nil
+}
+
+// send starts a Copilot cloud agent task with the briefing as its description:
 // `gh agent-task create -F - --base <handoff branch> -R <owner/repo>`, the briefing on
 // standard input ("-F -", documented in gh 2.97's help). The agent starts from the base
 // branch, which the core pushed, and opens its pull request against it.
@@ -39,7 +48,7 @@ var (
 // when the job has no session id yet, or "job <id> queued. View progress: …" when the pull
 // request has not appeared. Without a session id in the output, the new task is the one in
 // gh agent-task list that was not there before the create.
-func (m *Module) SendCloud(ctx context.Context, h agent.Host, _ agent.Install, r agent.SendRequest) (agent.CloudSession, error) {
+func (m *Module) send(ctx context.Context, h agent.Host, r agent.SendRequest) (agent.CloudSession, error) {
 	host, repo, _ := strings.Cut(r.Repo, "/")
 	switch {
 	case !strings.HasPrefix(r.Brief, agent.NotePrefix):

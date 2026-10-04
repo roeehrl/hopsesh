@@ -87,7 +87,7 @@ func TestSendCloud(t *testing.T) {
 	in, _ := m.Detect(ctx, fake)
 	h := agent.Confine(fake, m.Spec(), in)
 	r := sendRequest(repo)
-	cs, err := m.SendCloud(ctx, h, in, r)
+	cs, err := m.send(ctx, h, r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,16 +104,16 @@ func TestSendCloud(t *testing.T) {
 		t.Fatalf("session %+v, in the cloud %+v %v", cs, st, err)
 	}
 	reply = "Started: https://app.devin.ai/sessions/0123456789abcdef0123456789abcdef\n"
-	if cs, err := m.SendCloud(ctx, h, in, r); err != nil || cs.Key.Session != "devin-0123456789abcdef0123456789abcdef" {
+	if cs, err := m.send(ctx, h, r); err != nil || cs.Key.Session != "devin-0123456789abcdef0123456789abcdef" {
 		t.Errorf("a link in the reply: %+v %v", cs, err)
 	}
 	reply, code = "", -1 // hopsesh stopped waiting for the reply
-	if cs, err := m.SendCloud(ctx, h, in, r); err != nil || !strings.HasPrefix(string(cs.Key.Session), "devin-") {
+	if cs, err := m.send(ctx, h, r); err != nil || !strings.HasPrefix(string(cs.Key.Session), "devin-") {
 		t.Errorf("a reply not waited for: %+v %v", cs, err)
 	}
 	for fail, want := range map[string]error{"signed-out": agent.ErrSignedOut, "not-eligible": agent.ErrNotEligible, "repo-mismatch": agent.ErrRepoUnsupported} {
-		h, in := host(t, dir, fail)
-		if _, err := m.SendCloud(ctx, h, in, r); !errors.Is(err, want) {
+		h, _ := host(t, dir, fail)
+		if _, err := m.send(ctx, h, r); !errors.Is(err, want) {
 			t.Errorf("%s: %v", fail, err)
 		}
 	}

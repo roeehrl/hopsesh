@@ -87,6 +87,10 @@ type model struct {
 	notice  string
 	// ho is a hand-off to a cloud being chosen or planned.
 	ho handoff
+	// stepPaste asks for the link of a session a terminal step did not show.
+	stepPaste *stepPaste
+	// steps receives what the hand-off sends the program (tests: no program runs).
+	steps chan tea.Msg
 }
 
 type scanDone struct{ inv *app.Inventory }
@@ -105,7 +109,12 @@ func Run(d Deps) (*Exit, error) {
 	opts := d.App.DefaultOptions()
 	opts.Worktree = move.WorktreeAuto
 	m := &model{deps: d, mode: modeLoading, started: time.Now(), opts: opts}
-	final, err := tea.NewProgram(m).Run()
+	prog := tea.NewProgram(m)
+	// A hand-off whose driver needs a terminal gets this one, the UI paused meanwhile.
+	prev := d.App.Steps
+	d.App.Steps = stepper(prog.Send)
+	defer func() { d.App.Steps = prev }()
+	final, err := prog.Run()
 	if err != nil {
 		return nil, err
 	}
@@ -206,6 +215,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case briefEdited:
 		return m.briefDone(msg)
+	case stepRun:
+		return m.runStep(msg)
+	case stepRan:
+		return m.stepDone(msg)
+	case tea.PasteMsg:
+		if m.stepPaste != nil {
+			m.stepPaste.text += strings.TrimSpace(msg.Content)
+		}
 	case applyDone:
 		if msg.res != nil && msg.res.Handoff != nil {
 			m.result, m.mode = msg.res, modeDone // a failed step is shown with the steps
@@ -230,6 +247,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) key(k string) (tea.Model, tea.Cmd) {
+	if m.stepPaste != nil {
+		return m.stepPasteKey(k)
+	}
 	if k == "ctrl+c" {
 		return m, tea.Quit
 	}
@@ -543,7 +563,14 @@ func (m *model) View() tea.View {
 	case modeApplying:
 		switch m.plan.Kind {
 		case move.KindHandoff:
+			if m.stepPaste != nil {
+				m.viewStepPaste(&b)
+				break
+			}
 			fmt.Fprintf(&b, "\n  Handing %q off to %s… (snapshot, push, start the cloud session)\n", m.plan.Title, m.plan.Handoff.CloudTitle)
+			if t := m.plan.Handoff.Terminal; t != "" {
+				b.WriteString("  " + dim.Render(t) + "\n")
+			}
 		case move.KindFetch:
 			fmt.Fprintf(&b, "\n  Preparing a worktree for %q…\n", m.plan.Title)
 		default:

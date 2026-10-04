@@ -71,6 +71,8 @@ test("the hand-off sheet: briefing, branch, what stays, options; done, then undo
   await expect(sheet).toContainText("hopsesh can't tell whether github.com/example/demo is public. Anyone who can see the branch could read this file.");
   await expect(sheet.getByRole("checkbox", { name: "Mark this session “continued in Claude Code on claude-cloud”" })).toBeChecked();
   await expect(sheet).toContainText("Cloud sessions use your plan's allowance.");
+  await expect(sheet.locator("#ho-terminal")).toContainText("Claude Code starts the session in a terminal: it runs claude in hopsesh's hand-off folder for this repository");
+  await expect(sheet.locator("#ho-terminal")).toContainText("handoff/github.com/example/demo");
 
   // Ticking the untracked note plans it in.
   await sheet.getByRole("checkbox", { name: /docs\/notes\.md/ }).check();
@@ -86,7 +88,9 @@ test("the hand-off sheet: briefing, branch, what stays, options; done, then undo
   await expect(page.locator(".page")).toContainText(".env, certs/dev.pem");
   await expect(page.locator(".page")).toContainText("The session here is marked “continued in Claude Code on claude-cloud”");
   await expect(page.getByRole("note")).toHaveText("When it finishes: Clouds → Claude Code cloud → Bring here");
-  await expect(page.getByRole("button", { name: "Send a follow-up…" })).toBeVisible();
+  // Claude Code has no follow-up hopsesh could send: the button says why it is off.
+  await expect(page.getByRole("button", { name: "Send a follow-up…" })).toBeDisabled();
+  await expect(page.locator("#ho-nofollow")).toContainText("hopsesh can't send a Claude Code cloud session a message");
 
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   const dlg = page.locator("#dlg");
@@ -119,4 +123,49 @@ test("a hand-off to Jules: the briefing asks for the handoff branch", async ({ p
   await expect(page.getByRole("heading", { name: "Handed off to Jules" })).toBeVisible({ timeout: 30_000 });
   await expect(page.locator(".term")).toContainText("https://jules.google.com/session/");
   await expect(page.getByRole("note")).toHaveText("When it finishes: Clouds → Jules → Bring here");
+});
+
+// Claude Code starts the session in a terminal hopsesh opens: the sheet says what happens
+// there while it waits, and takes the session's link by hand (one of another cloud is
+// refused); a step that ends with no session can be left, and the hand-off says so.
+test("the hand-off waits for the terminal and takes a pasted link", async ({ page }) => {
+  await turnOn(page);
+  const seeded = await page.request.post("/cloud?fail=hold&work=0&title=Started%20by%20hand");
+  const { id } = await seeded.json();
+  const menu = await openMenu(page);
+  await menu.getByRole("menuitem", { name: /Claude Code cloud/ }).click();
+  const sheet = page.locator("#sheet");
+  await expect(sheet.getByRole("heading", { name: "Hand off “Find the codeword” to Claude Code cloud" })).toBeVisible({ timeout: 30_000 });
+  await sheet.getByRole("button", { name: /^Hand off/ }).click();
+  const box = sheet.getByRole("group", { name: "In your terminal" });
+  await expect(box).toContainText("Claude Code cloud is starting the session in your terminal", { timeout: 30_000 });
+  await expect(box).toContainText("claude --cloud");
+  await expect(box).toContainText("If it asks whether you trust this folder, answer it there");
+  await expect(box).toContainText("handoff/github.com/example/demo");
+  const link = box.getByLabel("Paste the link");
+  await link.fill("https://chatgpt.com/codex/tasks/task_e_1");
+  await box.getByRole("button", { name: "Use this link" }).click();
+  await expect(box.getByRole("alert")).toContainText("is not a link to a Claude Code cloud session");
+  await link.fill(`https://claude.ai/code/${id}?from=cli&m=0`);
+  await link.press("Enter");
+  await expect(page.getByRole("heading", { name: "Handed off to Claude Code cloud" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator(".term")).toHaveText(`https://claude.ai/code/${id}`);
+  await expect(page.locator(".page")).toContainText("The session's link is the one you pasted");
+});
+
+test("a terminal step with no session: the sheet says so, and stopping ends the hand-off", async ({ page }) => {
+  await turnOn(page);
+  expect((await page.request.post("/cloud?fail=trust-no&work=0")).ok()).toBeTruthy();
+  const menu = await openMenu(page);
+  await menu.getByRole("menuitem", { name: /Claude Code cloud/ }).click();
+  const sheet = page.locator("#sheet");
+  await expect(sheet.getByRole("heading", { name: "Hand off “Find the codeword” to Claude Code cloud" })).toBeVisible({ timeout: 30_000 });
+  await sheet.getByRole("button", { name: /^Hand off/ }).click();
+  const box = sheet.getByRole("group", { name: "In your terminal" });
+  await expect(box).toContainText("hopsesh saw no session link", { timeout: 30_000 });
+  await expect(box).toContainText("Claude Code asked whether you trust hopsesh's hand-off folder");
+  await box.getByRole("button", { name: "Stop waiting" }).click();
+  await expect(sheet.getByRole("heading", { name: "The hand-off stopped at “Start cloud session”" })).toBeVisible({ timeout: 30_000 });
+  await expect(sheet.locator("#ho-msg")).toContainText("No session started: Claude Code asked whether you trust hopsesh's hand-off folder");
+  await expect(sheet.getByRole("button", { name: "Undo" })).toBeVisible();
 });

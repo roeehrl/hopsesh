@@ -137,6 +137,9 @@ type ScanOptions struct {
 	Hosts   []string // only these machines and clouds ("" or none: every allowed one)
 	NoLocal bool     // leave this machine out
 	SkipGit bool     // no git state (faster)
+	// GitFor, when set, limits the git probe to the folders of the sessions it accepts (the
+	// others get no git state); see App.GitFor.
+	GitFor func(Entry) bool
 }
 
 // Scan reads this machine, the allowed machines and the clouds in parallel. A machine or
@@ -302,7 +305,7 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 		var dirs []string
 		seen := map[string]bool{}
 		for _, e := range entries {
-			if d := e.Session.CWD; d != "" && !seen[d] {
+			if d := e.Session.CWD; d != "" && !seen[d] && (o.GitFor == nil || o.GitFor(e)) {
 				seen[d] = true
 				dirs = append(dirs, d)
 			}
@@ -316,15 +319,26 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 			by[states[i].Dir] = &states[i]
 		}
 		for i := range entries {
-			if d := entries[i].Session.CWD; d != "" {
-				if entries[i].Git = by[d]; err != nil {
-					entries[i].GitError = err.Error()
-				}
+			if d := entries[i].Session.CWD; d != "" && seen[d] {
+				setGit(&entries[i], by[d], err)
 			}
 		}
 	}
 	a.applyPending(ctx, m, entries)
 	return m, entries
+}
+
+// setGit gives an entry its folder's git state. A probe that failed, or a folder git could
+// not answer for in time, leaves the reason instead: unknown is not "no repository".
+func setGit(e *Entry, g *repos.GitState, err error) {
+	switch {
+	case err != nil:
+		e.Git, e.GitError = nil, err.Error()
+	case g != nil && g.Error != "":
+		e.Git, e.GitError = nil, g.Error
+	default:
+		e.Git, e.GitError = g, ""
+	}
 }
 
 // hopseshVersion reads "hopsesh 0.3.0 (commit …)" from the probe ("" when not found;

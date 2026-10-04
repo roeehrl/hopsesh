@@ -90,7 +90,11 @@ func TestSendCloud(t *testing.T) {
 	m := codex.New()
 	ctx := context.Background()
 	brief := agent.NotePrefix + "Fix the parser."
-	cs, err := m.SendCloud(ctx, h, in, agent.SendRequest{Dir: repo, Repo: "github.com/example/demo", Branch: "main", Env: "acme-api", Brief: brief, Attempts: 2, Title: "Fix it"})
+	sent, err := m.SendCloud(ctx, h, in, agent.SendRequest{Dir: repo, Repo: "github.com/example/demo", Branch: "main", Env: "acme-api", Brief: brief, Attempts: 2, Title: "Fix it"})
+	cs := sent.Session
+	if sent.Run != nil {
+		t.Fatal("codex cloud exec needs no terminal")
+	}
 	if err != nil || !strings.HasPrefix(string(cs.Key.Session), "task_e_") || cs.URL != "https://chatgpt.com/codex/tasks/"+string(cs.Key.Session) ||
 		cs.Branch != "main" || cs.Env != "acme-api" || cs.Attempts != 2 || cs.State != agent.CloudRunning || cs.Title != "Fix it" {
 		t.Fatalf("exec: %+v %v", cs, err)

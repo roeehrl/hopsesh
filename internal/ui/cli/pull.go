@@ -178,7 +178,7 @@ func pull(cmd *cobra.Command, refArg string) error {
 	}
 	in, _ := cmd.Flags().GetString("in")
 	ref := app.ParseRef(refArg)
-	inv := r.scan(cmd, ref.Machine, false)
+	inv := r.scanFor(cmd, ref.Machine, ref)
 	defer inv.Close()
 	e, err := inv.Find(ref)
 	if err != nil {

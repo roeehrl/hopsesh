@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/roeehrl/hopsesh/agents/claude"
+	"github.com/roeehrl/hopsesh/internal/core/term"
 	"github.com/roeehrl/hopsesh/internal/testkit/fakecloud"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 	"github.com/roeehrl/hopsesh/sdk/agent/agenttest"
@@ -30,6 +31,7 @@ func TestCloudConformance(t *testing.T) {
 		Request: func(c agent.Cloud) agent.SendRequest {
 			return agent.SendRequest{Cloud: c.Name, Dir: repo, Repo: "github.com/example/demo", Branch: "main", Brief: agent.NotePrefix + "This task continues a session (conformance).", Title: "conformance"}
 		},
+		Step: fakecloud.TerminalStep(dir, nil, nil),
 	})
 }
 
@@ -60,81 +62,125 @@ func demoRepo(t *testing.T) string {
 	return repo
 }
 
-// SendCloud starts a session with the briefing as the prompt, from the handoff branch's
-// worktree, without the variables the cloud must not inherit; with the bundle, it sets
-// CCR_FORCE_BUNDLE=1. FollowUp queues a message in the documented form. Both read the
-// session's link when the reply is not JSON.
-func TestSendAndFollowUp(t *testing.T) {
-	var runs []agent.RunOptions
+// SendCloud checks the login and returns `claude --cloud <brief>` for the user's terminal,
+// in the handoff branch's folder, without the variables the cloud must not inherit; with
+// the bundle, it sets CCR_FORCE_BUNDLE=1. It runs nothing but auth status itself.
+func TestSendIsATerminalStep(t *testing.T) {
 	var argvs []string
-	reply := `{"ok":true,"session_id":"cse_01NewSession42","url":"https://claude.ai/code/session_01NewSession42"}`
 	fh := agenttest.NewFakeHost(home)
 	fh.AddBinary("claude", "2.1.284 (Claude Code)")
-	fh.Programs["claude"] = func(argv []string, o agent.RunOptions) agent.Result {
-		if strings.Join(argv[1:], " ") == "auth status --json" {
-			return agent.Result{Stdout: []byte(maxLogin)}
-		}
-		runs, argvs = append(runs, o), append(argvs, strings.Join(argv, " "))
-		return agent.Result{Stdout: []byte(reply)}
+	fh.Programs["claude"] = func(argv []string, _ agent.RunOptions) agent.Result {
+		argvs = append(argvs, strings.Join(argv[1:], " "))
+		return agent.Result{Stdout: []byte(maxLogin)}
 	}
 	fh.Put(home+"/.claude/projects/.keep", nil, time.Now())
 	m := claude.New()
 	in, _ := m.Detect(context.Background(), fh)
 	h := agent.Confine(fh, m.Spec(), in)
 	ctx := context.Background()
-	r := agent.SendRequest{Cloud: "claude-cloud", Dir: "/tmp/hopsesh-handoff-1/demo", Repo: "github.com/example/demo", Branch: "hopsesh/handoff/20261004-0b6c6a8e",
-		Base: "4c1e9a2", Brief: agent.NotePrefix + "This task continues a Claude Code session.", Title: "Fix the parser"}
-	cs, err := m.SendCloud(ctx, h, in, r)
+	r := agent.SendRequest{Cloud: "claude-cloud", Dir: "/home/u/.local/state/hopsesh/handoff/github.com/example/demo", Repo: "github.com/example/demo",
+		Branch: "hopsesh/handoff/20261004-0b6c6a8e", Base: "4c1e9a2", Brief: agent.NotePrefix + "This task continues a Claude Code session.", Title: "Fix the parser"}
+	sent, err := m.SendCloud(ctx, h, in, r)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if argvs[0] != "/bin/claude -p "+r.Brief+" --cloud --output-format json" || runs[0].Dir != r.Dir || len(runs[0].Env) != 0 ||
-		strings.Join(runs[0].Unset, " ") != "CLAUDE_CODE_CHILD_SESSION ANTHROPIC_API_KEY" {
-		t.Errorf("send: %s %+v", argvs[0], runs[0])
+	run := sent.Run
+	if run == nil || strings.Join(run.Argv, "|") != "claude|--cloud|"+r.Brief || run.Dir != r.Dir || len(run.Env) != 0 ||
+		strings.Join(run.Unset, " ") != "CLAUDE_CODE_CHILD_SESSION ANTHROPIC_API_KEY" || sent.Session.Key.Session != "" {
+		t.Fatalf("send: %+v", sent)
 	}
-	if cs.Key.Session != "session_01NewSession42" || cs.Cloud != "claude-cloud" || cs.URL != "https://claude.ai/code/session_01NewSession42" ||
-		cs.State != agent.CloudRunning || cs.Branch != r.Branch || cs.Title != "Fix the parser" {
-		t.Errorf("session: %+v", cs)
+	if strings.Join(argvs, ",") != "auth status --json" {
+		t.Errorf("SendCloud ran %v", argvs)
 	}
 	r.Code = agent.ViaBundle
-	if cs, err = m.SendCloud(ctx, h, in, r); err != nil || strings.Join(runs[1].Env, " ") != "CCR_FORCE_BUNDLE=1" || cs.Branch != "" {
-		t.Errorf("bundle: %+v %+v %v", runs[1], cs, err)
+	if sent, err = m.SendCloud(ctx, h, in, r); err != nil || strings.Join(sent.Run.Env, " ") != "CCR_FORCE_BUNDLE=1" {
+		t.Errorf("bundle: %+v %v", sent.Run, err)
 	}
-	if _, err := m.SendCloud(ctx, h, in, agent.SendRequest{Brief: "no prefix"}); err == nil {
+	if _, err := m.SendCloud(ctx, h, in, agent.SendRequest{Brief: "no prefix", Dir: "/w"}); err == nil {
 		t.Error("a briefing without hopsesh's prefix is refused")
 	}
-	reply = "Sent to the cloud session: https://claude.ai/code/session_01NewSession42\n"
-	cs, err = m.FollowUp(ctx, h, in, "cse_01NewSession42", "Also add a test.")
-	if err != nil || cs.Key.Session != "session_01NewSession42" || argvs[2] != "/bin/claude -p Also add a test. --cloud session_01NewSession42 --output-format json" {
-		t.Errorf("follow-up: %+v %v %s", cs, err, argvs[2])
+	if _, ok := any(m).(agent.CloudFollower); ok {
+		t.Error("Claude Code has no non-interactive follow-up; the module must not claim one")
 	}
-	if _, err := m.FollowUp(ctx, h, in, "not-an-id", "x"); !errors.Is(err, agent.ErrNotFound) {
-		t.Errorf("a bad id: %v", err)
+	if cl, _ := m.Spec().FindCloud("claude-cloud"); !strings.Contains(cl.NoFollowUp, "claude.ai") {
+		t.Errorf("the cloud says why there is no follow-up: %q", cl.NoFollowUp)
 	}
 }
 
-// The cloud's refusals map onto the SDK's errors.
-func TestSendRefusals(t *testing.T) {
-	for stderr, want := range map[string]error{
-		"Error: Unable to get organization UUID":                                                agent.ErrSignedOut,
-		"Error: Claude Code on the web is not available for your plan or organization.":         agent.ErrNotEligible,
-		"Error: Claude Code can't send this repository to the cloud: it is inside a submodule.": agent.ErrRepoUnsupported,
+// ReadStep reads what `claude --cloud` printed in a terminal, as 2.1.284 printed it: the
+// link (with its query), checked against the teleport command; colours, a cursor that
+// moves, and a link broken where the terminal ends; and the refusals and the ends without
+// a session.
+func TestReadStep(t *testing.T) {
+	m := claude.New()
+	const id = "session_01ABCDEFGHJKMNPQRSTVWXYZ01"
+	ok := "Created cloud session: Session ready\nView: https://claude.ai/code/" + id + "?from=cli&m=0\nResume with: claude --teleport " + id + "\n"
+	for name, tc := range map[string]struct {
+		raw   string
+		width int
+		code  int
+		want  string
+		err   error
+		words string
+	}{
+		"plain":             {raw: ok, want: id},
+		"colours":           {raw: "\x1b[1mCreated cloud session:\x1b[22m Session ready\r\n\x1b[1mView:\x1b[22m \x1b]8;;https://claude.ai/code/" + id + "\x1b\\https://claude.ai/code/" + id + "?from=cli&m=0\x1b]8;;\x1b\\\r\n\x1b[2mResume with:\x1b[22m claude --teleport " + id + "\r\n", want: id},
+		"cursor moves":      {raw: "\x1b[2J\x1b[HQuick safety check: Is this a project you created or one you trust?\x1b[3;1H❯ 1. Yes\x1b[2J\x1b[HCreated cloud session: Session ready\x1b[2;1HView: https://claude.ai/code/" + id + "?from=cli&m=0\x1b[3;1HResume with: claude --teleport " + id, want: id},
+		"wrapped link":      {raw: "View: https://claude.ai/code/session_01ABCDEFGHJKMN\nPQRSTVWXYZ01?from=cli&m=0\nResume with: claude --teleport " + id + "\n", width: 50, want: id},
+		"wrapped, no width": {raw: "View: https://claude.ai/code/session_01ABCDEFGHJKMN\nPQRSTVWXYZ01?from=cli&m=0\nResume with: claude --teleport " + id + "\n", want: id},
+		"link only":         {raw: "View: https://claude.ai/code/cse_01ABCDEFGHJKMNPQRSTVWXYZ01\n", want: id},
+		"teleport only":     {raw: "Resume with: claude --teleport " + id + "\n", want: id},
+		"no terminal":       {raw: "Error: --cloud requires an interactive terminal. Non-interactive invocations (piped stdout, --init-only, --sdk-url) run locally and would silently ignore --cloud. Drop --cloud, or run from a TTY.\n", code: 1, words: "found no terminal"},
+		"print":             {raw: "Error: --cloud cannot be combined with --print.\n", code: 1, words: "claude refused: Error: --cloud cannot be combined with --print."},
+		"signed out":        {raw: "Error: Unable to get organization UUID\n", code: 1, err: agent.ErrSignedOut},
+		"not eligible":      {raw: "Error: Claude Code on the web is not available for your plan or organization.\n", code: 1, err: agent.ErrNotEligible},
+		"repository":        {raw: "Error: Claude Code can't send this repository to the cloud: it is inside a submodule.\n", code: 1, err: agent.ErrRepoUnsupported},
+		"trust, no":         {raw: "Quick safety check: Is this a project you created or one you trust?\n❯ 1. Yes, I trust this folder\n  2. No, exit\n", code: 1, err: agent.ErrNoSession, words: "asked whether you trust"},
+		"stopped":           {raw: "Quick safety check: Is this a project you created or one you trust?\n", code: 130, err: agent.ErrNoSession, words: "stopped"},
+		"another host":      {raw: "View: https://claude.ai.evil.example/code/" + id + "\n", err: agent.ErrNoSession, words: "without printing a session link"},
+		"a nested link":     {raw: "View: \x1b]8;;https://evil.example/?u=https://claude.ai/code/" + id + "\x1b\\open\x1b]8;;\x1b\\\n", err: agent.ErrNoSession, words: "without printing a session link"},
+		"nothing":           {raw: "", code: 0, err: agent.ErrNoSession, words: "without printing a session link"},
+		"something else":    {raw: "something unexpected\n", code: 3, err: agent.ErrNoSession, words: "exit status 3"},
 	} {
-		fh := agenttest.NewFakeHost(home)
-		fh.AddBinary("claude", "2.1.284 (Claude Code)")
-		fh.Programs["claude"] = func(argv []string, _ agent.RunOptions) agent.Result {
-			if strings.Join(argv[1:], " ") == "auth status --json" {
-				return agent.Result{Stdout: []byte(maxLogin)}
+		t.Run(name, func(t *testing.T) {
+			cs, err := m.ReadStep("claude-cloud", agent.StepOutput{Text: term.Plain([]byte(tc.raw)), Width: tc.width, Code: tc.code})
+			if tc.want != "" {
+				if err != nil || string(cs.Key.Session) != tc.want || cs.URL != "https://claude.ai/code/"+tc.want || cs.Cloud != "claude-cloud" ||
+					cs.Key.Agent != "claude" || cs.State != agent.CloudRunning {
+					t.Fatalf("%+v %v", cs, err)
+				}
+				return
 			}
-			return agent.Result{Stderr: []byte(stderr), Code: 1}
-		}
-		m := claude.New()
-		in, _ := m.Detect(context.Background(), fh)
-		h := agent.Confine(fh, m.Spec(), in)
-		_, err := m.SendCloud(context.Background(), h, in, agent.SendRequest{Brief: agent.NotePrefix + "x", Dir: "/w"})
-		if !errors.Is(err, want) {
-			t.Errorf("%s: %v", stderr, err)
-		}
+			if err == nil || tc.err != nil && !errors.Is(err, tc.err) || !strings.Contains(err.Error(), tc.words) {
+				t.Fatalf("want %v with %q, got %v", tc.err, tc.words, err)
+			}
+		})
+	}
+	if _, err := m.ReadStep("codex-cloud", agent.StepOutput{Text: ok}); !errors.Is(err, agent.ErrUnsupported) {
+		t.Errorf("another cloud: %v", err)
+	}
+}
+
+// The stand-in claude refuses what the real one refuses: --cloud with -p, and --cloud
+// without a terminal; in a terminal, it prints the session's three lines.
+func TestStandInRefusesLikeTheRealOne(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in origin's hook needs a POSIX shell")
+	}
+	dir, repo := t.TempDir(), demoRepo(t)
+	progs := fakecloud.Programs(dir, nil)
+	r := progs["claude"]([]string{"claude", "-p", "[hopsesh] x", "--cloud", "--output-format", "json"}, agent.RunOptions{Dir: repo})
+	if r.Code != 1 || !strings.Contains(string(r.Stderr), "--cloud cannot be combined with --print") {
+		t.Errorf("-p with --cloud: %d %s", r.Code, r.Stderr)
+	}
+	r = progs["claude"]([]string{"claude", "--cloud", "[hopsesh] x"}, agent.RunOptions{Dir: repo})
+	if r.Code != 1 || !strings.Contains(string(r.Stderr), "--cloud requires an interactive terminal") {
+		t.Errorf("--cloud without a terminal: %d %s", r.Code, r.Stderr)
+	}
+	out := fakecloud.TerminalStep(dir, nil, nil)(agent.Command{Argv: []string{"claude", "--cloud", "[hopsesh] x"}, Dir: repo})
+	cs, err := claude.New().ReadStep("claude-cloud", out)
+	if err != nil || !strings.HasPrefix(string(cs.Key.Session), "session_01") || !strings.Contains(out.Text, "Created cloud session: Session ready") {
+		t.Errorf("in a terminal: %+v %v\n%s", cs, err, out.Text)
 	}
 }
 

@@ -50,6 +50,7 @@ type App struct {
 	pw       *pwBroker
 	appIcons map[agent.ID]string // installed apps' icons, read once ("" when none)
 	pwOnce   sync.Once
+	step     *pendingStep // the terminal step a hand-off waits for
 	// Wails is the running application (events, clipboard, dialogs).
 	Wails *application.App `json:"-"`
 }
@@ -62,6 +63,7 @@ func NewApp(reg *registry.Registry) *App {
 	a := &App{cfgErr: err}
 	a.core = app.New(cfg, reg, config.StateDir(), log)
 	a.core.Passwords = a.passwordFor
+	a.core.Steps = a.runStep
 	return a
 }
 

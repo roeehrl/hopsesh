@@ -10,12 +10,20 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/agents/all"
 	"github.com/roeehrl/hopsesh/internal/testkit/fakeagent"
+	"github.com/roeehrl/hopsesh/internal/ui/cli"
 )
 
 // The test binary is the stand-in claude when it runs under that name.
 func TestMain(m *testing.M) {
 	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == "claude" {
 		os.Exit(fakeagent.Claude())
+	}
+	if len(os.Args) > 1 && os.Args[1] == "terminal-step" {
+		// The line the window opens in a terminal for a hand-off's step.
+		if err := cli.NewRoot(os.Stdout, all.Registry()).Execute(); err != nil {
+			os.Exit(1)
+		}
+		os.Exit(0)
 	}
 	os.Exit(m.Run())
 }

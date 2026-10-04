@@ -81,7 +81,7 @@ func TestSendCloud(t *testing.T) {
 	in, _ := m.Detect(ctx, fake)
 	h := agent.Confine(fake, m.Spec(), in)
 	r := sendRequest(repo)
-	cs, err := m.SendCloud(ctx, h, in, r)
+	cs, err := m.send(ctx, h, r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,13 +93,13 @@ func TestSendCloud(t *testing.T) {
 		t.Fatalf("session %+v, in the cloud %+v %v", cs, st, err)
 	}
 	quiet = true
-	cs2, err := m.SendCloud(ctx, h, in, r)
+	cs2, err := m.send(ctx, h, r)
 	if err != nil || cs2.Key.Session == "" || cs2.Key.Session == cs.Key.Session {
 		t.Fatalf("found by the listing: %+v %v", cs2, err)
 	}
 	for fail, want := range map[string]error{"signed-out": agent.ErrSignedOut, "not-eligible": agent.ErrNotEligible, "repo-mismatch": agent.ErrRepoUnsupported} {
-		h, in := host(t, dir, fail)
-		if _, err := m.SendCloud(ctx, h, in, r); !errors.Is(err, want) {
+		h, _ := host(t, dir, fail)
+		if _, err := m.send(ctx, h, r); !errors.Is(err, want) {
 			t.Errorf("%s: %v", fail, err)
 		}
 	}
