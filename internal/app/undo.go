@@ -63,7 +63,7 @@ func (a *App) Undo(ctx context.Context, match string, force bool) (*journal.Jour
 		}
 		return m.FS(ctx)
 	}
-	reach := journal.Files(fsFor)
+	reach := journal.Reach{FS: fsFor, Clouds: a.undoClouds()}
 	if !force {
 		if err := j.Changed(ctx, reach); err != nil {
 			return j, err

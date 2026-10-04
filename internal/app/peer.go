@@ -152,9 +152,9 @@ func (s *peerSession) planReceive(ctx context.Context, req peer.PlanRequest) (*p
 	inv := s.a.Scan(ctx, ScanOptions{Hosts: []string{LocalName()}})
 	in := pkg.Install
 	in.Present = true
-	src := &Machine{Name: pkg.Location, Status: StatusOK, OS: pkg.Facts.OS, host: s.snap, account: pkg.Account,
+	src := &Machine{Kind: agent.AtMachine, Name: pkg.Location, Status: StatusOK, OS: pkg.Facts.OS, host: s.snap, account: pkg.Account,
 		Agents: []AgentState{{Agent: pkg.Agent, Name: mod.Spec().Name, Install: in}}}
-	e := Entry{Machine: pkg.Location, Agent: pkg.Agent, AgentName: mod.Spec().Name, Session: pkg.Session, Live: pkg.Live, Git: pkg.Git, GitError: pkg.GitError, Lineage: pkg.Lineage}
+	e := Entry{Location: agent.MachineLocation(pkg.Location), Machine: pkg.Location, Agent: pkg.Agent, AgentName: mod.Spec().Name, Session: pkg.Session, Live: pkg.Live, Git: pkg.Git, GitError: pkg.GitError, Lineage: pkg.Lineage}
 	inv.Machines = append(inv.Machines, src)
 	inv.Entries = append(inv.Entries, e)
 	p, input, err := s.a.Plan(ctx, inv, e, req.Target, s.a.receiveOptions(req.Options))
