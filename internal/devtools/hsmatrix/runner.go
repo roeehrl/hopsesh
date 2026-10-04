@@ -495,7 +495,7 @@ func (r *runner) skill() error {
 
 // fetch brings a Claude Code cloud session here. A stand-in cloud plays it (the fake's
 // store, and a bare repository standing in for its GitHub repository); hopsesh plans it,
-// runs the teleport in a new worktree (--run), checks the copy's message count and keeps the
+// runs the teleport in a new worktree (--run), checks the copy and keeps the
 // cloud's branch under hopsesh/from/claude-cloud/ (or says none was pushed), continues it in
 // Codex for claude→codex rows, and undo takes it all back.
 func (r *runner) fetch(row Row) error {
@@ -516,7 +516,7 @@ func (r *runner) fetch(row Row) error {
 	}
 	world := filepath.Join(r.out, "work", "cloud")
 	gitConfig := filepath.Join(world, "gitconfig")
-	for k, v := range map[string]string{"GIT_CONFIG_GLOBAL": gitConfig, "FAKE_CLOUD_DIR": filepath.Join(world, "store"), "FAKE_CLOUD_FAIL": ""} {
+	for k, v := range map[string]string{"GIT_CONFIG_GLOBAL": gitConfig, "FAKE_CLOUD_DIR": filepath.Join(world, "store"), "FAKE_CLOUD_FAIL": "", "FAKE_CLAUDE_SAYS": "ok"} {
 		old, had := os.LookupEnv(k)
 		os.Setenv(k, v)
 		defer func() { // the other rows run with this machine's own settings
@@ -586,7 +586,7 @@ func (r *runner) fetch(row Row) error {
 		want = len(msgs)
 	}
 	switch {
-	case b.Outcome != "complete" || b.Restored != want:
+	case b.Outcome != "unchecked" || b.Restored != want: // hopsesh did not start it: no briefing to check against
 		return fmt.Errorf("the copy: %+v", b)
 	case row.Repo == "unpushed" && !b.NoBranch:
 		return fmt.Errorf("a session that never pushed reports a branch: %+v", b)
@@ -733,7 +733,7 @@ func (r *runner) cloudWorld(name string) (fakecloud.Origin, func(), error) {
 			f()
 		}
 	}
-	for k, v := range map[string]string{"GIT_CONFIG_GLOBAL": gitConfig, "FAKE_CLOUD_DIR": filepath.Join(world, "store"), "FAKE_CLOUD_FAIL": ""} {
+	for k, v := range map[string]string{"GIT_CONFIG_GLOBAL": gitConfig, "FAKE_CLOUD_DIR": filepath.Join(world, "store"), "FAKE_CLOUD_FAIL": "", "FAKE_CLAUDE_SAYS": "ok"} {
 		old, had := os.LookupEnv(k)
 		os.Setenv(k, v)
 		restore = append(restore, func() {

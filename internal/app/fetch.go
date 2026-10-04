@@ -424,6 +424,10 @@ type Brought struct {
 	Restored int    `json:"restored,omitempty"`
 	Expected int    `json:"expected,omitempty"`
 	Stated   bool   `json:"stated,omitempty"`
+	// Check is how a copy with no stated count was checked (move.Checked*); Note, what the
+	// user must do in the driver's terminal for the copy to be saved (while it waits).
+	Check string `json:"check,omitempty"`
+	Note  string `json:"note,omitempty"`
 	// Branch is the branch the code is on here; Renamed, the cloud's own name for it.
 	Branch   string `json:"branch,omitempty"`
 	Renamed  string `json:"renamed,omitempty"`
@@ -458,13 +462,16 @@ type Brought struct {
 func BroughtOf(f *move.Fetch, agentName string) Brought {
 	b := Brought{Journal: f.Journal, Cloud: f.Cloud, CloudTitle: f.CloudTitle, Session: string(f.Session), URL: f.URL, Title: f.Title,
 		Agent: agentName, Worktree: f.Worktree, Outcome: move.FetchWaiting, Command: f.Command, Run: f.Run, MirrorOf: f.MirrorOf,
-		Continue: string(f.Continue), ContinueName: f.ContinueName, Kept: f.Kept}
+		Continue: string(f.Continue), ContinueName: f.ContinueName, Kept: f.Kept, Note: f.Note}
 	ad := f.Adopted
 	if ad == nil {
 		b.Message = fmt.Sprintf("Waiting for %s to finish copying…", agentName)
+		if f.Note != "" {
+			b.Message += " " + f.Note + "."
+		}
 		return b
 	}
-	b.Outcome, b.Restored, b.Expected, b.Stated = ad.Outcome, ad.Restored, ad.Expected, ad.Stated
+	b.Outcome, b.Restored, b.Expected, b.Stated, b.Check = ad.Outcome, ad.Restored, ad.Expected, ad.Stated, ad.Check
 	b.Branch, b.Renamed, b.NoBranch, b.Appended, b.Warnings = ad.Branch, ad.Renamed, ad.NoBranch, ad.Appended, ad.Warnings
 	b.Command, b.Run, b.Key, b.Issue = ad.Command, ad.Resume, ad.Key.String(), ad.Issue
 	b.Written, b.Fidelity, b.Changes, b.Loss, b.Noun = ad.Written, ad.Fidelity, ad.Changes, f.Loss, f.Noun
@@ -500,13 +507,22 @@ func BroughtOf(f *move.Fetch, agentName string) Brought {
 	switch ad.Outcome {
 	case move.FetchComplete:
 		b.Message = fmt.Sprintf("“%s” is here in %s", f.Title, agentName)
-		if ad.Stated {
+		switch {
+		case ad.Stated:
 			b.Message += fmt.Sprintf(": %d of %d messages, checked", ad.Restored, ad.Expected)
-		} else {
+		case ad.Check == move.CheckedBrief:
+			b.Message += fmt.Sprintf(": %d messages, from the briefing hopsesh sent on", ad.Restored)
+		default:
 			b.Message += fmt.Sprintf(": %d messages", ad.Restored)
 		}
+	case move.FetchUnchecked:
+		b.Message = fmt.Sprintf("“%s” is here in %s: %s restored. %s gives no count to check them against.", f.Title, agentName, move.Plural(ad.Restored, "message"), agentName)
 	case move.FetchPartial:
-		b.Message = fmt.Sprintf("%s restored %d of %d messages.%s", agentName, ad.Restored, ad.Expected, known)
+		if ad.Stated {
+			b.Message = fmt.Sprintf("%s restored %d of %d messages.%s", agentName, ad.Restored, ad.Expected, known)
+		} else {
+			b.Message = fmt.Sprintf("%s restored %s, but %s.%s", agentName, move.Plural(ad.Restored, "message"), ad.Why, known)
+		}
 	case move.FetchEmpty:
 		if f.Mirror {
 			b.Message = fmt.Sprintf("This is a Remote Control session, and %s copies none of its messages right now.%s", agentName, known)

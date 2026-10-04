@@ -6,7 +6,8 @@
 // this program, run as claude, codex or gh, is the stand-in claude, codex or gh; the demo
 // repository's GitHub remote is a local bare repository; POST /cloud adds a cloud session
 // (?cloud=copilot-cloud for a Copilot task, ?cloud=codex-cloud for a Codex cloud task with
-// ?env=; it sets the failure the next driver call plays); POST /dirty leaves work in
+// ?env=; ?handed=1 records it as one hopsesh handed off; it sets the failure the next
+// driver call plays); POST /dirty leaves work in
 // progress in the demo repository, for a hand-off; and a command the window opens "in a
 // terminal" runs in the background instead.
 //
@@ -29,11 +30,14 @@ import (
 	"sync"
 
 	"github.com/roeehrl/hopsesh/internal/agents/all"
+	"github.com/roeehrl/hopsesh/internal/config"
+	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/testkit"
 	"github.com/roeehrl/hopsesh/internal/testkit/fakeagent"
 	"github.com/roeehrl/hopsesh/internal/testkit/fakecloud"
 	"github.com/roeehrl/hopsesh/internal/ui/cli"
 	"github.com/roeehrl/hopsesh/internal/ui/gui"
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 // shim stands in for /wails/runtime.js: calls go to /call, and tests raise events with
@@ -166,6 +170,19 @@ func main() {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		if q.Get("handed") == "1" {
+			// As if hopsesh had handed it off: the bring-back checks the copy against the
+			// briefing it sent.
+			title := q.Get("title")
+			if title == "" {
+				title = "Add rate limiting"
+			}
+			if err := move.SaveHandoff(config.StateDir(), &move.Handoff{Journal: "handed-" + id, Cloud: fakecloud.ClaudeCloud, Repo: "github.com/example/demo",
+				Session: agent.SessionKey{Agent: "claude", Session: agent.SessionID(id)}, Brief: "[hopsesh] " + title}); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
 		os.Setenv("FAKE_CLOUD_FAIL", r.URL.Query().Get("fail"))
 		_ = json.NewEncoder(w).Encode(map[string]string{"id": id})
 	})
@@ -266,7 +283,7 @@ func cloudWorld(h string) error {
 	}
 	gitConfig := filepath.Join(h, "gitconfig")
 	for k, v := range map[string]string{"PATH": bin + string(os.PathListSeparator) + os.Getenv("PATH"), "GIT_CONFIG_GLOBAL": gitConfig,
-		"GIT_CONFIG_NOSYSTEM": "1", "FAKE_CLOUD_DIR": filepath.Join(h, "cloud"), "FAKE_CLOUD_FAIL": "", "FAKE_CODEX_ENVS": "env_api=acme-api,env_web=acme-web",
+		"GIT_CONFIG_NOSYSTEM": "1", "FAKE_CLOUD_DIR": filepath.Join(h, "cloud"), "FAKE_CLOUD_FAIL": "", "FAKE_CLAUDE_SAYS": "ok", "FAKE_CODEX_ENVS": "env_api=acme-api,env_web=acme-web",
 		"GIT_AUTHOR_NAME": "Sam Doe", "GIT_AUTHOR_EMAIL": "sam@example.com", "GIT_COMMITTER_NAME": "Sam Doe", "GIT_COMMITTER_EMAIL": "sam@example.com"} {
 		os.Setenv(k, v)
 	}

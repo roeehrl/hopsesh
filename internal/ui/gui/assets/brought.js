@@ -78,10 +78,13 @@ function render(b) {
         codeLine(b), h("div", { class: "out-acts" }, h("button", { class: "btn", onclick: () => doUndo(b) }, "Undo"), back));
       break;
     case "complete":
-      body = h("section", { class: "outcome ok", "aria-labelledby": "out-h" }, h("span", { class: "sec-h ok" }, "Complete"),
+    case "unchecked":
+      body = h("section", { class: "outcome ok", "aria-labelledby": "out-h" }, h("span", { class: "sec-h ok" }, b.outcome === "unchecked" ? "Brought" : "Complete"),
         h("div", { class: "out-head" }, badge("ok", "✓"), h("div", {}, h("h2", { id: "out-h" }, `“${b.title}” is here in ${b.agent}`),
           h("span", { class: "muted", style: "font-size:12px" }, b.written ? (b.fidelity === "code" ? `The ${b.noun || "session"}'s title and what came of it, written by hopsesh` : `${b.restored} messages, as text`)
-            : b.stated ? `${b.restored} of ${b.expected} messages · checked` : `${b.restored} messages`))),
+            : b.stated ? `${b.restored} of ${b.expected} messages · checked`
+            : b.check === "brief" ? `${b.restored} messages · it begins with the briefing hopsesh sent`
+            : b.check === "none" ? `${b.restored} messages · ${b.agent} gives no count to check against` : `${b.restored} messages`))),
         h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" },
           b.continueName && !b.written ? h("button", { class: "btn primary", onclick: () => continueIn(b) }, `Continue in ${b.continueName}`) : null,
           h("button", { class: "btn" + (b.continueName && !b.written ? "" : " primary"), id: "open", onclick: () => api("OpenBrought", b.journal).catch(fail) }, `Open in ${sys.terminal}`),

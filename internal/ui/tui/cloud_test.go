@@ -18,9 +18,11 @@ import (
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/host"
+	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/testkit"
 	"github.com/roeehrl/hopsesh/internal/testkit/fakeagent"
 	"github.com/roeehrl/hopsesh/internal/testkit/fakecloud"
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 // The test binary is the stand-in claude when it runs under that name.
@@ -49,7 +51,7 @@ func cloudModel(t *testing.T) (*model, fakecloud.Session) {
 		t.Setenv(k, v)
 	}
 	gitConfig := filepath.Join(h, "gitconfig")
-	for k, v := range map[string]string{"PATH": bin + ":" + os.Getenv("PATH"), "FAKE_CLOUD_DIR": filepath.Join(h, "cloud"), "FAKE_CLOUD_FAIL": "",
+	for k, v := range map[string]string{"PATH": bin + ":" + os.Getenv("PATH"), "FAKE_CLOUD_DIR": filepath.Join(h, "cloud"), "FAKE_CLOUD_FAIL": "", "FAKE_CLAUDE_SAYS": "ok",
 		"GIT_CONFIG_GLOBAL": gitConfig, "GIT_CONFIG_NOSYSTEM": "1", "GIT_AUTHOR_NAME": "Sam Doe", "GIT_AUTHOR_EMAIL": "sam@example.com",
 		"GIT_COMMITTER_NAME": "Sam Doe", "GIT_COMMITTER_EMAIL": "sam@example.com", "CLAUDE_CODE_CHILD_SESSION": "1"} {
 		t.Setenv(k, v)
@@ -134,6 +136,7 @@ func TestBringFromCloud(t *testing.T) {
 		scr.waitFor(t, "Clean worktree")
 		tm.Type("y")
 		scr.waitFor(t, "The worktree is ready")
+		scr.waitFor(t, "send a message in it")
 		tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
 		fm := tm.FinalModel(t, teatest.WithFinalTimeout(10*time.Second)).(*model)
 		if fm.inv != nil {
@@ -159,20 +162,25 @@ func TestBringFromCloud(t *testing.T) {
 	tm := teatest.NewTestModel(t, again, teatest.WithInitialTermSize(140, 40))
 	scr := watch(t, tm, 140, 40)
 	scr.waitFor(t, "Brought “")
-	scr.waitFor(t, "3 of 3 messages, checked")
+	scr.waitFor(t, "3 messages restored. Claude Code gives no count to check them against.")
 	scr.waitFor(t, "The code is here in full")
 	tm.Type("q")
 	if fm := tm.FinalModel(t, teatest.WithFinalTimeout(10*time.Second)).(*model); fm.inv != nil {
 		fm.inv.Close()
 	}
 
+	// A session hopsesh handed off is checked against the briefing it sent.
+	if err := move.SaveHandoff(m.deps.App.StateDir, &move.Handoff{Journal: "handed-off", Cloud: "claude-cloud", Repo: "github.com/example/demo",
+		Session: agent.SessionKey{Agent: "claude", Session: agent.SessionID(s.ID)}, Brief: s.Messages[0].Text}); err != nil {
+		t.Fatal(err)
+	}
 	m = &model{deps: Deps{App: m.deps.App, Describe: m.deps.Describe}, mode: modeLoading, started: time.Now(), opts: m.opts}
 	e = run("partial")
 	again = &model{deps: Deps{App: m.deps.App, Describe: m.deps.Describe, Adopted: e.Adopt}, mode: modeLoading, started: time.Now(), opts: m.opts}
 	tm = teatest.NewTestModel(t, again, teatest.WithInitialTermSize(140, 40))
 	scr = watch(t, tm, 140, 40)
 	scr.waitFor(t, ": partial")
-	scr.waitFor(t, "Claude Code restored 1 of 3 messages. This is a known Claude Code problem (#94836).")
+	scr.waitFor(t, "Claude Code restored 1 message, but it holds only the briefing hopsesh sent")
 	scr.waitFor(t, "k keep the partial copy")
 	tm.Type("k")
 	scr.waitFor(t, "The partial copy stays as it is.")

@@ -169,6 +169,16 @@ func TestClaudeCloudRoundTrip(t *testing.T) {
 		t.Fatalf("after work: %+v", s)
 	}
 
+	copies := func() []string {
+		files, _ := filepath.Glob(filepath.Join(w.home, ".claude", "projects", "*", "*.jsonl"))
+		return files
+	}
+	// As 2.1.289: the teleport writes nothing until the user sends a message.
+	t.Setenv("FAKE_CLAUDE_SAYS", "")
+	if out, _, code := w.run("", claudeMain, "--teleport", id); code != 0 || len(copies()) != 0 || !strings.Contains(out, "no local copy saved") {
+		t.Fatalf("a teleport without a message saves nothing: %d %v %s", code, copies(), out)
+	}
+	t.Setenv("FAKE_CLAUDE_SAYS", "ok")
 	teleport := func(fail string) (string, []map[string]any) {
 		t.Helper()
 		w.git("checkout", "-q", "main")
@@ -176,17 +186,16 @@ func TestClaudeCloudRoundTrip(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("teleport (%s): %s", fail, stderr)
 		}
-		files, _ := filepath.Glob(filepath.Join(w.home, ".claude", "projects", "*", "*.jsonl"))
-		var newest string
-		var recs []map[string]any
-		for _, f := range files {
-			fi, _ := os.Stat(f)
-			if newest == "" || fi.ModTime().After(mustStat(t, newest).ModTime()) {
-				newest = f
-			}
+		files := copies()
+		if len(files) != 1 {
+			t.Fatalf("teleport (%s) wrote %v", fail, files)
 		}
-		b, _ := os.ReadFile(newest)
-		os.Remove(newest)
+		b, _ := os.ReadFile(files[0])
+		os.Remove(files[0])
+		if strings.Contains(string(b), `"sessionId":"`+id) || strings.Contains(string(b), "teleported-from") || strings.Contains(string(b), "remoteSessionId") {
+			t.Fatalf("the copy names the cloud session: %s", b)
+		}
+		var recs []map[string]any
 		for _, l := range strings.Split(strings.TrimSpace(string(b)), "\n") {
 			var r map[string]any
 			must(t, json.Unmarshal([]byte(l), &r))
@@ -194,21 +203,36 @@ func TestClaudeCloudRoundTrip(t *testing.T) {
 		}
 		return out, recs
 	}
+	// The cloud's messages, the "continued from another machine" record, then the new turn.
+	shape := func(recs []map[string]any) string {
+		var kinds []string
+		for _, r := range recs {
+			k := r["type"].(string)
+			if r["isMeta"] == true {
+				k = "meta"
+			}
+			if st, ok := r["subtype"].(string); ok {
+				k += ":" + st
+			}
+			kinds = append(kinds, k)
+		}
+		return strings.Join(kinds, ",")
+	}
 	_, recs := teleport("")
-	if recs[0]["type"] != "teleported-from" || recs[0]["messageCount"] != float64(2) || len(recs) != 3 {
-		t.Fatalf("a whole teleport: %v", recs)
+	if got := shape(recs); got != "user,assistant,meta,user,assistant,system:turn_duration" {
+		t.Fatalf("a whole teleport: %s", got)
 	}
 	if w.git("rev-parse", "--abbrev-ref", "HEAD") != s.Result {
 		t.Fatal("teleport checks out the cloud's branch")
 	}
-	if _, recs = teleport("partial"); recs[0]["messageCount"] != float64(2) || len(recs) != 2 {
-		t.Fatalf("a partial teleport restores one message of two: %v", recs)
+	if _, recs = teleport("partial"); shape(recs) != "user,meta,user,assistant,system:turn_duration" {
+		t.Fatalf("a partial teleport restores one message of two: %s", shape(recs))
 	}
-	if _, recs = teleport("empty"); recs[0]["messageCount"] != float64(0) || len(recs) != 1 {
-		t.Fatalf("an empty teleport: %v", recs)
+	if _, recs = teleport("empty"); shape(recs) != "meta,user,assistant,system:turn_duration" {
+		t.Fatalf("an empty teleport: %s", shape(recs))
 	}
-	if out, _ := teleport("no-branch"); !strings.Contains(out, "Failed to checkout branch") {
-		t.Fatalf("no branch: %s", out)
+	if out, recs := teleport("no-branch"); !strings.Contains(out, "Failed to checkout branch") || shape(recs) != "user,assistant,meta,system:informational,user,assistant,system:turn_duration" {
+		t.Fatalf("no branch: %s %s", out, shape(recs))
 	}
 	must(t, os.WriteFile(filepath.Join(w.repo, "README.md"), []byte("dirty\n"), 0o600))
 	if _, stderr, code := w.run("", claudeMain, "--teleport", id); code == 0 || !strings.Contains(stderr, "uncommitted") {
@@ -217,14 +241,6 @@ func TestClaudeCloudRoundTrip(t *testing.T) {
 	if _, stderr, code := w.run("signed-out", claudeMain, "--teleport", id); code == 0 || !strings.Contains(stderr, "organization UUID") {
 		t.Fatalf("signed out: %s", stderr)
 	}
-}
-
-func mustStat(t *testing.T, p string) os.FileInfo {
-	fi, err := os.Stat(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return fi
 }
 
 // Claude Code starts only from a pushed branch; a push the origin refuses fails the

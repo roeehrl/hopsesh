@@ -56,7 +56,9 @@ function fetchText(x) {
   const f = x.fetch;
   if (!f) return { title: x.title, detail: "", note: "" };
   const outcome = { partial: ": partial", empty: ": empty", waiting: ": waiting" }[f.outcome] || "";
-  const counts = f.outcome === "code" ? "the code only" : f.stated ? `${f.restored} of ${f.expected} messages${f.outcome === "partial" ? " restored" + (f.kept ? ", partial copy kept" : "") : ""}` : f.restored ? `${f.restored} messages` : "";
+  const partial = f.outcome === "partial" ? " restored" + (f.kept ? ", partial copy kept" : "") : "";
+  const counts = f.outcome === "code" ? "the code only" : f.stated ? `${f.restored} of ${f.expected} messages${partial}`
+    : f.restored ? `${f.restored} message${f.restored === 1 ? "" : "s"}${partial}${f.outcome === "unchecked" ? ", nothing to check them against" : ""}` : "";
   return {
     title: `“${f.title}” from ${f.cloudTitle}${outcome}`,
     detail: [`${f.cloud} → ${f.agent} on ${sys.here}`, counts, "worktree " + f.worktree].filter(Boolean).join(" · "),

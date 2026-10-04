@@ -65,7 +65,7 @@ func newHandoffWorld(t *testing.T) *handoffWorld {
 	}
 	gitConfig := filepath.Join(root, "gitconfig")
 	env := testkit.Env(w.home)
-	for k, v := range map[string]string{"PATH": bin + ":" + testPath(), "HOPSESH_MACHINE": "here", "FAKE_CLOUD_DIR": w.store, "FAKE_CLOUD_FAIL": "",
+	for k, v := range map[string]string{"PATH": bin + ":" + testPath(), "HOPSESH_MACHINE": "here", "FAKE_CLOUD_DIR": w.store, "FAKE_CLOUD_FAIL": "", "FAKE_CLAUDE_SAYS": "ok",
 		"FAKE_AGENT_LOG": filepath.Join(root, "agents.log"), "GIT_CONFIG_GLOBAL": gitConfig, "GIT_CONFIG_NOSYSTEM": "1", "FAKE_CLAUDE_TRUSTED": w.trusted,
 		"GIT_AUTHOR_NAME": "Sam Doe", "GIT_AUTHOR_EMAIL": "sam@example.com", "GIT_COMMITTER_NAME": "Sam Doe", "GIT_COMMITTER_EMAIL": "sam@example.com",
 		// As inside another agent's session: the driver must run without these.

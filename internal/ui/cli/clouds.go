@@ -367,7 +367,11 @@ func (r *run) pullCloud(cmd *cobra.Command, cloud string, id agent.SessionID, op
 		if r.jsonOut {
 			c.Stdout = os.Stderr // standard output is the JSON
 		} else {
-			r.printf("\nRunning %s here; hopsesh checks what it brought when it ends.\n\n", strings.Join(p.Fetch.Run.Argv, " "))
+			r.printf("\nRunning %s here; hopsesh checks what it brought when it ends.\n", strings.Join(p.Fetch.Run.Argv, " "))
+			if p.Fetch.Note != "" {
+				r.printf("! %s.\n", p.Fetch.Note)
+			}
+			r.printf("\n")
 		}
 		runErr := c.Run()
 		f, err := r.app.Adopt(context.Background(), res.Journal, true)
@@ -383,7 +387,7 @@ func (r *run) pullCloud(cmd *cobra.Command, cloud string, id agent.SessionID, op
 		r.renderBrought(b, res.Journal)
 	}
 	out := map[string]any{"plan": p, "result": res, "brought": b}
-	if run && b.Continue != "" && !b.Written && (b.Outcome == move.FetchComplete || b.Outcome == move.FetchPartial) {
+	if run && b.Continue != "" && !b.Written && move.HasCopy(b.Outcome) {
 		cp, cres, err := r.continueBrought(cmd, b, opt)
 		if err != nil {
 			return err
@@ -505,6 +509,9 @@ func (r *run) renderFetchPlan(p *move.Plan) {
 	if fp.Command != "" {
 		r.printf("  runs      %s\n", fp.Command)
 	}
+	if fp.Note != "" {
+		r.printf("  ! %s\n", fp.Note)
+	}
 	if fp.Write && !fp.CodeOnly {
 		r.printf("  writes    a new %s session (%d message(s)) in the worktree\n", fp.Writer, fp.Messages)
 	}
@@ -527,15 +534,18 @@ func (r *run) renderBrought(b app.Brought, journal string) {
 	case move.FetchWaiting:
 		r.printf("\n✓ The worktree is ready: %s\n", b.Worktree)
 		r.printf("\nBring it here in your terminal:\n\n  %s\n\n", b.Command)
-		r.printf("hopsesh picks up the copy when it appears (or on its next look, hopsesh ls), checks its\nmessage count, and renames the cloud's branch. Undo with: hopsesh undo %s\n", journal)
+		if b.Note != "" {
+			r.printf("! %s.\n\n", b.Note)
+		}
+		r.printf("hopsesh picks up the copy when it appears (or on its next look, hopsesh ls), checks it,\nand renames the cloud's branch. Undo with: hopsesh undo %s\n", journal)
 		return
 	case move.FetchCode:
 		r.printf("\n✓ The code of %q is in %s on %s.\n  Undo with: hopsesh undo %s\n", b.Title, b.Worktree, b.Branch, journal)
 		return
 	}
-	mark := map[string]string{move.FetchComplete: "✓", move.FetchPartial: "!", move.FetchEmpty: "✗"}[b.Outcome]
+	mark := map[string]string{move.FetchComplete: "✓", move.FetchUnchecked: "✓", move.FetchPartial: "!", move.FetchEmpty: "✗"}[b.Outcome]
 	r.printf("\n%s %s\n", mark, b.Message)
-	if b.Outcome != move.FetchComplete && b.Issue != "" {
+	if (b.Outcome == move.FetchPartial || b.Outcome == move.FetchEmpty) && b.Issue != "" {
 		r.printf("  %s\n", b.Issue)
 	}
 	switch {

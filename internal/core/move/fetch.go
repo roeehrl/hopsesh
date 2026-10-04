@@ -37,6 +37,9 @@ const (
 	FetchPartial  = "partial"  // fewer messages than the cloud said it sent
 	FetchEmpty    = "empty"    // a copy with no messages
 	FetchCode     = "code"     // the code only, as asked
+	// FetchUnchecked: a copy with messages that nothing can be checked against (the vendor
+	// states no count, and hopsesh did not start the cloud session, so no briefing either).
+	FetchUnchecked = "unchecked"
 )
 
 // States of a fetch's cloud branch.
@@ -126,8 +129,10 @@ type FetchPlan struct {
 	Run      agent.Command `json:"run"`
 	Command  string        `json:"command,omitempty"` // Run for the user's shell
 	Adopt    *agent.Adopt  `json:"adopt,omitempty"`
-	Loss     []string      `json:"loss,omitempty"`
-	Checks   []Check       `json:"checks"`
+	// Note is what the user must do in the driver's terminal for the copy to be saved.
+	Note   string   `json:"note,omitempty"`
+	Loss   []string `json:"loss,omitempty"`
+	Checks []Check  `json:"checks"`
 	// ContinueIn is the agent it continues in once it is here ("" : its own).
 	ContinueIn   agent.ID `json:"continueIn,omitempty"`
 	ContinueName string   `json:"continueName,omitempty"`
@@ -230,7 +235,7 @@ func BuildFetch(ctx context.Context, in FetchInput, opt Options) (*Plan, error) 
 			fp.Run = *f.Run
 			fp.Run.Unset = union(fp.Run.Unset, cl.Unset)
 			fp.Command = launch.Shell(fp.Run, "", launch.DefaultShell())
-			fp.Adopt, fp.Loss = f.Adopt, f.Loss
+			fp.Adopt, fp.Loss, fp.Note = f.Adopt, f.Loss, f.Note
 			acct := "Signed in to the account " + cl.Title + " needs"
 			if in.Account != nil && in.Account.Label != "" {
 				acct += " (" + in.Account.Label + ")"
@@ -248,8 +253,16 @@ func BuildFetch(ctx context.Context, in FetchInput, opt Options) (*Plan, error) 
 	if s.State == agent.CloudRunning && !fp.Write {
 		check("warn", fmt.Sprintf("The %s is still running in the cloud. You get the conversation as it is now", fp.Noun))
 	}
-	if !fp.Write {
-		relateFetch(ctx, in, p, opt, check)
+	relateFetch(ctx, in, p, opt, check)
+	if fp.Write {
+		switch {
+		case fp.Append:
+			check("ok", fmt.Sprintf("Added to “%s”, the %s session it was handed off from (%s)", fp.Original.Title, fp.Writer, plural(fp.Messages, "message")))
+		case opt.AppendOriginal && fp.Relation == RelationNew:
+			check("err", fmt.Sprintf("The %s's work can be added only to the %s session it was handed off from, here and as it was left; this comes as a new session", fp.Noun, fp.Writer))
+		case !opt.AppendOriginal || fp.Relation != RelationDiverged:
+			check("ok", fmt.Sprintf("Written here as a new %s session (%s)", fp.Writer, plural(fp.Messages, "message")))
+		}
 	}
 	return p, nil
 }
@@ -297,10 +310,6 @@ func planFetchWrite(in FetchInput, p *Plan, f *agent.Fetched, opt Options, check
 	if !fp.Diff && in.Session.State == agent.CloudRunning {
 		check("warn", fmt.Sprintf("The %s is still running in %s. You get its messages as they are now", fp.Noun, cl.Title))
 	}
-	if opt.AppendOriginal {
-		check("err", fmt.Sprintf("This comes as a new %s session; it can't be added to the original", fp.Writer))
-	}
-	check("ok", fmt.Sprintf("Written here as a new %s session (%s)", fp.Writer, plural(fp.Messages, "message")))
 }
 
 // diffWords sums up a unified diff for people: "+12 −3 · 2 files".
@@ -424,11 +433,19 @@ func planFetchBranch(ctx context.Context, in FetchInput, fp *FetchPlan, opt Opti
 
 // relateFetch finds the local session the cloud session was handed off from: as it was
 // left, the cloud's work can be added to it instead of resumed apart (Options.Append);
-// used since, both stay, and only keep-both is offered.
+// used since, both stay, and only keep-both is offered. A copy hopsesh writes (Write) can be
+// added to the original when it goes into the original's own agent.
 func relateFetch(ctx context.Context, in FetchInput, p *Plan, opt Options, check func(string, string)) {
 	fp, o := p.Fetch, in.Original
 	if o == nil || in.Lineage == nil {
 		return
+	}
+	holder, hin := in.Module, in.Install
+	if fp.Write && in.Continue != nil {
+		holder, hin = in.Continue, in.ContinueInstall
+	}
+	if o.Summary.Key.Agent != holder.Spec().ID {
+		return // the original is another agent's session: the work comes as a new one
 	}
 	var from *lineage.Replica
 	for _, h := range in.Lineage.Hops {
@@ -443,16 +460,16 @@ func relateFetch(ctx context.Context, in FetchInput, p *Plan, opt Options, check
 	if from == nil || from.Key != o.Summary.Key {
 		return
 	}
-	reader, okR := in.Module.(agent.Reader)
-	_, okW := in.Module.(agent.Writer)
+	reader, okR := holder.(agent.Reader)
+	_, okW := holder.(agent.Writer)
 	if !okR || !okW {
 		return
 	}
-	h, err := in.Machine.For(ctx, in.Module.Spec(), in.Install, nil)
+	h, err := in.Machine.For(ctx, holder.Spec(), hin, nil)
 	if err != nil {
 		return
 	}
-	cur, err := reader.Read(ctx, h, in.Install, o.Summary, ir.Cursor{})
+	cur, err := reader.Read(ctx, h, hin, o.Summary, ir.Cursor{})
 	if err != nil {
 		return
 	}
@@ -460,6 +477,9 @@ func relateFetch(ctx context.Context, in FetchInput, p *Plan, opt Options, check
 	fp.Original = &s
 	if cur.Cursor.Head != from.Head {
 		fp.Relation = RelationDiverged
+		if fp.Write && !opt.AppendOriginal {
+			return // a written copy is a new session anyway
+		}
 		p.Conflict = "you continued the local session after handing it off"
 		if opt.Conflict == ConflictKeepBoth {
 			check("warn", "You continued the local session after handing it off; the cloud work comes in as a separate session")
@@ -473,7 +493,7 @@ func relateFetch(ctx context.Context, in FetchInput, p *Plan, opt Options, check
 		return
 	}
 	switch {
-	case fp.ContinueIn != "":
+	case fp.ContinueIn != "" && !fp.Write:
 		check("err", "Adding the cloud's work to the original keeps it in "+in.Module.Spec().Name+"; continue in "+fp.ContinueName+" separately")
 	case o.Live.State == agent.Live:
 		check("err", "The original session is open here; quit it first")
@@ -489,7 +509,7 @@ func conversationWords(spec agent.Spec, cl agent.Cloud, fp *FetchPlan) string {
 	case cl.Down == agent.FidNative && fp.ContinueIn != "":
 		return "Copied by " + spec.Name + ", then converted (tool calls become text)."
 	case cl.Down == agent.FidNative:
-		return spec.Name + " copies the whole conversation; hopsesh checks the message count."
+		return spec.Name + " copies the whole conversation, once you send a message in it; hopsesh checks the copy."
 	case cl.Down == agent.FidCode:
 		return "Only the task title, summary and code come back. The steps stay in the cloud."
 	case cl.Down == agent.FidText:
@@ -667,7 +687,7 @@ func applyFetch(ctx context.Context, p *Plan, env Env) (*Result, error) {
 			Session: fp.Session, URL: fp.URL, Title: p.Title, Untitled: in.Session.Title == "", Repo: fp.Repo, Checkout: top, Worktree: fp.Worktree, Base: base,
 			CloudBranch: fp.CloudBranch, VendorPrefix: in.Cloud.VendorPrefix, Rename: fp.Rename, Lineage: in.Lineage,
 			Continue: fp.ContinueIn, ContinueName: fp.ContinueName, Command: fp.Command, Run: fp.Run, Problems: in.Cloud.Problems,
-			Mirror: in.Session.Mirror, MirrorOf: in.MirrorOf}
+			Mirror: in.Session.Mirror, MirrorOf: in.MirrorOf, Note: fp.Note, Brief: in.Prompt}
 		if fp.Adopt != nil {
 			pf.Adopt = *fp.Adopt
 		}

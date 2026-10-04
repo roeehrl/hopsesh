@@ -253,18 +253,18 @@ func TestTestCloud(t *testing.T) {
 func TestParseCloudLink(t *testing.T) {
 	m := codex.New()
 	for s, want := range map[string]string{
-		"https://chatgpt.com/codex/tasks/task_e_68f2c41a9b7c81909d3e":            "task_e_68f2c41a9b7c81909d3e",
-		"chatgpt.com/codex/tasks/task_e_68f2c41a9b7c81909d3e?tab=diff#x":         "task_e_68f2c41a9b7c81909d3e",
-		" task_e_68f2c41a9b7c81909d3e ":                                          "task_e_68f2c41a9b7c81909d3e",
-		"https://chatgpt.com/codex/tasks/task_e_68f2c41a9b7c81909d3e/attempts/2": "task_e_68f2c41a9b7c81909d3e",
-		"https://claude.ai/code/session_01abc":                                   "",
-		"task_":                                                                  "",
-		"https://chatgpt.com/codex/tasks/../../x":                                "",
-		"http://chatgpt.com/codex/tasks/task_e_68f2c41a9b7c81909d3e":             "",
+		"https://chatgpt.com/codex/tasks/task_e_68f2c41a9b7c81909d3e":              "task_e_68f2c41a9b7c81909d3e",
+		"chatgpt.com/codex/tasks/task_e_68f2c41a9b7c81909d3e?tab=diff#x":           "task_e_68f2c41a9b7c81909d3e",
+		" task_e_68f2c41a9b7c81909d3e ":                                            "task_e_68f2c41a9b7c81909d3e",
+		"https://chatgpt.com/codex/tasks/task_e_68f2c41a9b7c81909d3e/attempts/2":   "task_e_68f2c41a9b7c81909d3e",
+		"https://claude.ai/code/session_01abc":                                     "",
+		"task_":                                                                    "",
+		"https://chatgpt.com/codex/tasks/../../x":                                  "",
+		"http://chatgpt.com/codex/tasks/task_e_68f2c41a9b7c81909d3e":               "",
 		"https://chatgpt.com.evil.example/codex/tasks/task_e_68f2c41a9b7c81909d3e": "",
 		"https://evil.example/chatgpt.com/codex/tasks/task_e_68f2c41a9b7c81909d3e": "",
-		"https://user@chatgpt.com/codex/tasks/task_e_68f2c41a9b7c81909d3e":        "",
-		"https://chatgpt.com:444/codex/tasks/task_e_68f2c41a9b7c81909d3e":         "",
+		"https://user@chatgpt.com/codex/tasks/task_e_68f2c41a9b7c81909d3e":         "",
+		"https://chatgpt.com:444/codex/tasks/task_e_68f2c41a9b7c81909d3e":          "",
 	} {
 		cl, id, ok := m.ParseCloudLink(s)
 		if string(id) != want || ok != (want != "") || cl != "codex-cloud" {

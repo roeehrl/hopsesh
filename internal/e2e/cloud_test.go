@@ -67,7 +67,7 @@ func newCloudWorld(t *testing.T, work bool) *cloudWorld {
 	gitConfig := filepath.Join(root, "gitconfig")
 	for k, v := range map[string]string{"HOME": w.home, "USERPROFILE": w.home, "PATH": bin + ":" + testPath(), "HOPSESH_MACHINE": "here",
 		"HOPSESH_CONFIG_DIR": filepath.Join(w.home, "config"), "HOPSESH_STATE_DIR": filepath.Join(w.home, "state"), "HOPSESH_TAILSCALE": "off",
-		"CLAUDE_CONFIG_DIR": "", "CODEX_HOME": "", "FAKE_CLOUD_DIR": w.store, "FAKE_CLOUD_FAIL": "", "FAKE_AGENT_LOG": filepath.Join(root, "agents.log"),
+		"CLAUDE_CONFIG_DIR": "", "CODEX_HOME": "", "FAKE_CLOUD_DIR": w.store, "FAKE_CLOUD_FAIL": "", "FAKE_CLAUDE_SAYS": "ok", "FAKE_AGENT_LOG": filepath.Join(root, "agents.log"),
 		"GIT_CONFIG_GLOBAL": gitConfig, "GIT_CONFIG_NOSYSTEM": "1", "GIT_AUTHOR_NAME": "Sam Doe", "GIT_AUTHOR_EMAIL": "sam@example.com",
 		"GIT_COMMITTER_NAME": "Sam Doe", "GIT_COMMITTER_EMAIL": "sam@example.com",
 		// As inside another agent's session: the teleport must run without these.
@@ -143,6 +143,16 @@ func (w *cloudWorld) plan(a *app.App, checkout string, opt move.Options) (*app.I
 	return inv, p
 }
 
+// handedOff records the session as one hopsesh handed off, with its first message as the
+// briefing hopsesh sent.
+func (w *cloudWorld) handedOff(a *app.App) {
+	w.t.Helper()
+	if err := move.SaveHandoff(a.StateDir, &move.Handoff{Journal: "handed-off", Cloud: "claude-cloud", Repo: "github.com/example/demo",
+		Session: agent.SessionKey{Agent: "claude", Session: agent.SessionID(w.session.ID)}, Brief: w.session.Messages[0].Text}); err != nil {
+		w.t.Fatal(err)
+	}
+}
+
 // terminal runs the plan's command line as the user's terminal would.
 func (w *cloudWorld) terminal(line, fail string) string {
 	w.t.Helper()
@@ -180,6 +190,18 @@ func TestBringFromClaudeCloud(t *testing.T) {
 	if err != nil || !f.Waiting() {
 		t.Fatalf("nothing to adopt before the teleport: %+v %v", f, err)
 	}
+	// Claude Code saves its copy only once the user sends a message in it: a teleport left
+	// without one leaves the fetch waiting, and every front end says so.
+	t.Setenv("FAKE_CLAUDE_SAYS", "")
+	if out := w.terminal(res.Command, ""); !strings.Contains(out, "Teleported") {
+		t.Fatalf("teleport: %s", out)
+	}
+	f, err = a.Adopt(ctx, res.Journal, true)
+	if err != nil || !f.Waiting() || !strings.Contains(a.Brought(f).Message, "Claude Code saves its copy only after you send a message in it") ||
+		!strings.Contains(fp.Note, "send a message") {
+		t.Fatalf("no message sent, no copy: %+v %v %q", f, err, fp.Note)
+	}
+	t.Setenv("FAKE_CLAUDE_SAYS", "ok")
 	if out := w.terminal(res.Command, ""); !strings.Contains(out, "Teleported") {
 		t.Fatalf("teleport: %s", out)
 	}
@@ -189,8 +211,9 @@ func TestBringFromClaudeCloud(t *testing.T) {
 	}
 	b := a.Brought(f)
 	branch := "hopsesh/from/claude-cloud/" + strings.TrimPrefix(w.session.Result, "claude/")
-	if b.Outcome != move.FetchComplete || b.Restored != 3 || b.Expected != 3 || b.Branch != branch || b.Renamed != w.session.Result ||
-		!strings.Contains(b.Command, "claude --resume") || !strings.Contains(b.Message, "3 of 3 messages") {
+	if b.Outcome != move.FetchUnchecked || b.Restored != 3 || b.Stated || b.Branch != branch || b.Renamed != w.session.Result ||
+		!strings.Contains(b.Command, "claude --resume") || !strings.Contains(b.Message, "3 messages restored. Claude Code gives no count to check them against.") ||
+		b.Title != "add rate limiting to search" {
 		t.Fatalf("brought: %+v", b)
 	}
 	if got := repos.CurrentBranch(ctx, fp.Worktree); got != branch {
@@ -236,14 +259,20 @@ func TestBringOutcomes(t *testing.T) {
 		work       bool
 		outcome    string
 		message    string
+		handedOff  bool // hopsesh started the session, so the copy is checked against its briefing
 	}{
-		{"partial", "partial", true, move.FetchPartial, "restored 1 of 3 messages. This is a known Claude Code problem (#94836)."},
-		{"empty", "empty", true, move.FetchEmpty, "copied none of the session's messages. This is a known Claude Code problem (#95873)."},
-		{"no-branch", "no-branch", false, move.FetchComplete, ""},
+		{"partial", "partial", true, move.FetchPartial, "restored 1 message, but it holds only the briefing hopsesh sent, none of the cloud's replies. This is a known Claude Code problem (#94836).", true},
+		{"whole", "", true, move.FetchComplete, "3 messages, from the briefing hopsesh sent on", true},
+		{"unchecked", "", true, move.FetchUnchecked, "3 messages restored. Claude Code gives no count to check them against.", false},
+		{"empty", "empty", true, move.FetchEmpty, "copied none of the session's messages. This is a known Claude Code problem (#95873).", true},
+		{"no-branch", "no-branch", false, move.FetchUnchecked, "", false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			w := newCloudWorld(t, c.work)
 			a := w.app()
+			if c.handedOff {
+				w.handedOff(a)
+			}
 			inv, p := w.plan(a, w.repo, move.Options{})
 			defer inv.Close()
 			if p == nil || len(p.Blockers) > 0 {
