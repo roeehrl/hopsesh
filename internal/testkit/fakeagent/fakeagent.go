@@ -58,6 +58,16 @@ func Codex() int {
 	return 0
 }
 
+// Vendor is the stand-in for a second-wave cloud's CLI (gh, jules, devin, amp), by the
+// name it runs under; ok is false for another name.
+func Vendor(name string) (code int, ok bool) {
+	main := fakecloud.Vendor(name)
+	if main == nil {
+		return 0, false
+	}
+	return main(proc()), true
+}
+
 // Cloud is the fakecloud program: it plays the cloud agent (fakecloud work) and the fake's
 // own cloud CLI (fakecloud remote).
 func Cloud() int { return fakecloud.Main(proc()) }
