@@ -13,6 +13,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/roeehrl/hopsesh/internal/app"
+	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/launch"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -212,8 +213,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.err != nil {
 			m.err, m.mode = msg.err, modeError
-		} else {
-			m.result, m.mode = msg.res, modeDone
+			break
+		}
+		m.result, m.mode = msg.res, modeDone
+		if f := msg.res.Fetch; f != nil && f.Outcome == move.FetchComplete {
+			// Written here at once (no terminal step): show what came back.
+			if rec, err := m.deps.App.Adopt(context.Background(), msg.res.Journal, false); err == nil {
+				b := m.deps.App.Brought(rec)
+				m.brought, m.mode = &b, modeBrought
+			}
 		}
 	case tea.KeyPressMsg:
 		return m.key(msg.String())
@@ -425,6 +433,9 @@ func (m *model) applyCmd() tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
 		res, err := a.Apply(ctx, p, in, nil)
+		if err == nil && p.Handoff != nil && a.RememberEnv(p) {
+			_ = config.Save(a.Cfg)
+		}
 		return applyDone{res, err}
 	}
 }

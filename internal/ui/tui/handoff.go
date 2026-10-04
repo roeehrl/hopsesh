@@ -124,6 +124,22 @@ func (m *model) handoffKeys(k string) (tea.Model, tea.Cmd) {
 		if hp.CanBundle {
 			m.ho.opts.Bundle = !m.ho.opts.Bundle
 		}
+	case "e":
+		// The next environment hopsesh knows of (the plan lists them).
+		if !hp.EnvNeeded || len(hp.Envs) == 0 {
+			return m, nil
+		}
+		next := 0
+		for i, e := range hp.Envs {
+			if e.Value == hp.Env {
+				next = (i + 1) % len(hp.Envs)
+			}
+		}
+		m.ho.opts.Env = hp.Envs[next].Value
+	case "S":
+		if hp.CanStartingDiff {
+			m.ho.opts.StartingDiff = !m.ho.opts.StartingDiff
+		}
 	default:
 		return m, nil
 	}
@@ -176,7 +192,11 @@ func (m *model) viewPicker(b *strings.Builder) {
 			cur = "▸ "
 		}
 		if t.OK {
-			fmt.Fprintf(b, "  %s%-14s %s\n", cur, cloudSt.Render(t.Cloud), t.Note)
+			note := t.Note
+			if len(t.Limits) > 0 {
+				note += dim.Render(" · " + t.Limits[0])
+			}
+			fmt.Fprintf(b, "  %s%-14s %s\n", cur, cloudSt.Render(t.Cloud), note)
 		} else {
 			fmt.Fprintf(b, "  %s%-14s %s\n", cur, dim.Render(t.Cloud), errSt.Render("✕ "+t.Why))
 		}
@@ -203,6 +223,8 @@ func (m *model) viewHandoffPlan(b *strings.Builder) {
 	}
 	fmt.Fprintf(b, "  Briefing  %d tokens%s%s  %s\n", hp.Tokens, masked, edited, dim.Render("[b] view/edit"))
 	switch {
+	case hp.Code == agent.ViaStartingDiff:
+		fmt.Fprintf(b, "  Code      %d changed file(s) as a starting diff, on branch %s (nothing is pushed)\n", len(hp.Tracked)+len(hp.Untracked), hp.Branch)
 	case hp.Code == agent.ViaBundle:
 		fmt.Fprintf(b, "  Code      an upload by %s (branch %s here; nothing is pushed)\n", hp.Agent, hp.Branch)
 	case hp.Reuse:
@@ -245,6 +267,21 @@ func (m *model) viewHandoffPlan(b *strings.Builder) {
 	if hp.CanBundle {
 		fmt.Fprintf(b, "  %s Upload the repository instead of pushing a branch  %s\n", box(hp.Code == agent.ViaBundle), dim.Render("[U]"))
 	}
+	if hp.CanStartingDiff {
+		fmt.Fprintf(b, "  %s Send the changes with the %s as a starting diff instead of a branch  %s\n", box(hp.Code == agent.ViaStartingDiff), hp.Noun, dim.Render("[S]"))
+	}
+	if hp.EnvNeeded {
+		switch {
+		case hp.Env != "" && len(hp.Envs) > 1:
+			fmt.Fprintf(b, "  Environment  %s  %s\n", hp.EnvName, dim.Render("[e] next"))
+		case hp.Env != "":
+			fmt.Fprintf(b, "  Environment  %s\n", hp.EnvName)
+		case len(hp.Envs) > 0:
+			fmt.Fprintf(b, "  Environment  %s  %s\n", warnSt.Render("none picked"), dim.Render("[e] pick: "+envLabels(hp.Envs)))
+		default:
+			fmt.Fprintf(b, "  Environment  %s\n", warnSt.Render("none known"))
+		}
+	}
 	var oks []string
 	for _, c := range hp.Checks {
 		switch c.State {
@@ -261,6 +298,9 @@ func (m *model) viewHandoffPlan(b *strings.Builder) {
 		b.WriteString("  " + errSt.Render("✗ "+bl) + "\n")
 	}
 	b.WriteString("  " + dim.Render(hp.Usage) + "\n")
+	for _, l := range hp.Limits {
+		b.WriteString("  " + dim.Render("· "+l) + "\n")
+	}
 	if hp.Tally.Messages > 0 || hp.Tally.ToolCalls > 0 {
 		fmt.Fprintf(b, "  Loss      %d messages, %d tool calls, %d reasoning blocks  %s\n", hp.Tally.Messages, hp.Tally.ToolCalls, hp.Tally.Reasoning, dim.Render("[L] list"))
 	}
@@ -275,6 +315,9 @@ func (m *model) viewHandoffPlan(b *strings.Builder) {
 	keys := "enter hand off · b briefing in $EDITOR · u untracked files · L loss list · esc back"
 	if len(p.Blockers) > 0 {
 		keys = "resolve the ✗ first · b briefing in $EDITOR · L loss list · esc back"
+	}
+	if hp.EnvNeeded && len(hp.Envs) > 0 {
+		keys = strings.Replace(keys, " · L loss list", " · e environment · L loss list", 1)
 	}
 	b.WriteString(dim.Render("\n  "+keys) + "\n")
 }
@@ -306,15 +349,21 @@ func (m *model) viewHandoffDone(b *strings.Builder) {
 		return
 	}
 	fmt.Fprintf(b, "\n  %s %s\n", okSt.Render("✓"), bold.Render("Handed off to "+r.CloudTitle))
-	fmt.Fprintf(b, "   Session %s is %s · %q\n", shortID(r.Session), nonEmpty(r.State, "running"), m.plan.Title)
+	fmt.Fprintf(b, "   %s %s is %s · %q\n", upperFirst(nonEmpty(r.Noun, "session")), shortID(r.Session), nonEmpty(r.State, "running"), m.plan.Title)
 	fmt.Fprintf(b, "   %s\n", link(r.URL, r.URL))
 	fmt.Fprintf(b, "   id      %s\n", r.Session)
-	if r.Branch != "" && r.Code == string(agent.ViaBranch) {
+	if r.Branch != "" && (r.Code == string(agent.ViaBranch) || r.Code == string(agent.ViaStartingDiff)) {
 		branch := r.Branch
 		if r.BranchURL != "" {
 			branch = link(r.BranchURL, r.Branch)
 		}
 		fmt.Fprintf(b, "   branch  %s on %s\n", branch, r.Repo)
+		if r.Code == string(agent.ViaStartingDiff) {
+			b.WriteString("           the changes went with it as a starting diff\n")
+		}
+	}
+	if r.EnvName != "" {
+		fmt.Fprintf(b, "   env     %s\n", r.EnvName)
 	}
 	if len(r.Stayed) > 0 {
 		fmt.Fprintf(b, "   stayed on this machine  %s\n", strings.Join(r.Stayed, " · "))
@@ -334,7 +383,11 @@ func (m *model) viewHandoffDone(b *strings.Builder) {
 	if m.ho.notice != "" {
 		b.WriteString("\n   " + okSt.Render(m.ho.notice) + "\n")
 	}
-	b.WriteString(dim.Render("\n   o open in browser · y copy link · u undo (deletes the branch and the mark; "+strings.TrimSuffix(lowerFirst(r.Manual), ".")+") · enter back to the list · q quit") + "\n")
+	undo := "deletes the branch and the mark"
+	if !r.Pushed {
+		undo = "deletes the mark"
+	}
+	b.WriteString(dim.Render("\n   o open in browser · y copy link · u undo ("+undo+"; "+strings.TrimSuffix(lowerFirst(r.Manual), ".")+") · enter back to the list · q quit") + "\n")
 }
 
 // handoffDoneKeys are the done view's keys.
@@ -395,4 +448,20 @@ func lowerFirst(s string) string {
 		return s
 	}
 	return strings.ToLower(s[:1]) + s[1:]
+}
+
+func upperFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// envLabels are the environments to pick from, in short.
+func envLabels(envs []move.EnvChoice) string {
+	var out []string
+	for _, e := range envs {
+		out = append(out, e.Name)
+	}
+	return strings.Join(out, ", ")
 }
