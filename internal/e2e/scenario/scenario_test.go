@@ -16,6 +16,7 @@ import (
 	"github.com/roeehrl/hopsesh/agents/claude"
 	"github.com/roeehrl/hopsesh/internal/agents/all"
 	"github.com/roeehrl/hopsesh/internal/testkit/fakeagent"
+	"github.com/roeehrl/hopsesh/internal/testkit/fakecloud"
 	"github.com/roeehrl/hopsesh/internal/ui/cli"
 )
 
@@ -62,6 +63,7 @@ func TestScenarios(t *testing.T) {
 		Cmds: map[string]func(ts *testscript.TestScript, neg bool, args []string){
 			"agent-turn":     agentTurn,
 			"claude-session": claudeSession,
+			"cloud-world":    cloudWorld,
 			"git-repo":       gitRepo,
 		},
 	})
@@ -151,6 +153,39 @@ func agentTurn(ts *testscript.TestScript, neg bool, args []string) {
 		ts.Fatalf("%v", err)
 	}
 	ts.Setenv("SESSION", files[0])
+}
+
+// cloudWorld makes a repository whose GitHub remote is a local bare repository, and a
+// Claude Code cloud session on it that pushed its work to a claude/… branch: cloud-world
+// DIR. It sets $CLOUDID to the session's id and $FAKE_CLOUD_DIR to the stand-in cloud.
+func cloudWorld(ts *testscript.TestScript, neg bool, args []string) {
+	if neg || len(args) != 1 {
+		ts.Fatalf("usage: cloud-world DIR")
+	}
+	for _, k := range []string{"HOME", "GIT_CONFIG_GLOBAL", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {
+		os.Setenv(k, ts.Getenv(k)) // fakecloud runs git in this process
+	}
+	store := ts.MkAbs("cloud")
+	ts.Setenv("FAKE_CLOUD_DIR", store)
+	os.Setenv("FAKE_CLOUD_DIR", store)
+	o, err := fakecloud.NewOrigin(ts.MkAbs("origins"), "https://github.com/example/demo.git")
+	ts.Check(err)
+	ts.Check(o.Redirect(ts.Getenv("GIT_CONFIG_GLOBAL")))
+	gitRepo(ts, false, []string{args[0], o.URL})
+	dir := ts.MkAbs(args[0])
+	for _, a := range [][]string{{"push", "-q", "origin", "main"}} {
+		cmd := exec.Command("git", a...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			ts.Fatalf("git %v: %v\n%s", a, err, out)
+		}
+	}
+	s, err := fakecloud.Open(store).Seed(fakecloud.Session{Cloud: fakecloud.ClaudeCloud, Title: "Add rate limiting", Repo: "github.com/example/demo",
+		CloneURL: o.FileURL(), Branch: "main", Code: "branch",
+		Messages: []fakecloud.Message{{Role: "user", Text: "[hopsesh] add rate limiting to search"}, {Role: "assistant", Text: "On it."}}})
+	ts.Check(err)
+	ts.Check(fakecloud.Work(fakecloud.Proc{Vars: map[string]string{}}, s.ID, false))
+	ts.Setenv("CLOUDID", s.ID)
 }
 
 // gitRepo makes a git repository with one commit and a remote: git-repo DIR URL.

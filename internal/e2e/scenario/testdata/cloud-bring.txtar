@@ -1,0 +1,45 @@
+# A session from Claude Code cloud comes here: allowed first, checked read-only, then
+# planned, its teleport run in a new worktree (without the variables an agent's own
+# session passes on), adopted with its message count, its claude/… branch kept under
+# hopsesh/from/claude-cloud/, listed, and undone.
+[windows] skip 'the stand-in origin needs a POSIX shell'
+env CLAUDE_CODE_CHILD_SESSION=1
+env ANTHROPIC_API_KEY=sk-ant-not-a-real-key
+cloud-world demo
+
+exec hopsesh clouds
+stdout 'claude-cloud +Claude Code cloud +no +off'
+
+! exec hopsesh pull claude-cloud:$CLOUDID --to $WORK/demo --yes
+stderr 'hopsesh clouds allow claude-cloud'
+
+exec hopsesh clouds allow claude-cloud
+stdout 'claude-cloud: allowed'
+exec hopsesh clouds test claude-cloud
+stdout '✓ claude.ai · max login'
+stdout '✓ --teleport found'
+
+exec hopsesh plan claude-cloud:$CLOUDID --to $WORK/demo --json
+stdout '"kind": "fetch"'
+stdout 'env -u CLAUDE_CODE_CHILD_SESSION -u ANTHROPIC_API_KEY claude --teleport '$CLOUDID
+! grep 'teleport' $WORK/agents.log
+
+exec hopsesh pull https://claude.ai/code/$CLOUDID --to $WORK/demo --yes --run
+stdout 'is here in Claude Code: 3 of 3 messages, checked'
+stdout 'on hopsesh/from/claude-cloud/web-session-\w+ \(renamed from claude/web-session-\w+\)'
+stdout 'claude --resume'
+exec git -C demo branch --show-current
+stdout '^main$'
+
+exec hopsesh ls claude-cloud: --json
+stdout '"session": "'$CLOUDID'"'
+
+exec hopsesh undo --yes
+stdout 'Undid'
+exec git -C demo branch --list 'hopsesh/*'
+! stdout .
+
+# A partial copy says so, and where the problem is known.
+env FAKE_CLOUD_FAIL=partial
+exec hopsesh pull claude-cloud:$CLOUDID --to $WORK/demo --yes --run
+stdout '! Claude Code restored 1 of 3 messages. This is a known Claude Code problem \(#94836\).'
