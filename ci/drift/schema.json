@@ -5,7 +5,7 @@
   "properties": {
     "summary": {
       "type": "string",
-      "description": "Two or three plain sentences: what changed upstream since the tested versions and whether hopsesh is affected."
+      "description": "Two or three plain sentences: what changed upstream for these targets since the tested versions or last week, and whether hopsesh is affected."
     },
     "breaking": {
       "type": "boolean",
@@ -16,13 +16,22 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["agent", "severity", "title", "evidence", "source", "affected", "test"],
+        "required": ["target", "surface", "severity", "title", "evidence", "source", "affected", "test"],
         "properties": {
-          "agent": { "type": "string", "enum": ["claude", "codex"] },
+          "target": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,31}$",
+            "description": "The id of the target the finding is about, from intel/manifest.json (claude, codex-cloud)."
+          },
+          "surface": {
+            "type": "string",
+            "enum": ["local", "cloud"],
+            "description": "local: an agent's own sessions and CLI. cloud: a vendor cloud."
+          },
           "severity": {
             "type": "string",
             "enum": ["break", "risk", "info"],
-            "description": "break: hopsesh does the wrong thing with the latest version. risk: plausibly affected, needs a check. info: a new feature hopsesh could support."
+            "description": "break: hopsesh does the wrong thing with the latest version, or a flag it relies on is gone. risk: plausibly affected, needs a check. info: a new feature hopsesh could support."
           },
           "title": { "type": "string" },
           "evidence": {
@@ -31,12 +40,12 @@
           },
           "source": {
             "type": "string",
-            "description": "Where the change is documented: a changelog version, release tag, docs page URL or schema file."
+            "description": "Where the change is documented: a changelog version, release tag, docs page URL, help diff, issue or schema file."
           },
           "affected": {
             "type": "array",
             "items": { "type": "string" },
-            "description": "Repository paths, with a line number where useful (agents/codex/reader.go:120)."
+            "description": "Repository paths, with a line number where useful (agents/codex/reader.go:120); for a cloud target, its entry in internal/devtools/driftmanifest/targets.go."
           },
           "test": {
             "type": "string",

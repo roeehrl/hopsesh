@@ -1,11 +1,17 @@
 // Command driftmanifest prints, as JSON, what hopsesh's agent modules rely on in each
 // agent: its spec (versions tested, programs, data folders, secrets, instruction files),
-// its capabilities, its test fixtures and its source files. The weekly upstream-drift
-// review reads it next to the agents' changelogs and docs. It is not shipped.
+// its capabilities, its test fixtures and its source files. It also prints the targets
+// the weekly upstream-drift check watches (targets.go): the agents and the vendor clouds,
+// each with its docs, feeds, help commands, issues and code canaries. The probe reads the
+// targets; the review reads all of it next to the vendors' changelogs and docs.
+//
+// `driftmanifest feed FILE SINCE` prints the items of an RSS or Atom file published
+// after SINCE (RFC 3339) as Markdown, for the probe. It is not shipped.
 package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -35,6 +41,29 @@ type module struct {
 }
 
 func main() {
+	if len(os.Args) == 4 && os.Args[1] == "feed" {
+		if err := printFeed(os.Stdout, os.Args[2], os.Args[3]); err != nil {
+			fmt.Fprintln(os.Stderr, "driftmanifest feed:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	out := modules()
+	targets, err := buildTargets(out)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "driftmanifest:", err)
+		os.Exit(1)
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(map[string]any{"modules": out, "targets": targets}); err != nil {
+		os.Exit(1)
+	}
+}
+
+// modules describes the compiled-in modules. Run from the repository root.
+func modules() []module {
 	var out []module
 	for _, m := range all.Registry().All() {
 		s := m.Spec()
@@ -58,9 +87,5 @@ func main() {
 		sort.Strings(d.Sources)
 		out = append(out, d)
 	}
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(map[string]any{"modules": out}); err != nil {
-		os.Exit(1)
-	}
+	return out
 }
