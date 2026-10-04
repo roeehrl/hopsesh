@@ -39,20 +39,27 @@ func TestPairwiseCoversEveryValidPair(t *testing.T) {
 	}
 }
 
-// Fetch rows start in Claude Code's cloud and come into Claude Code or Codex here; hand-off
-// rows go there from Claude Code or Codex here, and round trips go there and back in
-// Claude Code; no other row involves a cloud. The pull-request tier stays small.
+// Fetch rows start in a cloud and come into Claude Code or Codex here (a Claude Code cloud
+// session from Claude Code, a Codex cloud task from Codex); hand-off rows go there from
+// Claude Code or Codex here, the cloud's own agent taking it; round trips come home in that
+// agent; no other row involves a cloud. The pull-request tier stays small.
 func TestCloudRows(t *testing.T) {
 	rows := pairwise(1)
 	n := map[string]int{}
 	for _, r := range rows {
-		if cloudOp(r.Op) != (r.Location == "claude-cloud") || r.Op == "fetch" && r.From != "claude" || r.Op == "handoff" && r.To != "claude" ||
-			r.Op == "cloud-roundtrip" && (r.From != "claude" || r.To != "claude") {
+		own := map[string]string{"claude-cloud": "claude", "codex-cloud": "codex"}[r.Location]
+		if cloudOp(r.Op) != (r.Location != "machine") || r.Op == "fetch" && r.From != own || r.Op == "handoff" && r.To != own ||
+			r.Op == "cloud-roundtrip" && r.To != own || r.Location == "claude-cloud" && r.Op == "cloud-roundtrip" && r.From != "claude" {
 			t.Fatalf("row %s", r)
 		}
-		n[r.Op]++
+		n[r.Op+"@"+r.Location]++
 	}
-	if n["fetch"] < 2 || n["handoff"] < 3 || n["cloud-roundtrip"] < 1 || len(rows) > 70 {
+	for _, k := range []string{"fetch@claude-cloud", "handoff@claude-cloud", "cloud-roundtrip@claude-cloud", "fetch@codex-cloud", "handoff@codex-cloud", "cloud-roundtrip@codex-cloud"} {
+		if n[k] < 1 {
+			t.Fatalf("no %s row: %v", k, n)
+		}
+	}
+	if n["handoff@claude-cloud"]+n["handoff@codex-cloud"] < 4 || len(rows) > 75 {
 		t.Fatalf("%v of %d rows", n, len(rows))
 	}
 }
