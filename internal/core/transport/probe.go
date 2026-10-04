@@ -71,10 +71,11 @@ func psScriptName() string {
 	return ".hopsesh-" + hex.EncodeToString(b[:]) + ".ps1"
 }
 
-// psFromFile runs an uploaded script and removes it. Invoke-Expression, not the call
-// operator: a machine's execution policy may refuse to run .ps1 files.
+// psFromFile runs an uploaded script and removes it. The script runs as a script block,
+// not as a .ps1 file (a machine's execution policy may refuse those), in its own scope:
+// its variables cannot overwrite the path the cleanup removes.
 func psFromFile(name string) string {
-	return `$p = Join-Path $HOME ` + PSQuote(name) + `; try { Invoke-Expression ([IO.File]::ReadAllText($p)) } finally { Remove-Item -LiteralPath $p -ErrorAction SilentlyContinue }`
+	return `$hopseshScriptFile = Join-Path $HOME ` + PSQuote(name) + `; try { & ([scriptblock]::Create([IO.File]::ReadAllText($hopseshScriptFile))) } finally { Remove-Item -LiteralPath $hopseshScriptFile -ErrorAction SilentlyContinue }`
 }
 
 // PowerShellCommand is the command line that runs a PowerShell script on a Windows
