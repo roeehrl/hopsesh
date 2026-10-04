@@ -392,7 +392,7 @@ func TestHandoffFailures(t *testing.T) {
 			if tg.Cloud == "claude-cloud" && (!tg.OK || !tg.Bundle || !strings.Contains(tg.Note, "Results can't be pushed back: the remote is gitlab.example.com")) {
 				t.Fatalf("target: %+v", tg)
 			}
-			if tg.Cloud == "codex-cloud" && (tg.OK || tg.Why != "hopsesh does not reach Codex cloud yet") {
+			if tg.Cloud == "codex-cloud" && (tg.OK || tg.Why != "turned off. Turn it on in Machines.") {
 				t.Fatalf("codex: %+v", tg)
 			}
 		}

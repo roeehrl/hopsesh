@@ -63,6 +63,7 @@ type Session struct {
 	Diff     string `json:"diff,omitempty"`   // a starting diff sent with it, then the task's diff (codex)
 	Result   string `json:"result,omitempty"` // the branch the cloud pushed its work to
 	Env      string `json:"env,omitempty"`
+	EnvLabel string `json:"envLabel,omitempty"`
 	Attempts int    `json:"attempts"`
 	State    string `json:"state"`
 	// Applied: codex apply ran for this task.

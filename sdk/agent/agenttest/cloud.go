@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/roeehrl/hopsesh/sdk/agent"
+	"github.com/roeehrl/hopsesh/sdk/ir"
 )
 
 // Programs answer a module's binaries in a FakeHost (FakeHost.Programs).
@@ -266,6 +267,17 @@ func RunCloudWith(t *testing.T, m agent.Module, programs Programs, o CloudOption
 					}
 				}
 			}
+			if okS && needs(c, agent.NeedEnvironment) {
+				h, in := setup(t, "no-env")
+				if _, err := sender.SendCloud(ctx, h, in, o.request(c)); !errors.Is(err, agent.ErrNoEnvironment) {
+					t.Errorf("SendCloud to an environment the cloud does not have: want ErrNoEnvironment, got %v", err)
+				}
+				r := o.request(c)
+				r.Env = ""
+				if _, err := sender.SendCloud(ctx, h, in, r); !errors.Is(err, agent.ErrNoEnvironment) {
+					t.Errorf("SendCloud without an environment: want ErrNoEnvironment, got %v", err)
+				}
+			}
 			if okS {
 				h, in := setup(t, "repo-mismatch")
 				if _, err := sender.SendCloud(ctx, h, in, o.request(c)); !errors.Is(err, agent.ErrRepoUnsupported) {
@@ -311,6 +323,15 @@ func RunCloudWith(t *testing.T, m agent.Module, programs Programs, o CloudOption
 	})
 }
 
+func needs(c agent.Cloud, n agent.Need) bool {
+	for _, x := range c.Needs {
+		if x == n {
+			return true
+		}
+	}
+	return false
+}
+
 // request is the hand-off to send: the module's own (Request), or a made-up one.
 func (o CloudOptions) request(c agent.Cloud) agent.SendRequest {
 	if o.Request != nil {
@@ -323,10 +344,8 @@ func (o CloudOptions) request(c agent.Cloud) agent.SendRequest {
 func sendRequest(c agent.Cloud) agent.SendRequest {
 	r := agent.SendRequest{Cloud: c.Name, Dir: "/home/alice/git/demo", Repo: "github.com/example/demo", Branch: "hopsesh/handoff/20261004-conform",
 		Base: "0123456789abcdef0123456789abcdef01234567", Brief: agent.NotePrefix + "This task continues a session (conformance).", Title: "conformance"}
-	for _, n := range c.Needs {
-		if n == agent.NeedEnvironment {
-			r.Env = "env_conformance"
-		}
+	if needs(c, agent.NeedEnvironment) {
+		r.Env = "env_conformance"
 	}
 	return r
 }
@@ -369,7 +388,18 @@ func checkFetched(t *testing.T, spec agent.Spec, c agent.Cloud, f agent.Fetched)
 			t.Errorf("Fetched.Adopt must name a session in a folder inside one of the module's roots: %+v", a)
 		}
 	}
-	if f.Segment != nil && c.Down == agent.FidCode {
-		t.Errorf("cloud %s declares code only coming down but fetched a conversation", c.Name)
+	if seg := f.Segment; seg != nil {
+		switch c.Down {
+		case agent.FidCode:
+			// Code only: the task's own words (its title, a summary) may come as messages, never
+			// its steps.
+			for _, n := range seg.Nodes {
+				if n.Kind != ir.KindMessage {
+					t.Errorf("cloud %s declares code only coming down but fetched a %s", c.Name, n.Kind)
+				}
+			}
+		case agent.FidNone, agent.FidBrief:
+			t.Errorf("cloud %s declares no conversation coming down but fetched one", c.Name)
+		}
 	}
 }

@@ -113,7 +113,14 @@ type Cloud struct {
 	// subscription login. The core removes them from every run of the cloud capabilities
 	// and from a command the user runs (Fetched.Run).
 	Unset []string
-	Watch Watch
+	// Noun is what the vendor calls one of its sessions, for people ("task"); "" is
+	// "session".
+	Noun string
+	// Limits are parts of the vendor's cloud the driver cannot reach, in short sentences
+	// the user interfaces show beside the cloud (the hand-off menu, its card, `hopsesh clouds
+	// test`), so a missing path is said, never faked.
+	Limits []string
+	Watch  Watch
 }
 
 // Watch is what the weekly upstream-drift check watches for a cloud (read by
@@ -203,6 +210,21 @@ type CloudSession struct {
 	// Account is the module's fingerprint of the account that owns the session (Account.Key's
 	// form), when the module knows it.
 	Account string `json:"account,omitempty"`
+	// Env and EnvLabel are the vendor's environment the session runs in (its id, and its
+	// name for people), for clouds that need one.
+	Env      string `json:"env,omitempty"`
+	EnvLabel string `json:"envLabel,omitempty"`
+	// Changes sums up the code the session changed, as the vendor reports it
+	// ("+12 −3 · 2 files").
+	Changes string `json:"changes,omitempty"`
+}
+
+// SessionNoun is what a cloud calls its sessions ("session" unless it says).
+func (c Cloud) SessionNoun() string {
+	if c.Noun == "" {
+		return "session"
+	}
+	return c.Noun
 }
 
 // CloudLink is the vendor's cloud copy of a session that runs on a machine (Claude Code's
@@ -242,6 +264,8 @@ type CloudQuery struct {
 	// itself when it needs them.
 	Local []Summary
 	Limit int
+	// Env lists only the sessions of one of the vendor's environments ("" for all).
+	Env string
 }
 
 // CloudListing is the result of ListCloud. One unreadable session goes in Errors.
@@ -273,7 +297,10 @@ type SendRequest struct {
 	Brief string
 	Diff  []byte // only with ViaStartingDiff
 	Env   string // the vendor's environment id, when the cloud has NeedEnvironment
-	Title string
+	// Attempts asks for that many attempts at once (best-of-N), where the cloud runs them; 0
+	// is the cloud's default.
+	Attempts int
+	Title    string
 	// Code is how the code goes up: ViaBranch (Branch is pushed; the default) or ViaBundle
 	// (the driver uploads the repository from Dir itself, and nothing is pushed).
 	Code CodeWay
@@ -397,6 +424,9 @@ var (
 	ErrSignedOut       = errors.New("the agent is not signed in with the account its cloud needs")
 	ErrNotEligible     = errors.New("plan or organization policy does not allow cloud sessions")
 	ErrRepoUnsupported = errors.New("the cloud cannot clone or push this repository")
+	// ErrNoEnvironment: the cloud has no environment of that name or id for this account,
+	// or none at all (for clouds with NeedEnvironment).
+	ErrNoEnvironment = errors.New("the cloud has no such environment")
 )
 
 // NoLocal is embedded by a cloud-only module (no data folders on any machine) for the

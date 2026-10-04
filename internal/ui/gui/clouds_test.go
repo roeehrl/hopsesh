@@ -46,7 +46,8 @@ func TestCloudInTheWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(scan.Clouds) != 1 || scan.Clouds[0].Name != "claude-cloud" || scan.Clouds[0].Allowed || scan.Clouds[0].Status != "not-allowed" {
+	if len(scan.Clouds) != 2 || scan.Clouds[0].Name != "claude-cloud" || scan.Clouds[0].Allowed || scan.Clouds[0].Status != "not-allowed" ||
+		scan.Clouds[1].Name != "codex-cloud" || scan.Clouds[1].Allowed {
 		t.Fatalf("clouds before consent: %+v", scan.Clouds)
 	}
 	if err := a.SetCloudAllowed("claude-cloud", true); err != nil {
@@ -74,7 +75,7 @@ func TestCloudInTheWindow(t *testing.T) {
 	if row == nil || row.Machine != "claude-cloud" || row.Location != "cloud" || row.Cloud.ID != "session_01PastedAbc123" || row.Cloud.URL == "" || row.Cloud.Checkout == "" {
 		t.Fatalf("cloud row: %+v", row)
 	}
-	if m := a.Machines(); len(m.Clouds) != 1 || !m.Clouds[0].Allowed {
+	if m := a.Machines(); len(m.Clouds) != 2 || !m.Clouds[0].Allowed || m.Clouds[1].Allowed {
 		t.Fatalf("machines: %+v", m.Clouds)
 	}
 	ct, err := a.TestCloud("claude-cloud")

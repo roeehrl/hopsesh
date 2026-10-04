@@ -25,7 +25,7 @@ func TestHandoffFromTheList(t *testing.T) {
 		t.Fatal("c opens the picker")
 	}
 	v := ansi.Strip(m.View().Content)
-	for _, want := range []string{"Hand off to ▸", "claude-cloud", "Gets a briefing and the code on a branch", "codex-cloud", "✕ hopsesh does not reach Codex cloud yet"} {
+	for _, want := range []string{"Hand off to ▸", "claude-cloud", "Gets a briefing and the code on a branch", "codex-cloud", "✕ turned off. Turn it on in Machines."} {
 		if !strings.Contains(v, want) {
 			t.Errorf("the picker lacks %q:\n%s", want, v)
 		}
