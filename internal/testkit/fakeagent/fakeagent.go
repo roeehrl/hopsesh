@@ -11,11 +11,14 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/roeehrl/hopsesh/internal/testkit/fakecloud"
 )
 
 // The stand-in agents: the programs hopsesh runs, answering the way the real ones do for
-// what hopsesh asks (versions, and Codex's app-server). Every call is logged to
-// $FAKE_AGENT_LOG, one line each: the program, its arguments, and app-server methods.
+// what hopsesh asks (versions, Codex's app-server, and both agents' cloud verbs, which
+// internal/testkit/fakecloud plays). Every call is logged to $FAKE_AGENT_LOG, one line
+// each: the program, its arguments, and app-server methods.
 
 func logCall(line string) {
 	if p := os.Getenv("FAKE_AGENT_LOG"); p != "" {
@@ -27,16 +30,20 @@ func logCall(line string) {
 	}
 }
 
-// Claude answers --version; anything else is logged and succeeds.
+// Claude answers --version and the cloud flags (--cloud, --teleport); anything else is
+// logged and succeeds.
 func Claude() int {
 	logCall("claude " + strings.Join(os.Args[1:], " "))
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
 		fmt.Println("2.1.284 (Claude Code)")
 	}
+	if handled, code := fakecloud.Claude(proc()); handled {
+		return code
+	}
 	return 0
 }
 
-// Codex answers --version and runs app-server.
+// Codex answers --version, runs app-server and answers codex cloud and codex apply.
 func Codex() int {
 	logCall("codex " + strings.Join(os.Args[1:], " "))
 	switch {
@@ -45,7 +52,20 @@ func Codex() int {
 	case len(os.Args) > 1 && os.Args[1] == "app-server":
 		return appServer()
 	}
+	if handled, code := fakecloud.Codex(proc()); handled {
+		return code
+	}
 	return 0
+}
+
+// Cloud is the fakecloud program: it plays the cloud agent (fakecloud work) and the fake's
+// own cloud CLI (fakecloud remote).
+func Cloud() int { return fakecloud.Main(proc()) }
+
+// proc is this run, for the stand-in clouds.
+func proc() fakecloud.Proc {
+	dir, _ := os.Getwd()
+	return fakecloud.Proc{Args: os.Args[1:], Dir: dir, Stdout: os.Stdout, Stderr: os.Stderr}
 }
 
 // appServer answers JSON-RPC lines on stdin until it ends. $FAKE_CODEX_EMAIL is the
