@@ -29,7 +29,10 @@ or a hand-off (a cloud session itself stays in the cloud).
 
 | Flag | Meaning |
 |---|---|
-| `--to <cloud>` | the cloud (`claude-cloud`) |
+| `--to <cloud>` | the cloud (`claude-cloud`, `codex-cloud`) |
+| `--env <id or name>` | `codex-cloud`: the environment the task runs in (only the one the user picks; the repository's remembered one is the default) |
+| `--attempts <1-4>` | `codex-cloud`: that many attempts at once (only when the user asks) |
+| `--starting-diff` | `codex-cloud`: the changes go with the task instead of on a new branch (the session's branch must be on the remote as it is) |
 | `--untracked <path or glob>` | carry this untracked file (repeat it); credential-like files never go |
 | `--bundle` | the agent uploads the repository instead of hopsesh pushing a branch (a repository not on GitHub; results can't be pushed back) |
 | `--history-file` | also commit the conversation as `.hopsesh/handoff.md` (only when the user asks: anyone who can see the branch can read it) |
@@ -71,7 +74,11 @@ another agent `continue` (`relation`, `report`, `briefing`). `pull --json --yes`
 `{"plan": …, "result": …, "command": "…"}`; the result has `journal` (for undo), `syncNote`,
 `mark`, `markError`, `pushed`, `pushError`, `warnings`. `handoff --json --yes` prints
 `{"plan": …, "result": …, "handoff": …}` (and `error` when a step failed); `handoff` has
-`session`, `url`, `branch`, `steps`, `stayed`, `failed`, `message` and `manual`.
+`session`, `url`, `branch`, `env`, `noun`, `steps`, `stayed`, `failed`, `message` and
+`manual`. A pull from a cloud prints `{"plan": …, "result": …, "brought": …}`; `brought`
+has `outcome`, `message`, `branch`, `worktree`, `command`, `written` (hopsesh wrote the
+session from what the cloud gave back) and `loss`. `{{.Bin}} clouds env codex-cloud --json`
+lists each repository's Codex cloud environment.
 
 ## Permissions and the sandbox
 

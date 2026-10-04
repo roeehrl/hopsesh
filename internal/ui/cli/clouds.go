@@ -47,13 +47,16 @@ only through that agent's own command, signed in as you, and never one you have 
 				if h := cloudHint(c); h != "" {
 					r.printf("\n%s: %s", c.Name, h)
 				}
+				for _, l := range c.Limits {
+					r.printf("\n%s: %s", c.Name, l)
+				}
 			}
 			r.printf("\n\nAllow one with: hopsesh clouds allow <cloud>   Check one, read-only: hopsesh clouds test <cloud>\n")
 			return nil
 		},
 	}
 	cmd.Flags().Bool("json", false, "output JSON")
-	cmd.AddCommand(cloudsAllowCmd(true), cloudsAllowCmd(false), cloudsTestCmd())
+	cmd.AddCommand(cloudsAllowCmd(true), cloudsAllowCmd(false), cloudsTestCmd(), cloudsEnvCmd())
 	return cmd
 }
 
@@ -192,6 +195,11 @@ func cloudsTestCmd() *cobra.Command {
 					if res.Error != "" && len(res.Checks) == 0 {
 						r.printf("  ✗ %s\n", res.Error)
 					}
+					if _, cl, ok := r.app.CloudModule(res.Cloud); ok {
+						for _, l := range cl.Limits {
+							r.printf("  · %s\n", l)
+						}
+					}
 				}
 			}
 			if failed {
@@ -200,6 +208,80 @@ func cloudsTestCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().Bool("json", false, "output JSON")
+	return cmd
+}
+
+func cloudsEnvCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "env <cloud> [<repository> <environment>]",
+		Short: "Show or set the environment each repository's hand-offs run in (Codex cloud)",
+		Long: `Codex cloud runs every task in an environment you made on the web (open codex cloud once to make
+one). With a cloud alone, this lists the repositories hopsesh knows and the environment set
+for each; with a repository (github.com/owner/repo) and an environment (its id or its name),
+it sets that one; --unset forgets it. A hand-off remembers the environment you pick for a
+repository that had none.`,
+		Args: cobra.RangeArgs(1, 3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			r, err := newRun(cmd)
+			if err != nil {
+				return err
+			}
+			_, cl, ok := r.app.CloudModule(args[0])
+			if !ok {
+				return fmt.Errorf("unknown cloud %q (see hopsesh clouds)", args[0])
+			}
+			unset, _ := cmd.Flags().GetBool("unset")
+			switch {
+			case len(args) == 3 || len(args) == 2 && unset:
+				env := ""
+				if !unset {
+					env = strings.TrimSpace(args[2])
+				}
+				r.app.Cfg.SetCloudEnvironment(cl.Name, args[1], env)
+				if err := config.Save(r.app.Cfg); err != nil {
+					return err
+				}
+				if env == "" {
+					r.printf("%s: %s has no environment set\n", cl.Name, args[1])
+				} else {
+					r.printf("%s: %s runs in %s\n", cl.Name, args[1], env)
+				}
+				return nil
+			case len(args) == 2:
+				return errors.New("name the environment too, or pass --unset")
+			}
+			inv := r.scan(cmd, "", true)
+			defer inv.Close()
+			rows := r.app.RepoEnvs(inv, cl.Name)
+			if rows == nil {
+				return fmt.Errorf("%s needs no environment", cl.Title)
+			}
+			choices := r.app.EnvChoices(inv, cl.Name, "")
+			if r.jsonOut {
+				return r.emitJSON(map[string]any{"repositories": rows, "environments": choices})
+			}
+			tw := tabwriter.NewWriter(r.out, 0, 2, 2, ' ', 0)
+			fmt.Fprintln(tw, "REPOSITORY\tENVIRONMENT")
+			for _, row := range rows {
+				env := nonEmpty(row.Env, "ask each time")
+				if row.Unsupported != "" {
+					env = row.Unsupported
+				}
+				fmt.Fprintf(tw, "%s\t%s\n", row.Repo, env)
+			}
+			tw.Flush()
+			if len(choices) > 0 {
+				r.printf("\nEnvironments your recent %ss used:\n", cl.SessionNoun())
+				for _, c := range choices {
+					r.printf("  %s\t%s\n", c.Value, c.Label)
+				}
+			}
+			r.printf("\nSet one with: hopsesh clouds env %s <repository> <environment>\n", cl.Name)
+			return nil
+		},
+	}
+	cmd.Flags().Bool("unset", false, "forget the repository's environment")
 	cmd.Flags().Bool("json", false, "output JSON")
 	return cmd
 }
@@ -301,7 +383,7 @@ func (r *run) pullCloud(cmd *cobra.Command, cloud string, id agent.SessionID, op
 		r.renderBrought(b, res.Journal)
 	}
 	out := map[string]any{"plan": p, "result": res, "brought": b}
-	if run && b.Continue != "" && (b.Outcome == move.FetchComplete || b.Outcome == move.FetchPartial) {
+	if run && b.Continue != "" && !b.Written && (b.Outcome == move.FetchComplete || b.Outcome == move.FetchPartial) {
 		cp, cres, err := r.continueBrought(cmd, b, opt)
 		if err != nil {
 			return err
@@ -391,13 +473,17 @@ func (r *run) renderFetchPlan(p *move.Plan) {
 	if fp.Checkout != "" {
 		r.printf("  repo      %s at %s\n", fp.Repo, fp.Checkout)
 	}
-	switch fp.BranchState {
-	case move.BranchPushed:
+	switch {
+	case fp.Diff && fp.BranchState == move.BranchPushed:
+		r.printf("  base      %s (the branch the %s started from), fetched into %s\n", fp.CloudBranch, fp.Noun, fp.Ref)
+	case fp.Diff:
+		r.printf("  base      the checkout's HEAD here\n")
+	case fp.BranchState == move.BranchPushed:
 		r.printf("  branch    %s, fetched into %s\n", fp.CloudBranch, fp.Ref)
-	case move.BranchMissing:
+	case fp.BranchState == move.BranchMissing:
 		r.printf("  branch    %s is not on origin\n", fp.CloudBranch)
 	default:
-		if !fp.CodeOnly {
+		if !fp.CodeOnly && !fp.Write {
 			r.printf("  branch    the session's own; %s fetches and checks it out\n", p.Agent)
 		}
 	}
@@ -405,6 +491,8 @@ func (r *run) renderFetchPlan(p *move.Plan) {
 		r.printf("  worktree  %s (a new one, at %s)\n", fp.Worktree, short7(fp.Base))
 	}
 	switch {
+	case fp.Diff:
+		r.printf("  code      the %s's patch%s, committed on %s\n", fp.Noun, parens(fp.Changes), fp.LocalBranch)
 	case fp.FastForward:
 		r.printf("  local     %s, here already: it moves forward to the cloud's work\n", fp.LocalBranch)
 	case fp.LocalBranch != "" && fp.LocalBranch != fp.CloudBranch:
@@ -414,6 +502,9 @@ func (r *run) renderFetchPlan(p *move.Plan) {
 	}
 	if fp.Command != "" {
 		r.printf("  runs      %s\n", fp.Command)
+	}
+	if fp.Write && !fp.CodeOnly {
+		r.printf("  writes    a new %s session (%d message(s)) in the worktree\n", fp.Writer, fp.Messages)
 	}
 	if fp.CanAppend && !fp.Append {
 		r.printf("  also      --append adds the cloud's work to %q instead\n", fp.Original.Title)
@@ -460,10 +551,13 @@ func (r *run) renderBrought(b app.Brought, journal string) {
 	for _, w := range b.Warnings {
 		r.printf("  ! %s\n", w)
 	}
+	for _, l := range b.Loss {
+		r.printf("  · %s\n", l)
+	}
 	r.printf("  Undo with: hopsesh undo %s\n", journal)
 	if b.Outcome != move.FetchEmpty {
 		r.printf("\nContinue it:\n\n  %s\n", b.Command)
-		if b.ContinueName != "" {
+		if b.ContinueName != "" && !b.Written {
 			r.printf("\nOr in %s: hopsesh pull %s --in %s\n", b.ContinueName, b.Key, b.Continue)
 		}
 	}
@@ -474,4 +568,12 @@ func short7(c string) string {
 		return c[:7]
 	}
 	return c
+}
+
+// parens is " (s)", or "" for no s.
+func parens(s string) string {
+	if s == "" {
+		return ""
+	}
+	return " (" + s + ")"
 }

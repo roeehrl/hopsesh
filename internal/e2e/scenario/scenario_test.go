@@ -64,6 +64,7 @@ func TestScenarios(t *testing.T) {
 			"agent-turn":     agentTurn,
 			"claude-session": claudeSession,
 			"cloud-world":    cloudWorld,
+			"cloud-work":     cloudWork,
 			"git-repo":       gitRepo,
 		},
 	})
@@ -192,6 +193,25 @@ func cloudWorld(ts *testscript.TestScript, neg bool, args []string) {
 	ts.Check(err)
 	ts.Check(fakecloud.Work(fakecloud.Proc{Vars: vars}, s.ID, false))
 	ts.Setenv("CLOUDID", s.ID)
+}
+
+// cloudWork plays the cloud agent on the newest session of a cloud (cloud-work CLOUD), as
+// fakecloud work does, and sets $TASKID to its id.
+func cloudWork(ts *testscript.TestScript, neg bool, args []string) {
+	if neg || len(args) != 1 {
+		ts.Fatalf("usage: cloud-work CLOUD")
+	}
+	vars := map[string]string{"FAKE_CLOUD_DIR": ts.Getenv("FAKE_CLOUD_DIR")}
+	for _, k := range []string{"HOME", "GIT_CONFIG_GLOBAL", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {
+		vars[k] = ts.Getenv(k)
+	}
+	all, err := fakecloud.Open(vars["FAKE_CLOUD_DIR"]).List(args[0])
+	ts.Check(err)
+	if len(all) == 0 {
+		ts.Fatalf("cloud-work: no %s session", args[0])
+	}
+	ts.Check(fakecloud.Work(fakecloud.Proc{Vars: vars}, all[0].ID, false))
+	ts.Setenv("TASKID", all[0].ID)
 }
 
 // gitRepo makes a git repository with one commit and a remote: git-repo DIR URL.

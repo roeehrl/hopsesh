@@ -1,0 +1,66 @@
+# A session here goes to Codex cloud and comes back: the environment asked for (and
+# remembered for the repository), the task started with `codex cloud exec`, the cloud's
+# work brought back as a commit on hopsesh/from/codex-cloud/<id> with a Codex thread
+# written in a new worktree, and both undone.
+[windows] skip 'the stand-in origin needs a POSIX shell'
+env FAKE_CODEX_ENVS=env_api=acme-api,env_web=acme-web
+cloud-world demo
+claude-session 11111111-2222-4333-8444-555555555555 demo 'Fix the parser' 'fix the quoting in'
+exec git -C demo commit -q --allow-empty -m 'not pushed yet'
+
+exec hopsesh clouds allow codex-cloud
+stdout 'codex-cloud: allowed'
+exec hopsesh clouds test codex-cloud
+stdout '✓ signed in with ChatGPT'
+stdout '✓ codex cloud list answered'
+stdout '· Codex cloud \(legacy\) tasks only: the new Codex Cloud has no command line yet'
+
+! exec hopsesh handoff claude/11111111 --to codex-cloud --yes
+stderr 'Pick a Codex cloud environment for github.com/example/demo. If you have none, open `codex cloud` once to create one.'
+! grep 'codex cloud exec' $WORK/agents.log
+
+exec hopsesh plan claude/11111111 --to codex-cloud --env acme-api --json
+stdout '"kind": "handoff"'
+stdout '"envNeeded": true'
+stdout '"noun": "task"'
+stdout '"env": "acme-api"'
+
+exec hopsesh handoff claude/11111111 --to codex-cloud --env acme-api --yes
+stdout '✓ Handed off to Codex cloud'
+stdout 'Task task_e_\w+ is running'
+stdout 'https://chatgpt.com/codex/tasks/task_e_'
+stdout 'Branch hopsesh/handoff/\d{8}-11111111 on github.com/example/demo'
+stdout 'Environment acme-api'
+stdout 'This session is now marked "↪ continued in Codex on codex-cloud"'
+stdout 'The task stays in your Codex cloud list'
+! stdout 'followup'
+stdout 'The environment acme-api is now github.com/example/demo''s'
+grep 'codex cloud exec --env acme-api --branch hopsesh/handoff/\d{8}-11111111 \[hopsesh\] This task continues a Claude Code session' $WORK/agents.log
+exec hopsesh clouds env codex-cloud
+stdout 'github.com/example/demo +acme-api'
+
+cloud-work codex-cloud
+exec hopsesh ls codex-cloud:
+stdout 'done'
+stdout 'env acme-api'
+
+exec hopsesh pull codex-cloud:$TASKID --yes
+stdout 'code      the task''s patch \(\+1 −0 · 1 file\), committed on hopsesh/from/codex-cloud/'$TASKID
+stdout 'writes    a new Codex session \(2 message\(s\)\) in the worktree'
+stdout 'is here in Codex: the task''s title and what came of it, with its code on hopsesh/from/codex-cloud/'$TASKID
+stdout 'codex resume'
+exec git -C demo branch --list 'hopsesh/from/*'
+stdout 'hopsesh/from/codex-cloud/'$TASKID
+exec git -C demo branch --show-current
+stdout '^main$'
+
+exec hopsesh undo --yes
+stdout 'Undid'
+exec git -C demo branch --list 'hopsesh/from/*'
+! stdout .
+
+# Signed in with an API key: Codex cloud refuses, and says why.
+env FAKE_CLOUD_FAIL=signed-out
+! exec hopsesh clouds test codex-cloud
+stdout '✗ Codex here uses an API key. Cloud tasks need a ChatGPT login'
+! stdout 'sk-'

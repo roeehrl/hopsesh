@@ -106,6 +106,9 @@ func (inv *Inventory) CloudEntry(a *App, cloud string, id agent.SessionID) (Entr
 	return cloudEntry(mod.Spec(), cl, s, nil), nil
 }
 
+// CloudModule is the enabled module that reaches a cloud, with the cloud's declaration.
+func (a *App) CloudModule(name string) (agent.Module, agent.Cloud, bool) { return a.cloudModule(name) }
+
 // cloudModule is the enabled module that reaches a cloud.
 func (a *App) cloudModule(name string) (agent.Module, agent.Cloud, bool) {
 	for _, r := range a.clouds() {
