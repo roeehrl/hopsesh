@@ -31,9 +31,9 @@ func TestMain(m *testing.M) {
 // GitHub remote is a local bare repository, and a Claude Code cloud session that pushed
 // its work to a claude/… branch.
 type cloudWorld struct {
-	t                     *testing.T
-	home, repo, store, wd string
-	session               fakecloud.Session
+	t                 *testing.T
+	home, repo, store string
+	session           fakecloud.Session
 }
 
 func newCloudWorld(t *testing.T, work bool) *cloudWorld {
