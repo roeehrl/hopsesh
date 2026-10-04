@@ -216,6 +216,12 @@ func BuildFetch(ctx context.Context, in FetchInput, opt Options) (*Plan, error) 
 		case err != nil:
 			check("err", refusal(err, spec, cl))
 		case f.Run == nil && f.Segment != nil:
+			if fp.CloudBranch == "" && !fp.Diff && f.Code.Branch != "" && (f.Code.Way == agent.ViaPR || f.Code.Way == agent.ViaBranch) {
+				// The listing did not know the branch the cloud pushed (its pull request's head);
+				// the driver did.
+				fp.CloudBranch, fp.Base, fp.BaseNote, fp.LocalBranch = f.Code.Branch, "", "", ""
+				planFetchBranch(ctx, in, fp, opt, top, check)
+			}
 			planFetchWrite(in, p, &f, opt, check)
 		case f.Run == nil:
 			// A driver that needs no terminal and brings no conversation brings the code only.
@@ -253,15 +259,15 @@ func BuildFetch(ctx context.Context, in FetchInput, opt Options) (*Plan, error) 
 // title and summary, beside its code. Any module that writes sessions can take it.
 func planFetchWrite(in FetchInput, p *Plan, f *agent.Fetched, opt Options, check func(string, string)) {
 	fp, cl := p.Fetch, in.Cloud
-	if _, own := in.Module.(agent.Writer); !own {
-		// A cloud-only module (Copilot's log, Amp's thread): which local agent its text goes
-		// into is still to be decided, so only the code comes home for now.
-		check("err", fmt.Sprintf("hopsesh brings only the code of %s sessions so far; the conversation stays in the cloud. Choose the code only", cl.Title))
-		return
-	}
 	tm := in.Module
 	if in.Continue != nil {
 		tm = in.Continue
+	}
+	if _, own := in.Module.(agent.Writer); !own && in.Continue == nil {
+		// A cloud-only module (Copilot's log, Amp's thread) has no sessions of its own here: its
+		// text goes into the local agent the user picks.
+		check("err", fmt.Sprintf("Choose the agent here that gets the %s's messages (Claude Code or Codex), or bring the code only", fp.Noun))
+		return
 	}
 	if _, ok := tm.(agent.Writer); !ok {
 		check("err", fmt.Sprintf("hopsesh can't write %s sessions yet; choose the code only", tm.Spec().Name))
@@ -287,6 +293,9 @@ func planFetchWrite(in FetchInput, p *Plan, f *agent.Fetched, opt Options, check
 			fp.Changes = nonEmpty(fp.Changes, diffWords(f.Code.Diff))
 			check("ok", fmt.Sprintf("%s's changes (%s) are committed on %s in the new worktree", cl.Title, fp.Changes, fp.LocalBranch))
 		}
+	}
+	if !fp.Diff && in.Session.State == agent.CloudRunning {
+		check("warn", fmt.Sprintf("The %s is still running in %s. You get its messages as they are now", fp.Noun, cl.Title))
 	}
 	if opt.AppendOriginal {
 		check("err", fmt.Sprintf("This comes as a new %s session; it can't be added to the original", fp.Writer))

@@ -237,23 +237,37 @@ lists the ones it brought here or that you pasted, and the local sessions Remote
 mirrors (`hopsesh ls --cloud`); `claude --teleport` with no id shows the rest. In the app:
 **Clouds** in the sidebar, **Bring here** on a cloud session.
 
-### Copilot, Jules, Devin and Amp: the code comes home
+### Copilot, Jules, Devin and Amp
 
-hopsesh also lists the sessions of four agents that live only in their vendors' clouds,
-through each vendor's own command line, signed in as you: the GitHub Copilot cloud agent
-(`gh agent-task`), Jules (`jules remote`), Devin (`devin list`) and Amp (`amp threads`).
-Bringing one back brings its code into a new worktree, undone by `hopsesh undo`: Copilot's
-and Devin's pull request branch, or Jules's patch committed on a `hopsesh/from/jules/<id>`
-branch. Their conversations stay in their clouds for now, and so does the code of an Amp orb.
+hopsesh also reaches four agents that live only in their vendors' clouds, through each
+vendor's own command line, signed in as you: the GitHub Copilot cloud agent
+(`gh agent-task`), Jules (`jules remote`), Devin (`devin`) and Amp (`amp`). Each is off
+until you allow it.
 
 ```sh
 hopsesh clouds allow copilot-cloud                  # each is off until you allow it
 hopsesh ls copilot-cloud:                           # the agent's tasks, with their branches
-hopsesh pull copilot-cloud:<session id> --code-only
+hopsesh handoff claude/<id> --to copilot-cloud      # or jules, devin, amp
+hopsesh pull copilot-cloud:<session id> [--in codex] [--code-only]
 ```
+
+**Up**, a session goes as for Claude Code cloud (below): a briefing and the code on a handoff
+branch. Copilot starts from that branch (`gh agent-task create --base`, the briefing on
+standard input) and opens its pull request against it. Jules (`jules remote new`), Devin
+(`devin --cloud -p`, from a worktree on the branch) and Amp (`amp -ox`, a new orb thread on
+the repository's project) can't be told which branch to start from, so the briefing asks
+the cloud agent to check it out first, and the plan says so.
+
+**Down**, the code comes into a new worktree, undone by `hopsesh undo`: Copilot's and Devin's
+pull request branch, or Jules's patch committed on a `hopsesh/from/jules/<id>` branch.
+Copilot's session log and Amp's thread come as text, written as a new session of the agent
+the session was handed off from, or Claude Code (`--in codex` picks Codex); their tool calls
+come only as the log's words. Jules's and Devin's messages stay in their clouds (their
+CLIs don't print them), and so does the code of an Amp orb.
 
 Most of these commands' output is undocumented; hopsesh reads it defensively and so far has
 been tested only against stand-ins of them.
+
 ## Hand a session off to Claude Code cloud
 
 A session here (or on another of your machines) can carry on in Claude Code's cloud. No
@@ -336,10 +350,10 @@ things like "bring my laptop session here", "continue this in Codex" or "which s
 running on the studio?". The agent plans first and **moves only after you say yes**.
 `--add-rules` lets the read-only commands (`ls`, `show`, `plan`, `agents`, `clouds`, `doctor`, …)
 run without asking, while `pull`, `push`, `handoff`, `followup` and `undo` **always ask**, even
-in auto mode. "Hand this off to Claude Code cloud" (or "to Codex cloud") works the same way:
-the agent shows the plan and what stays behind, asks you for the environment Codex cloud
-needs, then hands it off after your yes (to Claude Code cloud, it gives you the command to
-run in your own terminal, where Claude Code starts the session). The skill
+in auto mode. "Hand this off to Claude Code cloud" (or to Codex cloud, Copilot, Jules, Devin
+or Amp) works the same way: the agent shows the plan and what stays behind, asks you for the
+environment Codex cloud needs, then hands it off after your yes (to Claude Code cloud, it
+gives you the command to run in your own terminal, where Claude Code starts the session). The skill
 never starts another agent and never handles passwords: for a machine that logs in with a
 password, the agent asks you to run `hopsesh hosts setup-key` yourself. `hopsesh skill remove`
 takes it out again. Details: [docs/design.md §13](docs/design.md#13-the-hopsesh-skill-for-every-agent)

@@ -281,10 +281,13 @@ const FID = { native: ["Full", "ok"], text: ["Lossy", "warn"], code: ["Code only
 function renderFetch(p) {
   const f = p.fetch, o = cur.opts;
   const blocked = (p.blockers || []).length > 0;
-  const own = { id: p.sourceAgent, name: p.fromAgent };
+  // A cloud-only agent (Copilot, Amp) has no sessions here: its messages go into one of
+  // the agents here, the one it came from by default (bringIn).
+  const into = cur.e && cur.e.bringIn;
+  const own = into || { id: p.sourceAgent, name: p.fromAgent };
   const targets = [own, ...((cur.e && cur.e.continueIn) || [])];
   const target = targets.find((t) => t.id === (cur.target || own.id)) || own;
-  const [fidLabel, fidKind] = f.codeOnly ? ["Code only", "warn"] : f.continueIn ? ["Lossy", "warn"] : FID[f.fidelity] || ["Lossy", "warn"];
+  const [fidLabel, fidKind] = f.codeOnly ? ["Code only", "warn"] : f.continueIn && !into ? ["Lossy", "warn"] : FID[f.fidelity] || ["Lossy", "warn"];
   const add = [];
   const noun = f.noun || "session";
   if (!f.codeOnly) add.push(f.append ? `the cloud's work added to “${f.original.title}”` : `1 ${p.agent} session here`);
@@ -305,9 +308,9 @@ function renderFetch(p) {
     h("div", { class: "sheet-body" },
       f.codeOnly ? null : h("section", { class: "sec", style: "border:0;padding:0;gap:12px" },
         h("div", { style: "display:flex;align-items:center;gap:10px;flex-wrap:wrap" }, h("span", { class: "sec-h" }, "The conversation"), h("span", { class: "spacer" }),
-          targets.length > 1 ? [h("span", { class: "muted", style: "font-size:12px" }, "Continue in"),
-            h("div", { class: "seg", role: "radiogroup", "aria-label": "Continue in" }, targets.map((t) => h("button", { role: "radio", "aria-checked": t.id === target.id ? "true" : "false",
-              onclick: () => { cur.target = t.id === own.id ? "" : t.id; replan(); } }, t.name)))] : null),
+          targets.length > 1 ? [h("span", { class: "muted", style: "font-size:12px" }, into ? "Write it into" : "Continue in"),
+            h("div", { class: "seg", role: "radiogroup", "aria-label": into ? "Write it into" : "Continue in" }, targets.map((t) => h("button", { role: "radio", "aria-checked": t.id === target.id ? "true" : "false",
+              onclick: () => { cur.target = t.id === own.id && !into ? "" : t.id; replan(); } }, t.name)))] : null),
         h("div", { class: "fid " + fidKind }, h("b", {}, fidLabel), h("span", {}, f.conversation)),
         !f.continueIn && targets.length > 1 && f.terminal ? h("span", { class: "muted", style: "font-size:12px" }, `In ${targets[1].name} instead: copied by ${p.fromAgent}, then converted (tool calls become text).`) : null,
         f.write ? h("span", { class: "muted", style: "font-size:12px" }, `hopsesh writes it as a new ${f.writer} session (${count(f.messages, "message")}), in the worktree with the ${noun}'s code.`) : null),
@@ -318,7 +321,9 @@ function renderFetch(p) {
             " ", h("button", { class: "link", onclick: chooseCheckout }, f.checkout ? "Another checkout…" : "Choose its checkout…")),
           f.diff ? kv("Started from", f.cloudBranch ? h("span", { class: "mono", style: "font-size:12px" }, f.cloudBranch) : h("span", { class: "muted" }, "Not known: the patch goes on the checkout's HEAD"),
             f.branchState === "pushed" ? h("span", { class: "muted" }, " · fetched into " + f.ref) : null)
-          : kv("Cloud branch", f.cloudBranch ? h("span", { class: "mono", style: "font-size:12px" }, f.cloudBranch) : h("span", { class: "muted" }, `The session's own; ${p.fromAgent} fetches and checks it out`),
+          : kv("Cloud branch", f.cloudBranch ? h("span", { class: "mono", style: "font-size:12px" }, f.cloudBranch)
+            : f.write ? h("span", { class: "muted" }, (cloudOf(f.cloud)?.codeDown || []).length ? "None yet: only the messages come" : `None: the code stays in ${f.cloudTitle}`)
+            : h("span", { class: "muted" }, `The session's own; ${p.fromAgent} fetches and checks it out`),
             f.branchState === "pushed" ? h("span", { class: "muted" }, " · fetched into " + f.ref) : null),
           f.worktree ? kv("New worktree", h("span", { class: "mono", style: "font-size:12px" }, f.worktree)) : null,
           kv("Local branch", f.diff ? [h("span", { class: "mono", style: "font-size:12px" }, f.localBranch || `hopsesh/from/${f.cloud}/${f.session}`), h("span", { class: "muted" }, ` · the ${noun}'s patch${f.changes ? " (" + f.changes + ")" : ""}, committed`)]
@@ -329,6 +334,7 @@ function renderFetch(p) {
         f.command ? h("div", { class: "runbox" }, h("span", { style: "font-size:12px;font-weight:500" }, `Runs in ${sys.terminal}`), h("span", { class: "mono", style: "font-size:11.5px;overflow-wrap:anywhere" }, f.command)) : null),
       h("section", { class: "sec", style: "gap:10px" }, h("span", { class: "sec-h" }, "Options"),
         cloudOf(f.cloud)?.codeOnly ? h("span", { class: "muted", style: "font-size:12px" }, `Only the code comes from ${f.cloudTitle}; its conversation stays there for now.`)
+        : !(cloudOf(f.cloud)?.codeDown || []).length ? h("span", { class: "muted", style: "font-size:12px" }, `${f.cloudTitle} brings no code here; only its messages come.`)
         : f.diff ? check("Get the code only, without the conversation", "codeOnly", `The ${noun}'s patch, committed on a new branch in a new worktree.`)
         : f.cloudBranch || o.codeOnly ? check("Fetch the cloud branch only, without the conversation", "codeOnly", "Into a new worktree; nothing runs in a terminal.")
           : h("label", { class: "opt", style: "cursor:default" }, h("input", { type: "checkbox", disabled: true }),

@@ -239,7 +239,7 @@ func call(w http.ResponseWriter, r *http.Request, svc *gui.App) {
 // origin is the demo repository's stand-in GitHub remote.
 var origin fakecloud.Origin
 
-// cloudWorld puts the stand-in claude and codex first on PATH (the account has the Codex
+// cloudWorld puts the stand-in claude, codex, gh and jules first on PATH (the account has the Codex
 // cloud environments env_api, "acme-api", and env_web, "acme-web") and points the demo
 // repository's GitHub remote at a local bare repository, with main pushed there.
 func cloudWorld(h string) error {
@@ -251,7 +251,7 @@ func cloudWorld(h string) error {
 	if err != nil {
 		return err
 	}
-	for _, name := range []string{"claude", "codex", "gh"} {
+	for _, name := range []string{"claude", "codex", "gh", "jules"} {
 		if runtime.GOOS == "windows" {
 			b, err := os.ReadFile(self)
 			if err == nil {

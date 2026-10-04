@@ -79,9 +79,10 @@ func TestBringFromCopilot(t *testing.T) {
 		t.Fatalf("entry: %+v %+v %v", e, e.Cloud, err)
 	}
 
-	// The conversation does not come home yet: the plan says to take the code only.
+	// With the conversation, the session log is written into a local agent: Claude Code
+	// unless the user picks another (TestHandoffToCopilotAndBack applies it).
 	p, _, err := a.Plan(ctx, inv, e, "", move.Options{TargetDir: w.repo})
-	if err != nil || len(p.Blockers) == 0 || !strings.Contains(p.Blockers[0], "only the code") {
+	if err != nil || len(p.Blockers) > 0 || !p.Fetch.Write || p.Fetch.Writer != "Claude Code" || p.Fetch.ContinueIn != "claude" || p.Fetch.Fidelity != agent.FidText {
 		t.Fatalf("plan with the conversation: %+v %v", p, err)
 	}
 
@@ -198,7 +199,8 @@ func TestBringFromJules(t *testing.T) {
 }
 
 // Devin and Amp list through the same scan; Devin's code comes as its pull request's
-// branch, Amp's threads have no code to bring yet.
+// branch, Amp's threads have no code to bring yet (their text does: see
+// TestHandoffToAmpAndBack).
 func TestListDevinAndAmp(t *testing.T) {
 	w, d := vendorWorld(t, fakecloud.DevinCloud, "Upgrade the router")
 	if _, err := fakecloud.Open(w.store).Seed(fakecloud.Session{Cloud: fakecloud.AmpCloud, Title: "Speed up the importer",

@@ -108,7 +108,7 @@ func readCloudOutput(text string, width int) (sid, refusal string, trust bool) {
 		if strings.Contains(l, trustAsked) {
 			trust = true
 		}
-		for _, u := range linksIn(l, "claude.ai") {
+		for _, u := range agent.LinksIn(l, "claude.ai") {
 			if id := sessionOf(u); id != "" {
 				view = id
 			}

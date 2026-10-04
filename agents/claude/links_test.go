@@ -2,6 +2,8 @@ package claude
 
 import (
 	"testing"
+
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 // Only a link on claude.ai itself names a session: another host before or after it, a
@@ -33,7 +35,7 @@ func TestLinksOnlyOnClaudeAI(t *testing.T) {
 		"View: https://clаude.ai/code/" + id:/* a Cyrillic а */ "",
 	} {
 		got := ""
-		for _, u := range linksIn(line, "claude.ai") {
+		for _, u := range agent.LinksIn(line, "claude.ai") {
 			if s := sessionOf(u); s != "" {
 				got = s
 			}

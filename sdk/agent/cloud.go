@@ -127,6 +127,11 @@ type Cloud struct {
 	// EnvHint says how the user makes an environment, for a cloud with NeedEnvironment
 	// ("open `codex cloud` once to create one").
 	EnvHint string
+	// BriefBranch: the driver cannot choose the branch a new session starts from (the cloud
+	// clones the repository's default branch, or one hopsesh cannot name), so the core's
+	// briefing asks the cloud agent to check out the handoff branch first, and the plan says
+	// so.
+	BriefBranch bool
 	// NoFollowUp says, for people, why hopsesh sends this cloud's sessions no follow-up
 	// and where the user can ("Claude Code has no command that sends one without its own
 	// terminal session; open the session on claude.ai to write to it"). The user interfaces

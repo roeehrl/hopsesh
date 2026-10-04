@@ -102,6 +102,29 @@ test("the hand-off sheet: briefing, branch, what stays, options; done, then undo
   await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible({ timeout: 30_000 });
 });
 
+// Jules's CLI can't name the branch a session starts from: the menu and the sheet say so,
+// and the briefing asks Jules to check the handoff branch out first.
+test("a hand-off to Jules: the briefing asks for the handoff branch", async ({ page }) => {
+  expect((await page.request.post("/dirty")).ok()).toBeTruthy();
+  const sidebar = page.getByRole("navigation", { name: "Scopes" });
+  await sidebar.locator(".side-off", { hasText: "Jules" }).getByRole("button", { name: "Turn on" }).click();
+  await expect(sidebar.locator(".side-off", { hasText: "Jules" })).toHaveCount(0, { timeout: 30_000 });
+  const menu = await openMenu(page);
+  const jules = menu.getByRole("menuitem", { name: /Jules/ });
+  await expect(jules).toBeEnabled();
+  await expect(jules).toContainText("The jules CLI can't choose the branch a session starts from");
+  await jules.click();
+
+  const sheet = page.locator("#sheet");
+  await expect(sheet.getByRole("heading", { name: "Hand off “Find the codeword” to Jules" })).toBeVisible({ timeout: 30_000 });
+  await expect(sheet.getByLabel("Briefing")).toHaveValue(/git fetch origin hopsesh\/handoff\/\d{8}-0b6c6a8e && git checkout hopsesh\/handoff\/\d{8}-0b6c6a8e/);
+  await expect(sheet).toContainText("Jules can't be told which branch to start from, so the briefing asks it to check out");
+  await sheet.getByRole("button", { name: /^Hand off/ }).click();
+  await expect(page.getByRole("heading", { name: "Handed off to Jules" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator(".term")).toContainText("https://jules.google.com/session/");
+  await expect(page.getByRole("note")).toHaveText("When it finishes: Clouds → Jules → Bring here");
+});
+
 // Claude Code starts the session in a terminal hopsesh opens: the sheet says what happens
 // there while it waits, and takes the session's link by hand (one of another cloud is
 // refused); a step that ends with no session can be left, and the hand-off says so.

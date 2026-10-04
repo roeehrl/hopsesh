@@ -16,9 +16,12 @@ import (
 const cloudName = "amp"
 
 // cloud declares Amp's threads as data. Down is the thread as text (amp threads
-// markdown, which includes the tool calls as text; its layout is unverified). The code an
-// orb wrote comes home through `amp sync <thread>`, which mirrors the orb into a checkout
-// live and keeps running, so hopsesh does not run it yet: no code comes down.
+// markdown, which includes the tool calls as text; its layout is unverified), which the
+// core writes into a local agent. The code an orb wrote comes home through `amp sync
+// <thread>`, which mirrors the orb into a checkout live and keeps running, so hopsesh does
+// not run it yet: no code comes down. Up is a briefing through `amp -ox` into a new orb
+// thread on the repository's project; which branch the orb clones is not documented, so the
+// briefing asks for the handoff branch (BriefBranch).
 func cloud() agent.Cloud {
 	return agent.Cloud{
 		Name:   cloudName,
@@ -32,14 +35,19 @@ func cloud() agent.Cloud {
 		Up:     agent.FidBrief,
 		Down:   agent.FidText,
 		CodeUp: []agent.CodeWay{agent.ViaBranch},
-		Needs:  []agent.Need{agent.NeedGitHub},
+		Needs:  []agent.Need{agent.NeedGitHub, agent.NeedPushedBranch},
+		Limits: []string{
+			"An orb's branch can't be chosen from the amp CLI: the briefing asks Amp to check out the handoff branch first",
+			"The code an orb writes stays there: hopsesh does not run `amp sync`, which mirrors it live into a checkout",
+		},
+		BriefBranch: true,
 		Watch: agent.Watch{
-			Surface: "threads through `amp threads list` (a table: title, last updated, visibility, messages, thread id) and `amp threads markdown <id>`, thread links (ampcode.com/threads/T-…), and orbs (`amp -ox`, `amp sync <thread>`)",
-			Docs:    []string{"https://ampcode.com/manual.md", "https://ampcode.com/manual/orbs.md", "https://ampcode.com/manual/sdk.md"},
+			Surface: "orb threads started with `amp -ox <prompt> --project <owner/repo> --title <title>` (the thread link it prints), threads through `amp threads list` (a table: title, last updated, visibility, messages, thread id) and `amp threads markdown <id>`, thread links (ampcode.com/threads/T-…), and orbs (`amp -ox`, `amp sync <thread>`)",
+			Docs:    []string{"https://ampcode.com/manual.md", "https://ampcode.com/manual/orbs.md", "https://ampcode.com/manual/sdk.md", "https://ampcode.com/docs/cli/spawning-orbs"},
 			Feeds:   []agent.Feed{{Kind: agent.FeedRSS, URL: "https://ampcode.com/news.rss"}},
-			Grep:    `thread|orb|sync|markdown|export|sdk|cloud|handoff|deprecat`,
+			Grep:    `thread|orb|-ox|orb-execute|--project|sync|markdown|export|sdk|cloud|handoff|deprecat`,
 			Help:    [][]string{{"amp", "--help"}, {"amp", "threads", "--help"}},
-			Relies:  []string{"threads", "list", "markdown", "sync"},
+			Relies:  []string{"threads", "list", "markdown", "sync", "-x", "--orb-execute", "--project", "--title"},
 		},
 	}
 }
@@ -67,6 +75,11 @@ func run(ctx context.Context, h agent.Host, args ...string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	return mapped(r, strings.Join(args[:min(2, len(args))], " "))
+}
+
+// mapped is an amp run's output, or its refusal as one of the SDK's errors.
+func mapped(r agent.Result, what string) ([]byte, error) {
 	if r.Code != 0 {
 		text := string(r.Stderr) + "\n" + string(r.Stdout)
 		msg := firstLine(text)
@@ -78,7 +91,7 @@ func run(ctx context.Context, h agent.Host, args ...string) ([]byte, error) {
 		case notFoundWords.MatchString(text):
 			return nil, fmt.Errorf("%w: %s", agent.ErrNotFound, msg)
 		}
-		return nil, fmt.Errorf("amp %s: exit %d: %s", strings.Join(args[:min(2, len(args))], " "), r.Code, msg)
+		return nil, fmt.Errorf("amp %s: exit %d: %s", what, r.Code, msg)
 	}
 	return r.Stdout, nil
 }

@@ -91,6 +91,10 @@ type Briefing struct {
 	Withheld    []string // files that stay on the machine (credential-like, or not chosen)
 	NotCarried  []string // anything else the cloud does not get ("the user's personal CLAUDE.md")
 	HistoryFile string   // the conversation committed on the branch (".hopsesh/handoff.md"), if it is
+	// Checkout: the cloud may start on another branch (its driver cannot choose one), so the
+	// briefing asks it to check out Branch of Repo (host/owner/repo) first.
+	Checkout bool
+	Repo     string
 }
 
 // Rules are the text of one global instruction file.

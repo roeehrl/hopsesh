@@ -141,6 +141,13 @@ func cloudText(nodes []ir.Node, r BriefRequest, cut cloudCut) string {
 		}
 		b.WriteString(".\n")
 	}
+	if bf.Checkout && bf.Branch != "" {
+		b.WriteString("You may have started on another branch: before anything else, check this one out")
+		if bf.Repo != "" {
+			fmt.Fprintf(&b, " in a clone of %s", bf.Repo)
+		}
+		fmt.Fprintf(&b, ": `git fetch origin %s && git checkout %s`.\n", bf.Branch, bf.Branch)
+	}
 	var not []string
 	if len(bf.Withheld) > 0 {
 		not = append(not, strings.Join(bf.Withheld, ", ")+" (they stay on the user's machine)")

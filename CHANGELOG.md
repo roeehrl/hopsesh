@@ -50,8 +50,7 @@ All notable changes to this project are documented here. The format follows
   Bringing one back brings its code into a new worktree (`hopsesh pull <cloud>:<id>
   --code-only`, or **Get the code** in the app): Copilot's and Devin's pull request branch,
   or Jules's patch committed on a `hopsesh/from/jules/<id>` branch; `hopsesh undo` takes it
-  back. Their conversations stay in the cloud for now, and an Amp orb's code (`amp sync`)
-  is not brought. These CLIs' output is mostly undocumented: hopsesh reads it defensively,
+  back. An Amp orb's code (`amp sync`) is not brought. These CLIs' output is mostly undocumented: hopsesh reads it defensively,
   and was tested against stand-ins only.
 
 - Codex cloud, both ways. `hopsesh handoff <session> --to codex-cloud --env <environment>`
@@ -76,6 +75,29 @@ All notable changes to this project are documented here. The format follows
   screen with the task's link, a bring-back sheet and done screen for a task, and an
   environment per repository on its card under Machines. In the terminal UI: `e` picks the
   environment, `S` the starting diff. The skill handles "hand this off to Codex cloud".
+- Hand a session off to the GitHub Copilot cloud agent, Jules, Devin or Amp:
+  `hopsesh handoff <session> --to copilot-cloud|jules|devin|amp`, the same briefing and
+  handoff branch as the other clouds, through each vendor's own CLI signed in as you.
+  Copilot: `gh agent-task create -F - --base <handoff branch> -R <owner/repo>`, the briefing
+  on standard input; the agent starts from the branch and opens its pull request against
+  it. Jules: `jules remote new --repo <owner/repo> --session <briefing>`. Devin: `devin
+  --cloud -p` (its documented non-interactive start) in a worktree on the handoff branch.
+  Amp: `amp -ox <briefing> --project <owner/repo>` in a new orb thread. The jules, devin and
+  amp commands can't name the branch a session starts from, so the briefing asks the cloud
+  agent to check it out first, and the plan says so. Refusals (not signed in, no plan, a
+  repository the cloud can't take) are said in words; after a refused start, undo removes
+  the branch.
+- Copilot's session log and Amp's thread come home as text: **Bring here** (or `hopsesh pull
+  copilot-cloud:<id>` / `amp:<id>`) writes them as a new session of the agent the session was
+  handed off from, else Claude Code (`--in codex`, or **Bring here into ▸** in the app,
+  picks another), in a new worktree with Copilot's pull request branch. Fidelity is text:
+  tool calls and their output come only as the log's words, and review comments, an orb's
+  code and Jules's and Devin's messages stay in their clouds. **Get the code only** works as
+  before.
+- SDK: `Cloud.BriefBranch` declares a cloud whose driver cannot name the branch a session
+  starts from (the core's briefing then asks the cloud agent to check it out), and
+  `agenttest.CloudOptions.Work` plays the cloud's agent between the conformance kit's send
+  and fetch, and `agent.LinksIn` reads a driver's links on an exact host only.
 
 ### Fixed
 - Handing a session off to Claude Code cloud works with the real Claude Code. hopsesh ran

@@ -70,6 +70,11 @@ function noCode(e, cl) {
   return `${cl.title} has not pushed a branch for this session yet.`;
 }
 
+// cloudOnly reports whether a session's agent works only in its cloud (no sessions here).
+function cloudOnly(e) {
+  return !agentInfo(e.agent)?.capabilities?.includes("write");
+}
+
 // actionsFor lists what can be done with a session: the first is its main action.
 export function actionsFor(e) {
   const out = [];
@@ -82,8 +87,18 @@ export function actionsFor(e) {
       const code = { id: "code", label: "Get the code", short: "Get the code", why: no, run: () => planFor(e, { target: "", codeOnly: true }) };
       return [no ? Object.assign(code, { run: () => toast(no) }) : code];
     }
-    out.push({ id: "bring", label: `Bring here (${e.agentName})`, short: "Bring here", why, run: () => planFor(e, { target: "" }) });
-    for (const t of e.continueIn) out.push({ id: "bring:" + t.id, label: `Bring here and continue in ${t.name}`, why, run: () => planFor(e, { target: t.id }) });
+    if (e.bringIn) {
+      // A cloud-only agent: its messages are written into an agent here, the one it came
+      // from by default.
+      out.push({ id: "bring", label: `Bring here (${e.bringIn.name})`, short: "Bring here", why, run: () => planFor(e, { target: e.bringIn.id }) });
+      for (const t of e.continueIn) out.push({ id: "bring:" + t.id, label: `Bring here into ${t.name}`, why, run: () => planFor(e, { target: t.id }) });
+    } else if (cl && !cl.codeOnly && cloudOnly(e)) {
+      const no = "No agent here takes its messages: install Claude Code or Codex, or get the code only.";
+      out.push({ id: "bring", label: "Bring here", short: "Bring here", why: why || no, run: () => toast(why || no) });
+    } else {
+      out.push({ id: "bring", label: `Bring here (${e.agentName})`, short: "Bring here", why, run: () => planFor(e, { target: "" }) });
+      for (const t of e.continueIn) out.push({ id: "bring:" + t.id, label: `Bring here and continue in ${t.name}`, why, run: () => planFor(e, { target: t.id }) });
+    }
     return why ? out.map((a) => Object.assign(a, { run: () => toast(why) })) : out;
   }
   const local = e.machine === here();
@@ -353,8 +368,9 @@ function cloudInspector(e) {
       h("button", { class: "btn", style: "align-self:flex-start", onclick: () => api("OpenURL", c.url).catch(fail) }, icon(ICONS.external, 13), "Open in browser")),
     h("div", { style: "display:flex;flex-direction:column;gap:8px" },
       h("button", { class: "btn primary big", disabled: !!why, onclick: acts[0].run }, acts[0].label, h("span", { class: "kbd" }, "↩")),
-      cl?.codeOnly ? null : acts.slice(1).map((a) => h("button", { class: "btn wrap", disabled: !!why, onclick: a.run }, "Bring here and continue in ▸ ", agentChip(a.id.slice(6), a.label.replace(/^.* in /, "")))),
-      cl?.codeOnly ? null : h("button", { class: "btn", disabled: !!why || !(c.branch || diffDown), title: c.branch || diffDown ? "" : "hopsesh doesn't know its branch yet: bring it with its conversation once", onclick: () => planFor(e, { target: "", codeOnly: true }) }, "Get the code only"),
+      cl?.codeOnly ? null : acts.slice(1).map((a) => h("button", { class: "btn wrap", disabled: !!why, onclick: a.run }, e.bringIn ? "Bring here into ▸ " : "Bring here and continue in ▸ ",
+        agentChip(a.id.slice(6), a.label.replace(/^.* in(to)? /, "")))),
+      cl?.codeOnly || !(cl?.codeDown || []).length ? null : h("button", { class: "btn", disabled: !!why || !(c.branch || diffDown), title: c.branch || diffDown ? "" : "hopsesh doesn't know its branch yet: bring it with its conversation once", onclick: () => planFor(e, { target: "", codeOnly: true }) }, "Get the code only"),
       h("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap" }, h("button", { class: "btn", disabled: true, "aria-describedby": "arch-why" }, "Archive"),
         h("span", { id: "arch-why", class: "muted", style: "font-size:11.5px" }, `${e.agentName} archives only on ${host}`)),
       why ? h("span", { class: "warn", style: "font-size:12px" }, why) : null),
@@ -377,7 +393,8 @@ function cloudInspector(e) {
       ? `hopsesh brings its code into a new worktree; the conversation stays in ${cl.title} for now. The cloud ${noun} is not changed.`
       : cl?.fidelity === "native"
       ? `Bringing it here makes a new worktree; ${e.agentName} copies the conversation in ${sys.terminal}. The cloud session is not changed.`
-      : `Bringing it here makes a new worktree with its code; hopsesh writes ${cl?.fidelity === "code" ? `the ${noun}'s title and what came of it` : "its messages"} as a new session. The cloud ${noun} is not changed.`),
+      : !(cl?.codeDown || []).length ? `Bringing it here makes a new worktree of its repository; hopsesh writes its messages, as text, as a new session of the agent you pick. Its code stays in ${cl.title}. The cloud ${noun} is not changed.`
+      : `Bringing it here makes a new worktree with its code; hopsesh writes ${cl?.fidelity === "code" ? `the ${noun}'s title and what came of it` : "its messages"} as a new session${e.bringIn ? " of the agent you pick" : ""}. The cloud ${noun} is not changed.`),
     (cl?.limits || []).map((l) => h("span", { class: "muted", style: "font-size:11.5px" }, l)));
 }
 

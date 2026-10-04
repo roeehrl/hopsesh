@@ -77,7 +77,7 @@ func Cloud() int { return fakecloud.Main(proc()) }
 // proc is this run, for the stand-in clouds: with its terminal, when it has one.
 func proc() fakecloud.Proc {
 	dir, _ := os.Getwd()
-	p := fakecloud.Proc{Args: os.Args[1:], Dir: dir, Stdout: os.Stdout, Stderr: os.Stderr}
+	p := fakecloud.Proc{Args: os.Args[1:], Dir: dir, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}
 	in, out := int(os.Stdin.Fd()), int(os.Stdout.Fd())
 	if term.IsTerminal(in) && term.IsTerminal(out) {
 		p.TTY, p.In = true, os.Stdin

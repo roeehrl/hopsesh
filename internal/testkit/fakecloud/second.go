@@ -3,6 +3,8 @@ package fakecloud
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -73,6 +75,12 @@ func ghAgentTask(p Proc, args []string) int {
 		fmt.Fprintln(p.Stdout, "\nAVAILABLE COMMANDS\n  create:        Create an agent task (preview)\n  list:          List agent tasks (preview)\n  view:          View an agent task session (preview)")
 		return 0
 	}
+	if len(args) > 1 && args[1] == "--help" && args[0] == "create" {
+		// gh 2.97.0's help for create, the flags hopsesh uses.
+		fmt.Fprintln(p.Stdout, "FLAGS\n  -b, --base string              Base branch for the pull request (use default branch if not provided)\n      --follow                   Follow agent session logs")
+		fmt.Fprintln(p.Stdout, "  -F, --from-file file           Read task description from file (use \"-\" to read from standard input)\n  -R, --repo [HOST/]OWNER/REPO   Select another repository using the [HOST/]OWNER/REPO format")
+		return 0
+	}
 	if len(args) > 1 && args[1] == "--help" {
 		fmt.Fprintln(p.Stdout, "FLAGS\n      --json fields       Output JSON with the specified fields\n      --log               Show agent session logs\n  -L, --limit int         Maximum number of agent tasks to fetch (default 30)")
 		fmt.Fprintln(p.Stdout, "\nJSON FIELDS\n  completedAt, createdAt, id, name, pullRequestNumber, pullRequestState,\n  pullRequestTitle, pullRequestUrl, repository, state, updatedAt, user")
@@ -88,6 +96,8 @@ func ghAgentTask(p Proc, args []string) int {
 	flags, pos := codexFlags(args[1:], "--json", "--limit", "-L", "--repo", "-R", "--jq", "-q")
 	fields := strings.Split(flags["--json"], ",")
 	switch args[0] {
+	case "create":
+		return ghCreate(p, st, args[1:])
 	case "list":
 		if p.fail() == "slow" {
 			time.Sleep(5 * time.Second)
@@ -259,9 +269,9 @@ func Jules(p Proc) int {
 	case "version", "--version":
 		fmt.Fprintln(p.Stdout, "0.1.42") // unverified layout
 		return 0
-	case "--help", "remote --help", "remote pull --help", "remote list --help":
+	case "--help", "remote --help", "remote pull --help", "remote list --help", "remote new --help":
 		fmt.Fprintln(p.Stdout, "Usage:\n  jules remote [command]\n\nAvailable Commands:\n  list        List remote repos or sessions\n  new         Create a remote session\n  pull        Pull the result of a remote session")
-		fmt.Fprintln(p.Stdout, "\nFlags:\n      --apply            Apply the patch to the local repository\n      --repo             List repositories\n      --session string   The session ID")
+		fmt.Fprintln(p.Stdout, "\nFlags:\n      --apply            Apply the patch to the local repository\n      --parallel int     Number of parallel sessions\n      --repo             The repository (owner/repo, or . for this folder's)\n      --session string   The session ID, or the new session's prompt")
 		return 0
 	}
 	if len(args) < 2 || args[0] != "remote" {
@@ -277,14 +287,16 @@ func Jules(p Proc) int {
 	if err != nil {
 		return p.errorf(1, "%v", err)
 	}
-	flags, _ := codexFlags(args[2:], "--session")
+	flags, _ := codexFlags(args[2:], "--session", "--repo", "--parallel")
 	switch args[1] {
+	case "new":
+		return julesNew(p, st, flags)
 	case "list":
 		all, err := st.List(JulesCloud)
 		if err != nil {
 			return p.errorf(1, "%v", err)
 		}
-		if flags["--repo"] != "" {
+		if flags["--repo"] != "" && flags["--session"] == "" {
 			fmt.Fprintln(p.Stdout, "Repo")
 			seen := map[string]bool{}
 			for _, s := range all {
@@ -352,7 +364,7 @@ func Devin(p Proc) int {
 		fmt.Fprintln(p.Stdout, "devin 2026.9.24") // unverified layout
 		return 0
 	case "--help":
-		fmt.Fprintln(p.Stdout, "Usage: devin [OPTIONS] [PROMPT] [COMMAND]\n\nCommands:\n  auth  Manage authentication\n  list  List sessions (interactive picker by default)\n\nOptions:\n  --cloud   Drive Devin Cloud sessions instead of the local agent\n  --format <FORMAT>  Output format for list: json or csv")
+		fmt.Fprintln(p.Stdout, "Usage: devin [OPTIONS] [PROMPT] [COMMAND]\n\nCommands:\n  auth  Manage authentication\n  list  List sessions (interactive picker by default)\n\nOptions:\n  --cloud   Drive Devin Cloud sessions instead of the local agent\n  -p, --print [PROMPT]  Print response and exit (non-interactive mode)\n  --respect-workspace-trust [true|false]  Whether to respect workspace trust settings\n  --format <FORMAT>  Output format for list: json or csv")
 		return 0
 	case "auth status":
 		if p.fail() == "signed-out" {
@@ -360,6 +372,9 @@ func Devin(p Proc) int {
 		}
 		fmt.Fprintln(p.Stdout, "Logged in as example-user (example-org)") // unverified wording
 		return 0
+	}
+	if contains(p.Args, "--cloud") {
+		return devinCloud(p)
 	}
 	if len(p.Args) == 0 || p.Args[0] != "list" && p.Args[0] != "ls" {
 		return p.errorf(2, "error: unrecognized subcommand '%s'", strings.Join(p.Args, " "))
@@ -419,8 +434,11 @@ func Amp(p Proc) int {
 		fmt.Fprintln(p.Stdout, "0.0.1791107882-gfe04cc")
 		return 0
 	case "--help", "threads --help":
-		fmt.Fprintln(p.Stdout, "Usage: amp [options] [command]\n\nCommands:\n  threads list              List your threads\n  threads markdown <id>     Print a thread as Markdown\n  sync <thread>             Mirror an orb thread's changes to this checkout")
+		fmt.Fprintln(p.Stdout, "Usage: amp [options] [command]\n\nOptions:\n  -x, --execute [message]   Execute mode: run the prompt and exit\n  --orb-execute             With -x: run the thread in an orb (-ox)\n  --project <project>       The orb's project (GitHub owner/repo)\n  --title <title>           The thread's title\n\nCommands:\n  threads list              List your threads\n  threads markdown <id>     Print a thread as Markdown\n  sync <thread>             Mirror an orb thread's changes to this checkout")
 		return 0
+	}
+	if contains(p.Args, "-ox") || contains(p.Args, "--orb-execute") {
+		return ampOrb(p)
 	}
 	if len(p.Args) < 2 || p.Args[0] != "threads" && p.Args[0] != "t" {
 		return p.errorf(1, "error: unknown command '%s'", strings.Join(p.Args, " "))
@@ -510,4 +528,227 @@ func ago(t time.Time) string {
 		return fmt.Sprintf("%dh ago", int(d.Hours()))
 	}
 	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+}
+
+// The create verbs: a hand-off's start in each vendor. Each new session records where it
+// starts: the repository's clone URL and the branch and commit it starts from, read from
+// the folder the CLI runs in (a worktree on the handoff branch) when that is a checkout.
+
+// briefedBranch is the branch a briefing asks the agent to check out first ("git fetch
+// origin B && git checkout B"), which the fake agent does, as a real one following the
+// briefing would; "" when it asks for none.
+func briefedBranch(prompt string) string {
+	if mm := checkoutAsk.FindStringSubmatch(prompt); mm != nil {
+		return mm[1]
+	}
+	return ""
+}
+
+var checkoutAsk = regexp.MustCompile("git checkout ([^`\\s]+)`")
+
+// startFrom fills a new session's clone URL and starting commit from the folder the CLI
+// runs in, when it is a checkout of repo whose origin has branch; ok is false when the folder
+// is that checkout but the branch is not on origin.
+func startFrom(p Proc, s *Session, branch string) bool {
+	env := p.environ()
+	identity, cloneURL, _, _, err := repoOf(env, p.Dir)
+	if err != nil || p.Dir == "" || identity != s.Repo {
+		return true // not a checkout here (the conformance kit's made-up folder)
+	}
+	s.CloneURL, s.Branch = cloneURL, branch
+	out, err := git(env, p.Dir, "ls-remote", "origin", "refs/heads/"+branch)
+	if err != nil || out == "" {
+		return false
+	}
+	s.Base = strings.Fields(out)[0]
+	return true
+}
+
+// title is a task's title from its prompt: the first line, without hopsesh's prefix.
+func title(prompt string) string {
+	line, _, _ := strings.Cut(strings.TrimSpace(prompt), "\n")
+	return clip(strings.TrimPrefix(line, "[hopsesh] "), 60)
+}
+
+// ghCreate answers gh agent-task create [-F file|-] [--base B] [-R OWNER/REPO]
+// [<description>]. Copilot opens a draft pull request when it starts, so the fake names its
+// copilot/… branch and pull request at once, and gh prints the agent session's link (its
+// source's agentSessionWebURL); with FAKE_CLOUD_FAIL=queued, the job has no pull request
+// yet and gh prints "job <id> queued. View progress: …" instead.
+func ghCreate(p Proc, st Store, args []string) int {
+	flags, pos := codexFlags(args, "-F", "--from-file", "--base", "-b", "--repo", "-R", "--custom-agent", "-a")
+	prompt := strings.Join(pos, " ")
+	switch f := nonEmpty(flags["-F"], flags["--from-file"]); f {
+	case "":
+	case "-":
+		prompt = p.input()
+	default:
+		b, err := os.ReadFile(f)
+		if err != nil {
+			return p.errorf(1, "could not read task description file: %v", err)
+		}
+		prompt = string(b)
+	}
+	if strings.TrimSpace(prompt) == "" {
+		return p.errorf(1, "a task description or -F is required when running non-interactively")
+	}
+	repo := strings.TrimPrefix(nonEmpty(flags["--repo"], flags["-R"]), "github.com/")
+	if repo == "" {
+		if id, _, _, _, err := repoOf(p.environ(), p.Dir); err == nil {
+			repo = strings.TrimPrefix(id, "github.com/")
+		}
+	}
+	if repo == "" {
+		return p.errorf(1, "a repository is required; re-run in a repository or supply one with --repo owner/name")
+	}
+	if p.fail() == "repo-mismatch" {
+		return p.errorf(1, "failed to create agent task: HTTP 404: Could not resolve to a Repository with the name '%s'.", repo) // unverified wording
+	}
+	base := nonEmpty(nonEmpty(flags["--base"], flags["-b"]), "main")
+	s := Session{Cloud: CopilotCloud, Title: title(prompt), Repo: "github.com/" + repo, Branch: base, Code: "branch",
+		Messages: []Message{{Role: "user", Text: prompt, Time: time.Now().UTC()}}}
+	if !startFrom(p, &s, base) {
+		return p.errorf(1, "failed to create agent task: HTTP 422: base branch %s not found", base) // unverified wording
+	}
+	id := newID(CopilotCloud)
+	s.ID = id
+	if p.fail() != "queued" {
+		s.PR, s.Result = st.nextPR(), "copilot/"+slug(s.Title, "work")
+	}
+	s, err := st.Seed(s)
+	if err != nil {
+		return p.errorf(1, "%v", err)
+	}
+	if p.fail() == "queued" {
+		fmt.Fprintf(p.Stdout, "job %s queued. View progress: https://github.com/copilot/agents\n", newUUID())
+		return 0
+	}
+	fmt.Fprintln(p.Stdout, s.URL())
+	return 0
+}
+
+// julesNew answers jules remote new --repo OWNER/REPO --session PROMPT [--parallel N]. It
+// takes no branch: the session starts on the repository's default branch, or (the fake's
+// agent following the briefing) the one the briefing asks for. Unverified: what it prints;
+// the fake prints a line with the id and the session's link.
+func julesNew(p Proc, st Store, flags map[string]string) int {
+	prompt, repo := flags["--session"], strings.TrimPrefix(flags["--repo"], "github.com/")
+	if repo == "." || repo == "" {
+		if id, _, _, _, err := repoOf(p.environ(), p.Dir); err == nil {
+			repo = strings.TrimPrefix(id, "github.com/")
+		}
+	}
+	switch {
+	case strings.TrimSpace(prompt) == "":
+		return p.errorf(1, "Error: a prompt is required (--session)") // unverified wording
+	case repo == "":
+		return p.errorf(1, "Error: no repository given (--repo)") // unverified wording
+	case p.fail() == "repo-mismatch":
+		return p.errorf(1, "Error: repository %s is not connected to Jules. Install the Jules GitHub app on it first.", repo) // unverified wording
+	}
+	branch := nonEmpty(briefedBranch(prompt), "main")
+	s := Session{Cloud: JulesCloud, Title: title(prompt), Repo: "github.com/" + repo, Branch: branch, Code: "branch",
+		Messages: []Message{{Role: "user", Text: prompt, Time: time.Now().UTC()}}}
+	if !startFrom(p, &s, branch) {
+		return p.errorf(1, "Error: branch %s not found in %s", branch, repo) // unverified wording
+	}
+	s, err := st.Seed(s)
+	if err != nil {
+		return p.errorf(1, "%v", err)
+	}
+	fmt.Fprintf(p.Stdout, "Created session %s for %s.\n%s\n", s.ID, repo, s.URL()) // unverified layout
+	return 0
+}
+
+// devinCloud answers devin --cloud [--respect-workspace-trust false] -p [--] PROMPT: it
+// starts a cloud session on the folder's repository and branch (as /handoff carries them;
+// unverified for -p), or the branch the briefing asks for, and prints Devin's first reply,
+// with no session id in it (unverified: the docs say only that it prints the response).
+// Without -p it refuses: the interactive session needs a terminal.
+func devinCloud(p Proc) int {
+	print := false
+	var pos []string
+	for i := 0; i < len(p.Args); i++ {
+		switch a := p.Args[i]; a {
+		case "--cloud", "--":
+		case "-p", "--print":
+			print = true
+		case "--respect-workspace-trust", "--model", "--permission-mode", "--prompt-file", "-r", "--resume":
+			i++
+		default:
+			pos = append(pos, a)
+		}
+	}
+	if !print {
+		return p.errorf(1, "Error: the interactive session needs a terminal")
+	}
+	switch p.fail() {
+	case "signed-out":
+		return p.errorf(1, "Error: not logged in. Run `devin auth login`.") // unverified wording
+	case "not-eligible":
+		return p.errorf(1, "Error: Devin Cloud is not enabled for your organization.") // unverified wording
+	case "repo-mismatch":
+		return p.errorf(1, "Error: repository example/demo is not connected to Devin.") // unverified wording
+	}
+	prompt := strings.Join(pos, " ")
+	if strings.TrimSpace(prompt) == "" {
+		return p.errorf(1, "Error: -p needs a prompt")
+	}
+	st, err := p.store()
+	if err != nil {
+		return p.errorf(1, "%v", err)
+	}
+	s := Session{Cloud: DevinCloud, Title: title(prompt), Code: "branch", Messages: []Message{{Role: "user", Text: prompt, Time: time.Now().UTC()}}}
+	if id, _, branch, _, err := repoOf(p.environ(), p.Dir); err == nil {
+		s.Repo = id
+		if !startFrom(p, &s, nonEmpty(briefedBranch(prompt), branch)) {
+			return p.errorf(1, "Error: branch not found on origin")
+		}
+	}
+	reply := "I'll start by checking out the branch and reading the code."
+	s.Messages = append(s.Messages, Message{Role: "assistant", Text: reply, Time: time.Now().UTC()})
+	if _, err := st.Seed(s); err != nil {
+		return p.errorf(1, "%v", err)
+	}
+	fmt.Fprintln(p.Stdout, reply)
+	return 0
+}
+
+// ampOrb answers amp -ox PROMPT [--project OWNER/REPO] [--title T] [--orb-size S]: a new
+// thread in an orb on the project, printing its link (documented) and returning at once.
+func ampOrb(p Proc) int {
+	flags, pos := codexFlags(p.Args, "--project", "--title", "--orb-size", "--mode", "-x", "--execute")
+	prompt := nonEmpty(flags["-x"], flags["--execute"])
+	for _, a := range pos {
+		if a != "-ox" && a != "-o" {
+			prompt = strings.TrimSpace(prompt + " " + a)
+		}
+	}
+	switch p.fail() {
+	case "signed-out":
+		return p.errorf(1, "Error: You are not logged in. Run `amp login` first.") // unverified wording
+	case "not-eligible":
+		return p.errorf(1, "Error: Your workspace has no credits left; threads are paused. (402 Payment Required)") // unverified wording
+	case "repo-mismatch":
+		return p.errorf(1, "Error: no Amp project matches %s; create one with project: create", flags["--project"]) // unverified wording
+	}
+	if prompt == "" {
+		return p.errorf(1, "error: -x needs a message")
+	}
+	st, err := p.store()
+	if err != nil {
+		return p.errorf(1, "%v", err)
+	}
+	s := Session{Cloud: AmpCloud, Title: nonEmpty(flags["--title"], title(prompt)), Code: "branch",
+		Messages: []Message{{Role: "user", Text: prompt, Time: time.Now().UTC()}}}
+	if r := flags["--project"]; r != "" {
+		s.Repo = "github.com/" + strings.TrimPrefix(r, "github.com/")
+		startFrom(p, &s, nonEmpty(briefedBranch(prompt), "main"))
+	}
+	s, err = st.Seed(s)
+	if err != nil {
+		return p.errorf(1, "%v", err)
+	}
+	fmt.Fprintln(p.Stdout, s.URL())
+	return 0
 }

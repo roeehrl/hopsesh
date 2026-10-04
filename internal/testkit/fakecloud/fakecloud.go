@@ -115,6 +115,7 @@ type Proc struct {
 	// Vars are variables set for this run; Env falls back to the process's own.
 	Vars   map[string]string
 	Dir    string
+	Stdin  io.Reader // nil: empty
 	Stdout io.Writer
 	Stderr io.Writer
 	// TTY: the run has a terminal (claude --cloud needs one); In is what is typed there
@@ -123,6 +124,15 @@ type Proc struct {
 	In    io.Reader
 	Width int
 	Raw   func() (restore func())
+}
+
+// input is the run's standard input.
+func (p Proc) input() string {
+	if p.Stdin == nil {
+		return ""
+	}
+	b, _ := io.ReadAll(p.Stdin)
+	return string(b)
 }
 
 // Env returns a variable of the run.
@@ -273,7 +283,9 @@ func newID(cloud string) string {
 func newUUID() string {
 	var u [16]byte
 	_, _ = rand.Read(u[:])
-	return fmt.Sprintf("%x-%x-4%x-8%x-%x", u[0:4], u[4:6], u[6:8], u[8:10], u[10:16])
+	u[6] = u[6]&0x0f | 0x40
+	u[8] = u[8]&0x3f | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", u[0:4], u[4:6], u[6:8], u[8:10], u[10:16])
 }
 
 // Origin is a bare repository standing in for a repository on GitHub.
@@ -399,7 +411,9 @@ func Work(p Proc, id string, sameBranch bool) error {
 		s.Messages = append(s.Messages, Message{Role: "assistant", Text: "Added cloud-work/" + s.ID + ".md.", Time: now})
 	default:
 		branch := s.Branch
-		if !sameBranch {
+		if !sameBranch && s.Result != "" {
+			branch = s.Result // named when the session started (Copilot's draft pull request)
+		} else if !sameBranch {
 			switch s.Cloud {
 			case ClaudeCloud:
 				branch = "claude/web-session-" + strings.ToLower(s.ID[len(s.ID)-6:])

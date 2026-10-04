@@ -96,7 +96,7 @@ test("a partial copy comes back amber, with the known problem and what to do", a
   await expect(act).toContainText("1 of 3 messages restored, partial copy kept");
 });
 
-test("a cloud-only module: Copilot's tasks are listed, and only their code comes home", async ({ page }) => {
+test("a cloud-only module: Copilot's tasks are listed, their code comes home, and their log is written into Claude Code", async ({ page }) => {
   const r = await page.request.post("/cloud?cloud=copilot-cloud&title=" + encodeURIComponent("Fix the search index"));
   expect(r.ok()).toBeTruthy();
   const sidebar = page.getByRole("navigation", { name: "Scopes" });
@@ -114,22 +114,38 @@ test("a cloud-only module: Copilot's tasks are listed, and only their code comes
   await expect(task.locator(".chip.st-done")).toHaveText("Done");
   await task.click();
   const details = page.getByRole("complementary", { name: "Cloud session details" });
-  await expect(details.getByRole("button", { name: /Get the code/ })).toBeEnabled();
-  await expect(details.getByRole("button", { name: /Bring here/ })).toHaveCount(0);
-  await expect(details).toContainText("the conversation stays in Copilot cloud agent for now");
+  await expect(details.getByRole("button", { name: "Bring here (Claude Code)" })).toBeEnabled();
+  await expect(details.getByRole("button", { name: "Get the code only" })).toBeEnabled();
+  await expect(details).toContainText("hopsesh writes its messages as a new session of the agent you pick");
 
-  await details.getByRole("button", { name: /Get the code/ }).click();
+  // The code alone, as before.
+  await details.getByRole("button", { name: "Get the code only" }).click();
   const sheet = page.locator("#sheet");
   await expect(sheet.getByRole("heading", { name: "Bring the code of “Fix the search index” here from Copilot cloud agent" })).toBeVisible({ timeout: 30_000 });
   await expect(sheet).toContainText("hopsesh/from/copilot-cloud/fix-the-search-index");
-  await expect(sheet).toContainText("Only the code comes from Copilot cloud agent");
   await sheet.getByRole("button", { name: /Get the code/ }).click();
   await expect(page.locator(".outcome.ok")).toContainText("The code of “Fix the search index” is here", { timeout: 30_000 });
+
+  // The session log, written into Claude Code beside the code.
+  await menu(page, "sessions");
+  await row(page, "Fix the search index").click();
+  await details.getByRole("button", { name: "Bring here (Claude Code)" }).click();
+  await expect(sheet.getByRole("heading", { name: "Bring “Fix the search index” here from Copilot cloud agent" })).toBeVisible({ timeout: 30_000 });
+  await expect(sheet.getByRole("radiogroup", { name: "Write it into" })).toBeVisible();
+  await expect(sheet).toContainText("The messages come back as text; tool calls stay in the cloud.");
+  await expect(sheet).toContainText("hopsesh writes it as a new Claude Code session (2 messages)");
+  await sheet.getByRole("button", { name: /^Bring here/ }).click();
+  const done = page.locator(".outcome.ok");
+  await expect(done).toContainText("“Fix the search index” is here in Claude Code", { timeout: 30_000 });
+  await expect(done).toContainText("2 messages, as text");
+  await expect(done).toContainText("claude --resume");
+  await expect(done).toContainText("Tool calls and their output come only as the session log's text");
 
   await menu(page, "machines");
   await expect(page.getByRole("heading", { name: "Machines" })).toBeVisible();
   const card = page.locator(".cloud-card", { hasText: "Copilot cloud agent" });
-  await expect(card).toContainText("The code (its branch); the conversation stays in the cloud for now", { timeout: 30_000 });
+  await expect(card).toContainText("The messages, as text, and the code", { timeout: 30_000 });
+  await expect(page.locator(".cloud-card", { hasText: "Jules" })).toContainText("The code (its patch, committed on a new branch)");
   // By its heading: "Amp" alone would also match "example" on the Codex cloud card's table.
-  await expect(page.getByRole("region", { name: "Amp", exact: true })).toContainText("Nothing yet: the conversation stays in the cloud", { timeout: 30_000 });
+  await expect(page.getByRole("region", { name: "Amp", exact: true })).toContainText("The messages, as text (no code)", { timeout: 30_000 });
 });
