@@ -39,20 +39,20 @@ func TestPairwiseCoversEveryValidPair(t *testing.T) {
 	}
 }
 
-// Fetch rows start in Claude Code's cloud and come into Claude Code or Codex here; no
-// other row starts in a cloud. The pull-request tier stays small.
-func TestFetchRows(t *testing.T) {
+// Fetch rows start in Claude Code's cloud and come into Claude Code or Codex here; hand-off
+// rows go there from Claude Code or Codex here, and round trips go there and back in
+// Claude Code; no other row involves a cloud. The pull-request tier stays small.
+func TestCloudRows(t *testing.T) {
 	rows := pairwise(1)
-	n := 0
+	n := map[string]int{}
 	for _, r := range rows {
-		if (r.Op == "fetch") != (r.Location == "claude-cloud") || r.Op == "fetch" && r.From != "claude" {
+		if cloudOp(r.Op) != (r.Location == "claude-cloud") || r.Op == "fetch" && r.From != "claude" || r.Op == "handoff" && r.To != "claude" ||
+			r.Op == "cloud-roundtrip" && (r.From != "claude" || r.To != "claude") {
 			t.Fatalf("row %s", r)
 		}
-		if r.Op == "fetch" {
-			n++
-		}
+		n[r.Op]++
 	}
-	if n < 2 || len(rows) > 60 {
-		t.Fatalf("%d fetch rows of %d", n, len(rows))
+	if n["fetch"] < 2 || n["handoff"] < 3 || n["cloud-roundtrip"] < 1 || len(rows) > 70 {
+		t.Fatalf("%v of %d rows", n, len(rows))
 	}
 }
