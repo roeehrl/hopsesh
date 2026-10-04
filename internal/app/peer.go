@@ -149,7 +149,7 @@ func (s *peerSession) planReceive(ctx context.Context, req peer.PlanRequest) (*p
 		return nil, fmt.Errorf("the session's files are larger than %s", move.Human(maxPackage))
 	}
 	s.snap = host.NewSnapshot(pkg.Location, host.Facts{OS: pkg.Facts.OS, Arch: pkg.Facts.Arch, Home: pkg.Facts.Home}, pkg.Files)
-	inv := s.a.Scan(ctx, ScanOptions{Hosts: []string{LocalName()}})
+	inv := s.a.Scan(ctx, ScanOptions{Hosts: []string{LocalName()}, GitFor: s.a.GitFor(Ref{Query: string(pkg.Session.Key.Session)})})
 	in := pkg.Install
 	in.Present = true
 	src := &Machine{Kind: agent.AtMachine, Name: pkg.Location, Status: StatusOK, OS: pkg.Facts.OS, host: s.snap, account: pkg.Account,
@@ -250,7 +250,7 @@ func (a *App) StartPush(ctx context.Context, inv *Inventory, e Entry, to config.
 			}
 			p.Pushed = out
 			if states, err := here.host.GitProbe(ctx, []string{e.Session.CWD}, a.Reg.Worktrees()); err == nil && len(states) == 1 {
-				p.e.Git = &states[0]
+				setGit(&p.e, &states[0], nil)
 			}
 		}
 	}

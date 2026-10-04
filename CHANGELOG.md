@@ -81,6 +81,15 @@ All notable changes to this project are documented here. The format follows
   the long script hopsesh sent there over standard input sometimes never arrived, because
   PowerShell with redirected input can read it first. Such a script is now uploaded over
   SFTP, run from the file and removed.
+- One session folder that git could not read quickly, such as a folder in iCloud Drive
+  whose files are not downloaded, made every scan wait for it, and with it `hopsesh ls`,
+  `plan`, `pull` and `handoff`, sometimes for minutes. Each git call hopsesh makes to read a
+  folder now gets 20 seconds to answer (30 seconds on another machine over SSH), on macOS,
+  Linux and Windows; a folder that is slow but answers is still read in full. A folder
+  where git does not answer in time is reported as such, not as one without a repository:
+  moving or handing off that session stops and says why, and the other sessions are not
+  affected. `pull`, `plan`, `handoff`, `push` and `show` now ask git only about the folders
+  of the session they name.
 
 ### Changed
 - The macOS app's self-update opens the new disk image with `diskutil image attach` (on

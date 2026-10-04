@@ -6,10 +6,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/roeehrl/hopsesh/internal/core/proc"
 )
@@ -49,6 +51,9 @@ type GitState struct {
 	MainBranch     string     `json:"mainBranch,omitempty"`
 	Worktrees      []Worktree `json:"worktrees,omitempty"`
 	RootCommit     string     `json:"rootCommit,omitempty"`
+	// Error says why git could not read the folder (it did not answer in time); every other
+	// field is then unknown, which is not the same as "no repository".
+	Error string `json:"error,omitempty"`
 }
 
 // BranchCheckedOutElsewhere returns the path of another worktree that has Branch checked
@@ -77,46 +82,106 @@ func samePath(a, b string) bool {
 	return strings.TrimRight(a, `/\`) == strings.TrimRight(b, `/\`)
 }
 
-// ProbeScript returns a POSIX sh script that prints the git state of each directory in a
+// ProbeTimeout is how long one git call may go without answering when hopsesh reads a
+// folder on this machine; RemoteProbeTimeout, on another machine over SSH. A folder whose
+// files are offloaded to a cloud drive (iCloud Drive, OneDrive) or on a stuck disk can
+// keep git waiting for minutes; past the limit the folder is reported as unreadable
+// (GitState.Error) and the probe goes on to the next one. The limit is per git call, so a
+// folder that is slow but answers (a cold disk, a large repository) is never cut off as
+// long as each call returns in time. Variables only so tests can shorten them.
+var (
+	ProbeTimeout       = 20 * time.Second
+	RemoteProbeTimeout = 30 * time.Second
+)
+
+// seconds is a limit in whole seconds (at least 1), what sh's sleep accepts.
+func seconds(limit time.Duration) int {
+	return max(1, int(math.Ceil(limit.Seconds())))
+}
+
+// TimeoutError is a folder's Error when git did not answer in time.
+func TimeoutError(seconds string) string {
+	return "git did not answer within " + seconds + " seconds; the folder may be offloaded to iCloud or OneDrive, or on a slow disk"
+}
+
+// probeScript is a POSIX sh script that prints the git state of each directory in a
 // line-oriented format parsed by ParseProbe. One script per host keeps it to a single
 // SSH round trip. Directories are passed as positional arguments after "--".
+//
+// Each folder is probed in a background subshell writing to a temporary file. Every git
+// call ticks a second file as it returns, and a watchdog kills the subshell once no tick
+// has come for the limit; a folder that runs out of time prints "timeout" instead of its
+// partial output. Only sh, sleep, kill, wc and mktemp are needed (no timeout(1), which
+// macOS lacks). A git that cannot be killed (waiting on a cloud drive) is left behind,
+// holding none of the script's output, so the script still ends.
 const probeScript = `
-for d in "$@"; do
-  printf '@@dir\t%s\n' "$d"
-  if [ ! -d "$d" ]; then printf 'exists\t0\n'; continue; fi
+hp_git() { git "$@"; hp_rc=$?; printf . >&3; return $hp_rc; }
+hp_one() {
+  d=$1
+  if [ ! -d "$d" ]; then printf 'exists\t0\n'; return 0; fi
   printf 'exists\t1\n'
-  top=$(git -C "$d" rev-parse --show-toplevel 2>/dev/null) || { printf 'repo\t0\n'; continue; }
+  top=$(hp_git -C "$d" rev-parse --show-toplevel 2>/dev/null) || { printf 'repo\t0\n'; return 0; }
   printf 'repo\t1\ntop\t%s\n' "$top"
-  printf 'branch\t%s\n' "$(git -C "$d" branch --show-current 2>/dev/null)"
-  printf 'head\t%s\n' "$(git -C "$d" rev-parse --short HEAD 2>/dev/null)"
-  r=$(git -C "$d" remote 2>/dev/null | head -n1)
-  [ -n "$r" ] && printf 'remote\t%s\n' "$(git -C "$d" config --get "remote.$r.url" 2>/dev/null)"
-  up=$(git -C "$d" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)
+  printf 'branch\t%s\n' "$(hp_git -C "$d" branch --show-current 2>/dev/null)"
+  printf 'head\t%s\n' "$(hp_git -C "$d" rev-parse --short HEAD 2>/dev/null)"
+  r=$(hp_git -C "$d" remote 2>/dev/null | head -n1)
+  [ -n "$r" ] && printf 'remote\t%s\n' "$(hp_git -C "$d" config --get "remote.$r.url" 2>/dev/null)"
+  up=$(hp_git -C "$d" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)
   if [ -n "$up" ]; then
     printf 'upstream\t%s\n' "$up"
-    printf 'aheadbehind\t%s\n' "$(git -C "$d" rev-list --left-right --count '@{u}...HEAD' 2>/dev/null)"
+    printf 'aheadbehind\t%s\n' "$(hp_git -C "$d" rev-list --left-right --count '@{u}...HEAD' 2>/dev/null)"
   else
-    printf 'unpushed\t%s\n' "$(git -C "$d" rev-list --count HEAD --not --remotes 2>/dev/null)"
+    printf 'unpushed\t%s\n' "$(hp_git -C "$d" rev-list --count HEAD --not --remotes 2>/dev/null)"
   fi
-  printf 'dirty\t%s\n' "$(git -C "$d" status --porcelain -- ':/'@EXCLUDES@ 2>/dev/null | wc -l | tr -d ' ')"
-  gd=$(git -C "$d" rev-parse --absolute-git-dir 2>/dev/null)
-  cd_=$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
-  [ -z "$cd_" ] && cd_=$(cd "$d" && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd)
+  printf 'dirty\t%s\n' "$(hp_git -C "$d" status --porcelain -- ':/'@EXCLUDES@ 2>/dev/null | wc -l | tr -d ' ')"
+  gd=$(hp_git -C "$d" rev-parse --absolute-git-dir 2>/dev/null)
+  cd_=$(hp_git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+  [ -z "$cd_" ] && cd_=$(cd "$d" && cd "$(hp_git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd)
   printf 'gitdir\t%s\ncommondir\t%s\n' "$gd" "$cd_"
-  printf 'root\t%s\n' "$(git -C "$d" rev-list --max-parents=0 HEAD 2>/dev/null | tail -n1)"
-  git -C "$d" worktree list --porcelain 2>/dev/null | sed 's/^/wt\t/'
+  printf 'root\t%s\n' "$(hp_git -C "$d" rev-list --max-parents=0 HEAD 2>/dev/null | tail -n1)"
+  hp_git -C "$d" worktree list --porcelain 2>/dev/null | sed 's/^/wt\t/'
+}
+hp_limit=@LIMIT@
+hp_tmp=$(mktemp -d 2>/dev/null) || { hp_tmp=${TMPDIR:-/tmp}/hopsesh-probe.$$; mkdir -m 700 "$hp_tmp" 2>/dev/null || hp_tmp=; }
+hp_n=0
+for d in "$@"; do
+  printf '@@dir\t%s\n' "$d"
+  if [ -z "$hp_tmp" ]; then hp_one "$d" 3>/dev/null; continue; fi
+  hp_n=$((hp_n + 1)); hp_o=$hp_tmp/$hp_n
+  ( hp_one "$d"; : >"$hp_o.ok" ) >"$hp_o" 3>"$hp_o.tick" 2>/dev/null </dev/null &
+  hp_p=$!
+  (
+    trap 'kill $hp_s 2>/dev/null; exit 0' TERM
+    hp_idle=0; hp_last=
+    while :; do
+      sleep 1 & hp_s=$!; wait $hp_s
+      hp_now=$(wc -c <"$hp_o.tick" 2>/dev/null)
+      if [ "$hp_now" = "$hp_last" ]; then hp_idle=$((hp_idle + 1)); else hp_last=$hp_now; hp_idle=0; fi
+      if [ "$hp_idle" -ge "$hp_limit" ]; then kill -9 $hp_p 2>/dev/null; exit 0; fi
+    done
+  ) >/dev/null 2>&1 </dev/null &
+  hp_w=$!
+  wait $hp_p 2>/dev/null
+  kill $hp_w 2>/dev/null; wait $hp_w 2>/dev/null
+  if [ -f "$hp_o.ok" ]; then cat "$hp_o"; else printf 'timeout\t%s\n' "$hp_limit"; fi
+  rm -f "$hp_o" "$hp_o.ok" "$hp_o.tick"
 done
+[ -n "$hp_tmp" ] && rm -rf "$hp_tmp"
+exit 0
 `
 
 // ProbeScript returns the shell program and its arguments for the given directories.
 // excl are agent-managed worktree folders (".claude/worktrees") that never count as
-// uncommitted changes.
-func ProbeScript(dirs, excl []string) (script string, args []string) {
+// uncommitted changes; limit is how long one git call may go without answering
+// (ProbeTimeout or RemoteProbeTimeout).
+func ProbeScript(dirs, excl []string, limit time.Duration) (script string, args []string) {
 	var b strings.Builder
 	for _, p := range excludes(excl) {
 		b.WriteString(" '" + strings.ReplaceAll(p, "'", `'"'"'`) + "'")
 	}
-	return strings.Replace(probeScript, "@EXCLUDES@", b.String(), 1), append([]string{"--"}, dirs...)
+	script = strings.Replace(probeScript, "@EXCLUDES@", b.String(), 1)
+	script = strings.Replace(script, "@LIMIT@", strconv.Itoa(seconds(limit)), 1)
+	return script, append([]string{"--"}, dirs...)
 }
 
 // excludes turns agent worktree folders into git pathspecs.
@@ -178,6 +243,15 @@ func ParseProbe(out []byte, excl []string) []GitState {
 			finish()
 			cur = &GitState{Dir: v}
 			gitDir, commonDir = "", ""
+		case "timeout", "error":
+			// Whatever the folder printed before is incomplete: keep only the reason.
+			wt, gitDir, commonDir = nil, "", ""
+			if cur != nil {
+				*cur = GitState{Dir: cur.Dir, Error: v}
+				if k == "timeout" {
+					cur.Error = TimeoutError(v)
+				}
+			}
 		case "exists":
 			cur.Exists = v == "1"
 		case "repo":
@@ -264,8 +338,11 @@ func ProbeLocal(ctx context.Context, dirs, excl []string) ([]GitState, error) {
 	if err != nil {
 		return nil, err
 	}
-	script, args := ProbeScript(dirs, excl)
+	script, args := ProbeScript(dirs, excl, ProbeTimeout)
 	cmd := proc.CommandContext(ctx, sh, append([]string{"-c", script, "hopsesh-probe"}, args[1:]...)...)
+	// The script leaves a git it could not stop behind; should one still hold the output
+	// open, stop waiting for it shortly after the shell has ended.
+	cmd.WaitDelay = 2 * time.Second
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git probe: %w", err)

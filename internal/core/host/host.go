@@ -237,13 +237,13 @@ func (m *Machine) GitProbe(ctx context.Context, dirs, excl []string) ([]repos.Gi
 		return repos.ProbeLocal(ctx, dirs, excl)
 	}
 	if m.Facts.OS == "windows" {
-		out, err := m.Conn.RunPowerShell(ctx, repos.PowerShellProbe(dirs, excl))
+		out, err := m.Conn.RunPowerShell(ctx, repos.PowerShellProbe(dirs, excl, repos.RemoteProbeTimeout))
 		if err != nil {
 			return nil, err
 		}
 		return repos.WindowsPaths(repos.ParseProbe(out, excl)), nil
 	}
-	script, args := repos.ProbeScript(dirs, excl)
+	script, args := repos.ProbeScript(dirs, excl, repos.RemoteProbeTimeout)
 	out, err := m.Conn.RunSh(ctx, script, args[1:]...)
 	if err != nil {
 		return nil, err

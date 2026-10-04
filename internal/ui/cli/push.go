@@ -73,7 +73,7 @@ func push(cmd *cobra.Command, refArg, machine string) error {
 		return errors.New("push sends a session from this machine; to bring one here from elsewhere, use pull")
 	}
 	ref.Machine = ""
-	inv := r.scan(cmd, "local", false)
+	inv := r.scanFor(cmd, "local", ref)
 	defer inv.Close()
 	e, err := inv.Find(ref)
 	if err != nil {

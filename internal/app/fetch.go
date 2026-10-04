@@ -68,6 +68,9 @@ func (a *App) Paste(ctx context.Context, link, checkout string) (Pasted, error) 
 	p := Pasted{Cloud: cl, ID: id, Time: time.Now().UTC()}
 	if checkout != "" {
 		states, err := repos.ProbeLocal(ctx, []string{checkout}, a.Reg.Worktrees())
+		if err == nil && len(states) == 1 && states[0].Error != "" {
+			return Pasted{}, fmt.Errorf("hopsesh could not read %s: %s", checkout, states[0].Error)
+		}
 		if err != nil || len(states) == 0 || !states[0].IsRepo {
 			return Pasted{}, fmt.Errorf("%s is not a git checkout", checkout)
 		}
