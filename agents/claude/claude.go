@@ -373,8 +373,14 @@ func (m *Module) Resume(in agent.Install, key agent.SessionKey, p agent.Placemen
 	if o.Prompt != "" {
 		argv = append(argv, o.Prompt)
 	}
-	return agent.Command{Argv: argv, Dir: p.CWD}
+	return agent.Command{Argv: argv, Dir: p.CWD, Unset: sessionMarkers}
 }
+
+// sessionMarkers are variables a Claude Code session sets for the programs it starts. A
+// terminal opened from inside one (or a terminal app started from one) passes them on, and
+// a resumed session then believes it is a child: with CLAUDE_CODE_CHILD_SESSION it saves
+// no transcript at all. A session hopsesh resumes is never anyone's child.
+var sessionMarkers = []string{"CLAUDE_CODE_CHILD_SESSION", "CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_ENTRYPOINT"}
 
 // NotifyInstruction asks the resumed session to message the old one through Remote
 // Control's cross-session messaging.

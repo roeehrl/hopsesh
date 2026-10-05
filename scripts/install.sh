@@ -45,7 +45,7 @@ base="https://github.com/$REPO/releases/download/$tag"
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-say "Downloading hopsesh $version for $os/$arch…"
+say "Downloading hopsesh $version for $os/${arch}…"
 curl -fsSL -o "$tmp/$archive" "$base/$archive" || die "no $archive in release $tag"
 curl -fsSL -o "$tmp/checksums.txt" "$base/checksums.txt" || die "release $tag has no checksums.txt"
 

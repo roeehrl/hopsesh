@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Fixed
+- The install script (`curl … | sh`) failed on macOS in a terminal with a UTF-8 locale
+  ("arch…: unbound variable"): macOS's /bin/sh read the "…" after `$arch` as part of the
+  name.
+- With hopsesh's settings or state in other folders (`HOPSESH_CONFIG_DIR`,
+  `HOPSESH_STATE_DIR`), a session or step opened in iTerm2 or Terminal couldn't find its
+  launch: the terminal app doesn't pass on hopsesh's environment. hopsesh now passes the
+  folders to the tab itself.
+- A Claude Code session resumed in a terminal that a Claude Code session had started
+  (directly or through the terminal app) inherited its CLAUDE_CODE_CHILD_SESSION marker,
+  and Claude Code then saved nothing of it. hopsesh now removes Claude Code's session
+  markers before it resumes a session.
+
 ### Added
 - Your terminal app: sessions, teleports and hand-off steps the app opens go to a new tab in
   iTerm2's front window when iTerm2 is installed (else a Terminal window; Windows Terminal on

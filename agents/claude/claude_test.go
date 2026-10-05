@@ -3,6 +3,7 @@ package claude
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -167,5 +168,16 @@ func TestResume(t *testing.T) {
 	c := New().Resume(agent.Install{}, agent.SessionKey{Agent: id, Session: "x"}, agent.Placement{CWD: "/r"}, agent.ResumeOptions{Fork: true, RemoteControl: true, Name: "fix@laptop"})
 	if strings.Join(c.Argv, " ") != "claude --resume x --fork-session --remote-control fix@laptop" || c.Dir != "/r" {
 		t.Fatalf("%+v", c)
+	}
+}
+
+// A resumed session must not inherit the markers of a Claude Code session that started the
+// terminal: with CLAUDE_CODE_CHILD_SESSION it would save no transcript.
+func TestResumeDropsSessionMarkers(t *testing.T) {
+	c := New().Resume(agent.Install{}, agent.SessionKey{Session: "s1"}, agent.Placement{CWD: "/w"}, agent.ResumeOptions{})
+	for _, v := range []string{"CLAUDE_CODE_CHILD_SESSION", "CLAUDECODE"} {
+		if !slices.Contains(c.Unset, v) {
+			t.Errorf("resume keeps %s: %v", v, c.Unset)
+		}
 	}
 }
