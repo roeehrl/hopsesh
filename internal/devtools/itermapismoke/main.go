@@ -116,7 +116,7 @@ func main() {
 
 	if here.SessionID != "" {
 		split, err := c.OpenSplit(ctx, here.SessionID, iterm2api.SplitRight, iterm2api.Launch{Command: iterm2api.QuoteArgv([]string{"sh", "-c", "sleep 10"})})
-		if step("open a split beside this tab (closes itself after 4 s)", err) {
+		if step("open a split beside this tab (closes itself after 10 s)", err) {
 			step("label the split (user.hopsesh_title)", c.SetLabels(ctx, split.SessionID, map[string]string{"title": "hopsesh smoke"}))
 			step("terminate event for the split", waitTerminated(ctx, c, split.SessionID, time.Minute))
 		}
