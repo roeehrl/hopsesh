@@ -146,11 +146,29 @@ installs it and reopens.
   <img src="docs/assets/windows-app-light.png" alt="The hopsesh app on Windows listing Claude Code and Codex sessions from this PC and from studio, a Linux machine, grouped by repository" width="900">
 </picture>
 
+### The hopsesh Terminal
+
+The app has a terminal of its own: a **hopsesh Terminal** window with tabs. **Resume here**
+runs a session there, and so do the steps Claude Code needs a terminal for (a hand-off to its
+cloud, bringing a session back), cloud sign-ins and **Open a shell here**. hopsesh starts the
+command; you do all the typing, and it never answers a question for you, Claude Code's trust
+question included. Each tab shows whether its program runs, waits for you or ended (with its
+exit code), and keeps **Open in my terminal**, which ends it and runs the same command in your
+own terminal app. Ctrl+` moves between the terminal and your sessions. Quitting hopsesh ends
+the programs in its tabs, so it asks first; for work that must outlive the app, use your
+terminal app.
+
+Settings → Terminal chooses where sessions and steps open (**In this window**, **In my
+terminal** or **Ask each time**), the font, its size and how much scrollback each tab keeps
+(in memory only). Programs in a tab can never read your clipboard, links open only after you
+confirm the whole address, and nothing a tab shows is written to disk or a log. Sign-in and
+shell tabs are recorded nowhere: hopsesh doesn't watch, match or keep what appears in them.
+
 ### Your terminal app
 
-Sessions, teleports and hand-off steps open in your own terminal app: on macOS a new tab in
-iTerm2's front window when iTerm2 is installed (else a Terminal window), on Windows Windows
-Terminal. `hopsesh open <session>` does the same from the command line (`--here` runs it in
+Sessions, teleports and hand-off steps you open outside the app go to your own terminal
+app: on macOS a new tab in iTerm2's front window when iTerm2 is installed (else a Terminal
+window), on Windows Windows Terminal. `hopsesh open <session>` does the same from the command line (`--here` runs it in
 this terminal), and `hopsesh terminals` lists the apps and picks one (`--use terminal-app`).
 In iTerm2 the tab gets a badge with the session's title, agent and machine (and
 `user.hopsesh_*` variables for your own title or status bar); hopsesh leaves the tab's
@@ -300,8 +318,9 @@ remembers your pick for the repository (`hopsesh clouds env codex-cloud`).
 ### Claude Code's steps in your terminal
 
 Claude Code starts a cloud session, and copies one home, only in a terminal you can answer,
-so both steps run in yours (the app opens a terminal window; the terminal UI hands its
-terminal over and comes back). Starting one runs `claude --cloud "<briefing>"` in hopsesh's
+so both steps run in one you see: a tab of the app's hopsesh Terminal window (or your own
+terminal app, if you chose it in Settings → Terminal), or the terminal UI's own terminal,
+which it hands over and comes back to. Starting one runs `claude --cloud "<briefing>"` in hopsesh's
 hand-off folder for the repository. The first time, Claude Code asks whether you trust that
 folder: you answer it, once per repository, and hopsesh never answers it or changes Claude
 Code's settings to skip it. hopsesh only reads the session's link Claude Code prints, and asks

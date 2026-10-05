@@ -20,6 +20,8 @@ type unixTerm struct {
 	closeOnce sync.Once
 }
 
+func bundledConsole(string) bool { return false }
+
 func start(argv []string, dir string, env []string, cols, rows int, _ string) (backend, error) {
 	p, err := xpty.NewUnixPty(cols, rows)
 	if err != nil {

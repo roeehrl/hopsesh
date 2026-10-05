@@ -54,6 +54,7 @@ func (a *App) openLaunch(l app.Launch) error {
 		return err
 	}
 	a.noteOpened(o)
+	a.watchLaunch(o, l)
 	return nil
 }
 
@@ -103,8 +104,12 @@ type TabDTO struct {
 	Terminal string `json:"terminal"` // its name: "iTerm2"
 }
 
-// EntryTab finds the tab a session on this machine runs in (nil: none hopsesh can show).
+// EntryTab finds the tab a session on this machine runs in (nil: none hopsesh can show):
+// one of the hopsesh Terminal window's, or one in the user's terminal app.
 func (a *App) EntryTab(machine, key string) (*TabDTO, error) {
+	if a.Terms != nil && a.Terms.liveSessionTab(machine, key) != "" {
+		return &TabDTO{Terminal: TerminalTitle}, nil
+	}
 	f, ok, err := a.entryTab(machine, key)
 	if err != nil || !ok {
 		return nil, err
@@ -115,6 +120,12 @@ func (a *App) EntryTab(machine, key string) (*TabDTO, error) {
 // ShowEntry brings forward the tab a session on this machine runs in, and returns the
 // terminal's name.
 func (a *App) ShowEntry(machine, key string) (string, error) {
+	if a.Terms != nil {
+		if id := a.Terms.liveSessionTab(machine, key); id != "" {
+			a.Terms.Focus(id)
+			return TerminalTitle, nil
+		}
+	}
 	f, ok, err := a.entryTab(machine, key)
 	if err != nil {
 		return "", err

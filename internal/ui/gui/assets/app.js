@@ -10,10 +10,24 @@ import "./machines.js";
 import "./settings.js";
 import { undoLast } from "./activity.js";
 import { openPalette } from "./palette.js";
+import { loadTabs, onTabs, showTerminal, tabs, exits } from "./term.js";
+import { render as renderSessions } from "./sessions.js";
 
 $("#btn-search").onclick = openPalette;
 $("#btn-refresh").onclick = () => go("sessions", true);
 $("#btn-settings").onclick = () => go("settings");
+$("#btn-terminal").onclick = () => showTerminal();
+// A tab's state shows on its session's row and in the sidebar: drawn again when what they
+// show changes (not on every output), keeping the focus on the selected row.
+let shownTabs = "";
+onTabs(() => {
+  const sig = JSON.stringify([[...tabs.values()].map((t) => [t.kind, t.machine, t.key, t.attention, t.state === "exited"]), [...exits.values()].map((x) => [x.key, x.code])]);
+  if (sig === shownTabs || current !== "sessions") { shownTabs = sig; return; }
+  shownTabs = sig;
+  const onRow = document.activeElement?.classList?.contains("row");
+  renderSessions();
+  if (onRow) view.querySelector('.row[aria-selected="true"]')?.focus();
+});
 
 // The app menu (and its shortcuts) sends these.
 on("hopsesh:menu", menuCommand);
@@ -102,6 +116,7 @@ function configError() {
   try { state.info = await api("Info"); } catch (e) { fill(view, h("div", { class: "loading err" }, errText(e))); return; }
   setSystem(state.info.os, state.info.terminal);
   if (state.info.configError) { configError(); return; }
+  await loadTabs();
   await go("sessions", true);
   if (state.info.updateCheck === "on") {
     try { state.update = await api("CheckUpdate"); } catch { return; } // offline

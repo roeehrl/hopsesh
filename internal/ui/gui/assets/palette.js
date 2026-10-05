@@ -3,6 +3,7 @@ import { api, h, fill, icon, ICONS, state, go, current, toast, fail, agentBadge,
 import { pickHandoff } from "./handoff.js";
 import { actionsFor, statusOf, render as renderSessions, pasteDialog } from "./sessions.js";
 import { undoLast } from "./activity.js";
+import { showTerminal, openShell } from "./term.js";
 
 const pal = $("#palette");
 let items = [], sel = 0;
@@ -24,6 +25,11 @@ function commands() {
     { label: "Refresh: read every machine again", hint: keys("mod+R"), run: () => go("sessions", true) },
     { label: "Undo the last hop", hint: keys("mod+alt+Z"), run: undoLast },
     { label: "Add a machine", run: () => go("machines") },
+    { label: "Terminal: show the hopsesh Terminal window", hint: sys.mac ? "⌃`" : "Ctrl+`", run: () => showTerminal() },
+    { label: "Terminal: open a shell", sub: selected() && !selected().cloud && selected().machine === here() ? `in “${selected().title}”'s folder` : "in your home folder",
+      run: () => openShell(selected() && !selected().cloud && selected().machine === here() ? selected() : null) },
+    { label: `Terminal: turn screen reader mode ${state.terminalReader ? "off" : "on"}`, run: toggleReader },
+    { label: "Settings: Terminal", run: () => go("settings", "terminal") },
     ...handOff(),
     ...(clouds().some((c) => c.fetchable) ? [
       { label: "Bring from cloud…", sub: clouds().filter((c) => c.fetchable).map((c) => c.title).join(", "), run: bringFromCloud },
@@ -37,6 +43,18 @@ function commands() {
     { label: "Settings: the command-line tool", run: () => go("settings", "cli") },
     { label: "Settings: updates", run: () => go("settings", "updates") },
   ];
+}
+
+// toggleReader turns the terminal's screen reader mode on or off.
+async function toggleReader() {
+  try {
+    const t = await api("TerminalSettings");
+    const on = !(t.screenReader === "on");
+    await api("SetTerminalSettings", { app: t.app, where: t.where, font: t.font, fontSize: t.fontSize, scrollback: t.scrollback, keepTabs: t.keepTabs,
+      notify: t.notify, screenReader: on ? "on" : "off", systemConsole: t.systemConsole });
+    state.terminalReader = on;
+    toast(`The terminal's screen reader mode is ${on ? "on" : "off"}`);
+  } catch (e) { fail(e); }
 }
 
 // handOff is "Hand off to…" for the selected session (or the newest one), when it can go

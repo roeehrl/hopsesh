@@ -1,6 +1,10 @@
 // The Machines screen: this machine (and whether it receives sessions), the machines you
 // added, and the ones discovery found. hopsesh connects only to machines you added.
-import { api, h, fill, icon, ICONS, view, state, screen, go, loading, toast, fail, errText, cap, dialog, ask, machineStatus, sys, when } from "./core.js";
+import { api, h, fill, icon, ICONS, view, state, screen, go, loading, toast, fail, errText, cap, dialog, ask, machineStatus, sys, when, current } from "./core.js";
+import { signIn, onSignedIn } from "./term.js";
+
+// A sign-in tab ended well: the card shows the new check.
+onSignedIn(() => { if (current === "machines") reload(); });
 
 let data = null;
 let changed = false; // machines changed since the last scan
@@ -104,8 +108,15 @@ function cloudCard(c) {
         fill(result, h("span", { class: "muted" }, "Checking…"));
         try { await api("TestCloud", c.name); } catch (e) { fill(result, h("span", { class: "err" }, errText(e))); btn.disabled = false; return; }
         reload();
-      } }, "Test"), result));
+      } }, "Test"), result,
+      c.signIn ? h("span", { class: "spacer" }) : null,
+      c.signIn ? h("button", { class: "btn" + (signedOut(c) ? " primary" : ""), title: `Runs ${c.signIn} in a tab that records nothing`, onclick: () => signIn(c) }, signedOut(c) ? "Sign in" : "Sign in again") : null,
+      c.signIn ? h("button", { class: "btn", title: `Runs ${c.signIn} in ${sys.terminal}`, onclick: () => signIn(c, "terminal") }, `Sign in in ${sys.terminal}`) : null),
+    c.signIn ? h("span", { class: "muted", style: "font-size:12px" }, "Signing in runs ", h("span", { class: "mono" }, c.signIn), ": it happens in that command, never in hopsesh, and nothing in its tab is recorded.") : null);
 }
+
+// signedOut: the cloud's login is missing or failed its last check.
+const signedOut = (c) => c.status === "signed-out" || (c.test && !c.test.ok && !c.test.account);
 
 async function setEnv(c, r, v) {
   try { await api("SetCloudEnvironment", c.name, r.repo, v); } catch (e) { fail(e); return; }
@@ -182,7 +193,7 @@ function render() {
       h("div", { class: "card-h" }, h("span", { class: "name" }, "Found on your network"), h("span", { class: "muted", style: "font-size:12px" }, "From Tailscale and ~/.ssh/config. Nothing is contacted until you add it.")),
       d.found.length ? d.found.map(foundRow) : h("div", { class: "empty" }, "No other machines found. Add one by its address.")),
     d.clouds.length ? [h("div", { style: "display:flex;flex-direction:column;gap:4px;margin-top:8px" }, h("h2", { style: "margin:0;font-size:17px" }, "Clouds"),
-      h("span", { class: "muted", style: "font-size:12.5px" }, "hopsesh reaches each cloud through that agent's own command, signed in as you. Nothing goes to a cloud you haven't allowed.")),
+      h("span", { class: "muted", style: "font-size:12.5px" }, "hopsesh reaches each cloud through that agent's own command, signed in as you. Signing in happens in that command, never in hopsesh. Nothing goes to a cloud you haven't allowed.")),
       h("div", { class: "cloud-cards" }, d.clouds.map(cloudCard))] : null)));
 }
 

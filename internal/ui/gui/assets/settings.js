@@ -1,5 +1,6 @@
-// The Settings screen, in tabs: General, Agents, Skill, Command line, Updates.
-import { api, h, fill, view, state, screen, go, loading, toast, fail, dialog, agentBadge, sys, cliHow } from "./core.js";
+// The Settings screen, in tabs: General, Agents, Terminal, Skill, Command line, Updates.
+import { api, h, fill, view, state, screen, go, loading, toast, fail, dialog, agentBadge, sys, cliHow, icon, ask, count, current } from "./core.js";
+import { running } from "./term.js";
 
 const SKILL_TEXT = {
   absent: ["Not installed", "st-ended"],
@@ -104,6 +105,74 @@ function agents() {
   });
 }
 
+// terminal is Settings → Terminal: where sessions and steps open, the user's terminal app,
+// and the hopsesh Terminal window.
+let ts = null;
+async function setTerm(patch) {
+  const next = Object.assign({ app: ts.app, where: ts.where, font: ts.font, fontSize: ts.fontSize, scrollback: ts.scrollback, keepTabs: ts.keepTabs,
+    notify: ts.notify, screenReader: ts.screenReader, systemConsole: ts.systemConsole }, patch);
+  try { await api("SetTerminalSettings", next); toast("Saved"); } catch (e) { fail(e); }
+  ts = await api("TerminalSettings").catch(() => ts);
+  state.info = await api("Info").catch(() => state.info);
+  if (current === "settings") render(); // unless the user went on meanwhile
+}
+function seg(label, value, choices, onpick) {
+  return h("div", { class: "seg", role: "radiogroup", "aria-label": label },
+    choices.map(([v, text]) => h("button", { role: "radio", "aria-checked": value === v ? "true" : "false", onclick: () => onpick(v) }, text)));
+}
+const SHIELD = "M12 3 5 6v6c0 4.2 2.9 7.6 7 9 4.1-1.4 7-4.8 7-9V6z";
+function terminal() {
+  if (!ts) return [h("div", { class: "loading", role: "status" }, "Reading the terminal settings…")];
+  const name = ts.name || sys.terminal;
+  const installed = (ts.apps || []).filter((a) => a.installed);
+  const iterm = installed.some((a) => a.id === "iterm2");
+  const sw = (key, label, desc) => h("label", { class: "opt" }, h("input", { type: "checkbox", checked: ts[key], onchange: (e) => setTerm({ [key]: e.target.checked }) }),
+    h("span", {}, h("b", {}, label), h("span", { class: "muted" }, desc)));
+  return [
+    h("span", { class: "muted", style: "font-size:12.5px" }, "Where hopsesh runs Claude Code, Codex and your shell when you resume, bring back, hand off or sign in."),
+    card(h("span", { class: "sec-h" }, "Where sessions open"),
+      h("div", { class: "set-row" }, title("Resume sessions, hand-offs and bring-backs", `Hand-offs, bring-backs and sign-ins use this window unless you choose ${name}, because hopsesh needs to see how they end. Every tab keeps Open in my terminal.`),
+        seg("Where sessions open", ts.where, [["here", "In this window"], ["terminal", `In ${name}`], ["ask", "Ask each time"]], (v) => setTerm({ where: v }))),
+      h("span", { class: "muted", style: "font-size:12px" }, ts.where === "terminal" ? `${name} keeps running after hopsesh quits.` : "In this window: a tab of the hopsesh Terminal window, which ends when hopsesh quits."),
+      h("div", { class: "set-row" }, title("My terminal", `Where Open in my terminal goes. Now: ${ts.name}.`),
+        h("select", { "aria-label": "My terminal", onchange: (e) => setTerm({ app: e.target.value }) },
+          h("option", { value: "", selected: !ts.app }, `Automatic (${ts.name})`),
+          installed.map((a) => h("option", { value: a.id, selected: ts.app === a.id }, a.name)))),
+      iterm ? h("span", { class: "muted", style: "font-size:12px" }, "iTerm2: hopsesh opens a new tab in its front window, labels it with the session, and shows a session's tab instead of opening it twice. It never types into iTerm2 or reads it.") : null,
+      sw("keepTabs", "Keep tabs when the window closes", "Closing the window only hides it, and the programs keep running. Quitting hopsesh ends every program in its tabs; hopsesh asks first. For work that must outlive hopsesh, use Open in my terminal."),
+      sw("notify", "Tell me when a program waits for me", sys.mac
+        ? "A notification when a tab you can't see waits for your answer. hopsesh writes the text; it never shows what the program printed. Claude Code tells hopsesh it's waiting only if you turn on its terminal bell (/config → Notifications); hopsesh never changes Claude Code's settings for you."
+        : "The terminal's taskbar button flashes when a tab you can't see waits for your answer. Claude Code tells hopsesh it's waiting only if you turn on its terminal bell (/config → Notifications).")),
+    card(h("span", { class: "sec-h" }, "Look"),
+      h("div", { class: "set-row" }, title("Font", "Fonts with box-drawing characters draw Claude Code and Codex best. Empty: the system's monospace font."),
+        h("input", { class: "field", "aria-label": "Font", list: "term-fonts", value: ts.font, placeholder: sys.mac ? "SF Mono" : sys.win ? "Cascadia Mono" : "monospace", onchange: (e) => setTerm({ font: e.target.value.trim() }) }),
+        h("datalist", { id: "term-fonts" }, ["SF Mono", "Menlo", "Monaco", "Cascadia Mono", "Cascadia Code", "Consolas", "JetBrains Mono", "Fira Code", "IBM Plex Mono", "Source Code Pro"].map((f) => h("option", { value: f })))),
+      h("div", { class: "set-row" }, title("Size", `${sys.mac ? "⌘= and ⌘-" : "Ctrl+= and Ctrl+-"} in the terminal change it too.`),
+        h("select", { "aria-label": "Font size", onchange: (e) => setTerm({ fontSize: Number(e.target.value) }) },
+          Array.from({ length: 16 }, (_, i) => i + 9).map((n) => h("option", { value: n, selected: ts.fontSize === n }, `${n} pt`)))),
+      h("div", { class: "set-row" }, title("Colours", "Follow the app's light or dark look. Programs that ask for the background colour get the real one, so Claude Code and Codex pick a matching theme."),
+        h("span", { class: "muted" }, "Follow the app")),
+      h("div", { class: "set-row" }, title("Scrollback", "Kept in memory only, and gone when the tab closes."),
+        h("select", { "aria-label": "Scrollback", onchange: (e) => setTerm({ scrollback: Number(e.target.value) }) },
+          (ts.scrollbacks || []).map((n) => h("option", { value: n, selected: ts.scrollback === n }, `${n.toLocaleString("en")} lines`))))),
+    card(h("span", { class: "sec-h" }, "Accessibility"),
+      h("div", { class: "set-row" }, title("Screen reader mode", `Makes the terminal's text readable line by line and announces new output. Automatic turns it on while ${sys.mac ? "VoiceOver" : sys.win ? "Narrator or another screen reader" : "a screen reader"} runs.`),
+        seg("Screen reader mode", ts.screenReader, [["", "Automatic"], ["on", "On"], ["off", "Off"]], (v) => setTerm({ screenReader: v })))),
+    sys.win ? card(h("span", { class: "sec-h" }, "On Windows"),
+      h("label", { class: "opt" }, h("input", { type: "checkbox", checked: !ts.systemConsole, disabled: !ts.bundled, onchange: (e) => setTerm({ systemConsole: !e.target.checked }) }),
+        h("span", {}, h("b", {}, "Use the bundled console host (recommended)"), h("span", { class: "muted" }, ts.bundled
+          ? "hopsesh carries Microsoft's newer console host for its tabs; Claude Code and Codex draw correctly with it. Turn it off only if a security tool blocks it."
+          : "This copy of hopsesh has no bundled console host, so tabs use Windows' own.")))) : null,
+    card(h("span", { class: "sec-h" }, "Safety"),
+      [["Programs can never read your clipboard.", "Pasting is always something you do."],
+        ["hopsesh never types into a program.", "It starts the command; you answer every question, including Claude Code's trust question."],
+        ["Sign-in and shell tabs are never recorded.", "hopsesh never reads your sign-in tokens."],
+        ["Nothing a terminal shows is written to disk,", "to the activity log or to crash reports."],
+        ["Links open only after you confirm them.", "Only web links (http and https) open from a terminal, and hopsesh shows you the whole address first."]]
+        .map(([b, t]) => h("div", { class: "safety" }, icon(SHIELD, 15), h("span", {}, h("b", {}, b), " ", h("span", { class: "muted" }, t))))),
+  ];
+}
+
 function skill() {
   const sk = s.skill || {}, copies = sk.copies || [], rules = sk.rules || [];
   const addRules = h("input", { type: "checkbox" });
@@ -170,6 +239,8 @@ function updates() {
 // installUpdate installs the new version over this app (the backend verifies it first),
 // which then reopens.
 async function installUpdate(btn, u) {
+  const n = running().length;
+  if (n && !await ask({ title: `Restart and end ${count(n, "program")}?`, body: "Installing the update restarts hopsesh, which ends every program in its terminal tabs. Claude Code and Codex keep each conversation up to its last finished turn.", ok: "Install and restart", danger: true })) return;
   btn.disabled = true;
   fill(btn, `Downloading and checking ${u.latest}…`);
   try {
@@ -191,7 +262,7 @@ async function preview() {
   } catch (e) { fail(e); }
 }
 
-const TABS = [["general", "General", general], ["agents", "Agents", agents], ["skill", "Skill", skill], ["cli", "Command line", cli], ["updates", "Updates", updates]];
+const TABS = [["general", "General", general], ["agents", "Agents", agents], ["terminal", "Terminal", terminal], ["skill", "Skill", skill], ["cli", "Command line", cli], ["updates", "Updates", updates]];
 
 function render() {
   const [, name, body] = TABS.find((t) => t[0] === tab);
@@ -211,7 +282,9 @@ function render() {
 
 async function load() {
   try { s = await api("Settings"); } catch (e) { fail(e); return; }
+  if (current !== "settings") return;
   render();
+  api("TerminalSettings").then((t) => { ts = t; if (tab === "terminal" && current === "settings") render(); }).catch(() => {});
 }
 
 screen("settings", async (which) => {

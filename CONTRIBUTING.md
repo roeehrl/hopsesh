@@ -39,10 +39,13 @@ make app      # macOS only: builds dist/macos/hopsesh.app (unsigned unless SIGN_
 - The app's terminal tabs (`internal/core/pty`): `scripts/app-terminal-check.sh` runs a tab
   in the real terminal window of a `-tags e2e` build on macOS or Linux. On Windows, run
   `go run ./internal/devtools/conptyfetch -out <dir>` and set `HOPSESH_CONPTY_DIR=<dir>` so
-  the tests also cover the bundled ConPTY. `internal/devtools/winres` makes the
+  the tests also cover the bundled ConPTY. The terminal window's xterm.js comes from
+  `go run ./internal/devtools/xtermfetch` (pinned npm versions and hashes; a test checks the
+  vendored files). `internal/devtools/winres` makes the
   Windows resource file (icon, manifest, version information).
 - Window tests: `internal/devtools/webtest` drives the app's real window code in a browser
-  (Playwright). `playwright.real.config.ts` drives the real Windows window instead and needs
+  (Playwright), the hopsesh Terminal window included (`tests/terminal.spec.ts`, with tabs
+  running `internal/testkit/termfake`). `playwright.real.config.ts` drives the real Windows window instead and needs
   `HOPSESH_APP_EXE` pointing at a `-tags e2e` build. That build tag opens a debugging port:
   never ship it.
 - `demo/record.sh shell` gives you two made-up machines (see [demo/README.md](demo/README.md)),
@@ -82,7 +85,7 @@ issue or discussion first so we can agree on the approach.
 
 | Method | What it does |
 |---|---|
-| `Spec` | id, name, vendor, stability (`experimental` until proven), tested version prefixes, binaries (with search paths and version arguments), data folders (env var plus default), login variables, secrets (never opened; globs allowed), instruction files, global instruction files (carried by `--carry-rules`), features, icon (below) |
+| `Spec` | id, name, vendor, stability (`experimental` until proven), tested version prefixes, binaries (with search paths and version arguments), data folders (env var plus default), login variables, secrets (never opened; globs allowed), instruction files, global instruction files (carried by `--carry-rules`), features, icon (below), clouds (each with its driver's own sign-in command, `SignIn`, if it has one), variables for the app's terminal tabs (`TerminalEnv`) |
 | `Detect` | turns a machine's facts into an install (most modules start from `DefaultInstall`) |
 | `List` | the sessions on a machine; one unreadable session is reported, not fatal |
 | `Bundle` | the files that make up one session |

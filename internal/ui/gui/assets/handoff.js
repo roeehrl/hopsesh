@@ -4,6 +4,7 @@
 // session's link, Undo and a follow-up.
 import { api, on, h, fill, view, state, screen, go, current, toast, fail, errText, cap, agentChip, cloudChip, $, count, sys, keys, ask, dialog } from "./core.js";
 import { undo } from "./activity.js";
+import { showTerminal, tabFor, IN_A_TAB } from "./term.js";
 
 const sheet = $("#sheet");
 let hc = null; // { e, cloud, opts, plan, busy, applying }
@@ -31,6 +32,7 @@ export function handoffMenu(e, open, toggle) {
 
 // pickHandoff asks which cloud (the palette's Hand off to…).
 export function pickHandoff(e) {
+  if (tabFor(e)) { toast(IN_A_TAB); return; }
   const d = dialog(h("h2", { style: "margin:0;font-size:16px" }, `Hand off “${e.title}” to…`),
     h("div", { class: "menu", role: "menu", "aria-label": "Hand off to", style: "position:static" },
       (e.handoff || []).map((t) => h("button", { class: "menu-item", role: "menuitem", "aria-disabled": t.ok ? null : "true", disabled: !t.ok,
@@ -43,6 +45,7 @@ export function pickHandoff(e) {
 
 // planHandoff opens the hand-off sheet for a session.
 export async function planHandoff(e, cloud, bundle = false) {
+  if (tabFor(e)) { toast(IN_A_TAB); return; }
   let d = {};
   try { d = await api("HandoffDefaults", cloud); } catch { /* the defaults below */ }
   hc = { e, cloud, opts: { untracked: [], historyFile: !!d.historyFile, bundle: bundle || !!d.bundle, mark: d.mark !== false, cleanup: d.cleanup || "", brief: "", note: "", carryRules: false,
@@ -262,7 +265,7 @@ async function apply() {
   let shown = "";
   const poll = setInterval(async () => {
     const st = await api("HandoffStep").catch(() => null);
-    const key = st ? `${st.state}|${st.message || ""}` : "";
+    const key = st ? `${st.state}|${st.where}|${st.tab}|${st.exit}|${st.message || ""}` : "";
     if (key !== shown) { shown = key; stepBox(term, st); }
   }, 500);
   const off = on("hopsesh:progress", (label) => {
@@ -301,14 +304,22 @@ export function stepBox(box, st) {
     try { await api("HandoffPasteLink", input.value.trim()); msg.textContent = ""; } catch (e) { msg.textContent = errText(e); }
   };
   input.onkeydown = (ev) => { if (ev.key === "Enter") { ev.preventDefault(); use(); } };
-  const lead = st.state === "waiting"
+  const lead = st.state === "waiting" && st.where === "here"
+    ? [h("b", {}, `${st.cloudTitle} is starting the session in the hopsesh Terminal window`),
+      h("span", { style: "font-size:12.5px;line-height:1.5" }, "Its tab runs ", mono(`${st.driver} --cloud`), " in hopsesh's hand-off folder for this repository. If it asks whether you trust this folder, answer it there; hopsesh never answers for you. hopsesh reads that tab only for the session link."),
+      h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" }, h("button", { class: "btn primary", onclick: () => showTerminal(st.tab) }, "Show the terminal")),
+      h("span", { class: "mono muted", style: "font-size:11.5px;word-break:break-all" }, st.folder)]
+    : st.state === "waiting" && st.exit != null
+    ? [h("b", {}, st.exit < 0 ? "The step's tab was closed" : `The step's tab ended (exited ${st.exit})`),
+      h("span", { style: "font-size:12.5px;line-height:1.5" }, "hopsesh is reading what it left. If a session started, paste its link; otherwise stop waiting, and Undo removes what the hand-off did.")]
+    : st.state === "waiting"
     ? [h("b", {}, `${st.cloudTitle} is starting the session in your terminal`),
       h("span", { style: "font-size:12.5px;line-height:1.5" }, "hopsesh opened a terminal window that runs ", mono(`${st.driver} --cloud`), " in its hand-off folder for this repository. If it asks whether you trust this folder, answer it there; hopsesh picks up the session's link once it is printed."),
       h("span", { class: "mono muted", style: "font-size:11.5px;word-break:break-all" }, st.folder)]
     : st.state === "no-link"
       ? [h("b", {}, "hopsesh saw no session link"), h("span", { style: "font-size:12.5px;line-height:1.5" }, `No session started: ${st.message.replace(/\.$/, "")}. If one did, paste its link; otherwise stop, and Undo removes what the hand-off did.`)]
       : [h("b", {}, "No terminal"), h("span", { class: "err", style: "font-size:12.5px;line-height:1.5" }, st.message)];
-  fill(box, h("div", { role: "group", "aria-label": "In your terminal", style: "display:flex;flex-direction:column;gap:8px" }, lead,
+  fill(box, h("div", { role: "group", "aria-label": st.where === "here" ? "In the hopsesh Terminal" : "In your terminal", style: "display:flex;flex-direction:column;gap:8px" }, lead,
     h("label", { for: "ho-link", style: "font-size:12.5px;font-weight:500" }, "Paste the link"),
     h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" }, input, h("button", { class: "btn", onclick: use }, "Use this link"),
       h("button", { class: "btn", onclick: () => api("HandoffStopWaiting").catch(fail) }, "Stop waiting")),

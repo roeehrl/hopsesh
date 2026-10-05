@@ -1,0 +1,3 @@
+# The vendored xterm.js files are checked byte for byte against their hashes (VERSIONS):
+# never convert their line endings.
+internal/ui/gui/assets/terminal/vendor/** -text

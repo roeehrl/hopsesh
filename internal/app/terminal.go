@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/integrate"
 	"github.com/roeehrl/hopsesh/internal/core/termapp"
+	"github.com/roeehrl/hopsesh/internal/core/winshim"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -412,4 +414,20 @@ func (a *App) OpenElsewhere(ctx context.Context, key agent.SessionKey, live agen
 		return fmt.Errorf("%w in another terminal; quit it there first", ErrOpenElsewhere)
 	}
 	return nil
+}
+
+// TabArgv is a command's argument list as the app's terminal tabs run it: the program
+// found on this process's PATH, else on the login shell's, and on Windows a command shim
+// (npm's codex.cmd) replaced by the program it starts, since a tab never runs a batch file
+// (see internal/core/winshim).
+func TabArgv(argv []string) ([]string, error) {
+	if len(argv) == 0 {
+		return nil, errors.New("no command to run")
+	}
+	out := append([]string{}, argv...)
+	out[0] = resolveProgram(out[0])
+	if runtime.GOOS == "windows" {
+		return winshim.Program(out, winshim.System())
+	}
+	return out, nil
 }

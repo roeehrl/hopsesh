@@ -78,6 +78,10 @@ type Spec struct {
 	// Private marks a sign-in (claude auth login, codex login, gh auth login): nothing of
 	// the output is read, not even for the waiting state. It cannot capture.
 	Private bool
+	// SystemConsole runs the tab on the system's pseudoconsole even when the app carries
+	// Microsoft's newer one (Windows; the user's choice, for a security tool that blocks
+	// the bundled OpenConsole.exe). Elsewhere it is unused.
+	SystemConsole bool
 }
 
 // Info is a tab as the window shows it.
@@ -196,7 +200,11 @@ func (m *Manager) Start(spec Spec) (*Session, error) {
 	m.order = append(m.order, id)
 	m.mu.Unlock()
 
-	be, err := start(spec.Argv, spec.Dir, spec.Env.Build(m.opts.Version), cols, rows, m.opts.ConptyDir)
+	conpty := m.opts.ConptyDir
+	if spec.SystemConsole {
+		conpty = "" // no bundled pair: the system's pseudoconsole
+	}
+	be, err := start(spec.Argv, spec.Dir, spec.Env.Build(m.opts.Version), cols, rows, conpty)
 	if err != nil {
 		m.remove(id)
 		return nil, fmt.Errorf("starting %s: %w", filepath.Base(spec.Argv[0]), err)
@@ -205,6 +213,10 @@ func (m *Manager) Start(spec Spec) (*Session, error) {
 	m.changed(s.Info())
 	return s, nil
 }
+
+// BundledConsole reports whether tabs run on the newer pseudoconsole the app carries
+// (Windows; false elsewhere).
+func (m *Manager) BundledConsole() bool { return bundledConsole(m.opts.ConptyDir) }
 
 // Get is the open tab id.
 func (m *Manager) Get(id string) (*Session, bool) {

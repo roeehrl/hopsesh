@@ -39,6 +39,9 @@ func cloud() agent.Cloud {
 		CodeDown:     []agent.CodeWay{agent.ViaPR},
 		Needs:        []agent.Need{agent.NeedGitHub, agent.NeedPushedBranch},
 		VendorPrefix: "copilot/",
+		// The GitHub CLI's sign-in in the browser; the app runs it in a sign-in tab, which
+		// it never reads.
+		SignIn: []string{"auth", "login", "--web"},
 		Watch: agent.Watch{
 			Surface: "agent tasks through `gh agent-task create -F - --base <branch> -R <repo>` (and the agent-session link it prints), `gh agent-task list --json`, `gh agent-task view --json` and `view --log`, the pull requests on copilot/… branches through `gh pr list|view --json`, `gh auth status --json hosts`, and the REST agent-tasks API (its X-GitHub-Api-Version date)",
 			Docs: githubDocs("rest/agent-tasks/agent-tasks", "copilot/how-tos/copilot-cli/use-copilot-cli/delegate-tasks-to-cca",

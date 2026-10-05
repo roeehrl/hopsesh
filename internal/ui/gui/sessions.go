@@ -15,6 +15,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/proc"
+	"github.com/roeehrl/hopsesh/internal/core/pty"
 	"github.com/roeehrl/hopsesh/internal/core/repos"
 	"github.com/roeehrl/hopsesh/internal/core/termapp"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -554,19 +555,23 @@ func (a *App) Apply() (*DoneDTO, error) {
 }
 
 // OpenResult starts the session that was just moved or continued: in the agent's desktop
-// app when that was chosen, otherwise in a new terminal window.
-func (a *App) OpenResult() error {
+// app when that was chosen, otherwise in a tab of the hopsesh Terminal window or the user's
+// terminal app (where as for ResumeSession). A bring-back still waiting for the agent's own
+// command (claude --teleport) runs that command, in a tab unless the user chose their
+// terminal app.
+func (a *App) OpenResult(where string) (*OpenedDTO, error) {
 	a.mu.Lock()
 	p, res := a.plan, a.res
+	setting := a.core.Cfg.AppResume()
 	a.mu.Unlock()
 	if p == nil || res == nil {
-		return errors.New("nothing was moved")
+		return nil, errors.New("nothing was moved")
 	}
 	if p.Options.App {
-		return start(p.Resume)
+		return &OpenedDTO{Where: "app"}, start(p.Resume)
 	}
 	if res.Command == "" || len(res.Run.Argv) == 0 {
-		return errors.New("there is nothing to open")
+		return nil, errors.New("there is nothing to open")
 	}
 	l := app.Launch{Kind: termapp.KindSession, Run: res.Run, Key: p.Placement.Key,
 		Labels: termapp.Labels{Title: p.Title, Agent: p.Agent, Machine: app.LocalName()}}
@@ -574,11 +579,51 @@ func (a *App) OpenResult() error {
 		if res.Fetch.Outcome == move.FetchWaiting {
 			// The agent's own command that brings the session (claude --teleport).
 			l.Kind, l.Key, l.Labels.Agent = termapp.KindStep, agent.SessionKey{}, p.Fetch.CloudTitle
-		} else {
-			l.Key, _ = agent.ParseKey(res.Fetch.Key)
+			return a.bringTab(l, res.Journal, p.Fetch.Cloud, p.Fetch.CloudTitle, p.Agent, p.Title, where)
+		}
+		l.Key, _ = agent.ParseKey(res.Fetch.Key)
+	}
+	key := l.Key.String()
+	if a.Terms != nil {
+		if id := a.Terms.liveSessionTab(app.LocalName(), key); id != "" {
+			a.Terms.Focus(id)
+			return &OpenedDTO{Where: WhereShown, Tab: id}, nil
 		}
 	}
-	return a.openLaunch(l)
+	switch route(where, setting, false) {
+	case WhereAsk:
+		return &OpenedDTO{Where: WhereAsk}, nil
+	case WhereTerminal:
+		return &OpenedDTO{Where: WhereTerminal}, a.openLaunch(l)
+	}
+	return a.sessionTab(res.Run, l, TabMeta{Kind: TabSession, Agent: p.Agent, Machine: app.LocalName(), Key: key}, p.Title)
+}
+
+// bringTab runs a bring-back's command (claude --teleport, which saves the copy only once
+// the user sends a message in it) in a tab with that said, or in the user's terminal app.
+func (a *App) bringTab(l app.Launch, journal, cloud, cloudTitle, agentName, title, where string) (*OpenedDTO, error) {
+	a.mu.Lock()
+	setting := a.core.Cfg.AppResume()
+	a.mu.Unlock()
+	if a.Terms == nil || route(where, setting, true) == WhereTerminal {
+		return &OpenedDTO{Where: WhereTerminal}, a.openLaunch(l)
+	}
+	spec, err := a.tabSpec(l.Run, tabTitle("Bring here", title, strings.TrimSuffix(filepath.Base(l.Run.Argv[0]), ".exe")))
+	if err == nil {
+		var info pty.Info
+		info, err = a.Terms.Open(spec, TabSetup{
+			Meta: TabMeta{Kind: TabBring, Command: displayCommand(l.Run.Argv), Agent: agentName, Cloud: cloud, CloudTitle: cloudTitle,
+				Journal: journal, External: true},
+			External: func(id string) error { return a.moveOut(id, l) },
+		})
+		if err == nil {
+			return &OpenedDTO{Where: WhereHere, Tab: info.ID}, nil
+		}
+	}
+	if oerr := a.openLaunch(l); oerr != nil {
+		return nil, fmt.Errorf("%v; and %w", err, oerr)
+	}
+	return &OpenedDTO{Where: WhereTerminal, Notice: a.fellBack(err)}, nil
 }
 
 // ResumeEntry continues a session that is already on this machine, in a terminal or (inApp)
@@ -591,6 +636,9 @@ func (a *App) ResumeEntry(machine, key string, inApp bool) error {
 	a.mu.Unlock()
 	if err != nil {
 		return err
+	}
+	if a.Terms != nil && a.Terms.liveSessionTab(machine, key) != "" {
+		return fmt.Errorf("%w in the hopsesh Terminal window: show that tab instead", app.ErrOpenElsewhere)
 	}
 	c, err := core.Resume(inv, e, agent.ResumeOptions{App: inApp})
 	if err != nil {

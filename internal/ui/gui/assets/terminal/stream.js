@@ -1,9 +1,10 @@
-// The terminal page's side of the stream protocol (internal/core/pty/stream.go): one
-// TerminalStream connection per tab, and the TerminalTabsStream list. The page has no
-// Wails bindings: these streams are all it can reach.
+// The terminal window's side of the stream protocol (internal/core/pty/stream.go): one
+// TerminalStream connection per tab, and the TerminalTabsStream list. The page has no Wails
+// bindings: these streams are all it can reach.
 import { Stream } from "/wails/runtime.js";
 
 const enc = new TextEncoder();
+const dec = new TextDecoder();
 const HIGH_ACK = 64 * 1024; // ack after this much was drawn (or at once when idle)
 
 function frame(op, body) {
@@ -27,17 +28,24 @@ function u32(n) {
   return new Uint8Array(v.buffer);
 }
 
-// watchTabs calls onTabs with the open tabs (an array of the tabs' Info), now and
-// whenever one changes; it reconnects if the stream ends.
-export function watchTabs(onTabs) {
-  let stopped = false;
+const data = (ev) => (typeof ev.data === "string" ? enc.encode(ev.data) : new Uint8Array(ev.data));
+
+// watchTabs calls onMessage with each message of the tabs stream ({tabs, prefs}: every
+// tab and the window's settings; {select}: show this tab; {notice, id}: something hopsesh
+// could not do), and reconnects when the stream ends. It returns send(request), for the
+// window's typed requests ({op, id, size, on}).
+export function watchTabs(onMessage) {
+  let s = null;
   const open = () => {
-    const s = Stream("hopsesh.terminal.tabs");
-    s.onmessage = (ev) => onTabs(JSON.parse(new TextDecoder().decode(ev.data)));
-    s.onclose = () => { if (!stopped) setTimeout(open, 500); };
+    s = Stream("hopsesh.terminal.tabs");
+    s.binaryType = "arraybuffer";
+    s.onmessage = (ev) => onMessage(JSON.parse(dec.decode(data(ev))));
+    s.onclose = () => setTimeout(open, 500);
   };
   open();
-  return () => { stopped = true; };
+  return (req) => {
+    if (s && s.readyState === 1) s.send(enc.encode(JSON.stringify(req)));
+  };
 }
 
 // connectTab attaches to tab id. handlers: output(Uint8Array, done) — draw it, then call
@@ -45,9 +53,10 @@ export function watchTabs(onTabs) {
 // It returns the tab's controls.
 export function connectTab(id, handlers) {
   const s = Stream("hopsesh.terminal");
+  s.binaryType = "arraybuffer";
   let drawn = 0;
   let queue = []; // frames sent before the stream opened: the attach frame goes first
-  const send = (f) => (queue ? queue.push(f) : s.send(f));
+  const send = (f) => (queue ? queue.push(f) : s.readyState === 1 && s.send(f));
   const flush = () => { if (drawn > 0) { send(frame("k", u32(drawn))); drawn = 0; } };
   s.onopen = () => {
     s.send(frame("a", id));
@@ -55,7 +64,7 @@ export function connectTab(id, handlers) {
     queue = null;
   };
   s.onmessage = (ev) => {
-    const f = new Uint8Array(ev.data);
+    const f = data(ev);
     const body = f.subarray(1);
     switch (String.fromCharCode(f[0])) {
       case "o":
@@ -65,17 +74,17 @@ export function connectTab(id, handlers) {
         });
         break;
       case "s":
-        handlers.state(JSON.parse(new TextDecoder().decode(body)));
+        handlers.state(JSON.parse(dec.decode(body)));
         break;
       case "e":
-        handlers.error(new TextDecoder().decode(body));
+        handlers.error(dec.decode(body));
         break;
     }
   };
   s.onclose = () => handlers.closed && handlers.closed();
   return {
     // input: what the user typed or pasted, or the emulator's answer to a query.
-    input: (data) => send(frame("i", data)),
+    input: (text) => send(frame("i", text)),
     resize: (cols, rows) => send(frame("r", u16pair(cols, rows))),
     // link: the user clicked a link; hopsesh asks before opening it (http and https only).
     link: (url) => send(frame("l", url)),

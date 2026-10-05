@@ -62,6 +62,26 @@ func TestBundledConpty(t *testing.T) {
 	roundTrip(t, m, "conpty (bundled)")
 }
 
+// A tab the user moved to the system's pseudoconsole (Settings → Terminal) uses it even
+// when the bundled pair is there.
+func TestSystemConsoleChosen(t *testing.T) {
+	dir := os.Getenv("HOPSESH_CONPTY_DIR")
+	if dir == "" {
+		t.Skip("HOPSESH_CONPTY_DIR is not set")
+	}
+	dir, _ = filepath.Abs(dir)
+	m := tabs(t, pty.Options{ConptyDir: dir})
+	if !m.BundledConsole() {
+		t.Fatal("the bundled pair is not seen")
+	}
+	spec := role(t, "da1")
+	spec.SystemConsole = true
+	s := start(t, m, spec)
+	if got := s.Info().Backend; got != "conpty (system)" {
+		t.Fatalf("backend %q", got)
+	}
+}
+
 // A batch file is not run: cmd.exe would parse its arguments.
 func TestBatchFilesRefused(t *testing.T) {
 	dir := t.TempDir()

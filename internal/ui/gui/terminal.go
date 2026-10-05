@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -17,55 +18,205 @@ import (
 )
 
 // The app's terminal: tabs whose programs run in pseudo-terminals here (internal/core/pty),
-// shown in a terminal window of their own.
+// shown in a window of their own, "hopsesh Terminal".
 //
 // That window is isolated from the app (docs/design.md §15). Its page talks to hopsesh only
 // through two Wails streams: TerminalStream, one connection per tab (input, resize, acks,
 // close, a link to open; output and the tab's state back), and TerminalTabsStream (the
-// list of tabs). Gate, the asset middleware, gives any window other than the app's own the
-// terminal page, the Wails runtime script and the stream endpoints only: no bound method,
-// no event, no clipboard, no dialog and no other page. Wails tags every request with the
-// window it came from in the native layer, so a page cannot claim another window's id. A
-// link a tab's program prints opens only as http(s), and only after the user confirms it
-// in a native dialog that shows the whole address.
+// list of tabs and the window's settings; from the window, a small set of typed requests
+// about tabs, see windowRequest). Gate, the asset middleware, gives any window other than
+// the app's own the terminal page, the Wails runtime script and the stream endpoints only:
+// no bound method, no event, no clipboard, no dialog and no other page. Wails tags every
+// request with the window it came from in the native layer, so a page cannot claim another
+// window's id. A link a tab's program prints opens only as http(s), and only after the user
+// confirms it in a native dialog that shows the whole address.
 //
-// What a tab runs is decided in Go (openTab, from a typed request such as a hand-off's
-// step), never taken from a window.
+// What a tab runs is decided in Go (Open, from one of the app's entry points: a session's
+// resume command, a hand-off's step, a sign-in, a shell), never taken from a window. A
+// request from the window names a tab and an action; Go looks up what that tab runs.
 
-// Stream names the terminal page connects to.
+// Stream and event names, and where the terminal page is.
 const (
 	TerminalStream     = "hopsesh.terminal"
 	TerminalTabsStream = "hopsesh.terminal.tabs"
-	// TerminalEvent carries a tab's Info (State "" once it is gone) to the app's window,
-	// for its badges.
+	// TerminalEvent carries a tab's TermTab (State "" once it is gone) to the app's window,
+	// for its chips and counts.
 	TerminalEvent = "hopsesh:terminal"
+	// QuitEvent asks the app's window to confirm quitting while programs run in tabs.
+	QuitEvent = "hopsesh:quit"
+	// SignedInEvent: a sign-in tab ended with code 0, and hopsesh checked the login again
+	// (a SignedInDTO).
+	SignedInEvent = "hopsesh:signed-in"
 	// TerminalPage is where the terminal window's page is.
 	TerminalPage = "/terminal/"
+	// TerminalTitle is the terminal window's title.
+	TerminalTitle = "hopsesh Terminal"
 )
+
+// What a tab is for (TabMeta.Kind).
+const (
+	TabSession = "session" // a session resumed here
+	TabStep    = "step"    // a hand-off's driver step (claude --cloud)
+	TabBring   = "bring"   // a bring-back's teleport (claude --teleport)
+	TabSignIn  = "signin"  // a vendor's sign-in: nothing recorded
+	TabShell   = "shell"   // the user's login shell: nothing recorded
+)
+
+// TabMeta is what the app knows about a tab besides its program's state.
+type TabMeta struct {
+	Kind string `json:"kind"`
+	// Command is the program and its arguments, for people.
+	Command string `json:"command"`
+	// Agent names whose program it is ("Claude Code"; "" for a shell).
+	Agent string `json:"agent,omitempty"`
+	// Machine and Key are a session tab's row (or a bring-back's copy, once known).
+	Machine string `json:"machine,omitempty"`
+	Key     string `json:"key,omitempty"`
+	// Cloud and CloudTitle are a step's, a bring-back's or a sign-in's cloud.
+	Cloud      string `json:"cloud,omitempty"`
+	CloudTitle string `json:"cloudTitle,omitempty"`
+	// Journal is a bring-back's journal id (its done screen asks AdoptStatus by it).
+	Journal string `json:"journal,omitempty"`
+	// Link is a step's session link, once the module's reader found it after the step
+	// ended.
+	Link string `json:"link,omitempty"`
+	// External: the tab offers "Open in my terminal" (end it here and run the same command
+	// in the user's terminal app).
+	External bool `json:"external"`
+	// Rerun: the tab offers "Run again" once its program ended.
+	Rerun bool `json:"rerun"`
+}
+
+// TermTab is a tab as the windows show it.
+type TermTab struct {
+	pty.Info
+	TabMeta
+	// Attention: the tab waits for the user (a bell or a notification from its program, or
+	// a step from its start to its end); it counts in "Needs you".
+	Attention bool `json:"attention"`
+}
+
+// tab is what the app keeps for an open tab.
+type tab struct {
+	meta TabMeta
+	spec pty.Spec
+	// external ends the tab and runs its command in the user's terminal app (nil: not
+	// offered); rerun starts the same spec in a new tab.
+	external func(id string) error
+	// exited is told once that the program ended.
+	exited   func(pty.Info)
+	notified bool // this waiting episode was notified
+	exitSeen bool
+}
+
+// TabSetup is what an entry point opens a tab with, besides the program.
+type TabSetup struct {
+	Meta TabMeta
+	// External ends tab id and runs its command in the user's terminal app (nil: the tab
+	// does not offer it); Exited is told once that its program ended.
+	External func(id string) error
+	Exited   func(pty.Info)
+}
+
+// TermPrefs are the terminal window's settings, sent with the list of tabs.
+type TermPrefs struct {
+	Font         string `json:"font"`
+	FontSize     int    `json:"fontSize"`
+	Scrollback   int    `json:"scrollback"`
+	ScreenReader bool   `json:"screenReader"`
+	OS           string `json:"os"`
+	// Home is the home folder (the window shortens paths under it to ~); TerminalName is
+	// the user's terminal app ("iTerm2"), for "Open in my terminal".
+	Home         string `json:"home"`
+	TerminalName string `json:"terminalName"`
+}
 
 // Terminals holds the app's terminal tabs and their window.
 type Terminals struct {
 	mgr    *pty.Manager
 	showMu sync.Mutex // one terminal window at a time
 
-	mu    sync.Mutex
-	app   *application.App
-	main  map[uint]bool // windows with the app's own page and its bindings
-	win   *application.WebviewWindow
-	winID uint
-	asked time.Time // when a link's confirmation was last shown
-	lists map[*tabList]bool
+	mu      sync.Mutex
+	app     *application.App
+	main    map[uint]bool // windows with the app's own page and its bindings
+	mainWin *application.WebviewWindow
+	win     *application.WebviewWindow
+	winID   uint
+	asked   time.Time // when a link's confirmation was last shown
+	lists   map[*tabList]bool
+	tabs    map[string]*tab
+	active  string // the tab the terminal window shows
+	badge   int
+
+	// Prefs are the window's settings (nil: defaults); SavePrefs stores what the window
+	// changed (a font size, the screen reader mode; nil: unchanged); Shell opens a shell
+	// tab in a folder ("" home) for the window's "+"; NotifyOn says whether desktop
+	// notifications are on. The App sets them.
+	Prefs     func() TermPrefs
+	SavePrefs func(fontSize int, reader *bool)
+	Shell     func(dir string) error
+	NotifyOn  func() bool
+	// Emit sends the app's window an event (the App's emit).
+	Emit func(name string, data any)
+
+	notes *notifier
 }
 
-// tabList is a terminal window's TerminalTabsStream connection.
-type tabList struct{ ch chan []pty.Info }
+// tabList is a terminal window's TerminalTabsStream connection: the messages waiting for
+// it. A newer list of tabs replaces one not yet sent, so a slow window always gets the
+// latest without a queue growing.
+type tabList struct {
+	mu    sync.Mutex
+	queue []listItem
+	wake  chan struct{}
+}
+
+type listItem struct {
+	list bool // a list of tabs (replaced by a newer one)
+	b    []byte
+}
+
+func newTabList() *tabList { return &tabList{wake: make(chan struct{}, 1)} }
+
+func (l *tabList) push(it listItem) {
+	l.mu.Lock()
+	if it.list {
+		l.queue = slices.DeleteFunc(l.queue, func(x listItem) bool { return x.list })
+	}
+	if len(l.queue) < 64 {
+		l.queue = append(l.queue, it)
+	}
+	l.mu.Unlock()
+	select {
+	case l.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (l *tabList) take() []listItem {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	q := l.queue
+	l.queue = nil
+	return q
+}
 
 // NewTerminals is the app's tabs; version is hopsesh's.
 func NewTerminals(version string) *Terminals {
-	t := &Terminals{main: map[uint]bool{}, lists: map[*tabList]bool{}}
-	t.mgr = pty.NewManager(pty.Options{Version: version, OnChange: t.changed})
+	t := &Terminals{main: map[uint]bool{}, lists: map[*tabList]bool{}, tabs: map[string]*tab{}}
+	t.mgr = pty.NewManager(pty.Options{Version: version, OnChange: t.changed, MaxTabs: maxTabs})
+	t.notes = newNotifier(func(id, title, body string) { osNotify(t, id, title, body) }, 10*time.Second)
+	t.notes.still = func(id string) bool {
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		tb := t.tabs[id]
+		return tb != nil && tb.notified
+	}
 	return t
 }
+
+// maxTabs is how many tabs may be open at once (the spec's 12 live tabs).
+const maxTabs = 12
 
 // Attach connects the tabs to the running app: its streams, and its window events.
 func (t *Terminals) Attach(app *application.App) {
@@ -76,8 +227,19 @@ func (t *Terminals) Attach(app *application.App) {
 	app.HandleStream(TerminalTabsStream, t.serveList)
 }
 
-// Privileged marks a window as the app's own (its requests pass Gate).
-func (t *Terminals) Privileged(id uint) {
+// Privileged marks a window as the app's own (its requests pass Gate); the first is the
+// main window, which notifications and the terminal window's "back to sessions" raise.
+func (t *Terminals) Privileged(w *application.WebviewWindow) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.main[w.ID()] = true
+	if t.mainWin == nil {
+		t.mainWin = w
+	}
+}
+
+// privilegedID marks a window id as the app's own (tests).
+func (t *Terminals) privilegedID(id uint) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.main[id] = true
@@ -118,17 +280,19 @@ func (t *Terminals) Gate(next http.Handler) http.Handler {
 			return
 		}
 		if strings.HasPrefix(r.URL.Path, TerminalPage) {
-			w.Header().Set("Content-Security-Policy", terminalCSP)
+			w.Header().Set("Content-Security-Policy", TerminalCSP)
 			w.Header().Set("Cache-Control", "no-store")
 		}
 		next.ServeHTTP(w, r)
 	})
 }
 
-// terminalCSP keeps the terminal page to its own scripts and styles, and its requests to
-// the app's asset server (the streams): no inline script, no other origin, no frames, no
-// forms, no plugins.
-const terminalCSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'"
+// TerminalCSP keeps the terminal page to its own scripts, and its requests to the app's
+// asset server (the streams): no inline script, no other origin, no frames, no forms, no
+// plugins. Styles may be inline because xterm.js writes its scrollbar's and its DOM
+// renderer's rules into <style> elements it makes; the page's own markup never carries a
+// program's text as anything but text.
+const TerminalCSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'"
 
 // terminalMayFetch is what a terminal window may request: its page's files, the Wails
 // runtime scripts, and the two stream endpoints.
@@ -154,28 +318,41 @@ func (t *Terminals) isTerminalWindow(w application.Window) bool {
 	return t.win != nil && w.ID() == t.winID && !t.main[w.ID()]
 }
 
-// serveTab is one TerminalStream connection: a tab shown in the terminal window.
+// serveTab is one TerminalStream connection, from the terminal window only.
 func (t *Terminals) serveTab(c *application.StreamConn) {
 	if !t.isTerminalWindow(c.Window()) {
 		_ = c.Close()
 		return
 	}
+	t.ServeTab(c)
+}
+
+// ServeTab serves one TerminalStream connection that is known to come from the terminal
+// window (the app checks the window first; the browser tests have only that page).
+func (t *Terminals) ServeTab(c pty.Conn) {
 	find := func(id string) (*pty.Session, error) {
 		if s, ok := t.mgr.Get(id); ok {
 			return s, nil
 		}
 		return nil, errors.New("no such tab")
 	}
-	_ = pty.Serve(c, find, func(u string) { t.confirmLink(c.Window(), u) })
+	_ = pty.Serve(c, find, func(u string) { t.confirmLink(u) })
 }
 
-// serveList is one TerminalTabsStream connection: the tabs, again whenever one changes.
+// serveList is one TerminalTabsStream connection, from the terminal window only.
 func (t *Terminals) serveList(c *application.StreamConn) {
-	defer c.Close()
 	if !t.isTerminalWindow(c.Window()) {
+		_ = c.Close()
 		return
 	}
-	l := &tabList{ch: make(chan []pty.Info, 1)}
+	t.ServeList(c)
+}
+
+// ServeList serves one TerminalTabsStream connection known to come from the terminal
+// window: the tabs and settings now and on every change, and the window's requests.
+func (t *Terminals) ServeList(c pty.Conn) {
+	defer c.Close()
+	l := newTabList()
 	t.mu.Lock()
 	t.lists[l] = true
 	t.mu.Unlock()
@@ -184,20 +361,23 @@ func (t *Terminals) serveList(c *application.StreamConn) {
 		delete(t.lists, l)
 		t.mu.Unlock()
 	}()
-	l.ch <- t.mgr.List()
-	go func() { // the page sends nothing; this notices it going
+	l.push(listItem{list: true, b: t.listMessage()})
+	go func() {
 		for {
-			if _, err := c.Receive(); err != nil {
+			b, err := c.Receive()
+			if err != nil {
 				return
 			}
+			t.request(b)
 		}
 	}()
 	for {
 		select {
-		case tabs := <-l.ch:
-			b, _ := json.Marshal(tabs)
-			if err := c.Send(b); err != nil {
-				return
+		case <-l.wake:
+			for _, it := range l.take() {
+				if err := c.Send(it.b); err != nil {
+					return
+				}
 			}
 		case <-c.Context().Done():
 			return
@@ -205,38 +385,253 @@ func (t *Terminals) serveList(c *application.StreamConn) {
 	}
 }
 
-// changed tells the app's window and the terminal window's list about a tab.
-func (t *Terminals) changed(i pty.Info) {
+// listMessage is the window's list: every tab, and its settings.
+func (t *Terminals) listMessage() []byte {
+	b, _ := json.Marshal(map[string]any{"tabs": t.Tabs(), "prefs": t.prefs()})
+	return b
+}
+
+func (t *Terminals) prefs() TermPrefs {
+	if t.Prefs != nil {
+		return t.Prefs()
+	}
+	return TermPrefs{FontSize: 13, Scrollback: 5000, OS: runtime.GOOS}
+}
+
+// send queues a message for every terminal window's list connection.
+func (t *Terminals) send(m []byte) { t.queue(listItem{b: m}) }
+
+// sendList sends the windows the tabs and settings as they are now.
+func (t *Terminals) sendList() { t.queue(listItem{list: true, b: t.listMessage()}) }
+
+func (t *Terminals) queue(it listItem) {
 	t.mu.Lock()
-	app := t.app
 	lists := make([]*tabList, 0, len(t.lists))
 	for l := range t.lists {
 		lists = append(lists, l)
 	}
 	t.mu.Unlock()
-	if len(lists) > 0 {
-		tabs := t.mgr.List()
-		for _, l := range lists {
-			select { // only the newest list matters
-			case <-l.ch:
-			default:
-			}
-			select {
-			case l.ch <- tabs:
-			default:
-			}
+	for _, l := range lists {
+		l.push(it)
+	}
+}
+
+// Refresh sends the window its list again (the settings changed).
+func (t *Terminals) Refresh() { t.sendList() }
+
+// windowRequest is what the terminal window may ask of hopsesh about its tabs; every
+// field is checked, and a tab is looked up by its id.
+type windowRequest struct {
+	// Op: "active" (the window shows tab ID), "external" (end ID and open its command in
+	// the user's terminal app), "rerun" (run ID's command again), "shell" (a new shell tab
+	// in ID's folder, or home), "main" (raise the app's window), "maximize" (the
+	// terminal window), "font" (Size), "reader" (On).
+	Op   string `json:"op"`
+	ID   string `json:"id"`
+	Size int    `json:"size"`
+	On   *bool  `json:"on"`
+}
+
+// request carries out one windowRequest.
+func (t *Terminals) request(b []byte) {
+	if len(b) > 512 {
+		return
+	}
+	var r windowRequest
+	if json.Unmarshal(b, &r) != nil {
+		return
+	}
+	t.mu.Lock()
+	tb := t.tabs[r.ID]
+	t.mu.Unlock()
+	switch r.Op {
+	case "active":
+		if tb != nil {
+			t.mu.Lock()
+			t.active = r.ID
+			t.mu.Unlock()
+		}
+	case "external":
+		if tb != nil && tb.external != nil {
+			go func() {
+				if err := tb.external(r.ID); err != nil {
+					t.notice(r.ID, err.Error())
+				}
+			}()
+		}
+	case "rerun":
+		if tb != nil && tb.meta.Rerun {
+			go t.rerun(r.ID, tb)
+		}
+	case "shell":
+		dir := ""
+		if tb != nil {
+			dir = tb.spec.Dir
+		}
+		if t.Shell != nil {
+			go func() {
+				if err := t.Shell(dir); err != nil {
+					t.notice(r.ID, err.Error())
+				}
+			}()
+		}
+	case "main":
+		t.ShowMain()
+	case "maximize":
+		t.mu.Lock()
+		win := t.win
+		t.mu.Unlock()
+		if win != nil {
+			win.ToggleMaximise()
+		}
+	case "font":
+		if r.Size >= 9 && r.Size <= 24 && t.SavePrefs != nil {
+			t.SavePrefs(r.Size, nil)
+		}
+	case "reader":
+		if r.On != nil && t.SavePrefs != nil {
+			t.SavePrefs(0, r.On)
 		}
 	}
+}
+
+// notice tells the terminal window something hopsesh could not do about a tab.
+func (t *Terminals) notice(id, msg string) {
+	b, _ := json.Marshal(map[string]string{"notice": msg, "id": id})
+	t.send(b)
+}
+
+// rerun starts a tab's command again in a new tab, in place of the ended one.
+func (t *Terminals) rerun(id string, tb *tab) {
+	if s, ok := t.mgr.Get(id); !ok || s.Info().State != pty.Exited {
+		return
+	}
+	if tb.meta.Kind == TabSession && t.liveSessionTab(tb.meta.Machine, tb.meta.Key) != "" {
+		t.notice(id, "It is running in another tab already.")
+		return
+	}
+	_ = t.mgr.Close(id)
+	if _, err := t.Open(tb.spec, TabSetup{Meta: tb.meta, External: tb.external, Exited: tb.exited}); err != nil {
+		t.notice("", err.Error())
+	}
+}
+
+// changed tells the app's window and the terminal window's list about a tab, notifies the
+// user when a tab they cannot see starts waiting, and tells a tab's opener that it ended.
+func (t *Terminals) changed(i pty.Info) {
+	t.mu.Lock()
+	tb := t.tabs[i.ID]
+	app := t.app
+	var (
+		wait   bool
+		exited func(pty.Info)
+		meta   TabMeta
+	)
+	if tb != nil {
+		meta = tb.meta
+		att := attention(i, tb.meta)
+		if att && !tb.notified {
+			tb.notified, wait = true, true
+		} else if !att {
+			tb.notified = false
+		}
+		if i.State == pty.Exited && !tb.exitSeen {
+			tb.exitSeen, exited = true, tb.exited
+		}
+	}
+	if i.State == "" {
+		delete(t.tabs, i.ID)
+		if t.active == i.ID {
+			t.active = ""
+		}
+	}
+	t.mu.Unlock()
+	t.sendList()
+	if t.Emit != nil {
+		t.Emit(TerminalEvent, TermTab{Info: i, TabMeta: meta, Attention: tb != nil && attention(i, meta)})
+	}
 	if app != nil {
-		app.Event.Emit(TerminalEvent, i)
+		t.updateBadge()
+	}
+	if wait && !t.visible(i.ID) && t.notifyOn() {
+		t.notes.waiting(i.ID, waitingText(meta, i.Title))
+		t.flash()
+	}
+	if exited != nil {
+		if (meta.Kind == TabStep || meta.Kind == TabSignIn || meta.Kind == TabBring) && !t.appFocused() && t.notifyOn() {
+			t.notes.now(i.ID, endedText(meta, i))
+		}
+		go exited(i)
+	}
+}
+
+// attention reports whether a tab waits for the user.
+func attention(i pty.Info, m TabMeta) bool {
+	switch {
+	case i.State == pty.Exited || i.State == "":
+		return false
+	case m.Kind == TabStep || m.Kind == TabBring:
+		return true // the step needs the user from its start until it ends
+	}
+	return i.State == pty.Waiting && (i.Reason == pty.ReasonBell || i.Reason == pty.ReasonNotification)
+}
+
+func (t *Terminals) notifyOn() bool { return t.NotifyOn == nil || t.NotifyOn() }
+
+// visible: the terminal window has focus and shows the tab.
+func (t *Terminals) visible(id string) bool {
+	t.mu.Lock()
+	win, active := t.win, t.active
+	t.mu.Unlock()
+	return win != nil && active == id && win.IsFocused()
+}
+
+// appFocused: one of hopsesh's windows has focus.
+func (t *Terminals) appFocused() bool {
+	t.mu.Lock()
+	win, main := t.win, t.mainWin
+	t.mu.Unlock()
+	return win != nil && win.IsFocused() || main != nil && main.IsFocused()
+}
+
+// flash asks for attention on the taskbar (Windows) while the terminal window is in the
+// background.
+func (t *Terminals) flash() {
+	t.mu.Lock()
+	win := t.win
+	t.mu.Unlock()
+	if runtime.GOOS == "windows" && win != nil && !win.IsFocused() {
+		win.Flash(true)
+	}
+}
+
+// updateBadge shows how many tabs wait for the user on the Dock icon (macOS).
+func (t *Terminals) updateBadge() {
+	n := 0
+	for _, d := range t.Tabs() {
+		if d.Attention {
+			n++
+		}
+	}
+	t.mu.Lock()
+	same := n == t.badge
+	t.badge = n
+	app := t.app
+	t.mu.Unlock()
+	if !same && app != nil {
+		setBadge(n)
 	}
 }
 
 // confirmLink asks the user whether to open a link a tab's program printed (already
 // checked to be http or https), showing all of it; one question at a time.
-func (t *Terminals) confirmLink(w application.Window, u string) {
+func (t *Terminals) confirmLink(u string) {
+	if linkHook != nil {
+		linkHook(u)
+		return
+	}
 	t.mu.Lock()
-	app := t.app
+	app, w := t.app, t.win
 	// A link is sent when the user clicks one, so a second request while one question
 	// shows is a double click.
 	if app == nil || time.Since(t.asked) < 2*time.Second {
@@ -245,8 +640,8 @@ func (t *Terminals) confirmLink(w application.Window, u string) {
 	}
 	t.asked = time.Now()
 	t.mu.Unlock()
-	d := app.Dialog.Question().SetTitle("Open this link?").
-		SetMessage("A program in a terminal tab asks to open this address in your browser:\n\n" + u + "\n\nOpen it only if you expected it.")
+	d := app.Dialog.Question().SetTitle("Open this link in your browser?").
+		SetMessage("A program in a terminal tab asks to open this address:\n\n" + u + "\n\nOpen it only if you expected it.")
 	d.AddButton("Open").OnClick(func() { _ = openInBrowser(u) })
 	cancel := d.AddButton("Cancel")
 	d.SetDefaultButton(cancel).SetCancelButton(cancel)
@@ -256,17 +651,44 @@ func (t *Terminals) confirmLink(w application.Window, u string) {
 	d.Show()
 }
 
-// Open opens a tab running spec's program and shows it in the terminal window. Only
-// hopsesh's own Go code calls it, with a program it chose (a hand-off's driver, an agent's
-// documented resume command), never with one a window sent: Terminals is not bound to the
-// window.
-func (t *Terminals) Open(spec pty.Spec) (pty.Info, error) {
+// linkHook replaces the link dialog (the browser tests: they see what would be asked; no
+// browser opens).
+var linkHook func(url string)
+
+// SetLinkHook sends every link a tab asks to open to f instead of the dialog (tests).
+func SetLinkHook(f func(url string)) { linkHook = f }
+
+// Open opens a tab running spec's program, for what setup says, and shows it in the
+// terminal window. Only hopsesh's own Go code calls it, with a program it chose, never
+// with one a window sent: Terminals is not bound to the window.
+func (t *Terminals) Open(spec pty.Spec, setup TabSetup) (pty.Info, error) {
 	s, err := t.mgr.Start(spec)
 	if err != nil {
 		return pty.Info{}, err
 	}
-	t.Show()
+	t.mu.Lock()
+	t.tabs[s.ID()] = &tab{meta: setup.Meta, spec: spec, external: setup.External, exited: setup.Exited}
+	t.mu.Unlock()
+	if _, ok := t.mgr.Get(s.ID()); !ok { // gone already
+		t.mu.Lock()
+		delete(t.tabs, s.ID())
+		t.mu.Unlock()
+	}
+	t.changed(s.Info()) // again, now that the tab's purpose is known (it may have ended)
+	t.Focus(s.ID())
 	return s.Info(), nil
+}
+
+// Focus shows the terminal window with tab id in front.
+func (t *Terminals) Focus(id string) {
+	t.Show()
+	t.mu.Lock()
+	if _, ok := t.tabs[id]; ok {
+		t.active = id
+	}
+	t.mu.Unlock()
+	b, _ := json.Marshal(map[string]string{"select": id})
+	t.send(b)
 }
 
 // Show opens the terminal window, or brings it to the front.
@@ -285,11 +707,11 @@ func (t *Terminals) Show() {
 	}
 	w := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:      "hopsesh-terminal",
-		Title:     "hopsesh: terminal",
-		Width:     960,
-		Height:    640,
-		MinWidth:  480,
-		MinHeight: 300,
+		Title:     TerminalTitle,
+		Width:     1040,
+		Height:    680,
+		MinWidth:  560,
+		MinHeight: 320,
 		URL:       TerminalPage,
 	})
 	t.mu.Lock()
@@ -298,19 +720,105 @@ func (t *Terminals) Show() {
 	w.OnWindowEvent(events.Common.WindowClosing, func(*application.WindowEvent) {
 		t.mu.Lock()
 		if t.win == w {
-			t.win, t.winID = nil, 0
+			t.win, t.winID, t.active = nil, 0, ""
 		}
+		main := t.mainWin
 		t.mu.Unlock()
+		// The programs keep running; with the app's window hidden, it comes back so the
+		// tabs (and quitting) stay within reach.
+		if main != nil && !main.IsVisible() {
+			main.Show().Focus()
+		}
 	})
 }
 
-// Tabs are the open tabs, for the app's window.
-func (t *Terminals) Tabs() []pty.Info { return t.mgr.List() }
+// ShowMain brings the app's window to the front.
+func (t *Terminals) ShowMain() {
+	t.mu.Lock()
+	main := t.mainWin
+	t.mu.Unlock()
+	if main != nil {
+		main.Show().Focus()
+	}
+}
 
-// TerminalTabs are the terminal's open tabs (state, title, exit code).
-func (a *App) TerminalTabs() []pty.Info {
+// Toggle is Ctrl+`: from the terminal window back to the app's window, from anywhere else
+// to the terminal window.
+func (t *Terminals) Toggle() {
+	t.mu.Lock()
+	win := t.win
+	t.mu.Unlock()
+	if win != nil && win.IsFocused() {
+		t.ShowMain()
+		return
+	}
+	t.Show()
+}
+
+// WindowOpen reports whether the terminal window is open.
+func (t *Terminals) WindowOpen() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.win != nil
+}
+
+// Tabs are the open tabs, oldest first.
+func (t *Terminals) Tabs() []TermTab {
+	infos := t.mgr.List()
+	out := make([]TermTab, 0, len(infos))
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, i := range infos {
+		d := TermTab{Info: i}
+		if tb := t.tabs[i.ID]; tb != nil {
+			d.TabMeta = tb.meta
+			d.Attention = attention(i, tb.meta)
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
+// tabOf is an open tab's setup.
+func (t *Terminals) tabOf(id string) (*tab, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	tb, ok := t.tabs[id]
+	return tb, ok
+}
+
+// setMeta changes what the windows show about a tab.
+func (t *Terminals) setMeta(id string, f func(*TabMeta)) {
+	t.mu.Lock()
+	tb := t.tabs[id]
+	if tb != nil {
+		f(&tb.meta)
+	}
+	t.mu.Unlock()
+	if tb != nil {
+		if s, ok := t.mgr.Get(id); ok {
+			t.changed(s.Info())
+		}
+	}
+}
+
+// liveSessionTab is the tab whose program still runs a session (machine, key), if any.
+func (t *Terminals) liveSessionTab(machine, key string) string {
+	for _, d := range t.Tabs() {
+		if d.Kind == TabSession && d.Machine == machine && d.Key == key && d.State != pty.Exited {
+			return d.ID
+		}
+	}
+	return ""
+}
+
+// close ends a tab and waits for its program.
+func (t *Terminals) close(id string) error { return t.mgr.Close(id) }
+
+// TerminalTabs are the terminal's open tabs (state, title, exit code, what each is for).
+func (a *App) TerminalTabs() []TermTab {
 	if a.Terms == nil {
-		return []pty.Info{}
+		return []TermTab{}
 	}
 	return a.Terms.Tabs()
 }
@@ -330,12 +838,37 @@ func (a *App) TerminalShow() {
 	}
 }
 
+// TerminalFocus shows the terminal window with one of its tabs in front.
+func (a *App) TerminalFocus(id string) error {
+	if a.Terms == nil {
+		return errors.New("no terminal")
+	}
+	if _, ok := a.Terms.tabOf(id); !ok {
+		return errors.New("no such tab")
+	}
+	a.Terms.Focus(id)
+	return nil
+}
+
+// TerminalOpenElsewhere ends a tab and runs its command in the user's terminal app ("Move
+// to Terminal…", which the window confirmed with the user).
+func (a *App) TerminalOpenElsewhere(id string) error {
+	if a.Terms == nil {
+		return errors.New("no terminal")
+	}
+	tb, ok := a.Terms.tabOf(id)
+	if !ok || tb.external == nil {
+		return errors.New("this tab cannot open in your terminal app")
+	}
+	return tb.external(id)
+}
+
 // TerminalCloseTab closes a tab, ending its program.
 func (a *App) TerminalCloseTab(id string) error {
 	if a.Terms == nil {
 		return errors.New("no terminal")
 	}
-	if !slices.ContainsFunc(a.Terms.Tabs(), func(i pty.Info) bool { return i.ID == id }) {
+	if !slices.ContainsFunc(a.Terms.Tabs(), func(i TermTab) bool { return i.ID == id }) {
 		return errors.New("no such tab")
 	}
 	return a.Terms.mgr.Close(id)

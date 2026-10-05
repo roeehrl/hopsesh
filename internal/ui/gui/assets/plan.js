@@ -2,6 +2,7 @@
 // progress, and the Done screen.
 import { api, on, h, fill, view, state, screen, go, current, toast, fail, errText, cap, agentChip, here, $, count, sys, keys, cloudChip, cloudOf } from "./core.js";
 import { undo } from "./activity.js";
+import { openResult, where as opensIn } from "./term.js";
 
 const sheet = $("#sheet");
 let cur = null; // { e, target, sendTo, opts, plan, busy, applying }
@@ -279,6 +280,7 @@ async function apply() {
 const FID = { native: ["Full", "ok"], text: ["Lossy", "warn"], code: ["Code only", "warn"], brief: ["Lossy", "warn"] };
 
 function renderFetch(p) {
+  const outside = opensIn() === "terminal"; // the user chose their terminal app for steps
   const f = p.fetch, o = cur.opts;
   const blocked = (p.blockers || []).length > 0;
   // A cloud-only agent (Copilot, Amp) has no sessions here: its messages go into one of
@@ -331,7 +333,7 @@ function renderFetch(p) {
             : f.localBranch && f.localBranch !== f.cloudBranch ? [h("span", { class: "mono", style: "font-size:12px" }, f.localBranch), h("span", { class: "muted" }, " renamed from " + f.cloudBranch)]
             : f.rename ? h("span", {}, "A claude/… branch is renamed to ", h("span", { class: "mono", style: "font-size:12px" }, `hopsesh/from/${f.cloud}/…`)) : h("span", { class: "muted" }, "Kept as the cloud names it")),
           f.base ? kv("Starts at", h("span", { class: "ok", style: "font-weight:600" }, "✓ "), f.baseNote || h("span", { class: "mono" }, f.base.slice(0, 7))) : null),
-        f.command ? h("div", { class: "runbox" }, h("span", { style: "font-size:12px;font-weight:500" }, `Runs in ${sys.terminal}`), h("span", { class: "mono", style: "font-size:11.5px;overflow-wrap:anywhere" }, f.command),
+        f.command ? h("div", { class: "runbox" }, h("span", { style: "font-size:12px;font-weight:500" }, outside ? `Runs in ${sys.terminal}` : "Runs in a tab of the hopsesh Terminal window"), h("span", { class: "mono", style: "font-size:11.5px;overflow-wrap:anywhere" }, f.command),
           f.note ? h("span", { class: "warn", id: "copy-note", style: "font-size:12px" }, f.note + ".") : null) : null),
       h("section", { class: "sec", style: "gap:10px" }, h("span", { class: "sec-h" }, "Options"),
         cloudOf(f.cloud)?.codeOnly ? h("span", { class: "muted", style: "font-size:12px" }, `Only the code comes from ${f.cloudTitle}; its conversation stays there for now.`)
@@ -347,9 +349,12 @@ function renderFetch(p) {
     h("footer", { class: "sheet-foot" },
       h("span", { class: "muted", style: "font-size:12px;flex:1 1 260px" }, f.codeOnly ? "The code comes into a new worktree; your checkout stays as it is."
         : !f.terminal ? "Nothing runs in a terminal; your checkout stays as it is."
-        : `${p.fromAgent} copies it in your terminal; hopsesh picks it up when it appears.`),
+        : outside ? `${p.fromAgent} copies it in ${sys.terminal}; hopsesh picks it up when it appears.`
+        : `${p.fromAgent} copies it in a tab of the hopsesh Terminal window; hopsesh picks it up when it appears.`),
       h("button", { class: "btn", onclick: () => sheet.close() }, "Cancel"),
-      h("button", { class: "btn primary big", id: "go", disabled: blocked, onclick: apply }, h("span", {}, f.codeOnly ? "Get the code" : f.terminal ? `Bring here in ${sys.terminal}` : "Bring here"), h("span", { class: "kbd" }, keys("mod+enter"))))));
+      f.terminal && !f.codeOnly ? h("button", { class: "btn", disabled: blocked, onclick: () => { cur.where = outside ? "here" : "terminal"; apply(); } }, outside ? "Bring it to this window instead" : `Bring here in ${sys.terminal}`) : null,
+      h("button", { class: "btn primary big", id: "go", disabled: blocked, onclick: () => { cur.where = f.terminal ? (outside ? "terminal" : "here") : ""; apply(); } },
+        h("span", {}, f.codeOnly ? "Get the code" : f.terminal && outside ? `Bring here in ${sys.terminal}` : "Bring here"), h("span", { class: "kbd" }, keys("mod+enter"))))));
 }
 
 function checkItem(p, c) {
@@ -383,7 +388,7 @@ async function applyFetch(c) {
     cur = null;
     state.stale = true;
     sheet.close();
-    if (d.fetch.outcome === "waiting") await api("OpenResult").catch(fail);
+    if (d.fetch.outcome === "waiting") await openResult(c.where || "");
     go("brought", d.fetch, c.plan);
   } catch (err) {
     c.applying = false;
@@ -425,7 +430,8 @@ function happened(d, p) {
 
 screen("done", (d, p, o) => {
   const where = d.machine ? `on ${d.machine}` : `on ${sys.here}`;
-  const open = () => api("OpenResult").catch(fail);
+  const open = () => (d.inApp ? api("OpenResult", "").catch(fail) : openResult(opensIn() === "ask" ? "" : opensIn()));
+  const other = () => openResult(opensIn() === "terminal" ? "here" : "terminal");
   const copy = async () => { await api("CopyText", d.command); toast("Copied"); };
   const doUndo = async () => { if (await undo(d.journal, d.title)) go("sessions", true); };
   fill(view, h("div", { class: "page" }, h("div", { class: "page-in", style: "max-width:720px" },
@@ -434,7 +440,8 @@ screen("done", (d, p, o) => {
         h("div", { class: "muted" }, `${cap(where)}, in `, h("span", { class: "mono" }, p.targetCwd)))),
     h("div", { class: "card" }, h("div", { class: "dlg-body" },
       d.machine ? h("b", {}, `Start it on ${d.machine}`) : h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" },
-        h("button", { class: "btn primary big", id: "open", onclick: open }, d.inApp ? `Open in the ${d.agent} app` : `Open in ${sys.terminal}`, h("span", { class: "kbd" }, "↩")),
+        h("button", { class: "btn primary big", id: "open", onclick: open }, d.inApp ? `Open in the ${d.agent} app` : opensIn() === "terminal" ? `Open in ${sys.terminal}` : opensIn() === "ask" ? "Resume…" : "Resume here", h("span", { class: "kbd" }, "↩")),
+        d.inApp ? null : h("button", { class: "btn big", onclick: other }, opensIn() === "terminal" ? "Resume here" : `Open in ${sys.terminal}`),
         h("button", { class: "btn big", onclick: copy }, "Copy the command")),
       h("div", { style: "display:flex;gap:8px;align-items:flex-start" }, h("div", { class: "term", style: "flex:1" }, d.command), d.machine ? h("button", { class: "btn", onclick: copy }, "Copy") : null),
       h("span", { class: "muted", style: "font-size:12px" }, d.kind === "continue" ? `${d.agent} reads hopsesh's briefing at the end of the history, then ${o.go ? "starts working" : "waits for you"}.`

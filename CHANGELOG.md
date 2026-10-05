@@ -30,11 +30,49 @@ All notable changes to this project are documented here. The format follows
   or reads a tab; the AppleScript it can run is a fixed list of lines, checked before each
   run. The macOS app's Automation permission text now names your terminal app, not only
   Terminal.
-- Groundwork for a terminal inside the app (the window it shows in comes in a later
-  release): programs run in tabs with their own pseudo-terminal, take input only from what
-  you type, and keep their output in memory only. On Windows the installer and the app's
-  update now carry Microsoft's ConPTY (`conpty.dll` and `OpenConsole.exe`, MIT) in a
-  `conpty` folder, which the tabs use instead of the older one built into Windows.
+- **The hopsesh Terminal window**: the app now has a terminal of its own, a window with
+  tabs. **Resume here** runs a session in a tab there, and hand-offs to Claude Code cloud,
+  bringing a session back from it, cloud sign-ins and **Open a shell here** run there too.
+  Each tab has a status chip (running, waiting for you, exited with its code), says what it
+  runs and where, and keeps **Open in my terminal**, which ends the tab and runs the same
+  command in your terminal app after asking. It uses xterm.js 6.0.0 (shipped inside the
+  app, MIT), with copy, find, clear, links that open only after you confirm the whole
+  address, Shift+Return for a new line in Claude Code, a screen reader mode, and colours
+  that follow the app's light or dark look. Ctrl+` moves between the terminal and your
+  sessions.
+- In the hand-off's terminal step, a banner says when Claude Code asks whether it trusts
+  hopsesh's hand-off folder: you answer it in the tab, and hopsesh never does. Bringing a
+  session back says to send one message and then type `/exit`, and the done screen says
+  when the tab ended before Claude Code saved a copy.
+- Sign in from the app: the Claude Code cloud, Codex cloud and Copilot cards under
+  **Machines** have **Sign in**, which runs `claude auth login`, `codex login
+  --device-auth` or `gh auth login --web` in a tab that records nothing; when it ends well,
+  the card checks the login again. Modules name their cloud's sign-in command
+  (`Cloud.SignIn`) and the variables their programs get in the app's tabs
+  (`Spec.TerminalEnv`; Claude Code gets `CLAUDE_CODE_FORCE_SYNC_OUTPUT=1`).
+- The sessions list shows **In a tab** and **Waiting for you** for sessions running in the
+  app's terminal, and they count in **Needs you**; the sidebar and the title bar show the
+  terminal and how many tabs wait. A session runs in one tab at most: Resume shows its tab
+  instead. On macOS a tab you can't see that waits for you raises a notification (hopsesh's
+  own words, at most one every 10 seconds) and a Dock badge; on Windows the terminal's
+  taskbar button flashes.
+- Where your terminal app can say when a tab ends (iTerm2 with its Python API on), the app
+  shows how a session or a hand-off step you opened there ended: "exited N" beside the
+  session, or "closed" when the tab was closed first, and a notice.
+- Quitting hopsesh while programs run in its tabs asks first and lists them. Closing the
+  window hides it while programs run (**Keep tabs when the window closes**).
+- **Settings → Terminal**: where sessions, hand-offs and bring-backs open (**In this
+  window**, the default; **In my terminal**; **Ask each time**), your terminal app, font,
+  size, scrollback (kept in memory only; 5,000 lines by default), keeping tabs when the
+  window closes, notifications, the screen reader mode, on Windows the bundled console host,
+  and what the terminal never does. The choices are saved under `[terminal]` in the
+  configuration.
+- On Windows a tab runs the program behind an npm command shim (such as `codex.cmd`) itself,
+  node with the package's script or its own `.exe`, since tabs never run batch files. The
+  installer and the app's update carry Microsoft's ConPTY (`conpty.dll` and
+  `OpenConsole.exe`, MIT) in a `conpty` folder, which the tabs use instead of the older one
+  built into Windows. Programs in tabs take input only from what you type and keep their
+  output in memory only.
 - Bring a session from Claude Code cloud: `hopsesh pull claude-cloud:<id>` (or the session's
   link) makes a new worktree of its repository and runs `claude --teleport` there, in your
   terminal (`--run`, or the command to paste). Once the copy appears, hopsesh checks its

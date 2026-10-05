@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 
 	"github.com/roeehrl/hopsesh/internal/agents/all"
 	"github.com/roeehrl/hopsesh/internal/config"
@@ -38,6 +39,8 @@ func main() {
 			Middleware: application.ChainMiddleware(svc.Terms.Gate, testAssets),
 		},
 		Mac: application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: true},
+		// With programs running in terminal tabs, the window asks before quitting.
+		ShouldQuit: svc.ShouldQuit,
 		Windows: application.WindowsOptions{
 			WebviewUserDataPath:   filepath.Join(config.StateDir(), "webview"),
 			AdditionalBrowserArgs: testBrowserArgs(),
@@ -46,7 +49,7 @@ func main() {
 	})
 	svc.Wails = app
 	svc.Terms.Attach(app)
-	app.Menu.Set(menu(func(cmd string) { app.Event.Emit(gui.MenuEvent, cmd) }))
+	app.Menu.Set(menu(func(cmd string) { app.Event.Emit(gui.MenuEvent, cmd) }, svc.Terms.Toggle))
 	win := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:     "hopsesh",
 		Width:     1280,
@@ -59,7 +62,19 @@ func main() {
 			InvisibleTitleBarHeight: 44,
 		},
 	})
-	svc.Terms.Privileged(win.ID()) // the app's own window: the one with its bindings
+	svc.Terms.Privileged(win) // the app's own window: the one with its bindings
+	// Closing the window while programs run in tabs hides it (Settings → Terminal → Keep
+	// tabs when the window closes), or asks whether to quit.
+	win.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
+		if cancel, hide := svc.MainClosing(); cancel {
+			e.Cancel()
+			if hide {
+				win.Hide()
+			}
+		}
+	})
+	// macOS: clicking the Dock icon brings a hidden window back.
+	app.Event.OnApplicationEvent(events.Mac.ApplicationShouldHandleReopen, func(*application.ApplicationEvent) { win.Show().Focus() })
 	testHook(win, svc)
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
@@ -67,8 +82,9 @@ func main() {
 }
 
 // menu is the menu bar: the standard App, Edit and Window menus, and a Session menu whose
-// commands the window carries out (it gets each as a gui.MenuEvent).
-func menu(send func(cmd string)) *application.Menu {
+// commands the window carries out (it gets each as a gui.MenuEvent); Terminal (Ctrl+`)
+// moves between the app's window and the hopsesh Terminal window.
+func menu(send func(cmd string), terminal func()) *application.Menu {
 	m := application.NewMenu()
 	m.AddRole(application.AppMenu)
 	m.AddRole(application.EditMenu)
@@ -88,6 +104,8 @@ func menu(send func(cmd string)) *application.Menu {
 	item("Settings…", "CmdOrCtrl+,", "settings")
 	s.AddSeparator()
 	item("Undo Last Move", "CmdOrCtrl+Alt+Z", "undo-last")
+	s.AddSeparator()
+	s.Add("Terminal").SetAccelerator("Ctrl+`").OnClick(func(*application.Context) { terminal() })
 	m.AddRole(application.WindowMenu)
 	return m
 }

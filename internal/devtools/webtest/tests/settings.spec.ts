@@ -11,7 +11,7 @@ test("settings tabs, agents and their capabilities", async ({ page }) => {
   await expect(page.getByText("Claude Code", { exact: true }).first()).toBeVisible();
   await expect(page.locator(".cap", { hasText: "continues in other agents" }).first()).toBeVisible();
   await page.keyboard.press("ArrowDown");
-  await expect(tabs.getByRole("tab", { name: "Skill" })).toHaveAttribute("aria-selected", "true");
+  await expect(tabs.getByRole("tab", { name: "Terminal" })).toHaveAttribute("aria-selected", "true");
 });
 
 test("turning an agent off hides its sessions", async ({ page }) => {
