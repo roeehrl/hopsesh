@@ -32,8 +32,12 @@ func main() {
 		Name:        "hopsesh",
 		Description: "Continue your coding agent sessions from your other machines, or in another agent",
 		Services:    []application.Service{application.NewService(svc)},
-		Assets:      application.AssetOptions{Handler: application.BundledAssetFileServer(gui.Assets)},
-		Mac:         application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: true},
+		Assets: application.AssetOptions{
+			Handler: application.BundledAssetFileServer(gui.Assets),
+			// The terminal window may reach its page and its streams only.
+			Middleware: application.ChainMiddleware(svc.Terms.Gate, testAssets),
+		},
+		Mac: application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: true},
 		Windows: application.WindowsOptions{
 			WebviewUserDataPath:   filepath.Join(config.StateDir(), "webview"),
 			AdditionalBrowserArgs: testBrowserArgs(),
@@ -41,6 +45,7 @@ func main() {
 		OnShutdown: svc.Shutdown,
 	})
 	svc.Wails = app
+	svc.Terms.Attach(app)
 	app.Menu.Set(menu(func(cmd string) { app.Event.Emit(gui.MenuEvent, cmd) }))
 	win := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:     "hopsesh",
@@ -54,7 +59,8 @@ func main() {
 			InvisibleTitleBarHeight: 44,
 		},
 	})
-	testHook(win)
+	svc.Terms.Privileged(win.ID()) // the app's own window: the one with its bindings
+	testHook(win, svc)
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
 	}
