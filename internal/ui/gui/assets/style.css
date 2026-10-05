@@ -403,6 +403,7 @@ code { font-family: var(--mono); font-size: .92em; padding: 0 3px; border-radius
 .pchip:hover { border-color: var(--faint); }
 .pchip.hop svg { color: var(--accent); }
 .pchip .dot { width: 7px; height: 7px; }
+.pchip .pc-n { display: none; }
 .pchip .agent-ico { width: 12px; height: 12px; border-radius: 3px; }
 .pchip .chip { height: 14px; padding: 0 4px; font-size: 9px; }
 .chip.twice svg, .chip.mini { flex: 0 0 auto; }
@@ -447,6 +448,7 @@ code { font-family: var(--mono); font-size: .92em; padding: 0 3px; border-radius
 }
 @container list (max-width: 519px) {
   .pchip .pc-w { display: none; }
+  .pchip .pc-n { display: inline; }
   .tree .row .w { display: none; }
   .tb-btn .tb-l, .tb-btn > svg:last-child:not(:first-child) { display: none; }
   .tb-search { width: 120px; }

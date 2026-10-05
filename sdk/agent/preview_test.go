@@ -120,3 +120,36 @@ func TestCheckTitle(t *testing.T) {
 		t.Errorf("a title of MaxTitle characters: %v", err)
 	}
 }
+
+func TestPreviewPrivacyAndTurnBoundaries(t *testing.T) {
+	for _, s := range []string{
+		"public <system-reminder>private</system-reminder> answer",
+		"public \x1b]8;;https://private.example\x07answer\x1b]8;;\x1b\\",
+	} {
+		if got := PreviewText(s); got != "public answer" {
+			t.Fatalf("got %q", got)
+		}
+	}
+	p := BuildPreview([]PreviewItem{
+		{Role: PreviewUser, Text: "question"},
+		{Role: PreviewAgent, Text: "first block"},
+		{Role: PreviewUser, Text: NotePrefix + "injected"},
+		{Role: PreviewAgent, Text: NotePrefix + "private"},
+		{Role: PreviewAgent, Text: "second block"},
+	}, 4, false)
+	if p.Messages() != 2 || p.Items[1].Text != "first block\n\nsecond block" {
+		t.Fatalf("%+v", p)
+	}
+}
+
+func TestPromptTitle(t *testing.T) {
+	for _, s := range []string{"/deploy production", "[Pasted text #1 +40 lines]", "! ls", "[Request interrupted by user]", NotePrefix + "private"} {
+		if got := PromptTitle(s); got != "" {
+			t.Errorf("%q: %q", s, got)
+		}
+	}
+	got := PromptTitle(strings.Repeat("word ", 50))
+	if len([]rune(got)) > 80 || !strings.HasSuffix(got, "word…") {
+		t.Fatal(got)
+	}
+}

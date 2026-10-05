@@ -128,8 +128,8 @@ func BuildPreview(items []PreviewItem, n int, earlier bool) Preview {
 	for _, it := range items {
 		switch it.Role {
 		case PreviewUser:
-			flush()
 			if t := PreviewText(it.Text); t != "" {
+				flush()
 				out = append(out, PreviewItem{Role: PreviewUser, Text: t, Time: it.Time})
 			}
 		case PreviewCompacted:
@@ -146,7 +146,7 @@ func BuildPreview(items []PreviewItem, n int, earlier bool) Preview {
 			}
 			toolTime, inRun, runLast = it.Time, false, false
 		case PreviewAgent:
-			if strings.TrimSpace(it.Text) == "" {
+			if it.Text = PreviewText(it.Text); it.Text == "" {
 				continue
 			}
 			if !inRun {
@@ -191,6 +191,8 @@ func BuildPreview(items []PreviewItem, n int, earlier bool) Preview {
 const MaxPreviewText = 1200
 
 var (
+	reminderRE = regexp.MustCompile(`(?s)<system-reminder\b[^>]*>.*?(?:</system-reminder>|$)`)
+	oscRE      = regexp.MustCompile(`\x1b\][^\x07\x1b]*(?:\x07|\x1b\\|$)`)
 	fenceRE    = regexp.MustCompile("^ {0,3}(```+|~~~+)")
 	ansiRE     = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
 	mdImageRE  = regexp.MustCompile(`!\[[^\]\n]*\]\([^)\n]*\)`)
@@ -205,11 +207,13 @@ const ImageMark = "‹image›"
 // blank line between them), no control characters, and at most MaxPreviewText characters,
 // cut at a word.
 func PreviewText(s string) string {
+	s = reminderRE.ReplaceAllString(s, "")
 	s = OwnText(s)
 	if s == "" {
 		return ""
 	}
 	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = oscRE.ReplaceAllString(s, "")
 	s = ansiRE.ReplaceAllString(s, "")
 	s = strings.Map(func(r rune) rune {
 		switch {
@@ -279,4 +283,13 @@ func cutWords(s string, max int) string {
 		}
 	}
 	return strings.TrimRightFunc(string(r[:cut]), unicode.IsSpace) + "…"
+}
+
+// PromptTitle returns a short title from a real prompt, excluding command and paste stubs.
+func PromptTitle(s string) string {
+	s = PreviewText(s)
+	if s == "" || strings.HasPrefix(s, "/") || strings.HasPrefix(s, "!") || strings.HasPrefix(s, "[Pasted text") || strings.HasPrefix(s, "[Request interrupted by user") || strings.HasPrefix(s, "<command-") || strings.HasPrefix(s, "<local-command-") {
+		return ""
+	}
+	return cutWords(strings.Join(strings.Fields(s), " "), 80)
 }

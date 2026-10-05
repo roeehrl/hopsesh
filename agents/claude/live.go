@@ -103,6 +103,21 @@ func (m *Module) Live(ctx context.Context, h agent.Host, in agent.Install, ids [
 
 // liveInfo describes a session from its running processes' entries.
 func liveInfo(les []liveEntry) agent.LiveInfo {
+
+	if len(les) == 0 {
+		return agent.LiveInfo{State: agent.Ended}
+	}
+	// A registry can contain stale aliases for the same PID. Its newest record wins.
+	unique := map[int]liveEntry{}
+	for _, le := range les {
+		if old, ok := unique[le.PID]; !ok || le.written.After(old.written) {
+			unique[le.PID] = le
+		}
+	}
+	les = make([]liveEntry, 0, len(unique))
+	for _, le := range unique {
+		les = append(les, le)
+	}
 	slices.SortFunc(les, func(a, b liveEntry) int {
 		if aw, bw := a.WaitingFor != "", b.WaitingFor != ""; aw != bw {
 			if aw {

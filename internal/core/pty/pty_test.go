@@ -81,7 +81,11 @@ func must(t *testing.T, err error) {
 // reach it raw, a resize reaches it, and its exit code comes back as the tab's state.
 func TestTabRoundTrip(t *testing.T) {
 	m := tabs(t, pty.Options{})
-	s := start(t, m, role(t, "da1"))
+	// The child can print its initial size before the window attaches. Start it at
+	// the intended size, then independently verify the later resize below.
+	spec := role(t, "da1")
+	spec.Cols, spec.Rows = 90, 25
+	s := start(t, m, spec)
 	w := open(t, m, s, ptytest.Options{Cols: 90, Rows: 25})
 	must(t, w.WaitFor("ready size=", wait))
 	must(t, w.WaitFor("da1=", wait))

@@ -262,3 +262,47 @@ func newRenameHost(t *testing.T) *agenttest.FakeHost {
 	h.AddBinary("claude", "2.1.284 (Claude Code)")
 	return h
 }
+
+func TestPreviewSkipsMetaAndSidechainFirst(t *testing.T) {
+	file := writeTranscript(t, "/t/"+t.Name(), "p1", []line{
+		msg("user", "side", "", "", "private sidechain", line{"isSidechain": true}),
+		msg("user", "u", "", "", "real prompt", nil),
+		msg("assistant", "meta", "u", "", text("private meta"), line{"isMeta": true}),
+		msg("assistant", "a", "meta", "", text("public <system-reminder>private reminder</system-reminder> answer"), nil),
+	})
+	p := preview(t, fake, file, 4)
+	if got := shape(p); got != "user:real prompt | agent:public answer" {
+		t.Fatal(got)
+	}
+	if p.First == nil || p.First.Text != "real prompt" {
+		t.Fatalf("first: %+v", p.First)
+	}
+}
+
+func TestPreviewCanceledAndNonPowerOfTwoBound(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := New().Preview(ctx, nil, agent.Install{}, agent.Summary{}, 4); err != context.Canceled {
+		t.Fatalf("%v", err)
+	}
+	defer func(w, m int64) { previewWindow, previewMaxWindow = w, m }(previewWindow, previewMaxWindow)
+	previewWindow, previewMaxWindow = 2<<10, 5<<10
+	file := writeTranscript(t, "/t/"+t.Name(), "p1", conversation(600))
+	var read atomic.Int64
+	preview(t, countingHost{fake, &read}, file, 10000)
+	if n := read.Load(); n > previewMaxWindow+liteChunk {
+		t.Fatalf("read %d bytes", n)
+	}
+}
+
+func TestLiveInfoDeduplicatesPID(t *testing.T) {
+	now := time.Now()
+	li := liveInfo([]liveEntry{
+		{PID: 1, Status: "idle", WaitingFor: "input", Name: "old", written: now.Add(-time.Second)},
+		{PID: 1, Status: "working", Name: "new", written: now},
+		{PID: 2, Status: "idle", written: now},
+	})
+	if len(li.Procs) != 2 || li.Name != "new" || li.Status != "working" || li.Procs[0].Waiting {
+		t.Fatalf("%+v", li)
+	}
+}

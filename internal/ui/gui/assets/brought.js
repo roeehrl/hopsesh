@@ -28,7 +28,7 @@ function copyOf(b) {
 
 // nextActions are what the copy offers now: while the tab that brought it still runs it,
 // only showing that tab (one process per session); after, the list's own actions for it
-// (Resume here, Open in the terminal app, the agent's app), and copying the command.
+// (Resume in hopsesh Terminal, the terminal app, or the agent's app), and copying the command.
 function nextActions(b, primary = true) {
   const t = bringTab(b);
   if (t && t.state !== "exited") {

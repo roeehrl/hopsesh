@@ -285,9 +285,32 @@ func summarize(h agent.Host, r rollout) (*agent.Summary, error) {
 	for _, l := range lines(head, false) {
 		p := userPrompt(l)
 		talked = talked || p != ""
-		if p = agent.OwnText(p); p != "" {
-			s.Title, s.TitleSource = clip(p), "prompt"
+		if p = agent.PromptTitle(p); p != "" {
+			s.Title, s.TitleSource = p, "prompt"
 			break
+		}
+	}
+	if s.Title == "" {
+		for _, l := range lines(head, false) {
+			role, text := previewMessage(l)
+			if role != "assistant" {
+				continue
+			}
+			text = agent.PreviewText(text)
+			if text == "" {
+				continue
+			}
+			text, _, _ = strings.Cut(text, "\n")
+			text = strings.TrimLeft(text, "#>*- ")
+			for _, end := range []string{". ", "! ", "? "} {
+				if i := strings.Index(text, end); i >= 0 {
+					text = text[:i+1]
+				}
+			}
+			if title := agent.PromptTitle(strings.TrimRight(text, ".:")); title != "" {
+				s.Title, s.TitleSource = title, "reply"
+				break
+			}
 		}
 	}
 	tail := head
@@ -538,7 +561,12 @@ func (m *Module) Live(ctx context.Context, h agent.Host, in agent.Install, ids [
 				status = "working"
 			}
 			li := agent.LiveInfo{State: agent.Live, Status: status}
+			seen := map[int]bool{}
 			for _, pid := range holders[paths[i]] {
+				if pid <= 0 || seen[pid] {
+					continue
+				}
+				seen[pid] = true
 				li.Procs = append(li.Procs, agent.LiveProc{PID: pid})
 			}
 			if len(li.Procs) > 0 {

@@ -133,29 +133,22 @@ function openIn(e, m) {
 
 // ---- The conversation ----
 
-const previews = new Map(); // by machine, key, last activity and how many: the answer
 let previewTimer = 0;
 const wantN = new Map(); // how many messages the user asked to see, by session
-
-function previewKey(e) { return `${e.machine}\u0000${e.key}\u0000${e.lastActive}\u0000${e.sizeKB}\u0000${wantN.get(e.machine + e.key) || 4}`; }
 
 // conversation is the Recent conversation section, filled once the preview is read (after
 // 120 ms on the same selection; a skeleton meanwhile).
 function conversation(e) {
   if (e.cloud || !e.canPreview || !state.info?.previews) return null;
   const body = h("div", { class: "conv", "aria-live": "polite", "aria-busy": "true" }, skeleton());
-  const k = previewKey(e);
-  if (previews.has(k)) fillConversation(body, e, previews.get(k));
-  else {
-    clearTimeout(previewTimer);
-    previewTimer = setTimeout(async () => {
-      let p;
-      try { p = await api("Preview", e.machine, e.key, wantN.get(e.machine + e.key) || 4); } catch (err) { p = { items: [], note: "Preview not available: " + errText(err) }; }
-      previews.set(k, p);
-      if (previews.size > 60) previews.delete(previews.keys().next().value);
-      if (body.isConnected) fillConversation(body, e, p);
-    }, 120);
-  }
+  // The backend validates the file's current size/mtime before reusing a preview.
+  // Scan metadata can be a minute old, so it cannot safely key a second cache here.
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(async () => {
+    let p;
+    try { p = await api("Preview", e.machine, e.key, wantN.get(e.machine + e.key) || 4); } catch (err) { p = { items: [], note: "Preview not available: " + errText(err) }; }
+    if (body.isConnected && state.info?.previews) fillConversation(body, e, p);
+  }, 120);
   return section("conversation", "Recent conversation", true, null, body);
 }
 

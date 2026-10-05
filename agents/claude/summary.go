@@ -222,7 +222,7 @@ func apply(s *info, head, tail []record) {
 	}
 	firstPrompt := ""
 	for _, r := range head {
-		if p := realPrompt(r); p != "" {
+		if p := agent.PromptTitle(userText(r)); p != "" {
 			firstPrompt = p
 			break
 		}
@@ -424,10 +424,10 @@ const maxReplyTitle = 80
 // title for a session whose prompts are all commands or notes.
 func firstReply(head []record) string {
 	for _, r := range head {
-		if r.Type != "assistant" || r.IsSidechain || r.Message == nil {
+		if r.Type != "assistant" || r.IsSidechain || r.IsMeta || r.Message == nil {
 			continue
 		}
-		if t := firstSentence(contentText(r.Message.Content)); t != "" {
+		if t := firstSentence(agent.PreviewText(contentText(r.Message.Content))); t != "" {
 			return clipWords(t, maxReplyTitle)
 		}
 	}

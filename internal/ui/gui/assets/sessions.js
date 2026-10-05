@@ -335,7 +335,8 @@ function chipFor(e, p) {
   return h("button", { class: "pchip" + (p.kind === "hopsesh" ? " hop" : ""), type: "button", tabindex: "-1", title: tip, "aria-label": `${words}${p.waiting ? ", waiting for you" : ""}: show`,
     onclick: (ev) => { ev.stopPropagation(); showPlace(e, p); } },
     p.kind === "claude-app" || p.kind === "codex-app" ? agentBadge(e.agent, e.agentName) : placeIcon(p.kind, 11),
-    h("span", { class: "pc-w" }, words), p.waiting ? h("span", { class: "dot needs", "aria-hidden": "true" }) : null);
+    h("span", { class: "pc-w" }, words), h("span", { class: "pc-n", "aria-hidden": "true" }, String(p.count || 1)),
+    p.waiting ? h("span", { class: "dot needs", "aria-hidden": "true" }) : null);
 }
 
 // presenceChips are at most two places, then "+N" (a popover lists them all), and

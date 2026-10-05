@@ -110,13 +110,23 @@ func (a *App) Preview(machine, key string, n int) (*PreviewDTO, error) {
 	if !on {
 		return &PreviewDTO{Items: []PreviewItemDTO{}, Note: "Conversation previews are off (Settings → General)."}, nil
 	}
-	ck := fmt.Sprintf("%s\x00%s\x00%d\x00%d\x00%d", machine, e.Session.Path, e.Session.Size, e.Session.LastActivity.UnixNano(), n)
-	if d, ok := previews.get(ck); ok {
-		return &d, nil
-	}
 	local := false
 	if m := inv.Machine(machine); m != nil {
 		local = m.Local
+	}
+	// Inventory timestamps describe conversation activity, not the current file version.
+	// Only reuse a preview when we can validate its size and mtime. Remote reads remain
+	// bounded by the module and timeout until the host API exposes a version token here.
+	ck := ""
+	if local && !e.Location.IsCloud() {
+		if fi, err := os.Stat(filepath.FromSlash(e.Session.Path)); err == nil {
+			ck = fmt.Sprintf("%s\x00%s\x00%s\x00%d\x00%d\x00%d", machine, key, e.Session.Path, fi.Size(), fi.ModTime().UnixNano(), n)
+		}
+	}
+	if ck != "" {
+		if d, ok := previews.get(ck); ok {
+			return &d, nil
+		}
 	}
 	limit := 30 * time.Second
 	if !local {
@@ -133,8 +143,16 @@ func (a *App) Preview(machine, key string, n int) (*PreviewDTO, error) {
 	case err != nil:
 		return &PreviewDTO{Items: []PreviewItemDTO{}, Note: "Preview not available: " + err.Error()}, nil
 	}
+	a.mu.Lock()
+	on = a.core.Cfg.PreviewsOn()
+	a.mu.Unlock()
+	if !on {
+		return &PreviewDTO{Items: []PreviewItemDTO{}, Note: "Conversation previews are off (Settings → General)."}, nil
+	}
 	d := previewDTO(p, e.AgentName)
-	previews.put(ck, d)
+	if ck != "" {
+		previews.put(ck, d)
+	}
 	return &d, nil
 }
 
@@ -328,13 +346,26 @@ func placesOf(li agent.LiveInfo, t presence.Table, self int) []PlaceDTO {
 	}
 	if len(procs) == 0 {
 		if li.App {
-			add(string(presence.KindClaudeApp), "", false)
+			add(string(presence.KindClaudeApp), "", strings.HasPrefix(li.Status, "waiting"))
 		} else {
-			add(string(presence.KindUnknown), "", false)
+			add(string(presence.KindUnknown), "", strings.HasPrefix(li.Status, "waiting"))
 		}
 		return out
 	}
+
+	// Count each process once even when a detector supplies duplicate observations.
+	unique := make([]agent.LiveProc, 0, len(procs))
+	seen := map[int]int{}
 	for _, p := range procs {
+		if i, ok := seen[p.PID]; ok {
+			unique[i].Waiting = unique[i].Waiting || p.Waiting
+			unique[i].App = unique[i].App || p.App
+		} else {
+			seen[p.PID] = len(unique)
+			unique = append(unique, p)
+		}
+	}
+	for _, p := range unique {
 		if p.App {
 			add(string(presence.KindClaudeApp), "", p.Waiting)
 			continue
@@ -407,13 +438,17 @@ func (a *App) ResumeCommand(machine, key string) (string, error) {
 // ShowPlace brings forward an editor a session runs in (VS Code, Cursor): hopsesh can't
 // pick the terminal inside it, so the app comes to the front as it is.
 func (a *App) ShowPlace(name string) error {
+	app, ok := ideApps[name]
+	if !ok {
+		return errors.New("hopsesh cannot show that app")
+	}
 	if appHook != nil {
 		return appHook(name)
 	}
 	if runtime.GOOS != "darwin" {
 		return errors.New("hopsesh can't bring that app forward here")
 	}
-	return proc.Command("open", "-a", ideApps[name]).Run()
+	return proc.Command("open", "-a", app).Run()
 }
 
 // ideApps are the editors ShowPlace can bring forward, by the name presence gives them, as

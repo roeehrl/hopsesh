@@ -266,3 +266,50 @@ func previewSetup(t *testing.T) (agent.Host, agent.Install, map[string]agent.Sum
 	}
 	return h, in, byID
 }
+
+func TestPreviewMixedMessageFormats(t *testing.T) {
+	h, file := rolloutOf(t, []rec{
+		event("00:01", rec{"type": "user_message", "message": "first"}),
+		resp("00:01", said("user", "input_text", "first")),
+		resp("00:02", said("assistant", "output_text", "done")),
+		event("00:02", rec{"type": "agent_message", "message": "done"}),
+		event("00:03", rec{"type": "user_message", "message": "second"}),
+		event("00:04", rec{"type": "agent_message", "message": "latest answer"}),
+	})
+	if got := shape(preview(t, h, file, 10)); got != "user:first | agent:done | user:second | agent:latest answer" {
+		t.Fatal(got)
+	}
+}
+
+func TestPreviewCanceledAndNonPowerOfTwoBound(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := New().Preview(ctx, nil, agent.Install{}, agent.Summary{}, 4); err != context.Canceled {
+		t.Fatalf("%v", err)
+	}
+	defer func(w, m int64) { previewWindow, previewMaxWindow = w, m }(previewWindow, previewMaxWindow)
+	previewWindow, previewMaxWindow = 2<<10, 5<<10
+	h, file := rolloutOf(t, thread(1500))
+	var read atomic.Int64
+	preview(t, countingHost{h, &read}, file, 10000)
+	if n := read.Load(); n > previewMaxWindow+headChunk {
+		t.Fatalf("read %d bytes", n)
+	}
+}
+
+func TestSummarySkipsCommandTitleAndFallsBackToReply(t *testing.T) {
+	h, file := rolloutOf(t, []rec{
+		{"type": "session_meta", "payload": rec{"id": t1, "cwd": "/repo"}},
+		resp("00:01", said("user", "input_text", "/clear")),
+		resp("00:02", said("user", "input_text", "[Pasted text #1 +30 lines]")),
+		resp("00:03", said("assistant", "output_text", "## Ready to continue. Next sentence.")),
+	})
+	fi, err := h.FS().Stat(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := summarize(h, rollout{path: file, info: fi})
+	if err != nil || s == nil || s.Title != "Ready to continue" || s.TitleSource != "reply" {
+		t.Fatalf("%+v %v", s, err)
+	}
+}

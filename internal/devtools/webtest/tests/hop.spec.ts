@@ -84,7 +84,7 @@ test("Activity looks for merged branches only when asked, and offers none that i
   const id = await post(page, "handed=1");
   await turnOn(page, "Claude Code cloud");
   await paste(page, id);
-  await cloudDetails(page).getByRole("button", { name: /Bring here \(Claude Code\)/ }).click();
+  await cloudDetails(page).getByRole("button", { name: /^Bring to this/ }).click();
   const sheet = page.locator("#sheet");
   await sheet.getByRole("button", { name: /Bring here in/ }).click();
   await expect(page.locator(".outcome.ok")).toBeVisible({ timeout: 60_000 });

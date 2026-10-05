@@ -34,6 +34,18 @@ test("filters: status first, faceted counts, chips with is / is not, Clear, and 
   // Chips: the facet word switches is / is not, the values reopen the facet, ✕ removes it.
   const chips = page.locator("#list-chips");
   await expect(chips.getByRole("button", { name: "Status is Ended, edit" })).toBeVisible();
+  // Editing a chip opens its facet directly, without the parent Filter menu.
+  // Toggling a value must update that menu's checks as well as the list.
+  const errors: string[] = [];
+  page.on("pageerror", (err) => errors.push(err.message));
+  await chips.getByRole("button", { name: "Status is Ended, edit" }).click();
+  const status = page.getByRole("menu", { name: "Status", exact: true });
+  await status.getByRole("menuitemcheckbox", { name: /^Moved/ }).click();
+  await expect(status.getByRole("menuitemcheckbox", { name: /^Moved/ })).toHaveAttribute("aria-checked", "true");
+  await status.getByRole("menuitemcheckbox", { name: /^Moved/ }).click();
+  await expect(status.getByRole("menuitemcheckbox", { name: /^Moved/ })).toHaveAttribute("aria-checked", "false");
+  await page.keyboard.press("Escape");
+  expect(errors).toEqual([]);
   await chips.getByRole("button", { name: /^Status: is, switch/ }).click();
   await expect(chips.getByRole("button", { name: "Status is not Ended, edit" })).toBeVisible();
   await expect(count(page)).toHaveText("0 of 4");

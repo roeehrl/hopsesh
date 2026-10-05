@@ -170,6 +170,12 @@ test("a session open in the Claude app says so, and shows the app", async ({ pag
   await expect(d.getByText("Open in", { exact: true })).toBeVisible();
   await d.locator("#act-primary").click();
   await expect.poll(async () => (await (await page.request.get("/terminal-test/links")).json()) as string[]).toContain("app:Claude");
+  await page.locator("#btn-filter").click();
+  await page.getByRole("menuitem", { name: /^Has/ }).click();
+  await page.getByRole("menuitemcheckbox", { name: /^Open in a terminal tab/ }).click();
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await expect(r).toHaveCount(0); // A desktop-app window is not a terminal tab.
 });
 
 test("a session open in a terminal is shown where it runs, never opened twice", async ({ page }) => {

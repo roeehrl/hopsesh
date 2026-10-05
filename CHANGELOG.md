@@ -41,7 +41,7 @@ All notable changes to this project are documented here. The format follows
   labels an iTerm2 tab (a badge and `user.hopsesh_title`, `_agent`, `_machine` variables,
   sanitised and base64-encoded, wrapped for tmux), records the tab and the agent's process
   while it runs, and keeps the tab open with the exit code shown.
-- Show a running session instead of a second copy: **Show its terminal tab** in the app and
+- Show a running session instead of a second copy: **Show in ‹terminal app›** in the app and
   `hopsesh open <session>` find the iTerm2 or Terminal tab from the agent's own process id
   (Claude Code's registry) or hopsesh's launch record (Codex) and the process table, and
   bring it forward. Resume refuses a session that already runs.
@@ -57,8 +57,8 @@ All notable changes to this project are documented here. The format follows
   run. The macOS app's Automation permission text now names your terminal app, not only
   Terminal.
 - **The hopsesh Terminal window**: the app now has a terminal of its own, a window with
-  tabs. **Resume here** runs a session in a tab there, and hand-offs to Claude Code cloud,
-  bringing a session back from it, cloud sign-ins and **Open a shell here** run there too.
+  tabs. **Resume in hopsesh Terminal** runs a session in a tab there, and hand-offs to Claude
+  Code cloud, bringing a session back, cloud sign-ins and **Open a shell in its folder** run there too.
   Each tab has a status chip (running, waiting for you, exited with its code), says what it
   runs and where, and keeps **Open in my terminal**, which ends the tab and runs the same
   command in your terminal app after asking. It uses xterm.js 6.0.0 (shipped inside the

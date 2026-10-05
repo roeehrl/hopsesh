@@ -9,6 +9,8 @@ test("the palette finds sessions and runs commands", async ({ page }) => {
   await input.fill("codeword");
   await expect(page.locator(".pal-grp", { hasText: "Session" }).first()).toBeVisible();
   await expect(page.locator(".pal-item", { hasText: /Continue with (Codex|Claude Code)…/ }).first()).toBeVisible();
+  // Explanatory lines from Move are not runnable palette entries.
+  expect(await page.locator(".pal-item > span:first-of-type").allTextContents()).not.toContain("");
   await input.fill("activity");
   await input.press("Enter");
   await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();

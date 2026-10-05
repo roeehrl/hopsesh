@@ -62,7 +62,7 @@ const at = (e) => (e.lastActive ? new Date(e.lastActive).getTime() : 0);
 const locationOf = (e) => (e.cloud ? "clouds" : e.machine === here() ? "here" : "machines");
 function hasOf(e) {
   const out = [];
-  if (placesOf(e).length) out.push("tab");
+  if (placesOf(e).some((p) => !["claude-app", "codex-app"].includes(p.kind))) out.push("tab");
   if (e.mirror) out.push("mirror");
   if (e.unpushed || e.dirty) out.push("unpushed");
   return out;
@@ -302,7 +302,10 @@ function chip(f) {
   return h("span", { class: "fchip" + (not ? " not" : "") },
     FACETS[f].single ? h("span", { class: "fchip-f" }, FACETS[f].name) : h("button", { class: "fchip-f", title: not ? "Is not: click for is" : "Is: click for is not", "aria-label": `${FACETS[f].name}: ${not ? "is not" : "is"}, switch`,
       onclick: () => { list.filter[f + "Not"] = !not; save(); redraw(false); } }, FACETS[f].name, not ? " is not" : ""),
-    h("button", { class: "fchip-v", "aria-label": `${words}, edit`, onclick: (ev) => openMenu(ev.currentTarget, facetItems(f), { label: FACETS[f].name }) }, vals.join(", ")),
+    h("button", { class: "fchip-v", "aria-label": `${words}, edit`, onclick: (ev) => {
+      const menu = openMenu(ev.currentTarget, facetItems(f), { label: FACETS[f].name });
+      menu.dataset.facet = f;
+    } }, vals.join(", ")),
     h("button", { class: "fchip-x", "aria-label": `Remove ${FACETS[f].name} filter`, onclick: () => { clearFacet(f); save(); redraw(false); } }, "✕"));
 }
 

@@ -54,6 +54,10 @@ async function run(fn, done) {
 }
 
 function save(patch) {
+  // Apply the privacy switch before navigating away: returning to Sessions must
+  // never briefly reveal a preview while SaveSettings/Info are still in flight.
+  if (patch.previews !== undefined) state.info.previews = patch.previews;
+  Object.assign(s, patch);
   return run(() => api("SaveSettings", Object.assign({ layout: s.layout, markMoved: s.markMoved, syncCode: s.syncCode, pushSource: s.pushSource, updateCheck: s.updateCheck || "off", appIcons: s.appIcons, previews: s.previews }, patch)), "Saved");
 }
 

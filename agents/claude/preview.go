@@ -24,7 +24,10 @@ var (
 
 // Preview reads the end of the transcript's active branch: from the newest message back
 // along parentUuid, within a tail window of the file (never the whole of it).
-func (m *Module) Preview(_ context.Context, h agent.Host, in agent.Install, s agent.Summary, n int) (agent.Preview, error) {
+func (m *Module) Preview(ctx context.Context, h agent.Host, in agent.Install, s agent.Summary, n int) (agent.Preview, error) {
+	if err := ctx.Err(); err != nil {
+		return agent.Preview{}, err
+	}
 	f, err := h.FS().Open(s.Path)
 	if err != nil {
 		return agent.Preview{}, err
@@ -41,7 +44,10 @@ func (m *Module) Preview(_ context.Context, h agent.Host, in agent.Install, s ag
 		p     agent.Preview
 		recs  []record
 	)
-	for win := previewWindow; ; win *= 2 {
+	for win := min(previewWindow, previewMaxWindow); ; win = min(win*2, previewMaxWindow) {
+		if err := ctx.Err(); err != nil {
+			return agent.Preview{}, err
+		}
 		from := max(size-win, 0)
 		if from < start {
 			more := make([]byte, start-from)
@@ -56,6 +62,9 @@ func (m *Module) Preview(_ context.Context, h agent.Host, in agent.Install, s ag
 		if p.Messages() >= n || start == 0 || rooted || win >= previewMaxWindow {
 			break
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return agent.Preview{}, err
 	}
 	head := recs
 	if start > 0 {
@@ -124,7 +133,7 @@ func previewItems(recs []record) (items []agent.PreviewItem, rooted bool) {
 func previewOf(r record) []agent.PreviewItem {
 	ts := parseTime(r.Timestamp)
 	switch {
-	case r.IsSidechain:
+	case r.IsSidechain || r.IsMeta:
 		return nil
 	case r.Type == "system" && r.Subtype == "compact_boundary", r.Type == "user" && r.IsCompactSummary:
 		return []agent.PreviewItem{{Role: agent.PreviewCompacted, Time: ts}}
@@ -159,6 +168,9 @@ func previewOf(r record) []agent.PreviewItem {
 // mark for an attached image its text does not mention. An interruption notice is not a
 // prompt.
 func userText(r record) string {
+	if r.IsSidechain {
+		return ""
+	}
 	t := promptText(r)
 	if t == "" || strings.HasPrefix(t, "[Request interrupted by user") {
 		return ""

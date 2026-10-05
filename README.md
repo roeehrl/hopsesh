@@ -179,8 +179,8 @@ In iTerm2 the tab gets a badge with the session's title, agent and machine (and
 `user.hopsesh_*` variables for your own title or status bar); hopsesh leaves the tab's
 title to the agent.
 
-A session that's already running is shown, not opened twice: the app's **Show its terminal
-tab** and `hopsesh open` bring its iTerm2 or Terminal tab forward. hopsesh finds the tab
+A session that's already running is shown, not opened twice: the app's **Show in iTerm2**
+or **Show in Terminal** and `hopsesh open` bring its tab forward. hopsesh finds the tab
 from the agent's own process and the terminal it runs on (for Codex, from hopsesh's record of
 the launch), never from anything the tab shows. It never types into a tab or reads one, and
 never changes iTerm2's settings: it doesn't turn on the Python API or install iTerm2's

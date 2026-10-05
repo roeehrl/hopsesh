@@ -239,7 +239,7 @@ export function onTurnOn(fn) { turnOnCloud = fn; }
 function handItem(t, run) {
   const ok = t.ok;
   const plain = (x) => String(x || "").replace(/`/g, "");
-  return { id: "handoff:" + t.cloud, label: `Hand off to ${t.title}…`, disabled: !ok, why: ok ? "" : cap(plain(t.why)), sub: ok ? plain(t.note) : "", title: t.cloud, icon: icon(ICONS.cloud, 16),
+  return { id: "handoff:" + t.cloud, label: `Hand off to ${t.title}…`, disabled: !ok, why: ok ? "" : cap(plain(t.why)), sub: ok ? [t.note, ...(t.limits || []).slice(0, 1)].filter(Boolean).map(plain).join(" · ") : "", title: t.cloud, icon: icon(ICONS.cloud, 16),
     chip: cloudOf(t.cloud)?.experimental ? h("span", { class: "chip st-warn mini" }, "experimental") : null, run };
 }
 
@@ -301,7 +301,7 @@ export function actionsFor(e) {
   const out = [];
   if (m.primary && !m.primary.disabled) out.push(m.primary);
   for (const it of m.chevron) if (!it.disabled) out.push(it);
-  for (const g of m.move) for (const it of g.items) if (!it.disabled && !out.some((x) => x.id === it.id)) out.push(it);
+  for (const g of m.move) for (const it of g.items) if (it.run && !it.disabled && !out.some((x) => x.id === it.id)) out.push(it);
   for (const it of m.more) if (!it.disabled) out.push(it);
   return out;
 }

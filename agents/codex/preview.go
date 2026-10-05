@@ -24,7 +24,10 @@ var (
 
 // Preview reads the end of the rollout, within a tail window of the file (never the whole
 // of it), and the first prompt from its head.
-func (m *Module) Preview(_ context.Context, h agent.Host, in agent.Install, s agent.Summary, n int) (agent.Preview, error) {
+func (m *Module) Preview(ctx context.Context, h agent.Host, in agent.Install, s agent.Summary, n int) (agent.Preview, error) {
+	if err := ctx.Err(); err != nil {
+		return agent.Preview{}, err
+	}
 	f, err := h.FS().Open(s.Path)
 	if err != nil {
 		return agent.Preview{}, err
@@ -41,7 +44,10 @@ func (m *Module) Preview(_ context.Context, h agent.Host, in agent.Install, s ag
 		p     agent.Preview
 		ls    []line
 	)
-	for win := previewWindow; ; win *= 2 {
+	for win := min(previewWindow, previewMaxWindow); ; win = min(win*2, previewMaxWindow) {
+		if err := ctx.Err(); err != nil {
+			return agent.Preview{}, err
+		}
 		from := max(size-win, 0)
 		if from < start {
 			more := make([]byte, start-from)
@@ -55,6 +61,9 @@ func (m *Module) Preview(_ context.Context, h agent.Host, in agent.Install, s ag
 		if p.Messages() >= n || start == 0 || win >= previewMaxWindow {
 			break
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return agent.Preview{}, err
 	}
 	head := ls
 	if start > 0 {
@@ -73,24 +82,41 @@ func (m *Module) Preview(_ context.Context, h agent.Host, in agent.Install, s ag
 	return p, nil
 }
 
-// previewItems turns rollout records into preview items. Codex writes each message twice,
-// as a response item and as an event; the response items are read, and the events only in
-// a rollout (window) without them. Tool calls are counted from the structured
-// item_completed records when there are any, as Read does, else from the raw calls.
+// previewItems pairs event/response copies of each message, keeping unmatched events
+// (including a live turn's newest message). A window can contain both formats.
 func previewItems(ls []line) []agent.PreviewItem {
-	structured, responses := false, false
-	for _, l := range ls {
-		switch l.Type {
-		case "event_msg":
-			structured = structured || strings.Contains(string(l.Payload), `"item_completed"`)
-		case "response_item":
-			var r struct {
-				Type string `json:"type"`
-				Role string `json:"role"`
+	structured := false
+	pairedEvents := map[int]bool{}
+	pending := map[string][]int{}
+	for i, l := range ls {
+		if l.Type == "event_msg" {
+			for _, nd := range fromEvent(l, parseTime(l.Timestamp)) {
+				structured = structured || nd.Kind == ir.KindToolCall
 			}
-			if json.Unmarshal(l.Payload, &r) == nil && r.Type == "message" && (r.Role == "user" || r.Role == "assistant") {
-				responses = true
+		}
+		role, text := previewMessage(l)
+		if role == "" || text == "" {
+			continue
+		}
+		key := role + "\x00" + strings.TrimSpace(text)
+		candidates := pending[key]
+		match := -1
+		for j, prev := range candidates {
+			if ls[prev].Type != l.Type {
+				match = j
+				break
 			}
+		}
+		if match < 0 {
+			pending[key] = append(candidates, i)
+			continue
+		}
+		prev := candidates[match]
+		pending[key] = append(candidates[:match], candidates[match+1:]...)
+		if l.Type == "event_msg" {
+			pairedEvents[i] = true
+		} else {
+			pairedEvents[prev] = true
 		}
 	}
 	var out []agent.PreviewItem
@@ -100,7 +126,7 @@ func previewItems(ls []line) []agent.PreviewItem {
 	call := func(k ir.ToolKind, l line) {
 		out = append(out, agent.PreviewItem{Role: agent.PreviewTools, Time: parseTime(l.Timestamp), Tools: map[ir.ToolKind]int{k: 1}})
 	}
-	for _, l := range ls {
+	for i, l := range ls {
 		switch l.Type {
 		case "compacted":
 			add(agent.PreviewCompacted, "", l)
@@ -111,9 +137,6 @@ func previewItems(ls []line) []agent.PreviewItem {
 			}
 			switch ri.Type {
 			case "message":
-				if !responses {
-					continue
-				}
 				switch ri.Role {
 				case "user":
 					if t := userPrompt(l); t != "" {
@@ -154,11 +177,11 @@ func previewItems(ls []line) []agent.PreviewItem {
 			}
 			switch e.Type {
 			case "user_message":
-				if t := userText(e.Message); t != "" && !responses {
+				if t := userText(e.Message); t != "" && !pairedEvents[i] {
 					add(agent.PreviewUser, withImages(t, len(e.Images)), l)
 				}
 			case "agent_message":
-				if !responses {
+				if !pairedEvents[i] {
 					add(agent.PreviewAgent, e.Message, l)
 				}
 			case "context_compacted":
@@ -210,4 +233,34 @@ func (m *Module) Rename(_ context.Context, h agent.Host, in agent.Install, s age
 		t = agent.MarkTitle(*s.Mark, t)
 	}
 	return setName(h, in, string(s.Key.Session), t)
+}
+
+// previewMessage extracts only public user/assistant text for duplicate matching.
+func previewMessage(l line) (string, string) {
+	if l.Type == "event_msg" {
+		var e struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(l.Payload, &e) == nil {
+			switch e.Type {
+			case "user_message":
+				return "user", e.Message
+			case "agent_message":
+				return "assistant", e.Message
+			}
+		}
+	} else if l.Type == "response_item" {
+		var r responseItem
+		if json.Unmarshal(l.Payload, &r) == nil && r.Type == "message" && (r.Role == "user" || r.Role == "assistant") {
+			var parts []string
+			for _, c := range r.Content {
+				if c.Type == "input_text" || c.Type == "output_text" {
+					parts = append(parts, c.Text)
+				}
+			}
+			return r.Role, strings.Join(parts, "\n")
+		}
+	}
+	return "", ""
 }

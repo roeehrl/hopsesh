@@ -199,6 +199,20 @@ func TestPreviewAndRename(t *testing.T) {
 	if again, _ := a.Preview(e.Machine, e.Key, 4); len(again.Items) != len(p.Items) {
 		t.Fatal("the cached preview differs")
 	}
+	// A running file changes between scans; the old inventory must not pin the cache.
+	f, err := os.OpenFile(e.Path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.WriteString("\n" + `{"type":"user","uuid":"cache-new","parentUuid":null,"message":{"role":"user","content":"fresh preview without a scan"}}` + "\n")
+	f.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := a.Preview(e.Machine, e.Key, 4)
+	if err != nil || fresh.Note != "" || len(fresh.Items) != 1 || fresh.Items[0].Text != "fresh preview without a scan" {
+		t.Fatalf("stale preview: %+v %v", fresh, err)
+	}
 	if err := a.Rename(e.Machine, e.Key, "Renamed here"); err != nil {
 		t.Fatal(err)
 	}
@@ -252,4 +266,22 @@ func TestPreviewAndRename(t *testing.T) {
 		}
 	}
 	_ = time.Second
+}
+
+func TestPlacesOfDuplicatePID(t *testing.T) {
+	li := agent.LiveInfo{State: agent.Live, Procs: []agent.LiveProc{{PID: 123}, {PID: 123, Waiting: true}}}
+	got := placesOf(li, nil, 0)
+	if len(got) != 1 || got[0].Count != 1 || !got[0].Waiting {
+		t.Fatalf("%+v", got)
+	}
+	got = placesOf(agent.LiveInfo{State: agent.Live, Status: "waiting for input"}, nil, 0)
+	if len(got) != 1 || !got[0].Waiting {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestShowPlaceRejectsUnknown(t *testing.T) {
+	if err := new(App).ShowPlace("not an editor"); err == nil {
+		t.Fatal("unknown app accepted")
+	}
 }

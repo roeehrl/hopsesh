@@ -66,6 +66,7 @@ func main() {
 		},
 	})
 	svc.Terms.Privileged(win) // the app's own window: the one with its bindings
+	configureTitlebar(win)
 	// Closing the window while programs run in tabs hides it (Settings → Terminal → Keep
 	// tabs when the window closes), or asks whether to quit.
 	win.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
