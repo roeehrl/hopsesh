@@ -25,6 +25,7 @@ type SpecData struct {
 	Experimental       []agent.Capability  `json:"experimental"`
 	DesktopApps        map[string][]string `json:"desktopApps"`
 	Clouds             []CloudData         `json:"clouds"`
+	TerminalEnv        []string            `json:"terminalEnv"`
 }
 
 // BinaryData is a program the module may run.
@@ -62,6 +63,7 @@ type CloudData struct {
 	EnvHint      string            `json:"envHint,omitempty"`
 	BriefBranch  bool              `json:"briefBranch"`
 	NoFollowUp   string            `json:"noFollowUp,omitempty"`
+	SignIn       []string          `json:"signIn"`
 	Watch        WatchData         `json:"watch"`
 }
 
@@ -100,7 +102,7 @@ func Data(s agent.Spec) SpecData {
 		LoginEnv: list(s.LoginEnv), Secrets: list(s.Secrets), Worktrees: list(s.Worktrees),
 		Instructions: list(s.Instructions), GlobalInstructions: list(s.GlobalInstructions), Tools: s.Tools,
 		Features: list(s.Features), Experimental: list(s.Experimental), DesktopApps: lists(s.Icon.Apps),
-		Binaries: []BinaryData{}, Roots: []RootData{}, Clouds: []CloudData{},
+		Binaries: []BinaryData{}, Roots: []RootData{}, Clouds: []CloudData{}, TerminalEnv: list(s.TerminalEnv),
 	}
 	for _, b := range s.Binaries {
 		d.Binaries = append(d.Binaries, BinaryData{Name: b.Name, Candidates: lists(b.Candidates), VersionArgs: list(b.VersionArgs)})
@@ -133,7 +135,7 @@ func Data(s agent.Spec) SpecData {
 			Name: c.Name, Title: c.Title, Driver: c.Driver, Tested: list(c.Tested), Hosts: list(c.Hosts), Up: c.Up, Down: c.Down,
 			CodeUp: list(c.CodeUp), CodeDown: list(c.CodeDown), Needs: list(c.Needs), VendorPrefix: c.VendorPrefix,
 			Problems: problems, Unset: list(c.Unset), Noun: c.Noun, Limits: list(c.Limits), Summary: c.Summary,
-			EnvHint: c.EnvHint, BriefBranch: c.BriefBranch, NoFollowUp: c.NoFollowUp, Watch: wd,
+			EnvHint: c.EnvHint, BriefBranch: c.BriefBranch, NoFollowUp: c.NoFollowUp, SignIn: list(c.SignIn), Watch: wd,
 		})
 	}
 	return d
