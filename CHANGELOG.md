@@ -54,8 +54,8 @@ start fresh and add your machines again.
   repository, and hopsesh never answers it or changes Claude Code's settings to skip it.
   `hopsesh pull claude-cloud:<id>` (or the session's link) makes a new worktree of its
   repository and runs `claude --teleport` there (`--run`, or the command to paste). Claude
-  Code saves its copy only after you send a message in it: send one (even "ok"), then type
-  `/exit`, and hopsesh picks the copy up, checks it against the briefing when hopsesh
+  Code saves its copy only after you send a message in it: send one (even "ok") and
+  hopsesh picks the copy up, checks it against the briefing when hopsesh
   started that cloud session (otherwise it says how many messages came), keeps the cloud's
   `claude/…` branch as `hopsesh/from/claude-cloud/…` and records it all for undo. `--in
   codex` continues it in Codex, and `--code-only` brings the branch alone. An agent running
@@ -120,8 +120,8 @@ start fresh and add your machines again.
   whether its program runs, waits for you or has exited (with its code), and has **Open in
   my terminal**, which ends the tab and runs the same command in your terminal app after
   asking. Banners say when Claude Code asks whether it trusts the hand-off folder (you
-  answer it in the tab) and, when bringing a session back, to send one message and then
-  type `/exit`; the done screen says when the tab ended before Claude Code saved a copy.
+  answer it in the tab) and, when bringing a session back, to send one message, then that
+  the copy is saved; the done screen says when the tab ended before Claude Code saved a copy.
   Copy, find and clear, links that open only after you confirm the whole address,
   Shift+Return for a new line in Claude Code, a screen reader mode, and colours that follow
   the app's light or dark look. Ctrl+` moves between the terminal and your sessions. It
@@ -186,6 +186,18 @@ start fresh and add your machines again.
   variables a module's programs get in the app's tabs, `agent.LinksIn` and `agent.LinkOn`,
   which read links on an exact host only, and the cloud conformance kit
   (`agenttest.RunCloud`, `agenttest.RunCloudWith`).
+
+- **The app's window:** the sidebar and the details panel can be resized and hidden
+  (dividers, the title bar's buttons, a new View menu: ⌃⌘S and ⌥⌘I, Ctrl+B and Ctrl+I on
+  Windows), and the layout is kept in `[window]`. The sidebar lists the clouds that are on
+  and the agents with sessions; setup is one line on All sessions. The list refreshes this
+  machine every minute while the window is in front. In the palette, Enter shows a session
+  in the list and ⌘Enter runs its action. Cloud sessions carry a cloud badge, and a session
+  open in the Claude app offers Show the Claude app. "In the cloud" leaves out Remote
+  Control mirrors, which run on their machine.
+- A cloud hand-off's tab runs in the background and comes forward when Claude Code asks
+  something or the step fails. Tabs whose program ended well close on their own (Settings →
+  Terminal → Close a tab when its program ends).
 
 ### Changed
 
