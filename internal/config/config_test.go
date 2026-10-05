@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,8 +47,37 @@ func TestLoadSaveAndRefuseOldFormat(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(three), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Load(); !errors.Is(err, ErrOldConfig) {
-		t.Fatalf("a schema 3 file must be refused, got %v", err)
+	if _, err := Load(); !errors.Is(err, ErrOldConfig) || errors.Is(err, ErrNewConfig) {
+		t.Fatalf("a schema 3 file must be refused as older, got %v", err)
+	}
+}
+
+// A file a newer hopsesh wrote (after a downgrade) is refused as newer, never as older: the
+// way out is updating hopsesh, and setting it aside comes second.
+func TestRefuseNewerFormat(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOPSESH_CONFIG_DIR", dir)
+	newer := fmt.Sprintf("schema = %d\nrepos_dir = \"/x\"\nlayout = \"flat\"\n[future]\nthing = true\n", Schema+1)
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(newer), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load()
+	if !errors.Is(err, ErrNewConfig) || errors.Is(err, ErrOldConfig) {
+		t.Fatalf("a newer file must be refused as newer, got %v", err)
+	}
+	want := fmt.Sprintf("the configuration was written by a newer hopsesh (schema %d); update hopsesh, or move the file aside to start fresh", Schema+1)
+	if !strings.HasPrefix(err.Error(), want) || !strings.Contains(err.Error(), filepath.Join(dir, "config.toml")) {
+		t.Fatalf("message: %q", err)
+	}
+	if c.ReposDir == "/x" {
+		t.Fatal("nothing of a newer file is read")
+	}
+	old, err := SetAside()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(old); string(b) != newer {
+		t.Fatal("set aside, the newer file is kept as it was")
 	}
 }
 

@@ -24,6 +24,8 @@ import (
 	"github.com/charmbracelet/x/xpty"
 	"github.com/muesli/cancelreader"
 	"golang.org/x/term"
+
+	"github.com/roeehrl/hopsesh/internal/core/winshim"
 )
 
 // ErrNoPseudoTerminal is returned when this system cannot give the program a
@@ -81,6 +83,11 @@ func (r *Relay) Run() error {
 	if len(r.Argv) == 0 {
 		return errors.New("nothing to run")
 	}
+	// On Windows, an npm command shim (claude.cmd) runs as the program behind it.
+	argv, err := winshim.Argv(r.Argv)
+	if err != nil {
+		return fmt.Errorf("starting %s: %w", r.Argv[0], err)
+	}
 	in, out := r.in, r.out
 	if in == nil {
 		in = os.Stdin
@@ -96,7 +103,7 @@ func (r *Relay) Run() error {
 	}
 	defer pty.Close()
 
-	cmd := exec.Command(r.Argv[0], r.Argv[1:]...) //nolint:gosec // a module's driver, by its argument list
+	cmd := exec.Command(argv[0], argv[1:]...) //nolint:gosec // a module's driver, by its argument list
 	cmd.Dir, cmd.Env = r.Dir, r.Env
 	setSession(cmd)
 	if err := pty.Start(cmd); err != nil {

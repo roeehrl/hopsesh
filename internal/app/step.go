@@ -21,6 +21,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/pty"
 	"github.com/roeehrl/hopsesh/internal/core/term"
 	"github.com/roeehrl/hopsesh/internal/core/termapp"
+	"github.com/roeehrl/hopsesh/internal/core/winshim"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -40,6 +41,19 @@ func StepRelay(s move.TermStep) *term.Relay {
 	r := term.New(s.Run.Argv, s.Run.Dir, env)
 	r.Capture = &term.Capture{}
 	return r
+}
+
+// StepCommand is a terminal step's driver run on the terminal itself, unwatched (where this
+// system has no pseudo-terminal), with the relay's environment; on Windows an npm command
+// shim runs as the program behind it, as in the relay.
+func StepCommand(s move.TermStep) (*exec.Cmd, error) {
+	argv, err := winshim.Argv(s.Run.Argv)
+	if err != nil {
+		return nil, err
+	}
+	c := exec.Command(argv[0], argv[1:]...) //nolint:gosec // the module's driver, by its argument list
+	c.Dir, c.Env = s.Run.Dir, append(host.Without(os.Environ(), s.Run.Unset), s.Run.Env...)
+	return c, nil
 }
 
 // ReadStep reads the session a terminal step started from what its relay saw, through the
@@ -154,8 +168,10 @@ func (a *App) afterStep(s move.TermStep, r *term.Relay, ask func() string) (move
 // runUnwatched runs a step's driver on the terminal itself (no pseudo-terminal here), and
 // asks for the link it printed.
 func (a *App) runUnwatched(s move.TermStep, in io.Reader, out io.Writer, ask func() string) (move.StepResult, error) {
-	c := exec.Command(s.Run.Argv[0], s.Run.Argv[1:]...) //nolint:gosec // the module's driver, by its argument list
-	c.Dir, c.Env = s.Run.Dir, append(host.Without(os.Environ(), s.Run.Unset), s.Run.Env...)
+	c, err := StepCommand(s)
+	if err != nil {
+		return move.StepResult{}, err
+	}
 	c.Stdin, c.Stdout, c.Stderr = in, out, out
 	_ = c.Run()
 	if ask != nil {
@@ -307,11 +323,13 @@ func (a *App) RunStepFile(id string, tio TerminalIO) error {
 	switch {
 	case errors.Is(err, term.ErrNoPseudoTerminal):
 		// Unwatched: the user pastes the link in the app.
-		c := exec.Command(s.Run.Argv[0], s.Run.Argv[1:]...) //nolint:gosec // the module's driver, checked above
-		c.Dir, c.Env = s.Run.Dir, append(host.Without(os.Environ(), s.Run.Unset), s.Run.Env...)
-		c.Stdin, c.Stdout, c.Stderr = in, out, out
-		_ = c.Run()
-		o.NoSession, o.Error = true, "hopsesh could not watch "+filepath.Base(s.Run.Argv[0])+" here"
+		if c, cerr := StepCommand(s); cerr != nil {
+			o.Error = cerr.Error()
+		} else {
+			c.Stdin, c.Stdout, c.Stderr = in, out, out
+			_ = c.Run()
+			o.NoSession, o.Error = true, "hopsesh could not watch "+filepath.Base(s.Run.Argv[0])+" here"
+		}
 	case err != nil:
 		o.Error = err.Error()
 	default:

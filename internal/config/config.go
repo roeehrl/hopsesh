@@ -19,8 +19,12 @@ import (
 // hopsesh keeps no code for older formats.
 const Schema = 4
 
-// ErrOldConfig means the configuration file was written by an older hopsesh.
-var ErrOldConfig = errors.New("the configuration was written by an older hopsesh")
+// ErrOldConfig means the configuration file was written by an older hopsesh; ErrNewConfig,
+// by a newer one (after a downgrade), which this one must not set aside as if it were old.
+var (
+	ErrOldConfig = errors.New("the configuration was written by an older hopsesh")
+	ErrNewConfig = errors.New("the configuration was written by a newer hopsesh")
+)
 
 // Host is one machine hopsesh knows about.
 type Host struct {
@@ -228,7 +232,8 @@ func StateDir() string {
 func Path() string { return filepath.Join(Dir(), "config.toml") }
 
 // Load reads the configuration, filling defaults for missing values. A file in another
-// format is refused with ErrOldConfig.
+// format is refused with ErrOldConfig (an older one, or one that is not hopsesh's) or
+// ErrNewConfig (a newer one).
 func Load() (Config, error) {
 	c := Defaults()
 	b, err := os.ReadFile(Path())
@@ -241,7 +246,11 @@ func Load() (Config, error) {
 	var probe struct {
 		Schema int `toml:"schema"`
 	}
-	if _, err := toml.NewDecoder(bytes.NewReader(b)).Decode(&probe); err != nil || probe.Schema != Schema {
+	_, err = toml.NewDecoder(bytes.NewReader(b)).Decode(&probe)
+	switch {
+	case err == nil && probe.Schema > Schema:
+		return Defaults(), fmt.Errorf("%w (schema %d); update hopsesh, or move the file aside to start fresh: %s", ErrNewConfig, probe.Schema, Path())
+	case err != nil || probe.Schema != Schema:
 		return Defaults(), fmt.Errorf("%w: %s (move it aside; hopsesh starts fresh and you add your machines again)", ErrOldConfig, Path())
 	}
 	if _, err := toml.NewDecoder(bytes.NewReader(b)).Decode(&c); err != nil {
@@ -281,8 +290,9 @@ func Save(c Config) error {
 	return os.Rename(tmp, Path())
 }
 
-// SetAside renames an older configuration file out of the way (to config.toml.old-<time>)
-// so hopsesh can start fresh; it returns the new name.
+// SetAside renames the configuration file out of the way (to config.toml.old-<time>) so
+// hopsesh can start fresh; it returns the new name. For a newer file (ErrNewConfig) it is
+// the user's explicit second choice, after updating hopsesh.
 func SetAside() (string, error) {
 	dst := Path() + ".old-" + time.Now().Format("20060102-150405")
 	if err := os.Rename(Path(), dst); err != nil {

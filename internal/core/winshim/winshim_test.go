@@ -101,3 +101,48 @@ func TestWinClean(t *testing.T) {
 		}
 	}
 }
+
+// On Windows a bare claude is found on PATH as npm's claude.cmd and runs as node with
+// Claude Code's script, its arguments passed on as they are (never through cmd.exe);
+// elsewhere, and for a program that is not a batch file, nothing changes.
+func TestCommand(t *testing.T) {
+	sysNode := `C:\Program Files\nodejs\node.exe`
+	cli := npmDir + `\node_modules\@anthropic-ai\claude-code\cli.js`
+	env := fakeEnv(t, map[string]bool{strings.ToLower(cli): true}, sysNode)
+	look := env.LookPath
+	env.LookPath = func(name string) (string, error) {
+		if name == "claude" {
+			return npmDir + `\claude.cmd`, nil
+		}
+		return look(name)
+	}
+	brief := `[hopsesh] fix "the bug" & say 100% done`
+	want := []string{sysNode, cli, "--cloud", brief}
+	for _, argv := range [][]string{{"claude", "--cloud", brief}, {npmDir + `\claude.cmd`, "--cloud", brief}} {
+		in := slices.Clone(argv)
+		got, err := Command(argv, "windows", env)
+		if err != nil {
+			t.Fatalf("%s: %v", argv[0], err)
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("%s:\n got  %q\n want %q", argv[0], got, want)
+		}
+		if !slices.Equal(argv, in) {
+			t.Errorf("the caller's argv changed: %q", argv)
+		}
+	}
+	exe := []string{`C:\Users\alice\.local\bin\claude.exe`, "--cloud", brief}
+	if got, err := Command(exe, "windows", env); err != nil || !slices.Equal(got, exe) {
+		t.Errorf("a program that is not a batch file: %q %v", got, err)
+	}
+	for _, goos := range []string{"darwin", "linux"} {
+		argv := []string{"claude", "--cloud", brief}
+		if got, err := Command(argv, goos, env); err != nil || !slices.Equal(got, argv) {
+			t.Errorf("%s: %q %v", goos, got, err)
+		}
+	}
+	// A shim hopsesh cannot read is refused, not run.
+	if _, err := Command([]string{npmDir + `\othervar.cmd`}, "windows", env); !errors.Is(err, ErrUnknownShim) {
+		t.Errorf("an unknown shim: %v", err)
+	}
+}

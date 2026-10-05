@@ -1,6 +1,6 @@
 // hopsesh's window: boot, the menu's commands, and ssh's password questions. Plain ES
 // modules, no build step.
-import { api, on, h, fill, view, state, go, current, toast, fail, errText, $, sys, setSystem } from "./core.js";
+import { api, on, h, fill, view, state, go, current, toast, fail, errText, $, sys, setSystem, ask } from "./core.js";
 import "./sessions.js";
 import "./plan.js";
 import "./brought.js";
@@ -97,18 +97,51 @@ function showPassword() {
 }
 on("hopsesh:password", askPassword);
 
-// configError explains settings an older hopsesh wrote; hopsesh keeps no code for old
-// formats, so it offers to set the file aside and start fresh.
+// configError explains settings hopsesh cannot read. An older hopsesh's: hopsesh keeps no
+// code for old formats, so it offers to set the file aside and start fresh. A newer
+// hopsesh's (after a downgrade): updating comes first; setting it aside is a second,
+// confirmed choice.
 function configError() {
+  const fresh = async (newer) => {
+    try { toast((newer ? "Newer settings kept at " : "Old settings kept at ") + await api("StartFresh", newer)); } catch (e) { fail(e); return; }
+    state.info = await api("Info");
+    go("sessions", true);
+  };
+  if (!state.info.configNewer) {
+    fill(view, h("div", { class: "page" }, h("div", { class: "page-in", style: "max-width:620px;padding-top:12vh" },
+      h("h1", {}, "Your hopsesh settings are from an older version"),
+      h("span", { class: "muted", style: "line-height:1.5" }, "This version stores its settings differently. Start fresh to keep the old file next to the new one and add your machines again. Your sessions are not affected."),
+      h("span", { class: "mono muted", style: "font-size:11.5px" }, state.info.configError),
+      h("div", {}, h("button", { class: "btn primary big", onclick: () => fresh(false) }, "Start fresh")))));
+    return;
+  }
+  const update = async (btn) => {
+    btn.disabled = true;
+    try {
+      const u = await api("LatestRelease");
+      if (u.newer && u.canInstall) {
+        fill(btn, `Downloading and checking ${u.latest}…`);
+        await api("InstallUpdate");
+        fill(btn, "Restarting…");
+        return;
+      }
+      if (u.newer) await api("OpenURL", u.url);
+      else toast(`hopsesh ${u.latest} is the newest release, and this is it: the settings come from a build newer than that`);
+    } catch (e) { fail(e); }
+    btn.disabled = false;
+    fill(btn, "Update hopsesh");
+  };
+  const setAside = async () => {
+    if (await ask({ title: "Set the newer settings aside?", ok: "Set aside and start fresh", danger: true,
+      body: "hopsesh moves the file next to the new one and starts with defaults: you add your machines again, and the newer hopsesh will not see what you change here. Your sessions are not affected." })) fresh(true);
+  };
   fill(view, h("div", { class: "page" }, h("div", { class: "page-in", style: "max-width:620px;padding-top:12vh" },
-    h("h1", {}, "Your hopsesh settings are from an older version"),
-    h("span", { class: "muted", style: "line-height:1.5" }, "This version stores its settings differently. Start fresh to keep the old file next to the new one and add your machines again. Your sessions are not affected."),
+    h("h1", {}, "Your hopsesh settings are from a newer version"),
+    h("span", { class: "muted", style: "line-height:1.5" }, `A newer hopsesh wrote them, and this one (${state.info.version}) cannot read them. Update hopsesh to keep using them as they are. Your sessions are not affected.`),
     h("span", { class: "mono muted", style: "font-size:11.5px" }, state.info.configError),
-    h("div", {}, h("button", { class: "btn primary big", onclick: async () => {
-      try { toast("Old settings kept at " + await api("StartFresh")); } catch (e) { fail(e); return; }
-      state.info = await api("Info");
-      go("sessions", true);
-    } }, "Start fresh")))));
+    h("div", { style: "display:flex;gap:10px;flex-wrap:wrap" },
+      h("button", { class: "btn primary big", onclick: (ev) => update(ev.currentTarget) }, "Update hopsesh"),
+      h("button", { class: "btn big", onclick: setAside }, "Set them aside and start fresh…")))));
 }
 
 (async () => {

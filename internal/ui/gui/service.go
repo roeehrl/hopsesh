@@ -123,13 +123,16 @@ type AgentCloudDTO struct {
 
 // Info is static information for the window.
 type Info struct {
-	Version     string     `json:"version"`
-	OS          string     `json:"os"` // runtime.GOOS: the window words things for its system
-	Host        string     `json:"host"`
-	ReposDir    string     `json:"reposDir"`
-	AuditDir    string     `json:"auditDir"`
-	HasHosts    bool       `json:"hasHosts"`
-	ConfigError string     `json:"configError,omitempty"`
+	Version     string `json:"version"`
+	OS          string `json:"os"` // runtime.GOOS: the window words things for its system
+	Host        string `json:"host"`
+	ReposDir    string `json:"reposDir"`
+	AuditDir    string `json:"auditDir"`
+	HasHosts    bool   `json:"hasHosts"`
+	ConfigError string `json:"configError,omitempty"`
+	// ConfigNewer: a newer hopsesh wrote the configuration; the window offers to update
+	// hopsesh first, and setting the file aside only as a second, confirmed choice.
+	ConfigNewer bool       `json:"configNewer,omitempty"`
 	Agents      []AgentDTO `json:"agents"`
 	// LocalNetwork describes macOS local network privacy: gated (macOS 15+) and firstRun
 	// (the prompt has probably not been answered yet).
@@ -169,6 +172,7 @@ func (a *App) Info() Info {
 		SkillState: skill.State, SkillPrompt: cfg.SkillPrompt, Receive: cfg.Peer.Receive}
 	if a.cfgErr != nil {
 		info.ConfigError = a.cfgErr.Error()
+		info.ConfigNewer = errors.Is(a.cfgErr, config.ErrNewConfig)
 	}
 	for _, h := range cfg.Hosts {
 		info.HasHosts = info.HasHosts || h.Allowed
@@ -251,11 +255,17 @@ func (a *App) agentsLocked() []AgentDTO {
 }
 
 // StartFresh sets aside a configuration file an older hopsesh wrote and starts with
-// defaults (machines are added again). It returns where the old file went.
-func (a *App) StartFresh() (string, error) {
+// defaults (machines are added again). It returns where the old file went. A file a newer
+// hopsesh wrote is set aside only when the user chose that over updating (newer).
+func (a *App) StartFresh(newer bool) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if !errors.Is(a.cfgErr, config.ErrOldConfig) {
+	switch {
+	case errors.Is(a.cfgErr, config.ErrNewConfig):
+		if !newer {
+			return "", errors.New("a newer hopsesh wrote these settings: update hopsesh, or choose to set them aside")
+		}
+	case !errors.Is(a.cfgErr, config.ErrOldConfig):
 		return "", errors.New("the configuration is in use; nothing to set aside")
 	}
 	old, err := config.SetAside()
@@ -324,6 +334,18 @@ func (a *App) InstallUpdate() error {
 		go func() { time.Sleep(300 * time.Millisecond); a.Wails.Quit() }()
 	}
 	return nil
+}
+
+// LatestRelease looks for the newest release now, whatever the daily check is set to: the
+// user asked, from the page that says a newer hopsesh wrote the configuration.
+func (a *App) LatestRelease() (*UpdateDTO, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	rel, err := update.Latest(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("could not check for updates: %w", err)
+	}
+	return &UpdateDTO{Latest: rel.Version, URL: rel.URL, Newer: update.Newer(rel.Version, version.Version), CanInstall: canInstall()}, nil
 }
 
 // CheckUpdate looks for a newer release, at most once a day, and only when allowed.

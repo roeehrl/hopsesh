@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -165,6 +164,19 @@ func (a *App) OpenStepInTerminal(ctx context.Context, prog string, t termapp.Ter
 	return a.terminals().Open(ctx, t, termapp.Launch{Program: prog, Args: []string{"terminal-step", stepID}, Dir: dir, Kind: termapp.KindStep, Where: termapp.Beside})
 }
 
+// programName is a program's name, for checks: its file name in lower case without the
+// Windows program extensions (.exe, and .cmd or .bat for an npm command shim), whichever
+// system's path it is.
+func programName(path string) string {
+	base := strings.ToLower(path[strings.LastIndexAny(path, `/\`)+1:])
+	for _, ext := range []string{".exe", ".cmd", ".bat"} {
+		if strings.HasSuffix(base, ext) {
+			return strings.TrimSuffix(base, ext)
+		}
+	}
+	return base
+}
+
 // resolveProgram finds a bare program name on this process's PATH, else on the login
 // shell's.
 func resolveProgram(name string) string {
@@ -287,7 +299,7 @@ func (a *App) RunInThisTerminal(l Launch, tio TerminalIO) (int, error) {
 // program, or in a folder that is not there (a ticket is hopsesh's own, in its private
 // state folder; this is a second check).
 func (a *App) checkTicket(t termapp.Ticket) error {
-	base := strings.TrimSuffix(strings.ToLower(filepath.Base(t.Argv[0])), ".exe")
+	base := programName(t.Argv[0])
 	ok := false
 	for _, s := range a.Specs() {
 		for _, b := range s.Binaries {
@@ -324,8 +336,10 @@ func (a *App) runLaunch(id string, t termapp.Ticket, tio TerminalIO) (int, error
 		}
 		fmt.Fprintln(tio.Out, ".")
 	}
-	argv := append([]string{}, t.Argv...)
-	argv[0] = resolveProgram(argv[0])
+	argv, err := TabArgv(t.Argv)
+	if err != nil {
+		return -1, err
+	}
 	c := exec.Command(argv[0], argv[1:]...) //nolint:gosec // an agent's own program, checked against the modules' binaries
 	c.Dir = t.Dir
 	env := host.Without(os.Environ(), t.Unset)
@@ -353,7 +367,7 @@ func (a *App) runLaunch(id string, t termapp.Ticket, tio TerminalIO) (int, error
 			defer a.termStore().Forget(id)
 		}
 	}
-	err := c.Wait()
+	err = c.Wait()
 	code := 0
 	var ee *exec.ExitError
 	switch {
@@ -426,8 +440,5 @@ func TabArgv(argv []string) ([]string, error) {
 	}
 	out := append([]string{}, argv...)
 	out[0] = resolveProgram(out[0])
-	if runtime.GOOS == "windows" {
-		return winshim.Program(out, winshim.System())
-	}
-	return out, nil
+	return winshim.Argv(out)
 }

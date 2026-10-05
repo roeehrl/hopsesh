@@ -268,6 +268,12 @@ All notable changes to this project are documented here. The format follows
   moving or handing off that session stops and says why, and the other sessions are not
   affected. `pull`, `plan`, `handoff`, `push` and `show` now ask git only about the folders
   of the session they name.
+- On Windows, a `claude.cmd` (or another npm or pnpm command shim) now runs as the program
+  behind it in the command line's and terminal UI's terminal steps, launches in a terminal
+  app or this terminal, and `pull --run`, as it already did in the app's tabs.
+- A configuration file written by a newer hopsesh is reported as newer, not older: update
+  hopsesh, or set it aside as a confirmed second choice (the app no longer offers to set it
+  aside as outdated).
 
 ### Changed
 - The macOS app's self-update opens the new disk image with `diskutil image attach` (on
@@ -287,6 +293,10 @@ All notable changes to this project are documented here. The format follows
   sessions as built.
 - The hand-off's branch choice reads "Offer to delete it once its work is merged (and on
   undo)", "Delete it only if I undo" and "Keep it, even on undo".
+- The peer protocol is now 2 (lineage and cloud fields changed): a push between hopsesh 0.3
+  and 0.4 stops at hello and names the machine to update to 0.4.0 or later.
+- `hopsesh followup` is hidden (help, completions, the skill) and says that no cloud accepts
+  a follow-up yet; the app shows no follow-up button.
 
 ## [0.3.1] - 2026-10-04
 
