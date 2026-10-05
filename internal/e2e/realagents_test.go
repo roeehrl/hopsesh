@@ -36,6 +36,27 @@ func realAgents(t *testing.T, bin string) string {
 	return p
 }
 
+// codexHome prepares a Codex home for a real Codex to run in, and returns it. Its config
+// turns plugins off: with them on, every Codex start clones OpenAI's plugin catalogue into
+// <home>/.tmp in the background, through a git that outlives a one-shot app-server, so
+// t.TempDir's cleanup raced the clone ("directory not empty"). If a Codex starts that sync
+// anyway, the test fails here and says so, instead of failing only when the clone is slow.
+func codexHome(t *testing.T, home string) string {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(home, "sessions"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte("[features]\nplugins = false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { // runs before the TempDir holding home is removed
+		if m, _ := filepath.Glob(filepath.Join(home, ".tmp", "plugins*")); len(m) > 0 {
+			t.Errorf("Codex synced its plugin catalogue with plugins turned off: %v", m)
+		}
+	})
+	return home
+}
+
 // codexList lists threads the way `codex resume` does: from Codex's index only.
 func codexList(t *testing.T, bin, home string) string {
 	t.Helper()
@@ -65,8 +86,7 @@ func codexList(t *testing.T, bin, home string) string {
 // Codex's own list, under its name, once installed.
 func TestCodexListsWrittenThread(t *testing.T) {
 	bin := realAgents(t, "codex")
-	home := t.TempDir()
-	os.MkdirAll(filepath.Join(home, "sessions"), 0o700)
+	home := codexHome(t, t.TempDir())
 	if got := codexList(t, bin, home); strings.Contains(got, `"id"`) { // builds the index (empty)
 		t.Fatalf("a fresh home lists nothing: %s", got)
 	}
@@ -113,8 +133,7 @@ func TestCodexImportRoute(t *testing.T) {
 	t.Setenv("HOME", here.m.Facts.Home)
 	t.Setenv("USERPROFILE", here.m.Facts.Home)
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
-	home := filepath.Join(root, "here", ".codex")
-	os.MkdirAll(filepath.Join(home, "sessions"), 0o700)
+	home := codexHome(t, filepath.Join(root, "here", ".codex"))
 	ci := agent.Install{Agent: "codex", Version: "0.153.2", Binary: bin, Roots: map[string]string{"home": home}, Present: true}
 	here.m.Facts.Binaries["codex"] = agent.BinaryFact{Path: bin}
 	in := move.Input{Source: move.Side{Machine: here.m, Module: claude.New(), Install: here.in}, Session: list(t, here)[sid],
@@ -155,7 +174,7 @@ func TestCodexImportRoute(t *testing.T) {
 // Codex reports its login itself; a fresh home is not logged in.
 func TestCodexAccount(t *testing.T) {
 	bin := realAgents(t, "codex")
-	home := t.TempDir()
+	home := codexHome(t, t.TempDir())
 	m := &host.Machine{Name: "here", Local: true, Facts: host.Facts{OS: runtime.GOOS, Home: home, Env: map[string]string{"CODEX_HOME": home},
 		Binaries: map[string]agent.BinaryFact{"codex": {Path: bin}}}}
 	in := agent.Install{Agent: "codex", Version: "0.153.2", Binary: bin, Roots: map[string]string{"home": home}, Present: true}
@@ -181,7 +200,7 @@ func TestCodexStop(t *testing.T) {
 	if err != nil {
 		t.Skip("python3 drives the TUI")
 	}
-	home, cwd := t.TempDir(), t.TempDir()
+	home, cwd := codexHome(t, t.TempDir()), t.TempDir()
 	login := exec.Command(bin, "login", "--with-api-key")
 	login.Env = append(os.Environ(), "CODEX_HOME="+home)
 	login.Stdin = strings.NewReader("sk-hopsesh-test-not-a-real-key") // never used: no prompt is sent
