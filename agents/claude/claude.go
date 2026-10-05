@@ -77,6 +77,9 @@ func (*Module) Spec() agent.Spec {
 			"windows": {"~/AppData/Local/AnthropicClaude/claude.exe"},
 		}},
 		Clouds: []agent.Cloud{cloud()},
+		// In hopsesh's tabs Claude Code draws with synchronized output (DEC 2026), which
+		// xterm.js supports, so a redraw never shows half a frame.
+		TerminalEnv: []string{"CLAUDE_CODE_FORCE_SYNC_OUTPUT=1"},
 	}
 }
 

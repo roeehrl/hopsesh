@@ -33,6 +33,9 @@ func cloud() agent.Cloud {
 		},
 		// The CLI cannot list or create environments; its picker shows them.
 		EnvHint: "open `codex cloud` once to create one",
+		// Codex's sign-in with a device code (the user opens the page and types the code);
+		// the app runs it in a sign-in tab, which it never reads.
+		SignIn: []string{"login", "--device-auth"},
 		Watch: agent.Watch{
 			Surface: "cloud tasks through `codex cloud exec --env --branch` (with CODEX_STARTING_DIFF), `codex cloud list --json`, `status`, `diff` and `apply`, `codex apply`, the cloud environments, and the docs sentence that a handoff to a Codex cloud environment isn't supported",
 			// Never the 2.9 MB codex-manual.md.

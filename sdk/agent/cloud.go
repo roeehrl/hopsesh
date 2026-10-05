@@ -138,7 +138,11 @@ type Cloud struct {
 	// show it in place of a follow-up. "" for a cloud whose module is a CloudFollower, or
 	// where nothing needs saying.
 	NoFollowUp string
-	Watch      Watch
+	// SignIn are the arguments, after Driver, of the driver's own sign-in command
+	// (["auth", "login"]): the app runs it in a sign-in tab the user answers, which
+	// hopsesh never reads or records. Empty: the app offers no Sign in button.
+	SignIn []string
+	Watch  Watch
 }
 
 // Watch is what the weekly upstream-drift check watches for a cloud (read by

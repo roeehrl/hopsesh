@@ -91,6 +91,10 @@ type Spec struct {
 	// Clouds are the vendor clouds the module reaches through its agent's CLI. A module
 	// with clouds may have no Roots (a cloud-only module, see NoLocal).
 	Clouds []Cloud
+	// TerminalEnv are variables ("NAME=value") the agent's programs get in hopsesh's own
+	// terminal tabs, on top of the user's: settings that suit that terminal
+	// (CLAUDE_CODE_FORCE_SYNC_OUTPUT=1). Never a credential; not used in other terminals.
+	TerminalEnv []string
 }
 
 // Icon pictures an agent. The installed desktop app's own icon comes first (unless the

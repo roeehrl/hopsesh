@@ -52,6 +52,9 @@ func cloud() agent.Cloud {
 		// the place of the claude.ai login teleport needs.
 		Unset:      []string{"CLAUDE_CODE_CHILD_SESSION", "ANTHROPIC_API_KEY"},
 		NoFollowUp: noFollowUp,
+		// Claude Code's own sign-in (it opens claude.ai in the browser); the app runs it in a
+		// sign-in tab, which it never reads.
+		SignIn: []string{"auth", "login"},
 		Watch: agent.Watch{
 			Surface: "cloud sessions started with `claude --cloud \"<briefing>\"` in the user's terminal (its workspace-trust question, then the `View: https://claude.ai/code/session_…` and `Resume with: claude --teleport session_…` lines hopsesh reads, and its refusals without a terminal or with --print), brought back with `claude --teleport <id>` (which saves its copy only after the user sends a message in it, marked by an isMeta \"continued from another machine\" record), Remote Control, cloud environments, and the transcript records a teleport or bridge leaves",
 			Docs: append(docs("claude-code-on-the-web", "web-quickstart", "cloud-environments", "remote-control", "desktop",
