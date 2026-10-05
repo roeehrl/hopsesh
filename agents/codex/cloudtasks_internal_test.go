@@ -96,6 +96,9 @@ func TestRefused(t *testing.T) {
 			t.Errorf("%s: %v", msg, err)
 		}
 	}
+	if err := refused("Error: no cloud environments are available for this workspace"); err == nil || !strings.Contains(err.Error(), NewCloudEnvs) {
+		t.Errorf("no environments: %v", err)
+	}
 	if err := refused("Error: No diff available for task task_e_6840130401ff; it may still be running."); errors.Is(err, agent.ErrSignedOut) || errors.Is(err, agent.ErrNotEligible) {
 		t.Errorf("digits in an id are not an HTTP status: %v", err)
 	}

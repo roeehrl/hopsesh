@@ -211,7 +211,7 @@ function options(p) {
     p.can.remoteControl ? check("Turn on Remote Control", "remoteControl", `Reach it from your phone or other machines, as ${p.newName}.`) : null,
     p.can.app && !p.machine ? check(`Open it in the ${p.agent} app`, "app", "Instead of a terminal window.") : null,
     !cont ? check("Tell the old session it moved", "notify", p.can.notify ? "Its new first message asks the agent to tell the old one." : "You get a line to paste into it.") : null,
-    p.live && p.can.fork ? check("Keep the old session running too", "fork", "Both copies continue, instead of a handoff.") : null,
+    p.live && p.can.fork ? check("Keep the old session running too", "fork", "Both copies continue, instead of a hand-off.") : null,
     check("Redact likely secrets", "redact", "In this copy only."),
   ];
   return h("section", { class: "sec", style: "gap:10px" }, h("span", { class: "sec-h" }, "Options"), h("div", { class: "opts-grid" }, opts),

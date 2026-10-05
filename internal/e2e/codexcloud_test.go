@@ -90,7 +90,7 @@ func TestHandoffToCodexCloudAndBack(t *testing.T) {
 	}
 	for _, tg := range a.HandoffTargets(inv, findEntry(t, inv)) {
 		if tg.Cloud == "codex-cloud" && (!tg.OK || tg.Note != "Gets a briefing and the code on a branch" || len(tg.Limits) == 0 ||
-			!strings.Contains(tg.Limits[0], "the new Codex Cloud has no command line yet")) {
+			!strings.Contains(tg.Limits[0], "Codex can't see any cloud environments from its command line")) {
 			t.Fatalf("target: %+v", tg)
 		}
 	}
@@ -101,11 +101,11 @@ func TestHandoffToCodexCloudAndBack(t *testing.T) {
 	defer inv2.Close()
 	hp = p.Handoff
 	if len(p.Blockers) > 0 || hp.Env != "env_api" || hp.EnvName != "acme-api" || !hp.Remember || hp.Noun != "task" || hp.Follow ||
-		strings.Join(hp.Steps, ",") != "snapshot,push,start,lineage,mark" || hp.MarkTitle != "↪ continued in Codex on codex-cloud" ||
+		strings.Join(hp.Steps, ",") != "snapshot,push,start,lineage,mark" || hp.MarkTitle != "↪ continued in Codex cloud" ||
 		hp.Usage != "Cloud tasks use your plan's allowance." || hp.CanStartingDiff {
 		t.Fatalf("plan: %v %+v", p.Blockers, hp)
 	}
-	if !strings.Contains(strings.Join(hp.Loss, "\n"), "Codex cloud (legacy) tasks only") {
+	if !strings.Contains(strings.Join(hp.Loss, "\n"), "Codex can't see any cloud environments") {
 		t.Fatalf("loss: %v", hp.Loss)
 	}
 	before := w.statusOf()

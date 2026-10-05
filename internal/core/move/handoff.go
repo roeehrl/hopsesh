@@ -380,7 +380,7 @@ func BuildHandoff(ctx context.Context, in HandoffInput, opt Options) (*Plan, err
 	planBrief(ctx, p, in, opt, check)
 
 	// The session left here.
-	mk := agent.Mark{Kind: agent.MarkContinued, AgentName: target.Name, Location: cl.Name}
+	mk := agent.Mark{Kind: agent.MarkContinued, AgentName: cl.Title} // "continued in Claude Code cloud"
 	hp.MarkTitle = agent.MarkTitle(mk, "")
 	_, canMark := src.Module.(agent.Marker)
 	switch {
@@ -838,7 +838,7 @@ func applyHandoff(ctx context.Context, p *Plan, env Env) (*Result, error) {
 			msg := fmt.Sprintf("Pushing %s failed: %s. Nothing went to the cloud.", hp.Branch, firstLine(err.Error()))
 			switch {
 			case errors.Is(err, repos.ErrPushRefused):
-				msg = fmt.Sprintf("%s refused the handoff branch (branch protection or permissions). Nothing went to the cloud.", hostName(hp.Host))
+				msg = fmt.Sprintf("%s refused the hand-off branch (branch protection or permissions). Nothing went to the cloud.", hostName(hp.Host))
 				if hp.CanBundle && src.Machine.Local {
 					hr.Retry = "bundle"
 				}
@@ -946,7 +946,7 @@ func applyHandoff(ctx context.Context, p *Plan, env Env) (*Result, error) {
 	}
 
 	// 5. The mark.
-	mk := agent.Mark{Kind: agent.MarkContinued, AgentName: target.Name, Location: cl.Name}
+	mk := agent.Mark{Kind: agent.MarkContinued, AgentName: cl.Title} // "continued in Claude Code cloud"
 	switch p.Mark {
 	case MarkNow:
 		step(StepMark, StepTodo, "")

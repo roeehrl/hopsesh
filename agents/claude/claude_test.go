@@ -125,6 +125,15 @@ func TestLiveStopMarkAccount(t *testing.T) {
 	if err != nil || live[s1].State != agent.Live || live[s1].PID != 4242 || live[s2].State != agent.Ended {
 		t.Fatalf("live: %+v %v", live, err)
 	}
+	if live[s1].App {
+		t.Fatal("a terminal session reads as the Claude app's")
+	}
+	// The Claude app runs its sessions with entrypoint claude-desktop.
+	fh.Put("/home/u/.claude/sessions/4343.json", []byte(`{"pid":4343,"sessionId":"`+s2+`","entrypoint":"claude-desktop","status":"idle"}`), time.Now())
+	fh.PIDs[4343] = true
+	if live, err = m.Live(ctx, h, in, []agent.SessionID{s2}); err != nil || live[s2].State != agent.Live || !live[s2].App {
+		t.Fatalf("a Claude app session: %+v %v", live, err)
+	}
 	if err := m.Stop(ctx, h, in, byID[s1], time.Second); err != nil || fh.PIDs[4242] {
 		t.Fatalf("stop: %v", err)
 	}

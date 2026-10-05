@@ -62,7 +62,7 @@ export function fill(el, ...kids) {
 let toastTimer;
 export function toast(msg, action) {
   const t = $("#toast");
-  fill(t, h("span", {}, msg), action ? h("button", { onclick: () => { t.classList.remove("show"); action.run(); } }, action.label) : null);
+  fill(t, h("span", {}, rich(msg)), action ? h("button", { onclick: () => { t.classList.remove("show"); action.run(); } }, action.label) : null);
   t.classList.add("show");
   clearTimeout(toastTimer);
   const hide = () => { toastTimer = setTimeout(() => t.classList.remove("show"), action ? 12000 : 3500); };
@@ -88,23 +88,46 @@ export function ago(iso) {
 export function when(iso) {
   return new Date(iso).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
+// bytes is a size for people; a no-break space keeps the number with its unit.
 export function bytes(n) {
-  if (n >= 1 << 30) return (n / (1 << 30)).toFixed(1) + " GB";
-  if (n >= 1 << 20) return (n / (1 << 20)).toFixed(1) + " MB";
-  if (n >= 1 << 10) return Math.round(n / 1024) + " KB";
-  return n + " B";
+  if (n >= 1 << 30) return (n / (1 << 30)).toFixed(1) + "\u00a0GB";
+  if (n >= 1 << 20) return (n / (1 << 20)).toFixed(1) + "\u00a0MB";
+  if (n >= 1 << 10) return Math.round(n / 1024) + "\u00a0KB";
+  return n + "\u00a0B";
+}
+
+// rich is a module's or the backend's text with its `command` spans as code: DOM nodes
+// built from the text, never markup.
+export function rich(text) {
+  const parts = String(text ?? "").split("`");
+  if (parts.length < 3) return String(text ?? "");
+  return parts.map((p, i) => (i % 2 && i < parts.length - 1 ? h("code", {}, p) : (i % 2 ? "`" + p : p)));
+}
+
+// path is a path or an address that breaks only after its slashes,
+// in a mono span whose title holds the whole of it.
+export function path(text, size = 12) {
+  const kids = [];
+  for (const part of String(text).split(/(?<=[/\\])/)) kids.push(part, h("wbr"));
+  return h("span", { class: "mono path", style: `font-size:${size}px`, title: text }, kids);
 }
 // agentBadge pictures an agent: its icon (the installed app's, else the module's mark), or
 // its initials on the agent's colour. agentChip adds the name.
 const agentClass = (id) => "chip agent-" + id;
 const short = (name) => { const w = (name || "").split(/\s+/).filter(Boolean); return (w.length > 1 ? w.map((x) => x[0]).join("") : w.join("")).slice(0, 2).toUpperCase(); };
-export function agentBadge(id, name) {
+// A cloud session's picture carries a small cloud at its corner (inCloud: the cloud's
+// title, for the tooltip).
+export function agentBadge(id, name, inCloud = "") {
   const src = agentInfo(id)?.icon;
-  return src ? h("img", { class: "agent-ico", src, alt: name, title: name }) : h("span", { class: agentClass(id), title: name }, short(name));
+  const pic = src ? h("img", { class: "agent-ico", src, alt: name, title: name }) : h("span", { class: agentClass(id), title: name }, short(name));
+  if (!inCloud) return pic;
+  pic.removeAttribute("title");
+  return h("span", { class: "in-cloud", title: `${name} · ${inCloud}` }, pic, h("span", { class: "cloud-mark", "aria-hidden": "true" }, icon(ICONS.cloud, 9)));
 }
-export function agentChip(id, name) {
+export function agentChip(id, name, inCloud = "") {
   const src = agentInfo(id)?.icon;
-  return h("span", { class: agentClass(id) }, src ? h("img", { class: "agent-ico small", src, alt: "" }) : null, name);
+  const pic = src ? h("img", { class: "agent-ico small", src, alt: "" }) : null;
+  return h("span", { class: agentClass(id) }, inCloud && pic ? h("span", { class: "in-cloud small", title: inCloud }, pic, h("span", { class: "cloud-mark", "aria-hidden": "true" }, icon(ICONS.cloud, 7))) : pic, name);
 }
 
 // machineStatus is a scan status as [dot kind, words].
@@ -144,6 +167,8 @@ export function setSystem(os, terminal) {
   for (const el of document.querySelectorAll("[data-keys]")) el.textContent = keys(el.dataset.keys);
   for (const el of document.querySelectorAll("[data-keys-title]")) el.title = `${el.dataset.label} (${keys(el.dataset.keysTitle)})`;
   for (const el of document.querySelectorAll("[aria-keyshortcuts]")) el.setAttribute("aria-keyshortcuts", mac ? "Meta+K" : "Control+K");
+  const term = document.querySelector("#btn-terminal");
+  if (term) term.title = `Show the terminal (${mac ? "⌃`" : "Ctrl+`"})`;
 }
 // Until Info says, go by the browser's own report (so the first paint fits the system).
 setSystem(/Windows/.test(navigator.userAgent) ? "windows" : /Mac/.test(navigator.userAgent) ? "darwin" : "linux");
@@ -164,7 +189,9 @@ export function screen(name, fn) { screens[name] = fn; }
 export let current = "";
 export function go(name, ...args) {
   current = name;
+  state.handoffOpen = null;
   $("#where").textContent = { sessions: "", activity: "Activity", machines: "Machines", settings: "Settings", done: "", brought: "" }[name] ?? "";
+  document.body.dataset.screen = name; // the panes' buttons work on Sessions only
   return screens[name](...args);
 }
 
@@ -195,8 +222,10 @@ export function cloudState(c) {
   }
   return ["err", "error"];
 }
-// cloudChip names a cloud with its glyph.
-export const cloudChip = (name) => h("span", { class: "chip cloud" }, icon(ICONS.cloud, 12), name);
+// cloudTitle is a cloud's name for people ("Claude Code cloud" for claude-cloud).
+export const cloudTitle = (name) => cloudOf(name)?.title || name;
+// cloudChip names a cloud with its glyph (its id in the tooltip).
+export const cloudChip = (name) => h("span", { class: "chip cloud", title: name }, icon(ICONS.cloud, 12), cloudTitle(name));
 export const agentInfo = (id) => (state.info?.agents || []).find((a) => a.id === id);
 
 // dialog fills the small dialog and shows it; close() hides it.

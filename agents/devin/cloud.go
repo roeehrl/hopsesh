@@ -39,7 +39,7 @@ func cloud() agent.Cloud {
 		// Unverified: Devin names its branches devin/<timestamp>-<topic>.
 		VendorPrefix: "devin/",
 		Limits: []string{
-			"`devin --cloud -p` can't choose a repository or branch (the Devin CLI does that only interactively, with /repo): hopsesh starts it in a worktree on the handoff branch, and the briefing names both",
+			"`devin --cloud -p` can't choose a repository or branch (the Devin CLI does that only interactively, with /repo): hopsesh starts it in a worktree on the hand-off branch, and the briefing names both",
 			"Devin's messages stay in Devin: the Devin CLI shows them only in its interactive session",
 		},
 		BriefBranch: true,

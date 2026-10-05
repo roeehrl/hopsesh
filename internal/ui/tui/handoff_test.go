@@ -46,7 +46,7 @@ func TestHandoffFromTheList(t *testing.T) {
 	v = ansi.Strip(m.View().Content)
 	for _, want := range []string{"Hand off to Claude Code cloud", "The cloud agent receives a briefing, not this conversation.", "Briefing ", "tokens", "[b] view/edit",
 		"Claude Code starts the session in a terminal", "The folder: ",
-		"Also commit the conversation as .hopsesh/handoff.md", "Mark this session \"continued in Claude Code on claude-cloud\"", "Cloud sessions use your plan's allowance.",
+		"Also commit the conversation as .hopsesh/handoff.md", "Mark this session \"continued in Claude Code cloud\"", "Cloud sessions use your plan's allowance.",
 		"enter hand off · b briefing in $EDITOR · u untracked files · L loss list · esc back"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("the plan pane lacks %q:\n%s", want, v)
@@ -67,7 +67,7 @@ func TestHandoffFromTheList(t *testing.T) {
 	raw := m.View().Content
 	v = ansi.Strip(raw)
 	r := m.result.Handoff
-	for _, want := range []string{"✓ Handed off to Claude Code cloud", "id      " + r.Session, "↪ this session is now marked “continued in Claude Code on claude-cloud”",
+	for _, want := range []string{"✓ Handed off to Claude Code cloud", "id      " + r.Session, "↪ this session is now marked “continued in Claude Code cloud”",
 		"When it finishes: select the claude-cloud row and press enter to bring it here.", "o open in browser · y copy link · u undo",
 		"hopsesh can't send a Claude Code cloud session a message"} {
 		if !strings.Contains(v, want) {

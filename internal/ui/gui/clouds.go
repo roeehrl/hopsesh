@@ -40,6 +40,8 @@ type CloudDTO struct {
 	Partial   bool   `json:"partial"`
 	Listable  bool   `json:"listable"`
 	Fetchable bool   `json:"fetchable"`
+	// Experimental: its module is experimental (its drivers' output is partly unverified).
+	Experimental bool `json:"experimental"`
 	// Rename: the cloud's own branches come home under hopsesh/from/<cloud>/.
 	Rename bool `json:"rename"`
 	// VendorPrefix starts the cloud's own branches ("claude/").
@@ -122,6 +124,7 @@ func cloudDTO(core *app.App, inv *app.Inventory, c *app.Cloud) CloudDTO {
 		d.Limits = []string{}
 	}
 	if m, ok := core.Module(c.Agent); ok {
+		d.Experimental = m.Spec().Stability == agent.Experimental
 		if cl, ok := m.Spec().FindCloud(c.Name); ok {
 			d.TestedOn, d.VendorPrefix, d.Fidelity = strings.Join(cl.Tested, ", "), cl.VendorPrefix, string(cl.Down)
 			if len(cl.SignIn) > 0 {
@@ -338,7 +341,22 @@ func (a *App) AdoptStatus(journal string) (*BroughtDTO, error) {
 		return nil, err
 	}
 	b := core.Brought(f)
+	a.bindBring(b)
 	return &b, err
+}
+
+// bindBring gives a bring-back's tab, while its program still runs, the copy it saved
+// here: the tab is then that session's, so nothing starts a second process on it (Resume
+// shows the tab).
+func (a *App) bindBring(b app.Brought) {
+	if a.Terms == nil || b.Key == "" || b.Outcome == move.FetchWaiting {
+		return
+	}
+	for _, t := range a.Terms.Tabs() {
+		if t.Kind == TabBring && t.Journal == b.Journal && t.State != pty.Exited && t.Key != b.Key {
+			a.Terms.setMeta(t.ID, func(m *TabMeta) { m.Machine, m.Key, m.Saved = app.LocalName(), b.Key, nonEmptyStr(b.Title, "the copy") })
+		}
+	}
 }
 
 // KeepPartial keeps a partial copy as it is.

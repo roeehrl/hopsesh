@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { fresh, row, menu } from "./helpers";
+import { fresh, row, menu, turnOnCloud } from "./helpers";
 
 test.beforeEach(async ({ page }) => fresh(page));
 
@@ -15,7 +15,7 @@ async function codexTask(page: Page, title = "Add a changelog entry", env = "env
 
 async function turnOnCodex(page: Page) {
   const sidebar = page.getByRole("navigation", { name: "Scopes" });
-  await sidebar.locator(".side-off", { hasText: "Codex cloud" }).getByRole("button", { name: "Turn on" }).click();
+  await turnOnCloud(page, "Codex cloud");
   await expect(sidebar.getByRole("button", { name: /Codex cloud/ })).toContainText("ready", { timeout: 30_000 });
 }
 
@@ -30,7 +30,7 @@ test("the hand-off sheet asks for a Codex cloud environment; the done screen nam
   const codex = menu.getByRole("menuitem", { name: /Codex cloud/ });
   await expect(codex).toBeEnabled();
   await expect(codex).toContainText("Gets a briefing and the code on a branch");
-  await expect(codex).toContainText("Codex cloud (legacy) tasks only: the new Codex Cloud has no command line yet");
+  await expect(codex).toContainText("Codex can't see any cloud environments from its command line");
   await codex.click();
 
   const sheet = page.locator("#sheet");
@@ -44,7 +44,7 @@ test("the hand-off sheet asks for a Codex cloud environment; the done screen nam
   await expect(sheet.locator("#ho-env-note")).toHaveText("Pick a Codex cloud environment for github.com/example/demo. If you have none, open codex cloud once to create one.");
   await expect(sheet.getByRole("button", { name: /^Hand off/ })).toBeDisabled();
   await expect(sheet).toContainText("Cloud tasks use your plan's allowance.");
-  await expect(sheet.getByRole("checkbox", { name: "Mark this session “continued in Codex on codex-cloud”" })).toBeChecked();
+  await expect(sheet.getByRole("checkbox", { name: "Mark this session “continued in Codex cloud”" })).toBeChecked();
 
   await env.selectOption({ label: "acme-api (used by 1 of your recent tasks)" });
   await expect(sheet.locator("#ho-env-note")).toHaveCount(0, { timeout: 30_000 });
@@ -59,7 +59,7 @@ test("the hand-off sheet asks for a Codex cloud environment; the done screen nam
   await expect(page.getByRole("button", { name: "Copy link" })).toBeVisible();
   await expect(page.locator(".page")).toContainText("Environment acme-api");
   await expect(page.getByRole("button", { name: /^hopsesh\/handoff\// })).toBeVisible();
-  await expect(page.locator(".page")).toContainText("The session here is marked “continued in Codex on codex-cloud”");
+  await expect(page.locator(".page")).toContainText("The session here is marked “continued in Codex cloud”");
   await expect(page.getByRole("note")).toHaveText("When it finishes: Clouds → Codex cloud → Bring here");
   await expect(page.getByRole("button", { name: "Send a follow-up…" })).toHaveCount(0);
 
@@ -78,7 +78,7 @@ test("a Codex cloud task comes back: its code committed on a branch, a Codex ses
   await sidebar.getByRole("button", { name: /Codex cloud/ }).click();
   await expect(page.getByRole("heading", { name: "Codex cloud" })).toBeVisible();
   const r = row(page, "Add a changelog entry");
-  await expect(r.locator(".chip.cloud")).toContainText("codex-cloud", { timeout: 30_000 });
+  await expect(r.locator(".chip.cloud")).toContainText("Codex cloud", { timeout: 30_000 });
   await expect(r.locator(".chip.st-done")).toHaveText("Done");
   await expect(r).toContainText("+1 −0 · 1 file");
   await r.click();
@@ -132,14 +132,15 @@ test("Machines: the Codex cloud card sets each repository's environment", async 
   await menu(page, "machines");
   await expect(page.getByRole("heading", { name: "Machines" })).toBeVisible();
   const card = page.locator(".cloud-card", { has: page.getByRole("heading", { name: "Codex cloud" }) });
-  await expect(card).toContainText("a handoff branch");
+  await expect(card).toContainText("a hand-off branch");
   await expect(card).toContainText("GitHub only");
-  await expect(card).toContainText("Codex cloud (legacy) tasks only: the new Codex Cloud has no command line yet");
+  await expect(card).toContainText("Codex can't see any cloud environments from its command line");
   const table = card.getByRole("table", { name: "Codex cloud environment per repository" });
   const select = table.getByLabel("Environment for github.com/example/demo");
   await expect(select).toHaveValue("");
   await select.selectOption({ label: "acme-api" });
   await expect(page.locator("#toast")).toContainText("github.com/example/demo runs in env_api");
   await expect(card.getByRole("table", { name: "Codex cloud environment per repository" }).getByLabel("Environment for github.com/example/demo")).toHaveValue("env_api", { timeout: 30_000 });
-  await expect(card).toContainText("No environment yet? Open `codex cloud` once to create one.");
+  await expect(card).toContainText("No environment yet? Open codex cloud once to create one.");
+  await expect(card.locator("code", { hasText: "codex cloud" }).first()).toBeVisible(); // a command, shown as code
 });

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { fresh, row, menu } from "./helpers";
+import { fresh, row, menu, turnOnCloud } from "./helpers";
 
 test.beforeEach(async ({ page }) => fresh(page));
 
@@ -14,7 +14,7 @@ async function cloudSession(page: Page, fail = "", handed = false): Promise<stri
 // turnOnAndPaste allows Claude Code cloud from the sidebar and pastes the session's link.
 async function turnOnAndPaste(page: Page, id: string) {
   const sidebar = page.getByRole("navigation", { name: "Scopes" });
-  await sidebar.locator(".side-off", { hasText: "Claude Code cloud" }).getByRole("button", { name: "Turn on" }).click();
+  await turnOnCloud(page, "Claude Code cloud");
   await expect(sidebar.getByRole("button", { name: /Claude Code cloud/ })).toContainText("ready", { timeout: 30_000 });
   await page.getByRole("button", { name: "Paste a link…" }).click();
   await page.getByLabel("The session's link or id").fill(`https://claude.ai/code/${id}`);
@@ -26,15 +26,17 @@ test("the Clouds group: turn Claude Code cloud on, paste a link, and see the ses
   const id = await cloudSession(page);
   const sidebar = page.getByRole("navigation", { name: "Scopes" });
   await expect(sidebar.getByText("Clouds", { exact: true })).toBeVisible();
-  await expect(sidebar.locator(".side-off", { hasText: "Claude Code cloud" }).getByRole("button", { name: "Turn on" })).toBeVisible();
+  // A cloud that is off is not listed: one row turns one on (in Machines).
+  await expect(sidebar.getByRole("button", { name: /Claude Code cloud/ })).toHaveCount(0);
+  await expect(sidebar.getByRole("button", { name: "Turn on a cloud…" })).toBeVisible();
   await turnOnAndPaste(page, id);
 
   await expect(page.getByRole("heading", { name: "Claude Code cloud" })).toBeVisible();
-  await expect(page.getByText("Showing the cloud sessions hopsesh started or brought here, and Remote Control mirrors. Claude Code can show you the rest.")).toBeVisible();
+  await expect(page.getByText(/^Showing the cloud sessions hopsesh started or brought here\. Claude Code can show you the rest/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Find in Claude Code…" })).toBeVisible();
   const r = row(page, `Session ${id}`);
-  await expect(r.locator(".chip.cloud")).toContainText("claude-cloud");
-  await expect(r.locator(".chip.st-unknown")).toHaveText("State unknown");
+  await expect(r.locator(".chip.cloud")).toContainText("Claude Code cloud");
+  await expect(r.locator(".chip.st-unknown")).toHaveText("Status on claude.ai");
   await expect(sidebar.getByRole("button", { name: /Claude Code cloud/ })).toContainText("1");
   await expect(sidebar.getByRole("button", { name: /In the cloud/ })).toContainText("1");
 
@@ -101,15 +103,15 @@ test("a cloud-only module: Copilot's tasks are listed, their code comes home, an
   expect(r.ok()).toBeTruthy();
   const sidebar = page.getByRole("navigation", { name: "Scopes" });
   for (const title of ["Copilot cloud agent", "Jules", "Devin", "Amp"]) {
-    await expect(sidebar.locator(".side-off", { hasText: title }).getByRole("button", { name: "Turn on" })).toBeVisible();
+    await expect(sidebar.getByRole("button", { name: new RegExp(title) })).toHaveCount(0);
   }
-  await sidebar.locator(".side-off", { hasText: "Copilot cloud agent" }).getByRole("button", { name: "Turn on" }).click();
+  await turnOnCloud(page, "Copilot cloud agent");
   await expect(sidebar.getByRole("button", { name: /Copilot cloud agent/ })).toContainText("ready", { timeout: 30_000 });
   await expect(sidebar.getByRole("button", { name: /Copilot cloud agent/ })).toContainText("1");
 
   const task = row(page, "Fix the search index");
   await expect(task).toBeVisible({ timeout: 30_000 });
-  await expect(task.locator(".chip.cloud")).toContainText("copilot-cloud");
+  await expect(task.locator(".chip.cloud")).toContainText("Copilot cloud agent");
   await expect(task).toContainText("copilot/fix-the-search-index");
   await expect(task.locator(".chip.st-done")).toHaveText("Done");
   await task.click();

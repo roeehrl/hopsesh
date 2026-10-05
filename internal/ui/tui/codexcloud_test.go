@@ -42,7 +42,7 @@ func TestHandoffToCodexCloudInTheTerminal(t *testing.T) {
 		m.key("down")
 	}
 	v := ansi.Strip(m.View().Content)
-	if !strings.Contains(v, "Gets a briefing and the code on a branch · Codex cloud (legacy) tasks only: the new Codex Cloud has no command line yet") {
+	if !strings.Contains(v, "Gets a briefing and the code on a branch · Codex can't see any cloud environments from its command line") {
 		t.Errorf("the picker:\n%s", v)
 	}
 	_, cmd := m.key("enter")

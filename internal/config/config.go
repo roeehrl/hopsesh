@@ -122,6 +122,10 @@ type Terminal struct {
 	// Notify: a desktop notification when a tab the user cannot see waits for them (nil:
 	// on).
 	Notify *bool `toml:"notify,omitempty"`
+	// KeepEnded keeps a tab open after its program ended well (exit code 0; a hand-off's
+	// step once its link is known). nil or false: such a tab closes (a failed one stays,
+	// so its output can be read).
+	KeepEnded *bool `toml:"keep_ended,omitempty"`
 	// ScreenReader is the terminal's screen reader mode: "" (on while the system's screen
 	// reader runs), "on" or "off".
 	ScreenReader string `toml:"screen_reader,omitempty"`
@@ -129,6 +133,22 @@ type Terminal struct {
 	// the app carries.
 	SystemConsole bool `toml:"system_console,omitempty"`
 }
+
+// Window is the app window's layout on the Sessions screen: the sidebar's and the
+// inspector's widths in CSS pixels (0: the default) and whether the user hid them. A
+// pane the window hides because it is narrow is not saved.
+type Window struct {
+	SidebarWidth    int  `toml:"sidebar_width,omitempty"`
+	SidebarHidden   bool `toml:"sidebar_hidden,omitempty"`
+	InspectorWidth  int  `toml:"inspector_width,omitempty"`
+	InspectorHidden bool `toml:"inspector_hidden,omitempty"`
+}
+
+// The app window's pane widths: defaults and limits.
+const (
+	SidebarWidth, SidebarMin, SidebarMax       = 220, 180, 320
+	InspectorWidth, InspectorMin, InspectorMax = 360, 280, 560
+)
 
 // AppResumeDefault is where the desktop app resumes sessions and runs hand-off and
 // bring-back steps until the user chooses: in its own Terminal window. It is the release
@@ -174,6 +194,8 @@ type Config struct {
 	// CLIPrompt is "declined" once the user said not now to linking the command-line tool
 	// from the app.
 	CLIPrompt string `toml:"cli_prompt,omitempty"`
+	// SetupPrompt is "declined" once the user closed the app's "Finish setting up" line.
+	SetupPrompt string `toml:"setup_prompt,omitempty"`
 	// AppIcons shows an agent's installed desktop app icon in the app (default on).
 	AppIcons *bool            `toml:"app_icons,omitempty"`
 	Agents   map[string]Agent `toml:"agents,omitempty"`
@@ -182,7 +204,9 @@ type Config struct {
 	Peer   Peer             `toml:"peer"`
 	// Terminal is the terminal app hopsesh opens launches in.
 	Terminal Terminal `toml:"terminal,omitempty"`
-	Hosts    []Host   `toml:"hosts"`
+	// Window is the app window's layout.
+	Window Window `toml:"window,omitempty"`
+	Hosts  []Host `toml:"hosts"`
 }
 
 // Defaults returns the configuration used when no file exists.
@@ -423,6 +447,9 @@ func (c Config) TerminalLines() int {
 // KeepTabsOn reports whether closing the app's window keeps its tabs' programs running.
 func (c Config) KeepTabsOn() bool { return c.Terminal.KeepTabs == nil || *c.Terminal.KeepTabs }
 
+// CloseEndedOn reports whether a tab closes once its program ended well.
+func (c Config) CloseEndedOn() bool { return c.Terminal.KeepEnded == nil || !*c.Terminal.KeepEnded }
+
 // NotifyOn reports whether a waiting tab may raise a desktop notification.
 func (c Config) NotifyOn() bool { return c.Terminal.Notify == nil || *c.Terminal.Notify }
 
@@ -455,6 +482,12 @@ func (c Config) Check() error {
 	case "", "on", "off":
 	default:
 		return fmt.Errorf("terminal.screen_reader is %q: use \"on\" or \"off\" (or leave it out)", c.Terminal.ScreenReader)
+	}
+	if w := c.Window.SidebarWidth; w != 0 && (w < SidebarMin || w > SidebarMax) {
+		return fmt.Errorf("window.sidebar_width is %d: use %d to %d", w, SidebarMin, SidebarMax)
+	}
+	if w := c.Window.InspectorWidth; w != 0 && (w < InspectorMin || w > InspectorMax) {
+		return fmt.Errorf("window.inspector_width is %d: use %d to %d", w, InspectorMin, InspectorMax)
 	}
 	for name, cl := range c.Clouds {
 		switch cl.Code {

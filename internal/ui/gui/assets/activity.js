@@ -1,6 +1,6 @@
 // The Activity screen: what hopsesh did here, newest first, with Undo, and the marks still
 // waiting for a copy left behind to end.
-import { api, h, fill, icon, ICONS, view, state, screen, go, loading, toast, fail, errText, ago, when, ask, sys } from "./core.js";
+import { api, h, fill, icon, ICONS, view, state, screen, go, loading, toast, fail, errText, ago, when, ask, sys, cloudTitle } from "./core.js";
 
 // undo reverses an operation. When the session was used since, it says what changed and
 // asks before throwing that work away.
@@ -47,7 +47,7 @@ function hopText(x) {
   if (!o) return { title: x.title, detail: "", note: "" };
   return {
     title: x.title,
-    detail: [`${o.from} → ${sys.here} → ${o.to}`, o.key, o.state === "done" ? "" : o.state].filter(Boolean).join(" · "),
+    detail: [`${cloudTitle(o.from)} → ${sys.here} → ${cloudTitle(o.to)}`, o.key, o.state === "done" ? "" : o.state].filter(Boolean).join(" · "),
     note: o.state === "waiting" ? o.message : o.state === "failed" ? o.message
       : `Undo takes both legs back: the hand-off, then the copy here. Both cloud sessions stay where they are.`,
   };
@@ -60,7 +60,7 @@ function handoffText(x) {
   const tail = " to " + o.cloudTitle;
   return {
     title: x.title.endsWith(tail) ? `“${x.title.slice(0, -tail.length)}”${tail}` : x.title,
-    detail: [`${o.machine} → ${o.cloud}`, o.session, o.branch ? "branch " + o.branch : ""].filter(Boolean).join(" · "),
+    detail: [`${o.machine} → ${o.cloudTitle || cloudTitle(o.cloud)}`, o.session, o.branch ? "branch " + o.branch : ""].filter(Boolean).join(" · "),
     note: `Undo ${o.pushed ? "deletes the branch and " : "removes "}the mark. The ${o.noun || "session"} stays in ${o.cloudTitle}; archive it there if you want it gone.`,
   };
 }
@@ -75,7 +75,7 @@ function fetchText(x) {
     : f.restored ? `${f.restored} message${f.restored === 1 ? "" : "s"}${partial}${f.outcome === "unchecked" ? ", nothing to check them against" : ""}` : "";
   return {
     title: `“${f.title}” from ${f.cloudTitle}${outcome}`,
-    detail: [`${f.cloud} → ${f.agent} on ${sys.here}`, counts, "worktree " + f.worktree].filter(Boolean).join(" · "),
+    detail: [`${cloudTitle(f.cloud)} → ${f.agent} on ${sys.here}`, counts, "worktree " + f.worktree].filter(Boolean).join(" · "),
     note: f.outcome === "waiting" ? "" : `Undo removes the copy here and the worktree. The cloud session stays on ${(f.url.match(/^https:\/\/([^/]+)/) || [])[1] || "the cloud"}.`,
   };
 }
@@ -149,7 +149,7 @@ function branchesCard() {
   const offered = (b?.list || []).filter((c) => c.offer);
   return h("section", { class: "card", "aria-label": "Branches on your remotes" },
     h("div", { class: "card-h" }, h("span", { class: "name" }, "Branches cloud hand-offs left"),
-      h("span", { class: "muted", style: "font-size:12px" }, "Handoff branches and the clouds' own branches, offered for deletion once their work is merged."),
+      h("span", { class: "muted", style: "font-size:12px" }, "Hand-off branches and the clouds' own branches, offered for deletion once their work is merged."),
       h("span", { class: "spacer" }),
       offered.length > 1 ? h("button", { class: "btn small", onclick: () => del(offered) }, `Delete ${offered.length} merged`) : null,
       h("button", { class: "btn small", id: "look-branches", disabled: !!b?.busy, onclick: look }, b ? "Look again" : "Look for merged branches")),
@@ -159,7 +159,7 @@ function branchesCard() {
         h("span", { class: "ico cloud" }, icon(ICONS.cloud, 15)),
         h("div", { style: "flex:1 1 300px;min-width:0;display:flex;flex-direction:column;gap:3px" },
           h("span", { class: "mono", style: "font-size:12.5px" }, c.branch),
-          h("span", { class: "muted", style: "font-size:12px" }, [c.repo || c.checkout, c.cloudTitle, c.kind === "handoff" ? "handoff branch" : "the cloud's own branch"].filter(Boolean).join(" · ")),
+          h("span", { class: "muted", style: "font-size:12px" }, [c.repo || c.checkout, c.cloudTitle, c.kind === "handoff" ? "hand-off branch" : "the cloud's own branch"].filter(Boolean).join(" · ")),
           h("span", { class: c.offer ? "ok" : "muted", style: "font-size:12px" }, c.why)),
         c.offer ? h("button", { class: "btn", onclick: () => del([c]) }, "Delete") : null)));
 }

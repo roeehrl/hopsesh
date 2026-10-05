@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { fresh, row } from "./helpers";
+import { fresh, row, turnOnCloud } from "./helpers";
 
 test.beforeEach(async ({ page }) => fresh(page));
 
@@ -15,7 +15,7 @@ async function openMenu(page: Page) {
 
 async function turnOn(page: Page) {
   const sidebar = page.getByRole("navigation", { name: "Scopes" });
-  await sidebar.locator(".side-off", { hasText: "Claude Code cloud" }).getByRole("button", { name: "Turn on" }).click();
+  await turnOnCloud(page, "Claude Code cloud");
   await expect(sidebar.getByRole("button", { name: /Claude Code cloud/ })).toContainText("ready", { timeout: 30_000 });
 }
 
@@ -23,10 +23,10 @@ test("the Hand off menu lists every cloud, and a disabled one says why", async (
   let menu = await openMenu(page);
   const claude = menu.getByRole("menuitem", { name: /Claude Code cloud/ });
   await expect(claude).toBeDisabled();
-  await expect(claude).toContainText("Claude Code cloud: turned off. Turn it on in Machines.");
+  await expect(claude).toContainText("Turned off. Turn it on in Machines.");
   const codex = menu.getByRole("menuitem", { name: /Codex cloud/ });
   await expect(codex).toBeDisabled();
-  await expect(codex).toContainText("Codex cloud: turned off. Turn it on in Machines.");
+  await expect(codex).toContainText("Turned off. Turn it on in Machines.");
   await expect(menu).toContainText("A cloud gets a briefing, not this conversation.");
 
   await turnOn(page);
@@ -41,7 +41,7 @@ test("the Hand off menu lists every cloud, and a disabled one says why", async (
   await page.locator(".pal-item", { hasText: "Hand off to…" }).click();
   const picker = page.locator("#dlg").getByRole("menu", { name: "Hand off to" });
   await expect(picker.getByRole("menuitem", { name: /Claude Code cloud/ })).toBeEnabled();
-  await expect(picker.getByRole("menuitem", { name: /Codex cloud/ })).toContainText("Codex cloud: turned off. Turn it on in Machines.");
+  await expect(picker.getByRole("menuitem", { name: /Codex cloud/ })).toContainText("Turned off. Turn it on in Machines.");
 });
 
 test("the hand-off sheet: briefing, branch, what stays, options; done, then undo", async ({ page }) => {
@@ -69,7 +69,7 @@ test("the hand-off sheet: briefing, branch, what stays, options; done, then undo
   const history = sheet.getByRole("checkbox", { name: /Also commit the conversation as \.hopsesh\/handoff\.md/ });
   await expect(history).not.toBeChecked();
   await expect(sheet).toContainText("hopsesh can't tell whether github.com/example/demo is public. Anyone who can see the branch could read this file.");
-  await expect(sheet.getByRole("checkbox", { name: "Mark this session “continued in Claude Code on claude-cloud”" })).toBeChecked();
+  await expect(sheet.getByRole("checkbox", { name: "Mark this session “continued in Claude Code cloud”" })).toBeChecked();
   await expect(sheet).toContainText("Cloud sessions use your plan's allowance.");
   await expect(sheet.locator("#ho-terminal")).toContainText("Claude Code starts the session in a terminal: it runs claude in hopsesh's hand-off folder for this repository");
   await expect(sheet.locator("#ho-terminal")).toContainText("handoff/github.com/example/demo");
@@ -86,7 +86,7 @@ test("the hand-off sheet: briefing, branch, what stays, options; done, then undo
   await expect(page.getByRole("button", { name: /^hopsesh\/handoff\// })).toBeVisible();
   await expect(page.locator(".page")).toContainText("Stayed on this");
   await expect(page.locator(".page")).toContainText(".env, certs/dev.pem");
-  await expect(page.locator(".page")).toContainText("The session here is marked “continued in Claude Code on claude-cloud”");
+  await expect(page.locator(".page")).toContainText("The session here is marked “continued in Claude Code cloud”");
   await expect(page.getByRole("note")).toHaveText("When it finishes: Clouds → Claude Code cloud → Bring here");
   // No cloud takes a follow-up from hopsesh: there is no button, and Claude Code's cloud
   // says where to write to the session instead.
@@ -108,8 +108,8 @@ test("the hand-off sheet: briefing, branch, what stays, options; done, then undo
 test("a hand-off to Jules: the briefing asks for the handoff branch", async ({ page }) => {
   expect((await page.request.post("/dirty")).ok()).toBeTruthy();
   const sidebar = page.getByRole("navigation", { name: "Scopes" });
-  await sidebar.locator(".side-off", { hasText: "Jules" }).getByRole("button", { name: "Turn on" }).click();
-  await expect(sidebar.locator(".side-off", { hasText: "Jules" })).toHaveCount(0, { timeout: 30_000 });
+  await turnOnCloud(page, "Jules");
+  await expect(sidebar.getByRole("button", { name: /Jules/ })).toBeVisible({ timeout: 30_000 });
   const menu = await openMenu(page);
   const jules = menu.getByRole("menuitem", { name: /Jules/ });
   await expect(jules).toBeEnabled();

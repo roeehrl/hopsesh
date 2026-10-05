@@ -1,11 +1,12 @@
 // The Sessions screen: scopes on the left, sessions by repository in the middle, the
 // selected session on the right. Every action on a session comes from actionsFor(), which
 // the palette uses too.
-import { api, h, fill, icon, ICONS, view, state, screen, go, loading, toast, fail, cap, ago, when, bytes, agentBadge, agentChip, machineStatus, sys, keys, cliHow,
-  entries, selected, here, agentInfo, $, count, clouds, cloudOf, cloudState, cloudChip, dialog, errText } from "./core.js";
+import { api, h, fill, icon, ICONS, view, state, screen, go, current, loading, toast, fail, cap, ago, when, bytes, agentBadge, agentChip, machineStatus, sys, keys, cliHow,
+  entries, selected, here, agentInfo, $, count, clouds, cloudOf, cloudState, cloudChip, dialog, errText, rich, path, cloudTitle } from "./core.js";
 import { handoffMenu } from "./handoff.js";
 import { hopMenu } from "./hop.js";
 import { planFor, planPicked } from "./plan.js";
+import { dividers, apply as applyLayout } from "./layout.js";
 import { tabFor, exitOf, exitWords, waiting, strayWaiting, where as opensIn, resume, openShell, moveToTerminal, showTerminal, tabChip, IN_A_TAB, tabs } from "./term.js";
 
 // scan reads every machine again. The list stays while it runs.
@@ -37,19 +38,61 @@ export async function scan() {
   if (state.sel && !selected()) state.sel = null;
 }
 
+// refreshHere reads this machine again (RefreshHere), keeping what the last scan found
+// elsewhere: quiet, with the list kept as it is until the answer comes.
+async function refreshHere() {
+  if (state.scanning || !state.scan) return;
+  state.scanning = true;
+  try {
+    state.scan = await api("RefreshHere");
+  } catch { /* the next refresh tries again; the list stays */ }
+  state.scanning = false;
+  freshness();
+  if (state.sel && !selected()) state.sel = null;
+}
+
 function freshness() {
   const el = $("#fresh");
   el.textContent = state.scanning ? "Refreshing…" : state.scan ? "updated " + ago(state.scan.updated) : "";
+  const other = state.scan && state.scan.elsewhere !== state.scan.updated;
+  el.title = other ? `${sys.Here}: ${ago(state.scan.updated)}. Your other machines and the clouds: ${ago(state.scan.elsewhere)}.` : "";
 }
 setInterval(freshness, 30000);
 
+// The list keeps itself current while the window is in front: this machine every
+// minute (a local read), and everything (SSH to every machine, the clouds' commands) when
+// the window comes back after five minutes or more. Never while a dialog or a plan is open,
+// or another screen is shown.
+const HERE_EVERY = 60_000, ALL_AFTER = 5 * 60_000;
+const since = (iso) => (iso ? Date.now() - new Date(iso).getTime() : Infinity);
+const busy = () => !state.scan || state.scanning || current !== "sessions" || document.hidden || !!document.querySelector("dialog[open]");
+async function autoRefresh(all) {
+  if (busy()) return;
+  const onRow = document.activeElement?.classList?.contains("row");
+  if (all) await scan(); else await refreshHere();
+  if (busy() && !state.scanning) return; // something opened meanwhile: drawn when it closes
+  render();
+  if (onRow) view.querySelector('.row[aria-selected="true"]')?.focus();
+}
+setInterval(() => { if (document.hasFocus() && since(state.scan?.updated) >= HERE_EVERY) autoRefresh(since(state.scan?.elsewhere) >= ALL_AFTER * 2); }, 15_000);
+const comeBack = () => { if (!document.hidden && since(state.scan?.updated) >= HERE_EVERY / 2) autoRefresh(since(state.scan?.elsewhere) >= ALL_AFTER); };
+document.addEventListener("visibilitychange", comeBack);
+window.addEventListener("focus", comeBack);
+
 // CLOUD_STATES are a cloud session's states: [kind, words].
 const CLOUD_STATES = { running: ["running", "Running"], idle: ["idle", "Idle"], done: ["done", "Done"], failed: ["error", "Failed"],
-  archived: ["ended", "Archived"], unknown: ["unknown", "State unknown"] };
+  archived: ["ended", "Archived"], unknown: ["unknown", "State not known"] };
 
 // statusOf is a session's state: [kind, words].
 export function statusOf(e) {
-  if (e.cloud) return CLOUD_STATES[e.cloud.state] || CLOUD_STATES.unknown;
+  if (e.cloud) {
+    const st = CLOUD_STATES[e.cloud.state];
+    if (st && e.cloud.state !== "unknown") return st;
+    // The vendor's command doesn't say (Claude Code has none for a cloud session's state):
+    // where to look instead.
+    const host = (e.cloud.url.match(/^https:\/\/([^/]+)/) || [])[1];
+    return ["unknown", host ? `Status on ${host}` : CLOUD_STATES.unknown[1]];
+  }
   const t = tabFor(e);
   if (t) return t.attention ? ["needs", "Waiting for you"] : ["working", "Working"];
   if (e.needs) return ["needs", "Needs you"];
@@ -113,8 +156,10 @@ export function actionsFor(e) {
     out.push({ id: "show", label: "Show its tab", short: "Show tab", run: () => showTerminal(tab.id) });
     out.push({ id: "move", label: `Move to ${sys.terminal}…`, run: () => moveToTerminal(tab) });
   } else if (local) {
-    // A session running here: show the tab it runs in (never a second copy).
-    if (e.live) out.push({ id: "show", label: "Show its terminal tab", run: () => api("ShowEntry", e.machine, e.key).catch(fail) });
+    // A session running here: show the tab it runs in (never a second copy), or the
+    // agent's own app when that runs it (the Claude app).
+    if (e.live && e.app) out.push({ id: "app-show", label: `Show the ${e.app} app`, short: `Show ${e.app}`, run: () => showApp(e) });
+    else if (e.live) out.push({ id: "show", label: "Show its terminal tab", short: "Show its tab", run: () => showEntry(e) });
     if (!e.live && e.hereNewest) {
       const inTab = { id: "resume-here", label: "Resume here", short: "Resume here", run: () => resume(e, "here") };
       const outside = { id: "resume-terminal", label: `Open in ${sys.terminal}`, short: `Open in ${sys.terminal}`, run: () => resume(e, "terminal") };
@@ -133,6 +178,27 @@ export function actionsFor(e) {
   return out;
 }
 
+// showEntry brings forward the terminal tab a session runs in; when hopsesh can't find
+// one, it says so.
+async function showEntry(e) {
+  try { await api("ShowEntry", e.machine, e.key); } catch (err) { toast(`Couldn't show “${e.title}”: ${errText(err)}`); }
+}
+
+// showApp brings forward the agent's desktop app that runs a session.
+async function showApp(e) {
+  try { await api("ShowApp", e.machine, e.key); } catch (err) { toast(cap(errText(err))); }
+}
+
+// lower starts words with a small letter, for the middle of a line (names keep theirs).
+const lower = (s) => (s ? s[0].toLowerCase() + s.slice(1) : s);
+
+// copyPlace says where another copy of a session is: "Codex here", "Claude Code on
+// laptop", "Claude Code cloud".
+function copyPlace(c, hereWord = "here") {
+  if (cloudOf(c.machine)) return cloudTitle(c.machine);
+  return `${c.agentName} ${c.local ? (hereWord === "here" ? "here" : "on " + hereWord) : "on " + c.machine}`;
+}
+
 // needsYou: the session waits for its person (its agent says so, or its tab here does).
 const needsYou = (e) => e.needs || !!tabFor(e)?.attention;
 
@@ -141,8 +207,8 @@ function scoped() {
   return entries().filter((e) =>
     (sc.kind !== "needs" || needsYou(e)) &&
     (sc.kind !== "here" || e.machine === here()) &&
-    (sc.kind !== "incloud" || e.cloud || e.mirror) &&
-    (sc.kind !== "cloud" || (e.cloud ? e.machine === sc.value : e.mirror?.cloud === sc.value)) &&
+    (sc.kind !== "incloud" || e.cloud) && // a Remote Control mirror runs here: it is under this machine
+    (sc.kind !== "cloud" || (e.cloud && e.machine === sc.value)) &&
     (sc.kind !== "machine" || e.machine === sc.value) &&
     (sc.kind !== "agent" || e.agent === sc.value) &&
     (!f.agent || e.agent === f.agent) &&
@@ -155,7 +221,8 @@ function scopeTitle() {
     agent: agentInfo(sc.value)?.name || sc.value }[sc.kind];
 }
 
-function setScope(sc) { state.scope = sc; render(); }
+// setScope shows another list; the menu closes, and a selection not in it goes.
+function setScope(sc) { state.scope = sc; state.handoffOpen = null; render(); }
 
 function sidebar() {
   const s = state.scan, all = entries();
@@ -165,26 +232,31 @@ function sidebar() {
   const machines = s.machines.filter((m) => !m.local);
   const dotFor = (m) => machineStatus(m.status)[0];
   const act = state.activity;
-  return h("nav", { class: "sidebar", "aria-label": "Scopes" },
+  // Clouds: the ones turned on, and a way to turn on another. Agents: the ones with
+  // sessions on the machines shown.
+  const on = clouds().filter((c) => c.allowed);
+  const agents = (state.info.agents || []).filter((a) => a.enabled).map((a) => [a, all.filter((e) => e.agent === a.id).length]).filter(([, n]) => n);
+  return h("nav", { class: "sidebar", id: "sidebar", "aria-label": "Scopes" },
     h("button", { class: "side-btn", "aria-current": cur("needs"), onclick: () => setScope({ kind: "needs" }) },
       h("span", { class: "dot" + (needs ? " needs" : "") }), h("span", { style: needs ? "font-weight:600" : "" }, "Needs you"),
       needs ? h("span", { class: "chip st-needs", style: "margin-left:auto" }, needs) : h("span", { class: "count" }, "0")),
     h("button", { class: "side-btn", "aria-current": cur("all"), onclick: () => setScope({ kind: "all" }) }, icon(ICONS.all), "All sessions", h("span", { class: "count" }, all.length)),
-    h("button", { class: "side-btn", "aria-current": cur("here"), onclick: () => setScope({ kind: "here" }) }, icon(ICONS.here), `On ${sys.here}`,
+    h("button", { class: "side-btn", "aria-current": cur("here"), onclick: () => setScope({ kind: "here" }) }, icon(ICONS.here), h("span", { class: "label" }, `On ${sys.here}`),
       h("span", { class: "count" }, all.filter((e) => e.machine === here()).length)),
-    clouds().length ? h("button", { class: "side-btn", "aria-current": cur("incloud"), onclick: () => setScope({ kind: "incloud" }) }, icon(ICONS.cloud), "In the cloud",
-      h("span", { class: "count" }, all.filter((e) => e.cloud || e.mirror).length)) : null,
+    on.length ? h("button", { class: "side-btn", "aria-current": cur("incloud"), onclick: () => setScope({ kind: "incloud" }) }, icon(ICONS.cloud), "In the cloud",
+      h("span", { class: "count" }, all.filter((e) => e.cloud).length)) : null,
     h("div", { class: "side-h" }, "Machines"),
     machines.map((m) => h("button", { class: "side-btn", "aria-current": cur("machine", m.name), onclick: () => setScope({ kind: "machine", value: m.name }) },
       h("span", { class: "dot " + dotFor(m) }),
-      h("span", { style: "min-width:0" }, h("span", {}, m.name), h("small", { class: dotFor(m) === "ok" ? "" : "warn" }, dotFor(m) === "ok" ? [m.os, m.hopsesh ? "hopsesh " + m.hopsesh : ""].filter(Boolean).join(" · ") : machineStatus(m.status)[1])),
+      h("span", { class: "label" }, h("span", {}, m.name), h("small", { class: dotFor(m) === "ok" ? "" : "warn" }, dotFor(m) === "ok" ? [m.os, m.hopsesh ? "hopsesh " + m.hopsesh : ""].filter(Boolean).join(" · ") : machineStatus(m.status)[1])),
       h("span", { class: "count" }, m.status === "ok" ? m.sessions : ""))),
     h("button", { class: "side-btn", style: "color:var(--accent)", onclick: () => go("machines") }, icon(ICONS.plus), machines.length ? "Add a machine" : "Add your other machines"),
     clouds().length ? h("div", { class: "side-h" }, "Clouds") : null,
-    clouds().map(cloudSide),
-    h("div", { class: "side-h" }, "Agents"),
-    (state.info.agents || []).filter((a) => a.enabled).map((a) => h("button", { class: "side-btn", "aria-current": cur("agent", a.id), onclick: () => setScope({ kind: "agent", value: a.id }) },
-      agentBadge(a.id, a.name), a.name, h("span", { class: "count" }, all.filter((e) => e.agent === a.id).length))),
+    on.map(cloudSide),
+    on.length < clouds().length ? h("button", { class: "side-btn", style: "color:var(--accent)", onclick: () => go("machines", "clouds") }, icon(ICONS.plus), "Turn on a cloud…") : null,
+    agents.length ? h("div", { class: "side-h" }, "Agents") : null,
+    agents.map(([a, n]) => h("button", { class: "side-btn", "aria-current": cur("agent", a.id), onclick: () => setScope({ kind: "agent", value: a.id }) },
+      agentBadge(a.id, a.name), h("span", { class: "label" }, a.name), h("span", { class: "count" }, n))),
     h("div", { class: "side-foot" },
       nTabs ? h("button", { class: "side-btn", style: "padding:6px 0", onclick: () => showTerminal() }, icon(["M3 4h18v16H3z", "m7 9 3 3-3 3M12 15h5"]), "Terminal",
         h("span", { class: "count" + (nWait ? " warn" : "") }, nWait ? `${nWait} waiting` : `${count(nTabs, "tab")}`)) : null,
@@ -195,20 +267,18 @@ function sidebar() {
       updateNote()));
 }
 
-// cloudSide is a cloud in the sidebar: a dot, its name and one word, and its count, or a
-// Turn on link while it is not allowed.
+// cloudSide is a cloud that is turned on, in the sidebar: a dot, its name and one word,
+// and its count (without Remote Control mirrors: those run on this machine).
 function cloudSide(c) {
   const [dot, word] = cloudState(c);
   const cur = state.scope.kind === "cloud" && state.scope.value === c.name ? "true" : "false";
-  if (!c.allowed) return h("div", { class: "side-off" }, h("span", { class: "dot off" }), h("span", {}, c.title),
-    h("button", { class: "link", title: `Allow hopsesh to use ${c.title}`, onclick: () => turnOn(c) }, "Turn on"));
-  return h("button", { class: "side-btn", "aria-current": cur, onclick: () => setScope({ kind: "cloud", value: c.name }) },
+  return h("button", { class: "side-btn", "aria-current": cur, title: c.title, onclick: () => setScope({ kind: "cloud", value: c.name }) },
     h("span", { class: "dot " + dot }),
-    h("span", { style: "min-width:0" }, h("span", {}, c.title), h("small", { class: dot === "ok" || dot === "half" ? "ok" : dot === "off" ? "" : "warn" }, word)),
-    h("span", { class: "count" }, c.listable && (c.status === "ready" || c.status === "cli-old") ? c.sessions : "–"));
+    h("span", { class: "label" }, h("span", {}, c.title), h("small", { class: dot === "ok" || dot === "half" ? "ok" : dot === "off" ? "" : "warn" }, word)),
+    h("span", { class: "count" }, c.listable && (c.status === "ready" || c.status === "cli-old") ? c.sessions - (c.mirrors || 0) : "–"));
 }
 
-// turnOn allows a cloud and reads it.
+// turnOn turns a cloud on (allows it) and reads it.
 async function turnOn(c) {
   try { await api("SetCloudAllowed", c.name, true); } catch (e) { fail(e); return; }
   toast(`${c.title} is on: hopsesh reaches it through ${c.driver}, signed in as you`);
@@ -284,7 +354,7 @@ function notices() {
   const picked = state.scope.kind === "machine" && s.machines.find((m) => m.name === state.scope.value);
   if (picked && picked.status !== "ok") out.push(h("div", { class: "card notice warn-card", role: "status" },
     h("div", { style: "flex:1 1 360px" }, h("b", {}, `${picked.name}: ${machineStatus(picked.status)[1]}`),
-      h("div", { style: "font-size:12.5px" }, cap(picked.hint || picked.error))),
+      h("div", { style: "font-size:12.5px" }, rich(cap(picked.hint || picked.error)))),
     h("button", { class: "btn", onclick: () => go("machines") }, "Open Machines")));
   const blocked = s.machines.filter((m) => m.status === "local-network");
   if (blocked.length) out.push(h("div", { class: "card notice warn-card", role: "status" },
@@ -299,21 +369,32 @@ function notices() {
     h("button", { class: "btn", onclick: () => showTerminal(stray[0].id) }, "Show the terminal")));
   const sc = state.scope.kind === "cloud" && cloudOf(state.scope.value);
   if (sc) out.push(...cloudNotices(sc));
-  if (!i.hasHosts && !sc) out.push(h("div", { class: "card notice" },
-    h("div", { style: "flex:1 1 360px" }, h("b", {}, `These are ${sys.here}'s sessions`), h("div", { class: "muted", style: "font-size:12.5px" }, "Add your other machines to see and bring over their sessions too.")),
-    h("button", { class: "btn primary", onclick: () => go("machines") }, "Add machines")));
-  if (i.skillState === "absent" && i.skillPrompt !== "declined") out.push(h("div", { class: "card notice" },
-    h("div", { style: "flex:1 1 360px" }, h("b", {}, "Let your agents use hopsesh"), h("div", { class: "muted", style: "font-size:12.5px" }, "Ask an agent “bring my laptop session here” or “continue this in Codex”. It shows you the plan and acts only after you say yes.")),
-    h("button", { class: "btn primary", onclick: async () => { try { await api("InstallSkill", false, false); toast("Installed the hopsesh skill in every agent"); } catch (e) { fail(e); } state.info = await api("Info"); render(); } }, "Install the skill"),
-    h("button", { class: "btn", onclick: async () => { await api("DismissSkillOffer"); state.info = await api("Info"); render(); } }, "Not now")));
-  else if (i.skillState === "stale" || i.skillState === "broken") out.push(h("div", { class: "card notice" },
+  if (state.scope.kind !== "all") return out;
+  if (i.skillState === "stale" || i.skillState === "broken") out.push(h("div", { class: "card notice" },
     h("b", { style: "flex:1 1 360px" }, i.skillState === "stale" ? "The hopsesh skill is out of date" : "The hopsesh skill is damaged"),
     h("button", { class: "btn primary", onclick: async () => { try { await api("InstallSkill", false, false); toast("Updated the hopsesh skill"); } catch (e) { fail(e); } state.info = await api("Info"); render(); } }, i.skillState === "stale" ? "Update it" : "Repair it")));
-  if (i.cliOffer) out.push(h("div", { class: "card notice" },
-    h("div", { style: "flex:1 1 360px" }, h("b", {}, `Use hopsesh in ${sys.terminal} too`), h("div", { class: "muted", style: "font-size:12.5px" }, `${cliHow()}. It always runs this app's version.`)),
-    h("button", { class: "btn primary", onclick: async () => { try { await api("InstallCLI", false); toast(sys.win ? "hopsesh is ready in new terminal windows" : "hopsesh is ready in Terminal"); } catch (e) { fail(e); } state.info = await api("Info"); render(); } }, "Install command"),
-    h("button", { class: "btn", onclick: async () => { await api("DismissCLIOffer"); state.info = await api("Info"); render(); } }, "Not now")));
+  out.push(setupLine());
   return out;
+}
+
+// setupLine is the one line of what is left to set up, on All sessions only: each step
+// opens its place in Machines or Settings, and drops out once done (or declined there);
+// ✕ closes the line for good. Every step stays in Machines and Settings.
+function setupLine() {
+  const i = state.info;
+  if (i.setupDismissed) return null;
+  const steps = [
+    !i.hasHosts && ["Add machines", "Your other machines' sessions, here too", () => go("machines")],
+    i.skillState === "absent" && i.skillPrompt !== "declined" && ["Install the skill", "Your agents can find and hop sessions, after asking you", () => go("settings", "skill")],
+    i.cliOffer && ["Install the command", `${cliHow()}`, () => go("settings", "cli")],
+  ].filter(Boolean);
+  if (!steps.length) return null;
+  const close = async () => { try { await api("DismissSetup"); state.info = await api("Info"); } catch (e) { fail(e); } render(); };
+  return h("div", { class: "setup", role: "note", "aria-label": "Finish setting up" },
+    h("b", {}, `Finish setting up (${3 - steps.length} of 3 done):`),
+    steps.map(([label, why, run], n) => [n ? h("span", { class: "muted", "aria-hidden": "true" }, "·") : null, h("button", { class: "link", title: why, onclick: run }, label)]),
+    h("span", { class: "spacer" }),
+    h("button", { class: "x", "aria-label": "Close: don't show this again", title: "Don't show this again (each step stays in Machines and Settings)", onclick: close }, "✕"));
 }
 
 // cloudNotices are the head of a cloud's scope: honest about what a partial listing shows,
@@ -322,11 +403,11 @@ function cloudNotices(c) {
   const out = [];
   const why = cloudBlock(c);
   if (why) out.push(h("div", { class: "card notice warn-card", role: "status" },
-    h("div", { style: "flex:1 1 360px" }, h("b", {}, `${c.title}: ${cloudState(c)[1]}`), h("div", { style: "font-size:12.5px" }, why)),
+    h("div", { style: "flex:1 1 360px" }, h("b", {}, `${c.title}: ${cloudState(c)[1]}`), h("div", { style: "font-size:12.5px" }, rich(why))),
     c.status === "signed-out" ? h("button", { class: "btn", onclick: () => scan().then(render) }, "Refresh") : null,
     !c.allowed ? h("button", { class: "btn primary", onclick: () => turnOn(c) }, "Turn on") : null));
   else if (c.partial) out.push(h("div", { class: "cloud-head", role: "note" },
-    h("span", { style: "flex:1 1 380px" }, `Showing the cloud sessions hopsesh started or brought here, and Remote Control mirrors. ${c.agentName} can show you the rest.`),
+    h("span", { style: "flex:1 1 380px" }, `Showing the cloud sessions hopsesh started or brought here. ${c.agentName} can show you the rest; sessions mirrored by Remote Control run on their machine and are listed there.`),
     h("button", { class: "btn", onclick: () => findDialog(c.name) }, `Find in ${c.agentName}…`),
     h("button", { class: "btn", onclick: () => pasteDialog(c.name) }, "Paste a link…")));
   return out;
@@ -341,15 +422,16 @@ function row(e) {
   if (e.unpushed) bits.push(`+${e.unpushed} unpushed`);
   const tab = tabFor(e);
   if (tab?.attention) bits.push("waiting for you in its tab here");
-  else if (e.needs) bits.push("waiting for your answer in its window");
+  else if (e.needs) bits.push(e.app ? `waiting for your answer in the ${e.app} app` : "waiting for your answer in its window");
   else if (e.lastPrompt) bits.push(`“${e.lastPrompt}”`);
   const others = (e.copies || []).filter((c) => !(c.machine === e.machine && c.key === e.key));
   if (e.cloud) {
     bits.length = 0;
     if (e.cloud.branch) bits.push(e.cloud.branch);
     if (e.cloud.changes) bits.push(e.cloud.changes);
-    const last = e.history[e.history.length - 1];
-    bits.push(last ? `${last.what.toLowerCase()} ${ago(last.when)}` : "from a pasted link");
+    const first = e.history[0], last = e.history[e.history.length - 1];
+    if (e.cloud.state === "unknown" && first) bits.push(`started ${ago(first.when)}`);
+    else bits.push(last ? `${lower(last.what)} ${ago(last.when)}` : "from a pasted link");
   }
   const chips = [];
   if (e.cloud) chips.push(cloudChip(e.machine));
@@ -358,15 +440,16 @@ function row(e) {
   if (tab) chips.push(tabChip());
   const ext = !tab && !e.live && e.machine === here() ? exitOf(e) : null;
   if (ext) chips.push(h("span", { class: "chip " + (ext.code === 0 ? "st-idle" : ext.closed ? "st-ended" : "st-error"), title: `How its last run in ${ext.terminal} ended` }, `${exitWords(ext)} in ${ext.terminal}`));
-  for (const c of others) chips.push(h("span", { class: "chip" + (c.newest ? " st-warn" : "") }, `${c.newest ? "newest: " : "also "}${c.agentName} ${c.local ? "here" : "on " + c.machine}`));
+  for (const c of others) chips.push(h("span", { class: "chip" + (c.newest ? " st-warn" : "") }, `${c.newest ? "newest: " : "also "}${copyPlace(c)}`));
   const where = e.cloud ? "cloud" : e.machine === here() ? (tab ? "here · in a tab" : "here") : e.machine;
   return h("div", { class: "row", role: "option", "aria-selected": sel ? "true" : "false", tabindex: sel ? "0" : "-1", "data-key": e.machine + "\u0000" + e.key,
       onclick: () => select(e), ondblclick: () => acts[0]?.run() },
-    agentBadge(e.agent, e.agentName),
+    agentBadge(e.agent, e.agentName, e.cloud ? cloudTitle(e.machine) : ""),
     h("div", { class: "main" }, h("span", { class: "t", title: e.title }, e.title), h("span", { class: "s" }, bits.join(" · ") || " "),
       chips.length ? h("div", { class: "copies" }, chips) : null),
     h("div", { class: "state" }, h("span", { class: "chip st-" + k }, h("span", { class: "dot " + k }), words), `${where} · ${ago(e.lastActive)}`),
-    h("div", { class: "act" }, acts[0] ? h("button", { class: "btn small outline", style: "width:100%", title: acts[0].why || "", onclick: (ev) => { ev.stopPropagation(); acts[0].run(); } }, acts[0].short || acts[0].label) : null));
+    h("div", { class: "act" }, acts[0] ? h("button", { class: "btn small outline", title: acts[0].why || acts[0].label, onclick: (ev) => { ev.stopPropagation(); acts[0].run(); } },
+      h("span", { class: "btn-t" }, acts[0].short || acts[0].label)) : null));
 }
 
 // mirrorChip links a session's copy on the vendor's site (Remote Control).
@@ -381,6 +464,48 @@ function select(e) {
   view.querySelector('.row[aria-selected="true"]')?.focus();
 }
 
+// toggleMenu opens or closes a session's Hand off ▸ menu. Open, it hangs below its button,
+// as wide as it needs (over the list if need be); Escape, a click elsewhere, a choice or
+// another list closes it.
+function toggleMenu(e) {
+  const k = e.machine + "\u0000" + e.key;
+  const opening = state.handoffOpen !== k;
+  state.handoffOpen = opening ? k : null;
+  render();
+  if (opening) view.querySelector('.menu-pop [role="menuitem"]:not([disabled])')?.focus();
+  else view.querySelector('.menu-wrap > .btn')?.focus();
+}
+// closeMenu closes the open menu in place (no redraw, so the click that closed it still
+// reaches what it was on).
+function closeMenu(focus = false) {
+  if (!state.handoffOpen) return;
+  state.handoffOpen = null;
+  view.querySelector(".menu-pop")?.remove();
+  const btn = view.querySelector('.menu-wrap > .btn[aria-expanded="true"]');
+  btn?.setAttribute("aria-expanded", "false");
+  if (focus) btn?.focus();
+}
+// placeMenu sets an open menu's place from its button: below it, its right edge on the
+// button's, inside the window (above the button when there is no room below).
+function placeMenu() {
+  const pop = view.querySelector(".menu-pop");
+  const btn = pop?.parentElement.querySelector(":scope > .btn");
+  if (!pop || !btn) return;
+  const r = btn.getBoundingClientRect();
+  const w = Math.min(360, window.innerWidth - 16);
+  pop.style.width = w + "px";
+  pop.style.left = Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8)) + "px";
+  const below = window.innerHeight - r.bottom - 12, above = r.top - 12;
+  const up = below < Math.min(pop.scrollHeight, 260) && above > below;
+  pop.style.maxHeight = (up ? above : below) + "px";
+  pop.style.top = up ? "" : r.bottom + 4 + "px";
+  pop.style.bottom = up ? window.innerHeight - r.top + 4 + "px" : "";
+}
+document.addEventListener("pointerdown", (ev) => { if (state.handoffOpen && !ev.target.closest?.(".menu-wrap")) closeMenu(); }, true);
+document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && state.handoffOpen && !document.querySelector("dialog[open]")) { ev.preventDefault(); closeMenu(true); } });
+window.addEventListener("resize", placeMenu);
+document.addEventListener("scroll", placeMenu, true);
+
 // cloudInspector is a cloud session's details: where it is, what can be done with it here,
 // its repository and where it has been.
 function cloudInspector(e) {
@@ -392,9 +517,9 @@ function cloudInspector(e) {
   const kv = (label, value) => [h("dt", {}, label), h("dd", {}, value)];
   const diffDown = (cl?.codeDown || [])[0] === "diff";
   const noun = c.noun || "session";
-  return h("aside", { class: "inspector", "aria-label": `Cloud ${noun} details` },
+  return h("aside", { class: "inspector", id: "inspector", "aria-label": `Cloud ${noun} details` },
     h("div", { style: "display:flex;flex-direction:column;gap:6px" },
-      h("div", { style: "display:flex;gap:6px;flex-wrap:wrap;align-items:center" }, agentChip(e.agent, e.agentName), cloudChip(e.machine),
+      h("div", { style: "display:flex;gap:6px;flex-wrap:wrap;align-items:center" }, agentChip(e.agent, e.agentName, cloudTitle(e.machine)), cloudChip(e.machine),
         h("span", { class: "chip st-" + k }, h("span", { class: "dot " + k }), words)),
       h("h2", {}, e.title),
       h("span", { class: "mono muted", style: "font-size:11.5px" }, c.id),
@@ -404,18 +529,13 @@ function cloudInspector(e) {
       cl?.codeOnly ? null : acts.slice(1).map((a) => h("button", { class: "btn wrap", disabled: !!why, onclick: a.run }, e.bringIn ? "Bring here into ▸ " : "Bring here and continue in ▸ ",
         agentChip(a.id.slice(6), a.label.replace(/^.* in(to)? /, "")))),
       cl?.codeOnly || !(cl?.codeDown || []).length ? null : h("button", { class: "btn", disabled: !!why || !(c.branch || diffDown), title: c.branch || diffDown ? "" : "hopsesh doesn't know its branch yet: bring it with its conversation once", onclick: () => planFor(e, { target: "", codeOnly: true }) }, "Get the code only"),
-      hopMenu(e, state.handoffOpen === e.machine + "\u0000" + e.key, () => {
-        const k = e.machine + "\u0000" + e.key;
-        state.handoffOpen = state.handoffOpen === k ? null : k;
-        render();
-        view.querySelector('[role="menu"] [role="menuitem"]:not([disabled])')?.focus();
-      }),
+      hopMenu(e, state.handoffOpen === e.machine + "\u0000" + e.key, () => toggleMenu(e)),
       h("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap" }, h("button", { class: "btn", disabled: true, "aria-describedby": "arch-why" }, "Archive"),
         h("span", { id: "arch-why", class: "muted", style: "font-size:11.5px" }, `${e.agentName} archives only on ${host}`)),
-      why ? h("span", { class: "warn", style: "font-size:12px" }, why) : null),
+      why ? h("span", { class: "warn", style: "font-size:12px" }, rich(why)) : null),
     h("div", { class: "sec" }, h("span", { class: "sec-h" }, "Repository"),
       h("dl", { class: "kv" },
-        kv("Repository", c.repo ? h("span", { class: "mono", style: "font-size:12px" }, c.repo) : h("span", { class: "muted" }, "Not known yet")),
+        kv("Repository", c.repo ? path(c.repo) : h("span", { class: "muted" }, "Not known yet")),
         diffDown ? kv("Started from", c.branch ? h("span", { class: "mono", style: "font-size:12px" }, c.branch) : h("span", { class: "muted" }, "Not known: its patch goes on your checkout's HEAD"))
           : kv("Branch", c.branch ? h("span", { class: "mono", style: "font-size:12px" }, c.branch)
             : h("span", { class: "muted" }, cl?.codeOnly ? "None yet" : `${e.agentName} fetches it when it brings the session`)),
@@ -424,7 +544,7 @@ function cloudInspector(e) {
         c.base ? kv("Base", h("span", { class: "mono", style: "font-size:12px" }, c.base.slice(0, 7))) : null,
         c.pr ? kv("PR", c.pr) : null,
         kv("State", [words, e.lastActive ? h("span", { class: "muted" }, ` · ${ago(e.lastActive)}`) : null]),
-        c.checkout ? kv("Here", h("span", { class: "mono", style: "font-size:11.5px" }, c.checkout)) : null)),
+        c.checkout ? kv("Here", path(c.checkout, 11.5)) : null)),
     e.history.length ? h("div", { class: "sec" }, h("span", { class: "sec-h" }, "Lineage"),
       e.history.map((x, i) => h("div", { class: "hop" }, h("span", { class: "dot" + (i === e.history.length - 1 ? " ok" : "") }),
         h("div", {}, h("div", {}, x.what), h("div", { class: "muted", style: "font-size:11px" }, when(x.when)))))) : null,
@@ -434,12 +554,12 @@ function cloudInspector(e) {
       ? `Bringing it here makes a new worktree; ${e.agentName} copies the conversation in ${sys.terminal}. The cloud session is not changed.`
       : !(cl?.codeDown || []).length ? `Bringing it here makes a new worktree of its repository; hopsesh writes its messages, as text, as a new session of the agent you pick. Its code stays in ${cl.title}. The cloud ${noun} is not changed.`
       : `Bringing it here makes a new worktree with its code; hopsesh writes ${cl?.fidelity === "code" ? `the ${noun}'s title and what came of it` : "its messages"} as a new session${e.bringIn ? " of the agent you pick" : ""}. The cloud ${noun} is not changed.`),
-    (cl?.limits || []).map((l) => h("span", { class: "muted", style: "font-size:11.5px" }, l)));
+    (cl?.limits || []).map((l) => h("span", { class: "muted", style: "font-size:11.5px" }, rich(l))));
 }
 
 function inspector() {
   const e = selected();
-  if (!e) return h("aside", { class: "inspector", "aria-label": "Session details" }, h("div", { class: "empty" }, "Select a session to see what you can do with it."));
+  if (!e) return h("aside", { class: "inspector", id: "inspector", "aria-label": "Session details" }, h("div", { class: "empty" }, "Select a session to see what you can do with it."));
   if (e.cloud) return cloudInspector(e);
   const [k, words] = statusOf(e);
   const acts = actionsFor(e);
@@ -447,12 +567,13 @@ function inspector() {
   const others = (e.copies || []).filter((c) => !(c.machine === e.machine && c.key === e.key));
   let note = "";
   if (!local && e.live) note = `It is still open on ${e.machine}: hopsesh hands it off, and marks that copy once it ends.`;
-  if (local && e.live) note = e.needs ? "It is waiting for your answer in its own window." : "It is running here, in its own window.";
+  if (local && e.live) note = e.app ? (e.needs ? `It is waiting for your answer in the ${e.app} app.` : `It is running in the ${e.app} app.`)
+    : e.needs ? "It is waiting for your answer in its own window." : "It is running here, in its own window.";
   const tab = local ? tabFor(e) : null;
   if (tab) note = tab.attention ? "It is waiting for you in its tab in the hopsesh Terminal window." : "It is running in a tab of the hopsesh Terminal window. Hand off and Continue in wait until it ends.";
   else if (local && !e.live && e.hereNewest && acts[0]?.id === "resume-here") note = `Resume here runs it in a tab of the hopsesh Terminal window; it ends when hopsesh quits. Open in ${sys.terminal} keeps running on its own.`;
   if (local && !e.live && !e.hereNewest) note = "A newer copy is elsewhere; bring that one here instead.";
-  return h("aside", { class: "inspector", "aria-label": "Session details" },
+  return h("aside", { class: "inspector", id: "inspector", "aria-label": "Session details" },
     h("div", { style: "display:flex;flex-direction:column;gap:6px" },
       h("div", { style: "display:flex;gap:6px;flex-wrap:wrap" }, agentChip(e.agent, e.agentName), h("span", { class: "chip st-" + k }, h("span", { class: "dot " + k }), words)),
       h("h2", {}, e.title),
@@ -463,24 +584,19 @@ function inspector() {
       note ? h("span", { class: "muted", style: "font-size:11.5px" }, note) : null)
       : h("span", { class: "muted", style: "font-size:12px" }, note),
     tab && (e.handoff || []).length ? h("button", { class: "btn", disabled: true, title: IN_A_TAB }, "Hand off ▸")
-      : handoffMenu(e, state.handoffOpen === e.machine + "\u0000" + e.key, () => {
-        const k = e.machine + "\u0000" + e.key;
-        state.handoffOpen = state.handoffOpen === k ? null : k;
-        render();
-        view.querySelector('[role="menu"] [role="menuitem"]:not([disabled])')?.focus();
-      }),
+      : handoffMenu(e, state.handoffOpen === e.machine + "\u0000" + e.key, () => toggleMenu(e)),
     e.lastPrompt ? h("div", { class: "sec" }, h("span", { class: "sec-h" }, "Last prompt"), h("span", { style: "font-style:italic;color:var(--ink2)" }, `“${e.lastPrompt}”`)) : null,
     h("div", { class: "sec" }, h("span", { class: "sec-h" }, "Repository"),
       e.group.noRepo ? h("span", { class: "muted" }, "Started outside a git checkout") : [
-        h("span", { class: "mono", style: "font-size:12px" }, e.group.remote || e.group.name + " (no remote)"),
+        e.group.remote ? path(e.group.remote) : h("span", { class: "mono", style: "font-size:12px" }, e.group.name), // "name (no remote)" says it
         e.branch ? h("span", {}, e.branch, e.worktree ? h("span", { class: "muted" }, ` in a ${e.worktree}` + (e.mainBranch ? ` · main folder on ${e.mainBranch}` : "")) : null) : null,
         e.unpushed || e.dirty ? h("span", { class: "warn" }, [e.unpushed ? count(e.unpushed, "unpushed commit") : "", e.dirty ? count(e.dirty, "uncommitted file") : ""].filter(Boolean).join(" · ")) : null,
-        e.group.local ? h("span", { class: "ok" }, "Cloned here at " + e.group.local) : e.group.remote ? h("span", { class: "muted" }, `Not on ${sys.here}: hopsesh can clone it`) : null],
-      e.cwd !== e.group.local ? h("span", { class: "mono muted", style: "font-size:11px;overflow-wrap:anywhere" }, e.cwd) : null),
+        e.group.local ? h("span", { class: "ok" }, "Cloned here at ", path(e.group.local, 12.5)) : e.group.remote ? h("span", { class: "muted" }, `Not on ${sys.here}: hopsesh can clone it`) : null],
+      e.cwd !== e.group.local ? h("span", { class: "muted" }, path(e.cwd, 11)) : null),
     e.mirror ? h("div", { class: "sec" }, h("span", { class: "sec-h" }, "Mirrored"),
       h("span", {}, `Remote Control keeps a copy on ${e.mirror.host} while it runs. `, h("button", { class: "link", onclick: () => api("OpenURL", e.mirror.url).catch(fail) }, "Open it"))) : null,
     others.length ? h("div", { class: "sec" }, h("span", { class: "sec-h" }, "Other copies"),
-      others.map((c) => h("span", {}, `${c.agentName} on ${c.local ? sys.here : c.machine}`, h("span", { class: "muted" }, c.newest ? " · newest" : c.mark ? " · marked" : " · older")))) : null,
+      others.map((c) => h("span", {}, copyPlace(c, sys.here), h("span", { class: "muted" }, c.newest ? " · newest" : c.mark ? " · marked" : " · older")))) : null,
     e.history.length ? h("div", { class: "sec" }, h("span", { class: "sec-h" }, "Where it has been"),
       e.history.map((x, i) => h("div", { class: "hop" }, h("span", { class: "dot" + (i === e.history.length - 1 ? " ok" : "") }),
         h("div", {}, h("div", {}, x.what), h("div", { class: "muted", style: "font-size:11px" }, when(x.when)))))) : null);
@@ -490,6 +606,8 @@ export function render() {
   if (!state.scan) return;
   const s = state.scan;
   const list = scoped();
+  // A selection the list doesn't show goes (another scope, a filter, a refresh).
+  if (state.sel && !list.some((x) => x.machine === state.sel.machine && x.key === state.sel.key)) { state.sel = null; state.handoffOpen = null; }
   const groups = s.groups.map((g) => ({ g, rows: g.entries.filter((e) => list.some((x) => x.machine === e.machine && x.key === e.key)) })).filter((x) => x.rows.length);
   const agents = (state.info.agents || []).filter((a) => a.enabled);
   const content = h("section", { class: "content" },
@@ -509,7 +627,20 @@ export function render() {
             g.noRepo ? "Outside a git checkout" : g.noRemote ? "A checkout without a remote" : g.local ? "Cloned here" : `Not on ${sys.here}`)),
         rows.map(row)))
       : h("div", { class: "empty" }, state.scope.kind === "needs" ? "Nothing needs you right now." : "No sessions here.")));
-  fill(view, h("div", { class: "three" }, sidebar(), content, inspector()));
+  fill(view, h("div", { class: "three layout" }, sidebar(), content, inspector(), dividers()));
+  applyLayout();
+  placeMenu();
+}
+
+// reveal scrolls the selected row to the middle of the list and flashes it, so a session
+// picked elsewhere (the palette) is seen to land.
+export function reveal() {
+  const r = view.querySelector('.row[aria-selected="true"]');
+  if (!r) return;
+  inView(r, true);
+  r.classList.remove("flash");
+  void r.offsetWidth; // restart the animation
+  r.classList.add("flash");
 }
 
 // Keyboard: ↑/↓ move through the list, ↩ runs the main action, ⌘↩ (Ctrl+Enter) the second.
@@ -534,4 +665,17 @@ document.addEventListener("keydown", (ev) => {
 screen("sessions", async (rescan = false) => {
   if (!state.scan || rescan || state.stale) await scan();
   render();
+  const r = view.querySelector('.row[aria-selected="true"]');
+  if (r) inView(r, false);
 });
+
+// inView scrolls the list (never the window) to a row: to its middle, or just enough.
+function inView(r, center) {
+  const list = r.closest(".content");
+  if (!list) return;
+  const top = list.querySelector(".toolbar")?.offsetHeight || 0;
+  const lb = list.getBoundingClientRect(), rb = r.getBoundingClientRect();
+  if (center) list.scrollTop += rb.top - lb.top - (lb.height + top - rb.height) / 2;
+  else if (rb.top < lb.top + top) list.scrollTop -= lb.top + top - rb.top + 8;
+  else if (rb.bottom > lb.bottom) list.scrollTop += rb.bottom - lb.bottom + 8;
+}

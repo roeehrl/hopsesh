@@ -39,8 +39,9 @@ on("hopsesh:terminal", (t) => {
 });
 
 const live = (t) => t.state !== "exited";
-// tabFor is the live tab a session runs in here, if any.
-export const tabFor = (e) => [...tabs.values()].find((t) => t.kind === "session" && t.machine === e.machine && t.key === e.key && live(t));
+// tabFor is the live tab a session runs in here, if any: its own, or the bring-back's
+// that saved it and still runs it.
+export const tabFor = (e) => [...tabs.values()].find((t) => (t.kind === "session" || t.kind === "bring") && t.key && t.machine === e.machine && t.key === e.key && live(t));
 export const waiting = () => [...tabs.values()].filter((t) => t.attention);
 export const running = () => [...tabs.values()].filter(live);
 // strayWaiting are the waiting tabs no session row stands for (steps, sign-ins, shells).

@@ -178,8 +178,8 @@ func (a *App) ResumeSession(machine, key, where string) (*OpenedDTO, error) {
 		return nil, err
 	}
 	l := app.Launch{Kind: termapp.KindSession, Run: c, Key: e.Session.Key,
-		Labels: termapp.Labels{Title: e.Session.Title, Agent: e.AgentName, Machine: e.Machine}}
-	return a.sessionTab(c, l, TabMeta{Kind: TabSession, Agent: e.AgentName, Machine: machine, Key: key}, e.Session.Title)
+		Labels: termapp.Labels{Title: titleOf(e.Session), Agent: e.AgentName, Machine: e.Machine}}
+	return a.sessionTab(c, l, TabMeta{Kind: TabSession, Agent: e.AgentName, Machine: machine, Key: key}, titleOf(e.Session))
 }
 
 // sessionTab opens a session's command in a tab; when the terminal cannot start it, the

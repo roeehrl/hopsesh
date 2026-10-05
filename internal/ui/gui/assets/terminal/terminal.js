@@ -66,6 +66,7 @@ const tabs = new Map(); // id → { info, term, fit, search, conn, el, order, ou
 let order = [];
 let active = "";
 let request = () => {};
+let tipWanted = false; // the first-run tip, until "Got it"
 
 // ---- the tab's words -------------------------------------------------------------------
 
@@ -141,7 +142,10 @@ function makeTerm(t) {
       term.loadAddon(gl);
     } catch { /* no WebGL here: the DOM renderer draws it */ }
   }
-  term.onData((d) => t.conn?.input(d)); // keys, pastes and the emulator's answers
+  term.onData((d) => { // keys, pastes and the emulator's answers
+    t.conn?.input(d);
+    if (t.savedTimer && !t.savedSeen) { t.savedSeen = true; if (t.id === active) paint(); } // the "Saved here" banner goes on the next key
+  });
   term.onBinary((d) => t.conn?.input(Uint8Array.from(d, (c) => c.charCodeAt(0) & 255)));
   term.onResize(({ cols, rows }) => t.conn?.resize(cols, rows));
   term.attachCustomKeyEventHandler((ev) => keys(ev, t));
@@ -277,14 +281,21 @@ function setPrefs(p) {
   const changed = JSON.stringify(p) !== JSON.stringify(prefs);
   prefs = Object.assign({}, prefs, p);
   document.documentElement.dataset.os = prefs.os;
-  $("#back").lastChild.textContent = mac() ? "⌃`" : "Ctrl+`";
-  $("#tip").firstChild.textContent = `Press ${mac() ? "⌃`" : "Ctrl+`"} to move between the terminal and your sessions. `;
+  shortcuts();
   if (!changed) return;
   for (const t of tabs.values()) {
     Object.assign(t.term.options, { fontFamily: fontFamily(), fontSize: prefs.fontSize, scrollback: prefs.scrollback, screenReaderMode: !!prefs.screenReader });
     fitTab(t);
   }
   $("#t-reader").setAttribute("aria-pressed", prefs.screenReader ? "true" : "false");
+}
+
+// shortcuts spells the way back for the system: ⌃` on macOS, Ctrl+` elsewhere.
+function shortcuts() {
+  const k = mac() ? "⌃`" : "Ctrl+`";
+  $("#back").lastChild.textContent = k;
+  $("#back").title = `Back to sessions (${k})`;
+  $("#tip").firstChild.textContent = `Press ${k} to move between the terminal and your sessions. `;
 }
 
 // ---- drawing the window ------------------------------------------------------------------
@@ -304,11 +315,22 @@ function strip() {
     t.info.attention ? h("span", { class: "wdot", "aria-hidden": "true" }) : null,
     priv ? padlock() : null,
     h("span", { class: "name" }, t.info.title),
-    h("span", { class: "chip " + cls }, cls === "run" ? h("span", { class: "cd" }) : null, words),
+    h("span", { class: "chip " + cls, title: words }, h("span", { class: "cd" }), h("span", { class: "cw" }, words)),
     h("button", { class: "x", tabindex: "-1", "aria-label": "Close tab " + t.info.title, onclick: (ev) => { ev.stopPropagation(); closeTab(t); } }, svg(["M6 6l12 12M18 6 6 18"], 12)));
   }));
   $("#empty").hidden = tabs.size > 0;
   $("#info").hidden = !active;
+  tighten();
+  $("#tab-" + active)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+
+// tighten marks the tabs squeezed to (near) their minimum width: they show their status
+// as a dot, which leaves their name some room.
+function tighten() {
+  const els = [...$("#tabs").children];
+  for (const el of els) el.classList.remove("tight"); // measured with their words
+  const narrow = els.filter((el) => { const n = el.querySelector(".name"); return el.getBoundingClientRect().width < 150 && n && n.scrollWidth > n.clientWidth; });
+  for (const el of narrow) el.classList.add("tight");
 }
 
 function tabKeys(ev, id) {
@@ -327,11 +349,13 @@ function paint() {
   const t = tabs.get(active);
   const banner = $("#banner"), note = $("#note"), bar = $("#exitbar");
   banner.hidden = note.hidden = bar.hidden = true;
+  $("#tip").hidden = !tipWanted;
   if (!t) return;
   const i = t.info;
   const done = i.state === "exited";
   const runs = $("#runs");
   $("#lock").hidden = !(i.kind === "signin" || i.kind === "shell" || i.private);
+  $("#reads").hidden = i.kind !== "step";
   if (i.kind === "signin") runs.replaceChildren("Runs ", h("span", { class: "mono" }, i.command), " · your browser opens the sign-in page; hopsesh never sees it");
   else if (i.kind === "shell") runs.replaceChildren("Your login shell ", h("span", { class: "mono" }, (i.command || "").replace(/^your login shell /, "")), " in ", h("span", { class: "mono" }, home(i.dir)));
   else runs.replaceChildren("Runs ", h("span", { class: "mono" }, i.command || i.program), " in ", h("span", { class: "mono" }, home(i.dir)), " · started " + ago(i.started));
@@ -345,14 +369,19 @@ function paint() {
     if (i.link) show("ok", h("span", {}, "✓"), h("span", {}, "Session link captured: ", h("span", { class: "mono" }, i.link.replace(/^https?:\/\//, "").replace(/(session_[A-Za-z0-9]{10})[A-Za-z0-9]+.*/, "$1…"))),
       h("span", { class: "spacer" }), h("button", { class: "ib", onclick: () => copyText(i.link, "Copied the link") }, "Copy link"));
     else if (!done && t.trust) show("warn", svg(ICON_INFO, 16), h("span", {}, `${agent} is asking whether it trusts hopsesh's hand-off folder. Answer it here; hopsesh never answers for you.`));
-    else if (!done) show("warn", svg(ICON_INFO, 16), h("span", {}, `If ${agent} asks you something, answer it here; hopsesh never answers for you.`));
-    note.textContent = "hopsesh reads this tab only for the session link. It never types here.";
-    note.hidden = false;
+    else if (!done) show("warn", svg(ICON_INFO, 16), h("span", {}, `If ${agent} asks you something, answer it here. hopsesh reads this tab only for the session link; it never types or answers here.`));
+  } else if (i.kind === "bring" && !done && i.saved) {
+    if (!t.savedSeen) {
+      // Said once, then out of the way: after a few seconds or the next key.
+      show("ok", h("span", {}, "✓"), h("span", {}, h("b", {}, `Saved here as “${i.saved}”.`), " Keep working in this tab."));
+      if (!t.savedTimer) t.savedTimer = setTimeout(() => { t.savedSeen = true; if (t.id === active) paint(); }, 6000);
+    }
   } else if (i.kind === "bring" && !done) {
-    show("warn", svg(ICON_INFO, 16), h("span", {}, h("b", {}, "Send one message, then type /exit"), ` — ${agent} saves the copy only after you continue it.`));
+    show("warn", svg(ICON_INFO, 16), h("span", {}, `Send a message to keep this session here. ${agent} saves its copy once you do.`));
   } else if (i.kind === "signin") {
     show("lock", padlock(), h("span", {}, "Nothing in a sign-in tab is recorded. hopsesh doesn't watch, match or keep what appears here, and it's gone when you close the tab."));
   }
+  if (!banner.hidden) $("#tip").hidden = true; // one thing at a time above the terminal
   if (done && i.code > 0) {
     const at = new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
     bar.replaceChildren(h("span", {}, h("b", {}, `${program(t)} exited with code ${i.code}`), ` · ${at}. The output stays until you close the tab.`), h("span", { class: "spacer" }),
@@ -547,6 +576,9 @@ $("#t-clear").onclick = () => tabs.get(active)?.term.clear();
 $("#t-close").onclick = () => closeTab(tabs.get(active));
 $("#t-max").onclick = () => request({ op: "maximize" });
 $("#t-reader").onclick = () => request({ op: "reader", on: !prefs.screenReader });
+$("#tabs").addEventListener("wheel", (ev) => { // a mouse's wheel scrolls the tabs sideways
+  if (Math.abs(ev.deltaY) > Math.abs(ev.deltaX)) { $("#tabs").scrollLeft += ev.deltaY; ev.preventDefault(); }
+}, { passive: false });
 $("#find-q").addEventListener("input", () => find(true));
 $("#find-q").addEventListener("keydown", (ev) => {
   if (ev.key === "Enter") { ev.preventDefault(); find(!ev.shiftKey); }
@@ -560,14 +592,18 @@ document.addEventListener("keydown", (ev) => {
   if (ev.ctrlKey && ev.code === "Backquote") { ev.preventDefault(); request({ op: "main" }); }
 });
 new ResizeObserver(() => { const t = tabs.get(active); if (t) fitTab(t); }).observe($("#stage"));
+new ResizeObserver(() => tighten()).observe($("#strip"));
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { for (const t of tabs.values()) t.term.options.theme = theme(); });
 setInterval(() => { strip(); if (active) paint(); }, 30_000); // "started 3 min ago", and "starting" ending
 
-// The first-run tip: how to leave the terminal.
+// The first-run tip: how to leave the terminal, until "Got it" (kept), and never under a
+// banner.
 try {
-  if (!localStorage.getItem("hopsesh.terminal.tip")) $("#tip").hidden = false;
+  tipWanted = !localStorage.getItem("hopsesh.terminal.tip");
 } catch { /* no storage here: no tip */ }
-$("#tip-ok").onclick = () => { $("#tip").hidden = true; try { localStorage.setItem("hopsesh.terminal.tip", "1"); } catch { /* fine */ } };
+$("#tip-ok").onclick = () => { tipWanted = false; $("#tip").hidden = true; try { localStorage.setItem("hopsesh.terminal.tip", "1"); } catch { /* fine */ } };
+shortcuts();
+paint();
 
 // For the browser tests: what a tab shows, as text (the page's own copy of its screen).
 window.hopseshTerminal = {

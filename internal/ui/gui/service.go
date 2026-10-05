@@ -44,6 +44,7 @@ type App struct {
 	core     *app.App // its Cfg is the saved configuration; calls work on snapshots
 	cfgErr   error    // the configuration file could not be used (see StartFresh)
 	inv      *app.Inventory
+	invAt    time.Time // when inv last read the other machines and the clouds
 	plan     *move.Plan
 	input    move.Input
 	res      *move.Result
@@ -150,8 +151,12 @@ type Info struct {
 	SkillState  string `json:"skillState"`  // across every agent: absent | current | stale | modified | foreign | broken
 	SkillPrompt string `json:"skillPrompt"` // "declined" once the user said not now
 	CLIOffer    bool   `json:"cliOffer"`    // offer to link the command-line tool
-	Receive     bool   `json:"receive"`     // other machines' hopsesh may send sessions here
-	Defaults    struct {
+	// SetupDismissed: the user closed the "Finish setting up" line.
+	SetupDismissed bool `json:"setupDismissed"`
+	// Layout is the window's pane layout, restored before the first paint.
+	Layout   LayoutDTO `json:"layout"`
+	Receive  bool      `json:"receive"` // other machines' hopsesh may send sessions here
+	Defaults struct {
 		MarkMoved  bool `json:"markMoved"`
 		SyncCode   bool `json:"syncCode"`
 		PushSource bool `json:"pushSource"`
@@ -169,7 +174,8 @@ func (a *App) Info() Info {
 	cfg := a.core.Cfg
 	info := Info{Version: version.Version, OS: runtime.GOOS, Host: app.LocalName(), ReposDir: cfg.ReposDir,
 		AuditDir: filepath.Join(config.StateDir(), "log"), UpdateCheck: cfg.UpdateCheck,
-		SkillState: skill.State, SkillPrompt: cfg.SkillPrompt, Receive: cfg.Peer.Receive}
+		SkillState: skill.State, SkillPrompt: cfg.SkillPrompt, Receive: cfg.Peer.Receive,
+		SetupDismissed: cfg.SetupPrompt == "declined", Layout: layoutOf(cfg.Window)}
 	if a.cfgErr != nil {
 		info.ConfigError = a.cfgErr.Error()
 		info.ConfigNewer = errors.Is(a.cfgErr, config.ErrNewConfig)

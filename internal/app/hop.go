@@ -157,8 +157,8 @@ func (a *App) PlanHop(ctx context.Context, inv *Inventory, e Entry, to string, v
 	hp.Conversation = fmt.Sprintf("%s Then %s gets a briefing of it, not the conversation; the copy here keeps everything that came back.",
 		fp.Conversation, toCloud.Title)
 	hp.Legs = []move.HopLeg{
-		{Verb: "Bring here", From: fromCloud.Name, To: here.Name, Fidelity: string(fromCloud.Down), Words: fp.Conversation},
-		{Verb: "Hand off", From: here.Name, To: to, Fidelity: string(toCloud.Up), Words: fmt.Sprintf("%s gets a briefing and the code on a branch.", toCloud.Title)},
+		{Verb: "Bring here", From: fromCloud.Name, To: here.Name, FromTitle: fromCloud.Title, ToTitle: here.Name, Fidelity: string(fromCloud.Down), Words: fp.Conversation},
+		{Verb: "Hand off", From: here.Name, To: to, FromTitle: here.Name, ToTitle: toCloud.Title, Fidelity: string(toCloud.Up), Words: fmt.Sprintf("%s gets a briefing and the code on a branch.", toCloud.Title)},
 	}
 	switch {
 	case fp.Diff:

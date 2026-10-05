@@ -4,10 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"runtime"
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
+	"github.com/roeehrl/hopsesh/internal/core/appicon"
+	"github.com/roeehrl/hopsesh/internal/core/proc"
 	"github.com/roeehrl/hopsesh/internal/core/termapp"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
@@ -139,6 +143,59 @@ func (a *App) ShowEntry(machine, key string) (string, error) {
 		return "", err
 	}
 	return f.Name(), nil
+}
+
+// ShowApp brings forward the agent's own desktop app, which runs a session on this
+// machine (Claude Code in the Claude app), and returns the app's name. hopsesh has no way
+// to pick the session inside the app: the app comes to the front as it is.
+func (a *App) ShowApp(machine, key string) (string, error) {
+	core := a.snapshot()
+	a.mu.Lock()
+	e, err := a.find(machine, key)
+	local := false
+	if a.inv != nil {
+		m := a.inv.Machine(machine)
+		local = m != nil && m.Local
+	}
+	a.mu.Unlock()
+	if err != nil {
+		return "", err
+	}
+	if !local {
+		return "", errors.New("the session is not on this machine")
+	}
+	m, ok := core.Module(e.Agent)
+	if !ok {
+		return "", fmt.Errorf("%s is turned off", e.AgentName)
+	}
+	apps := m.Spec().Icon.Apps
+	name := nonEmptyStr(appicon.Name(apps), e.AgentName)
+	if appHook != nil {
+		return name, appHook(name)
+	}
+	home, _ := os.UserHomeDir()
+	p := appicon.Installed(apps, home)
+	if p == "" {
+		return "", fmt.Errorf("hopsesh can't find the %s app on this machine", name)
+	}
+	return name, openApp(p)
+}
+
+var appHook func(name string) error
+
+// SetAppHook sends every desktop app ShowApp would bring forward to f instead (tests: the
+// machine running them may have the real app).
+func SetAppHook(f func(name string) error) { appHook = f }
+
+// openApp brings an installed app to the front (starting it when it isn't running).
+func openApp(p string) error {
+	switch runtime.GOOS {
+	case "darwin":
+		return proc.Command("open", p).Run()
+	case "windows":
+		return proc.Command(p).Start() // a running app takes its second start as "show me"
+	}
+	return errors.New("hopsesh can't open desktop apps here")
 }
 
 func (a *App) entryTab(machine, key string) (termapp.Found, bool, error) {
