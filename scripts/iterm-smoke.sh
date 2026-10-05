@@ -41,6 +41,9 @@ repo=$(cd "$(dirname "$0")/.." && pwd)
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/hopsesh-iterm-smoke.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT
 hs="$scratch/hopsesh"
+# hopsesh's own settings and launch records go to the scratch folder: the check never reads
+# or changes your configuration (which an older hopsesh may have written).
+export HOPSESH_CONFIG_DIR="$scratch/config" HOPSESH_STATE_DIR="$scratch/state"
 echo "Building hopsesh into ${scratch}…"
 (cd "$repo" && go build -o "$hs" ./cmd/hopsesh)
 iterm_version=$(defaults read /Applications/iTerm.app/Contents/Info CFBundleShortVersionString 2>/dev/null || echo unknown)
