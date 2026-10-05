@@ -19,7 +19,7 @@ import (
 
 func addPullFlags(cmd *cobra.Command) {
 	f := cmd.Flags()
-	f.String("in", "", "continue in this agent ("+strings.Join(agentIDs(), ", ")+"; default: the session's own; from copilot-cloud or amp, whose text is written into an agent here: the one it was handed off from, else claude)")
+	f.String("in", "", "continue in this agent ("+strings.Join(writerIDs(), ", ")+"; default: the session's own; from copilot-cloud or amp, whose text is written into an agent here: the one it was handed off from, else claude)")
 	f.String("fidelity", "history", "for another agent: history (the conversation as text) or note (a briefing only)")
 	f.Bool("native", false, "for another agent that can: replay exact tool calls as its own (experimental)")
 	f.String("note-file", "", "a handoff note for the other agent's briefing")
@@ -131,12 +131,16 @@ The copy left behind is marked (--no-mark to skip). The checkout here is fetched
 clean, fast-forwarded to the session's commit (--no-sync to skip). Nothing changes until
 you confirm (or pass --yes).
 
-From a cloud (claude-cloud:<id>, or the session's link): hopsesh makes a worktree of the
-repository (your checkout stays as it is) and prints the agent's own command that brings
-the conversation, for your terminal (--run runs it here). Claude Code saves its copy only
-after you send a message in it: send one, then exit. Once the copy appears, hopsesh checks
-it (that it begins with the briefing hopsesh sent, for a session hopsesh handed off),
-keeps the cloud's branch under hopsesh/from/<cloud>/, and records it for undo. Allow the cloud first: hopsesh clouds allow <cloud>.`,
+From a cloud (<cloud>:<id>, or the session's link; hopsesh clouds lists them): hopsesh
+brings the cloud's code into a new worktree of the repository (your checkout stays as it
+is) and its conversation as far as the cloud gives it back. Claude Code cloud's comes whole
+through claude --teleport, which hopsesh prints for your terminal (--run runs it here):
+Claude Code saves its copy only after you send a message in it, so send one, then exit
+(/exit). Once the copy appears, hopsesh checks it (that it begins with the briefing hopsesh
+sent, for a session hopsesh handed off), keeps the cloud's branch under
+hopsesh/from/<cloud>/, and records it for undo. Codex cloud, Copilot and Amp come back as
+text written into an agent here (--in), Jules and Devin as code only (--code-only). Allow
+the cloud first: hopsesh clouds allow <cloud>.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error { return pull(cmd, args[0]) },
 	}
@@ -150,7 +154,7 @@ func planCmd() *cobra.Command {
 	cmd.Use = "plan [<machine>:][<agent>/]<id-or-title> | <cloud>:<id> | <cloud link>"
 	cmd.Short = "Show what pulling a session would do, without changing anything"
 	cmd.Long = "Same as pull --dry-run: finds the session, plans the move or continuation and prints the plan (or JSON with --json). It never writes."
-	cmd.Long += "\n\nWith --to <cloud> (claude-cloud) it plans a hand-off to that cloud instead, as hopsesh handoff --dry-run does."
+	cmd.Long += "\n\nWith --to <cloud> (claude-cloud, codex-cloud, copilot-cloud, jules, devin, amp) it plans a hand-off to that cloud instead, as hopsesh handoff --dry-run does."
 	addHandoffFlags(cmd)
 	cmd.RunE = func(c *cobra.Command, args []string) error {
 		_ = c.Flags().Set("dry-run", "true")

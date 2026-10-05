@@ -142,7 +142,7 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 				tw.Flush()
 				r.printf("\n")
 			}
-			r.printf("Move one here: hopsesh pull [<machine>:]<id-or-title>   Continue in another agent: add --in <%s>\n", strings.Join(agentIDs(), "|"))
+			r.printf("Move one here: hopsesh pull [<machine>:]<id-or-title>   Continue in another agent: add --in <%s>\n", strings.Join(writerIDs(), "|"))
 			if cloudOnly {
 				r.printf("Bring one from a cloud: hopsesh pull <cloud>:<id> (or its link)\n")
 			}
@@ -170,6 +170,21 @@ func agentIDs() []string {
 	}
 	for _, id := range modules.IDs() {
 		out = append(out, string(id))
+	}
+	return out
+}
+
+// writerIDs are the agents a session can continue in (--in): those that write sessions
+// here, which leaves out the cloud-only modules.
+func writerIDs() []string {
+	var out []string
+	if modules == nil {
+		return out
+	}
+	for _, id := range modules.IDs() {
+		if m, ok := modules.Get(id); ok && agent.Has(m, agent.CapWrite) {
+			out = append(out, string(id))
+		}
 	}
 	return out
 }
@@ -328,7 +343,11 @@ func agentsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "agents",
 		Short: "List the agents hopsesh supports and what is installed on this machine",
-		Args:  cobra.NoArgs,
+		Long: `Lists the agent modules this hopsesh carries, what each can do, its clouds, and what is
+installed on this machine. With --json each row also has the module's spec: its programs,
+data folders, the secrets it never opens, instruction files, features, desktop apps, and
+its clouds with their fidelity, needs and the upstream changes the drift check watches.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			r, err := newRun(cmd)
 			if err != nil {

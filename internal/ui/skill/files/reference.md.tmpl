@@ -11,8 +11,6 @@
 | `{{.Bin}} hosts --json` | known machines and whether each is allowed |
 | `{{.Bin}} clouds --json` | the agents' clouds, whether each is allowed, and their state |
 | `{{.Bin}} clouds test [cloud]` | check a cloud's login and flags, read-only |
-| `{{.Bin}} clouds cleanup [--list] [--yes]` | branches hand-offs left on the remotes, and which are merged; deletes the merged ones when confirmed |
-| `{{.Bin}} clouds continue <hop>` | take a hop whose first leg waited for a terminal on to the next cloud |
 | `{{.Bin}} plan <ref> --to <cloud> --json [flags]` | what handing it off to a cloud would do; never writes |
 | `{{.Bin}} doctor [machine] --json` | SSH, host trust, agents, skill |
 | `{{.Bin}} version` | the installed version |
@@ -26,8 +24,12 @@ folder there). `{{.Bin}} handoff <ref> --to <cloud> --json --yes [flags]` starts
 that continues it (a briefing and a branch); for `claude-cloud` only the user can run it, in
 their own terminal (Claude Code starts the session there and may ask them a question).
 `{{.Bin}} followup <cloud>:<id> "<text>" --yes` sends a cloud session one message (a paid
-turn), where the cloud takes one (neither `claude-cloud` nor `codex-cloud` does). `{{.Bin}}
-undo <id>` reverses a pull, a push or a hand-off (a cloud session itself stays in the cloud).
+turn) where the cloud takes one; none does yet. `{{.Bin}} clouds cleanup --list --json`
+lists the branches hand-offs left on the remotes and which are merged, and
+`{{.Bin}} clouds cleanup --yes` deletes the merged ones (undo pushes them back); the
+approval rule covers both. `{{.Bin}} clouds continue <hop>` takes a hop whose first leg
+waited for a terminal on to the next cloud. `{{.Bin}} undo <id>` reverses a pull, a push or
+a hand-off (a cloud session itself stays in the cloud).
 
 ## handoff flags
 

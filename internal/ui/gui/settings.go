@@ -40,11 +40,15 @@ type SettingsDTO struct {
 	StateDir          string `json:"stateDir"`
 }
 
-// skillFiles renders this build's skill for the enabled agents.
+// skillFiles renders this build's skill for the enabled agents that keep sessions on
+// machines (the skill names the clouds itself); the command line renders the same files.
 func (a *App) skillFiles() (map[string][]byte, string) {
 	bin := integrate.SkillBin()
 	var names, ids []string
 	for _, s := range a.snapshot().Specs() {
+		if len(s.Roots) == 0 {
+			continue
+		}
 		names = append(names, s.Name)
 		ids = append(ids, string(s.ID))
 	}

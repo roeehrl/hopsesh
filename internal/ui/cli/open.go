@@ -149,9 +149,9 @@ func terminalsCmd() *cobra.Command {
 		Short: "List the terminal apps hopsesh opens sessions in, and choose one",
 		Long: `Lists the terminal apps hopsesh can open sessions and steps in on this machine, what
 each can do, and the one it uses. --use picks one ("auto": the best installed one, iTerm2
-before Terminal on macOS); --resume sets where the app resumes sessions: terminal (your
-terminal app), here (hopsesh's own window, once it has a terminal of its own; hopsesh
-open: this terminal) or ask.
+before Terminal on macOS); --resume sets where the app resumes sessions: here (its own
+hopsesh Terminal window, the app's default; for hopsesh open, this terminal), terminal
+(your terminal app) or ask.
 
 hopsesh never changes the terminal apps' own settings: it does not turn on iTerm2's
 Python API, install its Claude Code integration, or write profiles.`,
