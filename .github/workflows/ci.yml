@@ -42,9 +42,14 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
       - name: vet
         run: go vet ./...
+      - name: the terminal's bundled pseudoconsole (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: go run ./internal/devtools/conptyfetch -arch amd64 -out "$RUNNER_TEMP/conpty"
       - name: test
         shell: bash
         run: >-
+          if [ "$RUNNER_OS" = Windows ]; then export HOPSESH_CONPTY_DIR="$RUNNER_TEMP/conpty"; fi;
           go run gotest.tools/gotestsum@v1.13.0 --format github-actions
           --junitfile "junit-${{ matrix.family }}.xml" --rerun-fails=2 --rerun-fails-report reruns.txt
           --packages ./... -- -race -count=1 -timeout 25m
@@ -387,6 +392,9 @@ jobs:
           $key = (Get-Content packaging/release-key.pub | Where-Object { $_ -notmatch '-----' }) -join ''
           go build -tags e2e -ldflags "-H windowsgui -X github.com/roeehrl/hopsesh/internal/version.Version=0.3.0 -X github.com/roeehrl/hopsesh/internal/update.PublicKey=$key" -o "$env:RUNNER_TEMP/e2e/hopsesh-app.exe" ./cmd/hopsesh-app
           go build -o "$env:RUNNER_TEMP/e2e/hopsesh.exe" ./cmd/hopsesh
+      - name: the real terminal window (a tab on the bundled ConPTY, through its stream)
+        shell: pwsh
+        run: ./scripts/windows-terminal-check.ps1 -App "$env:RUNNER_TEMP/e2e/hopsesh-app.exe"
       - name: the real window (WebView2 driven over CDP)
         shell: pwsh
         working-directory: internal/devtools/webtest

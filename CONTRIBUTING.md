@@ -34,7 +34,12 @@ make app      # macOS only: builds dist/macos/hopsesh.app (unsigned unless SIGN_
 - The Windows app: `scripts/build-windows-app.sh` builds `hopsesh-app.exe` and `hopsesh.exe`
   for amd64 and arm64, the app `.zip` (what the app updates itself from) and the per-user
   installer. It needs `makensis` (`apt install nsis`); Homebrew's makensis 3.13 crashes on
-  current macOS, so build it on Linux or let CI do it. `internal/devtools/winres` makes the
+  current macOS, so build it on Linux or let CI do it. It downloads Microsoft's ConPTY
+  package from NuGet (`internal/devtools/conptyfetch`, which pins and checks its hash).
+- The app's terminal tabs (`internal/core/pty`): `scripts/app-terminal-check.sh` runs a tab
+  in the real terminal window of a `-tags e2e` build on macOS or Linux. On Windows, run
+  `go run ./internal/devtools/conptyfetch -out <dir>` and set `HOPSESH_CONPTY_DIR=<dir>` so
+  the tests also cover the bundled ConPTY. `internal/devtools/winres` makes the
   Windows resource file (icon, manifest, version information).
 - Window tests: `internal/devtools/webtest` drives the app's real window code in a browser
   (Playwright). `playwright.real.config.ts` drives the real Windows window instead and needs

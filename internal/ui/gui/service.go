@@ -53,6 +53,8 @@ type App struct {
 	step     *pendingStep // the terminal step a hand-off waits for
 	// Wails is the running application (events, clipboard, dialogs).
 	Wails *application.App `json:"-"`
+	// Terms are the terminal's tabs and window (not bound to the window: see terminal.go).
+	Terms *Terminals `json:"-"`
 }
 
 // NewApp loads the configuration for the modules in reg. A configuration an older hopsesh
@@ -60,7 +62,7 @@ type App struct {
 func NewApp(reg *registry.Registry) *App {
 	cfg, err := config.Load()
 	log, _ := audit.Open(filepath.Join(config.StateDir(), "log"))
-	a := &App{cfgErr: err}
+	a := &App{cfgErr: err, Terms: NewTerminals(version.Version)}
 	a.core = app.New(cfg, reg, config.StateDir(), log)
 	a.core.Passwords = a.passwordFor
 	a.core.Steps = a.runStep
@@ -351,6 +353,11 @@ func (a *App) OpenURL(url string) error {
 	if !strings.HasPrefix(url, "https://github.com/"+update.Repo+"/") && !strings.HasPrefix(url, "https://login.tailscale.com/") && !cloudPage(a.snapshot(), url) && !a.listedPage(url) && !handoffPage(url) {
 		return errors.New("only hopsesh release pages, Tailscale sign-in and cloud sessions' pages can be opened")
 	}
+	return openInBrowser(url)
+}
+
+// openInBrowser opens a web page in the default browser.
+func openInBrowser(url string) error {
 	switch runtime.GOOS {
 	case "darwin":
 		return proc.Command("open", url).Run()
@@ -399,8 +406,11 @@ func (a *App) SetReposDir(dir string) error {
 	return a.save()
 }
 
-// Shutdown closes connections.
+// Shutdown closes connections and ends the terminal's tabs.
 func (a *App) Shutdown() {
+	if a.Terms != nil {
+		a.Terms.CloseAll()
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.inv != nil {

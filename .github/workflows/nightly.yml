@@ -13,6 +13,7 @@ on:
     paths:
       - .github/workflows/nightly.yml
       - scripts/app-selfcheck.sh
+      - scripts/app-terminal-check.sh
       - internal/devtools/webtest/real/selfcheck.js
       - internal/e2e/tuipty/**
 
@@ -102,6 +103,8 @@ jobs:
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: the real window lists the demo sessions and calls its backend
         run: scripts/app-selfcheck.sh
+      - name: the real terminal window runs a tab's program through its stream
+        run: scripts/app-terminal-check.sh
 
   tui:
     name: terminal UI in a pseudo-terminal (${{ matrix.family }})

@@ -183,6 +183,30 @@ func TestInstallWindowsApp(t *testing.T) {
 			t.Errorf("%s.new left behind", n)
 		}
 	}
+	if _, err := os.Stat(filepath.Join(dir, "conpty")); err == nil {
+		t.Error("a zip without the pseudoconsole made its folder")
+	}
+	// A zip with the terminal's pseudoconsole installs it, the first time and again; other
+	// names in the zip are not written.
+	for _, round := range []string{"1", "2"} {
+		z := map[string]string{"hopsesh-app.exe": "app " + round, "hopsesh.exe": "cli " + round, "../evil.exe": "no", "conpty/other.dll": "no"}
+		for _, n := range conptyFiles {
+			z[n] = n + " " + round
+		}
+		if err := installWindowsApp(dir, zipOf(t, z), "0.4.0"); err != nil {
+			t.Fatal(err)
+		}
+		for _, n := range conptyFiles {
+			if b, _ := os.ReadFile(filepath.Join(dir, filepath.FromSlash(n))); string(b) != n+" "+round {
+				t.Errorf("round %s: %s: %q", round, n, b)
+			}
+		}
+		for _, n := range []string{"conpty/other.dll", "../evil.exe"} {
+			if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(n))); err == nil {
+				t.Errorf("%s written", n)
+			}
+		}
+	}
 }
 
 // A release file is installed only when it matches checksums.txt and checksums.txt

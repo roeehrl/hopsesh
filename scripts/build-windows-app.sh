@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Build the hopsesh Windows app for amd64 and arm64: hopsesh-app.exe (a window program
-# with its icon, manifest and version information) and hopsesh.exe side by side, as
+# with its icon, manifest and version information) and hopsesh.exe side by side, with the
+# terminal's pseudoconsole in conpty\ (conpty.dll and OpenConsole.exe from Microsoft's
+# Microsoft.Windows.Console.ConPTY package, MIT; internal/devtools/conptyfetch pins its
+# version and hash and checks it), as
 #   hopsesh-<version>-windows-<arch>-app.zip    what the app updates itself from
 #   hopsesh-<version>-windows-<arch>-setup.exe  the per-user installer (NSIS)
-# Runs on Linux or macOS (no CGO; needs makensis).
+# Runs on Linux or macOS (no CGO; needs makensis, and fetches the ConPTY package from NuGet).
 #
 #   VERSION=0.3.0 HOPSESH_RELEASE_PUBKEY=… scripts/build-windows-app.sh
 set -euo pipefail
@@ -28,7 +31,8 @@ for arch in amd64 arm64; do
   rm -f "$syso"
   CGO_ENABLED=0 GOOS=windows GOARCH=$arch go build -trimpath -ldflags "$LDFLAGS" -o "$stage/hopsesh.exe" ./cmd/hopsesh
   cp LICENSE "$stage/LICENSE"
-  (cd "$stage" && zip -q -X "../../hopsesh-$VERSION-windows-$arch-app.zip" hopsesh-app.exe hopsesh.exe LICENSE)
+  go run ./internal/devtools/conptyfetch -arch "$arch" -nupkg "$OUT/tmp/conpty.nupkg" -out "$stage/conpty"
+  (cd "$stage" && zip -q -X -r "../../hopsesh-$VERSION-windows-$arch-app.zip" hopsesh-app.exe hopsesh.exe LICENSE conpty)
   makensis -V2 -DVERSION="$VERSION" -DNUMVERSION="$NUMVERSION" -DARCH="$arch" -DSRC="$(cd "$stage" && pwd)" \
     -DICON="$(cd "$OUT/tmp" && pwd)/hopsesh.ico" -DART="$(pwd)/packaging/windows/art" -DOUT="$(cd "$OUT" && pwd)/hopsesh-$VERSION-windows-$arch-setup.exe" packaging/windows/hopsesh.nsi
 done

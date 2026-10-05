@@ -313,8 +313,8 @@ func installCLI(exe string, arch []byte, name string) error {
 }
 
 // installWindowsApp replaces hopsesh-app.exe and hopsesh.exe in the app's folder with the
-// ones in the release's app zip; both running programs are moved aside, and CleanUp
-// removes them later.
+// ones in the release's app zip, and the terminal's pseudoconsole (conptyFiles) when the
+// zip has it; every running file is moved aside, and CleanUp removes them later.
 func installWindowsApp(dir string, zipData []byte, version string) error {
 	zr, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
 	if err != nil {
@@ -323,7 +323,7 @@ func installWindowsApp(dir string, zipData []byte, version string) error {
 	names := []string{"hopsesh-app.exe", "hopsesh.exe"}
 	files := map[string][]byte{}
 	for _, f := range zr.File {
-		for _, n := range names {
+		for _, n := range append(names, conptyFiles...) {
 			if f.Name == n && !f.FileInfo().IsDir() {
 				rc, err := f.Open()
 				if err != nil {
@@ -342,14 +342,32 @@ func installWindowsApp(dir string, zipData []byte, version string) error {
 		if files[n] == nil {
 			return fmt.Errorf("%s is missing from the app zip; not installing", n)
 		}
-		if err := os.WriteFile(filepath.Join(dir, n+".new"), files[n], 0o755); err != nil {
+	}
+	for _, n := range conptyFiles {
+		if files[n] != nil {
+			names = append(names, n)
+		}
+	}
+	for _, n := range names {
+		p := filepath.Join(dir, filepath.FromSlash(n))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(p+".new", files[n], 0o755); err != nil {
 			return fmt.Errorf("cannot write to %s (%w); run the installer from the release page instead", dir, err)
 		}
 	}
 	for i, n := range names {
-		if err := swap(filepath.Join(dir, n), filepath.Join(dir, n+".new")); err != nil {
+		p := filepath.Join(dir, filepath.FromSlash(n))
+		var err error
+		if isFile(p) {
+			err = swap(p, p+".new")
+		} else {
+			err = os.Rename(p+".new", p)
+		}
+		if err != nil {
 			for _, m := range names[i:] {
-				os.Remove(filepath.Join(dir, m+".new"))
+				os.Remove(filepath.Join(dir, filepath.FromSlash(m)) + ".new")
 			}
 			return err
 		}
@@ -357,6 +375,10 @@ func installWindowsApp(dir string, zipData []byte, version string) error {
 	setInstalledVersion(version)
 	return nil
 }
+
+// conptyFiles are the terminal's pseudoconsole in the Windows app's folder (see
+// internal/core/pty), which app zips carry from 0.4.0.
+var conptyFiles = []string{"conpty/conpty.dll", "conpty/x64/OpenConsole.exe", "conpty/arm64/OpenConsole.exe", "conpty/LICENSE-conpty.txt"}
 
 // CleanUp removes what an earlier update left behind: the programs Windows moved aside,
 // and a macOS update's work folder. Best effort; call it at start-up.
@@ -367,8 +389,8 @@ func CleanUp() {
 	}
 	switch t.Kind {
 	case KindWindowsApp:
-		for _, n := range []string{"hopsesh-app.exe.old", "hopsesh.exe.old"} {
-			_ = os.Remove(filepath.Join(t.Path, n))
+		for _, n := range append([]string{"hopsesh-app.exe", "hopsesh.exe"}, conptyFiles...) {
+			_ = os.Remove(filepath.Join(t.Path, filepath.FromSlash(n)) + ".old")
 		}
 	case KindMacApp:
 		old, _ := filepath.Glob(filepath.Join(filepath.Dir(t.Path), ".hopsesh-update-*"))

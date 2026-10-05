@@ -18,7 +18,7 @@ $("#btn-settings").onclick = () => go("settings");
 // The app menu (and its shortcuts) sends these.
 on("hopsesh:menu", menuCommand);
 // A launch opened in another terminal than the chosen one (macOS denied iTerm2, say).
-on("hopsesh:terminal", (n) => toast(n.message));
+on("hopsesh:terminal-app", (n) => toast(n.message));
 function menuCommand(cmd) {
   if (document.querySelector("#sheet[open]") && cmd !== "palette") return; // a plan is open
   switch (cmd) {

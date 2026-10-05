@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -17,6 +18,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/audit"
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/move"
+	"github.com/roeehrl/hopsesh/internal/core/pty"
 	"github.com/roeehrl/hopsesh/internal/core/term"
 	"github.com/roeehrl/hopsesh/internal/core/termapp"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -48,6 +50,45 @@ func (a *App) ReadStep(s move.TermStep, r *term.Relay) (agent.CloudSession, erro
 		out.Text = r.Capture.Text()
 		r.Capture.Reset()
 	}
+	return a.ReadStepOutput(s, out)
+}
+
+// StepTab is the app's terminal tab for a terminal step: the driver's argument list in its
+// folder, with the user's environment less the cloud's Unset (and other terminals'
+// variables, see pty.Env) plus the step's Env, its output captured for the module's
+// reader. The tab says what it runs and where.
+func StepTab(s move.TermStep) pty.Spec {
+	return pty.Spec{
+		Argv:    s.Run.Argv,
+		Dir:     s.Run.Dir,
+		Title:   fmt.Sprintf("%s for “%s”, in hopsesh's hand-off folder", filepath.Base(s.Run.Argv[0]), s.Title),
+		Env:     pty.Env{Unset: s.Run.Unset, Set: s.Run.Env},
+		Capture: pty.CaptureStep,
+	}
+}
+
+// AwaitStep waits for a terminal step running in the app's tab sess (started from
+// StepTab) to end, and reads the session it started, as RunStepHere does for a relay. A
+// step whose output names no session ends with agent.ErrNoSession; the window then offers
+// to paste the link (PastedStep).
+func (a *App) AwaitStep(ctx context.Context, s move.TermStep, sess *pty.Session) (move.StepResult, error) {
+	if _, err := sess.Wait(ctx); err != nil {
+		return move.StepResult{}, err
+	}
+	out, ok := sess.StepOutput()
+	if !ok {
+		return move.StepResult{}, errors.New("the step's tab kept no output (it was read already, or does not capture)")
+	}
+	cs, err := a.ReadStepOutput(s, out)
+	if err != nil {
+		return move.StepResult{}, err
+	}
+	return move.StepResult{Session: cs}, nil
+}
+
+// ReadStepOutput reads the session a terminal step started from what it printed (a relay's
+// or an app tab's capture), through the module's agent.CloudStepReader.
+func (a *App) ReadStepOutput(s move.TermStep, out agent.StepOutput) (agent.CloudSession, error) {
 	mod, ok := a.Module(s.Agent)
 	if !ok {
 		return agent.CloudSession{}, fmt.Errorf("%s is not enabled", s.Agent)

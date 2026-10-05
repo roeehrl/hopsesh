@@ -19,9 +19,11 @@ Write-Host "Installing $Setup"
 $p = Start-Process -FilePath (Resolve-Path $Setup) -ArgumentList '/S' -Wait -PassThru
 if ($p.ExitCode -ne 0) { Fail "the installer exited with $($p.ExitCode)" }
 
-foreach ($f in 'hopsesh-app.exe', 'hopsesh.exe', 'LICENSE', 'uninstall.exe') {
+foreach ($f in 'hopsesh-app.exe', 'hopsesh.exe', 'LICENSE', 'uninstall.exe', 'conpty\conpty.dll', 'conpty\x64\OpenConsole.exe', 'conpty\arm64\OpenConsole.exe', 'conpty\LICENSE-conpty.txt') {
   if (-not (Test-Path (Join-Path $dir $f))) { Fail "$f is not in $dir" }
 }
+$sig = Get-AuthenticodeSignature (Join-Path $dir 'conpty\x64\OpenConsole.exe')
+Write-Host "OpenConsole.exe signature: $($sig.Status) $($sig.SignerCertificate.Subject)"
 if (-not (Test-Path $lnk)) { Fail 'no Start menu entry' }
 $entry = Get-ItemProperty $key
 if ($entry.DisplayVersion -ne $Version) { Fail "uninstall entry says $($entry.DisplayVersion), want $Version" }
@@ -46,7 +48,7 @@ Get-Process hopsesh-app -ErrorAction SilentlyContinue | Stop-Process -Force
 $p = Start-Process -FilePath (Join-Path $dir 'uninstall.exe') -ArgumentList '/S', "_?=$dir" -Wait -PassThru
 if ($p.ExitCode -ne 0) { Fail "the uninstaller exited with $($p.ExitCode)" }
 Remove-Item (Join-Path $dir 'uninstall.exe') -ErrorAction SilentlyContinue
-foreach ($f in 'hopsesh-app.exe', 'hopsesh.exe') {
+foreach ($f in 'hopsesh-app.exe', 'hopsesh.exe', 'conpty') {
   if (Test-Path (Join-Path $dir $f)) { Fail "$f is still there after uninstalling" }
 }
 if (Test-Path $lnk) { Fail 'the Start menu entry is still there' }
