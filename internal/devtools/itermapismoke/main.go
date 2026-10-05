@@ -1,7 +1,7 @@
 // Command itermapismoke is the maintainer's manual check of the iTerm2 API client against a
 // real iTerm2 (run it through scripts/iterm-api-smoke.sh, from a tab in iTerm2, with the
 // API already enabled by you). It lists sessions, finds the tab it runs in by TTY, opens a
-// tab running `sh -c 'sleep 2; exit 3'` and waits for its exit, opens a split beside this
+// tab running `sh -c 'sleep 8; exit 3'` and waits for its exit, opens a split beside this
 // tab, labels it, and focuses this tab again. It sends no text to any session and reads no
 // screen. CI never runs it.
 package main
@@ -97,11 +97,11 @@ func main() {
 	}
 	defer os.RemoveAll(dir)
 	statusFile := filepath.Join(dir, "status")
-	inner := iterm2api.QuoteArgv([]string{"sh", "-c", "sleep 2; exit 3"})
+	inner := iterm2api.QuoteArgv([]string{"sh", "-c", "sleep 8; exit 3"})
 	cmd := iterm2api.QuoteArgv([]string{"/bin/sh", "-c", inner + "; s=$?; echo $s > " + iterm2api.QuoteArgv([]string{statusFile}) + "; exit $s"})
 	fmt.Printf("      tab command: %s\n", cmd)
 	tab, err := c.OpenTab(ctx, win, iterm2api.Launch{Command: cmd, Dir: dir})
-	if step("open a tab in the key window running sh -c 'sleep 2; exit 3'", err) {
+	if step("open a tab in the key window running sh -c 'sleep 8; exit 3'", err) {
 		fmt.Printf("      session %s (window %s, tab %s)\n", tab.SessionID, tab.WindowID, tab.TabID)
 		fmt.Println("      waiting for its session to terminate (if your profile keeps ended sessions open, close that tab)")
 		if step("terminate event for that session", waitTerminated(ctx, c, tab.SessionID, 2*time.Minute)) {
@@ -115,7 +115,7 @@ func main() {
 	}
 
 	if here.SessionID != "" {
-		split, err := c.OpenSplit(ctx, here.SessionID, iterm2api.SplitRight, iterm2api.Launch{Command: iterm2api.QuoteArgv([]string{"sh", "-c", "sleep 4"})})
+		split, err := c.OpenSplit(ctx, here.SessionID, iterm2api.SplitRight, iterm2api.Launch{Command: iterm2api.QuoteArgv([]string{"sh", "-c", "sleep 10"})})
 		if step("open a split beside this tab (closes itself after 4 s)", err) {
 			step("label the split (user.hopsesh_title)", c.SetLabels(ctx, split.SessionID, map[string]string{"title": "hopsesh smoke"}))
 			step("terminate event for the split", waitTerminated(ctx, c, split.SessionID, time.Minute))
