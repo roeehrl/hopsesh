@@ -21,6 +21,9 @@ import (
 
 // The test binary stands in for the agents' programs when it runs under their names.
 func TestMain(m *testing.M) {
+	if code, ok := terminalRole(); ok {
+		os.Exit(code)
+	}
 	switch strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") {
 	case "fakecloud":
 		os.Exit(fakeagent.Cloud())

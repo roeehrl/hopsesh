@@ -146,6 +146,23 @@ installs it and reopens.
   <img src="docs/assets/windows-app-light.png" alt="The hopsesh app on Windows listing Claude Code and Codex sessions from this PC and from studio, a Linux machine, grouped by repository" width="900">
 </picture>
 
+### Your terminal app
+
+Sessions, teleports and hand-off steps open in your own terminal app: on macOS a new tab in
+iTerm2's front window when iTerm2 is installed (else a Terminal window), on Windows Windows
+Terminal. `hopsesh open <session>` does the same from the command line (`--here` runs it in
+this terminal), and `hopsesh terminals` lists the apps and picks one (`--use terminal-app`).
+In iTerm2 the tab gets a badge with the session's title, agent and machine (and
+`user.hopsesh_*` variables for your own title or status bar); hopsesh leaves the tab's
+title to the agent.
+
+A session that's already running is shown, not opened twice: the app's **Show its terminal
+tab** and `hopsesh open` bring its iTerm2 or Terminal tab forward. hopsesh finds the tab
+from the agent's own process and the terminal it runs on (for Codex, from hopsesh's record of
+the launch), never from anything the tab shows. It never types into a tab or reads one, and
+never changes iTerm2's settings: it doesn't turn on the Python API or install iTerm2's
+Claude Code integration.
+
 ## Continue in another agent
 
 ```sh
@@ -521,6 +538,16 @@ macOS 15 and later ask before an app may reach machines on your LAN. The hopsesh
 when it first connects to such a machine, explains why, and if you chose Don't Allow, links to
 System Settings → Privacy & Security → Local Network. Tailscale connections aren't affected,
 and the command-line tool run from Terminal never needs this permission.
+</details>
+
+<details>
+<summary><b>Why does macOS ask whether hopsesh may control iTerm2 or Terminal?</b></summary>
+
+Opening a tab in another app, or bringing one forward, takes macOS's Automation permission,
+asked once per app. hopsesh uses it only to open tabs that run its own launch command and to
+select a session's tab. If you choose Don't Allow for iTerm2, hopsesh opens Terminal
+instead; if Terminal is refused too, it gives you the command to copy. You can change it
+later in System Settings → Privacy & Security → Automation.
 </details>
 
 <details>

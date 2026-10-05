@@ -1,4 +1,4 @@
-package gui
+package termapp
 
 import (
 	"encoding/base64"

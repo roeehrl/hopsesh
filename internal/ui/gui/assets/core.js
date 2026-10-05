@@ -135,10 +135,10 @@ export const state = {
 // sys words things and spells shortcuts for the system the app runs on (setSystem, once
 // Info has loaded): "this Mac" and ⌘K on macOS, "this PC" and Ctrl+K on Windows.
 export const sys = { mac: true, win: false, os: "darwin", here: "this Mac", Here: "This Mac", vault: "the Keychain", terminal: "Terminal" };
-export function setSystem(os) {
+export function setSystem(os, terminal) {
   const mac = os === "darwin", win = os === "windows";
   Object.assign(sys, { mac, win, os, here: mac ? "this Mac" : win ? "this PC" : "this computer",
-    vault: mac ? "the Keychain" : win ? "Windows Credential Manager" : "the keyring", terminal: mac ? "Terminal" : "a terminal" });
+    vault: mac ? "the Keychain" : win ? "Windows Credential Manager" : "the keyring", terminal: terminal || (mac ? "Terminal" : "a terminal") });
   sys.Here = cap(sys.here);
   document.documentElement.dataset.os = os;
   for (const el of document.querySelectorAll("[data-keys]")) el.textContent = keys(el.dataset.keys);

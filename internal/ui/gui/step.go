@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/core/integrate"
-	"github.com/roeehrl/hopsesh/internal/core/launch"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
@@ -136,7 +135,14 @@ func (a *App) openStep(id string, s move.TermStep) error {
 	if err != nil {
 		return err
 	}
-	return terminal(launch.Shell(agent.Command{Argv: []string{prog, "terminal-step", id}, Dir: s.Run.Dir}, "", launch.DefaultShell()))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	o, err := a.snapshot().OpenStepInTerminal(ctx, prog, testTerminal, id, s.Run.Dir)
+	if err != nil {
+		return err
+	}
+	a.noteOpened(o)
+	return nil
 }
 
 // HandoffStep is the terminal step the hand-off being applied waits for (nil: none).
