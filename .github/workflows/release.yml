@@ -1,7 +1,7 @@
 name: release
 
 # A v* tag builds the Linux and Windows files (the CLI, and the Windows app with its
-# installer), attests them and creates a DRAFT release.
+# installer) and the test bundle, attests them and creates a DRAFT release.
 # No signing key or Apple credential is used here: the maintainer completes the draft on
 # their Mac with scripts/release-sign.sh (macOS files, checksums.txt and its signature),
 # then publishes it. See docs/RELEASING.md.
@@ -63,6 +63,13 @@ jobs:
             cp "dist/windows/hopsesh-$VERSION-windows-$arch-setup.exe" "dist/windows/hopsesh-windows-$arch-setup.exe"
           done
           gh release upload "$GITHUB_REF_NAME" dist/windows/*.zip dist/windows/*.exe --repo "$GITHUB_REPOSITORY"
+      - name: test bundle (stand-in agents, fixtures and contributed payloads; testbundle/README.md)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          go run ./internal/devtools/testbundle build -version "$VERSION" -out dist/testbundle
+          gh release upload "$GITHUB_REF_NAME" dist/testbundle/* --repo "$GITHUB_REPOSITORY"
       # Provenance for every file this job built; scripts/release-sign.sh checks it with
       # `gh attestation verify` before it signs checksums.txt.
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
@@ -75,3 +82,4 @@ jobs:
             dist/*.apk
             dist/windows/*.zip
             dist/windows/*.exe
+            dist/testbundle/*.tar.gz

@@ -202,6 +202,13 @@ All notable changes to this project are documented here. The format follows
   own records (`--hold` keeps the tab open after the agent ends). Any API error falls back
   to AppleScript, and a refusal is never asked again. `scripts/iterm-api-smoke.sh` checks it
   against a real iTerm2 by hand.
+- `hopsesh agents --json` includes each module's spec as data (`spec`): its binaries, data
+  folders, secrets it never opens, instruction files, features, desktop apps, and its clouds
+  with their fidelity, needs and upstream watch lists.
+- Each release has a test bundle, `hopsesh-testbundle-<version>.tar.gz` (in `checksums.txt`,
+  with build provenance): the stand-in agents for six platforms, the agents' fixtures, the
+  modules' specs, and scrubbed payloads other projects contribute, so a project that ships
+  hopsesh can test against exactly that version. See `testbundle/README.md`.
 
 ### Fixed
 - Bringing a session from Claude Code cloud adopts the copy the real Claude Code writes.

@@ -1,0 +1,6 @@
+[
+  {"group": "local", "budget": "1.50"},
+  {"group": "anthropic-cloud", "budget": "1.00"},
+  {"group": "openai-cloud", "budget": "1.00"},
+  {"group": "third-party-cloud", "budget": "0.75"}
+]

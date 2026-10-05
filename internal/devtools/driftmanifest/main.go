@@ -7,7 +7,9 @@
 // targets; the review reads all of it next to the vendors' changelogs and docs.
 //
 // `driftmanifest feed FILE SINCE` prints the items of an RSS or Atom file published
-// after SINCE (RFC 3339) as Markdown, for the probe. It is not shipped.
+// after SINCE (RFC 3339) as Markdown, for the probe. `driftmanifest check SCHEMA FILE`
+// validates a manifest that another repository wrote for the reusable workflow
+// (ci/drift/manifest.schema.json, and the rules a schema cannot say). It is not shipped.
 package main
 
 import (
@@ -55,6 +57,15 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) == 4 && os.Args[1] == "check" {
+		if errs := checkFile(os.Args[2], os.Args[3], true); len(errs) > 0 {
+			for _, e := range errs {
+				fmt.Fprintln(os.Stderr, "driftmanifest check:", e)
+			}
+			os.Exit(1)
+		}
+		return
+	}
 	out := modules()
 	targets, err := buildTargets(out)
 	if err != nil {
@@ -64,7 +75,7 @@ func main() {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	enc.SetEscapeHTML(false)
-	if err := enc.Encode(map[string]any{"modules": out, "targets": targets}); err != nil {
+	if err := enc.Encode(map[string]any{"project": hopsesh(out), "modules": out, "targets": targets}); err != nil {
 		os.Exit(1)
 	}
 }

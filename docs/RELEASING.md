@@ -4,8 +4,9 @@ A release is built in two places, and no signing key or Apple credential is ever
 in GitHub:
 
 1. **GitHub Actions** (`.github/workflows/release.yml`), on a `v*` tag: builds the Linux and
-   Windows files with GoReleaser and the Windows app with `scripts/build-windows-app.sh`,
-   records build provenance for each of them, and creates a **draft** release.
+   Windows files with GoReleaser, the Windows app with `scripts/build-windows-app.sh` and the
+   test bundle with `internal/devtools/testbundle`, records build provenance for each of
+   them, and creates a **draft** release.
 2. **The maintainer's Mac** (`scripts/release-sign.sh`): verifies that provenance, builds
    the macOS CLI and app from the tagged commit, signs and notarizes them, writes
    `checksums.txt` for every file, signs it with the release key, and uploads the result to
@@ -20,6 +21,7 @@ in GitHub:
 | `hopsesh-windows-{amd64,arm64}-setup.exe` | CI (a copy of the above) | same; a stable link: `releases/latest/download/hopsesh-windows-amd64-setup.exe` |
 | `hopsesh-<ver>-windows-{amd64,arm64}-app.zip` | `build-windows-app.sh` in CI | build provenance, `checksums.txt`; what the Windows app updates itself from (both programs, and Microsoft's ConPTY in `conpty/`, checked against its pinned NuGet hash when built) |
 | `*.sbom.json` | syft in CI | `checksums.txt` |
+| `hopsesh-testbundle-<ver>.tar.gz`, `.sha256` | `internal/devtools/testbundle` in CI: the stand-in agents for six platforms, the agents' fixtures, the modules' specs and the contributed payloads ([testbundle/README.md](../testbundle/README.md)) | build provenance (the archive), `checksums.txt`; `release-sign.sh` checks the `.sha256` against the archive |
 | `hopsesh_<ver>_darwin_{amd64,arm64}.tar.gz` | `release-sign.sh` | Developer ID signature, notarization, `checksums.txt` |
 | `hopsesh-<ver>-macos-universal.dmg` | `release-sign.sh` → `build-macos-app.sh` | Developer ID signature, notarization (stapled), `checksums.txt` |
 | `hopsesh-macos-universal.dmg` | `release-sign.sh` (a copy of the above) | same; a stable link for web pages: `releases/latest/download/hopsesh-macos-universal.dmg` |

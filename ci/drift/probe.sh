@@ -1,11 +1,13 @@
 #!/bin/sh
 # Weekly upstream-drift probe: what changed in the agents hopsesh drives and the vendor
-# clouds it plans to reach, since the versions it was tested with and since last week's
-# run. No model, no secrets (GH_TOKEN reads public data and last week's artifact), no
-# logins and no cloud calls: the CLIs only print their help. It loops over the targets
-# in the manifest (internal/devtools/driftmanifest) and writes intel/ for the review:
+# clouds it reaches (or, for another repository's manifest, in that project's targets),
+# since the versions it was tested with and since last week's run. No model, no secrets
+# (GH_TOKEN reads public data and last week's artifact), no logins and no cloud calls:
+# the CLIs only print their help. It loops over the targets
+# in the manifest (internal/devtools/driftmanifest, or DRIFT_MANIFEST) and writes intel/
+# for the review:
 #   probe.md        the facts per target; read first
-#   manifest.json   what each module declares and what each target watches
+#   manifest.json   the project, what each target watches (and hopsesh's modules)
 #   versions.json   [{id, kind, name, tested, latest}]
 #   help/<id>/      help at the tested and latest versions, diffs, removed flags, relies.tsv
 #   sources/        the docs pages; docs-hashes.json; docs/*.diff for pages changed since last week
@@ -14,14 +16,22 @@
 #   issues.json     watched issues: state, last update, comments, changed since last week
 #   issues/<id>-search.json, code/<id>-commits.txt, code/<id>-canaries.tsv
 #   schema/         Codex app-server schema diffs; real-agents-<id>.txt
-# Run from the repository root; needs node, go, gh, git, jq and curl. DRIFT_OFFLINE=1
-# skips everything that uses the network; DRIFT_NO_INSTALL=1 installs no CLIs (help comes
-# from the CLIs on PATH, the schema and real-agent steps are skipped); DRIFT_BASELINE=dir
-# uses that folder as last week's intel instead of downloading it.
+# The engine is the hopsesh checkout this script is in; it can run from any folder. Needs
+# node, go, gh, git, jq and curl.
+#   DRIFT_MANIFEST=file   a manifest another repository wrote (ci/drift/manifest.schema.json);
+#                         without it, the manifest is built from hopsesh's own modules
+#   DRIFT_WORKFLOW, DRIFT_BRANCH  the workflow file and branch whose last successful run
+#                         is the baseline (default drift.yml on main)
+#   DRIFT_OFFLINE=1       skips everything that uses the network
+#   DRIFT_NO_INSTALL=1    installs no CLIs (help comes from the CLIs on PATH, the schema
+#                         and real-agent steps are skipped)
+#   DRIFT_BASELINE=dir    uses that folder as last week's intel instead of downloading it
 set -u
 OUT=${1:-intel}
+ENGINE=$(cd "$(dirname "$0")/../.." && pwd)
 rm -rf "$OUT"
 mkdir -p "$OUT/sources" "$OUT/docs" "$OUT/schema" "$OUT/help" "$OUT/feeds/full" "$OUT/grep" "$OUT/issues" "$OUT/code"
+OUT=$(cd "$OUT" && pwd)
 SCRATCH=$(mktemp -d)
 trap 'rm -rf "$SCRATCH"' EXIT
 mkdir -p "$SCRATCH/home/.claude" "$SCRATCH/home/.codex" "$SCRATCH/cache" "$SCRATCH/tools"
@@ -97,8 +107,14 @@ has() {
 }
 
 note "# Upstream drift probe, $(date -u +%Y-%m-%d)" ""
-go build -o "$SCRATCH/driftmanifest" ./internal/devtools/driftmanifest || { note "- driftmanifest does not build"; exit 1; }
-"$SCRATCH/driftmanifest" > "$OUT/manifest.json" || { note "- driftmanifest failed"; exit 1; }
+(cd "$ENGINE" && go build -o "$SCRATCH/driftmanifest" ./internal/devtools/driftmanifest) || { note "- driftmanifest does not build"; exit 1; }
+if [ -n "${DRIFT_MANIFEST:-}" ]; then
+  "$SCRATCH/driftmanifest" check "$ENGINE/ci/drift/manifest.schema.json" "$DRIFT_MANIFEST" \
+    || { note "- $DRIFT_MANIFEST is not a valid manifest (ci/drift/manifest.schema.json)"; exit 1; }
+  jq . "$DRIFT_MANIFEST" > "$OUT/manifest.json"
+else
+  (cd "$ENGINE" && "$SCRATCH/driftmanifest") > "$OUT/manifest.json" || { note "- driftmanifest failed"; exit 1; }
+fi
 
 # Last week: the previous successful run's intel, for the docs hashes, the help of CLIs
 # with no tested version, the issues, the canaries and the feeds' dates.
@@ -108,7 +124,7 @@ if [ -n "${DRIFT_BASELINE:-}" ]; then
   BASE=$DRIFT_BASELINE
   SINCE=$(jq -r '.date // empty' "$BASE/run.json" 2> /dev/null)
 elif online; then
-  prev=$(gh run list --workflow drift.yml --branch main --status success --limit 1 \
+  prev=$(gh run list --workflow "${DRIFT_WORKFLOW:-drift.yml}" --branch "${DRIFT_BRANCH:-main}" --status success --limit 1 \
     --json databaseId,createdAt --jq '.[0] | "\(.databaseId) \(.createdAt)"' 2> /dev/null)
   if [ -n "$prev" ] && gh run download "${prev% *}" --name drift-intel --dir "$BASE" > /dev/null 2>&1; then
     SINCE=${prev#* }
@@ -168,7 +184,7 @@ while read -r T <&3; do
   if [ -n "$(get '.versionArgv // empty')" ]; then
     eval "set -- $(get '.versionArgv | @sh')"
     if [ -n "$NEW" ] || command -v "$1" > /dev/null 2>&1; then
-      say "" "Version output of the latest CLI (hopsesh parses it):" "" '```'
+      say "" "Version output of the latest CLI (the project parses it):" "" '```'
       cli "$NEW" "$@" >> "$SECTIONS"
       say '```'
     fi
@@ -252,17 +268,18 @@ while read -r T <&3; do
           > "$OUT/schema/$n.diff" 2>&1 || true
         [ -s "$OUT/schema/$n.diff" ] || rm -f "$OUT/schema/$n.diff"
       done
-      say "$(lines "$OUT/schema/changed-files.txt") files differ (schema/changed-files.txt); full diffs of the ones hopsesh uses: $(count "$OUT/schema" '*.diff') (schema/*.diff)."
+      say "$(lines "$OUT/schema/changed-files.txt") files differ (schema/changed-files.txt); full diffs of the ones the manifest keeps: $(count "$OUT/schema" '*.diff') (schema/*.diff)."
     else
       say "- the schema was not generated for both versions"
     fi
     rm -rf "$SCRATCH/schema-tested" "$SCRATCH/schema-latest"
   fi
 
-  # hopsesh's real-agent tests against the latest CLI (no model calls).
+  # hopsesh's real-agent tests against the latest CLI (no model calls). Only hopsesh's own
+  # manifest has them.
   tests=$(get '.watch.tests // empty')
   if [ -n "$tests" ] && [ -n "$NEW" ]; then
-    env -u GH_TOKEN PATH="$NEW/bin:$PATH" HOPSESH_REAL_AGENTS=1 go test ./internal/e2e/ -run "$tests" -count=1 > "$OUT/real-agents-$ID.txt" 2>&1
+    (cd "$ENGINE" && env -u GH_TOKEN PATH="$NEW/bin:$PATH" HOPSESH_REAL_AGENTS=1 go test ./internal/e2e/ -run "$tests" -count=1) > "$OUT/real-agents-$ID.txt" 2>&1
     say "" "Real-agent tests ($tests) against $LATEST:" "" '```'
     tail -n 25 "$OUT/real-agents-$ID.txt" >> "$SECTIONS"
     say '```'

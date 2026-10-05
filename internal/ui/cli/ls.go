@@ -10,6 +10,7 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/core/move"
+	"github.com/roeehrl/hopsesh/internal/core/registry"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -346,13 +347,16 @@ func agentsCmd() *cobra.Command {
 				Capabilities []agent.Capability `json:"capabilities"`
 				Enabled      bool               `json:"enabled"`
 				Install      *agent.Install     `json:"install,omitempty"`
+				// Spec is everything the module declares, its clouds and their drift
+				// watch lists included (registry.SpecData).
+				Spec registry.SpecData `json:"spec"`
 			}
 			var rows []row
 			here := inv.Local()
 			for _, m := range r.app.Reg.All() {
 				s := m.Spec()
 				rw := row{ID: s.ID, Name: s.Name, Vendor: s.Vendor, Stability: s.Stability, Tested: s.Tested,
-					Capabilities: agent.Capabilities(m), Enabled: r.app.Cfg.AgentEnabled(string(s.ID))}
+					Capabilities: agent.Capabilities(m), Enabled: r.app.Cfg.AgentEnabled(string(s.ID)), Spec: registry.Data(s)}
 				if here != nil {
 					for _, a := range here.Agents {
 						if a.Agent == s.ID {

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/roeehrl/hopsesh/blob/main/testbundle/schemas/claude-registry.schema.json",
+  "title": "Claude Code running-session registry entry",
+  "description": "<Claude config folder>/sessions/<pid>.json: one file per running Claude Code process. The format is internal to Claude Code. hopsesh reads pid, sessionId, status and waitingFor (agents/claude/live.go: a session is open while its process runs; its status is \"waiting for <waitingFor>\" when that is set) and ignores the rest, which is kept as captured. The file lives in claude/<Claude Code version>/registry/.",
+  "type": "object",
+  "required": ["pid", "sessionId"],
+  "properties": {
+    "pid": {"type": "integer", "minimum": 2, "maximum": 4194304},
+    "sessionId": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
+    "cwd": {"type": "string"},
+    "status": {"type": "string"},
+    "waitingFor": {"type": "string"}
+  },
+  "additionalProperties": true
+}

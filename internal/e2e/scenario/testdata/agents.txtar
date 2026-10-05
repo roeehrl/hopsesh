@@ -6,3 +6,10 @@ stdout '"id": "codex"'
 stdout '"version": "0.153.2"'
 grep '^claude --version' $WORK/agents.log
 grep '^codex --version' $WORK/agents.log
+
+# Each module's Spec comes with it as data: its folders, and its clouds with the drift
+# watch list.
+stdout '"spec": \{'
+stdout '"env": \[\s*"CLAUDE_CONFIG_DIR"'
+stdout '"name": "claude-cloud"'
+stdout '"surface": '

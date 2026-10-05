@@ -5,7 +5,7 @@
   "properties": {
     "summary": {
       "type": "string",
-      "description": "Two or three plain sentences: what changed upstream for these targets since the tested versions or last week, and whether hopsesh is affected."
+      "description": "Two or three plain sentences: what changed upstream for these targets since the tested versions or last week, and whether the project is affected."
     },
     "breaking": {
       "type": "boolean",
@@ -31,12 +31,12 @@
           "severity": {
             "type": "string",
             "enum": ["break", "risk", "info"],
-            "description": "break: hopsesh does the wrong thing with the latest version, or a flag it relies on is gone. risk: plausibly affected, needs a check. info: a new feature hopsesh could support."
+            "description": "break: the project does the wrong thing with the latest version, or a flag it relies on is gone. risk: plausibly affected, needs a check. info: a new feature the project could support."
           },
           "title": { "type": "string" },
           "evidence": {
             "type": "string",
-            "description": "What changed upstream and which hopsesh code relies on the old behaviour. Paraphrase; quote at most a short phrase."
+            "description": "What changed upstream and which of the project's code relies on the old behaviour. Paraphrase; quote at most a short phrase."
           },
           "source": {
             "type": "string",
@@ -45,7 +45,7 @@
           "affected": {
             "type": "array",
             "items": { "type": "string" },
-            "description": "Repository paths, with a line number where useful (agents/codex/reader.go:120); for a cloud target, the declaring module's cloud.go (agents/claude/cloud.go), or its entry in internal/devtools/driftmanifest/targets.go when no module reaches it."
+            "description": "Repository paths, with a line number where useful (agents/codex/reader.go:120), as the prompt's rule on citing says."
           },
           "test": {
             "type": "string",

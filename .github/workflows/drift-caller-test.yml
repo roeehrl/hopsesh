@@ -1,0 +1,67 @@
+name: drift workflow test
+
+# Calls drift.yml the way another repository does (workflow_call, a pinned engine commit,
+# its own manifest, focus folder and groups) with a small made-up manifest, as a dry run:
+# the probe, the prompts and the report run for real, no review is paid for and no issue
+# is touched. No secret is passed.
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/drift.yml
+      - .github/workflows/drift-caller-test.yml
+      - ci/drift/**
+      - internal/devtools/driftmanifest/**
+      - internal/devtools/schemalite/**
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  drift:
+    permissions:
+      contents: read
+      actions: read # the baseline: the last successful run's drift-intel artifact
+      issues: write # what drift.yml's report job asks for; a dry run never uses it
+    # The self-repository form ($/...) is what zizmor asks for, but actionlint 1.7.12 cannot
+    # parse it yet.
+    uses: ./.github/workflows/drift.yml # zizmor: ignore[self-repository]
+    with:
+      # The commit this run is for, as a caller pins a hopsesh commit.
+      engine-ref: ${{ github.sha }}
+      engine-repository: ${{ github.repository }}
+      manifest: ci/drift/testdata/manifest.json
+      focus: ci/drift/testdata/focus
+      groups: '[{"group": "sample", "budget": "0.10"}]'
+      issue-label: drift-test
+      issue-title: Drift test
+      environment: ""
+      dry-run: true
+
+  outputs:
+    needs: drift
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.drift.outputs.findings-artifact }}
+      - name: the outputs and the findings
+        env:
+          FINDINGS: ${{ needs.drift.outputs.findings-file }}
+          REPORT: ${{ needs.drift.outputs.report-file }}
+          BREAKING: ${{ needs.drift.outputs.breaking }}
+          COUNT: ${{ needs.drift.outputs.count }}
+          ISSUE: ${{ needs.drift.outputs.issue-url }}
+        run: |
+          set -x
+          test "$BREAKING" = false
+          test "$COUNT" = 0
+          test -z "$ISSUE"
+          jq -e 'length == 1 and .[0].group == "sample" and .[0].findings == [] and (.[0].summary | startswith("Dry run"))' "$FINDINGS"
+          grep -q '^## Summary' "$REPORT"
+          grep -q '| jq |' "$REPORT"
