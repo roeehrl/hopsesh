@@ -42,7 +42,10 @@ ci/drift/prompt.sh local /tmp/intel                                   # the prom
 ```
 
 `DRIFT_NO_INSTALL=1` installs no CLIs (help comes from the ones on `PATH`), and
-`DRIFT_BASELINE=dir` uses a folder as last week's `intel/`.
+`DRIFT_BASELINE=dir` uses a folder as last week's `intel/`. Without it, the probe looks up
+last week's `drift-intel` with `gh run list` in the repository of the folder it runs in: probe
+another project's manifest from that project's own checkout, or set `DRIFT_BASELINE` (an
+empty folder means "baseline only"), so you never compare against hopsesh's intel.
 
 ## Calling it from another repository
 
@@ -160,6 +163,10 @@ written to hopsesh.
   your default branch.
 - **Concurrency.** Runs queue on the group `<your workflow's name>-drift-engine`; don't give
   your calling workflow the same group.
+- **Issue searches** match words anywhere in an issue's body, so a broad query (say
+  `repo:openai/codex app-server approval`) returns a hundred issues a week. Search for a
+  method, hook or flag name, or limit the query with `in:title`, to keep it to the few that
+  matter.
 - **Updating the engine** means changing the SHA in both places. Read the hopsesh changelog
   first; `ci/drift/manifest.schema.json` says what a manifest may contain at that commit.
 - **What never happens:** no vendor sign-in, no subscription login, no cloud call. Every
