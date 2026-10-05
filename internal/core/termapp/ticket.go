@@ -135,6 +135,47 @@ func (s Store) Record(r Record) error {
 	return s.write("running", r.Ticket, r)
 }
 
+// exit is a launch's exit code, as its verb wrote it when the agent ended.
+type exit struct {
+	Code  int       `json:"code"`
+	Ended time.Time `json:"ended"`
+}
+
+// keepExits is how long an exit code stays for a watcher to read.
+const keepExits = 24 * time.Hour
+
+// Exit writes the exit code of a ticket's launch (-1: stopped, or it never started), and
+// removes codes older than a day.
+func (s Store) Exit(ticket string, code int) error {
+	if !IsTicket(ticket) {
+		return errors.New("not a ticket")
+	}
+	if entries, err := os.ReadDir(filepath.Join(s.Dir, "exited")); err == nil {
+		for _, e := range entries {
+			if fi, err := e.Info(); err == nil && time.Since(fi.ModTime()) > keepExits {
+				_ = os.Remove(filepath.Join(s.Dir, "exited", e.Name()))
+			}
+		}
+	}
+	return s.write("exited", ticket, exit{Code: code, Ended: time.Now().UTC()})
+}
+
+// ExitOf is a ticket's launch's exit code, once its verb wrote one.
+func (s Store) ExitOf(ticket string) (int, bool) {
+	if !IsTicket(ticket) {
+		return 0, false
+	}
+	b, err := os.ReadFile(s.path("exited", ticket))
+	if err != nil {
+		return 0, false
+	}
+	var e exit
+	if json.Unmarshal(b, &e) != nil {
+		return 0, false
+	}
+	return e.Code, true
+}
+
 // Forget removes a launch's record (its agent ended).
 func (s Store) Forget(ticket string) {
 	if IsTicket(ticket) {

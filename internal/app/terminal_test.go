@@ -154,6 +154,42 @@ func TestRunTicketRefuses(t *testing.T) {
 	}
 }
 
+// A launch's exit code for a watcher comes from hopsesh's own records only: a ticket's
+// exit (terminal-open) or a step's outcome (terminal-step); a refused ticket ends with -1.
+func TestLaunchExit(t *testing.T) {
+	cloudEnv(t, "claude")
+	a := cloudApp(t, all.Registry())
+	step := "00112233445566aa"
+	if _, ok := a.launchExit(termapp.Handle{Verb: "terminal-step", Ticket: step}); ok {
+		t.Fatal("a step's exit before its outcome")
+	}
+	if err := os.MkdirAll(filepath.Join(a.StateDir, "steps"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.writeOutcome(step, StepOutcome{Code: 5}); err != nil {
+		t.Fatal(err)
+	}
+	if code, ok := a.launchExit(termapp.Handle{Verb: "terminal-step", Ticket: step}); !ok || code != 5 {
+		t.Fatalf("step exit %d %v", code, ok)
+	}
+	if _, ok := a.launchExit(termapp.Handle{Verb: "something-else", Ticket: step}); ok {
+		t.Fatal("an exit for an unknown verb")
+	}
+	id, err := a.termStore().Save(termapp.Ticket{Kind: termapp.KindSession, Argv: []string{"/bin/sh"}, Dir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = a.RunTicket(id, TerminalIO{In: strings.NewReader(""), Out: &bytes.Buffer{}, Err: &bytes.Buffer{}})
+	if code, ok := a.launchExit(termapp.Handle{Verb: "terminal-open", Ticket: id}); !ok || code != -1 {
+		t.Fatalf("refused ticket exit %d %v", code, ok)
+	}
+	// The default terminals (none injected) read exits through the app; a launch in a
+	// terminal that cannot watch says so.
+	if _, err := a.WatchLaunch(context.Background(), termapp.Handle{Terminal: "nope"}); err == nil {
+		t.Fatal("watched a launch in an unknown terminal")
+	}
+}
+
 // Rule 14: a session's tab is found from the agent's process id (Claude's registry) or
 // hopsesh's own record (Codex has no process id in its files), never from what a tab
 // shows; a session open elsewhere is shown, not opened twice.

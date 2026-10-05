@@ -57,6 +57,9 @@ const (
 	NewTab Placement = "tab"
 	// NewWindow opens a new window.
 	NewWindow Placement = "window"
+	// Beside opens a split pane beside the session the user is in, where the terminal can
+	// (iTerm2 with its Python API on); elsewhere it is NewTab.
+	Beside Placement = "beside"
 )
 
 // Terminal ids.
@@ -85,6 +88,24 @@ type Handle struct {
 	Terminal string `json:"terminal"`
 	Ref      string `json:"ref,omitempty"`
 	TTY      string `json:"tty,omitempty"`
+	// Verb and Ticket are the hopsesh verb and id the tab runs ("terminal-open" and a
+	// ticket, or "terminal-step" and a step), for its exit code (ExitSource).
+	Verb   string `json:"verb,omitempty"`
+	Ticket string `json:"ticket,omitempty"`
+}
+
+// ExitSource reads a launch's exit code from hopsesh's own records: the code its verb
+// wrote when the agent or step ended (false: not ended, or not known). Terminals never
+// report it (iTerm2's API says only that a tab closed, and with --hold the tab outlives
+// the agent).
+type ExitSource func(h Handle) (code int, ok bool)
+
+// handleFor fills a handle's Verb and Ticket from the launch that opened it.
+func handleFor(h Handle, l Launch) Handle {
+	if len(l.Args) >= 2 {
+		h.Verb, h.Ticket = l.Args[0], l.Args[1]
+	}
+	return h
 }
 
 // Terminal is a terminal app hopsesh can open launches in.
@@ -108,8 +129,11 @@ type Focuser interface {
 	Focus(ctx context.Context, h Handle) error
 }
 
-// Watcher reports a tab's program's exit code once it ends: the exit only, never output.
-// No terminal implements it yet (it needs iTerm2's Python API, which hopsesh does not use).
+// Watcher reports a launch's exit code once it ends: the exit only, never output. The
+// code comes from hopsesh's own records (ExitSource); the terminal adds that the tab was
+// closed, which ends the launch with -1 when the agent left no code. Only iTerm2 with its
+// Python API turned on by the user implements it; check CapsOf(t).Watch, which is false
+// while the API is off.
 type Watcher interface {
 	Exited(ctx context.Context, h Handle) (<-chan int, error)
 }
@@ -149,6 +173,7 @@ func CapsOf(t Terminal) Caps {
 	if d, ok := t.(interface{ caps() Caps }); ok {
 		x := d.caps()
 		c.Labels, c.Tabs, c.Hold = x.Labels, x.Tabs, x.Hold
+		c.Watch = watch && x.Watch // a Watcher that can watch only now and then says when
 	}
 	return c
 }
@@ -173,6 +198,18 @@ func System() Set {
 		return Set{list: []Terminal{WindowsTerminal()}}
 	}
 	return Set{list: []Terminal{Linux()}}
+}
+
+// WithExits is the set with its terminals that watch launches reading exit codes from src.
+func (s Set) WithExits(src ExitSource) Set {
+	out := Set{list: make([]Terminal, len(s.list))}
+	for i, t := range s.list {
+		if w, ok := t.(interface{ withExits(ExitSource) Terminal }); ok {
+			t = w.withExits(src)
+		}
+		out.list[i] = t
+	}
+	return out
 }
 
 // NewSet is a set of the given terminals, best first (tests).
