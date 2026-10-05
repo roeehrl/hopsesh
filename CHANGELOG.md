@@ -95,9 +95,6 @@ start fresh and add your machines again.
   request where `gh` is installed), and deletes the merged ones only when you confirm, each
   only while it is where hopsesh saw it. Undo pushes them back. `delete_branch = "on-undo"`
   or `"never"` under `[clouds.<name>]` keeps them.
-- `hopsesh followup <cloud>:<id> "<text>"` sends a cloud session one message, for a cloud
-  whose tool can send one. None of the six can yet: Claude Code and Codex have no command
-  that does it, so hopsesh points you to the session's page instead.
 - **Clouds in the app:** a **Clouds** group and an **In the cloud** scope; **Hand off ▸** on
   every session, local or in a cloud (a cloud hopsesh can't use is listed with the reason);
   the hand-off sheet with the editable briefing, the branch, what stays on this machine and
@@ -112,7 +109,7 @@ start fresh and add your machines again.
 - The skill handles "hand this off to Claude Code cloud" (or to any of the other clouds): the
   agent shows the plan and asks first. For Claude Code cloud it gives you the command to run
   in your own terminal. With `--add-rules`, `clouds` and `clouds test` run without asking,
-  while `handoff`, `followup`, `clouds cleanup` and `clouds continue` always ask.
+  while `handoff`, `clouds cleanup` and `clouds continue` always ask.
 - **The hopsesh Terminal window:** the app has a terminal of its own, a window with tabs.
   **Resume here** runs a session in a tab, and so do Claude Code's hand-off and bring-back
   steps, cloud sign-ins and **Open a shell here**. hopsesh starts the command and you do all
@@ -142,7 +139,8 @@ start fresh and add your machines again.
 - On Windows the app and its installer carry Microsoft's ConPTY (`conpty.dll` and
   `OpenConsole.exe`, MIT) in a `conpty` folder, which the tabs use instead of the older one
   built into Windows. Tabs never run batch files, so for an npm command shim (such as
-  `codex.cmd`) a tab runs the program behind it directly.
+  `codex.cmd`) a tab runs the program behind it directly, and so do the command line and
+  the terminal UI.
 - **Your terminal app:** sessions, teleports and hand-off steps that hopsesh opens outside
   its own window go to a new tab in iTerm2's front window when iTerm2 is installed (else a
   Terminal window; Windows Terminal on Windows). The tab runs hopsesh's own launcher with an
@@ -192,11 +190,14 @@ start fresh and add your machines again.
   with `[clouds.<name>]` and `[terminal]`. A configuration file from 0.3 is refused, never
   converted: the app offers to set it aside and start fresh (the old file stays next to the
   new one as `config.toml.old-<date>`), and the command line names the file to move aside.
-  Then add and allow your machines again. Your sessions are not affected.
+  Then add and allow your machines again. Your sessions are not affected. A configuration
+  file written by a newer hopsesh is reported as newer: update hopsesh.
 - Lineage manifests (the `.hopsesh.json` file beside each session hopsesh moved) have a new
   format that can record cloud copies. Manifests written by 0.3 are not read: a session
   moved with 0.3 is treated as if hopsesh had not moved it before. Update hopsesh on every
   machine where you run it, so they read each other's manifests.
+- The peer protocol is now 2: a push between hopsesh 0.3 and 0.4 stops at hello and names
+  the machine to update to 0.4.0 or later.
 - The app now resumes sessions in its hopsesh Terminal window by default. To open them in
   your terminal app as before, choose **In my terminal** (or **Ask each time**) in Settings
   → Terminal. The command line still runs sessions in your terminal.

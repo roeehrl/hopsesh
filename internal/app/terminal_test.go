@@ -251,3 +251,21 @@ func TestSessionTab(t *testing.T) {
 		}
 	}
 }
+
+// A ticket for an agent npm installed on Windows names its claude.cmd: that is still
+// Claude Code's own program (runLaunch then runs the program behind the shim).
+func TestCheckTicketTakesNpmShims(t *testing.T) {
+	cloudEnv(t, "claude")
+	a := cloudApp(t, all.Registry())
+	dir := t.TempDir()
+	for _, prog := range []string{`C:\Users\alice\AppData\Roaming\npm\claude.cmd`, `C:\Users\alice\.local\bin\claude.exe`, "/usr/local/bin/claude", `C:\npm\CLAUDE.CMD`} {
+		if err := a.checkTicket(termapp.Ticket{Kind: termapp.KindSession, Argv: []string{prog, "--resume", "x"}, Dir: dir}); err != nil {
+			t.Errorf("%s: %v", prog, err)
+		}
+	}
+	for _, prog := range []string{`C:\Windows\System32\cmd.exe`, `C:\npm\claude.ps1`, `C:\npm\claude-evil.cmd`} {
+		if err := a.checkTicket(termapp.Ticket{Kind: termapp.KindSession, Argv: []string{prog}, Dir: dir}); err == nil {
+			t.Errorf("%s passed for an agent's program", prog)
+		}
+	}
+}

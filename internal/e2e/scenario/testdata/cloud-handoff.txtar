@@ -59,10 +59,17 @@ exec hopsesh ls --json
 stdout '"kind": "continued"'
 stdout '"location": "claude-cloud"'
 
-! exec hopsesh followup claude-cloud:session_01Nope000000 'and add a test'
-stderr 'not confirmed'
+# No cloud takes a follow-up from hopsesh yet: the command is hidden, and run directly it
+# says so and fails, whatever it is given.
 ! exec hopsesh followup claude-cloud:session_01Nope000000 'and add a test' --yes
-stderr 'hopsesh can.t send a Claude Code cloud session a message: Claude Code 2.1 has no command'
+stderr 'no cloud accepts a follow-up from hopsesh yet'
+! exec hopsesh followup
+stderr 'no cloud accepts a follow-up from hopsesh yet'
+exec hopsesh --help
+! stdout 'followup'
+exec hopsesh __complete f
+! stdout 'followup'
+! grep 'claude -p' $WORK/agents.log
 
 exec hopsesh undo --yes
 stdout 'Undid'

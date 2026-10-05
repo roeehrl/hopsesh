@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode/utf16"
@@ -17,11 +18,20 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/repos"
+	"github.com/roeehrl/hopsesh/internal/version"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
-// Protocol is the version of the messages below. Any change to them changes it.
-const Protocol = 1
+// Protocol is the version of the messages below. Any change to them changes it, and
+// FirstVersion with it.
+//
+//   - 1: hopsesh 0.2 and 0.3.
+//   - 2: hopsesh 0.4: lineage/2 manifests, cloud locations and hops in packages and plans.
+const Protocol = 2
+
+// FirstVersion is the first hopsesh release that speaks Protocol: the version to update an
+// older machine to.
+const FirstVersion = "0.4.0"
 
 // Methods.
 const (
@@ -38,10 +48,13 @@ const (
 	CodeFailed   = "failed"
 )
 
-// Error is a failure the other end reported.
+// Error is a failure the other end reported. A protocol mismatch also says which protocol
+// and hopsesh the answering end has (hopsesh 0.3 and older sent neither).
 type Error struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code     string `json:"code"`
+	Message  string `json:"message"`
+	Protocol int    `json:"protocol,omitempty"`
+	Version  string `json:"version,omitempty"`
 }
 
 func (e *Error) Error() string { return e.Message }
@@ -254,6 +267,61 @@ func (c *Client) Call(ctx context.Context, method string, params, result any) er
 // Handler answers one request.
 type Handler func(ctx context.Context, method string, params json.RawMessage) (any, error)
 
+// refuseHello is the answer to a hello in another protocol. Its message is read on the
+// machine that said hello, where hopsesh 0.3 prints it as it is followed by " (on
+// <machine>)", so it speaks from there and ends with the other machine.
+func refuseHello(hi Hello) *Error {
+	sender := hi.Version
+	if sender == "" {
+		sender = "unknown version"
+	}
+	e := &Error{Code: CodeProtocol, Protocol: Protocol, Version: version.Version}
+	if hi.Protocol < Protocol {
+		e.Message = fmt.Sprintf("this machine runs an older hopsesh (%s, peer protocol %d): update it to %s or later to work with the newer hopsesh (%s, protocol %d) on the other machine",
+			sender, hi.Protocol, FirstVersion, version.Version, Protocol)
+	} else {
+		e.Message = fmt.Sprintf("this machine runs a newer hopsesh (%s, peer protocol %d): update hopsesh to %s or later on the other machine, which runs an older one (%s, protocol %d)",
+			sender, hi.Protocol, sender, version.Version, Protocol)
+	}
+	return e
+}
+
+// Mismatch explains, on the machine that said hello, a refusal for another protocol from
+// hopsesh on machine: which of the two is older and what to update. A hopsesh 0.3 or older
+// sends only its message, which names its protocol; any other error comes back as it is.
+func Mismatch(err error, machine string) error {
+	var pe *Error
+	if !errors.As(err, &pe) || pe.Code != CodeProtocol {
+		return err
+	}
+	theirs := pe.Protocol
+	if theirs == 0 {
+		if _, serr := fmt.Sscanf(pe.Message, "hopsesh here speaks protocol %d,", &theirs); serr != nil {
+			return fmt.Errorf("%w (on %s)", err, machine)
+		}
+	}
+	there := "peer protocol " + strconv.Itoa(theirs)
+	if pe.Version != "" {
+		there = pe.Version + ", " + there
+	}
+	out := &Error{Code: CodeProtocol, Protocol: theirs, Version: pe.Version}
+	switch {
+	case theirs < Protocol:
+		out.Message = fmt.Sprintf("%s runs an older hopsesh (%s) than this one (%s, peer protocol %d): update hopsesh on %s to %s or later",
+			machine, there, version.Version, Protocol, machine, FirstVersion)
+	case theirs > Protocol:
+		newer := "the version it runs"
+		if pe.Version != "" {
+			newer = pe.Version
+		}
+		out.Message = fmt.Sprintf("%s runs a newer hopsesh (%s) than this one (%s, peer protocol %d): update hopsesh on this machine to %s or later",
+			machine, there, version.Version, Protocol, newer)
+	default:
+		return fmt.Errorf("%w (on %s)", err, machine)
+	}
+	return out
+}
+
 // Serve answers requests from r on w until r ends. The first request must be a hello with
 // this Protocol; any other is refused.
 func Serve(ctx context.Context, r io.Reader, w io.Writer, h Handler) error {
@@ -277,7 +345,7 @@ func Serve(ctx context.Context, r io.Reader, w io.Writer, h Handler) error {
 		case m.Method == MethodHello:
 			var hi Hello
 			if err = json.Unmarshal(m.Params, &hi); err == nil && hi.Protocol != Protocol {
-				err = &Error{Code: CodeProtocol, Message: fmt.Sprintf("hopsesh here speaks protocol %d, the other machine %d: update hopsesh so both are the same version", Protocol, hi.Protocol)}
+				err = refuseHello(hi)
 			}
 			if err == nil {
 				greeted = true

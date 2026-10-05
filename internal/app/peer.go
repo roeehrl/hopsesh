@@ -305,7 +305,7 @@ func (a *App) dialPeer(ctx context.Context, to config.Host) (*peer.Client, peer.
 	case strings.Contains(stderr, `unknown command "peer"`):
 		return nil, hr, nil, fmt.Errorf("hopsesh on %s is too old to work with this one; update it there", to.Name)
 	case errors.Is(err, peer.ErrProtocol):
-		return nil, hr, nil, fmt.Errorf("%w (on %s)", err, to.Name)
+		return nil, hr, nil, peer.Mismatch(err, to.Name)
 	case strings.TrimSpace(stderr) != "":
 		return nil, hr, nil, fmt.Errorf("hopsesh on %s: %s", to.Name, strings.SplitN(strings.TrimSpace(stderr), "\n", 2)[0])
 	}

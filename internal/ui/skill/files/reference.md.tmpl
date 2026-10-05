@@ -23,12 +23,10 @@ another machine whose hopsesh receives sessions (same flags, `--dry-run` to plan
 folder there). `{{.Bin}} handoff <ref> --to <cloud> --json --yes [flags]` starts a cloud session
 that continues it (a briefing and a branch); for `claude-cloud` only the user can run it, in
 their own terminal (Claude Code starts the session there and may ask them a question).
-`{{.Bin}} followup <cloud>:<id> "<text>" --yes` sends a cloud session one message (a paid
-turn) where the cloud takes one; none does yet. `{{.Bin}} clouds cleanup --list --json`
-lists the branches hand-offs left on the remotes and which are merged, and
-`{{.Bin}} clouds cleanup --yes` deletes the merged ones (undo pushes them back); the
-approval rule covers both. `{{.Bin}} clouds continue <hop>` takes a hop whose first leg
-waited for a terminal on to the next cloud. `{{.Bin}} undo <id>` reverses a pull, a push or
+`{{.Bin}} clouds cleanup --list --json` lists the branches hand-offs left on the remotes and
+which are merged, and `{{.Bin}} clouds cleanup --yes` deletes the merged ones (undo pushes them
+back); the approval rule covers both. `{{.Bin}} clouds continue <hop>` takes a hop whose first
+leg waited for a terminal on to the next cloud. `{{.Bin}} undo <id>` reverses a pull, a push or
 a hand-off (a cloud session itself stays in the cloud).
 
 ## handoff flags
@@ -91,4 +89,4 @@ lists each repository's Codex cloud environment.
 hopsesh reads other machines over SSH and writes into the agents' data folders, which agent
 sandboxes usually block. `{{.Bin}} skill install --add-rules` adds approval rules for each agent:
 the read-only commands run without asking (and, in Codex, outside its sandbox), while `pull`,
-`push`, `handoff`, `followup`, `undo`, `clouds cleanup` and `clouds continue` always ask.
+`push`, `handoff`, `undo`, `clouds cleanup` and `clouds continue` always ask.

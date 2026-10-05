@@ -4,14 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/roeehrl/hopsesh/internal/app"
-	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/term"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -92,8 +89,11 @@ func (m *model) stepExec(msg stepRun) (*term.Relay, tea.ExecCallback) {
 func (m *model) stepDone(msg stepRan) (tea.Model, tea.Cmd) {
 	if msg.unwatched {
 		s := msg.run.s
-		c := exec.Command(s.Run.Argv[0], s.Run.Argv[1:]...) //nolint:gosec // the module's driver, by its argument list
-		c.Dir, c.Env = s.Run.Dir, append(host.Without(os.Environ(), s.Run.Unset), s.Run.Env...)
+		c, err := app.StepCommand(s)
+		if err != nil {
+			msg.run.reply <- stepReply{err: err}
+			return m, nil
+		}
 		return m, tea.ExecProcess(c, func(error) tea.Msg {
 			return stepRan{run: msg.run, err: fmt.Errorf("%w: hopsesh could not watch %s here", agent.ErrNoSession, s.Run.Argv[0])}
 		})

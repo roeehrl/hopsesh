@@ -358,18 +358,40 @@ func (r *run) renderHandedOff(res *move.Result) {
 		r.printf("  ! %s\n", w)
 	}
 	r.printf("  When it finishes: hopsesh pull %s:%s brings it here.\n", hr.Cloud, hr.Session)
-	if hr.Follow {
-		r.printf("  Send it a message: hopsesh followup %s:%s \"…\"\n", hr.Cloud, hr.Session)
-	} else if hr.NoFollowUp != "" {
+	if hr.NoFollowUp != "" {
 		r.printf("  Follow-ups: %s\n", hr.NoFollowUp)
 	}
 	r.printf("  Undo with: hopsesh undo %s (%s)\n", res.Journal, hr.Manual)
 }
 
+// noFollowUpYet is what followup says while no cloud takes a follow-up from hopsesh.
+const noFollowUpYet = "no cloud accepts a follow-up from hopsesh yet: Claude Code has no command that sends one outside its own terminal session, and the other clouds' commands have none. Write to the session on its own page"
+
+// followers are the clouds whose module sends follow-ups (agent.CloudFollower).
+func followers() []string {
+	var out []string
+	if modules == nil {
+		return out
+	}
+	for _, m := range modules.All() {
+		if _, ok := m.(agent.CloudFollower); !ok {
+			continue
+		}
+		for _, c := range m.Spec().Clouds {
+			out = append(out, c.Name)
+		}
+	}
+	return out
+}
+
+// followupCmd is hidden while no cloud takes a follow-up (none does in this release): it
+// stays out of help, completions and the skill, and run directly it says so and fails.
+// The path behind it is kept for the first cloud whose module is an agent.CloudFollower.
 func followupCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "followup <cloud>:<id> | <cloud link> <text>",
-		Short: "Send a message to a cloud session (it starts a turn there, on your plan)",
+		Hidden: true,
+		Use:    "followup <cloud>:<id> | <cloud link> <text>",
+		Short:  "Send a message to a cloud session (it starts a turn there, on your plan)",
 		Long: `Queues one message in a cloud session through its agent's own command and returns at once, for
 a cloud whose command line can send one. The message starts a model turn in the cloud, which
 uses your plan's allowance. Nothing is sent until you confirm (or pass --yes).
@@ -377,8 +399,14 @@ uses your plan's allowance. Nothing is sent until you confirm (or pass --yes).
 None of the clouds hopsesh reaches takes one yet: Claude Code 2.1 has no command that sends
 one outside its own terminal session, so open the session on claude.ai to write to it, and
 the Codex, gh, jules, devin and amp commands hopsesh drives have none either.`,
-		Args: cobra.ExactArgs(2),
+		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(followers()) == 0 {
+				return errors.New(noFollowUpYet)
+			}
+			if len(args) != 2 {
+				return fmt.Errorf("followup takes a cloud session and the text, not %d arguments", len(args))
+			}
 			r, err := newRun(cmd)
 			if err != nil {
 				return err

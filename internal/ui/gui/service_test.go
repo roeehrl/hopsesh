@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -276,7 +277,7 @@ func TestWindowStartsFreshFromOldConfig(t *testing.T) {
 	if err := a.SetUpdateCheck(true); err == nil {
 		t.Fatal("settings must not overwrite the old file")
 	}
-	old, err := a.StartFresh()
+	old, err := a.StartFresh(false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,6 +286,39 @@ func TestWindowStartsFreshFromOldConfig(t *testing.T) {
 	}
 	if err := a.SetUpdateCheck(true); err != nil || a.Info().ConfigError != "" {
 		t.Fatalf("after starting fresh: %v", err)
+	}
+}
+
+// A configuration a newer hopsesh wrote is not set aside as if it were old: the window
+// offers to update first, and StartFresh sets it aside only when asked to for a newer file.
+func TestWindowKeepsNewerConfig(t *testing.T) {
+	home(t)
+	os.MkdirAll(config.Dir(), 0o700)
+	newer := fmt.Sprintf("schema = %d\nrepos_dir = \"/x\"\n", config.Schema+1)
+	os.WriteFile(config.Path(), []byte(newer), 0o600)
+	a := NewApp(all.Registry())
+	info := a.Info()
+	if !info.ConfigNewer || !strings.Contains(info.ConfigError, "written by a newer hopsesh") || strings.Contains(info.ConfigError, "older hopsesh") {
+		t.Fatalf("the newer file must be reported as newer: %+v", info.ConfigError)
+	}
+	if _, err := a.StartFresh(false); err == nil || !strings.Contains(err.Error(), "update hopsesh") {
+		t.Fatalf("a newer file is not set aside as if it were old: %v", err)
+	}
+	if b, _ := os.ReadFile(config.Path()); string(b) != newer {
+		t.Fatal("the newer file stays where it is")
+	}
+	if err := a.SetUpdateCheck(true); err == nil {
+		t.Fatal("settings must not overwrite the newer file")
+	}
+	old, err := a.StartFresh(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(old); string(b) != newer {
+		t.Fatal("set aside on request, the newer file is kept as it was")
+	}
+	if info := a.Info(); info.ConfigError != "" || info.ConfigNewer {
+		t.Fatalf("after starting fresh: %+v", info)
 	}
 }
 
