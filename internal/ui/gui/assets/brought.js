@@ -1,15 +1,47 @@
 // The done screen of bringing a session from a cloud: a quiet wait while the agent's own
 // command copies it in the terminal, then one of three outcomes (complete, a partial copy
 // in amber, an empty one in red), each with what can be done next.
-import { api, h, fill, view, state, screen, go, current, toast, fail, keys, sys, entries } from "./core.js";
+import { api, h, fill, view, state, screen, go, current, toast, fail, keys, sys, entries, here } from "./core.js";
 import { undo } from "./activity.js";
 import { planFor } from "./plan.js";
-import { tabs, onTabs, openBrought, showTerminal, where as opensIn } from "./term.js";
+import { tabs, onTabs, showTerminal, openBrought } from "./term.js";
+import { actionsFor } from "./sessions.js";
 
 // bringTab is the tab a bring-back's command runs in, if it runs in one.
 const bringTab = (b) => [...tabs.values()].find((t) => t.kind === "bring" && t.journal === b.journal);
 let showing = null;
-onTabs(() => { if (current === "brought" && showing?.outcome === "waiting") render(showing); });
+// The tab's state decides what the screen offers (waiting; open in that tab, or ended).
+onTabs(() => { if (current === "brought" && showing) render(showing); });
+
+// copyOf is the copy's row (its actions are the list's): this machine is read again once
+// for the copy, and once more after the tab that brought it ended (it was open till then).
+const looked = new Set();
+function copyOf(b) {
+  const e = b.key ? entries().find((x) => x.key === b.key && x.machine === here()) : null;
+  const look = b.key + "\u0000" + (bringTab(b)?.state || "");
+  if (b.key && (!e || e.live) && !looked.has(look)) {
+    looked.add(look);
+    api("RefreshHere").then((s) => { state.scan = s; if (current === "brought" && showing === b) render(b); }).catch(() => {});
+  }
+  return e;
+}
+
+// nextActions are what the copy offers now: while the tab that brought it still runs it,
+// only showing that tab (one process per session); after, the list's own actions for it
+// (Resume here, Open in the terminal app, the agent's app), and copying the command.
+function nextActions(b, primary = true) {
+  const t = bringTab(b);
+  if (t && t.state !== "exited") {
+    return [h("button", { class: "btn" + (primary ? " primary" : ""), id: "open", onclick: () => showTerminal(t.id) }, "Show the tab"),
+      h("span", { class: "muted", style: "font-size:12px;align-self:center" }, "It's open in the tab that brought it; keep working there.")];
+  }
+  const e = copyOf(b);
+  const acts = e ? actionsFor(e).filter((a) => /^(resume|app|show)/.test(a.id)) : [];
+  const out = acts.length ? acts.map((a, i) => h("button", { class: "btn" + (primary && i === 0 ? " primary" : ""), id: i === 0 ? "open" : null, onclick: a.run }, a.label))
+    : [h("button", { class: "btn" + (primary ? " primary" : ""), id: "open", onclick: () => openBrought(b.journal) }, "Resume")];
+  out.push(h("button", { class: "btn", onclick: async () => { await api("CopyText", b.command); toast("Copied"); } }, "Copy the command"));
+  return out;
+}
 
 let timer = null;
 
@@ -87,11 +119,11 @@ function render(b) {
       body = h("section", { class: "card" }, h("div", { class: "dlg-body" },
         h("div", { class: "waiting", role: "status" }, h("span", { class: "spinner", "aria-hidden": "true" }),
           h("span", {}, b.message), h("span", { class: "muted", style: "font-size:12px" }, inTab
-            ? "It's running in a tab of the hopsesh Terminal window: send one message there, then type /exit. hopsesh picks the copy up when it appears."
+            ? "It's running in a tab of the hopsesh Terminal window: send one message there. hopsesh picks the copy up when it appears, and you can keep working in that tab."
             : `It's running in ${sys.terminal}. You can close this; hopsesh picks it up on its next look.`)),
         h("div", { class: "term" }, b.command),
         h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" },
-          inTab ? h("button", { class: "btn primary", onclick: () => showTerminal(t.id) }, "Show the terminal") : null,
+          inTab ? h("button", { class: "btn primary", onclick: () => showTerminal(t.id) }, "Show the tab") : null,
           h("button", { class: "btn", onclick: () => openBrought(b.journal, "terminal") }, inTab ? `Open in ${sys.terminal} instead` : `Open in ${sys.terminal} again`),
           h("button", { class: "btn", onclick: async () => { await api("CopyText", b.command); toast("Copied"); } }, "Copy the command"),
           h("button", { class: "btn", onclick: () => doUndo(b) }, "Undo"), back)));
@@ -112,10 +144,8 @@ function render(b) {
             : b.check === "brief" ? `${b.restored} messages · it begins with the briefing hopsesh sent`
             : b.check === "none" ? `${b.restored} messages · ${b.agent} gives no count to check against` : `${b.restored} messages`))),
         h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" },
-          b.continueName && !b.written ? h("button", { class: "btn primary", onclick: () => continueIn(b) }, `Continue in ${b.continueName}`) : null,
-          h("button", { class: "btn" + (b.continueName && !b.written ? "" : " primary"), id: "open", onclick: () => openBrought(b.journal) }, opensIn() === "terminal" ? `Open in ${sys.terminal}` : opensIn() === "ask" ? "Resume…" : "Resume here"),
-          h("button", { class: "btn", onclick: () => openBrought(b.journal, opensIn() === "terminal" ? "here" : "terminal") }, opensIn() === "terminal" ? "Resume here" : `Open in ${sys.terminal}`),
-          h("button", { class: "btn", onclick: async () => { await api("CopyText", b.command); toast("Copied"); } }, "Copy the command")),
+          b.continueName && !b.written && !(bringTab(b) && bringTab(b).state !== "exited") ? h("button", { class: "btn primary", onclick: () => continueIn(b) }, `Continue in ${b.continueName}`) : null,
+          nextActions(b, !(b.continueName && !b.written))),
         h("div", { class: "term" }, b.command), codeLine(b),
         (b.warnings || []).map((w) => h("span", { class: "warn", style: "font-size:12px" }, w)),
         (b.loss || []).length ? h("details", { class: "sec" }, h("summary", { style: "cursor:pointer;font-size:12.5px" }, "What stays in the cloud"),
@@ -131,7 +161,7 @@ function render(b) {
         h("p", { style: "margin:0;font-size:13px" }, message(b)), codeLine(b),
         b.kept ? h("span", { class: "ok", style: "font-size:12.5px" }, "You kept the partial copy.") : null,
         h("div", { class: "out-stack" },
-          b.kept ? h("button", { class: "btn primary", onclick: () => openBrought(b.journal) }, opensIn() === "terminal" ? `Open in ${sys.terminal}` : "Resume here")
+          b.kept ? h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" }, nextActions(b))
             : h("button", { class: "btn primary", onclick: async () => { try { await api("KeepPartial", b.journal); } catch (e) { fail(e); return; } render(Object.assign({}, b, { kept: true })); } }, "Keep the partial copy"),
           h("button", { class: "btn", onclick: () => doUndo(b) }, "Undo"),
           b.url ? linkBtn("Open the session in the browser", b.url) : null),

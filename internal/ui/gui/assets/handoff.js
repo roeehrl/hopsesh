@@ -2,7 +2,7 @@
 // why), the plan sheet (the briefing, the code, what stays on this machine, the options),
 // the steps while it applies (and a step that failed), and the done screen with the
 // session's link and Undo.
-import { api, on, h, fill, view, state, screen, go, current, toast, fail, errText, cap, agentChip, cloudChip, $, count, sys, keys, ask, dialog } from "./core.js";
+import { api, on, h, fill, view, state, screen, go, current, toast, fail, errText, cap, agentChip, cloudChip, $, count, sys, keys, ask, dialog, icon, ICONS, rich, cloudOf } from "./core.js";
 import { undo } from "./activity.js";
 import { showTerminal, tabFor, IN_A_TAB } from "./term.js";
 
@@ -17,17 +17,23 @@ export function handoffMenu(e, open, toggle) {
   const targets = e.handoff || [];
   if (!targets.length) return null;
   const btn = h("button", { class: "btn", "aria-haspopup": "menu", "aria-expanded": open ? "true" : "false", onclick: toggle }, "Hand off ▸");
-  if (!open) return btn;
-  return h("div", { style: "display:flex;flex-direction:column;gap:6px" }, btn,
-    h("div", { class: "menu", role: "menu", "aria-label": "Hand off to" },
+  if (!open) return h("div", { class: "menu-wrap" }, btn);
+  return h("div", { class: "menu-wrap" }, btn,
+    h("div", { class: "menu menu-pop", role: "menu", "aria-label": "Hand off to" },
       h("div", { class: "menu-h", role: "presentation" }, "Hand off to"),
-      targets.map((t) => h("button", { class: "menu-item", role: "menuitem", "aria-disabled": t.ok ? null : "true", disabled: !t.ok,
-          onclick: () => { if (t.ok) planHandoff(e, t.cloud, t.bundle); } },
-        cloudChip(t.cloud), h("span", { style: "display:flex;flex-direction:column;gap:2px;min-width:0" },
-          h("span", { class: "menu-t" }, t.title),
-          t.ok ? h("span", { class: "muted", style: "font-size:11.5px" }, t.note) : h("span", { class: "err", style: "font-size:11.5px" }, `${t.title}: ${t.why}`),
-          (t.limits || []).length ? h("span", { class: "muted", style: "font-size:11px" }, t.limits[0]) : null))),
+      targets.map((t) => menuItem(t, () => { toggle(); planHandoff(e, t.cloud, t.bundle); })),
       h("div", { class: "muted", role: "presentation", style: "font-size:11.5px;padding:4px 8px" }, "A cloud gets a briefing, not this conversation.")));
+}
+
+// menuItem is one cloud in a Hand off menu: its name (its id in the tooltip), what going
+// there means, or why it can't.
+export function menuItem(t, pick) {
+  return h("button", { class: "menu-item", role: "menuitem", title: t.cloud, "aria-disabled": t.ok ? null : "true", disabled: !t.ok, onclick: () => { if (t.ok) pick(); } },
+    h("span", { class: "menu-ic", "aria-hidden": "true" }, icon(ICONS.cloud, 14)),
+    h("span", { style: "display:flex;flex-direction:column;gap:2px;min-width:0" },
+      h("span", { class: "menu-t" }, t.title, cloudOf(t.cloud)?.experimental ? h("span", { class: "chip st-warn", style: "margin-left:6px;height:17px;font-size:10.5px" }, "experimental") : null),
+      t.ok ? h("span", { class: "muted", style: "font-size:11.5px" }, rich(t.note)) : h("span", { class: "err", style: "font-size:11.5px" }, rich(cap(t.why))),
+      (t.limits || []).length ? h("span", { class: "muted", style: "font-size:11px" }, rich(t.limits[0])) : null));
 }
 
 // pickHandoff asks which cloud (the palette's Hand off to…).
@@ -35,11 +41,7 @@ export function pickHandoff(e) {
   if (tabFor(e)) { toast(IN_A_TAB); return; }
   const d = dialog(h("h2", { style: "margin:0;font-size:16px" }, `Hand off “${e.title}” to…`),
     h("div", { class: "menu", role: "menu", "aria-label": "Hand off to", style: "position:static" },
-      (e.handoff || []).map((t) => h("button", { class: "menu-item", role: "menuitem", "aria-disabled": t.ok ? null : "true", disabled: !t.ok,
-          onclick: () => { d.close(); planHandoff(e, t.cloud, t.bundle); } },
-        cloudChip(t.cloud), h("span", { style: "display:flex;flex-direction:column;gap:2px" }, h("span", { class: "menu-t" }, t.title),
-          h("span", { class: t.ok ? "muted" : "err", style: "font-size:11.5px" }, t.ok ? t.note : `${t.title}: ${t.why}`),
-          (t.limits || []).length ? h("span", { class: "muted", style: "font-size:11px" }, t.limits[0]) : null)))),
+      (e.handoff || []).map((t) => menuItem(t, () => { d.close(); planHandoff(e, t.cloud, t.bundle); }))),
     h("div", { class: "dlg-foot" }, h("button", { class: "btn", onclick: () => d.close() }, "Cancel")));
 }
 
@@ -209,7 +211,7 @@ function checks(p) {
     x.terminal ? h("span", { class: "muted", id: "ho-terminal", style: "font-size:12px;line-height:1.5" }, envNoteWords(x.terminal),
       x.folder ? [" The folder: ", h("span", { class: "mono", style: "font-size:11.5px;word-break:break-all" }, x.folder)] : null) : null,
     (x.notes || []).map((n) => h("span", { class: "muted", style: "font-size:12px" }, n)),
-    (x.limits || []).map((n) => h("span", { class: "muted", style: "font-size:12px" }, n)));
+    (x.limits || []).map((n) => h("span", { class: "muted", style: "font-size:12px" }, rich(n))));
 }
 
 function render() {
@@ -305,9 +307,9 @@ export function stepBox(box, st) {
   };
   input.onkeydown = (ev) => { if (ev.key === "Enter") { ev.preventDefault(); use(); } };
   const lead = st.state === "waiting" && st.where === "here"
-    ? [h("b", {}, `${st.cloudTitle} is starting the session in the hopsesh Terminal window`),
-      h("span", { style: "font-size:12.5px;line-height:1.5" }, "Its tab runs ", mono(`${st.driver} --cloud`), " in hopsesh's hand-off folder for this repository. If it asks whether you trust this folder, answer it there; hopsesh never answers for you. hopsesh reads that tab only for the session link."),
-      h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" }, h("button", { class: "btn primary", onclick: () => showTerminal(st.tab) }, "Show the terminal")),
+    ? [h("b", { style: "display:flex;gap:8px;align-items:center" }, h("span", { class: "spinner", "aria-hidden": "true" }), `${st.cloudTitle} is starting the session in the hopsesh Terminal window`),
+      h("span", { style: "font-size:12.5px;line-height:1.5" }, "Its tab runs ", mono(`${st.driver} --cloud`), " in hopsesh's hand-off folder for this repository, in the background: it comes forward if it asks you something (whether you trust this folder, say) or fails. hopsesh never answers for you, and reads that tab only for the session link."),
+      h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" }, h("button", { class: "btn", onclick: () => showTerminal(st.tab) }, "Show the tab")),
       h("span", { class: "mono muted", style: "font-size:11.5px;word-break:break-all" }, st.folder)]
     : st.state === "waiting" && st.exit != null
     ? [h("b", {}, st.exit < 0 ? "The step's tab was closed" : `The step's tab ended (exited ${st.exit})`),

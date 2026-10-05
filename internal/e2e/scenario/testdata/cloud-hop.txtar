@@ -12,8 +12,8 @@ exec hopsesh clouds allow codex-cloud
 cd demo
 exec hopsesh plan claude-cloud:$CLOUDID --to codex-cloud --env acme-api
 stdout 'Hand "Session \w+" on from Claude Code cloud to Codex cloud, through \S+'
-stdout '1. Bring here +claude-cloud → \S+ \(native\)'
-stdout '2. Hand off +\S+ → codex-cloud \(brief\)'
+stdout '1. Bring here +Claude Code cloud → \S+ \(native\)'
+stdout '2. Hand off +\S+ → Codex cloud \(brief\)'
 stdout 'Codex cloud starts from the claude/… branch Claude Code cloud pushed'
 stdout 'Claude Code saves its copy only after you send a message in it'
 stdout 'Both cloud sessions stay where they are'

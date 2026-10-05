@@ -327,10 +327,11 @@ only, not against the real services. Expect rough edges, and please report what 
 The code always comes into a new worktree beside your checkout, which stays as it is. Text
 is written as a new session of the agent it was handed off from (else Claude Code; `--in
 codex` picks Codex), or, with `--append`, added to the session it was handed off from when
-that is as you left it. Only Codex cloud (legacy) tasks can be reached: the new Codex Cloud
-has no command line yet. Codex cloud runs every task in an **environment** you made on the
-web: name it with `--env`; the plan suggests the ones your recent tasks used, and hopsesh
-remembers your pick for the repository (`hopsesh clouds env codex-cloud`).
+that is as you left it. Only older Codex cloud environments work: the codex command can't
+use environments made in today's Codex cloud (chatgpt.com) yet. Codex cloud runs every task
+in an **environment** you made on the web: name it with `--env`; the plan suggests the ones
+your recent tasks used, and hopsesh remembers your pick for the repository (`hopsesh clouds
+env codex-cloud`).
 
 ### Claude Code's steps in your terminal
 
@@ -343,7 +344,7 @@ folder: you answer it, once per repository, and hopsesh never answers it or chan
 Code's settings to skip it. hopsesh only reads the session's link Claude Code prints, and asks
 you to paste it if it sees none. Bringing one home runs `claude --teleport <id>` in a new
 worktree. **Claude Code saves its copy only after you send a message in it**: send one (even
-"ok"), then exit (`/exit`), and hopsesh picks the copy up. It checks the copy against the
+"ok") and hopsesh picks the copy up; keep working in it if you like. It checks the copy against the
 briefing hopsesh sent, when hopsesh started that cloud session; otherwise it says how many
 messages came, since Claude Code gives no count to check them against.
 

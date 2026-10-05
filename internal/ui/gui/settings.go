@@ -204,6 +204,15 @@ func (a *App) DismissCLIOffer() error {
 	return a.save()
 }
 
+// DismissSetup stops the app from showing its "Finish setting up" line; each step stays
+// in Machines and Settings.
+func (a *App) DismissSetup() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.core.Cfg.SetupPrompt = "declined"
+	return a.save()
+}
+
 // Reveal shows a file or folder in Finder, Explorer or the system file manager.
 func (a *App) Reveal(path string) error {
 	if path == "" {

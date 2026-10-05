@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -81,13 +82,31 @@ func main() {
 	}
 }
 
-// menu is the menu bar: the standard App, Edit and Window menus, and a Session menu whose
+// menu is the menu bar: the standard App, Edit and Window menus, a View menu for the
+// panes, and a Session menu whose
 // commands the window carries out (it gets each as a gui.MenuEvent); Terminal (Ctrl+`)
 // moves between the app's window and the hopsesh Terminal window.
 func menu(send func(cmd string), terminal func()) *application.Menu {
 	m := application.NewMenu()
 	m.AddRole(application.AppMenu)
 	m.AddRole(application.EditMenu)
+	// View: the Sessions screen's panes (each title says what it does now; the window
+	// tells, gui.SetViewMenu), and full screen on macOS.
+	v := m.AddSubmenu("View")
+	sidebarKey, inspectorKey := "Ctrl+B", "Ctrl+I"
+	if runtime.GOOS == "darwin" {
+		sidebarKey, inspectorKey = "Ctrl+Cmd+S", "Alt+Cmd+I"
+	}
+	sidebar := v.Add("Hide Sidebar").SetAccelerator(sidebarKey).OnClick(func(*application.Context) { send("toggle-sidebar") })
+	inspector := v.Add("Hide Inspector").SetAccelerator(inspectorKey).OnClick(func(*application.Context) { send("toggle-inspector") })
+	gui.SetViewMenu(func(sb, in bool) {
+		sidebar.SetLabel(map[bool]string{true: "Hide Sidebar", false: "Show Sidebar"}[sb])
+		inspector.SetLabel(map[bool]string{true: "Hide Inspector", false: "Show Inspector"}[in])
+	})
+	if runtime.GOOS == "darwin" {
+		v.AddSeparator()
+		v.AddRole(application.ToggleFullscreen)
+	}
 	s := m.AddSubmenu("Session")
 	item := func(label, accel, cmd string) {
 		it := s.Add(label).OnClick(func(*application.Context) { send(cmd) })

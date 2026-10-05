@@ -28,7 +28,7 @@ func cloud() agent.Cloud {
 		// the desktop app only; its native client (ThreadService, openai/codex#50113) is not
 		// released.
 		Limits: []string{
-			"Codex cloud (legacy) tasks only: the new Codex Cloud has no command line yet",
+			NewCloudEnvs,
 			"A task comes back as its title and its diff; its messages stay in the cloud",
 		},
 		// The CLI cannot list or create environments; its picker shows them.

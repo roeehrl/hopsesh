@@ -80,6 +80,9 @@ func cloudRun(ctx context.Context, h agent.Host, o agent.RunOptions, args ...str
 	return h.Exec().Run(ctx, append([]string{"codex"}, args...), o)
 }
 
+// NewCloudEnvs says why codex lists no cloud environment where the user made one.
+const NewCloudEnvs = "Codex can't see any cloud environments from its command line. Environments made in today's Codex cloud (chatgpt.com) can't be used by the codex command yet; only older Codex cloud environments can."
+
 // refused maps what codex printed when a cloud command failed onto the cloud sentinels.
 // "Not signed in. Please run 'codex login' to sign in with ChatGPT" (also an API-key login)
 // and the environment wordings are from source; a plan without cloud tasks and a repository
@@ -91,8 +94,11 @@ func refused(msg string) error {
 	case strings.Contains(l, "not signed in"), strings.Contains(l, "not logged in"), strings.Contains(l, "codex login"),
 		httpCode(l, "401"), strings.Contains(l, "unauthorized"):
 		return fmt.Errorf("%w: Codex here isn't signed in with ChatGPT. Cloud tasks need a ChatGPT login", agent.ErrSignedOut)
-	case strings.Contains(l, "environment") && (strings.Contains(l, "not found") || strings.Contains(l, "ambiguous")),
-		strings.Contains(l, "no cloud environments"):
+	case strings.Contains(l, "no cloud environments"):
+		// Seen with codex 0.153.2 on 2026-10-05: an environment made in today's Codex cloud
+		// on chatgpt.com is invisible to the command line.
+		return fmt.Errorf("%w: %s", agent.ErrNoEnvironment, NewCloudEnvs)
+	case strings.Contains(l, "environment") && (strings.Contains(l, "not found") || strings.Contains(l, "ambiguous")):
 		return fmt.Errorf("%w: %s", agent.ErrNoEnvironment, first)
 	case strings.Contains(l, "your plan"), strings.Contains(l, "upgrade"), httpCode(l, "403"), strings.Contains(l, "forbidden"),
 		strings.Contains(l, "not enabled for"), strings.Contains(l, "workspace has disabled"):

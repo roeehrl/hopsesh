@@ -374,8 +374,10 @@ func claudeTeleport(p Proc, arg string) int {
 	// As Claude Code 2.1.289 does: the conversation is shown, but nothing is written until
 	// the user sends a message here (FAKE_CLAUDE_SAYS, else a line typed on standard input).
 	said := p.Env("FAKE_CLAUDE_SAYS")
+	var in *bufio.Reader
 	if said == "" && p.Stdin != nil {
-		line, _ := bufio.NewReader(p.Stdin).ReadString('\n')
+		in = bufio.NewReader(p.Stdin)
+		line, _ := in.ReadString('\n')
 		said = strings.TrimSpace(line)
 	}
 	if said == "" {
@@ -437,6 +439,17 @@ func claudeTeleport(p Proc, arg string) int {
 	add("system", map[string]any{"subtype": "turn_duration", "durationMs": 1200, "messageCount": len(msgs) + 2})
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 		return p.errorf(1, "%v", err)
+	}
+	if in != nil {
+		// Typed by the user: the session goes on, as Claude Code's does, until /exit.
+		fmt.Fprintln(p.Stdout, "Noted. (type /exit to leave)")
+		for {
+			line, err := in.ReadString('\n')
+			if strings.TrimSpace(line) == "/exit" || err != nil {
+				return 0
+			}
+			fmt.Fprintln(p.Stdout, "Noted.")
+		}
 	}
 	return 0
 }

@@ -16,3 +16,18 @@ export async function menu(page: Page, cmd: string) {
 // row is the session row with exactly this title.
 export const row = (page: Page, title: string) =>
   page.locator(".row").filter({ has: page.locator(".t").getByText(title, { exact: true }) });
+
+// turnOnCloud turns a cloud on the way the window offers it: the sidebar's "Turn on a
+// cloud…" opens Machines at its clouds, the cloud's switch, then back to the sessions
+// (scanned again), showing that cloud's own list.
+export async function turnOnCloud(page: Page, title: string) {
+  const sidebar = page.getByRole("navigation", { name: "Scopes" });
+  await sidebar.getByRole("button", { name: "Turn on a cloud…" }).click();
+  await expect(page.getByRole("heading", { name: "Clouds", exact: true })).toBeInViewport({ timeout: 30_000 });
+  const sw = page.getByRole("switch", { name: `Turn on ${title}` });
+  await sw.click();
+  await expect(sw).toHaveAttribute("aria-checked", "true");
+  await page.getByRole("button", { name: "Scan them now" }).click();
+  await sidebar.getByRole("button", { name: new RegExp(title) }).click({ timeout: 30_000 });
+  await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
+}

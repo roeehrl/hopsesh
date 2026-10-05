@@ -280,7 +280,7 @@ const continuedMarker = "This session is being continued from another machine"
 
 // CopyNote is what the user must know at the teleport: Claude Code writes the copy only
 // once a message is sent in it.
-const CopyNote = "Claude Code saves its copy only after you send a message in it: send one (even \"ok\"), then exit (/exit)"
+const CopyNote = "Claude Code saves its copy only after you send a message in it: send one (even \"ok\"), and hopsesh picks the copy up"
 
 // maxAdoptScan bounds how much of a candidate transcript Adopted reads.
 const maxAdoptScan = 256 << 20

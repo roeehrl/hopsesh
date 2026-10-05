@@ -164,7 +164,7 @@ func TestHandoffToClaudeCloudAndBack(t *testing.T) {
 		!strings.Contains(hp.Brief, "fix TestParseQuoted next") || !strings.Contains(hp.Brief, hp.Branch) || hp.Tokens == 0 || hp.Tokens > 2100 {
 		t.Fatalf("brief: %d tokens\n%s", hp.Tokens, hp.Brief)
 	}
-	if hp.MarkTitle != "↪ continued in Claude Code on claude-cloud" || p.Mark != move.MarkNow || len(hp.Steps) != 5 {
+	if hp.MarkTitle != "↪ continued in Claude Code cloud" || p.Mark != move.MarkNow || len(hp.Steps) != 5 {
 		t.Fatalf("mark and steps: %s %s %v", hp.MarkTitle, p.Mark, hp.Steps)
 	}
 	before := w.statusOf()
@@ -341,7 +341,7 @@ func TestHandoffFailures(t *testing.T) {
 		t.Setenv("FAKE_CLOUD_FAIL", "push-refused")
 		res, err := a.Apply(ctx, p, move.Input{}, nil)
 		if err == nil || res.Handoff.Failed != move.StepPush || res.Handoff.Retry != "bundle" ||
-			!strings.Contains(err.Error(), "GitHub refused the handoff branch (branch protection or permissions)") {
+			!strings.Contains(err.Error(), "GitHub refused the hand-off branch (branch protection or permissions)") {
 			t.Fatalf("push refused: %v %+v", err, res.Handoff)
 		}
 		if res.Handoff.Steps[0].State != move.StepDone || res.Handoff.Steps[2].State != move.StepTodo {

@@ -26,6 +26,7 @@ type TerminalSettingsDTO struct {
 	Scrollbacks  []int  `json:"scrollbacks"`
 	KeepTabs     bool   `json:"keepTabs"`
 	Notify       bool   `json:"notify"`
+	CloseEnded   bool   `json:"closeEnded"`   // a tab closes once its program ended well
 	ScreenReader string `json:"screenReader"` // "" automatic, on, off
 	// SystemConsole (Windows): tabs use the system's pseudoconsole.
 	SystemConsole bool `json:"systemConsole"`
@@ -41,6 +42,7 @@ func (a *App) TerminalSettings() TerminalSettingsDTO {
 	a.mu.Unlock()
 	d.Where, d.Font, d.FontSize, d.Scrollback = c.AppResume(), c.Terminal.Font, c.TerminalFont(), c.TerminalLines()
 	d.KeepTabs, d.Notify, d.ScreenReader, d.SystemConsole = c.KeepTabsOn(), c.NotifyOn(), c.Terminal.ScreenReader, c.Terminal.SystemConsole
+	d.CloseEnded = c.CloseEndedOn()
 	d.Bundled = a.Terms != nil && a.Terms.Manager().BundledConsole()
 	return d
 }
@@ -54,6 +56,7 @@ type TerminalSettingsInput struct {
 	Scrollback    int    `json:"scrollback"`
 	KeepTabs      bool   `json:"keepTabs"`
 	Notify        bool   `json:"notify"`
+	CloseEnded    bool   `json:"closeEnded"`
 	ScreenReader  string `json:"screenReader"`
 	SystemConsole bool   `json:"systemConsole"`
 }
@@ -72,6 +75,11 @@ func (a *App) SetTerminalSettings(in TerminalSettingsInput) error {
 	}
 	if notify {
 		t.Notify = nil
+	}
+	t.KeepEnded = nil
+	if !in.CloseEnded {
+		keepEnded := true
+		t.KeepEnded = &keepEnded
 	}
 	if t.Resume == config.AppResumeDefault && c.Terminal.Resume == "" {
 		t.Resume = "" // still the default
@@ -164,6 +172,11 @@ func (a *App) attachTerminal() {
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		return a.core.Cfg.NotifyOn()
+	}
+	t.AutoClose = func() bool {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		return a.core.Cfg.CloseEndedOn()
 	}
 }
 

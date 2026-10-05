@@ -79,7 +79,7 @@ func TestHandoffToCopilotAndBack(t *testing.T) {
 	defer inv.Close()
 	hp := p.Handoff
 	if len(p.Blockers) > 0 || hp.Noun != "session" || hp.Follow || strings.Join(hp.Steps, ",") != "snapshot,push,start,lineage,mark" ||
-		hp.MarkTitle != "↪ continued in GitHub Copilot on copilot-cloud" || strings.Contains(hp.Brief, "git checkout") {
+		hp.MarkTitle != "↪ continued in Copilot cloud agent" || strings.Contains(hp.Brief, "git checkout") {
 		t.Fatalf("plan: %v %+v", p.Blockers, hp)
 	}
 	for _, tg := range a.HandoffTargets(inv, findEntry(t, inv)) {

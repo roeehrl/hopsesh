@@ -98,8 +98,8 @@ func TestNotifier(t *testing.T) {
 	}
 }
 
-// A tab waits for the user on a bell or a notification, and a step or a bring-back from
-// its start to its end; going quiet is not waiting.
+// A tab waits for the user on a bell or a notification, a step when it asks or goes
+// quiet, and a bring-back until the copy is saved; a session going quiet is not waiting.
 func TestAttention(t *testing.T) {
 	for _, tc := range []struct {
 		i    pty.Info
@@ -110,8 +110,10 @@ func TestAttention(t *testing.T) {
 		{pty.Info{State: pty.Waiting, Reason: pty.ReasonIdle}, TabMeta{Kind: TabSession}, false},
 		{pty.Info{State: pty.Waiting, Reason: pty.ReasonBell}, TabMeta{Kind: TabSession}, true},
 		{pty.Info{State: pty.Waiting, Reason: pty.ReasonNotification}, TabMeta{Kind: TabShell}, true},
-		{pty.Info{State: pty.Running}, TabMeta{Kind: TabStep}, true},
+		{pty.Info{State: pty.Running}, TabMeta{Kind: TabStep}, false},
+		{pty.Info{State: pty.Waiting, Reason: pty.ReasonIdle}, TabMeta{Kind: TabStep}, true},
 		{pty.Info{State: pty.Running}, TabMeta{Kind: TabBring}, true},
+		{pty.Info{State: pty.Running}, TabMeta{Kind: TabBring, Saved: "Fix it"}, false},
 		{pty.Info{State: pty.Exited}, TabMeta{Kind: TabStep}, false},
 	} {
 		if got := attention(tc.i, tc.m); got != tc.want {
@@ -160,6 +162,7 @@ func TestResumeSessionRouting(t *testing.T) {
 	fakeClaude(t)
 	a := NewApp(all.Registry())
 	defer a.Shutdown()
+	a.Terms.AutoClose = func() bool { return false } // the test reads the ended tab
 	var lines []string
 	SetTerminal(func(line string) error { lines = append(lines, line); return nil })
 	defer func() { testTerminal = nil }()

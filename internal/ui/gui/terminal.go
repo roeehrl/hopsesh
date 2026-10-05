@@ -77,6 +77,9 @@ type TabMeta struct {
 	CloudTitle string `json:"cloudTitle,omitempty"`
 	// Journal is a bring-back's journal id (its done screen asks AdoptStatus by it).
 	Journal string `json:"journal,omitempty"`
+	// Saved is the title of the copy a bring-back saved here while its tab still runs it
+	// (Machine and Key are then that copy's: the tab is the session's).
+	Saved string `json:"saved,omitempty"`
 	// Link is a step's session link, once the module's reader found it after the step
 	// ended.
 	Link string `json:"link,omitempty"`
@@ -91,8 +94,8 @@ type TabMeta struct {
 type TermTab struct {
 	pty.Info
 	TabMeta
-	// Attention: the tab waits for the user (a bell or a notification from its program, or
-	// a step from its start to its end); it counts in "Needs you".
+	// Attention: the tab waits for the user (a bell or a notification from its program, a
+	// step that asks or stays quiet, a bring-back until it ends); it counts in "Needs you".
 	Attention bool `json:"attention"`
 }
 
@@ -107,6 +110,12 @@ type tab struct {
 	exited   func(pty.Info)
 	notified bool // this waiting episode was notified
 	exitSeen bool
+	// background: the tab opened without bringing the window forward (a hand-off's step,
+	// which may finish without the user); raised once it came forward because it waits
+	// for the user or failed; raise is the timer of a quiet step's coming forward.
+	background, raised bool
+	raise              *time.Timer
+	closing            bool // it ended well and closes (AutoClose)
 }
 
 // TabSetup is what an entry point opens a tab with, besides the program.
@@ -116,6 +125,9 @@ type TabSetup struct {
 	// does not offer it); Exited is told once that its program ended.
 	External func(id string) error
 	Exited   func(pty.Info)
+	// Background opens the tab without bringing the window forward: it comes forward when
+	// it waits for the user or fails (a hand-off's step, which may need nobody).
+	Background bool
 }
 
 // TermPrefs are the terminal window's settings, sent with the list of tabs.
@@ -156,6 +168,9 @@ type Terminals struct {
 	SavePrefs func(fontSize int, reader *bool)
 	Shell     func(dir string) error
 	NotifyOn  func() bool
+	// AutoClose says whether a tab closes once its program ended well (Settings →
+	// Terminal; nil: on).
+	AutoClose func() bool
 	// Emit sends the app's window an event (the App's emit).
 	Emit func(name string, data any)
 
@@ -523,9 +538,9 @@ func (t *Terminals) changed(i pty.Info) {
 	tb := t.tabs[i.ID]
 	app := t.app
 	var (
-		wait   bool
-		exited func(pty.Info)
-		meta   TabMeta
+		wait, forward, closeNow bool
+		exited                  func(pty.Info)
+		meta                    TabMeta
 	)
 	if tb != nil {
 		meta = tb.meta
@@ -537,6 +552,36 @@ func (t *Terminals) changed(i pty.Info) {
 		}
 		if i.State == pty.Exited && !tb.exitSeen {
 			tb.exitSeen, exited = true, tb.exited
+		}
+		if tb.background && !tb.raised {
+			// A background step comes forward when it waits for the user (at once for a
+			// bell or a notification, after raiseAfter more of quiet), or when it failed.
+			switch {
+			case i.State == pty.Exited && i.Code > 0:
+				forward = true
+			case att && i.Reason != pty.ReasonIdle:
+				forward = true
+			case att && tb.raise == nil:
+				id := i.ID
+				tb.raise = time.AfterFunc(raiseAfter, func() {
+					if s, ok := t.mgr.Get(id); ok && s.Info().State == pty.Waiting {
+						t.comeForward(id)
+					}
+					t.mu.Lock()
+					if tb := t.tabs[id]; tb != nil {
+						tb.raise = nil
+					}
+					t.mu.Unlock()
+				})
+			case !att && tb.raise != nil:
+				tb.raise.Stop()
+				tb.raise = nil
+			}
+		}
+		// A tab whose program ended well closes (a step once its link is known; a sign-in
+		// closes itself, in its window).
+		if i.State == pty.Exited && i.Code == 0 && !tb.closing && tb.meta.Kind != TabSignIn && (tb.meta.Kind != TabStep || tb.meta.Link != "") && t.autoClose() {
+			tb.closing, closeNow = true, true
 		}
 	}
 	if i.State == "" {
@@ -557,6 +602,12 @@ func (t *Terminals) changed(i pty.Info) {
 		t.notes.waiting(i.ID, waitingText(meta, i.Title))
 		t.flash()
 	}
+	if forward {
+		go t.comeForward(i.ID)
+	}
+	if closeNow {
+		t.closeEnded(i.ID)
+	}
 	if exited != nil {
 		if (meta.Kind == TabStep || meta.Kind == TabSignIn || meta.Kind == TabBring) && !t.appFocused() && t.notifyOn() {
 			t.notes.now(i.ID, endedText(meta, i))
@@ -570,13 +621,17 @@ func attention(i pty.Info, m TabMeta) bool {
 	switch {
 	case i.State == pty.Exited || i.State == "":
 		return false
-	case m.Kind == TabStep || m.Kind == TabBring:
-		return true // the step needs the user from its start until it ends
+	case m.Kind == TabBring && m.Saved == "":
+		return true // the user sends a message (and the copy is saved then)
+	case m.Kind == TabStep:
+		return i.State == pty.Waiting // a question, or quiet: the cloud's command may wait for the user
 	}
 	return i.State == pty.Waiting && (i.Reason == pty.ReasonBell || i.Reason == pty.ReasonNotification)
 }
 
 func (t *Terminals) notifyOn() bool { return t.NotifyOn == nil || t.NotifyOn() }
+
+func (t *Terminals) autoClose() bool { return t.AutoClose == nil || t.AutoClose() }
 
 // visible: the terminal window has focus and shows the tab.
 func (t *Terminals) visible(id string) bool {
@@ -667,7 +722,7 @@ func (t *Terminals) Open(spec pty.Spec, setup TabSetup) (pty.Info, error) {
 		return pty.Info{}, err
 	}
 	t.mu.Lock()
-	t.tabs[s.ID()] = &tab{meta: setup.Meta, spec: spec, external: setup.External, exited: setup.Exited}
+	t.tabs[s.ID()] = &tab{meta: setup.Meta, spec: spec, external: setup.External, exited: setup.Exited, background: setup.Background}
 	t.mu.Unlock()
 	if _, ok := t.mgr.Get(s.ID()); !ok { // gone already
 		t.mu.Lock()
@@ -675,8 +730,52 @@ func (t *Terminals) Open(spec pty.Spec, setup TabSetup) (pty.Info, error) {
 		t.mu.Unlock()
 	}
 	t.changed(s.Info()) // again, now that the tab's purpose is known (it may have ended)
-	t.Focus(s.ID())
+	if !setup.Background {
+		t.Focus(s.ID())
+	}
 	return s.Info(), nil
+}
+
+// raiseAfter is how long a background step stays quiet (after the terminal's own idle
+// time) before it comes forward as waiting for the user: a cloud's command pauses while
+// it starts the session, a question waits.
+const raiseAfter = 5 * time.Second
+
+// closeAfter is how long a tab the window shows stays after its program ended well, so
+// its last line can be read.
+const closeAfter = 3 * time.Second
+
+// comeForward shows a background tab (once): it waits for the user, or failed.
+func (t *Terminals) comeForward(id string) {
+	t.mu.Lock()
+	tb := t.tabs[id]
+	if tb == nil || tb.raised {
+		t.mu.Unlock()
+		return
+	}
+	tb.raised = true
+	if tb.raise != nil {
+		tb.raise.Stop()
+	}
+	t.mu.Unlock()
+	t.Focus(id)
+}
+
+// closeEnded closes a tab whose program ended well: at once when the window doesn't show
+// it, else after closeAfter.
+func (t *Terminals) closeEnded(id string) {
+	t.mu.Lock()
+	shown := t.win != nil && t.active == id
+	t.mu.Unlock()
+	d := time.Duration(0)
+	if shown {
+		d = closeAfter
+	}
+	time.AfterFunc(d, func() {
+		if s, ok := t.mgr.Get(id); ok && s.Info().State == pty.Exited {
+			_ = t.mgr.Close(id)
+		}
+	})
 }
 
 // Focus shows the terminal window with tab id in front.
@@ -713,6 +812,9 @@ func (t *Terminals) Show() {
 		MinWidth:  560,
 		MinHeight: 320,
 		URL:       TerminalPage,
+		// As the app's window: no title bar, the window's buttons inset into the tab strip,
+		// which drags the window (--wails-draggable in terminal.css).
+		Mac: application.MacWindow{TitleBar: application.MacTitleBarHiddenInset},
 	})
 	t.mu.Lock()
 	t.win, t.winID = w, w.ID()
@@ -802,10 +904,11 @@ func (t *Terminals) setMeta(id string, f func(*TabMeta)) {
 	}
 }
 
-// liveSessionTab is the tab whose program still runs a session (machine, key), if any.
+// liveSessionTab is the tab whose program still runs a session (machine, key), if any: a
+// session's, or the bring-back's that saved it.
 func (t *Terminals) liveSessionTab(machine, key string) string {
 	for _, d := range t.Tabs() {
-		if d.Kind == TabSession && d.Machine == machine && d.Key == key && d.State != pty.Exited {
+		if (d.Kind == TabSession || d.Kind == TabBring) && d.Machine == machine && d.Key == key && d.State != pty.Exited {
 			return d.ID
 		}
 	}

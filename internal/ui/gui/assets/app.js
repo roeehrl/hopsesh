@@ -12,11 +12,14 @@ import { undoLast } from "./activity.js";
 import { openPalette } from "./palette.js";
 import { loadTabs, onTabs, showTerminal, tabs, exits } from "./term.js";
 import { render as renderSessions } from "./sessions.js";
+import { load as loadLayout, toggle as togglePane } from "./layout.js";
 
 $("#btn-search").onclick = openPalette;
 $("#btn-refresh").onclick = () => go("sessions", true);
 $("#btn-settings").onclick = () => go("settings");
 $("#btn-terminal").onclick = () => showTerminal();
+$("#btn-sidebar").onclick = () => togglePane("sidebar");
+$("#btn-inspector").onclick = () => togglePane("inspector");
 // A tab's state shows on its session's row and in the sidebar: drawn again when what they
 // show changes (not on every output), keeping the focus on the selected row.
 let shownTabs = "";
@@ -43,6 +46,8 @@ function menuCommand(cmd) {
     case "machines": go("machines"); break;
     case "settings": go("settings"); break;
     case "undo-last": undoLast(); break;
+    case "toggle-sidebar": togglePane("sidebar"); break;
+    case "toggle-inspector": togglePane("inspector"); break;
   }
 }
 
@@ -50,7 +55,7 @@ function menuCommand(cmd) {
 document.addEventListener("keydown", (ev) => {
   if (sys.mac || !ev.ctrlKey || ev.metaKey) return;
   const k = ev.key.toLowerCase();
-  const cmd = ev.altKey ? (k === "z" ? "undo-last" : "") : { k: "palette", r: "refresh", 1: "sessions", 2: "activity", 3: "machines", ",": "settings" }[k];
+  const cmd = ev.altKey ? (k === "z" ? "undo-last" : "") : { k: "palette", r: "refresh", 1: "sessions", 2: "activity", 3: "machines", ",": "settings", b: "toggle-sidebar", i: "toggle-inspector" }[k];
   if (!cmd) return;
   ev.preventDefault();
   menuCommand(cmd);
@@ -148,6 +153,7 @@ function configError() {
   for (const r of await api("PendingPasswords").catch(() => [])) askPassword(r);
   try { state.info = await api("Info"); } catch (e) { fill(view, h("div", { class: "loading err" }, errText(e))); return; }
   setSystem(state.info.os, state.info.terminal);
+  loadLayout(state.info.layout);
   if (state.info.configError) { configError(); return; }
   await loadTabs();
   await go("sessions", true);

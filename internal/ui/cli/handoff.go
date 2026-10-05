@@ -40,7 +40,7 @@ the unpushed commits and changed files. Your checkout, index and branch are not 
 Untracked files go only when you name them (--untracked), and files that look like
 credentials (.env, *.pem, *.key, …) never go.
 
-The session here is marked "continued in … on <cloud>" (--no-mark to skip). Nothing changes
+The session here is marked "continued in <cloud>" (--no-mark to skip). Nothing changes
 until you confirm (or pass --yes). hopsesh undo deletes the branch and the mark; the cloud
 session itself stays in the cloud until you archive it there. Allow the cloud first:
 hopsesh clouds allow <cloud>. The cloud session uses your plan's allowance.
@@ -54,8 +54,9 @@ asks you to paste it. Without a terminal (run by an agent), the plan says so.
 Codex cloud runs each task in an environment you made on the web: name it with --env (its
 id or its name; hopsesh lists the ones your recent tasks used, and remembers the one you
 pick for the repository). A small change on a branch already pushed can go with the task as
-a starting diff (--starting-diff) instead of on a new branch. Only Codex cloud (legacy)
-tasks are reachable: the new Codex Cloud has no command line yet.
+a starting diff (--starting-diff) instead of on a new branch. Only older Codex cloud
+environments work: the codex command can't use environments made in today's Codex cloud
+(chatgpt.com) yet.
 
 The Copilot cloud agent starts from the handoff branch (gh agent-task create --base) and
 opens its pull request against it. The jules, devin and amp commands can't name the branch
@@ -64,7 +65,7 @@ a session starts from, so the briefing asks the cloud agent to check it out firs
 A cloud session hands on to another cloud through this machine (claude-cloud:<id> --to
 codex-cloud, codex-cloud:<id> --to claude-cloud, …): hopsesh brings it here first, as
 hopsesh pull does (Claude Code's teleport runs in this terminal: send a message in the
-copy, then exit), keeps that copy, and hands it off from here. The plan shows both legs and
+copy, and the next leg starts once you leave it), keeps that copy, and hands it off from here. The plan shows both legs and
 what the trip loses; hopsesh undo takes both legs back. --in chooses the agent the session
 is in here (where the cloud's text is written), --to-dir the repository's checkout here.`,
 		Args: cobra.ExactArgs(1),
@@ -533,7 +534,7 @@ func (r *run) renderHopPlan(p *move.Plan) {
 	hp := p.Hop
 	r.printf("Hand %q on from %s to %s, through %s\n", p.Title, hp.FromTitle, hp.ToTitle, hp.Via)
 	for i, l := range hp.Legs {
-		r.printf("  %d. %-10s %s → %s (%s): %s\n", i+1, l.Verb, l.From, l.To, l.Fidelity, l.Words)
+		r.printf("  %d. %-10s %s → %s (%s): %s\n", i+1, l.Verb, nonEmpty(l.FromTitle, l.From), nonEmpty(l.ToTitle, l.To), l.Fidelity, l.Words)
 	}
 	r.printf("  carries   %s\n", hp.Conversation)
 	r.printf("  code      %s\n", hp.Code)

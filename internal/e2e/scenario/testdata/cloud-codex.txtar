@@ -13,7 +13,7 @@ stdout 'codex-cloud: allowed'
 exec hopsesh clouds test codex-cloud
 stdout '✓ signed in with ChatGPT'
 stdout '✓ codex cloud list answered'
-stdout '· Codex cloud \(legacy\) tasks only: the new Codex Cloud has no command line yet'
+stdout '· Codex can.t see any cloud environments from its command line'
 
 ! exec hopsesh handoff claude/11111111 --to codex-cloud --yes
 stderr 'Pick a Codex cloud environment for github.com/example/demo. If you have none, open `codex cloud` once to create one.'
@@ -31,7 +31,7 @@ stdout 'Task task_e_\w+ is running'
 stdout 'https://chatgpt.com/codex/tasks/task_e_'
 stdout 'Branch hopsesh/handoff/\d{8}-11111111 on github.com/example/demo'
 stdout 'Environment acme-api'
-stdout 'This session is now marked "↪ continued in Codex on codex-cloud"'
+stdout 'This session is now marked "↪ continued in Codex cloud"'
 stdout 'The task stays in your Codex cloud list'
 ! stdout 'followup'
 stdout 'The environment acme-api is now github.com/example/demo''s'

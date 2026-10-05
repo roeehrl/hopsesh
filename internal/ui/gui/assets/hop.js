@@ -2,8 +2,8 @@
 // on a cloud row, the sheet with both legs and what the trip loses, the wait while the
 // first leg runs in the user's terminal (Claude Code's teleport), and the hand-off's done
 // screen, which says it came through here.
-import { api, on, h, fill, state, go, toast, fail, errText, cap, cloudChip, $, sys, keys } from "./core.js";
-import { stepBox } from "./handoff.js";
+import { api, on, h, fill, state, go, toast, fail, errText, cap, cloudChip, cloudTitle, $, sys, keys } from "./core.js";
+import { stepBox, menuItem } from "./handoff.js";
 import { undo } from "./activity.js";
 
 const sheet = $("#sheet");
@@ -18,16 +18,11 @@ export function hopMenu(e, open, toggle) {
   const targets = e.hop || [];
   if (!targets.length) return null;
   const btn = h("button", { class: "btn", "aria-haspopup": "menu", "aria-expanded": open ? "true" : "false", onclick: toggle }, "Hand off ▸");
-  if (!open) return btn;
-  return h("div", { style: "display:flex;flex-direction:column;gap:6px" }, btn,
-    h("div", { class: "menu", role: "menu", "aria-label": "Hand off to" },
+  if (!open) return h("div", { class: "menu-wrap" }, btn);
+  return h("div", { class: "menu-wrap" }, btn,
+    h("div", { class: "menu menu-pop", role: "menu", "aria-label": "Hand off to" },
       h("div", { class: "menu-h", role: "presentation" }, "Hand off to"),
-      targets.map((t) => h("button", { class: "menu-item", role: "menuitem", "aria-disabled": t.ok ? null : "true", disabled: !t.ok,
-          onclick: () => { if (t.ok) planHop(e, t.cloud); } },
-        cloudChip(t.cloud), h("span", { style: "display:flex;flex-direction:column;gap:2px;min-width:0" },
-          h("span", { class: "menu-t" }, t.title),
-          t.ok ? h("span", { class: "muted", style: "font-size:11.5px" }, t.note) : h("span", { class: "err", style: "font-size:11.5px" }, `${t.title}: ${t.why}`),
-          (t.limits || []).length ? h("span", { class: "muted", style: "font-size:11px" }, t.limits[0]) : null))),
+      targets.map((t) => menuItem(t, () => { toggle(); planHop(e, t.cloud); })),
       h("div", { class: "muted", role: "presentation", style: "font-size:11.5px;padding:4px 8px" }, `It comes to ${sys.here} first; the next cloud gets a briefing.`)));
 }
 
@@ -96,7 +91,7 @@ function render() {
     h("div", { class: "sheet-body" },
       h("section", { class: "sec", style: "gap:10px", "aria-label": "Both legs" }, h("span", { class: "sec-h" }, "Two legs, through " + sys.here),
         x.legs.map((l, i) => h("div", { class: "item hop-leg", "data-leg": String(i + 1) }, h("span", { class: "badge" }, String(i + 1)),
-          h("div", { style: "display:flex;flex-direction:column;gap:2px" }, h("b", {}, `${l.verb}: ${l.from} → ${l.to}`, h("span", { class: "muted", style: "font-weight:400" }, ` · ${l.fidelity}`)),
+          h("div", { style: "display:flex;flex-direction:column;gap:2px" }, h("b", {}, `${l.verb}: ${l.fromTitle || cloudTitle(l.from)} → ${l.toTitle || cloudTitle(l.to)}`, h("span", { class: "muted", style: "font-weight:400" }, ` · ${l.fidelity}`)),
             h("span", { style: "font-size:12.5px" }, l.words))))),
       h("section", { class: "sec", style: "gap:8px" }, h("span", { class: "sec-h" }, "The conversation and the code"),
         h("p", { style: "margin:0;font-size:13.5px;font-weight:500" }, x.conversation),

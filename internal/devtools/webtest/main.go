@@ -14,9 +14,12 @@
 // The terminal window: /terminal/ is the real page (with its content security policy), and
 // its two streams are WebSockets to /stream. POST /reset?terminal=here makes sessions and
 // steps open in the app's own terminal (other resets choose the user's terminal app, which
-// the older tests expect); POST /terminal-test/open?title=…[&trust=1][&quiet=1][&kind=step][&as=claude] opens a tab running
+// the older tests expect), and &close=1 closes tabs whose program ended well; POST /terminal-test/open?title=…[&trust=1][&quiet=1][&kind=step][&as=claude] opens a tab running
 // termfake (internal/testkit/termfake), as an entry point would; GET /terminal-test/links
-// lists the links the window asked hopsesh to open (no browser opens).
+// lists the links the window asked hopsesh to open (no browser opens), and "app:<name>"
+// for each desktop app it asked to bring forward (none opens). POST
+// /live?session=<id>&entrypoint=claude-desktop makes a Claude Code session open in the
+// Claude app (entrypoint=cli: in a terminal).
 //
 //	go run ./internal/devtools/webtest -addr 127.0.0.1:8765 -home /tmp/demo
 package main
@@ -52,6 +55,24 @@ import (
 	"github.com/roeehrl/hopsesh/internal/ui/gui"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
+
+// live makes a demo Claude Code session open (in Claude Code's own process registry, with
+// this program's pid, which runs): started by entrypoint ("cli" in a terminal,
+// "claude-desktop" in the Claude app).
+func live(home, session, entrypoint string) error {
+	if session == "" {
+		return fmt.Errorf("session is required")
+	}
+	dir := filepath.Join(home, ".claude", "sessions")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	b, err := json.Marshal(map[string]any{"pid": os.Getpid(), "sessionId": session, "kind": "interactive", "entrypoint": entrypoint, "status": "idle"})
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, fmt.Sprintf("%d.json", os.Getpid())), b, 0o600)
+}
 
 // shim stands in for /wails/runtime.js: calls go to /call, tests raise events with
 // window.__emit(name, data), and streams are WebSockets to /stream.
@@ -141,8 +162,10 @@ func main() {
 		svc *gui.App
 	)
 	// fresh starts over from a new demo home (POST /reset, so tests are independent);
-	// where is where sessions and steps open ("terminal" unless a test asks).
-	fresh := func(where string) error {
+	// where is where sessions and steps open ("terminal" unless a test asks); closeEnded is
+	// Settings → Terminal's "Close a tab when its program ends" (off unless a test asks: the
+	// older tests read ended tabs).
+	fresh := func(where string, closeEnded bool) error {
 		mu.Lock()
 		defer mu.Unlock()
 		if svc != nil {
@@ -166,14 +189,14 @@ func main() {
 			where = gui.WhereTerminal
 		}
 		set := svc.TerminalSettings()
-		return svc.SetTerminalSettings(gui.TerminalSettingsInput{Where: where, KeepTabs: true, Notify: true, FontSize: set.FontSize, Scrollback: set.Scrollback})
+		return svc.SetTerminalSettings(gui.TerminalSettingsInput{Where: where, KeepTabs: true, Notify: true, CloseEnded: closeEnded, FontSize: set.FontSize, Scrollback: set.Scrollback})
 	}
 	http.HandleFunc("/events", serveEvents)
 	gui.SetTerminal(background)
 	if self, err := os.Executable(); err == nil {
 		gui.SetStepProgram(self)
 	}
-	if err := fresh(""); err != nil {
+	if err := fresh("", false); err != nil {
 		log.Fatal(err)
 	}
 	var (
@@ -184,6 +207,12 @@ func main() {
 		linksMu.Lock()
 		links = append(links, u)
 		linksMu.Unlock()
+	})
+	gui.SetAppHook(func(name string) error {
+		linksMu.Lock()
+		links = append(links, "app:"+name)
+		linksMu.Unlock()
+		return nil
 	})
 	assets, err := fs.Sub(gui.Assets, "assets")
 	if err != nil {
@@ -231,6 +260,17 @@ func main() {
 		os.Setenv("FAKE_CLOUD_FAIL", r.URL.Query().Get("fail"))
 		_ = json.NewEncoder(w).Encode(map[string]string{"id": id})
 	})
+	http.HandleFunc("/live", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if err := live(h, r.URL.Query().Get("session"), r.URL.Query().Get("entrypoint")); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	})
 	http.HandleFunc("/dirty", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "POST only", http.StatusMethodNotAllowed)
@@ -250,7 +290,7 @@ func main() {
 		linksMu.Lock()
 		links = nil
 		linksMu.Unlock()
-		if err := fresh(r.URL.Query().Get("terminal")); err != nil {
+		if err := fresh(r.URL.Query().Get("terminal"), r.URL.Query().Get("close") == "1"); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 		if r.URL.Query().Get("terminal") == gui.WhereHere {

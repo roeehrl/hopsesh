@@ -1,18 +1,21 @@
 // The command palette (⌘K, Ctrl+K): find a session and act on it, or run any command, from the keyboard.
-import { api, h, fill, icon, ICONS, state, go, current, toast, fail, agentBadge, entries, here, $, sys, keys, clouds, selected } from "./core.js";
+import { api, h, fill, icon, ICONS, state, go, current, toast, fail, agentBadge, entries, here, $, sys, keys, clouds, selected, cloudTitle } from "./core.js";
 import { pickHandoff } from "./handoff.js";
-import { actionsFor, statusOf, render as renderSessions, pasteDialog } from "./sessions.js";
+import { actionsFor, statusOf, render as renderSessions, reveal, pasteDialog } from "./sessions.js";
 import { undoLast } from "./activity.js";
 import { showTerminal, openShell } from "./term.js";
 
 const pal = $("#palette");
 let items = [], sel = 0;
 
-function show(e) {
+// show selects a session in the list (All sessions, no filters), its row in view.
+async function show(e) {
   state.scope = { kind: "all" };
   state.filter = { agent: "", live: false };
   state.sel = { machine: e.machine, key: e.key };
-  if (current === "sessions") renderSessions(); else go("sessions");
+  if (current === "sessions") renderSessions(); else await go("sessions");
+  document.querySelector('#view .row[aria-selected="true"]')?.focus({ preventScroll: true });
+  reveal();
 }
 
 function commands() {
@@ -35,7 +38,7 @@ function commands() {
       { label: "Bring from cloud…", sub: clouds().filter((c) => c.fetchable).map((c) => c.title).join(", "), run: bringFromCloud },
       { label: "Paste a cloud link…", sub: "claude.ai/code/…, session_…, cse_…", run: () => pasteDialog() },
     ] : []),
-    { label: "Machines: Clouds", sub: "allow, sign in, test", run: () => go("machines") },
+    { label: "Machines: Clouds", sub: "turn on, sign in, test", run: () => go("machines", "clouds") },
     { label: i.receive ? "Stop receiving sessions from my other machines" : "Receive sessions from my other machines",
       run: async () => { try { await api("SetReceive", !i.receive); state.info = await api("Info"); toast(state.info.receive ? `${sys.Here} now receives sessions` : `${sys.Here} no longer receives sessions`); } catch (e) { fail(e); } if (current === "sessions") renderSessions(); } },
     { label: "Settings: agents", run: () => go("settings", "agents") },
@@ -51,7 +54,7 @@ async function toggleReader() {
     const t = await api("TerminalSettings");
     const on = !(t.screenReader === "on");
     await api("SetTerminalSettings", { app: t.app, where: t.where, font: t.font, fontSize: t.fontSize, scrollback: t.scrollback, keepTabs: t.keepTabs,
-      notify: t.notify, screenReader: on ? "on" : "off", systemConsole: t.systemConsole });
+      notify: t.notify, closeEnded: t.closeEnded, screenReader: on ? "on" : "off", systemConsole: t.systemConsole });
     state.terminalReader = on;
     toast(`The terminal's screen reader mode is ${on ? "on" : "off"}`);
   } catch (e) { fail(e); }
@@ -76,11 +79,15 @@ function bringFromCloud() {
 const words = (q) => q.toLowerCase().split(/\s+/).filter(Boolean);
 const matches = (text, ws) => { const t = text.toLowerCase(); return ws.every((w) => t.includes(w)); };
 
+// sessionItem is a session found: ↩ shows it in the list, ⌘↩ (Ctrl+Enter) runs its main
+// action. Its line says where it is: the repository, the machine, its state.
 function sessionItem(e, group) {
   const acts = actionsFor(e);
   const [, st] = statusOf(e);
-  return { group, session: e, label: e.title, sub: [e.machine === here() ? sys.here : e.machine, st.toLowerCase(), e.cloud?.pr ? "PR " + e.cloud.pr : ""].filter(Boolean).join(" · "), hint: acts[0]?.short || acts[0]?.label || "Show",
-    run: acts[0] ? acts[0].run : () => show(e), second: acts[1]?.run };
+  const repo = e.group.noRepo ? "" : e.group.name.replace(/ \(no remote\)$/, "");
+  const where = e.cloud ? cloudTitle(e.machine) : e.machine === here() ? sys.here : e.machine;
+  return { group, session: e, label: e.title, sub: [repo, where, st[0].toLowerCase() + st.slice(1), e.cloud?.pr ? "PR " + e.cloud.pr : ""].filter(Boolean).join(" · "),
+    hint: acts[0] ? `${keys("mod+enter")} ${acts[0].short || acts[0].label}` : "", run: () => show(e), second: acts[0]?.run };
 }
 
 function build(q) {
@@ -94,7 +101,7 @@ function build(q) {
   if (found.length) {
     const top = found[0];
     out.push(sessionItem(top, "Session"));
-    for (const a of actionsFor(top).slice(1)) out.push({ group: "Actions for this session", label: a.label, run: a.run });
+    for (const a of actionsFor(top)) out.push({ group: "Actions for this session", label: a.label, run: a.run });
     out.push({ group: "Actions for this session", label: "Show it in the list", run: () => show(top) });
     found = found.slice(1, 9);
   }
@@ -111,10 +118,10 @@ function paint() {
     if (it.group !== group) { group = it.group; kids.push(h("div", { class: "pal-grp", role: "presentation" }, group)); }
     kids.push(h("button", { class: "pal-item", role: "option", id: "pal-" + i, "aria-selected": i === sel ? "true" : "false", tabindex: "-1",
         onmousemove: () => { if (sel !== i) { sel = i; paint(); } }, onclick: () => runAt(i, false) },
-      it.session ? agentBadge(it.session.agent, it.session.agentName) : icon(it.group === "Commands" ? ICONS.arrow : ICONS.chevron, 13),
+      it.session ? agentBadge(it.session.agent, it.session.agentName, it.session.cloud ? cloudTitle(it.session.machine) : "") : icon(ICONS.arrow, 13),
       h("span", { style: "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" }, it.label, it.sub ? h("span", { class: "muted" }, " · " + it.sub) : null),
       it.hint ? h("span", { class: "muted", style: "font-size:12px" }, it.hint) : null,
-      i === sel && (it.run || it.second) ? h("span", { class: "kbd" }, "↩") : null));
+      i === sel && it.run ? h("span", { class: "kbd", title: it.session ? "Show it in the list" : "" }, "↩") : null));
   });
   fill(list, kids.length ? kids : h("div", { class: "empty" }, "Nothing matches."));
   list.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
@@ -137,7 +144,7 @@ export function openPalette() {
   fill(pal,
     h("div", { class: "pal-in" }, icon(["M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14z", "m20 20-3.5-3.5"], 16), input),
     h("div", { class: "pal-list", id: "pal-list", role: "listbox" }),
-    h("div", { class: "pal-foot" }, h("span", {}, "↑↓ move"), h("span", {}, "↩ run"), h("span", {}, `${keys("mod+enter")} second action`), h("span", {}, "esc close"), h("span", { class: "spacer" }), h("span", {}, `${keys("mod+alt+Z")} undo the last hop`)));
+    h("div", { class: "pal-foot" }, h("span", {}, "↑↓ move"), h("span", {}, "↩ show the session, or run"), h("span", {}, `${keys("mod+enter")} the session's main action`), h("span", {}, "esc close"), h("span", { class: "spacer" }), h("span", {}, `${keys("mod+alt+Z")} undo the last hop`)));
   input.addEventListener("input", () => { items = build(input.value); sel = 0; paint(); });
   input.addEventListener("keydown", (e) => {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {

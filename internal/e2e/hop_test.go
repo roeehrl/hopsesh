@@ -142,7 +142,7 @@ func TestHopClaudeCloudToCodexCloud(t *testing.T) {
 	for _, x := range copyHere.Lineage.Hops {
 		kinds = append(kinds, x.Kind)
 	}
-	if strings.Join(kinds, ",") != lineage.HopFetch+","+lineage.HopHandoff || copyHere.Session.Mark == nil || copyHere.Session.Mark.Location != "codex-cloud" {
+	if strings.Join(kinds, ",") != lineage.HopFetch+","+lineage.HopHandoff || copyHere.Session.Mark == nil || copyHere.Session.Mark.AgentName != "Codex cloud" {
 		t.Fatalf("lineage %v, mark %+v", kinds, copyHere.Session.Mark)
 	}
 	// One journal, both legs.

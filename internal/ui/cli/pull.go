@@ -135,8 +135,7 @@ From a cloud (<cloud>:<id>, or the session's link; hopsesh clouds lists them): h
 brings the cloud's code into a new worktree of the repository (your checkout stays as it
 is) and its conversation as far as the cloud gives it back. Claude Code cloud's comes whole
 through claude --teleport, which hopsesh prints for your terminal (--run runs it here):
-Claude Code saves its copy only after you send a message in it, so send one, then exit
-(/exit). Once the copy appears, hopsesh checks it (that it begins with the briefing hopsesh
+Claude Code saves its copy only after you send a message in it, so send one. Once the copy appears, hopsesh checks it (that it begins with the briefing hopsesh
 sent, for a session hopsesh handed off), keeps the cloud's branch under
 hopsesh/from/<cloud>/, and records it for undo. Codex cloud, Copilot and Amp come back as
 text written into an agent here (--in), Jules and Devin as code only (--code-only). Allow
