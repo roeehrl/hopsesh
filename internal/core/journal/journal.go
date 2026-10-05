@@ -134,6 +134,7 @@ const (
 	KindFetch    = "fetch"    // a session brought from a cloud (a worktree, an adopted session)
 	KindHop      = "hop"      // a cloud session handed on to another cloud through this machine (Parts)
 	KindCleanup  = "cleanup"  // branches deleted on a remote once their work was merged
+	KindRename   = "rename"   // a session given a new title in its agent's own data
 )
 
 // New starts a journal of one operation.

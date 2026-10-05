@@ -34,7 +34,7 @@ type info struct {
 	ID          string
 	File        string
 	Title       string
-	TitleSource string // custom | ai | summary | prompt | none
+	TitleSource string // custom | ai | summary | prompt | reply | none
 	Mark        *agent.Mark
 	CWD         string // project directory: relocated cwd, else the launch cwd
 	LastCWD     string // shell cwd of the newest record (may be a subdirectory)
@@ -81,6 +81,10 @@ type record struct {
 	// A Remote Control link (bridge-session): the claude.ai copy, in cse_ form, and its owner.
 	BridgeSessionID string `json:"bridgeSessionId"`
 	OwnerOrg        string `json:"ownerOrganizationUuid"`
+	// For a preview's walk: a compaction boundary (a system record of subtype
+	// compact_boundary) chains to the conversation before it through its logical parent.
+	LogicalParentUUID string `json:"logicalParentUuid"`
+	Subtype           string `json:"subtype"`
 }
 
 // summarize reads the head and tail of a transcript and derives what Claude Code's picker
@@ -128,7 +132,7 @@ func summarize(fsys agent.FS, pa agent.Path, file string, fi fs.FileInfo, hasSid
 	}
 	apply(s, headRecs, tailRecs)
 	if hasSidecar == nil || *hasSidecar {
-		if s.TitleSource == "" || s.TitleSource == "prompt" || s.TitleSource == "none" {
+		if s.TitleSource == "" || s.TitleSource == "prompt" || s.TitleSource == "reply" || s.TitleSource == "none" {
 			if t := readTitleSidecar(fsys, pa, file, s.ID); t != "" {
 				s.Title, s.TitleSource = t, "custom"
 			}
@@ -226,6 +230,8 @@ func apply(s *info, head, tail []record) {
 	if s.Title == "" {
 		if firstPrompt != "" {
 			s.Title, s.TitleSource = firstPrompt, "prompt"
+		} else if r := firstReply(head); r != "" {
+			s.Title, s.TitleSource = r, "reply"
 		} else {
 			s.TitleSource = "none"
 		}
@@ -370,9 +376,14 @@ var builtinCommands = map[string]bool{
 	"usage": true, "fast": true, "effort": true, "agents": true, "mcp": true, "hooks": true, "plugin": true,
 }
 
-// realPrompt returns the user's own prompt text for a record, or "" if the record is a
-// tool result, meta message, compaction summary, peer/task notification or command noise.
-func realPrompt(r record) string {
+// realPrompt returns the user's own prompt for a record on one line, at most 200
+// characters, or "" if the record is not one (promptText).
+func realPrompt(r record) string { return clip(oneLine(promptText(r))) }
+
+// promptText returns the user's own prompt text for a record, in full, or "" if the
+// record is a tool result, meta message, compaction summary, peer/task notification or
+// command noise. A command with arguments reads "/name args", a shell escape "! command".
+func promptText(r record) string {
 	if r.Type != "user" || r.IsMeta || r.IsCompactSummary || r.Message == nil {
 		return ""
 	}
@@ -395,15 +406,65 @@ func realPrompt(r record) string {
 		if builtinCommands[name] || args == "" {
 			return ""
 		}
-		return clip(oneLine("/" + name + " " + args))
+		return "/" + name + " " + args
 	}
 	if m := bashInputRE.FindStringSubmatch(text); m != nil {
-		return clip(oneLine("! " + strings.TrimSpace(m[1])))
+		return "! " + strings.TrimSpace(m[1])
 	}
 	if internalTagRE.MatchString(text) {
 		return ""
 	}
-	return clip(oneLine(text))
+	return text
+}
+
+// maxReplyTitle bounds a title taken from the agent's first reply, in characters.
+const maxReplyTitle = 80
+
+// firstReply is the first sentence of the agent's first text reply in the head, as a
+// title for a session whose prompts are all commands or notes.
+func firstReply(head []record) string {
+	for _, r := range head {
+		if r.Type != "assistant" || r.IsSidechain || r.Message == nil {
+			continue
+		}
+		if t := firstSentence(contentText(r.Message.Content)); t != "" {
+			return clipWords(t, maxReplyTitle)
+		}
+	}
+	return ""
+}
+
+// firstSentence is the first sentence of a text's first line, without markdown heading
+// marks or a closing period or colon.
+func firstSentence(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	s = strings.TrimLeft(oneLine(s), "#>*- ")
+	for _, end := range []string{". ", "! ", "? "} {
+		if i := strings.Index(s, end); i >= 0 {
+			s = s[:i+1]
+		}
+	}
+	return strings.TrimSpace(strings.TrimRight(s, ".:"))
+}
+
+// clipWords shortens s to at most max characters, ending at a word with "…".
+func clipWords(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	r = r[:max-1]
+	cut := len(r)
+	for i := len(r) - 1; i > len(r)/2; i-- {
+		if r[i] == ' ' {
+			cut = i
+			break
+		}
+	}
+	return strings.TrimRight(string(r[:cut]), " ") + "…"
 }
 
 // contentText extracts text from string content or from text blocks; tool_result

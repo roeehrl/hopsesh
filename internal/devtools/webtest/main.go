@@ -19,7 +19,8 @@
 // lists the links the window asked hopsesh to open (no browser opens), and "app:<name>"
 // for each desktop app it asked to bring forward (none opens). POST
 // /live?session=<id>&entrypoint=claude-desktop makes a Claude Code session open in the
-// Claude app (entrypoint=cli: in a terminal).
+// Claude app (entrypoint=cli: in a terminal). POST /seed?n=220 adds n made-up Claude Code
+// sessions over a dozen made-up repositories and the last 90 days (for a long list).
 //
 //	go run ./internal/devtools/webtest -addr 127.0.0.1:8765 -home /tmp/demo
 package main
@@ -43,6 +44,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/roeehrl/hopsesh/agents/claude"
 	"github.com/roeehrl/hopsesh/internal/agents/all"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/move"
@@ -271,6 +273,19 @@ func main() {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 	})
+	http.HandleFunc("/seed", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		n := 220
+		fmt.Sscan(r.URL.Query().Get("n"), &n)
+		if err := seedMany(h, n); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	})
 	http.HandleFunc("/dirty", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "POST only", http.StatusMethodNotAllowed)
@@ -485,6 +500,84 @@ func dirty(h string) error {
 	for _, args := range [][]string{{"add", "parser.go"}, {"commit", "-q", "-m", "work in progress"}} {
 		if out, err := exec.Command("git", append([]string{"-C", demo}, args...)...).CombinedOutput(); err != nil {
 			return fmt.Errorf("git %v: %v: %s", args, err, out)
+		}
+	}
+	return nil
+}
+
+// seedMany writes n made-up Claude Code sessions over made-up repositories (each a local
+// checkout with a GitHub remote), spread over the last 90 days, newest first.
+func seedMany(h string, n int) error {
+	repos := []string{"api", "webapp", "infra", "mobile", "docs", "billing", "search", "notify", "auth", "ledger", "gateway", "reports"}
+	tasks := []string{"Retry the upload when a part stalls", "Bound the merge phase", "Add a peer-visibility journal", "Tidy the memory guard",
+		"Group the session list", "Container query for compact rows", "Fix title bar spacing", "Speed up the session scan", "Sign the Windows installer",
+		"Bench the layer-1 forward pass", "Probe the feed rate limits", "Tests for the session file reader", "Clean up old worktrees", "Import the tool table",
+		"Profile the idle CPU burn", "Release notes for the next version", "Cache the scan by path, size and mtime", "Explain the epoch timer",
+		"Port the settings page to the new layout", "Rate-limit the public endpoints", "Migrate the queue to the new broker", "Find the flaky login test"}
+	branches := []string{"main", "fix/retry", "feat/journal", "list-groups", "compact-rows", "titlebar", "scan-cache", "win-sign", "perf/l1"}
+	seed := uint32(7)
+	rnd := func(k int) int { seed = seed*1664525 + 1013904223; return int(seed>>8) % k }
+	now := time.Now().UTC()
+	for _, name := range repos {
+		dir := filepath.Join(h, "git", name)
+		if _, err := os.Stat(dir); err == nil {
+			continue
+		}
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+		for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"remote", "add", "origin", "https://github.com/example/" + name + ".git"},
+			{"-c", "user.name=demo", "-c", "user.email=demo@example.com", "commit", "-q", "--allow-empty", "-m", "init"}} {
+			cmd := exec.Command("git", args...)
+			cmd.Dir = dir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("git %v: %v %s", args, err, out)
+			}
+		}
+	}
+	for i := 0; i < n; i++ {
+		name := repos[rnd(len(repos))]
+		cwd := filepath.Join(h, "git", name)
+		// The newest few minutes ago, the oldest about 90 days ago.
+		at := now.Add(-time.Duration(float64(i*i)/float64(n*n)*90*24) * time.Hour).Add(-time.Duration(rnd(50)+3) * time.Minute)
+		id := fmt.Sprintf("5eed%04x-0000-4000-8000-%012x", i, i)
+		branch := branches[rnd(len(branches))]
+		task := tasks[rnd(len(tasks))]
+		ts := func(d time.Duration) string { return at.Add(d).Format("2006-01-02T15:04:05.000Z") }
+		rec := func(m map[string]any) string { b, _ := json.Marshal(m); return string(b) }
+		base := func(typ, uuid, parent string, d time.Duration) map[string]any {
+			m := map[string]any{"type": typ, "uuid": uuid, "sessionId": id, "cwd": cwd, "version": "2.1.284", "gitBranch": branch, "timestamp": ts(d), "isSidechain": false, "userType": "external"}
+			if parent == "" {
+				m["parentUuid"] = nil
+			} else {
+				m["parentUuid"] = parent
+			}
+			return m
+		}
+		u1 := base("user", "u1", "", -4*time.Minute)
+		u1["message"] = map[string]any{"role": "user", "content": strings.ToLower(task[:1]) + task[1:] + ", and keep the tests green"}
+		a1 := base("assistant", "a1", "u1", -3*time.Minute)
+		a1["message"] = map[string]any{"role": "assistant", "content": []map[string]any{{"type": "tool_use", "id": "t1", "name": "Bash", "input": map[string]any{"command": "go test ./..."}}}}
+		r1 := base("user", "u2", "a1", -2*time.Minute)
+		r1["message"] = map[string]any{"role": "user", "content": []map[string]any{{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}}}
+		r1["toolUseResult"] = map[string]any{"stdout": "ok"}
+		a2 := base("assistant", "a2", "u2", -time.Minute)
+		a2["message"] = map[string]any{"role": "assistant", "content": []map[string]any{{"type": "text", "text": "Done: " + strings.ToLower(task[:1]) + task[1:] + ". The tests pass, and nothing is pushed yet."}}}
+		lines := []string{rec(u1), rec(a1), rec(r1), rec(a2)}
+		if i%5 != 3 {
+			lines = append(lines, rec(map[string]any{"type": "custom-title", "customTitle": task, "sessionId": id}))
+		}
+		lines = append(lines, rec(map[string]any{"type": "last-prompt", "lastPrompt": u1["message"].(map[string]any)["content"], "sessionId": id, "leafUuid": "a2"}))
+		dir := filepath.Join(h, ".claude", "projects", claude.Slug(cwd))
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+		p := filepath.Join(dir, id+".jsonl")
+		if err := os.WriteFile(p, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+			return err
+		}
+		if err := os.Chtimes(p, at, at); err != nil {
+			return err
 		}
 	}
 	return nil

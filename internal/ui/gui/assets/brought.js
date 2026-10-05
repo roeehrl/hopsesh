@@ -5,7 +5,7 @@ import { api, h, fill, view, state, screen, go, current, toast, fail, keys, sys,
 import { undo } from "./activity.js";
 import { planFor } from "./plan.js";
 import { tabs, onTabs, showTerminal, openBrought } from "./term.js";
-import { actionsFor } from "./sessions.js";
+import { actionsFor } from "./actions.js";
 
 // bringTab is the tab a bring-back's command runs in, if it runs in one.
 const bringTab = (b) => [...tabs.values()].find((t) => t.kind === "bring" && t.journal === b.journal);

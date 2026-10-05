@@ -6,7 +6,7 @@ import "time"
 type Summary struct {
 	Key         SessionKey `json:"key"`
 	Title       string     `json:"title"`
-	TitleSource string     `json:"titleSource,omitempty"` // custom | generated | prompt
+	TitleSource string     `json:"titleSource,omitempty"` // custom | generated | prompt | reply
 	// CWD is the session's project folder, as the agent resumes it.
 	CWD          string    `json:"cwd"`
 	LastPrompt   string    `json:"lastPrompt,omitempty"`
@@ -201,6 +201,21 @@ type LiveInfo struct {
 	// App is true when the agent's own desktop app runs it (Claude Code in the Claude
 	// app), not a terminal: there is no terminal tab to show.
 	App bool `json:"app,omitempty"`
+	// Procs are every process that has the session open (Claude Code can run one session
+	// in several), PID among them; empty when the module can't say.
+	Procs []LiveProc `json:"procs,omitempty"`
+	// Name is the session's name as the running agent reports it (the Claude app names
+	// sessions), "" when none.
+	Name string `json:"name,omitempty"`
+}
+
+// LiveProc is one process that has a session open.
+type LiveProc struct {
+	PID int `json:"pid"`
+	// App is true when the agent's desktop app runs it.
+	App bool `json:"app,omitempty"`
+	// Waiting is true when it waits for the person (a question, a permission).
+	Waiting bool `json:"waiting,omitempty"`
 }
 
 // Account is an opaque, hashed account identity (never a credential).

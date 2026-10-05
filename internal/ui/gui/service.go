@@ -154,8 +154,15 @@ type Info struct {
 	// SetupDismissed: the user closed the "Finish setting up" line.
 	SetupDismissed bool `json:"setupDismissed"`
 	// Layout is the window's pane layout, restored before the first paint.
-	Layout   LayoutDTO `json:"layout"`
-	Receive  bool      `json:"receive"` // other machines' hopsesh may send sessions here
+	Layout LayoutDTO `json:"layout"`
+	// List is how the session list shows sessions.
+	List ListDTO `json:"list"`
+	// Places is where each agent's sessions resume, as last chosen (by agent id: here,
+	// terminal or app); an agent not listed follows Where.
+	Places map[string]string `json:"places"`
+	// Previews: the inspector shows the end of a session's conversation.
+	Previews bool `json:"previews"`
+	Receive  bool `json:"receive"` // other machines' hopsesh may send sessions here
 	Defaults struct {
 		MarkMoved  bool `json:"markMoved"`
 		SyncCode   bool `json:"syncCode"`
@@ -175,7 +182,13 @@ func (a *App) Info() Info {
 	info := Info{Version: version.Version, OS: runtime.GOOS, Host: app.LocalName(), ReposDir: cfg.ReposDir,
 		AuditDir: filepath.Join(config.StateDir(), "log"), UpdateCheck: cfg.UpdateCheck,
 		SkillState: skill.State, SkillPrompt: cfg.SkillPrompt, Receive: cfg.Peer.Receive,
-		SetupDismissed: cfg.SetupPrompt == "declined", Layout: layoutOf(cfg.Window)}
+		SetupDismissed: cfg.SetupPrompt == "declined", Layout: layoutOf(cfg.Window, cfg.Inspector),
+		List: listOf(cfg.List), Places: map[string]string{}, Previews: cfg.PreviewsOn()}
+	for k, ag := range cfg.Agents {
+		if ag.Place != "" {
+			info.Places[k] = ag.Place
+		}
+	}
 	if a.cfgErr != nil {
 		info.ConfigError = a.cfgErr.Error()
 		info.ConfigNewer = errors.Is(a.cfgErr, config.ErrNewConfig)
@@ -193,7 +206,13 @@ func (a *App) Info() Info {
 	if t := a.core.MyTerminal(ctx); t != nil && runtime.GOOS == "darwin" {
 		info.Terminal = t.Name()
 	}
+	if f := listMenu; f != nil {
+		f(info.List.GroupBy, info.List.SortBy, info.List.Density == "compact")
+	}
 	info.Where = cfg.AppResume()
+	if info.Where == config.ResumeAsk {
+		info.Where = config.AppResumeDefault // the app's Resume menu is the asking
+	}
 	return info
 }
 

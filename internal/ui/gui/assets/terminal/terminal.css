@@ -49,7 +49,7 @@ button, input { font: inherit; color: inherit; }
    as the app's and leaves room for the window's buttons. */
 .strip { flex: 0 0 auto; display: flex; align-items: flex-end; gap: 4px; padding: 0 8px; min-height: 40px; background: var(--bar); border-bottom: 1px solid var(--line); --wails-draggable: drag; }
 .strip button, .strip [role="tab"] { --wails-draggable: no-drag; }
-:root[data-os="darwin"] .strip { min-height: 48px; padding-left: 86px; }
+:root[data-os="darwin"] .strip { min-height: 52px; padding-left: 96px; } /* the zoom button ends at x 79; 17px clear, as in the app's window */
 /* Many tabs: each shrinks to a minimum (its name ellipsized), then the tabs scroll
    sideways (the wheel scrolls them too); "+" and "Back to sessions" keep their places. */
 #tabs { flex: 0 1 auto; display: flex; align-items: flex-end; gap: 2px; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }

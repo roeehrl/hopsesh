@@ -29,12 +29,13 @@ async function terminalPage(): Promise<Page> {
   throw new Error("the terminal window never opened");
 }
 
-test("Open a shell here opens the hopsesh Terminal window with a tab that runs PowerShell", async () => {
+test("Open a shell in its folder opens the hopsesh Terminal window with a tab that runs PowerShell", async () => {
   const row = page.locator(".row").filter({ has: page.locator(".t").getByText("Find the codeword", { exact: true }) });
   await row.click();
   const details = page.getByRole("complementary", { name: "Session details" });
-  await expect(details.getByRole("button", { name: /^Resume here/ })).toBeVisible();
-  await details.getByRole("button", { name: "Open a shell here" }).click();
+  await expect(details.locator("#act-primary")).toHaveText(/^Resume in /);
+  await details.getByRole("button", { name: "More actions" }).click();
+  await page.getByRole("menuitem", { name: "Open a shell in its folder" }).click();
 
   const t = await terminalPage();
   const tab = t.getByRole("tablist", { name: "Terminal tabs" }).getByRole("tab", { name: /^shell · / });

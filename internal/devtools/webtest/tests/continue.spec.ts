@@ -1,11 +1,11 @@
 import { test, expect } from "@playwright/test";
-import { fresh, row, menu } from "./helpers";
+import { fresh, row, menu, action } from "./helpers";
 
 test.beforeEach(async ({ page }) => fresh(page));
 
 test("continue a Claude Code session in Codex, see where it has been, and undo", async ({ page }) => {
   await row(page, "Find the codeword").click();
-  await page.getByRole("complementary", { name: "Session details" }).getByRole("button", { name: "Continue in Codex" }).click();
+  await action(page, "move", /^Continue with Codex…/);
 
   const sheet = page.locator("#sheet");
   await expect(sheet.getByRole("heading", { name: "Continue “Find the codeword” in Codex" })).toBeVisible({ timeout: 30_000 });

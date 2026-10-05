@@ -155,6 +155,44 @@ func TestLiveStopMarkAccount(t *testing.T) {
 	}
 }
 
+// One session open in several processes: every one is in Procs, the waiting one is the
+// main process, the newest name wins, and Stop quits them all.
+func TestLiveSeveralProcesses(t *testing.T) {
+	fh, h, in, byID := setup(t)
+	m := New()
+	ctx := context.Background()
+	t0 := time.Unix(1_790_000_000, 0)
+	fh.Put("/home/u/.claude/sessions/5001.json", []byte(`{"pid":5001,"sessionId":"`+s2+`","entrypoint":"cli","status":"busy","name":"old name"}`), t0)
+	fh.Put("/home/u/.claude/sessions/5002.json", []byte(`{"pid":5002,"sessionId":"`+s2+`","entrypoint":"claude-desktop","status":"idle","waitingFor":"permission","name":"parser fix"}`), t0.Add(-time.Minute))
+	fh.Put("/home/u/.claude/sessions/5003.json", []byte(`{"pid":5003,"sessionId":"`+s2+`","entrypoint":"cli","status":"idle","name":"newest name"}`), t0.Add(time.Minute))
+	fh.Put("/home/u/.claude/sessions/5004.json", []byte(`{"pid":5004,"sessionId":"`+s2+`","entrypoint":"cli","status":"idle"}`), t0.Add(time.Hour))
+	fh.PIDs[5001], fh.PIDs[5002], fh.PIDs[5003] = true, true, true // 5004 has exited
+	live, err := m.Live(ctx, h, in, []agent.SessionID{s1, s2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := live[s1].Procs; len(got) != 1 || got[0] != (agent.LiveProc{PID: 4242}) {
+		t.Fatalf("a single terminal process: %+v", got)
+	}
+	l := live[s2]
+	if l.State != agent.Live || l.PID != 5002 || !l.App || l.Status != "waiting for permission" || l.Name != "newest name" {
+		t.Fatalf("the waiting process is the main one: %+v", l)
+	}
+	want := []agent.LiveProc{{PID: 5002, App: true, Waiting: true}, {PID: 5003}, {PID: 5001}}
+	if !slices.Equal(l.Procs, want) {
+		t.Fatalf("procs %+v, want %+v", l.Procs, want)
+	}
+	// Without a waiting one, the latest to write its entry is the main one.
+	delete(fh.PIDs, 5002)
+	if live, _ = m.Live(ctx, h, in, []agent.SessionID{s2}); live[s2].PID != 5003 || live[s2].App || len(live[s2].Procs) != 2 {
+		t.Fatalf("the newest entry is the main one: %+v", live[s2])
+	}
+	fh.PIDs[5002] = true
+	if err := m.Stop(ctx, h, in, byID[s2], time.Second); err != nil || fh.PIDs[5001] || fh.PIDs[5002] || fh.PIDs[5003] || !fh.PIDs[4242] {
+		t.Fatalf("stop quits every process of the session and no other: %v %v", err, fh.PIDs)
+	}
+}
+
 func TestRules(t *testing.T) {
 	r := agent.Rules{Bin: "hopsesh", Allow: [][]string{{"ls"}}, Ask: [][]string{{"pull"}}}
 	b, err := mergeRules([]byte(`{"model":"opus","permissions":{"allow":["Bash(git status)"]}}`), r)

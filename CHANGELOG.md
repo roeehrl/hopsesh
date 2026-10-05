@@ -20,6 +20,19 @@ All notable changes to this project are documented here. The format follows
   markers before it resumes a session.
 
 ### Added
+- App: the end of the selected session's conversation (the last two exchanges, a line for
+  each turn's tool calls, Load earlier, Open transcript), as plain text read on its machine
+  and never during a scan; Settings → General → Show conversation previews turns it off.
+- App: where a session is open: its hopsesh tabs, iTerm2, Terminal, Windows Terminal, an
+  editor, tmux, ssh or the Claude app, from the agents' own registries and the process table
+  (no Apple Events: those run only when you click Show), every few seconds while the window
+  is in front. Two processes on one session say "Open twice".
+- App: ⋯ → Rename… gives a Claude Code or Codex session a title in the agent's own data (as
+  `/rename` does); Activity undoes it. ⋯ also reveals the session's file and copies its
+  resume command or id.
+- Module SDK: `Previewer` (`preview`) and `Renamer` (`rename`), `PreviewText` and
+  `BuildPreview`; `LiveInfo.Procs` lists every process that has a session open, and
+  `LiveInfo.Name` the name the running agent gives it.
 - Your terminal app: sessions, teleports and hand-off steps the app opens go to a new tab in
   iTerm2's front window when iTerm2 is installed (else a Terminal window; Windows Terminal on
   Windows), through a terminal-adapter layer whose only required verb is Open. Every launch
@@ -306,6 +319,29 @@ All notable changes to this project are documented here. The format follows
   aside as outdated).
 
 ### Changed
+- App: the Sessions screen is redesigned. The sidebar lists places (Needs you, All sessions,
+  This Mac and your other machines, the clouds that are on); agents and "In the cloud"
+  became filters. The list groups by repository, location, agent, status or last active (or
+  not at all), sorts within the groups, has comfortable and compact rows (compact by itself
+  for 150 sessions or more, and whenever the list is narrower than 600px), and its groups
+  collapse (⌥-click for all), each choice kept. Live only and All agents gave way to the
+  Filter menu (⇧⌘F: status, location, agent, repository, last active, has; is / is not),
+  shown as chips, a text filter (⌘F) and the Display popover (⌘J, and the View menu). It
+  is all kept in `[list]` and `[list.filter]`, except the text.
+- App: one action vocabulary: Resume in ‹place›, Show in ‹place›, Bring to this Mac…, Send
+  to ‹machine›…, Continue with ‹agent›…, Hand off to ‹cloud›…. The inspector's actions are
+  one row: the primary as a split button whose menu lists the other places (the one you
+  pick becomes that agent's default, `[agents.<id>] place`), Move ▾ (unavailable items stay,
+  with their reason) and ⋯. "Ask each time" is gone from Settings → Terminal; Where sessions
+  open is where they first resume.
+- App: the inspector shows where it runs in its status line, a facts line, where the
+  session is open (each place with Show), and collapsible Repository, Copies & history and
+  Details sections (kept app-wide in `[inspector]`). It is 300 to 960px wide; by default 30%
+  of the window beside the sidebar.
+- App: titles never need a model: the title given, the name the running Claude app gives,
+  the agent's own, the first prompt or reply, else "Untitled · folder (branch)".
+- App on macOS: the title bar is 52px, as tall as AppKit's own, and the sidebar button sits
+  where AppKit puts its own (17px clear of the window's buttons), in the Terminal window too.
 - App: the sidebar and the inspector can be resized and hidden (dividers, the title bar's
   buttons, the new View menu: ⌃⌘S and ⌥⌘I, Ctrl+B and Ctrl+I on Windows); the layout is
   kept in `[window]`. Below 1000px the sidebar hides for now.

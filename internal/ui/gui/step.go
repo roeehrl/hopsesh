@@ -131,7 +131,7 @@ func (a *App) runStep(ctx context.Context, s move.TermStep) (move.StepResult, er
 		exited, _ = core.WatchLaunch(ctx, opened.Handle)
 		termName = opened.Terminal
 	}
-	if route("", core.Cfg.AppResume(), true) == WhereHere && a.Terms != nil {
+	if route("", core.Cfg.AppResume()) == WhereHere && a.Terms != nil {
 		if tab, err = a.stepTab(ctx, s, ps, done); err != nil {
 			a.fellBack(err)
 			external()

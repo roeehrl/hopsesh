@@ -430,7 +430,7 @@ function happened(d, p) {
 
 screen("done", (d, p, o) => {
   const where = d.machine ? `on ${d.machine}` : `on ${sys.here}`;
-  const open = () => (d.inApp ? api("OpenResult", "").catch(fail) : openResult(opensIn() === "ask" ? "" : opensIn()));
+  const open = () => (d.inApp ? api("OpenResult", "").catch(fail) : openResult(opensIn()));
   const other = () => openResult(opensIn() === "terminal" ? "here" : "terminal");
   const copy = async () => { await api("CopyText", d.command); toast("Copied"); };
   const doUndo = async () => { if (await undo(d.journal, d.title)) go("sessions", true); };
@@ -440,8 +440,8 @@ screen("done", (d, p, o) => {
         h("div", { class: "muted" }, `${cap(where)}, in `, h("span", { class: "mono" }, p.targetCwd)))),
     h("div", { class: "card" }, h("div", { class: "dlg-body" },
       d.machine ? h("b", {}, `Start it on ${d.machine}`) : h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" },
-        h("button", { class: "btn primary big", id: "open", onclick: open }, d.inApp ? `Open in the ${d.agent} app` : opensIn() === "terminal" ? `Open in ${sys.terminal}` : opensIn() === "ask" ? "Resume…" : "Resume here", h("span", { class: "kbd" }, "↩")),
-        d.inApp ? null : h("button", { class: "btn big", onclick: other }, opensIn() === "terminal" ? "Resume here" : `Open in ${sys.terminal}`),
+        h("button", { class: "btn primary big", id: "open", onclick: open }, d.inApp ? `Open in the ${d.agent} app` : opensIn() === "terminal" ? `Resume in ${sys.terminal}` : "Resume in hopsesh Terminal", h("span", { class: "kbd" }, "↩")),
+        d.inApp ? null : h("button", { class: "btn big", onclick: other }, opensIn() === "terminal" ? "Resume in hopsesh Terminal" : `Resume in ${sys.terminal}`),
         h("button", { class: "btn big", onclick: copy }, "Copy the command")),
       h("div", { style: "display:flex;gap:8px;align-items:flex-start" }, h("div", { class: "term", style: "flex:1" }, d.command), d.machine ? h("button", { class: "btn", onclick: copy }, "Copy") : null),
       h("span", { class: "muted", style: "font-size:12px" }, d.kind === "continue" ? `${d.agent} reads hopsesh's briefing at the end of the history, then ${o.go ? "starts working" : "waits for you"}.`

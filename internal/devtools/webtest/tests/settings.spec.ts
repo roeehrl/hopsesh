@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { fresh, menu } from "./helpers";
+import { fresh, menu, row } from "./helpers";
 
 test.beforeEach(async ({ page }) => fresh(page));
 
@@ -20,6 +20,6 @@ test("turning an agent off hides its sessions", async ({ page }) => {
   await page.getByRole("switch", { name: "Codex on" }).click();
   await expect(page.getByRole("switch", { name: "Codex on" })).toHaveAttribute("aria-checked", "false");
   await menu(page, "refresh");
-  const sidebar = page.getByRole("navigation", { name: "Scopes" });
-  await expect(sidebar.getByRole("button", { name: /^CO?\s*Codex/ })).toHaveCount(0, { timeout: 30_000 });
+  await expect(row(page, "Find the codeword")).toBeVisible({ timeout: 30_000 });
+  await expect(row(page, "What is the codeword in notes.txt?")).toHaveCount(0); // Codex's
 });

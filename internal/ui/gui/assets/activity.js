@@ -39,6 +39,7 @@ const KINDS = {
   handoff: { label: "Handed off", ico: ICONS.send, cls: "cloud" },
   hop: { label: "Handed on", ico: ICONS.cloud, cls: "cloud" },
   cleanup: { label: "Cleaned up", ico: ICONS.mark, cls: "" },
+  rename: { label: "Renamed", ico: ICONS.mark, cls: "mark" },
 };
 
 // hopText words a hop from one cloud to another: both legs, and what undo does.

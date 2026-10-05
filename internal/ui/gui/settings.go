@@ -28,6 +28,7 @@ type SettingsDTO struct {
 	PushSource bool       `json:"pushSource"`
 	UpdateChk  string     `json:"updateCheck"`
 	AppIcons   bool       `json:"appIcons"` // installed desktop apps' icons picture the agents
+	Previews   bool       `json:"previews"` // the inspector shows the end of a conversation
 	Agents     []AgentDTO `json:"agents"`
 
 	CLI         integrate.CLIStatus `json:"cli"`
@@ -66,7 +67,7 @@ func (a *App) Settings() SettingsDTO {
 	defer a.mu.Unlock()
 	cfg := a.core.Cfg
 	return SettingsDTO{Version: version.Version, ReposDir: cfg.ReposDir, Layout: nonEmpty(cfg.Layout, "flat"),
-		MarkMoved: cfg.MarkMovedOn(), SyncCode: cfg.SyncCodeOn(), PushSource: cfg.PushSource, UpdateChk: cfg.UpdateCheck, AppIcons: cfg.AppIconsOn(),
+		MarkMoved: cfg.MarkMovedOn(), SyncCode: cfg.SyncCodeOn(), PushSource: cfg.PushSource, UpdateChk: cfg.UpdateCheck, AppIcons: cfg.AppIconsOn(), Previews: cfg.PreviewsOn(),
 		Agents: a.agentsLocked(), CLI: integrate.CheckCLI(), Skill: rep, SkillBin: bin, SkillPrompt: cfg.SkillPrompt,
 		LocalNetworkGated: lnp.Gated(), ConfigDir: config.Dir(), StateDir: config.StateDir()}
 }
@@ -79,6 +80,7 @@ type SettingsInput struct {
 	PushSource bool   `json:"pushSource"`
 	UpdateChk  string `json:"updateCheck"`
 	AppIcons   bool   `json:"appIcons"`
+	Previews   bool   `json:"previews"`
 }
 
 // SaveSettings stores the user's choices.
@@ -98,6 +100,11 @@ func (a *App) SaveSettings(in SettingsInput) error {
 	a.core.Cfg.PushSource = in.PushSource
 	icons := in.AppIcons
 	a.core.Cfg.AppIcons = &icons
+	a.core.Cfg.Previews = nil
+	if !in.Previews {
+		off := false
+		a.core.Cfg.Previews = &off
+	}
 	return a.save()
 }
 
@@ -113,7 +120,7 @@ func (a *App) SetAgent(id string, enabled, remoteControl, imp bool) error {
 	if a.core.Cfg.Agents == nil {
 		a.core.Cfg.Agents = map[string]config.Agent{}
 	}
-	ac := config.Agent{Disabled: !enabled, RemoteControl: remoteControl, Import: imp}
+	ac := config.Agent{Disabled: !enabled, RemoteControl: remoteControl, Import: imp, Place: a.core.Cfg.Agents[id].Place}
 	if ac == (config.Agent{}) {
 		delete(a.core.Cfg.Agents, id)
 	} else {

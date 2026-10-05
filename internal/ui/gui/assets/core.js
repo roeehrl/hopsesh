@@ -148,8 +148,8 @@ export const state = {
   info: null,
   scan: null, scanning: false,
   stale: false, // something changed the machines since the last scan
-  scope: { kind: "all" }, // all | needs | here | incloud | machine (value) | cloud (value) | agent (value)
-  filter: { agent: "", live: false },
+  scope: { kind: "all" }, // all | needs | here | machine (value) | cloud (value)
+  presence: {}, // where this machine's sessions are open now, by machine NUL key (Presence)
   sel: null, // { machine, key }
   update: null,
   activity: null, // the last Activity list, for the sidebar's undo count

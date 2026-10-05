@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { fresh, row, menu, turnOnCloud } from "./helpers";
+import { fresh, row, menu, turnOnCloud, details as pane, action } from "./helpers";
 
 test.beforeEach(async ({ page }) => fresh(page));
 
@@ -13,7 +13,7 @@ async function cloudSession(page: Page, fail = "", handed = false): Promise<stri
 
 // turnOnAndPaste allows Claude Code cloud from the sidebar and pastes the session's link.
 async function turnOnAndPaste(page: Page, id: string) {
-  const sidebar = page.getByRole("navigation", { name: "Scopes" });
+  const sidebar = page.getByRole("navigation", { name: "Places" });
   await turnOnCloud(page, "Claude Code cloud");
   await expect(sidebar.getByRole("button", { name: /Claude Code cloud/ })).toContainText("ready", { timeout: 30_000 });
   await page.getByRole("button", { name: "Paste a link…" }).click();
@@ -24,7 +24,7 @@ async function turnOnAndPaste(page: Page, id: string) {
 
 test("the Clouds group: turn Claude Code cloud on, paste a link, and see the session in its scope", async ({ page }) => {
   const id = await cloudSession(page);
-  const sidebar = page.getByRole("navigation", { name: "Scopes" });
+  const sidebar = page.getByRole("navigation", { name: "Places" });
   await expect(sidebar.getByText("Clouds", { exact: true })).toBeVisible();
   // A cloud that is off is not listed: one row turns one on (in Machines).
   await expect(sidebar.getByRole("button", { name: /Claude Code cloud/ })).toHaveCount(0);
@@ -38,14 +38,19 @@ test("the Clouds group: turn Claude Code cloud on, paste a link, and see the ses
   await expect(r.locator(".chip.cloud")).toContainText("Claude Code cloud");
   await expect(r.locator(".chip.st-unknown")).toHaveText("Status on claude.ai");
   await expect(sidebar.getByRole("button", { name: /Claude Code cloud/ })).toContainText("1");
-  await expect(sidebar.getByRole("button", { name: /In the cloud/ })).toContainText("1");
+  await expect(sidebar.getByRole("button", { name: /In the cloud/ })).toHaveCount(0); // a Location filter now
 
-  const details = page.getByRole("complementary", { name: "Cloud session details" });
+  const details = pane(page, true);
   await expect(details.getByRole("heading", { name: `Session ${id}` })).toBeVisible();
-  await expect(details.getByRole("button", { name: /Bring here \(Claude Code\)/ })).toBeEnabled();
-  await expect(details.getByRole("button", { name: /Bring here and continue in/ })).toContainText("Codex");
-  await expect(details.getByRole("button", { name: "Archive" })).toBeDisabled();
-  await expect(details).toContainText("Claude Code archives only on claude.ai");
+  await expect(details.getByRole("button", { name: /^Bring to this/ })).toBeEnabled();
+  await details.getByRole("button", { name: "Other ways to bring it" }).click();
+  await expect(page.getByRole("menuitem", { name: /^Bring to this .* into Codex…/ })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await details.getByRole("button", { name: "More actions" }).click();
+  const archive = page.getByRole("menuitem", { name: /^Archive/ });
+  await expect(archive).toHaveAttribute("aria-disabled", "true");
+  await expect(archive).toContainText("Claude Code archives only on claude.ai");
+  await page.keyboard.press("Escape");
 
   await page.getByRole("button", { name: "Search sessions or run a command" }).click();
   await page.getByRole("combobox", { name: "Search sessions or run a command" }).fill("cloud");
@@ -56,7 +61,7 @@ test("the Clouds group: turn Claude Code cloud on, paste a link, and see the ses
 test("the bring-back sheet says what comes back and where, and switches to Codex", async ({ page }) => {
   const id = await cloudSession(page);
   await turnOnAndPaste(page, id);
-  await page.getByRole("complementary", { name: "Cloud session details" }).getByRole("button", { name: /Bring here \(Claude Code\)/ }).click();
+  await pane(page, true).getByRole("button", { name: /^Bring to this/ }).click();
 
   const sheet = page.locator("#sheet");
   await expect(sheet.getByRole("heading", { name: `Bring “Session ${id}” here from Claude Code cloud` })).toBeVisible({ timeout: 30_000 });
@@ -78,7 +83,7 @@ test("the bring-back sheet says what comes back and where, and switches to Codex
 test("a partial copy comes back amber, with the known problem and what to do", async ({ page }) => {
   const id = await cloudSession(page, "partial", true);
   await turnOnAndPaste(page, id);
-  await page.getByRole("complementary", { name: "Cloud session details" }).getByRole("button", { name: /Bring here \(Claude Code\)/ }).click();
+  await pane(page, true).getByRole("button", { name: /^Bring to this/ }).click();
   const sheet = page.locator("#sheet");
   await sheet.getByRole("button", { name: /Bring here in/ }).click();
 
@@ -101,7 +106,7 @@ test("a partial copy comes back amber, with the known problem and what to do", a
 test("a cloud-only module: Copilot's tasks are listed, their code comes home, and their log is written into Claude Code", async ({ page }) => {
   const r = await page.request.post("/cloud?cloud=copilot-cloud&title=" + encodeURIComponent("Fix the search index"));
   expect(r.ok()).toBeTruthy();
-  const sidebar = page.getByRole("navigation", { name: "Scopes" });
+  const sidebar = page.getByRole("navigation", { name: "Places" });
   for (const title of ["Copilot cloud agent", "Jules", "Devin", "Amp"]) {
     await expect(sidebar.getByRole("button", { name: new RegExp(title) })).toHaveCount(0);
   }
@@ -115,13 +120,12 @@ test("a cloud-only module: Copilot's tasks are listed, their code comes home, an
   await expect(task).toContainText("copilot/fix-the-search-index");
   await expect(task.locator(".chip.st-done")).toHaveText("Done");
   await task.click();
-  const details = page.getByRole("complementary", { name: "Cloud session details" });
-  await expect(details.getByRole("button", { name: "Bring here (Claude Code)" })).toBeEnabled();
-  await expect(details.getByRole("button", { name: "Get the code only" })).toBeEnabled();
+  const details = pane(page, true);
+  await expect(details.getByRole("button", { name: /^Bring to this/ })).toBeEnabled();
   await expect(details).toContainText("hopsesh writes its messages as a new session of the agent you pick");
 
   // The code alone, as before.
-  await details.getByRole("button", { name: "Get the code only" }).click();
+  await action(page, "places", "Get the code only…", true);
   const sheet = page.locator("#sheet");
   await expect(sheet.getByRole("heading", { name: "Bring the code of “Fix the search index” here from Copilot cloud agent" })).toBeVisible({ timeout: 30_000 });
   await expect(sheet).toContainText("hopsesh/from/copilot-cloud/fix-the-search-index");
@@ -131,7 +135,7 @@ test("a cloud-only module: Copilot's tasks are listed, their code comes home, an
   // The session log, written into Claude Code beside the code.
   await menu(page, "sessions");
   await row(page, "Fix the search index").click();
-  await details.getByRole("button", { name: "Bring here (Claude Code)" }).click();
+  await details.getByRole("button", { name: /^Bring to this/ }).click();
   await expect(sheet.getByRole("heading", { name: "Bring “Fix the search index” here from Copilot cloud agent" })).toBeVisible({ timeout: 30_000 });
   await expect(sheet.getByRole("radiogroup", { name: "Write it into" })).toBeVisible();
   await expect(sheet).toContainText("The messages come back as text; tool calls stay in the cloud.");

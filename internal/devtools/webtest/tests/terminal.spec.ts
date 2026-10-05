@@ -1,5 +1,5 @@
 import { test, expect, type Page, type BrowserContext } from "@playwright/test";
-import { row, turnOnCloud } from "./helpers";
+import { action, row, turnOnCloud } from "./helpers";
 
 // The hopsesh Terminal window: the real page (under its content security policy) with
 // xterm.js, its streams to the real service, and tabs running termfake
@@ -98,7 +98,7 @@ test("a bell makes the tab wait for you, in the window and in the app's Needs yo
   await t.keyboard.press("B");
   await expect(tab(t, /Invoice PDF/)).toContainText("waiting for you");
   await expect(tab(t, /Invoice PDF/).locator(".wdot")).toBeVisible();
-  const sidebar = page.getByRole("navigation", { name: "Scopes" });
+  const sidebar = page.getByRole("navigation", { name: "Places" });
   await expect(sidebar.getByRole("button", { name: /Needs you/ })).toContainText("1");
   await expect(sidebar.getByRole("button", { name: /Terminal/ })).toContainText("1 waiting");
   await expect(page.getByRole("status").filter({ hasText: "“Invoice PDF · termfake” is waiting for you" })).toBeVisible();
@@ -177,7 +177,7 @@ test("a sign-in tab records nothing and says so; the cloud card checks the login
 test("a shell tab: the login shell in the session's folder, not recorded", async ({ page, context }) => {
   const t = await terminal(context);
   await row(page, "Find the codeword").click();
-  await page.getByRole("complementary", { name: "Session details" }).getByRole("button", { name: "Open a shell here" }).click();
+  await action(page, "more", "Open a shell in its folder");
   const shell = tab(t, /^shell · demo/);
   await expect(shell).toBeVisible();
   await expect(t.locator("#lock")).toHaveText("Not recorded");
@@ -189,13 +189,16 @@ test("a shell tab: the login shell in the session's folder, not recorded", async
   await expect.poll(() => screen(t)).toMatch(/git[\\/]demo/);
 });
 
-test("Resume here opens the session in a tab; Open in my terminal moves it out after asking", async ({ page, context }) => {
+test("Resume in hopsesh Terminal opens the session in a tab; Open in my terminal moves it out after asking", async ({ page, context }) => {
   const t = await terminal(context);
   await row(page, "Find the codeword").click();
   const details = page.getByRole("complementary", { name: "Session details" });
-  await expect(details.getByRole("button", { name: /^Resume here/ })).toBeVisible();
-  await expect(details).toContainText("Resume here runs it in a tab of the hopsesh Terminal window; it ends when hopsesh quits.");
-  await details.getByRole("button", { name: /^Resume here/ }).click();
+  await expect(details.locator("#act-primary")).toHaveText("Resume in hopsesh Terminal");
+  // The other places say what they mean.
+  await details.getByRole("button", { name: "Resume elsewhere" }).click();
+  await expect(page.getByRole("menuitem", { name: /^Resume in .*Keeps running after hopsesh quits/ })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await details.locator("#act-primary").click();
   const resumed = tab(t, /Find the codeword · claude/);
   await expect(resumed).toBeVisible();
   await expect(t.locator("#runs")).toContainText(/Runs claude --resume \S+ in/);
@@ -210,14 +213,12 @@ test("Resume here opens the session in a tab; Open in my terminal moves it out a
 
 test("the hand-off step runs in a tab: the trust question's banner, answered by the user, then the link", async ({ page, context }) => {
   const t = await terminal(context);
-  const sidebar = page.getByRole("navigation", { name: "Scopes" });
+  const sidebar = page.getByRole("navigation", { name: "Places" });
   await turnOnCloud(page, "Claude Code cloud");
   await expect(sidebar.getByRole("button", { name: /Claude Code cloud/ })).toContainText("ready", { timeout: 30_000 });
   await sidebar.getByRole("button", { name: /All sessions/ }).click();
   await row(page, "Find the codeword").click();
-  const details = page.getByRole("complementary", { name: "Session details" });
-  await details.getByRole("button", { name: "Hand off ▸" }).click();
-  await details.getByRole("menu", { name: "Hand off to" }).getByRole("menuitem", { name: /Claude Code cloud/ }).click();
+  await action(page, "move", /Hand off to Claude Code cloud/);
   const sheet = page.locator("#sheet");
   await expect(sheet.getByRole("heading", { name: "Hand off “Find the codeword” to Claude Code cloud" })).toBeVisible({ timeout: 30_000 });
   await sheet.getByRole("button", { name: /^Hand off/ }).click();
@@ -244,14 +245,14 @@ test("bringing a session back runs Claude Code's teleport in a tab with what to 
   await here(page, ""); // the stand-in's user has not sent anything yet
   const t = await terminal(context);
   const id = (await (await page.request.post("/cloud")).json()).id;
-  const sidebar = page.getByRole("navigation", { name: "Scopes" });
+  const sidebar = page.getByRole("navigation", { name: "Places" });
   await turnOnCloud(page, "Claude Code cloud");
   await expect(sidebar.getByRole("button", { name: /Claude Code cloud/ })).toContainText("ready", { timeout: 30_000 });
   await page.getByRole("button", { name: "Paste a link…" }).click();
   await page.getByLabel("The session's link or id").fill(`https://claude.ai/code/${id}`);
   await page.locator("#dlg").getByRole("button", { name: "Add" }).click();
   await expect(row(page, `Session ${id}`)).toBeVisible({ timeout: 30_000 });
-  await page.getByRole("complementary", { name: "Cloud session details" }).getByRole("button", { name: /Bring here \(Claude Code\)/ }).click();
+  await page.getByRole("complementary", { name: "Cloud session details" }).getByRole("button", { name: /^Bring to this/ }).click();
   const sheet = page.locator("#sheet");
   await expect(sheet.getByRole("button", { name: /^Bring here in / })).toBeVisible({ timeout: 30_000 });
   await expect(sheet).toContainText("Runs in a tab of the hopsesh Terminal window");
@@ -270,7 +271,7 @@ test("bringing a session back runs Claude Code's teleport in a tab with what to 
   const done = page.locator(".outcome.ok");
   await expect(done).toBeVisible({ timeout: 60_000 });
   await expect(done.getByRole("button", { name: "Show the tab" })).toBeVisible();
-  await expect(done.getByRole("button", { name: /^Resume|^Open in/ })).toHaveCount(0);
+  await expect(done.getByRole("button", { name: /^Resume|^Open in|^Show in/ })).toHaveCount(0);
   await expect(t.locator("#banner")).toContainText("Saved here as “", { timeout: 20_000 });
   await expect(bring).not.toContainText("waiting for you");
   await focusTerminal(t);
@@ -278,7 +279,7 @@ test("bringing a session back runs Claude Code's teleport in a tab with what to 
   await t.keyboard.press("Enter");
   await expect(bring).toContainText("exited 0");
   // Ended: the copy's own actions, as the list offers them.
-  await expect(done.getByRole("button", { name: /^Resume here/ })).toBeVisible({ timeout: 30_000 });
+  await expect(done.getByRole("button", { name: /^Resume in hopsesh Terminal/ })).toBeVisible({ timeout: 30_000 });
   await expect(done.getByRole("button", { name: "Show the tab" })).toHaveCount(0);
 });
 
@@ -287,8 +288,10 @@ test("Settings → Terminal: where things open, the look, and the fixed safety l
   await page.getByRole("tab", { name: "Terminal" }).click();
   const where = page.getByRole("radiogroup", { name: "Where sessions open" });
   await expect(where.getByRole("radio", { name: "In this window" })).toHaveAttribute("aria-checked", "true");
-  await where.getByRole("radio", { name: "Ask each time" }).click();
-  await expect(where.getByRole("radio", { name: "Ask each time" })).toHaveAttribute("aria-checked", "true");
+  await expect(where.getByRole("radio")).toHaveCount(2); // no "Ask each time": a session's Resume menu asks
+  const mine = where.getByRole("radio").nth(1);
+  await mine.click();
+  await expect(mine).toHaveAttribute("aria-checked", "true");
   await page.getByLabel("Scrollback").selectOption("10000");
   await page.getByLabel("Font size").selectOption("15");
   await expect(page.getByLabel("Scrollback")).toHaveValue("10000");
@@ -299,15 +302,16 @@ test("Settings → Terminal: where things open, the look, and the fixed safety l
   await expect(page.getByText("Keep tabs when the window closes")).toBeVisible();
   const r = await page.request.post("/call", { data: { m: "TerminalSettings", args: [] } });
   const s = (await r.json()).result;
-  expect([s.where, s.scrollback, s.fontSize]).toEqual(["ask", 10000, 15]);
+  expect([s.where, s.scrollback, s.fontSize]).toEqual(["terminal", 10000, 15]);
 
-  // With Ask, resuming asks first.
+  // Sessions now resume in the terminal app; a place picked from the Resume menu becomes the
+  // agent's own default.
   await page.getByRole("button", { name: "Back to sessions" }).click();
   await row(page, "Find the codeword").click();
-  await page.getByRole("complementary", { name: "Session details" }).getByRole("button", { name: /^Resume…/ }).click();
-  const dlg = page.locator("#dlg");
-  await expect(dlg.getByRole("button", { name: "In this window" })).toBeVisible();
-  await dlg.getByRole("button", { name: "Cancel" }).click();
+  const details = page.getByRole("complementary", { name: "Session details" });
+  await expect(details.locator("#act-primary")).not.toHaveText("Resume in hopsesh Terminal");
+  await action(page, "places", /^Resume in hopsesh Terminal/);
+  await expect.poll(async () => (await (await page.request.post("/call", { data: { m: "Info", args: [] } })).json()).result.places.claude).toBe("here");
 });
 
 test("quitting with a program running asks first, lists it, and ends it", async ({ page, context }) => {

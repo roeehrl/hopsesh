@@ -13,7 +13,7 @@ async function post(page: Page, query: string): Promise<string> {
 }
 
 async function turnOn(page: Page, title: string) {
-  const sidebar = page.getByRole("navigation", { name: "Scopes" });
+  const sidebar = page.getByRole("navigation", { name: "Places" });
   await turnOnCloud(page, title);
   await expect(sidebar.getByRole("button", { name: new RegExp(title) })).toContainText("ready", { timeout: 30_000 });
 }
@@ -31,12 +31,12 @@ test("a Claude Code cloud session goes on to Codex cloud through this machine, a
   await turnOn(page, "Claude Code cloud");
   await paste(page, id);
   await turnOn(page, "Codex cloud");
-  await page.getByRole("navigation", { name: "Scopes" }).getByRole("button", { name: /Claude Code cloud/ }).click();
+  await page.getByRole("navigation", { name: "Places" }).getByRole("button", { name: /Claude Code cloud/ }).click();
   await row(page, `Session ${id}`).click();
 
-  await cloudDetails(page).getByRole("button", { name: "Hand off ▸" }).click();
-  const list = cloudDetails(page).getByRole("menu", { name: "Hand off to" });
-  await expect(list.getByRole("menuitem", { name: /^Claude Code cloud/ })).toHaveCount(0); // not to its own cloud
+  await cloudDetails(page).getByRole("button", { name: "Move", exact: true }).click();
+  const list = page.getByRole("menu", { name: "Move" });
+  await expect(list.getByRole("menuitem", { name: /Hand off to Claude Code cloud/ })).toHaveCount(0); // not to its own cloud
   await expect(list.locator(".chip.cloud")).toHaveCount(0); // names only, no ids
   const codex = list.getByRole("menuitem", { name: /Codex cloud/ });
   await expect(codex).toBeEnabled();

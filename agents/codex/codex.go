@@ -15,6 +15,7 @@ import (
 	"io"
 	"io/fs"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -505,7 +506,9 @@ func (m *Module) Resume(in agent.Install, key agent.SessionKey, p agent.Placemen
 }
 
 // Live probes the lock Codex holds on thread-writer-locks/<id>.lock while a thread is
-// open (the file stays after Codex exits; only the lock means open).
+// open (the file stays after Codex exits; only the lock means open). The processes holding
+// an open thread's lock are its Procs, the first of them its PID; a machine that cannot
+// name lock holders leaves them out.
 func (m *Module) Live(ctx context.Context, h agent.Host, in agent.Install, ids []agent.SessionID) (map[agent.SessionID]agent.LiveInfo, error) {
 	paths := make([]string, len(ids))
 	for i, sid := range ids {
@@ -515,6 +518,13 @@ func (m *Module) Live(ctx context.Context, h agent.Host, in agent.Install, ids [
 	if err != nil {
 		return nil, err
 	}
+	var held []string
+	for _, p := range paths {
+		if states[p] == agent.LockHeld {
+			held = append(held, p)
+		}
+	}
+	holders := lockHolders(ctx, h, held)
 	var files map[agent.SessionID]string
 	out := make(map[agent.SessionID]agent.LiveInfo, len(ids))
 	for i, sid := range ids {
@@ -527,7 +537,14 @@ func (m *Module) Live(ctx context.Context, h agent.Host, in agent.Install, ids [
 			if busy, err := turnOpen(h, files[sid]); err == nil && busy {
 				status = "working"
 			}
-			out[sid] = agent.LiveInfo{State: agent.Live, Status: status}
+			li := agent.LiveInfo{State: agent.Live, Status: status}
+			for _, pid := range holders[paths[i]] {
+				li.Procs = append(li.Procs, agent.LiveProc{PID: pid})
+			}
+			if len(li.Procs) > 0 {
+				li.PID = li.Procs[0].PID
+			}
+			out[sid] = li
 		case agent.LockFree:
 			out[sid] = agent.LiveInfo{State: agent.Ended}
 		default:
@@ -535,6 +552,36 @@ func (m *Module) Live(ctx context.Context, h agent.Host, in agent.Install, ids [
 		}
 	}
 	return out, nil
+}
+
+// lockHolders names the codex processes holding each held lock, best effort: none when the
+// machine cannot tell. Holders found by open files (lsof) can include other programs, so
+// only processes named codex (any case: the Codex app too) are kept when names are known.
+func lockHolders(ctx context.Context, h agent.Host, held []string) map[string][]int {
+	if len(held) == 0 {
+		return nil
+	}
+	holders, err := h.Locks().Holders(ctx, held)
+	if err != nil {
+		return nil
+	}
+	var pids []int
+	for _, ps := range holders {
+		pids = append(pids, ps...)
+	}
+	names, err := h.Procs().Names(ctx, pids)
+	if err != nil {
+		return holders
+	}
+	out := make(map[string][]int, len(holders))
+	for p, ps := range holders {
+		for _, pid := range ps {
+			if strings.HasPrefix(strings.ToLower(names[pid]), "codex") && !slices.Contains(out[p], pid) {
+				out[p] = append(out[p], pid)
+			}
+		}
+	}
+	return out
 }
 
 func lockPath(h agent.Host, in agent.Install, sid agent.SessionID) string {

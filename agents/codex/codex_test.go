@@ -189,6 +189,13 @@ func TestStopAndStatus(t *testing.T) {
 	if live, _ := m.Live(ctx, h, in, []agent.SessionID{t1}); live[t1].Status != "idle" {
 		t.Fatalf("a finished turn is idle: %+v", live[t1])
 	}
+	// The lock's holders are the thread's processes; another program holding it is not.
+	fh.LockHolders[lock] = []int{4242, 4343}
+	fh.PIDs[4343], fh.PIDNames[4343] = true, "lsof"
+	if live, _ := m.Live(ctx, h, in, []agent.SessionID{t1}); live[t1].PID != 4242 || len(live[t1].Procs) != 1 || live[t1].Procs[0].PID != 4242 {
+		t.Fatalf("the codex process holding the lock: %+v", live[t1])
+	}
+	fh.LockHolders[lock] = []int{4242}
 	// Mid-turn: refused.
 	rollout := s.Path
 	b, _ := h.FS().ReadFile(rollout, 1<<20)

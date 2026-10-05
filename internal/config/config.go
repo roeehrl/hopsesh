@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -51,6 +52,10 @@ type Agent struct {
 	RemoteControl bool `toml:"remote_control,omitempty"`
 	// Import has the agent's own importer convert sessions continued in it, by default.
 	Import bool `toml:"import,omitempty"`
+	// Place is where the app resumes the agent's sessions, as the user last chose from a
+	// session's Resume menu: "here" (the hopsesh Terminal window), "terminal" (the
+	// terminal app) or "app" (the agent's desktop app). "" follows [terminal] resume.
+	Place string `toml:"place,omitempty"`
 }
 
 // Cloud is per-cloud configuration, by the cloud's name ("codex-cloud"). Like a machine,
@@ -135,8 +140,9 @@ type Terminal struct {
 }
 
 // Window is the app window's layout on the Sessions screen: the sidebar's and the
-// inspector's widths in CSS pixels (0: the default) and whether the user hid them. A
-// pane the window hides because it is narrow is not saved.
+// inspector's widths in CSS pixels (0: the default; the inspector's default follows the
+// window's width) and whether the user hid them. A pane the window hides because it is
+// narrow is not saved.
 type Window struct {
 	SidebarWidth    int  `toml:"sidebar_width,omitempty"`
 	SidebarHidden   bool `toml:"sidebar_hidden,omitempty"`
@@ -144,10 +150,77 @@ type Window struct {
 	InspectorHidden bool `toml:"inspector_hidden,omitempty"`
 }
 
-// The app window's pane widths: defaults and limits.
+// Inspector is the app inspector's sections the user opened or closed (explicit choices
+// only: the others keep their defaults), app-wide rather than per session.
+type Inspector struct {
+	Open   []string `toml:"open,omitempty"`   // InspectorSections
+	Closed []string `toml:"closed,omitempty"` // InspectorSections
+}
+
+// The app window's pane widths: defaults and limits. The inspector's default width is the
+// window's to work out (a share of its width); InspectorMax is the most it may be.
 const (
-	SidebarWidth, SidebarMin, SidebarMax       = 220, 180, 320
-	InspectorWidth, InspectorMin, InspectorMax = 360, 280, 560
+	SidebarWidth, SidebarMin, SidebarMax = 220, 180, 320
+	InspectorMin, InspectorMax           = 300, 960
+)
+
+// InspectorSections are the inspector's sections that open and close.
+var InspectorSections = []string{"conversation", "repository", "copies", "details"}
+
+// List is how the app's session list shows sessions: grouped by one property, sorted
+// within the groups, comfortable or compact rows, the groups the user collapsed or
+// expanded (by "grouping:name", explicit choices only), and the filters. An empty List
+// means the app has not chosen yet (it picks once, by how many sessions the first scan
+// finds).
+type List struct {
+	GroupBy     string `toml:"group_by,omitempty"`     // ListGroups ("": repository)
+	SortBy      string `toml:"sort_by,omitempty"`      // ListSorts ("": last-active)
+	SortReverse bool   `toml:"sort_reverse,omitempty"` // oldest, Z–A or smallest first
+	Density     string `toml:"density,omitempty"`      // comfortable | compact
+	// CollapseInactive starts groups whose newest session is more than 14 days old
+	// collapsed, unless the user expanded them.
+	CollapseInactive bool       `toml:"collapse_inactive,omitempty"`
+	Collapsed        []string   `toml:"collapsed,omitempty"`
+	Expanded         []string   `toml:"expanded,omitempty"`
+	Filter           ListFilter `toml:"filter,omitempty"`
+}
+
+// ListFilter is the list's saved filters: within a facet the values combine with OR (or,
+// with its _not set, none of them), and facets combine with AND. Empty: no filter.
+type ListFilter struct {
+	Status        []string `toml:"status,omitempty"` // ListStatuses
+	StatusNot     bool     `toml:"status_not,omitempty"`
+	Location      []string `toml:"location,omitempty"` // here | machines | clouds
+	LocationNot   bool     `toml:"location_not,omitempty"`
+	Agent         []string `toml:"agent,omitempty"` // agent ids
+	AgentNot      bool     `toml:"agent_not,omitempty"`
+	Repository    []string `toml:"repository,omitempty"` // repository identities or names
+	RepositoryNot bool     `toml:"repository_not,omitempty"`
+	LastActive    string   `toml:"last_active,omitempty"` // today | 7d | 30d
+	Has           []string `toml:"has,omitempty"`         // tab | mirror | unpushed
+	HasNot        bool     `toml:"has_not,omitempty"`
+}
+
+// The list's choices.
+var (
+	ListGroups     = []string{"repository", "location", "agent", "status", "last-active", "none"}
+	ListSorts      = []string{"last-active", "title", "status", "size"}
+	ListDensities  = []string{"comfortable", "compact"}
+	ListStatuses   = []string{"needs", "working", "idle", "moved", "ended", "unknown"}
+	ListLocations  = []string{"here", "machines", "clouds"}
+	ListLastActive = []string{"today", "7d", "30d"}
+	ListHas        = []string{"tab", "mirror", "unpushed"}
+)
+
+// ListKeysMax is how many collapsed and expanded groups the list remembers (the oldest
+// choices go first).
+const ListKeysMax = 300
+
+// Places a session resumes in, in the app (Agent.Place).
+const (
+	PlaceHere     = ResumeHere
+	PlaceTerminal = ResumeTerminal
+	PlaceApp      = "app"
 )
 
 // AppResumeDefault is where the desktop app resumes sessions and runs hand-off and
@@ -204,9 +277,15 @@ type Config struct {
 	Peer   Peer             `toml:"peer"`
 	// Terminal is the terminal app hopsesh opens launches in.
 	Terminal Terminal `toml:"terminal,omitempty"`
-	// Window is the app window's layout.
-	Window Window `toml:"window,omitempty"`
-	Hosts  []Host `toml:"hosts"`
+	// Window is the app window's layout, and Inspector its inspector's sections.
+	Window    Window    `toml:"window,omitempty"`
+	Inspector Inspector `toml:"inspector,omitempty"`
+	// List is how the app's session list shows sessions.
+	List List `toml:"list,omitempty"`
+	// Previews shows the end of a session's conversation in the app's inspector (default
+	// on; off for people who share their screen).
+	Previews *bool  `toml:"previews,omitempty"`
+	Hosts    []Host `toml:"hosts"`
 }
 
 // Defaults returns the configuration used when no file exists.
@@ -352,6 +431,9 @@ func (c Config) AgentEnabled(id string) bool { return !c.Agents[id].Disabled }
 // MarkMovedOn reports whether copies left behind are marked (default on).
 func (c Config) MarkMovedOn() bool { return c.MarkMoved == nil || *c.MarkMoved }
 
+// PreviewsOn reports whether the app shows conversation previews (default on).
+func (c Config) PreviewsOn() bool { return c.Previews == nil || *c.Previews }
+
 // AppIconsOn reports whether installed desktop apps' icons picture the agents (default on).
 func (c Config) AppIconsOn() bool { return c.AppIcons == nil || *c.AppIcons }
 
@@ -489,6 +571,24 @@ func (c Config) Check() error {
 	if w := c.Window.InspectorWidth; w != 0 && (w < InspectorMin || w > InspectorMax) {
 		return fmt.Errorf("window.inspector_width is %d: use %d to %d", w, InspectorMin, InspectorMax)
 	}
+	for _, f := range []struct {
+		name string
+		vals []string
+	}{{"inspector.open", c.Inspector.Open}, {"inspector.closed", c.Inspector.Closed}} {
+		if err := oneOfEach(f.name, f.vals, InspectorSections); err != nil {
+			return err
+		}
+	}
+	for agent, a := range c.Agents {
+		if a.Place != "" {
+			if err := oneOf("agents."+agent+".place", a.Place, []string{PlaceHere, PlaceTerminal, PlaceApp}); err != nil {
+				return err
+			}
+		}
+	}
+	if err := c.List.check(); err != nil {
+		return err
+	}
 	for name, cl := range c.Clouds {
 		switch cl.Code {
 		case "", CloudCodeBranch, CloudCodeBundle:
@@ -499,6 +599,66 @@ func (c Config) Check() error {
 		case "", DeleteNever, DeleteAfterMerge, DeleteOnUndo:
 		default:
 			return fmt.Errorf("clouds.%s.delete_branch is %q: use %q, %q or %q", name, cl.DeleteBranch, DeleteNever, DeleteAfterMerge, DeleteOnUndo)
+		}
+	}
+	return nil
+}
+
+// check reports list settings the app cannot show.
+func (l List) check() error {
+	if l.GroupBy != "" {
+		if err := oneOf("list.group_by", l.GroupBy, ListGroups); err != nil {
+			return err
+		}
+	}
+	if l.SortBy != "" {
+		if err := oneOf("list.sort_by", l.SortBy, ListSorts); err != nil {
+			return err
+		}
+	}
+	if l.Density != "" {
+		if err := oneOf("list.density", l.Density, ListDensities); err != nil {
+			return err
+		}
+	}
+	if len(l.Collapsed) > ListKeysMax || len(l.Expanded) > ListKeysMax {
+		return fmt.Errorf("list.collapsed and list.expanded hold at most %d groups each", ListKeysMax)
+	}
+	f := l.Filter
+	for _, x := range []struct {
+		name    string
+		vals    []string
+		allowed []string
+	}{{"list.filter.status", f.Status, ListStatuses}, {"list.filter.location", f.Location, ListLocations}, {"list.filter.has", f.Has, ListHas}} {
+		if err := oneOfEach(x.name, x.vals, x.allowed); err != nil {
+			return err
+		}
+	}
+	if f.LastActive != "" {
+		if err := oneOf("list.filter.last_active", f.LastActive, ListLastActive); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// oneOf reports a value that is not one of the allowed ones, naming them.
+func oneOf(name, v string, allowed []string) error {
+	if slices.Contains(allowed, v) {
+		return nil
+	}
+	quoted := make([]string, len(allowed))
+	for i, a := range allowed {
+		quoted[i] = fmt.Sprintf("%q", a)
+	}
+	return fmt.Errorf("%s is %q: use %s", name, v, strings.Join(quoted, ", "))
+}
+
+// oneOfEach is oneOf for every value of a list.
+func oneOfEach(name string, vals, allowed []string) error {
+	for _, v := range vals {
+		if err := oneOf(name, v, allowed); err != nil {
+			return err
 		}
 	}
 	return nil

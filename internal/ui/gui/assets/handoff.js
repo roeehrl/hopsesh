@@ -1,7 +1,7 @@
-// Handing a session off to a cloud: the Hand off ▸ menu (every cloud; a disabled one says
-// why), the plan sheet (the briefing, the code, what stays on this machine, the options),
-// the steps while it applies (and a step that failed), and the done screen with the
-// session's link and Undo.
+// Handing a session off to a cloud (Move ▾'s clouds come from actions.js: every cloud, a
+// disabled one with its reason): the plan sheet (the briefing, the code, what stays on this
+// machine, the options), the steps while it applies (and a step that failed), and the done
+// screen with the session's link and Undo.
 import { api, on, h, fill, view, state, screen, go, current, toast, fail, errText, cap, agentChip, cloudChip, $, count, sys, keys, ask, dialog, icon, ICONS, rich, cloudOf } from "./core.js";
 import { undo } from "./activity.js";
 import { showTerminal, tabFor, IN_A_TAB } from "./term.js";
@@ -11,21 +11,7 @@ let hc = null; // { e, cloud, opts, plan, busy, applying }
 
 const STEP = { snapshot: "Snapshot", push: "Push branch", start: "Start cloud session", lineage: "Record lineage", mark: "Mark this session" };
 
-// handoffMenu is the Hand off ▸ button and, open, its menu: one entry per cloud, a
-// disabled one with its reason inline.
-export function handoffMenu(e, open, toggle) {
-  const targets = e.handoff || [];
-  if (!targets.length) return null;
-  const btn = h("button", { class: "btn", "aria-haspopup": "menu", "aria-expanded": open ? "true" : "false", onclick: toggle }, "Hand off ▸");
-  if (!open) return h("div", { class: "menu-wrap" }, btn);
-  return h("div", { class: "menu-wrap" }, btn,
-    h("div", { class: "menu menu-pop", role: "menu", "aria-label": "Hand off to" },
-      h("div", { class: "menu-h", role: "presentation" }, "Hand off to"),
-      targets.map((t) => menuItem(t, () => { toggle(); planHandoff(e, t.cloud, t.bundle); })),
-      h("div", { class: "muted", role: "presentation", style: "font-size:11.5px;padding:4px 8px" }, "A cloud gets a briefing, not this conversation.")));
-}
-
-// menuItem is one cloud in a Hand off menu: its name (its id in the tooltip), what going
+// menuItem is one cloud in the palette's Hand off to… picker: its name (its id in the tooltip), what going
 // there means, or why it can't.
 export function menuItem(t, pick) {
   return h("button", { class: "menu-item", role: "menuitem", title: t.cloud, "aria-disabled": t.ok ? null : "true", disabled: !t.ok, onclick: () => { if (t.ok) pick(); } },

@@ -23,7 +23,7 @@ test("the window lists the demo sessions through the real service", async () => 
 });
 
 test("it speaks Windows: this PC and Ctrl shortcuts", async () => {
-  const sidebar = page.getByRole("navigation", { name: "Scopes" });
+  const sidebar = page.getByRole("navigation", { name: "Places" });
   await expect(sidebar.getByRole("button", { name: /On this PC/ })).toBeVisible();
   await expect(page.locator(".titlebar .kbd")).toHaveText("Ctrl+K");
   await page.keyboard.press("Control+K");
@@ -40,7 +40,10 @@ test("it speaks Windows: this PC and Ctrl shortcuts", async () => {
 test("the details pane and settings work against the real service", async () => {
   await row("Find the codeword").click();
   const details = page.getByRole("complementary", { name: "Session details" });
-  await expect(details.getByRole("button", { name: "Continue in Codex" })).toBeVisible();
+  await expect(details.locator("#act-primary")).toHaveText(/^Resume in /);
+  await details.getByRole("button", { name: "Move", exact: true }).click();
+  await expect(page.getByRole("menuitem", { name: /^Continue with Codex…/ })).toBeVisible();
+  await page.keyboard.press("Escape");
   await page.keyboard.press("Control+,");
   await page.getByRole("tab", { name: "Command line" }).click();
   await expect(page.getByText(/Puts the app's folder on your PATH/)).toBeVisible();

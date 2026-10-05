@@ -5,16 +5,16 @@ test.beforeEach(async ({ page }) => fresh(page));
 
 const details = (page: Page) => page.getByRole("complementary", { name: "Session details" });
 
-// openMenu selects the demo session and opens its Hand off ▸ menu.
+// openMenu selects the demo session and opens its Move menu, whose Cloud group hands off.
 async function openMenu(page: Page) {
-  await page.getByRole("navigation", { name: "Scopes" }).getByRole("button", { name: /All sessions/ }).click();
+  await page.getByRole("navigation", { name: "Places" }).getByRole("button", { name: /All sessions/ }).click();
   await row(page, "Find the codeword").click();
-  await details(page).getByRole("button", { name: "Hand off ▸" }).click();
-  return details(page).getByRole("menu", { name: "Hand off to" });
+  await details(page).getByRole("button", { name: "Move", exact: true }).click();
+  return page.getByRole("menu", { name: "Move" });
 }
 
 async function turnOn(page: Page) {
-  const sidebar = page.getByRole("navigation", { name: "Scopes" });
+  const sidebar = page.getByRole("navigation", { name: "Places" });
   await turnOnCloud(page, "Claude Code cloud");
   await expect(sidebar.getByRole("button", { name: /Claude Code cloud/ })).toContainText("ready", { timeout: 30_000 });
 }
@@ -107,7 +107,7 @@ test("the hand-off sheet: briefing, branch, what stays, options; done, then undo
 // and the briefing asks Jules to check the handoff branch out first.
 test("a hand-off to Jules: the briefing asks for the handoff branch", async ({ page }) => {
   expect((await page.request.post("/dirty")).ok()).toBeTruthy();
-  const sidebar = page.getByRole("navigation", { name: "Scopes" });
+  const sidebar = page.getByRole("navigation", { name: "Places" });
   await turnOnCloud(page, "Jules");
   await expect(sidebar.getByRole("button", { name: /Jules/ })).toBeVisible({ timeout: 30_000 });
   const menu = await openMenu(page);

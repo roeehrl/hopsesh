@@ -16,8 +16,8 @@ import (
 // terminal app, and the hopsesh Terminal window's look and behaviour.
 type TerminalSettingsDTO struct {
 	TerminalAppsDTO
-	// Where is where sessions resume and steps run: here, terminal or ask (the setting, or
-	// its default).
+	// Where is where sessions resume and steps run: here or terminal (the setting, or its
+	// default; the command line's "ask" is the default here).
 	Where        string `json:"where"`
 	Default      string `json:"default"` // config.AppResumeDefault
 	Font         string `json:"font"`
@@ -40,7 +40,7 @@ func (a *App) TerminalSettings() TerminalSettingsDTO {
 	a.mu.Lock()
 	c := a.core.Cfg
 	a.mu.Unlock()
-	d.Where, d.Font, d.FontSize, d.Scrollback = c.AppResume(), c.Terminal.Font, c.TerminalFont(), c.TerminalLines()
+	d.Where, d.Font, d.FontSize, d.Scrollback = route("", c.AppResume()), c.Terminal.Font, c.TerminalFont(), c.TerminalLines()
 	d.KeepTabs, d.Notify, d.ScreenReader, d.SystemConsole = c.KeepTabsOn(), c.NotifyOn(), c.Terminal.ScreenReader, c.Terminal.SystemConsole
 	d.CloseEnded = c.CloseEndedOn()
 	d.Bundled = a.Terms != nil && a.Terms.Manager().BundledConsole()

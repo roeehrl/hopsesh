@@ -814,7 +814,7 @@ func (t *Terminals) Show() {
 		URL:       TerminalPage,
 		// As the app's window: no title bar, the window's buttons inset into the tab strip,
 		// which drags the window (--wails-draggable in terminal.css).
-		Mac: application.MacWindow{TitleBar: application.MacTitleBarHiddenInset},
+		Mac: application.MacWindow{TitleBar: application.MacTitleBarHiddenInset, InvisibleTitleBarHeight: 52},
 	})
 	t.mu.Lock()
 	t.win, t.winID = w, w.ID()

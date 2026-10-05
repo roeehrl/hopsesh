@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/convert"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/internal/core/move"
+	"github.com/roeehrl/hopsesh/internal/core/presence"
 	"github.com/roeehrl/hopsesh/internal/core/proc"
 	"github.com/roeehrl/hopsesh/internal/core/pty"
 	"github.com/roeehrl/hopsesh/internal/core/repos"
@@ -47,11 +49,25 @@ type AgentOpt struct {
 
 // EntryDTO is one session row.
 type EntryDTO struct {
-	Machine    string     `json:"machine"`
-	Agent      agent.ID   `json:"agent"`
-	AgentName  string     `json:"agentName"`
-	Key        string     `json:"key"` // agent/session
-	Title      string     `json:"title"`
+	Machine   string   `json:"machine"`
+	Agent     agent.ID `json:"agent"`
+	AgentName string   `json:"agentName"`
+	Key       string   `json:"key"` // agent/session
+	Title     string   `json:"title"`
+	// TitleSource is where the title comes from: custom (renamed), live (the running
+	// agent's name for it), generated (the agent's own title), prompt (the first prompt),
+	// reply (the first reply) or none ("Untitled · folder").
+	TitleSource string `json:"titleSource"`
+	// Session is the agent's session id; Path its file on its machine; AgentVersion the
+	// agent version that last wrote it.
+	Session      string `json:"session"`
+	Path         string `json:"path"`
+	AgentVersion string `json:"agentVersion"`
+	// CanRename: its agent's own title can be changed (Rename); CanPreview: the end of its
+	// conversation can be shown (Preview).
+	CanRename  bool       `json:"canRename"`
+	CanPreview bool       `json:"canPreview"`
+	Places     []PlaceDTO `json:"places"` // where it is open on this machine, besides hopsesh's tabs
 	Status     string     `json:"status"`
 	Live       bool       `json:"live"`
 	LastActive string     `json:"lastActive"`
@@ -234,10 +250,17 @@ func scanDTO(core *app.App, inv *app.Inventory, updated, elsewhere time.Time) *S
 		}
 	}
 	targets := continueTargets(core, inv)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	table, _ := presence.Snapshot(ctx) // where the open sessions here run (nil: not known)
 	for _, g := range inv.Groups(core.LocalRoots()) {
 		gd := GroupDTO{Name: g.Name, Remote: g.Remote, Local: g.Local, NoRepo: g.Identity == "", NoRemote: strings.HasPrefix(g.Identity, "local:")}
 		for _, it := range g.Items {
-			gd.Entries = append(gd.Entries, entryDTO(core, inv, it, targets))
+			d := entryDTO(core, inv, it, targets)
+			if m := inv.Machine(d.Machine); m != nil && m.Local && d.Live {
+				d.Places = placesOf(it.Entry.Live, table, os.Getpid())
+			}
+			gd.Entries = append(gd.Entries, d)
 		}
 		out.Groups = append(out.Groups, gd)
 	}
@@ -261,25 +284,63 @@ func continueTargets(core *app.App, inv *app.Inventory) []AgentOpt {
 	return out
 }
 
-// titleOf is a session's title for people: its own, else its first line of the last
-// prompt, else "Untitled session".
+// titleOf is a session's title for people (titleFor, without the running agent's name).
 func titleOf(s agent.Summary) string {
-	if t := strings.TrimSpace(s.Title); t != "" {
-		return t
+	t, _ := titleFor(s, "")
+	return t
+}
+
+// titleFor is a session's title for people and where it comes from, without asking a
+// model: the title it was given (custom), else the name the running agent gives it (live:
+// the Claude app names sessions), else the agent's own title (generated: Claude Code's
+// AI title, a legacy summary, Codex's thread name), else its first real prompt (prompt) or
+// first reply (reply), clipped to 80 characters, else "Untitled · folder (branch)".
+func titleFor(s agent.Summary, liveName string) (string, string) {
+	t := strings.TrimSpace(s.Title)
+	if t != "" && s.TitleSource == "custom" {
+		return t, "custom"
 	}
-	p, _, _ := strings.Cut(strings.TrimSpace(s.LastPrompt), "\n")
-	if p = strings.TrimSpace(p); p != "" {
-		if r := []rune(p); len(r) > 80 {
-			p = string(r[:79]) + "…"
+	if n := strings.TrimSpace(liveName); n != "" {
+		return n, "live"
+	}
+	switch {
+	case t != "" && (s.TitleSource == "prompt" || s.TitleSource == "reply"):
+		return clipWords(t, 80), s.TitleSource
+	case t != "":
+		return t, nonEmpty(s.TitleSource, "generated")
+	}
+	if p, _, _ := strings.Cut(strings.TrimSpace(s.LastPrompt), "\n"); strings.TrimSpace(p) != "" {
+		return clipWords(strings.TrimSpace(p), 80), "prompt"
+	}
+	untitled := "Untitled"
+	if dir := strings.TrimRight(strings.ReplaceAll(s.CWD, "\\", "/"), "/"); dir != "" {
+		untitled += " · " + dir[strings.LastIndex(dir, "/")+1:]
+		if s.GitBranch != "" {
+			untitled += " (" + s.GitBranch + ")"
 		}
-		return p
 	}
-	return "Untitled session"
+	return untitled, "none"
+}
+
+// clipWords shortens text to at most n characters, at a word boundary when there is one
+// in its second half, with "…".
+func clipWords(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	cut := string(r[:n-1])
+	if i := strings.LastIndex(cut, " "); i > len(cut)/2 {
+		cut = cut[:i]
+	}
+	return strings.TrimRight(cut, " ,;:.-") + "…"
 }
 
 func entryDTO(core *app.App, inv *app.Inventory, it app.Item, targets []AgentOpt) EntryDTO {
 	e, s := it.Entry, it.Entry.Session
-	d := EntryDTO{Machine: e.Machine, Agent: e.Agent, AgentName: e.AgentName, Key: s.Key.String(), Title: titleOf(s),
+	title, source := titleFor(s, e.Live.Name)
+	d := EntryDTO{Machine: e.Machine, Agent: e.Agent, AgentName: e.AgentName, Key: s.Key.String(), Title: title, TitleSource: source,
+		Session: string(s.Key.Session), Path: s.Path, AgentVersion: s.AgentVersion, CanRename: core.CanRename(e), Places: []PlaceDTO{},
 		Status: statusWords(core, e), Live: e.Live.State == agent.Live, LastActive: s.LastActivity.Format(time.RFC3339),
 		LastPrompt: s.LastPrompt, CWD: s.CWD, SizeKB: s.Size / 1024, ContinueIn: []AgentOpt{},
 		Needs:   e.Live.State == agent.Live && strings.HasPrefix(e.Live.Status, "waiting"),
@@ -289,6 +350,9 @@ func entryDTO(core *app.App, inv *app.Inventory, it app.Item, targets []AgentOpt
 		if m, ok := core.Module(e.Agent); ok {
 			d.App = nonEmptyStr(appicon.Name(m.Spec().Icon.Apps), d.App)
 		}
+	}
+	if m, ok := core.Module(e.Agent); ok && !e.Location.IsCloud() {
+		_, d.CanPreview = m.(agent.Previewer)
 	}
 	d.Handoff, d.Hop = core.HandoffTargets(inv, e), core.HopTargets(inv, e)
 	if d.Handoff == nil {
@@ -708,9 +772,7 @@ func (a *App) OpenResult(where string) (*OpenedDTO, error) {
 			return &OpenedDTO{Where: WhereShown, Tab: id}, nil
 		}
 	}
-	switch route(where, setting, false) {
-	case WhereAsk:
-		return &OpenedDTO{Where: WhereAsk}, nil
+	switch route(where, setting) {
 	case WhereTerminal:
 		return &OpenedDTO{Where: WhereTerminal}, a.openLaunch(l)
 	}
@@ -723,7 +785,7 @@ func (a *App) bringTab(l app.Launch, journal, cloud, cloudTitle, agentName, titl
 	a.mu.Lock()
 	setting := a.core.Cfg.AppResume()
 	a.mu.Unlock()
-	if a.Terms == nil || route(where, setting, true) == WhereTerminal {
+	if a.Terms == nil || route(where, setting) == WhereTerminal {
 		return &OpenedDTO{Where: WhereTerminal}, a.openLaunch(l)
 	}
 	spec, err := a.tabSpec(l.Run, tabTitle("Bring here", title, strings.TrimSuffix(filepath.Base(l.Run.Argv[0]), ".exe")))
