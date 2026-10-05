@@ -10,7 +10,10 @@ let page: Page;
 test.beforeAll(async () => {
   browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
   const pages = browser.contexts().flatMap((c) => c.pages());
-  page = pages.find((p) => URL.canParse(p.url()) && new URL(p.url()).pathname === "/") || pages[0];
+  page = pages.find((p) => URL.canParse(p.url()) && new URL(p.url()).host === "wails.localhost" && !new URL(p.url()).pathname.startsWith("/terminal/")) || pages[0];
+  // The app's window may show another screen (the tests before this one end in Settings).
+  await expect(page.locator("#view")).not.toBeEmpty({ timeout: 45_000 });
+  await page.keyboard.press("Control+1");
   await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible({ timeout: 45_000 });
 });
 
