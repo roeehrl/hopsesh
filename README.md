@@ -570,6 +570,18 @@ later in System Settings → Privacy & Security → Automation.
 </details>
 
 <details>
+<summary><b>Does hopsesh use iTerm2's Python API?</b></summary>
+
+Only if you have turned it on yourself (iTerm2 → Settings → General → Magic → Enable Python
+API); hopsesh never turns it on and never changes iTerm2's or Claude Code's settings. With it
+on, a hand-off step opens in a split beside the session you are in, the app learns at once
+when you close a step's tab, and "Show" finds a running session's tab directly. It asks iTerm2 for an API cookie once per
+connection (macOS asks you once whether hopsesh may control iTerm2) and keeps it in memory
+only. hopsesh's client cannot type into a session, inject output or read what is on screen:
+those requests are not in it. With the API off, hopsesh uses AppleScript as before.
+</details>
+
+<details>
 <summary><b>How do I undo a move?</b></summary>
 
 `hopsesh undo` reverses the newest move or continuation, and `hopsesh undo <id>` a specific

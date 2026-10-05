@@ -46,9 +46,39 @@ type Launch struct {
 // terminals is the set of terminal apps (the App's, or this system's).
 func (a *App) terminals() termapp.Set {
 	if len(a.Terminals.All()) == 0 {
-		return termapp.System()
+		return termapp.System().WithExits(a.launchExit)
 	}
 	return a.Terminals
+}
+
+// launchExit is a launch's exit code as hopsesh's verb recorded it: a ticket's
+// (terminal-open) or a step's outcome (terminal-step).
+func (a *App) launchExit(h termapp.Handle) (int, bool) {
+	switch h.Verb {
+	case "terminal-open":
+		return a.termStore().ExitOf(h.Ticket)
+	case "terminal-step":
+		if o, err := a.StepOutcomeOf(h.Ticket); err == nil && o != nil {
+			return o.Code, true
+		}
+	}
+	return 0, false
+}
+
+// WatchLaunch reports a launch's exit code once it ends (see termapp.Watcher): from
+// hopsesh's own records, and -1 when its tab was closed first. It errors when the launch's
+// terminal cannot watch (only iTerm2 with its Python API turned on can); callers then do
+// without.
+func (a *App) WatchLaunch(ctx context.Context, h termapp.Handle) (<-chan int, error) {
+	t, err := a.TerminalByID(h.Terminal)
+	if err != nil {
+		return nil, err
+	}
+	w, ok := t.(termapp.Watcher)
+	if !ok || !termapp.CapsOf(t).Watch {
+		return nil, fmt.Errorf("%s cannot report when a tab ends", t.Name())
+	}
+	return w.Exited(ctx, h)
 }
 
 func (a *App) procs() termapp.Procs {
@@ -126,12 +156,13 @@ func (a *App) OpenInTerminal(ctx context.Context, prog string, t termapp.Termina
 }
 
 // OpenStepInTerminal opens `<prog> terminal-step <id>` (a hand-off's step the app wrote)
-// in t (nil: MyTerminal), with the same fallback.
+// in t (nil: MyTerminal), with the same fallback: beside the session the user is in where
+// the terminal can (iTerm2 with its Python API on), else as a tab.
 func (a *App) OpenStepInTerminal(ctx context.Context, prog string, t termapp.Terminal, stepID, dir string) (termapp.Opened, error) {
 	if t == nil {
 		t = a.MyTerminal(ctx)
 	}
-	return a.terminals().Open(ctx, t, termapp.Launch{Program: prog, Args: []string{"terminal-step", stepID}, Dir: dir, Kind: termapp.KindStep, Where: termapp.NewTab})
+	return a.terminals().Open(ctx, t, termapp.Launch{Program: prog, Args: []string{"terminal-step", stepID}, Dir: dir, Kind: termapp.KindStep, Where: termapp.Beside})
 }
 
 // resolveProgram finds a bare program name on this process's PATH, else on the login
@@ -194,6 +225,9 @@ func (a *App) RunTicket(id string, tio TerminalIO) error {
 		err = a.checkTicket(t)
 	}
 	if err != nil {
+		if t.Kind == termapp.KindSession || t.Kind == termapp.KindStep {
+			_ = a.termStore().Exit(id, -1)
+		}
 		if tio.Hold {
 			fmt.Fprintf(tio.Err, "hopsesh could not open this: %v\n", err)
 			return holdTab(tio, "")
@@ -201,6 +235,15 @@ func (a *App) RunTicket(id string, tio TerminalIO) error {
 		return fmt.Errorf("hopsesh could not open this: %w", err)
 	}
 	code, err := a.runLaunch(id, t, tio)
+	if t.Kind == termapp.KindSession || t.Kind == termapp.KindStep {
+		// For a watcher: the agent's exit, which a held tab outlives (sign-ins and shells
+		// leave no record).
+		ec := code
+		if err != nil {
+			ec = -1
+		}
+		_ = a.termStore().Exit(id, ec)
+	}
 	name := strings.TrimSuffix(filepath.Base(t.Argv[0]), ".exe")
 	switch {
 	case err != nil:

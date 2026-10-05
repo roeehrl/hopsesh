@@ -13,6 +13,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/integrate"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/pty"
+	"github.com/roeehrl/hopsesh/internal/core/termapp"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -111,13 +112,19 @@ func (a *App) runStep(ctx context.Context, s move.TermStep) (move.StepResult, er
 	ps.out = make(chan struct{}, 1)
 	done := make(chan stepDone, 1)
 	tab := ""
+	// Where the user's terminal can say so (iTerm2 with its Python API on), a tab closed
+	// before the step wrote its outcome ends the wait at once instead of after 25 minutes.
+	var exited <-chan int
 	external := func() {
 		a.mu.Lock()
 		ps.dto.Where, ps.dto.Tab = WhereTerminal, ""
 		a.mu.Unlock()
-		if err := a.openStep(id, s); err != nil {
+		opened, err := a.openStep(id, s)
+		if err != nil {
 			set("no-terminal", "hopsesh could not open a terminal: "+err.Error()+". Stop waiting and hand it off from the command line (hopsesh handoff … --to "+s.Cloud+") instead.")
+			return
 		}
+		exited, _ = core.WatchLaunch(ctx, opened.Handle)
 	}
 	if route("", core.Cfg.AppResume(), true) == WhereHere && a.Terms != nil {
 		if tab, err = a.stepTab(ctx, s, ps, done); err != nil {
@@ -174,22 +181,27 @@ func (a *App) runStep(ctx context.Context, s move.TermStep) (move.StepResult, er
 			default:
 				return move.StepResult{}, d.err
 			}
+		case _, ok := <-exited:
+			exited = nil
+			if !ok || noSession != nil {
+				continue
+			}
+			o, err := core.StepOutcomeOf(id)
+			if err == nil && o == nil {
+				noSession = fmt.Errorf("%w: the terminal tab was closed before %s finished", agent.ErrNoSession, s.CloudTitle)
+				set("no-link", "The terminal tab was closed before "+s.CloudTitle+" finished. If a session started, paste its link; otherwise stop waiting and undo.")
+				continue
+			}
+			if res, fin, err := stepOutcome(o, err, &noSession, set); fin {
+				return res, err
+			}
 		case <-tick.C:
 			if noSession != nil || tab != "" {
 				continue
 			}
 			o, err := core.StepOutcomeOf(id)
-			switch {
-			case err != nil:
-				return move.StepResult{}, err
-			case o == nil:
-			case o.Session != nil:
-				return move.StepResult{Session: *o.Session}, nil
-			case o.NoSession:
-				noSession = fmt.Errorf("%w: %s", agent.ErrNoSession, o.Error)
-				set("no-link", o.Error)
-			default:
-				return move.StepResult{}, errors.New(o.Error)
+			if res, fin, err := stepOutcome(o, err, &noSession, set); fin {
+				return res, err
 			}
 		}
 	}
@@ -238,19 +250,38 @@ func (a *App) stepTab(ctx context.Context, s move.TermStep, ps *pendingStep, don
 
 // openStep opens the user's terminal on the step: a line hopsesh built, never one taken
 // from the window.
-func (a *App) openStep(id string, s move.TermStep) error {
+func (a *App) openStep(id string, s move.TermStep) (termapp.Opened, error) {
 	prog, err := stepProgram()
 	if err != nil {
-		return err
+		return termapp.Opened{}, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	o, err := a.snapshot().OpenStepInTerminal(ctx, prog, testTerminal, id, s.Run.Dir)
 	if err != nil {
-		return err
+		return o, err
 	}
 	a.noteOpened(o)
-	return nil
+	return o, nil
+}
+
+// stepOutcome is what a step's written outcome means for the wait: a result (done), or
+// that it ended without a session (noSession set: a pasted link may still come), or
+// nothing yet.
+func stepOutcome(o *app.StepOutcome, err error, noSession *error, set func(state, msg string)) (move.StepResult, bool, error) {
+	switch {
+	case err != nil:
+		return move.StepResult{}, true, err
+	case o == nil:
+	case o.Session != nil:
+		return move.StepResult{Session: *o.Session}, true, nil
+	case o.NoSession:
+		*noSession = fmt.Errorf("%w: %s", agent.ErrNoSession, o.Error)
+		set("no-link", o.Error)
+	default:
+		return move.StepResult{}, true, errors.New(o.Error)
+	}
+	return move.StepResult{}, false, nil
 }
 
 // HandoffStep is the terminal step the hand-off being applied waits for (nil: none).

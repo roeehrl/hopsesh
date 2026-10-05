@@ -2,6 +2,7 @@ package termapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -11,27 +12,37 @@ import (
 // (`create tab with default profile command`), so nothing is typed into a shell. Such a
 // tab closes when its command ends, so the command carries --hold and hopsesh's verb keeps
 // the tab open with the exit code shown. A running session's tab is found by its tty and
-// brought forward with select. hopsesh never uses iTerm2's Python API, never changes its
-// settings, and never reads a session's contents.
+// brought forward with select. hopsesh never changes iTerm2's settings and never reads a
+// session's contents. When the user has turned on iTerm2's Python API, the richer path in
+// iterm2_api.go is tried first for steps opened Beside, FindTTY, Focus and Exited, and this
+// AppleScript path is the fallback for every one of its errors.
 
 const iterm2Bundle = "com.googlecode.iterm2"
 
 type iterm2 struct {
 	run       Script
 	installed func() bool
+	api       *apiPath   // nil: AppleScript only
+	exits     ExitSource // for Exited
 }
 
-// ITerm2 is iTerm2 on this Mac.
-func ITerm2() Terminal { return ITerm2Using(Osascript, bundle("iTerm.app")) }
+// ITerm2 is iTerm2 on this Mac, with its Python API as the richer path when the user has
+// turned it on.
+func ITerm2() Terminal {
+	return &iterm2{run: Osascript, installed: bundle("iTerm.app"), api: sharedAPI}
+}
 
-// ITerm2Using is iTerm2 driven by run, installed as installed says (tests).
+// ITerm2Using is iTerm2 driven by run, installed as installed says, AppleScript only
+// (tests).
 func ITerm2Using(run Script, installed func() bool) Terminal {
 	return &iterm2{run: run, installed: installed}
 }
 
 func (t *iterm2) ID() string   { return IDITerm2 }
 func (t *iterm2) Name() string { return "iTerm2" }
-func (t *iterm2) caps() Caps   { return Caps{Labels: true, Tabs: true, Hold: true} }
+func (t *iterm2) caps() Caps {
+	return Caps{Labels: true, Tabs: true, Hold: true, Watch: t.api.usable()}
+}
 
 func (t *iterm2) Available(context.Context) error {
 	if t.installed() {
@@ -106,11 +117,17 @@ func (t *iterm2) Open(ctx context.Context, l Launch) (Handle, error) {
 	if err := l.check(); err != nil {
 		return Handle{}, err
 	}
+	if l.Where == Beside && t.api.usable() {
+		if h, err := t.openBeside(ctx, l); err == nil {
+			return h, nil
+		}
+		// Any API error: a tab through AppleScript, as without the API.
+	}
 	out, err := t.run.run(ctx, iterm2Open(l))
 	if err != nil {
 		return Handle{}, err
 	}
-	return t.handle(out), nil
+	return handleFor(t.handle(out), l), nil
 }
 
 // handle reads "<unique id>\t<tty>" as iTerm2 returned it, keeping only well-formed values.
@@ -133,6 +150,11 @@ func (t *iterm2) FindTTY(ctx context.Context, tty string) (Handle, bool, error) 
 	if !t.installed() {
 		return Handle{}, false, nil
 	}
+	if t.api.usable() {
+		if h, found, err := t.findAPI(ctx, tty); err == nil {
+			return h, found, nil
+		}
+	}
 	out, err := t.run.run(ctx, iterm2Find(tty))
 	if err != nil {
 		return Handle{}, false, err
@@ -147,6 +169,12 @@ func (t *iterm2) FindTTY(ctx context.Context, tty string) (Handle, bool, error) 
 func (t *iterm2) Focus(ctx context.Context, h Handle) error {
 	if !refName.MatchString(h.Ref) || !ttyName.MatchString(h.TTY) {
 		return fmt.Errorf("not an iTerm2 session hopsesh found: %+v", h)
+	}
+	if t.api.usable() {
+		switch err := t.focusAPI(ctx, h); {
+		case err == nil, errors.Is(err, ErrGone):
+			return err
+		}
 	}
 	out, err := t.run.run(ctx, iterm2Focus(h))
 	if err != nil {

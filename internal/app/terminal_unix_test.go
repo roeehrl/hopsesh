@@ -145,6 +145,10 @@ func TestTicketInATab(t *testing.T) {
 	if _, err := a.termStore().Take(id, ticketAge); err == nil {
 		t.Fatal("the ticket can run again")
 	}
+	// The agent's exit code stays for a watcher (a held tab outlives the agent).
+	if code, ok := a.launchExit(termapp.Handle{Terminal: termapp.IDITerm2, Verb: "terminal-open", Ticket: id}); !ok || code != 3 {
+		t.Fatalf("recorded exit %d %v", code, ok)
+	}
 }
 
 // --hold (a terminal that closes a tab with its command): once the agent ends, the tab
