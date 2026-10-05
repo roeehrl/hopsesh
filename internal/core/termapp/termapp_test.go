@@ -150,11 +150,17 @@ func TestStore(t *testing.T) {
 // A settings or state folder hopsesh passes to its own verb is a plain absolute path,
 // quoted like the program; anything with a control character is refused.
 func TestLaunchPathArgs(t *testing.T) {
-	l := Launch{Program: "/opt/hop sesh/hopsesh", Args: []string{"terminal-open", "t1", "--state-dir", "/tmp/a b/state"}, Kind: KindSession}
+	prog, state := "/opt/hop sesh/hopsesh", "/tmp/a b/state"
+	want := `'/opt/hop sesh/hopsesh' terminal-open t1 --state-dir '/tmp/a b/state'`
+	if runtime.GOOS == "windows" {
+		prog, state = `C:\hop sesh\hopsesh.exe`, `C:\a b\state`
+		want = `'C:\hop sesh\hopsesh.exe' terminal-open t1 --state-dir 'C:\a b\state'`
+	}
+	l := Launch{Program: prog, Args: []string{"terminal-open", "t1", "--state-dir", state}, Kind: KindSession}
 	if err := l.check(); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := commandLine(l), `'/opt/hop sesh/hopsesh' terminal-open t1 --state-dir '/tmp/a b/state'`; got != want {
+	if got := commandLine(l); got != want {
 		t.Fatalf("command line %q, want %q", got, want)
 	}
 	for _, bad := range []string{"/tmp/a\nb", "/tmp/\x1b]0;x\x07", "relative/path", "$(id)"} {
