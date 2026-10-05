@@ -250,9 +250,7 @@ func (v *viewer) push(kind byte, p []byte) {
 			continue
 		}
 		k := min(maxFrame, len(p))
-		f := make([]byte, 1, 1+k)
-		f[0] = frameOutput
-		v.items = append(v.items, append(f, p[:k]...))
+		v.items = append(v.items, append([]byte{frameOutput}, p[:k]...))
 		p = p[k:]
 	}
 	v.ready.Broadcast()

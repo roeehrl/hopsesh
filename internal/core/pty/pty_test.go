@@ -22,6 +22,9 @@ func tabs(t *testing.T, o pty.Options) *pty.Manager {
 	if o.Version == "" {
 		o.Version = "0.0.0-test"
 	}
+	// The tabs' folders go after the tabs: on Windows a running program's folder cannot be
+	// removed (cleanups run last first).
+	_ = t.TempDir()
 	if o.ConptyDir == "" {
 		o.ConptyDir = os.Getenv("HOPSESH_CONPTY_DIR") // CI's Windows test job fetches the pair
 	}

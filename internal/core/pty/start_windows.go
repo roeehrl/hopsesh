@@ -188,8 +188,20 @@ func start(argv []string, dir string, env []string, cols, rows int, conptyDir st
 	return t, nil
 }
 
+// processCtrlC makes this process (and so the programs it starts, which inherit it) take
+// Ctrl-C as an interrupt again. A process started in a new process group, as some
+// launchers and CI runners start theirs, ignores Ctrl-C, and a tab's program would then
+// never get CTRL_C_EVENT from the user's Ctrl-C.
+var processCtrlC = sync.OnceFunc(func() {
+	p := windows.NewLazySystemDLL("kernel32.dll").NewProc("SetConsoleCtrlHandler")
+	if p.Find() == nil {
+		_, _, _ = p.Call(0, 0)
+	}
+})
+
 // spawn starts the program attached to the pseudoconsole.
 func (t *conTerm) spawn(prog string, argv []string, dir string, env []string) error {
+	processCtrlC()
 	attrs, err := windows.NewProcThreadAttributeList(1)
 	if err != nil {
 		return err
