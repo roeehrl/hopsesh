@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Fixed
+- The install script (`curl … | sh`) failed on macOS in a terminal with a UTF-8 locale
+  ("arch…: unbound variable"): macOS's /bin/sh read the "…" after `$arch` as part of the
+  name.
+
 ### Added
 - Your terminal app: sessions, teleports and hand-off steps the app opens go to a new tab in
   iTerm2's front window when iTerm2 is installed (else a Terminal window; Windows Terminal on

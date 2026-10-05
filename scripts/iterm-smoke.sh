@@ -41,7 +41,7 @@ repo=$(cd "$(dirname "$0")/.." && pwd)
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/hopsesh-iterm-smoke.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT
 hs="$scratch/hopsesh"
-echo "Building hopsesh into $scratch…"
+echo "Building hopsesh into ${scratch}…"
 (cd "$repo" && go build -o "$hs" ./cmd/hopsesh)
 iterm_version=$(defaults read /Applications/iTerm.app/Contents/Info CFBundleShortVersionString 2>/dev/null || echo unknown)
 echo "iTerm2 $iterm_version; macOS $(sw_vers -productVersion)"

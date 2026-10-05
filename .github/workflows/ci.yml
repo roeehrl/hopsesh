@@ -482,6 +482,10 @@ jobs:
         with:
           persist-credentials: false
       - run: shellcheck scripts/*.sh demo/*.sh
+      # macOS's /bin/sh, in a terminal's UTF-8 locale, reads a non-ASCII character straight
+      # after "$name" as part of the name ("$arch…" is the variable "arch…"). Use "${name}".
+      - name: no non-ASCII character straight after a $variable
+        run: "! grep -nP '\\$[A-Za-z_][A-Za-z0-9_]*[^\\x00-\\x7F]' scripts/*.sh demo/*.sh ci/drift/*.sh"
       - shell: pwsh
         run: |
           foreach ($f in 'scripts/install.ps1', 'scripts/windows-app-test.ps1', 'scripts/windows-peer-test.ps1', 'scripts/windows-demo-studio.ps1', 'scripts/matrix-loopback.ps1', 'scripts/matrix-wsl.ps1', 'scripts/windows-installer-shots.ps1') {
