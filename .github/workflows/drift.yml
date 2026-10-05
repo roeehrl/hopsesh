@@ -1,53 +1,239 @@
 name: upstream drift
 
-# Weekly: did an agent release or a vendor cloud change something hopsesh relies on, or
-# that its cloud design does? The targets (agents and clouds) and what is watched for each
-# come from internal/devtools/driftmanifest. probe gathers the facts with no secrets;
-# review reads them with a model, one run per group of targets (the only job that sees
-# the API key, behind the drift-review environment, main only); report merges the reviews
-# and keeps a single issue labelled upstream-drift up to date. Nothing here signs in to a
-# vendor or calls a cloud: the CLIs only print their help, and the reviewer runs on an
-# API key.
+# Weekly: did an agent release or a vendor cloud change something hopsesh relies on? The
+# targets (agents and clouds) and what is watched for each come from
+# internal/devtools/driftmanifest. probe gathers the facts with no secrets; review reads
+# them with a model, one run per group of targets (the only job that sees the API key,
+# behind the drift-review environment, main only); report merges the reviews and keeps a
+# single issue labelled upstream-drift up to date. Nothing here signs in to a vendor or
+# calls a cloud: the CLIs only print their help, and the reviewer runs on an API key.
+#
+# Another repository runs the same engine on its own manifest by calling this workflow
+# (workflow_call), pinned to a hopsesh commit; its issue goes to its own repository. See
+# docs/drift.md. A dry run (dry-run: true) runs the probe, the prompts and the report but
+# pays for no review and touches no issue.
 
 on:
   schedule:
     - cron: "41 6 * * 1"
   workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Probe, prompts and report only; no paid review, no issue
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      engine-ref:
+        description: >-
+          The full commit SHA of hopsesh whose engine runs (probe, prompts, findings schema,
+          report). Use the SHA you pinned in `uses: roeehrl/hopsesh/.github/workflows/drift.yml@<sha>`.
+        type: string
+        required: true
+      engine-repository:
+        description: The repository the engine is checked out from (a fork, for testing).
+        type: string
+        default: roeehrl/hopsesh
+      manifest:
+        description: >-
+          Path, in the calling repository, of its manifest (the schema is
+          ci/drift/manifest.schema.json in hopsesh). Empty builds hopsesh's own, which only
+          makes sense in hopsesh.
+        type: string
+        default: ""
+      focus:
+        description: >-
+          Folder, in the calling repository, with one <group>.md per review group: what that
+          review pays attention to. Required with a manifest.
+        type: string
+        default: ""
+      groups:
+        description: >-
+          The reviews and their budgets in US dollars, as JSON:
+          [{"group": "local", "budget": "1.50"}]. Every group in the manifest needs exactly
+          one; a budget is at most 99.99. Required with a manifest.
+        type: string
+        default: ""
+      issue-label:
+        description: The label of the single issue the check keeps up to date in the calling repository.
+        type: string
+        default: upstream-drift
+      issue-title:
+        description: "The issue's title; the targets with findings are appended (Upstream drift: Claude Code 2.1.300)."
+        type: string
+        default: Upstream drift
+      environment:
+        description: >-
+          The calling repository's environment the review job runs in, so its protection
+          rules (main only) and its ANTHROPIC_API_KEY secret apply. Empty for none.
+        type: string
+        default: drift-review
+      dry-run:
+        description: Probe, prompts and report only; no paid review, no issue.
+        type: boolean
+        default: false
+    secrets:
+      ANTHROPIC_API_KEY:
+        description: >-
+          The API key the review runs on, when it is not a secret of the environment. Never
+          logged; only the review step sees it. Not needed for a dry run.
+        required: false
+    outputs:
+      findings-artifact:
+        description: The artifact of this run that holds the findings (findings-file) and the issue body (report-file).
+        value: ${{ jobs.report.outputs.artifact }}
+      findings-file:
+        description: >-
+          The findings JSON inside that artifact: one object per review group, each
+          {group, summary, breaking, findings[]} as in ci/drift/schema.json.
+        value: ${{ jobs.report.outputs.findings }}
+      report-file:
+        description: The rendered report (the issue's body, Markdown) inside that artifact.
+        value: ${{ jobs.report.outputs.report }}
+      breaking:
+        description: '"true" when a review found a break.'
+        value: ${{ jobs.report.outputs.breaking }}
+      count:
+        description: The number of findings that are breaks or risks.
+        value: ${{ jobs.report.outputs.count }}
+      issue-url:
+        description: The issue that was opened, updated or closed; empty in a dry run or when there was none.
+        value: ${{ jobs.report.outputs.issue }}
 
 permissions: {}
 
 concurrency:
-  group: drift
+  group: ${{ github.workflow }}-drift-engine
   cancel-in-progress: false
 
 jobs:
   probe:
-    if: github.repository == 'roeehrl/hopsesh'
+    # Forks of hopsesh don't run the weekly check; a caller always does.
+    if: inputs.engine-ref != '' || github.repository == 'roeehrl/hopsesh'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
       actions: read # last week's drift-intel artifact, the baseline for docs, help, issues and canaries
+    outputs:
+      groups: ${{ steps.groups.outputs.groups }}
+      environment: ${{ steps.setup.outputs.environment }}
+      dry-run: ${{ steps.setup.outputs.dry-run }}
+      label: ${{ steps.setup.outputs.label }}
+      title: ${{ steps.setup.outputs.title }}
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: audit
+      - name: check the inputs
+        id: setup
+        env:
+          ENGINE_REF: ${{ inputs.engine-ref }}
+          ENGINE_REPO: ${{ inputs.engine-repository }}
+          MANIFEST: ${{ inputs.manifest }}
+          FOCUS: ${{ inputs.focus }}
+          REVIEWS: ${{ inputs.groups }}
+          LABEL: ${{ inputs.issue-label }}
+          TITLE: ${{ inputs.issue-title }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          fail() { echo "::error::$*"; exit 1; }
+          if [ -n "$ENGINE_REF" ]; then
+            printf '%s' "$ENGINE_REF" | grep -qE '^[0-9a-f]{40}$' || fail "engine-ref must be a full commit SHA"
+            printf '%s' "$ENGINE_REPO" | grep -qE '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || fail "engine-repository must be owner/repo"
+          else
+            # hopsesh's own schedule and dispatch: its manifest, groups and environment.
+            [ -z "$MANIFEST$FOCUS$REVIEWS" ] || fail "manifest, focus and groups need engine-ref"
+            LABEL=upstream-drift TITLE="Upstream drift" ENVIRONMENT=drift-review
+          fi
+          if [ -n "$MANIFEST" ] && { [ -z "$FOCUS" ] || [ -z "$REVIEWS" ]; }; then
+            fail "a manifest needs focus and groups"
+          fi
+          for p in "$MANIFEST" "$FOCUS"; do
+            case "$p" in
+              /* | .. | ../* | */.. | */../*) fail "$p: give a path inside the repository" ;;
+            esac
+          done
+          printf '%s' "$LABEL" | grep -qE '^[A-Za-z0-9][A-Za-z0-9 ._:-]{0,49}$' || fail "issue-label: letters, digits, space . _ : - (at most 50)"
+          [ -n "$TITLE" ] && [ "${#TITLE}" -le 100 ] || fail "issue-title: 1 to 100 characters"
+          [ "$DRY_RUN" = true ] && ENVIRONMENT=
+          {
+            echo "environment=$ENVIRONMENT"
+            echo "dry-run=${DRY_RUN:-false}"
+            echo "label=$LABEL"
+            echo "title=$TITLE"
+          } >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: check out the engine (a caller's run)
+        if: inputs.engine-ref != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.engine-repository }}
+          ref: ${{ inputs.engine-ref }}
+          path: .drift-engine
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version-file: ${{ inputs.engine-ref != '' && '.drift-engine/go.mod' || 'go.mod' }}
+          cache-dependency-path: ${{ inputs.engine-ref != '' && '.drift-engine/go.sum' || 'go.sum' }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
+      - name: the engine
+        env:
+          CALLED: ${{ inputs.engine-ref != '' }}
+        run: |
+          # A caller's engine leaves the workspace, which is the caller's repository.
+          if [ "$CALLED" = true ]; then
+            mv .drift-engine "$RUNNER_TEMP/drift-engine"
+            echo "ENGINE=$RUNNER_TEMP/drift-engine" >> "$GITHUB_ENV"
+          else
+            echo "ENGINE=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          fi
       - name: probe
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          MANIFEST: ${{ inputs.manifest }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          ci/drift/probe.sh intel
+          # The baseline is the last successful run of the workflow that started this one (a
+          # caller's own workflow file) on the default branch.
+          w=${WORKFLOW_REF%%@*}
+          export DRIFT_WORKFLOW=${w##*/} DRIFT_BRANCH=${DEFAULT_BRANCH:-main}
+          if [ -n "$MANIFEST" ]; then export DRIFT_MANIFEST="$GITHUB_WORKSPACE/$MANIFEST"; fi
+          "$ENGINE/ci/drift/probe.sh" intel
           cat intel/probe.md >> "$GITHUB_STEP_SUMMARY"
+      - name: the reviews and their focus
+        id: groups
+        env:
+          REVIEWS: ${{ inputs.groups }}
+          FOCUS: ${{ inputs.focus }}
+        run: |
+          fail() { echo "::error::$*"; exit 1; }
+          [ -n "$REVIEWS" ] || REVIEWS=$(cat "$ENGINE/ci/drift/groups.json")
+          dir=$ENGINE/ci/drift/focus
+          [ -z "$FOCUS" ] || dir=$GITHUB_WORKSPACE/$FOCUS
+          printf '%s' "$REVIEWS" | jq -e 'type == "array" and length > 0 and length <= 20
+            and all(.[]; type == "object" and (keys == ["budget", "group"])
+              and (.group | type == "string" and test("^[a-z][a-z0-9-]{1,31}$"))
+              and (.budget | type == "string" and test("^[0-9]{1,2}([.][0-9]{1,2})?$")))
+            and (map(.group) | length == (unique | length))' > /dev/null \
+            || fail 'groups: a JSON list of {"group": "<name>", "budget": "<dollars>"}, each group once'
+          # Every group in the manifest has exactly one review, and every review has targets.
+          have=$(jq -c '[.targets[].group] | unique' intel/manifest.json)
+          want=$(printf '%s' "$REVIEWS" | jq -c 'map(.group) | sort')
+          [ "$have" = "$want" ] || fail "the manifest's groups are $have but groups lists $want"
+          mkdir -p intel/focus
+          for g in $(printf '%s' "$REVIEWS" | jq -r '.[].group'); do
+            [ -f "$dir/$g.md" ] || fail "no $g.md in the focus folder"
+            cp "$dir/$g.md" "intel/focus/$g.md"
+          done
+          echo "groups=$(printf '%s' "$REVIEWS" | jq -c .)" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: drift-intel
@@ -58,54 +244,76 @@ jobs:
     needs: probe
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    environment: drift-review
+    # The caller's environment (hopsesh's: drift-review, main only); none in a dry run.
+    environment: ${{ needs.probe.outputs.environment }}
     permissions:
       contents: read
     strategy:
       fail-fast: false
-      # One review per group of targets, each with its own budget. The groups are those in
-      # internal/devtools/driftmanifest/targets.go, whose test checks this list.
+      # One review per group of targets, each with its own budget: the groups input, or
+      # for hopsesh's own runs ci/drift/groups.json (whose groups driftmanifest's test
+      # checks against targets.go).
       matrix:
-        include:
-          - group: local
-            budget: "1.50"
-          - group: anthropic-cloud
-            budget: "1.00"
-          - group: openai-cloud
-            budget: "1.00"
-          - group: third-party-cloud
-            budget: "0.75"
+        include: ${{ fromJSON(needs.probe.outputs.groups) }}
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: audit
+      # The repository under review: the reviewer reads its code.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: check out the engine (a caller's run)
+        if: inputs.engine-ref != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.engine-repository }}
+          ref: ${{ inputs.engine-ref }}
+          path: .drift-engine
+          persist-credentials: false
+      - name: the engine
+        env:
+          CALLED: ${{ inputs.engine-ref != '' }}
+        run: |
+          if [ "$CALLED" = true ]; then
+            mv .drift-engine "$RUNNER_TEMP/drift-engine"
+            echo "ENGINE=$RUNNER_TEMP/drift-engine" >> "$GITHUB_ENV"
+          else
+            echo "ENGINE=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          fi
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: drift-intel
           path: intel
+      - name: prompt
+        env:
+          GROUP: ${{ matrix.group }}
+        run: |
+          "$ENGINE/ci/drift/prompt.sh" "$GROUP" intel intel/focus > "$RUNNER_TEMP/prompt.md"
+          printf 'Prompt (%s): %s lines\n' "$GROUP" "$(wc -l < "$RUNNER_TEMP/prompt.md" | tr -d ' ')" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: needs.probe.outputs.dry-run != 'true'
         with:
           node-version: 24
       - name: install Claude Code (the version hopsesh is tested with)
-        # The exact version the module's fixtures were recorded with, read from the repository.
+        if: needs.probe.outputs.dry-run != 'true'
+        # The exact version the module's fixtures were recorded with, read from the engine.
         run: | # zizmor: ignore[adhoc-packages]
-          version=$(find agents/claude/testdata -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort -V | tail -n 1)
+          version=$(find "$ENGINE/agents/claude/testdata" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort -V | tail -n 1)
           npm install -g --silent --prefix "$RUNNER_TEMP/claude" "@anthropic-ai/claude-code@$version"
           echo "$RUNNER_TEMP/claude/bin" >> "$GITHUB_PATH"
       - name: review
+        if: needs.probe.outputs.dry-run != 'true'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
           GROUP: ${{ matrix.group }}
           BUDGET: ${{ matrix.budget }}
         run: |
-          ci/drift/prompt.sh "$GROUP" intel > "$RUNNER_TEMP/prompt.md"
+          [ -n "$ANTHROPIC_API_KEY" ] || { echo "::error::no ANTHROPIC_API_KEY: set it in the environment or pass it under secrets, or make it a dry run"; exit 1; }
           claude --safe-mode -p "$(cat "$RUNNER_TEMP/prompt.md")" \
             --model sonnet \
-            --output-format json --json-schema "$(cat ci/drift/schema.json)" \
+            --output-format json --json-schema "$(cat "$ENGINE/ci/drift/schema.json")" \
             --tools "Read,Grep,Glob" --permission-mode dontAsk \
             --max-budget-usd "$BUDGET" --no-session-persistence > review.json || true
           jq '{subtype, is_error, total_cost_usd, num_turns}' review.json || cat review.json
@@ -113,6 +321,15 @@ jobs:
             || { echo "::error::the $GROUP review returned no report"; exit 1; }
           jq --arg g "$GROUP" '.structured_output + {group: $g}' review.json > "report-$GROUP.json"
           printf '\nReview cost (%s): $%s\n' "$GROUP" "$(jq -r .total_cost_usd review.json)" >> "$GITHUB_STEP_SUMMARY"
+      - name: review (dry run, nothing paid)
+        if: needs.probe.outputs.dry-run == 'true'
+        env:
+          GROUP: ${{ matrix.group }}
+          BUDGET: ${{ matrix.budget }}
+        run: |
+          jq -n --arg g "$GROUP" --arg b "$BUDGET" --arg n "$(wc -l < "$RUNNER_TEMP/prompt.md" | tr -d ' ')" \
+            '{summary: "Dry run: the \($g) prompt has \($n) lines and a budget of $\($b); no review ran.", breaking: false, findings: [], group: $g}' \
+            > "report-$GROUP.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: drift-report-${{ matrix.group }}
@@ -127,7 +344,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
-      issues: write
+      issues: write # the single issue, in the repository the check runs for
+    outputs:
+      artifact: drift-findings
+      findings: findings.json
+      report: report.md
+      breaking: ${{ steps.merge.outputs.breaking }}
+      count: ${{ steps.merge.outputs.count }}
+      issue: ${{ steps.issue.outputs.url }}
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
@@ -141,23 +365,26 @@ jobs:
           name: drift-intel
           path: intel
       - name: merge the reviews
+        id: merge
         run: |
           # The groups come from the manifest, in its order; a review with no report is named.
           missing=
-          echo '[]' > reports.json
+          echo '[]' > findings.json
           for g in $(jq -r 'reduce .targets[].group as $g ([]; if index([$g]) then . else . + [$g] end) | .[]' intel/manifest.json); do
             if [ -f "report-$g.json" ]; then
-              jq --slurpfile r "report-$g.json" '. + $r' reports.json > merged.json && mv merged.json reports.json
+              jq --slurpfile r "report-$g.json" '. + $r' findings.json > merged.json && mv merged.json findings.json
             else
               missing="$missing $g"
             fi
           done
           echo "MISSING=${missing# }" >> "$GITHUB_ENV"
-          jq -e 'length > 0' reports.json > /dev/null || { echo "::error::no review returned a report"; exit 1; }
-      - name: update the upstream-drift issue
+          jq -e 'length > 0' findings.json > /dev/null || { echo "::error::no review returned a report"; exit 1; }
+          {
+            echo "breaking=$(jq 'any(.[]; .breaking == true or any(.findings[]; .severity == "break"))' findings.json)"
+            echo "count=$(jq '[.[].findings[] | select(.severity != "info")] | length' findings.json)"
+          } >> "$GITHUB_OUTPUT"
+      - name: the report
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           # The reports are model output built from third-party text: neutralise @mentions.
@@ -180,31 +407,54 @@ jobs:
                   + (if .test != "" then "- Test: \(.test | safe)\n" else "" end)
                 ) | join("\n")) end)
             + "\n---\nWeekly upstream-drift check. Facts, sources and the full reports: \($run)\n"
-          ' reports.json > body.md
-          cat body.md >> "$GITHUB_STEP_SUMMARY"
-
+          ' findings.json > report.md
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: drift-findings
+          path: |
+            findings.json
+            report.md
+          retention-days: 90
+      - name: update the issue
+        id: issue
+        if: needs.probe.outputs.dry-run != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          LABEL: ${{ needs.probe.outputs.label }}
+          TITLE: ${{ needs.probe.outputs.title }}
+        run: |
           # The title names the targets with findings that matter, at most three of them.
-          title=$(jq -r --slurpfile v intel/versions.json '
+          title=$(jq -r --slurpfile v intel/versions.json --arg t "$TITLE" '
             ([.[].findings[] | select(.severity != "info") | .target] | unique) as $ids
             | [$v[0][] | select(.id as $i | $ids | index($i)) | .name + (if .latest == "" then "" else " " + .latest end)]
             | if length > 3 then .[:3] + ["\(length - 3) more"] else . end
-            | if length == 0 then "Upstream drift" else "Upstream drift: " + join(", ") end' reports.json)
-          count=$(jq '[.[].findings[] | select(.severity != "info")] | length' reports.json)
-          gh label create upstream-drift --color FBCA04 --description "An upstream agent or cloud change may affect hopsesh" --force
-          open=$(gh issue list --label upstream-drift --state open --json number --jq '.[0].number // empty')
+            | if length == 0 then $t else $t + ": " + join(", ") end' findings.json)
+          count=$(jq '[.[].findings[] | select(.severity != "info")] | length' findings.json)
+          project=$(jq -r .project.name intel/manifest.json)
+          gh label create "$LABEL" --color FBCA04 --description "An upstream agent or cloud change may affect $project" --force
+          open=$(gh issue list --label "$LABEL" --state open --json number --jq '.[0].number // empty')
+          url=
           if [ "$count" = 0 ]; then
             if [ -n "$open" ]; then
-              gh issue comment "$open" --body-file body.md
+              gh issue comment "$open" --body-file report.md
               # Close only when every group was reviewed.
-              [ -n "$MISSING" ] || gh issue close "$open" --reason completed --comment "Nothing that affects hopsesh in the latest upstream changes."
+              [ -n "$MISSING" ] || gh issue close "$open" --reason completed --comment "Nothing that affects $project in the latest upstream changes."
+              url=$(gh issue view "$open" --json url --jq .url)
             fi
           elif [ -n "$open" ]; then
-            gh issue edit "$open" --title "$title" --body-file body.md
+            gh issue edit "$open" --title "$title" --body-file report.md
             gh issue comment "$open" --body "Updated with this week's check: $RUN_URL"
+            url=$(gh issue view "$open" --json url --jq .url)
           else
-            gh issue create --title "$title" --body-file body.md --label upstream-drift
+            url=$(gh issue create --title "$title" --body-file report.md --label "$LABEL")
           fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+      - name: every group reviewed
+        run: |
           if [ -n "$MISSING" ]; then
-            echo "::error::no report from:$MISSING"
+            echo "::error::no report from: $MISSING"
             exit 1
           fi

@@ -85,6 +85,9 @@ for f in "$WORK"/ci/*; do
         --source-ref "refs/tags/$TAG" --source-digest "$FULL_COMMIT" --deny-self-hosted-runners >/dev/null \
         || die "no valid build provenance for $(basename "$f"); not signing"
       n=$((n + 1)) ;;
+    *.sha256) # the test bundle's own checksum file: it must match its archive
+      (cd "$WORK/ci" && shasum -a 256 -c "$(basename "$f")" >/dev/null) \
+        || die "$(basename "$f") does not match its file; not signing" ;;
     *checksums.txt*) rm -f "$f" ;; # replaced below
   esac
 done

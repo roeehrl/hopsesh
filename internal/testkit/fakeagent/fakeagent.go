@@ -37,7 +37,7 @@ func logCall(line string) {
 func Claude() int {
 	logCall("claude " + strings.Join(os.Args[1:], " "))
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
-		fmt.Println("2.1.284 (Claude Code)")
+		fmt.Println(fakecloud.ClaudeVersionLine)
 	}
 	if handled, code := fakecloud.Claude(proc()); handled {
 		return code
@@ -50,7 +50,7 @@ func Codex() int {
 	logCall("codex " + strings.Join(os.Args[1:], " "))
 	switch {
 	case len(os.Args) > 1 && os.Args[1] == "--version":
-		fmt.Println("codex-cli 0.153.2")
+		fmt.Println(fakecloud.CodexVersionLine)
 	case len(os.Args) > 1 && os.Args[1] == "app-server":
 		return appServer()
 	}

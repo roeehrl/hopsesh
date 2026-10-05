@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -9,105 +10,31 @@ import (
 	"testing"
 )
 
-// The pattern schema.json puts on findings[].target.
-var targetID = regexp.MustCompile(`^[a-z][a-z0-9-]{1,31}$`)
-
 func TestTargets(t *testing.T) {
 	t.Chdir(filepath.Join("..", "..", ".."))
-	ts, err := buildTargets(modules())
+	mods := modules()
+	ts, err := buildTargets(mods)
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, e := range checkTargets(ts, groups, false) {
+		t.Error(e)
+	}
 	cloudOnly := map[string]bool{}
-	for _, m := range modules() {
+	for _, m := range mods {
 		cloudOnly[string(m.ID)] = m.cloudOnly()
 	}
-	issue := regexp.MustCompile(`^[\w.-]+/[\w.-]+#\d+$`)
 	seen := map[string]bool{}
 	used := map[string]bool{}
 	for _, x := range ts {
-		where := "target " + x.ID
-		if !targetID.MatchString(x.ID) || seen[x.ID] {
-			t.Errorf("%s: id is not a unique lower-case name", where)
-		}
 		seen[x.ID] = true
 		used[x.Group] = true
-		if x.Name == "" || x.Vendor == "" || x.Surface == "" {
-			t.Errorf("%s: name, vendor and surface are required", where)
-		}
-		if !slices.Contains(groups, x.Group) {
-			t.Errorf("%s: group %q is not one of %v", where, x.Group, groups)
-		}
-		if !slices.Contains([]string{"agent", "cloud", "standard"}, x.Kind) || !slices.Contains([]string{"high", "low"}, x.Priority) {
-			t.Errorf("%s: kind %q or priority %q", where, x.Kind, x.Priority)
-		}
 		if x.Module != "" && x.Tested == "" && !cloudOnly[x.Module] {
-			t.Errorf("%s: driven by %s, which has no fixture folder to give the tested version", where, x.Module)
-		}
-		switch x.Latest.From {
-		case "none":
-		case "npm", "github-release":
-			if x.Latest.Ref == "" {
-				t.Errorf("%s: latest from %s needs a ref", where, x.Latest.From)
-			}
-		case "json":
-			if !strings.HasPrefix(x.Latest.Ref, "https://") || !strings.HasPrefix(x.Latest.Field, ".") {
-				t.Errorf("%s: latest from json needs an https ref and a jq field", where)
-			}
-		default:
-			t.Errorf("%s: latest from %q", where, x.Latest.From)
-		}
-		w := x.Watch
-		if len(w.Docs) == 0 || w.Grep == "" {
-			t.Errorf("%s: every target hashes docs and greps its feeds", where)
-		}
-		if _, err := regexp.Compile(w.Grep); err != nil {
-			t.Errorf("%s: grep: %v", where, err)
-		}
-		for _, u := range w.Docs {
-			if !strings.HasPrefix(u, "https://") {
-				t.Errorf("%s: doc %s is not https", where, u)
-			}
-		}
-		for _, f := range w.Feeds {
-			ok := f.Kind == "releases" && f.Repo != "" && f.URL == "" ||
-				(f.Kind == "markdown" || f.Kind == "feed") && strings.HasPrefix(f.URL, "https://") && f.Repo == ""
-			if !ok {
-				t.Errorf("%s: feed %+v", where, f)
-			}
-		}
-		if len(w.Relies) > 0 && len(w.Help) == 0 {
-			t.Errorf("%s: relies on help it does not run", where)
-		}
-		if x.Priority == "low" && (len(w.Help) > 0 || len(w.Issues) > 0 || w.Code != nil) {
-			t.Errorf("%s: a low-priority target is docs only", where)
-		}
-		for _, argv := range w.Help {
-			if len(argv) == 0 {
-				t.Errorf("%s: empty help argv", where)
-			}
-		}
-		for _, i := range w.Issues {
-			if !issue.MatchString(i) {
-				t.Errorf("%s: issue %q is not owner/repo#number", where, i)
-			}
-		}
-		for _, s := range w.Searches {
-			if !strings.HasPrefix(s, "repo:") {
-				t.Errorf("%s: search %q is not limited to a repository", where, s)
-			}
-		}
-		if c := w.Code; c != nil && (c.Repo == "" || len(c.Paths) == 0 || len(c.Canaries) == 0) {
-			t.Errorf("%s: code needs a repo, paths and canaries", where)
-		}
-		if s := w.Schema; s != nil {
-			if _, err := regexp.Compile(s.Keep); err != nil || len(s.Argv) == 0 {
-				t.Errorf("%s: schema %+v", where, s)
-			}
+			t.Errorf("target %s: driven by %s, which has no fixture folder to give the tested version", x.ID, x.Module)
 		}
 	}
 	declared := map[string]bool{}
-	for _, m := range modules() {
+	for _, m := range mods {
 		if !seen[string(m.ID)] && !m.cloudOnly() {
 			t.Errorf("module %s is not watched", m.ID)
 		}
@@ -128,17 +55,90 @@ func TestTargets(t *testing.T) {
 			t.Errorf("cloud %s is declared by a module and listed in clouds too", x.ID)
 		}
 	}
-	// Every group has a target, and a review in drift.yml's matrix.
-	wf, err := os.ReadFile(filepath.Join(".github", "workflows", "drift.yml"))
+	// Every group has a target, a review with a budget in ci/drift/groups.json (the
+	// matrix of hopsesh's own runs) and a focus file.
+	b, err := os.ReadFile(filepath.Join("ci", "drift", "groups.json"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	var reviews []struct{ Group, Budget string }
+	if err := json.Unmarshal(b, &reviews); err != nil {
+		t.Fatal(err)
+	}
+	var listed []string
+	for _, r := range reviews {
+		listed = append(listed, r.Group)
+		if !budget.MatchString(r.Budget) {
+			t.Errorf("groups.json: budget %q of %s", r.Budget, r.Group)
+		}
+	}
+	if !slices.Equal(listed, groups) {
+		t.Errorf("ci/drift/groups.json lists %v, targets.go %v", listed, groups)
 	}
 	for _, g := range groups {
 		if !used[g] {
 			t.Errorf("group %s has no targets", g)
 		}
-		if !strings.Contains(strings.ReplaceAll(string(wf), "\r\n", "\n"), "- group: "+g+"\n") { // Windows checks out CRLF
-			t.Errorf("group %s has no review in drift.yml", g)
+		if _, err := os.Stat(filepath.Join("ci", "drift", "focus", g+".md")); err != nil {
+			t.Errorf("group %s: %v", g, err)
+		}
+	}
+}
+
+// The budget format drift.yml accepts for a review.
+var budget = regexp.MustCompile(`^[0-9]{1,2}(\.[0-9]{1,2})?$`)
+
+// The manifest hopsesh builds, and the caller fixture the workflow's own test run uses,
+// both satisfy ci/drift/manifest.schema.json.
+func TestManifestSchema(t *testing.T) {
+	t.Chdir(filepath.Join("..", "..", ".."))
+	mods := modules()
+	ts, err := buildTargets(mods)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(map[string]any{"project": hopsesh(mods), "modules": mods, "targets": ts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	built := filepath.Join(t.TempDir(), "manifest.json")
+	if err := os.WriteFile(built, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	schema := filepath.Join("ci", "drift", "manifest.schema.json")
+	for _, e := range checkFile(schema, built, false) {
+		t.Errorf("hopsesh's manifest: %s", e)
+	}
+	for _, e := range checkFile(schema, filepath.Join("ci", "drift", "testdata", "manifest.json"), true) {
+		t.Errorf("the caller fixture: %s", e)
+	}
+	// hopsesh's own manifest uses what a caller may not.
+	if errs := checkFile(schema, built, true); len(errs) == 0 {
+		t.Error("an external manifest with module and watch.tests was accepted")
+	}
+}
+
+func TestCheckRefuses(t *testing.T) {
+	t.Chdir(filepath.Join("..", "..", ".."))
+	schema := filepath.Join("ci", "drift", "manifest.schema.json")
+	good := `{"id": "demo", "name": "Demo", "kind": "agent", "group": "sample", "vendor": "Example", "surface": "its help",
+	  "priority": "high", "tested": "", "latest": {"from": "none"}, "watch": {"docs": ["https://example.com/a.md"], "grep": "x"}}`
+	for name, c := range map[string]struct{ doc, want string }{
+		"no project":  {`{"targets": [` + good + `]}`, "project is required"},
+		"no targets":  {`{"project": {"name": "p", "about": "a", "cite": "c"}, "targets": []}`, "fewer than 1"},
+		"duplicate":   {`{"project": {"name": "p", "about": "a", "cite": "c"}, "targets": [` + good + `,` + good + `]}`, "not a unique"},
+		"http doc":    {`{"project": {"name": "p", "about": "a", "cite": "c"}, "targets": [` + strings.Replace(good, "https://", "http://", 1) + `]}`, "does not match"},
+		"bad grep":    {`{"project": {"name": "p", "about": "a", "cite": "c"}, "targets": [` + strings.Replace(good, `"grep": "x"`, `"grep": "("`, 1) + `]}`, "grep:"},
+		"relies only": {`{"project": {"name": "p", "about": "a", "cite": "c"}, "targets": [` + strings.Replace(good, `"grep": "x"`, `"grep": "x", "relies": ["--x"]`, 1) + `]}`, "relies on help"},
+		"unknown key": {`{"project": {"name": "p", "about": "a", "cite": "c"}, "targets": [` + strings.Replace(good, `"tested"`, `"tset": "", "tested"`, 1) + `]}`, "tset is not allowed"},
+	} {
+		p := filepath.Join(t.TempDir(), "m.json")
+		if err := os.WriteFile(p, []byte(c.doc), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		errs := checkFile(schema, p, true)
+		if !slices.ContainsFunc(errs, func(e string) bool { return strings.Contains(e, c.want) }) {
+			t.Errorf("%s: %q, want an error with %q", name, errs, c.want)
 		}
 	}
 }

@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/roeehrl/hopsesh/blob/main/testbundle/schemas/bundle-manifest.schema.json",
+  "title": "hopsesh test bundle manifest",
+  "description": "manifest.json at the root of hopsesh-testbundle-<version>.tar.gz: which hopsesh it belongs to, the stand-in programs, the agents and every file with its checksum.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["bundle", "hopsesh", "standIns", "agents", "files"],
+  "properties": {
+    "bundle": {"const": 1, "description": "The layout's version; a change a reader must know about raises it."},
+    "hopsesh": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "commit", "date"],
+      "properties": {
+        "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$"},
+        "commit": {"type": "string", "pattern": "^[0-9a-f]{7,40}$"},
+        "date": {"type": "string", "description": "The commit's date, RFC 3339; every file in the archive has it."}
+      }
+    },
+    "standIns": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["program", "names", "platforms", "versions", "env"],
+      "properties": {
+        "program": {"type": "string", "description": "bin/<platform>/<program>: one program that plays every stand-in by the name it runs under."},
+        "names": {"type": "array", "items": {"type": "string"}, "description": "The names it answers to (copy or link it as each)."},
+        "platforms": {"type": "array", "items": {"type": "string", "pattern": "^[a-z0-9]+-[a-z0-9]+$"}},
+        "versions": {"type": "object", "additionalProperties": {"type": "string"}, "description": "What each prints for --version."},
+        "env": {"type": "object", "additionalProperties": {"type": "string"}, "description": "The environment variables it reads, and what for."}
+      }
+    },
+    "agents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "tested", "versions"],
+        "properties": {
+          "id": {"type": "string"},
+          "name": {"type": "string"},
+          "tested": {"type": "array", "items": {"type": "string"}, "description": "The agent versions the module was tested with (Spec.Tested)."},
+          "versions": {"type": "array", "items": {"type": "string"}, "description": "The agent-version folders in the bundle."}
+        }
+      }
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "kind", "sha256", "size"],
+        "properties": {
+          "path": {"type": "string", "description": "Relative to the bundle's root folder."},
+          "kind": {"enum": ["doc", "schema", "specs", "program", "fixture", "hook", "registry", "notify"]},
+          "agent": {"type": "string"},
+          "agentVersion": {"type": "string"},
+          "schema": {"type": "string", "description": "The schema the file was validated against."},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "size": {"type": "integer", "minimum": 0}
+        }
+      }
+    }
+  }
+}

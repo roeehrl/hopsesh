@@ -105,6 +105,41 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
+  testbundle:
+    name: test bundle
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: the contributions and the fixtures validate
+        run: go run ./internal/devtools/testbundle check
+      - name: the bundle builds, as a release builds it
+        run: go run ./internal/devtools/testbundle build -version 0.0.0-ci -out "$RUNNER_TEMP/tb"
+      - name: the archive matches its checksum and manifest, and the stand-in runs from it
+        working-directory: ${{ runner.temp }}/tb
+        run: |
+          sha256sum -c hopsesh-testbundle-0.0.0-ci.tar.gz.sha256
+          tar -xzf hopsesh-testbundle-0.0.0-ci.tar.gz
+          cd hopsesh-testbundle-0.0.0-ci
+          jq -r '.files[] | "\(.sha256)  \(.path)"' manifest.json | sha256sum -c --quiet
+          [ "$(jq '.files | length' manifest.json)" = "$(find . -type f ! -name manifest.json | wc -l)" ]
+          mkdir -p "$RUNNER_TEMP/stand-ins"
+          for n in claude codex; do cp bin/linux-amd64/fakeagent "$RUNNER_TEMP/stand-ins/$n"; done
+          [ "$("$RUNNER_TEMP/stand-ins/claude" --version)" = "$(jq -r .standIns.versions.claude manifest.json)" ]
+          [ "$("$RUNNER_TEMP/stand-ins/codex" --version)" = "$(jq -r .standIns.versions.codex manifest.json)" ]
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: testbundle
+          path: ${{ runner.temp }}/tb/hopsesh-testbundle-0.0.0-ci.tar.gz*
+          retention-days: 7
+
   workflows:
     name: workflow audit
     runs-on: ubuntu-24.04

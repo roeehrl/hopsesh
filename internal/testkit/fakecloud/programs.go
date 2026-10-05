@@ -11,6 +11,13 @@ import (
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
+// The version lines the stand-in claude and codex print for --version: the versions of
+// the agents' newest fixtures (agents/<id>/testdata/<version>).
+const (
+	ClaudeVersionLine = "2.1.284 (Claude Code)"
+	CodexVersionLine  = "codex-cli 0.153.2"
+)
+
 // Programs are the stand-in claude, codex, gh, jules, devin, amp and fakecloud for
 // agenttest.FakeHost.Programs
 // (and agenttest.RunCloud): they answer --version and the cloud verbs, in this process,
@@ -41,7 +48,7 @@ func Programs(dir string, vars map[string]string) map[string]func(argv []string,
 		"claude": run(func(p Proc) int {
 			p.Log("claude " + strings.Join(p.Args, " "))
 			if len(p.Args) == 1 && p.Args[0] == "--version" {
-				fmt.Fprintln(p.Stdout, "2.1.284 (Claude Code)")
+				fmt.Fprintln(p.Stdout, ClaudeVersionLine)
 				return 0
 			}
 			_, code := Claude(p)
@@ -50,7 +57,7 @@ func Programs(dir string, vars map[string]string) map[string]func(argv []string,
 		"codex": run(func(p Proc) int {
 			p.Log("codex " + strings.Join(p.Args, " "))
 			if len(p.Args) == 1 && p.Args[0] == "--version" {
-				fmt.Fprintln(p.Stdout, "codex-cli 0.153.2")
+				fmt.Fprintln(p.Stdout, CodexVersionLine)
 				return 0
 			}
 			_, code := Codex(p)

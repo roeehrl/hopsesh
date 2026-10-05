@@ -139,6 +139,19 @@ chips, the palette and Settings → Agents. The app picks the first of these tha
 **Then document it:** add the agent to the README, add an entry to `CHANGELOG.md`, and a line to
 `docs/design.md`.
 
+## Contribute to the test bundle
+
+Projects that build on hopsesh can add payloads they captured from a real agent (Claude Code
+hook inputs, running-session registry entries such as one with `waitingFor`, Codex `notify`
+payloads) under `testbundle/<agent>/<agent version>/`, so every release's test bundle carries
+them. The payloads must be scrubbed to made-up data (alice, bob, `example.com`,
+`192.0.2.x`/`100.64.0.x`, no tokens) and satisfy their slot's schema;
+`go run ./internal/devtools/testbundle check` runs the same checks as CI. The layout, the
+slots and the rules are in [testbundle/README.md](testbundle/README.md).
+
+The weekly upstream-drift check, and how another repository reuses it, is described in
+[docs/drift.md](docs/drift.md).
+
 ## Pull requests
 
 - One logical change per PR, with tests. CI runs on Linux, macOS and Windows.

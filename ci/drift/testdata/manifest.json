@@ -1,0 +1,45 @@
+{
+  "project": {
+    "name": "Demo project",
+    "about": "A made-up project that exercises the reusable drift workflow from inside hopsesh: drift-caller-test.yml passes this manifest in dry-run mode, so the probe, the prompts and the report run for real and no review is paid for.",
+    "cite": "Cite the file under ci/drift/testdata that declares what the target relies on."
+  },
+  "targets": [
+    {
+      "id": "jq",
+      "name": "jq",
+      "kind": "agent",
+      "group": "sample",
+      "vendor": "jqlang",
+      "surface": "the runner's jq: `--help` and the --raw-output flag",
+      "priority": "high",
+      "tested": "",
+      "latest": {"from": "github-release", "ref": "jqlang/jq"},
+      "versionArgv": ["jq", "--version"],
+      "watch": {
+        "docs": ["https://raw.githubusercontent.com/jqlang/jq/master/README.md"],
+        "feeds": [{"kind": "releases", "repo": "jqlang/jq", "tag": "jq-"}],
+        "grep": "raw-output|deprecat|remov|breaking",
+        "help": [["jq", "--help"]],
+        "relies": ["--raw-output"],
+        "issues": [],
+        "searches": []
+      }
+    },
+    {
+      "id": "hopsesh-readme",
+      "name": "hopsesh README",
+      "kind": "standard",
+      "group": "sample",
+      "vendor": "hopsesh contributors",
+      "surface": "the README of hopsesh (docs only)",
+      "priority": "low",
+      "tested": "",
+      "latest": {"from": "none"},
+      "watch": {
+        "docs": ["https://raw.githubusercontent.com/roeehrl/hopsesh/main/README.md"],
+        "grep": "session|agent|cloud"
+      }
+    }
+  ]
+}

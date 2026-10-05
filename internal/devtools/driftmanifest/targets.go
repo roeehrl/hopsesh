@@ -95,7 +95,8 @@ type schema struct {
 	Keep string   `json:"keep"`
 }
 
-// groups are the reviews, each with its own budget; drift.yml's review matrix lists the same.
+// groups are the reviews, each with its own budget; ci/drift/groups.json, the review
+// matrix of hopsesh's own runs, lists the same.
 var groups = []string{"local", "anthropic-cloud", "openai-cloud", "third-party-cloud"}
 
 // agentWatch is what the probe watches for each agent module. A module without an entry

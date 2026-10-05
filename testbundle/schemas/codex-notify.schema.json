@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/roeehrl/hopsesh/blob/main/testbundle/schemas/codex-notify.schema.json",
+  "title": "Codex notify payload",
+  "description": "The JSON document Codex passes to the program configured as `notify` in config.toml (as its last argument), captured and scrubbed. Only the event type is checked; the rest is kept as captured. The file lives in codex/<Codex version>/notify/.",
+  "type": "object",
+  "required": ["type"],
+  "properties": {
+    "type": {"type": "string", "pattern": "^[a-z][a-z-]{2,40}$"}
+  },
+  "additionalProperties": true
+}

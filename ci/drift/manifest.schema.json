@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/roeehrl/hopsesh/blob/main/ci/drift/manifest.schema.json",
+  "title": "Upstream-drift manifest",
+  "description": "What the drift check watches. hopsesh builds its own with internal/devtools/driftmanifest; a repository that calls the reusable workflow commits one and passes its path. `driftmanifest check FILE` validates a manifest against this schema and the rules no schema can say (unique ids, compilable grep patterns, help for every relied-on flag). Empty lists may be [] or null.",
+  "type": "object",
+  "required": ["project", "targets"],
+  "properties": {
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "about", "cite"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "maxLength": 60, "description": "The project the review protects: \"hopsesh\", \"MyCNC\". Used in the prompt and the issue."},
+        "about": {"type": "string", "minLength": 1, "maxLength": 4000, "description": "A paragraph for the reviewer: what the project is and which upstream behaviour it depends on."},
+        "cite": {"type": "string", "minLength": 1, "maxLength": 2000, "description": "Where a finding points in the project's code: the files that hold what each kind of target relies on."}
+      }
+    },
+    "modules": {
+      "type": ["array", "null"],
+      "description": "hopsesh only: what each compiled-in agent module declares. Another project may leave it out, or put its own records here for the reviewer to read."
+    },
+    "targets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/target"}
+    }
+  },
+  "$defs": {
+    "list": {"type": ["array", "null"], "items": {"type": "string", "minLength": 1}},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "kind", "group", "vendor", "surface", "priority", "tested", "latest", "watch"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$", "description": "Unique; a finding names it."},
+        "name": {"type": "string", "minLength": 1, "description": "For people: \"Codex cloud\"."},
+        "kind": {"enum": ["agent", "cloud", "standard"]},
+        "group": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$", "description": "The review that reads this target. Every group needs a budget in the workflow's groups input and a <group>.md in its focus folder."},
+        "vendor": {"type": "string", "minLength": 1},
+        "surface": {"type": "string", "minLength": 1, "description": "What the project uses there, in plain words."},
+        "priority": {"enum": ["high", "low"], "description": "low: docs and feeds only (no help, issues or code)."},
+        "module": {"type": "string", "description": "hopsesh only: the agent module that drives the target."},
+        "tested": {"type": "string", "description": "The exact version the project was tested with (\"2.1.284\"), or \"\". With a package, the probe diffs the help of this version against the latest."},
+        "latest": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["from"],
+          "description": "Where the probe reads the newest version.",
+          "properties": {
+            "from": {"enum": ["npm", "github-release", "json", "none"]},
+            "ref": {"type": "string", "description": "npm: the package. github-release: owner/repo. json: an https URL."},
+            "field": {"type": "string", "pattern": "^\\.", "description": "json: the jq path to the version (\".info.version\")."}
+          }
+        },
+        "package": {"type": "string", "description": "The npm package whose CLI runs the help commands, installed at tested and at latest. Without one the help comes from the CLI on the runner and is compared with last week's."},
+        "versionArgv": {"$ref": "#/$defs/list", "description": "A command that prints the version the project parses."},
+        "watch": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["docs", "grep"],
+          "properties": {
+            "docs": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^https://"}, "description": "Markdown pages and llms.txt indexes, hashed and diffed week to week."},
+            "feeds": {
+              "type": ["array", "null"],
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind"],
+                "properties": {
+                  "kind": {"enum": ["markdown", "feed", "releases"], "description": "markdown: a CHANGELOG cut at the tested version (\"## <tested>\"). feed: RSS or Atom. releases: a GitHub repository's releases."},
+                  "url": {"type": "string", "pattern": "^https://", "description": "markdown and feed."},
+                  "repo": {"type": "string", "pattern": "^[\\w.-]+/[\\w.-]+$", "description": "releases: owner/repo."},
+                  "tag": {"type": "string", "description": "releases: the tag's prefix before the version (\"rust-v\")."}
+                }
+              }
+            },
+            "grep": {"type": "string", "minLength": 1, "description": "An extended regular expression for the feeds' new entries and the docs diffs."},
+            "help": {"type": ["array", "null"], "items": {"type": "array", "minItems": 1, "items": {"type": "string"}}, "description": "Commands that need no login: [[\"claude\", \"--help\"]]."},
+            "relies": {"$ref": "#/$defs/list", "description": "Flags and subcommands in that help the project uses. One that was in the tested help and is gone is a break."},
+            "issues": {"type": ["array", "null"], "items": {"type": "string", "pattern": "^[\\w.-]+/[\\w.-]+#\\d+$"}, "description": "Upstream issues and pull requests: \"owner/repo#123\"."},
+            "searches": {"type": ["array", "null"], "items": {"type": "string", "pattern": "^repo:"}, "description": "GitHub issue searches, limited to a repository and to issues opened since the last run."},
+            "code": {
+              "type": ["object", "null"],
+              "additionalProperties": false,
+              "required": ["repo", "paths", "canaries"],
+              "properties": {
+                "repo": {"type": "string", "pattern": "^[\\w.-]+/[\\w.-]+$"},
+                "paths": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+                "canaries": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+              }
+            },
+            "schema": {
+              "type": ["object", "null"],
+              "additionalProperties": false,
+              "required": ["argv", "keep"],
+              "description": "A protocol schema the CLI generates (the output folder is appended to argv); files matching keep are diffed in full.",
+              "properties": {
+                "argv": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+                "keep": {"type": "string"}
+              }
+            },
+            "tests": {"type": "string", "description": "hopsesh only: a go test -run pattern for its real-agent tests. Refused in a caller's manifest."}
+          }
+        }
+      }
+    }
+  }
+}
