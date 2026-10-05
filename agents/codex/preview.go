@@ -237,7 +237,8 @@ func (m *Module) Rename(_ context.Context, h agent.Host, in agent.Install, s age
 
 // previewMessage extracts only public user/assistant text for duplicate matching.
 func previewMessage(l line) (string, string) {
-	if l.Type == "event_msg" {
+	switch l.Type {
+	case "event_msg":
 		var e struct {
 			Type    string `json:"type"`
 			Message string `json:"message"`
@@ -250,7 +251,7 @@ func previewMessage(l line) (string, string) {
 				return "assistant", e.Message
 			}
 		}
-	} else if l.Type == "response_item" {
+	case "response_item":
 		var r responseItem
 		if json.Unmarshal(l.Payload, &r) == nil && r.Type == "message" && (r.Role == "user" || r.Role == "assistant") {
 			var parts []string

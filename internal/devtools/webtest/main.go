@@ -281,7 +281,12 @@ func main() {
 		mu.Lock()
 		defer mu.Unlock()
 		n := 220
-		fmt.Sscan(r.URL.Query().Get("n"), &n)
+		if raw := r.URL.Query().Get("n"); raw != "" {
+			if _, err := fmt.Sscan(raw, &n); err != nil {
+				http.Error(w, "invalid session count", http.StatusBadRequest)
+				return
+			}
+		}
 		if err := seedMany(h, n); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
