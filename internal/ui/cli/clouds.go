@@ -15,6 +15,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/proc"
+	"github.com/roeehrl/hopsesh/internal/core/winshim"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -494,7 +495,11 @@ func (r *run) pullCloud(cmd *cobra.Command, cloud string, id agent.SessionID, op
 	}
 	run, _ := cmd.Flags().GetBool("run")
 	if run && res.Fetch.Outcome == move.FetchWaiting {
-		c := proc.Command(p.Fetch.Run.Argv[0], p.Fetch.Run.Argv[1:]...)
+		argv, err := winshim.Argv(p.Fetch.Run.Argv) // an npm command shim runs as its program
+		if err != nil {
+			return fmt.Errorf("%w; undo the worktree with: hopsesh undo %s", err, res.Journal)
+		}
+		c := proc.Command(argv[0], argv[1:]...)
 		c.Dir, c.Env = p.Fetch.Run.Dir, host.Without(os.Environ(), p.Fetch.Run.Unset)
 		c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
 		if r.jsonOut {

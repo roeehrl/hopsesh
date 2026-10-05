@@ -1,8 +1,10 @@
 // Package winshim finds the program behind a Windows command shim: the .cmd file npm (and
-// pnpm, and older npm versions) writes for a package's command, such as codex.cmd. The app's
-// terminal tabs never run a batch file, because cmd.exe would read the tab's arguments
-// (internal/core/pty refuses them), so a tab runs what the shim would have run instead:
-// node with the package's script, or the package's own .exe.
+// pnpm, and older npm versions) writes for a package's command, such as codex.cmd. hopsesh
+// never runs a batch file, because cmd.exe would read the program's arguments (a briefing,
+// a prompt; internal/core/pty refuses them): the app's terminal tabs, the relay of a
+// terminal step (internal/core/term), launches in a terminal app or in this terminal and a
+// driver run here all run what the shim would have run instead: node with the package's
+// script, or the package's own .exe (Argv).
 //
 // Only the shims' known shapes are read, never run. A shim's command line is the last line
 // that passes the arguments on (%*); before %* it names the program and its fixed
@@ -22,6 +24,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 )
 
@@ -70,6 +73,30 @@ func Program(argv []string, e Env) ([]string, error) {
 		return argv, nil
 	}
 	return Resolve(argv[0], argv[1:], e)
+}
+
+// Argv is argv as hopsesh runs a program on this system, outside a terminal tab too: the
+// relay of a terminal step, a launch in a terminal app or in this terminal, a driver run
+// here (Command, for this system).
+func Argv(argv []string) ([]string, error) {
+	return Command(argv, runtime.GOOS, System())
+}
+
+// Command is argv as hopsesh runs it on goos. On Windows a bare program name is first
+// found on PATH, as Windows finds it (claude is claude.cmd where npm installed it), and a
+// batch file is replaced by what it runs (Program), so the program gets its arguments as
+// they are instead of through cmd.exe. Elsewhere argv comes back as it is.
+func Command(argv []string, goos string, e Env) ([]string, error) {
+	if goos != "windows" || len(argv) == 0 {
+		return argv, nil
+	}
+	out := append([]string{}, argv...)
+	if !strings.ContainsAny(out[0], `\/:`) {
+		if p, err := e.LookPath(out[0]); err == nil && p != "" {
+			out[0] = p
+		}
+	}
+	return Program(out, e)
 }
 
 // ErrUnknownShim means a batch file is not a shim of a known shape.
