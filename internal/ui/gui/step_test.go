@@ -13,6 +13,7 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/agents/all"
 	"github.com/roeehrl/hopsesh/internal/core/move"
+	"github.com/roeehrl/hopsesh/internal/core/termapp"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -40,7 +41,7 @@ func TestWindowTerminalStep(t *testing.T) {
 	step := move.TermStep{Agent: "claude", Cloud: "claude-cloud", CloudTitle: "Claude Code cloud", Title: "Fix the parser", Folder: folder,
 		Run: agent.Command{Argv: []string{filepath.Join(bin, "claude"), "--cloud", "[hopsesh] the briefing"}, Dir: folder, Unset: []string{"ANTHROPIC_API_KEY"}}}
 	var lines []string
-	defer SetTerminal(terminal)
+	defer func(t termapp.Terminal) { testTerminal = t }(testTerminal)
 	SetStepProgram(self)
 
 	// The terminal runs the line: the stand-in claude, in a folder that is no checkout,

@@ -7,6 +7,34 @@ All notable changes to this project are documented here. The format follows
 ## Unreleased
 
 ### Added
+- Your terminal app: sessions, teleports and hand-off steps the app opens go to a new tab in
+  iTerm2's front window when iTerm2 is installed (else a Terminal window; Windows Terminal on
+  Windows), through a terminal-adapter layer whose only required verb is Open. Every launch
+  runs only hopsesh's own `terminal-open <ticket>` (or `terminal-step <id>`), so what goes to
+  the terminal app carries hopsesh's path and an id, never a title or a prompt. That verb
+  labels an iTerm2 tab (a badge and `user.hopsesh_title`, `_agent`, `_machine` variables,
+  sanitised and base64-encoded, wrapped for tmux), records the tab and the agent's process
+  while it runs, and keeps the tab open with the exit code shown.
+- Show a running session instead of a second copy: **Show its terminal tab** in the app and
+  `hopsesh open <session>` find the iTerm2 or Terminal tab from the agent's own process id
+  (Claude Code's registry) or hopsesh's launch record (Codex) and the process table, and
+  bring it forward. Resume refuses a session that already runs.
+- `hopsesh open <session>` resumes a session on this machine in your terminal app
+  (`--terminal <id>`, or `--here`); `hopsesh terminals` lists the terminal apps and sets
+  `terminal.app` and `terminal.resume` (`--use`, `--resume`); `hopsesh pull --run
+  --terminal <id>` starts the moved session in a new tab. The command line and the terminal
+  UI label and record the sessions they run in place too.
+- When macOS denies hopsesh control of iTerm2, the launch opens in Terminal and the app says
+  so; when Terminal is denied too, you get the command to copy. hopsesh never turns on
+  iTerm2's Python API, installs its Claude Code integration, writes profiles, or types into
+  or reads a tab; the AppleScript it can run is a fixed list of lines, checked before each
+  run. The macOS app's Automation permission text now names your terminal app, not only
+  Terminal.
+- Groundwork for a terminal inside the app (the window it shows in comes in a later
+  release): programs run in tabs with their own pseudo-terminal, take input only from what
+  you type, and keep their output in memory only. On Windows the installer and the app's
+  update now carry Microsoft's ConPTY (`conpty.dll` and `OpenConsole.exe`, MIT) in a
+  `conpty` folder, which the tabs use instead of the older one built into Windows.
 - Bring a session from Claude Code cloud: `hopsesh pull claude-cloud:<id>` (or the session's
   link) makes a new worktree of its repository and runs `claude --teleport` there, in your
   terminal (`--run`, or the command to paste). Once the copy appears, hopsesh checks its

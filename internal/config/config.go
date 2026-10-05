@@ -90,6 +90,28 @@ type Peer struct {
 	Receive bool `toml:"receive,omitempty"`
 }
 
+// Terminal is how hopsesh opens sessions and steps in a terminal app.
+type Terminal struct {
+	// App is the terminal app launches open in: "iterm2", "terminal-app" (macOS),
+	// "windows-terminal", "linux"; "" picks the best installed one (iTerm2 before
+	// Terminal on macOS).
+	App string `toml:"app,omitempty"`
+	// Resume is where the app resumes a session: "here" (in hopsesh's own window, once it
+	// has a terminal of its own), "terminal" (in App), "ask" (each time); "" is "terminal".
+	Resume string `toml:"resume,omitempty"`
+}
+
+// Terminal apps and resume choices.
+const (
+	TerminalITerm2          = "iterm2"
+	TerminalApp             = "terminal-app"
+	TerminalWindowsTerminal = "windows-terminal"
+	TerminalLinux           = "linux"
+	ResumeHere              = "here"
+	ResumeTerminal          = "terminal"
+	ResumeAsk               = "ask"
+)
+
 // Config is the user's configuration file.
 type Config struct {
 	Schema   int    `toml:"schema"`
@@ -114,7 +136,9 @@ type Config struct {
 	// Clouds are the vendor clouds the user allowed or set up, by name.
 	Clouds map[string]Cloud `toml:"clouds,omitempty"`
 	Peer   Peer             `toml:"peer"`
-	Hosts  []Host           `toml:"hosts"`
+	// Terminal is the terminal app hopsesh opens launches in.
+	Terminal Terminal `toml:"terminal,omitempty"`
+	Hosts    []Host   `toml:"hosts"`
 }
 
 // Defaults returns the configuration used when no file exists.
@@ -313,8 +337,26 @@ func (c *Config) SetCloudEnvironment(name, repo, env string) {
 	c.Clouds[name] = cl
 }
 
+// ResumeIn is where sessions resume (default "terminal").
+func (c Config) ResumeIn() string {
+	if c.Terminal.Resume == "" {
+		return ResumeTerminal
+	}
+	return c.Terminal.Resume
+}
+
 // Check reports settings hopsesh cannot act on.
 func (c Config) Check() error {
+	switch c.Terminal.App {
+	case "", TerminalITerm2, TerminalApp, TerminalWindowsTerminal, TerminalLinux:
+	default:
+		return fmt.Errorf("terminal.app is %q: use %q, %q, %q or %q", c.Terminal.App, TerminalITerm2, TerminalApp, TerminalWindowsTerminal, TerminalLinux)
+	}
+	switch c.Terminal.Resume {
+	case "", ResumeHere, ResumeTerminal, ResumeAsk:
+	default:
+		return fmt.Errorf("terminal.resume is %q: use %q, %q or %q", c.Terminal.Resume, ResumeHere, ResumeTerminal, ResumeAsk)
+	}
 	for name, cl := range c.Clouds {
 		switch cl.Code {
 		case "", CloudCodeBranch, CloudCodeBundle:

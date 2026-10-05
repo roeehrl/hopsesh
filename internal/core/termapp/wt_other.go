@@ -1,6 +1,6 @@
 //go:build !windows
 
-package gui
+package termapp
 
 import "errors"
 

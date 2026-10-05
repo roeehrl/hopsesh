@@ -703,7 +703,7 @@ func applyFetch(ctx context.Context, p *Plan, env Env) (*Result, error) {
 			return res, err
 		}
 		res.Fetch.Outcome = FetchWaiting
-		res.Command = fp.Command
+		res.Command, res.Run = fp.Command, fp.Run
 		env.Audit.Write(audit.Entry{Action: "cloud.fetch", Session: p.Key.String(), Detail: map[string]any{"cloud": fp.Cloud, "worktree": fp.Worktree, "journal": j.ID}})
 	}
 	if err := j.Seal(func(string) (host.FS, error) { return host.LocalFS(), nil }); err != nil {

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -11,8 +12,8 @@ import (
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/core/convert"
 	"github.com/roeehrl/hopsesh/internal/core/move"
-	"github.com/roeehrl/hopsesh/internal/core/proc"
 	"github.com/roeehrl/hopsesh/internal/core/repos"
+	"github.com/roeehrl/hopsesh/internal/core/termapp"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -44,6 +45,7 @@ func addPullFlags(cmd *cobra.Command) {
 	f.Bool("keep-both", false, "when both copies changed, keep both (this one comes in as a separate session)")
 	f.Bool("app", false, "open it in the agent's desktop app instead of the terminal (agents that can)")
 	f.Bool("run", false, "start the agent in the new location when done")
+	f.String("terminal", "", "with --run: start it in a new tab of this terminal app instead of here (see hopsesh terminals)")
 	f.Bool("dry-run", false, "show the plan and stop")
 	f.Bool("yes", false, "do not ask for confirmation")
 	f.Bool("json", false, "output JSON")
@@ -235,14 +237,41 @@ func pull(cmd *cobra.Command, refArg string) error {
 	}
 	r.renderResult(p, res)
 	if run, _ := cmd.Flags().GetBool("run"); run {
-		c := proc.Command(p.Resume.Argv[0], p.Resume.Argv[1:]...)
-		if res.PromptFile != "" {
-			if b, err := os.ReadFile(res.PromptFile); err == nil && len(p.Resume.Argv) > 0 {
-				c = proc.Command(p.Resume.Argv[0], append(p.Resume.Argv[1:len(p.Resume.Argv)-1], string(b))...)
+		l := app.Launch{Kind: termapp.KindSession, Run: p.Resume, Key: p.Placement.Key,
+			Labels: termapp.Labels{Title: p.Title, Agent: p.Agent, Machine: app.LocalName()}}
+		if res.PromptFile != "" && len(l.Run.Argv) > 1 {
+			if b, err := os.ReadFile(res.PromptFile); err == nil {
+				l.Run.Argv = append(l.Run.Argv[:len(l.Run.Argv)-1:len(l.Run.Argv)-1], string(b))
 			}
 		}
-		c.Dir, c.Stdin, c.Stdout, c.Stderr = p.Resume.Dir, os.Stdin, os.Stdout, os.Stderr
-		return c.Run()
+		if name, _ := cmd.Flags().GetString("terminal"); name != "" {
+			return r.openElsewhere(ctx, name, l)
+		}
+		return r.runInThisTerminal(l)
+	}
+	return nil
+}
+
+// openElsewhere opens a launch in a new tab of the named terminal app.
+func (r *run) openElsewhere(ctx context.Context, name string, l app.Launch) error {
+	t, err := r.app.TerminalByID(name)
+	if err != nil {
+		return err
+	}
+	prog, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	o, err := r.app.OpenInTerminal(ctx, prog, t, l)
+	if err != nil {
+		return err
+	}
+	if !r.jsonOut {
+		if o.FellBack {
+			r.printf("Opened in %s instead (%s).\n", o.Terminal, o.Reason)
+		} else {
+			r.printf("Opened in %s.\n", o.Terminal)
+		}
 	}
 	return nil
 }

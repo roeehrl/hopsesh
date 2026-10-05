@@ -65,9 +65,9 @@ func main() {
 	if code, ok := fakeagent.Vendor(name); ok {
 		os.Exit(code)
 	}
-	if len(os.Args) > 1 && os.Args[1] == "terminal-step" {
-		// The line the window opens "in a terminal" for a hand-off's step: the command line's
-		// own verb, which this program carries.
+	if len(os.Args) > 1 && (os.Args[1] == "terminal-step" || os.Args[1] == "terminal-open") {
+		// The line the window opens "in a terminal" (a hand-off's step, or a ticket for a
+		// session or a teleport): the command line's own verb, which this program carries.
 		if err := cli.NewRoot(os.Stdout, all.Registry()).Execute(); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			os.Exit(1)

@@ -82,8 +82,11 @@ type Result struct {
 	MarkError  string            `json:"markError,omitempty"`
 	PromptFile string            `json:"promptFile,omitempty"`
 	Command    string            `json:"command"` // to resume, for this machine's shell
-	Notice     string            `json:"notice,omitempty"`
-	Warnings   []string          `json:"warnings,omitempty"`
+	// Run is Command as an argument list (with the start prompt as its last argument when
+	// PromptFile is set), for a terminal hopsesh opens on it.
+	Run      agent.Command `json:"run"`
+	Notice   string        `json:"notice,omitempty"`
+	Warnings []string      `json:"warnings,omitempty"`
 	// Owed is a mark the source still needs once its open copy ends, when the source is a
 	// snapshot: its sender keeps it (on other sources hopsesh keeps it here).
 	Owed *lineage.Pending `json:"owed,omitempty"`
@@ -193,7 +196,7 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (*Result, error) {
 	if os.MkdirAll(filepath.Dir(promptFile), 0o700) == nil && os.WriteFile(promptFile, []byte(p.StartPrompt), 0o600) == nil {
 		res.PromptFile = promptFile
 	}
-	res.Command = launch.Shell(p.Resume, res.PromptFile, launch.DefaultShell())
+	res.Command, res.Run = launch.Shell(p.Resume, res.PromptFile, launch.DefaultShell()), p.Resume
 	if p.Options.Notify && (!agent.Has(tgt.Module, agent.CapNotify) || !p.Options.RemoteControl) {
 		// The agent cannot tell the old session itself: the user pastes this there.
 		res.Notice = launch.OldSessionNotice(tgt.Machine.Name, p.Target.CWD, p.NewName, p.Options.Fork && p.Live)
