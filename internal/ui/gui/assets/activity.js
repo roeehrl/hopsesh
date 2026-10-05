@@ -112,12 +112,12 @@ async function render(reload = false) {
       h("button", { class: "btn", onclick: () => go("sessions") }, "Back to sessions")),
     h("span", { class: "muted" }, `Everything hopsesh changed on ${sys.here}. Undo puts it back, on every machine it touched; if a session was used since, hopsesh asks first. What a cloud made stays there.`),
     a.waiting.length ? h("section", { class: "card" },
-      h("div", { class: "card-h" }, h("span", { class: "name" }, "Waiting to be adopted")),
+      h("div", { class: "card-h" }, h("h2", { class: "name" }, "Waiting to be adopted")),
       a.waiting.map((w) => h("div", { class: "line-item" }, h("span", { class: "ico cloud" }, icon(ICONS.cloud, 15)),
         h("div", { style: "flex:1 1 300px;min-width:0;font-size:12.5px" }, `“${w.title}” is being copied from ${w.cloudTitle} in ${sys.terminal}. hopsesh adds it here when the copy appears, or on its next scan.`),
         h("button", { class: "btn small", onclick: () => go("brought", w) }, "Show")))) : null,
     a.owed.length ? h("section", { class: "card" },
-      h("div", { class: "card-h" }, h("span", { class: "name" }, "Waiting to mark"), h("span", { class: "muted", style: "font-size:12px" }, "Copies left open elsewhere: hopsesh marks them on its next scan after they end.")),
+      h("div", { class: "card-h stacked" }, h("h2", { class: "name" }, "Waiting to mark"), h("span", { class: "muted", style: "font-size:12px" }, "Copies left open elsewhere: hopsesh marks them on its next scan after they end.")),
       a.owed.map((o) => h("div", { class: "line-item" }, h("span", { class: "ico mark" }, icon(ICONS.clock, 15)),
         h("div", { style: "flex:1 1 300px;min-width:0" }, h("div", {}, o.title), h("span", { class: "muted", style: "font-size:12px" }, `${o.location} · will say “${o.mark}”`)),
         h("span", { class: "muted", style: "font-size:12px" }, "since " + ago(o.since))))) : null,
@@ -149,9 +149,8 @@ function branchesCard() {
   };
   const offered = (b?.list || []).filter((c) => c.offer);
   return h("section", { class: "card", "aria-label": "Branches on your remotes" },
-    h("div", { class: "card-h" }, h("span", { class: "name" }, "Branches cloud hand-offs left"),
-      h("span", { class: "muted", style: "font-size:12px" }, "Hand-off branches and the clouds' own branches, offered for deletion once their work is merged."),
-      h("span", { class: "spacer" }),
+    h("div", { class: "card-h" }, h("div", { class: "card-h-copy" }, h("h2", { class: "name" }, "Branches cloud hand-offs left"),
+      h("span", { class: "muted", style: "font-size:12px" }, "Hand-off branches and the clouds' own branches, offered for deletion once their work is merged.")),
       offered.length > 1 ? h("button", { class: "btn small", onclick: () => del(offered) }, `Delete ${offered.length} merged`) : null,
       h("button", { class: "btn small", id: "look-branches", disabled: !!b?.busy, onclick: look }, b ? "Look again" : "Look for merged branches")),
     b?.busy ? h("div", { class: "loading", role: "status" }, "Asking the remotes…")

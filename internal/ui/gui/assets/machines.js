@@ -51,7 +51,7 @@ function machineRow(m) {
 
 function foundRow(f) {
   const online = f.online === null || f.online === undefined ? "" : f.online ? "online" : "offline";
-  return h("div", { class: "mgrid" },
+  return h("div", { class: "mgrid found" },
     h("div", { style: "min-width:0" }, h("div", { style: "font-weight:500" }, f.name), h("div", { class: "mono muted", style: "font-size:11px;overflow-wrap:anywhere" }, f.destination + (f.os ? ` · ${f.os}` : ""))),
     h("span", { class: "muted", style: "font-size:12px" }, "Found via " + f.via.join(" and ")),
     h("span", { class: "muted", style: "font-size:12px" }, [online, f.owner ? `shared by ${f.owner}` : ""].filter(Boolean).join(" · ")),
@@ -92,7 +92,7 @@ function cloudCard(c) {
       c.experimental ? h("span", { class: "chip st-warn", title: `hopsesh's ${c.agentName} support is experimental: some of its command's output is not verified yet` }, "experimental") : null,
       h("span", { class: "spacer" }), h("span", { style: "font-size:12.5px;font-weight:500", "aria-hidden": "true" }, c.allowed ? "On" : "Off"), allow),
     h("dl", { class: "kv wide" },
-      kv("Driver", c.version ? h("span", { class: "mono", style: "font-size:12px" }, `${c.driver} ${c.version}`) : h("span", { class: "warn" }, `${c.title} is reached through the `, h("span", { class: "mono" }, c.driver), " command, which isn't installed here"),
+      kv("Driver", c.version ? h("span", { class: "mono", style: "font-size:12px" }, `${c.driver} ${c.version}`) : !c.allowed ? h("span", { class: "muted" }, c.driver + " · not checked while this cloud is off") : h("span", { class: "warn" }, `${c.title} is reached through the `, h("span", { class: "mono" }, c.driver), " command, which isn't installed here"),
         c.version ? [" ", h("span", { class: "chip " + (c.tested ? "st-idle" : "st-warn") }, c.tested ? "tested" : "untested"), c.tested ? null : h("span", { class: "muted", style: "font-size:12px" }, ` hopsesh tested ${c.testedOn}`)] : null),
       kv("Signed in", signed),
       up.length ? kv("Code goes up as", up[0], up.length > 1 ? h("span", { class: "muted" }, " · " + up.slice(1).join(" · ")) : null,
@@ -187,11 +187,11 @@ function render() {
           h("span", { class: "muted", style: "font-size:12px" }, d.here.receive ? "On: “Send to…” on your other machines can deliver sessions here." : `Off: ${sys.here} refuses sessions sent from other machines.`)),
         receive))),
     h("section", { class: "card" },
-      h("div", { class: "card-h" }, h("span", { class: "name" }, "Your machines"), h("span", { class: "spacer" }), h("button", { class: "btn small", onclick: addDialog }, icon(ICONS.plus, 12), "Add by address…")),
+      h("div", { class: "card-h" }, h("h2", { class: "name" }, "Your machines"), h("span", { class: "spacer" }), h("button", { class: "btn small", onclick: addDialog }, icon(ICONS.plus, 12), "Add by address…")),
       d.machines.length ? [h("div", { class: "mgrid h" }, h("span", {}, "Machine"), h("span", {}, "Login"), h("span", {}, "Last scan"), h("span", {})), d.machines.map(machineRow)]
         : h("div", { class: "empty" }, "No machines yet. Add one found below, or by its address.")),
     h("section", { class: "card" },
-      h("div", { class: "card-h" }, h("span", { class: "name" }, "Found on your network"), h("span", { class: "muted", style: "font-size:12px" }, "From Tailscale and ~/.ssh/config. Nothing is contacted until you add it.")),
+      h("div", { class: "card-h stacked" }, h("h2", { class: "name" }, "Found on your network"), h("span", { class: "muted", style: "font-size:12px" }, "From Tailscale and ~/.ssh/config. Nothing is contacted until you add it.")),
       d.found.length ? d.found.map(foundRow) : h("div", { class: "empty" }, "No other machines found. Add one by its address.")),
     d.clouds.length ? [h("div", { id: "clouds", style: "display:flex;flex-direction:column;gap:4px;margin-top:8px;scroll-margin-top:16px" }, h("h2", { style: "margin:0;font-size:17px" }, "Clouds"),
       h("span", { class: "muted", style: "font-size:12.5px" }, "hopsesh reaches each cloud through that agent's own command, signed in as you. Signing in happens in that command, never in hopsesh. Nothing goes to a cloud you haven't turned on.")),

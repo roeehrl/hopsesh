@@ -5,7 +5,7 @@ test.beforeEach(async ({ page }) => fresh(page));
 
 test("add a machine, receive sessions, and remove the machine", async ({ page }) => {
   await menu(page, "machines");
-  await expect(page.getByRole("heading", { name: "Machines" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Machines", exact: true })).toBeVisible();
 
   const receive = page.getByRole("switch", { name: "Receive sessions from my other machines" });
   await expect(receive).toHaveAttribute("aria-checked", "false");

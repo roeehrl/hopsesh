@@ -134,7 +134,7 @@ test("Machines: the Codex cloud card sets each repository's environment", async 
   await codexTask(page);
   await turnOnCodex(page);
   await menu(page, "machines");
-  await expect(page.getByRole("heading", { name: "Machines" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Machines", exact: true })).toBeVisible();
   const card = page.locator(".cloud-card", { has: page.getByRole("heading", { name: "Codex cloud" }) });
   await expect(card).toContainText("a hand-off branch");
   await expect(card).toContainText("GitHub only");

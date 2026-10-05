@@ -130,3 +130,21 @@ test("the list's own width decides compact rows: below 600px they are one line",
   await expect.poll(rowHeight).toBe(32);
   await expect(page.locator(".row .act").first()).toBeHidden();
 });
+
+// Page headers share styles with Activity; neither screen should scroll the shell.
+test("Machines and Activity keep padded section headings and a single page scroll area", async ({ page }) => {
+  for (const width of [1280, 900]) {
+    await page.setViewportSize({ width, height: 600 });
+    for (const screen of ["machines", "activity"]) {
+      await menu(page, screen);
+      await expect(page.getByRole("heading", { name: screen === "machines" ? "Machines" : "Activity", exact: true })).toBeVisible();
+      const header = page.locator(".card-h").first();
+      await expect(header).toBeVisible();
+      expect(await header.evaluate(el => parseFloat(getComputedStyle(el).paddingLeft))).toBeGreaterThanOrEqual(12);
+      expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(600);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+      await page.locator(".page").evaluate(el => { el.scrollTop = el.scrollHeight; });
+      expect(await page.locator(".titlebar").evaluate(el => el.getBoundingClientRect().top)).toBe(0);
+    }
+  }
+});

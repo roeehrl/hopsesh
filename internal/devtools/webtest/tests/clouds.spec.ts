@@ -148,7 +148,7 @@ test("a cloud-only module: Copilot's tasks are listed, their code comes home, an
   await expect(done).toContainText("Tool calls and their output come only as the session log's text");
 
   await menu(page, "machines");
-  await expect(page.getByRole("heading", { name: "Machines" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Machines", exact: true })).toBeVisible();
   const card = page.locator(".cloud-card", { hasText: "Copilot cloud agent" });
   await expect(card).toContainText("The messages, as text, and the code", { timeout: 30_000 });
   await expect(page.locator(".cloud-card", { hasText: "Jules" })).toContainText("The code (its patch, committed on a new branch)");
