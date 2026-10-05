@@ -54,7 +54,7 @@ pause() {
 	read -r _
 }
 ok() {
-	printf '  Did you see it? [y/N] '
+	printf '  Check: %s\n  Did you see it? [y/N] ' "$1"
 	read -r answer
 	case $answer in
 	y | Y | yes) echo "  ✓ $1" ;;
