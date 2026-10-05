@@ -74,7 +74,8 @@ scoops:
     homepage: https://github.com/roeehrl/hopsesh
     description: Move Claude Code sessions between your machines
     license: Apache-2.0
-    skip_upload: '{{ if isEnvSet "TAP_GITHUB_TOKEN" }}false{{ else }}true{{ end }}'
+    # A pre-release tag (v0.4.0-rc.1) never reaches Scoop or winget.
+    skip_upload: '{{ if and (isEnvSet "TAP_GITHUB_TOKEN") (not .Prerelease) }}false{{ else }}true{{ end }}'
 
 winget:
   - name: hopsesh
@@ -95,7 +96,8 @@ winget:
           owner: microsoft
           name: winget-pkgs
           branch: master
-    skip_upload: '{{ if isEnvSet "TAP_GITHUB_TOKEN" }}false{{ else }}true{{ end }}'
+    # A pre-release tag (v0.4.0-rc.1) never reaches Scoop or winget.
+    skip_upload: '{{ if and (isEnvSet "TAP_GITHUB_TOKEN") (not .Prerelease) }}false{{ else }}true{{ end }}'
 
 # Release notes are this version's CHANGELOG.md section, passed with --release-notes (see
 # release.yml), which replaces GoReleaser's own changelog. "changelog: disable: true" would
@@ -103,6 +105,10 @@ winget:
 
 release:
   draft: true # scripts/release-sign.sh completes it; a person publishes it
+  # A tag with a pre-release suffix (v0.4.0-rc.1, v0.5.0-beta.2) makes a pre-release, which
+  # GitHub's "latest release" (what hopsesh update, the apps and the install scripts read)
+  # never points to.
+  prerelease: auto
   footer: |
     ## Install
 
