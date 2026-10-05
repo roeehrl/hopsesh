@@ -14,7 +14,7 @@
 // The terminal window: /terminal/ is the real page (with its content security policy), and
 // its two streams are WebSockets to /stream. POST /reset?terminal=here makes sessions and
 // steps open in the app's own terminal (other resets choose the user's terminal app, which
-// the older tests expect); POST /terminal-test/open?title=…[&trust=1] opens a tab running
+// the older tests expect); POST /terminal-test/open?title=…[&trust=1][&quiet=1][&kind=step][&as=claude] opens a tab running
 // termfake (internal/testkit/termfake), as an entry point would; GET /terminal-test/links
 // lists the links the window asked hopsesh to open (no browser opens).
 //
@@ -278,7 +278,7 @@ func main() {
 		mu.RLock()
 		terms := svc.Terms
 		mu.RUnlock()
-		info, err := openFake(terms, r.URL.Query().Get("title"), r.URL.Query().Get("trust") == "1", r.URL.Query().Get("kind"))
+		info, err := openFake(terms, r.URL.Query().Get("title"), r.URL.Query().Get("trust") == "1", r.URL.Query().Get("quiet") == "1", r.URL.Query().Get("kind"), r.URL.Query().Get("as"))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -522,12 +522,14 @@ func (w *wsConn) Close() error {
 // openFake opens a tab running termfake (this program), as one of the app's entry points
 // would: kind session (default), step (with the hand-off's banner), signin (recorded
 // nowhere) or shell.
-func openFake(terms *gui.Terminals, title string, trust bool, kind string) (any, error) {
+func openFake(terms *gui.Terminals, title string, trust, quiet bool, kind, as string) (any, error) {
 	self, err := os.Executable()
 	if err != nil {
 		return nil, err
 	}
-	dir := filepath.Join(os.TempDir(), "hopsesh-termfake")
+	// One folder per webtest process: a link or copy left by an earlier build would run that
+	// build's stand-in (and a running copy can't be replaced on Windows).
+	dir := filepath.Join(os.TempDir(), "hopsesh-termfake", fmt.Sprint(os.Getpid()))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
@@ -549,6 +551,9 @@ func openFake(terms *gui.Terminals, title string, trust bool, kind string) (any,
 	if trust {
 		argv = append(argv, "trust")
 	}
+	if quiet {
+		argv = append(argv, "quiet")
+	}
 	if title == "" {
 		title = "Fix the parser · termfake"
 	}
@@ -558,6 +563,19 @@ func openFake(terms *gui.Terminals, title string, trust bool, kind string) (any,
 	home, _ := os.UserHomeDir()
 	spec := pty.Spec{Argv: argv, Dir: home, Title: title, Private: kind == gui.TabSignIn || kind == gui.TabShell}
 	meta := gui.TabMeta{Kind: kind, Command: strings.Join(append([]string{"termfake"}, argv[1:]...), " "), Agent: "Termfake", Rerun: kind != gui.TabStep, External: false}
+	if as == "claude" && kind == gui.TabStep {
+		// For screenshots: the tab presents itself as a real hand-off step does, the stand-in
+		// running in the demo repository's hand-off folder.
+		state := os.Getenv("HOPSESH_STATE_DIR")
+		if state == "" {
+			state = filepath.Join(home, ".local", "state", "hopsesh")
+		}
+		spec.Dir = filepath.Join(state, "handoff", "github.com", "example", "demo")
+		if err := os.MkdirAll(spec.Dir, 0o700); err != nil {
+			return nil, err
+		}
+		meta.Command, meta.Agent = `claude --cloud "`+strings.SplitN(title, " · ", 2)[0]+`"`, "Claude Code"
+	}
 	if kind == gui.TabStep {
 		spec.Capture = pty.CaptureStep
 		meta.CloudTitle = "Claude Code cloud"
