@@ -76,11 +76,15 @@ type HopResult struct {
 
 // HopLeg is one leg of a hop, for people.
 type HopLeg struct {
-	Verb     string `json:"verb"` // "Bring here", "Hand off"
-	From     string `json:"from"`
-	To       string `json:"to"`
-	Fidelity string `json:"fidelity"`
-	Words    string `json:"words"`
+	Verb string `json:"verb"` // "Bring here", "Hand off"
+	From string `json:"from"`
+	To   string `json:"to"`
+	// FromTitle and ToTitle are From and To for people: a cloud's title ("Claude Code
+	// cloud"), a machine's name.
+	FromTitle string `json:"fromTitle,omitempty"`
+	ToTitle   string `json:"toTitle,omitempty"`
+	Fidelity  string `json:"fidelity"`
+	Words     string `json:"words"`
 }
 
 // PreviewHandoff plans a hand-off to a cloud before the session exists here (the second
@@ -133,7 +137,7 @@ func PreviewHandoff(ctx context.Context, in HandoffInput, repo string, opt Optio
 		}
 	}
 	hp.Cleanup = nonEmpty(opt.Cleanup, nonEmpty(in.Settings.DeleteBranch, CleanupAfterMerge))
-	hp.MarkTitle = agent.MarkTitle(agent.Mark{Kind: agent.MarkContinued, AgentName: target.Name, Location: cl.Name}, "")
+	hp.MarkTitle = agent.MarkTitle(agent.Mark{Kind: agent.MarkContinued, AgentName: cl.Title}, "") // the cloud by its name for people
 	hp.Steps = []string{StepSnapshot, StepPush, StepStart, StepLineage}
 	if opt.Mark {
 		hp.Steps = append(hp.Steps, StepMark)

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"strings"
@@ -71,7 +72,7 @@ func (m *model) viewHopPlan(b *strings.Builder) {
 		b.WriteString("  updating the plan…\n")
 	}
 	for i, l := range hp.Legs {
-		fmt.Fprintf(b, "  %d. %-10s %s → %s %s\n     %s\n", i+1, l.Verb, cloudSt.Render(l.From), cloudSt.Render(l.To), dim.Render("("+l.Fidelity+")"), l.Words)
+		fmt.Fprintf(b, "  %d. %-10s %s → %s %s\n     %s\n", i+1, l.Verb, cloudSt.Render(cmp.Or(l.FromTitle, l.From)), cloudSt.Render(cmp.Or(l.ToTitle, l.To)), dim.Render("("+l.Fidelity+")"), l.Words)
 	}
 	fmt.Fprintf(b, "\n  %s\n  Code  %s\n", hp.Conversation, hp.Code)
 	if hp.Terminal != "" {

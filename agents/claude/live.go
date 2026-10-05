@@ -17,6 +17,9 @@ type liveEntry struct {
 	SessionID  string `json:"sessionId"`
 	Status     string `json:"status"`
 	WaitingFor string `json:"waitingFor"`
+	// Entrypoint is what started it: "cli" in a terminal, "claude-desktop" in the Claude
+	// app.
+	Entrypoint string `json:"entrypoint"`
 }
 
 // registry reads the per-process registry and keeps entries whose process runs.
@@ -82,7 +85,7 @@ func (m *Module) Live(ctx context.Context, h agent.Host, in agent.Install, ids [
 			if le.WaitingFor != "" {
 				status = "waiting for " + le.WaitingFor
 			}
-			out[sid] = agent.LiveInfo{State: agent.Live, PID: le.PID, Status: status}
+			out[sid] = agent.LiveInfo{State: agent.Live, PID: le.PID, Status: status, App: le.Entrypoint == "claude-desktop"}
 		}
 	}
 	return out, nil

@@ -35,7 +35,7 @@ func cloud() agent.Cloud {
 		CodeDown: []agent.CodeWay{agent.ViaDiff},
 		Needs:    []agent.Need{agent.NeedGitHub, agent.NeedPushedBranch},
 		Limits: []string{
-			"The jules CLI can't choose the branch a session starts from: the briefing asks Jules to check out the handoff branch first",
+			"The jules CLI can't choose the branch a session starts from: the briefing asks Jules to check out the hand-off branch first",
 			"Jules's plan and messages stay in Jules: the jules CLI prints only a session's patch",
 		},
 		BriefBranch: true,

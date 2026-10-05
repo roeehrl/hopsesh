@@ -37,7 +37,7 @@ func cloud() agent.Cloud {
 		CodeUp: []agent.CodeWay{agent.ViaBranch},
 		Needs:  []agent.Need{agent.NeedGitHub, agent.NeedPushedBranch},
 		Limits: []string{
-			"An orb's branch can't be chosen from the amp CLI: the briefing asks Amp to check out the handoff branch first",
+			"An orb's branch can't be chosen from the amp CLI: the briefing asks Amp to check out the hand-off branch first",
 			"The code an orb writes stays there: hopsesh does not run `amp sync`, which mirrors it live into a checkout",
 		},
 		BriefBranch: true,

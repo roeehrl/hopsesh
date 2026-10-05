@@ -157,6 +157,24 @@ func (inv *Inventory) Groups(localRoots []string) []Group {
 			idx[id] = gi
 		}
 		groups[gi].Items = append(groups[gi].Items, it)
+		if groups[gi].Remote == "" && remote != "" {
+			groups[gi].Remote = remote // a cloud session first knows the repository, not its remote
+		}
+	}
+	// A checkout outside the roots that a session here works in is a checkout here too.
+	for gi, g := range groups {
+		if g.Local != "" || g.Identity == "" || strings.HasPrefix(g.Identity, "local:") {
+			continue
+		}
+		for _, it := range g.Items {
+			e := it.Entry
+			if m := inv.Machine(e.Machine); m != nil && m.Local && e.Git != nil && e.Git.Identity == g.Identity {
+				if dir := nonEmpty(e.Git.MainWorktree, e.Git.Toplevel); dir != "" {
+					groups[gi].Local = dir
+					break
+				}
+			}
+		}
 	}
 	sort.SliceStable(groups, func(a, b int) bool {
 		if (groups[a].Identity == "") != (groups[b].Identity == "") {

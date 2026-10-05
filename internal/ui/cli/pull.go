@@ -134,7 +134,7 @@ you confirm (or pass --yes).
 From a cloud (claude-cloud:<id>, or the session's link): hopsesh makes a worktree of the
 repository (your checkout stays as it is) and prints the agent's own command that brings
 the conversation, for your terminal (--run runs it here). Claude Code saves its copy only
-after you send a message in it: send one, then exit. Once the copy appears, hopsesh checks
+after you send a message in it: send one. Once the copy appears, hopsesh checks
 it (that it begins with the briefing hopsesh sent, for a session hopsesh handed off),
 keeps the cloud's branch under hopsesh/from/<cloud>/, and records it for undo. Allow the cloud first: hopsesh clouds allow <cloud>.`,
 		Args: cobra.ExactArgs(1),

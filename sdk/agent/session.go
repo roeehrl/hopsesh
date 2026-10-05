@@ -198,6 +198,9 @@ type LiveInfo struct {
 	State  Liveness `json:"state"`
 	PID    int      `json:"pid,omitempty"`
 	Status string   `json:"status,omitempty"` // agent words: "busy", "waiting for input"
+	// App is true when the agent's own desktop app runs it (Claude Code in the Claude
+	// app), not a terminal: there is no terminal tab to show.
+	App bool `json:"app,omitempty"`
 }
 
 // Account is an opaque, hashed account identity (never a credential).
