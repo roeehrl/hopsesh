@@ -318,6 +318,9 @@ func (r *runner) codeCame(s *sc) error {
 	return nil
 }
 
+// cloudTitles are the clouds' names in a mark ("continued in Claude Code cloud").
+var cloudTitles = map[string]string{"claude-cloud": "Claude Code cloud", "codex-cloud": "Codex cloud"}
+
 func (r *runner) markPrefix(s *sc) string {
 	if s.row.To != s.row.From {
 		return "↪ continued in "
@@ -866,7 +869,7 @@ func (r *runner) handoff(row Row) error {
 	}
 	marked := false
 	for _, f := range fs {
-		marked = marked || f.ID == id && strings.Contains(f.Mark, "on "+cloud)
+		marked = marked || f.ID == id && strings.Contains(f.Mark, "continued in "+cloudTitles[cloud])
 	}
 	if !marked {
 		return fmt.Errorf("the session here is not marked (%+v)", fs)
