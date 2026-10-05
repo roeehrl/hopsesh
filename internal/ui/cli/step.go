@@ -63,6 +63,7 @@ func terminalStepCmd() *cobra.Command {
 		Hidden: true,
 		Args:   cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			useDirFlags(cmd)
 			r, err := newRun(cmd)
 			if err != nil {
 				return err
@@ -76,6 +77,7 @@ func terminalStepCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().Bool("hold", false, "keep the tab open when the step ends (a terminal that closes it with its command)")
+	addDirFlags(cmd)
 	return cmd
 }
 
@@ -89,6 +91,7 @@ func terminalOpenCmd() *cobra.Command {
 		Hidden: true,
 		Args:   cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			useDirFlags(cmd)
 			r, err := newRun(cmd)
 			if err != nil {
 				return err
@@ -97,7 +100,24 @@ func terminalOpenCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().Bool("hold", false, "keep the tab open as a shell when the agent ends (a terminal that closes it with its command)")
+	addDirFlags(cmd)
 	return cmd
+}
+
+// addDirFlags lets the launcher pass its own settings and state folders: a terminal app
+// starts the verb without the launcher's environment, so an overridden HOPSESH_CONFIG_DIR
+// or HOPSESH_STATE_DIR would otherwise be lost and the ticket not found.
+func addDirFlags(cmd *cobra.Command) {
+	cmd.Flags().String("config-dir", "", "hopsesh's settings folder (as HOPSESH_CONFIG_DIR)")
+	cmd.Flags().String("state-dir", "", "hopsesh's state folder (as HOPSESH_STATE_DIR)")
+}
+
+func useDirFlags(cmd *cobra.Command) {
+	for flag, env := range map[string]string{"config-dir": "HOPSESH_CONFIG_DIR", "state-dir": "HOPSESH_STATE_DIR"} {
+		if v, _ := cmd.Flags().GetString(flag); v != "" {
+			_ = os.Setenv(env, v)
+		}
+	}
 }
 
 // terminalIO is this process's terminal for hopsesh's verbs and --run: labels only when

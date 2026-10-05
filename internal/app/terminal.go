@@ -146,7 +146,7 @@ func (a *App) OpenInTerminal(ctx context.Context, prog string, t termapp.Termina
 	if t == nil {
 		t = a.MyTerminal(ctx)
 	}
-	o, err := a.terminals().Open(ctx, t, termapp.Launch{Program: prog, Args: []string{"terminal-open", id}, Dir: l.Run.Dir, Kind: l.Kind, Where: termapp.NewTab})
+	o, err := a.terminals().Open(ctx, t, termapp.Launch{Program: prog, Args: append([]string{"terminal-open", id}, dirArgs()...), Dir: l.Run.Dir, Kind: l.Kind, Where: termapp.NewTab})
 	if err != nil {
 		a.DropTicket(id)
 		return o, err
@@ -162,7 +162,20 @@ func (a *App) OpenStepInTerminal(ctx context.Context, prog string, t termapp.Ter
 	if t == nil {
 		t = a.MyTerminal(ctx)
 	}
-	return a.terminals().Open(ctx, t, termapp.Launch{Program: prog, Args: []string{"terminal-step", stepID}, Dir: dir, Kind: termapp.KindStep, Where: termapp.Beside})
+	return a.terminals().Open(ctx, t, termapp.Launch{Program: prog, Args: append([]string{"terminal-step", stepID}, dirArgs()...), Dir: dir, Kind: termapp.KindStep, Where: termapp.Beside})
+}
+
+// dirArgs passes this process's overridden settings and state folders to a verb a terminal
+// app starts: it doesn't inherit this environment.
+func dirArgs() []string {
+	var args []string
+	if v := os.Getenv("HOPSESH_CONFIG_DIR"); v != "" {
+		args = append(args, "--config-dir", v)
+	}
+	if v := os.Getenv("HOPSESH_STATE_DIR"); v != "" {
+		args = append(args, "--state-dir", v)
+	}
+	return args
 }
 
 // resolveProgram finds a bare program name on this process's PATH, else on the login

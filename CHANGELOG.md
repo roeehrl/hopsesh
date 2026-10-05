@@ -10,6 +10,10 @@ All notable changes to this project are documented here. The format follows
 - The install script (`curl … | sh`) failed on macOS in a terminal with a UTF-8 locale
   ("arch…: unbound variable"): macOS's /bin/sh read the "…" after `$arch` as part of the
   name.
+- With hopsesh's settings or state in other folders (`HOPSESH_CONFIG_DIR`,
+  `HOPSESH_STATE_DIR`), a session or step opened in iTerm2 or Terminal couldn't find its
+  launch: the terminal app doesn't pass on hopsesh's environment. hopsesh now passes the
+  folders to the tab itself.
 
 ### Added
 - Your terminal app: sessions, teleports and hand-off steps the app opens go to a new tab in

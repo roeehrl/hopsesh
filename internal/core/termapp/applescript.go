@@ -146,11 +146,16 @@ func asString(s string) string {
 	return `"` + strings.ReplaceAll(strings.ReplaceAll(s, `\`, `\\`), `"`, `\"`) + `"`
 }
 
-// commandLine is a launch as one POSIX command line: hopsesh's quoted path and its plain
-// words (Launch.check holds them to that).
+// commandLine is a launch as one POSIX command line: hopsesh's quoted path, its plain
+// words, and quoted plain paths (Launch.check holds them to that).
 func commandLine(l Launch, extra ...string) string {
 	parts := []string{launch.ShQuote(l.Program)}
-	parts = append(parts, l.Args...)
+	for _, a := range l.Args {
+		if !word.MatchString(a) {
+			a = launch.ShQuote(a)
+		}
+		parts = append(parts, a)
+	}
 	parts = append(parts, extra...)
 	return strings.Join(parts, " ")
 }
