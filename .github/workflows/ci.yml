@@ -395,13 +395,13 @@ jobs:
       - name: the real terminal window (a tab on the bundled ConPTY, through its stream)
         shell: pwsh
         run: ./scripts/windows-terminal-check.ps1 -App "$env:RUNNER_TEMP/e2e/hopsesh-app.exe"
-      - name: the real window (WebView2 driven over CDP)
+      - name: the real window and the hopsesh Terminal window (WebView2 driven over CDP)
         shell: pwsh
         working-directory: internal/devtools/webtest
         run: |
           npm ci
           $env:HOPSESH_APP_EXE = "$env:RUNNER_TEMP/e2e/hopsesh-app.exe"
-          npx playwright test -c playwright.real.config.ts real/app.spec.ts
+          npx playwright test -c playwright.real.config.ts real/app.spec.ts real/terminal.spec.ts
       - name: studio for the screenshots (WSL2 Ubuntu over SSH)
         shell: pwsh
         run: ./scripts/windows-demo-studio.ps1 -Key "$env:RUNNER_TEMP\demo-ssh\id_ed25519" -SshConfig "$env:RUNNER_TEMP\demo-ssh\config"
