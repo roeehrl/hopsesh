@@ -1,7 +1,7 @@
 // Handing a session off to a cloud: the Hand off ▸ menu (every cloud; a disabled one says
 // why), the plan sheet (the briefing, the code, what stays on this machine, the options),
 // the steps while it applies (and a step that failed), and the done screen with the
-// session's link, Undo and a follow-up.
+// session's link and Undo.
 import { api, on, h, fill, view, state, screen, go, current, toast, fail, errText, cap, agentChip, cloudChip, $, count, sys, keys, ask, dialog } from "./core.js";
 import { undo } from "./activity.js";
 import { showTerminal, tabFor, IN_A_TAB } from "./term.js";
@@ -351,18 +351,6 @@ sheet.addEventListener("keydown", (ev) => {
   if (hc && ev.key === "Enter" && (ev.metaKey || ev.ctrlKey) && ev.target.tagName !== "TEXTAREA") { ev.preventDefault(); apply(); }
 });
 
-// followUp asks for a message and sends it to the cloud session.
-export function followUp(cloud, id, title) {
-  const text = h("textarea", { id: "fu-text", class: "field", rows: 3, placeholder: "What should it do next?" });
-  const d = dialog(h("h2", { style: "margin:0;font-size:16px" }, "Send a follow-up"),
-    h("label", { for: "fu-text", class: "muted", style: "font-size:12.5px" }, `To “${title}” in the cloud. It starts a turn there, on your plan's allowance.`), text,
-    h("div", { class: "dlg-foot" }, h("button", { class: "btn", onclick: () => d.close() }, "Cancel"),
-      h("button", { class: "btn primary", onclick: async () => {
-        try { await api("FollowUp", cloud, id, text.value); d.close(); toast("Sent to the cloud session"); } catch (e) { fail(e); }
-      } }, "Send")));
-  text.focus();
-}
-
 // ---- Done ----
 screen("handedoff", (d) => {
   const r = d.handoff;
@@ -398,10 +386,8 @@ screen("handedoff", (d) => {
     h("div", { class: "hint", role: "note" }, r.hint),
     h("div", { style: "display:flex;gap:10px;align-items:center;flex-wrap:wrap" },
       h("button", { class: "btn", onclick: doUndo }, "Undo"),
-      r.follow ? h("button", { class: "btn", onclick: () => followUp(r.cloud, r.session, d.title) }, "Send a follow-up…")
-        : r.noFollowUp ? h("button", { class: "btn", disabled: true, "aria-describedby": "ho-nofollow", title: r.noFollowUp }, "Send a follow-up…") : null,
       h("button", { class: "btn", onclick: () => go("sessions", true) }, "Back to sessions", h("span", { class: "kbd" }, "esc"))),
-    !r.follow && r.noFollowUp ? h("span", { id: "ho-nofollow", class: "muted", style: "font-size:12px" }, r.noFollowUp) : null)));
+    r.noFollowUp ? h("span", { id: "ho-nofollow", class: "muted", style: "font-size:12px" }, r.noFollowUp) : null)));
   view.querySelector("#ho-open")?.focus();
 });
 
