@@ -376,7 +376,7 @@ func (t *Terminals) ServeList(c pty.Conn) {
 		delete(t.lists, l)
 		t.mu.Unlock()
 	}()
-	l.push(listItem{list: true, b: t.listMessage()})
+	l.push(listItem{list: true})
 	go func() {
 		for {
 			b, err := c.Receive()
@@ -390,6 +390,9 @@ func (t *Terminals) ServeList(c pty.Conn) {
 		select {
 		case <-l.wake:
 			for _, it := range l.take() {
+				if it.list {
+					it.b = t.listMessage()
+				}
 				if err := c.Send(it.b); err != nil {
 					return
 				}
@@ -416,8 +419,10 @@ func (t *Terminals) prefs() TermPrefs {
 // send queues a message for every terminal window's list connection.
 func (t *Terminals) send(m []byte) { t.queue(listItem{b: m}) }
 
-// sendList sends the windows the tabs and settings as they are now.
-func (t *Terminals) sendList() { t.queue(listItem{list: true, b: t.listMessage()}) }
+// sendList queues a refresh, not a snapshot. Concurrent state changes can finish
+// queueing out of order; taking the snapshot at delivery prevents an older list
+// from replacing the captured link or other newly learned tab metadata.
+func (t *Terminals) sendList() { t.queue(listItem{list: true}) }
 
 func (t *Terminals) queue(it listItem) {
 	t.mu.Lock()
