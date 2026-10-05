@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format follows
 ## Unreleased
 
 ### Added
+- Groundwork for a terminal inside the app (the window it shows in comes in a later
+  release): programs run in tabs with their own pseudo-terminal, take input only from what
+  you type, and keep their output in memory only. On Windows the installer and the app's
+  update now carry Microsoft's ConPTY (`conpty.dll` and `OpenConsole.exe`, MIT) in a
+  `conpty` folder, which the tabs use instead of the older one built into Windows.
 - Bring a session from Claude Code cloud: `hopsesh pull claude-cloud:<id>` (or the session's
   link) makes a new worktree of its repository and runs `claude --teleport` there, in your
   terminal (`--run`, or the command to paste). Once the copy appears, hopsesh checks its

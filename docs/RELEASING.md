@@ -18,7 +18,7 @@ in GitHub:
 | `hopsesh_<ver>_linux_*.tar.gz`, `hopsesh_<ver>_windows_*.zip`, `.deb`/`.rpm`/`.apk` | GoReleaser in CI | build provenance (`gh attestation verify`), `checksums.txt` |
 | `hopsesh-<ver>-windows-{amd64,arm64}-setup.exe` | `build-windows-app.sh` in CI (NSIS) | build provenance, `checksums.txt`; not code-signed yet (SmartScreen asks) |
 | `hopsesh-windows-{amd64,arm64}-setup.exe` | CI (a copy of the above) | same; a stable link: `releases/latest/download/hopsesh-windows-amd64-setup.exe` |
-| `hopsesh-<ver>-windows-{amd64,arm64}-app.zip` | `build-windows-app.sh` in CI | build provenance, `checksums.txt`; what the Windows app updates itself from |
+| `hopsesh-<ver>-windows-{amd64,arm64}-app.zip` | `build-windows-app.sh` in CI | build provenance, `checksums.txt`; what the Windows app updates itself from (both programs, and Microsoft's ConPTY in `conpty/`, checked against its pinned NuGet hash when built) |
 | `*.sbom.json` | syft in CI | `checksums.txt` |
 | `hopsesh_<ver>_darwin_{amd64,arm64}.tar.gz` | `release-sign.sh` | Developer ID signature, notarization, `checksums.txt` |
 | `hopsesh-<ver>-macos-universal.dmg` | `release-sign.sh` → `build-macos-app.sh` | Developer ID signature, notarization (stapled), `checksums.txt` |

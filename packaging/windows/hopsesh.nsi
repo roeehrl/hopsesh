@@ -1,5 +1,6 @@
 ; The hopsesh installer for Windows: per user, no administrator rights. It puts
-; hopsesh-app.exe and hopsesh.exe in %LOCALAPPDATA%\Programs\hopsesh (where the install
+; hopsesh-app.exe, hopsesh.exe and the terminal's pseudoconsole (conpty\: Microsoft's
+; conpty.dll and OpenConsole.exe, MIT) in %LOCALAPPDATA%\Programs\hopsesh (where the install
 ; script and other machines' hopsesh look for hopsesh.exe), adds a Start menu entry,
 ; puts the folder on the user's PATH and registers an uninstaller. Updates come from the
 ; app itself (or hopsesh update); running a newer installer over an install also works.
@@ -118,6 +119,10 @@ Section "hopsesh"
   File "${SRC}\hopsesh-app.exe"
   File "${SRC}\hopsesh.exe"
   File "${SRC}\LICENSE"
+  ; The terminal's pseudoconsole, with its licence notice.
+  SetOutPath "$INSTDIR\conpty"
+  File /r "${SRC}\conpty\*"
+  SetOutPath "$INSTDIR"
   WriteUninstaller "$INSTDIR\uninstall.exe"
   CreateShortCut "$SMPROGRAMS\hopsesh.lnk" "$INSTDIR\hopsesh-app.exe"
 
@@ -161,6 +166,7 @@ Section "Uninstall"
   Delete "$INSTDIR\hopsesh-app.exe.old"
   Delete "$INSTDIR\hopsesh.exe.old"
   Delete "$INSTDIR\LICENSE"
+  RMDir /r "$INSTDIR\conpty"
   Delete "$INSTDIR\uninstall.exe"
   RMDir "$INSTDIR"
   Delete "$SMPROGRAMS\hopsesh.lnk"
