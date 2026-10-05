@@ -19,6 +19,7 @@ func TestVendoredXterm(t *testing.T) {
 	}
 	listed := map[string]bool{"VERSIONS": true, "LICENSE-xterm.txt": true}
 	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSuffix(line, "\r") // a checkout that converted line endings
 		sum, name, ok := strings.Cut(line, "  ")
 		if !ok || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "package ") {
 			continue
