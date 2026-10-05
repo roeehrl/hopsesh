@@ -122,6 +122,16 @@ All notable changes to this project are documented here. The format follows
 - `agent.LinkOn` reads a link the user pasted on an exact host only (https, no user info,
   no port).
 
+- An opt-in client for iTerm2's Python API (`internal/core/termapp/iterm2api`), used only
+  when you have enabled the API in iTerm2 yourself: session-terminated, new-session and
+  focus events (with reconnection, and catching up on tabs that closed while disconnected),
+  opening a tab or a split beside a session with a command and folder, finding a session
+  by its TTY and focusing it, and `user.hopsesh_*` labels. A credential-free probe comes
+  first, so nobody with the API off is prompted; the cookie comes from AppleScript and stays
+  in memory. The client is hand-written (iTerm2's protocol file is GPLv2) and can send seven
+  requests only: no typing, injecting or screen, buffer, selection or prompt reading, which
+  a test enforces. `scripts/iterm-api-smoke.sh` checks it against a real iTerm2 by hand.
+
 ### Fixed
 - Bringing a session from Claude Code cloud adopts the copy the real Claude Code writes.
   Claude Code 2.1.289's teleport saves nothing until you send a message in the teleported
