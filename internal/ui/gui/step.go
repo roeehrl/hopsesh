@@ -181,9 +181,11 @@ func (a *App) runStep(ctx context.Context, s move.TermStep) (move.StepResult, er
 				}
 				return d.res, nil
 			case errors.Is(d.err, agent.ErrNoSession):
+				a.Terms.comeForward(tab) // it ended without its link: the user reads why
 				noSession = d.err
 				set("no-link", strings.TrimPrefix(d.err.Error(), agent.ErrNoSession.Error()+": "))
 			default:
+				a.Terms.comeForward(tab)
 				return move.StepResult{}, d.err
 			}
 		case code, ok := <-exited:
@@ -237,6 +239,8 @@ func (a *App) stepTab(ctx context.Context, s move.TermStep, ps *pendingStep, don
 	}
 	info, err := a.Terms.Open(spec, TabSetup{
 		Meta: TabMeta{Kind: TabStep, Command: displayCommand(s.Run.Argv), Agent: name, Cloud: s.Cloud, CloudTitle: s.CloudTitle, External: true},
+		// It may finish without the user: it comes forward if it asks or fails.
+		Background: true,
 		External: func(string) error {
 			select {
 			case ps.out <- struct{}{}:
