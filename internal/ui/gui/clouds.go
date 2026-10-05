@@ -11,6 +11,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/move"
+	"github.com/roeehrl/hopsesh/internal/core/pty"
 	"github.com/roeehrl/hopsesh/internal/core/termapp"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
@@ -50,6 +51,9 @@ type CloudDTO struct {
 	CodeOnly bool `json:"codeOnly"`
 	// Test is the last read-only probe of it, when there was one.
 	Test *CloudTestDTO `json:"test,omitempty"`
+	// SignIn is the driver's own sign-in command, for people ("codex login --device-auth";
+	// "": the card offers no Sign in).
+	SignIn string `json:"signIn,omitempty"`
 	// Noun is what the cloud calls its sessions ("task"); Limits, what hopsesh cannot reach
 	// there; CodeUp and CodeDown, how code travels each way; Hosts, the repository hosts it
 	// takes.
@@ -120,6 +124,9 @@ func cloudDTO(core *app.App, inv *app.Inventory, c *app.Cloud) CloudDTO {
 	if m, ok := core.Module(c.Agent); ok {
 		if cl, ok := m.Spec().FindCloud(c.Name); ok {
 			d.TestedOn, d.VendorPrefix, d.Fidelity = strings.Join(cl.Tested, ", "), cl.VendorPrefix, string(cl.Down)
+			if len(cl.SignIn) > 0 {
+				d.SignIn = cl.Driver + " " + strings.Join(cl.SignIn, " ")
+			}
 			// Code only: the cloud brings no words back (a text cloud's messages, or a code
 			// cloud's task summary, are written here as a session: a cloud-only module's into
 			// the local agent the user picks).
@@ -337,25 +344,50 @@ func (a *App) AdoptStatus(journal string) (*BroughtDTO, error) {
 // KeepPartial keeps a partial copy as it is.
 func (a *App) KeepPartial(journal string) error { return a.snapshot().KeepPartial(journal) }
 
-// OpenBrought opens a fetch's next command in a terminal: the agent's own command while
-// it waits, the command that resumes the copy once it is here.
-func (a *App) OpenBrought(journal string) error {
+// OpenBrought opens a fetch's next command: the agent's own command while it waits (in a
+// tab, unless the user chose their terminal app), the command that resumes the copy once it
+// is here (as ResumeSession). where is as for ResumeSession.
+func (a *App) OpenBrought(journal, where string) (*OpenedDTO, error) {
 	f, err := move.LoadFetch(a.snapshot().StateDir, journal)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	b := a.snapshot().Brought(f)
 	if b.Command == "" || b.Outcome == move.FetchEmpty || len(b.Run.Argv) == 0 {
-		return errors.New("there is nothing to open")
+		return nil, errors.New("there is nothing to open")
 	}
 	l := app.Launch{Kind: termapp.KindSession, Run: b.Run, Labels: termapp.Labels{Title: b.Title, Agent: b.Agent, Machine: app.LocalName()}}
 	if b.Outcome == move.FetchWaiting {
 		// The agent's own command that brings the session (claude --teleport).
 		l.Kind, l.Labels.Agent = termapp.KindStep, b.CloudTitle
-	} else {
-		l.Key, _ = agent.ParseKey(b.Key)
+		if a.Terms != nil {
+			for _, t := range a.Terms.Tabs() {
+				if t.Kind == TabBring && t.Journal == journal && t.State != pty.Exited {
+					a.Terms.Focus(t.ID)
+					return &OpenedDTO{Where: WhereShown, Tab: t.ID}, nil
+				}
+			}
+		}
+		return a.bringTab(l, journal, b.Cloud, b.CloudTitle, b.Agent, b.Title, where)
 	}
-	return a.openLaunch(l)
+	l.Key, _ = agent.ParseKey(b.Key)
+	key := l.Key.String()
+	if a.Terms != nil {
+		if id := a.Terms.liveSessionTab(app.LocalName(), key); id != "" {
+			a.Terms.Focus(id)
+			return &OpenedDTO{Where: WhereShown, Tab: id}, nil
+		}
+	}
+	a.mu.Lock()
+	setting := a.core.Cfg.AppResume()
+	a.mu.Unlock()
+	switch route(where, setting, false) {
+	case WhereAsk:
+		return &OpenedDTO{Where: WhereAsk}, nil
+	case WhereTerminal:
+		return &OpenedDTO{Where: WhereTerminal}, a.openLaunch(l)
+	}
+	return a.sessionTab(b.Run, l, TabMeta{Kind: TabSession, Agent: b.Agent, Machine: app.LocalName(), Key: key}, b.Title)
 }
 
 // cloudPage reports whether url is a page hopsesh may open for a cloud: a session's page

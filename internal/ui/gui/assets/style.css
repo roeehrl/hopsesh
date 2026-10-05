@@ -287,3 +287,10 @@ textarea.brief { border: 0; background: transparent; padding: 10px 12px; font-si
 .step-ic.run { border: 2px solid var(--accent); color: var(--accent); }
 .failbox { padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--err-dot) 40%, var(--line)); background: color-mix(in srgb, var(--err-soft) 45%, var(--panel)); border-radius: 8px; font-size: 13px; color: var(--err); }
 .hint { display: flex; gap: 10px; align-items: center; padding: 10px 14px; border-radius: 8px; background: var(--cloud-band); color: var(--cloud); font-size: 12.5px; }
+
+/* the terminal: the title bar's button, the quit list, Settings → Terminal */
+.term-n { position: absolute; top: -4px; right: -4px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--needs-dot); color: #fff; font-size: 10px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; }
+.quit-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; }
+.safety { display: flex; gap: 10px; align-items: flex-start; font-size: 12.5px; }
+.safety svg { flex: 0 0 auto; color: var(--accent); margin-top: 2px; }
+.safety b { font-weight: 500; }

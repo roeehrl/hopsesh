@@ -13,7 +13,7 @@ import (
 // treated as the terminal's.
 func TestTerminalGate(t *testing.T) {
 	terms := NewTerminals("test")
-	terms.Privileged(1)
+	terms.privilegedID(1)
 	reached := ""
 	gate := terms.Gate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { reached = r.Method + " " + r.URL.Path }))
 	do := func(window, method, path string) (int, http.Header) {
@@ -38,13 +38,14 @@ func TestTerminalGate(t *testing.T) {
 	}
 	for _, window := range []string{"2", "", "junk"} {
 		allowed := map[string]string{
-			"/terminal/":          http.MethodGet,
-			"/terminal/dev.js":    http.MethodGet,
-			"/wails/runtime.js":   http.MethodGet,
-			"/wails/transport.js": http.MethodGet,
-			"/wails/custom.js":    http.MethodHead,
-			"/wails/stream/poll":  http.MethodGet,
-			"/wails/stream/send":  http.MethodPost,
+			"/terminal/":                 http.MethodGet,
+			"/terminal/terminal.js":      http.MethodGet,
+			"/terminal/vendor/xterm.mjs": http.MethodGet,
+			"/wails/runtime.js":          http.MethodGet,
+			"/wails/transport.js":        http.MethodGet,
+			"/wails/custom.js":           http.MethodHead,
+			"/wails/stream/poll":         http.MethodGet,
+			"/wails/stream/send":         http.MethodPost,
 		}
 		for path, m := range allowed {
 			code, h := do(window, m, path)

@@ -28,8 +28,9 @@ func testBrowserArgs() []string {
 	return nil
 }
 
-// testAssets serves the terminal's test page (test builds only).
-func testAssets(next http.Handler) http.Handler { return gui.DevTerminalAssets(next) }
+// testAssets: test builds serve the same assets (the terminal check drives the real
+// terminal page).
+func testAssets(next http.Handler) http.Handler { return next }
 
 // testHook runs the script in HOPSESH_E2E_SCRIPT in the window once its runtime is ready
 // (the self-check on macOS and Linux, where there is no debugging port), and opens the
@@ -56,8 +57,8 @@ func testHook(w *application.WebviewWindow, svc *gui.App) {
 }
 
 // terminalCheck runs the program in HOPSESH_E2E_TERMINAL (a JSON argument list) in a
-// terminal tab, shown in the real terminal window with the test page, whose stand-in
-// emulator answers the program's DA1 query. Once the program ends it writes the tab's
+// terminal tab, shown in the real hopsesh Terminal window, whose emulator (xterm.js)
+// answers the program's DA1 query. Once the program ends it writes the tab's
 // backend, the exit code and what the program printed to HOPSESH_E2E_TERMINAL_OUT, and
 // quits the app.
 func terminalCheck(svc *gui.App, argv string) {
@@ -73,7 +74,8 @@ func terminalCheck(svc *gui.App, argv string) {
 		return
 	}
 	dir, _ := os.Getwd()
-	info, err := svc.Terms.Open(pty.Spec{Argv: args, Dir: dir, Title: "terminal check", Capture: pty.CaptureStep})
+	info, err := svc.Terms.Open(pty.Spec{Argv: args, Dir: dir, Title: "terminal check", Capture: pty.CaptureStep},
+		gui.TabSetup{Meta: gui.TabMeta{Kind: gui.TabSession, Command: "terminal check"}})
 	if err != nil {
 		report("error: %v\n", err)
 		return

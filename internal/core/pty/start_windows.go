@@ -73,6 +73,11 @@ func BundledConpty(dir string) (dll, host string, ok bool) {
 	return dll, host, true
 }
 
+func bundledConsole(dir string) bool {
+	_, _, ok := BundledConpty(dir)
+	return ok
+}
+
 func loadBundled(dir string) (*conptyAPI, error) {
 	dll, _, ok := BundledConpty(dir)
 	if !ok {

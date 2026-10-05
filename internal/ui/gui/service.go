@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -51,10 +52,14 @@ type App struct {
 	appIcons map[agent.ID]string // installed apps' icons, read once ("" when none)
 	pwOnce   sync.Once
 	step     *pendingStep // the terminal step a hand-off waits for
+	quitting atomic.Bool  // the user confirmed quitting (or an update restarts the app)
+	termName atomic.Value // the user's terminal app's name, for the terminal window (a string)
 	// Wails is the running application (events, clipboard, dialogs).
 	Wails *application.App `json:"-"`
 	// Terms are the terminal's tabs and window (not bound to the window: see terminal.go).
 	Terms *Terminals `json:"-"`
+	// Emitter takes the window's events when there is no Wails app (the browser tests).
+	Emitter func(name string, data any) `json:"-"`
 }
 
 // NewApp loads the configuration for the modules in reg. A configuration an older hopsesh
@@ -66,6 +71,7 @@ func NewApp(reg *registry.Registry) *App {
 	a.core = app.New(cfg, reg, config.StateDir(), log)
 	a.core.Passwords = a.passwordFor
 	a.core.Steps = a.runStep
+	a.attachTerminal()
 	return a
 }
 
@@ -134,7 +140,10 @@ type Info struct {
 	UpdateCheck string `json:"updateCheck"` // "", "on" or "off"
 	// Terminal is the terminal app sessions open in, by name ("iTerm2"): the window says
 	// "Open in iTerm2".
-	Terminal    string `json:"terminal"`
+	Terminal string `json:"terminal"`
+	// Where is where sessions resume and steps run: here (the hopsesh Terminal window),
+	// terminal (the user's terminal app) or ask.
+	Where       string `json:"where"`
 	SkillState  string `json:"skillState"`  // across every agent: absent | current | stale | modified | foreign | broken
 	SkillPrompt string `json:"skillPrompt"` // "declined" once the user said not now
 	CLIOffer    bool   `json:"cliOffer"`    // offer to link the command-line tool
@@ -174,6 +183,7 @@ func (a *App) Info() Info {
 	if t := a.core.MyTerminal(ctx); t != nil && runtime.GOOS == "darwin" {
 		info.Terminal = t.Name()
 	}
+	info.Where = cfg.AppResume()
 	return info
 }
 
@@ -310,6 +320,7 @@ func (a *App) InstallUpdate() error {
 		return fmt.Errorf("installed hopsesh %s; quit and reopen the app to use it (%w)", rel.Version, err)
 	}
 	if a.Wails != nil {
+		a.quitting.Store(true) // the window asked about running tabs before installing
 		go func() { time.Sleep(300 * time.Millisecond); a.Wails.Quit() }()
 	}
 	return nil
@@ -421,7 +432,10 @@ func (a *App) Shutdown() {
 
 // emit sends an event to the window (nothing without one).
 func (a *App) emit(name string, data any) {
-	if a.Wails != nil {
+	switch {
+	case a.Wails != nil:
 		a.Wails.Event.Emit(name, data)
+	case a.Emitter != nil:
+		a.Emitter(name, data)
 	}
 }

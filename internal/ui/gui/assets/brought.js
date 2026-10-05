@@ -4,6 +4,12 @@
 import { api, h, fill, view, state, screen, go, current, toast, fail, keys, sys, entries } from "./core.js";
 import { undo } from "./activity.js";
 import { planFor } from "./plan.js";
+import { tabs, onTabs, openBrought, showTerminal, where as opensIn } from "./term.js";
+
+// bringTab is the tab a bring-back's command runs in, if it runs in one.
+const bringTab = (b) => [...tabs.values()].find((t) => t.kind === "bring" && t.journal === b.journal);
+let showing = null;
+onTabs(() => { if (current === "brought" && showing?.outcome === "waiting") render(showing); });
 
 let timer = null;
 
@@ -58,20 +64,40 @@ async function continueIn(b) {
 }
 
 function render(b) {
+  showing = b;
   const back = h("button", { class: "btn", onclick: () => go("sessions", true) }, "Back to sessions", h("span", { class: "kbd" }, "esc"));
   let body;
   switch (b.outcome) {
-    case "waiting":
+    case "waiting": {
+      const t = bringTab(b);
+      if (t && t.state === "exited") {
+        // The tab ended and no copy came: Claude Code saves it only once the user sends a
+        // message in it.
+        body = h("section", { class: "outcome partial", "aria-labelledby": "out-h" }, h("span", { class: "sec-h warn" }, "No copy yet"),
+          h("div", { class: "out-head" }, badge("warn", "!"), h("h2", { id: "out-h" }, "The tab ended before you sent a message")),
+          h("p", { style: "margin:0;font-size:13px" }, `${b.agent || "The agent"} saves the copy only once you continue the conversation, so nothing was saved. The worktree and the code are ready.`),
+          h("div", { class: "out-stack" },
+            h("button", { class: "btn primary", onclick: () => openBrought(b.journal, "here") }, "Bring here again"),
+            h("button", { class: "btn", onclick: () => doUndo(b) }, "Undo")),
+          back);
+        poll(b);
+        break;
+      }
+      const inTab = !!t;
       body = h("section", { class: "card" }, h("div", { class: "dlg-body" },
         h("div", { class: "waiting", role: "status" }, h("span", { class: "spinner", "aria-hidden": "true" }),
-          h("span", {}, b.message), h("span", { class: "muted", style: "font-size:12px" }, `It's running in ${sys.terminal}. You can close this; hopsesh picks it up on its next look.`)),
+          h("span", {}, b.message), h("span", { class: "muted", style: "font-size:12px" }, inTab
+            ? "It's running in a tab of the hopsesh Terminal window: send one message there, then type /exit. hopsesh picks the copy up when it appears."
+            : `It's running in ${sys.terminal}. You can close this; hopsesh picks it up on its next look.`)),
         h("div", { class: "term" }, b.command),
         h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" },
-          h("button", { class: "btn", onclick: () => api("OpenBrought", b.journal).catch(fail) }, `Open in ${sys.terminal} again`),
+          inTab ? h("button", { class: "btn primary", onclick: () => showTerminal(t.id) }, "Show the terminal") : null,
+          h("button", { class: "btn", onclick: () => openBrought(b.journal, "terminal") }, inTab ? `Open in ${sys.terminal} instead` : `Open in ${sys.terminal} again`),
           h("button", { class: "btn", onclick: async () => { await api("CopyText", b.command); toast("Copied"); } }, "Copy the command"),
           h("button", { class: "btn", onclick: () => doUndo(b) }, "Undo"), back)));
       poll(b);
       break;
+    }
     case "code":
       body = h("section", { class: "outcome ok" }, h("span", { class: "sec-h ok" }, "The code only"),
         h("div", { class: "out-head" }, badge("ok", "✓"), h("h2", {}, `The code of “${b.title}” is here`)),
@@ -87,7 +113,8 @@ function render(b) {
             : b.check === "none" ? `${b.restored} messages · ${b.agent} gives no count to check against` : `${b.restored} messages`))),
         h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" },
           b.continueName && !b.written ? h("button", { class: "btn primary", onclick: () => continueIn(b) }, `Continue in ${b.continueName}`) : null,
-          h("button", { class: "btn" + (b.continueName && !b.written ? "" : " primary"), id: "open", onclick: () => api("OpenBrought", b.journal).catch(fail) }, `Open in ${sys.terminal}`),
+          h("button", { class: "btn" + (b.continueName && !b.written ? "" : " primary"), id: "open", onclick: () => openBrought(b.journal) }, opensIn() === "terminal" ? `Open in ${sys.terminal}` : opensIn() === "ask" ? "Resume…" : "Resume here"),
+          h("button", { class: "btn", onclick: () => openBrought(b.journal, opensIn() === "terminal" ? "here" : "terminal") }, opensIn() === "terminal" ? "Resume here" : `Open in ${sys.terminal}`),
           h("button", { class: "btn", onclick: async () => { await api("CopyText", b.command); toast("Copied"); } }, "Copy the command")),
         h("div", { class: "term" }, b.command), codeLine(b),
         (b.warnings || []).map((w) => h("span", { class: "warn", style: "font-size:12px" }, w)),
@@ -104,7 +131,7 @@ function render(b) {
         h("p", { style: "margin:0;font-size:13px" }, message(b)), codeLine(b),
         b.kept ? h("span", { class: "ok", style: "font-size:12.5px" }, "You kept the partial copy.") : null,
         h("div", { class: "out-stack" },
-          b.kept ? h("button", { class: "btn primary", onclick: () => api("OpenBrought", b.journal).catch(fail) }, `Open in ${sys.terminal}`)
+          b.kept ? h("button", { class: "btn primary", onclick: () => openBrought(b.journal) }, opensIn() === "terminal" ? `Open in ${sys.terminal}` : "Resume here")
             : h("button", { class: "btn primary", onclick: async () => { try { await api("KeepPartial", b.journal); } catch (e) { fail(e); return; } render(Object.assign({}, b, { kept: true })); } }, "Keep the partial copy"),
           h("button", { class: "btn", onclick: () => doUndo(b) }, "Undo"),
           b.url ? linkBtn("Open the session in the browser", b.url) : null),
