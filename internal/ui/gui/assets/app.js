@@ -17,6 +17,8 @@ $("#btn-settings").onclick = () => go("settings");
 
 // The app menu (and its shortcuts) sends these.
 on("hopsesh:menu", menuCommand);
+// A launch opened in another terminal than the chosen one (macOS denied iTerm2, say).
+on("hopsesh:terminal", (n) => toast(n.message));
 function menuCommand(cmd) {
   if (document.querySelector("#sheet[open]") && cmd !== "palette") return; // a plan is open
   switch (cmd) {
@@ -98,7 +100,7 @@ function configError() {
 (async () => {
   for (const r of await api("PendingPasswords").catch(() => [])) askPassword(r);
   try { state.info = await api("Info"); } catch (e) { fill(view, h("div", { class: "loading err" }, errText(e))); return; }
-  setSystem(state.info.os);
+  setSystem(state.info.os, state.info.terminal);
   if (state.info.configError) { configError(); return; }
   await go("sessions", true);
   if (state.info.updateCheck === "on") {

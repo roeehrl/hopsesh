@@ -105,6 +105,8 @@ export function actionsFor(e) {
   const local = e.machine === here();
   const a = agentInfo(e.agent);
   if (local) {
+    // A session running here: show the tab it runs in (never a second copy).
+    if (e.live) out.push({ id: "show", label: "Show its terminal tab", run: () => api("ShowEntry", e.machine, e.key).catch(fail) });
     if (!e.live && e.hereNewest) {
       out.push({ id: "resume", label: "Resume", run: () => api("ResumeEntry", e.machine, e.key, false).catch(fail) });
       if (a?.capabilities?.includes("app")) out.push({ id: "app", label: `Open in the ${e.agentName} app`, run: () => api("ResumeEntry", e.machine, e.key, true).catch(fail) });

@@ -14,6 +14,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/audit"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/registry"
+	"github.com/roeehrl/hopsesh/internal/core/termapp"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
@@ -40,6 +41,10 @@ type App struct {
 	// teleport that brings a hop's session here); nil: the front end opens it itself, and the
 	// hop waits for ContinueHop.
 	RunHere RunHere
+	// Terminals are the terminal apps launches open in (empty: this system's), and Procs
+	// what finding a session's tab reads of the process table (nil: this machine's).
+	Terminals termapp.Set
+	Procs     termapp.Procs
 	// tests keeps the clouds' recent read-only probes, so replanning a hand-off does not ask
 	// the vendor again each time (shared by copies of the App; nil: never kept).
 	tests *cloudTests

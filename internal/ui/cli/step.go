@@ -7,14 +7,15 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/roeehrl/hopsesh/internal/core/host"
+	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/core/move"
-	"github.com/roeehrl/hopsesh/internal/core/proc"
+	"github.com/roeehrl/hopsesh/internal/core/termapp"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -56,7 +57,7 @@ func askLink(in io.Reader, out io.Writer, s move.TermStep) string {
 // terminalStepCmd is the hidden command the app opens a terminal window on: it runs a
 // terminal step the app wrote and leaves the outcome for the app.
 func terminalStepCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:    "terminal-step <id>",
 		Short:  "Run a step the app handed to this terminal (used by the app)",
 		Hidden: true,
@@ -66,9 +67,63 @@ func terminalStepCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return r.app.RunStepFile(args[0], os.Stdin, os.Stdout)
+			tio := r.terminalIO(cmd)
+			err = r.app.RunStepFile(args[0], tio)
+			if tio.Hold {
+				return holdUntilReturn(tio, err)
+			}
+			return err
 		},
 	}
+	cmd.Flags().Bool("hold", false, "keep the tab open when the step ends (a terminal that closes it with its command)")
+	return cmd
+}
+
+// terminalOpenCmd is the hidden command a terminal app runs for a launch the app or the
+// command line wrote (a ticket): it labels the tab, records it while the agent runs, and
+// runs the agent's command.
+func terminalOpenCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:    "terminal-open <ticket>",
+		Short:  "Run a launch hopsesh handed to this terminal (used by hopsesh)",
+		Hidden: true,
+		Args:   cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			r, err := newRun(cmd)
+			if err != nil {
+				return err
+			}
+			return r.app.RunTicket(args[0], r.terminalIO(cmd))
+		},
+	}
+	cmd.Flags().Bool("hold", false, "keep the tab open as a shell when the agent ends (a terminal that closes it with its command)")
+	return cmd
+}
+
+// terminalIO is this process's terminal for hopsesh's verbs and --run: labels only when
+// standard output is a terminal and not the JSON.
+func (r *run) terminalIO(cmd *cobra.Command) app.TerminalIO {
+	tio := app.TerminalIO{In: os.Stdin, Out: os.Stdout, Err: os.Stderr}
+	if f, ok := r.out.(*os.File); ok && !r.jsonOut && term.IsTerminal(int(f.Fd())) {
+		tio.Labels = true
+	}
+	if r.jsonOut {
+		tio.Out = os.Stderr // standard output is the JSON
+	}
+	if f := cmd.Flags().Lookup("hold"); f != nil {
+		tio.Hold, _ = cmd.Flags().GetBool("hold")
+	}
+	return tio
+}
+
+// holdUntilReturn keeps a step's tab open until the user presses Return.
+func holdUntilReturn(tio app.TerminalIO, err error) error {
+	if err != nil {
+		fmt.Fprintf(tio.Out, "\nhopsesh: %v\n", err)
+	}
+	fmt.Fprint(tio.Out, "\nPress Return to close this tab. ")
+	_, _ = bufio.NewReader(tio.In).ReadString('\n')
+	return nil
 }
 
 // runHere runs a driver's command in this terminal and waits for it (a hop's teleport), as
@@ -77,13 +132,28 @@ func (r *run) runHere(_ context.Context, run agent.Command) error {
 	if len(run.Argv) == 0 {
 		return errors.New("no command to run")
 	}
-	c := proc.Command(run.Argv[0], run.Argv[1:]...)
-	c.Dir, c.Env = run.Dir, host.Without(os.Environ(), run.Unset)
-	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
-	if r.jsonOut {
-		c.Stdout = os.Stderr // standard output is the JSON
-	} else {
+	if !r.jsonOut {
 		r.printf("\nRunning %s here; hopsesh hands the copy on when it ends.\n\n", strings.Join(run.Argv, " "))
 	}
-	return c.Run()
+	return r.runInThisTerminal(app.Launch{Kind: termapp.KindStep, Run: run})
+}
+
+// runInThisTerminal runs a launch attached to this terminal (labels when it is one), as
+// --run and the terminal UI do; a session is recorded while it runs, so "Show" finds it.
+func (r *run) runInThisTerminal(l app.Launch) error {
+	tio := app.TerminalIO{In: os.Stdin, Out: os.Stdout, Err: os.Stderr}
+	if f, ok := r.out.(*os.File); ok && !r.jsonOut && term.IsTerminal(int(f.Fd())) {
+		tio.Labels = true
+	}
+	if r.jsonOut {
+		tio.Out = os.Stderr // standard output is the JSON
+	}
+	code, err := r.app.RunInThisTerminal(l, tio)
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		return fmt.Errorf("%s exited with code %d", filepath.Base(l.Run.Argv[0]), code)
+	}
+	return nil
 }

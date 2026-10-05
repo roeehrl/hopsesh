@@ -32,6 +32,11 @@ type Exit struct {
 	// Hop is the hop (its journal) whose first leg the program is: once it ends, the caller
 	// adopts the copy, takes the hop on, and opens the TUI on it (Deps.Hop).
 	Hop string
+	// Key, Title and Agent name the session a resume runs (Key empty: a driver's
+	// command), for the tab's labels and hopsesh's record of where it runs.
+	Key   agent.SessionKey
+	Title string
+	Agent string
 }
 
 // Deps are what the TUI needs from the CLI.
@@ -424,7 +429,8 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		}
 		switch k {
 		case "enter":
-			m.exit = &Exit{RunDir: m.plan.Resume.Dir, RunArgv: m.plan.Resume.Argv, Prompt: m.result.PromptFile}
+			m.exit = &Exit{RunDir: m.plan.Resume.Dir, RunArgv: m.plan.Resume.Argv, Prompt: m.result.PromptFile,
+				Key: m.plan.Placement.Key, Title: m.plan.Title, Agent: m.plan.Agent}
 			return m, tea.Quit
 		case "c":
 			m.copied = true

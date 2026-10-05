@@ -3,11 +3,12 @@ package gui
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/app"
-	"github.com/roeehrl/hopsesh/internal/core/launch"
 	"github.com/roeehrl/hopsesh/internal/core/move"
+	"github.com/roeehrl/hopsesh/internal/core/termapp"
 )
 
 // Handing a cloud session on to another cloud in the window: the Hand off ▸ menu on a
@@ -93,7 +94,7 @@ func (a *App) ApplyHop() (*HopDoneDTO, error) {
 	}
 	d := a.hopDone(core, p.Title, res, err)
 	if res.Hop != nil && res.Hop.State == move.HopWaiting && res.Hop.Command != "" {
-		if terr := terminal(res.Hop.Command); terr != nil {
+		if terr := a.openLaunch(hopLaunch(p.Title, res.Hop)); terr != nil {
 			d.Warnings = append(d.Warnings, "hopsesh could not open a terminal ("+terr.Error()+"); run the command yourself")
 		}
 	}
@@ -126,7 +127,13 @@ func (a *App) OpenHop(journal string) error {
 	if h.Result.State != move.HopWaiting || len(h.Result.Run.Argv) == 0 {
 		return errors.New("there is nothing to open")
 	}
-	return terminal(launch.Shell(h.Result.Run, "", launch.DefaultShell()))
+	return a.openLaunch(hopLaunch(h.Title, &h.Result))
+}
+
+// hopLaunch is a waiting hop's first leg: the agent's own command that brings the session
+// here (claude --teleport), a step in the user's terminal.
+func hopLaunch(title string, h *move.HopResult) app.Launch {
+	return app.Launch{Kind: termapp.KindStep, Run: h.Run, Labels: termapp.Labels{Title: title, Agent: filepath.Base(h.Run.Argv[0]), Machine: app.LocalName()}}
 }
 
 func (a *App) hopDone(core *app.App, title string, res *move.Result, err error) *HopDoneDTO {

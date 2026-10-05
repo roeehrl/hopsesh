@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -113,5 +114,35 @@ allowed = false
 	}
 	if _, err := Load(); err == nil || errors.Is(err, ErrOldConfig) {
 		t.Fatalf("an unknown code way must be refused (not as an old file), got %v", err)
+	}
+}
+
+// The terminal app and where sessions resume: omitted until set, kept, and checked.
+func TestTerminal(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOPSESH_CONFIG_DIR", dir)
+	c := Defaults()
+	if err := Save(c); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(Path()); strings.Contains(string(b), "terminal") {
+		t.Fatalf("an unset terminal is written:\n%s", b)
+	}
+	if c.ResumeIn() != ResumeTerminal {
+		t.Fatal(c.ResumeIn())
+	}
+	c.Terminal = Terminal{App: TerminalITerm2, Resume: ResumeAsk}
+	if err := Save(c); err != nil {
+		t.Fatal(err)
+	}
+	back, err := Load()
+	if err != nil || back.Terminal != c.Terminal || back.ResumeIn() != ResumeAsk {
+		t.Fatalf("%+v %v", back.Terminal, err)
+	}
+	for _, bad := range []Terminal{{App: "xterm"}, {Resume: "elsewhere"}} {
+		c.Terminal = bad
+		if c.Check() == nil {
+			t.Errorf("%+v passed", bad)
+		}
 	}
 }

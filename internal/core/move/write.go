@@ -146,7 +146,7 @@ func writeFetched(ctx context.Context, p *Plan, env Env, j *journal.Journal, bas
 		return err
 	}
 	res.Fetch.Outcome, res.Fetch.Branch, res.Fetch.Key = FetchComplete, branch, key.String()
-	res.Command = ad.Command
+	res.Command, res.Run = ad.Command, ad.Resume
 	env.Audit.Write(audit.Entry{Action: "cloud.fetch", Session: p.Key.String(), Detail: map[string]any{"cloud": fp.Cloud, "worktree": fp.Worktree,
 		"branch": branch, "journal": j.ID}})
 	env.Audit.Write(audit.Entry{Action: "cloud.write", Host: machine, Session: key.String(), Detail: map[string]any{"from": string(fp.Session),
@@ -230,7 +230,7 @@ func appendWritten(ctx context.Context, p *Plan, env Env, j *journal.Journal, no
 		return err
 	}
 	res.Fetch.Outcome, res.Fetch.Branch, res.Fetch.Key = FetchComplete, branch, o.Key.String()
-	res.Command = ad.Command
+	res.Command, res.Run = ad.Command, ad.Resume
 	env.Audit.Write(audit.Entry{Action: "cloud.fetch", Session: p.Key.String(), Detail: map[string]any{"cloud": fp.Cloud, "worktree": fp.Worktree,
 		"branch": branch, "journal": j.ID, "appended": true}})
 	env.Audit.Write(audit.Entry{Action: "cloud.write", Host: machine, Session: o.Key.String(), Detail: map[string]any{"from": string(fp.Session),

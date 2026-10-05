@@ -130,6 +130,9 @@ type Info struct {
 		FirstRun bool `json:"firstRun"`
 	} `json:"localNetwork"`
 	UpdateCheck string `json:"updateCheck"` // "", "on" or "off"
+	// Terminal is the terminal app sessions open in, by name ("iTerm2"): the window says
+	// "Open in iTerm2".
+	Terminal    string `json:"terminal"`
 	SkillState  string `json:"skillState"`  // across every agent: absent | current | stale | modified | foreign | broken
 	SkillPrompt string `json:"skillPrompt"` // "declined" once the user said not now
 	CLIOffer    bool   `json:"cliOffer"`    // offer to link the command-line tool
@@ -166,6 +169,9 @@ func (a *App) Info() Info {
 	info.Defaults.MarkMoved, info.Defaults.SyncCode, info.Defaults.PushSource = cfg.MarkMovedOn(), cfg.SyncCodeOn(), cfg.PushSource
 	info.LocalNetwork.Gated = lnp.Gated()
 	info.LocalNetwork.FirstRun = lnp.FirstRun(config.StateDir())
+	if t := a.core.MyTerminal(ctx); t != nil && runtime.GOOS == "darwin" {
+		info.Terminal = t.Name()
+	}
 	return info
 }
 

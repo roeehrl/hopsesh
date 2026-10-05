@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -14,11 +12,11 @@ import (
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/convert"
-	"github.com/roeehrl/hopsesh/internal/core/launch"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/proc"
 	"github.com/roeehrl/hopsesh/internal/core/repos"
+	"github.com/roeehrl/hopsesh/internal/core/termapp"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -567,10 +565,20 @@ func (a *App) OpenResult() error {
 	if p.Options.App {
 		return start(p.Resume)
 	}
-	if res.Command == "" {
+	if res.Command == "" || len(res.Run.Argv) == 0 {
 		return errors.New("there is nothing to open")
 	}
-	return terminal(res.Command)
+	l := app.Launch{Kind: termapp.KindSession, Run: res.Run, Key: p.Placement.Key,
+		Labels: termapp.Labels{Title: p.Title, Agent: p.Agent, Machine: app.LocalName()}}
+	if p.Kind == move.KindFetch && res.Fetch != nil {
+		if res.Fetch.Outcome == move.FetchWaiting {
+			// The agent's own command that brings the session (claude --teleport).
+			l.Kind, l.Key, l.Labels.Agent = termapp.KindStep, agent.SessionKey{}, p.Fetch.CloudTitle
+		} else {
+			l.Key, _ = agent.ParseKey(res.Fetch.Key)
+		}
+	}
+	return a.openLaunch(l)
 }
 
 // ResumeEntry continues a session that is already on this machine, in a terminal or (inApp)
@@ -588,10 +596,17 @@ func (a *App) ResumeEntry(machine, key string, inApp bool) error {
 	if err != nil {
 		return err
 	}
+	// One live tab per session: never a second copy writing to the same conversation.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := core.OpenElsewhere(ctx, e.Session.Key, e.Live); err != nil {
+		return err
+	}
 	if inApp {
 		return start(c)
 	}
-	return terminal(launch.Shell(c, "", launch.DefaultShell()))
+	return a.openLaunch(app.Launch{Kind: termapp.KindSession, Run: c, Key: e.Session.Key,
+		Labels: termapp.Labels{Title: e.Session.Title, Agent: e.AgentName, Machine: e.Machine}})
 }
 
 // Undo reverses a move or continuation by its journal id; force undoes it even when the
@@ -615,28 +630,6 @@ func start(c agent.Command) error {
 	}
 	go func() { _ = cmd.Wait() }()
 	return nil
-}
-
-// openTerminal runs a shell line (built by hopsesh, never taken from the window) in a new
-// terminal window.
-func openTerminal(line string) error {
-	switch runtime.GOOS {
-	case "darwin":
-		script := fmt.Sprintf("tell application \"Terminal\"\n\tactivate\n\tdo script %s\nend tell", appleScriptString(line))
-		return proc.Command("osascript", "-e", script).Run()
-	case "windows":
-		return openWindowsTerminal(line)
-	}
-	for _, t := range [][]string{{"x-terminal-emulator", "-e"}, {"gnome-terminal", "--"}, {"konsole", "-e"}, {"xterm", "-e"}} {
-		if _, err := exec.LookPath(t[0]); err == nil {
-			return proc.Command(t[0], append(t[1:], "sh", "-c", line+"; exec $SHELL")...).Start()
-		}
-	}
-	return errors.New("no terminal emulator found; copy the command instead")
-}
-
-func appleScriptString(s string) string {
-	return `"` + strings.ReplaceAll(strings.ReplaceAll(s, `\`, `\\`), `"`, `\"`) + `"`
 }
 
 func nonEmpty(s, d string) string {

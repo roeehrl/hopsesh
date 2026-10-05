@@ -6,9 +6,9 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
-	"github.com/roeehrl/hopsesh/internal/core/host"
-	"github.com/roeehrl/hopsesh/internal/core/proc"
+	"github.com/roeehrl/hopsesh/internal/core/termapp"
 	"github.com/roeehrl/hopsesh/internal/ui/tui"
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 func (r *run) runTUI() error {
@@ -25,11 +25,14 @@ func (r *run) runTUI() error {
 				argv = append(argv[:len(argv)-1:len(argv)-1], string(b))
 			}
 		}
-		c := proc.Command(argv[0], argv[1:]...)
-		c.Dir = exit.RunDir
-		c.Env = host.Without(os.Environ(), exit.Unset)
-		c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
-		runErr := c.Run()
+		// The agent runs attached to this terminal: a resume labels the tab and is recorded
+		// while it runs (so "Show" finds it); a driver's command is a step.
+		l := app.Launch{Kind: termapp.KindStep, Run: agent.Command{Argv: argv, Dir: exit.RunDir, Unset: exit.Unset},
+			Labels: termapp.Labels{Title: exit.Title, Agent: exit.Agent, Machine: app.LocalName()}}
+		if exit.Key.Session != "" {
+			l.Kind, l.Key = termapp.KindSession, exit.Key
+		}
+		runErr := r.runInThisTerminal(l)
 		if exit.Adopt == "" {
 			return runErr
 		}

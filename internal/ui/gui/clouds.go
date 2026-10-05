@@ -11,6 +11,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/move"
+	"github.com/roeehrl/hopsesh/internal/core/termapp"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -344,10 +345,17 @@ func (a *App) OpenBrought(journal string) error {
 		return err
 	}
 	b := a.snapshot().Brought(f)
-	if b.Command == "" || b.Outcome == move.FetchEmpty {
+	if b.Command == "" || b.Outcome == move.FetchEmpty || len(b.Run.Argv) == 0 {
 		return errors.New("there is nothing to open")
 	}
-	return terminal(b.Command)
+	l := app.Launch{Kind: termapp.KindSession, Run: b.Run, Labels: termapp.Labels{Title: b.Title, Agent: b.Agent, Machine: app.LocalName()}}
+	if b.Outcome == move.FetchWaiting {
+		// The agent's own command that brings the session (claude --teleport).
+		l.Kind, l.Labels.Agent = termapp.KindStep, b.CloudTitle
+	} else {
+		l.Key, _ = agent.ParseKey(b.Key)
+	}
+	return a.openLaunch(l)
 }
 
 // cloudPage reports whether url is a page hopsesh may open for a cloud: a session's page
@@ -399,13 +407,6 @@ func cloudModuleOf(core *app.App, name string) (agent.Module, agent.Cloud, bool)
 	}
 	return nil, agent.Cloud{}, false
 }
-
-// terminal opens a shell line hopsesh built in a new terminal window; SetTerminal
-// replaces it (the browser tests run the line in the background, as a terminal would).
-var terminal = openTerminal
-
-// SetTerminal replaces how the window opens a command in a terminal.
-func SetTerminal(f func(line string) error) { terminal = f }
 
 func nonEmptyStr(a, b string) string {
 	if a != "" {
