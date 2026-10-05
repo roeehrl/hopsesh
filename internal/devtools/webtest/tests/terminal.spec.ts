@@ -311,3 +311,19 @@ test("quitting with a program running asks first, lists it, and ends it", async 
   await expect(tab(t, /Tidy request logging/)).toBeHidden();
   await expect(t.getByText("No programs are running here")).toBeVisible();
 });
+
+// A session opened in the user's terminal app that can report its end (iTerm2 with its
+// Python API): the window says how it ended, beside the session.
+test("a session's run in the user's terminal app shows how it ended", async ({ page }) => {
+  await page.getByRole("button", { name: /All sessions/ }).click();
+  const r = row(page, "Find the codeword");
+  const key = await r.getAttribute("data-key");
+  const [machine, k] = key!.split("\u0000");
+  await page.evaluate(([machine, key]) => (window as any).__emit("hopsesh:external-exit",
+    { kind: "session", machine, key, title: "Find the codeword", terminal: "iTerm2", code: 3, closed: false, at: new Date().toISOString() }), [machine, k]);
+  await expect(page.locator("#toast")).toContainText("“Find the codeword” in iTerm2: exited with code 3");
+  await expect(r.locator(".chip", { hasText: "exited 3 in iTerm2" })).toBeVisible();
+  await page.evaluate(([machine, key]) => (window as any).__emit("hopsesh:external-exit",
+    { kind: "session", machine, key, title: "Find the codeword", terminal: "iTerm2", code: -1, closed: true, at: new Date().toISOString() }), [machine, k]);
+  await expect(r.locator(".chip", { hasText: "closed in iTerm2" })).toBeVisible();
+});

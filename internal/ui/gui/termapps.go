@@ -54,6 +54,7 @@ func (a *App) openLaunch(l app.Launch) error {
 		return err
 	}
 	a.noteOpened(o)
+	a.watchLaunch(o, l)
 	return nil
 }
 

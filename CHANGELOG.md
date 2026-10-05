@@ -56,6 +56,9 @@ All notable changes to this project are documented here. The format follows
   instead. On macOS a tab you can't see that waits for you raises a notification (hopsesh's
   own words, at most one every 10 seconds) and a Dock badge; on Windows the terminal's
   taskbar button flashes.
+- Where your terminal app can say when a tab ends (iTerm2 with its Python API on), the app
+  shows how a session or a hand-off step you opened there ended: "exited N" beside the
+  session, or "closed" when the tab was closed first, and a notice.
 - Quitting hopsesh while programs run in its tabs asks first and lists them. Closing the
   window hides it while programs run (**Keep tabs when the window closes**).
 - **Settings → Terminal**: where sessions, hand-offs and bring-backs open (**In this

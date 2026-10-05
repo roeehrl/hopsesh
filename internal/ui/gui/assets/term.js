@@ -13,9 +13,25 @@ const changed = () => { for (const f of listeners) f(); badge(); };
 export async function loadTabs() {
   try {
     for (const t of await api("TerminalTabs")) tabs.set(t.id, t);
+    for (const x of await api("ExternalExits")) exits.set(x.machine + "\u0000" + x.key, x);
   } catch { /* no terminal here */ }
   changed();
 }
+
+// exits are how launches in the user's terminal app ended, where it can say (iTerm2 with
+// its Python API): by session.
+export const exits = new Map();
+// exitOf is how a session's last run in the user's terminal app ended, if hopsesh knows.
+export const exitOf = (e) => exits.get(e.machine + "\u0000" + e.key);
+// exitWords are an external exit for people: "exited 0", "exited 3", "closed".
+export const exitWords = (x) => (x.closed ? "closed" : `exited ${x.code}`);
+
+on("hopsesh:external-exit", (x) => {
+  if (x.key) exits.set(x.machine + "\u0000" + x.key, x);
+  const what = x.closed ? "its tab was closed" : `exited with code ${x.code}`;
+  toast(`“${x.title}” in ${x.terminal}: ${what}`);
+  changed();
+});
 
 on("hopsesh:terminal", (t) => {
   if (!t.state) tabs.delete(t.id); else tabs.set(t.id, t);

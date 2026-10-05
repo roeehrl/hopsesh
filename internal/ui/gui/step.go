@@ -38,8 +38,11 @@ type HandoffStepDTO struct {
 	State string `json:"state"`
 	// Where it runs: "here" (a tab of the hopsesh Terminal window, Tab) or "terminal" (the
 	// user's terminal app).
-	Where      string `json:"where"`
-	Tab        string `json:"tab,omitempty"`
+	Where string `json:"where"`
+	Tab   string `json:"tab,omitempty"`
+	// Exit is how the step's tab in the user's terminal app ended, when that terminal can
+	// say: its exit code, -1 when the tab was closed first.
+	Exit       *int   `json:"exit,omitempty"`
 	CloudTitle string `json:"cloudTitle"`
 	Driver     string `json:"driver"` // "claude"
 	Folder     string `json:"folder"`
@@ -115,6 +118,7 @@ func (a *App) runStep(ctx context.Context, s move.TermStep) (move.StepResult, er
 	// Where the user's terminal can say so (iTerm2 with its Python API on), a tab closed
 	// before the step wrote its outcome ends the wait at once instead of after 25 minutes.
 	var exited <-chan int
+	termName := ""
 	external := func() {
 		a.mu.Lock()
 		ps.dto.Where, ps.dto.Tab = WhereTerminal, ""
@@ -125,6 +129,7 @@ func (a *App) runStep(ctx context.Context, s move.TermStep) (move.StepResult, er
 			return
 		}
 		exited, _ = core.WatchLaunch(ctx, opened.Handle)
+		termName = opened.Terminal
 	}
 	if route("", core.Cfg.AppResume(), true) == WhereHere && a.Terms != nil {
 		if tab, err = a.stepTab(ctx, s, ps, done); err != nil {
@@ -181,9 +186,18 @@ func (a *App) runStep(ctx context.Context, s move.TermStep) (move.StepResult, er
 			default:
 				return move.StepResult{}, d.err
 			}
-		case _, ok := <-exited:
+		case code, ok := <-exited:
 			exited = nil
-			if !ok || noSession != nil {
+			if !ok {
+				continue
+			}
+			// The step's tab in the user's terminal app ended (or was closed): say so.
+			a.mu.Lock()
+			c := code
+			ps.dto.Exit = &c
+			a.mu.Unlock()
+			a.noteExit(ExternalExitDTO{Kind: string(termapp.KindStep), Title: s.Title, Terminal: termName}, code)
+			if noSession != nil {
 				continue
 			}
 			o, err := core.StepOutcomeOf(id)

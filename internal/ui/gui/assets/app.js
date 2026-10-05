@@ -10,7 +10,7 @@ import "./machines.js";
 import "./settings.js";
 import { undoLast } from "./activity.js";
 import { openPalette } from "./palette.js";
-import { loadTabs, onTabs, showTerminal, tabs } from "./term.js";
+import { loadTabs, onTabs, showTerminal, tabs, exits } from "./term.js";
 import { render as renderSessions } from "./sessions.js";
 
 $("#btn-search").onclick = openPalette;
@@ -21,7 +21,7 @@ $("#btn-terminal").onclick = () => showTerminal();
 // show changes (not on every output), keeping the focus on the selected row.
 let shownTabs = "";
 onTabs(() => {
-  const sig = JSON.stringify([...tabs.values()].map((t) => [t.kind, t.machine, t.key, t.attention, t.state === "exited"]));
+  const sig = JSON.stringify([[...tabs.values()].map((t) => [t.kind, t.machine, t.key, t.attention, t.state === "exited"]), [...exits.values()].map((x) => [x.key, x.code])]);
   if (sig === shownTabs || current !== "sessions") { shownTabs = sig; return; }
   shownTabs = sig;
   const onRow = document.activeElement?.classList?.contains("row");

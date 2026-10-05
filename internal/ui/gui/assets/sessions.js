@@ -6,7 +6,7 @@ import { api, h, fill, icon, ICONS, view, state, screen, go, loading, toast, fai
 import { handoffMenu } from "./handoff.js";
 import { hopMenu } from "./hop.js";
 import { planFor, planPicked } from "./plan.js";
-import { tabFor, waiting, strayWaiting, where as opensIn, resume, openShell, moveToTerminal, showTerminal, tabChip, IN_A_TAB, tabs } from "./term.js";
+import { tabFor, exitOf, exitWords, waiting, strayWaiting, where as opensIn, resume, openShell, moveToTerminal, showTerminal, tabChip, IN_A_TAB, tabs } from "./term.js";
 
 // scan reads every machine again. The list stays while it runs.
 export async function scan() {
@@ -356,6 +356,8 @@ function row(e) {
   if (e.cloud?.pr) chips.push(h("span", { class: "chip st-moved" }, "PR " + e.cloud.pr));
   if (e.mirror) chips.push(mirrorChip(e.mirror));
   if (tab) chips.push(tabChip());
+  const ext = !tab && !e.live && e.machine === here() ? exitOf(e) : null;
+  if (ext) chips.push(h("span", { class: "chip " + (ext.code === 0 ? "st-idle" : ext.closed ? "st-ended" : "st-error"), title: `How its last run in ${ext.terminal} ended` }, `${exitWords(ext)} in ${ext.terminal}`));
   for (const c of others) chips.push(h("span", { class: "chip" + (c.newest ? " st-warn" : "") }, `${c.newest ? "newest: " : "also "}${c.agentName} ${c.local ? "here" : "on " + c.machine}`));
   const where = e.cloud ? "cloud" : e.machine === here() ? (tab ? "here · in a tab" : "here") : e.machine;
   return h("div", { class: "row", role: "option", "aria-selected": sel ? "true" : "false", tabindex: sel ? "0" : "-1", "data-key": e.machine + "\u0000" + e.key,

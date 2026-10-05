@@ -265,7 +265,7 @@ async function apply() {
   let shown = "";
   const poll = setInterval(async () => {
     const st = await api("HandoffStep").catch(() => null);
-    const key = st ? `${st.state}|${st.where}|${st.tab}|${st.message || ""}` : "";
+    const key = st ? `${st.state}|${st.where}|${st.tab}|${st.exit}|${st.message || ""}` : "";
     if (key !== shown) { shown = key; stepBox(term, st); }
   }, 500);
   const off = on("hopsesh:progress", (label) => {
@@ -309,6 +309,9 @@ export function stepBox(box, st) {
       h("span", { style: "font-size:12.5px;line-height:1.5" }, "Its tab runs ", mono(`${st.driver} --cloud`), " in hopsesh's hand-off folder for this repository. If it asks whether you trust this folder, answer it there; hopsesh never answers for you. hopsesh reads that tab only for the session link."),
       h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" }, h("button", { class: "btn primary", onclick: () => showTerminal(st.tab) }, "Show the terminal")),
       h("span", { class: "mono muted", style: "font-size:11.5px;word-break:break-all" }, st.folder)]
+    : st.state === "waiting" && st.exit != null
+    ? [h("b", {}, st.exit < 0 ? "The step's tab was closed" : `The step's tab ended (exited ${st.exit})`),
+      h("span", { style: "font-size:12.5px;line-height:1.5" }, "hopsesh is reading what it left. If a session started, paste its link; otherwise stop waiting, and Undo removes what the hand-off did.")]
     : st.state === "waiting"
     ? [h("b", {}, `${st.cloudTitle} is starting the session in your terminal`),
       h("span", { style: "font-size:12.5px;line-height:1.5" }, "hopsesh opened a terminal window that runs ", mono(`${st.driver} --cloud`), " in its hand-off folder for this repository. If it asks whether you trust this folder, answer it there; hopsesh picks up the session's link once it is printed."),
