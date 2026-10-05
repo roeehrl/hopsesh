@@ -335,8 +335,20 @@ func TestQuitAndClose(t *testing.T) {
 	home(t)
 	a := NewApp(all.Registry())
 	defer a.Shutdown()
-	var events []string
-	a.Emitter = func(name string, _ any) { events = append(events, name) }
+	var (
+		evMu   sync.Mutex
+		events []string
+	)
+	a.Emitter = func(name string, _ any) {
+		evMu.Lock()
+		events = append(events, name)
+		evMu.Unlock()
+	}
+	saw := func(name string) bool {
+		evMu.Lock()
+		defer evMu.Unlock()
+		return slices.Contains(events, name)
+	}
 	if !a.ShouldQuit() {
 		t.Fatal("no tabs: quits")
 	}
@@ -347,8 +359,8 @@ func TestQuitAndClose(t *testing.T) {
 	if _, err := a.Terms.Open(pty.Spec{Argv: []string{shellProg(), "-c", "sleep 30"}, Dir: dir}, TabSetup{Meta: TabMeta{Kind: TabShell}}); err != nil {
 		t.Fatal(err)
 	}
-	if a.ShouldQuit() || !slices.Contains(events, QuitEvent) {
-		t.Fatalf("a running tab: %v", events)
+	if a.ShouldQuit() || !saw(QuitEvent) {
+		t.Fatal("a running tab: quitting must ask")
 	}
 	if c, hide := a.MainClosing(); !c || !hide {
 		t.Fatal("keep tabs: hide")
@@ -357,8 +369,10 @@ func TestQuitAndClose(t *testing.T) {
 	a.mu.Lock()
 	a.core.Cfg.Terminal.KeepTabs = &off
 	a.mu.Unlock()
+	evMu.Lock()
 	events = nil
-	if c, hide := a.MainClosing(); !c || hide || !slices.Contains(events, QuitEvent) {
+	evMu.Unlock()
+	if c, hide := a.MainClosing(); !c || hide || !saw(QuitEvent) {
 		t.Fatal("no keeping tabs: ask")
 	}
 	a.QuitAndEnd()
