@@ -14,7 +14,7 @@
 // The terminal window: /terminal/ is the real page (with its content security policy), and
 // its two streams are WebSockets to /stream. POST /reset?terminal=here makes sessions and
 // steps open in the app's own terminal (other resets choose the user's terminal app, which
-// the older tests expect); POST /terminal-test/open?title=…[&trust=1] opens a tab running
+// the older tests expect); POST /terminal-test/open?title=…[&trust=1][&quiet=1][&kind=step] opens a tab running
 // termfake (internal/testkit/termfake), as an entry point would; GET /terminal-test/links
 // lists the links the window asked hopsesh to open (no browser opens).
 //
@@ -278,7 +278,7 @@ func main() {
 		mu.RLock()
 		terms := svc.Terms
 		mu.RUnlock()
-		info, err := openFake(terms, r.URL.Query().Get("title"), r.URL.Query().Get("trust") == "1", r.URL.Query().Get("kind"))
+		info, err := openFake(terms, r.URL.Query().Get("title"), r.URL.Query().Get("trust") == "1", r.URL.Query().Get("quiet") == "1", r.URL.Query().Get("kind"))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -522,7 +522,7 @@ func (w *wsConn) Close() error {
 // openFake opens a tab running termfake (this program), as one of the app's entry points
 // would: kind session (default), step (with the hand-off's banner), signin (recorded
 // nowhere) or shell.
-func openFake(terms *gui.Terminals, title string, trust bool, kind string) (any, error) {
+func openFake(terms *gui.Terminals, title string, trust, quiet bool, kind string) (any, error) {
 	self, err := os.Executable()
 	if err != nil {
 		return nil, err
@@ -548,6 +548,9 @@ func openFake(terms *gui.Terminals, title string, trust bool, kind string) (any,
 	argv := []string{prog}
 	if trust {
 		argv = append(argv, "trust")
+	}
+	if quiet {
+		argv = append(argv, "quiet")
 	}
 	if title == "" {
 		title = "Fix the parser · termfake"

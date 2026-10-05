@@ -11,7 +11,8 @@
 //	anything else is echoed back as "typed=<text>" once Return comes
 //
 // Started as "termfake trust", it first asks Claude Code's workspace-trust question and
-// waits for 1 or Return.
+// waits for 1 or Return. "quiet" (in any order with "trust") still asks the terminal but
+// prints none of its own diagnostics, for screenshots.
 package termfake
 
 import (
@@ -70,17 +71,27 @@ func Main() int {
 			}
 		}
 	}
-	say("termfake: da1=%q", ask("\x1b[c"))
-	say("termfake: da2=%q", ask("\x1b[>c"))
+	opts := map[string]bool{}
+	for _, a := range os.Args[1:] {
+		opts[a] = true
+	}
+	quiet := opts["quiet"]
+	note := func(format string, a ...any) {
+		if !quiet {
+			say(format, a...)
+		}
+	}
+	note("termfake: da1=%q", ask("\x1b[c"))
+	note("termfake: da2=%q", ask("\x1b[>c"))
 	w, h, _ := term.GetSize(out)
-	say("termfake: size=%dx%d", w, h)
-	if len(os.Args) > 1 && os.Args[1] == "trust" {
+	note("termfake: size=%dx%d", w, h)
+	if opts["trust"] {
 		say("\x1b[1mQuick safety check: Is this a project you created or one you trust?\x1b[22m")
 		say(" ❯ 1. Yes, I trust this folder")
 		say("   2. No, exit")
 		for k := range keys {
 			if k == '1' || k == '\r' {
-				say("termfake: trusted")
+				note("termfake: trusted")
 				break
 			}
 			if k == '2' {
@@ -88,7 +99,7 @@ func Main() int {
 			}
 		}
 	}
-	say("termfake: ready")
+	note("termfake: ready")
 	var line strings.Builder
 	for k := range keys {
 		switch {
