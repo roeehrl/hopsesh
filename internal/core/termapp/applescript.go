@@ -50,6 +50,9 @@ var allowedLines = func() []*regexp.Regexp {
 		`if tty of s is <tty> then return \(unique ID of s\) & tab & \(tty of s\)`,
 		`if \(unique ID of s is <ref>\) and \(tty of s is <tty>\) then`,
 		`select [wts]`,
+		// iTerm2's Python API, when the user turned it on: a cookie for hopsesh's own
+		// connection (iterm2api.CookieScript), nothing else.
+		`return \(request cookie and key for app named "hopsesh"\)`,
 		// Terminal: a new window running hopsesh's command (do script without "in", so
 		// never into a tab that exists), its tab's tty, and bringing a tab forward.
 		`set t to do script <cmd>`,

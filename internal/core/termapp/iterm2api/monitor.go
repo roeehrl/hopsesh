@@ -34,7 +34,9 @@ type Monitor struct {
 	order      []string // terminated ids, oldest first, to bound the set
 	client     *Client
 
-	events *eventQueue
+	events  *eventQueue
+	started chan struct{}
+	once    sync.Once
 }
 
 const keepTerminated = 1024
@@ -56,8 +58,12 @@ func NewMonitor(o MonitorOptions) *Monitor {
 		watched:    map[string]chan struct{}{},
 		terminated: map[string]bool{},
 		events:     newEventQueue(),
+		started:    make(chan struct{}),
 	}
 }
+
+// Started is closed once the first connection is up and subscribed.
+func (m *Monitor) Started() <-chan struct{} { return m.started }
 
 // Events delivers every notification (and Reconnected) in order until Run returns. The
 // caller must drain it.
@@ -212,5 +218,6 @@ func (m *Monitor) session(ctx context.Context, first bool) (*Client, error) {
 	m.mu.Lock()
 	m.client = c
 	m.mu.Unlock()
+	m.once.Do(func() { close(m.started) })
 	return c, nil
 }

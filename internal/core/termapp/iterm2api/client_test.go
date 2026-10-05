@@ -290,12 +290,15 @@ func TestParseCookieOutput(t *testing.T) {
 			t.Errorf("%q: error carries osascript's output", tc.stderr)
 		}
 	}
-	for _, out := range []string{"", "onlyonepart", "a b c"} {
+	if _, err := parseCookieOutput(nil, nil, nil); !errors.Is(err, ErrUnavailable) {
+		t.Errorf("empty reply (iTerm2 not running): %v", err)
+	}
+	for _, out := range []string{"onlyonepart", "a b c"} {
 		if _, err := parseCookieOutput([]byte(out), nil, nil); !errors.Is(err, ErrNotAuthorized) {
 			t.Errorf("%q: err = %v", out, err)
 		}
 	}
-	if !strings.Contains(cookieScript("hopsesh"), `is running`) {
+	if !strings.Contains(CookieScript("hopsesh"), `is not running then return ""`) {
 		t.Error("the cookie script could launch iTerm2")
 	}
 	if _, err := AppleScriptCredentials(ctxT(t), `x" & do shell script "y`); err == nil {
@@ -398,11 +401,14 @@ func TestOperations(t *testing.T) {
 		t.Fatalf("Focus(gone) = %v", err)
 	}
 
-	if err := c.SetLabels(ctx, tab.SessionID, map[string]string{"title": "Fix\x1b]1337;evil\x07 parser\u202e", "machine": "laptop"}); err != nil {
+	if err := c.SetLabels(ctx, tab.SessionID, map[string]string{"title": "Fix\x1b]1337;evil\x07 parser\u202e"}); err == nil {
+		t.Fatal("an unsanitised label was sent")
+	}
+	if err := c.SetLabels(ctx, tab.SessionID, map[string]string{"title": "Fix the parser", "machine": "laptop"}); err != nil {
 		t.Fatal(err)
 	}
 	vars := srv.Vars(tab.SessionID)
-	if vars["user.hopsesh_title"] != `"Fix]1337;evil parser"` || vars["user.hopsesh_machine"] != `"laptop"` {
+	if vars["user.hopsesh_title"] != `"Fix the parser"` || vars["user.hopsesh_machine"] != `"laptop"` {
 		t.Fatalf("vars = %v", vars)
 	}
 	if err := c.SetLabels(ctx, tab.SessionID, map[string]string{"../x": "y"}); err == nil {
@@ -616,17 +622,20 @@ func TestMonitorStopsWhenConsentIsWithdrawn(t *testing.T) {
 	}
 }
 
-func TestQuoteArgvAndSanitize(t *testing.T) {
+func TestQuoteArgvAndValidLabel(t *testing.T) {
 	got := QuoteArgv([]string{"sh", "-c", "sleep 2; exit 3", "it's", ""})
 	if got != `sh -c 'sleep 2; exit 3' 'it'\''s' ''` {
 		t.Fatalf("QuoteArgv = %s", got)
 	}
-	long := strings.Repeat("é", 100)
-	if s := Sanitize(long); len([]rune(s)) != 80 {
-		t.Fatalf("Sanitize did not cap: %d", len([]rune(s)))
+	for _, v := range []string{"Fix the parser", "é", strings.Repeat("a", 80), ""} {
+		if !ValidLabel(v) {
+			t.Errorf("ValidLabel(%q) = false", v)
+		}
 	}
-	if s := Sanitize("a\x00b\x1b[31mc\x07d\u0085e\u2066f\u200fg\x7f"); s != "ab[31mcdefg" {
-		t.Fatalf("Sanitize = %q", s)
+	for _, v := range []string{"a\x1b]1337;x\x07", "a\x00", "a\u0085", "a\u202e", "a\u2066", "a\x7f", strings.Repeat("a", 81), "\xff"} {
+		if ValidLabel(v) {
+			t.Errorf("ValidLabel(%q) = true", v)
+		}
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"google.golang.org/protobuf/encoding/protowire"
 )
@@ -255,7 +256,10 @@ func newVariableSet(session string, labels map[string]string) (variableRequest, 
 		if !labelKey.MatchString(k) {
 			return variableRequest{}, fmt.Errorf("iterm2api: label name %q must match %s", k, labelKey)
 		}
-		j, err := json.Marshal(Sanitize(labels[k]))
+		if !ValidLabel(labels[k]) {
+			return variableRequest{}, fmt.Errorf("iterm2api: label %q is not sanitised", k)
+		}
+		j, err := json.Marshal(labels[k])
 		if err != nil {
 			return variableRequest{}, err
 		}
@@ -686,24 +690,15 @@ func decodeNotification(b []byte) ([]Event, error) {
 	return evs, err
 }
 
-// Sanitize makes a label safe to show in a badge or variable: it drops C0 and C1 controls
-// (ESC and BEL among them), DEL and bidirectional overrides, and caps the result at 80
-// characters.
-func Sanitize(s string) string {
-	var b strings.Builder
-	n := 0
-	for _, r := range s {
-		if n == 80 {
-			break
-		}
-		switch {
-		case r < 0x20, r == 0x7f, r >= 0x80 && r < 0xa0:
-			continue
-		case r >= 0x202a && r <= 0x202e, r >= 0x2066 && r <= 0x2069, r == 0x200e, r == 0x200f, r == 0x061c:
-			continue
-		}
-		b.WriteRune(r)
-		n++
+// ValidLabel reports whether a label value is already clean: no C0 or C1 controls (so no ESC
+// or BEL), no DEL, no bidirectional controls, valid UTF-8, at most 80 characters. The
+// caller cleans labels with termapp.Sanitize; this package only refuses unclean ones.
+func ValidLabel(v string) bool {
+	if !utf8.ValidString(v) || utf8.RuneCountInString(v) > 80 {
+		return false
 	}
-	return b.String()
+	return !strings.ContainsFunc(v, func(r rune) bool {
+		return r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) ||
+			r == 0x061c || r == 0x200e || r == 0x200f || (r >= 0x202a && r <= 0x202e) || (r >= 0x2066 && r <= 0x2069)
+	})
 }

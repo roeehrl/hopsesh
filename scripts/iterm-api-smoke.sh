@@ -11,14 +11,18 @@
 #   1. probes the API socket without credentials (nothing is prompted if the API is off);
 #   2. connects with a cookie from AppleScript, lists windows and sessions, and reads the
 #      key window;
-#   3. finds the tab it runs in by the TTY the OS reports for it;
+#   3. finds the tab it runs in by the TTY the OS reports for it, and checks that
+#      AppleScript's "unique ID" for that tab is the API's session id (hopsesh may focus
+#      a tab found one way through the other);
 #   4. opens a tab in the key window running sh -c 'sleep 2; exit 3', waits for iTerm2's
 #      session-terminated event, and checks the exit status 3 from a status file the tab's
 #      own command writes (iTerm2's protocol carries no exit status; hopsesh gets codes from
 #      its launch records);
 #   5. opens a split beside this tab running sh -c 'sleep 4', sets user.hopsesh_title on
 #      it, waits for it to end, and focuses this tab again.
-# It never sends text to a session and never reads a screen. If your profile keeps ended
+# It never sends text to a session and never reads a screen. To see hopsesh itself use the
+# API, hand a session off from the app with the API on: the step opens in a split beside the
+# session in front, and closing that split before the step ends stops the app's wait. If your profile keeps ended
 # sessions open, close the test tab when its program has ended and the script goes on.
 #
 #   HOPSESH_ITERM_API=1 scripts/iterm-api-smoke.sh

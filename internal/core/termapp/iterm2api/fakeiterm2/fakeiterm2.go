@@ -49,8 +49,9 @@ type Server struct {
 }
 
 type window struct {
-	id   string
-	tabs []*tab
+	id       string
+	tabs     []*tab
+	selected int // the selected tab's id
 }
 
 type tab struct {
@@ -211,7 +212,9 @@ func (s *Server) AddWindow() (windowID, sessionID string) {
 	defer s.mu.Unlock()
 	w := s.newWindowLocked()
 	sess := s.newSessionLocked("", nil)
-	w.tabs = append(w.tabs, s.newTabLocked(sess.id))
+	t := s.newTabLocked(sess.id)
+	w.tabs = append(w.tabs, t)
+	w.selected = t.id
 	s.keyWindow = w.id
 	return w.id, sess.id
 }
@@ -530,6 +533,9 @@ func (s *Server) listSessions() []byte {
 			wb = appendBytes(wb, 1, tb)
 		}
 		wb = appendString(wb, 2, w.id)
+		if w.selected != 0 {
+			wb = appendString(wb, 5, fmt.Sprint(w.selected))
+		}
 		out = appendBytes(out, 1, wb)
 	}
 	return out
@@ -585,6 +591,7 @@ func (s *Server) createTab(b []byte) ([]byte, error) {
 	sess := s.newSessionLocked(profile, props)
 	t := s.newTabLocked(sess.id)
 	w.tabs = append(w.tabs, t)
+	w.selected = t.id
 	var out []byte
 	out = appendVarint(out, 1, 0)
 	out = appendString(out, 2, w.id)
@@ -649,6 +656,7 @@ func (s *Server) activate(b []byte) []byte {
 			for _, x := range t.sessions {
 				if x == id {
 					t.active = id
+					w.selected = t.id
 					s.keyWindow = w.id
 				}
 			}

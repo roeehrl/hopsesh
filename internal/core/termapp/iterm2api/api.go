@@ -210,8 +210,9 @@ func (c *Client) Focus(ctx context.Context, session string) error {
 }
 
 // SetLabels sets user.hopsesh_<name> variables on a session (for badges and titles that
-// interpolate them). Names are lower-case letters, digits and underscores; values are
-// sanitised. Labels are for people: hopsesh never reads them back as identity.
+// interpolate them). Names are lower-case letters, digits and underscores; values must
+// already be clean (termapp.Sanitize), and one that is not is refused. Labels are for
+// people: hopsesh never reads them back as identity.
 func (c *Client) SetLabels(ctx context.Context, session string, labels map[string]string) error {
 	if len(labels) == 0 {
 		return nil

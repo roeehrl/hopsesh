@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"testing"
 )
 
 // Errors from Connect and Probe. Every one of them means "use the AppleScript path": the
@@ -84,16 +85,15 @@ func ScrubEnv(env []string) []string {
 
 var appNameOK = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}$`)
 
-// cookieScript asks a running iTerm2 for a cookie and key. It never launches iTerm2: the
-// running check comes first, and the client asks only after a handshake showed the API
-// listening.
-func cookieScript(appName string) string {
-	return `if application "iTerm2" is running then
-	tell application "iTerm2" to request cookie and key for app named "` + appName + `"
-else
-	error "iTerm2 is not running" number -600
-end if
-`
+// CookieScript is the AppleScript that asks a running iTerm2 for a cookie and key. It never
+// launches iTerm2 (an empty result when it is not running), and the client runs it only
+// after a handshake showed the API listening. termapp checks it against its AppleScript
+// allowlist.
+func CookieScript(appName string) string {
+	return `if application id "com.googlecode.iterm2" is not running then return ""
+tell application id "com.googlecode.iterm2"
+	return (request cookie and key for app named "` + appName + `")
+end tell`
 }
 
 // osascript runs an AppleScript given on standard input (so nothing secret or quoted is on
@@ -115,13 +115,14 @@ var appleScriptErrNum = regexp.MustCompile(`\((-?\d+)\)\s*$`)
 // call shows macOS's "hopsesh wants to control iTerm2" prompt; a declined prompt maps to
 // ErrNotAuthorized.
 func AppleScriptCredentials(ctx context.Context, appName string) (Credentials, error) {
-	if runtime.GOOS != "darwin" {
+	if runtime.GOOS != "darwin" || testing.Testing() {
+		// Off macOS there is no iTerm2; under test no Apple Event is ever sent.
 		return Credentials{}, ErrUnavailable
 	}
 	if !appNameOK.MatchString(appName) {
 		return Credentials{}, fmt.Errorf("iterm2api: app name %q is not allowed", appName)
 	}
-	stdout, stderr, err := osascript(ctx, cookieScript(appName))
+	stdout, stderr, err := osascript(ctx, CookieScript(appName))
 	return parseCookieOutput(stdout, stderr, err)
 }
 
@@ -144,6 +145,9 @@ func parseCookieOutput(stdout, stderr []byte, runErr error) (Credentials, error)
 			return Credentials{}, fmt.Errorf("%w (osascript failed)", ErrUnavailable)
 		}
 		return Credentials{}, fmt.Errorf("%w (AppleScript error %s)", ErrNotAuthorized, num)
+	}
+	if strings.TrimSpace(string(stdout)) == "" {
+		return Credentials{}, fmt.Errorf("%w (iTerm2 is not running)", ErrUnavailable)
 	}
 	cookie, key, ok := strings.Cut(strings.TrimSpace(string(stdout)), " ")
 	if !ok || cookie == "" || key == "" || strings.ContainsAny(cookie+key, " \r\n\t") {

@@ -9,8 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/core/integrate"
 	"github.com/roeehrl/hopsesh/internal/core/move"
+	"github.com/roeehrl/hopsesh/internal/core/termapp"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -88,11 +90,18 @@ func (a *App) runStep(ctx context.Context, s move.TermStep) (move.StepResult, er
 		return move.StepResult{}, err
 	}
 	defer core.DropStep(id)
-	if err := a.openStep(id, s); err != nil {
+	opened, err := a.openStep(id, s)
+	if err != nil {
 		set("no-terminal", "hopsesh could not open a terminal: "+err.Error()+". Stop waiting and hand it off from the command line (hopsesh handoff … --to "+s.Cloud+") instead.")
 	}
 	ctx, cancel := context.WithTimeout(ctx, stepWait)
 	defer cancel()
+	// Where the terminal can say so (iTerm2 with its Python API on), a tab closed before
+	// the step wrote its outcome ends the wait at once instead of after 25 minutes.
+	var exited <-chan int
+	if err == nil {
+		exited, _ = core.WatchLaunch(ctx, opened.Handle)
+	}
 	tick := time.NewTicker(400 * time.Millisecond)
 	defer tick.Stop()
 	var noSession error
@@ -107,22 +116,27 @@ func (a *App) runStep(ctx context.Context, s move.TermStep) (move.StepResult, er
 			return move.StepResult{}, fmt.Errorf("%w: you stopped waiting for the terminal", agent.ErrNoSession)
 		case <-ctx.Done():
 			return move.StepResult{}, fmt.Errorf("%w: hopsesh stopped waiting for the terminal after 25 minutes", agent.ErrNoSession)
+		case _, ok := <-exited:
+			exited = nil
+			if !ok || noSession != nil {
+				continue
+			}
+			o, err := core.StepOutcomeOf(id)
+			if err == nil && o == nil {
+				noSession = fmt.Errorf("%w: the terminal tab was closed before %s finished", agent.ErrNoSession, s.CloudTitle)
+				set("no-link", "The terminal tab was closed before "+s.CloudTitle+" finished. If a session started, paste its link; otherwise stop waiting and undo.")
+				continue
+			}
+			if res, done, err := stepOutcome(o, err, &noSession, set); done {
+				return res, err
+			}
 		case <-tick.C:
 			if noSession != nil {
 				continue
 			}
 			o, err := core.StepOutcomeOf(id)
-			switch {
-			case err != nil:
-				return move.StepResult{}, err
-			case o == nil:
-			case o.Session != nil:
-				return move.StepResult{Session: *o.Session}, nil
-			case o.NoSession:
-				noSession = fmt.Errorf("%w: %s", agent.ErrNoSession, o.Error)
-				set("no-link", o.Error)
-			default:
-				return move.StepResult{}, errors.New(o.Error)
+			if res, done, err := stepOutcome(o, err, &noSession, set); done {
+				return res, err
 			}
 		}
 	}
@@ -130,19 +144,38 @@ func (a *App) runStep(ctx context.Context, s move.TermStep) (move.StepResult, er
 
 // openStep opens the user's terminal on the step: a line hopsesh built, never one taken
 // from the window.
-func (a *App) openStep(id string, s move.TermStep) error {
+func (a *App) openStep(id string, s move.TermStep) (termapp.Opened, error) {
 	prog, err := stepProgram()
 	if err != nil {
-		return err
+		return termapp.Opened{}, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	o, err := a.snapshot().OpenStepInTerminal(ctx, prog, testTerminal, id, s.Run.Dir)
 	if err != nil {
-		return err
+		return o, err
 	}
 	a.noteOpened(o)
-	return nil
+	return o, nil
+}
+
+// stepOutcome is what a step's written outcome means for the wait: a result (done), or
+// that it ended without a session (noSession set: a pasted link may still come), or
+// nothing yet.
+func stepOutcome(o *app.StepOutcome, err error, noSession *error, set func(state, msg string)) (move.StepResult, bool, error) {
+	switch {
+	case err != nil:
+		return move.StepResult{}, true, err
+	case o == nil:
+	case o.Session != nil:
+		return move.StepResult{Session: *o.Session}, true, nil
+	case o.NoSession:
+		*noSession = fmt.Errorf("%w: %s", agent.ErrNoSession, o.Error)
+		set("no-link", o.Error)
+	default:
+		return move.StepResult{}, true, errors.New(o.Error)
+	}
+	return move.StepResult{}, false, nil
 }
 
 // HandoffStep is the terminal step the hand-off being applied waits for (nil: none).

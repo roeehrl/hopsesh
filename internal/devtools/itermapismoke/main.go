@@ -75,6 +75,17 @@ func main() {
 		}
 	}
 
+	// hopsesh's AppleScript path names a tab by AppleScript's "unique ID", the API path by
+	// the API's session id; a Handle from one may be focused by the other, so they must be
+	// the same id. Read only (a tab's tty and id), as hopsesh's AppleScript allowlist has it.
+	if here.SessionID != "" {
+		as, err := appleScriptID(ctx, tty)
+		if err == nil && as != here.SessionID {
+			err = fmt.Errorf("AppleScript says %q, the API %q", as, here.SessionID)
+		}
+		step("AppleScript's unique ID is the API's session id", err)
+	}
+
 	step("subscribe to terminate, new-session and focus events", c.Subscribe(ctx))
 
 	// A tab whose program exits 3. The protocol reports only that the session ended; the
@@ -137,6 +148,27 @@ func waitTerminated(ctx context.Context, c *iterm2api.Client, session string, d 
 			return ctx.Err()
 		}
 	}
+}
+
+// appleScriptID is the unique ID AppleScript gives the session on tty.
+func appleScriptID(ctx context.Context, tty string) (string, error) {
+	script := `tell application id "com.googlecode.iterm2"
+	repeat with w in windows
+		repeat with t in tabs of w
+			repeat with s in sessions of t
+				if tty of s is "` + tty + `" then return (unique ID of s)
+			end repeat
+		end repeat
+	end repeat
+end tell
+return ""`
+	cmd := exec.CommandContext(ctx, "/usr/bin/osascript", "-")
+	cmd.Stdin = strings.NewReader(script)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("osascript: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // ownTTY asks the OS which terminal this process runs on.
