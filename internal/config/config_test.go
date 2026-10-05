@@ -146,3 +146,35 @@ func TestTerminal(t *testing.T) {
 		}
 	}
 }
+
+// The app's Terminal window: defaults, a round trip, and values it cannot use.
+func TestTerminalWindow(t *testing.T) {
+	t.Setenv("HOPSESH_CONFIG_DIR", t.TempDir())
+	c := Defaults()
+	if c.AppResume() != AppResumeDefault || c.ResumeIn() != ResumeTerminal {
+		t.Fatalf("defaults: app %q, command line %q", c.AppResume(), c.ResumeIn())
+	}
+	if c.TerminalFont() != 13 || c.TerminalLines() != 5000 || !c.KeepTabsOn() || !c.NotifyOn() {
+		t.Fatalf("defaults: %d %d %v %v", c.TerminalFont(), c.TerminalLines(), c.KeepTabsOn(), c.NotifyOn())
+	}
+	off := false
+	c.Terminal = Terminal{Resume: ResumeTerminal, Font: "JetBrains Mono, Menlo", FontSize: 15, Scrollback: 10000, KeepTabs: &off, Notify: &off,
+		ScreenReader: "on", SystemConsole: true}
+	if err := Save(c); err != nil {
+		t.Fatal(err)
+	}
+	back, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.AppResume() != ResumeTerminal || back.Terminal.Font != "JetBrains Mono, Menlo" || back.TerminalFont() != 15 || back.TerminalLines() != 10000 ||
+		back.KeepTabsOn() || back.NotifyOn() || back.Terminal.ScreenReader != "on" || !back.Terminal.SystemConsole {
+		t.Fatalf("%+v", back.Terminal)
+	}
+	for _, bad := range []Terminal{{FontSize: 8}, {FontSize: 25}, {Scrollback: 2000}, {Font: "x; background:url(//evil)"}, {Font: "a{b}"}, {ScreenReader: "yes"}} {
+		c.Terminal = bad
+		if c.Check() == nil {
+			t.Errorf("%+v passed", bad)
+		}
+	}
+}

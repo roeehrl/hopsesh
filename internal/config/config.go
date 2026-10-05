@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"slices"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -96,10 +98,48 @@ type Terminal struct {
 	// "windows-terminal", "linux"; "" picks the best installed one (iTerm2 before
 	// Terminal on macOS).
 	App string `toml:"app,omitempty"`
-	// Resume is where the app resumes a session: "here" (in hopsesh's own window, once it
-	// has a terminal of its own), "terminal" (in App), "ask" (each time); "" is "terminal".
+	// Resume is where sessions resume and the app's hand-off and bring-back steps run:
+	// "here" (the app's own Terminal window; the command line: this terminal), "terminal"
+	// (in App), "ask" (each time). "" is AppResumeDefault in the app and "terminal" on the
+	// command line.
 	Resume string `toml:"resume,omitempty"`
+
+	// The app's Terminal window.
+
+	// Font is its font family ("": the system's monospace font).
+	Font string `toml:"font,omitempty"`
+	// FontSize is its font size in points, 9 to 24 (0: 13).
+	FontSize int `toml:"font_size,omitempty"`
+	// Scrollback is how many lines each tab keeps, in memory only: 1000, 5000, 10000 or
+	// 50000 (0: 5000).
+	Scrollback int `toml:"scrollback,omitempty"`
+	// KeepTabs: closing the app's window hides it while programs run in tabs (nil: on).
+	KeepTabs *bool `toml:"keep_tabs,omitempty"`
+	// Notify: a desktop notification when a tab the user cannot see waits for them (nil:
+	// on).
+	Notify *bool `toml:"notify,omitempty"`
+	// ScreenReader is the terminal's screen reader mode: "" (on while the system's screen
+	// reader runs), "on" or "off".
+	ScreenReader string `toml:"screen_reader,omitempty"`
+	// SystemConsole (Windows): tabs use the system's pseudoconsole instead of the newer one
+	// the app carries.
+	SystemConsole bool `toml:"system_console,omitempty"`
 }
+
+// AppResumeDefault is where the desktop app resumes sessions and runs hand-off and
+// bring-back steps until the user chooses: in its own Terminal window. It is the release
+// gate of the app's terminal: a release whose nightly terminal checks are not green on
+// macOS and Windows ships ResumeTerminal here instead (only this constant changes).
+const AppResumeDefault = ResumeHere
+
+// Terminal font sizes and scrollback lengths.
+const (
+	TerminalFontSize   = 13
+	TerminalScrollback = 5000
+)
+
+// TerminalScrollbacks are the scrollback lengths the app offers.
+var TerminalScrollbacks = []int{1000, 5000, 10000, 50000}
 
 // Terminal apps and resume choices.
 const (
@@ -345,6 +385,41 @@ func (c Config) ResumeIn() string {
 	return c.Terminal.Resume
 }
 
+// AppResume is where the desktop app resumes sessions and runs steps (default
+// AppResumeDefault).
+func (c Config) AppResume() string {
+	if c.Terminal.Resume == "" {
+		return AppResumeDefault
+	}
+	return c.Terminal.Resume
+}
+
+// TerminalFont is the app's terminal font size in points.
+func (c Config) TerminalFont() int {
+	if c.Terminal.FontSize == 0 {
+		return TerminalFontSize
+	}
+	return c.Terminal.FontSize
+}
+
+// TerminalLines is how many lines a tab keeps.
+func (c Config) TerminalLines() int {
+	if c.Terminal.Scrollback == 0 {
+		return TerminalScrollback
+	}
+	return c.Terminal.Scrollback
+}
+
+// KeepTabsOn reports whether closing the app's window keeps its tabs' programs running.
+func (c Config) KeepTabsOn() bool { return c.Terminal.KeepTabs == nil || *c.Terminal.KeepTabs }
+
+// NotifyOn reports whether a waiting tab may raise a desktop notification.
+func (c Config) NotifyOn() bool { return c.Terminal.Notify == nil || *c.Terminal.Notify }
+
+// fontName is what a terminal font family may be named: letters, digits, spaces and a few
+// marks (it ends up in a CSS font list).
+var fontName = regexp.MustCompile(`^[\p{L}\p{N} ._,'"-]{0,120}$`)
+
 // Check reports settings hopsesh cannot act on.
 func (c Config) Check() error {
 	switch c.Terminal.App {
@@ -356,6 +431,20 @@ func (c Config) Check() error {
 	case "", ResumeHere, ResumeTerminal, ResumeAsk:
 	default:
 		return fmt.Errorf("terminal.resume is %q: use %q, %q or %q", c.Terminal.Resume, ResumeHere, ResumeTerminal, ResumeAsk)
+	}
+	if f := c.Terminal.FontSize; f != 0 && (f < 9 || f > 24) {
+		return fmt.Errorf("terminal.font_size is %d: use 9 to 24", f)
+	}
+	if n := c.Terminal.Scrollback; n != 0 && !slices.Contains(TerminalScrollbacks, n) {
+		return fmt.Errorf("terminal.scrollback is %d: use 1000, 5000, 10000 or 50000", n)
+	}
+	if !fontName.MatchString(c.Terminal.Font) {
+		return fmt.Errorf("terminal.font is %q: use a font family's name", c.Terminal.Font)
+	}
+	switch c.Terminal.ScreenReader {
+	case "", "on", "off":
+	default:
+		return fmt.Errorf("terminal.screen_reader is %q: use \"on\" or \"off\" (or leave it out)", c.Terminal.ScreenReader)
 	}
 	for name, cl := range c.Clouds {
 		switch cl.Code {
