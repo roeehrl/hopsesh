@@ -13,8 +13,10 @@ web, Codex cloud, the GitHub Copilot cloud agent, Jules, Devin or Amp, brings th
 home, and hands one cloud's session on to another, always through the vendors' own
 command-line tools, signed in as you. The desktop app gets a terminal of its own, the
 hopsesh Terminal window, and sessions you open elsewhere go to a tab of iTerm2 or your other
-terminal app. Copilot, Jules, Devin and Amp support is experimental: it has been tested
-against stand-ins of their tools only. The configuration format changed: after upgrading,
+terminal app. Codex cloud, Copilot, Jules, Devin and Amp support is experimental: Copilot,
+Jules, Devin and Amp have been tested against stand-ins of their tools only, and Codex cloud
+works only with older Codex cloud environments, because the `codex` command can't see
+environments made in today's Codex cloud. The configuration format changed: after upgrading,
 start fresh and add your machines again.
 
 ### Added
@@ -59,8 +61,9 @@ start fresh and add your machines again.
   codex` continues it in Codex, and `--code-only` brings the branch alone. An agent running
   hopsesh has no terminal to answer in, so the plan says you have to run these steps
   yourself.
-- **Codex cloud, both ways** (Codex cloud legacy tasks; the new Codex Cloud has no command
-  line yet, and hopsesh says so). `hopsesh handoff <session> --to codex-cloud --env
+- **Codex cloud, both ways (experimental).** It works with older Codex cloud environments
+  only: the `codex` command can't see environments made in today's Codex cloud, and hopsesh
+  says so. `hopsesh handoff <session> --to codex-cloud --env
   <environment>` starts a task with the briefing and the code on a branch, or with a few
   changes as a starting diff on a branch already pushed (`--starting-diff`); `--attempts`
   asks for several attempts. The plan suggests the environments your recent tasks used, and
