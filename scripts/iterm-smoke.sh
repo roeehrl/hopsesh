@@ -41,7 +41,10 @@ repo=$(cd "$(dirname "$0")/.." && pwd)
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/hopsesh-iterm-smoke.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT
 hs="$scratch/hopsesh"
-echo "Building hopsesh into $scratch…"
+# hopsesh's own settings and launch records go to the scratch folder: the check never reads
+# or changes your configuration (which an older hopsesh may have written).
+export HOPSESH_CONFIG_DIR="$scratch/config" HOPSESH_STATE_DIR="$scratch/state"
+echo "Building hopsesh into ${scratch}…"
 (cd "$repo" && go build -o "$hs" ./cmd/hopsesh)
 iterm_version=$(defaults read /Applications/iTerm.app/Contents/Info CFBundleShortVersionString 2>/dev/null || echo unknown)
 echo "iTerm2 $iterm_version; macOS $(sw_vers -productVersion)"
@@ -51,7 +54,7 @@ pause() {
 	read -r _
 }
 ok() {
-	printf '  Did you see it? [y/N] '
+	printf '  Check: %s\n  Did you see it? [y/N] ' "$1"
 	read -r answer
 	case $answer in
 	y | Y | yes) echo "  ✓ $1" ;;

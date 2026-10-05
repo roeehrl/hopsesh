@@ -316,6 +316,12 @@ var word = regexp.MustCompile(`^-{0,2}[a-z0-9][a-z0-9-]*$`)
 
 // check refuses a launch that would put anything but hopsesh's absolute path and plain
 // words on a terminal's command line.
+// plainPath reports whether a is an absolute path with no control characters (a settings
+// or state folder hopsesh passes to its own verb); it is quoted like the program.
+func plainPath(a string) bool {
+	return filepath.IsAbs(a) && !strings.ContainsFunc(a, func(r rune) bool { return r < 0x20 || r == 0x7f })
+}
+
 func (l Launch) check() error {
 	if !filepath.IsAbs(l.Program) || strings.ContainsFunc(l.Program, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
 		return fmt.Errorf("hopsesh's program is not a plain absolute path: %q", l.Program)
@@ -324,8 +330,8 @@ func (l Launch) check() error {
 		return errors.New("a launch needs hopsesh's verb")
 	}
 	for _, a := range l.Args {
-		if !word.MatchString(a) {
-			return fmt.Errorf("a launch's argument is not a plain word: %q", a)
+		if !word.MatchString(a) && !plainPath(a) {
+			return fmt.Errorf("a launch's argument is not a plain word or path: %q", a)
 		}
 	}
 	if !l.Kind.Valid() {

@@ -208,6 +208,17 @@ start fresh and add your machines again.
 
 ### Fixed
 
+- The install script (`curl … | sh`) failed on macOS in a terminal with a UTF-8 locale
+  ("arch…: unbound variable"): macOS's /bin/sh read the "…" after `$arch` as part of the
+  name.
+- With hopsesh's settings or state in other folders (`HOPSESH_CONFIG_DIR`,
+  `HOPSESH_STATE_DIR`), a session or step opened in iTerm2 or Terminal couldn't find its
+  launch: the terminal app doesn't pass on hopsesh's environment. hopsesh now passes the
+  folders to the tab itself.
+- A Claude Code session resumed in a terminal that a Claude Code session had started
+  (directly or through the terminal app) inherited its CLAUDE_CODE_CHILD_SESSION marker,
+  and Claude Code then saved nothing of it. hopsesh now removes Claude Code's session
+  markers before it resumes a session.
 - Reading a Windows machine with many sessions could stall for 30 seconds and then fail:
   the long script hopsesh sent there over standard input sometimes never arrived. Such a
   script is now uploaded over SFTP, run from the file and removed.
