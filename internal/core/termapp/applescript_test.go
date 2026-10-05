@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -44,20 +45,30 @@ func (f *fakeScripts) last() string {
 func yes() bool { return true }
 func no() bool  { return false }
 
-var testLaunch = Launch{Program: "/Applications/hopsesh.app/Contents/MacOS/hopsesh", Args: []string{"terminal-open", "0123456789abcdef"},
+// macLaunch is the launch the golden scripts are made from (as on a Mac).
+var macLaunch = Launch{Program: "/Applications/hopsesh.app/Contents/MacOS/hopsesh", Args: []string{"terminal-open", "0123456789abcdef"},
 	Dir: "/Users/someone/git/demo", Kind: KindSession, Where: NewTab}
+
+// testLaunch is macLaunch with a program path that is absolute on this system.
+var testLaunch = func() Launch {
+	l := macLaunch
+	if runtime.GOOS == "windows" {
+		l.Program = "C:" + l.Program
+	}
+	return l
+}()
 
 // generated is every script hopsesh can generate, by golden file name.
 func generated() map[string]string {
-	win := testLaunch
+	win := macLaunch
 	win.Where = NewWindow
 	h := Handle{Terminal: IDITerm2, Ref: "w0t1p0-6A1F2C3D-0000-4E5F-9ABC-DEF012345678", TTY: "/dev/ttys004"}
 	return map[string]string{
-		"iterm2-open-tab.applescript":    iterm2Open(testLaunch),
+		"iterm2-open-tab.applescript":    iterm2Open(macLaunch),
 		"iterm2-open-window.applescript": iterm2Open(win),
 		"iterm2-find.applescript":        iterm2Find("/dev/ttys004"),
 		"iterm2-focus.applescript":       iterm2Focus(h),
-		"terminal-open.applescript":      terminalOpen(testLaunch),
+		"terminal-open.applescript":      terminalOpen(macLaunch),
 		"terminal-find.applescript":      terminalFind("/dev/ttys004"),
 		"terminal-focus.applescript":     terminalFocus("/dev/ttys004"),
 	}
@@ -78,7 +89,7 @@ func TestScriptsGolden(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v (run go test -update)", name, err)
 		}
-		if string(want) != script+"\n" {
+		if strings.ReplaceAll(string(want), "\r\n", "\n") != script+"\n" { // a Windows checkout may add CRs
 			t.Errorf("%s changed:\n%s\nwant:\n%s", name, script, want)
 		}
 	}
@@ -180,7 +191,7 @@ func TestTerminalAppOpen(t *testing.T) {
 	if err != nil || h.TTY != "/dev/ttys009" {
 		t.Fatalf("%+v %v", h, err)
 	}
-	if strings.Contains(f.last(), "--hold") || !strings.Contains(f.last(), "set t to do script \"/Applications/hopsesh.app/Contents/MacOS/hopsesh terminal-open 0123456789abcdef\"") {
+	if strings.Contains(f.last(), "--hold") || !strings.Contains(f.last(), "set t to do script \""+testLaunch.Program+" terminal-open 0123456789abcdef\"") {
 		t.Fatal(f.last())
 	}
 }

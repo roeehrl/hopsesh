@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -88,7 +89,11 @@ func TestOpenInTerminal(t *testing.T) {
 	l := Launch{Kind: termapp.KindSession, Key: agent.SessionKey{Agent: "claude", Session: "sess-1"},
 		Run:    agent.Command{Argv: []string{"claude", "--resume", "sess-1", "[hopsesh] the start prompt"}, Dir: dir},
 		Labels: termapp.Labels{Title: "Fix \"the\" parser", Agent: "Claude Code", Machine: "here"}}
-	o, err := a.OpenInTerminal(context.Background(), "/opt/hopsesh/bin/hopsesh", nil, l)
+	prog := "/opt/hopsesh/bin/hopsesh"
+	if runtime.GOOS == "windows" {
+		prog = "C:" + prog // absolute there
+	}
+	o, err := a.OpenInTerminal(context.Background(), prog, nil, l)
 	if err != nil || !o.FellBack || o.Terminal != "Terminal" {
 		t.Fatalf("%+v %v", o, err)
 	}
@@ -96,7 +101,7 @@ func TestOpenInTerminal(t *testing.T) {
 		t.Fatalf("scripts: %d %d", len(it.got), len(ta.got))
 	}
 	for _, s := range append(it.got, ta.got...) {
-		if strings.Contains(s, "parser") || strings.Contains(s, "prompt") || strings.Contains(s, "--resume") || !strings.Contains(s, "/opt/hopsesh/bin/hopsesh terminal-open ") {
+		if strings.Contains(s, "parser") || strings.Contains(s, "prompt") || strings.Contains(s, "--resume") || !strings.Contains(s, prog+" terminal-open ") {
 			t.Fatalf("the script carries more than hopsesh's verb:\n%s", s)
 		}
 	}
@@ -113,7 +118,7 @@ func TestOpenInTerminal(t *testing.T) {
 		t.Fatalf("%+v %v", tk, err)
 	}
 	ta.answer = denied
-	_, err = a.OpenInTerminal(context.Background(), "/opt/hopsesh/bin/hopsesh", nil, l)
+	_, err = a.OpenInTerminal(context.Background(), prog, nil, l)
 	if !errors.Is(err, termapp.ErrNoTerminal) {
 		t.Fatal(err)
 	}

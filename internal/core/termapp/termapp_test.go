@@ -73,9 +73,9 @@ func TestLine(t *testing.T) {
 	if _, err := lt.Open(context.Background(), testLaunch); err != nil {
 		t.Fatal(err)
 	}
-	want := "cd /Users/someone/git/demo && /Applications/hopsesh.app/Contents/MacOS/hopsesh terminal-open 0123456789abcdef"
+	want := "cd /Users/someone/git/demo && " + testLaunch.Program + " terminal-open 0123456789abcdef"
 	if runtime.GOOS == "windows" {
-		want = "Set-Location '/Users/someone/git/demo'; & '/Applications/hopsesh.app/Contents/MacOS/hopsesh' 'terminal-open' '0123456789abcdef'"
+		want = "Set-Location '/Users/someone/git/demo'; & '" + testLaunch.Program + "' 'terminal-open' '0123456789abcdef'"
 	}
 	if got != want {
 		t.Fatalf("%q", got)
