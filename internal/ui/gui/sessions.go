@@ -11,6 +11,7 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
+	"github.com/roeehrl/hopsesh/internal/core/appicon"
 	"github.com/roeehrl/hopsesh/internal/core/convert"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/internal/core/move"
@@ -67,7 +68,10 @@ type EntryDTO struct {
 	StaleHere  bool       `json:"staleHere"`        // an older copy is on this machine
 	ContinueIn []AgentOpt `json:"continueIn"`       // other agents here it can continue in
 	Needs      bool       `json:"needs"`            // the agent waits for the person (an approval)
-	History    []HopDTO   `json:"history"`          // where it has been, oldest first
+	// App names the agent's desktop app ("Claude") when that app, not a terminal, runs the
+	// open session.
+	App     string   `json:"app,omitempty"`
+	History []HopDTO `json:"history"` // where it has been, oldest first
 	// BringIn is the agent here a cloud-only module's session (Copilot's log, Amp's thread)
 	// is written into by default: the one it was handed off from, else Claude Code;
 	// ContinueIn then lists the others.
@@ -118,7 +122,10 @@ type ScanDTO struct {
 	Total    int          `json:"total"`
 	Peers    []string     `json:"peers"`   // reached machines with hopsesh, a session here can be sent to
 	Updated  string       `json:"updated"` // when the scan finished (RFC 3339)
-	Clouds   []CloudDTO   `json:"clouds"`  // the clouds hopsesh can do something with
+	// Elsewhere is when the other machines and the clouds were last read (RFC 3339): the
+	// same as Updated, unless only this machine was read since (RefreshHere).
+	Elsewhere string     `json:"elsewhere"`
+	Clouds    []CloudDTO `json:"clouds"` // the clouds hopsesh can do something with
 	// Adopted are copies brought from a cloud that this scan picked up.
 	Adopted []BroughtDTO `json:"adopted"`
 }
@@ -135,16 +142,77 @@ func (a *App) Scan() (*ScanDTO, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	inv := core.Scan(ctx, app.ScanOptions{})
+	now := time.Now()
 	a.mu.Lock()
 	if a.inv != nil {
 		a.inv.Close()
 	}
-	a.inv, a.plan, a.res = inv, nil, nil
+	a.inv, a.invAt, a.plan, a.res = inv, now, nil, nil
 	a.closePushLocked()
 	a.mu.Unlock()
+	return a.bindAdopted(scanDTO(core, inv, now, now)), nil
+}
 
-	out := &ScanDTO{Total: len(inv.Entries), Machines: []MachineDTO{}, Groups: []GroupDTO{}, Peers: []string{}, Updated: time.Now().Format(time.RFC3339),
-		Clouds: shownClouds(core, inv), Adopted: []BroughtDTO{}}
+// bindAdopted binds the tabs that brought the copies a scan adopted (bindBring).
+func (a *App) bindAdopted(d *ScanDTO) *ScanDTO {
+	for _, b := range d.Adopted {
+		a.bindBring(b)
+	}
+	return d
+}
+
+// RefreshHere reads this machine again and keeps what the last scan found on the other
+// machines and in the clouds (reading those takes SSH and the vendors' commands, so the
+// window does it less often). It leaves a plan in progress alone. Before any scan it is
+// Scan.
+func (a *App) RefreshHere() (*ScanDTO, error) {
+	a.mu.Lock()
+	cfgErr, had := a.cfgErr, a.inv != nil
+	a.mu.Unlock()
+	if cfgErr != nil {
+		return nil, cfgErr
+	}
+	if !had {
+		return a.Scan()
+	}
+	core := a.snapshot()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	fresh := core.Scan(ctx, app.ScanOptions{Hosts: []string{app.LocalName()}})
+	now := time.Now()
+	a.mu.Lock()
+	old := a.inv
+	inv := &app.Inventory{Adopted: fresh.Adopted, Waiting: fresh.Waiting, Clouds: old.Clouds}
+	inv.Machines = append(inv.Machines, fresh.Machines...)
+	inv.Entries = append(inv.Entries, fresh.Entries...)
+	for _, m := range old.Machines {
+		if m.Local {
+			if hm := m.Host(); hm != nil {
+				hm.Close()
+			}
+		} else {
+			inv.Machines = append(inv.Machines, m) // its connection stays open, as in old
+		}
+	}
+	for _, e := range old.Entries {
+		if lm := old.Machine(e.Machine); lm == nil || !lm.Local {
+			inv.Entries = append(inv.Entries, e) // other machines' and the clouds'
+		}
+	}
+	sort.SliceStable(inv.Entries, func(i, j int) bool {
+		return inv.Entries[i].Session.LastActivity.After(inv.Entries[j].Session.LastActivity)
+	})
+	a.inv = inv
+	at := a.invAt
+	a.mu.Unlock()
+	return a.bindAdopted(scanDTO(core, inv, now, at)), nil
+}
+
+// scanDTO is an inventory for the window: updated is when it was read, elsewhere when
+// the other machines and the clouds were.
+func scanDTO(core *app.App, inv *app.Inventory, updated, elsewhere time.Time) *ScanDTO {
+	out := &ScanDTO{Total: len(inv.Entries), Machines: []MachineDTO{}, Groups: []GroupDTO{}, Peers: []string{}, Updated: updated.Format(time.RFC3339),
+		Elsewhere: elsewhere.Format(time.RFC3339), Clouds: shownClouds(core, inv), Adopted: []BroughtDTO{}}
 	for _, f := range inv.Adopted {
 		out.Adopted = append(out.Adopted, core.Brought(f))
 	}
@@ -173,7 +241,7 @@ func (a *App) Scan() (*ScanDTO, error) {
 		}
 		out.Groups = append(out.Groups, gd)
 	}
-	return out, nil
+	return out
 }
 
 // continueTargets are the agents on this machine that can take a converted session.
@@ -193,13 +261,35 @@ func continueTargets(core *app.App, inv *app.Inventory) []AgentOpt {
 	return out
 }
 
+// titleOf is a session's title for people: its own, else its first line of the last
+// prompt, else "Untitled session".
+func titleOf(s agent.Summary) string {
+	if t := strings.TrimSpace(s.Title); t != "" {
+		return t
+	}
+	p, _, _ := strings.Cut(strings.TrimSpace(s.LastPrompt), "\n")
+	if p = strings.TrimSpace(p); p != "" {
+		if r := []rune(p); len(r) > 80 {
+			p = string(r[:79]) + "…"
+		}
+		return p
+	}
+	return "Untitled session"
+}
+
 func entryDTO(core *app.App, inv *app.Inventory, it app.Item, targets []AgentOpt) EntryDTO {
 	e, s := it.Entry, it.Entry.Session
-	d := EntryDTO{Machine: e.Machine, Agent: e.Agent, AgentName: e.AgentName, Key: s.Key.String(), Title: s.Title,
-		Status: e.Status(), Live: e.Live.State == agent.Live, LastActive: s.LastActivity.Format(time.RFC3339),
+	d := EntryDTO{Machine: e.Machine, Agent: e.Agent, AgentName: e.AgentName, Key: s.Key.String(), Title: titleOf(s),
+		Status: statusWords(core, e), Live: e.Live.State == agent.Live, LastActive: s.LastActivity.Format(time.RFC3339),
 		LastPrompt: s.LastPrompt, CWD: s.CWD, SizeKB: s.Size / 1024, ContinueIn: []AgentOpt{},
 		Needs:   e.Live.State == agent.Live && strings.HasPrefix(e.Live.Status, "waiting"),
 		History: history(core, e.Lineage), Location: string(e.Location.Kind), Cloud: cloudEntryDTO(core, e), Mirror: mirrorDTO(s.Mirror)}
+	if e.Live.State == agent.Live && e.Live.App {
+		d.App = e.AgentName
+		if m, ok := core.Module(e.Agent); ok {
+			d.App = nonEmptyStr(appicon.Name(m.Spec().Icon.Apps), d.App)
+		}
+	}
 	d.Handoff, d.Hop = core.HandoffTargets(inv, e), core.HopTargets(inv, e)
 	if d.Handoff == nil {
 		d.Handoff = []app.HandoffTarget{}
@@ -256,6 +346,26 @@ func writesText(m agent.Module, cloud string) bool {
 }
 
 // history tells a session's hops from its lineage, oldest first.
+// cloudTitleOf is a cloud's title by its name ("" when loc isn't a cloud's).
+func cloudTitleOf(core *app.App, loc string) string {
+	if _, cl, ok := core.CloudModule(loc); ok {
+		return cl.Title
+	}
+	return ""
+}
+
+// statusWords is an entry's state in words, a cloud named by its title: a session marked
+// before marks named clouds that way reads "continued in Claude Code cloud" too.
+func statusWords(core *app.App, e app.Entry) string {
+	st := e.Status()
+	if mk := e.Session.Mark; mk != nil && mk.Kind == agent.MarkContinued && st == app.MarkWords(*mk) {
+		if t := cloudTitleOf(core, mk.Location); t != "" {
+			return "continued in " + t
+		}
+	}
+	return st
+}
+
 func history(core *app.App, m *lineage.Manifest) []HopDTO {
 	out := []HopDTO{}
 	if m == nil {
@@ -267,6 +377,14 @@ func history(core *app.App, m *lineage.Manifest) []HopDTO {
 		}
 		return string(id)
 	}
+	// A cloud is named by its title ("Claude Code cloud"), and is where its agent runs.
+	place := func(loc string) string { return nonEmptyStr(cloudTitleOf(core, loc), loc) }
+	in := func(id agent.ID, loc string) string {
+		if t := cloudTitleOf(core, loc); t != "" {
+			return t
+		}
+		return name(id) + " on " + loc
+	}
 	hops := append([]lineage.Hop(nil), m.Hops...)
 	sort.Slice(hops, func(i, j int) bool { return hops[i].Time.Before(hops[j].Time) })
 	for i, h := range hops {
@@ -275,19 +393,19 @@ func history(core *app.App, m *lineage.Manifest) []HopDTO {
 		}
 		from, to := m.Replicas[h.From], m.Replicas[h.To]
 		if i == 0 {
-			out = append(out, HopDTO{When: from.Time.Format(time.RFC3339), What: fmt.Sprintf("In %s on %s", name(from.Key.Agent), from.Location)})
+			out = append(out, HopDTO{When: from.Time.Format(time.RFC3339), What: "In " + in(from.Key.Agent, from.Location)})
 		}
-		what := fmt.Sprintf("Moved to %s", to.Location)
+		what := "Moved to " + place(to.Location)
 		switch {
 		case h.Kind == lineage.HopFetch:
-			what = fmt.Sprintf("Brought from %s to %s", from.Location, to.Location)
+			what = fmt.Sprintf("Brought from %s to %s", place(from.Location), place(to.Location))
 		case h.Kind == lineage.HopHandoff:
-			what = fmt.Sprintf("Handed off to %s", to.Location)
+			what = "Handed off to " + place(to.Location)
 		}
 		if h.Kind == lineage.HopContinue {
-			what = fmt.Sprintf("Continued in %s on %s", name(to.Key.Agent), to.Location)
+			what = "Continued in " + in(to.Key.Agent, to.Location)
 		} else if i > 0 && hops[i-1].Kind == lineage.HopContinue && hops[i-1].Time.Equal(h.Time) {
-			what = fmt.Sprintf("The %s copy kept on %s too", name(to.Key.Agent), to.Location) // the native copy
+			what = fmt.Sprintf("The %s copy kept on %s too", name(to.Key.Agent), place(to.Location)) // the native copy
 		}
 		if h.Fork {
 			what += " (both kept going)"
@@ -654,7 +772,7 @@ func (a *App) ResumeEntry(machine, key string, inApp bool) error {
 		return start(c)
 	}
 	return a.openLaunch(app.Launch{Kind: termapp.KindSession, Run: c, Key: e.Session.Key,
-		Labels: termapp.Labels{Title: e.Session.Title, Agent: e.AgentName, Machine: e.Machine}})
+		Labels: termapp.Labels{Title: titleOf(e.Session), Agent: e.AgentName, Machine: e.Machine}})
 }
 
 // Undo reverses a move or continuation by its journal id; force undoes it even when the

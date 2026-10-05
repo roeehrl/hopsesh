@@ -1,5 +1,5 @@
 import { test, expect, type Page, type BrowserContext } from "@playwright/test";
-import { row } from "./helpers";
+import { row, turnOnCloud } from "./helpers";
 
 // The hopsesh Terminal window: the real page (under its content security policy) with
 // xterm.js, its streams to the real service, and tabs running termfake
@@ -157,7 +157,7 @@ test("a sign-in tab records nothing and says so; the cloud card checks the login
   // From the Machines page: Claude Code cloud, allowed, has its own sign-in command.
   await page.evaluate(() => (window as any).__emit("hopsesh:menu", "machines"));
   const card = page.locator(".cloud-card", { hasText: "Claude Code cloud" });
-  await card.getByRole("switch", { name: "Allow Claude Code cloud" }).click();
+  await card.getByRole("switch", { name: "Turn on Claude Code cloud" }).click();
   await expect(card).toContainText("Signing in runs claude auth login");
   await card.getByRole("button", { name: /^Sign in( again)?$/ }).click();
   const signIn = tab(t, /Sign in · Claude Code cloud/);
@@ -211,7 +211,7 @@ test("Resume here opens the session in a tab; Open in my terminal moves it out a
 test("the hand-off step runs in a tab: the trust question's banner, answered by the user, then the link", async ({ page, context }) => {
   const t = await terminal(context);
   const sidebar = page.getByRole("navigation", { name: "Scopes" });
-  await sidebar.locator(".side-off", { hasText: "Claude Code cloud" }).getByRole("button", { name: "Turn on" }).click();
+  await turnOnCloud(page, "Claude Code cloud");
   await expect(sidebar.getByRole("button", { name: /Claude Code cloud/ })).toContainText("ready", { timeout: 30_000 });
   await sidebar.getByRole("button", { name: /All sessions/ }).click();
   await row(page, "Find the codeword").click();
@@ -223,13 +223,14 @@ test("the hand-off step runs in a tab: the trust question's banner, answered by 
   await sheet.getByRole("button", { name: /^Hand off/ }).click();
   const box = sheet.getByRole("group", { name: "In the hopsesh Terminal" });
   await expect(box).toContainText("Claude Code cloud is starting the session in the hopsesh Terminal window", { timeout: 30_000 });
-  await expect(box.getByRole("button", { name: "Show the terminal" })).toBeVisible();
+  await expect(box.getByRole("button", { name: "Show the tab" })).toBeVisible();
 
   const step = tab(t, /Hand off · Find the codeword/);
   await expect(step).toBeVisible();
   await expect(step).toContainText("waiting for you");
   await expect(t.locator("#banner")).toHaveText("Claude Code is asking whether it trusts hopsesh's hand-off folder. Answer it here; hopsesh never answers for you.", { timeout: 20_000 });
-  await expect(t.locator("#note")).toHaveText("hopsesh reads this tab only for the session link. It never types here.");
+  await expect(t.locator("#reads")).toHaveText("Reads the link only");
+  await expect(t.locator("#tip")).toBeHidden(); // never under a banner
   // The user answers (the test types as the user; hopsesh never does).
   await focusTerminal(t);
   await t.keyboard.press("Enter");
@@ -244,7 +245,7 @@ test("bringing a session back runs Claude Code's teleport in a tab with what to 
   const t = await terminal(context);
   const id = (await (await page.request.post("/cloud")).json()).id;
   const sidebar = page.getByRole("navigation", { name: "Scopes" });
-  await sidebar.locator(".side-off", { hasText: "Claude Code cloud" }).getByRole("button", { name: "Turn on" }).click();
+  await turnOnCloud(page, "Claude Code cloud");
   await expect(sidebar.getByRole("button", { name: /Claude Code cloud/ })).toContainText("ready", { timeout: 30_000 });
   await page.getByRole("button", { name: "Paste a link…" }).click();
   await page.getByLabel("The session's link or id").fill(`https://claude.ai/code/${id}`);
@@ -259,13 +260,26 @@ test("bringing a session back runs Claude Code's teleport in a tab with what to 
   const bring = tab(t, /Bring here · Session/);
   await expect(bring).toBeVisible({ timeout: 30_000 });
   await expect(bring).toContainText("waiting for you");
-  await expect(t.locator("#banner")).toHaveText("Send one message, then type /exit — Claude Code saves the copy only after you continue it.");
+  await expect(t.locator("#banner")).toHaveText("Send a message to keep this session here. Claude Code saves its copy once you do.");
   await expect(page.locator(".waiting")).toContainText("It's running in a tab of the hopsesh Terminal window");
   await focusTerminal(t);
   await t.keyboard.type("carry on here");
   await t.keyboard.press("Enter");
+  // The copy is saved while the tab still runs it: the tab is now that session's, and
+  // nothing offers a second process on it.
+  const done = page.locator(".outcome.ok");
+  await expect(done).toBeVisible({ timeout: 60_000 });
+  await expect(done.getByRole("button", { name: "Show the tab" })).toBeVisible();
+  await expect(done.getByRole("button", { name: /^Resume|^Open in/ })).toHaveCount(0);
+  await expect(t.locator("#banner")).toContainText("Saved here as “", { timeout: 20_000 });
+  await expect(bring).not.toContainText("waiting for you");
+  await focusTerminal(t);
+  await t.keyboard.type("/exit");
+  await t.keyboard.press("Enter");
   await expect(bring).toContainText("exited 0");
-  await expect(page.locator(".outcome.ok")).toBeVisible({ timeout: 60_000 });
+  // Ended: the copy's own actions, as the list offers them.
+  await expect(done.getByRole("button", { name: /^Resume here/ })).toBeVisible({ timeout: 30_000 });
+  await expect(done.getByRole("button", { name: "Show the tab" })).toHaveCount(0);
 });
 
 test("Settings → Terminal: where things open, the look, and the fixed safety lines", async ({ page }) => {
@@ -326,4 +340,52 @@ test("a session's run in the user's terminal app shows how it ended", async ({ p
   await page.evaluate(([machine, key]) => (window as any).__emit("hopsesh:external-exit",
     { kind: "session", machine, key, title: "Find the codeword", terminal: "iTerm2", code: -1, closed: true, at: new Date().toISOString() }), [machine, k]);
   await expect(r.locator(".chip", { hasText: "closed in iTerm2" })).toBeVisible();
+});
+
+test("with Close a tab when its program ends, a tab that ended well goes; one that failed stays", async ({ page, context }) => {
+  const r = await page.request.post("/reset?terminal=here&close=1");
+  expect(r.ok(), await r.text()).toBeTruthy();
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible({ timeout: 30_000 });
+  await openFake(page, "quiet=1&title=" + encodeURIComponent("Ends well · termfake"));
+  await openFake(page, "quiet=1&title=" + encodeURIComponent("Fails · termfake"));
+  const t = await terminal(context);
+  const well = tab(t, /Ends well/), fails = tab(t, /Fails/);
+  await expect(well).toBeVisible();
+  await fails.click();
+  await focusTerminal(t);
+  await t.keyboard.press("5");
+  await expect(fails).toContainText("exited 5");
+  await well.click();
+  await focusTerminal(t);
+  await t.keyboard.press("0");
+  await expect(well).toBeHidden({ timeout: 10_000 });
+  await expect(fails).toBeVisible();
+  await expect(fails).toContainText("exited 5");
+});
+
+test("many tabs: they shrink, then scroll, the active one in view, never covering + or Back to sessions", async ({ page, context }) => {
+  const t = await terminal(context);
+  const check = async (n: number) => {
+    for (const w of [560, 743, 1040]) {
+      await t.setViewportSize({ width: w, height: 420 });
+      await expect(t.getByRole("tab")).toHaveCount(n);
+      const tabsBox = (await t.locator("#tabs").boundingBox())!;
+      const plus = (await t.locator("#new-shell").boundingBox())!;
+      const back = (await t.locator("#back").boundingBox())!;
+      expect(tabsBox.x + tabsBox.width).toBeLessThanOrEqual(plus.x + 0.5);
+      expect(plus.x + plus.width).toBeLessThanOrEqual(back.x + 0.5);
+      expect(back.x + back.width).toBeLessThanOrEqual(w);
+      for (const b of await t.getByRole("tab").evaluateAll((els) => els.map((e) => e.getBoundingClientRect().width))) {
+        expect(b).toBeGreaterThanOrEqual(119);
+        expect(b).toBeLessThanOrEqual(241);
+      }
+      await expect(t.getByRole("tab", { selected: true })).toBeInViewport({ ratio: 0.9 });
+    }
+  };
+  let n = 0;
+  for (const want of [1, 4, 8]) {
+    while (n < want) { n++; await openFake(page, "quiet=1&title=" + encodeURIComponent(`Tab number ${n} with a long title · termfake`)); }
+    await check(n);
+  }
 });

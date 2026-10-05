@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { fresh, row, menu } from "./helpers";
+import { fresh, row, menu, turnOnCloud } from "./helpers";
 
 test.beforeEach(async ({ page }) => fresh(page));
 
@@ -14,7 +14,7 @@ async function post(page: Page, query: string): Promise<string> {
 
 async function turnOn(page: Page, title: string) {
   const sidebar = page.getByRole("navigation", { name: "Scopes" });
-  await sidebar.locator(".side-off", { hasText: title }).getByRole("button", { name: "Turn on" }).click();
+  await turnOnCloud(page, title);
   await expect(sidebar.getByRole("button", { name: new RegExp(title) })).toContainText("ready", { timeout: 30_000 });
 }
 
@@ -36,18 +36,19 @@ test("a Claude Code cloud session goes on to Codex cloud through this machine, a
 
   await cloudDetails(page).getByRole("button", { name: "Hand off ▸" }).click();
   const list = cloudDetails(page).getByRole("menu", { name: "Hand off to" });
-  await expect(list.locator(".chip.cloud", { hasText: /^claude-cloud$/ })).toHaveCount(0); // not to its own cloud
+  await expect(list.getByRole("menuitem", { name: /^Claude Code cloud/ })).toHaveCount(0); // not to its own cloud
+  await expect(list.locator(".chip.cloud")).toHaveCount(0); // names only, no ids
   const codex = list.getByRole("menuitem", { name: /Codex cloud/ });
   await expect(codex).toBeEnabled();
   await expect(codex).toContainText("Comes here from Claude Code cloud first, then gets a briefing and the code on a branch");
-  await expect(list.getByRole("menuitem", { name: /Jules/ })).toContainText("Jules: turned off. Turn it on in Machines.");
+  await expect(list.getByRole("menuitem", { name: /Jules/ })).toContainText("Turned off. Turn it on in Machines.");
   await codex.click();
 
   const sheet = page.locator("#sheet");
   await expect(sheet.getByRole("heading", { name: `Hand “Session ${id}” on to Codex cloud` })).toBeVisible({ timeout: 30_000 });
-  await expect(sheet.locator(".hop-leg[data-leg='1']")).toContainText("Bring here: claude-cloud →");
+  await expect(sheet.locator(".hop-leg[data-leg='1']")).toContainText("Bring here: Claude Code cloud →");
   await expect(sheet.locator(".hop-leg[data-leg='1']")).toContainText("native");
-  await expect(sheet.locator(".hop-leg[data-leg='2']")).toContainText("→ codex-cloud");
+  await expect(sheet.locator(".hop-leg[data-leg='2']")).toContainText("→ Codex cloud");
   await expect(sheet.locator(".hop-leg[data-leg='2']")).toContainText("brief");
   await expect(sheet).toContainText("Codex cloud starts from the claude/… branch Claude Code cloud pushed");
   await expect(sheet.locator("#hop-terminal")).toContainText("Claude Code saves its copy only after you send a message in it");
@@ -63,7 +64,7 @@ test("a Claude Code cloud session goes on to Codex cloud through this machine, a
   await expect(page.locator(".page")).toContainText(/Task task_e_\w+ is running/);
   await expect(page.locator("#ho-via")).toContainText("Brought here from Claude Code cloud first");
   await expect(page.locator(".page")).toContainText("Environment acme-api");
-  await expect(page.locator(".page")).toContainText("The session here is marked “continued in Codex on codex-cloud”");
+  await expect(page.locator(".page")).toContainText("The session here is marked “continued in Codex cloud”");
 
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   const dlg = page.locator("#dlg");

@@ -110,7 +110,8 @@ function agents() {
 let ts = null;
 async function setTerm(patch) {
   const next = Object.assign({ app: ts.app, where: ts.where, font: ts.font, fontSize: ts.fontSize, scrollback: ts.scrollback, keepTabs: ts.keepTabs,
-    notify: ts.notify, screenReader: ts.screenReader, systemConsole: ts.systemConsole }, patch);
+    notify: ts.notify, closeEnded: ts.closeEnded, screenReader: ts.screenReader, systemConsole: ts.systemConsole }, patch);
+  ts = Object.assign({}, ts, patch); // a second change before this one's answer builds on it
   try { await api("SetTerminalSettings", next); toast("Saved"); } catch (e) { fail(e); }
   ts = await api("TerminalSettings").catch(() => ts);
   state.info = await api("Info").catch(() => state.info);
@@ -140,6 +141,7 @@ function terminal() {
           installed.map((a) => h("option", { value: a.id, selected: ts.app === a.id }, a.name)))),
       iterm ? h("span", { class: "muted", style: "font-size:12px" }, "iTerm2: hopsesh opens a new tab in its front window, labels it with the session, and shows a session's tab instead of opening it twice. It never types into iTerm2 or reads it.") : null,
       sw("keepTabs", "Keep tabs when the window closes", "Closing the window only hides it, and the programs keep running. Quitting hopsesh ends every program in its tabs; hopsesh asks first. For work that must outlive hopsesh, use Open in my terminal."),
+      sw("closeEnded", "Close a tab when its program ends", "When it ends well (a hand-off's step once hopsesh has its link). A program that failed keeps its tab, so you can read why."),
       sw("notify", "Tell me when a program waits for me", sys.mac
         ? "A notification when a tab you can't see waits for your answer. hopsesh writes the text; it never shows what the program printed. Claude Code tells hopsesh it's waiting only if you turn on its terminal bell (/config → Notifications); hopsesh never changes Claude Code's settings for you."
         : "The terminal's taskbar button flashes when a tab you can't see waits for your answer. Claude Code tells hopsesh it's waiting only if you turn on its terminal bell (/config → Notifications).")),
@@ -150,8 +152,8 @@ function terminal() {
       h("div", { class: "set-row" }, title("Size", `${sys.mac ? "⌘= and ⌘-" : "Ctrl+= and Ctrl+-"} in the terminal change it too.`),
         h("select", { "aria-label": "Font size", onchange: (e) => setTerm({ fontSize: Number(e.target.value) }) },
           Array.from({ length: 16 }, (_, i) => i + 9).map((n) => h("option", { value: n, selected: ts.fontSize === n }, `${n} pt`)))),
-      h("div", { class: "set-row" }, title("Colours", "Follow the app's light or dark look. Programs that ask for the background colour get the real one, so Claude Code and Codex pick a matching theme."),
-        h("span", { class: "muted" }, "Follow the app")),
+      h("div", { class: "set-row" }, title("Colors", "The terminal follows the app's light or dark look. Programs that ask for the background color get the real one, so Claude Code and Codex pick a matching theme."),
+        h("span", { class: "ro-val", role: "status", "aria-label": "Colors: follow the app (not a setting)", title: "The only choice for now" }, "Follow the app")),
       h("div", { class: "set-row" }, title("Scrollback", "Kept in memory only, and gone when the tab closes."),
         h("select", { "aria-label": "Scrollback", onchange: (e) => setTerm({ scrollback: Number(e.target.value) }) },
           (ts.scrollbacks || []).map((n) => h("option", { value: n, selected: ts.scrollback === n }, `${n.toLocaleString("en")} lines`))))),
@@ -213,7 +215,7 @@ function cli() {
     sys.win ? "Use this app's first" : "Replace with this app's (keeps a backup)"));
   if (["ours", "other-app", "dangling"].includes(c.state)) acts.push(h("button", { class: "btn", onclick: () => run(() => api("UninstallCLI"), "Removed the hopsesh command") }, "Uninstall command"));
   return [card(
-    h("div", { class: "set-row" }, title(`The hopsesh command in ${sys.terminal}`, `${cliHow()}, so your terminal, your agents and your other machines can run it. It updates with the app.`), chip(CLI_TEXT[c.state] || [c.state, ""])),
+    h("div", { class: "set-row" }, title("The hopsesh command", `${cliHow()}, so any terminal, your agents and your other machines can run it. It updates with the app.`), chip(CLI_TEXT[c.state] || [c.state, ""])),
     c.target && !sys.win ? h("span", { class: "muted mono", style: "font-size:11px;overflow-wrap:anywhere" }, `${c.path} → ${c.target}`) : null,
     h("div", { style: "display:flex;gap:8px;flex-wrap:wrap;align-items:center" }, acts),
     !c.dirOnPath && !sys.win ? h("div", { class: "item" }, h("span", { class: "badge warn" }, "!"),

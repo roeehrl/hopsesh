@@ -55,8 +55,8 @@ All notable changes to this project are documented here. The format follows
   sessions.
 - In the hand-off's terminal step, a banner says when Claude Code asks whether it trusts
   hopsesh's hand-off folder: you answer it in the tab, and hopsesh never does. Bringing a
-  session back says to send one message and then type `/exit`, and the done screen says
-  when the tab ended before Claude Code saved a copy.
+  session back says to send one message, and the done screen says when the tab ended
+  before Claude Code saved a copy.
 - Sign in from the app: the Claude Code cloud, Codex cloud and Copilot cards under
   **Machines** have **Sign in**, which runs `claude auth login`, `codex login
   --device-auth` or `gh auth login --web` in a tab that records nothing; when it ends well,
@@ -224,6 +224,23 @@ All notable changes to this project are documented here. The format follows
   hopsesh can test against exactly that version. See `testbundle/README.md`.
 
 ### Fixed
+- App: the hopsesh Terminal window has no separate title bar on macOS (its tabs sit beside
+  the window buttons and drag the window), and many tabs shrink, then scroll, without
+  covering "+" or Back to sessions.
+- App: the details panel follows the list (a session the list no longer shows goes), the
+  Hand off menu closes on Escape, a click elsewhere or a choice, row buttons keep their
+  labels inside, sizes no longer break between number and unit, and paths break at slashes.
+- App: a session open in the Claude app offers Show the Claude app instead of a terminal tab
+  it doesn't have; a terminal tab hopsesh can't find says so.
+- App: a session brought from Claude Code cloud is never resumed twice: while the tab that
+  brought it runs it, Resume shows that tab, and the done screen offers the list's own
+  actions (the agent's app too) once it ends. Nothing in the bring-back asks for `/exit`.
+- App: "In the cloud" and each cloud's list leave out Remote Control mirrors (they run on
+  their machine); cloud ids no longer show where people read (marks say "continued in
+  Claude Code cloud").
+- Codex cloud: when codex lists no environment, hopsesh says why: environments made in
+  today's Codex cloud can't be used by the codex command yet.
+
 - Bringing a session from Claude Code cloud adopts the copy the real Claude Code writes.
   Claude Code 2.1.289's teleport saves nothing until you send a message in the teleported
   session, then writes a new session with the cloud's conversation and a "continued from
@@ -233,7 +250,7 @@ All notable changes to this project are documented here. The format follows
   sent when hopsesh started that cloud session, and otherwise says how many messages came
   with nothing to check them against, instead of calling it complete. Every bring-back plan
   and done screen (command line, terminal UI and app) says that Claude Code saves its copy
-  only after you send a message in it, then exit.
+  only after you send a message in it.
 - Codex cloud: the new task's link is read on chatgpt.com only. A link to any other host
   that ended in `/tasks/task_…` was taken for the task's. Pasted links of Claude Code,
   Codex, Amp and Devin sessions, and Devin's pull request links, are read on their exact
@@ -289,6 +306,21 @@ All notable changes to this project are documented here. The format follows
   aside as outdated).
 
 ### Changed
+- App: the sidebar and the inspector can be resized and hidden (dividers, the title bar's
+  buttons, the new View menu: ⌃⌘S and ⌥⌘I, Ctrl+B and Ctrl+I on Windows); the layout is
+  kept in `[window]`. Below 1000px the sidebar hides for now.
+- App: the sidebar lists the clouds that are on (Turn on a cloud… opens Machines) and the
+  agents with sessions; setup is one line on All sessions instead of three cards.
+- App: the list refreshes this machine every minute while the window is in front, and
+  everything when it comes back after five minutes.
+- App: in the palette, Enter shows a session in the list (⌘Enter runs its action); rows
+  show the repository, a cloud badge on cloud sessions, and a title for untitled ones.
+- App: a cloud hand-off's step runs in the background and comes forward when it asks
+  something or fails; tabs whose program ended well close (Settings → Terminal → Close a
+  tab when its program ends, `keep_ended` in `[terminal]`).
+- App: wording: "Turn on" for clouds throughout, "hand-off", "Colors", "The hopsesh
+  command", "Sign in using …", ⌃` on macOS; Codex cloud is marked experimental.
+
 - The macOS app's self-update opens the new disk image with `diskutil image attach` (on
   macOS 27, which deprecates `hdiutil attach`), and with hdiutil on earlier systems.
 - The configuration format is now schema 4, with room for the cloud sessions to come
