@@ -14,6 +14,10 @@ All notable changes to this project are documented here. The format follows
   `HOPSESH_STATE_DIR`), a session or step opened in iTerm2 or Terminal couldn't find its
   launch: the terminal app doesn't pass on hopsesh's environment. hopsesh now passes the
   folders to the tab itself.
+- A Claude Code session resumed in a terminal that a Claude Code session had started
+  (directly or through the terminal app) inherited its CLAUDE_CODE_CHILD_SESSION marker,
+  and Claude Code then saved nothing of it. hopsesh now removes Claude Code's session
+  markers before it resumes a session.
 
 ### Added
 - Your terminal app: sessions, teleports and hand-off steps the app opens go to a new tab in
