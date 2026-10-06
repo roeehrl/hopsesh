@@ -440,8 +440,8 @@ jobs:
           npm ci
           $env:HOPSESH_APP_EXE = "$env:RUNNER_TEMP/e2e/hopsesh-app.exe"
           npx playwright test -c playwright.real.config.ts real/app.spec.ts real/terminal.spec.ts
-      # The screenshots are a bonus: a WSL2 VM that never boots (it happens) must not hold up
-      # the install and window checks above.
+      # WSL2 availability is optional. Once it boots, screenshot flow failures are
+      # real test failures and must not be hidden by continue-on-error.
       - name: studio for the screenshots (WSL2 Ubuntu over SSH)
         id: studio
         continue-on-error: true
@@ -450,7 +450,6 @@ jobs:
         run: ./scripts/windows-demo-studio.ps1 -Key "$env:RUNNER_TEMP\demo-ssh\id_ed25519" -SshConfig "$env:RUNNER_TEMP\demo-ssh\config"
       - name: screenshots of the real window (the made-up laptop)
         if: steps.studio.outcome == 'success'
-        continue-on-error: true
         timeout-minutes: 10
         shell: pwsh
         working-directory: internal/devtools/webtest
@@ -472,13 +471,17 @@ jobs:
         if: ${{ !cancelled() }}
         uses: test-summary/action@37b508cfee6d4d080eedd00b5bb240a6a784a6a5 # v2.6
         with:
-          paths: internal/devtools/webtest/test-results/junit-real.xml
+          paths: |
+            internal/devtools/webtest/test-results/junit-real.xml
+            internal/devtools/webtest/test-results-shots/junit-shots.xml
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ failure() }}
         with:
           name: windows-app-report
           path: |
             internal/devtools/webtest/playwright-report-real/
+            internal/devtools/webtest/test-results-shots/
+            internal/devtools/webtest/playwright-report-shots/
             internal/devtools/webtest/test-results/
           retention-days: 7
 

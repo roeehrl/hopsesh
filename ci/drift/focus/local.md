@@ -44,6 +44,15 @@ Check these surfaces against upstream changes:
   explicit. Upstream state/record changes must not make remote/cloud filters, scan status,
   active-terminal indicators or rendered conversation previews misleading. Cosmetic UI
   design is outside upstream drift; changed vendor data that breaks these consumers is not.
+- Quick access and desktop presence (0.4.0): inspect `internal/ui/desktop`,
+  `internal/ui/gui/desktop.go`, `assets/quick.js` and `docs/desktop-presence.md`.
+  Wails v3 tray attachment, activation/taskbar visibility, autostart and focus-loss
+  behavior must preserve a reachable main window and terminal-aware quitting.
+  Watch reliable agent attention signals, profile-aware live detection and desktop
+  launch gating: stale remote status must not become live attention. The popup and
+  main app share one inventory; background refresh must not start authentication.
+  Include the lifecycle capability matrix, Quick access browser scenarios and native
+  selfcheck. A headless pass does not establish tray-host/compositor behavior.
 - Storage and live sessions: inspect current readers/writers for paginated history,
   compressed .jsonl.zst rollouts, multiple rollouts per thread, SQLite/index precedence,
   instruction/skill folders, permissions and settings. Paginated history now has a writer;

@@ -1,16 +1,17 @@
 import { test, expect, chromium, type Browser, type Page } from "@playwright/test";
 import { port } from "./setup";
+import { mainWindow, nativeDiagnostics } from "./window";
 
 // The real hopsesh Terminal window on Windows: WebView2, xterm.js, the bundled ConPTY and
 // the Go service. A shell opened from the app's window runs in a tab there; the test types
 // in it as the user and ends it.
 let browser: Browser;
 let page: Page;
+nativeDiagnostics(() => browser);
 
 test.beforeAll(async () => {
   browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
-  const pages = browser.contexts().flatMap((c) => c.pages());
-  page = pages.find((p) => URL.canParse(p.url()) && new URL(p.url()).host === "wails.localhost" && !new URL(p.url()).pathname.startsWith("/terminal/")) || pages[0];
+  page = await mainWindow(browser);
   // The app's window may show another screen (the tests before this one end in Settings).
   await expect(page.locator("#view")).not.toBeEmpty({ timeout: 45_000 });
   await page.keyboard.press("Control+1");

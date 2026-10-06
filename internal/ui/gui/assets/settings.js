@@ -1,5 +1,6 @@
 // The Settings screen, in tabs: General, Agents, Terminal, Skill, Command line, Updates.
 import { api, h, fill, view, state, screen, go, loading, toast, fail, dialog, agentBadge, sys, cliHow, icon, ask, count, current } from "./core.js";
+import { desktopSettings } from "./desktop-settings.js";
 import { running } from "./term.js";
 
 const SKILL_TEXT = {
@@ -113,6 +114,8 @@ function agents() {
 
 // terminal is Settings → Terminal: where sessions and steps open, the user's terminal app,
 // and the hopsesh Terminal window.
+let ds = null;
+function desktop() { return ds ? [desktopSettings({...ds,os:state.info.os})] : [h("p", {}, "Reading desktop settings…")]; }
 let ts = null;
 async function setTerm(patch) {
   const next = Object.assign({ app: ts.app, where: ts.where, font: ts.font, fontSize: ts.fontSize, scrollback: ts.scrollback, keepTabs: ts.keepTabs,
@@ -147,7 +150,7 @@ function terminal() {
           h("option", { value: "", selected: !ts.app }, `Automatic (${ts.name})`),
           installed.map((a) => h("option", { value: a.id, selected: ts.app === a.id }, a.name)))),
       iterm ? h("span", { class: "muted", style: "font-size:12px" }, "iTerm2: hopsesh opens a new tab in its front window, labels it with the session, and shows a session's tab instead of opening it twice. It never types into iTerm2 or reads it.") : null,
-      sw("keepTabs", "Keep tabs when the window closes", "Closing the window only hides it, and the programs keep running. Quitting hopsesh ends every program in its tabs; hopsesh asks first. For work that must outlive hopsesh, use Open in my terminal."),
+      state.info?.desktopManaged ? h("div",{class:"set-row"},title("When the main window closes", "Desktop presence controls keeping the app running. Quitting always asks before ending active terminal programs."),h("button",{class:"btn",onclick:()=>go("settings","desktop")},"Desktop presence…")) : sw("keepTabs", "Keep tabs when the window closes", "Used when Desktop presence has no explicit close preference. Closing the window hides it while programs keep running. Quitting hopsesh ends every program in its tabs; hopsesh asks first. For work that must outlive hopsesh, use Open in my terminal."),
       sw("closeEnded", "Close a tab when its program ends", "When it ends well (a hand-off's step once hopsesh has its link). A program that failed keeps its tab, so you can read why."),
       sw("notify", "Tell me when a program waits for me", sys.mac
         ? "A notification when a tab you can't see waits for your answer. hopsesh writes the text; it never shows what the program printed. Claude Code tells hopsesh it's waiting only if you turn on its terminal bell (/config → Notifications); hopsesh never changes Claude Code's settings for you."
@@ -271,7 +274,7 @@ async function preview() {
   } catch (e) { fail(e); }
 }
 
-const TABS = [["general", "General", general], ["agents", "Agents", agents], ["terminal", "Terminal", terminal], ["skill", "Skill", skill], ["cli", "Command line", cli], ["updates", "Updates", updates]];
+const TABS = [["general", "General", general], ["desktop", "Desktop presence", desktop], ["agents", "Agents", agents], ["terminal", "Terminal", terminal], ["skill", "Skill", skill], ["cli", "Command line", cli], ["updates", "Updates", updates]];
 
 function render() {
   if (current !== "settings") return;
@@ -291,7 +294,7 @@ function render() {
 }
 
 async function load() {
-  try { s = await api("Settings"); } catch (e) { fail(e); return; }
+  try { s = await api("Settings"); ds = await api("DesktopSettings"); } catch (e) { fail(e); return; }
   if (current !== "settings") return;
   render();
   api("TerminalSettings").then((t) => { ts = t; if (tab === "terminal" && current === "settings") render(); }).catch(() => {});

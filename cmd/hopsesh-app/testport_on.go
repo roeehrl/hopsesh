@@ -36,6 +36,18 @@ func testAssets(next http.Handler) http.Handler { return next }
 // (the self-check on macOS and Linux, where there is no debugging port), and opens the
 // terminal check in HOPSESH_E2E_TERMINAL. Test builds only.
 func testHook(w *application.WebviewWindow, svc *gui.App) {
+	if path := os.Getenv("HOPSESH_E2E_QUICK_SCRIPT"); path != "" {
+		if quick, ok := svc.Wails.Window.GetByName("quick-access"); ok {
+			var quickOnce sync.Once
+			quick.OnWindowEvent(events.Common.WindowRuntimeReady, func(*application.WindowEvent) {
+				quickOnce.Do(func() {
+					if b, err := os.ReadFile(path); err == nil {
+						quick.ExecJS(string(b))
+					}
+				})
+			})
+		}
+	}
 	var once sync.Once
 	script := os.Getenv("HOPSESH_E2E_SCRIPT")
 	argv := os.Getenv("HOPSESH_E2E_TERMINAL")

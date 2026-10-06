@@ -165,7 +165,12 @@ func screenReader() bool {
 func (a *App) attachTerminal() {
 	t := a.Terms
 	t.Prefs = a.termPrefs
-	t.Emit = a.emit
+	t.Emit = func(name string, data any) {
+		a.emit(name, data)
+		if name == "hopsesh:terminal" {
+			go a.updateQuickAttention()
+		}
+	}
 	t.SavePrefs = a.saveTermPrefs
 	t.Shell = func(dir string) error { _, err := a.shellTab(dir); return err }
 	t.NotifyOn = func() bool {
@@ -210,15 +215,17 @@ func (a *App) QuitAndEnd() {
 	}
 }
 
-// MainClosing decides what closing the app's window does: nothing special without
-// running tabs (cancel false); with them, it hides (the setting "Keep tabs when the window
-// closes"), or asks whether to quit.
+// MainClosing applies desktop close behavior, then the terminal-aware quit guard.
+// Existing configurations without an explicit desktop preference retain KeepTabs.
 func (a *App) MainClosing() (cancel, hide bool) {
+	if !a.quitting.Load() && a.Desktop != nil && a.Desktop.KeepOnClose() {
+		return true, true
+	}
 	if a.quitting.Load() || a.TerminalRunning() == 0 {
 		return false, false
 	}
 	a.mu.Lock()
-	keep := a.core.Cfg.KeepTabsOn()
+	keep := a.core.Cfg.KeepTabsOn() && a.core.Cfg.Desktop.Close != "quit"
 	a.mu.Unlock()
 	if keep {
 		// Without a Dock to bring the app back from (Windows, Linux), the terminal window

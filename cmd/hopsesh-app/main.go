@@ -2,6 +2,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -39,9 +41,10 @@ func main() {
 			// The terminal window may reach its page and its streams only.
 			Middleware: application.ChainMiddleware(svc.Terms.Gate, testAssets),
 		},
-		Mac: application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: true},
+		Mac: application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false},
 		// With programs running in terminal tabs, the window asks before quitting.
-		ShouldQuit: svc.ShouldQuit,
+		ShouldQuit:     svc.ShouldQuit,
+		SingleInstance: &application.SingleInstanceOptions{UniqueID: fmt.Sprintf("hopsesh-%x", sha256.Sum256([]byte(config.Dir()))), OnSecondInstanceLaunch: func(application.SecondInstanceData) { _ = svc.QuickOpen("sessions", "", "") }},
 		Windows: application.WindowsOptions{
 			WebviewUserDataPath:   filepath.Join(config.StateDir(), "webview"),
 			AdditionalBrowserArgs: testBrowserArgs(),
@@ -67,14 +70,18 @@ func main() {
 	})
 	svc.Terms.Privileged(win) // the app's own window: the one with its bindings
 	configureTitlebar(win)
-	// Closing the window while programs run in tabs hides it (Settings → Terminal → Keep
-	// tabs when the window closes), or asks whether to quit.
+	svc.AttachDesktop(win)
+	// Desktop presence owns close behavior. Quit still confirms running terminal
+	// programs; canceling it must leave the main window available.
 	win.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		if cancel, hide := svc.MainClosing(); cancel {
 			e.Cancel()
 			if hide {
 				win.Hide()
 			}
+		} else {
+			e.Cancel()
+			go app.Quit()
 		}
 	})
 	// macOS: clicking the Dock icon brings a hidden window back.

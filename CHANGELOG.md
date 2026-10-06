@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format follows
 ## Unreleased
 
 ### Fixed
+- Windows UI validation waits for the actual main window and uses the remote-session
+  continuation label. Screenshot failures now fail CI and retain their own reports.
 - Codex sessions offer desktop opening through the documented exact-thread deep link.
   Installation and account-root checks explain unavailable actions; launcher errors surface
   instead of silently falling back to a terminal. CLI: `hopsesh open <session> --app`.
@@ -34,6 +36,10 @@ All notable changes to this project are documented here. The format follows
   markers before it resumes a session.
 
 ### Added
+- Desktop presence for 0.4.0: menu bar/system tray Quick access, supported Dock/taskbar/tray
+  placement choices, independent login startup and close behavior, shared session search,
+  safe conversation previews, exact-session navigation and existing terminal focus. Linux
+  detects tray support and keeps normal app access when the host is unavailable.
 - Named Claude Code and Codex account profiles, arbitrary many-to-many tags, known-root
   discovery on allowed machines, and vendor-owned sign-in. GUI Settings → Accounts, TUI `a`,
   and `hopsesh accounts` share one store; transfer plans select an explicit destination profile.

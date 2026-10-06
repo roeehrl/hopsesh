@@ -132,4 +132,6 @@ var profileIntegrationFiles = []string{
 	"internal/e2e/scenario/testdata/accounts.txtar",
 	"internal/devtools/webtest/tests/accounts.spec.ts",
 	"docs/accounts.md", "docs/account-lineage-contract.md",
+	"internal/ui/desktop", "cmd/hopsesh-app/main.go", "internal/config/desktop.go",
+	"internal/devtools/webtest/tests/quick.spec.ts", "docs/desktop-presence.md",
 }

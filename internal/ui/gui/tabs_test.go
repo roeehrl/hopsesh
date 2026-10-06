@@ -365,8 +365,19 @@ func TestQuitAndClose(t *testing.T) {
 	if c, hide := a.MainClosing(); !c || !hide {
 		t.Fatal("keep tabs: hide")
 	}
+	// An explicit desktop Quit choice wins over the older terminal keep-tabs preference.
+	a.mu.Lock()
+	a.core.Cfg.Desktop.Close = "quit"
+	a.mu.Unlock()
+	evMu.Lock()
+	events = nil
+	evMu.Unlock()
+	if c, hide := a.MainClosing(); !c || hide || !saw(QuitEvent) {
+		t.Fatal("explicit desktop quit must confirm running tabs")
+	}
 	off := false
 	a.mu.Lock()
+	a.core.Cfg.Desktop.Close = ""
 	a.core.Cfg.Terminal.KeepTabs = &off
 	a.mu.Unlock()
 	evMu.Lock()

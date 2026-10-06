@@ -11,6 +11,7 @@ go build -tags e2e -o "$WORK/hopsesh-app" ./cmd/hopsesh-app
 go run ./internal/devtools/webtest -home "$WORK/home" -prepare > "$WORK/env.json"
 eval "$(jq -r 'to_entries[] | "export \(.key)=\(.value | @sh)"' "$WORK/env.json")"
 export PATH="/usr/bin:/bin:/usr/sbin:/sbin" HOPSESH_E2E_SCRIPT="$PWD/internal/devtools/webtest/real/selfcheck.js"
+export HOPSESH_E2E_QUICK_SCRIPT="$PWD/internal/devtools/webtest/real/quick-selfcheck.js"
 CFG="$HOPSESH_CONFIG_DIR/config.toml"
 if [ "$(uname -s)" = Linux ]; then
   # A virtual display with no GPU: WebKitGTK renders in software, in its own D-Bus session.
@@ -36,4 +37,4 @@ if [ -z "$ok" ]; then
   head -n 60 "$WORK/app.log" >&2
   exit 1
 fi
-echo "the real app listed the demo sessions and saved a setting through its backend"
+echo "the real app checked desktop modes, session routing and the native popup when supported"
