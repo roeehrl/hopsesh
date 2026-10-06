@@ -1,0 +1,247 @@
+<style>
+#hs-account-preview{--hs-bg:light-dark(#faf9f6,#1b1d20);--hs-pane:light-dark(#f0efea,#24272b);--hs-paper:light-dark(#fff,#202327);--hs-ink:light-dark(#222829,#eef0eb);--hs-muted:light-dark(#596363,#b4bcb7);--hs-line:light-dark(#d9ded5,#414940);--hs-accent:light-dark(#31593b,#b6d5aa);--hs-onaccent:light-dark(#fff,#1c2d1d);--hs-soft:light-dark(#e8efdf,#303e31);--hs-warn:light-dark(#795319,#edc587);--hs-warnbg:light-dark(#fff3dc,#3c3222);--hs-user:light-dark(#eaf1e7,#2a392d);--hs-agent:light-dark(#f0f1f5,#2c303a);font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:var(--hs-ink);max-width:100%;overflow-wrap:anywhere}
+#hs-account-preview *{box-sizing:border-box}
+#hs-account-preview .hs-previewbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px;padding-right:90px}
+#hs-account-preview .hs-previewbar small{color:var(--hs-muted)}
+#hs-account-preview button,#hs-account-preview select,#hs-account-preview input{font:inherit;color:var(--hs-ink)}
+#hs-account-preview button{background:var(--hs-paper);border:1px solid var(--hs-line);border-radius:7px;padding:8px 12px;min-height:36px;white-space:normal;text-align:left}
+#hs-account-preview button:hover:not(:disabled){background:var(--hs-soft)}
+#hs-account-preview button.hs-primary{background:var(--hs-accent);color:var(--hs-onaccent);border-color:var(--hs-accent)}
+#hs-account-preview button[aria-pressed=true]{background:var(--hs-soft);border-color:var(--hs-accent)}
+#hs-account-preview button:disabled{opacity:.5;cursor:not-allowed}
+#hs-account-preview select,#hs-account-preview input{width:100%;padding:9px;border:1px solid var(--hs-line);border-radius:6px;background:var(--hs-paper)}
+#hs-account-preview .hs-previewbar select{width:auto;max-width:100%}
+#hs-account-preview .hs-window{background:var(--hs-bg);border:1px solid var(--hs-line);border-radius:12px;overflow:hidden}
+#hs-account-preview .hs-chrome{display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:13px 24px;border-bottom:1px solid var(--hs-line);min-height:66px}
+#hs-account-preview .hs-chrome strong{font-size:16px;letter-spacing:-.3px}
+#hs-account-preview .hs-chrome span{color:var(--hs-muted)}
+#hs-account-preview .hs-shell{display:grid;grid-template-columns:166px minmax(0,1fr);min-height:610px}
+#hs-account-preview .hs-nav{background:var(--hs-pane);padding:20px 12px;border-right:1px solid var(--hs-line);display:flex;flex-direction:column;gap:8px}
+#hs-account-preview .hs-nav button{background:transparent;border-color:transparent}
+#hs-account-preview .hs-nav button[aria-pressed=true]{background:var(--hs-paper);border-color:var(--hs-line)}
+#hs-account-preview .hs-nav small{padding:20px 10px 3px;color:var(--hs-muted)}
+#hs-account-preview .hs-content{padding:28px;min-width:0}
+#hs-account-preview h1{font-size:25px;line-height:1.25;margin:0 0 8px;font-weight:600;letter-spacing:-.6px}
+#hs-account-preview h2{font-size:17px;margin:0 0 10px;font-weight:600}
+#hs-account-preview h3{font-size:14px;margin:0 0 5px;font-weight:600}
+#hs-account-preview p{margin:6px 0 14px}
+#hs-account-preview small,#hs-account-preview .hs-muted{color:var(--hs-muted);font-size:12px}
+#hs-account-preview .hs-heading{display:flex;justify-content:space-between;align-items:start;gap:18px;flex-wrap:wrap;margin-bottom:22px}
+#hs-account-preview .hs-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:17px 0;border-bottom:1px solid var(--hs-line)}
+#hs-account-preview .hs-row>div{min-width:0}
+#hs-account-preview .hs-tag{display:inline-block;font-size:12px;padding:2px 8px;background:var(--hs-soft);color:var(--hs-accent);border-radius:5px;margin:4px 5px 3px 0}
+#hs-account-preview .hs-tag.hs-amber{background:var(--hs-warnbg);color:var(--hs-warn)}
+#hs-account-preview .hs-controls{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:18px 0}
+#hs-account-preview .hs-controls>label{flex:1;min-width:130px}
+#hs-account-preview label{display:block;margin-bottom:14px}
+#hs-account-preview label input,#hs-account-preview label select{margin-top:6px}
+#hs-account-preview .hs-note{border-left:3px solid var(--hs-accent);padding:12px 15px;background:var(--hs-soft);border-radius:0 6px 6px 0;margin:18px 0}
+#hs-account-preview .hs-warning{border-left-color:var(--hs-warn);background:var(--hs-warnbg)}
+#hs-account-preview .hs-note p:last-child{margin-bottom:0}
+#hs-account-preview .hs-split{display:grid;grid-template-columns:minmax(0,1fr) minmax(230px,.85fr);gap:22px}
+#hs-account-preview .hs-inspector{background:var(--hs-paper);border:1px solid var(--hs-line);border-radius:8px;padding:18px;min-width:0}
+#hs-account-preview .hs-session{display:block;width:100%;margin:8px 0;padding:16px}
+#hs-account-preview .hs-session small{display:block;margin-top:6px}
+#hs-account-preview .hs-message{padding:11px;border-radius:7px;margin:10px 0;background:var(--hs-agent)}
+#hs-account-preview .hs-message.hs-user{background:var(--hs-user)}
+#hs-account-preview .hs-message p{font-size:13px;margin:5px 0 0}
+#hs-account-preview .hs-message strong{font-size:12px}
+#hs-account-preview .hs-route{display:grid;grid-template-columns:1fr 30px 1fr;align-items:center;gap:10px;padding:18px 0;margin:15px 0;border-top:1px solid var(--hs-line);border-bottom:1px solid var(--hs-line)}
+#hs-account-preview .hs-route .hs-arrow{text-align:center;font-size:24px;color:var(--hs-muted)}
+#hs-account-preview .hs-route strong{font-size:19px;display:block}
+#hs-account-preview .hs-route small{display:block}
+#hs-account-preview .hs-facts{display:grid;grid-template-columns:150px minmax(0,1fr);gap:12px 20px;margin:24px 0}
+#hs-account-preview .hs-facts dt{color:var(--hs-muted)}
+#hs-account-preview .hs-facts dd{margin:0}
+#hs-account-preview .hs-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:26px;padding-top:18px;border-top:1px solid var(--hs-line)}
+#hs-account-preview .hs-steps{color:var(--hs-muted);display:flex;gap:15px;flex-wrap:wrap;margin-bottom:24px;font-size:12px}
+#hs-account-preview .hs-steps .hs-current{color:var(--hs-accent);font-weight:600}
+#hs-account-preview .hs-form{max-width:470px}
+#hs-account-preview .hs-timeline{list-style:none;margin:18px 0;padding:0}
+#hs-account-preview .hs-timeline li{padding:10px 0 10px 16px;border-left:2px solid var(--hs-line)}
+#hs-account-preview .hs-timeline li:last-child{border-color:var(--hs-accent)}
+#hs-account-preview .hs-tui{font:14px/1.7 ui-monospace,SFMono-Regular,Consolas,monospace;padding:22px;min-height:610px;background:var(--hs-paper)}
+#hs-account-preview .hs-tui pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;margin:18px 0;color:var(--hs-ink)}
+#hs-account-preview .hs-tui .hs-termhead{padding-bottom:12px;border-bottom:1px solid var(--hs-line);color:var(--hs-accent)}
+#hs-account-preview .hs-tui button{font:inherit}
+#hs-account-preview .hs-tui .hs-terminalnav{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}
+#hs-account-preview .hs-checkline{display:flex;align-items:start;gap:9px}
+#hs-account-preview .hs-checkline input{width:auto;margin:4px 0 0}
+#hs-account-preview .hs-inert{font-size:12px;padding:12px 24px;border-top:1px solid var(--hs-line);background:var(--hs-pane);color:var(--hs-muted)}
+@media(max-width:800px){#hs-account-preview .hs-shell{grid-template-columns:125px minmax(0,1fr)}#hs-account-preview .hs-content{padding:22px}#hs-account-preview .hs-split{grid-template-columns:1fr}#hs-account-preview .hs-inspector{margin-top:8px}}
+@media(max-width:520px){#hs-account-preview .hs-previewbar{padding-right:0}#hs-account-preview .hs-shell{display:block}#hs-account-preview .hs-nav{flex-direction:row;flex-wrap:wrap;padding:8px;border-right:0;border-bottom:1px solid var(--hs-line)}#hs-account-preview .hs-nav small{display:none}#hs-account-preview .hs-content{padding:18px}#hs-account-preview .hs-chrome{padding:12px 16px;gap:10px}#hs-account-preview .hs-chrome span{display:none}#hs-account-preview .hs-facts{grid-template-columns:1fr;gap:4px}#hs-account-preview .hs-facts dd{margin-bottom:12px}#hs-account-preview .hs-row{align-items:start;flex-wrap:wrap}#hs-account-preview .hs-route{grid-template-columns:1fr}#hs-account-preview .hs-route .hs-arrow{text-align:left;transform:rotate(90deg);width:25px}#hs-account-preview .hs-tui{padding:16px;font-size:13px}}
+@media(pointer:coarse){#hs-account-preview button{min-height:44px}#hs-account-preview input,#hs-account-preview select{font-size:16px;min-height:44px}}
+</style>
+<div id="hs-account-preview" aria-label="Hopsesh account setup and session transfer design">
+  <div class="hs-previewbar">
+    <button class="cursor-interaction" data-mode="gui" aria-pressed="true">Desktop</button>
+    <button class="cursor-interaction" data-mode="tui" aria-pressed="false">Terminal</button>
+    <label style="margin:0">Preview case <select id="hs-case" aria-label="Preview case"><option value="ready">Ready</option><option value="changed">Account changed</option><option value="diverged">Both copies changed</option><option value="partial">History incomplete</option></select></label>
+    <small>Interactive proposal · sample data</small>
+  </div>
+  <div class="hs-window">
+    <header class="hs-chrome"><button class="cursor-interaction" data-go="sessions">← Back to sessions</button><strong>hopsesh</strong><span id="hs-location" aria-live="polite">Accounts / This Mac</span></header>
+    <div id="hs-body"></div>
+    <div class="hs-inert">Design preview. Sign-in, transfers and terminal launches are simulated.</div>
+  </div>
+</div>
+<script>
+(()=>{
+const root=document.getElementById('hs-account-preview'),body=root.querySelector('#hs-body');
+const state={mode:'gui',page:'accounts',scenario:'ready',setup:'choose',draft:{agent:'Claude Code',label:'',method:'new',path:'',login:'subscription',tags:''},accountTag:'all',accountGroup:'None',discovery:'checking',scanScope:'all',ack:false,dense:false,filter:'all',group:'Account',session:'s1',target:'p2',editing:'p1',next:6,operation:null,result:null};
+const profiles=[
+ {id:'p1',label:'Everyday',email:'a@b.com',agent:'Claude Code',machine:'This Mac',tags:['Personal'],origin:'Detected default profile'},
+ {id:'p2',label:'Side projects',email:'a@c.com',agent:'Claude Code',machine:'This Mac',tags:['Personal','Side projects'],origin:'Registered profile'},
+ {id:'p3',label:'Acme team',email:'a@d.com',agent:'Claude Code',machine:'This Mac',tags:['Work'],origin:'Registered profile'},
+ {id:'p4',label:'Client lab',email:'alex@client.example',agent:'Codex',machine:'This Mac',tags:['Work','Client'],origin:'Registered profile'},
+ {id:'p5',label:'Research',email:'alex.research@example.com',agent:'Codex',machine:'MacBook',tags:['Personal','Research'],origin:'Detected on connected machine'}
+];
+const sessions=[
+ {id:'s1',profile:'p1',title:'Fix checkout retry',rounds:2},
+ {id:'s2',profile:'p2',title:'Build the reading tracker',rounds:0},
+ {id:'s3',profile:'p3',title:'Review the deployment plan',rounds:1},
+ {id:'s4',profile:'p4',title:'Document the release checklist',rounds:0},
+ {id:'s5',profile:'p5',title:'Compare parser implementations',rounds:0}
+];
+const profile=id=>profiles.find(p=>p.id===id),session=()=>sessions.find(s=>s.id===state.session)||sessions[0];
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const button=(text,action,primary=false,disabled=false)=>`<button class="cursor-interaction ${primary?'hs-primary':''}" data-go="${esc(action)}" ${disabled?'disabled':''}>${esc(text)}</button>`;
+const tag=(text,warn=false)=>`<span class="hs-tag ${warn?'hs-amber':''}">${esc(text)}</span>`;
+const heading=(title,sub,action='')=>`<div class="hs-heading"><div><h1>${esc(title)}</h1><p class="hs-muted">${esc(sub)}</p></div>${action}</div>`;
+const describe=p=>`${p.label} · ${p.email} · ${p.agent} · ${p.machine}`;
+const optionLabel=p=>describe(p)+(profiles.filter(q=>describe(q)===describe(p)).length>1?' · '+p.id:'');
+const option=(value,label,chosen)=>`<option value="${esc(value)}" ${value===chosen?'selected':''}>${esc(label)}</option>`;
+const profileOptions=(chosen,exclude)=>profiles.filter(p=>p.id!==exclude).map(p=>option(p.id,optionLabel(p),chosen)).join('');
+const status=p=>p.agent==='Codex'?'Signed in · workspace identity limited':'Signed in';
+const actions=content=>`<div class="hs-actions">${content}</div>`;
+function ensureTarget(){if(!profile(state.target)||state.target===session().profile)state.target=profiles.find(p=>p.id!==session().profile)?.id;}
+const allTags=()=>[...new Set(profiles.flatMap(p=>p.tags||[]))].sort((a,b)=>a.localeCompare(b));
+const tagOptions=chosen=>option('all','All tags',chosen)+option('untagged','Untagged',chosen)+allTags().map(t=>option('tag:'+t,t,chosen)).join('');
+const matchesTag=p=>state.accountTag==='all'||(state.accountTag==='untagged'?!(p.tags||[]).length:(p.tags||[]).includes(state.accountTag.slice(4)));
+const parseTags=text=>{const known=allTags();return [...new Map(text.split(',').map(t=>t.trim()).filter(Boolean).map(t=>{const label=known.find(k=>k.toLowerCase()===t.toLowerCase())||t;return [label.toLowerCase(),label];})).values()];};
+const tagsView=p=>(p.tags||[]).map(t=>tag(t)).join('');
+function accounts(){
+ const visible=profiles.filter(matchesTag);
+ const row=p=>`<div class="hs-row" data-profile="${p.id}"><div><h3>${esc(p.label)} · ${esc(p.agent)}</h3><div>${esc(p.email)}</div><small>${esc(p.machine)} · ${esc(p.origin||'Registered profile')}</small><div>${tagsView(p)}</div><small>${esc(status(p))}</small></div><div class="hs-controls">${button('Sessions','filter:'+p.id)}${button('Edit','rename:'+p.id)}</div></div>`;
+ const groups=new Map();
+ for(const p of visible){const keys=state.accountGroup==='Tag'?(p.tags.length?p.tags:['Untagged']):[state.accountGroup==='Agent'?p.agent:state.accountGroup==='Machine'?p.machine:'Accounts'];for(const key of keys){if(!groups.has(key))groups.set(key,[]);groups.get(key).push(p);}}
+ const rows=[...groups].map(([name,items])=>state.accountGroup==='None'?items.map(row).join(''):`<details open><summary class="cursor-interaction">${esc(name)} · ${items.length} account${items.length===1?'':'s'}</summary>${items.map(row).join('')}</details>`).join('');
+ return heading('Accounts',`${profiles.length} accounts across ${new Set(profiles.map(p=>p.machine)).size} machines`,button('Add account','setup',true))+`<div class="hs-controls">${button('Discover accounts','discover')}<label>Tag<select id="hs-tag-filter">${tagOptions(state.accountTag)}</select></label><label>Group by<select id="hs-account-group">${['None','Tag','Agent','Machine'].map(x=>option(x,x,state.accountGroup)).join('')}</select></label></div><p>Names and tags are yours. An account can have several tags.</p>${rows||'<p>No accounts match this tag.</p>'}<div class="hs-note"><h3>Automatic discovery · On</h3><p>Check supported default and registered profiles when Hopsesh opens or a configured machine connects. Custom directories can be added manually.</p></div>`;
+}
+function discovery(){
+ const checking=state.discovery==='checking',localBusy=checking&&state.scanScope!=='remote',remoteBusy=checking&&state.scanScope!=='local',offline=state.discovery==='offline';
+ return heading('Discover accounts','Supported profiles on this device and configured SSH machines')+`<p class="hs-muted">Automatic checks run when Hopsesh opens and machines connect. This preview simulates the results.</p><div class="hs-row"><div><h3>This Mac</h3><small>${localBusy?'Checking default and registered profiles…':'Checked just now · existing profiles matched by profile ID'}</small></div>${button('Scan','scan-local',false,localBusy)}</div><div class="hs-row"><div><h3>MacBook</h3><small>${remoteBusy?'Checking over the configured SSH connection…':offline?'Connection unavailable · last successful check 18 minutes ago':'Checked just now · credentials stayed on MacBook'}</small></div>${button('Scan','scan-remote',false,remoteBusy)}</div>${checking?'<div class="hs-note" role="status">Checking profiles… No login windows are opened and credentials are not copied.</div>':offline?'<div class="hs-note hs-warning" role="status">MacBook could not be checked. Its saved accounts remain listed with last-known information.</div>':`<div class="hs-row"><div><h3>Additional Claude account · MacBook</h3><div>alex.other@example.com</div><small>Signed in · default Claude profile · no tags assigned</small></div>${profiles.some(p=>p.discoveryKey==='remote-claude')?tag('Added'):button('Add detected profile','adopt',true)}</div>`}<div class="hs-note"><h3>Discovery has limits</h3><p>Checks use known supported profile locations. Unknown custom directories and unsupported desktop sign-ins need manual setup. Email domains do not assign tags.</p></div>`+actions(checking?button('Simulate completed check','scan-done',true)+button('Simulate remote unavailable','scan-offline'):button('Check again','scan')+button('Register custom profile','custom-profile'));
+}
+function setup(){
+ const d=state.draft,steps=`<div class="hs-steps"><span>1 · Profile</span><span>2 · Sign in</span><span>3 · Review</span></div>`;
+ if(state.setup==='signin')return heading('Sign in to '+(d.label||'your new account'),'Complete sign-in through the agent’s own flow.')+steps+`<div class="hs-note"><h3>Waiting for ${esc(d.agent)}</h3><p>Your existing ${profiles.length} accounts stay available.</p></div><p class="hs-muted">This preview assigns a fictional example.com address. The real app reads the identity reported after sign-in.</p>`+actions(button('Simulate completed sign-in','signed-in',true)+button('Cancel','accounts'));
+ if(state.setup==='done'){
+  const p=profile(state.target);
+  return heading(p.label+' is ready',`${profiles.length} accounts now available`)+steps+`<dl class="hs-facts"><dt>Display name</dt><dd>${esc(p.label)}</dd><dt>Signed-in identity</dt><dd>${esc(p.email)}</dd><dt>Agent</dt><dd>${esc(p.agent)}</dd><dt>Identity check</dt><dd>${esc(status(p))}</dd></dl>`+actions(button('Choose a session','sessions',true)+button('Add another account','setup')+button('All accounts','accounts'));
+ }
+ return heading('Add an account','Add another sign-in. There is no Personal/Work category or two-account limit.')+steps+`<div class="hs-form"><label>Agent<select id="hs-agent">${option('Claude Code','Claude Code',d.agent)}${option('Codex','Codex',d.agent)}</select></label><label>Display name (optional)<input id="hs-label" value="${esc(d.label)}" maxlength="60" placeholder="e.g. Side projects, Team Atlas, Research"></label><p class="hs-muted">Leave blank to use the identity reported after sign-in. You can rename it later.</p><label>Tags (optional)<input id="hs-tags" value="${esc(d.tags||'')}" maxlength="200" placeholder="e.g. Personal, Research"></label><p class="hs-muted">Separate tags with commas. Tags never determine login or routing.</p><label>Setup method<select id="hs-method">${option('new','Create a separate profile',d.method)}${option('existing','Register an existing profile',d.method)}</select></label>${d.method==='existing'?`<label>Existing state directory<input id="hs-path" value="${esc(d.path)}" placeholder="Absolute path on this machine"></label>`:''}<label>Sign-in method<select id="hs-login">${option('subscription',d.agent==='Codex'?'ChatGPT account':'Claude subscription',d.login)}${option('key','API key · separate API billing',d.login)}${d.agent==='Claude Code'?option('console','Console sign-in without an API key',d.login):''}</select></label>${d.login==='console'?'<div class="hs-note hs-warning">This Claude sign-in type cannot be isolated with configuration directories. Choose a supported method.</div>':'<div class="hs-note">The destination gets its own sign-in. Existing credentials are not copied.</div>'}`+actions(button('Continue to sign-in','signin',true,d.login==='console')+button('Cancel','accounts'))+'</div>';
+}
+function rename(){const p=profile(state.editing);return heading('Edit account',`${p.email} · ${p.agent} · ${p.machine}`)+`<div class="hs-form"><label>Display name<input id="hs-rename" maxlength="60" value="${esc(p.label)}"></label><label>Tags<input id="hs-edit-tags" maxlength="200" value="${esc((p.tags||[]).join(', '))}" placeholder="e.g. Personal, Research"></label><p class="hs-muted">Names and tags are labels. Your profile ID, sign-in, session history and round-trip destinations stay the same.</p></div>`+actions(button('Save changes','save-name',true)+button('Cancel','accounts'));}
+function sessionSelectors(){return `<div class="hs-controls"><label>Account<select id="hs-filter">${option('all','All accounts',state.filter)}${profileOptions(state.filter)}</select></label><label>Tag<select id="hs-tag-filter">${tagOptions(state.accountTag)}</select></label><label>Group by<select id="hs-group">${option('Account','Account',state.group)}${option('Agent','Agent',state.group)}</select></label></div>`;}
+function sessionsView(){
+ const visible=sessions.filter(s=>(state.filter==='all'||s.profile===state.filter)&&matchesTag(profile(s.profile))),groups=new Map();
+ if(visible.length&&!visible.some(s=>s.id===state.session))chooseSession(visible[0].id);
+ for(const s of visible){const p=profile(s.profile),key=state.group==='Agent'?p.agent:p.id;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(s);}
+ const list=[...groups].map(([key,items])=>`<details open><summary class="cursor-interaction">${esc(state.group==='Agent'?key:profile(key).label)} · ${items.length} session${items.length===1?'':'s'}</summary>${items.map(s=>{const p=profile(s.profile);return `<button class="hs-session cursor-interaction" data-go="pick:${s.id}" aria-pressed="${s.id===state.session}"><strong>${esc(s.title)}</strong><small>${esc(p.label)} · ${esc(p.email)}<br>${esc(p.agent)} · ${esc(p.machine)}</small>${tag(s.rounds+' round trips')}</button>`;}).join('')}</details>`).join('');
+ return heading('Sessions','Choose a session, then choose its destination account.')+sessionSelectors()+`<div class="hs-split"><div>${list||'<p>No sessions in this account yet. Choose an existing session and continue it here.</p>'}</div>${visible.length?`<aside class="hs-inspector">${inspector()}</aside>`:''}</div>`;
+}
+function inspector(){const s=session(),p=profile(s.profile);return `<h2>${esc(s.title)}</h2><p>${esc(p.label)}<br><small>${esc(p.email)} · ${esc(p.agent)}</small></p><div class="hs-controls">${button('Continue with another account…','plan',true)}</div><h3>Recent conversation</h3><div class="hs-message hs-user"><strong>You</strong><p>Keep the behavior predictable when a request is retried.</p></div><div class="hs-message"><strong>${esc(p.agent)}</strong><p>The request now uses a stable <code>operation ID</code>.</p></div>${tag(s.rounds+' round trips')}<p class="hs-muted">Return targets follow profile IDs, even after you rename them.</p>`;}
+function route(returning){const op=state.operation;return returning&&op?{from:profile(op.to),to:profile(op.from),title:op.title}:{from:profile(session().profile),to:profile(state.target),title:session().title};}
+function review(returning,terminal=false){
+ ensureTarget();if(returning&&!state.operation)return heading('No return to preview yet','Continue a session in another account first.')+actions(button('Choose a session','sessions',true));
+ const r=route(returning),changed=state.scenario==='changed',partial=state.scenario==='partial',diverged=returning&&state.scenario==='diverged',limited=returning&&r.to.agent==='Codex';
+ const selectors=returning?'':`<label>Source session<select id="hs-source">${sessions.map(s=>option(s.id,s.title+' — '+optionLabel(profile(s.profile)),state.session)).join('')}</select></label><label>Destination account<select id="hs-target">${profileOptions(state.target,session().profile)}</select></label>${button('Add another destination account','setup')}`;
+ const routeView=terminal?`<pre>${esc('FROM  '+describe(r.from)+'\nTO    '+describe(r.to))}</pre>`:`<div class="hs-route"><div><small>From</small><strong>${esc(r.from.label)}</strong><small>${esc(r.from.email)}<br>${esc(r.from.agent)} · ${esc(r.from.machine)}</small></div><div class="hs-arrow">→</div><div><small>To</small><strong>${esc(r.to.label)}</strong><small>${esc(r.to.email)}<br>${esc(r.to.agent)} · ${esc(r.to.machine)}</small></div></div>`;
+ let notice='';
+ if(changed)notice+='<div class="hs-note hs-warning" role="alert"><h3>Destination login changed</h3><p>Review this account and make a new plan. Do not use the saved preview.</p></div>';
+ if(partial)notice+=`<div class="hs-note hs-warning"><h3>Earlier detail is unavailable</h3><label class="hs-checkline"><input id="hs-ack" type="checkbox" ${state.ack?'checked':''}>Continue with the available summary</label></div>`;
+ if(diverged)notice+='<div class="hs-note hs-warning"><h3>Both copies have new work</h3><p>Keep both creates an independent branch. The original stays available.</p></div>';
+ if(limited)notice+='<div class="hs-note hs-warning"><h3>Original workspace cannot be verified</h3><p>Create a portable copy; preserve the original unchanged.</p></div>';
+ let label=diverged?'Keep both in '+r.to.label:limited?'Create portable copy in '+r.to.label:returning?'Add 4 messages to '+r.to.label:'Continue in '+r.to.label;
+ return heading(returning?'Return to '+r.to.label:'Continue with another account',r.title)+selectors+routeView+notice+`<dl class="hs-facts"><dt>Incoming work</dt><dd>${returning?'4 new messages':partial?'Summary + 8 recent messages':'34 available messages'}</dd><dt>Protected reasoning</dt><dd>Stays with its original account</dd><dt>Original</dt><dd>Preserved${returning&&!limited&&!diverged?' · append only after verified safety checks':''}</dd><dt>Result</dt><dd>${diverged?'Separate conversation branch':limited?'Separate portable copy':returning?'Append to verified unchanged original (sample case)':'New conversation in the selected account'}</dd></dl>`+actions(button(label,returning?'returned':'transferred',true,changed||(partial&&!state.ack))+button('Cancel','sessions'));
+}
+function result(){const r=state.result,p=profile(r.to);return heading(r.returned?'Return preview complete':'Continuation preview complete','Simulated result · no real session files changed')+`<div class="hs-note"><h3>${esc(r.fork?'Separate branch created in '+p.label:r.copy?'Portable copy created in '+p.label:'Work delivered to '+p.label)}</h3><p>${esc(p.email)} · ${esc(p.agent)}</p></div><dl class="hs-facts"><dt>Original</dt><dd>Retained</dd><dt>Journey</dt><dd>${esc(r.route.map(id=>profile(id).label).join(' → '))}</dd><dt>Fidelity</dt><dd>Visible history; protected reasoning not transferred</dd></dl>`+actions(button(r.returned?'View sessions':'Preview return to '+profile(state.operation.from).label,r.returned?'sessions':'return',true)+button('Accounts','accounts'));}
+function terminal(){
+ let content;
+ if(state.page==='accounts')content=heading('Accounts',`${profiles.length} independent profiles · names are editable`)+`<pre>${esc(profiles.map(p=>`${p.id}  ${p.label}\n    ${p.email} · ${p.agent} · ${p.machine}\n    Tags: ${(p.tags||[]).join(', ')||'none'}\n    ${status(p)}`).join('\n\n'))}</pre><label>Tag filter<select id="hs-tag-filter">${tagOptions(state.accountTag)}</select></label><label>Selected account<select id="hs-selected-account">${profileOptions(state.editing)}</select></label>`+actions(button('a · Add account','setup',true)+button('e · Edit account and tags','rename:'+state.editing)+button('s · Sessions','filter:'+state.editing)+button('d · Discover accounts','discover'));
+ else if(state.page==='plan'||state.page==='return')content=review(state.page==='return',true);
+ else content=screen();
+ return `<div class="hs-tui"><div class="hs-termhead">hopsesh / ${esc(state.page)}</div>${content}<div class="hs-terminalnav">${button('Accounts','accounts')}${button('Sessions','sessions')}</div><small>Controls simulate TUI selection and keyboard actions.</small></div>`;
+}
+function screen(){return ({accounts,setup,rename,discover:discovery,sessions:sessionsView,plan:()=>review(false),return:()=>review(true),result})[state.page]();}
+function render(){
+ ensureTarget();root.querySelectorAll('[data-mode]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.mode===state.mode)));
+ root.querySelector('#hs-location').textContent=(state.page==='sessions'?'Sessions':'Accounts')+' / All machines';
+ body.innerHTML=state.mode==='tui'?terminal():`<div class="hs-shell"><nav class="hs-nav" aria-label="Hopsesh navigation">${button('Sessions','sessions')}${button('Accounts','accounts')}<small>ALL MACHINES</small><small>${profiles.length} accounts</small></nav><main class="hs-content">${screen()}</main></div>`;
+ root.querySelectorAll('.hs-nav button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.go===(state.page==='sessions'?'sessions':'accounts'))));
+ if(state.dense)root.querySelectorAll('.hs-row').forEach(el=>el.style.padding='10px 0');
+}
+function save(){if(window.openai?.setWidgetState)window.openai.setWidgetState({modelContent:{screen:state.page,mode:state.mode,scenario:state.scenario,accountCount:profiles.length},privateContent:{}}).catch(()=>{});}
+function chooseSession(id){if(sessions.some(s=>s.id===id))state.session=id;ensureTarget();state.ack=false;}
+function filter(id){state.filter=id;const match=sessions.find(s=>id==='all'||s.profile===id);if(match)chooseSession(match.id);state.page='sessions';}
+root.addEventListener('click',e=>{
+ const mode=e.target.closest('[data-mode]');if(mode){state.mode=mode.dataset.mode;render();save();return;}
+ const b=e.target.closest('[data-go]');if(!b||b.disabled)return;const go=b.dataset.go;
+ if(go.startsWith('filter:'))filter(go.slice(7));
+ else if(go.startsWith('rename:')){state.editing=go.slice(7);state.page='rename';}
+ else if(go.startsWith('pick:')){chooseSession(go.slice(5));state.page='sessions';}
+ else if(go==='save-name'){const input=root.querySelector('#hs-rename');const name=input.value.trim();if(!name){input.setCustomValidity('Enter a display name.');input.reportValidity();return;}profile(state.editing).label=name;profile(state.editing).tags=parseTags(root.querySelector('#hs-edit-tags').value);state.page='accounts';}
+ else if(go==='setup'){state.setup='choose';state.draft={agent:'Claude Code',label:'',method:'new',path:'',login:'subscription',tags:''};state.page='setup';}
+ else if(['discover','scan','scan-local','scan-remote'].includes(go)){state.scanScope=go==='scan-local'?'local':go==='scan-remote'?'remote':'all';state.discovery='checking';state.page='discover';}
+ else if(go==='scan-done'){state.discovery='done';}
+ else if(go==='scan-offline'){state.discovery='offline';}
+ else if(go==='adopt'&&!profiles.some(p=>p.discoveryKey==='remote-claude')){const id='p'+state.next++;profiles.push({id,label:'Additional account',email:'alex.other@example.com',agent:'Claude Code',machine:'MacBook',tags:[],origin:'Detected on connected machine',discoveryKey:'remote-claude'});state.editing=id;state.page='rename';}
+ else if(go==='custom-profile'){state.setup='choose';state.draft={agent:'Claude Code',label:'',method:'existing',path:'',login:'subscription',tags:''};state.page='setup';}
+ else if(go==='signin'){
+  if(state.draft.login==='console')return;
+  if(state.draft.method==='existing'&&!state.draft.path.trim()){const input=root.querySelector('#hs-path');input.setCustomValidity('Enter the existing profile directory.');input.reportValidity();return;}
+  state.setup='signin';
+ }
+ else if(go==='signed-in'){
+  const id='p'+state.next++,email='sample.'+id+'@example.com';
+  profiles.push({id,label:state.draft.label.trim()||email,email,agent:state.draft.agent,machine:'This Mac',tags:parseTags(state.draft.tags||''),origin:'Added in preview'});state.target=id;state.editing=id;state.setup='done';
+ }
+ else if(go==='transferred'){
+  const source=session(),to=profile(state.target),id='s'+state.next++;
+  state.operation={from:source.profile,to:to.id,source:source.id,created:id,title:source.title};
+  sessions.push({id,profile:to.id,title:source.title,rounds:source.rounds});
+  state.result={returned:false,to:to.id,route:[source.profile,to.id]};state.page='result';
+ }
+ else if(go==='returned'&&state.operation){
+  const op=state.operation,fork=state.scenario==='diverged',copy=profile(op.from).agent==='Codex',original=sessions.find(s=>s.id===op.source);
+  if(fork||copy){const id='s'+state.next++;sessions.push({id,profile:op.from,title:op.title+(fork?' · Returned branch':' · Portable return'),rounds:fork?0:original.rounds+1});state.session=id;}else{original.rounds++;state.session=original.id;}
+  state.filter=op.from;state.result={returned:true,to:op.from,fork,copy,route:[op.from,op.to,op.from]};state.page='result';
+ }
+ else if(['accounts','sessions','plan','return'].includes(go)){state.page=go;state.ack=false;}
+ render();save();
+});
+root.addEventListener('input',e=>{
+ if(e.target.id==='hs-label')state.draft.label=e.target.value;if(e.target.id==='hs-tags')state.draft.tags=e.target.value;
+ if(e.target.id==='hs-path'){state.draft.path=e.target.value;e.target.setCustomValidity('');}
+ if(e.target.id==='hs-rename')e.target.setCustomValidity('');
+});
+root.addEventListener('change',e=>{
+ const id=e.target.id,value=e.target.value;
+ if(id==='hs-case'){state.scenario=value;state.ack=false;}
+ else if(id==='hs-agent'){state.draft.agent=value;state.draft.login='subscription';}
+ else if(id==='hs-method')state.draft.method=value;
+ else if(id==='hs-login')state.draft.login=value;
+ else if(id==='hs-filter')filter(value);else if(id==='hs-tag-filter')state.accountTag=value;else if(id==='hs-account-group')state.accountGroup=value;
+ else if(id==='hs-group')state.group=value;
+ else if(id==='hs-target'){state.target=value;state.ack=false;}
+ else if(id==='hs-source')chooseSession(value);
+ else if(id==='hs-ack')state.ack=e.target.checked;
+ else if(id==='hs-selected-account')state.editing=value;
+ else return;render();save();
+});
+function restore(saved){if(!saved)return;if(['gui','tui'].includes(saved.mode))state.mode=saved.mode;if(['accounts','sessions','plan'].includes(saved.screen))state.page=saved.screen;if(['ready','changed','partial','diverged'].includes(saved.scenario))state.scenario=saved.scenario;root.querySelector('#hs-case').value=state.scenario;}
+restore(window.openai?.widgetState?.modelContent);render();
+window.addEventListener('openai:set_globals',e=>{restore(e.detail?.globals?.widgetState?.modelContent);render();});
+if(globalThis.Tweak){const tweak=new Tweak({container:root,onChange:render});tweak.addToggle(state,'dense',{label:'Compact account rows'});}
+})();
+</script>

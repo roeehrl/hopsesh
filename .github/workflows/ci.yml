@@ -253,9 +253,9 @@ jobs:
           go build -o "bin/hopsesh$ext" ./cmd/hopsesh
           go build -o "bin/hsmatrix$ext" ./internal/devtools/hsmatrix
           go build -o "bin/fakeagent$ext" ./internal/devtools/fakeagent
-      - name: mandatory stateful lineage routes, forks and recovery
+      - name: mandatory stateful account and lineage routes, forks and recovery
         shell: bash
-        run: go test ./internal/e2e -run TestLineage -race -count=1 -timeout 5m
+        run: go test ./internal/e2e -run 'TestLineage|TestAccountProfile' -race -count=1 -timeout 10m
       - name: scenario matrix over loopback SSH
         if: runner.os != 'Windows'
         run: scripts/matrix-loopback.sh bin "${{ matrix.family }}→${{ matrix.family }}" "$RUNNER_TEMP/hsmatrix"

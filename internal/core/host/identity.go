@@ -96,3 +96,28 @@ func (m *Machine) identityPath() string {
 	}
 	return m.Path().Join(m.Facts.Home, ".hopsesh", "endpoint-id")
 }
+
+// ReadIdentity reads an already initialized endpoint without reserving or writing one.
+func (m *Machine) ReadIdentity(ctx context.Context) (string, error) {
+	if m.Facts.Endpoint != "" {
+		return m.Facts.Endpoint, nil
+	}
+	fsys, err := m.FS(ctx)
+	if err != nil {
+		return "", err
+	}
+	b, err := fsys.ReadFile(m.identityPath(), 128)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	id := strings.TrimSpace(string(b))
+	raw, err := hex.DecodeString(id)
+	if err != nil || len(raw) != 32 {
+		return "", fmt.Errorf("invalid endpoint identity")
+	}
+	m.Facts.Endpoint = id
+	return id, nil
+}

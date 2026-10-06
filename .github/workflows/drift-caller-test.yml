@@ -13,11 +13,50 @@ on:
       - ci/drift/**
       - internal/devtools/driftmanifest/**
       - internal/devtools/schemalite/**
+      - agents/**
+      - sdk/agent/**
+      - internal/app/**
+      - internal/core/**
+      - internal/ui/**
+      - internal/e2e/**
+      - internal/devtools/webtest/**
+      - docs/accounts.md
+      - docs/account-lineage-contract.md
   workflow_dispatch:
 
 permissions: {}
 
 jobs:
+  hopsesh-coverage:
+    name: hopsesh drift coverage (offline)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: manifest, nested schemas and review prompts
+        run: |
+          command -v jq
+          command -v diff
+          go test -race ./internal/devtools/driftmanifest ./internal/devtools/schemalite -count=1
+          ci/drift/test-hopsesh.sh "$RUNNER_TEMP/hopsesh-drift"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hopsesh-drift-review-inputs
+          path: |
+            ${{ runner.temp }}/hopsesh-drift/manifest.json
+            ${{ runner.temp }}/hopsesh-drift/probe.md
+            ${{ runner.temp }}/hopsesh-drift/prompts/
+
   drift:
     permissions:
       contents: read

@@ -38,6 +38,9 @@ type module struct {
 	Instructions       []string            `json:"instructionFiles"`
 	GlobalInstructions []string            `json:"globalInstructionFiles"`
 	DesktopApps        map[string][]string `json:"desktopApps"`
+	DesktopScheme      string              `json:"desktopScheme,omitempty"`
+	Accounts           *agent.ProfileSpec  `json:"accounts,omitempty"`
+	IntegrationFiles   []string            `json:"integrationFiles,omitempty"`
 	Capabilities       []agent.Capability  `json:"capabilities"`
 	Fixtures           []string            `json:"fixtureVersions"`
 	Sources            []string            `json:"sourceFiles"`
@@ -66,6 +69,13 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) == 6 && os.Args[1] == "schema-diff" {
+		if err := diffSchemas(os.Args[2], os.Args[3], os.Args[4], os.Args[5]); err != nil {
+			fmt.Fprintln(os.Stderr, "driftmanifest schema-diff:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	out := modules()
 	targets, err := buildTargets(out)
 	if err != nil {
@@ -89,7 +99,10 @@ func modules() []module {
 		d := module{ID: s.ID, Name: s.Name, Vendor: s.Vendor, Stability: s.Stability, Tested: s.Tested, Binaries: s.Binaries,
 			Roots: s.Roots, LoginEnv: s.LoginEnv, Secrets: s.Secrets, Worktrees: s.Worktrees, Instructions: s.Instructions,
 			GlobalInstructions: s.GlobalInstructions, DesktopApps: s.Icon.Apps, Capabilities: agent.Capabilities(m),
-			clouds: s.Clouds}
+			Accounts: s.Accounts, DesktopScheme: s.DesktopScheme, clouds: s.Clouds}
+		if s.Accounts != nil {
+			d.IntegrationFiles = profileIntegrationFiles
+		}
 		if es, err := os.ReadDir(filepath.Join(dir, "testdata")); err == nil {
 			for _, e := range es {
 				if e.IsDir() {
@@ -107,4 +120,16 @@ func modules() []module {
 		out = append(out, d)
 	}
 	return out
+}
+
+// Upstream changes can break shared consumers even when the adapter still compiles.
+// These paths also give the reviewer the regression scenarios and current contracts.
+var profileIntegrationFiles = []string{
+	"sdk/agent/runtime_profile.go", "internal/core/profiles", "internal/core/lineage",
+	"internal/core/move", "internal/core/peer", "internal/core/host", "internal/app",
+	"internal/ui/gui", "internal/ui/tui", "internal/ui/cli",
+	"internal/e2e/lineage_routes_test.go", "internal/e2e/push_test.go",
+	"internal/e2e/scenario/testdata/accounts.txtar",
+	"internal/devtools/webtest/tests/accounts.spec.ts",
+	"docs/accounts.md", "docs/account-lineage-contract.md",
 }

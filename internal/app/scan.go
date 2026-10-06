@@ -63,8 +63,25 @@ func (m *Machine) Host() *host.Machine { return m.host }
 
 // Install returns an agent's install there.
 func (m *Machine) Install(id agent.ID) (agent.Install, bool) {
+	var chosen agent.Install
 	for _, a := range m.Agents {
-		if a.Agent == id && a.Install.Present {
+		if a.Agent == id && a.Install.Present && (a.Install.Profile == nil || a.Install.Profile.Default) {
+			if chosen.Agent != "" {
+				return agent.Install{}, false
+			}
+			chosen = a.Install
+		}
+	}
+	return chosen, chosen.Agent != ""
+}
+
+// InstallProfile selects the exact registered root. An empty selector means the default.
+func (m *Machine) InstallProfile(id agent.ID, profile string) (agent.Install, bool) {
+	if profile == "" {
+		return m.Install(id)
+	}
+	for _, a := range m.Agents {
+		if a.Agent == id && a.Install.Present && a.Install.ProfileID() == profile {
 			return a.Install, true
 		}
 	}
@@ -91,7 +108,8 @@ type Entry struct {
 	// Checkout is a cloud session's repository checked out here, when known.
 	Checkout string `json:"checkout,omitempty"`
 	// Original is the session a cloud session was handed off from ("machine:agent/id").
-	Original string `json:"original,omitempty"`
+	Original string                `json:"original,omitempty"`
+	Profile  *agent.RuntimeProfile `json:"profile,omitempty"`
 }
 
 // Inventory is the result of a scan.
@@ -136,9 +154,10 @@ func (inv *Inventory) Local() *Machine {
 
 // ScanOptions narrow a scan.
 type ScanOptions struct {
-	Hosts   []string // only these machines and clouds ("" or none: every allowed one)
-	NoLocal bool     // leave this machine out
-	SkipGit bool     // no git state (faster)
+	ForceAccounts bool     // explicitly refresh public login metadata
+	Hosts         []string // only these machines and clouds ("" or none: every allowed one)
+	NoLocal       bool     // leave this machine out
+	SkipGit       bool     // no git state (faster)
 	// GitFor, when set, limits the git probe to the folders of the sessions it accepts (the
 	// others get no git state); see App.GitFor.
 	GitFor func(Entry) bool
@@ -285,24 +304,44 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 		if err != nil {
 			st.Error = err.Error()
 		}
-		m.Agents = append(m.Agents, st)
-		if !st.Install.Present {
+
+		installs, scanErr := a.profileInstalls(ctx, hm, mod, st.Install, o.ForceAccounts)
+		if scanErr != nil {
+			st.Error = scanErr.Error()
+			m.Agents = append(m.Agents, st)
 			continue
 		}
-		ch, err := hm.For(ctx, spec, st.Install, nil)
-		if err == nil {
-			var l agent.Listing
-			if l, err = mod.List(ctx, ch, st.Install); err == nil {
-				entries = append(entries, listedEntries(ctx, hm, fsys, mod, ch, st, l)...)
-				if n := len(l.Errors); n > 0 {
-					err = fmt.Errorf("%d session file(s) could not be read; the first, %s: %w", n, l.Errors[0].Path, l.Errors[0].Err)
+		for _, in := range installs {
+			state := AgentState{Agent: spec.ID, Name: spec.Name, Install: in, Error: st.Error}
+			if in.Profile != nil {
+				if in.Profile.Error != "" {
+					state.Error = in.Profile.Error
 				}
 			}
-		}
-		if err != nil {
-			m.Agents[len(m.Agents)-1].Error = err.Error()
+			m.Agents = append(m.Agents, state)
+			if !in.Present {
+				continue
+			}
+			ch, e := hm.For(ctx, spec, in, nil)
+			if e == nil {
+				var l agent.Listing
+				l, e = mod.List(ctx, ch, in)
+				if e == nil {
+					for i := range l.Sessions {
+						l.Sessions[i].Key.Profile = in.ProfileID()
+					}
+					entries = append(entries, listedEntries(ctx, hm, fsys, mod, ch, state, l)...)
+					if len(l.Errors) > 0 {
+						e = fmt.Errorf("%d session files could not be read; first: %w", len(l.Errors), l.Errors[0].Err)
+					}
+				}
+			}
+			if e != nil {
+				m.Agents[len(m.Agents)-1].Error = e.Error()
+			}
 		}
 	}
+
 	if !o.SkipGit {
 		var dirs []string
 		seen := map[string]bool{}
@@ -492,7 +531,7 @@ func listedEntries(ctx context.Context, hm *host.Machine, fsys host.FS, mod agen
 		if lv.State == "" {
 			lv.State = agent.Unknown
 		}
-		out = append(out, Entry{Location: agent.MachineLocation(hm.Name), Machine: hm.Name, Agent: spec.ID, AgentName: spec.Name, Session: s, Live: lv, Lineage: manifests[i], LineageError: problems[i], CanArchiveLineage: unsupported[i]})
+		out = append(out, Entry{Location: agent.MachineLocation(hm.Name), Machine: hm.Name, Agent: spec.ID, AgentName: spec.Name, Profile: st.Install.Profile, Session: s, Live: lv, Lineage: manifests[i], LineageError: problems[i], CanArchiveLineage: unsupported[i]})
 	}
 	return out
 }

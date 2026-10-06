@@ -81,6 +81,7 @@ const (
 
 // Options are the user's choices.
 type Options struct {
+	TargetProfile string `json:"targetProfile,omitempty"`
 	OperationID   string `json:"operationId,omitempty"`
 	TargetSession string `json:"targetSession,omitempty"`
 	TargetDir     string // resume here (skips repository matching)
@@ -213,12 +214,15 @@ type Plan struct {
 
 // Endpoint describes one end for people and JSON.
 type Endpoint struct {
-	ID       string `json:"id"`
-	Location string `json:"location"`
-	OS       string `json:"os"`
-	CWD      string `json:"cwd"`
-	Path     string `json:"path,omitempty"`
-	Version  string `json:"agentVersion,omitempty"`
+	Profile     string `json:"profile,omitempty"`
+	Binding     string `json:"binding,omitempty"`
+	ProfileName string `json:"profileName,omitempty"`
+	ID          string `json:"id"`
+	Location    string `json:"location"`
+	OS          string `json:"os"`
+	CWD         string `json:"cwd"`
+	Path        string `json:"path,omitempty"`
+	Version     string `json:"agentVersion,omitempty"`
 }
 
 // Build works out a move. It reads (the bundle's file list, the target's copies) but
@@ -235,7 +239,7 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		}
 		copies = selected
 	}
-	if src.Module.Spec().ID != tgt.Module.Spec().ID || len(copies) == 1 && copies[0].Summary.Key != in.Session.Key {
+	if profileBoundary(in) || src.Module.Spec().ID != tgt.Module.Spec().ID || len(copies) == 1 && copies[0].Summary.Key != in.Session.Key {
 		return buildContinue(ctx, in, opt)
 	}
 	if opt.Worktree == "" {
@@ -275,7 +279,9 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		cwd = realIntended(cwd)
 	}
 	p.Target.CWD = cwd
-	p.Placement = agent.Placement{Key: s.Key, SourceID: s.Key.Session, CWD: cwd, Location: tgt.Machine.Name, Mappings: withShortNames(ctx, src, mappings(p, src, tgt)), OtherAccount: p.Options.OtherAccount}
+	destinationKey := s.Key
+	destinationKey.Profile = tgt.Install.ProfileID()
+	p.Placement = agent.Placement{Key: destinationKey, SourceID: s.Key.Session, CWD: cwd, Location: tgt.Machine.Name, Mappings: withShortNames(ctx, src, mappings(p, src, tgt)), OtherAccount: p.Options.OtherAccount}
 	if s.TitleSource == "custom" {
 		p.Placement.Name = s.Title
 	}
@@ -348,10 +354,20 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		Branch: p.Repo.SourceBranch, WorktreeNote: worktreeNote(p), Unpushed: p.Repo.Unpushed, Dirty: p.Repo.Dirty,
 		Redacted: opt.Redact, OtherAccount: p.Options.OtherAccount, Live: p.Live, Fork: opt.Fork && p.Live, Notify: notify,
 	})
-	p.Resume = tgt.Module.Resume(tgt.Install, p.Placement.Key, p.Placement, agent.ResumeOptions{
-		Fork: false, RemoteControl: p.Options.RemoteControl,
-		App: opt.App && agent.Has(tgt.Module, agent.CapApp), Name: p.NewName, Prompt: p.StartPrompt,
-	})
+	p.resumeOpts = agent.ResumeOptions{RemoteControl: p.Options.RemoteControl, App: opt.App && agent.Has(tgt.Module, agent.CapApp), Name: p.NewName, Prompt: p.StartPrompt}
+	if p.resumeOpts.App {
+		if tgt.Install.Profile != nil && !tgt.Install.Profile.Default {
+			p.Blockers = append(p.Blockers, "desktop opening cannot select an account profile; use a terminal")
+		}
+		if checker, ok := tgt.Module.(agent.AppChecker); ok {
+			// Desktop links open an existing thread; they cannot submit the transfer prompt.
+			p.resumeOpts.Prompt, p.StartPrompt = "", ""
+			if err := checker.CheckApp(tgt.Install, p.Placement.Key, p.resumeOpts); err != nil {
+				p.Blockers = append(p.Blockers, err.Error())
+			}
+		}
+	}
+	p.Resume = tgt.Module.Resume(tgt.Install, p.Placement.Key, p.Placement, p.resumeOpts)
 	return p, nil
 }
 

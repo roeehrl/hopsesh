@@ -19,3 +19,14 @@ Look for changes to those subcommands, flags, JSON fields, status lines and erro
 for task"); a new `resume`, `attach` or `pull` subcommand under `codex cloud`, or `cloud/*`
 app-server methods; the `/wham/tasks`, `CODEX_STARTING_DIFF` and `ThreadService` canaries
 disappearing or moving; and dates for retiring the Legacy environments.
+
+Account-profile integration: CODEX_HOME, CODEX_SQLITE_HOME and credential-store/login
+changes can redirect a cloud command as well as a local launch. Inspect the pinned driver
+profile/binding in `internal/app/accounts.go`, `internal/core/move` and
+`internal/app/pending.go`; a local profile is not a selector for cloud environments or
+proof of cloud ownership. Watch new public account/workspace identity and account/read
+semantics, retaining the current limited-identity behavior until upstream proves more.
+Bring to the default profile first, then review a separate account transfer. Check
+receipt/projection integrity and stale plans when login changes during handoff/adoption.
+Use the generated module accounts policy, integrationFiles and
+`docs/account-lineage-contract.md`; do not inspect credentials or initiate a login.

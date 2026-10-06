@@ -228,3 +228,12 @@ func TestResumeDropsSessionMarkers(t *testing.T) {
 		}
 	}
 }
+
+func TestConsoleIsolationIsNotClaimedForSubscriptionOrAPIKey(t *testing.T) {
+	for _, method := range []string{"console", "claude.ai", "api-key"} {
+		a := account(authStatus{LoggedIn: true, Method: method, Provider: "firstParty"})
+		if (a.IsolationWhy != "") != (method == "console") {
+			t.Fatalf("%s: %+v", method, a)
+		}
+	}
+}

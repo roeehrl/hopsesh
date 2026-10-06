@@ -179,3 +179,37 @@ would, with the made-up manifest in `ci/drift/testdata/` and `dry-run: true`, on
 request that touches the drift files. It then checks the outputs and the findings artifact.
 To try the paid review on a branch, run `upstream drift` by hand (`workflow_dispatch`); the
 `drift-review` environment allows `main` only.
+
+### Account, lineage and desktop coverage
+
+The generated module records include the actual `Spec.Accounts` root, login, environment
+cleanup and initial credential-store policy, plus `DesktopScheme` and shared integration
+paths. The local review follows these through profile discovery (local and remote), binding
+changes and stale-plan rejection, portable cross-account continuation, repeated/multi-party
+round trips and forks, and GUI/TUI/CLI consumers. Claude and Codex cloud reviews also check
+profile-pinned drivers and adoption. Desktop coverage includes Codex's exact thread URL,
+default-profile restriction, application/protocol detection and surfaced launch failures.
+Names/tags are labels, not identities; the optional presence daemon remains a proposal.
+
+The probe watches authentication, environment/configuration and desktop documentation and
+login help. Codex upstream account protocol/login code is included in the canaries. Schema
+diffs now recurse into versioned folders, include GetAccount/LoginAccount records and keep
+added/removed contents under `intel/schema/<target>/<relative-path>.diff`. Generation or
+comparison failures are reported as incomplete coverage, with logs, rather than an empty
+diff. Reviewers must inspect current code before repeating an old known limitation.
+
+The drift workflow test now checks Hopsesh's own manifest and all four prompts in addition
+to the external caller fixture. Relevant adapter, SDK, core, app, UI and scenario changes
+trigger it. Its `hopsesh-drift-review-inputs` artifact contains the generated manifest,
+probe report and prompts. To run those checks locally:
+
+```sh
+go test -race ./internal/devtools/driftmanifest ./internal/devtools/schemalite
+ci/drift/test-hopsesh.sh /tmp/hopsesh-drift
+```
+
+These checks are offline and do not pay for a review or sign in. The existing scenario
+matrices test account/lineage routes; weekly upstream probes are narrower and do not prove
+live authenticated round trips or that a desktop displayed the requested chat. The four
+review groups, their model budgets and the main-only protected review environment are
+unchanged. Scheduled runs acquire the new coverage when this change lands on main.

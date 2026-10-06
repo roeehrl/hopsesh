@@ -82,6 +82,7 @@ function header(e) {
   const [k, lead, rest, cl, twice] = statusLine(e);
   const g = e.group;
   const facts = [];
+  if(e.profile) facts.push(h("span",{title:e.profile.root},`${e.profile.name}${e.profile.tags?.length?" · "+e.profile.tags.join(", "):""}`));
   if (e.cloud) {
     if (e.cloud.repo || !g.noRepo) facts.push(h("span", {}, (e.cloud.repo || g.name).split("/").pop()));
     if (e.cloud.branch) facts.push(h("span", { class: "mono" }, e.cloud.branch));
@@ -304,8 +305,9 @@ function history(e) {
  e.canArchiveLineage ? h("button", {class:"btn small",onclick:async()=>{try{await api("ArchiveLineage",e.machine,e.key);toast("Lineage metadata archived. Activity can undo it.");await renamed();}catch(err){fail(err);}}},"Archive unsupported lineage") : null) : null,
  e.journey ? h("div", { class: "journey-counts" },
  h("span", { class: "chip" }, `${e.journey.transfers} transfers`),
- h("span", { class: "chip" }, `${e.journey.roundTrips} round trips to origin`),
+ h("span", { class: "chip" }, `${e.journey.roundTrips} round trips to origin${e.journey.originProfile?" profile":""}`),
  h("span", { class: "chip" }, `${e.journey.returns} returns to visited locations`),
+ h("span", {class:"chip"}, `${e.journey.machineTransfers||0} machine transfers · ${e.journey.machineRoundTrips||0} machine round trips`),
  e.journey.fork ? h("span", { class: "chip",title:`Parent branch: ${e.journey.parentBranch}` }, "Separate fork") : null,
  h("span",{class:"muted",style:"font-size:12px"},`Origin: ${e.journey.origin}; branch ${e.journey.branch.slice(0,8)}`)) : null,
  others.length ? h("div", { class: "sub-h" }, "Other copies") : null,

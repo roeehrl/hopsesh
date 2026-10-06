@@ -8,6 +8,7 @@ import (
 	"context"
 	"io/fs"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,13 +29,14 @@ type FS interface {
 
 // Facts is what one probe learned about a machine.
 type Facts struct {
-	Endpoint string                      `json:"endpoint"`
-	OS       string                      `json:"os"`
-	Arch     string                      `json:"arch"`
-	Home     string                      `json:"home"`
-	Env      map[string]string           `json:"env"`
-	Binaries map[string]agent.BinaryFact `json:"binaries"`
-	HasGit   bool                        `json:"hasGit"`
+	DesktopProtocols map[string]bool             `json:"desktopProtocols,omitempty"`
+	Endpoint         string                      `json:"endpoint"`
+	OS               string                      `json:"os"`
+	Arch             string                      `json:"arch"`
+	Home             string                      `json:"home"`
+	Env              map[string]string           `json:"env"`
+	Binaries         map[string]agent.BinaryFact `json:"binaries"`
+	HasGit           bool                        `json:"hasGit"`
 }
 
 // Machine is a place sessions live: this machine, one reached over SSH, or a snapshot
@@ -125,11 +127,16 @@ func (m *Machine) Close() {
 // declares, writes through w (the journal, or nil for read-only work), confined to the
 // install's roots and away from its secrets.
 func (m *Machine) For(ctx context.Context, s agent.Spec, in agent.Install, w Writes) (agent.Host, error) {
+	in.Accounts = s.Accounts
 	fsys, err := m.FS(ctx)
 	if err != nil {
 		return nil, err
 	}
-	h := &moduleHost{m: m, fs: fsys, facts: m.specFacts(s), w: w}
+	h := &moduleHost{m: m, fs: fsys, facts: m.specFacts(s), w: w, install: in}
+	for _, e := range in.ProfileEnv() {
+		k, v, _ := strings.Cut(e, "=")
+		h.facts.Env[k] = v
+	}
 	if in.Agent == "" { // before Detect: nothing may be written
 		return h, nil
 	}
@@ -145,7 +152,7 @@ type Writes interface {
 }
 
 func (m *Machine) specFacts(s agent.Spec) agent.Facts {
-	f := agent.Facts{Machine: m.Name, Local: m.Local, OS: m.Facts.OS, Arch: m.Facts.Arch, Home: m.Facts.Home,
+	f := agent.Facts{DesktopProtocols: map[string]bool{s.DesktopScheme: m.Facts.DesktopProtocols[s.DesktopScheme]}, Machine: m.Name, Local: m.Local, OS: m.Facts.OS, Arch: m.Facts.Arch, Home: m.Facts.Home,
 		Env: map[string]string{}, Binaries: map[string]agent.BinaryFact{}}
 	for _, k := range SpecEnv(s) {
 		f.Env[k] = m.Facts.Env[k]
@@ -180,15 +187,16 @@ func SpecEnv(s agent.Spec) []string {
 }
 
 type moduleHost struct {
-	m     *Machine
-	fs    FS
-	facts agent.Facts
-	w     Writes
+	install agent.Install
+	m       *Machine
+	fs      FS
+	facts   agent.Facts
+	w       Writes
 }
 
 func (h *moduleHost) Facts() agent.Facts { return h.facts }
 func (h *moduleHost) FS() agent.FS       { return moduleFS{h} }
-func (h *moduleHost) Exec() agent.Exec   { return h.m.Exec() }
+func (h *moduleHost) Exec() agent.Exec   { return profileExec{h.m.Exec(), h.install} }
 func (h *moduleHost) Path() agent.Path   { return h.m.Path() }
 func (h *moduleHost) Locks() agent.Locks { return h.m.Locks() }
 func (h *moduleHost) Procs() agent.Procs { return h.m.Procs() }
@@ -250,4 +258,16 @@ func (m *Machine) GitProbe(ctx context.Context, dirs, excl []string) ([]repos.Gi
 		return nil, err
 	}
 	return repos.ParseProbe(out, excl), nil
+}
+
+// profileExec pins all module subprocesses, including one-shot app servers, to this root.
+type profileExec struct {
+	base    agent.Exec
+	install agent.Install
+}
+
+func (e profileExec) Run(ctx context.Context, argv []string, o agent.RunOptions) (agent.Result, error) {
+	c := e.install.ScopeCommand(agent.Command{Argv: argv, Env: o.Env, Unset: o.Unset})
+	o.Env, o.Unset = c.Env, c.Unset
+	return e.base.Run(ctx, c.Argv, o)
 }

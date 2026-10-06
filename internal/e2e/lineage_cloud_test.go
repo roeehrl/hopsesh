@@ -32,7 +32,7 @@ func TestLineageCloudForkAndIdempotentHandoff(t *testing.T) {
 		t.Fatal(err)
 	}
 	afterLog, _ := os.ReadFile(os.Getenv("FAKE_AGENT_LOG"))
-	if first.Journal != again.Journal || first.Handoff.Session != again.Handoff.Session || string(log) != string(afterLog) {
+	if first.Journal != again.Journal || first.Handoff.Session != again.Handoff.Session || cloudMutationLog(log) != cloudMutationLog(afterLog) {
 		t.Fatal("retry sent another cloud operation")
 	}
 	after, _ := os.ReadFile(original)
@@ -74,7 +74,18 @@ func TestLineageCloudUncertainSendNeverRetriesVendor(t *testing.T) {
 		t.Fatalf("uncertain send must require reconciliation: %v", err)
 	}
 	after, _ := os.ReadFile(os.Getenv("FAKE_AGENT_LOG"))
-	if string(before) != string(after) {
+	if cloudMutationLog(before) != cloudMutationLog(after) {
 		t.Fatal("retry invoked vendor twice")
 	}
+}
+
+// A retry may recheck public auth metadata; it must not issue another cloud mutation.
+func cloudMutationLog(b []byte) string {
+	var lines []string
+	for _, l := range strings.Split(string(b), "\n") {
+		if !strings.Contains(l, " auth status ") {
+			lines = append(lines, l)
+		}
+	}
+	return strings.Join(lines, "\n")
 }

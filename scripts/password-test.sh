@@ -93,7 +93,12 @@ mkdir -p "$TARGET"
 "$BIN" pull "pwbox:$ID" --to "$TARGET" --yes --json --password-stdin < "$WORK/password" > "$WORK/pull.json" \
   || { cat "$WORK/pull.json"; fail "pull failed"; }
 TSLUG=$(cd "$TARGET" && pwd -P | sed 's/[^A-Za-z0-9]/-/g')
-[ -f "$CLAUDE_CONFIG_DIR/projects/$TSLUG/$ID.jsonl" ] || fail "transcript not installed"
+RECEIVED_ID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["plan"]["placement"]["key"]["session"])' "$WORK/pull.json")
+if [ -z "$RECEIVED_ID" ] || [ "$RECEIVED_ID" = "$ID" ]; then
+  fail "unverified account transfer did not create a fresh session"
+fi
+[ -f "$CLAUDE_CONFIG_DIR/projects/$TSLUG/$RECEIVED_ID.jsonl" ] || fail "transcript not installed"
+grep -q 'hello from a password machine' "$CLAUDE_CONFIG_DIR/projects/$TSLUG/$RECEIVED_ID.jsonl" || fail "conversation not preserved"
 grep -rq "$PW" "$HOPSESH_CONFIG_DIR" "$HOPSESH_STATE_DIR" && fail "the password was written to disk"
 
 # Switch to key login: one password login adds the key, then no password is needed.

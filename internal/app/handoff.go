@@ -127,7 +127,7 @@ func (a *App) PlanHandoff(ctx context.Context, inv *Inventory, e Entry, cloud st
 	if !ok {
 		return nil, fmt.Errorf("%s is not enabled", e.Agent)
 	}
-	sin, _ := src.Install(e.Agent)
+	sin, _ := src.InstallProfile(e.Agent, e.Session.Key.Profile)
 	h, in, err := cloudHost(ctx, here.host, mod, cl)
 	if err != nil {
 		return nil, err

@@ -1,11 +1,12 @@
-# Codex's own importer converts the session (--via import); hopsesh adds its briefing and
-# undo removes the imported thread.
+# Vendor import cannot cross unverified account boundaries. Portable history is offered.
 git-repo proj https://github.com/example/proj.git
 claude-session 22222222-2222-4333-8444-555555555555 proj 'Import me' 'imported prompt in'
 
-exec hopsesh pull 22222222-2222-4333-8444-555555555555 --in codex --via import --yes --json
-stdout '"via": "import"'
-grep 'codex app-server externalAgentConfig/import' $WORK/agents.log
+! exec hopsesh pull 22222222-2222-4333-8444-555555555555 --in codex --via import --yes --json
+stderr 'import'
+! grep 'codex app-server externalAgentConfig/import' $WORK/agents.log
+exec hopsesh pull 22222222-2222-4333-8444-555555555555 --in codex --yes --json
+stdout '"OtherAccount": true'
 exec hopsesh ls --json --no-git
 stdout '"lastPrompt": "imported prompt in'
 

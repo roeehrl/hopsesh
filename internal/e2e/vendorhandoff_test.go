@@ -115,7 +115,7 @@ func TestHandoffToCopilotAndBack(t *testing.T) {
 	inv2 := a.Scan(ctx, app.ScanOptions{})
 	defer inv2.Close()
 	e := cloudEntryFor(t, inv2, "copilot-cloud", hr.Session)
-	if e.Original != "here:claude/"+demoSession || e.Cloud.Branch != s.Result || a.BringTarget(inv2, e) != "claude" {
+	if e.Original != "here:"+p.Key.String() || e.Cloud.Branch != s.Result || a.BringTarget(inv2, e) != "claude" {
 		t.Fatalf("listed: %+v %+v", e, e.Cloud)
 	}
 	fp, _, err := a.Plan(ctx, inv2, e, "", move.Options{})
@@ -129,7 +129,7 @@ func TestHandoffToCopilotAndBack(t *testing.T) {
 		t.Fatalf("fetch plan: %+v", f)
 	}
 	fres, err := a.Apply(ctx, fp, move.Input{}, nil)
-	if err != nil || fres.Fetch.Outcome != move.FetchComplete || fres.Fetch.Branch != f.LocalBranch || !strings.HasPrefix(fres.Fetch.Key, "claude/") {
+	if err != nil || fres.Fetch.Outcome != move.FetchComplete || fres.Fetch.Branch != f.LocalBranch || !strings.HasPrefix(fres.Fetch.Key, "claude@") {
 		t.Fatalf("fetched: %+v %v", fres, err)
 	}
 	for _, file := range []string{"cloud-work/" + hr.Session + ".md", "parser.go"} {
@@ -365,7 +365,7 @@ func TestHandoffToAmpAndBack(t *testing.T) {
 		t.Fatalf("fetch plan: %+v", f)
 	}
 	fres, err := a.Apply(ctx, fp, move.Input{}, nil)
-	if err != nil || fres.Fetch.Outcome != move.FetchComplete || !strings.HasPrefix(fres.Fetch.Key, "codex/") {
+	if err != nil || fres.Fetch.Outcome != move.FetchComplete || !strings.HasPrefix(fres.Fetch.Key, "codex@") {
 		t.Fatalf("fetched: %+v %v", fres, err)
 	}
 	inv3 := a.Scan(ctx, app.ScanOptions{Hosts: []string{"here"}})

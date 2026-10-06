@@ -1,0 +1,27 @@
+# Arbitrary names, many personal accounts, portable copy and profile-scoped addressing.
+git-repo proj https://github.com/example/proj.git
+claude-session 22222222-2222-4333-8444-555555555555 proj 'Account work' 'portable message in'
+exec hopsesh accounts add claude 'First personal' --tag Personal,Research --json
+cp stdout first-account.json
+exec hopsesh accounts add claude 'Second personal' --tag Personal,personal --json
+stdout 'Second personal'
+cp stdout second-account.json
+account-id second-account.json
+exec hopsesh accounts list --json
+stdout 'First personal'
+stdout 'Second personal'
+exec hopsesh accounts edit $ACCOUNT_ID --name 'Another personal' --tag Personal,Research
+exec hopsesh accounts list --json
+stdout 'Another personal'
+! stdout 'Second personal'
+exec hopsesh pull 22222222-2222-4333-8444-555555555555 --target-profile $ACCOUNT_ID --yes --json
+stdout '"OtherAccount": true'
+stdout '"kind": "continue"'
+cp stdout transfer.json
+result-session transfer.json
+! exec hopsesh open claude@$ACCOUNT_ID/$RETURN_ID --app --json
+stderr 'desktop opening cannot select an account profile'
+exec hopsesh undo --yes
+exec hopsesh accounts forget $ACCOUNT_ID
+exec hopsesh accounts list --json
+! stdout 'Another personal'

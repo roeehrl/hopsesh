@@ -200,7 +200,7 @@ func IsExperimental(m Module, c Capability) bool {
 // DefaultInstall resolves a Spec's roots and first binary from a machine's facts.
 func DefaultInstall(s Spec, h Host) Install {
 	f := h.Facts()
-	in := Install{Agent: s.ID, Roots: map[string]string{}}
+	in := Install{Accounts: s.Accounts, Agent: s.ID, Roots: map[string]string{}}
 	for _, r := range s.Roots {
 		p := ""
 		for _, e := range r.Env {
@@ -263,4 +263,9 @@ func (s Spec) TestedWith(version string) bool {
 		}
 	}
 	return false
+}
+
+// AppChecker validates an installation-specific desktop resume before it is offered or run.
+type AppChecker interface {
+	CheckApp(Install, SessionKey, ResumeOptions) error
 }

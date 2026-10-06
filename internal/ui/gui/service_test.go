@@ -178,18 +178,29 @@ func TestWindowRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Continue.Relation != "append" || p.Continue.AppendTo == "" {
+	if p.Continue.Relation != "new" || p.Continue.AppendTo != "" {
 		t.Fatalf("back: %+v", p.Continue)
 	}
 	back, err := a.Apply()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if back.Title != p.Continue.AppendTo || !strings.Contains(back.Command, sid) {
+	if strings.Contains(back.Command, sid) {
 		t.Fatalf("done: %+v", back)
 	}
 	scan, _ = a.Scan()
-	cl := findEntry(t, scan, "claude/"+sid)
+	original, readErr := os.ReadFile(e.Path)
+	if readErr != nil || strings.Contains(string(original), "Now in uppercase") {
+		t.Fatal("portable return modified protected original", readErr)
+	}
+	var cl EntryDTO
+	for _, group := range scan.Groups {
+		for _, entry := range group.Entries {
+			if entry.Agent == "claude" && entry.Session != sid && entry.LastPrompt == "Now in uppercase" {
+				cl = entry
+			}
+		}
+	}
 	if cl.LastPrompt != "Now in uppercase" || !cl.HereNewest {
 		t.Fatalf("the original is newest again, without hopsesh's briefing as its prompt: %+v", cl)
 	}
@@ -326,7 +337,7 @@ func findEntry(t *testing.T, s *ScanDTO, key string) EntryDTO {
 	t.Helper()
 	for _, g := range s.Groups {
 		for _, e := range g.Entries {
-			if e.Key == key {
+			if e.Key == key || e.Profile != nil && e.Profile.Default && string(e.Agent)+"/"+e.Session == key {
 				return e
 			}
 		}
@@ -377,17 +388,19 @@ func TestWindowSendsToAnotherMachine(t *testing.T) {
 		}
 		return &app.PeerConn{Out: out, In: in, Close: func() { in.Close(); _ = cmd.Wait() }}, nil
 	}
-	if _, err := a.Scan(); err != nil {
+	scan, err := a.Scan()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.PushPlan("claude/"+sid, "box", "", OptsDTO{Mark: true, TargetDir: boxRepo}); err != nil {
+	key := findEntry(t, scan, "claude/"+sid).Key
+	if _, err := a.PushPlan(key, "box", "", OptsDTO{Mark: true, TargetDir: boxRepo}); err != nil {
 		t.Fatal(err)
 	}
 	a.ClosePlan() // the window closed the plan: its connection ends
 	if _, err := a.PushApply(); err == nil {
 		t.Fatal("a closed plan cannot be applied")
 	}
-	p, err := a.PushPlan("claude/"+sid, "box", "", OptsDTO{Mark: true, TargetDir: boxRepo})
+	p, err := a.PushPlan(key, "box", "", OptsDTO{Mark: true, TargetDir: boxRepo})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,12 +411,16 @@ func TestWindowSendsToAnotherMachine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	moved := filepath.Join(box, ".claude", "projects", claude.Slug(boxRepo), sid+".jsonl")
+	files, _ := filepath.Glob(filepath.Join(box, ".claude", "projects", claude.Slug(boxRepo), "*.jsonl"))
+	if len(files) != 1 {
+		t.Fatalf("portable copies: %v", files)
+	}
+	moved := files[0]
 	if _, err := os.Stat(moved); err != nil || d.Machine != "box" || d.Journal == "" || !strings.Contains(d.Command, "claude") {
 		t.Fatalf("done: %+v (%v)", d, err)
 	}
-	scan, _ := a.Scan()
-	if e := findEntry(t, scan, "claude/"+sid); !strings.HasPrefix(e.Status, "moved to box") {
+	scan, _ = a.Scan()
+	if e := findEntry(t, scan, "claude/"+sid); !strings.Contains(e.Status, "box") {
 		t.Fatalf("the copy here is marked: %+v", e.Status)
 	}
 	if err := a.Undo(d.Journal, false); err != nil {

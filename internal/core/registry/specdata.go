@@ -8,6 +8,8 @@ import (
 // agents.json: what the module declares, with the field names the JSON outputs use. The
 // mark (Icon.SVG) is left out; Icon.Apps is desktopApps.
 type SpecData struct {
+	Accounts           *agent.ProfileSpec  `json:"accounts,omitempty"`
+	DesktopScheme      string              `json:"desktopScheme,omitempty"`
 	ID                 agent.ID            `json:"id"`
 	Name               string              `json:"name"`
 	Vendor             string              `json:"vendor"`
@@ -97,7 +99,7 @@ type CodeData struct {
 
 // Data returns s as data. Lists and maps are never null, so a reader can iterate them.
 func Data(s agent.Spec) SpecData {
-	d := SpecData{
+	d := SpecData{Accounts: s.Accounts, DesktopScheme: s.DesktopScheme,
 		ID: s.ID, Name: s.Name, Vendor: s.Vendor, Stability: s.Stability, Tested: list(s.Tested),
 		LoginEnv: list(s.LoginEnv), Secrets: list(s.Secrets), Worktrees: list(s.Worktrees),
 		Instructions: list(s.Instructions), GlobalInstructions: list(s.GlobalInstructions), Tools: s.Tools,
