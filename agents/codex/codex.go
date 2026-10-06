@@ -83,15 +83,17 @@ func (m *Module) Detect(_ context.Context, h agent.Host) (agent.Install, error) 
 
 // meta is the first record of a rollout.
 type meta struct {
-	ID            string          `json:"id"`
-	Timestamp     string          `json:"timestamp"`
-	CWD           string          `json:"cwd"`
-	Originator    string          `json:"originator"`
-	CLIVersion    string          `json:"cli_version"`
-	Source        json.RawMessage `json:"source"`
-	ModelProvider string          `json:"model_provider"`
-	HistoryMode   string          `json:"history_mode"`
-	HistoryBase   *struct {
+	ForkedFromID               string          `json:"forked_from_id"`
+	ForkedFromOrdinalExclusive *uint64         `json:"forked_from_ordinal_exclusive"`
+	ID                         string          `json:"id"`
+	Timestamp                  string          `json:"timestamp"`
+	CWD                        string          `json:"cwd"`
+	Originator                 string          `json:"originator"`
+	CLIVersion                 string          `json:"cli_version"`
+	Source                     json.RawMessage `json:"source"`
+	ModelProvider              string          `json:"model_provider"`
+	HistoryMode                string          `json:"history_mode"`
+	HistoryBase                *struct {
 		ThreadID string `json:"thread_id"`
 	} `json:"history_base"`
 	Git *struct {
@@ -102,6 +104,7 @@ type meta struct {
 
 // line is one rollout record.
 type line struct {
+	Ordinal   *uint64         `json:"ordinal,omitempty"`
 	Timestamp string          `json:"timestamp"`
 	Type      string          `json:"type"`
 	Payload   json.RawMessage `json:"payload"`
@@ -270,6 +273,7 @@ func summarize(h agent.Host, r rollout) (*agent.Summary, error) {
 		return nil, nil
 	}
 	s := &agent.Summary{
+		NativeParent: agent.SessionID(first.ForkedFromID),
 		Key:          agent.SessionKey{Agent: id, Session: agent.SessionID(first.ID)},
 		CWD:          first.CWD,
 		Size:         size,

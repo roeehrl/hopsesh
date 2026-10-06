@@ -657,7 +657,7 @@ func taskSegment(sid agent.SessionID, st taskStatus, diff []byte) *ir.Segment {
 	seg := &ir.Segment{Header: ir.Header{Agent: string(id), SessionID: string(sid), Title: st.Title, Created: now}}
 	seg.Nodes = []ir.Node{
 		{Kind: ir.KindMessage, Actor: ir.User, Time: now, Text: asked},
-		{Kind: ir.KindMessage, Actor: ir.Agent, Time: now, Text: b.String(), Generated: true},
+		{Kind: ir.KindMessage, Actor: ir.Agent, Time: now, Text: b.String()},
 	}
 	ir.Chain(seg.Nodes, "")
 	seg.Cursor = ir.Cursor{Head: seg.Nodes[len(seg.Nodes)-1].ID}

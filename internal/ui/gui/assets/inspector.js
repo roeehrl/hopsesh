@@ -298,15 +298,23 @@ function copyPlace(c) {
 function history(e) {
   const others = (e.copies || []).filter((c) => !(c.machine === e.machine && c.key === e.key));
   const n = others.length + e.history.length + (e.mirror ? 1 : 0);
-  if (!n) return null;
+  if (!n && !e.journey && !e.lineageError) return null;
   return section("copies", "Copies & history", false, h("span", { class: "chip disc-n" }, String(n)),
-    others.length ? h("div", { class: "sub-h" }, "Other copies") : null,
+    e.lineageError ? h("div", { class: "item warn" }, `Lineage unavailable: ${e.lineageError}`, e.canArchiveLineage ? h("p", {}, "Archive this metadata to start a new family. The native conversation is preserved; Activity can undo this.") : h("p",{},"Ancestry cannot be verified. Create a separate fork to transfer it independently."),
+ e.canArchiveLineage ? h("button", {class:"btn small",onclick:async()=>{try{await api("ArchiveLineage",e.machine,e.key);toast("Lineage metadata archived. Activity can undo it.");await renamed();}catch(err){fail(err);}}},"Archive unsupported lineage") : null) : null,
+ e.journey ? h("div", { class: "journey-counts" },
+ h("span", { class: "chip" }, `${e.journey.transfers} transfers`),
+ h("span", { class: "chip" }, `${e.journey.roundTrips} round trips to origin`),
+ h("span", { class: "chip" }, `${e.journey.returns} returns to visited locations`),
+ e.journey.fork ? h("span", { class: "chip",title:`Parent branch: ${e.journey.parentBranch}` }, "Separate fork") : null,
+ h("span",{class:"muted",style:"font-size:12px"},`Origin: ${e.journey.origin}; branch ${e.journey.branch.slice(0,8)}`)) : null,
+ others.length ? h("div", { class: "sub-h" }, "Other copies") : null,
     others.map((c) => h("span", {}, copyPlace(c), h("span", { class: "muted" }, c.newest ? " · newest" : c.mark ? " · marked" : " · older"))),
     e.mirror ? [h("div", { class: "sub-h" }, "Mirrored"), h("span", {}, `Remote Control keeps a copy on ${e.mirror.host} while it runs. `,
       h("button", { class: "link", onclick: () => api("OpenURL", e.mirror.url).catch(fail) }, "Open it"))] : null,
     e.history.length ? [h("div", { class: "sub-h" }, e.cloud ? "Lineage" : "Where it has been"),
       e.history.map((x, i) => h("div", { class: "hop" }, h("span", { class: "dot" + (i === e.history.length - 1 ? " ok" : "") }),
-        h("div", {}, h("div", {}, x.what), h("div", { class: "muted", style: "font-size:11px" }, when(x.when)))))] : null);
+        h("div", {}, h("div", {}, x.what), x.loss?.length ? h("div", {class:"muted",style:"font-size:12px"}, `Fidelity: ${x.loss.join("; ")}`) : null, h("div", { class: "muted", style: "font-size:11px" }, when(x.when)))))] : null);
 }
 
 function details(e) {

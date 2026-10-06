@@ -148,7 +148,7 @@ func TestMoveRoundTripAndUndo(t *testing.T) {
 	}
 	for _, s := range []agent.Summary{moved, left} {
 		m, err := lineage.Read(host.LocalFS(), s.Path)
-		if err != nil || m == nil || len(m.Replicas) != 2 || len(m.Hops) != 1 || m.Replicas[0].Head == "" || m.Replicas[1].Head == "" {
+		if err != nil || m == nil || len(m.Replicas) != 2 || len(m.Hops) != 1 || m.Replica(m.Replicas[0].ID).Head == "" || m.Replica(m.Replicas[1].ID).Head == "" {
 			t.Fatalf("lineage beside %s: %+v %v", s.Path, m, err)
 		}
 	}
@@ -170,8 +170,9 @@ func TestMoveRoundTripAndUndo(t *testing.T) {
 	if list(t, box)[sid].Mark != nil {
 		t.Fatal("undo must remove the mark")
 	}
-	if _, err := os.Stat(lineage.PathFor(left.Path)); !os.IsNotExist(err) {
-		t.Fatal("undo must remove the lineage written on the source")
+	undone, e := lineage.Read(host.LocalFS(), left.Path)
+	if e != nil || undone == nil || len(undone.Compensations) != 1 || undone.Journey().Transfers != 0 {
+		t.Fatalf("undo must preserve the compensated journey: %+v %v", undone, e)
 	}
 
 	// Again, then home: the copy at box was not touched, so it is simply replaced.

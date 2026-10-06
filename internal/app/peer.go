@@ -148,7 +148,7 @@ func (s *peerSession) planReceive(ctx context.Context, req peer.PlanRequest) (*p
 	if size > maxPackage {
 		return nil, fmt.Errorf("the session's files are larger than %s", move.Human(maxPackage))
 	}
-	s.snap = host.NewSnapshot(pkg.Location, host.Facts{OS: pkg.Facts.OS, Arch: pkg.Facts.Arch, Home: pkg.Facts.Home}, pkg.Files)
+	s.snap = host.NewSnapshot(pkg.Location, host.Facts{OS: pkg.Facts.OS, Arch: pkg.Facts.Arch, Home: pkg.Facts.Home, Endpoint: pkg.Facts.Endpoint}, pkg.Files)
 	inv := s.a.Scan(ctx, ScanOptions{Hosts: []string{LocalName()}, GitFor: s.a.GitFor(Ref{Query: string(pkg.Session.Key.Session)})})
 	in := pkg.Install
 	in.Present = true
@@ -362,8 +362,11 @@ func (a *App) packageOf(ctx context.Context, here *Machine, e Entry) (peer.Packa
 	if err != nil {
 		return peer.Package{}, err
 	}
+	if err := here.host.CommitIdentity(ctx); err != nil {
+		return peer.Package{}, err
+	}
 	f := here.host.Facts
-	pkg := peer.Package{Location: here.Name, Facts: host.Facts{OS: f.OS, Arch: f.Arch, Home: f.Home}, Agent: e.Agent, Install: in,
+	pkg := peer.Package{Location: here.Name, Facts: host.Facts{OS: f.OS, Arch: f.Arch, Home: f.Home, Endpoint: f.Endpoint}, Agent: e.Agent, Install: in,
 		Session: e.Session, Live: e.Live, Git: e.Git, GitError: e.GitError, Lineage: e.Lineage, Account: a.account(ctx, here, mod, in)}
 	var size int64
 	for _, bf := range b.Files {

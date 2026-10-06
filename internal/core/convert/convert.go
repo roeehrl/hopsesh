@@ -35,16 +35,17 @@ const outputMax = 4000
 
 // Request is one rendering.
 type Request struct {
-	Nodes      []ir.Node
-	From       string // the source agent's name ("Claude Code")
-	To         string // the target agent's name ("Codex")
-	Fidelity   Fidelity
-	Native     bool            // render exact tool calls natively (the target writer supports it)
-	Window     int             // the target's context, in tokens
-	Mappings   []agent.Mapping // source paths → target paths
-	Briefing   Briefing
-	Redact     func([]byte) ([]byte, int)
-	SkipBefore int // render only nodes from this index (round-trip deltas); earlier ones are context
+	// IncludeGenerated carries a known cloud handoff briefing as context in a new session.
+	IncludeGenerated bool
+	Nodes            []ir.Node
+	From             string // the source agent's name ("Claude Code")
+	To               string // the target agent's name ("Codex")
+	Fidelity         Fidelity
+	Native           bool            // render exact tool calls natively (the target writer supports it)
+	Window           int             // the target's context, in tokens
+	Mappings         []agent.Mapping // source paths → target paths
+	Briefing         Briefing
+	Redact           func([]byte) ([]byte, int)
 }
 
 // Result is a rendering.
@@ -115,16 +116,16 @@ func Render(r Request) Result {
 	}
 	var items []ir.Item
 	if r.Fidelity != Note {
-		items = res.history(r, nodes[min(r.SkipBefore, len(nodes)):])
+		items = res.history(r, nodes)
 	}
 	brief := briefing(r, &res.Report)
 	now := time.Now().UTC()
 	if k := len(items); k > 0 && items[k-1].Role == ir.RoleUser && items[k-1].Tool == nil {
 		items[k-1].Text += "\n\n" + brief // the history ended on the user: keep roles alternating
 	} else {
-		items = append(items, ir.Item{Node: "hopsesh/briefing", Role: ir.RoleUser, Time: now, Text: brief})
+		items = append(items, ir.Item{Node: "hopsesh/briefing", Role: ir.RoleUser, Time: now, Text: brief, Generated: true})
 	}
-	items = append(items, ir.Item{Node: "hopsesh/ack", Role: ir.RoleAgent, Time: now, Text: "Understood. I'll check the working tree first, then continue from where the conversation stopped."})
+	items = append(items, ir.Item{Node: "hopsesh/ack", Role: ir.RoleAgent, Time: now, Generated: true, Text: "Understood. I'll check the working tree first, then continue from where the conversation stopped."})
 	res.Items = items
 	res.Report.Used = tokens(items)
 	res.Report.Summary = summary(res.Report, r)
@@ -133,24 +134,56 @@ func Render(r Request) Result {
 
 func (res *Result) history(r Request, nodes []ir.Node) []ir.Item {
 	results := map[string]*ir.ToolResult{}
+	resultCoverage := map[string][]ir.NodeID{}
+	fragments := map[ir.NodeID][]ir.Fragment{}
+	generated := map[ir.NodeID]bool{}
 	for _, n := range nodes {
 		if n.Kind == ir.KindToolResult && n.Result != nil {
 			results[n.Result.CallID] = n.Result
+			resultCoverage[n.Result.CallID] = n.Coverage
 		}
 	}
 	var items []ir.Item
+	coverage := map[ir.NodeID][]ir.NodeID{}
+	for _, n := range nodes {
+		generated[n.ID] = n.Generated
+		coverage[n.ID] = n.Coverage
+		fragments[n.ID] = n.Fragments
+		if len(n.Coverage) == 0 && !n.Generated {
+			coverage[n.ID] = []ir.NodeID{n.ID}
+		}
+	}
+	for _, n := range nodes {
+		if n.Tool != nil {
+			coverage[n.ID] = append(append([]ir.NodeID(nil), coverage[n.ID]...), resultCoverage[n.Tool.CallID]...)
+		}
+	}
 	add := func(role ir.Role, node ir.NodeID, ts time.Time, text string) {
 		text = res.mapText(r, text)
 		if strings.TrimSpace(text) == "" {
 			return
 		}
-		if k := len(items); k > 0 && items[k-1].Role == role && items[k-1].Tool == nil {
+		parts := fragments[node]
+		if len(parts) == 0 {
+			parts = []ir.Fragment{{Text: text, Coverage: coverage[node]}}
+		} else {
+			parts = append([]ir.Fragment(nil), parts...)
+			for i := range parts {
+				parts[i].Text = res.mapText(r, parts[i].Text)
+			}
+		}
+		if k := len(items); k > 0 && items[k-1].Role == role && items[k-1].Tool == nil && items[k-1].Generated == generated[node] {
 			items[k-1].Text += "\n\n" + text // keep roles alternating
+			items[k-1].Coverage = append(items[k-1].Coverage, coverage[node]...)
+			items[k-1].Fragments = append(items[k-1].Fragments, parts...)
 			return
 		}
-		items = append(items, ir.Item{Node: node, Role: role, Time: ts, Text: text})
+		items = append(items, ir.Item{Node: node, Generated: generated[node], Role: role, Time: ts, Text: text, Coverage: coverage[node], Fragments: parts, Fidelity: "text"})
 	}
 	for _, n := range nodes {
+		if n.Generated && !r.IncludeGenerated {
+			continue
+		}
 		switch n.Kind {
 		case ir.KindMessage:
 			res.Report.Messages++
@@ -178,7 +211,7 @@ func (res *Result) history(r Request, nodes []ir.Node) []ir.Item {
 					call.Shell = &sh
 				}
 				result.Output = res.mapText(r, shorten(result.Output, &res.Report))
-				items = append(items, ir.Item{Node: n.ID, Role: ir.RoleAgent, Time: n.Time, Tool: &ir.ToolPair{Call: call, Result: result}})
+				items = append(items, ir.Item{Node: n.ID, Role: ir.RoleAgent, Time: n.Time, Coverage: coverage[n.ID], Fidelity: "native", Tool: &ir.ToolPair{Call: call, Result: result}})
 				continue
 			}
 			add(ir.RoleAgent, n.ID, n.Time, flatten(r.From, n.Tool, out, &res.Report))
@@ -206,11 +239,18 @@ func (res *Result) budget(r Request, items []ir.Item) []ir.Item {
 	res.Report.Summarised = len(old)
 	kept := append([]ir.Item(nil), items[keep:]...)
 	d := digest(r.From, old)
+	var represented []ir.NodeID
+	for _, it := range old {
+		represented = append(represented, it.Coverage...)
+	}
 	if len(kept) > 0 { // the kept part starts on a user turn: the digest leads it
 		kept[0].Text = d + "\n" + kept[0].Text
+		kept[0].Coverage = append(represented, kept[0].Coverage...)
+		kept[0].Fidelity = "summarized"
+		kept[0].Fragments = append([]ir.Fragment{{Text: d, Coverage: represented}}, kept[0].Fragments...)
 		return kept
 	}
-	return []ir.Item{{Node: "hopsesh/digest", Role: ir.RoleUser, Time: old[0].Time, Text: d}}
+	return []ir.Item{{Node: "hopsesh/digest", Role: ir.RoleUser, Time: old[0].Time, Text: d, Coverage: represented, Fidelity: "summarized"}}
 }
 
 // digest summarises dropped items deterministically: the user's requests and what ran.

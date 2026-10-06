@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/roeehrl/hopsesh/internal/core/repos"
-	"github.com/roeehrl/hopsesh/sdk/ir"
 )
 
 // Repository actions.
@@ -226,5 +225,3 @@ func newID() string {
 	h := hex.EncodeToString(b[:])
 	return h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:]
 }
-
-func agentCursor(head ir.NodeID) ir.Cursor { return ir.Cursor{Head: head} }

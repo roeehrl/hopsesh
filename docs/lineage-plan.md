@@ -1,14 +1,14 @@
 # Session lineage and round trip implementation plan
 
-Status: researched design and reproduced defects, not an implemented lineage replacement.
-Release must wait for the correctness gates below. Navigation and machine scanning are
-independent UI fixes and do not resolve these transfer defects.
+Status: implemented on `sessions-redesign` using `lineage/3` and peer protocol 3.
+The four defects below now have regression tests. Release still requires the hosted
+scenario and OS-pair gates; local verification is recorded at the end of this document.
 
 ## Confirmed behavior and defects
 
 The ordinary same-machine Claude Code → Codex → Claude Code path and existing two-machine
 move/return tests pass. That does not establish arbitrary multi-party synchronization.
-The current implementation has four reproduced failures:
+The previous implementation had four reproduced failures, preserved as regression cases:
 
 | Reproduction | Current failure | Required invariant |
 | --- | --- | --- |
@@ -17,11 +17,9 @@ The current implementation has four reproduced failures:
 | Move the original again after Keep both | Replace can set aside the independent fork too | Only the explicitly selected branch and destination may be changed |
 | Reorder an equivalent manifest's replicas | Return target and conflict classification change | Serialization order cannot select a destination |
 
-Relevant code: `internal/core/move/continue.go` chooses the last matching target-agent
-replica and compares mutable source/target heads; `move/plan.go` considers all related
-copies when setting files aside; `internal/app/group.go` groups the entire logical
-family into one item. `internal/core/lineage/lineage.go` stores index-based hop endpoints,
-mutable replica heads and wall-clock ordering. None is sufficient as a causal history.
+The replacement chooses destinations by branch and persistent endpoint, requires explicit
+selection when several replicas match, and compares revision coverage. Inventory groups
+copies within one branch. Causal references determine history; timestamps only label it.
 
 ## Identity and history model
 
@@ -173,8 +171,8 @@ Scan progress uses an indeterminate status and accessible announcements, followi
 
 ## Tests and release gates
 
-`internal/devtools/hsmatrix/model.go` currently excludes cross-agent `roundtrip` rows.
-Remove that exclusion when supported and add a dedicated stateful route runner. Pairwise
+`internal/devtools/hsmatrix/model.go` now includes cross-agent `roundtrip` rows.
+A dedicated stateful route suite complements the transport matrix. Pairwise
 coverage is complementary; it cannot substitute for temporal multi-party scenarios.
 The existing nightly `-t3` is covering-array strength three, not a three-machine test.
 
@@ -196,3 +194,56 @@ Finally exercise actual installed agents: resume, native fork, compaction, appen
 continuation on both agents, plus real machine transport. Fixture success proves planner
 and format invariants; it does not prove a vendor accepts the resulting session interactively.
 Record the tested versions and inspect the installed GUI/TUI before release.
+
+
+## Implemented behavior and verification
+
+- `internal/core/lineage` stores immutable authored revision ancestry, branch identities,
+  endpoint-scoped replicas, projection states, causal transfer operations and undo events.
+  Strict parsing rejects unknown formats/fields, conflicts, malformed references and cycles.
+  Old sidecars require explicit, undoable archival; native conversation bytes are preserved.
+- `sdk/ir`, both native agent modules and `internal/core/convert` carry revision coverage
+  through coalescing, summaries, generated briefings and sanitized native copies. A native
+  anchor changed by compaction or rewind blocks automatic append; an explicit snapshot fork
+  records unverified history as a loss. Forks inherit prior fidelity losses.
+- Native move/continue operations persist their stable request, planned heads, writer request,
+  committed native cursor and receipt intent. Retrying recovers receipts without rewriting
+  native files. Later native work blocks recovery. Source acknowledgments remain visible
+  in Activity and recover on retry. Destination locks and frozen cursors protect selected
+  replicas; independent forks are never replaced or stopped along with their parent.
+- A visit with no new authored work synchronizes lineage receipts and may synchronize code;
+  it does not write conversation bytes or count another transfer. Original native IDs are
+  selected on return. Fork creation starts independent route counters at the fork endpoint.
+- The GUI inspector displays branch/origin, transfer and origin-return counts, causal history,
+  undone events and fidelity losses. CLI/TUI show the same branch-derived counts. Plans
+  require a selected destination when multiple replicas qualify. Deferred native titles are
+  tied to the committed operation, source replica and branch, and cannot mark a later return.
+- Mandatory `TestLineage` E2E scenarios run in each Linux/macOS/Windows scenario job, alongside
+  the existing SSH transport matrix and real OS pairs. The suite has 48 work-at-every-stop
+  route cases plus 12 workless/alternating cases across ABABA, ABCA and ABCBCAB, both starting
+  agents and all agent assignments. Separate scenarios route originals and sibling forks,
+  test multiple destinations, reordered manifests, stale plans, interrupted writes in both
+  conversion directions, failed destination receipts and uncertain cloud sends.
+- Nightly adds 12 seeded routes with 24 hops each and alternating work. These use three
+  isolated machine homes and actual module readers/writers. They are temporal correctness
+  tests, not claims of three physical machines. Hosted SSH/OS-pair jobs prove transport.
+
+Local verification on 2026-10-06: a paid round trip through installed Claude Code 2.1.289
+and Codex 0.160.1 passed, including resuming the original Claude session after append.
+The inspector/conversation/navigation/layout browser checks passed in Chromium and WebKit
+(28 tests). Native receipts, route/counter, merge, recovery and fork regressions have also
+passed locally; final hosted gate results belong in the pull request, not inferred here.
+
+### Provider boundaries
+
+Hopsesh-created forks are tracked for both agents. Discovery of an agent-created fork
+requires a vendor-declared parent plus verified native inherited records. Codex's materialized
+forks expose this information; paginated ancestry that is absent from the local file is
+reported unverified. Claude's local fork files currently offer no verified parent capability
+in this module. Those sessions remain independent rather than being linked by similar text.
+
+Cloud drivers without idempotency keys cannot safely repeat an uncertain vendor send.
+Hopsesh returns the durable pending operation and requires adoption or undo; it never sends
+again automatically. A completed cloud operation returns its cached result and recovers
+pending source receipts. Cloud briefings and code-only task results retain their reduced
+fidelity; receiving every logical revision does not restore hidden reasoning or tool state.

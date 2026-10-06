@@ -91,7 +91,14 @@ func (m *Module) Read(_ context.Context, h agent.Host, in agent.Install, s agent
 		if r.Message != nil && r.Message.Model != "" && r.Message.Model != "<synthetic>" {
 			seg.Header.Model = r.Message.Model
 		}
-		seg.Nodes = append(seg.Nodes, nodes(r)...)
+		lifted := nodes(r)
+		for j := range lifted {
+			if lifted[j].Native == nil {
+				lifted[j].Native = &ir.Native{Format: nativeFormat}
+			}
+			lifted[j].Native.Anchor = fmt.Sprintf("%s/%d", r.UUID, j)
+		}
+		seg.Nodes = append(seg.Nodes, lifted...)
 	}
 	ir.Chain(seg.Nodes, "")
 	seg.Cursor = ir.Cursor{Offset: end}

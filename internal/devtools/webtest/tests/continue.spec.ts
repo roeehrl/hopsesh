@@ -30,6 +30,11 @@ test("continue a Claude Code session in Codex, see where it has been, and undo",
   await moved.click();
   const details = page.getByRole("complementary", { name: "Session details" });
   await expect(details).toContainText("Continued in Codex on studio");
+  await details.getByRole("button", { name: /Copies & history/ }).click();
+  await expect(details).toContainText("1 transfers");
+  await expect(details).toContainText("0 round trips to origin");
+  await expect(details).toContainText("Origin: studio/claude");
+  await expect(details).toContainText("reasoning omitted");
 
   await menu(page, "activity");
   await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();

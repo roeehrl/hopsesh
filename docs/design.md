@@ -14,7 +14,7 @@ You pick a session, and hopsesh brings it to this machine:
 - **in the same agent** (a move): the session's own files are copied, their paths rewritten for this machine, and installed byte for byte otherwise;
 - **or in another agent** (a continuation, `--in codex`): the conversation is converted into the other agent's own session format, with a briefing that tells the agent where it came from and what did not carry over. This works on one machine too.
 
-Either way it finds the repository here (or clones it), recreates the worktree, brings the code to the session's commit, marks the copy left behind, and prints the command to continue. A cross-agent round trip (A → B → A) can append new work to the original; a same-agent return replaces its unchanged native copy. Repeated trips, three-copy synchronization and independent forks have known correctness gaps: see the [lineage implementation plan](lineage-plan.md). When the other machine also runs hopsesh, a session can be sent there too (`push`, §11).
+Either way it finds the repository here (or clones it), recreates the worktree, brings the code to the session's commit, marks the copy left behind, and prints the command to continue. A cross-agent round trip (A → B → A) can append new work to the original; a same-agent return replaces its unchanged native copy. Repeated trips, multiple replicas and independent forks use causal revision coverage and branch-specific receipts: see the [lineage implementation and validation notes](lineage-plan.md). When the other machine also runs hopsesh, a session can be sent there too (`push`, §11).
 
 **Doesn't:**
 - No cloud relay: files move machine to machine over your own SSH.
@@ -173,9 +173,9 @@ Listing and moving commands take `--json`; `--password-stdin` supplies a passwor
 
 ## 10. Round trips and lineage
 
-**Lineage manifests.** Beside each session hopsesh touched (`<session>.hopsesh.json`, ignored by the agents) is a manifest: a logical session id, every replica (agent, key, location, head node, byte offset, version), the hops between them (move or continue, fork, fidelity, the byte range hopsesh wrote), and loss reports. Every move updates it on both ends, so the next hop works from any machine, even one that never ran hopsesh before. Because node ids are content hashes, a lost manifest can be recomputed from the transcripts.
+**Lineage manifests.** Beside each native transcript is `<native-path>.hopsesh.json` (ignored by the agents), in `lineage/3` format. It stores family and independent branch IDs, persistent endpoint identities, native replicas, immutable authored revisions, projection receipts, causal operations, fidelity losses and undo compensations. Receipt coverage determines what each replica has received. Native bytes alone cannot reconstruct cross-agent provenance after losing a sidecar; Hopsesh must treat that ancestry as unverified. Old formats require explicit, undoable archival. See [the lineage implementation and test plan](lineage-plan.md).
 
-**Marks.** The copy left behind is retitled in its agent's own list ("↪ moved to studio · title", "↪ continued in Codex on studio · title"), with its modification time kept. A copy still open is marked once it ends: the owed mark is recorded and applied by a later scan, unless the copy grew in the meantime.
+**Marks.** The copy left behind is retitled in its agent's own list ("↪ moved to studio · title", "↪ continued in Codex on studio · title"), with its modification time kept. A copy still open is marked once it ends: the owed mark is bound to the operation, branch and source replica and applied by a later scan, unless the copy grew, returned or the operation was undone.
 
 **Same agent, coming back.** The copy here is compared with the incoming one, by lineage when there is one:
 
@@ -294,7 +294,7 @@ The redesign (approved 2026-10-02):
 6. hopsesh's writer is the default Claude → Codex route; Codex's importer is `--via import`.
 7. Native replay is a module capability; the app offers it for every target that declares it.
 8. The source agent's own copy is kept next to a continuation (the native copy): a round trip resumes the latest state, and the earlier turns come back byte for byte.
-9. Lineage lives in a manifest beside each session and travels with it; content-hash ids let it be recomputed.
+9. Lineage lives in a manifest beside each session and travels with it; immutable revision IDs and native projection receipts preserve provenance. Missing cross-agent receipts cannot be inferred from similar text.
 10. Canonical hashing: RFC 8785 + SHA-256.
 11. The local journal and audit log are a cache and a trail, not the source of truth.
 12. The briefing is an in-transcript note plus an acknowledgement; no automatic prompt (`--go`).

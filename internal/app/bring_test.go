@@ -24,7 +24,7 @@ func TestBringTarget(t *testing.T) {
 	l := lineage.New("lin-1")
 	from := l.Upsert(lineage.Replica{Key: agent.SessionKey{Agent: "codex", Session: "019a-local"}, Location: "here"})
 	to := l.Upsert(lineage.Replica{Key: thread, Location: "amp"})
-	l.Hops = append(l.Hops, lineage.Hop{From: from, To: to, Kind: lineage.HopHandoff})
+	l.AppendHop(lineage.Hop{From: from, To: to, Kind: lineage.HopHandoff})
 	e := Entry{Location: agent.CloudLocation("amp"), Machine: "amp", Agent: "amp", Session: agent.Summary{Key: thread}, Lineage: l}
 	for _, c := range []struct {
 		inv  *Inventory

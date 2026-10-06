@@ -4,9 +4,10 @@ import "time"
 
 // Summary describes one session, the same way for every agent.
 type Summary struct {
-	Key         SessionKey `json:"key"`
-	Title       string     `json:"title"`
-	TitleSource string     `json:"titleSource,omitempty"` // custom | generated | prompt | reply
+	NativeParent SessionID  `json:"nativeParent,omitempty"` // module-declared parent; core verifies before linking lineage
+	Key          SessionKey `json:"key"`
+	Title        string     `json:"title"`
+	TitleSource  string     `json:"titleSource,omitempty"` // custom | generated | prompt | reply
 	// CWD is the session's project folder, as the agent resumes it.
 	CWD          string    `json:"cwd"`
 	LastPrompt   string    `json:"lastPrompt,omitempty"`

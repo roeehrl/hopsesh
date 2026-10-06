@@ -29,9 +29,11 @@ var ErrBlocked = errors.New("the move cannot go ahead")
 
 // Env is where apply keeps its state and logs.
 type Env struct {
-	StateDir string
-	Audit    *audit.Log
-	Progress func(step string)
+	// Failpoint injects interrupted-transfer failures in scenario tests.
+	Failpoint func(string) error
+	StateDir  string
+	Audit     *audit.Log
+	Progress  func(step string)
 	// Step runs a driver's terminal step (a hand-off's Sent.Run) where the user sees and
 	// answers it, and returns the session it started, as the module read it from what the
 	// step printed (or as the user pasted its link). nil: this front end has no terminal for
@@ -113,7 +115,7 @@ func machinesOf(ctx context.Context, in Input) func(string) (host.FS, error) {
 }
 
 // Apply carries out a plan.
-func Apply(ctx context.Context, p *Plan, in Input, env Env) (*Result, error) {
+func applyPlan(ctx context.Context, p *Plan, in Input, env Env) (*Result, error) {
 	if len(p.Blockers) > 0 {
 		return nil, fmt.Errorf("%w: %s", ErrBlocked, strings.Join(p.Blockers, "; "))
 	}
@@ -122,6 +124,18 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (*Result, error) {
 		return applyFetch(ctx, p, env)
 	case KindHandoff:
 		return applyHandoff(ctx, p, env)
+	}
+	if p.manifest != nil {
+		for _, side := range []Side{in.Source, in.Target} {
+			if err := side.Machine.CommitIdentity(ctx); err != nil {
+				return nil, err
+			}
+		}
+		if seg, err := readSegment(ctx, in.Source, in.Session); err != nil {
+			return nil, err
+		} else if seg.Cursor.Head != p.sourceState.Head || seg.Cursor.Offset != p.sourceState.Offset {
+			return nil, fmt.Errorf("source changed since planning; refresh the plan")
+		}
 	}
 	step := func(s string) {
 		if env.Progress != nil {
@@ -132,11 +146,21 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (*Result, error) {
 	if !tgt.Machine.Local {
 		return nil, errors.New("a move installs on this machine")
 	}
+	if p.NoWork {
+		return applyNoWork(ctx, p, in, env)
+	}
 	if p.Kind == KindContinue {
 		return applyContinue(ctx, p, in, env)
 	}
 	j, err := journal.New(env.StateDir, journal.KindMove, fmt.Sprintf("%s from %s", p.Title, p.Source.Location))
 	if err != nil {
+		return nil, err
+	}
+	if err := operationJournal(env, p, j); err != nil {
+		return nil, err
+	}
+	j.TransferID = p.OperationID
+	if err := j.Save(); err != nil {
 		return nil, err
 	}
 	j.AddKey(p.Placement.Key)
@@ -150,7 +174,14 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (*Result, error) {
 	if p.StopHere {
 		step("quitting the copy of this session open here")
 		for _, c := range in.Copies {
-			if c.Live.State == agent.Live {
+			selected := false
+			for _, dst := range p.SetAside {
+				if dst.Key == c.Summary.Key && dst.Path == c.Summary.Path {
+					selected = true
+					break
+				}
+			}
+			if selected && c.Live.State == agent.Live {
 				if err := tgt.Module.(agent.Stopper).Stop(ctx, tgtHost, tgt.Install, c.Summary, 15*time.Second); err != nil {
 					return nil, err
 				}
@@ -182,8 +213,18 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (*Result, error) {
 	env.Audit.Write(audit.Entry{Action: "move.install", Host: p.Source.Location, Session: p.Placement.Key.String(),
 		Detail: map[string]any{"target": mainDst, "files": res.Files, "bytes": res.Bytes, "journal": j.ID, "secrets": res.Secrets.Total}})
 
+	if err := operationNative(env, p, mainDst, tgtHead, res); err != nil {
+		return res, err
+	}
+	if env.Failpoint != nil {
+		if err := env.Failpoint("native-written"); err != nil {
+			return res, err
+		}
+	}
 	// 5. Lineage beside both copies.
-	recordLineage(ctx, p, in, j, mainDst, srcHead, tgtHead, res)
+	if err := recordLineage(ctx, p, in, j, mainDst, srcHead, tgtHead, res); err != nil {
+		return res, err
+	}
 	if pi, ok := tgt.Module.(agent.PostInstaller); ok {
 		if err := pi.AfterInstall(ctx, tgtHost, tgt.Install, p.Placement.Key, p.Placement); err != nil {
 			res.Warnings = append(res.Warnings, "after installing: "+err.Error())
@@ -371,6 +412,25 @@ func install(ctx context.Context, p *Plan, in Input, env Env, j *journal.Journal
 	}
 	srcHead, tgtHead := heads(ctx, p, in, stagedHost, raw, staged)
 
+	// Freeze and recheck every destination before replacing any native file.
+	for path, expect := range p.ExpectedDestination {
+		var summary agent.Summary
+		for _, c := range in.Copies {
+			if c.Summary.Path == path {
+				summary = c.Summary
+				break
+			}
+		}
+		seg, e := readSegment(ctx, in.Target, summary)
+		if e != nil || seg.Cursor != expect {
+			return "", none, none, fmt.Errorf("destination changed since planning; refresh the plan")
+		}
+	}
+	for _, path := range p.ExpectedAbsent {
+		if _, e := os.Stat(path); !errors.Is(e, os.ErrNotExist) {
+			return "", none, none, fmt.Errorf("destination appeared since planning; refresh the plan")
+		}
+	}
 	// 4. Install, keeping what it replaces.
 	step("installing")
 	for _, c := range p.SetAside {
@@ -404,32 +464,69 @@ func install(ctx context.Context, p *Plan, in Input, env Env, j *journal.Journal
 
 // recordLineage writes the session's lineage beside the new copy and beside the copy
 // left behind.
-func recordLineage(ctx context.Context, p *Plan, in Input, j *journal.Journal, mainDst string, src, tgt ir.Cursor, res *Result) {
-	m := in.Lineage
+func recordLineage(ctx context.Context, p *Plan, in Input, j *journal.Journal, mainDst string, src, tgt ir.Cursor, res *Result) error {
+	m := p.manifest.Clone()
 	if m == nil {
-		m = lineage.New(newID())
+		return fmt.Errorf("native transfer requires a verified reader and lineage")
 	}
-	for _, c := range in.Copies {
-		m.Merge(c.Lineage)
+	source, err := readSegment(ctx, in.Source, in.Session)
+	if err != nil {
+		return err
 	}
-	now := time.Now().UTC()
-	from := m.Upsert(lineage.Replica{Key: p.Key, Location: p.Source.Location, AgentVersion: p.Source.Version, Head: src.Head, Offset: src.Offset, Time: now})
-	to := m.Upsert(lineage.Replica{Key: p.Placement.Key, Location: p.Target.Location, AgentVersion: p.Target.Version, Head: tgt.Head, Offset: tgt.Offset, Time: now})
-	m.Hops = append(m.Hops, lineage.Hop{Time: now, From: from, To: to, Kind: lineage.HopMove, Fork: p.Options.Fork && p.Live})
-	body := m.Encode()
-	if err := j.WriteFile(host.LocalFS(), p.Target.Location, lineage.PathFor(mainDst), body, 0o600); err != nil {
-		res.Warnings = append(res.Warnings, "could not record the session's lineage here: "+err.Error())
+	// The plan was made for a specific native head. Never attach a stale receipt.
+	if source.Cursor.Head != p.sourceState.Head || source.Cursor.Offset != p.sourceState.Offset {
+		return fmt.Errorf("source changed since this move was planned")
 	}
-	if p.Source.Location == p.Target.Location {
-		return
+	if _, err = m.Observe(p.sourceReplica, &source); err != nil {
+		return err
+	}
+	target, err := readSegment(ctx, in.Target, agent.Summary{Key: p.Placement.Key, Path: mainDst, CWD: p.Target.CWD})
+	if err != nil {
+		return err
+	}
+	if target.Cursor != tgt {
+		return fmt.Errorf("destination changed after native installation; cannot attach a stale receipt")
+	}
+	var projection []ir.Projection
+	if p.Options.OtherAccount {
+		if mapper, ok := in.Target.Module.(agent.SanitizedProjection); ok {
+			projection, err = mapper.ProjectSanitized(source, target)
+		} else {
+			projection, err = nativeProjection(source, target)
+		}
+	} else {
+		projection, err = nativeProjection(source, target)
+	}
+	if err != nil {
+		return err
+	}
+	now := j.Time.UTC()
+	to := m.Upsert(lineage.Replica{Endpoint: in.Target.Machine.Facts.Endpoint, Key: p.Placement.Key, Line: p.targetLine, Location: p.Target.Location, AgentVersion: p.Target.Version, Time: now})
+	loss := append([]string(nil), p.sourceState.Loss...)
+	if p.Options.OtherAccount {
+		loss = append(loss, "native reasoning omitted for another account")
+	}
+	st := m.ReplaceProjection(to, tgt, projection, p.sourceState.Heads, loss)
+	if err := m.AppendHop(lineage.Hop{ID: p.OperationID, Time: now, From: p.sourceReplica, To: to, Source: p.sourceState.ID, Target: st.ID, Kind: lineage.HopMove, Fork: p.sourceLine != p.targetLine}); err != nil {
+		return err
+	}
+	if err = m.Validate(); err != nil {
+		return err
+	}
+	if err = j.WriteReceipt(host.LocalFS(), p.Target.Location, lineage.PathFor(mainDst), m.ForBranch(p.targetLine).Encode(), true); err != nil {
+		return fmt.Errorf("recording destination receipt: %w", err)
+	}
+	if p.Source.Location == p.Target.Location && in.Session.Path == mainDst {
+		return nil
 	}
 	srcFS, err := in.Source.Machine.FS(ctx)
 	if err == nil {
-		err = j.WriteFile(srcFS, p.Source.Location, lineage.PathFor(in.Session.Path), body, 0o600)
+		err = j.WriteReceipt(srcFS, p.Source.Location, lineage.PathFor(in.Session.Path), m.ForBranch(p.sourceLine).Encode(), false)
 	}
 	if err != nil {
-		res.Warnings = append(res.Warnings, "could not record the session's lineage on "+p.Source.Location+": "+err.Error())
+		res.Warnings = append(res.Warnings, "destination committed; source receipt acknowledgement pending: "+err.Error())
 	}
+	return nil
 }
 
 // markWith marks the copy left behind now, or records an owed mark when it is still open.
@@ -452,7 +549,7 @@ func markWith(ctx context.Context, p *Plan, in Input, j *journal.Journal, env En
 		}
 	case MarkWhenStopped:
 		res.Mark = "pending"
-		owed := lineage.Pending{Time: time.Now().UTC(), Location: p.Source.Location, Key: p.Key,
+		owed := lineage.Pending{Operation: p.OperationID, Branch: p.sourceLine, Replica: p.sourceReplica, Time: time.Now().UTC(), Location: p.Source.Location, Key: p.Key,
 			Path: in.Session.Path, Title: p.Title, Mark: mark, Head: string(src.Head)}
 		if in.Source.Machine.IsSnapshot() {
 			res.Owed = &owed

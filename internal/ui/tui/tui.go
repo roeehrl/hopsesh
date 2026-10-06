@@ -741,6 +741,17 @@ func (m *model) viewBrowse(b *strings.Builder) {
 			}
 		}
 		fmt.Fprintf(b, "  %s\n", dim.Render(truncate("last prompt: “"+s.LastPrompt+"”", w-4)))
+		if e.Lineage != nil {
+			j := e.Lineage.Journey()
+			fork := ""
+			if j.Fork {
+				fork = " · separate fork"
+			}
+			fmt.Fprintf(b, "  %d transfers · %d round trips to origin · %d returns%s\n", j.Transfers, j.RoundTrips, j.Returns, fork)
+		}
+		if e.LineageError != "" {
+			fmt.Fprintf(b, "  lineage unavailable: %s\n", e.LineageError)
+		}
 		if len(it.Copies) > 1 {
 			var parts []string
 			for _, c := range it.Copies {

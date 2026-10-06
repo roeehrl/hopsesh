@@ -93,7 +93,10 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	}
 	cp := &ContinuePlan{From: src.Module.Spec().Name, Fidelity: opt.Fidelity, Relation: RelationNew, head: seg.Cursor}
 	p.Continue = cp
-	skip := relateContinue(ctx, p, in, seg, opt)
+	if err := prepareLineage(ctx, p, in, &seg); err != nil {
+		p.Blockers = append(p.Blockers, "cannot verify session lineage: "+err.Error())
+	}
+	relateContinue(ctx, p, in, &seg, opt)
 
 	title := fmt.Sprintf("%s (from %s)", nonEmpty(s.Title, "session"), cp.From)
 	if cp.AppendTo != nil {
@@ -110,7 +113,7 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		fidelity = convert.Note // the importer brings the history; hopsesh adds only its briefing
 	}
 	r := convert.Render(convert.Request{
-		Nodes: seg.Nodes, SkipBefore: skip, From: cp.From, To: spec.Name, Fidelity: fidelity,
+		Nodes: seg.Nodes, From: cp.From, To: spec.Name, Fidelity: fidelity,
 		Native: opt.Native && prof.NativeReplay, Window: prof.Window, Mappings: p.Placement.Mappings, Redact: redact,
 		Briefing: briefingFor(p, srcHost, src, s, spec, tgt.Machine.Name, cwd, opt),
 	})
@@ -173,7 +176,7 @@ func planNative(ctx context.Context, p *Plan, in Input, opt Options) {
 		return
 	}
 	name := in.Source.Module.Spec().Name
-	nin := Input{Source: in.Source, Session: in.Session, Live: in.Live, Git: in.Git, Lineage: in.Lineage,
+	nin := Input{Source: in.Source, Session: in.Session, Live: in.Live, Git: in.Git, Lineage: p.manifest.ForBranch(p.sourceLine),
 		Target: ns.Target, Copies: ns.Copies, Worktrees: in.Worktrees}
 	np, err := Build(ctx, nin, Options{TargetDir: p.Target.CWD, Worktree: WorktreeMain, Redact: opt.Redact})
 	switch {
@@ -191,84 +194,81 @@ func planNative(ctx context.Context, p *Plan, in Input, opt Options) {
 // relateContinue finds the session's earlier copy in the target agent here (from lineage)
 // and decides between a new session and adding the new work to that copy. It returns
 // how many source nodes the target already has.
-func relateContinue(ctx context.Context, p *Plan, in Input, seg ir.Segment, opt Options) int {
+func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt Options) {
 	cp := p.Continue
-	tgtID := in.Target.Module.Spec().ID
-	m := in.Lineage
-	if m == nil {
-		return 0
+	if p.manifest == nil || opt.Fork {
+		return
 	}
-	sr, _, okS := m.Find(in.Session.Key, in.Source.Machine.Name)
-	var tr lineage.Replica
-	okT := false
-	for _, r := range m.Replicas {
-		if r.Key.Agent == tgtID && r.Location == in.Target.Machine.Name {
-			tr, okT = r, true
+	var candidates []Copy
+	for _, c := range currentBranchCopies(in) {
+		if c.Summary.Key.Agent == in.Target.Module.Spec().ID {
+			candidates = append(candidates, c)
 		}
 	}
-	if !okS || !okT {
-		return 0
-	}
-	var copyHere *Copy
-	for i := range in.Copies {
-		if in.Copies[i].Summary.Key == tr.Key {
-			copyHere = &in.Copies[i]
+	if opt.TargetSession != "" {
+		selected := candidates[:0]
+		for _, c := range candidates {
+			if c.Summary.Key.String() == opt.TargetSession || string(c.Summary.Key.Session) == opt.TargetSession {
+				selected = append(selected, c)
+			}
+		}
+		candidates = selected
+		if len(candidates) == 0 {
+			p.Blockers = append(p.Blockers, "selected destination does not belong to this branch")
+			return
 		}
 	}
-	reader, isReader := in.Target.Module.(agent.Reader)
-	if copyHere == nil || !isReader {
-		return 0
+	if len(candidates) == 0 {
+		return
 	}
-	h, err := in.Target.Machine.For(ctx, in.Target.Module.Spec(), in.Target.Install, nil)
+	if len(candidates) > 1 {
+		for _, c := range candidates {
+			p.Destinations = append(p.Destinations, c.Summary)
+		}
+		p.Blockers = append(p.Blockers, "multiple destination replicas match this branch; select a destination session explicitly")
+		return
+	}
+	c := candidates[0]
+	st, _, err := targetState(ctx, p, in, c)
 	if err != nil {
-		return 0
-	}
-	cur, err := reader.Read(ctx, h, in.Target.Install, copyHere.Summary, ir.Cursor{})
-	if err != nil {
-		return 0
-	}
-	targetChanged := cur.Cursor.Head != tr.Head
-	skip := -1
-	for i, n := range seg.Nodes {
-		if n.ID == sr.Head {
-			skip = i + 1
+		p.Conflict = "cannot safely append: " + err.Error()
+		cp.Relation = RelationDiverged
+	} else {
+		source, target := p.manifest.Covered(p.sourceState.Heads), p.manifest.Covered(st.Heads)
+		switch {
+		case lineage.Subset(source, target) && lineage.Subset(target, source):
+			cp.Relation = RelationSame
+			p.NoWork = true
+			p.SyncTo = &c.Summary
+			p.Placement.Key = c.Summary.Key
+			return
+		case lineage.Subset(source, target):
+			cp.Relation = RelationBehind
+			p.Blockers = append(p.Blockers, "only the destination copy has new work; continue it there")
+			return
+		case lineage.Subset(target, source):
+			cp.Relation = RelationAppend
+			s := c.Summary
+			cp.AppendTo = &s
+			cp.expect = ir.Cursor{Head: st.Head, Offset: st.Offset}
+			p.Placement.Key = s.Key
+			if c.Live.State == agent.Live {
+				p.Blockers = append(p.Blockers, "the destination copy is open; quit it first")
+			}
+			seg.Nodes = missingNodes(seg.Nodes, target)
+			return
+		default:
+			cp.Relation = RelationDiverged
+			p.Conflict = "both sessions contain independent work; preserve them as separate branches"
 		}
 	}
-	sourceChanged := seg.Cursor.Head != sr.Head
-	name := in.Target.Module.Spec().Name
-	switch {
-	case skip < 0:
-		cp.Relation = RelationDiverged
-		p.Conflict = "the session was rewound or edited since it last went to " + name
-	case !sourceChanged && !targetChanged:
-		cp.Relation = RelationSame
-		p.Blockers = append(p.Blockers, fmt.Sprintf("%s here already has everything from this session (%s)", name, copyHere.Summary.Key))
-		return 0
-	case !sourceChanged:
-		cp.Relation = RelationBehind
-		p.Blockers = append(p.Blockers, fmt.Sprintf("only the copy in %s here has new work; continue it there (%s)", name, copyHere.Summary.Key))
-		return 0
-	case targetChanged:
-		cp.Relation = RelationDiverged
-		p.Conflict = fmt.Sprintf("both this session and its copy in %s here changed since they were last in step", name)
-	default:
-		cp.Relation = RelationAppend
-		s := copyHere.Summary
-		cp.AppendTo, cp.expect = &s, cur.Cursor
-		p.Placement.Key = s.Key
-		if copyHere.Live.State == agent.Live {
-			p.Blockers = append(p.Blockers, fmt.Sprintf("the copy in %s here is open; quit it first", name))
-		}
-		return skip
-	}
-	switch opt.Conflict {
-	case ConflictKeepBoth:
+	if opt.Conflict == ConflictKeepBoth {
+		forkLine(p)
 		cp.Relation = RelationNew
-		p.Warnings = append(p.Warnings, p.Conflict+"; this continues as a separate session")
-	default:
-		p.Blockers = append(p.Blockers, p.Conflict+"; choose --keep-both to continue as a separate session")
+		p.Warnings = append(p.Warnings, p.Conflict+"; a separate fork will be created")
+	} else {
+		p.Blockers = append(p.Blockers, p.Conflict+"; choose --keep-both")
 	}
-	return 0
 }
 
 // continueMappings map the repository and the home folder (each agent's data folder is
@@ -354,7 +354,7 @@ func planContinueWarnings(p *Plan, in Input, opt Options) {
 // importThen has the target agent's importer convert the session (from this machine:
 // the source itself, or the native copy just kept here), adopts the file it created for
 // undo, and appends hopsesh's briefing to it.
-func importThen(ctx context.Context, p *Plan, in Input, h agent.Host, j *journal.Journal, nativeDst string, step func(string)) (ir.WriteResult, error) {
+func importThen(ctx context.Context, p *Plan, in Input, h agent.Host, j *journal.Journal, env Env, nativeDst string, step func(string)) (ir.WriteResult, error) {
 	tgt, cp := in.Target, p.Continue
 	path := in.Session.Path
 	if !in.Source.Machine.Local || in.Source.Machine.Name != tgt.Machine.Name {
@@ -392,9 +392,20 @@ func importThen(ctx context.Context, p *Plan, in Input, h agent.Host, j *journal
 	if err != nil {
 		return ir.WriteResult{}, err
 	}
+	// The vendor attests that this new native session was imported from this input.
+	// Treat its history as a whole snapshot, retaining an explicit fidelity loss.
+	var projection []ir.Projection
+	for _, n := range seg.Nodes {
+		projection = append(projection, ir.Projection{Anchor: n.Native.Anchor, Hash: ir.ContentHash(n), Coverage: p.sourceState.Heads, Fidelity: "vendor snapshot"})
+	}
+	idReplica := p.manifest.Upsert(lineage.Replica{Endpoint: in.Target.Machine.Facts.Endpoint, Key: s.Key, Line: p.targetLine, Location: p.Target.Location, AgentVersion: in.Target.Install.Version, Time: seg.Header.Created})
+	p.manifest.ReplaceProjection(idReplica, seg.Cursor, projection, p.sourceState.Heads, []string{"vendor import; per-turn fidelity not verified"})
+	req := ir.WriteRequest{OperationID: p.OperationID, Mode: ir.WriteAppend, SessionID: string(id), Expect: seg.Cursor, Header: cp.header, Items: cp.items}
+	if err = operationRequest(env, p, req, nativeDst, ir.Cursor{}); err != nil {
+		return ir.WriteResult{}, err
+	}
 	step("adding hopsesh's briefing")
-	w, err := tgt.Module.(agent.Writer).Write(ctx, h, tgt.Install, ir.WriteRequest{Mode: ir.WriteAppend, SessionID: string(id),
-		Expect: seg.Cursor, Header: cp.header, Items: cp.items})
+	w, err := tgt.Module.(agent.Writer).Write(ctx, h, tgt.Install, req)
 	if err != nil {
 		return w, fmt.Errorf("adding the briefing to the imported session: %w", err)
 	}
@@ -433,6 +444,13 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 	if err != nil {
 		return nil, err
 	}
+	if err := operationJournal(env, p, j); err != nil {
+		return nil, err
+	}
+	j.TransferID = p.OperationID
+	if err := j.Save(); err != nil {
+		return nil, err
+	}
 	j.AddKey(p.Placement.Key)
 	res := &Result{Journal: j.ID}
 	if err := applyRepo(ctx, p, in, env, res, step); err != nil {
@@ -448,7 +466,10 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 	if np := p.native; np != nil {
 		name := src.Module.Spec().Name
 		step("keeping the " + name + " session here too")
-		if dst, _, nh, err := install(ctx, np, p.nativeIn, env, j, &Result{}, func(string) {}); err != nil {
+		if np.NoWork {
+			nativeDst = np.SyncTo.Path
+			nativeHead = np.ExpectedDestination[nativeDst]
+		} else if dst, _, nh, err := install(ctx, np, p.nativeIn, env, j, &Result{}, func(string) {}); err != nil {
 			res.Warnings = append(res.Warnings, fmt.Sprintf("the %s session was not also kept here: %v", name, err))
 		} else {
 			nativeDst, nativeHead = dst, nh
@@ -457,11 +478,14 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 
 	var w ir.WriteResult
 	if cp.Via == ViaImport {
-		w, err = importThen(ctx, p, in, h, j, nativeDst, step)
+		w, err = importThen(ctx, p, in, h, j, env, nativeDst, step)
 	} else {
-		req := ir.WriteRequest{Mode: ir.WriteNew, SessionID: string(p.Placement.Key.Session), Header: cp.header, Items: cp.items}
+		req := ir.WriteRequest{OperationID: p.OperationID, Mode: ir.WriteNew, SessionID: string(p.Placement.Key.Session), Header: cp.header, Items: cp.items}
 		if cp.Relation == RelationAppend {
 			req.Mode, req.Expect = ir.WriteAppend, cp.expect
+		}
+		if err := operationRequest(env, p, req, nativeDst, nativeHead); err != nil {
+			return res, err
 		}
 		step(fmt.Sprintf("writing the session for %s", tgt.Module.Spec().Name))
 		w, err = tgt.Module.(agent.Writer).Write(ctx, h, tgt.Install, req)
@@ -470,36 +494,19 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 		return res, err
 	}
 	res.Files, res.Bytes = 1, w.To-w.From
+	if err := operationNative(env, p, w.Path, w.Cursor, res); err != nil {
+		return res, err
+	}
+	if env.Failpoint != nil {
+		if err := env.Failpoint("native-written"); err != nil {
+			return res, err
+		}
+	}
 	env.Audit.Write(audit.Entry{Action: "continue.write", Host: p.Source.Location, Session: p.Placement.Key.String(),
 		Detail: map[string]any{"from": p.Key.String(), "path": w.Path, "bytes": res.Bytes, "relation": cp.Relation, "via": cp.Via, "journal": j.ID}})
 
-	// Lineage beside every copy.
-	m := in.Lineage
-	if m == nil {
-		m = lineage.New(newID())
-	}
-	now := time.Now().UTC()
-	from := m.Upsert(lineage.Replica{Key: p.Key, Location: p.Source.Location, AgentVersion: p.Source.Version, Head: cp.head.Head, Offset: cp.head.Offset, Time: now})
-	to := m.Upsert(lineage.Replica{Key: p.Placement.Key, Location: p.Target.Location, AgentVersion: p.Target.Version, Head: w.Cursor.Head, Offset: w.Cursor.Offset, Time: now})
-	m.Hops = append(m.Hops, lineage.Hop{Time: now, From: from, To: to, Kind: lineage.HopContinue, Fork: p.Options.Fork, Fidelity: string(cp.Fidelity), Written: &lineage.Range{From: w.From, To: w.To}})
-	if nativeDst != "" {
-		n := m.Upsert(lineage.Replica{Key: p.native.Placement.Key, Location: p.Target.Location, AgentVersion: p.native.Target.Version, Head: nativeHead.Head, Offset: nativeHead.Offset, Time: now})
-		m.Hops = append(m.Hops, lineage.Hop{Time: now, From: from, To: n, Kind: lineage.HopMove})
-	}
-	body := m.Encode()
-	if err := j.WriteFile(host.LocalFS(), p.Target.Location, lineage.PathFor(w.Path), body, 0o600); err != nil {
-		res.Warnings = append(res.Warnings, "could not record the session's lineage here: "+err.Error())
-	}
-	if nativeDst != "" {
-		if err := j.WriteFile(host.LocalFS(), p.Target.Location, lineage.PathFor(nativeDst), body, 0o600); err != nil {
-			res.Warnings = append(res.Warnings, "could not record the lineage of the native copy here: "+err.Error())
-		}
-		markNative(ctx, p, j, nativeDst, res)
-	}
-	if srcFS, err := src.Machine.FS(ctx); err == nil {
-		if err := j.WriteFile(srcFS, p.Source.Location, lineage.PathFor(in.Session.Path), body, 0o600); err != nil {
-			res.Warnings = append(res.Warnings, "could not record the session's lineage on "+p.Source.Location+": "+err.Error())
-		}
+	if err := recordContinuation(ctx, p, in, j, w, nativeDst, nativeHead, res); err != nil {
+		return res, err
 	}
 	if pi, ok := tgt.Module.(agent.PostInstaller); ok {
 		pl := p.Placement
@@ -516,4 +523,42 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 	}
 	step("done")
 	return res, nil
+}
+
+func recordContinuation(ctx context.Context, p *Plan, in Input, j *journal.Journal, w ir.WriteResult, nativeDst string, nativeHead ir.Cursor, res *Result) error {
+	// Lineage beside every copy.
+	m := p.manifest.Clone()
+	now := j.Time.UTC()
+	from := p.sourceReplica
+	to := m.Upsert(lineage.Replica{Endpoint: in.Target.Machine.Facts.Endpoint, Key: p.Placement.Key, Line: p.targetLine, Location: p.Target.Location, AgentVersion: p.Target.Version, Time: now})
+	st := m.Deliver(to, w.Cursor, w.Projection, p.sourceState.Heads, append(append([]string(nil), p.sourceState.Loss...), conversionLoss(p.Continue.Report)...))
+	if err := m.AppendHop(lineage.Hop{ID: p.OperationID, Time: now, From: from, To: to, Source: p.sourceState.ID, Target: st.ID, Kind: lineage.HopContinue, Fork: p.targetLine != p.sourceLine, Fidelity: string(p.Continue.Fidelity), Written: &lineage.Range{From: w.From, To: w.To}}); err != nil {
+		return err
+	}
+	if nativeDst != "" {
+		if err := recordNativeBackup(ctx, p, in, m, nativeDst, nativeHead, j.Time.UTC()); err != nil {
+			return err
+		}
+	}
+	if err := m.Validate(); err != nil {
+		return err
+	}
+	if err := j.WriteReceipt(host.LocalFS(), p.Target.Location, lineage.PathFor(w.Path), m.ForBranch(p.targetLine).Encode(), true); err != nil {
+		return fmt.Errorf("recording destination receipt: %w", err)
+	}
+	if nativeDst != "" {
+		if err := j.WriteReceipt(host.LocalFS(), p.Target.Location, lineage.PathFor(nativeDst), m.ForBranch(p.sourceLine).Encode(), true); err != nil {
+			return err
+		}
+		if !p.Options.Fork {
+			markNative(ctx, p, j, nativeDst, res)
+		}
+	}
+	if srcFS, e := in.Source.Machine.FS(ctx); e == nil {
+		if e = j.WriteReceipt(srcFS, p.Source.Location, lineage.PathFor(in.Session.Path), m.ForBranch(p.sourceLine).Encode(), false); e != nil {
+			res.Warnings = append(res.Warnings, "destination committed; source receipt acknowledgement pending: "+e.Error())
+		}
+	}
+
+	return nil
 }

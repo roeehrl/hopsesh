@@ -5,36 +5,43 @@ import (
 	"time"
 
 	"github.com/roeehrl/hopsesh/sdk/agent"
+	"github.com/roeehrl/hopsesh/sdk/ir"
 )
 
-func TestMergeKeepsNewerAndRemapsHops(t *testing.T) {
-	t0 := time.Date(2026, 10, 2, 10, 0, 0, 0, time.UTC)
-	claude := agent.SessionKey{Agent: "claude", Session: "a"}
-	codex := agent.SessionKey{Agent: "codex", Session: "b"}
+func TestMergeCausalReceipts(t *testing.T) {
 	m := New("L")
-	m.Upsert(Replica{Key: claude, Location: "studio", Head: "h1", Time: t0})
-	o := New("L")
-	j := o.Upsert(Replica{Key: codex, Location: "laptop", Head: "x1", Time: t0.Add(time.Minute)})
-	i := o.Upsert(Replica{Key: claude, Location: "studio", Head: "h2", Time: t0.Add(2 * time.Minute)})
-	o.Hops = append(o.Hops, Hop{Time: t0.Add(time.Minute), From: i, To: j, Kind: HopContinue})
-	m.Merge(o)
-	r, _, ok := m.Find(claude, "studio")
+	id := m.Upsert(Replica{Key: agent.SessionKey{Agent: "claude", Session: "a"}, Location: "studio"})
+	seg := ir.Segment{Nodes: []ir.Node{{Kind: ir.KindMessage, Text: "one"}}, Cursor: ir.Cursor{Head: "h1", Offset: 10}}
+	if _, err := m.Observe(id, &seg); err != nil {
+		t.Fatal(err)
+	}
+	o := m.Clone()
+	seg.Nodes = append(seg.Nodes, ir.Node{Kind: ir.KindMessage, Text: "two"})
+	seg.Cursor = ir.Cursor{Head: "h2", Offset: 20}
+	if _, err := o.Observe(id, &seg); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Merge(o); err != nil {
+		t.Fatal(err)
+	}
+	r, _, ok := m.Find(agent.SessionKey{Agent: "claude", Session: "a"}, "studio")
 	if !ok || r.Head != "h2" {
-		t.Fatalf("newer state must win: %+v", r)
+		t.Fatalf("causal state: %+v", r)
 	}
-	if len(m.Hops) != 1 || m.Replicas[m.Hops[0].From].Key != claude || m.Replicas[m.Hops[0].To].Key != codex {
-		t.Fatalf("hops: %+v", m.Hops)
+	before := len(m.States)
+	if err := m.Merge(o); err != nil {
+		t.Fatal(err)
 	}
-	m.Merge(o)
-	if len(m.Hops) != 1 {
-		t.Fatal("merging twice must not duplicate hops")
+	if len(m.States) != before {
+		t.Fatal("merge duplicated receipts")
 	}
-	back, err := Parse(m.Encode())
-	if err != nil || back.Logical != "L" || len(back.Replicas) != 2 {
-		t.Fatalf("round trip: %+v %v", back, err)
+	if _, err := Parse(m.Encode()); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := Parse([]byte(`{"hopsesh":"lineage/1"}`)); err == nil {
-		t.Fatal("another format must be refused")
+	for _, f := range []string{"lineage/1", "lineage/2"} {
+		if _, err := Parse([]byte(`{"hopsesh":"` + f + `"}`)); err == nil {
+			t.Fatal("old format accepted")
+		}
 	}
 }
 
@@ -43,10 +50,10 @@ func TestMergeKeepsNewerAndRemapsHops(t *testing.T) {
 func TestCloudReplica(t *testing.T) {
 	t0 := time.Date(2026, 10, 4, 9, 0, 0, 0, time.UTC)
 	m := New("L")
-	from := m.Upsert(Replica{Key: agent.SessionKey{Agent: "claude", Session: "a"}, Location: "studio", Head: "h1", Time: t0})
+	from := m.Upsert(Replica{Key: agent.SessionKey{Agent: "claude", Session: "a"}, Location: "studio", Time: t0})
 	to := m.Upsert(Replica{Key: agent.SessionKey{Agent: "codex", Session: "task_e_1"}, Location: "codex-cloud", Time: t0,
 		URL: "https://chatgpt.com/codex/tasks/task_e_1", Branch: "hopsesh/handoff/20261004-aaaaaaaa"})
-	m.Hops = append(m.Hops, Hop{Time: t0, From: from, To: to, Kind: HopHandoff, Fidelity: string(agent.FidBrief),
+	m.AppendHop(Hop{Time: t0, From: from, To: to, Kind: HopHandoff, Fidelity: string(agent.FidBrief),
 		Code: &CodeHop{Way: agent.ViaBranch, Remote: "github.com/example/demo", Branch: "hopsesh/handoff/20261004-aaaaaaaa", Base: "4c1e9a2",
 			Snapshot: "9f00d1e", Withheld: []string{".env"}, Redactions: 2}})
 	back, err := Parse(m.Encode())
@@ -61,7 +68,7 @@ func TestCloudReplica(t *testing.T) {
 	if !ok || h.Kind != HopHandoff || h.Code == nil || h.Code.Way != agent.ViaBranch || h.Code.Redactions != 2 || h.Code.Withheld[0] != ".env" {
 		t.Fatalf("handoff hop: %+v", h)
 	}
-	if back.Format != "lineage/2" {
+	if back.Format != Format {
 		t.Fatalf("format %q", back.Format)
 	}
 }

@@ -381,7 +381,9 @@ function row(e, level) {
     else if (e.lastPrompt) bits.push(`“${e.lastPrompt}”`);
   }
   const repoWord = list.groupBy === "repository" || e.group.noRepo ? "" : e.group.name.replace(/ \(no remote\)$/, "");
-  const chips = presenceChips(e);
+  if(e.journey?.fork) bits.push("separate fork");
+ if(e.journey?.roundTrips) bits.push(`${e.journey.roundTrips} round trips`);
+ const chips = presenceChips(e);
   if (e.cloud) chips.push(cloudChip(e.machine));
   if (e.cloud?.pr) chips.push(h("span", { class: "chip st-moved" }, "PR " + e.cloud.pr));
   if (e.mirror) chips.push(mirrorChip(e.mirror));

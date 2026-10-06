@@ -28,6 +28,8 @@ func (m *Module) Write(ctx context.Context, h agent.Host, in agent.Install, req 
 	var file string
 	var from int64
 	var b strings.Builder
+	index := 0
+	provenance := map[string]ir.Item{}
 	sid := req.SessionID
 	switch req.Mode {
 	case ir.WriteNew:
@@ -41,6 +43,7 @@ func (m *Module) Write(ctx context.Context, h agent.Host, in agent.Install, req 
 		if created.IsZero() {
 			created = now
 		}
+		index++
 		writeLine(&b, created, "session_meta", map[string]any{
 			"id": sid, "timestamp": stamp(created), "cwd": req.Header.CWD, "originator": "hopsesh",
 			"cli_version": in.Version, "source": "cli", "model_provider": "openai",
@@ -76,11 +79,27 @@ func (m *Module) Write(ctx context.Context, h agent.Host, in agent.Install, req 
 		if mt.HistoryMode == "paginated" {
 			return ir.WriteResult{}, fmt.Errorf("%w: Codex thread %s keeps paginated history, which hopsesh does not extend", agent.ErrUnsupported, sid)
 		}
+		if req.Expect.Head != "" {
+			seg, e := m.Read(ctx, h, in, agent.Summary{Key: agent.SessionKey{Agent: id, Session: agent.SessionID(sid)}, Path: file}, ir.Cursor{})
+			if e != nil {
+				return ir.WriteResult{}, e
+			}
+			if seg.Cursor.Head != req.Expect.Head {
+				return ir.WriteResult{}, fmt.Errorf("%w: native head changed", agent.ErrDiverged)
+			}
+		}
 		from = fi.Size()
+		recs, _, err := readLines(strings.NewReader(string(head)))
+		if err != nil {
+			return ir.WriteResult{}, err
+		}
+		index = len(recs)
 	default:
 		return ir.WriteResult{}, fmt.Errorf("unknown write mode %q", req.Mode)
 	}
 	for _, it := range req.Items {
+		provenance[fmt.Sprintf("line:%d/0", index+1)] = it
+		index += 2
 		ts := it.Time
 		if ts.IsZero() {
 			ts = time.Now()
@@ -116,7 +135,15 @@ func (m *Module) Write(ctx context.Context, h agent.Host, in agent.Install, req 
 	if err != nil {
 		return ir.WriteResult{}, err
 	}
-	return ir.WriteResult{SessionID: sid, Path: file, From: from, To: fi.Size(), Cursor: seg.Cursor}, nil
+	res := ir.WriteResult{SessionID: sid, Path: file, From: from, To: fi.Size(), Cursor: seg.Cursor}
+	for _, n := range seg.Nodes {
+		if n.Native != nil {
+			if it, ok := provenance[n.Native.Anchor]; ok {
+				res.Projection = append(res.Projection, ir.ProjectionFor(n, it))
+			}
+		}
+	}
+	return res, nil
 }
 
 func writeLine(b *strings.Builder, ts time.Time, typ string, payload any) {

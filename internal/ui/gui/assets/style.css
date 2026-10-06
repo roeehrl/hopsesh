@@ -615,3 +615,5 @@ code { font-family: var(--mono); font-size: .92em; padding: 0 3px; border-radius
 .search > span:not(.kbd) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .titlebar > .btn { flex-shrink: 0; }
 @media (max-width: 1000px) { .titlebar .fresh { display: none; } }
+
+.journey-counts{display:flex;flex-wrap:wrap;gap:6px}

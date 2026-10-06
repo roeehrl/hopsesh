@@ -86,14 +86,30 @@ func (m *Module) Read(_ context.Context, h agent.Host, in agent.Install, s agent
 	if mt.Git != nil {
 		seg.Header.GitBranch = mt.Git.Branch
 	}
-	structured := false
-	for _, r := range recs {
-		if r.Type == "event_msg" && strings.Contains(string(r.Payload), `"item_completed"`) {
-			structured = true
-			break
+	structuredByRecord := make([]bool, len(recs))
+	mark := func(start, end int) {
+		structured := false
+		for _, r := range recs[start:end] {
+			if r.Type == "event_msg" && strings.Contains(string(r.Payload), `"item_completed"`) {
+				structured = true
+				break
+			}
+		}
+		for i := start; i < end; i++ {
+			structuredByRecord[i] = structured
 		}
 	}
-	for _, r := range recs {
+	start := 0
+	for i, r := range recs {
+		if r.Type == "turn_context" && i > start {
+			mark(start, i)
+			start = i
+		}
+	}
+	mark(start, len(recs))
+	for index, r := range recs {
+		structured := structuredByRecord[index]
+		before := len(seg.Nodes)
 		ts := parseTime(r.Timestamp)
 		switch r.Type {
 		case "turn_context":
@@ -116,6 +132,12 @@ func (m *Module) Read(_ context.Context, h agent.Host, in agent.Install, s agent
 			if structured {
 				seg.Nodes = append(seg.Nodes, fromEvent(r, ts)...)
 			}
+		}
+		for j := before; j < len(seg.Nodes); j++ {
+			if seg.Nodes[j].Native == nil {
+				seg.Nodes[j].Native = &ir.Native{Format: nativeFormat}
+			}
+			seg.Nodes[j].Native.Anchor = fmt.Sprintf("line:%d/%d", index, j-before)
 		}
 	}
 	ir.Chain(seg.Nodes, "")

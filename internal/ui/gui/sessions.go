@@ -86,8 +86,11 @@ type EntryDTO struct {
 	Needs      bool       `json:"needs"`            // the agent waits for the person (an approval)
 	// App names the agent's desktop app ("Claude") when that app, not a terminal, runs the
 	// open session.
-	App     string   `json:"app,omitempty"`
-	History []HopDTO `json:"history"` // where it has been, oldest first
+	App               string           `json:"app,omitempty"`
+	Journey           *lineage.Journey `json:"journey,omitempty"`
+	CanArchiveLineage bool             `json:"canArchiveLineage"`
+	LineageError      string           `json:"lineageError,omitempty"`
+	History           []HopDTO         `json:"history"` // where it has been, oldest first
 	// BringIn is the agent here a cloud-only module's session (Copilot's log, Amp's thread)
 	// is written into by default: the one it was handed off from, else Claude Code;
 	// ContinueIn then lists the others.
@@ -117,8 +120,11 @@ type CopyDTO struct {
 
 // HopDTO is one step of a session's history.
 type HopDTO struct {
-	When string `json:"when"` // RFC 3339
-	What string `json:"what"`
+	Operation string   `json:"operation,omitempty"`
+	Branch    string   `json:"branch,omitempty"`
+	Loss      []string `json:"loss,omitempty"`
+	When      string   `json:"when"` // RFC 3339
+	What      string   `json:"what"`
 }
 
 // GroupDTO is one repository.
@@ -358,7 +364,7 @@ func entryDTO(core *app.App, inv *app.Inventory, it app.Item, targets []AgentOpt
 		Status: statusWords(core, e), Live: e.Live.State == agent.Live, LastActive: s.LastActivity.Format(time.RFC3339),
 		LastPrompt: s.LastPrompt, CWD: s.CWD, SizeKB: s.Size / 1024, ContinueIn: []AgentOpt{},
 		Needs:   e.Live.State == agent.Live && strings.HasPrefix(e.Live.Status, "waiting"),
-		History: history(core, e.Lineage), Location: string(e.Location.Kind), Cloud: cloudEntryDTO(core, e), Mirror: mirrorDTO(s.Mirror)}
+		Journey: journey(e.Lineage), LineageError: e.LineageError, CanArchiveLineage: e.CanArchiveLineage, History: history(core, e.Lineage), Location: string(e.Location.Kind), Cloud: cloudEntryDTO(core, e), Mirror: mirrorDTO(s.Mirror)}
 	if e.Live.State == agent.Live && e.Live.App {
 		d.App = e.AgentName
 		if m, ok := core.Module(e.Agent); ok {
@@ -444,6 +450,14 @@ func statusWords(core *app.App, e app.Entry) string {
 	return st
 }
 
+func journey(m *lineage.Manifest) *lineage.Journey {
+	if m == nil {
+		return nil
+	}
+	j := m.Journey()
+	return &j
+}
+
 func history(core *app.App, m *lineage.Manifest) []HopDTO {
 	out := []HopDTO{}
 	if m == nil {
@@ -463,14 +477,16 @@ func history(core *app.App, m *lineage.Manifest) []HopDTO {
 		}
 		return name(id) + " on " + loc
 	}
-	hops := append([]lineage.Hop(nil), m.Hops...)
-	sort.Slice(hops, func(i, j int) bool { return hops[i].Time.Before(hops[j].Time) })
-	for i, h := range hops {
-		if h.From < 0 || h.From >= len(m.Replicas) || h.To < 0 || h.To >= len(m.Replicas) {
+	hops := m.OrderedHops()
+	for _, h := range hops {
+		if h.Line != m.Branch {
 			continue
 		}
-		from, to := m.Replicas[h.From], m.Replicas[h.To]
-		if i == 0 {
+		if !m.HasReplica(h.From) || !m.HasReplica(h.To) {
+			continue
+		}
+		from, to := m.Replica(h.From), m.Replica(h.To)
+		if len(out) == 0 {
 			out = append(out, HopDTO{When: from.Time.Format(time.RFC3339), What: "In " + in(from.Key.Agent, from.Location)})
 		}
 		what := "Moved to " + place(to.Location)
@@ -482,13 +498,18 @@ func history(core *app.App, m *lineage.Manifest) []HopDTO {
 		}
 		if h.Kind == lineage.HopContinue {
 			what = "Continued in " + in(to.Key.Agent, to.Location)
-		} else if i > 0 && hops[i-1].Kind == lineage.HopContinue && hops[i-1].Time.Equal(h.Time) {
+		} else if h.Backup {
 			what = fmt.Sprintf("The %s copy kept on %s too", name(to.Key.Agent), place(to.Location)) // the native copy
 		}
 		if h.Fork {
-			what += " (both kept going)"
+			what += " (separate fork)"
 		}
-		out = append(out, HopDTO{When: h.Time.Format(time.RFC3339), What: what})
+		for _, c := range m.Compensations {
+			if c.Operation == h.ID {
+				what += " · undone"
+			}
+		}
+		out = append(out, HopDTO{When: h.Time.Format(time.RFC3339), What: what, Operation: h.ID, Branch: h.Line, Loss: m.State(h.Target).Loss})
 	}
 	return out
 }
@@ -508,6 +529,8 @@ func (a *App) find(machine, key string) (app.Entry, error) {
 
 // OptsDTO are the choices on the plan screen.
 type OptsDTO struct {
+	OperationID   string `json:"operationId"`
+	TargetSession string `json:"targetSession"`
 	TargetDir     string `json:"targetDir"`
 	Clone         bool   `json:"clone"`
 	ReposDir      string `json:"reposDir"`
@@ -541,6 +564,7 @@ func (o OptsDTO) options(d move.Options) move.Options {
 		d.ReposDir = o.ReposDir
 	}
 	d.Fork, d.RemoteControl, d.Notify, d.Redact, d.App = o.Fork, o.RemoteControl, o.Notify, o.Redact, o.App
+	d.OperationID, d.TargetSession = o.OperationID, o.TargetSession
 	d.Mark, d.SyncCode, d.Push, d.StopLocal, d.Conflict = o.Mark, o.SyncCode, o.Push, o.StopLocal, o.Conflict
 	d.Fidelity, d.Native, d.Note, d.Go = convert.Fidelity(nonEmpty(o.Fidelity, string(convert.History))), o.Native, strings.TrimSpace(o.Note), o.Go
 	d.CarryRules, d.CodeOnly, d.AppendOriginal = o.CarryRules, o.CodeOnly, o.Append
@@ -573,38 +597,40 @@ type ContinueDTO struct {
 
 // PlanDTO is a plan as the window shows it.
 type PlanDTO struct {
-	Kind        string           `json:"kind"` // move | continue
-	Title       string           `json:"title"`
-	Agent       string           `json:"agent"`     // the agent it lands in
-	FromAgent   string           `json:"fromAgent"` // the agent it comes from
-	SourceHost  string           `json:"sourceHost"`
-	SourceOS    string           `json:"sourceOs"`
-	SourceCWD   string           `json:"sourceCwd"`
-	TargetCWD   string           `json:"targetCwd"`
-	Live        bool             `json:"live"`
-	Repo        move.RepoPlan    `json:"repo"`
-	Mappings    []agent.Mapping  `json:"mappings"`
-	Files       int              `json:"files"`
-	Bytes       int64            `json:"bytes"`
-	Mark        string           `json:"mark"`
-	Sync        string           `json:"sync"`
-	FromSource  bool             `json:"syncFromSource"`
-	Push        bool             `json:"push"`
-	StopHere    bool             `json:"stopHere"`
-	Conflict    string           `json:"conflict"`
-	Warnings    []string         `json:"warnings"`
-	Blockers    []string         `json:"blockers"`
-	NewName     string           `json:"newName"`
-	OtherAcct   bool             `json:"otherAccount"`
-	Continue    *ContinueDTO     `json:"continue,omitempty"`
-	NativeCopy  *move.NativeCopy `json:"nativeCopy,omitempty"`
-	Can         CanDTO           `json:"can"`
-	SetAside    int              `json:"setAside"`
-	Options     move.Options     `json:"-"`
-	SessionKey  agent.SessionKey `json:"-"`
-	SourceAgent agent.ID         `json:"sourceAgent"`
-	Machine     string           `json:"machine,omitempty"` // a push: the machine it goes to
-	Fetch       *move.FetchPlan  `json:"fetch,omitempty"`   // bringing it from a cloud
+	NoWork       bool             `json:"noWork"`
+	Destinations []agent.Summary  `json:"destinations,omitempty"`
+	Kind         string           `json:"kind"` // move | continue
+	Title        string           `json:"title"`
+	Agent        string           `json:"agent"`     // the agent it lands in
+	FromAgent    string           `json:"fromAgent"` // the agent it comes from
+	SourceHost   string           `json:"sourceHost"`
+	SourceOS     string           `json:"sourceOs"`
+	SourceCWD    string           `json:"sourceCwd"`
+	TargetCWD    string           `json:"targetCwd"`
+	Live         bool             `json:"live"`
+	Repo         move.RepoPlan    `json:"repo"`
+	Mappings     []agent.Mapping  `json:"mappings"`
+	Files        int              `json:"files"`
+	Bytes        int64            `json:"bytes"`
+	Mark         string           `json:"mark"`
+	Sync         string           `json:"sync"`
+	FromSource   bool             `json:"syncFromSource"`
+	Push         bool             `json:"push"`
+	StopHere     bool             `json:"stopHere"`
+	Conflict     string           `json:"conflict"`
+	Warnings     []string         `json:"warnings"`
+	Blockers     []string         `json:"blockers"`
+	NewName      string           `json:"newName"`
+	OtherAcct    bool             `json:"otherAccount"`
+	Continue     *ContinueDTO     `json:"continue,omitempty"`
+	NativeCopy   *move.NativeCopy `json:"nativeCopy,omitempty"`
+	Can          CanDTO           `json:"can"`
+	SetAside     int              `json:"setAside"`
+	Options      move.Options     `json:"-"`
+	SessionKey   agent.SessionKey `json:"-"`
+	SourceAgent  agent.ID         `json:"sourceAgent"`
+	Machine      string           `json:"machine,omitempty"` // a push: the machine it goes to
+	Fetch        *move.FetchPlan  `json:"fetch,omitempty"`   // bringing it from a cloud
 }
 
 // Plan works out how a session comes here: in its own agent (target "") or continued in
@@ -644,7 +670,7 @@ func (a *App) planEntry(core *app.App, inv *app.Inventory, e app.Entry, target s
 }
 
 func planDTO(p *move.Plan, e app.Entry, tm agent.Module) *PlanDTO {
-	d := &PlanDTO{Kind: p.Kind, Title: p.Title, Agent: p.Agent, FromAgent: e.AgentName, SourceHost: p.Source.Location,
+	d := &PlanDTO{NoWork: p.NoWork, Destinations: p.Destinations, Kind: p.Kind, Title: p.Title, Agent: p.Agent, FromAgent: e.AgentName, SourceHost: p.Source.Location,
 		SourceOS: p.Source.OS, SourceCWD: p.Source.CWD, TargetCWD: p.Target.CWD, Live: p.Live, Repo: p.Repo,
 		Mappings: p.Placement.Mappings, Files: len(p.Files.Files), Bytes: p.Bytes, Mark: p.Mark, Sync: p.Sync,
 		FromSource: p.SyncFromSource, Push: p.Push, StopHere: p.StopHere, Conflict: p.Conflict,
@@ -879,4 +905,19 @@ func nonEmpty(s, d string) string {
 		return d
 	}
 	return s
+}
+
+func (a *App) ArchiveLineage(machine, key string) error {
+	core := a.snapshot()
+	a.mu.Lock()
+	e, err := a.find(machine, key)
+	inv := a.inv
+	a.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	_, err = core.ArchiveLineage(ctx, inv, e)
+	return err
 }

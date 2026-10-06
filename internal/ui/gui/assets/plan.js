@@ -17,7 +17,7 @@ function defaults() {
 // planFor opens the sheet for a session: target "" keeps its agent, sendTo pushes it;
 // codeOnly brings a cloud session's branch alone.
 export async function planFor(e, { target = "", sendTo = "", codeOnly = false }) {
-  cur = { e, target, sendTo, opts: Object.assign(defaults(), { codeOnly }), plan: null, busy: false, applying: false };
+  cur = { e, target, sendTo, opts: Object.assign(defaults(), { operationId: crypto.randomUUID() }, { codeOnly }), plan: null, busy: false, applying: false };
   fill(sheet, h("div", { class: "sheet-in" }, h("div", { class: "loading", role: "status", style: "min-height:240px" },
     sendTo ? `Asking hopsesh on ${sendTo} to plan it…` : "Working out the plan…")));
   if (!sheet.open) sheet.showModal();
@@ -27,7 +27,7 @@ export async function planFor(e, { target = "", sendTo = "", codeOnly = false })
 // planPicked opens the sheet for a cloud session that is not a row: id "" leaves the
 // choice to the vendor's own picker, in a new worktree of the checkout chosen here.
 export async function planPicked(cloud, id, checkout, target = "") {
-  cur = { e: null, picked: { cloud, id, checkout }, target, sendTo: "", opts: Object.assign(defaults(), { targetDir: checkout }), plan: null, busy: false, applying: false };
+  cur = { e: null, picked: { cloud, id, checkout }, target, sendTo: "", opts: Object.assign(defaults(), { operationId: crypto.randomUUID() }, { targetDir: checkout }), plan: null, busy: false, applying: false };
   fill(sheet, h("div", { class: "sheet-in" }, h("div", { class: "loading", role: "status", style: "min-height:240px" }, "Working out the plan…")));
   if (!sheet.open) sheet.showModal();
   await replan();
@@ -80,6 +80,8 @@ async function chooseFolder() {
 }
 
 function summary(p) {
+ if(p.noWork) return h("div",{class:"summary","aria-label":"What changes"},"Conversation already synchronized. Update lineage receipts; 0 new messages, 0 transfers.");
+ if(p.destinations?.length) {return h("label",{class:"summary"},"Choose the destination session",h("select",{onchange:ev=>set("targetSession",ev.target.value)},h("option",{value:""},"Select a session…"),p.destinations.map(s=>h("option",{value:`${s.key.agent}/${s.key.session}`},`${s.title || s.key.session} · ${s.key.session}`))))}
   const cont = p.continue, r = p.repo, there = p.machine ? `on ${p.machine}` : "here";
   const add = [], chg = [];
   if (cont) {
@@ -226,6 +228,7 @@ function paths(p) {
 }
 
 function verb(p) {
+ if (p.noWork) return "Sync lineage receipts";
   if (p.machine) return `Send to ${p.machine}`;
   if (p.continue) return `Continue in ${p.agent}`;
   return p.repo.action === "clone" ? "Clone and hop here" : "Hop here";
