@@ -239,7 +239,7 @@ func TestHandoffToClaudeCloudAndBack(t *testing.T) {
 	if tr := w.git(w.repo, "log", "-1", "--format=%(trailers:key=Hopsesh-Handoff,valueonly)", hr.Snapshot); tr != local.Lineage.Family {
 		t.Fatalf("the trailer is the lineage's id: %q vs %q", tr, local.Lineage.Family)
 	}
-	if cloud == nil || cloud.Original != "here:claude/"+demoSession {
+	if cloud == nil || cloud.Original != "here:"+p.Key.String() {
 		t.Fatalf("the cloud session: %+v", cloud)
 	}
 

@@ -234,7 +234,7 @@ func applyPlan(ctx context.Context, p *Plan, in Input, env Env) (*Result, error)
 	// 6. Mark the copy left behind, and save the start prompt.
 	markWith(ctx, p, in, j, env, srcHead, agent.Mark{Kind: agent.MarkMoved, Location: p.Target.Location}, res)
 	promptFile := filepath.Join(env.StateDir, "prompts", string(p.Placement.Key.Agent)+"-"+string(p.Placement.Key.Session)+".md")
-	if os.MkdirAll(filepath.Dir(promptFile), 0o700) == nil && os.WriteFile(promptFile, []byte(p.StartPrompt), 0o600) == nil {
+	if p.StartPrompt != "" && os.MkdirAll(filepath.Dir(promptFile), 0o700) == nil && os.WriteFile(promptFile, []byte(p.StartPrompt), 0o600) == nil {
 		res.PromptFile = promptFile
 	}
 	res.Command, res.Run = launch.Shell(p.Resume, res.PromptFile, launch.DefaultShell()), p.Resume
@@ -502,7 +502,7 @@ func recordLineage(ctx context.Context, p *Plan, in Input, j *journal.Journal, m
 		return err
 	}
 	now := j.Time.UTC()
-	to := m.Upsert(lineage.Replica{Endpoint: in.Target.Machine.Facts.Endpoint, Key: p.Placement.Key, Line: p.targetLine, Location: p.Target.Location, AgentVersion: p.Target.Version, Time: now})
+	to := m.Upsert(lineage.Replica{Endpoint: in.Target.Machine.Facts.Endpoint, Binding: in.Target.Install.BindingID(), Key: p.Placement.Key, Line: p.targetLine, Location: p.Target.Location, AgentVersion: p.Target.Version, Time: now})
 	loss := append([]string(nil), p.sourceState.Loss...)
 	if p.Options.OtherAccount {
 		loss = append(loss, "native reasoning omitted for another account")

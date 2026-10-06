@@ -49,9 +49,29 @@ func runLineageRoute(t *testing.T, route, start string, mask int, patterns ...st
 			ci.Roots["home"] = filepath.Join(root, string(c), ".codex")
 		}
 		installs[c] = map[string]agent.Install{"claude": l.in, "codex": ci}
+		if len(patterns) > 0 && patterns[0] == "accounts" {
+			places[c].m.Facts.Endpoint = strings.Repeat("e", 64)
+			for id, in := range installs[c] {
+				in.Profile = &agent.RuntimeProfile{ID: string(c) + "-" + id, Endpoint: places[c].m.Facts.Endpoint, Agent: agent.ID(id), Name: "Personal", Tags: []string{"Personal"}, Root: in.Root("home"), Binding: string(c) + "-binding", Generation: 1}
+				installs[c][id] = in
+			}
+		}
 		for _, in := range installs[c] {
 			if err := os.MkdirAll(in.Root("home"), 0o700); err != nil {
 				t.Fatal(err)
+			}
+		}
+	}
+	if len(patterns) > 0 && patterns[0] == "accounts" {
+		for c, group := range installs {
+			for id, in := range group {
+				root, err := filepath.EvalSymlinks(in.Root("home"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				in.Roots["home"] = root
+				in.Profile.Root = root
+				installs[c][id] = in
 			}
 		}
 	}
@@ -71,6 +91,7 @@ func runLineageRoute(t *testing.T, route, start string, mask int, patterns ...st
 		}
 		current = listAgent(t, places['A'], cx, installs['A']["codex"])[0]
 	}
+	current.Key.Profile = installs['A'][currentAgent].ProfileID()
 	if len(patterns) > 0 && patterns[0] == "paginated" {
 		promoteCodexPaginated(t, current.Path)
 	}
@@ -84,7 +105,7 @@ func runLineageRoute(t *testing.T, route, start string, mask int, patterns ...st
 	for i := 0; i < len(route)-1; i++ {
 		from, to := route[i], route[i+1]
 		src, dst := places[from], places[to]
-		if pattern == "all" || pattern == "profiles" || pattern == "paginated" || pattern == "alternating" && i%2 == 0 {
+		if pattern == "all" || pattern == "accounts" || pattern == "profiles" || pattern == "paginated" || pattern == "alternating" && i%2 == 0 {
 			sentinel := fmt.Sprintf("ROUTE-WORK-%d-UNIQUE", i)
 			sentinels = append(sentinels, sentinel)
 			if currentAgent == "claude" {
@@ -154,10 +175,13 @@ func runLineageRoute(t *testing.T, route, start string, mask int, patterns ...st
 			t.Fatal(e)
 		}
 		journey := graph.Journey()
+		if pattern == "accounts" && (journey.MachineTransfers != 0 || journey.MachineRoundTrips != 0) {
+			t.Fatalf("account route counted as machine travel: %+v", journey)
+		}
 		if journey.Transfers != transfers {
 			t.Fatalf("transfers %+v at hop %d", journey, i)
 		}
-		if to == 'A' && current.Key.Session != sid {
+		if pattern != "accounts" && to == 'A' && current.Key.Session != sid {
 			t.Fatalf("return must select original: %s", current.Key)
 		}
 	}
@@ -211,5 +235,15 @@ func TestLineageSeededLongHistories(t *testing.T) {
 func TestLineageRoutesSeparateProfilesOnOneAccount(t *testing.T) {
 	for _, start := range []string{"claude", "codex"} {
 		t.Run(start, func(t *testing.T) { runLineageRoute(t, "ABABA", start, 3, "profiles") })
+	}
+}
+
+func TestAccountProfileRoutes(t *testing.T) {
+	for _, route := range []string{"ABABA", "ABCA", "ABCBCAB"} {
+		for _, start := range []string{"claude", "codex"} {
+			for mask := 0; mask < 8; mask++ {
+				t.Run(fmt.Sprintf("%s/%s/%03b", route, start, mask), func(t *testing.T) { runLineageRoute(t, route, start, mask, "accounts") })
+			}
+		}
 	}
 }

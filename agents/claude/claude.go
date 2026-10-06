@@ -51,6 +51,7 @@ var iconSVG string
 // Spec declares Claude Code.
 func (*Module) Spec() agent.Spec {
 	return agent.Spec{
+		Accounts:  &agent.ProfileSpec{RootEnv: []string{"CLAUDE_CONFIG_DIR"}, Unset: []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"}, Login: []string{"auth", "login"}},
 		ID:        id,
 		Name:      "Claude Code",
 		Vendor:    "Anthropic",
@@ -182,6 +183,9 @@ func (m *Module) List(_ context.Context, h agent.Host, in agent.Install) (agent.
 		out.Sessions = append(out.Sessions, s.summary())
 	}
 	sort.Slice(out.Sessions, func(i, j int) bool { return out.Sessions[i].LastActivity.After(out.Sessions[j].LastActivity) })
+	for i := range out.Sessions {
+		out.Sessions[i].Key.Profile = in.ProfileID()
+	}
 	return out, nil
 }
 
@@ -358,6 +362,7 @@ func (m *Module) Verify(_ context.Context, h agent.Host, mp agent.MovePlan, stag
 
 // Resume is `claude [--desktop] --resume <id> [--fork-session] [--remote-control [name]]`.
 func (m *Module) Resume(in agent.Install, key agent.SessionKey, p agent.Placement, o agent.ResumeOptions) agent.Command {
+	in.Accounts = m.Spec().Accounts
 	argv := []string{"claude"}
 	if o.App {
 		argv = append(argv, "--desktop")
@@ -375,7 +380,7 @@ func (m *Module) Resume(in agent.Install, key agent.SessionKey, p agent.Placemen
 	if o.Prompt != "" {
 		argv = append(argv, o.Prompt)
 	}
-	return agent.Command{Argv: argv, Dir: p.CWD, Unset: sessionMarkers}
+	return in.ScopeCommand(agent.Command{Argv: argv, Dir: p.CWD, Unset: sessionMarkers})
 }
 
 // sessionMarkers are variables a Claude Code session sets for the programs it starts. A

@@ -66,6 +66,8 @@ func TestScenarios(t *testing.T) {
 		},
 		Cmds: map[string]func(ts *testscript.TestScript, neg bool, args []string){
 			"agent-turn":     agentTurn,
+			"result-session": resultSession,
+			"account-id":     accountID,
 			"at-terminal":    atTerminal,
 			"claude-session": claudeSession,
 			"cloud-world":    cloudWorld,
@@ -240,4 +242,43 @@ func gitRepo(ts *testscript.TestScript, neg bool, args []string) {
 			ts.Fatalf("git %v: %v\n%s", a, err, out)
 		}
 	}
+}
+
+// result-session reads an applied transfer's explicit destination, not a guessed id.
+func resultSession(ts *testscript.TestScript, neg bool, args []string) {
+	if neg || len(args) != 1 {
+		ts.Fatalf("usage: result-session JSON-FILE")
+	}
+	var result struct {
+		Plan struct {
+			Placement struct {
+				Key struct {
+					Session string `json:"session"`
+				} `json:"key"`
+			} `json:"placement"`
+		} `json:"plan"`
+	}
+	b, err := os.ReadFile(ts.MkAbs(args[0]))
+	ts.Check(err)
+	ts.Check(json.Unmarshal(b, &result))
+	if result.Plan.Placement.Key.Session == "" {
+		ts.Fatalf("missing destination session in transfer result")
+	}
+	ts.Setenv("RETURN_ID", result.Plan.Placement.Key.Session)
+}
+
+func accountID(ts *testscript.TestScript, neg bool, args []string) {
+	if neg || len(args) != 1 {
+		ts.Fatalf("usage: account-id JSON-FILE")
+	}
+	var p struct {
+		ID string `json:"id"`
+	}
+	b, err := os.ReadFile(ts.MkAbs(args[0]))
+	ts.Check(err)
+	ts.Check(json.Unmarshal(b, &p))
+	if p.ID == "" {
+		ts.Fatalf("missing profile id")
+	}
+	ts.Setenv("ACCOUNT_ID", p.ID)
 }

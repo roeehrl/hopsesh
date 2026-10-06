@@ -285,6 +285,7 @@ function render() {
           const n = e.key === "ArrowDown" ? i + 1 : e.key === "ArrowUp" ? i - 1 : -1;
           if (n >= 0 && n < TABS.length) { e.preventDefault(); tab = TABS[n][0]; render(); view.querySelector("#tab-" + tab).focus(); }
         } }, label)),
+      h("button", {class:"tab",onclick:()=>go("accounts")}, "Accounts"),
       h("span", { class: "spacer" })),
     h("div", { class: "page", role: "tabpanel", "aria-labelledby": "tab-" + tab }, h("div", { class: "page-in", style: "max-width:760px" }, h("h1", {}, name), body()))));
 }

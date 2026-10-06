@@ -1,8 +1,11 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"github.com/roeehrl/hopsesh/internal/core/move"
+	"time"
 
 	"github.com/roeehrl/hopsesh/internal/core/launch"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -18,12 +21,30 @@ func (a *App) Resume(inv *Inventory, e Entry, o agent.ResumeOptions) (agent.Comm
 	if !ok {
 		return agent.Command{}, fmt.Errorf("%s is not enabled", e.Agent)
 	}
-	in, ok := m.Install(e.Agent)
+	in, ok := m.InstallProfile(e.Agent, e.Session.Key.Profile)
 	if !ok {
 		return agent.Command{}, fmt.Errorf("%w: %s", agent.ErrNotInstalled, mod.Spec().Name)
 	}
+	if err := a.checkAccountRegistration(in); err != nil {
+		return agent.Command{}, err
+	}
+	if o.App && in.Profile != nil && !in.Profile.Default {
+		return agent.Command{}, fmt.Errorf("desktop opening cannot select an account profile; use the integrated or external terminal")
+	}
 	if o.App && !agent.Has(mod, agent.CapApp) {
 		return agent.Command{}, fmt.Errorf("%w: %s has no desktop app hopsesh can open", agent.ErrUnsupported, mod.Spec().Name)
+	}
+	if o.App {
+		if check, ok := mod.(agent.AppChecker); ok {
+			if err := check.CheckApp(in, e.Session.Key, o); err != nil {
+				return agent.Command{}, err
+			}
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := move.ValidateProfiles(ctx, move.Input{Source: move.Side{Machine: m.host, Module: mod, Install: in}}); err != nil {
+		return agent.Command{}, err
 	}
 	p := agent.Placement{Key: e.Session.Key, SourceID: e.Session.Key.Session, CWD: e.Session.CWD, Location: m.Name}
 	return mod.Resume(in, e.Session.Key, p, o), nil

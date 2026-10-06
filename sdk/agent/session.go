@@ -178,6 +178,8 @@ type ResumeOptions struct {
 // Command is a program to run, never a shell string; the core quotes it for the user's
 // shell.
 type Command struct {
+	// Wait requests error reporting from a short-lived desktop launcher.
+	Wait bool     `json:"wait,omitempty"`
 	Argv []string `json:"argv"`
 	Dir  string   `json:"dir"`
 	// Unset are environment variables the program must run without (a cloud driver's
@@ -222,10 +224,18 @@ type LiveProc struct {
 	Waiting bool `json:"waiting,omitempty"`
 }
 
-// Account is an opaque, hashed account identity (never a credential).
+// Account contains public vendor login metadata, never credentials. Key is legacy
+// Remote Control ownership metadata; it does not prove cross-profile identity.
 type Account struct {
-	Key   string `json:"key"`             // compared for equality only
-	Label string `json:"label,omitempty"` // for people: "Max plan", "Team org"
+	IsolationWhy string `json:"isolationWhy,omitempty"`
+	LoggedIn     bool   `json:"loggedIn"`
+	Provider     string `json:"provider,omitempty"`
+	Email        string `json:"email,omitempty"`
+	Confidence   string `json:"confidence,omitempty"` // verified, limited, unknown
+	// Observation detects visible login changes; never proves account equality.
+	Observation string `json:"observation,omitempty"`
+	Key         string `json:"key"`             // never sufficient for native cross-account replay
+	Label       string `json:"label,omitempty"` // for people: "Max plan", "Team org"
 	// RemoteControl is whether this login can use the agent's own remote control.
 	RemoteControl bool   `json:"remoteControl"`
 	Why           string `json:"why,omitempty"` // why not

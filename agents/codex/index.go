@@ -178,7 +178,7 @@ func (m *Module) Account(ctx context.Context, h agent.Host, in agent.Install) (a
 	if in.Binary == "" {
 		return agent.Account{}, fmt.Errorf("%w: codex is not installed there", agent.ErrNotInstalled)
 	}
-	lines, err := appServer(ctx, h, in, []map[string]any{{"id": 2, "method": "account/read", "params": map[string]any{}}}, `{"id":2,`, 20*time.Second)
+	lines, err := appServer(ctx, h, in, []map[string]any{{"id": 2, "method": "account/read", "params": map[string]any{"refreshToken": false}}}, `{"id":2,`, 20*time.Second)
 	if err != nil {
 		return agent.Account{}, err
 	}
@@ -205,12 +205,12 @@ func (m *Module) Account(ctx context.Context, h agent.Host, in agent.Install) (a
 		a := r.Result.Account
 		switch {
 		case a == nil:
-			return agent.Account{Label: "not logged in"}, nil
+			return agent.Account{Label: "not logged in", Confidence: "unknown", Observation: "signed-out"}, nil
 		case a.Type == "chatgpt" && a.Email != "":
 			sum := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(a.Email))))
-			return agent.Account{Key: "chatgpt:" + hex.EncodeToString(sum[:8]), Label: "ChatGPT " + a.Plan}, nil
+			return agent.Account{Key: "chatgpt:" + hex.EncodeToString(sum[:8]), Label: "ChatGPT " + a.Plan, LoggedIn: true, Email: a.Email, Provider: a.Type, Confidence: "limited", Observation: "chatgpt:" + hex.EncodeToString(sum[:])}, nil
 		default:
-			return agent.Account{Label: a.Type}, nil
+			return agent.Account{Label: a.Type, LoggedIn: true, Provider: a.Type, Confidence: "unknown", Observation: a.Type}, nil
 		}
 	}
 	return agent.Account{}, errors.New("no answer from codex app-server")

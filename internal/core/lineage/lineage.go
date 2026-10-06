@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -21,13 +22,14 @@ import (
 )
 
 const Suffix = ".hopsesh.json"
-const Format = "lineage/3"
+const Format = "lineage/4"
 const maxSize = 16 << 20
 
 type ReplicaID string
 type StateID string
 
 type Replica struct {
+	Binding      string           `json:"binding,omitempty"`
 	ID           ReplicaID        `json:"id"`
 	Key          agent.SessionKey `json:"key"`
 	Endpoint     string           `json:"endpoint"`
@@ -219,7 +221,7 @@ func (m *Manifest) Upsert(r Replica) ReplicaID {
 	if r.Endpoint == "" {
 		r.Endpoint = r.Location
 	}
-	r.ID = ReplicaID(hash([]string{m.Family, r.Line, r.Endpoint, r.Key.String()}))
+	r.ID = ReplicaID(hash([]string{m.Family, r.Line, r.Endpoint, r.Key.String(), r.Binding}))
 	found := false
 	for _, x := range m.Replicas {
 		if x.ID == r.ID {
@@ -251,12 +253,16 @@ func (m *Manifest) Find(key agent.SessionKey, location string) (Replica, Replica
 	return found, found.ID, found.ID != ""
 }
 func (m *Manifest) FindEndpoint(key agent.SessionKey, endpoint string) (Replica, ReplicaID, bool) {
+	var found Replica
 	for _, r := range m.Replicas {
 		if r.Key == key && r.Endpoint == endpoint && r.Line == m.Branch {
-			return m.Replica(r.ID), r.ID, true
+			if found.ID != "" && found.ID != r.ID {
+				return Replica{}, "", false
+			}
+			found = m.Replica(r.ID)
 		}
 	}
-	return Replica{}, "", false
+	return found, found.ID, found.ID != ""
 }
 func (m *Manifest) FindOnBranch(key agent.SessionKey, location, line string) (Replica, ReplicaID, bool) {
 	if m == nil {
@@ -682,14 +688,18 @@ func (m *Manifest) LastHopTo(id ReplicaID) (Hop, bool) {
 }
 
 type Journey struct {
-	ParentBranch string `json:"parentBranch,omitempty"`
-	Origin       string `json:"origin,omitempty"`
-	Transfers    int    `json:"transfers"`
-	RoundTrips   int    `json:"roundTrips"`
-	Returns      int    `json:"returns"`
-	Fork         bool   `json:"fork"`
-	Branch       string `json:"branch"`
-	Family       string `json:"family"`
+	MachineTransfers  int    `json:"machineTransfers"`
+	MachineRoundTrips int    `json:"machineRoundTrips"`
+	MachineReturns    int    `json:"machineReturns"`
+	OriginProfile     string `json:"originProfile,omitempty"`
+	ParentBranch      string `json:"parentBranch,omitempty"`
+	Origin            string `json:"origin,omitempty"`
+	Transfers         int    `json:"transfers"`
+	RoundTrips        int    `json:"roundTrips"`
+	Returns           int    `json:"returns"`
+	Fork              bool   `json:"fork"`
+	Branch            string `json:"branch"`
+	Family            string `json:"family"`
 }
 
 func (m *Manifest) Journey() Journey {
@@ -702,7 +712,11 @@ func (m *Manifest) Journey() Journey {
 	j.ParentBranch = b.Parent
 	origin := m.Replica(b.Origin)
 	j.Origin = origin.Location + "/" + string(origin.Key.Agent)
-	place := func(r Replica) string { return r.Endpoint + "\x00" + string(r.Key.Agent) }
+	j.OriginProfile = origin.Key.Profile
+	seenMachines := map[string]bool{origin.Endpoint: true}
+	place := func(r Replica) string {
+		return r.Endpoint + "\x00" + string(r.Key.Agent) + "\x00" + r.Key.Profile + "\x00" + r.Binding
+	}
 	seen := map[string]bool{}
 	if origin.ID != "" {
 		seen[place(origin)] = true
@@ -723,6 +737,16 @@ func (m *Manifest) Journey() Journey {
 			continue
 		}
 		j.Transfers++
+		if from.Endpoint != to.Endpoint && !strings.HasPrefix(from.Endpoint, "cloud:") && !strings.HasPrefix(to.Endpoint, "cloud:") {
+			j.MachineTransfers++
+			if seenMachines[to.Endpoint] {
+				j.MachineReturns++
+				if to.Endpoint == origin.Endpoint {
+					j.MachineRoundTrips++
+				}
+			}
+			seenMachines[to.Endpoint] = true
+		}
 		if seen[place(to)] {
 			j.Returns++
 			if place(to) == place(origin) {
@@ -771,7 +795,7 @@ func (m *Manifest) Validate() error {
 		if err := add(reps, string(r.ID)); err != nil {
 			return err
 		}
-		if r.ID != ReplicaID(hash([]string{m.Family, r.Line, r.Endpoint, r.Key.String()})) {
+		if r.ID != ReplicaID(hash([]string{m.Family, r.Line, r.Endpoint, r.Key.String(), r.Binding})) {
 			return fmt.Errorf("invalid replica identity")
 		}
 		if r.Endpoint == "" || r.Key.Agent == "" || r.Key.Session == "" || !branches[r.Line] {

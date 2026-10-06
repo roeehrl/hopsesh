@@ -49,26 +49,14 @@ func nativeForkManifests(ctx context.Context, hm *host.Machine, h agent.Host, mo
 			}
 			if pm == nil {
 				pm = lineage.NewNative(endpoint, ss[parent].Key)
-				id := pm.Upsert(lineage.Replica{Key: ss[parent].Key, Endpoint: endpoint, Location: hm.Name, AgentVersion: ss[parent].AgentVersion, Time: parentSeg.Header.Created})
-				if _, err = pm.Observe(id, &parentSeg); err != nil {
-					problems[i] = err.Error()
-					continue
-				}
-				manifests[parent] = pm.Clone()
 			}
-			_, pid, ok := pm.FindEndpoint(ss[parent].Key, endpoint)
-			if !ok && len(pm.Replicas) == 0 {
-				pid = pm.Upsert(lineage.Replica{Endpoint: endpoint, Key: ss[parent].Key, Location: hm.Name, Time: parentSeg.Header.Created, AgentVersion: ss[parent].AgentVersion})
-				ok = true
-			}
-			if !ok {
-				problems[i] = "native fork parent endpoint has no receipt"
-				continue
-			}
-			if _, err := pm.Observe(pid, &parentSeg); err != nil {
+			pid, _, err := pm.ObserveBinding(lineage.Replica{Key: ss[parent].Key, Endpoint: endpoint, Binding: in.BindingID(), Location: hm.Name, AgentVersion: ss[parent].AgentVersion, Time: parentSeg.Header.Created}, &parentSeg)
+			if err != nil {
 				problems[i] = err.Error()
 				continue
 			}
+			manifests[parent] = pm.Clone()
+
 			proof, err := verifier.VerifyNativeFork(ctx, h, in, ss[parent], s)
 			if err != nil {
 				problems[i] = err.Error()
@@ -79,7 +67,7 @@ func nativeForkManifests(ctx context.Context, hm *host.Machine, h agent.Host, mo
 				problems[i] = err.Error()
 				continue
 			}
-			m, err := pm.AdoptNativeFork(pid, lineage.Replica{Key: s.Key, Endpoint: endpoint, Location: hm.Name, AgentVersion: s.AgentVersion, Time: seg.Header.Created}, proof, &seg)
+			m, err := pm.AdoptNativeFork(pid, lineage.Replica{Key: s.Key, Endpoint: endpoint, Binding: in.BindingID(), Location: hm.Name, AgentVersion: s.AgentVersion, Time: seg.Header.Created}, proof, &seg)
 			if err != nil {
 				problems[i] = fmt.Sprintf("native fork ancestry: %v", err)
 				continue

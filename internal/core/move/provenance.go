@@ -61,15 +61,23 @@ func prepareLineage(ctx context.Context, p *Plan, in Input, seg *ir.Segment) err
 		return err
 	}
 	p.Source.ID, p.Target.ID = sourceID, targetID
-	p.sourceReplica = m.Upsert(lineage.Replica{Endpoint: sourceID, Key: p.Key, Location: p.Source.Location, AgentVersion: p.Source.Version, Time: seg.Header.Created})
-	st, err := m.Observe(p.sourceReplica, seg)
+	p.Source.Profile, p.Source.Binding = in.Source.Install.ProfileID(), in.Source.Install.BindingID()
+	p.Target.Profile, p.Target.Binding = in.Target.Install.ProfileID(), in.Target.Install.BindingID()
+	if in.Source.Install.Profile != nil {
+		p.Source.ProfileName = in.Source.Install.Profile.Name
+	}
+	if in.Target.Install.Profile != nil {
+		p.Target.ProfileName = in.Target.Install.Profile.Name
+	}
+	var st lineage.State
+	p.sourceReplica, st, err = m.ObserveBinding(lineage.Replica{Endpoint: sourceID, Binding: in.Source.Install.BindingID(), Key: p.Key, Location: p.Source.Location, AgentVersion: p.Source.Version, Time: seg.Header.Created}, seg)
 	snapshot := false
 	if err != nil && (p.Options.Fork || p.Options.Conflict == ConflictKeepBoth) {
 		old, _ := m.LatestState(p.sourceReplica)
 		line := m.Fork(p.OperationID+"/rewritten", old.Heads)
 		m.Branch = line
 		p.sourceLine, p.targetLine = line, line
-		p.sourceReplica = m.Upsert(lineage.Replica{Endpoint: sourceID, Key: p.Key, Line: line, Location: p.Source.Location, AgentVersion: p.Source.Version, Time: seg.Header.Created})
+		p.sourceReplica = m.Upsert(lineage.Replica{Endpoint: sourceID, Binding: in.Source.Install.BindingID(), Key: p.Key, Line: line, Location: p.Source.Location, AgentVersion: p.Source.Version, Time: seg.Header.Created})
 		// This is an explicitly chosen independent snapshot, not verified replay of
 		// rewritten records. It retains ancestry but cannot claim exact coverage.
 		m.ReplaceProjection(p.sourceReplica, ir.Cursor{}, nil, old.Heads, []string{"native history changed; separate branch snapshot; inherited representation cannot be verified"})
@@ -110,8 +118,8 @@ func targetState(ctx context.Context, p *Plan, in Input, c Copy) (lineage.State,
 		p.ExpectedDestination = map[string]ir.Cursor{}
 	}
 	p.ExpectedDestination[c.Summary.Path] = seg.Cursor
-	_, id, ok := p.manifest.FindEndpoint(c.Summary.Key, in.Target.Machine.Facts.Endpoint)
-	if !ok {
+	replica, id, ok := p.manifest.FindEndpoint(c.Summary.Key, in.Target.Machine.Facts.Endpoint)
+	if !ok || replica.Binding != in.Target.Install.BindingID() {
 		return lineage.State{}, seg, fmt.Errorf("destination session has no verified lineage; choose a separate fork")
 	}
 	if p.ExpectedDestination == nil {
@@ -124,6 +132,9 @@ func targetState(ctx context.Context, p *Plan, in Input, c Copy) (lineage.State,
 func currentBranchCopies(in Input) []Copy {
 	var out []Copy
 	for _, c := range in.Copies {
+		if c.Summary.Key.Profile != in.Target.Install.ProfileID() {
+			continue
+		}
 		if in.Lineage != nil {
 			if c.Lineage != nil && (c.Lineage.Family != in.Lineage.Family || c.Lineage.Branch != in.Lineage.Branch) {
 				continue
@@ -233,7 +244,7 @@ func recordNativeBackup(ctx context.Context, p *Plan, in Input, m *lineage.Manif
 	if err != nil {
 		return err
 	}
-	id := m.Upsert(lineage.Replica{Endpoint: in.Target.Machine.Facts.Endpoint, Key: sum.Key, Line: p.sourceLine, Location: p.Target.Location, AgentVersion: p.native.Target.Version, Time: when})
+	id := m.Upsert(lineage.Replica{Endpoint: in.Target.Machine.Facts.Endpoint, Binding: in.Target.Install.BindingID(), Key: sum.Key, Line: p.sourceLine, Location: p.Target.Location, AgentVersion: p.native.Target.Version, Time: when})
 	st := m.ReplaceProjection(id, cursor, ps, p.sourceState.Heads, nil)
 	if err := m.AppendHop(lineage.Hop{ID: p.OperationID + "/native", From: p.sourceReplica, To: id, Time: when, Kind: lineage.HopMove, Backup: true, Source: p.sourceState.ID, Target: st.ID}); err != nil {
 		return err

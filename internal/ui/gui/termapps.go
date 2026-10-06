@@ -146,8 +146,8 @@ func (a *App) ShowEntry(machine, key string) (string, error) {
 }
 
 // ShowApp brings forward the agent's own desktop app, which runs a session on this
-// machine (Claude Code in the Claude app), and returns the app's name. hopsesh has no way
-// to pick the session inside the app: the app comes to the front as it is.
+// machine, and returns its name. Modules with exact chat links navigate to that chat;
+// other modules can only bring their app forward.
 func (a *App) ShowApp(machine, key string) (string, error) {
 	core := a.snapshot()
 	a.mu.Lock()
@@ -170,6 +170,16 @@ func (a *App) ShowApp(machine, key string) (string, error) {
 	}
 	apps := m.Spec().Icon.Apps
 	name := nonEmptyStr(appicon.Name(apps), e.AgentName)
+	if _, exact := m.(agent.AppChecker); exact {
+		a.mu.Lock()
+		inv := a.inv
+		a.mu.Unlock()
+		c, err := core.Resume(inv, e, agent.ResumeOptions{App: true})
+		if err != nil {
+			return "", err
+		}
+		return name, start(c)
+	}
 	if appHook != nil {
 		return name, appHook(name)
 	}

@@ -404,7 +404,7 @@ func (m *model) broughtKeys(k string) (tea.Model, tea.Cmd) {
 		return m, m.Init()
 	case "r":
 		if move.HasCopy(r.Outcome) {
-			m.exit = &Exit{RunDir: r.Run.Dir, RunArgv: r.Run.Argv}
+			m.exit = &Exit{RunDir: r.Run.Dir, RunArgv: r.Run.Argv, Env: r.Run.Env, Unset: r.Run.Unset}
 			return m, tea.Quit
 		}
 	case "i":

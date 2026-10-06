@@ -16,6 +16,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/secrets"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
 	"github.com/roeehrl/hopsesh/internal/version"
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 // HereDTO is this machine on the Machines screen.
@@ -141,8 +142,10 @@ func hasAgent(st app.AgentState) bool {
 
 func agentNames(m *app.Machine) []string {
 	out := []string{}
+	seen := map[agent.ID]bool{}
 	for _, st := range m.Agents {
-		if hasAgent(st) {
+		if hasAgent(st) && !seen[st.Agent] {
+			seen[st.Agent] = true
 			out = append(out, strings.TrimSpace(st.Name+" "+st.Install.Version))
 		}
 	}

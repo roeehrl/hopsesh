@@ -162,6 +162,9 @@ test("groups collapse and stay so; ⌥-click and Display do all of them", async 
 });
 
 test("a long list: compact rows and older groups collapsed by default, and a toast that says so", async ({ page }) => {
+  // Stop the previous page's delayed SaveList before replacing its service/home.
+  // Otherwise it can save the four-session defaults into the freshly seeded home.
+  await page.goto("about:blank");
   expect((await page.request.post("/reset")).ok()).toBeTruthy();
   expect((await page.request.post("/seed?n=180")).ok()).toBeTruthy();
   await page.goto("/");

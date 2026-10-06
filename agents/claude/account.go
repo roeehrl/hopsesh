@@ -5,31 +5,40 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
-// authStatus is what `claude auth status --json` reports. The email address is not kept.
+// authStatus is what `claude auth status --json` reports. Only public login metadata is kept.
 type authStatus struct {
+	Email        string `json:"email"`
 	LoggedIn     bool   `json:"loggedIn"`
 	Method       string `json:"authMethod"`       // claude.ai | api-key | …
 	Provider     string `json:"apiProvider"`      // firstParty | bedrock | vertex | …
-	OrgID        string `json:"orgId"`            // identifies the account
+	OrgID        string `json:"orgId"`            // identifies the organization, not the user
 	Subscription string `json:"subscriptionType"` // pro | max | team | enterprise | …
 }
 
 // Account asks claude which login it uses (it reads its own credentials; hopsesh never
 // does). The key is a hash of the organisation id.
 func (m *Module) Account(ctx context.Context, h agent.Host, in agent.Install) (agent.Account, error) {
-	r, err := h.Exec().Run(ctx, []string{"claude", "auth", "status", "--json"}, agent.RunOptions{Timeout: 20 * time.Second})
+	binary := in.Binary
+	if binary == "" {
+		binary = "claude"
+	}
+	r, err := h.Exec().Run(ctx, []string{binary, "auth", "status", "--json"}, agent.RunOptions{Timeout: 20 * time.Second})
 	if err != nil {
 		return agent.Account{}, err
 	}
 	var a authStatus
 	if err := json.Unmarshal(r.Stdout, &a); err != nil {
 		return agent.Account{}, &agent.FormatError{Path: "claude auth status", Err: err}
+	}
+	if r.Code != 0 && a.LoggedIn {
+		return agent.Account{}, fmt.Errorf("claude auth status exited %d", r.Code)
 	}
 	return account(a), nil
 }
@@ -45,7 +54,12 @@ func accountKey(org string) string {
 }
 
 func account(a authStatus) agent.Account {
-	acct := agent.Account{Label: a.Subscription, Key: accountKey(a.OrgID)}
+	raw, _ := json.Marshal([]any{a.LoggedIn, a.Method, a.Provider, a.OrgID, a.Email})
+	fingerprint := sha256.Sum256(raw)
+	acct := agent.Account{Label: a.Subscription, Key: accountKey(a.OrgID), LoggedIn: a.LoggedIn, Email: a.Email, Provider: a.Provider, Confidence: "limited", Observation: hex.EncodeToString(fingerprint[:])}
+	if a.LoggedIn && strings.Contains(strings.ToLower(a.Method), "console") {
+		acct.IsolationWhy = "Claude Console logins without API keys are not isolated by CLAUDE_CONFIG_DIR; use a supported subscription login"
+	}
 	// Remote Control needs a claude.ai subscription login with Anthropic as the provider.
 	switch {
 	case !a.LoggedIn:

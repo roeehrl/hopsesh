@@ -109,12 +109,20 @@ func (s *peerSession) handle(ctx context.Context, method string, params json.Raw
 
 func (s *peerSession) hello(ctx context.Context) peer.HelloReply {
 	m := s.a.localMachine(ctx)
+	defer m.Close()
 	r := peer.HelloReply{Protocol: peer.Protocol, Version: version.Version, Machine: m.Name, OS: m.Facts.OS, Receive: s.a.Cfg.Peer.Receive, Agents: []peer.AgentInfo{}}
 	for _, mod := range s.a.Modules() {
 		spec := mod.Spec()
 		in := agent.Install{}
 		if h, err := m.For(ctx, spec, agent.Install{}, nil); err == nil {
 			in, _ = mod.Detect(ctx, h)
+		}
+		if installs, err := s.a.profileInstalls(ctx, m, mod, in, false); err == nil {
+			for _, profile := range installs {
+				if profile.Present {
+					in.Present = true
+				}
+			}
 		}
 		r.Agents = append(r.Agents, peer.AgentInfo{ID: spec.ID, Name: spec.Name, Version: in.Version, Present: in.Present, Write: agent.Has(mod, agent.CapWrite)})
 	}
@@ -125,6 +133,7 @@ func (s *peerSession) hello(ctx context.Context) peer.HelloReply {
 // repositories go is this machine's business).
 func (a *App) receiveOptions(o move.Options) move.Options {
 	d := a.DefaultOptions()
+	d.TargetProfile = o.TargetProfile
 	d.TargetDir, d.Clone, d.Worktree = o.TargetDir, o.Clone, o.Worktree
 	d.OperationID, d.TargetSession = o.OperationID, o.TargetSession
 	d.Fork, d.RemoteControl, d.Notify, d.Redact = o.Fork, o.RemoteControl, o.Notify, o.Redact
@@ -194,6 +203,7 @@ type Push struct {
 	Peer   peer.HelloReply
 	Pushed string // the branch was pushed first ("" when not)
 
+	source move.Side
 	a      *App
 	to     config.Host
 	e      Entry
@@ -220,7 +230,9 @@ func (a *App) StartPush(ctx context.Context, inv *Inventory, e Entry, to config.
 	if err != nil {
 		return nil, err
 	}
-	p := &Push{a: a, to: to, e: e, client: c, Peer: hr, close: closeFn}
+	mod, _ := a.Module(e.Agent)
+	install, _ := here.InstallProfile(e.Agent, e.Session.Key.Profile)
+	p := &Push{source: move.Side{Machine: here.host, Module: mod, Install: install}, a: a, to: to, e: e, client: c, Peer: hr, close: closeFn}
 	if !hr.Receive {
 		p.Close()
 		return nil, peer.Refused(to.Name)
@@ -351,7 +363,7 @@ func (a *App) packageOf(ctx context.Context, here *Machine, e Entry) (peer.Packa
 	if !ok {
 		return peer.Package{}, fmt.Errorf("%s is not enabled", e.Agent)
 	}
-	in, ok := here.Install(e.Agent)
+	in, ok := here.InstallProfile(e.Agent, e.Session.Key.Profile)
 	if !ok {
 		return peer.Package{}, fmt.Errorf("%w: %s", agent.ErrNotInstalled, mod.Spec().Name)
 	}
@@ -369,6 +381,19 @@ func (a *App) packageOf(ctx context.Context, here *Machine, e Entry) (peer.Packa
 	f := here.host.Facts
 	pkg := peer.Package{Location: here.Name, Facts: host.Facts{OS: f.OS, Arch: f.Arch, Home: f.Home, Endpoint: f.Endpoint}, Agent: e.Agent, Install: in,
 		Session: e.Session, Live: e.Live, Git: e.Git, GitError: e.GitError, Lineage: e.Lineage, Account: a.account(ctx, here, mod, in)}
+	if pkg.Install.Profile != nil {
+		public := *pkg.Install.Profile
+		public.Name = ""
+		public.Tags = nil
+		public.Account = nil
+		public.Error = ""
+		pkg.Install.Profile = &public
+	}
+	if pkg.Account != nil {
+		public := *pkg.Account
+		public.Email = ""
+		pkg.Account = &public
+	}
 	var size int64
 	for _, bf := range b.Files {
 		p := h.Path().Join(in.Root(bf.Root), bf.Rel)
@@ -399,6 +424,12 @@ func (a *App) packageOf(ctx context.Context, here *Machine, e Entry) (peer.Packa
 // this machine records, in its own journal, what changes for its copy (the mark and the
 // lineage), and keeps a mark owed while the copy here is still open.
 func (p *Push) Commit(ctx context.Context) (*PushResult, error) {
+	if err := p.a.checkAccountRegistration(p.source.Install); err != nil {
+		return nil, err
+	}
+	if err := move.ValidateProfiles(ctx, move.Input{Source: p.source}); err != nil {
+		return nil, err
+	}
 	var reply peer.ApplyReply
 	if err := p.client.Call(ctx, peer.MethodApply, struct{}{}, &reply); err != nil {
 		return nil, err
@@ -444,7 +475,12 @@ func (a *App) replay(ctx context.Context, e Entry, j *journal.Journal, ws []host
 		return fmt.Errorf("%s is not enabled", e.Agent)
 	}
 	m := a.localMachine(ctx)
-	h0, err := m.For(ctx, mod.Spec(), agent.Install{}, nil)
+	defer m.Close()
+	initial := agent.Install{Agent: e.Agent, Profile: e.Profile, Accounts: mod.Spec().Accounts}
+	if err := a.checkAccountRegistration(initial); err != nil {
+		return err
+	}
+	h0, err := m.For(ctx, mod.Spec(), initial, nil)
 	if err != nil {
 		return err
 	}
@@ -452,6 +488,7 @@ func (a *App) replay(ctx context.Context, e Entry, j *journal.Journal, ws []host
 	if err != nil {
 		return err
 	}
+	in.Profile = e.Profile
 	h, err := m.For(ctx, mod.Spec(), in, j)
 	if err != nil {
 		return err

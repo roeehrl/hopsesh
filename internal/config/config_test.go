@@ -276,7 +276,7 @@ func TestList(t *testing.T) {
 		}
 	}
 	c.List = List{GroupBy: "folder"}
-	if err := c.Check(); err == nil || !strings.Contains(err.Error(), `use "repository", "location", "agent", "status", "last-active", "none"`) {
+	if err := c.Check(); err == nil || !strings.Contains(err.Error(), `use "repository", "location", "agent", "account", "tag", "status", "last-active", "none"`) {
 		t.Errorf("the error names the allowed values: %v", err)
 	}
 	c.List = List{}

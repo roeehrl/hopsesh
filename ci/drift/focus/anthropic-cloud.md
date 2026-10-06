@@ -20,3 +20,13 @@ the "continued from another machine" record that marks it; for a new command to
 list, attach to, message or archive cloud sessions, or a non-interactive way to start one
 (the watched issues ask for these); and for changes to what the docs say about cloud
 environments, data use, and the terms that apply to cloud sessions.
+
+Account-profile integration: cloud operations pin their driver profile and binding
+(`internal/app/accounts.go`, `internal/core/move`, `internal/app/pending.go`). Watch whether
+CLAUDE_CONFIG_DIR/auth changes alter the owner used for handoff or where teleport writes
+its local copy. Cloud account selection is separate from a local destination profile;
+bring to the default first, then use a reviewed account transfer. Do not assume that a
+local label or email proves cloud ownership. Check delayed transcript adoption, plan
+invalidation after login changes, and causal receipts when returning to another account
+or agent. Use `docs/account-lineage-contract.md` and the module's manifest integrationFiles
+for the current implementation and tests; never read credentials or initiate a login.

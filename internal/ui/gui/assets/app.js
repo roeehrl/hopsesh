@@ -8,6 +8,7 @@ import "./handoff.js";
 import "./hop.js";
 import "./machines.js";
 import "./settings.js";
+import "./accounts.js";
 import { undoLast } from "./activity.js";
 import { openPalette } from "./palette.js";
 import { loadTabs, onTabs, showTerminal, tabs, exits } from "./term.js";

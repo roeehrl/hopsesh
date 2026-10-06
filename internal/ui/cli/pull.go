@@ -11,7 +11,9 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/core/convert"
+	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/move"
+	"github.com/roeehrl/hopsesh/internal/core/proc"
 	"github.com/roeehrl/hopsesh/internal/core/repos"
 	"github.com/roeehrl/hopsesh/internal/core/termapp"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -43,6 +45,7 @@ func addPullFlags(cmd *cobra.Command) {
 	f.Bool("push", false, "first push the session branch's unpushed commits on the other machine")
 	f.Bool("replace", false, "when the copy here changed too, replace it anyway (hopsesh undo brings it back)")
 	f.String("operation-id", "", "idempotency key for retrying the same transfer")
+	f.String("target-profile", "", "destination account profile ID (hopsesh accounts list)")
 	f.String("target-session", "", "explicit destination session when a branch has several replicas here")
 	f.Bool("keep-both", false, "when both copies changed, keep both (this one comes in as a separate session)")
 	f.Bool("app", false, "open it in the agent's desktop app instead of the terminal (agents that can)")
@@ -59,6 +62,7 @@ func (r *run) pullOptions(cmd *cobra.Command) (move.Options, error) {
 	o.TargetDir, _ = f.GetString("to")
 	o.OperationID, _ = f.GetString("operation-id")
 	o.TargetSession, _ = f.GetString("target-session")
+	o.TargetProfile, _ = f.GetString("target-profile")
 	if v, _ := f.GetString("repos"); v != "" {
 		o.ReposDir = expandHome(v)
 	}
@@ -244,6 +248,13 @@ func pull(cmd *cobra.Command, refArg string) error {
 	}
 	r.renderResult(p, res)
 	if run, _ := cmd.Flags().GetBool("run"); run {
+		if p.Options.App && len(p.Resume.Argv) > 0 {
+			c := p.Resume
+			command := proc.CommandContext(ctx, c.Argv[0], c.Argv[1:]...)
+			command.Dir = c.Dir
+			command.Env = append(host.Without(os.Environ(), c.Unset), c.Env...)
+			return command.Run()
+		}
 		l := app.Launch{Kind: termapp.KindSession, Run: p.Resume, Key: p.Placement.Key,
 			Labels: termapp.Labels{Title: p.Title, Agent: p.Agent, Machine: app.LocalName()}}
 		if res.PromptFile != "" && len(l.Run.Argv) > 1 {

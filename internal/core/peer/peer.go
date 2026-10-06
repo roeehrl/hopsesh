@@ -27,8 +27,9 @@ import (
 //
 //   - 1: hopsesh 0.2 and 0.3.
 //   - 2: pre-release lineage/2 manifests and cloud locations.
-//   - 3: hopsesh 0.4: causal lineage/3, persistent endpoints and stable transfer IDs.
-const Protocol = 3
+//   - 3: pre-release causal lineage/3, persistent endpoints and stable transfer IDs.
+//   - 4: scoped account profiles and binding-aware lineage/4.
+const Protocol = 4
 
 // FirstVersion is the first hopsesh release that speaks Protocol: the version to update an
 // older machine to.

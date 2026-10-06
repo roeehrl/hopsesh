@@ -49,11 +49,13 @@ var iconSVG string
 // Spec declares Codex.
 func (*Module) Spec() agent.Spec {
 	return agent.Spec{
-		ID:        id,
-		Name:      "Codex",
-		Vendor:    "OpenAI",
-		Stability: agent.Experimental,
-		Tested:    []string{"0.153"},
+		Accounts:      &agent.ProfileSpec{RootEnv: []string{"CODEX_HOME", "CODEX_SQLITE_HOME"}, Unset: []string{"OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL", "CODEX_APP_SERVER_ADDRESS"}, Login: []string{"login"}, InitialFiles: map[string]string{"config.toml": "cli_auth_credentials_store = \"keyring\"\n"}},
+		ID:            id,
+		DesktopScheme: "codex",
+		Name:          "Codex",
+		Vendor:        "OpenAI",
+		Stability:     agent.Experimental,
+		Tested:        []string{"0.153"},
 		Binaries: []agent.Binary{{
 			Name: "codex",
 			Candidates: map[string][]string{
@@ -68,9 +70,9 @@ func (*Module) Spec() agent.Spec {
 		Instructions:       []string{"AGENTS.md"},
 		GlobalInstructions: []string{"{home}/AGENTS.override.md", "{home}/AGENTS.md"},
 		Tools:              "shell, apply_patch, update_plan",
-		Features:           []agent.Capability{agent.CapFork},
+		Features:           []agent.Capability{agent.CapFork, agent.CapApp},
 		Icon: agent.Icon{SVG: iconSVG, Apps: map[string][]string{
-			"darwin": {"/Applications/Codex.app", "~/Applications/Codex.app"},
+			"darwin": {"/Applications/Codex.app", "~/Applications/Codex.app", "/Applications/ChatGPT.app", "~/Applications/ChatGPT.app"},
 		}},
 		Clouds: []agent.Cloud{cloud()},
 	}
@@ -78,7 +80,9 @@ func (*Module) Spec() agent.Spec {
 
 // Detect resolves CODEX_HOME and the codex binary.
 func (m *Module) Detect(_ context.Context, h agent.Host) (agent.Install, error) {
-	return agent.DefaultInstall(m.Spec(), h), nil
+	in := agent.DefaultInstall(m.Spec(), h)
+	detectDesktop(h, &in)
+	return in, nil
 }
 
 // meta is the first record of a rollout.
@@ -151,6 +155,9 @@ func (m *Module) List(_ context.Context, h agent.Host, in agent.Install) (agent.
 		}
 	}
 	sort.Slice(out.Sessions, func(i, j int) bool { return out.Sessions[i].LastActivity.After(out.Sessions[j].LastActivity) })
+	for i := range out.Sessions {
+		out.Sessions[i].Key.Profile = in.ProfileID()
+	}
 	return out, nil
 }
 
@@ -522,6 +529,13 @@ func (m *Module) Verify(_ context.Context, h agent.Host, mp agent.MovePlan, stag
 
 // Resume is `codex resume <id> [prompt]` (or `codex fork <id>`), run in the thread's folder.
 func (m *Module) Resume(in agent.Install, key agent.SessionKey, p agent.Placement, o agent.ResumeOptions) agent.Command {
+	in.Accounts = m.Spec().Accounts
+	if o.App {
+		if m.CheckApp(in, key, o) != nil {
+			return agent.Command{}
+		}
+		return desktopCommand(in, key)
+	}
 	verb := "resume"
 	if o.Fork {
 		verb = "fork"
@@ -530,7 +544,7 @@ func (m *Module) Resume(in agent.Install, key agent.SessionKey, p agent.Placemen
 	if o.Prompt != "" {
 		argv = append(argv, o.Prompt)
 	}
-	return agent.Command{Argv: argv, Dir: p.CWD}
+	return in.ScopeCommand(agent.Command{Argv: argv, Dir: p.CWD})
 }
 
 // Live probes the lock Codex holds on thread-writer-locks/<id>.lock while a thread is

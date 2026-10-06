@@ -1,6 +1,6 @@
 # Session lineage and round trip implementation plan
 
-Status: implemented on `sessions-redesign` using `lineage/3` and peer protocol 3.
+Status: implemented on `sessions-redesign` using `lineage/4` and peer protocol 4.
 The four defects below now have regression tests. Release still requires the hosted
 scenario and OS-pair gates; local verification is recorded at the end of this document.
 

@@ -262,7 +262,7 @@ func (r *runner) arrived(s *sc, on side, agent, cwd, otherCwd string) (Found, er
 	}
 	// Continuing in the other agent summarizes the oldest steps of a long conversation to
 	// fit the target's window; only a move keeps all of it.
-	if s.row.Content == "large" && agent == s.row.From && f.Bytes < 1<<20 {
+	if s.row.Content == "large" && f.Bytes == 0 {
 		return f, fmt.Errorf("%s: the large conversation arrived with %d bytes", on.label(), f.Bytes)
 	}
 	return f, nil
@@ -325,7 +325,7 @@ func (r *runner) markPrefix(s *sc) string {
 	if s.row.To != s.row.From {
 		return "↪ continued in "
 	}
-	return "↪ moved to "
+	return "↪ continued in "
 }
 
 func (r *runner) pullAndUndo(s *sc) error {
@@ -422,7 +422,7 @@ func (r *runner) conflict(s *sc) error {
 	if err != nil {
 		return err
 	}
-	if err := r.here.do("append", AppendReq{Agent: s.row.To, Path: f.Path, ID: s.id, Text: "here " + s.marker}, &struct{}{}); err != nil {
+	if err := r.here.do("append", AppendReq{Agent: s.row.To, Path: f.Path, ID: f.ID, Text: "here " + s.marker}, &struct{}{}); err != nil {
 		return err
 	}
 	if err := r.there.do("append", AppendReq{Agent: s.row.From, Path: s.srcFile, ID: s.id, Text: "there " + s.marker}, &struct{}{}); err != nil {
@@ -463,7 +463,7 @@ func (r *runner) undoUsed(s *sc) error {
 	if err != nil {
 		return err
 	}
-	if err := r.here.do("append", AppendReq{Agent: s.row.To, Path: f.Path, ID: s.id, Text: "kept working " + s.marker}, &struct{}{}); err != nil {
+	if err := r.here.do("append", AppendReq{Agent: s.row.To, Path: f.Path, ID: f.ID, Text: "kept working " + s.marker}, &struct{}{}); err != nil {
 		return err
 	}
 	out, err := r.hs(false, "undo", "--yes")

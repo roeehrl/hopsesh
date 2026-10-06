@@ -220,6 +220,16 @@ start fresh and add your machines again.
   list and ⌘Enter runs its action; cloud sessions carry a cloud badge; "In the cloud" leaves
   out Remote Control mirrors, which run on their machine; added machines are scanned
   straight away, with Retry when a scan fails; Move offers only the clouds that are on.
+- **Account profiles:** name and tag independent Claude Code and Codex accounts (Settings →
+  Accounts, `a` in the terminal UI, `hopsesh accounts`, one store), find their folders here
+  and on allowed machines, and sign in with the vendor's own command. A transfer plan names
+  its destination profile, and plans refuse edited profiles or a login that changed. A
+  return across profiles becomes a portable copy and leaves the original as it was; if both
+  copies changed, hopsesh offers a separate branch and never merges. See
+  [Accounts](docs/accounts.md).
+- **Codex sessions open in the Codex app** with the exact thread selected (the Resume menu,
+  `hopsesh open <session> --app`); an account in a custom folder opens in a terminal,
+  because the app's links can't select it.
 - Module SDK: `Previewer` (`preview`) and `Renamer` (`rename`), `PreviewText` and
   `BuildPreview`; `LiveInfo.Procs` lists every process that has a session open, and
   `LiveInfo.Name` the name the running agent gives it.
@@ -236,10 +246,10 @@ start fresh and add your machines again.
   Then add and allow your machines again. Your sessions are not affected. A configuration
   file written by a newer hopsesh is reported as newer: update hopsesh.
 - Lineage manifests (the `.hopsesh.json` file beside each session hopsesh moved) have a new
-  format that can record cloud copies. Manifests written by 0.3 are not read: a session
+  format (`lineage/4`) that records cloud copies, account profiles and forks. Manifests written by 0.3 are not read: a session
   moved with 0.3 is treated as if hopsesh had not moved it before. Update hopsesh on every
   machine where you run it, so they read each other's manifests.
-- The peer protocol is now 2: a push between hopsesh 0.3 and 0.4 stops at hello and names
+- The peer protocol is now 4: a push between hopsesh 0.3 and 0.4 stops at hello and names
   the machine to update to 0.4.0 or later.
 - The app now resumes sessions in its hopsesh Terminal window by default. To open them in
   your terminal app as before, choose **In my terminal** in Settings → Terminal, or pick

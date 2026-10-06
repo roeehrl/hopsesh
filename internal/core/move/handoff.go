@@ -838,7 +838,7 @@ func applyHandoff(ctx context.Context, p *Plan, env Env) (*Result, error) {
 	if err := src.Machine.CommitIdentity(ctx); err != nil {
 		return fail(StepLineage, "cannot establish the source endpoint", err)
 	}
-	sourceReplica := lin.Upsert(lineage.Replica{Endpoint: src.Machine.Facts.Endpoint, Key: s.Key, Location: machine, AgentVersion: s.AgentVersion, Time: s.LastActivity})
+	sourceReplicaInfo := lineage.Replica{Endpoint: src.Machine.Facts.Endpoint, Binding: src.Install.BindingID(), Key: s.Key, Location: machine, AgentVersion: s.AgentVersion, Time: s.LastActivity}
 	sourceSegment, e := readSegment(ctx, src, s)
 	if e != nil {
 		return fail(StepLineage, "cannot read the source conversation", e)
@@ -848,7 +848,7 @@ func applyHandoff(ctx context.Context, p *Plan, env Env) (*Result, error) {
 	}
 	sourceLine := lin.Branch
 	targetLine := sourceLine
-	sourceState, e := lin.Observe(sourceReplica, &sourceSegment)
+	sourceReplica, sourceState, e := lin.ObserveBinding(sourceReplicaInfo, &sourceSegment)
 	if e != nil {
 		return fail(StepLineage, "cannot verify source ancestry", e)
 	}

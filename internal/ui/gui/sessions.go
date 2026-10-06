@@ -14,6 +14,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/appicon"
 	"github.com/roeehrl/hopsesh/internal/core/convert"
+	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/presence"
@@ -49,11 +50,14 @@ type AgentOpt struct {
 
 // EntryDTO is one session row.
 type EntryDTO struct {
-	Machine   string   `json:"machine"`
-	Agent     agent.ID `json:"agent"`
-	AgentName string   `json:"agentName"`
-	Key       string   `json:"key"` // agent/session
-	Title     string   `json:"title"`
+	CanApp    bool                  `json:"canApp"`
+	AppWhy    string                `json:"appWhy,omitempty"`
+	Profile   *agent.RuntimeProfile `json:"profile,omitempty"`
+	Machine   string                `json:"machine"`
+	Agent     agent.ID              `json:"agent"`
+	AgentName string                `json:"agentName"`
+	Key       string                `json:"key"` // agent/session
+	Title     string                `json:"title"`
 	// TitleSource is where the title comes from: custom (renamed), live (the running
 	// agent's name for it), generated (the agent's own title), prompt (the first prompt),
 	// reply (the first reply) or none ("Untitled · folder").
@@ -153,7 +157,8 @@ type ScanDTO struct {
 }
 
 // Scan reads this machine and every allowed machine, for every enabled agent.
-func (a *App) Scan() (*ScanDTO, error) {
+func (a *App) Scan() (*ScanDTO, error) { return a.scanAccounts(false) }
+func (a *App) scanAccounts(forceAccounts bool) (*ScanDTO, error) {
 	a.scanMu.Lock()
 	defer a.scanMu.Unlock()
 	a.mu.Lock()
@@ -170,7 +175,7 @@ func (a *App) Scan() (*ScanDTO, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	inv := core.Scan(ctx, app.ScanOptions{})
+	inv := core.Scan(ctx, app.ScanOptions{ForceAccounts: forceAccounts})
 	for _, m := range inv.Machines {
 		if !m.Local {
 			a.scanPhase(m.Name, "done", scanProblem(m))
@@ -259,11 +264,7 @@ func scanDTO(core *app.App, inv *app.Inventory, updated, elsewhere time.Time) *S
 				d.Sessions++
 			}
 		}
-		for _, st := range m.Agents {
-			if hasAgent(st) {
-				d.Agents = append(d.Agents, strings.TrimSpace(st.Name+" "+st.Install.Version))
-			}
-		}
+		d.Agents = agentNames(m)
 		out.Machines = append(out.Machines, d)
 		if !m.Local && m.Status == app.StatusOK && m.Hopsesh != "" {
 			out.Peers = append(out.Peers, m.Name)
@@ -294,11 +295,13 @@ func continueTargets(core *app.App, inv *app.Inventory) []AgentOpt {
 		return nil
 	}
 	var out []AgentOpt
+	seen := map[agent.ID]bool{}
 	for _, st := range here.Agents {
 		m, ok := core.Module(st.Agent)
-		if !ok || !st.Install.Present || !agent.Has(m, agent.CapWrite) {
+		if seen[st.Agent] || !ok || !st.Install.Present || !agent.Has(m, agent.CapWrite) {
 			continue
 		}
+		seen[st.Agent] = true
 		out = append(out, AgentOpt{ID: st.Agent, Name: st.Name, Experimental: m.Spec().Stability == agent.Experimental})
 	}
 	return out
@@ -359,12 +362,35 @@ func clipWords(s string, n int) string {
 func entryDTO(core *app.App, inv *app.Inventory, it app.Item, targets []AgentOpt) EntryDTO {
 	e, s := it.Entry, it.Entry.Session
 	title, source := titleFor(s, e.Live.Name)
-	d := EntryDTO{Machine: e.Machine, Agent: e.Agent, AgentName: e.AgentName, Key: s.Key.String(), Title: title, TitleSource: source,
+	d := EntryDTO{Profile: e.Profile, Machine: e.Machine, Agent: e.Agent, AgentName: e.AgentName, Key: s.Key.String(), Title: title, TitleSource: source,
 		Session: string(s.Key.Session), Path: s.Path, AgentVersion: s.AgentVersion, CanRename: core.CanRename(e), Places: []PlaceDTO{},
 		Status: statusWords(core, e), Live: e.Live.State == agent.Live, LastActive: s.LastActivity.Format(time.RFC3339),
 		LastPrompt: s.LastPrompt, CWD: s.CWD, SizeKB: s.Size / 1024, ContinueIn: []AgentOpt{},
 		Needs:   e.Live.State == agent.Live && strings.HasPrefix(e.Live.Status, "waiting"),
 		Journey: journey(e.Lineage), LineageError: e.LineageError, CanArchiveLineage: e.CanArchiveLineage, History: history(core, e.Lineage), Location: string(e.Location.Kind), Cloud: cloudEntryDTO(core, e), Mirror: mirrorDTO(s.Mirror)}
+	if e.Machine == app.LocalName() && !e.Location.IsCloud() {
+		if mod, ok := core.Module(e.Agent); ok && agent.Has(mod, agent.CapApp) {
+			d.CanApp = true
+			if e.Profile != nil && !e.Profile.Default {
+				d.CanApp = false
+				d.AppWhy = "Desktop opening cannot select this account profile; use a terminal"
+			}
+			if checker, ok := mod.(agent.AppChecker); ok {
+				d.CanApp = false
+				d.AppWhy = "Scan this machine to check the desktop installation"
+				if machine := inv.Machine(e.Machine); machine != nil {
+					if install, ok := machine.InstallProfile(e.Agent, e.Session.Key.Profile); ok {
+						d.CanApp, d.AppWhy = true, ""
+						if err := checker.CheckApp(install, e.Session.Key, agent.ResumeOptions{App: true}); err != nil {
+							d.CanApp = false
+							d.AppWhy = err.Error()
+						}
+					}
+				}
+			}
+		}
+	}
+
 	if e.Live.State == agent.Live && e.Live.App {
 		d.App = e.AgentName
 		if m, ok := core.Module(e.Agent); ok {
@@ -529,6 +555,7 @@ func (a *App) find(machine, key string) (app.Entry, error) {
 
 // OptsDTO are the choices on the plan screen.
 type OptsDTO struct {
+	TargetProfile string `json:"targetProfile"`
 	OperationID   string `json:"operationId"`
 	TargetSession string `json:"targetSession"`
 	TargetDir     string `json:"targetDir"`
@@ -565,6 +592,7 @@ func (o OptsDTO) options(d move.Options) move.Options {
 	}
 	d.Fork, d.RemoteControl, d.Notify, d.Redact, d.App = o.Fork, o.RemoteControl, o.Notify, o.Redact, o.App
 	d.OperationID, d.TargetSession = o.OperationID, o.TargetSession
+	d.TargetProfile = o.TargetProfile
 	d.Mark, d.SyncCode, d.Push, d.StopLocal, d.Conflict = o.Mark, o.SyncCode, o.Push, o.StopLocal, o.Conflict
 	d.Fidelity, d.Native, d.Note, d.Go = convert.Fidelity(nonEmpty(o.Fidelity, string(convert.History))), o.Native, strings.TrimSpace(o.Note), o.Go
 	d.CarryRules, d.CodeOnly, d.AppendOriginal = o.CarryRules, o.CodeOnly, o.Append
@@ -597,40 +625,42 @@ type ContinueDTO struct {
 
 // PlanDTO is a plan as the window shows it.
 type PlanDTO struct {
-	NoWork       bool             `json:"noWork"`
-	Destinations []agent.Summary  `json:"destinations,omitempty"`
-	Kind         string           `json:"kind"` // move | continue
-	Title        string           `json:"title"`
-	Agent        string           `json:"agent"`     // the agent it lands in
-	FromAgent    string           `json:"fromAgent"` // the agent it comes from
-	SourceHost   string           `json:"sourceHost"`
-	SourceOS     string           `json:"sourceOs"`
-	SourceCWD    string           `json:"sourceCwd"`
-	TargetCWD    string           `json:"targetCwd"`
-	Live         bool             `json:"live"`
-	Repo         move.RepoPlan    `json:"repo"`
-	Mappings     []agent.Mapping  `json:"mappings"`
-	Files        int              `json:"files"`
-	Bytes        int64            `json:"bytes"`
-	Mark         string           `json:"mark"`
-	Sync         string           `json:"sync"`
-	FromSource   bool             `json:"syncFromSource"`
-	Push         bool             `json:"push"`
-	StopHere     bool             `json:"stopHere"`
-	Conflict     string           `json:"conflict"`
-	Warnings     []string         `json:"warnings"`
-	Blockers     []string         `json:"blockers"`
-	NewName      string           `json:"newName"`
-	OtherAcct    bool             `json:"otherAccount"`
-	Continue     *ContinueDTO     `json:"continue,omitempty"`
-	NativeCopy   *move.NativeCopy `json:"nativeCopy,omitempty"`
-	Can          CanDTO           `json:"can"`
-	SetAside     int              `json:"setAside"`
-	Options      move.Options     `json:"-"`
-	SessionKey   agent.SessionKey `json:"-"`
-	SourceAgent  agent.ID         `json:"sourceAgent"`
-	Machine      string           `json:"machine,omitempty"` // a push: the machine it goes to
-	Fetch        *move.FetchPlan  `json:"fetch,omitempty"`   // bringing it from a cloud
+	SourceProfile string           `json:"sourceProfile,omitempty"`
+	TargetProfile string           `json:"targetProfile,omitempty"`
+	NoWork        bool             `json:"noWork"`
+	Destinations  []agent.Summary  `json:"destinations,omitempty"`
+	Kind          string           `json:"kind"` // move | continue
+	Title         string           `json:"title"`
+	Agent         string           `json:"agent"`     // the agent it lands in
+	FromAgent     string           `json:"fromAgent"` // the agent it comes from
+	SourceHost    string           `json:"sourceHost"`
+	SourceOS      string           `json:"sourceOs"`
+	SourceCWD     string           `json:"sourceCwd"`
+	TargetCWD     string           `json:"targetCwd"`
+	Live          bool             `json:"live"`
+	Repo          move.RepoPlan    `json:"repo"`
+	Mappings      []agent.Mapping  `json:"mappings"`
+	Files         int              `json:"files"`
+	Bytes         int64            `json:"bytes"`
+	Mark          string           `json:"mark"`
+	Sync          string           `json:"sync"`
+	FromSource    bool             `json:"syncFromSource"`
+	Push          bool             `json:"push"`
+	StopHere      bool             `json:"stopHere"`
+	Conflict      string           `json:"conflict"`
+	Warnings      []string         `json:"warnings"`
+	Blockers      []string         `json:"blockers"`
+	NewName       string           `json:"newName"`
+	OtherAcct     bool             `json:"otherAccount"`
+	Continue      *ContinueDTO     `json:"continue,omitempty"`
+	NativeCopy    *move.NativeCopy `json:"nativeCopy,omitempty"`
+	Can           CanDTO           `json:"can"`
+	SetAside      int              `json:"setAside"`
+	Options       move.Options     `json:"-"`
+	SessionKey    agent.SessionKey `json:"-"`
+	SourceAgent   agent.ID         `json:"sourceAgent"`
+	Machine       string           `json:"machine,omitempty"` // a push: the machine it goes to
+	Fetch         *move.FetchPlan  `json:"fetch,omitempty"`   // bringing it from a cloud
 }
 
 // Plan works out how a session comes here: in its own agent (target "") or continued in
@@ -670,15 +700,15 @@ func (a *App) planEntry(core *app.App, inv *app.Inventory, e app.Entry, target s
 }
 
 func planDTO(p *move.Plan, e app.Entry, tm agent.Module) *PlanDTO {
-	d := &PlanDTO{NoWork: p.NoWork, Destinations: p.Destinations, Kind: p.Kind, Title: p.Title, Agent: p.Agent, FromAgent: e.AgentName, SourceHost: p.Source.Location,
+	d := &PlanDTO{SourceProfile: p.Source.ProfileName, TargetProfile: p.Target.ProfileName, NoWork: p.NoWork, Destinations: p.Destinations, Kind: p.Kind, Title: p.Title, Agent: p.Agent, FromAgent: e.AgentName, SourceHost: p.Source.Location,
 		SourceOS: p.Source.OS, SourceCWD: p.Source.CWD, TargetCWD: p.Target.CWD, Live: p.Live, Repo: p.Repo,
 		Mappings: p.Placement.Mappings, Files: len(p.Files.Files), Bytes: p.Bytes, Mark: p.Mark, Sync: p.Sync,
 		FromSource: p.SyncFromSource, Push: p.Push, StopHere: p.StopHere, Conflict: p.Conflict,
 		Warnings: p.Warnings, Blockers: p.Blockers, NewName: p.NewName, OtherAcct: p.Placement.OtherAccount,
 		SetAside: len(p.SetAside), NativeCopy: p.NativeCopy, Options: p.Options, SessionKey: p.Key, SourceAgent: e.Agent,
 		Can: CanDTO{Fork: agent.Has(tm, agent.CapFork), RemoteControl: agent.Has(tm, agent.CapRemoteControl),
-			App: agent.Has(tm, agent.CapApp), Notify: agent.Has(tm, agent.CapNotify), Native: agent.Has(tm, agent.CapNativeReplay),
-			Import: importsFrom(tm, e.Agent)}}
+			App: agent.Has(tm, agent.CapApp), Notify: agent.Has(tm, agent.CapNotify), Native: !p.Options.OtherAccount && agent.Has(tm, agent.CapNativeReplay),
+			Import: !p.Options.OtherAccount && importsFrom(tm, e.Agent)}}
 	if c := p.Continue; c != nil {
 		d.Continue = &ContinueDTO{From: c.From, Fidelity: string(c.Fidelity), Relation: c.Relation, Report: c.Report, Briefing: c.Briefing, Via: c.Via}
 		if c.AppendTo != nil {
@@ -895,8 +925,21 @@ func start(c agent.Command) error {
 	if len(c.Argv) == 0 {
 		return errors.New("no command")
 	}
-	cmd := proc.Command(c.Argv[0], c.Argv[1:]...)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if !c.Wait {
+		cancel()
+		ctx = context.Background()
+	}
+	defer cancel()
+	cmd := proc.CommandContext(ctx, c.Argv[0], c.Argv[1:]...)
 	cmd.Dir = c.Dir
+	cmd.Env = append(host.Without(os.Environ(), c.Unset), c.Env...)
+	if c.Wait {
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("opening desktop app: %w: %s", err, strings.TrimSpace(string(output)))
+		}
+		return nil
+	}
 	if err := cmd.Start(); err != nil {
 		return err
 	}

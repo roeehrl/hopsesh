@@ -16,11 +16,19 @@ function defaults() {
 
 // planFor opens the sheet for a session: target "" keeps its agent, sendTo pushes it;
 // codeOnly brings a cloud session's branch alone.
-export async function planFor(e, { target = "", sendTo = "", codeOnly = false }) {
-  cur = { e, target, sendTo, opts: Object.assign(defaults(), { operationId: crypto.randomUUID() }, { codeOnly }), plan: null, busy: false, applying: false };
+export async function planFor(e, { target = "", sendTo = "", codeOnly = false, targetProfile = "" }) {
+  cur = { e, target, sendTo, opts: Object.assign(defaults(), { operationId: crypto.randomUUID() }, { codeOnly, targetProfile }), plan: null, busy: false, applying: false };
   fill(sheet, h("div", { class: "sheet-in" }, h("div", { class: "loading", role: "status", style: "min-height:240px" },
     sendTo ? `Asking hopsesh on ${sendTo} to plan it…` : "Working out the plan…")));
   if (!sheet.open) sheet.showModal();
+  const c=cur;
+  try {c.profiles = e.cloud?[]:await api("AccountDestinations", sendTo, target || e.agent);} catch {c.profiles=[];}
+  if(cur!==c)return;
+  if(!c.opts.targetProfile && c.profiles.length && !c.profiles.some(p=>p.default)) {
+    fill(sheet,h("div",{class:"sheet-in"},h("div",{class:"sheet-body"},h("h2",{},"Choose a destination account"),
+      ...c.profiles.map(p=>h("button",{class:"btn",onclick:()=>{c.opts.targetProfile=p.id;replan()}},`${p.name} · ${p.account?.email||p.agent}`))),
+      h("div",{class:"sheet-foot"},h("button",{class:"btn",onclick:()=>sheet.close()},"Cancel"))));return;
+  }
   await replan();
 }
 
@@ -80,8 +88,18 @@ async function chooseFolder() {
 }
 
 function summary(p) {
+ const profiles=cur.profiles||[];
+ const accountChoice=profiles.length ? h("label",{class:"summary"},
+   `From ${p.sourceProfile || cur.e?.profile?.name || p.fromAgent} → Destination account`,
+   h("select",{"aria-label":"Destination account",onchange:ev=>{cur.opts.targetSession="";set("targetProfile",ev.target.value)}},
+    h("option",{value:"",selected:!cur.opts.targetProfile},"Default account"),
+    profiles.map(p=>h("option",{value:p.id,selected:cur.opts.targetProfile===p.id},`${p.name}${p.account?.email?' · '+p.account.email:''}${p.tags?.length?' ['+p.tags.join(', ')+']':''}`)))):null;
+ const summaryBody=summaryContent(p);
+ return h("div",{},accountChoice,summaryBody);
+}
+function summaryContent(p) {
  if(p.noWork) return h("div",{class:"summary","aria-label":"What changes"},"Conversation already synchronized. Update lineage receipts; 0 new messages, 0 transfers.");
- if(p.destinations?.length) {return h("label",{class:"summary"},"Choose the destination session",h("select",{onchange:ev=>set("targetSession",ev.target.value)},h("option",{value:""},"Select a session…"),p.destinations.map(s=>h("option",{value:`${s.key.agent}/${s.key.session}`},`${s.title || s.key.session} · ${s.key.session}`))))}
+ if(p.destinations?.length) {return h("label",{class:"summary"},"Choose the destination session",h("select",{onchange:ev=>set("targetSession",ev.target.value)},h("option",{value:""},"Select a session…"),p.destinations.map(s=>h("option",{value:`${s.key.agent}${s.key.profile?"@"+s.key.profile:""}/${s.key.session}`},`${s.title || s.key.session} · ${s.key.session}`))))}
   const cont = p.continue, r = p.repo, there = p.machine ? `on ${p.machine}` : "here";
   const add = [], chg = [];
   if (cont) {

@@ -41,15 +41,20 @@ repository, worktree and paths fixed up. Then it gives you the command to contin
 - **Continues it in another agent**: `--in codex` or `--in claude`, on another machine or this
   one. The plan shows exactly what carries over and what doesn't, plus the briefing the other
   agent gets.
-- **Comes back intact**: a round trip adds only the new work to the original session, so a
-  Claude Code session's earlier turns, including its signed reasoning, stay byte for byte.
-  If both copies changed, it stops and asks; it never merges.
+- **Tracks round trips and forks**: verified compatible returns can add only new work.
+  Across account profiles, hopsesh creates a portable conversation and preserves the original
+  protected state. If both copies changed, it offers a separate branch; it never silently merges.
 - **Works with the agents' clouds**: hands a session to Claude Code on the web or Codex
   cloud (and, experimentally, Copilot, Jules, Devin or Amp), brings their sessions home, and
   hands one cloud's session on to another, all through the vendors' own commands, signed in
   as you.
 - **Works from inside your agent**: ask Claude Code or Codex "bring my laptop session here" and
   it plans with hopsesh, then moves only after you say yes.
+- **Multiple accounts**: name and tag independent Claude Code and Codex profiles, discover
+  known roots locally and on allowed machines, and review account-to-account transfers.
+  See [Accounts](docs/accounts.md) for setup and vendor limitations.
+- **Open a Codex conversation in its desktop app** from the Resume menu, with the exact
+  thread selected. Custom account roots use a terminal because desktop links cannot select them.
 - **CLI, TUI and a desktop app for macOS and Windows** on one engine, with `--json` output
   everywhere it matters. The app has a terminal of its own and also opens sessions in iTerm2,
   Terminal or Windows Terminal. The apps update themselves.

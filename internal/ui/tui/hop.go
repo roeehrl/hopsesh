@@ -174,7 +174,7 @@ func (m *model) hopDoneKeys(k string) (tea.Model, tea.Cmd) {
 		return m, m.Init()
 	case "enter":
 		if r.State == move.HopWaiting && len(r.Run.Argv) > 0 {
-			m.exit = &Exit{RunDir: r.Run.Dir, RunArgv: r.Run.Argv, Unset: r.Run.Unset, Adopt: r.Fetch, Hop: m.result.Journal}
+			m.exit = &Exit{RunDir: r.Run.Dir, RunArgv: r.Run.Argv, Env: r.Run.Env, Unset: r.Run.Unset, Adopt: r.Fetch, Hop: m.result.Journal}
 			return m, tea.Quit
 		}
 		m.ho, m.mode = handoff{}, modeLoading
