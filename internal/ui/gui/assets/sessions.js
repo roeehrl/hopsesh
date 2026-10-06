@@ -563,7 +563,7 @@ export function listCommand(cmd) {
 screen("sessions", async (rescan = false) => {
   loadList(state.info?.list);
   if (!state.scan || rescan || state.stale) await scan();
-  if (!state.scan) return;
+  if (!state.scan || current !== "sessions") return;
   decide(entries().length, () => toggleDisplay());
   render();
   const r = view.querySelector('.row[aria-selected="true"]');

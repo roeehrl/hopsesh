@@ -274,6 +274,7 @@ async function preview() {
 const TABS = [["general", "General", general], ["agents", "Agents", agents], ["terminal", "Terminal", terminal], ["skill", "Skill", skill], ["cli", "Command line", cli], ["updates", "Updates", updates]];
 
 function render() {
+  if (current !== "settings") return;
   const [, name, body] = TABS.find((t) => t[0] === tab);
   fill(view, h("div", { class: "three" },
     h("nav", { class: "tabs", role: "tablist", "aria-label": "Settings", "aria-orientation": "vertical" },
@@ -284,8 +285,7 @@ function render() {
           const n = e.key === "ArrowDown" ? i + 1 : e.key === "ArrowUp" ? i - 1 : -1;
           if (n >= 0 && n < TABS.length) { e.preventDefault(); tab = TABS[n][0]; render(); view.querySelector("#tab-" + tab).focus(); }
         } }, label)),
-      h("span", { class: "spacer" }),
-      h("button", { class: "btn", onclick: () => go("sessions") }, "Back to sessions")),
+      h("span", { class: "spacer" })),
     h("div", { class: "page", role: "tabpanel", "aria-labelledby": "tab-" + tab }, h("div", { class: "page-in", style: "max-width:760px" }, h("h1", {}, name), body()))));
 }
 

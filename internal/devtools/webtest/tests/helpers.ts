@@ -27,7 +27,7 @@ export async function turnOnCloud(page: Page, title: string) {
   const sw = page.getByRole("switch", { name: `Turn on ${title}` });
   await sw.click();
   await expect(sw).toHaveAttribute("aria-checked", "true");
-  await page.getByRole("button", { name: "Scan them now" }).click();
+  await page.getByRole("button", { name: "Back to sessions" }).click();
   await sidebar.getByRole("button", { name: new RegExp(title) }).click({ timeout: 30_000 });
   await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
 }

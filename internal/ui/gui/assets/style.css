@@ -57,9 +57,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 /* Windows and Linux have their own title bar above: no room for traffic lights needed. */
 :root:not([data-os="darwin"]) .titlebar { height: 44px; padding-left: 8px; }
 .brand { font-weight: 600; font-size: 14px; }
-/* A fixed slot, so the search box stays put whichever screen is shown. */
+/* The current section has a fixed slot beside the shared navigation. */
 .where { flex: 0 0 72px; color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.search { flex: 1 1 280px; max-width: 520px; height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--muted); cursor: pointer; text-align: left; }
+.search { min-width: 0; flex: 1 1 280px; max-width: 520px; height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--muted); cursor: pointer; text-align: left; }
 .fresh { font-size: 12px; color: var(--muted); white-space: nowrap; }
 
 /* controls */
@@ -608,3 +608,10 @@ code { font-family: var(--mono); font-size: .92em; padding: 0 3px; border-radius
   .kv { grid-template-columns: 130px minmax(0, 1fr); }
   .ins-head { gap: 7px; }
 }
+
+.nav-back { flex: 0 0 auto; gap: 6px; }
+.scan-status { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+
+.search > span:not(.kbd) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.titlebar > .btn { flex-shrink: 0; }
+@media (max-width: 1000px) { .titlebar .fresh { display: none; } }

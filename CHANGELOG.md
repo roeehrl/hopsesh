@@ -7,6 +7,13 @@ All notable changes to this project are documented here. The format follows
 ## Unreleased
 
 ### Fixed
+- App: Back to sessions has one fixed upper-left toolbar location on every secondary
+  screen and in the terminal window, including loading, errors and completed transfers.
+  Late page loads no longer replace Sessions after returning. Resizing a terminal keeps
+  its selected tab visible.
+- Machines: added machines scan automatically, with queued/running status and a disabled
+  per-machine Scan button. Failures explain what happened and offer Retry; successful
+  rows refresh every five minutes while Machines is active.
 - App: Move and the hand-off picker only offer enabled clouds. Other clouds can be set up
   in Machines; enabled destinations that are temporarily unavailable still say why.
 - The install script (`curl … | sh`) failed on macOS in a terminal with a UTF-8 locale

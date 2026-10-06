@@ -378,12 +378,13 @@ test("many tabs: they shrink, then scroll, the active one in view, never coverin
       const plus = (await t.locator("#new-shell").boundingBox())!;
       const back = (await t.locator("#back").boundingBox())!;
       expect(tabsBox.x + tabsBox.width).toBeLessThanOrEqual(plus.x + 0.5);
-      expect(plus.x + plus.width).toBeLessThanOrEqual(back.x + 0.5);
+      expect(back.x + back.width).toBeLessThanOrEqual(tabsBox.x + 0.5);
+      expect(plus.x + plus.width).toBeLessThanOrEqual(w);
       expect(back.x + back.width).toBeLessThanOrEqual(w);
-      for (const b of await t.getByRole("tab").evaluateAll((els) => els.map((e) => e.getBoundingClientRect().width))) {
-        expect(b).toBeGreaterThanOrEqual(119);
-        expect(b).toBeLessThanOrEqual(241);
-      }
+      await expect.poll(() => t.getByRole("tab").evaluateAll(els => els.every(el => {
+        const w = el.getBoundingClientRect().width;
+        return w >= 119 && w <= 241;
+      }))).toBe(true);
       await expect(t.getByRole("tab", { selected: true })).toBeInViewport({ ratio: 0.9 });
     }
   };

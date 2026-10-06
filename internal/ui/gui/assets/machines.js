@@ -1,28 +1,78 @@
 // The Machines screen: this machine (and whether it receives sessions), the machines you
 // added, and the ones discovery found. hopsesh connects only to machines you added.
-import { api, h, fill, icon, ICONS, view, state, screen, go, loading, toast, fail, errText, cap, dialog, ask, machineStatus, sys, when, current, rich } from "./core.js";
+import { api, h, fill, icon, ICONS, view, state, screen, loading, toast, fail, errText, cap, dialog, ask, machineStatus, sys, when, current, rich } from "./core.js";
 import { signIn, onSignedIn } from "./term.js";
 
 // A sign-in tab ended well: the card shows the new check.
 onSignedIn(() => { if (current === "machines") reload(); });
 
 let data = null;
-let changed = false; // machines changed since the last scan
+const scanning = new Set();
+const scanErrors = new Map();
 
 
 async function reload() {
   try { data = await api("Machines"); } catch (e) { fail(e); }
-  render();
+  if (current === "machines") render();
 }
 
 // after reloads what a change affects; machine changes also need a new scan.
-function after(rescan = true) {
-  if (rescan) changed = state.stale = true;
-  return Promise.all([api("Info").then((i) => { state.info = i; }).catch(fail), reload()]);
+async function after(rescan = true, machine = "") {
+  if (rescan) state.stale = true;
+  await Promise.all([api("Info").then((i) => { state.info = i; }).catch(fail), reload()]);
+  if (machine) scanMachine(machine);
 }
 
+const failedScan = (m) => (m.scanned && m.status !== "ok") || scanErrors.has(m.name) || !!m.scan?.error;
+const activeScan = (m) => scanning.has(m.name) || ["queued", "scanning"].includes(m.scan?.phase);
+async function scanMachine(name) {
+  if (scanning.has(name)) return;
+  scanning.add(name);
+  scanErrors.delete(name);
+  if (current === "machines") render();
+  try { await api("ScanMachine", name); state.stale = true; }
+  catch (e) { scanErrors.set(name, errText(e)); }
+  finally { scanning.delete(name); await reload(); }
+}
+
+// Keep a running scan visible across navigation without repeating network discovery.
+let polling = false;
+setInterval(async () => {
+  if (current !== "machines" || document.hidden || polling || !data) return;
+  polling = true;
+  try {
+    const states = await api("MachineScans");
+    let finished = false, changed = false;
+    for (const m of data.machines) {
+      const next = states?.[m.name];
+      if (JSON.stringify(m.scan) !== JSON.stringify(next)) {
+        finished ||= next?.phase === "done";
+        m.scan = next;
+        changed = true;
+      }
+    }
+    if (finished) await reload();
+    else if (changed && !document.querySelector("dialog[open]")) render();
+  } catch { /* the next poll retries; the previous result stays */ }
+  finally { polling = false; }
+}, 1000);
+
+// Added machines scan immediately. Healthy rows refresh every five minutes while
+// Machines is visible; failed connections need an explicit Retry (no repeated prompts).
+setInterval(() => {
+  if (current !== "machines" || document.hidden || !document.hasFocus() || document.querySelector("dialog[open]") || !data) return;
+  for (const m of data.machines) {
+    const last = Date.parse(m.scan?.finished || "") || 0;
+    if (!activeScan(m) && !failedScan(m) && Date.now() - last >= 300000) scanMachine(m.name);
+  }
+}, 15000);
+
 function statusCell(m) {
-  if (!m.scanned) return h("span", { class: "muted" }, "Not scanned yet");
+  if (activeScan(m)) return h("div", { role: "status", "aria-live": "polite", class: "scan-status" },
+    h("span", {}, m.scan?.phase === "queued" ? "Queued…" : "Scanning…"),
+    h("span", { class: "muted" }, m.scanned ? `Previous result: ${m.sessions} sessions` : "Connecting and reading sessions"));
+  const error = scanErrors.get(m.name) || m.scan?.error;
+  if (!m.scanned) return h("div", { role: "status", class: error ? "err" : "muted" }, error || "Not scanned yet");
   const [k, words] = machineStatus(m.status);
   const url = (m.error.match(/https:\/\/login\.tailscale\.com\/\S+/) || [])[0];
   return h("div", { style: "display:flex;flex-direction:column;gap:3px;min-width:0" },
@@ -30,18 +80,21 @@ function statusCell(m) {
     m.status === "ok" ? h("span", { class: "muted", style: "font-size:12px" }, [`${m.sessions} session${m.sessions === 1 ? "" : "s"}`, m.agents.join(", ")].filter(Boolean).join(" · ")) : null,
     m.status === "ok" ? h("span", { class: m.hopsesh ? "muted" : "warn", style: "font-size:12px" }, m.hopsesh ? `hopsesh ${m.hopsesh}: you can send sessions there` : "No hopsesh there: you can bring sessions from it, not send to it") : null,
     m.status !== "ok" && m.hint ? h("span", { class: "muted", style: "font-size:12px" }, rich(cap(m.hint))) : null,
+    error && error !== m.error ? h("span", { class: "err" }, error) : null,
+    m.scan?.finished ? h("span", { class: "muted", style: "font-size:11px" }, "Last checked " + when(m.scan.finished)) : null,
     m.status !== "ok" && m.error && !url ? h("span", { class: "mono muted", style: "font-size:11px;overflow-wrap:anywhere" }, m.error) : null,
     url ? h("button", { class: "btn small", style: "align-self:flex-start", onclick: () => api("OpenURL", url).catch(fail) }, "Open the Tailscale sign-in") : null);
 }
 
 function machineRow(m) {
   const login = m.auth === "password" ? (m.keychain ? `Password, in ${sys.vault}` : "Password, asked each time") : "SSH key";
-  return h("div", { class: "mgrid" },
+  return h("div", { class: "mgrid", "data-machine": m.name, "aria-busy": activeScan(m) ? "true" : "false" },
     h("div", { style: "min-width:0" }, h("div", { style: "font-weight:500" }, m.name), h("div", { class: "mono muted", style: "font-size:11px;overflow-wrap:anywhere" }, m.destination + (m.os ? ` · ${m.os}` : ""))),
     h("div", {}, h("button", { class: "btn small", title: "How hopsesh logs in to this machine", onclick: () => loginDialog(m) }, login)),
     statusCell(m),
     h("div", { style: "display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end" },
-      /host-key/.test(m.status) || !m.scanned ? h("button", { class: "btn small" + (m.status === "host-key" ? " primary" : ""), onclick: () => trustDialog(m.name) }, "Check host key") : null,
+      h("button", { class: "btn small", disabled: activeScan(m), "aria-label": `${activeScan(m) ? "Scanning" : failedScan(m) ? "Retry scan" : "Scan"} ${m.name}`, onclick: () => scanMachine(m.name) }, activeScan(m) ? "Scanning…" : failedScan(m) ? "Retry scan" : "Scan"),
+      /host-key/.test(m.status) ? h("button", { class: "btn small" + (m.status === "host-key" ? " primary" : ""), onclick: () => trustDialog(m.name) }, "Check host key") : null,
       h("button", { class: "btn small danger", onclick: async () => {
         if (!await ask({ title: `Remove ${m.name}?`, body: "hopsesh stops connecting to it and forgets its remembered password. Its sessions stay where they are.", ok: "Remove", danger: true })) return;
         try { await api("RemoveHost", m.name); toast(`Removed ${m.name}`); } catch (e) { fail(e); }
@@ -58,7 +111,7 @@ function foundRow(f) {
     h("div", { style: "display:flex;justify-content:flex-end" }, h("button", { class: "btn small outline", onclick: async () => {
       if (f.owner && !await ask({ title: `Add ${f.name}?`, body: `It belongs to ${f.owner}. hopsesh would log in to it with your SSH setup and read its coding agents' session folders.`, ok: "Add it" })) return;
       try { await api("SetAllowed", f.name, f.destination, true); toast(`Added ${f.name}`); } catch (e) { fail(e); }
-      after();
+      after(true, f.name);
     } }, "Add")));
 }
 
@@ -165,6 +218,7 @@ function envTable(c) {
 }
 
 function render() {
+  if (current !== "machines") return;
   const d = data;
   if (!d) return;
   const receive = h("button", { class: "switch", role: "switch", "aria-checked": d.here.receive ? "true" : "false", "aria-label": "Receive sessions from my other machines",
@@ -174,8 +228,7 @@ function render() {
       after(false);
     } });
   fill(view, h("div", { class: "page" }, h("div", { class: "page-in" },
-    h("div", { style: "display:flex;align-items:baseline;gap:12px;flex-wrap:wrap" }, h("h1", {}, "Machines"), h("span", { class: "spacer" }),
-      changed ? h("button", { class: "btn primary", onclick: () => { changed = false; go("sessions"); } }, "Scan them now") : h("button", { class: "btn", onclick: () => go("sessions") }, "Back to sessions")),
+    h("h1", {}, "Machines"),
     h("span", { class: "muted" }, "hopsesh connects only to the machines you add, with your own ssh and keys, and only reads your coding agents' session folders until you hop a session."),
     h("section", { class: "card" }, h("div", { class: "line-item" },
       h("span", { class: "ico push" }, icon(ICONS.here, 15)),
@@ -187,7 +240,7 @@ function render() {
           h("span", { class: "muted", style: "font-size:12px" }, d.here.receive ? "On: “Send to…” on your other machines can deliver sessions here." : `Off: ${sys.here} refuses sessions sent from other machines.`)),
         receive))),
     h("section", { class: "card" },
-      h("div", { class: "card-h" }, h("h2", { class: "name" }, "Your machines"), h("span", { class: "spacer" }), h("button", { class: "btn small", onclick: addDialog }, icon(ICONS.plus, 12), "Add by address…")),
+      h("div", { class: "card-h" }, h("div", {}, h("h2", { class: "name" }, "Your machines"), h("div", { class: "muted", style: "font-size:12px" }, "Scanned when added, then every 5 minutes while this page is active. Failed scans wait for Retry.")), h("span", { class: "spacer" }), h("button", { class: "btn small", onclick: addDialog }, icon(ICONS.plus, 12), "Add by address…")),
       d.machines.length ? [h("div", { class: "mgrid h" }, h("span", {}, "Machine"), h("span", {}, "Login"), h("span", {}, "Last scan"), h("span", {})), d.machines.map(machineRow)]
         : h("div", { class: "empty" }, "No machines yet. Add one found below, or by its address.")),
     h("section", { class: "card" },
@@ -208,7 +261,7 @@ function trustDialog(name) {
       k.verified ? h("div", { class: "ok" }, "✓ " + k.verified)
         : h("div", { class: "warn", style: "font-size:12.5px;line-height:1.5" }, "Not independently verified. Compare with ", h("span", { class: "mono" }, "ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub"), " on that machine."),
       h("div", { class: "dlg-foot" }, h("button", { class: "btn", onclick: () => d.close() }, "Cancel"),
-        h("button", { class: "btn primary", onclick: async () => { try { await api("TrustHost", name); toast(`${name} trusted`); } catch (e) { fail(e); } d.close(); after(); } }, "Trust these keys")));
+        h("button", { class: "btn primary", onclick: async () => { try { await api("TrustHost", name); toast(`${name} trusted`); } catch (e) { fail(e); } d.close(); after(true, name); } }, "Trust these keys")));
   }).catch((e) => dialog(h("div", { class: "err" }, errText(e)), h("div", { class: "dlg-foot" }, h("button", { class: "btn", onclick: () => d.close() }, "Close"))));
 }
 
@@ -229,7 +282,7 @@ function addDialog() {
       h("button", { class: "btn primary", onclick: async () => {
         if (!name.value.trim() || !dest.value.trim()) { msg.textContent = "Give it a name and an SSH destination."; return; }
         try { await api("AddHost", name.value.trim(), dest.value.trim(), pw.checked, remember.checked); } catch (e) { msg.textContent = errText(e); return; }
-        d.close(); toast(`Added ${name.value.trim()}`); after();
+        d.close(); toast(`Added ${name.value.trim()}`); after(true, name.value.trim());
       } }, "Add")));
   name.focus();
 }
@@ -251,7 +304,7 @@ function loginDialog(m) {
       const r = await api("SetupKeyLogin", m.name, createKey);
       d.close();
       toast(r.created ? `Created ${r.publicKey}; ${m.name} now logs in with it` : `${m.name} now logs in with your key`);
-      after();
+      after(true, m.name);
     } catch (e) {
       if (errText(e).includes("no-key")) {
         msg.className = "warn";
@@ -274,7 +327,7 @@ function loginDialog(m) {
       h("button", { class: "btn", onclick: () => d.close() }, "Cancel"),
       h("button", { class: "btn primary", onclick: async () => {
         try { await api("SetAuth", m.name, pass.checked ? "password" : "key", remember.checked); } catch (e) { fail(e); return; }
-        d.close(); after();
+        d.close(); after(true, m.name);
       } }, "Save")));
 }
 
@@ -282,6 +335,7 @@ function loginDialog(m) {
 screen("machines", async (at) => {
   if (!data) loading("Looking for your machines (nothing is contacted)…");
   await reload();
+  if (current !== "machines") return;
   const to = at === "clouds" && view.querySelector("#clouds"), pg = view.querySelector(".page");
   if (to && pg) pg.scrollTop += to.getBoundingClientRect().top - pg.getBoundingClientRect().top - 12; // the page scrolls, never the window
 });

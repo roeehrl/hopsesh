@@ -1,6 +1,6 @@
 // The Activity screen: what hopsesh did here, newest first, with Undo, and the marks still
 // waiting for a copy left behind to end.
-import { api, h, fill, icon, ICONS, view, state, screen, go, loading, toast, fail, errText, ago, when, ask, sys, cloudTitle } from "./core.js";
+import { api, h, fill, icon, ICONS, view, state, screen, go, current, loading, toast, fail, errText, ago, when, ask, sys, cloudTitle } from "./core.js";
 
 // undo reverses an operation. When the session was used since, it says what changed and
 // asks before throwing that work away.
@@ -102,14 +102,15 @@ function row(x) {
 }
 
 async function render(reload = false) {
+  if (current !== "activity") return;
   if (reload || !state.activity) {
-    if (!state.activity) loading("Reading the activity…");
-    try { state.activity = await api("Activity"); } catch (e) { fill(view, h("div", { class: "loading err" }, errText(e))); return; }
+    loading("Reading the activity…");
+    try { state.activity = await api("Activity"); } catch (e) { if (current === "activity") fill(view, h("div", { class: "loading err" }, errText(e))); return; }
   }
+  if (current !== "activity") return;
   const a = state.activity;
   fill(view, h("div", { class: "page" }, h("div", { class: "page-in" },
-    h("div", { style: "display:flex;align-items:baseline;gap:12px;flex-wrap:wrap" }, h("h1", {}, "Activity"), h("span", { class: "spacer" }),
-      h("button", { class: "btn", onclick: () => go("sessions") }, "Back to sessions")),
+    h("h1", {}, "Activity"),
     h("span", { class: "muted" }, `Everything hopsesh changed on ${sys.here}. Undo puts it back, on every machine it touched; if a session was used since, hopsesh asks first. What a cloud made stays there.`),
     a.waiting.length ? h("section", { class: "card" },
       h("div", { class: "card-h" }, h("h2", { class: "name" }, "Waiting to be adopted")),

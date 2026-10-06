@@ -42,6 +42,8 @@ const MenuEvent = "hopsesh:menu"
 // App is the service bound to the frontend.
 type App struct {
 	mu       sync.Mutex
+	scanMu   sync.Mutex // serialize inventory refreshes
+	scans    map[string]MachineScan
 	core     *app.App // its Cfg is the saved configuration; calls work on snapshots
 	cfgErr   error    // the configuration file could not be used (see StartFresh)
 	inv      *app.Inventory

@@ -189,6 +189,7 @@ export function screen(name, fn) { screens[name] = fn; }
 export let current = "";
 export function go(name, ...args) {
   current = name;
+  $("#btn-back-sessions").hidden = name === "sessions";
   state.handoffOpen = null;
   $("#where").textContent = { sessions: "", activity: "Activity", machines: "Machines", settings: "Settings", done: "", brought: "" }[name] ?? "";
   document.body.dataset.screen = name; // the panes' buttons work on Sessions only

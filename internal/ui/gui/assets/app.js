@@ -15,6 +15,7 @@ import { render as renderSessions, listCommand } from "./sessions.js";
 import { load as loadLayout, toggle as togglePane } from "./layout.js";
 
 $("#btn-search").onclick = openPalette;
+$("#btn-back-sessions").onclick = () => go("sessions", state.stale || ["done", "brought", "handedoff"].includes(current));
 $("#btn-refresh").onclick = () => go("sessions", true);
 $("#btn-settings").onclick = () => go("settings");
 $("#btn-terminal").onclick = () => showTerminal();

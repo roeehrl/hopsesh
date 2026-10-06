@@ -373,8 +373,7 @@ screen("handedoff", (d) => {
       (d.warnings || []).map((w) => h("div", { class: "item" }, tick("warn"), h("span", {}, cap(w)))))),
     h("div", { class: "hint", role: "note" }, r.hint),
     h("div", { style: "display:flex;gap:10px;align-items:center;flex-wrap:wrap" },
-      h("button", { class: "btn", onclick: doUndo }, "Undo"),
-      h("button", { class: "btn", onclick: () => go("sessions", true) }, "Back to sessions", h("span", { class: "kbd" }, "esc"))),
+      h("button", { class: "btn", onclick: doUndo }, "Undo")),
     r.noFollowUp ? h("span", { id: "ho-nofollow", class: "muted", style: "font-size:12px" }, r.noFollowUp) : null)));
   view.querySelector("#ho-open")?.focus();
 });

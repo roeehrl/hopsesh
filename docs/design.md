@@ -14,7 +14,7 @@ You pick a session, and hopsesh brings it to this machine:
 - **in the same agent** (a move): the session's own files are copied, their paths rewritten for this machine, and installed byte for byte otherwise;
 - **or in another agent** (a continuation, `--in codex`): the conversation is converted into the other agent's own session format, with a briefing that tells the agent where it came from and what did not carry over. This works on one machine too.
 
-Either way it finds the repository here (or clones it), recreates the worktree, brings the code to the session's commit, marks the copy left behind, and prints the command to continue. A round trip (A → B → A) adds only the new work to the original. When the other machine also runs hopsesh, a session can be sent there too (`push`, §11).
+Either way it finds the repository here (or clones it), recreates the worktree, brings the code to the session's commit, marks the copy left behind, and prints the command to continue. A cross-agent round trip (A → B → A) can append new work to the original; a same-agent return replaces its unchanged native copy. Repeated trips, three-copy synchronization and independent forks have known correctness gaps: see the [lineage implementation plan](lineage-plan.md). When the other machine also runs hopsesh, a session can be sent there too (`push`, §11).
 
 **Doesn't:**
 - No cloud relay: files move machine to machine over your own SSH.
@@ -302,3 +302,9 @@ The redesign (approved 2026-10-02):
 14. One skill, identical bytes in every agent's folder, with per-copy status and no drift.
 15. Global instructions are reported; `--carry-rules` carries them.
 16. Next modules Reader-first (OpenCode, Hermes, Gemini, Goose, Amp, Crush, Cursor); "coding-agent sessions" wording with a notice naming both vendors.
+
+### Shared navigation and machine scan feedback
+
+Every secondary app screen uses the shell’s upper-left **Back to sessions** button, clear of the macOS window controls. It remains available while page data loads or fails and on transfer result pages. The terminal window uses the same leading position and label. Modal transfer sheets keep their own Close or Cancel actions; an active operation is not cancelled by navigating between pages.
+
+Adding a machine starts a scan. Each machine has a Scan button, disabled while queued or scanning, and a result timestamp. Failures explain the reason and expose Retry scan. Healthy rows refresh every five minutes while Machines is visible and focused; failed rows wait for an explicit retry. Sessions separately refreshes local inventory every minute while active, all destinations every ten minutes, and remote inventory on returning to focus when at least five minutes old. These are inventory scans; terminal presence updates have their own shorter cadence.

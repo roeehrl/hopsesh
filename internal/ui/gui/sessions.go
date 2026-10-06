@@ -148,6 +148,8 @@ type ScanDTO struct {
 
 // Scan reads this machine and every allowed machine, for every enabled agent.
 func (a *App) Scan() (*ScanDTO, error) {
+	a.scanMu.Lock()
+	defer a.scanMu.Unlock()
 	a.mu.Lock()
 	cfgErr := a.cfgErr
 	a.mu.Unlock()
@@ -155,9 +157,19 @@ func (a *App) Scan() (*ScanDTO, error) {
 		return nil, cfgErr
 	}
 	core := a.snapshot()
+	for _, h := range core.Cfg.Hosts {
+		if h.Allowed {
+			a.scanPhase(h.Name, "scanning", "")
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	inv := core.Scan(ctx, app.ScanOptions{})
+	for _, m := range inv.Machines {
+		if !m.Local {
+			a.scanPhase(m.Name, "done", scanProblem(m))
+		}
+	}
 	now := time.Now()
 	a.mu.Lock()
 	if a.inv != nil {
@@ -191,6 +203,8 @@ func (a *App) RefreshHere() (*ScanDTO, error) {
 	if !had {
 		return a.Scan()
 	}
+	a.scanMu.Lock()
+	defer a.scanMu.Unlock()
 	core := a.snapshot()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
