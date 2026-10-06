@@ -11,10 +11,11 @@ import "./settings.js";
 import { undoLast } from "./activity.js";
 import { openPalette } from "./palette.js";
 import { loadTabs, onTabs, showTerminal, tabs, exits } from "./term.js";
-import { render as renderSessions } from "./sessions.js";
+import { render as renderSessions, listCommand } from "./sessions.js";
 import { load as loadLayout, toggle as togglePane } from "./layout.js";
 
 $("#btn-search").onclick = openPalette;
+$("#btn-back-sessions").onclick = () => go("sessions", state.stale || ["done", "brought", "handedoff"].includes(current));
 $("#btn-refresh").onclick = () => go("sessions", true);
 $("#btn-settings").onclick = () => go("settings");
 $("#btn-terminal").onclick = () => showTerminal();
@@ -27,9 +28,7 @@ onTabs(() => {
   const sig = JSON.stringify([[...tabs.values()].map((t) => [t.kind, t.machine, t.key, t.attention, t.state === "exited"]), [...exits.values()].map((x) => [x.key, x.code])]);
   if (sig === shownTabs || current !== "sessions") { shownTabs = sig; return; }
   shownTabs = sig;
-  const onRow = document.activeElement?.classList?.contains("row");
-  renderSessions();
-  if (onRow) view.querySelector('.row[aria-selected="true"]')?.focus();
+  renderSessions(); // keeps the focus and the scroll
 });
 
 // The app menu (and its shortcuts) sends these.
@@ -48,6 +47,10 @@ function menuCommand(cmd) {
     case "undo-last": undoLast(); break;
     case "toggle-sidebar": togglePane("sidebar"); break;
     case "toggle-inspector": togglePane("inspector"); break;
+    default:
+      // The View menu's list commands: group:…, sort:…, compact, collapse-all,
+      // expand-all, display.
+      if (/^(group|sort):|^(compact|collapse-all|expand-all|display)$/.test(cmd)) listCommand(cmd);
   }
 }
 

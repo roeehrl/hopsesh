@@ -304,6 +304,14 @@ func BuildHandoff(ctx context.Context, in HandoffInput, opt Options) (*Plan, err
 		Source:  Endpoint{Location: src.Machine.Name, OS: src.Machine.Facts.OS, CWD: s.CWD, Path: s.Path, Version: s.AgentVersion},
 		Target:  Endpoint{Location: cl.Name, Version: in.Install.Version},
 		Handoff: hp, handoffIn: &in}
+	endpoint, identityErr := src.Machine.PrepareIdentity(ctx)
+	if identityErr != nil {
+		return nil, identityErr
+	}
+	p.Source.ID = endpoint
+	if err := assignCloudOperation(p, opt); err != nil {
+		return nil, err
+	}
 	if p.Title == "" {
 		p.Title = "Session " + shortStr(string(s.Key.Session), 8)
 	}
@@ -384,7 +392,7 @@ func BuildHandoff(ctx context.Context, in HandoffInput, opt Options) (*Plan, err
 	hp.MarkTitle = agent.MarkTitle(mk, "")
 	_, canMark := src.Module.(agent.Marker)
 	switch {
-	case !opt.Mark || !canMark:
+	case opt.Fork || !opt.Mark || !canMark:
 		p.Mark = MarkOff
 	case p.Live:
 		p.Mark = MarkWhenStopped
@@ -761,6 +769,9 @@ func applyHandoff(ctx context.Context, p *Plan, env Env) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := operationJournal(env, p, j); err != nil {
+		return nil, err
+	}
 	j.AddKey(p.Key)
 	hr := &HandoffResult{Cloud: cl.Name, CloudTitle: cl.Title, Agent: target.Name, Repo: hp.Repo, Branch: hp.Branch, BranchURL: hp.BranchURL,
 		Code: string(hp.Code), Reuse: hp.Reuse, Tokens: hp.Tokens, Masked: hp.Masked, Snapshot: "",
@@ -800,9 +811,46 @@ func applyHandoff(ctx context.Context, p *Plan, env Env) (*Result, error) {
 	if in.Git != nil {
 		top = in.Git.Toplevel
 	}
-	lin := in.Lineage
+	lin := in.Lineage.Clone()
+	sourceFS, e := src.Machine.FS(ctx)
+	if e != nil {
+		return fail(StepLineage, "cannot read source lineage", e)
+	}
+	current, e := lineage.Read(sourceFS, s.Path)
+	if e != nil {
+		return fail(StepLineage, "cannot verify source lineage", e)
+	}
+	if current != nil {
+		if lin == nil {
+			lin = current.Clone()
+		} else if e = lin.Merge(current); e != nil {
+			return fail(StepLineage, "source lineage changed", e)
+		}
+	}
 	if lin == nil {
-		lin = lineage.New(newID())
+		endpoint, e := src.Machine.PrepareIdentity(ctx)
+		if e != nil {
+			return fail(StepLineage, "cannot establish source identity", e)
+		}
+		lin = lineage.NewNative(endpoint, s.Key)
+	}
+
+	if err := src.Machine.CommitIdentity(ctx); err != nil {
+		return fail(StepLineage, "cannot establish the source endpoint", err)
+	}
+	sourceReplica := lin.Upsert(lineage.Replica{Endpoint: src.Machine.Facts.Endpoint, Key: s.Key, Location: machine, AgentVersion: s.AgentVersion, Time: s.LastActivity})
+	sourceSegment, e := readSegment(ctx, src, s)
+	if e != nil {
+		return fail(StepLineage, "cannot read the source conversation", e)
+	}
+	if sourceSegment.Cursor != hp.head {
+		return fail(StepLineage, "source changed since planning", fmt.Errorf("refresh the handoff plan"))
+	}
+	sourceLine := lin.Branch
+	targetLine := sourceLine
+	sourceState, e := lin.Observe(sourceReplica, &sourceSegment)
+	if e != nil {
+		return fail(StepLineage, "cannot verify source ancestry", e)
 	}
 
 	// 1. The snapshot.
@@ -814,7 +862,7 @@ func applyHandoff(ctx context.Context, p *Plan, env Env) (*Result, error) {
 			text, _ := convert.HistoryFile(hp.nodes, src.Module.Spec().Name, s.Title)
 			extra = append(extra, repos.ExtraFile{Path: HistoryPath, Data: []byte(text)})
 		}
-		sha, err = repos.Snapshot(ctx, in.Runner, top, hp.snapshot, repos.SnapshotMessage(lin.Logical), extra...)
+		sha, err = repos.Snapshot(ctx, in.Runner, top, hp.snapshot, repos.SnapshotMessage(lin.Family), extra...)
 		if err != nil {
 			return fail(StepSnapshot, "Nothing changed: hopsesh could not make the snapshot: "+firstLine(err.Error()), err)
 		}
@@ -920,25 +968,36 @@ func applyHandoff(ctx context.Context, p *Plan, env Env) (*Result, error) {
 
 	// 4. Lineage: the session here and the cloud's copy are one logical session.
 	step(StepLineage, StepTodo, "")
-	now := time.Now().UTC()
-	from := lin.Upsert(lineage.Replica{Key: s.Key, Location: machine, AgentVersion: s.AgentVersion, Head: hp.head.Head, Offset: hp.head.Offset, Time: now})
+	now := j.Time.UTC()
+	from := sourceReplica
 	cloudCopy := lineage.Replica{Key: cs.Key, Location: cl.Name, AgentVersion: in.Install.Version, Time: now, URL: cs.URL}
 	if len(cl.CodeDown) > 0 && cl.CodeDown[0] == agent.ViaDiff {
 		// The cloud works on this branch and brings back a diff of it: the branch is where the
 		// diff applies when it comes back.
 		cloudCopy.Branch = hp.Branch
 	}
+	if opt := p.Options; opt.Fork {
+		targetLine = lin.Fork(p.OperationID, sourceState.Heads)
+	}
+	cloudCopy.Line = targetLine
+	cloudCopy.Endpoint = cloudEndpoint(cl.Name, cs.Account)
 	to := lin.Upsert(cloudCopy)
+	lin.Deliver(to, ir.Cursor{}, nil, sourceState.Heads, append(sourceState.Loss, "handoff briefing; native reasoning stays at source"))
 	var withheld []string
 	for _, w := range hp.Withheld {
 		withheld = append(withheld, w.Path)
 	}
-	lin.Hops = append(lin.Hops, lineage.Hop{Time: now, From: from, To: to, Kind: lineage.HopHandoff, Fidelity: string(cl.Up),
-		Code: &lineage.CodeHop{Way: hp.Code, Remote: hp.Repo, Branch: hp.Branch, Base: hp.Base, Snapshot: hr.Snapshot, Withheld: withheld, Redactions: hp.Masked}})
+	if err := lin.AppendHop(lineage.Hop{ID: j.ID, Time: now, From: from, To: to, Fork: targetLine != sourceLine, Kind: lineage.HopHandoff, Fidelity: string(cl.Up),
+		Code: &lineage.CodeHop{Way: hp.Code, Remote: hp.Repo, Branch: hp.Branch, Base: hp.Base, Snapshot: hr.Snapshot, Withheld: withheld, Redactions: hp.Masked}}); err != nil {
+		return fail(StepLineage, "cannot record cloud lineage", err)
+	}
+	if err := lin.Validate(); err != nil {
+		return fail(StepLineage, "invalid cloud lineage", err)
+	}
 	if f, err := fsys(machine); err != nil {
 		step(StepLineage, StepFailed, err.Error())
 		res.Warnings = append(res.Warnings, "could not record the session's lineage: "+err.Error())
-	} else if err := j.WriteFile(f, machine, lineage.PathFor(s.Path), lin.Encode(), 0o600); err != nil {
+	} else if err := j.WriteReceipt(f, machine, lineage.PathFor(s.Path), lin.ForBranch(sourceLine).Encode(), false); err != nil {
 		step(StepLineage, StepFailed, err.Error())
 		res.Warnings = append(res.Warnings, "could not record the session's lineage: "+err.Error())
 	} else {
@@ -964,7 +1023,7 @@ func applyHandoff(ctx context.Context, p *Plan, env Env) (*Result, error) {
 		}
 	case MarkWhenStopped:
 		res.Mark = "pending"
-		owed := lineage.Pending{Time: now, Location: machine, Key: s.Key, Path: s.Path, Title: p.Title, Mark: mk, Head: string(hp.head.Head)}
+		owed := lineage.Pending{Operation: j.ID, Branch: sourceLine, Replica: sourceReplica, Time: now, Location: machine, Key: s.Key, Path: s.Path, Title: p.Title, Mark: mk, Head: string(hp.head.Head)}
 		if err := lineage.AddPending(env.StateDir, owed); err != nil {
 			res.Mark, res.MarkError = "failed", err.Error()
 			step(StepMark, StepFailed, err.Error())

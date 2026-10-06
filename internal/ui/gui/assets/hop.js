@@ -1,7 +1,7 @@
-// Handing a cloud session on to another cloud through this machine: the Hand off ▸ menu
-// on a cloud row, the sheet with both legs and what the trip loses, the wait while the
-// first leg runs in the user's terminal (Claude Code's teleport), and the hand-off's done
-// screen, which says it came through here.
+// Handing a cloud session on to another cloud through this machine (Move ▾ on a cloud
+// session, from actions.js): the sheet with both legs and what the trip loses, the wait
+// while the first leg runs in the user's terminal (Claude Code's teleport), and the
+// hand-off's done screen, which says it came through here.
 import { api, on, h, fill, state, go, toast, fail, errText, cap, cloudChip, cloudTitle, $, sys, keys } from "./core.js";
 import { stepBox, menuItem } from "./handoff.js";
 import { undo } from "./activity.js";
@@ -11,20 +11,6 @@ let hop = null; // { e, cloud, opts, plan, busy, applying, waiting }
 
 const mono = (s) => h("span", { class: "mono", style: "font-size:12px" }, s);
 const tick = (kind) => h("span", { class: "badge " + kind }, kind === "ok" ? "✓" : kind === "err" ? "✕" : "!");
-
-// hopMenu is the Hand off ▸ button of a cloud session and, open, its menu: every other
-// cloud, a disabled one with its reason inline.
-export function hopMenu(e, open, toggle) {
-  const targets = e.hop || [];
-  if (!targets.length) return null;
-  const btn = h("button", { class: "btn", "aria-haspopup": "menu", "aria-expanded": open ? "true" : "false", onclick: toggle }, "Hand off ▸");
-  if (!open) return h("div", { class: "menu-wrap" }, btn);
-  return h("div", { class: "menu-wrap" }, btn,
-    h("div", { class: "menu menu-pop", role: "menu", "aria-label": "Hand off to" },
-      h("div", { class: "menu-h", role: "presentation" }, "Hand off to"),
-      targets.map((t) => menuItem(t, () => { toggle(); planHop(e, t.cloud); })),
-      h("div", { class: "muted", role: "presentation", style: "font-size:11.5px;padding:4px 8px" }, `It comes to ${sys.here} first; the next cloud gets a briefing.`)));
-}
 
 // planHop opens the hop sheet for a cloud session.
 export async function planHop(e, cloud) {

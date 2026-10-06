@@ -239,11 +239,11 @@ func (a *App) BringTarget(inv *Inventory, e Entry) agent.ID {
 	}
 	if l := e.Lineage; l != nil {
 		for _, h := range l.Hops {
-			if h.Kind != lineage.HopHandoff || h.From < 0 || h.From >= len(l.Replicas) || h.To < 0 || h.To >= len(l.Replicas) {
+			if h.Kind != lineage.HopHandoff || !l.HasReplica(h.From) || !l.HasReplica(h.To) {
 				continue
 			}
-			if to := l.Replicas[h.To]; to.Location == e.Location.Name && to.Key.Session == e.Session.Key.Session {
-				if from := l.Replicas[h.From].Key.Agent; takes(from) {
+			if to := l.Replica(h.To); to.Location == e.Location.Name && to.Key.Session == e.Session.Key.Session {
+				if from := l.Replica(h.From).Key.Agent; takes(from) {
 					return from
 				}
 			}

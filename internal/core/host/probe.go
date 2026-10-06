@@ -40,8 +40,8 @@ var Hopsesh = agent.Binary{
 }
 
 func wants(specs []agent.Spec) probeWants {
-	w := probeWants{bins: []agent.Binary{Hopsesh}}
-	seen := map[string]bool{}
+	w := probeWants{bins: []agent.Binary{Hopsesh}, env: []string{"HOPSESH_CONFIG_DIR"}}
+	seen := map[string]bool{"HOPSESH_CONFIG_DIR": true}
 	for _, s := range specs {
 		for _, e := range SpecEnv(s) {
 			if !seen[e] && envName.MatchString(e) {

@@ -1,0 +1,5 @@
+# Marked lexer, vendored from the npm registry without running package scripts.
+# npm pack marked@18.1.0 --ignore-scripts; copy lib/marked.esm.js and LICENSE.
+package marked@18.1.0
+054d73b676031dc8e60e247ef228044fbeebe10af14bac1a6e53852f80f826e5  marked.mjs
+8e3a3f82f59a60958f56ca08f445647c32a4733dc7ca6c2c46f6eb898471ab9c  LICENSE-marked.txt

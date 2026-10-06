@@ -438,8 +438,8 @@ func (a *App) undoHop(ctx context.Context, hj *journal.Journal, reach journal.Re
 	}
 	var manual []journal.Manual
 	var kept, problems []string
-	for _, leg := range legs {
-		if err := leg.Undo(ctx, reach, force); err != nil {
+	for i, leg := range legs {
+		if err := leg.UndoAfter(ctx, reach, force, legs[:i]); err != nil {
 			problems = append(problems, fmt.Sprintf("%s: %v", leg.Title, err))
 		}
 		manual, kept = append(manual, leg.Manual...), append(kept, leg.Kept...)
@@ -448,6 +448,9 @@ func (a *App) undoHop(ctx context.Context, hj *journal.Journal, reach journal.Re
 		problems = append(problems, err.Error())
 	}
 	hj.Manual, hj.Kept = manual, kept
+	if len(problems) > 0 {
+		hj.Undone = false
+	}
 	if err := hj.Save(); err != nil {
 		problems = append(problems, err.Error())
 	}

@@ -3,16 +3,18 @@
 // bar's buttons, the View menu, Enter on a divider, or dragging past half the minimum).
 // The window lays out on a grid whose columns are --sb-w and --in-w. What the user chose
 // is saved in the config (SaveLayout); a sidebar hidden because the window is narrow is
-// not.
+// not. The inspector's width follows the window until the user sets one: by default 30%
+// of the room beside the sidebar (360 to 480px), at most 960px, 60% of that room, and
+// whatever leaves the list 440px. Its sections' open or closed state is saved too.
 import { api, h, state, sys, $ } from "./core.js";
 
 export const SIDEBAR = { def: 220, min: 180, max: 320, snap: 90 };
-export const INSPECTOR = { def: 360, min: 280, max: 560, snap: 140 };
-const LIST_MIN = 380, NARROW = 1000, STEP = 16, BIG_STEP = 64;
+export const INSPECTOR = { min: 300, max: 960, snap: 150 };
+const LIST_MIN = 440, NARROW = 1000, STEP = 16, BIG_STEP = 64;
 
-// lay is what the user chose; preview a pane's width while a drag passes its collapse
-// point (0) or moves it.
-const lay = { sidebarWidth: SIDEBAR.def, sidebarHidden: false, inspectorWidth: INSPECTOR.def, inspectorHidden: false };
+// lay is what the user chose (an inspector width of 0 is its default); preview a pane's
+// width while a drag passes its collapse point (0) or moves it.
+const lay = { sidebarWidth: SIDEBAR.def, sidebarHidden: false, inspectorWidth: 0, inspectorHidden: false, sectionsOpen: [], sectionsClosed: [] };
 const preview = { sidebar: null, inspector: null };
 let loaded = false;
 
@@ -22,9 +24,24 @@ export function load(l) {
   loaded = true;
   Object.assign(lay, {
     sidebarWidth: clamp(l.sidebarWidth || SIDEBAR.def, SIDEBAR.min, SIDEBAR.max), sidebarHidden: !!l.sidebarHidden,
-    inspectorWidth: clamp(l.inspectorWidth || INSPECTOR.def, INSPECTOR.min, INSPECTOR.max), inspectorHidden: !!l.inspectorHidden,
+    inspectorWidth: l.inspectorWidth ? clamp(l.inspectorWidth, INSPECTOR.min, INSPECTOR.max) : 0, inspectorHidden: !!l.inspectorHidden,
+    sectionsOpen: [...(l.sectionsOpen || [])], sectionsClosed: [...(l.sectionsClosed || [])],
   });
   apply();
+}
+
+// sectionOpen is whether an inspector section is open (def until the user chose).
+export function sectionOpen(name, def) {
+  if (lay.sectionsOpen.includes(name)) return true;
+  if (lay.sectionsClosed.includes(name)) return false;
+  return def;
+}
+// setSection remembers that the user opened or closed an inspector section.
+export function setSection(name, open) {
+  lay.sectionsOpen = lay.sectionsOpen.filter((x) => x !== name);
+  lay.sectionsClosed = lay.sectionsClosed.filter((x) => x !== name);
+  (open ? lay.sectionsOpen : lay.sectionsClosed).push(name);
+  save();
 }
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.round(v)));
@@ -35,13 +52,17 @@ let override = false;
 const sidebarBase = () => (lay.sidebarHidden || (narrow() && !override) ? 0 : lay.sidebarWidth);
 const sidebarShown = () => (preview.sidebar ?? sidebarBase()) > 0;
 const inspectorShown = () => (preview.inspector ?? (lay.inspectorHidden ? 0 : 1)) > 0;
-// inspectorMax keeps the list at its minimum width at least.
-const inspectorMax = (sb) => Math.max(INSPECTOR.min, Math.min(INSPECTOR.max, window.innerWidth - sb - LIST_MIN));
+// The room beside the sidebar decides the inspector's default and its maximum (which keeps
+// the list at its minimum width at least).
+const room = (sb) => window.innerWidth - sb;
+const inspectorDef = (sb) => clamp(room(sb) * 0.3, 360, 480);
+const inspectorMax = (sb) => Math.max(INSPECTOR.min, Math.min(INSPECTOR.max, room(sb) - LIST_MIN, Math.round(room(sb) * 0.6)));
 
 // widths are the columns now: [sidebar, inspector].
 function widths() {
   const sb = preview.sidebar ?? sidebarBase();
-  const insp = preview.inspector ?? (lay.inspectorHidden ? 0 : clamp(lay.inspectorWidth, INSPECTOR.min, inspectorMax(sb)));
+  const want = lay.inspectorWidth || inspectorDef(sb);
+  const insp = preview.inspector ?? (lay.inspectorHidden ? 0 : clamp(want, INSPECTOR.min, inspectorMax(sb)));
   return [sb, insp];
 }
 
@@ -113,7 +134,7 @@ export function toggle(which) {
 // reset puts a pane back to its default width, shown.
 function reset(which) {
   if (which === "sidebar") Object.assign(lay, { sidebarWidth: SIDEBAR.def, sidebarHidden: false });
-  else Object.assign(lay, { inspectorWidth: INSPECTOR.def, inspectorHidden: false });
+  else Object.assign(lay, { inspectorWidth: 0, inspectorHidden: false });
   animate();
   apply();
   save();

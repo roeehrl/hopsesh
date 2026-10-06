@@ -147,7 +147,7 @@ func TestContinueInCodexAndBack(t *testing.T) {
 	again := move.Input{Source: move.Side{Machine: box.m, Module: cl, Install: box.in}, Session: home, Lineage: lin,
 		Target: move.Side{Machine: here.m, Module: cx, Install: hereCodex}, Copies: []move.Copy{{Summary: listAgent(t, here, cx, hereCodex)[0]}}}
 	p, _ = move.Build(ctx, again, move.Options{TargetDir: here.repo})
-	if p.Continue.Relation != move.RelationSame || len(p.Blockers) == 0 {
+	if p.Continue.Relation != move.RelationSame || !p.NoWork || len(p.Blockers) > 0 {
 		t.Fatalf("right after the round trip both copies are in step: %s %v", p.Continue.Relation, p.Blockers)
 	}
 }
@@ -280,6 +280,7 @@ func appendCodexTurn(t *testing.T, file, user, reply string) {
 		`{"timestamp":"` + ts + `","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"` + user + `"}]}}` + "\n" +
 		`{"timestamp":"` + ts + `","type":"response_item","payload":{"type":"reasoning","summary":[],"encrypted_content":"gAAA"}}` + "\n" +
 		`{"timestamp":"` + ts + `","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"` + reply + `"}]}}` + "\n"
+	lines = numberPaginatedTurn(t, file, lines)
 	f, err := os.OpenFile(file, os.O_APPEND|os.O_WRONLY, 0)
 	if err != nil {
 		t.Fatal(err)

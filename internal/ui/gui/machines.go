@@ -28,19 +28,20 @@ type HereDTO struct {
 
 // MachineRow is a machine you added: how hopsesh logs in, and what the last scan found.
 type MachineRow struct {
-	Name        string   `json:"name"`
-	Destination string   `json:"destination"`
-	OS          string   `json:"os"`
-	Auth        string   `json:"auth"`     // key | password
-	Keychain    bool     `json:"keychain"` // the password is remembered
-	CanRemember bool     `json:"canRemember"`
-	Scanned     bool     `json:"scanned"` // the last scan reached for it
-	Status      string   `json:"status"`  // the last scan's (app.Status*)
-	Hint        string   `json:"hint"`
-	Error       string   `json:"error"`
-	Agents      []string `json:"agents"`
-	Hopsesh     string   `json:"hopsesh"`
-	Sessions    int      `json:"sessions"`
+	Name        string      `json:"name"`
+	Destination string      `json:"destination"`
+	OS          string      `json:"os"`
+	Auth        string      `json:"auth"`     // key | password
+	Keychain    bool        `json:"keychain"` // the password is remembered
+	CanRemember bool        `json:"canRemember"`
+	Scanned     bool        `json:"scanned"` // the last scan reached for it
+	Scan        MachineScan `json:"scan"`
+	Status      string      `json:"status"` // the last scan's (app.Status*)
+	Hint        string      `json:"hint"`
+	Error       string      `json:"error"`
+	Agents      []string    `json:"agents"`
+	Hopsesh     string      `json:"hopsesh"`
+	Sessions    int         `json:"sessions"`
 }
 
 // FoundRow is a machine discovery found that is not added.
@@ -97,6 +98,7 @@ func (a *App) Machines() MachinesDTO {
 		}
 		added[h.Name] = true
 		r := MachineRow{Name: h.Name, Destination: h.Destination, OS: h.OS, Auth: "key", Keychain: h.Keychain, CanRemember: secrets.Available(), Agents: []string{}}
+		r.Scan = a.scans[h.Name]
 		if h.UsesPassword() {
 			r.Auth = "password"
 		}

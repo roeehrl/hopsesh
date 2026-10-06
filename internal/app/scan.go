@@ -75,15 +75,17 @@ func (m *Machine) Install(id agent.ID) (agent.Install, bool) {
 type Entry struct {
 	// Location is where the session lives. Machine is the machine whose files hold it, or
 	// the cloud's name for a cloud session (so "claude-cloud:<id>" names one).
-	Location  agent.Location    `json:"location"`
-	Machine   string            `json:"machine"`
-	Agent     agent.ID          `json:"agent"`
-	AgentName string            `json:"agentName"`
-	Session   agent.Summary     `json:"session"`
-	Live      agent.LiveInfo    `json:"live"`
-	Git       *repos.GitState   `json:"git,omitempty"`
-	GitError  string            `json:"gitError,omitempty"` // the checkout could not be read
-	Lineage   *lineage.Manifest `json:"lineage,omitempty"`
+	Location          agent.Location    `json:"location"`
+	Machine           string            `json:"machine"`
+	Agent             agent.ID          `json:"agent"`
+	AgentName         string            `json:"agentName"`
+	Session           agent.Summary     `json:"session"`
+	Live              agent.LiveInfo    `json:"live"`
+	Git               *repos.GitState   `json:"git,omitempty"`
+	GitError          string            `json:"gitError,omitempty"` // the checkout could not be read
+	CanArchiveLineage bool              `json:"canArchiveLineage,omitempty"`
+	LineageError      string            `json:"lineageError,omitempty"`
+	Lineage           *lineage.Manifest `json:"lineage,omitempty"`
 	// Cloud is a cloud session as its cloud listed it.
 	Cloud *agent.CloudSession `json:"cloud,omitempty"`
 	// Checkout is a cloud session's repository checked out here, when known.
@@ -354,7 +356,8 @@ func hopseshVersion(b agent.BinaryFact) string {
 }
 
 // readManifests reads the lineage beside each session, in parallel.
-func readManifests(fsys host.FS, ss []agent.Summary) []*lineage.Manifest {
+func readManifests(fsys host.FS, ss []agent.Summary) ([]*lineage.Manifest, []string) {
+	problems := make([]string, len(ss))
 	out := make([]*lineage.Manifest, len(ss))
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 16)
@@ -363,11 +366,15 @@ func readManifests(fsys host.FS, ss []agent.Summary) []*lineage.Manifest {
 		sem <- struct{}{}
 		go func() {
 			defer func() { <-sem; wg.Done() }()
-			out[i], _ = lineage.Read(fsys, s.Path)
+			var err error
+			out[i], err = lineage.Read(fsys, s.Path)
+			if err != nil {
+				problems[i] = err.Error()
+			}
 		}()
 	}
 	wg.Wait()
-	return out
+	return out, problems
 }
 
 func classify(err error, h config.Host) (status, msg, hint string) {
@@ -474,13 +481,18 @@ func listedEntries(ctx context.Context, hm *host.Machine, fsys host.FS, mod agen
 		}
 		live, _ = ld.Live(ctx, ch, st.Install, ids)
 	}
-	manifests := readManifests(fsys, l.Sessions)
+	manifests, problems := readManifests(fsys, l.Sessions)
+	unsupported := make([]bool, len(problems))
+	for i, err := range problems {
+		unsupported[i] = err != ""
+	}
+	nativeForkManifests(ctx, hm, ch, mod, st.Install, l.Sessions, manifests, problems)
 	for i, s := range l.Sessions {
 		lv := live[s.Key.Session]
 		if lv.State == "" {
 			lv.State = agent.Unknown
 		}
-		out = append(out, Entry{Location: agent.MachineLocation(hm.Name), Machine: hm.Name, Agent: spec.ID, AgentName: spec.Name, Session: s, Live: lv, Lineage: manifests[i]})
+		out = append(out, Entry{Location: agent.MachineLocation(hm.Name), Machine: hm.Name, Agent: spec.ID, AgentName: spec.Name, Session: s, Live: lv, Lineage: manifests[i], LineageError: problems[i], CanArchiveLineage: unsupported[i]})
 	}
 	return out
 }

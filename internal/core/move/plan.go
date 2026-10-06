@@ -5,9 +5,10 @@ package move
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"strings"
-	"time"
 
 	"github.com/roeehrl/hopsesh/internal/core/convert"
 	"github.com/roeehrl/hopsesh/internal/core/host"
@@ -15,6 +16,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/internal/core/repos"
 	"github.com/roeehrl/hopsesh/sdk/agent"
+	"github.com/roeehrl/hopsesh/sdk/ir"
 )
 
 // Side is one end of a move: a machine, the agent module and its install there.
@@ -79,6 +81,8 @@ const (
 
 // Options are the user's choices.
 type Options struct {
+	OperationID   string `json:"operationId,omitempty"`
+	TargetSession string `json:"targetSession,omitempty"`
 	TargetDir     string // resume here (skips repository matching)
 	Clone         bool   // clone the repository when it is not here
 	ReposDir      string
@@ -156,17 +160,21 @@ const (
 
 // Plan is a move, worked out without changing anything.
 type Plan struct {
-	Kind      string           `json:"kind"`
-	Key       agent.SessionKey `json:"key"`
-	Title     string           `json:"title"`
-	Agent     string           `json:"agent"` // display name
-	Source    Endpoint         `json:"source"`
-	Target    Endpoint         `json:"target"`
-	Live      bool             `json:"live"`
-	Repo      RepoPlan         `json:"repo"`
-	Placement agent.Placement  `json:"placement"`
-	Files     agent.MovePlan   `json:"files"`
-	Bytes     int64            `json:"bytes"`
+	NoWork       bool             `json:"noWork,omitempty"`
+	SyncTo       *agent.Summary   `json:"syncTo,omitempty"`
+	OperationID  string           `json:"operationId"`
+	Destinations []agent.Summary  `json:"destinations,omitempty"`
+	Kind         string           `json:"kind"`
+	Key          agent.SessionKey `json:"key"`
+	Title        string           `json:"title"`
+	Agent        string           `json:"agent"` // display name
+	Source       Endpoint         `json:"source"`
+	Target       Endpoint         `json:"target"`
+	Live         bool             `json:"live"`
+	Repo         RepoPlan         `json:"repo"`
+	Placement    agent.Placement  `json:"placement"`
+	Files        agent.MovePlan   `json:"files"`
+	Bytes        int64            `json:"bytes"`
 	// SetAside are copies at the target that make way (kept by the journal for undo).
 	SetAside []agent.Summary `json:"setAside,omitempty"`
 	Conflict string          `json:"conflict,omitempty"`
@@ -189,16 +197,23 @@ type Plan struct {
 	Handoff        *HandoffPlan  `json:"handoff,omitempty"`
 	Hop            *HopPlan      `json:"hop,omitempty"`
 
-	bundle     agent.Bundle
-	native     *Plan // the move that keeps NativeCopy
-	nativeIn   Input
-	resumeOpts agent.ResumeOptions
-	fetchIn    *FetchInput
-	handoffIn  *HandoffInput
+	ExpectedDestination    map[string]ir.Cursor `json:"expectedDestination,omitempty"`
+	ExpectedAbsent         []string             `json:"expectedAbsent,omitempty"`
+	manifest               *lineage.Manifest
+	sourceLine, targetLine string
+	sourceReplica          lineage.ReplicaID
+	sourceState            lineage.State
+	bundle                 agent.Bundle
+	native                 *Plan // the move that keeps NativeCopy
+	nativeIn               Input
+	resumeOpts             agent.ResumeOptions
+	fetchIn                *FetchInput
+	handoffIn              *HandoffInput
 }
 
 // Endpoint describes one end for people and JSON.
 type Endpoint struct {
+	ID       string `json:"id"`
 	Location string `json:"location"`
 	OS       string `json:"os"`
 	CWD      string `json:"cwd"`
@@ -210,7 +225,17 @@ type Endpoint struct {
 // writes nothing.
 func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	src, tgt := in.Source, in.Target
-	if src.Module.Spec().ID != tgt.Module.Spec().ID {
+	copies := currentBranchCopies(in)
+	if opt.TargetSession != "" {
+		var selected []Copy
+		for _, c := range copies {
+			if c.Summary.Key.String() == opt.TargetSession || string(c.Summary.Key.Session) == opt.TargetSession {
+				selected = append(selected, c)
+			}
+		}
+		copies = selected
+	}
+	if src.Module.Spec().ID != tgt.Module.Spec().ID || len(copies) == 1 && copies[0].Summary.Key != in.Session.Key {
 		return buildContinue(ctx, in, opt)
 	}
 	if opt.Worktree == "" {
@@ -269,9 +294,45 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	if src.Machine.Name == tgt.Machine.Name && (s.CWD == cwd || tgt.Machine.Local && realIntended(s.CWD) == cwd) {
 		p.Blockers = append(p.Blockers, "this session is already here, in this folder; to move it to another folder on this machine use --to <dir>")
 	}
+	if r, ok := src.Module.(agent.Reader); ok {
+		seg, e := r.Read(ctx, srcHost, src.Install, s, ir.Cursor{})
+		if e != nil {
+			return nil, e
+		}
+		if e = prepareLineage(ctx, p, in, &seg); e != nil {
+			p.Blockers = append(p.Blockers, "cannot verify session lineage: "+e.Error())
+		}
+	}
 	relate(ctx, p, in, opt)
 	if p.Files, err = tgt.Module.PlanMove(src.Install, tgt.Install, s, p.bundle, p.Placement); err != nil {
 		return nil, err
+	}
+	if !p.NoWork {
+		fsys, e := tgt.Machine.FS(ctx)
+		if e != nil {
+			return nil, e
+		}
+		for _, file := range p.Files.Files {
+			if file.From.Role != agent.RoleMain {
+				continue
+			}
+			path := tgt.Machine.Path().Join(tgt.Install.Root(file.ToRoot), fromSlash(tgt.Machine.Path(), file.ToRel))
+			if _, e = fsys.Stat(path); errors.Is(e, fs.ErrNotExist) {
+				p.ExpectedAbsent = append(p.ExpectedAbsent, path)
+			} else if e != nil {
+				return nil, e
+			} else {
+				selected := false
+				for _, c := range p.SetAside {
+					if c.Path == path {
+						selected = true
+					}
+				}
+				if !selected {
+					p.Blockers = append(p.Blockers, "destination native session already exists outside the selected branch; create a separate fork")
+				}
+			}
+		}
 	}
 	planWarnings(p, in, opt)
 	planRoundTrip(p, in, opt)
@@ -288,7 +349,7 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		Redacted: opt.Redact, OtherAccount: p.Options.OtherAccount, Live: p.Live, Fork: opt.Fork && p.Live, Notify: notify,
 	})
 	p.Resume = tgt.Module.Resume(tgt.Install, p.Placement.Key, p.Placement, agent.ResumeOptions{
-		Fork: opt.Fork && p.Live && agent.Has(tgt.Module, agent.CapFork), RemoteControl: p.Options.RemoteControl,
+		Fork: false, RemoteControl: p.Options.RemoteControl,
 		App: opt.App && agent.Has(tgt.Module, agent.CapApp), Name: p.NewName, Prompt: p.StartPrompt,
 	})
 	return p, nil
@@ -297,7 +358,33 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 // relate compares the incoming session with copies already here.
 func relate(ctx context.Context, p *Plan, in Input, opt Options) {
 	conflict := ""
-	for _, c := range in.Copies {
+	copies := currentBranchCopies(in)
+	if !p.Options.Fork {
+		if opt.TargetSession != "" {
+			var selected []Copy
+			for _, c := range copies {
+				if c.Summary.Key.String() == opt.TargetSession || string(c.Summary.Key.Session) == opt.TargetSession {
+					selected = append(selected, c)
+				}
+			}
+			copies = selected
+			if len(copies) == 0 {
+				p.Blockers = append(p.Blockers, "selected destination does not belong to this branch")
+				return
+			}
+		}
+		if len(copies) > 1 {
+			for _, c := range copies {
+				p.Destinations = append(p.Destinations, c.Summary)
+			}
+			p.Blockers = append(p.Blockers, "multiple destination replicas match this branch; select a destination session explicitly")
+			return
+		}
+	}
+	for _, c := range copies {
+		if p.Options.Fork {
+			continue
+		}
 		if c.Live.State == agent.Live {
 			if opt.StopLocal && agent.Has(in.Target.Module, agent.CapStop) && in.Source.Machine.Name != in.Target.Machine.Name {
 				p.StopHere = true
@@ -310,7 +397,14 @@ func relate(ctx context.Context, p *Plan, in Input, opt Options) {
 		}
 		p.SetAside = append(p.SetAside, c.Summary)
 	}
+	if p.NoWork {
+		p.SetAside = nil
+		p.StopHere = false
+	}
 	if conflict == "" {
+		if p.Options.Fork {
+			keepBoth(p)
+		}
 		return
 	}
 	p.Conflict = conflict
@@ -318,6 +412,9 @@ func relate(ctx context.Context, p *Plan, in Input, opt Options) {
 	case ConflictReplace:
 		p.Warnings = append(p.Warnings, conflict+"; it will be replaced (hopsesh undo brings it back)")
 	case ConflictKeepBoth:
+		if p.manifest != nil {
+			forkLine(p)
+		}
 		keepBoth(p)
 	default:
 		p.Blockers = append(p.Blockers, conflict+"; choose --replace (the copy here is kept for undo) or --keep-both (bring this one in as a separate session)")
@@ -328,26 +425,26 @@ func relate(ctx context.Context, p *Plan, in Input, opt Options) {
 // the incoming copy was taken from it. Lineage tells exactly (the head it had when it
 // left); without lineage, a copy newer than the incoming one is treated as changed.
 func changedSinceItLeft(ctx context.Context, p *Plan, in Input, c Copy) string {
-	if r, _, ok := in.Lineage.Find(c.Summary.Key, in.Target.Machine.Name); ok && r.Head != "" {
-		if reader, isReader := in.Target.Module.(agent.Reader); isReader {
-			h, err := in.Target.Machine.For(ctx, in.Target.Module.Spec(), in.Target.Install, nil)
-			if err == nil {
-				seg, err := reader.Read(ctx, h, in.Target.Install, c.Summary, agentCursor(r.Head))
-				switch {
-				case err != nil:
-					return "the copy here changed after it was moved to " + p.Source.Location
-				case len(seg.Nodes) > 0:
-					return fmt.Sprintf("the copy here has %d new step(s) since it was moved to %s", len(seg.Nodes), p.Source.Location)
-				}
+	if p.manifest != nil {
+		st, _, err := targetState(ctx, p, in, c)
+		if err != nil {
+			return "cannot verify the copy here: " + err.Error()
+		}
+		source, target := p.manifest.Covered(p.sourceState.Heads), p.manifest.Covered(st.Heads)
+		if lineage.Subset(source, target) && lineage.Subset(target, source) {
+			if c.Summary.CWD != "" && realIntended(c.Summary.CWD) != realIntended(p.Target.CWD) {
+				p.Blockers = append(p.Blockers, "destination is synchronized in "+c.Summary.CWD+"; choose that folder or create a separate fork for a different folder")
 				return ""
 			}
+			p.NoWork = true
+			p.SyncTo = &c.Summary
 		}
+		if !lineage.Subset(target, source) {
+			return "the copy here contains work that the incoming session does not have"
+		}
+		return ""
 	}
-	if c.Summary.LastActivity.After(in.Session.LastActivity.Add(time.Minute)) {
-		return fmt.Sprintf("the copy here is newer (last active %s) than the one on %s (%s)",
-			c.Summary.LastActivity.Local().Format("2 Jan 15:04"), p.Source.Location, in.Session.LastActivity.Local().Format("2 Jan 15:04"))
-	}
-	return ""
+	return "the copy here has no verified causal history"
 }
 
 // keepBoth brings the incoming copy in under a new id, so both stay.
@@ -408,11 +505,13 @@ func planWarnings(p *Plan, in Input, opt Options) {
 // planRoundTrip decides marking, pushing and code sync.
 func planRoundTrip(p *Plan, in Input, opt Options) {
 	switch {
+	case p.NoWork:
+		p.Mark = MarkOff
 	case p.Kind == KindMove && p.Placement.Key != p.Key:
 		p.Mark = MarkOff // keep-both: both copies stay
 	case !opt.Mark || (p.Kind == KindMove && p.Source.Location == p.Target.Location):
 		p.Mark = MarkOff
-	case opt.Fork && p.Live:
+	case p.Options.Fork:
 		p.Mark = MarkOff // both continue on purpose
 	case p.Live:
 		p.Mark = MarkWhenStopped

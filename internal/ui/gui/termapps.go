@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/app"
-	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/appicon"
 	"github.com/roeehrl/hopsesh/internal/core/proc"
 	"github.com/roeehrl/hopsesh/internal/core/termapp"
@@ -93,8 +92,9 @@ func (a *App) TerminalApps() TerminalAppsDTO {
 func (a *App) SetTerminalApps(appID, resume string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	t := config.Terminal{App: appID, Resume: resume}
 	c := a.core.Cfg
+	t := c.Terminal
+	t.App, t.Resume = appID, resume
 	c.Terminal = t
 	if err := c.Check(); err != nil {
 		return err

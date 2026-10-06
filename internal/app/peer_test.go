@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/roeehrl/hopsesh/internal/config"
+	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/peer"
 )
 
@@ -51,5 +52,13 @@ func TestPushToOlderPeer(t *testing.T) {
 	}
 	if want := "old-box runs an older hopsesh (peer protocol 1)"; !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "update hopsesh on old-box to "+peer.FirstVersion+" or later") {
 		t.Fatalf("%q must name old-box as the one to update", err)
+	}
+}
+
+func TestReceiveOptionsRetainsTransferIdentityAndSelectedReplica(t *testing.T) {
+	a := &App{Cfg: config.Defaults()}
+	got := a.receiveOptions(move.Options{OperationID: "same-transfer", TargetSession: "claude/selected"})
+	if got.OperationID != "same-transfer" || got.TargetSession != "claude/selected" {
+		t.Fatalf("peer lost identity or destination: %+v", got)
 	}
 }

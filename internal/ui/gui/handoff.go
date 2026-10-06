@@ -12,7 +12,7 @@ import (
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
-// Handing a session off to a cloud in the window: the Hand off ▸ menu (every cloud, a
+// Handing a session off to a cloud in the window: Move ▾'s clouds (every cloud, a
 // disabled one with its reason), the plan sheet, the applying checklist, the done screen
 // and a follow-up.
 

@@ -16,6 +16,9 @@ import (
 
 func addHandoffFlags(cmd *cobra.Command) {
 	f := cmd.Flags()
+	if f.Lookup("operation-id") == nil {
+		f.String("operation-id", "", "idempotency key for retrying the same cloud request")
+	}
 	f.Bool("history-file", false, "also commit the conversation as .hopsesh/handoff.md on the handoff branch (off by default: anyone who can see the branch can read it)")
 	f.StringArray("untracked", nil, "carry these untracked files (a path or a glob; repeat it); credential-like files never go")
 	f.Bool("bundle", false, "let the agent upload the repository itself instead of pushing a branch (where the cloud takes one)")
@@ -107,6 +110,7 @@ func cloudNames() []string {
 func (r *run) handoffOptions(cmd *cobra.Command, cloud string) (move.Options, error) {
 	f := cmd.Flags()
 	o := r.app.HandoffDefaults(cloud)
+	o.OperationID, _ = f.GetString("operation-id")
 	if f.Changed("history-file") {
 		o.HistoryFile, _ = f.GetBool("history-file")
 	}

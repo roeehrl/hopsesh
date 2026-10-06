@@ -321,7 +321,15 @@ function strip() {
   $("#empty").hidden = tabs.size > 0;
   $("#info").hidden = !active;
   tighten();
-  $("#tab-" + active)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  revealActiveTab();
+}
+
+function revealActiveTab() {
+  const strip = $("#tabs"), tab = $("#tab-" + active);
+  if (!tab) return;
+  const box = strip.getBoundingClientRect(), item = tab.getBoundingClientRect();
+  if (item.left < box.left) strip.scrollLeft -= box.left - item.left;
+  else if (item.right > box.right) strip.scrollLeft += item.right - box.right;
 }
 
 // tighten marks the tabs squeezed to (near) their minimum width: they show their status
@@ -592,7 +600,7 @@ document.addEventListener("keydown", (ev) => {
   if (ev.ctrlKey && ev.code === "Backquote") { ev.preventDefault(); request({ op: "main" }); }
 });
 new ResizeObserver(() => { const t = tabs.get(active); if (t) fitTab(t); }).observe($("#stage"));
-new ResizeObserver(() => tighten()).observe($("#strip"));
+new ResizeObserver(() => { tighten(); revealActiveTab(); }).observe($("#strip"));
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { for (const t of tabs.values()) t.term.options.theme = theme(); });
 setInterval(() => { strip(); if (active) paint(); }, 30_000); // "started 3 min ago", and "starting" ending
 

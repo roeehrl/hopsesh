@@ -136,12 +136,15 @@ hopsesh undo                                   # undo the newest move (--list sh
 </picture>
 
 Same engine, with a plan sheet for each move: repository, worktree mode, what gets
-rewritten, and what's left behind on the other machine. Every session has **Continue in…**,
-with a preview of the conversion, and sessions on this machine have **Send to…** another
-machine: it plans there, carries it out, and one Undo reverses both sides. Settings has
-per-agent options, the terminal (below) and a **Receive sessions** switch. It can also put
-the `hopsesh` command on your PATH (no administrator password) and install the skill into
-your agents.
+rewritten, and what's left behind on the other machine. Sessions are grouped by repository,
+machine, agent, status or age, with filters you can see as chips. Each session has one row of
+actions: **Resume in ‹place›** (or **Show in ‹place›** while it runs, or **Bring to this
+Mac…**), **Move** (**Continue with ‹agent›…** with a preview of the conversion, **Send to
+‹machine›…**, **Hand off to ‹cloud›…**) and **⋯**, beside the end of its conversation and
+where it is open now. Sending plans on the other machine, carries it out, and one Undo
+reverses both sides. Settings has per-agent options, the terminal (below) and a **Receive
+sessions** switch. It can also put the `hopsesh` command on your PATH (no administrator password) and
+install the skill into your agents.
 
 The app is the same on macOS and Windows; on Windows it says "this PC", uses Ctrl where macOS
 uses ⌘, opens sessions in its own terminal window (or, if you choose, Windows Terminal or
@@ -156,9 +159,10 @@ PowerShell) and keeps passwords in Windows Credential Manager. It updates itself
 
 ### The hopsesh Terminal
 
-The app has a terminal of its own: a **hopsesh Terminal** window with tabs. **Resume here**
-runs a session there, and so do the steps Claude Code needs a terminal for (a hand-off to its
-cloud, bringing a session back), cloud sign-ins and **Open a shell here**. hopsesh starts the
+The app has a terminal of its own: a **hopsesh Terminal** window with tabs. **Resume in
+hopsesh Terminal** runs a session there, and so do the steps Claude Code needs a terminal for
+(a hand-off to its cloud, bringing a session back), cloud sign-ins and **Open a shell in its
+folder**. hopsesh starts the
 command; you do all the typing, and it never answers a question for you, Claude Code's trust
 question included. Each tab shows whether its program runs, waits for you or ended (with its
 exit code), and keeps **Open in my terminal**, which ends it and runs the same command in your
@@ -167,10 +171,9 @@ run in a tab and wait for you. Ctrl+` moves between the terminal and your sessio
 hopsesh ends the programs in its tabs, so it asks first; for work that must outlive the app,
 use your terminal app.
 
-Settings → Terminal chooses where sessions and steps open (**In this window**, **In my
-terminal** or **Ask each time**; the app opens them in its own window until you choose),
-your terminal app, the font, its size and how much scrollback each tab keeps (in memory
-only). Programs in a tab can never read your clipboard, links open only after you
+Settings → Terminal chooses where sessions and steps open (**In this window** or **In my
+terminal**; a session's Resume menu picks another place, remembered for that agent), your terminal app, the font, its size and how much scrollback each tab keeps
+(in memory only). Programs in a tab can never read your clipboard, links open only after you
 confirm the whole address, and nothing a tab shows is written to disk or a log. Sign-in and
 shell tabs are recorded nowhere: hopsesh doesn't watch, match or keep what appears in them.
 
@@ -184,8 +187,8 @@ In iTerm2 the tab gets a badge with the session's title, agent and machine (and
 `user.hopsesh_*` variables for your own title or status bar); hopsesh leaves the tab's
 title to the agent.
 
-A session that's already running is shown, not opened twice: the app's **Show its terminal
-tab** and `hopsesh open` bring its iTerm2 or Terminal tab forward. hopsesh finds the tab
+A session that's already running is shown, not opened twice: the app's **Show in iTerm2**
+or **Show in Terminal** and `hopsesh open` bring its tab forward. hopsesh finds the tab
 from the agent's own process and the terminal it runs on (for Codex, from hopsesh's record of
 the launch), never from anything the tab shows. It never types into a tab or reads one, and
 never changes iTerm2's settings: it doesn't turn on the Python API or install iTerm2's
@@ -288,10 +291,11 @@ hopsesh handoff claude-cloud:session_01… --to codex-cloud --env acme-api   # c
 hopsesh clouds cleanup                                # branches whose work is merged, deleted when you say so
 ```
 
-In the app: **Clouds** in the sidebar, **Hand off ▸** on a session (on a cloud session too),
-**Bring here** on a cloud session, and a card per cloud under **Machines** (Allow, Test and
-**Sign in**, which runs the vendor's own login command in a terminal tab that records
-nothing). In the terminal UI, `c` hands off and `enter` brings a cloud session here.
+In the app: **Clouds** in the sidebar, **Move → Hand off to ‹cloud›…** on a session (on a
+cloud session too), **Bring to this Mac…** on a cloud session, and a card per cloud under
+**Machines** (Turn on, Test and **Sign in**, which runs the vendor's own login command in a
+terminal tab that records nothing). In the terminal UI, `c`
+hands off and `enter` brings a cloud session here.
 
 ### What goes up: a briefing and the code
 

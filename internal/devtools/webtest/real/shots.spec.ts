@@ -69,12 +69,13 @@ test("screenshots of the real window", async () => {
   await page.keyboard.press("Control+K");
   const input = page.getByRole("combobox", { name: "Search sessions or run a command" });
   await input.fill("checkout");
-  await expect(page.locator(".pal-item", { hasText: "Continue in" }).first()).toBeVisible();
+  await expect(page.locator(".pal-item", { hasText: "Continue with" }).first()).toBeVisible();
   await shoot("08-palette");
   await input.press("Escape");
 
   await row("Fix flaky checkout tests").click();
-  await page.getByRole("complementary", { name: "Session details" }).getByRole("button", { name: "Continue in Codex" }).click();
+  await page.getByRole("complementary", { name: "Session details" }).getByRole("button", { name: "Move", exact: true }).click();
+  await page.getByRole("menuitem", { name: /^Continue with Codex…/ }).click();
   const sheet = page.locator("#sheet");
   await expect(sheet.getByRole("heading", { name: "Continue “Fix flaky checkout tests” in Codex" })).toBeVisible({ timeout: 60_000 });
   await shoot("02-continue-plan");

@@ -23,6 +23,7 @@ const CAPS = {
   sanitize: "moves between accounts", read: "continues in other agents", write: "takes sessions from other agents",
   "native-replay": "replays commands natively", integrate: "can use the hopsesh skill", fork: "can fork", "remote-control": "remote control",
   app: "desktop app", notify: "tells the old session", import: "has its own importer", "post-install": "registers moved sessions",
+  preview: "previews conversations", rename: "renames sessions",
   "cloud-list": "cloud list", "cloud-send": "cloud send", "cloud-fetch": "cloud bring", "cloud-follow": "follow-up", "cloud-archive": "cloud archive",
 };
 
@@ -53,7 +54,11 @@ async function run(fn, done) {
 }
 
 function save(patch) {
-  return run(() => api("SaveSettings", Object.assign({ layout: s.layout, markMoved: s.markMoved, syncCode: s.syncCode, pushSource: s.pushSource, updateCheck: s.updateCheck || "off", appIcons: s.appIcons }, patch)), "Saved");
+  // Apply the privacy switch before navigating away: returning to Sessions must
+  // never briefly reveal a preview while SaveSettings/Info are still in flight.
+  if (patch.previews !== undefined) state.info.previews = patch.previews;
+  Object.assign(s, patch);
+  return run(() => api("SaveSettings", Object.assign({ layout: s.layout, markMoved: s.markMoved, syncCode: s.syncCode, pushSource: s.pushSource, updateCheck: s.updateCheck || "off", appIcons: s.appIcons, previews: s.previews }, patch)), "Saved");
 }
 
 function toggle(key, label, desc) {
@@ -73,7 +78,8 @@ function general() {
       toggle("syncCode", "Bring the code along", "Fetch the session's commit (from the other machine if it isn't pushed) and fast-forward a clean checkout."),
       toggle("pushSource", "Push unpushed commits on the other machine first", "Off: commits are fetched straight from the other machine.")),
     card(h("span", { class: "sec-h" }, "Appearance"),
-      toggle("appIcons", "Show each agent's own app icon", "When the agent's desktop app is installed here, its icon pictures the agent; otherwise hopsesh's own mark does.")),
+      toggle("appIcons", "Show each agent's own app icon", "When the agent's desktop app is installed here, its icon pictures the agent; otherwise hopsesh's own mark does."),
+      toggle("previews", "Show conversation previews", "The inspector shows the end of the selected session's conversation, with Markdown formatting, read on its machine. Turn it off when you share your screen.")),
     card(h("span", { class: "sec-h" }, sys.Here),
       h("div", { class: "set-row" }, title("Receiving sessions", state.info.receive ? "On: your other machines can send sessions here." : `Off: ${sys.here} refuses sessions sent from other machines.`),
         h("button", { class: "btn", onclick: () => go("machines") }, "Machines…")),
@@ -133,8 +139,9 @@ function terminal() {
     h("span", { class: "muted", style: "font-size:12.5px" }, "Where hopsesh runs Claude Code, Codex and your shell when you resume, bring back, hand off or sign in."),
     card(h("span", { class: "sec-h" }, "Where sessions open"),
       h("div", { class: "set-row" }, title("Resume sessions, hand-offs and bring-backs", `Hand-offs, bring-backs and sign-ins use this window unless you choose ${name}, because hopsesh needs to see how they end. Every tab keeps Open in my terminal.`),
-        seg("Where sessions open", ts.where, [["here", "In this window"], ["terminal", `In ${name}`], ["ask", "Ask each time"]], (v) => setTerm({ where: v }))),
-      h("span", { class: "muted", style: "font-size:12px" }, ts.where === "terminal" ? `${name} keeps running after hopsesh quits.` : "In this window: a tab of the hopsesh Terminal window, which ends when hopsesh quits."),
+        seg("Where sessions open", ts.where, [["here", "In this window"], ["terminal", `In ${name}`]], (v) => setTerm({ where: v }))),
+      h("span", { class: "muted", style: "font-size:12px" }, (ts.where === "terminal" ? `${name} keeps running after hopsesh quits.` : "In this window: a tab of the hopsesh Terminal window, which ends when hopsesh quits.")
+        + " This is where a session first resumes; a session's Resume menu picks another place, and hopsesh remembers it for that agent."),
       h("div", { class: "set-row" }, title("My terminal", `Where Open in my terminal goes. Now: ${ts.name}.`),
         h("select", { "aria-label": "My terminal", onchange: (e) => setTerm({ app: e.target.value }) },
           h("option", { value: "", selected: !ts.app }, `Automatic (${ts.name})`),
@@ -267,6 +274,7 @@ async function preview() {
 const TABS = [["general", "General", general], ["agents", "Agents", agents], ["terminal", "Terminal", terminal], ["skill", "Skill", skill], ["cli", "Command line", cli], ["updates", "Updates", updates]];
 
 function render() {
+  if (current !== "settings") return;
   const [, name, body] = TABS.find((t) => t[0] === tab);
   fill(view, h("div", { class: "three" },
     h("nav", { class: "tabs", role: "tablist", "aria-label": "Settings", "aria-orientation": "vertical" },
@@ -277,8 +285,7 @@ function render() {
           const n = e.key === "ArrowDown" ? i + 1 : e.key === "ArrowUp" ? i - 1 : -1;
           if (n >= 0 && n < TABS.length) { e.preventDefault(); tab = TABS[n][0]; render(); view.querySelector("#tab-" + tab).focus(); }
         } }, label)),
-      h("span", { class: "spacer" }),
-      h("button", { class: "btn", onclick: () => go("sessions") }, "Back to sessions")),
+      h("span", { class: "spacer" })),
     h("div", { class: "page", role: "tabpanel", "aria-labelledby": "tab-" + tab }, h("div", { class: "page-in", style: "max-width:760px" }, h("h1", {}, name), body()))));
 }
 

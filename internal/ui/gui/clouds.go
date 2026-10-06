@@ -399,9 +399,7 @@ func (a *App) OpenBrought(journal, where string) (*OpenedDTO, error) {
 	a.mu.Lock()
 	setting := a.core.Cfg.AppResume()
 	a.mu.Unlock()
-	switch route(where, setting, false) {
-	case WhereAsk:
-		return &OpenedDTO{Where: WhereAsk}, nil
+	switch route(where, setting) {
 	case WhereTerminal:
 		return &OpenedDTO{Where: WhereTerminal}, a.openLaunch(l)
 	}

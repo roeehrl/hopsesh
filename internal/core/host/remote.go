@@ -382,3 +382,24 @@ func (l remoteLocks) Probe(ctx context.Context, paths []string) (map[string]agen
 	}
 	return out, nil
 }
+
+func (f remoteFS) CreateExclusive(p string, b []byte, perm fs.FileMode) error {
+	c := f.r.Client()
+	sp := f.p(p)
+	if err := c.MkdirAll(path.Dir(sp)); err != nil {
+		return err
+	}
+	file, err := c.OpenFile(sp, os.O_WRONLY|os.O_CREATE|os.O_EXCL)
+	if err != nil {
+		return err
+	}
+	if _, err = file.Write(b); err != nil {
+		file.Close()
+		return err
+	}
+	if err = file.Chmod(perm); err != nil {
+		file.Close()
+		return err
+	}
+	return file.Close()
+}

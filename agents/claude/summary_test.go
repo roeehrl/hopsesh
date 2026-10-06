@@ -179,3 +179,29 @@ func TestMovedMark(t *testing.T) {
 		t.Fatalf("the mark must not change last activity: %v", s.LastActivity)
 	}
 }
+
+// A session whose prompts are all commands or hopsesh's notes is titled by the first
+// sentence of the agent's first reply.
+func TestSummarizeReplyTitle(t *testing.T) {
+	root := "/t/" + t.Name()
+	p := writeTranscript(t, path.Join(root, "projects", "-r"), "s4", []line{
+		user("/r", "2026-10-01T10:00:00Z", "<command-name>/clear</command-name><command-args></command-args>", nil),
+		user("/r", "2026-10-01T10:00:01Z", agent.NotePrefix+"This conversation was moved here", nil),
+		{"type": "assistant", "uuid": "a1", "parentUuid": "x", "sessionId": "s4", "cwd": "/r", "timestamp": "2026-10-01T10:00:02Z",
+			"message": line{"role": "assistant", "content": []line{{"type": "text", "text": "## I picked up the parser work where it stopped. Next I run the tests."}}}},
+	})
+	s, err := summ(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Title != "I picked up the parser work where it stopped" || s.TitleSource != "reply" || titleSource(s.TitleSource) != "reply" {
+		t.Fatalf("title %q/%q", s.Title, s.TitleSource)
+	}
+	long := firstReply([]record{{Type: "assistant", Message: &struct {
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
+	}{Content: json.RawMessage(`"` + strings.Repeat("word ", 30) + `"`)}}})
+	if n := len([]rune(long)); n > maxReplyTitle || !strings.HasSuffix(long, "word…") {
+		t.Fatalf("clipped reply title %q (%d)", long, n)
+	}
+}

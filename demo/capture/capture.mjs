@@ -132,7 +132,8 @@ async function paletteTo(label, showKeys) {
 if (mode === "stills") {
   await text("Fix flaky checkout tests").click();
   await still("main");
-  await app.getByRole("button", { name: /Continue in Codex/ }).first().click();
+  await app.getByRole("button", { name: "Move", exact: true }).first().click();
+  await app.getByRole("menuitem", { name: /^Continue with Codex…/ }).first().click();
   await text("Carried over").waitFor({ timeout: 60000 });
   await still("plan");
   await page.keyboard.press("Control+Enter");
@@ -162,7 +163,7 @@ if (mode === "stills") {
   await keys(["⌘", "K"], openPalette, 500);
   await page.keyboard.type("flaky", { delay: 140 });
   await wait(900);
-  await paletteTo("Continue in Codex", true);
+  await paletteTo("Continue with Codex…", true);
   await keys(["↩"], () => page.keyboard.press("Enter"), 300);
   await text("Carried over").waitFor({ timeout: 60000 });
   await wait(4200); // time to read from → to and the loss report
@@ -187,7 +188,7 @@ if (mode === "stills") {
   await keys(["⌘", "K"], openPalette, 400);
   await page.keyboard.type("flaky", { delay: 110 });
   await wait(500);
-  await paletteTo("Continue in Codex", true);
+  await paletteTo("Continue with Codex…", true);
   await keys(["↩"], () => page.keyboard.press("Enter"), 200);
   await text("Carried over").waitFor({ timeout: 60000 });
   mark("plan");
@@ -224,7 +225,8 @@ if (mode === "stills") {
   writeFileSync(`${out}/${tag}-${scheme}.marks.json`, JSON.stringify(marks, null, 1));
 } else if (mode === "undo") {
   await text("Fix flaky checkout tests").click();
-  await app.getByRole("button", { name: /Continue in Codex/ }).first().click();
+  await app.getByRole("button", { name: "Move", exact: true }).first().click();
+  await app.getByRole("menuitem", { name: /^Continue with Codex…/ }).first().click();
   await text("Carried over").waitFor({ timeout: 60000 });
   await page.keyboard.press("Control+Enter");
   await text("continues in Codex").waitFor({ timeout: 120000 });

@@ -14,12 +14,15 @@ import (
 // Pending is a mark this machine owes a copy left behind: the copy was still open when
 // it was moved, so it is marked on a later scan, once it has ended.
 type Pending struct {
-	Time     time.Time        `json:"time"`
-	Location string           `json:"location"` // where the copy is
-	Key      agent.SessionKey `json:"key"`
-	Path     string           `json:"path"`
-	Title    string           `json:"title"`
-	Mark     agent.Mark       `json:"mark"`
+	Operation string           `json:"operation"`
+	Branch    string           `json:"branch"`
+	Replica   ReplicaID        `json:"replica"`
+	Time      time.Time        `json:"time"`
+	Location  string           `json:"location"` // where the copy is
+	Key       agent.SessionKey `json:"key"`
+	Path      string           `json:"path"`
+	Title     string           `json:"title"`
+	Mark      agent.Mark       `json:"mark"`
 	// Head is the copy's last conversation node when it was moved; a copy that grew
 	// afterwards was kept working on and is not marked.
 	Head string `json:"head,omitempty"`

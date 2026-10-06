@@ -75,7 +75,7 @@ func valid(v []string) bool {
 		if same {
 			return false
 		}
-	case "move", "roundtrip", "conflict", "undo-used":
+	case "move", "conflict", "undo-used":
 		if !same {
 			return false
 		}

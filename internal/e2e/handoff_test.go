@@ -236,8 +236,8 @@ func TestHandoffToClaudeCloudAndBack(t *testing.T) {
 	if hop.Kind != lineage.HopHandoff || hop.Fidelity != "brief" || hop.Code == nil || hop.Code.Branch != hp.Branch || hop.Code.Snapshot != hr.Snapshot {
 		t.Fatalf("lineage: %+v", hop)
 	}
-	if tr := w.git(w.repo, "log", "-1", "--format=%(trailers:key=Hopsesh-Handoff,valueonly)", hr.Snapshot); tr != local.Lineage.Logical {
-		t.Fatalf("the trailer is the lineage's id: %q vs %q", tr, local.Lineage.Logical)
+	if tr := w.git(w.repo, "log", "-1", "--format=%(trailers:key=Hopsesh-Handoff,valueonly)", hr.Snapshot); tr != local.Lineage.Family {
+		t.Fatalf("the trailer is the lineage's id: %q vs %q", tr, local.Lineage.Family)
 	}
 	if cloud == nil || cloud.Original != "here:claude/"+demoSession {
 		t.Fatalf("the cloud session: %+v", cloud)

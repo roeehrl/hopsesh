@@ -13,7 +13,7 @@ async function post(page: Page, query: string): Promise<string> {
 }
 
 async function turnOn(page: Page, title: string) {
-  const sidebar = page.getByRole("navigation", { name: "Scopes" });
+  const sidebar = page.getByRole("navigation", { name: "Places" });
   await turnOnCloud(page, title);
   await expect(sidebar.getByRole("button", { name: new RegExp(title) })).toContainText("ready", { timeout: 30_000 });
 }
@@ -31,17 +31,17 @@ test("a Claude Code cloud session goes on to Codex cloud through this machine, a
   await turnOn(page, "Claude Code cloud");
   await paste(page, id);
   await turnOn(page, "Codex cloud");
-  await page.getByRole("navigation", { name: "Scopes" }).getByRole("button", { name: /Claude Code cloud/ }).click();
+  await page.getByRole("navigation", { name: "Places" }).getByRole("button", { name: /Claude Code cloud/ }).click();
   await row(page, `Session ${id}`).click();
 
-  await cloudDetails(page).getByRole("button", { name: "Hand off ▸" }).click();
-  const list = cloudDetails(page).getByRole("menu", { name: "Hand off to" });
-  await expect(list.getByRole("menuitem", { name: /^Claude Code cloud/ })).toHaveCount(0); // not to its own cloud
+  await cloudDetails(page).getByRole("button", { name: "Move", exact: true }).click();
+  const list = page.getByRole("menu", { name: "Move" });
+  await expect(list.getByRole("menuitem", { name: /Hand off to Claude Code cloud/ })).toHaveCount(0); // not to its own cloud
   await expect(list.locator(".chip.cloud")).toHaveCount(0); // names only, no ids
   const codex = list.getByRole("menuitem", { name: /Codex cloud/ });
   await expect(codex).toBeEnabled();
   await expect(codex).toContainText("Comes here from Claude Code cloud first, then gets a briefing and the code on a branch");
-  await expect(list.getByRole("menuitem", { name: /Jules/ })).toContainText("Turned off. Turn it on in Machines.");
+  await expect(list.getByRole("menuitem", { name: /Jules/ })).toHaveCount(0);
   await codex.click();
 
   const sheet = page.locator("#sheet");
@@ -84,7 +84,7 @@ test("Activity looks for merged branches only when asked, and offers none that i
   const id = await post(page, "handed=1");
   await turnOn(page, "Claude Code cloud");
   await paste(page, id);
-  await cloudDetails(page).getByRole("button", { name: /Bring here \(Claude Code\)/ }).click();
+  await cloudDetails(page).getByRole("button", { name: /^Bring to this/ }).click();
   const sheet = page.locator("#sheet");
   await sheet.getByRole("button", { name: /Bring here in/ }).click();
   await expect(page.locator(".outcome.ok")).toBeVisible({ timeout: 60_000 });

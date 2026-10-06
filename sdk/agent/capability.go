@@ -28,6 +28,8 @@ const (
 	CapApp           Capability = "app"            // Resume honours ResumeOptions.App (Spec.Features)
 	CapNotify        Capability = "notify"         // Notifier: the resumed session tells the old one
 	CapImport        Capability = "import"         // Importer: the agent converts another agent's sessions itself
+	CapPreview       Capability = "preview"        // Previewer: the end of a conversation, for the app
+	CapRename        Capability = "rename"         // Renamer: a new title in the agent's own data
 )
 
 // LiveDetector reports which sessions are open right now.
@@ -144,6 +146,8 @@ func Capabilities(m Module) []Capability {
 	_, integ := m.(Integrator)
 	_, notify := m.(Notifier)
 	_, imp := m.(Importer)
+	_, preview := m.(Previewer)
+	_, rename := m.(Renamer)
 	_, clist := m.(CloudLister)
 	_, csend := m.(CloudSender)
 	_, cfetch := m.(CloudFetcher)
@@ -161,6 +165,8 @@ func Capabilities(m Module) []Capability {
 	add(integ, CapIntegrate)
 	add(notify, CapNotify)
 	add(imp, CapImport)
+	add(preview, CapPreview)
+	add(rename, CapRename)
 	add(clist, CapCloudList)
 	add(csend, CapCloudSend)
 	add(cfetch, CapCloudFetch)

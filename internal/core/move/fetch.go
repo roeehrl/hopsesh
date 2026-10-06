@@ -167,6 +167,9 @@ func BuildFetch(ctx context.Context, in FetchInput, opt Options) (*Plan, error) 
 	p := &Plan{Kind: KindFetch, Key: s.Key, Title: title, Agent: spec.Name, Source: Endpoint{Location: cl.Name},
 		Target: Endpoint{Location: in.Machine.Name, OS: in.Machine.Facts.OS, Version: in.Install.Version}, Options: opt, Mark: MarkOff,
 		Fetch: fp, fetchIn: &in}
+	if err := assignCloudOperation(p, opt); err != nil {
+		return nil, err
+	}
 	check := func(state, text string) {
 		fp.Checks = append(fp.Checks, Check{State: state, Text: text})
 		switch state {
@@ -449,11 +452,11 @@ func relateFetch(ctx context.Context, in FetchInput, p *Plan, opt Options, check
 	}
 	var from *lineage.Replica
 	for _, h := range in.Lineage.Hops {
-		if h.Kind != lineage.HopHandoff || h.To < 0 || h.To >= len(in.Lineage.Replicas) || h.From < 0 || h.From >= len(in.Lineage.Replicas) {
+		if h.Kind != lineage.HopHandoff || !in.Lineage.HasReplica(h.To) || !in.Lineage.HasReplica(h.From) {
 			continue
 		}
-		if to := in.Lineage.Replicas[h.To]; to.Key.Session == fp.Session && to.Location == fp.Cloud {
-			r := in.Lineage.Replicas[h.From]
+		if to := in.Lineage.Replica(h.To); to.Key.Session == fp.Session && to.Location == fp.Cloud {
+			r := in.Lineage.Replica(h.From)
 			from = &r
 		}
 	}
@@ -591,6 +594,9 @@ func applyFetch(ctx context.Context, p *Plan, env Env) (*Result, error) {
 	}
 	j, err := journal.New(env.StateDir, journal.KindFetch, fmt.Sprintf("%s from %s", p.Title, fp.CloudTitle))
 	if err != nil {
+		return nil, err
+	}
+	if err := operationJournal(env, p, j); err != nil {
 		return nil, err
 	}
 	if fp.Session != "" {

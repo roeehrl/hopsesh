@@ -221,7 +221,7 @@ func (m *Module) Account(ctx context.Context, h agent.Host, in agent.Install) (a
 // replaying them under another one makes the session fail to resume, so those records go
 // (the conversation itself stays; Codex compacts again when it needs to).
 func (m *Module) Sanitize() agent.RewritePolicy {
-	return agent.RewritePolicy{DropRecords: []agent.FieldMatch{
+	return agent.RewritePolicy{RenumberOrdinal: "ordinal", DropRecords: []agent.FieldMatch{
 		{Field: "payload.type", Values: []string{"reasoning", "compaction", "compaction_summary"}},
 		{Field: "type", Values: []string{"compacted"}},
 	}}

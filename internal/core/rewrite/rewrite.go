@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -48,6 +49,7 @@ func JSONL(r io.Reader, w io.Writer, opt Options) (Stats, error) {
 	pol := compilePolicy(opt.Policy)
 	br := bufio.NewReaderSize(r, 1<<20)
 	bw := bufio.NewWriterSize(w, 1<<20)
+	var emitted uint64
 	for {
 		line, err := br.ReadBytes('\n')
 		if len(line) > maxLine {
@@ -59,6 +61,14 @@ func JSONL(r io.Reader, w io.Writer, opt Options) (Stats, error) {
 			body := bytes.TrimRight(line, "\r\n")
 			out, keep := rewriteRecord(body, maps, pol, opt.Redact, &st)
 			if keep {
+				if pol.RenumberOrdinal != "" {
+					var e error
+					out, e = renumberOrdinal(out, pol.RenumberOrdinal, emitted)
+					if e != nil {
+						return st, e
+					}
+				}
+				emitted++
 				if !bytes.Equal(out, body) {
 					st.LinesChanged++
 				}
@@ -80,6 +90,37 @@ func JSONL(r io.Reader, w io.Writer, opt Options) (Stats, error) {
 		}
 	}
 	return st, bw.Flush()
+}
+
+// Change only the numeric token: opaque payloads and signed strings retain their bytes.
+func renumberOrdinal(body []byte, field string, ordinal uint64) ([]byte, error) {
+	d := json.NewDecoder(bytes.NewReader(body))
+	token, err := d.Token()
+	if err != nil || token != json.Delim('{') {
+		return body, errors.New("rewrite: ordinal record must be a JSON object")
+	}
+	for d.More() {
+		key, err := d.Token()
+		if err != nil {
+			return nil, err
+		}
+		var raw json.RawMessage
+		if err := d.Decode(&raw); err != nil {
+			return nil, err
+		}
+		if key != field {
+			continue
+		}
+		var value uint64
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return nil, err
+		}
+		end := int(d.InputOffset())
+		out := append([]byte{}, body[:end-len(raw)]...)
+		out = strconv.AppendUint(out, ordinal, 10)
+		return append(out, body[end:]...), nil
+	}
+	return body, nil // legacy records have no ordinal
 }
 
 // Text rewrites a plain-text file (spilled tool output) with unescaped path forms.

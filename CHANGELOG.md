@@ -98,12 +98,12 @@ start fresh and add your machines again.
   request where `gh` is installed), and deletes the merged ones only when you confirm, each
   only while it is where hopsesh saw it. Undo pushes them back. `delete_branch = "on-undo"`
   or `"never"` under `[clouds.<name>]` keeps them.
-- **Clouds in the app:** a **Clouds** group and an **In the cloud** scope; **Hand off ▸** on
-  every session, local or in a cloud (a cloud hopsesh can't use is listed with the reason);
+- **Clouds in the app:** a **Clouds** group in the sidebar; **Move → Hand off to ‹cloud›…**
+  on every session, local or in a cloud (a cloud hopsesh can't use is listed with the reason);
   the hand-off sheet with the editable briefing, the branch, what stays on this machine and
-  the options; the steps as they run, and a done screen with the link and Undo; **Bring
-  here** and **Get the code** on cloud sessions; **Paste a cloud link** and **Find in Claude
-  Code**; a card per cloud under **Machines** with Allow, Test, the Codex cloud environment
+  the options; the steps as they run, and a done screen with the link and Undo; **Bring to
+  this Mac…** and **Get the code…** on cloud sessions; **Paste a cloud link** and **Find in Claude
+  Code**; a card per cloud under **Machines** with Turn on, Test, the Codex cloud environment
   per repository and **Sign in**, which runs `claude auth login`, `codex login
   --device-auth` or `gh auth login --web` in a tab that records nothing; and **Activity →
   Look for merged branches**. In the terminal UI: clouds in the header and as rows, `enter`
@@ -114,8 +114,8 @@ start fresh and add your machines again.
   in your own terminal. With `--add-rules`, `clouds` and `clouds test` run without asking,
   while `handoff`, `clouds cleanup` and `clouds continue` always ask.
 - **The hopsesh Terminal window:** the app has a terminal of its own, a window with tabs.
-  **Resume here** runs a session in a tab, and so do Claude Code's hand-off and bring-back
-  steps, cloud sign-ins and **Open a shell here**. hopsesh starts the command and you do all
+  **Resume in hopsesh Terminal** runs a session in a tab, and so do Claude Code's hand-off
+  and bring-back steps, cloud sign-ins and **Open a shell in its folder**. hopsesh starts the command and you do all
   the typing: it never writes into a program or answers a question for you. Each tab shows
   whether its program runs, waits for you or has exited (with its code), and has **Open in
   my terminal**, which ends the tab and runs the same command in your terminal app after
@@ -134,7 +134,8 @@ start fresh and add your machines again.
   tabs asks first and lists them, and closing the window hides it while they run (**Keep
   tabs when the window closes**).
 - **Settings → Terminal:** where sessions, hand-offs and bring-backs open (**In this
-  window**, the default; **In my terminal**; **Ask each time**), your terminal app, the
+  window**, the default, or **In my terminal**; a session's Resume menu picks another place,
+  remembered for that agent), your terminal app, the
   font, its size, scrollback (5,000 lines by default), keeping tabs when the window closes,
   notifications, the screen reader mode and, on Windows, the bundled console host. The
   choices are saved under `[terminal]` in the configuration. What a tab shows is kept in
@@ -155,7 +156,7 @@ start fresh and add your machines again.
   (`--terminal <id>` picks one, `--here` runs it in this terminal). `hopsesh terminals` lists
   the terminal apps, chooses one (`--use`) and sets where the app resumes sessions
   (`--resume`). `hopsesh pull --run --terminal <id>` starts the moved session in a new tab.
-- **A running session is shown, not started twice:** **Show its terminal tab** in the app
+- **A running session is shown, not started twice:** **Show in ‹terminal app›** in the app
   and `hopsesh open` bring its iTerm2 or Terminal tab forward, found from the agent's own
   process and the terminal it runs on, never from what the tab shows. Resuming a session
   that already runs is refused.
@@ -187,14 +188,41 @@ start fresh and add your machines again.
   which read links on an exact host only, and the cloud conformance kit
   (`agenttest.RunCloud`, `agenttest.RunCloudWith`).
 
-- **The app's window:** the sidebar and the details panel can be resized and hidden
-  (dividers, the title bar's buttons, a new View menu: ⌃⌘S and ⌥⌘I, Ctrl+B and Ctrl+I on
-  Windows), and the layout is kept in `[window]`. The sidebar lists the clouds that are on
-  and the agents with sessions; setup is one line on All sessions. The list refreshes this
-  machine every minute while the window is in front. In the palette, Enter shows a session
-  in the list and ⌘Enter runs its action. Cloud sessions carry a cloud badge, and a session
-  open in the Claude app offers Show the Claude app. "In the cloud" leaves out Remote
-  Control mirrors, which run on their machine.
+- **The sessions screen, redesigned.** The sidebar lists places: Needs you, All sessions,
+  This Mac and your other machines, and the clouds that are on. The list groups by
+  repository, location, agent, status or last active (or not at all), sorts within the
+  groups, has comfortable and compact rows (compact on its own for 150 sessions or more, or
+  when the list is narrower than 600px), and its groups collapse (⌥-click for all). The
+  Filter menu (⇧⌘F: status, location, agent, repository, last active, has; is / is not)
+  shows as chips, beside a text filter (⌘F) and the Display popover (⌘J, also in the View
+  menu); all of it but the text is kept in `[list]` and `[list.filter]`. The sidebar and
+  the details panel can be resized and hidden (dividers, the title bar's buttons, the View
+  menu: ⌃⌘S and ⌥⌘I, Ctrl+B and Ctrl+I on Windows), kept in `[window]`; on macOS the title
+  bar is 52px and the sidebar button sits where AppKit puts its own.
+- **One set of actions:** Resume in ‹place›, Show in ‹place›, Bring to this Mac…, Send to
+  ‹machine›…, Continue with ‹agent›…, Hand off to ‹cloud›…. The details panel puts them in
+  one row: the main action as a split button whose menu lists the other places (the one
+  you pick becomes that agent's default, `[agents.<id>] place`), Move ▾ (an action that
+  can't run now stays, with its reason) and ⋯ (Rename…, which writes the title into the
+  agent's own data and can be undone, reveal the file, copy the resume command or id).
+- **What a session is and where it is open:** the details panel shows the end of the
+  conversation (the last two exchanges, a line for each turn's tool calls, Load earlier,
+  Open transcript), read on its machine and never during a scan; markdown is rendered
+  locally, raw HTML stays inert and images never load (Settings → General → Show
+  conversation previews turns it off). Rows and the panel show where a session is open:
+  hopsesh tabs, iTerm2, Terminal, Windows Terminal, an editor, tmux, ssh or the Claude app,
+  from the agents' own registries and the process table every few seconds while the
+  window is in front (Apple Events only when you click Show); two processes on one session
+  say "Open twice". Titles never need a model: the title given, the name the Claude app
+  gives, the agent's own, the first prompt or reply, else "Untitled · folder (branch)".
+- **More in the app:** setup is one line on All sessions; the list refreshes this machine
+  every minute while the window is in front; in the palette, Enter shows a session in the
+  list and ⌘Enter runs its action; cloud sessions carry a cloud badge; "In the cloud" leaves
+  out Remote Control mirrors, which run on their machine; added machines are scanned
+  straight away, with Retry when a scan fails; Move offers only the clouds that are on.
+- Module SDK: `Previewer` (`preview`) and `Renamer` (`rename`), `PreviewText` and
+  `BuildPreview`; `LiveInfo.Procs` lists every process that has a session open, and
+  `LiveInfo.Name` the name the running agent gives it.
 - A cloud hand-off's tab runs in the background and comes forward when Claude Code asks
   something or the step fails. Tabs whose program ended well close on their own (Settings →
   Terminal → Close a tab when its program ends).
@@ -214,8 +242,8 @@ start fresh and add your machines again.
 - The peer protocol is now 2: a push between hopsesh 0.3 and 0.4 stops at hello and names
   the machine to update to 0.4.0 or later.
 - The app now resumes sessions in its hopsesh Terminal window by default. To open them in
-  your terminal app as before, choose **In my terminal** (or **Ask each time**) in Settings
-  → Terminal. The command line still runs sessions in your terminal.
+  your terminal app as before, choose **In my terminal** in Settings → Terminal, or pick
+  the place from a session's Resume menu. The command line still runs sessions in your terminal.
 - The macOS app's Automation permission text names your terminal app (iTerm2 or Terminal)
   and says hopsesh only opens tabs and brings a session's tab forward.
 - The macOS app's self-update opens the new disk image with `diskutil image attach` on

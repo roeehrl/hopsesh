@@ -93,6 +93,15 @@ func TestCodexMoveAcrossAccounts(t *testing.T) {
 			if !tc.encrypted && res.Rewrite.DroppedRecords == 0 {
 				t.Fatal("records should be reported as dropped")
 			}
+			appendCodexTurn(t, got.Path, "SANITIZED-RESUME-WORK", "new local answer")
+			seg := readAll(t, here, cx, hereIn, got)
+			found := false
+			for _, n := range seg.Nodes {
+				found = found || n.Text == "SANITIZED-RESUME-WORK"
+			}
+			if !found {
+				t.Fatal("sanitized paginated copy cannot continue its native history")
+			}
 			os.Remove(got.Path)
 		})
 	}

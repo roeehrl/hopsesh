@@ -36,13 +36,20 @@ const (
 	Agent Actor = "agent"
 )
 
+// Fragment retains individual source coverage when adjacent messages coalesce.
+type Fragment struct {
+	Text     string   `json:"text"`
+	Coverage []NodeID `json:"coverage"`
+}
+
 // Node is one step of a conversation.
 type Node struct {
-	ID     NodeID    `json:"id"`
-	Parent NodeID    `json:"parent,omitempty"`
-	Kind   Kind      `json:"kind"`
-	Actor  Actor     `json:"actor"`
-	Time   time.Time `json:"time"`
+	Fragments []Fragment `json:"fragments,omitempty"`
+	ID        NodeID     `json:"id"`
+	Parent    NodeID     `json:"parent,omitempty"`
+	Kind      Kind       `json:"kind"`
+	Actor     Actor      `json:"actor"`
+	Time      time.Time  `json:"time"`
 	// Text is the message, the reasoning summary or the compaction summary.
 	Text       string      `json:"text,omitempty"`
 	Tool       *ToolCall   `json:"tool,omitempty"`
@@ -52,19 +59,14 @@ type Node struct {
 	Reasoning  *Reasoning  `json:"reasoning,omitempty"`
 	Native     *Native     `json:"native,omitempty"`
 	Generated  bool        `json:"generated,omitempty"` // written by hopsesh (briefing, acknowledgement)
-	Origin     *Origin     `json:"origin,omitempty"`    // set on nodes hopsesh converted from another agent
+	Coverage   []NodeID    `json:"coverage,omitempty"`  // logical revisions represented by this node
 }
 
 // Native is a node's record as its agent wrote it.
 type Native struct {
 	Format  string          `json:"format"` // "claude.jsonl", "codex.rollout"
 	Payload json.RawMessage `json:"payload"`
-}
-
-// Origin says where a converted node came from.
-type Origin struct {
-	Agent string `json:"agent"`
-	Node  NodeID `json:"node"`
+	Anchor  string          `json:"anchor,omitempty"` // stable native record identity, independent of rewritten paths
 }
 
 // ToolKind is the intent of a tool call (the Agent Client Protocol's kinds).
@@ -219,7 +221,8 @@ const (
 
 // WriteRequest asks a writer for native records.
 type WriteRequest struct {
-	Mode WriteMode `json:"mode"`
+	OperationID string    `json:"operationId,omitempty"` // stable transfer identity; scopes generated native record IDs
+	Mode        WriteMode `json:"mode"`
 	// SessionID is the session to append to (WriteAppend), or the id to use for a new one
 	// ("" lets the writer choose).
 	SessionID string `json:"sessionId,omitempty"`
@@ -240,12 +243,16 @@ const (
 
 // Item is one rendered unit for a writer.
 type Item struct {
-	Node   NodeID    `json:"node"`
-	Role   Role      `json:"role"`
-	Time   time.Time `json:"time"`
-	Text   string    `json:"text,omitempty"`
-	Tool   *ToolPair `json:"tool,omitempty"`   // native replay only
-	Native *Native   `json:"native,omitempty"` // same-agent passthrough
+	Fragments []Fragment `json:"fragments,omitempty"`
+	Node      NodeID     `json:"node"`
+	Role      Role       `json:"role"`
+	Time      time.Time  `json:"time"`
+	Text      string     `json:"text,omitempty"`
+	Tool      *ToolPair  `json:"tool,omitempty"`   // native replay only
+	Native    *Native    `json:"native,omitempty"` // same-agent passthrough
+	Coverage  []NodeID   `json:"coverage,omitempty"`
+	Generated bool       `json:"generated,omitempty"`
+	Fidelity  string     `json:"fidelity,omitempty"`
 }
 
 // ToolPair is a tool call and its result, for native replay.
@@ -256,9 +263,21 @@ type ToolPair struct {
 
 // WriteResult is what a writer wrote.
 type WriteResult struct {
-	SessionID string `json:"sessionId"`
-	Path      string `json:"path"`
-	From      int64  `json:"from"` // byte range written into Path
-	To        int64  `json:"to"`
-	Cursor    Cursor `json:"cursor"` // the session's new end
+	SessionID  string       `json:"sessionId"`
+	Path       string       `json:"path"`
+	From       int64        `json:"from"` // byte range written into Path
+	To         int64        `json:"to"`
+	Cursor     Cursor       `json:"cursor"` // the session's new end
+	Projection []Projection `json:"projection,omitempty"`
+}
+
+// Projection binds the exact native representation to the logical revisions it carries.
+// It lives in the portable sidecar, never in vendor-specific transcript fields.
+type Projection struct {
+	Fragments []Fragment `json:"fragments,omitempty"`
+	Anchor    string     `json:"anchor"`
+	Hash      string     `json:"hash"`
+	Coverage  []NodeID   `json:"coverage,omitempty"`
+	Generated bool       `json:"generated,omitempty"`
+	Fidelity  string     `json:"fidelity,omitempty"`
 }

@@ -385,10 +385,13 @@ func (r *runner) roundtrip(s *sc) error {
 		return err
 	}
 	back := "and back again " + s.marker
-	if err := r.here.do("append", AppendReq{Agent: s.row.To, Path: f.Path, ID: s.id, Text: back}, &struct{}{}); err != nil {
+	if err := r.here.do("append", AppendReq{Agent: s.row.To, Path: f.Path, ID: f.ID, Text: back}, &struct{}{}); err != nil {
 		return err
 	}
-	args := []string{"push", s.row.To + "/" + s.id, s.host, "--yes", "--json"}
+	args := []string{"push", s.row.To + "/" + f.ID, s.host, "--yes", "--json"}
+	if s.row.To != s.row.From {
+		args = append(args, "--in", s.row.From)
+	}
 	if s.row.Repo == "none" {
 		args = append(args, "--to", s.srcCwd)
 	}
