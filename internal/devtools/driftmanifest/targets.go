@@ -170,6 +170,17 @@ var cloudReviews = map[string]review{
 // they are watched so the cloud design learns of changes before it is built.
 var clouds = []target{
 	{
+		ID: "wails-desktop", Name: "Wails desktop shell", Kind: "standard", Group: "local", Vendor: "Wails",
+		Surface: "native tray, popup, activation, login startup and window lifecycle", Priority: "high",
+		Tested: "v3.0.0-beta.27", Latest: latest{From: "none"},
+		Watch: watch{
+			Docs:  []string{"https://raw.githubusercontent.com/wailsapp/wails/master/v3/README.md"},
+			Feeds: []feed{{Kind: "releases", Repo: "wailsapp/wails"}},
+			Grep:  `tray|StatusNotifier|activation|autostart|focus|taskbar|window|shutdown`,
+			Code:  &code{Repo: "wailsapp/wails", Paths: []string{"v3/pkg/application"}, Canaries: []string{"RegisterStatusNotifierItem", "TaskbarCreated", "HideOnFocusLost", "EnableWithOptions"}},
+		},
+	},
+	{
 		ID: "cursor", Name: "Cursor cloud agents", Kind: "cloud", Group: "third-party-cloud", Vendor: "Anysphere",
 		Surface:  "the cloud-agent API (docs only; no plan to drive it yet)",
 		Priority: "low",

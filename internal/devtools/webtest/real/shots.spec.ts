@@ -22,7 +22,7 @@ test.skip(!dir, "set SHOTS_DIR to save screenshots");
 test.beforeAll(async () => {
   browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
   const pages = browser.contexts().flatMap((c) => c.pages());
-  page = pages.find((p) => URL.canParse(p.url()) && new URL(p.url()).host === "wails.localhost") || pages[0];
+  page = pages.find((p) => URL.canParse(p.url()) && new URL(p.url()).host === "wails.localhost" && ["/", "/index.html"].includes(new URL(p.url()).pathname)) || pages[0];
   cdp = await page.context().newCDPSession(page);
   mkdirSync(dir, { recursive: true });
 });

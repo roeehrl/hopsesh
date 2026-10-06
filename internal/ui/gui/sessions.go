@@ -194,6 +194,7 @@ func (a *App) scanAccounts(forceAccounts bool) (*ScanDTO, error) {
 
 // bindAdopted binds the tabs that brought the copies a scan adopted (bindBring).
 func (a *App) bindAdopted(d *ScanDTO) *ScanDTO {
+	a.publishQuick(d)
 	for _, b := range d.Adopted {
 		a.bindBring(b)
 	}
@@ -203,16 +204,13 @@ func (a *App) bindAdopted(d *ScanDTO) *ScanDTO {
 // RefreshHere reads this machine again and keeps what the last scan found on the other
 // machines and in the clouds (reading those takes SSH and the vendors' commands, so the
 // window does it less often). It leaves a plan in progress alone. Before any scan it is
-// Scan.
+// local-only discovery, with no remote authentication.
 func (a *App) RefreshHere() (*ScanDTO, error) {
 	a.mu.Lock()
-	cfgErr, had := a.cfgErr, a.inv != nil
+	cfgErr := a.cfgErr
 	a.mu.Unlock()
 	if cfgErr != nil {
 		return nil, cfgErr
-	}
-	if !had {
-		return a.Scan()
 	}
 	a.scanMu.Lock()
 	defer a.scanMu.Unlock()
@@ -223,6 +221,9 @@ func (a *App) RefreshHere() (*ScanDTO, error) {
 	now := time.Now()
 	a.mu.Lock()
 	old := a.inv
+	if old == nil {
+		old = &app.Inventory{}
+	}
 	inv := &app.Inventory{Adopted: fresh.Adopted, Waiting: fresh.Waiting, Clouds: old.Clouds}
 	inv.Machines = append(inv.Machines, fresh.Machines...)
 	inv.Entries = append(inv.Entries, fresh.Entries...)

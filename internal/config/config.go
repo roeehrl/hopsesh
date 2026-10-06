@@ -255,9 +255,10 @@ const (
 
 // Config is the user's configuration file.
 type Config struct {
-	Schema   int    `toml:"schema"`
-	ReposDir string `toml:"repos_dir"` // where clones go; default ~/git
-	Layout   string `toml:"layout"`    // flat | ghq
+	Desktop  Desktop `toml:"desktop,omitempty"`
+	Schema   int     `toml:"schema"`
+	ReposDir string  `toml:"repos_dir"` // where clones go; default ~/git
+	Layout   string  `toml:"layout"`    // flat | ghq
 	// UpdateCheck is "on" or "off" once the person has answered whether the app may
 	// look for new releases once a day ("" = not asked yet).
 	UpdateCheck string `toml:"update_check,omitempty"`
@@ -295,7 +296,7 @@ type Config struct {
 // Defaults returns the configuration used when no file exists.
 func Defaults() Config {
 	home, _ := os.UserHomeDir()
-	return Config{Schema: Schema, ReposDir: filepath.Join(home, "git"), Layout: "flat"}
+	return Config{Desktop: Desktop{Mode: "both", Close: "keep"}, Schema: Schema, ReposDir: filepath.Join(home, "git"), Layout: "flat"}
 }
 
 // Dir is the configuration directory: $XDG_CONFIG_HOME/hopsesh or ~/.config/hopsesh on
@@ -350,6 +351,8 @@ func Load() (Config, error) {
 	if err != nil {
 		return c, err
 	}
+	// Existing files without desktop settings retain ordinary app behavior.
+	c.Desktop = Desktop{}
 	var probe struct {
 		Schema int `toml:"schema"`
 	}
@@ -545,6 +548,9 @@ var fontName = regexp.MustCompile(`^[\p{L}\p{N} ._,'"-]{0,120}$`)
 
 // Check reports settings hopsesh cannot act on.
 func (c Config) Check() error {
+	if err := c.Desktop.Check(); err != nil {
+		return err
+	}
 	switch c.Terminal.App {
 	case "", TerminalITerm2, TerminalApp, TerminalWindowsTerminal, TerminalLinux:
 	default:

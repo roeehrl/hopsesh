@@ -14,7 +14,12 @@ on:
       - .github/workflows/nightly.yml
       - scripts/app-selfcheck.sh
       - scripts/app-terminal-check.sh
-      - internal/devtools/webtest/real/selfcheck.js
+      - internal/devtools/webtest/real/*selfcheck.js
+      - internal/ui/desktop/**
+      - internal/ui/gui/desktop*
+      - internal/ui/gui/assets/quick*
+      - internal/ui/gui/assets/desktop-settings.js
+      - cmd/hopsesh-app/**
       - internal/e2e/tuipty/**
 
 permissions:
@@ -101,7 +106,7 @@ jobs:
           # WebKitGTK sandboxes web content with bubblewrap, which needs unprivileged user
           # namespaces; Ubuntu 24.04's AppArmor restricts them on this runner.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - name: the real window lists the demo sessions and calls its backend
+      - name: the real app checks desktop placement, Quick access and session navigation
         run: scripts/app-selfcheck.sh
       - name: the real terminal window runs a tab's program through its stream
         run: scripts/app-terminal-check.sh

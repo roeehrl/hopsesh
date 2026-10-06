@@ -44,6 +44,11 @@ func home(t *testing.T) (repo string) {
 			return err
 		}
 		rel, _ := filepath.Rel(fix, p)
+		// The fixture process ID can belong to an unrelated real process on a
+		// long-running developer machine. Live-state tests create their own registry.
+		if strings.HasPrefix(filepath.ToSlash(rel), "sessions/") {
+			return nil
+		}
 		b, _ := os.ReadFile(p)
 		esc, _ := json.Marshal(repo)
 		b = []byte(strings.ReplaceAll(string(b), "/home/u/git/demo", string(esc[1:len(esc)-1])))

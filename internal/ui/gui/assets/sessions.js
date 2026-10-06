@@ -77,7 +77,7 @@ const since = (iso) => (iso ? Date.now() - new Date(iso).getTime() : Infinity);
 const busy = () => !state.scan || state.scanning || current !== "sessions" || document.hidden || !!document.querySelector("dialog[open]") || isOpen();
 async function autoRefresh(all) {
   if (busy()) return;
-  if (all) await scan(); else await refreshHere();
+  if (all) await scan(); else if (!state.info?.desktopManaged) await refreshHere();
   if (busy() && !state.scanning) return; // something opened meanwhile: drawn when it closes
   render();
 }
@@ -93,7 +93,7 @@ window.addEventListener("focus", comeBack);
 let presTimer = 0, presSig = "", presBusy = false;
 function presenceSoon(ms) {
   clearTimeout(presTimer);
-  if (document.hidden) return; // paused until visible again
+  if (state.info?.desktopManaged || document.hidden) return; // backend owns desktop refresh; paused until visible again
   presTimer = setTimeout(pollPresence, ms);
 }
 const presenceEvery = () => (document.hasFocus() && current === "sessions" ? 5_000 : 30_000);

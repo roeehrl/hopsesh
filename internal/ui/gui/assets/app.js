@@ -12,7 +12,7 @@ import "./accounts.js";
 import { undoLast } from "./activity.js";
 import { openPalette } from "./palette.js";
 import { loadTabs, onTabs, showTerminal, tabs, exits } from "./term.js";
-import { render as renderSessions, listCommand } from "./sessions.js";
+import { render as renderSessions, listCommand, showEntry, reveal } from "./sessions.js";
 import { load as loadLayout, toggle as togglePane } from "./layout.js";
 
 $("#btn-search").onclick = openPalette;
@@ -31,6 +31,21 @@ onTabs(() => {
   shownTabs = sig;
   renderSessions(); // keeps the focus and the scroll
 });
+
+// Native Quick access requests also survive a cold main-window boot.
+let mainReady=false;
+async function quickRoute() {
+ if(!mainReady)return;
+ const r=await api("TakeQuickRoute");if(!r)return;
+ if(r.screen==="settings"){await go("settings","desktop");return}
+ if(r.screen==="terminals"){await showTerminal();return}
+ const snapshot=await api("QuickSnapshot");if(snapshot.scan)state.scan=snapshot.scan;
+ await go("sessions");
+ const e=state.scan?.groups.flatMap(g=>g.entries).find(e=>e.machine===r.machine&&e.key===r.key);
+ if(e){showEntry(e);reveal()}
+}
+on("hopsesh:quick-route",()=>quickRoute().catch(fail));
+on("hopsesh:quick",async()=>{if(!mainReady||state.scanning)return;const d=await api("QuickSnapshot");if(d.scan){state.scan=d.scan;state.presence=d.presence?.entries||{};if(current==="sessions"&&!document.querySelector("dialog[open]"))renderSessions()}});
 
 // The app menu (and its shortcuts) sends these.
 on("hopsesh:menu", menuCommand);
@@ -160,7 +175,9 @@ function configError() {
   loadLayout(state.info.layout);
   if (state.info.configError) { configError(); return; }
   await loadTabs();
-  await go("sessions", true);
+  try { state.scan=await api("InitialScan"); } catch(e) { fill(view,h("div",{class:"loading err"},errText(e))); mainReady=true; return; }
+  await go("sessions");
+  mainReady=true;await quickRoute();
   if (state.info.updateCheck === "on") {
     try { state.update = await api("CheckUpdate"); } catch { return; } // offline
     if (state.update?.newer && current === "sessions") go("sessions");
