@@ -352,6 +352,7 @@ func (r *run) renderPlan(p *move.Plan) {
 			r.printf("  session   a new %s session (%s)\n", p.Agent, c.Fidelity)
 		}
 		r.printf("  carries   %s\n", c.Report.Summary)
+		r.printf("  capacity  %s\n", c.Report.ContextSummary())
 		if c.Report.Archive != "" {
 			r.printf("  archive   %s\n", c.Report.Archive)
 		}
@@ -379,7 +380,7 @@ func (r *run) renderResult(p *move.Plan, res *move.Result) {
 	if p.NoWork {
 		r.printf("\n✓ Conversation already synchronized; lineage receipts updated. 0 new messages, 0 transfers.\n")
 	} else if p.Kind == move.KindContinue {
-		r.printf("\n✓ %q continues in %s.\n", p.Title, p.Agent)
+		r.printf("\n✓ %q is prepared for %s.\n", p.Title, p.Agent)
 	} else {
 		r.printf("\n✓ %q is on this machine: %d file(s), %s.\n", p.Title, res.Files, move.Human(res.Bytes))
 	}

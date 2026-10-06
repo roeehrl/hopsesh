@@ -78,6 +78,16 @@ type Report struct {
 	Summary        string      `json:"summary"`
 }
 
+// ContextSummary exposes the same capacity evidence to text front ends, including
+// vendor import plans whose conversion summary describes a different operation.
+func (r Report) ContextSummary() string {
+	label := "working context"
+	if r.Method == "vendor-import" {
+		label = "import input"
+	}
+	return fmt.Sprintf("%s upper estimate %d / %d; window %d, existing %d; %s", label, r.Used, r.Budget, r.Capacity.EffectiveWindow(), r.Capacity.Existing, r.Capacity.Source)
+}
+
 // Briefing is what the receiving agent is told at the end of the history.
 type Briefing struct {
 	FromVersion string

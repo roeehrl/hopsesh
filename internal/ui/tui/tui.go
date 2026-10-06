@@ -959,6 +959,7 @@ func (m *model) viewPlan(b *strings.Builder) {
 			fmt.Fprintf(b, "  adds the new work to %s here\n", c.AppendTo.Key)
 		}
 		fmt.Fprintf(b, "  carries %s\n", c.Report.Summary)
+		fmt.Fprintf(b, "  capacity %s\n", c.Report.ContextSummary())
 		if c.Report.Archive != "" {
 			fmt.Fprintf(b, "  archive %s\n", c.Report.Archive)
 		}
@@ -1013,7 +1014,7 @@ func (m *model) viewDone(b *strings.Builder) {
 	if p.NoWork {
 		fmt.Fprintf(b, "\n  %s %q already synchronized · 0 new messages, 0 transfers.\n", okSt.Render("✓"), p.Title)
 	} else if p.Kind == move.KindContinue {
-		fmt.Fprintf(b, "\n  %s %q continues in %s.\n", okSt.Render("✓"), p.Title, p.Agent)
+		fmt.Fprintf(b, "\n  %s %q is prepared for %s.\n", okSt.Render("✓"), p.Title, p.Agent)
 	} else {
 		fmt.Fprintf(b, "\n  %s %q is on this machine: %d file(s), %s.\n", okSt.Render("✓"), p.Title, res.Files, move.Human(res.Bytes))
 	}

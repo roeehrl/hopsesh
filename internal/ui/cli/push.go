@@ -126,7 +126,7 @@ func (r *run) renderPushResult(p *move.Plan, pr *app.PushResult) {
 	if p.NoWork {
 		r.printf("\n✓ %q already synchronized on %s: 0 new messages, 0 transfers.\n", p.Title, pr.Machine)
 	} else if p.Kind == move.KindContinue {
-		r.printf("\n✓ %q continues in %s on %s.\n", p.Title, p.Agent, pr.Machine)
+		r.printf("\n✓ %q is prepared for %s on %s.\n", p.Title, p.Agent, pr.Machine)
 	} else {
 		r.printf("\n✓ %q is on %s: %d file(s), %s.\n", p.Title, pr.Machine, res.Files, move.Human(res.Bytes))
 	}
