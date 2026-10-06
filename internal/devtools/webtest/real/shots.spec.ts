@@ -2,6 +2,7 @@ import { test, expect, chromium, type Browser, type CDPSession, type Page } from
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { port } from "./setup";
+import { mainWindow, nativeDiagnostics } from "./window";
 
 // Screenshots of the real Windows window for the README and the product pages, on
 // demoseed's made-up laptop (HOPSESH_DEMO_WORLD=laptop) with its studio in WSL2 over SSH
@@ -15,14 +16,14 @@ const looks = [
 
 let browser: Browser;
 let page: Page;
+nativeDiagnostics(() => browser);
 let cdp: CDPSession;
 
 test.skip(!dir, "set SHOTS_DIR to save screenshots");
 
 test.beforeAll(async () => {
   browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
-  const pages = browser.contexts().flatMap((c) => c.pages());
-  page = pages.find((p) => URL.canParse(p.url()) && new URL(p.url()).host === "wails.localhost") || pages[0];
+  page = await mainWindow(browser);
   cdp = await page.context().newCDPSession(page);
   mkdirSync(dir, { recursive: true });
 });
@@ -75,7 +76,7 @@ test("screenshots of the real window", async () => {
 
   await row("Fix flaky checkout tests").click();
   await page.getByRole("complementary", { name: "Session details" }).getByRole("button", { name: "Move", exact: true }).click();
-  await page.getByRole("menuitem", { name: /^Continue with Codex…/ }).click();
+  await page.getByRole("menuitem", { name: /^Continue with Codex on this PC…/ }).click();
   const sheet = page.locator("#sheet");
   await expect(sheet.getByRole("heading", { name: "Continue “Fix flaky checkout tests” in Codex" })).toBeVisible({ timeout: 60_000 });
   await shoot("02-continue-plan");

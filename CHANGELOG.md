@@ -261,6 +261,8 @@ start fresh and add your machines again.
 
 ### Fixed
 
+- Windows UI validation waits for the actual main window and uses the remote-session
+  continuation label. Screenshot failures now fail CI and retain their own reports.
 - The install script (`curl … | sh`) failed on macOS in a terminal with a UTF-8 locale
   ("arch…: unbound variable"): macOS's /bin/sh read the "…" after `$arch` as part of the
   name.

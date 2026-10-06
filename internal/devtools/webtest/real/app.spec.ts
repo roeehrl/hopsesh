@@ -1,14 +1,15 @@
 import { test, expect, chromium, type Browser, type Page } from "@playwright/test";
 import { port } from "./setup";
+import { mainWindow, nativeDiagnostics } from "./window";
 
 // The real Windows app: WebView2, the Wails runtime and the Go service, on a demo home.
 let browser: Browser;
 let page: Page;
+nativeDiagnostics(() => browser);
 
 test.beforeAll(async () => {
   browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
-  const pages = browser.contexts().flatMap((c) => c.pages());
-  page = pages.find((p) => URL.canParse(p.url()) && new URL(p.url()).host === "wails.localhost") || pages[0];
+  page = await mainWindow(browser);
   await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible({ timeout: 45_000 });
 });
 
