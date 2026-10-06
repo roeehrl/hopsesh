@@ -53,6 +53,16 @@ func diffSchemas(tested, latest, out, keep string) error {
 	if err := os.MkdirAll(out, 0o755); err != nil {
 		return err
 	}
+	// A real empty file also works with Git for Windows diff, which does not
+	// understand Go's Windows null-device name (NUL).
+	empty, err := os.CreateTemp("", "hopsesh-empty-schema-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(empty.Name())
+	if err := empty.Close(); err != nil {
+		return err
+	}
 	names := make([]string, 0, len(paths))
 	for name := range paths {
 		names = append(names, name)
@@ -77,10 +87,10 @@ func diffSchemas(tested, latest, out, keep string) error {
 			continue
 		}
 		if errors.Is(oldErr, os.ErrNotExist) {
-			oldPath = os.DevNull
+			oldPath = empty.Name()
 		}
 		if errors.Is(newErr, os.ErrNotExist) {
-			newPath = os.DevNull
+			newPath = empty.Name()
 		}
 		result, err := exec.Command("diff", "-u", "-L", rel+", tested", "-L", rel+", latest", oldPath, newPath).CombinedOutput()
 		var exit *exec.ExitError

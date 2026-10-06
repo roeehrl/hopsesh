@@ -73,8 +73,12 @@ if ($LASTEXITCODE -ne 0) {
   Write-Host "--- the session file: $($bytes.Length) bytes, starting" (($bytes[0..23] | ForEach-Object { $_.ToString('x2') }) -join ' ')
   Fail 'push'
 }
-$journal = ($out | ConvertFrom-Json).result.journal
-$got = Join-Path $HOME (".claude\projects\" + (Slug $boxProj) + "\$id.jsonl")
+$transfer = $out | ConvertFrom-Json
+$journal = $transfer.result.journal
+$receivedId = $transfer.plan.placement.key.session
+if (-not $receivedId -or $receivedId -eq $id) { Fail 'unverified account transfer did not create a fresh session' }
+if ($transfer.plan.kind -ne 'continue') { Fail 'unverified account transfer did not use portable history' }
+$got = Join-Path $HOME (".claude\projects\" + (Slug $boxProj) + "\$receivedId.jsonl")
 if (-not (Test-Path $got)) { Write-Host $out; Fail "nothing installed at $got" }
 $text = [IO.File]::ReadAllText($got, [Text.Encoding]::UTF8)
 foreach ($want in @('バグを直して', '修复错误', '直しました。 已修复。', $boxProj.Replace('\', '\\'))) {
@@ -82,12 +86,12 @@ foreach ($want in @('バグを直して', '修复错误', '直しました。 �
 }
 if ($text.Contains($projJson)) { Write-Host $text; Fail 'the old path is still in the session on box' }
 $here = [IO.File]::ReadAllText((Join-Path $sessionDir "$id.jsonl"), [Text.Encoding]::UTF8)
-if (-not $here.Contains('moved to ')) { Fail 'the copy here is not marked' }
+if ($here -notmatch 'moved to |continued in ') { Fail 'the copy here is not marked' }
 
 & $Bin undo $journal --yes | Out-Null
 if (Test-Path $got) { Fail 'undo left the copy on box' }
 $here = [IO.File]::ReadAllText((Join-Path $sessionDir "$id.jsonl"), [Text.Encoding]::UTF8)
-if ($here.Contains('moved to ')) { Fail 'undo left the mark here' }
+if ($here -match 'moved to |continued in ') { Fail 'undo left the mark here' }
 
 # box's own settings: without this machine's scratch configuration.
 $saved = @{}

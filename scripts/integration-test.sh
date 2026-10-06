@@ -46,13 +46,15 @@ TARGET="$WORK/here/proj"
 mkdir -p "$TARGET"
 "$BIN" pull "box:$ID" --to "$TARGET" --yes --json > "$WORK/pull.json" || { cat "$WORK/pull.json"; fail "pull failed"; }
 TSLUG=$(cd "$TARGET" && pwd -P | sed 's/[^A-Za-z0-9]/-/g')
-GOT="$CLAUDE_CONFIG_DIR/projects/$TSLUG/$ID.jsonl"
+LOCAL_ID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["plan"]["placement"]["key"]["session"])' "$WORK/pull.json")
+[ -n "$LOCAL_ID" ] && [ "$LOCAL_ID" != "$ID" ] || fail "unverified account transfer did not create a fresh session"
+GOT="$CLAUDE_CONFIG_DIR/projects/$TSLUG/$LOCAL_ID.jsonl"
 [ -f "$GOT" ] || { ls -R "$CLAUDE_CONFIG_DIR" >&2; fail "transcript not installed at $GOT"; }
 grep -q "$TARGET/main.go" "$GOT" || fail "paths were not rewritten"
 grep -q "$RHOME/proj" "$GOT" && fail "old paths remain"
-grep -q '"type":"relocated"' "$GOT" || fail "no relocated record"
+grep -q '"kind": *"continue"' "$WORK/pull.json" || fail "unverified account transfer did not use portable history"
 
-"$BIN" undo "$ID" --yes
+"$BIN" undo "$LOCAL_ID" --yes
 [ -f "$GOT" ] && fail "undo left the transcript"
 
 # Continue it in Codex here.
@@ -70,14 +72,26 @@ sudo mkdir -p /usr/local/bin && sudo install -m 0755 "$BIN" /usr/local/bin/hopse
 as_remote() { sudo -u "$REMOTE_USER" -H env -u XDG_CONFIG_HOME -u XDG_STATE_HOME -u XDG_CACHE_HOME -u XDG_DATA_HOME HOME="$RHOME" "$@"; }
 as_remote /usr/local/bin/hopsesh receive on >/dev/null
 "$BIN" pull "box:$ID" --to "$TARGET" --yes --json > "$WORK/pull2.json" || { cat "$WORK/pull2.json"; fail "second pull failed"; }
+LOCAL_ID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["plan"]["placement"]["key"]["session"])' "$WORK/pull2.json")
+GOT="$CLAUDE_CONFIG_DIR/projects/$TSLUG/$LOCAL_ID.jsonl"
+[ -f "$GOT" ] || fail "second pull did not install its reported destination"
 RFILE="$RHOME/.claude/projects/$SLUG/$ID.jsonl"
-sudo grep -q 'moved to here' "$RFILE" || fail "box's copy is not marked after the pull"
+sudo grep -Eq 'moved to here|continued in .*here' "$RFILE" || fail "box's copy is not marked after the pull"
 # Continue the native chain before returning. A workless visit only syncs receipts.
-cat >> "$GOT" <<JSONL
-{"type":"user","uuid":"return1","parentUuid":"a1","sessionId":"$ID","timestamp":"2026-10-01T10:01:00Z","message":{"role":"user","content":"SSH return sentinel"}}
-{"type":"last-prompt","leafUuid":"return1","sessionId":"$ID"}
-JSONL
-"$BIN" push "$ID" box --to "$RHOME/proj" --yes --json > "$WORK/push.json" || {
+python3 - "$GOT" "$LOCAL_ID" <<'PYTHON'
+import json, sys
+path, session = sys.argv[1:]
+with open(path) as f:
+    records = [json.loads(line) for line in f if line.strip()]
+parent = next(r["uuid"] for r in reversed(records) if r.get("type") in ("user", "assistant") and r.get("uuid"))
+with open(path, "a") as f:
+    for record in [
+        {"type": "user", "uuid": "return1", "parentUuid": parent, "sessionId": session, "timestamp": "2026-10-01T10:01:00Z", "message": {"role": "user", "content": "SSH return sentinel"}},
+        {"type": "last-prompt", "leafUuid": "return1", "sessionId": session},
+    ]:
+        f.write(json.dumps(record) + "\n")
+PYTHON
+"$BIN" push "$LOCAL_ID" box --to "$RHOME/proj" --yes --json > "$WORK/push.json" || {
   cat "$WORK/push.json"
   # shellcheck disable=SC2016 # expands on box
   ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@127.0.0.1" 'echo "box HOME=$HOME"; env | grep "^XDG_" || true' >&2
@@ -85,15 +99,21 @@ JSONL
 }
 JOURNAL=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["result"]["journal"])' "$WORK/push.json")
 [ -n "$JOURNAL" ] || { cat "$WORK/push.json"; fail "push printed no journal"; }
-sudo cat "$RFILE" | grep '"type":"custom-title"' | tail -n 1 | grep -q 'moved to here' && fail "the copy that went back to box still carries a mark"
-sudo grep -q 'SSH return sentinel' "$RFILE" || fail "box did not receive this machine's new work"
-tail -n 2 "$GOT" | grep -q 'moved to ' || fail "the copy here is not marked as moved" # box names itself
+RETURN_ID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["plan"]["placement"]["key"]["session"])' "$WORK/push.json")
+[ -n "$RETURN_ID" ] && [ "$RETURN_ID" != "$ID" ] || fail "unverified return did not preserve the original session"
+RETURN_FILE="$RHOME/.claude/projects/$SLUG/$RETURN_ID.jsonl"
+sudo test -f "$RETURN_FILE" || fail "box did not install the reported return destination"
+sudo cat "$RETURN_FILE" | grep '"type":"custom-title"' | tail -n 1 | grep -Eq 'moved to |continued in ' && fail "the returned copy still carries a mark"
+sudo grep -q 'SSH return sentinel' "$RETURN_FILE" || fail "box did not receive this machine's new work"
+sudo grep -q 'SSH return sentinel' "$RFILE" && fail "unverified return changed the original conversation"
+tail -n 2 "$GOT" | grep -Eq 'moved to |continued in ' || fail "the copy here is not marked as moved" # box names itself
 "$BIN" undo "$JOURNAL" --yes
-tail -n 2 "$GOT" | grep -q 'moved to ' && fail "undo left the mark here"
-sudo grep -q 'moved to here' "$RFILE" || fail "undo did not restore box's own copy"
+sudo test -f "$RETURN_FILE" && fail "undo left the returned portable copy"
+tail -n 2 "$GOT" | grep -Eq 'moved to |continued in ' && fail "undo left the mark here"
+sudo grep -Eq 'moved to here|continued in .*here' "$RFILE" || fail "undo did not restore box's own copy"
 
 # A machine that does not receive refuses.
 as_remote /usr/local/bin/hopsesh receive off >/dev/null
-if "$BIN" push "$ID" box --to "$RHOME/proj" --yes --json > "$WORK/refused.json" 2>&1; then fail "push to a machine that does not receive"; fi
+if "$BIN" push "$LOCAL_ID" box --to "$RHOME/proj" --yes --json > "$WORK/refused.json" 2>&1; then fail "push to a machine that does not receive"; fi
 grep -q 'does not receive sessions' "$WORK/refused.json" || { cat "$WORK/refused.json"; fail "the refusal does not say why"; }
 echo "integration test passed"

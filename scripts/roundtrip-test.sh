@@ -4,8 +4,8 @@
 #   "box"  = user hsremote (the session starts there)
 #   "back" = user hsback   (runs hopsesh first)
 # box → back: code comes along straight from box (never pushed), box's copy gets marked.
-# back → box: the full native copy returns to its original ID, back's copy gets marked.
-# Same-agent transport preserves native reasoning/tool records; mixed-agent returns append.
+# back → box: portable history returns as a fresh copy, back is marked.
+# Without verified login identity each account boundary uses a fresh native ID; originals remain.
 # Then both copies change and a move is refused until --keep-both.
 # Run by CI on Linux and macOS; needs sudo, sshd and git. The account running it is not changed.
 set -eu
@@ -79,41 +79,49 @@ grep -q '"fromSource": *true' "$WORK/pull1.json" || { cat "$WORK/pull1.json"; fa
 grep -q '"state": *"fast-forwarded"' "$WORK/pull1.json" || fail "back's checkout should be fast-forwarded"
 [ "$(sh_a 'git -C ~/git/rt rev-parse HEAD')" = "$TWO" ] || fail "back's checkout is not at box's commit"
 grep -q '"mark": *"done"' "$WORK/pull1.json" || fail "box's copy should be marked"
-sudo tail -n 1 "$BFILE" | grep -q 'moved to' || fail "box's transcript has no moved mark"
+sudo tail -n 1 "$BFILE" | grep -Eq 'moved to|continued in' || fail "box's transcript has no moved mark"
 SLUG_A=$(sh_a 'cd ~/git/rt && pwd -P' | sed 's/[^A-Za-z0-9]/-/g')
-AFILE="$AHOME/.claude/projects/$SLUG_A/$ID.jsonl"
+AID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["plan"]["placement"]["key"]["session"])' "$WORK/pull1.json")
+[ -n "$AID" ] && [ "$AID" != "$ID" ] || fail "unverified account transfer did not create a fresh session"
+AFILE="$AHOME/.claude/projects/$SLUG_A/$AID.jsonl"
 sudo test -f "$AFILE" || fail "no copy on back at $AFILE"
 as_a "$HS" ls --json --no-git > "$WORK/ls.json"
-grep -q '"kind": *"moved"' "$WORK/ls.json" || fail "the listing should show box's copy as moved"
+grep -q '"kind": *"continued"' "$WORK/ls.json" || fail "the listing should show box's copy as continued"
 
 say "work continues on back"
-sh_a "echo '{\"type\":\"user\",\"uuid\":\"u2\",\"parentUuid\":\"u1\",\"sessionId\":\"$ID\",\"cwd\":\"$AHOME/git/rt\",\"timestamp\":\"2026-10-02T12:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"continued on back\"}}' >> '$AFILE'"
+ALEAF=$(sudo cat "$AFILE" | python3 -c 'import json,sys; records=[json.loads(l) for l in sys.stdin]; print([r["uuid"] for r in records if r.get("type") in ("user","assistant")][-1])')
+sh_a "echo '{\"type\":\"user\",\"uuid\":\"u2\",\"parentUuid\":\"$ALEAF\",\"sessionId\":\"$AID\",\"cwd\":\"$AHOME/git/rt\",\"timestamp\":\"2026-10-02T12:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"continued on back\"}}' >> '$AFILE'"
+sh_a "echo '{\"type\":\"last-prompt\",\"leafUuid\":\"u2\",\"sessionId\":\"$AID\"}' >> '$AFILE'"
 sh_a 'cd ~/git/rt && echo three > a.txt && git commit -qam three'
 THREE=$(sh_a 'git -C ~/git/rt rev-parse HEAD')
 
 say "back → box (hop back)"
 as_b "$HS" hosts add back "$A@127.0.0.1" >/dev/null
 as_b "$HS" trust back --yes >/dev/null
-as_b "$HS" pull "back:$ID" --yes --json > "$WORK/pull2.json" 2>&1 || { cat "$WORK/pull2.json"; fail "hop back"; }
-python3 -c 'import json,sys; p=json.load(open(sys.argv[1]))["plan"]; assert p["kind"]=="move" and p["placement"]["key"]["session"]==sys.argv[2] and not p.get("conflict")' "$WORK/pull2.json" "$ID" \
-  || { cat "$WORK/pull2.json"; fail "the same-agent return should restore the full native copy to its original ID"; }
+as_b "$HS" pull "back:$AID" --yes --json > "$WORK/pull2.json" 2>&1 || { cat "$WORK/pull2.json"; fail "hop back"; }
+RETURN_ID=$(python3 -c 'import json,sys; p=json.load(open(sys.argv[1]))["plan"]; assert p["kind"]=="continue" and not p.get("conflict"); print(p["placement"]["key"]["session"])' "$WORK/pull2.json")
+[ -n "$RETURN_ID" ] && [ "$RETURN_ID" != "$ID" ] || fail "unverified return did not use a fresh ID"
+sudo grep -q "continued on back" "$BFILE" && fail "return changed the preserved original"
+BFILE="$BHOME/.claude/projects/$SLUG_B/$RETURN_ID.jsonl"
+sudo test -f "$BFILE" || fail "no reported return copy on box"
 sudo grep -q "continued on back" "$BFILE" || fail "box should now have the newer copy"
-if sudo cat "$BFILE" | grep '"type":"custom-title"' | tail -n 1 | grep -q 'moved to'; then fail "the copy that came home must not carry a moved mark"; fi
+if sudo cat "$BFILE" | grep '"type":"custom-title"' | tail -n 1 | grep -Eq 'moved to|continued in'; then fail "the copy that came home must not carry a moved mark"; fi
 [ "$(sh_b 'git -C ~/rt rev-parse HEAD')" = "$THREE" ] || fail "box's checkout should be at back's commit"
 sudo tail -n 1 "$AFILE" | grep -Eq 'moved to|continued in' || fail "back's copy should now be marked continued"
 
 say "both change: a conflict"
 # Follow the active native leaf on the returned copy.
 BLEAF=$(sudo cat "$BFILE" | python3 -c 'import json,sys; records=[json.loads(l) for l in sys.stdin]; leaves=[r["leafUuid"] for r in records if r.get("type")=="last-prompt"]; print(leaves[-1] if leaves else [r["uuid"] for r in records if r.get("type") in ("user","assistant")][-1])')
-sh_a "echo '{\"type\":\"user\",\"uuid\":\"u3\",\"parentUuid\":\"u2\",\"sessionId\":\"$ID\",\"cwd\":\"$AHOME/git/rt\",\"timestamp\":\"2026-10-02T13:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"kept going on back after the move\"}}' >> '$AFILE'"
-sh_b "echo '{\"type\":\"user\",\"uuid\":\"u4\",\"parentUuid\":\"$BLEAF\",\"sessionId\":\"$ID\",\"cwd\":\"$BHOME/rt\",\"timestamp\":\"2026-10-02T14:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"and on box\"}}' >> '$BFILE'"
-sh_b "echo '{\"type\":\"last-prompt\",\"leafUuid\":\"u4\",\"sessionId\":\"$ID\"}' >> '$BFILE'"
-if as_a "$HS" pull "box:$ID" --yes --json > "$WORK/pull3.json" 2>&1; then fail "a move over a changed copy must be refused"; fi
+sh_a "echo '{\"type\":\"user\",\"uuid\":\"u3\",\"parentUuid\":\"u2\",\"sessionId\":\"$AID\",\"cwd\":\"$AHOME/git/rt\",\"timestamp\":\"2026-10-02T13:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"kept going on back after the move\"}}' >> '$AFILE'"
+sh_a "echo '{\"type\":\"last-prompt\",\"leafUuid\":\"u3\",\"sessionId\":\"$AID\"}' >> '$AFILE'"
+sh_b "echo '{\"type\":\"user\",\"uuid\":\"u4\",\"parentUuid\":\"$BLEAF\",\"sessionId\":\"$RETURN_ID\",\"cwd\":\"$BHOME/rt\",\"timestamp\":\"2026-10-02T14:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"and on box\"}}' >> '$BFILE'"
+sh_b "echo '{\"type\":\"last-prompt\",\"leafUuid\":\"u4\",\"sessionId\":\"$RETURN_ID\"}' >> '$BFILE'"
+if as_a "$HS" pull "box:$RETURN_ID" --yes --json > "$WORK/pull3.json" 2>&1; then fail "a move over a changed copy must be refused"; fi
 grep -q "keep-both" "$WORK/pull3.json" || { cat "$WORK/pull3.json"; fail "the refusal should offer --keep-both"; }
-as_a "$HS" pull "box:$ID" --yes --json --keep-both > "$WORK/pull4.json" || { cat "$WORK/pull4.json"; fail "keep both"; }
+as_a "$HS" pull "box:$RETURN_ID" --yes --json --keep-both > "$WORK/pull4.json" || { cat "$WORK/pull4.json"; fail "keep both"; }
 sudo grep -q "kept going on back after the move" "$AFILE" || fail "keep-both must not touch the copy here"
-grep -q '"sourceId": *"'"$ID"'"' "$WORK/pull4.json" || fail "the incoming copy should record where it came from"
-python3 -c 'import json,sys; sys.exit(json.load(open(sys.argv[1]))["plan"]["placement"]["key"]["session"] == sys.argv[2])' "$WORK/pull4.json" "$ID" \
+grep -q '"sourceId": *"'"$RETURN_ID"'"' "$WORK/pull4.json" || fail "the incoming copy should record where it came from"
+python3 -c 'import json,sys; sys.exit(json.load(open(sys.argv[1]))["plan"]["placement"]["key"]["session"] == sys.argv[2])' "$WORK/pull4.json" "$AID" \
   || fail "the incoming copy should get a new id"
 
 echo
