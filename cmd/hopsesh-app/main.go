@@ -58,12 +58,15 @@ func main() {
 		MinWidth:  900,
 		MinHeight: 600,
 		URL:       "/",
+		// The header is 52px, as tall as AppKit's own unified toolbar, so the window's buttons
+		// sit on its middle (style.css).
 		Mac: application.MacWindow{
 			TitleBar:                application.MacTitleBarHiddenInset,
-			InvisibleTitleBarHeight: 44,
+			InvisibleTitleBarHeight: 52,
 		},
 	})
 	svc.Terms.Privileged(win) // the app's own window: the one with its bindings
+	configureTitlebar(win)
 	// Closing the window while programs run in tabs hides it (Settings → Terminal → Keep
 	// tabs when the window closes), or asks whether to quit.
 	win.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
@@ -83,9 +86,9 @@ func main() {
 }
 
 // menu is the menu bar: the standard App, Edit and Window menus, a View menu for the
-// panes, and a Session menu whose
-// commands the window carries out (it gets each as a gui.MenuEvent); Terminal (Ctrl+`)
-// moves between the app's window and the hopsesh Terminal window.
+// panes and the session list's display, and a Session menu whose commands the window
+// carries out (it gets each as a gui.MenuEvent); Terminal (Ctrl+`) moves between the app's
+// window and the hopsesh Terminal window.
 func menu(send func(cmd string), terminal func()) *application.Menu {
 	m := application.NewMenu()
 	m.AddRole(application.AppMenu)
@@ -102,6 +105,25 @@ func menu(send func(cmd string), terminal func()) *application.Menu {
 	gui.SetViewMenu(func(sb, in bool) {
 		sidebar.SetLabel(map[bool]string{true: "Hide Sidebar", false: "Show Sidebar"}[sb])
 		inspector.SetLabel(map[bool]string{true: "Hide Inspector", false: "Show Inspector"}[in])
+	})
+	// The session list: Group By and Sort By (radio items; the window tells which is
+	// chosen, gui.SetListMenu), collapsing every group, compact rows and the Display popover.
+	v.AddSeparator()
+	groups := radios(v.AddSubmenu("Group By"), [][2]string{{"repository", "Repository"}, {"location", "Location"}, {"agent", "Agent"},
+		{"status", "Status"}, {"last-active", "Last Active"}, {"none", "None"}}, "group:", send)
+	sorts := radios(v.AddSubmenu("Sort By"), [][2]string{{"last-active", "Last Active"}, {"title", "Title"}, {"status", "Status"}, {"size", "Size"}}, "sort:", send)
+	v.Add("Collapse All Groups").OnClick(func(*application.Context) { send("collapse-all") })
+	v.Add("Expand All Groups").OnClick(func(*application.Context) { send("expand-all") })
+	compact := v.AddCheckbox("Compact Rows", false).OnClick(func(*application.Context) { send("compact") })
+	v.Add("Show Display Options").SetAccelerator("CmdOrCtrl+J").OnClick(func(*application.Context) { send("display") })
+	gui.SetListMenu(func(groupBy, sortBy string, c bool) {
+		for id, it := range groups {
+			it.SetChecked(id == groupBy)
+		}
+		for id, it := range sorts {
+			it.SetChecked(id == sortBy)
+		}
+		compact.SetChecked(c)
 	})
 	if runtime.GOOS == "darwin" {
 		v.AddSeparator()
@@ -127,4 +149,15 @@ func menu(send func(cmd string), terminal func()) *application.Menu {
 	s.Add("Terminal").SetAccelerator("Ctrl+`").OnClick(func(*application.Context) { terminal() })
 	m.AddRole(application.WindowMenu)
 	return m
+}
+
+// radios fills a submenu with one radio item per choice ({id, label}); picking one sends
+// prefix+id. The items are returned by id, for the window to check the chosen one.
+func radios(sub *application.Menu, choices [][2]string, prefix string, send func(cmd string)) map[string]*application.MenuItem {
+	out := map[string]*application.MenuItem{}
+	for i, c := range choices {
+		id := c[0]
+		out[id] = sub.AddRadio(c[1], i == 0).OnClick(func(*application.Context) { send(prefix + id) })
+	}
+	return out
 }

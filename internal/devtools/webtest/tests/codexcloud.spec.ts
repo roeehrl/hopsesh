@@ -14,7 +14,7 @@ async function codexTask(page: Page, title = "Add a changelog entry", env = "env
 }
 
 async function turnOnCodex(page: Page) {
-  const sidebar = page.getByRole("navigation", { name: "Scopes" });
+  const sidebar = page.getByRole("navigation", { name: "Places" });
   await turnOnCloud(page, "Codex cloud");
   await expect(sidebar.getByRole("button", { name: /Codex cloud/ })).toContainText("ready", { timeout: 30_000 });
 }
@@ -23,10 +23,10 @@ test("the hand-off sheet asks for a Codex cloud environment; the done screen nam
   await codexTask(page, "An earlier task");
   expect((await page.request.post("/dirty")).ok()).toBeTruthy();
   await turnOnCodex(page);
-  await page.getByRole("navigation", { name: "Scopes" }).getByRole("button", { name: /All sessions/ }).click();
+  await page.getByRole("navigation", { name: "Places" }).getByRole("button", { name: /All sessions/ }).click();
   await row(page, "Find the codeword").click();
-  await details(page).getByRole("button", { name: "Hand off ▸" }).click();
-  const menu = details(page).getByRole("menu", { name: "Hand off to" });
+  await details(page).getByRole("button", { name: "Move", exact: true }).click();
+  const menu = page.getByRole("menu", { name: "Move" });
   const codex = menu.getByRole("menuitem", { name: /Codex cloud/ });
   await expect(codex).toBeEnabled();
   await expect(codex).toContainText("Gets a briefing and the code on a branch");
@@ -74,7 +74,7 @@ test("the hand-off sheet asks for a Codex cloud environment; the done screen nam
 test("a Codex cloud task comes back: its code committed on a branch, a Codex session written", async ({ page }) => {
   const id = await codexTask(page);
   await turnOnCodex(page);
-  const sidebar = page.getByRole("navigation", { name: "Scopes" });
+  const sidebar = page.getByRole("navigation", { name: "Places" });
   await sidebar.getByRole("button", { name: /Codex cloud/ }).click();
   await expect(page.getByRole("heading", { name: "Codex cloud" })).toBeVisible();
   const r = row(page, "Add a changelog entry");
@@ -86,15 +86,19 @@ test("a Codex cloud task comes back: its code committed on a branch, a Codex ses
   const inspector = page.getByRole("complementary", { name: "Cloud task details" });
   await expect(inspector.getByRole("heading", { name: "Add a changelog entry" })).toBeVisible();
   await expect(inspector).toContainText(id);
-  await expect(inspector.getByRole("button", { name: /Bring here \(Codex\)/ })).toBeEnabled();
-  await expect(inspector.getByRole("button", { name: /Bring here and continue in/ })).toContainText("Claude Code");
-  await expect(inspector.getByRole("button", { name: "Get the code only" })).toBeEnabled();
-  await expect(inspector.getByRole("button", { name: "Archive" })).toBeDisabled();
-  await expect(inspector).toContainText("Codex archives only on chatgpt.com");
+  await expect(inspector.getByRole("button", { name: /^Bring to this/ })).toBeEnabled();
+  await inspector.getByRole("button", { name: "Other ways to bring it" }).click();
+  await expect(page.getByRole("menuitem", { name: /into Claude Code…/ })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: /^Get the code only…/ })).toBeEnabled();
+  await page.keyboard.press("Escape");
+  await inspector.getByRole("button", { name: "More actions" }).click();
+  await expect(page.getByRole("menuitem", { name: /^Archive/ })).toBeDisabled();
+  await expect(page.getByRole("menuitem", { name: /^Archive/ })).toContainText("Codex archives only on chatgpt.com");
+  await page.keyboard.press("Escape");
   await expect(inspector).toContainText("acme-api");
   await expect(inspector).toContainText("hopsesh writes the task's title and what came of it as a new session");
 
-  await inspector.getByRole("button", { name: /Bring here \(Codex\)/ }).click();
+  await inspector.getByRole("button", { name: /^Bring to this/ }).click();
   const sheet = page.locator("#sheet");
   await expect(sheet.getByRole("heading", { name: "Bring “Add a changelog entry” here from Codex cloud" })).toBeVisible({ timeout: 30_000 });
   await expect(sheet).toContainText("Only the task title, summary and code come back. The steps stay in the cloud.");
@@ -130,7 +134,7 @@ test("Machines: the Codex cloud card sets each repository's environment", async 
   await codexTask(page);
   await turnOnCodex(page);
   await menu(page, "machines");
-  await expect(page.getByRole("heading", { name: "Machines" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Machines", exact: true })).toBeVisible();
   const card = page.locator(".cloud-card", { has: page.getByRole("heading", { name: "Codex cloud" }) });
   await expect(card).toContainText("a hand-off branch");
   await expect(card).toContainText("GitHub only");

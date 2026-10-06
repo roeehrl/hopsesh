@@ -307,10 +307,10 @@ func broughtBranch(e Entry) string {
 	}
 	b := ""
 	for _, h := range l.Hops {
-		if h.Kind != lineage.HopFetch || h.Code == nil || h.To < 0 || h.To >= len(l.Replicas) {
+		if h.Kind != lineage.HopFetch || h.Code == nil || !l.HasReplica(h.To) {
 			continue
 		}
-		if to := l.Replicas[h.To]; to.Key == e.Session.Key && to.Location == e.Machine {
+		if to := l.Replica(h.To); to.Key == e.Session.Key && to.Location == e.Machine {
 			b = h.Code.Branch
 		}
 	}

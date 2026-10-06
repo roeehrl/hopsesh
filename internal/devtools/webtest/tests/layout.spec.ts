@@ -29,10 +29,10 @@ test("dragging a divider resizes its pane within its limits; past half the minim
   await dragBy(page, "Resize sidebar", 200); // clamped at 320
   await expect.poll(() => width(page, "#sidebar")).toBe(320);
   await expect(divider(page, "Resize sidebar")).toHaveAttribute("aria-valuenow", "320");
-  await dragBy(page, "Resize inspector", -400); // wider, until the list keeps 380
+  await dragBy(page, "Resize inspector", -400); // wider, until the list keeps 440 (and at most 60% of the room)
   const list = await width(page, ".content");
-  expect(list).toBeGreaterThanOrEqual(379);
-  expect(await width(page, "#inspector")).toBeLessThanOrEqual(560);
+  expect(list).toBeGreaterThanOrEqual(439);
+  expect(await width(page, "#inspector")).toBeLessThanOrEqual(Math.round((1280 - 320) * 0.6));
   await dragBy(page, "Resize inspector", 600); // past half its minimum: hidden
   await expect.poll(() => width(page, "#inspector")).toBe(0);
   await expect(page.locator("#inspector")).toHaveAttribute("inert", "");
@@ -88,8 +88,8 @@ test("the layout is kept across a reload", async ({ page }) => {
 test("a narrow window hides the sidebar for now, and brings it back when wide again", async ({ page }) => {
   await page.setViewportSize({ width: 900, height: 600 });
   await expect.poll(() => width(page, "#sidebar")).toBe(0);
-  expect(await width(page, ".content")).toBeGreaterThanOrEqual(380);
-  expect(await width(page, "#inspector")).toBeGreaterThanOrEqual(280);
+  expect(await width(page, ".content")).toBeGreaterThanOrEqual(440);
+  expect(await width(page, "#inspector")).toBeGreaterThanOrEqual(300);
   // Shown by the user in the narrow window, for now.
   await page.getByRole("button", { name: "Show sidebar" }).click();
   await expect.poll(() => width(page, "#sidebar")).toBe(220);
@@ -105,4 +105,46 @@ test("a narrow window hides the sidebar for now, and brings it back when wide ag
   await page.reload();
   await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible({ timeout: 30_000 });
   expect(await width(page, "#sidebar")).toBe(220);
+});
+
+test("the inspector's width follows the window until set: 30% of the room, at most 60% and what leaves the list 440px", async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await expect.poll(() => width(page, "#inspector")).toBe(Math.round((1600 - 220) * 0.3)); // 414
+  await divider(page, "Resize inspector").focus();
+  await page.keyboard.press("End");
+  await expect.poll(() => width(page, "#inspector")).toBe(Math.min(960, 1600 - 220 - 440, Math.round((1600 - 220) * 0.6)));
+  await page.setViewportSize({ width: 2560, height: 1200 });
+  await divider(page, "Resize inspector").focus();
+  await page.keyboard.press("End");
+  await expect.poll(() => width(page, "#inspector")).toBe(960);
+  await divider(page, "Resize inspector").dblclick(); // back to its default for this window
+  await expect.poll(() => width(page, "#inspector")).toBe(480);
+});
+
+test("the list's own width decides compact rows: below 600px they are one line", async ({ page }) => {
+  const rowHeight = () => page.locator(".row").first().evaluate((el) => Math.round(el.getBoundingClientRect().height));
+  expect(await rowHeight()).toBeGreaterThan(40); // comfortable
+  await divider(page, "Resize inspector").focus();
+  await page.keyboard.press("End"); // a wide inspector leaves the list under 600px
+  await expect.poll(() => width(page, ".content")).toBeLessThan(600);
+  await expect.poll(rowHeight).toBe(32);
+  await expect(page.locator(".row .act").first()).toBeHidden();
+});
+
+// Page headers share styles with Activity; neither screen should scroll the shell.
+test("Machines and Activity keep padded section headings and a single page scroll area", async ({ page }) => {
+  for (const width of [1280, 900]) {
+    await page.setViewportSize({ width, height: 600 });
+    for (const screen of ["machines", "activity"]) {
+      await menu(page, screen);
+      await expect(page.getByRole("heading", { name: screen === "machines" ? "Machines" : "Activity", exact: true })).toBeVisible();
+      const header = page.locator(".card-h").first();
+      await expect(header).toBeVisible();
+      expect(await header.evaluate(el => parseFloat(getComputedStyle(el).paddingLeft))).toBeGreaterThanOrEqual(12);
+      expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(600);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+      await page.locator(".page").evaluate(el => { el.scrollTop = el.scrollHeight; });
+      expect(await page.locator(".titlebar").evaluate(el => el.getBoundingClientRect().top)).toBe(0);
+    }
+  }
 });

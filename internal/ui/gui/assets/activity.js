@@ -1,6 +1,6 @@
 // The Activity screen: what hopsesh did here, newest first, with Undo, and the marks still
 // waiting for a copy left behind to end.
-import { api, h, fill, icon, ICONS, view, state, screen, go, loading, toast, fail, errText, ago, when, ask, sys, cloudTitle } from "./core.js";
+import { api, h, fill, icon, ICONS, view, state, screen, go, current, loading, toast, fail, errText, ago, when, ask, sys, cloudTitle } from "./core.js";
 
 // undo reverses an operation. When the session was used since, it says what changed and
 // asks before throwing that work away.
@@ -31,6 +31,8 @@ export async function undoLast() {
 }
 
 const KINDS = {
+  "lineage-sync": {label:"Receipts synchronized",ico:ICONS.mark,cls:""},
+  "archive-lineage": {label:"Metadata archived",ico:ICONS.mark,cls:""},
   move: { label: "Hopped here", ico: ICONS.down, cls: "" },
   continue: { label: "Continued", ico: ICONS.arrow, cls: "continue" },
   push: { label: "Sent", ico: ICONS.send, cls: "push" },
@@ -39,6 +41,7 @@ const KINDS = {
   handoff: { label: "Handed off", ico: ICONS.send, cls: "cloud" },
   hop: { label: "Handed on", ico: ICONS.cloud, cls: "cloud" },
   cleanup: { label: "Cleaned up", ico: ICONS.mark, cls: "" },
+  rename: { label: "Renamed", ico: ICONS.mark, cls: "mark" },
 };
 
 // hopText words a hop from one cloud to another: both legs, and what undo does.
@@ -91,6 +94,8 @@ function row(x) {
     h("div", { style: "flex:1 1 300px;min-width:0;display:flex;flex-direction:column;gap:3px" },
       h("div", {}, h("b", { style: "font-weight:500" }, k.label), " · ", ft ? ft.title : x.title),
       h("span", { class: "muted", style: "font-size:12px" }, ft?.detail || [`${x.changes} change${x.changes === 1 ? "" : "s"}`, x.remote.length ? `also on ${x.remote.join(", ")}` : ""].filter(Boolean).join(" · ")),
+      x.pendingReceipt && !x.undone ? h("span",{class:"warn",style:"font-size:12px"},"Receipt acknowledgement pending.") : null,
+      x.pendingReceipt && !x.undone ? h("button",{class:"btn small",onclick:async(ev)=>{const b=ev.currentTarget;b.disabled=true;b.textContent="Retrying acknowledgement…";try{await api("RetryReceipts",x.id);toast("Lineage acknowledgement recovered");state.stale=true;await render(true);}catch(err){fail(err);b.disabled=false;b.textContent="Retry acknowledgement";}}},"Retry acknowledgement") : null,
       ft?.note && !x.undone ? h("span", { class: x.fetch?.outcome === "partial" || x.kind === "handoff" || x.hop?.state === "failed" ? "warn" : "muted", style: "font-size:12px" }, ft.note) : null,
       x.hop?.state === "waiting" && !x.undone ? h("div", { style: "display:flex;gap:8px" },
         h("button", { class: "btn small", onclick: async () => { try { const d = await api("ContinueHop", x.id); toast(d.hop?.state === "done" ? "Handed on" : d.hop?.message || "Still waiting for the copy"); render(true); } catch (e) { fail(e); } } }, "Go on"),
@@ -101,22 +106,23 @@ function row(x) {
 }
 
 async function render(reload = false) {
+  if (current !== "activity") return;
   if (reload || !state.activity) {
-    if (!state.activity) loading("Reading the activity…");
-    try { state.activity = await api("Activity"); } catch (e) { fill(view, h("div", { class: "loading err" }, errText(e))); return; }
+    loading("Reading the activity…");
+    try { state.activity = await api("Activity"); } catch (e) { if (current === "activity") fill(view, h("div", { class: "loading err" }, errText(e))); return; }
   }
+  if (current !== "activity") return;
   const a = state.activity;
   fill(view, h("div", { class: "page" }, h("div", { class: "page-in" },
-    h("div", { style: "display:flex;align-items:baseline;gap:12px;flex-wrap:wrap" }, h("h1", {}, "Activity"), h("span", { class: "spacer" }),
-      h("button", { class: "btn", onclick: () => go("sessions") }, "Back to sessions")),
+    h("h1", {}, "Activity"),
     h("span", { class: "muted" }, `Everything hopsesh changed on ${sys.here}. Undo puts it back, on every machine it touched; if a session was used since, hopsesh asks first. What a cloud made stays there.`),
     a.waiting.length ? h("section", { class: "card" },
-      h("div", { class: "card-h" }, h("span", { class: "name" }, "Waiting to be adopted")),
+      h("div", { class: "card-h" }, h("h2", { class: "name" }, "Waiting to be adopted")),
       a.waiting.map((w) => h("div", { class: "line-item" }, h("span", { class: "ico cloud" }, icon(ICONS.cloud, 15)),
         h("div", { style: "flex:1 1 300px;min-width:0;font-size:12.5px" }, `“${w.title}” is being copied from ${w.cloudTitle} in ${sys.terminal}. hopsesh adds it here when the copy appears, or on its next scan.`),
         h("button", { class: "btn small", onclick: () => go("brought", w) }, "Show")))) : null,
     a.owed.length ? h("section", { class: "card" },
-      h("div", { class: "card-h" }, h("span", { class: "name" }, "Waiting to mark"), h("span", { class: "muted", style: "font-size:12px" }, "Copies left open elsewhere: hopsesh marks them on its next scan after they end.")),
+      h("div", { class: "card-h stacked" }, h("h2", { class: "name" }, "Waiting to mark"), h("span", { class: "muted", style: "font-size:12px" }, "Copies left open elsewhere: hopsesh marks them on its next scan after they end.")),
       a.owed.map((o) => h("div", { class: "line-item" }, h("span", { class: "ico mark" }, icon(ICONS.clock, 15)),
         h("div", { style: "flex:1 1 300px;min-width:0" }, h("div", {}, o.title), h("span", { class: "muted", style: "font-size:12px" }, `${o.location} · will say “${o.mark}”`)),
         h("span", { class: "muted", style: "font-size:12px" }, "since " + ago(o.since))))) : null,
@@ -148,9 +154,8 @@ function branchesCard() {
   };
   const offered = (b?.list || []).filter((c) => c.offer);
   return h("section", { class: "card", "aria-label": "Branches on your remotes" },
-    h("div", { class: "card-h" }, h("span", { class: "name" }, "Branches cloud hand-offs left"),
-      h("span", { class: "muted", style: "font-size:12px" }, "Hand-off branches and the clouds' own branches, offered for deletion once their work is merged."),
-      h("span", { class: "spacer" }),
+    h("div", { class: "card-h" }, h("div", { class: "card-h-copy" }, h("h2", { class: "name" }, "Branches cloud hand-offs left"),
+      h("span", { class: "muted", style: "font-size:12px" }, "Hand-off branches and the clouds' own branches, offered for deletion once their work is merged.")),
       offered.length > 1 ? h("button", { class: "btn small", onclick: () => del(offered) }, `Delete ${offered.length} merged`) : null,
       h("button", { class: "btn small", id: "look-branches", disabled: !!b?.busy, onclick: look }, b ? "Look again" : "Look for merged branches")),
     b?.busy ? h("div", { class: "loading", role: "status" }, "Asking the remotes…")

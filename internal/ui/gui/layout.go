@@ -1,50 +1,77 @@
 package gui
 
-import "github.com/roeehrl/hopsesh/internal/config"
+import (
+	"slices"
+
+	"github.com/roeehrl/hopsesh/internal/config"
+)
 
 // The window's panes: the sidebar and the inspector of the Sessions screen, resizable and
-// hideable, saved in the config ([window]) and shown in the View menu.
+// hideable, saved in the config ([window]) and shown in the View menu, and the inspector's
+// sections the user opened or closed.
 
-// LayoutDTO is the panes' widths (CSS pixels) and whether the user hid them, with the
-// limits the window keeps to.
+// LayoutDTO is the panes' widths (CSS pixels; the inspector's 0 is its default, which
+// follows the window's width) and whether the user hid them, and the inspector's sections
+// the user opened or closed.
 type LayoutDTO struct {
-	SidebarWidth    int  `json:"sidebarWidth"`
-	SidebarHidden   bool `json:"sidebarHidden"`
-	InspectorWidth  int  `json:"inspectorWidth"`
-	InspectorHidden bool `json:"inspectorHidden"`
+	SidebarWidth    int      `json:"sidebarWidth"`
+	SidebarHidden   bool     `json:"sidebarHidden"`
+	InspectorWidth  int      `json:"inspectorWidth"`
+	InspectorHidden bool     `json:"inspectorHidden"`
+	SectionsOpen    []string `json:"sectionsOpen"`
+	SectionsClosed  []string `json:"sectionsClosed"`
 }
 
-func layoutOf(w config.Window) LayoutDTO {
-	d := LayoutDTO{SidebarWidth: w.SidebarWidth, SidebarHidden: w.SidebarHidden, InspectorWidth: w.InspectorWidth, InspectorHidden: w.InspectorHidden}
+func layoutOf(w config.Window, in config.Inspector) LayoutDTO {
+	d := LayoutDTO{SidebarWidth: w.SidebarWidth, SidebarHidden: w.SidebarHidden, InspectorWidth: w.InspectorWidth, InspectorHidden: w.InspectorHidden,
+		SectionsOpen: nonNil(in.Open), SectionsClosed: nonNil(in.Closed)}
 	if d.SidebarWidth == 0 {
 		d.SidebarWidth = config.SidebarWidth
-	}
-	if d.InspectorWidth == 0 {
-		d.InspectorWidth = config.InspectorWidth
 	}
 	return d
 }
 
 // SaveLayout stores the panes' layout (what the user chose: never a pane the window hid
-// for being narrow).
+// for being narrow) and the inspector's sections.
 func (a *App) SaveLayout(l LayoutDTO) error {
 	w := config.Window{SidebarWidth: min(max(l.SidebarWidth, config.SidebarMin), config.SidebarMax), SidebarHidden: l.SidebarHidden,
-		InspectorWidth: min(max(l.InspectorWidth, config.InspectorMin), config.InspectorMax), InspectorHidden: l.InspectorHidden}
+		InspectorHidden: l.InspectorHidden}
+	in := config.Inspector{Open: known(l.SectionsOpen, config.InspectorSections), Closed: known(l.SectionsClosed, config.InspectorSections)}
+	if l.InspectorWidth > 0 {
+		w.InspectorWidth = min(max(l.InspectorWidth, config.InspectorMin), config.InspectorMax)
+	}
 	if w.SidebarWidth == config.SidebarWidth {
 		w.SidebarWidth = 0
 	}
-	if w.InspectorWidth == config.InspectorWidth {
-		w.InspectorWidth = 0
-	}
 	a.mu.Lock()
-	changed := a.core.Cfg.Window != w
-	a.core.Cfg.Window = w
+	old := a.core.Cfg.Inspector
+	changed := a.core.Cfg.Window != w || !slices.Equal(old.Open, in.Open) || !slices.Equal(old.Closed, in.Closed)
+	a.core.Cfg.Window, a.core.Cfg.Inspector = w, in
 	var err error
 	if changed {
 		err = a.save()
 	}
 	a.mu.Unlock()
 	return err
+}
+
+// known keeps the values that are one of allowed, once each, in their order (nil when
+// none).
+func known(vals, allowed []string) []string {
+	var out []string
+	for _, v := range vals {
+		if slices.Contains(allowed, v) && !slices.Contains(out, v) {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+func nonNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
 
 // ViewState tells the View menu what the window shows now (sidebar, inspector), so its

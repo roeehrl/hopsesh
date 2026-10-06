@@ -55,8 +55,8 @@ func (inv *Inventory) Items() []Item {
 			// A cloud session is a row of its own, next to its relatives here.
 			return "C:" + e.Location.Name + ":" + e.Session.Key.String()
 		}
-		if e.Lineage != nil && e.Lineage.Logical != "" {
-			return "L:" + e.Lineage.Logical
+		if e.Lineage != nil && e.Lineage.Family != "" {
+			return "L:" + e.Lineage.Family + ":" + e.Lineage.Branch
 		}
 		return "K:" + e.Session.Key.String()
 	}
@@ -76,6 +76,9 @@ func (inv *Inventory) Items() []Item {
 		}
 		for _, e := range by[k] {
 			for _, r := range e.Lineage.Replicas {
+				if r.Line != e.Lineage.Branch {
+					continue
+				}
 				alone := "K:" + r.Key.String()
 				if es, ok := by[alone]; ok {
 					by[k] = append(by[k], es...)

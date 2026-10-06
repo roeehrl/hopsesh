@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 	"text/tabwriter"
 
@@ -309,11 +308,18 @@ func showCmd() *cobra.Command {
 				r.printf("  repository   unknown: %s\n", e.GitError)
 			}
 			if l := e.Lineage; l != nil {
-				r.printf("  lineage      %d cop(ies), %d hop(s)\n", len(l.Replicas), len(l.Hops))
-				hops := append(l.Hops[:0:0], l.Hops...)
-				sort.Slice(hops, func(i, j int) bool { return hops[i].Time.Before(hops[j].Time) })
+				j := l.Journey()
+				r.printf("  lineage      branch %s · family %s\n", l.Branch, l.Family)
+				r.printf("  journey      %d transfers · %d round trips to origin · %d returns to visited locations\n", j.Transfers, j.RoundTrips, j.Returns)
+				if j.Fork {
+					r.printf("  ancestry     separate fork\n")
+				}
+				hops := l.OrderedHops()
 				for _, h := range hops {
-					from, to := l.Replicas[h.From], l.Replicas[h.To]
+					if h.Line != l.Branch {
+						continue
+					}
+					from, to := l.Replica(h.From), l.Replica(h.To)
 					r.printf("    %s  %s %s → %s %s (%s)\n", h.Time.Local().Format("2 Jan 15:04"), from.Location, from.Key, to.Location, to.Key, h.Kind)
 				}
 			}

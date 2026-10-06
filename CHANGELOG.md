@@ -7,6 +7,15 @@ All notable changes to this project are documented here. The format follows
 ## Unreleased
 
 ### Fixed
+- App: Back to sessions has one fixed upper-left toolbar location on every secondary
+  screen and in the terminal window, including loading, errors and completed transfers.
+  Late page loads no longer replace Sessions after returning. Resizing a terminal keeps
+  its selected tab visible.
+- Machines: added machines scan automatically, with queued/running status and a disabled
+  per-machine Scan button. Failures explain what happened and offer Retry; successful
+  rows refresh every five minutes while Machines is active.
+- App: Move and the hand-off picker only offer enabled clouds. Other clouds can be set up
+  in Machines; enabled destinations that are temporarily unavailable still say why.
 - The install script (`curl … | sh`) failed on macOS in a terminal with a UTF-8 locale
   ("arch…: unbound variable"): macOS's /bin/sh read the "…" after `$arch` as part of the
   name.
@@ -20,6 +29,21 @@ All notable changes to this project are documented here. The format follows
   markers before it resumes a session.
 
 ### Added
+- App: the end of the selected session's conversation (the last two exchanges, a line for
+  each turn's tool calls, Load earlier, Open transcript), read on its machine and never
+  during a scan. Markdown is rendered locally, with distinct user and agent cards and
+  Show more for long messages. Raw HTML stays inert and images never load;
+  Settings → General → Show conversation previews turns it off.
+- App: where a session is open: its hopsesh tabs, iTerm2, Terminal, Windows Terminal, an
+  editor, tmux, ssh or the Claude app, from the agents' own registries and the process table
+  (no Apple Events: those run only when you click Show), every few seconds while the window
+  is in front. Two processes on one session say "Open twice".
+- App: ⋯ → Rename… gives a Claude Code or Codex session a title in the agent's own data (as
+  `/rename` does); Activity undoes it. ⋯ also reveals the session's file and copies its
+  resume command or id.
+- Module SDK: `Previewer` (`preview`) and `Renamer` (`rename`), `PreviewText` and
+  `BuildPreview`; `LiveInfo.Procs` lists every process that has a session open, and
+  `LiveInfo.Name` the name the running agent gives it.
 - Your terminal app: sessions, teleports and hand-off steps the app opens go to a new tab in
   iTerm2's front window when iTerm2 is installed (else a Terminal window; Windows Terminal on
   Windows), through a terminal-adapter layer whose only required verb is Open. Every launch
@@ -28,7 +52,7 @@ All notable changes to this project are documented here. The format follows
   labels an iTerm2 tab (a badge and `user.hopsesh_title`, `_agent`, `_machine` variables,
   sanitised and base64-encoded, wrapped for tmux), records the tab and the agent's process
   while it runs, and keeps the tab open with the exit code shown.
-- Show a running session instead of a second copy: **Show its terminal tab** in the app and
+- Show a running session instead of a second copy: **Show in ‹terminal app›** in the app and
   `hopsesh open <session>` find the iTerm2 or Terminal tab from the agent's own process id
   (Claude Code's registry) or hopsesh's launch record (Codex) and the process table, and
   bring it forward. Resume refuses a session that already runs.
@@ -44,8 +68,8 @@ All notable changes to this project are documented here. The format follows
   run. The macOS app's Automation permission text now names your terminal app, not only
   Terminal.
 - **The hopsesh Terminal window**: the app now has a terminal of its own, a window with
-  tabs. **Resume here** runs a session in a tab there, and hand-offs to Claude Code cloud,
-  bringing a session back from it, cloud sign-ins and **Open a shell here** run there too.
+  tabs. **Resume in hopsesh Terminal** runs a session in a tab there, and hand-offs to Claude
+  Code cloud, bringing a session back, cloud sign-ins and **Open a shell in its folder** run there too.
   Each tab has a status chip (running, waiting for you, exited with its code), says what it
   runs and where, and keeps **Open in my terminal**, which ends the tab and runs the same
   command in your terminal app after asking. It uses xterm.js 6.0.0 (shipped inside the
@@ -306,6 +330,29 @@ All notable changes to this project are documented here. The format follows
   aside as outdated).
 
 ### Changed
+- App: the Sessions screen is redesigned. The sidebar lists places (Needs you, All sessions,
+  This Mac and your other machines, the clouds that are on); agents and "In the cloud"
+  became filters. The list groups by repository, location, agent, status or last active (or
+  not at all), sorts within the groups, has comfortable and compact rows (compact by itself
+  for 150 sessions or more, and whenever the list is narrower than 600px), and its groups
+  collapse (⌥-click for all), each choice kept. Live only and All agents gave way to the
+  Filter menu (⇧⌘F: status, location, agent, repository, last active, has; is / is not),
+  shown as chips, a text filter (⌘F) and the Display popover (⌘J, and the View menu). It
+  is all kept in `[list]` and `[list.filter]`, except the text.
+- App: one action vocabulary: Resume in ‹place›, Show in ‹place›, Bring to this Mac…, Send
+  to ‹machine›…, Continue with ‹agent›…, Hand off to ‹cloud›…. The inspector's actions are
+  one row: the primary as a split button whose menu lists the other places (the one you
+  pick becomes that agent's default, `[agents.<id>] place`), Move ▾ (unavailable items stay,
+  with their reason) and ⋯. "Ask each time" is gone from Settings → Terminal; Where sessions
+  open is where they first resume.
+- App: the inspector shows where it runs in its status line, a facts line, where the
+  session is open (each place with Show), and collapsible Repository, Copies & history and
+  Details sections (kept app-wide in `[inspector]`). It is 300 to 960px wide; by default 30%
+  of the window beside the sidebar.
+- App: titles never need a model: the title given, the name the running Claude app gives,
+  the agent's own, the first prompt or reply, else "Untitled · folder (branch)".
+- App on macOS: the title bar is 52px, as tall as AppKit's own, and the sidebar button sits
+  where AppKit puts its own (17px clear of the window's buttons), in the Terminal window too.
 - App: the sidebar and the inspector can be resized and hidden (dividers, the title bar's
   buttons, the new View menu: ⌃⌘S and ⌥⌘I, Ctrl+B and Ctrl+I on Windows); the layout is
   kept in `[window]`. Below 1000px the sidebar hides for now.

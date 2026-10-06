@@ -1,19 +1,19 @@
 // The command palette (⌘K, Ctrl+K): find a session and act on it, or run any command, from the keyboard.
-import { api, h, fill, icon, ICONS, state, go, current, toast, fail, agentBadge, entries, here, $, sys, keys, clouds, selected, cloudTitle } from "./core.js";
+import { cloudOf, api, h, fill, icon, ICONS, state, go, current, toast, fail, agentBadge, entries, here, $, sys, keys, clouds, selected, cloudTitle } from "./core.js";
 import { pickHandoff } from "./handoff.js";
-import { actionsFor, statusOf, render as renderSessions, reveal, pasteDialog } from "./sessions.js";
+import { actionsFor, statusOf, render as renderSessions, reveal, pasteDialog, showEntry, listCommand } from "./sessions.js";
+import { list } from "./listview.js";
 import { undoLast } from "./activity.js";
 import { showTerminal, openShell } from "./term.js";
 
 const pal = $("#palette");
 let items = [], sel = 0;
 
-// show selects a session in the list (All sessions, no filters), its row in view.
+// show selects a session in the list (its place, no filter that hides it, its group
+// open), its row in view.
 async function show(e) {
-  state.scope = { kind: "all" };
-  state.filter = { agent: "", live: false };
-  state.sel = { machine: e.machine, key: e.key };
-  if (current === "sessions") renderSessions(); else await go("sessions");
+  if (current !== "sessions") await go("sessions");
+  showEntry(e);
   document.querySelector('#view .row[aria-selected="true"]')?.focus({ preventScroll: true });
   reveal();
 }
@@ -33,6 +33,16 @@ function commands() {
       run: () => openShell(selected() && !selected().cloud && selected().machine === here() ? selected() : null) },
     { label: `Terminal: turn screen reader mode ${state.terminalReader ? "off" : "on"}`, run: toggleReader },
     { label: "Settings: Terminal", run: () => go("settings", "terminal") },
+    { label: "Display options", hint: keys("mod+J"), run: () => listCommand("display") },
+    { label: "Filter sessions…", hint: sys.mac ? "⇧⌘F" : "Ctrl+Shift+F", run: () => listCommand("filter") },
+    { label: "Clear filters", run: () => listCommand("clear-filters") },
+    ...[["repository", "Repository"], ["location", "Location"], ["agent", "Agent"], ["status", "Status"], ["last-active", "Last active"], ["none", "None"]]
+      .map(([v, n]) => ({ label: `Group by: ${n}`, sub: list.groupBy === v ? "now" : "", run: () => listCommand("group:" + v) })),
+    ...[["last-active", "Last active"], ["title", "Title"], ["status", "Status"], ["size", "Size"]]
+      .map(([v, n]) => ({ label: `Sort by: ${n}`, sub: list.sortBy === v ? "now" : "", run: () => listCommand("sort:" + v) })),
+    { label: list.density === "compact" ? "Rows: Comfortable" : "Rows: Compact", run: () => listCommand(list.density === "compact" ? "rows:comfortable" : "rows:compact") },
+    { label: "Collapse all groups", run: () => listCommand("collapse-all") },
+    { label: "Expand all groups", run: () => listCommand("expand-all") },
     ...handOff(),
     ...(clouds().some((c) => c.fetchable) ? [
       { label: "Bring from cloud…", sub: clouds().filter((c) => c.fetchable).map((c) => c.title).join(", "), run: bringFromCloud },
@@ -65,14 +75,14 @@ async function toggleReader() {
 function handOff() {
   const sel = selected();
   const e = sel && !sel.cloud ? sel : entries().filter((x) => !x.cloud).sort((a, b) => (b.lastActive > a.lastActive ? 1 : -1))[0];
-  if (!e || !(e.handoff || []).length) return [];
+  if (!e || !(e.handoff || []).some((t) => cloudOf(t.cloud)?.allowed)) return [];
   return [{ label: "Hand off to…", sub: `“${e.title}”`, hint: "Pick a cloud", run: () => pickHandoff(e) }];
 }
 
 // bringFromCloud shows the first cloud sessions can come from.
 function bringFromCloud() {
   const c = clouds().find((x) => x.fetchable && x.allowed) || clouds().find((x) => x.fetchable);
-  state.scope = c ? { kind: "cloud", value: c.name } : { kind: "incloud" };
+  state.scope = c ? { kind: "cloud", value: c.name } : { kind: "all" };
   if (current === "sessions") renderSessions(); else go("sessions");
 }
 
@@ -87,7 +97,7 @@ function sessionItem(e, group) {
   const repo = e.group.noRepo ? "" : e.group.name.replace(/ \(no remote\)$/, "");
   const where = e.cloud ? cloudTitle(e.machine) : e.machine === here() ? sys.here : e.machine;
   return { group, session: e, label: e.title, sub: [repo, where, st[0].toLowerCase() + st.slice(1), e.cloud?.pr ? "PR " + e.cloud.pr : ""].filter(Boolean).join(" · "),
-    hint: acts[0] ? `${keys("mod+enter")} ${acts[0].short || acts[0].label}` : "", run: () => show(e), second: acts[0]?.run };
+    hint: acts[0] ? `${keys("mod+enter")} ${acts[0].label}` : "", run: () => show(e), second: acts[0]?.run };
 }
 
 function build(q) {

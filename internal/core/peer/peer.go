@@ -26,8 +26,9 @@ import (
 // FirstVersion with it.
 //
 //   - 1: hopsesh 0.2 and 0.3.
-//   - 2: hopsesh 0.4: lineage/2 manifests, cloud locations and hops in packages and plans.
-const Protocol = 2
+//   - 2: pre-release lineage/2 manifests and cloud locations.
+//   - 3: hopsesh 0.4: causal lineage/3, persistent endpoints and stable transfer IDs.
+const Protocol = 3
 
 // FirstVersion is the first hopsesh release that speaks Protocol: the version to update an
 // older machine to.

@@ -77,6 +77,11 @@ func (localFS) WriteFile(p string, b []byte, perm fs.FileMode) error {
 		os.Remove(tmp.Name())
 		return err
 	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmp.Name())
 		return err
@@ -264,3 +269,22 @@ func (localLocks) Holders(ctx context.Context, paths []string) (map[string][]int
 
 // LocalFS is this machine's filesystem.
 func LocalFS() FS { return localFS{} }
+
+func (localFS) CreateExclusive(p string, b []byte, perm fs.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+	if err != nil {
+		return err
+	}
+	if _, err = f.Write(b); err != nil {
+		f.Close()
+		return err
+	}
+	if err = f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}

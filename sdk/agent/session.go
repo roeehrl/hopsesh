@@ -4,9 +4,10 @@ import "time"
 
 // Summary describes one session, the same way for every agent.
 type Summary struct {
-	Key         SessionKey `json:"key"`
-	Title       string     `json:"title"`
-	TitleSource string     `json:"titleSource,omitempty"` // custom | generated | prompt
+	NativeParent SessionID  `json:"nativeParent,omitempty"` // module-declared parent; core verifies before linking lineage
+	Key          SessionKey `json:"key"`
+	Title        string     `json:"title"`
+	TitleSource  string     `json:"titleSource,omitempty"` // custom | generated | prompt | reply
 	// CWD is the session's project folder, as the agent resumes it.
 	CWD          string    `json:"cwd"`
 	LastPrompt   string    `json:"lastPrompt,omitempty"`
@@ -138,6 +139,9 @@ type RewritePolicy struct {
 	Protect []string `json:"protect,omitempty"`
 	// DropRecords removes whole records whose top-level field has one of the values.
 	DropRecords []FieldMatch `json:"dropRecords,omitempty"`
+	// RenumberOrdinal rebases this top-level integer field after dropping records in a
+	// newly installed copy. All other bytes stay intact; append never uses this policy.
+	RenumberOrdinal string `json:"renumberOrdinal,omitempty"`
 	// DropElems removes array elements (only when Placement.OtherAccount, via Sanitizer).
 	DropElems []ElemMatch `json:"dropElems,omitempty"`
 	// Rename gives a keep-both copy a new session id ({"old","new"}; empty for none): the id
@@ -201,6 +205,21 @@ type LiveInfo struct {
 	// App is true when the agent's own desktop app runs it (Claude Code in the Claude
 	// app), not a terminal: there is no terminal tab to show.
 	App bool `json:"app,omitempty"`
+	// Procs are every process that has the session open (Claude Code can run one session
+	// in several), PID among them; empty when the module can't say.
+	Procs []LiveProc `json:"procs,omitempty"`
+	// Name is the session's name as the running agent reports it (the Claude app names
+	// sessions), "" when none.
+	Name string `json:"name,omitempty"`
+}
+
+// LiveProc is one process that has a session open.
+type LiveProc struct {
+	PID int `json:"pid"`
+	// App is true when the agent's desktop app runs it.
+	App bool `json:"app,omitempty"`
+	// Waiting is true when it waits for the person (a question, a permission).
+	Waiting bool `json:"waiting,omitempty"`
 }
 
 // Account is an opaque, hashed account identity (never a credential).

@@ -20,25 +20,22 @@ import (
 )
 
 // Where an entry point opens: what the window asked, else the setting (its default the
-// release gate's constant); a step never asks.
+// release gate's constant); the app never asks first (the command line's "ask" is the
+// default place).
 func TestRoute(t *testing.T) {
 	for _, tc := range []struct {
 		asked, setting string
-		step           bool
 		want           string
 	}{
-		{"", "", false, config.AppResumeDefault},
-		{"", "", true, config.AppResumeDefault},
-		{"", "terminal", false, "terminal"},
-		{"", "terminal", true, "terminal"},
-		{"", "ask", false, "ask"},
-		{"", "ask", true, "here"},
-		{"here", "terminal", false, "here"},
-		{"terminal", "here", true, "terminal"},
-		{"elsewhere", "here", false, "here"},
+		{"", "", config.AppResumeDefault},
+		{"", "terminal", "terminal"},
+		{"", "ask", config.AppResumeDefault},
+		{"here", "terminal", "here"},
+		{"terminal", "here", "terminal"},
+		{"elsewhere", "here", "here"},
 	} {
-		if got := route(tc.asked, tc.setting, tc.step); got != tc.want {
-			t.Errorf("route(%q, %q, %v) = %q, want %q", tc.asked, tc.setting, tc.step, got, tc.want)
+		if got := route(tc.asked, tc.setting); got != tc.want {
+			t.Errorf("route(%q, %q) = %q, want %q", tc.asked, tc.setting, got, tc.want)
 		}
 	}
 	if config.AppResumeDefault != config.ResumeHere {
@@ -201,8 +198,8 @@ func TestResumeSessionRouting(t *testing.T) {
 	a.mu.Lock()
 	a.core.Cfg.Terminal.Resume = config.ResumeAsk
 	a.mu.Unlock()
-	if r3, err := a.ResumeSession(e.Machine, e.Key, ""); err != nil || r3.Where != WhereAsk {
-		t.Fatalf("ask: %+v %v", r3, err)
+	if r3, err := a.ResumeSession(e.Machine, e.Key, ""); err != nil || r3.Where != config.AppResumeDefault {
+		t.Fatalf("the command line's ask is the default place in the app: %+v %v", r3, err)
 	}
 }
 
@@ -393,12 +390,12 @@ func TestTerminalSettings(t *testing.T) {
 	if s.Where != config.AppResumeDefault || s.FontSize != 13 || s.Scrollback != 5000 || !s.KeepTabs || !s.Notify {
 		t.Fatalf("defaults: %+v", s)
 	}
-	in := TerminalSettingsInput{Where: "ask", Font: "JetBrains Mono", FontSize: 15, Scrollback: 10000, KeepTabs: false, Notify: true, ScreenReader: "on"}
+	in := TerminalSettingsInput{Where: "terminal", Font: "JetBrains Mono", FontSize: 15, Scrollback: 10000, KeepTabs: false, Notify: true, ScreenReader: "on"}
 	if err := a.SetTerminalSettings(in); err != nil {
 		t.Fatal(err)
 	}
 	s = a.TerminalSettings()
-	if s.Where != "ask" || s.Font != "JetBrains Mono" || s.FontSize != 15 || s.Scrollback != 10000 || s.KeepTabs || !s.Notify || s.ScreenReader != "on" {
+	if s.Where != "terminal" || s.Font != "JetBrains Mono" || s.FontSize != 15 || s.Scrollback != 10000 || s.KeepTabs || !s.Notify || s.ScreenReader != "on" {
 		t.Fatalf("saved: %+v", s)
 	}
 	if p := a.termPrefs(); p.FontSize != 15 || p.Scrollback != 10000 || !p.ScreenReader || p.Font != "JetBrains Mono" {

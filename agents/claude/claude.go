@@ -212,6 +212,8 @@ func titleSource(s string) string {
 		return "generated"
 	case "prompt":
 		return "prompt"
+	case "reply":
+		return "reply"
 	}
 	return ""
 }

@@ -72,6 +72,11 @@ as_remote /usr/local/bin/hopsesh receive on >/dev/null
 "$BIN" pull "box:$ID" --to "$TARGET" --yes --json > "$WORK/pull2.json" || { cat "$WORK/pull2.json"; fail "second pull failed"; }
 RFILE="$RHOME/.claude/projects/$SLUG/$ID.jsonl"
 sudo grep -q 'moved to here' "$RFILE" || fail "box's copy is not marked after the pull"
+# Continue the native chain before returning. A workless visit only syncs receipts.
+cat >> "$GOT" <<JSONL
+{"type":"user","uuid":"return1","parentUuid":"a1","sessionId":"$ID","timestamp":"2026-10-01T10:01:00Z","message":{"role":"user","content":"SSH return sentinel"}}
+{"type":"last-prompt","leafUuid":"return1","sessionId":"$ID"}
+JSONL
 "$BIN" push "$ID" box --to "$RHOME/proj" --yes --json > "$WORK/push.json" || {
   cat "$WORK/push.json"
   # shellcheck disable=SC2016 # expands on box
@@ -80,8 +85,8 @@ sudo grep -q 'moved to here' "$RFILE" || fail "box's copy is not marked after th
 }
 JOURNAL=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["result"]["journal"])' "$WORK/push.json")
 [ -n "$JOURNAL" ] || { cat "$WORK/push.json"; fail "push printed no journal"; }
-sudo grep -q 'moved to here' "$RFILE" && fail "the copy that went back to box still carries a mark"
-sudo grep -q '"type":"relocated"' "$RFILE" || fail "box did not receive this machine's copy"
+sudo cat "$RFILE" | grep '"type":"custom-title"' | tail -n 1 | grep -q 'moved to here' && fail "the copy that went back to box still carries a mark"
+sudo grep -q 'SSH return sentinel' "$RFILE" || fail "box did not receive this machine's new work"
 tail -n 2 "$GOT" | grep -q 'moved to ' || fail "the copy here is not marked as moved" # box names itself
 "$BIN" undo "$JOURNAL" --yes
 tail -n 2 "$GOT" | grep -q 'moved to ' && fail "undo left the mark here"

@@ -28,7 +28,7 @@ await page.getByText("Fix flaky checkout tests").first().waitFor({ timeout: 6000
 await page.waitForTimeout(1500);
 await shot("main");
 await step("details", () => page.getByText("Fix flaky checkout tests").first().click());
-await step("plan-sheet", () => page.getByRole("button", { name: /Continue in Codex/ }).first().click().then(() => page.waitForTimeout(4000)));
+await step("plan-sheet", () => page.getByRole("button", { name: "Move", exact: true }).first().click().then(() => page.getByRole("menuitem", { name: /^Continue with Codex…/ }).first().click()).then(() => page.waitForTimeout(4000)));
 await step("plan-sheet-scrolled", async () => { await page.mouse.move(640, 500); await page.mouse.wheel(0, 700); });
 await step("plan-sheet-bottom", async () => { await page.mouse.wheel(0, 2000); });
 await step("result", async () => { await page.keyboard.press("Control+Enter"); await page.waitForTimeout(8000); });

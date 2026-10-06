@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/convert"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/internal/core/move"
+	"github.com/roeehrl/hopsesh/internal/core/presence"
 	"github.com/roeehrl/hopsesh/internal/core/proc"
 	"github.com/roeehrl/hopsesh/internal/core/pty"
 	"github.com/roeehrl/hopsesh/internal/core/repos"
@@ -47,11 +49,25 @@ type AgentOpt struct {
 
 // EntryDTO is one session row.
 type EntryDTO struct {
-	Machine    string     `json:"machine"`
-	Agent      agent.ID   `json:"agent"`
-	AgentName  string     `json:"agentName"`
-	Key        string     `json:"key"` // agent/session
-	Title      string     `json:"title"`
+	Machine   string   `json:"machine"`
+	Agent     agent.ID `json:"agent"`
+	AgentName string   `json:"agentName"`
+	Key       string   `json:"key"` // agent/session
+	Title     string   `json:"title"`
+	// TitleSource is where the title comes from: custom (renamed), live (the running
+	// agent's name for it), generated (the agent's own title), prompt (the first prompt),
+	// reply (the first reply) or none ("Untitled · folder").
+	TitleSource string `json:"titleSource"`
+	// Session is the agent's session id; Path its file on its machine; AgentVersion the
+	// agent version that last wrote it.
+	Session      string `json:"session"`
+	Path         string `json:"path"`
+	AgentVersion string `json:"agentVersion"`
+	// CanRename: its agent's own title can be changed (Rename); CanPreview: the end of its
+	// conversation can be shown (Preview).
+	CanRename  bool       `json:"canRename"`
+	CanPreview bool       `json:"canPreview"`
+	Places     []PlaceDTO `json:"places"` // where it is open on this machine, besides hopsesh's tabs
 	Status     string     `json:"status"`
 	Live       bool       `json:"live"`
 	LastActive string     `json:"lastActive"`
@@ -70,8 +86,11 @@ type EntryDTO struct {
 	Needs      bool       `json:"needs"`            // the agent waits for the person (an approval)
 	// App names the agent's desktop app ("Claude") when that app, not a terminal, runs the
 	// open session.
-	App     string   `json:"app,omitempty"`
-	History []HopDTO `json:"history"` // where it has been, oldest first
+	App               string           `json:"app,omitempty"`
+	Journey           *lineage.Journey `json:"journey,omitempty"`
+	CanArchiveLineage bool             `json:"canArchiveLineage"`
+	LineageError      string           `json:"lineageError,omitempty"`
+	History           []HopDTO         `json:"history"` // where it has been, oldest first
 	// BringIn is the agent here a cloud-only module's session (Copilot's log, Amp's thread)
 	// is written into by default: the one it was handed off from, else Claude Code;
 	// ContinueIn then lists the others.
@@ -101,8 +120,11 @@ type CopyDTO struct {
 
 // HopDTO is one step of a session's history.
 type HopDTO struct {
-	When string `json:"when"` // RFC 3339
-	What string `json:"what"`
+	Operation string   `json:"operation,omitempty"`
+	Branch    string   `json:"branch,omitempty"`
+	Loss      []string `json:"loss,omitempty"`
+	When      string   `json:"when"` // RFC 3339
+	What      string   `json:"what"`
 }
 
 // GroupDTO is one repository.
@@ -132,6 +154,8 @@ type ScanDTO struct {
 
 // Scan reads this machine and every allowed machine, for every enabled agent.
 func (a *App) Scan() (*ScanDTO, error) {
+	a.scanMu.Lock()
+	defer a.scanMu.Unlock()
 	a.mu.Lock()
 	cfgErr := a.cfgErr
 	a.mu.Unlock()
@@ -139,9 +163,19 @@ func (a *App) Scan() (*ScanDTO, error) {
 		return nil, cfgErr
 	}
 	core := a.snapshot()
+	for _, h := range core.Cfg.Hosts {
+		if h.Allowed {
+			a.scanPhase(h.Name, "scanning", "")
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	inv := core.Scan(ctx, app.ScanOptions{})
+	for _, m := range inv.Machines {
+		if !m.Local {
+			a.scanPhase(m.Name, "done", scanProblem(m))
+		}
+	}
 	now := time.Now()
 	a.mu.Lock()
 	if a.inv != nil {
@@ -175,6 +209,8 @@ func (a *App) RefreshHere() (*ScanDTO, error) {
 	if !had {
 		return a.Scan()
 	}
+	a.scanMu.Lock()
+	defer a.scanMu.Unlock()
 	core := a.snapshot()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
@@ -234,10 +270,17 @@ func scanDTO(core *app.App, inv *app.Inventory, updated, elsewhere time.Time) *S
 		}
 	}
 	targets := continueTargets(core, inv)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	table, _ := presence.Snapshot(ctx) // where the open sessions here run (nil: not known)
 	for _, g := range inv.Groups(core.LocalRoots()) {
 		gd := GroupDTO{Name: g.Name, Remote: g.Remote, Local: g.Local, NoRepo: g.Identity == "", NoRemote: strings.HasPrefix(g.Identity, "local:")}
 		for _, it := range g.Items {
-			gd.Entries = append(gd.Entries, entryDTO(core, inv, it, targets))
+			d := entryDTO(core, inv, it, targets)
+			if m := inv.Machine(d.Machine); m != nil && m.Local && d.Live {
+				d.Places = placesOf(it.Entry.Live, table, os.Getpid())
+			}
+			gd.Entries = append(gd.Entries, d)
 		}
 		out.Groups = append(out.Groups, gd)
 	}
@@ -261,34 +304,75 @@ func continueTargets(core *app.App, inv *app.Inventory) []AgentOpt {
 	return out
 }
 
-// titleOf is a session's title for people: its own, else its first line of the last
-// prompt, else "Untitled session".
+// titleOf is a session's title for people (titleFor, without the running agent's name).
 func titleOf(s agent.Summary) string {
-	if t := strings.TrimSpace(s.Title); t != "" {
-		return t
+	t, _ := titleFor(s, "")
+	return t
+}
+
+// titleFor is a session's title for people and where it comes from, without asking a
+// model: the title it was given (custom), else the name the running agent gives it (live:
+// the Claude app names sessions), else the agent's own title (generated: Claude Code's
+// AI title, a legacy summary, Codex's thread name), else its first real prompt (prompt) or
+// first reply (reply), clipped to 80 characters, else "Untitled · folder (branch)".
+func titleFor(s agent.Summary, liveName string) (string, string) {
+	t := strings.TrimSpace(s.Title)
+	if t != "" && s.TitleSource == "custom" {
+		return t, "custom"
 	}
-	p, _, _ := strings.Cut(strings.TrimSpace(s.LastPrompt), "\n")
-	if p = strings.TrimSpace(p); p != "" {
-		if r := []rune(p); len(r) > 80 {
-			p = string(r[:79]) + "…"
+	if n := strings.TrimSpace(liveName); n != "" {
+		return n, "live"
+	}
+	switch {
+	case t != "" && (s.TitleSource == "prompt" || s.TitleSource == "reply"):
+		return clipWords(t, 80), s.TitleSource
+	case t != "":
+		return t, nonEmpty(s.TitleSource, "generated")
+	}
+	if p, _, _ := strings.Cut(strings.TrimSpace(s.LastPrompt), "\n"); strings.TrimSpace(p) != "" {
+		return clipWords(strings.TrimSpace(p), 80), "prompt"
+	}
+	untitled := "Untitled"
+	if dir := strings.TrimRight(strings.ReplaceAll(s.CWD, "\\", "/"), "/"); dir != "" {
+		untitled += " · " + dir[strings.LastIndex(dir, "/")+1:]
+		if s.GitBranch != "" {
+			untitled += " (" + s.GitBranch + ")"
 		}
-		return p
 	}
-	return "Untitled session"
+	return untitled, "none"
+}
+
+// clipWords shortens text to at most n characters, at a word boundary when there is one
+// in its second half, with "…".
+func clipWords(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	cut := string(r[:n-1])
+	if i := strings.LastIndex(cut, " "); i > len(cut)/2 {
+		cut = cut[:i]
+	}
+	return strings.TrimRight(cut, " ,;:.-") + "…"
 }
 
 func entryDTO(core *app.App, inv *app.Inventory, it app.Item, targets []AgentOpt) EntryDTO {
 	e, s := it.Entry, it.Entry.Session
-	d := EntryDTO{Machine: e.Machine, Agent: e.Agent, AgentName: e.AgentName, Key: s.Key.String(), Title: titleOf(s),
+	title, source := titleFor(s, e.Live.Name)
+	d := EntryDTO{Machine: e.Machine, Agent: e.Agent, AgentName: e.AgentName, Key: s.Key.String(), Title: title, TitleSource: source,
+		Session: string(s.Key.Session), Path: s.Path, AgentVersion: s.AgentVersion, CanRename: core.CanRename(e), Places: []PlaceDTO{},
 		Status: statusWords(core, e), Live: e.Live.State == agent.Live, LastActive: s.LastActivity.Format(time.RFC3339),
 		LastPrompt: s.LastPrompt, CWD: s.CWD, SizeKB: s.Size / 1024, ContinueIn: []AgentOpt{},
 		Needs:   e.Live.State == agent.Live && strings.HasPrefix(e.Live.Status, "waiting"),
-		History: history(core, e.Lineage), Location: string(e.Location.Kind), Cloud: cloudEntryDTO(core, e), Mirror: mirrorDTO(s.Mirror)}
+		Journey: journey(e.Lineage), LineageError: e.LineageError, CanArchiveLineage: e.CanArchiveLineage, History: history(core, e.Lineage), Location: string(e.Location.Kind), Cloud: cloudEntryDTO(core, e), Mirror: mirrorDTO(s.Mirror)}
 	if e.Live.State == agent.Live && e.Live.App {
 		d.App = e.AgentName
 		if m, ok := core.Module(e.Agent); ok {
 			d.App = nonEmptyStr(appicon.Name(m.Spec().Icon.Apps), d.App)
 		}
+	}
+	if m, ok := core.Module(e.Agent); ok && !e.Location.IsCloud() {
+		_, d.CanPreview = m.(agent.Previewer)
 	}
 	d.Handoff, d.Hop = core.HandoffTargets(inv, e), core.HopTargets(inv, e)
 	if d.Handoff == nil {
@@ -366,6 +450,14 @@ func statusWords(core *app.App, e app.Entry) string {
 	return st
 }
 
+func journey(m *lineage.Manifest) *lineage.Journey {
+	if m == nil {
+		return nil
+	}
+	j := m.Journey()
+	return &j
+}
+
 func history(core *app.App, m *lineage.Manifest) []HopDTO {
 	out := []HopDTO{}
 	if m == nil {
@@ -385,14 +477,16 @@ func history(core *app.App, m *lineage.Manifest) []HopDTO {
 		}
 		return name(id) + " on " + loc
 	}
-	hops := append([]lineage.Hop(nil), m.Hops...)
-	sort.Slice(hops, func(i, j int) bool { return hops[i].Time.Before(hops[j].Time) })
-	for i, h := range hops {
-		if h.From < 0 || h.From >= len(m.Replicas) || h.To < 0 || h.To >= len(m.Replicas) {
+	hops := m.OrderedHops()
+	for _, h := range hops {
+		if h.Line != m.Branch {
 			continue
 		}
-		from, to := m.Replicas[h.From], m.Replicas[h.To]
-		if i == 0 {
+		if !m.HasReplica(h.From) || !m.HasReplica(h.To) {
+			continue
+		}
+		from, to := m.Replica(h.From), m.Replica(h.To)
+		if len(out) == 0 {
 			out = append(out, HopDTO{When: from.Time.Format(time.RFC3339), What: "In " + in(from.Key.Agent, from.Location)})
 		}
 		what := "Moved to " + place(to.Location)
@@ -404,13 +498,18 @@ func history(core *app.App, m *lineage.Manifest) []HopDTO {
 		}
 		if h.Kind == lineage.HopContinue {
 			what = "Continued in " + in(to.Key.Agent, to.Location)
-		} else if i > 0 && hops[i-1].Kind == lineage.HopContinue && hops[i-1].Time.Equal(h.Time) {
+		} else if h.Backup {
 			what = fmt.Sprintf("The %s copy kept on %s too", name(to.Key.Agent), place(to.Location)) // the native copy
 		}
 		if h.Fork {
-			what += " (both kept going)"
+			what += " (separate fork)"
 		}
-		out = append(out, HopDTO{When: h.Time.Format(time.RFC3339), What: what})
+		for _, c := range m.Compensations {
+			if c.Operation == h.ID {
+				what += " · undone"
+			}
+		}
+		out = append(out, HopDTO{When: h.Time.Format(time.RFC3339), What: what, Operation: h.ID, Branch: h.Line, Loss: m.State(h.Target).Loss})
 	}
 	return out
 }
@@ -430,6 +529,8 @@ func (a *App) find(machine, key string) (app.Entry, error) {
 
 // OptsDTO are the choices on the plan screen.
 type OptsDTO struct {
+	OperationID   string `json:"operationId"`
+	TargetSession string `json:"targetSession"`
 	TargetDir     string `json:"targetDir"`
 	Clone         bool   `json:"clone"`
 	ReposDir      string `json:"reposDir"`
@@ -463,6 +564,7 @@ func (o OptsDTO) options(d move.Options) move.Options {
 		d.ReposDir = o.ReposDir
 	}
 	d.Fork, d.RemoteControl, d.Notify, d.Redact, d.App = o.Fork, o.RemoteControl, o.Notify, o.Redact, o.App
+	d.OperationID, d.TargetSession = o.OperationID, o.TargetSession
 	d.Mark, d.SyncCode, d.Push, d.StopLocal, d.Conflict = o.Mark, o.SyncCode, o.Push, o.StopLocal, o.Conflict
 	d.Fidelity, d.Native, d.Note, d.Go = convert.Fidelity(nonEmpty(o.Fidelity, string(convert.History))), o.Native, strings.TrimSpace(o.Note), o.Go
 	d.CarryRules, d.CodeOnly, d.AppendOriginal = o.CarryRules, o.CodeOnly, o.Append
@@ -495,38 +597,40 @@ type ContinueDTO struct {
 
 // PlanDTO is a plan as the window shows it.
 type PlanDTO struct {
-	Kind        string           `json:"kind"` // move | continue
-	Title       string           `json:"title"`
-	Agent       string           `json:"agent"`     // the agent it lands in
-	FromAgent   string           `json:"fromAgent"` // the agent it comes from
-	SourceHost  string           `json:"sourceHost"`
-	SourceOS    string           `json:"sourceOs"`
-	SourceCWD   string           `json:"sourceCwd"`
-	TargetCWD   string           `json:"targetCwd"`
-	Live        bool             `json:"live"`
-	Repo        move.RepoPlan    `json:"repo"`
-	Mappings    []agent.Mapping  `json:"mappings"`
-	Files       int              `json:"files"`
-	Bytes       int64            `json:"bytes"`
-	Mark        string           `json:"mark"`
-	Sync        string           `json:"sync"`
-	FromSource  bool             `json:"syncFromSource"`
-	Push        bool             `json:"push"`
-	StopHere    bool             `json:"stopHere"`
-	Conflict    string           `json:"conflict"`
-	Warnings    []string         `json:"warnings"`
-	Blockers    []string         `json:"blockers"`
-	NewName     string           `json:"newName"`
-	OtherAcct   bool             `json:"otherAccount"`
-	Continue    *ContinueDTO     `json:"continue,omitempty"`
-	NativeCopy  *move.NativeCopy `json:"nativeCopy,omitempty"`
-	Can         CanDTO           `json:"can"`
-	SetAside    int              `json:"setAside"`
-	Options     move.Options     `json:"-"`
-	SessionKey  agent.SessionKey `json:"-"`
-	SourceAgent agent.ID         `json:"sourceAgent"`
-	Machine     string           `json:"machine,omitempty"` // a push: the machine it goes to
-	Fetch       *move.FetchPlan  `json:"fetch,omitempty"`   // bringing it from a cloud
+	NoWork       bool             `json:"noWork"`
+	Destinations []agent.Summary  `json:"destinations,omitempty"`
+	Kind         string           `json:"kind"` // move | continue
+	Title        string           `json:"title"`
+	Agent        string           `json:"agent"`     // the agent it lands in
+	FromAgent    string           `json:"fromAgent"` // the agent it comes from
+	SourceHost   string           `json:"sourceHost"`
+	SourceOS     string           `json:"sourceOs"`
+	SourceCWD    string           `json:"sourceCwd"`
+	TargetCWD    string           `json:"targetCwd"`
+	Live         bool             `json:"live"`
+	Repo         move.RepoPlan    `json:"repo"`
+	Mappings     []agent.Mapping  `json:"mappings"`
+	Files        int              `json:"files"`
+	Bytes        int64            `json:"bytes"`
+	Mark         string           `json:"mark"`
+	Sync         string           `json:"sync"`
+	FromSource   bool             `json:"syncFromSource"`
+	Push         bool             `json:"push"`
+	StopHere     bool             `json:"stopHere"`
+	Conflict     string           `json:"conflict"`
+	Warnings     []string         `json:"warnings"`
+	Blockers     []string         `json:"blockers"`
+	NewName      string           `json:"newName"`
+	OtherAcct    bool             `json:"otherAccount"`
+	Continue     *ContinueDTO     `json:"continue,omitempty"`
+	NativeCopy   *move.NativeCopy `json:"nativeCopy,omitempty"`
+	Can          CanDTO           `json:"can"`
+	SetAside     int              `json:"setAside"`
+	Options      move.Options     `json:"-"`
+	SessionKey   agent.SessionKey `json:"-"`
+	SourceAgent  agent.ID         `json:"sourceAgent"`
+	Machine      string           `json:"machine,omitempty"` // a push: the machine it goes to
+	Fetch        *move.FetchPlan  `json:"fetch,omitempty"`   // bringing it from a cloud
 }
 
 // Plan works out how a session comes here: in its own agent (target "") or continued in
@@ -566,7 +670,7 @@ func (a *App) planEntry(core *app.App, inv *app.Inventory, e app.Entry, target s
 }
 
 func planDTO(p *move.Plan, e app.Entry, tm agent.Module) *PlanDTO {
-	d := &PlanDTO{Kind: p.Kind, Title: p.Title, Agent: p.Agent, FromAgent: e.AgentName, SourceHost: p.Source.Location,
+	d := &PlanDTO{NoWork: p.NoWork, Destinations: p.Destinations, Kind: p.Kind, Title: p.Title, Agent: p.Agent, FromAgent: e.AgentName, SourceHost: p.Source.Location,
 		SourceOS: p.Source.OS, SourceCWD: p.Source.CWD, TargetCWD: p.Target.CWD, Live: p.Live, Repo: p.Repo,
 		Mappings: p.Placement.Mappings, Files: len(p.Files.Files), Bytes: p.Bytes, Mark: p.Mark, Sync: p.Sync,
 		FromSource: p.SyncFromSource, Push: p.Push, StopHere: p.StopHere, Conflict: p.Conflict,
@@ -595,6 +699,7 @@ func importsFrom(m agent.Module, from agent.ID) bool {
 
 // DoneDTO reports a finished move or continuation.
 type DoneDTO struct {
+	NoWork     bool     `json:"noWork"`
 	Kind       string   `json:"kind"`
 	Title      string   `json:"title"`
 	Agent      string   `json:"agent"`
@@ -647,11 +752,14 @@ func (a *App) Apply() (*DoneDTO, error) {
 	a.mu.Lock()
 	a.res = res
 	a.mu.Unlock()
-	d := &DoneDTO{Kind: p.Kind, Title: p.Title, Agent: p.Agent, Command: res.Command, Files: res.Files, Bytes: move.Human(res.Bytes),
+	d := &DoneDTO{NoWork: p.NoWork, Kind: p.Kind, Title: p.Title, Agent: p.Agent, Command: res.Command, Files: res.Files, Bytes: move.Human(res.Bytes),
 		Secrets: res.Secrets.Total, Redacted: p.Options.Redact, Cloned: res.Cloned, Worktree: res.Worktree, Journal: res.Journal,
 		SourceHost: p.Source.Location, Stopped: res.Stopped, Pushed: res.Pushed, PushError: res.PushError, SyncNote: res.SyncNote,
 		Mark: res.Mark, MarkError: res.MarkError, Notice: res.Notice, Warnings: res.Warnings, InApp: p.Options.App,
 		AuditDir: filepath.Join(config.StateDir(), "log")}
+	if p.NoWork && p.SyncTo != nil && p.SyncTo.Title != "" {
+		d.Title = p.SyncTo.Title
+	}
 	if c := p.Continue; c != nil && c.AppendTo != nil && c.AppendTo.Title != "" {
 		d.Title = c.AppendTo.Title // the session it went back into
 	}
@@ -708,9 +816,7 @@ func (a *App) OpenResult(where string) (*OpenedDTO, error) {
 			return &OpenedDTO{Where: WhereShown, Tab: id}, nil
 		}
 	}
-	switch route(where, setting, false) {
-	case WhereAsk:
-		return &OpenedDTO{Where: WhereAsk}, nil
+	switch route(where, setting) {
 	case WhereTerminal:
 		return &OpenedDTO{Where: WhereTerminal}, a.openLaunch(l)
 	}
@@ -723,7 +829,7 @@ func (a *App) bringTab(l app.Launch, journal, cloud, cloudTitle, agentName, titl
 	a.mu.Lock()
 	setting := a.core.Cfg.AppResume()
 	a.mu.Unlock()
-	if a.Terms == nil || route(where, setting, true) == WhereTerminal {
+	if a.Terms == nil || route(where, setting) == WhereTerminal {
 		return &OpenedDTO{Where: WhereTerminal}, a.openLaunch(l)
 	}
 	spec, err := a.tabSpec(l.Run, tabTitle("Bring here", title, strings.TrimSuffix(filepath.Base(l.Run.Argv[0]), ".exe")))
@@ -803,4 +909,19 @@ func nonEmpty(s, d string) string {
 		return d
 	}
 	return s
+}
+
+func (a *App) ArchiveLineage(machine, key string) error {
+	core := a.snapshot()
+	a.mu.Lock()
+	e, err := a.find(machine, key)
+	inv := a.inv
+	a.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	_, err = core.ArchiveLineage(ctx, inv, e)
+	return err
 }

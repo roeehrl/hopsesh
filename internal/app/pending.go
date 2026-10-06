@@ -40,6 +40,9 @@ func (a *App) applyPending(ctx context.Context, m *Machine, entries []Entry) {
 			continue
 		}
 		changed = true
+		if !currentDeparture(p, e.Lineage) {
+			continue
+		}
 		mod, ok := a.Module(e.Agent)
 		if !ok {
 			continue
@@ -82,4 +85,22 @@ func (a *App) applyPending(ctx context.Context, m *Machine, entries []Entry) {
 func mustInstall(m *Machine, id agent.ID) agent.Install {
 	in, _ := m.Install(id)
 	return in
+}
+
+// Deferred titles belong to one committed departure, never a later return or sibling.
+func currentDeparture(p lineage.Pending, m *lineage.Manifest) bool {
+	if m == nil || p.Operation == "" || p.Branch != m.Branch || m.Replica(p.Replica).Key != p.Key {
+		return false
+	}
+	undone := map[string]bool{}
+	for _, c := range m.Compensations {
+		undone[c.Operation] = true
+	}
+	var last lineage.Hop
+	for _, h := range m.OrderedHops() {
+		if h.Line == p.Branch && !h.Backup && !undone[h.ID] {
+			last = h
+		}
+	}
+	return last.ID == p.Operation && last.From == p.Replica
 }

@@ -149,6 +149,9 @@ func (a *App) DefaultOptions() move.Options {
 // Plan works out how a session comes here, in the same agent or (target set) another. A
 // cloud session is brought from its cloud (a fetch).
 func (a *App) Plan(ctx context.Context, inv *Inventory, e Entry, target agent.ID, opt move.Options) (*move.Plan, move.Input, error) {
+	if e.LineageError != "" && (e.CanArchiveLineage || !opt.Fork) {
+		return nil, move.Input{}, fmt.Errorf("cannot transfer with unsupported or damaged lineage: %s; archive the sidecar explicitly to start a new family", e.LineageError)
+	}
 	if e.Location.IsCloud() {
 		return a.planFetch(ctx, inv, e, target, opt)
 	}
@@ -191,6 +194,9 @@ func (a *App) Plan(ctx context.Context, inv *Inventory, e Entry, target agent.ID
 	related := map[agent.SessionKey]bool{e.Session.Key: true}
 	if e.Lineage != nil {
 		for _, r := range e.Lineage.Replicas {
+			if r.Line != e.Lineage.Branch {
+				continue
+			}
 			related[r.Key] = true
 		}
 	}

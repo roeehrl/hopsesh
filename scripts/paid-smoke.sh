@@ -29,7 +29,7 @@ JOURNALS=""
 cleanup() {
   for j in $JOURNALS; do "$BIN" undo "$j" --yes --force >/dev/null 2>&1 || echo "note: could not undo $j" >&2; done
   if [ -n "$CLAUDE_FILE" ]; then
-    rm -f "$CLAUDE_FILE" "${CLAUDE_FILE%.jsonl}.hopsesh.json"
+    rm -f "$CLAUDE_FILE" "${CLAUDE_FILE}.hopsesh.json"
     rmdir "$(dirname "$CLAUDE_FILE")/memory" "$(dirname "$CLAUDE_FILE")" 2>/dev/null || true # only if empty
   fi
   rm -rf "$WORK"

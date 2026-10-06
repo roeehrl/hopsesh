@@ -1,6 +1,6 @@
 // The app window's side of the hopsesh Terminal window: the open tabs (TerminalTabs, then
 // each hopsesh:terminal event), their chips on session rows and in the sidebar, "Needs
-// you", the entry points' routing (In this window / In my terminal / Ask), and the quit
+// you", the entry points' routing (In this window / In my terminal), and the quit
 // confirmation that lists the programs still running.
 import { api, on, h, state, toast, fail, sys, dialog, count, icon } from "./core.js";
 
@@ -47,8 +47,8 @@ export const running = () => [...tabs.values()].filter(live);
 // strayWaiting are the waiting tabs no session row stands for (steps, sign-ins, shells).
 export const strayWaiting = () => waiting().filter((t) => t.kind !== "session" || !(state.scan && state.scan.groups.some((g) => g.entries.some((e) => e.machine === t.machine && e.key === t.key))));
 
-// where is the setting: here, terminal or ask.
-export const where = () => state.info?.where || "here";
+// where is the setting: here or terminal.
+export const where = () => (state.info?.where === "terminal" ? "terminal" : "here");
 export const IN_A_TAB = "It's running in a tab here. End it first.";
 
 // showTerminal brings the hopsesh Terminal window forward (a tab in front, when given).
@@ -61,12 +61,10 @@ function opened(r) {
   if (r?.notice) toast(r.notice);
 }
 
-// resume continues a session: "here", "terminal", or "" (the setting; with Ask, the window
-// asks first).
+// resume continues a session: "here", "terminal", or "" (the setting).
 export async function resume(e, w = "") {
   let r;
   try { r = await api("ResumeSession", e.machine, e.key, w); } catch (err) { fail(err); return; }
-  if (r.where === "ask") { askWhere(`Resume “${e.title}”`, (x) => resume(e, x)); return; }
   opened(r);
 }
 
@@ -74,7 +72,6 @@ export async function resume(e, w = "") {
 export async function openResult(w = "") {
   let r;
   try { r = await api("OpenResult", w); } catch (err) { fail(err); return; }
-  if (r.where === "ask") { askWhere("Open it", (x) => openResult(x)); return; }
   opened(r);
 }
 
@@ -82,19 +79,7 @@ export async function openResult(w = "") {
 export async function openBrought(journal, w = "") {
   let r;
   try { r = await api("OpenBrought", journal, w); } catch (err) { fail(err); return; }
-  if (r.where === "ask") { askWhere("Open it", (x) => openBrought(journal, x)); return; }
   opened(r);
-}
-
-// askWhere is the two-way question of the "Ask each time" setting.
-export function askWhere(title, then) {
-  const d = dialog(h("h2", { style: "margin:0;font-size:16px" }, title),
-    h("div", { class: "muted", style: "line-height:1.5" }, `In this window, it runs in a tab of the hopsesh Terminal window and ends when hopsesh quits. In ${sys.terminal}, it keeps running on its own.`),
-    h("div", { class: "dlg-foot" },
-      h("button", { class: "btn", onclick: () => d.close() }, "Cancel"),
-      h("button", { class: "btn", onclick: () => { d.close(); then("terminal"); } }, `In ${sys.terminal}`),
-      h("button", { class: "btn primary", onclick: () => { d.close(); then("here"); } }, "In this window")));
-  d.querySelector(".btn.primary").focus();
 }
 
 // openShell opens the login shell in a session's folder (or home).
@@ -114,9 +99,6 @@ export async function moveToTerminal(t) {
 export async function signIn(c, w = "") {
   try { opened(await api("SignIn", c.name, w)); } catch (err) { fail(err); }
 }
-
-// tabChip is a session row's chip for its tab: "In a tab".
-export const tabChip = () => h("span", { class: "chip" }, icon(["M3 4h18v16H3z", "m7 9 3 3-3 3M12 15h5"], 11), "In a tab");
 
 // The title bar's Terminal button, with how many tabs wait.
 function badge() {

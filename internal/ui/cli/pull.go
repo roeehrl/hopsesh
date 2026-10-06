@@ -42,6 +42,8 @@ func addPullFlags(cmd *cobra.Command) {
 	f.Bool("no-sync", false, "do not fetch or fast-forward the checkout here to the session's commit")
 	f.Bool("push", false, "first push the session branch's unpushed commits on the other machine")
 	f.Bool("replace", false, "when the copy here changed too, replace it anyway (hopsesh undo brings it back)")
+	f.String("operation-id", "", "idempotency key for retrying the same transfer")
+	f.String("target-session", "", "explicit destination session when a branch has several replicas here")
 	f.Bool("keep-both", false, "when both copies changed, keep both (this one comes in as a separate session)")
 	f.Bool("app", false, "open it in the agent's desktop app instead of the terminal (agents that can)")
 	f.Bool("run", false, "start the agent in the new location when done")
@@ -55,6 +57,8 @@ func (r *run) pullOptions(cmd *cobra.Command) (move.Options, error) {
 	f := cmd.Flags()
 	o := r.app.DefaultOptions()
 	o.TargetDir, _ = f.GetString("to")
+	o.OperationID, _ = f.GetString("operation-id")
+	o.TargetSession, _ = f.GetString("target-session")
 	if v, _ := f.GetString("repos"); v != "" {
 		o.ReposDir = expandHome(v)
 	}
@@ -353,7 +357,9 @@ func (r *run) renderPlan(p *move.Plan) {
 }
 
 func (r *run) renderResult(p *move.Plan, res *move.Result) {
-	if p.Kind == move.KindContinue {
+	if p.NoWork {
+		r.printf("\n✓ Conversation already synchronized; lineage receipts updated. 0 new messages, 0 transfers.\n")
+	} else if p.Kind == move.KindContinue {
 		r.printf("\n✓ %q continues in %s.\n", p.Title, p.Agent)
 	} else {
 		r.printf("\n✓ %q is on this machine: %d file(s), %s.\n", p.Title, res.Files, move.Human(res.Bytes))

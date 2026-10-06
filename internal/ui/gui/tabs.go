@@ -17,39 +17,36 @@ import (
 
 // The app's entry points into its terminal: resuming a session here, a sign-in, a shell in
 // a session's folder (and the hand-off and bring-back steps, in step.go and below). Each
-// opens a tab in the hopsesh Terminal window, or the user's terminal app, as the user
-// chose in Settings → Terminal (config [terminal] resume; "" is
-// config.AppResumeDefault). A session has at most one live tab: asking again shows it.
+// opens where the window asks (a session's Resume menu names the place), else a tab in
+// the hopsesh Terminal window or the user's terminal app, as the user chose in Settings →
+// Terminal (config [terminal] resume; "" is config.AppResumeDefault). A session has at most
+// one live tab: asking again shows it.
 
 // Where an entry point opens.
 const (
 	WhereHere     = config.ResumeHere     // a tab in the hopsesh Terminal window
 	WhereTerminal = config.ResumeTerminal // the user's terminal app
-	WhereAsk      = config.ResumeAsk      // the window asks each time
 	// WhereShown: the session runs in a tab already, which is now in front.
 	WhereShown = "shown"
 )
 
 // route is where an entry point opens: asked ("here" or "terminal") when the window says,
-// else the setting. Steps (a hand-off's, a bring-back's) never ask: they open in the window
-// unless the user chose their terminal app.
-func route(asked, setting string, step bool) string {
+// else the setting. The app never asks first: the command line's "ask" is the default
+// place here (a session's Resume menu is the app's way of asking).
+func route(asked, setting string) string {
 	switch asked {
 	case WhereHere, WhereTerminal:
 		return asked
 	}
-	if setting == "" {
-		setting = config.AppResumeDefault
-	}
-	if step && setting == WhereAsk {
-		return WhereHere
+	if setting == "" || setting == config.ResumeAsk {
+		return config.AppResumeDefault
 	}
 	return setting
 }
 
 // OpenedDTO says where an entry point opened.
 type OpenedDTO struct {
-	// Where: here, terminal, ask (nothing opened: the window asks first) or shown.
+	// Where: here, terminal or shown.
 	Where string `json:"where"`
 	// Tab is the tab it runs in (here, shown).
 	Tab string `json:"tab,omitempty"`
@@ -134,8 +131,7 @@ func (a *App) fellBack(why error) string {
 
 // ResumeSession continues a session that is on this machine: in a tab of the hopsesh
 // Terminal window or in the user's terminal app (where: "here", "terminal", or "" for the
-// setting; with the setting "ask" nothing opens and the window asks). A session that runs
-// in a tab already is shown instead.
+// setting). A session that runs in a tab already is shown instead.
 func (a *App) ResumeSession(machine, key, where string) (*OpenedDTO, error) {
 	if a.Terms != nil {
 		if id := a.Terms.liveSessionTab(machine, key); id != "" {
@@ -146,9 +142,7 @@ func (a *App) ResumeSession(machine, key, where string) (*OpenedDTO, error) {
 	a.mu.Lock()
 	setting := a.core.Cfg.AppResume()
 	a.mu.Unlock()
-	switch route(where, setting, false) {
-	case WhereAsk:
-		return &OpenedDTO{Where: WhereAsk}, nil
+	switch route(where, setting) {
 	case WhereTerminal:
 		return &OpenedDTO{Where: WhereTerminal}, a.ResumeEntry(machine, key, false)
 	}
@@ -225,7 +219,7 @@ type SignedInDTO struct {
 
 // SignIn runs a cloud's own sign-in command (claude auth login, codex login --device-auth,
 // gh auth login --web): in a sign-in tab, whose output hopsesh never reads or keeps, or in
-// the user's terminal app (where as for ResumeSession; "ask" counts as here). When the tab
+// the user's terminal app (where as for ResumeSession). When the tab
 // ends with code 0, hopsesh checks the login again and tells the window (SignedInEvent).
 func (a *App) SignIn(cloud, where string) (*OpenedDTO, error) {
 	core := a.snapshot()
@@ -242,7 +236,7 @@ func (a *App) SignIn(cloud, where string) (*OpenedDTO, error) {
 	}
 	c := agent.Command{Argv: append([]string{cl.Driver}, cl.SignIn...), Dir: home}
 	l := app.Launch{Kind: termapp.KindSignIn, Run: c}
-	if route(where, core.Cfg.AppResume(), true) == WhereTerminal || a.Terms == nil {
+	if route(where, core.Cfg.AppResume()) == WhereTerminal || a.Terms == nil {
 		return &OpenedDTO{Where: WhereTerminal}, a.openLaunch(l)
 	}
 	spec, err := a.tabSpec(c, "Sign in · "+cl.Title)

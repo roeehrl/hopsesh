@@ -28,6 +28,7 @@ type FS interface {
 
 // Facts is what one probe learned about a machine.
 type Facts struct {
+	Endpoint string                      `json:"endpoint"`
 	OS       string                      `json:"os"`
 	Arch     string                      `json:"arch"`
 	Home     string                      `json:"home"`

@@ -263,6 +263,9 @@ func codexThread(r SeedReq, cwd string) (string, error) {
 	recs = append(recs, map[string]any{"timestamp": ts(3 * time.Minute), "type": "event_msg", "payload": map[string]any{"type": "task_complete", "turn_id": "t1"}})
 	dir := filepath.Join(codexDir(), "sessions", t0.Format("2006"), t0.Format("01"), t0.Format("02"))
 	path := filepath.Join(dir, "rollout-"+t0.Format("2006-01-02T15-04-05")+"-"+r.ID+".jsonl")
+	for i := range recs {
+		recs[i]["ordinal"] = i
+	}
 	if err := writeJSONL(path, recs, t0.Add(time.Hour)); err != nil {
 		return "", err
 	}
@@ -369,13 +372,57 @@ func appendTurn(r AppendReq) error {
 	var rec map[string]any
 	now := time.Now().UTC()
 	if r.Agent == "claude" {
-		rec = map[string]any{"type": "user", "uuid": newID()[:8], "sessionId": r.ID, "timestamp": now.Format(time.RFC3339Nano),
+		data, err := os.ReadFile(r.Path)
+		if err != nil {
+			return err
+		}
+		var parent string
+		for _, line := range strings.Split(string(data), "\n") {
+			var existing struct {
+				Type      string `json:"type"`
+				UUID      string `json:"uuid"`
+				Leaf      string `json:"leafUuid"`
+				Sidechain bool   `json:"isSidechain"`
+			}
+			if json.Unmarshal([]byte(line), &existing) != nil {
+				continue
+			}
+			if (existing.Type == "user" || existing.Type == "assistant") && !existing.Sidechain {
+				parent = existing.UUID
+			}
+			if existing.Type == "last-prompt" && existing.Leaf != "" {
+				parent = existing.Leaf
+			}
+		}
+		rec = map[string]any{"type": "user", "uuid": newID()[:8], "parentUuid": parent, "sessionId": r.ID, "timestamp": now.Format(time.RFC3339Nano),
 			"message": map[string]any{"role": "user", "content": r.Text}}
 	} else {
 		rec = map[string]any{"timestamp": now.Format("2006-01-02T15:04:05.000Z"), "type": "response_item",
 			"payload": map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_text", "text": r.Text}}}}
 	}
+	if r.Agent == "codex" {
+		raw, err := os.ReadFile(r.Path)
+		if err != nil {
+			return err
+		}
+		lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+		var first struct {
+			Payload struct {
+				Mode string `json:"history_mode"`
+			} `json:"payload"`
+		}
+		if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+			return err
+		}
+		if first.Payload.Mode == "paginated" {
+			rec["ordinal"] = len(lines)
+		}
+	}
 	b, _ := json.Marshal(rec)
+	if r.Agent == "claude" {
+		prompt, _ := json.Marshal(map[string]any{"type": "last-prompt", "leafUuid": rec["uuid"], "lastPrompt": r.Text, "sessionId": r.ID})
+		b = append(append(b, '\n'), prompt...)
+	}
 	f, err := os.OpenFile(r.Path, os.O_APPEND|os.O_WRONLY, 0)
 	if err != nil {
 		return err

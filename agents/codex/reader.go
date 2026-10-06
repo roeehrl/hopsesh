@@ -81,19 +81,40 @@ func (m *Module) Read(_ context.Context, h agent.Host, in agent.Install, s agent
 		return ir.Segment{}, &agent.FormatError{Path: s.Path, Line: 1, Err: fmt.Errorf("a rollout starts with session_meta")}
 	}
 	var mt meta
-	_ = json.Unmarshal(recs[0].Payload, &mt)
+	if err := json.Unmarshal(recs[0].Payload, &mt); err != nil {
+		return ir.Segment{}, &agent.FormatError{Path: s.Path, Line: 1, Err: err}
+	}
+	if _, err := paginatedNext(mt, recs); err != nil {
+		return ir.Segment{}, err
+	}
 	seg := ir.Segment{Header: ir.Header{Agent: string(id), Version: mt.CLIVersion, SessionID: mt.ID, CWD: mt.CWD, Title: s.Title, Created: parseTime(mt.Timestamp)}}
 	if mt.Git != nil {
 		seg.Header.GitBranch = mt.Git.Branch
 	}
-	structured := false
-	for _, r := range recs {
-		if r.Type == "event_msg" && strings.Contains(string(r.Payload), `"item_completed"`) {
-			structured = true
-			break
+	structuredByRecord := make([]bool, len(recs))
+	mark := func(start, end int) {
+		structured := false
+		for _, r := range recs[start:end] {
+			if r.Type == "event_msg" && strings.Contains(string(r.Payload), `"item_completed"`) {
+				structured = true
+				break
+			}
+		}
+		for i := start; i < end; i++ {
+			structuredByRecord[i] = structured
 		}
 	}
-	for _, r := range recs {
+	start := 0
+	for i, r := range recs {
+		if r.Type == "turn_context" && i > start {
+			mark(start, i)
+			start = i
+		}
+	}
+	mark(start, len(recs))
+	for index, r := range recs {
+		structured := structuredByRecord[index]
+		before := len(seg.Nodes)
 		ts := parseTime(r.Timestamp)
 		switch r.Type {
 		case "turn_context":
@@ -117,6 +138,12 @@ func (m *Module) Read(_ context.Context, h agent.Host, in agent.Install, s agent
 				seg.Nodes = append(seg.Nodes, fromEvent(r, ts)...)
 			}
 		}
+		for j := before; j < len(seg.Nodes); j++ {
+			if seg.Nodes[j].Native == nil {
+				seg.Nodes[j].Native = &ir.Native{Format: nativeFormat}
+			}
+			seg.Nodes[j].Native.Anchor = fmt.Sprintf("line:%d/%d", index, j-before)
+		}
 	}
 	ir.Chain(seg.Nodes, "")
 	seg.Cursor = ir.Cursor{Offset: end}
@@ -139,6 +166,7 @@ func readLines(r io.Reader) ([]line, int64, error) {
 	br := bufio.NewReaderSize(r, 1<<20)
 	var out []line
 	var off int64
+	paginated := false
 	for {
 		b, err := br.ReadBytes('\n')
 		if err == io.EOF {
@@ -150,7 +178,15 @@ func readLines(r io.Reader) ([]line, int64, error) {
 		off += int64(len(b))
 		var l line
 		if json.Unmarshal(b, &l) == nil && l.Type != "" {
+			if len(out) == 0 && l.Type == "session_meta" {
+				var mt meta
+				if json.Unmarshal(l.Payload, &mt) == nil {
+					paginated = mt.HistoryMode == "paginated"
+				}
+			}
 			out = append(out, l)
+		} else if paginated {
+			return nil, 0, fmt.Errorf("%w: invalid record in paginated history at byte %d", agent.ErrDiverged, off)
 		}
 	}
 }

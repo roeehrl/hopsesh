@@ -228,7 +228,9 @@ func AdoptFetch(ctx context.Context, f *Fetch, side Side, env Env, exited bool) 
 	judgeCopy(f, a, ad)
 	ad.Issue = f.Problems[ad.Outcome]
 	cloudBranch := adoptBranch(ctx, f, j, ad)
-	recordFetchLineage(ctx, f, side, j, a, ad, cloudBranch)
+	if err := recordFetchLineage(ctx, f, side, j, a, ad, cloudBranch); err != nil {
+		return nil, err
+	}
 	ad.Resume = mod.Resume(in, ad.Key, agent.Placement{Key: ad.Key, SourceID: ad.Key.Session, CWD: f.Worktree, Location: machine}, agent.ResumeOptions{})
 	if f.Original != nil && ad.Outcome != FetchEmpty {
 		if err := appendOriginal(ctx, f, side, j, a, ad); err != nil {
@@ -329,34 +331,64 @@ func adoptBranch(ctx context.Context, f *Fetch, j *journal.Journal, ad *Adopted)
 
 // recordFetchLineage records the hop from the cloud copy to the copy here, beside the copy
 // (and beside the original it was handed off from, when that is here).
-func recordFetchLineage(ctx context.Context, f *Fetch, side Side, j *journal.Journal, a agent.Adoption, ad *Adopted, cloudBranch string) {
-	m := f.Lineage
+func recordFetchLineage(ctx context.Context, f *Fetch, side Side, j *journal.Journal, a agent.Adoption, ad *Adopted, cloudBranch string) error {
+	if err := side.Machine.CommitIdentity(ctx); err != nil {
+		return err
+	}
+	m := f.Lineage.Clone()
+	key := agent.SessionKey{Agent: f.Agent, Session: f.Session}
 	if m == nil {
-		m = lineage.New(newID())
+		m = lineage.NewNative(cloudEndpoint(f.Cloud, ""), key)
 	}
-	now := time.Now().UTC()
-	from := m.Upsert(lineage.Replica{Key: agent.SessionKey{Agent: f.Agent, Session: f.Session}, Location: f.Cloud, Time: now, URL: f.URL, Branch: cloudBranch})
-	local := lineage.Replica{Key: ad.Key, Location: side.Machine.Name, AgentVersion: nonEmpty(a.Session.AgentVersion, side.Install.Version), Time: now}
-	if r, ok := side.Module.(agent.Reader); ok {
-		if h, err := side.Machine.For(ctx, side.Module.Spec(), side.Install, nil); err == nil {
-			if seg, err := r.Read(ctx, h, side.Install, a.Session, ir.Cursor{}); err == nil {
-				local.Head, local.Offset = seg.Cursor.Head, seg.Cursor.Offset
-			}
+	if _, _, ok := m.Find(key, f.Cloud); !ok {
+		m.Upsert(lineage.Replica{Key: key, Endpoint: cloudEndpoint(f.Cloud, ""), Location: f.Cloud, URL: f.URL, Branch: cloudBranch})
+	}
+	from := cloudReplica(m, key, f.Cloud, "")
+	seg, err := readSegment(ctx, side, a.Session)
+	if err != nil {
+		return err
+	}
+	if err = seedCloudPrefix(m, from, &seg, f.Brief); err != nil {
+		return err
+	}
+	source, err := m.Observe(from, &seg)
+	if err != nil && ad.Outcome == FetchPartial && errors.Is(err, agent.ErrDiverged) {
+		previous, _ := m.LatestState(from)
+		parent := m.Replica(from)
+		line := m.Fork(j.ID+"/partial", previous.Heads)
+		m.Branch = line
+		parent.ID = ""
+		parent.Line = line
+		parent.Head = ""
+		parent.Offset = 0
+		from = m.Upsert(parent)
+		m.ReplaceProjection(from, ir.Cursor{}, nil, nil, []string{"partial cloud snapshot; prior cloud history unavailable"})
+		if err = seedCloudPrefix(m, from, &seg, f.Brief); err != nil {
+			return err
 		}
+		source, err = m.Observe(from, &seg)
+		ad.Warnings = append(ad.Warnings, "Cloud history is incomplete; this copy is a separate snapshot branch.")
 	}
-	to := m.Upsert(local)
-	m.Hops = append(m.Hops, lineage.Hop{Time: now, From: from, To: to, Kind: lineage.HopFetch, Fidelity: string(agent.FidNative),
-		Code: &lineage.CodeHop{Way: agent.ViaBranch, Remote: f.Repo, Branch: cloudBranch, Base: f.Base}})
+	if err != nil {
+		return err
+	}
+	to := m.Upsert(lineage.Replica{Endpoint: side.Machine.Facts.Endpoint, Key: ad.Key, Location: side.Machine.Name, AgentVersion: nonEmpty(a.Session.AgentVersion, side.Install.Version), Time: seg.Header.Created})
+	ps, err := nativeProjection(seg, seg)
+	if err != nil {
+		return err
+	}
+	target := m.ReplaceProjection(to, seg.Cursor, ps, source.Heads, append(source.Loss, f.Loss...))
+	if err := m.AppendHop(lineage.Hop{ID: j.ID, From: from, To: to, Source: source.ID, Target: target.ID, Time: j.Time.UTC(), Kind: lineage.HopFetch, Fidelity: string(agent.FidNative), Code: &lineage.CodeHop{Way: agent.ViaBranch, Remote: f.Repo, Branch: cloudBranch, Base: f.Base}}); err != nil {
+		return err
+	}
+	if err = m.Validate(); err != nil {
+		return err
+	}
+	if err = j.WriteReceipt(host.LocalFS(), side.Machine.Name, lineage.PathFor(ad.Path), m.Encode(), true); err != nil {
+		return err
+	}
 	f.Lineage = m
-	body := m.Encode()
-	if err := j.WriteFile(host.LocalFS(), side.Machine.Name, lineage.PathFor(ad.Path), body, 0o600); err != nil {
-		ad.Warnings = append(ad.Warnings, "could not record the session's lineage here: "+err.Error())
-	}
-	if f.Original != nil && f.Original.Path != "" {
-		if err := j.WriteFile(host.LocalFS(), side.Machine.Name, lineage.PathFor(f.Original.Path), body, 0o600); err != nil {
-			ad.Warnings = append(ad.Warnings, "could not record the lineage beside the original: "+err.Error())
-		}
-	}
+	return nil
 }
 
 // appendOriginal adds the cloud's work, as the brought copy holds it, to the session it
@@ -376,33 +408,51 @@ func appendOriginal(ctx context.Context, f *Fetch, side Side, j *journal.Journal
 	if err != nil {
 		return err
 	}
-	// The cloud session began with hopsesh's briefing; the work is what follows it.
-	skip := 0
-	for i, n := range seg.Nodes {
-		if n.Kind == ir.KindMessage && n.Actor == ir.User && strings.HasPrefix(strings.TrimSpace(n.Text), agent.NotePrefix) {
-			skip = i + 1
-			break
-		}
+	m := f.Lineage.Clone()
+	_, from, ok := m.FindEndpoint(ad.Key, side.Machine.Facts.Endpoint)
+	if !ok {
+		return fmt.Errorf("brought session has no receipt")
+	}
+	source, err := m.Observe(from, &seg)
+	if err != nil {
+		return err
 	}
 	o := *f.Original
 	name := side.Module.Spec().Name
+	original, err := reader.Read(ctx, h, side.Install, o, ir.Cursor{})
+	if err != nil {
+		return err
+	}
+	to := m.Upsert(lineage.Replica{Endpoint: side.Machine.Facts.Endpoint, Key: o.Key, Location: side.Machine.Name, AgentVersion: side.Install.Version, Time: original.Header.Created})
+	target, err := m.Observe(to, &original)
+	if err != nil {
+		return err
+	}
+	if !lineage.Subset(m.Covered(target.Heads), m.Covered(source.Heads)) {
+		return fmt.Errorf("original has work absent from cloud; preserve a separate branch")
+	}
+	seg.Nodes = missingNodes(seg.Nodes, m.Covered(target.Heads))
 	prof := writer.Profile(side.Install)
-	r := convert.Render(convert.Request{Nodes: seg.Nodes, SkipBefore: skip, From: name + " in " + f.CloudTitle, To: name,
+	r := convert.Render(convert.Request{Nodes: seg.Nodes, From: name + " in " + f.CloudTitle, To: name,
 		Fidelity: convert.History, Window: prof.Window,
 		Briefing: convert.Briefing{SourceID: string(f.Session), SourceLoc: f.Cloud, TargetLoc: side.Machine.Name, When: time.Now(), Branch: ad.Branch}})
-	w, err := writer.Write(ctx, h, side.Install, ir.WriteRequest{Mode: ir.WriteAppend, SessionID: string(o.Key.Session), Expect: f.OriginalHead,
+	w, err := writer.Write(ctx, h, side.Install, ir.WriteRequest{OperationID: j.ID + "-append", Mode: ir.WriteAppend, SessionID: string(o.Key.Session), Expect: f.OriginalHead,
 		Header: ir.Header{CWD: o.CWD, Title: o.Title, GitBranch: ad.Branch}, Items: r.Items})
 	if err != nil {
 		return err
 	}
-	m := f.Lineage
-	now := time.Now().UTC()
-	from := m.Upsert(lineage.Replica{Key: ad.Key, Location: side.Machine.Name, Time: now})
-	to := m.Upsert(lineage.Replica{Key: o.Key, Location: side.Machine.Name, Head: w.Cursor.Head, Offset: w.Cursor.Offset, Time: now})
-	m.Hops = append(m.Hops, lineage.Hop{Time: now, From: from, To: to, Kind: lineage.HopContinue, Fidelity: string(convert.History), Written: &lineage.Range{From: w.From, To: w.To}})
-	if err := j.WriteFile(host.LocalFS(), side.Machine.Name, lineage.PathFor(o.Path), m.Encode(), 0o600); err != nil {
+	now := j.Time.UTC()
+	receipt := m.Deliver(to, w.Cursor, w.Projection, source.Heads, source.Loss)
+	if err := m.AppendHop(lineage.Hop{ID: j.ID + "/append", Time: now, From: from, To: to, Source: source.ID, Target: receipt.ID, Kind: lineage.HopContinue, Fidelity: string(convert.History), Written: &lineage.Range{From: w.From, To: w.To}}); err != nil {
 		return err
 	}
+	if err = m.Validate(); err != nil {
+		return err
+	}
+	if err = j.WriteReceipt(host.LocalFS(), side.Machine.Name, lineage.PathFor(o.Path), m.Encode(), true); err != nil {
+		return err
+	}
+	f.Lineage = m
 	ad.Appended, ad.Key = true, o.Key
 	ad.Resume = side.Module.Resume(side.Install, o.Key, agent.Placement{Key: o.Key, SourceID: o.Key.Session, CWD: o.CWD, Location: side.Machine.Name}, agent.ResumeOptions{})
 	return nil

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/core/host"
+	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -92,13 +93,16 @@ type Entry struct {
 
 // Journal is the undo record of one operation (a move, a continuation, a mark).
 type Journal struct {
-	ID      string             `json:"id"`
-	Kind    string             `json:"kind"` // what kind of operation (Kind*)
-	Title   string             `json:"title"`
-	Time    time.Time          `json:"time"`
-	Keys    []agent.SessionKey `json:"keys"` // the sessions it created or changed
-	Entries []Entry            `json:"entries"`
-	Undone  bool               `json:"undone,omitempty"`
+	UndoTime   time.Time          `json:"undoTime,omitempty"`
+	Receipts   []Receipt          `json:"receipts,omitempty"`
+	TransferID string             `json:"transferId,omitempty"`
+	ID         string             `json:"id"`
+	Kind       string             `json:"kind"` // what kind of operation (Kind*)
+	Title      string             `json:"title"`
+	Time       time.Time          `json:"time"`
+	Keys       []agent.SessionKey `json:"keys"` // the sessions it created or changed
+	Entries    []Entry            `json:"entries"`
+	Undone     bool               `json:"undone,omitempty"`
 	// Remote are journals of the same operation kept by hopsesh on other machines (a push):
 	// undoing this one undoes them too.
 	Remote []Remote `json:"remote,omitempty"`
@@ -134,6 +138,7 @@ const (
 	KindFetch    = "fetch"    // a session brought from a cloud (a worktree, an adopted session)
 	KindHop      = "hop"      // a cloud session handed on to another cloud through this machine (Parts)
 	KindCleanup  = "cleanup"  // branches deleted on a remote once their work was merged
+	KindRename   = "rename"   // a session given a new title in its agent's own data
 )
 
 // New starts a journal of one operation.
@@ -189,11 +194,7 @@ func (j *Journal) saveLocked() error {
 	if err != nil {
 		return err
 	}
-	tmp := filepath.Join(j.dir, "journal.json.tmp")
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, filepath.Join(j.dir, "journal.json"))
+	return host.LocalFS().WriteFile(filepath.Join(j.dir, "journal.json"), b, 0o600)
 }
 
 // State is a file's size and SHA-256.
@@ -792,11 +793,38 @@ func copyOut(fsys host.FS, p, dst string) error {
 // undo deletes a pushed ref wherever it points now. A cloud session undo cannot archive is
 // recorded in Manual, for the user.
 func (j *Journal) Undo(ctx context.Context, r Reach, force bool) error {
+	return j.undo(ctx, r, force, nil)
+}
+
+// UndoAfter permits only lineage compensation written by an already undone leg of
+// the same composite transaction. Native transcript and code checks remain active.
+func (j *Journal) UndoAfter(ctx context.Context, r Reach, force bool, later []*Journal) error {
+	touched := map[string]bool{}
+	for _, l := range later {
+		if !l.Undone {
+			return fmt.Errorf("later leg is not undone")
+		}
+		for _, e := range l.Entries {
+			if strings.HasSuffix(e.Path, lineage.Suffix) {
+				touched[e.Machine+"\x00"+e.Path] = true
+			}
+		}
+	}
+	return j.undo(ctx, r, force, func(machine, path string) bool { return touched[machine+"\x00"+path] })
+}
+func (j *Journal) undo(ctx context.Context, r Reach, force bool, skip func(string, string) bool) error {
 	if !force {
-		if err := j.Changed(ctx, r); err != nil {
+		if err := j.changed(ctx, r, skip); err != nil {
 			return err
 		}
 	}
+	if j.UndoTime.IsZero() {
+		j.UndoTime = time.Now().UTC()
+		if err := j.Save(); err != nil {
+			return err
+		}
+	}
+	captured := j.captureLineage(r)
 	var problems, kept []string
 	var manual []Manual
 	// Worktrees go first: a branch is only renamed or deleted once no worktree hopsesh made
@@ -864,8 +892,13 @@ func (j *Journal) Undo(ctx context.Context, r Reach, force bool) error {
 			problems = append(problems, fmt.Sprintf("%s: %v", e.Path, err))
 		}
 	}
+	if len(problems) == 0 {
+		if err := j.compensateLineage(r, captured); err != nil {
+			problems = append(problems, err.Error())
+		}
+	}
 	j.mu.Lock()
-	j.Undone, j.Manual, j.Kept = true, manual, kept
+	j.Undone, j.Manual, j.Kept = len(problems) == 0, manual, kept
 	err := j.saveLocked()
 	j.mu.Unlock()
 	if err != nil {

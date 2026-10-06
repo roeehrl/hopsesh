@@ -5,7 +5,7 @@ import { api, h, fill, view, state, screen, go, current, toast, fail, keys, sys,
 import { undo } from "./activity.js";
 import { planFor } from "./plan.js";
 import { tabs, onTabs, showTerminal, openBrought } from "./term.js";
-import { actionsFor } from "./sessions.js";
+import { actionsFor } from "./actions.js";
 
 // bringTab is the tab a bring-back's command runs in, if it runs in one.
 const bringTab = (b) => [...tabs.values()].find((t) => t.kind === "bring" && t.journal === b.journal);
@@ -28,7 +28,7 @@ function copyOf(b) {
 
 // nextActions are what the copy offers now: while the tab that brought it still runs it,
 // only showing that tab (one process per session); after, the list's own actions for it
-// (Resume here, Open in the terminal app, the agent's app), and copying the command.
+// (Resume in hopsesh Terminal, the terminal app, or the agent's app), and copying the command.
 function nextActions(b, primary = true) {
   const t = bringTab(b);
   if (t && t.state !== "exited") {
@@ -96,8 +96,8 @@ async function continueIn(b) {
 }
 
 function render(b) {
+  if (current !== "brought") return;
   showing = b;
-  const back = h("button", { class: "btn", onclick: () => go("sessions", true) }, "Back to sessions", h("span", { class: "kbd" }, "esc"));
   let body;
   switch (b.outcome) {
     case "waiting": {
@@ -110,8 +110,7 @@ function render(b) {
           h("p", { style: "margin:0;font-size:13px" }, `${b.agent || "The agent"} saves the copy only once you continue the conversation, so nothing was saved. The worktree and the code are ready.`),
           h("div", { class: "out-stack" },
             h("button", { class: "btn primary", onclick: () => openBrought(b.journal, "here") }, "Bring here again"),
-            h("button", { class: "btn", onclick: () => doUndo(b) }, "Undo")),
-          back);
+            h("button", { class: "btn", onclick: () => doUndo(b) }, "Undo")));
         poll(b);
         break;
       }
@@ -126,14 +125,14 @@ function render(b) {
           inTab ? h("button", { class: "btn primary", onclick: () => showTerminal(t.id) }, "Show the tab") : null,
           h("button", { class: "btn", onclick: () => openBrought(b.journal, "terminal") }, inTab ? `Open in ${sys.terminal} instead` : `Open in ${sys.terminal} again`),
           h("button", { class: "btn", onclick: async () => { await api("CopyText", b.command); toast("Copied"); } }, "Copy the command"),
-          h("button", { class: "btn", onclick: () => doUndo(b) }, "Undo"), back)));
+          h("button", { class: "btn", onclick: () => doUndo(b) }, "Undo"))));
       poll(b);
       break;
     }
     case "code":
       body = h("section", { class: "outcome ok" }, h("span", { class: "sec-h ok" }, "The code only"),
         h("div", { class: "out-head" }, badge("ok", "✓"), h("h2", {}, `The code of “${b.title}” is here`)),
-        codeLine(b), h("div", { class: "out-acts" }, h("button", { class: "btn", onclick: () => doUndo(b) }, "Undo"), back));
+        codeLine(b), h("div", { class: "out-acts" }, h("button", { class: "btn", onclick: () => doUndo(b) }, "Undo")));
       break;
     case "complete":
     case "unchecked":
@@ -153,7 +152,7 @@ function render(b) {
         b.url ? h("div", {}, linkBtn(`Open the ${b.noun || "session"} in the browser`, b.url)) : null,
         b.renamed || (b.branch && !b.written) ? h("div", { class: "hint", role: "note", id: "cleanup-hint" }, "Once its work is merged, hopsesh can delete the cloud's branch for you: ",
           h("button", { class: "link", onclick: () => go("activity") }, "Activity → Look for merged branches"), ". It asks first.") : null,
-        h("div", { class: "out-acts" }, h("button", { class: "btn", onclick: () => doUndo(b) }, "Undo", h("span", { class: "kbd" }, keys("mod+alt+Z"))), back));
+        h("div", { class: "out-acts" }, h("button", { class: "btn", onclick: () => doUndo(b) }, "Undo", h("span", { class: "kbd" }, keys("mod+alt+Z")))));
       break;
     case "partial":
       body = h("section", { class: "outcome partial", "aria-labelledby": "out-h" }, h("span", { class: "sec-h warn" }, "Partial"),
@@ -164,8 +163,7 @@ function render(b) {
           b.kept ? h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" }, nextActions(b))
             : h("button", { class: "btn primary", onclick: async () => { try { await api("KeepPartial", b.journal); } catch (e) { fail(e); return; } render(Object.assign({}, b, { kept: true })); } }, "Keep the partial copy"),
           h("button", { class: "btn", onclick: () => doUndo(b) }, "Undo"),
-          b.url ? linkBtn("Open the session in the browser", b.url) : null),
-        back);
+          b.url ? linkBtn("Open the session in the browser", b.url) : null));
       break;
     case "empty": {
       const [machine] = (b.mirrorOf || "").split(":");
@@ -177,8 +175,7 @@ function render(b) {
         h("div", { class: "out-stack" },
           local && machine !== state.scan?.machines.find((m) => m.local)?.name ? h("button", { class: "btn primary", onclick: () => planFor(local, { target: "" }) }, `Hop here from ${machine}`) : null,
           h("button", { class: "btn", onclick: () => doUndo(b) }, "Undo"),
-          b.url ? linkBtn("Open the session in the browser", b.url) : null),
-        back);
+          b.url ? linkBtn("Open the session in the browser", b.url) : null));
       break;
     }
   }

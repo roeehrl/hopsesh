@@ -205,6 +205,7 @@ func cloudEntry(spec agent.Spec, cl agent.Cloud, s agent.CloudSession, k *knownC
 			s.Updated = k.Time
 		}
 		e.Lineage, e.Checkout, e.Original = k.Lineage, k.Checkout, k.Original
+		e.LineageError = k.LineageError
 	}
 	if s.Repo != "" {
 		e.Git = &repos.GitState{IsRepo: true, Identity: s.Repo, Branch: s.Branch}
@@ -243,15 +244,16 @@ func cloudSummary(s agent.CloudSession) agent.Summary {
 // here (a copy brought from it, or the session handed off to it), or a link the user
 // pasted.
 type knownCloud struct {
-	ID       agent.SessionID
-	URL      string
-	Branch   string
-	Title    string
-	Repo     string
-	Remote   string
-	Checkout string // the repository's checkout here
-	Time     time.Time
-	Lineage  *lineage.Manifest
+	LineageError string
+	ID           agent.SessionID
+	URL          string
+	Branch       string
+	Title        string
+	Repo         string
+	Remote       string
+	Checkout     string // the repository's checkout here
+	Time         time.Time
+	Lineage      *lineage.Manifest
 	// Original is the session it was handed off from ("machine:agent/id").
 	Original string
 }
@@ -277,7 +279,7 @@ func knownClouds(es []Entry, clouds []cloudRef, pasted []Pasted) map[string][]*k
 		if e.Lineage == nil || e.Location.IsCloud() {
 			continue
 		}
-		for ri, r := range e.Lineage.Replicas {
+		for _, r := range e.Lineage.Replicas {
 			id, ok := agents[r.Location]
 			if !ok || r.Key.Agent != id {
 				continue
@@ -289,9 +291,11 @@ func knownClouds(es []Entry, clouds []cloudRef, pasted []Pasted) map[string][]*k
 				k.Time = r.Time
 			}
 			if k.Lineage == nil {
-				k.Lineage = e.Lineage
+				k.Lineage = e.Lineage.ForBranch(r.Line)
 			} else {
-				k.Lineage.Merge(e.Lineage)
+				if err := k.Lineage.Merge(e.Lineage); err != nil {
+					k.LineageError = err.Error()
+				}
 			}
 			if g := e.Git; g != nil && g.Identity != "" {
 				k.Repo, k.Remote = nonEmpty(k.Repo, g.Identity), nonEmpty(k.Remote, g.Remote)
@@ -300,7 +304,7 @@ func knownClouds(es []Entry, clouds []cloudRef, pasted []Pasted) map[string][]*k
 				}
 			}
 			for _, h := range e.Lineage.Hops {
-				if h.Kind == lineage.HopHandoff && h.To == ri && h.From >= 0 && h.From < len(e.Lineage.Replicas) && e.Lineage.Replicas[h.From].Key == e.Session.Key {
+				if h.Kind == lineage.HopHandoff && h.To == r.ID && e.Lineage.HasReplica(h.From) && e.Lineage.Replica(h.From).Key == e.Session.Key {
 					k.Original = e.Machine + ":" + e.Session.Key.String()
 				}
 			}

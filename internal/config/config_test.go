@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -213,18 +214,74 @@ func TestTerminalWindow(t *testing.T) {
 func TestWindowLayout(t *testing.T) {
 	t.Setenv("HOPSESH_CONFIG_DIR", t.TempDir())
 	c := Defaults()
-	c.Window = Window{SidebarWidth: 260, SidebarHidden: true, InspectorWidth: 480}
+	c.Window = Window{SidebarWidth: 260, SidebarHidden: true, InspectorWidth: 900}
+	c.Inspector = Inspector{Open: []string{"copies"}, Closed: []string{"repository"}}
 	if err := Save(c); err != nil {
 		t.Fatal(err)
 	}
 	back, err := Load()
-	if err != nil || back.Window != c.Window {
-		t.Fatalf("%+v %v", back.Window, err)
+	if err != nil || back.Window != c.Window || !reflect.DeepEqual(back.Inspector, c.Inspector) {
+		t.Fatalf("%+v %+v %v", back.Window, back.Inspector, err)
 	}
-	for _, bad := range []Window{{SidebarWidth: 100}, {SidebarWidth: 400}, {InspectorWidth: 200}, {InspectorWidth: 900}} {
+	c.Inspector = Inspector{Open: []string{"history"}}
+	if c.Check() == nil {
+		t.Error("an unknown inspector section passed the check")
+	}
+	c.Inspector = Inspector{}
+	for _, bad := range []Window{{SidebarWidth: 100}, {SidebarWidth: 400}, {InspectorWidth: 200}, {InspectorWidth: 1000}} {
 		c.Window = bad
 		if c.Check() == nil {
 			t.Errorf("%+v passed the check", bad)
 		}
+	}
+}
+
+// The session list's display and filters: omitted until set, a round trip, and values the
+// app does not know, refused with the ones it does.
+func TestList(t *testing.T) {
+	t.Setenv("HOPSESH_CONFIG_DIR", t.TempDir())
+	c := Defaults()
+	if err := Save(c); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(Path()); strings.Contains(string(b), "[list") {
+		t.Fatalf("an unset list is written:\n%s", b)
+	}
+	c.List = List{GroupBy: "location", SortBy: "title", SortReverse: true, Density: "compact", CollapseInactive: true,
+		Collapsed: []string{"location:laptop"}, Expanded: []string{"location:here"},
+		Filter: ListFilter{Status: []string{"working", "idle", "needs"}, Location: []string{"clouds"}, LocationNot: true, Agent: []string{"codex"},
+			Repository: []string{"github.com/o/r"}, LastActive: "7d", Has: []string{"tab"}}}
+	c.Agents = map[string]Agent{"claude": {Place: PlaceTerminal}, "codex": {Place: PlaceHere}}
+	off := false
+	c.Previews = &off
+	if err := Save(c); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(Path())
+	for _, want := range []string{"[list]", "[list.filter]", "group_by = \"location\"", "status = [\"working\", \"idle\", \"needs\"]", "[agents.claude]", "place = \"terminal\"", "previews = false"} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("the file lacks %s:\n%s", want, b)
+		}
+	}
+	back, err := Load()
+	if err != nil || !reflect.DeepEqual(back.List, c.List) || !reflect.DeepEqual(back.Agents, c.Agents) || back.PreviewsOn() {
+		t.Fatalf("%+v %+v %v", back.List, back.Agents, err)
+	}
+	for _, bad := range []List{{GroupBy: "folder"}, {SortBy: "size-desc"}, {Density: "dense"}, {Filter: ListFilter{Status: []string{"running"}}},
+		{Filter: ListFilter{Location: []string{"laptop"}}}, {Filter: ListFilter{LastActive: "1y"}}, {Filter: ListFilter{Has: []string{"pr"}}},
+		{Collapsed: make([]string, ListKeysMax+1)}} {
+		c.List = bad
+		if c.Check() == nil {
+			t.Errorf("%+v passed the check", bad)
+		}
+	}
+	c.List = List{GroupBy: "folder"}
+	if err := c.Check(); err == nil || !strings.Contains(err.Error(), `use "repository", "location", "agent", "status", "last-active", "none"`) {
+		t.Errorf("the error names the allowed values: %v", err)
+	}
+	c.List = List{}
+	c.Agents = map[string]Agent{"claude": {Place: "browser"}}
+	if c.Check() == nil {
+		t.Error("an unknown place passed the check")
 	}
 }
