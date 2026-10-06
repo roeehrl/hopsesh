@@ -41,23 +41,26 @@ const MenuEvent = "hopsesh:menu"
 
 // App is the service bound to the frontend.
 type App struct {
-	mu       sync.Mutex
-	scanMu   sync.Mutex // serialize inventory refreshes
-	scans    map[string]MachineScan
-	core     *app.App // its Cfg is the saved configuration; calls work on snapshots
-	cfgErr   error    // the configuration file could not be used (see StartFresh)
-	inv      *app.Inventory
-	invAt    time.Time // when inv last read the other machines and the clouds
-	plan     *move.Plan
-	input    move.Input
-	res      *move.Result
-	push     *app.Push // a push planned on another machine, its connection open
-	pw       *pwBroker
-	appIcons map[agent.ID]string // installed apps' icons, read once ("" when none)
-	pwOnce   sync.Once
-	step     *pendingStep // the terminal step a hand-off waits for
-	quitting atomic.Bool  // the user confirmed quitting (or an update restarts the app)
-	termName atomic.Value // the user's terminal app's name, for the terminal window (a string)
+	Desktop   DesktopShell `json:"-"`
+	desktopMu sync.Mutex
+	quick     quickState
+	mu        sync.Mutex
+	scanMu    sync.Mutex // serialize inventory refreshes
+	scans     map[string]MachineScan
+	core      *app.App // its Cfg is the saved configuration; calls work on snapshots
+	cfgErr    error    // the configuration file could not be used (see StartFresh)
+	inv       *app.Inventory
+	invAt     time.Time // when inv last read the other machines and the clouds
+	plan      *move.Plan
+	input     move.Input
+	res       *move.Result
+	push      *app.Push // a push planned on another machine, its connection open
+	pw        *pwBroker
+	appIcons  map[agent.ID]string // installed apps' icons, read once ("" when none)
+	pwOnce    sync.Once
+	step      *pendingStep // the terminal step a hand-off waits for
+	quitting  atomic.Bool  // the user confirmed quitting (or an update restarts the app)
+	termName  atomic.Value // the user's terminal app's name, for the terminal window (a string)
 	// Wails is the running application (events, clipboard, dialogs).
 	Wails *application.App `json:"-"`
 	// Terms are the terminal's tabs and window (not bound to the window: see terminal.go).
@@ -127,13 +130,14 @@ type AgentCloudDTO struct {
 
 // Info is static information for the window.
 type Info struct {
-	Version     string `json:"version"`
-	OS          string `json:"os"` // runtime.GOOS: the window words things for its system
-	Host        string `json:"host"`
-	ReposDir    string `json:"reposDir"`
-	AuditDir    string `json:"auditDir"`
-	HasHosts    bool   `json:"hasHosts"`
-	ConfigError string `json:"configError,omitempty"`
+	DesktopManaged bool   `json:"desktopManaged"`
+	Version        string `json:"version"`
+	OS             string `json:"os"` // runtime.GOOS: the window words things for its system
+	Host           string `json:"host"`
+	ReposDir       string `json:"reposDir"`
+	AuditDir       string `json:"auditDir"`
+	HasHosts       bool   `json:"hasHosts"`
+	ConfigError    string `json:"configError,omitempty"`
 	// ConfigNewer: a newer hopsesh wrote the configuration; the window offers to update
 	// hopsesh first, and setting the file aside only as a second, confirmed choice.
 	ConfigNewer bool       `json:"configNewer,omitempty"`
@@ -182,7 +186,7 @@ func (a *App) Info() Info {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	cfg := a.core.Cfg
-	info := Info{Version: version.Version, OS: runtime.GOOS, Host: app.LocalName(), ReposDir: cfg.ReposDir,
+	info := Info{DesktopManaged: a.Desktop != nil, Version: version.Version, OS: runtime.GOOS, Host: app.LocalName(), ReposDir: cfg.ReposDir,
 		AuditDir: filepath.Join(config.StateDir(), "log"), UpdateCheck: cfg.UpdateCheck,
 		SkillState: skill.State, SkillPrompt: cfg.SkillPrompt, Receive: cfg.Peer.Receive,
 		SetupDismissed: cfg.SetupPrompt == "declined", Layout: layoutOf(cfg.Window, cfg.Inspector),
@@ -482,6 +486,12 @@ func (a *App) SetReposDir(dir string) error {
 
 // Shutdown closes connections and ends the terminal's tabs.
 func (a *App) Shutdown() {
+	if a.quick.cancel != nil {
+		a.quick.cancel()
+	}
+	if a.Desktop != nil {
+		a.Desktop.Stop()
+	}
 	if a.Terms != nil {
 		a.Terms.CloseAll()
 	}

@@ -51,3 +51,29 @@ test("the details pane and settings work against the real service", async () => 
   await page.getByRole("tab", { name: "Agents" }).click();
   await expect(page.locator(".cap", { hasText: "continues in other agents" }).first()).toBeVisible();
 });
+
+// Native WebView2 and Win32 mode changes; preserve real login registration.
+test("desktop placement and the native Quick access window", async () => {
+  const call = (name: string, ...args: unknown[]) => page.evaluate(async ({name,args}) => {
+    // @ts-expect-error runtime module is supplied by the native app
+    const {Call} = await import('/wails/runtime.js');
+    return Call.ByName('github.com/roeehrl/hopsesh/internal/ui/gui.App.'+name,...args);
+  }, {name,args});
+  const initial = await call('DesktopSettings');
+  expect(initial.capabilities).toMatchObject({tray:true,hideApp:true});
+  const input={close:'keep',attention:true,previews:true,login:initial.login};
+  try {
+    for(const mode of ['app','both','tray']) {
+      await call('SaveDesktop',{...input,mode});
+      expect((await call('DesktopSettings')).effective).toBe(mode);
+    }
+    await call('QuickShow');
+    const quick=browser.contexts().flatMap(c=>c.pages()).find(p=>new URL(p.url()).pathname==='/quick.html');
+    expect(quick).toBeTruthy();
+    await quick!.getByRole('button',{name:'Recent',exact:true}).click();
+    await quick!.locator('.quick-row').first().click();
+    await expect(quick!.locator('.quick-message').first()).toBeVisible();
+    await quick!.getByRole('button',{name:'Open session details',exact:true}).click();
+    await expect(page.locator('.row[aria-selected="true"]')).toBeVisible();
+  } finally { await call('SaveDesktop',{...input,mode:'app',close:'quit'}); }
+});

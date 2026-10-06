@@ -13,6 +13,7 @@ require (
 	github.com/charmbracelet/x/vt v0.0.0-20261001101533-953920dd3285
 	github.com/charmbracelet/x/xpty v0.1.4
 	github.com/coder/websocket v1.8.14
+	github.com/godbus/dbus/v5 v5.2.2
 	github.com/muesli/cancelreader v0.2.2
 	github.com/pkg/sftp v1.13.11
 	github.com/rogpeppe/go-internal v1.16.0
@@ -41,7 +42,6 @@ require (
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/creack/pty v1.1.24 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
-	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect

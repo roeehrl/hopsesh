@@ -21,6 +21,11 @@ start fresh and add your machines again.
 
 ### Added
 
+- **Menu bar and system tray Quick access.** Choose the supported Dock/taskbar/tray
+  placement in Settings → Desktop, independently of login startup and window-close
+  behavior. Search sessions, preview conversations, open exact session details and focus
+  existing terminal tabs from the compact window. Linux detects tray support and keeps
+  normal app access when the host is unavailable. See [Desktop presence](docs/desktop-presence.md).
 - **Cloud sessions.** `hopsesh clouds` lists the clouds hopsesh can reach: Claude Code cloud
   (`claude-cloud`), Codex cloud (`codex-cloud`), the GitHub Copilot cloud agent
   (`copilot-cloud`), Jules (`jules`), Devin (`devin`) and Amp (`amp`). Each is off until you

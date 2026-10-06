@@ -42,6 +42,10 @@ func newMachineHome(t *testing.T, root, name string, withSession bool) machineHo
 				return err
 			}
 			rel, _ := filepath.Rel(fix, p)
+			// Fixture PIDs are not processes owned by this isolated test machine.
+			if strings.HasPrefix(filepath.ToSlash(rel), "sessions/") {
+				return nil
+			}
 			b, _ := os.ReadFile(p)
 			b = []byte(strings.ReplaceAll(string(b), "/home/u/git/demo", jsonText(m.repo)))
 			rel = strings.ReplaceAll(rel, "-home-u-git-demo", claude.Slug(m.repo))
