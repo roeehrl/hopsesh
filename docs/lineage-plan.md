@@ -271,3 +271,8 @@ from treating two isolated native files as a single replica. Consecutive undo ad
 metadata guards that match the exact restored bytes before compensation; all native guards
 remain unchanged. Both no-new-work consecutive undo and refusal after later authored work
 have mandatory regressions. The cloud fetch/convert/two-undo matrix row passed locally.
+
+TUI plans provide a `d` destination picker, retained after selection and refreshed before
+applying. `h` opens the branch's scrollable Journey with origin, operation IDs, undo labels
+and fidelity losses. Its workless plans/results explicitly report zero new messages and
+transfers. These controls have native-module and stale-plan keyboard regressions.

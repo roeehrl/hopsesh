@@ -59,6 +59,7 @@ const (
 	modeDone
 	modeError
 	modeBrought // what came back from a cloud
+	modeJourney
 )
 
 type row struct {
@@ -67,27 +68,29 @@ type row struct {
 }
 
 type model struct {
-	deps     Deps
-	copied   bool // the resume command was copied on the done screen
-	mode     mode
-	width    int
-	height   int
-	inv      *app.Inventory
-	rows     []row
-	cursor   int
-	offset   int
-	filter   string
-	editing  bool
-	opts     move.Options
-	target   agent.ID // the agent to continue in ("" = the session's own)
-	plan     *move.Plan
-	planning bool // a new plan is being worked out; the one shown is out of date
-	input    move.Input
-	sel      row
-	result   *move.Result
-	err      error
-	exit     *Exit
-	started  time.Time
+	deps          Deps
+	copied        bool // the resume command was copied on the done screen
+	mode          mode
+	width         int
+	height        int
+	inv           *app.Inventory
+	rows          []row
+	cursor        int
+	offset        int
+	filter        string
+	editing       bool
+	opts          move.Options
+	target        agent.ID // the agent to continue in ("" = the session's own)
+	plan          *move.Plan
+	destinations  []agent.Summary
+	journeyOffset int
+	planning      bool // a new plan is being worked out; the one shown is out of date
+	input         move.Input
+	sel           row
+	result        *move.Result
+	err           error
+	exit          *Exit
+	started       time.Time
 	// Clouds: a session planned from a pasted link or the vendor's picker (not a row), what
 	// came back from a cloud, and the link being pasted.
 	picked  *app.Entry
@@ -225,6 +228,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err, m.mode = msg.err, modeError
 		} else {
 			m.plan, m.input, m.mode = msg.plan, msg.input, modePlan
+			if len(msg.plan.Destinations) > 0 || m.opts.TargetSession == "" {
+				m.destinations = msg.plan.Destinations
+			}
 		}
 	case briefEdited:
 		return m.briefDone(msg)
@@ -312,8 +318,25 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch m.mode {
+	case modeJourney:
+		switch k {
+		case "q", "esc", "h":
+			m.mode = modeBrowse
+		case "up", "k":
+			m.journeyOffset = max(0, m.journeyOffset-1)
+		case "down", "j":
+			m.journeyOffset = min(max(0, len(m.journeyLines())-max(1, m.height-5)), m.journeyOffset+1)
+		case "pgdown":
+			m.journeyOffset = min(max(0, len(m.journeyLines())-max(1, m.height-5)), m.journeyOffset+max(1, m.height-5))
+		case "pgup":
+			m.journeyOffset = max(0, m.journeyOffset-max(1, m.height-5))
+		}
 	case modeBrowse:
 		switch k {
+		case "h":
+			if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil && m.rows[m.cursor].item.Entry.Lineage != nil {
+				m.sel, m.mode, m.journeyOffset = m.rows[m.cursor], modeJourney, 0
+			}
 		case "q", "esc":
 			return m, tea.Quit
 		case "up", "k":
@@ -332,6 +355,7 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		case "enter":
 			if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil {
 				m.sel, m.target, m.picked, m.ho = m.rows[m.cursor], "", nil, handoff{}
+				m.opts.TargetSession, m.destinations = "", nil
 				return m, m.planCmd()
 			}
 		case "c":
@@ -339,6 +363,7 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		case "i":
 			if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil {
 				m.sel, m.target, m.picked, m.ho = m.rows[m.cursor], "", nil, handoff{}
+				m.opts.TargetSession, m.destinations = "", nil
 				if m.target = m.nextAgent(); m.target != "" {
 					return m, m.planCmd()
 				}
@@ -367,11 +392,16 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 				m.mode = modeApplying
 				return m, m.applyCmd()
 			}
+		case "d":
+			if !m.planning && m.cycleDestination() {
+				return m, m.planCmd()
+			}
 		case "c":
 			m.opts.Clone = !m.opts.Clone
 			return m, m.planCmd()
 		case "a":
 			m.target = m.nextAgent()
+			m.opts.TargetSession, m.destinations = "", nil
 			return m, m.planCmd()
 		case "w":
 			m.opts.Worktree = map[move.WorktreeMode]move.WorktreeMode{move.WorktreeAuto: move.WorktreeCreate,
@@ -575,6 +605,8 @@ func (m *model) View() tea.View {
 		fmt.Fprintf(&b, "\n  Scanning this machine and %d allowed machine(s)… %s\n", countAllowed(m.deps.App), dim.Render(time.Since(m.started).Truncate(time.Second).String()))
 	case modeBrowse:
 		m.viewBrowse(&b)
+	case modeJourney:
+		m.viewJourney(&b)
 	case modePlan:
 		switch m.plan.Kind {
 		case move.KindFetch:
@@ -773,7 +805,7 @@ func (m *model) viewBrowse(b *strings.Builder) {
 		m.viewPicker(b)
 		return
 	}
-	hint := "\n  ↑↓ move · enter bring here · i continue in · c hand off · / search · r refresh · q quit"
+	hint := "\n  ↑↓ move · enter bring here · i continue in · c hand off · h journey · / search · r refresh · q quit"
 	if m.partialCloud() != nil {
 		hint = "\n  ↑↓ move · enter resume/bring · i continue in · c hand off · p paste a cloud link · f find in a cloud · / search · r refresh · q quit"
 	}
@@ -786,7 +818,20 @@ func (m *model) viewPlan(b *strings.Builder) {
 	if p.Kind == move.KindContinue {
 		verb = "Continue in " + p.Agent
 	}
+	if p.NoWork {
+		verb = "Sync lineage receipts for"
+	}
 	fmt.Fprintf(b, "\n  %s %q\n", bold.Render(verb), p.Title)
+	if len(m.destinations) > 0 {
+		b.WriteString("  [d] choose destination session:\n")
+		for _, destination := range m.destinations {
+			selected := "  "
+			if m.opts.TargetSession == destination.Key.String() {
+				selected = "→ "
+			}
+			fmt.Fprintf(b, "    %s%s · %s\n", selected, destination.Title, destination.Key.String())
+		}
+	}
 	if m.planning {
 		b.WriteString("  updating the plan…\n")
 	}
@@ -805,7 +850,9 @@ func (m *model) viewPlan(b *strings.Builder) {
 	if r.Worktree != "" {
 		fmt.Fprintf(b, "  worktree → %s\n", r.Worktree)
 	}
-	if c := p.Continue; c != nil {
+	if p.NoWork {
+		fmt.Fprintf(b, "  existing session %s · 0 new messages, 0 transfers\n", p.Placement.Key)
+	} else if c := p.Continue; c != nil {
 		if c.Relation == move.RelationAppend {
 			fmt.Fprintf(b, "  adds the new work to %s here\n", c.AppendTo.Key)
 		}
@@ -857,7 +904,9 @@ func (m *model) viewPlan(b *strings.Builder) {
 
 func (m *model) viewDone(b *strings.Builder) {
 	p, res := m.plan, m.result
-	if p.Kind == move.KindContinue {
+	if p.NoWork {
+		fmt.Fprintf(b, "\n  %s %q already synchronized · 0 new messages, 0 transfers.\n", okSt.Render("✓"), p.Title)
+	} else if p.Kind == move.KindContinue {
 		fmt.Fprintf(b, "\n  %s %q continues in %s.\n", okSt.Render("✓"), p.Title, p.Agent)
 	} else {
 		fmt.Fprintf(b, "\n  %s %q is on this machine: %d file(s), %s.\n", okSt.Render("✓"), p.Title, res.Files, move.Human(res.Bytes))

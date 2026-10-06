@@ -123,7 +123,9 @@ func push(cmd *cobra.Command, refArg, machine string) error {
 
 func (r *run) renderPushResult(p *move.Plan, pr *app.PushResult) {
 	res := pr.Result
-	if p.Kind == move.KindContinue {
+	if p.NoWork {
+		r.printf("\n✓ %q already synchronized on %s: 0 new messages, 0 transfers.\n", p.Title, pr.Machine)
+	} else if p.Kind == move.KindContinue {
 		r.printf("\n✓ %q continues in %s on %s.\n", p.Title, p.Agent, pr.Machine)
 	} else {
 		r.printf("\n✓ %q is on %s: %d file(s), %s.\n", p.Title, pr.Machine, res.Files, move.Human(res.Bytes))

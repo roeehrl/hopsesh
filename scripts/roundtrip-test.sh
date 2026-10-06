@@ -4,7 +4,7 @@
 #   "box"  = user hsremote (the session starts there)
 #   "back" = user hsback   (runs hopsesh first)
 # box → back: code comes along straight from box (never pushed), box's copy gets marked.
-# back → box: the marked copy on box is replaced by the newer one, back's copy gets marked.
+# back → box: missing work is appended to the original native ID, back's copy gets marked.
 # Then both copies change and a move is refused until --keep-both.
 # Run by CI on Linux and macOS; needs sudo, sshd and git. The account running it is not changed.
 set -eu
@@ -32,10 +32,10 @@ BHOME=$(th_home "$B")
 user_env() {
   u=$1 h=$2
   shift 2
-  sudo -u "$u" -H env -u XDG_CONFIG_HOME -u XDG_STATE_HOME -u XDG_CACHE_HOME -u XDG_DATA_HOME HOME="$h" "$@"
+  sudo -u "$u" -H env -u HOPSESH_CONFIG_DIR -u XDG_CONFIG_HOME -u XDG_STATE_HOME -u XDG_CACHE_HOME -u XDG_DATA_HOME HOME="$h" "$@"
 }
-as_a() { user_env "$A" "$AHOME" HOPSESH_MACHINE=back HOPSESH_CONFIG_DIR="$AHOME/.hscfg" HOPSESH_STATE_DIR="$AHOME/.hsstate" "$@"; }
-as_b() { user_env "$B" "$BHOME" HOPSESH_MACHINE=box HOPSESH_CONFIG_DIR="$BHOME/.hscfg" HOPSESH_STATE_DIR="$BHOME/.hsstate" "$@"; }
+as_a() { user_env "$A" "$AHOME" HOPSESH_MACHINE=back HOPSESH_STATE_DIR="$AHOME/.hsstate" "$@"; }
+as_b() { user_env "$B" "$BHOME" HOPSESH_MACHINE=box HOPSESH_STATE_DIR="$BHOME/.hsstate" "$@"; }
 sh_a() { user_env "$A" "$AHOME" sh -c "$1"; }
 sh_b() { user_env "$B" "$BHOME" sh -c "$1"; }
 
@@ -94,15 +94,18 @@ say "back → box (hop back)"
 as_b "$HS" hosts add back "$A@127.0.0.1" >/dev/null
 as_b "$HS" trust back --yes >/dev/null
 as_b "$HS" pull "back:$ID" --yes --json > "$WORK/pull2.json" 2>&1 || { cat "$WORK/pull2.json"; fail "hop back"; }
-grep -q '"setAside"' "$WORK/pull2.json" || fail "box's stale copy should be set aside"
+grep -q '"relation": *"append"' "$WORK/pull2.json" || fail "the return should append only missing work to the original"
 sudo grep -q "continued on back" "$BFILE" || fail "box should now have the newer copy"
-if sudo grep -q 'moved to' "$BFILE"; then fail "the copy that came home must not carry a moved mark"; fi
+if sudo cat "$BFILE" | grep '"type":"custom-title"' | tail -n 1 | grep -q 'moved to'; then fail "the copy that came home must not carry a moved mark"; fi
 [ "$(sh_b 'git -C ~/rt rev-parse HEAD')" = "$THREE" ] || fail "box's checkout should be at back's commit"
-sudo tail -n 1 "$AFILE" | grep -q 'moved to' || fail "back's copy should now be marked moved"
+sudo tail -n 1 "$AFILE" | grep -Eq 'moved to|continued in' || fail "back's copy should now be marked continued"
 
 say "both change: a conflict"
+# The return writer generated native UUIDs; fork the actual active leaf, not u2.
+BLEAF=$(sudo cat "$BFILE" | python3 -c 'import json,sys; records=[json.loads(l) for l in sys.stdin]; print([r["leafUuid"] for r in records if r.get("type")=="last-prompt"][-1])')
 sh_a "echo '{\"type\":\"user\",\"uuid\":\"u3\",\"parentUuid\":\"u2\",\"sessionId\":\"$ID\",\"cwd\":\"$AHOME/git/rt\",\"timestamp\":\"2026-10-02T13:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"kept going on back after the move\"}}' >> '$AFILE'"
-sh_b "echo '{\"type\":\"user\",\"uuid\":\"u4\",\"parentUuid\":\"u2\",\"sessionId\":\"$ID\",\"cwd\":\"$BHOME/rt\",\"timestamp\":\"2026-10-02T14:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"and on box\"}}' >> '$BFILE'"
+sh_b "echo '{\"type\":\"user\",\"uuid\":\"u4\",\"parentUuid\":\"$BLEAF\",\"sessionId\":\"$ID\",\"cwd\":\"$BHOME/rt\",\"timestamp\":\"2026-10-02T14:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"and on box\"}}' >> '$BFILE'"
+sh_b "echo '{\"type\":\"last-prompt\",\"leafUuid\":\"u4\",\"sessionId\":\"$ID\"}' >> '$BFILE'"
 if as_a "$HS" pull "box:$ID" --yes --json > "$WORK/pull3.json" 2>&1; then fail "a move over a changed copy must be refused"; fi
 grep -q "keep-both" "$WORK/pull3.json" || { cat "$WORK/pull3.json"; fail "the refusal should offer --keep-both"; }
 as_a "$HS" pull "box:$ID" --yes --json --keep-both > "$WORK/pull4.json" || { cat "$WORK/pull4.json"; fail "keep both"; }
