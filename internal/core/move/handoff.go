@@ -632,13 +632,16 @@ func planBrief(ctx context.Context, p *Plan, in HandoffInput, opt Options, check
 	if home := src.Machine.Facts.Home; home != "" && len(home) > 1 && strings.Contains(hp.Brief, home+"/") {
 		hp.Brief, relative = strings.ReplaceAll(hp.Brief, home+"/", "~/"), true
 	}
-	hp.Tokens = len(hp.Brief) / 4
+	hp.Tokens = len(hp.Brief)
 	if e := strings.TrimSpace(opt.Brief); e != "" {
 		if !strings.HasPrefix(e, agent.NotePrefix) {
 			e = agent.NotePrefix + e
 		}
 		masked, n := scan.Redact([]byte(e))
-		hp.Brief, hp.Masked, hp.Tokens, hp.Edited, hp.Shortened = string(masked), n, len(masked)/4, true, false
+		hp.Brief, hp.Masked, hp.Tokens, hp.Edited, hp.Shortened = string(masked), n, len(masked), true, false
+	}
+	if hp.Tokens > convert.CloudBudget {
+		p.Blockers = append(p.Blockers, fmt.Sprintf("edited briefing exceeds the %d-token conservative budget; shorten it before sending", convert.CloudBudget))
 	}
 	hp.MaskedRules = maskedRules(hp.Brief)
 	hp.HistoryWarning = fmt.Sprintf("hopsesh can't tell whether %s is public. Anyone who can see the branch could read this file.", nonEmpty(hp.Repo, "the repository"))

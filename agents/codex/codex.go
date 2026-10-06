@@ -350,8 +350,30 @@ func summarize(h agent.Host, r rollout) (*agent.Summary, error) {
 			break
 		}
 	}
-	if !talked {
-		return nil, nil // no conversation yet
+	for _, record := range tl {
+		if record.Type != "event_msg" {
+			continue
+		}
+		var event struct {
+			Type    string          `json:"type"`
+			Error   json.RawMessage `json:"error"`
+			Message string          `json:"message"`
+			Code    string          `json:"codex_error_info"`
+		}
+		if json.Unmarshal(record.Payload, &event) != nil {
+			continue
+		}
+		if event.Type == "error" || event.Type == "task_complete" {
+			body := string(event.Error) + " " + event.Message + " " + event.Code
+			if strings.Contains(body, "context_window_exceeded") || strings.Contains(body, "ContextWindowExceeded") || strings.Contains(body, "ran out of room in the model's context window") {
+				s.ContextOverflow = true
+			} else if event.Type == "task_complete" && (len(event.Error) == 0 || string(event.Error) == "null") {
+				s.ContextOverflow = false
+			}
+		}
+	}
+	if !talked && size <= headChunk {
+		return nil, nil // a fully sampled file has no conversation yet
 	}
 	return s, nil
 }
@@ -461,6 +483,15 @@ func (m *Module) Bundle(_ context.Context, h agent.Host, in agent.Install, s age
 		return agent.Bundle{}, err
 	}
 	b := agent.Bundle{Files: []agent.BundleFile{{Root: home, Rel: toSlash(rel), Size: fi.Size(), Role: agent.RoleMain, Rewrite: agent.RewriteJSONL, Growable: true}}}
+	if !strings.ContainsAny(string(s.Key.Session), "/\\") && s.Key.Session != ".." && s.Key.Session != "." && s.Key.Session != "" {
+		archiveRel := "hopsesh/archives/" + string(s.Key.Session) + ".jsonl"
+		if archive, err := h.FS().Stat(pa.Join(root, archiveRel)); err == nil {
+			b.Files = append(b.Files, agent.BundleFile{Root: home, Rel: archiveRel, Size: archive.Size(), Role: agent.RoleSide, Rewrite: agent.RewriteJSONL})
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return agent.Bundle{}, fmt.Errorf("preserved history: %w", err)
+		}
+	}
+
 	head, err := h.FS().ReadFile(s.Path, headChunk)
 	if err != nil && !errors.Is(err, io.EOF) {
 		head = nil
@@ -491,6 +522,9 @@ func (m *Module) PlanMove(src, dst agent.Install, s agent.Summary, b agent.Bundl
 	}
 	for _, f := range b.Files {
 		to := f.Rel
+		if f.Rel == "hopsesh/archives/"+oldID+".jsonl" {
+			to = "hopsesh/archives/" + newID + ".jsonl"
+		}
 		if f.Role == agent.RoleMain && oldID != newID {
 			to = path.Join(path.Dir(f.Rel), strings.Replace(path.Base(f.Rel), oldID, newID, 1))
 		}

@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Fixed
+
+- Prevent oversized working contexts in Claude/Codex conversions, vendor imports, cloud
+  returns and repeated round trips. Count final briefings and existing active context;
+  preserve portable text in journaled archives with bounded retrieval. Full destinations
+  can roll over to a new native session on the same logical branch. Recovery is available
+  in the GUI, TUI and CLI; originals remain available. See [context safety](docs/context-safety.md).
+- Keep Codex sessions with large first messages visible. Report imported history and
+  preparation status accurately; enforce edited cloud briefing limits and record cloud
+  return conversion losses.
+
 ## [0.4.0] - 2026-10-05
 
 hopsesh now works with the coding agents' clouds: it hands a session to Claude Code on the

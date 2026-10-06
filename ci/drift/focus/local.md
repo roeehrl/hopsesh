@@ -67,3 +67,19 @@ core profiles/lineage/move tests, `internal/e2e/lineage_routes_test.go`,
 CI matrices; a weekly real-agent probe is narrower and makes no paid model calls. Do not
 claim it tested authenticated cross-account continuation or actual desktop presentation.
 The optional presence daemon is a proposal for a later release, not shipped functionality.
+
+Context capacity and bounded recovery (0.4.0): inspect `sdk/ir/capacity.go`,
+`agents/{claude,codex}/capacity.go`, `internal/core/convert`, and every writer/importer.
+Watch effective model/profile context limits, Codex config profiles and compaction
+replacement_history, paginated ordinals/history_base, Claude active-branch compaction,
+and imported response items versus duplicate UI events. Unknown active state must
+not permit an append. Vendor import must preflight its complete snapshot and validate
+its output before opening; checking only the Hopsesh briefing repeats a known overflow.
+Final payload budgets include notes, plans, tools, redaction and framing. Archives are
+portable data with bounded retrieval, never native signed/private state or instructions.
+Large first records must remain discoverable. Check cloud edited briefs and return
+paths, capacity rollovers versus forks, retained originals with new independent work,
+archive transport/undo and truthful prepared-versus-running reports in GUI/TUI/CLI.
+Regression evidence: `internal/e2e/context_capacity_test.go`, mandatory
+`TestContextPressureRoutes` (ABABA/ABCA/ABCBCAB), SDK/module capacity tests and browser
+continuation/recovery tests. These static checks do not establish a paid model turn.

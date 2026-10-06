@@ -78,7 +78,8 @@ type Reader interface {
 type Importer interface {
 	CanImport(from ID) bool
 	// Import converts the session file at path (on h's machine) into a new session of this
-	// agent and returns its id.
+	// agent and returns its id. If validation fails after creation, return both its
+	// id and an error so the core can adopt the file for undo without launching it.
 	Import(ctx context.Context, h Host, in Install, from ID, path, cwd, title string) (SessionID, error)
 }
 

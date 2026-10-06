@@ -208,7 +208,7 @@ func (r *runner) scenario(row Row) error {
 	}
 	s.dstCwd = tr.Cwd
 	switch row.Op {
-	case "move", "continue":
+	case "move", "continue", "bounded":
 		return r.pullAndUndo(s)
 	case "push":
 		return r.push(s)
@@ -226,6 +226,9 @@ func (s *sc) ref() string { return s.host + ":" + s.row.From + "/" + s.id }
 
 func (s *sc) pullArgs(extra ...string) []string {
 	args := []string{"pull", s.ref(), "--yes", "--json"}
+	if s.row.Op == "bounded" {
+		args = append(args, "--bounded")
+	}
 	if s.row.To != s.row.From {
 		args = append(args, "--in", s.row.To)
 	}

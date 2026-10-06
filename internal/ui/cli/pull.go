@@ -23,6 +23,7 @@ func addPullFlags(cmd *cobra.Command) {
 	f := cmd.Flags()
 	f.String("in", "", "continue in this agent ("+strings.Join(writerIDs(), ", ")+"; default: the session's own; from copilot-cloud or amp, whose text is written into an agent here: the one it was handed off from, else claude)")
 	f.String("fidelity", "history", "for another agent: history (the conversation as text) or note (a briefing only)")
+	f.Bool("bounded", false, "create a bounded continuation on the same branch; preserve the original session and portable archive")
 	f.Bool("native", false, "for another agent that can: replay exact tool calls as its own (experimental)")
 	f.String("note-file", "", "a handoff note for the other agent's briefing")
 	f.Bool("go", false, "start the continued session with \"Continue.\"")
@@ -79,6 +80,7 @@ func (r *run) pullOptions(cmd *cobra.Command) (move.Options, error) {
 	o.StopLocal, _ = f.GetBool("stop-local")
 	o.App, _ = f.GetBool("app")
 	o.Native, _ = f.GetBool("native")
+	o.Bounded, _ = f.GetBool("bounded")
 	o.Go, _ = f.GetBool("go")
 	o.CarryRules, _ = f.GetBool("carry-rules")
 	switch via, _ := f.GetString("via"); via {
@@ -350,6 +352,9 @@ func (r *run) renderPlan(p *move.Plan) {
 			r.printf("  session   a new %s session (%s)\n", p.Agent, c.Fidelity)
 		}
 		r.printf("  carries   %s\n", c.Report.Summary)
+		if c.Report.Archive != "" {
+			r.printf("  archive   %s\n", c.Report.Archive)
+		}
 		if n := p.NativeCopy; n != nil {
 			r.printf("  also      keeps the %s session there byte for byte, so going back to %s adds only the new work\n", n.Agent, n.Agent)
 		}

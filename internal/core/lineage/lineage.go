@@ -77,7 +77,14 @@ const (
 	HopFetch    = "fetch"
 )
 
+// Rollover records the unchanged replica retained when its active context was full.
+type Rollover struct {
+	Replica ReplicaID `json:"replica"`
+	Cursor  ir.Cursor `json:"cursor"`
+}
+
 type Hop struct {
+	Rollover *Rollover `json:"rollover,omitempty"`
 	ID       string    `json:"id"`
 	Parents  []string  `json:"parents,omitempty"`
 	Line     string    `json:"line"`
@@ -844,6 +851,12 @@ func (m *Manifest) Validate() error {
 			return fmt.Errorf("invalid hop endpoints")
 		}
 		from, to := m.Replica(h.From), m.Replica(h.To)
+		if h.Rollover != nil {
+			old := m.Replica(h.Rollover.Replica)
+			if old.ID == "" || old.Line != to.Line || old.Endpoint != to.Endpoint || old.Binding != to.Binding || old.Key.Agent != to.Key.Agent || old.Key.Profile != to.Key.Profile || old.ID == to.ID || h.Rollover.Cursor.Offset < 0 {
+				return fmt.Errorf("invalid capacity rollover")
+			}
+		}
 		if h.Line != to.Line || h.Fork != (from.Line != to.Line) {
 			return fmt.Errorf("invalid operation branch boundary")
 		}
