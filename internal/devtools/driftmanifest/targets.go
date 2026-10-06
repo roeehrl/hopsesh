@@ -112,7 +112,7 @@ var agentWatch = map[agent.ID]target{
 		Watch: watch{
 			Docs:   claudeDocs("sessions", "settings", "skills", "hooks", "headless", "cli-reference", "claude-directory", "permissions", "authentication", "env-vars", "desktop"),
 			Feeds:  []feed{{Kind: "markdown", URL: claudeChangelog}},
-			Grep:   `session|transcript|jsonl|resume|fork|CLAUDE_CONFIG_DIR|skills|CLAUDE\.md|AGENTS\.md|settings|auth|account|login|keychain|credential|Console|desktop|deprecat|remov|rename|breaking`,
+			Grep:   `session|transcript|jsonl|resume|fork|CLAUDE_CONFIG_DIR|hook|SessionStart|UserPromptSubmit|skills|CLAUDE\.md|AGENTS\.md|settings|auth|account|login|keychain|credential|Console|desktop|deprecat|remov|rename|breaking`,
 			Help:   [][]string{{"claude", "--help"}, {"claude", "auth", "status", "--help"}, {"claude", "auth", "login", "--help"}},
 			Relies: []string{"--resume", "--fork-session", "--remote-control", "--desktop", "--version", "--json", "auth", "login", "status"},
 		},
@@ -124,11 +124,11 @@ var agentWatch = map[agent.ID]target{
 		Latest:   latest{From: "npm", Ref: "@openai/codex"},
 		Package:  "@openai/codex",
 		Watch: watch{
-			Docs:  codexDocs("app-server", "config-file/config-reference", "build-skills", "agent-configuration/agents-md", "non-interactive-mode", "auth", "config-file/environment-variables", "config-file/config-advanced", "reference/commands", "developer-commands"),
+			Docs:  codexDocs("app-server", "config-file/config-reference", "build-skills", "agent-configuration/agents-md", "non-interactive-mode", "auth", "config-file/environment-variables", "config-file/config-advanced", "reference/commands", "developer-commands", "hooks"),
 			Feeds: []feed{{Kind: "releases", Repo: "openai/codex", Tag: "rust-v"}},
 			// Track storage evolution without assuming an old limitation is still present;
 			// the reviewer must inspect the current reader and writer.
-			Grep:   `session|rollout|thread|resume|fork|CODEX_HOME|CODEX_SQLITE_HOME|cli_auth_credentials_store|keyring|refreshToken|workspace|identity|desktop|deep.link|codex://|skills|AGENTS\.md|config\.toml|account|auth|app-server|paginated|history_mode|jsonl\.zst|zstd|compress|revert|migrate-rollouts|deprecat|remov|rename|breaking`,
+			Grep:   `session|rollout|thread|resume|fork|CODEX_HOME|CODEX_SQLITE_HOME|cli_auth_credentials_store|keyring|refreshToken|workspace|identity|desktop|deep.link|codex://|hook|SessionStart|UserPromptSubmit|skills|AGENTS\.md|config\.toml|account|auth|app-server|paginated|history_mode|jsonl\.zst|zstd|compress|revert|migrate-rollouts|deprecat|remov|rename|breaking`,
 			Help:   [][]string{{"codex", "--help"}, {"codex", "resume", "--help"}, {"codex", "fork", "--help"}, {"codex", "app-server", "--help"}, {"codex", "login", "--help"}, {"codex", "login", "status", "--help"}},
 			Relies: []string{"resume", "fork", "app-server", "--version", "login", "status"},
 			Code: &code{

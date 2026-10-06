@@ -36,6 +36,7 @@ type Summary struct {
 type MarkKind string
 
 const (
+	MarkPrepared  MarkKind = "prepared"  // destination written; no inference claimed
 	MarkMoved     MarkKind = "moved"     // the session moved to another location
 	MarkContinued MarkKind = "continued" // the session continues in another agent
 )

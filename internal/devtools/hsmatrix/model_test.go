@@ -61,7 +61,24 @@ func TestCloudRows(t *testing.T) {
 			t.Fatalf("no %s row: %v", k, n)
 		}
 	}
-	if n["handoff@claude-cloud"]+n["handoff@codex-cloud"] < 4 || len(rows) > 75 {
+	if n["handoff@claude-cloud"]+n["handoff@codex-cloud"] < 4 || len(rows) > 100 {
 		t.Fatalf("%v of %d rows", n, len(rows))
+	}
+}
+
+// Movement operations must exercise every native agent pairing in PR coverage;
+// triples and OS-pair jobs use the same model and receipt assertions.
+func TestMovementRows(t *testing.T) {
+	rows := pairwise(1)
+	for _, op := range []string{"roundtrip", "quiet-roundtrip", "fork"} {
+		for _, agents := range []string{"claude>claude", "codex>codex", "claude>codex", "codex>claude"} {
+			found := false
+			for _, r := range rows {
+				found = found || r.Op == op && r.From+">"+r.To == agents && r.Location == "machine"
+			}
+			if !found {
+				t.Errorf("no %s %s row", op, agents)
+			}
+		}
 	}
 }

@@ -21,11 +21,12 @@ import (
 
 // App holds what every use case needs.
 type App struct {
-	Cfg      config.Config
-	Reg      *registry.Registry // every compiled-in module
-	StateDir string
-	Audit    *audit.Log
-	Log      *slog.Logger
+	movementReads *movementReadCache
+	Cfg           config.Config
+	Reg           *registry.Registry // every compiled-in module
+	StateDir      string
+	Audit         *audit.Log
+	Log           *slog.Logger
 	// Passwords answers ssh password questions for machines that log in with one (nil:
 	// such machines are reported, not scanned).
 	Passwords func(h config.Host) transport.PasswordFunc
@@ -52,7 +53,7 @@ type App struct {
 
 // New returns an App for the modules and configuration.
 func New(cfg config.Config, reg *registry.Registry, stateDir string, log *audit.Log) *App {
-	return &App{Cfg: cfg, Reg: reg, StateDir: stateDir, Audit: log, Log: slog.Default(), tests: &cloudTests{m: map[string]cloudTest{}}}
+	return &App{movementReads: &movementReadCache{entries: map[string]movementRead{}}, Cfg: cfg, Reg: reg, StateDir: stateDir, Audit: log, Log: slog.Default(), tests: &cloudTests{m: map[string]cloudTest{}}}
 }
 
 // Modules returns the enabled modules.

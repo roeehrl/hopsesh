@@ -22,7 +22,7 @@ import (
 )
 
 const Suffix = ".hopsesh.json"
-const Format = "lineage/4"
+const Format = "lineage/5"
 const maxSize = 16 << 20
 
 type ReplicaID string
@@ -84,6 +84,7 @@ type Rollover struct {
 }
 
 type Hop struct {
+	Notify   bool      `json:"notify,omitempty"` // optional source notice; never conversation work
 	Rollover *Rollover `json:"rollover,omitempty"`
 	ID       string    `json:"id"`
 	Parents  []string  `json:"parents,omitempty"`

@@ -23,7 +23,7 @@ const CAPS = {
   live: "sees open sessions", stop: "quits open sessions", mark: "marks copies left behind", account: "knows its account",
   sanitize: "moves between accounts", read: "continues in other agents", write: "takes sessions from other agents",
   "native-replay": "replays commands natively", integrate: "can use the hopsesh skill", fork: "can fork", "remote-control": "remote control",
-  app: "desktop app", notify: "tells the old session", import: "has its own importer", "post-install": "registers moved sessions",
+  app: "desktop app", import: "has its own importer", "post-install": "registers moved sessions",
   preview: "previews conversations", rename: "renames sessions",
   "cloud-list": "cloud list", "cloud-send": "cloud send", "cloud-fetch": "cloud bring", "cloud-follow": "follow-up", "cloud-archive": "cloud archive",
 };
@@ -59,7 +59,7 @@ function save(patch) {
   // never briefly reveal a preview while SaveSettings/Info are still in flight.
   if (patch.previews !== undefined) state.info.previews = patch.previews;
   Object.assign(s, patch);
-  return run(() => api("SaveSettings", Object.assign({ layout: s.layout, markMoved: s.markMoved, syncCode: s.syncCode, pushSource: s.pushSource, updateCheck: s.updateCheck || "off", appIcons: s.appIcons, previews: s.previews }, patch)), "Saved");
+  return run(() => api("SaveSettings", Object.assign({ layout: s.layout, movementNotices: s.movementNotices, markMoved: s.markMoved, syncCode: s.syncCode, pushSource: s.pushSource, updateCheck: s.updateCheck || "off", appIcons: s.appIcons, previews: s.previews }, patch)), "Saved");
 }
 
 function toggle(key, label, desc) {
@@ -75,9 +75,11 @@ function general() {
       h("div", { class: "set-row" }, title("Clone layout", "Where a repository goes inside the repos folder."),
         h("select", { "aria-label": "Clone layout", onchange: (e) => save({ layout: e.target.value }) },
           h("option", { value: "flat", selected: s.layout === "flat" }, "<repos>/<name>"), h("option", { value: "ghq", selected: s.layout === "ghq" }, "<repos>/<host>/<owner>/<name>"))),
+      toggle("movementNotices", "Record movement notices", "Keep a durable notice of where work was prepared or continued. Each move can override this default."),
       toggle("markMoved", "Mark the copy left behind", "Its title says where the work went (“↪ moved to …”), so it isn't resumed by mistake."),
       toggle("syncCode", "Bring the code along", "Fetch the session's commit (from the other machine if it isn't pushed) and fast-forward a clean checkout."),
       toggle("pushSource", "Push unpushed commits on the other machine first", "Off: commits are fetched straight from the other machine.")),
+    noticeSetup(),
     card(h("span", { class: "sec-h" }, "Appearance"),
       toggle("appIcons", "Show each agent's own app icon", "When the agent's desktop app is installed here, its icon pictures the agent; otherwise hopsesh's own mark does."),
       toggle("previews", "Show conversation previews", "The inspector shows the end of the selected session's conversation, with Markdown formatting, read on its machine. Turn it off when you share your screen.")),
@@ -305,3 +307,16 @@ screen("settings", async (which) => {
   if (!s) loading("Reading the settings…");
   await load();
 });
+
+function noticeSetup() {
+  const hooks = s.noticeHooks || [];
+  return card(h("span", {class:"sec-h"}, "Movement notice delivery"),
+    h("span", {class:"muted"}, "Hopsesh keeps movement notices. Install local hooks to show them when an agent session starts. Installation does not prove delivery; the agent's hook trust settings still apply."),
+    s.noticeHooksError ? h("span", {class:"warn"}, s.noticeHooksError) : null,
+    ...hooks.map(hook => h("div", {class:"set-row"},
+      title(`${hook.agent} · ${hook.profileLabel || hook.profile || "Default account"}`, `${hook.installed ? "Installed" : "Not installed"}${!hook.enabled ? " · notices disabled" : ""}${hook.reason ? " · " + hook.reason : ""}${hook.evidence ? " · " + hook.evidence : ""}`),
+      hook.path ? h("span", {class:"mono",style:"font-size:11px;overflow-wrap:anywhere"}, hook.path) : null,
+      hook.installed ? h("button", {class:"btn",onclick:()=>run(()=>api("RemoveNoticeHooks",hook.agent,hook.profile),"Notice hook removed")}, "Remove hook")
+      : h("button", {class:"btn",disabled:!hook.supported || !s.movementNotices,onclick:()=>run(()=>api("InstallNoticeHooks",hook.agent,hook.profile),"Notice hook installed; delivery depends on agent settings")}, "Install hook"))),
+    h("button", {class:"btn",disabled:!s.movementNotices,onclick:()=>run(()=>api("InstallNoticeHooks","",""),"Local notice hooks installed; delivery depends on agent settings")}, "Set up local notice hooks"));
+}

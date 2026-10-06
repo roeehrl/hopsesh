@@ -75,7 +75,7 @@ func (a *App) PushApply() (*DoneDTO, error) {
 	res, pl := r.Result, p.Plan
 	d := &DoneDTO{NoWork: pl.NoWork, Kind: pl.Kind, Title: pl.Title, Agent: pl.Agent, Command: res.Command, Files: res.Files, Bytes: move.Human(res.Bytes),
 		Secrets: res.Secrets.Total, Redacted: pl.Options.Redact, Cloned: res.Cloned, Worktree: res.Worktree, Journal: r.Journal,
-		SourceHost: pl.Source.Location, Pushed: r.Pushed, SyncNote: res.SyncNote, Mark: res.Mark, MarkError: res.MarkError,
+		SourceHost: pl.Source.Location, Pushed: r.Pushed, SyncNote: res.SyncNote, Mark: res.Mark, MarkError: res.MarkError, Notice: res.Notice,
 		Warnings: res.Warnings, Machine: r.Machine, AuditDir: filepath.Join(config.StateDir(), "log")}
 	if pl.NoWork && pl.SyncTo != nil && pl.SyncTo.Title != "" {
 		d.Title = pl.SyncTo.Title

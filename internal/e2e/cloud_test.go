@@ -24,6 +24,8 @@ import (
 func TestMain(m *testing.M) {
 	name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
 	switch name {
+	case "hopsesh-notice-probe":
+		os.Exit(movementHookProbe())
 	case "claude":
 		os.Exit(fakeagent.Claude())
 	case "codex":

@@ -5,6 +5,7 @@ import "strings"
 // Mark titles: modules whose agent shows session titles mark a copy left behind by
 // retitling it, in one form every module shares, so any hopsesh reads any agent's marks.
 const (
+	preparedPrefix  = "↪ prepared in "
 	movedPrefix     = "↪ moved to "
 	continuedPrefix = "↪ continued in "
 	titleSep        = " · "
@@ -14,8 +15,11 @@ const (
 func MarkTitle(m Mark, title string) string {
 	var t string
 	switch m.Kind {
-	case MarkContinued:
+	case MarkPrepared, MarkContinued:
 		t = continuedPrefix + m.AgentName
+		if m.Kind == MarkPrepared {
+			t = preparedPrefix + m.AgentName
+		}
 		if m.Location != "" {
 			t += " on " + m.Location
 		}
@@ -31,6 +35,11 @@ func MarkTitle(m Mark, title string) string {
 // ParseMarkTitle reads a mark title back: the mark (AgentName set for MarkContinued), the
 // original title, and ok=false when t is an ordinary title.
 func ParseMarkTitle(t string) (Mark, string, bool) {
+	if rest, ok := strings.CutPrefix(t, preparedPrefix); ok {
+		mark, title, valid := ParseMarkTitle(continuedPrefix + rest)
+		mark.Kind = MarkPrepared
+		return mark, title, valid
+	}
 	if rest, ok := strings.CutPrefix(t, movedPrefix); ok {
 		loc, title, _ := strings.Cut(rest, titleSep)
 		loc = strings.TrimSpace(loc)
@@ -52,7 +61,7 @@ func ParseMarkTitle(t string) (Mark, string, bool) {
 
 // MarkPrefixes are the beginnings of every mark title (for dropping marks from a copy
 // that moves on).
-func MarkPrefixes() []string { return []string{movedPrefix, continuedPrefix} }
+func MarkPrefixes() []string { return []string{movedPrefix, continuedPrefix, preparedPrefix} }
 
 // NotePrefix begins every message hopsesh itself adds to a conversation (a move's first
 // prompt, a continuation's briefing). Session lists do not show such a message as the

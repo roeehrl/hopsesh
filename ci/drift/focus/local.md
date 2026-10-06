@@ -21,7 +21,7 @@ Check these surfaces against upstream changes:
   An upstream identity or storage change must not silently select another profile,
   adopt a session into the wrong account or infer identity from duplicate labels.
 - Transfers, forks and round trips: inspect `internal/core/move`, `internal/core/lineage`,
-  `internal/core/peer` and `internal/app`. Current contracts use lineage/4 and peer v4.
+  `internal/core/peer` and `internal/app`. Current contracts use lineage/5 and peer v5.
   Cross-account continuation uses a portable transcript with a fresh native ID, preserves
   the original, and excludes signed reasoning, opaque compaction and private agent state.
   Watch changed record shapes, native fork metadata, tool/message IDs, resume semantics
@@ -83,3 +83,32 @@ archive transport/undo and truthful prepared-versus-running reports in GUI/TUI/C
 Regression evidence: `internal/e2e/context_capacity_test.go`, mandatory
 `TestContextPressureRoutes` (ABABA/ABCA/ABCBCAB), SDK/module capacity tests and browser
 continuation/recovery tests. These static checks do not establish a paid model turn.
+
+Movement notices and returns: read `docs/movement-return.md`,
+`internal/e2e/movement_test.go`, `internal/app/movement.go`, module `hooks.go`,
+`sdk/agent/hooks*.go`, `sdk/agent/mark.go` and `internal/devtools/hsmatrix`.
+The contract is lineage/5 and peer protocol 5; strict decoding refuses old versions.
+Watch upstream SessionStart/UserPromptSubmit hook payloads, session/transcript identity,
+profile-root precedence, output visibility, synchronous command behavior and trust gates.
+Existing user hooks must survive installation/removal; unsupported vendor versions or
+platforms must report pending/unsupported delivery, not success. Hook delivery must never
+append native conversation nodes or establish authored work. Check prepared versus
+continued against actual new agent work, forked versus departed parents, divergence,
+last-checked observations, repeated returns, retry/undo and notices disabled while
+lineage and return discovery remain available. Return candidates use the actual branch
+and profile/binding, not labels; available/verify/same/behind/diverged/missing/live must
+remain honest as upstream readers, live detection and fork metadata change. No paid calls
+or writes to live vendor configuration are needed to validate these fixture scenarios.
+
+Portable return comparisons after a first account observation must verify the original
+native anchors across the binding rotation (`internal/core/move/portable_return.go`,
+`internal/e2e/movement_binding_test.go`). A changed binding alone is not independent
+conversation work, but it must never grant native append permission. Added or rewritten
+original work still blocks the return; successful portable copies retain the original.
+
+Missing-original returns carry explicit new-replica intent through GUI/TUI/CLI and the
+peer receiver. They must never select a surviving replica by accident. Hook commands
+pin the installation's config/state scope; default-root registration must not orphan
+older hooks. Failed or timed-out stdout writes remain retryable and cannot be reported
+as supplied. Repeated identical notices use validated operation/status identity even
+without a scan cache; lookup must not overwrite newer scan evidence.

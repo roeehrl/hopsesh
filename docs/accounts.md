@@ -108,6 +108,6 @@ OS launcher exit confirms dispatch, not that the vendor has loaded or indexed th
   vendor desktop indexing remain separate live acceptance checks; synthetic tests do not prove them.
 
 Storage is `accounts.json` in Hopsesh's state directory, guarded by a cross-process lock and
-atomic replacement. Lineage uses `lineage/4` and peers require protocol 4. Old receipt formats
+atomic replacement. Lineage uses `lineage/5` and peers require protocol 5. Old receipt formats
 are refused rather than silently assigned to a default account. The optional presence daemon
 is a separate future-release proposal, not required or installed by Accounts.

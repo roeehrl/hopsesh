@@ -135,3 +135,33 @@ func TestReceiptRetryDoesNotBlessLaterNativeWorkForUndo(t *testing.T) {
 		t.Fatal("metadata recovery blessed later native work for destructive undo", err)
 	}
 }
+
+func TestUnreachableSourceReceiptIsDurableBeforeConnection(t *testing.T) {
+	state, data := t.TempDir(), t.TempDir()
+	native := filepath.Join(data, "conversation.jsonl")
+	if err := os.WriteFile(native, []byte("untouched"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m := lineage.New("offline")
+	j, err := New(state, KindMove, "offline source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = j.WriteReceipt(nil, "source", lineage.PathFor(native), m.Encode(), false); err == nil {
+		t.Fatal("unreachable receipt claimed applied")
+	}
+	j, err = Load(state, j.ID)
+	if err != nil || !j.PendingReceipts() {
+		t.Fatal("lost notice receipt", err)
+	}
+	if err = j.RecoverReceipts(func(string) (host.FS, error) { return host.LocalFS(), nil }); err != nil {
+		t.Fatal(err)
+	}
+	if j.PendingReceipts() {
+		t.Fatal("receipt not delivered")
+	}
+	b, _ := os.ReadFile(native)
+	if string(b) != "untouched" {
+		t.Fatal("recovery changed native history")
+	}
+}

@@ -29,7 +29,8 @@ import (
 //   - 2: pre-release lineage/2 manifests and cloud locations.
 //   - 3: pre-release causal lineage/3, persistent endpoints and stable transfer IDs.
 //   - 4: scoped account profiles and binding-aware lineage/4.
-const Protocol = 4
+//   - 5: causal movement notices and lineage/5.
+const Protocol = 5
 
 // FirstVersion is the first hopsesh release that speaks Protocol: the version to update an
 // older machine to.

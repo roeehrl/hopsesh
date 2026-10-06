@@ -61,4 +61,10 @@ func TestReceiveOptionsRetainsTransferIdentityAndSelectedReplica(t *testing.T) {
 	if got.OperationID != "same-transfer" || got.TargetSession != "claude/selected" {
 		t.Fatalf("peer lost identity or destination: %+v", got)
 	}
+	for _, o := range []move.Options{{NewReplica: true}, {Bounded: true}} {
+		got = a.receiveOptions(o)
+		if got.NewReplica != o.NewReplica || got.Bounded != o.Bounded {
+			t.Fatalf("peer lost explicit new-session intent: %+v", got)
+		}
+	}
 }

@@ -14,9 +14,9 @@ exec hopsesh ls --json --no-git
 stdout '"agent": "codex",\s+"agentName": "Codex",\s+"session"'
 stdout '"lastPrompt": "please fix the parser in'
 ! stdout 'lastPrompt": "\[hopsesh\]'
-stdout '"kind": "continued"'
+stdout '"kind": "prepared"'
 
 exec hopsesh undo --yes
 exec hopsesh ls --json --no-git
 ! stdout '"agent": "codex",\s+"agentName": "Codex",\s+"session"'
-! stdout '"kind": "continued"'
+! stdout '"kind": "prepared"'

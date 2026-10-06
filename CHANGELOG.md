@@ -6,7 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+
+- Durable movement notices and branch-aware return destinations. Transfers report
+  preparation until new agent work is observed; forks keep the original available.
+  Notices can be disabled without losing lineage or returns. Receipts now require
+  `lineage/5` and peers protocol 5; older versions are refused without migration.
+  See [movement and return](docs/movement-return.md).
+
 ### Fixed
+
+- Avoid false divergence on portable returns when the first account observation rotates
+  a profile binding. Verify the original's native history while keeping native append
+  restrictions and independent-work conflict checks intact.
 
 - Prevent oversized working contexts in Claude/Codex conversions, vendor imports, cloud
   returns and repeated round trips. Count final briefings and existing active context;

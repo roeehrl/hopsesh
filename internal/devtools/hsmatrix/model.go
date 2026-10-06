@@ -34,7 +34,7 @@ var dims = []struct {
 	name   string
 	values []string
 }{
-	{"op", []string{"move", "continue", "bounded", "push", "roundtrip", "conflict", "undo-used", "skill", "fetch", "handoff", "cloud-roundtrip", "cloud-hop"}},
+	{"op", []string{"move", "continue", "bounded", "push", "roundtrip", "quiet-roundtrip", "fork", "conflict", "undo-used", "skill", "fetch", "handoff", "cloud-roundtrip", "cloud-hop"}},
 	{"agents", []string{"claude>claude", "codex>codex", "claude>codex", "codex>claude"}},
 	{"content", []string{"ascii", "zh", "ja", "ar", "el", "large"}},
 	{"repo", []string{"clean", "unpushed", "uncommitted", "worktree", "none"}},

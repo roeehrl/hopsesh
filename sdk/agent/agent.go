@@ -95,7 +95,7 @@ type Spec struct {
 	// ("shell, apply_patch, update_plan").
 	Tools string
 	// Features are capabilities without a method of their own: the module honours the
-	// matching ResumeOptions (CapFork, CapRemoteControl) or start prompt (CapNotify).
+	// matching ResumeOptions (CapFork, CapRemoteControl).
 	Features []Capability
 	// Experimental marks capabilities that are not yet trustworthy; the user interfaces
 	// say so and keep them opt-in.

@@ -38,7 +38,6 @@ var (
 	_ agent.Marker        = (*Module)(nil)
 	_ agent.AccountProber = (*Module)(nil)
 	_ agent.Sanitizer     = (*Module)(nil)
-	_ agent.Notifier      = (*Module)(nil)
 	_ agent.Integrator    = (*Module)(nil)
 )
 
@@ -400,19 +399,6 @@ func (m *Module) Resume(in agent.Install, key agent.SessionKey, p agent.Placemen
 // a resumed session then believes it is a child: with CLAUDE_CODE_CHILD_SESSION it saves
 // no transcript at all. A session hopsesh resumes is never anyone's child.
 var sessionMarkers = []string{"CLAUDE_CODE_CHILD_SESSION", "CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_ENTRYPOINT"}
-
-// NotifyInstruction asks the resumed session to message the old one through Remote
-// Control's cross-session messaging.
-func (m *Module) NotifyInstruction(oldName, oldLocation, newName string, fork bool) string {
-	s := fmt.Sprintf("Also use ListAgents and SendMessage to tell the session %q on %s that this work now continues here", oldName, oldLocation)
-	if newName != "" {
-		s += fmt.Sprintf(" as %q", newName)
-	}
-	if fork {
-		return s + ", so you can coordinate."
-	}
-	return s + ", and ask it to stop working on this task and not edit these files."
-}
 
 // Mark retitles the copy left behind with a custom-title record (what /rename writes), so
 // Claude Code's own resume list shows where it went. The file's time is kept.

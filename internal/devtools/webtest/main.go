@@ -108,6 +108,10 @@ func main() {
 	name := strings.TrimSuffix(strings.ToLower(filepath.Base(os.Args[0])), ".exe")
 	switch name {
 	case "claude":
+		if os.Getenv("FAKE_MOVEMENT_ACCOUNT") == "1" && strings.Join(os.Args[1:], " ") == "auth status --json" {
+			fmt.Println(`{"loggedIn":true,"email":"alice@example.com","authMethod":"claude.ai","apiProvider":"firstParty","orgId":"org-fixture","subscriptionType":"max"}`)
+			return
+		}
 		os.Exit(fakeagent.Claude())
 	case "codex":
 		os.Exit(fakeagent.Codex())
@@ -139,6 +143,8 @@ func main() {
 		log.Fatal(err)
 	}
 	if *prepare {
+		_ = os.Unsetenv("FAKE_MOVEMENT_ACCOUNT")
+		_ = os.Unsetenv("FAKE_CODEX_EMAIL")
 		if err := os.RemoveAll(h); err != nil {
 			log.Fatal(err)
 		}
@@ -291,6 +297,42 @@ func main() {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 	})
+
+	// This fixture endpoint writes only a scanned Codex rollout inside the demo
+	// home, representing real native work after a transfer without editing DTOs.
+	http.HandleFunc("/movement-work", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		e, err := svc.ResolveEntry(r.URL.Query().Get("machine"), r.URL.Query().Get("key"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		demoRoot, rootErr := filepath.EvalSymlinks(h)
+		path, pathErr := filepath.EvalSymlinks(e.Path)
+		rel, err := filepath.Rel(demoRoot, path)
+		if rootErr != nil || pathErr != nil || err != nil || e.Agent != "codex" || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			http.Error(w, "expected a demo Codex rollout", http.StatusBadRequest)
+			return
+		}
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer f.Close()
+		for _, message := range []struct{ role, kind, text string }{{"user", "input_text", "Add a fixture return checkpoint"}, {"assistant", "output_text", "Fixture return checkpoint completed."}} {
+			record := map[string]any{"timestamp": time.Now().UTC().Format(time.RFC3339Nano), "type": "response_item", "payload": map[string]any{"type": "message", "role": message.role, "content": []map[string]string{{"type": message.kind, "text": message.text}}}}
+			if err := json.NewEncoder(f).Encode(record); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+	})
 	http.HandleFunc("/dirty", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "POST only", http.StatusMethodNotAllowed)
@@ -312,6 +354,10 @@ func main() {
 		linksMu.Unlock()
 		if err := fresh(r.URL.Query().Get("terminal"), r.URL.Query().Get("close") == "1"); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		if r.URL.Query().Get("movement") == "1" {
+			_ = os.Setenv("FAKE_MOVEMENT_ACCOUNT", "1")
+			_ = os.Setenv("FAKE_CODEX_EMAIL", "alice@example.com")
 		}
 		if r.URL.Query().Get("terminal") == gui.WhereHere {
 			// In the app's own terminal the stand-in Claude Code asks whether it trusts a

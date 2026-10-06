@@ -47,19 +47,26 @@ test("continue a Claude Code session in Codex, see where it has been, and undo",
 });
 
 
-test("an unverified account return preserves the original and creates a portable copy", async ({ page }) => {
+test("a return with no new work opens the exact original without another transfer", async ({ page }) => {
   await row(page, "Find the codeword").click();
+  const source = await page.evaluate(async () => {
+    const { selected } = await import('/core.js');
+    const e = selected();
+    return { machine: e.machine, key: e.key };
+  });
   await action(page, "move", /^Continue with Codex…/);
   await page.locator("#sheet").getByRole("button", { name: /Continue in Codex/ }).click();
   await expect(page.getByRole("heading", { name: /is prepared for Codex/ })).toBeVisible({ timeout: 30_000 });
   await page.getByRole("button", { name: /Back to sessions/ }).click();
   await row(page, "Find the codeword (from Claude Code)").click();
-  await action(page, "move", /^Continue with Claude Code…/);
-  const sheet = page.locator("#sheet");
-  await expect(sheet.getByLabel("What changes")).toContainText("1 new Claude Code session");
-  await expect(sheet).toContainText("Account identity continuity is unverified");
-  await sheet.getByRole("button", { name: /Continue in Claude Code/ }).click();
-  await expect(page.getByText("Claude Code session written", { exact: true })).toBeVisible({timeout:30_000});
+  const plans: string[] = [];
+  page.on('request', request => {
+    if (request.url().endsWith('/call') && ['Plan', 'PushPlan', 'Apply'].includes(request.postDataJSON()?.m)) plans.push(request.postDataJSON().m);
+  });
+  const resumed = page.waitForRequest(request => request.url().endsWith('/call') && request.postDataJSON()?.m === 'ResumeSession');
+  await action(page, "move", /^Open existing session in Claude Code/);
+  expect((await resumed).postDataJSON().args.slice(0, 2)).toEqual([source.machine, source.key]);
+  expect(plans).toEqual([]);
 });
 
 // The Windows screenshot world selects a remote session. Its action explicitly
