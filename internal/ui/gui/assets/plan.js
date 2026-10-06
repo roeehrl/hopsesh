@@ -156,8 +156,8 @@ function conversation(p) {
         h("div", { class: "brief" }, c.briefing))),
     h("div", { class: "opts-grid" },
       check(`Bring my ${c.from} instructions`, "carryRules", `Your instructions for every ${c.from} project go into the briefing.`),
-      p.can.import ? check(`Let ${p.agent}'s own importer convert it`, "via", "Instead of hopsesh's conversion; hopsesh still adds its briefing.", imported, (on) => (on ? "import" : "")) : null,
-      p.can.native && !imported ? check(`Replay shell commands as ${p.agent}'s own`, "native", "Experimental: exact commands and outputs instead of text.") : null));
+      p.can.import && !o.bounded ? check(`Let ${p.agent}'s own importer convert it`, "via", "Instead of hopsesh's conversion; hopsesh still adds its briefing.", imported, (on) => (on ? "import" : "")) : null,
+      p.can.native && !imported && !o.bounded ? check(`Replay shell commands as ${p.agent}'s own`, "native", "Experimental: exact commands and outputs instead of text.") : null));
 }
 
 // sameFolder: the session stays in its folder on this machine (another agent here).

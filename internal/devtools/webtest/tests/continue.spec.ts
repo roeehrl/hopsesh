@@ -100,6 +100,7 @@ test("bounded recovery keeps the original and explains capacity and archive", as
   await expect(sheet).toContainText("Working context:");
   await expect(sheet).toContainText("Portable history preserved separately");
   await expect(sheet).toContainText("The original remains available");
+  await expect(sheet.getByRole("checkbox", { name: /Replay shell commands|own importer/ })).toHaveCount(0);
   await sheet.getByRole("button", {name: /Continue in Claude Code/}).click();
   await expect(page.getByRole("heading", {name: /is prepared for Claude Code/})).toBeVisible();
   await expect(page.getByText("Claude Code session written", {exact: true})).toBeVisible();
