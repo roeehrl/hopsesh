@@ -190,6 +190,37 @@ func TestContextEditedCloudBrief(t *testing.T) {
 	}
 }
 
+func TestContextBoundedForkRemainsASeparateBranch(t *testing.T) {
+	ctx := context.Background()
+	l := newLocation(t, "here", t.TempDir())
+	seed(t, l)
+	cl := claude.New()
+	source := list(t, l)[sid]
+	side := move.Side{Machine: l.m, Module: cl, Install: l.in}
+	in := move.Input{Source: side, Session: source, Target: side}
+	p, err := move.Build(ctx, in, move.Options{Bounded: true, Fork: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Continue.Rollover != nil || !strings.Contains(strings.Join(p.Warnings, " "), "separate fork") {
+		t.Fatal("explicit fork treated as rollover")
+	}
+	if _, err = move.Apply(ctx, p, in, move.Env{StateDir: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	s := findRouteSession(t, l, cl, l.in, p.Placement.Key)
+	graph, err := lineage.Read(host.LocalFS(), s.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !graph.Journey().Fork || graph.Journey().Transfers != 0 {
+		t.Fatalf("incorrect fork journey: %+v", graph.Journey())
+	}
+	if _, err = os.Stat(source.Path); err != nil {
+		t.Fatal("fork removed the original")
+	}
+}
+
 func TestContextRetainedOriginalWithNewWorkIsNotHidden(t *testing.T) {
 	ctx := context.Background()
 	l := newLocation(t, "here", t.TempDir())

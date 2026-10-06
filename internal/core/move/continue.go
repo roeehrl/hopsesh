@@ -277,7 +277,11 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 			cp.expect = seg.Cursor
 			cp.RolloverCursor = seg.Cursor
 		}
-		p.Warnings = append(p.Warnings, "A separate bounded continuation will be created. The original remains available; this is not a new conversation branch.")
+		if opt.Fork {
+			p.Warnings = append(p.Warnings, "A bounded continuation will be created on a separate fork. The original remains available.")
+		} else {
+			p.Warnings = append(p.Warnings, "A separate bounded continuation will be created. The original remains available; this is not a new conversation branch.")
+		}
 		return
 	}
 	if p.manifest == nil || opt.Fork {
