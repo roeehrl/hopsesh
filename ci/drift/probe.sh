@@ -79,7 +79,7 @@ cli() {
   p=$1
   shift
   limited 60 env -i PATH="${p:+$p/bin:}$PATH" HOME="$SCRATCH/home" CLAUDE_CONFIG_DIR="$SCRATCH/home/.claude" \
-    CODEX_HOME="$SCRATCH/home/.codex" CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 TERM=dumb NO_COLOR=1 LANG=C.UTF-8 \
+    CODEX_HOME="$SCRATCH/home/.codex" CODEX_SQLITE_HOME="$SCRATCH/home/.codex" CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 TERM=dumb NO_COLOR=1 LANG=C.UTF-8 \
     "$@" < /dev/null 2>&1
 }
 
@@ -255,22 +255,18 @@ while read -r T <&3; do
   if [ "$(get '.watch.schema // empty')" != "" ] && [ -n "$HAVE_OLD" ] && [ -n "$NEW" ]; then
     eval "set -- $(get '.watch.schema.argv | @sh')"
     keep=$(get .watch.schema.keep)
-    cli "$OLD" "$@" "$SCRATCH/schema-tested" > /dev/null
-    cli "$NEW" "$@" "$SCRATCH/schema-latest" > /dev/null
     say "" "Schema from \`$*\`, $TESTED → $LATEST:"
-    if [ -d "$SCRATCH/schema-tested" ] && [ -d "$SCRATCH/schema-latest" ]; then
-      diff -rq "$SCRATCH/schema-tested" "$SCRATCH/schema-latest" | sed "s|$SCRATCH/||g" > "$OUT/schema/changed-files.txt"
-      for f in "$SCRATCH"/schema-latest/* "$SCRATCH"/schema-tested/*; do
-        n=$(basename "$f")
-        printf '%s\n' "$n" | grep -qE "$keep" || continue
-        [ -f "$OUT/schema/$n.diff" ] && continue
-        diff -u --label "$n, tested $TESTED" --label "$n, latest $LATEST" "$SCRATCH/schema-tested/$n" "$SCRATCH/schema-latest/$n" \
-          > "$OUT/schema/$n.diff" 2>&1 || true
-        [ -s "$OUT/schema/$n.diff" ] || rm -f "$OUT/schema/$n.diff"
-      done
-      say "$(lines "$OUT/schema/changed-files.txt") files differ (schema/changed-files.txt); full diffs of the ones the manifest keeps: $(count "$OUT/schema" '*.diff') (schema/*.diff)."
+    S=$OUT/schema/$ID
+    mkdir -p "$S"
+    if cli "$OLD" "$@" "$SCRATCH/schema-tested" > "$S/tested-generation.txt" &&
+       cli "$NEW" "$@" "$SCRATCH/schema-latest" > "$S/latest-generation.txt"; then
+      if "$SCRATCH/driftmanifest" schema-diff "$SCRATCH/schema-tested" "$SCRATCH/schema-latest" "$S" "$keep" > "$S/comparison.txt" 2>&1; then
+        say "$(lines "$S/changed-files.txt") files differ (schema/$ID/changed-files.txt); full recursive diffs of the ones the manifest keeps: $(count "$S" '*.diff') (schema/$ID/**/*.diff)."
+      else
+        say "- schema comparison failed; coverage is incomplete (schema/$ID/comparison.txt)"
+      fi
     else
-      say "- the schema was not generated for both versions"
+      say "- schema generation failed; coverage is incomplete (schema/$ID/*-generation.txt)"
     fi
     rm -rf "$SCRATCH/schema-tested" "$SCRATCH/schema-latest"
   fi

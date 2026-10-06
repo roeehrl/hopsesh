@@ -33,11 +33,14 @@ func hopsesh(mods []module) project {
 	return project{
 		Name: "hopsesh",
 		About: "hopsesh is a tool that finds coding-agent sessions on several machines, moves them between machines " +
-			"and converts them between agents. Each agent is a compiled-in module written against `sdk/agent`: " + list + ". " +
+			"and converts them between agents and isolated account profiles, preserving causal lineage, forks and repeated " +
+			"multi-machine/account/agent round trips. GUI, TUI and CLI share these operations. Each agent is a compiled-in module written against `sdk/agent`: " + list + ". " +
 			"hopsesh also has a cloud capability: handing a session off to a vendor's cloud and bringing cloud sessions " +
 			"back, through the vendor's own CLI. `intel/manifest.json` has, under `modules`, what each module declares " +
-			"(folders, binaries, instruction files, desktop apps, capabilities, tested versions, its source files).",
-		Cite: "An agent's code is its module (`agents/<module>/`). A cloud a module declares is in that module's " +
+			"(folders, binaries, instruction files, desktop apps and URL scheme, accounts root/login/environment policy, " +
+			"capabilities, tested versions, sourceFiles and shared integrationFiles including regression scenarios).",
+		Cite: "Follow module integrationFiles through shared app/core code and GUI/TUI/CLI consumers as well as regression tests. " +
+			"An agent's code is its module (`agents/<module>/`). A cloud a module declares is in that module's " +
 			"`cloud.go` (`agents/<module>/cloud.go`); a cloud no module reaches yet has no code: cite its entry in " +
 			"`internal/devtools/driftmanifest/targets.go` instead.",
 	}
@@ -156,7 +159,7 @@ func checkTargets(ts []target, groups []string, external bool) []string {
 			bad(x, "code needs a repo, paths and canaries")
 		}
 		if s := w.Schema; s != nil {
-			if _, err := regexp.Compile(s.Keep); err != nil || len(s.Argv) == 0 {
+			if _, err := regexp.CompilePOSIX(s.Keep); err != nil || len(s.Argv) == 0 {
 				bad(x, "schema %+v", s)
 			}
 		}

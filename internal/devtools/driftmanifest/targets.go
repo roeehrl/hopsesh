@@ -89,7 +89,8 @@ type code struct {
 	Canaries []string `json:"canaries"`
 }
 
-// schema is a protocol schema the CLI generates; files matching Keep are diffed in full.
+// schema is a protocol schema the CLI generates. Keep is a POSIX expression matched
+// against basenames at every depth; relative paths are preserved in full diffs.
 type schema struct {
 	Argv []string `json:"argv"` // the output folder is appended
 	Keep string   `json:"keep"`
@@ -104,41 +105,40 @@ var groups = []string{"local", "anthropic-cloud", "openai-cloud", "third-party-c
 var agentWatch = map[agent.ID]target{
 	"claude": {
 		Group:    "local",
-		Surface:  "transcripts and their records under the Claude config folder, `claude --resume` with its fork and Remote Control flags, `claude auth status --json`, `--version` output, CLAUDE.md, skills, settings and the desktop app",
+		Surface:  "transcripts and their records under the Claude config folder, `claude --resume` with its fork and Remote Control flags, `claude auth status --json`, isolated account profiles via CLAUDE_CONFIG_DIR and auth login, public identity and credential-store isolation, `--version` output, CLAUDE.md, skills, settings and the desktop app",
 		Priority: "high",
 		Latest:   latest{From: "npm", Ref: "@anthropic-ai/claude-code"},
 		Package:  "@anthropic-ai/claude-code",
 		Watch: watch{
-			Docs:   claudeDocs("sessions", "settings", "skills", "hooks", "headless", "cli-reference", "claude-directory", "permissions"),
+			Docs:   claudeDocs("sessions", "settings", "skills", "hooks", "headless", "cli-reference", "claude-directory", "permissions", "authentication", "env-vars", "desktop"),
 			Feeds:  []feed{{Kind: "markdown", URL: claudeChangelog}},
-			Grep:   `session|transcript|jsonl|resume|fork|CLAUDE_CONFIG_DIR|skills|CLAUDE\.md|AGENTS\.md|settings|auth|desktop|deprecat|remov|rename|breaking`,
-			Help:   [][]string{{"claude", "--help"}, {"claude", "auth", "status", "--help"}},
-			Relies: []string{"--resume", "--fork-session", "--remote-control", "--desktop", "--version", "--json"},
+			Grep:   `session|transcript|jsonl|resume|fork|CLAUDE_CONFIG_DIR|skills|CLAUDE\.md|AGENTS\.md|settings|auth|account|login|keychain|credential|Console|desktop|deprecat|remov|rename|breaking`,
+			Help:   [][]string{{"claude", "--help"}, {"claude", "auth", "status", "--help"}, {"claude", "auth", "login", "--help"}},
+			Relies: []string{"--resume", "--fork-session", "--remote-control", "--desktop", "--version", "--json", "auth", "login", "status"},
 		},
 	},
 	"codex": {
 		Group:    "local",
-		Surface:  "rollout files under CODEX_HOME and their session_meta, session_index.jsonl, `codex resume` and `codex fork`, the `codex app-server` JSON-RPC methods for threads and accounts, `--version` output, AGENTS.md, skills and config.toml",
+		Surface:  "rollout files under isolated CODEX_HOME and CODEX_SQLITE_HOME profiles and their session_meta, session_index.jsonl, `codex resume` and `codex fork`, the `codex app-server` JSON-RPC methods for threads and accounts (account/read with refreshToken:false), login and keyring credential storage, exact desktop navigation through codex://threads/<uuid> for the default profile, `--version` output, AGENTS.md, skills and config.toml",
 		Priority: "high",
 		Latest:   latest{From: "npm", Ref: "@openai/codex"},
 		Package:  "@openai/codex",
 		Watch: watch{
-			Docs:  codexDocs("app-server", "config-file/config-reference", "build-skills", "agent-configuration/agents-md", "non-interactive-mode"),
+			Docs:  codexDocs("app-server", "config-file/config-reference", "build-skills", "agent-configuration/agents-md", "non-interactive-mode", "auth", "config-file/environment-variables", "config-file/config-advanced", "reference/commands", "developer-commands"),
 			Feeds: []feed{{Kind: "releases", Repo: "openai/codex", Tag: "rust-v"}},
-			// The storage words track three gaps in the module: paginated history is the
-			// default for new threads since 0.158, rollouts may be zstd-compressed
-			// (.jsonl.zst), and a reverted thread has several rollout files.
-			Grep:   `session|rollout|thread|resume|fork|CODEX_HOME|skills|AGENTS\.md|config\.toml|account|auth|app-server|paginated|history_mode|jsonl\.zst|zstd|compress|revert|migrate-rollouts|deprecat|remov|rename|breaking`,
-			Help:   [][]string{{"codex", "--help"}, {"codex", "resume", "--help"}, {"codex", "fork", "--help"}, {"codex", "app-server", "--help"}},
-			Relies: []string{"resume", "fork", "app-server", "--version"},
+			// Track storage evolution without assuming an old limitation is still present;
+			// the reviewer must inspect the current reader and writer.
+			Grep:   `session|rollout|thread|resume|fork|CODEX_HOME|CODEX_SQLITE_HOME|cli_auth_credentials_store|keyring|refreshToken|workspace|identity|desktop|deep.link|codex://|skills|AGENTS\.md|config\.toml|account|auth|app-server|paginated|history_mode|jsonl\.zst|zstd|compress|revert|migrate-rollouts|deprecat|remov|rename|breaking`,
+			Help:   [][]string{{"codex", "--help"}, {"codex", "resume", "--help"}, {"codex", "fork", "--help"}, {"codex", "app-server", "--help"}, {"codex", "login", "--help"}, {"codex", "login", "status", "--help"}},
+			Relies: []string{"resume", "fork", "app-server", "--version", "login", "status"},
 			Code: &code{
 				Repo:     "openai/codex",
-				Paths:    []string{"codex-rs/protocol/src/protocol.rs", "codex-rs/rollout", "codex-rs/thread-store", "codex-rs/history/src/rollout_payload.rs", "codex-rs/cli/src/main.rs"},
-				Canaries: []string{"history_mode", "ThreadHistoryMode", ".jsonl.zst", "rollout_id", "migrate-rollouts"},
+				Paths:    []string{"codex-rs/protocol/src/protocol.rs", "codex-rs/rollout", "codex-rs/thread-store", "codex-rs/history/src/rollout_payload.rs", "codex-rs/cli/src/main.rs", "codex-rs/app-server-protocol/src/protocol/v2/account.rs", "codex-rs/app-server/src/request_processors/account_processor", "codex-rs/login", "codex-rs/keyring-store", "codex-rs/core/src/config/auth_keyring.rs", "codex-rs/config/src/lib.rs", "codex-rs/config/src/types.rs", "codex-rs/config/src/config_toml.rs"},
+				Canaries: []string{"history_mode", "ThreadHistoryMode", ".jsonl.zst", "rollout_id", "migrate-rollouts", "refresh_token", "GetAccountResponse", "AccountLogin", "Chatgpt", "cli_auth_credentials_store", "CODEX_SQLITE_HOME"},
 			},
 			Schema: &schema{
 				Argv: []string{"codex", "app-server", "generate-json-schema", "--out"},
-				Keep: `^(Initialize|Thread|Account|ExternalAgentConfig)|^(ClientRequest|ServerNotification)\.json$`,
+				Keep: `^(Initialize|Thread|Account|GetAccount|LoginAccount|LogoutAccount|CancelLoginAccount|ExternalAgentConfig)|^(ClientRequest|ServerNotification)\.json$`,
 			},
 			Tests: "TestCodex",
 		},
