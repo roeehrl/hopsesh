@@ -4,7 +4,8 @@
 #   "box"  = user hsremote (the session starts there)
 #   "back" = user hsback   (runs hopsesh first)
 # box → back: code comes along straight from box (never pushed), box's copy gets marked.
-# back → box: missing work is appended to the original native ID, back's copy gets marked.
+# back → box: the full native copy returns to its original ID, back's copy gets marked.
+# Same-agent transport preserves native reasoning/tool records; mixed-agent returns append.
 # Then both copies change and a move is refused until --keep-both.
 # Run by CI on Linux and macOS; needs sudo, sshd and git. The account running it is not changed.
 set -eu
@@ -94,15 +95,16 @@ say "back → box (hop back)"
 as_b "$HS" hosts add back "$A@127.0.0.1" >/dev/null
 as_b "$HS" trust back --yes >/dev/null
 as_b "$HS" pull "back:$ID" --yes --json > "$WORK/pull2.json" 2>&1 || { cat "$WORK/pull2.json"; fail "hop back"; }
-grep -q '"relation": *"append"' "$WORK/pull2.json" || fail "the return should append only missing work to the original"
+python3 -c 'import json,sys; p=json.load(open(sys.argv[1]))["plan"]; assert p["kind"]=="move" and p["placement"]["key"]["session"]==sys.argv[2] and not p.get("conflict")' "$WORK/pull2.json" "$ID" \
+  || { cat "$WORK/pull2.json"; fail "the same-agent return should restore the full native copy to its original ID"; }
 sudo grep -q "continued on back" "$BFILE" || fail "box should now have the newer copy"
 if sudo cat "$BFILE" | grep '"type":"custom-title"' | tail -n 1 | grep -q 'moved to'; then fail "the copy that came home must not carry a moved mark"; fi
 [ "$(sh_b 'git -C ~/rt rev-parse HEAD')" = "$THREE" ] || fail "box's checkout should be at back's commit"
 sudo tail -n 1 "$AFILE" | grep -Eq 'moved to|continued in' || fail "back's copy should now be marked continued"
 
 say "both change: a conflict"
-# The return writer generated native UUIDs; fork the actual active leaf, not u2.
-BLEAF=$(sudo cat "$BFILE" | python3 -c 'import json,sys; records=[json.loads(l) for l in sys.stdin]; print([r["leafUuid"] for r in records if r.get("type")=="last-prompt"][-1])')
+# Follow the active native leaf on the returned copy.
+BLEAF=$(sudo cat "$BFILE" | python3 -c 'import json,sys; records=[json.loads(l) for l in sys.stdin]; leaves=[r["leafUuid"] for r in records if r.get("type")=="last-prompt"]; print(leaves[-1] if leaves else [r["uuid"] for r in records if r.get("type") in ("user","assistant")][-1])')
 sh_a "echo '{\"type\":\"user\",\"uuid\":\"u3\",\"parentUuid\":\"u2\",\"sessionId\":\"$ID\",\"cwd\":\"$AHOME/git/rt\",\"timestamp\":\"2026-10-02T13:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"kept going on back after the move\"}}' >> '$AFILE'"
 sh_b "echo '{\"type\":\"user\",\"uuid\":\"u4\",\"parentUuid\":\"$BLEAF\",\"sessionId\":\"$ID\",\"cwd\":\"$BHOME/rt\",\"timestamp\":\"2026-10-02T14:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"and on box\"}}' >> '$BFILE'"
 sh_b "echo '{\"type\":\"last-prompt\",\"leafUuid\":\"u4\",\"sessionId\":\"$ID\"}' >> '$BFILE'"

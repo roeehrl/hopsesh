@@ -22,13 +22,14 @@ func (m *Module) Profile(agent.Install) ir.Profile { return ir.Profile{Window: w
 
 // Write emits a legacy-mode rollout (no ordinals): session_meta, then each message as a
 // response_item with its user_message/agent_message event (Codex titles threads from
-// those events). Appends go only to rollouts in that mode.
+// those events). Paginated appends preserve contiguous native ordinals.
 func (m *Module) Write(ctx context.Context, h agent.Host, in agent.Install, req ir.WriteRequest) (ir.WriteResult, error) {
 	fsys, pa := h.FS(), h.Path()
 	var file string
 	var from int64
 	var b strings.Builder
 	index := 0
+	var ordinal *uint64
 	provenance := map[string]ir.Item{}
 	sid := req.SessionID
 	switch req.Mode {
@@ -76,9 +77,7 @@ func (m *Module) Write(ctx context.Context, h agent.Host, in agent.Install, req 
 		if err != nil {
 			return ir.WriteResult{}, err
 		}
-		if mt.HistoryMode == "paginated" {
-			return ir.WriteResult{}, fmt.Errorf("%w: Codex thread %s keeps paginated history, which hopsesh does not extend", agent.ErrUnsupported, sid)
-		}
+
 		if req.Expect.Head != "" {
 			seg, e := m.Read(ctx, h, in, agent.Summary{Key: agent.SessionKey{Agent: id, Session: agent.SessionID(sid)}, Path: file}, ir.Cursor{})
 			if e != nil {
@@ -89,7 +88,14 @@ func (m *Module) Write(ctx context.Context, h agent.Host, in agent.Install, req 
 			}
 		}
 		from = fi.Size()
-		recs, _, err := readLines(strings.NewReader(string(head)))
+		recs, end, err := readLines(strings.NewReader(string(head)))
+		if err != nil {
+			return ir.WriteResult{}, err
+		}
+		if end != fi.Size() {
+			return ir.WriteResult{}, fmt.Errorf("%w: incomplete native record", agent.ErrDiverged)
+		}
+		ordinal, err = paginatedNext(mt, recs)
 		if err != nil {
 			return ir.WriteResult{}, err
 		}
@@ -113,6 +119,25 @@ func (m *Module) Write(ctx context.Context, h agent.Host, in agent.Install, req 
 		writeLine(&b, ts, "response_item", map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": it.Text}}})
 	}
 	body := []byte(b.String())
+	if ordinal != nil && len(body) > 0 {
+		var numbered strings.Builder
+		next := *ordinal
+		for _, raw := range strings.Split(strings.TrimSuffix(string(body), "\n"), "\n") {
+			var record map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(raw), &record); err != nil {
+				return ir.WriteResult{}, err
+			}
+			record["ordinal"], _ = json.Marshal(next)
+			next++
+			encoded, err := marshal(record)
+			if err != nil {
+				return ir.WriteResult{}, err
+			}
+			numbered.Write(encoded)
+			numbered.WriteByte('\n')
+		}
+		body = []byte(numbered.String())
+	}
 	var err error
 	if req.Mode == ir.WriteNew {
 		err = fsys.WriteFile(file, body, 0o600)

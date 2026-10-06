@@ -263,6 +263,9 @@ func codexThread(r SeedReq, cwd string) (string, error) {
 	recs = append(recs, map[string]any{"timestamp": ts(3 * time.Minute), "type": "event_msg", "payload": map[string]any{"type": "task_complete", "turn_id": "t1"}})
 	dir := filepath.Join(codexDir(), "sessions", t0.Format("2006"), t0.Format("01"), t0.Format("02"))
 	path := filepath.Join(dir, "rollout-"+t0.Format("2006-01-02T15-04-05")+"-"+r.ID+".jsonl")
+	for i := range recs {
+		recs[i]["ordinal"] = i
+	}
 	if err := writeJSONL(path, recs, t0.Add(time.Hour)); err != nil {
 		return "", err
 	}
@@ -396,6 +399,24 @@ func appendTurn(r AppendReq) error {
 	} else {
 		rec = map[string]any{"timestamp": now.Format("2006-01-02T15:04:05.000Z"), "type": "response_item",
 			"payload": map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_text", "text": r.Text}}}}
+	}
+	if r.Agent == "codex" {
+		raw, err := os.ReadFile(r.Path)
+		if err != nil {
+			return err
+		}
+		lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+		var first struct {
+			Payload struct {
+				Mode string `json:"history_mode"`
+			} `json:"payload"`
+		}
+		if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+			return err
+		}
+		if first.Payload.Mode == "paginated" {
+			rec["ordinal"] = len(lines)
+		}
 	}
 	b, _ := json.Marshal(rec)
 	if r.Agent == "claude" {

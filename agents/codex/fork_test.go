@@ -30,7 +30,7 @@ func TestNativeForkUsesDeclaredParentAndVerifiedRecords(t *testing.T) {
 	var first map[string]any
 	json.Unmarshal([]byte(lines[0]), &first)
 	meta := first["payload"].(map[string]any)
-	meta["history_mode"] = "legacy"
+	meta["history_mode"] = "paginated"
 	meta["id"] = t3
 	meta["forked_from_id"] = t1
 	body, _ := json.Marshal(first)

@@ -139,6 +139,9 @@ type RewritePolicy struct {
 	Protect []string `json:"protect,omitempty"`
 	// DropRecords removes whole records whose top-level field has one of the values.
 	DropRecords []FieldMatch `json:"dropRecords,omitempty"`
+	// RenumberOrdinal rebases this top-level integer field after dropping records in a
+	// newly installed copy. All other bytes stay intact; append never uses this policy.
+	RenumberOrdinal string `json:"renumberOrdinal,omitempty"`
 	// DropElems removes array elements (only when Placement.OtherAccount, via Sanitizer).
 	DropElems []ElemMatch `json:"dropElems,omitempty"`
 	// Rename gives a keep-both copy a new session id ({"old","new"}; empty for none): the id

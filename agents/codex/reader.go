@@ -81,7 +81,12 @@ func (m *Module) Read(_ context.Context, h agent.Host, in agent.Install, s agent
 		return ir.Segment{}, &agent.FormatError{Path: s.Path, Line: 1, Err: fmt.Errorf("a rollout starts with session_meta")}
 	}
 	var mt meta
-	_ = json.Unmarshal(recs[0].Payload, &mt)
+	if err := json.Unmarshal(recs[0].Payload, &mt); err != nil {
+		return ir.Segment{}, &agent.FormatError{Path: s.Path, Line: 1, Err: err}
+	}
+	if _, err := paginatedNext(mt, recs); err != nil {
+		return ir.Segment{}, err
+	}
 	seg := ir.Segment{Header: ir.Header{Agent: string(id), Version: mt.CLIVersion, SessionID: mt.ID, CWD: mt.CWD, Title: s.Title, Created: parseTime(mt.Timestamp)}}
 	if mt.Git != nil {
 		seg.Header.GitBranch = mt.Git.Branch
@@ -161,6 +166,7 @@ func readLines(r io.Reader) ([]line, int64, error) {
 	br := bufio.NewReaderSize(r, 1<<20)
 	var out []line
 	var off int64
+	paginated := false
 	for {
 		b, err := br.ReadBytes('\n')
 		if err == io.EOF {
@@ -172,7 +178,15 @@ func readLines(r io.Reader) ([]line, int64, error) {
 		off += int64(len(b))
 		var l line
 		if json.Unmarshal(b, &l) == nil && l.Type != "" {
+			if len(out) == 0 && l.Type == "session_meta" {
+				var mt meta
+				if json.Unmarshal(l.Payload, &mt) == nil {
+					paginated = mt.HistoryMode == "paginated"
+				}
+			}
 			out = append(out, l)
+		} else if paginated {
+			return nil, 0, fmt.Errorf("%w: invalid record in paginated history at byte %d", agent.ErrDiverged, off)
 		}
 	}
 }

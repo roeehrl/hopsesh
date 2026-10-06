@@ -71,6 +71,9 @@ func runLineageRoute(t *testing.T, route, start string, mask int, patterns ...st
 		}
 		current = listAgent(t, places['A'], cx, installs['A']["codex"])[0]
 	}
+	if len(patterns) > 0 && patterns[0] == "paginated" {
+		promoteCodexPaginated(t, current.Path)
+	}
 	env := move.Env{StateDir: t.TempDir()}
 	var sentinels []string
 	transfers, returns := 0, 0
@@ -81,7 +84,7 @@ func runLineageRoute(t *testing.T, route, start string, mask int, patterns ...st
 	for i := 0; i < len(route)-1; i++ {
 		from, to := route[i], route[i+1]
 		src, dst := places[from], places[to]
-		if pattern == "all" || pattern == "profiles" || pattern == "alternating" && i%2 == 0 {
+		if pattern == "all" || pattern == "profiles" || pattern == "paginated" || pattern == "alternating" && i%2 == 0 {
 			sentinel := fmt.Sprintf("ROUTE-WORK-%d-UNIQUE", i)
 			sentinels = append(sentinels, sentinel)
 			if currentAgent == "claude" {

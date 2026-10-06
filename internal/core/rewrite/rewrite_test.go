@@ -244,3 +244,19 @@ func TestPathAfterJoinedWord(t *testing.T) {
 		t.Errorf("got\n%s\nwant\n%s", out, want)
 	}
 }
+
+func TestRenumberSanitizedOrdinalsPreservesOtherBytes(t *testing.T) {
+	in := "{\"ordinal\": 0,\"type\":\"session_meta\",\"payload\":{\"signed\":\"\\u0061\"}}\n" +
+		"{\"ordinal\":1,\"type\":\"reasoning\"}\n" +
+		"{ \"ordinal\" : 2 , \"type\":\"message\",\"payload\":{\"ordinal\":99,\"opaque\":\"\\u003c\"}}\n"
+	out, st := run(t, in, Options{Policy: agent.RewritePolicy{RenumberOrdinal: "ordinal", DropRecords: []agent.FieldMatch{{Field: "type", Values: []string{"reasoning"}}}}})
+	want := strings.Replace(strings.Replace(in, "{\"ordinal\":1,\"type\":\"reasoning\"}\n", "", 1), "\"ordinal\" : 2", "\"ordinal\" : 1", 1)
+	if out != want || st.DroppedRecords != 1 {
+		t.Fatalf("got %s; want %s; %+v", out, want, st)
+	}
+	legacy := `{"type":"message","payload":{"signed":"\u0061"}}` + "\n"
+	out, _ = run(t, legacy, Options{Policy: agent.RewritePolicy{RenumberOrdinal: "ordinal"}})
+	if out != legacy {
+		t.Fatal("legacy bytes changed")
+	}
+}

@@ -276,3 +276,28 @@ TUI plans provide a `d` destination picker, retained after selection and refresh
 applying. `h` opens the branch's scrollable Journey with origin, operation IDs, undo labels
 and fidelity losses. Its workless plans/results explicitly report zero new messages and
 transfers. These controls have native-module and stale-plan keyboard regressions.
+
+
+Codex paginated returns are supported for complete standalone local rollouts. Append preserves
+all existing bytes and continues ordinals without changing the history mode. Missing ordinals,
+gaps, duplicate ordinals, malformed records, partial write tails and incomplete subagent
+prefixes refuse a write. By-reference `history_base` ancestry still requires vendor prefix
+materialization and is rejected before planning a transfer; a local suffix is never reported
+as the full conversation. The implementation follows Codex's [durable ordinal contract](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/rollout/src/ordinal.rs).
+
+The mandatory suite adds 24 paginated-original routes across all assignments in ABABA, ABCA
+and ABCBCAB, alongside the 60 existing route/workless cases and separate fork/recovery cases.
+All 18 focused local transport rows passed, including Codex→Claude→Codex. The full browser
+suite passed 148 tests. A controlled standalone paginated fixture was carried to installed
+Claude, worked on there, appended to its original Codex ID and resumed by installed Codex;
+the native prefix and ordinals stayed intact and Codex recalled the newly returned work.
+This complements the paid Claude-origin round trip; it does not claim materialization of
+by-reference vendor forks. Same-agent native moves retain full native files and signed
+records; returns involving conversion append only missing logical work to the existing ID.
+
+The complete local stand-in SSH/SFTP matrix passed all 64 rows. Account sanitization also
+rebases standalone ordinals after dropping account-bound records in the newly installed
+copy, changing only the numeric tokens. Ordinary same-account native moves and appends
+retain the original ordinals and payload bytes. The account-change regression verifies
+that the sanitized copy can continue accepting native turns. Live paginated verification
+is repeatable with `HOPSESH_PAID_SMOKE=1 scripts/paid-paginated-smoke.py`.

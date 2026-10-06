@@ -44,7 +44,7 @@ func (m *Module) VerifyNativeFork(ctx context.Context, h agent.Host, in agent.In
 	if cm.ForkedFromID != pm.ID || cm.ID == pm.ID || child.Key.Agent != parent.Key.Agent {
 		return nil, fmt.Errorf("%w: native fork parent is not declared", agent.ErrDiverged)
 	}
-	if cm.HistoryMode == "paginated" {
+	if cm.HistoryBase != nil {
 		return nil, fmt.Errorf("%w: paginated fork ancestry is not materialized", agent.ErrUnsupported)
 	}
 	pr, _, err := readLines(strings.NewReader(string(pb)))

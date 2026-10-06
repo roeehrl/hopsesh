@@ -377,6 +377,7 @@ func install(ctx context.Context, p *Plan, in Input, env Env, j *journal.Journal
 		san := tgt.Module.(agent.Sanitizer).Sanitize()
 		pol.DropElems = append(pol.DropElems, san.DropElems...)
 		pol.DropRecords = append(pol.DropRecords, san.DropRecords...)
+		pol.RenumberOrdinal = san.RenumberOrdinal
 	}
 	var redact func([]byte) ([]byte, int)
 	if p.Options.Redact {
