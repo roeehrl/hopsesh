@@ -55,6 +55,11 @@ func TestLineageInterruptedWriteAndIdempotentRetry(t *testing.T) {
 			}
 			original, _ := os.ReadFile(written.Path)
 			// Rebuild from disk: no in-memory plan or writer result survives.
+			// Display-name changes must not invalidate persistent endpoint recovery.
+			if target == "claude" {
+				a.m.Name = "A-renamed"
+				b.m.Name = "B-renamed"
+			}
 			p, err = move.Build(ctx, in, opt)
 			if err != nil {
 				t.Fatal(err)

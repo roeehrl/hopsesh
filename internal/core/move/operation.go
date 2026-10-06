@@ -156,6 +156,15 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (*Result, error) {
 		if r.Intent != intent {
 			return nil, fmt.Errorf("operation ID belongs to another transfer; use a new ID")
 		}
+		reach := func(name string) (host.FS, error) {
+			if name == r.Plan.Source.Location {
+				return in.Source.Machine.FS(ctx)
+			}
+			if name == r.Plan.Target.Location {
+				return in.Target.Machine.FS(ctx)
+			}
+			return machinesOf(ctx, in)(name)
+		}
 		j, e := journal.Load(env.StateDir, r.Journal)
 		if e != nil {
 			return nil, fmt.Errorf("interrupted transfer journal: %w", e)
@@ -164,7 +173,7 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (*Result, error) {
 			return nil, fmt.Errorf("this transfer was undone; use a new operation ID")
 		}
 		if r.Phase == "complete" {
-			if e = j.RecoverReceipts(machinesOf(ctx, in)); e != nil {
+			if e = j.RecoverReceipts(reach); e != nil {
 				return r.Result, e
 			}
 			p.Placement = r.Plan.Placement
@@ -212,7 +221,7 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (*Result, error) {
 				return res, e
 			}
 		}
-		if e = j.RecoverReceipts(machinesOf(ctx, in)); e != nil {
+		if e = j.RecoverReceipts(reach); e != nil {
 			return res, e
 		}
 		if seg, e := readSegment(ctx, in.Source, in.Session); e == nil && seg.Cursor.Head == p.sourceState.Head {
@@ -225,7 +234,7 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (*Result, error) {
 			res.Mark = "off"
 		}
 		res.Command, res.Run = launch.Shell(p.Resume, "", launch.DefaultShell()), p.Resume
-		if e = j.Seal(machinesOf(ctx, in)); e != nil {
+		if e = j.Seal(reach); e != nil {
 			return res, e
 		}
 		r.Phase = "complete"

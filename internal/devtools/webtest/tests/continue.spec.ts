@@ -45,3 +45,21 @@ test("continue a Claude Code session in Codex, see where it has been, and undo",
   await menu(page, "sessions");
   await expect(row(page, "Find the codeword (from Claude Code)")).toHaveCount(0, { timeout: 30_000 });
 });
+
+
+test("a workless return synchronizes receipts and reports no new conversation", async ({ page }) => {
+  await row(page, "Find the codeword").click();
+  await action(page, "move", /^Continue with Codex…/);
+  await page.locator("#sheet").getByRole("button", { name: /Continue in Codex/ }).click();
+  await expect(page.getByRole("heading", { name: /continues in Codex/ })).toBeVisible({ timeout: 30_000 });
+  await page.getByRole("button", { name: /Back to sessions/ }).click();
+  await row(page, "Find the codeword (from Claude Code)").click();
+  await action(page, "move", /^Continue with Claude Code…/);
+  const sheet = page.locator("#sheet");
+  await expect(sheet.getByLabel("What changes")).toContainText("0 new messages, 0 transfers");
+  await sheet.getByRole("button", { name: "Sync lineage receipts" }).click();
+  await expect(page.getByRole("heading", { name: /already synchronized/ })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("Lineage receipts synchronized", { exact: true })).toBeVisible();
+  await expect(page.getByText("Claude Code session written", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Paste this into the old session:", { exact: true })).toHaveCount(0);
+});

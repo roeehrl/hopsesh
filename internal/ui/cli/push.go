@@ -30,6 +30,8 @@ Nothing changes until you confirm (or pass --yes). hopsesh undo <id> here undoes
 		RunE: func(cmd *cobra.Command, args []string) error { return push(cmd, args[0], args[1]) },
 	}
 	f := cmd.Flags()
+	f.String("operation-id", "", "idempotency key for retrying the same transfer")
+	f.String("target-session", "", "explicit destination session when a branch has several replicas there")
 	f.String("in", "", "continue in this agent there ("+strings.Join(agentIDs(), ", ")+"; default: the session's own)")
 	f.String("fidelity", "history", "for another agent: history (the conversation as text) or note (a briefing only)")
 	f.Bool("native", false, "for another agent that can: replay exact tool calls as its own (experimental)")

@@ -390,7 +390,7 @@ func (r *runner) roundtrip(s *sc) error {
 	}
 	args := []string{"push", s.row.To + "/" + f.ID, s.host, "--yes", "--json"}
 	if s.row.To != s.row.From {
-		args = append(args, "--into", s.row.From)
+		args = append(args, "--in", s.row.From)
 	}
 	if s.row.Repo == "none" {
 		args = append(args, "--to", s.srcCwd)

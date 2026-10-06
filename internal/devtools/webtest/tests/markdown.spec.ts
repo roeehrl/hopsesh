@@ -16,7 +16,7 @@ test("Markdown renders safely in distinct message cards, expands, and carries in
   await fresh(page);
   const opened: string[] = [];
   const network: string[] = [];
-  page.on("request", (r) => { if (r.url().startsWith("https://example.com")) network.push(r.url()); });
+  page.on("request", (r) => { if (new URL(r.url()).hostname === "example.com") network.push(r.url()); });
   await page.route("**/call", async (route) => {
     const call = route.request().postDataJSON();
     if (call.m === "Preview") return route.fulfill({ json: { result: {

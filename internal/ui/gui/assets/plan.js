@@ -410,7 +410,8 @@ sheet.addEventListener("keydown", (ev) => {
 // ---- Done ----
 function happened(d, p) {
   const out = [];
-  if (d.kind === "continue") {
+  if(d.noWork) {out.push(item("ok","Lineage receipts synchronized","0 new messages, 0 transfers. The existing conversation is ready to open."));}
+  else if (d.kind === "continue") {
     const rep = p.continue.report;
     out.push(item("ok", `${d.agent} session written`, rep.fidelity === "note" ? "With a briefing only." : `${count(rep.messages, "message")}, ${count(rep.toolCalls, "tool call")}.`));
     if (p.nativeCopy) out.push(item("ok", `The ${p.nativeCopy.agent} session is kept ${d.machine ? "on " + d.machine : "here"} too`, `Coming back to ${p.nativeCopy.agent} later adds only the new work to it.`));
@@ -439,7 +440,7 @@ screen("done", (d, p, o) => {
   const doUndo = async () => { if (await undo(d.journal, d.title)) go("sessions", true); };
   fill(view, h("div", { class: "page" }, h("div", { class: "page-in", style: "max-width:720px" },
     h("div", { style: "display:flex;gap:14px;align-items:center" }, h("span", { class: "badge ok", style: "width:40px;height:40px;font-size:20px" }, "✓"),
-      h("div", {}, h("h1", {}, d.kind === "continue" ? `“${d.title}” continues in ${d.agent}` : `“${d.title}” is ${d.machine ? "on " + d.machine : "here"}`),
+      h("div", {}, h("h1", {}, d.noWork ? `“${d.title}” is already synchronized` : d.kind === "continue" ? `“${d.title}” continues in ${d.agent}` : `“${d.title}” is ${d.machine ? "on " + d.machine : "here"}`),
         h("div", { class: "muted" }, `${cap(where)}, in `, h("span", { class: "mono" }, p.targetCwd)))),
     h("div", { class: "card" }, h("div", { class: "dlg-body" },
       d.machine ? h("b", {}, `Start it on ${d.machine}`) : h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" },
@@ -447,10 +448,10 @@ screen("done", (d, p, o) => {
         d.inApp ? null : h("button", { class: "btn big", onclick: other }, opensIn() === "terminal" ? "Resume in hopsesh Terminal" : `Resume in ${sys.terminal}`),
         h("button", { class: "btn big", onclick: copy }, "Copy the command")),
       h("div", { style: "display:flex;gap:8px;align-items:flex-start" }, h("div", { class: "term", style: "flex:1" }, d.command), d.machine ? h("button", { class: "btn", onclick: copy }, "Copy") : null),
-      h("span", { class: "muted", style: "font-size:12px" }, d.kind === "continue" ? `${d.agent} reads hopsesh's briefing at the end of the history, then ${o.go ? "starts working" : "waits for you"}.`
+      h("span", { class: "muted", style: "font-size:12px" }, d.noWork ? "Opens the existing session; no new conversation or briefing was written." : d.kind === "continue" ? `${d.agent} reads hopsesh's briefing at the end of the history, then ${o.go ? "starts working" : "waits for you"}.`
         : `Its first message tells ${d.agent} where the session came from and asks it to check the repository and files before going on.`))),
     h("section", { class: "card" }, h("div", { class: "dlg-body" }, h("span", { class: "sec-h" }, "What happened"), happened(d, p),
-      p.continue ? h("details", {}, h("summary", { style: "cursor:pointer;font-size:12.5px" }, "Show the loss report"), h("div", { style: "margin-top:10px" }, boxes(p))) : null)),
+      p.continue && !d.noWork ? h("details", {}, h("summary", { style: "cursor:pointer;font-size:12.5px" }, "Show the loss report"), h("div", { style: "margin-top:10px" }, boxes(p))) : null)),
     d.notice ? h("section", { class: "card" }, h("div", { class: "dlg-body" }, h("b", {}, `Tell the session on ${d.sourceHost}`),
       h("span", { class: "muted", style: "font-size:12px" }, "Paste this into the old session:"),
       h("div", { style: "display:flex;gap:8px;align-items:flex-start" }, h("div", { class: "term", style: "flex:1" }, d.notice),

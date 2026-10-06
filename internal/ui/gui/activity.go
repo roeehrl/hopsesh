@@ -137,3 +137,10 @@ func (a *App) UndoLast() (string, error) {
 	}
 	return "", errors.New("nothing to undo")
 }
+
+// RetryReceipts repairs pending metadata without relaunching a native or cloud agent.
+func (a *App) RetryReceipts(id string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	return a.snapshot().RecoverReceipts(ctx, id)
+}

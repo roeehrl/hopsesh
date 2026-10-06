@@ -226,6 +226,15 @@ type Endpoint struct {
 func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	src, tgt := in.Source, in.Target
 	copies := currentBranchCopies(in)
+	if opt.TargetSession != "" {
+		var selected []Copy
+		for _, c := range copies {
+			if c.Summary.Key.String() == opt.TargetSession || string(c.Summary.Key.Session) == opt.TargetSession {
+				selected = append(selected, c)
+			}
+		}
+		copies = selected
+	}
 	if src.Module.Spec().ID != tgt.Module.Spec().ID || len(copies) == 1 && copies[0].Summary.Key != in.Session.Key {
 		return buildContinue(ctx, in, opt)
 	}
@@ -423,6 +432,10 @@ func changedSinceItLeft(ctx context.Context, p *Plan, in Input, c Copy) string {
 		}
 		source, target := p.manifest.Covered(p.sourceState.Heads), p.manifest.Covered(st.Heads)
 		if lineage.Subset(source, target) && lineage.Subset(target, source) {
+			if c.Summary.CWD != "" && realIntended(c.Summary.CWD) != realIntended(p.Target.CWD) {
+				p.Blockers = append(p.Blockers, "destination is synchronized in "+c.Summary.CWD+"; choose that folder or create a separate fork for a different folder")
+				return ""
+			}
 			p.NoWork = true
 			p.SyncTo = &c.Summary
 		}

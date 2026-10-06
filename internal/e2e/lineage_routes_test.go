@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -38,8 +39,16 @@ func runLineageRoute(t *testing.T, route, start string, mask int, patterns ...st
 	installs := map[byte]map[string]agent.Install{}
 	for _, c := range []byte{'A', 'B', 'C'} {
 		l := newLocation(t, string(c), root)
+		if len(patterns) > 0 && patterns[0] == "profiles" {
+			l.m.Facts.Home = root
+			l.m.Facts.Env["HOPSESH_CONFIG_DIR"] = filepath.Join(root, string(c), "config")
+		}
 		places[c] = l
-		installs[c] = map[string]agent.Install{"claude": l.in, "codex": codexInstall(l)}
+		ci := codexInstall(l)
+		if len(patterns) > 0 && patterns[0] == "profiles" {
+			ci.Roots["home"] = filepath.Join(root, string(c), ".codex")
+		}
+		installs[c] = map[string]agent.Install{"claude": l.in, "codex": ci}
 		for _, in := range installs[c] {
 			if err := os.MkdirAll(in.Root("home"), 0o700); err != nil {
 				t.Fatal(err)
@@ -72,7 +81,7 @@ func runLineageRoute(t *testing.T, route, start string, mask int, patterns ...st
 	for i := 0; i < len(route)-1; i++ {
 		from, to := route[i], route[i+1]
 		src, dst := places[from], places[to]
-		if pattern == "all" || pattern == "alternating" && i%2 == 0 {
+		if pattern == "all" || pattern == "profiles" || pattern == "alternating" && i%2 == 0 {
 			sentinel := fmt.Sprintf("ROUTE-WORK-%d-UNIQUE", i)
 			sentinels = append(sentinels, sentinel)
 			if currentAgent == "claude" {
@@ -191,5 +200,13 @@ func TestLineageSeededLongHistories(t *testing.T) {
 			route = append(route, next)
 		}
 		t.Run(fmt.Sprint(seed), func(t *testing.T) { runLineageRoute(t, string(route), "claude", int(seed%8), "alternating") })
+	}
+}
+
+// Windows loopback SSH uses the same administrator account with isolated agent
+// and configuration folders. These must not collapse into one native replica.
+func TestLineageRoutesSeparateProfilesOnOneAccount(t *testing.T) {
+	for _, start := range []string{"claude", "codex"} {
+		t.Run(start, func(t *testing.T) { runLineageRoute(t, "ABABA", start, 3, "profiles") })
 	}
 }

@@ -238,6 +238,10 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 		switch {
 		case lineage.Subset(source, target) && lineage.Subset(target, source):
 			cp.Relation = RelationSame
+			if c.Summary.CWD != "" && realIntended(c.Summary.CWD) != realIntended(p.Target.CWD) {
+				p.Blockers = append(p.Blockers, "destination is synchronized in "+c.Summary.CWD+"; choose that folder or create a separate fork for a different folder")
+				return
+			}
 			p.NoWork = true
 			p.SyncTo = &c.Summary
 			p.Placement.Key = c.Summary.Key

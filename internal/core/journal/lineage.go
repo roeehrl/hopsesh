@@ -1,7 +1,10 @@
 package journal
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
+	"path/filepath"
 	"strings"
 
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
@@ -81,14 +84,56 @@ func (j *Journal) compensateLineage(r Reach, captured []lineageUndo) error {
 				m.ReplaceProjection(id, ir.Cursor{Head: checkpoint.Head, Offset: checkpoint.Offset}, checkpoint.Projection, checkpoint.Heads, checkpoint.Loss)
 			}
 		}
-		if err = m.UndoOperationAt(operation, j.UndoTime); err != nil {
+		if err = m.UndoOperation(operation); err != nil {
 			return err
 		}
 		if err = m.Validate(); err != nil {
 			return fmt.Errorf("undo lineage: %w", err)
 		}
+		restored, err := fileState(fsys, saved.machine, saved.path)
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
 		if err = fsys.WriteFile(saved.path, m.Encode(), 0o600); err != nil {
 			return err
+		}
+		after, err := fileState(fsys, saved.machine, saved.path)
+		if err != nil {
+			return err
+		}
+		if err = j.refreshRestoredMetadataGuards(restored, after); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Undo restores exact prior metadata, then adds an immutable compensation. Advance
+// only earlier guards that match those restored bytes; native guards never change.
+// This permits undoing consecutive transfers without accepting unrelated metadata.
+func (j *Journal) refreshRestoredMetadataGuards(before, after State) error {
+	if before.Sum == "" {
+		return nil
+	}
+	journals, err := List(filepath.Dir(filepath.Dir(j.dir)))
+	if err != nil {
+		return err
+	}
+	for _, previous := range journals {
+		if previous.ID == j.ID || previous.Undone || !previous.Time.Before(j.Time) {
+			continue
+		}
+		changed := false
+		for i, checkpoint := range previous.After {
+			if checkpoint.Machine == before.Machine && checkpoint.Path == before.Path && checkpoint.Sum == before.Sum {
+				previous.After[i] = after
+				changed = true
+			}
+		}
+		if changed {
+			if err := previous.Save(); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

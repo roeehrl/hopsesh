@@ -16,7 +16,8 @@ test("Back to sessions stays in one toolbar position across pages and scrolling"
       const bounds = (await back.boundingBox())!;
       if (position) expect({ x: bounds.x, y: bounds.y }).toEqual(position);
       position = { x: bounds.x, y: bounds.y };
-      expect(bounds.x).toBeGreaterThanOrEqual(96); // clear of macOS traffic lights
+      const mac = await page.locator("html").evaluate(el => el.getAttribute("data-os") === "darwin");
+      expect(bounds.x).toBeGreaterThanOrEqual(mac ? 96 : 8); // native buttons exist on macOS only
       await page.locator(".page").evaluate(el => { el.scrollTop = el.scrollHeight; });
       expect(await back.boundingBox()).toEqual(bounds);
       const controls = await page.locator(".titlebar > :not([hidden])").evaluateAll(els =>

@@ -699,6 +699,7 @@ func importsFrom(m agent.Module, from agent.ID) bool {
 
 // DoneDTO reports a finished move or continuation.
 type DoneDTO struct {
+	NoWork     bool     `json:"noWork"`
 	Kind       string   `json:"kind"`
 	Title      string   `json:"title"`
 	Agent      string   `json:"agent"`
@@ -751,11 +752,14 @@ func (a *App) Apply() (*DoneDTO, error) {
 	a.mu.Lock()
 	a.res = res
 	a.mu.Unlock()
-	d := &DoneDTO{Kind: p.Kind, Title: p.Title, Agent: p.Agent, Command: res.Command, Files: res.Files, Bytes: move.Human(res.Bytes),
+	d := &DoneDTO{NoWork: p.NoWork, Kind: p.Kind, Title: p.Title, Agent: p.Agent, Command: res.Command, Files: res.Files, Bytes: move.Human(res.Bytes),
 		Secrets: res.Secrets.Total, Redacted: p.Options.Redact, Cloned: res.Cloned, Worktree: res.Worktree, Journal: res.Journal,
 		SourceHost: p.Source.Location, Stopped: res.Stopped, Pushed: res.Pushed, PushError: res.PushError, SyncNote: res.SyncNote,
 		Mark: res.Mark, MarkError: res.MarkError, Notice: res.Notice, Warnings: res.Warnings, InApp: p.Options.App,
 		AuditDir: filepath.Join(config.StateDir(), "log")}
+	if p.NoWork && p.SyncTo != nil && p.SyncTo.Title != "" {
+		d.Title = p.SyncTo.Title
+	}
 	if c := p.Continue; c != nil && c.AppendTo != nil && c.AppendTo.Title != "" {
 		d.Title = c.AppendTo.Title // the session it went back into
 	}

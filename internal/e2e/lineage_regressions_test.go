@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -12,11 +13,23 @@ import (
 	"github.com/roeehrl/hopsesh/agents/codex"
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/core/host"
+	"github.com/roeehrl/hopsesh/internal/core/journal"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"os"
 	"testing"
+	"time"
 )
+
+type recordingStopper struct {
+	*claude.Module
+	stopped []agent.SessionKey
+}
+
+func (m *recordingStopper) Stop(_ context.Context, _ agent.Host, _ agent.Install, s agent.Summary, _ time.Duration) error {
+	m.stopped = append(m.stopped, s.Key)
+	return nil
+}
 
 func TestLineageThreeDestinationsHaveIndependentReceipts(t *testing.T) {
 	root := t.TempDir()
@@ -111,6 +124,25 @@ func TestLineageForkBranchesRemainIndependent(t *testing.T) {
 			if s.Key == fork.Key {
 				t.Fatalf("bringing original %s back also sets aside independent fork %s", in.Session.Key, s.Key)
 			}
+		}
+	})
+	t.Run("stop only selected branch", func(t *testing.T) {
+		in = input(t, b, a)
+		stopper := &recordingStopper{Module: claude.New()}
+		in.Target.Module = stopper
+		in.Copies = []move.Copy{{Summary: original, Lineage: ol, Live: agent.LiveInfo{State: agent.Live}}, {Summary: fork, Lineage: fl, Live: agent.LiveInfo{State: agent.Live}}}
+		p, err := move.Build(ctx, in, move.Options{TargetDir: a.repo, Conflict: move.ConflictReplace, StopLocal: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(p.Blockers) > 0 || !p.StopHere {
+			t.Fatalf("invalid scoped-stop plan %v", p.Blockers)
+		}
+		if _, err = move.Apply(ctx, p, in, env); err != nil {
+			t.Fatal(err)
+		}
+		if len(stopper.stopped) != 1 || stopper.stopped[0] != original.Key {
+			t.Fatalf("stopped another branch: %v", stopper.stopped)
 		}
 	})
 }
@@ -250,6 +282,14 @@ func TestLineageNoWorkReturnDoesNotCount(t *testing.T) {
 			if !p.NoWork || len(p.Blockers) > 0 {
 				t.Fatal("no-work return must synchronize only metadata", p.Blockers)
 			}
+			otherFolder, err := move.Build(ctx, back, move.Options{TargetDir: a.repo + "-other"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if otherFolder.NoWork || !strings.Contains(strings.Join(otherFolder.Blockers, " "), "synchronized in") {
+				t.Fatal("workless visit silently ignored the requested folder")
+			}
+
 			nativeBefore, _ := os.ReadFile(list(t, a)[sid].Path)
 			if _, err = move.Apply(ctx, p, back, env); err != nil {
 				t.Fatal(err)
@@ -416,6 +456,164 @@ func TestLineageOriginalAndSiblingForksMixedRoutes(t *testing.T) {
 				if mentions(seg, "SIBLING-LEFT-WORK-") {
 					t.Fatal("sibling/parent received unrelated fork work")
 				}
+			}
+		})
+	}
+}
+
+func TestLineageMultipleReplicasRequireExplicitSelection(t *testing.T) {
+	root := t.TempDir()
+	a, b := newLocation(t, "A", root), newLocation(t, "B", root)
+	seed(t, a)
+	ctx := context.Background()
+	env := move.Env{StateDir: t.TempDir()}
+	in := input(t, a, b)
+	p, err := move.Build(ctx, in, move.Options{TargetDir: b.repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = move.Apply(ctx, p, in, env); err != nil {
+		t.Fatal(err)
+	}
+	original := list(t, a)[sid]
+	m, err := lineage.Read(host.LocalFS(), original.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, originalID, ok := m.FindEndpoint(original.Key, a.m.Facts.Endpoint)
+	if !ok {
+		t.Fatal("missing original endpoint")
+	}
+	originalState, _ := m.LatestState(originalID)
+	newID := "0b6c6a8e-1d2f-4c3b-9a7e-5f4d3c2b1aff"
+	copiedPath := strings.TrimSuffix(original.Path, sid+".jsonl") + newID + ".jsonl"
+	raw, _ := os.ReadFile(original.Path)
+	raw = []byte(strings.ReplaceAll(string(raw), sid, newID))
+	if err = os.WriteFile(copiedPath, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	copy := list(t, a)[newID]
+	seg := readAll(t, a, claude.New(), a.in, copy)
+	proj := []ir.Projection{}
+	for _, n := range seg.Nodes {
+		found := false
+		for _, q := range originalState.Projection {
+			if q.Anchor == n.Native.Anchor && q.Hash == ir.ContentHash(n) {
+				proj = append(proj, q)
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatal("replica fixture changed native history")
+		}
+	}
+	replica := m.Upsert(lineage.Replica{Endpoint: a.m.Facts.Endpoint, Location: "A", Key: copy.Key})
+	m.ReplaceProjection(replica, seg.Cursor, proj, originalState.Heads, originalState.Loss)
+	if err = m.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{original.Path, copy.Path} {
+		if err = os.WriteFile(lineage.PathFor(path), m.Encode(), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	untouched, _ := os.ReadFile(copy.Path)
+	appendTurn(t, list(t, b)[sid].Path, "EXPLICIT-DESTINATION-DELTA")
+	in = input(t, b, a)
+	in.Copies = []move.Copy{{Summary: original, Lineage: m}, {Summary: copy, Lineage: m}}
+	p, err = move.Build(ctx, in, move.Options{TargetDir: a.repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Destinations) != 2 || len(p.Blockers) == 0 {
+		t.Fatalf("ambiguous target silently selected: destinations=%d blockers=%v", len(p.Destinations), p.Blockers)
+	}
+	p, err = move.Build(ctx, in, move.Options{TargetDir: a.repo, TargetSession: original.Key.String()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Blockers) > 0 {
+		t.Fatal(p.Blockers)
+	}
+	if _, err = move.Apply(ctx, p, in, env); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.ReadFile(copy.Path)
+	if string(untouched) != string(after) {
+		t.Fatal("explicit destination changed another replica")
+	}
+	if !mentions(readAll(t, a, claude.New(), a.in, list(t, a)[sid]), "EXPLICIT-DESTINATION-DELTA") {
+		t.Fatal("selected destination did not receive work")
+	}
+	selectedBytes, _ := os.ReadFile(original.Path)
+	p, err = move.Build(ctx, in, move.Options{TargetDir: a.repo, TargetSession: copy.Key.String()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Blockers) > 0 || p.Continue == nil || p.Continue.AppendTo == nil || p.Continue.AppendTo.Key != copy.Key {
+		t.Fatalf("different native ID was not selected: %v", p.Blockers)
+	}
+	if _, err = move.Apply(ctx, p, in, env); err != nil {
+		t.Fatal(err)
+	}
+	after, _ = os.ReadFile(original.Path)
+	if string(selectedBytes) != string(after) {
+		t.Fatal("selecting second replica changed the first")
+	}
+	if !mentions(readAll(t, a, claude.New(), a.in, list(t, a)[newID]), "EXPLICIT-DESTINATION-DELTA") {
+		t.Fatal("second replica did not receive work")
+	}
+}
+
+func TestLineageConsecutiveUndoPreservesNativeGuards(t *testing.T) {
+	for _, newWork := range []bool{false, true} {
+		t.Run(fmt.Sprintf("new-work-%t", newWork), func(t *testing.T) {
+			root := t.TempDir()
+			a, b, c := newLocation(t, "A", root), newLocation(t, "B", root), newLocation(t, "C", root)
+			seed(t, a)
+			ctx := context.Background()
+			env := move.Env{StateDir: t.TempDir()}
+			in := input(t, a, b)
+			p, err := move.Build(ctx, in, move.Options{TargetDir: b.repo, Mark: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			first, err := move.Apply(ctx, p, in, env)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if newWork {
+				appendTurn(t, list(t, b)[sid].Path, "keep this native work")
+			}
+			in = input(t, b, c)
+			p, err = move.Build(ctx, in, move.Options{TargetDir: c.repo, Mark: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			second, err := move.Apply(ctx, p, in, env)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reach := journal.Files(func(string) (host.FS, error) { return host.LocalFS(), nil })
+			j, err := journal.Load(env.StateDir, second.Journal)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := j.Undo(ctx, reach, false); err != nil {
+				t.Fatal("undo second", err)
+			}
+			j, err = journal.Load(env.StateDir, first.Journal)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = j.Undo(ctx, reach, false)
+			if newWork {
+				if !errors.Is(err, journal.ErrChanged) {
+					t.Fatal("undo accepted authored work", err)
+				}
+			} else if err != nil {
+				t.Fatal("compensation blocked consecutive undo", err)
 			}
 		})
 	}

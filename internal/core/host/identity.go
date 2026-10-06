@@ -22,7 +22,7 @@ func (m *Machine) PrepareIdentity(ctx context.Context) (string, error) {
 	if m.Facts.Endpoint != "" {
 		return m.Facts.Endpoint, nil
 	}
-	path := m.Path().Join(m.Facts.Home, ".hopsesh", "endpoint-id")
+	path := m.identityPath()
 	b, err := fsys.ReadFile(path, 128)
 	if err == nil {
 		value := strings.TrimSpace(string(b))
@@ -58,7 +58,7 @@ func (m *Machine) CommitIdentity(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	path := m.Path().Join(m.Facts.Home, ".hopsesh", "endpoint-id")
+	path := m.identityPath()
 	b, err := fsys.ReadFile(path, 128)
 	if err == nil {
 		if strings.TrimSpace(string(b)) != id {
@@ -86,4 +86,13 @@ func (m *Machine) CommitIdentity(ctx context.Context) error {
 		return fmt.Errorf("endpoint initialized by another transfer; refresh the plan")
 	}
 	return err
+}
+
+// Explicit configuration folders are independent installations, even under one OS
+// account. This also keeps isolated test homes from sharing one native replica ID.
+func (m *Machine) identityPath() string {
+	if dir := m.Facts.Env["HOPSESH_CONFIG_DIR"]; dir != "" {
+		return m.Path().Join(dir, "endpoint-id")
+	}
+	return m.Path().Join(m.Facts.Home, ".hopsesh", "endpoint-id")
 }

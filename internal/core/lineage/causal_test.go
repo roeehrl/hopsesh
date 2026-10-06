@@ -150,6 +150,7 @@ func TestNativeForkProjectionKeepsInheritedRevisionIdentity(t *testing.T) {
 	m := New("F")
 	parent := m.Upsert(Replica{Endpoint: "A", Location: "A", Key: agent.SessionKey{Agent: "codex", Session: "parent"}})
 	st := observeText(t, m, parent, "base", "shared work")
+	m.Deliver(parent, ir.Cursor{Head: st.Head, Offset: st.Offset}, nil, st.Heads, []string{"history summarized"})
 	seg := ir.Segment{Nodes: []ir.Node{{Kind: ir.KindMessage, Actor: ir.User, Text: "base", Native: &ir.Native{Anchor: "child-a"}}, {Kind: ir.KindMessage, Actor: ir.User, Text: "shared work", Native: &ir.Native{Anchor: "child-b"}}, {Kind: ir.KindMessage, Actor: ir.User, Text: "fork work", Native: &ir.Native{Anchor: "child-c"}}}}
 	ir.Chain(seg.Nodes, "")
 	seg.Cursor.Head = seg.Nodes[len(seg.Nodes)-1].ID
@@ -161,6 +162,11 @@ func TestNativeForkProjectionKeepsInheritedRevisionIdentity(t *testing.T) {
 	}
 	if len(out.Revisions) != len(m.Revisions)+1 {
 		t.Fatal("inherited records counted as new authorship")
+	}
+	_, childReplica, _ := out.FindEndpoint(child.Key, child.Endpoint)
+	childState, _ := out.LatestState(childReplica)
+	if !slices.Contains(childState.Loss, "history summarized") {
+		t.Fatal("native fork discarded prior conversion loss")
 	}
 	if out.Branch == m.Branch || out.Family != m.Family || !out.Journey().Fork {
 		t.Fatal("native fork lineage missing")
@@ -186,5 +192,37 @@ func TestNativeForkProjectionKeepsInheritedRevisionIdentity(t *testing.T) {
 func TestStrictLineageRejectsTrailingJSON(t *testing.T) {
 	if _, err := Parse(append(New("F").Encode(), []byte(" {}")...)); err == nil {
 		t.Fatal("trailing object accepted")
+	}
+}
+
+func TestStrictReceiptsCannotClaimUnrelatedCoverage(t *testing.T) {
+	m := New("coverage-test")
+	a := m.Upsert(Replica{Endpoint: "A", Location: "A", Key: agent.SessionKey{Agent: "claude", Session: "a"}})
+	b := m.Upsert(Replica{Endpoint: "B", Location: "B", Key: agent.SessionKey{Agent: "codex", Session: "b"}})
+	observeText(t, m, a, "A original")
+	other := observeText(t, m, b, "unrelated B original")
+	forged := m.Clone()
+	st := &forged.States[0]
+	st.Projection[0].Coverage = other.Heads
+	st.ID = ""
+	st.ID = StateID(hash(*st))
+	if _, err := Parse(forged.Encode()); err == nil {
+		t.Fatal("projection claimed revisions outside receipt frontier")
+	}
+	if err := m.AppendHop(Hop{ID: "travel", From: a, To: b, Kind: HopMove}); err != nil {
+		t.Fatal(err)
+	}
+	bad := m.Clone()
+	bad.Hops[0].Kind = "unsupported-op"
+	if _, err := Parse(bad.Encode()); err == nil {
+		t.Fatal("unknown transfer type accepted")
+	}
+	if err := m.UndoOperation("travel"); err != nil {
+		t.Fatal(err)
+	}
+	bad = m.Clone()
+	bad.Compensations[0].ID = "forged"
+	if _, err := Parse(bad.Encode()); err == nil {
+		t.Fatal("invalid compensation identity accepted")
 	}
 }

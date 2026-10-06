@@ -247,3 +247,27 @@ Hopsesh returns the durable pending operation and requires adoption or undo; it 
 again automatically. A completed cloud operation returns its cached result and recovers
 pending source receipts. Cloud briefings and code-only task results retain their reduced
 fidelity; receiving every logical revision does not restore hidden reasoning or tool state.
+
+Final provenance regressions also cover plan records, generated-context exclusion,
+coalesced tool/result coverage, summarized-history coverage and fragment-level return
+filtering. Explicit selection tests create two native replicas on the same destination
+branch, select each in turn and prove the other native file is untouched. A scoped-stop
+regression proves a sibling branch's running session is not stopped.
+
+Acknowledgment writes lock and merge the current sidecar instead of overwriting a newer
+acknowledgment from another destination. An owned lock survives a process exit and can be
+recovered by the same journal; other operations remain pending. Activity's **Retry
+acknowledgement** and `hopsesh lineage retry <journal-id>` repair metadata without native
+writes. Receipt recovery updates only metadata undo guards, so later authored native work
+still blocks destructive undo. Peer pushes retain explicit destination/operation IDs and
+use the same transfer identity in both undo journals; portable undo identity does not
+use either machine's clock. Alias-rename recovery is covered by the native crash test.
+
+Hosted matrix regressions exposed and now cover valid Claude append parents and active
+leaf checkpoints, the public push `--in` flag, and profile-scoped endpoint identity.
+Independent explicit configuration folders under one OS account have distinct endpoints;
+SSH aliases of one profile retain one endpoint. This prevents the Windows loopback transport
+from treating two isolated native files as a single replica. Consecutive undo advances only
+metadata guards that match the exact restored bytes before compensation; all native guards
+remain unchanged. Both no-new-work consecutive undo and refusal after later authored work
+have mandatory regressions. The cloud fetch/convert/two-undo matrix row passed locally.

@@ -134,6 +134,17 @@ func currentBranchCopies(in Input) []Copy {
 					known = true
 				}
 			}
+			// A destination may know a replica the source has not acknowledged yet.
+			// Its matching branch receipt is still a candidate; fresh native validation
+			// occurs before using it. Source knowledge alone cannot hide that replica.
+			if !known && c.Lineage != nil {
+				for _, r := range c.Lineage.Replicas {
+					if r.Key == c.Summary.Key && r.Line == in.Lineage.Branch {
+						known = true
+						break
+					}
+				}
+			}
 			if !known && c.Summary.Key != in.Session.Key {
 				continue
 			}

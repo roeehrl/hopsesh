@@ -31,6 +31,8 @@ export async function undoLast() {
 }
 
 const KINDS = {
+  "lineage-sync": {label:"Receipts synchronized",ico:ICONS.mark,cls:""},
+  "archive-lineage": {label:"Metadata archived",ico:ICONS.mark,cls:""},
   move: { label: "Hopped here", ico: ICONS.down, cls: "" },
   continue: { label: "Continued", ico: ICONS.arrow, cls: "continue" },
   push: { label: "Sent", ico: ICONS.send, cls: "push" },
@@ -92,7 +94,8 @@ function row(x) {
     h("div", { style: "flex:1 1 300px;min-width:0;display:flex;flex-direction:column;gap:3px" },
       h("div", {}, h("b", { style: "font-weight:500" }, k.label), " · ", ft ? ft.title : x.title),
       h("span", { class: "muted", style: "font-size:12px" }, ft?.detail || [`${x.changes} change${x.changes === 1 ? "" : "s"}`, x.remote.length ? `also on ${x.remote.join(", ")}` : ""].filter(Boolean).join(" · ")),
-      x.pendingReceipt && !x.undone ? h("span",{class:"warn",style:"font-size:12px"},"Receipt acknowledgement pending; retry the same operation to recover.") : null,
+      x.pendingReceipt && !x.undone ? h("span",{class:"warn",style:"font-size:12px"},"Receipt acknowledgement pending.") : null,
+      x.pendingReceipt && !x.undone ? h("button",{class:"btn small",onclick:async(ev)=>{const b=ev.currentTarget;b.disabled=true;b.textContent="Retrying acknowledgement…";try{await api("RetryReceipts",x.id);toast("Lineage acknowledgement recovered");state.stale=true;await render(true);}catch(err){fail(err);b.disabled=false;b.textContent="Retry acknowledgement";}}},"Retry acknowledgement") : null,
       ft?.note && !x.undone ? h("span", { class: x.fetch?.outcome === "partial" || x.kind === "handoff" || x.hop?.state === "failed" ? "warn" : "muted", style: "font-size:12px" }, ft.note) : null,
       x.hop?.state === "waiting" && !x.undone ? h("div", { style: "display:flex;gap:8px" },
         h("button", { class: "btn small", onclick: async () => { try { const d = await api("ContinueHop", x.id); toast(d.hop?.state === "done" ? "Handed on" : d.hop?.message || "Still waiting for the copy"); render(true); } catch (e) { fail(e); } } }, "Go on"),

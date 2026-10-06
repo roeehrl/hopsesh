@@ -126,6 +126,7 @@ func (s *peerSession) hello(ctx context.Context) peer.HelloReply {
 func (a *App) receiveOptions(o move.Options) move.Options {
 	d := a.DefaultOptions()
 	d.TargetDir, d.Clone, d.Worktree = o.TargetDir, o.Clone, o.Worktree
+	d.OperationID, d.TargetSession = o.OperationID, o.TargetSession
 	d.Fork, d.RemoteControl, d.Notify, d.Redact = o.Fork, o.RemoteControl, o.Notify, o.Redact
 	d.Mark, d.SyncCode, d.StopLocal, d.Conflict = o.Mark, o.SyncCode, o.StopLocal, o.Conflict
 	d.Fidelity, d.Native, d.Note, d.Go, d.CarryRules, d.Via = o.Fidelity, o.Native, o.Note, o.Go, o.CarryRules, o.Via
@@ -409,6 +410,10 @@ func (p *Push) Commit(ctx context.Context) (*PushResult, error) {
 		return out, err
 	}
 	out.Journal = j.ID
+	j.TransferID = p.Plan.OperationID
+	if err = j.Save(); err != nil {
+		return out, err
+	}
 	j.AddKey(e.Session.Key)
 	if err := j.AddRemote(p.to.Name, reply.Journal); err != nil {
 		return out, err
@@ -458,7 +463,18 @@ func (a *App) replay(ctx context.Context, e Entry, j *journal.Journal, ws []host
 		}
 		switch w.Op {
 		case "write":
-			err = h.FS().WriteFile(w.Path, w.Data, perm)
+			if strings.HasSuffix(w.Path, lineage.Suffix) {
+				if w.Path != lineage.PathFor(e.Session.Path) {
+					return fmt.Errorf("peer receipt targets another session")
+				}
+				fsys, e := m.FS(ctx)
+				if e != nil {
+					return e
+				}
+				err = j.WriteReceipt(fsys, m.Name, w.Path, w.Data, false)
+			} else {
+				err = h.FS().WriteFile(w.Path, w.Data, perm)
+			}
 		case "append":
 			err = h.FS().Append(w.Path, w.Data, w.Append)
 		case "rename":

@@ -192,6 +192,13 @@ func (res *Result) history(r Request, nodes []ir.Node) []ir.Item {
 				role = ir.RoleUser
 			}
 			add(role, n.ID, n.Time, n.Text)
+		case ir.KindPlan:
+			var plan strings.Builder
+			fmt.Fprintf(&plan, "[prior agent · %s · plan]", r.From)
+			for _, step := range n.Plan {
+				fmt.Fprintf(&plan, "\n[%s] %s", step.Status, step.Content)
+			}
+			add(ir.RoleAgent, n.ID, n.Time, plan.String())
 		case ir.KindCompaction:
 			add(ir.RoleUser, n.ID, n.Time, "[earlier conversation, as "+r.From+" summarised it]\n"+n.Text)
 		case ir.KindReasoning:

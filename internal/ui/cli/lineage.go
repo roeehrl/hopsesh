@@ -30,6 +30,19 @@ func lineageCmd() *cobra.Command {
 		_, err = fmt.Fprintf(cmd.OutOrStdout(), "Archived unsupported lineage; native session preserved. Undo: hopsesh undo %s\n", j.ID)
 		return err
 	}}
-	cmd.AddCommand(archive)
+	retry := &cobra.Command{Use: "retry <journal-id>", Short: "Retry pending lineage acknowledgments without writing conversation bytes", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		r, err := newRun(cmd)
+		if err != nil {
+			return err
+		}
+		ctx, cancel := ctxTimeout(2)
+		defer cancel()
+		if err = r.app.RecoverReceipts(ctx, args[0]); err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), "Lineage acknowledgments recovered; conversation bytes preserved.")
+		return err
+	}}
+	cmd.AddCommand(archive, retry)
 	return cmd
 }

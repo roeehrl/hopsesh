@@ -85,3 +85,83 @@ func TestBudgetSummarisesOldest(t *testing.T) {
 		t.Fatalf("the digest leads the first kept user turn and roles alternate: %q", res.Items[0].Text[:60])
 	}
 }
+
+func TestProjectionCoverageSurvivesCoalescingAndSummaries(t *testing.T) {
+	nodes := session()
+	for i := range nodes {
+		nodes[i].Coverage = []ir.NodeID{nodes[i].ID}
+	}
+	res := Render(Request{Nodes: nodes, From: "Claude Code", To: "Codex", Fidelity: History, Window: 1000000})
+	represented := map[ir.NodeID]bool{}
+	for _, item := range res.Items {
+		if item.Generated && len(item.Coverage) > 0 {
+			t.Fatal("generated briefing acquired authored revision coverage")
+		}
+		for _, id := range item.Coverage {
+			represented[id] = true
+		}
+		for _, f := range item.Fragments {
+			for _, id := range f.Coverage {
+				if !represented[id] {
+					t.Fatal("fragment lost its parent's coverage")
+				}
+			}
+		}
+	}
+	for _, n := range nodes {
+		if n.Kind != ir.KindReasoning && !represented[n.ID] {
+			t.Fatalf("coalescing omitted coverage for %s", n.Kind)
+		}
+	}
+	var many []ir.Node
+	for i := 0; i < 80; i++ {
+		actor := ir.User
+		if i%2 != 0 {
+			actor = ir.Agent
+		}
+		many = append(many, ir.Node{Kind: ir.KindMessage, Actor: actor, Text: strings.Repeat("history ", 200)})
+	}
+	ir.Chain(many, "")
+	for i := range many {
+		many[i].Coverage = []ir.NodeID{many[i].ID}
+	}
+	summarized := Render(Request{Nodes: many, From: "Claude Code", To: "Codex", Fidelity: History, Window: 4000})
+	if summarized.Report.Summarised == 0 {
+		t.Fatal("budget fixture did not summarize")
+	}
+	represented = map[ir.NodeID]bool{}
+	loss := false
+	for _, it := range summarized.Items {
+		for _, id := range it.Coverage {
+			represented[id] = true
+		}
+		if it.Fidelity == "summarized" {
+			loss = true
+		}
+	}
+	if !loss {
+		t.Fatal("summary omitted its fidelity annotation")
+	}
+	for _, n := range many {
+		if !represented[n.ID] {
+			t.Fatal("summary dropped provenance")
+		}
+	}
+}
+
+func TestGeneratedContextDoesNotBecomeNewWork(t *testing.T) {
+	nodes := []ir.Node{{Kind: ir.KindMessage, Actor: ir.User, Text: "generated-old-briefing", Generated: true}, {Kind: ir.KindMessage, Actor: ir.User, Text: "actual authored continuation", Coverage: []ir.NodeID{"revision"}}}
+	ir.Chain(nodes, "")
+	r := Render(Request{Nodes: nodes, From: "Claude Code", To: "Codex", Fidelity: History, Window: 1000000})
+	for _, it := range r.Items {
+		if strings.Contains(it.Text, "generated-old-briefing") {
+			t.Fatal("old generated context became imported work")
+		}
+	}
+	r = Render(Request{Nodes: nodes, IncludeGenerated: true, From: "Cloud", To: "Codex", Fidelity: History, Window: 1000000})
+	for _, it := range r.Items {
+		if strings.Contains(it.Text, "generated-old-briefing") && (!it.Generated || len(it.Coverage) != 0) {
+			t.Fatal("cloud context became authored work during coalescing")
+		}
+	}
+}

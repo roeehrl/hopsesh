@@ -108,9 +108,8 @@ type Range struct {
 }
 
 type Compensation struct {
-	ID        string    `json:"id"`
-	Operation string    `json:"operation"`
-	Time      time.Time `json:"time"`
+	ID        string `json:"id"`
+	Operation string `json:"operation"`
 }
 
 type Manifest struct {
@@ -657,8 +656,7 @@ func (m *Manifest) OrderedHops() []Hop {
 	}
 	return out
 }
-func (m *Manifest) UndoOperation(id string) error { return m.UndoOperationAt(id, time.Time{}) }
-func (m *Manifest) UndoOperationAt(id string, at time.Time) error {
+func (m *Manifest) UndoOperation(id string) error {
 	for _, c := range m.Compensations {
 		if c.Operation == id {
 			return nil
@@ -666,7 +664,7 @@ func (m *Manifest) UndoOperationAt(id string, at time.Time) error {
 	}
 	for _, h := range m.Hops {
 		if h.ID == id {
-			m.Compensations = append(m.Compensations, Compensation{ID: hash([]string{m.Family, "undo", id}), Operation: id, Time: at})
+			m.Compensations = append(m.Compensations, Compensation{ID: hash([]string{m.Family, "undo", id}), Operation: id})
 			return nil
 		}
 	}
@@ -737,6 +735,9 @@ func (m *Manifest) Journey() Journey {
 }
 
 func (m *Manifest) Validate() error {
+	if len(m.Encode()) > maxSize {
+		return fmt.Errorf("lineage exceeds %d bytes", maxSize)
+	}
 	if m.Format != Format {
 		return fmt.Errorf("lineage format %q is not %q", m.Format, Format)
 	}
@@ -789,6 +790,9 @@ func (m *Manifest) Validate() error {
 		if !reps[string(r.Replica)] {
 			return fmt.Errorf("revision references unknown replica")
 		}
+		if r.Anchor == "" || r.Hash == "" {
+			return fmt.Errorf("authored revision lacks native provenance")
+		}
 	}
 	for _, s := range m.States {
 		body := s
@@ -804,11 +808,23 @@ func (m *Manifest) Validate() error {
 		}
 	}
 	for _, h := range m.Hops {
+		switch h.Kind {
+		case HopMove, HopContinue, HopHandoff, HopFetch:
+		default:
+			return fmt.Errorf("invalid hop kind %q", h.Kind)
+		}
 		if err := add(hops, h.ID); err != nil {
 			return err
 		}
 		if !reps[string(h.From)] || !reps[string(h.To)] || !branches[h.Line] {
 			return fmt.Errorf("invalid hop endpoints")
+		}
+		from, to := m.Replica(h.From), m.Replica(h.To)
+		if h.Line != to.Line || h.Fork != (from.Line != to.Line) {
+			return fmt.Errorf("invalid operation branch boundary")
+		}
+		if h.Fork && m.branch(to.Line).Parent != from.Line {
+			return fmt.Errorf("invalid fork operation parent")
 		}
 		if h.Written != nil && (h.Written.From < 0 || h.Written.To < h.Written.From) {
 			return fmt.Errorf("invalid written range")
@@ -851,6 +867,7 @@ func (m *Manifest) Validate() error {
 				return fmt.Errorf("missing receipt revision")
 			}
 		}
+		covered := m.Covered(s.Heads)
 		seen := map[string]bool{}
 		for _, p := range s.Projection {
 			if p.Anchor == "" || p.Hash == "" || seen[p.Anchor] {
@@ -865,7 +882,7 @@ func (m *Manifest) Validate() error {
 			}
 			seen[p.Anchor] = true
 			for _, id := range p.Coverage {
-				if !revs[string(id)] {
+				if !revs[string(id)] || !covered[id] {
 					return fmt.Errorf("missing projection revision")
 				}
 			}
@@ -892,6 +909,9 @@ func (m *Manifest) Validate() error {
 	}
 	compensations := map[string]bool{}
 	for _, c := range m.Compensations {
+		if c.ID != hash([]string{m.Family, "undo", c.Operation}) {
+			return fmt.Errorf("invalid undo identity")
+		}
 		if err := add(compensations, c.ID); err != nil {
 			return err
 		}
