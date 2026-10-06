@@ -78,7 +78,10 @@ func NoticeHookCommand(bin string, id ID, profile string, args ...string) (strin
 
 // NoticeHookPowerShellScript uses single-quoted literals (doubled apostrophes),
 // explicitly passes UTF-8 stdin, and combines --profile= so Windows PowerShell
-// 5.1 cannot discard an empty native argument. No payload becomes script text.
+// 5.1 cannot discard an empty native argument. Suppress progress before any
+// command can trigger first-use module initialization. Allocate the input buffer
+// through .NET so the wrapper itself needs no cmdlet module. Genuine errors keep
+// their stderr stream; no payload becomes script text.
 func NoticeHookPowerShellScript(bin string, id ID, profile string, args ...string) (string, error) {
 	if _, err := NoticeHookCommand(bin, id, profile, args...); err != nil {
 		return "", err
@@ -88,17 +91,18 @@ func NoticeHookPowerShellScript(bin string, id ID, profile string, args ...strin
 	for _, arg := range args {
 		extra += " " + quote(arg)
 	}
-	return "$ErrorActionPreference='Stop'; $OutputEncoding=[System.Text.UTF8Encoding]::new($false); [Console]::InputEncoding=$OutputEncoding; [Console]::OutputEncoding=$OutputEncoding; $buffer=New-Object char[] 65537; $count=[Console]::In.ReadBlock($buffer,0,$buffer.Length); $payload=[string]::new($buffer,0,$count); $payload | & " + quote(bin) + " notice-hook --agent " + quote(string(id)) + " " + quote("--profile="+profile) + extra + "; exit $LASTEXITCODE", nil
+	return "$ProgressPreference='SilentlyContinue'; $ErrorActionPreference='Stop'; $OutputEncoding=[System.Text.UTF8Encoding]::new($false); [Console]::InputEncoding=$OutputEncoding; [Console]::OutputEncoding=$OutputEncoding; $buffer=[char[]]::new(65537); $count=[Console]::In.ReadBlock($buffer,0,$buffer.Length); $payload=[string]::new($buffer,0,$count); $payload | & " + quote(bin) + " notice-hook --agent " + quote(string(id)) + " " + quote("--profile="+profile) + extra + "; exit $LASTEXITCODE", nil
 }
 
 // EncodedPowerShellHook is a whitespace-only command launch usable under Codex's
 // selected Windows shell (PowerShell, cmd fallback, or Git Bash). Encoding the
 // fixed script avoids outer-shell expansion of paths, %, $, ! and embedded quotes.
+// Explicit Text output avoids implicit CLIXML serialization by nested PowerShell.
 func EncodedPowerShellHook(script string) string {
 	chars := utf16.Encode([]rune(script))
 	raw := make([]byte, len(chars)*2)
 	for i, c := range chars {
 		binary.LittleEndian.PutUint16(raw[i*2:], c)
 	}
-	return "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand " + base64.StdEncoding.EncodeToString(raw)
+	return "powershell.exe -NoLogo -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand " + base64.StdEncoding.EncodeToString(raw)
 }

@@ -63,7 +63,7 @@ func TestMovementHooksWindowsAndDisabledFeatures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(b), `"commandWindows": "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand `) {
+	if !strings.Contains(string(b), `"commandWindows": "powershell.exe -NoLogo -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand `) {
 		t.Fatalf("Windows handler: %s", b)
 	}
 }

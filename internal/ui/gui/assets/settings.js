@@ -47,11 +47,15 @@ const chip = ([text, cls]) => h("span", { class: "chip " + cls }, text);
 const title = (t, desc) => h("div", { style: "display:flex;flex-direction:column;gap:2px;min-width:0;flex:1 1 300px" }, h("span", { style: "font-weight:500" }, t), desc ? h("span", { class: "muted", style: "font-size:12px" }, desc) : null);
 const card = (...kids) => h("section", { class: "card" }, h("div", { class: "dlg-body" }, kids));
 
-// run calls the backend, says how it went, and shows the settings again.
+// Refresh shared defaults before acknowledging a save: the user can immediately
+// leave Settings and open a plan, which captures defaults from state.info.
 async function run(fn, done) {
-  try { await fn(); if (done) toast(done); } catch (e) { fail(e); }
+  try {
+    await fn();
+    state.info = await api("Info");
+    if (done) toast(done);
+  } catch (e) { fail(e); }
   await load();
-  state.info = await api("Info").catch(() => state.info);
 }
 
 function save(patch) {

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"os/exec"
+	"strings"
 	"syscall"
 	"testing"
 )
@@ -13,6 +14,10 @@ func TestNoticeHookWindowsShellTransport(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		// Exercise progress under each real shell even on warmed-up CI machines.
+		// Without the script preference, encoded PowerShell can serialize it as
+		// CLIXML on stderr. stdout must stay JSON and this progress must be quiet.
+		script = strings.Replace(script, "$buffer=", "Write-Progress -Activity 'hook regression progress' -Status 'first use' -PercentComplete 50; $buffer=", 1)
 		// Claude shell=powershell; Codex selected PowerShell or cmd fallback.
 		assertHookShellTransport(t, exec.Command("powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script), profile)
 		wrapper := EncodedPowerShellHook(script)

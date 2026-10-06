@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // A real native child exercises shell argument/stdin/output transport in platform
@@ -47,12 +49,20 @@ var hookShellDirArgs = []string{"--config-dir", filepath.FromSlash("C:/Users/ali
 
 func assertHookShellTransport(t *testing.T, cmd *exec.Cmd, profile string) {
 	t.Helper()
-	const input = `{"session_id":"s","transcript_path":"/home/alice/日本語.jsonl","hook_event_name":"SessionStart"}`
+	const input = `{"session_id":"s","transcript_path":"/home/alice/日本語-é-🙂.jsonl","hook_event_name":"SessionStart"}`
 	cmd.Env = append(os.Environ(), "HOPSESH_HOOK_TEST_HELPER=1")
 	cmd.Stdin = strings.NewReader(input)
-	b, err := cmd.CombinedOutput()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	b, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("shell: %v: %s", err, b)
+		t.Fatalf("shell: %v; stdout=%q; stderr=%q", err, b, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("quiet hook emitted diagnostics or progress: %q", stderr.String())
+	}
+	if !utf8.Valid(b) {
+		t.Fatalf("hook stdout is not UTF-8: %q", b)
 	}
 	var got struct {
 		Args  []string `json:"args"`

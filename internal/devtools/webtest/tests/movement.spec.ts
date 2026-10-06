@@ -90,12 +90,40 @@ test('a fork with no candidates never infers a return to its parent',async({page
 
 test('movement notice setting persists and same-agent plans expose the override',async({page})=>{
  await fresh(page);await page.locator('#btn-settings').click();
- const toggle=page.getByRole('checkbox',{name:/Record movement notices/});await expect(toggle).toBeChecked();await toggle.uncheck();
+ const toggle=page.getByRole('checkbox',{name:/Record movement notices/});await expect(toggle).toBeChecked();
+ // Hold the real post-save Info response: a fast click after "Saved" must not
+ // create a plan from the previous cached defaults, regardless of network timing.
+ let saving=false;
+ let releaseInfo!:()=>void, infoHeld!:()=>void;
+ const gate=new Promise<void>(resolve=>{releaseInfo=resolve});
+ const held=new Promise<void>(resolve=>{infoHeld=resolve});
+ const plans:any[]=[];
+ await page.route('**/call',async route=>{
+  const req=route.request().postDataJSON();
+  if(req.m==='SaveSettings') saving=true;
+  if(req.m==='Plan') plans.push(req.args[3]);
+  if(req.m==='Info' && saving) {
+   saving=false;
+   const response=await route.fetch();
+   infoHeld();await gate;
+   return route.fulfill({response});
+  }
+  return route.continue();
+ });
+ try {
+  await toggle.uncheck();await held;
+  await expect(page.getByText('Saved',{exact:true})).not.toBeVisible();
+ } finally {releaseInfo()}
  await expect(page.getByText('Saved',{exact:true})).toBeVisible();
  await page.getByRole('button',{name:'Back to sessions',exact:true}).click();await row(page,'Find the codeword').click();
  await details(page).getByRole('button',{name:'Move',exact:true}).click();await page.getByRole('menuitem',{name:/Move to another account/}).click();
  const notice=page.getByRole('checkbox',{name:/Record a movement notice/});await expect(notice).not.toBeChecked();
+ await expect.poll(()=>plans.at(-1)?.notify).toBe(false);
  await notice.check();await expect(notice).toBeChecked();
+ await expect.poll(()=>plans.at(-1)?.notify).toBe(true);
+ await page.locator('#sheet').getByRole('button',{name:'Cancel',exact:true}).click();
+ await page.reload();await page.locator('#btn-settings').click();
+ await expect(toggle).not.toBeChecked(); // The per-move override did not change the saved default.
 });
 
 test('missing destination reviews a new session without reusing its original key',async({page})=>{

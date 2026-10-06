@@ -15,8 +15,11 @@ must set `Notify: true` when they want a notice; config defaults apply in the ap
 
 ## Native agent setup
 
-The GUI's Settings exposes movement notices and the installation status of native-agent
-hooks. Install those hooks there, or use `hopsesh notices install`. Installation covers
+In **Hopsesh → Settings → General**, **Record movement notices** controls the default-on
+recording preference. Under **Movement notice delivery**, **Set up local notice hooks**
+enables delivery inside supported native agents; recording alone does not install hooks.
+That section also shows each hook's installation status. Alternatively, use
+`hopsesh notices install`. Installation covers
 supported local Claude Code and Codex roots, including registered account profiles. To
 select one profile, use `hopsesh notices install --agent claude --profile <profile-id>`.
 `hopsesh notices status` reports installation and disabled/unsupported reasons;

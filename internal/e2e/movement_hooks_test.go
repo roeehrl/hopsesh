@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
@@ -23,6 +25,9 @@ func movementHookProbe() int {
 	b, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		return 1
+	}
+	if diagnostic := os.Getenv("HOPSESH_HOOK_PROBE_DIAGNOSTIC"); diagnostic != "" {
+		_, _ = io.WriteString(os.Stderr, diagnostic)
 	}
 	if err := json.NewEncoder(os.Stdout).Encode(struct {
 		Args  []string `json:"args"`
@@ -119,29 +124,47 @@ func TestMovementHookCommandInvocation(t *testing.T) {
 						}
 					}
 					for _, shell := range shells {
-						ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-						defer cancel()
-						cmd := exec.CommandContext(ctx, shell[0], shell[1:]...)
+						for _, diagnostic := range []string{"", "hook-probe stderr diagnostic"} {
+							ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+							cmd := exec.CommandContext(ctx, shell[0], shell[1:]...)
 
-						payload := fmt.Sprintf(`{"session_id":"session-'quote'","hook_event_name":%q,"transcript_path":"C:\\fixture 'quotes'\\$(literal);.jsonl"}`, event)
-						cmd.Stdin = strings.NewReader(payload)
-						out, err := cmd.CombinedOutput()
-						if err != nil {
-							t.Fatalf("%s/%s hook invocation: %v\n%s", id, event, err, out)
-						}
-						var got struct {
-							Args  []string `json:"args"`
-							Input string   `json:"input"`
-						}
-						if err := json.Unmarshal(out, &got); err != nil {
-							t.Fatalf("hook emitted non-JSON output: %s: %v", out, err)
-						}
-						want := []string{"notice-hook", "--agent", id, "--profile", profile}
-						if runtime.GOOS == "windows" {
-							want = []string{"notice-hook", "--agent", id, "--profile=" + profile}
-						}
-						if !reflect.DeepEqual(got.Args, want) || strings.TrimRight(got.Input, "\r\n") != payload {
-							t.Fatalf("shell changed arguments or interpolated payload: %+v; want %q and %q", got, want, payload)
+							payload := fmt.Sprintf(`{"session_id":"session-'quote'","hook_event_name":%q,"transcript_path":"C:\\fixture 日本語-é-🙂 'quotes'\\$(literal);.jsonl"}`, event)
+							cmd.Stdin = strings.NewReader(payload)
+							// Vendor runners parse stdout and retain stderr separately. Do
+							// not turn legitimate diagnostics into malformed hook JSON.
+							var stderr bytes.Buffer
+							cmd.Stderr = &stderr
+							cmd.Env = append(os.Environ(), "HOPSESH_HOOK_PROBE_DIAGNOSTIC="+diagnostic)
+							out, err := cmd.Output()
+							cancel()
+							if err != nil {
+								t.Fatalf("%s/%s via %s hook invocation: %v; stdout=%q; stderr=%q", id, event, shell[0], err, out, stderr.String())
+							}
+							// encoding/json accepts invalid UTF-8 by replacement; enforce
+							// the actual wire encoding before checking exact Unicode text.
+							if !utf8.Valid(out) {
+								t.Fatalf("hook stdout is not UTF-8: %q", out)
+							}
+							var got struct {
+								Args  []string `json:"args"`
+								Input string   `json:"input"`
+							}
+							if err := json.Unmarshal(out, &got); err != nil {
+								t.Fatalf("hook stdout is not JSON: %q; stderr=%q: %v", out, stderr.String(), err)
+							}
+							want := []string{"notice-hook", "--agent", id, "--profile", profile}
+							if runtime.GOOS == "windows" {
+								want = []string{"notice-hook", "--agent", id, "--profile=" + profile}
+							}
+							if !reflect.DeepEqual(got.Args, want) || strings.TrimRight(got.Input, "\r\n") != payload {
+								t.Fatalf("shell changed arguments or interpolated payload: %+v; want %q and %q", got, want, payload)
+							}
+							if diagnostic == "" && stderr.Len() != 0 {
+								t.Fatalf("quiet hook emitted progress or diagnostics: %q", stderr.String())
+							}
+							if diagnostic != "" && !strings.Contains(stderr.String(), diagnostic) {
+								t.Fatalf("hook lost stderr diagnostic: %q", stderr.String())
+							}
 						}
 					}
 				}

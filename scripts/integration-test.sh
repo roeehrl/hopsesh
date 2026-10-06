@@ -78,7 +78,7 @@ LOCAL_ID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["plan
 GOT="$CLAUDE_CONFIG_DIR/projects/$TSLUG/$LOCAL_ID.jsonl"
 [ -f "$GOT" ] || fail "second pull did not install its reported destination"
 RFILE="$RHOME/.claude/projects/$SLUG/$ID.jsonl"
-sudo grep -Eq 'moved to here|continued in .*here' "$RFILE" || fail "box's copy is not marked after the pull"
+sudo grep -Eq 'prepared in Claude Code on here' "$RFILE" || fail "box's copy is not marked after the pull"
 # Continue the native chain before returning. A workless visit only syncs receipts.
 python3 - "$GOT" "$LOCAL_ID" <<'PYTHON'
 import json, sys
@@ -107,14 +107,14 @@ if [ -z "$RETURN_ID" ] || [ "$RETURN_ID" = "$ID" ]; then
 fi
 RETURN_FILE="$RHOME/.claude/projects/$SLUG/$RETURN_ID.jsonl"
 sudo test -f "$RETURN_FILE" || fail "box did not install the reported return destination"
-sudo cat "$RETURN_FILE" | grep '"type":"custom-title"' | tail -n 1 | grep -Eq 'moved to |continued in ' && fail "the returned copy still carries a mark"
+sudo cat "$RETURN_FILE" | grep '"type":"custom-title"' | tail -n 1 | grep -Eq 'moved to |continued in |prepared in ' && fail "the returned copy still carries a mark"
 sudo grep -q 'SSH return sentinel' "$RETURN_FILE" || fail "box did not receive this machine's new work"
 sudo grep -q 'SSH return sentinel' "$RFILE" && fail "unverified return changed the original conversation"
-tail -n 2 "$GOT" | grep -Eq 'moved to |continued in ' || fail "the copy here is not marked as moved" # box names itself
+tail -n 2 "$GOT" | grep -q 'prepared in Claude Code on ' || fail "the copy here is not marked as prepared" # box names itself
 "$BIN" undo "$JOURNAL" --yes
 sudo test -f "$RETURN_FILE" && fail "undo left the returned portable copy"
-tail -n 2 "$GOT" | grep -Eq 'moved to |continued in ' && fail "undo left the mark here"
-sudo grep -Eq 'moved to here|continued in .*here' "$RFILE" || fail "undo did not restore box's own copy"
+tail -n 2 "$GOT" | grep -Eq 'moved to |continued in |prepared in ' && fail "undo left the mark here"
+sudo grep -Eq 'prepared in Claude Code on here' "$RFILE" || fail "undo did not restore box's own copy"
 
 # A machine that does not receive refuses.
 as_remote /usr/local/bin/hopsesh receive off >/dev/null
