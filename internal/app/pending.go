@@ -48,9 +48,9 @@ func (a *App) applyPending(ctx context.Context, m *Machine, entries []Entry) {
 			continue
 		}
 		if r, isReader := mod.(agent.Reader); isReader && p.Head != "" {
-			h, err := m.host.For(ctx, mod.Spec(), mustInstall(m, e.Agent), nil)
+			h, err := m.host.For(ctx, mod.Spec(), mustProfileInstall(m, e.Session.Key), nil)
 			if err == nil {
-				seg, err := r.Read(ctx, h, mustInstall(m, e.Agent), e.Session, ir.Cursor{Head: ir.NodeID(p.Head)})
+				seg, err := r.Read(ctx, h, mustProfileInstall(m, e.Session.Key), e.Session, ir.Cursor{Head: ir.NodeID(p.Head)})
 				if err != nil || len(seg.Nodes) > 0 {
 					continue // kept in use after it moved on
 				}
@@ -65,9 +65,9 @@ func (a *App) applyPending(ctx context.Context, m *Machine, entries []Entry) {
 			continue
 		}
 		j.AddKey(p.Key)
-		h, err := m.host.For(ctx, mod.Spec(), mustInstall(m, e.Agent), j)
+		h, err := m.host.For(ctx, mod.Spec(), mustProfileInstall(m, e.Session.Key), j)
 		if err == nil {
-			err = marker.Mark(ctx, h, mustInstall(m, e.Agent), e.Session, p.Mark)
+			err = marker.Mark(ctx, h, mustProfileInstall(m, e.Session.Key), e.Session, p.Mark)
 		}
 		if err == nil {
 			mk := p.Mark
@@ -80,11 +80,6 @@ func (a *App) applyPending(ctx context.Context, m *Machine, entries []Entry) {
 	if changed {
 		_ = lineage.SavePending(a.StateDir, keep)
 	}
-}
-
-func mustInstall(m *Machine, id agent.ID) agent.Install {
-	in, _ := m.Install(id)
-	return in
 }
 
 // Deferred titles belong to one committed departure, never a later return or sibling.
@@ -103,4 +98,9 @@ func currentDeparture(p lineage.Pending, m *lineage.Manifest) bool {
 		}
 	}
 	return last.ID == p.Operation && last.From == p.Replica
+}
+
+func mustProfileInstall(m *Machine, key agent.SessionKey) agent.Install {
+	in, _ := m.InstallProfile(key.Agent, key.Profile)
+	return in
 }

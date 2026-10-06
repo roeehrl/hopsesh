@@ -2,7 +2,10 @@ package cli
 
 import (
 	"context"
+	"github.com/roeehrl/hopsesh/internal/core/host"
+	"github.com/roeehrl/hopsesh/internal/core/proc"
 	"os"
+	"time"
 
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
@@ -25,9 +28,18 @@ func (r *run) runTUI() error {
 				argv = append(argv[:len(argv)-1:len(argv)-1], string(b))
 			}
 		}
+		if exit.Desktop && len(argv) > 0 {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			command := proc.CommandContext(ctx, argv[0], argv[1:]...)
+			command.Dir = exit.RunDir
+			command.Env = append(host.Without(os.Environ(), exit.Unset), exit.Env...)
+			err := command.Run()
+			cancel()
+			return err
+		}
 		// The agent runs attached to this terminal: a resume labels the tab and is recorded
 		// while it runs (so "Show" finds it); a driver's command is a step.
-		l := app.Launch{Kind: termapp.KindStep, Run: agent.Command{Argv: argv, Dir: exit.RunDir, Unset: exit.Unset},
+		l := app.Launch{Kind: termapp.KindStep, Run: agent.Command{Argv: argv, Dir: exit.RunDir, Unset: exit.Unset, Env: exit.Env},
 			Labels: termapp.Labels{Title: exit.Title, Agent: exit.Agent, Machine: app.LocalName()}}
 		if exit.Key.Session != "" {
 			l.Kind, l.Key = termapp.KindSession, exit.Key

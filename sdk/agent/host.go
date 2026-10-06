@@ -23,11 +23,12 @@ type Host interface {
 
 // Facts is what the core learned about a machine in one probe.
 type Facts struct {
-	Machine string `json:"machine"` // the name hopsesh knows it by
-	Local   bool   `json:"local"`   // this machine
-	OS      string `json:"os"`      // darwin | linux | windows
-	Arch    string `json:"arch"`
-	Home    string `json:"home"`
+	DesktopProtocols map[string]bool `json:"desktopProtocols,omitempty"`
+	Machine          string          `json:"machine"` // the name hopsesh knows it by
+	Local            bool            `json:"local"`   // this machine
+	OS               string          `json:"os"`      // darwin | linux | windows
+	Arch             string          `json:"arch"`
+	Home             string          `json:"home"`
 	// Env holds the variables the module's Spec declares (Roots[].Env, LoginEnv), as set on
 	// that machine ("" when unset).
 	Env map[string]string `json:"env"`

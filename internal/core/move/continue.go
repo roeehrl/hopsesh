@@ -57,6 +57,12 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	if opt.Fidelity == "" {
 		opt.Fidelity = convert.History
 	}
+	if profileBoundary(in) {
+		if opt.Native || opt.Via == ViaImport {
+			return nil, fmt.Errorf("account transfers require portable history; native replay and vendor import are not supported")
+		}
+		opt.OtherAccount = true
+	}
 	s := in.Session
 	spec := tgt.Module.Spec()
 	if opt.Via == ViaImport {
@@ -80,8 +86,8 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		cwd = realIntended(cwd)
 	}
 	p.Target.CWD = cwd
-	p.Placement = agent.Placement{Key: agent.SessionKey{Agent: spec.ID, Session: agent.SessionID(newID())}, SourceID: s.Key.Session,
-		CWD: cwd, Location: tgt.Machine.Name, Mappings: withShortNames(ctx, src, continueMappings(p, src, tgt))}
+	p.Placement = agent.Placement{Key: agent.SessionKey{Agent: spec.ID, Profile: tgt.Install.ProfileID(), Session: agent.SessionID(newID())}, SourceID: s.Key.Session,
+		CWD: cwd, OtherAccount: opt.OtherAccount, Location: tgt.Machine.Name, Mappings: withShortNames(ctx, src, continueMappings(p, src, tgt))}
 
 	srcHost, err := src.Machine.For(ctx, src.Module.Spec(), src.Install, nil)
 	if err != nil {
@@ -97,6 +103,9 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		p.Blockers = append(p.Blockers, "cannot verify session lineage: "+err.Error())
 	}
 	relateContinue(ctx, p, in, &seg, opt)
+	if opt.OtherAccount {
+		p.Warnings = append(p.Warnings, "Account identity continuity is unverified. A new portable conversation is created; signed reasoning, opaque compaction and vendor-private state are not transferred. Original copies remain available.")
+	}
 
 	title := fmt.Sprintf("%s (from %s)", nonEmpty(s.Title, "session"), cp.From)
 	if cp.AppendTo != nil {
@@ -143,6 +152,16 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	p.resumeOpts = agent.ResumeOptions{
 		RemoteControl: opt.RemoteControl && agent.Has(tgt.Module, agent.CapRemoteControl), Name: p.NewName, Prompt: prompt,
 		App: opt.App && agent.Has(tgt.Module, agent.CapApp),
+	}
+	if p.resumeOpts.App {
+		if tgt.Install.Profile != nil && !tgt.Install.Profile.Default {
+			p.Blockers = append(p.Blockers, "desktop opening cannot select an account profile; use a terminal")
+		}
+		if checker, ok := tgt.Module.(agent.AppChecker); ok {
+			if err := checker.CheckApp(tgt.Install, p.Placement.Key, p.resumeOpts); err != nil {
+				p.Blockers = append(p.Blockers, err.Error())
+			}
+		}
 	}
 	p.Resume = tgt.Module.Resume(tgt.Install, p.Placement.Key, p.Placement, p.resumeOpts)
 	planNative(ctx, p, in, opt)
@@ -197,6 +216,27 @@ func planNative(ctx context.Context, p *Plan, in Input, opt Options) {
 func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt Options) {
 	cp := p.Continue
 	if p.manifest == nil || opt.Fork {
+		return
+	}
+	if opt.OtherAccount {
+		if opt.TargetSession != "" {
+			p.Blockers = append(p.Blockers, "cannot append to a native replica under an unverified account binding; clear the destination session to create a portable copy")
+		}
+		// A portable return preserves existing copies, but must still detect independent
+		// destination work instead of silently treating divergent histories as one line.
+		for _, c := range currentBranchCopies(in) {
+			st, _, err := targetState(ctx, p, in, c)
+			if err != nil || !lineage.Subset(p.manifest.Covered(st.Heads), p.manifest.Covered(p.sourceState.Heads)) {
+				if opt.Conflict == ConflictKeepBoth {
+					forkLine(p)
+					return
+				}
+				p.Conflict = "destination has independent or unverifiable work"
+				cp.Relation = RelationDiverged
+				p.Blockers = append(p.Blockers, "destination has independent work; use --keep-both to preserve a separate branch")
+				return
+			}
+		}
 		return
 	}
 	var candidates []Copy
@@ -255,6 +295,7 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 			s := c.Summary
 			cp.AppendTo = &s
 			cp.expect = ir.Cursor{Head: st.Head, Offset: st.Offset}
+			s.Key.Profile = in.Target.Install.ProfileID()
 			p.Placement.Key = s.Key
 			if c.Live.State == agent.Live {
 				p.Blockers = append(p.Blockers, "the destination copy is open; quit it first")
@@ -391,6 +432,13 @@ func importThen(ctx context.Context, p *Plan, in Input, h agent.Host, j *journal
 	}
 	j.AddKey(s.Key)
 	p.Placement.Key = s.Key
+	if p.resumeOpts.App {
+		if checker, ok := tgt.Module.(agent.AppChecker); ok {
+			if err := checker.CheckApp(tgt.Install, p.Placement.Key, p.resumeOpts); err != nil {
+				p.Blockers = append(p.Blockers, err.Error())
+			}
+		}
+	}
 	p.Resume = tgt.Module.Resume(tgt.Install, s.Key, p.Placement, p.resumeOpts)
 	seg, err := tgt.Module.(agent.Reader).Read(ctx, h, tgt.Install, *s, ir.Cursor{})
 	if err != nil {
@@ -402,7 +450,7 @@ func importThen(ctx context.Context, p *Plan, in Input, h agent.Host, j *journal
 	for _, n := range seg.Nodes {
 		projection = append(projection, ir.Projection{Anchor: n.Native.Anchor, Hash: ir.ContentHash(n), Coverage: p.sourceState.Heads, Fidelity: "vendor snapshot"})
 	}
-	idReplica := p.manifest.Upsert(lineage.Replica{Endpoint: in.Target.Machine.Facts.Endpoint, Key: s.Key, Line: p.targetLine, Location: p.Target.Location, AgentVersion: in.Target.Install.Version, Time: seg.Header.Created})
+	idReplica := p.manifest.Upsert(lineage.Replica{Endpoint: in.Target.Machine.Facts.Endpoint, Binding: in.Target.Install.BindingID(), Key: s.Key, Line: p.targetLine, Location: p.Target.Location, AgentVersion: in.Target.Install.Version, Time: seg.Header.Created})
 	p.manifest.ReplaceProjection(idReplica, seg.Cursor, projection, p.sourceState.Heads, []string{"vendor import; per-turn fidelity not verified"})
 	req := ir.WriteRequest{OperationID: p.OperationID, Mode: ir.WriteAppend, SessionID: string(id), Expect: seg.Cursor, Header: cp.header, Items: cp.items}
 	if err = operationRequest(env, p, req, nativeDst, ir.Cursor{}); err != nil {
@@ -534,7 +582,7 @@ func recordContinuation(ctx context.Context, p *Plan, in Input, j *journal.Journ
 	m := p.manifest.Clone()
 	now := j.Time.UTC()
 	from := p.sourceReplica
-	to := m.Upsert(lineage.Replica{Endpoint: in.Target.Machine.Facts.Endpoint, Key: p.Placement.Key, Line: p.targetLine, Location: p.Target.Location, AgentVersion: p.Target.Version, Time: now})
+	to := m.Upsert(lineage.Replica{Endpoint: in.Target.Machine.Facts.Endpoint, Binding: in.Target.Install.BindingID(), Key: p.Placement.Key, Line: p.targetLine, Location: p.Target.Location, AgentVersion: p.Target.Version, Time: now})
 	st := m.Deliver(to, w.Cursor, w.Projection, p.sourceState.Heads, append(append([]string(nil), p.sourceState.Loss...), conversionLoss(p.Continue.Report)...))
 	if err := m.AppendHop(lineage.Hop{ID: p.OperationID, Time: now, From: from, To: to, Source: p.sourceState.ID, Target: st.ID, Kind: lineage.HopContinue, Fork: p.targetLine != p.sourceLine, Fidelity: string(p.Continue.Fidelity), Written: &lineage.Range{From: w.From, To: w.To}}); err != nil {
 		return err

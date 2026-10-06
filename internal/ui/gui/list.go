@@ -27,6 +27,10 @@ type ListDTO struct {
 
 // FilterDTO is the list's saved filters (config.ListFilter).
 type FilterDTO struct {
+	Account       []string `json:"account"`
+	AccountNot    bool     `json:"accountNot"`
+	Tag           []string `json:"tag"`
+	TagNot        bool     `json:"tagNot"`
 	Status        []string `json:"status"`
 	StatusNot     bool     `json:"statusNot"`
 	Location      []string `json:"location"`
@@ -44,7 +48,7 @@ func listOf(l config.List) ListDTO {
 	f := l.Filter
 	return ListDTO{Decided: l.Density != "", GroupBy: nonEmpty(l.GroupBy, "repository"), SortBy: nonEmpty(l.SortBy, "last-active"), SortReverse: l.SortReverse,
 		Density: nonEmpty(l.Density, "comfortable"), CollapseInactive: l.CollapseInactive, Collapsed: nonNil(l.Collapsed), Expanded: nonNil(l.Expanded),
-		Filter: FilterDTO{Status: nonNil(f.Status), StatusNot: f.StatusNot, Location: nonNil(f.Location), LocationNot: f.LocationNot,
+		Filter: FilterDTO{Account: nonNil(f.Account), AccountNot: f.AccountNot, Tag: nonNil(f.Tag), TagNot: f.TagNot, Status: nonNil(f.Status), StatusNot: f.StatusNot, Location: nonNil(f.Location), LocationNot: f.LocationNot,
 			Agent: nonNil(f.Agent), AgentNot: f.AgentNot, Repository: nonNil(f.Repository), RepositoryNot: f.RepositoryNot,
 			LastActive: f.LastActive, Has: nonNil(f.Has), HasNot: f.HasNot}}
 }
@@ -62,7 +66,7 @@ func (a *App) SaveList(d ListDTO) error {
 	f := d.Filter
 	l := config.List{GroupBy: d.GroupBy, SortBy: d.SortBy, SortReverse: d.SortReverse, Density: d.Density, CollapseInactive: d.CollapseInactive,
 		Collapsed: newest(d.Collapsed), Expanded: newest(d.Expanded),
-		Filter: config.ListFilter{Status: empty(f.Status), StatusNot: f.StatusNot, Location: empty(f.Location), LocationNot: f.LocationNot,
+		Filter: config.ListFilter{Account: empty(f.Account), AccountNot: f.AccountNot, Tag: empty(f.Tag), TagNot: f.TagNot, Status: empty(f.Status), StatusNot: f.StatusNot, Location: empty(f.Location), LocationNot: f.LocationNot,
 			Agent: empty(f.Agent), AgentNot: f.AgentNot, Repository: empty(f.Repository), RepositoryNot: f.RepositoryNot,
 			LastActive: f.LastActive, Has: empty(f.Has), HasNot: f.HasNot}}
 	if l.Density == "" {

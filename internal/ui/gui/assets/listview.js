@@ -8,7 +8,7 @@ import { api, h, fill, icon, ICONS, state, sys, keys, here, cloudOf, cloudTitle,
 import { openMenu, openPopover, update, closeAll, isOpen, openEl, refill } from "./menu.js";
 import { statusKey, placesOf, key as entryKey } from "./actions.js";
 
-const emptyFilter = () => ({ status: [], statusNot: false, location: [], locationNot: false, agent: [], agentNot: false, repository: [], repositoryNot: false, lastActive: "", has: [], hasNot: false });
+const emptyFilter = () => ({ account:[],accountNot:false,tag:[],tagNot:false,status: [], statusNot: false, location: [], locationNot: false, agent: [], agentNot: false, repository: [], repositoryNot: false, lastActive: "", has: [], hasNot: false });
 export const DEFAULTS = { groupBy: "repository", sortBy: "last-active", sortReverse: false, density: "comfortable", collapseInactive: false };
 
 // list is the display as chosen; text is the text filter (not saved).
@@ -75,6 +75,8 @@ const LOCATION = () => [["here", sys.Here], ["machines", "Other machines"], ["cl
 
 // FACETS are the filters: their words, values (with their names) and each session's.
 const FACETS = {
+ account:{name:"Account",values:()=>[...new Map(pool.map(e=>[e.profile?.id||"",e.profile?.name||"No account profile"]))],of:e=>[e.profile?.id||""]},
+ tag:{name:"Account tag",values:()=>[...new Map(pool.flatMap(e=>e.profile?.tags?.length?e.profile.tags:["Untagged"]).map(t=>[t.toLowerCase(),t]))].sort((a,b)=>a[0].localeCompare(b[0])),of:e=>(e.profile?.tags?.length?e.profile.tags:["Untagged"]).map(t=>t.toLowerCase())},
   status: { name: "Status", values: () => STATUS.map(([v, n]) => [v, n]), of: (e) => [statusKey(e)] },
   location: { name: "Location", values: LOCATION, of: (e) => [locationOf(e)] },
   agent: { name: "Agent", values: () => agentValues(), of: (e) => [e.agent] },
@@ -82,7 +84,7 @@ const FACETS = {
   lastActive: { name: "Last active", values: () => LAST, single: true },
   has: { name: "Has", values: HAS, of: hasOf },
 };
-const ORDER = ["status", "location", "agent", "repository", "lastActive", "has"];
+const ORDER = ["status", "location", "agent", "account", "tag", "repository", "lastActive", "has"];
 
 let pool = []; // the sessions in scope, before the facets (for the menus' counts)
 function agentValues() {
@@ -126,7 +128,7 @@ function matches(f, e) {
 function textMatch(e) {
   const ws = list.text.toLowerCase().split(/\s+/).filter(Boolean);
   if (!ws.length) return true;
-  const hay = [e.title, e.group.name, e.group.remote, e.branch, e.cloud?.branch, e.cloud ? cloudTitle(e.machine) : e.machine === here() ? sys.here : e.machine, e.lastPrompt].join(" ").toLowerCase();
+  const hay = [e.title,e.profile?.name,e.profile?.account?.email,...(e.profile?.tags||[]), e.group.name, e.group.remote, e.branch, e.cloud?.branch, e.cloud ? cloudTitle(e.machine) : e.machine === here() ? sys.here : e.machine, e.lastPrompt].join(" ").toLowerCase();
   return ws.every((w) => hay.includes(w));
 }
 
@@ -188,7 +190,9 @@ export function groupsOf(rows) {
     } else if (g === "location") {
       const loc = e.cloud ? "cloud:" + e.machine : e.machine;
       add("location:" + loc, () => ({ name: e.cloud ? cloudTitle(e.machine) : e.machine === here() ? sys.Here : e.machine, machine: e.cloud ? null : e.machine, cloud: e.cloud ? e.machine : null }), e);
-    } else if (g === "agent") add("agent:" + e.agent, () => ({ name: e.agentName, agent: e.agent }), e);
+    } else if(g==="account") add("account:"+(e.profile?.id||""),()=>({name:e.profile?.name||"No account profile"}),e);
+    else if(g==="tag") for(const t of e.profile?.tags?.length?e.profile.tags:["Untagged"]) add("tag:"+t.toLowerCase(),()=>({name:t}),e);
+    else if (g === "agent") add("agent:" + e.agent, () => ({ name: e.agentName, agent: e.agent }), e);
     else if (g === "status") { const k = statusKey(e); add("status:" + k, () => ({ name: STATUS.find(([v]) => v === k)[1], status: k }), e); }
     else if (g === "last-active") { const b = bucket(e); add("last-active:" + b, () => ({ name: BUCKETS.find(([v]) => v === b)[1], bucket: b }), e); }
   }
@@ -196,7 +200,7 @@ export function groupsOf(rows) {
   for (const x of out) { x.rows = sortRows(x.rows); x.newest = Math.max(...x.rows.map(at)); }
   const byActivity = (a, b) => (a.last ? 1 : 0) - (b.last ? 1 : 0) || b.newest - a.newest;
   const az = (a, b) => (a.last ? 1 : 0) - (b.last ? 1 : 0) || a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
-  if (g === "repository" || g === "agent") out.sort(list.sortBy === "title" ? az : byActivity);
+  if (g === "repository" || g === "agent" || g === "account" || g === "tag") out.sort(list.sortBy === "title" ? az : byActivity);
   else if (g === "status") out.sort((a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status));
   else if (g === "last-active") out.sort((a, b) => BUCKETS.findIndex(([v]) => v === a.bucket) - BUCKETS.findIndex(([v]) => v === b.bucket));
   else if (g === "location") {
@@ -418,7 +422,7 @@ function displayContent() {
   return [
     h("div", { class: "dp-head" }, h("span", { class: "dp-title" }, "Display"), h("span", { class: "spacer" }), h("span", { class: "kbd" }, keys("mod+J"))),
     h("div", { class: "dp-grid" },
-      sel("dp-group", "Group by", list.groupBy, [["repository", "Repository"], ["location", "Location"], ["agent", "Agent"], ["status", "Status"], ["last-active", "Last active"], ["none", "None"]], (v) => setDisplay({ groupBy: v })),
+      sel("dp-group", "Group by", list.groupBy, [["repository", "Repository"], ["location", "Location"], ["agent", "Agent"], ["account", "Account"], ["tag", "Account tag"], ["status", "Status"], ["last-active", "Last active"], ["none", "None"]], (v) => setDisplay({ groupBy: v })),
       h("label", { class: "dp-l", for: "dp-sort" }, "Sort by"),
       h("div", { class: "dp-sort" },
         h("select", { id: "dp-sort", onchange: (ev) => setDisplay({ sortBy: ev.target.value, sortReverse: false }) },

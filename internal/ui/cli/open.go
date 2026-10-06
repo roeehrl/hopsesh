@@ -11,7 +11,9 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
+	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/launch"
+	"github.com/roeehrl/hopsesh/internal/core/proc"
 	"github.com/roeehrl/hopsesh/internal/core/termapp"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
@@ -43,12 +45,17 @@ prints the command to copy.`,
 	}
 	f := cmd.Flags()
 	f.String("terminal", "", "the terminal app to open it in (see hopsesh terminals)")
+	f.Bool("app", false, "open this exact conversation in its installed desktop app")
 	f.Bool("here", false, "run it in this terminal instead")
 	f.Bool("json", false, "output JSON")
 	return cmd
 }
 
 func openSession(cmd *cobra.Command, refArg string) error {
+	inApp, _ := cmd.Flags().GetBool("app")
+	if inApp && (cmd.Flags().Changed("here") || cmd.Flags().Changed("terminal")) {
+		return errors.New("--app cannot be combined with --here or --terminal")
+	}
 	r, err := newRun(cmd)
 	if err != nil {
 		return err
@@ -75,7 +82,7 @@ func openSession(cmd *cobra.Command, refArg string) error {
 		pid = e.Live.PID
 	}
 	f, found, ferr := r.app.SessionTab(ctx, key, pid)
-	if found {
+	if found && !inApp {
 		if err := r.app.ShowTab(ctx, f); err != nil {
 			return fmt.Errorf("it is open in %s, but hopsesh could not show its tab: %w", f.Name(), err)
 		}
@@ -85,16 +92,28 @@ func openSession(cmd *cobra.Command, refArg string) error {
 		r.printf("%q is already open in %s; hopsesh brought its tab forward.\n", e.Session.Title, f.Name())
 		return nil
 	}
-	if e.Live.State == agent.Live || r.app.Running(key) {
+	if !inApp && (e.Live.State == agent.Live || r.app.Running(key)) {
 		msg := fmt.Sprintf("%q is already running in a terminal hopsesh cannot show; quit it there first", e.Session.Title)
 		if ferr != nil {
 			msg += " (" + ferr.Error() + ")"
 		}
 		return errors.New(msg)
 	}
-	c, err := r.app.Resume(inv, e, agent.ResumeOptions{})
+	c, err := r.app.Resume(inv, e, agent.ResumeOptions{App: inApp})
 	if err != nil {
 		return err
+	}
+	if inApp {
+		if r.jsonOut {
+			return r.emitJSON(c)
+		}
+		if len(c.Argv) == 0 {
+			return errors.New("desktop command unavailable")
+		}
+		command := proc.CommandContext(ctx, c.Argv[0], c.Argv[1:]...)
+		command.Dir = c.Dir
+		command.Env = append(host.Without(os.Environ(), c.Unset), c.Env...)
+		return command.Run()
 	}
 	l := app.Launch{Kind: termapp.KindSession, Run: c, Key: key,
 		Labels: termapp.Labels{Title: e.Session.Title, Agent: e.AgentName, Machine: e.Machine}}

@@ -188,6 +188,10 @@ type List struct {
 // ListFilter is the list's saved filters: within a facet the values combine with OR (or,
 // with its _not set, none of them), and facets combine with AND. Empty: no filter.
 type ListFilter struct {
+	Account       []string `toml:"account,omitempty"`
+	AccountNot    bool     `toml:"account_not,omitempty"`
+	Tag           []string `toml:"tag,omitempty"`
+	TagNot        bool     `toml:"tag_not,omitempty"`
 	Status        []string `toml:"status,omitempty"` // ListStatuses
 	StatusNot     bool     `toml:"status_not,omitempty"`
 	Location      []string `toml:"location,omitempty"` // here | machines | clouds
@@ -203,7 +207,7 @@ type ListFilter struct {
 
 // The list's choices.
 var (
-	ListGroups     = []string{"repository", "location", "agent", "status", "last-active", "none"}
+	ListGroups     = []string{"repository", "location", "agent", "account", "tag", "status", "last-active", "none"}
 	ListSorts      = []string{"last-active", "title", "status", "size"}
 	ListDensities  = []string{"comfortable", "compact"}
 	ListStatuses   = []string{"needs", "working", "idle", "moved", "ended", "unknown"}

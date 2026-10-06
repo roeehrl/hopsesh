@@ -19,6 +19,7 @@ import (
 type Ref struct {
 	Machine string
 	Agent   agent.ID
+	Profile string
 	Query   string
 }
 
@@ -28,8 +29,9 @@ func ParseRef(s string) Ref {
 	if m, rest, ok := strings.Cut(s, ":"); ok && !strings.ContainsAny(m, "/ ") {
 		r.Machine, s = m, rest
 	}
-	if a, rest, ok := strings.Cut(s, "/"); ok && a != "" && !strings.ContainsAny(a, " ") && len(a) <= 16 && strings.ToLower(a) == a {
-		r.Agent, s = agent.ID(a), rest
+	if a, rest, ok := strings.Cut(s, "/"); ok && a != "" && !strings.ContainsAny(a, " ") && len(a) <= 100 && strings.ToLower(a) == a {
+		name, profile, _ := strings.Cut(a, "@")
+		r.Agent, r.Profile, s = agent.ID(name), profile, rest
 	}
 	r.Query = strings.TrimSpace(s)
 	return r
@@ -85,7 +87,7 @@ const (
 
 // match is how r names e (q is r.Query in lower case).
 func (r Ref) match(q string, e Entry) int {
-	if r.Machine != "" && e.Machine != r.Machine || r.Agent != "" && e.Agent != r.Agent {
+	if r.Profile != "" && e.Session.Key.Profile != r.Profile || r.Machine != "" && e.Machine != r.Machine || r.Agent != "" && e.Agent != r.Agent {
 		return matchNone
 	}
 	sid := string(e.Session.Key.Session)
@@ -174,11 +176,11 @@ func (a *App) Plan(ctx context.Context, inv *Inventory, e Entry, target agent.ID
 	if !ok {
 		return nil, move.Input{}, fmt.Errorf("there is no %q agent module", target)
 	}
-	tin, ok := here.Install(target)
+	tin, ok := here.InstallProfile(target, opt.TargetProfile)
 	if !ok {
 		return nil, move.Input{}, fmt.Errorf("%w: %s has no data folder on this machine yet; start it here once, then try again", agent.ErrNotInstalled, tm.Spec().Name)
 	}
-	sin, _ := src.Install(e.Agent)
+	sin, _ := src.InstallProfile(e.Agent, e.Session.Key.Profile)
 	in := move.Input{
 		Source:    move.Side{Machine: src.host, Module: sm, Install: sin},
 		Session:   e.Session,
@@ -201,13 +203,13 @@ func (a *App) Plan(ctx context.Context, inv *Inventory, e Entry, target agent.ID
 		}
 	}
 	for _, c := range inv.Entries {
-		if c.Machine == here.Name && c.Agent == target && related[c.Session.Key] {
+		if c.Machine == here.Name && c.Agent == target && c.Session.Key.Profile == tin.ProfileID() && related[c.Session.Key] {
 			in.Copies = append(in.Copies, move.Copy{Summary: c.Session, Live: c.Live, Lineage: c.Lineage})
 		}
 	}
 	if target == e.Agent {
 		in.Source.Account, in.Target.Account = a.account(ctx, src, sm, sin), a.account(ctx, here, tm, tin)
-	} else if nin, ok := here.Install(e.Agent); ok && src.Name != here.Name {
+	} else if nin, ok := here.InstallProfile(e.Agent, e.Session.Key.Profile); ok && src.Name != here.Name && sin.Profile == nil && tin.Profile == nil {
 		// Continuing on another machine: keep the source agent's own copy here too.
 		in.Source.Account = a.account(ctx, src, sm, sin)
 		ns := &move.NativeSide{Target: move.Side{Machine: here.host, Module: sm, Install: nin, Account: a.account(ctx, here, sm, nin)}}
@@ -225,7 +227,7 @@ func (a *App) Plan(ctx context.Context, inv *Inventory, e Entry, target agent.ID
 	case move.ViaHopsesh:
 		opt.Via = ""
 	case "":
-		if imp, ok := tm.(agent.Importer); ok && target != e.Agent && a.Cfg.Agents[string(target)].Import && imp.CanImport(e.Agent) {
+		if imp, ok := tm.(agent.Importer); ok && sin.Profile == nil && tin.Profile == nil && target != e.Agent && a.Cfg.Agents[string(target)].Import && imp.CanImport(e.Agent) {
 			opt.Via = move.ViaImport
 		}
 	}
@@ -256,6 +258,14 @@ func (a *App) account(ctx context.Context, m *Machine, mod agent.Module, in agen
 func (a *App) Apply(ctx context.Context, p *move.Plan, in move.Input, progress func(string)) (*move.Result, error) {
 	if p.Kind == move.KindHop {
 		return a.applyHop(ctx, p, progress)
+	}
+	profiles := move.ProfileInput(p, in)
+	for _, side := range []move.Side{profiles.Source, profiles.Target} {
+		if side.Machine != nil && !side.Machine.IsSnapshot() {
+			if err := a.checkAccountRegistration(side.Install); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return move.Apply(ctx, p, in, move.Env{StateDir: a.StateDir, Audit: a.Audit, Progress: progress, Step: a.Steps})
 }

@@ -47,7 +47,7 @@ test("continue a Claude Code session in Codex, see where it has been, and undo",
 });
 
 
-test("a workless return synchronizes receipts and reports no new conversation", async ({ page }) => {
+test("an unverified account return preserves the original and creates a portable copy", async ({ page }) => {
   await row(page, "Find the codeword").click();
   await action(page, "move", /^Continue with Codex…/);
   await page.locator("#sheet").getByRole("button", { name: /Continue in Codex/ }).click();
@@ -56,10 +56,8 @@ test("a workless return synchronizes receipts and reports no new conversation", 
   await row(page, "Find the codeword (from Claude Code)").click();
   await action(page, "move", /^Continue with Claude Code…/);
   const sheet = page.locator("#sheet");
-  await expect(sheet.getByLabel("What changes")).toContainText("0 new messages, 0 transfers");
-  await sheet.getByRole("button", { name: "Sync lineage receipts" }).click();
-  await expect(page.getByRole("heading", { name: /already synchronized/ })).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText("Lineage receipts synchronized", { exact: true })).toBeVisible();
-  await expect(page.getByText("Claude Code session written", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("Paste this into the old session:", { exact: true })).toHaveCount(0);
+  await expect(sheet.getByLabel("What changes")).toContainText("1 new Claude Code session");
+  await expect(sheet).toContainText("Account identity continuity is unverified");
+  await sheet.getByRole("button", { name: /Continue in Claude Code/ }).click();
+  await expect(page.getByText("Claude Code session written", { exact: true })).toBeVisible({timeout:30_000});
 });

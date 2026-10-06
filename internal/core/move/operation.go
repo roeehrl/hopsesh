@@ -47,8 +47,9 @@ func operationIntent(p *Plan) string {
 		Source                                        agent.SessionKey
 		Head                                          ir.NodeID
 		Target, Endpoint, CWD, SourceEndpoint, Branch string
+		TargetProfile, SourceBinding, TargetBinding   string
 		Options                                       Options
-	}{p.Key, p.sourceState.Head, string(p.Placement.Key.Agent), p.Target.ID, p.Target.CWD, p.Source.ID, p.sourceLine, opt})
+	}{p.Key, p.sourceState.Head, string(p.Placement.Key.Agent), p.Target.ID, p.Target.CWD, p.Source.ID, p.sourceLine, p.Target.Profile, p.Source.Binding, p.Target.Binding, opt})
 	sum := sha256.Sum256(body)
 	return hex.EncodeToString(sum[:])
 }
@@ -111,6 +112,9 @@ func operationNative(env Env, p *Plan, path string, cursor ir.Cursor, res *Resul
 // Apply is idempotent for its stable operation ID. A restarted caller recovers durable
 // receipts and verifies a native write through the module before committing its graph.
 func Apply(ctx context.Context, p *Plan, in Input, env Env) (*Result, error) {
+	if err := ValidateProfiles(ctx, ProfileInput(p, in)); err != nil {
+		return nil, err
+	}
 	if p.OperationID == "" {
 		return applyPlan(ctx, p, in, env)
 	}

@@ -78,14 +78,14 @@ export function showPlace(e, p) {
 export function resumePlaces(e) {
   const out = [{ id: "here", name: "hopsesh Terminal", note: "Tab ends when hopsesh quits" },
     { id: "terminal", name: sys.terminal, note: "Keeps running after hopsesh quits" }];
-  if (agentInfo(e.agent)?.capabilities?.includes("app")) out.push({ id: "app", name: `${APPS[e.agent] || e.agentName} app`, note: `Opens the ${APPS[e.agent] || e.agentName} app` });
+  if (agentInfo(e.agent)?.capabilities?.includes("app")) out.push({ id: "app", disabled:e.canApp===false, why:e.appWhy, name: `${APPS[e.agent] || e.agentName} app`, note: e.appWhy || `Opens this conversation in the ${APPS[e.agent] || e.agentName} app` });
   return out;
 }
 
 // defaultPlace is where an agent's sessions resume: as last chosen from a Resume menu,
 // else Settings → Terminal's choice.
 export function defaultPlace(e) {
-  const ids = resumePlaces(e).map((p) => p.id);
+  const ids = resumePlaces(e).filter(p=>!p.disabled).map((p) => p.id);
   const p = state.info?.places?.[e.agent];
   return p && ids.includes(p) ? p : state.info?.where === "terminal" ? "terminal" : "here";
 }
@@ -142,7 +142,7 @@ function localModel(e) {
   const local = e.machine === here();
   const lv = liveOf(e);
   const m = { primary: null, chevron: [], fix: null, caption: "", move: [], more: more(e, local), places: [], twice: false, chevronLabel: "Other places" };
-  const resumeItem = (p, older = false) => ({ id: "resume:" + p.id, label: `Resume ${older ? "this older copy " : ""}in ${p.name}`, sub: p.note, run: () => resumeIn(e, p.id, true),
+  const resumeItem = (p, older = false) => ({ id: "resume:" + p.id, label: `Resume ${older ? "this older copy " : ""}in ${p.name}`, sub: p.note, disabled:!!p.disabled, why:p.why, run: () => resumeIn(e, p.id, true),
     icon: p.id === "app" ? agentBadge(e.agent, e.agentName) : icon(p.id === "here" ? ["M3 4h18v16H3z", "m7 10 3 2.5L7 15M12 15h5"] : ["M3 4h18v16H3z", "M3 9h18"], 16) });
   if (local) {
     const places = placesOf(e);
@@ -258,6 +258,7 @@ function moveGroups(e, local, inTab) {
     if (!peers.length) machine.push({ id: "send", label: "Send to another machine…", icon: icon(ICONS.here, 16), disabled: true, why: "No other machine with hopsesh is reached" });
   } else machine.push({ id: "bring", label: `Bring to ${sys.here}…`, icon: icon(ICONS.here, 16), run: () => planFor(e, { target: "" }) });
   out.push({ heading: "Machine", items: machine });
+  if (["claude","codex"].includes(e.agent)) out.push({heading:"Account",items:[block({id:"account",label:"Move to another account…",sub:"Choose a profile and review the portable conversation",run:()=>planFor(e,{target:e.agent})})]});
   const agents = (e.continueIn || []).map((t) => block({ id: "continue:" + t.id, label: `Continue with ${t.name}${local ? "" : " on " + sys.here}…`, icon: agentBadge(t.id, t.name), run: () => planFor(e, { target: t.id }),
     chip: t.experimental ? h("span", { class: "chip st-warn mini" }, "experimental") : null }));
   if (agents.length) out.push({ heading: "Agent", items: agents });

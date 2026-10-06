@@ -137,7 +137,7 @@ func TestHandoffToCodexCloudAndBack(t *testing.T) {
 	inv3 := a.Scan(ctx, app.ScanOptions{})
 	defer inv3.Close()
 	e := cloudEntryFor(t, inv3, "codex-cloud", hr.Session)
-	if e.Original != "here:claude/"+demoSession || e.Cloud.Repo != "github.com/example/demo" || e.Cloud.Branch != hp.Branch || e.Cloud.State != agent.CloudRunning ||
+	if e.Original != "here:"+p.Key.String() || e.Cloud.Repo != "github.com/example/demo" || e.Cloud.Branch != hp.Branch || e.Cloud.State != agent.CloudRunning ||
 		e.Cloud.EnvLabel != "acme-api" {
 		t.Fatalf("listed: %+v %+v", e, e.Cloud)
 	}
@@ -165,7 +165,7 @@ func TestHandoffToCodexCloudAndBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fres.Fetch.Outcome != move.FetchComplete || fres.Fetch.Branch != f.LocalBranch || !strings.HasPrefix(fres.Fetch.Key, "codex/") || !strings.Contains(fres.Command, "codex resume") {
+	if fres.Fetch.Outcome != move.FetchComplete || fres.Fetch.Branch != f.LocalBranch || !strings.HasPrefix(fres.Fetch.Key, "codex@") || !strings.Contains(fres.Command, "codex resume") {
 		t.Fatalf("fetched: %+v %s", fres.Fetch, fres.Command)
 	}
 	for _, file := range []string{"cloud-work/" + hr.Session + ".md", "parser.go", "docs/plan.md"} {
@@ -263,7 +263,7 @@ func TestBringCodexTaskIntoClaude(t *testing.T) {
 		t.Fatalf("plan: %+v %v", p, err)
 	}
 	res, err := a.Apply(ctx, p, move.Input{}, nil)
-	if err != nil || !strings.HasPrefix(res.Fetch.Key, "claude/") || !strings.Contains(res.Command, "claude --resume") {
+	if err != nil || !strings.HasPrefix(res.Fetch.Key, "claude@") || !strings.Contains(res.Command, " --resume ") {
 		t.Fatalf("apply: %+v %v", res, err)
 	}
 	inv2 := a.Scan(ctx, app.ScanOptions{Hosts: []string{"here"}})

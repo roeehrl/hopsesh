@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format follows
 ## Unreleased
 
 ### Fixed
+- Codex sessions offer desktop opening through the documented exact-thread deep link.
+  Installation and account-root checks explain unavailable actions; launcher errors surface
+  instead of silently falling back to a terminal. CLI: `hopsesh open <session> --app`.
+- Profile IDs now survive cloud adoption, live-status refreshes, terminal launches, and peer
+  writes back to the source. Plans reject edited profiles and observable login changes.
 - App: Back to sessions has one fixed upper-left toolbar location on every secondary
   screen and in the terminal window, including loading, errors and completed transfers.
   Late page loads no longer replace Sessions after returning. Resizing a terminal keeps
@@ -29,6 +34,12 @@ All notable changes to this project are documented here. The format follows
   markers before it resumes a session.
 
 ### Added
+- Named Claude Code and Codex account profiles, arbitrary many-to-many tags, known-root
+  discovery on allowed machines, and vendor-owned sign-in. GUI Settings → Accounts, TUI `a`,
+  and `hopsesh accounts` share one store; transfer plans select an explicit destination profile.
+- Account-aware lineage (`lineage/4`, peer protocol 4), login-binding segments preserving
+  authorship, portable account returns, separate machine counters, and 48 mandatory
+  repeated/multi-party account routes in the CI scenario matrix. No migration is implied.
 - App: the end of the selected session's conversation (the last two exchanges, a line for
   each turn's tool calls, Load earlier, Open transcript), read on its machine and never
   during a scan. Markdown is rendered locally, with distinct user and agent cards and

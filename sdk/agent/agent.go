@@ -25,10 +25,17 @@ type SessionID string
 // manifests and the user interfaces use.
 type SessionKey struct {
 	Agent   ID        `json:"agent"`
+	Profile string    `json:"profile,omitempty"`
 	Session SessionID `json:"session"`
 }
 
-func (k SessionKey) String() string { return string(k.Agent) + "/" + string(k.Session) }
+func (k SessionKey) String() string {
+	a := string(k.Agent)
+	if k.Profile != "" {
+		a += "@" + k.Profile
+	}
+	return a + "/" + string(k.Session)
+}
 
 // ParseKey parses "agent/session".
 func ParseKey(s string) (SessionKey, error) {
@@ -36,7 +43,11 @@ func ParseKey(s string) (SessionKey, error) {
 	if !ok || a == "" || id == "" {
 		return SessionKey{}, fmt.Errorf("%q is not agent/session", s)
 	}
-	return SessionKey{Agent: ID(a), Session: SessionID(id)}, nil
+	name, profile, scoped := strings.Cut(a, "@")
+	if name == "" || scoped && profile == "" || strings.ContainsAny(profile, "/:@ \t\r\n") {
+		return SessionKey{}, fmt.Errorf("invalid profile in %q", s)
+	}
+	return SessionKey{Agent: ID(name), Profile: profile, Session: SessionID(id)}, nil
 }
 
 // Stability says how far a module (or one of its capabilities) can be trusted.
@@ -50,10 +61,13 @@ const (
 // Spec is what a module declares as data. The core resolves roots, probes binaries,
 // confines writes and refuses secret reads from it, before any module code runs.
 type Spec struct {
-	ID        ID
-	Name      string // "Claude Code"
-	Vendor    string // "Anthropic"
-	Stability Stability
+	Accounts *ProfileSpec
+	// DesktopScheme is the registered URL protocol a desktop resume uses.
+	DesktopScheme string
+	ID            ID
+	Name          string // "Claude Code"
+	Vendor        string // "Anthropic"
+	Stability     Stability
 	// Tested lists the agent versions this module was verified against, oldest first,
 	// as version prefixes ("2.1"). Other versions work but are reported as untested.
 	Tested []string
@@ -129,11 +143,16 @@ type Root struct {
 
 // Install is an agent as found on one machine.
 type Install struct {
-	Agent   ID                `json:"agent"`
-	Version string            `json:"version,omitempty"` // "" when the binary was not found
-	Binary  string            `json:"binary,omitempty"`  // absolute path
-	Roots   map[string]string `json:"roots"`             // name → absolute path on that machine
-	Present bool              `json:"present"`           // the main root exists
+	Accounts   *ProfileSpec      `json:"-"`
+	OS         string            `json:"os,omitempty"`
+	Desktop    string            `json:"desktop,omitempty"`
+	DesktopWhy string            `json:"desktopWhy,omitempty"`
+	Profile    *RuntimeProfile   `json:"profile,omitempty"`
+	Agent      ID                `json:"agent"`
+	Version    string            `json:"version,omitempty"` // "" when the binary was not found
+	Binary     string            `json:"binary,omitempty"`  // absolute path
+	Roots      map[string]string `json:"roots"`             // name → absolute path on that machine
+	Present    bool              `json:"present"`           // the main root exists
 }
 
 // Root returns the path of a named root.

@@ -21,6 +21,8 @@ import (
 
 // Exit is what the TUI asks its caller to do after it closes.
 type Exit struct {
+	Desktop bool
+	Env     []string
 	RunDir  string   // start the agent here...
 	RunArgv []string // ...with these arguments
 	Prompt  string   // a file holding the last argument, if any
@@ -60,6 +62,7 @@ const (
 	modeError
 	modeBrought // what came back from a cloud
 	modeJourney
+	modeAccounts
 )
 
 type row struct {
@@ -68,6 +71,7 @@ type row struct {
 }
 
 type model struct {
+	accts         accountView
 	deps          Deps
 	copied        bool // the resume command was copied on the done screen
 	mode          mode
@@ -192,6 +196,49 @@ func (m *model) nextSelectable(from, dir int) int {
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case accountsDone:
+		if msg.inv != nil {
+			if m.inv != nil {
+				m.inv.Close()
+			}
+			m.inv = msg.inv
+			m.buildRows()
+		}
+		m.accts.busy = false
+		if msg.err != nil {
+			m.accts.problem = msg.err.Error()
+			return m, nil
+		}
+		m.accts.problem = ""
+		m.accts.rows = msg.rows
+		if m.accts.choosing {
+			m.accts.rows = nil
+			if local := m.inv.Local(); local != nil && local.Host() != nil {
+				for _, p := range msg.rows {
+					if p.Endpoint == local.Host().Facts.Endpoint {
+						m.accts.rows = append(m.accts.rows, p)
+					}
+				}
+			}
+		}
+		if q := strings.ToLower(m.accts.filter); q != "" {
+			filtered := m.accts.rows[:0]
+			for _, p := range m.accts.rows {
+				label := p.Name + " " + p.Machine + " " + string(p.Agent) + " " + strings.Join(p.Tags, " ")
+				if p.Account != nil {
+					label += " " + p.Account.Email
+				}
+				if q == "@untagged" && len(p.Tags) == 0 || q != "@untagged" && strings.Contains(strings.ToLower(label), q) {
+					filtered = append(filtered, p)
+				}
+			}
+			m.accts.rows = filtered
+		}
+		m.accts.rebuild()
+	case accountLoginReady:
+		c := msg.command
+		m.exit = &Exit{RunDir: c.Dir, RunArgv: c.Argv, Env: c.Env, Unset: c.Unset}
+		return m, tea.Quit
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 	case scanDone:
@@ -276,6 +323,9 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 	if k == "ctrl+c" {
 		return m, tea.Quit
 	}
+	if m.mode == modeAccounts {
+		return m.accountKeys(k)
+	}
 	if m.pasting {
 		return m.pasteKey(k)
 	}
@@ -333,6 +383,29 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		}
 	case modeBrowse:
 		switch k {
+		case "D":
+			if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil {
+				c, err := m.deps.App.Resume(m.inv, m.rows[m.cursor].item.Entry, agent.ResumeOptions{App: true})
+				if err != nil {
+					m.err = err
+					m.mode = modeError
+					return m, nil
+				}
+				m.exit = &Exit{Desktop: true, RunArgv: c.Argv, RunDir: c.Dir, Env: c.Env, Unset: c.Unset}
+				return m, tea.Quit
+			}
+		case "a":
+			m.mode = modeAccounts
+			m.accts = accountView{}
+			return m, m.loadAccounts()
+		case "A":
+			if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil {
+				m.sel = m.rows[m.cursor]
+				m.mode = modeAccounts
+				m.accts = accountView{choosing: true}
+				m.opts = m.deps.App.DefaultOptions()
+				return m, m.loadAccounts()
+			}
 		case "h":
 			if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil && m.rows[m.cursor].item.Entry.Lineage != nil {
 				m.sel, m.mode, m.journeyOffset = m.rows[m.cursor], modeJourney, 0
@@ -399,7 +472,15 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		case "c":
 			m.opts.Clone = !m.opts.Clone
 			return m, m.planCmd()
+		case "A":
+			m.mode = modeAccounts
+			m.accts = accountView{choosing: true}
+			return m, m.loadAccounts()
+		case "D":
+			m.opts.App = !m.opts.App
+			return m, m.planCmd()
 		case "a":
+			m.opts.TargetProfile = ""
 			m.target = m.nextAgent()
 			m.opts.TargetSession, m.destinations = "", nil
 			return m, m.planCmd()
@@ -444,7 +525,7 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 			case "enter":
 				if m.result.Fetch.Outcome == move.FetchWaiting {
 					r := m.plan.Fetch.Run
-					m.exit = &Exit{RunDir: r.Dir, RunArgv: r.Argv, Unset: r.Unset, Adopt: m.result.Journal}
+					m.exit = &Exit{RunDir: r.Dir, RunArgv: r.Argv, Env: r.Env, Unset: r.Unset, Adopt: m.result.Journal}
 					return m, tea.Quit
 				}
 			case "c":
@@ -459,8 +540,8 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		}
 		switch k {
 		case "enter":
-			m.exit = &Exit{RunDir: m.plan.Resume.Dir, RunArgv: m.plan.Resume.Argv, Prompt: m.result.PromptFile,
-				Key: m.plan.Placement.Key, Title: m.plan.Title, Agent: m.plan.Agent}
+			m.exit = &Exit{Desktop: m.opts.App, RunDir: m.plan.Resume.Dir, RunArgv: m.plan.Resume.Argv, Prompt: m.result.PromptFile,
+				Env: m.plan.Resume.Env, Unset: m.plan.Resume.Unset, Key: m.plan.Placement.Key, Title: m.plan.Title, Agent: m.plan.Agent}
 			return m, tea.Quit
 		case "c":
 			m.copied = true
@@ -523,11 +604,13 @@ func (m *model) nextAgent() agent.ID {
 	}
 	own := m.sel.item.Entry.Agent
 	var cands []agent.ID
+	seen := map[agent.ID]bool{}
 	for _, a := range here.Agents {
 		mod, ok := m.deps.App.Module(a.Agent)
-		if a.Agent == own || !a.Install.Present || !ok || !agent.Has(mod, agent.CapWrite) {
+		if seen[a.Agent] || a.Agent == own || !a.Install.Present || !ok || !agent.Has(mod, agent.CapWrite) {
 			continue
 		}
+		seen[a.Agent] = true
 		cands = append(cands, a.Agent)
 	}
 	cur := m.target
@@ -605,6 +688,8 @@ func (m *model) View() tea.View {
 		fmt.Fprintf(&b, "\n  Scanning this machine and %d allowed machine(s)… %s\n", countAllowed(m.deps.App), dim.Render(time.Since(m.started).Truncate(time.Second).String()))
 	case modeBrowse:
 		m.viewBrowse(&b)
+	case modeAccounts:
+		m.viewAccounts(&b)
 	case modeJourney:
 		m.viewJourney(&b)
 	case modePlan:
@@ -780,6 +865,7 @@ func (m *model) viewBrowse(b *strings.Builder) {
 				fork = " · separate fork"
 			}
 			fmt.Fprintf(b, "  %d transfers · %d round trips to origin · %d returns%s\n", j.Transfers, j.RoundTrips, j.Returns, fork)
+			fmt.Fprintf(b, "  %d machine transfers · %d machine round trips\n", j.MachineTransfers, j.MachineRoundTrips)
 		}
 		if e.LineageError != "" {
 			fmt.Fprintf(b, "  lineage unavailable: %s\n", e.LineageError)
@@ -805,7 +891,7 @@ func (m *model) viewBrowse(b *strings.Builder) {
 		m.viewPicker(b)
 		return
 	}
-	hint := "\n  ↑↓ move · enter bring here · i continue in · c hand off · h journey · / search · r refresh · q quit"
+	hint := "\n  ↑↓ move · enter bring here · i continue in · c hand off · h journey · a accounts · A move account · / search · r refresh · q quit"
 	if m.partialCloud() != nil {
 		hint = "\n  ↑↓ move · enter resume/bring · i continue in · c hand off · p paste a cloud link · f find in a cloud · / search · r refresh · q quit"
 	}
@@ -887,6 +973,7 @@ func (m *model) viewPlan(b *strings.Builder) {
 		}
 		return dim.Render("off")
 	}
+	fmt.Fprintf(b, "  Account: %s → %s [A] change account · [D] desktop app %s\n", p.Source.ProfileName, p.Target.ProfileName, on(m.opts.App))
 	target := p.Agent
 	fmt.Fprintf(b, "\n  [a] agent %s  [c] clone %s  [w] worktree %s  [r] remote control %s  [n] notify old %s  [f] fork %s  [x] redact %s\n",
 		target, on(m.opts.Clone), string(m.opts.Worktree), on(m.opts.RemoteControl), on(m.opts.Notify), on(m.opts.Fork), on(m.opts.Redact))

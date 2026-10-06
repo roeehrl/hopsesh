@@ -27,7 +27,7 @@ func (a *App) moduleOn(inv *Inventory, e Entry) (agent.Module, *Machine, agent.I
 	if m == nil || m.host == nil {
 		return nil, nil, agent.Install{}, fmt.Errorf("%s is not reached", e.Machine)
 	}
-	in, ok := m.Install(e.Agent)
+	in, ok := m.InstallProfile(e.Agent, e.Session.Key.Profile)
 	if !ok {
 		return nil, nil, agent.Install{}, fmt.Errorf("%s is not on %s", e.AgentName, e.Machine)
 	}
@@ -107,19 +107,24 @@ func (a *App) LiveHere(ctx context.Context, inv *Inventory) map[agent.SessionKey
 	if m == nil || m.host == nil {
 		return out
 	}
-	ids := map[agent.ID][]agent.SessionID{}
+	type profileKey struct {
+		agent   agent.ID
+		profile string
+	}
+	ids := map[profileKey][]agent.SessionID{}
 	for _, e := range inv.Entries {
 		if e.Machine == m.Name && !e.Location.IsCloud() {
-			ids[e.Agent] = append(ids[e.Agent], e.Session.Key.Session)
+			pk := profileKey{e.Agent, e.Session.Key.Profile}
+			ids[pk] = append(ids[pk], e.Session.Key.Session)
 		}
 	}
 	for id, list := range ids {
-		mod, ok := a.Module(id)
+		mod, ok := a.Module(id.agent)
 		if !ok {
 			continue
 		}
 		ld, ok := mod.(agent.LiveDetector)
-		in, has := m.Install(id)
+		in, has := m.InstallProfile(id.agent, id.profile)
 		if !ok || !has {
 			continue
 		}
@@ -132,7 +137,7 @@ func (a *App) LiveHere(ctx context.Context, inv *Inventory) map[agent.SessionKey
 			continue
 		}
 		for sid, li := range live {
-			out[agent.SessionKey{Agent: id, Session: sid}] = li
+			out[agent.SessionKey{Agent: id.agent, Profile: id.profile, Session: sid}] = li
 		}
 	}
 	return out

@@ -111,7 +111,7 @@ func writeFetched(ctx context.Context, p *Plan, env Env, j *journal.Journal, bas
 	if err != nil {
 		return fmt.Errorf("writing the %s session: %w", spec.Name, err)
 	}
-	key := agent.SessionKey{Agent: spec.ID, Session: agent.SessionID(w.SessionID)}
+	key := agent.SessionKey{Agent: spec.ID, Profile: tin.ProfileID(), Session: agent.SessionID(w.SessionID)}
 	j.AddKey(key)
 	pl := agent.Placement{Key: key, SourceID: fp.Session, CWD: fp.Worktree, Location: machine, Name: title}
 	if pi, ok := tm.(agent.PostInstaller); ok {
@@ -130,7 +130,7 @@ func writeFetched(ctx context.Context, p *Plan, env Env, j *journal.Journal, bas
 	now := j.Time.UTC()
 	from := m.Upsert(lineage.Replica{Key: agent.SessionKey{Agent: in.Module.Spec().ID, Session: fp.Session}, Endpoint: cloudEndpoint(fp.Cloud, in.Session.Account), Location: fp.Cloud, Time: now,
 		URL: fp.URL, Branch: fp.CloudBranch})
-	to := m.Upsert(lineage.Replica{Endpoint: in.Machine.Facts.Endpoint, Key: key, Location: machine, AgentVersion: tin.Version, Time: now})
+	to := m.Upsert(lineage.Replica{Endpoint: in.Machine.Facts.Endpoint, Binding: tin.BindingID(), Key: key, Location: machine, AgentVersion: tin.Version, Time: now})
 	source, _ := m.LatestState(from)
 	m.Deliver(to, w.Cursor, w.Projection, source.Heads, append(append(append([]string(nil), source.Loss...), fp.Loss...), conversionLoss(r.Report)...))
 	if err := m.AppendHop(lineage.Hop{ID: j.ID, Time: now, From: from, To: to, Kind: lineage.HopFetch, Fidelity: string(fp.Fidelity),
@@ -193,7 +193,7 @@ func appendWritten(ctx context.Context, p *Plan, env Env, j *journal.Journal, no
 	machine := in.Machine.Name
 	if in.Lineage != nil {
 		m := in.Lineage
-		id := m.Upsert(lineage.Replica{Endpoint: in.Machine.Facts.Endpoint, Key: o.Key, Location: machine, AgentVersion: tin.Version, Time: time.Now().UTC()})
+		id := m.Upsert(lineage.Replica{Endpoint: in.Machine.Facts.Endpoint, Binding: tin.BindingID(), Key: o.Key, Location: machine, AgentVersion: tin.Version, Time: time.Now().UTC()})
 		segment, e := tm.(agent.Reader).Read(ctx, h, tin, o, ir.Cursor{})
 		if e != nil {
 			return e
@@ -231,7 +231,7 @@ func appendWritten(ctx context.Context, p *Plan, env Env, j *journal.Journal, no
 		way = agent.ViaDiff
 	}
 	from := m.Upsert(lineage.Replica{Key: agent.SessionKey{Agent: in.Module.Spec().ID, Session: fp.Session}, Endpoint: cloudEndpoint(fp.Cloud, in.Session.Account), Location: fp.Cloud, Time: now, URL: fp.URL, Branch: fp.CloudBranch})
-	to := m.Upsert(lineage.Replica{Endpoint: in.Machine.Facts.Endpoint, Key: o.Key, Location: machine, AgentVersion: tin.Version, Time: now})
+	to := m.Upsert(lineage.Replica{Endpoint: in.Machine.Facts.Endpoint, Binding: tin.BindingID(), Key: o.Key, Location: machine, AgentVersion: tin.Version, Time: now})
 	source, _ := m.LatestState(from)
 	m.Deliver(to, w.Cursor, w.Projection, source.Heads, append(append(append([]string(nil), source.Loss...), fp.Loss...), conversionLoss(r.Report)...))
 	if err := m.AppendHop(lineage.Hop{ID: j.ID, Time: now, From: from, To: to, Kind: lineage.HopFetch, Fidelity: string(fp.Fidelity),

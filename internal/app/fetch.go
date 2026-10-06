@@ -142,12 +142,18 @@ func (a *App) planFetch(ctx context.Context, inv *Inventory, e Entry, target age
 	if here == nil || here.host == nil {
 		return nil, move.Input{}, errors.New("this machine was not scanned")
 	}
-	var in agent.Install
-	for _, st := range here.Agents {
-		if st.Agent == e.Agent {
-			in = st.Install
+	in, _ := here.Install(e.Agent)
+	if in.Agent == "" {
+		for _, st := range here.Agents {
+			if st.Agent == e.Agent && st.Install.Profile == nil {
+				in = st.Install
+			}
 		}
 	}
+	if opt.TargetProfile != "" {
+		return nil, move.Input{}, errors.New("cloud return uses the cloud's default local profile; bring it here first, then move to another account")
+	}
+
 	if in.Agent == "" {
 		in.Agent = e.Agent
 	}
@@ -301,6 +307,24 @@ func (a *App) adopt(ctx context.Context, lm *host.Machine, f *move.Fetch, exited
 	}
 	if in.Agent == "" {
 		in.Agent = mod.Spec().ID
+	}
+	installs, err := a.profileInstalls(ctx, lm, mod, in, false)
+	if err != nil {
+		return nil, err
+	}
+	matched := false
+	for _, candidate := range installs {
+		if f.Profile != nil && candidate.ProfileID() == f.Profile.ID || f.Profile == nil && (candidate.Profile == nil || candidate.Profile.Default) {
+			in = candidate
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		return nil, errors.New("the cloud return account profile is unavailable; scan accounts")
+	}
+	if f.Profile != nil && (in.BindingID() != f.Profile.Binding || in.Profile.Root != f.Profile.Root) {
+		return nil, errors.New("cloud return account changed; do not adopt this copy into a different login")
 	}
 	return move.AdoptFetch(ctx, f, move.Side{Machine: lm, Module: mod, Install: in}, move.Env{StateDir: a.StateDir, Audit: a.Audit}, exited)
 }

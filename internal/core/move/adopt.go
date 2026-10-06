@@ -25,15 +25,16 @@ import (
 // Fetch is a fetch from a cloud, kept in the state folder: waiting for the driver the
 // user runs (Claude Code's teleport) to write its copy, then what the adoption found.
 type Fetch struct {
-	Journal    string          `json:"journal"`
-	Time       time.Time       `json:"time"`
-	Machine    string          `json:"machine"`
-	Agent      agent.ID        `json:"agent"`
-	Cloud      string          `json:"cloud"`
-	CloudTitle string          `json:"cloudTitle"`
-	Session    agent.SessionID `json:"session,omitempty"` // "" until the vendor's picker chose
-	URL        string          `json:"url,omitempty"`
-	Title      string          `json:"title"`
+	Profile    *agent.RuntimeProfile `json:"profile,omitempty"`
+	Journal    string                `json:"journal"`
+	Time       time.Time             `json:"time"`
+	Machine    string                `json:"machine"`
+	Agent      agent.ID              `json:"agent"`
+	Cloud      string                `json:"cloud"`
+	CloudTitle string                `json:"cloudTitle"`
+	Session    agent.SessionID       `json:"session,omitempty"` // "" until the vendor's picker chose
+	URL        string                `json:"url,omitempty"`
+	Title      string                `json:"title"`
 	// Untitled: hopsesh knew no title for it before the copy came (Title is made up).
 	Untitled bool   `json:"untitled,omitempty"`
 	Repo     string `json:"repo,omitempty"`
@@ -214,6 +215,7 @@ func AdoptFetch(ctx context.Context, f *Fetch, side Side, env Env, exited bool) 
 	if err := j.Adopt(fsys, machine, a.Session.Path); err != nil {
 		return nil, err
 	}
+	a.Session.Key.Profile = in.ProfileID()
 	j.AddKey(a.Session.Key)
 	if f.Session == "" {
 		f.Session = a.Remote
@@ -224,6 +226,7 @@ func AdoptFetch(ctx context.Context, f *Fetch, side Side, env Env, exited bool) 
 	if f.Session != "" {
 		j.AddKey(agent.SessionKey{Agent: f.Agent, Session: f.Session})
 	}
+	a.Session.Key.Profile = in.ProfileID()
 	ad := &Adopted{Time: time.Now().UTC(), Key: a.Session.Key, Path: a.Session.Path, Restored: a.Restored, Expected: a.Expected, Stated: a.Stated}
 	judgeCopy(f, a, ad)
 	ad.Issue = f.Problems[ad.Outcome]
@@ -372,7 +375,7 @@ func recordFetchLineage(ctx context.Context, f *Fetch, side Side, j *journal.Jou
 	if err != nil {
 		return err
 	}
-	to := m.Upsert(lineage.Replica{Endpoint: side.Machine.Facts.Endpoint, Key: ad.Key, Location: side.Machine.Name, AgentVersion: nonEmpty(a.Session.AgentVersion, side.Install.Version), Time: seg.Header.Created})
+	to := m.Upsert(lineage.Replica{Endpoint: side.Machine.Facts.Endpoint, Binding: side.Install.BindingID(), Key: ad.Key, Location: side.Machine.Name, AgentVersion: nonEmpty(a.Session.AgentVersion, side.Install.Version), Time: seg.Header.Created})
 	ps, err := nativeProjection(seg, seg)
 	if err != nil {
 		return err
@@ -423,7 +426,7 @@ func appendOriginal(ctx context.Context, f *Fetch, side Side, j *journal.Journal
 	if err != nil {
 		return err
 	}
-	to := m.Upsert(lineage.Replica{Endpoint: side.Machine.Facts.Endpoint, Key: o.Key, Location: side.Machine.Name, AgentVersion: side.Install.Version, Time: original.Header.Created})
+	to := m.Upsert(lineage.Replica{Endpoint: side.Machine.Facts.Endpoint, Binding: side.Install.BindingID(), Key: o.Key, Location: side.Machine.Name, AgentVersion: side.Install.Version, Time: original.Header.Created})
 	target, err := m.Observe(to, &original)
 	if err != nil {
 		return err

@@ -89,7 +89,7 @@ func (a *App) ScanMachine(name string) error {
 	a.scanPhase(name, "scanning", "")
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	fresh := core.Scan(ctx, app.ScanOptions{Hosts: []string{name}, NoLocal: true})
+	fresh := core.Scan(ctx, app.ScanOptions{Hosts: []string{name}, NoLocal: true, ForceAccounts: true})
 	problem := ""
 	if m := fresh.Machine(name); m != nil {
 		problem = scanProblem(m)

@@ -247,7 +247,10 @@ func (a *App) agentsLocked() []AgentDTO {
 	if a.inv != nil && a.inv.Local() != nil {
 		here = map[agent.ID]app.AgentState{}
 		for _, st := range a.inv.Local().Agents {
-			here[st.Agent] = st
+			old, exists := here[st.Agent]
+			if !exists || st.Install.Profile != nil && st.Install.Profile.Default || !old.Install.Present && st.Install.Present {
+				here[st.Agent] = st
+			}
 		}
 	}
 	var out []AgentDTO

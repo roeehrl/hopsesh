@@ -40,8 +40,8 @@ var Hopsesh = agent.Binary{
 }
 
 func wants(specs []agent.Spec) probeWants {
-	w := probeWants{bins: []agent.Binary{Hopsesh}, env: []string{"HOPSESH_CONFIG_DIR"}}
-	seen := map[string]bool{"HOPSESH_CONFIG_DIR": true}
+	w := probeWants{bins: []agent.Binary{Hopsesh}, env: []string{"HOPSESH_CONFIG_DIR", "HOPSESH_STATE_DIR", "XDG_STATE_HOME", "LOCALAPPDATA"}}
+	seen := map[string]bool{"HOPSESH_CONFIG_DIR": true, "HOPSESH_STATE_DIR": true, "XDG_STATE_HOME": true, "LOCALAPPDATA": true}
 	for _, s := range specs {
 		for _, e := range SpecEnv(s) {
 			if !seen[e] && envName.MatchString(e) {
@@ -79,6 +79,12 @@ func ProbeLocal(ctx context.Context, specs []agent.Spec) Facts {
 	}
 	_, err := exec.LookPath("git")
 	f.HasGit = err == nil
+	f.DesktopProtocols = map[string]bool{}
+	for _, s := range specs {
+		if s.DesktopScheme != "" {
+			f.DesktopProtocols[s.DesktopScheme] = registeredDesktopProtocol(ctx, s.DesktopScheme)
+		}
+	}
 	return f
 }
 
