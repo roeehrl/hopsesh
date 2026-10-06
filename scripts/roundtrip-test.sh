@@ -82,7 +82,9 @@ grep -q '"mark": *"done"' "$WORK/pull1.json" || fail "box's copy should be marke
 sudo tail -n 1 "$BFILE" | grep -Eq 'moved to|continued in' || fail "box's transcript has no moved mark"
 SLUG_A=$(sh_a 'cd ~/git/rt && pwd -P' | sed 's/[^A-Za-z0-9]/-/g')
 AID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["plan"]["placement"]["key"]["session"])' "$WORK/pull1.json")
-[ -n "$AID" ] && [ "$AID" != "$ID" ] || fail "unverified account transfer did not create a fresh session"
+if [ -z "$AID" ] || [ "$AID" = "$ID" ]; then
+  fail "unverified account transfer did not create a fresh session"
+fi
 AFILE="$AHOME/.claude/projects/$SLUG_A/$AID.jsonl"
 sudo test -f "$AFILE" || fail "no copy on back at $AFILE"
 as_a "$HS" ls --json --no-git > "$WORK/ls.json"
@@ -100,7 +102,9 @@ as_b "$HS" hosts add back "$A@127.0.0.1" >/dev/null
 as_b "$HS" trust back --yes >/dev/null
 as_b "$HS" pull "back:$AID" --yes --json > "$WORK/pull2.json" 2>&1 || { cat "$WORK/pull2.json"; fail "hop back"; }
 RETURN_ID=$(python3 -c 'import json,sys; p=json.load(open(sys.argv[1]))["plan"]; assert p["kind"]=="continue" and not p.get("conflict"); print(p["placement"]["key"]["session"])' "$WORK/pull2.json")
-[ -n "$RETURN_ID" ] && [ "$RETURN_ID" != "$ID" ] || fail "unverified return did not use a fresh ID"
+if [ -z "$RETURN_ID" ] || [ "$RETURN_ID" = "$ID" ]; then
+  fail "unverified return did not use a fresh ID"
+fi
 sudo grep -q "continued on back" "$BFILE" && fail "return changed the preserved original"
 BFILE="$BHOME/.claude/projects/$SLUG_B/$RETURN_ID.jsonl"
 sudo test -f "$BFILE" || fail "no reported return copy on box"

@@ -47,7 +47,9 @@ mkdir -p "$TARGET"
 "$BIN" pull "box:$ID" --to "$TARGET" --yes --json > "$WORK/pull.json" || { cat "$WORK/pull.json"; fail "pull failed"; }
 TSLUG=$(cd "$TARGET" && pwd -P | sed 's/[^A-Za-z0-9]/-/g')
 LOCAL_ID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["plan"]["placement"]["key"]["session"])' "$WORK/pull.json")
-[ -n "$LOCAL_ID" ] && [ "$LOCAL_ID" != "$ID" ] || fail "unverified account transfer did not create a fresh session"
+if [ -z "$LOCAL_ID" ] || [ "$LOCAL_ID" = "$ID" ]; then
+  fail "unverified account transfer did not create a fresh session"
+fi
 GOT="$CLAUDE_CONFIG_DIR/projects/$TSLUG/$LOCAL_ID.jsonl"
 [ -f "$GOT" ] || { ls -R "$CLAUDE_CONFIG_DIR" >&2; fail "transcript not installed at $GOT"; }
 grep -q "$TARGET/main.go" "$GOT" || fail "paths were not rewritten"
@@ -100,7 +102,9 @@ PYTHON
 JOURNAL=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["result"]["journal"])' "$WORK/push.json")
 [ -n "$JOURNAL" ] || { cat "$WORK/push.json"; fail "push printed no journal"; }
 RETURN_ID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["plan"]["placement"]["key"]["session"])' "$WORK/push.json")
-[ -n "$RETURN_ID" ] && [ "$RETURN_ID" != "$ID" ] || fail "unverified return did not preserve the original session"
+if [ -z "$RETURN_ID" ] || [ "$RETURN_ID" = "$ID" ]; then
+  fail "unverified return did not preserve the original session"
+fi
 RETURN_FILE="$RHOME/.claude/projects/$SLUG/$RETURN_ID.jsonl"
 sudo test -f "$RETURN_FILE" || fail "box did not install the reported return destination"
 sudo cat "$RETURN_FILE" | grep '"type":"custom-title"' | tail -n 1 | grep -Eq 'moved to |continued in ' && fail "the returned copy still carries a mark"
