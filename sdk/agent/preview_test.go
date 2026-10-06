@@ -11,13 +11,14 @@ import (
 
 func TestPreviewText(t *testing.T) {
 	for _, c := range []struct{ in, want string }{
-		{"hello   world", "hello world"},
-		{"one\ntwo\n\n\nthree\t four", "one two\n\nthree four"},
-		{"look:\n```go\nfunc a() {}\nfunc b() {}\n```\nthen run it", "look:\n\n‹code, 2 lines›\n\nthen run it"},
-		{"```\nx\n```", "‹code, 1 line›"},
-		{"open fence\n~~~\na\nb\nc", "open fence\n\n‹code, 3 lines›"},
+		{"1. First\n2. Second\n   - Nested", "1. First\n2. Second\n   - Nested"},
+		{"hello   world", "hello   world"},
+		{"one\ntwo\n\n\nthree\t four", "one\ntwo\n\n\nthree\t four"},
+		{"look:\n```go\nfunc a() {}\nfunc b() {}\n```\nthen run it", "look:\n```go\nfunc a() {}\nfunc b() {}\n```\nthen run it"},
+		{"```\nx\n```", "```\nx\n```"},
+		{"open fence\n~~~\na\nb\nc", "open fence\n~~~\na\nb\nc"},
 		{"see ![shot](a.png) and [Image #2] here", "see ‹image› and ‹image› here"},
-		{"bell\x07 and\x1b[0m escape\r\nnext", "bell and escape next"},
+		{"bell\x07 and\x1b[0m escape\r\nnext", "bell and escape\nnext"},
 		{NotePrefix + "This conversation was moved here", ""},
 		{"my question\n\n" + NotePrefix + "briefing", "my question"},
 		{"   \n\n  ", ""},
@@ -126,7 +127,7 @@ func TestPreviewPrivacyAndTurnBoundaries(t *testing.T) {
 		"public <system-reminder>private</system-reminder> answer",
 		"public \x1b]8;;https://private.example\x07answer\x1b]8;;\x1b\\",
 	} {
-		if got := PreviewText(s); got != "public answer" {
+		if got := PreviewText(s); strings.Join(strings.Fields(got), " ") != "public answer" {
 			t.Fatalf("got %q", got)
 		}
 	}

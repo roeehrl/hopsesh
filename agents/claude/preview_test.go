@@ -136,7 +136,7 @@ func TestPreviewActiveBranch(t *testing.T) {
 	file := writeTranscript(t, "/t/"+t.Name(), "p1", conversation(0))
 	p := preview(t, fake, file, 10)
 	want := "user:Please refactor the parser | agent:Sure. | user:Also add tests | tools(read=1 edit=1 execute=1) | " +
-		"agent:Done: the tests pass.\n\n‹code, 1 line› | compacted | user:Now the docs ‹image› | agent:Docs updated."
+		"agent:Done: the tests pass.\n\n```\nok parser\n``` | compacted | user:Now the docs ‹image› | agent:Docs updated."
 	if got := shape(p); got != want {
 		t.Fatalf("preview:\n got %s\nwant %s", got, want)
 	}
@@ -151,7 +151,7 @@ func TestPreviewActiveBranch(t *testing.T) {
 		t.Fatalf("n=2: %s", got)
 	}
 	p = preview(t, fake, file, 3)
-	if got := shape(p); got != "agent:Done: the tests pass.\n\n‹code, 1 line› | compacted | user:Now the docs ‹image› | agent:Docs updated." || !p.More {
+	if got := shape(p); got != "agent:Done: the tests pass.\n\n```\nok parser\n``` | compacted | user:Now the docs ‹image› | agent:Docs updated." || !p.More {
 		t.Fatalf("n=3: %s (more=%v)", got, p.More)
 	}
 }
@@ -271,7 +271,7 @@ func TestPreviewSkipsMetaAndSidechainFirst(t *testing.T) {
 		msg("assistant", "a", "meta", "", text("public <system-reminder>private reminder</system-reminder> answer"), nil),
 	})
 	p := preview(t, fake, file, 4)
-	if got := shape(p); got != "user:real prompt | agent:public answer" {
+	if got := shape(p); got != "user:real prompt | agent:public  answer" {
 		t.Fatal(got)
 	}
 	if p.First == nil || p.First.Text != "real prompt" {

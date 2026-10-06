@@ -193,7 +193,6 @@ const MaxPreviewText = 1200
 var (
 	reminderRE = regexp.MustCompile(`(?s)<system-reminder\b[^>]*>.*?(?:</system-reminder>|$)`)
 	oscRE      = regexp.MustCompile(`\x1b\][^\x07\x1b]*(?:\x07|\x1b\\|$)`)
-	fenceRE    = regexp.MustCompile("^ {0,3}(```+|~~~+)")
 	ansiRE     = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
 	mdImageRE  = regexp.MustCompile(`!\[[^\]\n]*\]\([^)\n]*\)`)
 	tagImageRE = regexp.MustCompile(`\[Image(?: #\d+)?(?:: [^\]\n]*)?\]|<img\b[^>\n]*>`)
@@ -202,10 +201,8 @@ var (
 // ImageMark stands for an image in preview text.
 const ImageMark = "‹image›"
 
-// PreviewText is a message's text as a preview shows it: without hopsesh's own note, code
-// blocks and images replaced by short marks, whitespace collapsed inside paragraphs (one
-// blank line between them), no control characters, and at most MaxPreviewText characters,
-// cut at a word.
+// PreviewText keeps Markdown structure for the inspector's safe renderer. It removes
+// control sequences, hopsesh's own notes and images, and bounds the text at a word.
 func PreviewText(s string) string {
 	s = reminderRE.ReplaceAllString(s, "")
 	s = OwnText(s)
@@ -217,9 +214,9 @@ func PreviewText(s string) string {
 	s = ansiRE.ReplaceAllString(s, "")
 	s = strings.Map(func(r rune) rune {
 		switch {
-		case r == '\n':
+		case r == '\n' || r == '\t':
 			return r
-		case r == '\t' || r == '\r':
+		case r == '\r':
 			return ' '
 		case unicode.IsControl(r) || r == utf8.RuneError:
 			return -1
@@ -227,43 +224,9 @@ func PreviewText(s string) string {
 		return r
 	}, s)
 
-	var paras []string
-	var para []string
-	end := func() {
-		if t := strings.Join(strings.Fields(strings.Join(para, " ")), " "); t != "" {
-			paras = append(paras, t)
-		}
-		para = nil
-	}
-	lines := strings.Split(s, "\n")
-	for i := 0; i < len(lines); i++ {
-		ln := lines[i]
-		if m := fenceRE.FindStringSubmatch(ln); m != nil {
-			end()
-			fence, n := m[1], 0
-			for i++; i < len(lines); i++ {
-				if c := strings.TrimSpace(lines[i]); strings.HasPrefix(c, fence) && strings.Trim(c, fence[:1]) == "" {
-					break
-				}
-				n++
-			}
-			unit := "lines"
-			if n == 1 {
-				unit = "line"
-			}
-			paras = append(paras, fmt.Sprintf("‹code, %d %s›", n, unit))
-			continue
-		}
-		if strings.TrimSpace(ln) == "" {
-			end()
-			continue
-		}
-		ln = mdImageRE.ReplaceAllString(ln, ImageMark)
-		ln = tagImageRE.ReplaceAllString(ln, ImageMark)
-		para = append(para, ln)
-	}
-	end()
-	return cutWords(strings.Join(paras, "\n\n"), MaxPreviewText)
+	s = mdImageRE.ReplaceAllString(s, ImageMark)
+	s = tagImageRE.ReplaceAllString(s, ImageMark)
+	return cutWords(strings.TrimSpace(s), MaxPreviewText)
 }
 
 // cutWords shortens s to at most max characters, ending at a word with "…".

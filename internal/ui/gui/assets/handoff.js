@@ -1,4 +1,4 @@
-// Handing a session off to a cloud (Move ▾'s clouds come from actions.js: every cloud, a
+// Handing a session off to a cloud (Move ▾'s clouds come from actions.js: enabled clouds, an unavailable
 // disabled one with its reason): the plan sheet (the briefing, the code, what stays on this
 // machine, the options), the steps while it applies (and a step that failed), and the done
 // screen with the session's link and Undo.
@@ -27,7 +27,7 @@ export function pickHandoff(e) {
   if (tabFor(e)) { toast(IN_A_TAB); return; }
   const d = dialog(h("h2", { style: "margin:0;font-size:16px" }, `Hand off “${e.title}” to…`),
     h("div", { class: "menu", role: "menu", "aria-label": "Hand off to", style: "position:static" },
-      (e.handoff || []).map((t) => menuItem(t, () => { d.close(); planHandoff(e, t.cloud, t.bundle); }))),
+      (e.handoff || []).filter((t) => cloudOf(t.cloud)?.allowed).map((t) => menuItem(t, () => { d.close(); planHandoff(e, t.cloud, t.bundle); }))),
     h("div", { class: "dlg-foot" }, h("button", { class: "btn", onclick: () => d.close() }, "Cancel")));
 }
 

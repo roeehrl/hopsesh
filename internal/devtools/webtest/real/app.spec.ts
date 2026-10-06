@@ -24,7 +24,7 @@ test("the window lists the demo sessions through the real service", async () => 
 
 test("it speaks Windows: this PC and Ctrl shortcuts", async () => {
   const sidebar = page.getByRole("navigation", { name: "Places" });
-  await expect(sidebar.getByRole("button", { name: /On this PC/ })).toBeVisible();
+  await expect(sidebar.getByRole("button", { name: /^This PC/ })).toBeVisible();
   await expect(page.locator(".titlebar .kbd")).toHaveText("Ctrl+K");
   await page.keyboard.press("Control+K");
   const input = page.getByRole("combobox", { name: "Search sessions or run a command" });

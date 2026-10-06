@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format follows
 ## Unreleased
 
 ### Fixed
+- App: Move and the hand-off picker only offer enabled clouds. Other clouds can be set up
+  in Machines; enabled destinations that are temporarily unavailable still say why.
 - The install script (`curl … | sh`) failed on macOS in a terminal with a UTF-8 locale
   ("arch…: unbound variable"): macOS's /bin/sh read the "…" after `$arch` as part of the
   name.
@@ -21,8 +23,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 - App: the end of the selected session's conversation (the last two exchanges, a line for
-  each turn's tool calls, Load earlier, Open transcript), as plain text read on its machine
-  and never during a scan; Settings → General → Show conversation previews turns it off.
+  each turn's tool calls, Load earlier, Open transcript), read on its machine and never
+  during a scan. Markdown is rendered locally, with distinct user and agent cards and
+  Show more for long messages. Raw HTML stays inert and images never load;
+  Settings → General → Show conversation previews turns it off.
 - App: where a session is open: its hopsesh tabs, iTerm2, Terminal, Windows Terminal, an
   editor, tmux, ssh or the Claude app, from the agents' own registries and the process table
   (no Apple Events: those run only when you click Show), every few seconds while the window

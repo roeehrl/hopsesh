@@ -1,11 +1,12 @@
 // The inspector: the selected session's header (its title, a status line that says where
 // it runs, one line of facts), its action row ([Primary ▾] [Move ▾] [⋯]), where it is
-// open, the end of its conversation (as text only: never markup, links or images), and its
+// open, the end of its conversation (safe, locally rendered Markdown), and its
 // repository, copies and details, which open and close app-wide.
 import { api, h, fill, icon, ICONS, state, sys, here, ago, when, bytes, agentBadge, cloudOf, cloudTitle, count, path, rich, fail, toast, dialog, errText, cap, $ } from "./core.js";
 import { model, statusLine, placeName, showPlace, placeCount, onInspector, liveOf, appWord } from "./actions.js";
 import { openMenu, isOpen, openEl, closeAll } from "./menu.js";
 import { sectionOpen, setSection } from "./layout.js";
+import { markdown } from "./markdown.js";
 import { tabs } from "./term.js";
 
 const AGENT_SHORT = { claude: "Claude", codex: "Codex" };
@@ -157,14 +158,31 @@ const skeleton = () => h("div", { class: "skel", "aria-hidden": "true" }, h("spa
 const who = (e) => AGENT_SHORT[e.agent] || e.agentName;
 function stamp(iso) { return iso ? h("span", { class: "msg-t", title: when(iso) }, ago(iso)) : null; }
 
-// message is one message as text, clamped (3 lines for you, 5 for the agent) until
-// clicked.
+// A separate expansion button leaves formatted text selectable and links usable.
+let messageID = 0;
+const previews = new Map();
+const measurePreviews = new ResizeObserver((entries) => {
+  for (const [node] of previews) if (!node.isConnected) { measurePreviews.unobserve(node); previews.delete(node); }
+  for (const { target } of entries) previews.get(target)?.();
+});
+function messageBody(text, clampLines) {
+  const full = clampLines >= 1000;
+  const t = h("div", { class: "msg-x" + (full ? " open" : ""), id: "message-" + (++messageID), style: `--clamp:${clampLines}` }, markdown(text));
+  if (full) return [t];
+  const button = h("button", { class: "link msg-expand", hidden: true, "aria-expanded": "false", "aria-controls": t.id, onclick: () => setOpen(!t.classList.contains("open")) }, "Show more");
+  function setOpen(open) {
+    t.classList.toggle("open", open);
+    button.setAttribute("aria-expanded", String(open));
+    button.textContent = open ? "Show less" : "Show more";
+  }
+  // Keyboard focus on a link also reveals it instead of landing outside the clip.
+  t.addEventListener("focusin", () => { if (!button.hidden) setOpen(true); });
+  previews.set(t, () => { button.hidden = !t.classList.contains("open") && t.scrollHeight <= t.clientHeight + 1; });
+  measurePreviews.observe(t);
+  return [t, button];
+}
 function message(role, text, iso, e, clampLines) {
-  const t = h("div", { class: "msg-x", style: `--clamp:${clampLines}`, tabindex: "0", role: "button", "aria-expanded": "false", title: "Click to show it all",
-    onclick: (ev) => { const x = ev.currentTarget; const open = x.classList.toggle("open"); x.setAttribute("aria-expanded", open ? "true" : "false"); },
-    onkeydown: (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); ev.currentTarget.click(); } } });
-  t.textContent = text; // the agent's own words: text, never markup
-  return h("div", { class: "msg " + role }, h("span", { class: "msg-l" + (role === "agent" ? " agent-" + e.agent : "") }, role === "user" ? "You" : who(e), stamp(iso)), t);
+  return h("div", { class: "msg " + role }, h("span", { class: "msg-l" + (role === "agent" ? " agent-" + e.agent : "") }, role === "user" ? "You" : who(e), stamp(iso)), messageBody(text, clampLines));
 }
 
 export function previewItems(e, p, clampUser = 3, clampAgent = 5) {
@@ -183,8 +201,7 @@ function fillConversation(body, e, p) {
   const kids = [];
   const derived = ["prompt", "reply", "none"].includes(e.titleSource);
   if (derived && p.first && !(p.items || []).some((x) => x.role === "user" && x.text === p.first.text)) {
-    const t = h("div", { class: "msg-x", style: "--clamp:2" });
-    t.textContent = p.first.text;
+    const t = messageBody(p.first.text, 2);
     kids.push(h("div", { class: "started" }, h("span", { class: "msg-l" }, icon(["M12 17v5", "M8 3h8l-1 6 3 4H6l3-4z"], 11), "Started with", stamp(p.first.time)), t));
   }
   kids.push(previewItems(e, p));
@@ -208,7 +225,7 @@ export async function transcript(e, n = 40) {
   const body = h("div", { class: "sheet-body transcript", "aria-busy": "true" }, skeleton());
   fill(sheet, h("div", { class: "sheet-in" },
     h("header", { class: "sheet-head" }, h("span", { class: "sec-h" }, "Transcript · read-only"), h("h2", { id: "sheet-title" }, e.title),
-      h("span", { class: "muted", style: "font-size:12px" }, `${e.agentName} · ${e.machine === here() ? sys.here : e.machine} · the last ${n} messages, as text`)),
+      h("span", { class: "muted", style: "font-size:12px" }, `${e.agentName} · ${e.machine === here() ? sys.here : e.machine} · the last ${n} messages`)),
     body,
     h("footer", { class: "sheet-foot" }, h("span", { class: "spacer" }), h("button", { class: "btn primary", onclick: () => sheet.close() }, "Close"))));
   if (!sheet.open) sheet.showModal();

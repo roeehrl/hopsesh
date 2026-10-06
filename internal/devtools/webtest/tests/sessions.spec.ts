@@ -31,14 +31,14 @@ test("the details pane: a status line, one action row, the conversation and the 
   await expect(d.getByRole("button", { name: "Move", exact: true })).toBeVisible();
   await expect(d.getByRole("button", { name: "More actions" })).toBeVisible();
   await expect(d).toContainText("https://github.com/example/demo.git");
-  // Move: every item visible, one that can't run now says why.
+  // Move: enabled destinations only; an unavailable machine says why.
   await d.getByRole("button", { name: "Move", exact: true }).click();
   const move = page.getByRole("menu", { name: "Move" });
   await expect(move.getByRole("menuitem", { name: /^Continue with Codex…/ })).toBeEnabled();
   const send = move.getByRole("menuitem", { name: /^Send to another machine…/ });
   await expect(send).toHaveAttribute("aria-disabled", "true");
   await expect(send).toContainText("No other machine with hopsesh is reached");
-  await expect(move.getByRole("menuitem", { name: /^Hand off to Claude Code cloud…/ })).toContainText("Turned off. Turn it on in Machines.");
+  await expect(move.getByRole("menuitem", { name: /^Hand off to / })).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(move).toBeHidden();
   await expect(d.getByRole("button", { name: "Move", exact: true })).toBeFocused();
@@ -50,16 +50,16 @@ test("the details pane: a status line, one action row, the conversation and the 
   await page.keyboard.press("Escape");
 });
 
-test("the conversation preview is text only: the last exchange, its tool calls, and the transcript", async ({ page }) => {
+test("the conversation preview: the last exchange, its tool calls, and the transcript", async ({ page }) => {
   await row(page, "Find the codeword").click();
   const conv = details(page).locator(".conv");
   await expect(conv.locator(".msg.user .msg-x")).toHaveText("What is the codeword in notes.txt?", { timeout: 30_000 });
   await expect(conv.locator(".msg-tools")).toHaveText("Ran 1 command");
   await expect(conv.locator(".msg.agent .msg-x")).toContainText("The codeword is PLUM-7");
   await expect(conv.locator(".msg.agent .msg-l")).toContainText("Claude");
-  // Nothing but text: no markup, links or images from the transcript.
+  // Formatted messages, without executable HTML or image requests.
   expect(await conv.evaluate((el) => el.querySelectorAll("a, img, iframe, script").length)).toBe(0);
-  expect(await conv.evaluate((el) => [...el.querySelectorAll(".msg-x")].every((x) => x.childElementCount === 0))).toBeTruthy();
+  await expect(conv.locator(".msg.user .markdown p")).toHaveText("What is the codeword in notes.txt?");
   await conv.getByRole("button", { name: "Open transcript" }).click();
   const sheet = page.locator("#sheet");
   await expect(sheet.getByText("Transcript · read-only")).toBeVisible();

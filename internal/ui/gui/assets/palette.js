@@ -1,5 +1,5 @@
 // The command palette (⌘K, Ctrl+K): find a session and act on it, or run any command, from the keyboard.
-import { api, h, fill, icon, ICONS, state, go, current, toast, fail, agentBadge, entries, here, $, sys, keys, clouds, selected, cloudTitle } from "./core.js";
+import { cloudOf, api, h, fill, icon, ICONS, state, go, current, toast, fail, agentBadge, entries, here, $, sys, keys, clouds, selected, cloudTitle } from "./core.js";
 import { pickHandoff } from "./handoff.js";
 import { actionsFor, statusOf, render as renderSessions, reveal, pasteDialog, showEntry, listCommand } from "./sessions.js";
 import { list } from "./listview.js";
@@ -75,7 +75,7 @@ async function toggleReader() {
 function handOff() {
   const sel = selected();
   const e = sel && !sel.cloud ? sel : entries().filter((x) => !x.cloud).sort((a, b) => (b.lastActive > a.lastActive ? 1 : -1))[0];
-  if (!e || !(e.handoff || []).length) return [];
+  if (!e || !(e.handoff || []).some((t) => cloudOf(t.cloud)?.allowed)) return [];
   return [{ label: "Hand off to…", sub: `“${e.title}”`, hint: "Pick a cloud", run: () => pickHandoff(e) }];
 }
 

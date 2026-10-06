@@ -19,21 +19,17 @@ async function turnOn(page: Page) {
   await expect(sidebar.getByRole("button", { name: /Claude Code cloud/ })).toContainText("ready", { timeout: 30_000 });
 }
 
-test("the Hand off menu lists every cloud, and a disabled one says why", async ({ page }) => {
+test("the Hand off menu and palette only list enabled clouds", async ({ page }) => {
   let menu = await openMenu(page);
-  const claude = menu.getByRole("menuitem", { name: /Claude Code cloud/ });
-  await expect(claude).toBeDisabled();
-  await expect(claude).toContainText("Turned off. Turn it on in Machines.");
-  const codex = menu.getByRole("menuitem", { name: /Codex cloud/ });
-  await expect(codex).toBeDisabled();
-  await expect(codex).toContainText("Turned off. Turn it on in Machines.");
-  await expect(menu).toContainText("A cloud gets a briefing, not this conversation.");
+  await expect(menu.getByRole("menuitem", { name: /Hand off to / })).toHaveCount(0);
+  await expect(menu.getByText("A cloud gets a briefing, not this conversation.")).toHaveCount(0);
+  await page.keyboard.press("Escape");
 
   await turnOn(page);
   menu = await openMenu(page);
   await expect(menu.getByRole("menuitem", { name: /Claude Code cloud/ })).toBeEnabled();
   await expect(menu.getByRole("menuitem", { name: /Claude Code cloud/ })).toContainText("Gets a briefing and the code on a branch");
-  await expect(menu.getByRole("menuitem", { name: /Codex cloud/ })).toBeDisabled();
+  await expect(menu.getByRole("menuitem", { name: /Codex cloud/ })).toHaveCount(0);
 
   // The palette offers it too, for the selected session.
   await page.getByRole("button", { name: "Search sessions or run a command" }).click();
@@ -41,7 +37,7 @@ test("the Hand off menu lists every cloud, and a disabled one says why", async (
   await page.locator(".pal-item", { hasText: "Hand off to…" }).click();
   const picker = page.locator("#dlg").getByRole("menu", { name: "Hand off to" });
   await expect(picker.getByRole("menuitem", { name: /Claude Code cloud/ })).toBeEnabled();
-  await expect(picker.getByRole("menuitem", { name: /Codex cloud/ })).toContainText("Turned off. Turn it on in Machines.");
+  await expect(picker.getByRole("menuitem", { name: /Codex cloud/ })).toHaveCount(0);
 });
 
 test("the hand-off sheet: briefing, branch, what stays, options; done, then undo", async ({ page }) => {

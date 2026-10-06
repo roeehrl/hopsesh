@@ -79,7 +79,7 @@ function general() {
       toggle("pushSource", "Push unpushed commits on the other machine first", "Off: commits are fetched straight from the other machine.")),
     card(h("span", { class: "sec-h" }, "Appearance"),
       toggle("appIcons", "Show each agent's own app icon", "When the agent's desktop app is installed here, its icon pictures the agent; otherwise hopsesh's own mark does."),
-      toggle("previews", "Show conversation previews", "The inspector shows the end of the selected session's conversation, as plain text read on its machine. Turn it off when you share your screen.")),
+      toggle("previews", "Show conversation previews", "The inspector shows the end of the selected session's conversation, with Markdown formatting, read on its machine. Turn it off when you share your screen.")),
     card(h("span", { class: "sec-h" }, sys.Here),
       h("div", { class: "set-row" }, title("Receiving sessions", state.info.receive ? "On: your other machines can send sessions here." : `Off: ${sys.here} refuses sessions sent from other machines.`),
         h("button", { class: "btn", onclick: () => go("machines") }, "Machines…")),

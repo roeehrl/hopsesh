@@ -41,7 +41,7 @@ test("a Claude Code cloud session goes on to Codex cloud through this machine, a
   const codex = list.getByRole("menuitem", { name: /Codex cloud/ });
   await expect(codex).toBeEnabled();
   await expect(codex).toContainText("Comes here from Claude Code cloud first, then gets a briefing and the code on a branch");
-  await expect(list.getByRole("menuitem", { name: /Jules/ })).toContainText("Turned off. Turn it on in Machines.");
+  await expect(list.getByRole("menuitem", { name: /Jules/ })).toHaveCount(0);
   await codex.click();
 
   const sheet = page.locator("#sheet");

@@ -28,6 +28,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/lnp"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/proc"
+	"github.com/roeehrl/hopsesh/internal/core/pty"
 	"github.com/roeehrl/hopsesh/internal/core/registry"
 	"github.com/roeehrl/hopsesh/internal/update"
 	"github.com/roeehrl/hopsesh/internal/version"
@@ -412,6 +413,16 @@ func (a *App) OpenURL(url string) error {
 		return errors.New("only hopsesh release pages, Tailscale sign-in and cloud sessions' pages can be opened")
 	}
 	return openInBrowser(url)
+}
+
+// OpenConversationLink opens a clicked and confirmed transcript link. Keep this
+// separate from OpenURL's allowlist for app-generated links.
+func (a *App) OpenConversationLink(raw string) error {
+	u, ok := pty.LinkTarget(raw)
+	if !ok {
+		return errors.New("only web links (http and https) can open from a conversation")
+	}
+	return openInBrowser(u)
 }
 
 // openInBrowser opens a web page in the default browser.

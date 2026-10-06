@@ -226,7 +226,7 @@ function cloudModel(e) {
     if (cl && !cl.allowed) m.fix = { label: "Turn on", run: () => turnOnCloud(cl) };
     else if (cl && cl.status === "signed-out") m.fix = { label: "Sign in", run: () => signIn(cl) };
   }
-  const hops = (e.hop || []).map((t) => handItem(t, () => planHop(e, t.cloud)));
+  const hops = (e.hop || []).filter((t) => cloudOf(t.cloud)?.allowed).map((t) => handItem(t, () => planHop(e, t.cloud)));
   if (hops.length) m.move.push({ heading: "Cloud", items: [...hops, note(`It comes to ${sys.here} first; the next cloud gets a briefing.`)] });
   return m;
 }
@@ -261,7 +261,7 @@ function moveGroups(e, local, inTab) {
   const agents = (e.continueIn || []).map((t) => block({ id: "continue:" + t.id, label: `Continue with ${t.name}${local ? "" : " on " + sys.here}…`, icon: agentBadge(t.id, t.name), run: () => planFor(e, { target: t.id }),
     chip: t.experimental ? h("span", { class: "chip st-warn mini" }, "experimental") : null }));
   if (agents.length) out.push({ heading: "Agent", items: agents });
-  const clouds = (e.handoff || []).map((t) => block(handItem(t, () => planHandoff(e, t.cloud, t.bundle))));
+  const clouds = (e.handoff || []).filter((t) => cloudOf(t.cloud)?.allowed).map((t) => block(handItem(t, () => planHandoff(e, t.cloud, t.bundle))));
   if (clouds.length) out.push({ heading: "Cloud", items: [...clouds, note("A cloud gets a briefing, not this conversation.")] });
   return out;
 }
