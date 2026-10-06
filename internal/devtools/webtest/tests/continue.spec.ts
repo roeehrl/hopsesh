@@ -61,3 +61,33 @@ test("an unverified account return preserves the original and creates a portable
   await sheet.getByRole("button", { name: /Continue in Claude Code/ }).click();
   await expect(page.getByText("Claude Code session written", { exact: true })).toBeVisible({timeout:30_000});
 });
+
+// The Windows screenshot world selects a remote session. Its action explicitly
+// names the destination PC; a local-only locator waits forever on that menu.
+test("remote continuation names this PC and retains its source when planning", async ({ page }) => {
+  await page.evaluate(async () => {
+    const { state, setSystem } = await import(/* @vite-ignore */ '/core.js');
+    const { render } = await import(/* @vite-ignore */ '/sessions.js');
+    setSystem('windows', 'Windows Terminal');
+    const entry = state.scan.groups.flatMap(g => g.entries).find(e => e.title === 'Find the codeword');
+    entry.machine = 'remote-fixture';
+    state.scan.machines.push({ name: 'remote-fixture', local: false, status: 'ok', agents: ['claude'] });
+    render();
+  });
+  await page.route('**/call', async route => {
+    const request = route.request().postDataJSON();
+    if (request.m === 'Plan') return route.fulfill({ json: { error: 'Remote plan captured for regression test' } });
+    return route.continue();
+  });
+  await row(page, 'Find the codeword').click();
+  await page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'Move', exact: true }).click();
+  const target = page.getByRole('menuitem', { name: /^Continue with Codex on this PC…/ });
+  await expect(target).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: /^Continue with Codex…/ })).toHaveCount(0);
+  const request = page.waitForRequest(r => r.url().endsWith('/call') && r.postDataJSON()?.m === 'Plan');
+  await target.click();
+  const args = (await request).postDataJSON().args;
+  expect(args[0]).toBe('remote-fixture');
+  expect(args[2]).toBe('codex');
+  await expect(page.locator('#sheet')).toContainText('Remote plan captured for regression test');
+});

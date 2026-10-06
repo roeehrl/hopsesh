@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format follows
 ## Unreleased
 
 ### Fixed
+- Windows UI validation waits for the actual main window and uses the remote-session
+  continuation label. Screenshot failures now fail CI and retain their own reports.
 - Codex sessions offer desktop opening through the documented exact-thread deep link.
   Installation and account-root checks explain unavailable actions; launcher errors surface
   instead of silently falling back to a terminal. CLI: `hopsesh open <session> --app`.
