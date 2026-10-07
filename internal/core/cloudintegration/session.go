@@ -338,13 +338,7 @@ func (s Incarnation) Handler(ctx context.Context, grant relay.Grant, operation, 
 	if err != nil {
 		return nil, err
 	}
-	sum := sha256.Sum256(b)
-	return struct {
-		Observation
-		Format string `json:"format"`
-		Data   []byte `json:"data"`
-		SHA256 string `json:"sha256"`
-	}{obs, "native-jsonl", b, hex.EncodeToString(sum[:])}, nil
+	return sealedExport(obs, b)
 }
 
 // Run uses the same reviewed transport and durable request processor as device

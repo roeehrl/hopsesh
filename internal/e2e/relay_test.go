@@ -400,18 +400,25 @@ func qualifyCloudConnector(t *testing.T, ctx context.Context, bin, root, origin,
 	if observed.Session != sid || observed.Incarnation != instance.ID || observed.Workspace != cloud.repo || !observed.TranscriptAvailable || !observed.ExportAllowed {
 		t.Fatal("cloud observation widened or lost its scope", observed)
 	}
-	var exported struct {
-		cloudintegration.Observation
-		Format string `json:"format"`
-		Data   []byte `json:"data"`
-		SHA256 string `json:"sha256"`
-	}
+	var exported cloudintegration.Export
 	if err = call("export", nil, &exported); err != nil {
 		t.Fatal("scoped cloud export", err)
 	}
 	sum := sha256.Sum256(native)
 	if exported.Session != sid || exported.Format != "native-jsonl" || !bytes.Equal(exported.Data, native) || exported.SHA256 != hex.EncodeToString(sum[:]) {
 		t.Fatal("cloud export did not preserve the bound native transcript")
+	}
+	if exported.Checkpoint.Kind != "complete-record-prefix" || exported.Checkpoint.OmittedTail != 0 || exported.Checkpoint.ExportedBytes != int64(len(native)) {
+		t.Fatal("cloud checkpoint lacked fidelity metadata")
+	}
+	firstCheckpoint := bytes.Clone(exported.Data)
+	partial := []byte(`{"type":"assistant","message":`)
+	currentNative := append(bytes.Clone(native), partial...)
+	if err = os.WriteFile(transcript, currentNative, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = call("export", nil, &exported); err != nil || !bytes.Equal(exported.Data, firstCheckpoint) || exported.Checkpoint.OmittedTail != int64(len(partial)) {
+		t.Fatal("encrypted export included or hid the unfinished vendor write", err)
 	}
 	if err = call("apply", nil, nil); err == nil {
 		t.Fatal("cloud grant allowed device mutation")
@@ -436,7 +443,7 @@ func qualifyCloudConnector(t *testing.T, ctx context.Context, bin, root, origin,
 		t.Fatal("superseded cloud connector retained authority")
 	}
 	after, err := os.ReadFile(transcript)
-	if err != nil || !bytes.Equal(after, native) {
+	if err != nil || !bytes.Equal(after, currentNative) {
 		t.Fatal("read-only cloud delivery changed the native transcript", err)
 	}
 	journals, err := filepath.Glob(filepath.Join(cloud.home, "state", "journal", "*", "journal.json"))
