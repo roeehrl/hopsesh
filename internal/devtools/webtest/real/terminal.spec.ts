@@ -58,3 +58,23 @@ test("Open a shell in its folder opens the hopsesh Terminal window with a tab th
   await expect(tab).toBeHidden();
   await expect(t.getByText("No programs are running here")).toBeVisible();
 });
+
+test("the native terminal docks into the main window without restarting its process",async()=>{
+ const row=page.locator('.row').filter({has:page.locator('.t').getByText('Find the codeword',{exact:true})});await row.click();
+ await page.getByRole('complementary',{name:'Session details'}).getByRole('button',{name:'More actions'}).click();
+ await page.getByRole('menuitem',{name:'Open a shell in its folder'}).click();
+ const detached=await terminalPage();await expect(detached.locator('.term')).toBeVisible();
+ const id=await detached.locator('.term').getAttribute('id');
+ const input=detached.locator('.term:not([hidden]) .xterm-helper-textarea');await input.focus();
+ await detached.keyboard.type("$hopseshDockProof = $PID; Write-Output ('before-dock:' + $hopseshDockProof)");await detached.keyboard.press('Enter');
+ await expect.poll(()=>detached.evaluate(()=>(window as any).hopseshTerminal.text())).toContain('before-dock:');
+ await detached.getByLabel('Terminal placement').selectOption('bottom');
+ const embedded=page.frameLocator('#terminal-workspace iframe');await expect(embedded.locator('.term')).toHaveAttribute('id',id!);
+ await embedded.locator('.term:not([hidden]) .xterm-helper-textarea').fill('');
+ await embedded.locator('.term:not([hidden]) .xterm-helper-textarea').pressSequentially("Write-Output ('same-process:' + ($hopseshDockProof -eq $PID)); exit 7");
+ await embedded.locator('.term:not([hidden]) .xterm-helper-textarea').press('Enter');
+ await expect(embedded.locator('#exitbar')).toContainText('exited with code 7');
+ const f=page.frames().find(f=>f.url().includes('host='))!;
+ expect(await f.evaluate(()=>(window as any).hopseshTerminal.text())).toContain('same-process:True');
+ await embedded.locator('#exitbar').getByRole('button',{name:'Close tab'}).click();
+});

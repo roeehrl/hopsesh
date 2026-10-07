@@ -35,6 +35,10 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 			limit, _ := cmd.Flags().GetInt("limit")
 			cloudOnly, _ := cmd.Flags().GetBool("cloud")
 			env, _ := cmd.Flags().GetString("env")
+			groupBy, _ := cmd.Flags().GetString("group-by")
+			if groupBy != "repository" && groupBy != "family" {
+				return fmt.Errorf("group-by must be repository or family")
+			}
 			if len(args) == 1 {
 				name := strings.TrimSuffix(args[0], ":")
 				if !r.app.IsCloud(name) {
@@ -60,8 +64,16 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 			}
 			inv.Entries = kept
 			groups := inv.Groups(r.app.LocalRoots())
+			if groupBy == "family" {
+				groups = inv.FamilyGroups()
+				for i := range groups {
+					if name := r.app.Cfg.FamilyNames[groups[i].Identity]; name != "" {
+						groups[i].Name = name
+					}
+				}
+			}
 			if r.jsonOut {
-				out := map[string]any{"machines": inv.Machines, "clouds": inv.Clouds, "groups": groups}
+				out := map[string]any{"machines": inv.Machines, "clouds": inv.Clouds, "groups": groups, "relationships": inv.Relationships()}
 				var adopted, waiting []app.Brought
 				for _, f := range inv.Adopted {
 					adopted = append(adopted, r.app.Brought(f))
@@ -112,6 +124,8 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 					head += "  " + g.Remote
 				}
 				switch {
+				case groupBy == "family":
+					head += fmt.Sprintf("  [%d branches]", len(g.Items))
 				case g.Local != "":
 					head += "  [here: " + g.Local + "]"
 				case g.Identity != "" && !strings.HasPrefix(g.Identity, "local:"):
@@ -156,6 +170,7 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 			return nil
 		},
 	}
+	cmd.Flags().String("group-by", "repository", "group sessions by repository or verified conversation family")
 	cmd.Flags().String("host", "", "only this machine (\"local\" for this one)")
 	cmd.Flags().String("agent", "", "only this agent ("+strings.Join(agentIDs(), ", ")+")")
 	cmd.Flags().String("repo", "", "only sessions whose repository or path contains this")
@@ -164,7 +179,7 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 	cmd.Flags().Bool("no-local", false, "skip this machine")
 	cmd.Flags().Bool("cloud", false, "only cloud sessions (and the local sessions their vendor mirrors)")
 	cmd.Flags().String("env", "", "only cloud sessions run in this environment (its id or name)")
-	cmd.Flags().Int("limit", 8, "sessions shown per repository (0 = all)")
+	cmd.Flags().Int("limit", 8, "sessions shown per group (0 = all)")
 	cmd.Flags().Bool("json", false, "output JSON")
 	return cmd
 }

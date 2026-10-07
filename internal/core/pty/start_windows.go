@@ -354,6 +354,7 @@ func (t *conTerm) Read(p []byte) (int, error) {
 }
 
 func (t *conTerm) Write(p []byte) (int, error) { return t.in.Write(p) }
+func (t *conTerm) PID() int                    { return int(t.pid) }
 func (t *conTerm) ClosesOnExit() bool          { return false }
 func (t *conTerm) Name() string                { return t.api.name }
 

@@ -103,6 +103,17 @@ func Main() int {
 	var line strings.Builder
 	for k := range keys {
 		switch {
+		case k == 'A':
+			fmt.Print("\x1b[?1049h\x1b[2J\x1b[3;9Halternate-screen-proof\x1b[5;12H")
+		case k == 'N':
+			fmt.Print("\x1b[?1049l")
+		case k == 'P':
+			say("pid=%d", os.Getpid())
+		case k == 'F':
+			for i := 0; i < 3000; i++ {
+				say("stream line %d", i)
+			}
+			say("stream complete")
 		case k == 'S':
 			w, h, _ := term.GetSize(out)
 			say("size=%dx%d", w, h)

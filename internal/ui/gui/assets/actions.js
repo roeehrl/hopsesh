@@ -7,7 +7,7 @@
 import { api, state, sys, here, agentInfo, cloudOf, cloudTitle, toast, fail, errText, cap, entries, count, ago, h, icon, ICONS, agentBadge, pending } from "./core.js";
 import { returnActions, returnChooser, showMovementDestination } from "./returns.js";
 import { planFor } from "./plan.js";
-import { tabs, resume, showTerminal, moveToTerminal, openShell, signIn } from "./term.js";
+import { tabs, resume, showTerminal, moveToTerminal, openShell, associateShell, signIn } from "./term.js";
 import { planHandoff } from "./handoff.js";
 import { planHop } from "./hop.js";
 
@@ -307,6 +307,7 @@ function more(e, local) {
   const onlyHere = local ? "" : `Only for sessions on ${sys.here}`;
   const out = [];
   if (!e.cloud) {
+    if(local && [...tabs.values()].some(t=>t.kind==="shell" && t.state!=="exited")) out.push({id:"associate-shell",label:"Organize a shell with this conversation…",run:()=>associateShell(e)});
     out.push({ id: "shell", label: "Open a shell in its folder", disabled: !local, why: onlyHere, run: () => openShell(e) });
     out.push({ id: "reveal", label: sys.mac ? "Reveal in Finder" : sys.win ? "Show in Explorer" : "Show in Files", disabled: !local, why: onlyHere,
       run: () => api("RevealEntry", e.machine, e.key).catch(fail) });

@@ -13,6 +13,8 @@ go build -o (Join-Path $dir 'termprobe.exe') ./internal/devtools/termprobe
 if ($LASTEXITCODE -ne 0) { exit 1 }
 go run ./internal/devtools/conptyfetch -arch amd64 -out (Join-Path $dir 'conpty')
 if ($LASTEXITCODE -ne 0) { exit 1 }
+foreach ($placement in @('separate', 'bottom', 'right')) {
+$env:HOPSESH_E2E_TERMINAL_PLACEMENT = $placement
 $work = Join-Path $env:RUNNER_TEMP ('hsterm-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path "$work\config", "$work\state" | Out-Null
 $out = Join-Path $work 'terminal.txt'
@@ -45,3 +47,6 @@ Write-Host $text
 if ($text -notmatch '(?m)^backend=conpty \(bundled\) code=0') { Write-Error 'the tab did not run on the bundled ConPTY, or its program ended badly'; exit 1 }
 if ($text -notmatch [regex]::Escape('da1="\x1b[?')) { Write-Error "the tab's program got no answer to its query"; exit 1 }
 Write-Host 'A tab ran on the bundled ConPTY in the real terminal window and got an answer through its stream.'
+
+}
+Remove-Item Env:HOPSESH_E2E_TERMINAL_PLACEMENT -ErrorAction SilentlyContinue

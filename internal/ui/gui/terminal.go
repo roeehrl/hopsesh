@@ -14,21 +14,20 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 
+	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/core/pty"
 )
 
 // The app's terminal: tabs whose programs run in pseudo-terminals here (internal/core/pty),
-// shown in a window of their own, "hopsesh Terminal".
+// shown in a separate window or a sandboxed panel in the main window.
 //
 // That window is isolated from the app (docs/design.md §15). Its page talks to hopsesh only
-// through two Wails streams: TerminalStream, one connection per tab (input, resize, acks,
+// through two capability-authorized loopback websocket streams: TerminalStream, one connection per tab (input, resize, acks,
 // close, a link to open; output and the tab's state back), and TerminalTabsStream (the
-// list of tabs and the window's settings; from the window, a small set of typed requests
-// about tabs, see windowRequest). Gate, the asset middleware, gives any window other than
-// the app's own the terminal page, the Wails runtime script and the stream endpoints only:
-// no bound method, no event, no clipboard, no dialog and no other page. Wails tags every
-// request with the window it came from in the native layer, so a page cannot claim another
-// window's id. A link a tab's program prints opens only as http(s), and only after the user
+// list of tabs and settings; from the renderer, validated typed requests about tabs).
+// The loopback host serves no app bindings; the embedded frame has an opaque sandbox
+// origin. Gate also rejects cross-origin requests before considering a native window ID.
+// A link a tab's program prints opens only as http(s), and only after the user
 // confirms it in a native dialog that shows the whole address.
 //
 // What a tab runs is decided in Go (Open, from one of the app's entry points: a session's
@@ -64,7 +63,11 @@ const (
 
 // TabMeta is what the app knows about a tab besides its program's state.
 type TabMeta struct {
-	Kind string `json:"kind"`
+	LaunchedKey  string            `json:"launchedKey,omitempty"`
+	Relationship *app.Relationship `json:"relationship,omitempty"`
+	Account      string            `json:"account,omitempty"`
+	Association  string            `json:"association,omitempty"`
+	Kind         string            `json:"kind"`
 	// Command is the program and its arguments, for people.
 	Command string `json:"command"`
 	// Agent names whose program it is ("Claude Code"; "" for a shell).
@@ -132,12 +135,15 @@ type TabSetup struct {
 
 // TermPrefs are the terminal window's settings, sent with the list of tabs.
 type TermPrefs struct {
-	Appearance   string `json:"appearance"`
-	Font         string `json:"font"`
-	FontSize     int    `json:"fontSize"`
-	Scrollback   int    `json:"scrollback"`
-	ScreenReader bool   `json:"screenReader"`
-	OS           string `json:"os"`
+	Collapsed    []string `json:"collapsed"`
+	Placement    string   `json:"placement"`
+	Grouping     string   `json:"grouping"`
+	Appearance   string   `json:"appearance"`
+	Font         string   `json:"font"`
+	FontSize     int      `json:"fontSize"`
+	Scrollback   int      `json:"scrollback"`
+	ScreenReader bool     `json:"screenReader"`
+	OS           string   `json:"os"`
 	// Home is the home folder (the window shortens paths under it to ~); TerminalName is
 	// the user's terminal app ("iTerm2"), for "Open in my terminal".
 	Home         string `json:"home"`
@@ -146,8 +152,13 @@ type TermPrefs struct {
 
 // Terminals holds the app's terminal tabs and their window.
 type Terminals struct {
-	mgr    *pty.Manager
-	showMu sync.Mutex // one terminal window at a time
+	winURL          string // guarded by showMu
+	embeddedVisible bool   // guarded by mu; main window presentation state
+	host            terminalHost
+	SavePlacement   func(string) error
+	SaveGrouping    func(string, string, *bool) error
+	mgr             *pty.Manager
+	showMu          sync.Mutex // one terminal window at a time
 
 	mu      sync.Mutex
 	app     *application.App
@@ -239,8 +250,6 @@ func (t *Terminals) Attach(app *application.App) {
 	t.mu.Lock()
 	t.app = app
 	t.mu.Unlock()
-	app.HandleStream(TerminalStream, t.serveTab)
-	app.HandleStream(TerminalTabsStream, t.serveList)
 }
 
 // Privileged marks a window as the app's own (its requests pass Gate); the first is the
@@ -265,7 +274,23 @@ func (t *Terminals) privilegedID(id uint) {
 func (t *Terminals) Manager() *pty.Manager { return t.mgr }
 
 // CloseAll ends every tab (the app is quitting).
-func (t *Terminals) CloseAll() { t.mgr.CloseAll() }
+func (t *Terminals) CloseAll() {
+	t.mgr.CloseAll()
+	t.host.mu.Lock()
+	defer t.host.mu.Unlock()
+	if t.host.server != nil {
+		_ = t.host.server.Close()
+	}
+	if t.host.pendingTimer != nil {
+		t.host.pendingTimer.Stop()
+	}
+	for c := range t.host.conns {
+		_ = c.c.CloseNow()
+	}
+	if t.host.cancel != nil {
+		t.host.cancel()
+	}
+}
 
 // windowOf is the id Wails' native layer tagged a request with.
 func windowOf(r *http.Request) (uint, bool) {
@@ -282,6 +307,13 @@ func windowOf(r *http.Request) (uint, bool) {
 // terminal page needs, and its page a strict content security policy.
 func (t *Terminals) Gate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Native window IDs identify the containing window, not the calling frame.
+		// Never let a cross-origin/sandboxed frame inherit main-window authority.
+		origin := r.Header.Get("Origin")
+		if origin != "" && origin != "http://wails.localhost" && origin != "wails://wails.localhost" && origin != "wails://localhost" && origin != "https://wails.localhost" {
+			http.Error(w, "cross-origin app request", http.StatusForbidden)
+			return
+		}
 		if id, ok := windowOf(r); ok {
 			t.mu.Lock()
 			main := t.main[id]
@@ -324,25 +356,6 @@ func terminalMayFetch(r *http.Request) bool {
 	return false
 }
 
-// isTerminalWindow: the window is the terminal window hopsesh opened.
-func (t *Terminals) isTerminalWindow(w application.Window) bool {
-	if w == nil {
-		return false
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.win != nil && w.ID() == t.winID && !t.main[w.ID()]
-}
-
-// serveTab is one TerminalStream connection, from the terminal window only.
-func (t *Terminals) serveTab(c *application.StreamConn) {
-	if !t.isTerminalWindow(c.Window()) {
-		_ = c.Close()
-		return
-	}
-	t.ServeTab(c)
-}
-
 // ServeTab serves one TerminalStream connection that is known to come from the terminal
 // window (the app checks the window first; the browser tests have only that page).
 func (t *Terminals) ServeTab(c pty.Conn) {
@@ -353,15 +366,6 @@ func (t *Terminals) ServeTab(c pty.Conn) {
 		return nil, errors.New("no such tab")
 	}
 	_ = pty.Serve(c, find, func(u string) { t.confirmLink(u) })
-}
-
-// serveList is one TerminalTabsStream connection, from the terminal window only.
-func (t *Terminals) serveList(c *application.StreamConn) {
-	if !t.isTerminalWindow(c.Window()) {
-		_ = c.Close()
-		return
-	}
-	t.ServeList(c)
 }
 
 // ServeList serves one TerminalTabsStream connection known to come from the terminal
@@ -414,7 +418,7 @@ func (t *Terminals) prefs() TermPrefs {
 	if t.Prefs != nil {
 		return t.Prefs()
 	}
-	return TermPrefs{FontSize: 13, Scrollback: 5000, OS: runtime.GOOS}
+	return TermPrefs{Placement: "separate", Grouping: "family", FontSize: 13, Scrollback: 5000, OS: runtime.GOOS}
 }
 
 // send queues a message for every terminal window's list connection.
@@ -437,8 +441,16 @@ func (t *Terminals) queue(it listItem) {
 	}
 }
 
-// Refresh sends the window its list again (the settings changed).
-func (t *Terminals) Refresh() { t.sendList() }
+// TerminalPreferencesEvent synchronizes Settings with the terminal menu.
+const TerminalPreferencesEvent = "hopsesh:terminal-preferences"
+
+// Refresh sends both views their committed terminal preferences.
+func (t *Terminals) Refresh() {
+	t.sendList()
+	if t.Emit != nil {
+		t.Emit(TerminalPreferencesEvent, t.prefs())
+	}
+}
 
 // windowRequest is what the terminal window may ask of hopsesh about its tabs; every
 // field is checked, and a tab is looked up by its id.
@@ -464,8 +476,24 @@ func (t *Terminals) request(b []byte) {
 	}
 	t.mu.Lock()
 	tb := t.tabs[r.ID]
+	var meta TabMeta
+	if tb != nil {
+		meta = tb.meta
+	}
 	t.mu.Unlock()
 	switch r.Op {
+	case "grouping", "collapse":
+		if t.SaveGrouping != nil {
+			if err := t.SaveGrouping(r.Op, r.ID, r.On); err != nil {
+				t.notice("", err.Error())
+			} else {
+				t.Refresh()
+			}
+		}
+	case "placement":
+		if r.ID == "bottom" || r.ID == "right" || r.ID == "separate" {
+			go t.moveWorkspace(r.ID)
+		}
 	case "active":
 		if tb != nil {
 			t.mu.Lock()
@@ -473,7 +501,7 @@ func (t *Terminals) request(b []byte) {
 			t.mu.Unlock()
 		}
 	case "external":
-		if tb != nil && tb.external != nil {
+		if tb != nil && meta.External && tb.external != nil {
 			go func() {
 				if err := tb.external(r.ID); err != nil {
 					t.notice(r.ID, err.Error())
@@ -481,7 +509,7 @@ func (t *Terminals) request(b []byte) {
 			}()
 		}
 	case "rerun":
-		if tb != nil && tb.meta.Rerun {
+		if tb != nil && meta.Rerun {
 			go t.rerun(r.ID, tb)
 		}
 	case "shell":
@@ -498,6 +526,9 @@ func (t *Terminals) request(b []byte) {
 		}
 	case "main":
 		t.ShowMain()
+		if t.Emit != nil {
+			t.Emit("hopsesh:terminal-main", nil)
+		}
 	case "maximize":
 		t.mu.Lock()
 		win := t.win
@@ -642,8 +673,11 @@ func (t *Terminals) autoClose() bool { return t.AutoClose == nil || t.AutoClose(
 // visible: the terminal window has focus and shows the tab.
 func (t *Terminals) visible(id string) bool {
 	t.mu.Lock()
-	win, active := t.win, t.active
+	win, main, active, embedded := t.win, t.mainWin, t.active, t.embeddedVisible
 	t.mu.Unlock()
+	if t.prefs().Placement != "separate" {
+		return embedded && main != nil && active == id && main.IsFocused()
+	}
 	return win != nil && active == id && win.IsFocused()
 }
 
@@ -771,7 +805,7 @@ func (t *Terminals) comeForward(id string) {
 // it, else after closeAfter.
 func (t *Terminals) closeEnded(id string) {
 	t.mu.Lock()
-	shown := t.win != nil && t.active == id
+	shown := (t.win != nil || t.embeddedVisible) && t.active == id
 	t.mu.Unlock()
 	d := time.Duration(0)
 	if shown {
@@ -798,6 +832,34 @@ func (t *Terminals) Focus(id string) {
 
 // Show opens the terminal window, or brings it to the front.
 func (t *Terminals) Show() {
+	t.host.mu.Lock()
+	pending, p := t.host.pending, t.host.pendingPlacement
+	u := t.host.origin + "/terminal/?host=" + t.host.secret + "&view=" + pending
+	t.host.mu.Unlock()
+	if pending != "" {
+		t.presentWorkspace(p, u, false)
+		return
+	}
+	if p := t.prefs().Placement; p == "bottom" || p == "right" {
+		u, err := t.hostURL(false)
+		if err != nil {
+			t.notice("", err.Error())
+			return
+		}
+		t.ShowMain()
+		if t.Emit != nil {
+			t.Emit(TerminalWorkspaceEvent, TerminalWorkspaceDTO{URL: u, Placement: p})
+		}
+		return
+	}
+	u, err := t.hostURL(false)
+	if err != nil {
+		t.notice("", err.Error())
+		return
+	}
+	t.showDetached(u)
+}
+func (t *Terminals) showDetached(u string) {
 	t.showMu.Lock()
 	defer t.showMu.Unlock()
 	t.mu.Lock()
@@ -807,6 +869,10 @@ func (t *Terminals) Show() {
 		return
 	}
 	if win != nil {
+		if t.winURL != u {
+			win.SetURL(u)
+			t.winURL = u
+		}
 		win.Show().Focus()
 		return
 	}
@@ -817,13 +883,14 @@ func (t *Terminals) Show() {
 		Height:    680,
 		MinWidth:  560,
 		MinHeight: 320,
-		URL:       TerminalPage,
+		URL:       u,
 		// As the app's window: no title bar, the window's buttons inset into the tab strip,
 		// which drags the window (--wails-draggable in terminal.css).
 		Mac: application.MacWindow{TitleBar: application.MacTitleBarHiddenInset, InvisibleTitleBarHeight: 52},
 	})
 	t.mu.Lock()
 	t.win, t.winID = w, w.ID()
+	t.winURL = u
 	t.mu.Unlock()
 	w.OnWindowEvent(events.Common.WindowClosing, func(*application.WindowEvent) {
 		t.mu.Lock()
@@ -965,8 +1032,11 @@ func (a *App) TerminalOpenElsewhere(id string) error {
 	if a.Terms == nil {
 		return errors.New("no terminal")
 	}
-	tb, ok := a.Terms.tabOf(id)
-	if !ok || tb.external == nil {
+	a.Terms.mu.Lock()
+	tb, ok := a.Terms.tabs[id]
+	allowed := ok && tb.meta.External && tb.external != nil
+	a.Terms.mu.Unlock()
+	if !allowed {
 		return errors.New("this tab cannot open in your terminal app")
 	}
 	return tb.external(id)

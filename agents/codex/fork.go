@@ -41,7 +41,7 @@ func (m *Module) VerifyNativeFork(ctx context.Context, h agent.Host, in agent.In
 	if err != nil {
 		return nil, err
 	}
-	if cm.ForkedFromID != pm.ID || cm.ID == pm.ID || child.Key.Agent != parent.Key.Agent {
+	if cm.ForkedFromID != pm.ID || cm.ID == pm.ID || child.Key.Agent != parent.Key.Agent || child.Key.Profile != parent.Key.Profile || string(parent.Key.Session) != pm.ID || string(child.Key.Session) != cm.ID {
 		return nil, fmt.Errorf("%w: native fork parent is not declared", agent.ErrDiverged)
 	}
 	if cm.HistoryBase != nil {
@@ -55,6 +55,16 @@ func (m *Module) VerifyNativeFork(ctx context.Context, h agent.Host, in agent.In
 	if err != nil {
 		return nil, err
 	}
+	if boundary := cm.ForkedFromOrdinalExclusive; boundary != nil {
+		if *boundary < 2 || *boundary > uint64(len(pr)) || *boundary > uint64(len(cr)) {
+			return nil, fmt.Errorf("%w: declared fork boundary is not materialized", agent.ErrDiverged)
+		}
+		for i := uint64(0); i < *boundary; i++ {
+			if pr[i].Ordinal == nil || cr[i].Ordinal == nil || *pr[i].Ordinal != i || *cr[i].Ordinal != i {
+				return nil, fmt.Errorf("%w: fork prefix ordinals are missing or discontinuous", agent.ErrDiverged)
+			}
+		}
+	}
 	last := 1
 	for last < len(pr) && last < len(cr) {
 		if cm.ForkedFromOrdinalExclusive != nil {
@@ -66,6 +76,9 @@ func (m *Module) VerifyNativeFork(ctx context.Context, h agent.Host, in agent.In
 			}
 		}
 		if pr[last].Type != cr[last].Type || pr[last].Timestamp != cr[last].Timestamp || !bytes.Equal(nativeValue(pr[last].Payload), nativeValue(cr[last].Payload)) {
+			if cm.ForkedFromOrdinalExclusive != nil {
+				return nil, fmt.Errorf("%w: history differs before declared fork boundary", agent.ErrDiverged)
+			}
 			break
 		}
 		last++
@@ -94,6 +107,9 @@ func (m *Module) VerifyNativeFork(ctx context.Context, h agent.Host, in agent.In
 			return nil, fmt.Errorf("%w: native fork prefix changed representation", agent.ErrDiverged)
 		}
 		out = append(out, agent.NativeInheritance{ParentAnchor: pn.Native.Anchor, ChildAnchor: n.Native.Anchor, Hash: ir.ContentHash(n)})
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("%w: native fork has no verified inherited conversation", agent.ErrDiverged)
 	}
 	return out, nil
 }

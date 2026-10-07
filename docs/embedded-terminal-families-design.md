@@ -1,6 +1,20 @@
 # Embedded terminals and conversation families
 
-Status: proposal for approval, 7 October 2026. The appearance selector is implemented separately; the layouts and family grouping below are not shipped behavior.
+Status: approved and implemented on the 0.4.0 development branch, 7 October 2026. Merge, cross-platform CI and release publication are separate gates. The sections below retain the approved design rationale; the implementation notes describe the delivered contract.
+
+## Implementation and validation
+
+Settings → Terminal offers Separate window (unchanged default), Bottom panel and Right panel. Right adapts to bottom below 1400 px. Drag or keyboard-resize the divider; maximize, hide or detach without launching another program. The right workspace exposes Session details without creating four narrow columns. System/Light/Dark follows the existing appearance setting.
+
+A capability-authenticated loopback server serves only terminal assets and two typed WebSocket streams. Embedded content uses `sandbox="allow-scripts"` with an opaque origin; app bindings reject its origin even if it claims the main window ID. The old view stays available until its replacement loads. Each PTY checkpoints the xterm screen, buffers and modes in memory behind an output barrier; the new viewer restores at the old size before fitting. A transfer never writes this checkpoint to disk. Ownership checks reject stale input/resize/close/ack frames. IME composition must finish before moving. Loading/checkpoint failure releases the original view. Quit still ends owned programs after the existing confirmation; embedding does not add a daemon.
+
+Display → Group by → Conversation family uses the same relationship index as TUI (`g`, arrows/Enter to expand/collapse) and `hopsesh ls --group-by family`. Group names and collapse choices persist. Copies of a branch count once; title/native-ID similarity across machines or profiles does not prove ancestry. Missing parents and conflicting/cyclic ancestry remain explicit. Native-only verified forks have stable presentation IDs even before a transfer persists an endpoint. These IDs never authorize append/merge.
+
+Terminal tabs group by Family, Session or None. Unassociated shells and sign-ins stay in Other terminals. A local session’s More actions → Organize a shell with this conversation explicitly associates an existing shell for presentation only; it can be moved back to Other terminals. Native process evidence can rebind agent tabs after an in-process fork/resume. Missing, stale or ambiguous evidence is shown as “Session association not confirmed”; an old launch command is not offered as a rerun of a different session.
+
+Claude retrospective forks without supported native parent evidence remain separate; Hopsesh-recorded Claude forks and verified Codex native forks are supported. No similarity matching or delegated-subagent inference was added. Custom collections, arbitrary split panes, following selection automatically and survival after Quit remain outside 0.4.0.
+
+Regression coverage is in `internal/app/families_test.go`, `nativefork_test.go`, `internal/core/pty/handover_test.go`, GUI host/binding tests, TUI family tests and browser terminal-workspace/list suites. The round-trip undo scenario asserts that Claude → Codex → Claude remains one family and one branch. The existing cross-OS scenario matrices run it. Native macOS/Linux CI now tests separate/bottom/right renderers; Windows uses the same placements on bundled ConPTY plus a real WebView2 same-process dock test. Browser tests cover repeated moves, alternate screen/cursor, PID preservation, high output, rejected old capabilities, IME, failed loading, responsive layout, grouping persistence and shell association. Native tray/compositor and screen-reader behavior still requires platform verification; browser success alone is not a native release sign-off.
 
 ## Recommendation
 

@@ -15,6 +15,7 @@ import { setAppearance, darkAppearance, onAppearanceChange } from "./appearance.
 //     refused here.
 //   - The hand-off's trust-question banner is a display-only match on what the tab shows;
 //     it never drives input or any step.
+import { SerializeAddon } from "./vendor/addon-serialize.mjs";
 import { Terminal } from "./vendor/xterm.mjs";
 import { FitAddon } from "./vendor/addon-fit.mjs";
 import { WebglAddon } from "./vendor/addon-webgl.mjs";
@@ -66,6 +67,8 @@ document.documentElement.dataset.os = prefs.os;
 const tabs = new Map(); // id → { info, term, fit, search, conn, el, order, output, tail, trust, started, closeTimer }
 let order = [];
 let active = "";
+let scope = "";
+const collapsedGroups = new Set();
 let request = () => {};
 let tipWanted = false; // the first-run tip, until "Got it"
 
@@ -130,6 +133,7 @@ function makeTerm(t) {
   });
   const fit = new FitAddon();
   const search = new SearchAddon();
+ const serializer = new SerializeAddon(); term.loadAddon(serializer); t.serializer = serializer;
   term.loadAddon(fit);
   term.loadAddon(search);
   term.loadAddon(new Unicode11Addon());
@@ -148,7 +152,9 @@ function makeTerm(t) {
     if (t.savedTimer && !t.savedSeen) { t.savedSeen = true; if (t.id === active) paint(); } // the "Saved here" banner goes on the next key
   });
   term.onBinary((d) => t.conn?.input(Uint8Array.from(d, (c) => c.charCodeAt(0) & 255)));
-  term.onResize(({ cols, rows }) => t.conn?.resize(cols, rows));
+  term.onResize(({ cols, rows }) => { if (t.restored) t.conn?.resize(cols, rows); });
+  term.textarea?.addEventListener("compositionstart", () => { t.composing=true; });
+  term.textarea?.addEventListener("compositionend", () => { t.composing=false; });
   term.attachCustomKeyEventHandler((ev) => keys(ev, t));
   search.onDidChangeResults?.((r) => {
     if (t.id !== active) return;
@@ -174,11 +180,19 @@ function addTab(info) {
       if (info.capture || t.info.kind === "step") watchTrust(t, dec.decode(bytes, { stream: true }));
       t.term.write(bytes, done);
     },
-    state: (i) => update(t, i),
+    restored: () => new Promise(resolve => t.term.write("", () => { t.restored=true; fitTab(t); t.conn.resize(t.term.cols,t.term.rows); resolve(); })),
+    checkpoint: () => new Promise(resolve => t.term.write("", () => {
+       const b = t.term.buffer.active;
+       // Explicit CUP fixes serialize 0.14's final-column cursor restoration bug
+       // (xtermjs/xterm.js#6165). Leave pending-wrap cursors untouched.
+       const cursor = b.cursorX < t.term.cols ? `\x1b[${b.cursorY+1};${b.cursorX+1}H` : "";
+       resolve("\x1bc" + t.serializer.serialize() + cursor);
+    })),
+    state: (i) => { if (!t.initialSize) { t.initialSize=true; t.term.resize(i.cols,i.rows); } update(t, i); },
     error: (e) => toast(e),
     closed: () => {},
   });
-  requestAnimationFrame(() => { fitTab(t); t.conn.resize(t.term.cols, t.term.rows); });
+
 }
 
 // watchTrust is the trust question's display-only match: the step's banner says what the
@@ -197,7 +211,9 @@ function watchTrust(t, text) {
 // update takes a tab's new state (from its stream or the list).
 function update(t, i) {
   const before = t.info;
-  t.info = Object.assign({}, t.info, i);
+  // List messages are complete metadata snapshots; omitted optional fields clear
+  // earlier associations. Per-PTY state frames contain only Info and are merged.
+  t.info = i.kind ? {...i} : Object.assign({}, t.info, i);
   if (before.state !== "exited" && t.info.state === "exited") exited(t);
   if (before.attention !== t.info.attention || before.state !== t.info.state || before.code !== t.info.code) announce(t);
   if (before.link !== t.info.link && t.info.link) say("Session link captured");
@@ -253,14 +269,16 @@ function activate(id, focus = true) {
 }
 
 function fitTab(t) {
+  if (!t.restored || t.el.hidden || !t.el.getClientRects().length || t.el.clientWidth<1 || t.el.clientHeight<1) return;
   try { t.fit.fit(); } catch { /* not laid out yet */ }
 }
 
 // ---- the list from hopsesh -----------------------------------------------------------------
 
 function onMessage(m) {
+  if (m.rehost) { rehost(m.rehost); return; }
   if (m.notice) { toast(m.notice); return; }
-  if (m.select) { if (tabs.has(m.select)) activate(m.select); else pendingSelect = m.select; return; }
+  if (m.select) { if (tabs.has(m.select)) { scope=groupKey(tabs.get(m.select));collapsedGroups.delete(scope); activate(m.select); } else pendingSelect = m.select; return; }
   if (m.prefs) setPrefs(m.prefs);
   if (!m.tabs) return;
   const seen = new Set();
@@ -279,6 +297,10 @@ function onMessage(m) {
 let pendingSelect = "";
 
 function setPrefs(p) {
+ $("#terminal-grouping").value=p.grouping||"family";
+ collapsedGroups.clear();for(const k of p.collapsed||[])collapsedGroups.add(k);
+ $("#placement").value = p.placement || "separate";
+ document.documentElement.classList.toggle("embedded", p.placement === "bottom" || p.placement === "right");
   const changed = JSON.stringify(p) !== JSON.stringify(prefs);
   prefs = Object.assign({}, prefs, p);
   setAppearance(prefs.appearance);
@@ -302,9 +324,23 @@ function shortcuts() {
 
 // ---- drawing the window ------------------------------------------------------------------
 
+function groupKey(t){return prefs.grouping==="none"?"":prefs.grouping==="session"?(t.info.machine+"/"+(t.info.key||t.id)):(t.info.relationship?.family||"other");}
+function groupName(t){return prefs.grouping==="session"?(t.info.relationship?.branchName||t.info.title):(t.info.relationship?.name||"Other terminals");}
+function drawGroups(){
+ const el=$("#terminal-groups");
+ if(prefs.grouping==="none" || tabs.size<2){el.replaceChildren();return;}
+ const groups=new Map();
+ for(const t of tabs.values()){const k=groupKey(t);if(!groups.has(k))groups.set(k,{name:groupName(t),tabs:[]});groups.get(k).tabs.push(t);}
+ if(scope && !groups.has(scope))scope="";
+ el.replaceChildren(h("button",{class:!scope?"ib selected":"ib",onclick:()=>{scope="";strip();}},"All terminals"),
+ ...[...groups].map(([key,g])=>h("button",{class:scope===key?"ib selected":"ib","aria-expanded":!collapsedGroups.has(key),onclick:()=>{
+ if(scope===key){const on=!collapsedGroups.has(key);on?collapsedGroups.add(key):collapsedGroups.delete(key);request({op:"collapse",id:key,on});}else{scope=key;collapsedGroups.delete(key);if(!g.tabs.some(t=>t.id===active))activate(g.tabs[0].id);}strip();
+ }},(collapsedGroups.has(key)?"▸ ":"▾ ")+g.name+" · "+g.tabs.length+(g.tabs.some(t=>t.info.attention)?" · needs you":""))));
+}
 function strip() {
+  drawGroups();
   const list = $("#tabs");
-  const ids = order.filter((id) => tabs.has(id));
+  const ids = order.filter((id) => tabs.has(id) && (!scope || groupKey(tabs.get(id))===scope) && !collapsedGroups.has(groupKey(tabs.get(id))));
   list.replaceChildren(...ids.map((id) => {
     const t = tabs.get(id);
     const [cls, words] = chipOf(t);
@@ -368,8 +404,10 @@ function paint() {
   $("#reads").hidden = i.kind !== "step";
   if (i.kind === "signin") runs.replaceChildren("Runs ", h("span", { class: "mono" }, i.command), " · your browser opens the sign-in page; hopsesh never sees it");
   else if (i.kind === "shell") runs.replaceChildren("Your login shell ", h("span", { class: "mono" }, (i.command || "").replace(/^your login shell /, "")), " in ", h("span", { class: "mono" }, home(i.dir)));
-  else runs.replaceChildren("Runs ", h("span", { class: "mono" }, i.command || i.program), " in ", h("span", { class: "mono" }, home(i.dir)), " · started " + ago(i.started));
-  runs.title = `${i.command || i.program}\n${i.dir}`;
+  else runs.replaceChildren(t.info.machine ? `${t.info.machine}${t.info.account ? " · "+t.info.account : ""} · ` : "", "Runs ", h("span", { class: "mono" }, i.command || i.program), " in ", h("span", { class: "mono" }, home(i.dir)), " · started " + ago(i.started));
+  if(i.relationship?.branchName) runs.append(" · "+i.relationship.branchName);
+ if (i.association === "Session association not confirmed") runs.append(" · Session association not confirmed");
+ runs.title = `${i.command || i.program}\n${i.dir}`;
   $("#t-external").hidden = !i.external || (done && i.kind === "step");
   $("#t-reader").setAttribute("aria-pressed", prefs.screenReader ? "true" : "false");
 
@@ -394,10 +432,10 @@ function paint() {
   if (!banner.hidden) $("#tip").hidden = true; // one thing at a time above the terminal
   if (done && i.code > 0) {
     const at = new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-    bar.replaceChildren(h("span", {}, h("b", {}, `${program(t)} exited with code ${i.code}`), ` · ${at}. The output stays until you close the tab.`), h("span", { class: "spacer" }),
+    bar.replaceChildren(...[h("span", {}, h("b", {}, `${program(t)} exited with code ${i.code}`), ` · ${at}. The output stays until you close the tab.`), h("span", { class: "spacer" }),
       i.rerun ? h("button", { class: "btn", onclick: () => request({ op: "rerun", id: t.id }) }, "Run again") : null,
       i.external && i.kind !== "step" ? h("button", { class: "btn", onclick: () => moveOut(t) }, "Open in my terminal") : null,
-      h("button", { class: "btn", onclick: () => t.conn.close() }, "Close tab"));
+      h("button", { class: "btn", onclick: () => t.conn.close() }, "Close tab")].filter(Boolean));
     bar.hidden = false;
   }
 }
@@ -633,4 +671,25 @@ window.hopseshTerminal = {
   },
   size: (id) => { const t = tabs.get(id || active); return t ? { cols: t.term.cols, rows: t.term.rows } : null; },
   active: () => active,
+  buffer: () => { const t=tabs.get(active);const b=t?.term.buffer.active;return b?{type:b.type,x:b.cursorX,y:b.cursorY}:null; },
 };
+
+let moving = false;
+async function rehost(placement) {
+ if (moving) return;
+ if ([...tabs.values()].some(t => t.composing)) { toast("Finish composing your text before moving the terminal."); $("#placement").value=prefs.placement||"separate"; return; }
+ moving = true; $("#placement").disabled = true;
+ try {
+   await Promise.all([...tabs.values()].map(t => t.conn.prepare()));
+   request({op:"placement", id:placement});
+ } catch { toast("Couldn’t move the terminal. Your programs are still running here."); }
+ finally { moving = false; $("#placement").disabled = false; }
+}
+$("#placement").value = prefs.placement || "separate";
+$("#placement").onchange = e => {
+ const p=e.target.value;
+ if ((p==="separate") !== ((prefs.placement||"separate")==="separate")) rehost(p);
+ else request({op:"placement",id:p});
+};
+
+$("#terminal-grouping").onchange=e=>{scope="";request({op:"grouping",id:e.target.value});};

@@ -677,3 +677,31 @@ code { font-family: var(--mono); font-size: .92em; padding: 0 3px; border-radius
 .transfer-launch .split-chevron {border-radius:0 6px 6px 0;border-left-color:color-mix(in srgb,var(--accent-ink) 35%,var(--accent))}
 .transfer-launch .split-chevron {min-width:40px}.sheet-foot .launch-choice {flex-shrink:0}
 @media(max-width:700px){.transfer-accounts {grid-template-columns:1fr}.account-arrow {display:none}.sheet-foot .launch-choice{max-width:100%;flex-shrink:1}}
+
+/* Persistent terminal host sits outside the changing view. Right placement replaces
+   the inspector rather than compressing four columns; narrow screens use bottom. */
+#terminal-workspace {position:fixed;z-index:15;bottom:0;left:var(--sb-w);right:0;height:var(--terminal-size,320px);background:var(--panel);border-top:1px solid var(--line);display:flex;flex-direction:column;min-width:0}
+#terminal-workspace[hidden]{display:none}
+#terminal-workspace iframe{width:100%;flex:1;min-height:0;border:0;background:var(--panel)}
+.terminal-workspace-bar{display:flex;gap:10px;align-items:center;padding:6px 10px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.terminal-workspace-bar .spacer{flex:1}
+.terminal-divider{height:6px;flex:0 0 6px;cursor:row-resize;background:var(--line2)}
+.terminal-divider:hover,.terminal-divider:focus-visible{background:var(--accent);outline:none}
+#terminal-workspace.resizing iframe{pointer-events:none}
+body.terminal-bottom #view{padding-bottom:var(--terminal-size,320px)}
+body.terminal-right #terminal-workspace{top:52px;left:auto;width:var(--terminal-size,640px);height:auto;border-left:1px solid var(--line);border-top:0}
+body.terminal-right #view{padding-right:var(--terminal-size,640px)}
+body.terminal-right #inspector{display:none}
+body.terminal-right .terminal-divider{position:absolute;left:0;top:0;bottom:0;width:6px;height:auto;cursor:col-resize}
+body.terminal-maximized #terminal-workspace{top:52px;left:0;height:auto}
+@media(max-width:1100px){.terminal-workspace-bar .muted{display:none}}
+
+body.terminal-right .layout{grid-template-columns:var(--sb-w) minmax(0,1fr) 0px}
+body.terminal-right .inspector{display:none}
+.family-ancestry{font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* A paint-contained view clips fixed descendants and traps their stacking order. */
+body.terminal-right.terminal-details #view {contain:none}
+body.terminal-right.terminal-details #inspector {display:block;position:fixed;z-index:16;right:0;top:var(--terminal-details-top,96px);bottom:0;width:var(--terminal-size);background:var(--panel);border-left:1px solid var(--line);overflow:auto}
+body.terminal-right.terminal-details #terminal-workspace iframe {visibility:hidden}
+body.terminal-right .divider[data-pane="inspector"]{display:none}

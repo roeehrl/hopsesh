@@ -9,7 +9,7 @@ retry.onclick = () => location.reload();
 const slow = setTimeout(() => {
   if (target.isConnected && !target.hidden) target.append(' Still connecting. ', retry);
 }, 15000);
-import(boot.dataset.module).then(() => clearTimeout(slow)).catch(error => {
+import(new URL(boot.dataset.module, location.href).href).then(() => clearTimeout(slow)).catch(error => {
   clearTimeout(slow);
   const output = target.isConnected ? target : document.querySelector('#view');
   output.hidden = false;

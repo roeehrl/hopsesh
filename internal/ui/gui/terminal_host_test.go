@@ -1,0 +1,100 @@
+package gui
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"testing"
+)
+
+func TestEmbeddedRendererCannotInheritMainWindowBindings(t *testing.T) {
+	terms := NewTerminals("test")
+	terms.privilegedID(1)
+	gate := terms.Gate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Fatal("frame reached app bindings") }))
+	for _, origin := range []string{"null", "http://127.0.0.1:9876", "https://evil.test"} {
+		r := httptest.NewRequest("POST", "http://wails.localhost/wails/runtime", nil)
+		r.Header.Set("x-wails-window-id", "1")
+		r.Header.Set("Origin", origin)
+		w := httptest.NewRecorder()
+		gate.ServeHTTP(w, r)
+		if w.Code != 403 {
+			t.Fatalf("origin %q: %d", origin, w.Code)
+		}
+	}
+}
+func TestTerminalHostCapabilityAndAssetBoundary(t *testing.T) {
+	terms := NewTerminals("test")
+	defer terms.CloseAll()
+	raw, err := terms.hostURL(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, _ := url.Parse(raw)
+	for _, p := range []string{"/", "/app.js", "/wails/runtime", "/terminal/", "/stream?name=hopsesh.terminal"} {
+		resp, err := http.Get(u.Scheme + "://" + u.Host + p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != 403 {
+			t.Fatalf("%s: %d", p, resp.StatusCode)
+		}
+	}
+	resp, err := http.Get(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("authorized view %d", resp.StatusCode)
+	}
+	_, _ = terms.hostURL(true)
+	resp, err = http.Get(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 403 {
+		t.Fatal("old capability remained valid")
+	}
+}
+
+func TestRehostCommitsOnlyAfterReplacementConnectsAndRollsBackFailure(t *testing.T) {
+	terms := NewTerminals("test")
+	defer terms.CloseAll()
+	placement := "separate"
+	terms.Prefs = func() TermPrefs { return TermPrefs{Placement: placement} }
+	terms.SavePlacement = func(p string) error { placement = p; return nil }
+	original, _ := terms.hostURL(false)
+	terms.moveWorkspace("bottom")
+	if placement != "separate" {
+		t.Fatal("placement committed before renderer loaded")
+	}
+	terms.host.mu.Lock()
+	next := terms.host.pending
+	terms.host.mu.Unlock()
+	terms.rollbackWorkspace(next, "separate")
+	resp, err := http.Get(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatal("failed load revoked original")
+	}
+	terms.moveWorkspace("bottom")
+	terms.host.mu.Lock()
+	next = terms.host.pending
+	terms.host.mu.Unlock()
+	if !terms.commitWorkspace(next) || placement != "bottom" {
+		t.Fatal("ready renderer did not commit")
+	}
+	resp, err = http.Get(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 403 {
+		t.Fatal("commit did not revoke original")
+	}
+}

@@ -51,6 +51,7 @@ type AgentOpt struct {
 
 // EntryDTO is one session row.
 type EntryDTO struct {
+	Relationship    app.Relationship      `json:"relationship"`
 	ObservedAt      time.Time             `json:"observedAt,omitempty"`
 	Returns         []app.ReturnCandidate `json:"returns,omitempty"`
 	Movement        *app.MovementNotice   `json:"movement,omitempty"`
@@ -194,11 +195,29 @@ func (a *App) scanAccounts(forceAccounts bool) (*ScanDTO, error) {
 	a.inv, a.invAt, a.plan, a.res = inv, now, nil, nil
 	a.closePushLocked()
 	a.mu.Unlock()
+	a.bindTerminalSessions(inv)
 	return a.bindAdopted(scanDTO(core, inv, now, now)), nil
 }
 
 // bindAdopted binds the tabs that brought the copies a scan adopted (bindBring).
 func (a *App) bindAdopted(d *ScanDTO) *ScanDTO {
+	if a.Terms != nil {
+		for _, tab := range a.Terms.Tabs() {
+			for _, g := range d.Groups {
+				for _, e := range g.Entries {
+					if e.Machine == tab.Machine && e.Key == tab.Key && tab.Association != "Session association not confirmed" {
+						r := e.Relationship
+						account := ""
+						if e.Profile != nil && e.Profile.Account != nil {
+							account = e.Profile.Account.Email
+						}
+						a.Terms.setMeta(tab.ID, func(m *TabMeta) { m.Relationship = &r; m.Account = account })
+					}
+				}
+			}
+		}
+	}
+
 	a.publishQuick(d)
 	for _, b := range d.Adopted {
 		a.bindBring(b)
@@ -252,6 +271,7 @@ func (a *App) RefreshHere() (*ScanDTO, error) {
 	a.inv = inv
 	at := a.invAt
 	a.mu.Unlock()
+	a.bindTerminalSessions(inv)
 	return a.bindAdopted(scanDTO(core, inv, now, at)), nil
 }
 
@@ -281,10 +301,15 @@ func scanDTO(core *app.App, inv *app.Inventory, updated, elsewhere time.Time) *S
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	table, _ := presence.Snapshot(ctx) // where the open sessions here run (nil: not known)
+	relations := inv.Relationships()
 	for _, g := range inv.Groups(core.LocalRoots()) {
 		gd := GroupDTO{Name: g.Name, Remote: g.Remote, Local: g.Local, NoRepo: g.Identity == "", NoRemote: strings.HasPrefix(g.Identity, "local:")}
 		for _, it := range g.Items {
 			d := entryDTO(core, inv, it, targets)
+			d.Relationship = relations[app.EntryIdentity(it.Entry.Machine, it.Entry.Session.Key.String())]
+			if name := core.Cfg.FamilyNames[d.Relationship.Family]; name != "" {
+				d.Relationship.Name = name
+			}
 			if m := inv.Machine(d.Machine); m != nil && m.Local && d.Live {
 				d.Places = placesOf(it.Entry.Live, table, os.Getpid())
 			}

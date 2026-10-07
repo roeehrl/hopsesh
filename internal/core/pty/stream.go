@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 )
 
 // The stream between a tab and its window (a Wails stream in the app). Every frame's
@@ -35,12 +36,14 @@ import (
 // of output it has not acked, and goes on once that is under 10 KiB. A window acks after
 // the emulator wrote a chunk (xterm.js: write's callback).
 const (
-	opAttach = 'a'
-	opInput  = 'i'
-	opResize = 'r'
-	opAck    = 'k'
-	opClose  = 'c'
-	opLink   = 'l'
+	opAttach     = 'a'
+	opInput      = 'i'
+	opResize     = 'r'
+	opAck        = 'k'
+	opClose      = 'c'
+	opLink       = 'l'
+	opPrepare    = 'q'
+	opCheckpoint = 'v'
 )
 
 // Conn is a tab window's connection: a Wails stream (*application.StreamConn) in the app,
@@ -102,6 +105,21 @@ func Serve(conn Conn, find func(id string) (*Session, error), openLink func(url 
 		if len(f) == 0 {
 			continue
 		}
+		// A transport can deliver a final frame after Close. Authorize every command
+		// against the current viewer, under the same lock used by attach.
+		s.ownerMu.Lock()
+		s.mu.Lock()
+		owned := s.view == v && !v.closed
+		frozen := s.handingOff
+		s.mu.Unlock()
+		if !owned {
+			s.ownerMu.Unlock()
+			return nil
+		}
+		if frozen && f[0] != opCheckpoint && f[0] != opAck {
+			s.ownerMu.Unlock()
+			continue
+		}
 		switch body := f[1:]; f[0] {
 		case opInput:
 			if err := s.typed(body); err != nil {
@@ -119,7 +137,12 @@ func Serve(conn Conn, find func(id string) (*Session, error), openLink func(url 
 			}
 		case opClose:
 			_ = s.m.Close(s.id)
+			s.ownerMu.Unlock()
 			return nil
+		case opPrepare:
+			s.prepare(v)
+		case opCheckpoint:
+			s.acceptCheckpoint(v, body)
 		case opLink:
 			target, ok := LinkTarget(string(body))
 			switch {
@@ -133,6 +156,7 @@ func Serve(conn Conn, find func(id string) (*Session, error), openLink func(url 
 		default:
 			s.notice(v, "unknown frame")
 		}
+		s.ownerMu.Unlock()
 	}
 }
 
@@ -178,6 +202,8 @@ type viewer struct {
 // attach makes a viewer the tab's window (the one before, if any, lets go): it gets the
 // tab's state, then its scrollback, then what comes.
 func (s *Session) attach() *viewer {
+	s.ownerMu.Lock()
+	defer s.ownerMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	v := &viewer{ready: sync.NewCond(&s.mu)}
@@ -190,10 +216,16 @@ func (s *Session) attach() *viewer {
 	}
 	s.view = v
 	v.push(frameState, stateJSON(s.info))
-	if back := s.scroll.bytes(); len(back) > 0 {
+	if len(s.checkpoint) > 0 {
+		v.push(frameOutput, s.checkpoint)
+		clear(s.checkpoint)
+		s.checkpoint = nil
+	} else if back := s.scroll.bytes(); len(back) > 0 {
 		v.push(frameOutput, back)
 		clear(back)
 	}
+	v.push('z', nil) // replay boundary: renderer restores at the old size before fitting
+	s.cancelHandoff()
 	s.flow.Broadcast()
 	return v
 }
@@ -213,11 +245,64 @@ func (s *Session) detach(v *viewer) {
 func (s *Session) acked(v *viewer, n int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.view != v || v.closed {
+		return
+	}
 	v.unacked = max(v.unacked-n, 0)
 	if v.paused && v.unacked < flowLow {
 		v.paused = false
 		s.flow.Broadcast()
 	}
+}
+
+// prepare orders a checkpoint request after all previously delivered output, then
+// pauses reads. The renderer drains xterm's write queue before serializing both
+// buffers, cursor and modes. A failed/rejected transfer releases the old viewer.
+func (s *Session) prepare(v *viewer) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.view != v || s.handingOff {
+		return
+	}
+	s.handingOff = true
+	v.push('h', nil)
+	s.handoffTimer = time.AfterFunc(10*time.Second, func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.handingOff {
+			s.cancelHandoff()
+			v.push(frameError, []byte("Moving the terminal timed out. The original view is still available."))
+			v.push('v', []byte("cancelled"))
+		}
+	})
+}
+
+func (s *Session) acceptCheckpoint(v *viewer, data []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.view != v || !s.handingOff {
+		return
+	}
+	if len(data) == 0 || len(data) > 8<<20 {
+		s.cancelHandoff()
+		v.push(frameError, []byte("Terminal state is too large to move safely. Keep this view open."))
+		v.push('v', []byte("cancelled"))
+		return
+	}
+	s.checkpoint = append([]byte(nil), data...)
+	v.push('v', nil)
+}
+
+// cancelHandoff requires s.mu. Snapshot bytes never enter the transcript or disk.
+func (s *Session) cancelHandoff() {
+	s.handingOff = false
+	if s.handoffTimer != nil {
+		s.handoffTimer.Stop()
+		s.handoffTimer = nil
+	}
+	clear(s.checkpoint)
+	s.checkpoint = nil
+	s.flow.Broadcast()
 }
 
 // notice tells v something hopsesh refused or could not do.

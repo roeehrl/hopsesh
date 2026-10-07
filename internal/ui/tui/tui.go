@@ -6,6 +6,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -67,11 +68,14 @@ const (
 )
 
 type row struct {
-	header string
-	item   *app.Item
+	relationship app.Relationship
+	groupKey     string
+	header       string
+	item         *app.Item
 }
 
 type model struct {
+	collapsed     map[string]bool
 	returnCursor  int
 	returnTo      *app.ReturnCandidate
 	returnPush    *app.Push
@@ -158,8 +162,20 @@ func (m *model) Init() tea.Cmd {
 
 func (m *model) buildRows() {
 	m.rows = m.rows[:0]
+	if m.collapsed == nil {
+		m.collapsed = map[string]bool{}
+		for _, key := range m.deps.App.Cfg.List.Collapsed {
+			if strings.HasPrefix(key, "family:") {
+				m.collapsed[strings.TrimPrefix(key, "family:")] = true
+			}
+		}
+	}
 	groups := m.inv.Groups(m.deps.App.LocalRoots())
+	if m.deps.App.Cfg.List.GroupBy == "family" {
+		groups = m.inv.FamilyGroups()
+	}
 	f := strings.ToLower(m.filter)
+	relations := m.inv.Relationships()
 	for _, g := range groups {
 		var rows []row
 		for i := range g.Items {
@@ -169,22 +185,30 @@ func (m *model) buildRows() {
 			if f != "" && !strings.Contains(strings.ToLower(s.Title+" "+s.LastPrompt+" "+s.CWD+" "+g.Name+" "+e.Machine+" "+e.AgentName), f) {
 				continue
 			}
-			rows = append(rows, row{item: it})
+			rows = append(rows, row{item: it, groupKey: g.Identity, relationship: relations[app.EntryIdentity(e.Machine, s.Key.String())]})
 		}
 		if len(rows) == 0 {
 			continue
 		}
 		h := g.Name
+		if m.deps.App.Cfg.List.GroupBy == "family" {
+			if name := m.deps.App.Cfg.FamilyNames[g.Identity]; name != "" {
+				h = name
+			}
+			h += fmt.Sprintf(" · %d branches", len(g.Items))
+		}
 		if g.Remote != "" {
 			h += "  " + g.Remote
 		}
 		if g.Local != "" {
 			h += "  · here: " + g.Local
-		} else if g.Identity != "" && !strings.HasPrefix(g.Identity, "local:") {
+		} else if m.deps.App.Cfg.List.GroupBy != "family" && g.Identity != "" && !strings.HasPrefix(g.Identity, "local:") {
 			h += "  · not cloned here"
 		}
-		m.rows = append(m.rows, row{header: h})
-		m.rows = append(m.rows, rows...)
+		m.rows = append(m.rows, row{header: h, groupKey: g.Identity})
+		if !m.collapsed[g.Identity] {
+			m.rows = append(m.rows, rows...)
+		}
 	}
 	m.cursor = m.nextSelectable(0, 1)
 	m.offset = 0
@@ -192,7 +216,7 @@ func (m *model) buildRows() {
 
 func (m *model) nextSelectable(from, dir int) int {
 	for i := from; i >= 0 && i < len(m.rows); i += dir {
-		if m.rows[i].item != nil {
+		if m.rows[i].item != nil || m.deps.App.Cfg.List.GroupBy == "family" {
 			return i
 		}
 	}
@@ -437,10 +461,47 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 			m.cursor = m.nextSelectable(max(m.cursor-m.listHeight(), 0), 1)
 		case "/":
 			m.editing = true
+		case "left", "right":
+			if m.cursor < len(m.rows) && m.deps.App.Cfg.List.GroupBy == "family" {
+				groupKey := m.rows[m.cursor].groupKey
+				if m.collapsed == nil {
+					m.collapsed = map[string]bool{}
+				}
+				m.collapsed[groupKey] = k == "left"
+				m.saveFamilyGrouping()
+				m.buildRows()
+				for i, r := range m.rows {
+					if r.groupKey == groupKey {
+						m.cursor = i
+						break
+					}
+				}
+			}
+		case "g":
+			if m.deps.App.Cfg.List.GroupBy == "family" {
+				m.deps.App.Cfg.List.GroupBy = "repository"
+			} else {
+				m.deps.App.Cfg.List.GroupBy = "family"
+			}
+			m.saveFamilyGrouping()
+			m.buildRows()
 		case "r":
 			m.mode = modeLoading
 			return m, m.Init()
 		case "enter":
+			if m.cursor < len(m.rows) && m.rows[m.cursor].item == nil && m.deps.App.Cfg.List.GroupBy == "family" {
+				group := m.rows[m.cursor].groupKey
+				m.collapsed[group] = !m.collapsed[group]
+				m.saveFamilyGrouping()
+				m.buildRows()
+				for i, row := range m.rows {
+					if row.groupKey == group {
+						m.cursor = i
+						break
+					}
+				}
+				return m, nil
+			}
 			if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil {
 				m.returnTo = nil
 				m.opts.Bounded = false
@@ -869,7 +930,11 @@ func (m *model) viewBrowse(b *strings.Builder) {
 	for i := m.offset; i < end; i++ {
 		r := m.rows[i]
 		if r.header != "" {
-			b.WriteString(headerSt.Render(truncate("▾ "+r.header, w-2)) + "\n")
+			label := headerSt.Render(truncate(map[bool]string{true: "▸ ", false: "▾ "}[m.collapsed[r.groupKey]]+r.header, w-2))
+			if i == m.cursor {
+				label = selSt.Render(padRight(label, w-1))
+			}
+			b.WriteString(label + "\n")
 			continue
 		}
 		e := r.item.Entry
@@ -887,7 +952,14 @@ func (m *model) viewBrowse(b *strings.Builder) {
 		if mr := s.Mirror; mr != nil {
 			status += dim.Render(" · " + mirrorWords(mr))
 		}
-		line := fmt.Sprintf("  %-12s %-11s %-40s %-9s %s", truncate(e.Machine, 12), truncate(e.AgentName, 11), truncate(s.Title, 40), ago(s.LastActivity), status)
+		title := s.Title
+		if m.deps.App != nil && m.deps.App.Cfg.List.GroupBy == "family" {
+			relation := r.relationship
+			if relation.Depth > 0 {
+				title = strings.Repeat("  ", min(3, relation.Depth)) + "↳ " + title
+			}
+		}
+		line := fmt.Sprintf("  %-12s %-11s %-40s %-9s %s", truncate(e.Machine, 12), truncate(e.AgentName, 11), truncate(title, 40), ago(s.LastActivity), status)
 		line = truncate(line, w-1)
 		if i == m.cursor {
 			line = selSt.Render(padRight(truncate(line, w-1), w-1))
@@ -928,7 +1000,7 @@ func (m *model) viewBrowseDetail(b *strings.Builder, w int) {
 				m.viewPicker(b)
 				return
 			}
-			b.WriteString(dim.Render("\n  ↑↓ move · enter bring here · i bring and continue in · c hand on · / search · r refresh · q quit\n"))
+			b.WriteString(dim.Render("\n  ↑↓ move · enter bring here · i bring and continue in · c hand on · / search · g family/repository · r refresh · q quit\n"))
 			return
 		}
 		fmt.Fprintf(b, "  %s  %s %s  %s\n", e.Machine, e.AgentName, s.AgentVersion, s.CWD)
@@ -977,9 +1049,9 @@ func (m *model) viewBrowseDetail(b *strings.Builder, w int) {
 		m.viewPicker(b)
 		return
 	}
-	hint := "\n  ↑↓ move · enter bring here · i continue in · b bounded copy · c hand off · h journey · a accounts · A move account · / search · r refresh · q quit"
+	hint := "\n  ↑↓ move · enter bring here · i continue in · b bounded copy · c hand off · h journey · a accounts · A move account · / search · g family/repository · r refresh · q quit"
 	if m.partialCloud() != nil {
-		hint = "\n  ↑↓ move · enter resume/bring · i continue in · b bounded copy · c hand off · p paste a cloud link · f find in a cloud · / search · r refresh · q quit"
+		hint = "\n  ↑↓ move · enter resume/bring · i continue in · b bounded copy · c hand off · p paste a cloud link · f find in a cloud · / search · g family/repository · r refresh · q quit"
 	}
 	b.WriteString(dim.Render(hint) + "\n")
 }
@@ -1223,4 +1295,17 @@ func padRight(s string, n int) string {
 		return s + strings.Repeat(" ", n-l)
 	}
 	return s
+}
+
+func (m *model) saveFamilyGrouping() {
+	c := &m.deps.App.Cfg
+	c.List.Collapsed = slices.DeleteFunc(slices.Clone(c.List.Collapsed), func(k string) bool { return strings.HasPrefix(k, "family:") })
+	for k, collapsed := range m.collapsed {
+		if collapsed {
+			c.List.Collapsed = append(c.List.Collapsed, "family:"+k)
+		}
+	}
+	if err := config.Save(*c); err != nil {
+		m.err = err
+	}
 }

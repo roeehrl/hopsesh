@@ -1,8 +1,10 @@
 package gui
 
 import (
+	"fmt"
 	"os"
 	"runtime"
+	"slices"
 	"sync"
 	"time"
 
@@ -15,6 +17,8 @@ import (
 // TerminalSettingsDTO is Settings → Terminal: where steps and resumes open, the user's
 // terminal app, and the hopsesh Terminal window's look and behaviour.
 type TerminalSettingsDTO struct {
+	Placement string `json:"placement"`
+	Grouping  string `json:"grouping"`
 	TerminalAppsDTO
 	// Where is where sessions resume and steps run: here or terminal (the setting, or its
 	// default; the command line's "ask" is the default here).
@@ -43,12 +47,15 @@ func (a *App) TerminalSettings() TerminalSettingsDTO {
 	d.Where, d.Font, d.FontSize, d.Scrollback = route("", c.AppResume()), c.Terminal.Font, c.TerminalFont(), c.TerminalLines()
 	d.KeepTabs, d.Notify, d.ScreenReader, d.SystemConsole = c.KeepTabsOn(), c.NotifyOn(), c.Terminal.ScreenReader, c.Terminal.SystemConsole
 	d.CloseEnded = c.CloseEndedOn()
+	d.Placement = nonEmpty(c.Terminal.Placement, "separate")
+	d.Grouping = nonEmpty(c.Terminal.Grouping, "family")
 	d.Bundled = a.Terms != nil && a.Terms.Manager().BundledConsole()
 	return d
 }
 
 // TerminalSettingsInput are the settings the user can change in Settings → Terminal.
 type TerminalSettingsInput struct {
+	Grouping      string `json:"grouping"`
 	App           string `json:"app"`
 	Where         string `json:"where"`
 	Font          string `json:"font"`
@@ -67,6 +74,7 @@ func (a *App) SetTerminalSettings(in TerminalSettingsInput) error {
 	a.mu.Lock()
 	c := a.core.Cfg
 	t := c.Terminal
+	t.Grouping = in.Grouping
 	t.App, t.Resume, t.Font, t.FontSize, t.Scrollback = in.App, in.Where, in.Font, in.FontSize, in.Scrollback
 	keep, notify := in.KeepTabs, in.Notify
 	t.KeepTabs, t.Notify, t.ScreenReader, t.SystemConsole = &keep, &notify, in.ScreenReader, in.SystemConsole
@@ -117,7 +125,7 @@ func (a *App) termPrefs() TermPrefs {
 		name = a.TerminalApps().Name
 		a.termName.Store(name)
 	}
-	return TermPrefs{Appearance: c.AppearanceMode(), Font: c.Terminal.Font, FontSize: c.TerminalFont(), Scrollback: c.TerminalLines(), ScreenReader: reader, OS: runtime.GOOS,
+	return TermPrefs{Collapsed: c.List.TerminalCollapsed, Placement: nonEmpty(c.Terminal.Placement, "separate"), Grouping: nonEmpty(c.Terminal.Grouping, "family"), Appearance: c.AppearanceMode(), Font: c.Terminal.Font, FontSize: c.TerminalFont(), Scrollback: c.TerminalLines(), ScreenReader: reader, OS: runtime.GOOS,
 		Home: home, TerminalName: name}
 }
 
@@ -165,11 +173,46 @@ func screenReader() bool {
 func (a *App) attachTerminal() {
 	t := a.Terms
 	t.Prefs = a.termPrefs
+	t.SavePlacement = func(p string) error {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		old := a.core.Cfg.Terminal.Placement
+		a.core.Cfg.Terminal.Placement = p
+		if err := a.save(); err != nil {
+			a.core.Cfg.Terminal.Placement = old
+			return err
+		}
+		return nil
+	}
 	t.Emit = func(name string, data any) {
 		a.emit(name, data)
 		if name == "hopsesh:terminal" {
 			go a.updateQuickAttention()
 		}
+	}
+	t.SaveGrouping = func(op, id string, on *bool) error {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		c := a.core.Cfg
+		if op == "grouping" {
+			if id != "family" && id != "session" && id != "none" {
+				return fmt.Errorf("invalid grouping")
+			}
+			c.Terminal.Grouping = id
+		} else {
+			if on == nil {
+				return fmt.Errorf("missing group state")
+			}
+			c.List.TerminalCollapsed = slices.DeleteFunc(slices.Clone(c.List.TerminalCollapsed), func(k string) bool { return k == id })
+			if *on {
+				c.List.TerminalCollapsed = append(c.List.TerminalCollapsed, id)
+			}
+		}
+		if err := c.Check(); err != nil {
+			return err
+		}
+		a.core.Cfg = c
+		return a.save()
 	}
 	t.SavePrefs = a.saveTermPrefs
 	t.Shell = func(dir string) error { _, err := a.shellTab(dir); return err }

@@ -140,3 +140,23 @@ Desktop availability and remembered launch choices must be checked against the a
 profile and installed application. Drift findings should distinguish a newer upstream
 release from fixture coverage: help/schema probes do not certify model continuation or
 justify expanding `Spec.Tested` or removing experimental status without versioned evidence.
+
+
+Embedded terminal and conversation families (0.4.0): inspect
+`internal/ui/gui/terminal_host.go`, `internal/core/pty/{session,stream}.go`,
+`internal/ui/gui/assets/terminal`, `internal/app/families.go` and
+`internal/ui/gui/terminal_binding.go`. All placements use one PTY and the same
+restricted renderer; moving the view must never resume or fork an agent. Check
+xterm serialized alternate/normal buffers, cursor and modes, replay/resize ordering,
+backpressure, IME and stale-view input ownership when updating renderer dependencies.
+Native checks run separate/bottom/right on macOS/Linux and bundled Windows ConPTY.
+
+For agent releases, verify native parent metadata and exclusive ordinal boundaries,
+complete inherited prefixes, registry timestamps and PID/wrapper evidence after
+in-process fork/resume/clear. Unknown or conflicting associations stay explicit.
+Do not infer Claude native fork ancestry from titles or prompts, or count replicas
+as branches. Endpoint/profile/installation bindings scope identity. Native-only UI
+identities are presentation metadata and never portable-history authority. Include
+family grouping/rename/collapse and shell-association browser tests, TUI family
+tests and the round-trip scenario's one-family/one-branch assertion. A real-agent
+storage probe does not prove native window rehosting or account continuity.
