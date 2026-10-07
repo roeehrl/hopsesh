@@ -16,6 +16,9 @@ import (
 
 const MaxWireBytes = (MaxEnvelope * 4 / 3) + 65536
 
+var ErrTrafficBudget = errors.New("relay daily traffic budget exhausted; existing deliveries can drain, and the operator can review its counters")
+var ErrOperatorPaused = errors.New("relay operator paused new delivery; existing admitted work can still drain")
+
 type Delivery struct {
 	Sequence uint64   `json:"sequence"`
 	Envelope Envelope `json:"envelope"`
@@ -82,6 +85,22 @@ func (t Transport) request(ctx context.Context, method, path string, body any, o
 	}
 	defer r.Body.Close()
 	if r.StatusCode < 200 || r.StatusCode >= 300 {
+		// Only fixed protocol codes affect diagnostics. Never reflect a proxy's
+		// arbitrary response body, headers, credentials or URLs into the UI/log.
+		if r.StatusCode == 429 || r.StatusCode == 503 {
+			body, _ := io.ReadAll(io.LimitReader(r.Body, 4097))
+			var status struct {
+				Error string `json:"error"`
+			}
+			if len(body) <= 4096 && json.Unmarshal(body, &status) == nil {
+				if r.StatusCode == 429 && status.Error == "traffic-budget" {
+					return ErrTrafficBudget
+				}
+				if r.StatusCode == 503 && status.Error == "paused" {
+					return ErrOperatorPaused
+				}
+			}
+		}
 		switch r.StatusCode {
 		case 401, 403:
 			return errors.New("relay authorization refused or revoked")

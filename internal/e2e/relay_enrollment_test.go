@@ -392,7 +392,7 @@ func qualifyCloudAdmission(t *testing.T, ctx context.Context, bin, root, origin,
 	}
 }
 
-func startSQLiteRelayFixture(t *testing.T, timeout time.Duration) (context.Context, string, string, string, *http.Client) {
+func startSQLiteRelayFixture(t *testing.T, timeout time.Duration, vars ...string) (context.Context, string, string, string, *http.Client) {
 	t.Helper()
 	node, err := exec.LookPath("node")
 	if err != nil {
@@ -410,6 +410,9 @@ func startSQLiteRelayFixture(t *testing.T, timeout time.Duration) (context.Conte
 	ctx, cancel := context.WithTimeout(t.Context(), timeout)
 	t.Cleanup(cancel)
 	server := exec.CommandContext(ctx, node, filepath.Join(fixture, "node_modules", "wrangler", "wrangler-dist", "cli.js"), "dev", "--local", "--ip", "127.0.0.1", "--port", fmt.Sprint(port), "--inspector-port", "0", "--local-protocol", "https", "--local-upstream", fmt.Sprintf("127.0.0.1:%d", port), "--https-key-path", key, "--https-cert-path", cert, "--persist-to", filepath.Join(root, "platform-state"), "--var", "ENROLLMENT_ADMIN:fixture-admin-secret-with-32-bytes-minimum", "--log-level", "error", "--show-interactive-dev-session=false")
+	for _, value := range vars {
+		server.Args = append(server.Args, "--var", value)
+	}
 	prepareRelayFixture(server)
 	server.Dir = fixture
 	server.Env = append(os.Environ(), "WRANGLER_SEND_METRICS=false")

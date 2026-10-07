@@ -12,15 +12,55 @@ class Storage {
  async transaction(fn){let release;const before=this.tail;this.tail=new Promise(r=>release=r);await before;const tx=new Storage();tx.values=structuredClone(this.values);try{const result=await fn(tx);this.values=tx.values;return result}finally{release()}}
 }
 class Bucket {constructor(){this.values=new Map()}async put(k,v){this.values.set(k,v)}async get(k){const v=this.values.get(k);return v===undefined?null:{text:async()=>v}}async delete(k){this.values.delete(k)}}
-async function fixture(events){
+async function fixture(events,policy){
  const storage=new Storage(),bucket=new Bucket(),space='space-12345678901',admin='test-operator-secret';let clock=Date.now();
- const handle=createHandler(storage,bucket,admin,space,()=>clock,events);
+ const handle=createHandler(storage,bucket,admin,space,()=>clock,events,policy);
  const invoke=(path,method='GET',token='',body)=>handle(new Request('https://relay.test'+path,{method,headers:{Authorization:'Bearer '+token,'X-Hopsesh-Space':space},body:body===undefined?undefined:JSON.stringify(body)}));
  const enroll=async device=>{const r=await invoke('/v1/enrollment/register','POST',admin,{device,ttl:3600});assert.equal(r.status,201);return(await r.json()).token};
  const a='endpoint-A-123456',b='endpoint-B-123456',ta=await enroll(a),tb=await enroll(b);
  const envelope=(id='message-123456789')=>({kind:"request",protocol:1,id,space,from:a,to:b,operation:'operation-123456',created:Math.floor(clock/1000),expires:Math.floor(clock/1000)+300,ciphertext:'opaque-encrypted-payload',signature:'x'.repeat(88)});
  return{storage,bucket,invoke,ta,tb,a,b,envelope,advance:ms=>clock+=ms};
 }
+test('serialized daily traffic ceiling survives acknowledgment, duplicate retry and midnight rollover',async()=>{
+ const f=await fixture(undefined,{dailyFrames:2,dailyBytes:100000});
+ const statuses=await Promise.all(Array.from({length:12},(_,i)=>f.invoke('/v1/messages','POST',f.ta,f.envelope('budget-message-'+String(i).padStart(4,'0'))).then(r=>r.status)));
+ assert.equal(statuses.filter(s=>s===201).length,2);assert.equal(statuses.filter(s=>s===429).length,10);
+ assert.equal(f.bucket.values.size,2);
+ const batch=await(await f.invoke('/v1/messages','GET',f.tb)).json();
+ await f.invoke('/v1/ack','POST',f.tb,{cursor:batch.cursor});
+ assert.equal((await f.invoke('/v1/messages','POST',f.ta,f.envelope('new-budget-message'))).status,429,'ack must not refund daily admission');
+ assert.equal((await f.invoke('/v1/messages','POST',f.ta,f.envelope('budget-message-0000'))).status,200,'committed retry must not consume another reservation');
+ const stored=await f.storage.get('day-budget');assert.equal(stored.frames,2);
+ // Move the existing counter to yesterday: the next transaction rolls it over
+ // without an idle timer or extra maintenance wakeup.
+ await f.storage.put('day-budget',{...stored,day:stored.day-1});
+ assert.equal((await f.invoke('/v1/messages','POST',f.ta,f.envelope('rollover-message-001'))).status,201);
+ assert.equal((await f.storage.get('day-budget')).frames,1);
+});
+test('byte budget blocks before R2 publication and operator metrics disclose counts only',async()=>{
+ const f=await fixture(undefined,{dailyBytes:1,dailyFrames:99999999});
+ assert.equal((await f.invoke('/v1/messages','POST',f.ta,f.envelope())).status,429);assert.equal(f.bucket.values.size,0);
+ assert.equal((await f.invoke('/v1/operator/stats','GET',f.ta)).status,403);
+ const stats=await(await f.invoke('/v1/operator/stats','GET','test-operator-secret')).json();
+ assert.deepEqual(Object.keys(stats).sort(),['admittedBytes','admittedFrames','ciphertextBytes','day','devices','limits','messages','paused','pendingDeletions','resetAt','tombstones'].sort());
+ assert.equal(stats.devices,2);assert.equal(stats.admittedFrames,0);assert.equal(stats.limits.dailyFrames,LIMITS.dailyFrames);
+ assert.equal(JSON.stringify(stats).includes(f.a),false);assert.equal(JSON.stringify(stats).includes(f.ta),false);
+});
+test('operator pause rejects new traffic while allowing drain and metadata inspection',async()=>{
+ const policy={paused:false},f=await fixture(undefined,policy);
+ assert.equal((await f.invoke('/v1/messages','POST',f.ta,f.envelope())).status,201);
+ policy.paused=true;
+ assert.equal((await f.invoke('/v1/messages','POST',f.ta,f.envelope('paused-message-001'))).status,503);
+ assert.equal((await f.invoke('/v1/enrollment/register','POST','test-operator-secret',{device:'paused-device-0001',ttl:300})).status,503);
+ const batch=await(await f.invoke('/v1/messages','GET',f.tb)).json();assert.equal(batch.messages.length,1);
+ assert.equal((await f.invoke('/v1/ack','POST',f.tb,{cursor:batch.cursor})).status,200);assert.equal(f.bucket.values.size,0);
+ const stats=await(await f.invoke('/v1/operator/stats','GET','test-operator-secret')).json();assert.equal(stats.paused,true);assert.equal(stats.admittedFrames,1);
+});
+test('operator pause prevents paid allocation before a new mailbox or admission',async()=>{
+ let allocations=0;const env={RELAY_PAUSED:'1',MAILBOX:{idFromName(){allocations++;throw Error('must not allocate')}},AUTHORIZATION:{idFromName(){allocations++;throw Error('must not allocate')}}};
+ for(const path of ['/v1/messages','/v1/cloud/claim','/v1/device/code','/v1/enrollment/register'])assert.equal((await worker.fetch(new Request('https://relay.test'+path,{method:'POST',body:'{}'}),env)).status,503);
+ assert.equal(allocations,0);
+});
 test('handler deduplicates encrypted delivery; GET does not acknowledge',async()=>{
  const f=await fixture(),e=f.envelope();assert.equal((await f.invoke('/v1/messages','POST',f.ta,e)).status,201);
  assert.equal((await f.invoke('/v1/messages','POST',f.ta,e)).status,200);assert.equal(f.bucket.values.size,1);

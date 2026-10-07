@@ -5,7 +5,7 @@ import {createAdmissionHandler,maintainAdmission} from './admission.mjs';
 import {digest} from './authorization.mjs';
 // Experimental Hopsesh-only infrastructure. Payloads stay encrypted end to end.
 const encoder = new TextEncoder();
-export const LIMITS = Object.freeze({ frame: 24 * 1024 * 1024, bytes: 64 * 1024 * 1024, messages: 1000, devices: 32, lifetime: 86400, batch: 1 });
+export const LIMITS = Object.freeze({ frame: 24 * 1024 * 1024, bytes: 64 * 1024 * 1024, messages: 1000, devices: 32, lifetime: 86400, batch: 1, dailyFrames:4096, dailyBytes:256*1024*1024 });
 const opaque = s => typeof s === 'string' && /^[A-Za-z0-9_-]{16,128}$/.test(s);
 const hash = async s => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(s)))).map(v => v.toString(16).padStart(2,'0')).join('');
 const json = (v,status=200) => new Response(JSON.stringify(v),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
@@ -23,7 +23,7 @@ async function bounded(req, max) {
 }
 // This exact handler is used by the deployed Durable Object and deterministic
 // tests. Storage transactions serialize quotas, revocation and cursor updates.
-export function createHandler(storage,bucket,adminToken,space,clock=()=>Date.now(),events) {
+export function createHandler(storage,bucket,adminToken,space,clock=()=>Date.now(),events,policy={}) {
  return async req => {
   let recipient;
   const handle=async()=>{
@@ -32,6 +32,17 @@ export function createHandler(storage,bucket,adminToken,space,clock=()=>Date.now
    if(path==='/v1/capabilities'&&req.method==='GET')return json({protocol:1,limits:LIMITS,methods:['GET','POST'],experimental:true});
    if(!opaque(space))return json({error:'space'},400);
    const token=(req.headers.get('authorization')||'').replace(/^Bearer /,'');
+   if(path==='/v1/operator/stats'){
+    if(req.method!=='GET'||url.search)return json({error:'method'},405);
+    if(!adminToken||!token||await hash(token)!==await hash(adminToken))return json({error:'authorization'},403);
+    const counters={devices:0,messages:0,ciphertextBytes:0,pendingDeletions:0,tombstones:0};
+    for(const [,d]of await storage.list({prefix:'device:'}))if(!d.revoked&&d.expires>now)counters.devices++;
+    for(const [,m]of await storage.list({prefix:'message:'})){counters.messages++;counters.ciphertextBytes+=m.bytes}
+    counters.pendingDeletions=(await storage.list({prefix:'delete:'})).size;counters.tombstones=(await storage.list({prefix:'id:'})).size;
+    const day=Math.floor(now/86400),stored=await storage.get('day-budget'),budget=stored?.day===day?stored:{day,frames:0,bytes:0};
+    return json({...counters,day:budget.day,admittedFrames:budget.frames,admittedBytes:budget.bytes,resetAt:(day+1)*86400,paused:policy.paused===true,limits:{dailyFrames:ceiling(policy.dailyFrames,LIMITS.dailyFrames),dailyBytes:ceiling(policy.dailyBytes,LIMITS.dailyBytes)}});
+   }
+   if(policy.paused===true&&((path==='/v1/messages'&&req.method==='POST')||path==='/v1/enrollment/register'))return json({error:'paused'},503);
    if(['/v1/enrollment/register','/v1/enrollment/check','/v1/enrollment/revoke-device'].includes(path)){
     if(req.method!=='POST')return json({error:'method'},405);
     // Operator authorization only enrolls a routing credential. Local fingerprint
@@ -98,7 +109,7 @@ export function createHandler(storage,bucket,adminToken,space,clock=()=>Date.now
     if(grant.kind==='cloud-session'&&e.to!==grant.issuer)return json({error:'recipient'},403);
     if(!['request','response'].includes(e.kind)||e.protocol!==1||e.space!==space||e.from!==device||!opaque(e.to)||e.to===device||!opaque(e.id)||!opaque(e.operation)||!Number.isInteger(e.created)||!Number.isInteger(e.expires)||e.expires<=now||e.created>now+60||e.expires<=e.created||e.expires-e.created>LIMITS.lifetime||typeof e.ciphertext!=='string'||typeof e.signature!=='string'||!e.ciphertext.length||e.signature.length!==88)return json({error:'envelope'},400);
     const target=await storage.get('device:'+e.to);if(!target||target.revoked||target.expires<=now)return json({error:'recipient'},403);
-    const data=JSON.stringify(e),sum=await hash(data),key=space+'/'+e.to+'/'+e.id;
+    const data=JSON.stringify(e),wireBytes=encoder.encode(data).length,sum=await hash(data),key=space+'/'+e.to+'/'+e.id;
     recipient=e.to;
     return await storage.transaction(async tx=>{
      const fresh=await tx.get('device:'+device),receiver=await tx.get('device:'+e.to);
@@ -107,14 +118,17 @@ export function createHandler(storage,bucket,adminToken,space,clock=()=>Date.now
      if(prior)return prior.sum===sum?json({sequence:prior.sequence,duplicate:true}):json({error:'id-conflict'},409);
      const q=(await tx.get('quota:'+e.to))||{bytes:0,count:0};
      const tombstones=(await tx.get('id-count'))||0;
-     if(q.bytes+data.length>LIMITS.bytes||q.count>=LIMITS.messages||tombstones>=10000)return json({error:'quota'},429);
+     if(q.bytes+wireBytes>LIMITS.bytes||q.count>=LIMITS.messages||tombstones>=10000)return json({error:'quota'},429);
+     const day=Math.floor(now/86400),stored=await tx.get('day-budget'),budget=stored?.day===day?stored:{day,frames:0,bytes:0};
+     if(budget.frames>=ceiling(policy.dailyFrames,LIMITS.dailyFrames)||budget.bytes+wireBytes>ceiling(policy.dailyBytes,LIMITS.dailyBytes))return json({error:'traffic-budget'},429);
      const sequence=((await tx.get('sequence:'+e.to))||0)+1;
      // If bucket publication or the transaction fails, no delivery is visible.
      // Unreferenced ciphertext has a separate R2 lifecycle cleanup policy.
      await bucket.put(key,data,{customMetadata:{expires:String(e.expires)}});
-     await tx.put('message:'+e.to+':'+String(sequence).padStart(20,'0'),{key,bytes:data.length,expires:e.expires,sequence});
+     await tx.put('message:'+e.to+':'+String(sequence).padStart(20,'0'),{key,bytes:wireBytes,expires:e.expires,sequence});
      await tx.put('id:'+device+':'+e.id,{sum,sequence,expires:e.expires});await tx.put('id-count',tombstones+1);
-     await tx.put('sequence:'+e.to,sequence);await tx.put('quota:'+e.to,{bytes:q.bytes+data.length,count:q.count+1});
+     await tx.put('sequence:'+e.to,sequence);await tx.put('quota:'+e.to,{bytes:q.bytes+wireBytes,count:q.count+1});
+     await tx.put('day-budget',{day,frames:budget.frames+1,bytes:budget.bytes+wireBytes});
      await schedule(storage,e.expires*1000,clock());
      return json({sequence},201);
     });
@@ -145,6 +159,8 @@ export function createHandler(storage,bucket,adminToken,space,clock=()=>Date.now
   return result;
  };
 }
+function ceiling(value,max){return Number.isSafeInteger(Number(value))&&Number(value)>=1?Math.min(Number(value),max):max}
+function operatorPolicy(env){return {paused:env.RELAY_PAUSED==='1',dailyFrames:env.DAILY_FRAMES_PER_SPACE,dailyBytes:env.DAILY_BYTES_PER_SPACE}}
 async function removeMessages(storage,bucket,device,predicate){
  await storage.transaction(async tx=>{
   const rows=await tx.list({prefix:'message:'+device+':' });const q=(await tx.get('quota:'+device))||{bytes:0,count:0};
@@ -202,7 +218,7 @@ export class Mailbox {
   await this.refresh();
   for(const socket of this.ctx.getWebSockets('device:'+device)){try{socket.send('{"type":"mailbox-changed"}')}catch{}}
  }
- async fetch(req){const space=req.headers.get('X-Hopsesh-Space');return createHandler(this.ctx.storage,this.env.CIPHERTEXT,this.env.ENROLLMENT_ADMIN,space,()=>Date.now(),{subscribe:(d,g)=>this.subscribe(d,g),changed:d=>this.changed(d),refresh:()=>this.refresh()})(req)}
+ async fetch(req){const space=req.headers.get('X-Hopsesh-Space');return createHandler(this.ctx.storage,this.env.CIPHERTEXT,this.env.ENROLLMENT_ADMIN,space,()=>Date.now(),{subscribe:(d,g)=>this.subscribe(d,g),changed:d=>this.changed(d),refresh:()=>this.refresh()},operatorPolicy(this.env))(req)}
  webSocketMessage(socket){socket.close(1008,'notifications are read only')}
  webSocketError(socket){try{socket.close(1011,'notification connection ended')}catch{}}
  async alarm(){
@@ -230,6 +246,7 @@ export class Authorization {
 }
 export default {async fetch(req,env){
  const url=new URL(req.url);
+ if(env.RELAY_PAUSED==='1'&&req.method==='POST'&&['/v1/messages','/v1/cloud/tickets','/v1/cloud/claim','/v1/device/code','/v1/authorization/request','/v1/enrollment/register'].includes(url.pathname))return json({error:'paused'},503);
  if(url.pathname==='/v1/capabilities'&&req.method==='GET')return json({protocol:1,limits:LIMITS,experimental:true});
  if(url.pathname.startsWith('/v1/cloud/')){
   if(!env.AUTHORIZATION||!env.LOGIN_RATE||!env.CODE_RATE||!env.ENROLLMENT_ADMIN||env.ENROLLMENT_ADMIN.length<32)return response({error:'temporarily_unavailable'},503);
@@ -264,12 +281,13 @@ export default {async fetch(req,env){
  if(!env.ENROLLMENT_ADMIN||env.ENROLLMENT_ADMIN.length<32||token.length>4096)return json({error:'authorization'},403);
  // Authenticate before allocating a Durable Object. Arbitrary unauthenticated
  // namespace headers must not create unbounded paid objects.
- if(['/v1/enrollment/register','/v1/enrollment/check','/v1/enrollment/revoke-device'].includes(url.pathname)){
+ if(['/v1/enrollment/register','/v1/enrollment/check','/v1/enrollment/revoke-device','/v1/operator/stats'].includes(url.pathname)){
   if(!token||await hash(token)!==await hash(env.ENROLLMENT_ADMIN))return json({error:'authorization'},403);
  }else{
   try{
    const {payload}=await jwtVerify(token,encoder.encode(env.ENROLLMENT_ADMIN),{algorithms:['HS256'],issuer:'hopsesh-relay-v1',audience:'hopsesh-relay-mailbox'});
    if(payload.space!==space||!opaque(payload.device)||!['device','cloud-session'].includes(payload.kind))return json({error:'authorization'},403);
+   if(['/v1/messages','/v1/ack'].includes(url.pathname)&&env.TRAFFIC_RATE&&(!(await env.TRAFFIC_RATE.limit({key:'device:'+space+':'+payload.device})).success||env.GLOBAL_TRAFFIC_RATE&&!(await env.GLOBAL_TRAFFIC_RATE.limit({key:'global:mailbox'})).success))return json({error:'quota'},429);
    if(url.pathname==='/v1/notifications'){
     if(url.protocol!=='https:'||req.method!=='GET'||url.search||req.headers.get('Upgrade')?.toLowerCase()!=='websocket')return json({error:'websocket-required'},426);
     if(!env.LOGIN_RATE||!(await env.LOGIN_RATE.limit({key:'notifications:'+space+':'+payload.device})).success||!(await env.LOGIN_RATE.limit({key:'global:notifications'})).success)return json({error:'quota'},429);

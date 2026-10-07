@@ -44,6 +44,10 @@ func TestRuntimeIdleClientsDoNotMultiplyCollections(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := localruntime.Client{Namespace: n}
+	var owner localruntime.Status
+	if err = client.Call(ctx, "status", nil, &owner); err != nil {
+		t.Fatal(err)
+	}
 	defer func() {
 		stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer stopCancel()
@@ -89,8 +93,18 @@ func TestRuntimeIdleClientsDoNotMultiplyCollections(t *testing.T) {
 			if err = client.Call(ctx, "metrics", nil, &before); err != nil {
 				t.Fatal(err)
 			}
+			usageBefore, err := readRuntimeUsage(ctx, owner.PID)
+			if err != nil {
+				t.Fatal("native idle counters", err)
+			}
+			started := time.Now()
 			// A finite idle measurement, not a claim about macOS power counters.
 			time.Sleep(2 * time.Second)
+			usageAfter, err := readRuntimeUsage(ctx, owner.PID)
+			if err != nil {
+				t.Fatal("native idle counters", err)
+			}
+			cpuPercent := 100 * (usageAfter.CPUSeconds - usageBefore.CPUSeconds) / time.Since(started).Seconds()
 			if err = client.Call(ctx, "metrics", nil, &after); err != nil {
 				t.Fatal(err)
 			}
@@ -98,6 +112,10 @@ func TestRuntimeIdleClientsDoNotMultiplyCollections(t *testing.T) {
 				t.Fatalf("idle clients created work: before %+v, after %+v", before, after)
 			}
 			t.Logf("clients=%d collections=%d notifications=%d subscribers=%d", count, after.Collections-before.Collections, after.Notifications-before.Notifications, after.Subscribers)
+			t.Logf("native idle sample: one-core CPU=%.3f%% RSS=%d bytes RSS delta=%d bytes", cpuPercent, usageAfter.RSSBytes, usageAfter.RSSBytes-usageBefore.RSSBytes)
+			if cpuPercent < 0 || usageAfter.RSSBytes <= 0 {
+				t.Fatal("native process counters are invalid")
+			}
 		})
 	}
 }
