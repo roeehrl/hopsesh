@@ -7,7 +7,8 @@ test('one destination shows its identity without a redundant default picker',asy
  await plan(page);
  const accounts=page.locator('.transfer-accounts');await expect(accounts).toContainText('Destination account');
  await expect(accounts.getByRole('combobox')).toHaveCount(0);await expect(accounts).toContainText('Default profile');
- await expect(page.locator('.fromto')).toContainText('studio (this Mac)');
+ const device=process.platform==='darwin'?'Mac':process.platform==='win32'?'PC':'computer';
+ await expect(page.locator('.fromto')).toContainText(`studio (this ${device})`);
  await expect(page.locator('#sheet')).not.toContainText('is signed in to another');
  await expect(page.locator('#sheet')).not.toContainText('Account identity continuity is unverified');
  await page.setViewportSize({width:760,height:700});
