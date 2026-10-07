@@ -123,7 +123,7 @@ func menu(send func(cmd string), terminal func()) *application.Menu {
 	// The session list: Group By and Sort By (radio items; the window tells which is
 	// chosen, gui.SetListMenu), collapsing every group, compact rows and the Display popover.
 	v.AddSeparator()
-	groups := radios(v.AddSubmenu("Group By"), [][2]string{{"repository", "Repository"}, {"location", "Location"}, {"agent", "Agent"},
+	groups := radios(v.AddSubmenu("Group By"), [][2]string{{"family", "Conversation Family"}, {"repository", "Repository"}, {"location", "Location"}, {"agent", "Agent"},
 		{"status", "Status"}, {"last-active", "Last Active"}, {"none", "None"}}, "group:", send)
 	sorts := radios(v.AddSubmenu("Sort By"), [][2]string{{"last-active", "Last Active"}, {"title", "Title"}, {"status", "Status"}, {"size", "Size"}}, "sort:", send)
 	v.Add("Collapse All Groups").OnClick(func(*application.Context) { send("collapse-all") })

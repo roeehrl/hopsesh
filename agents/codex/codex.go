@@ -620,7 +620,7 @@ func (m *Module) Live(ctx context.Context, h agent.Host, in agent.Install, ids [
 					continue
 				}
 				seen[pid] = true
-				li.Procs = append(li.Procs, agent.LiveProc{PID: pid})
+				li.Procs = append(li.Procs, agent.LiveProc{PID: pid, ObservedAt: time.Now().UTC()})
 			}
 			if len(li.Procs) > 0 {
 				li.PID = li.Procs[0].PID

@@ -47,7 +47,7 @@ async function quickRoute() {
 }
 on("hopsesh:machine-scan",()=>machineScanChanged().catch(fail));
 on("hopsesh:quick-route",()=>quickRoute().catch(fail));
-on("hopsesh:quick",async()=>{if(!mainReady||state.scanning)return;const d=await api("QuickSnapshot");state.runtime=d.runtime;if(d.scan){state.scan=d.scan;state.presence=d.presence?.entries||{};if(current==="sessions"&&!document.querySelector("dialog[open]"))renderSessions()}});
+on("hopsesh:quick",async()=>{if(!mainReady||state.scanning)return;const d=await api("QuickSnapshot");state.runtime=d.runtime;if(d.scan){state.scan=d.scan;state.presence=d.presence?.entries||{};if(current==="sessions"&&!document.querySelector("dialog[open], button:active"))renderSessions()}});
 
 // The app menu (and its shortcuts) sends these.
 on("hopsesh:menu", menuCommand);

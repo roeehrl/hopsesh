@@ -1,5 +1,5 @@
 // The Settings screen, in tabs: General, Agents, Terminal, Skill, Command line, Updates.
-import { api, h, fill, view, state, screen, go, loading, toast, fail, dialog, agentBadge, sys, cliHow, icon, ask, count, current, loadError, navigationID, errText } from "./core.js";
+import { api, on, h, fill, view, state, screen, go, loading, toast, fail, dialog, agentBadge, sys, cliHow, icon, ask, count, current, loadError, navigationID, errText } from "./core.js";
 import { desktopSettings } from "./desktop-settings.js";
 import { running } from "./term.js";
 
@@ -134,11 +134,22 @@ function agents() {
 let ds = null, desktopError = null;
 function desktop() { if (desktopError) return [loadError(desktopError, load)]; return ds ? [desktopSettings({...ds,os:state.info.os})] : [h("p", {}, "Reading desktop settings…")]; }
 let ts = null, terminalError = "", loadSequence = 0;
+// The terminal has its own layout/group controls. Reflect committed preferences
+// without rebuilding Settings or dropping focus from an in-progress form edit.
+on("hopsesh:terminal-preferences", prefs => {
+  if (!ts) return;
+  for (const [key, label] of [["placement", "Terminal placement"], ["grouping", "Group terminal tabs"]]) {
+    ts[key] = prefs[key];
+    document.querySelectorAll(`[role="radiogroup"][aria-label="${label}"] [role="radio"]`).forEach(button => {
+      button.setAttribute("aria-checked", String(button.dataset.value === prefs[key]));
+    });
+  }
+});
 async function setTerm(patch) {
   if (saving) return;
   saving = true;
   const next = Object.assign({ app: ts.app, where: ts.where, font: ts.font, fontSize: ts.fontSize, scrollback: ts.scrollback, keepTabs: ts.keepTabs,
-    notify: ts.notify, closeEnded: ts.closeEnded, screenReader: ts.screenReader, systemConsole: ts.systemConsole }, patch);
+    grouping: ts.grouping, notify: ts.notify, closeEnded: ts.closeEnded, screenReader: ts.screenReader, systemConsole: ts.systemConsole }, patch);
   ts = Object.assign({}, ts, patch); // reflect this change while the form is locked
   render();
   try { await api("SetTerminalSettings", next); toast("Saved"); } catch (e) { fail(e); }
@@ -149,7 +160,7 @@ async function setTerm(patch) {
 }
 function seg(label, value, choices, onpick) {
   return h("div", { class: "seg", role: "radiogroup", "aria-label": label },
-    choices.map(([v, text]) => h("button", { role: "radio", "aria-checked": value === v ? "true" : "false", onclick: () => onpick(v) }, text)));
+    choices.map(([v, text]) => h("button", { role: "radio", "data-value": v, "aria-checked": value === v ? "true" : "false", onclick: () => onpick(v) }, text)));
 }
 const SHIELD = "M12 3 5 6v6c0 4.2 2.9 7.6 7 9 4.1-1.4 7-4.8 7-9V6z";
 function terminal() {
@@ -162,10 +173,15 @@ function terminal() {
     h("span", {}, h("b", {}, label), h("span", { class: "muted" }, desc)));
   return [
     h("span", { class: "muted", style: "font-size:12.5px" }, "Where hopsesh runs Claude Code, Codex and your shell when you resume, bring back, hand off or sign in."),
+    card(h("span", { class: "sec-h" }, "Terminal workspace"),
+      h("div", {class:"set-row"}, title("Placement", "Move the view of the same running programs. Separate window remains the default until you choose a panel."),
+        seg("Terminal placement", ts.placement, [["bottom","Bottom panel"],["right","Right panel"],["separate","Separate window"]], async v => { try { await api("TerminalPlacement",v); } catch(e){fail(e);} })),
+      h("div", {class:"set-row"}, title("Group terminal tabs", "Conversation families contain verified forks. Copies across machines or agents remain on their conversation branch."),
+        seg("Group terminal tabs",ts.grouping,[["family","Family"],["session","Session"],["none","None"]],v=>setTerm({grouping:v})))),
     card(h("span", { class: "sec-h" }, "Where sessions open"),
-      h("div", { class: "set-row" }, title("Resume sessions, hand-offs and bring-backs", `Hand-offs, bring-backs and sign-ins use this window unless you choose ${name}, because hopsesh needs to see how they end. Every tab keeps Open in my terminal.`),
+      h("div", { class: "set-row" }, title("Resume sessions, hand-offs and bring-backs", `Hand-offs, bring-backs and sign-ins use Hopsesh Terminal unless you choose ${name}, because hopsesh needs to see how they end. Every tab keeps Open in my terminal.`),
         seg("Where sessions open", ts.where, [["here", "In this window"], ["terminal", `In ${name}`]], (v) => setTerm({ where: v }))),
-      h("span", { class: "muted", style: "font-size:12px" }, (ts.where === "terminal" ? `${name} keeps running after hopsesh quits.` : "In this window: a tab of the hopsesh Terminal window, which ends when hopsesh quits.")
+      h("span", { class: "muted", style: "font-size:12px" }, (ts.where === "terminal" ? `${name} keeps running after hopsesh quits.` : "In this window: a Hopsesh Terminal tab in your chosen panel or separate window. Its program ends when hopsesh quits.")
         + " This is where a session first resumes; a session's Resume menu picks another place, and hopsesh remembers it for that agent."),
       h("div", { class: "set-row" }, title("My terminal", `Where Open in my terminal goes. Now: ${ts.name}.`),
         h("select", { "aria-label": "My terminal", onchange: (e) => setTerm({ app: e.target.value }) },

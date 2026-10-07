@@ -56,6 +56,7 @@ func testHook(w *application.WebviewWindow, svc *gui.App) {
 	}
 	w.OnWindowEvent(events.Common.WindowRuntimeReady, func(*application.WindowEvent) {
 		once.Do(func() {
+			testConsole(w)
 			if script != "" {
 				if b, err := os.ReadFile(script); err == nil {
 					w.ExecJS(string(b))
@@ -85,12 +86,23 @@ func terminalCheck(svc *gui.App, argv string) {
 		report("error: HOPSESH_E2E_TERMINAL: %v\n", err)
 		return
 	}
+	if placement := os.Getenv("HOPSESH_E2E_TERMINAL_PLACEMENT"); placement != "" {
+		if err := svc.TerminalPlacement(placement); err != nil {
+			report("error: placement: %v\n", err)
+			return
+		}
+	}
 	dir, _ := os.Getwd()
 	info, err := svc.Terms.Open(pty.Spec{Argv: args, Dir: dir, Title: "terminal check", Capture: pty.CaptureStep},
 		gui.TabSetup{Meta: gui.TabMeta{Kind: gui.TabSession, Command: "terminal check"}})
 	if err != nil {
 		report("error: %v\n", err)
 		return
+	}
+	// Repeated requests while the native window is still being constructed must
+	// not focus a half-created WebView2 controller or start another process.
+	for range 3 {
+		svc.Terms.Show()
 	}
 	s, _ := svc.Terms.Manager().Get(info.ID)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -101,5 +113,10 @@ func terminalCheck(svc *gui.App, argv string) {
 		return
 	}
 	out, _ := s.StepOutput()
-	report("backend=%s code=%d\n%s", s.Info().Backend, code, out.Text)
+	placement := svc.TerminalSettings().Placement
+	if want := os.Getenv("HOPSESH_E2E_TERMINAL_PLACEMENT"); want != "" && placement != want {
+		report("error: view stayed in %s, wanted %s\n", placement, want)
+		return
+	}
+	report("backend=%s code=%d\nplacement=%s\n%s", s.Info().Backend, code, placement, out.Text)
 }

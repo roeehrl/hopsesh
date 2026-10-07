@@ -196,3 +196,16 @@ test("the View menu's commands change the display", async ({ page }) => {
   await menu(page, "display");
   await expect(page.getByRole("dialog", { name: "Display options" })).toBeVisible();
 });
+
+test('conversation families keep separate identities, rename and collapse across refresh', async({page})=>{
+ const d=await display(page);await d.getByLabel('Group by').selectOption('family');await page.keyboard.press('Escape');
+ await expect(page.locator('.grp[role=treeitem]')).toHaveCount(4);
+ const first=page.locator('.grp[role=treeitem]').first();await first.getByRole('button',{name:'Rename conversation family'}).click();
+ const rename=page.getByRole('dialog');await rename.locator('input').fill('My conversation family');await rename.getByRole('button',{name:'Save name'}).click();
+ await expect(page.locator('.gname').filter({hasText:'My conversation family'})).toHaveCount(1);
+ const group=page.locator('.grp[role=treeitem]').filter({hasText:'My conversation family'});
+ await group.locator(".gh").click();await expect(group).toHaveAttribute('aria-expanded','false');
+ await page.waitForTimeout(600);await page.reload();
+ await expect(page.locator('.grp[role=treeitem]').filter({hasText:'My conversation family'})).toHaveAttribute('aria-expanded','false');
+ await expect(page.locator('#btn-terminal')).not.toContainText('1');
+});

@@ -62,11 +62,12 @@ setInterval(freshness, 30000);
 
 // Shared backend owns collection. Focus requests one refresh; source events update
 // the list and Quick access. No client polling or duplicate presence collector.
-const busy = () => !state.scan || state.scanning || current !== "sessions" || document.hidden || !!document.querySelector("dialog[open]") || isOpen();
+const busy = () => !state.scan || state.scanning || current !== "sessions" || document.hidden || !!document.querySelector("dialog[open], button:active") || isOpen();
 const comeBack = () => { if (!document.hidden) api("RuntimeRefresh").catch(() => {}); freshness(); };
 document.addEventListener("visibilitychange",comeBack);
 window.addEventListener("focus",comeBack);
 onTabs(() => { freshness(); });
+
 
 // needsYou: the session waits for its person (its agent says so, or its tab here does).
 const needsYou = (e) => statusKey(e) === "needs";

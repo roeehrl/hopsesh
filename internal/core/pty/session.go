@@ -56,14 +56,18 @@ type Session struct {
 	spec Spec
 	be   backend
 
-	mu      sync.Mutex
-	flow    *sync.Cond // the reader waits on it for the window to catch up
-	info    Info
-	scroll  *ring
-	capture *term.Capture
-	note    *notifier
-	view    *viewer
-	idle    *time.Timer
+	mu           sync.Mutex
+	ownerMu      sync.Mutex // serializes view replacement with commands from that view
+	checkpoint   []byte     // emulator state; memory only, consumed by the next owner
+	handingOff   bool
+	handoffTimer *time.Timer
+	flow         *sync.Cond // the reader waits on it for the window to catch up
+	info         Info
+	scroll       *ring
+	capture      *term.Capture
+	note         *notifier
+	view         *viewer
+	idle         *time.Timer
 	// printedSince: the program printed something since the user last typed.
 	printedSince bool
 	closing      bool // stop flow control: the program ended or is being ended
@@ -122,6 +126,9 @@ func (s *Session) run(be backend) {
 	s.mu.Lock()
 	s.be = be
 	s.info.Backend = be.Name()
+	if p, ok := be.(interface{ PID() int }); ok {
+		s.info.PID = p.PID()
+	}
 	s.mu.Unlock()
 	output := make(chan struct{})
 	go s.read(output)
@@ -130,6 +137,9 @@ func (s *Session) run(be backend) {
 		code := be.Wait()
 		close(s.done)
 		s.mu.Lock()
+		for s.handingOff && !s.gone {
+			s.flow.Wait()
+		}
 		s.closing = true
 		s.flow.Broadcast()
 		s.mu.Unlock()
@@ -183,6 +193,9 @@ func (s *Session) read(output chan<- struct{}) {
 // printed takes in one read of output.
 func (s *Session) printed(p []byte) {
 	s.mu.Lock()
+	for s.handingOff && !s.gone {
+		s.flow.Wait()
+	}
 	if s.gone {
 		s.mu.Unlock()
 		return
@@ -275,6 +288,11 @@ func (s *Session) typed(p []byte) error {
 		return nil
 	case <-s.done:
 		return errors.New("the program has ended")
+	default:
+		s.mu.Lock()
+		s.pending -= len(p)
+		s.mu.Unlock()
+		return errors.New("the program is not reading its input")
 	}
 }
 
@@ -346,6 +364,7 @@ func (s *Session) forget() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.gone = true
+	s.cancelHandoff()
 	s.scroll.wipe()
 	if s.capture != nil {
 		s.capture.Reset()

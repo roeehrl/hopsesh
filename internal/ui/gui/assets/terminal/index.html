@@ -13,7 +13,10 @@
   <div role="tablist" aria-label="Terminal tabs" id="tabs"></div>
   <button class="ib" id="new-shell" disabled aria-label="New shell tab" title="New shell tab"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
   <span class="spacer"></span>
+<label class="workspace-label">Layout <select id="placement" aria-label="Terminal placement"><option value="bottom">Bottom panel</option><option value="right">Right panel</option><option value="separate">Separate window</option></select></label>
 </header>
+<label class="terminal-grouping">Group tabs <select id="terminal-grouping" aria-label="Group terminal tabs"><option value="family">Family</option><option value="session">Session</option><option value="none">None</option></select></label>
+<div id="terminal-groups" class="terminal-groups" aria-label="Terminal groups"></div>
 <div id="connection" role="status" aria-live="polite">Connecting to Hopsesh…</div>
 <div id="banner" role="status" hidden></div>
 <div class="info" id="info" hidden>

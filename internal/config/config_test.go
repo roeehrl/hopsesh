@@ -167,7 +167,7 @@ func TestTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	back, err := Load()
-	if err != nil || back.Terminal != c.Terminal || back.ResumeIn() != ResumeAsk {
+	if err != nil || !reflect.DeepEqual(back.Terminal, c.Terminal) || back.ResumeIn() != ResumeAsk {
 		t.Fatalf("%+v %v", back.Terminal, err)
 	}
 	for _, bad := range []Terminal{{App: "xterm"}, {Resume: "elsewhere"}} {
@@ -276,7 +276,7 @@ func TestList(t *testing.T) {
 		}
 	}
 	c.List = List{GroupBy: "folder"}
-	if err := c.Check(); err == nil || !strings.Contains(err.Error(), `use "repository", "location", "agent", "account", "tag", "status", "last-active", "none"`) {
+	if err := c.Check(); err == nil || !strings.Contains(err.Error(), `use "family", "repository", "location", "agent", "account", "tag", "status", "last-active", "none"`) {
 		t.Errorf("the error names the allowed values: %v", err)
 	}
 	c.List = List{}

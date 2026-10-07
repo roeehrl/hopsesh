@@ -12,6 +12,11 @@ result-session return.json
 agent-turn claude $RETURN_ID 'claude continues from the test'
 grep 'codex wrote the parser test' $SESSION
 
+# A cross-agent return creates another copy, not a new conversation branch.
+exec hopsesh ls --group-by family --json --no-git
+cp stdout families.json
+family-count families.json 1 1
+
 ! exec hopsesh undo --yes
 stderr 'changed since'
 grep 'claude continues from the test' $SESSION

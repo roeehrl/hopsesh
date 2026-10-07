@@ -66,6 +66,7 @@ func TestScenarios(t *testing.T) {
 		},
 		Cmds: map[string]func(ts *testscript.TestScript, neg bool, args []string){
 			"agent-turn":     agentTurn,
+			"family-count":   familyCount,
 			"result-session": resultSession,
 			"account-id":     accountID,
 			"at-terminal":    atTerminal,
@@ -281,4 +282,26 @@ func accountID(ts *testscript.TestScript, neg bool, args []string) {
 		ts.Fatalf("missing profile id")
 	}
 	ts.Setenv("ACCOUNT_ID", p.ID)
+}
+
+// family-count inspects the public CLI grouping contract after real transfers.
+func familyCount(ts *testscript.TestScript, neg bool, args []string) {
+	if neg || len(args) != 3 {
+		ts.Fatalf("usage: family-count FILE FAMILIES BRANCHES")
+	}
+	var result struct {
+		Groups []struct {
+			Items []json.RawMessage `json:"items"`
+		} `json:"groups"`
+	}
+	if err := json.Unmarshal([]byte(ts.ReadFile(args[0])), &result); err != nil {
+		ts.Fatalf("%v", err)
+	}
+	branches := 0
+	for _, g := range result.Groups {
+		branches += len(g.Items)
+	}
+	if fmt.Sprint(len(result.Groups)) != args[1] || fmt.Sprint(branches) != args[2] {
+		ts.Fatalf("got %d families / %d branches; want %s / %s", len(result.Groups), branches, args[1], args[2])
+	}
 }

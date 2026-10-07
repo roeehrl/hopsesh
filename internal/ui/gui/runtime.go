@@ -180,6 +180,7 @@ func (a *App) acceptRuntimeSnapshot(s observe.Snapshot) {
 	a.inv = fresh
 	elsewhere := a.invAt
 	a.mu.Unlock()
+	a.bindTerminalSessions(fresh)
 	scan := scanDTO(core, fresh, s.ObservedAt, elsewhere, out.Processes)
 	a.publishQuick(scan)
 	if len(out.Problems) > 0 {

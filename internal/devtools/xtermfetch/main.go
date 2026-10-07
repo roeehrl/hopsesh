@@ -43,6 +43,7 @@ type pkg struct {
 
 // The pinned packages: xterm.js 6.0.0 and the addons released with it (2025-12-22).
 var pkgs = []pkg{
+ {"@xterm/addon-serialize", "0.14.0", "sha512-uteyTU1EkrQa2Ux6P/uFl2fzmXI46jy5uoQMKEOM0fKTyiW7cSn0WrFenHm5vO5uEXX/GpwW/FgILvv3r0WbkA==", map[string]string{"lib/addon-serialize.mjs": "addon-serialize.mjs"}},
 	{"@xterm/xterm", "6.0.0", "sha512-TQwDdQGtwwDt+2cgKDLn0IRaSxYu1tSUjgKarSDkUM0ZNiSRXFpjxEsvc/Zgc5kq5omJ+V0a8/kIM2WD3sMOYg==",
 		map[string]string{"lib/xterm.mjs": "xterm.mjs", "css/xterm.css": "xterm.css"}},
 	{"@xterm/addon-fit", "0.11.0", "sha512-jYcgT6xtVYhnhgxh3QgYDnnNMYTcf8ElbxxFzX0IZo+vabQqSPAjC3c1wJrKB5E19VwQei89QCiZZP86DCPF7g==",
@@ -161,7 +162,13 @@ func fetch(p pkg) (map[string][]byte, string, error) {
 		}
 		files[want] = b
 	}
-	if len(files) != len(p.Files) || lic == "" {
+	// serialize 0.14.0 omits LICENSE in its npm tarball. It is part of the
+ // same MIT-licensed xterm release; obtain that notice from the pinned,
+ // integrity-verified core tarball, never an unversioned URL.
+ if lic == "" && p.Name == "@xterm/addon-serialize" {
+  for _, core := range pkgs { if core.Name == "@xterm/xterm" { _, lic, err = fetch(core); if err != nil { return nil, "", err }; break } }
+ }
+ if len(files) != len(p.Files) || lic == "" {
 		return nil, "", errors.New("the package lacks a file the app takes, or its licence")
 	}
 	return files, lic, nil
