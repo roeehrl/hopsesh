@@ -1,6 +1,39 @@
 import { api, h, dialog, fail, ask, go, pending } from "./core.js";
+import { previewItems } from "./inspector.js";
 
 const field = (label, control, help = "") => h("label", {class:"opt",style:"display:flex;flex-direction:column;align-items:stretch;gap:6px"}, h("b",{},label), control, help ? h("span",{class:"muted"},help) : null);
+
+function inspectCloud(peer) {
+ const status=h("div",{role:"status","aria-live":"polite"}),content=h("div",{class:"conversation",style:"max-height:40vh;overflow:auto"}),error=h("p",{class:"err",role:"alert"});
+ let closed=false;
+ const preview=h("button",{class:"btn",disabled:true},"Preview conversation checkpoint");
+ const check=h("button",{class:"btn"},"Check session now");
+ async function inspect(){
+  check.disabled=true;preview.disabled=true;error.textContent="";content.replaceChildren();
+  try {
+   const o=await pending("Check cloud session",()=>api("RelayCloudInspect",peer.id));
+   if(closed)return;
+   const title=o.provider==="claude-hosted" ? "Claude Code" : "Codex";
+   status.replaceChildren(h("h3",{},`${title} · ${o.session}`),h("p",{},`Responded ${new Date(o.observedAt).toLocaleString()} · lease ends ${new Date(o.leaseExpires).toLocaleString()}`),h("p",{class:"mono",style:"overflow-wrap:anywhere"},o.workspace),h("p",{class:"muted"},o.exportAllowed && o.transcriptAvailable ? "A complete-record conversation checkpoint can be previewed. Ongoing writes may leave an unfinished final record. Code, agent control and native restore are separate capabilities." : !o.transcriptAvailable ? "Native conversation export is unavailable on this session. Installing the helper does not provide a transcript source." : "Conversation export has not been approved on both endpoints."));
+   preview.disabled=!(o.exportAllowed && o.transcriptAvailable);
+  } catch(e){if(!closed){status.replaceChildren();error.textContent=String(e?.message || e);}}
+  finally {check.disabled=false;}
+ }
+ check.addEventListener("click",()=>void inspect());
+ preview.addEventListener("click",async()=>{
+  preview.disabled=true;check.disabled=true;error.textContent="";
+  try {
+   const p=await pending("Read cloud checkpoint",()=>api("RelayCloudPreview",peer.id));
+   if(closed)return;
+   const agent=p.provider==="claude-hosted" ? "claude" : "codex";
+   content.replaceChildren(h("h3",{},"Conversation checkpoint"),h("p",{class:"muted"},`${p.checkpoint.records} complete records · ${new Date(p.checkpoint.created).toLocaleString()} · ${p.checkpoint.omittedTailBytes ? `${p.checkpoint.omittedTailBytes} unfinished bytes excluded` : "no unfinished tail at this read"}`),h("p",{class:"mono muted",style:"overflow-wrap:anywhere"},`SHA256 ${p.sha256}`),...previewItems({agent,agentName:agent==="claude" ? "Claude Code" : "Codex"},p.preview,1000,1000),h("p",{class:"muted"},p.preview.more ? "Earlier conversation is not included in this bounded preview." : "This is a snapshot; the cloud session may continue writing."));
+  }catch(e){if(!closed)error.textContent=String(e?.message || e);}
+  finally {preview.disabled=false;check.disabled=false;}
+ });
+ const d=dialog(h("h2",{},"One approved cloud session"),h("p",{class:"mono muted",style:"overflow-wrap:anywhere"},peer.fingerprint),status,error,content,h("div",{class:"dlg-foot"},h("button",{class:"btn",onclick:()=>d.close()},"Close"),check,preview));
+ d.addEventListener("close",()=>{closed=true;},{once:true});
+ void inspect();
+}
 
 function pairing(kind, refresh, receivingEnabled, publicIdentity) {
  const cloud=kind==="cloud-session";
@@ -144,7 +177,7 @@ export function relaySettings(data, refresh) {
 
   h("section",{class:"card"},h("div",{class:"dlg-body"},h("h2",{},"Approved endpoints"),
    h("div",{class:"set-row"},h("button",{class:"btn",disabled:!r.initialized,onclick:()=>pairing("device",refresh,r.receiveEnabled)},"Pair machine…"),h("button",{class:"btn",disabled:!r.initialized,onclick:()=>pairing("cloud-session",refresh,false)},"Approve cloud session…")),
-   !(r.peers || []).length ? h("p",{class:"muted"},"No endpoints have been approved.") : r.peers.map(p=>h("div",{class:"set-row"},h("div",{style:"min-width:0;overflow-wrap:anywhere"},h("b",{},p.name),h("p",{class:"muted"},`${p.kind === "cloud-session" ? "Cloud session" : "Machine"} · ${p.revoked ? "Revoked" : p.expires && p.expires*1000<=Date.now() ? "Expired" : "Approved"}`),h("p",{class:"mono muted",style:"overflow-wrap:anywhere"},p.fingerprint),h("p",{class:"muted"},permissions(p)),p.roots?.length ? h("p",{class:"mono muted",style:"white-space:pre-wrap;overflow-wrap:anywhere"},p.roots.join("\n")) : null),h("button",{class:"btn danger",disabled:p.revoked,onclick:async()=>{if(await ask({title:`Revoke ${p.name}?`,body:"This endpoint will no longer have the approved local access. Previously delivered conversations stay on their endpoints.",ok:"Revoke",danger:true}))await action(()=>api("RelayRevoke",p.id));}},"Revoke")))) )];
+   !(r.peers || []).length ? h("p",{class:"muted"},"No endpoints have been approved.") : r.peers.map(p=>h("div",{class:"set-row"},h("div",{style:"min-width:0;overflow-wrap:anywhere"},h("b",{},p.name),h("p",{class:"muted"},`${p.kind === "cloud-session" ? "Cloud session" : "Machine"} · ${p.revoked ? "Revoked" : p.expires && p.expires*1000<=Date.now() ? "Expired" : "Approved"}`),h("p",{class:"mono muted",style:"overflow-wrap:anywhere"},p.fingerprint),h("p",{class:"muted"},permissions(p)),p.roots?.length ? h("p",{class:"mono muted",style:"white-space:pre-wrap;overflow-wrap:anywhere"},p.roots.join("\n")) : null),p.kind === "cloud-session" ? h("button",{class:"btn",disabled:!r.enabled || p.revoked || p.expires*1000<=Date.now(),onclick:()=>inspectCloud(p)},"Inspect session…") : null,h("button",{class:"btn danger",disabled:p.revoked,onclick:async()=>{if(await ask({title:`Revoke ${p.name}?`,body:"This endpoint will no longer have the approved local access. Previously delivered conversations stay on their endpoints.",ok:"Revoke",danger:true}))await action(()=>api("RelayRevoke",p.id));}},"Revoke")))) )];
 }
 
 function permissions(peer) {

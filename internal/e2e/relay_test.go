@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/roeehrl/hopsesh/agents/claude"
+	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/cloudintegration"
 	"github.com/roeehrl/hopsesh/internal/core/move"
@@ -316,13 +317,13 @@ func TestRelayPushSurvivesReceiverRestartAndPeerOwnedUndo(t *testing.T) {
 		t.Fatal("pull retry duplicated native installation")
 	}
 	run(box, "undo", pullResult.Result.Journal, "--yes", "--json")
-	qualifyCloudConnector(t, ctx, bin, root, ready.URL, certFile, httpClient, hereClient, hereID)
+	qualifyCloudConnector(t, ctx, bin, root, ready.URL, certFile, httpClient, hereClient, hereID, here)
 }
 
 // This is a real CLI connector process, not a provider startup simulation. It
 // qualifies scoped authorization and encrypted read-only delivery independently
 // of the hosted provider's install/start lifecycle.
-func qualifyCloudConnector(t *testing.T, ctx context.Context, bin, root, origin, certFile string, httpClient *http.Client, client localruntime.Client, peer relay.PublicIdentity) {
+func qualifyCloudConnector(t *testing.T, ctx context.Context, bin, root, origin, certFile string, httpClient *http.Client, client localruntime.Client, peer relay.PublicIdentity, desktop machineHome) {
 	t.Helper()
 	cloud := newMachineHome(t, root, "cloud-scoped", true)
 	transcript := filepath.Join(cloud.home, ".claude", "projects", claude.Slug(cloud.repo), sid+".jsonl")
@@ -345,7 +346,7 @@ func qualifyCloudConnector(t *testing.T, ctx context.Context, bin, root, origin,
 	if err = json.Unmarshal(run(nil, prepare...), &instance); err != nil {
 		t.Fatal(err)
 	}
-	store := relay.Store{Directory: filepath.Join(root, "relay-here", "state", "relay")}
+	store := relay.Store{Directory: filepath.Join(desktop.home, "state", "relay")}
 	ownerConnection, err := store.Connection(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -424,6 +425,40 @@ func qualifyCloudConnector(t *testing.T, ctx context.Context, bin, root, origin,
 	}
 	if err = call("export", nil, &exported); err != nil || !bytes.Equal(exported.Data, firstCheckpoint) || exported.Checkpoint.OmittedTail != int64(len(partial)) {
 		t.Fatal("encrypted export included or hid the unfinished vendor write", err)
+	}
+	inspect := func(preview, success bool) []byte {
+		t.Helper()
+		args := []string{"cloud-integration", "inspect", instance.Public.ID}
+		if preview {
+			args = append(args, "--preview")
+		}
+		cmd := exec.CommandContext(ctx, bin, args...)
+		cmd.Env = desktop.env()
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		out, err := cmd.Output()
+		if (err == nil) != success {
+			t.Fatalf("native scoped cloud inspect: %v\n%s", err, stderr.String())
+		}
+		return out
+	}
+	var checked cloudintegration.Observation
+	if err = json.Unmarshal(inspect(false, true), &checked); err != nil || !checked.ExportAllowed || checked.Session != sid {
+		t.Fatal("native cloud inspector widened or lost scope", err)
+	}
+	var preview app.CloudConnectorPreview
+	if err = json.Unmarshal(inspect(true, true), &preview); err != nil || preview.Preview.Messages() == 0 || preview.Checkpoint.OmittedTail != int64(len(partial)) {
+		t.Fatal("native cloud preview lost conversation or fidelity metadata", err)
+	}
+	if err = store.Approve(ctx, relay.Grant{Peer: instance.Public, Endpoint: instance.Public.Endpoint, Kind: "cloud-session", SendMethods: []string{"observe"}, Expires: connection.Expires}); err != nil {
+		t.Fatal(err)
+	}
+	if err = json.Unmarshal(inspect(false, true), &checked); err != nil || checked.ExportAllowed {
+		t.Fatal("observation-only approval exposed transcript permission", err)
+	}
+	inspect(true, false)
+	if err = store.Approve(ctx, relay.Grant{Peer: instance.Public, Endpoint: instance.Public.Endpoint, Kind: "cloud-session", SendMethods: []string{"observe", "export"}, Expires: connection.Expires}); err != nil {
+		t.Fatal(err)
 	}
 	if err = call("apply", nil, nil); err == nil {
 		t.Fatal("cloud grant allowed device mutation")

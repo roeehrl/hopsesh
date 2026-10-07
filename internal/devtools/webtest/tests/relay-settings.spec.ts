@@ -7,6 +7,50 @@ test.beforeEach(async ({ page }) => {
   await page.getByRole("tab", { name: "Internet delivery" }).click();
 });
 
+test("scoped cloud inspection is explicit and unqualified export stays disabled",async({page})=>{
+ let checked=0,exported=0;
+ const fingerprint="a".repeat(64);
+ await page.route("**/call",async route=>{
+  const request=route.request().postDataJSON();
+  if(request.m==="Settings"){const response=await route.fetch(),body=await response.json();body.result.relay={initialized:true,enabled:true,enrolled:true,expires:Date.now()/1000+3600,peers:[{id:fingerprint,fingerprint,name:"One cloud task",kind:"cloud-session",sendMethods:["observe"],methods:[],expires:Date.now()/1000+3600}]};await route.fulfill({json:body});return;}
+  if(request.m==="RelayCloudInspect"){checked++;expect(request.args).toEqual([fingerprint]);await route.fulfill({json:{result:{provider:"codex-current",session:"actual-task",workspace:"/workspace/repo",observedAt:new Date().toISOString(),leaseExpires:new Date(Date.now()+3600000).toISOString(),transcriptAvailable:false,exportAllowed:false}}});return;}
+  if(request.m==="RelayCloudPreview"){exported++;await route.fulfill({json:{error:"must not export"}});return;}
+  await route.continue();
+ });
+ await page.getByRole("button",{name:"Refresh status",exact:true}).click();
+ await expect(page.getByRole("button",{name:"Inspect session…"})).toBeVisible();
+ expect(checked).toBe(0);
+ await page.getByRole("button",{name:"Inspect session…"}).click();
+ const d=page.getByRole("dialog");
+ await expect(d).toContainText("Native conversation export is unavailable");
+ await expect(d.getByRole("button",{name:"Preview conversation checkpoint"})).toBeDisabled();
+ await d.getByRole("button",{name:"Check session now"}).click();
+ await expect.poll(()=>checked).toBe(2);expect(exported).toBe(0);
+});
+
+test("cloud checkpoint preview renders roles and Markdown while disclosing unfinished writes",async({page})=>{
+ const fingerprint="b".repeat(64),observedAt=new Date().toISOString(),leaseExpires=new Date(Date.now()+3600000).toISOString();
+ const observation={provider:"claude-hosted",session:"actual-session",workspace:"/workspace/repo",observedAt,leaseExpires,transcriptAvailable:true,exportAllowed:true};
+ await page.route("**/call",async route=>{
+  const request=route.request().postDataJSON();
+  if(request.m==="Settings"){const response=await route.fetch(),body=await response.json();body.result.relay={initialized:true,enabled:true,enrolled:true,expires:Date.now()/1000+3600,peers:[{id:fingerprint,fingerprint,name:"One cloud session",kind:"cloud-session",sendMethods:["observe","export"],methods:[],expires:Date.now()/1000+3600}]};await route.fulfill({json:body});return;}
+  if(request.m==="RelayCloudInspect"){await route.fulfill({json:{result:observation}});return;}
+  if(request.m==="RelayCloudPreview"){await route.fulfill({json:{result:{...observation,sha256:"c".repeat(64),checkpoint:{created:observedAt,records:12,omittedTailBytes:31},preview:{more:true,items:[{role:"user",text:"**Review this**\n<script>window.cloudCheckpointInjected=true</script>"},{role:"agent",text:"**Result**: ready to inspect."}]}}}});return;}
+  await route.continue();
+ });
+ await page.getByRole("button",{name:"Refresh status",exact:true}).click();
+ await page.getByRole("button",{name:"Inspect session…"}).click();
+ const d=page.getByRole("dialog");
+ await expect(d.getByRole("button",{name:"Preview conversation checkpoint"})).toBeEnabled();
+ await d.getByRole("button",{name:"Preview conversation checkpoint"}).click();
+ await expect(d).toContainText("31 unfinished bytes excluded");
+ await expect(d.locator(".msg.user strong")).toHaveText("Review this");
+ await expect(d.locator(".msg.agent strong")).toHaveText("Result");
+ await expect(d).toContainText("Earlier conversation is not included");
+ expect(await page.evaluate(()=> (window as any).cloudCheckpointInjected)).toBeUndefined();
+ await expect(d.locator("script")).toHaveCount(0);
+});
+
 test("opening internet settings does not enroll or create an identity", async ({ page }) => {
   await expect(page.getByRole("status").filter({ hasText: "Not initialized" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Enroll endpoint…" })).toBeDisabled();

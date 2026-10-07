@@ -35,8 +35,34 @@ func cloudIntegrationCmd() *cobra.Command {
 	plan.Flags().StringVar(&version, "version", "", "immutable signed 0.5 release version")
 	plan.Flags().StringVar(&origin, "origin", cloudintegration.DownloadOrigin, "verified downloads HTTPS origin")
 	plan.Flags().BoolVar(&script, "script", false, "print only the installation shell script")
-	root.AddCommand(plan, cloudPrepareCmd(), cloudCurrentCmd(), cloudStartupInstallCmd(), cloudAuthorizeCmd(), cloudServeCmd(), cloudTicketCmd(), cloudClaimCmd(), cloudRevokeTicketCmd(), cloudTicketStatusCmd())
+	root.AddCommand(plan, cloudPrepareCmd(), cloudCurrentCmd(), cloudStartupInstallCmd(), cloudAuthorizeCmd(), cloudServeCmd(), cloudTicketCmd(), cloudClaimCmd(), cloudRevokeTicketCmd(), cloudTicketStatusCmd(), cloudInspectCmd())
 	return root
+}
+
+func cloudInspectCmd() *cobra.Command {
+	var preview bool
+	c := &cobra.Command{Use: "inspect <approved-cloud-fingerprint>", Short: "Check one approved cloud incarnation; optionally preview its conversation checkpoint", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		r, err := newRun(cmd)
+		if err != nil {
+			return err
+		}
+		ctx, cancel := ctxTimeout(1)
+		defer cancel()
+		if preview {
+			out, err := r.app.CloudConnectorConversation(ctx, args[0])
+			if err != nil {
+				return err
+			}
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(out)
+		}
+		out, err := r.app.CloudConnectorObservation(ctx, args[0])
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(out)
+	}}
+	c.Flags().BoolVar(&preview, "preview", false, "explicitly request up to 20 messages; export must be approved on both endpoints")
+	return c
 }
 
 func cloudPrepareCmd() *cobra.Command {
