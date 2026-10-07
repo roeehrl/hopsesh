@@ -1,12 +1,40 @@
 package gui
 
 import (
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 )
+
+func TestTerminalModuleTypesIgnoreOSFileAssociations(t *testing.T) {
+	for _, ext := range []string{".js", ".mjs", ".css"} {
+		previous := mime.TypeByExtension(ext)
+		t.Cleanup(func() { _ = mime.AddExtensionType(ext, previous) })
+		if err := mime.AddExtensionType(ext, "application/octet-stream"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	terms := NewTerminals("test")
+	defer terms.CloseAll()
+	raw, err := terms.hostURL(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, _ := url.Parse(raw)
+	for file, want := range map[string]string{"window-start.js": "text/javascript", "vendor/xterm.mjs": "text/javascript", "terminal.css": "text/css"} {
+		resp, err := http.Get(u.Scheme + "://" + u.Host + "/terminal/" + file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != 200 || !strings.HasPrefix(resp.Header.Get("Content-Type"), want) {
+			t.Errorf("%s: status %d, type %s", file, resp.StatusCode, resp.Header.Get("Content-Type"))
+		}
+	}
+}
 
 func TestEmbeddedRendererCannotInheritMainWindowBindings(t *testing.T) {
 	terms := NewTerminals("test")

@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -176,6 +177,14 @@ func (t *Terminals) terminalHTTP(w http.ResponseWriter, r *http.Request) {
 	policy = strings.ReplaceAll(policy, "'self'", origin)
 	policy = strings.Replace(policy, "connect-src "+origin, "connect-src "+origin+" "+strings.Replace(origin, "http://", "ws://", 1), 1)
 	w.Header().Set("Content-Security-Policy", policy)
+	// Bundled browser assets have known types. Windows file associations can
+	// override Go's MIME table, which must not disable strict module loading.
+	switch path.Ext(r.URL.Path) {
+	case ".js", ".mjs":
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	case ".css":
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	}
 	sub, _ := fs.Sub(Assets, "assets")
 	http.FileServer(http.FS(sub)).ServeHTTP(w, r)
 }
