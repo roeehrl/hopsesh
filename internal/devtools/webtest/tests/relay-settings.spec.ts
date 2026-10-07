@@ -24,8 +24,41 @@ test("scoped cloud inspection is explicit and unqualified export stays disabled"
  const d=page.getByRole("dialog");
  await expect(d).toContainText("Native conversation export is unavailable");
  await expect(d.getByRole("button",{name:"Preview conversation checkpoint"})).toBeDisabled();
+ await expect(d.getByRole("button",{name:"Import conversation…"})).toBeDisabled();
  await d.getByRole("button",{name:"Check session now"}).click();
  await expect.poll(()=>checked).toBe(2);expect(exported).toBe(0);
+});
+
+test("checkpoint import reviews exact destination and invalidates approval after editing",async({page})=>{
+ const fingerprint="d".repeat(64),now=new Date().toISOString();
+ let planCalls=0,applyCalls=0,reviewed="";
+ await page.route("**/call",async route=>{
+  const request=route.request().postDataJSON();
+  if(request.m==="Settings"){const response=await route.fetch(),body=await response.json();body.result.relay={initialized:true,enabled:true,enrolled:true,expires:Date.now()/1000+3600,peers:[{id:fingerprint,fingerprint,name:"Approved task",kind:"cloud-session",expires:Date.now()/1000+3600}]};await route.fulfill({json:body});return;}
+  if(request.m==="RelayCloudInspect"){await route.fulfill({json:{result:{provider:"claude-hosted",session:"actual-session",workspace:"/workspace/repo",observedAt:now,leaseExpires:now,transcriptAvailable:true,exportAllowed:true}}});return;}
+  if(request.m==="AccountDestinations"){await route.fulfill({json:{result:[{id:"profile-one",name:"Research",default:true}]}});return;}
+  if(request.m==="ChooseFolder"){await route.fulfill({json:{result:"/local/repo"}});return;}
+  if(request.m==="RelayCloudPlan"){planCalls++;expect(request.args.slice(0,4)).toEqual([fingerprint,planCalls===1?"claude":"codex","/local/repo","profile-one"]);expect(request.args[5]).toBe(false);reviewed=request.args[4];await route.fulfill({json:{result:{operation:reviewed,sha256:"e".repeat(64),checkpoint:{records:12,omittedTailBytes:19},plan:{agent:planCalls===1?"Claude Code":"Codex",targetCwd:"/local/repo",warnings:["Portable conversation only"],blockers:[]}}}});return;}
+  if(request.m==="RelayCloudApply"){applyCalls++;expect(request.args).toEqual([reviewed]);await route.fulfill({json:{error:"this cloud incarnation is not approved for conversation export"}});return;}
+  await route.continue();
+ });
+ await page.getByRole("button",{name:"Refresh status",exact:true}).click();
+ await page.getByRole("button",{name:"Inspect session…"}).click();
+ await page.getByRole("dialog").getByRole("button",{name:"Import conversation…"}).click();
+ const d=page.getByRole("dialog");
+ await expect(d.getByRole("button",{name:"Import reviewed checkpoint"})).toBeDisabled();
+ await d.getByRole("button",{name:"Choose working directory…"}).click();
+ await d.getByRole("button",{name:"Review import"}).click();
+ await expect(d).toContainText("19 unfinished bytes excluded");
+ await expect(d.getByRole("button",{name:"Import reviewed checkpoint"})).toBeEnabled();
+ const first=reviewed;
+ await d.getByLabel("Checkpoint destination agent").selectOption("codex");
+ await expect(d.getByRole("button",{name:"Import reviewed checkpoint"})).toBeDisabled();
+ await d.getByRole("button",{name:"Review import"}).click();
+ expect(reviewed).not.toBe(first);
+ await d.getByRole("button",{name:"Import reviewed checkpoint"}).click();
+ await expect(d.getByRole("alert")).toContainText("not approved for conversation export");
+ await expect(d).toBeVisible();expect(applyCalls).toBe(1);
 });
 
 test("cloud checkpoint preview renders roles and Markdown while disclosing unfinished writes",async({page})=>{

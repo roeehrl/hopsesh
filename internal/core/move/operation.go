@@ -112,6 +112,11 @@ func operationNative(env Env, p *Plan, path string, cursor ir.Cursor, res *Resul
 // Apply is idempotent for its stable operation ID. A restarted caller recovers durable
 // receipts and verifies a native write through the module before committing its graph.
 func Apply(ctx context.Context, p *Plan, in Input, env Env) (result *Result, failure error) {
+	if in.CheckSource != nil {
+		if err := in.CheckSource(ctx); err != nil {
+			return nil, err
+		}
+	}
 	defer func() {
 		if failure == nil && result != nil && p.Options.Notify && !p.NoWork && (p.Kind == KindMove || p.Kind == KindContinue) {
 			result.Notice = fmt.Sprintf("Prepared in %s on %s. Work there has not yet been observed. The previous copy retains a movement notice; native-agent delivery requires its Hopsesh notice hooks.", p.Agent, p.Target.Location)

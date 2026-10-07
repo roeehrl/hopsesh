@@ -791,6 +791,10 @@ func (a *App) Apply() (*DoneDTO, error) {
 	if p == nil {
 		return nil, errors.New("no plan; choose the session again")
 	}
+	return a.applyReviewedPlan(core, p, in)
+}
+
+func (a *App) applyReviewedPlan(core *app.App, p *move.Plan, in move.Input) (*DoneDTO, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 	res, err := core.Apply(ctx, p, in, func(step string) { a.emit(ProgressEvent, step) })

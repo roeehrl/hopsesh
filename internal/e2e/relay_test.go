@@ -25,12 +25,16 @@ import (
 	"time"
 
 	"github.com/roeehrl/hopsesh/agents/claude"
+	"github.com/roeehrl/hopsesh/agents/codex"
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/cloudintegration"
+	"github.com/roeehrl/hopsesh/internal/core/host"
+	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/relay"
 	localruntime "github.com/roeehrl/hopsesh/internal/core/runtime"
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 // Exercise the real CLI/private IPC/age/HTTPS/Worker/receiver/native writer path.
@@ -459,6 +463,89 @@ func qualifyCloudConnector(t *testing.T, ctx context.Context, bin, root, origin,
 	inspect(true, false)
 	if err = store.Approve(ctx, relay.Grant{Peer: instance.Public, Endpoint: instance.Public.Endpoint, Kind: "cloud-session", SendMethods: []string{"observe", "export"}, Expires: connection.Expires}); err != nil {
 		t.Fatal(err)
+	}
+	// Real portable imports use the shared native planner, private local source
+	// ledger and stable operation recovery. A sibling fork stays independent.
+	for _, target := range []string{"claude", "codex"} {
+		for _, fork := range []bool{false, true} {
+			operation := fmt.Sprintf("cloud-checkpoint-%s-%t", target, fork)
+			args := []string{"cloud-integration", "import", instance.Public.ID, "--to", desktop.repo, "--in", target, "--operation-id", operation, "--yes"}
+			if fork {
+				args = append(args, "--fork")
+			}
+			invoke := func(extra ...string) []byte {
+				t.Helper()
+				cmd := exec.CommandContext(ctx, bin, append(append([]string{}, args...), extra...)...)
+				cmd.Env = desktop.env()
+				var stderr bytes.Buffer
+				cmd.Stderr = &stderr
+				out, err := cmd.Output()
+				if err != nil {
+					t.Fatalf("checkpoint import: %v\n%s", err, stderr.String())
+				}
+				return out
+			}
+			var review struct {
+				Plan       move.Plan                   `json:"plan"`
+				Checkpoint cloudintegration.Checkpoint `json:"checkpoint"`
+			}
+			if err = json.Unmarshal(invoke("--dry-run"), &review); err != nil || !review.Plan.Options.NewReplica || !review.Plan.Options.OtherAccount || review.Checkpoint.OmittedTail != int64(len(partial)) {
+				t.Fatal("checkpoint review lost portable or fidelity boundary", err)
+			}
+			var result struct {
+				Plan   move.Plan   `json:"plan"`
+				Result move.Result `json:"result"`
+			}
+			if err = json.Unmarshal(invoke(), &result); err != nil || result.Result.Journal == "" {
+				t.Fatal("checkpoint destination was not durable", err)
+			}
+			if result.Plan.Placement.Key.Session == sid {
+				t.Fatal("cloud import reused a protected native identity")
+			}
+			l := newLocation(t, desktop.name, root)
+			var mod agent.Module = claude.New()
+			install := l.in
+			if target == "codex" {
+				mod = codex.New()
+				install = codexInstall(l)
+			}
+			var destination agent.Summary
+			for _, s := range listAgent(t, l, mod, install) {
+				if s.Key.Session == result.Plan.Placement.Key.Session {
+					destination = s
+				}
+			}
+			if destination.Path == "" {
+				t.Fatal("imported native session not listed")
+			}
+			before, err := os.ReadFile(destination.Path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			graph, err := lineage.Read(host.LocalFS(), destination.Path)
+			if err != nil || graph == nil || graph.Journey().Fork != fork || graph.Journey().MachineTransfers != 0 {
+				t.Fatal("checkpoint lineage misclassified cloud or fork", err)
+			}
+			var retry struct {
+				Plan   move.Plan   `json:"plan"`
+				Result move.Result `json:"result"`
+			}
+			if err = json.Unmarshal(invoke(), &retry); err != nil || retry.Plan.Placement.Key != result.Plan.Placement.Key || retry.Result.Journal != result.Result.Journal {
+				t.Fatal("checkpoint retry allocated a new destination", err)
+			}
+			after, err := os.ReadFile(destination.Path)
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatal("checkpoint retry rewrote native history", err)
+			}
+			cmd := exec.CommandContext(ctx, bin, "undo", result.Result.Journal, "--yes", "--json")
+			cmd.Env = desktop.env()
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("checkpoint undo: %v\n%s", err, out)
+			}
+			if _, err = os.Stat(destination.Path); !os.IsNotExist(err) {
+				t.Fatal("checkpoint undo left its new native session", err)
+			}
+		}
 	}
 	if err = call("apply", nil, nil); err == nil {
 		t.Fatal("cloud grant allowed device mutation")

@@ -714,11 +714,11 @@ func recordContinuation(ctx context.Context, p *Plan, in Input, j *journal.Journ
 			markNative(ctx, p, j, nativeDst, res)
 		}
 	}
-	srcFS, reachErr := in.Source.Machine.FS(ctx)
+	srcFS, receiptMachine, receiptPath, reachErr := sourceReceipt(ctx, in)
 	if reachErr != nil {
 		srcFS = nil
 	}
-	if e := j.WriteReceipt(srcFS, p.Source.Location, lineage.PathFor(in.Session.Path), m.ForBranch(p.sourceLine).Encode(), false); e != nil {
+	if e := j.WriteReceipt(srcFS, receiptMachine, lineage.PathFor(receiptPath), m.ForBranch(p.sourceLine).Encode(), false); e != nil {
 		res.Warnings = append(res.Warnings, "destination committed; source receipt acknowledgement pending: "+e.Error())
 	}
 

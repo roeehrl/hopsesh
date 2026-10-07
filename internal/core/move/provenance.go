@@ -15,11 +15,11 @@ import (
 // prepareLineage snapshots the entire causal graph. Planning never mutates inventory.
 func prepareLineage(ctx context.Context, p *Plan, in Input, seg *ir.Segment) error {
 	m := in.Lineage.Clone()
-	fsys, err := in.Source.Machine.FS(ctx)
+	fsys, _, sourcePath, err := sourceReceipt(ctx, in)
 	if err != nil {
 		return err
 	}
-	actual, err := lineage.Read(fsys, in.Session.Path)
+	actual, err := lineage.Read(fsys, sourcePath)
 	if err != nil {
 		return err
 	}

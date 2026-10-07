@@ -104,6 +104,9 @@ type Result struct {
 // machinesOf reaches the two machines of a move by name, for the journal.
 func machinesOf(ctx context.Context, in Input) func(string) (host.FS, error) {
 	return func(name string) (host.FS, error) {
+		if r := in.SourceReceipt; r != nil && name == r.Machine {
+			return r.FS, nil
+		}
 		switch name {
 		case in.Target.Machine.Name:
 			return in.Target.Machine.FS(ctx)
@@ -516,11 +519,11 @@ func recordLineage(ctx context.Context, p *Plan, in Input, j *journal.Journal, m
 	if p.Source.Location == p.Target.Location && in.Session.Path == mainDst {
 		return nil
 	}
-	srcFS, err := in.Source.Machine.FS(ctx)
+	srcFS, receiptMachine, receiptPath, err := sourceReceipt(ctx, in)
 	if err != nil {
 		srcFS = nil
 	}
-	err = j.WriteReceipt(srcFS, p.Source.Location, lineage.PathFor(in.Session.Path), m.ForBranch(p.sourceLine).Encode(), false)
+	err = j.WriteReceipt(srcFS, receiptMachine, lineage.PathFor(receiptPath), m.ForBranch(p.sourceLine).Encode(), false)
 	if err != nil {
 		res.Warnings = append(res.Warnings, "destination committed; source receipt acknowledgement pending: "+err.Error())
 	}

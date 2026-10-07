@@ -7,19 +7,22 @@ function inspectCloud(peer) {
  const status=h("div",{role:"status","aria-live":"polite"}),content=h("div",{class:"conversation",style:"max-height:40vh;overflow:auto"}),error=h("p",{class:"err",role:"alert"});
  let closed=false;
  const preview=h("button",{class:"btn",disabled:true},"Preview conversation checkpoint");
+ const bring=h("button",{class:"btn primary",disabled:true},"Import conversation…");
  const check=h("button",{class:"btn"},"Check session now");
  async function inspect(){
-  check.disabled=true;preview.disabled=true;error.textContent="";content.replaceChildren();
+  check.disabled=true;preview.disabled=true;bring.disabled=true;error.textContent="";content.replaceChildren();
   try {
    const o=await pending("Check cloud session",()=>api("RelayCloudInspect",peer.id));
    if(closed)return;
    const title=o.provider==="claude-hosted" ? "Claude Code" : "Codex";
    status.replaceChildren(h("h3",{},`${title} · ${o.session}`),h("p",{},`Responded ${new Date(o.observedAt).toLocaleString()} · lease ends ${new Date(o.leaseExpires).toLocaleString()}`),h("p",{class:"mono",style:"overflow-wrap:anywhere"},o.workspace),h("p",{class:"muted"},o.exportAllowed && o.transcriptAvailable ? "A complete-record conversation checkpoint can be previewed. Ongoing writes may leave an unfinished final record. Code, agent control and native restore are separate capabilities." : !o.transcriptAvailable ? "Native conversation export is unavailable on this session. Installing the helper does not provide a transcript source." : "Conversation export has not been approved on both endpoints."));
    preview.disabled=!(o.exportAllowed && o.transcriptAvailable);
+   bring.disabled=preview.disabled;
   } catch(e){if(!closed){status.replaceChildren();error.textContent=String(e?.message || e);}}
   finally {check.disabled=false;}
  }
  check.addEventListener("click",()=>void inspect());
+ bring.addEventListener("click",()=>checkpointImport(peer));
  preview.addEventListener("click",async()=>{
   preview.disabled=true;check.disabled=true;error.textContent="";
   try {
@@ -30,9 +33,30 @@ function inspectCloud(peer) {
   }catch(e){if(!closed)error.textContent=String(e?.message || e);}
   finally {preview.disabled=false;check.disabled=false;}
  });
- const d=dialog(h("h2",{},"One approved cloud session"),h("p",{class:"mono muted",style:"overflow-wrap:anywhere"},peer.fingerprint),status,error,content,h("div",{class:"dlg-foot"},h("button",{class:"btn",onclick:()=>d.close()},"Close"),check,preview));
+ const d=dialog(h("h2",{},"One approved cloud session"),h("p",{class:"mono muted",style:"overflow-wrap:anywhere"},peer.fingerprint),status,error,content,h("div",{class:"dlg-foot",style:"flex-wrap:wrap"},h("button",{class:"btn",onclick:()=>d.close()},"Close"),check,preview,bring));
  d.addEventListener("close",()=>{closed=true;},{once:true});
  void inspect();
+}
+
+function checkpointImport(peer) {
+ const agent=h("select",{"aria-label":"Checkpoint destination agent"},h("option",{value:"claude"},"Claude Code"),h("option",{value:"codex"},"Codex"));
+ const profile=h("select",{"aria-label":"Checkpoint destination account"});
+ const folder=h("p",{class:"mono muted",style:"overflow-wrap:anywhere"},"Choose a local working directory");
+ const fork=h("input",{type:"checkbox","aria-label":"Independent checkpoint branch"});
+ const status=h("div",{role:"status","aria-live":"polite",style:"max-height:35vh;overflow:auto"}),error=h("p",{role:"alert",class:"err"});
+ let dir="",operation=crypto.randomUUID(),review=null,closed=false,busy=false;
+ const apply=h("button",{class:"btn primary",disabled:true},"Import reviewed checkpoint");
+ const prepare=h("button",{class:"btn",disabled:true},"Review import");
+ const choose=h("button",{class:"btn"},"Choose working directory…");
+ function controls(active){busy=active;agent.disabled=profile.disabled=fork.disabled=choose.disabled=active;prepare.disabled=active||!dir||!profile.options.length;apply.disabled=active||!review||(review.plan.blockers||[]).length>0;}
+ function invalidate(){operation=crypto.randomUUID();review=null;status.replaceChildren();error.textContent="";controls(false);}
+ async function accounts(){profile.replaceChildren();invalidate();controls(true);try{const rows=await api("AccountDestinations","",agent.value);if(closed)return;for(const p of rows)profile.append(h("option",{value:p.id},p.name+(p.default?" (default)":"")));if(!rows.length)error.textContent="Start this agent locally and scan its account before importing.";}catch(e){if(!closed)error.textContent=String(e?.message||e);}finally{controls(false);}}
+ agent.addEventListener("change",()=>void accounts());profile.addEventListener("change",invalidate);fork.addEventListener("change",invalidate);
+ choose.addEventListener("click",async()=>{controls(true);try{const selected=await api("ChooseFolder","Local working directory for the cloud conversation");if(selected&&!closed){dir=selected;folder.textContent=dir;invalidate();}}catch(e){if(!closed)error.textContent=String(e?.message||e);}finally{controls(false);}});
+ prepare.addEventListener("click",async()=>{if(busy)return;controls(true);error.textContent="";try{const r=await pending("Review cloud checkpoint",()=>api("RelayCloudPlan",peer.id,agent.value,dir,profile.value,operation,fork.checked));if(closed)return;review=r;operation=r.operation;const p=r.plan;status.replaceChildren(h("h3",{},`New ${p.agent} session`),h("p",{class:"mono"},p.targetCwd),h("p",{},`${r.checkpoint.records} complete records · ${r.checkpoint.omittedTailBytes} unfinished bytes excluded`),h("p",{class:"mono muted",style:"overflow-wrap:anywhere"},`SHA256 ${r.sha256}`),...(p.warnings||[]).map(w=>h("p",{class:"muted"},w)),...(p.blockers||[]).map(b=>h("p",{class:"err"},b)),h("p",{class:"muted"},"This review expires after 10 minutes. Conversation only; repository code stays on its current branch. No agent is launched automatically."));}catch(e){review=null;if(!closed)error.textContent=String(e?.message||e);}finally{controls(false);}});
+ apply.addEventListener("click",async()=>{if(busy||!review)return;controls(true);error.textContent="";try{const result=await pending("Import cloud checkpoint",()=>api("RelayCloudApply",operation));if(closed)return;d.close();go("done",result,review.plan,{app:false,notify:false});}catch(e){if(!closed)error.textContent=String(e?.message||e);}finally{controls(false);}});
+ const d=dialog(h("h2",{},"Import cloud conversation"),h("p",{class:"muted"},"Create a portable local session from one approved incarnation. The cloud session can keep working; subsequent messages are not synchronized automatically."),field("Agent",agent),field("Account",profile),folder,choose,h("label",{class:"opt"},fork,"Start an independent lineage branch"),error,status,h("div",{class:"dlg-foot",style:"flex-wrap:wrap"},h("button",{class:"btn",onclick:()=>d.close()},"Cancel"),prepare,apply));
+ d.addEventListener("close",()=>{closed=true;},{once:true});void accounts();
 }
 
 function pairing(kind, refresh, receivingEnabled, publicIdentity) {
