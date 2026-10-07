@@ -154,7 +154,7 @@ function localModel(e) {
     if (places.length) {
       const first = tab || places.find(canShow) || places[0];
       const show = (p) => ({ id: "show:" + p.kind, label: canShow(p) ? (p.kind === "ide" ? `Show ${placeName(p, e)}` : `Show in ${placeName(p, e)}`) : `Running in ${placeName(p, e)}`, short: "Show",
-        disabled: !canShow(p), why: canShow(p) ? "" : `hopsesh can't show a session in ${placeName(p, e)}`, run: () => showPlace(e, p) });
+        disabled: !canShow(p) || ((p.kind === "claude-app" || p.kind === "codex-app") && !e.canApp), why: ((p.kind === "claude-app" || p.kind === "codex-app") && !e.canApp) ? e.appWhy : canShow(p) ? "" : `hopsesh can't show a session in ${placeName(p, e)}`, run: () => showPlace(e, p) });
       m.primary = show(first);
       if (n >= 2) {
         m.twice = true;
@@ -165,7 +165,7 @@ function localModel(e) {
         m.chevronLabel = "Move it";
       } else if (first.kind === "ide") m.caption = sys.mac ? `hopsesh can't pick the tab inside ${placeName(first, e)}` : `hopsesh can't show a session in ${placeName(first, e)}`;
       else if (first.kind === "tmux" || first.kind === "ssh") { m.primary = null; m.caption = `Running in ${placeName(first, e)}; hopsesh can't show it`; }
-      else if (first.kind === "claude-app" || first.kind === "codex-app") m.caption = "The app opens on its last view";
+      else if (first.kind === "claude-app" || first.kind === "codex-app") m.caption = e.canApp ? "Opens this conversation in the desktop app" : e.appWhy;
     } else if (e.movement?.machine && e.movement?.key) {
       m.primary = { id: "destination", label: "Show destination", run: () => showMovementDestination(e.movement, selectFn) };
       m.chevron = resumePlaces(e).map(p => resumeItem(p));

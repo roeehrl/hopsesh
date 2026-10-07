@@ -155,7 +155,7 @@ test("the inspector's menus close on Escape, a click elsewhere and another place
   await expect(places).toBeHidden();
 });
 
-test("a session open in the Claude app says so, and shows the app", async ({ page }) => {
+test("a session open in Claude reports unsupported exact opening instead of silently showing the app", async ({ page }) => {
   const key = await row(page, "Find the codeword").getAttribute("data-key");
   const id = key!.split("\u0000")[1].split("/")[1];
   expect((await page.request.post(`/live?session=${id}&entrypoint=claude-desktop`)).ok()).toBeTruthy();
@@ -166,10 +166,10 @@ test("a session open in the Claude app says so, and shows the app", async ({ pag
   await r.click();
   const d = details(page);
   await expect(d.locator(".ins-status")).toContainText("in Claude app");
-  await expect(d).toContainText("The app opens on its last view");
+  await expect(d).not.toContainText("The app opens on its last view");
   await expect(d.getByText("Open in", { exact: true })).toBeVisible();
-  await d.locator("#act-primary").click();
-  await expect.poll(async () => (await (await page.request.get("/terminal-test/links")).json()) as string[]).toContain("app:Claude");
+  await expect(d.locator("#act-primary")).toBeDisabled();
+  await expect(d).toContainText(process.platform === "linux" ? "Claude desktop opening requires macOS or Windows x64" : "Update Claude Code to 2.1.285");
   await page.locator("#btn-filter").click();
   await page.getByRole("menuitem", { name: /^Has/ }).click();
   await page.getByRole("menuitemcheckbox", { name: /^Open in a terminal tab/ }).click();
@@ -291,7 +291,7 @@ test("the palette finds a session and shows it; its action is on mod+Enter", asy
   await page.keyboard.press("Escape");
 });
 
-test("mod+Enter in the palette runs the main action: here, showing the Claude app", async ({ page }) => {
+test("mod+Enter cannot bypass a disabled desktop action or run a different action", async ({ page }) => {
   const key = await row(page, "Find the codeword").getAttribute("data-key");
   const id = key!.split("\u0000")[1].split("/")[1];
   expect((await page.request.post(`/live?session=${id}&entrypoint=claude-desktop`)).ok()).toBeTruthy();
@@ -301,7 +301,8 @@ test("mod+Enter in the palette runs the main action: here, showing the Claude ap
   const input = page.getByRole("combobox", { name: "Search sessions or run a command" });
   await input.fill("Find the codeword");
   await input.press(process.platform === "darwin" ? "Meta+Enter" : "Control+Enter");
-  await expect.poll(async () => (await (await page.request.get("/terminal-test/links")).json()) as string[]).toContain("app:Claude");
+  await expect(input).toBeVisible();
+  expect((await (await page.request.get("/terminal-test/links")).json()) as string[]).not.toContain("app:Claude");
 });
 
 test("rename: the agent's own title, undone from Activity", async ({ page }) => {

@@ -261,3 +261,9 @@ func (s Spec) TestedWith(version string) bool {
 type AppChecker interface {
 	CheckApp(Install, SessionKey, ResumeOptions) error
 }
+
+// AppFocusVerifier rechecks ownership before a vendor focus route that could
+// otherwise import a stale session ID. It is not needed for pure navigation URLs.
+type AppFocusVerifier interface {
+	VerifyAppFocus(context.Context, Host, Install, SessionKey) error
+}

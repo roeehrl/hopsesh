@@ -16,6 +16,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Open the selected Claude Code session in Desktop instead of only activating the
+  app. Use the supported CLI for saved sessions, with a temporary PTY and visible
+  errors; focus a currently owned Desktop session only on a verified app build.
+  Gate unsupported versions/platforms/profiles. Replace the tray arrows with the
+  official Hopsesh arch and dots, rendered as a macOS template image.
+
 - Avoid false divergence on portable returns when the first account observation rotates
   a profile binding. Verify the original's native history while keeping native append
   restrictions and independent-work conflict checks intact.

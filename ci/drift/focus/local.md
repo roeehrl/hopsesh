@@ -112,3 +112,19 @@ pin the installation's config/state scope; default-root registration must not or
 older hooks. Failed or timed-out stdout writes remain retryable and cannot be reported
 as supplied. Repeated identical notices use validated operation/status identity even
 without a scan cache; lookup must not overwrite newer scan evidence.
+
+Claude desktop opening: review `agents/claude/desktop.go`, `internal/app/resume.go`,
+`internal/ui/gui/{termapps,sessions}.go`, `internal/ui/cli/tui.go` and SDK Command.TTY.
+The documented `claude --desktop --resume <uuid>` (2.1.285+, macOS / Windows x64)
+requires terminal stdin/stdout, a subscription login, and no conflicting options.
+It rejects even an already-running Desktop session. The narrow focus exception uses
+Desktop's own `claude://resume?session=<current-cli-id>` route only for a live session
+whose entrypoint identifies Desktop and a verified public macOS bundle (2.19675.1+).
+That route is an observed implementation contract, not a documented public focus API.
+Watch issue anthropics/claude-code#80773: older native/previous-/clear IDs can duplicate
+chats. Recheck live ownership on click. Never use a chat URL, guessed native ID, old
+lineage ID, hidden prompt or retry that imports after a focus failure. Public bundle
+metadata is the only Desktop file read. Unsupported live focus remains explicit;
+no fallback merely activates the app. Check TTY launch timeout/exit status/cleanup,
+no visible tab, session UUID propagation, and default-profile/root gates with module,
+GUI service and browser tests.

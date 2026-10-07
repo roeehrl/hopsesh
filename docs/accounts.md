@@ -111,3 +111,28 @@ Storage is `accounts.json` in Hopsesh's state directory, guarded by a cross-proc
 atomic replacement. Lineage uses `lineage/5` and peers require protocol 5. Old receipt formats
 are refused rather than silently assigned to a default account. The optional presence daemon
 is a separate future-release proposal, not required or installed by Accounts.
+
+### Opening a local session in Claude Desktop
+
+Hopsesh uses the [documented Claude Code launcher](https://code.claude.com/docs/en/desktop)
+`claude --desktop --resume <session-id>` for a saved local session. This requires
+Claude Code 2.1.285 or newer, macOS or Windows x64, Claude Desktop, and a subscription
+login. Claude checks installation, login and competing live sessions. API-key and
+third-party-provider logins are not supported by this launcher. Hopsesh waits for
+its result in a temporary terminal, reports errors, and leaves no terminal tab.
+The TUI preserves terminal input/output for the same command.
+
+An already-running Desktop session needs a different focus path: the CLI rejects it
+as in use. For a live session identified as belonging to Desktop on macOS, Hopsesh
+uses Desktop's own resume URL with that session's current CLI ID, after rechecking
+live ownership and verifying the public app bundle and version (2.19675.1 or newer).
+This is an observed implementation contract, not a documented public focus API;
+the upstream drift check covers it. Older/unverified builds and other platforms
+report that exact focus is unavailable. The
+[upstream duplicate-session issue](https://github.com/anthropics/claude-code/issues/80773)
+is why Hopsesh does not send historical IDs or blindly import to focus a chat.
+
+Both actions require the default account profile and native `.claude` root. They do
+not switch Desktop accounts, copy credentials, or send a message. Desktop can still
+ask for folder trust or sign-in. A successful launcher handoff alone does not prove
+that Desktop completed an import; any Desktop-side prompt must be completed there.

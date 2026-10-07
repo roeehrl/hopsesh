@@ -386,7 +386,7 @@ func entryDTO(core *app.App, inv *app.Inventory, it app.Item, targets []AgentOpt
 				if machine := inv.Machine(e.Machine); machine != nil {
 					if install, ok := machine.InstallProfile(e.Agent, e.Session.Key.Profile); ok {
 						d.CanApp, d.AppWhy = true, ""
-						if err := checker.CheckApp(install, e.Session.Key, agent.ResumeOptions{App: true}); err != nil {
+						if err := checker.CheckApp(install, e.Session.Key, agent.ResumeOptions{App: true, AppRunning: e.Live.State == agent.Live && e.Live.App}); err != nil {
 							d.CanApp = false
 							d.AppWhy = err.Error()
 						}
@@ -940,6 +940,10 @@ func start(c agent.Command) error {
 		return errors.New("no command")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if c.TTY {
+		defer cancel()
+		return startDesktopTTY(ctx, c)
+	}
 	if !c.Wait {
 		cancel()
 		ctx = context.Background()
@@ -981,4 +985,25 @@ func (a *App) ArchiveLineage(machine, key string) error {
 	defer cancel()
 	_, err = core.ArchiveLineage(ctx, inv, e)
 	return err
+}
+
+// Claude's desktop launcher rejects redirected stdin/stdout. Reuse the app's
+// cross-platform PTY backend without publishing a terminal tab or sending input.
+func startDesktopTTY(ctx context.Context, c agent.Command) error {
+	mgr := pty.NewManager(pty.Options{MaxTabs: 1, Scrollback: 32 << 10})
+	defer mgr.CloseAll()
+	s, err := mgr.Start(pty.Spec{Argv: c.Argv, Dir: c.Dir,
+		Env: pty.Env{Unset: c.Unset, Set: c.Env}, Capture: pty.CaptureStep})
+	if err != nil {
+		return fmt.Errorf("opening desktop app: %w", err)
+	}
+	code, err := s.Wait(ctx)
+	if err != nil {
+		return fmt.Errorf("opening desktop app: %w", err)
+	}
+	output, _ := s.StepOutput()
+	if code != 0 {
+		return fmt.Errorf("opening desktop app (exit %d): %s", code, strings.TrimSpace(output.Text))
+	}
+	return nil
 }

@@ -216,9 +216,12 @@ func main() {
 		links = append(links, u)
 		linksMu.Unlock()
 	})
-	gui.SetAppHook(func(name string) error {
+	gui.SetAppHook(func(name string, command agent.Command) error {
 		linksMu.Lock()
 		links = append(links, "app:"+name)
+		if len(command.Argv) > 0 {
+			links = append(links, "desktop:"+strings.Join(command.Argv[1:], " "))
+		}
 		linksMu.Unlock()
 		return nil
 	})
