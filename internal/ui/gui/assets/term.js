@@ -2,7 +2,7 @@
 // each hopsesh:terminal event), their chips on session rows and in the sidebar, "Needs
 // you", the entry points' routing (In this window / In my terminal), and the quit
 // confirmation that lists the programs still running.
-import "./terminal-workspace.js";
+import {showWorkspace} from "./terminal-workspace.js";
 import { api, on, h, state, toast, fail, sys, dialog, count, icon } from "./core.js";
 
 export const tabs = new Map(); // id → the tab (TermTab)
@@ -15,6 +15,12 @@ export async function loadTabs() {
   try {
     for (const t of await api("TerminalTabs")) tabs.set(t.id, t);
     for (const x of await api("ExternalExits")) exits.set(x.machine + "\u0000" + x.key, x);
+    // Native startup can open a tab before this document registers its event
+    // listeners. Recover the pending view from backend state, not event timing.
+    if (tabs.size) {
+      const workspace = await api("TerminalWorkspace");
+      if (workspace.placement !== "separate") await showWorkspace(workspace);
+    }
   } catch { /* no terminal here */ }
   changed();
 }

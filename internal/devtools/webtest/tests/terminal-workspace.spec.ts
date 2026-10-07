@@ -126,3 +126,19 @@ test('a shell can be organized explicitly without becoming a running agent sessi
  await page.getByRole('button',{name:'Move to Other terminals',exact:true}).click();
  await expect(terminal.locator('#runs')).not.toContainText('Find the codeword');
 });
+
+// A native launch may emit placement before the page installs event listeners.
+test('startup recovers an embedded terminal whose initial presentation event was missed',async({page})=>{
+ await page.goto('about:blank');
+ await page.request.post('/terminal-test/open?title=Early%20terminal');
+ const changed=await page.request.post('/call',{data:{m:'TerminalPlacement',args:['bottom']}});
+ expect(changed.ok()).toBeTruthy();
+ await page.goto('/');
+ const frame=page.frameLocator('#terminal-workspace iframe');
+ await expect(frame.getByRole('tab',{name:/Early terminal/})).toBeVisible();
+ await expect(frame.locator('#connection')).toBeHidden();
+ await expect.poll(async()=>{
+  const response=await page.request.post('/call',{data:{m:'TerminalSettings',args:[]}});
+  return (await response.json()).result.placement;
+ }).toBe('bottom');
+});
