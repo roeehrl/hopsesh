@@ -434,19 +434,34 @@ func appendOriginal(ctx context.Context, f *Fetch, side Side, j *journal.Journal
 	if !lineage.Subset(m.Covered(target.Heads), m.Covered(source.Heads)) {
 		return fmt.Errorf("original has work absent from cloud; preserve a separate branch")
 	}
+	fullNodes := append([]ir.Node(nil), seg.Nodes...)
 	seg.Nodes = missingNodes(seg.Nodes, m.Covered(target.Heads))
-	prof := writer.Profile(side.Install)
-	r := convert.Render(convert.Request{Nodes: seg.Nodes, From: name + " in " + f.CloudTitle, To: name,
-		Fidelity: convert.History, Window: prof.Window,
-		Briefing: convert.Briefing{SourceID: string(f.Session), SourceLoc: f.Cloud, TargetLoc: side.Machine.Name, When: time.Now(), Branch: ad.Branch}})
-	w, err := writer.Write(ctx, h, side.Install, ir.WriteRequest{OperationID: j.ID + "-append", Mode: ir.WriteAppend, SessionID: string(o.Key.Session), Expect: f.OriginalHead,
-		Header: ir.Header{CWD: o.CWD, Title: o.Title, GitBranch: ad.Branch}, Items: r.Items})
+	req, r, rolled, err := portableWrite(ctx, h, side.Module, side.Install, &o, fullNodes, ir.WriteRequest{OperationID: j.ID + "-append", Mode: ir.WriteAppend, SessionID: string(o.Key.Session), Expect: f.OriginalHead, Header: ir.Header{CWD: o.CWD, Title: o.Title, GitBranch: ad.Branch}}, convert.Request{Nodes: seg.Nodes, From: name + " in " + f.CloudTitle, To: name, Fidelity: convert.History, Briefing: convert.Briefing{SourceID: string(f.Session), SourceLoc: f.Cloud, TargetLoc: side.Machine.Name, When: time.Now(), Branch: ad.Branch}})
 	if err != nil {
 		return err
 	}
+	w, err := writer.Write(ctx, h, side.Install, req)
+	if err != nil {
+		return err
+	}
+	var rollover *lineage.Rollover
+	if rolled {
+		rollover = &lineage.Rollover{Replica: to, Cursor: f.OriginalHead}
+		o.Key.Session = agent.SessionID(w.SessionID)
+		o.Path = w.Path
+		to = m.Upsert(lineage.Replica{Endpoint: side.Machine.Facts.Endpoint, Binding: side.Install.BindingID(), Key: o.Key, Line: m.Branch, Location: side.Machine.Name, AgentVersion: side.Install.Version, Time: j.Time.UTC()})
+		ad.Warnings = append(ad.Warnings, "Original context was full; prepared a bounded continuation on the same branch. Original retained.")
+		if pi, ok := side.Module.(agent.PostInstaller); ok {
+			pl := agent.Placement{Key: o.Key, SourceID: f.Original.Key.Session, CWD: o.CWD, Location: side.Machine.Name, Name: o.Title}
+			if err := pi.AfterInstall(ctx, h, side.Install, o.Key, pl); err != nil {
+				ad.Warnings = append(ad.Warnings, "after writing: "+err.Error())
+			}
+		}
+	}
+	j.AddKey(o.Key)
 	now := j.Time.UTC()
-	receipt := m.Deliver(to, w.Cursor, w.Projection, source.Heads, source.Loss)
-	if err := m.AppendHop(lineage.Hop{ID: j.ID + "/append", Time: now, From: from, To: to, Source: source.ID, Target: receipt.ID, Kind: lineage.HopContinue, Fidelity: string(convert.History), Written: &lineage.Range{From: w.From, To: w.To}}); err != nil {
+	receipt := m.Deliver(to, w.Cursor, w.Projection, source.Heads, append(append([]string(nil), source.Loss...), conversionLoss(r.Report)...))
+	if err := m.AppendHop(lineage.Hop{Rollover: rollover, ID: j.ID + "/append", Time: now, From: from, To: to, Source: source.ID, Target: receipt.ID, Kind: lineage.HopContinue, Fidelity: string(convert.History), Written: &lineage.Range{From: w.From, To: w.To}}); err != nil {
 		return err
 	}
 	if err = m.Validate(); err != nil {
@@ -456,7 +471,7 @@ func appendOriginal(ctx context.Context, f *Fetch, side Side, j *journal.Journal
 		return err
 	}
 	f.Lineage = m
-	ad.Appended, ad.Key = true, o.Key
+	ad.Appended, ad.Key, ad.Path = !rolled, o.Key, o.Path
 	ad.Resume = side.Module.Resume(side.Install, o.Key, agent.Placement{Key: o.Key, SourceID: o.Key.Session, CWD: o.CWD, Location: side.Machine.Name}, agent.ResumeOptions{})
 	return nil
 }

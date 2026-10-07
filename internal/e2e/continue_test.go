@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -275,6 +276,8 @@ func TestContinueOnTheSameMachine(t *testing.T) {
 // appendCodexTurn adds a user and an assistant message as Codex records them.
 func appendCodexTurn(t *testing.T, file, user, reply string) {
 	t.Helper()
+	encode := func(s string) string { b, _ := json.Marshal(s); return string(b[1 : len(b)-1]) }
+	user, reply = encode(user), encode(reply)
 	ts := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
 	lines := `{"timestamp":"` + ts + `","type":"event_msg","payload":{"type":"user_message","message":"` + user + `","images":[]}}` + "\n" +
 		`{"timestamp":"` + ts + `","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"` + user + `"}]}}` + "\n" +

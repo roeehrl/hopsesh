@@ -16,8 +16,8 @@ function defaults() {
 
 // planFor opens the sheet for a session: target "" keeps its agent, sendTo pushes it;
 // codeOnly brings a cloud session's branch alone.
-export async function planFor(e, { target = "", sendTo = "", codeOnly = false, targetProfile = "" }) {
-  cur = { e, target, sendTo, opts: Object.assign(defaults(), { operationId: crypto.randomUUID() }, { codeOnly, targetProfile }), plan: null, busy: false, applying: false };
+export async function planFor(e, { target = "", sendTo = "", codeOnly = false, targetProfile = "", bounded = false }) {
+  cur = { e, target, sendTo, opts: Object.assign(defaults(), { operationId: crypto.randomUUID() }, { codeOnly, targetProfile, bounded }), plan: null, busy: false, applying: false };
   fill(sheet, h("div", { class: "sheet-in" }, h("div", { class: "loading", role: "status", style: "min-height:240px" },
     sendTo ? `Asking hopsesh on ${sendTo} to plan it…` : "Working out the plan…")));
   if (!sheet.open) sheet.showModal();
@@ -120,12 +120,12 @@ function summaryContent(p) {
 // boxes splits a conversion report into what is carried, changed and left out.
 function boxes(p) {
   const c = p.continue, rep = c.report;
-  const carried = rep.fidelity === "note" ? ["A briefing only"] : [count(rep.messages, "message"),
+  const carried = rep.method === "vendor-import" ? ["History converted by the agent’s importer", "Hopsesh briefing added"] : rep.fidelity === "note" ? ["A briefing only"] : rep.stepsSummarised ? ["Bounded history", "Full portable text in the archive"] : [count(rep.messages, "message"),
     rep.nativeCalls ? `${count(rep.nativeCalls, "command")} as ${p.agent}'s own, ${count(rep.toolCalls - rep.nativeCalls, "tool call")} as text` : `${count(rep.toolCalls, "tool call")}, as text`];
   const changed = [rep.outputsShortened && `${count(rep.outputsShortened, "long output")} shortened`, rep.stepsSummarised && `${count(rep.stepsSummarised, "oldest step")} summarised to fit`,
-    rep.pathsMapped && `${count(rep.pathsMapped, "path")} mapped to ${p.machine || "this machine"}`, rep.redactions && `${count(rep.redactions, "likely secret")} redacted`,
+    rep.briefShortened && "Briefing shortened to fit", rep.pathsMapped && `${count(rep.pathsMapped, "path")} mapped to ${p.machine || "this machine"}`, rep.redactions && `${count(rep.redactions, "likely secret")} redacted`,
     rep.attachmentsAsPlaceholders && `${count(rep.attachmentsAsPlaceholders, "attachment")} as placeholders`].filter(Boolean);
-  const lost = rep.reasoningDropped ? [count(rep.reasoningDropped, "reasoning block"), `private to ${c.from}`] : ["Nothing"];
+  const lost = rep.method === "vendor-import" ? ["Vendor import fidelity has not been verified"] : rep.reasoningDropped ? [count(rep.reasoningDropped, "reasoning block"), `private to ${c.from}`] : ["Nothing"];
   const box = (cls, title, lines) => h("div", { class: "box " + cls }, h("b", {}, title), lines.map((l, i) => h("span", { class: i ? "muted" : "" }, l)));
   return h("div", { class: "three-boxes" }, box("kept", "Carried over", carried), box("changed", "Changed", changed.length ? changed : ["Nothing"]), box("lost", "Left out", lost));
 }
@@ -144,8 +144,10 @@ function conversation(p) {
   return h("section", { class: "sec", style: "border:0;padding:0;gap:10px" },
     h("div", { style: "display:flex;align-items:center;gap:12px;flex-wrap:wrap" }, h("span", { class: "sec-h" }, "The conversation"), h("span", { class: "spacer" }),
       imported ? null : h("div", { class: "seg", role: "radiogroup", "aria-label": "What to carry" },
-        [["history", "Whole conversation"], ["note", "Briefing only"]].map(([v, t]) => h("button", { role: "radio", "aria-checked": o.fidelity === v ? "true" : "false", onclick: () => set("fidelity", v) }, t)))),
+        [["history", "History + bounded context"], ["note", "Briefing only"]].map(([v, t]) => h("button", { role: "radio", "aria-checked": o.fidelity === v ? "true" : "false", onclick: () => set("fidelity", v) }, t)))),
     relation ? item("ok", relation, "") : null,
+    item("ok", `${c.report.method === "vendor-import" ? "Import input upper estimate" : "Working context"}: ${c.report.usedTokens.toLocaleString()} / ${c.report.budgetTokens.toLocaleString()} upper estimate`, `${c.report.capacity?.source || "Conservative static check"}. A successful model continuation has not been observed.`),
+    c.report.archive ? item("ok", "Portable history preserved separately", c.report.archive) : null,
     imported ? item("ok", `${p.agent}'s own importer converts the conversation`, "hopsesh adds its briefing at the end and keeps the rest of the plan.") : boxes(p),
     h("label", { for: "note", style: "font-size:12.5px" }, `A note for ${p.agent} (optional)`), note,
     h("details", {}, h("summary", { style: "cursor:pointer;font-size:12.5px" }, `What ${p.agent} is told`),
@@ -154,8 +156,8 @@ function conversation(p) {
         h("div", { class: "brief" }, c.briefing))),
     h("div", { class: "opts-grid" },
       check(`Bring my ${c.from} instructions`, "carryRules", `Your instructions for every ${c.from} project go into the briefing.`),
-      p.can.import ? check(`Let ${p.agent}'s own importer convert it`, "via", "Instead of hopsesh's conversion; hopsesh still adds its briefing.", imported, (on) => (on ? "import" : "")) : null,
-      p.can.native && !imported ? check(`Replay shell commands as ${p.agent}'s own`, "native", "Experimental: exact commands and outputs instead of text.") : null));
+      p.can.import && !o.bounded ? check(`Let ${p.agent}'s own importer convert it`, "via", "Instead of hopsesh's conversion; hopsesh still adds its briefing.", imported, (on) => (on ? "import" : "")) : null,
+      p.can.native && !imported && !o.bounded ? check(`Replay shell commands as ${p.agent}'s own`, "native", "Experimental: exact commands and outputs instead of text.") : null));
 }
 
 // sameFolder: the session stays in its folder on this machine (another agent here).
@@ -431,7 +433,7 @@ function happened(d, p) {
   if(d.noWork) {out.push(item("ok","Lineage receipts synchronized","0 new messages, 0 transfers. The existing conversation is ready to open."));}
   else if (d.kind === "continue") {
     const rep = p.continue.report;
-    out.push(item("ok", `${d.agent} session written`, rep.fidelity === "note" ? "With a briefing only." : `${count(rep.messages, "message")}, ${count(rep.toolCalls, "tool call")}.`));
+    out.push(item("ok", `${d.agent} session written`, rep.method === "vendor-import" ? "Vendor-imported history plus briefing; model continuation not yet verified." : rep.fidelity === "note" ? "With a briefing only." : `${count(rep.messages, "message")}, ${count(rep.toolCalls, "tool call")}.`));
     if (p.nativeCopy) out.push(item("ok", `The ${p.nativeCopy.agent} session is kept ${d.machine ? "on " + d.machine : "here"} too`, `Coming back to ${p.nativeCopy.agent} later adds only the new work to it.`));
   } else {
     out.push(item("ok", `${count(d.files, "file")}, ${d.bytes} copied`, `${count(d.paths, "path")} rewritten.`));
@@ -458,7 +460,7 @@ screen("done", (d, p, o) => {
   const doUndo = async () => { if (await undo(d.journal, d.title)) go("sessions", true); };
   fill(view, h("div", { class: "page" }, h("div", { class: "page-in", style: "max-width:720px" },
     h("div", { style: "display:flex;gap:14px;align-items:center" }, h("span", { class: "badge ok", style: "width:40px;height:40px;font-size:20px" }, "✓"),
-      h("div", {}, h("h1", {}, d.noWork ? `“${d.title}” is already synchronized` : d.kind === "continue" ? `“${d.title}” continues in ${d.agent}` : `“${d.title}” is ${d.machine ? "on " + d.machine : "here"}`),
+      h("div", {}, h("h1", {}, d.noWork ? `“${d.title}” is already synchronized` : d.kind === "continue" ? `“${d.title}” is prepared for ${d.agent}` : `“${d.title}” is ${d.machine ? "on " + d.machine : "here"}`),
         h("div", { class: "muted" }, `${cap(where)}, in `, h("span", { class: "mono" }, p.targetCwd)))),
     h("div", { class: "card" }, h("div", { class: "dlg-body" },
       d.machine ? h("b", {}, `Start it on ${d.machine}`) : h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" },

@@ -105,6 +105,7 @@ issue or discussion first so we can agree on the approach.
 | `PostInstaller` | registering an installed session with the agent |
 | `Reader` | being the source of "continue in" |
 | `Writer` | being the target of "continue in" (a profile with context window and native replay) |
+| `ContextSizer` | destination capacity and active-context accounting for safe writes |
 | `Importer` | "use the agent's own importer" (`--via import`) |
 | `Integrator` | where the skill and approval rules go |
 | `Notifier` | telling the old session where the work went |

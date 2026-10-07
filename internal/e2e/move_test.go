@@ -3,7 +3,9 @@ package e2e
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -230,9 +232,10 @@ func appendTurn(t *testing.T, file, text string) {
 			leaf = strings.SplitN(line[i+8:], `"`, 2)[0]
 		}
 	}
-	u := "u-" + strings.ReplaceAll(text, " ", "-")
-	rec := `{"parentUuid":"` + leaf + `","isSidechain":false,"type":"user","message":{"role":"user","content":"` + text + `"},"uuid":"` + u + `","timestamp":"` + time.Now().UTC().Format(time.RFC3339Nano) + `","sessionId":"` + sid + `","cwd":"x"}` + "\n" +
-		`{"type":"last-prompt","lastPrompt":"` + text + `","leafUuid":"` + u + `","sessionId":"` + sid + `"}` + "\n"
+	u := fmt.Sprintf("u-%x", sha256.Sum256([]byte(text)))
+	first, _ := json.Marshal(map[string]any{"parentUuid": leaf, "isSidechain": false, "type": "user", "message": map[string]any{"role": "user", "content": text}, "uuid": u, "timestamp": time.Now().UTC().Format(time.RFC3339Nano), "sessionId": sid, "cwd": "x"})
+	last, _ := json.Marshal(map[string]any{"type": "last-prompt", "lastPrompt": text, "leafUuid": u, "sessionId": sid})
+	rec := string(first) + "\n" + string(last) + "\n"
 	f, _ := os.OpenFile(file, os.O_APPEND|os.O_WRONLY, 0)
 	f.WriteString(rec)
 	f.Close()

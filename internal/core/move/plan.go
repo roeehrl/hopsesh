@@ -81,6 +81,7 @@ const (
 
 // Options are the user's choices.
 type Options struct {
+	Bounded       bool   `json:"bounded,omitempty"` // new bounded replica on the same logical branch
 	TargetProfile string `json:"targetProfile,omitempty"`
 	OperationID   string `json:"operationId,omitempty"`
 	TargetSession string `json:"targetSession,omitempty"`
@@ -228,6 +229,7 @@ type Endpoint struct {
 // Build works out a move. It reads (the bundle's file list, the target's copies) but
 // writes nothing.
 func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
+	in.Copies = activeCopies(ctx, in, opt)
 	src, tgt := in.Source, in.Target
 	copies := currentBranchCopies(in)
 	if opt.TargetSession != "" {
@@ -239,7 +241,7 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		}
 		copies = selected
 	}
-	if profileBoundary(in) || src.Module.Spec().ID != tgt.Module.Spec().ID || len(copies) == 1 && copies[0].Summary.Key != in.Session.Key {
+	if opt.Bounded || profileBoundary(in) || src.Module.Spec().ID != tgt.Module.Spec().ID || len(copies) == 1 && copies[0].Summary.Key != in.Session.Key {
 		return buildContinue(ctx, in, opt)
 	}
 	if opt.Worktree == "" {

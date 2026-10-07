@@ -293,7 +293,7 @@ The redesign (approved 2026-10-02):
 2. The SDK is public (`sdk/`), in the same module, v0.
 3. Modules are compiled in.
 4. Pull by default; peers over SSH when the other machine runs hopsesh, push only to a machine that opted in.
-5. Default fidelity: history within 30% of the target's window, plus the briefing; `--fidelity note` one flag away.
+5. Default fidelity: history and briefing together within 30% of the conservative target window, reduced by existing active context. Full portable text is archived separately; `--fidelity note` is one flag away. See [context safety and recovery](context-safety.md).
 6. hopsesh's writer is the default Claude → Codex route; Codex's importer is `--via import`.
 7. Native replay is a module capability; the app offers it for every target that declares it.
 8. The source agent's own copy is kept next to a continuation (the native copy): a round trip resumes the latest state, and the earlier turns come back byte for byte.

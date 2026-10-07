@@ -255,7 +255,7 @@ jobs:
           go build -o "bin/fakeagent$ext" ./internal/devtools/fakeagent
       - name: mandatory stateful account and lineage routes, forks and recovery
         shell: bash
-        run: go test ./internal/e2e -run 'TestLineage|TestAccountProfile' -race -count=1 -timeout 10m
+        run: go test ./internal/e2e -run 'TestLineage|TestAccountProfile|TestContext' -race -count=1 -timeout 10m
       - name: scenario matrix over loopback SSH
         if: runner.os != 'Windows'
         run: scripts/matrix-loopback.sh bin "${{ matrix.family }}→${{ matrix.family }}" "$RUNNER_TEMP/hsmatrix"

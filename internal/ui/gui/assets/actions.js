@@ -190,6 +190,10 @@ function localModel(e) {
     if (lv.live) m.caption = `Still open on ${e.machine}; hopsesh marks that copy when it ends`;
     m.move = moveGroups(e, false, false);
   }
+  if(local && e.contextOverflow) {
+    m.caption="The agent reported a context limit. The original is preserved; prepare a bounded continuation to recover.";
+    if(!sessionTabs(e).length && !lv.live) m.fix={label:"Create bounded continuation…",run:()=>planFor(e,{target:e.agent,bounded:true,targetProfile:e.profile?.id||""})};
+  }
   return m;
 }
 
@@ -259,6 +263,7 @@ function moveGroups(e, local, inTab) {
   } else machine.push({ id: "bring", label: `Bring to ${sys.here}…`, icon: icon(ICONS.here, 16), run: () => planFor(e, { target: "" }) });
   out.push({ heading: "Machine", items: machine });
   if (["claude","codex"].includes(e.agent)) out.push({heading:"Account",items:[block({id:"account",label:"Move to another account…",sub:"Choose a profile and review the portable conversation",run:()=>planFor(e,{target:e.agent})})]});
+  if (local && ["claude","codex"].includes(e.agent)) out.push({heading:"Context recovery",items:[block({id:"bounded",label:"Create bounded continuation…",sub:"Keep the original and archive; prepare a smaller working context on this branch",run:()=>planFor(e,{target:e.agent,bounded:true,targetProfile:e.profile?.id||""})})]});
   const agents = (e.continueIn || []).map((t) => block({ id: "continue:" + t.id, label: `Continue with ${t.name}${local ? "" : " on " + sys.here}…`, icon: agentBadge(t.id, t.name), run: () => planFor(e, { target: t.id }),
     chip: t.experimental ? h("span", { class: "chip st-warn mini" }, "experimental") : null }));
   if (agents.length) out.push({ heading: "Agent", items: agents });

@@ -15,8 +15,8 @@ import (
 
 var _ agent.Writer = (*Module)(nil)
 
-// window is the context Claude Code's current models give a session (1M tokens).
-const window = 1_000_000
+// window is a conservative fallback; effective account/model capacity may differ.
+const window = ir.FallbackWindow
 
 // Profile says Claude Code takes long histories, and tool calls can be replayed natively.
 func (m *Module) Profile(agent.Install) ir.Profile {
@@ -28,6 +28,14 @@ func (m *Module) Profile(agent.Install) ir.Profile {
 // new leaf (Claude Code resumes from the leaf its newest last-prompt names).
 func (m *Module) Write(ctx context.Context, h agent.Host, in agent.Install, req ir.WriteRequest) (ir.WriteResult, error) {
 	pa, fsys := h.Path(), h.FS()
+	capacity, err := m.ContextCapacity(ctx, h, in, nil)
+	if err != nil {
+		return ir.WriteResult{}, err
+	}
+	if err = capacity.Check(req.Items); err != nil {
+		return ir.WriteResult{}, err
+	}
+
 	w := writer{version: in.Version, cwd: req.Header.CWD, branch: req.Header.GitBranch, model: claudeModel(req.Header.Model)}
 	var file string
 	var from int64
@@ -77,6 +85,14 @@ func (m *Module) Write(ctx context.Context, h agent.Host, in agent.Install, req 
 				return ir.WriteResult{}, fmt.Errorf("%w: native head changed", agent.ErrDiverged)
 			}
 		}
+
+		capacity, err = m.ContextCapacity(ctx, h, in, &agent.Summary{Path: file})
+		if err != nil {
+			return ir.WriteResult{}, err
+		}
+		if err = capacity.Check(req.Items); err != nil {
+			return ir.WriteResult{}, err
+		}
 		from = fi.Size()
 		f, err := fsys.Open(file)
 		if err != nil {
@@ -95,7 +111,6 @@ func (m *Module) Write(ctx context.Context, h agent.Host, in agent.Install, req 
 		return ir.WriteResult{}, fmt.Errorf("unknown write mode %q", req.Mode)
 	}
 	body := w.records(req)
-	var err error
 	if req.Mode == ir.WriteNew {
 		err = fsys.WriteFile(file, body, 0o600)
 	} else {

@@ -50,14 +50,15 @@ type AgentOpt struct {
 
 // EntryDTO is one session row.
 type EntryDTO struct {
-	CanApp    bool                  `json:"canApp"`
-	AppWhy    string                `json:"appWhy,omitempty"`
-	Profile   *agent.RuntimeProfile `json:"profile,omitempty"`
-	Machine   string                `json:"machine"`
-	Agent     agent.ID              `json:"agent"`
-	AgentName string                `json:"agentName"`
-	Key       string                `json:"key"` // agent/session
-	Title     string                `json:"title"`
+	ContextOverflow bool                  `json:"contextOverflow,omitempty"`
+	CanApp          bool                  `json:"canApp"`
+	AppWhy          string                `json:"appWhy,omitempty"`
+	Profile         *agent.RuntimeProfile `json:"profile,omitempty"`
+	Machine         string                `json:"machine"`
+	Agent           agent.ID              `json:"agent"`
+	AgentName       string                `json:"agentName"`
+	Key             string                `json:"key"` // agent/session
+	Title           string                `json:"title"`
 	// TitleSource is where the title comes from: custom (renamed), live (the running
 	// agent's name for it), generated (the agent's own title), prompt (the first prompt),
 	// reply (the first reply) or none ("Untitled · folder").
@@ -366,7 +367,7 @@ func entryDTO(core *app.App, inv *app.Inventory, it app.Item, targets []AgentOpt
 	d := EntryDTO{Profile: e.Profile, Machine: e.Machine, Agent: e.Agent, AgentName: e.AgentName, Key: s.Key.String(), Title: title, TitleSource: source,
 		Session: string(s.Key.Session), Path: s.Path, AgentVersion: s.AgentVersion, CanRename: core.CanRename(e), Places: []PlaceDTO{},
 		Status: statusWords(core, e), Live: e.Live.State == agent.Live, LastActive: s.LastActivity.Format(time.RFC3339),
-		LastPrompt: s.LastPrompt, CWD: s.CWD, SizeKB: s.Size / 1024, ContinueIn: []AgentOpt{},
+		ContextOverflow: s.ContextOverflow, LastPrompt: s.LastPrompt, CWD: s.CWD, SizeKB: s.Size / 1024, ContinueIn: []AgentOpt{},
 		Needs:   e.Live.State == agent.Live && strings.HasPrefix(e.Live.Status, "waiting"),
 		Journey: journey(e.Lineage), LineageError: e.LineageError, CanArchiveLineage: e.CanArchiveLineage, History: history(core, e.Lineage), Location: string(e.Location.Kind), Cloud: cloudEntryDTO(core, e), Mirror: mirrorDTO(s.Mirror)}
 	if e.Machine == app.LocalName() && !e.Location.IsCloud() {
@@ -528,6 +529,9 @@ func history(core *app.App, m *lineage.Manifest) []HopDTO {
 		} else if h.Backup {
 			what = fmt.Sprintf("The %s copy kept on %s too", name(to.Key.Agent), place(to.Location)) // the native copy
 		}
+		if h.Rollover != nil {
+			what += " · bounded continuation; original retained"
+		}
 		if h.Fork {
 			what += " (separate fork)"
 		}
@@ -556,6 +560,7 @@ func (a *App) find(machine, key string) (app.Entry, error) {
 
 // OptsDTO are the choices on the plan screen.
 type OptsDTO struct {
+	Bounded       bool   `json:"bounded"`
 	TargetProfile string `json:"targetProfile"`
 	OperationID   string `json:"operationId"`
 	TargetSession string `json:"targetSession"`
@@ -587,6 +592,7 @@ type OptsDTO struct {
 }
 
 func (o OptsDTO) options(d move.Options) move.Options {
+	d.Bounded = o.Bounded
 	d.TargetDir, d.Clone, d.Worktree = o.TargetDir, o.Clone, move.WorktreeMode(nonEmpty(o.Worktree, string(move.WorktreeAuto)))
 	if o.ReposDir != "" {
 		d.ReposDir = o.ReposDir

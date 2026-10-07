@@ -1,0 +1,109 @@
+# Context capacity and recovery
+
+A stored transcript is an archive, not necessarily the context the next model turn can
+accept. Hopsesh separates portable history from a bounded working conversation when
+converting between agents or accounts. Native same-agent copies remain native copies.
+
+## Using it
+
+The continuation plan shows the working-context upper estimate, budget, how capacity was
+resolved, and the destination archive path. Optional notes and carried instructions count
+against the same budget as messages and tool activity. Long content is shortened in the
+working conversation; portable text is retained in the archive. Reasoning, signed vendor
+state and attachment bytes are excluded from portable archives. The source remains intact.
+
+If an existing conversation exceeds capacity, choose **Move → Create bounded continuation…**
+in the desktop app, press **b** on its TUI row, or run:
+
+```sh
+hopsesh plan claude/<session-id> --bounded
+hopsesh pull claude/<session-id> --bounded --yes
+```
+
+Use `codex/<session-id>` for Codex. This creates another native session on the same logical
+conversation branch. It does not fork the branch or count a local recovery as a machine
+transfer or round trip. The original remains available. Normal mixed-agent returns append
+only missing work when it fits. A full or unmeasurable original instead gets a bounded
+replacement. Future returns prefer that replacement while the retained original is
+unchanged. New work in the retained original still requires conflict resolution.
+
+The completed screen says **prepared**. A written file and a static capacity check do not
+prove that the receiving model has continued successfully. Hopsesh does not start a paid
+model turn to obtain a success badge.
+
+## Preserved history
+
+Archives live under the selected destination agent/account root:
+`hopsesh/archives/<session-id>.jsonl`. They are journaled for undo, carried by native moves,
+and merged into subsequent portable transfers with duplicate records removed. Path mapping
+and the chosen redaction policy also apply to archived text. They are private local files,
+not files committed to the user's repository. Cloud prompts keep their existing separate
+handoff-file policy; this archive is not silently uploaded to a cloud.
+
+The receiving agent is given a bounded retrieval command:
+
+```sh
+hopsesh archive /absolute/path/to/archive.jsonl --offset 0 --limit 10
+hopsesh archive /absolute/path/to/archive.jsonl --search "migration decision"
+hopsesh archive /absolute/path/to/archive.jsonl --offset 12 --limit 1 --chunk 1
+```
+
+Offsets refer to records. Large records are retrieved in 2 KiB chunks; the command prints
+the next chunk and record offsets. Each response stays below 8 KiB including its framing.
+Archive text is quoted data, not an instruction source. No model-written summary or vendor
+API credentials are involved. Deterministic summaries quote recent requests and the latest
+agent reply; they do not promise semantic equivalence to the full conversation.
+
+## Capacity policy
+
+The SDK policy counts UTF-8 bytes plus message/tool framing as a conservative token upper
+estimate. It does not use the old bytes/4 heuristic or claim exact tokenizer measurements.
+A transfer uses at most 30% of the window. Existing active context reduces that allowance;
+30% of the window is reserved for instructions, tools and the next response.
+
+The fallback window is 64,000 tokens, explicitly labeled unverified. Codex's selected
+configuration profile can lower this using `model_context_window` or
+`model_auto_compact_token_limit`; a configured larger value never raises the fallback.
+Claude uses the fallback because account/model entitlements are not reliably observable
+through the supported local interfaces. This is deliberately conservative, not a promise
+about arbitrary custom model providers or arbitrary project/tool instruction sizes.
+
+For Codex, active context counts response items once, excluding their duplicate UI events.
+A verified `replacement_history` resets the active-context count; a compacted record without
+a readable replacement prevents append. Paginated history must have contiguous ordinals and
+no unmaterialized inherited prefix. Claude follows its active native branch and resets only
+on an explicit readable compaction summary. Neither adapter equates archive file size with
+active context.
+
+Planning counts the final text after path mapping, redaction, notes and framing. Application
+rechecks the source revision, destination cursor and capacity. The native writer checks
+again, including for cloud fetch/adoption appends. Configuration fingerprints also detect model changes even when the fallback stays the
+same. A changed configuration requires a fresh plan. Readers check cancellation and reject transcripts beyond a 256 MiB analysis limit
+instead of silently truncating them. Native readers retain tool output for the portable
+archive; the working-context renderer applies tool-output limits separately.
+
+## Vendor import
+
+Codex's importer can flatten much more history than fits in a model window. Hopsesh rejects
+large inputs before invoking it and recommends portable conversion. The module snapshots
+accepted input inside the destination's data root before asking the vendor to import it.
+Codex requires the recognized original Claude path for import. Hopsesh passes that path,
+then compares the source with the saved snapshot and rejects a changed input.
+The created session is adopted into the journal, measured, and checked before Hopsesh adds
+its briefing or returns a launch command. A rejected output remains available for inspection
+and undo. The report describes vendor history plus the Hopsesh briefing and marks vendor
+fidelity as unverified. Existing account-boundary restrictions still apply.
+
+## Verification
+
+Every platform's scenario job runs `TestContext*`, including ABABA, ABCA and ABCBCAB with
+large payloads. The cross-OS covering matrix includes a bounded-recovery operation. Tests
+also cover Unicode and boundary sizes, oversized notes/plans/cloud edits, changed target
+configuration, duplicate events, known/unknown compaction, large first records, preserved
+originals, archives, recovery branch counters, and GUI preparation wording. The smart drift
+review explicitly monitors upstream import, compaction, context metadata and pagination.
+
+References: [OpenAI compaction](https://developers.openai.com/api/docs/guides/compaction),
+[Codex configuration](https://learn.chatgpt.com/docs/config-file/config-reference),
+[Claude Code context](https://code.claude.com/docs/en/how-claude-code-works), and
+[Anthropic context engineering](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents).

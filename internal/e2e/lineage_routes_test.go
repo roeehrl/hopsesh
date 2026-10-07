@@ -105,9 +105,12 @@ func runLineageRoute(t *testing.T, route, start string, mask int, patterns ...st
 	for i := 0; i < len(route)-1; i++ {
 		from, to := route[i], route[i+1]
 		src, dst := places[from], places[to]
-		if pattern == "all" || pattern == "accounts" || pattern == "profiles" || pattern == "paginated" || pattern == "alternating" && i%2 == 0 {
+		if pattern == "pressure" || pattern == "all" || pattern == "accounts" || pattern == "profiles" || pattern == "paginated" || pattern == "alternating" && i%2 == 0 {
 			sentinel := fmt.Sprintf("ROUTE-WORK-%d-UNIQUE", i)
 			sentinels = append(sentinels, sentinel)
+			if pattern == "pressure" {
+				sentinel += "\n" + strings.Repeat("capacity-pressure ", 4000)
+			}
 			if currentAgent == "claude" {
 				appendTurn(t, current.Path, sentinel)
 			} else {
@@ -165,8 +168,19 @@ func runLineageRoute(t *testing.T, route, start string, mask int, patterns ...st
 			text.WriteString(n.Text)
 			text.WriteByte('\n')
 		}
+		if pattern == "pressure" {
+			path := filepath.Join(installs[to][nextAgent].Root("home"), "hopsesh", "archives", string(current.Key.Session)+".jsonl")
+			archived, e := os.ReadFile(path)
+			if e != nil && !os.IsNotExist(e) {
+				t.Fatal(e)
+			}
+			if e == nil {
+				text.Reset()
+				text.Write(archived)
+			}
+		}
 		for _, s := range sentinels {
-			if n := strings.Count(text.String(), s); n != 1 {
+			if n := strings.Count(text.String(), s); n != 1 && pattern != "pressure" || n < 1 {
 				t.Fatalf("hop %d: %s appears %d times", i, s, n)
 			}
 		}
@@ -181,7 +195,7 @@ func runLineageRoute(t *testing.T, route, start string, mask int, patterns ...st
 		if journey.Transfers != transfers {
 			t.Fatalf("transfers %+v at hop %d", journey, i)
 		}
-		if pattern != "accounts" && to == 'A' && current.Key.Session != sid {
+		if pattern != "accounts" && pattern != "pressure" && to == 'A' && current.Key.Session != sid {
 			t.Fatalf("return must select original: %s", current.Key)
 		}
 	}
@@ -244,6 +258,16 @@ func TestAccountProfileRoutes(t *testing.T) {
 			for mask := 0; mask < 8; mask++ {
 				t.Run(fmt.Sprintf("%s/%s/%03b", route, start, mask), func(t *testing.T) { runLineageRoute(t, route, start, mask, "accounts") })
 			}
+		}
+	}
+}
+
+// These payloads exceed the conservative incoming allowance at every stop; routes
+// exercise archive transport, repeated summaries, same-branch returns and discovery.
+func TestContextPressureRoutes(t *testing.T) {
+	for _, route := range []string{"ABABA", "ABCA", "ABCBCAB"} {
+		for _, start := range []string{"claude", "codex"} {
+			t.Run(route+"/"+start, func(t *testing.T) { runLineageRoute(t, route, start, 2, "pressure") })
 		}
 	}
 }

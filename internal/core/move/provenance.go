@@ -192,7 +192,13 @@ func nativeProjection(source, target ir.Segment) ([]ir.Projection, error) {
 
 func conversionLoss(r convert.Report) []string {
 	var out []string
-	if r.Fidelity == convert.Note {
+	if r.Method == "vendor-import" {
+		out = append(out, "vendor import; per-turn fidelity not verified")
+	}
+	if r.BriefShortened {
+		out = append(out, "briefing shortened")
+	}
+	if r.Fidelity == convert.Note && r.Method != "vendor-import" {
 		out = append(out, "briefing only; full history stays at source")
 	}
 	if r.Redactions > 0 {

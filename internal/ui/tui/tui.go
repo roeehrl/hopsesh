@@ -427,14 +427,30 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 			return m, m.Init()
 		case "enter":
 			if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil {
+				m.opts.Bounded = false
 				m.sel, m.target, m.picked, m.ho = m.rows[m.cursor], "", nil, handoff{}
 				m.opts.TargetSession, m.destinations = "", nil
 				return m, m.planCmd()
 			}
 		case "c":
 			m.openHandoff()
+		case "b":
+			if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil {
+				e := m.rows[m.cursor].item.Entry
+				if e.Cloud != nil || (e.Agent != "claude" && e.Agent != "codex") {
+					break
+				}
+				m.sel, m.target, m.picked, m.ho = m.rows[m.cursor], "", nil, handoff{}
+				m.opts = m.deps.App.DefaultOptions()
+				m.opts.Bounded = true
+				if e.Machine == app.LocalName() && e.Profile != nil {
+					m.opts.TargetProfile = e.Profile.ID
+				}
+				return m, m.planCmd()
+			}
 		case "i":
 			if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil {
+				m.opts.Bounded = false
 				m.sel, m.target, m.picked, m.ho = m.rows[m.cursor], "", nil, handoff{}
 				m.opts.TargetSession, m.destinations = "", nil
 				if m.target = m.nextAgent(); m.target != "" {
@@ -891,9 +907,9 @@ func (m *model) viewBrowse(b *strings.Builder) {
 		m.viewPicker(b)
 		return
 	}
-	hint := "\n  ↑↓ move · enter bring here · i continue in · c hand off · h journey · a accounts · A move account · / search · r refresh · q quit"
+	hint := "\n  ↑↓ move · enter bring here · i continue in · b bounded copy · c hand off · h journey · a accounts · A move account · / search · r refresh · q quit"
 	if m.partialCloud() != nil {
-		hint = "\n  ↑↓ move · enter resume/bring · i continue in · c hand off · p paste a cloud link · f find in a cloud · / search · r refresh · q quit"
+		hint = "\n  ↑↓ move · enter resume/bring · i continue in · b bounded copy · c hand off · p paste a cloud link · f find in a cloud · / search · r refresh · q quit"
 	}
 	b.WriteString(dim.Render(hint) + "\n")
 }
@@ -943,6 +959,10 @@ func (m *model) viewPlan(b *strings.Builder) {
 			fmt.Fprintf(b, "  adds the new work to %s here\n", c.AppendTo.Key)
 		}
 		fmt.Fprintf(b, "  carries %s\n", c.Report.Summary)
+		fmt.Fprintf(b, "  capacity %s\n", c.Report.ContextSummary())
+		if c.Report.Archive != "" {
+			fmt.Fprintf(b, "  archive %s\n", c.Report.Archive)
+		}
 	} else {
 		fmt.Fprintf(b, "  files %d (%s) · %d path mapping(s)\n", len(p.Files.Files), move.Human(p.Bytes), len(p.Placement.Mappings))
 	}
@@ -994,7 +1014,7 @@ func (m *model) viewDone(b *strings.Builder) {
 	if p.NoWork {
 		fmt.Fprintf(b, "\n  %s %q already synchronized · 0 new messages, 0 transfers.\n", okSt.Render("✓"), p.Title)
 	} else if p.Kind == move.KindContinue {
-		fmt.Fprintf(b, "\n  %s %q continues in %s.\n", okSt.Render("✓"), p.Title, p.Agent)
+		fmt.Fprintf(b, "\n  %s %q is prepared for %s.\n", okSt.Render("✓"), p.Title, p.Agent)
 	} else {
 		fmt.Fprintf(b, "\n  %s %q is on this machine: %d file(s), %s.\n", okSt.Render("✓"), p.Title, res.Files, move.Human(res.Bytes))
 	}

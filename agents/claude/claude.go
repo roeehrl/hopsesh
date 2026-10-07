@@ -236,6 +236,15 @@ func (m *Module) Bundle(_ context.Context, h agent.Host, in agent.Install, s age
 	}
 	rel = toSlash(rel)
 	b := agent.Bundle{Files: []agent.BundleFile{{Root: home, Rel: rel, Size: fi.Size(), Role: agent.RoleMain, Rewrite: agent.RewriteJSONL, Growable: true}}}
+	if !strings.ContainsAny(string(s.Key.Session), "/\\") && s.Key.Session != ".." && s.Key.Session != "." && s.Key.Session != "" {
+		archiveRel := "hopsesh/archives/" + string(s.Key.Session) + ".jsonl"
+		if archive, err := h.FS().Stat(pa.Join(root, archiveRel)); err == nil {
+			b.Files = append(b.Files, agent.BundleFile{Root: home, Rel: archiveRel, Size: archive.Size(), Role: agent.RoleSide, Rewrite: agent.RewriteJSONL})
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return agent.Bundle{}, fmt.Errorf("preserved history: %w", err)
+		}
+	}
+
 	sid := string(s.Key.Session)
 	walk(fsys, pa, pa.Join(pa.Dir(s.Path), sid), path.Join(path.Dir(rel), sid), func(r string, size int64) {
 		f := agent.BundleFile{Root: home, Rel: r, Size: size, Role: agent.RoleSide}
@@ -297,6 +306,9 @@ func (m *Module) PlanMove(src, dst agent.Install, s agent.Summary, b agent.Bundl
 	}
 	for _, f := range b.Files {
 		to := f.Rel
+		if f.Rel == "hopsesh/archives/"+oldID+".jsonl" {
+			to = "hopsesh/archives/" + newID + ".jsonl"
+		}
 		switch {
 		case f.Role == agent.RoleMain:
 			to = dstProject + "/" + newID + ".jsonl"
