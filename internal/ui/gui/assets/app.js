@@ -1,6 +1,6 @@
 // hopsesh's window: boot, the menu's commands, and ssh's password questions. Plain ES
 // modules, no build step.
-import { api, on, h, fill, view, state, go, current, toast, fail, errText, $, sys, setSystem, ask } from "./core.js";
+import { api, on, h, fill, view, state, go, current, toast, fail, $, sys, setSystem, ask } from "./core.js";
 import "./sessions.js";
 import "./plan.js";
 import "./brought.js";
@@ -52,6 +52,8 @@ on("hopsesh:menu", menuCommand);
 // A launch opened in another terminal than the chosen one (macOS denied iTerm2, say).
 on("hopsesh:terminal-app", (n) => toast(n.message));
 function menuCommand(cmd) {
+  if (!mainReady) return; // startup owns the window until its inventory is ready
+
   if (document.querySelector("#sheet[open]") && cmd !== "palette") return; // a plan is open
   switch (cmd) {
     case "palette": openPalette(); break;
@@ -168,18 +170,25 @@ function configError() {
       h("button", { class: "btn big", onclick: setAside }, "Set them aside and start fresh…")))));
 }
 
-(async () => {
+// The dependency-free startup shell awaits this promise, including module-load
+// failures. Nothing can silently leave an empty window while the bridge is busy.
+export async function start() {
   for (const r of await api("PendingPasswords").catch(() => [])) askPassword(r);
-  try { state.info = await api("Info"); } catch (e) { fill(view, h("div", { class: "loading err" }, errText(e))); return; }
+  state.info = await api("Info");
   setSystem(state.info.os, state.info.terminal);
   loadLayout(state.info.layout);
-  if (state.info.configError) { configError(); return; }
+  if (state.info.configError) { configError(); mainReady = true; return; }
+  $("#startup-title").textContent = "Finding your sessions…";
+  $("#startup-detail").textContent = "Reading local sessions and checking your configured machines. This can take a moment.";
   await loadTabs();
-  try { state.scan=await api("InitialScan"); } catch(e) { fill(view,h("div",{class:"loading err"},errText(e))); mainReady=true; return; }
+  state.scan = await api("InitialScan");
   await go("sessions");
-  mainReady=true;await quickRoute();
+  mainReady = true;
+  await quickRoute();
   if (state.info.updateCheck === "on") {
-    try { state.update = await api("CheckUpdate"); } catch { return; } // offline
-    if (state.update?.newer && current === "sessions") go("sessions");
+    api("CheckUpdate").then((update) => {
+      state.update = update;
+      if (update?.newer && current === "sessions") go("sessions");
+    }).catch(() => {}); // offline; update checking must not hold startup open
   }
-})();
+}

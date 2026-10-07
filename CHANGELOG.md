@@ -16,6 +16,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Show a startup screen immediately while the bridge and first scan load. Report
+  module/initialization failures with a reload action; keep shortcuts from operating
+  on an uninitialized inventory and offer recovery when startup is unusually slow.
+
 - Open the selected Claude Code session in Desktop instead of only activating the
   app. Use the supported CLI for saved sessions, with a temporary PTY and visible
   errors; focus a currently owned Desktop session only on a verified app build.
