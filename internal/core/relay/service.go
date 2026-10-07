@@ -81,15 +81,16 @@ func (s *Service) receive(ctx context.Context, e Envelope) error {
 }
 
 type Health struct {
-	Connected   bool      `json:"connected"`
-	LastSuccess time.Time `json:"lastSuccess"`
-	Error       string    `json:"error,omitempty"`
-	Rejected    uint64    `json:"rejected"`
+	DeliveryMode string    `json:"deliveryMode"`
+	Connected    bool      `json:"connected"`
+	LastSuccess  time.Time `json:"lastSuccess"`
+	Error        string    `json:"error,omitempty"`
+	Rejected     uint64    `json:"rejected"`
 }
 
 func (s *Service) Health() Health { s.mu.Lock(); defer s.mu.Unlock(); return s.health }
 func (s *Service) Run(ctx context.Context) error {
-	return (Listener{Transport: s.Transport, Processor: s.Processor, OnResponse: s.receive, OnRejected: func() { s.mu.Lock(); s.health.Rejected++; s.mu.Unlock() }, Notify: func(err error) {
+	return (Listener{Transport: s.Transport, Processor: s.Processor, OnResponse: s.receive, OnDeliveryMode: func(mode string) { s.mu.Lock(); s.health.DeliveryMode = mode; s.mu.Unlock() }, OnRejected: func() { s.mu.Lock(); s.health.Rejected++; s.mu.Unlock() }, Notify: func(err error) {
 		s.mu.Lock()
 		s.health.Connected = err == nil
 		s.health.Error = ""

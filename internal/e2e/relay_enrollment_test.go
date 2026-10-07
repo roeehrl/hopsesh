@@ -272,6 +272,7 @@ func TestCloudAdmissionSQLiteR2(t *testing.T) {
 		t.Fatal(err)
 	}
 	qualifyCloudAdmission(t, ctx, bin, root, origin, cert, client, native, owner)
+	qualifyRelayNotifications(t, ctx, origin, client)
 }
 
 // The actual native/CLI clients cross the outer Worker's JWT role boundary,

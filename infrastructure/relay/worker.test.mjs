@@ -12,9 +12,9 @@ class Storage {
  async transaction(fn){let release;const before=this.tail;this.tail=new Promise(r=>release=r);await before;const tx=new Storage();tx.values=structuredClone(this.values);try{const result=await fn(tx);this.values=tx.values;return result}finally{release()}}
 }
 class Bucket {constructor(){this.values=new Map()}async put(k,v){this.values.set(k,v)}async get(k){const v=this.values.get(k);return v===undefined?null:{text:async()=>v}}async delete(k){this.values.delete(k)}}
-async function fixture(){
+async function fixture(events){
  const storage=new Storage(),bucket=new Bucket(),space='space-12345678901',admin='test-operator-secret';let clock=Date.now();
- const handle=createHandler(storage,bucket,admin,space,()=>clock);
+ const handle=createHandler(storage,bucket,admin,space,()=>clock,events);
  const invoke=(path,method='GET',token='',body)=>handle(new Request('https://relay.test'+path,{method,headers:{Authorization:'Bearer '+token,'X-Hopsesh-Space':space},body:body===undefined?undefined:JSON.stringify(body)}));
  const enroll=async device=>{const r=await invoke('/v1/enrollment/register','POST',admin,{device,ttl:3600});assert.equal(r.status,201);return(await r.json()).token};
  const a='endpoint-A-123456',b='endpoint-B-123456',ta=await enroll(a),tb=await enroll(b);
@@ -98,4 +98,51 @@ test('expired dedupe receipts and routing devices release quotas without accepti
  f.advance(301000);assert.equal((await f.invoke('/v1/messages','POST',f.ta,e)).status,400);
  await maintain(f.storage,f.bucket,e.created+3601);
  assert.equal((await f.storage.list({prefix:'device:'})).size,0);assert.equal((await f.storage.list({prefix:'token:'})).size,0);assert.equal(await f.storage.get('device-count'),0);
+});
+
+test('notifications follow durable publication and never carry encrypted or native content',async()=>{
+ let f;const hints=[];
+ f=await fixture({changed:async device=>{
+  assert.equal((await f.storage.list({prefix:'message:'+device+':'})).size,1);
+  assert.equal(f.bucket.values.size,1);
+  hints.push(device);throw new Error('broken notification socket');
+ },refresh:async()=>{},subscribe:()=>new Response(null,{status:204})});
+ const envelope=f.envelope();
+ assert.equal((await f.invoke('/v1/messages','POST',f.ta,envelope)).status,201,'a failed hint cannot undo successful publication');
+ assert.deepEqual(hints,[f.b]);
+ assert.equal((await f.invoke('/v1/messages','POST',f.ta,envelope)).status,200);
+ assert.equal(hints.length,1,'deduplication does not wake the receiver again');
+ f.bucket.put=async()=>{throw new Error('storage')};
+ assert.equal((await f.invoke('/v1/messages','POST',f.ta,f.envelope('another-message-123'))).status,503);
+ assert.equal(hints.length,1,'uncommitted writes cannot issue a wake hint');
+});
+
+test('notification authentication and revocation use the current mailbox grant',async()=>{
+ const subscriptions=[];
+ const f=await fixture({subscribe:(device,grant)=>{subscriptions.push({device,token:grant.token});return new Response(null,{status:204})},refresh:async()=>{}});
+ const connect=token=>createHandler(f.storage,f.bucket,'test-operator-secret','space-12345678901',()=>Date.now(),{subscribe:(d,g)=>{subscriptions.push({device:d,token:g.token});return new Response(null,{status:204})}})(new Request('https://relay.test/v1/notifications',{headers:{Authorization:'Bearer '+token,Upgrade:'websocket'}}));
+ assert.equal((await connect('forged')).status,403);assert.equal(subscriptions.length,0);
+ assert.equal((await connect(f.tb)).status,204);assert.equal(subscriptions[0].device,f.b);
+ assert.equal((await f.invoke('/v1/notifications','GET',f.tb)).status,426);
+ await f.invoke('/v1/enrollment/revoke','POST',f.tb,{});
+ assert.equal((await connect(f.tb)).status,403);assert.equal(subscriptions.length,1);
+});
+
+test('hibernated socket attachments are rechecked on renewal, revocation, authority change and expiry',async()=>{
+ const f=await fixture(),sockets=[];
+ const old=await f.storage.get('device:'+f.b);
+ for(const a of [{device:f.b,token:old.token},{device:f.a,token:'old-credential'},null])sockets.push({closed:false,deserializeAttachment:()=>a,close(){this.closed=true}});
+ const ctx={storage:f.storage,getWebSockets:()=>sockets};
+ // Construct a new instance, as the runtime does after hibernation; no in-memory
+ // authentication cache is available.
+ await new Mailbox(ctx,{ENROLLMENT_ADMIN:'test-operator-secret'}).refresh();
+ assert.deepEqual(sockets.map(s=>s.closed),[false,true,true]);
+ await f.invoke('/v1/enrollment/revoke','POST',f.tb,{});
+ await new Mailbox(ctx,{ENROLLMENT_ADMIN:'test-operator-secret'}).refresh();assert.ok(sockets.every(s=>s.closed));
+ const grant=await f.storage.get('device:'+f.a);
+ const socket={closed:false,deserializeAttachment:()=>({device:f.a,token:grant.token}),close(){this.closed=true}};
+ ctx.getWebSockets=()=>[socket];
+ await new Mailbox(ctx,{ENROLLMENT_ADMIN:'rotated-operator-secret'}).refresh();assert.ok(socket.closed);
+ socket.closed=false;await f.storage.put('device:'+f.a,{...grant,expires:1});
+ await new Mailbox(ctx,{ENROLLMENT_ADMIN:'test-operator-secret'}).refresh();assert.ok(socket.closed);
 });

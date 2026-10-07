@@ -97,18 +97,25 @@ func (s Store) Connection(ctx context.Context) (Connection, error) {
 }
 
 type Listener struct {
-	Transport  Transport
-	Processor  Processor
-	Notify     func(error)
-	OnResponse func(context.Context, Envelope) error
-	OnRejected func()
+	Transport      Transport
+	Processor      Processor
+	Notify         func(error)
+	OnResponse     func(context.Context, Envelope) error
+	OnRejected     func()
+	OnDeliveryMode func(string)
 }
 
-// Run uses one adaptive HTTP poll for all local clients. Delivery acknowledgments
+// Run shares one notification stream and HTTP reconciliation across all clients.
+// Delivery acknowledgments
 // follow durable native outcomes and encrypted reply publication, not receipt of
 // a request alone. Source observation timestamps are never renewed by transport.
 func (l Listener) Run(ctx context.Context) error {
-	var cursor uint64
+	child, cancel := context.WithCancel(ctx)
+	wake, state, done := make(chan struct{}, 1), make(chan bool, 1), make(chan struct{})
+	go func() { defer close(done); l.Transport.notifications(child, wake, state) }()
+	defer func() { cancel(); <-done }()
+	connected := false
+	var cursor, acknowledged uint64
 	delay := time.Second
 	for {
 		batch, err := l.Transport.Poll(ctx, cursor)
@@ -156,8 +163,11 @@ func (l Listener) Run(ctx context.Context) error {
 			if err == nil && batch.Cursor > cursor {
 				cursor = batch.Cursor
 			}
-			if err == nil && cursor > 0 {
+			if err == nil && cursor > acknowledged {
 				err = l.Transport.Ack(ctx, cursor)
+				if err == nil {
+					acknowledged = cursor
+				}
 			}
 		}
 		if l.Notify != nil {
@@ -165,15 +175,31 @@ func (l Listener) Run(ctx context.Context) error {
 		}
 		if err == nil && len(batch.Messages) > 0 {
 			delay = time.Second
+			continue // Drain committed batches without adding per-message latency.
 		} else {
 			delay = min(60*time.Second, delay*2)
 		}
-		t := time.NewTimer(delay)
+		wait := delay
+		if connected && err == nil {
+			wait = 5 * time.Minute
+		}
+		t := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
 			t.Stop()
 			return ctx.Err()
 		case <-t.C:
+		case connected = <-state:
+			t.Stop()
+			if l.OnDeliveryMode != nil {
+				mode := "http-fallback"
+				if connected {
+					mode = "notifications"
+				}
+				l.OnDeliveryMode(mode)
+			}
+		case <-wake:
+			t.Stop()
 		}
 	}
 }

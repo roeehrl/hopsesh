@@ -53,12 +53,13 @@ type DiagnosticObservation struct {
 	RemoteScanning int       `json:"remoteScanning"`
 }
 type DiagnosticRelay struct {
-	Enabled     bool      `json:"enabled"`
-	HealthKnown bool      `json:"healthKnown"`
-	Connected   bool      `json:"connected"`
-	LastSuccess time.Time `json:"lastSuccess"`
-	Error       bool      `json:"error"`
-	Rejected    uint64    `json:"rejected"`
+	DeliveryMode string    `json:"deliveryMode,omitempty"`
+	Enabled      bool      `json:"enabled"`
+	HealthKnown  bool      `json:"healthKnown"`
+	Connected    bool      `json:"connected"`
+	LastSuccess  time.Time `json:"lastSuccess"`
+	Error        bool      `json:"error"`
+	Rejected     uint64    `json:"rejected"`
 }
 type DiagnosticLogs struct {
 	Files  int   `json:"files"`
@@ -115,6 +116,9 @@ func (a *App) Diagnostics(ctx context.Context) (RuntimeDiagnostics, error) {
 		}
 		var health relay.Health
 		if c.Call(probe, "relay.status", nil, &health) == nil {
+			if health.DeliveryMode == "notifications" || health.DeliveryMode == "http-fallback" {
+				d.Relay.DeliveryMode = health.DeliveryMode
+			}
 			d.Relay.HealthKnown = true
 			d.Relay.Connected = health.Connected
 			d.Relay.LastSuccess = health.LastSuccess

@@ -23,8 +23,10 @@ async function bounded(req, max) {
 }
 // This exact handler is used by the deployed Durable Object and deterministic
 // tests. Storage transactions serialize quotas, revocation and cursor updates.
-export function createHandler(storage,bucket,adminToken,space,clock=()=>Date.now()) {
+export function createHandler(storage,bucket,adminToken,space,clock=()=>Date.now(),events) {
  return async req => {
+  let recipient;
+  const handle=async()=>{
   const url=new URL(req.url),path=url.pathname,now=Math.floor(clock()/1000);
   try {
    if(path==='/v1/capabilities'&&req.method==='GET')return json({protocol:1,limits:LIMITS,methods:['GET','POST'],experimental:true});
@@ -81,7 +83,11 @@ export function createHandler(storage,bucket,adminToken,space,clock=()=>Date.now
    const tokenHash=await hash(token);
    const device=await storage.get('token:'+tokenHash);
    const grant=device&&await storage.get('device:'+device);
-   if(!grant||grant.revoked||grant.expires<=now||grant.token!==tokenHash)return json({error:'authorization'},403);
+   if(!grant||grant.revoked||grant.expires<=now||grant.token!==tokenHash||grant.authority!==await hash(adminToken))return json({error:'authorization'},403);
+   if(path==='/v1/notifications'){
+    if(req.method!=='GET'||req.headers.get('Upgrade')?.toLowerCase()!=='websocket'||url.search)return json({error:'websocket-required'},426);
+    return events?.subscribe?events.subscribe(device,grant):json({error:'notifications-unavailable'},501);
+   }
    if(path==='/v1/enrollment/revoke'){
     if(req.method!=='POST')return json({error:'method'},405);
     // A scoped credential may revoke itself, never another endpoint.
@@ -93,6 +99,7 @@ export function createHandler(storage,bucket,adminToken,space,clock=()=>Date.now
     if(!['request','response'].includes(e.kind)||e.protocol!==1||e.space!==space||e.from!==device||!opaque(e.to)||e.to===device||!opaque(e.id)||!opaque(e.operation)||!Number.isInteger(e.created)||!Number.isInteger(e.expires)||e.expires<=now||e.created>now+60||e.expires<=e.created||e.expires-e.created>LIMITS.lifetime||typeof e.ciphertext!=='string'||typeof e.signature!=='string'||!e.ciphertext.length||e.signature.length!==88)return json({error:'envelope'},400);
     const target=await storage.get('device:'+e.to);if(!target||target.revoked||target.expires<=now)return json({error:'recipient'},403);
     const data=JSON.stringify(e),sum=await hash(data),key=space+'/'+e.to+'/'+e.id;
+    recipient=e.to;
     return await storage.transaction(async tx=>{
      const fresh=await tx.get('device:'+device),receiver=await tx.get('device:'+e.to);
      if(!fresh||fresh.revoked||fresh.expires<=now||fresh.token!==tokenHash||!receiver||receiver.revoked||receiver.expires<=now)return json({error:'authorization'},403);
@@ -127,6 +134,15 @@ export function createHandler(storage,bucket,adminToken,space,clock=()=>Date.now
    }
    return json({error:'method-or-route'},['/v1/messages','/v1/ack'].includes(path)?405:404);
   }catch(e){return json({error:e?.message==='too-large'?'frame':e?.message==='storage'?'storage':'invalid-request'},e?.message==='too-large'?413:e?.message==='storage'?503:400)}
+  };
+  const result=await handle();
+  // Hints follow the committed transaction. A failed hint must never turn an
+  // accepted encrypted message into an apparent publication failure.
+  if(events&&result.ok){try{
+   if(recipient&&result.status===201)await events.changed(recipient);
+   if(new URL(req.url).pathname.startsWith('/v1/enrollment/'))await events.refresh();
+  }catch{/* HTTP reconciliation recovers missed hints. */}}
+  return result;
  };
 }
 async function removeMessages(storage,bucket,device,predicate){
@@ -166,9 +182,32 @@ export async function maintain(storage,bucket,now=Math.floor(Date.now()/1000)){
 }
 export class Mailbox {
  constructor(ctx,env){this.ctx=ctx;this.env=env}
- async fetch(req){const space=req.headers.get('X-Hopsesh-Space');return createHandler(this.ctx.storage,this.env.CIPHERTEXT,this.env.ENROLLMENT_ADMIN,space)(req)}
+ subscribe(device,grant){
+  if(this.ctx.getWebSockets('device:'+device).length>=4||this.ctx.getWebSockets().length>=128)return json({error:'quota'},429);
+  const pair=new WebSocketPair(),client=pair[0],server=pair[1];
+  this.ctx.acceptWebSocket(server,['device:'+device]);
+  server.serializeAttachment({device,token:grant.token});
+  server.send('{"type":"mailbox-changed"}');
+  return new Response(null,{status:101,webSocket:client});
+ }
+ async refresh(){
+  if(!this.ctx.getWebSockets)return;
+  const authority=await hash(this.env.ENROLLMENT_ADMIN),now=Math.floor(Date.now()/1000);
+  for(const socket of this.ctx.getWebSockets()){
+   const a=socket.deserializeAttachment(),grant=a&&await this.ctx.storage.get('device:'+a.device);
+   if(!grant||grant.revoked||grant.expires<=now||grant.token!==a.token||grant.authority!==authority){try{socket.close(1008,'authorization ended')}catch{}}
+  }
+ }
+ async changed(device){
+  await this.refresh();
+  for(const socket of this.ctx.getWebSockets('device:'+device)){try{socket.send('{"type":"mailbox-changed"}')}catch{}}
+ }
+ async fetch(req){const space=req.headers.get('X-Hopsesh-Space');return createHandler(this.ctx.storage,this.env.CIPHERTEXT,this.env.ENROLLMENT_ADMIN,space,()=>Date.now(),{subscribe:(d,g)=>this.subscribe(d,g),changed:d=>this.changed(d),refresh:()=>this.refresh()})(req)}
+ webSocketMessage(socket){socket.close(1008,'notifications are read only')}
+ webSocketError(socket){try{socket.close(1011,'notification connection ended')}catch{}}
  async alarm(){
   await maintain(this.ctx.storage,this.env.CIPHERTEXT);
+  await this.refresh();
  }
 }
 export class Authorization {
@@ -231,6 +270,10 @@ export default {async fetch(req,env){
   try{
    const {payload}=await jwtVerify(token,encoder.encode(env.ENROLLMENT_ADMIN),{algorithms:['HS256'],issuer:'hopsesh-relay-v1',audience:'hopsesh-relay-mailbox'});
    if(payload.space!==space||!opaque(payload.device)||!['device','cloud-session'].includes(payload.kind))return json({error:'authorization'},403);
+   if(url.pathname==='/v1/notifications'){
+    if(url.protocol!=='https:'||req.method!=='GET'||url.search||req.headers.get('Upgrade')?.toLowerCase()!=='websocket')return json({error:'websocket-required'},426);
+    if(!env.LOGIN_RATE||!(await env.LOGIN_RATE.limit({key:'notifications:'+space+':'+payload.device})).success||!(await env.LOGIN_RATE.limit({key:'global:notifications'})).success)return json({error:'quota'},429);
+   }
   }catch{return json({error:'authorization'},403)}
  }
  return env.MAILBOX.get(env.MAILBOX.idFromName(space)).fetch(req);
