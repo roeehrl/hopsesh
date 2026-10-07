@@ -77,7 +77,9 @@ setInterval(freshness, 30000);
 // menu is open, or another screen is shown.
 const HERE_EVERY = 60_000, ALL_AFTER = 5 * 60_000;
 const since = (iso) => (iso ? Date.now() - new Date(iso).getTime() : Infinity);
-const busy = () => !state.scan || state.scanning || current !== "sessions" || document.hidden || !!document.querySelector("dialog[open]") || isOpen();
+// A presence response between pointer-down and pointer-up must not replace the
+// button under the pointer: WebKit would then swallow the user's click.
+const busy = () => !state.scan || state.scanning || current !== "sessions" || document.hidden || !!document.querySelector("dialog[open], button:active") || isOpen();
 async function autoRefresh(all) {
   if (busy()) return;
   if (all) await scan(); else if (!state.info?.desktopManaged) await refreshHere();

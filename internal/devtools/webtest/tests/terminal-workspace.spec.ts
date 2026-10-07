@@ -110,6 +110,29 @@ test('failed replacement keeps the source usable and composing text postpones a 
  await expect.poll(()=>detached.evaluate(()=>window.hopseshTerminal?.text())).toContain('typed=still here');
 });
 
+test('presence refresh during a press does not swallow the shell grouping menu',async({page})=>{
+ await page.request.post('/terminal-test/open?title=Build%20shell&kind=shell');
+ await row(page,'Find the codeword').click();
+ let release!:()=>void;
+ const responseGate=new Promise<void>(resolve=>release=resolve);
+ let reached!:()=>void;
+ const requested=new Promise<void>(resolve=>reached=resolve);
+ await page.route('**/call',async route=>{
+  if(route.request().postDataJSON().m!=='Presence')return route.continue();
+  reached();await responseGate;
+  await route.fulfill({json:{result:{entries:{'test-presence':[]}}}});
+ });
+ await page.evaluate(()=>window.dispatchEvent(new Event('focus')));
+ await requested;
+ const button=page.getByRole('button',{name:'More actions',exact:true});
+ const box=await button.boundingBox();
+ await page.mouse.move(box!.x+box!.width/2,box!.y+box!.height/2);
+ await page.mouse.down();release();
+ await expect.poll(()=>page.evaluate(async()=>Boolean((await import('/core.js')).state.presence['test-presence']))).toBe(true);
+ await page.mouse.up();
+ await expect(page.getByRole('menuitem',{name:'Organize a shell with this conversation…'})).toBeVisible();
+});
+
 test('a shell can be organized explicitly without becoming a running agent session',async({page,context})=>{
  await page.request.post('/terminal-test/open?title=Build%20shell&kind=shell');
  const ws=await page.evaluate(async()=> (await import('/core.js')).api('TerminalWorkspace'));
