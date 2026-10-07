@@ -58,3 +58,12 @@ test('instruction paths, previews, individual selection and round-trip explanati
  await picker.getByRole('checkbox',{name:'Include all listed instruction files',exact:true}).uncheck();
  await expect(picker.locator('summary').first()).toHaveText('Source instructions · 0 of 2 files selected');
 });
+
+// A launcher restriction can itself be the blocker: keep alternatives available.
+test('a blocked plan still allows changing its launcher',async({page})=>{
+ await page.route('**/call',async route=>{const r=route.request().postDataJSON();if(r.m!=='Plan'){await route.continue();return;}const response=await route.fetch(),body=await response.json();body.result.blockers=['Choose a compatible launcher'];await route.fulfill({json:body});});
+ await row(page,'Find the codeword').click();await action(page,'move',/^Continue with Codex…/);
+ await expect(page.locator('#sheet #go')).toBeDisabled();
+ const choice=page.getByRole('button',{name:'Choose where to open the continued session'});await expect(choice).toBeEnabled();await choice.click();
+ await expect(page.getByRole('menu',{name:'Open continued session in'})).toBeVisible();
+});
