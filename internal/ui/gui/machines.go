@@ -152,6 +152,21 @@ func agentNames(m *app.Machine) []string {
 	return out
 }
 
+// machineAgentNames labels capabilities found by the scan, including agents with
+// no sessions. Profiles do not duplicate an agent in a machine's subtitle.
+func machineAgentNames(m *app.Machine) []string {
+	out := []string{}
+	seen := map[agent.ID]bool{}
+	for _, st := range m.Agents {
+		if hasAgent(st) && !seen[st.Agent] {
+			seen[st.Agent] = true
+			out = append(out, st.Name)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 // SetReceive lets (or stops letting) hopsesh on your other machines send sessions here.
 func (a *App) SetReceive(on bool) error {
 	a.mu.Lock()
