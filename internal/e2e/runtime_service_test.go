@@ -35,6 +35,13 @@ func TestRuntimeNativeUserServiceLifecycle(t *testing.T) {
 		t.Helper()
 		cmd := exec.CommandContext(ctx, bin, args...)
 		cmd.Env = box.env()
+		// The isolated CLI still needs the actual disposable runner's user bus.
+		// No unrelated environment or credentials are forwarded to the child.
+		for _, key := range []string{"XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"} {
+			if value := os.Getenv(key); value != "" {
+				cmd.Env = append(cmd.Env, key+"="+value)
+			}
+		}
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("native runtime service %v: %v\n%s", args, err, out)
