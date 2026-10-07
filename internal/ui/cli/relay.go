@@ -174,6 +174,6 @@ func relayCmd() *cobra.Command {
 		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(grants)
 	}}
-	root.AddCommand(init, pair, enroll, status, peers, revoke, disable)
+	root.AddCommand(init, pair, enroll, relayLoginCmd(), status, peers, revoke, disable)
 	return root
 }

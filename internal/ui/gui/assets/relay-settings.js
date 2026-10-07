@@ -43,15 +43,31 @@ function enrollment(refresh) {
  const d=dialog(h("h2",{},"Use a scoped relay credential"),h("p",{class:"muted"},"An operator-issued credential must be scoped to this public endpoint. Enrollment routes encrypted messages; peer permissions are approved separately."),field("Relay HTTPS origin",origin),field("Scoped credential JSON",credential,"Kept in private local state. It is excluded from settings exports and diagnostics."),error,h("div",{class:"dlg-foot"},h("button",{class:"btn",onclick:()=>{credential.value="";d.close();}},"Cancel"),button));
 }
 
+function browserEnrollment(identity, refresh) {
+ const origin=h("input",{"aria-label":"Browser login relay origin",type:"url",value:"https://relay.hopsesh.codonic.dev"});
+ const status=h("p",{role:"status"}),error=h("p",{class:"err",role:"alert"});
+ let running=false,canceled=false;
+ const cancel=()=>d.close();
+ const button=h("button",{class:"btn primary",onclick:async()=>{
+  running=true;button.disabled=true;origin.disabled=true;error.textContent="";status.textContent="Waiting for approval in your browser…";
+  try{await api("RelayLogin",origin.value.trim());running=false;if(!canceled){d.close();await refresh();}}
+  catch(e){error.textContent=String(e?.message || e);status.textContent="";}
+  finally{running=false;button.disabled=false;origin.disabled=false;}
+ }},"Open browser to connect");
+ const d=dialog(h("h2",{},"Connect internet delivery"),h("p",{class:"muted"},"Sign in and approve this machine in your browser. Compare this full fingerprint before allowing delivery:"),h("p",{class:"mono",style:"overflow-wrap:anywhere"},identity.id),field("Relay HTTPS origin",origin),status,error,h("div",{class:"dlg-foot"},h("button",{class:"btn",onclick:cancel},"Cancel"),button));
+ d.addEventListener("close",()=>{canceled=true;if(running)void api("RelayCancelLogin");},{once:true});
+}
+
 export function relaySettings(data, refresh) {
  const r=data || {peers:[]};
  const expired=r.enrolled && r.expires*1000<=Date.now();
  const status=r.health?.connected && r.enabled && !expired ? "Connected" : !r.initialized ? "Not initialized" : !r.enrolled ? "Not enrolled" : expired ? "Credential expired" : !r.enabled ? "Disabled" : "Disconnected";
  const action=async fn=>{try{await fn();await refresh();}catch(e){fail(e);}};
  return [h("section",{class:"card"},h("div",{class:"dlg-body"},
-  h("h2",{},"Optional internet delivery"),h("p",{class:"muted"},"Pair approved endpoints to move supported sessions without a VPN. Sessions and conversations are encrypted between endpoints. Enrollment requires a credential from your relay operator."),
+  h("h2",{},"Optional internet delivery"),h("p",{class:"muted"},"Pair approved endpoints to move supported sessions without a VPN. Sessions and conversations are encrypted between endpoints. Connect through your relay's browser approval, or use an operator-issued scoped credential."),
   h("p",{role:"status"},status,r.url ? ` · ${r.url}` : ""),r.error ? h("p",{class:"err",role:"alert"},r.error) : null,
   h("div",{class:"set-row"},r.initialized ? h("button",{class:"btn",onclick:()=>{const text=JSON.stringify(r.identity,null,2);const d=dialog(h("h2",{},"This endpoint's public identity"),h("pre",{class:"brief",style:"white-space:pre-wrap;overflow-wrap:anywhere;max-height:50vh"},text),h("p",{class:"muted"},`Fingerprint: ${r.identity.id}`),h("div",{class:"dlg-foot"},h("button",{class:"btn",onclick:()=>d.close()},"Close")));}},"Show public identity") : h("button",{class:"btn",onclick:()=>action(()=>api("RelayInitialize"))},"Create endpoint identity"),
+   h("button",{class:"btn",disabled:!r.initialized,onclick:()=>browserEnrollment(r.identity,refresh)},r.enrolled ? "Renew in browser…" : "Connect in browser…"),
    h("button",{class:"btn",disabled:!r.initialized,onclick:()=>enrollment(refresh)},r.enrolled ? "Renew enrollment…" : "Enroll endpoint…"),
    h("button",{class:"btn",disabled:!r.enrolled,onclick:()=>action(()=>api("RelayEnable",!r.enabled))},r.enabled ? "Disable internet delivery" : "Enable internet delivery"),
    h("button",{class:"btn",onclick:refresh},"Refresh status")),

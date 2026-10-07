@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Optional relay browser approval: desktop uses an external browser with S256 PKCE
+  and a temporary loopback callback; headless machines use `hopsesh relay login`
+  with a short-lived code. Approval grants delivery only, separate from local
+  conversation sharing and receiving. Private credentials stay in local state.
 - 0.5 foundation: `hopsesh runtime observe` reads local sessions without initializing
   accounts, probing login, adopting imports or applying movement marks. `--watch`
   coalesces filesystem notifications with bounded fallback reconciliation and reports

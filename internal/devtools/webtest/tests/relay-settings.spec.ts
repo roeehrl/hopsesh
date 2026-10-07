@@ -65,3 +65,35 @@ test("public pairing identity wraps within a compact window", async ({ page }) =
   const dimensions = await dialog.evaluate(element => ({ width: element.scrollWidth, client: element.clientWidth }));
   expect(dimensions.width).toBeLessThanOrEqual(dimensions.client + 1);
 });
+
+test("browser enrollment keeps secrets out of the bridge and cancels waiting approval", async ({ page }) => {
+  await page.getByRole("button", { name: "Create endpoint identity" }).click();
+  let pending: any;
+  let cancellations=0;
+  await page.route("**/call", async route => {
+    const request=route.request().postDataJSON();
+    if(request.m==="RelayLogin") {
+      expect(request.args).toEqual(["https://relay.hopsesh.codonic.dev"]);
+      pending=route;return;
+    }
+    if(request.m==="RelayCancelLogin") {
+      cancellations++;
+      await route.fulfill({json:{}});
+      if(pending)await pending.fulfill({json:{error:"relay login canceled or expired; start again when ready"}});
+      return;
+    }
+    await route.continue();
+  });
+  await page.getByRole("button", { name: "Connect in browser…" }).click();
+  const dialog=page.getByRole("dialog");
+  await expect(dialog.getByLabel("Browser login relay origin")).toHaveValue("https://relay.hopsesh.codonic.dev");
+  await expect(dialog.locator(".mono")).toHaveText(/^[a-f0-9]{64}$/);
+  await dialog.getByRole("button",{name:"Open browser to connect"}).click();
+  await expect(dialog.getByRole("status").filter({hasText:"Waiting for approval in your browser…"})).toBeVisible();
+  await expect(dialog.getByRole("button",{name:"Open browser to connect"})).toBeDisabled();
+  await expect(dialog.getByLabel("Browser login relay origin")).toBeDisabled();
+  await dialog.getByRole("button",{name:"Cancel",exact:true}).click();
+  await expect(dialog).not.toBeVisible();
+  await expect.poll(()=>cancellations).toBe(1);
+  await expect(page.getByRole("status").filter({hasText:"Not enrolled"})).toBeVisible();
+});

@@ -56,7 +56,7 @@ func (c Connection) HTTPClient() (*http.Client, error) {
 }
 
 func (s Store) SetConnection(ctx context.Context, c Connection) error {
-	if !opaque(c.Device) || c.Expires <= time.Now().Unix() {
+	if !opaque(c.Device) || c.Expires <= time.Now().Unix() || c.Expires > time.Now().Add(MaxLifetime+time.Minute).Unix() || len(c.Token) > 4096 {
 		return errors.New("invalid or expired relay credential")
 	}
 	if _, err := (Transport{Base: c.URL, Space: c.Space, Token: c.Token}).endpoint("/v1/messages"); err != nil {
@@ -65,13 +65,23 @@ func (s Store) SetConnection(ctx context.Context, c Connection) error {
 	if _, err := c.HTTPClient(); err != nil {
 		return err
 	}
-	return s.withLock(ctx, func() error { return writeJSON(filepath.Join(s.Directory, "connection.json"), c) })
+	data, err := json.Marshal(c)
+	if err != nil || len(data) > 8192 {
+		return errors.New("relay credential metadata exceeds limit")
+	}
+	return s.withLock(ctx, func() error {
+		identity, err := s.Public()
+		if err != nil || identity.ID != c.Device {
+			return errors.New("relay credential does not match this endpoint's current identity")
+		}
+		return writeJSON(filepath.Join(s.Directory, "connection.json"), c)
+	})
 }
 func (s Store) Connection(ctx context.Context) (Connection, error) {
 	var c Connection
 	err := s.withLock(ctx, func() error {
 		path := filepath.Join(s.Directory, "connection.json")
-		b, err := localstate.ReadPrivateFile(path, MaxWireBytes)
+		b, err := localstate.ReadPrivateFile(path, 8192)
 		if err != nil {
 			return err
 		}

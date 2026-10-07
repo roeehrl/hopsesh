@@ -108,6 +108,11 @@ jobs:
         env:
           HOPSESH_RELAY_REQUIRE_NODE: "1"
         run: go test -race -count=1 -run TestRelayPush -timeout 5m ./internal/e2e
+      - name: headless browser approval and native S256 callback
+        shell: bash
+        env:
+          HOPSESH_RELAY_REQUIRE_NODE: "1"
+        run: go test -race -count=1 -run TestRelayEnrollment -timeout 2m ./internal/e2e
       - name: one observer with zero, one and multiple idle clients
         shell: bash
         run: go test -race -count=1 -run TestRuntimeIdleClients -timeout 2m ./internal/e2e

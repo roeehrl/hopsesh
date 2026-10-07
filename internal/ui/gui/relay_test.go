@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -12,6 +13,18 @@ import (
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/relay"
 )
+
+func TestGUIShutdownCancelsPendingRelayApproval(t *testing.T) {
+	home(t)
+	a := NewApp(all.Registry())
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	a.relayLogin.cancel = cancel
+	a.Shutdown()
+	if ctx.Err() != context.Canceled {
+		t.Fatal("app shutdown left pending browser approval alive")
+	}
+}
 
 func TestRelaySettingsDoesNotInitializeAndNeverExportsSecrets(t *testing.T) {
 	home(t)

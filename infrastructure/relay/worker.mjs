@@ -1,4 +1,6 @@
 import {SignJWT, jwtVerify} from 'jose';
+import {createAuthorizationHandler, maintainAuthorization, accessPrincipal, response} from './authorization.mjs';
+import {deviceAsset} from './device-page.mjs';
 // Experimental Hopsesh-only infrastructure. Payloads stay encrypted end to end.
 const encoder = new TextEncoder();
 export const LIMITS = Object.freeze({ frame: 24 * 1024 * 1024, bytes: 64 * 1024 * 1024, messages: 1000, devices: 32, lifetime: 86400, batch: 1 });
@@ -140,9 +142,34 @@ export class Mailbox {
   await maintain(this.ctx.storage,this.env.CIPHERTEXT);
  }
 }
+export class Authorization {
+ constructor(ctx,env){this.ctx=ctx;this.env=env}
+ async fetch(req){
+  const enroll=async(space,device,ttl)=>{
+   const r=await this.env.MAILBOX.get(this.env.MAILBOX.idFromName(space)).fetch(new Request(new URL('/v1/enrollment/register',req.url),{method:'POST',headers:{'Content-Type':'application/json','X-Hopsesh-Space':space,Authorization:'Bearer '+this.env.ENROLLMENT_ADMIN},body:JSON.stringify({device,ttl})}));
+   if(r.status!==201)throw new Error('enrollment');return r.json();
+  };
+  return createAuthorizationHandler(this.ctx.storage,enroll)(req);
+ }
+ async alarm(){await maintainAuthorization(this.ctx.storage)}
+}
 export default {async fetch(req,env){
  const url=new URL(req.url);
  if(url.pathname==='/v1/capabilities'&&req.method==='GET')return json({protocol:1,limits:LIMITS,experimental:true});
+ if(url.pathname.startsWith('/v1/device/')||url.pathname.startsWith('/v1/authorization/')||['/device','/device.js','/device.css'].includes(url.pathname)){
+  if(!env.AUTHORIZATION||!env.LOGIN_RATE||!env.CODE_RATE||!env.ACCESS_TEAM_DOMAIN||!env.ACCESS_AUDIENCE||!env.ENROLLMENT_ADMIN||env.ENROLLMENT_ADMIN.length<32)return response({error:'temporarily_unavailable'},503);
+  if(url.protocol!=='https:')return response({error:'invalid_request'},400);
+  const publicRoute=['/v1/device/code','/v1/device/token','/v1/authorization/request','/v1/authorization/token'].includes(url.pathname);
+  let principal;
+  if(!publicRoute){try{principal=await accessPrincipal(req,env)}catch{return response({error:'access_denied'},403)}}
+  const ip=req.headers.get('CF-Connecting-IP');if(!ip)return response({error:'invalid_request'},400);
+  if(!(await env.LOGIN_RATE.limit({key:'ip:'+ip})).success||!(await env.LOGIN_RATE.limit({key:'global:'+url.pathname})).success)return response({error:'temporarily_unavailable'},429);
+  if(['/v1/device/code','/v1/authorization/request'].includes(url.pathname)&&!(await env.CODE_RATE.limit({key:ip})).success)return response({error:'temporarily_unavailable'},429);
+  if(req.method==='GET'){const asset=deviceAsset(url.pathname);if(asset)return asset}
+  if(req.method!=='POST'||!['/v1/device/code','/v1/device/token','/v1/device/review','/v1/device/approve','/v1/authorization/request','/v1/authorization/token'].includes(url.pathname))return response({error:'invalid_request'},404);
+  const headers=new Headers(req.headers);headers.delete('X-Hopsesh-Principal');if(principal)headers.set('X-Hopsesh-Principal',principal);
+  return env.AUTHORIZATION.get(env.AUTHORIZATION.idFromName('hopsesh-device-enrollment-v1')).fetch(new Request(req,{headers}));
+ }
  const space=req.headers.get('X-Hopsesh-Space');if(!opaque(space))return json({error:'space'},400);
  const token=(req.headers.get('authorization')||'').replace(/^Bearer /,'');
  if(!env.ENROLLMENT_ADMIN||env.ENROLLMENT_ADMIN.length<32||token.length>4096)return json({error:'authorization'},403);
