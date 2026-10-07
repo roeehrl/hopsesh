@@ -103,7 +103,7 @@ type Briefing struct {
 	Missing     []string // differences in instructions, skills, MCP servers
 	ToolNames   string   // the target's own tool names, to use instead of the history's
 	Note        string   // a handoff note the source agent wrote, if any
-	Rules       []Rules  // the user's instructions for every project, carried when asked
+	Rules       []Rules  // selected source instruction text, carried when asked
 	// For a cloud briefing (Brief with BriefCloud):
 	Title       string   // the session's title
 	Unpushed    int      // commits the cloud gets that were not on the remote
@@ -116,7 +116,7 @@ type Briefing struct {
 	Repo     string
 }
 
-// Rules are the text of one global instruction file.
+// Rules are the text of one selected instruction file, quoted in the briefing.
 type Rules struct {
 	File string
 	Text string

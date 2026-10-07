@@ -216,7 +216,7 @@ func (a *App) QuitAndEnd() {
 }
 
 // MainClosing applies desktop close behavior, then the terminal-aware quit guard.
-// Existing configurations without an explicit desktop preference retain KeepTabs.
+// The installed desktop shell keeps running by default, independently of icon placement.
 func (a *App) MainClosing() (cancel, hide bool) {
 	if !a.quitting.Load() && a.Desktop != nil && a.Desktop.KeepOnClose() {
 		return true, true

@@ -75,9 +75,6 @@ func (a *App) AttachDesktop(main *application.WebviewWindow) {
 				if shell, ok := a.Desktop.(interface{ Foreground() bool }); ok {
 					fg = shell.Foreground()
 				}
-				if !fg && a.Desktop.Snapshot().Effective == "app" {
-					continue
-				}
 				a.quick.mu.Lock()
 				scanned := a.quick.scan
 				a.quick.mu.Unlock()

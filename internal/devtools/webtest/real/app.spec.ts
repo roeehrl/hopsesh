@@ -67,6 +67,14 @@ test("desktop placement and the native Quick access window", async () => {
       await call('SaveDesktop',{...input,mode});
       expect((await call('DesktopSettings')).effective).toBe(mode);
     }
+    await call('SaveDesktop',{...input,mode:'app'});
+    await page.evaluate(async()=>{ // actual native close, not just the preference model
+      // @ts-expect-error native runtime module
+      const {Window}=await import('/wails/runtime.js');await Window.Close();
+    });
+    await call('QuickOpen','sessions','','');
+    await expect(page.getByRole('heading',{name:'All sessions',exact:true})).toBeVisible();
+    await call('SaveDesktop',{...input,mode:'both'});
     await call('QuickShow');
     const quick=browser.contexts().flatMap(c=>c.pages()).find(p=>new URL(p.url()).pathname==='/quick.html');
     expect(quick).toBeTruthy();

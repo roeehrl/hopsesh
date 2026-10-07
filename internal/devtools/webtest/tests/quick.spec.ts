@@ -102,3 +102,20 @@ test('Quick access uses the same loaded agent icons as the main window',async({p
  }
  await page.screenshot({path:testInfo.outputPath('quick-agent-icons.png')});
 });
+
+test('background close is the default on every platform even without a tray',async({page})=>{
+ for(const os of ['darwin','windows','linux']){
+  await page.route('**/call',async route=>{
+   if(route.request().postDataJSON().m!=='QuickSnapshot'){await route.continue();return;}
+   const response=await route.fetch(),body=await response.json();
+   body.result.os=os;body.result.desktop.preferences={mode:'app',close:''};body.result.desktop.capabilities={tray:false,hideApp:false};body.result.desktop.effective='app';
+   await route.fulfill({json:body});
+  });
+  await page.goto('/quick.html');await page.getByRole('button',{name:'Desktop presence settings',exact:true}).click();
+  const close=page.getByLabel('When the main window closes');await expect(close).toHaveValue('keep');
+  await expect(close.locator('option[value=keep]')).toHaveText('Keep running in background');
+  await expect(close.locator('option[value=keep]')).toBeEnabled();
+  await expect(page.getByText(/Open Hopsesh from your app launcher/)).toBeVisible();
+  await page.unrouteAll({behavior:'wait'});
+ }
+});

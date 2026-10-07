@@ -51,6 +51,51 @@ carries over and apply. Other-agent transfers also have a destination account se
 The plan identifies both profiles. An unqualified target uses the known default profile;
 it never silently chooses among custom accounts.
 
+The GUI shows the observed email or account label, with the runtime profile beneath it.
+A single destination is a static identity card; multiple destinations use a profile
+selector without an extra duplicate Default option. The arrow beside **Continue** chooses
+the agent desktop app, Hopsesh Terminal or the configured external terminal. The choice is
+remembered per agent and used when applying the transfer. Unsupported desktop destinations
+explain their restriction and fall back to the terminal preference.
+
+### Instruction review
+
+Expand **Source instructions** to inspect paths, scope and file text, then select individual
+files. Hopsesh discovers the module's declared global instruction files in the selected
+source profile and declared instruction files directly in the session's project directory.
+It does not resolve imports, parent-directory rules, skills, settings or automatic memory.
+Remote transfers package these same declared files for review. Arbitrary submitted paths
+are rejected, and a selected file that disappears or becomes unreadable blocks the plan.
+
+Selected text is quoted in the handoff briefing; destination instruction files are never
+created or overwritten. Each file is bounded to 8,000 bytes, and the final briefing can
+shorten it further to fit the context budget. Review **What the agent is told** for the
+final text. On a round trip, earlier quoted text may remain conversation history, but the
+original instruction files stay in place and edits are not synchronized back. Review the
+current source files on every transfer. The CLI's `--carry-rules` retains its global-only
+meaning; individual file selection is available in the GUI.
+
+This explicit selection follows the vendors' distinction between conversation context and
+persistent instructions: [Claude memory](https://code.claude.com/docs/en/memory) and
+[Codex AGENTS.md](https://developers.openai.com/codex/guides/agents-md). The launch control
+uses a default action with adjacent alternatives, following
+[split-button guidance](https://www.nngroup.com/articles/split-buttons/).
+
+### Review notices
+
+Cross-agent moves create portable conversation history and leave private vendor state out.
+Moving between runtime profiles does not prove that different people own the two logins;
+matching account labels also cannot establish permission to reuse private native state.
+An active source is transferred as a snapshot: later messages are not synchronized. Marking
+the source waits for its process to stop and does not itself stop that process.
+
+The weekly drift workflow checks current published agent versions against the tested
+versions, commands and schemas. It does not certify live resume behavior on every release.
+Codex native writing therefore remains experimental, with untested versions identified
+separately. See [drift detection](drift.md).
+
+### CLI examples
+
 ```sh
 hopsesh plan claude@<source-profile-id>/<session-id> --in codex --target-profile <target-profile-id>
 hopsesh pull claude@<source-profile-id>/<session-id> --in codex --target-profile <target-profile-id> --yes

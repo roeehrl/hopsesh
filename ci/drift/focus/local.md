@@ -128,3 +128,15 @@ metadata is the only Desktop file read. Unsupported live focus remains explicit;
 no fallback merely activates the app. Check TTY launch timeout/exit status/cleanup,
 no visible tab, session UUID propagation, and default-profile/root gates with module,
 GUI service and browser tests.
+
+Transfer review instructions: inspect `internal/core/move/instructions.go` and the
+source-file packaging in `internal/app/peer.go`. The GUI previews declared global and
+current-project instruction files and carries only the selected text snapshot in the
+briefing, never overwriting destination rule files. Check path allowlists, missing and
+oversized files, imported/parent rules (currently not followed), scoped account roots,
+peer transport, and return-trip preservation. Agent account email/slug is display metadata,
+not proof of native replay permission; cross-agent moves must not claim a different login.
+Desktop availability and remembered launch choices must be checked against the actual
+profile and installed application. Drift findings should distinguish a newer upstream
+release from fixture coverage: help/schema probes do not certify model continuation or
+justify expanding `Spec.Tested` or removing experimental status without versioned evidence.

@@ -649,3 +649,19 @@ code { font-family: var(--mono); font-size: .92em; padding: 0 3px; border-radius
 @media (prefers-reduced-motion:reduce) { .operation-status::before, .loading[role=status]::before, button.is-pending::before { animation:none; } }
 
 .settings-fields { border:0; padding:0; margin:0; min-width:0; display:flex; flex-direction:column; gap:16px; }
+
+/* Transfer review: account identity and file-level instruction disclosure. */
+.transfer-accounts {display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:16px;align-items:center;padding:12px 14px;background:var(--side);border-radius:10px}
+.transfer-accounts>div {display:flex;flex-direction:column;gap:5px;min-width:0;overflow-wrap:anywhere}
+.transfer-accounts .muted {font-size:12px}.transfer-accounts select {width:100%;min-width:0}
+.instruction-picker {border:1px solid var(--line);border-radius:8px;padding:12px}
+.instruction-picker summary {cursor:pointer;font-weight:500}.instruction-picker p {font-size:12px;line-height:1.5}
+.instruction-file {padding:10px 0;border-top:1px solid var(--line)}.instruction-file .mono {overflow-wrap:anywhere}
+.instruction-file details {margin:8px 0 0 24px}.instruction-text {max-height:280px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;background:var(--side);padding:12px;border-radius:6px}
+.launch-choice {display:flex;flex-direction:column;gap:6px;align-items:flex-end}.launch-notice {max-width:300px;font-size:11px}
+.transfer-launch #go>span:first-child {display:flex;flex-direction:column;gap:3px;text-align:left}.transfer-launch small {font-size:11px;font-weight:400}
+.transfer-launch .btn {height:auto;min-height:48px;padding-top:7px;padding-bottom:7px;line-height:1.25}
+.transfer-launch:has(.split-chevron) #go {border-radius:6px 0 0 6px}
+.transfer-launch .split-chevron {border-radius:0 6px 6px 0;border-left-color:color-mix(in srgb,var(--accent-ink) 35%,var(--accent))}
+.transfer-launch .split-chevron {min-width:40px}.sheet-foot .launch-choice {flex-shrink:0}
+@media(max-width:700px){.transfer-accounts {grid-template-columns:1fr}.account-arrow {display:none}.sheet-foot .launch-choice{max-width:100%;flex-shrink:1}}

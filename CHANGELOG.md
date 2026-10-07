@@ -16,6 +16,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Make window-close behavior default to keeping Hopsesh running in the background,
+  independently of menu-bar or tray placement on macOS, Windows and Linux. Preserve
+  explicit Quit preferences and reopen the hidden window when launching Hopsesh again.
+- Show selectable instruction files and text previews in transfer review, distinguish
+  account profiles from verified identity, explain live-source snapshots and deferred
+  moved labels, and place a remembered launch choice beside Continue. Single-account
+  destinations display their identity without a redundant Default selector.
+
 - Use the main window’s agent icons in Quick access. Put this machine first in
   Accounts and give remote setup notices the same collapsible machine grouping.
 

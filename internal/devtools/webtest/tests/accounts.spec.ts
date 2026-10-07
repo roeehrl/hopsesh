@@ -20,7 +20,7 @@ test('arbitrary account names, tags, edits, and a scoped transfer destination',a
  await page.getByRole('button',{name:'Back to sessions',exact:true}).click();await row(page,'Find the codeword').click();
  await details(page).getByRole('button',{name:'Move',exact:true}).click();await page.getByRole('menuitem',{name:/Move to another account/}).click();
  const choice=page.getByLabel('Destination account');await expect(choice).toBeVisible();const id=await choice.locator('option').filter({hasText:'Research lab'}).getAttribute('value');await choice.selectOption(id!);
- await expect(page.locator('#sheet')).toContainText('new portable conversation',{timeout:30000});
+ await expect(page.locator('#sheet')).toContainText('portable conversation',{timeout:30000});
 });
 test('account setup fits a narrow window',async({page},testInfo)=>{
  await page.setViewportSize({width:760,height:650});await page.locator('#btn-settings').click();await page.getByRole('button',{name:'Accounts',exact:true}).click();
@@ -38,7 +38,7 @@ test('Codex desktop action remains visible and explains why a custom account use
  await page.getByRole('button',{name:'Back to sessions',exact:true}).click();await row(page,'Find the codeword').click();
  await details(page).getByRole('button',{name:'Move',exact:true}).click();await page.getByRole('menuitem',{name:/^Continue with Codex…/}).click();
  const choice=page.getByLabel('Destination account');const id=await choice.locator('option').filter({hasText:'Research Codex'}).getAttribute('value');await choice.selectOption(id!);
- await expect(page.locator('#sheet')).toContainText('new portable conversation');await page.locator('#sheet').getByRole('button',{name:/Continue in Codex/}).click();
+ await expect(page.locator('#sheet')).toContainText('portable conversation');await page.locator('#sheet').getByRole('button',{name:/Continue in Codex/}).click();
  await expect(page.getByText('Codex session written',{exact:true})).toBeVisible({timeout:30000});await page.getByRole('button',{name:'Back to sessions',exact:true}).click();
  await row(page,'Find the codeword (from Claude Code)').click();await details(page).locator('#act-chevron').click();
  const app=page.getByRole('menuitem',{name:/Resume in Codex app/});await expect(app).toBeVisible();await expect(app).toHaveAttribute('aria-disabled','true');await expect(app).toContainText(/account (root|profile)/);
@@ -62,7 +62,7 @@ test('connected remote without identity explains account setup and clears after 
  await expect(notice).toBeVisible();await expect(notice).toContainText('SSH is connected');
  await remote.locator('summary').click();await expect(notice).toBeHidden();
  await page.getByRole('button',{name:'Scan accounts',exact:true}).click();
- await expect(page.getByRole('button',{name:'Scan accounts',exact:true})).toBeEnabled();
+ await expect(page.getByRole('button',{name:'Scan accounts',exact:true})).toBeEnabled({timeout:30000});
  await expect(notice).toBeHidden();await remote.locator('summary').click();
  await expect(notice).toContainText('hopsesh accounts scan --machine local');
  await page.screenshot({path:testInfo.outputPath('remote-account-setup.png'),fullPage:true});

@@ -45,7 +45,6 @@ func Validate(d config.Desktop, c Capabilities) error {
 	return nil
 }
 
-// KeepOnClose never hides the last access route on desktops without a Dock.
-func KeepOnClose(d config.Desktop, c Capabilities, mac bool) bool {
-	return d.Close == "keep" && (mac || Effective(d, c) != "app")
-}
+// KeepOnClose is independent of icon placement. Launching Hopsesh again uses
+// the single-instance handler to show its existing window, including without a tray.
+func KeepOnClose(d config.Desktop) bool { return d.KeepInBackground() }

@@ -1,6 +1,7 @@
 // The plan sheet (what a hop, continuation or send will do, with its choices), its
 // progress, and the Done screen.
 import { api, on, h, fill, view, state, screen, go, current, toast, fail, errText, cap, agentChip, here, $, count, sys, keys, cloudChip, cloudOf } from "./core.js";
+import { openMenu, closeAll } from "./menu.js";
 import { undo } from "./activity.js";
 import { openResult, where as opensIn } from "./term.js";
 
@@ -11,7 +12,7 @@ function defaults() {
   const d = state.info.defaults;
   return { worktree: "auto", remoteControl: false, notify: d.movementNotices !== false, fork: false, redact: false, clone: false, targetDir: "", reposDir: "",
     mark: d.markMoved, syncCode: d.syncCode, push: d.pushSource, stopLocal: false, app: false, conflict: "",
-    fidelity: "history", native: false, note: "", go: false, carryRules: false, via: "", codeOnly: false, append: false };
+    fidelity: "history", native: false, note: "", go: false, carryRules: false, ruleFiles: [], via: "", codeOnly: false, append: false };
 }
 
 // planFor opens the sheet for a session: target "" keeps its agent, sendTo pushes it;
@@ -22,6 +23,7 @@ export async function planFor(e, { target = "", sendTo = "", codeOnly = false, t
     sendTo ? `Asking hopsesh on ${sendTo} to plan it…` : "Working out the plan…")));
   if (!sheet.open) sheet.showModal();
   const c=cur;
+  c.launch = state.info.places?.[target || e.agent] || opensIn();
   try {c.profiles = e.cloud?[]:await api("AccountDestinations", sendTo, target || e.agent);} catch (err) { if (cur === c) problem(errText(err), { label: "Try again", run: () => planFor(e, { target, sendTo, codeOnly, targetProfile, targetSession, bounded, fork, returnCandidate }) }); return; }
   if(cur!==c)return;
   if(!c.returnCandidate && !c.opts.targetProfile && c.profiles.length && !c.profiles.some(p=>p.default)) {
@@ -59,6 +61,11 @@ async function replan() {
     const p = await request;
     if (cur !== c || c.revision !== revision || !p) return;
     c.plan = p;
+    if(!c.sendTo && p.kind!=="fetch") {
+      if(c.launch==="app"&&!p.can.app){c.launch=opensIn();c.launchNotice=p.can.appWhy||"Desktop opening is unavailable for this destination.";}
+      const app=c.launch==="app";
+      if(c.opts.app!==app){c.opts.app=app;return replan();}
+    }
     c.busy = false;
     render();
   } catch (err) {
@@ -98,11 +105,16 @@ async function chooseFolder() {
 
 function summary(p) {
  const profiles=cur.profiles||[];
- const accountChoice=!cur.returnCandidate && profiles.length ? h("label",{class:"summary"},
-   `From ${p.sourceProfile || cur.e?.profile?.name || p.fromAgent} → Destination account`,
-   h("select",{"aria-label":"Destination account",onchange:ev=>{cur.opts.targetSession="";set("targetProfile",ev.target.value)}},
-    h("option",{value:"",selected:!cur.opts.targetProfile},"Default account"),
-    profiles.map(p=>h("option",{value:p.id,selected:cur.opts.targetProfile===p.id},`${p.name}${p.account?.email?' · '+p.account.email:''}${p.tags?.length?' ['+p.tags.join(', ')+']':''}`)))):null;
+ const chosen=profiles.find(x=>x.id===cur.opts.targetProfile)||profiles.find(x=>x.default);
+ const identity=x=>x?.account?.email||x?.account?.label||x?.name||"Account not identified";
+ const source=cur.e?.profile;
+ const accountChoice=profiles.length?h("div",{class:"transfer-accounts"},
+  h("div",{},h("span",{class:"sec-h"},"Source account"),h("b",{},identity(source)),h("span",{class:"muted"},source?.name||p.sourceProfile||p.fromAgent)),
+  h("span",{class:"account-arrow","aria-hidden":"true"},"→"),
+  h("div",{},h("span",{class:"sec-h"},"Destination account"),
+   !cur.returnCandidate&&profiles.length>1?h("select",{"aria-label":"Destination account",onchange:ev=>{cur.opts.targetSession="";return set("targetProfile",ev.target.value)}},
+    profiles.map(x=>h("option",{value:x.id,selected:chosen?.id===x.id},`${identity(x)}${identity(x)!==x.name?' · '+x.name:''}${x.default?' · Default profile':''}`)))
+   :h("b",{},identity(chosen)),h("span",{class:"muted"},chosen?`${identity(chosen)!==chosen.name?chosen.name+' · ':''}${chosen.default?'Default profile':'Named profile'}${!chosen.account?.email&&!chosen.account?.label?' · Email unavailable':''}`:"Account not identified"))):null;
  const summaryBody=summaryContent(p);
  return h("div",{},cur.returnCandidate ? h("div",{class:"summary"}, `Move back destination: ${cur.returnCandidate.agentName} · ${cur.returnCandidate.profileLabel || cur.returnCandidate.profile || "Default account"} · ${cur.returnCandidate.machine}`, h("span",{class:"mono"},cur.opts.targetSession || (cur.opts.fork ? "New separate branch; the original session will be preserved" : "New session; the missing original will not be reused"))) : null,accountChoice,summaryBody);
 }
@@ -120,7 +132,7 @@ function summaryContent(p) {
   if (r.worktree) add.push("1 worktree");
   if (p.setAside) chg.push(`${count(p.setAside, "older copy", "older copies")} set aside`);
   if (p.stopHere) chg.push("1 quit here first");
-  if (p.mark !== "off") chg.push(`1 marked on ${p.sourceHost}${p.mark === "when-stopped" ? " when it ends" : ""}`);
+  if (p.mark !== "off") chg.push(`1 marked on ${sourcePlace(p)}${p.mark === "when-stopped" ? " when it ends" : ""}`);
   return h("div", { class: "summary", "aria-label": "What changes" },
     add.map((x) => h("span", { class: "add" }, "+ " + x)), chg.map((x) => h("span", { class: "chg" }, "~ " + x)),
     h("span", { class: "none" }, "0 removed"), h("span", { class: "spacer" }), h("span", { class: "muted" }, "Undo any time from Activity"));
@@ -163,10 +175,32 @@ function conversation(p) {
       h("div", { style: "display:flex;flex-direction:column;gap:6px;margin-top:8px" },
         h("button", { class: "btn small", style: "align-self:flex-end", onclick: async () => { await api("CopyText", c.briefing); toast("Copied"); } }, "Copy"),
         h("div", { class: "brief" }, c.briefing))),
+    instructionPicker(p),
     h("div", { class: "opts-grid" },
-      check(`Bring my ${c.from} instructions`, "carryRules", `Your instructions for every ${c.from} project go into the briefing.`),
       p.can.import && !o.bounded ? check(`Let ${p.agent}'s own importer convert it`, "via", "Instead of hopsesh's conversion; hopsesh still adds its briefing.", imported, (on) => (on ? "import" : "")) : null,
       p.can.native && !imported && !o.bounded ? check(`Replay shell commands as ${p.agent}'s own`, "native", "Experimental: exact commands and outputs instead of text.") : null));
+}
+
+function instructionPicker(p) {
+ const files=p.continue.instructions||[], selected=files.filter(f=>f.selected), c=cur;
+ const pick=(path,on)=>{const paths=new Set(files.filter(f=>f.selected).map(f=>f.path));if(on)paths.add(path);else paths.delete(path);c.opts.ruleFiles=[...paths];c.opts.carryRules=paths.size>0;return replan()};
+ return h("details",{class:"instruction-picker",open:!!c.rulesExpanded,ontoggle:ev=>{if(ev.target.isConnected)c.rulesExpanded=ev.target.open}},
+  h("summary",{},`Source instructions · ${selected.length} of ${files.length} files selected`),
+  h("p",{class:"muted"},"Choose which source files to quote in the handoff briefing. Destination instruction files are never created or overwritten."),
+  h("p",{class:"muted"},"On a return trip, earlier snapshots remain conversation history. Your original instruction files stay in place; edits are not synchronized back. Review the files again for each transfer."),
+  files.length?h("label",{class:"opt"},h("input",{type:"checkbox",checked:files.some(f=>!f.error)&&files.filter(f=>!f.error).every(f=>f.selected),onchange:ev=>{c.opts.ruleFiles=ev.target.checked?files.filter(f=>!f.error).map(f=>f.path):[];return set("carryRules",ev.target.checked)}}),h("span",{},"Include all listed instruction files")):h("p",{},"No supported instruction files found."),
+  files.map(f=>h("div",{class:"instruction-file"},h("label",{class:"opt"},h("input",{type:"checkbox",checked:f.selected,disabled:!!f.error,'aria-label':`Include ${f.path}`,onchange:ev=>pick(f.path,ev.target.checked)}),h("span",{},h("b",{class:"mono"},f.path),h("span",{class:"muted"},`${f.scope} · ${sourcePlace(p)} · ${f.bytes.toLocaleString()} bytes${f.shortened?' · Preview and carried text shortened':''}`))),
+   f.error?h("p",{class:"err"},f.error):h("details",{},h("summary",{},"View instructions"),h("pre",{class:"instruction-text"},f.text)))),
+  h("p",{class:"muted"},"Shows declared global files and instruction files in the session’s project directory. Imported files, parent-directory rules, skills, settings and automatic memory are not included. The briefing may shorten selected text to fit; review “What the agent is told” above."));
+}
+const sourcePlace=p=>p.sourceHost===here()?`${p.sourceHost} (${sys.here})`:p.sourceHost;
+function launchControl(p,blocked) {
+ const enabled=!p.machine&&!p.noWork&&p.kind!=="fetch", c=cur;
+ const label=place=>place==='app'?`${p.agent} app`:place==='here'?'Hopsesh Terminal':sys.terminal;
+ const choices=[{id:'app',label:`Open in ${p.agent} app`,disabled:!p.can.app,why:p.can.appWhy||(!p.can.app?'Desktop opening is unavailable':null)},{id:'here',label:'Open in Hopsesh Terminal'},{id:'terminal',label:`Open in ${sys.terminal}`}];
+ return h("div",{class:"launch-choice"},c.launchNotice?h("span",{class:"muted launch-notice"},c.launchNotice):null,h("div",{class:"split transfer-launch"},
+  h("button",{class:"btn primary big",id:"go",disabled:blocked,onclick:apply},h("span",{},h("span",{},verb(p)),enabled?h("small",{},`Open in ${label(c.launch||opensIn())}`):null),h("span",{class:"kbd"},keys("mod+enter"))),
+  enabled?h("button",{class:"btn primary big split-chevron",disabled:blocked,'aria-label':'Choose where to open the continued session','aria-haspopup':'menu','aria-expanded':'false',onclick:ev=>openMenu(ev.currentTarget,choices.map(choice=>({...choice,radio:(c.launch||opensIn())===choice.id,run:async()=>{await api('SetPlace',c.target||c.e.agent,choice.id);state.info.places||={};state.info.places[c.target||c.e.agent]=choice.id;c.launch=choice.id;c.launchNotice='';await replan();sheet.querySelector('#go')?.focus()}})),{label:'Open continued session in',align:'end',width:300})},'▾'):null));
 }
 
 // sameFolder: the session stays in its folder on this machine (another agent here).
@@ -235,21 +269,20 @@ function checks(p) {
 
 function options(p) {
   const r = p.repo, o = cur.opts, cont = p.continue;
-  const markDesc = p.mark === "when-stopped" ? "It is still open: marked when it ends, so it isn't resumed by mistake."
+  const markDesc = p.mark === "when-stopped" ? "Adds a moved label after the source process stops. This option does not stop it or synchronize later messages."
     : "Its title says where the work went, so it isn't resumed by mistake.";
   const opts = [
-    p.mark !== "off" || !o.mark ? check(`Mark the copy on ${p.sourceHost}`, "mark", markDesc) : null,
+    p.mark !== "off" || !o.mark ? check(`Mark the source on ${sourcePlace(p)}`, "mark", markDesc) : null,
     r.sourceHead && !sameFolder(p) ? check("Bring the code to the session's commit", "syncCode", "Fetches if needed; fast-forwards only a clean checkout on the same branch.") : null,
     r.unpushed && r.sourceUpstream && !sameFolder(p) ? check(`Push ${count(r.unpushed, "commit")} on ${p.sourceHost} first`, "push", "With that machine's own git credentials.") : null,
     cont ? check("Start working right away", "go", `${p.agent} starts with “Continue.” instead of waiting for you.`) : null,
     p.can.remoteControl ? check("Turn on Remote Control", "remoteControl", `Reach it from your phone or other machines, as ${p.newName}.`) : null,
-    p.can.app && !p.machine ? check(`Open it in the ${p.agent} app`, "app", "Instead of a terminal window.") : null,
     check("Record a movement notice", "notify", "Keep a durable Hopsesh notice on the source. Prepared means the destination was written; continued requires observed new work."),
     p.live && p.can.fork ? check("Keep the old session running too", "fork", "Both copies continue, instead of a hand-off.") : null,
     check("Redact likely secrets", "redact", "In this copy only."),
   ];
   return h("section", { class: "sec", style: "gap:10px" }, h("span", { class: "sec-h" }, "Options"), h("div", { class: "opts-grid" }, opts),
-    p.otherAccount ? h("span", { class: "muted", style: "font-size:12px" }, `${p.machine || "This machine"} is signed in to another ${p.agent} account: content bound to the original account is left out.`) : null);
+    null);
 }
 
 function paths(p) {
@@ -276,18 +309,19 @@ function render() {
     h("header", { class: "sheet-head" },
       h("h2", { id: "sheet-title" }, title),
       h("div", { class: "fromto" },
-        agentChip(p.sourceAgent, p.fromAgent), h("span", {}, `on ${p.sourceHost}`), h("span", { class: "mono muted", style: "font-size:11.5px" }, p.sourceCwd),
+        agentChip(p.sourceAgent, p.fromAgent), h("span", {}, `on ${sourcePlace(p)}`), h("span", { class: "mono muted", style: "font-size:11.5px" }, p.sourceCwd),
         h("span", { style: "color:var(--accent)", "aria-label": "to" }, "→"),
         agentChip(p.continue ? cur.target : p.sourceAgent, p.agent), h("span", {}, there), h("span", { class: "mono muted", style: "font-size:11.5px" }, p.targetCwd)),
       summary(p)),
     h("div", { class: "sheet-body" }, p.continue ? conversation(p) : null, repository(p), checks(p), options(p), paths(p)),
     h("footer", { class: "sheet-foot" },
-      h("span", { class: "muted", style: "font-size:12px;flex:1 1 260px" }, `Nothing changes until you ${p.continue ? "continue" : p.machine ? "send it" : "hop"}. The original on ${p.machine ? sys.here : p.sourceHost} is never deleted.`),
+      h("span", { class: "muted", style: "font-size:12px;flex:1 1 260px" }, `Nothing changes until you ${p.continue ? "continue" : p.machine ? "send it" : "hop"}. The original on ${p.machine ? sys.here : sourcePlace(p)} is never deleted.`),
       h("button", { class: "btn", onclick: () => sheet.close() }, "Cancel"),
-      h("button", { class: "btn primary big", id: "go", disabled: blocked, onclick: apply }, h("span", {}, verb(p)), h("span", { class: "kbd" }, keys("mod+enter"))))));
+      launchControl(p,blocked))));
 }
 
 async function apply() {
+  closeAll(false);
   const c = cur;
   if (!c?.plan || c.busy || c.applying || (c.plan.blockers || []).length) return;
   if (c.plan.kind === "fetch") return applyFetch(c);
@@ -302,7 +336,9 @@ async function apply() {
     cur = null; // the plan stays for OpenResult
     state.stale = true;
     sheet.close();
+    c.opts.launch = c.launch;
     go("done", d, c.plan, c.opts);
+    if(!d.machine&&!d.noWork&&c.launch) await openResult(c.launch==='app'?'':c.launch);
   } catch (err) {
     c.applying = false;
     problem(errText(err), { label: "Back to the plan", run: () => replan() });
@@ -468,8 +504,9 @@ function happened(d, p) {
 
 screen("done", (d, p, o) => {
   const where = d.machine ? `on ${d.machine}` : `on ${sys.here}`;
-  const open = () => (d.inApp ? api("OpenResult", "").catch(fail) : openResult(opensIn()));
-  const other = () => openResult(opensIn() === "terminal" ? "here" : "terminal");
+  const resultPlace=o.launch==='here'||o.launch==='terminal'?o.launch:opensIn();
+  const open = () => (d.inApp ? api("OpenResult", "").catch(fail) : openResult(resultPlace));
+  const other = () => openResult(resultPlace === "terminal" ? "here" : "terminal");
   const copy = async () => { await api("CopyText", d.command); toast("Copied"); };
   const doUndo = async () => { if (await undo(d.journal, d.title)) go("sessions", true); };
   fill(view, h("div", { class: "page" }, h("div", { class: "page-in", style: "max-width:720px" },
@@ -478,8 +515,8 @@ screen("done", (d, p, o) => {
         h("div", { class: "muted" }, `${cap(where)}, in `, h("span", { class: "mono" }, p.targetCwd)))),
     h("div", { class: "card" }, h("div", { class: "dlg-body" },
       d.machine ? h("b", {}, `Start it on ${d.machine}`) : h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" },
-        h("button", { class: "btn primary big", id: "open", onclick: open }, d.inApp ? `Open in the ${d.agent} app` : opensIn() === "terminal" ? `Resume in ${sys.terminal}` : "Resume in hopsesh Terminal", h("span", { class: "kbd" }, "↩")),
-        d.inApp ? null : h("button", { class: "btn big", onclick: other }, opensIn() === "terminal" ? "Resume in hopsesh Terminal" : `Resume in ${sys.terminal}`),
+        h("button", { class: "btn primary big", id: "open", onclick: open }, d.inApp ? `Open in the ${d.agent} app` : resultPlace === "terminal" ? `Resume in ${sys.terminal}` : "Resume in hopsesh Terminal", h("span", { class: "kbd" }, "↩")),
+        d.inApp ? null : h("button", { class: "btn big", onclick: other }, resultPlace === "terminal" ? "Resume in hopsesh Terminal" : `Resume in ${sys.terminal}`),
         h("button", { class: "btn big", onclick: copy }, "Copy the command")),
       h("div", { style: "display:flex;gap:8px;align-items:flex-start" }, h("div", { class: "term", style: "flex:1" }, d.command), d.machine ? h("button", { class: "btn", onclick: copy }, "Copy") : null),
       h("span", { class: "muted", style: "font-size:12px" }, d.noWork ? "Opens the existing session; no new conversation or briefing was written." : d.kind === "continue" ? `${d.agent} reads hopsesh's briefing at the end of the history, then ${o.go ? "starts working" : "waits for you"}.`

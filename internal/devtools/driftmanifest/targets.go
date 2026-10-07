@@ -110,7 +110,7 @@ var agentWatch = map[agent.ID]target{
 		Latest:   latest{From: "npm", Ref: "@anthropic-ai/claude-code"},
 		Package:  "@anthropic-ai/claude-code",
 		Watch: watch{
-			Docs:   claudeDocs("sessions", "settings", "skills", "hooks", "headless", "cli-reference", "claude-directory", "permissions", "authentication", "env-vars", "desktop"),
+			Docs:   claudeDocs("sessions", "settings", "skills", "hooks", "headless", "cli-reference", "claude-directory", "permissions", "authentication", "env-vars", "desktop", "memory"),
 			Feeds:  []feed{{Kind: "markdown", URL: claudeChangelog}},
 			Grep:   `session|transcript|jsonl|resume|fork|CLAUDE_CONFIG_DIR|hook|SessionStart|UserPromptSubmit|skills|CLAUDE\.md|AGENTS\.md|settings|auth|account|login|keychain|credential|Console|desktop|deprecat|remov|rename|breaking`,
 			Help:   [][]string{{"claude", "--help"}, {"claude", "auth", "status", "--help"}, {"claude", "auth", "login", "--help"}},

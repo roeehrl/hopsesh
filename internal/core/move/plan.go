@@ -109,6 +109,7 @@ type Options struct {
 	Note     string           // a handoff note the source agent wrote
 	// CarryRules adds the user's global instructions for the source agent to the briefing.
 	CarryRules bool
+	RuleFiles  []string // explicit subset of discovered source instruction paths
 	// Via is how another agent gets the session: "" (hopsesh converts it) or ViaImport (the
 	// target agent's own importer converts it; hopsesh adds its briefing).
 	Via string

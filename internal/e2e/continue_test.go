@@ -291,3 +291,80 @@ func appendCodexTurn(t *testing.T, file, user, reply string) {
 	f.WriteString(lines)
 	f.Close()
 }
+
+// Runs in each OS scenario job: selected rule snapshots travel in conversation
+// text while the real instruction files survive both legs unchanged.
+func TestInstructionSelectionRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	here := newLocation(t, "here", root)
+	seed(t, here)
+	global := filepath.Join(here.in.Root("home"), "CLAUDE.md")
+	project := filepath.Join(here.repo, "CLAUDE.md")
+	ci := codexInstall(here)
+	_ = os.MkdirAll(ci.Root("home"), 0o700)
+	codexRules := filepath.Join(ci.Root("home"), "AGENTS.md")
+	for path, text := range map[string]string{global: "GLOBAL-UNSELECTED", project: "PROJECT-SELECTED", codexRules: "CODEX-ORIGINAL"} {
+		if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cl, cx := claude.New(), codex.New()
+	ctx := context.Background()
+	env := move.Env{StateDir: t.TempDir()}
+	in := move.Input{Source: move.Side{Machine: here.m, Module: cl, Install: here.in}, Session: list(t, here)[sid], Target: move.Side{Machine: here.m, Module: cx, Install: ci}}
+	p, err := move.Build(ctx, in, move.Options{CarryRules: true, RuleFiles: []string{project}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Continue.Instructions) != 2 || !strings.Contains(p.Continue.Briefing, "PROJECT-SELECTED") || strings.Contains(p.Continue.Briefing, "GLOBAL-UNSELECTED") {
+		t.Fatalf("incorrect selection: %+v", p.Continue.Instructions)
+	}
+	if _, err = move.Apply(ctx, p, in, env); err != nil {
+		t.Fatal(err)
+	}
+	th := listAgent(t, here, cx, ci)[0]
+	appendCodexTurn(t, th.Path, "new work", "RETURN-WORK")
+	th = listAgent(t, here, cx, ci)[0]
+	lin, err := lineage.Read(host.LocalFS(), th.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backIn := move.Input{Source: move.Side{Machine: here.m, Module: cx, Install: ci}, Session: th, Lineage: lin, Target: move.Side{Machine: here.m, Module: cl, Install: here.in}, Copies: []move.Copy{{Summary: list(t, here)[sid]}}}
+	back, err := move.Build(ctx, backIn, move.Options{CarryRules: true, RuleFiles: []string{codexRules}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = move.Apply(ctx, back, backIn, env); err != nil {
+		t.Fatal(err)
+	}
+	if !mentions(readAll(t, here, cl, here.in, list(t, here)[sid]), "RETURN-WORK") {
+		t.Fatal("return lost new work")
+	}
+	for path, want := range map[string]string{global: "GLOBAL-UNSELECTED", project: "PROJECT-SELECTED", codexRules: "CODEX-ORIGINAL"} {
+		b, err := os.ReadFile(path)
+		if err != nil || string(b) != want {
+			t.Fatalf("instruction file changed: %s", path)
+		}
+	}
+	// A client cannot turn the picker into an arbitrary file reader.
+	bad := filepath.Join(root, "private.txt")
+	_ = os.WriteFile(bad, []byte("MUST-NOT-BE-READ"), 0o600)
+	invalid, err := move.Build(ctx, in, move.Options{CarryRules: true, RuleFiles: []string{bad}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(invalid.Blockers) == 0 || strings.Contains(invalid.Continue.Briefing, "MUST-NOT-BE-READ") {
+		t.Fatal("unlisted instruction path accepted")
+	}
+	// A stale selection must be visible and block, not silently drop the file.
+	if err := os.Remove(project); err != nil {
+		t.Fatal(err)
+	}
+	missing, err := move.Build(ctx, in, move.Options{CarryRules: true, RuleFiles: []string{project}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(missing.Blockers, " "), "no longer exists") {
+		t.Fatal("missing selected file was ignored")
+	}
+}
