@@ -30,15 +30,16 @@ const ProgressEvent = "hopsesh:progress"
 
 // MachineDTO summarises one scanned machine.
 type MachineDTO struct {
-	Name     string   `json:"name"`
-	Status   string   `json:"status"`
-	Hint     string   `json:"hint"`
-	Error    string   `json:"error"`
-	OS       string   `json:"os"`
-	Sessions int      `json:"sessions"`
-	Local    bool     `json:"local"`
-	Agents   []string `json:"agents"`  // "Claude Code 2.1.284"
-	Hopsesh  string   `json:"hopsesh"` // hopsesh's version there ("" when not installed)
+	AccountSetupRequired bool     `json:"accountSetupRequired"` // reachable remote without a persistent endpoint identity
+	Name                 string   `json:"name"`
+	Status               string   `json:"status"`
+	Hint                 string   `json:"hint"`
+	Error                string   `json:"error"`
+	OS                   string   `json:"os"`
+	Sessions             int      `json:"sessions"`
+	Local                bool     `json:"local"`
+	Agents               []string `json:"agents"`  // "Claude Code 2.1.284"
+	Hopsesh              string   `json:"hopsesh"` // hopsesh's version there ("" when not installed)
 }
 
 // AgentOpt is an agent a session can continue in here.
@@ -264,6 +265,7 @@ func scanDTO(core *app.App, inv *app.Inventory, updated, elsewhere time.Time) *S
 	}
 	for _, m := range inv.Machines {
 		d := MachineDTO{Name: m.Name, Status: m.Status, Hint: m.Hint, Error: m.Error, OS: m.OS, Local: m.Local, Hopsesh: m.Hopsesh, Agents: []string{}}
+		d.AccountSetupRequired = !m.Local && m.Status == app.StatusOK && m.Host() != nil && m.Host().Facts.Endpoint == ""
 		for _, e := range inv.Entries {
 			if e.Machine == m.Name {
 				d.Sessions++

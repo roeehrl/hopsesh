@@ -30,6 +30,12 @@ hopsesh accounts edit <profile-id> --name "Research" --tag Personal,Research
 hopsesh accounts forget <profile-id>
 ```
 
+Remote discovery requires an initialized Hopsesh machine identity. SSH alone can read
+sessions, but does not initialize remote account tracking. On the remote machine, install
+Hopsesh if needed and run `hopsesh accounts scan --machine local`, then click **Scan
+accounts** on the controlling machine. The GUI shows an account setup notice for reachable
+machines without that identity; scanning never silently installs or initializes remote software.
+
 `forget` removes only Hopsesh's registration. Vendor files, login and credentials remain.
 A known default root is rediscovered on the next scan. A remote custom root must first be
 registered by Hopsesh on its own machine. Scanning imports its stable registration ID and

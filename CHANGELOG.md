@@ -16,6 +16,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Explain remote account setup prerequisites on the Accounts screen instead of
+  silently omitting connected machines without a Hopsesh identity. Replace the
+  sun-shaped Settings icon with a recognizable gear.
+
 - Show pending actions, screen loading, retryable read failures, and terminal
   connection status throughout the GUI and Quick access. Keep previous sessions
   visible during refresh, lock pending saves, prevent repeated session launches,
