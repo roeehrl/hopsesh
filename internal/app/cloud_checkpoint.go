@@ -58,7 +58,7 @@ func (a *App) PlanCloudCheckpoint(ctx context.Context, inv *Inventory, id string
 			return fail(err)
 		}
 	}
-	if len(opt.OperationID) > 100 || strings.Trim(opt.OperationID, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != "" {
+	if !checkpointOperationValid(opt.OperationID) {
 		return fail(errors.New("invalid checkpoint operation ID"))
 	}
 	grant, err := a.checkCloudCheckpointAccess(ctx, id)
@@ -77,6 +77,9 @@ func (a *App) PlanCloudCheckpoint(ctx context.Context, inv *Inventory, id string
 		return fail(err)
 	}
 	defer lock.Close()
+	if err = checkpointRetired(root, opt.OperationID); err != nil {
+		return fail(err)
+	}
 	recordPath := filepath.Join(root, opt.OperationID+".json")
 	var record cloudCheckpointRecord
 	b, err := localstate.ReadPrivateFile(recordPath, relayStateLimit)
@@ -170,7 +173,12 @@ func (a *App) PlanCloudCheckpoint(ctx context.Context, inv *Inventory, id string
 		if !record.Export.LeaseExpires.After(time.Now()) {
 			return errors.New("cloud incarnation lease expired since review")
 		}
-		return nil
+		lock, err := localstate.Lock(ctx, filepath.Join(root, ".admission.lock"))
+		if err != nil {
+			return err
+		}
+		defer lock.Close()
+		return checkpointRetired(root, opt.OperationID)
 	}
 	p, err := move.Build(ctx, input, opt)
 	if err != nil {

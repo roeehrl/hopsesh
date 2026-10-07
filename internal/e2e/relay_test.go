@@ -537,7 +537,25 @@ func qualifyCloudConnector(t *testing.T, ctx context.Context, bin, root, origin,
 			if err != nil || !bytes.Equal(before, after) {
 				t.Fatal("checkpoint retry rewrote native history", err)
 			}
-			cmd := exec.CommandContext(ctx, bin, "undo", result.Result.Journal, "--yes", "--json")
+			// Cleanup is independent of cloud liveness and frees only the frozen
+			// cache. The durable retry ID remains retired; undo must still work.
+			for range 2 {
+				cmd := exec.CommandContext(ctx, bin, "cloud-integration", "checkpoints", "remove", operation, "--yes")
+				cmd.Env = desktop.env()
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("checkpoint cache cleanup: %v\n%s", err, out)
+				}
+			}
+			cmd := exec.CommandContext(ctx, bin, args...)
+			cmd.Env = desktop.env()
+			if out, err := cmd.CombinedOutput(); err == nil || !bytes.Contains(out, []byte("cached cloud checkpoint was removed")) {
+				t.Fatal("retired checkpoint retry can create another session", err, string(out))
+			}
+			after, err = os.ReadFile(destination.Path)
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatal("cache cleanup changed native session", err)
+			}
+			cmd = exec.CommandContext(ctx, bin, "undo", result.Result.Journal, "--yes", "--json")
 			cmd.Env = desktop.env()
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("checkpoint undo: %v\n%s", err, out)

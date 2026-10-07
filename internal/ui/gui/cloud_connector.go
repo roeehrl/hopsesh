@@ -60,3 +60,15 @@ func (a *App) RelayCloudPreview(id string) (app.CloudConnectorPreview, error) {
 	defer cancel()
 	return a.snapshot().CloudConnectorConversation(ctx, id)
 }
+
+func (a *App) CloudCheckpointCache() ([]app.CloudCheckpointCacheEntry, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return a.snapshot().CloudCheckpointCache(ctx)
+}
+
+func (a *App) RemoveCloudCheckpoint(operation string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return a.snapshot().RemoveCloudCheckpoint(ctx, operation)
+}

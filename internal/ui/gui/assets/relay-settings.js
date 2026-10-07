@@ -179,6 +179,29 @@ function cloudStartup() {
  const d=dialog(h("h2",{},"Prepare cloud environment startup"),h("p",{class:"muted"},"Only startup scripts and provider configuration are added to this repository. Invitations, private identities and account credentials stay out of reusable setup."),form,error,result,h("div",{class:"dlg-foot"},h("button",{class:"btn",onclick:()=>d.close()},"Close"),prepare,apply));
 }
 
+function checkpointCache() {
+ const rows=h("div",{role:"status","aria-live":"polite",style:"max-height:50vh;overflow:auto"}),error=h("p",{class:"err",role:"alert"});
+ let closed=false;
+ async function load(){
+  error.textContent="";
+  try{const entries=await api("CloudCheckpointCache");if(closed)return;rows.replaceChildren(...entries.map(entry=>{
+   const button=h("button",{class:"btn danger"},"Remove cached checkpoint…");
+   const confirm=h("div",{hidden:true,style:"flex-basis:100%"});
+   const remove=h("button",{class:"btn danger"},"Remove cache"),keep=h("button",{class:"btn"},"Keep cache");
+   confirm.append(h("p",{},"Its review and retry ID will be retired. Native sessions, lineage receipts and undo journals stay available. Interrupted imports must be recovered or undone first."),h("div",{class:"set-row"},keep,remove));
+   button.addEventListener("click",()=>{confirm.hidden=false;button.disabled=true;keep.focus();});
+   keep.addEventListener("click",()=>{confirm.hidden=true;button.disabled=false;button.focus();});
+   remove.addEventListener("click",async()=>{
+    remove.disabled=keep.disabled=true;error.textContent="";
+    try{await api("RemoveCloudCheckpoint",entry.operation);if(!closed)await load();}catch(e){if(!closed)error.textContent=String(e?.message||e);}finally{remove.disabled=keep.disabled=false;}
+   });
+   return h("div",{class:"set-row",style:"flex-wrap:wrap"},h("div",{style:"min-width:0;overflow-wrap:anywhere"},h("b",{class:"mono"},entry.operation),h("p",{class:"muted"},`${new Date(entry.reviewed).toLocaleString()} · ${(entry.bytes/1048576).toFixed(2)} MiB cached · ${entry.started ? "Import started; recovery state checked before cleanup" : "Review only"}`)),button,confirm);
+  }));if(!entries.length)rows.append(h("p",{class:"muted"},"No cached checkpoints."));}catch(e){if(!closed)error.textContent=String(e?.message||e);}
+ }
+ const d=dialog(h("h2",{},"Cached cloud checkpoints"),h("p",{class:"muted"},"Reviewed snapshots stay frozen for retry. Remove reviews you no longer need to release cache capacity. This removes only the checkpoint cache; recovery records and undo backups are retained separately."),error,rows,h("div",{class:"dlg-foot"},h("button",{class:"btn",onclick:()=>d.close()},"Close")));
+ d.addEventListener("close",()=>{closed=true;},{once:true});void load();
+}
+
 export function relaySettings(data, refresh) {
  const r=data || {peers:[]};
  const expired=r.enrolled && r.expires*1000<=Date.now();
@@ -195,7 +218,7 @@ export function relaySettings(data, refresh) {
    h("button",{class:"btn",onclick:refresh},"Refresh status")),
   r.enrolled ? h("p",{class:"muted"},`Routing credential expires ${new Date(r.expires*1000).toLocaleString()}. Receiving on this computer: ${r.receiveEnabled ? "enabled" : "disabled"}.`) : null,
   h("button",{class:"btn",onclick:()=>go("machines")},"Receiving and machines…"))),
-  h("section",{class:"card"},h("div",{class:"dlg-body"},h("h2",{},"Cloud environment setup"),h("p",{class:"muted"},"Install a verified helper during setup, then prepare a fresh scoped connector in each actual task. Hosted lifecycle support is still being qualified."),h("button",{class:"btn",onclick:cloudStartup},"Prepare cloud startup…"))),
+  h("section",{class:"card"},h("div",{class:"dlg-body"},h("h2",{},"Cloud environment setup"),h("p",{class:"muted"},"Install a verified helper during setup, then prepare a fresh scoped connector in each actual task. Hosted lifecycle support is still being qualified."),h("div",{class:"set-row"},h("button",{class:"btn",onclick:cloudStartup},"Prepare cloud startup…"),h("button",{class:"btn",onclick:checkpointCache},"Manage cached checkpoints…")))),
   h("section",{class:"card"},h("div",{class:"dlg-body"},h("h2",{},"Cloud invitations"),h("p",{class:"muted"},"Invitations authorize provisional delivery. Approve the fresh cloud fingerprint separately before requesting its conversation."),h("button",{class:"btn",disabled:!r.enrolled || expired,onclick:()=>cloudInvitation(refresh)},"Invite cloud session…"),
    !(r.admissions || []).length ? h("p",{class:"muted"},"No cloud invitations saved.") : r.admissions.map(ticket=>invitationRow(ticket,r,expired,action,refresh)))),
 

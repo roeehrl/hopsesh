@@ -7,6 +7,30 @@ test.beforeEach(async ({ page }) => {
   await page.getByRole("tab", { name: "Internet delivery" }).click();
 });
 
+test("checkpoint cache cleanup stays explicit and keeps recovery errors reviewable",async({page})=>{
+ let reads=0,removes=0;
+ await page.route("**/call",async route=>{
+  const request=route.request().postDataJSON();
+  if(request.m==="CloudCheckpointCache"){reads++;await route.fulfill({json:{result:[{operation:"frozen-review",bytes:2048,reviewed:new Date().toISOString(),started:true}]}});return;}
+  if(request.m==="RemoveCloudCheckpoint"){removes++;expect(request.args).toEqual(["frozen-review"]);await route.fulfill({json:{error:"checkpoint belongs to an interrupted import or pending receipt; recover or undo it before cleanup"}});return;}
+  await route.continue();
+ });
+ expect(reads).toBe(0);
+ await page.getByRole("button",{name:"Manage cached checkpoints…"}).click();
+ const d=page.getByRole("dialog");
+ await expect(d).toContainText("frozen-review");
+ await expect(d).toContainText("undo backups are retained separately");
+ expect(removes).toBe(0);
+ await d.getByRole("button",{name:"Remove cached checkpoint…"}).click();
+ await expect(page.getByRole("dialog")).toContainText("Native sessions, lineage receipts and undo journals stay available");
+ await page.getByRole("button",{name:"Remove cache",exact:true}).click();
+ await expect(d.getByRole("alert")).toContainText("interrupted import or pending receipt");
+ await expect(d.getByRole("button",{name:"Remove cache",exact:true})).toBeEnabled();
+ await d.getByRole("button",{name:"Keep cache",exact:true}).click();
+ await expect(d.getByRole("button",{name:"Remove cached checkpoint…"})).toBeEnabled();
+ expect(removes).toBe(1);
+});
+
 test("scoped cloud inspection is explicit and unqualified export stays disabled",async({page})=>{
  let checked=0,exported=0;
  const fingerprint="a".repeat(64);

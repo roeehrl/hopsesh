@@ -15,6 +15,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/journal"
 	"github.com/roeehrl/hopsesh/internal/core/launch"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
+	"github.com/roeehrl/hopsesh/internal/localstate"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 	"github.com/roeehrl/hopsesh/sdk/ir"
 )
@@ -141,13 +142,17 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (result *Result, fai
 	if err := os.MkdirAll(filepath.Dir(operationPath(env, p.OperationID)), 0o700); err != nil {
 		return nil, err
 	}
-	lockFile, err := os.OpenFile(operationPath(env, p.OperationID)+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	lockFile, err := lockOperation(env.StateDir, p.OperationID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("this transfer is already being applied: %w", err)
 	}
 	defer lockFile.Close()
-	if err = lockOperationFile(lockFile); err != nil {
-		return nil, fmt.Errorf("this transfer is already being applied: %w", err)
+	// A review can be retired between the initial check and acquiring this lock.
+	// Cleanup holds this same lock before invalidating its cached source.
+	if in.CheckSource != nil {
+		if err = in.CheckSource(ctx); err != nil {
+			return nil, err
+		}
 	}
 	// Recovery must lock the committed destination, not a newly allocated plan ID.
 	stored, loadErr := operationLoad(env, p.OperationID)
@@ -160,14 +165,11 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (result *Result, fai
 	if err = os.MkdirAll(filepath.Dir(destinationPath), 0o700); err != nil {
 		return nil, err
 	}
-	destinationLock, err := os.OpenFile(destinationPath, os.O_CREATE|os.O_RDWR, 0o600)
+	destinationLock, err := localstate.TryLock(destinationPath)
 	if err != nil {
-		return nil, err
-	}
-	defer destinationLock.Close()
-	if err = lockOperationFile(destinationLock); err != nil {
 		return nil, fmt.Errorf("destination is being changed by another transfer: %w", err)
 	}
+	defer destinationLock.Close()
 	intent := operationIntent(p)
 	r, err := operationLoad(env, p.OperationID)
 	if err == nil {
