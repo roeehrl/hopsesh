@@ -13,7 +13,7 @@ func openLock(path string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	h, err := windows.CreateFile(p, windows.GENERIC_READ|windows.GENERIC_WRITE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil, windows.OPEN_ALWAYS, windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	h, err := windows.CreateFile(p, windows.GENERIC_READ|windows.GENERIC_WRITE|windows.READ_CONTROL|windows.WRITE_DAC|windows.WRITE_OWNER, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil, windows.OPEN_ALWAYS, windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -26,6 +26,10 @@ func openLock(path string) (*os.File, error) {
 	if !st.Mode().IsRegular() || st.Mode()&os.ModeSymlink != 0 {
 		f.Close()
 		return nil, fmt.Errorf("lock must be a regular file: %s", path)
+	}
+	if err = secureOwnedHandle(h, false); err != nil {
+		f.Close()
+		return nil, err
 	}
 	return f, nil
 }

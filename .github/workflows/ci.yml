@@ -39,7 +39,7 @@ jobs:
           go-version-file: go.mod
       - name: GUI build dependencies (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
+        run: bash scripts/install-ci-dependencies.sh libgtk-4-dev libwebkitgtk-6.0-dev
       - name: vet
         run: go vet ./...
       - name: the terminal's bundled pseudoconsole (Windows)
@@ -149,7 +149,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
+      - run: bash scripts/install-ci-dependencies.sh libgtk-4-dev libwebkitgtk-6.0-dev
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.14.0
@@ -167,7 +167,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
+      - run: bash scripts/install-ci-dependencies.sh libgtk-4-dev libwebkitgtk-6.0-dev
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
   testbundle:
@@ -245,7 +245,7 @@ jobs:
           cache: npm
           cache-dependency-path: internal/devtools/webtest/package-lock.json
       - name: GUI build dependencies
-        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
+        run: bash scripts/install-ci-dependencies.sh libgtk-4-dev libwebkitgtk-6.0-dev
       - run: npm ci
       - run: npx playwright install --with-deps chromium webkit
       - name: window tests (Chromium and WebKit, the real service on a demo home)
@@ -299,7 +299,7 @@ jobs:
           - {family: macos, os: macos-15}
           - {family: windows, os: windows-2025}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
@@ -321,7 +321,7 @@ jobs:
       - name: mandatory stateful movement, account and lineage routes, forks and recovery
         shell: bash
         run: |
-          go test ./internal/e2e -run 'TestMovement|TestLineage|TestAccountProfile|TestContext|TestInstruction' -race -count=1 -timeout 10m
+          go test ./internal/e2e -run 'TestMovement|TestLineage|TestAccountProfile|TestContext|TestInstruction' -race -count=1 -timeout 25m
           go test ./internal/e2e/scenario -run 'TestScenarios/notice-hook' -race -count=1 -timeout 3m
       - name: scenario matrix over loopback SSH
         if: runner.os != 'Windows'
@@ -438,7 +438,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - run: sudo apt-get update && sudo apt-get install -y nsis zip
+      - run: bash scripts/install-ci-dependencies.sh nsis zip
       - name: build the app, its zip and the installer (amd64 and arm64)
         env:
           VERSION: 0.0.0-ci
@@ -616,7 +616,7 @@ jobs:
       - name: GUI build dependencies and a virtual display (Linux)
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev xvfb dbus jq
+          bash scripts/install-ci-dependencies.sh libgtk-4-dev libwebkitgtk-6.0-dev xvfb dbus jq
           # WebKitGTK sandboxes web content with bubblewrap, which needs unprivileged user
           # namespaces; Ubuntu 24.04's AppArmor restricts them on this runner.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0

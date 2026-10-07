@@ -184,6 +184,29 @@ func (a *App) Plan(ctx context.Context, inv *Inventory, e Entry, target agent.ID
 		return nil, move.Input{}, fmt.Errorf("%w: %s has no data folder on this machine yet; start it here once, then try again", agent.ErrNotInstalled, tm.Spec().Name)
 	}
 	sin, _ := src.InstallProfile(e.Agent, e.Session.Key.Profile)
+	// A never-initialized remote endpoint has no profile during passive scanning.
+	// Pin its default root against the reserved endpoint before the first review;
+	// otherwise Apply creates the identity and the next scan changes the source
+	// profile/binding, making the same committed operation impossible to retry.
+	if sin.Profile == nil && sm.Spec().Accounts != nil && !src.host.IsSnapshot() {
+		if _, err := src.host.PrepareIdentity(ctx); err != nil {
+			return nil, move.Input{}, err
+		}
+		installs, err := a.profileInstalls(ctx, src.host, sm, sin, false)
+		if err != nil {
+			return nil, move.Input{}, err
+		}
+		for _, install := range installs {
+			if install.Profile != nil && install.Profile.Default && install.Present {
+				sin = install
+				e.Session.Key.Profile, e.Profile = install.ProfileID(), install.Profile
+				break
+			}
+		}
+		if sin.Profile == nil {
+			return nil, move.Input{}, errors.New("source default profile could not be pinned; scan its accounts and retry")
+		}
+	}
 	in := move.Input{
 		Source:    move.Side{Machine: src.host, Module: sm, Install: sin},
 		Session:   e.Session,

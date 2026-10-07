@@ -29,7 +29,9 @@ th_start_sshd
 
 # The Linux VM.
 command -v limactl >/dev/null || brew install lima qemu
-limactl start --name=hs --tty=false --vm-type=qemu --cpus=2 --memory=4 template:ubuntu-24.04
+# This native SSH fixture needs neither containers nor a mount of runner files.
+# Containerd provisioning otherwise holds the VM in "starting" after SSH is ready.
+limactl start --name=hs --tty=false --vm-type=qemu --cpus=2 --memory=4 --containerd=none --mount-none template:ubuntu-24.04
 G() { limactl shell hs -- "$@"; }
 G sudo sh -c 'DEBIAN_FRONTEND=noninteractive apt-get update -qq && apt-get install -y -qq git >/dev/null'
 for p in hopsesh hsmatrix fakeagent; do limactl copy "$LBIN/$p" "hs:/tmp/$p"; done

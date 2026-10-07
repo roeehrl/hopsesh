@@ -13,7 +13,11 @@ func openOwnedRead(path string, private bool) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	h, err := windows.CreateFile(p, windows.GENERIC_READ, windows.FILE_SHARE_READ, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	rights := uint32(windows.GENERIC_READ)
+	if private {
+		rights |= windows.READ_CONTROL | windows.WRITE_DAC | windows.WRITE_OWNER
+	}
+	h, err := windows.CreateFile(p, rights, windows.FILE_SHARE_READ, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -28,13 +32,14 @@ func openOwnedRead(path string, private bool) (*os.File, error) {
 			err = e
 		} else {
 			owner, _, e := sd.Owner()
-			u, ue := windows.GetCurrentProcessToken().GetTokenUser()
 			if e != nil {
 				err = e
-			} else if ue != nil {
-				err = ue
-			} else if !windows.EqualSid(owner, u.User.Sid) {
-				err = errors.New("state file belongs to another OS user")
+			} else {
+				var allowed bool
+				allowed, err = tokenOwnsSID(owner)
+				if err == nil && !allowed {
+					err = errors.New("state file belongs to another OS user")
+				}
 			}
 		}
 	}
@@ -42,10 +47,10 @@ func openOwnedRead(path string, private bool) (*os.File, error) {
 		f.Close()
 		return nil, err
 	}
-	// This handle denies replacement while the existing ownership/DACL helper
-	// restricts the same object. No bytes are read until that succeeds.
+	// This handle denies replacement and narrows this exact object's owner/DACL.
+	// Vendor reads remain passive and do not change native file permissions.
 	if private {
-		err = PrivateFile(path)
+		err = secureOwnedHandle(h, false)
 	}
 	if err != nil {
 		f.Close()

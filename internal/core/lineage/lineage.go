@@ -644,6 +644,19 @@ func (m *Manifest) AppendHop(h Hop) error {
 	}
 	if len(h.Parents) == 0 {
 		h.Parents = m.hopTips(h.Line)
+		// A new fork observes its source branch, and a later transfer from the
+		// same original observes forks already recorded beside that original.
+		// These are operation ancestry only: content coverage and trip counters
+		// stay branch-local. Independently read/merged graphs retain concurrency.
+		if sourceLine := m.Replica(h.From).Line; sourceLine != h.Line {
+			h.Parents = append(h.Parents, m.hopTips(sourceLine)...)
+		}
+		for _, known := range m.Hops {
+			if known.Fork && !known.Backup && known.From == h.From {
+				h.Parents = append(h.Parents, known.ID)
+			}
+		}
+		h.Parents = unique(h.Parents)
 	}
 	if h.Source == "" {
 		if s, ok := m.LatestState(h.From); ok {

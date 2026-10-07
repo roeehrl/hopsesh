@@ -170,6 +170,48 @@ func TestMovementForkKeepsOriginalAvailable(t *testing.T) {
 	f.check(t, "B", "", "A")
 }
 
+func TestObservedForkThenOriginalMoveHasCausalNoticeWithoutChildTravel(t *testing.T) {
+	f := newMovementFixture("A", "B", "D")
+	f.hop(t, "inbound", "A", "B", true)
+	f.fork(t, "fork", "B", "child", true, "inbound")
+	childLine := f.m.Replica(f.ids["child"]).Line
+	f.replica("E", childLine)
+	f.hop(t, "child-travel", "child", "E", true, "fork")
+	if err := f.m.AppendHop(Hop{ID: "original-move", From: f.ids["B"], To: f.ids["D"], Kind: HopMove, Notify: true}); err != nil {
+		t.Fatal(err)
+	}
+	f.check(t, "B", "original-move", "A")
+	f.check(t, "D", "", "B", "A")
+	parent := f.m.ForBranch(f.m.Replica(f.ids["B"]).Line).Journey()
+	child := f.m.ForBranch(childLine).Journey()
+	if parent.Transfers != 2 || parent.RoundTrips != 0 || child.Transfers != 1 || child.RoundTrips != 0 {
+		t.Fatal("operation ancestry inherited sibling travel", parent, child)
+	}
+	last := f.m.Hops[len(f.m.Hops)-1]
+	if !slices.Contains(last.Parents, "fork") || slices.Contains(last.Parents, "child-travel") {
+		t.Fatal("original move did not depend on exactly its observed fork creation", last.Parents)
+	}
+}
+
+func TestIndependentlyObservedForkAndOriginalMoveStayConcurrent(t *testing.T) {
+	f := newMovementFixture("A", "B")
+	left, right := f.m.Clone(), f.m.Clone()
+	branch := left.Fork("independent-fork", nil)
+	child := left.Upsert(Replica{Line: branch, Endpoint: "C", Location: "C", Key: agent.SessionKey{Agent: "claude", Session: "c"}})
+	if err := left.AppendHop(Hop{ID: "fork", From: f.ids["A"], To: child, Fork: true, Kind: HopMove, Notify: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := right.AppendHop(Hop{ID: "move", From: f.ids["A"], To: f.ids["B"], Kind: HopMove, Notify: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := left.Merge(right); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := left.Departure(f.ids["A"]); ok {
+		t.Fatal("concurrent original/fork routes were falsely ordered")
+	}
+}
+
 func TestMovementSiblingAndParentExclusions(t *testing.T) {
 	f := newMovementFixture("A", "B")
 	f.hop(t, "parent-route", "A", "B", true)

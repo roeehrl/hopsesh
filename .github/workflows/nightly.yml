@@ -13,6 +13,7 @@ on:
     paths:
       - .github/workflows/nightly.yml
       - scripts/app-selfcheck.sh
+      - scripts/install-ci-dependencies.sh
       - scripts/app-terminal-check.sh
       - internal/devtools/webtest/real/*selfcheck.js
       - internal/ui/desktop/**
@@ -102,7 +103,7 @@ jobs:
       - name: GUI build dependencies and a virtual display (Linux)
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev xvfb dbus jq
+          bash scripts/install-ci-dependencies.sh libgtk-4-dev libwebkitgtk-6.0-dev xvfb dbus jq
           # WebKitGTK sandboxes web content with bubblewrap, which needs unprivileged user
           # namespaces; Ubuntu 24.04's AppArmor restricts them on this runner.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0

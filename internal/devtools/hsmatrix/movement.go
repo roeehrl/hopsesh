@@ -152,6 +152,9 @@ func (r *runner) repeatRoundtrip(s *sc) error {
 					return fmt.Errorf("fork-only work leaked into its original")
 				}
 			}
+			// The original's move follows its already recorded fork creation;
+			// it must supersede the separate-fork notice without inheriting the
+			// child's subsequent travel or work.
 			return checkMovement(f, 1, true, false)
 		}
 		return fmt.Errorf("independent original did not arrive")

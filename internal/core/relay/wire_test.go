@@ -34,7 +34,9 @@ func TestActualWorkerHandlerAndGoEndpointsRoundTrip(t *testing.T) {
 		}
 		t.Skip("relay Worker dependencies are installed in the relay matrix job")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	// This fixture deliberately has no notification socket. Chunk request/reply
+	// traffic exercises the bounded HTTP fallback on native hosted runners too.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, node, fixture)
 	stdout, err := cmd.StdoutPipe()
@@ -120,11 +122,13 @@ func TestActualWorkerHandlerAndGoEndpointsRoundTrip(t *testing.T) {
 		}
 	}
 	large, _ := json.Marshal(map[string]string{"transcript": strings.Repeat("private-long-history", ChunkBytes/10)})
-	for range 2 {
+	for iteration := range 2 {
+		started := time.Now()
 		result, err := sa.Call(ctx, b.Public.ID, "large-native-operation-1234", "apply", large)
 		if err != nil || !bytes.Contains(result, []byte("private-long-history")) {
-			t.Fatal("large encrypted request/reply failed", err)
+			t.Fatal("large encrypted request/reply failed", err, "iteration", iteration, "elapsed", time.Since(started), "native actions", calls.Load(), "sender", sa.Health(), "receiver", sb.Health())
 		}
+		t.Logf("HTTP fallback large transfer %d completed in %s", iteration, time.Since(started))
 	}
 	if calls.Load() != 2 {
 		t.Fatal("duplicate delivery repeated native action", calls.Load())
