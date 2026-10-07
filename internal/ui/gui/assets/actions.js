@@ -291,7 +291,7 @@ function moveGroups(e, local, inTab) {
     if (!peers.length) machine.push({ id: "send", label: "Send to another machine…", icon: icon(ICONS.here, 16), disabled: true, why: "No other machine with hopsesh is reached" });
   } else machine.push({ id: "bring", label: `Bring to ${sys.here}…`, icon: icon(ICONS.here, 16), run: () => planFor(e, { target: "" }) });
   out.push({ heading: "Machine", items: machine });
-  if (["claude","codex"].includes(e.agent)) out.push({heading:"Account",items:[block({id:"account",label:"Move to another account…",sub:"Choose a profile and review the portable conversation",run:()=>planFor(e,{target:e.agent})})]});
+  if (["claude","codex"].includes(e.agent)) out.push({heading:"Account",items:[block({id:"account",label:local ? "Move to another account…" : `Move to an account on ${sys.here}…`,sub:local ? "Choose a profile and review the portable conversation" : `Bring this session from ${e.machine} into a profile on ${sys.here}`,run:()=>planFor(e,{target:e.agent})})]});
   if (local && ["claude","codex"].includes(e.agent)) out.push({heading:"Context recovery",items:[block({id:"bounded",label:"Create bounded continuation…",sub:"Keep the original and archive; prepare a smaller working context on this branch",run:()=>planFor(e,{target:e.agent,bounded:true,targetProfile:e.profile?.id||""})})]});
   const agents = (e.continueIn || []).map((t) => block({ id: "continue:" + t.id, label: `Continue with ${t.name}${local ? "" : " on " + sys.here}…`, icon: agentBadge(t.id, t.name), run: () => planFor(e, { target: t.id }),
     chip: t.experimental ? h("span", { class: "chip st-warn mini" }, "experimental") : null }));
