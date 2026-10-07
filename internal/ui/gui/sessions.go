@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -206,58 +205,9 @@ func (a *App) bindAdopted(d *ScanDTO) *ScanDTO {
 	return d
 }
 
-// RefreshHere reads this machine again and keeps what the last scan found on the other
-// machines and in the clouds (reading those takes SSH and the vendors' commands, so the
-// window does it less often). It leaves a plan in progress alone. Before any scan it is
-// local-only discovery, with no remote authentication.
-func (a *App) RefreshHere() (*ScanDTO, error) {
-	a.mu.Lock()
-	cfgErr := a.cfgErr
-	a.mu.Unlock()
-	if cfgErr != nil {
-		return nil, cfgErr
-	}
-	a.scanMu.Lock()
-	defer a.scanMu.Unlock()
-	core := a.snapshot()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	fresh := core.Scan(ctx, app.ScanOptions{Hosts: []string{app.LocalName()}})
-	now := time.Now()
-	a.mu.Lock()
-	old := a.inv
-	if old == nil {
-		old = &app.Inventory{}
-	}
-	inv := &app.Inventory{Adopted: fresh.Adopted, Waiting: fresh.Waiting, Clouds: old.Clouds}
-	inv.Machines = append(inv.Machines, fresh.Machines...)
-	inv.Entries = append(inv.Entries, fresh.Entries...)
-	for _, m := range old.Machines {
-		if m.Local {
-			if hm := m.Host(); hm != nil {
-				hm.Close()
-			}
-		} else {
-			inv.Machines = append(inv.Machines, m) // its connection stays open, as in old
-		}
-	}
-	for _, e := range old.Entries {
-		if lm := old.Machine(e.Machine); lm == nil || !lm.Local {
-			inv.Entries = append(inv.Entries, e) // other machines' and the clouds'
-		}
-	}
-	sort.SliceStable(inv.Entries, func(i, j int) bool {
-		return inv.Entries[i].Session.LastActivity.After(inv.Entries[j].Session.LastActivity)
-	})
-	a.inv = inv
-	at := a.invAt
-	a.mu.Unlock()
-	return a.bindAdopted(scanDTO(core, inv, now, at)), nil
-}
-
 // scanDTO is an inventory for the window: updated is when it was read, elsewhere when
 // the other machines and the clouds were.
-func scanDTO(core *app.App, inv *app.Inventory, updated, elsewhere time.Time) *ScanDTO {
+func scanDTO(core *app.App, inv *app.Inventory, updated, elsewhere time.Time, tables ...presence.Table) *ScanDTO {
 	out := &ScanDTO{Total: len(inv.Entries), Machines: []MachineDTO{}, Groups: []GroupDTO{}, Peers: []string{}, Updated: updated.Format(time.RFC3339),
 		Elsewhere: elsewhere.Format(time.RFC3339), Clouds: shownClouds(core, inv), Adopted: []BroughtDTO{}}
 	for _, f := range inv.Adopted {
@@ -280,7 +230,12 @@ func scanDTO(core *app.App, inv *app.Inventory, updated, elsewhere time.Time) *S
 	targets := continueTargets(core, inv)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	table, _ := presence.Snapshot(ctx) // where the open sessions here run (nil: not known)
+	var table presence.Table
+	if len(tables) > 0 {
+		table = tables[0]
+	} else {
+		table, _ = presence.Snapshot(ctx)
+	}
 	for _, g := range inv.Groups(core.LocalRoots()) {
 		gd := GroupDTO{Name: g.Name, Remote: g.Remote, Local: g.Local, NoRepo: g.Identity == "", NoRemote: strings.HasPrefix(g.Identity, "local:")}
 		for _, it := range g.Items {

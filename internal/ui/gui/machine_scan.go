@@ -33,7 +33,9 @@ func scanProblem(m *app.Machine) string {
 	return strings.Join(problems, "; ")
 }
 
-// MachineScans is cheap to poll: unlike Machines it does no network discovery.
+const MachineScanEvent = "hopsesh:machine-scan"
+
+// MachineScans supplies a replayable snapshot without network discovery.
 func (a *App) MachineScans() map[string]MachineScan {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -42,7 +44,6 @@ func (a *App) MachineScans() map[string]MachineScan {
 
 func (a *App) scanPhase(name, phase, problem string) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	if a.scans == nil {
 		a.scans = map[string]MachineScan{}
 	}
@@ -55,6 +56,8 @@ func (a *App) scanPhase(name, phase, problem string) {
 		s.Finished = time.Now().UTC().Format(time.RFC3339Nano)
 	}
 	a.scans[name] = s
+	a.mu.Unlock()
+	a.emit(MachineScanEvent, nil)
 }
 
 // ScanMachine reads just one allowed machine, merges its result into the inventory,
@@ -71,6 +74,7 @@ func (a *App) ScanMachine(name string) error {
 		return nil
 	}
 	destination := h.Destination
+	relayID := h.RelayID
 	if a.scans == nil {
 		a.scans = map[string]MachineScan{}
 	}
@@ -78,11 +82,12 @@ func (a *App) ScanMachine(name string) error {
 	s.Phase, s.Error = "queued", ""
 	a.scans[name] = s
 	a.mu.Unlock()
+	a.emit(MachineScanEvent, nil)
 	a.scanMu.Lock()
 	defer a.scanMu.Unlock()
 	core := a.snapshot()
 	h = core.Cfg.FindHost(name)
-	if h == nil || !h.Allowed || h.Destination != destination {
+	if h == nil || !h.Allowed || h.Destination != destination || h.RelayID != relayID {
 		a.scanPhase(name, "done", "Machine settings changed before the scan started. Scan again.")
 		return nil
 	}
@@ -99,7 +104,7 @@ func (a *App) ScanMachine(name string) error {
 	a.mu.Lock()
 	// Removing or editing a machine while SSH is running must not resurrect it.
 	h = a.core.Cfg.FindHost(name)
-	if h != nil && h.Allowed && h.Destination == destination {
+	if h != nil && h.Allowed && h.Destination == destination && h.RelayID == relayID {
 		if a.inv == nil {
 			a.inv = &app.Inventory{}
 		}

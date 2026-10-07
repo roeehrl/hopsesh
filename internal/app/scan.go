@@ -228,6 +228,11 @@ func (a *App) Scan(ctx context.Context, o ScanOptions) *Inventory {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			if h.RelayID != "" {
+				m, es := a.scanRelay(ctx, h)
+				add(m, es)
+				return
+			}
 			hm, err := a.Connect(ctx, h)
 			if err != nil {
 				m := &Machine{Kind: agent.AtMachine, Name: h.Name, Destination: h.Destination}
@@ -258,6 +263,9 @@ func (a *App) localMachine(ctx context.Context) *host.Machine {
 
 // Connect reaches a configured machine and probes it (one round trip).
 func (a *App) Connect(ctx context.Context, h config.Host) (*host.Machine, error) {
+	if h.RelayID != "" {
+		return nil, errors.New("relay machines do not expose a remote shell or filesystem; use an approved session transfer")
+	}
 	conn, err := transport.NewConn(h.Destination, a.StateDir, a.Audit)
 	if err != nil {
 		return nil, err

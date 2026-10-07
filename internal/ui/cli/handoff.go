@@ -214,7 +214,7 @@ func handoff(cmd *cobra.Command, refArg, cloud string) error {
 		r.renderHandedOff(res)
 	}
 	if applyErr == nil && r.app.RememberEnv(p) {
-		if err := config.Save(r.app.Cfg); err != nil {
+		if err := config.Save(&r.app.Cfg); err != nil {
 			r.printf("  ! Could not remember the environment for %s: %v\n", p.Handoff.Repo, err)
 		} else if !r.jsonOut {
 			r.printf("  The environment %s is now %s's (hopsesh clouds env).\n", p.Handoff.EnvName, p.Handoff.Repo)
@@ -511,7 +511,7 @@ func (r *run) hop(cmd *cobra.Command, from string, id agent.SessionID, to string
 	}
 	res, applyErr := r.app.Apply(ctx, p, move.Input{}, progress)
 	if res != nil && res.Hop != nil && res.Hop.Remembered {
-		if err := config.Save(r.app.Cfg); err != nil && !r.jsonOut {
+		if err := config.Save(&r.app.Cfg); err != nil && !r.jsonOut {
 			r.printf("  ! Could not remember the environment: %v\n", err)
 		}
 	}

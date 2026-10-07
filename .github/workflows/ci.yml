@@ -71,6 +71,44 @@ jobs:
       - name: build
         run: go build -trimpath ./cmd/hopsesh
 
+  relay:
+    name: encrypted relay (${{ matrix.family }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {family: linux, os: ubuntu-24.04}
+          - {family: macos, os: macos-15}
+          - {family: windows, os: windows-2025}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: infrastructure/relay/package-lock.json
+      - run: npm ci
+        working-directory: infrastructure/relay
+      - name: deployed handler contracts, auth, quotas, retention and cursors
+        run: npm test
+        working-directory: infrastructure/relay
+      - name: actual Worker handler with native encrypted endpoints
+        shell: bash
+        env:
+          HOPSESH_RELAY_REQUIRE_NODE: "1"
+        run: go test -race -count=1 -timeout 5m ./internal/core/relay ./internal/core/runtime ./internal/config ./internal/archtest
+      - name: relay transfer restart and peer-owned undo
+        shell: bash
+        env:
+          HOPSESH_RELAY_REQUIRE_NODE: "1"
+        run: go test -race -count=1 -run TestRelayPush -timeout 5m ./internal/e2e
+
   lint:
     runs-on: ubuntu-24.04
     steps:

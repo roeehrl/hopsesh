@@ -190,3 +190,27 @@ func TestTimeoutCancellationAndSlowSubscriber(t *testing.T) {
 		}
 	})
 }
+
+func TestReconfigureChangesDeadlineWithoutRefreshingCachedEvidence(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var calls atomic.Int32
+		e, stop := running(t, func(context.Context) (json.RawMessage, error) { calls.Add(1); return json.RawMessage(`{}`), nil })
+		defer stop()
+		synctest.Wait()
+		first := e.Latest()
+		opts := e.Options()
+		opts.Reconcile = 5 * time.Second
+		if err := e.UpdateOptions(opts); err != nil {
+			t.Fatal(err)
+		}
+		synctest.Wait()
+		if !e.Latest().ObservedAt.Equal(first.ObservedAt) || calls.Load() != 1 {
+			t.Fatal("configuration renewed evidence")
+		}
+		time.Sleep(5 * time.Second)
+		synctest.Wait()
+		if calls.Load() != 2 {
+			t.Fatal("deadline did not change", calls.Load())
+		}
+	})
+}

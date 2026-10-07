@@ -15,6 +15,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/peer"
+	"github.com/roeehrl/hopsesh/internal/core/relay"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
 	"github.com/roeehrl/hopsesh/internal/version"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -228,7 +229,13 @@ func (a *App) StartPush(ctx context.Context, inv *Inventory, e Entry, to config.
 	if here == nil || e.Machine != here.Name {
 		return nil, errors.New("only a session on this machine can be pushed; to bring one here, pull it")
 	}
-	c, hr, closeFn, err := a.dialPeer(ctx, to)
+	if opt.OperationID == "" && to.RelayID != "" {
+		var err error
+		if opt.OperationID, err = relay.NewOperationID(); err != nil {
+			return nil, err
+		}
+	}
+	c, hr, closeFn, err := a.dialPeer(ctx, to, opt.OperationID)
 	if err != nil {
 		return nil, err
 	}
@@ -294,8 +301,33 @@ type PeerConn struct {
 
 // dialPeer starts hopsesh peer on a configured machine (over SSH, or a.PeerDial) and says
 // hello.
-func (a *App) dialPeer(ctx context.Context, to config.Host) (*peer.Client, peer.HelloReply, func(), error) {
+func (a *App) dialPeer(ctx context.Context, to config.Host, operations ...string) (*peer.Client, peer.HelloReply, func(), error) {
 	var hr peer.HelloReply
+	if to.RelayID != "" {
+		if !to.Allowed || !a.Cfg.Relay.Enabled {
+			return nil, hr, nil, errors.New("relay machine access is disabled")
+		}
+		var err error
+		op := ""
+		if len(operations) > 0 {
+			op = operations[0]
+		}
+		if op == "" {
+			if op, err = relay.NewOperationID(); err != nil {
+				return nil, hr, nil, err
+			}
+		}
+		c := peer.NewRPCClient(func(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
+			var result json.RawMessage
+			err := a.relayCall(ctx, to, op, method, params, &result)
+			return result, err
+		})
+		err = c.Call(ctx, peer.MethodHello, peer.Hello{Protocol: peer.Protocol, Version: version.Version, From: LocalName()}, &hr)
+		if err == nil && hr.Protocol != peer.Protocol {
+			err = peer.ErrProtocol
+		}
+		return c, hr, func() {}, err
+	}
 	dial := a.PeerDial
 	if dial == nil {
 		dial = a.sshPeer
@@ -427,6 +459,11 @@ func (a *App) packageOf(ctx context.Context, here *Machine, e Entry) (peer.Packa
 // this machine records, in its own journal, what changes for its copy (the mark and the
 // lineage), and keeps a mark owed while the copy here is still open.
 func (p *Push) Commit(ctx context.Context) (*PushResult, error) {
+	finished, err := p.a.beginRuntimeAction()
+	if err != nil {
+		return nil, err
+	}
+	defer finished()
 	if err := p.a.checkAccountRegistration(p.source.Install); err != nil {
 		return nil, err
 	}

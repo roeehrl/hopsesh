@@ -306,6 +306,11 @@ type RunHere func(ctx context.Context, run agent.Command) error
 // ContinueHop takes a waiting hop on once the copy is here: it adopts the copy if it has
 // appeared, then hands it off. A hop still waiting is returned as it is.
 func (a *App) ContinueHop(ctx context.Context, id string, progress func(string)) (*move.Result, error) {
+	finished, err := a.beginRuntimeAction()
+	if err != nil {
+		return nil, err
+	}
+	defer finished()
 	rec, err := a.LoadHop(id)
 	if err != nil {
 		return nil, fmt.Errorf("no hop %s: %w", id, err)

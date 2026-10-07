@@ -49,75 +49,24 @@ export async function scan() {
   if (state.sel && !selected()) state.sel = null;
 }
 
-// refreshHere reads this machine again (RefreshHere), keeping what the last scan found
-// elsewhere: quiet, with the list kept as it is until the answer comes.
-async function refreshHere() {
-  if (state.scanning || !state.scan) return;
-  state.scanning = true;
-  try {
-    state.scan = await api("RefreshHere");
-    state.presence = {};
-  } catch { /* the next refresh tries again; the list stays */ }
-  state.scanning = false;
-  freshness();
-  if (state.sel && !selected()) state.sel = null;
-}
-
 function freshness() {
   const el = $("#fresh");
-  el.textContent = state.scanning ? "Refreshing…" : state.scan ? "updated " + ago(state.scan.updated) : "";
+  const rt=state.runtime;
+  const observation=rt?.snapshot;
+  const stale=observation?.paused || rt?.error || (observation?.expiresAt && Date.parse(observation.expiresAt)<Date.now());
+  el.textContent = stale ? observation?.paused ? "Observation paused" : "Showing cached sessions" : state.scanning ? "Refreshing…" : state.scan ? "updated " + ago(state.scan.updated) : "";
   const other = state.scan && state.scan.elsewhere !== state.scan.updated;
   el.title = other ? `${sys.Here}: ${ago(state.scan.updated)}. Your other machines and the clouds: ${ago(state.scan.elsewhere)}.` : "";
 }
 setInterval(freshness, 30000);
 
-// The list keeps itself current while the window is in front: this machine every
-// minute (a local read), and everything (SSH to every machine, the clouds' commands) when
-// the window comes back after five minutes or more. Never while a dialog, a plan or a
-// menu is open, or another screen is shown.
-const HERE_EVERY = 60_000, ALL_AFTER = 5 * 60_000;
-const since = (iso) => (iso ? Date.now() - new Date(iso).getTime() : Infinity);
+// Shared backend owns collection. Focus requests one refresh; source events update
+// the list and Quick access. No client polling or duplicate presence collector.
 const busy = () => !state.scan || state.scanning || current !== "sessions" || document.hidden || !!document.querySelector("dialog[open]") || isOpen();
-async function autoRefresh(all) {
-  if (busy()) return;
-  if (all) await scan(); else if (!state.info?.desktopManaged) await refreshHere();
-  if (busy() && !state.scanning) return; // something opened meanwhile: drawn when it closes
-  render();
-}
-setInterval(() => { if (document.hasFocus() && since(state.scan?.updated) >= HERE_EVERY) autoRefresh(since(state.scan?.elsewhere) >= ALL_AFTER * 2); }, 15_000);
-const comeBack = () => { if (!document.hidden && since(state.scan?.updated) >= HERE_EVERY / 2) autoRefresh(since(state.scan?.elsewhere) >= ALL_AFTER); };
-document.addEventListener("visibilitychange", comeBack);
-window.addEventListener("focus", comeBack);
-
-// Presence: where this machine's sessions are open (the agents' registries and the
-// process table; never a terminal app's), every 5 s while the window is in front on
-// Sessions, every 30 s while it is visible, not at all while hidden; at once when the
-// window comes back or a tab changes. Other machines' come with their scans.
-let presTimer = 0, presSig = "", presBusy = false;
-function presenceSoon(ms) {
-  clearTimeout(presTimer);
-  if (state.info?.desktopManaged || document.hidden) return; // backend owns desktop refresh; paused until visible again
-  presTimer = setTimeout(pollPresence, ms);
-}
-const presenceEvery = () => (document.hasFocus() && current === "sessions" ? 5_000 : 30_000);
-async function pollPresence() {
-  if (presBusy || !state.scan || state.scanning || document.hidden) { presenceSoon(presenceEvery()); return; }
-  presBusy = true;
-  const p = await api("Presence").catch(() => null);
-  presBusy = false;
-  if (p) {
-    const sig = JSON.stringify(p.entries);
-    if (sig !== presSig) {
-      presSig = sig;
-      state.presence = p.entries;
-      if (current === "sessions" && !busy()) render();
-    }
-  }
-  presenceSoon(presenceEvery());
-}
-document.addEventListener("visibilitychange", () => { if (!document.hidden) presenceSoon(0); });
-window.addEventListener("focus", () => presenceSoon(0));
-onTabs(() => presenceSoon(300));
+const comeBack = () => { if (!document.hidden) api("RuntimeRefresh").catch(() => {}); freshness(); };
+document.addEventListener("visibilitychange",comeBack);
+window.addEventListener("focus",comeBack);
+onTabs(() => { freshness(); });
 
 // needsYou: the session waits for its person (its agent says so, or its tab here does).
 const needsYou = (e) => statusKey(e) === "needs";
@@ -584,10 +533,9 @@ screen("sessions", async (rescan = false) => {
   render();
   const r = view.querySelector('.row[aria-selected="true"]');
   if (r) inView(r, false);
-  presenceSoon(presenceEvery());
 });
 
-onRenamed(async () => { await refreshHere(); render(); });
+onRenamed(async () => { state.scan=await api("RefreshHere");state.presence={};render(); });
 
 // inView scrolls the list (never the window) to a row: to its middle, or just enough
 // (below the toolbar and its group's sticky header).

@@ -7,7 +7,7 @@ import "./plan.js";
 import "./brought.js";
 import "./handoff.js";
 import "./hop.js";
-import "./machines.js";
+import { machineScanChanged } from "./machines.js";
 import "./settings.js";
 import "./accounts.js";
 import { undoLast } from "./activity.js";
@@ -45,8 +45,9 @@ async function quickRoute() {
  const e=state.scan?.groups.flatMap(g=>g.entries).find(e=>e.machine===r.machine&&e.key===r.key);
  if(e){showEntry(e);reveal()}
 }
+on("hopsesh:machine-scan",()=>machineScanChanged().catch(fail));
 on("hopsesh:quick-route",()=>quickRoute().catch(fail));
-on("hopsesh:quick",async()=>{if(!mainReady||state.scanning)return;const d=await api("QuickSnapshot");if(d.scan){state.scan=d.scan;state.presence=d.presence?.entries||{};if(current==="sessions"&&!document.querySelector("dialog[open]"))renderSessions()}});
+on("hopsesh:quick",async()=>{if(!mainReady||state.scanning)return;const d=await api("QuickSnapshot");state.runtime=d.runtime;if(d.scan){state.scan=d.scan;state.presence=d.presence?.entries||{};if(current==="sessions"&&!document.querySelector("dialog[open]"))renderSessions()}});
 
 // The app menu (and its shortcuts) sends these.
 on("hopsesh:menu", menuCommand);

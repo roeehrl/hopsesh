@@ -3,6 +3,9 @@ package config
 
 import (
 	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -14,11 +17,12 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/roeehrl/hopsesh/internal/localstate"
 )
 
 // Schema is the configuration format. Files in another format are refused, never read:
 // hopsesh keeps no code for older formats.
-const Schema = 4
+const Schema = 5
 
 // ErrOldConfig means the configuration file was written by an older hopsesh; ErrNewConfig,
 // by a newer one (after a downgrade), which this one must not set aside as if it were old.
@@ -29,10 +33,11 @@ var (
 
 // Host is one machine hopsesh knows about.
 type Host struct {
-	Name        string `toml:"name"`        // label shown to the user, e.g. "studio"
-	Destination string `toml:"destination"` // what to pass to ssh: alias, user@host or host
-	Via         string `toml:"via"`         // tailscale | ssh-config | manual (or a "+" combination)
-	Allowed     bool   `toml:"allowed"`     // the user consented to hopsesh connecting
+	Name        string `toml:"name"`               // label shown to the user, e.g. "studio"
+	Destination string `toml:"destination"`        // what to pass to ssh: alias, user@host or host
+	RelayID     string `toml:"relay_id,omitempty"` // pinned relay peer; never falls back to SSH
+	Via         string `toml:"via"`                // tailscale | ssh-config | manual (or a "+" combination)
+	Allowed     bool   `toml:"allowed"`            // the user consented to hopsesh connecting
 	OS          string `toml:"os,omitempty"`
 	// TailscaleName is the machine's MagicDNS name, used when Destination's own host
 	// name does not resolve (e.g. an alias pointing at a .local name on another network).
@@ -255,6 +260,10 @@ const (
 
 // Config is the user's configuration file.
 type Config struct {
+	Relay    Relay   `toml:"relay,omitempty"`
+	Runtime  Runtime `toml:"runtime,omitempty"`
+	revision string  // source bytes; copied values retain their original revision
+
 	// Appearance is system (also the empty default), light or dark for app windows.
 	Appearance string  `toml:"appearance,omitempty"`
 	Desktop    Desktop `toml:"desktop,omitempty"`
@@ -379,28 +388,77 @@ func Load() (Config, error) {
 	if c.Layout == "" {
 		c.Layout = d.Layout
 	}
+	c.revision = digest(b)
 	return c, nil
 }
 
-// Save writes the configuration atomically with user-only permissions.
-func Save(c Config) error {
+// ErrConflict means another writer changed settings since this value was loaded.
+var ErrConflict = errors.New("settings changed in another client; reload before saving")
+
+func digest(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
+
+// Revision identifies the exact settings file this value was loaded from.
+func (c Config) Revision() string { return c.revision }
+
+// Save validates and compares revisions under an OS-held lock, then atomically
+// publishes a unique, synced temporary file. On success it advances this value's
+// revision; copies made before saving remain stale and cannot overwrite it.
+func Save(c *Config) error {
+	if c == nil {
+		return errors.New("nil settings")
+	}
 	c.Schema = Schema
-	if err := os.MkdirAll(Dir(), 0o700); err != nil {
+	if err := c.Check(); err != nil {
 		return err
 	}
-	tmp := Path() + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err := os.MkdirAll(Dir(), 0700); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	lock, err := localstate.Lock(ctx, Path()+".lock")
 	if err != nil {
 		return err
 	}
-	if err := toml.NewEncoder(f).Encode(c); err != nil {
-		f.Close()
+	defer lock.Close()
+	old, err := os.ReadFile(Path())
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if err := f.Close(); err != nil {
+	revision := ""
+	if err == nil {
+		revision = digest(old)
+	}
+	if revision != c.revision {
+		return ErrConflict
+	}
+	var out bytes.Buffer
+	if err := toml.NewEncoder(&out).Encode(c); err != nil {
 		return err
 	}
-	return os.Rename(tmp, Path())
+	f, err := os.CreateTemp(Dir(), ".config-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if err = f.Chmod(0600); err == nil {
+		_, err = f.Write(out.Bytes())
+	}
+	if err == nil {
+		err = f.Sync()
+	}
+	closeErr := f.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if err = os.Rename(f.Name(), Path()); err != nil {
+		return err
+	}
+	c.revision = digest(out.Bytes())
+	return nil
 }
 
 // SetAside renames the configuration file out of the way (to config.toml.old-<time>) so
@@ -551,6 +609,24 @@ var fontName = regexp.MustCompile(`^[\p{L}\p{N} ._,'"-]{0,120}$`)
 
 // Check reports settings hopsesh cannot act on.
 func (c Config) Check() error {
+	for _, h := range c.Hosts {
+		if h.RelayID != "" && (h.Destination != "" || h.Auth != "" || h.TailscaleName != "" || h.Keychain) {
+			return fmt.Errorf("hosts.%s: a relay machine cannot also have SSH credentials or a destination", h.Name)
+		}
+		if h.RelayID != "" && !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(h.RelayID) {
+			return fmt.Errorf("hosts.%s: invalid relay peer identity", h.Name)
+		}
+	}
+	if err := c.Runtime.Check(); err != nil {
+		return err
+	}
+	if c.Layout != "" && c.Layout != "flat" && c.Layout != "ghq" {
+		return errors.New("layout must be flat or ghq")
+	}
+	if c.UpdateCheck != "" && c.UpdateCheck != "on" && c.UpdateCheck != "off" {
+		return errors.New("update_check must be on or off")
+	}
+
 	if err := CheckAppearance(c.Appearance); err != nil {
 		return err
 	}

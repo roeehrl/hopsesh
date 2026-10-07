@@ -5,23 +5,29 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"runtime"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/roeehrl/hopsesh/internal/core/host"
+	"github.com/roeehrl/hopsesh/internal/core/presence"
+	"github.com/roeehrl/hopsesh/internal/core/repos"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 // Observation is local evidence, not an authorization to receive, resume or move.
 // An empty Endpoint means the installation has never initialized its identity.
 type Observation struct {
-	InventoryComplete bool         `json:"inventoryComplete"`
-	Machine           string       `json:"machine"`
-	Endpoint          string       `json:"endpoint,omitempty"`
-	Agents            []AgentState `json:"agents"`
-	Entries           []Entry      `json:"entries"`
-	Problems          []string     `json:"problems,omitempty"`
-	WatchRoots        []string     `json:"watchRoots"`
+	Processes         presence.Table `json:"processes,omitempty"`
+	OS                string         `json:"os"`
+	InventoryComplete bool           `json:"inventoryComplete"`
+	Machine           string         `json:"machine"`
+	Endpoint          string         `json:"endpoint,omitempty"`
+	Agents            []AgentState   `json:"agents"`
+	Entries           []Entry        `json:"entries"`
+	Problems          []string       `json:"problems,omitempty"`
+	WatchRoots        []string       `json:"watchRoots"`
 }
 
 // ObserveLocal never adopts imports, registers accounts, changes login bindings,
@@ -38,7 +44,7 @@ func (a *App) ObserveLocal(ctx context.Context) (Observation, error) {
 }
 
 func (a *App) observeMachine(ctx context.Context, m *host.Machine) (Observation, error) {
-	out := Observation{InventoryComplete: true, Machine: m.Name, Agents: []AgentState{}, Entries: []Entry{}, WatchRoots: []string{}}
+	out := Observation{OS: runtime.GOOS, InventoryComplete: true, Machine: m.Name, Agents: []AgentState{}, Entries: []Entry{}, WatchRoots: []string{}}
 	endpoint, err := m.ReadIdentity(ctx)
 	if err != nil {
 		return out, err
@@ -139,6 +145,9 @@ func (a *App) observeMachine(ctx context.Context, m *host.Machine) (Observation,
 				out.Agents[len(out.Agents)-1].Error = err.Error()
 				continue
 			}
+			if len(listing.Errors) > 0 {
+				out.Agents[len(out.Agents)-1].Error = "Some session files could not be read"
+			}
 			for _, problem := range listing.Errors {
 				out.InventoryComplete = false
 				out.Problems = append(out.Problems, problem.Error())
@@ -169,6 +178,46 @@ func (a *App) observeMachine(ctx context.Context, m *host.Machine) (Observation,
 			}
 		}
 	}
+	// Repository probes are bounded, read-only Git queries owned by the source.
+	// Modules still cannot execute vendor commands through observationHost.
+	var dirs []string
+	for _, e := range out.Entries {
+		if d := e.Session.CWD; d != "" && !slices.Contains(dirs, d) {
+			dirs = append(dirs, d)
+		}
+	}
+	states, gitErr := m.GitProbe(ctx, dirs, a.Reg.Worktrees())
+	byDir := map[string]*repos.GitState{}
+	for i := range states {
+		byDir[states[i].Dir] = &states[i]
+	}
+	for i := range out.Entries {
+		if d := out.Entries[i].Session.CWD; d != "" {
+			setGit(&out.Entries[i], byDir[d], gitErr)
+		}
+	}
+	table, tableErr := presence.Snapshot(ctx)
+	if tableErr != nil {
+		out.Problems = append(out.Problems, "Process places unavailable: "+tableErr.Error())
+	}
+	var pids []int
+	for _, e := range out.Entries {
+		if e.Live.PID > 0 {
+			pids = append(pids, e.Live.PID)
+		}
+		for _, p := range e.Live.Procs {
+			pids = append(pids, p.PID)
+		}
+	}
+	out.Processes = table.Ancestors(pids)
+	inv := &Inventory{Machines: []*Machine{{Kind: agent.AtMachine, Name: m.Name, Local: true, Status: StatusOK, OS: m.Facts.OS, Agents: out.Agents, host: m}}, Entries: out.Entries}
+	a.enrichMovement(ctx, inv, true)
+	out.Entries = inv.Entries
+	for i := range out.Entries {
+		if out.Entries[i].ObservedAt.IsZero() {
+			out.Entries[i].ObservedAt = time.Now().UTC()
+		}
+	}
 	slices.Sort(out.WatchRoots)
 	out.WatchRoots = slices.Compact(out.WatchRoots)
 	slices.SortFunc(out.Entries, func(a, b Entry) int {
@@ -194,4 +243,13 @@ type observationProcs struct{ agent.Procs }
 
 func (observationProcs) Terminate(context.Context, int) error {
 	return fmt.Errorf("%w: passive observation cannot terminate processes", agent.ErrDenied)
+}
+
+// ObservationInventory reattaches local filesystem access for explicit preview and
+// transfer actions without repeating listing or registration. Cached login identity
+// is still checked by the existing transfer planner before committing anything.
+func (a *App) ObservationInventory(ctx context.Context, o Observation) *Inventory {
+	hm := &host.Machine{Name: o.Machine, Local: true, Facts: host.ObserveLocal(ctx, a.Specs()), Log: a.Log}
+	hm.Facts.Endpoint = o.Endpoint
+	return &Inventory{Machines: []*Machine{{Kind: agent.AtMachine, Name: o.Machine, Local: true, Status: StatusOK, OS: o.OS, Agents: o.Agents, host: hm}}, Entries: o.Entries}
 }

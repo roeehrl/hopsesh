@@ -256,6 +256,12 @@ func (a *App) account(ctx context.Context, m *Machine, mod agent.Module, in agen
 
 // Apply carries out a plan.
 func (a *App) Apply(ctx context.Context, p *move.Plan, in move.Input, progress func(string)) (*move.Result, error) {
+	finished, activityErr := a.beginRuntimeAction()
+	if activityErr != nil {
+		return nil, activityErr
+	}
+	defer finished()
+
 	if p.Kind == move.KindHop {
 		return a.applyHop(ctx, p, progress)
 	}

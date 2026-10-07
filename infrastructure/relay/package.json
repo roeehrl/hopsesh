@@ -1,0 +1,1 @@
+{"name":"hopsesh-relay-experimental","private":true,"type":"module","scripts":{"test":"node --test worker.test.mjs","deploy":"wrangler deploy","check":"wrangler deploy --dry-run"},"devDependencies":{"wrangler":"4.148.0"},"dependencies":{"jose":"6.2.12"}}

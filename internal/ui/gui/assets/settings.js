@@ -77,6 +77,10 @@ function toggle(key, label, desc) {
 
 function general() {
   return [
+    card(h("span",{class:"sec-h"},"Background runtime"),
+     h("div",{class:"set-row"},title(s.runtime?.connected ? s.runtime.owner.mode==="headless" ? "Connected to headless runtime" : "Running in this app" : "Runtime unavailable",s.runtime?.error || "The app, Quick access and CLI share one session observer. Receiving permission is managed separately."),h("button",{class:"btn",onclick:()=>run(()=>api("RuntimeRefresh"),"Refresh requested")},"Refresh observation")),
+     h("div",{class:"set-row"},title("Fallback reconciliation","Filesystem changes refresh sessions automatically. This interval covers missed notifications and process exits."),h("select",{"aria-label":"Fallback reconciliation",disabled:saving,onchange:e=>run(()=>api("SaveRuntimePreferences",Number(e.target.value)),"Saved")},[15,30,60,120,300].map(seconds=>h("option",{value:seconds,selected:(s.runtimePreferences?.reconcileSeconds||60)===seconds},seconds<60 ? `${seconds} seconds` : `${seconds/60} minutes`)))),
+     h("p",{class:"muted"},s.runtime?.owner?.mode==="headless" ? "Closing or quitting this app leaves the headless runtime running. Manage login startup with hopsesh runtime enable or disable." : "Window-close behavior is set in Desktop presence. For CLI-first machines, hopsesh runtime enable registers a headless host at user login.")),
     card(h("span", { class: "sec-h" }, "Hopping sessions"),
       h("div", { class: "set-row" }, title("Repos folder", s.reposDir),
         h("button", { class: "btn", onclick: async () => { const d = await api("ChooseFolder", "Where should hopsesh clone repositories?").catch(fail); if (d) run(() => api("SetReposDir", d), "Saved"); } }, "Change…")),

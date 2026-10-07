@@ -23,6 +23,12 @@ const errNothingToUndo = "nothing to undo"
 // is "". Writes on other machines are undone over SSH. Unless force, it refuses when a file
 // the operation wrote changed since (that later work would be lost).
 func (a *App) Undo(ctx context.Context, match string, force bool) (*journal.Journal, error) {
+	finished, activityErr := a.beginRuntimeAction()
+	if activityErr != nil {
+		return nil, activityErr
+	}
+	defer finished()
+
 	js, err := a.Journals()
 	if err != nil {
 		return nil, err

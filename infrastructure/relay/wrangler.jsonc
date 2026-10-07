@@ -1,0 +1,12 @@
+{
+ "$schema": "node_modules/wrangler/config-schema.json",
+ "name": "hopsesh-relay-experimental",
+ "main": "worker.mjs",
+ "compatibility_date": "2026-10-07",
+ "workers_dev": false,
+ "routes": [{ "pattern": "relay.hopsesh.codonic.dev", "custom_domain": true }],
+ "durable_objects": {"bindings": [{"name":"MAILBOX","class_name":"Mailbox"}]},
+ "migrations": [{"tag":"v1","new_sqlite_classes":["Mailbox"]}],
+ "r2_buckets": [{"binding":"CIPHERTEXT","bucket_name":"hopsesh-relay-experimental-ciphertext"}],
+ "observability": {"enabled":false}
+}

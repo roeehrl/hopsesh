@@ -43,27 +43,15 @@ async function scanMachine(name) {
   finally { scanning.delete(name); await reload(); }
 }
 
-// Keep a running scan visible across navigation without repeating network discovery.
-let polling = false;
-setInterval(async () => {
-  if (current !== "machines" || document.hidden || polling || !data) return;
-  polling = true;
-  try {
-    const states = await api("MachineScans");
-    let finished = false, changed = false;
-    for (const m of data.machines) {
-      const next = states?.[m.name];
-      if (JSON.stringify(m.scan) !== JSON.stringify(next)) {
-        finished ||= next?.phase === "done";
-        m.scan = next;
-        changed = true;
-      }
-    }
-    if (finished) await reload();
-    else if (changed && !document.querySelector("dialog[open]")) render();
-  } catch { /* the next poll retries; the previous result stays */ }
-  finally { polling = false; }
-}, 1000);
+// Backend phase notifications keep all views in sync without a client poll.
+export async function machineScanChanged() {
+ if (!data) return;
+ const states = await api("MachineScans");
+ let finished=false;
+ for(const m of data.machines){const next=states?.[m.name];finished ||= next?.phase === "done" && JSON.stringify(m.scan)!==JSON.stringify(next);m.scan=next;}
+ if(current!=="machines")return;
+ if(finished)await reload();else if(!document.querySelector("dialog[open]"))render();
+}
 
 // Added machines scan immediately. Healthy rows refresh every five minutes while
 // Machines is visible; failed connections need an explicit Retry (no repeated prompts).

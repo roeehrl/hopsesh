@@ -90,7 +90,7 @@ func cloudModel(t *testing.T) (*model, fakecloud.Session) {
 		t.Fatal(err)
 	}
 	cfg.SetCloudAllowed("claude-cloud", true)
-	if err := config.Save(cfg); err != nil {
+	if err := config.Save(&cfg); err != nil {
 		t.Fatal(err)
 	}
 	a := app.New(cfg, all.Registry(), config.StateDir(), nil)

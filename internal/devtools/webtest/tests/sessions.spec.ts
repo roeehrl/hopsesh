@@ -226,16 +226,14 @@ test("a copy left behind offers the newer one, and resuming it anyway", async ({
   await page.keyboard.press("Escape");
 });
 
-test("the list refreshes this machine by itself while the window is in front", async ({ page }) => {
-  await page.clock.install();
+test("filesystem notifications refresh session presence without client polling", async ({ page }) => {
   await page.goto("/");
   await expect(row(page, "Find the codeword")).toBeVisible({ timeout: 30_000 });
   await expect(row(page, "Find the codeword").locator(".chip.st-ended")).toBeVisible();
   const key = await row(page, "Find the codeword").getAttribute("data-key");
   const id = key!.split("\u0000")[1].split("/")[1];
   expect((await page.request.post(`/live?session=${id}&entrypoint=cli`)).ok()).toBeTruthy();
-  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-  await page.clock.fastForward("01:30");
+
   await expect(row(page, "Find the codeword").locator(".chip.st-idle")).toBeVisible({ timeout: 30_000 });
 });
 

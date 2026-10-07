@@ -650,7 +650,9 @@ func (m *model) applyCmd() tea.Cmd {
 		defer cancel()
 		res, err := a.Apply(ctx, p, in, nil)
 		if err == nil && p.Handoff != nil && a.RememberEnv(p) {
-			_ = config.Save(a.Cfg)
+			if saveErr := config.Save(&a.Cfg); saveErr != nil {
+				err = fmt.Errorf("session transferred; environment preference was not saved: %w", saveErr)
+			}
 		}
 		return applyDone{res, err}
 	}

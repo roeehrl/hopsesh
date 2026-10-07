@@ -39,7 +39,7 @@ func newVendorWorld(t *testing.T, clouds ...string) *handoffWorld {
 	for _, c := range clouds {
 		cfg.SetCloudAllowed(c, true)
 	}
-	if err := config.Save(cfg); err != nil {
+	if err := config.Save(&cfg); err != nil {
 		t.Fatal(err)
 	}
 	return w

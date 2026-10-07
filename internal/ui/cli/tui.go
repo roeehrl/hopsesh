@@ -58,9 +58,14 @@ func (r *run) runTUI() error {
 		}
 		if exit.Hop != "" {
 			// The first leg of a hop: take it on to the next cloud, and show where it stands.
-			res, _ := r.app.ContinueHop(context.Background(), exit.Hop, nil)
+			res, err := r.app.ContinueHop(context.Background(), exit.Hop, nil)
+			if err != nil {
+				return err
+			}
 			if res != nil && res.Hop != nil && res.Hop.Remembered {
-				_ = config.Save(r.app.Cfg)
+				if err := config.Save(&r.app.Cfg); err != nil {
+					return err
+				}
 			}
 			deps.Hop = exit.Hop
 			continue

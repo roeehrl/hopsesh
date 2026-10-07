@@ -43,15 +43,16 @@ func (s Snapshot) clone() Snapshot { s.Data = append(json.RawMessage(nil), s.Dat
 
 type Collector func(context.Context) (json.RawMessage, error)
 type Engine struct {
-	mu      sync.Mutex
-	opts    Options
-	collect Collector
-	latest  Snapshot
-	subs    map[chan Snapshot]bool
-	wake    chan struct{}
-	paused  bool
-	started bool
-	closed  bool
+	mu        sync.Mutex
+	opts      Options
+	collect   Collector
+	latest    Snapshot
+	subs      map[chan Snapshot]bool
+	wake      chan struct{}
+	configure chan struct{}
+	paused    bool
+	started   bool
+	closed    bool
 }
 
 func New(o Options, collect Collector) (*Engine, error) {
@@ -62,9 +63,28 @@ func New(o Options, collect Collector) (*Engine, error) {
 	if _, err := rand.Read(epoch[:]); err != nil {
 		return nil, err
 	}
-	return &Engine{opts: o, collect: collect, latest: Snapshot{Epoch: hex.EncodeToString(epoch[:])}, subs: map[chan Snapshot]bool{}, wake: make(chan struct{}, 1)}, nil
+	return &Engine{opts: o, collect: collect, latest: Snapshot{Epoch: hex.EncodeToString(epoch[:])}, subs: map[chan Snapshot]bool{}, wake: make(chan struct{}, 1), configure: make(chan struct{}, 1)}, nil
 }
 
+// UpdateOptions changes scheduling at a single serialized boundary. It does not
+// renew the freshness of any cached observation.
+func (e *Engine) UpdateOptions(o Options) error {
+	if o.Reconcile <= 0 || o.Debounce <= 0 || o.MaxDelay < o.Debounce || o.Timeout <= 0 || o.FreshFor <= 0 {
+		return errors.New("invalid observation scheduler options")
+	}
+	e.mu.Lock()
+	changed := e.opts != o
+	e.opts = o
+	e.mu.Unlock()
+	if changed {
+		select {
+		case e.configure <- struct{}{}:
+		default:
+		}
+	}
+	return nil
+}
+func (e *Engine) Options() Options { e.mu.Lock(); defer e.mu.Unlock(); return e.opts }
 func (e *Engine) Latest() Snapshot { e.mu.Lock(); defer e.mu.Unlock(); return e.latest.clone() }
 
 // Subscribe replays the current snapshot, without renewing freshness. Slow clients
@@ -153,10 +173,13 @@ func (e *Engine) Run(ctx context.Context) error {
 			delete(e.subs, ch)
 		}
 	}()
+	opts := e.Options()
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	due := timer.C
 	results := make(chan result, 1)
+	var collectors sync.WaitGroup
+	defer collectors.Wait()
 	var active context.CancelFunc
 	defer func() {
 		if active != nil {
@@ -172,6 +195,11 @@ func (e *Engine) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-e.configure:
+			opts = e.Options()
+			if active == nil {
+				arm(opts.Reconcile)
+			}
 		case <-e.wake:
 			e.mu.Lock()
 			paused, seq := e.paused, e.latest.Sequence
@@ -196,7 +224,7 @@ func (e *Engine) Run(ctx context.Context) error {
 			if first.IsZero() {
 				first = now
 			}
-			delay := min(e.opts.Debounce, max(time.Duration(0), first.Add(e.opts.MaxDelay).Sub(now)))
+			delay := min(opts.Debounce, max(time.Duration(0), first.Add(opts.MaxDelay).Sub(now)))
 			arm(delay)
 		case <-due:
 			due = nil
@@ -207,9 +235,11 @@ func (e *Engine) Run(ctx context.Context) error {
 				continue
 			}
 			dirty, first = false, time.Time{}
-			cctx, cancel := context.WithTimeout(ctx, e.opts.Timeout)
+			cctx, cancel := context.WithTimeout(ctx, opts.Timeout)
 			active, generation = cancel, seq
+			collectors.Add(1)
 			go func() {
+				defer collectors.Done()
 				started := time.Now()
 				data, err := e.collect(cctx)
 				if err == nil {
@@ -236,7 +266,7 @@ func (e *Engine) Run(ctx context.Context) error {
 				} else {
 					e.latest.Data = r.data
 					e.latest.ObservedAt = r.started
-					e.latest.ExpiresAt = r.started.Add(e.opts.FreshFor)
+					e.latest.ExpiresAt = r.started.Add(opts.FreshFor)
 				}
 				e.publishLocked()
 			} else {
@@ -248,9 +278,9 @@ func (e *Engine) Run(ctx context.Context) error {
 			}
 			if dirty {
 				first = time.Now()
-				arm(e.opts.Debounce)
+				arm(opts.Debounce)
 			} else {
-				arm(e.opts.Reconcile)
+				arm(opts.Reconcile)
 			}
 		}
 	}

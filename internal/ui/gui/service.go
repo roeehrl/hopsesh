@@ -41,6 +41,7 @@ const MenuEvent = "hopsesh:menu"
 
 // App is the service bound to the frontend.
 type App struct {
+	backend   runtimeLink
 	Desktop   DesktopShell `json:"-"`
 	desktopMu sync.Mutex
 	quick     quickState
@@ -98,7 +99,7 @@ func (a *App) save() error {
 	if a.cfgErr != nil {
 		return a.cfgErr // never overwrite a file the user has not set aside
 	}
-	return config.Save(a.core.Cfg)
+	return config.Save(&a.core.Cfg)
 }
 
 // AgentDTO is one agent module.
@@ -488,9 +489,7 @@ func (a *App) SetReposDir(dir string) error {
 
 // Shutdown closes connections and ends the terminal's tabs.
 func (a *App) Shutdown() {
-	if a.quick.cancel != nil {
-		a.quick.cancel()
-	}
+	a.stopRuntime()
 	if a.Desktop != nil {
 		a.Desktop.Stop()
 	}
@@ -507,6 +506,23 @@ func (a *App) Shutdown() {
 
 // emit sends an event to the window (nothing without one).
 func (a *App) emit(name string, data any) {
+	if name == TerminalEvent {
+		a.backend.mu.Lock()
+		owner := a.backend.owner
+		client := a.backend.client
+		connected := a.backend.cancel != nil
+		a.backend.mu.Unlock()
+		if owner != nil {
+			owner.Engine.Notify()
+		} else if connected {
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = client.Call(ctx, "refresh", nil, nil)
+			}()
+		}
+	}
+
 	switch {
 	case a.Wails != nil:
 		a.Wails.Event.Emit(name, data)

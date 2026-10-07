@@ -1,16 +1,15 @@
 package gui
 
 import (
-	"context"
 	"errors"
 	"runtime"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/ui/desktop"
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 const QuickEvent = "hopsesh:quick"
@@ -29,13 +28,11 @@ type DesktopShell interface {
 	Stop()
 }
 type quickState struct {
-	presence   *PresenceDTO
 	mu         sync.Mutex
 	scan       *ScanDTO
 	err        string
 	route      *QuickRoute
 	refreshing atomic.Bool
-	cancel     context.CancelFunc
 }
 type QuickRoute struct {
 	Screen  string `json:"screen"`
@@ -43,6 +40,7 @@ type QuickRoute struct {
 	Key     string `json:"key"`
 }
 type QuickDTO struct {
+	Runtime    RuntimeDTO    `json:"runtime"`
 	Agents     []AgentDTO    `json:"agents"`
 	Presence   *PresenceDTO  `json:"presence"`
 	Scan       *ScanDTO      `json:"scan"`
@@ -57,53 +55,18 @@ type QuickDTO struct {
 // and service boundary as the main window; terminal windows remain isolated.
 func (a *App) AttachDesktop(main *application.WebviewWindow) {
 	a.Desktop = desktop.New(a.Wails, main, a.snapshot().Cfg.Desktop, a.Terms.Privileged, func(screen string) { _ = a.QuickOpen(screen, "", "") }, func() { a.emit(QuickEvent, nil) })
-	ctx, cancel := context.WithCancel(context.Background())
-	a.quick.cancel = cancel
-	go func() {
-		ticker := time.NewTicker(5 * time.Second)
-		lastScan, lastPresence := time.Time{}, time.Time{}
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if shell, ok := a.Desktop.(interface{ Suspended() bool }); ok && shell.Suspended() {
-					continue
-				}
-				fg := false
-				if shell, ok := a.Desktop.(interface{ Foreground() bool }); ok {
-					fg = shell.Foreground()
-				}
-				a.quick.mu.Lock()
-				scanned := a.quick.scan
-				a.quick.mu.Unlock()
-				if scanned != nil {
-					if at, err := time.Parse(time.RFC3339, scanned.Updated); err == nil && at.After(lastScan) {
-						lastScan = at
-					}
-				}
-				if time.Since(lastScan) >= time.Minute {
-					a.refreshQuick()
-					lastScan = time.Now()
-				}
-				interval := 30 * time.Second
-				if fg {
-					interval = 5 * time.Second
-				}
-				if time.Since(lastPresence) >= interval {
-					if p, err := a.Presence(); err == nil {
-						a.quick.mu.Lock()
-						a.quick.presence = p
-						a.quick.mu.Unlock()
-						a.updateQuickAttention()
-						a.emit(QuickEvent, nil)
-					}
-					lastPresence = time.Now()
-				}
-			}
-		}
-	}()
+	if err := a.connectRuntime(); err != nil {
+		a.backend.mu.Lock()
+		a.backend.problem = err.Error()
+		a.backend.mu.Unlock()
+	}
+	for _, event := range []events.ApplicationEventType{events.Common.SystemWillSleep, events.Common.ScreenLocked} {
+		a.Wails.Event.OnApplicationEvent(event, func(*application.ApplicationEvent) { a.runtimeSleep(true) })
+	}
+	for _, event := range []events.ApplicationEventType{events.Common.SystemDidWake, events.Common.ScreenUnlocked} {
+		a.Wails.Event.OnApplicationEvent(event, func(*application.ApplicationEvent) { go a.runtimeSleep(false) })
+	}
+
 }
 func (a *App) DesktopSettings() desktop.State {
 	if a.Desktop != nil {
@@ -166,12 +129,12 @@ func (a *App) RecheckDesktop() desktop.State {
 func (a *App) QuickSnapshot() QuickDTO {
 	a.quick.mu.Lock()
 	scan, err := a.quick.scan, a.quick.err
-	presence := a.quick.presence
 	a.quick.mu.Unlock()
 	a.mu.Lock()
 	agents := a.agentsLocked()
 	a.mu.Unlock()
-	return QuickDTO{Agents: agents, Presence: presence, Scan: scan, Tabs: a.TerminalTabs(), Desktop: a.DesktopSettings(), OS: runtime.GOOS, Refreshing: a.quick.refreshing.Load(), Error: err}
+	live, _ := a.Presence()
+	return QuickDTO{Runtime: a.RuntimeStatus(), Agents: agents, Presence: live, Scan: scan, Tabs: a.TerminalTabs(), Desktop: a.DesktopSettings(), OS: runtime.GOOS, Refreshing: a.quick.refreshing.Load(), Error: err}
 }
 
 // publishQuick shares immutable scan DTOs. It never starts a second inventory or
@@ -179,7 +142,6 @@ func (a *App) QuickSnapshot() QuickDTO {
 func (a *App) publishQuick(scan *ScanDTO) {
 	a.quick.mu.Lock()
 	a.quick.scan = scan
-	a.quick.presence = nil
 	a.quick.err = ""
 	a.quick.mu.Unlock()
 	a.updateQuickAttention()
@@ -191,7 +153,6 @@ func (a *App) updateQuickAttention() {
 	}
 	a.quick.mu.Lock()
 	scan := a.quick.scan
-	presence := a.quick.presence
 	a.quick.mu.Unlock()
 	needs := map[string]bool{}
 	if scan != nil {
@@ -205,11 +166,7 @@ func (a *App) updateQuickAttention() {
 				}
 				k := e.Machine + "\x00" + e.Key
 				waiting := e.Needs
-				if presence != nil {
-					if p, ok := presence.Entries[k]; ok {
-						waiting = p.Needs
-					}
-				}
+
 				if local && waiting {
 					needs[k] = true
 				}
@@ -309,6 +266,9 @@ func (a *App) QuickQuit() {
 func (a *App) InitialScan() (*ScanDTO, error) {
 	if shell, ok := a.Desktop.(interface{ BackgroundLaunch() bool }); ok && shell.BackgroundLaunch() {
 		return a.RefreshHere()
+	}
+	if err := a.connectRuntime(); err != nil {
+		return nil, err
 	}
 	return a.Scan()
 }

@@ -21,11 +21,16 @@ func main() {
 	reg := all.Registry()
 	integrate.SetLoginVars(reg.LoginEnv())
 	root := cli.NewRoot(os.Stdout, reg)
-	root.PersistentPreRun = func(cmd *cobra.Command, _ []string) {
+	prepare := root.PersistentPreRunE
+	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		if err := prepare(cmd, args); err != nil {
+			return err
+		}
 		// A passive invocation must not remove backups from an earlier update.
 		if cmd.Annotations["hopsesh.passive"] != "true" {
 			update.CleanUp()
 		}
+		return nil
 	}
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)

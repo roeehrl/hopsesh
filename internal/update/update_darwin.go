@@ -44,11 +44,23 @@ func installMacApp(ctx context.Context, bundle string, dmg []byte) error {
 	if err := sameSigner(bundle, next); err != nil {
 		return err
 	}
-	if teamID(bundle) != "" {
-		if out, err := proc.Command("spctl", "--assess", "--type", "execute", next).CombinedOutput(); err != nil {
-			return fmt.Errorf("macOS does not accept the new app (%s); not installing", strings.TrimSpace(string(out)))
-		}
+	// The manifest authenticates the publisher; first installs also require an
+	// actual Developer ID signature and Gatekeeper acceptance.
+	if teamID(next) == "" {
+		return errors.New("new app has no Developer ID team signature")
 	}
+	if out, err := proc.CommandContext(ctx, "codesign", "--verify", "--deep", "--strict", next).CombinedOutput(); err != nil {
+		return fmt.Errorf("new app signature rejected: %s", strings.TrimSpace(string(out)))
+	}
+	if out, err := proc.CommandContext(ctx, "spctl", "--assess", "--type", "execute", next).CombinedOutput(); err != nil {
+		return fmt.Errorf("macOS does not accept the new app (%s); not installing", strings.TrimSpace(string(out)))
+	}
+	if _, err := os.Lstat(bundle); errors.Is(err, os.ErrNotExist) {
+		return os.Rename(next, bundle)
+	} else if err != nil {
+		return err
+	}
+
 	old := filepath.Join(work, "old.app")
 	if err := os.Rename(bundle, old); err != nil {
 		return fmt.Errorf("cannot replace %s (%w); download the new app from the release page instead", bundle, err)
