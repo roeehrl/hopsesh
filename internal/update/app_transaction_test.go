@@ -84,3 +84,33 @@ func TestWindowsInterruptedPublicationRestoresOldFilesAndRemovesNewLibrary(t *te
 		t.Fatal("recovery not idempotent", err)
 	}
 }
+
+func TestRecoveryRefusesLinkedOrOversizedManifestBeforeMutation(t *testing.T) {
+	for _, name := range []string{"linked", "oversized"} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			live := filepath.Join(dir, "hopsesh.exe")
+			if err := os.WriteFile(live, []byte("current"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(dir, appTransactionFile)
+			if name == "linked" {
+				other := filepath.Join(t.TempDir(), "manifest")
+				if err := os.WriteFile(other, []byte(`{"stage":".hopsesh-app-stage-test","files":["hopsesh.exe"],"existed":{}}`), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(other, path); err != nil {
+					t.Skip("OS does not permit a test symlink")
+				}
+			} else if err := os.WriteFile(path, make([]byte, 16385), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := recoverWindowsApp(dir, os.Rename); err == nil {
+				t.Fatal("unsafe manifest accepted")
+			}
+			if data, err := os.ReadFile(live); err != nil || string(data) != "current" {
+				t.Fatal("invalid manifest altered the install", string(data), err)
+			}
+		})
+	}
+}

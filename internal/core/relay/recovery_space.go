@@ -28,7 +28,7 @@ func (s Store) recoverySpaceLimit(path string, reserve int64, now time.Time, lim
 		return errors.New("relay recovery reservation exceeds record bound")
 	}
 	paths := []string{}
-	for _, prefix := range []string{"operation-", "outgoing-", "reply-"} {
+	for _, prefix := range []string{"operation-", "outgoing-", "large-intent-", "reply-"} {
 		matches, err := filepath.Glob(filepath.Join(s.Directory, prefix+"*.json"))
 		if err != nil {
 			return err
@@ -45,7 +45,7 @@ func (s Store) recoverySpaceLimit(path string, reserve int64, now time.Time, lim
 	// Reclaim on admission pressure, not with an idle timer. Never evict a live
 	// result, an uncertain intent or a native journal to make room.
 	for _, existing := range paths {
-		if strings.HasPrefix(filepath.Base(existing), "outgoing-") {
+		if strings.HasPrefix(filepath.Base(existing), "outgoing-") || strings.HasPrefix(filepath.Base(existing), "large-intent-") {
 			continue // metadata-only durable request bindings
 		}
 		body, err := localstate.ReadPrivateFile(existing, MaxWireBytes)

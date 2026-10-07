@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -32,14 +31,7 @@ func (c Connection) HTTPClient() (*http.Client, error) {
 	if !filepath.IsAbs(c.CAFile) {
 		return nil, errors.New("relay trust root must be an absolute local path")
 	}
-	fi, err := os.Lstat(c.CAFile)
-	if err != nil {
-		return nil, err
-	}
-	if !fi.Mode().IsRegular() || fi.Size() > 1<<20 {
-		return nil, errors.New("relay trust root must be a bounded regular PEM file")
-	}
-	data, err := os.ReadFile(c.CAFile)
+	data, err := localstate.ReadOwnedFile(c.CAFile, 1<<20)
 	if err != nil {
 		return nil, err
 	}

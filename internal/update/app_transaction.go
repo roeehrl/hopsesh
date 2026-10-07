@@ -139,17 +139,10 @@ func publishWindowsAppFiles(dir string, files map[string][]byte, names []string,
 
 func recoverWindowsApp(dir string, rename func(string, string) error) error {
 	path := filepath.Join(dir, appTransactionFile)
-	info, err := os.Lstat(path)
+	data, err := localstate.ReadPrivateFile(path, 16384)
 	if os.IsNotExist(err) {
 		return nil
 	}
-	if err != nil {
-		return err
-	}
-	if !info.Mode().IsRegular() || info.Size() > 16384 {
-		return errors.New("invalid app update recovery manifest")
-	}
-	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}

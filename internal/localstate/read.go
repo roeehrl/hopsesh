@@ -3,6 +3,7 @@ package localstate
 import (
 	"errors"
 	"io"
+	"os"
 )
 
 // ReadPrivateFile checks the opened object before reading it and bounds the read.
@@ -26,6 +27,13 @@ func readOwnedFile(path string, limit int64, private bool) ([]byte, error) {
 		return nil, err
 	}
 	defer f.Close()
+	return readStableFile(f, limit)
+}
+
+func readStableFile(f interface {
+	io.Reader
+	Stat() (os.FileInfo, error)
+}, limit int64) ([]byte, error) {
 	st, err := f.Stat()
 	if err != nil {
 		return nil, err
@@ -37,5 +45,15 @@ func readOwnedFile(path string, limit int64, private bool) ([]byte, error) {
 	if err == nil && int64(len(b)) > limit {
 		return nil, errors.New("private state file exceeds limit")
 	}
-	return b, err
+	if err != nil {
+		return nil, err
+	}
+	after, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(b)) != st.Size() || st.Size() != after.Size() || !st.ModTime().Equal(after.ModTime()) || st.Mode() != after.Mode() {
+		return nil, errors.New("owned file changed during read; try again after the native write finishes")
+	}
+	return b, nil
 }

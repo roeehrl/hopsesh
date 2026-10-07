@@ -41,6 +41,71 @@ type blobResult struct {
 	Descriptor *blobDescriptor `json:"hopseshRelayBlob,omitempty"`
 }
 
+type largeIntent struct {
+	Peer       string         `json:"peer"`
+	Scope      []byte         `json:"scope"`
+	Descriptor blobDescriptor `json:"descriptor"`
+}
+
+// Freeze before the first chunk. Keep even expired request bindings: dropping
+// them would let a reused operation acquire different input or authority.
+func (s Store) freezeUpload(ctx context.Context, grant Grant, d blobDescriptor) (blobDescriptor, error) {
+	if err := d.check(time.Now()); err != nil {
+		return d, err
+	}
+	err := s.withLock(ctx, func() error {
+		current, err := s.grantLocked(grant.Peer.ID)
+		if err != nil {
+			return err
+		}
+		if !current.AllowsSend(d.Method, time.Now()) || !bytes.Equal(grantScope(current), grantScope(grant)) || current.Expires != 0 && d.Expires > current.Expires {
+			return ErrRevoked
+		}
+		path := filepath.Join(s.Directory, "large-intent-"+replyKey(grant.Peer.ID, d.Operation, d.Method)+".json")
+		old, err := localstate.ReadPrivateFile(path, 8192)
+		if err == nil {
+			var prior largeIntent
+			if err = json.Unmarshal(old, &prior); err != nil {
+				return err
+			}
+			if prior.Peer != grant.Peer.ID || !bytes.Equal(prior.Scope, grantScope(current)) || prior.Descriptor.ID != d.ID {
+				return errors.New("large operation reused for different input or authorization; use a new operation ID")
+			}
+			if err = prior.Descriptor.check(time.Now()); err != nil {
+				return err
+			}
+			if current.Expires != 0 && prior.Descriptor.Expires > current.Expires {
+				return ErrRevoked
+			}
+			d = prior.Descriptor
+			return nil
+		}
+		if !os.IsNotExist(err) {
+			return err
+		}
+		records, err := filepath.Glob(filepath.Join(s.Directory, "large-intent-*.json"))
+		if err != nil {
+			return err
+		}
+		if len(records) >= MaxOperationRecords {
+			return errors.New("relay large outgoing operation quota reached")
+		}
+		intent := largeIntent{Peer: grant.Peer.ID, Scope: grantScope(current), Descriptor: d}
+		encoded, err := json.Marshal(intent)
+		if err != nil {
+			return err
+		}
+		if len(encoded) > 8192 {
+			return errors.New("relay large request metadata exceeds bound")
+		}
+		if err = s.recoverySpace(path, int64(len(encoded)), time.Now()); err != nil {
+			return err
+		}
+		return writeJSON(path, intent)
+	})
+	return d, err
+}
+
 func descriptor(operation, method, direction string, body []byte, expires int64) blobDescriptor {
 	sum := sha256.Sum256(body)
 	d := blobDescriptor{Operation: operation, Method: method, Direction: direction, SHA256: hex.EncodeToString(sum[:]), Bytes: len(body), Parts: (len(body) + ChunkBytes - 1) / ChunkBytes, Expires: expires}
@@ -300,28 +365,7 @@ func (s *Service) Call(ctx context.Context, peer, operation, method string, para
 		d := descriptor(operation, method, "request", params, expires)
 		// The upload's lease is part of its immutable wire request. Freeze it
 		// before sending the first chunk so a restarted sender reuses exact IDs.
-		err = s.Processor.Store.withLock(ctx, func() error {
-			path := filepath.Join(s.Processor.Store.Directory, "large-intent-"+replyKey(peer, operation, method)+".json")
-			old, err := localstate.ReadPrivateFile(path, 8192)
-			if err == nil {
-				var prior blobDescriptor
-				if err = json.Unmarshal(old, &prior); err != nil {
-					return err
-				}
-				if prior.ID != d.ID {
-					return errors.New("large operation reused for different input")
-				}
-				if err = prior.check(time.Now()); err != nil {
-					return err
-				}
-				d = prior
-				return nil
-			}
-			if !os.IsNotExist(err) {
-				return err
-			}
-			return writeJSON(path, d)
-		})
+		d, err = s.Processor.Store.freezeUpload(ctx, grant, d)
 		if err != nil {
 			return nil, err
 		}
