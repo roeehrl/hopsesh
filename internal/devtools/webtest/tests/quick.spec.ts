@@ -81,3 +81,24 @@ test('refresh preserves keyboard focus and duplicate tags never identify a sessi
  await expect.poll(()=>page.evaluate(()=> (document.activeElement as HTMLElement)?.dataset.session)).toBe(identity);
  await page.keyboard.press('Enter');await expect(page.getByRole('heading',{name:'Recent conversation'})).toBeVisible();
 });
+
+test('Quick access uses the same loaded agent icons as the main window',async({page},testInfo)=>{
+ const response=await page.request.post('/call',{data:{m:'Info',args:[]}});
+ const agents=(await response.json()).result.agents;
+ await page.route('**/call',async route=>{
+  if(route.request().postDataJSON().m!=='QuickSnapshot'){await route.continue();return;}
+  const response=await route.fetch(),body=await response.json();
+  const source=body.result.scan.groups[0].entries[0];
+  body.result.scan.groups=[{name:'demo',entries:['claude','codex'].map(id=>({...source,key:id+'/icon-test',agent:id,agentName:agents.find(a=>a.id===id).name}))}];
+  await route.fulfill({json:body});
+ });
+ await page.setViewportSize({width:420,height:640});await page.goto('/quick.html');
+ await page.getByRole('button',{name:'Recent',exact:true}).click();
+ for(const id of ['claude','codex']){
+  const agent=agents.find(a=>a.id===id);expect(agent.icon).toBeTruthy();
+  const icon=page.locator('.quick-row').filter({has:page.getByRole('img',{name:agent.name,exact:true})}).locator('img.agent-ico');
+  await expect(icon).toHaveAttribute('src',agent.icon);
+  await expect.poll(()=>icon.evaluate((img:HTMLImageElement)=>img.complete&&img.naturalWidth>0)).toBe(true);
+ }
+ await page.screenshot({path:testInfo.outputPath('quick-agent-icons.png')});
+});

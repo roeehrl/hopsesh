@@ -44,7 +44,7 @@ async function refresh(){
  if(pending){again=true;return}pending=true;
  try{
   data=await api('QuickSnapshot');setSystem(data.os,'Terminal');
-  state.info={agents:[...new Map(entries().map(e=>[e.agent,{id:e.agent,name:e.agentName}])).values()]};
+  state.info={agents:data.agents};
   if(screen!=='settings'){
    const focused=document.activeElement,search=focused?.matches('.quick-search'),session=focused?.dataset.session;
    const label=focused?.getAttribute('aria-label'),text=focused?.matches('button')?focused.textContent:null;

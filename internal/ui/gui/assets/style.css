@@ -625,7 +625,13 @@ code { font-family: var(--mono); font-size: .92em; padding: 0 3px; border-radius
 .account-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr)); gap:16px; margin:16px 0 28px; }
 .account-card { display:flex; flex-direction:column; justify-content:space-between; gap:18px; padding:20px; border:1px solid var(--line); background:var(--panel); border-radius:12px; min-width:0; }
 .account-card h3 { margin:0 0 8px; }.account-card .mono { overflow-wrap:anywhere; }
-.account-group > summary { cursor:pointer; font-weight:600; padding:8px 0; }
+.account-group > summary { cursor:pointer; font-weight:600; padding:12px 0; }
+.account-group > summary > span { margin-right:12px; }
+.account-group > summary .muted { font-size:12px; font-weight:400; }
+.account-setup { gap:12px; margin-top:4px; }
+.account-setup p { margin:0; }
+.account-setup code { align-self:flex-start; max-width:100%; overflow-wrap:anywhere; }
+.account-setup button { align-self:flex-start; }
 .account-editor { background:var(--panel); color:var(--ink); border:1px solid var(--line); max-height:90vh; overflow:auto; width:min(540px,90vw); padding:28px; border-radius:14px; }
 .account-editor label { display:flex; flex-direction:column; gap:6px; margin:14px 0; }
 .account-editor .account-actions { justify-content:flex-end; margin-top:20px; position:sticky; bottom:-28px; padding:14px 0; background:var(--panel); }

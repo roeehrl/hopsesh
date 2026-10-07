@@ -16,6 +16,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Use the main window’s agent icons in Quick access. Put this machine first in
+  Accounts and give remote setup notices the same collapsible machine grouping.
+
 - Explain remote account setup prerequisites on the Accounts screen instead of
   silently omitting connected machines without a Hopsesh identity. Replace the
   sun-shaped Settings icon with a recognizable gear.
