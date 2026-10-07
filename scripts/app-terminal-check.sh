@@ -39,7 +39,7 @@ if ! [ -s "$WORK/$placement/terminal.txt" ]; then
 fi
 cat "$WORK/$placement/terminal.txt"
 if ! grep -q '^backend=pty code=0$' "$WORK/$placement/terminal.txt" || ! grep -qF 'da1="\x1b[?' "$WORK/$placement/terminal.txt"; then
-  head -n 100 "$WORK/$placement/app.log" >&2
+  tail -n 120 "$WORK/$placement/app.log" >&2
   echo "the tab's program did not get the window's answer, or ended badly" >&2
   exit 1
 fi

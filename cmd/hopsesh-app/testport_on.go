@@ -56,6 +56,7 @@ func testHook(w *application.WebviewWindow, svc *gui.App) {
 	}
 	w.OnWindowEvent(events.Common.WindowRuntimeReady, func(*application.WindowEvent) {
 		once.Do(func() {
+			testConsole(w)
 			if script != "" {
 				if b, err := os.ReadFile(script); err == nil {
 					w.ExecJS(string(b))
