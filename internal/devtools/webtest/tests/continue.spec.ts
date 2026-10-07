@@ -16,11 +16,11 @@ test("continue a Claude Code session in Codex, see where it has been, and undo",
   // A briefing only, then the whole conversation again.
   await sheet.getByRole("radio", { name: "Briefing only" }).click();
   await expect(sheet.locator(".box.kept")).toContainText("A briefing only");
-  await sheet.getByRole("radio", { name: "Whole conversation" }).click();
+  await sheet.getByRole("radio", { name: "History + bounded context" }).click();
   await expect(sheet.locator(".box.kept")).toContainText("2 messages");
 
   await sheet.getByRole("button", { name: /Continue in Codex/ }).click();
-  await expect(page.getByRole("heading", { name: "“Find the codeword” continues in Codex" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("heading", { name: "“Find the codeword” is prepared for Codex" })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("Codex session written")).toBeVisible();
 
   await page.getByRole("button", { name: /Back to sessions/ }).click();
@@ -47,19 +47,26 @@ test("continue a Claude Code session in Codex, see where it has been, and undo",
 });
 
 
-test("an unverified account return preserves the original and creates a portable copy", async ({ page }) => {
+test("a return with no new work opens the exact original without another transfer", async ({ page }) => {
   await row(page, "Find the codeword").click();
+  const source = await page.evaluate(async () => {
+    const { selected } = await import('/core.js');
+    const e = selected();
+    return { machine: e.machine, key: e.key };
+  });
   await action(page, "move", /^Continue with Codex…/);
   await page.locator("#sheet").getByRole("button", { name: /Continue in Codex/ }).click();
-  await expect(page.getByRole("heading", { name: /continues in Codex/ })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("heading", { name: /is prepared for Codex/ })).toBeVisible({ timeout: 30_000 });
   await page.getByRole("button", { name: /Back to sessions/ }).click();
   await row(page, "Find the codeword (from Claude Code)").click();
-  await action(page, "move", /^Continue with Claude Code…/);
-  const sheet = page.locator("#sheet");
-  await expect(sheet.getByLabel("What changes")).toContainText("1 new Claude Code session");
-  await expect(sheet).toContainText("Account identity continuity is unverified");
-  await sheet.getByRole("button", { name: /Continue in Claude Code/ }).click();
-  await expect(page.getByText("Claude Code session written", { exact: true })).toBeVisible({timeout:30_000});
+  const plans: string[] = [];
+  page.on('request', request => {
+    if (request.url().endsWith('/call') && ['Plan', 'PushPlan', 'Apply'].includes(request.postDataJSON()?.m)) plans.push(request.postDataJSON().m);
+  });
+  const resumed = page.waitForRequest(request => request.url().endsWith('/call') && request.postDataJSON()?.m === 'ResumeSession');
+  await action(page, "move", /^Open existing session in Claude Code/);
+  expect((await resumed).postDataJSON().args.slice(0, 2)).toEqual([source.machine, source.key]);
+  expect(plans).toEqual([]);
 });
 
 // The Windows screenshot world selects a remote session. Its action explicitly
@@ -90,4 +97,46 @@ test("remote continuation names this PC and retains its source when planning", a
   expect(args[0]).toBe('remote-fixture');
   expect(args[2]).toBe('codex');
   await expect(page.locator('#sheet')).toContainText('Remote plan captured for regression test');
+});
+
+test("bounded recovery keeps the original and explains capacity and archive", async ({ page }) => {
+  await row(page, "Find the codeword").click();
+  await action(page, "move", /^Create bounded continuation…/);
+  const sheet = page.locator("#sheet");
+  await expect(sheet.getByRole("heading", {name: /Continue.*Claude Code/})).toBeVisible();
+  await expect(sheet).toContainText("Working context:");
+  await expect(sheet).toContainText("Portable history preserved separately");
+  await expect(sheet).toContainText("The original remains available");
+  await expect(sheet.getByRole("checkbox", { name: /Replay shell commands|own importer/ })).toHaveCount(0);
+  await sheet.getByRole("button", {name: /Continue in Claude Code/}).click();
+  await expect(page.getByRole("heading", {name: /is prepared for Claude Code/})).toBeVisible();
+  await expect(page.getByText("Claude Code session written", {exact: true})).toBeVisible();
+  await page.getByRole("button", {name: /Back to sessions/}).click();
+  await expect(row(page, "Find the codeword (from Claude Code)")).toBeVisible();
+});
+
+test("oversized note is bounded and disclosed before apply", async ({ page }) => {
+  await row(page, "Find the codeword").click();
+  await action(page, "move", /^Continue with Codex…/);
+  const sheet = page.locator("#sheet");
+  await sheet.locator('#note').fill('Pending task: '.repeat(20000));
+  await sheet.locator('#note').blur();
+  await expect(sheet).toContainText("Briefing shortened to fit");
+  await expect(sheet).toContainText("Portable history preserved separately");
+  await expect(sheet.getByRole("button", {name: /Continue in Codex/})).toBeEnabled();
+});
+
+test("a recorded context error offers bounded recovery in session details", async ({ page }) => {
+  await page.evaluate(async () => {
+    const { state } = await import(/* @vite-ignore */ '/core.js');
+    const { render } = await import(/* @vite-ignore */ '/sessions.js');
+    const entry = state.scan.groups.flatMap(g => g.entries).find(e => e.title === 'Find the codeword');
+    entry.contextOverflow = true;
+    render();
+  });
+  await row(page, 'Find the codeword').click();
+  const details = page.getByRole('complementary', { name: 'Session details' });
+  await expect(details).toContainText('The agent reported a context limit');
+  await details.getByRole('button', { name: 'Create bounded continuation…', exact: true }).click();
+  await expect(page.locator('#sheet')).toContainText('The original remains available');
 });

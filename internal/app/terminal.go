@@ -349,6 +349,16 @@ func (a *App) runLaunch(id string, t termapp.Ticket, tio TerminalIO) (int, error
 		}
 		fmt.Fprintln(tio.Out, ".")
 	}
+	if t.Kind == termapp.KindSession && t.Key != "" {
+		if key, err := agent.ParseKey(t.Key); err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			notice, _ := a.SessionMovementNotice(ctx, key.Agent, key.Profile, string(key.Session))
+			cancel()
+			if notice != "" {
+				fmt.Fprintln(tio.Out, notice)
+			}
+		}
+	}
 	argv, err := TabArgv(t.Argv)
 	if err != nil {
 		return -1, err

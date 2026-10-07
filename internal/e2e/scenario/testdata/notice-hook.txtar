@@ -1,0 +1,52 @@
+# The actual CLI parses bounded hook input on Linux, macOS and Windows. Empty,
+# malformed or mismatched identities fail open without invoking a vendor CLI.
+env CLAUDE_CONFIG_DIR=$WORK/home/.claude
+env CODEX_HOME=$WORK/home/.codex
+env CODEX_SQLITE_HOME=$WORK/home/.codex
+stdin valid.json
+exec hopsesh notice-hook --agent claude
+! stdout .
+! stderr .
+stdin valid.json
+exec hopsesh notice-hook --agent codex --profile 'profile with ''quotes'' $HOME & semi;'
+! stdout .
+! stderr .
+stdin malformed.json
+exec hopsesh notice-hook --agent codex
+! stdout .
+! stderr .
+stdin missing-session.json
+exec hopsesh notice-hook --agent claude
+! stdout .
+! stderr .
+stdin invalid-session.json
+exec hopsesh notice-hook --agent codex
+! stdout .
+! stderr .
+stdin invalid-path.json
+exec hopsesh notice-hook --agent claude
+! stdout .
+! stderr .
+stdin wrong-event.json
+exec hopsesh notice-hook --agent codex
+! stdout .
+! stderr .
+stdin valid.json
+exec hopsesh notice-hook --agent unknown
+! stdout .
+! stderr .
+! exists agents.log
+! exists injected
+
+-- valid.json --
+{"hook_event_name":"SessionStart","session_id":"11111111-2222-4333-8444-555555555555","transcript_path":"C:\\fixture 'quoted' & $(touch injected);\\session.jsonl"}
+-- malformed.json --
+{"session_id":
+-- missing-session.json --
+{"hook_event_name":"SessionStart"}
+-- invalid-session.json --
+{"hook_event_name":"SessionStart","session_id":"bad\u0000session"}
+-- invalid-path.json --
+{"hook_event_name":"UserPromptSubmit","session_id":"session","transcript_path":"bad\u0000path"}
+-- wrong-event.json --
+{"hook_event_name":"PreToolUse","session_id":"session"}

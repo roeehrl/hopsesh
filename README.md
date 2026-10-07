@@ -42,11 +42,12 @@ repository, worktree and paths fixed up. Then it gives you the command to contin
   one. The plan shows exactly what carries over and what doesn't, plus the briefing the other
   agent gets.
 - **Tracks round trips and forks**: verified compatible returns can add only new work.
-  Across account profiles, Hopsesh creates a portable conversation and preserves the original
+  Across account profiles, hopsesh creates a portable conversation and preserves the original
   protected state. If both copies changed, it offers a separate branch; it never silently merges.
-- **Works with the agents' clouds**: hands a session to Claude Code on the web, Codex cloud,
-  Copilot, Jules, Devin or Amp, brings their sessions home, and hands one cloud's session on
-  to another, all through the vendors' own commands, signed in as you.
+- **Works with the agents' clouds**: hands a session to Claude Code on the web or Codex
+  cloud (and, experimentally, Copilot, Jules, Devin or Amp), brings their sessions home, and
+  hands one cloud's session on to another, all through the vendors' own commands, signed in
+  as you.
 - **Works from inside your agent**: ask Claude Code or Codex "bring my laptop session here" and
   it plans with hopsesh, then moves only after you say yes.
 - **Multiple accounts**: name and tag independent Claude Code and Codex profiles, discover
@@ -55,7 +56,8 @@ repository, worktree and paths fixed up. Then it gives you the command to contin
 - **Open a Codex conversation in its desktop app** from the Resume menu, with the exact
   thread selected. Custom account roots use a terminal because desktop links cannot select them.
 - **CLI, TUI and a desktop app for macOS and Windows** on one engine, with `--json` output
-  everywhere it matters. The apps update themselves.
+  everywhere it matters. The app has a terminal of its own and also opens sessions in iTerm2,
+  Terminal or Windows Terminal. The apps update themselves.
 
 > Status: alpha. It works end to end on macOS and Linux, and the Windows app and installer are
 > tested in CI on Windows Server 2025, including the real window. hopsesh is an independent
@@ -96,6 +98,11 @@ Both check the download against the release's `checksums.txt` and its signature,
 
 The other machines need only an SSH server (Remote Login on macOS, OpenSSH on Windows) and
 their sessions. To continue in another agent, that agent must be installed here.
+
+**Upgrading from 0.3?** 0.4 stores its settings in a new format and doesn't read the old
+file: the app offers to set it aside and start fresh (the old file stays next to the new
+one), and the command line names the file to move aside. Then add and allow your machines
+again; your sessions are not affected. Update hopsesh on each machine where you run it.
 
 ## Quick start
 
@@ -142,15 +149,15 @@ actions: **Resume in ‹place›** (or **Show in ‹place›** while it runs, or
 Mac…**), **Move** (**Continue with ‹agent›…** with a preview of the conversion, **Send to
 ‹machine›…**, **Hand off to ‹cloud›…**) and **⋯**, beside the end of its conversation and
 where it is open now. Sending plans on the other machine, carries it out, and one Undo
-reverses both sides. Settings has per-agent options and a **Receive sessions**
-switch. It can also put the `hopsesh` command on your PATH (no administrator password) and
+reverses both sides. Settings has per-agent options, the terminal (below) and a **Receive
+sessions** switch. It can also put the `hopsesh` command on your PATH (no administrator password) and
 install the skill into your agents.
 
 The app is the same on macOS and Windows; on Windows it says "this PC", uses Ctrl where macOS
-uses ⌘, opens sessions in Windows Terminal (or PowerShell) and keeps passwords in Windows
-Credential Manager. It updates itself: **Settings → Updates → Install and restart** checks
-the release's signature and checksum (on macOS also the Apple developer and notarization),
-installs it and reopens.
+uses ⌘, opens sessions in its own terminal window (or, if you choose, Windows Terminal or
+PowerShell) and keeps passwords in Windows Credential Manager. It updates itself:
+**Settings → Updates → Install and restart** checks the release's signature and checksum
+(on macOS also the Apple developer and notarization), installs it and reopens.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/windows-app-dark.png">
@@ -166,12 +173,13 @@ folder**. hopsesh starts the
 command; you do all the typing, and it never answers a question for you, Claude Code's trust
 question included. Each tab shows whether its program runs, waits for you or ended (with its
 exit code), and keeps **Open in my terminal**, which ends it and runs the same command in your
-own terminal app. Ctrl+` moves between the terminal and your sessions. Quitting hopsesh ends
-the programs in its tabs, so it asks first; for work that must outlive the app, use your
-terminal app.
+own terminal app. A session runs in one tab at most, and the sessions list shows which ones
+run in a tab and wait for you. Ctrl+` moves between the terminal and your sessions. Quitting
+hopsesh ends the programs in its tabs, so it asks first; for work that must outlive the app,
+use your terminal app.
 
 Settings → Terminal chooses where sessions and steps open (**In this window** or **In my
-terminal**; a session's Resume menu picks another place, remembered for that agent), the font, its size and how much scrollback each tab keeps
+terminal**; a session's Resume menu picks another place, remembered for that agent), your terminal app, the font, its size and how much scrollback each tab keeps
 (in memory only). Programs in a tab can never read your clipboard, links open only after you
 confirm the whole address, and nothing a tab shows is written to disk or a log. Sign-in and
 shell tabs are recorded nowhere: hopsesh doesn't watch, match or keep what appears in them.
@@ -267,14 +275,16 @@ hopsesh protocol version; otherwise hopsesh asks you to update. Details:
 
 ## Cloud sessions
 
-hopsesh works with the agents' own clouds: Claude Code on the web, Codex cloud, the GitHub
-Copilot cloud agent, Jules, Devin and Amp. It hands a session on this machine (or on another
-of yours) to a cloud, brings a cloud session home into Claude Code or Codex, and hands one
-cloud's session on to another vendor's cloud through this machine. It does this with the
-vendors' own commands (`claude --cloud`, `claude --teleport`, `codex cloud`, `gh agent-task`,
-`jules remote`, `devin`, `amp`), run here, signed in as you: the cloud sessions it starts
-are yours, on your plan, and hopsesh never reads a login or calls a vendor's servers. Each
-cloud is off until you allow it.
+hopsesh works with the agents' own clouds: Claude Code on the web and Codex cloud, and,
+experimentally, the GitHub Copilot cloud agent, Jules, Devin and Amp. It hands a session on
+this machine (or on another of yours) to a cloud, brings a cloud session home into Claude
+Code or Codex, and hands one cloud's session on to another vendor's cloud through this
+machine. It doesn't replace the vendors' own commands; it runs them (`claude --cloud`,
+`claude --teleport`, `codex cloud`, `gh agent-task`, `jules remote`, `devin`, `amp`), here,
+signed in as you, and adds what they don't do: a session from another of your machines or
+the other vendor's agent, a briefing and a loss report, the branches, lineage and undo. The
+cloud sessions it starts are yours, on your plan, and hopsesh never reads a login or calls a
+vendor's servers. Each cloud is off until you allow it.
 
 ```sh
 hopsesh clouds                                        # the clouds, and what a read-only look found
@@ -289,8 +299,9 @@ hopsesh clouds cleanup                                # branches whose work is m
 ```
 
 In the app: **Clouds** in the sidebar, **Move → Hand off to ‹cloud›…** on a session (on a
-cloud session too), **Bring to this Mac…** on a cloud session, and the cards under
-**Machines**. In the terminal UI, `c`
+cloud session too), **Bring to this Mac…** on a cloud session, and a card per cloud under
+**Machines** (Turn on, Test and **Sign in**, which runs the vendor's own login command in a
+terminal tab that records nothing). In the terminal UI, `c`
 hands off and `enter` brings a cloud session here.
 
 ### What goes up: a briefing and the code
@@ -311,14 +322,18 @@ start from, so their briefing asks the cloud agent to check it out first.
 
 ### What comes back
 
-| Cloud | Through | The conversation comes back | The code comes back |
-|---|---|---|---|
-| Claude Code cloud | `claude --teleport`, in your terminal | Whole, as Claude Code's own copy | Its `claude/…` branch, kept here as `hopsesh/from/claude-cloud/…` |
-| Codex cloud (legacy tasks) | `codex cloud status`, `codex cloud diff` | The task's title and what came of it, written as a session | Its diff, committed on `hopsesh/from/codex-cloud/<id>` |
-| GitHub Copilot cloud agent | `gh agent-task view --log` | Its session log, as text | Its pull request's branch |
-| Amp | `amp threads markdown` | Its thread, as text | Stays in the orb |
-| Jules | `jules remote pull` | Stays in Jules | Its patch, committed on `hopsesh/from/jules/<id>` |
-| Devin | `devin list` | Stays in Devin | Its pull request's branch |
+| Cloud | Status | Through | The conversation comes back | The code comes back |
+|---|---|---|---|---|
+| Claude Code cloud | Supported | `claude --teleport`, in a terminal | Whole, as Claude Code's own copy | Its `claude/…` branch, kept here as `hopsesh/from/claude-cloud/…` |
+| Codex cloud (legacy tasks) | Supported | `codex cloud status`, `codex cloud diff` | The task's title and what came of it, written as a session | Its diff, committed on `hopsesh/from/codex-cloud/<id>` |
+| GitHub Copilot cloud agent | Experimental | `gh agent-task view --log` | Its session log, as text | Its pull request's branch |
+| Amp | Experimental | `amp threads markdown` | Its thread, as text | Stays in the orb |
+| Jules | Experimental | `jules remote pull` | Stays in Jules | Its patch, committed on `hopsesh/from/jules/<id>` |
+| Devin | Experimental | `devin list` | Stays in Devin | Its pull request's branch |
+
+**Experimental** means unverified: hopsesh drives these four through their vendors' command
+lines, whose output is mostly undocumented, and has been tested against stand-ins of them
+only, not against the real services. Expect rough edges, and please report what you find.
 
 The code always comes into a new worktree beside your checkout, which stays as it is. Text
 is written as a new session of the agent it was handed off from (else Claude Code; `--in
@@ -376,9 +391,10 @@ saw it. Undo pushes them back. `delete_branch = "never"` or `"on-undo"` under
 - The conversation itself goes on the branch only if you ask (`--history-file`, which
   commits `.hopsesh/handoff.md`): anyone who can see the branch can read it.
 - Secret masking is best effort, not a guarantee; the plan shows what it masked.
-- What a cloud session holds is kept under that vendor's terms. Most of these commands'
-  output is undocumented: hopsesh reads it defensively, and has been tested against
-  stand-ins of them and by hand.
+- What a cloud session holds is kept under that vendor's terms. Much of these commands'
+  output is undocumented: hopsesh reads it defensively. It is tested against stand-ins of
+  every tool; parts of Claude Code cloud and Codex cloud were also checked against the real
+  tools by hand, the experimental clouds not yet.
 
 ## Use it from your agent
 
@@ -444,10 +460,6 @@ including the file-format traps hopsesh handles, are in [docs/design.md](docs/de
 - **Codex's own import of Claude Code sessions?** It converts on one machine. hopsesh uses it
   when you ask (`--via import`) and adds machines, the repository, a loss report, a briefing
   and a way home that keeps the original session intact.
-- **`claude --teleport`, `claude --cloud`, Codex cloud?** hopsesh uses them. They move a
-  session between a vendor's cloud and the machine you're on, in that vendor's agent.
-  hopsesh runs them for you and adds the rest: a session on another machine, the other
-  vendor's agent or cloud, a briefing and a loss report, the branches, lineage and undo.
 - **Remote Control?** Remote Control lets you drive a session that keeps running where it
   is. hopsesh moves the session, so it continues on the machine you're at, with that
   machine's files and tools. It can turn Remote Control on for the moved session.

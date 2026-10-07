@@ -18,7 +18,6 @@ var _ agent.Reader = (*Module)(nil)
 
 const (
 	nativeFormat = "codex.rollout"
-	maxOutput    = 256 << 10
 )
 
 // item is the item of an item_completed event (Codex's structured record of what ran).
@@ -67,13 +66,13 @@ type responseItem struct {
 // Read lifts a rollout into IR: the user's messages (not the context Codex injects), the
 // agent's replies, and what ran, from Codex's structured item_completed records (falling
 // back to raw function calls in rollouts that have none).
-func (m *Module) Read(_ context.Context, h agent.Host, in agent.Install, s agent.Summary, from ir.Cursor) (ir.Segment, error) {
+func (m *Module) Read(ctx context.Context, h agent.Host, in agent.Install, s agent.Summary, from ir.Cursor) (ir.Segment, error) {
 	f, err := h.FS().Open(s.Path)
 	if err != nil {
 		return ir.Segment{}, err
 	}
 	defer f.Close()
-	recs, end, err := readLines(f)
+	recs, end, err := readLines(&ir.BoundedReader{Context: ctx, Reader: f})
 	if err != nil {
 		return ir.Segment{}, &agent.FormatError{Path: s.Path, Err: err}
 	}
@@ -280,9 +279,9 @@ func outputText(raw json.RawMessage) string {
 		Output *string `json:"output"`
 	}
 	if json.Unmarshal(raw, &o) == nil && o.Output != nil {
-		return clipOutput(*o.Output)
+		return *o.Output
 	}
-	return clipOutput(s)
+	return s
 }
 
 // fromEvent maps an item_completed record to a tool call and its result.
@@ -313,10 +312,7 @@ func fromEvent(r line, ts time.Time) []ir.Node {
 			cmd = it.Command[n-1] // strips the "/bin/zsh -lc" wrapper
 		}
 		input, _ := json.Marshal(map[string]any{"command": it.Command})
-		res := ir.ToolResult{Status: status, ExitCode: it.ExitCode, Output: clipOutput(it.AggregatedOutput)}
-		if len(it.AggregatedOutput) > maxOutput {
-			res.OutputBytes = int64(len(it.AggregatedOutput))
-		}
+		res := ir.ToolResult{Status: status, ExitCode: it.ExitCode, Output: it.AggregatedOutput}
 		return pair(ir.ToolCall{Name: "shell", Input: input, Kind: ir.ToolExecute, Shell: &ir.Shell{Command: cmd, Dir: strings.TrimPrefix(it.CWD, "file://")}}, res)
 	case "FileChange":
 		var out []ir.Node
@@ -345,7 +341,7 @@ func fromEvent(r line, ts time.Time) []ir.Node {
 	case "McpToolCall":
 		input := it.Arguments
 		return pair(ir.ToolCall{Name: "mcp__" + it.Server + "__" + it.Tool, Input: input, Kind: ir.ToolOther, MCP: &ir.MCP{Server: it.Server, Tool: it.Tool}},
-			ir.ToolResult{Status: status, Output: clipOutput(string(it.Result))})
+			ir.ToolResult{Status: status, Output: string(it.Result)})
 	case "Extension":
 		if it.Kind == "web.search" {
 			input, _ := json.Marshal(map[string]string{"query": it.Query})
@@ -353,13 +349,6 @@ func fromEvent(r line, ts time.Time) []ir.Node {
 		}
 	}
 	return nil
-}
-
-func clipOutput(s string) string {
-	if len(s) > maxOutput {
-		return s[:maxOutput]
-	}
-	return s
 }
 
 func parseTime(s string) time.Time {

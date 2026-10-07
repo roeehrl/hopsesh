@@ -178,10 +178,13 @@ func (a *App) ShowApp(machine, key string) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		if appHook != nil {
+			return name, appHook(name, c)
+		}
 		return name, start(c)
 	}
 	if appHook != nil {
-		return name, appHook(name)
+		return name, appHook(name, agent.Command{})
 	}
 	home, _ := os.UserHomeDir()
 	p := appicon.Installed(apps, home)
@@ -191,11 +194,11 @@ func (a *App) ShowApp(machine, key string) (string, error) {
 	return name, openApp(p)
 }
 
-var appHook func(name string) error
+var appHook func(name string, command agent.Command) error
 
 // SetAppHook sends every desktop app ShowApp would bring forward to f instead (tests: the
 // machine running them may have the real app).
-func SetAppHook(f func(name string) error) { appHook = f }
+func SetAppHook(f func(name string, command agent.Command) error) { appHook = f }
 
 // openApp brings an installed app to the front (starting it when it isn't running).
 func openApp(p string) error {

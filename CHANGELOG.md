@@ -6,23 +6,306 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+
+- 0.5 foundation: `hopsesh runtime observe` reads local sessions without initializing
+  accounts, probing login, adopting imports or applying movement marks. `--watch`
+  coalesces filesystem notifications with bounded fallback reconciliation and reports
+  source freshness, errors and profile-scoped session identities, without requiring a GUI.
+
+- Durable movement notices and branch-aware return destinations. Transfers report
+  preparation until new agent work is observed; forks keep the original available.
+  Notices can be disabled without losing lineage or returns. Receipts now require
+  `lineage/5` and peers protocol 5; older versions are refused without migration.
+  See [movement and return](docs/movement-return.md).
+
 ### Fixed
+
+- Show a startup screen immediately while the bridge and first scan load. Report
+  module/initialization failures with a reload action; keep shortcuts from operating
+  on an uninitialized inventory and offer recovery when startup is unusually slow.
+
+- Open the selected Claude Code session in Desktop instead of only activating the
+  app. Use the supported CLI for saved sessions, with a temporary PTY and visible
+  errors; focus a currently owned Desktop session only on a verified app build.
+  Gate unsupported versions/platforms/profiles. Replace the tray arrows with the
+  official Hopsesh arch and dots, rendered as a macOS template image.
+
+- Avoid false divergence on portable returns when the first account observation rotates
+  a profile binding. Verify the original's native history while keeping native append
+  restrictions and independent-work conflict checks intact.
+
+- Prevent oversized working contexts in Claude/Codex conversions, vendor imports, cloud
+  returns and repeated round trips. Count final briefings and existing active context;
+  preserve portable text in journaled archives with bounded retrieval. Full destinations
+  can roll over to a new native session on the same logical branch. Recovery is available
+  in the GUI, TUI and CLI; originals remain available. See [context safety](docs/context-safety.md).
+- Keep Codex sessions with large first messages visible. Report imported history and
+  preparation status accurately; enforce edited cloud briefing limits and record cloud
+  return conversion losses.
+
+## [0.4.0] - 2026-10-05
+
+hopsesh now works with the coding agents' clouds: it hands a session to Claude Code on the
+web, Codex cloud, the GitHub Copilot cloud agent, Jules, Devin or Amp, brings their sessions
+home, and hands one cloud's session on to another, always through the vendors' own
+command-line tools, signed in as you. The desktop app gets a terminal of its own, the
+hopsesh Terminal window, and sessions you open elsewhere go to a tab of iTerm2 or your other
+terminal app. Codex cloud, Copilot, Jules, Devin and Amp support is experimental: Copilot,
+Jules, Devin and Amp have been tested against stand-ins of their tools only, and Codex cloud
+works only with older Codex cloud environments, because the `codex` command can't see
+environments made in today's Codex cloud. The configuration format changed: after upgrading,
+start fresh and add your machines again.
+
+### Added
+
+- **Menu bar and system tray Quick access.** Choose the supported Dock/taskbar/tray
+  placement in Settings → Desktop, independently of login startup and window-close
+  behavior. Search sessions, preview conversations, open exact session details and focus
+  existing terminal tabs from the compact window. Linux detects tray support and keeps
+  normal app access when the host is unavailable. See [Desktop presence](docs/desktop-presence.md).
+- **Cloud sessions.** `hopsesh clouds` lists the clouds hopsesh can reach: Claude Code cloud
+  (`claude-cloud`), Codex cloud (`codex-cloud`), the GitHub Copilot cloud agent
+  (`copilot-cloud`), Jules (`jules`), Devin (`devin`) and Amp (`amp`). Each is off until you
+  allow it (`hopsesh clouds allow <cloud>`, `clouds deny` to turn it off again), and
+  `hopsesh clouds test` checks its login and the commands hopsesh uses, read-only. hopsesh
+  reaches a cloud only through the vendor's own tool (`claude`, `codex`, `gh`, `jules`,
+  `devin`, `amp`), run on this machine and signed in as you: it never reads a login or calls
+  a vendor's servers, and the cloud sessions it starts run on your plan. `hopsesh ls --cloud`
+  (or `hopsesh ls <cloud>:`) lists cloud sessions, with the local sessions Claude Code's
+  Remote Control mirrors.
+- **Hand a session off to a cloud:** `hopsesh handoff <session> --to <cloud>` (`hopsesh plan
+  <session> --to <cloud>` shows the plan first) starts a cloud session that continues one on
+  this machine or on another of yours. No cloud takes a conversation, so the cloud agent
+  gets a briefing of about 2,000 tokens as its first prompt (likely secrets masked; you can
+  read and edit it) and the code on a branch. A clean branch already on GitHub goes as it
+  is; otherwise hopsesh pushes a `hopsesh/handoff/<date>-<id>` branch with a snapshot of the
+  unpushed commits and changed files, leaving your checkout, index and branch as they were.
+  Untracked files go only when you name them (`--untracked`); credential-like files (`.env*`,
+  SSH keys, `*.pem`, `*.key`, …), Git LFS files and files over 50 MB never go.
+  `--history-file` also commits the conversation as `.hopsesh/handoff.md`, and `--bundle`
+  lets Claude Code upload a repository that isn't on GitHub. The session here is marked, and
+  `hopsesh undo` deletes the branch (while the cloud hasn't pushed to it) and the mark; the
+  cloud session stays in the vendor's list for you to archive there.
+- **Claude Code cloud, both ways.** Claude Code starts a cloud session, and copies one home,
+  only in a terminal you can answer, so hopsesh runs both steps where you see them: in your
+  terminal from the command line, in the terminal UI (which hands over its terminal and
+  comes back), or in the app's hopsesh Terminal window (or your own terminal app). A
+  hand-off runs `claude --cloud "<briefing>"` in a hand-off folder hopsesh keeps for each
+  repository and reads the session's link Claude Code prints, or asks you to paste it. The
+  first time, Claude Code asks whether you trust that folder: you answer it, once per
+  repository, and hopsesh never answers it or changes Claude Code's settings to skip it.
+  `hopsesh pull claude-cloud:<id>` (or the session's link) makes a new worktree of its
+  repository and runs `claude --teleport` there (`--run`, or the command to paste). Claude
+  Code saves its copy only after you send a message in it: send one (even "ok") and
+  hopsesh picks the copy up, checks it against the briefing when hopsesh
+  started that cloud session (otherwise it says how many messages came), keeps the cloud's
+  `claude/…` branch as `hopsesh/from/claude-cloud/…` and records it all for undo. `--in
+  codex` continues it in Codex, and `--code-only` brings the branch alone. An agent running
+  hopsesh has no terminal to answer in, so the plan says you have to run these steps
+  yourself.
+- **Codex cloud, both ways (experimental).** It works with older Codex cloud environments
+  only: the `codex` command can't see environments made in today's Codex cloud, and hopsesh
+  says so. `hopsesh handoff <session> --to codex-cloud --env
+  <environment>` starts a task with the briefing and the code on a branch, or with a few
+  changes as a starting diff on a branch already pushed (`--starting-diff`); `--attempts`
+  asks for several attempts. The plan suggests the environments your recent tasks used, and
+  hopsesh remembers your pick for the repository (`hopsesh clouds env codex-cloud`).
+  `hopsesh pull codex-cloud:<id>` brings a task back: its diff committed on
+  `hopsesh/from/codex-cloud/<id>` in a new worktree, and its title and outcome written as a
+  new Codex session there (`--in claude` writes a Claude Code session). Only the first
+  attempt comes back. hopsesh needs your `codex` signed in with ChatGPT and never reads its
+  login.
+- **Copilot, Jules, Devin and Amp (experimental).** Hand a session off with `--to
+  copilot-cloud`, `jules`, `devin` or `amp`, list their sessions, and bring their code into a
+  new worktree: Copilot's and Devin's pull request branch, or Jules's patch committed on
+  `hopsesh/from/jules/<id>`. Copilot's session log and Amp's thread come home as text,
+  written as a new session of the agent the session was handed off from (else Claude Code;
+  `--in` picks another). Jules's and Devin's messages and an Amp orb's code stay in their
+  clouds. Jules, Devin and Amp can't be told which branch to start from, so the briefing
+  asks the cloud agent to check the handoff branch out first, and the plan says so. Most of
+  these tools' output is undocumented: hopsesh reads it defensively and has been tested
+  against stand-ins of them only, not against the real services.
+- **Cloud to cloud:** `hopsesh handoff <cloud>:<id> --to <other cloud>` brings a cloud
+  session here first, as `hopsesh pull` does, keeps that copy, and hands it off from here. A
+  Claude Code cloud session goes on to Codex cloud from its own `claude/…` branch as it is;
+  a Codex cloud task's diff is committed here and pushed on a handoff branch. The plan shows
+  both legs and what the trip loses, and one `hopsesh undo` takes both back. `hopsesh clouds
+  continue <hop>` goes on with a hop whose first leg ran in another terminal.
+- **Add a cloud's work to the original session:** `hopsesh pull <cloud>:<id> --append` adds
+  what came back to the session it was handed off from, when that session is as you left
+  it. Its own turns stay byte for byte, and undo cuts the addition off again.
+- **Branch clean-up:** `hopsesh clouds cleanup` lists the handoff branches hopsesh pushed and
+  the clouds' own branches it brought home (`claude/…`, `copilot/…`), asks each remote,
+  read-only, whether their work is in its default branch (by history, or a merged pull
+  request where `gh` is installed), and deletes the merged ones only when you confirm, each
+  only while it is where hopsesh saw it. Undo pushes them back. `delete_branch = "on-undo"`
+  or `"never"` under `[clouds.<name>]` keeps them.
+- **Clouds in the app:** a **Clouds** group in the sidebar; **Move → Hand off to ‹cloud›…**
+  on every session, local or in a cloud (a cloud hopsesh can't use is listed with the reason);
+  the hand-off sheet with the editable briefing, the branch, what stays on this machine and
+  the options; the steps as they run, and a done screen with the link and Undo; **Bring to
+  this Mac…** and **Get the code…** on cloud sessions; **Paste a cloud link** and **Find in Claude
+  Code**; a card per cloud under **Machines** with Turn on, Test, the Codex cloud environment
+  per repository and **Sign in**, which runs `claude auth login`, `codex login
+  --device-auth` or `gh auth login --web` in a tab that records nothing; and **Activity →
+  Look for merged branches**. In the terminal UI: clouds in the header and as rows, `enter`
+  brings one here, `c` hands a session off, `e` picks the Codex cloud environment and `S`
+  the starting diff.
+- The skill handles "hand this off to Claude Code cloud" (or to any of the other clouds): the
+  agent shows the plan and asks first. For Claude Code cloud it gives you the command to run
+  in your own terminal. With `--add-rules`, `clouds` and `clouds test` run without asking,
+  while `handoff`, `clouds cleanup` and `clouds continue` always ask.
+- **The hopsesh Terminal window:** the app has a terminal of its own, a window with tabs.
+  **Resume in hopsesh Terminal** runs a session in a tab, and so do Claude Code's hand-off
+  and bring-back steps, cloud sign-ins and **Open a shell in its folder**. hopsesh starts the command and you do all
+  the typing: it never writes into a program or answers a question for you. Each tab shows
+  whether its program runs, waits for you or has exited (with its code), and has **Open in
+  my terminal**, which ends the tab and runs the same command in your terminal app after
+  asking. Banners say when Claude Code asks whether it trusts the hand-off folder (you
+  answer it in the tab) and, when bringing a session back, to send one message, then that
+  the copy is saved; the done screen says when the tab ended before Claude Code saved a copy.
+  Copy, find and clear, links that open only after you confirm the whole address,
+  Shift+Return for a new line in Claude Code, a screen reader mode, and colours that follow
+  the app's light or dark look. Ctrl+` moves between the terminal and your sessions. It
+  uses xterm.js 6.0.0 (MIT), shipped inside the app.
+- Sessions running in a tab show **In a tab** and **Waiting for you** and count in **Needs
+  you**; the sidebar and the title bar show the terminal and how many tabs wait. A session
+  runs in one tab at most: Resume shows its tab instead. On macOS a tab you can't see that
+  waits for you raises a notification (at most one every 10 seconds) and a Dock badge; on
+  Windows the terminal's taskbar button flashes. Quitting hopsesh while programs run in its
+  tabs asks first and lists them, and closing the window hides it while they run (**Keep
+  tabs when the window closes**).
+- **Settings → Terminal:** where sessions, hand-offs and bring-backs open (**In this
+  window**, the default, or **In my terminal**; a session's Resume menu picks another place,
+  remembered for that agent), your terminal app, the
+  font, its size, scrollback (5,000 lines by default), keeping tabs when the window closes,
+  notifications, the screen reader mode and, on Windows, the bundled console host. The
+  choices are saved under `[terminal]` in the configuration. What a tab shows is kept in
+  memory only, never written to disk or a log.
+- On Windows the app and its installer carry Microsoft's ConPTY (`conpty.dll` and
+  `OpenConsole.exe`, MIT) in a `conpty` folder, which the tabs use instead of the older one
+  built into Windows. Tabs never run batch files, so for an npm command shim (such as
+  `codex.cmd`) a tab runs the program behind it directly, and so do the command line and
+  the terminal UI.
+- **Your terminal app:** sessions, teleports and hand-off steps that hopsesh opens outside
+  its own window go to a new tab in iTerm2's front window when iTerm2 is installed (else a
+  Terminal window; Windows Terminal on Windows). The tab runs hopsesh's own launcher with an
+  id, never a title or a prompt. In iTerm2 the tab gets a badge with the session's title,
+  agent and machine, and `user.hopsesh_title`, `user.hopsesh_agent` and
+  `user.hopsesh_machine` variables for your own title or status bar; it keeps the tab open
+  with the exit code shown when the agent ends.
+- `hopsesh open <session>` resumes a session on this machine in your terminal app
+  (`--terminal <id>` picks one, `--here` runs it in this terminal). `hopsesh terminals` lists
+  the terminal apps, chooses one (`--use`) and sets where the app resumes sessions
+  (`--resume`). `hopsesh pull --run --terminal <id>` starts the moved session in a new tab.
+- **A running session is shown, not started twice:** **Show in ‹terminal app›** in the app
+  and `hopsesh open` bring its iTerm2 or Terminal tab forward, found from the agent's own
+  process and the terminal it runs on, never from what the tab shows. Resuming a session
+  that already runs is refused.
+- When macOS denies hopsesh control of iTerm2, the launch opens in Terminal and the app says
+  so; when Terminal is denied too, you get the command to copy. hopsesh only opens tabs and
+  brings them forward, from a fixed list of AppleScript lines: it never types into or reads
+  a tab, and never changes iTerm2's settings or installs its Claude Code integration.
+- **iTerm2's Python API, when you have turned it on yourself:** hand-off steps open in a
+  split beside the session you are in, the app learns at once when a step's tab is closed
+  and shows how a session you opened there ended ("exited N", or "closed" when the tab was
+  closed first), and finding and focusing a session's tab go through the API. hopsesh's
+  client can open, split, find and focus tabs and set its own labels; it has no request
+  that types into a session or reads its screen. With the API off, or on any error, hopsesh
+  uses AppleScript, and it never asks again after you said no.
+- `hopsesh agents --json` includes each module's spec: its programs, data folders, the
+  secrets it never opens, instruction files, features, desktop apps, and its clouds with
+  their fidelity, needs and the upstream changes the drift check watches.
+- Each release has a test bundle, `hopsesh-testbundle-<version>.tar.gz` (with a `.sha256`,
+  in `checksums.txt` and with build provenance): the stand-in agents for six platforms, the
+  agents' fixtures, the modules' specs and scrubbed payloads other projects contribute, so a
+  project that ships hopsesh can test against exactly that version. See
+  `testbundle/README.md`.
+- For module authors (the SDK is v0 and changes with the app): cloud capabilities
+  (`CloudLister`, `CloudSender`, `CloudStepReader`, `CloudFetcher`, `CloudAdopter`,
+  `CloudLinker`, `CloudTester`, `CloudFollower`, `CloudArchiver`), clouds declared in
+  `Spec.Clouds` (with the cloud's sign-in command and `BriefBranch` for a cloud that can't
+  name its starting branch), cloud-only modules (`agent.NoLocal`), `Spec.TerminalEnv` for
+  variables a module's programs get in the app's tabs, `agent.LinksIn` and `agent.LinkOn`,
+  which read links on an exact host only, and the cloud conformance kit
+  (`agenttest.RunCloud`, `agenttest.RunCloudWith`).
+
+- **The sessions screen, redesigned.** The sidebar lists places: Needs you, All sessions,
+  This Mac and your other machines, and the clouds that are on. The list groups by
+  repository, location, agent, status or last active (or not at all), sorts within the
+  groups, has comfortable and compact rows (compact on its own for 150 sessions or more, or
+  when the list is narrower than 600px), and its groups collapse (⌥-click for all). The
+  Filter menu (⇧⌘F: status, location, agent, repository, last active, has; is / is not)
+  shows as chips, beside a text filter (⌘F) and the Display popover (⌘J, also in the View
+  menu); all of it but the text is kept in `[list]` and `[list.filter]`. The sidebar and
+  the details panel can be resized and hidden (dividers, the title bar's buttons, the View
+  menu: ⌃⌘S and ⌥⌘I, Ctrl+B and Ctrl+I on Windows), kept in `[window]`; on macOS the title
+  bar is 52px and the sidebar button sits where AppKit puts its own.
+- **One set of actions:** Resume in ‹place›, Show in ‹place›, Bring to this Mac…, Send to
+  ‹machine›…, Continue with ‹agent›…, Hand off to ‹cloud›…. The details panel puts them in
+  one row: the main action as a split button whose menu lists the other places (the one
+  you pick becomes that agent's default, `[agents.<id>] place`), Move ▾ (an action that
+  can't run now stays, with its reason) and ⋯ (Rename…, which writes the title into the
+  agent's own data and can be undone, reveal the file, copy the resume command or id).
+- **What a session is and where it is open:** the details panel shows the end of the
+  conversation (the last two exchanges, a line for each turn's tool calls, Load earlier,
+  Open transcript), read on its machine and never during a scan; markdown is rendered
+  locally, raw HTML stays inert and images never load (Settings → General → Show
+  conversation previews turns it off). Rows and the panel show where a session is open:
+  hopsesh tabs, iTerm2, Terminal, Windows Terminal, an editor, tmux, ssh or the Claude app,
+  from the agents' own registries and the process table every few seconds while the
+  window is in front (Apple Events only when you click Show); two processes on one session
+  say "Open twice". Titles never need a model: the title given, the name the Claude app
+  gives, the agent's own, the first prompt or reply, else "Untitled · folder (branch)".
+- **More in the app:** setup is one line on All sessions; the list refreshes this machine
+  every minute while the window is in front; in the palette, Enter shows a session in the
+  list and ⌘Enter runs its action; cloud sessions carry a cloud badge; "In the cloud" leaves
+  out Remote Control mirrors, which run on their machine; added machines are scanned
+  straight away, with Retry when a scan fails; Move offers only the clouds that are on.
+- **Account profiles:** name and tag independent Claude Code and Codex accounts (Settings →
+  Accounts, `a` in the terminal UI, `hopsesh accounts`, one store), find their folders here
+  and on allowed machines, and sign in with the vendor's own command. A transfer plan names
+  its destination profile, and plans refuse edited profiles or a login that changed. A
+  return across profiles becomes a portable copy and leaves the original as it was; if both
+  copies changed, hopsesh offers a separate branch and never merges. See
+  [Accounts](docs/accounts.md).
+- **Codex sessions open in the Codex app** with the exact thread selected (the Resume menu,
+  `hopsesh open <session> --app`); an account in a custom folder opens in a terminal,
+  because the app's links can't select it.
+- Module SDK: `Previewer` (`preview`) and `Renamer` (`rename`), `PreviewText` and
+  `BuildPreview`; `LiveInfo.Procs` lists every process that has a session open, and
+  `LiveInfo.Name` the name the running agent gives it.
+- A cloud hand-off's tab runs in the background and comes forward when Claude Code asks
+  something or the step fails. Tabs whose program ended well close on their own (Settings →
+  Terminal → Close a tab when its program ends).
+
+### Changed
+
+- **Upgrading from 0.3: add your machines again.** The configuration format is now schema 4,
+  with `[clouds.<name>]` and `[terminal]`. A configuration file from 0.3 is refused, never
+  converted: the app offers to set it aside and start fresh (the old file stays next to the
+  new one as `config.toml.old-<date>`), and the command line names the file to move aside.
+  Then add and allow your machines again. Your sessions are not affected. A configuration
+  file written by a newer hopsesh is reported as newer: update hopsesh.
+- Lineage manifests (the `.hopsesh.json` file beside each session hopsesh moved) have a new
+  format (`lineage/4`) that records cloud copies, account profiles and forks. Manifests written by 0.3 are not read: a session
+  moved with 0.3 is treated as if hopsesh had not moved it before. Update hopsesh on every
+  machine where you run it, so they read each other's manifests.
+- The peer protocol is now 4: a push between hopsesh 0.3 and 0.4 stops at hello and names
+  the machine to update to 0.4.0 or later.
+- The app now resumes sessions in its hopsesh Terminal window by default. To open them in
+  your terminal app as before, choose **In my terminal** in Settings → Terminal, or pick
+  the place from a session's Resume menu. The command line still runs sessions in your terminal.
+- The macOS app's Automation permission text names your terminal app (iTerm2 or Terminal)
+  and says hopsesh only opens tabs and brings a session's tab forward.
+- The macOS app's self-update opens the new disk image with `diskutil image attach` on
+  macOS 27, which deprecates `hdiutil attach`, and with `hdiutil` on earlier systems.
+
+### Fixed
+
 - Windows UI validation waits for the actual main window and uses the remote-session
   continuation label. Screenshot failures now fail CI and retain their own reports.
-- Codex sessions offer desktop opening through the documented exact-thread deep link.
-  Installation and account-root checks explain unavailable actions; launcher errors surface
-  instead of silently falling back to a terminal. CLI: `hopsesh open <session> --app`.
-- Profile IDs now survive cloud adoption, live-status refreshes, terminal launches, and peer
-  writes back to the source. Plans reject edited profiles and observable login changes.
-- App: Back to sessions has one fixed upper-left toolbar location on every secondary
-  screen and in the terminal window, including loading, errors and completed transfers.
-  Late page loads no longer replace Sessions after returning. Resizing a terminal keeps
-  its selected tab visible.
-- Machines: added machines scan automatically, with queued/running status and a disabled
-  per-machine Scan button. Failures explain what happened and offer Retry; successful
-  rows refresh every five minutes while Machines is active.
-- App: Move and the hand-off picker only offer enabled clouds. Other clouds can be set up
-  in Machines; enabled destinations that are temporarily unavailable still say why.
 - The install script (`curl … | sh`) failed on macOS in a terminal with a UTF-8 locale
   ("arch…: unbound variable"): macOS's /bin/sh read the "…" after `$arch` as part of the
   name.
@@ -34,382 +317,19 @@ All notable changes to this project are documented here. The format follows
   (directly or through the terminal app) inherited its CLAUDE_CODE_CHILD_SESSION marker,
   and Claude Code then saved nothing of it. hopsesh now removes Claude Code's session
   markers before it resumes a session.
-
-### Added
-- 0.5 foundation: `hopsesh runtime observe` reads local sessions without initializing
-  accounts, probing login, adopting imports or applying movement marks. `--watch`
-  coalesces filesystem notifications with bounded fallback reconciliation and reports
-  source freshness, errors and profile-scoped session identities, without requiring a GUI.
-- Desktop presence for 0.4.0: menu bar/system tray Quick access, supported Dock/taskbar/tray
-  placement choices, independent login startup and close behavior, shared session search,
-  safe conversation previews, exact-session navigation and existing terminal focus. Linux
-  detects tray support and keeps normal app access when the host is unavailable.
-- Named Claude Code and Codex account profiles, arbitrary many-to-many tags, known-root
-  discovery on allowed machines, and vendor-owned sign-in. GUI Settings → Accounts, TUI `a`,
-  and `hopsesh accounts` share one store; transfer plans select an explicit destination profile.
-- Account-aware lineage (`lineage/4`, peer protocol 4), login-binding segments preserving
-  authorship, portable account returns, separate machine counters, and 48 mandatory
-  repeated/multi-party account routes in the CI scenario matrix. No migration is implied.
-- App: the end of the selected session's conversation (the last two exchanges, a line for
-  each turn's tool calls, Load earlier, Open transcript), read on its machine and never
-  during a scan. Markdown is rendered locally, with distinct user and agent cards and
-  Show more for long messages. Raw HTML stays inert and images never load;
-  Settings → General → Show conversation previews turns it off.
-- App: where a session is open: its hopsesh tabs, iTerm2, Terminal, Windows Terminal, an
-  editor, tmux, ssh or the Claude app, from the agents' own registries and the process table
-  (no Apple Events: those run only when you click Show), every few seconds while the window
-  is in front. Two processes on one session say "Open twice".
-- App: ⋯ → Rename… gives a Claude Code or Codex session a title in the agent's own data (as
-  `/rename` does); Activity undoes it. ⋯ also reveals the session's file and copies its
-  resume command or id.
-- Module SDK: `Previewer` (`preview`) and `Renamer` (`rename`), `PreviewText` and
-  `BuildPreview`; `LiveInfo.Procs` lists every process that has a session open, and
-  `LiveInfo.Name` the name the running agent gives it.
-- Your terminal app: sessions, teleports and hand-off steps the app opens go to a new tab in
-  iTerm2's front window when iTerm2 is installed (else a Terminal window; Windows Terminal on
-  Windows), through a terminal-adapter layer whose only required verb is Open. Every launch
-  runs only hopsesh's own `terminal-open <ticket>` (or `terminal-step <id>`), so what goes to
-  the terminal app carries hopsesh's path and an id, never a title or a prompt. That verb
-  labels an iTerm2 tab (a badge and `user.hopsesh_title`, `_agent`, `_machine` variables,
-  sanitised and base64-encoded, wrapped for tmux), records the tab and the agent's process
-  while it runs, and keeps the tab open with the exit code shown.
-- Show a running session instead of a second copy: **Show in ‹terminal app›** in the app and
-  `hopsesh open <session>` find the iTerm2 or Terminal tab from the agent's own process id
-  (Claude Code's registry) or hopsesh's launch record (Codex) and the process table, and
-  bring it forward. Resume refuses a session that already runs.
-- `hopsesh open <session>` resumes a session on this machine in your terminal app
-  (`--terminal <id>`, or `--here`); `hopsesh terminals` lists the terminal apps and sets
-  `terminal.app` and `terminal.resume` (`--use`, `--resume`); `hopsesh pull --run
-  --terminal <id>` starts the moved session in a new tab. The command line and the terminal
-  UI label and record the sessions they run in place too.
-- When macOS denies hopsesh control of iTerm2, the launch opens in Terminal and the app says
-  so; when Terminal is denied too, you get the command to copy. hopsesh never turns on
-  iTerm2's Python API, installs its Claude Code integration, writes profiles, or types into
-  or reads a tab; the AppleScript it can run is a fixed list of lines, checked before each
-  run. The macOS app's Automation permission text now names your terminal app, not only
-  Terminal.
-- **The hopsesh Terminal window**: the app now has a terminal of its own, a window with
-  tabs. **Resume in hopsesh Terminal** runs a session in a tab there, and hand-offs to Claude
-  Code cloud, bringing a session back, cloud sign-ins and **Open a shell in its folder** run there too.
-  Each tab has a status chip (running, waiting for you, exited with its code), says what it
-  runs and where, and keeps **Open in my terminal**, which ends the tab and runs the same
-  command in your terminal app after asking. It uses xterm.js 6.0.0 (shipped inside the
-  app, MIT), with copy, find, clear, links that open only after you confirm the whole
-  address, Shift+Return for a new line in Claude Code, a screen reader mode, and colours
-  that follow the app's light or dark look. Ctrl+` moves between the terminal and your
-  sessions.
-- In the hand-off's terminal step, a banner says when Claude Code asks whether it trusts
-  hopsesh's hand-off folder: you answer it in the tab, and hopsesh never does. Bringing a
-  session back says to send one message, and the done screen says when the tab ended
-  before Claude Code saved a copy.
-- Sign in from the app: the Claude Code cloud, Codex cloud and Copilot cards under
-  **Machines** have **Sign in**, which runs `claude auth login`, `codex login
-  --device-auth` or `gh auth login --web` in a tab that records nothing; when it ends well,
-  the card checks the login again. Modules name their cloud's sign-in command
-  (`Cloud.SignIn`) and the variables their programs get in the app's tabs
-  (`Spec.TerminalEnv`; Claude Code gets `CLAUDE_CODE_FORCE_SYNC_OUTPUT=1`).
-- The sessions list shows **In a tab** and **Waiting for you** for sessions running in the
-  app's terminal, and they count in **Needs you**; the sidebar and the title bar show the
-  terminal and how many tabs wait. A session runs in one tab at most: Resume shows its tab
-  instead. On macOS a tab you can't see that waits for you raises a notification (hopsesh's
-  own words, at most one every 10 seconds) and a Dock badge; on Windows the terminal's
-  taskbar button flashes.
-- Where your terminal app can say when a tab ends (iTerm2 with its Python API on), the app
-  shows how a session or a hand-off step you opened there ended: "exited N" beside the
-  session, or "closed" when the tab was closed first, and a notice.
-- Quitting hopsesh while programs run in its tabs asks first and lists them. Closing the
-  window hides it while programs run (**Keep tabs when the window closes**).
-- **Settings → Terminal**: where sessions, hand-offs and bring-backs open (**In this
-  window**, the default; **In my terminal**; **Ask each time**), your terminal app, font,
-  size, scrollback (kept in memory only; 5,000 lines by default), keeping tabs when the
-  window closes, notifications, the screen reader mode, on Windows the bundled console host,
-  and what the terminal never does. The choices are saved under `[terminal]` in the
-  configuration.
-- On Windows a tab runs the program behind an npm command shim (such as `codex.cmd`) itself,
-  node with the package's script or its own `.exe`, since tabs never run batch files. The
-  installer and the app's update carry Microsoft's ConPTY (`conpty.dll` and
-  `OpenConsole.exe`, MIT) in a `conpty` folder, which the tabs use instead of the older one
-  built into Windows. Programs in tabs take input only from what you type and keep their
-  output in memory only.
-- Bring a session from Claude Code cloud: `hopsesh pull claude-cloud:<id>` (or the session's
-  link) makes a new worktree of its repository and runs `claude --teleport` there, in your
-  terminal (`--run`, or the command to paste). Once the copy appears, hopsesh checks its
-  message count (complete, partial or empty, with the known Claude Code problem), keeps the
-  cloud's `claude/…` branch as `hopsesh/from/claude-cloud/…`, records lineage, and `hopsesh
-  undo` takes it all back. `--in codex` continues it in Codex, `--code-only` brings the
-  branch alone.
-- `hopsesh clouds` lists the agents' clouds; `clouds allow` and `deny` record whether hopsesh
-  may use one, and `clouds test` checks one read-only. `hopsesh ls --cloud` (or
-  `ls claude-cloud:`) shows cloud sessions and the local sessions Remote Control mirrors.
-- In the app: a **Clouds** group and an **In the cloud** scope, cloud sessions with **Bring
-  here**, a plan sheet and a done screen for bringing one back, a card per cloud under
-  Machines (Allow, Test), and **Paste a cloud link** and **Find in Claude Code**. In the
-  terminal UI: clouds in the header and as rows; enter brings one here.
-- Hand a session off to Claude Code cloud: `hopsesh handoff <session> --to claude-cloud`
-  (`hopsesh plan <session> --to claude-cloud` shows the plan first) starts a cloud session
-  whose first prompt is a briefing of about 2,000 tokens, with likely secrets masked. A
-  clean branch already on GitHub goes as it is; otherwise hopsesh pushes a
-  `hopsesh/handoff/<date>-<id>` branch with a snapshot of the unpushed commits and changed
-  files, leaving your checkout, index and branch as they were. Untracked files go only when
-  you name them (`--untracked`); files that look like credentials never go. `--bundle`
-  lets Claude Code upload the repository instead (for one that isn't on GitHub);
-  `--history-file` also commits the conversation as `.hopsesh/handoff.md`. The session here
-  is marked, the hop is recorded in its lineage, and `hopsesh undo` deletes the branch (only
-  while the cloud hasn't pushed to it) and the mark. Works for sessions on your other
-  machines too: the snapshot and the push happen there, over SSH.
-- `hopsesh followup <cloud>:<id> "<text>"` sends a cloud session a message, for a cloud
-  whose command line can send one (Claude Code's and Codex's cannot; see Fixed).
-- In the app: **Hand off ▸** on a session (every cloud, a disabled one with its reason),
-  the hand-off sheet (the editable briefing, the branch, what stays on this Mac, the
-  options), the steps as they run (and which one failed), and a done screen with the link
-  and Undo; *Hand off to…* in the command palette; hand-offs in Activity. In the terminal
-  UI: `c` hands the selected session off.
-- The skill handles "hand this off to Claude Code cloud" (it plans first and asks), and its
-  approval rules let `clouds --json` and `clouds test` run without asking while `handoff`
-  and `followup` always ask.
-- Four cloud-only agents: the GitHub Copilot cloud agent (through `gh agent-task` and
-  `gh pr`), Jules (`jules remote`), Devin (`devin list --format json`) and Amp
-  (`amp threads`). Once allowed, each lists its sessions in `hopsesh clouds`, `hopsesh ls
-  --cloud` and the app's Clouds group, and `hopsesh clouds test` checks it read-only.
-  Bringing one back brings its code into a new worktree (`hopsesh pull <cloud>:<id>
-  --code-only`, or **Get the code** in the app): Copilot's and Devin's pull request branch,
-  or Jules's patch committed on a `hopsesh/from/jules/<id>` branch; `hopsesh undo` takes it
-  back. An Amp orb's code (`amp sync`) is not brought. These CLIs' output is mostly undocumented: hopsesh reads it defensively,
-  and was tested against stand-ins only.
-
-- Codex cloud, both ways. `hopsesh handoff <session> --to codex-cloud --env <environment>`
-  starts a Codex cloud task with the briefing and the code on a branch (`codex cloud exec`),
-  or with a few changes as a starting diff on a branch already pushed (`--starting-diff`);
-  `--attempts` asks for several attempts. The plan lists the environments your recent tasks
-  used and waits for your pick ("If you have none, open `codex cloud` once to create one");
-  the one you pick is remembered for the repository, and `hopsesh clouds env codex-cloud`
-  shows and sets them. `hopsesh ls codex-cloud:` lists tasks (`codex cloud list --json`,
-  `--env` to filter). `hopsesh pull codex-cloud:<id>` brings a task back: its diff committed
-  on `hopsesh/from/codex-cloud/<id>` in a new worktree, and the task's title and what came
-  of it written as a new Codex session there (`--in claude` writes a Claude Code session);
-  undo removes the session, the branch and the worktree. hopsesh drives only your own
-  `codex`, signed in with ChatGPT (`codex login status`), never reads its login and never
-  calls the ChatGPT backend. Only Codex cloud (legacy) tasks are reachable: the new Codex
-  Cloud has no command line, and hopsesh says so.
-- A cloud whose driver brings a conversation back as text (or a task's words) is written
-  into a local agent of your choice through the same pieces as a continuation, beside the
-  cloud's code.
-- In the app: Codex cloud under Clouds, in **Hand off ▸** (with what hopsesh cannot reach
-  there), the environment picker and the starting-diff choice in the hand-off sheet, a done
-  screen with the task's link, a bring-back sheet and done screen for a task, and an
-  environment per repository on its card under Machines. In the terminal UI: `e` picks the
-  environment, `S` the starting diff. The skill handles "hand this off to Codex cloud".
-- Hand a session off to the GitHub Copilot cloud agent, Jules, Devin or Amp:
-  `hopsesh handoff <session> --to copilot-cloud|jules|devin|amp`, the same briefing and
-  handoff branch as the other clouds, through each vendor's own CLI signed in as you.
-  Copilot: `gh agent-task create -F - --base <handoff branch> -R <owner/repo>`, the briefing
-  on standard input; the agent starts from the branch and opens its pull request against
-  it. Jules: `jules remote new --repo <owner/repo> --session <briefing>`. Devin: `devin
-  --cloud -p` (its documented non-interactive start) in a worktree on the handoff branch.
-  Amp: `amp -ox <briefing> --project <owner/repo>` in a new orb thread. The jules, devin and
-  amp commands can't name the branch a session starts from, so the briefing asks the cloud
-  agent to check it out first, and the plan says so. Refusals (not signed in, no plan, a
-  repository the cloud can't take) are said in words; after a refused start, undo removes
-  the branch.
-- Copilot's session log and Amp's thread come home as text: **Bring here** (or `hopsesh pull
-  copilot-cloud:<id>` / `amp:<id>`) writes them as a new session of the agent the session was
-  handed off from, else Claude Code (`--in codex`, or **Bring here into ▸** in the app,
-  picks another), in a new worktree with Copilot's pull request branch. Fidelity is text:
-  tool calls and their output come only as the log's words, and review comments, an orb's
-  code and Jules's and Devin's messages stay in their clouds. **Get the code only** works as
-  before.
-- SDK: `Cloud.BriefBranch` declares a cloud whose driver cannot name the branch a session
-  starts from (the core's briefing then asks the cloud agent to check it out), and
-  `agenttest.CloudOptions.Work` plays the cloud's agent between the conformance kit's send
-  and fetch, and `agent.LinksIn` reads a driver's links on an exact host only.
-- Hand a cloud session on to another cloud, through this machine: `hopsesh handoff
-  claude-cloud:<id> --to codex-cloud` (or `codex-cloud:<id> --to claude-cloud`, and any cloud
-  whose sessions come back as a session to any cloud that takes a hand-off) brings it here
-  first, as `hopsesh pull` does, keeps that copy, and hands it off from here. Codex cloud
-  starts from Claude Code cloud's `claude/…` branch as it is when the copy is still exactly
-  that; a Codex cloud task's diff is committed here and goes up on a handoff branch. The plan
-  (`hopsesh plan <cloud>:<id> --to <cloud>`) shows both legs and what the trip loses, the
-  copy's lineage records both hops, and one `hopsesh undo` takes both back, the hand-off
-  first. In the app, **Hand off ▸** on a cloud session opens the same plan and waits while
-  Claude Code's teleport runs in a terminal; in the terminal UI, `c` on a cloud row.
-  `hopsesh clouds continue <hop>` takes on a hop whose first leg ran in another terminal.
-- Branch clean-up after merge: `hopsesh clouds cleanup` lists the handoff branches hopsesh
-  pushed and the clouds' own branches it brought home, asks each remote (read-only) whether
-  their work is in its default branch (by history, through the branch brought here, or a
-  merged pull request where `gh` is installed), and deletes the merged ones only when you
-  confirm, each only while it is where hopsesh saw it. Undo pushes them back. In the app:
-  **Activity → Look for merged branches**, and a pointer to it on the bring-back's done
-  screen. `delete_branch = "on-undo"` and `"never"` keep them.
-- A cloud's text or task summary can be added to the session it was handed off from, when
-  that session is as it was left (`hopsesh pull <cloud>:<id> --append`): a delta append, so
-  the session's own turns stay byte for byte, and undo cuts the addition off again.
-- `agent.LinkOn` reads a link the user pasted on an exact host only (https, no user info,
-  no port).
-
-- An opt-in client for iTerm2's Python API (`internal/core/termapp/iterm2api`), used only
-  when you have enabled the API in iTerm2 yourself: session-terminated, new-session and
-  focus events (with reconnection, and catching up on tabs that closed while disconnected),
-  opening a tab or a split beside a session with a command and folder, finding a session
-  by its TTY and focusing it, and `user.hopsesh_*` labels. A credential-free probe comes
-  first, so nobody with the API off is prompted; the cookie comes from AppleScript and stays
-  in memory. The client is hand-written (iTerm2's protocol file is GPLv2) and can send seven
-  requests only: no typing, injecting or screen, buffer, selection or prompt reading, which
-  a test enforces. With the API on, iTerm2 hand-off steps open in a split beside the
-  session in front, the app stops waiting as soon as a step's tab is closed, and finding and
-  focusing a session's tab go through the API; the exit code always comes from hopsesh's
-  own records (`--hold` keeps the tab open after the agent ends). Any API error falls back
-  to AppleScript, and a refusal is never asked again. `scripts/iterm-api-smoke.sh` checks it
-  against a real iTerm2 by hand.
-- `hopsesh agents --json` includes each module's spec as data (`spec`): its binaries, data
-  folders, secrets it never opens, instruction files, features, desktop apps, and its clouds
-  with their fidelity, needs and upstream watch lists.
-- Each release has a test bundle, `hopsesh-testbundle-<version>.tar.gz` (in `checksums.txt`,
-  with build provenance): the stand-in agents for six platforms, the agents' fixtures, the
-  modules' specs, and scrubbed payloads other projects contribute, so a project that ships
-  hopsesh can test against exactly that version. See `testbundle/README.md`.
-
-### Fixed
-- App: the hopsesh Terminal window has no separate title bar on macOS (its tabs sit beside
-  the window buttons and drag the window), and many tabs shrink, then scroll, without
-  covering "+" or Back to sessions.
-- App: the details panel follows the list (a session the list no longer shows goes), the
-  Hand off menu closes on Escape, a click elsewhere or a choice, row buttons keep their
-  labels inside, sizes no longer break between number and unit, and paths break at slashes.
-- App: a session open in the Claude app offers Show the Claude app instead of a terminal tab
-  it doesn't have; a terminal tab hopsesh can't find says so.
-- App: a session brought from Claude Code cloud is never resumed twice: while the tab that
-  brought it runs it, Resume shows that tab, and the done screen offers the list's own
-  actions (the agent's app too) once it ends. Nothing in the bring-back asks for `/exit`.
-- App: "In the cloud" and each cloud's list leave out Remote Control mirrors (they run on
-  their machine); cloud ids no longer show where people read (marks say "continued in
-  Claude Code cloud").
-- Codex cloud: when codex lists no environment, hopsesh says why: environments made in
-  today's Codex cloud can't be used by the codex command yet.
-
-- Bringing a session from Claude Code cloud adopts the copy the real Claude Code writes.
-  Claude Code 2.1.289's teleport saves nothing until you send a message in the teleported
-  session, then writes a new session with the cloud's conversation and a "continued from
-  another machine" record, with no `teleported-from` record and no message count. hopsesh
-  now finds the copy by that record (and still by a `teleported-from` record where one
-  appears), counts only the cloud's messages, checks the copy against the briefing hopsesh
-  sent when hopsesh started that cloud session, and otherwise says how many messages came
-  with nothing to check them against, instead of calling it complete. Every bring-back plan
-  and done screen (command line, terminal UI and app) says that Claude Code saves its copy
-  only after you send a message in it.
-- Codex cloud: the new task's link is read on chatgpt.com only. A link to any other host
-  that ended in `/tasks/task_…` was taken for the task's. Pasted links of Claude Code,
-  Codex, Amp and Devin sessions, and Devin's pull request links, are read on their exact
-  hosts too.
-- `delete_branch = "never"` now keeps the handoff branch through undo; undo deleted it
-  whatever the setting said.
-- Two operations started in the same millisecond could share a journal, so one's undo record
-  overwrote the other's.
-- Handing a session off to Claude Code cloud works with the real Claude Code. hopsesh ran
-  `claude -p <briefing> --cloud --output-format json` through pipes, which Claude Code
-  2.1.28x refuses ("--cloud cannot be combined with --print", and without a terminal
-  "--cloud requires an interactive terminal"). The hand-off now runs `claude --cloud
-  "<briefing>"` in your terminal, after the snapshot and the push, and reads the session's
-  link Claude Code prints (`View: https://claude.ai/code/session_…`); the link and id go
-  into the journal and the lineage as before. Claude Code may first ask whether you trust
-  the folder: you answer it (hopsesh never does, and never changes Claude Code's settings to
-  skip it). The folder is hopsesh's hand-off folder for the repository, the same each time
-  (a worktree of your checkout, reset to the handoff branch for each hand-off, one hand-off
-  at a time), so Claude Code asks once per repository; your checkout stays as it is. If
-  hopsesh sees no link (you said no, or Claude Code stopped), it asks you to paste it, or
-  stops at "Start cloud session" with a message that says what happened, and undo removes
-  the pushed branch. The command line relays the terminal (with `--json`, on standard
-  error); the terminal UI hands the terminal over for the step and comes back afterwards
-  instead of quitting; the app opens a terminal window for the step, shows what happens
-  there, waits for the link and also takes a pasted one. Without a terminal (an agent
-  running hopsesh), the plan says you have to run the hand-off yourself.
-- "Send a follow-up" to a Claude Code cloud session is gone: Claude Code has no command that
-  sends one outside its own terminal session (its `-p … --cloud <id>` form is refused like
-  the hand-off's was). The app's done screen, the command line and the skill say so and
-  point to the session's page instead.
-- `scripts/cloud-smoke.sh`: a hand-off or a bring-back that failed after it pushed a branch
-  now leaves the journal for the cleanup, which undoes it (the branch had to be deleted by
-  hand). The hand-off check runs `claude --cloud` in your terminal (answer its trust
-  question; the script goes on when it exits) and no longer sends a follow-up.
 - Reading a Windows machine with many sessions could stall for 30 seconds and then fail:
-  the long script hopsesh sent there over standard input sometimes never arrived, because
-  PowerShell with redirected input can read it first. Such a script is now uploaded over
-  SFTP, run from the file and removed.
-- One session folder that git could not read quickly, such as a folder in iCloud Drive
-  whose files are not downloaded, made every scan wait for it, and with it `hopsesh ls`,
-  `plan`, `pull` and `handoff`, sometimes for minutes. Each git call hopsesh makes to read a
-  folder now gets 20 seconds to answer (30 seconds on another machine over SSH), on macOS,
-  Linux and Windows; a folder that is slow but answers is still read in full. A folder
-  where git does not answer in time is reported as such, not as one without a repository:
-  moving or handing off that session stops and says why, and the other sessions are not
-  affected. `pull`, `plan`, `handoff`, `push` and `show` now ask git only about the folders
-  of the session they name.
-- On Windows, a `claude.cmd` (or another npm or pnpm command shim) now runs as the program
-  behind it in the command line's and terminal UI's terminal steps, launches in a terminal
-  app or this terminal, and `pull --run`, as it already did in the app's tabs.
-- A configuration file written by a newer hopsesh is reported as newer, not older: update
-  hopsesh, or set it aside as a confirmed second choice (the app no longer offers to set it
-  aside as outdated).
-
-### Changed
-- App: the Sessions screen is redesigned. The sidebar lists places (Needs you, All sessions,
-  This Mac and your other machines, the clouds that are on); agents and "In the cloud"
-  became filters. The list groups by repository, location, agent, status or last active (or
-  not at all), sorts within the groups, has comfortable and compact rows (compact by itself
-  for 150 sessions or more, and whenever the list is narrower than 600px), and its groups
-  collapse (⌥-click for all), each choice kept. Live only and All agents gave way to the
-  Filter menu (⇧⌘F: status, location, agent, repository, last active, has; is / is not),
-  shown as chips, a text filter (⌘F) and the Display popover (⌘J, and the View menu). It
-  is all kept in `[list]` and `[list.filter]`, except the text.
-- App: one action vocabulary: Resume in ‹place›, Show in ‹place›, Bring to this Mac…, Send
-  to ‹machine›…, Continue with ‹agent›…, Hand off to ‹cloud›…. The inspector's actions are
-  one row: the primary as a split button whose menu lists the other places (the one you
-  pick becomes that agent's default, `[agents.<id>] place`), Move ▾ (unavailable items stay,
-  with their reason) and ⋯. "Ask each time" is gone from Settings → Terminal; Where sessions
-  open is where they first resume.
-- App: the inspector shows where it runs in its status line, a facts line, where the
-  session is open (each place with Show), and collapsible Repository, Copies & history and
-  Details sections (kept app-wide in `[inspector]`). It is 300 to 960px wide; by default 30%
-  of the window beside the sidebar.
-- App: titles never need a model: the title given, the name the running Claude app gives,
-  the agent's own, the first prompt or reply, else "Untitled · folder (branch)".
-- App on macOS: the title bar is 52px, as tall as AppKit's own, and the sidebar button sits
-  where AppKit puts its own (17px clear of the window's buttons), in the Terminal window too.
-- App: the sidebar and the inspector can be resized and hidden (dividers, the title bar's
-  buttons, the new View menu: ⌃⌘S and ⌥⌘I, Ctrl+B and Ctrl+I on Windows); the layout is
-  kept in `[window]`. Below 1000px the sidebar hides for now.
-- App: the sidebar lists the clouds that are on (Turn on a cloud… opens Machines) and the
-  agents with sessions; setup is one line on All sessions instead of three cards.
-- App: the list refreshes this machine every minute while the window is in front, and
-  everything when it comes back after five minutes.
-- App: in the palette, Enter shows a session in the list (⌘Enter runs its action); rows
-  show the repository, a cloud badge on cloud sessions, and a title for untitled ones.
-- App: a cloud hand-off's step runs in the background and comes forward when it asks
-  something or fails; tabs whose program ended well close (Settings → Terminal → Close a
-  tab when its program ends, `keep_ended` in `[terminal]`).
-- App: wording: "Turn on" for clouds throughout, "hand-off", "Colors", "The hopsesh
-  command", "Sign in using …", ⌃` on macOS; Codex cloud is marked experimental.
-
-- The macOS app's self-update opens the new disk image with `diskutil image attach` (on
-  macOS 27, which deprecates `hdiutil attach`), and with hdiutil on earlier systems.
-- The configuration format is now schema 4, with room for the cloud sessions to come
-  (`[clouds.<name>]`: whether hopsesh may use a vendor's cloud, and how code goes up). A
-  configuration file from an earlier version is refused, never converted: the app offers
-  to set it aside and start fresh (the old file stays next to the new one), the command
-  line names the file to move aside, and you add your machines again. Sessions are not
-  affected.
-- Lineage manifests (the `.hopsesh.json` file beside each session hopsesh moved) have a new
-  format that can record cloud copies. Manifests from earlier versions are not read: a
-  session moved with 0.3 is treated as if hopsesh had not moved it before.
-- The README presents cloud sessions as working with the vendors' clouds (one "Cloud
-  sessions" section: what goes up, what comes back from each cloud, Claude Code's terminal
-  steps, cloud to cloud, undo and clean-up, privacy), and docs/design.md lists cloud
-  sessions as built.
-- The hand-off's branch choice reads "Offer to delete it once its work is merged (and on
-  undo)", "Delete it only if I undo" and "Keep it, even on undo".
-- The peer protocol is now 2 (lineage and cloud fields changed): a push between hopsesh 0.3
-  and 0.4 stops at hello and names the machine to update to 0.4.0 or later.
-- `hopsesh followup` is hidden (help, completions, the skill) and says that no cloud accepts
-  a follow-up yet; the app shows no follow-up button.
+  the long script hopsesh sent there over standard input sometimes never arrived. Such a
+  script is now uploaded over SFTP, run from the file and removed.
+- One session folder that git could not read quickly, such as a folder in iCloud Drive or
+  OneDrive whose files are not downloaded, made every scan wait for it, and with it
+  `hopsesh ls`, `plan` and `pull`, sometimes for minutes. Each git call hopsesh makes to read
+  a folder now gets 20 seconds to answer (30 seconds on another machine over SSH), on macOS,
+  Linux and Windows; a folder that is slow but answers is still read in full. A folder where
+  git does not answer in time is reported as such, not as one without a repository: moving
+  that session stops and says why, and the other sessions are not affected. `pull`, `plan`,
+  `push` and `show` now ask git only about the folders of the session they name.
+- Two operations started in the same millisecond could share an undo journal, so one's undo
+  record overwrote the other's.
 
 ## [0.3.1] - 2026-10-04
 
@@ -528,4 +448,6 @@ is refused and set aside (the app offers this), and machines are added again.
 - The terminal UI no longer carries out a plan you pressed `y` on while a changed one was
   still being worked out.
 
+[0.4.0]: https://github.com/roeehrl/hopsesh/releases/tag/v0.4.0
+[0.3.1]: https://github.com/roeehrl/hopsesh/releases/tag/v0.3.1
 [0.3.0]: https://github.com/roeehrl/hopsesh/releases/tag/v0.3.0

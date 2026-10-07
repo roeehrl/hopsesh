@@ -21,8 +21,10 @@ import (
 
 func addPullFlags(cmd *cobra.Command) {
 	f := cmd.Flags()
-	f.String("in", "", "continue in this agent ("+strings.Join(agentIDs(), ", ")+"; default: the session's own; from copilot-cloud or amp, whose text is written into an agent here: the one it was handed off from, else claude)")
+	f.String("in", "", "continue in this agent ("+strings.Join(writerIDs(), ", ")+"; default: the session's own; from copilot-cloud or amp, whose text is written into an agent here: the one it was handed off from, else claude)")
 	f.String("fidelity", "history", "for another agent: history (the conversation as text) or note (a briefing only)")
+	f.Bool("bounded", false, "create a bounded continuation on the same branch; preserve the original session and portable archive")
+	f.Bool("new-session", false, "create a new native session without selecting or modifying an existing destination copy")
 	f.Bool("native", false, "for another agent that can: replay exact tool calls as its own (experimental)")
 	f.String("note-file", "", "a handoff note for the other agent's briefing")
 	f.Bool("go", false, "start the continued session with \"Continue.\"")
@@ -37,7 +39,7 @@ func addPullFlags(cmd *cobra.Command) {
 	f.String("worktree", "auto", "auto: recreate the worktree if the session used one; create: always use a worktree on the session's branch; main: use the main checkout")
 	f.Bool("fork", false, "keep the source session running (both continue) instead of handing off")
 	f.Bool("rc", false, "turn the agent's remote control on, where it has one")
-	f.Bool("notify", false, "have the moved session tell the old one where the work went (agents that can)")
+	f.Bool("notify", false, "record a durable movement notice (default from config; --notify=false disables it)")
 	f.Bool("redact", false, "redact likely secrets in the copy")
 	f.Bool("stop-local", false, "if this session is open on this machine, quit it first")
 	f.Bool("no-mark", false, "do not mark the copy left behind")
@@ -62,6 +64,7 @@ func (r *run) pullOptions(cmd *cobra.Command) (move.Options, error) {
 	o.TargetDir, _ = f.GetString("to")
 	o.OperationID, _ = f.GetString("operation-id")
 	o.TargetSession, _ = f.GetString("target-session")
+	o.NewReplica, _ = f.GetBool("new-session")
 	o.TargetProfile, _ = f.GetString("target-profile")
 	if v, _ := f.GetString("repos"); v != "" {
 		o.ReposDir = expandHome(v)
@@ -74,11 +77,14 @@ func (r *run) pullOptions(cmd *cobra.Command) (move.Options, error) {
 	o.Clone, _ = f.GetBool("clone")
 	o.Fork, _ = f.GetBool("fork")
 	o.RemoteControl, _ = f.GetBool("rc")
-	o.Notify, _ = f.GetBool("notify")
+	if f.Changed("notify") {
+		o.Notify, _ = f.GetBool("notify")
+	}
 	o.Redact, _ = f.GetBool("redact")
 	o.StopLocal, _ = f.GetBool("stop-local")
 	o.App, _ = f.GetBool("app")
 	o.Native, _ = f.GetBool("native")
+	o.Bounded, _ = f.GetBool("bounded")
 	o.Go, _ = f.GetBool("go")
 	o.CarryRules, _ = f.GetBool("carry-rules")
 	switch via, _ := f.GetString("via"); via {
@@ -139,12 +145,15 @@ The copy left behind is marked (--no-mark to skip). The checkout here is fetched
 clean, fast-forwarded to the session's commit (--no-sync to skip). Nothing changes until
 you confirm (or pass --yes).
 
-From a cloud (claude-cloud:<id>, or the session's link): hopsesh makes a worktree of the
-repository (your checkout stays as it is) and prints the agent's own command that brings
-the conversation, for your terminal (--run runs it here). Claude Code saves its copy only
-after you send a message in it: send one. Once the copy appears, hopsesh checks
-it (that it begins with the briefing hopsesh sent, for a session hopsesh handed off),
-keeps the cloud's branch under hopsesh/from/<cloud>/, and records it for undo. Allow the cloud first: hopsesh clouds allow <cloud>.`,
+From a cloud (<cloud>:<id>, or the session's link; hopsesh clouds lists them): hopsesh
+brings the cloud's code into a new worktree of the repository (your checkout stays as it
+is) and its conversation as far as the cloud gives it back. Claude Code cloud's comes whole
+through claude --teleport, which hopsesh prints for your terminal (--run runs it here):
+Claude Code saves its copy only after you send a message in it, so send one. Once the copy appears, hopsesh checks it (that it begins with the briefing hopsesh
+sent, for a session hopsesh handed off), keeps the cloud's branch under
+hopsesh/from/<cloud>/, and records it for undo. Codex cloud, Copilot and Amp come back as
+text written into an agent here (--in), Jules and Devin as code only (--code-only). Allow
+the cloud first: hopsesh clouds allow <cloud>.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error { return pull(cmd, args[0]) },
 	}
@@ -158,7 +167,7 @@ func planCmd() *cobra.Command {
 	cmd.Use = "plan [<machine>:][<agent>/]<id-or-title> | <cloud>:<id> | <cloud link>"
 	cmd.Short = "Show what pulling a session would do, without changing anything"
 	cmd.Long = "Same as pull --dry-run: finds the session, plans the move or continuation and prints the plan (or JSON with --json). It never writes."
-	cmd.Long += "\n\nWith --to <cloud> (claude-cloud) it plans a hand-off to that cloud instead, as hopsesh handoff --dry-run does."
+	cmd.Long += "\n\nWith --to <cloud> (claude-cloud, codex-cloud, copilot-cloud, jules, devin, amp) it plans a hand-off to that cloud instead, as hopsesh handoff --dry-run does."
 	addHandoffFlags(cmd)
 	cmd.RunE = func(c *cobra.Command, args []string) error {
 		_ = c.Flags().Set("dry-run", "true")
@@ -320,6 +329,10 @@ func (r *run) renderPlan(p *move.Plan) {
 	}
 	r.printf("  from      %s (%s)\n", p.Source.CWD, p.Key)
 	r.printf("  to        %s\n", p.Target.CWD)
+	if p.Options.TargetSession != "" {
+		r.printf("  returning %s · account %s\n", p.Options.TargetSession, p.Options.TargetProfile)
+	}
+	r.printf("  notice    %t (durable movement notice)\n", p.Options.Notify)
 	switch p.Repo.Action {
 	case move.RepoUse:
 		r.printf("  repo      use %s", p.Repo.LocalPath)
@@ -347,6 +360,10 @@ func (r *run) renderPlan(p *move.Plan) {
 			r.printf("  session   a new %s session (%s)\n", p.Agent, c.Fidelity)
 		}
 		r.printf("  carries   %s\n", c.Report.Summary)
+		r.printf("  capacity  %s\n", c.Report.ContextSummary())
+		if c.Report.Archive != "" {
+			r.printf("  archive   %s\n", c.Report.Archive)
+		}
 		if n := p.NativeCopy; n != nil {
 			r.printf("  also      keeps the %s session there byte for byte, so going back to %s adds only the new work\n", n.Agent, n.Agent)
 		}
@@ -371,7 +388,7 @@ func (r *run) renderResult(p *move.Plan, res *move.Result) {
 	if p.NoWork {
 		r.printf("\n✓ Conversation already synchronized; lineage receipts updated. 0 new messages, 0 transfers.\n")
 	} else if p.Kind == move.KindContinue {
-		r.printf("\n✓ %q continues in %s.\n", p.Title, p.Agent)
+		r.printf("\n✓ %q is prepared for %s.\n", p.Title, p.Agent)
 	} else {
 		r.printf("\n✓ %q is on this machine: %d file(s), %s.\n", p.Title, res.Files, move.Human(res.Bytes))
 	}
@@ -405,7 +422,7 @@ func (r *run) renderResult(p *move.Plan, res *move.Result) {
 	r.printf("  Undo with: hopsesh undo %s\n\n", res.Journal)
 	r.printf("Continue it:\n\n  %s\n", res.Command)
 	if res.Notice != "" {
-		r.printf("\nTo tell the old session yourself, paste this there:\n  %s\n", res.Notice)
+		r.printf("\nMovement notice:\n  %s\n", res.Notice)
 	}
 	r.offerSkill()
 }

@@ -1,6 +1,6 @@
 # Account profiles: lineage integration contract
 
-Status: approved and implemented with `lineage/4` and peer protocol 4, 2026-10-06.
+Status: approved and implemented with `lineage/5` and peer protocol 5, 2026-10-06.
 Companion: [account design](accounts-design.md); [current interfaces and limitations](accounts.md).
 
 ## Identity boundary
@@ -64,7 +64,7 @@ and scoped provenance. A receiving peer resolves its own configured profile and 
 
 The currently observed in-progress lineage implementation calls the conversation branch `Line`
 and has explicit `Replica`, `State`, `Hop` and projection records. Use those concepts; do not
-introduce a second competing graph. Account scope is included in format 4 and peer protocol 4. Do not silently label unknown older
+introduce a second competing graph. Account scope is included in format 5 and peer protocol 5. Do not silently label unknown older
 records as the default account. The project currently does not require backward compatibility.
 
 Acceptance contract: per-profile collision tests; A/B/A/B/A; three-account and cross-agent routes;

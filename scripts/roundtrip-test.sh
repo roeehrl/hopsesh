@@ -79,7 +79,7 @@ grep -q '"fromSource": *true' "$WORK/pull1.json" || { cat "$WORK/pull1.json"; fa
 grep -q '"state": *"fast-forwarded"' "$WORK/pull1.json" || fail "back's checkout should be fast-forwarded"
 [ "$(sh_a 'git -C ~/git/rt rev-parse HEAD')" = "$TWO" ] || fail "back's checkout is not at box's commit"
 grep -q '"mark": *"done"' "$WORK/pull1.json" || fail "box's copy should be marked"
-sudo tail -n 1 "$BFILE" | grep -Eq 'moved to|continued in' || fail "box's transcript has no moved mark"
+sudo tail -n 1 "$BFILE" | grep -q 'prepared in Claude Code on back' || fail "box's transcript has no prepared mark"
 SLUG_A=$(sh_a 'cd ~/git/rt && pwd -P' | sed 's/[^A-Za-z0-9]/-/g')
 AID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["plan"]["placement"]["key"]["session"])' "$WORK/pull1.json")
 if [ -z "$AID" ] || [ "$AID" = "$ID" ]; then
@@ -88,7 +88,7 @@ fi
 AFILE="$AHOME/.claude/projects/$SLUG_A/$AID.jsonl"
 sudo test -f "$AFILE" || fail "no copy on back at $AFILE"
 as_a "$HS" ls --json --no-git > "$WORK/ls.json"
-grep -q '"kind": *"continued"' "$WORK/ls.json" || fail "the listing should show box's copy as continued"
+grep -q '"kind": *"prepared"' "$WORK/ls.json" || fail "the listing should show box's copy as prepared"
 
 say "work continues on back"
 ALEAF=$(sudo cat "$AFILE" | python3 -c 'import json,sys; records=[json.loads(l) for l in sys.stdin]; print([r["uuid"] for r in records if r.get("type") in ("user","assistant")][-1])')
@@ -109,9 +109,9 @@ sudo grep -q "continued on back" "$BFILE" && fail "return changed the preserved 
 BFILE="$BHOME/.claude/projects/$SLUG_B/$RETURN_ID.jsonl"
 sudo test -f "$BFILE" || fail "no reported return copy on box"
 sudo grep -q "continued on back" "$BFILE" || fail "box should now have the newer copy"
-if sudo cat "$BFILE" | grep '"type":"custom-title"' | tail -n 1 | grep -Eq 'moved to|continued in'; then fail "the copy that came home must not carry a moved mark"; fi
+if sudo cat "$BFILE" | grep '"type":"custom-title"' | tail -n 1 | grep -Eq 'moved to|continued in|prepared in'; then fail "the copy that came home must not carry a moved mark"; fi
 [ "$(sh_b 'git -C ~/rt rev-parse HEAD')" = "$THREE" ] || fail "box's checkout should be at back's commit"
-sudo tail -n 1 "$AFILE" | grep -Eq 'moved to|continued in' || fail "back's copy should now be marked continued"
+sudo tail -n 1 "$AFILE" | grep -q 'prepared in Claude Code on box' || fail "back's copy should now be marked prepared"
 
 say "both change: a conflict"
 # Follow the active native leaf on the returned copy.

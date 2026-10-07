@@ -12,11 +12,11 @@ func TestStartPromptCoversMoveAndChecks(t *testing.T) {
 		AgentName: "Claude Code", SourceLocation: "studio", SourceOS: "macOS", SourceVersion: "2.1.284", SourceCWD: "/Users/a/git/p",
 		TargetLocation: "laptop", TargetOS: "macOS", TargetCWD: "/Users/b/git/p/.claude/worktrees/feat",
 		Branch: "feat", WorktreeNote: "A matching worktree was created here.", Unpushed: 2, Dirty: 7,
-		SecretsFound: 1, Redacted: true, Notify: "Also tell the old session.",
+		SecretsFound: 1, Redacted: true,
 	})
 	for _, want := range []string{"moved here from another machine", "studio", "laptop", "Claude Code 2.1.284", "branch feat",
 		"worktree", "2 unpushed", "7 uncommitted", "git status", "environment variables", "redacted",
-		"Also tell the old session.", "wait for my go-ahead"} {
+		"wait for my go-ahead"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("start prompt lacks %q:\n%s", want, p)
 		}

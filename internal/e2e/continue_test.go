@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -100,8 +101,8 @@ func TestContinueInCodexAndBack(t *testing.T) {
 		t.Fatalf("command: %s", res.Command)
 	}
 	left := list(t, box)[sid]
-	if left.Mark == nil || left.Mark.Kind != agent.MarkContinued || left.Mark.AgentName != "Codex" {
-		t.Fatalf("the Claude session must say it continues in Codex: %+v", left.Mark)
+	if left.Mark == nil || left.Mark.Kind != agent.MarkPrepared || left.Mark.AgentName != "Codex" {
+		t.Fatalf("the Claude session must say it is prepared in Codex: %+v", left.Mark)
 	}
 	original, _ := os.ReadFile(left.Path)
 
@@ -179,7 +180,7 @@ func TestContinueKeepsNativeCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	native, ok := list(t, here)[sid]
-	if !ok || native.CWD != here.repo || native.Mark == nil || native.Mark.Kind != agent.MarkContinued || native.Mark.AgentName != "Codex" {
+	if !ok || native.CWD != here.repo || native.Mark == nil || native.Mark.Kind != agent.MarkPrepared || native.Mark.AgentName != "Codex" {
 		t.Fatalf("the native copy here: %+v %+v", native, native.Mark)
 	}
 	lin, _ := lineage.Read(host.LocalFS(), native.Path)
@@ -267,7 +268,7 @@ func TestContinueOnTheSameMachine(t *testing.T) {
 	if mentions(seg, "PLUM-7") || !mentions(seg, "moved from Claude Code") {
 		t.Fatal("a note carries only the briefing")
 	}
-	if m := list(t, here)[sid].Mark; m == nil || m.Kind != agent.MarkContinued {
+	if m := list(t, here)[sid].Mark; m == nil || m.Kind != agent.MarkPrepared {
 		t.Fatal("the Claude session must be marked")
 	}
 }
@@ -275,6 +276,8 @@ func TestContinueOnTheSameMachine(t *testing.T) {
 // appendCodexTurn adds a user and an assistant message as Codex records them.
 func appendCodexTurn(t *testing.T, file, user, reply string) {
 	t.Helper()
+	encode := func(s string) string { b, _ := json.Marshal(s); return string(b[1 : len(b)-1]) }
+	user, reply = encode(user), encode(reply)
 	ts := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
 	lines := `{"timestamp":"` + ts + `","type":"event_msg","payload":{"type":"user_message","message":"` + user + `","images":[]}}` + "\n" +
 		`{"timestamp":"` + ts + `","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"` + user + `"}]}}` + "\n" +

@@ -20,16 +20,19 @@ import (
 
 // SettingsDTO is everything the Settings screen shows.
 type SettingsDTO struct {
-	Version    string     `json:"version"`
-	ReposDir   string     `json:"reposDir"`
-	Layout     string     `json:"layout"` // flat | ghq
-	MarkMoved  bool       `json:"markMoved"`
-	SyncCode   bool       `json:"syncCode"`
-	PushSource bool       `json:"pushSource"`
-	UpdateChk  string     `json:"updateCheck"`
-	AppIcons   bool       `json:"appIcons"` // installed desktop apps' icons picture the agents
-	Previews   bool       `json:"previews"` // the inspector shows the end of a conversation
-	Agents     []AgentDTO `json:"agents"`
+	NoticeHooks      []app.MovementHookStatus `json:"noticeHooks"`
+	NoticeHooksError string                   `json:"noticeHooksError,omitempty"`
+	MovementNotices  bool                     `json:"movementNotices"`
+	Version          string                   `json:"version"`
+	ReposDir         string                   `json:"reposDir"`
+	Layout           string                   `json:"layout"` // flat | ghq
+	MarkMoved        bool                     `json:"markMoved"`
+	SyncCode         bool                     `json:"syncCode"`
+	PushSource       bool                     `json:"pushSource"`
+	UpdateChk        string                   `json:"updateCheck"`
+	AppIcons         bool                     `json:"appIcons"` // installed desktop apps' icons picture the agents
+	Previews         bool                     `json:"previews"` // the inspector shows the end of a conversation
+	Agents           []AgentDTO               `json:"agents"`
 
 	CLI         integrate.CLIStatus `json:"cli"`
 	Skill       app.SkillReport     `json:"skill"`
@@ -41,11 +44,15 @@ type SettingsDTO struct {
 	StateDir          string `json:"stateDir"`
 }
 
-// skillFiles renders this build's skill for the enabled agents.
+// skillFiles renders this build's skill for the enabled agents that keep sessions on
+// machines (the skill names the clouds itself); the command line renders the same files.
 func (a *App) skillFiles() (map[string][]byte, string) {
 	bin := integrate.SkillBin()
 	var names, ids []string
 	for _, s := range a.snapshot().Specs() {
+		if len(s.Roots) == 0 {
+			continue
+		}
 		names = append(names, s.Name)
 		ids = append(ids, string(s.ID))
 	}
@@ -63,24 +70,30 @@ func (a *App) Settings() SettingsDTO {
 	defer cancel()
 	files, bin := a.skillFiles()
 	rep := a.snapshot().Skill(ctx, files, bin)
+	hooks, hookErr := a.snapshot().NoticeHooks(ctx)
+	hookProblem := ""
+	if hookErr != nil {
+		hookProblem = hookErr.Error()
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	cfg := a.core.Cfg
-	return SettingsDTO{Version: version.Version, ReposDir: cfg.ReposDir, Layout: nonEmpty(cfg.Layout, "flat"),
-		MarkMoved: cfg.MarkMovedOn(), SyncCode: cfg.SyncCodeOn(), PushSource: cfg.PushSource, UpdateChk: cfg.UpdateCheck, AppIcons: cfg.AppIconsOn(), Previews: cfg.PreviewsOn(),
+	return SettingsDTO{NoticeHooks: hooks, NoticeHooksError: hookProblem, Version: version.Version, ReposDir: cfg.ReposDir, Layout: nonEmpty(cfg.Layout, "flat"),
+		MovementNotices: cfg.MovementNoticesOn(), MarkMoved: cfg.MarkMovedOn(), SyncCode: cfg.SyncCodeOn(), PushSource: cfg.PushSource, UpdateChk: cfg.UpdateCheck, AppIcons: cfg.AppIconsOn(), Previews: cfg.PreviewsOn(),
 		Agents: a.agentsLocked(), CLI: integrate.CheckCLI(), Skill: rep, SkillBin: bin, SkillPrompt: cfg.SkillPrompt,
 		LocalNetworkGated: lnp.Gated(), ConfigDir: config.Dir(), StateDir: config.StateDir()}
 }
 
 // SettingsInput are the settings the user can change.
 type SettingsInput struct {
-	Layout     string `json:"layout"`
-	MarkMoved  bool   `json:"markMoved"`
-	SyncCode   bool   `json:"syncCode"`
-	PushSource bool   `json:"pushSource"`
-	UpdateChk  string `json:"updateCheck"`
-	AppIcons   bool   `json:"appIcons"`
-	Previews   bool   `json:"previews"`
+	MovementNotices bool   `json:"movementNotices"`
+	Layout          string `json:"layout"`
+	MarkMoved       bool   `json:"markMoved"`
+	SyncCode        bool   `json:"syncCode"`
+	PushSource      bool   `json:"pushSource"`
+	UpdateChk       string `json:"updateCheck"`
+	AppIcons        bool   `json:"appIcons"`
+	Previews        bool   `json:"previews"`
 }
 
 // SaveSettings stores the user's choices.
@@ -95,6 +108,8 @@ func (a *App) SaveSettings(in SettingsInput) error {
 	case "on", "off":
 		a.core.Cfg.UpdateCheck = in.UpdateChk
 	}
+	notices := in.MovementNotices
+	a.core.Cfg.MovementNotices = &notices
 	mark, sync := in.MarkMoved, in.SyncCode
 	a.core.Cfg.MarkMoved, a.core.Cfg.SyncCode = &mark, &sync
 	a.core.Cfg.PushSource = in.PushSource

@@ -32,7 +32,10 @@ Nothing changes until you confirm (or pass --yes). hopsesh undo <id> here undoes
 	f := cmd.Flags()
 	f.String("operation-id", "", "idempotency key for retrying the same transfer")
 	f.String("target-session", "", "explicit destination session when a branch has several replicas there")
-	f.String("in", "", "continue in this agent there ("+strings.Join(agentIDs(), ", ")+"; default: the session's own)")
+	f.String("target-profile", "", "exact account profile ID on the destination machine")
+	f.Bool("new-session", false, "create a new native session without selecting or modifying an existing destination copy")
+	f.Bool("bounded", false, "create a bounded continuation on the same branch; preserve the original session and portable archive")
+	f.String("in", "", "continue in this agent there ("+strings.Join(writerIDs(), ", ")+"; default: the session's own)")
 	f.String("fidelity", "history", "for another agent: history (the conversation as text) or note (a briefing only)")
 	f.Bool("native", false, "for another agent that can: replay exact tool calls as its own (experimental)")
 	f.String("note-file", "", "a handoff note for the other agent's briefing")
@@ -46,6 +49,7 @@ Nothing changes until you confirm (or pass --yes). hopsesh undo <id> here undoes
 	f.Bool("rc", false, "turn the agent's remote control on there, where it has one")
 	f.Bool("redact", false, "redact likely secrets in the copy")
 	f.Bool("no-mark", false, "do not mark the copy here")
+	f.Bool("notify", false, "record a durable movement notice (default from config; --notify=false disables it)")
 	f.Bool("no-sync", false, "do not fetch or fast-forward the checkout there")
 	f.Bool("push", false, "first push the session branch's unpushed commits from here")
 	f.Bool("replace", false, "when the copy there changed too, replace it anyway")
@@ -126,7 +130,7 @@ func (r *run) renderPushResult(p *move.Plan, pr *app.PushResult) {
 	if p.NoWork {
 		r.printf("\n✓ %q already synchronized on %s: 0 new messages, 0 transfers.\n", p.Title, pr.Machine)
 	} else if p.Kind == move.KindContinue {
-		r.printf("\n✓ %q continues in %s on %s.\n", p.Title, p.Agent, pr.Machine)
+		r.printf("\n✓ %q is prepared for %s on %s.\n", p.Title, p.Agent, pr.Machine)
 	} else {
 		r.printf("\n✓ %q is on %s: %d file(s), %s.\n", p.Title, pr.Machine, res.Files, move.Human(res.Bytes))
 	}

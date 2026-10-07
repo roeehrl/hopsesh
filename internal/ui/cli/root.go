@@ -23,6 +23,10 @@ other machines (over your own SSH or Tailscale), shows them grouped by repositor
 moves the one you pick here, or continues it in another agent: it checks or clones the
 repo, copies the session, rewrites its paths and prints the command to continue it.
 
+It also hands sessions off to the agents' clouds (Claude Code cloud, Codex cloud, and
+experimentally Copilot, Jules, Devin and Amp) and brings cloud sessions home, through the
+vendors' own commands, signed in as you: see hopsesh clouds and hopsesh handoff.
+
 Unofficial; not affiliated with or endorsed by Anthropic or OpenAI.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -43,7 +47,7 @@ Unofficial; not affiliated with or endorsed by Anthropic or OpenAI.`,
 	root.SetErr(out)
 	root.AddCommand(
 		versionCmd(), updateCmd(), accountsCmd(), agentsCmd(), hostsCmd(), cloudsCmd(), trustCmd(), doctorCmd(), runtimeCmd(),
-		lsCmd(), showCmd(), lineageCmd(), pullCmd(), planCmd(), pushCmd(), handoffCmd(), followupCmd(), receiveCmd(), peerCmd(), undoCmd(), skillCmd(),
+		lsCmd(), showCmd(), archiveCmd(), lineageCmd(), pullCmd(), planCmd(), pushCmd(), handoffCmd(), followupCmd(), receiveCmd(), peerCmd(), undoCmd(), skillCmd(), noticesCmd(), noticeHookCmd(),
 		openCmd(), terminalsCmd(), terminalStepCmd(), terminalOpenCmd(),
 	)
 	return root

@@ -63,6 +63,7 @@ const (
 	modeBrought // what came back from a cloud
 	modeJourney
 	modeAccounts
+	modeReturns
 )
 
 type row struct {
@@ -71,6 +72,9 @@ type row struct {
 }
 
 type model struct {
+	returnCursor  int
+	returnTo      *app.ReturnCandidate
+	returnPush    *app.Push
 	accts         accountView
 	deps          Deps
 	copied        bool // the resume command was copied on the done screen
@@ -126,6 +130,7 @@ func Run(d Deps) (*Exit, error) {
 	opts := d.App.DefaultOptions()
 	opts.Worktree = move.WorktreeAuto
 	m := &model{deps: d, mode: modeLoading, started: time.Now(), opts: opts}
+	defer m.closeReturnPush()
 	prog := tea.NewProgram(m)
 	// A hand-off whose driver needs a terminal gets this one, the UI paused meanwhile.
 	prev := d.App.Steps
@@ -196,6 +201,12 @@ func (m *model) nextSelectable(from, dir int) int {
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case returnPlanDone:
+		m.returnPush = msg.push
+		if msg.err != nil {
+			return m.Update(planDone{err: msg.err})
+		}
+		return m.Update(planDone{plan: msg.push.Plan})
 	case accountsDone:
 		if msg.inv != nil {
 			if m.inv != nil {
@@ -368,6 +379,8 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch m.mode {
+	case modeReturns:
+		return m.returnKeys(k)
 	case modeJourney:
 		switch k {
 		case "q", "esc", "h":
@@ -383,6 +396,8 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		}
 	case modeBrowse:
 		switch k {
+		case "R":
+			m.openReturns()
 		case "D":
 			if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil {
 				c, err := m.deps.App.Resume(m.inv, m.rows[m.cursor].item.Entry, agent.ResumeOptions{App: true})
@@ -427,14 +442,33 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 			return m, m.Init()
 		case "enter":
 			if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil {
+				m.returnTo = nil
+				m.opts.Bounded = false
 				m.sel, m.target, m.picked, m.ho = m.rows[m.cursor], "", nil, handoff{}
 				m.opts.TargetSession, m.destinations = "", nil
 				return m, m.planCmd()
 			}
 		case "c":
 			m.openHandoff()
+		case "b":
+			if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil {
+				e := m.rows[m.cursor].item.Entry
+				if e.Cloud != nil || (e.Agent != "claude" && e.Agent != "codex") {
+					break
+				}
+				m.sel, m.target, m.picked, m.ho = m.rows[m.cursor], "", nil, handoff{}
+				m.returnTo = nil
+				m.opts = m.deps.App.DefaultOptions()
+				m.opts.Bounded = true
+				if e.Machine == app.LocalName() && e.Profile != nil {
+					m.opts.TargetProfile = e.Profile.ID
+				}
+				return m, m.planCmd()
+			}
 		case "i":
 			if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil {
+				m.returnTo = nil
+				m.opts.Bounded = false
 				m.sel, m.target, m.picked, m.ho = m.rows[m.cursor], "", nil, handoff{}
 				m.opts.TargetSession, m.destinations = "", nil
 				if m.target = m.nextAgent(); m.target != "" {
@@ -452,6 +486,9 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 			}
 		}
 	case modePlan:
+		if m.returnTo != nil && (k == "a" || k == "A" || k == "d" || k == "R") {
+			return m, nil
+		}
 		if m.plan.Kind == move.KindFetch && !m.planning {
 			if mm, cmd, ok := m.fetchKeys(k); ok {
 				return mm, cmd
@@ -459,6 +496,8 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		}
 		switch k {
 		case "esc", "q":
+			m.closeReturnPush()
+			m.returnTo = nil
 			m.mode = modeBrowse
 		case "y", "enter":
 			if !m.planning && len(m.plan.Blockers) == 0 { // never the plan being replaced
@@ -520,6 +559,9 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 			return m, m.planCmd()
 		}
 	case modeDone:
+		if m.returnTo != nil && !m.returnTo.Local && k == "enter" {
+			return m, nil
+		}
 		if m.plan.Kind == move.KindFetch {
 			switch k {
 			case "enter":
@@ -554,6 +596,8 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		case "q":
 			return m, tea.Quit
 		default:
+			m.closeReturnPush()
+			m.returnTo = nil
 			m.err, m.mode = nil, modeBrowse
 		}
 	case modeLoading, modeApplying:
@@ -566,6 +610,9 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) planCmd() tea.Cmd {
+	if m.returnTo != nil && !m.returnTo.Local {
+		return m.returnPushPlanCmd()
+	}
 	if m.ho.cloud != "" {
 		return m.handoffPlanCmd()
 	}
@@ -583,6 +630,20 @@ func (m *model) planCmd() tea.Cmd {
 }
 
 func (m *model) applyCmd() tea.Cmd {
+	if push := m.returnPush; push != nil {
+		m.returnPush = nil
+		return func() tea.Msg {
+			defer push.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+			defer cancel()
+			res, err := push.Commit(ctx)
+			if err != nil {
+				return applyDone{err: err}
+			}
+			res.Result.Journal = res.Journal
+			return applyDone{res: res.Result}
+		}
+	}
 	a, p, in := m.deps.App, m.plan, m.input
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
@@ -648,10 +709,19 @@ func (m *model) nextAgent() agent.ID {
 
 func (m *model) listHeight() int {
 	h := m.height - 12
-	if h < 5 {
-		h = 5
+	if m.inv != nil {
+		// Reserve the selected detail and help as actually rendered, including
+		// movement/return lines and wrapping in a small terminal.
+		var detail strings.Builder
+		w := max(m.width, 80)
+		m.viewBrowseDetail(&detail, w)
+		lines := 0
+		for _, line := range strings.Split(strings.TrimSuffix(detail.String(), "\n"), "\n") {
+			lines += max(1, (lipgloss.Width(line)+w-1)/w)
+		}
+		h = m.height - 3 - lines // title, machine summary, filter
 	}
-	return h
+	return max(1, h)
 }
 
 func (m *model) scroll() {
@@ -688,6 +758,8 @@ func (m *model) View() tea.View {
 		fmt.Fprintf(&b, "\n  Scanning this machine and %d allowed machine(s)… %s\n", countAllowed(m.deps.App), dim.Render(time.Since(m.started).Truncate(time.Second).String()))
 	case modeBrowse:
 		m.viewBrowse(&b)
+	case modeReturns:
+		m.viewReturns(&b)
 	case modeAccounts:
 		m.viewAccounts(&b)
 	case modeJourney:
@@ -803,6 +875,9 @@ func (m *model) viewBrowse(b *strings.Builder) {
 		e := r.item.Entry
 		s := e.Session
 		status := e.Status()
+		if strings.HasPrefix(status, "continued ") {
+			status = "previously " + status
+		}
 		switch {
 		case e.Live.State == agent.Live:
 			status = liveSt.Render(status)
@@ -813,6 +888,7 @@ func (m *model) viewBrowse(b *strings.Builder) {
 			status += dim.Render(" · " + mirrorWords(mr))
 		}
 		line := fmt.Sprintf("  %-12s %-11s %-40s %-9s %s", truncate(e.Machine, 12), truncate(e.AgentName, 11), truncate(s.Title, 40), ago(s.LastActivity), status)
+		line = truncate(line, w-1)
 		if i == m.cursor {
 			line = selSt.Render(padRight(truncate(line, w-1), w-1))
 		}
@@ -821,6 +897,10 @@ func (m *model) viewBrowse(b *strings.Builder) {
 	for i := end - m.offset; i < h; i++ {
 		b.WriteString("\n")
 	}
+	m.viewBrowseDetail(b, w)
+}
+
+func (m *model) viewBrowseDetail(b *strings.Builder, w int) {
 	if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil {
 		it := m.rows[m.cursor].item
 		e := it.Entry
@@ -852,6 +932,12 @@ func (m *model) viewBrowse(b *strings.Builder) {
 			return
 		}
 		fmt.Fprintf(b, "  %s  %s %s  %s\n", e.Machine, e.AgentName, s.AgentVersion, s.CWD)
+		if e.Movement != nil {
+			fmt.Fprintf(b, "  Movement [%s]: %s\n", e.Movement.Status, truncate(e.Movement.Text, w-25))
+		}
+		if len(e.Returns) > 0 {
+			fmt.Fprintf(b, "  [R] move back / show destination (%d choices; same branch)\n", len(e.Returns))
+		}
 		if m.deps.Describe != nil {
 			if d := m.deps.Describe(e); d != "" {
 				fmt.Fprintf(b, "  %s\n", d)
@@ -891,9 +977,9 @@ func (m *model) viewBrowse(b *strings.Builder) {
 		m.viewPicker(b)
 		return
 	}
-	hint := "\n  ↑↓ move · enter bring here · i continue in · c hand off · h journey · a accounts · A move account · / search · r refresh · q quit"
+	hint := "\n  ↑↓ move · enter bring here · i continue in · b bounded copy · c hand off · h journey · a accounts · A move account · / search · r refresh · q quit"
 	if m.partialCloud() != nil {
-		hint = "\n  ↑↓ move · enter resume/bring · i continue in · c hand off · p paste a cloud link · f find in a cloud · / search · r refresh · q quit"
+		hint = "\n  ↑↓ move · enter resume/bring · i continue in · b bounded copy · c hand off · p paste a cloud link · f find in a cloud · / search · r refresh · q quit"
 	}
 	b.WriteString(dim.Render(hint) + "\n")
 }
@@ -921,7 +1007,7 @@ func (m *model) viewPlan(b *strings.Builder) {
 	if m.planning {
 		b.WriteString("  updating the plan…\n")
 	}
-	fmt.Fprintf(b, "  from  %s  %s (%s)\n  to    this machine  %s\n", p.Source.Location, p.Source.CWD, p.Key.Agent, p.Target.CWD)
+	fmt.Fprintf(b, "  from  %s  %s (%s)\n  to    %s  %s\n", p.Source.Location, p.Source.CWD, p.Key.Agent, p.Target.Location, p.Target.CWD)
 	r := p.Repo
 	switch r.Action {
 	case move.RepoUse:
@@ -943,6 +1029,10 @@ func (m *model) viewPlan(b *strings.Builder) {
 			fmt.Fprintf(b, "  adds the new work to %s here\n", c.AppendTo.Key)
 		}
 		fmt.Fprintf(b, "  carries %s\n", c.Report.Summary)
+		fmt.Fprintf(b, "  capacity %s\n", c.Report.ContextSummary())
+		if c.Report.Archive != "" {
+			fmt.Fprintf(b, "  archive %s\n", c.Report.Archive)
+		}
 	} else {
 		fmt.Fprintf(b, "  files %d (%s) · %d path mapping(s)\n", len(p.Files.Files), move.Human(p.Bytes), len(p.Placement.Mappings))
 	}
@@ -973,14 +1063,26 @@ func (m *model) viewPlan(b *strings.Builder) {
 		}
 		return dim.Render("off")
 	}
-	fmt.Fprintf(b, "  Account: %s → %s [A] change account · [D] desktop app %s\n", p.Source.ProfileName, p.Target.ProfileName, on(m.opts.App))
+	if m.returnTo != nil {
+		fmt.Fprintf(b, "  Move back account: %s → %s · exact session %s\n", p.Source.ProfileName, p.Target.ProfileName, m.opts.TargetSession)
+	} else {
+		fmt.Fprintf(b, "  Account: %s → %s [A] change account · [D] desktop app %s\n", p.Source.ProfileName, p.Target.ProfileName, on(m.opts.App))
+	}
 	target := p.Agent
-	fmt.Fprintf(b, "\n  [a] agent %s  [c] clone %s  [w] worktree %s  [r] remote control %s  [n] notify old %s  [f] fork %s  [x] redact %s\n",
-		target, on(m.opts.Clone), string(m.opts.Worktree), on(m.opts.RemoteControl), on(m.opts.Notify), on(m.opts.Fork), on(m.opts.Redact))
+	agentLabel := "[a] agent"
+	if m.returnTo != nil {
+		agentLabel = "destination agent"
+	}
+	fmt.Fprintf(b, "\n  %s %s  [c] clone %s  [w] worktree %s  [r] remote control %s  [n] movement notice %s  [f] fork %s  [x] redact %s\n",
+		agentLabel, target, on(m.opts.Clone), string(m.opts.Worktree), on(m.opts.RemoteControl), on(m.opts.Notify), on(m.opts.Fork), on(m.opts.Redact))
 	fmt.Fprintf(b, "  [m] mark old copy %s  [s] sync code %s  [p] push on %s %s  [k] quit copy open here %s\n",
 		on(m.opts.Mark), on(m.opts.SyncCode), p.Source.Location, on(m.opts.Push), on(m.opts.StopLocal))
 	if p.Conflict != "" || m.opts.Conflict != "" {
-		fmt.Fprintf(b, "  both copies changed: [R] replace the one here %s  [B] keep both %s\n", on(m.opts.Conflict == move.ConflictReplace), on(m.opts.Conflict == move.ConflictKeepBoth))
+		if m.returnTo != nil {
+			fmt.Fprintf(b, "  both copies changed: [B] preserve both as separate branches %s\n", on(m.opts.Conflict == move.ConflictKeepBoth))
+		} else {
+			fmt.Fprintf(b, "  both copies changed: [R] replace the one here %s  [B] keep both %s\n", on(m.opts.Conflict == move.ConflictReplace), on(m.opts.Conflict == move.ConflictKeepBoth))
+		}
 	}
 	if len(p.Blockers) == 0 {
 		b.WriteString(dim.Render("\n  y/enter: go · esc: back\n"))
@@ -994,9 +1096,9 @@ func (m *model) viewDone(b *strings.Builder) {
 	if p.NoWork {
 		fmt.Fprintf(b, "\n  %s %q already synchronized · 0 new messages, 0 transfers.\n", okSt.Render("✓"), p.Title)
 	} else if p.Kind == move.KindContinue {
-		fmt.Fprintf(b, "\n  %s %q continues in %s.\n", okSt.Render("✓"), p.Title, p.Agent)
+		fmt.Fprintf(b, "\n  %s %q is prepared for %s.\n", okSt.Render("✓"), p.Title, p.Agent)
 	} else {
-		fmt.Fprintf(b, "\n  %s %q is on this machine: %d file(s), %s.\n", okSt.Render("✓"), p.Title, res.Files, move.Human(res.Bytes))
+		fmt.Fprintf(b, "\n  %s %q is prepared on %s: %d file(s), %s.\n", okSt.Render("✓"), p.Title, p.Target.Location, res.Files, move.Human(res.Bytes))
 	}
 	if res.Secrets.Total > 0 {
 		fmt.Fprintf(b, "  %d likely secret(s)\n", res.Secrets.Total)
@@ -1017,6 +1119,12 @@ func (m *model) viewDone(b *strings.Builder) {
 	case "failed":
 		b.WriteString("  " + warnSt.Render("! could not mark the copy on "+p.Source.Location+": "+res.MarkError) + "\n")
 	}
+	if m.returnTo != nil && !m.returnTo.Local {
+		fmt.Fprintf(b, "\n  Prepared on %s; run the following command there.\n", m.returnTo.Machine)
+	}
+	if res.Notice != "" {
+		fmt.Fprintf(b, "\n  Movement notice: %s\n", res.Notice)
+	}
 	b.WriteString("\n  Continue it:\n\n")
 	family := launch.DefaultShell()
 	for _, line := range wrapCommand(res.Command, max(m.width, 80)-4, family) {
@@ -1025,7 +1133,11 @@ func (m *model) viewDone(b *strings.Builder) {
 	if m.copied {
 		b.WriteString(okSt.Render("\n  Copied to the clipboard.") + "\n")
 	}
-	b.WriteString(dim.Render("\n  enter: start it there now · c: copy the command · q: quit (undo with: hopsesh undo " + res.Journal + ")\n"))
+	if m.returnTo != nil && !m.returnTo.Local {
+		b.WriteString(dim.Render("\n  c: copy the command to run on destination · q: quit (undo with: hopsesh undo " + res.Journal + ")\n"))
+	} else {
+		b.WriteString(dim.Render("\n  enter: start it there now · c: copy the command · q: quit (undo with: hopsesh undo " + res.Journal + ")\n"))
+	}
 }
 
 // wrapCommand breaks a long shell command at spaces outside quotes, ending each broken

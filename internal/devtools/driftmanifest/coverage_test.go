@@ -87,7 +87,7 @@ func TestReviewPrompts(t *testing.T) {
 		t.Fatal(err)
 	}
 	for group, required := range map[string][]string{
-		"local":             {"CLAUDE_CONFIG_DIR", "CODEX_SQLITE_HOME", "refreshToken:false", "codex://threads/<uuid>", "lineage/4", "binding epochs", "accounts.spec.ts", "multi-party"},
+		"local":             {"CLAUDE_CONFIG_DIR", "CODEX_SQLITE_HOME", "refreshToken:false", "codex://threads/<uuid>", "lineage/5", "binding epochs", "accounts.spec.ts", "multi-party", "movement_test.go", "SessionStart/UserPromptSubmit", "prepared versus", "native conversation nodes", "notices disabled"},
 		"anthropic-cloud":   {"driver profile and binding", "causal receipts"},
 		"openai-cloud":      {"CODEX_SQLITE_HOME", "stale plans"},
 		"third-party-cloud": {"shared move and", "lineage"},

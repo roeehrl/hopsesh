@@ -118,6 +118,10 @@ func targetState(ctx context.Context, p *Plan, in Input, c Copy) (lineage.State,
 		p.ExpectedDestination = map[string]ir.Cursor{}
 	}
 	p.ExpectedDestination[c.Summary.Path] = seg.Cursor
+	if p.Options.OtherAccount {
+		st, err := portableTargetState(p, in, c, &seg)
+		return st, seg, err
+	}
 	replica, id, ok := p.manifest.FindEndpoint(c.Summary.Key, in.Target.Machine.Facts.Endpoint)
 	if !ok || replica.Binding != in.Target.Install.BindingID() {
 		return lineage.State{}, seg, fmt.Errorf("destination session has no verified lineage; choose a separate fork")
@@ -192,7 +196,13 @@ func nativeProjection(source, target ir.Segment) ([]ir.Projection, error) {
 
 func conversionLoss(r convert.Report) []string {
 	var out []string
-	if r.Fidelity == convert.Note {
+	if r.Method == "vendor-import" {
+		out = append(out, "vendor import; per-turn fidelity not verified")
+	}
+	if r.BriefShortened {
+		out = append(out, "briefing shortened")
+	}
+	if r.Fidelity == convert.Note && r.Method != "vendor-import" {
 		out = append(out, "briefing only; full history stays at source")
 	}
 	if r.Redactions > 0 {

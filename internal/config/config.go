@@ -263,9 +263,10 @@ type Config struct {
 	// look for new releases once a day ("" = not asked yet).
 	UpdateCheck string `toml:"update_check,omitempty"`
 	// Round trips. MarkMoved and SyncCode default to on (nil); PushSource to off.
-	MarkMoved  *bool `toml:"mark_moved,omitempty"`  // mark the copy left behind
-	SyncCode   *bool `toml:"sync_code,omitempty"`   // fetch and fast-forward the checkout here
-	PushSource bool  `toml:"push_source,omitempty"` // push unpushed commits on the source first
+	MovementNotices *bool `toml:"movement_notices,omitempty"` // show movement notices (default on)
+	MarkMoved       *bool `toml:"mark_moved,omitempty"`       // mark the copy left behind
+	SyncCode        *bool `toml:"sync_code,omitempty"`        // fetch and fast-forward the checkout here
+	PushSource      bool  `toml:"push_source,omitempty"`      // push unpushed commits on the source first
 	// SkillPrompt remembers the answer to "let your agents use hopsesh?": "" (not asked),
 	// "declined", or the skill revision last offered.
 	SkillPrompt string `toml:"skill_prompt,omitempty"`
@@ -676,3 +677,6 @@ func oneOfEach(name string, vals, allowed []string) error {
 
 // UsesPassword reports whether the machine logs in with a password.
 func (h Host) UsesPassword() bool { return h.Auth == "password" }
+
+// MovementNoticesOn controls source-session notices independently of lineage.
+func (c Config) MovementNoticesOn() bool { return c.MovementNotices == nil || *c.MovementNotices }
