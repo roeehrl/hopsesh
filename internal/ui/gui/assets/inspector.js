@@ -312,7 +312,7 @@ function history(e) {
  h("span", { class: "chip" }, `${e.journey.returns} returns to visited locations`),
  h("span", {class:"chip"}, `${e.journey.machineTransfers||0} machine transfers · ${e.journey.machineRoundTrips||0} machine round trips`),
  e.journey.fork ? h("span", { class: "chip",title:`Parent branch: ${e.journey.parentBranch}` }, "Separate fork") : null,
- h("span",{class:"muted",style:"font-size:12px"},`Origin: ${e.journey.origin}; branch ${e.journey.branch.slice(0,8)}`)) : null,
+ h("span",{class:"muted",style:"font-size:12px"},`Origin: ${e.journey.origin&&e.journey.origin!=="/"?e.journey.origin:"not recorded"}; branch ${e.journey.branch.slice(0,8)}`)) : null,
  others.length ? h("div", { class: "sub-h" }, "Other copies") : null,
     others.map((c) => h("span", {}, copyPlace(c), h("span", { class: "muted" }, c.newest ? " · newest" : c.mark ? " · marked" : " · older"), " ", h("button",{class:"link",onclick:()=>resolveDestination(c).then(selectDestination).catch(fail)},"Show copy"))),
     e.mirror ? [h("div", { class: "sub-h" }, "Mirrored"), h("span", {}, `Remote Control keeps a copy on ${e.mirror.host} while it runs. `,

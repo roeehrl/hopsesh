@@ -16,6 +16,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Preserve transfer-review scroll position when options change, explain unavailable
+  account emails without repeating profile labels, match the close-behavior explanation
+  to the selected setting, and label missing journey origins instead of showing `/`.
+
 - Make window-close behavior default to keeping Hopsesh running in the background,
   independently of menu-bar or tray placement on macOS, Windows and Linux. Preserve
   explicit Quit preferences and reopen the hidden window when launching Hopsesh again.

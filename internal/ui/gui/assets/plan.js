@@ -67,7 +67,9 @@ async function replan() {
       if(c.opts.app!==app){c.opts.app=app;return replan();}
     }
     c.busy = false;
+    const scrollTop=sheet.querySelector('.sheet-body')?.scrollTop||0;
     render();
+    const body=sheet.querySelector('.sheet-body');if(body)body.scrollTop=scrollTop;
   } catch (err) {
     if (cur !== c || c.revision !== revision) return;
     c.busy = false;
@@ -109,7 +111,7 @@ function summary(p) {
  const identity=x=>x?.account?.email||x?.account?.label||x?.name||"Account not identified";
  const source=cur.e?.profile;
  const accountChoice=profiles.length?h("div",{class:"transfer-accounts"},
-  h("div",{},h("span",{class:"sec-h"},"Source account"),h("b",{},identity(source)),h("span",{class:"muted"},source?.name||p.sourceProfile||p.fromAgent)),
+  h("div",{},h("span",{class:"sec-h"},"Source account"),h("b",{},identity(source)),h("span",{class:"muted"},source?.account?.email||source?.account?.label ? source?.name||p.sourceProfile||p.fromAgent : "Email unavailable")),
   h("span",{class:"account-arrow","aria-hidden":"true"},"→"),
   h("div",{},h("span",{class:"sec-h"},"Destination account"),
    !cur.returnCandidate&&profiles.length>1?h("select",{"aria-label":"Destination account",onchange:ev=>{cur.opts.targetSession="";return set("targetProfile",ev.target.value)}},

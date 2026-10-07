@@ -116,6 +116,9 @@ test('background close is the default on every platform even without a tray',asy
   await expect(close.locator('option[value=keep]')).toHaveText('Keep running in background');
   await expect(close.locator('option[value=keep]')).toBeEnabled();
   await expect(page.getByText(/Open Hopsesh from your app launcher/)).toBeVisible();
+  await close.selectOption('quit');await expect(page.getByText(/Closing the main window quits Hopsesh/)).toBeVisible();
+  await expect(page.getByText(/Closing hides the main window/)).toHaveCount(0);
+  await close.selectOption('keep');await expect(page.getByText(/Open Hopsesh from your app launcher/)).toBeVisible();
   await page.unrouteAll({behavior:'wait'});
  }
 });

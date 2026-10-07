@@ -48,7 +48,10 @@ test('instruction paths, previews, individual selection and round-trip explanati
  await plan(page);const picker=page.locator('.instruction-picker');await picker.locator('summary').first().click();
  await expect(picker).toContainText('never created or overwritten');await expect(picker).toContainText('edits are not synchronized back');
  const project=picker.getByRole('checkbox',{name:'Include /fixture/project/CLAUDE.md',exact:true});
+ await project.scrollIntoViewIfNeeded();
+ const previousScroll=await page.locator('#sheet .sheet-body').evaluate(e=>e.scrollTop);expect(previousScroll).toBeGreaterThan(0);
  await project.check();await expect(picker.locator('summary').first()).toHaveText('Source instructions · 1 of 2 files selected');
+ expect(Math.abs(await page.locator('#sheet .sheet-body').evaluate(e=>e.scrollTop)-previousScroll)).toBeLessThan(4);
  await expect(picker.getByRole('checkbox',{name:'Include /fixture/.claude/CLAUDE.md',exact:true})).not.toBeChecked();
  await picker.locator('.instruction-file').first().getByText('View instructions',{exact:true}).click();
  await expect(picker.locator('pre').first()).toHaveText('GLOBAL rule <script>not executable</script>');await expect(picker.locator('script')).toHaveCount(0);
@@ -66,4 +69,11 @@ test('a blocked plan still allows changing its launcher',async({page})=>{
  await expect(page.locator('#sheet #go')).toBeDisabled();
  const choice=page.getByRole('button',{name:'Choose where to open the continued session'});await expect(choice).toBeEnabled();await choice.click();
  await expect(page.getByRole('menu',{name:'Open continued session in'})).toBeVisible();
+});
+
+test('missing source identity is explained without a duplicate profile label',async({page})=>{
+ // Remove only the public observation, never the stable profile ID.
+ await page.route('**/call',async route=>{const r=route.request().postDataJSON();if(!['InitialScan','Scan','RefreshHere'].includes(r.m)){await route.continue();return;}const response=await route.fetch(),body=await response.json();for(const g of body.result.groups||[])for(const e of g.entries||[])if(e.profile)e.profile.account=null;await route.fulfill({json:body});});
+ await page.reload();await plan(page);
+ const source=page.locator('.transfer-accounts>div').first();await expect(source).toContainText('Email unavailable');const name=await source.locator('b').innerText();expect((await source.innerText()).split(name).length-1).toBe(1);
 });
