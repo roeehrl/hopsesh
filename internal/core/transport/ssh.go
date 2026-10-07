@@ -347,7 +347,13 @@ func (c *Conn) Close() {
 		return
 	}
 	args := append(c.baseArgs(), "-O", "exit", c.Dest)
-	_ = proc.Command(c.sshBinary, args...).Run()
+	// A best-effort local control-socket cleanup must not hold a scan (or app
+	// shutdown) hostage when ssh hangs reading config or contacting its master.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := proc.CommandContext(ctx, c.sshBinary, args...)
+	cmd.WaitDelay = 100 * time.Millisecond
+	_ = cmd.Run()
 }
 
 // tsCheckURL finds the Tailscale SSH check link ssh prints: at the start of the output or
