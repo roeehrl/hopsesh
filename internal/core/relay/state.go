@@ -67,13 +67,16 @@ type Outcome struct {
 	Error  string          `json:"error,omitempty"`
 }
 type Record struct {
-	Peer      string   `json:"peer"`
-	Operation string   `json:"operation"`
-	Method    string   `json:"method"`
-	Request   []byte   `json:"request"` // SHA256, never plaintext
-	Phase     string   `json:"phase"`
-	Response  Envelope `json:"response"`
-	Expires   int64    `json:"expires"`
+	Authorization string           `json:"authorization,omitempty"`
+	Peer          string           `json:"peer"`
+	Operation     string           `json:"operation"`
+	Method        string           `json:"method"`
+	Request       []byte           `json:"request"`         // SHA256, never plaintext
+	Scope         []byte           `json:"scope,omitempty"` // source endpoint/root authorization at acceptance
+	Phase         string           `json:"phase"`
+	Response      Envelope         `json:"response"`
+	Outcome       *retainedOutcome `json:"outcome,omitempty"` // encrypted to this owner; allows reply renewal without another native action
+	Expires       int64            `json:"expires"`
 }
 
 // Store persists operation intent before running any native action. It fails
@@ -153,7 +156,7 @@ func (s Store) Approve(ctx context.Context, g Grant) error {
 	}
 	for _, m := range append(append([]string(nil), g.Methods...), g.SendMethods...) {
 		switch m {
-		case "hello", "plan", "apply", "undo", "observe", "export":
+		case "hello", "plan", "apply", "undo", "observe", "export", "ack":
 		default:
 			return fmt.Errorf("unsupported relay method %q", m)
 		}

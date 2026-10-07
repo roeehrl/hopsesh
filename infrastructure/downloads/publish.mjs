@@ -6,13 +6,19 @@ import {Readable} from 'node:stream';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 
+async function boundedRegularFile(file,limit){
+ const before=await lstat(file);if(!before.isFile()||before.size<1||before.size>limit)throw new Error('Release metadata is not a bounded regular file');
+ const handle=await open(file);
+ try{const after=await handle.stat();if(!after.isFile()||after.dev!==before.dev||after.ino!==before.ino||after.size!==before.size)throw new Error('Release metadata changed while opening');const buf=Buffer.alloc(limit+1);let size=0;while(size<buf.length){const {bytesRead}=await handle.read(buf,size,buf.length-size,null);if(!bytesRead)break;size+=bytesRead}if(size>limit)throw new Error('Release metadata exceeds bound');return buf.subarray(0,size)}finally{await handle.close()}
+}
+
 export async function publish(version,directory,origin,token,fetcher=fetch,publicKey=null){
  if(!/^0\.5\.\d+(?:-[A-Za-z0-9][A-Za-z0-9.-]*)?$/.test(version))throw new Error('Explicit immutable 0.5 release version required');
  const url=new URL(origin);if(url.protocol!=='https:'||url.username||url.password||url.search||url.hash||!['','/'].includes(url.pathname))throw new Error('Verified HTTPS origin required');
  if(!token||token.length<32||/[\r\n]/.test(token))throw new Error('Local publication credential required');
  // Tests inject an ephemeral key; the CLI exposes no alternate-key setting.
  const key=publicKey||await readFile(new URL('../../packaging/release-key.pub',import.meta.url));
- const manifest=await readFile(path.join(directory,'checksums.txt')),signature=await readFile(path.join(directory,'checksums.txt.sig'));
+ const manifest=await boundedRegularFile(path.join(directory,'checksums.txt'),1<<20),signature=await boundedRegularFile(path.join(directory,'checksums.txt.sig'),8192);
  if(!verify('sha256',manifest,createPublicKey(key),signature))throw new Error('Release signature failed; nothing published');
  const items=new Map(),seen=new Set();
  for(const line of manifest.toString('utf8').trim().split('\n')){

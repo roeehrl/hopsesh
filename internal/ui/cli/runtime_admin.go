@@ -9,6 +9,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/config"
 	localruntime "github.com/roeehrl/hopsesh/internal/core/runtime"
 	"github.com/spf13/cobra"
+	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -26,13 +27,23 @@ func runtimeCommands() []*cobra.Command {
 		if err != nil {
 			return err
 		}
-		ctx, cancel := signal.NotifyContext(cmd.Context(), runtimeSignals()...)
-		defer cancel()
-		host, err := app.New(cfg, modules, config.StateDir(), nil).StartRuntime(ctx, "headless", func() error { return nil })
+		log, err := localruntime.OpenLog(config.StateDir())
 		if err != nil {
 			return err
 		}
+		defer log.Close()
+		logger := slog.New(slog.NewJSONHandler(log, nil))
+		ctx, cancel := signal.NotifyContext(cmd.Context(), runtimeSignals()...)
+		defer cancel()
+		source := app.New(cfg, modules, config.StateDir(), nil)
+		source.Log = logger
+		host, err := source.StartRuntime(ctx, "headless", func() error { return nil })
+		if err != nil {
+			logger.Error("runtime startup failed", "error", "owner or listener unavailable")
+			return err
+		}
 		defer host.Close()
+		logger.Info("runtime started", "namespace", host.Namespace.ID, "mode", "headless")
 		if err = json.NewEncoder(cmd.OutOrStdout()).Encode(host.Status()); err != nil {
 			return err
 		}
@@ -40,6 +51,7 @@ func runtimeCommands() []*cobra.Command {
 		case <-ctx.Done():
 		case <-host.Done():
 		}
+		logger.Info("runtime stopped", "namespace", host.Namespace.ID)
 		return nil
 	}}
 	status := &cobra.Command{Use: "status", Short: "Identify the actual owner of this settings/state namespace", Args: cobra.NoArgs, Annotations: map[string]string{"hopsesh.passive": "true"}, RunE: func(cmd *cobra.Command, _ []string) error {
@@ -78,7 +90,20 @@ func runtimeCommands() []*cobra.Command {
 	status.Flags().Bool("json", true, "print JSON")
 	start := &cobra.Command{Use: "start", Short: "Start a shared headless runtime, or report the existing owner", Args: cobra.NoArgs, RunE: startRuntime}
 	start.Flags().Bool("headless", true, "run without desktop libraries")
-	return append([]*cobra.Command{serve, status, stop, start}, runtimeServiceCommands()...)
+	doctor := &cobra.Command{Use: "doctor", Short: "Print redacted runtime health; excludes paths, conversations, credentials and log contents", Args: cobra.NoArgs, Annotations: map[string]string{"hopsesh.passive": "true"}, RunE: func(cmd *cobra.Command, _ []string) error {
+		cfg, err := config.Load()
+		if err != nil {
+			cfg = config.Defaults()
+		}
+		d, err := app.New(cfg, modules, config.StateDir(), nil).Diagnostics(cmd.Context())
+		if err != nil {
+			return err
+		}
+		out := json.NewEncoder(cmd.OutOrStdout())
+		out.SetIndent("", "  ")
+		return out.Encode(d)
+	}}
+	return append([]*cobra.Command{serve, status, stop, start, doctor}, runtimeServiceCommands()...)
 }
 func startRuntime(cmd *cobra.Command, _ []string) error {
 	headless, _ := cmd.Flags().GetBool("headless")
@@ -106,7 +131,7 @@ func startRuntime(cmd *cobra.Command, _ []string) error {
 	if err = os.MkdirAll(config.StateDir(), 0700); err != nil {
 		return err
 	}
-	log, err := os.OpenFile(filepath.Join(config.StateDir(), "runtime.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	log, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0600)
 	if err != nil {
 		return err
 	}
@@ -128,8 +153,12 @@ func startRuntime(cmd *cobra.Command, _ []string) error {
 	for {
 		select {
 		case <-cmd.Context().Done():
+			_ = child.Process.Kill()
+			<-ended
 			return cmd.Context().Err()
 		case <-timer.C:
+			_ = child.Process.Kill()
+			<-ended
 			return errors.New("runtime did not become ready within 10s; inspect runtime.log")
 		case err := <-ended:
 			if err == nil {

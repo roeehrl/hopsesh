@@ -144,7 +144,7 @@ func TestInterruptedActionRemainsUncertainAfterRestart(t *testing.T) {
 	op := "operation-1234567"
 	digest := sha256.Sum256(body)
 	key := sha256.Sum256([]byte(a.Public.ID + "\x00" + op + "\x00apply"))
-	if err := writeJSON(filepath.Join(s.Directory, "operation-"+hex.EncodeToString(key[:])+".json"), Record{Peer: a.Public.ID, Operation: op, Method: "apply", Request: digest[:], Phase: "started"}); err != nil {
+	if err := writeJSON(filepath.Join(s.Directory, "operation-"+hex.EncodeToString(key[:])+".json"), Record{Peer: a.Public.ID, Operation: op, Method: "apply", Request: digest[:], Scope: grantScope(Grant{Peer: a.Public, Kind: "device"}), Phase: "started"}); err != nil {
 		t.Fatal(err)
 	}
 	e, _ := Seal(a, b.Public, "test-space-123456", op, body, now, time.Hour)

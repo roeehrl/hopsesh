@@ -46,15 +46,24 @@ func (s *Service) receive(ctx context.Context, e Envelope) error {
 	if err = json.Unmarshal(body, &reply); err != nil {
 		return reject(err)
 	}
-	if !grant.AllowsSend(reply.Method, time.Now()) {
-		return reject(ErrRevoked)
-	}
 	key := replyKey(e.From, e.Operation, reply.Method)
-	if _, err = os.Stat(filepath.Join(s.Processor.Store.Directory, "outgoing-"+key+".json")); err != nil {
+	outgoing, err := localstate.ReadPrivateFile(filepath.Join(s.Processor.Store.Directory, "outgoing-"+key+".json"), 8192)
+	if err != nil {
 		if os.IsNotExist(err) {
 			return reject(errors.New("unsolicited relay reply"))
 		}
 		return err
+	}
+	var intent Record
+	if err = json.Unmarshal(outgoing, &intent); err != nil {
+		return reject(err)
+	}
+	permission := intent.Authorization
+	if permission == "" {
+		permission = reply.Method
+	}
+	if !grant.AllowsSend(permission, time.Now()) {
+		return reject(ErrRevoked)
 	}
 	if err = s.Processor.Store.withLock(ctx, func() error { return writeJSON(filepath.Join(s.Processor.Store.Directory, "reply-"+key+".json"), e) }); err != nil {
 		return err
@@ -95,19 +104,26 @@ func (s *Service) Run(ctx context.Context) error {
 		}
 	}}).Run(ctx)
 }
-func (s *Service) Call(ctx context.Context, peer, operation, method string, params json.RawMessage) (json.RawMessage, error) {
+func (s *Service) callSmall(ctx context.Context, peer, operation, method, permission string, params json.RawMessage) (json.RawMessage, error) {
 	grant, err := s.Processor.Store.Grant(ctx, peer)
 	if err != nil {
 		return nil, err
 	}
-	if !grant.AllowsSend(method, time.Now()) {
+	if !grant.AllowsSend(permission, time.Now()) {
 		return nil, ErrRevoked
 	}
 	body, err := json.Marshal(Request{Method: method, Params: params})
 	if err != nil {
 		return nil, err
 	}
-	e, err := Seal(s.Processor.Identity, grant.Peer, s.Processor.Space, operation, body, time.Now(), time.Hour)
+	ttl := time.Hour
+	if grant.Expires != 0 {
+		ttl = min(ttl, time.Until(time.Unix(grant.Expires, 0)))
+	}
+	if ttl < time.Second {
+		return nil, ErrRevoked
+	}
+	e, err := Seal(s.Processor.Identity, grant.Peer, s.Processor.Space, operation, body, time.Now(), ttl)
 	if err != nil {
 		return nil, err
 	}
@@ -125,6 +141,15 @@ func (s *Service) Call(ctx context.Context, peer, operation, method string, para
 			if !bytes.Equal(old.Request, digest[:]) {
 				return errors.New("relay operation ID reused for different request")
 			}
+			// Renew only the delivery lease. The peer's canonical operation
+			// tombstone still prevents replaying any native action.
+			if old.Expires <= time.Now().Unix() {
+				if err := os.Remove(filepath.Join(s.Processor.Store.Directory, "reply-"+key+".json")); err != nil && !os.IsNotExist(err) {
+					return err
+				}
+				old.Expires = expiry
+				return writeJSON(path, old)
+			}
 			return nil
 		}
 		if !os.IsNotExist(e) {
@@ -137,7 +162,7 @@ func (s *Service) Call(ctx context.Context, peer, operation, method string, para
 		if len(records) >= MaxOperationRecords {
 			return errors.New("relay outgoing operation quota reached")
 		}
-		return writeJSON(path, Record{Peer: peer, Operation: operation, Method: method, Request: digest[:], Phase: "submitted", Expires: expiry})
+		return writeJSON(path, Record{Peer: peer, Operation: operation, Method: method, Authorization: permission, Request: digest[:], Phase: "submitted", Expires: expiry})
 	}); err != nil {
 		return nil, err
 	}
@@ -163,7 +188,7 @@ func (s *Service) Call(ctx context.Context, peer, operation, method string, para
 		b, err := localstate.ReadPrivateFile(path, MaxWireBytes)
 		if err == nil {
 			current, checkErr := s.Processor.Store.Grant(ctx, peer)
-			if checkErr != nil || !current.AllowsSend(method, time.Now()) || current.Peer.Fingerprint() != grant.Peer.Fingerprint() {
+			if checkErr != nil || !current.AllowsSend(permission, time.Now()) || current.Peer.Fingerprint() != grant.Peer.Fingerprint() {
 				return nil, ErrRevoked
 			}
 			if err = json.Unmarshal(b, &envelope); err != nil {

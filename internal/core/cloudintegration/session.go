@@ -334,7 +334,7 @@ func (s Incarnation) Handler(ctx context.Context, grant relay.Grant, operation, 
 	}
 	// Native file permissions are vendor-owned. Explicit export still requires
 	// an owned regular opened object and a bounded read without following links.
-	b, err := localstate.ReadOwnedFile(s.Transcript, relay.MaxPlaintext/2)
+	b, err := localstate.ReadOwnedFile(s.Transcript, relay.MaxObjectBytes/2)
 	if err != nil {
 		return nil, err
 	}

@@ -9,12 +9,24 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/localstate"
 )
 
 const MaxOperationRecords = 10000
+
+func grantScope(g Grant) []byte {
+	roots := slices.Clone(g.Roots)
+	slices.Sort(roots)
+	body, _ := json.Marshal(struct {
+		Kind, Endpoint, Fingerprint string
+		Roots                       []string
+	}{g.Kind, g.Endpoint, g.Peer.Fingerprint(), roots})
+	digest := sha256.Sum256(body)
+	return digest[:]
+}
 
 type Handler func(context.Context, Grant, string, string, json.RawMessage) (any, error)
 type Processor struct {
@@ -44,7 +56,11 @@ func (p Processor) Process(ctx context.Context, e Envelope, now time.Time) (Enve
 	if err = json.Unmarshal(plain, &req); err != nil {
 		return Envelope{}, reject(err)
 	}
-	if !grant.Allows(req.Method, now) {
+	permission, chunk, err := blobPermission(req, grant, now)
+	if err != nil {
+		return Envelope{}, reject(err)
+	}
+	if !grant.Allows(permission, now) {
 		return Envelope{}, reject(ErrRevoked)
 	}
 	if p.Handle == nil {
@@ -66,14 +82,30 @@ func (p Processor) Process(ctx context.Context, e Envelope, now time.Time) (Enve
 		if current.Peer.ID != grant.Peer.ID || current.Peer.Recipient != grant.Peer.Recipient || !bytes.Equal(current.Peer.Signing, grant.Peer.Signing) {
 			return errors.New("relay peer keys changed during authorization")
 		}
-		if !current.Allows(req.Method, now) {
+		if !current.Allows(permission, now) {
 			return reject(ErrRevoked)
 		}
-		digest := sha256.Sum256(plain)
-		key := sha256.Sum256([]byte(e.From + "\x00" + e.Operation + "\x00" + req.Method))
+		scope := grantScope(current)
+		canonical := req
+		if req.Method == "blob.invoke" {
+			// Missing or corrupt uploads have not started a native action. Do
+			// not create its replay tombstone until the complete object verifies.
+			assembled, err := p.Store.assemble(e.From, chunk.Descriptor)
+			if err != nil {
+				return reject(err)
+			}
+			canonical = Request{Method: permission, Params: assembled}
+		}
+		canonicalBytes, err := json.Marshal(canonical)
+		if err != nil {
+			return err
+		}
+		digest := sha256.Sum256(canonicalBytes)
+		key := sha256.Sum256([]byte(e.From + "\x00" + e.Operation + "\x00" + canonical.Method))
 		path := filepath.Join(p.Store.Directory, "operation-"+hex.EncodeToString(key[:])+".json")
 		var record Record
 		b, err = localstate.ReadPrivateFile(path, MaxWireBytes)
+		newRecord := os.IsNotExist(err)
 		if err == nil {
 			if err = json.Unmarshal(b, &record); err != nil {
 				return err
@@ -81,17 +113,46 @@ func (p Processor) Process(ctx context.Context, e Envelope, now time.Time) (Enve
 			if !bytes.Equal(record.Request, digest[:]) {
 				return reject(errors.New("relay operation ID reused for different input"))
 			}
-			if record.Phase == "completed" {
-				if record.Response.Expires <= now.Unix() {
-					return errors.New("operation completed; reply retention expired; inspect its native journal")
-				}
-				response = record.Response
-				return nil
+			if !bytes.Equal(record.Scope, scope) {
+				return reject(errors.New("relay operation authorization scope changed; use a new operation ID"))
 			}
-			if p.Recover == nil {
+			if record.Phase == "completed" {
+				if record.Response.Expires > now.Unix() && record.Method == req.Method {
+					response = record.Response
+					return nil
+				}
+				if record.Outcome == nil {
+					return errors.New("completed operation has no retained outcome; inspect its native journal")
+				}
+				retained, err := record.Outcome.open(p.Identity, e.From, e.Operation, digest[:], now)
+				if err != nil {
+					return errors.New("completed outcome retention expired or damaged; inspect its native journal; native action was not repeated")
+				}
+				var out Outcome
+				if err = json.Unmarshal(retained, &out); err != nil {
+					return err
+				}
+				var ref blobResult
+				if json.Unmarshal(out.Result, &ref) == nil && ref.Descriptor != nil && ref.Descriptor.Expires <= now.Unix() {
+					return errors.New("completed large reply retention expired; inspect its native journal; native action was not repeated")
+				}
+				body, err := json.Marshal(Reply{Method: req.Method, Outcome: out})
+				if err != nil {
+					return err
+				}
+				response, err = sealKind(p.Identity, grant.Peer, p.Space, e.Operation, "response", body, now, time.Duration(e.Expires-now.Unix())*time.Second)
+				if err != nil {
+					return err
+				}
+				record.Method, record.Response, record.Expires = req.Method, response, e.Expires
+				return writeJSON(path, record)
+			}
+			if p.Recover == nil && req.Method != "blob.put" && req.Method != "blob.read" {
 				return ErrUncertain
 			}
-			handle = p.Recover
+			if p.Recover != nil {
+				handle = p.Recover
+			}
 		}
 		if err != nil && !os.IsNotExist(err) {
 			return err
@@ -100,19 +161,27 @@ func (p Processor) Process(ctx context.Context, e Envelope, now time.Time) (Enve
 		if err != nil {
 			return err
 		}
-		if len(entries) >= MaxOperationRecords {
+		if newRecord && len(entries) >= MaxOperationRecords {
 			return errors.New("relay operation quota reached; archive receipts before accepting new operations")
 		}
-		record = Record{Peer: e.From, Operation: e.Operation, Method: req.Method, Request: digest[:], Phase: "started", Expires: e.Expires}
+		record = Record{Peer: e.From, Operation: e.Operation, Method: req.Method, Request: digest[:], Scope: scope, Phase: "started", Expires: e.Expires}
 		if err = writeJSON(path, record); err != nil {
 			return err
 		}
-		result, actionErr := handle(ctx, current, e.Operation, req.Method, req.Params)
+		result, actionErr := p.chunkHandle(ctx, current, e.Operation, req, chunk, handle)
 		out := Outcome{}
 		if actionErr != nil {
 			out.Error = actionErr.Error()
 		} else {
 			out.Result, err = json.Marshal(result)
+			if err != nil {
+				return err
+			}
+			resultMethod := permission
+			if req.Method == "blob.read" {
+				resultMethod = req.Method
+			}
+			out.Result, err = p.chunkResult(e.From, e.Operation, resultMethod, out.Result, e.Expires)
 			if err != nil {
 				return err
 			}
@@ -125,7 +194,18 @@ func (p Processor) Process(ctx context.Context, e Envelope, now time.Time) (Enve
 		if err != nil {
 			return err
 		}
-		record.Phase, record.Response = "completed", response
+		retained, err := json.Marshal(out)
+		if err != nil {
+			return err
+		}
+		var sealed *retainedOutcome
+		if canonical.Method != "blob.read" {
+			sealed, err = retainOutcome(p.Identity, e.From, e.Operation, digest[:], retained, now)
+			if err != nil {
+				return err
+			}
+		}
+		record.Phase, record.Response, record.Outcome = "completed", response, sealed
 		return writeJSON(path, record)
 	})
 	return response, err

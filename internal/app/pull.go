@@ -159,6 +159,9 @@ func (a *App) Plan(ctx context.Context, inv *Inventory, e Entry, target agent.ID
 	}
 	src := inv.Machine(e.Machine)
 	here := inv.Local()
+	if src != nil && src.Destination == "relay" && src.host == nil {
+		return a.planRelayPull(ctx, inv, e, target, opt)
+	}
 	if src == nil || src.host == nil {
 		return nil, move.Input{}, fmt.Errorf("%s was not reached", e.Machine)
 	}
@@ -273,7 +276,13 @@ func (a *App) Apply(ctx context.Context, p *move.Plan, in move.Input, progress f
 			}
 		}
 	}
-	return move.Apply(ctx, p, in, move.Env{StateDir: a.StateDir, Audit: a.Audit, Progress: progress, Step: a.Steps})
+	res, err := move.Apply(ctx, p, in, move.Env{StateDir: a.StateDir, Audit: a.Audit, Progress: progress, Step: a.Steps})
+	if err == nil && in.AcknowledgeSource != nil {
+		if err = in.AcknowledgeSource(ctx, p, res); err != nil && res != nil {
+			res.Warnings = append(res.Warnings, "Destination committed; source acknowledgment is pending: "+err.Error())
+		}
+	}
+	return res, err
 }
 
 // gitFetchFunc is how to fetch from a repository on a machine over SSH (nil for this

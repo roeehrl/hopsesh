@@ -2,9 +2,12 @@ package gui
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/roeehrl/hopsesh/internal/agents/all"
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
+	"github.com/roeehrl/hopsesh/internal/core/observe"
+	"github.com/roeehrl/hopsesh/sdk/agent"
 	"testing"
 	"time"
 )
@@ -34,6 +37,29 @@ func TestDesktopAttachesHeadlessWithoutAnotherOwnerAndQuitLeavesItRunning(t *tes
 	var status any
 	if err = a.backend.client.Call(ctx, "status", nil, &status); err != nil {
 		t.Fatalf("GUI quit stopped external owner: %v", err)
+	}
+}
+
+func TestOlderSharedObservationCannotReplaceFreshScannedIdentityAndSettings(t *testing.T) {
+	home(t)
+	cfg := config.Defaults()
+	if err := config.Save(&cfg); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	current := &app.Inventory{Entries: []app.Entry{{Machine: app.LocalName(), Session: agent.Summary{Key: agent.SessionKey{Agent: "claude", Session: "current-session", Profile: "registered-profile"}}}}}
+	a := &App{core: app.New(cfg, all.Registry(), config.StateDir(), nil), inv: current, invAt: now}
+	cfg.FamilyNames = map[string]string{"family": "Saved family label"}
+	if err := config.Save(&cfg); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(app.Observation{Machine: app.LocalName(), InventoryComplete: true, Entries: []app.Entry{{Machine: app.LocalName(), Session: agent.Summary{Key: agent.SessionKey{Agent: "claude", Session: "old-unregistered-session"}}}}})
+	a.acceptRuntimeSnapshot(observe.Snapshot{Epoch: "old-owner", Sequence: 1, ObservedAt: now.Add(-time.Second), ExpiresAt: now.Add(time.Minute), Data: body})
+	if a.inv != current || a.inv.Entries[0].Session.Key.Profile != "registered-profile" {
+		t.Fatal("older snapshot changed the fresh session identity")
+	}
+	if a.core.Cfg.FamilyNames["family"] != "Saved family label" {
+		t.Fatal("settings adoption lost a saved family label")
 	}
 }
 func TestGUIAdoptsCLISettingsAndPreservesConcurrentWriters(t *testing.T) {

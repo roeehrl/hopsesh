@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -33,7 +34,7 @@ func TestActualWorkerHandlerAndGoEndpointsRoundTrip(t *testing.T) {
 		}
 		t.Skip("relay Worker dependencies are installed in the relay matrix job")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, node, fixture)
 	stdout, err := cmd.StdoutPipe()
@@ -118,7 +119,14 @@ func TestActualWorkerHandlerAndGoEndpointsRoundTrip(t *testing.T) {
 			t.Fatal("encrypted reply missing", err)
 		}
 	}
-	if calls.Load() != 1 {
+	large, _ := json.Marshal(map[string]string{"transcript": strings.Repeat("private-long-history", ChunkBytes/10)})
+	for range 2 {
+		result, err := sa.Call(ctx, b.Public.ID, "large-native-operation-1234", "apply", large)
+		if err != nil || !bytes.Contains(result, []byte("private-long-history")) {
+			t.Fatal("large encrypted request/reply failed", err)
+		}
+	}
+	if calls.Load() != 2 {
 		t.Fatal("duplicate delivery repeated native action", calls.Load())
 	}
 	if sb.Health().Rejected != 2 {

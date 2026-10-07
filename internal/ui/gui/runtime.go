@@ -17,6 +17,12 @@ import (
 
 const RuntimeEvent = "hopsesh:runtime"
 
+func (a *App) RuntimeDiagnostics() (app.RuntimeDiagnostics, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	return a.snapshot().Diagnostics(ctx)
+}
+
 type runtimeLink struct {
 	mu              sync.Mutex
 	owner           *localruntime.Host
@@ -150,6 +156,22 @@ func (a *App) acceptRuntimeSnapshot(s observe.Snapshot) {
 	}
 	a.backend.appliedEpoch, a.backend.appliedSequence = s.Epoch, s.Sequence
 	a.backend.mu.Unlock()
+	// Serialize settings adoption with GUI saves. Loading before taking a.mu
+	// could overwrite a just-saved family label with an older configuration.
+	a.mu.Lock()
+	appearanceChanged := false
+	if cfg, err := config.Load(); err == nil {
+		appearanceChanged = a.core.Cfg.AppearanceMode() != cfg.AppearanceMode()
+		a.core.Cfg = cfg
+	}
+	olderThanScan := !a.invAt.IsZero() && s.ObservedAt.Before(a.invAt)
+	a.mu.Unlock()
+	if appearanceChanged {
+		a.publishAppearance()
+	}
+	if olderThanScan {
+		return
+	}
 	core := a.snapshot()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -189,17 +211,6 @@ func (a *App) acceptRuntimeSnapshot(s observe.Snapshot) {
 		a.quick.mu.Unlock()
 	}
 	a.emit(RuntimeEvent, nil)
-	// Settings written through the CLI are adopted before the next GUI save.
-	cfg, err := config.Load()
-	if err == nil {
-		a.mu.Lock()
-		changed := a.core.Cfg.AppearanceMode() != cfg.AppearanceMode()
-		a.core.Cfg = cfg
-		a.mu.Unlock()
-		if changed {
-			a.publishAppearance()
-		}
-	}
 }
 func (a *App) RuntimeRefresh() error {
 	if err := a.connectRuntime(); err != nil {

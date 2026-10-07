@@ -24,6 +24,13 @@ func (a *App) RecoverReceipts(ctx context.Context, id string) error {
 	if j.Undone {
 		return fmt.Errorf("this operation was undone; receipts cannot be retried")
 	}
+	for _, ack := range j.Acknowledgments {
+		if !ack.Applied {
+			if err = a.recoverRelayPullAcknowledgment(ctx, j, ack); err != nil {
+				return err
+			}
+		}
+	}
 	machines := map[string]*host.Machine{}
 	defer func() {
 		for _, m := range machines {

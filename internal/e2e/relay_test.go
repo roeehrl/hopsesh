@@ -27,6 +27,7 @@ import (
 	"github.com/roeehrl/hopsesh/agents/claude"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/cloudintegration"
+	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/relay"
 	localruntime "github.com/roeehrl/hopsesh/internal/core/runtime"
 )
@@ -67,7 +68,8 @@ func TestRelayPushSurvivesReceiverRestartAndPeerOwnedUndo(t *testing.T) {
 		}
 		port := listener.Addr().(*net.TCPAddr).Port
 		_ = listener.Close()
-		server = exec.CommandContext(ctx, node, filepath.Join(filepath.Dir(fixture), "node_modules", "wrangler", "bin", "wrangler.js"), "dev", "--local", "--ip", "127.0.0.1", "--port", fmt.Sprint(port), "--inspector-port", "0", "--local-protocol", "https", "--https-key-path", keyFile, "--https-cert-path", certFile, "--persist-to", filepath.Join(root, "platform-state"), "--var", "ENROLLMENT_ADMIN:fixture-admin-secret-with-32-bytes-minimum", "--log-level", "error", "--show-interactive-dev-session=false")
+		server = exec.CommandContext(ctx, node, filepath.Join(filepath.Dir(fixture), "node_modules", "wrangler", "wrangler-dist", "cli.js"), "dev", "--local", "--ip", "127.0.0.1", "--port", fmt.Sprint(port), "--inspector-port", "0", "--local-protocol", "https", "--https-key-path", keyFile, "--https-cert-path", certFile, "--persist-to", filepath.Join(root, "platform-state"), "--var", "ENROLLMENT_ADMIN:fixture-admin-secret-with-32-bytes-minimum", "--log-level", "error", "--show-interactive-dev-session=false")
+		prepareRelayFixture(server)
 		server.Dir = filepath.Dir(fixture)
 		server.Env = append(os.Environ(), "WRANGLER_SEND_METRICS=false")
 		log, err := os.Create(filepath.Join(root, "platform.log"))
@@ -169,7 +171,7 @@ func TestRelayPushSurvivesReceiverRestartAndPeerOwnedUndo(t *testing.T) {
 		remote relay.PublicIdentity
 	}{{box, hereID}, {here, boxID}} {
 		store := relay.Store{Directory: filepath.Join(p.local.home, "state", "relay")}
-		if err = store.Approve(ctx, relay.Grant{Peer: p.remote, Endpoint: p.remote.Endpoint, Kind: "device", Roots: []string{p.local.repo}, Methods: []string{"hello", "observe", "plan", "apply", "undo"}, SendMethods: []string{"hello", "observe", "plan", "apply", "undo"}}); err != nil {
+		if err = store.Approve(ctx, relay.Grant{Peer: p.remote, Endpoint: p.remote.Endpoint, Kind: "device", Roots: []string{p.local.repo}, Methods: []string{"hello", "observe", "plan", "apply", "undo", "export", "ack"}, SendMethods: []string{"hello", "observe", "plan", "apply", "undo", "export", "ack"}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -179,6 +181,11 @@ func TestRelayPushSurvivesReceiverRestartAndPeerOwnedUndo(t *testing.T) {
 	hereCfg.ReposDir = filepath.Join(here.home, "git")
 	hereCfg.Hosts = []config.Host{{Name: box.name, RelayID: boxID.ID, Allowed: true, Via: "relay"}}
 	here.writeConfig(t, hereCfg)
+	boxCfg := config.Defaults()
+	boxCfg.Relay.Enabled, boxCfg.Peer.Receive = true, true
+	boxCfg.ReposDir = filepath.Join(box.home, "git")
+	boxCfg.Hosts = []config.Host{{Name: here.name, RelayID: hereID.ID, Allowed: true, Via: "relay"}}
+	box.writeConfig(t, boxCfg)
 	start := func(m machineHome) (localruntime.Client, func()) {
 		cmd := exec.CommandContext(ctx, bin, "runtime", "serve")
 		cmd.Env = append(m.env(), "SSL_CERT_FILE="+certFile)
@@ -285,6 +292,30 @@ func TestRelayPushSurvivesReceiverRestartAndPeerOwnedUndo(t *testing.T) {
 		t.Fatal("source retry created another journal", journals, err)
 	}
 	run(here, "undo", result.Result.Journal, "--yes", "--json")
+	// Reverse direction: source inventory is obtained over the relay, the exact
+	// native package is frozen, and the local planner commits its source receipt.
+	pullArgs := []string{"pull", here.name + ":claude/" + sid, "--in", "codex", "--to", box.repo, "--no-sync", "--no-mark", "--operation-id", "relay-pull-op-12345678", "--yes", "--json"}
+	var pullResult struct {
+		Result move.Result `json:"result"`
+	}
+	if err = json.Unmarshal(run(box, pullArgs...), &pullResult); err != nil {
+		t.Fatal(err)
+	}
+	if pullResult.Result.Journal == "" {
+		t.Fatal("pull returned no destination journal")
+	}
+	stopBox()
+	_, _ = start(box)
+	var retryPull struct {
+		Result move.Result `json:"result"`
+	}
+	if err = json.Unmarshal(run(box, pullArgs...), &retryPull); err != nil {
+		t.Fatal(err)
+	}
+	if retryPull.Result.Journal != pullResult.Result.Journal {
+		t.Fatal("pull retry duplicated native installation")
+	}
+	run(box, "undo", pullResult.Result.Journal, "--yes", "--json")
 	qualifyCloudConnector(t, ctx, bin, root, ready.URL, certFile, httpClient, hereClient, hereID)
 }
 

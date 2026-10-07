@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // ServicePlan is a reviewable per-user login registration. It never requests
@@ -55,7 +56,7 @@ func PlanService(n Namespace, exe, platform, home, uid string) (ServicePlan, err
 	switch platform {
 	case "darwin":
 		p.Path = filepath.Join(home, "Library", "LaunchAgents", p.Name+".plist")
-		p.Definition = `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>Label</key><string>` + p.Name + `</string><key>ProgramArguments</key><array><string>` + xmlText(exe) + `</string><string>runtime</string><string>serve</string></array><key>EnvironmentVariables</key><dict><key>HOPSESH_CONFIG_DIR</key><string>` + xmlText(n.Config) + `</string><key>HOPSESH_STATE_DIR</key><string>` + xmlText(n.State) + `</string></dict><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>30</integer><key>StandardOutPath</key><string>` + xmlText(filepath.Join(n.State, "runtime.log")) + `</string><key>StandardErrorPath</key><string>` + xmlText(filepath.Join(n.State, "runtime.log")) + `</string></dict></plist>`
+		p.Definition = `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>Label</key><string>` + p.Name + `</string><key>ProgramArguments</key><array><string>` + xmlText(exe) + `</string><string>runtime</string><string>serve</string></array><key>EnvironmentVariables</key><dict><key>HOPSESH_CONFIG_DIR</key><string>` + xmlText(n.Config) + `</string><key>HOPSESH_STATE_DIR</key><string>` + xmlText(n.State) + `</string></dict><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>30</integer><key>StandardOutPath</key><string>/dev/null</string><key>StandardErrorPath</key><string>/dev/null</string></dict></plist>`
 		domain := "gui/" + uid
 		p.Enable = [][]string{{"launchctl", "bootstrap", domain, p.Path}}
 		p.Disable = [][]string{{"launchctl", "bootout", domain + "/" + p.Name}}
@@ -137,12 +138,22 @@ func (p ServicePlan) EnableAtLogin(ctx context.Context) error {
 		return err
 	}
 	// An unrelated definition at our path is refused instead of overwritten.
-	old, err := os.ReadFile(p.Path)
-	if err == nil && string(old) != p.Definition {
-		return errors.New("login registration differs from this plan; disable it before replacing")
-	}
-	if err != nil && !os.IsNotExist(err) {
+	present, err := p.definitionPresent()
+	if err != nil {
 		return err
+	}
+	status := p.Status(ctx)
+	if !status.Known {
+		return errors.New(status.Error)
+	}
+	if status.Registered {
+		if !present {
+			return errors.New("OS login service has no verified matching definition; refusing to replace it")
+		}
+		if status.Enabled && status.Running {
+			return nil
+		}
+		return p.startRegistered(ctx)
 	}
 	f, err := os.CreateTemp(filepath.Dir(p.Path), ".runtime-service-*")
 	if err != nil {
@@ -168,9 +179,50 @@ func (p ServicePlan) EnableAtLogin(ctx context.Context) error {
 	return runService(ctx, p.Enable)
 }
 func (p ServicePlan) DisableAtLogin(ctx context.Context) error {
-	if err := runService(ctx, p.Disable); err != nil {
+	present, err := p.definitionPresent()
+	if err != nil {
 		return err
 	}
-	return os.Remove(p.Path)
+	s := p.Status(ctx)
+	if !s.Known {
+		return errors.New(s.Error)
+	}
+	if s.Registered {
+		if !present {
+			return errors.New("OS login service has no verified matching definition; refusing to remove it")
+		}
+		if err = runService(ctx, p.Disable); err != nil {
+			return err
+		}
+		// launchctl can return while the job is still draining. Keep its
+		// verified definition until the supervisor has actually unregistered it.
+		if p.Platform != "linux" {
+			wait, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+			tick := time.NewTicker(50 * time.Millisecond)
+			defer tick.Stop()
+			for {
+				state := p.Status(wait)
+				if !state.Known {
+					return errors.New(state.Error)
+				}
+				if !state.Registered {
+					break
+				}
+				select {
+				case <-wait.Done():
+					return wait.Err()
+				case <-tick.C:
+				}
+			}
+		}
+	}
+	if err = os.Remove(p.Path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if p.Platform == "linux" {
+		return runService(ctx, [][]string{{"systemctl", "--user", "daemon-reload"}})
+	}
+	return nil
 }
 func (p ServicePlan) StopNow(ctx context.Context) error { return runService(ctx, p.Stop) }

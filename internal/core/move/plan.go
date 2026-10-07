@@ -36,13 +36,16 @@ type Copy struct {
 
 // Input is what planning needs.
 type Input struct {
-	Source  Side
-	Session agent.Summary
-	Live    agent.LiveInfo
-	Git     *repos.GitState // the session's checkout on the source (nil when unknown)
-	GitErr  string          // why the checkout could not be read ("" when it was)
-	Lineage *lineage.Manifest
-	Target  Side
+	// AcknowledgeSource is a transport-owned commit of writes made to a source
+	// snapshot. The app invokes it only after the native destination is durable.
+	AcknowledgeSource func(context.Context, *Plan, *Result) error
+	Source            Side
+	Session           agent.Summary
+	Live              agent.LiveInfo
+	Git               *repos.GitState // the session's checkout on the source (nil when unknown)
+	GitErr            string          // why the checkout could not be read ("" when it was)
+	Lineage           *lineage.Manifest
+	Target            Side
 	// Copies are the target agent's sessions with the same key at the target.
 	Copies []Copy
 	// Worktrees are agent-managed worktree folders (from every module).

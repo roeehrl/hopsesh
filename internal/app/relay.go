@@ -111,12 +111,15 @@ func (a *App) RelayReceiver(snapshots ...func() observe.Snapshot) relay.Handler 
 			if err := json.Unmarshal(snap.Data, &obs); err != nil {
 				return nil, err
 			}
-			obs.Processes, obs.WatchRoots = nil, nil
+			obs = relayObservation(obs, grant)
 			snap.Data, err = json.Marshal(obs)
 			return snap, err
 		}
 		if !cfg.Peer.Receive && method != peer.MethodHello {
 			return nil, peer.Refused(LocalName())
+		}
+		if method == "export" || method == "ack" {
+			return source.relayExport(ctx, grant, operation, method, params)
 		}
 		for key, s := range sessions {
 			if time.Since(s.used) > 15*time.Minute {
@@ -260,6 +263,23 @@ func (a *App) RelayReceiver(snapshots ...func() observe.Snapshot) relay.Handler 
 				return nil, err
 			}
 			for _, path := range paths {
+				if export, e := readRelayExport(path); e == nil && export.Peer == from && export.Endpoint == grant.Endpoint && export.Journal == req.Journal && export.Journal != "" {
+					if e = withinRelayRoots(export.Package.Session.CWD, grant.Roots); e != nil {
+						return nil, e
+					}
+					j, e := journal.Load(source.StateDir, req.Journal)
+					if e != nil {
+						return nil, e
+					}
+					if j.TransferID != export.Operation {
+						return nil, errors.New("source journal belongs to another transfer")
+					}
+					if j.Undone {
+						return struct{}{}, nil
+					}
+					_, e = source.Undo(ctx, req.Journal, req.Force)
+					return struct{}{}, e
+				}
 				r, e := readRelayTransfer(path)
 				if e != nil || r.Peer != from || r.Endpoint != grant.Endpoint || r.Reply == nil || r.Reply.Journal != req.Journal {
 					continue

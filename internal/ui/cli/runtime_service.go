@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"github.com/roeehrl/hopsesh/internal/config"
 	localruntime "github.com/roeehrl/hopsesh/internal/core/runtime"
 	"github.com/spf13/cobra"
 	"os"
+	"time"
 )
 
 func runtimeServiceCommands() []*cobra.Command {
@@ -31,9 +33,29 @@ func runtimeServiceCommands() []*cobra.Command {
 		if plan {
 			return json.NewEncoder(cmd.OutOrStdout()).Encode(p)
 		}
+		service := p.Status(cmd.Context())
+		if !service.Known {
+			return errors.New(service.Error)
+		}
 		var status localruntime.Status
-		if err = c.Call(cmd.Context(), "status", nil, &status); err == nil && status.Mode == "desktop" {
-			return errors.New("the desktop currently owns this runtime; quit it after finishing transfers, then enable the headless host; integrated terminals stay owned by the app")
+		if err = c.Call(cmd.Context(), "status", nil, &status); err == nil {
+			if status.Mode != "headless" {
+				return errors.New("the desktop currently owns this runtime; quit it after finishing transfers, then enable the headless host; integrated terminals stay owned by the app")
+			}
+			if !service.Running {
+				// Transfer a manually started owner to the supervisor only after its
+				// guarded shutdown and all native work have released ownership.
+				if err = c.Call(cmd.Context(), "stop", nil, nil); err != nil {
+					return err
+				}
+				ctx, cancel := context.WithTimeout(cmd.Context(), 60*time.Second)
+				defer cancel()
+				if err = c.WaitReleased(ctx); err != nil {
+					return err
+				}
+			}
+		} else if service.Running {
+			return errors.New("the registered runtime is running but its IPC is unavailable; inspect runtime doctor before changing startup")
 		}
 		if err = os.MkdirAll(config.StateDir(), 0700); err != nil {
 			return err
@@ -67,5 +89,16 @@ func runtimeServiceCommands() []*cobra.Command {
 		}
 		return p.DisableAtLogin(cmd.Context())
 	}}
-	return []*cobra.Command{enable, disable}
+	status := &cobra.Command{Use: "login-status", Short: "Read the actual OS login registration and supervisor state", Args: cobra.NoArgs, Annotations: map[string]string{"hopsesh.passive": "true"}, RunE: func(cmd *cobra.Command, _ []string) error {
+		c, err := runtimeClient()
+		if err != nil {
+			return err
+		}
+		p, err := localruntime.CurrentServicePlan(c.Namespace)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(p.Status(cmd.Context()))
+	}}
+	return []*cobra.Command{enable, disable, status}
 }

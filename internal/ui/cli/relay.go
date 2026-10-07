@@ -65,12 +65,12 @@ func relayCmd() *cobra.Command {
 		}
 		methods := []string{"hello", "observe"}
 		if kind == "device" && len(roots) > 0 {
-			methods = append(methods, "plan", "apply", "undo")
+			methods = append(methods, "plan", "apply", "undo", "export", "ack")
 			if public.Endpoint == "" {
 				return errors.New("receiving requires the peer's native endpoint binding")
 			}
 		}
-		grant := relay.Grant{Peer: public, Endpoint: public.Endpoint, Kind: kind, Roots: roots, Methods: methods, SendMethods: []string{"hello", "observe", "plan", "apply", "undo"}}
+		grant := relay.Grant{Peer: public, Endpoint: public.Endpoint, Kind: kind, Roots: roots, Methods: methods, SendMethods: []string{"hello", "observe", "plan", "apply", "undo", "export", "ack"}}
 		if kind == "cloud-session" {
 			grant.Methods = []string{"observe", "export"}
 			grant.SendMethods = []string{"observe", "export"}

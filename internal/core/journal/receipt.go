@@ -83,6 +83,9 @@ func (j *Journal) RecoverReceipts(fsFor func(string) (host.FS, error)) error {
 	return nil
 }
 func (j *Journal) PendingReceipts() bool {
+	if j.PendingAcknowledgments() {
+		return true
+	}
 	for _, r := range j.Receipts {
 		if !r.Applied {
 			return true

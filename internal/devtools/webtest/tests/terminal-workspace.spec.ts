@@ -110,7 +110,7 @@ test('failed replacement keeps the source usable and composing text postpones a 
  await expect.poll(()=>detached.evaluate(()=>window.hopseshTerminal?.text())).toContain('typed=still here');
 });
 
-test('presence refresh during a press does not swallow the shell grouping menu',async({page})=>{
+test('shared observation during a press does not swallow the shell grouping menu',async({page})=>{
  await page.request.post('/terminal-test/open?title=Build%20shell&kind=shell');
  await row(page,'Find the codeword').click();
  let release!:()=>void;
@@ -118,11 +118,13 @@ test('presence refresh during a press does not swallow the shell grouping menu',
  let reached!:()=>void;
  const requested=new Promise<void>(resolve=>reached=resolve);
  await page.route('**/call',async route=>{
-  if(route.request().postDataJSON().m!=='Presence')return route.continue();
+  if(route.request().postDataJSON().m!=='QuickSnapshot')return route.continue();
   reached();await responseGate;
-  await route.fulfill({json:{result:{entries:{'test-presence':[]}}}});
+  const response=await route.fetch();const body=await response.json();
+  body.result.presence={entries:{'test-presence':[]}};
+  await route.fulfill({json:body});
  });
- await page.evaluate(()=>window.dispatchEvent(new Event('focus')));
+ await page.evaluate(()=>window.__emit('hopsesh:quick',null));
  await requested;
  const button=page.getByRole('button',{name:'More actions',exact:true});
  const box=await button.boundingBox();
