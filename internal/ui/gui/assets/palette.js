@@ -1,5 +1,5 @@
 // The command palette (⌘K, Ctrl+K): find a session and act on it, or run any command, from the keyboard.
-import { cloudOf, api, h, fill, icon, ICONS, state, go, current, toast, fail, agentBadge, entries, here, $, sys, keys, clouds, selected, cloudTitle } from "./core.js";
+import { cloudOf, api, h, fill, icon, ICONS, state, go, current, toast, fail, agentBadge, entries, here, $, sys, keys, clouds, selected, cloudTitle, pending } from "./core.js";
 import { pickHandoff } from "./handoff.js";
 import { actionsFor, statusOf, render as renderSessions, reveal, pasteDialog, showEntry, listCommand } from "./sessions.js";
 import { list } from "./listview.js";
@@ -146,7 +146,7 @@ function runAt(i, second) {
   const fn = second ? it.second : it.run;
   if (!fn) return;
   pal.close();
-  fn();
+  return pending(it.label, fn, "palette:" + it.label).catch(fail);
 }
 
 export function openPalette() {

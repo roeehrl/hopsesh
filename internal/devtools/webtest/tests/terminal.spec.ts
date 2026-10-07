@@ -25,6 +25,7 @@ async function openFake(page: Page, q = ""): Promise<{ id: string }> {
 async function terminal(context: BrowserContext): Promise<Page> {
   const t = await context.newPage();
   await t.goto("/terminal/?renderer=dom");
+  await expect(t.locator("#connection")).toBeHidden(); // the asynchronous module and stream are ready
   return t;
 }
 

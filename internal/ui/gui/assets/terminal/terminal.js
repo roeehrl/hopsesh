@@ -573,7 +573,13 @@ function announce(t) {
 
 // ---- wiring -------------------------------------------------------------------------------
 
-request = watchTabs(onMessage);
+request = watchTabs(onMessage, connected => {
+  const el = $("#connection");
+  el.hidden = connected;
+  el.textContent = connected ? "" : "Connecting to Hopsesh… Terminal controls will be ready when the connection returns.";
+  $("#new-shell").disabled = !connected;
+  $("#empty-shell").disabled = !connected;
+});
 $("#new-shell").onclick = () => request({ op: "shell", id: active });
 $("#empty-shell").onclick = () => request({ op: "shell", id: "" });
 $("#back").onclick = () => request({ op: "main" });

@@ -1,5 +1,5 @@
 // The Settings screen, in tabs: General, Agents, Terminal, Skill, Command line, Updates.
-import { api, h, fill, view, state, screen, go, loading, toast, fail, dialog, agentBadge, sys, cliHow, icon, ask, count, current } from "./core.js";
+import { api, h, fill, view, state, screen, go, loading, toast, fail, dialog, agentBadge, sys, cliHow, icon, ask, count, current, loadError, navigationID, errText } from "./core.js";
 import { desktopSettings } from "./desktop-settings.js";
 import { running } from "./term.js";
 
@@ -41,7 +41,7 @@ function cloudRow(a, c) {
 }
 
 let tab = "general";
-let s = null;
+let s = null, saving = false;
 
 const chip = ([text, cls]) => h("span", { class: "chip " + cls }, text);
 const title = (t, desc) => h("div", { style: "display:flex;flex-direction:column;gap:2px;min-width:0;flex:1 1 300px" }, h("span", { style: "font-weight:500" }, t), desc ? h("span", { class: "muted", style: "font-size:12px" }, desc) : null);
@@ -50,15 +50,19 @@ const card = (...kids) => h("section", { class: "card" }, h("div", { class: "dlg
 // Refresh shared defaults before acknowledging a save: the user can immediately
 // leave Settings and open a plan, which captures defaults from state.info.
 async function run(fn, done) {
+  if (saving) return;
+  saving = true; render();
   try {
     await fn();
     state.info = await api("Info");
     if (done) toast(done);
   } catch (e) { fail(e); }
+  saving = false;
   await load();
 }
 
 function save(patch) {
+  if (saving) return;
   // Apply the privacy switch before navigating away: returning to Sessions must
   // never briefly reveal a preview while SaveSettings/Info are still in flight.
   if (patch.previews !== undefined) state.info.previews = patch.previews;
@@ -120,16 +124,20 @@ function agents() {
 
 // terminal is Settings → Terminal: where sessions and steps open, the user's terminal app,
 // and the hopsesh Terminal window.
-let ds = null;
-function desktop() { return ds ? [desktopSettings({...ds,os:state.info.os})] : [h("p", {}, "Reading desktop settings…")]; }
-let ts = null;
+let ds = null, desktopError = null;
+function desktop() { if (desktopError) return [loadError(desktopError, load)]; return ds ? [desktopSettings({...ds,os:state.info.os})] : [h("p", {}, "Reading desktop settings…")]; }
+let ts = null, terminalError = "", loadSequence = 0;
 async function setTerm(patch) {
+  if (saving) return;
+  saving = true;
   const next = Object.assign({ app: ts.app, where: ts.where, font: ts.font, fontSize: ts.fontSize, scrollback: ts.scrollback, keepTabs: ts.keepTabs,
     notify: ts.notify, closeEnded: ts.closeEnded, screenReader: ts.screenReader, systemConsole: ts.systemConsole }, patch);
-  ts = Object.assign({}, ts, patch); // a second change before this one's answer builds on it
+  ts = Object.assign({}, ts, patch); // reflect this change while the form is locked
+  render();
   try { await api("SetTerminalSettings", next); toast("Saved"); } catch (e) { fail(e); }
   ts = await api("TerminalSettings").catch(() => ts);
   state.info = await api("Info").catch(() => state.info);
+  saving = false;
   if (current === "settings") render(); // unless the user went on meanwhile
 }
 function seg(label, value, choices, onpick) {
@@ -138,6 +146,7 @@ function seg(label, value, choices, onpick) {
 }
 const SHIELD = "M12 3 5 6v6c0 4.2 2.9 7.6 7 9 4.1-1.4 7-4.8 7-9V6z";
 function terminal() {
+  if (terminalError) return [loadError(terminalError, loadTerminal)];
   if (!ts) return [h("div", { class: "loading", role: "status" }, "Reading the terminal settings…")];
   const name = ts.name || sys.terminal;
   const installed = (ts.apps || []).filter((a) => a.installed);
@@ -296,14 +305,27 @@ function render() {
         } }, label)),
       h("button", {class:"tab",onclick:()=>go("accounts")}, "Accounts"),
       h("span", { class: "spacer" })),
-    h("div", { class: "page", role: "tabpanel", "aria-labelledby": "tab-" + tab }, h("div", { class: "page-in", style: "max-width:760px" }, h("h1", {}, name), body()))));
+    h("div", { class: "page", role: "tabpanel", "aria-labelledby": "tab-" + tab }, h("div", { class: "page-in", style: "max-width:760px" }, h("h1", {}, name), saving ? h("p", { role: "status" }, "Saving changes…") : null, h("fieldset", { class: "settings-fields", disabled: saving, "aria-busy": String(saving) }, body())))));
 }
 
+async function loadTerminal() {
+  terminalError = ""; ts = null;
+  if (current === "settings" && tab === "terminal") render();
+  const n = loadSequence, visit = navigationID();
+  try { const result = await api("TerminalSettings"); if (n !== loadSequence || visit !== navigationID()) return; ts = result; }
+  catch (e) { if (n !== loadSequence || visit !== navigationID()) return; terminalError = errText(e); }
+  if (current === "settings" && tab === "terminal") render();
+}
 async function load() {
-  try { s = await api("Settings"); ds = await api("DesktopSettings"); } catch (e) { fail(e); return; }
-  if (current !== "settings") return;
+  const n = ++loadSequence, visit = navigationID();
+  const [settings, desktop] = await Promise.allSettled([api("Settings"), api("DesktopSettings")]);
+  if (n !== loadSequence || visit !== navigationID() || current !== "settings") return;
+  if (settings.status === "rejected") { fill(view, loadError(settings.reason, load)); return; }
+  s = settings.value;
+  ds = desktop.status === "fulfilled" ? desktop.value : null;
+  desktopError = desktop.status === "rejected" ? desktop.reason : null;
   render();
-  api("TerminalSettings").then((t) => { ts = t; if (tab === "terminal" && current === "settings") render(); }).catch(() => {});
+  await loadTerminal();
 }
 
 screen("settings", async (which) => {

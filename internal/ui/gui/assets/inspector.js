@@ -149,13 +149,13 @@ function conversation(e) {
   clearTimeout(previewTimer);
   previewTimer = setTimeout(async () => {
     let p;
-    try { p = await api("Preview", e.machine, e.key, wantN.get(e.machine + e.key) || 4); } catch (err) { p = { items: [], note: "Preview not available: " + errText(err) }; }
+    try { p = await api("Preview", e.machine, e.key, wantN.get(e.machine + e.key) || 4); } catch (err) { p = { items: [], failed: true, note: "Preview not available: " + errText(err) }; }
     if (body.isConnected && state.info?.previews) fillConversation(body, e, p);
   }, 120);
   return section("conversation", "Recent conversation", true, null, body);
 }
 
-const skeleton = () => h("div", { class: "skel", "aria-hidden": "true" }, h("span", { style: "width:30%" }), h("span", { style: "width:92%" }), h("span", { style: "width:70%" }));
+const skeleton = () => h("div", { class: "skel", role: "status" }, h("span", { class: "visually-hidden" }, "Reading conversation…"), h("span", { style: "width:30%" }), h("span", { style: "width:92%" }), h("span", { style: "width:70%" }));
 
 const who = (e) => AGENT_SHORT[e.agent] || e.agentName;
 function stamp(iso) { return iso ? h("span", { class: "msg-t", title: when(iso) }, ago(iso)) : null; }
@@ -209,6 +209,7 @@ function fillConversation(body, e, p) {
   kids.push(previewItems(e, p));
   if (p.note) kids.push(h("span", { class: "muted", style: "font-size:12px" }, p.note));
   else if (!(p.items || []).length) kids.push(h("span", { class: "muted", style: "font-size:12px" }, "No messages yet."));
+  if (p.failed) kids.push(h("button", { class: "link", onclick: () => refresh(e) }, "Try again"));
   kids.push(h("span", { class: "conv-foot" },
     p.more ? h("button", { class: "link", onclick: () => { const k = e.machine + e.key; wantN.set(k, (wantN.get(k) || 4) + 10); refresh(e); } }, "Load earlier") : null,
     h("button", { class: "link", onclick: () => transcript(e) }, "Open transcript")));
@@ -232,9 +233,9 @@ export async function transcript(e, n = 40) {
     h("footer", { class: "sheet-foot" }, h("span", { class: "spacer" }), h("button", { class: "btn primary", onclick: () => sheet.close() }, "Close"))));
   if (!sheet.open) sheet.showModal();
   let p;
-  try { p = await api("Preview", e.machine, e.key, n); } catch (err) { p = { items: [], note: errText(err) }; }
+  try { p = await api("Preview", e.machine, e.key, n); } catch (err) { p = { items: [], failed: true, note: errText(err) }; }
   body.removeAttribute("aria-busy");
-  fill(body, p.note ? h("span", { class: "muted" }, p.note) : null, previewItems(e, p, 1000, 1000),
+  fill(body, p.failed ? h("button", { class: "btn", onclick: () => transcript(e, n) }, "Try again") : null, p.note ? h("span", { class: "muted" }, p.note) : null, previewItems(e, p, 1000, 1000),
     p.more ? h("button", { class: "link", style: "align-self:flex-start", onclick: () => transcript(e, n + 40) }, "Load earlier") : null);
   for (const x of body.querySelectorAll(".msg-x")) x.classList.add("open");
 }
@@ -252,7 +253,7 @@ export function renameDialog(e) {
     toast(`Renamed to “${t}”. ${e.agentName} shows it too; Activity undoes it.`);
     await renamed();
   };
-  input.onkeydown = (ev) => { if (ev.key === "Enter") { ev.preventDefault(); go(); } };
+  input.onkeydown = (ev) => { if (ev.key === "Enter") { ev.preventDefault(); d.querySelector(".btn.primary").click(); } };
   const d = dialog(h("h2", { style: "margin:0;font-size:16px" }, "Rename session"),
     h("label", { for: "rename-title", style: "font-size:12.5px" }, "Title"), input,
     h("span", { class: "muted", style: "font-size:12px" }, `${e.agentName} keeps it in its own data, as its own rename does, so its session list shows it too.`), msg,
@@ -326,7 +327,7 @@ function details(e) {
   const id = e.cloud ? e.cloud.id : e.session || e.key.split("/").pop();
   return section("details", "Details", false, null, h("dl", { class: "kv wide" },
     kv("Session ID", h("span", { class: "id-line" }, h("span", { class: "mono", style: "font-size:11.5px" }, id),
-      h("button", { class: "btn small", "aria-label": "Copy session ID", onclick: async () => { await api("CopyText", id).catch(fail); toast("Copied the session ID"); } }, "Copy"))),
+      h("button", { class: "btn small", "aria-label": "Copy session ID", onclick: async () => { await api("CopyText", id); toast("Copied the session ID"); } }, "Copy"))),
     kv("File", e.path ? path(e.path, 11) : null),
     kv("Size", e.sizeKB ? bytes(e.sizeKB * 1024) : null),
     kv("Agent", [e.agentName, e.agentVersion ? " " + e.agentVersion : ""].join("")),

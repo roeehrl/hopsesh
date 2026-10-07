@@ -16,6 +16,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Show pending actions, screen loading, retryable read failures, and terminal
+  connection status throughout the GUI and Quick access. Keep previous sessions
+  visible during refresh, lock pending saves, prevent repeated session launches,
+  ignore obsolete navigation/plan responses, and stop reporting failed copies as
+  successful. Add delayed/failing-response browser scenarios to the CI GUI matrix.
+
 - Show a startup screen immediately while the bridge and first scan load. Report
   module/initialization failures with a reload action; keep shortcuts from operating
   on an uninitialized inventory and offer recovery when startup is unusually slow.

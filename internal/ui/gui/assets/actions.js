@@ -4,7 +4,7 @@
 // off to ‹cloud›… (to a cloud). model(e) is a session's whole action row: its status line,
 // the primary (a split button whose menu lists the other places), Move ▾ and ⋯; the row's
 // button, ↩, ⌘↩ and the palette all come from it.
-import { api, state, sys, here, agentInfo, cloudOf, cloudTitle, toast, fail, errText, cap, entries, count, ago, h, icon, ICONS, agentBadge } from "./core.js";
+import { api, state, sys, here, agentInfo, cloudOf, cloudTitle, toast, fail, errText, cap, entries, count, ago, h, icon, ICONS, agentBadge, pending } from "./core.js";
 import { returnActions, returnChooser, showMovementDestination } from "./returns.js";
 import { planFor } from "./plan.js";
 import { tabs, resume, showTerminal, moveToTerminal, openShell, signIn } from "./term.js";
@@ -93,7 +93,10 @@ export function defaultPlace(e) {
 
 // resumeIn resumes a session in a place; picked from the menu, the place becomes the
 // agent's default.
-export async function resumeIn(e, place, remember = false) {
+export function resumeIn(e, place, remember = false) {
+  return pending(`Opening ${e.title}`, () => resumeOnce(e, place, remember), `resume:${key(e)}`);
+}
+async function resumeOnce(e, place, remember) {
   if (remember && place !== defaultPlace(e)) {
     try {
       await api("SetPlace", e.agent, place);
@@ -311,7 +314,7 @@ function more(e, local) {
       try { await api("CopyText", await api("ResumeCommand", e.machine, e.key)); toast("Copied the resume command"); } catch (err) { fail(err); }
     } });
   }
-  out.push({ id: "copy-id", label: "Copy session ID", run: async () => { await api("CopyText", e.cloud ? e.cloud.id : e.session || e.key.split("/").pop()).catch(fail); toast("Copied the session ID"); } });
+  out.push({ id: "copy-id", label: "Copy session ID", run: async () => { await api("CopyText", e.cloud ? e.cloud.id : e.session || e.key.split("/").pop()); toast("Copied the session ID"); } });
   if (!e.cloud) {
     out.push({ id: "rename", label: "Rename…", disabled: !e.canRename, why: e.canRename ? "" : `hopsesh can't rename ${e.agentName} sessions`, run: () => renameFn(e) });
     out.push({ id: "transcript", label: "Open transcript", disabled: !e.canPreview || !state.info?.previews,

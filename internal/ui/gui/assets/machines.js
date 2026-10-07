@@ -1,6 +1,6 @@
 // The Machines screen: this machine (and whether it receives sessions), the machines you
 // added, and the ones discovery found. hopsesh connects only to machines you added.
-import { api, h, fill, icon, ICONS, view, state, screen, loading, toast, fail, errText, cap, dialog, ask, machineStatus, sys, when, current, rich } from "./core.js";
+import { api, h, fill, icon, ICONS, view, state, screen, loading, toast, fail, errText, cap, dialog, ask, machineStatus, sys, when, current, rich, navigationID, loadError } from "./core.js";
 import { signIn, onSignedIn } from "./term.js";
 
 // A sign-in tab ended well: the card shows the new check.
@@ -11,9 +11,17 @@ const scanning = new Set();
 const scanErrors = new Map();
 
 
+let read = 0;
 async function reload() {
-  try { data = await api("Machines"); } catch (e) { fail(e); }
-  if (current === "machines") render();
+  const n = ++read, visit = navigationID();
+  try {
+    const result = await api("Machines");
+    if (n !== read || visit !== navigationID()) return;
+    data = result;
+    if (current === "machines") render();
+  } catch (e) {
+    if (n === read && visit === navigationID() && current === "machines") fill(view, loadError(e, reload));
+  }
 }
 
 // after reloads what a change affects; machine changes also need a new scan.
@@ -98,7 +106,7 @@ function machineRow(m) {
       h("button", { class: "btn small danger", onclick: async () => {
         if (!await ask({ title: `Remove ${m.name}?`, body: "hopsesh stops connecting to it and forgets its remembered password. Its sessions stay where they are.", ok: "Remove", danger: true })) return;
         try { await api("RemoveHost", m.name); toast(`Removed ${m.name}`); } catch (e) { fail(e); }
-        after();
+        await after();
       } }, "Remove")));
 }
 
@@ -111,7 +119,7 @@ function foundRow(f) {
     h("div", { style: "display:flex;justify-content:flex-end" }, h("button", { class: "btn small outline", onclick: async () => {
       if (f.owner && !await ask({ title: `Add ${f.name}?`, body: `It belongs to ${f.owner}. hopsesh would log in to it with your SSH setup and read its coding agents' session folders.`, ok: "Add it" })) return;
       try { await api("SetAllowed", f.name, f.destination, true); toast(`Added ${f.name}`); } catch (e) { fail(e); }
-      after(true, f.name);
+      await after(true, f.name);
     } }, "Add")));
 }
 
@@ -122,7 +130,7 @@ function cloudCard(c) {
     onclick: async () => {
       try { await api("SetCloudAllowed", c.name, !c.allowed); } catch (e) { fail(e); return; }
       toast(!c.allowed ? `${c.title} is on: hopsesh reaches it through ${c.driver}, signed in as you` : `${c.title} is off: hopsesh leaves it alone`);
-      after();
+      await after();
     } });
   const kv = (label, ...value) => [h("dt", {}, label), h("dd", {}, ...value)];
   const t = c.test;
@@ -225,7 +233,7 @@ function render() {
     onclick: async () => {
       try { await api("SetReceive", !d.here.receive); } catch (e) { fail(e); return; }
       toast(!d.here.receive ? `${sys.Here} now receives sessions` : `${sys.Here} no longer receives sessions`);
-      after(false);
+      await after(false);
     } });
   fill(view, h("div", { class: "page" }, h("div", { class: "page-in" },
     h("h1", {}, "Machines"),
@@ -252,8 +260,10 @@ function render() {
 }
 
 function trustDialog(name) {
-  const d = dialog(h("div", { role: "status" }, `Fetching ${name}'s host keys…`));
-  api("ScanKeys", name).then((k) => {
+  const progress = h("div", { class: "loading", role: "status" }, `Fetching ${name}'s host keys…`);
+  const d = dialog(progress, h("button", { class: "btn", onclick: () => d.close() }, "Cancel"));
+  return api("ScanKeys", name).then((k) => {
+    if (!d.open || !progress.isConnected) return;
     dialog(
       h("h2", { style: "margin:0;font-size:16px" }, `Host keys of ${name}`),
       h("div", { class: "mono muted", style: "font-size:11px" }, k.address),
@@ -261,8 +271,8 @@ function trustDialog(name) {
       k.verified ? h("div", { class: "ok" }, "✓ " + k.verified)
         : h("div", { class: "warn", style: "font-size:12.5px;line-height:1.5" }, "Not independently verified. Compare with ", h("span", { class: "mono" }, "ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub"), " on that machine."),
       h("div", { class: "dlg-foot" }, h("button", { class: "btn", onclick: () => d.close() }, "Cancel"),
-        h("button", { class: "btn primary", onclick: async () => { try { await api("TrustHost", name); toast(`${name} trusted`); } catch (e) { fail(e); } d.close(); after(true, name); } }, "Trust these keys")));
-  }).catch((e) => dialog(h("div", { class: "err" }, errText(e)), h("div", { class: "dlg-foot" }, h("button", { class: "btn", onclick: () => d.close() }, "Close"))));
+        h("button", { class: "btn primary", onclick: async () => { try { await api("TrustHost", name); toast(`${name} trusted`); } catch (e) { fail(e); } d.close(); return after(true, name); } }, "Trust these keys")));
+  }).catch((e) => { if (d.open && progress.isConnected) dialog(loadError(e, () => trustDialog(name)), h("button", { class: "btn", onclick: () => d.close() }, "Close")); });
 }
 
 function addDialog() {
@@ -282,7 +292,7 @@ function addDialog() {
       h("button", { class: "btn primary", onclick: async () => {
         if (!name.value.trim() || !dest.value.trim()) { msg.textContent = "Give it a name and an SSH destination."; return; }
         try { await api("AddHost", name.value.trim(), dest.value.trim(), pw.checked, remember.checked); } catch (e) { msg.textContent = errText(e); return; }
-        d.close(); toast(`Added ${name.value.trim()}`); after(true, name.value.trim());
+        d.close(); toast(`Added ${name.value.trim()}`); return after(true, name.value.trim());
       } }, "Add")));
   name.focus();
 }
@@ -304,7 +314,7 @@ function loginDialog(m) {
       const r = await api("SetupKeyLogin", m.name, createKey);
       d.close();
       toast(r.created ? `Created ${r.publicKey}; ${m.name} now logs in with it` : `${m.name} now logs in with your key`);
-      after(true, m.name);
+      await after(true, m.name);
     } catch (e) {
       if (errText(e).includes("no-key")) {
         msg.className = "warn";
@@ -321,21 +331,22 @@ function loginDialog(m) {
       `Set up key login adds ${sys.here}'s public SSH key to the machine (one password login), checks that it works, then stops using the password.`) : null,
     msg,
     h("div", { class: "dlg-foot" },
-      m.auth === "password" && m.keychain ? h("button", { class: "btn", onclick: async () => { try { await api("ForgetPassword", m.name); toast("Forgot the remembered password"); } catch (e) { fail(e); } d.close(); after(); } }, "Forget password") : null,
+      m.auth === "password" && m.keychain ? h("button", { class: "btn", onclick: async () => { try { await api("ForgetPassword", m.name); toast("Forgot the remembered password"); } catch (e) { fail(e); } d.close(); return after(); } }, "Forget password") : null,
       m.auth === "password" ? h("button", { class: "btn", onclick: () => setup(false) }, "Set up key login") : null,
       h("span", { class: "spacer" }),
       h("button", { class: "btn", onclick: () => d.close() }, "Cancel"),
       h("button", { class: "btn primary", onclick: async () => {
         try { await api("SetAuth", m.name, pass.checked ? "password" : "key", remember.checked); } catch (e) { fail(e); return; }
-        d.close(); after(true, m.name);
+        d.close(); return after(true, m.name);
       } }, "Save")));
 }
 
 // The Machines screen; "clouds" scrolls to the clouds.
 screen("machines", async (at) => {
   if (!data) loading("Looking for your machines (nothing is contacted)…");
+  const visit = navigationID();
   await reload();
-  if (current !== "machines") return;
+  if (current !== "machines" || visit !== navigationID()) return;
   const to = at === "clouds" && view.querySelector("#clouds"), pg = view.querySelector(".page");
   if (to && pg) pg.scrollTop += to.getBoundingClientRect().top - pg.getBoundingClientRect().top - 12; // the page scrolls, never the window
 });

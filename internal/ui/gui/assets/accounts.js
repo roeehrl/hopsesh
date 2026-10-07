@@ -1,9 +1,10 @@
-import {api,h,fill,view,state,screen,go,here,toast,fail,ask,errText,current} from './core.js';
+import {api,h,fill,view,state,screen,go,here,toast,fail,ask,errText,current,navigationID} from './core.js';
 let accounts=[], query='', tag='', group='machine', busy=false, problem='';
 const collapsed=new Set();
 const text=(p)=>[p.name,p.agent,p.machine,p.root,p.account?.email,...(p.tags||[])].join(' ').toLowerCase();
 const status=(p)=>p.error || p.account?.isolationWhy || (p.stale?'Machine has not been checked':p.account?.loggedIn ? `${p.account.email || p.account.label || p.account.provider} · ${p.account.confidence || 'unverified'} identity`:'Sign-in not verified');
-async function reload(){accounts=await api('Accounts');if(current==='accounts')render();}
+let read=0;
+async function reload(){const n=++read,visit=navigationID();const result=await api('Accounts');if(n!==read||visit!==navigationID())return;accounts=result;if(current==='accounts')render();}
 async function scan(){if(busy)return;busy=true;problem='';render();try{state.scan=await api('ScanAccounts');state.stale=true;await reload();}catch(e){problem=errText(e)}finally{busy=false;if(current==='accounts')render()}}
 function editor(p){
  const dlg=document.createElement('dialog');dlg.className='account-editor';
@@ -14,7 +15,7 @@ function editor(p){
  const root=h('input',{class:'field',placeholder:'Leave empty to create a new local profile'});
  const error=h('p',{class:'err',role:'alert'});
  const submit=h('button',{class:'btn primary',type:'submit'},p?'Save changes':'Add account');
- const form=h('form',{onsubmit:async ev=>{ev.preventDefault();submit.disabled=true;try{const ts=tags.value.split(',');if(p)await api('EditAccount',p.id,name.value,ts,p.generation);else await api('RegisterAccount',machine.value,agent.value,name.value,root.value,ts);state.stale=true;dlg.close();await scan();}catch(e){error.textContent=errText(e);submit.disabled=false}}},
+ const form=h('form',{onsubmit:async ev=>{ev.preventDefault();error.textContent="";try{const ts=tags.value.split(',');if(p)await api('EditAccount',p.id,name.value,ts,p.generation);else await api('RegisterAccount',machine.value,agent.value,name.value,root.value,ts);state.stale=true;dlg.close();await scan();}catch(e){error.textContent=errText(e)}}},
  h('h2',{},p?'Edit account':'Add an account'),h('p',{class:'muted'},'Names and tags are yours. Two personal accounts, multiple work accounts, or any combination.'),
  h('label',{},'Name',name),!p?h('label',{},'Agent',agent):null,!p?h('label',{},'Machine',machine):null,
  !p?h('label',{},'Existing state root (optional)',root):null,h('label',{},'Tags, separated by commas',tags),
@@ -40,4 +41,4 @@ function render(){
  !visible.length?h('p',{class:'muted'},'No matching accounts. Scan known roots or add an account.'):null,
  h('p',{class:'muted'},'Discovery checks known default roots and registered roots on allowed machines. Sign-in metadata can be limited; a matching email is never treated as proof of account identity.'))));
 }
-screen('accounts',async()=>{try{await reload();if(!accounts.length)await scan()}catch(e){fail(e)}});
+screen('accounts',async()=>{const visit=navigationID();await reload();if(visit===navigationID()&&!accounts.length)await scan()});

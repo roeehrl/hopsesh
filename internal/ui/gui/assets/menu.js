@@ -27,7 +27,7 @@ function item(it, level) {
       if (it.disabled) return;
       if (it.submenu) { openSub(el, it, level); return; }
       if (!it.keep) closeAll(true);
-      it.run?.(ev);
+      return it.run?.(ev);
     },
     onpointerenter: () => { if (it.submenu && !it.disabled) openSub(el, it, level); else closeFrom(level + 1); },
   },

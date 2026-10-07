@@ -131,3 +131,5 @@ button, input { font: inherit; color: inherit; }
 #toast.show { opacity: 1; }
 
 .strip > #back { margin-bottom: 0; }
+
+#connection { padding:10px 16px; font-size:12px; background:var(--bar); flex-shrink:0; }

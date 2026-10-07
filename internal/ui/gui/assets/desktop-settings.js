@@ -23,7 +23,7 @@ export function desktopSettings(initial) {
    toggle('login','Start Hopsesh at login',s.login),close,
    toggle('attention','Show an attention indicator',p.attention!==false),toggle('previews','Show message previews in Quick access',p.previews!==false),
    win?h('p',{class:'muted'},'Windows may place the icon under Show hidden icons. Pinned shortcuts stay under your control.'):null,
-   h('div',{class:'desktop-buttons'},save,s.effective!=='app'?h('button',{class:'btn',onclick:()=>api('QuickShow').catch(e=>{error.textContent=String(e.message||e)})},'Open Quick access'):null,h('button',{class:'btn',disabled:busy,onclick:async()=>{try{s={...await api('RecheckDesktop'),os};paint();}catch(e){error.textContent=String(e.message||e)}}},'Check support again')),error,h('p',{role:'status','aria-live':'polite'}));
+   h('div',{class:'desktop-buttons'},save,s.effective!=='app'?h('button',{class:'btn',onclick:()=>api('QuickShow').catch(e=>{error.textContent=String(e.message||e)})},'Open Quick access'):null,h('button',{class:'btn',disabled:busy,onclick:async()=>{if(busy)return;busy=true;paint();try{s={...await api('RecheckDesktop'),os};}catch(e){s={...s,error:String(e.message||e)}}finally{busy=false;paint()}}},'Check support again')),error,h('p',{role:'status','aria-live':'polite'}));
  };
  paint();return root;
 }

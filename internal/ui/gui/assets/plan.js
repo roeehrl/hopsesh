@@ -22,11 +22,11 @@ export async function planFor(e, { target = "", sendTo = "", codeOnly = false, t
     sendTo ? `Asking hopsesh on ${sendTo} to plan it…` : "Working out the plan…")));
   if (!sheet.open) sheet.showModal();
   const c=cur;
-  try {c.profiles = e.cloud?[]:await api("AccountDestinations", sendTo, target || e.agent);} catch {c.profiles=[];}
+  try {c.profiles = e.cloud?[]:await api("AccountDestinations", sendTo, target || e.agent);} catch (err) { if (cur === c) problem(errText(err), { label: "Try again", run: () => planFor(e, { target, sendTo, codeOnly, targetProfile, targetSession, bounded, fork, returnCandidate }) }); return; }
   if(cur!==c)return;
   if(!c.returnCandidate && !c.opts.targetProfile && c.profiles.length && !c.profiles.some(p=>p.default)) {
     fill(sheet,h("div",{class:"sheet-in"},h("div",{class:"sheet-body"},h("h2",{},"Choose a destination account"),
-      ...c.profiles.map(p=>h("button",{class:"btn",onclick:()=>{c.opts.targetProfile=p.id;replan()}},`${p.name} · ${p.account?.email||p.agent}`))),
+      ...c.profiles.map(p=>h("button",{class:"btn",onclick:()=>{c.opts.targetProfile=p.id;return replan()}},`${p.name} · ${p.account?.email||p.agent}`))),
       h("div",{class:"sheet-foot"},h("button",{class:"btn",onclick:()=>sheet.close()},"Cancel"))));return;
   }
   await replan();
@@ -41,25 +41,34 @@ export async function planPicked(cloud, id, checkout, target = "") {
   await replan();
 }
 
+let planning = Promise.resolve();
 async function replan() {
   const c = cur;
+  if (!c) return;
+  const revision = c.revision = (c.revision || 0) + 1;
   c.busy = true;
   const btn = sheet.querySelector("#go");
   if (btn) { btn.disabled = true; btn.firstChild.textContent = "Updating the plan…"; }
   try {
-    const p = c.picked ? await api("PlanPicked", c.picked.cloud, c.picked.id, c.opts.targetDir || c.picked.checkout, c.target, c.opts)
-      : c.sendTo ? await api("PushPlan", c.e.key, c.sendTo, c.target, c.opts) : await api("Plan", c.e.machine, c.e.key, c.target, c.opts);
-    if (cur !== c) return;
+    const request = planning.then(() => {
+      if (cur !== c || c.revision !== revision) return null;
+      return c.picked ? api("PlanPicked", c.picked.cloud, c.picked.id, c.opts.targetDir || c.picked.checkout, c.target, c.opts)
+      : c.sendTo ? api("PushPlan", c.e.key, c.sendTo, c.target, c.opts) : api("Plan", c.e.machine, c.e.key, c.target, c.opts);
+    });
+    planning = request.catch(() => {});
+    const p = await request;
+    if (cur !== c || c.revision !== revision || !p) return;
     c.plan = p;
     c.busy = false;
     render();
   } catch (err) {
+    if (cur !== c || c.revision !== revision) return;
     c.busy = false;
-    if (cur === c) problem(errText(err), c.plan ? { label: "Back to the plan", run: render } : null);
+    if (cur === c) problem(errText(err), { label: "Try again", run: replan });
   }
 }
 
-const set = (k, v) => { cur.opts[k] = v; replan(); };
+const set = (k, v) => { cur.opts[k] = v; return replan(); };
 
 function problem(msg, back) {
   fill(sheet, h("div", { class: "sheet-in" },
@@ -84,7 +93,7 @@ function check(label, key, desc, value = cur.opts[key], to = (on) => on) {
 
 async function chooseFolder() {
   const d = await api("ChooseFolder", "Where should the session continue?").catch(fail);
-  if (d) { cur.opts.targetDir = d; cur.opts.clone = false; replan(); }
+  if (d) { cur.opts.targetDir = d; cur.opts.clone = false; return replan(); }
 }
 
 function summary(p) {
@@ -175,7 +184,7 @@ function repository(p) {
     const dest = h("input", { class: "field mono", style: "flex:1 1 260px", value: r.localPath, "aria-label": "Clone into" });
     out.push(item("warn", `Not found ${there}`, `Matched by its remote, ${r.identity}. hopsesh looked in your repos folder and the usual places.`,
       h("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap" }, h("span", { class: "muted", style: "font-size:12px" }, "Clone into"), dest,
-        h("button", { class: "btn primary small", onclick: () => { o.clone = true; o.reposDir = dest.value.replace(/[/\\][^/\\]+[/\\]?$/, ""); replan(); } }, "Clone for me"),
+        h("button", { class: "btn primary small", onclick: () => { o.clone = true; o.reposDir = dest.value.replace(/[/\\][^/\\]+[/\\]?$/, ""); return replan(); } }, "Clone for me"),
         p.machine ? null : h("button", { class: "btn small", onclick: chooseFolder }, "I already have it…"))));
   }
   if (r.action === "none") out.push(p.sourceCwd === p.targetCwd ? item("ok", "The same folder", "The session stays where it was started.")
@@ -202,7 +211,7 @@ function blocker(p, b) {
   const o = cur.opts, cont = p.continue;
   if (cur.returnCandidate && /cannot append to a native replica under an unverified account binding/.test(b)) return item("err", plain(b),
     "The original cannot be safely updated under this account binding. Review creating a new session on a separate branch; both existing sessions will be preserved.",
-    h("button", {class:"btn small",onclick:()=>{Object.assign(cur.opts,{targetSession:"",fork:true,newReplica:true,conflict:"keep-both"});replan();}}, "Review keeping both as separate sessions"));
+    h("button", {class:"btn small",onclick:()=>{Object.assign(cur.opts,{targetSession:"",fork:true,newReplica:true,conflict:"keep-both"});return replan();}}, "Review keeping both as separate sessions"));
   if (/^--via import only/.test(b)) return item("err", `${p.agent}'s importer only starts a new session`, "", h("button", { class: "btn small", style: "align-self:flex-start", onclick: () => set("via", "") }, "Use hopsesh's conversion instead"));
   if (/^--via import reads/.test(b)) return item("err", `${p.agent}'s importer needs ${cont.from} installed here`, "", h("button", { class: "btn small", style: "align-self:flex-start", onclick: () => set("via", "") }, "Use hopsesh's conversion instead"));
   if (p.conflict && b.startsWith(p.conflict)) return item("err", "Both copies changed: " + p.conflict, "Nothing is merged. Pick what to keep.",
@@ -338,7 +347,7 @@ function renderFetch(p) {
         h("div", { style: "display:flex;align-items:center;gap:10px;flex-wrap:wrap" }, h("span", { class: "sec-h" }, "The conversation"), h("span", { class: "spacer" }),
           targets.length > 1 ? [h("span", { class: "muted", style: "font-size:12px" }, into ? "Write it into" : "Continue in"),
             h("div", { class: "seg", role: "radiogroup", "aria-label": into ? "Write it into" : "Continue in" }, targets.map((t) => h("button", { role: "radio", "aria-checked": t.id === target.id ? "true" : "false",
-              onclick: () => { cur.target = t.id === own.id && !into ? "" : t.id; replan(); } }, t.name)))] : null),
+              onclick: () => { cur.target = t.id === own.id && !into ? "" : t.id; return replan(); } }, t.name)))] : null),
         h("div", { class: "fid " + fidKind }, h("b", {}, fidLabel), h("span", {}, f.conversation)),
         !f.continueIn && targets.length > 1 && f.terminal ? h("span", { class: "muted", style: "font-size:12px" }, `In ${targets[1].name} instead: copied by ${p.fromAgent}, then converted (tool calls become text).`) : null,
         f.write ? h("span", { class: "muted", style: "font-size:12px" }, `hopsesh writes it as a new ${f.writer} session (${count(f.messages, "message")}), in the worktree with the ${noun}'s code.`) : null),
@@ -396,10 +405,12 @@ function checkItem(p, c) {
 
 // chooseCheckout picks the repository checkout a cloud session comes into.
 async function chooseCheckout() {
-  const ks = await api("Checkouts").catch(() => []);
+  const c = cur;
+  const ks = await api("Checkouts");
+  if (cur !== c || !sheet.open) return;
   const sel = h("select", { style: "width:100%", "aria-label": "Repository" }, ks.map((k) => h("option", { value: k.path }, `${k.name} · ${k.identity}`)));
-  const box = h("div", { class: "item" }, sel, h("button", { class: "btn small", onclick: () => { cur.opts.targetDir = sel.value; replan(); } }, "Use it"),
-    h("button", { class: "btn small", onclick: async () => { const d = await api("ChooseFolder", "The repository's checkout").catch(fail); if (d) { cur.opts.targetDir = d; replan(); } } }, "Another folder…"));
+  const box = h("div", { class: "item" }, sel, h("button", { class: "btn small", onclick: () => { cur.opts.targetDir = sel.value; return replan(); } }, "Use it"),
+    h("button", { class: "btn small", onclick: async () => { const d = await api("ChooseFolder", "The repository's checkout").catch(fail); if (d) { cur.opts.targetDir = d; return replan(); } } }, "Another folder…"));
   sheet.querySelector(".sheet-body")?.prepend(box);
 }
 
