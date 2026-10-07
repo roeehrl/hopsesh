@@ -99,6 +99,11 @@ func terminalCheck(svc *gui.App, argv string) {
 		report("error: %v\n", err)
 		return
 	}
+	// Repeated requests while the native window is still being constructed must
+	// not focus a half-created WebView2 controller or start another process.
+	for range 3 {
+		svc.Terms.Show()
+	}
 	s, _ := svc.Terms.Manager().Get(info.ID)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()

@@ -153,6 +153,8 @@ type TermPrefs struct {
 // Terminals holds the app's terminal tabs and their window.
 type Terminals struct {
 	winURL          string // guarded by showMu
+	winReady        bool   // guarded by showMu; WebView2 must finish creation before focus/navigation
+	winPendingURL   string // guarded by showMu; latest show request during native creation
 	embeddedVisible bool   // guarded by mu; main window presentation state
 	host            terminalHost
 	SavePlacement   func(string) error
@@ -869,6 +871,10 @@ func (t *Terminals) showDetached(u string) {
 		return
 	}
 	if win != nil {
+		if !t.winReady {
+			t.winPendingURL = u
+			return
+		}
 		if t.winURL != u {
 			win.SetURL(u)
 			t.winURL = u
@@ -888,10 +894,31 @@ func (t *Terminals) showDetached(u string) {
 		// which drags the window (--wails-draggable in terminal.css).
 		Mac: application.MacWindow{TitleBar: application.MacTitleBarHiddenInset, InvisibleTitleBarHeight: 52},
 	})
+	t.winReady = runtime.GOOS != "windows"
+	t.winPendingURL = ""
 	t.mu.Lock()
 	t.win, t.winID = w, w.ID()
 	t.winURL = u
 	t.mu.Unlock()
+	// NewWithOptions returns before Windows finishes constructing WebView2.
+	// A second Open/Show can otherwise enter Focus through its nested message
+	// pump while the controller is nil. This native event also works for our
+	// isolated page, which deliberately never loads the Wails runtime.
+	w.OnWindowEvent(events.Windows.WebViewNavigationCompleted, func(*application.WindowEvent) {
+		t.showMu.Lock()
+		t.mu.Lock()
+		current := t.win == w
+		t.mu.Unlock()
+		pending := ""
+		if current && !t.winReady {
+			t.winReady = true
+			pending, t.winPendingURL = t.winPendingURL, ""
+		}
+		t.showMu.Unlock()
+		if pending != "" {
+			t.showDetached(pending)
+		}
+	})
 	w.OnWindowEvent(events.Common.WindowClosing, func(*application.WindowEvent) {
 		t.mu.Lock()
 		if t.win == w {
