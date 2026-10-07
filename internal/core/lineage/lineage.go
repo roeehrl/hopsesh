@@ -531,6 +531,35 @@ func (m *Manifest) Merge(o *Manifest) error {
 		return err
 	}
 	next := m.Clone()
+	// A root/fork placeholder is persisted before its first replica exists. Origin
+	// becomes immutable once populated. Completing only that empty placeholder is
+	// a monotonic initialization, never permission to replace an existing origin.
+	incoming := o.Clone()
+	for i := range next.Branches {
+		left := &next.Branches[i]
+		right := incoming.branch(left.ID)
+		if right == nil || left.Origin == right.Origin {
+			continue
+		}
+		a, b := *left, *right
+		a.Origin = ""
+		b.Origin = ""
+		if !reflect.DeepEqual(a, b) {
+			continue
+		}
+		empty, filled, graph := left, right, next
+		if right.Origin == "" {
+			empty, filled, graph = right, left, incoming
+		}
+		if empty.Origin != "" || filled.Origin == "" {
+			continue
+		}
+		hasReplica := slices.ContainsFunc(graph.Replicas, func(r Replica) bool { return r.Line == empty.ID })
+		if !hasReplica {
+			empty.Origin = filled.Origin
+		}
+	}
+	o = incoming
 	union := func(dst, src any, key func(json.RawMessage) string) (json.RawMessage, error) {
 		a, _ := json.Marshal(dst)
 		b, _ := json.Marshal(src)
