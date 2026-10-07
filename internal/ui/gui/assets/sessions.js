@@ -101,7 +101,8 @@ function sidebar() {
   const dotFor = (m) => machineStatus(m.status)[0];
   const act = state.activity;
   const mine = all.filter((e) => e.machine === here() && !e.cloud);
-  const myAgents = [...new Set(mine.map((e) => e.agentName))].join(", ");
+  const local = s.machines.find((m) => m.local);
+  const agentSubtitle = (m) => (m?.agentNames || []).join(", ") || "No agents detected";
   const on = clouds().filter((c) => c.allowed);
   return h("nav", { class: "sidebar", id: "sidebar", "aria-label": "Places" },
     h("button", { class: "side-btn", "aria-current": cur("needs"), onclick: () => setScope({ kind: "needs" }) },
@@ -110,11 +111,11 @@ function sidebar() {
     h("button", { class: "side-btn", "aria-current": cur("all"), onclick: () => setScope({ kind: "all" }) }, icon(ICONS.all), "All sessions", h("span", { class: "count" }, all.length)),
     h("div", { class: "side-h" }, "Machines"),
     h("button", { class: "side-btn", "aria-current": cur("here"), onclick: () => setScope({ kind: "here" }) },
-      h("span", { class: "dot ok" }), h("span", { class: "label" }, h("span", {}, sys.Here), myAgents ? h("small", {}, myAgents) : null),
+      h("span", { class: "dot ok" }), h("span", { class: "label" }, h("span", {}, sys.Here), h("small", { title: (local?.agents || []).join(", ") }, agentSubtitle(local))),
       h("span", { class: "count" }, mine.length)),
     machines.map((m) => h("button", { class: "side-btn", "aria-current": cur("machine", m.name), onclick: () => setScope({ kind: "machine", value: m.name }) },
       h("span", { class: "dot " + dotFor(m) }),
-      h("span", { class: "label" }, h("span", {}, m.name), h("small", { class: dotFor(m) === "ok" ? "" : "warn" }, dotFor(m) === "ok" ? [m.os, m.hopsesh ? "hopsesh " + m.hopsesh : ""].filter(Boolean).join(" · ") : machineStatus(m.status)[1])),
+      h("span", { class: "label" }, h("span", {}, m.name), h("small", { class: dotFor(m) === "ok" ? "" : "warn", title: dotFor(m) === "ok" ? (m.agents || []).join(", ") : m.hint || m.error }, dotFor(m) === "ok" ? agentSubtitle(m) : machineStatus(m.status)[1])),
       h("span", { class: "count" }, m.status === "ok" ? m.sessions : ""))),
     h("button", { class: "side-btn", style: "color:var(--accent)", onclick: () => go("machines") }, icon(ICONS.plus), machines.length ? "Add a machine" : "Add your other machines"),
     clouds().length ? h("div", { class: "side-h" }, "Clouds") : null,

@@ -51,8 +51,21 @@ hopsesh archive /absolute/path/to/archive.jsonl --offset 12 --limit 1 --chunk 1
 Offsets refer to records. Large records are retrieved in 2 KiB chunks; the command prints
 the next chunk and record offsets. Each response stays below 8 KiB including its framing.
 Archive text is quoted data, not an instruction source. No model-written summary or vendor
-API credentials are involved. Deterministic summaries quote recent requests and the latest
-agent reply; they do not promise semantic equivalence to the full conversation.
+API credentials are involved. When history exceeds the working budget, the first message
+is a labelled **Transfer context** extract. It preserves the latest available source
+compaction summary, a few substantive earlier requests in chronological order, and the
+latest earlier agent reply taken from the original message records. Tool activity is
+identified separately and rendered as literal fenced text. Short acknowledgements and
+status requests do not fill the extract.
+
+The extract is historical quoted data and does not claim to be a newly written semantic
+summary. Source summaries remain quoted, including their existing uncertainty. Long
+excerpts preserve their beginning and end with an explicit shortening marker. The current
+user request stays in its own message; consecutive user messages are never combined. A
+large current request keeps both ends and its original revision coverage. Generated
+context boundaries carry no authored revisions, and an empty extract is never invented.
+If capacity cannot preserve the context/request boundary, the plan blocks instead of
+silently discarding the request. The portable archive retains the full text.
 
 ## Capacity policy
 

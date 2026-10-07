@@ -92,7 +92,7 @@ func main() {
 		}
 	})
 	// macOS: clicking the Dock icon brings a hidden window back.
-	app.Event.OnApplicationEvent(events.Mac.ApplicationShouldHandleReopen, func(*application.ApplicationEvent) { win.Show().Focus() })
+	app.Event.OnApplicationEvent(events.Mac.ApplicationShouldHandleReopen, func(*application.ApplicationEvent) { svc.Terms.ShowMain() })
 	testHook(win, svc)
 	if err := app.Run(); err != nil {
 		log.Fatal(err)

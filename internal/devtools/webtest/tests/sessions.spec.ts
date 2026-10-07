@@ -6,6 +6,36 @@ test.beforeEach(async ({ page }) => fresh(page));
 const sidebar = (page: Page) => page.getByRole("navigation", { name: "Places" });
 const group = (page: Page, name: string | RegExp) => page.locator(".grp").filter({ has: page.locator(".gname").getByText(name) });
 
+test("machine sidebar subtitles show detected agents consistently even without sessions", async ({ page }) => {
+  await page.route("**/call", async route => {
+    if (!["InitialScan", "Scan", "RefreshHere"].includes(route.request().postDataJSON().m)) return route.continue();
+    const response = await route.fetch(), body = await response.json();
+    const local = body.result.machines.find((m: any) => m.local);
+    expect(local.agentNames).toContain("Claude Code");
+    expect(local.agentNames).toContain("Codex");
+    body.result.groups = [];
+    body.result.total = 0;
+    body.result.machines = [local,
+      { name: "other-mac", local: false, status: "ok", os: "darwin", hopsesh: "0.4.0", sessions: 0, agentNames: ["Claude Code", "Codex"], agents: ["Claude Code 2.1.288", "Codex 0.160.1"] },
+      { name: "empty-box", local: false, status: "ok", sessions: 0, agentNames: [], agents: [] },
+      { name: "offline-box", local: false, status: "unreachable", error: "Connection timed out", sessions: 4, agentNames: ["Claude Code"], agents: ["Claude Code 2.1.288"] },
+    ];
+    await route.fulfill({ json: body });
+  });
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible();
+  const local = sidebar(page).getByRole("button", { name: /^This (Mac|PC|computer)/ });
+  const remote = sidebar(page).getByRole("button", { name: /^other-mac/ });
+  await expect(local.locator("small")).toHaveText("Claude Code, Codex");
+  await expect(remote.locator("small")).toHaveText("Claude Code, Codex");
+  await expect(remote.locator("small")).toHaveAttribute("title", "Claude Code 2.1.288, Codex 0.160.1");
+  await expect(remote).not.toContainText(/darwin|hopsesh 0.4.0/);
+  await expect(sidebar(page).getByRole("button", { name: /^empty-box/ }).locator("small")).toHaveText("No agents detected");
+  await expect(sidebar(page).getByRole("button", { name: /^offline-box/ }).locator("small")).toHaveText("Not reachable");
+  await remote.click();
+  await expect(page.getByRole("heading", { name: "other-mac", exact: true })).toBeVisible();
+});
+
 test("lists sessions by repository, in one tree, with their agents and states", async ({ page }) => {
   await expect(page.getByRole("tree", { name: "Sessions" })).toHaveCount(1);
   await expect(group(page, "demo")).toHaveAttribute("aria-expanded", "true");

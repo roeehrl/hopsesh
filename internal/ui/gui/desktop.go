@@ -55,6 +55,7 @@ type QuickDTO struct {
 // and service boundary as the main window; terminal windows remain isolated.
 func (a *App) AttachDesktop(main *application.WebviewWindow) {
 	a.Desktop = desktop.New(a.Wails, main, a.snapshot().Cfg.Desktop, a.Terms.Privileged, func(screen string) { _ = a.QuickOpen(screen, "", "") }, func() { a.emit(QuickEvent, nil) })
+	a.Terms.RaiseMain = a.Desktop.OpenMain
 	if err := a.connectRuntime(); err != nil {
 		a.backend.mu.Lock()
 		a.backend.problem = err.Error()

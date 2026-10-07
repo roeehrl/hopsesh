@@ -182,6 +182,8 @@ type Terminals struct {
 	SavePrefs func(fontSize int, reader *bool)
 	Shell     func(dir string) error
 	NotifyOn  func() bool
+	// RaiseMain uses the desktop shell's readiness guard when it is attached.
+	RaiseMain func()
 	// AutoClose says whether a tab closes once its program ended well (Settings →
 	// Terminal; nil: on).
 	AutoClose func() bool
@@ -929,13 +931,17 @@ func (t *Terminals) showDetached(u string) {
 		// The programs keep running; with the app's window hidden, it comes back so the
 		// tabs (and quitting) stay within reach.
 		if main != nil && !main.IsVisible() {
-			main.Show().Focus()
+			t.ShowMain()
 		}
 	})
 }
 
 // ShowMain brings the app's window to the front.
 func (t *Terminals) ShowMain() {
+	if t.RaiseMain != nil {
+		t.RaiseMain()
+		return
+	}
 	t.mu.Lock()
 	main := t.mainWin
 	t.mu.Unlock()

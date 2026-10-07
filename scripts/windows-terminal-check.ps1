@@ -13,7 +13,9 @@ go build -o (Join-Path $dir 'termprobe.exe') ./internal/devtools/termprobe
 if ($LASTEXITCODE -ne 0) { exit 1 }
 go run ./internal/devtools/conptyfetch -arch amd64 -out (Join-Path $dir 'conpty')
 if ($LASTEXITCODE -ne 0) { exit 1 }
-foreach ($placement in @('separate', 'bottom', 'right')) {
+# Repeat cold starts of the detached window: both startup placement and an
+# early reopen request must survive WebView2's nested initialization pump.
+foreach ($placement in @('separate', 'separate', 'separate', 'bottom', 'right')) {
 $env:HOPSESH_E2E_TERMINAL_PLACEMENT = $placement
 $env:HOPSESH_E2E_CDP_PORT = '9334'
 $work = Join-Path $env:RUNNER_TEMP ('hsterm-' + [guid]::NewGuid().ToString('N'))

@@ -38,8 +38,9 @@ type MachineDTO struct {
 	OS                   string   `json:"os"`
 	Sessions             int      `json:"sessions"`
 	Local                bool     `json:"local"`
-	Agents               []string `json:"agents"`  // "Claude Code 2.1.284"
-	Hopsesh              string   `json:"hopsesh"` // hopsesh's version there ("" when not installed)
+	Agents               []string `json:"agents"`     // "Claude Code 2.1.284"
+	AgentNames           []string `json:"agentNames"` // detected agents, without versions or duplicate profiles
+	Hopsesh              string   `json:"hopsesh"`    // hopsesh's version there ("" when not installed)
 }
 
 // AgentOpt is an agent a session can continue in here.
@@ -254,6 +255,7 @@ func scanDTO(core *app.App, inv *app.Inventory, updated, elsewhere time.Time, ta
 			}
 		}
 		d.Agents = agentNames(m)
+		d.AgentNames = machineAgentNames(m)
 		out.Machines = append(out.Machines, d)
 		if !m.Local && m.Status == app.StatusOK && m.Hopsesh != "" && (m.Receive == nil || *m.Receive) {
 			out.Peers = append(out.Peers, m.Name)
