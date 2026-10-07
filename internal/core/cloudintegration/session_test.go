@@ -96,7 +96,7 @@ func TestCloudHandlerCannotWidenSessionOrAccessDeviceOperations(t *testing.T) {
 		t.Fatal(err)
 	}
 	o := obs.(Observation)
-	if o.Session != scope.Session || !o.TranscriptAvailable || o.LeaseExpires != s.Expires || o.LastWrite.IsZero() {
+	if o.Session != scope.Session || !o.TranscriptAvailable || o.LeaseExpires.Unix() != s.Expires.Unix() || o.LastWrite.IsZero() {
 		t.Fatal(o)
 	}
 	result, err := s.Handler(t.Context(), g, "operation", "export", nil)
@@ -127,6 +127,30 @@ func TestCloudHandlerCannotWidenSessionOrAccessDeviceOperations(t *testing.T) {
 	s.Expires = time.Now().Add(-time.Second)
 	if _, err = s.Handler(t.Context(), g, "op", "observe", nil); err == nil {
 		t.Fatal("lease expiration ignored")
+	}
+}
+
+func TestCloudObservationUsesEffectivePeerLeaseAndExportPermission(t *testing.T) {
+	parent, scope := sessionFixture(t)
+	s, err := Begin(t.Context(), parent, scope, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer, err := relay.GenerateIdentity("native-cloud-owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := relay.Grant{Peer: peer.Public, Kind: "cloud-session", Methods: []string{"observe"}, Expires: time.Now().Add(45 * time.Second).Unix()}
+	value, err := s.Handler(t.Context(), g, "bounded-lease", "observe", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation := value.(Observation)
+	if observation.LeaseExpires.Unix() != g.Expires || observation.ExportAllowed {
+		t.Fatal("observation overstated sharing or routing lifetime")
+	}
+	if _, err = s.Handler(t.Context(), g, "bounded-lease", "export", nil); err == nil {
+		t.Fatal("observe-only owner exported a transcript")
 	}
 }
 

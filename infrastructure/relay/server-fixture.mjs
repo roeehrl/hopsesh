@@ -3,7 +3,7 @@ import http from 'node:http';
 import https from 'node:https';
 import {readFileSync} from 'node:fs';
 import {Readable} from 'node:stream';
-import {createHandler} from './worker.mjs';
+import worker,{createHandler,Authorization} from './worker.mjs';
 import {createAuthorizationHandler} from './authorization.mjs';
 class Storage {
  constructor(){this.data=new Map();this.tail=Promise.resolve()}
@@ -18,13 +18,18 @@ class Storage {
 const storage=new Map(),blobs=new Map();
 const authStorage=new Storage();
 const bucket={put:async(k,v)=>blobs.set(k,v),get:async k=>blobs.has(k)?{text:async()=>blobs.get(k)}:null,delete:async k=>blobs.delete(k)};
+const env={ENROLLMENT_ADMIN:'fixture-admin-secret-with-32-bytes-minimum',LOGIN_RATE:{limit:async()=>({success:true})},CODE_RATE:{limit:async()=>({success:true})},MAILBOX:{idFromName:space=>space,get:space=>({fetch:req=>{if(!storage.has(space))storage.set(space,new Storage());return createHandler(storage.get(space),bucket,'fixture-admin-secret-with-32-bytes-minimum',space)(req)}})}};
+const authorization=new Authorization({storage:authStorage},env);
+env.AUTHORIZATION={idFromName:name=>name,get:()=>authorization};
 const handler=async(req,res)=>{
  const space=req.headers['x-hopsesh-space'];if(!storage.has(space))storage.set(space,new Storage());
  try{
   const headers=new Headers();for(const[k,v]of Object.entries(req.headers))if(v)headers.set(k,String(v));
   const request=new Request((tls?'https':'http')+'://'+req.headers.host+req.url,{method:req.method,headers,body:['GET','HEAD'].includes(req.method)?undefined:Readable.toWeb(req),duplex:'half'});
   let response;
-  if(req.url.startsWith('/v1/device/')||req.url.startsWith('/v1/authorization/')){
+  if(req.url.startsWith('/v1/cloud/')){
+   headers.set('CF-Connecting-IP','127.0.0.1');response=await worker.fetch(new Request(request,{headers}),env);
+  }else if(req.url.startsWith('/v1/device/')||req.url.startsWith('/v1/authorization/')){
    // Test-only browser substitute. Production always verifies an Access JWT.
    if(req.url.endsWith('/review')||req.url.endsWith('/approve')){
     if(headers.get('Authorization')!=='Bearer fixture-browser-secret'){res.writeHead(403);res.end('{}');return}

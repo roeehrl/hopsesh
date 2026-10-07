@@ -65,6 +65,10 @@ func (e Enrollment) origin() (string, error) {
 }
 
 func (e Enrollment) request(ctx context.Context, path string, values url.Values, out any) (int, error) {
+	return e.requestAuthorized(ctx, path, values, out, "")
+}
+
+func (e Enrollment) requestAuthorized(ctx context.Context, path string, values url.Values, out any, token string) (int, error) {
 	origin, err := e.origin()
 	if err != nil {
 		return 0, err
@@ -74,6 +78,12 @@ func (e Enrollment) request(ctx context.Context, path string, values url.Values,
 		return 0, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if token != "" {
+		if len(token) > 4096 || strings.ContainsAny(token, "\r\n") {
+			return 0, errors.New("invalid relay routing credential")
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	client := http.Client{Timeout: 30 * time.Second}
 	if e.HTTP != nil {
 		client = *e.HTTP

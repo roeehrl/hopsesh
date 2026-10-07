@@ -345,7 +345,13 @@ func qualifyCloudConnector(t *testing.T, ctx context.Context, bin, root, origin,
 	if err = json.Unmarshal(run(nil, prepare...), &instance); err != nil {
 		t.Fatal(err)
 	}
-	body, _ := json.Marshal(map[string]any{"device": instance.Public.ID, "ttl": int(time.Until(instance.Expires).Seconds())})
+	store := relay.Store{Directory: filepath.Join(root, "relay-here", "state", "relay")}
+	ownerConnection, err := store.Connection(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerTokenHash := sha256.Sum256([]byte(ownerConnection.Token))
+	body, _ := json.Marshal(map[string]any{"device": instance.Public.ID, "kind": "cloud-session", "issuer": map[string]string{"device": peer.ID, "credential": hex.EncodeToString(ownerTokenHash[:])}, "ttl": int(time.Until(instance.Expires).Seconds())})
 	req, err := http.NewRequestWithContext(ctx, "POST", origin+"/v1/enrollment/register", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -372,7 +378,6 @@ func qualifyCloudConnector(t *testing.T, ctx context.Context, bin, root, origin,
 		t.Fatal(err)
 	}
 	run(credential, "cloud-integration", "authorize", instance.Directory, "--peer", publicFile, "--fingerprint", peer.Fingerprint(), "--origin", origin)
-	store := relay.Store{Directory: filepath.Join(root, "relay-here", "state", "relay")}
 	if err = store.Approve(ctx, relay.Grant{Peer: instance.Public, Endpoint: instance.Public.Endpoint, Kind: "cloud-session", SendMethods: []string{"observe", "export"}, Expires: connection.Expires}); err != nil {
 		t.Fatal(err)
 	}

@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Cloud session invitations in CLI and Settings: admit one fresh provider/session
+  incarnation, check provisional claim status and revoke its delivery lease.
+  Independent fingerprint approval still controls sharing; rebuilds and forks
+  use fresh invitations. Retry preserves the original scoped credential.
+
 - Optional relay browser approval: desktop uses an external browser with S256 PKCE
   and a temporary loopback callback; headless machines use `hopsesh relay login`
   with a short-lived code. Approval grants delivery only, separate from local

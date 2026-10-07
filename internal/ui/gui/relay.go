@@ -27,16 +27,17 @@ type RelayPeerDTO struct {
 	Revoked     bool     `json:"revoked"`
 }
 type RelaySettingsDTO struct {
-	ReceiveEnabled bool                  `json:"receiveEnabled"`
-	Enabled        bool                  `json:"enabled"`
-	Initialized    bool                  `json:"initialized"`
-	Identity       *relay.PublicIdentity `json:"identity,omitempty"`
-	Enrolled       bool                  `json:"enrolled"`
-	URL            string                `json:"url,omitempty"`
-	Expires        int64                 `json:"expires,omitempty"`
-	Health         relay.Health          `json:"health"`
-	Peers          []RelayPeerDTO        `json:"peers"`
-	Error          string                `json:"error,omitempty"`
+	ReceiveEnabled bool                    `json:"receiveEnabled"`
+	Enabled        bool                    `json:"enabled"`
+	Initialized    bool                    `json:"initialized"`
+	Identity       *relay.PublicIdentity   `json:"identity,omitempty"`
+	Enrolled       bool                    `json:"enrolled"`
+	URL            string                  `json:"url,omitempty"`
+	Expires        int64                   `json:"expires,omitempty"`
+	Health         relay.Health            `json:"health"`
+	Peers          []RelayPeerDTO          `json:"peers"`
+	Admissions     []relay.AdmissionRecord `json:"admissions"`
+	Error          string                  `json:"error,omitempty"`
 }
 
 func (a *App) RelaySettings() RelaySettingsDTO {
@@ -76,7 +77,59 @@ func (a *App) RelaySettings() RelaySettingsDTO {
 		}
 		out.Peers = append(out.Peers, RelayPeerDTO{ID: g.Peer.ID, Name: name, Fingerprint: g.Peer.Fingerprint(), Kind: g.Kind, Roots: g.Roots, Methods: g.Methods, SendMethods: g.SendMethods, Expires: g.Expires, Revoked: g.Revoked})
 	}
+	if rows, err := (relay.AdmissionStore{Directory: filepath.Join(core.StateDir, "cloud-admissions")}).List(); err == nil {
+		out.Admissions = rows
+	} else {
+		out.Error = "Cloud invitations could not be read safely"
+	}
 	return out
+}
+
+// RelayIssueCloudAdmission returns private file metadata only. A one-use
+// secret never crosses the browser bridge or clipboard.
+func (a *App) RelayIssueCloudAdmission(provider, session string, leaseSeconds int) (relay.AdmissionRecord, error) {
+	core := a.snapshot()
+	store := relay.Store{Directory: filepath.Join(core.StateDir, "relay")}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	public, err := store.Public()
+	if err != nil {
+		return relay.AdmissionRecord{}, errors.New("create and enroll this endpoint before inviting a cloud session")
+	}
+	owner, err := store.Identity(ctx, public.Endpoint)
+	if err != nil {
+		return relay.AdmissionRecord{}, err
+	}
+	c, err := store.Connection(ctx)
+	if err != nil {
+		return relay.AdmissionRecord{}, err
+	}
+	if leaseSeconds < 60 || leaseSeconds > 86400 {
+		return relay.AdmissionRecord{}, errors.New("cloud routing lease must be between one minute and 24 hours")
+	}
+	return (relay.AdmissionStore{Directory: filepath.Join(core.StateDir, "cloud-admissions")}).Issue(ctx, owner, c, provider, session, time.Duration(leaseSeconds)*time.Second)
+}
+
+func (a *App) RelayRevokeCloudAdmission(id string) error {
+	core := a.snapshot()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	c, err := (relay.Store{Directory: filepath.Join(core.StateDir, "relay")}).Connection(ctx)
+	if err != nil {
+		return err
+	}
+	return (relay.AdmissionStore{Directory: filepath.Join(core.StateDir, "cloud-admissions")}).Revoke(ctx, c, id)
+}
+
+func (a *App) RelayCheckCloudAdmission(id string) (relay.AdmissionStatus, error) {
+	core := a.snapshot()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	c, err := (relay.Store{Directory: filepath.Join(core.StateDir, "relay")}).Connection(ctx)
+	if err != nil {
+		return relay.AdmissionStatus{}, err
+	}
+	return (relay.AdmissionStore{Directory: filepath.Join(core.StateDir, "cloud-admissions")}).Check(ctx, c, id)
 }
 func (a *App) RelayInitialize() (relay.PublicIdentity, error) {
 	core := a.snapshot()

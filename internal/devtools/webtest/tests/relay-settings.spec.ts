@@ -97,3 +97,55 @@ test("browser enrollment keeps secrets out of the bridge and cancels waiting app
   await expect.poll(()=>cancellations).toBe(1);
   await expect(page.getByRole("status").filter({hasText:"Not enrolled"})).toBeVisible();
 });
+
+test("cloud invitations require enrollment and show provisional routing separately from approval",async({page})=>{
+ await expect(page.getByRole("button",{name:"Invite cloud session…"})).toBeDisabled();
+ await page.getByRole("button",{name:"Create endpoint identity"}).click();
+ await expect(page.getByRole("button",{name:"Invite cloud session…"})).toBeDisabled();
+ const record={id:"a".repeat(32),path:"/private/invitations/one.json",provider:"codex-current",session:"actual-task-123",ownerFingerprint:"b".repeat(64),origin:"https://relay.example.com",expires:Math.floor(Date.now()/1000)+600,leaseSeconds:3600,revoked:false};
+ let created=false,attempts=0;
+ await page.route("**/call",async route=>{
+  const request=route.request().postDataJSON();
+  if(request.m==="Settings"){
+   const response=await route.fetch(),body=await response.json();
+   body.result.relay={initialized:true,enrolled:true,enabled:true,expires:record.expires+3600,peers:[],admissions:created?[record]:[],identity:{id:record.ownerFingerprint}};
+   await route.fulfill({json:body});return;
+  }
+  if(request.m==="RelayIssueCloudAdmission"){
+   expect(request.args).toEqual(["codex-current","actual-task-123",3600]);attempts++;
+   if(attempts===1){await route.fulfill({json:{error:"relay temporarily unavailable"}});return;}
+   created=true;await route.fulfill({json:{result:record}});return;
+  }
+  if(request.m==="RelayRevokeCloudAdmission"){expect(request.args).toEqual([record.id]);record.revoked=true;await route.fulfill({json:{result:null}});return;}
+  if(request.m==="RelayCheckCloudAdmission"){expect(request.args).toEqual([record.id]);await route.fulfill({json:{result:{status:"claimed",provider:record.provider,session:record.session,leaseExpires:record.expires+3600,public:{id:"c".repeat(64),endpoint:"cloud/codex-current/"+"d".repeat(32),signing:"public-signing-key",recipient:"public-age-recipient"}}}});return;}
+  await route.continue();
+ });
+ await page.getByRole("button",{name:"Refresh status"}).click();
+ await page.getByRole("button",{name:"Invite cloud session…"}).click();
+ const dialog=page.getByRole("dialog");
+ await dialog.getByLabel("Cloud invitation provider").selectOption("codex-current");
+ await dialog.getByLabel("Actual cloud session ID").fill(record.session);
+ await dialog.getByRole("button",{name:"Create private invitation"}).click();
+ await expect(dialog.getByRole("alert")).toHaveText("relay temporarily unavailable");
+ await expect(dialog.getByLabel("Actual cloud session ID")).toHaveValue(record.session);
+ await dialog.getByRole("button",{name:"Create private invitation"}).click();
+ const invitationResult=dialog.getByRole("status").filter({hasText:"does not approve a cloud endpoint or enable sharing"});
+ await expect(invitationResult).toBeVisible();
+ await expect(invitationResult).toContainText(record.ownerFingerprint);
+ await expect(invitationResult).toContainText("Keep it out of setup scripts");
+ await expect(dialog.getByRole("button",{name:"Create private invitation"})).toBeDisabled();
+ await dialog.getByRole("button",{name:"Close",exact:true}).click();
+ await expect(page.getByText("Claim window open; claim status unconfirmed")).toBeVisible();
+ await expect(page.getByText("No endpoints have been approved.")).toBeVisible();
+ await page.getByRole("button",{name:"Check claim",exact:true}).click();
+ await expect(page.getByRole("dialog").getByRole("status").filter({hasText:"delivery is provisional"})).toBeVisible();
+ await page.getByRole("dialog").getByRole("button",{name:"Review cloud approval…"}).click();
+ await expect(page.getByRole("dialog").getByLabel("Public pairing identity")).toHaveValue(/public-signing-key/);
+ await expect(page.getByRole("dialog").getByLabel("Verified fingerprint")).toHaveValue("");
+ await expect(page.getByRole("dialog").getByLabel("Allow conversation export")).not.toBeChecked();
+ await page.getByRole("dialog").getByRole("button",{name:"Cancel",exact:true}).click();
+ await page.getByRole("button",{name:"Revoke invitation",exact:true}).click();
+ await page.getByRole("dialog").getByRole("button",{name:"Revoke",exact:true}).click();
+ await expect(page.getByText("Delivery revoked",{exact:true})).toBeVisible();
+ await expect(page.getByRole("button",{name:"Revoke invitation",exact:true})).toBeDisabled();
+});

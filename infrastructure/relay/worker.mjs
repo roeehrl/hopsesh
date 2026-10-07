@@ -1,6 +1,8 @@
 import {SignJWT, jwtVerify} from 'jose';
 import {createAuthorizationHandler, maintainAuthorization, accessPrincipal, response} from './authorization.mjs';
 import {deviceAsset} from './device-page.mjs';
+import {createAdmissionHandler,maintainAdmission} from './admission.mjs';
+import {digest} from './authorization.mjs';
 // Experimental Hopsesh-only infrastructure. Payloads stay encrypted end to end.
 const encoder = new TextEncoder();
 export const LIMITS = Object.freeze({ frame: 24 * 1024 * 1024, bytes: 64 * 1024 * 1024, messages: 1000, devices: 32, lifetime: 86400, batch: 1 });
@@ -28,26 +30,52 @@ export function createHandler(storage,bucket,adminToken,space,clock=()=>Date.now
    if(path==='/v1/capabilities'&&req.method==='GET')return json({protocol:1,limits:LIMITS,methods:['GET','POST'],experimental:true});
    if(!opaque(space))return json({error:'space'},400);
    const token=(req.headers.get('authorization')||'').replace(/^Bearer /,'');
-   if(path==='/v1/enrollment/register'){
+   if(['/v1/enrollment/register','/v1/enrollment/check','/v1/enrollment/revoke-device'].includes(path)){
     if(req.method!=='POST')return json({error:'method'},405);
     // Operator authorization only enrolls a routing credential. Local fingerprint
     // approval independently grants peer actions; this endpoint cannot widen it.
     if(!adminToken||!token||await hash(token)!==await hash(adminToken))return json({error:'authorization'},403);
     const body=await bounded(req,4096);
-    if(!opaque(body.device)||!Number.isInteger(body.ttl)||body.ttl<60||body.ttl>LIMITS.lifetime)return json({error:'enrollment'},400);
+    if(path==='/v1/enrollment/check'){
+     const grant=opaque(body.device)&&await storage.get('device:'+body.device);
+     return json({active:!!grant&&!grant.revoked&&grant.expires>now&&grant.token===body.credential&&grant.kind==='device'&&grant.authority===await hash(adminToken),expires:grant?.expires||0});
+    }
+    if(path==='/v1/enrollment/revoke-device')return await storage.transaction(async tx=>{
+     const issuer=body.issuer&&await tx.get('device:'+body.issuer.device),target=opaque(body.device)&&await tx.get('device:'+body.device);
+     if(!issuer||issuer.revoked||issuer.expires<=now||issuer.kind!=='device'||issuer.token!==body.issuer.credential||issuer.authority!==await hash(adminToken)||!opaque(body.device)||target&&(target.kind!=='cloud-session'||target.issuer!==body.issuer.device))return json({error:'authorization'},403);
+     // An expired target may already have been reclaimed. The Authorization
+     // object's owned ticket is still revoked; repeating that action is safe.
+     if(!target)return json({revoked:true});
+     await tx.put('device:'+body.device,{...target,revoked:true});await tx.delete('token:'+target.token);return json({revoked:true});
+    });
+    const kind=body.kind||'device';if(!['device','cloud-session'].includes(kind))return json({error:'enrollment'},400);
+    if(!opaque(body.device)||!Number.isInteger(body.ttl)||body.ttl<(kind==='cloud-session'?1:60)||body.ttl>LIMITS.lifetime)return json({error:'enrollment'},400);
+    if(body.admission!==undefined&&(kind!=='cloud-session'||! /^[a-f0-9]{64}$/.test(body.admission)))return json({error:'enrollment'},400);
+    if(kind==='cloud-session'&&!body.issuer)return json({error:'enrollment'},400);
+    let ttl=body.ttl;
+    if(body.issuer){const issuer=await storage.get('device:'+body.issuer.device);if(kind!=='cloud-session'||!issuer||issuer.revoked||issuer.kind!=='device'||issuer.expires<=now||issuer.token!==body.issuer.credential||issuer.authority!==await hash(adminToken))return json({error:'authorization'},403);ttl=Math.min(ttl,issuer.expires-now);if(ttl<1)return json({error:'authorization'},403)}
     const secret=Array.from(crypto.getRandomValues(new Uint8Array(32))).map(v=>v.toString(16).padStart(2,'0')).join('');
-    const credential=await new SignJWT({space,device:body.device,nonce:secret}).setProtectedHeader({alg:'HS256',typ:'JWT'}).setIssuer('hopsesh-relay-v1').setAudience('hopsesh-relay-mailbox').setIssuedAt(now).setExpirationTime(now+body.ttl).sign(encoder.encode(adminToken));
+    const credential=await new SignJWT({space,device:body.device,kind,nonce:secret}).setProtectedHeader({alg:'HS256',typ:'JWT'}).setIssuer('hopsesh-relay-v1').setAudience('hopsesh-relay-mailbox').setIssuedAt(now).setExpirationTime(now+ttl).sign(encoder.encode(adminToken));
     const key=await hash(credential);
     return await storage.transaction(async tx=>{
      const count=(await tx.get('device-count'))||0;
      const old=await tx.get('device:'+body.device);
      if(!old&&count>=LIMITS.devices)return json({error:'quota'},429);
+     if(body.issuer){const issuer=await tx.get('device:'+body.issuer.device);if(!issuer||issuer.revoked||issuer.kind!=='device'||issuer.expires<now+ttl||issuer.token!==body.issuer.credential||issuer.authority!==await hash(adminToken))return json({error:'authorization'},403)}
+     // Reconstruct the same credential after a cross-object response or commit
+     // failure. Never rotate or resurrect this admission on retry.
+     if(body.admission&&old){
+      if(old.admission!==body.admission||old.revoked||old.expires<=now||old.kind!==kind||old.issuer!==body.issuer.device||old.authority!==await hash(adminToken))return json({error:'admission-conflict'},409);
+      const replay=await new SignJWT({space,device:body.device,kind,nonce:old.nonce}).setProtectedHeader({alg:'HS256',typ:'JWT'}).setIssuer('hopsesh-relay-v1').setAudience('hopsesh-relay-mailbox').setIssuedAt(old.issuedAt).setExpirationTime(old.expires).sign(encoder.encode(adminToken));
+      if(await hash(replay)!==old.token)return json({error:'admission-conflict'},409);
+      return json({token:replay,space,device:body.device,expires:old.expires},201);
+     }
      if(old)await tx.delete('token:'+old.token);
-     await tx.put('device:'+body.device,{token:key,expires:now+body.ttl,revoked:false});
+     await tx.put('device:'+body.device,{token:key,expires:now+ttl,revoked:false,kind,issuer:body.issuer?.device,authority:await hash(adminToken),...(body.admission?{admission:body.admission,nonce:secret,issuedAt:now}:{})});
      await tx.put('token:'+key,body.device);
      if(!old)await tx.put('device-count',count+1);
-     await schedule(storage,(now+body.ttl)*1000,clock());
-     return json({token:credential,space,device:body.device,expires:now+body.ttl},201);
+     await schedule(storage,(now+ttl)*1000,clock());
+     return json({token:credential,space,device:body.device,expires:now+ttl},201);
     });
    }
    const tokenHash=await hash(token);
@@ -61,6 +89,7 @@ export function createHandler(storage,bucket,adminToken,space,clock=()=>Date.now
    }
    if(path==='/v1/messages'&&req.method==='POST'){
     const e=await bounded(req,LIMITS.frame);
+    if(grant.kind==='cloud-session'&&e.to!==grant.issuer)return json({error:'recipient'},403);
     if(!['request','response'].includes(e.kind)||e.protocol!==1||e.space!==space||e.from!==device||!opaque(e.to)||e.to===device||!opaque(e.id)||!opaque(e.operation)||!Number.isInteger(e.created)||!Number.isInteger(e.expires)||e.expires<=now||e.created>now+60||e.expires<=e.created||e.expires-e.created>LIMITS.lifetime||typeof e.ciphertext!=='string'||typeof e.signature!=='string'||!e.ciphertext.length||e.signature.length!==88)return json({error:'envelope'},400);
     const target=await storage.get('device:'+e.to);if(!target||target.revoked||target.expires<=now)return json({error:'recipient'},403);
     const data=JSON.stringify(e),sum=await hash(data),key=space+'/'+e.to+'/'+e.id;
@@ -145,17 +174,37 @@ export class Mailbox {
 export class Authorization {
  constructor(ctx,env){this.ctx=ctx;this.env=env}
  async fetch(req){
+  const mailbox=async(space,path,body)=>this.env.MAILBOX.get(this.env.MAILBOX.idFromName(space)).fetch(new Request(new URL(path,req.url),{method:'POST',headers:{'Content-Type':'application/json','X-Hopsesh-Space':space,Authorization:'Bearer '+this.env.ENROLLMENT_ADMIN},body:JSON.stringify(body)}));
+  if(new URL(req.url).pathname.startsWith('/v1/cloud/')){
+   const authorize=async(space,device,credential)=>{const r=await mailbox(space,'/v1/enrollment/check',{device,credential});return r.ok&&(await r.json()).active===true};
+   const enroll=async(space,device,ttl,issuer,admission)=>{const r=await mailbox(space,'/v1/enrollment/register',{device,ttl,kind:'cloud-session',issuer,admission});if(r.status!==201)throw new Error('enrollment');return r.json()};
+   const revoke=async(space,device,issuer)=>{const r=await mailbox(space,'/v1/enrollment/revoke-device',{device,issuer});if(!r.ok)throw new Error('revocation')};
+   return createAdmissionHandler(this.ctx.storage,enroll,authorize,revoke)(req);
+  }
   const enroll=async(space,device,ttl)=>{
    const r=await this.env.MAILBOX.get(this.env.MAILBOX.idFromName(space)).fetch(new Request(new URL('/v1/enrollment/register',req.url),{method:'POST',headers:{'Content-Type':'application/json','X-Hopsesh-Space':space,Authorization:'Bearer '+this.env.ENROLLMENT_ADMIN},body:JSON.stringify({device,ttl})}));
    if(r.status!==201)throw new Error('enrollment');return r.json();
   };
   return createAuthorizationHandler(this.ctx.storage,enroll)(req);
  }
- async alarm(){await maintainAuthorization(this.ctx.storage)}
+ async alarm(){await maintainAuthorization(this.ctx.storage);await maintainAdmission(this.ctx.storage)}
 }
 export default {async fetch(req,env){
  const url=new URL(req.url);
  if(url.pathname==='/v1/capabilities'&&req.method==='GET')return json({protocol:1,limits:LIMITS,experimental:true});
+ if(url.pathname.startsWith('/v1/cloud/')){
+  if(!env.AUTHORIZATION||!env.LOGIN_RATE||!env.CODE_RATE||!env.ENROLLMENT_ADMIN||env.ENROLLMENT_ADMIN.length<32)return response({error:'temporarily_unavailable'},503);
+  if(url.protocol!=='https:'||req.method!=='POST'||!['/v1/cloud/tickets','/v1/cloud/claim','/v1/cloud/revoke','/v1/cloud/status'].includes(url.pathname))return response({error:'invalid_request'},400);
+  const headers=new Headers(req.headers);for(const k of ['X-Hopsesh-Principal','X-Hopsesh-Issuer','X-Hopsesh-Credential'])headers.delete(k);
+  headers.set('X-Hopsesh-External-Origin',url.origin);
+  if(url.pathname!=='/v1/cloud/claim'){
+   const token=(req.headers.get('authorization')||'').replace(/^Bearer /,'');if(token.length>4096)return response({error:'access_denied'},403);
+   try{const {payload}=await jwtVerify(token,encoder.encode(env.ENROLLMENT_ADMIN),{algorithms:['HS256'],issuer:'hopsesh-relay-v1',audience:'hopsesh-relay-mailbox'});if(!opaque(payload.space)||!opaque(payload.device)||payload.kind!=='device')return response({error:'access_denied'},403);headers.set('X-Hopsesh-Principal',payload.space);headers.set('X-Hopsesh-Issuer',payload.device);headers.set('X-Hopsesh-Credential',await digest(token))}catch{return response({error:'access_denied'},403)}
+  }
+  const ip=req.headers.get('CF-Connecting-IP');if(!ip)return response({error:'invalid_request'},400);
+  if(!(await env.LOGIN_RATE.limit({key:'cloud:'+ip})).success||!(await env.LOGIN_RATE.limit({key:'global:'+url.pathname})).success||url.pathname==='/v1/cloud/claim'&&!(await env.CODE_RATE.limit({key:'cloud:'+ip})).success)return response({error:'quota'},429);
+  return env.AUTHORIZATION.get(env.AUTHORIZATION.idFromName('hopsesh-device-enrollment-v1')).fetch(new Request(req,{headers}));
+ }
  if(url.pathname.startsWith('/v1/device/')||url.pathname.startsWith('/v1/authorization/')||['/device','/device.js','/device.css'].includes(url.pathname)){
   if(!env.AUTHORIZATION||!env.LOGIN_RATE||!env.CODE_RATE||!env.ACCESS_TEAM_DOMAIN||!env.ACCESS_AUDIENCE||!env.ENROLLMENT_ADMIN||env.ENROLLMENT_ADMIN.length<32)return response({error:'temporarily_unavailable'},503);
   if(url.protocol!=='https:')return response({error:'invalid_request'},400);
@@ -168,6 +217,7 @@ export default {async fetch(req,env){
   if(req.method==='GET'){const asset=deviceAsset(url.pathname);if(asset)return asset}
   if(req.method!=='POST'||!['/v1/device/code','/v1/device/token','/v1/device/review','/v1/device/approve','/v1/authorization/request','/v1/authorization/token'].includes(url.pathname))return response({error:'invalid_request'},404);
   const headers=new Headers(req.headers);headers.delete('X-Hopsesh-Principal');if(principal)headers.set('X-Hopsesh-Principal',principal);
+  headers.set('X-Hopsesh-External-Origin',url.origin);
   return env.AUTHORIZATION.get(env.AUTHORIZATION.idFromName('hopsesh-device-enrollment-v1')).fetch(new Request(req,{headers}));
  }
  const space=req.headers.get('X-Hopsesh-Space');if(!opaque(space))return json({error:'space'},400);
@@ -175,12 +225,12 @@ export default {async fetch(req,env){
  if(!env.ENROLLMENT_ADMIN||env.ENROLLMENT_ADMIN.length<32||token.length>4096)return json({error:'authorization'},403);
  // Authenticate before allocating a Durable Object. Arbitrary unauthenticated
  // namespace headers must not create unbounded paid objects.
- if(url.pathname==='/v1/enrollment/register'){
+ if(['/v1/enrollment/register','/v1/enrollment/check','/v1/enrollment/revoke-device'].includes(url.pathname)){
   if(!token||await hash(token)!==await hash(env.ENROLLMENT_ADMIN))return json({error:'authorization'},403);
  }else{
   try{
    const {payload}=await jwtVerify(token,encoder.encode(env.ENROLLMENT_ADMIN),{algorithms:['HS256'],issuer:'hopsesh-relay-v1',audience:'hopsesh-relay-mailbox'});
-   if(payload.space!==space||!opaque(payload.device))return json({error:'authorization'},403);
+   if(payload.space!==space||!opaque(payload.device)||!['device','cloud-session'].includes(payload.kind))return json({error:'authorization'},403);
   }catch{return json({error:'authorization'},403)}
  }
  return env.MAILBOX.get(env.MAILBOX.idFromName(space)).fetch(req);

@@ -311,7 +311,11 @@ func (s Incarnation) Handler(ctx context.Context, grant relay.Grant, operation, 
 	if err := s.check(); err != nil {
 		return nil, err
 	}
-	obs := Observation{Provider: s.Provider, Session: s.Session, Incarnation: s.ID, Workspace: s.Workspace, ObservedAt: time.Now().UTC(), LeaseExpires: s.Expires, ExportAllowed: s.ExportTranscript}
+	leaseExpires := s.Expires
+	if grant.Expires > 0 && time.Unix(grant.Expires, 0).Before(leaseExpires) {
+		leaseExpires = time.Unix(grant.Expires, 0).UTC()
+	}
+	obs := Observation{Provider: s.Provider, Session: s.Session, Incarnation: s.ID, Workspace: s.Workspace, ObservedAt: time.Now().UTC(), LeaseExpires: leaseExpires, ExportAllowed: s.ExportTranscript && grant.Allows("export", time.Now())}
 	if s.Transcript != "" {
 		st, err := os.Lstat(s.Transcript)
 		if err != nil && !os.IsNotExist(err) {
@@ -378,7 +382,10 @@ func (s Incarnation) Run(ctx context.Context) error {
 	if httpClient != nil {
 		defer httpClient.CloseIdleConnections()
 	}
-	ctx, cancel := context.WithDeadline(ctx, s.Expires)
+	// Routing may be clipped to its native issuer's remaining lease. Stop at
+	// that bound rather than waking and retrying an expired credential.
+	deadline := min(s.Expires.Unix(), c.Expires)
+	ctx, cancel := context.WithDeadline(ctx, time.Unix(deadline, 0))
 	defer cancel()
 	service := relay.Service{Transport: relay.Transport{Base: c.URL, Token: c.Token, Space: c.Space, HTTP: httpClient}, Processor: relay.Processor{Identity: identity, Space: c.Space, Store: store, Handle: s.Handler, Recover: s.Handler}, Notify: func(error) {
 		if s.current() != nil {

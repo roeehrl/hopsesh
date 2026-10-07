@@ -8,7 +8,7 @@ export const digest = async value => Array.from(new Uint8Array(await crypto.subt
 const random = n => Array.from(crypto.getRandomValues(new Uint8Array(n))).map(v=>v.toString(16).padStart(2,'0')).join('');
 export const response = (body,status=200) => new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'}});
 const failure = (error,status=400) => response({error},status);
-async function form(req) {
+export async function authorizationForm(req) {
  if(!(req.headers.get('content-type')||'').startsWith('application/x-www-form-urlencoded'))throw new Error('invalid_request');
  const reader=req.body?.getReader();if(!reader)throw new Error('invalid_request');
  const parts=[];let bytes=0;
@@ -27,16 +27,26 @@ const proofMessage = (values,origin,raw) => 'hopsesh-relay-login-v1\0'+origin+'\
 function nativeRedirect(value){
  const u=new URL(value);if(u.protocol!=='http:'||!['127.0.0.1','[::1]'].includes(u.hostname)||!u.port||u.pathname!=='/callback'||u.username||u.password||u.search||u.hash)throw new Error('invalid_request');return u.toString();
 }
-async function identityProof(values,origin) {
- const raw=values.get('identity'),nonce=values.get('nonce');
- if(!raw||raw.length>2048||! /^[a-f0-9]{32}$/.test(nonce||''))throw new Error('invalid_request');
+export async function checkPublicIdentity(raw) {
+ if(!raw||raw.length>2048)throw new Error('invalid_request');
  const p=JSON.parse(raw),signing=b64(p.signing);
- if(signing.length!==32||! /^[a-f0-9]{64}$/.test(p.id||'')||typeof p.endpoint!=='string'||p.endpoint.length<1||p.endpoint.length>256||/[\x00-\x1f\x7f]/.test(p.endpoint)||p.endpoint.startsWith('cloud/')||! /^age1[023456789acdefghjklmnpqrstuvwxyz]{58}$/.test(p.recipient||''))throw new Error('invalid_request');
+ if(signing.length!==32||! /^[a-f0-9]{64}$/.test(p.id||'')||typeof p.endpoint!=='string'||p.endpoint.length<1||p.endpoint.length>256||/[\x00-\x1f\x7f]/.test(p.endpoint)||! /^age1[023456789acdefghjklmnpqrstuvwxyz]{58}$/.test(p.recipient||''))throw new Error('invalid_request');
  const prefix=encoder.encode('hopsesh-relay-identity-v1\0'),suffix=encoder.encode(p.recipient+'\0'+p.endpoint),material=new Uint8Array(prefix.length+signing.length+suffix.length);
  material.set(prefix);material.set(signing,prefix.length);material.set(suffix,prefix.length+signing.length);
  if(await digest(material)!==p.id)throw new Error('invalid_request');
+ return p;
+}
+export async function verifyIdentitySignature(publicIdentity,proof,message){
+ const signing=b64(publicIdentity.signing);
  const key=await crypto.subtle.importKey('raw',signing,{name:'Ed25519'},false,['verify']);
- if(!await crypto.subtle.verify('Ed25519',key,b64(values.get('proof')),encoder.encode(proofMessage(values,origin,raw))))throw new Error('invalid_request');
+ if(!await crypto.subtle.verify('Ed25519',key,b64(proof),encoder.encode(message)))throw new Error('invalid_request');
+}
+async function identityProof(values,origin) {
+ const raw=values.get('identity'),nonce=values.get('nonce');
+ if(! /^[a-f0-9]{32}$/.test(nonce||''))throw new Error('invalid_request');
+ const p=await checkPublicIdentity(raw);
+ if(p.endpoint.startsWith('cloud/'))throw new Error('invalid_request');
+ await verifyIdentitySignature(p,values.get('proof'),proofMessage(values,origin,raw));
  return {id:p.id,endpoint:p.endpoint};
 }
 
@@ -44,16 +54,16 @@ async function identityProof(values,origin) {
 // hash. Device codes are stored as hashes and never appear in browser responses.
 export function createAuthorizationHandler(storage,enroll,clock=()=>Date.now()) {
  return async req => {
-  const url=new URL(req.url),path=url.pathname,now=Math.floor(clock()/1000);
+  const url=new URL(req.url),origin=req.headers.get('X-Hopsesh-External-Origin')||url.origin,path=url.pathname,now=Math.floor(clock()/1000);
   try {
    if(req.method!=='POST')return failure('invalid_request',405);
-   const values=await form(req);
+   const values=await authorizationForm(req);
    if(path==='/v1/device/code'||path==='/v1/authorization/request') {
     const native=path==='/v1/authorization/request';
     if(values.get('client_id')!==(native?'hopsesh-desktop-v1':'hopsesh-headless-v1')||values.get('scope')!=='relay.routing')return failure('invalid_scope');
     let browser;
     if(native){if(values.get('response_type')!=='code'||values.get('code_challenge_method')!=='S256'||! /^[A-Za-z0-9_-]{43}$/.test(values.get('code_challenge')||'')||! /^[a-f0-9]{64}$/.test(values.get('state')||''))return failure('invalid_request');browser={redirect:nativeRedirect(values.get('redirect_uri')),challenge:values.get('code_challenge'),state:values.get('state')}}
-    const identity=await identityProof(values,url.origin);
+    const identity=await identityProof(values,origin);
     const deviceCode=random(32),key='request:'+await digest(deviceCode),userCode=random(5).toUpperCase().replace(/(.{5})(.{5})/,'$1-$2');
     return await storage.transaction(async tx=>{
      if((await tx.list({prefix:'request:',limit:AUTH_LIMITS.pending})).size>=AUTH_LIMITS.pending)return failure('temporarily_unavailable',429);
@@ -61,8 +71,8 @@ export function createAuthorizationHandler(storage,enroll,clock=()=>Date.now()) 
      await tx.put(key,{identity,userCode,expires:now+AUTH_LIMITS.lifetime,interval:AUTH_LIMITS.interval,next:now+AUTH_LIMITS.interval,status:'pending',browser});
      await tx.put('user:'+userCode,key);
      const alarm=await storage.getAlarm();if(!alarm||alarm>(now+AUTH_LIMITS.lifetime)*1000)await storage.setAlarm((now+AUTH_LIMITS.lifetime)*1000);
-     if(native)return response({authorization_uri:url.origin+'/device?user_code='+userCode,user_code:userCode,expires_in:AUTH_LIMITS.lifetime});
-     return response({device_code:deviceCode,user_code:userCode,verification_uri:url.origin+'/device',expires_in:AUTH_LIMITS.lifetime,interval:AUTH_LIMITS.interval});
+     if(native)return response({authorization_uri:origin+'/device?user_code='+userCode,user_code:userCode,expires_in:AUTH_LIMITS.lifetime});
+     return response({device_code:deviceCode,user_code:userCode,verification_uri:origin+'/device',expires_in:AUTH_LIMITS.lifetime,interval:AUTH_LIMITS.interval});
     });
    }
    if(path==='/v1/device/token') {
@@ -98,7 +108,7 @@ export function createAuthorizationHandler(storage,enroll,clock=()=>Date.now()) 
     });
    }
    const principal=req.headers.get('X-Hopsesh-Principal');
-   if(! /^[a-f0-9]{64}$/.test(principal||'')||req.headers.get('Origin')!==url.origin||req.headers.get('X-Hopsesh-CSRF')!=='review')return failure('access_denied',403);
+   if(! /^[a-f0-9]{64}$/.test(principal||'')||req.headers.get('Origin')!==origin||req.headers.get('X-Hopsesh-CSRF')!=='review')return failure('access_denied',403);
    const userCode=values.get('user_code');if(! /^[A-F0-9]{5}-[A-F0-9]{5}$/.test(userCode||''))return failure('invalid_request');
    return await storage.transaction(async tx=>{
     const key=await tx.get('user:'+userCode),state=key&&await tx.get(key);
