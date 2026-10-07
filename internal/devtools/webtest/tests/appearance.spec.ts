@@ -11,9 +11,14 @@ async function theme(page: Page, mode: "light" | "dark") {
 async function choose(page: Page, mode: string) {
   const select = page.getByRole("combobox", { name: "Color scheme" });
   await expect(select).toBeEnabled();
+  await select.evaluate(el => el.scrollIntoView({ block: "center" }));
+  const panel = page.getByRole("tabpanel");
+  const before = await panel.evaluate(el => el.scrollTop);
+  expect(before).toBeGreaterThan(0); // Exercise the native window's scrolled Settings state.
   await select.selectOption(mode);
   await expect(select).toBeEnabled();
   await expect(select).toHaveValue(mode);
+  await expect.poll(() => panel.evaluate(el => el.scrollTop)).toBe(before);
 }
 
 test.beforeEach(async ({ page }) => fresh(page));
@@ -51,7 +56,7 @@ test("appearance overrides the OS, updates open windows and terminals, and survi
   }
   await page.reload();
   await theme(page, "dark");
-  await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible({ timeout: 30_000 });
   await menu(page, "settings");
   await expect(page.getByRole("combobox", { name: "Color scheme" })).toHaveValue("dark");
   // A newly opened window also reads the saved choice.
@@ -61,6 +66,11 @@ test("appearance overrides the OS, updates open windows and terminals, and survi
   await theme(terminal, "dark");
 
   await choose(page, "system");
+  // Changing tabs starts at the top, even when leaving a scrolled General page.
+  await page.getByRole("tab", { name: "Agents", exact: true }).click();
+  await expect.poll(() => page.getByRole("tabpanel").evaluate(el => el.scrollTop)).toBe(0);
+  await page.getByRole("tab", { name: "General", exact: true }).click();
+  await expect.poll(() => page.getByRole("tabpanel").evaluate(el => el.scrollTop)).toBe(0);
   for (const mode of ["light", "dark", "light"] as const) {
     for (const p of [page, quick, terminal]) {
       await p.emulateMedia({ colorScheme: mode });

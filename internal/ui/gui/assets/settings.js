@@ -296,6 +296,8 @@ const TABS = [["general", "General", general], ["desktop", "Desktop presence", d
 
 function render() {
   if (current !== "settings") return;
+  const page = view.querySelector(".page");
+  const scrollTop = page?.getAttribute("aria-labelledby") === "tab-" + tab ? page.scrollTop : 0;
   const [, name, body] = TABS.find((t) => t[0] === tab);
   fill(view, h("div", { class: "three" },
     h("nav", { class: "tabs", role: "tablist", "aria-label": "Settings", "aria-orientation": "vertical" },
@@ -309,6 +311,7 @@ function render() {
       h("button", {class:"tab",onclick:()=>go("accounts")}, "Accounts"),
       h("span", { class: "spacer" })),
     h("div", { class: "page", role: "tabpanel", "aria-labelledby": "tab-" + tab }, h("div", { class: "page-in", style: "max-width:760px" }, h("h1", {}, name), saving ? h("p", { role: "status" }, "Saving changes…") : null, h("fieldset", { class: "settings-fields", disabled: saving, "aria-busy": String(saving) }, body())))));
+  view.querySelector(".page").scrollTop = scrollTop;
 }
 
 async function loadTerminal() {
