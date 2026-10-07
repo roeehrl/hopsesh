@@ -57,6 +57,84 @@ func TestSubscribersShareCollectionAndCannotRenewFreshness(t *testing.T) {
 	})
 }
 
+func TestForegroundRefreshCannotAcceptAnOlderInFlightAttempt(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var calls atomic.Int32
+		release := make(chan struct{})
+		e, stop := running(t, func(ctx context.Context) (json.RawMessage, error) {
+			if calls.Add(1) == 1 {
+				select {
+				case <-release:
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+				return json.RawMessage(`{"old":true}`), nil
+			}
+			return json.RawMessage(`{"new":true}`), nil
+		})
+		defer stop()
+		synctest.Wait()
+		// The first attempt and request deliberately share a clock timestamp.
+		results := make(chan Snapshot, 20)
+		for range 20 {
+			go func() {
+				s, err := e.Refresh(t.Context())
+				if err != nil {
+					t.Error(err)
+				}
+				results <- s
+			}()
+		}
+		synctest.Wait()
+		close(release)
+		synctest.Wait()
+		if len(results) != 0 {
+			t.Fatal("older in-flight collection satisfied explicit freshness")
+		}
+		time.Sleep(250 * time.Millisecond)
+		synctest.Wait()
+		if len(results) != 20 || calls.Load() != 2 {
+			t.Fatal("refresh clients did not share one subsequent attempt", len(results), calls.Load())
+		}
+		for range 20 {
+			if string((<-results).Data) != `{"new":true}` {
+				t.Fatal("cached evidence returned")
+			}
+		}
+		if e.Metrics().Subscribers != 0 {
+			t.Fatal("refresh subscription leaked")
+		}
+	})
+}
+
+func TestForegroundRefreshReportsFailurePauseAndCancellation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e, stop := running(t, func(context.Context) (json.RawMessage, error) { return nil, errors.New("private source error") })
+		defer stop()
+		synctest.Wait()
+		result := make(chan error, 1)
+		go func() { _, err := e.Refresh(t.Context()); result <- err }()
+		synctest.Wait()
+		time.Sleep(250 * time.Millisecond)
+		synctest.Wait()
+		if err := <-result; err == nil || err.Error() != "fresh observation failed" {
+			t.Fatal("failed explicit attempt reused cached success", err)
+		}
+		e.Pause(true)
+		if _, err := e.Refresh(t.Context()); err == nil {
+			t.Fatal("paused owner claimed fresh evidence")
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		if _, err := e.Refresh(ctx); err == nil {
+			t.Fatal("cancelled refresh succeeded")
+		}
+		if e.Metrics().Subscribers != 0 {
+			t.Fatal("cancelled subscriptions leaked")
+		}
+	})
+}
+
 func TestBurstAndContinuousChangesAreBounded(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var calls atomic.Int32

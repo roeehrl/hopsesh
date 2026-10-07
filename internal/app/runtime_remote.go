@@ -313,7 +313,7 @@ func (a *App) observeRemote(ctx context.Context, h config.Host) RemoteObservatio
 		return state
 	}
 	if h.RelayID != "" {
-		m, entries, snapshot := source.scanRelaySnapshot(ctx, h)
+		m, entries, snapshot := source.scanRelaySnapshot(ctx, h, false)
 		state.Status, state.Error, state.Hint = m.Status, m.Error, m.Hint
 		data, e := json.Marshal(Observation{Version: m.Hopsesh, Receive: m.Receive != nil && *m.Receive, OS: m.OS, Machine: h.Name, InventoryComplete: m.Status == StatusOK, Agents: m.Agents, Entries: entries})
 		if e != nil {

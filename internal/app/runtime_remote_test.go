@@ -173,7 +173,7 @@ func TestRemoteMergeRetainsFailedAndPartialEvidenceButRemovesCompleteAbsence(t *
 }
 
 func TestRelayedObservationKeepsSourceFreshnessRatherThanReceiptTime(t *testing.T) {
-	h := config.Host{Name: "relay-box", RelayID: "approved-relay-id", Via: "relay", Allowed: true}
+	h := config.Host{Name: "relay-box", RelayID: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", Via: "relay", Allowed: true}
 	cfg := config.Defaults()
 	cfg.Hosts = []config.Host{h}
 	r := newRemoteObserver(nil)

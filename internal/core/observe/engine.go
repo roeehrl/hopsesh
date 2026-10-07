@@ -147,6 +147,36 @@ func (e *Engine) Notify() {
 	}
 }
 
+// Refresh joins the existing collector and waits for an attempt started after
+// this request. A replay or a collection already in flight cannot satisfy it.
+// Concurrent foreground requests still use the engine's single coalesced work.
+func (e *Engine) Refresh(ctx context.Context) (Snapshot, error) {
+	requested := time.Now()
+	updates, close := e.Subscribe()
+	defer close()
+	e.Notify()
+	for {
+		select {
+		case <-ctx.Done():
+			return Snapshot{}, ctx.Err()
+		case snapshot, ok := <-updates:
+			if !ok {
+				return Snapshot{}, errors.New("observation owner stopped")
+			}
+			if snapshot.Paused {
+				return Snapshot{}, errors.New("observation owner is suspended")
+			}
+			if !snapshot.AttemptedAt.After(requested) {
+				continue
+			}
+			if snapshot.Error != "" {
+				return snapshot, errors.New("fresh observation failed")
+			}
+			return snapshot, nil
+		}
+	}
+}
+
 // Pause invalidates cached freshness immediately. Resume requests a new observation.
 // A collection started before suspension cannot publish a fresh post-resume result.
 func (e *Engine) Pause(paused bool) {

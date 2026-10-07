@@ -106,7 +106,7 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 					problem("Relay trust configuration is invalid; check the explicitly configured certificate file")
 					continue
 				}
-				service := &relay.Service{Transport: relay.Transport{Base: current.URL, Space: current.Space, Token: current.Token, HTTP: httpClient}, Processor: relay.Processor{Identity: identity, Space: current.Space, Store: store, Handle: a.RelayReceiver(func() observe.Snapshot { return engine.Latest() })}}
+				service := &relay.Service{Transport: relay.Transport{Base: current.URL, Space: current.Space, Token: current.Token, HTTP: httpClient}, Processor: relay.Processor{Identity: identity, Space: current.Space, Store: store, Handle: a.relayReceiver(engine.Latest, engine.Refresh)}}
 				service.Processor.Recover = service.Processor.Handle
 				service.Notify = func(err error) {
 					message := ""

@@ -116,12 +116,12 @@ jobs:
       - name: one observer with zero, one and multiple idle clients
         shell: bash
         run: go test -race -count=1 -run TestRuntimeIdleClients -timeout 2m ./internal/e2e
-      - name: actual local SQLite Durable Object and R2 transfer
+      - name: actual SQLite/R2 transfers, notifications, repeated routes and forks
         shell: bash
         env:
           HOPSESH_RELAY_REQUIRE_NODE: "1"
           HOPSESH_RELAY_PLATFORM: "1"
-        run: go test -race -count=1 -run 'TestRelayPush|TestCloudAdmissionSQLiteR2' -timeout 5m ./internal/e2e
+        run: go test -race -count=1 -run 'TestRelayPush|TestCloudAdmissionSQLiteR2|TestRelayLineageSQLiteR2' -timeout 5m ./internal/e2e
 
   lint:
     runs-on: ubuntu-24.04

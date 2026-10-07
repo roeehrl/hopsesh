@@ -39,11 +39,11 @@ func (a *App) relayCall(ctx context.Context, to config.Host, op, method string, 
 }
 
 func (a *App) scanRelay(ctx context.Context, to config.Host) (*Machine, []Entry) {
-	m, entries, _ := a.scanRelaySnapshot(ctx, to)
+	m, entries, _ := a.scanRelaySnapshot(ctx, to, true)
 	return m, entries
 }
 
-func (a *App) scanRelaySnapshot(ctx context.Context, to config.Host) (*Machine, []Entry, observe.Snapshot) {
+func (a *App) scanRelaySnapshot(ctx context.Context, to config.Host, refresh bool) (*Machine, []Entry, observe.Snapshot) {
 	var snapshot observe.Snapshot
 	m := &Machine{Kind: agent.AtMachine, Name: to.Name, Destination: "relay", Status: StatusError}
 	op, err := relay.NewOperationID()
@@ -51,7 +51,10 @@ func (a *App) scanRelaySnapshot(ctx context.Context, to config.Host) (*Machine, 
 		m.Error = err.Error()
 		return m, nil, snapshot
 	}
-	if err = a.relayCall(ctx, to, op, "observe", nil, &snapshot); err != nil {
+	params, _ := json.Marshal(struct {
+		Refresh bool `json:"refresh"`
+	}{refresh})
+	if err = a.relayCall(ctx, to, op, "observe", params, &snapshot); err != nil {
 		m.Error = err.Error()
 		return m, nil, snapshot
 	}
@@ -87,6 +90,14 @@ func (a *App) scanRelaySnapshot(ctx context.Context, to config.Host) (*Machine, 
 // RelayReceiver reuses the existing plan/apply machinery. Peer approval is
 // independent of mailbox login; a scoped cloud connector cannot become a receiver.
 func (a *App) RelayReceiver(snapshots ...func() observe.Snapshot) relay.Handler {
+	var snapshot func() observe.Snapshot
+	if len(snapshots) > 0 {
+		snapshot = snapshots[0]
+	}
+	return a.relayReceiver(snapshot, nil)
+}
+
+func (a *App) relayReceiver(snapshot func() observe.Snapshot, refresh func(context.Context) (observe.Snapshot, error)) relay.Handler {
 	type session struct {
 		peer *peerSession
 		used time.Time
@@ -115,10 +126,25 @@ func (a *App) RelayReceiver(snapshots ...func() observe.Snapshot) relay.Handler 
 			return nil, errors.New("relay receiving is disabled")
 		}
 		if method == "observe" {
-			if len(snapshots) == 0 {
+			if snapshot == nil {
 				return nil, errors.New("shared observation source is unavailable")
 			}
-			snap := snapshots[0]()
+			var request struct {
+				Refresh bool `json:"refresh"`
+			}
+			if len(params) > 0 && json.Unmarshal(params, &request) != nil {
+				return nil, errors.New("invalid observation request")
+			}
+			snap := snapshot()
+			if request.Refresh {
+				if refresh == nil {
+					return nil, errors.New("fresh shared observation is unavailable")
+				}
+				snap, err = refresh(ctx)
+				if err != nil {
+					return nil, err
+				}
+			}
 			var obs Observation
 			if err := json.Unmarshal(snap.Data, &obs); err != nil {
 				return nil, err

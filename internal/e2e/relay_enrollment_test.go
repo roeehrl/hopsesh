@@ -193,48 +193,8 @@ func TestCloudAdmissionSQLiteR2(t *testing.T) {
 	if testing.Short() || os.Getenv("HOPSESH_RELAY_PLATFORM") != "1" {
 		t.Skip("qualified in the actual SQLite/R2 relay job")
 	}
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Fatal(err)
-	}
-	fixture, _ := filepath.Abs("../../infrastructure/relay")
-	root := t.TempDir()
-	cert, key, pool := relayFixtureCertificate(t, root)
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	_ = listener.Close()
-	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
-	defer cancel()
-	server := exec.CommandContext(ctx, node, filepath.Join(fixture, "node_modules", "wrangler", "wrangler-dist", "cli.js"), "dev", "--local", "--ip", "127.0.0.1", "--port", fmt.Sprint(port), "--inspector-port", "0", "--local-protocol", "https", "--local-upstream", fmt.Sprintf("127.0.0.1:%d", port), "--https-key-path", key, "--https-cert-path", cert, "--persist-to", filepath.Join(root, "platform-state"), "--var", "ENROLLMENT_ADMIN:fixture-admin-secret-with-32-bytes-minimum", "--log-level", "error", "--show-interactive-dev-session=false")
-	prepareRelayFixture(server)
-	server.Dir = fixture
-	server.Env = append(os.Environ(), "WRANGLER_SEND_METRICS=false")
-	var logs bytes.Buffer
-	server.Stdout = &logs
-	server.Stderr = &logs
-	if err = server.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = server.Process.Signal(os.Interrupt); cancel(); _ = server.Wait() }()
-	origin := fmt.Sprintf("https://127.0.0.1:%d", port)
-	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}, Timeout: 5 * time.Second}
-	deadline := time.Now().Add(20 * time.Second)
-	for {
-		res, err := client.Get(origin + "/v1/capabilities")
-		if err == nil {
-			_ = res.Body.Close()
-			if res.StatusCode == 200 {
-				break
-			}
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("local platform not ready", err)
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
+	ctx, root, origin, cert, client := startSQLiteRelayFixture(t, 90*time.Second)
+	var err error
 	bin := buildHopsesh(t)
 	native := newMachineHome(t, root, "platform-admission-native", false)
 	native.writeConfig(t, config.Defaults())
@@ -430,4 +390,51 @@ func qualifyCloudAdmission(t *testing.T, ctx context.Context, bin, root, origin,
 	if _, err = (relay.Transport{Base: origin, Space: forkConnection.Space, Token: forkConnection.Token, HTTP: client}).Poll(ctx, 0); err != nil {
 		t.Fatal("revoking original revoked independent fork", err)
 	}
+}
+
+func startSQLiteRelayFixture(t *testing.T, timeout time.Duration) (context.Context, string, string, string, *http.Client) {
+	t.Helper()
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture, _ := filepath.Abs("../../infrastructure/relay")
+	root := t.TempDir()
+	cert, key, pool := relayFixtureCertificate(t, root)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	_ = listener.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	t.Cleanup(cancel)
+	server := exec.CommandContext(ctx, node, filepath.Join(fixture, "node_modules", "wrangler", "wrangler-dist", "cli.js"), "dev", "--local", "--ip", "127.0.0.1", "--port", fmt.Sprint(port), "--inspector-port", "0", "--local-protocol", "https", "--local-upstream", fmt.Sprintf("127.0.0.1:%d", port), "--https-key-path", key, "--https-cert-path", cert, "--persist-to", filepath.Join(root, "platform-state"), "--var", "ENROLLMENT_ADMIN:fixture-admin-secret-with-32-bytes-minimum", "--log-level", "error", "--show-interactive-dev-session=false")
+	prepareRelayFixture(server)
+	server.Dir = fixture
+	server.Env = append(os.Environ(), "WRANGLER_SEND_METRICS=false")
+	var logs bytes.Buffer
+	server.Stdout = &logs
+	server.Stderr = &logs
+	if err = server.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = server.Process.Signal(os.Interrupt); cancel(); _ = server.Wait() })
+	origin := fmt.Sprintf("https://127.0.0.1:%d", port)
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}, Timeout: 5 * time.Second}
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		res, err := client.Get(origin + "/v1/capabilities")
+		if err == nil {
+			_ = res.Body.Close()
+			if res.StatusCode == 200 {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("local platform not ready", err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return ctx, root, origin, cert, client
 }
