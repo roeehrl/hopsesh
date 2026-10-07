@@ -175,22 +175,32 @@ func (s Store) Grant(ctx context.Context, id string) (Grant, error) {
 		return g, ErrRevoked
 	}
 	err := s.withLock(ctx, func() error {
-		b, err := localstate.ReadPrivateFile(filepath.Join(s.Directory, "peer-"+id+".json"), 8192)
-		if os.IsNotExist(err) {
-			return ErrRevoked
-		}
-		if err != nil {
-			return err
-		}
-		if err = json.Unmarshal(b, &g); err != nil {
-			return err
-		}
-		if g.Peer.ID != id {
-			return ErrRevoked
-		}
-		return g.Peer.Check()
+		var err error
+		g, err = s.grantLocked(id)
+		return err
 	})
 	return g, err
+}
+
+func (s Store) grantLocked(id string) (Grant, error) {
+	var g Grant
+	if !opaque(id) {
+		return g, ErrRevoked
+	}
+	b, err := localstate.ReadPrivateFile(filepath.Join(s.Directory, "peer-"+id+".json"), 8192)
+	if os.IsNotExist(err) {
+		return g, ErrRevoked
+	}
+	if err != nil {
+		return g, err
+	}
+	if err = json.Unmarshal(b, &g); err != nil {
+		return g, err
+	}
+	if g.Peer.ID != id {
+		return g, ErrRevoked
+	}
+	return g, g.Peer.Check()
 }
 func (s Store) Revoke(ctx context.Context, id string) error {
 	if !opaque(id) {

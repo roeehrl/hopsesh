@@ -30,7 +30,15 @@ func replyKey(peer, op, method string) string {
 	digest := sha256.Sum256([]byte(peer + "\x00" + op + "\x00" + method))
 	return hex.EncodeToString(digest[:])
 }
+
+func wireMethodAuthorized(method, permission string) bool {
+	return permission != "" && (method == permission || method == "blob.put" || method == "blob.invoke" || method == "blob.read")
+}
+
 func (s *Service) receive(ctx context.Context, e Envelope) error {
+	if e.Kind != "response" {
+		return reject(errors.New("relay request is not a reply"))
+	}
 	grant, err := s.Processor.Store.Grant(ctx, e.From)
 	if err != nil {
 		if errors.Is(err, ErrRevoked) {
@@ -59,13 +67,36 @@ func (s *Service) receive(ctx context.Context, e Envelope) error {
 		return reject(err)
 	}
 	permission := intent.Authorization
-	if permission == "" {
-		permission = reply.Method
+	if !wireMethodAuthorized(reply.Method, permission) {
+		return reject(errors.New("relay reply has no request authorization"))
 	}
 	if !grant.AllowsSend(permission, time.Now()) {
 		return reject(ErrRevoked)
 	}
 	if err = s.Processor.Store.withLock(ctx, func() error {
+		// Approval can change while decryption waits for the durable writer.
+		// Re-read both the current scope and intent under that same lock.
+		current, err := s.Processor.Store.grantLocked(e.From)
+		if err != nil {
+			if errors.Is(err, ErrRevoked) {
+				return reject(err)
+			}
+			return err
+		}
+		if !current.AllowsSend(permission, time.Now()) || current.Peer.Fingerprint() != grant.Peer.Fingerprint() {
+			return reject(ErrRevoked)
+		}
+		body, err := localstate.ReadPrivateFile(filepath.Join(s.Processor.Store.Directory, "outgoing-"+key+".json"), 8192)
+		if err != nil {
+			return err
+		}
+		var currentIntent Record
+		if err = json.Unmarshal(body, &currentIntent); err != nil {
+			return err
+		}
+		if currentIntent.Peer != e.From || currentIntent.Operation != e.Operation || currentIntent.Method != reply.Method || currentIntent.Authorization != permission || !bytes.Equal(currentIntent.Scope, grantScope(current)) || currentIntent.Expires <= time.Now().Unix() || e.Expires > currentIntent.Expires || current.Expires != 0 && e.Expires > current.Expires {
+			return reject(errors.New("relay reply is outside its current request authorization"))
+		}
 		path := filepath.Join(s.Processor.Store.Directory, "reply-"+key+".json")
 		encoded, err := json.Marshal(e)
 		if err != nil {
@@ -116,6 +147,9 @@ func (s *Service) Run(ctx context.Context) error {
 	}}).Run(ctx)
 }
 func (s *Service) callSmall(ctx context.Context, peer, operation, method, permission string, params json.RawMessage) (json.RawMessage, error) {
+	if !wireMethodAuthorized(method, permission) {
+		return nil, errors.New("relay wire method does not match request authorization")
+	}
 	grant, err := s.Processor.Store.Grant(ctx, peer)
 	if err != nil {
 		return nil, err
@@ -142,6 +176,14 @@ func (s *Service) callSmall(ctx context.Context, peer, operation, method, permis
 	key := replyKey(peer, operation, method)
 	digest := sha256.Sum256(body)
 	if err = s.Processor.Store.withLock(ctx, func() error {
+		current, e := s.Processor.Store.grantLocked(peer)
+		if e != nil {
+			return e
+		}
+		if !current.AllowsSend(permission, time.Now()) || !bytes.Equal(grantScope(current), grantScope(grant)) || current.Expires != 0 && expiry > current.Expires {
+			return ErrRevoked
+		}
+		scope := grantScope(current)
 		path := filepath.Join(s.Processor.Store.Directory, "outgoing-"+key+".json")
 		prior, e := localstate.ReadPrivateFile(path, MaxWireBytes)
 		if e == nil {
@@ -151,6 +193,9 @@ func (s *Service) callSmall(ctx context.Context, peer, operation, method, permis
 			}
 			if !bytes.Equal(old.Request, digest[:]) {
 				return errors.New("relay operation ID reused for different request")
+			}
+			if old.Peer != peer || old.Operation != operation || old.Method != method || old.Authorization != permission || !bytes.Equal(old.Scope, scope) {
+				return errors.New("relay request authorization changed; use a new operation ID")
 			}
 			// Renew only the delivery lease. The peer's canonical operation
 			// tombstone still prevents replaying any native action.
@@ -173,7 +218,7 @@ func (s *Service) callSmall(ctx context.Context, peer, operation, method, permis
 		if len(records) >= MaxOperationRecords {
 			return errors.New("relay outgoing operation quota reached")
 		}
-		out := Record{Peer: peer, Operation: operation, Method: method, Authorization: permission, Request: digest[:], Phase: "submitted", Expires: expiry}
+		out := Record{Peer: peer, Operation: operation, Method: method, Authorization: permission, Scope: scope, Request: digest[:], Phase: "submitted", Expires: expiry}
 		encoded, e := json.Marshal(out)
 		if e != nil {
 			return e
@@ -207,7 +252,7 @@ func (s *Service) callSmall(ctx context.Context, peer, operation, method, permis
 		b, err := localstate.ReadPrivateFile(path, MaxWireBytes)
 		if err == nil {
 			current, checkErr := s.Processor.Store.Grant(ctx, peer)
-			if checkErr != nil || !current.AllowsSend(permission, time.Now()) || current.Peer.Fingerprint() != grant.Peer.Fingerprint() {
+			if checkErr != nil || !current.AllowsSend(permission, time.Now()) || current.Peer.Fingerprint() != grant.Peer.Fingerprint() || !bytes.Equal(grantScope(current), grantScope(grant)) {
 				return nil, ErrRevoked
 			}
 			if err = json.Unmarshal(b, &envelope); err != nil {
