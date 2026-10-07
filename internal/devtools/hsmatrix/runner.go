@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/internal/testkit/fakecloud"
 )
 
@@ -218,6 +219,8 @@ func (r *runner) scenario(row Row) error {
 		return r.push(s)
 	case "roundtrip", "quiet-roundtrip":
 		return r.roundtrip(s)
+	case "repeat-roundtrip", "fork-roundtrip":
+		return r.repeatRoundtrip(s)
 	case "conflict":
 		return r.conflict(s)
 	case "undo-used":
@@ -1088,7 +1091,12 @@ func checkMovement(f Found, transfers int, notify, fork bool) error {
 	if f.Graph == nil {
 		return fmt.Errorf("%s: missing movement receipt", f.Path)
 	}
-	hops := f.Graph.ActiveHops()
+	var hops []lineage.Hop
+	for _, h := range f.Graph.ActiveHops() {
+		if h.Line == f.Graph.Branch {
+			hops = append(hops, h)
+		}
+	}
 	if len(hops) != transfers {
 		return fmt.Errorf("%s: movements=%d, want %d", f.Path, len(hops), transfers)
 	}

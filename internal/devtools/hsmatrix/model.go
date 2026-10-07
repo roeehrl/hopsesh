@@ -34,7 +34,7 @@ var dims = []struct {
 	name   string
 	values []string
 }{
-	{"op", []string{"move", "continue", "bounded", "push", "roundtrip", "quiet-roundtrip", "fork", "conflict", "undo-used", "skill", "fetch", "handoff", "cloud-roundtrip", "cloud-hop"}},
+	{"op", []string{"move", "continue", "bounded", "push", "roundtrip", "repeat-roundtrip", "fork-roundtrip", "quiet-roundtrip", "fork", "conflict", "undo-used", "skill", "fetch", "handoff", "cloud-roundtrip", "cloud-hop"}},
 	{"agents", []string{"claude>claude", "codex>codex", "claude>codex", "codex>claude"}},
 	{"content", []string{"ascii", "zh", "ja", "ar", "el", "large"}},
 	{"repo", []string{"clean", "unpushed", "uncommitted", "worktree", "none"}},
@@ -60,6 +60,10 @@ func valid(v []string) bool {
 		return validCodex(op, agents, repo, naming)
 	}
 	switch op {
+	case "repeat-roundtrip", "fork-roundtrip":
+		// Four actual machine boundaries, independent native profiles and unique
+		// work on each hop. Other rows cover code/worktree synchronization.
+		return repo == "clean"
 	case "handoff":
 		// A Claude Code or Codex session here goes to Claude Code cloud (always a Claude
 		// Code session there), in each state of its checkout (none: refused).
