@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import worker, {createHandler, Mailbox, LIMITS} from './worker.mjs';
+import worker, {createHandler, Mailbox, LIMITS, maintain} from './worker.mjs';
 class Storage {
  constructor(){this.values=new Map();this.alarm=null;this.tail=Promise.resolve()}
  async get(k){return structuredClone(this.values.get(k))}
@@ -8,6 +8,7 @@ class Storage {
  async delete(k){return this.values.delete(k)}
  async list({prefix='',limit=Infinity}={}){return new Map([...this.values].filter(([k])=>k.startsWith(prefix)).sort(([a],[b])=>a.localeCompare(b)).slice(0,limit))}
  async setAlarm(t){this.alarm=t}
+ async getAlarm(){return this.alarm}
  async transaction(fn){let release;const before=this.tail;this.tail=new Promise(r=>release=r);await before;const tx=new Storage();tx.values=structuredClone(this.values);try{const result=await fn(tx);this.values=tx.values;return result}finally{release()}}
 }
 class Bucket {constructor(){this.values=new Map()}async put(k,v){this.values.set(k,v)}async get(k){const v=this.values.get(k);return v===undefined?null:{text:async()=>v}}async delete(k){this.values.delete(k)}}
@@ -70,4 +71,31 @@ test('unauthenticated namespace cannot allocate a paid Durable Object',async()=>
  assert.equal((await worker.fetch(req,env)).status,403);assert.equal(allocated,0);
  const enrollment=new Request('https://relay.test/v1/enrollment/register',{method:'POST',headers:{'X-Hopsesh-Space':'invented-space-123','Authorization':'Bearer forged'},body:'{}'});
  assert.equal((await worker.fetch(enrollment,env)).status,403);assert.equal(allocated,0);
+});
+
+test('R2 deletion failure cannot leave a missing object at the head of a mailbox',async()=>{
+ const f=await fixture();
+ await f.invoke('/v1/messages','POST',f.ta,f.envelope());
+ const batch=await(await f.invoke('/v1/messages','GET',f.tb)).json();
+ const remove=f.bucket.delete.bind(f.bucket);let fail=true;
+ f.bucket.delete=async key=>{await remove(key);if(fail)throw new Error('simulated R2 partial deletion')};
+ assert.equal((await f.invoke('/v1/ack','POST',f.tb,{cursor:batch.cursor})).status,503);
+ assert.equal((await f.storage.list({prefix:'message:'})).size,0);
+ assert.equal((await f.storage.list({prefix:'delete:'})).size,1);
+ fail=false;
+ assert.equal((await f.invoke('/v1/messages','POST',f.ta,f.envelope('message-next-12345'))).status,201);
+ const next=await(await f.invoke('/v1/messages','GET',f.tb)).json();assert.equal(next.messages.length,1);
+ await maintain(f.storage,f.bucket,Math.floor(Date.now()/1000));
+ assert.equal((await f.storage.list({prefix:'delete:'})).size,0);
+ assert.equal((await f.storage.get('quota:'+f.b)).count,1);
+});
+
+test('expired dedupe receipts and routing devices release quotas without accepting an expired envelope',async()=>{
+ const f=await fixture(),e=f.envelope();await f.invoke('/v1/messages','POST',f.ta,e);
+ await maintain(f.storage,f.bucket,e.expires+1);
+ assert.equal((await f.storage.list({prefix:'id:'})).size,0);assert.equal(await f.storage.get('id-count'),0);
+ assert.equal((await f.storage.list({prefix:'device:'})).size,2);
+ f.advance(301000);assert.equal((await f.invoke('/v1/messages','POST',f.ta,e)).status,400);
+ await maintain(f.storage,f.bucket,e.created+3601);
+ assert.equal((await f.storage.list({prefix:'device:'})).size,0);assert.equal((await f.storage.list({prefix:'token:'})).size,0);assert.equal(await f.storage.get('device-count'),0);
 });

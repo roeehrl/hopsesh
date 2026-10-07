@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 
@@ -77,15 +76,7 @@ func (a *App) loadRelayTransfer(from, op string) (*relayTransfer, error) {
 	return r, nil
 }
 func readRelayTransfer(path string) (*relayTransfer, error) {
-	if err := localstate.PrivateFile(path); err != nil {
-		return nil, err
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, relayStateLimit+1))
+	data, err := localstate.ReadPrivateFile(path, relayStateLimit)
 	if err != nil {
 		return nil, err
 	}

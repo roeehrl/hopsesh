@@ -102,11 +102,17 @@ jobs:
         shell: bash
         env:
           HOPSESH_RELAY_REQUIRE_NODE: "1"
-        run: go test -race -count=1 -timeout 5m ./internal/core/relay ./internal/core/runtime ./internal/config ./internal/archtest
+        run: go test -race -count=1 -timeout 5m ./internal/core/relay ./internal/core/cloudintegration ./internal/localstate ./internal/core/runtime ./internal/config ./internal/archtest
       - name: relay transfer restart and peer-owned undo
         shell: bash
         env:
           HOPSESH_RELAY_REQUIRE_NODE: "1"
+        run: go test -race -count=1 -run TestRelayPush -timeout 5m ./internal/e2e
+      - name: actual local SQLite Durable Object and R2 transfer
+        shell: bash
+        env:
+          HOPSESH_RELAY_REQUIRE_NODE: "1"
+          HOPSESH_RELAY_PLATFORM: "1"
         run: go test -race -count=1 -run TestRelayPush -timeout 5m ./internal/e2e
 
   lint:

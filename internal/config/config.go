@@ -414,6 +414,9 @@ func Save(c *Config) error {
 	if err := os.MkdirAll(Dir(), 0700); err != nil {
 		return err
 	}
+	if err := localstate.SecureDirectory(Dir()); err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	lock, err := localstate.Lock(ctx, Path()+".lock")
@@ -465,7 +468,18 @@ func Save(c *Config) error {
 // hopsesh can start fresh; it returns the new name. For a newer file (ErrNewConfig) it is
 // the user's explicit second choice, after updating hopsesh.
 func SetAside() (string, error) {
-	dst := Path() + ".old-" + time.Now().Format("20060102-150405")
+	if err := localstate.SecureDirectory(Dir()); err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	lock, err := localstate.Lock(ctx, Path()+".lock")
+	if err != nil {
+		return "", err
+	}
+	defer lock.Close()
+	// Nanoseconds avoid overwriting an earlier backup from the same second.
+	dst := Path() + ".old-" + time.Now().Format("20060102-150405.000000000")
 	if err := os.Rename(Path(), dst); err != nil {
 		return "", err
 	}

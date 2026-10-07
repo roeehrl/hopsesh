@@ -46,4 +46,5 @@ func privateACL(path string, directory bool) error {
 	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, acl, nil)
 }
 func PrivateDirectory(path string) error { return privateACL(path, true) }
+func SecureDirectory(path string) error  { return privateACL(path, true) }
 func PrivateFile(path string) error      { return privateACL(path, false) }

@@ -16,6 +16,8 @@ import (
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/launch"
 	"github.com/roeehrl/hopsesh/internal/core/move"
+	"github.com/roeehrl/hopsesh/internal/core/observe"
+	localruntime "github.com/roeehrl/hopsesh/internal/core/runtime"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -43,6 +45,7 @@ type Exit struct {
 
 // Deps are what the TUI needs from the CLI.
 type Deps struct {
+	Runtime  *localruntime.Client // optional shared local owner; no healthy-client polling
 	App      *app.App
 	Describe func(app.Entry) string // branch/worktree line
 	// Adopted is a fetch (its journal) to show first: what came back from a cloud.
@@ -111,7 +114,10 @@ type model struct {
 	// stepPaste asks for the link of a session a terminal step did not show.
 	stepPaste *stepPaste
 	// steps receives what the hand-off sends the program (tests: no program runs).
-	steps chan tea.Msg
+	steps          chan tea.Msg
+	latestRuntime  *observe.Snapshot
+	runtimeProblem error
+	refreshRuntime bool
 }
 
 type scanDone struct{ inv *app.Inventory }
@@ -132,6 +138,12 @@ func Run(d Deps) (*Exit, error) {
 	m := &model{deps: d, mode: modeLoading, started: time.Now(), opts: opts}
 	defer m.closeReturnPush()
 	prog := tea.NewProgram(m)
+	if d.Runtime != nil {
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() { defer close(done); watchRuntime(ctx, *d.Runtime, prog.Send) }()
+		defer func() { cancel(); <-done }()
+	}
 	// A hand-off whose driver needs a terminal gets this one, the UI paused meanwhile.
 	prev := d.App.Steps
 	d.App.Steps = stepper(prog.Send)
@@ -149,10 +161,20 @@ func Run(d Deps) (*Exit, error) {
 
 func (m *model) Init() tea.Cmd {
 	a := m.deps.App
+	runtime, refresh := m.deps.Runtime, m.refreshRuntime
+	m.refreshRuntime = false
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
-		return scanDone{a.Scan(ctx, app.ScanOptions{})}
+		opts := app.ScanOptions{}
+		if runtime != nil {
+			o, err := sharedLocal(ctx, *runtime, refresh)
+			if err != nil {
+				return runtimeScanError{err}
+			}
+			opts.LocalSnapshot = &o
+		}
+		return scanDone{a.Scan(ctx, opts)}
 	}
 }
 
@@ -201,6 +223,22 @@ func (m *model) nextSelectable(from, dir int) int {
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case runtimeSnapshot:
+		m.runtimeProblem = nil
+		m.latestRuntime = &msg.Snapshot
+		if m.mode == modeBrowse && !m.planning {
+			m.applyRuntime(msg.Snapshot)
+		}
+	case runtimeDisconnected:
+		m.runtimeProblem = msg.err
+		if m.runtimeProblem == nil {
+			m.runtimeProblem = fmt.Errorf("shared runtime disconnected")
+		}
+		if m.mode == modeBrowse && !m.planning {
+			m.invalidateRuntime(msg.err)
+		}
+	case runtimeScanError:
+		m.err, m.mode = msg.err, modeError
 	case returnPlanDone:
 		m.returnPush = msg.push
 		if msg.err != nil {
@@ -259,6 +297,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.inv = msg.inv
 		m.mode = modeBrowse
 		m.buildRows()
+		if m.latestRuntime != nil {
+			m.applyRuntime(*m.latestRuntime)
+		}
 		if j := m.deps.Hop; j != "" {
 			m.deps.Hop = ""
 			m.showHop(j)
@@ -322,7 +363,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case tea.KeyPressMsg:
-		return m.key(msg.String())
+		next, cmd := m.key(msg.String())
+		if m.mode == modeBrowse && !m.planning {
+			if m.runtimeProblem != nil {
+				m.invalidateRuntime(m.runtimeProblem)
+			} else if m.latestRuntime != nil {
+				m.applyRuntime(*m.latestRuntime)
+			}
+		}
+		return next, cmd
 	}
 	return m, nil
 }
@@ -439,6 +488,7 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 			m.editing = true
 		case "r":
 			m.mode = modeLoading
+			m.refreshRuntime = true
 			return m, m.Init()
 		case "enter":
 			if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil {

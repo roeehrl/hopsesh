@@ -38,3 +38,24 @@ func TestSettingsRevisionTypesAndProtectedKeys(t *testing.T) {
 		t.Fatalf("get: %T %v %v", v, v, err)
 	}
 }
+
+func TestNestedSettingsMapsPreserveSiblingsAndValidateTypes(t *testing.T) {
+	t.Setenv("HOPSESH_CONFIG_DIR", t.TempDir())
+	for _, change := range []struct{ key, value string }{{"agents.claude.disabled", "true"}, {"agents.claude.place", `"app"`}, {"agents.codex.disabled", "false"}, {"clouds.codex-cloud.environments.demo", `"default"`}} {
+		if _, err := SetSetting(change.key, json.RawMessage(change.value), nil); err != nil {
+			t.Fatal(change, err)
+		}
+	}
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Agents["claude"].Disabled || c.Agents["claude"].Place != "app" || c.Clouds["codex-cloud"].Environments["demo"] != "default" {
+		t.Fatal("nested update lost a sibling", c)
+	}
+	for _, change := range []struct{ key, value string }{{"agents.claude.missing", "true"}, {"agents.claude.disabled", `"true"`}, {"agents..disabled", "true"}, {"agents.claude.place", `"unknown"`}} {
+		if _, err := SetSetting(change.key, json.RawMessage(change.value), nil); err == nil {
+			t.Fatal("invalid nested setting accepted", change)
+		}
+	}
+}

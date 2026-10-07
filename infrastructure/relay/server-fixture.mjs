@@ -11,6 +11,7 @@ class Storage {
  async delete(k){this.data.delete(k)}
  async list({prefix='',limit=Infinity}={}){return new Map([...this.data].filter(([k])=>k.startsWith(prefix)).sort(([a],[b])=>a.localeCompare(b)).slice(0,limit))}
  async setAlarm(){}
+ async getAlarm(){return null}
  async transaction(fn){let release;const prior=this.tail;this.tail=new Promise(r=>release=r);await prior;const tx=new Storage();tx.data=structuredClone(this.data);try{const result=await fn(tx);this.data=tx.data;return result}finally{release()}}
 }
 const storage=new Map(),blobs=new Map();

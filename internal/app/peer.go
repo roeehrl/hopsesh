@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/roeehrl/hopsesh/internal/config"
@@ -206,12 +207,13 @@ type Push struct {
 	Peer   peer.HelloReply
 	Pushed string // the branch was pushed first ("" when not)
 
-	source move.Side
-	a      *App
-	to     config.Host
-	e      Entry
-	client *peer.Client
-	close  func()
+	source    move.Side
+	a         *App
+	to        config.Host
+	e         Entry
+	client    *peer.Client
+	close     func()
+	operation string // stable relay operation, empty for an SSH push
 }
 
 // PushResult is a finished push.
@@ -242,6 +244,9 @@ func (a *App) StartPush(ctx context.Context, inv *Inventory, e Entry, to config.
 	mod, _ := a.Module(e.Agent)
 	install, _ := here.InstallProfile(e.Agent, e.Session.Key.Profile)
 	p := &Push{source: move.Side{Machine: here.host, Module: mod, Install: install}, a: a, to: to, e: e, client: c, Peer: hr, close: closeFn}
+	if to.RelayID != "" {
+		p.operation = opt.OperationID
+	}
 	if !hr.Receive {
 		p.Close()
 		return nil, peer.Refused(to.Name)
@@ -282,7 +287,15 @@ func (a *App) StartPush(ctx context.Context, inv *Inventory, e Entry, to config.
 		return nil, err
 	}
 	var reply peer.PlanReply
-	if err := p.client.Call(ctx, peer.MethodPlan, peer.PlanRequest{Package: pkg, Target: target, Options: opt}, &reply); err != nil {
+	request := peer.PlanRequest{Package: pkg, Target: target, Options: opt}
+	if p.operation != "" {
+		request, err = p.frozenRequest(ctx, request)
+		if err != nil {
+			p.Close()
+			return nil, err
+		}
+	}
+	if err := p.client.Call(ctx, peer.MethodPlan, request, &reply); err != nil {
 		p.Close()
 		return nil, err
 	}
@@ -464,6 +477,18 @@ func (p *Push) Commit(ctx context.Context) (*PushResult, error) {
 		return nil, err
 	}
 	defer finished()
+	var outgoing *relayOutgoing
+	if p.operation != "" {
+		var lock *os.File
+		outgoing, lock, err = p.beginSourceCommit(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer lock.Close()
+		if outgoing.Phase == "completed" && outgoing.Result != nil {
+			return outgoing.Result, nil
+		}
+	}
 	if err := p.a.checkAccountRegistration(p.source.Install); err != nil {
 		return nil, err
 	}
@@ -489,6 +514,12 @@ func (p *Push) Commit(ctx context.Context) (*PushResult, error) {
 	if err := j.AddRemote(p.to.Name, reply.Journal); err != nil {
 		return out, err
 	}
+	if outgoing != nil {
+		outgoing.Phase, outgoing.Journal = "source-started", j.ID
+		if err = saveRelayOutgoing(p.outgoingPath(), outgoing); err != nil {
+			return out, err
+		}
+	}
 	if err := a.replay(ctx, e, j, reply.Writes); err != nil {
 		reply.Result.Warnings = append(reply.Result.Warnings, "could not update the copy here: "+err.Error())
 	}
@@ -501,6 +532,12 @@ func (p *Push) Commit(ctx context.Context) (*PushResult, error) {
 		}
 	}
 	a.Audit.Write(audit.Entry{Action: "push", Host: p.to.Name, Session: e.Session.Key.String(), Detail: map[string]any{"journal": j.ID, "remote": reply.Journal, "writes": len(reply.Writes)}})
+	if outgoing != nil {
+		outgoing.Phase, outgoing.Result = "completed", out
+		if err = saveRelayOutgoing(p.outgoingPath(), outgoing); err != nil {
+			return out, err
+		}
+	}
 	return out, nil
 }
 

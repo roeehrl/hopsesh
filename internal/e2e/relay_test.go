@@ -7,11 +7,14 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"net"
 	"net/http"
@@ -21,7 +24,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/roeehrl/hopsesh/agents/claude"
 	"github.com/roeehrl/hopsesh/internal/config"
+	"github.com/roeehrl/hopsesh/internal/core/cloudintegration"
 	"github.com/roeehrl/hopsesh/internal/core/relay"
 	localruntime "github.com/roeehrl/hopsesh/internal/core/runtime"
 )
@@ -52,26 +57,63 @@ func TestRelayPushSurvivesReceiverRestartAndPeerOwnedUndo(t *testing.T) {
 	certFile, keyFile, pool := relayFixtureCertificate(t, root)
 	server := exec.CommandContext(ctx, node, fixture)
 	server.Env = append(os.Environ(), "HOPSESH_RELAY_FIXTURE_CERT="+certFile, "HOPSESH_RELAY_FIXTURE_KEY="+keyFile)
-	stdout, err := server.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	server.Stderr = os.Stderr
-	if err = server.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { cancel(); _ = server.Wait() }()
-	line, err := bufio.NewReader(stdout).ReadBytes('\n')
-	if err != nil {
-		t.Fatal(err)
-	}
 	var ready struct {
 		URL string `json:"url"`
 	}
-	if err = json.Unmarshal(line, &ready); err != nil {
-		t.Fatal(err)
+	if os.Getenv("HOPSESH_RELAY_PLATFORM") == "1" {
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		port := listener.Addr().(*net.TCPAddr).Port
+		_ = listener.Close()
+		server = exec.CommandContext(ctx, node, filepath.Join(filepath.Dir(fixture), "node_modules", "wrangler", "bin", "wrangler.js"), "dev", "--local", "--ip", "127.0.0.1", "--port", fmt.Sprint(port), "--inspector-port", "0", "--local-protocol", "https", "--https-key-path", keyFile, "--https-cert-path", certFile, "--persist-to", filepath.Join(root, "platform-state"), "--var", "ENROLLMENT_ADMIN:fixture-admin-secret-with-32-bytes-minimum", "--log-level", "error", "--show-interactive-dev-session=false")
+		server.Dir = filepath.Dir(fixture)
+		server.Env = append(os.Environ(), "WRANGLER_SEND_METRICS=false")
+		log, err := os.Create(filepath.Join(root, "platform.log"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer log.Close()
+		server.Stdout, server.Stderr = log, log
+		if err = server.Start(); err != nil {
+			t.Fatal(err)
+		}
+		ready.URL = fmt.Sprintf("https://127.0.0.1:%d", port)
+	} else {
+		stdout, err := server.StdoutPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		server.Stderr = os.Stderr
+		if err = server.Start(); err != nil {
+			t.Fatal(err)
+		}
+		line, err := bufio.NewReader(stdout).ReadBytes('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = json.Unmarshal(line, &ready); err != nil {
+			t.Fatal(err)
+		}
 	}
+	defer func() { _ = server.Process.Signal(os.Interrupt); cancel(); _ = server.Wait() }()
 	httpClient := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}, Timeout: 10 * time.Second}
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		res, err := httpClient.Get(ready.URL + "/v1/capabilities")
+		if err == nil {
+			_ = res.Body.Close()
+			if res.StatusCode == 200 {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			log, _ := os.ReadFile(filepath.Join(root, "platform.log"))
+			t.Fatalf("local platform did not become ready: %v\n%s", err, log)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 	bin := buildHopsesh(t)
 	box := newMachineHome(t, root, "relay-box", false)
 	here := newMachineHome(t, root, "relay-here", true)
@@ -158,12 +200,21 @@ func TestRelayPushSurvivesReceiverRestartAndPeerOwnedUndo(t *testing.T) {
 			err = client.Call(probe, "status", nil, &status)
 			done()
 			if err == nil {
+				var health relay.Health
+				probe, done = context.WithTimeout(ctx, 200*time.Millisecond)
+				err = client.Call(probe, "relay.status", nil, &health)
+				done()
+				if err == nil && !health.Connected {
+					err = fmt.Errorf("relay startup pending: %s", health.Error)
+				}
+			}
+			if err == nil {
 				break
 			}
 			if time.Now().After(deadline) {
 				_ = cmd.Process.Kill()
 				_ = cmd.Wait()
-				t.Fatalf("runtime failed: %v\n%s", err, output.String())
+				t.Fatalf("runtime or relay failed: %v\n%s", err, output.String())
 			}
 			time.Sleep(20 * time.Millisecond)
 		}
@@ -183,7 +234,7 @@ func TestRelayPushSurvivesReceiverRestartAndPeerOwnedUndo(t *testing.T) {
 		return client, stop
 	}
 	_, stopBox := start(box)
-	_, _ = start(here)
+	_, stopHere := start(here)
 	args := []string{"push", sid, box.name, "--in", "codex", "--to", box.repo, "--no-sync", "--no-mark", "--operation-id", "relay-restart-op-123456", "--yes", "--json"}
 	planJSON := run(here, append(append([]string(nil), args...), "--dry-run")...)
 	stopBox()
@@ -212,7 +263,155 @@ func TestRelayPushSurvivesReceiverRestartAndPeerOwnedUndo(t *testing.T) {
 	if result.Result.Journal == "" || result.Result.Result.Journal == "" {
 		t.Fatal("missing source or destination undo journal")
 	}
+	// Restart both owners and repeat the committed operation. Source-side marks
+	// and journals must not be duplicated, and the original frozen request must
+	// remain valid even though its lineage receipt changed after completion.
+	stopHere()
+	hereClient, _ := start(here)
+	var repeated struct {
+		Result struct {
+			Journal string
+			Result  struct{ Journal string }
+		}
+	}
+	if err = json.Unmarshal(run(here, args...), &repeated); err != nil {
+		t.Fatal(err)
+	}
+	if repeated.Result.Journal != result.Result.Journal || repeated.Result.Result.Journal != result.Result.Result.Journal {
+		t.Fatal("retry duplicated a source or destination journal", result, repeated)
+	}
+	journals, err := filepath.Glob(filepath.Join(here.home, "state", "journal", "*", "journal.json"))
+	if err != nil || len(journals) != 1 {
+		t.Fatal("source retry created another journal", journals, err)
+	}
 	run(here, "undo", result.Result.Journal, "--yes", "--json")
+	qualifyCloudConnector(t, ctx, bin, root, ready.URL, certFile, httpClient, hereClient, hereID)
+}
+
+// This is a real CLI connector process, not a provider startup simulation. It
+// qualifies scoped authorization and encrypted read-only delivery independently
+// of the hosted provider's install/start lifecycle.
+func qualifyCloudConnector(t *testing.T, ctx context.Context, bin, root, origin, certFile string, httpClient *http.Client, client localruntime.Client, peer relay.PublicIdentity) {
+	t.Helper()
+	cloud := newMachineHome(t, root, "cloud-scoped", true)
+	transcript := filepath.Join(cloud.home, ".claude", "projects", claude.Slug(cloud.repo), sid+".jsonl")
+	native, err := os.ReadFile(transcript)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := func(input []byte, args ...string) []byte {
+		cmd := exec.CommandContext(ctx, bin, args...)
+		cmd.Env = cloud.env()
+		cmd.Stdin = bytes.NewReader(input)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("cloud %s: %v\n%s", args[0], err, out)
+		}
+		return out
+	}
+	prepare := []string{"cloud-integration", "prepare", "--provider", "claude-hosted", "--session", sid, "--workspace", cloud.repo, "--native-root", filepath.Join(cloud.home, ".claude", "projects"), "--transcript", transcript, "--allow-transcript-export"}
+	var instance cloudintegration.Incarnation
+	if err = json.Unmarshal(run(nil, prepare...), &instance); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]any{"device": instance.Public.ID, "ttl": int(time.Until(instance.Expires).Seconds())})
+	req, err := http.NewRequestWithContext(ctx, "POST", origin+"/v1/enrollment/register", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer fixture-admin-secret-with-32-bytes-minimum")
+	req.Header.Set("X-Hopsesh-Space", "relay-e2e-space-1234")
+	res, err := httpClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusCreated {
+		t.Fatal("cloud enrollment", res.StatusCode)
+	}
+	var connection relay.Connection
+	if err = json.NewDecoder(res.Body).Decode(&connection); err != nil {
+		t.Fatal(err)
+	}
+	connection.CAFile = certFile
+	credential, _ := json.Marshal(connection)
+	public, _ := json.Marshal(peer)
+	publicFile := filepath.Join(root, "desktop-public.json")
+	if err = os.WriteFile(publicFile, public, 0600); err != nil {
+		t.Fatal(err)
+	}
+	run(credential, "cloud-integration", "authorize", instance.Directory, "--peer", publicFile, "--fingerprint", peer.Fingerprint(), "--origin", origin)
+	store := relay.Store{Directory: filepath.Join(root, "relay-here", "state", "relay")}
+	if err = store.Approve(ctx, relay.Grant{Peer: instance.Public, Endpoint: instance.Public.Endpoint, Kind: "cloud-session", SendMethods: []string{"observe", "export"}, Expires: connection.Expires}); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(ctx, bin, "cloud-integration", "serve", instance.Directory)
+	cmd.Env = cloud.env()
+	var output bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &output, &output
+	if err = cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	call := func(method string, params any, result any) error {
+		operation, err := relay.NewOperationID()
+		if err != nil {
+			return err
+		}
+		bounded, done := context.WithTimeout(ctx, 30*time.Second)
+		defer done()
+		return client.Call(bounded, "relay.call", map[string]any{"peer": instance.Public.ID, "operation": operation, "method": method, "params": params}, result)
+	}
+	var observed cloudintegration.Observation
+	if err = call("observe", nil, &observed); err != nil {
+		t.Fatal("scoped cloud observation", err)
+	}
+	if observed.Session != sid || observed.Incarnation != instance.ID || observed.Workspace != cloud.repo || !observed.TranscriptAvailable || !observed.ExportAllowed {
+		t.Fatal("cloud observation widened or lost its scope", observed)
+	}
+	var exported struct {
+		cloudintegration.Observation
+		Format string `json:"format"`
+		Data   []byte `json:"data"`
+		SHA256 string `json:"sha256"`
+	}
+	if err = call("export", nil, &exported); err != nil {
+		t.Fatal("scoped cloud export", err)
+	}
+	sum := sha256.Sum256(native)
+	if exported.Session != sid || exported.Format != "native-jsonl" || !bytes.Equal(exported.Data, native) || exported.SHA256 != hex.EncodeToString(sum[:]) {
+		t.Fatal("cloud export did not preserve the bound native transcript")
+	}
+	if err = call("apply", nil, nil); err == nil {
+		t.Fatal("cloud grant allowed device mutation")
+	}
+	if err = call("export", map[string]string{"session": "another-session", "path": cloud.home}, nil); err == nil {
+		t.Fatal("cloud request widened the session")
+	}
+	// A fork has separate startup keys and cannot supersede the original.
+	run(nil, "cloud-integration", "prepare", "--provider", "claude-hosted", "--session", "independent-fork", "--workspace", cloud.repo)
+	if err = call("observe", nil, &observed); err != nil {
+		t.Fatal("fork invalidated original connector", err)
+	}
+	// Restart/rebuild of the same session must invalidate the cached credential.
+	var replacement cloudintegration.Incarnation
+	if err = json.Unmarshal(run(nil, prepare...), &replacement); err != nil {
+		t.Fatal(err)
+	}
+	if replacement.Public.ID == instance.Public.ID || replacement.Directory == instance.Directory {
+		t.Fatal("rebuild reused cached cloud identity")
+	}
+	if _, err = cloudintegration.Load(ctx, instance.Directory); err == nil {
+		t.Fatal("superseded cloud connector retained authority")
+	}
+	after, err := os.ReadFile(transcript)
+	if err != nil || !bytes.Equal(after, native) {
+		t.Fatal("read-only cloud delivery changed the native transcript", err)
+	}
+	journals, err := filepath.Glob(filepath.Join(cloud.home, "state", "journal", "*", "journal.json"))
+	if err != nil || len(journals) != 0 {
+		t.Fatal("scoped cloud reads created mutation journals", journals, err)
+	}
 }
 
 func relayFixtureCertificate(t *testing.T, root string) (string, string, *x509.CertPool) {

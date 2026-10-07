@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/roeehrl/hopsesh/internal/localstate"
 )
 
 // Connection keeps its credential only in the private state namespace. It is
@@ -69,7 +71,7 @@ func (s Store) Connection(ctx context.Context) (Connection, error) {
 	var c Connection
 	err := s.withLock(ctx, func() error {
 		path := filepath.Join(s.Directory, "connection.json")
-		b, err := os.ReadFile(path)
+		b, err := localstate.ReadPrivateFile(path, MaxWireBytes)
 		if err != nil {
 			return err
 		}
@@ -89,6 +91,7 @@ type Listener struct {
 	Processor  Processor
 	Notify     func(error)
 	OnResponse func(context.Context, Envelope) error
+	OnRejected func()
 }
 
 // Run uses one adaptive HTTP poll for all local clients. Delivery acknowledgments
@@ -107,7 +110,15 @@ func (l Listener) Run(ctx context.Context) error {
 						break
 					}
 					if err = l.OnResponse(ctx, d.Envelope); err != nil {
-						break
+						if !permanent(err) {
+							break
+						}
+						if err = l.Processor.Store.Quarantine(ctx, d.Envelope, err); err != nil {
+							break
+						}
+						if l.OnRejected != nil {
+							l.OnRejected()
+						}
 					}
 					cursor = d.Sequence
 					continue
@@ -117,6 +128,16 @@ func (l Listener) Run(ctx context.Context) error {
 					e = l.Transport.Submit(ctx, response)
 				}
 				if e != nil {
+					if permanent(e) {
+						if err = l.Processor.Store.Quarantine(ctx, d.Envelope, e); err != nil {
+							break
+						}
+						if l.OnRejected != nil {
+							l.OnRejected()
+						}
+						cursor = d.Sequence
+						continue
+					}
 					err = e
 					break
 				}

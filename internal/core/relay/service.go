@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/roeehrl/hopsesh/internal/localstate"
 )
 
 // Service multiplexes replies and incoming requests through the owner's single
@@ -31,19 +33,28 @@ func replyKey(peer, op, method string) string {
 func (s *Service) receive(ctx context.Context, e Envelope) error {
 	grant, err := s.Processor.Store.Grant(ctx, e.From)
 	if err != nil {
+		if errors.Is(err, ErrRevoked) {
+			err = reject(err)
+		}
 		return err
 	}
 	body, err := Open(s.Processor.Identity, grant.Peer, e, s.Processor.Space, time.Now())
 	if err != nil {
-		return err
+		return reject(err)
 	}
 	var reply Reply
 	if err = json.Unmarshal(body, &reply); err != nil {
-		return err
+		return reject(err)
+	}
+	if !grant.AllowsSend(reply.Method, time.Now()) {
+		return reject(ErrRevoked)
 	}
 	key := replyKey(e.From, e.Operation, reply.Method)
 	if _, err = os.Stat(filepath.Join(s.Processor.Store.Directory, "outgoing-"+key+".json")); err != nil {
-		return errors.New("unsolicited relay reply")
+		if os.IsNotExist(err) {
+			return reject(errors.New("unsolicited relay reply"))
+		}
+		return err
 	}
 	if err = s.Processor.Store.withLock(ctx, func() error { return writeJSON(filepath.Join(s.Processor.Store.Directory, "reply-"+key+".json"), e) }); err != nil {
 		return err
@@ -64,11 +75,12 @@ type Health struct {
 	Connected   bool      `json:"connected"`
 	LastSuccess time.Time `json:"lastSuccess"`
 	Error       string    `json:"error,omitempty"`
+	Rejected    uint64    `json:"rejected"`
 }
 
 func (s *Service) Health() Health { s.mu.Lock(); defer s.mu.Unlock(); return s.health }
 func (s *Service) Run(ctx context.Context) error {
-	return (Listener{Transport: s.Transport, Processor: s.Processor, OnResponse: s.receive, Notify: func(err error) {
+	return (Listener{Transport: s.Transport, Processor: s.Processor, OnResponse: s.receive, OnRejected: func() { s.mu.Lock(); s.health.Rejected++; s.mu.Unlock() }, Notify: func(err error) {
 		s.mu.Lock()
 		s.health.Connected = err == nil
 		s.health.Error = ""
@@ -104,7 +116,7 @@ func (s *Service) Call(ctx context.Context, peer, operation, method string, para
 	digest := sha256.Sum256(body)
 	if err = s.Processor.Store.withLock(ctx, func() error {
 		path := filepath.Join(s.Processor.Store.Directory, "outgoing-"+key+".json")
-		prior, e := os.ReadFile(path)
+		prior, e := localstate.ReadPrivateFile(path, MaxWireBytes)
 		if e == nil {
 			var old Record
 			if e = json.Unmarshal(prior, &old); e != nil {
@@ -148,7 +160,7 @@ func (s *Service) Call(ctx context.Context, peer, operation, method string, para
 	for {
 		var envelope Envelope
 		path := filepath.Join(s.Processor.Store.Directory, "reply-"+key+".json")
-		b, err := os.ReadFile(path)
+		b, err := localstate.ReadPrivateFile(path, MaxWireBytes)
 		if err == nil {
 			current, checkErr := s.Processor.Store.Grant(ctx, peer)
 			if checkErr != nil || !current.AllowsSend(method, time.Now()) || current.Peer.Fingerprint() != grant.Peer.Fingerprint() {

@@ -93,6 +93,21 @@ func TestActualWorkerHandlerAndGoEndpointsRoundTrip(t *testing.T) {
 		}}}
 	}
 	sa, sb := makeService(a, b, tokens[0]), makeService(b, a, tokens[1])
+	bad, err := Seal(a, b.Public, space, "invalid-delivery-1234", []byte(`{"method":"apply","params":{}}`), time.Now(), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad.Signature[0] ^= 1
+	if err = sa.Transport.Submit(ctx, bad); err != nil {
+		t.Fatal(err)
+	}
+	unsolicited, err := sealKind(a, b.Public, space, "unsolicited-op-1234", "response", []byte(`{"method":"apply","outcome":{"result":{}}}`), time.Now(), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = sa.Transport.Submit(ctx, unsolicited); err != nil {
+		t.Fatal(err)
+	}
 	ended := make(chan error, 2)
 	go func() { ended <- sa.Run(ctx) }()
 	go func() { ended <- sb.Run(ctx) }()
@@ -105,6 +120,19 @@ func TestActualWorkerHandlerAndGoEndpointsRoundTrip(t *testing.T) {
 	}
 	if calls.Load() != 1 {
 		t.Fatal("duplicate delivery repeated native action", calls.Load())
+	}
+	if sb.Health().Rejected != 2 {
+		t.Fatal("invalid or unsolicited delivery blocked later valid transfer", sb.Health())
+	}
+	rejected, _ := filepath.Glob(filepath.Join(sb.Processor.Store.Directory, "rejected-*.json"))
+	if len(rejected) != 2 {
+		t.Fatal("rejected deliveries were acknowledged without durable inspection receipts")
+	}
+	for _, path := range rejected {
+		b, err := os.ReadFile(path)
+		if err != nil || len(b) > 4096 || bytes.Contains(b, []byte("unique-marker")) {
+			t.Fatal("unbounded or plaintext rejection record", err)
+		}
 	}
 	if _, err = sa.Call(ctx, b.Public.ID, "native-operation-1234", "apply", json.RawMessage(`{"branch":"original"}`)); err == nil {
 		t.Fatal("operation changed branches")

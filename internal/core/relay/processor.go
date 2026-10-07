@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/roeehrl/hopsesh/internal/localstate"
 )
 
 const MaxOperationRecords = 10000
@@ -25,22 +27,25 @@ type Processor struct {
 
 func (p Processor) Process(ctx context.Context, e Envelope, now time.Time) (Envelope, error) {
 	if e.Kind != "request" {
-		return Envelope{}, errors.New("a relay reply is not a new native action")
+		return Envelope{}, reject(errors.New("a relay reply is not a new native action"))
 	}
 	grant, err := p.Store.Grant(ctx, e.From)
 	if err != nil {
+		if errors.Is(err, ErrRevoked) {
+			err = reject(err)
+		}
 		return Envelope{}, err
 	}
 	plain, err := Open(p.Identity, grant.Peer, e, p.Space, now)
 	if err != nil {
-		return Envelope{}, err
+		return Envelope{}, reject(err)
 	}
 	var req Request
 	if err = json.Unmarshal(plain, &req); err != nil {
-		return Envelope{}, err
+		return Envelope{}, reject(err)
 	}
 	if !grant.Allows(req.Method, now) {
-		return Envelope{}, ErrRevoked
+		return Envelope{}, reject(ErrRevoked)
 	}
 	if p.Handle == nil {
 		return Envelope{}, errors.New("relay receiver unavailable")
@@ -50,7 +55,7 @@ func (p Processor) Process(ctx context.Context, e Envelope, now time.Time) (Enve
 	err = p.Store.withLock(ctx, func() error {
 		// Re-read authorization under the same lock as durable intent. Revocation
 		// before action cannot race an earlier authorization read.
-		b, err := os.ReadFile(filepath.Join(p.Store.Directory, "peer-"+e.From+".json"))
+		b, err := localstate.ReadPrivateFile(filepath.Join(p.Store.Directory, "peer-"+e.From+".json"), 8192)
 		if err != nil {
 			return err
 		}
@@ -62,19 +67,19 @@ func (p Processor) Process(ctx context.Context, e Envelope, now time.Time) (Enve
 			return errors.New("relay peer keys changed during authorization")
 		}
 		if !current.Allows(req.Method, now) {
-			return ErrRevoked
+			return reject(ErrRevoked)
 		}
 		digest := sha256.Sum256(plain)
 		key := sha256.Sum256([]byte(e.From + "\x00" + e.Operation + "\x00" + req.Method))
 		path := filepath.Join(p.Store.Directory, "operation-"+hex.EncodeToString(key[:])+".json")
 		var record Record
-		b, err = os.ReadFile(path)
+		b, err = localstate.ReadPrivateFile(path, MaxWireBytes)
 		if err == nil {
 			if err = json.Unmarshal(b, &record); err != nil {
 				return err
 			}
 			if !bytes.Equal(record.Request, digest[:]) {
-				return errors.New("relay operation ID reused for different input")
+				return reject(errors.New("relay operation ID reused for different input"))
 			}
 			if record.Phase == "completed" {
 				if record.Response.Expires <= now.Unix() {

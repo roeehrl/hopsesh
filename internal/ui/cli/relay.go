@@ -135,7 +135,7 @@ func relayCmd() *cobra.Command {
 		}
 		_, err = config.SetSetting("relay.enabled", json.RawMessage("true"), nil)
 		if err == nil {
-			_, err = fmt.Fprintln(cmd.OutOrStdout(), "Relay enrolled. Start or restart this namespace's runtime to connect.")
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), "Relay enrolled. A running runtime connects automatically; otherwise start this namespace's runtime.")
 		}
 		return err
 	}}

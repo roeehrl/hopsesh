@@ -103,7 +103,19 @@ func (f *Files) SetRoots(roots []string) error {
 			problems = append(problems, err)
 			continue
 		}
-		if !info.IsDir() || info.Mode()&fs.ModeSymlink != 0 {
+		if info.Mode()&fs.ModeSymlink != 0 {
+			continue
+		}
+		if info.Mode().IsRegular() {
+			parent := filepath.Dir(root)
+			if len(wanted) >= f.limit && !wanted[parent] {
+				problems = append(problems, fmt.Errorf("directory watch limit %d reached; reconciliation remains active", f.limit))
+			} else {
+				wanted[parent] = true
+			}
+			continue
+		}
+		if !info.IsDir() {
 			continue
 		}
 		err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {

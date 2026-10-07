@@ -123,11 +123,8 @@ func (s Store) Identity(ctx context.Context, endpoints ...string) (Identity, err
 	var i Identity
 	err := s.withLock(ctx, func() error {
 		path := filepath.Join(s.Directory, "identity.json")
-		b, err := os.ReadFile(path)
+		b, err := localstate.ReadPrivateFile(path, MaxWireBytes)
 		if err == nil {
-			if err = localstate.PrivateFile(path); err != nil {
-				return err
-			}
 			if err = json.Unmarshal(b, &i); err != nil {
 				return err
 			}
@@ -175,7 +172,7 @@ func (s Store) Grant(ctx context.Context, id string) (Grant, error) {
 		return g, ErrRevoked
 	}
 	err := s.withLock(ctx, func() error {
-		b, err := os.ReadFile(filepath.Join(s.Directory, "peer-"+id+".json"))
+		b, err := localstate.ReadPrivateFile(filepath.Join(s.Directory, "peer-"+id+".json"), 8192)
 		if os.IsNotExist(err) {
 			return ErrRevoked
 		}
@@ -198,7 +195,7 @@ func (s Store) Revoke(ctx context.Context, id string) error {
 	}
 	return s.withLock(ctx, func() error {
 		path := filepath.Join(s.Directory, "peer-"+id+".json")
-		b, err := os.ReadFile(path)
+		b, err := localstate.ReadPrivateFile(path, MaxWireBytes)
 		if err != nil {
 			return err
 		}

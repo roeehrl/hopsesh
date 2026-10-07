@@ -87,3 +87,40 @@ func TestFilesBoundedAndSymlinksNotFollowed(t *testing.T) {
 		t.Fatal("followed a directory symlink")
 	}
 }
+
+func TestExactFileWatchIgnoresSiblingQueuesAndObservesAtomicReplacement(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "settings.json")
+	if err := os.WriteFile(target, []byte("old"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	events := make(chan struct{}, 100)
+	f, err := NewFiles(10, func() { events <- struct{}{} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err = f.SetRoots([]string{target}); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(dir, "delivery-ciphertext"), []byte("opaque"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-events:
+		t.Fatal("sibling queue woke observation")
+	case <-time.After(100 * time.Millisecond):
+	}
+	tmp := filepath.Join(dir, ".replacement")
+	if err = os.WriteFile(tmp, []byte("new"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Rename(tmp, target); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-events:
+	case <-time.After(5 * time.Second):
+		t.Fatal("atomic replacement was not observed")
+	}
+}

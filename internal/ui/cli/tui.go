@@ -17,6 +17,14 @@ import (
 func (r *run) runTUI() error {
 	r.askPasswordsFirst()
 	deps := tui.Deps{App: r.app, Describe: func(e app.Entry) string { return branchInfo(e.Git) }}
+	if client, err := runtimeClient(); err == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		var status any
+		if client.Call(ctx, "status", nil, &status) == nil {
+			deps.Runtime = &client
+		}
+		cancel()
+	}
 	for {
 		exit, err := tui.Run(deps)
 		if err != nil || exit == nil {

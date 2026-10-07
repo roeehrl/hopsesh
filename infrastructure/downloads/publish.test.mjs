@@ -1,0 +1,34 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createHash,generateKeyPairSync,sign} from 'node:crypto';
+import {mkdtemp,writeFile,rm} from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {publish} from './publish.mjs';
+
+test('publisher validates all signed objects before mutation and retries immutable objects safely',async()=>{
+ const {publicKey,privateKey}=generateKeyPairSync('ec',{namedCurve:'prime256v1'});
+ for(const scenario of ['valid','bad-signature','bad-archive']){
+  const dir=await mkdtemp(path.join(os.tmpdir(),'hopsesh-publication-'));
+  try{
+   const archive=Buffer.from('disposable signed archive fixture');
+   const manifest=Buffer.from(createHash('sha256').update(archive).digest('hex')+'  hopsesh_0.5.0_linux_amd64.tar.gz\n');
+   const signature=sign('sha256',manifest,privateKey);
+   if(scenario==='bad-signature')signature[0]^=1;
+   await writeFile(path.join(dir,'checksums.txt'),manifest);
+   await writeFile(path.join(dir,'checksums.txt.sig'),signature);
+   await writeFile(path.join(dir,'hopsesh_0.5.0_linux_amd64.tar.gz'),scenario==='bad-archive'?Buffer.from('tampered'):archive);
+   let calls=0;
+   const fetcher=async(url,options)=>{
+    calls++;assert.match(url,/^https:\/\/downloads\.example\/releases\/v0\.5\.0\//);
+    assert.equal(options.redirect,'error');assert.equal(options.method,'PUT');
+    const body=Buffer.from(await new Response(options.body).arrayBuffer());
+    assert.equal(createHash('sha256').update(body).digest('hex'),options.headers['X-Hopsesh-SHA256']);
+    return new Response(null,{status:calls>3?200:201});
+   };
+   const run=()=>publish('0.5.0',dir,'https://downloads.example','fixture-local-publication-token-32-bytes',fetcher,publicKey.export({type:'spki',format:'pem'}));
+   if(scenario==='valid'){assert.equal((await run()).length,3);assert.equal((await run()).length,3);assert.equal(calls,6)}
+   else {await assert.rejects(run);assert.equal(calls,0,'invalid release made a network mutation')}
+  }finally{await rm(dir,{recursive:true,force:true})}
+ }
+});

@@ -5,6 +5,9 @@ export const LIMITS = Object.freeze({ frame: 24 * 1024 * 1024, bytes: 64 * 1024 
 const opaque = s => typeof s === 'string' && /^[A-Za-z0-9_-]{16,128}$/.test(s);
 const hash = async s => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(s)))).map(v => v.toString(16).padStart(2,'0')).join('');
 const json = (v,status=200) => new Response(JSON.stringify(v),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
+async function schedule(storage,when,now=Date.now()){
+ const old=await storage.getAlarm();if(!old||old<=now||when<old)await storage.setAlarm(when);
+}
 async function bounded(req, max) {
   const advertised=Number(req.headers.get('content-length')||0);
   if(advertised>max)throw new Error('too-large');
@@ -41,6 +44,7 @@ export function createHandler(storage,bucket,adminToken,space,clock=()=>Date.now
      await tx.put('device:'+body.device,{token:key,expires:now+body.ttl,revoked:false});
      await tx.put('token:'+key,body.device);
      if(!old)await tx.put('device-count',count+1);
+     await schedule(storage,(now+body.ttl)*1000,clock());
      return json({token:credential,space,device:body.device,expires:now+body.ttl},201);
     });
    }
@@ -71,9 +75,9 @@ export function createHandler(storage,bucket,adminToken,space,clock=()=>Date.now
      // Unreferenced ciphertext has a separate R2 lifecycle cleanup policy.
      await bucket.put(key,data,{customMetadata:{expires:String(e.expires)}});
      await tx.put('message:'+e.to+':'+String(sequence).padStart(20,'0'),{key,bytes:data.length,expires:e.expires,sequence});
-     await tx.put('id:'+device+':'+e.id,{sum,sequence});await tx.put('id-count',tombstones+1);
+     await tx.put('id:'+device+':'+e.id,{sum,sequence,expires:e.expires});await tx.put('id-count',tombstones+1);
      await tx.put('sequence:'+e.to,sequence);await tx.put('quota:'+e.to,{bytes:q.bytes+data.length,count:q.count+1});
-     await storage.setAlarm(clock()+60000);
+     await schedule(storage,e.expires*1000,clock());
      return json({sequence},201);
     });
    }
@@ -91,23 +95,49 @@ export function createHandler(storage,bucket,adminToken,space,clock=()=>Date.now
     return json({acknowledged:cursor});
    }
    return json({error:'method-or-route'},['/v1/messages','/v1/ack'].includes(path)?405:404);
-  }catch(e){return json({error:e?.message==='too-large'?'frame':'invalid-request'},e?.message==='too-large'?413:400)}
+  }catch(e){return json({error:e?.message==='too-large'?'frame':e?.message==='storage'?'storage':'invalid-request'},e?.message==='too-large'?413:e?.message==='storage'?503:400)}
  };
 }
 async function removeMessages(storage,bucket,device,predicate){
  await storage.transaction(async tx=>{
   const rows=await tx.list({prefix:'message:'+device+':' });const q=(await tx.get('quota:'+device))||{bytes:0,count:0};
-  for(const [k,m]of rows){if(!predicate(m))continue;await bucket.delete(m.key);await tx.delete(k);q.bytes-=m.bytes;q.count--;}
+  // Commit logical deletion and a cleanup intent together. R2 deletion cannot
+  // participate in a DO transaction: deleting it first can strand a visible row
+  // after rollback and permanently block a mailbox on a missing object.
+  for(const [k,m]of rows){if(!predicate(m))continue;await tx.put('delete:'+m.key,m.key);await tx.delete(k);q.bytes-=m.bytes;q.count--;}
   await tx.put('quota:'+device,q);
  });
+ await schedule(storage,Date.now()+60000);
+ await retryDeletes(storage,bucket);
+}
+async function retryDeletes(storage,bucket){
+ const rows=await storage.list({prefix:'delete:'});
+ for(const [key,object]of rows){try{await bucket.delete(object);await storage.delete(key)}catch{throw new Error('storage')}}
+}
+export async function maintain(storage,bucket,now=Math.floor(Date.now()/1000)){
+ const devices=await storage.list({prefix:'device:'});
+ for(const [key,d]of devices)await removeMessages(storage,bucket,key.slice(7),m=>m.expires<=now||d.expires<=now||d.revoked);
+ await storage.transaction(async tx=>{
+  let ids=(await tx.get('id-count'))||0,deviceCount=(await tx.get('device-count'))||0;
+  for(const[key,r]of await tx.list({prefix:'id:'}))if(r.expires<=now){await tx.delete(key);ids--}
+  // Expired routing credentials cannot resurrect an old mailbox. Re-enrollment
+  // still needs operator authorization and independent local key approval.
+  for(const[key,d]of await tx.list({prefix:'device:'}))if(d.expires<=now||d.revoked){await tx.delete('token:'+d.token);await tx.delete(key);deviceCount--}
+  await tx.put('id-count',Math.max(0,ids));await tx.put('device-count',Math.max(0,deviceCount));
+ });
+ await retryDeletes(storage,bucket);
+ // Wake at the next real expiry, not every minute while devices are idle.
+ let next=Infinity;
+ for(const prefix of ['device:','id:','message:'])for(const [,v]of await storage.list({prefix}))next=Math.min(next,v.expires);
+ const deletes=await storage.list({prefix:'delete:',limit:1});
+ if(deletes.size)next=Math.min(next,now+60);
+ if(Number.isFinite(next))await storage.setAlarm(Math.max(Date.now()+1000,next*1000));
 }
 export class Mailbox {
  constructor(ctx,env){this.ctx=ctx;this.env=env}
  async fetch(req){const space=req.headers.get('X-Hopsesh-Space');return createHandler(this.ctx.storage,this.env.CIPHERTEXT,this.env.ENROLLMENT_ADMIN,space)(req)}
  async alarm(){
-  const now=Math.floor(Date.now()/1000);const devices=await this.ctx.storage.list({prefix:'device:'});
-  for(const [key]of devices)await removeMessages(this.ctx.storage,this.env.CIPHERTEXT,key.slice(7),m=>m.expires<=now);
-  const pending=await this.ctx.storage.list({prefix:'message:',limit:1});if(pending.size)await this.ctx.storage.setAlarm(Date.now()+60000);
+  await maintain(this.ctx.storage,this.env.CIPHERTEXT);
  }
 }
 export default {async fetch(req,env){

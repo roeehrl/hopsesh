@@ -67,34 +67,54 @@ func SetSetting(key string, value json.RawMessage, expected *string) (Settings, 
 	}
 	v := reflect.ValueOf(&c).Elem()
 	parts := strings.Split(key, ".")
-	for _, part := range parts {
-		if v.Kind() != reflect.Struct {
-			return Settings{}, fmt.Errorf("unknown setting %q", key)
-		}
-		typ := v.Type()
-		found := false
-		for i := 0; i < v.NumField(); i++ {
-			tag := strings.Split(typ.Field(i).Tag.Get("toml"), ",")[0]
-			if tag != "" && tag == part {
-				v = v.Field(i)
-				found = true
-				break
-			}
-		}
-		if !found {
-			return Settings{}, fmt.Errorf("unknown setting %q", key)
-		}
-	}
-	if !v.CanAddr() || !v.CanSet() {
-		return Settings{}, errors.New("setting is not editable")
-	}
-	if err = json.Unmarshal(value, v.Addr().Interface()); err != nil {
+	if err = assignSetting(v, parts, value); err != nil {
 		return Settings{}, fmt.Errorf("%s: %w", key, err)
 	}
 	if err = Save(&c); err != nil {
 		return Settings{}, err
 	}
 	return ReadSettings()
+}
+
+func assignSetting(v reflect.Value, parts []string, value json.RawMessage) error {
+	if len(parts) == 0 {
+		if !v.CanAddr() || !v.CanSet() {
+			return errors.New("setting is not editable")
+		}
+		return json.Unmarshal(value, v.Addr().Interface())
+	}
+	part := parts[0]
+	if part == "" {
+		return errors.New("empty setting path component")
+	}
+	switch v.Kind() {
+	case reflect.Struct:
+		typ := v.Type()
+		for i := 0; i < v.NumField(); i++ {
+			tag := strings.Split(typ.Field(i).Tag.Get("toml"), ",")[0]
+			if tag != "" && tag == part {
+				return assignSetting(v.Field(i), parts[1:], value)
+			}
+		}
+	case reflect.Map:
+		if v.Type().Key().Kind() != reflect.String || !v.CanSet() {
+			return errors.New("setting map is not editable")
+		}
+		entry := reflect.New(v.Type().Elem()).Elem()
+		key := reflect.ValueOf(part).Convert(v.Type().Key())
+		if old := v.MapIndex(key); old.IsValid() {
+			entry.Set(old)
+		}
+		if err := assignSetting(entry, parts[1:], value); err != nil {
+			return err
+		}
+		if v.IsNil() {
+			v.Set(reflect.MakeMap(v.Type()))
+		}
+		v.SetMapIndex(key, entry)
+		return nil
+	}
+	return errors.New("unknown setting path")
 }
 
 func SettingValue(s Settings, key string) (any, error) {

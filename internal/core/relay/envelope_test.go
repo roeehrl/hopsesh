@@ -155,6 +155,17 @@ func TestInterruptedActionRemainsUncertainAfterRestart(t *testing.T) {
 	if _, err := p.Process(ctx, e, now); !errors.Is(err, ErrUncertain) {
 		t.Fatal("uncertain operation retried", err)
 	}
+	p.Recover = func(context.Context, Grant, string, string, json.RawMessage) (any, error) {
+		return map[string]string{"journal": "verified-native-journal"}, nil
+	}
+	recovered, err := p.Process(ctx, e, now)
+	if err != nil {
+		t.Fatal("explicit native-journal recovery failed", err)
+	}
+	plain, err := Open(a, b.Public, recovered, e.Space, now)
+	if err != nil || !bytes.Contains(plain, []byte("verified-native-journal")) {
+		t.Fatal("recovery did not return durable outcome", err)
+	}
 }
 func TestCloudGrantCannotBecomeGeneralReceiver(t *testing.T) {
 	ctx := context.Background()

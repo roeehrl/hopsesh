@@ -158,10 +158,11 @@ func (inv *Inventory) Local() *Machine {
 
 // ScanOptions narrow a scan.
 type ScanOptions struct {
-	ForceAccounts bool     // explicitly refresh public login metadata
-	Hosts         []string // only these machines and clouds ("" or none: every allowed one)
-	NoLocal       bool     // leave this machine out
-	SkipGit       bool     // no git state (faster)
+	LocalSnapshot *Observation // a shared passive source; skips local adoption and vendor probes
+	ForceAccounts bool         // explicitly refresh public login metadata
+	Hosts         []string     // only these machines and clouds ("" or none: every allowed one)
+	NoLocal       bool         // leave this machine out
+	SkipGit       bool         // no git state (faster)
 	// GitFor, when set, limits the git probe to the folders of the sessions it accepts (the
 	// others get no git state); see App.GitFor.
 	GitFor func(Entry) bool
@@ -192,6 +193,12 @@ func (a *App) Scan(ctx context.Context, o ScanOptions) *Inventory {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			if o.LocalSnapshot != nil {
+				cached := a.ObservationInventory(ctx, *o.LocalSnapshot)
+				add(cached.Local(), cached.Entries)
+				localEntries <- cached.Entries
+				return
+			}
 			adopted, waiting := a.adoptWaiting(ctx, local())
 			m, es := a.scanMachine(ctx, local(), "", o)
 			add(m, es)

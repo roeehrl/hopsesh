@@ -10,6 +10,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/relay"
 	localruntime "github.com/roeehrl/hopsesh/internal/core/runtime"
 	"github.com/roeehrl/hopsesh/internal/version"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -30,75 +31,116 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 	var engine *observe.Engine
 	var files *observe.Files
 	var watchProblem string
+	var watchMu sync.Mutex
 	var relayMu sync.Mutex
 	var relayService *relay.Service
+	var relayContext context.Context
 	var relayProblem string
 	var tasks []func(context.Context)
-	if a.Cfg.Relay.Enabled {
-		store := relay.Store{Directory: filepath.Join(a.StateDir, "relay")}
-		connection, e := store.Connection(ctx)
-		if e != nil {
-			relayProblem = "Relay unavailable: " + e.Error()
-		} else {
-			identity, e := store.Identity(ctx)
-			if e != nil {
-				relayProblem = "Relay identity unavailable"
-			} else if identity.Public.ID != connection.Device {
-				relayProblem = "Relay credential belongs to another device"
-			} else {
-				httpClient, err := connection.HTTPClient()
-				if err != nil {
-					return nil, err
+	// Always supervise relay configuration, including enrollment or enablement
+	// after the owner has started. Clients never create additional listeners.
+	tasks = append(tasks, func(ctx context.Context) {
+		updates, unsubscribe := engine.Subscribe()
+		defer unsubscribe()
+		var connection relay.Connection
+		var stop func()
+		halt := func() {
+			relayMu.Lock()
+			relayService = nil
+			relayContext = nil
+			relayMu.Unlock()
+			if stop != nil {
+				stop()
+				stop = nil
+			}
+		}
+		defer halt()
+		problem := func(message string) {
+			relayMu.Lock()
+			changed := relayProblem != message
+			relayProblem = message
+			relayMu.Unlock()
+			if changed {
+				engine.Notify()
+			}
+		}
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case _, ok := <-updates:
+				if !ok {
+					return
 				}
-				relayService = &relay.Service{Transport: relay.Transport{Base: connection.URL, Space: connection.Space, Token: connection.Token, HTTP: httpClient}, Processor: relay.Processor{Identity: identity, Space: connection.Space, Store: store, Handle: a.RelayReceiver(func() observe.Snapshot { return engine.Latest() })}}
-				relayService.Processor.Recover = relayService.Processor.Handle
-				relayService.Notify = func(err error) {
-					problem := ""
+				cfg, err := config.Load()
+				if err != nil {
+					halt()
+					problem("Relay settings unavailable")
+					continue
+				}
+				if !cfg.Relay.Enabled {
+					halt()
+					problem("")
+					continue
+				}
+				store := relay.Store{Directory: filepath.Join(a.StateDir, "relay")}
+				current, err := store.Connection(ctx)
+				if err != nil {
+					halt()
+					problem("Relay unavailable: " + err.Error())
+					continue
+				}
+				if stop != nil && current == connection {
+					continue
+				}
+				halt()
+				identity, err := store.Identity(ctx)
+				if err != nil || identity.Public.ID != current.Device {
+					problem("Relay identity or routing credential does not match this device")
+					continue
+				}
+				httpClient, err := current.HTTPClient()
+				if err != nil {
+					problem("Relay trust configuration is invalid; check the explicitly configured certificate file")
+					continue
+				}
+				service := &relay.Service{Transport: relay.Transport{Base: current.URL, Space: current.Space, Token: current.Token, HTTP: httpClient}, Processor: relay.Processor{Identity: identity, Space: current.Space, Store: store, Handle: a.RelayReceiver(func() observe.Snapshot { return engine.Latest() })}}
+				service.Processor.Recover = service.Processor.Handle
+				service.Notify = func(err error) {
+					message := ""
 					if err != nil {
-						problem = "Relay disconnected: " + err.Error()
+						message = "Relay disconnected: " + err.Error()
 					}
 					relayMu.Lock()
-					changed := relayProblem != problem
-					relayProblem = problem
+					active := relayService == service
+					changed := active && relayProblem != message
+					if active {
+						relayProblem = message
+					}
 					relayMu.Unlock()
-					if changed && engine != nil {
+					if changed {
 						engine.Notify()
 					}
 				}
-				tasks = append(tasks, func(ctx context.Context) {
-					updates, unsubscribe := engine.Subscribe()
-					defer unsubscribe()
-					var stop func()
-					halt := func() {
-						if stop != nil {
-							stop()
-							stop = nil
-						}
+				relayMu.Lock()
+				relayService = service
+				relayMu.Unlock()
+				connection = current
+				child, cancel := context.WithCancel(ctx)
+				relayMu.Lock()
+				relayContext = child
+				relayMu.Unlock()
+				childStop := startRelayTask(child, service)
+				stop = func() {
+					cancel()
+					childStop()
+					if httpClient != nil {
+						httpClient.CloseIdleConnections()
 					}
-					defer halt()
-					for {
-						select {
-						case <-ctx.Done():
-							return
-						case _, ok := <-updates:
-							if !ok {
-								return
-							}
-							cfg, err := config.Load()
-							enabled := err == nil && cfg.Relay.Enabled
-							if !enabled {
-								halt()
-								continue
-							}
-							if stop == nil {
-								stop = startRelayTask(ctx, relayService)
-							}
-						}
-					}
-				})
+				}
 			}
 		}
-	}
+	})
 
 	collect := func(ctx context.Context) (json.RawMessage, error) {
 		cfg, err := config.Load()
@@ -119,14 +161,16 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 			return nil, err
 		}
 		if files != nil {
-			roots := append(append([]string{}, out.WatchRoots...), config.Dir(), a.StateDir)
+			roots := runtimeWatchRoots(out.WatchRoots, a.StateDir)
 			if err = files.SetRoots(roots); err != nil {
 				out.Problems = append(out.Problems, "Change notifications degraded: "+err.Error())
 			}
 		}
+		watchMu.Lock()
 		if watchProblem != "" {
 			out.Problems = append(out.Problems, watchProblem)
 		}
+		watchMu.Unlock()
 		relayMu.Lock()
 		if relayProblem != "" {
 			out.Problems = append(out.Problems, relayProblem)
@@ -142,13 +186,34 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 	if err != nil {
 		watchProblem = fmt.Sprintf("Change notifications unavailable: %v; reconciliation remains active", err)
 	}
+	if files != nil {
+		tasks = append(tasks, func(ctx context.Context) {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case err, ok := <-files.Problems():
+					if !ok {
+						return
+					}
+					watchMu.Lock()
+					watchProblem = "Change notifications degraded: " + err.Error() + "; reconciliation remains active"
+					watchMu.Unlock()
+					engine.Notify()
+				}
+			}
+		})
+	}
 	handler := func(ctx context.Context, method string, p json.RawMessage) (any, error) {
 		switch method {
 		case "relay.status":
-			if relayService == nil {
+			relayMu.Lock()
+			service := relayService
+			relayMu.Unlock()
+			if service == nil {
 				return relay.Health{Error: "relay listener is not running"}, nil
 			}
-			return relayService.Health(), nil
+			return service.Health(), nil
 		case "relay.call":
 			cfg, err := config.Load()
 			if err != nil {
@@ -157,7 +222,11 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 			if !cfg.Relay.Enabled {
 				return nil, errors.New("relay is disabled")
 			}
-			if relayService == nil {
+			relayMu.Lock()
+			service := relayService
+			serviceContext := relayContext
+			relayMu.Unlock()
+			if service == nil || serviceContext == nil {
 				return nil, errors.New("relay is not connected; enroll this device and enable relay first")
 			}
 			var in struct {
@@ -176,7 +245,9 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 			defer finished()
 			bounded, cancel := context.WithTimeout(ctx, 30*time.Minute)
 			defer cancel()
-			return relayService.Call(bounded, in.Peer, in.Operation, in.Method, in.Params)
+			unlink := context.AfterFunc(serviceContext, cancel)
+			defer unlink()
+			return service.Call(bounded, in.Peer, in.Operation, in.Method, in.Params)
 		case "settings.get":
 			return config.ReadSettings()
 		case "settings.set":
@@ -223,4 +294,19 @@ func startRelayTask(ctx context.Context, service *relay.Service) func() {
 	done := make(chan struct{})
 	go func() { defer close(done); _ = service.Run(child) }()
 	return func() { cancel(); <-done }
+}
+
+// Delivery queues, ciphertext, staging, downloads and logs do not change local
+// session evidence. Watching the entire state tree made those writes repeatedly
+// wake the passive collector and recursively enumerate unrelated large folders.
+func runtimeWatchRoots(agentRoots []string, state string) []string {
+	roots := append([]string(nil), agentRoots...)
+	roots = append(roots, config.Path(), filepath.Join(config.Dir(), "endpoint-id"))
+	if home, err := os.UserHomeDir(); err == nil {
+		roots = append(roots, filepath.Join(home, ".hopsesh", "endpoint-id"))
+	}
+	for _, rel := range []string{"accounts.json", "pending-marks.jsonl", "movement", "journal", filepath.Join("terminal", "records"), filepath.Join("relay", "connection.json"), filepath.Join("relay", "identity.json")} {
+		roots = append(roots, filepath.Join(state, rel))
+	}
+	return roots
 }
