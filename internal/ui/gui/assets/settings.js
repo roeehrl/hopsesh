@@ -67,7 +67,7 @@ function save(patch) {
   // never briefly reveal a preview while SaveSettings/Info are still in flight.
   if (patch.previews !== undefined) state.info.previews = patch.previews;
   Object.assign(s, patch);
-  return run(() => api("SaveSettings", Object.assign({ layout: s.layout, movementNotices: s.movementNotices, markMoved: s.markMoved, syncCode: s.syncCode, pushSource: s.pushSource, updateCheck: s.updateCheck || "off", appIcons: s.appIcons, previews: s.previews }, patch)), "Saved");
+  return run(() => api("SaveSettings", Object.assign({ appearance: s.appearance, layout: s.layout, movementNotices: s.movementNotices, markMoved: s.markMoved, syncCode: s.syncCode, pushSource: s.pushSource, updateCheck: s.updateCheck || "off", appIcons: s.appIcons, previews: s.previews }, patch)), "Saved");
 }
 
 function toggle(key, label, desc) {
@@ -89,6 +89,9 @@ function general() {
       toggle("pushSource", "Push unpushed commits on the other machine first", "Off: commits are fetched straight from the other machine.")),
     noticeSetup(),
     card(h("span", { class: "sec-h" }, "Appearance"),
+      h("div", { class: "set-row" }, title("Color scheme", "Choose the look for Hopsesh, Quick access and the built-in terminal. System follows your device's appearance."),
+        h("select", { "aria-label": "Color scheme", disabled: saving, onchange: e => save({ appearance: e.target.value }) },
+          ["system", "light", "dark"].map(mode => h("option", { value: mode, selected: s.appearance === mode }, mode[0].toUpperCase() + mode.slice(1))))),
       toggle("appIcons", "Show each agent's own app icon", "When the agent's desktop app is installed here, its icon pictures the agent; otherwise hopsesh's own mark does."),
       toggle("previews", "Show conversation previews", "The inspector shows the end of the selected session's conversation, with Markdown formatting, read on its machine. Turn it off when you share your screen.")),
     card(h("span", { class: "sec-h" }, sys.Here),

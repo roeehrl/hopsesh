@@ -117,7 +117,7 @@ func (a *App) termPrefs() TermPrefs {
 		name = a.TerminalApps().Name
 		a.termName.Store(name)
 	}
-	return TermPrefs{Font: c.Terminal.Font, FontSize: c.TerminalFont(), Scrollback: c.TerminalLines(), ScreenReader: reader, OS: runtime.GOOS,
+	return TermPrefs{Appearance: c.AppearanceMode(), Font: c.Terminal.Font, FontSize: c.TerminalFont(), Scrollback: c.TerminalLines(), ScreenReader: reader, OS: runtime.GOOS,
 		Home: home, TerminalName: name}
 }
 

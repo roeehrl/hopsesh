@@ -255,10 +255,12 @@ const (
 
 // Config is the user's configuration file.
 type Config struct {
-	Desktop  Desktop `toml:"desktop,omitempty"`
-	Schema   int     `toml:"schema"`
-	ReposDir string  `toml:"repos_dir"` // where clones go; default ~/git
-	Layout   string  `toml:"layout"`    // flat | ghq
+	// Appearance is system (also the empty default), light or dark for app windows.
+	Appearance string  `toml:"appearance,omitempty"`
+	Desktop    Desktop `toml:"desktop,omitempty"`
+	Schema     int     `toml:"schema"`
+	ReposDir   string  `toml:"repos_dir"` // where clones go; default ~/git
+	Layout     string  `toml:"layout"`    // flat | ghq
 	// UpdateCheck is "on" or "off" once the person has answered whether the app may
 	// look for new releases once a day ("" = not asked yet).
 	UpdateCheck string `toml:"update_check,omitempty"`
@@ -549,6 +551,9 @@ var fontName = regexp.MustCompile(`^[\p{L}\p{N} ._,'"-]{0,120}$`)
 
 // Check reports settings hopsesh cannot act on.
 func (c Config) Check() error {
+	if err := CheckAppearance(c.Appearance); err != nil {
+		return err
+	}
 	if err := c.Desktop.Check(); err != nil {
 		return err
 	}

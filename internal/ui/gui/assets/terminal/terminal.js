@@ -1,3 +1,4 @@
+import { setAppearance, darkAppearance, onAppearanceChange } from "./appearance.js";
 // The hopsesh Terminal window: one xterm.js terminal per tab, fed by the tab's stream. The
 // page reaches hopsesh only through its two streams (stream.js): no bindings, no events,
 // no clipboard reads. What a tab runs was decided in Go; the window only shows tabs, sends
@@ -101,7 +102,7 @@ function ago(iso) {
 // ---- xterm.js ---------------------------------------------------------------------------
 
 function theme() {
-  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  const dark = darkAppearance();
   return dark ? {
     background: "#1f1f1c", foreground: "#ecebe5", cursor: "#ecebe5", cursorAccent: "#1f1f1c", selectionBackground: "#3cbcac55",
     black: "#2c2b28", red: "#f0948c", green: "#8fd19e", yellow: "#e3c27a", blue: "#8fb8e6", magenta: "#c9a4e8", cyan: "#7fd4c8", white: "#d4d2c9",
@@ -280,6 +281,7 @@ let pendingSelect = "";
 function setPrefs(p) {
   const changed = JSON.stringify(p) !== JSON.stringify(prefs);
   prefs = Object.assign({}, prefs, p);
+  setAppearance(prefs.appearance);
   document.documentElement.dataset.os = prefs.os;
   shortcuts();
   if (!changed) return;
@@ -607,7 +609,7 @@ document.addEventListener("keydown", (ev) => {
 });
 new ResizeObserver(() => { const t = tabs.get(active); if (t) fitTab(t); }).observe($("#stage"));
 new ResizeObserver(() => { tighten(); revealActiveTab(); }).observe($("#strip"));
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { for (const t of tabs.values()) t.term.options.theme = theme(); });
+onAppearanceChange(() => { for (const t of tabs.values()) t.term.options.theme = theme(); });
 setInterval(() => { strip(); if (active) paint(); }, 30_000); // "started 3 min ago", and "starting" ending
 
 // The first-run tip: how to leave the terminal, until "Got it" (kept), and never under a

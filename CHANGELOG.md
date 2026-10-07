@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Choose System, Light or Dark in Settings → General → Appearance. The saved choice
+  updates Hopsesh, Quick access and open terminal tabs immediately; System follows
+  live OS changes. macOS native window chrome follows the same choice.
+
 - Durable movement notices and branch-aware return destinations. Transfers report
   preparation until new agent work is observed; forks keep the original available.
   Notices can be disabled without losing lineage or returns. Receipts now require

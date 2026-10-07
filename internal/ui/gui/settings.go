@@ -20,6 +20,7 @@ import (
 
 // SettingsDTO is everything the Settings screen shows.
 type SettingsDTO struct {
+	Appearance       string                   `json:"appearance"`
 	NoticeHooks      []app.MovementHookStatus `json:"noticeHooks"`
 	NoticeHooksError string                   `json:"noticeHooksError,omitempty"`
 	MovementNotices  bool                     `json:"movementNotices"`
@@ -78,7 +79,7 @@ func (a *App) Settings() SettingsDTO {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	cfg := a.core.Cfg
-	return SettingsDTO{NoticeHooks: hooks, NoticeHooksError: hookProblem, Version: version.Version, ReposDir: cfg.ReposDir, Layout: nonEmpty(cfg.Layout, "flat"),
+	return SettingsDTO{Appearance: cfg.AppearanceMode(), NoticeHooks: hooks, NoticeHooksError: hookProblem, Version: version.Version, ReposDir: cfg.ReposDir, Layout: nonEmpty(cfg.Layout, "flat"),
 		MovementNotices: cfg.MovementNoticesOn(), MarkMoved: cfg.MarkMovedOn(), SyncCode: cfg.SyncCodeOn(), PushSource: cfg.PushSource, UpdateChk: cfg.UpdateCheck, AppIcons: cfg.AppIconsOn(), Previews: cfg.PreviewsOn(),
 		Agents: a.agentsLocked(), CLI: integrate.CheckCLI(), Skill: rep, SkillBin: bin, SkillPrompt: cfg.SkillPrompt,
 		LocalNetworkGated: lnp.Gated(), ConfigDir: config.Dir(), StateDir: config.StateDir()}
@@ -86,20 +87,41 @@ func (a *App) Settings() SettingsDTO {
 
 // SettingsInput are the settings the user can change.
 type SettingsInput struct {
-	MovementNotices bool   `json:"movementNotices"`
-	Layout          string `json:"layout"`
-	MarkMoved       bool   `json:"markMoved"`
-	SyncCode        bool   `json:"syncCode"`
-	PushSource      bool   `json:"pushSource"`
-	UpdateChk       string `json:"updateCheck"`
-	AppIcons        bool   `json:"appIcons"`
-	Previews        bool   `json:"previews"`
+	// Nil preserves the current choice for callers changing unrelated settings.
+	Appearance      *string `json:"appearance,omitempty"`
+	MovementNotices bool    `json:"movementNotices"`
+	Layout          string  `json:"layout"`
+	MarkMoved       bool    `json:"markMoved"`
+	SyncCode        bool    `json:"syncCode"`
+	PushSource      bool    `json:"pushSource"`
+	UpdateChk       string  `json:"updateCheck"`
+	AppIcons        bool    `json:"appIcons"`
+	Previews        bool    `json:"previews"`
 }
 
 // SaveSettings stores the user's choices.
 func (a *App) SaveSettings(in SettingsInput) error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
+	before := a.core.Cfg
+	err := a.saveSettingsLocked(in)
+	changed := before.AppearanceMode() != a.core.Cfg.AppearanceMode()
+	if err != nil {
+		a.core.Cfg = before
+	}
+	a.mu.Unlock()
+	if err == nil && changed {
+		a.publishAppearance()
+	}
+	return err
+}
+
+func (a *App) saveSettingsLocked(in SettingsInput) error {
+	if in.Appearance != nil {
+		if err := config.CheckAppearance(*in.Appearance); err != nil {
+			return err
+		}
+		a.core.Cfg.Appearance = *in.Appearance
+	}
 	switch in.Layout {
 	case "flat", "ghq":
 		a.core.Cfg.Layout = in.Layout

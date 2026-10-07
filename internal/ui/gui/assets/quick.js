@@ -1,3 +1,4 @@
+import "./appearance.js";
 import {api,on,h,fill,view,state,setSystem,sys,errText,agentBadge,loadError} from './core.js';
 import {markdown} from './markdown.js';
 import {desktopSettings} from './desktop-settings.js';

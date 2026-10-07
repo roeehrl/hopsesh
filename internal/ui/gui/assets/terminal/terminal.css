@@ -1,5 +1,5 @@
-/* The hopsesh Terminal window: the app's colors (light and dark follow the system, as the
-   app's window does), a tab strip with status chips, an info row with the tab's actions,
+/* The hopsesh Terminal window: the app's colors (System follows the OS; Light and Dark
+   override it), a tab strip with status chips, an info row with the tab's actions,
    and the terminal. */
 :root {
   --bg: #f6f5f1; --panel: #ffffff; --bar: #ecebe5; --line: #dad7cd; --line2: #eeebe3; --hover: #f3f1ea;
@@ -16,7 +16,7 @@
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme]) {
     --bg: #171715; --panel: #1f1f1c; --bar: #222220; --line: #3a3934; --line2: #2c2b28; --hover: #262622;
     --ink: #ecebe5; --ink2: #d4d2c9; --muted: #a3a095; --faint: #7d7a71;
     --accent: #3cbcac; --accent-ink: #0d1514; --accent-soft: #173a36;
@@ -27,6 +27,17 @@
     --lock: #b9b6f0; --lock-soft: #26254a; --lock-band: #1d1c33; --lock-line: #33315a;
     --okband: #172219; --okline: #2a4031;
   }
+}
+:root[data-theme="dark"] {
+    --bg: #171715; --panel: #1f1f1c; --bar: #222220; --line: #3a3934; --line2: #2c2b28; --hover: #262622;
+    --ink: #ecebe5; --ink2: #d4d2c9; --muted: #a3a095; --faint: #7d7a71;
+    --accent: #3cbcac; --accent-ink: #0d1514; --accent-soft: #173a36;
+    --ok: #8fd19e; --ok-soft: #1c3324; --ok-dot: #4cbf74;
+    --err: #f0948c; --err-soft: #3d1f1c; --err-dot: #e0604e;
+    --needs: #f0b77a; --needs-soft: #3d2a17; --needs-dot: #e08a3a; --needs-band: #2b2116; --needs-line: #4a3820;
+    --run: #a9c8e4; --run-soft: #1b2b3a;
+    --lock: #b9b6f0; --lock-soft: #26254a; --lock-band: #1d1c33; --lock-line: #33315a;
+    --okband: #172219; --okline: #2a4031;
 }
 @media (forced-colors: active) {
   .chip, .lock, .tt[aria-selected="true"] { border: 1px solid CanvasText; }
