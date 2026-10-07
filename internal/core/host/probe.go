@@ -57,6 +57,17 @@ func wants(specs []agent.Spec) probeWants {
 
 // ProbeLocal learns this machine's facts for the given modules.
 func ProbeLocal(ctx context.Context, specs []agent.Spec) Facts {
+	return probeLocal(ctx, specs, false)
+}
+
+// ObserveLocal resolves roots and executable paths without starting vendor programs,
+// checking login, or launching desktop protocol helpers. Observation must be safe on
+// an uninitialized installation and on a machine without a graphical session.
+func ObserveLocal(ctx context.Context, specs []agent.Spec) Facts {
+	return probeLocal(ctx, specs, true)
+}
+
+func probeLocal(ctx context.Context, specs []agent.Spec, passive bool) Facts {
 	w := wants(specs)
 	home, _ := os.UserHomeDir()
 	f := Facts{OS: runtime.GOOS, Arch: runtime.GOARCH, Home: home, Env: map[string]string{}, Binaries: map[string]agent.BinaryFact{}}
@@ -69,7 +80,7 @@ func ProbeLocal(ctx context.Context, specs []agent.Spec) Facts {
 			continue
 		}
 		bf := agent.BinaryFact{Path: p}
-		if len(b.VersionArgs) > 0 {
+		if !passive && len(b.VersionArgs) > 0 {
 			vctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			out, _ := proc.CommandContext(vctx, p, b.VersionArgs...).Output()
 			cancel()
@@ -81,7 +92,7 @@ func ProbeLocal(ctx context.Context, specs []agent.Spec) Facts {
 	f.HasGit = err == nil
 	f.DesktopProtocols = map[string]bool{}
 	for _, s := range specs {
-		if s.DesktopScheme != "" {
+		if !passive && s.DesktopScheme != "" {
 			f.DesktopProtocols[s.DesktopScheme] = registeredDesktopProtocol(ctx, s.DesktopScheme)
 		}
 	}

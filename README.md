@@ -123,6 +123,8 @@ hopsesh pull 7f3c2a1e                          # no machine name: bring back the
 hopsesh push 7f3c2a1e laptop                   # send it to a machine that runs hopsesh
 hopsesh hosts add nas alice@192.168.1.20 --password   # a machine without SSH keys
 hopsesh doctor studio                          # agents, SSH, host trust and the skill
+hopsesh runtime observe                        # passive local snapshot; no state changes
+hopsesh runtime observe --watch                # watch changes as JSON lines, without a GUI
 hopsesh undo                                   # undo the newest move (--list shows more)
 ```
 

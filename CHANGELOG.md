@@ -36,6 +36,10 @@ All notable changes to this project are documented here. The format follows
   markers before it resumes a session.
 
 ### Added
+- 0.5 foundation: `hopsesh runtime observe` reads local sessions without initializing
+  accounts, probing login, adopting imports or applying movement marks. `--watch`
+  coalesces filesystem notifications with bounded fallback reconciliation and reports
+  source freshness, errors and profile-scoped session identities, without requiring a GUI.
 - Desktop presence for 0.4.0: menu bar/system tray Quick access, supported Dock/taskbar/tray
   placement choices, independent login startup and close behavior, shared session search,
   safe conversation previews, exact-session navigation and existing terminal focus. Linux

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/spf13/cobra"
+
 	"github.com/roeehrl/hopsesh/internal/agents/all"
 	"github.com/roeehrl/hopsesh/internal/core/integrate"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
@@ -16,10 +18,16 @@ func main() {
 	if transport.IsAskpass() {
 		os.Exit(transport.AskpassMain(os.Args[1:])) // ssh asking for a password, see transport
 	}
-	update.CleanUp() // what an earlier update moved aside
 	reg := all.Registry()
 	integrate.SetLoginVars(reg.LoginEnv())
-	if err := cli.NewRoot(os.Stdout, reg).Execute(); err != nil {
+	root := cli.NewRoot(os.Stdout, reg)
+	root.PersistentPreRun = func(cmd *cobra.Command, _ []string) {
+		// A passive invocation must not remove backups from an earlier update.
+		if cmd.Annotations["hopsesh.passive"] != "true" {
+			update.CleanUp()
+		}
+	}
+	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}

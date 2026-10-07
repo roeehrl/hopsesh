@@ -1,0 +1,22 @@
+# Passive observation is useful before account initialization, without a GUI/service.
+git-repo proj https://github.com/example/proj.git
+claude-session 33333333-3333-4333-8333-333333333333 proj 'Passive observer' 'observe this session'
+exec hopsesh runtime observe
+stdout 'Passive observer'
+stdout '"sequence":1'
+! exists $HOPSESH_CONFIG_DIR/endpoint-id
+! exists $HOPSESH_STATE_DIR/accounts.json
+! exists $HOPSESH_STATE_DIR/log
+
+# It also preserves existing profile registrations and their binding generations.
+exec hopsesh accounts add claude 'Registered root' --json
+cp $HOPSESH_STATE_DIR/accounts.json accounts-before.json
+cp $HOPSESH_CONFIG_DIR/endpoint-id endpoint-before
+exec hopsesh runtime observe
+stdout 'Passive observer'
+cmp $HOPSESH_STATE_DIR/accounts.json accounts-before.json
+cmp $HOPSESH_CONFIG_DIR/endpoint-id endpoint-before
+
+# Invalid scheduler options fail before discovery/watching.
+! exec hopsesh runtime observe --reconcile 1ms
+stderr 'reconciliation interval must be between 5s and 24h'

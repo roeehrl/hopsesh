@@ -10,6 +10,18 @@ import (
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
+func TestObserveLocalDoesNotRunVersionCommands(t *testing.T) {
+	facts := ObserveLocal(context.Background(), []agent.Spec{{Binaries: []agent.Binary{{Name: "go", VersionArgs: []string{"version"}}}}})
+	if facts.Binaries["go"].Path == "" {
+		t.Fatal("installed binary not resolved")
+	}
+	for name, binary := range facts.Binaries {
+		if binary.Version != "" {
+			t.Fatalf("passive probe ran %s: %s", name, binary.Version)
+		}
+	}
+}
+
 func TestPosixProbe(t *testing.T) {
 	specs := []agent.Spec{{
 		Roots:    []agent.Root{{Name: "home", Env: []string{"FAKE_AGENT_HOME"}}},
