@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"slices"
 	"strings"
 
@@ -13,12 +15,13 @@ import (
 // Observation is local evidence, not an authorization to receive, resume or move.
 // An empty Endpoint means the installation has never initialized its identity.
 type Observation struct {
-	Machine    string       `json:"machine"`
-	Endpoint   string       `json:"endpoint,omitempty"`
-	Agents     []AgentState `json:"agents"`
-	Entries    []Entry      `json:"entries"`
-	Problems   []string     `json:"problems,omitempty"`
-	WatchRoots []string     `json:"watchRoots"`
+	InventoryComplete bool         `json:"inventoryComplete"`
+	Machine           string       `json:"machine"`
+	Endpoint          string       `json:"endpoint,omitempty"`
+	Agents            []AgentState `json:"agents"`
+	Entries           []Entry      `json:"entries"`
+	Problems          []string     `json:"problems,omitempty"`
+	WatchRoots        []string     `json:"watchRoots"`
 }
 
 // ObserveLocal never adopts imports, registers accounts, changes login bindings,
@@ -27,11 +30,15 @@ type Observation struct {
 func (a *App) ObserveLocal(ctx context.Context) (Observation, error) {
 	m := &host.Machine{Name: LocalName(), Local: true, Facts: host.ObserveLocal(ctx, a.Specs()), Log: a.Log}
 	defer m.Close()
-	return a.observeMachine(ctx, m)
+	out, err := a.observeMachine(ctx, m)
+	if err != nil {
+		out.InventoryComplete = false
+	}
+	return out, err
 }
 
 func (a *App) observeMachine(ctx context.Context, m *host.Machine) (Observation, error) {
-	out := Observation{Machine: m.Name, Agents: []AgentState{}, Entries: []Entry{}, WatchRoots: []string{}}
+	out := Observation{InventoryComplete: true, Machine: m.Name, Agents: []AgentState{}, Entries: []Entry{}, WatchRoots: []string{}}
 	endpoint, err := m.ReadIdentity(ctx)
 	if err != nil {
 		return out, err
@@ -57,6 +64,7 @@ func (a *App) observeMachine(ctx context.Context, m *host.Machine) (Observation,
 		h = observationHost{h}
 		base, err := mod.Detect(ctx, h)
 		if err != nil {
+			out.InventoryComplete = false
 			out.Agents = append(out.Agents, AgentState{Agent: spec.ID, Name: spec.Name, Error: err.Error()})
 			continue
 		}
@@ -78,12 +86,14 @@ func (a *App) observeMachine(ctx context.Context, m *host.Machine) (Observation,
 			}
 			in, err := mod.Detect(ctx, observationHost{ch})
 			if err != nil {
+				out.InventoryComplete = false
 				out.Problems = append(out.Problems, fmt.Sprintf("%s/%s: %v", spec.ID, p.ID, err))
 				continue
 			}
 			in.Accounts, in.Profile = spec.Accounts, &p
 			canonical, err := fsys.RealPath(p.Root)
 			if err != nil || m.Path().Clean(canonical) != p.Root {
+				out.InventoryComplete = false
 				in.Present = false
 				in.Profile.Error = "Account root is missing or its symbolic link changed; re-register it"
 			}
@@ -104,6 +114,18 @@ func (a *App) observeMachine(ctx context.Context, m *host.Machine) (Observation,
 				}
 			}
 			if !in.Present {
+				// DefaultInstall cannot distinguish an absent root from a failed stat.
+				// Only confirmed absence may support a negative inventory result.
+				if len(spec.Roots) > 0 {
+					info, err := fsys.Stat(in.Root(spec.Roots[0].Name))
+					if err != nil && !errors.Is(err, fs.ErrNotExist) {
+						out.InventoryComplete = false
+						out.Agents[len(out.Agents)-1].Error = err.Error()
+					} else if err == nil && !info.IsDir() {
+						out.InventoryComplete = false
+						out.Agents[len(out.Agents)-1].Error = "Agent state root is not a directory"
+					}
+				}
 				continue
 			}
 			ch, err := m.For(ctx, spec, in, nil)
@@ -113,10 +135,12 @@ func (a *App) observeMachine(ctx context.Context, m *host.Machine) (Observation,
 			ch = observationHost{ch}
 			listing, err := mod.List(ctx, ch, in)
 			if err != nil {
+				out.InventoryComplete = false
 				out.Agents[len(out.Agents)-1].Error = err.Error()
 				continue
 			}
 			for _, problem := range listing.Errors {
+				out.InventoryComplete = false
 				out.Problems = append(out.Problems, problem.Error())
 			}
 			ids := make([]agent.SessionID, len(listing.Sessions))

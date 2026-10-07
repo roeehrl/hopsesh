@@ -78,12 +78,41 @@ func TestObserveUninitializedInstallationDoesNotWrite(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if o.Endpoint != "" || len(o.Entries) != 1 || o.Entries[0].Profile != nil {
+		if !o.InventoryComplete || o.Endpoint != "" || len(o.Entries) != 1 || o.Entries[0].Profile != nil {
 			t.Fatalf("unexpected initialized identity: %+v", o)
 		}
 	}
 	if !reflect.DeepEqual(before, treeDigest(t, home)) {
 		t.Fatal("passive collection changed the installation")
+	}
+}
+
+type partialInventory struct{ agent.Module }
+
+func (m partialInventory) List(ctx context.Context, h agent.Host, in agent.Install) (agent.Listing, error) {
+	ls, err := m.Module.List(ctx, h, in)
+	ls.Errors = append(ls.Errors, agent.SessionError{Path: "unreadable-session.jsonl", Err: errors.New("permission denied")})
+	return ls, err
+}
+
+func TestObservePartialInventoryCannotProveAbsence(t *testing.T) {
+	a, _, _ := observerFixture(t, partialInventory{claude.New()})
+	o, err := a.ObserveLocal(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o.InventoryComplete || len(o.Entries) != 1 || len(o.Problems) != 1 {
+		t.Fatalf("partial listing claimed complete coverage: %+v", o)
+	}
+}
+
+func TestObserveCanceledCollectionCannotProveAbsence(t *testing.T) {
+	a, _, _ := observerFixture(t, claude.New())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	o, err := a.ObserveLocal(ctx)
+	if !errors.Is(err, context.Canceled) || o.InventoryComplete {
+		t.Fatalf("canceled listing claimed complete coverage: %+v, %v", o, err)
 	}
 }
 
