@@ -170,6 +170,11 @@ func (t *Terminals) terminalHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	policy := strings.Replace(TerminalCSP, "frame-ancestors 'none'", "frame-ancestors 'self' wails://localhost http://wails.localhost wails://wails.localhost http://127.0.0.1:*", 1)
+	// WebKitGTK resolves 'self' against the sandbox's opaque origin. Name this
+	// listener explicitly so the same restricted assets can load in that frame;
+	// never broaden this to arbitrary loopback ports or remove the sandbox.
+	policy = strings.ReplaceAll(policy, "'self'", origin)
+	policy = strings.Replace(policy, "connect-src "+origin, "connect-src "+origin+" "+strings.Replace(origin, "http://", "ws://", 1), 1)
 	w.Header().Set("Content-Security-Policy", policy)
 	sub, _ := fs.Sub(Assets, "assets")
 	http.FileServer(http.FS(sub)).ServeHTTP(w, r)

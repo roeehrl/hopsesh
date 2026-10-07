@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -47,6 +48,18 @@ func TestTerminalHostCapabilityAndAssetBoundary(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != 200 {
 		t.Fatalf("authorized view %d", resp.StatusCode)
+	}
+	// Opaque sandbox origins must be able to load this listener's resources in
+	// WebKitGTK without trusting another process's loopback HTTP/WS listener.
+	policy := resp.Header.Get("Content-Security-Policy")
+	origin := u.Scheme + "://" + u.Host
+	for _, directive := range []string{"script-src " + origin + ";", "style-src " + origin + " 'unsafe-inline';", "connect-src " + origin + " ws://" + u.Host + ";", "object-src 'none'", "form-action 'none'"} {
+		if !strings.Contains(policy, directive) {
+			t.Errorf("policy missing %q: %s", directive, policy)
+		}
+	}
+	if strings.Contains(policy, "'self'") || strings.Contains(policy, "'unsafe-eval'") {
+		t.Fatalf("opaque origin or executable inline escape in policy: %s", policy)
 	}
 	_, _ = terms.hostURL(true)
 	resp, err = http.Get(raw)
