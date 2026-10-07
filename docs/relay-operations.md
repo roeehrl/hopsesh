@@ -43,6 +43,21 @@ credential-free metrics. Actual SQLite/R2 tests qualify concurrent admission
 and full acknowledgment drain. Native repeated-route/fork scenarios still pass
 with the meter present.
 
+Native recovery storage has a separate 256 MiB aggregate limit across operation
+records, outgoing request bindings and cached encrypted replies. The receiver
+reserves a bounded result slot before starting native work. Under admission
+pressure it removes expired reply ciphertext and expired owner-retained outcomes;
+it preserves operation digests, authorization scope, completed/uncertain phases,
+outgoing bindings and native journals. A retired completed outcome fails closed
+on retry and cannot execute again. Live results are never evicted for new work.
+This cleanup runs on write pressure and adds no idle timer. The existing 10,000
+operation and outgoing-record ceilings remain in force; receipt tombstones are
+not automatically deleted to bypass those ceilings.
+
+The native regression suite covers the production aggregate quota, refusal
+before intent/action, bounded linked-file refusal, wire expiry followed by valid
+reply renewal, expired-owner cleanup and retry after owner restart.
+
 See [Cloudflare rate limiting](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/)
 for the edge counter consistency boundary and
 [Worker CPU limits](https://developers.cloudflare.com/workers/platform/limits/#cpu-time)

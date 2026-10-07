@@ -65,7 +65,17 @@ func (s *Service) receive(ctx context.Context, e Envelope) error {
 	if !grant.AllowsSend(permission, time.Now()) {
 		return reject(ErrRevoked)
 	}
-	if err = s.Processor.Store.withLock(ctx, func() error { return writeJSON(filepath.Join(s.Processor.Store.Directory, "reply-"+key+".json"), e) }); err != nil {
+	if err = s.Processor.Store.withLock(ctx, func() error {
+		path := filepath.Join(s.Processor.Store.Directory, "reply-"+key+".json")
+		encoded, err := json.Marshal(e)
+		if err != nil {
+			return err
+		}
+		if err = s.Processor.Store.recoverySpace(path, int64(len(encoded)), time.Now()); err != nil {
+			return err
+		}
+		return writeJSON(path, e)
+	}); err != nil {
 		return err
 	}
 	s.mu.Lock()
@@ -163,7 +173,15 @@ func (s *Service) callSmall(ctx context.Context, peer, operation, method, permis
 		if len(records) >= MaxOperationRecords {
 			return errors.New("relay outgoing operation quota reached")
 		}
-		return writeJSON(path, Record{Peer: peer, Operation: operation, Method: method, Authorization: permission, Request: digest[:], Phase: "submitted", Expires: expiry})
+		out := Record{Peer: peer, Operation: operation, Method: method, Authorization: permission, Request: digest[:], Phase: "submitted", Expires: expiry}
+		encoded, e := json.Marshal(out)
+		if e != nil {
+			return e
+		}
+		if e = s.Processor.Store.recoverySpace(path, int64(len(encoded)), time.Now()); e != nil {
+			return e
+		}
+		return writeRecoveryRecord(path, out)
 	}); err != nil {
 		return nil, err
 	}

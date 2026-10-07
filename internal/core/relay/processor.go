@@ -145,7 +145,10 @@ func (p Processor) Process(ctx context.Context, e Envelope, now time.Time) (Enve
 					return err
 				}
 				record.Method, record.Response, record.Expires = req.Method, response, e.Expires
-				return writeJSON(path, record)
+				if err = p.Store.recoverySpace(path, MaxWireBytes, now); err != nil {
+					return err
+				}
+				return writeRecoveryRecord(path, record)
 			}
 			if p.Recover == nil && req.Method != "blob.put" && req.Method != "blob.read" {
 				return ErrUncertain
@@ -164,8 +167,11 @@ func (p Processor) Process(ctx context.Context, e Envelope, now time.Time) (Enve
 		if newRecord && len(entries) >= MaxOperationRecords {
 			return errors.New("relay operation quota reached; archive receipts before accepting new operations")
 		}
+		if err = p.Store.recoverySpace(path, MaxWireBytes, now); err != nil {
+			return err
+		}
 		record = Record{Peer: e.From, Operation: e.Operation, Method: req.Method, Request: digest[:], Scope: scope, Phase: "started", Expires: e.Expires}
-		if err = writeJSON(path, record); err != nil {
+		if err = writeRecoveryRecord(path, record); err != nil {
 			return err
 		}
 		result, actionErr := p.chunkHandle(ctx, current, e.Operation, req, chunk, handle)
@@ -206,7 +212,7 @@ func (p Processor) Process(ctx context.Context, e Envelope, now time.Time) (Enve
 			}
 		}
 		record.Phase, record.Response, record.Outcome = "completed", response, sealed
-		return writeJSON(path, record)
+		return writeRecoveryRecord(path, record)
 	})
 	return response, err
 }
