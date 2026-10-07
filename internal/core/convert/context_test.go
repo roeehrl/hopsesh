@@ -156,3 +156,25 @@ func TestTransferContextBlocksInsufficientHistoryCapacity(t *testing.T) {
 		}
 	}
 }
+
+func TestTransferContextGeneratedBriefingStaysGenerated(t *testing.T) {
+	nodes := []ir.Node{
+		{Kind: ir.KindMessage, Actor: ir.User, Generated: true, Text: "[hopsesh] Known cloud task: check the pending deployment.\n" + strings.Repeat("Earlier deployment evidence.\n", 3000)},
+		{Kind: ir.KindMessage, Actor: ir.User, Text: "Please verify the deployment status now."},
+	}
+	ir.Chain(nodes, "")
+	r := Render(Request{Nodes: nodes, From: "Cloud", To: "Codex", IncludeGenerated: true, Window: 8000})
+	if r.Report.Blocked != "" || len(r.Items) < 2 {
+		t.Fatalf("bounded cloud context: %+v", r.Report)
+	}
+	first := r.Items[0]
+	if !first.Generated || len(first.Coverage) != 0 || !strings.Contains(first.Text, "Earlier transfer briefing (quoted)") || !strings.Contains(first.Text, "> [hopsesh] Known cloud task") {
+		t.Fatal("known generated briefing was lost or became authored work")
+	}
+	for _, it := range r.Items {
+		if it.Node == nodes[1].ID && !it.Generated && it.Text == nodes[1].Text && len(it.Coverage) == 1 {
+			return
+		}
+	}
+	t.Fatal("actual request lost its text or authored revision")
+}

@@ -25,14 +25,20 @@ func (res *Result) historyContext(r Request, old []ir.Item, limit int) string {
 			represented[id] = true
 		}
 	}
-	var summary, reply, activity *ir.Node
+	var summary, reply, activity, generatedContext *ir.Node
 	var requests []ir.Node
 	for _, n := range r.Nodes {
 		match := represented[n.ID]
 		for _, id := range n.Coverage {
 			match = match || represented[id]
 		}
-		if !match || n.Generated {
+		if !match {
+			continue
+		}
+		if n.Generated {
+			if r.IncludeGenerated && n.Kind == ir.KindMessage && strings.TrimSpace(n.Text) != "" {
+				generatedContext = &n
+			}
 			continue
 		}
 		switch n.Kind {
@@ -66,6 +72,8 @@ func (res *Result) historyContext(r Request, old []ir.Item, limit int) string {
 	}
 	if summary != nil {
 		appendQuote("Latest earlier summary from "+r.From, res.mapText(r, summary.Text), left*3/5)
+	} else if generatedContext != nil {
+		appendQuote("Earlier transfer briefing (quoted)", res.mapText(r, generatedContext.Text), left*3/5)
 	}
 	if reply != nil {
 		appendQuote("Latest earlier agent reply", res.mapText(r, reply.Text), min(1400, (limit-b.Len())/2))

@@ -529,7 +529,7 @@ func (res *Result) fitHistory(r Request, items []ir.Item, limit int) []ir.Item {
 		return nil
 	}
 	text := res.historyContext(r, old, min(left, 12000))
-	d := ir.Item{Node: "hopsesh/digest", Role: ir.RoleUser, Text: text, Coverage: coverage, Fidelity: "summarized"}
+	d := ir.Item{Node: "hopsesh/digest", Role: ir.RoleUser, Text: text, Coverage: coverage, Fidelity: "summarized", Generated: len(coverage) == 0}
 	res.Report.Summarised += len(old)
 	result := []ir.Item{d}
 	if separator {
