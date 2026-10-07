@@ -1,11 +1,12 @@
 package cli
 
 import (
+	"runtime"
+	"testing"
+
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/sdk/agent"
-	"strings"
-	"testing"
 )
 
 func TestNotifyFlagUsesConfigUnlessExplicit(t *testing.T) {
@@ -35,20 +36,22 @@ func TestNotifyFlagUsesConfigUnlessExplicit(t *testing.T) {
 
 func TestReturnReviewCommandsAreExactAndReadOnly(t *testing.T) {
 	e := app.Entry{Machine: "laptop", Session: agent.Summary{Key: agent.SessionKey{Agent: "codex", Profile: "work", Session: "child"}}}
-	c := app.ReturnCandidate{Machine: "studio", Agent: "claude", Profile: "personal", Key: "claude@personal/original", Status: "diverged"}
-	cmd := returnReviewCommand(e, c)
-	for _, want := range []string{"On studio:", "hopsesh plan laptop:codex@work/child", "--target-profile personal", "--target-session claude@personal/original", "--keep-both"} {
-		if !strings.Contains(cmd, want) {
-			t.Fatalf("missing %q: %s", want, cmd)
-		}
-	}
-	c.Status = "behind"
-	if got := returnReviewCommand(e, c); got != "hopsesh show studio:claude@personal/original" {
-		t.Fatal(got)
-	}
-	c.Status = "missing"
-	if got := returnReviewCommand(e, c); !strings.Contains(got, "--new-session") || strings.Contains(got, "--target-session") {
-		t.Fatal(got)
+	c := app.ReturnCandidate{Machine: "studio", Agent: "claude", Profile: "personal", Key: "claude@personal/original"}
+	for _, tc := range []struct{ status, posix, powershell string }{
+		{"diverged", "On studio: hopsesh plan laptop:codex@work/child --in claude --target-profile personal --target-session claude@personal/original --keep-both", "On studio: hopsesh plan 'laptop:codex@work/child' --in 'claude' --target-profile 'personal' --target-session 'claude@personal/original' --keep-both"},
+		{"behind", "hopsesh show studio:claude@personal/original", "hopsesh show 'studio:claude@personal/original'"},
+		{"missing", "On studio: New session (original missing): hopsesh plan laptop:codex@work/child --in claude --target-profile personal --new-session", "On studio: New session (original missing): hopsesh plan 'laptop:codex@work/child' --in 'claude' --target-profile 'personal' --new-session"},
+	} {
+		t.Run(tc.status, func(t *testing.T) {
+			c.Status = tc.status
+			want := tc.posix
+			if runtime.GOOS == "windows" {
+				want = tc.powershell
+			}
+			if got := returnReviewCommand(e, c); got != want {
+				t.Fatalf("got %q; want %q", got, want)
+			}
+		})
 	}
 }
 
