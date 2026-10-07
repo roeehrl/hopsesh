@@ -48,7 +48,7 @@ func Plan(provider, version, origin string) (Bootstrap, error) {
 		p.Callback = "SessionStart (single repository)"
 		p.CallbackSupported = true
 		p.Reason = "Setup installs the binary. A separate SessionStart hook must start a fresh session-scoped connector. Multi-repository startup requires separate qualification."
-		p.ClaudeHookScript = "#!/bin/sh\nset -eu\n[ \"${CLAUDE_CODE_REMOTE:-}\" = true ] || exit 0\nexec \"$HOME/.local/share/hopsesh/cloud/v" + version + "/hopsesh\" cloud-integration prepare --claude-hook\n"
+		p.ClaudeHookScript = "#!/bin/sh\nset -eu\n[ \"${CLAUDE_CODE_REMOTE:-}\" = true ] || exit 0\nexec \"$HOME/.local/share/hopsesh/cloud/v" + version + "/hopsesh\" cloud-integration prepare --claude-hook --quiet\n"
 		p.ClaudeHookEntry = json.RawMessage(`{"matcher":"startup|resume|clear|compact|fork","hooks":[{"type":"command","command":"sh \"$CLAUDE_PROJECT_DIR\"/.hopsesh/cloud-session-start.sh","timeout":10}]}`)
 	case "codex-current":
 		p.Callback = "Start skill"

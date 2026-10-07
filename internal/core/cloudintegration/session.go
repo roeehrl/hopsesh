@@ -260,8 +260,32 @@ func Load(ctx context.Context, dir string) (Incarnation, error) {
 }
 
 func (s Incarnation) activePath() string {
-	sum := sha256.Sum256([]byte(s.Provider + "\x00" + s.Session + "\x00" + s.Workspace))
-	return filepath.Join(filepath.Dir(s.Directory), "active-"+hex.EncodeToString(sum[:]))
+	return filepath.Join(filepath.Dir(s.Directory), slotName(s.Provider, s.Session, s.Workspace))
+}
+
+func slotName(provider, session, workspace string) string {
+	sum := sha256.Sum256([]byte(provider + "\x00" + session + "\x00" + workspace))
+	return "active-" + hex.EncodeToString(sum[:])
+}
+
+func Current(ctx context.Context, parent, provider, session, workspace string) (Incarnation, error) {
+	if err := (Scope{Provider: provider, Session: session, Workspace: workspace}).check(); err != nil {
+		return Incarnation{}, err
+	}
+	if err := canonicalDirectory(parent); err != nil {
+		return Incarnation{}, err
+	}
+	if err := localstate.PrivateDirectory(parent); err != nil {
+		return Incarnation{}, err
+	}
+	id, err := localstate.ReadPrivateFile(filepath.Join(parent, slotName(provider, session, workspace)), 32)
+	if err != nil {
+		return Incarnation{}, err
+	}
+	if len(id) != 32 || strings.Trim(string(id), "0123456789abcdef") != "" {
+		return Incarnation{}, errors.New("invalid cloud incarnation pointer")
+	}
+	return Load(ctx, filepath.Join(parent, string(id)))
 }
 func (s Incarnation) current() error {
 	b, err := localstate.ReadPrivateFile(s.activePath(), 32)

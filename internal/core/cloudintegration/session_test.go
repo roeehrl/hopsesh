@@ -51,6 +51,10 @@ func TestCloudIncarnationsNeverReuseSetupKeysAcrossResumeRebuildAndFork(t *testi
 		if err != nil || loaded.ID != s.ID {
 			t.Fatal("load", err)
 		}
+		currentInstance, err := Current(t.Context(), parent, current.Provider, current.Session, current.Workspace)
+		if err != nil || currentInstance.ID != s.ID {
+			t.Fatal("exact task lookup did not return its fresh incarnation", err)
+		}
 		if _, err = (relay.Store{Directory: s.Directory}).Connection(t.Context()); !os.IsNotExist(err) {
 			t.Fatal("startup carried a setup credential", err)
 		}

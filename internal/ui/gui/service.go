@@ -41,28 +41,29 @@ const MenuEvent = "hopsesh:menu"
 
 // App is the service bound to the frontend.
 type App struct {
-	backend    runtimeLink
-	relayLogin relayLoginState
-	Desktop    DesktopShell `json:"-"`
-	desktopMu  sync.Mutex
-	quick      quickState
-	mu         sync.Mutex
-	scanMu     sync.Mutex // serialize inventory refreshes
-	scans      map[string]MachineScan
-	core       *app.App // its Cfg is the saved configuration; calls work on snapshots
-	cfgErr     error    // the configuration file could not be used (see StartFresh)
-	inv        *app.Inventory
-	invAt      time.Time // when inv last read the other machines and the clouds
-	plan       *move.Plan
-	input      move.Input
-	res        *move.Result
-	push       *app.Push // a push planned on another machine, its connection open
-	pw         *pwBroker
-	appIcons   map[agent.ID]string // installed apps' icons, read once ("" when none)
-	pwOnce     sync.Once
-	step       *pendingStep // the terminal step a hand-off waits for
-	quitting   atomic.Bool  // the user confirmed quitting (or an update restarts the app)
-	termName   atomic.Value // the user's terminal app's name, for the terminal window (a string)
+	backend      runtimeLink
+	relayLogin   relayLoginState
+	Desktop      DesktopShell `json:"-"`
+	desktopMu    sync.Mutex
+	quick        quickState
+	cloudStartup cloudStartupState
+	mu           sync.Mutex
+	scanMu       sync.Mutex // serialize inventory refreshes
+	scans        map[string]MachineScan
+	core         *app.App // its Cfg is the saved configuration; calls work on snapshots
+	cfgErr       error    // the configuration file could not be used (see StartFresh)
+	inv          *app.Inventory
+	invAt        time.Time // when inv last read the other machines and the clouds
+	plan         *move.Plan
+	input        move.Input
+	res          *move.Result
+	push         *app.Push // a push planned on another machine, its connection open
+	pw           *pwBroker
+	appIcons     map[agent.ID]string // installed apps' icons, read once ("" when none)
+	pwOnce       sync.Once
+	step         *pendingStep // the terminal step a hand-off waits for
+	quitting     atomic.Bool  // the user confirmed quitting (or an update restarts the app)
+	termName     atomic.Value // the user's terminal app's name, for the terminal window (a string)
 	// Wails is the running application (events, clipboard, dialogs).
 	Wails *application.App `json:"-"`
 	// Terms are the terminal's tabs and window (not bound to the window: see terminal.go).

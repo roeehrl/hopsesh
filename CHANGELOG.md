@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Review and install cloud startup files from Settings or the CLI. Claude's
+  cloud-only hook prepares fresh keys quietly; Codex receives environment Start
+  skill instructions. Existing settings are preserved, modified files are
+  refused, and stale previews cannot overwrite concurrent edits.
+
 - Cloud session invitations in CLI and Settings: admit one fresh provider/session
   incarnation, check provisional claim status and revoke its delivery lease.
   Independent fingerprint approval still controls sharing; rebuilds and forks

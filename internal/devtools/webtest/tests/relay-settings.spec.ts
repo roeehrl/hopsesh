@@ -149,3 +149,40 @@ test("cloud invitations require enrollment and show provisional routing separate
  await expect(page.getByText("Delivery revoked",{exact:true})).toBeVisible();
  await expect(page.getByRole("button",{name:"Revoke invitation",exact:true})).toBeDisabled();
 });
+
+test("cloud startup reviews file changes and invalidates review when its version changes",async({page})=>{
+ let previews=0,applied=0;
+ await page.route("**/call",async route=>{
+  const request=route.request().postDataJSON();
+  if(request.m==="ChooseFolder"){await route.fulfill({json:{result:"/fixture/repository"}});return;}
+  if(request.m==="CloudStartupPreview"){
+   expect(request.args).toEqual(["codex-current",previews===0?"0.5.0":"0.5.1","https://downloads.hopsesh.codonic.dev","/fixture/repository"]);
+   previews++;await route.fulfill({json:{result:{id:`review-${previews}`,setup:{provider:"codex-current",version:request.args[1],reason:"Start skill is an instruction, not a guaranteed lifecycle callback.",changes:[{path:".hopsesh/cloud-install.sh",action:"create"},{path:".hopsesh/codex-start.md",action:"create"}],installScript:"verified-install-script",startSkill:"fresh-task-start-instructions"}}}});return;
+  }
+  if(request.m==="CloudStartupApply"){expect(request.args).toEqual(["review-2"]);applied++;await route.fulfill({json:{result:null}});return;}
+  await route.continue();
+ });
+ await page.getByRole("button",{name:"Prepare cloud startup…"}).click();
+ const dialog=page.getByRole("dialog");
+ await expect(dialog.getByRole("button",{name:"Install reviewed startup files"})).toBeDisabled();
+ await dialog.getByRole("button",{name:"Preview startup files"}).click();
+ await expect(dialog.getByRole("alert")).toHaveText("Choose a repository first.");
+ await dialog.getByLabel("Startup provider").selectOption("codex-current");
+ await dialog.getByLabel("Immutable cloud helper version").fill("0.5.0");
+ await dialog.getByRole("button",{name:"Choose repository…"}).click();
+ await dialog.getByRole("button",{name:"Preview startup files"}).click();
+ await expect(dialog.getByRole("heading",{name:"Review startup changes"})).toBeVisible();
+ await expect(dialog.getByText("create · .hopsesh/codex-start.md")).toBeVisible();
+ await expect(dialog.getByRole("button",{name:"Copy Start skill instructions"})).toBeVisible();
+ await expect(dialog.getByRole("button",{name:"Install reviewed startup files"})).toBeEnabled();
+ await dialog.getByLabel("Immutable cloud helper version").fill("0.5.1");
+ await expect(dialog.getByRole("button",{name:"Install reviewed startup files"})).toBeDisabled();
+ await expect(dialog.getByRole("heading",{name:"Review startup changes"})).toHaveCount(0);
+ await dialog.getByRole("button",{name:"Preview startup files"}).click();
+ await dialog.getByRole("button",{name:"Install reviewed startup files"}).click();
+ await expect(dialog.getByText("Startup files installed. No cloud identity was created or enrolled.")).toBeVisible();
+ await expect.poll(()=>applied).toBe(1);
+ await expect(dialog.getByRole("button",{name:"Install reviewed startup files"})).toBeDisabled();
+ await dialog.getByRole("button",{name:"Close",exact:true}).click();
+ await expect(page.getByRole("status").filter({hasText:"Not initialized"})).toBeVisible();
+});

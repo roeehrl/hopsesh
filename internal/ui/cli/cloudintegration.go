@@ -35,13 +35,13 @@ func cloudIntegrationCmd() *cobra.Command {
 	plan.Flags().StringVar(&version, "version", "", "immutable signed 0.5 release version")
 	plan.Flags().StringVar(&origin, "origin", cloudintegration.DownloadOrigin, "verified downloads HTTPS origin")
 	plan.Flags().BoolVar(&script, "script", false, "print only the installation shell script")
-	root.AddCommand(plan, cloudPrepareCmd(), cloudAuthorizeCmd(), cloudServeCmd(), cloudTicketCmd(), cloudClaimCmd(), cloudRevokeTicketCmd(), cloudTicketStatusCmd())
+	root.AddCommand(plan, cloudPrepareCmd(), cloudCurrentCmd(), cloudStartupInstallCmd(), cloudAuthorizeCmd(), cloudServeCmd(), cloudTicketCmd(), cloudClaimCmd(), cloudRevokeTicketCmd(), cloudTicketStatusCmd())
 	return root
 }
 
 func cloudPrepareCmd() *cobra.Command {
 	var scope cloudintegration.Scope
-	var hook bool
+	var hook, quiet bool
 	var ttl time.Duration
 	c := &cobra.Command{Use: "prepare", Short: "Create fresh keys for one real cloud session; remains disconnected until authorized", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		if hook {
@@ -90,6 +90,9 @@ func cloudPrepareCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		if quiet {
+			return nil
+		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(struct {
 			cloudintegration.Incarnation
 			State string `json:"state"`
@@ -102,7 +105,79 @@ func cloudPrepareCmd() *cobra.Command {
 	c.Flags().StringVar(&scope.Transcript, "transcript", "", "exact native JSONL path for this session, if supported")
 	c.Flags().BoolVar(&scope.ExportTranscript, "allow-transcript-export", false, "explicitly allow a pinned peer to export this session's native transcript")
 	c.Flags().BoolVar(&hook, "claude-hook", false, "read documented SessionStart input; no-op outside Claude cloud")
+	c.Flags().BoolVar(&quiet, "quiet", false, "save public incarnation metadata privately without injecting hook stdout into agent context")
 	c.Flags().DurationVar(&ttl, "lease", time.Hour, "incarnation lease; one minute to 24 hours")
+	return c
+}
+
+func cloudCurrentCmd() *cobra.Command {
+	var provider, session, workspace string
+	c := &cobra.Command{Use: "current", Short: "Read the current incarnation for one exact cloud task; never initialize keys", Args: cobra.NoArgs, Annotations: map[string]string{"hopsesh.passive": "true"}, RunE: func(cmd *cobra.Command, _ []string) error {
+		if workspace == "" {
+			return errors.New("the actual cloud task's workspace is required")
+		}
+		p, err := filepath.Abs(workspace)
+		if err != nil {
+			return err
+		}
+		p, err = filepath.EvalSymlinks(p)
+		if err != nil {
+			return err
+		}
+		parent, err := filepath.EvalSymlinks(filepath.Join(config.StateDir(), "cloud-sessions"))
+		if err != nil {
+			return err
+		}
+		instance, err := cloudintegration.Current(cmd.Context(), parent, provider, session, p)
+		if err != nil {
+			return err
+		}
+		state := "awaiting-authorization"
+		store := relay.Store{Directory: instance.Directory}
+		if connection, err := store.PublicConnection(); err == nil && connection.Device == instance.Public.ID && connection.Expires > time.Now().Unix() {
+			state = "authorized; connector liveness unconfirmed"
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(struct {
+			cloudintegration.Incarnation
+			State string `json:"state"`
+		}{instance, state})
+	}}
+	c.Flags().StringVar(&provider, "provider", "", "cloud execution surface")
+	c.Flags().StringVar(&session, "session", "", "actual task session ID")
+	c.Flags().StringVar(&workspace, "workspace", "", "absolute checked-out repository for this task")
+	return c
+}
+
+func cloudStartupInstallCmd() *cobra.Command {
+	var provider, version, origin string
+	var preview bool
+	c := &cobra.Command{Use: "install-startup <repository>", Short: "Install reviewed provider startup files; never create a cloud identity during setup", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		repo, err := filepath.Abs(args[0])
+		if err != nil {
+			return err
+		}
+		repo, err = filepath.EvalSymlinks(repo)
+		if err != nil {
+			return err
+		}
+		plan, err := cloudintegration.PlanRepository(provider, version, origin, repo)
+		if err != nil {
+			return err
+		}
+		if !preview {
+			if err = plan.Apply(cmd.Context()); err != nil {
+				return err
+			}
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(struct {
+			*cloudintegration.RepositorySetup
+			Applied bool `json:"applied"`
+		}{plan, !preview})
+	}}
+	c.Flags().StringVar(&provider, "provider", "", "claude-hosted or codex-current")
+	c.Flags().StringVar(&version, "version", "", "immutable signed 0.5 release version")
+	c.Flags().StringVar(&origin, "origin", cloudintegration.DownloadOrigin, "verified downloads HTTPS origin")
+	c.Flags().BoolVar(&preview, "dry-run", false, "preview exact changed file names without writing configuration")
 	return c
 }
 

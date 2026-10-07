@@ -1,4 +1,4 @@
-import { api, h, dialog, fail, ask, go } from "./core.js";
+import { api, h, dialog, fail, ask, go, pending } from "./core.js";
 
 const field = (label, control, help = "") => h("label", {class:"opt",style:"display:flex;flex-direction:column;align-items:stretch;gap:6px"}, h("b",{},label), control, help ? h("span",{class:"muted"},help) : null);
 
@@ -65,14 +65,15 @@ function cloudInvitation(refresh) {
  const lease=h("select",{"aria-label":"Cloud routing lifetime"},[900,3600,14400,86400].map(seconds=>h("option",{value:seconds,selected:seconds===3600},seconds===900 ? "15 minutes" : `${seconds/3600} hour${seconds===3600 ? "" : "s"}`)));
  const error=h("p",{class:"err",role:"alert"}),status=h("div",{role:"status"});
  const form=h("fieldset",{style:"border:0;padding:0;margin:0"},field("Provider",provider),field("Actual session ID",session,"Use the task's session ID, not its environment or repository name."),field("Routing lifetime",lease));
- const button=h("button",{class:"btn primary",onclick:async()=>{
+ const button=h("button",{class:"btn primary"},"Create private invitation");
+ button.addEventListener("click",async()=>{
   button.disabled=true;form.disabled=true;error.textContent="";
   try{
-   const record=await api("RelayIssueCloudAdmission",provider.value,session.value.trim(),Number(lease.value));
+   const record=await pending("Create cloud invitation",()=>api("RelayIssueCloudAdmission",provider.value,session.value.trim(),Number(lease.value)));
    status.replaceChildren(h("p",{},"Invitation saved privately. It does not approve a cloud endpoint or enable sharing."),h("p",{class:"mono",style:"overflow-wrap:anywhere"},record.path),h("p",{},`Claim before ${new Date(record.expires*1000).toLocaleString()}. Compare owner fingerprint independently:`),h("p",{class:"mono",style:"overflow-wrap:anywhere"},record.ownerFingerprint),h("p",{class:"muted"},"Supply the file through stdin to cloud-integration claim in the actual session. Keep it out of setup scripts, environment variables and cached images. Then approve the fresh session's public identity here."),h("button",{class:"btn",onclick:()=>api("Reveal",record.path).catch(fail)},"Show private invitation file"));
    await refresh();
   }catch(e){error.textContent=String(e?.message || e);button.disabled=false;form.disabled=false;}
- }},"Create private invitation");
+ });
  const d=dialog(h("h2",{},"Invite one cloud session"),h("p",{class:"muted"},"The invitation can admit one fresh session identity for a bounded routing lease. A resume or rebuild needs a new invitation and approval."),form,error,status,h("div",{class:"dlg-foot"},h("button",{class:"btn",onclick:()=>d.close()},"Close"),button));
 }
 
@@ -92,6 +93,35 @@ function invitationRow(ticket,r,expired,action,refresh) {
  return h("div",{class:"set-row"},h("div",{style:"min-width:0;overflow-wrap:anywhere"},h("b",{},`${ticket.provider === "claude-hosted" ? "Claude Code" : "Codex"} · ${ticket.session}`),h("p",{class:"muted"},ticket.revoked ? "Delivery revoked" : ticket.expires*1000>Date.now() ? "Claim window open; claim status unconfirmed" : "Claim window closed; a claimed delivery lease may still be active"),h("p",{class:"muted"},`Claim deadline ${new Date(ticket.expires*1000).toLocaleString()} · routing up to ${ticket.leaseSeconds/3600} hours`),error),check,h("button",{class:"btn",onclick:()=>api("Reveal",ticket.path).catch(fail)},"Show file"),h("button",{class:"btn danger",disabled:ticket.revoked || !r.enrolled || expired,onclick:async()=>{if(await ask({title:"Revoke cloud invitation?",body:"This also revokes its claimed session's routing lease. Independent forks, peer approvals and previously delivered conversations remain available.",ok:"Revoke",danger:true}))await action(()=>api("RelayRevokeCloudAdmission",ticket.id));}},"Revoke invitation"));
 }
 
+function cloudStartup() {
+ const provider=h("select",{"aria-label":"Startup provider"},h("option",{value:"claude-hosted"},"Claude Code cloud"),h("option",{value:"codex-current"},"Codex cloud"));
+ const version=h("input",{"aria-label":"Immutable cloud helper version",placeholder:"0.5.0",maxlength:80});
+ const origin=h("input",{"aria-label":"Verified downloads origin",type:"url",value:"https://downloads.hopsesh.codonic.dev"});
+ let repository="",preview=null;
+ const folder=h("p",{class:"mono muted",style:"overflow-wrap:anywhere"},"No repository selected"),error=h("p",{class:"err",role:"alert"}),result=h("div",{role:"status"});
+ const form=h("fieldset",{style:"border:0;padding:0;margin:0"},field("Provider",provider),field("Published immutable helper version",version,"The signed archive must exist at the selected downloads origin before a cloud environment can install it."),field("Verified downloads origin",origin),h("button",{class:"btn",onclick:async()=>{try{const path=await api("ChooseFolder","Choose repository for cloud startup integration");if(path){repository=path;folder.textContent=path;preview=null;apply.disabled=true;result.replaceChildren()}}catch(e){error.textContent=String(e?.message||e)}}},"Choose repository…"),folder);
+ const apply=h("button",{class:"btn primary",disabled:true},"Install reviewed startup files");
+ apply.addEventListener("click",async()=>{
+  if(!preview)return;apply.disabled=true;form.disabled=true;prepare.disabled=true;error.textContent="";
+  try{const id=preview.id;await pending("Install reviewed cloud startup files",()=>api("CloudStartupApply",id));result.append(h("p",{},"Startup files installed. No cloud identity was created or enrolled."));preview=null;form.disabled=true;prepare.disabled=true;}
+  catch(e){error.textContent=String(e?.message||e);preview=null;prepare.disabled=false;form.disabled=false;}
+ });
+ const prepare=h("button",{class:"btn",onclick:async()=>{
+  if(!repository){error.textContent="Choose a repository first.";return}
+  prepare.disabled=true;form.disabled=true;apply.disabled=true;error.textContent="";
+  try{
+   preview=await api("CloudStartupPreview",provider.value,version.value.trim(),origin.value.trim(),repository);
+   const p=preview.setup;
+   result.replaceChildren(h("h3",{},"Review startup changes"),...p.changes.map(change=>h("p",{class:"mono"},`${change.action} · ${change.path}`)),h("p",{class:"muted"},p.reason),h("p",{},p.provider==="claude-hosted" ? "The cloud-only SessionStart hook prepares fresh keys quietly. Setup installs the binary; an actual session must claim an invitation and receive fingerprint approval separately." : "Paste the generated install script and Start skill into the provider's environment setup. A Start skill is an instruction; lifecycle support remains unqualified."),
+    h("button",{class:"btn",onclick:()=>api("CopyText",p.installScript).catch(fail)},"Copy environment install script"),p.startSkill ? h("button",{class:"btn",onclick:()=>api("CopyText",p.startSkill).catch(fail)},"Copy Start skill instructions") : null);
+   apply.disabled=false;
+  }catch(e){error.textContent=String(e?.message||e);preview=null}
+  finally{prepare.disabled=false;form.disabled=false}
+ }},"Preview startup files");
+ for(const control of [provider,version,origin])control.addEventListener("input",()=>{preview=null;apply.disabled=true;result.replaceChildren()});
+ const d=dialog(h("h2",{},"Prepare cloud environment startup"),h("p",{class:"muted"},"Only startup scripts and provider configuration are added to this repository. Invitations, private identities and account credentials stay out of reusable setup."),form,error,result,h("div",{class:"dlg-foot"},h("button",{class:"btn",onclick:()=>d.close()},"Close"),prepare,apply));
+}
+
 export function relaySettings(data, refresh) {
  const r=data || {peers:[]};
  const expired=r.enrolled && r.expires*1000<=Date.now();
@@ -107,6 +137,7 @@ export function relaySettings(data, refresh) {
    h("button",{class:"btn",onclick:refresh},"Refresh status")),
   r.enrolled ? h("p",{class:"muted"},`Routing credential expires ${new Date(r.expires*1000).toLocaleString()}. Receiving on this computer: ${r.receiveEnabled ? "enabled" : "disabled"}.`) : null,
   h("button",{class:"btn",onclick:()=>go("machines")},"Receiving and machines…"))),
+  h("section",{class:"card"},h("div",{class:"dlg-body"},h("h2",{},"Cloud environment setup"),h("p",{class:"muted"},"Install a verified helper during setup, then prepare a fresh scoped connector in each actual task. Hosted lifecycle support is still being qualified."),h("button",{class:"btn",onclick:cloudStartup},"Prepare cloud startup…"))),
   h("section",{class:"card"},h("div",{class:"dlg-body"},h("h2",{},"Cloud invitations"),h("p",{class:"muted"},"Invitations authorize provisional delivery. Approve the fresh cloud fingerprint separately before requesting its conversation."),h("button",{class:"btn",disabled:!r.enrolled || expired,onclick:()=>cloudInvitation(refresh)},"Invite cloud session…"),
    !(r.admissions || []).length ? h("p",{class:"muted"},"No cloud invitations saved.") : r.admissions.map(ticket=>invitationRow(ticket,r,expired,action,refresh)))),
 

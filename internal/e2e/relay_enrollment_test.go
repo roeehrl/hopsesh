@@ -310,9 +310,28 @@ func qualifyCloudAdmission(t *testing.T, ctx context.Context, bin, root, origin,
 		}
 		return body, path
 	}
+	previewJSON := run(cloud, nil, true, "cloud-integration", "install-startup", cloud.repo, "--provider", "codex-current", "--version", "0.5.0", "--dry-run")
+	var startup struct {
+		Applied bool `json:"applied"`
+	}
+	if json.Unmarshal(previewJSON, &startup) != nil || startup.Applied {
+		t.Fatal("startup dry-run applied configuration")
+	}
+	if _, err := os.Stat(filepath.Join(cloud.repo, ".hopsesh", "cloud-install-codex-current.sh")); !os.IsNotExist(err) {
+		t.Fatal("startup dry-run wrote install script")
+	}
+	run(cloud, nil, true, "cloud-integration", "install-startup", cloud.repo, "--provider", "codex-current", "--version", "0.5.0")
+	run(cloud, nil, true, "cloud-integration", "install-startup", cloud.repo, "--provider", "codex-current", "--version", "0.5.0")
+	if _, err := (relay.Store{Directory: filepath.Join(cloud.home, "state", "relay")}).Public(); !os.IsNotExist(err) {
+		t.Fatal("setup created a personal device identity")
+	}
 	prepare := func(session string) cloudintegration.Incarnation {
 		t.Helper()
-		out := run(cloud, nil, true, "cloud-integration", "prepare", "--provider", "codex-current", "--session", session, "--workspace", cloud.repo)
+		quiet := run(cloud, nil, true, "cloud-integration", "prepare", "--provider", "codex-current", "--session", session, "--workspace", cloud.repo, "--quiet")
+		if len(quiet) != 0 {
+			t.Fatal("quiet startup injected data into provider context")
+		}
+		out := run(cloud, nil, true, "cloud-integration", "current", "--provider", "codex-current", "--session", session, "--workspace", cloud.repo)
 		var instance cloudintegration.Incarnation
 		if err := json.Unmarshal(out, &instance); err != nil {
 			t.Fatal(err)

@@ -1,0 +1,61 @@
+# Repository startup integration
+
+Environment preparation installs the signed helper binary. Actual task startup
+creates fresh session keys. These steps remain separate: reusable setup files
+contain neither invitations nor identity, account or routing credentials.
+
+Settings → Internet delivery → **Prepare cloud startup** asks for the provider,
+published immutable 0.5 helper version, verified downloads origin and repository.
+The preview shows the files to create or update. Changing any input invalidates
+the preview. Installation rechecks all input files, refuses concurrent settings
+edits, and consumes the review after success. Existing repository settings never
+cross the browser bridge. Public install scripts and Start skill instructions
+can be copied into the provider's environment configuration.
+
+The CLI provides the same preview and installation:
+
+```sh
+hopsesh cloud-integration install-startup /absolute/repository --provider claude-hosted --version 0.5.0 --dry-run
+hopsesh cloud-integration install-startup /absolute/repository --provider claude-hosted --version 0.5.0
+```
+
+Claude writes `.hopsesh/cloud-install-claude-hosted.sh` and
+`.hopsesh/cloud-session-start.sh`, adds its own command hook to
+`.claude/settings.json`, and records ownership in a provider-specific public
+record. Unrelated settings and hooks are preserved. A modified Hopsesh script
+or hook is refused; installation does not overwrite it. Repeated installation
+is idempotent. File access is pinned to the chosen repository with `os.Root`;
+links, oversized settings and nonregular targets are refused.
+
+The SessionStart script is a no-op unless `CLAUDE_CODE_REMOTE=true`. On startup,
+resume, clear, compact or fork, it reads the documented input and prepares a fresh
+scoped incarnation. It uses `--quiet` so successful startup does not inject its
+metadata into agent context. To read the current public incarnation afterwards:
+
+```sh
+hopsesh cloud-integration current --provider claude-hosted --session ACTUAL_SESSION_ID --workspace /actual/repository
+```
+
+`current` is passive and requires the exact provider, native session and
+workspace. It creates no keys and does not infer connector liveness from the
+presence of a routing credential. A fork has its own slot; preparing it does
+not supersede its original. See [cloud admission](cloud-admission.md) for claim,
+independent fingerprint approval, scoped serving and revocation.
+
+Codex writes `.hopsesh/cloud-install-codex-current.sh` and
+`.hopsesh/codex-start.md`. Copy their contents into the environment's Install
+script and Start skill fields. This is a documented instruction mechanism,
+whose actual per-task startup, pause/resume and rebuild behavior still needs
+qualification. If the real task ID is unavailable, session binding must be
+reported unsupported. Current Codex Cloud native transcript export is also
+unqualified. Legacy Codex and Work Cloud do not receive invented repository
+callbacks. Claude and current Codex startup files can coexist independently in
+the same repository, including different pinned helper versions.
+
+Cloud installs require the signed immutable archive to be published at the
+chosen downloads origin. Preparing repository files does not establish that the
+download exists, a cloud session is running, or the relay is connected. Hosted
+defaults are qualified separately from these local installer and CLI tests.
+
+Mechanisms follow [Claude's hook reference](https://code.claude.com/docs/en/hooks)
+and [Codex cloud environment configuration](https://learn.chatgpt.com/docs/environments/cloud-environments).
