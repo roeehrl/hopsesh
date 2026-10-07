@@ -80,9 +80,20 @@ portable data with bounded retrieval, never native signed/private state or instr
 Large first records must remain discoverable. Check cloud edited briefs and return
 paths, capacity rollovers versus forks, retained originals with new independent work,
 archive transport/undo and truthful prepared-versus-running reports in GUI/TUI/CLI.
+The first bounded message is a labelled historical extract from original records:
+source compaction, actual agent reply, chronological substantive user requests, and
+separately framed tool activity. Never substitute a coalesced tool block for an agent
+reply or present extracted text as fresh task authorization. Preserve multiline source
+summaries, literal tool fences and the latest actual user request as a separate message,
+including when attachments or oversized agent blocks follow it. Consecutive user turns
+must not merge; generated boundaries carry no authored coverage. An empty extract must
+not invent a revision. Too little capacity blocks writing instead of dropping the request.
+Full portable text stays in the archive; no model-generated semantic summary is involved.
 Regression evidence: `internal/e2e/context_capacity_test.go`, mandatory
 `TestContextPressureRoutes` (ABABA/ABCA/ABCBCAB), SDK/module capacity tests and browser
-continuation/recovery tests. These static checks do not establish a paid model turn.
+continuation/recovery tests, plus `internal/core/convert/context_test.go` for source
+record selection and request/quote boundaries. These static checks do not establish a
+paid model turn.
 
 Movement notices and returns: read `docs/movement-return.md`,
 `internal/e2e/movement_test.go`, `internal/app/movement.go`, module `hooks.go`,
