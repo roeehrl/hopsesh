@@ -1,6 +1,6 @@
 // The Machines screen: this machine (and whether it receives sessions), the machines you
 // added, and the ones discovery found. hopsesh connects only to machines you added.
-import { api, h, fill, icon, ICONS, view, state, screen, loading, toast, fail, errText, cap, dialog, ask, machineStatus, sys, when, current, rich, navigationID, loadError } from "./core.js";
+import { api, h, fill, icon, ICONS, view, state, screen, go, loading, toast, fail, errText, cap, dialog, ask, machineStatus, sys, when, current, rich, navigationID, loadError } from "./core.js";
 import { signIn, onSignedIn } from "./term.js";
 
 // A sign-in tab ended well: the card shows the new check.
@@ -53,15 +53,8 @@ export async function machineScanChanged() {
  if(finished)await reload();else if(!document.querySelector("dialog[open]"))render();
 }
 
-// Added machines scan immediately. Healthy rows refresh every five minutes while
-// Machines is visible; failed connections need an explicit Retry (no repeated prompts).
-setInterval(() => {
-  if (current !== "machines" || document.hidden || !document.hasFocus() || document.querySelector("dialog[open]") || !data) return;
-  for (const m of data.machines) {
-    const last = Date.parse(m.scan?.finished || "") || 0;
-    if (!activeScan(m) && !failedScan(m) && Date.now() - last >= 300000) scanMachine(m.name);
-  }
-}, 15000);
+// The shared runtime schedules remote observations even when this view is closed.
+// Phase notifications update rows; Scan is an explicit retry after authentication.
 
 function statusCell(m) {
   if (activeScan(m)) return h("div", { role: "status", "aria-live": "polite", class: "scan-status" },
@@ -74,7 +67,7 @@ function statusCell(m) {
   return h("div", { style: "display:flex;flex-direction:column;gap:3px;min-width:0" },
     h("span", { style: "display:flex;gap:7px;align-items:center" }, h("span", { class: "dot " + k }), words),
     m.status === "ok" ? h("span", { class: "muted", style: "font-size:12px" }, [`${m.sessions} session${m.sessions === 1 ? "" : "s"}`, m.agents.join(", ")].filter(Boolean).join(" · ")) : null,
-    m.status === "ok" ? h("span", { class: m.hopsesh ? "muted" : "warn", style: "font-size:12px" }, m.hopsesh ? `hopsesh ${m.hopsesh}: you can send sessions there` : "No hopsesh there: you can bring sessions from it, not send to it") : null,
+    m.status === "ok" ? h("span", { class: m.hopsesh ? "muted" : "warn", style: "font-size:12px" }, m.hopsesh ? `hopsesh ${m.hopsesh}: ${m.receive === false ? "receiving is not approved for this connection" : "you can send sessions there"}` : "No hopsesh there: you can bring sessions from it, not send to it") : null,
     m.status !== "ok" && m.hint ? h("span", { class: "muted", style: "font-size:12px" }, rich(cap(m.hint))) : null,
     error && error !== m.error ? h("span", { class: "err" }, error) : null,
     m.scan?.finished ? h("span", { class: "muted", style: "font-size:11px" }, "Last checked " + when(m.scan.finished)) : null,
@@ -83,10 +76,10 @@ function statusCell(m) {
 }
 
 function machineRow(m) {
-  const login = m.auth === "password" ? (m.keychain ? `Password, in ${sys.vault}` : "Password, asked each time") : "SSH key";
+  const login = m.relay ? "Encrypted relay" : m.auth === "password" ? (m.keychain ? `Password, in ${sys.vault}` : "Password, asked each time") : "SSH key";
   return h("div", { class: "mgrid", "data-machine": m.name, "aria-busy": activeScan(m) ? "true" : "false" },
     h("div", { style: "min-width:0" }, h("div", { style: "font-weight:500" }, m.name), h("div", { class: "mono muted", style: "font-size:11px;overflow-wrap:anywhere" }, m.destination + (m.os ? ` · ${m.os}` : ""))),
-    h("div", {}, h("button", { class: "btn small", title: "How hopsesh logs in to this machine", onclick: () => loginDialog(m) }, login)),
+    h("div", {}, h("button", { class: "btn small", title: "How hopsesh logs in to this machine", onclick: () => m.relay ? go("settings","relay") : loginDialog(m) }, login)),
     statusCell(m),
     h("div", { style: "display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end" },
       h("button", { class: "btn small", disabled: activeScan(m), "aria-label": `${activeScan(m) ? "Scanning" : failedScan(m) ? "Retry scan" : "Scan"} ${m.name}`, onclick: () => scanMachine(m.name) }, activeScan(m) ? "Scanning…" : failedScan(m) ? "Retry scan" : "Scan"),

@@ -156,7 +156,7 @@ func (s Store) Approve(ctx context.Context, g Grant) error {
 	}
 	for _, m := range append(append([]string(nil), g.Methods...), g.SendMethods...) {
 		switch m {
-		case "hello", "plan", "apply", "undo", "observe", "export", "ack":
+		case "hello", "plan", "apply", "undo", "observe", "export", "ack", "preview":
 		default:
 			return fmt.Errorf("unsupported relay method %q", m)
 		}

@@ -149,6 +149,15 @@ func (a *App) acceptRuntimeSnapshot(s observe.Snapshot) {
 	}
 	a.scanMu.Lock()
 	defer a.scanMu.Unlock()
+	// Reviewed plans retain their inventory transports until apply completes.
+	// Keep the latest owner snapshot above, without closing those transports or
+	// acknowledging its sequence; a later update or explicit scan adopts it.
+	a.mu.Lock()
+	reviewing := a.plan != nil && a.res == nil || a.push != nil
+	a.mu.Unlock()
+	if reviewing {
+		return
+	}
 	a.backend.mu.Lock()
 	if a.backend.appliedEpoch == s.Epoch && a.backend.appliedSequence >= s.Sequence {
 		a.backend.mu.Unlock()
@@ -178,18 +187,39 @@ func (a *App) acceptRuntimeSnapshot(s observe.Snapshot) {
 	fresh := core.ObservationInventory(ctx, out)
 	a.mu.Lock()
 	old := a.inv
+	remoteTimes := map[string]time.Time{}
+	for name, scan := range a.scans {
+		remoteTimes[name], _ = time.Parse(time.RFC3339Nano, scan.Finished)
+	}
+	core.MergeRemoteObservations(ctx, fresh, old, out.Remotes, remoteTimes)
+	for _, remote := range out.Remotes {
+		if remoteTimes[remote.Binding.Name].After(remote.Started) {
+			continue
+		}
+		if a.scans == nil {
+			a.scans = map[string]MachineScan{}
+		}
+		scan := MachineScan{Phase: remote.Phase, Error: remote.Error}
+		if !remote.Started.IsZero() {
+			scan.Started = remote.Started.Format(time.RFC3339Nano)
+		}
+		if !remote.Finished.IsZero() {
+			scan.Finished = remote.Finished.Format(time.RFC3339Nano)
+		}
+		a.scans[remote.Binding.Name] = scan
+	}
 	if old != nil {
 		fresh.Clouds, fresh.Adopted, fresh.Waiting = old.Clouds, old.Adopted, old.Waiting
 		for _, m := range old.Machines {
-			if !m.Local {
-				fresh.Machines = append(fresh.Machines, m)
-			} else if m.Host() != nil {
+			if m.Local && m.Host() != nil {
 				m.Host().Close()
 			}
 		}
 		for _, e := range old.Entries {
 			if e.Machine != out.Machine || e.Location.IsCloud() {
-				fresh.Entries = append(fresh.Entries, e)
+				if e.Location.IsCloud() {
+					fresh.Entries = append(fresh.Entries, e)
+				}
 				continue
 			}
 			if !out.InventoryComplete && !slices.ContainsFunc(out.Entries, func(current app.Entry) bool { return current.Session.Key == e.Session.Key }) {
@@ -211,6 +241,7 @@ func (a *App) acceptRuntimeSnapshot(s observe.Snapshot) {
 		a.quick.mu.Unlock()
 	}
 	a.emit(RuntimeEvent, nil)
+	a.emit(MachineScanEvent, nil)
 }
 func (a *App) RuntimeRefresh() error {
 	if err := a.connectRuntime(); err != nil {

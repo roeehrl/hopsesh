@@ -37,6 +37,8 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 	var relayContext context.Context
 	var relayProblem string
 	var tasks []func(context.Context)
+	remotes := newRemoteObserver(a)
+	tasks = append(tasks, func(ctx context.Context) { remotes.run(ctx, engine) })
 	// Always supervise relay configuration, including enrollment or enablement
 	// after the owner has started. Clients never create additional listeners.
 	tasks = append(tasks, func(ctx context.Context) {
@@ -160,6 +162,7 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 		if err != nil {
 			return nil, err
 		}
+		out.Remotes = remotes.latest()
 		if files != nil {
 			roots := runtimeWatchRoots(out.WatchRoots, a.StateDir)
 			if err = files.SetRoots(roots); err != nil {
@@ -206,6 +209,14 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 	}
 	handler := func(ctx context.Context, method string, p json.RawMessage) (any, error) {
 		switch method {
+		case "machines.refresh":
+			var in struct {
+				Name string `json:"name"`
+			}
+			if err := json.Unmarshal(p, &in); err != nil {
+				return nil, err
+			}
+			return remotes.refresh(ctx, in.Name)
 		case "relay.status":
 			relayMu.Lock()
 			service := relayService
@@ -238,11 +249,15 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 			if err := json.Unmarshal(p, &in); err != nil {
 				return nil, err
 			}
-			finished, err := a.beginRuntimeAction()
-			if err != nil {
-				return nil, err
+			// Passive scheduler traffic must not make safe shutdown look like a
+			// user transfer. Owner cancellation joins its observation task.
+			if in.Method != "observe" && in.Method != "preview" && in.Method != "hello" {
+				finished, err := a.beginRuntimeAction()
+				if err != nil {
+					return nil, err
+				}
+				defer finished()
 			}
-			defer finished()
 			bounded, cancel := context.WithTimeout(ctx, 30*time.Minute)
 			defer cancel()
 			unlink := context.AfterFunc(serviceContext, cancel)

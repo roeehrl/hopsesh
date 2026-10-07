@@ -39,27 +39,39 @@ func (a *App) relayCall(ctx context.Context, to config.Host, op, method string, 
 }
 
 func (a *App) scanRelay(ctx context.Context, to config.Host) (*Machine, []Entry) {
+	m, entries, _ := a.scanRelaySnapshot(ctx, to)
+	return m, entries
+}
+
+func (a *App) scanRelaySnapshot(ctx context.Context, to config.Host) (*Machine, []Entry, observe.Snapshot) {
+	var snapshot observe.Snapshot
 	m := &Machine{Kind: agent.AtMachine, Name: to.Name, Destination: "relay", Status: StatusError}
 	op, err := relay.NewOperationID()
 	if err != nil {
 		m.Error = err.Error()
-		return m, nil
+		return m, nil, snapshot
 	}
-	var snapshot observe.Snapshot
 	if err = a.relayCall(ctx, to, op, "observe", nil, &snapshot); err != nil {
 		m.Error = err.Error()
-		return m, nil
+		return m, nil, snapshot
 	}
 	if !snapshot.Fresh(time.Now()) {
 		m.Error = "Remote observations are stale or unavailable; reconnect and refresh."
-		return m, nil
+		return m, nil, snapshot
 	}
 	var obs Observation
 	if err = json.Unmarshal(snapshot.Data, &obs); err != nil {
 		m.Error = err.Error()
-		return m, nil
+		return m, nil, snapshot
 	}
 	m.OS, m.Agents = obs.OS, obs.Agents
+	m.Hopsesh = obs.Version
+	receive := false
+	grant, e := (relay.Store{Directory: filepath.Join(a.StateDir, "relay")}).Grant(ctx, to.RelayID)
+	if e == nil {
+		receive = obs.Receive && grant.AllowsSend("plan", time.Now()) && grant.AllowsSend("apply", time.Now())
+	}
+	m.Receive = &receive
 	if !obs.InventoryComplete {
 		m.Error = "Remote observation is incomplete"
 	} else {
@@ -69,7 +81,7 @@ func (a *App) scanRelay(ctx context.Context, to config.Host) (*Machine, []Entry)
 		e := &obs.Entries[i]
 		e.Machine, e.Location = to.Name, agent.MachineLocation(to.Name)
 	}
-	return m, obs.Entries
+	return m, obs.Entries, snapshot
 }
 
 // RelayReceiver reuses the existing plan/apply machinery. Peer approval is
@@ -112,14 +124,18 @@ func (a *App) RelayReceiver(snapshots ...func() observe.Snapshot) relay.Handler 
 				return nil, err
 			}
 			obs = relayObservation(obs, grant)
+			obs.Receive = cfg.Peer.Receive && grant.Allows("plan", time.Now()) && grant.Allows("apply", time.Now()) && len(grant.Roots) > 0
 			snap.Data, err = json.Marshal(obs)
 			return snap, err
 		}
-		if !cfg.Peer.Receive && method != peer.MethodHello {
-			return nil, peer.Refused(LocalName())
-		}
 		if method == "export" || method == "ack" {
 			return source.relayExport(ctx, grant, operation, method, params)
+		}
+		if method == "preview" {
+			return source.relayPreview(ctx, grant, params)
+		}
+		if !cfg.Peer.Receive && method != peer.MethodHello && method != peer.MethodUndo {
+			return nil, peer.Refused(LocalName())
 		}
 		for key, s := range sessions {
 			if time.Since(s.used) > 15*time.Minute {

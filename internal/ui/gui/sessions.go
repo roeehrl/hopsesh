@@ -2,6 +2,7 @@ package gui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -173,16 +174,28 @@ func (a *App) scanAccounts(forceAccounts bool) (*ScanDTO, error) {
 		return nil, cfgErr
 	}
 	core := a.snapshot()
+	a.backend.mu.Lock()
+	shared := a.backend.cancel != nil
+	snapshot := a.backend.snapshot
+	a.backend.mu.Unlock()
 	for _, h := range core.Cfg.Hosts {
-		if h.Allowed {
+		if h.Allowed && !shared {
 			a.scanPhase(h.Name, "scanning", "")
 		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	inv := core.Scan(ctx, app.ScanOptions{ForceAccounts: forceAccounts})
+	opts := app.ScanOptions{ForceAccounts: forceAccounts}
+	if shared {
+		var out app.Observation
+		if json.Unmarshal(snapshot.Data, &out) == nil {
+			opts.RemoteSnapshots = out.Remotes
+		}
+		opts.SharedRemotes = true
+	}
+	inv := core.Scan(ctx, opts)
 	for _, m := range inv.Machines {
-		if !m.Local {
+		if !m.Local && !shared {
 			a.scanPhase(m.Name, "done", scanProblem(m))
 		}
 	}
@@ -242,7 +255,7 @@ func scanDTO(core *app.App, inv *app.Inventory, updated, elsewhere time.Time, ta
 		}
 		d.Agents = agentNames(m)
 		out.Machines = append(out.Machines, d)
-		if !m.Local && m.Status == app.StatusOK && m.Hopsesh != "" {
+		if !m.Local && m.Status == app.StatusOK && m.Hopsesh != "" && (m.Receive == nil || *m.Receive) {
 			out.Peers = append(out.Peers, m.Name)
 		}
 	}

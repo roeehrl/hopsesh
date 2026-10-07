@@ -43,6 +43,10 @@ func TestSubscribersShareCollectionAndCannotRenewFreshness(t *testing.T) {
 		if calls.Load() != 1 || string(e.Latest().Data) != `{"v":1}` {
 			t.Fatal("subscriptions collected or mutated shared data")
 		}
+		metrics := e.Metrics()
+		if metrics.Collections != 1 || metrics.Subscribers != 0 || metrics.Notifications != 0 {
+			t.Fatal("subscribers or diagnostics triggered collection", metrics)
+		}
 		time.Sleep(10 * time.Second)
 		ch, cancel := e.Subscribe()
 		defer cancel()
@@ -67,6 +71,10 @@ func TestBurstAndContinuousChangesAreBounded(t *testing.T) {
 		synctest.Wait()
 		if calls.Load() != 2 {
 			t.Fatalf("burst caused %d collections", calls.Load())
+		}
+		metrics := e.Metrics()
+		if metrics.Collections != 2 || metrics.Notifications != 1000 || metrics.Coalesced == 0 {
+			t.Fatal("coalescing metrics do not match actual scheduling", metrics)
 		}
 		for range 21 {
 			e.Notify()

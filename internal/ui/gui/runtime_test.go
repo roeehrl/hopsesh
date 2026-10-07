@@ -6,11 +6,33 @@ import (
 	"github.com/roeehrl/hopsesh/internal/agents/all"
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
+	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/observe"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 	"testing"
 	"time"
 )
+
+func TestRuntimeDoesNotReplaceInventoryForReviewedTransfer(t *testing.T) {
+	home(t)
+	cfg := config.Defaults()
+	if err := config.Save(&cfg); err != nil {
+		t.Fatal(err)
+	}
+	current := &app.Inventory{}
+	a := &App{core: app.New(cfg, all.Registry(), config.StateDir(), nil), inv: current, plan: &move.Plan{}}
+	body, _ := json.Marshal(app.Observation{Machine: app.LocalName(), InventoryComplete: true})
+	s := observe.Snapshot{Epoch: "owner", Sequence: 3, ObservedAt: time.Now(), ExpiresAt: time.Now().Add(time.Minute), Data: body}
+	a.acceptRuntimeSnapshot(s)
+	if a.inv != current || a.backend.appliedSequence != 0 || a.backend.snapshot.Sequence != 3 {
+		t.Fatal("notification replaced a reviewed plan or lost its deferred evidence")
+	}
+	a.res = &move.Result{}
+	a.acceptRuntimeSnapshot(s)
+	if a.inv == current || a.backend.appliedSequence != 3 {
+		t.Fatal("completed transfer did not adopt deferred observation")
+	}
+}
 
 func TestDesktopAttachesHeadlessWithoutAnotherOwnerAndQuitLeavesItRunning(t *testing.T) {
 	home(t)

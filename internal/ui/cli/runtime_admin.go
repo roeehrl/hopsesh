@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
+	"github.com/roeehrl/hopsesh/internal/core/observe"
 	localruntime "github.com/roeehrl/hopsesh/internal/core/runtime"
 	"github.com/spf13/cobra"
 	"log/slog"
@@ -88,6 +89,17 @@ func runtimeCommands() []*cobra.Command {
 		return nil
 	}}
 	status.Flags().Bool("json", true, "print JSON")
+	metrics := &cobra.Command{Use: "metrics", Short: "Show owner scheduling counters without triggering collection", Args: cobra.NoArgs, Annotations: map[string]string{"hopsesh.passive": "true"}, RunE: func(cmd *cobra.Command, _ []string) error {
+		client, err := runtimeClient()
+		if err != nil {
+			return err
+		}
+		var out observe.Metrics
+		if err = client.Call(cmd.Context(), "metrics", nil, &out); err != nil {
+			return err
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(out)
+	}}
 	start := &cobra.Command{Use: "start", Short: "Start a shared headless runtime, or report the existing owner", Args: cobra.NoArgs, RunE: startRuntime}
 	start.Flags().Bool("headless", true, "run without desktop libraries")
 	doctor := &cobra.Command{Use: "doctor", Short: "Print redacted runtime health; excludes paths, conversations, credentials and log contents", Args: cobra.NoArgs, Annotations: map[string]string{"hopsesh.passive": "true"}, RunE: func(cmd *cobra.Command, _ []string) error {
@@ -103,7 +115,7 @@ func runtimeCommands() []*cobra.Command {
 		out.SetIndent("", "  ")
 		return out.Encode(d)
 	}}
-	return append([]*cobra.Command{serve, status, stop, start, doctor}, runtimeServiceCommands()...)
+	return append([]*cobra.Command{serve, status, stop, start, doctor, metrics}, runtimeServiceCommands()...)
 }
 func startRuntime(cmd *cobra.Command, _ []string) error {
 	headless, _ := cmd.Flags().GetBool("headless")

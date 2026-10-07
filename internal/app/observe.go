@@ -13,21 +13,25 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/presence"
 	"github.com/roeehrl/hopsesh/internal/core/repos"
+	"github.com/roeehrl/hopsesh/internal/version"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 // Observation is local evidence, not an authorization to receive, resume or move.
 // An empty Endpoint means the installation has never initialized its identity.
 type Observation struct {
-	Processes         presence.Table `json:"processes,omitempty"`
-	OS                string         `json:"os"`
-	InventoryComplete bool           `json:"inventoryComplete"`
-	Machine           string         `json:"machine"`
-	Endpoint          string         `json:"endpoint,omitempty"`
-	Agents            []AgentState   `json:"agents"`
-	Entries           []Entry        `json:"entries"`
-	Problems          []string       `json:"problems,omitempty"`
-	WatchRoots        []string       `json:"watchRoots"`
+	Remotes           []RemoteObservation `json:"remotes"`
+	Version           string              `json:"version"`
+	Receive           bool                `json:"receive"`
+	Processes         presence.Table      `json:"processes,omitempty"`
+	OS                string              `json:"os"`
+	InventoryComplete bool                `json:"inventoryComplete"`
+	Machine           string              `json:"machine"`
+	Endpoint          string              `json:"endpoint,omitempty"`
+	Agents            []AgentState        `json:"agents"`
+	Entries           []Entry             `json:"entries"`
+	Problems          []string            `json:"problems,omitempty"`
+	WatchRoots        []string            `json:"watchRoots"`
 }
 
 // ObserveLocal never adopts imports, registers accounts, changes login bindings,
@@ -44,7 +48,10 @@ func (a *App) ObserveLocal(ctx context.Context) (Observation, error) {
 }
 
 func (a *App) observeMachine(ctx context.Context, m *host.Machine) (Observation, error) {
-	out := Observation{OS: runtime.GOOS, InventoryComplete: true, Machine: m.Name, Agents: []AgentState{}, Entries: []Entry{}, WatchRoots: []string{}}
+	out := Observation{Version: version.Version, OS: runtime.GOOS, InventoryComplete: true, Machine: m.Name, Agents: []AgentState{}, Entries: []Entry{}, WatchRoots: []string{}}
+	if !m.Local {
+		out.OS, out.Version = m.Facts.OS, hopseshVersion(m.Facts.Binaries[host.Hopsesh.Name])
+	}
 	endpoint, err := m.ReadIdentity(ctx)
 	if err != nil {
 		return out, err
@@ -196,21 +203,23 @@ func (a *App) observeMachine(ctx context.Context, m *host.Machine) (Observation,
 			setGit(&out.Entries[i], byDir[d], gitErr)
 		}
 	}
-	table, tableErr := presence.Snapshot(ctx)
-	if tableErr != nil {
-		out.Problems = append(out.Problems, "Process places unavailable: "+tableErr.Error())
-	}
-	var pids []int
-	for _, e := range out.Entries {
-		if e.Live.PID > 0 {
-			pids = append(pids, e.Live.PID)
+	if m.Local {
+		table, tableErr := presence.Snapshot(ctx)
+		if tableErr != nil {
+			out.Problems = append(out.Problems, "Process places unavailable: "+tableErr.Error())
 		}
-		for _, p := range e.Live.Procs {
-			pids = append(pids, p.PID)
+		var pids []int
+		for _, e := range out.Entries {
+			if e.Live.PID > 0 {
+				pids = append(pids, e.Live.PID)
+			}
+			for _, p := range e.Live.Procs {
+				pids = append(pids, p.PID)
+			}
 		}
+		out.Processes = table.Ancestors(pids)
 	}
-	out.Processes = table.Ancestors(pids)
-	inv := &Inventory{Machines: []*Machine{{Kind: agent.AtMachine, Name: m.Name, Local: true, Status: StatusOK, OS: m.Facts.OS, Agents: out.Agents, host: m}}, Entries: out.Entries}
+	inv := &Inventory{Machines: []*Machine{{Kind: agent.AtMachine, Name: m.Name, Local: m.Local, Status: StatusOK, OS: m.Facts.OS, Agents: out.Agents, host: m}}, Entries: out.Entries}
 	a.enrichMovement(ctx, inv, true)
 	out.Entries = inv.Entries
 	for i := range out.Entries {

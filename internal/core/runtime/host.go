@@ -164,6 +164,8 @@ func (h *Host) serve(ctx context.Context, c net.Conn) {
 		_ = reply(h.status, nil)
 	case "snapshot":
 		_ = reply(h.Engine.Latest(), nil)
+	case "metrics":
+		_ = reply(h.Engine.Metrics(), nil)
 	case "pause", "resume":
 		h.Engine.Pause(req.Method == "pause")
 		_ = reply(h.Engine.Latest(), nil)

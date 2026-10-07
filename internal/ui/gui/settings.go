@@ -20,6 +20,7 @@ import (
 
 // SettingsDTO is everything the Settings screen shows.
 type SettingsDTO struct {
+	Relay              RelaySettingsDTO         `json:"relay"`
 	Runtime            RuntimeDTO               `json:"runtime"`
 	RuntimePreferences config.Runtime           `json:"runtimePreferences"`
 	Appearance         string                   `json:"appearance"`
@@ -78,10 +79,11 @@ func (a *App) Settings() SettingsDTO {
 	if hookErr != nil {
 		hookProblem = hookErr.Error()
 	}
+	relaySettings := a.RelaySettings()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	cfg := a.core.Cfg
-	return SettingsDTO{Runtime: a.RuntimeStatus(), RuntimePreferences: cfg.Runtime, Appearance: cfg.AppearanceMode(), NoticeHooks: hooks, NoticeHooksError: hookProblem, Version: version.Version, ReposDir: cfg.ReposDir, Layout: nonEmpty(cfg.Layout, "flat"),
+	return SettingsDTO{Relay: relaySettings, Runtime: a.RuntimeStatus(), RuntimePreferences: cfg.Runtime, Appearance: cfg.AppearanceMode(), NoticeHooks: hooks, NoticeHooksError: hookProblem, Version: version.Version, ReposDir: cfg.ReposDir, Layout: nonEmpty(cfg.Layout, "flat"),
 		MovementNotices: cfg.MovementNoticesOn(), MarkMoved: cfg.MarkMovedOn(), SyncCode: cfg.SyncCodeOn(), PushSource: cfg.PushSource, UpdateChk: cfg.UpdateCheck, AppIcons: cfg.AppIconsOn(), Previews: cfg.PreviewsOn(),
 		Agents: a.agentsLocked(), CLI: integrate.CheckCLI(), Skill: rep, SkillBin: bin, SkillPrompt: cfg.SkillPrompt,
 		LocalNetworkGated: lnp.Gated(), ConfigDir: config.Dir(), StateDir: config.StateDir()}

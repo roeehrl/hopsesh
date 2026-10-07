@@ -46,6 +46,7 @@ type Machine struct {
 	Agents      []AgentState       `json:"agents"`
 	// Hopsesh is the version of hopsesh installed there ("" when none was found).
 	Hopsesh string `json:"hopsesh,omitempty"`
+	Receive *bool  `json:"receive,omitempty"` // scoped, fresh relay capability; nil for unqualified direct sources
 
 	host    *host.Machine
 	account *agent.Account // reported by the machine's own hopsesh (a push)
@@ -159,11 +160,13 @@ func (inv *Inventory) Local() *Machine {
 
 // ScanOptions narrow a scan.
 type ScanOptions struct {
-	LocalSnapshot *Observation // a shared passive source; skips local adoption and vendor probes
-	ForceAccounts bool         // explicitly refresh public login metadata
-	Hosts         []string     // only these machines and clouds ("" or none: every allowed one)
-	NoLocal       bool         // leave this machine out
-	SkipGit       bool         // no git state (faster)
+	SharedRemotes   bool // use the owner's remote evidence instead of client collections
+	RemoteSnapshots []RemoteObservation
+	LocalSnapshot   *Observation // a shared passive source; skips local adoption and vendor probes
+	ForceAccounts   bool         // explicitly refresh public login metadata
+	Hosts           []string     // only these machines and clouds ("" or none: every allowed one)
+	NoLocal         bool         // leave this machine out
+	SkipGit         bool         // no git state (faster)
 	// GitFor, when set, limits the git probe to the folders of the sessions it accepts (the
 	// others get no git state); see App.GitFor.
 	GitFor func(Entry) bool
@@ -236,6 +239,21 @@ func (a *App) Scan(ctx context.Context, o ScanOptions) *Inventory {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			if o.SharedRemotes && !h.UsesPassword() {
+				states := o.RemoteSnapshots
+				if o.LocalSnapshot != nil {
+					states = o.LocalSnapshot.Remotes
+				}
+				for _, state := range states {
+					if state.Binding == h {
+						cached := a.RemoteInventory(ctx, state)
+						add(cached.Machine(h.Name), cached.Entries)
+						return
+					}
+				}
+				add(&Machine{Kind: agent.AtMachine, Name: h.Name, Destination: h.Destination, Status: StatusError, Error: "Remote observation is queued"}, nil)
+				return
+			}
 			if h.RelayID != "" {
 				m, es := a.scanRelay(ctx, h)
 				add(m, es)

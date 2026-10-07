@@ -40,6 +40,9 @@ func (a *App) Preview(ctx context.Context, inv *Inventory, e Entry, n int) (agen
 	if e.Location.IsCloud() {
 		return agent.Preview{}, ErrNoPreview
 	}
+	if to := a.Cfg.FindHost(e.Machine); to != nil && to.RelayID != "" {
+		return a.previewRelay(ctx, *to, e.Session.Key, n)
+	}
 	mod, m, in, err := a.moduleOn(inv, e)
 	if err != nil {
 		return agent.Preview{}, err
@@ -57,6 +60,9 @@ func (a *App) Preview(ctx context.Context, inv *Inventory, e Entry, n int) (agen
 
 // CanRename reports whether a session can be renamed in its agent's own data.
 func (a *App) CanRename(e Entry) bool {
+	if h := a.Cfg.FindHost(e.Machine); h != nil && h.RelayID != "" {
+		return false // relay permissions do not include native title mutation
+	}
 	mod, ok := a.Module(e.Agent)
 	if !ok || e.Location.IsCloud() {
 		return false

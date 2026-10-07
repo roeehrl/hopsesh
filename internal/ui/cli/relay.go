@@ -40,6 +40,7 @@ func relayCmd() *cobra.Command {
 	var fingerprint, kind, name string
 	var roots []string
 	var ttl time.Duration
+	var send, bring, receive, share bool
 	pair := &cobra.Command{Use: "pair <public-identity.json>", Short: "Approve a peer after comparing its fingerprint through a trusted channel", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		f, err := os.Open(args[0])
 		if err != nil {
@@ -63,53 +64,53 @@ func relayCmd() *cobra.Command {
 		if fingerprint == "" || fingerprint != public.Fingerprint() {
 			return errors.New("provide --fingerprint copied from the peer through a trusted channel; a relay response cannot approve its own keys")
 		}
-		methods := []string{"hello", "observe"}
-		if kind == "device" && len(roots) > 0 {
-			methods = append(methods, "plan", "apply", "undo", "export", "ack")
-			if public.Endpoint == "" {
-				return errors.New("receiving requires the peer's native endpoint binding")
-			}
+		// Validation precedes every state mutation. Merely selecting roots does
+		// not grant access to conversations or permission to receive sessions.
+		validationName := name
+		if validationName == "" && kind == "device" {
+			validationName = public.ID[:12]
 		}
-		grant := relay.Grant{Peer: public, Endpoint: public.Endpoint, Kind: kind, Roots: roots, Methods: methods, SendMethods: []string{"hello", "observe", "plan", "apply", "undo", "export", "ack"}}
-		if kind == "cloud-session" {
-			grant.Methods = []string{"observe", "export"}
-			grant.SendMethods = []string{"observe", "export"}
-			grant.Expires = time.Now().Add(ttl).Unix()
+		grant, err := relay.ValidatePair(relay.PairInput{Identity: string(b), Fingerprint: fingerprint, Kind: kind, Name: validationName, Roots: roots, Send: send, Bring: bring, Receive: receive, Export: share, ExpiresSeconds: int(ttl / time.Second)})
+		if err != nil {
+			return err
 		}
-		for _, root := range roots {
-			if !filepath.IsAbs(root) {
-				return errors.New("approved repository roots must be absolute")
-			}
-			if _, err = filepath.EvalSymlinks(root); err != nil {
-				return err
-			}
+		self, err := relayStore().Public()
+		if err != nil {
+			return errors.New("run hopsesh relay init before pairing")
+		}
+		if self.ID == public.ID {
+			return errors.New("cannot pair this endpoint with itself")
+		}
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		if receive && !cfg.Peer.Receive {
+			return errors.New("enable receiving on this computer before approving repository access")
+		}
+		if old := cfg.FindHost(name); name != "" && old != nil && old.RelayID != public.ID {
+			return errors.New("machine name already belongs to another destination")
 		}
 		if err = relayStore().Approve(cmd.Context(), grant); err != nil {
 			return err
 		}
 		if name != "" {
-			if kind != "device" {
-				return errors.New("a cloud session cannot be registered as a machine")
-			}
-			cfg, err := config.Load()
-			if err != nil {
-				return err
-			}
-			if old := cfg.FindHost(name); old != nil && old.RelayID != public.ID {
-				return errors.New("machine name already belongs to another destination")
-			}
 			cfg.UpsertHost(config.Host{Name: name, RelayID: public.ID, Via: "relay", Allowed: true})
-			if err := config.Save(&cfg); err != nil {
-				return err
+			if err = config.Save(&cfg); err != nil {
+				return errors.New("peer approved, but machine registration was not saved; reload settings and approve again")
 			}
 		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(grant)
 	}}
 	pair.Flags().StringVar(&fingerprint, "fingerprint", "", "peer fingerprint compared independently")
 	pair.Flags().StringVar(&kind, "kind", "device", "device or cloud-session")
-	pair.Flags().StringVar(&name, "name", "", "register an approved device as a machine for session push")
-	pair.Flags().StringSliceVar(&roots, "root", nil, "locally approved repository roots; omit for observation only")
+	pair.Flags().StringVar(&name, "name", "", "register an approved device as a machine")
+	pair.Flags().StringSliceVar(&roots, "root", nil, "local repository roots approved for --receive or --share")
 	pair.Flags().DurationVar(&ttl, "expires", time.Hour, "cloud session grant lifetime, up to 24h")
+	pair.Flags().BoolVar(&send, "send", false, "allow sending sessions to the other machine; it must approve receiving independently")
+	pair.Flags().BoolVar(&bring, "bring", false, "allow bringing conversations from the other machine; it must approve sharing independently")
+	pair.Flags().BoolVar(&receive, "receive", false, "allow this peer to receive sessions into selected local roots")
+	pair.Flags().BoolVar(&share, "share", false, "allow sharing local conversations from selected roots, or exporting the approved cloud session")
 	enroll := &cobra.Command{Use: "connect <https-origin>", Short: "Read this device's scoped credential JSON from stdin; keep secrets out of arguments", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		b, err := io.ReadAll(io.LimitReader(cmd.InOrStdin(), 8193))
 		if err != nil {
@@ -123,11 +124,11 @@ func relayCmd() *cobra.Command {
 			return errors.New("invalid relay credential JSON")
 		}
 		connection.URL = args[0]
-		identity, err := relayStore().Identity(cmd.Context())
+		identity, err := relayStore().Public()
 		if err != nil {
 			return err
 		}
-		if identity.Public.ID != connection.Device {
+		if identity.ID != connection.Device {
 			return errors.New("relay credential was enrolled for another device")
 		}
 		if err = relayStore().SetConnection(cmd.Context(), connection); err != nil {
@@ -140,7 +141,7 @@ func relayCmd() *cobra.Command {
 		return err
 	}}
 	status := &cobra.Command{Use: "status", Short: "Show enrollment metadata with all credentials redacted", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		c, err := relayStore().Connection(cmd.Context())
+		c, err := relayStore().PublicConnection()
 		if err != nil {
 			return err
 		}
@@ -156,17 +157,23 @@ func relayCmd() *cobra.Command {
 		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(struct {
 			URL     string        `json:"url"`
-			Space   string        `json:"space"`
 			Device  string        `json:"device"`
 			Expires int64         `json:"expires"`
 			Health  *relay.Health `json:"health"`
-		}{c.URL, c.Space, c.Device, c.Expires, health})
+		}{c.URL, c.Device, c.Expires, health})
 	}}
 	revoke := &cobra.Command{Use: "revoke <peer-id>", Short: "Revoke a peer's local permissions immediately", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return relayStore().Revoke(cmd.Context(), args[0]) }}
 	disable := &cobra.Command{Use: "disable", Short: "Disable this namespace's outbound relay listener", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		_, err := config.SetSetting("relay.enabled", json.RawMessage("false"), nil)
 		return err
 	}}
-	root.AddCommand(init, pair, enroll, status, revoke, disable)
+	peers := &cobra.Command{Use: "peers", Short: "List public peer approvals and scopes without creating relay state", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		grants, err := relayStore().Grants()
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(grants)
+	}}
+	root.AddCommand(init, pair, enroll, status, peers, revoke, disable)
 	return root
 }

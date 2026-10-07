@@ -127,7 +127,22 @@ func candidates(b agent.Binary, goos string) []string {
 // ProbeRemote learns a machine's facts in one round trip, with a script generated from
 // the modules' Specs (no module code runs on the remote machine).
 func ProbeRemote(ctx context.Context, c *transport.Conn, specs []agent.Spec) (Facts, error) {
+	return probeRemote(ctx, c, wants(specs))
+}
+
+// ObserveRemote resolves remote paths and roots without invoking vendor binaries.
+func ObserveRemote(ctx context.Context, c *transport.Conn, specs []agent.Spec) (Facts, error) {
 	w := wants(specs)
+	w.bins = append([]agent.Binary(nil), w.bins...)
+	for i := range w.bins {
+		if i != 0 {
+			w.bins[i].VersionArgs = nil
+		}
+	}
+	return probeRemote(ctx, c, w)
+}
+
+func probeRemote(ctx context.Context, c *transport.Conn, w probeWants) (Facts, error) {
 	out, err := c.Run(ctx, "uname -s")
 	var re *transport.RemoteError
 	if err != nil && !errors.As(err, &re) {

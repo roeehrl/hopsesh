@@ -2,8 +2,11 @@ package cli
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/proc"
+	localruntime "github.com/roeehrl/hopsesh/internal/core/runtime"
 	"os"
 	"time"
 
@@ -20,10 +23,25 @@ func (r *run) runTUI() error {
 	if client, err := runtimeClient(); err == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		var status any
-		if client.Call(ctx, "status", nil, &status) == nil {
+		probeErr := client.Call(ctx, "status", nil, &status)
+		if probeErr == nil {
 			deps.Runtime = &client
 		}
 		cancel()
+		if deps.Runtime == nil {
+			owner, startErr := r.app.StartRuntime(context.Background(), "headless", func() error {
+				return errors.New("an interactive terminal owns this runtime; finish transfers and exit the terminal UI to stop it")
+			})
+			if startErr != nil && !errors.Is(startErr, localruntime.ErrOwned) {
+				return fmt.Errorf("start shared session observation: %w", startErr)
+			}
+			if owner != nil {
+				defer owner.Close()
+			}
+			deps.Runtime = &client
+		}
+	} else {
+		return err
 	}
 	for {
 		exit, err := tui.Run(deps)

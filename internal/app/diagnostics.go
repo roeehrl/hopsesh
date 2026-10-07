@@ -33,19 +33,24 @@ type RuntimeDiagnostics struct {
 	Observation      DiagnosticObservation      `json:"observation"`
 	Relay            DiagnosticRelay            `json:"relay"`
 	Logs             DiagnosticLogs             `json:"logs"`
+	Scheduler        observe.Metrics            `json:"scheduler"`
 }
 type DiagnosticObservation struct {
-	Sequence  uint64    `json:"sequence"`
-	Attempted time.Time `json:"attempted"`
-	Observed  time.Time `json:"observed"`
-	Expires   time.Time `json:"expires"`
-	Fresh     bool      `json:"fresh"`
-	Paused    bool      `json:"paused"`
-	Error     bool      `json:"error"`
-	Complete  bool      `json:"complete"`
-	Sessions  int       `json:"sessions"`
-	Agents    int       `json:"agents"`
-	Problems  int       `json:"problems"`
+	Sequence       uint64    `json:"sequence"`
+	Attempted      time.Time `json:"attempted"`
+	Observed       time.Time `json:"observed"`
+	Expires        time.Time `json:"expires"`
+	Fresh          bool      `json:"fresh"`
+	Paused         bool      `json:"paused"`
+	Error          bool      `json:"error"`
+	Complete       bool      `json:"complete"`
+	Sessions       int       `json:"sessions"`
+	Agents         int       `json:"agents"`
+	Problems       int       `json:"problems"`
+	RemoteSources  int       `json:"remoteSources"`
+	RemoteFresh    int       `json:"remoteFresh"`
+	RemoteFailures int       `json:"remoteFailures"`
+	RemoteScanning int       `json:"remoteScanning"`
 }
 type DiagnosticRelay struct {
 	Enabled     bool      `json:"enabled"`
@@ -69,6 +74,18 @@ func summarizeObservation(s observe.Snapshot, now time.Time) DiagnosticObservati
 		d.Sessions = len(o.Entries)
 		d.Agents = len(o.Agents)
 		d.Problems = len(o.Problems)
+		d.RemoteSources = len(o.Remotes)
+		for _, remote := range o.Remotes {
+			if remote.Snapshot.Fresh(now) {
+				d.RemoteFresh++
+			}
+			if remote.Error != "" {
+				d.RemoteFailures++
+			}
+			if remote.Phase == "scanning" || remote.Phase == "queued" {
+				d.RemoteScanning++
+			}
+		}
 	}
 	return d
 }
@@ -92,6 +109,7 @@ func (a *App) Diagnostics(ctx context.Context) (RuntimeDiagnostics, error) {
 	if c.Call(probe, "status", nil, &owner) == nil {
 		d.Connected, d.Mode, d.OwnerVersion, d.Protocol = true, owner.Mode, owner.Version, owner.Protocol
 		var s observe.Snapshot
+		_ = c.Call(probe, "metrics", nil, &d.Scheduler)
 		if c.Call(probe, "snapshot", nil, &s) == nil {
 			d.Observation = summarizeObservation(s, now)
 		}

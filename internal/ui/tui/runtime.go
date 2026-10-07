@@ -106,18 +106,22 @@ func (m *model) applyRuntime(s observe.Snapshot) {
 	if m.inv == nil {
 		return
 	}
+	if cfg, err := config.Load(); err == nil {
+		m.deps.App.Cfg = cfg
+	}
 	fresh := m.deps.App.ObservationInventory(context.Background(), o)
 	fresh.Clouds, fresh.Adopted, fresh.Waiting = m.inv.Clouds, m.inv.Adopted, m.inv.Waiting
+	m.deps.App.MergeRemoteObservations(context.Background(), fresh, m.inv, o.Remotes, nil)
 	for _, machine := range m.inv.Machines {
-		if !machine.Local {
-			fresh.Machines = append(fresh.Machines, machine)
-		} else if machine.Host() != nil {
+		if machine.Local && machine.Host() != nil {
 			machine.Host().Close()
 		}
 	}
 	for _, e := range m.inv.Entries {
 		if e.Machine != o.Machine || e.Location.IsCloud() {
-			fresh.Entries = append(fresh.Entries, e)
+			if e.Location.IsCloud() {
+				fresh.Entries = append(fresh.Entries, e)
+			}
 			continue
 		}
 		if !o.InventoryComplete {
@@ -138,9 +142,6 @@ func (m *model) applyRuntime(s observe.Snapshot) {
 	m.inv = fresh
 	m.notice = ""
 	m.rebuildRuntimeRows()
-	if cfg, err := config.Load(); err == nil {
-		m.deps.App.Cfg = cfg
-	}
 }
 
 func (m *model) rebuildRuntimeRows() {
@@ -160,4 +161,6 @@ func (m *model) rebuildRuntimeRows() {
 			}
 		}
 	}
+	m.offset = min(m.offset, max(0, len(m.rows)-m.listHeight()))
+	m.scroll()
 }

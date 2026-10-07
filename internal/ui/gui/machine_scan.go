@@ -94,7 +94,22 @@ func (a *App) ScanMachine(name string) error {
 	a.scanPhase(name, "scanning", "")
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	fresh := core.Scan(ctx, app.ScanOptions{Hosts: []string{name}, NoLocal: true, ForceAccounts: true})
+	a.backend.mu.Lock()
+	shared, client := a.backend.cancel != nil, a.backend.client
+	a.backend.mu.Unlock()
+	var fresh *app.Inventory
+	if shared && !h.UsesPassword() {
+		var observation app.RemoteObservation
+		if err := client.Call(ctx, "machines.refresh", struct {
+			Name string `json:"name"`
+		}{name}, &observation); err != nil {
+			a.scanPhase(name, "done", err.Error())
+			return err
+		}
+		fresh = core.RemoteInventory(ctx, observation)
+	} else {
+		fresh = core.Scan(ctx, app.ScanOptions{Hosts: []string{name}, NoLocal: true, ForceAccounts: true})
+	}
 	problem := ""
 	if m := fresh.Machine(name); m != nil {
 		problem = scanProblem(m)

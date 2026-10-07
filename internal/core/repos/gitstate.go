@@ -115,7 +115,7 @@ func TimeoutError(seconds string) string {
 // macOS lacks). A git that cannot be killed (waiting on a cloud drive) is left behind,
 // holding none of the script's output, so the script still ends.
 const probeScript = `
-hp_git() { git "$@"; hp_rc=$?; printf . >&3; return $hp_rc; }
+hp_git() { git --no-optional-locks -c core.fsmonitor=false "$@"; hp_rc=$?; printf . >&3; return $hp_rc; }
 hp_one() {
   d=$1
   if [ ! -d "$d" ]; then printf 'exists\t0\n'; return 0; fi

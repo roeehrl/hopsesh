@@ -8,6 +8,7 @@ import (
 // Pairing shares the approved inventory and stable account binding IDs, never
 // cached account labels, email, profile tags, process tables or watcher paths.
 func relayObservation(obs Observation, grant relay.Grant) Observation {
+	obs.Remotes = nil
 	obs.Processes, obs.WatchRoots = nil, nil
 	obs.Problems = nil
 	profile := func(p *agent.RuntimeProfile) *agent.RuntimeProfile {

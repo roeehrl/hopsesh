@@ -177,6 +177,7 @@ func (m *model) Init() tea.Cmd {
 				return runtimeScanError{err}
 			}
 			opts.LocalSnapshot = &o
+			opts.SharedRemotes = true
 		}
 		return scanDone{a.Scan(ctx, opts)}
 	}

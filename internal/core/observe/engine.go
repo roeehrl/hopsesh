@@ -42,6 +42,19 @@ func (s Snapshot) Fresh(now time.Time) bool {
 func (s Snapshot) clone() Snapshot { s.Data = append(json.RawMessage(nil), s.Data...); return s }
 
 type Collector func(context.Context) (json.RawMessage, error)
+
+// Metrics are per-incarnation counters. Reading them neither collects evidence
+// nor introduces a timer; they contain no source paths or conversation data.
+type Metrics struct {
+	Subscribers         int    `json:"subscribers"`
+	Notifications       uint64 `json:"notifications"`
+	Coalesced           uint64 `json:"coalesced"`
+	Collections         uint64 `json:"collections"`
+	Failures            uint64 `json:"failures"`
+	CollectionNanos     int64  `json:"collectionNanos"`
+	LastCollectionNanos int64  `json:"lastCollectionNanos"`
+	Paused              bool   `json:"paused"`
+}
 type Engine struct {
 	mu        sync.Mutex
 	opts      Options
@@ -53,6 +66,7 @@ type Engine struct {
 	paused    bool
 	started   bool
 	closed    bool
+	metrics   Metrics
 }
 
 func New(o Options, collect Collector) (*Engine, error) {
@@ -87,6 +101,14 @@ func (e *Engine) UpdateOptions(o Options) error {
 func (e *Engine) Options() Options { e.mu.Lock(); defer e.mu.Unlock(); return e.opts }
 func (e *Engine) Latest() Snapshot { e.mu.Lock(); defer e.mu.Unlock(); return e.latest.clone() }
 
+func (e *Engine) Metrics() Metrics {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	m := e.metrics
+	m.Subscribers, m.Paused = len(e.subs), e.paused
+	return m
+}
+
 // Subscribe replays the current snapshot, without renewing freshness. Slow clients
 // receive the newest snapshot and cannot block the collector or accumulate a queue.
 func (e *Engine) Subscribe() (<-chan Snapshot, func()) {
@@ -115,9 +137,13 @@ func (e *Engine) Subscribe() (<-chan Snapshot, func()) {
 }
 
 func (e *Engine) Notify() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.metrics.Notifications++
 	select {
 	case e.wake <- struct{}{}:
 	default:
+		e.metrics.Coalesced++
 	}
 }
 
@@ -151,6 +177,7 @@ type result struct {
 	err        error
 	started    time.Time
 	generation uint64
+	elapsed    time.Duration
 }
 
 // Run owns one timer and at most one collection. Notifications arriving during a
@@ -230,6 +257,9 @@ func (e *Engine) Run(ctx context.Context) error {
 			due = nil
 			e.mu.Lock()
 			paused, seq := e.paused, e.latest.Sequence
+			if !paused {
+				e.metrics.Collections++
+			}
 			e.mu.Unlock()
 			if paused {
 				continue
@@ -249,7 +279,7 @@ func (e *Engine) Run(ctx context.Context) error {
 					err = errors.New("collector returned invalid JSON")
 				}
 				select {
-				case results <- result{data: append(json.RawMessage(nil), data...), err: err, started: started, generation: seq}:
+				case results <- result{data: append(json.RawMessage(nil), data...), err: err, started: started, generation: seq, elapsed: time.Since(started)}:
 				case <-ctx.Done():
 				}
 			}()
@@ -258,6 +288,11 @@ func (e *Engine) Run(ctx context.Context) error {
 			active = nil
 			e.mu.Lock()
 			paused := e.paused
+			e.metrics.LastCollectionNanos = int64(r.elapsed)
+			e.metrics.CollectionNanos += int64(r.elapsed)
+			if r.err != nil {
+				e.metrics.Failures++
+			}
 			if !paused && e.latest.Sequence == r.generation {
 				e.latest.AttemptedAt = r.started
 				e.latest.Error = ""

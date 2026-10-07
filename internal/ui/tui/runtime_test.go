@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/app"
+	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/observe"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
@@ -22,6 +23,12 @@ func TestSharedTUIUpdatesPreserveSelectionRemoteEntriesAndPlanUnderReview(t *tes
 	remote.Location = agent.MachineLocation("remote-box")
 	remote.Session.Key.Session = "remote-session"
 	m.inv.Entries = append(m.inv.Entries, remote)
+	binding := config.Host{Name: "remote-box", Destination: "test@remote-box", Allowed: true}
+	m.deps.App.Cfg.Hosts = append(m.deps.App.Cfg.Hosts, binding)
+	if err := config.Save(&m.deps.App.Cfg); err != nil {
+		t.Fatal(err)
+	}
+	m.inv.Machines = append(m.inv.Machines, &app.Machine{Name: "remote-box", Destination: binding.Destination})
 	m.buildRows()
 	for i, r := range m.rows {
 		if r.item != nil && r.item.Entry.Machine == "remote-box" {
@@ -35,6 +42,7 @@ func TestSharedTUIUpdatesPreserveSelectionRemoteEntriesAndPlanUnderReview(t *tes
 	}
 	obs.Entries = nil
 	obs.InventoryComplete = false
+	obs.Remotes = []app.RemoteObservation{{Binding: binding, Phase: "queued"}}
 	data, _ := json.Marshal(obs)
 	s := observe.Snapshot{Epoch: "test", Sequence: 2, ObservedAt: time.Now(), ExpiresAt: time.Now().Add(time.Minute), Data: data}
 	m.Update(runtimeSnapshot{s})

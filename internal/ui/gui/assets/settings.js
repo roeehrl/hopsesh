@@ -2,6 +2,7 @@
 import { api, on, h, fill, view, state, screen, go, loading, toast, fail, dialog, agentBadge, sys, cliHow, icon, ask, count, current, loadError, navigationID, errText } from "./core.js";
 import { desktopSettings } from "./desktop-settings.js";
 import { running } from "./term.js";
+import { relaySettings } from "./relay-settings.js";
 
 const SKILL_TEXT = {
   absent: ["Not installed", "st-ended"],
@@ -313,7 +314,12 @@ async function preview() {
   } catch (e) { fail(e); }
 }
 
-const TABS = [["general", "General", general], ["desktop", "Desktop presence", desktop], ["agents", "Agents", agents], ["terminal", "Terminal", terminal], ["skill", "Skill", skill], ["cli", "Command line", cli], ["updates", "Updates", updates]];
+async function refreshRelay() {
+ state.info = await api("Info");
+ state.stale = true;
+ await load();
+}
+const TABS = [["general", "General", general], ["desktop", "Desktop presence", desktop], ["agents", "Agents", agents], ["terminal", "Terminal", terminal], ["relay", "Internet delivery", () => relaySettings(s.relay, refreshRelay)], ["skill", "Skill", skill], ["cli", "Command line", cli], ["updates", "Updates", updates]];
 
 function render() {
   if (current !== "settings") return;
