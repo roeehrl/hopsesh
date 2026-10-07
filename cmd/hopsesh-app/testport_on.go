@@ -54,6 +54,11 @@ func testHook(w *application.WebviewWindow, svc *gui.App) {
 	if script == "" && argv == "" {
 		return
 	}
+	// Exercise a second-launch/tray route while native windows are still being
+	// created. This used to focus an uninitialized WebView2 window on Windows.
+	svc.Wails.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		go func() { _ = svc.QuickOpen("sessions", "", "") }()
+	})
 	w.OnWindowEvent(events.Common.WindowRuntimeReady, func(*application.WindowEvent) {
 		once.Do(func() {
 			testConsole(w)
@@ -84,6 +89,13 @@ func terminalCheck(svc *gui.App, argv string) {
 	var args []string
 	if err := json.Unmarshal([]byte(argv), &args); err != nil {
 		report("error: HOPSESH_E2E_TERMINAL: %v\n", err)
+		return
+	}
+	if shell, ok := svc.Desktop.(interface{ BackgroundLaunch() bool }); ok {
+		_ = shell.BackgroundLaunch() // wait for native desktop placement
+	}
+	if state := svc.DesktopSettings(); state.Error != "" {
+		report("error: desktop startup: %s\n", state.Error)
 		return
 	}
 	if placement := os.Getenv("HOPSESH_E2E_TERMINAL_PLACEMENT"); placement != "" {
