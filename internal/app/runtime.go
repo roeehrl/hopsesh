@@ -108,6 +108,7 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 				}
 				service := &relay.Service{Transport: relay.Transport{Base: current.URL, Space: current.Space, Token: current.Token, HTTP: httpClient}, Processor: relay.Processor{Identity: identity, Space: current.Space, Store: store, Handle: a.relayReceiver(engine.Latest, engine.Refresh)}}
 				service.Processor.Recover = service.Processor.Handle
+				wasConnected := false
 				service.Notify = func(err error) {
 					message := ""
 					if err != nil {
@@ -115,11 +116,16 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 					}
 					relayMu.Lock()
 					active := relayService == service
+					restored := active && err == nil && !wasConnected
+					wasConnected = err == nil
 					changed := active && relayProblem != message
 					if active {
 						relayProblem = message
 					}
 					relayMu.Unlock()
+					if restored {
+						remotes.relayConnected()
+					}
 					if changed {
 						engine.Notify()
 					}

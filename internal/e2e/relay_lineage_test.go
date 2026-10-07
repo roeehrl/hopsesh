@@ -157,7 +157,7 @@ type relayFleet struct {
 	lastPlan   move.Plan
 }
 
-func newRelayFleet(t *testing.T, ctx context.Context, bin, origin, cert string, client *http.Client) *relayFleet {
+func newRelayFleet(t *testing.T, ctx context.Context, bin, origin, cert string, client *http.Client, extra ...byte) *relayFleet {
 	t.Helper()
 	root := t.TempDir()
 	space, err := relay.NewOperationID()
@@ -166,7 +166,11 @@ func newRelayFleet(t *testing.T, ctx context.Context, bin, origin, cert string, 
 	}
 	f := &relayFleet{ctx: ctx, bin: bin, cert: cert, homes: map[byte]machineHome{}, places: map[byte]location{}, stop: map[byte]func(){}}
 	ids := map[byte]relay.PublicIdentity{}
-	for _, key := range []byte{'A', 'B', 'C'} {
+	keys := append([]byte{'A', 'B', 'C'}, extra...)
+	for _, key := range keys {
+		if _, ok := f.homes[key]; ok {
+			t.Fatal("duplicate disposable fleet endpoint")
+		}
 		name := "relay-" + string(key)
 		m := newMachineHome(t, root, name, key == 'A')
 		f.homes[key] = m
@@ -202,13 +206,13 @@ func newRelayFleet(t *testing.T, ctx context.Context, bin, origin, cert string, 
 			t.Fatal(err)
 		}
 	}
-	for _, key := range []byte{'A', 'B', 'C'} {
+	for _, key := range keys {
 		m := f.homes[key]
 		cfg := config.Defaults()
 		cfg.Relay.Enabled, cfg.Peer.Receive = true, true
 		cfg.ReposDir = filepath.Join(m.home, "git")
 		store := relay.Store{Directory: filepath.Join(m.home, "state", "relay")}
-		for _, other := range []byte{'A', 'B', 'C'} {
+		for _, other := range keys {
 			if other == key {
 				continue
 			}
@@ -222,7 +226,7 @@ func newRelayFleet(t *testing.T, ctx context.Context, bin, origin, cert string, 
 		m.writeConfig(t, cfg)
 		f.run(t, m, "accounts", "scan", "--machine", "local", "--json")
 	}
-	for _, key := range []byte{'A', 'B', 'C'} {
+	for _, key := range keys {
 		f.start(t, key)
 	}
 	return f
@@ -270,8 +274,8 @@ func (f *relayFleet) start(t *testing.T, key byte) {
 	f.stop[key] = stop
 	t.Cleanup(stop)
 	deadline := time.Now().Add(10 * time.Second)
+	var health relay.Health
 	for {
-		var health relay.Health
 		bounded, cancel := context.WithTimeout(f.ctx, 200*time.Millisecond)
 		err = client.Call(bounded, "relay.status", nil, &health)
 		cancel()
@@ -280,7 +284,7 @@ func (f *relayFleet) start(t *testing.T, key byte) {
 		}
 		if time.Now().After(deadline) {
 			stop()
-			t.Fatalf("fleet runtime startup %c: %v\n%s", key, err, logs.String())
+			t.Fatalf("fleet runtime startup %c: %v connected=%t mode=%s reason=%q\n%s", key, err, health.Connected, health.DeliveryMode, health.Error, logs.String())
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

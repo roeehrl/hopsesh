@@ -34,6 +34,8 @@ type RuntimeDiagnostics struct {
 	Relay            DiagnosticRelay            `json:"relay"`
 	Logs             DiagnosticLogs             `json:"logs"`
 	Scheduler        observe.Metrics            `json:"scheduler"`
+	ResourcesKnown   bool                       `json:"resourcesKnown"`
+	Resources        localruntime.Resources     `json:"resources"`
 }
 type DiagnosticObservation struct {
 	Sequence       uint64    `json:"sequence"`
@@ -111,6 +113,7 @@ func (a *App) Diagnostics(ctx context.Context) (RuntimeDiagnostics, error) {
 		d.Connected, d.Mode, d.OwnerVersion, d.Protocol = true, owner.Mode, owner.Version, owner.Protocol
 		var s observe.Snapshot
 		_ = c.Call(probe, "metrics", nil, &d.Scheduler)
+		d.ResourcesKnown = c.Call(probe, "resources", nil, &d.Resources) == nil
 		if c.Call(probe, "snapshot", nil, &s) == nil {
 			d.Observation = summarizeObservation(s, now)
 		}

@@ -136,6 +136,101 @@ func TestRemoteAuthenticationFailureNeedsExplicitRetryAndShutdownJoins(t *testin
 	}
 }
 
+func TestRelayReadyRetriesFailedObservationWithoutRefreshingHealthyOrAuthPeers(t *testing.T) {
+	for _, inFlight := range []bool{false, true} {
+		t.Run(map[bool]string{false: "settled-failure", true: "late-failure"}[inFlight], func(t *testing.T) {
+			h := config.Host{Name: "disposable-relay", RelayID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Via: "relay", Allowed: true}
+			cfg := config.Defaults()
+			cfg.Hosts = []config.Host{h}
+			r := newRemoteObserver(nil)
+			started, release := make(chan struct{}), make(chan struct{})
+			var calls atomic.Int32
+			r.collect = func(ctx context.Context, _ config.Host) RemoteObservation {
+				if calls.Add(1) == 1 {
+					close(started)
+					if inFlight {
+						select {
+						case <-release:
+						case <-ctx.Done():
+						}
+					}
+					return RemoteObservation{Status: StatusError, Error: "local relay is not connected"}
+				}
+				return RemoteObservation{Status: StatusOK, Snapshot: observe.Snapshot{ObservedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour), Data: json.RawMessage(`{"inventoryComplete":true}`)}}
+			}
+			_, stop := remoteEngineFixture(t, cfg, r)
+			defer stop()
+			select {
+			case <-started:
+			case <-time.After(time.Second):
+				t.Fatal("initial automatic scan missing")
+			}
+			if !inFlight {
+				deadline := time.Now().Add(time.Second)
+				for r.latest()[0].Phase != "done" {
+					if time.Now().After(deadline) {
+						t.Fatal("initial failure did not settle")
+					}
+					time.Sleep(time.Millisecond)
+				}
+			}
+			r.relayConnected()
+			if inFlight {
+				// Deliver the connection transition while collection is still
+				// blocked, before returning the already-obsolete failure.
+				deadline := time.Now().Add(time.Second)
+				for len(r.relayReady) > 0 {
+					if time.Now().After(deadline) {
+						t.Fatal("connection signal was not consumed")
+					}
+					time.Sleep(time.Millisecond)
+				}
+				close(release)
+			}
+			deadline := time.Now().Add(time.Second)
+			for {
+				states := r.latest()
+				if len(states) == 1 && states[0].Status == StatusOK && states[0].Snapshot.Fresh(time.Now()) {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("relay readiness left a failed peer in minute-long backoff")
+				}
+				time.Sleep(time.Millisecond)
+			}
+			r.relayConnected()
+			time.Sleep(30 * time.Millisecond)
+			if calls.Load() != 2 {
+				t.Fatal("relay readiness refreshed already healthy evidence", calls.Load())
+			}
+		})
+	}
+	// A local connection does not authorize automatic password/key retries.
+	h := config.Host{Name: "auth-peer", RelayID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Via: "relay", Allowed: true}
+	cfg := config.Defaults()
+	cfg.Hosts = []config.Host{h}
+	r := newRemoteObserver(nil)
+	var calls atomic.Int32
+	r.collect = func(context.Context, config.Host) RemoteObservation {
+		calls.Add(1)
+		return RemoteObservation{Status: StatusAuth, Error: "explicit approval required"}
+	}
+	_, stop := remoteEngineFixture(t, cfg, r)
+	defer stop()
+	deadline := time.Now().Add(time.Second)
+	for calls.Load() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("initial auth check missing")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	r.relayConnected()
+	time.Sleep(30 * time.Millisecond)
+	if calls.Load() != 1 {
+		t.Fatal("connection readiness widened authentication permission")
+	}
+}
+
 func TestRemoteMergeRetainsFailedAndPartialEvidenceButRemovesCompleteAbsence(t *testing.T) {
 	h := config.Host{Name: "box", RelayID: "approved-id", Allowed: true, Via: "relay"}
 	cfg := config.Defaults()

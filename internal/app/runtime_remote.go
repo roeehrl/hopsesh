@@ -43,26 +43,41 @@ type remoteResult struct {
 	state   RemoteObservation
 }
 type remoteSlot struct {
-	binding  config.Host
-	due      time.Time
-	failures int
-	waiters  []chan remoteRefreshReply
+	binding         config.Host
+	due             time.Time
+	failures        int
+	waiters         []chan remoteRefreshReply
+	relayGeneration uint64
 }
 
 // One owner, one deadline timer, one active remote collection. A failed
 // authentication needs an explicit retry; network failures back off without
 // prompting for passwords, accepting host keys or starting vendor programs.
 type remoteObserver struct {
-	mu       sync.Mutex
-	states   map[string]RemoteObservation
-	requests chan remoteRefresh
-	collect  func(context.Context, config.Host) RemoteObservation
-	interval time.Duration
-	timeout  time.Duration
+	mu         sync.Mutex
+	states     map[string]RemoteObservation
+	requests   chan remoteRefresh
+	relayReady chan struct{}
+	collect    func(context.Context, config.Host) RemoteObservation
+	interval   time.Duration
+	timeout    time.Duration
 }
 
 func newRemoteObserver(a *App) *remoteObserver {
-	return &remoteObserver{states: map[string]RemoteObservation{}, requests: make(chan remoteRefresh), collect: a.observeRemote, interval: 5 * time.Minute, timeout: 30 * time.Second}
+	return &remoteObserver{states: map[string]RemoteObservation{}, requests: make(chan remoteRefresh), relayReady: make(chan struct{}, 1), collect: a.observeRemote, interval: 5 * time.Minute, timeout: 30 * time.Second}
+}
+
+// A local connection transition can unblock failed remote scans. This is a
+// coalesced owner signal, not a second polling loop or new user permission.
+func (r *remoteObserver) relayConnected() {
+	select {
+	case r.relayReady <- struct{}{}:
+	default:
+	}
+}
+
+func remoteNeedsExplicitRetry(status string) bool {
+	return status == StatusAuth || status == StatusHostKey || status == StatusKeyChanged || status == StatusTSCheck
 }
 func (r *remoteObserver) latest() []RemoteObservation {
 	r.mu.Lock()
@@ -115,6 +130,7 @@ func (r *remoteObserver) run(ctx context.Context, engine *observe.Engine) {
 	results := make(chan remoteResult, 1)
 	var active *remoteSlot
 	var cancel context.CancelFunc
+	var relayGeneration uint64
 	var tasks sync.WaitGroup
 	paused := engine.Latest().Paused
 	defer tasks.Wait()
@@ -219,6 +235,17 @@ func (r *remoteObserver) run(ctx context.Context, engine *observe.Engine) {
 			if active != s {
 				s.due = time.Now()
 			}
+		case <-r.relayReady:
+			relayGeneration++
+			configure()
+			r.mu.Lock()
+			for name, s := range slots {
+				state := r.states[name]
+				if s != active && s.binding.RelayID != "" && state.Error != "" && !remoteNeedsExplicitRetry(state.Status) {
+					s.due = time.Now()
+				}
+			}
+			r.mu.Unlock()
 		case <-due:
 			var next *remoteSlot
 			for _, s := range slots {
@@ -230,6 +257,7 @@ func (r *remoteObserver) run(ctx context.Context, engine *observe.Engine) {
 				break
 			}
 			active = next
+			next.relayGeneration = relayGeneration
 			next.due = time.Time{}
 			r.mu.Lock()
 			state := r.states[next.binding.Name]
@@ -271,8 +299,14 @@ func (r *remoteObserver) run(ctx context.Context, engine *observe.Engine) {
 				state.Snapshot.Sequence = previous.Snapshot.Sequence + 1
 				state.Snapshot.AttemptedAt, state.Snapshot.Error = state.Started, state.Error
 				s.failures++
-				if state.Status != StatusAuth && state.Status != StatusHostKey && state.Status != StatusKeyChanged && state.Status != StatusTSCheck {
-					s.due = time.Now().Add(min(time.Hour, time.Minute*time.Duration(1<<min(s.failures-1, 6))))
+				if !remoteNeedsExplicitRetry(state.Status) {
+					if s.binding.RelayID != "" && s.relayGeneration < relayGeneration {
+						// The connection became ready while this failed attempt was
+						// in flight; do not lose its transition behind the result.
+						s.due = time.Now()
+					} else {
+						s.due = time.Now().Add(min(time.Hour, time.Minute*time.Duration(1<<min(s.failures-1, 6))))
+					}
 				}
 			} else {
 				s.failures = 0
