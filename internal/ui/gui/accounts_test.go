@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestAccountPlanInvalidatedByEditAndRemoval(t *testing.T) {
@@ -144,5 +145,50 @@ func TestRegisterDefaultRootBeforeFirstScanStillAllowsUnqualifiedSelection(t *te
 	}
 	if e.Profile == nil || e.Profile.Name != "My personal login" {
 		t.Fatal("scan overwrote custom label")
+	}
+}
+
+// Account discovery is gated by endpoint identity, not merely the presence of a
+// hopsesh executable or a working SSH connection. Rendering must not create it.
+func TestRemoteAccountSetupNoticeUsesEndpointIdentity(t *testing.T) {
+	home(t)
+	a := NewApp(all.Registry())
+	if _, err := a.Scan(); err != nil {
+		t.Fatal(err)
+	}
+	m := a.inv.Local()
+	endpoint := m.Host().Facts.Endpoint
+	if endpoint == "" {
+		t.Fatal("local scan did not initialize identity")
+	}
+	m.Local = false
+	m.Hopsesh = "test-version"
+	for _, tc := range []struct {
+		name, endpoint, status string
+		want                   bool
+	}{
+		{"connected without identity", "", app.StatusOK, true},
+		{"initialized", endpoint, app.StatusOK, false},
+		{"unreachable", "", "offline", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m.Host().Facts.Endpoint, m.Status = tc.endpoint, tc.status
+			dto := scanDTO(a.core, a.inv, time.Now(), time.Now())
+			found := false
+			for _, d := range dto.Machines {
+				if d.Name == m.Name {
+					found = true
+					if d.AccountSetupRequired != tc.want {
+						t.Fatalf("setup required=%v, want %v", d.AccountSetupRequired, tc.want)
+					}
+				}
+			}
+			if !found {
+				t.Fatal("machine omitted")
+			}
+			if m.Host().Facts.Endpoint != tc.endpoint {
+				t.Fatal("render initialized remote identity")
+			}
+		})
 	}
 }

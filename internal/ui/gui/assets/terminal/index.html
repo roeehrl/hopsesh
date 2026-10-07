@@ -11,9 +11,10 @@
 <header class="strip" id="strip">
   <button class="ib" id="back" title="Back to sessions (⌃`)" aria-label="Back to sessions"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m10 5-7 7 7 7M3 12h18"/></svg><span class="bt">Back to sessions</span> <span class="kbd">⌃`</span></button>
   <div role="tablist" aria-label="Terminal tabs" id="tabs"></div>
-  <button class="ib" id="new-shell" aria-label="New shell tab" title="New shell tab"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+  <button class="ib" id="new-shell" disabled aria-label="New shell tab" title="New shell tab"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
   <span class="spacer"></span>
 </header>
+<div id="connection" role="status" aria-live="polite">Connecting to Hopsesh…</div>
 <div id="banner" role="status" hidden></div>
 <div class="info" id="info" hidden>
   <span class="lock" id="lock" hidden><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>Not recorded</span>
@@ -51,6 +52,6 @@
 <div id="live" class="visually-hidden" aria-live="polite"></div>
 <div id="toast" role="status" aria-live="polite"></div>
 <dialog id="dlg" class="dlg"></dialog>
-<script type="module" src="terminal.js"></script>
+<script src="/terminal/window-start.js" data-status="#connection" data-module="/terminal/terminal.js"></script>
 </body>
 </html>

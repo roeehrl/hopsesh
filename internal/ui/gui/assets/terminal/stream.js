@@ -34,17 +34,19 @@ const data = (ev) => (typeof ev.data === "string" ? enc.encode(ev.data) : new Ui
 // tab and the window's settings; {select}: show this tab; {notice, id}: something hopsesh
 // could not do), and reconnects when the stream ends. It returns send(request), for the
 // window's typed requests ({op, id, size, on}).
-export function watchTabs(onMessage) {
+export function watchTabs(onMessage, connection = () => {}) {
   let s = null;
   const open = () => {
+    connection(false);
     s = Stream("hopsesh.terminal.tabs");
     s.binaryType = "arraybuffer";
-    s.onmessage = (ev) => onMessage(JSON.parse(dec.decode(data(ev))));
-    s.onclose = () => setTimeout(open, 500);
+    s.onmessage = (ev) => { const message = JSON.parse(dec.decode(data(ev))); if (message.tabs) connection(true); onMessage(message); };
+    s.onclose = () => { connection(false); setTimeout(open, 500); };
   };
   open();
   return (req) => {
     if (s && s.readyState === 1) s.send(enc.encode(JSON.stringify(req)));
+    else onMessage({ notice: "The terminal is reconnecting. Try again when it is connected." });
   };
 }
 

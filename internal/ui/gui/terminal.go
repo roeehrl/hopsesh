@@ -132,6 +132,7 @@ type TabSetup struct {
 
 // TermPrefs are the terminal window's settings, sent with the list of tabs.
 type TermPrefs struct {
+	Appearance   string `json:"appearance"`
 	Font         string `json:"font"`
 	FontSize     int    `json:"fontSize"`
 	Scrollback   int    `json:"scrollback"`

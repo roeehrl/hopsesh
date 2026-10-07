@@ -6,7 +6,7 @@ import "fmt"
 // Empty Mode preserves the behavior of an existing installation.
 type Desktop struct {
 	Mode      string `toml:"mode,omitempty" json:"mode"`   // app | tray | both
-	Close     string `toml:"close,omitempty" json:"close"` // keep | quit; empty preserves legacy behavior
+	Close     string `toml:"close,omitempty" json:"close"` // keep | quit; empty keeps running in the background
 	Attention *bool  `toml:"attention,omitempty" json:"attention"`
 	Previews  *bool  `toml:"previews,omitempty" json:"previews"`
 }
@@ -17,8 +17,9 @@ func (d Desktop) Placement() string {
 	}
 	return d.Mode
 }
-func (d Desktop) AttentionOn() bool { return d.Attention == nil || *d.Attention }
-func (d Desktop) PreviewsOn() bool  { return d.Previews == nil || *d.Previews }
+func (d Desktop) KeepInBackground() bool { return d.Close != "quit" }
+func (d Desktop) AttentionOn() bool      { return d.Attention == nil || *d.Attention }
+func (d Desktop) PreviewsOn() bool       { return d.Previews == nil || *d.Previews }
 func (d Desktop) Check() error {
 	switch d.Mode {
 	case "", "app", "tray", "both":

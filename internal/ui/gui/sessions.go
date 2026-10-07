@@ -30,15 +30,16 @@ const ProgressEvent = "hopsesh:progress"
 
 // MachineDTO summarises one scanned machine.
 type MachineDTO struct {
-	Name     string   `json:"name"`
-	Status   string   `json:"status"`
-	Hint     string   `json:"hint"`
-	Error    string   `json:"error"`
-	OS       string   `json:"os"`
-	Sessions int      `json:"sessions"`
-	Local    bool     `json:"local"`
-	Agents   []string `json:"agents"`  // "Claude Code 2.1.284"
-	Hopsesh  string   `json:"hopsesh"` // hopsesh's version there ("" when not installed)
+	AccountSetupRequired bool     `json:"accountSetupRequired"` // reachable remote without a persistent endpoint identity
+	Name                 string   `json:"name"`
+	Status               string   `json:"status"`
+	Hint                 string   `json:"hint"`
+	Error                string   `json:"error"`
+	OS                   string   `json:"os"`
+	Sessions             int      `json:"sessions"`
+	Local                bool     `json:"local"`
+	Agents               []string `json:"agents"`  // "Claude Code 2.1.284"
+	Hopsesh              string   `json:"hopsesh"` // hopsesh's version there ("" when not installed)
 }
 
 // AgentOpt is an agent a session can continue in here.
@@ -264,6 +265,7 @@ func scanDTO(core *app.App, inv *app.Inventory, updated, elsewhere time.Time) *S
 	}
 	for _, m := range inv.Machines {
 		d := MachineDTO{Name: m.Name, Status: m.Status, Hint: m.Hint, Error: m.Error, OS: m.OS, Local: m.Local, Hopsesh: m.Hopsesh, Agents: []string{}}
+		d.AccountSetupRequired = !m.Local && m.Status == app.StatusOK && m.Host() != nil && m.Host().Facts.Endpoint == ""
 		for _, e := range inv.Entries {
 			if e.Machine == m.Name {
 				d.Sessions++
@@ -586,12 +588,13 @@ type OptsDTO struct {
 	Conflict      string `json:"conflict"` // "", "replace" or "keep-both"
 	App           bool   `json:"app"`
 	// Continuing in another agent.
-	Fidelity   string `json:"fidelity"` // history | note
-	Native     bool   `json:"native"`
-	Note       string `json:"note"`
-	Go         bool   `json:"go"`
-	CarryRules bool   `json:"carryRules"`
-	Via        string `json:"via"` // "" or "import"
+	Fidelity   string   `json:"fidelity"` // history | note
+	Native     bool     `json:"native"`
+	Note       string   `json:"note"`
+	Go         bool     `json:"go"`
+	CarryRules bool     `json:"carryRules"`
+	RuleFiles  []string `json:"ruleFiles"`
+	Via        string   `json:"via"` // "" or "import"
 	// Bringing a session from a cloud: the branch only; add its work to the session it was
 	// handed off from.
 	CodeOnly bool `json:"codeOnly"`
@@ -610,6 +613,7 @@ func (o OptsDTO) options(d move.Options) move.Options {
 	d.TargetProfile = o.TargetProfile
 	d.Mark, d.SyncCode, d.Push, d.StopLocal, d.Conflict = o.Mark, o.SyncCode, o.Push, o.StopLocal, o.Conflict
 	d.Fidelity, d.Native, d.Note, d.Go = convert.Fidelity(nonEmpty(o.Fidelity, string(convert.History))), o.Native, strings.TrimSpace(o.Note), o.Go
+	d.RuleFiles = o.RuleFiles
 	d.CarryRules, d.CodeOnly, d.AppendOriginal = o.CarryRules, o.CodeOnly, o.Append
 	if o.Via == move.ViaImport {
 		d.Via = move.ViaImport
@@ -619,22 +623,24 @@ func (o OptsDTO) options(d move.Options) move.Options {
 
 // CanDTO is what the receiving agent can do, for the options shown.
 type CanDTO struct {
-	Fork          bool `json:"fork"`
-	RemoteControl bool `json:"remoteControl"`
-	App           bool `json:"app"`
-	Native        bool `json:"native"`
-	Import        bool `json:"import"`
+	AppWhy        string `json:"appWhy,omitempty"`
+	Fork          bool   `json:"fork"`
+	RemoteControl bool   `json:"remoteControl"`
+	App           bool   `json:"app"`
+	Native        bool   `json:"native"`
+	Import        bool   `json:"import"`
 }
 
 // ContinueDTO is the conversion part of a plan.
 type ContinueDTO struct {
-	From     string         `json:"from"`
-	Fidelity string         `json:"fidelity"`
-	Relation string         `json:"relation"`
-	AppendTo string         `json:"appendTo,omitempty"` // the title of the copy here that gets the new work
-	Report   convert.Report `json:"report"`
-	Briefing string         `json:"briefing"`
-	Via      string         `json:"via,omitempty"`
+	Instructions []move.InstructionSource `json:"instructions"`
+	From         string                   `json:"from"`
+	Fidelity     string                   `json:"fidelity"`
+	Relation     string                   `json:"relation"`
+	AppendTo     string                   `json:"appendTo,omitempty"` // the title of the copy here that gets the new work
+	Report       convert.Report           `json:"report"`
+	Briefing     string                   `json:"briefing"`
+	Via          string                   `json:"via,omitempty"`
 }
 
 // PlanDTO is a plan as the window shows it.
@@ -710,7 +716,14 @@ func (a *App) planEntry(core *app.App, inv *app.Inventory, e app.Entry, target s
 	if p.Kind == move.KindFetch {
 		return fetchPlanDTO(p, e), nil
 	}
-	return planDTO(p, e, in.Target.Module), nil
+	d := planDTO(p, e, in.Target.Module)
+	if checker, ok := in.Target.Module.(agent.AppChecker); ok {
+		if err := checker.CheckApp(in.Target.Install, p.Placement.Key, agent.ResumeOptions{App: true}); err != nil {
+			d.Can.App = false
+			d.Can.AppWhy = err.Error()
+		}
+	}
+	return d, nil
 }
 
 func planDTO(p *move.Plan, e app.Entry, tm agent.Module) *PlanDTO {
@@ -724,7 +737,7 @@ func planDTO(p *move.Plan, e app.Entry, tm agent.Module) *PlanDTO {
 			App: agent.Has(tm, agent.CapApp), Native: !p.Options.OtherAccount && agent.Has(tm, agent.CapNativeReplay),
 			Import: !p.Options.OtherAccount && importsFrom(tm, e.Agent)}}
 	if c := p.Continue; c != nil {
-		d.Continue = &ContinueDTO{From: c.From, Fidelity: string(c.Fidelity), Relation: c.Relation, Report: c.Report, Briefing: c.Briefing, Via: c.Via}
+		d.Continue = &ContinueDTO{Instructions: c.Instructions, From: c.From, Fidelity: string(c.Fidelity), Relation: c.Relation, Report: c.Report, Briefing: c.Briefing, Via: c.Via}
 		if c.AppendTo != nil {
 			d.Continue.AppendTo = c.AppendTo.Title
 		}

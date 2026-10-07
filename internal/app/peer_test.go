@@ -57,9 +57,12 @@ func TestPushToOlderPeer(t *testing.T) {
 
 func TestReceiveOptionsRetainsTransferIdentityAndSelectedReplica(t *testing.T) {
 	a := &App{Cfg: config.Defaults()}
-	got := a.receiveOptions(move.Options{OperationID: "same-transfer", TargetSession: "claude/selected"})
+	got := a.receiveOptions(move.Options{OperationID: "same-transfer", TargetSession: "claude/selected", CarryRules: true, RuleFiles: []string{"/source/project/CLAUDE.md"}})
 	if got.OperationID != "same-transfer" || got.TargetSession != "claude/selected" {
 		t.Fatalf("peer lost identity or destination: %+v", got)
+	}
+	if !got.CarryRules || len(got.RuleFiles) != 1 || got.RuleFiles[0] != "/source/project/CLAUDE.md" {
+		t.Fatalf("peer lost the selected instruction subset: %+v", got)
 	}
 	for _, o := range []move.Options{{NewReplica: true}, {Bounded: true}} {
 		got = a.receiveOptions(o)

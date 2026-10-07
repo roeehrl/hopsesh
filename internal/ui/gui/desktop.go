@@ -43,6 +43,7 @@ type QuickRoute struct {
 	Key     string `json:"key"`
 }
 type QuickDTO struct {
+	Agents     []AgentDTO    `json:"agents"`
 	Presence   *PresenceDTO  `json:"presence"`
 	Scan       *ScanDTO      `json:"scan"`
 	Tabs       []TermTab     `json:"tabs"`
@@ -73,9 +74,6 @@ func (a *App) AttachDesktop(main *application.WebviewWindow) {
 				fg := false
 				if shell, ok := a.Desktop.(interface{ Foreground() bool }); ok {
 					fg = shell.Foreground()
-				}
-				if !fg && a.Desktop.Snapshot().Effective == "app" {
-					continue
 				}
 				a.quick.mu.Lock()
 				scanned := a.quick.scan
@@ -170,7 +168,10 @@ func (a *App) QuickSnapshot() QuickDTO {
 	scan, err := a.quick.scan, a.quick.err
 	presence := a.quick.presence
 	a.quick.mu.Unlock()
-	return QuickDTO{Presence: presence, Scan: scan, Tabs: a.TerminalTabs(), Desktop: a.DesktopSettings(), OS: runtime.GOOS, Refreshing: a.quick.refreshing.Load(), Error: err}
+	a.mu.Lock()
+	agents := a.agentsLocked()
+	a.mu.Unlock()
+	return QuickDTO{Agents: agents, Presence: presence, Scan: scan, Tabs: a.TerminalTabs(), Desktop: a.DesktopSettings(), OS: runtime.GOOS, Refreshing: a.quick.refreshing.Load(), Error: err}
 }
 
 // publishQuick shares immutable scan DTOs. It never starts a second inventory or

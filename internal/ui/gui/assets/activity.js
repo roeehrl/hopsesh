@@ -1,10 +1,13 @@
 // The Activity screen: what hopsesh did here, newest first, with Undo, and the marks still
 // waiting for a copy left behind to end.
-import { api, h, fill, icon, ICONS, view, state, screen, go, current, loading, toast, fail, errText, ago, when, ask, sys, cloudTitle } from "./core.js";
+import { navigationID, loadError, pending, api, h, fill, icon, ICONS, view, state, screen, go, current, loading, toast, fail, errText, ago, when, ask, sys, cloudTitle } from "./core.js";
 
 // undo reverses an operation. When the session was used since, it says what changed and
 // asks before throwing that work away.
-export async function undo(id, title) {
+export function undo(id, title) {
+  return pending(`Undoing ${title}`, () => undoOnce(id, title), `undo:${id}`);
+}
+async function undoOnce(id, title) {
   try {
     await api("Undo", id, false);
   } catch (e) {
@@ -22,7 +25,10 @@ export async function undo(id, title) {
 }
 
 // undoLast undoes the newest operation that can be undone (⌥⌘Z, Ctrl+Alt+Z).
-export async function undoLast() {
+export function undoLast() {
+  return pending("Undoing the last operation", undoLastOnce, "undo-last");
+}
+async function undoLastOnce() {
   try {
     const title = await api("UndoLast");
     toast(`Undone: ${title}`);
@@ -107,9 +113,10 @@ function row(x) {
 
 async function render(reload = false) {
   if (current !== "activity") return;
+  const visit = navigationID();
   if (reload || !state.activity) {
     loading("Reading the activity…");
-    try { state.activity = await api("Activity"); } catch (e) { if (current === "activity") fill(view, h("div", { class: "loading err" }, errText(e))); return; }
+    try { const result = await api("Activity"); if (visit !== navigationID()) return; state.activity = result; } catch (e) { if (visit === navigationID() && current === "activity") fill(view, loadError(e, () => render(true))); return; }
   }
   if (current !== "activity") return;
   const a = state.activity;

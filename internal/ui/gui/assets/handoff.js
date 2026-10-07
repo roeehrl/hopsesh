@@ -14,7 +14,7 @@ const STEP = { snapshot: "Snapshot", push: "Push branch", start: "Start cloud se
 // menuItem is one cloud in the palette's Hand off to… picker: its name (its id in the tooltip), what going
 // there means, or why it can't.
 export function menuItem(t, pick) {
-  return h("button", { class: "menu-item", role: "menuitem", title: t.cloud, "aria-disabled": t.ok ? null : "true", disabled: !t.ok, onclick: () => { if (t.ok) pick(); } },
+  return h("button", { class: "menu-item", role: "menuitem", title: t.cloud, "aria-disabled": t.ok ? null : "true", disabled: !t.ok, onclick: () => { if (t.ok) return pick(); } },
     h("span", { class: "menu-ic", "aria-hidden": "true" }, icon(ICONS.cloud, 14)),
     h("span", { style: "display:flex;flex-direction:column;gap:2px;min-width:0" },
       h("span", { class: "menu-t" }, t.title, cloudOf(t.cloud)?.experimental ? h("span", { class: "chip st-warn", style: "margin-left:6px;height:17px;font-size:10.5px" }, "experimental") : null),
@@ -27,15 +27,20 @@ export function pickHandoff(e) {
   if (tabFor(e)) { toast(IN_A_TAB); return; }
   const d = dialog(h("h2", { style: "margin:0;font-size:16px" }, `Hand off “${e.title}” to…`),
     h("div", { class: "menu", role: "menu", "aria-label": "Hand off to", style: "position:static" },
-      (e.handoff || []).filter((t) => cloudOf(t.cloud)?.allowed).map((t) => menuItem(t, () => { d.close(); planHandoff(e, t.cloud, t.bundle); }))),
+      (e.handoff || []).filter((t) => cloudOf(t.cloud)?.allowed).map((t) => menuItem(t, () => { d.close(); return planHandoff(e, t.cloud, t.bundle); }))),
     h("div", { class: "dlg-foot" }, h("button", { class: "btn", onclick: () => d.close() }, "Cancel")));
 }
 
 // planHandoff opens the hand-off sheet for a session.
 export async function planHandoff(e, cloud, bundle = false) {
   if (tabFor(e)) { toast(IN_A_TAB); return; }
+  const opening = {};
+  hc = opening;
+  fill(sheet, h("div", { class: "sheet-in" }, h("div", { class: "loading", role: "status" }, "Reading hand-off settings…"), h("button", { class: "btn", onclick: () => sheet.close() }, "Cancel")));
+  if (!sheet.open) sheet.showModal();
   let d = {};
   try { d = await api("HandoffDefaults", cloud); } catch { /* the defaults below */ }
+  if (hc !== opening || !sheet.open) return;
   hc = { e, cloud, opts: { untracked: [], historyFile: !!d.historyFile, bundle: bundle || !!d.bundle, mark: d.mark !== false, cleanup: d.cleanup || "", brief: "", note: "", carryRules: false,
     env: "", startingDiff: false },
     plan: null, busy: false, applying: false };
@@ -44,24 +49,33 @@ export async function planHandoff(e, cloud, bundle = false) {
   await replan();
 }
 
+let planning = Promise.resolve();
 async function replan() {
   const c = hc;
+  if (!c) return;
+  const revision = c.revision = (c.revision || 0) + 1;
   c.busy = true;
   const btn = sheet.querySelector("#ho-go");
   if (btn) { btn.disabled = true; btn.firstChild.textContent = "Updating the plan…"; }
   try {
-    const p = await api("PlanHandoff", c.e.machine, c.e.key, c.cloud, c.opts);
-    if (hc !== c) return;
+    const request = planning.then(() => {
+      if (hc !== c || c.revision !== revision) return null;
+      return api("PlanHandoff", c.e.machine, c.e.key, c.cloud, c.opts);
+    });
+    planning = request.catch(() => {});
+    const p = await request;
+    if (hc !== c || c.revision !== revision || !p) return;
     c.plan = p;
     c.busy = false;
     render();
   } catch (err) {
+    if (hc !== c || c.revision !== revision) return;
     c.busy = false;
     if (hc === c) problem(errText(err));
   }
 }
 
-const set = (k, v) => { hc.opts[k] = v; replan(); };
+const set = (k, v) => { hc.opts[k] = v; return replan(); };
 
 function problem(msg) {
   fill(sheet, h("div", { class: "sheet-in" },
@@ -326,7 +340,7 @@ function failed(c, d) {
       h("span", { class: "muted", style: "font-size:12.5px" }, `“${p.title}”${p.handoff.repo ? " · " + p.handoff.repo : ""}`)),
     h("div", { class: "sheet-body" }, h("div", { id: "ho-msg", class: "failbox" }, r.message), steps(r.steps.map((s) => s.name), states)),
     h("footer", { class: "sheet-foot" },
-      r.retry === "bundle" ? h("button", { class: "btn", onclick: () => { c.opts.bundle = true; hc = c; replan(); } }, `Retry as an upload (${r.cloudTitle})`) : null,
+      r.retry === "bundle" ? h("button", { class: "btn", onclick: () => { c.opts.bundle = true; hc = c; return replan(); } }, `Retry as an upload (${r.cloudTitle})`) : null,
       h("span", { class: "spacer" }),
       r.pushed ? h("button", { class: "btn", onclick: () => { hc = null; sheet.close(); go("sessions", true); } }, "Keep the branch")
         : h("button", { class: "btn", onclick: () => { hc = null; sheet.close(); go("sessions", true); } }, "Close"),

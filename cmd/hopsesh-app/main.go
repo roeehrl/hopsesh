@@ -52,6 +52,7 @@ func main() {
 		OnShutdown: svc.Shutdown,
 	})
 	svc.Wails = app
+	svc.AttachAppearance()
 	svc.Terms.Attach(app)
 	app.Menu.Set(menu(func(cmd string) { app.Event.Emit(gui.MenuEvent, cmd) }, svc.Terms.Toggle))
 	win := app.Window.NewWithOptions(application.WebviewWindowOptions{

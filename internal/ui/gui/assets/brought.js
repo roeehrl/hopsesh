@@ -1,7 +1,7 @@
 // The done screen of bringing a session from a cloud: a quiet wait while the agent's own
 // command copies it in the terminal, then one of three outcomes (complete, a partial copy
 // in amber, an empty one in red), each with what can be done next.
-import { api, h, fill, view, state, screen, go, current, toast, fail, keys, sys, entries, here } from "./core.js";
+import { api, h, fill, view, state, screen, go, current, toast, fail, keys, sys, entries, here, errText } from "./core.js";
 import { undo } from "./activity.js";
 import { planFor } from "./plan.js";
 import { tabs, onTabs, showTerminal, openBrought } from "./term.js";
@@ -55,9 +55,11 @@ function poll(b) {
   stop();
   timer = setTimeout(async () => {
     if (current !== "brought") return;
-    let next;
-    try { next = await api("AdoptStatus", b.journal); } catch (e) { next = null; }
-    if (current !== "brought") return;
+    let next, error = "";
+    try { next = await api("AdoptStatus", b.journal); } catch (e) { error = errText(e); }
+    if (current !== "brought" || showing?.journal !== b.journal) return;
+    const status = view.querySelector("#adopt-check");
+    if (status) { status.hidden = !error; status.textContent = error ? "Couldn’t check the saved copy: " + error + ". Retrying automatically…" : ""; }
     if (next && next.outcome !== "waiting") {
       state.stale = true;
       render(next);
@@ -180,7 +182,7 @@ function render(b) {
     }
   }
   const title = b.outcome === "waiting" ? `Bringing “${b.title}” from ${b.cloudTitle}` : `Brought from ${b.cloudTitle}`;
-  fill(view, h("div", { class: "page" }, h("div", { class: "page-in", style: "max-width:760px" }, h("h1", {}, title), body)));
+  fill(view, h("div", { class: "page" }, h("div", { class: "page-in", style: "max-width:760px" }, h("h1", {}, title), h("p", { id: "adopt-check", class: "warn", role: "status", hidden: true }), body)));
   view.querySelector("#open")?.focus();
 }
 

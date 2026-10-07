@@ -30,14 +30,15 @@ const (
 
 // ContinuePlan is how a session continues in another agent.
 type ContinuePlan struct {
-	From           string           `json:"from"` // source agent name
-	Fidelity       convert.Fidelity `json:"fidelity"`
-	Relation       string           `json:"relation"`
-	AppendTo       *agent.Summary   `json:"appendTo,omitempty"`
-	Report         convert.Report   `json:"report"`
-	Briefing       string           `json:"briefing"`
-	RolloverCursor ir.Cursor        `json:"rolloverCursor,omitempty"`
-	Rollover       *agent.Summary   `json:"rollover,omitempty"`
+	Instructions   []InstructionSource `json:"instructions"`
+	From           string              `json:"from"` // source agent name
+	Fidelity       convert.Fidelity    `json:"fidelity"`
+	Relation       string              `json:"relation"`
+	AppendTo       *agent.Summary      `json:"appendTo,omitempty"`
+	Report         convert.Report      `json:"report"`
+	Briefing       string              `json:"briefing"`
+	RolloverCursor ir.Cursor           `json:"rolloverCursor,omitempty"`
+	Rollover       *agent.Summary      `json:"rollover,omitempty"`
 	archive        []byte
 	Via            string `json:"via,omitempty"` // ViaImport: the target agent's importer converts it
 
@@ -112,7 +113,11 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	fullNodes := append([]ir.Node(nil), seg.Nodes...)
 	relateContinue(ctx, p, in, &seg, opt)
 	if opt.OtherAccount {
-		p.Warnings = append(p.Warnings, "Account identity continuity is unverified. A new portable conversation is created; signed reasoning, opaque compaction and vendor-private state are not transferred. Original copies remain available.")
+		if src.Module.Spec().ID != spec.ID {
+			p.Warnings = append(p.Warnings, "Moving between agents uses portable conversation text. Agent-private reasoning and internal state are not transferred; the original session remains available.")
+		} else {
+			p.Warnings = append(p.Warnings, "These are different runtime profiles. Login metadata cannot prove that account-bound session data is reusable, even when email addresses match. Hopsesh carries portable conversation text and keeps the original session.")
+		}
 	}
 
 	title := fmt.Sprintf("%s (from %s)", nonEmpty(s.Title, "session"), cp.From)
@@ -235,7 +240,7 @@ func briefingFor(p *Plan, srcHost agent.Host, src Side, s agent.Summary, to agen
 		FromVersion: s.AgentVersion, SourceID: string(s.Key.Session), SourceLoc: src.Machine.Name, TargetLoc: targetLoc,
 		When: time.Now(), TargetOS: p.Target.OS, Branch: p.Repo.SourceBranch, Head: short(p.Repo.SourceHead), Dirty: p.Repo.Dirty,
 		Missing: instructionGaps(src.Module.Spec(), to, cwd), ToolNames: to.Tools, Note: opt.Note,
-		Rules: globalRules(p, srcHost, src, to.Name, opt.CarryRules),
+		Rules: instructionRules(p, srcHost, src, s.CWD, opt),
 	}
 }
 
@@ -404,30 +409,6 @@ func continueMappings(p *Plan, src, tgt Side) []agent.Mapping {
 // maxRules bounds each carried instruction file.
 const maxRules = 8000
 
-// globalRules reads the user's instructions for every project of the source agent: carried
-// into the briefing when asked, otherwise reported.
-func globalRules(p *Plan, h agent.Host, src Side, to string, carry bool) []convert.Rules {
-	spec := src.Module.Spec()
-	var out []convert.Rules
-	for _, g := range spec.GlobalInstructions {
-		path := agent.Expand(g, h.Facts().Home, src.Install.Roots, h.Path())
-		b, err := h.FS().ReadFile(path, 1<<20)
-		text := strings.TrimSpace(string(b))
-		if err != nil || text == "" {
-			continue
-		}
-		if !carry {
-			p.Warnings = append(p.Warnings, fmt.Sprintf("your instructions for every %s project (%s) do not carry over to %s; --carry-rules adds them to the briefing", spec.Name, path, to))
-			continue
-		}
-		if len(text) > maxRules {
-			text = strings.ToValidUTF8(text[:maxRules], "") + "\n[shortened]"
-		}
-		out = append(out, convert.Rules{File: path, Text: text})
-	}
-	return out
-}
-
 // instructionGaps reports instruction files the source agent read that the target does
 // not.
 func instructionGaps(from, to agent.Spec, cwd string) []string {
@@ -450,7 +431,7 @@ func instructionGaps(from, to agent.Spec, cwd string) []string {
 func planContinueWarnings(p *Plan, in Input, opt Options) {
 	spec := in.Target.Module.Spec()
 	if p.Live && !opt.Fork {
-		p.Warnings = append(p.Warnings, fmt.Sprintf("the session is still open on %s; it continues in %s from what it has now", p.Source.Location, spec.Name))
+		p.Warnings = append(p.Warnings, liveSnapshotNotice(p))
 	}
 	if p.Repo.Unpushed > 0 || p.Repo.Dirty > 0 {
 		p.Warnings = append(p.Warnings, fmt.Sprintf("on %s the repository has %d unpushed commit(s) and %d uncommitted file(s) that a checkout here will not contain", p.Source.Location, p.Repo.Unpushed, p.Repo.Dirty))
@@ -461,7 +442,7 @@ func planContinueWarnings(p *Plan, in Input, opt Options) {
 		p.Warnings = append(p.Warnings, fmt.Sprintf("%s %s has not been tested with hopsesh", spec.Name, v))
 	}
 	if agent.IsExperimental(in.Target.Module, agent.CapWrite) || spec.Stability == agent.Experimental {
-		p.Warnings = append(p.Warnings, "writing "+spec.Name+" sessions is experimental")
+		p.Warnings = append(p.Warnings, "Experimental session writer: Hopsesh writes "+spec.Name+"’s native session format. Automated checks cover supported fixtures; compatibility with every agent release is not guaranteed")
 	}
 }
 
@@ -749,4 +730,16 @@ func nativeAnchor(n ir.Node) string {
 		return n.Native.Anchor
 	}
 	return ""
+}
+
+func liveSnapshotNotice(p *Plan) string {
+	place := p.Source.Location
+	if p.Source.Location == p.Target.Location {
+		place += " (this machine)"
+	}
+	notice := "The source session on " + place + " is still running. This transfer uses a snapshot; later source messages are not automatically synchronized."
+	if p.Mark == MarkWhenStopped || p.Options.Mark {
+		notice += " Its moved label is deferred until it stops; marking does not stop the process."
+	}
+	return notice
 }

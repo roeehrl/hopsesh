@@ -212,7 +212,7 @@ func (c *Controller) Recheck() {
 }
 func (c *Controller) KeepOnClose() bool {
 	s := c.published.Load()
-	return KeepOnClose(s.Preferences, s.Capabilities, runtime.GOOS == "darwin")
+	return KeepOnClose(s.Preferences)
 }
 func (c *Controller) OpenMain()   { c.quick.Hide(); c.main.Show().Focus() }
 func (c *Controller) CloseQuick() { c.quick.Hide() }

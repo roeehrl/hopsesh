@@ -256,7 +256,7 @@ jobs:
       - name: mandatory stateful movement, account and lineage routes, forks and recovery
         shell: bash
         run: |
-          go test ./internal/e2e -run 'TestMovement|TestLineage|TestAccountProfile|TestContext' -race -count=1 -timeout 10m
+          go test ./internal/e2e -run 'TestMovement|TestLineage|TestAccountProfile|TestContext|TestInstruction' -race -count=1 -timeout 10m
           go test ./internal/e2e/scenario -run 'TestScenarios/notice-hook' -race -count=1 -timeout 3m
       - name: scenario matrix over loopback SSH
         if: runner.os != 'Windows'
