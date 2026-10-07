@@ -105,6 +105,18 @@ func (p Processor) Process(ctx context.Context, e Envelope, now time.Time) (Enve
 		path := filepath.Join(p.Store.Directory, "operation-"+hex.EncodeToString(key[:])+".json")
 		var record Record
 		b, err = localstate.ReadPrivateFile(path, MaxWireBytes)
+		if err == nil {
+			var old Record
+			if err = json.Unmarshal(b, &old); err != nil {
+				return err
+			}
+			if retirePassive(old, "operation-", now) {
+				if err = os.Remove(path); err != nil {
+					return err
+				}
+				b, err = nil, os.ErrNotExist
+			}
+		}
 		newRecord := os.IsNotExist(err)
 		if err == nil {
 			if err = json.Unmarshal(b, &record); err != nil {
@@ -160,17 +172,15 @@ func (p Processor) Process(ctx context.Context, e Envelope, now time.Time) (Enve
 		if err != nil && !os.IsNotExist(err) {
 			return err
 		}
-		entries, err := filepath.Glob(filepath.Join(p.Store.Directory, "operation-*.json"))
-		if err != nil {
-			return err
-		}
-		if newRecord && len(entries) >= MaxOperationRecords {
-			return errors.New("relay operation quota reached; archive receipts before accepting new operations")
+		if newRecord {
+			if err := p.Store.recoveryRecordSlot("operation-", now); err != nil {
+				return err
+			}
 		}
 		if err = p.Store.recoverySpace(path, MaxWireBytes, now); err != nil {
 			return err
 		}
-		record = Record{Peer: e.From, Operation: e.Operation, Method: req.Method, Request: digest[:], Scope: scope, Phase: "started", Expires: e.Expires}
+		record = Record{Transient: transientOperation(req.Method), Peer: e.From, Operation: e.Operation, Method: req.Method, Request: digest[:], Scope: scope, Phase: "started", Expires: e.Expires}
 		if err = writeRecoveryRecord(path, record); err != nil {
 			return err
 		}
@@ -196,7 +206,11 @@ func (p Processor) Process(ctx context.Context, e Envelope, now time.Time) (Enve
 		if err != nil {
 			return err
 		}
-		response, err = sealKind(p.Identity, grant.Peer, p.Space, e.Operation, "response", body, now, time.Duration(e.Expires-now.Unix())*time.Second)
+		responseLease := time.Duration(e.Expires-now.Unix()) * time.Second
+		if record.Transient {
+			responseLease = min(responseLease, 90*time.Second)
+		}
+		response, err = sealKind(p.Identity, grant.Peer, p.Space, e.Operation, "response", body, now, responseLease)
 		if err != nil {
 			return err
 		}
@@ -205,13 +219,16 @@ func (p Processor) Process(ctx context.Context, e Envelope, now time.Time) (Enve
 			return err
 		}
 		var sealed *retainedOutcome
-		if canonical.Method != "blob.read" {
+		if canonical.Method != "blob.read" && !record.Transient {
 			sealed, err = retainOutcome(p.Identity, e.From, e.Operation, digest[:], retained, now)
 			if err != nil {
 				return err
 			}
 		}
 		record.Phase, record.Response, record.Outcome = "completed", response, sealed
+		if record.Transient {
+			record.Expires = response.Expires
+		}
 		return writeRecoveryRecord(path, record)
 	})
 	return response, err

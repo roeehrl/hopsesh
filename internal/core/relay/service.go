@@ -162,6 +162,9 @@ func (s *Service) callSmall(ctx context.Context, peer, operation, method, permis
 		return nil, err
 	}
 	ttl := time.Hour
+	if transientOperation(method) {
+		ttl = 90 * time.Second
+	}
 	if grant.Expires != 0 {
 		ttl = min(ttl, time.Until(time.Unix(grant.Expires, 0)))
 	}
@@ -211,14 +214,10 @@ func (s *Service) callSmall(ctx context.Context, peer, operation, method, permis
 		if !os.IsNotExist(e) {
 			return e
 		}
-		records, e := filepath.Glob(filepath.Join(s.Processor.Store.Directory, "outgoing-*.json"))
-		if e != nil {
+		if e := s.Processor.Store.recoveryRecordSlot("outgoing-", time.Now()); e != nil {
 			return e
 		}
-		if len(records) >= MaxOperationRecords {
-			return errors.New("relay outgoing operation quota reached")
-		}
-		out := Record{Peer: peer, Operation: operation, Method: method, Authorization: permission, Scope: scope, Request: digest[:], Phase: "submitted", Expires: expiry}
+		out := Record{Transient: transientOperation(method), Peer: peer, Operation: operation, Method: method, Authorization: permission, Scope: scope, Request: digest[:], Phase: "submitted", Expires: expiry}
 		encoded, e := json.Marshal(out)
 		if e != nil {
 			return e

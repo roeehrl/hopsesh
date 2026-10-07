@@ -15,11 +15,13 @@ import (
 
 	"github.com/roeehrl/hopsesh/agents/claude"
 	"github.com/roeehrl/hopsesh/agents/codex"
+	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/journal"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/internal/core/move"
+	"github.com/roeehrl/hopsesh/internal/core/observe"
 	"github.com/roeehrl/hopsesh/internal/core/relay"
 	localruntime "github.com/roeehrl/hopsesh/internal/core/runtime"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -240,9 +242,40 @@ func (f *relayFleet) run(t *testing.T, m machineHome, args ...string) []byte {
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
+		f.logHealth(t)
 		t.Fatalf("%s %v: %v\n%s", m.name, args, err, stderr.String())
 	}
 	return out
+}
+
+func (f *relayFleet) logHealth(t *testing.T) {
+	t.Helper()
+	for key, home := range f.homes {
+		namespace, err := localruntime.NewNamespace(filepath.Join(home.home, "config"), filepath.Join(home.home, "state"))
+		if err != nil {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		client := localruntime.Client{Namespace: namespace}
+		var health relay.Health
+		if err := client.Call(ctx, "relay.status", nil, &health); err == nil {
+			t.Logf("disposable owner %c relay connected=%t mode=%s rejected=%d reason=%q", key, health.Connected, health.DeliveryMode, health.Rejected, health.Error)
+		}
+		var snapshot observe.Snapshot
+		var observation app.Observation
+		if err := client.Call(ctx, "snapshot", nil, &snapshot); err == nil && json.Unmarshal(snapshot.Data, &observation) == nil {
+			t.Logf("disposable owner %c fresh=%t complete=%t snapshotError=%q problems=%v", key, snapshot.Fresh(time.Now()), observation.InventoryComplete, snapshot.Error, observation.Problems)
+			for _, agent := range observation.Agents {
+				if agent.Error != "" {
+					t.Logf("disposable owner %c agent=%s error=%q", key, agent.Agent, agent.Error)
+				}
+			}
+			for _, remote := range observation.Remotes {
+				t.Logf("disposable owner %c remote phase=%s status=%s reason=%q", key, remote.Phase, remote.Status, remote.Error)
+			}
+		}
+		cancel()
+	}
 }
 func (f *relayFleet) start(t *testing.T, key byte) {
 	t.Helper()

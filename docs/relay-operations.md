@@ -44,7 +44,8 @@ and full acknowledgment drain. Native repeated-route/fork scenarios still pass
 with the meter present.
 
 Native recovery storage has a separate 256 MiB aggregate limit across operation
-records, outgoing request bindings and cached encrypted replies. The receiver
+records, outgoing request bindings, large-upload descriptors and cached encrypted
+replies. The receiver
 reserves a bounded result slot before starting native work. Under admission
 pressure it removes expired reply ciphertext and expired owner-retained outcomes;
 it preserves operation digests, authorization scope, completed/uncertain phases,
@@ -53,6 +54,14 @@ on retry and cannot execute again. Live results are never evicted for new work.
 This cleanup runs on write pressure and adds no idle timer. The existing 10,000
 operation and outgoing-record ceilings remain in force; receipt tombstones are
 not automatically deleted to bypass those ceilings.
+
+Observation and preview are fixed passive read methods. Their wire/result lease
+is at most 90 seconds and they do not retain a 24-hour owner outcome. After expiry,
+completed passive records and their outgoing read intents can retire on count or
+byte pressure; a renewed read can request fresh evidence. Live reads and incomplete
+records stay. Native transfer/export/ack/undo bindings remain permanent, even if a
+record falsely claims to be passive. Periodic observation therefore does not
+consume the lifetime native-action quota. Cleanup adds no idle timer.
 
 The native regression suite covers the production aggregate quota, refusal
 before intent/action, bounded linked-file refusal, wire expiry followed by valid

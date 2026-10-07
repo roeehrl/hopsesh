@@ -67,6 +67,7 @@ type Outcome struct {
 	Error  string          `json:"error,omitempty"`
 }
 type Record struct {
+	Transient     bool             `json:"transient,omitempty"` // fixed passive read methods only; never native actions
 	Authorization string           `json:"authorization,omitempty"`
 	Peer          string           `json:"peer"`
 	Operation     string           `json:"operation"`
