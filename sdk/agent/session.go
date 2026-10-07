@@ -36,6 +36,7 @@ type Summary struct {
 type MarkKind string
 
 const (
+	MarkPrepared  MarkKind = "prepared"  // destination written; no inference claimed
 	MarkMoved     MarkKind = "moved"     // the session moved to another location
 	MarkContinued MarkKind = "continued" // the session continues in another agent
 )
@@ -169,6 +170,9 @@ type ElemMatch struct {
 
 // ResumeOptions shape the resume command.
 type ResumeOptions struct {
+	// AppRunning is set by the core from current live detection, never by a CLI flag.
+	// It distinguishes focusing an owned desktop session from importing a saved one.
+	AppRunning    bool
 	Fork          bool
 	RemoteControl bool
 	App           bool   // open in the agent's desktop app instead of the terminal
@@ -179,6 +183,9 @@ type ResumeOptions struct {
 // Command is a program to run, never a shell string; the core quotes it for the user's
 // shell.
 type Command struct {
+	// TTY requests a transient pseudo-terminal for a short-lived desktop launcher.
+	// It never creates a visible tab or sends input; the caller waits for completion.
+	TTY bool `json:"tty,omitempty"`
 	// Wait requests error reporting from a short-lived desktop launcher.
 	Wait bool     `json:"wait,omitempty"`
 	Argv []string `json:"argv"`

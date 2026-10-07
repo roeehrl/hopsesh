@@ -246,7 +246,7 @@ func briefingFor(p *Plan, srcHost agent.Host, src Side, s agent.Summary, to agen
 // the continuation.
 func planNative(ctx context.Context, p *Plan, in Input, opt Options) {
 	ns := in.Native
-	if ns == nil || in.Source.Machine.Name == in.Target.Machine.Name || len(p.Blockers) > 0 {
+	if opt.NewReplica || ns == nil || in.Source.Machine.Name == in.Target.Machine.Name || len(p.Blockers) > 0 {
 		return
 	}
 	name := in.Source.Module.Spec().Name
@@ -287,11 +287,11 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 	if p.manifest == nil || opt.Fork {
 		return
 	}
-	if opt.OtherAccount {
+	if opt.OtherAccount || opt.NewReplica {
 		if opt.TargetSession != "" {
 			p.Blockers = append(p.Blockers, "cannot append to a native replica under an unverified account binding; clear the destination session to create a portable copy")
 		}
-		// A portable return preserves existing copies, but must still detect independent
+		// A fresh return preserves existing copies, but must still detect independent
 		// destination work instead of silently treating divergent histories as one line.
 		for _, c := range currentBranchCopies(in) {
 			st, _, err := targetState(ctx, p, in, c)
@@ -573,7 +573,7 @@ func markNative(ctx context.Context, p *Plan, j *journal.Journal, path string, r
 	h, err := ns.Machine.For(ctx, ns.Module.Spec(), ns.Install, j)
 	if err == nil {
 		s := agent.Summary{Key: p.native.Placement.Key, Title: p.Title, CWD: p.Target.CWD, Path: path}
-		err = marker.Mark(ctx, h, ns.Install, s, agent.Mark{Kind: agent.MarkContinued, Location: p.Target.Location, AgentName: p.Agent})
+		err = marker.Mark(ctx, h, ns.Install, s, agent.Mark{Kind: agent.MarkPrepared, Location: p.Target.Location, AgentName: p.Agent})
 	}
 	if err != nil {
 		res.Warnings = append(res.Warnings, "could not mark the native copy here: "+err.Error())
@@ -687,7 +687,7 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 			res.Warnings = append(res.Warnings, "after writing: "+err.Error())
 		}
 	}
-	mark := agent.Mark{Kind: agent.MarkContinued, Location: p.Target.Location, AgentName: tgt.Module.Spec().Name}
+	mark := agent.Mark{Kind: agent.MarkPrepared, Location: p.Target.Location, AgentName: tgt.Module.Spec().Name}
 	markWith(ctx, p, in, j, env, cp.head, mark, res)
 	res.Command, res.Run = launch.Shell(p.Resume, "", launch.DefaultShell()), p.Resume
 	if err := j.Seal(machinesOf(ctx, in)); err != nil {
@@ -711,7 +711,7 @@ func recordContinuation(ctx context.Context, p *Plan, in Input, j *journal.Journ
 			rollover = &lineage.Rollover{Replica: id, Cursor: p.Continue.RolloverCursor}
 		}
 	}
-	if err := m.AppendHop(lineage.Hop{Rollover: rollover, ID: p.OperationID, Time: now, From: from, To: to, Source: p.sourceState.ID, Target: st.ID, Kind: lineage.HopContinue, Fork: p.targetLine != p.sourceLine, Fidelity: string(p.Continue.Fidelity), Written: &lineage.Range{From: w.From, To: w.To}}); err != nil {
+	if err := m.AppendHop(lineage.Hop{Notify: p.Options.Notify, Rollover: rollover, ID: p.OperationID, Time: now, From: from, To: to, Source: p.sourceState.ID, Target: st.ID, Kind: lineage.HopContinue, Fork: p.targetLine != p.sourceLine, Fidelity: string(p.Continue.Fidelity), Written: &lineage.Range{From: w.From, To: w.To}}); err != nil {
 		return err
 	}
 	if nativeDst != "" {
@@ -733,10 +733,12 @@ func recordContinuation(ctx context.Context, p *Plan, in Input, j *journal.Journ
 			markNative(ctx, p, j, nativeDst, res)
 		}
 	}
-	if srcFS, e := in.Source.Machine.FS(ctx); e == nil {
-		if e = j.WriteReceipt(srcFS, p.Source.Location, lineage.PathFor(in.Session.Path), m.ForBranch(p.sourceLine).Encode(), false); e != nil {
-			res.Warnings = append(res.Warnings, "destination committed; source receipt acknowledgement pending: "+e.Error())
-		}
+	srcFS, reachErr := in.Source.Machine.FS(ctx)
+	if reachErr != nil {
+		srcFS = nil
+	}
+	if e := j.WriteReceipt(srcFS, p.Source.Location, lineage.PathFor(in.Session.Path), m.ForBranch(p.sourceLine).Encode(), false); e != nil {
+		res.Warnings = append(res.Warnings, "destination committed; source receipt acknowledgement pending: "+e.Error())
 	}
 
 	return nil

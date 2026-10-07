@@ -20,6 +20,12 @@ on:
       - internal/ui/**
       - internal/e2e/**
       - internal/devtools/webtest/**
+      - internal/devtools/hsmatrix/**
+      - internal/config/**
+      - .github/workflows/ci.yml
+      - .github/workflows/nightly.yml
+      - docs/movement-return.md
+      - docs/drift.md
       - docs/accounts.md
       - docs/account-lineage-contract.md
   workflow_dispatch:

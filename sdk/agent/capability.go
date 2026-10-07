@@ -26,7 +26,6 @@ const (
 	CapFork          Capability = "fork"           // Resume honours ResumeOptions.Fork (Spec.Features)
 	CapRemoteControl Capability = "remote-control" // Resume honours ResumeOptions.RemoteControl (Spec.Features)
 	CapApp           Capability = "app"            // Resume honours ResumeOptions.App (Spec.Features)
-	CapNotify        Capability = "notify"         // Notifier: the resumed session tells the old one
 	CapImport        Capability = "import"         // Importer: the agent converts another agent's sessions itself
 	CapPreview       Capability = "preview"        // Previewer: the end of a conversation, for the app
 	CapRename        Capability = "rename"         // Renamer: a new title in the agent's own data
@@ -90,12 +89,6 @@ type Writer interface {
 	Write(ctx context.Context, h Host, in Install, req ir.WriteRequest) (ir.WriteResult, error)
 }
 
-// Notifier lets a resumed session tell the copy left behind that the work moved on. The
-// text is added to the new session's first message; the agent itself delivers it.
-type Notifier interface {
-	NotifyInstruction(oldName, oldLocation, newName string, fork bool) string
-}
-
 // Integrator says where the shared hopsesh skill goes for this agent, and how the agent is
 // told which hopsesh commands may run without asking.
 type Integrator interface {
@@ -145,7 +138,6 @@ func Capabilities(m Module) []Capability {
 	_, read := m.(Reader)
 	w, write := m.(Writer)
 	_, integ := m.(Integrator)
-	_, notify := m.(Notifier)
 	_, imp := m.(Importer)
 	_, preview := m.(Previewer)
 	_, rename := m.(Renamer)
@@ -164,7 +156,6 @@ func Capabilities(m Module) []Capability {
 	add(write, CapWrite)
 	add(write && w.Profile(Install{}).NativeReplay, CapNativeReplay)
 	add(integ, CapIntegrate)
-	add(notify, CapNotify)
 	add(imp, CapImport)
 	add(preview, CapPreview)
 	add(rename, CapRename)
@@ -269,4 +260,10 @@ func (s Spec) TestedWith(version string) bool {
 // AppChecker validates an installation-specific desktop resume before it is offered or run.
 type AppChecker interface {
 	CheckApp(Install, SessionKey, ResumeOptions) error
+}
+
+// AppFocusVerifier rechecks ownership before a vendor focus route that could
+// otherwise import a stale session ID. It is not needed for pure navigation URLs.
+type AppFocusVerifier interface {
+	VerifyAppFocus(context.Context, Host, Install, SessionKey) error
 }

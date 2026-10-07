@@ -139,7 +139,7 @@ func runLineageRoute(t *testing.T, route, start string, mask int, patterns ...st
 				input.Copies = append(input.Copies, move.Copy{Summary: copy, Lineage: cm})
 			}
 		}
-		p, err := move.Build(ctx, input, move.Options{TargetDir: dst.repo, Mark: true})
+		p, err := move.Build(ctx, input, move.Options{TargetDir: dst.repo, Mark: true, Notify: true})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -187,6 +187,43 @@ func runLineageRoute(t *testing.T, route, start string, mask int, patterns ...st
 		graph, e := lineage.Read(host.LocalFS(), current.Path)
 		if e != nil {
 			t.Fatal(e)
+		}
+		// Query the receipt reloaded from disk at every stop, including workless
+		// stops and profile routes. A no-work stop records no new arrival.
+		// A committed arrival must not look departed; return candidates are unique, same-branch visited replicas.
+		_, replica, ok := graph.FindOnBranch(current.Key, dst.m.Name, graph.Branch)
+		if !ok {
+			t.Fatalf("hop %d: current native replica missing", i)
+		}
+		if h, departed := graph.Departure(replica); departed && !p.NoWork && len(p.Blockers) == 0 {
+			t.Fatalf("hop %d: arrival has a departure notice: %+v", i, h)
+		}
+		seenReturns := map[lineage.ReplicaID]bool{}
+		for _, r := range graph.ReturnReplicas(replica) {
+			if r.ID == replica || r.Line != graph.Branch || seenReturns[r.ID] {
+				t.Fatalf("hop %d: invalid return candidate: %+v", i, r)
+			}
+			seenReturns[r.ID] = true
+		}
+		hops := graph.ActiveHops()
+		if len(hops) != transfers {
+			t.Fatalf("hop %d: active movements=%d, transfers=%d", i, len(hops), transfers)
+		}
+		for _, h := range hops {
+			if !h.Notify {
+				t.Fatalf("hop %d: lost notice preference: %+v", i, h)
+			}
+		}
+		if len(hops) > 0 && pattern != "pressure" {
+			last := hops[len(hops)-1]
+			if last.To == replica {
+				if !seenReturns[last.From] {
+					t.Fatalf("hop %d: previous stop missing from returns", i)
+				}
+				if h, ok := graph.Departure(last.From); !ok || h.ID != last.ID {
+					t.Fatalf("hop %d: previous stop departure: %+v %t", i, h, ok)
+				}
+			}
 		}
 		journey := graph.Journey()
 		if pattern == "accounts" && (journey.MachineTransfers != 0 || journey.MachineRoundTrips != 0) {

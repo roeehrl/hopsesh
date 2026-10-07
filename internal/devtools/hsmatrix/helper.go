@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -13,6 +14,8 @@ import (
 	"time"
 
 	"github.com/roeehrl/hopsesh/agents/claude"
+	"github.com/roeehrl/hopsesh/internal/core/host"
+	"github.com/roeehrl/hopsesh/internal/core/lineage"
 )
 
 // The helper does on one machine what a scenario needs there: make a repository and a
@@ -47,12 +50,14 @@ type FindReq struct {
 
 // Found is one session that contains the marker.
 type Found struct {
-	Agent string          `json:"agent"`
-	ID    string          `json:"id"`
-	Path  string          `json:"path"`
-	Bytes int64           `json:"bytes"`
-	Has   map[string]bool `json:"has"`
-	Mark  string          `json:"mark"` // the mark title, or ""
+	SHA256 string            `json:"sha256"`
+	Graph  *lineage.Manifest `json:"lineage,omitempty"`
+	Agent  string            `json:"agent"`
+	ID     string            `json:"id"`
+	Path   string            `json:"path"`
+	Bytes  int64             `json:"bytes"`
+	Has    map[string]bool   `json:"has"`
+	Mark   string            `json:"mark"` // the mark title, or ""
 }
 
 // AppendReq adds a user turn to a session file.
@@ -61,6 +66,30 @@ type AppendReq struct {
 	Path  string `json:"path"`
 	ID    string `json:"id"`
 	Text  string `json:"text"`
+}
+
+// RemoveReq removes only a discovered fixture transcript, retaining its receipt.
+// A missing original can then coexist with a surviving replica of its branch.
+type RemoveReq struct {
+	Agent  string `json:"agent"`
+	ID     string `json:"id"`
+	Marker string `json:"marker"`
+}
+
+func removeSession(r RemoveReq) error {
+	if r.Marker == "" || r.ID == "" {
+		return fmt.Errorf("remove requires a fixture marker and session ID")
+	}
+	found, err := find(FindReq{Marker: r.Marker})
+	if err != nil {
+		return err
+	}
+	for _, f := range found {
+		if f.Agent == r.Agent && f.ID == r.ID {
+			return os.Remove(f.Path)
+		}
+	}
+	return fmt.Errorf("fixture session %s/%s not found", r.Agent, r.ID)
 }
 
 // HeadReq asks for a repository's commit.
@@ -332,7 +361,7 @@ func find(r FindReq) ([]Found, error) {
 				return nil
 			}
 			text := string(b)
-			f := Found{Agent: agent, ID: idOf(p), Path: p, Bytes: int64(len(b)), Has: map[string]bool{}}
+			f := Found{SHA256: fmt.Sprintf("%x", sha256.Sum256(b)), Agent: agent, ID: idOf(p), Path: p, Bytes: int64(len(b)), Has: map[string]bool{}}
 			for _, n := range r.Needles {
 				f.Has[n] = strings.Contains(text, n) || strings.Contains(text, jsonEscape(n))
 			}
@@ -340,6 +369,10 @@ func find(r FindReq) ([]Found, error) {
 				f.Mark = claudeMark(text)
 			} else if strings.HasPrefix(names[f.ID], "↪ ") {
 				f.Mark = names[f.ID]
+			}
+			f.Graph, err = lineage.Read(host.LocalFS(), p)
+			if err != nil {
+				return fmt.Errorf("lineage beside %s: %w", p, err)
 			}
 			out = append(out, f)
 			return nil
@@ -462,6 +495,12 @@ func helperMain(op string) error {
 		var r AppendReq
 		if err = dec.Decode(&r); err == nil {
 			err = appendTurn(r)
+			out = map[string]any{}
+		}
+	case "remove":
+		var r RemoveReq
+		if err = dec.Decode(&r); err == nil {
+			err = removeSession(r)
 			out = map[string]any{}
 		}
 	case "head":

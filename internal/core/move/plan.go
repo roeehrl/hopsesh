@@ -81,7 +81,8 @@ const (
 
 // Options are the user's choices.
 type Options struct {
-	Bounded       bool   `json:"bounded,omitempty"` // new bounded replica on the same logical branch
+	Bounded       bool   `json:"bounded,omitempty"`    // new bounded replica on the same logical branch
+	NewReplica    bool   `json:"newReplica,omitempty"` // explicitly create a new native session; never auto-select an existing one
 	TargetProfile string `json:"targetProfile,omitempty"`
 	OperationID   string `json:"operationId,omitempty"`
 	TargetSession string `json:"targetSession,omitempty"`
@@ -229,6 +230,9 @@ type Endpoint struct {
 // Build works out a move. It reads (the bundle's file list, the target's copies) but
 // writes nothing.
 func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
+	if opt.NewReplica && opt.TargetSession != "" {
+		return nil, fmt.Errorf("a new session cannot also select an existing destination session")
+	}
 	in.Copies = activeCopies(ctx, in, opt)
 	src, tgt := in.Source, in.Target
 	copies := currentBranchCopies(in)
@@ -241,7 +245,7 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		}
 		copies = selected
 	}
-	if opt.Bounded || profileBoundary(in) || src.Module.Spec().ID != tgt.Module.Spec().ID || len(copies) == 1 && copies[0].Summary.Key != in.Session.Key {
+	if opt.NewReplica || opt.Bounded || profileBoundary(in) || src.Module.Spec().ID != tgt.Module.Spec().ID || len(copies) == 1 && copies[0].Summary.Key != in.Session.Key {
 		return buildContinue(ctx, in, opt)
 	}
 	if opt.Worktree == "" {
@@ -346,15 +350,11 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	planRoundTrip(p, in, opt)
 
 	p.NewName = launch.SessionName(p.Title, tgt.Machine.Name)
-	notify := ""
-	if n, ok := tgt.Module.(agent.Notifier); ok && opt.Notify {
-		notify = n.NotifyInstruction(p.OldName, src.Machine.Name, p.NewName, opt.Fork && p.Live)
-	}
 	p.StartPrompt = launch.StartPrompt(launch.Context{
 		AgentName: spec.Name, SourceLocation: src.Machine.Name, SourceOS: launch.OSName(src.Machine.Facts.OS), SourceVersion: s.AgentVersion,
 		SourceCWD: s.CWD, TargetLocation: tgt.Machine.Name, TargetOS: launch.OSName(tgt.Machine.Facts.OS), TargetCWD: cwd,
 		Branch: p.Repo.SourceBranch, WorktreeNote: worktreeNote(p), Unpushed: p.Repo.Unpushed, Dirty: p.Repo.Dirty,
-		Redacted: opt.Redact, OtherAccount: p.Options.OtherAccount, Live: p.Live, Fork: opt.Fork && p.Live, Notify: notify,
+		Redacted: opt.Redact, OtherAccount: p.Options.OtherAccount, Live: p.Live, Fork: opt.Fork && p.Live,
 	})
 	p.resumeOpts = agent.ResumeOptions{RemoteControl: p.Options.RemoteControl, App: opt.App && agent.Has(tgt.Module, agent.CapApp), Name: p.NewName, Prompt: p.StartPrompt}
 	if p.resumeOpts.App {

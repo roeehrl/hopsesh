@@ -134,6 +134,7 @@ func (s *peerSession) hello(ctx context.Context) peer.HelloReply {
 func (a *App) receiveOptions(o move.Options) move.Options {
 	d := a.DefaultOptions()
 	d.TargetProfile = o.TargetProfile
+	d.NewReplica, d.Bounded = o.NewReplica, o.Bounded
 	d.TargetDir, d.Clone, d.Worktree = o.TargetDir, o.Clone, o.Worktree
 	d.OperationID, d.TargetSession = o.OperationID, o.TargetSession
 	d.Fork, d.RemoteControl, d.Notify, d.Redact = o.Fork, o.RemoteControl, o.Notify, o.Redact

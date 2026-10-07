@@ -8,6 +8,7 @@ func TestMarkTitles(t *testing.T) {
 		title string
 		want  string
 	}{
+		{Mark{Kind: MarkPrepared, Location: "studio", AgentName: "Codex"}, "fix tests", "↪ prepared in Codex on studio · fix tests"},
 		{Mark{Kind: MarkMoved, Location: "studio"}, "fix tests", "↪ moved to studio · fix tests"},
 		{Mark{Kind: MarkMoved, Location: "studio"}, "", "↪ moved to studio"},
 		{Mark{Kind: MarkContinued, Location: "macbook", AgentName: "Codex"}, "fix tests", "↪ continued in Codex on macbook · fix tests"},

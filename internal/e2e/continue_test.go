@@ -101,8 +101,8 @@ func TestContinueInCodexAndBack(t *testing.T) {
 		t.Fatalf("command: %s", res.Command)
 	}
 	left := list(t, box)[sid]
-	if left.Mark == nil || left.Mark.Kind != agent.MarkContinued || left.Mark.AgentName != "Codex" {
-		t.Fatalf("the Claude session must say it continues in Codex: %+v", left.Mark)
+	if left.Mark == nil || left.Mark.Kind != agent.MarkPrepared || left.Mark.AgentName != "Codex" {
+		t.Fatalf("the Claude session must say it is prepared in Codex: %+v", left.Mark)
 	}
 	original, _ := os.ReadFile(left.Path)
 
@@ -180,7 +180,7 @@ func TestContinueKeepsNativeCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	native, ok := list(t, here)[sid]
-	if !ok || native.CWD != here.repo || native.Mark == nil || native.Mark.Kind != agent.MarkContinued || native.Mark.AgentName != "Codex" {
+	if !ok || native.CWD != here.repo || native.Mark == nil || native.Mark.Kind != agent.MarkPrepared || native.Mark.AgentName != "Codex" {
 		t.Fatalf("the native copy here: %+v %+v", native, native.Mark)
 	}
 	lin, _ := lineage.Read(host.LocalFS(), native.Path)
@@ -268,7 +268,7 @@ func TestContinueOnTheSameMachine(t *testing.T) {
 	if mentions(seg, "PLUM-7") || !mentions(seg, "moved from Claude Code") {
 		t.Fatal("a note carries only the briefing")
 	}
-	if m := list(t, here)[sid].Mark; m == nil || m.Kind != agent.MarkContinued {
+	if m := list(t, here)[sid].Mark; m == nil || m.Kind != agent.MarkPrepared {
 		t.Fatal("the Claude session must be marked")
 	}
 }

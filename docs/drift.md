@@ -213,3 +213,21 @@ matrices test account/lineage routes; weekly upstream probes are narrower and do
 live authenticated round trips or that a desktop displayed the requested chat. The four
 review groups, their model budgets and the main-only protected review environment are
 unchanged. Scheduled runs acquire the new coverage when this change lands on main.
+
+### Movement and return coverage
+
+The local review includes the [movement-return contract](movement-return.md), persisted
+`lineage/5` notice preferences, peer protocol 5, source title marks, scan-derived movement
+and return statuses, and Claude/Codex hook adapters. It checks vendor hook payload and
+output changes, trust/version gates, preservation of unrelated hooks, and whether native
+reader changes could misreport preparation as continued agent work. Neither notice
+output nor imported transcript records may become newly authored conversation nodes.
+
+The generated module integration paths include the real-module movement/return tests,
+interrupted recovery, the SSH matrix runner, config defaults and scenario CI definitions.
+PR and nightly scenario jobs explicitly include `TestMovement`; matrix rows cover ordinary
+and quiet returns and forks for all Claude/Codex pairings. Offline drift tests verify the
+review prompt retains these concerns. Notify-off still preserves return metadata; undo
+compensates movement history. These checks make no paid calls and modify no live vendor
+configuration. Agent-files/hook implementation and live hook delivery remain separate
+verification surfaces; static fixtures are not evidence of a live vendor session.

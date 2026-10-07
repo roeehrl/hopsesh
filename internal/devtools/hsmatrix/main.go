@@ -7,7 +7,7 @@
 //
 //	hsmatrix run -hopsesh bin/hopsesh -there hsremote@127.0.0.1 -alias hsm-box -label linux→linux -out out/
 //	hsmatrix rows [-all]
-//	hsmatrix agent seed|find|append|head|base   (the helper; JSON in, JSON out)
+//	hsmatrix agent seed|find|append|remove|head|base   (the helper; JSON in, JSON out)
 package main
 
 import (
@@ -29,7 +29,7 @@ func main() {
 	switch os.Args[1] {
 	case "agent":
 		if len(os.Args) < 3 {
-			fmt.Fprintln(os.Stderr, "usage: hsmatrix agent seed|find|append|head|base")
+			fmt.Fprintln(os.Stderr, "usage: hsmatrix agent seed|find|append|remove|head|base")
 			os.Exit(2)
 		}
 		if err := helperMain(os.Args[2]); err != nil {

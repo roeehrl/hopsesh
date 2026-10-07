@@ -50,6 +50,9 @@ type AgentOpt struct {
 
 // EntryDTO is one session row.
 type EntryDTO struct {
+	ObservedAt      time.Time             `json:"observedAt,omitempty"`
+	Returns         []app.ReturnCandidate `json:"returns,omitempty"`
+	Movement        *app.MovementNotice   `json:"movement,omitempty"`
 	ContextOverflow bool                  `json:"contextOverflow,omitempty"`
 	CanApp          bool                  `json:"canApp"`
 	AppWhy          string                `json:"appWhy,omitempty"`
@@ -364,7 +367,7 @@ func clipWords(s string, n int) string {
 func entryDTO(core *app.App, inv *app.Inventory, it app.Item, targets []AgentOpt) EntryDTO {
 	e, s := it.Entry, it.Entry.Session
 	title, source := titleFor(s, e.Live.Name)
-	d := EntryDTO{Profile: e.Profile, Machine: e.Machine, Agent: e.Agent, AgentName: e.AgentName, Key: s.Key.String(), Title: title, TitleSource: source,
+	d := EntryDTO{ObservedAt: e.ObservedAt, Returns: e.Returns, Movement: e.Movement, Profile: e.Profile, Machine: e.Machine, Agent: e.Agent, AgentName: e.AgentName, Key: s.Key.String(), Title: title, TitleSource: source,
 		Session: string(s.Key.Session), Path: s.Path, AgentVersion: s.AgentVersion, CanRename: core.CanRename(e), Places: []PlaceDTO{},
 		Status: statusWords(core, e), Live: e.Live.State == agent.Live, LastActive: s.LastActivity.Format(time.RFC3339),
 		ContextOverflow: s.ContextOverflow, LastPrompt: s.LastPrompt, CWD: s.CWD, SizeKB: s.Size / 1024, ContinueIn: []AgentOpt{},
@@ -383,7 +386,7 @@ func entryDTO(core *app.App, inv *app.Inventory, it app.Item, targets []AgentOpt
 				if machine := inv.Machine(e.Machine); machine != nil {
 					if install, ok := machine.InstallProfile(e.Agent, e.Session.Key.Profile); ok {
 						d.CanApp, d.AppWhy = true, ""
-						if err := checker.CheckApp(install, e.Session.Key, agent.ResumeOptions{App: true}); err != nil {
+						if err := checker.CheckApp(install, e.Session.Key, agent.ResumeOptions{App: true, AppRunning: e.Live.State == agent.Live && e.Live.App}); err != nil {
 							d.CanApp = false
 							d.AppWhy = err.Error()
 						}
@@ -470,9 +473,12 @@ func cloudTitleOf(core *app.App, loc string) string {
 // before marks named clouds that way reads "continued in Claude Code cloud" too.
 func statusWords(core *app.App, e app.Entry) string {
 	st := e.Status()
-	if mk := e.Session.Mark; mk != nil && mk.Kind == agent.MarkContinued && st == app.MarkWords(*mk) {
+	if strings.HasPrefix(st, "continued ") {
+		st = "previously " + st
+	}
+	if mk := e.Session.Mark; mk != nil && mk.Kind == agent.MarkContinued && strings.TrimPrefix(st, "previously ") == app.MarkWords(*mk) {
 		if t := cloudTitleOf(core, mk.Location); t != "" {
-			return "continued in " + t
+			return "previously continued in " + t
 		}
 	}
 	return st
@@ -561,6 +567,7 @@ func (a *App) find(machine, key string) (app.Entry, error) {
 // OptsDTO are the choices on the plan screen.
 type OptsDTO struct {
 	Bounded       bool   `json:"bounded"`
+	NewReplica    bool   `json:"newReplica"`
 	TargetProfile string `json:"targetProfile"`
 	OperationID   string `json:"operationId"`
 	TargetSession string `json:"targetSession"`
@@ -593,6 +600,7 @@ type OptsDTO struct {
 
 func (o OptsDTO) options(d move.Options) move.Options {
 	d.Bounded = o.Bounded
+	d.NewReplica = o.NewReplica
 	d.TargetDir, d.Clone, d.Worktree = o.TargetDir, o.Clone, move.WorktreeMode(nonEmpty(o.Worktree, string(move.WorktreeAuto)))
 	if o.ReposDir != "" {
 		d.ReposDir = o.ReposDir
@@ -614,7 +622,6 @@ type CanDTO struct {
 	Fork          bool `json:"fork"`
 	RemoteControl bool `json:"remoteControl"`
 	App           bool `json:"app"`
-	Notify        bool `json:"notify"`
 	Native        bool `json:"native"`
 	Import        bool `json:"import"`
 }
@@ -714,7 +721,7 @@ func planDTO(p *move.Plan, e app.Entry, tm agent.Module) *PlanDTO {
 		Warnings: p.Warnings, Blockers: p.Blockers, NewName: p.NewName, OtherAcct: p.Placement.OtherAccount,
 		SetAside: len(p.SetAside), NativeCopy: p.NativeCopy, Options: p.Options, SessionKey: p.Key, SourceAgent: e.Agent,
 		Can: CanDTO{Fork: agent.Has(tm, agent.CapFork), RemoteControl: agent.Has(tm, agent.CapRemoteControl),
-			App: agent.Has(tm, agent.CapApp), Notify: agent.Has(tm, agent.CapNotify), Native: !p.Options.OtherAccount && agent.Has(tm, agent.CapNativeReplay),
+			App: agent.Has(tm, agent.CapApp), Native: !p.Options.OtherAccount && agent.Has(tm, agent.CapNativeReplay),
 			Import: !p.Options.OtherAccount && importsFrom(tm, e.Agent)}}
 	if c := p.Continue; c != nil {
 		d.Continue = &ContinueDTO{From: c.From, Fidelity: string(c.Fidelity), Relation: c.Relation, Report: c.Report, Briefing: c.Briefing, Via: c.Via}
@@ -933,6 +940,10 @@ func start(c agent.Command) error {
 		return errors.New("no command")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if c.TTY {
+		defer cancel()
+		return startDesktopTTY(ctx, c)
+	}
 	if !c.Wait {
 		cancel()
 		ctx = context.Background()
@@ -974,4 +985,25 @@ func (a *App) ArchiveLineage(machine, key string) error {
 	defer cancel()
 	_, err = core.ArchiveLineage(ctx, inv, e)
 	return err
+}
+
+// Claude's desktop launcher rejects redirected stdin/stdout. Reuse the app's
+// cross-platform PTY backend without publishing a terminal tab or sending input.
+func startDesktopTTY(ctx context.Context, c agent.Command) error {
+	mgr := pty.NewManager(pty.Options{MaxTabs: 1, Scrollback: 32 << 10})
+	defer mgr.CloseAll()
+	s, err := mgr.Start(pty.Spec{Argv: c.Argv, Dir: c.Dir,
+		Env: pty.Env{Unset: c.Unset, Set: c.Env}, Capture: pty.CaptureStep})
+	if err != nil {
+		return fmt.Errorf("opening desktop app: %w", err)
+	}
+	code, err := s.Wait(ctx)
+	if err != nil {
+		return fmt.Errorf("opening desktop app: %w", err)
+	}
+	output, _ := s.StepOutput()
+	if code != 0 {
+		return fmt.Errorf("opening desktop app (exit %d): %s", code, strings.TrimSpace(output.Text))
+	}
+	return nil
 }

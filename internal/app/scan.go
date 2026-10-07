@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/host"
@@ -90,6 +91,9 @@ func (m *Machine) InstallProfile(id agent.ID, profile string) (agent.Install, bo
 
 // Entry is one session at one location: a machine, or a cloud.
 type Entry struct {
+	Returns    []ReturnCandidate `json:"returns,omitempty"`
+	Movement   *MovementNotice   `json:"movement,omitempty"`
+	ObservedAt time.Time         `json:"observedAt,omitempty"`
 	// Location is where the session lives. Machine is the machine whose files hold it, or
 	// the cloud's name for a cloud session (so "claude-cloud:<id>" names one).
 	Location          agent.Location    `json:"location"`
@@ -235,6 +239,7 @@ func (a *App) Scan(ctx context.Context, o ScanOptions) *Inventory {
 		}()
 	}
 	wg.Wait()
+	a.EnrichMovement(ctx, inv)
 	sort.SliceStable(inv.Machines, func(i, j int) bool {
 		if inv.Machines[i].Local != inv.Machines[j].Local {
 			return inv.Machines[i].Local
@@ -531,7 +536,7 @@ func listedEntries(ctx context.Context, hm *host.Machine, fsys host.FS, mod agen
 		if lv.State == "" {
 			lv.State = agent.Unknown
 		}
-		out = append(out, Entry{Location: agent.MachineLocation(hm.Name), Machine: hm.Name, Agent: spec.ID, AgentName: spec.Name, Profile: st.Install.Profile, Session: s, Live: lv, Lineage: manifests[i], LineageError: problems[i], CanArchiveLineage: unsupported[i]})
+		out = append(out, Entry{ObservedAt: time.Now().UTC(), Location: agent.MachineLocation(hm.Name), Machine: hm.Name, Agent: spec.ID, AgentName: spec.Name, Profile: st.Install.Profile, Session: s, Live: lv, Lineage: manifests[i], LineageError: problems[i], CanArchiveLineage: unsupported[i]})
 	}
 	return out
 }

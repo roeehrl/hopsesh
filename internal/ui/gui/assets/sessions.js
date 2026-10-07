@@ -499,6 +499,16 @@ export function render() {
 // open; then it is shown landing.
 export function showEntry(e) {
   const k = entryKey(e);
+  if (!entries().some(x=>entryKey(x)===k)) {
+    const group=e.group || state.scan?.groups.find(g=>g.entries.some(x=>(x.copies || []).some(c=>c.machine===e.machine && c.key===e.key)));
+    if (!group) { toast("This copy is not in the current scan; refresh its machine."); return; }
+    const i=group.entries.findIndex(x=>(x.copies || []).some(c=>c.machine===e.machine && c.key===e.key));
+    if (i<0) return;
+    const {group:ignored,...copy}=e;
+    group.entries[i]=copy;
+    e=Object.assign({group},copy);
+    toast(`Showing ${e.agentName} on ${e.machine === here() ? sys.here : e.machine}; other copies remain in Copies & history.`);
+  }
   const inScope = () => scoped().some((x) => entryKey(x) === k);
   if (!inScope()) state.scope = { kind: "all" };
   if (!applyFilters(scoped(), state.scope).some((x) => entryKey(x) === k)) {

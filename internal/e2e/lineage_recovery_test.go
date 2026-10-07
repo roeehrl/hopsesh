@@ -28,7 +28,7 @@ func TestLineageInterruptedWriteAndIdempotentRetry(t *testing.T) {
 			}
 			os.MkdirAll(install.Root("home"), 0o700)
 			ctx := context.Background()
-			opt := move.Options{TargetDir: b.repo, OperationID: "stable-transfer", Mark: true}
+			opt := move.Options{TargetDir: b.repo, OperationID: "stable-transfer", Mark: true, Notify: true}
 			in := move.Input{Source: move.Side{Machine: a.m, Module: claude.New(), Install: a.in}, Session: list(t, a)[sid], Target: move.Side{Machine: b.m, Module: mod, Install: install}}
 			p, err := move.Build(ctx, in, opt)
 			if err != nil {
@@ -76,6 +76,16 @@ func TestLineageInterruptedWriteAndIdempotentRetry(t *testing.T) {
 			graph, err := lineage.Read(host.LocalFS(), written.Path)
 			if err != nil || graph == nil {
 				t.Fatalf("recovered receipt %v", err)
+			}
+			hops := graph.ActiveHops()
+			if len(hops) != 1 || !hops[0].Notify {
+				t.Fatalf("recovery lost notice: %+v", hops)
+			}
+			if h, ok := graph.Departure(hops[0].From); !ok || h.ID != opt.OperationID {
+				t.Fatalf("recovery departure: %+v %t", h, ok)
+			}
+			if candidates := graph.ReturnReplicas(hops[0].To); len(candidates) != 1 || candidates[0].ID != hops[0].From {
+				t.Fatalf("recovery returns: %+v", candidates)
 			}
 			if graph.Journey().Transfers != 1 {
 				t.Fatalf("recovery counted twice: %+v", graph.Journey())

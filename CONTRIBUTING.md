@@ -108,7 +108,7 @@ issue or discussion first so we can agree on the approach.
 | `ContextSizer` | destination capacity and active-context accounting for safe writes |
 | `Importer` | "use the agent's own importer" (`--via import`) |
 | `Integrator` | where the skill and approval rules go |
-| `Notifier` | telling the old session where the work went |
+| `MovementHookIntegrator` | passive local movement notices on resume or prompt submission |
 
 **Cloud capabilities.** A module whose agent has a cloud declares it in `Spec.Clouds` (the
 program that drives it, fidelity each way, how code travels, what it needs, its sign-in

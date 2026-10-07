@@ -3,10 +3,11 @@
 // open, the end of its conversation (safe, locally rendered Markdown), and its
 // repository, copies and details, which open and close app-wide.
 import { api, h, fill, icon, ICONS, state, sys, here, ago, when, bytes, agentBadge, cloudOf, cloudTitle, count, path, rich, fail, toast, dialog, errText, cap, $ } from "./core.js";
-import { model, statusLine, placeName, showPlace, placeCount, onInspector, liveOf, appWord } from "./actions.js";
+import { selectDestination, model, statusLine, placeName, showPlace, placeCount, onInspector, liveOf, appWord } from "./actions.js";
 import { openMenu, isOpen, openEl, closeAll } from "./menu.js";
 import { sectionOpen, setSection } from "./layout.js";
 import { markdown } from "./markdown.js";
+import { movementNotice, resolveDestination } from "./returns.js";
 import { tabs } from "./term.js";
 
 const AGENT_SHORT = { claude: "Claude", codex: "Codex" };
@@ -299,8 +300,9 @@ function copyPlace(c) {
 function history(e) {
   const others = (e.copies || []).filter((c) => !(c.machine === e.machine && c.key === e.key));
   const n = others.length + e.history.length + (e.mirror ? 1 : 0);
-  if (!n && !e.journey && !e.lineageError) return null;
+  if (!n && !e.journey && !e.lineageError && !e.movement) return null;
   return section("copies", "Copies & history", false, h("span", { class: "chip disc-n" }, String(n)),
+    e.movement ? h("div", {class:"muted"}, `Movement operation: ${e.movement.operation || "Not available in this scan"}`) : null,
     e.lineageError ? h("div", { class: "item warn" }, `Lineage unavailable: ${e.lineageError}`, e.canArchiveLineage ? h("p", {}, "Archive this metadata to start a new family. The native conversation is preserved; Activity can undo this.") : h("p",{},"Ancestry cannot be verified. Create a separate fork to transfer it independently."),
  e.canArchiveLineage ? h("button", {class:"btn small",onclick:async()=>{try{await api("ArchiveLineage",e.machine,e.key);toast("Lineage metadata archived. Activity can undo it.");await renamed();}catch(err){fail(err);}}},"Archive unsupported lineage") : null) : null,
  e.journey ? h("div", { class: "journey-counts" },
@@ -311,7 +313,7 @@ function history(e) {
  e.journey.fork ? h("span", { class: "chip",title:`Parent branch: ${e.journey.parentBranch}` }, "Separate fork") : null,
  h("span",{class:"muted",style:"font-size:12px"},`Origin: ${e.journey.origin}; branch ${e.journey.branch.slice(0,8)}`)) : null,
  others.length ? h("div", { class: "sub-h" }, "Other copies") : null,
-    others.map((c) => h("span", {}, copyPlace(c), h("span", { class: "muted" }, c.newest ? " · newest" : c.mark ? " · marked" : " · older"))),
+    others.map((c) => h("span", {}, copyPlace(c), h("span", { class: "muted" }, c.newest ? " · newest" : c.mark ? " · marked" : " · older"), " ", h("button",{class:"link",onclick:()=>resolveDestination(c).then(selectDestination).catch(fail)},"Show copy"))),
     e.mirror ? [h("div", { class: "sub-h" }, "Mirrored"), h("span", {}, `Remote Control keeps a copy on ${e.mirror.host} while it runs. `,
       h("button", { class: "link", onclick: () => api("OpenURL", e.mirror.url).catch(fail) }, "Open it"))] : null,
     e.history.length ? [h("div", { class: "sub-h" }, e.cloud ? "Lineage" : "Where it has been"),
@@ -350,5 +352,14 @@ export function inspector(e) {
   if (!e) return h("aside", { class: "inspector", id: "inspector", "aria-label": "Session details" }, h("div", { class: "empty" }, "Select a session to see what you can do with it."));
   const m = model(e);
   return h("aside", { class: "inspector", id: "inspector", "aria-label": e.cloud ? `Cloud ${e.cloud.noun || "session"} details` : "Session details", "data-key": e.machine + "\u0000" + e.key },
-    header(e), actionRow(e, m), openIn(e, m), conversation(e), repository(e), history(e), details(e), e.cloud ? cloudNotes(e) : null);
+    header(e), actionRow(e, m), movementNotice(e, selectDestination, () => {
+      setSection("copies", true); refresh(e); $("#sec-copies")?.scrollIntoView({block:"nearest"});
+    }), returnSection(m), openIn(e, m), conversation(e), repository(e), history(e), details(e), e.cloud ? cloudNotes(e) : null);
+}
+
+function returnSection(m) {
+  if (!m.returns?.length) return null;
+  return h("section", {class:"sec", "aria-label":"Return destinations"}, h("span", {class:"sec-h"}, "Move back to an existing session"),
+    m.returns.map(a => h("div", {class:"return-choice"}, h("button", {class:"btn",onclick:a.run}, a.label),
+      h("span", {class:"muted"}, a.sub), h("span", {class:"mono"}, a.candidate.key))));
 }

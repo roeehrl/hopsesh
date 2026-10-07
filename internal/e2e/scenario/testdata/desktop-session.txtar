@@ -11,4 +11,4 @@ exec hopsesh pull 33333333-2222-4333-8444-555555555555 --in codex --yes --json
 stdout '"kind": "continue"'
 exec hopsesh ls --json --no-git
 stdout '"agent": "codex",\s+"agentName": "Codex",\s+"session"'
-stdout '"kind": "continued"'
+stdout '"kind": "prepared"'

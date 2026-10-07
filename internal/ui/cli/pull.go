@@ -24,6 +24,7 @@ func addPullFlags(cmd *cobra.Command) {
 	f.String("in", "", "continue in this agent ("+strings.Join(writerIDs(), ", ")+"; default: the session's own; from copilot-cloud or amp, whose text is written into an agent here: the one it was handed off from, else claude)")
 	f.String("fidelity", "history", "for another agent: history (the conversation as text) or note (a briefing only)")
 	f.Bool("bounded", false, "create a bounded continuation on the same branch; preserve the original session and portable archive")
+	f.Bool("new-session", false, "create a new native session without selecting or modifying an existing destination copy")
 	f.Bool("native", false, "for another agent that can: replay exact tool calls as its own (experimental)")
 	f.String("note-file", "", "a handoff note for the other agent's briefing")
 	f.Bool("go", false, "start the continued session with \"Continue.\"")
@@ -38,7 +39,7 @@ func addPullFlags(cmd *cobra.Command) {
 	f.String("worktree", "auto", "auto: recreate the worktree if the session used one; create: always use a worktree on the session's branch; main: use the main checkout")
 	f.Bool("fork", false, "keep the source session running (both continue) instead of handing off")
 	f.Bool("rc", false, "turn the agent's remote control on, where it has one")
-	f.Bool("notify", false, "have the moved session tell the old one where the work went (agents that can)")
+	f.Bool("notify", false, "record a durable movement notice (default from config; --notify=false disables it)")
 	f.Bool("redact", false, "redact likely secrets in the copy")
 	f.Bool("stop-local", false, "if this session is open on this machine, quit it first")
 	f.Bool("no-mark", false, "do not mark the copy left behind")
@@ -63,6 +64,7 @@ func (r *run) pullOptions(cmd *cobra.Command) (move.Options, error) {
 	o.TargetDir, _ = f.GetString("to")
 	o.OperationID, _ = f.GetString("operation-id")
 	o.TargetSession, _ = f.GetString("target-session")
+	o.NewReplica, _ = f.GetBool("new-session")
 	o.TargetProfile, _ = f.GetString("target-profile")
 	if v, _ := f.GetString("repos"); v != "" {
 		o.ReposDir = expandHome(v)
@@ -75,7 +77,9 @@ func (r *run) pullOptions(cmd *cobra.Command) (move.Options, error) {
 	o.Clone, _ = f.GetBool("clone")
 	o.Fork, _ = f.GetBool("fork")
 	o.RemoteControl, _ = f.GetBool("rc")
-	o.Notify, _ = f.GetBool("notify")
+	if f.Changed("notify") {
+		o.Notify, _ = f.GetBool("notify")
+	}
 	o.Redact, _ = f.GetBool("redact")
 	o.StopLocal, _ = f.GetBool("stop-local")
 	o.App, _ = f.GetBool("app")
@@ -325,6 +329,10 @@ func (r *run) renderPlan(p *move.Plan) {
 	}
 	r.printf("  from      %s (%s)\n", p.Source.CWD, p.Key)
 	r.printf("  to        %s\n", p.Target.CWD)
+	if p.Options.TargetSession != "" {
+		r.printf("  returning %s · account %s\n", p.Options.TargetSession, p.Options.TargetProfile)
+	}
+	r.printf("  notice    %t (durable movement notice)\n", p.Options.Notify)
 	switch p.Repo.Action {
 	case move.RepoUse:
 		r.printf("  repo      use %s", p.Repo.LocalPath)
@@ -414,7 +422,7 @@ func (r *run) renderResult(p *move.Plan, res *move.Result) {
 	r.printf("  Undo with: hopsesh undo %s\n\n", res.Journal)
 	r.printf("Continue it:\n\n  %s\n", res.Command)
 	if res.Notice != "" {
-		r.printf("\nTo tell the old session yourself, paste this there:\n  %s\n", res.Notice)
+		r.printf("\nMovement notice:\n  %s\n", res.Notice)
 	}
 	r.offerSkill()
 }

@@ -443,7 +443,7 @@ func (a *App) ShowPlace(name string) error {
 		return errors.New("hopsesh cannot show that app")
 	}
 	if appHook != nil {
-		return appHook(name)
+		return appHook(name, agent.Command{})
 	}
 	if runtime.GOOS != "darwin" {
 		return errors.New("hopsesh can't bring that app forward here")

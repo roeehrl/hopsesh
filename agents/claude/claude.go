@@ -32,14 +32,15 @@ type Module struct{}
 func New() *Module { return &Module{} }
 
 var (
-	_ agent.Module        = (*Module)(nil)
-	_ agent.LiveDetector  = (*Module)(nil)
-	_ agent.Stopper       = (*Module)(nil)
-	_ agent.Marker        = (*Module)(nil)
-	_ agent.AccountProber = (*Module)(nil)
-	_ agent.Sanitizer     = (*Module)(nil)
-	_ agent.Notifier      = (*Module)(nil)
-	_ agent.Integrator    = (*Module)(nil)
+	_ agent.Module           = (*Module)(nil)
+	_ agent.LiveDetector     = (*Module)(nil)
+	_ agent.Stopper          = (*Module)(nil)
+	_ agent.Marker           = (*Module)(nil)
+	_ agent.AccountProber    = (*Module)(nil)
+	_ agent.Sanitizer        = (*Module)(nil)
+	_ agent.Integrator       = (*Module)(nil)
+	_ agent.AppChecker       = (*Module)(nil)
+	_ agent.AppFocusVerifier = (*Module)(nil)
 )
 
 // iconSVG is the module's own mark for the window (drawn for hopsesh, not the vendor's
@@ -51,12 +52,13 @@ var iconSVG string
 // Spec declares Claude Code.
 func (*Module) Spec() agent.Spec {
 	return agent.Spec{
-		Accounts:  &agent.ProfileSpec{RootEnv: []string{"CLAUDE_CONFIG_DIR"}, Unset: []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"}, Login: []string{"auth", "login"}},
-		ID:        id,
-		Name:      "Claude Code",
-		Vendor:    "Anthropic",
-		Stability: agent.Stable,
-		Tested:    []string{"2.1"},
+		Accounts:      &agent.ProfileSpec{RootEnv: []string{"CLAUDE_CONFIG_DIR"}, Unset: []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"}, Login: []string{"auth", "login"}},
+		ID:            id,
+		DesktopScheme: "claude",
+		Name:          "Claude Code",
+		Vendor:        "Anthropic",
+		Stability:     agent.Stable,
+		Tested:        []string{"2.1"},
 		Binaries: []agent.Binary{{
 			Name: "claude",
 			Candidates: map[string][]string{
@@ -86,7 +88,9 @@ func (*Module) Spec() agent.Spec {
 
 // Detect resolves the config folder and the claude binary.
 func (m *Module) Detect(_ context.Context, h agent.Host) (agent.Install, error) {
-	return agent.DefaultInstall(m.Spec(), h), nil
+	in := agent.DefaultInstall(m.Spec(), h)
+	detectDesktop(h, &in)
+	return in, nil
 }
 
 // List summarises every transcript under <config>/projects, newest first. Subagent-only
@@ -377,6 +381,13 @@ func (m *Module) Resume(in agent.Install, key agent.SessionKey, p agent.Placemen
 	in.Accounts = m.Spec().Accounts
 	argv := []string{"claude"}
 	if o.App {
+		if err := m.CheckApp(in, key, o); err != nil {
+			return agent.Command{}
+		}
+		if o.AppRunning {
+			return agent.Command{Argv: []string{"/usr/bin/open", "-a", in.Desktop, "claude://resume?session=" + string(key.Session)}, Wait: true}
+		}
+		argv[0] = in.Binary
 		argv = append(argv, "--desktop")
 	}
 	argv = append(argv, "--resume", string(key.Session))
@@ -392,7 +403,7 @@ func (m *Module) Resume(in agent.Install, key agent.SessionKey, p agent.Placemen
 	if o.Prompt != "" {
 		argv = append(argv, o.Prompt)
 	}
-	return in.ScopeCommand(agent.Command{Argv: argv, Dir: p.CWD, Unset: sessionMarkers})
+	return in.ScopeCommand(agent.Command{Argv: argv, Dir: p.CWD, Unset: sessionMarkers, Wait: o.App, TTY: o.App})
 }
 
 // sessionMarkers are variables a Claude Code session sets for the programs it starts. A
@@ -400,19 +411,6 @@ func (m *Module) Resume(in agent.Install, key agent.SessionKey, p agent.Placemen
 // a resumed session then believes it is a child: with CLAUDE_CODE_CHILD_SESSION it saves
 // no transcript at all. A session hopsesh resumes is never anyone's child.
 var sessionMarkers = []string{"CLAUDE_CODE_CHILD_SESSION", "CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_ENTRYPOINT"}
-
-// NotifyInstruction asks the resumed session to message the old one through Remote
-// Control's cross-session messaging.
-func (m *Module) NotifyInstruction(oldName, oldLocation, newName string, fork bool) string {
-	s := fmt.Sprintf("Also use ListAgents and SendMessage to tell the session %q on %s that this work now continues here", oldName, oldLocation)
-	if newName != "" {
-		s += fmt.Sprintf(" as %q", newName)
-	}
-	if fork {
-		return s + ", so you can coordinate."
-	}
-	return s + ", and ask it to stop working on this task and not edit these files."
-}
 
 // Mark retitles the copy left behind with a custom-title record (what /rename writes), so
 // Claude Code's own resume list shows where it went. The file's time is kept.
