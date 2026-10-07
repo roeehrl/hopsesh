@@ -362,7 +362,7 @@ func installWindowsApp(dir string, zipData []byte, version string) error {
 			names = append(names, n)
 		}
 	}
-	if err := publishWindowsAppFiles(dir, files, names, os.Rename); err != nil {
+	if err := publishWindowsAppFiles(dir, files, names, (*os.Root).Rename); err != nil {
 		return err
 	}
 	if version != "" {
