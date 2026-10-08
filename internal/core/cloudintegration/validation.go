@@ -36,7 +36,7 @@ func (o Observation) Check(peer relay.PublicIdentity, now time.Time) error {
 	default:
 		return errors.New("unsupported cloud execution surface")
 	}
-	if len(o.Workspace) > 4096 || !path.IsAbs(o.Workspace) || path.Clean(o.Workspace) != o.Workspace || strings.ContainsAny(o.Workspace, "\x00\r\n") {
+	if !canonicalWorkspaceMetadata(o.Workspace) {
 		return errors.New("invalid cloud workspace metadata")
 	}
 	if o.ObservedAt.IsZero() || o.ObservedAt.After(now.Add(time.Minute)) || o.ObservedAt.Before(now.Add(-5*time.Minute)) || !o.LeaseExpires.After(now) || o.LeaseExpires.After(now.Add(relay.MaxLifetime+time.Minute)) {
@@ -49,6 +49,37 @@ func (o Observation) Check(peer relay.PublicIdentity, now time.Time) error {
 		return errors.New("native transcript visibility is unavailable on this cloud surface")
 	}
 	return nil
+}
+
+// This is a remote display value, never a local filesystem authority. Validate
+// both native path forms independently of the inspecting machine's OS.
+func canonicalWorkspaceMetadata(workspace string) bool {
+	if workspace == "" || len(workspace) > 4096 || strings.ContainsFunc(workspace, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+		return false
+	}
+	if strings.HasPrefix(workspace, "/") {
+		return path.Clean(workspace) == workspace
+	}
+	p := strings.ReplaceAll(workspace, `\`, "/")
+	if len(p) >= 3 && ((p[0] >= 'A' && p[0] <= 'Z') || (p[0] >= 'a' && p[0] <= 'z')) && p[1:3] == ":/" {
+		return path.Clean(p[2:]) == p[2:]
+	}
+	if strings.HasPrefix(workspace, `\\`) {
+		parts := strings.Split(p[2:], "/")
+		if len(parts) == 3 && parts[2] == "" { // A UNC share root may retain its separator.
+			parts = parts[:2]
+		}
+		if len(parts) < 2 || parts[0] == "?" || parts[0] == "." {
+			return false
+		}
+		for _, part := range parts {
+			if part == "" || part == "." || part == ".." {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // Check authenticates the typed checkpoint's byte boundary and digest before a

@@ -12,9 +12,10 @@ async function fixtures(page:Page, returns:any[], movement:any=null) {
    calls.push(req);return route.fulfill({json:{error:'Test stopped after read-only plan request'}});
   }
   if(req.m==='AccountDestinations') return route.fulfill({json:{result:[]}});
-  if(['InitialScan','Scan','RefreshHere'].includes(req.m)) {
+  if(['InitialScan','Scan','RefreshHere','QuickSnapshot'].includes(req.m)) {
    const response=await route.fetch();const body=await response.json();
-   for(const g of body.result?.groups||[]) for(const e of g.entries||[]) if(e.title==='Find the codeword') {
+   const scan=req.m==='QuickSnapshot'?body.result?.scan:body.result;
+   for(const g of scan?.groups||[]) for(const e of g.entries||[]) if(e.title==='Find the codeword') {
     e.returns=returns.map(r=>({...r,machine:r.local?e.machine:r.machine}));e.movement=movement;
    }
    return route.fulfill({json:body});

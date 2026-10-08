@@ -97,6 +97,18 @@ func TestQuickRefreshFirstScanStaysLocal(t *testing.T) {
 		t.Fatal("local refresh claims remote freshness")
 	}
 }
+
+func TestQuickPublicationRevisionDoesNotDependOnTimestamp(t *testing.T) {
+	a, _ := desktopApp(t)
+	first := &ScanDTO{Updated: "2026-10-08T19:00:00Z"}
+	second := &ScanDTO{Updated: first.Updated}
+	a.publishQuick(first)
+	before := first.Revision
+	a.publishQuick(second)
+	if before == 0 || first.Revision != before || second.Revision <= before || a.QuickSnapshot().Scan.Revision != second.Revision {
+		t.Fatal("scan publications are not immutable and ordered within a second")
+	}
+}
 func TestQuickRouteSurvivesColdWindow(t *testing.T) {
 	a, f := desktopApp(t)
 	d, err := a.RefreshHere()

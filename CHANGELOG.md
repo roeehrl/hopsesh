@@ -42,6 +42,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Background inventory notifications no longer replay an already displayed scan
+  or interrupt splitter dragging, keyboard resizing and form editing. Public
+  pairing fingerprints wrap within compact enrollment dialogs.
+- Cloud observations accept canonical Windows workspace paths when inspected
+  from another operating system; remote metadata never grants local file access.
+
 - Relay receiving starts independently of the first local inventory scan, so a
   slow scan no longer delays connections after a runtime restart.
 - Reading large private-state registries on Windows avoids repeatedly propagating

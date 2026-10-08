@@ -47,7 +47,39 @@ async function quickRoute() {
 }
 on("hopsesh:machine-scan",()=>machineScanChanged().catch(fail));
 on("hopsesh:quick-route",()=>quickRoute().catch(fail));
-on("hopsesh:quick",async()=>{if(!mainReady||state.scanning)return;const d=await api("QuickSnapshot");state.runtime=d.runtime;if(d.scan){state.scan=d.scan;state.presence=d.presence?.entries||{};if(current==="sessions"&&!document.querySelector("dialog[open], button:active"))renderSessions()}});
+// A notification may arrive after Scan already returned this exact publication.
+// Ignore duplicates and older responses; replacing the whole screen here used to
+// interrupt splitter drags, keyboard focus and conversation previews.
+let quickReading=false, quickAgain=false, quickPaint=false, pointerDown=false, quickPaintTimer;
+function paintQuick() {
+ if(!quickPaint||state.scanning||current!=="sessions"||document.hidden)return;
+ if(pointerDown||document.body.classList.contains("resizing")||document.querySelector("dialog[open], [role=menu], button:active")||document.activeElement?.matches("input, textarea, select, .divider"))return;
+ quickPaint=false;renderSessions();
+}
+// Let the complete pointer/click sequence dispatch before replacing its target.
+// This is a one-shot coalescer, not a background poll.
+function scheduleQuickPaint() { if(!quickPaint)return;clearTimeout(quickPaintTimer);quickPaintTimer=setTimeout(paintQuick,100); }
+document.addEventListener("pointerdown",()=>{pointerDown=true;},true);
+for(const event of ["pointerup","pointercancel"])document.addEventListener(event,()=>{pointerDown=false;scheduleQuickPaint();},true);
+for(const event of ["click","keyup","focusout","close"])document.addEventListener(event,scheduleQuickPaint,true);
+on("hopsesh:quick",async()=>{
+ if(!mainReady)return;
+ quickAgain=true;if(quickReading)return;
+ quickReading=true;
+ try {
+  while(quickAgain) {
+   quickAgain=false;
+   const d=await api("QuickSnapshot");state.runtime=d.runtime;
+   if(state.scanning)continue;
+   if(d.scan&&d.scan.revision>(state.scan?.revision||0)) {
+    state.scan=d.scan;state.presence=d.presence?.entries||{};quickPaint=true;
+   } else if(d.scan?.revision===state.scan?.revision&&JSON.stringify(d.presence?.entries||{})!==JSON.stringify(state.presence||{})) {
+    state.presence=d.presence?.entries||{};quickPaint=true;
+   }
+   scheduleQuickPaint();
+  }
+ } catch(e) { fail(e); } finally { quickReading=false; }
+});
 
 // The app menu (and its shortcuts) sends these.
 on("hopsesh:menu", menuCommand);

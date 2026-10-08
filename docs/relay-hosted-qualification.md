@@ -51,7 +51,7 @@ machine and agent. No product code change was needed for that assertion.
 The repository configuration defaults to paused. Local SQLite/R2 fixtures
 explicitly unpause their disposable service. After the hosted run, the deployed
 relay was restored to paused and a real admission request returned HTTP 503
-with `paused`. Browser enrollment also remains unavailable without Access config.
+with `paused`. Access enrollment configuration was subsequently qualified below.
 
 ## Hosted expiry and authorization termination
 
@@ -117,12 +117,39 @@ No network/approval settings, repository files or secrets were changed, and no
 connector was enrolled. This is a provider connectivity failure before signature
 verification, not a successful installation or lifecycle test.
 
-The user completed Zero Trust Free activation in Chrome; the dashboard confirms
-the subscription is active. A staging Access application is prepared for the
-five enrollment browser paths, restricted to `roeehrl@gmail.com` with a 30-minute
-session. Applying that access grant awaits action-time confirmation. The Worker
-still lacks the application's audience, and browser enrollment remains closed.
-Real PKCE/headless browser approvals, billing alerts and measured long-duration
+The user completed Zero Trust Free activation in Chrome and approved creating
+the staging Access application. The saved application
+`63bd3ec9-6a55-4fe7-8d54-f04565769b8a` covers exactly `/device`, `/device.js`,
+`/device.css`, `/v1/device/review` and `/v1/device/approve`. Its sole Allow policy
+includes `roeehrl@gmail.com`; the application session is 30 minutes. The Worker
+has the matching issuer and audience in nonsecret configuration.
+
+Live unauthenticated requests to all five browser paths return an Access login
+redirect. The four machine authorization endpoints reach the Worker and return
+JSON validation errors for empty requests, without browser redirects. Chrome
+completed the real Cloudflare identity login and loaded the enrollment page.
+A disposable native CLI produced a device code; the browser review displayed
+its exact independently printed fingerprint. No peer permissions were granted.
+The final delivery-credential approvals await browser action-time confirmation.
+Staging was restored to paused afterward; `/v1/device/code` returned HTTP 503
+with `paused`, and the disposable CLI namespace contains no saved connection.
+
+`TestRelayHostedAccessBrowser` is the interactive follow-up: complete CLI login
+in a disposable namespace, then run with `HOPSESH_HOSTED_ACCESS=1` and
+`HOPSESH_HOSTED_ACCESS_CLI_STATE=/absolute/disposable/state/relay`. The test checks
+the CLI credential and zero peer grants, prints a second URL/fingerprint for the
+desktop PKCE login, verifies both devices have the same authenticated user's
+space, then self-revokes both credentials and verifies HTTP 403. Browser cookies
+and operator credentials are never read by the test. Run only during a supervised
+temporary unpause; restore the paused deployment after qualification:
+
+```sh
+HOPSESH_HOSTED_ACCESS=1 \
+HOPSESH_HOSTED_ACCESS_CLI_STATE=/absolute/disposable/state/relay \
+go test -race -count=1 -v -timeout 15m -run '^TestRelayHostedAccessBrowser$' ./internal/e2e
+```
+
+Real PKCE/headless credential exchange, billing alerts and measured long-duration
 hibernation/cost behavior remain unqualified. Provider default startup,
 pause/resume/rebuild and transcript visibility remain separate gates. The PR stays
 draft and the release stays unpublished.

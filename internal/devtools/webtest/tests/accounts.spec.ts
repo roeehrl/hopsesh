@@ -47,9 +47,11 @@ test('Codex desktop action remains visible and explains why a custom account use
 test('connected remote without identity explains account setup and clears after initialization',async({page},testInfo)=>{
  let initialized=false;
  await page.route('**/call',async route=>{
-  if(route.request().postDataJSON().m!=='ScanAccounts'){await route.continue();return;}
+  const method=route.request().postDataJSON().m;
+  if(!['ScanAccounts','QuickSnapshot'].includes(method)){await route.continue();return;}
   const response=await route.fetch();const body=await response.json();
-  body.result.machines.push({name:'remote-laptop',status:'ok',local:false,agents:['Claude Code'],sessions:12,hopsesh:'',accountSetupRequired:!initialized});
+  const scan=method==='QuickSnapshot'?body.result?.scan:body.result;
+  scan?.machines.push({name:'remote-laptop',status:'ok',local:false,agents:['Claude Code'],sessions:12,hopsesh:'',accountSetupRequired:!initialized});
   await route.fulfill({json:body});
  });
  await page.locator('#btn-settings').click();await page.getByRole('button',{name:'Accounts',exact:true}).click();

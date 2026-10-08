@@ -150,6 +150,7 @@ type GroupDTO struct {
 
 // ScanDTO is the result of a scan.
 type ScanDTO struct {
+	Revision uint64       `json:"revision"` // GUI publication order, independent of timestamp precision.
 	Machines []MachineDTO `json:"machines"`
 	Groups   []GroupDTO   `json:"groups"`
 	Total    int          `json:"total"`

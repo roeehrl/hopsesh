@@ -158,6 +158,7 @@ function drag(ev, which) {
   if (ev.button !== 0) return;
   ev.preventDefault();
   const d = ev.currentTarget, grid = d.parentElement;
+  d.focus({ preventScroll: true });
   d.setPointerCapture(ev.pointerId);
   document.body.classList.add("resizing");
   d.classList.add("hot");

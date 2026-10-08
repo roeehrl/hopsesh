@@ -68,3 +68,25 @@ func TestCurrentCloudSurfaceCannotAdvertiseUnqualifiedNativeExport(t *testing.T)
 		}
 	}
 }
+
+func TestCloudWorkspaceMetadataAcrossOperatingSystems(t *testing.T) {
+	for _, test := range []struct {
+		path string
+		want bool
+	}{
+		{"/workspace/repo", true}, {"/", true},
+		{`C:\Users\runner\repo`, true}, {`D:\`, true}, {"C:/Users/runner/repo", true},
+		{`\\server\share\repo`, true}, {`\\server\share`, true},
+		{`\\server\share\`, true}, {`\\server\share\repo\`, false},
+		{"", false}, {"relative/repo", false}, {"/repo/../other", false},
+		{`C:repo`, false}, {`\repo`, false}, {`C:\repo\..\other`, false},
+		{`C:\repo\\other`, false}, {`\\server`, false}, {`\\server\share\..`, false},
+		{`\\?\C:\repo`, false}, {`\\.\pipe\repo`, false}, {"/repo\nother", false},
+	} {
+		t.Run(test.path, func(t *testing.T) {
+			if got := canonicalWorkspaceMetadata(test.path); got != test.want {
+				t.Fatalf("workspace validity = %v, want %v", got, test.want)
+			}
+		})
+	}
+}

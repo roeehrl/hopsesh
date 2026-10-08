@@ -72,6 +72,8 @@
   ],
   "vars": {
     "RELAY_PAUSED": "1",
+    "ACCESS_TEAM_DOMAIN": "https://steep-poetry-b55f.cloudflareaccess.com",
+    "ACCESS_AUDIENCE": "65d62c0f999100b76762ebf407012e4a24aecffc222bdc4d6413b1e6e4837d27",
     "DAILY_FRAMES_PER_SPACE": "4096",
     "DAILY_BYTES_PER_SPACE": "268435456"
   },

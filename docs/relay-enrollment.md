@@ -1,6 +1,8 @@
 # Relay enrollment
 
-Status: implemented clients and handler contracts; hosted qualification pending.
+Status: implemented clients and handler contracts. Hosted Access policy, real
+sign-in and device/fingerprint review pass; final native credential exchanges
+remain a supervised qualification gate. See [hosted evidence](relay-hosted-qualification.md).
 The experimental relay has its own Worker, SQLite authorization/mailbox objects,
 private ciphertext R2 bucket and domains. It shares no product-site or Souvenir
 authorization state. Enrollment authorizes delivery only. Each endpoint still
@@ -20,9 +22,9 @@ Set `ACCESS_TEAM_DOMAIN` to the team's exact `https://<team>.cloudflareaccess.co
 issuer, and `ACCESS_AUDIENCE` to this application's audience. Supply
 `ENROLLMENT_ADMIN` with `wrangler secret put`; never place it in the checked-in
 configuration, a cloud environment or an app bundle. It must contain at least
-32 bytes of high-entropy material. Review the two rate-limit namespace IDs for
+32 bytes of high-entropy material. Review the four rate-limit namespace IDs for
 account-wide uniqueness before provisioning. The checked-in configuration
-requires both rate limit bindings and the SQLite Authorization migration.
+requires all four rate-limit bindings and the SQLite Authorization migration.
 
 Unset Access/rate-limit bindings fail closed with HTTP 503. Access signature,
 issuer, audience, expiry, subject and app type are verified in the Worker even
@@ -80,7 +82,8 @@ Qualification covers the deployed handler's signature/Access/quota/expiry/CSRF/
 PKCE/retry contracts, Go client failures and cancellation, real CLI and native
 clients over verified HTTPS to the handlers, and Chromium/WebKit settings. The
 local browser fixture substitutes for Access only in the cross-language test;
-actual Access/provider deployment and hosted login remain external gates.
+real Access deployment, sign-in and review now pass. Final hosted credential
+exchange and provider lifecycle qualification remain separate gates.
 
 Sources: [device authorization](https://www.rfc-editor.org/rfc/rfc8628),
 [native OAuth](https://www.rfc-editor.org/rfc/rfc8252.html),
