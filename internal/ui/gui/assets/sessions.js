@@ -461,7 +461,18 @@ export function render() {
   // A selection the list doesn't show goes (another place, a filter, a refresh).
   if (state.sel && !shown.some((x) => x.machine === state.sel.machine && x.key === state.sel.key)) { state.sel = null; state.handoffOpen = null; }
   const content = h("section", { class: "content" }, toolbar(scopeTitle(), state.scope), h("div", { class: "list" }, notices(), body(shown, inScope)));
-  fill(view, h("div", { class: "three layout" }, sidebar(), content, inspector(selected()), dividers()));
+  const layout = view.querySelector(".three.layout");
+  if (layout) {
+    layout.querySelector("#sidebar").replaceWith(sidebar());
+    old.replaceWith(content);
+    const pane = layout.querySelector("#inspector");
+    const paneScroll = pane.scrollTop;
+    const next = inspector(selected());
+    if (pane !== next) {
+      pane.replaceWith(next);
+      if (pane.dataset.key === next.dataset.key) next.scrollTop = paneScroll;
+    }
+  } else fill(view, h("div", { class: "three layout" }, sidebar(), content, inspector(selected()), dividers()));
   counts(shown.length, inScope.length, state.scope);
   lastShown = shown; lastScope = inScope;
   applyLayout();

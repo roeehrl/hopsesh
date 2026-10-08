@@ -33,7 +33,15 @@ func TestRelayHostedIdleWake(t *testing.T) {
 	if os.Getenv("HOPSESH_HOSTED_IDLE") != "1" {
 		t.Skip("explicit ten-minute hosted idle qualification")
 	}
-	qualifyHostedRetention(t, 10*time.Minute)
+	idle := 10 * time.Minute
+	if value := os.Getenv("HOPSESH_HOSTED_IDLE_DURATION"); value != "" {
+		var err error
+		idle, err = time.ParseDuration(value)
+		if err != nil || idle < 10*time.Minute || idle > time.Hour {
+			t.Fatal("hosted idle duration must be between ten minutes and one hour")
+		}
+	}
+	qualifyHostedRetention(t, idle)
 }
 
 func qualifyHostedRetention(t *testing.T, idle time.Duration) {
@@ -50,6 +58,7 @@ func qualifyHostedRetention(t *testing.T, idle time.Duration) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Logf("disposable metrics namespace %s; started %s", space, time.Now().UTC().Format(time.RFC3339))
 	ctx, cancel := context.WithTimeout(t.Context(), idle+2*time.Minute)
 	defer cancel()
 	client := &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
@@ -127,7 +136,7 @@ func qualifyHostedRetention(t *testing.T, idle time.Duration) {
 	socket := subscribe(tb)
 	readHint(socket)
 	if idle > 0 {
-		t.Logf("beginning %s without HTTP polling, WebSocket pings or operator reads", idle)
+		t.Logf("beginning %s without HTTP polling, WebSocket pings or operator reads at %s", idle, time.Now().UTC().Format(time.RFC3339))
 		timer := time.NewTimer(idle)
 		defer timer.Stop()
 		select {

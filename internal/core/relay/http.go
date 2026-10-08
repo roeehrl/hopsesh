@@ -18,6 +18,7 @@ const MaxWireBytes = (MaxEnvelope * 4 / 3) + 65536
 
 var ErrTrafficBudget = errors.New("relay daily traffic budget exhausted; existing deliveries can drain, and the operator can review its counters")
 var ErrOperatorPaused = errors.New("relay operator paused new delivery; existing admitted work can still drain")
+var ErrAuthorizationRefused = errors.New("relay authorization refused or revoked")
 
 type Delivery struct {
 	Sequence uint64   `json:"sequence"`
@@ -103,7 +104,7 @@ func (t Transport) request(ctx context.Context, method, path string, body any, o
 		}
 		switch r.StatusCode {
 		case 401, 403:
-			return errors.New("relay authorization refused or revoked")
+			return ErrAuthorizationRefused
 		case 405:
 			return errors.New("provider proxy or relay refuses this HTTP method; POST access is required")
 		case 413, 429:

@@ -443,7 +443,13 @@ func (s Incarnation) Run(ctx context.Context) error {
 		return err
 	}
 	defer func() { stop(context.Canceled); join() }()
-	service := relay.Service{Transport: relay.Transport{Base: c.URL, Token: c.Token, Space: c.Space, HTTP: httpClient}, Processor: relay.Processor{Identity: identity, Space: c.Space, Store: store, Handle: s.Handler, Recover: s.Handler}, Notify: func(error) {
+	service := relay.Service{Transport: relay.Transport{Base: c.URL, Token: c.Token, Space: c.Space, HTTP: httpClient}, Processor: relay.Processor{Identity: identity, Space: c.Space, Store: store, Handle: s.Handler, Recover: s.Handler}, Notify: func(err error) {
+		// This incarnation has an immutable credential. Only an explicit new
+		// claim can recover authorization; retrying a refusal wastes wakeups.
+		if errors.Is(err, relay.ErrAuthorizationRefused) {
+			stop(err)
+			return
+		}
 		if s.current() != nil {
 			cancel()
 		}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"path"
 	"path/filepath"
 	"time"
@@ -46,6 +48,9 @@ func (a *App) cloudConnectorCall(ctx context.Context, id, method string, out any
 		Method    string          `json:"method"`
 		Params    json.RawMessage `json:"params"`
 	}{id, operation, method, nil}, out)
+	if errors.Is(err, os.ErrNotExist) {
+		return grant, fmt.Errorf("the local background runtime is unavailable; open Hopsesh or run 'hopsesh runtime start' with the same settings and state directories: %w", err)
+	}
 	return grant, err
 }
 

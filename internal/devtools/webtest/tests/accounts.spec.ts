@@ -1,6 +1,9 @@
 import {test,expect} from '@playwright/test';
 import {fresh,row,details} from './helpers';
 test.beforeEach(async({page})=>fresh(page));
+// The account fixture patches background snapshots too. Drain its in-flight
+// requests before closing the page so teardown cannot abort route.fetch().
+test.afterEach(async({page})=>page.unrouteAll({behavior:'wait'}));
 test('arbitrary account names, tags, edits, and a scoped transfer destination',async({page},testInfo)=>{
  await page.locator('#btn-settings').click();await page.getByRole('button',{name:'Accounts',exact:true}).click();
  for(const name of ['First personal','Second personal']){

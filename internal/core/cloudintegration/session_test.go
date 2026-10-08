@@ -3,9 +3,15 @@ package cloudintegration
 import (
 	"context"
 	"encoding/json"
+	"encoding/pem"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -28,6 +34,47 @@ func sessionFixture(t *testing.T) (string, Scope) {
 		t.Fatal(err)
 	}
 	return filepath.Join(dir, "sessions"), s
+}
+
+func TestCloudConnectorStopsAfterRoutingCredentialRevocation(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			parent, scope := sessionFixture(t)
+			s, err := Begin(t.Context(), parent, scope, time.Hour)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var polls atomic.Int32
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/v1/notifications" {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				if polls.Add(1) == 1 {
+					_ = json.NewEncoder(w).Encode(relay.Batch{})
+					return
+				}
+				w.WriteHeader(status)
+			}))
+			defer server.Close()
+			ca := filepath.Join(parent, "relay-ca.pem")
+			if err = os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}), 0600); err != nil {
+				t.Fatal(err)
+			}
+			store := relay.Store{Directory: s.Directory}
+			if err = store.SetConnection(t.Context(), relay.Connection{URL: server.URL, Space: "cloud-revoke-test", Device: s.Public.ID, Token: "disposable-test-token", Expires: time.Now().Add(time.Minute).Unix(), CAFile: ca}); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			if err = s.Run(ctx); !errors.Is(err, relay.ErrAuthorizationRefused) {
+				t.Fatalf("connector did not stop with its authorization cause: %v", err)
+			}
+			if polls.Load() != 2 {
+				t.Fatalf("refused credential was retried: %d polls", polls.Load())
+			}
+		})
+	}
 }
 
 func TestCloudIncarnationsNeverReuseSetupKeysAcrossResumeRebuildAndFork(t *testing.T) {

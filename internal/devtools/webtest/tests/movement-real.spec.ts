@@ -33,7 +33,6 @@ test('real service resolves hidden original and reviews a safe separate return w
  const background=(await (await page.request.post('/call',{data:{m:'QuickSnapshot',args:[]}})).json()).result;
  background.scan.revision=await page.evaluate(async()=>((await import('/core.js')).state.scan.revision)+1);
  expect(background.scan.groups.flatMap(g=>g.entries).some(e=>e.key===source.key)).toBe(false);
- const beforePublication=await details(page).elementHandle();
  const publication=async route=>{
   if(route.request().postDataJSON().m!=='QuickSnapshot')return route.fallback();
   await route.fulfill({json:{result:background}});
@@ -41,8 +40,7 @@ test('real service resolves hidden original and reviews a safe separate return w
  await page.route('**/call',publication);
  await page.evaluate(()=>(window as any).__emit('hopsesh:quick',null));
  await expect.poll(()=>page.evaluate(async()=>(await import('/core.js')).state.scan.revision)).toBe(background.scan.revision);
- await expect.poll(()=>beforePublication!.evaluate(el=>el.isConnected)).toBe(false);
- await beforePublication!.dispose();
+ await expect(row(page,'Find the codeword')).toHaveAttribute('aria-selected','true');
  await expect(details(page).getByRole('heading',{name:'Find the codeword',exact:true})).toBeVisible();
  await page.unroute('**/call',publication);
  const refreshed=page.waitForResponse(r=>r.url().endsWith('/call') && r.request().postDataJSON().m==='Scan');
