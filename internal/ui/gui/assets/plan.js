@@ -64,7 +64,7 @@ async function replan() {
     if(!c.sendTo && p.kind!=="fetch") {
       if(c.launch==="app"&&!p.can.app){c.launch=opensIn();c.launchNotice=p.can.appWhy||"Desktop opening is unavailable for this destination.";}
       const app=c.launch==="app";
-      if(c.opts.app!==app){c.opts.app=app;return replan();}
+      if(c.opts.app!==app || (app && c.opts.go)){c.opts.app=app;if(app)c.opts.go=false;return replan();}
     }
     c.busy = false;
     const scrollTop=sheet.querySelector('.sheet-body')?.scrollTop||0;

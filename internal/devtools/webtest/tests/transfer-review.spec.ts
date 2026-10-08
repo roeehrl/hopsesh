@@ -5,18 +5,26 @@ async function plan(page){await row(page,'Find the codeword').click();await acti
 
 test('desktop opening explains that the user must send the first message',async({page})=>{
  // Simulate desktop availability; no native application is opened by this review test.
+ let desktopOptions;
  await page.route('**/call',async route=>{
   const request=route.request().postDataJSON();if(request.m!=='Plan'){await route.continue();return;}
+  if(request.args[3].app)desktopOptions={...request.args[3]};
   request.args[3].app=false;
   const response=await route.fetch({postData:JSON.stringify(request)}),body=await response.json();
   body.result.can.app=true;body.result.can.appWhy='';await route.fulfill({json:body});
  });
  await plan(page);
+ await page.locator('#sheet').getByRole('checkbox',{name:/Send “Continue” when opening/}).check();
+ await expect(page.locator('#sheet #go')).toBeEnabled();
  await page.getByRole('button',{name:'Choose where to open the continued session'}).click();
  await page.getByRole('menuitemradio',{name:'Open in Codex app',exact:true}).click();
  await expect(page.locator('#sheet .launch-notice')).toContainText('Opens the conversation only');
  await expect(page.locator('#sheet .launch-notice')).toContainText('Send your next message in Codex');
  await expect(page.locator('#sheet').getByRole('checkbox',{name:/Send “Continue” when opening/})).toHaveCount(0);
+ expect(desktopOptions?.go).toBe(false);
+ await page.getByRole('button',{name:'Choose where to open the continued session'}).click();
+ await page.getByRole('menuitemradio',{name:'Open in Hopsesh Terminal',exact:true}).click();
+ await expect(page.locator('#sheet').getByRole('checkbox',{name:/Send “Continue” when opening/})).not.toBeChecked();
 });
 
 test('a remote transfer keeps terminal prompting regardless of the local desktop preference',async({page})=>{
