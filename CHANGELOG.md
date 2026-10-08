@@ -26,67 +26,12 @@ All notable changes to this project are documented here. The format follows
   accounts, probing login, adopting imports or applying movement marks. `--watch`
   coalesces filesystem notifications with bounded fallback reconciliation and reports
   source freshness, errors and profile-scoped session identities, without requiring a GUI.
-- Choose System, Light or Dark in Settings → General → Appearance. The saved choice
-  updates Hopsesh, Quick access and open terminal tabs immediately; System follows
-  live OS changes. macOS native window chrome follows the same choice.
+- Explicit logical cloud task continuity across approved resumes and rebuilds.
+  Fresh keys and owner-signed generations supersede old connector access while
+  verified native prefixes preserve checkpoint lineage. Checkpoint forks remain
+  separate, and private change notifications shut down superseded connectors.
 
-- Durable movement notices and branch-aware return destinations. Transfers report
-  preparation until new agent work is observed; forks keep the original available.
-  Notices can be disabled without losing lineage or returns. Receipts now require
-  `lineage/5` and peers protocol 5; older versions are refused without migration.
-  See [movement and return](docs/movement-return.md).
-
-### Fixed
-
-- Preserve transfer-review scroll position when options change, explain unavailable
-  account emails without repeating profile labels, match the close-behavior explanation
-  to the selected setting, and label missing journey origins instead of showing `/`.
-
-- Make window-close behavior default to keeping Hopsesh running in the background,
-  independently of menu-bar or tray placement on macOS, Windows and Linux. Preserve
-  explicit Quit preferences and reopen the hidden window when launching Hopsesh again.
-- Show selectable instruction files and text previews in transfer review, distinguish
-  account profiles from verified identity, explain live-source snapshots and deferred
-  moved labels, and place a remembered launch choice beside Continue. Single-account
-  destinations display their identity without a redundant Default selector.
-
-- Use the main window’s agent icons in Quick access. Put this machine first in
-  Accounts and give remote setup notices the same collapsible machine grouping.
-
-- Explain remote account setup prerequisites on the Accounts screen instead of
-  silently omitting connected machines without a Hopsesh identity. Replace the
-  sun-shaped Settings icon with a recognizable gear.
-
-- Show pending actions, screen loading, retryable read failures, and terminal
-  connection status throughout the GUI and Quick access. Keep previous sessions
-  visible during refresh, lock pending saves, prevent repeated session launches,
-  ignore obsolete navigation/plan responses, and stop reporting failed copies as
-  successful. Add delayed/failing-response browser scenarios to the CI GUI matrix.
-
-- Show a startup screen immediately while the bridge and first scan load. Report
-  module/initialization failures with a reload action; keep shortcuts from operating
-  on an uninitialized inventory and offer recovery when startup is unusually slow.
-
-- Open the selected Claude Code session in Desktop instead of only activating the
-  app. Use the supported CLI for saved sessions, with a temporary PTY and visible
-  errors; focus a currently owned Desktop session only on a verified app build.
-  Gate unsupported versions/platforms/profiles. Replace the tray arrows with the
-  official Hopsesh arch and dots, rendered as a macOS template image.
-
-- Avoid false divergence on portable returns when the first account observation rotates
-  a profile binding. Verify the original's native history while keeping native append
-  restrictions and independent-work conflict checks intact.
-
-- Prevent oversized working contexts in Claude/Codex conversions, vendor imports, cloud
-  returns and repeated round trips. Count final briefings and existing active context;
-  preserve portable text in journaled archives with bounded retrieval. Full destinations
-  can roll over to a new native session on the same logical branch. Recovery is available
-  in the GUI, TUI and CLI; originals remain available. See [context safety](docs/context-safety.md).
-- Keep Codex sessions with large first messages visible. Report imported history and
-  preparation status accurately; enforce edited cloud briefing limits and record cloud
-  return conversion losses.
-
-## [0.4.0] - 2026-10-05
+## [0.4.0] - 2026-10-08
 
 hopsesh now works with the coding agents' clouds: it hands a session to Claude Code on the
 web, Codex cloud, the GitHub Copilot cloud agent, Jules, Devin or Amp, brings their sessions
@@ -100,6 +45,26 @@ environments made in today's Codex cloud. The configuration format changed: afte
 start fresh and add your machines again.
 
 ### Added
+
+- **Terminal panels in the main window.** Choose Separate window, Bottom panel or
+  Right panel in Settings → Terminal. Resize, maximize, hide, dock and detach the
+  terminal while preserving its programs, screen, scrollback and input state.
+  A failed move keeps the original terminal view usable.
+- **Conversation families.** Group sessions and terminal tabs by verified forks and
+  transfers in the GUI, TUI and CLI. Name and collapse families, distinguish branches
+  from copies, and associate existing shells without changing conversation lineage.
+  Native Codex forks require inherited-history evidence; unverified sessions stay separate.
+
+- Choose System, Light or Dark in Settings → General → Appearance. The saved choice
+  updates Hopsesh, Quick access and open terminal tabs immediately; System follows
+  live OS changes. macOS native window chrome follows the same choice.
+
+- Durable movement notices and branch-aware return destinations. Transfers report
+  preparation until new agent work is observed; forks keep the original available.
+  Notices can be disabled without losing lineage or returns. Receipts now require
+  `lineage/5` and peers protocol 5; older versions are refused without migration.
+  See [movement and return](docs/movement-return.md).
+
 
 - **Menu bar and system tray Quick access.** Choose the supported Dock/taskbar/tray
   placement in Settings → Desktop, independently of login startup and window-close
@@ -345,6 +310,64 @@ start fresh and add your machines again.
   macOS 27, which deprecates `hdiutil attach`, and with `hdiutil` on earlier systems.
 
 ### Fixed
+
+- Keep bounded transfers readable: quote original conversation records and compaction
+  summaries, preserve message formatting, fence tool output and retain the current
+  user request separately. Very small context allowances block conversion instead of
+  silently dropping the request; full portable archives remain available.
+- Use the same detected-agent names under local and remote machine sidebar rows,
+  including installed agents with no sessions; keep connection failures explicit.
+- Wait for native window readiness before changing desktop placement or focusing
+  early reopen and Quick access requests, preventing a Windows WebView2 startup crash.
+
+- Preserve transfer-review scroll position when options change, explain unavailable
+  account emails without repeating profile labels, match the close-behavior explanation
+  to the selected setting, and label missing journey origins instead of showing `/`.
+
+- Make window-close behavior default to keeping Hopsesh running in the background,
+  independently of menu-bar or tray placement on macOS, Windows and Linux. Preserve
+  explicit Quit preferences and reopen the hidden window when launching Hopsesh again.
+- Show selectable instruction files and text previews in transfer review, distinguish
+  account profiles from verified identity, explain live-source snapshots and deferred
+  moved labels, and place a remembered launch choice beside Continue. Single-account
+  destinations display their identity without a redundant Default selector.
+
+- Use the main window’s agent icons in Quick access. Put this machine first in
+  Accounts and give remote setup notices the same collapsible machine grouping.
+
+- Explain remote account setup prerequisites on the Accounts screen instead of
+  silently omitting connected machines without a Hopsesh identity. Replace the
+  sun-shaped Settings icon with a recognizable gear.
+
+- Show pending actions, screen loading, retryable read failures, and terminal
+  connection status throughout the GUI and Quick access. Keep previous sessions
+  visible during refresh, lock pending saves, prevent repeated session launches,
+  ignore obsolete navigation/plan responses, and stop reporting failed copies as
+  successful. Add delayed/failing-response browser scenarios to the CI GUI matrix.
+
+- Show a startup screen immediately while the bridge and first scan load. Report
+  module/initialization failures with a reload action; keep shortcuts from operating
+  on an uninitialized inventory and offer recovery when startup is unusually slow.
+
+- Open the selected Claude Code session in Desktop instead of only activating the
+  app. Use the supported CLI for saved sessions, with a temporary PTY and visible
+  errors; focus a currently owned Desktop session only on a verified app build.
+  Gate unsupported versions/platforms/profiles. Replace the tray arrows with the
+  official Hopsesh arch and dots, rendered as a macOS template image.
+
+- Avoid false divergence on portable returns when the first account observation rotates
+  a profile binding. Verify the original's native history while keeping native append
+  restrictions and independent-work conflict checks intact.
+
+- Prevent oversized working contexts in Claude/Codex conversions, vendor imports, cloud
+  returns and repeated round trips. Count final briefings and existing active context;
+  preserve portable text in journaled archives with bounded retrieval. Full destinations
+  can roll over to a new native session on the same logical branch. Recovery is available
+  in the GUI, TUI and CLI; originals remain available. See [context safety](docs/context-safety.md).
+- Keep Codex sessions with large first messages visible. Report imported history and
+  preparation status accurately; enforce edited cloud briefing limits and record cloud
+  return conversion losses.
+
 
 - Windows UI validation waits for the actual main window and uses the remote-session
   continuation label. Screenshot failures now fail CI and retain their own reports.
