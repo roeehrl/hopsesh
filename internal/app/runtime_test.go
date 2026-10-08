@@ -12,12 +12,76 @@ import (
 	"testing"
 	"time"
 
+	"github.com/roeehrl/hopsesh/agents/claude"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/observe"
 	"github.com/roeehrl/hopsesh/internal/core/registry"
 	"github.com/roeehrl/hopsesh/internal/core/relay"
 	localruntime "github.com/roeehrl/hopsesh/internal/core/runtime"
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
+
+type blockedRuntimeInventory struct {
+	agent.Module
+	entered chan struct{}
+}
+
+func (m blockedRuntimeInventory) List(ctx context.Context, _ agent.Host, _ agent.Install) (agent.Listing, error) {
+	select {
+	case m.entered <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	return agent.Listing{}, ctx.Err()
+}
+
+func TestRelayStartsBeforeInitialInventoryCompletes(t *testing.T) {
+	entered, contacted := make(chan struct{}, 1), make(chan struct{}, 1)
+	a, home, _ := observerFixture(t, blockedRuntimeInventory{claude.New(), entered})
+	a.Cfg.Relay.Enabled = true
+	if err := config.Save(&a.Cfg); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer startup-token" {
+			w.WriteHeader(403)
+			return
+		}
+		select {
+		case contacted <- struct{}{}:
+		default:
+		}
+		_ = json.NewEncoder(w).Encode(relay.Batch{})
+	}))
+	defer server.Close()
+	ca := filepath.Join(home, "relay-ca.pem")
+	if err := os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	store := relay.Store{Directory: filepath.Join(config.StateDir(), "relay")}
+	id, err := store.Identity(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.SetConnection(t.Context(), relay.Connection{URL: server.URL, Space: "startup-space-123", Device: id.Public.ID, Token: "startup-token", Expires: time.Now().Add(time.Hour).Unix(), CAFile: ca}); err != nil {
+		t.Fatal(err)
+	}
+	owner, err := a.StartRuntime(t.Context(), "headless", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	for _, event := range []chan struct{}{entered, contacted} {
+		select {
+		case <-event:
+		case <-time.After(5 * time.Second):
+			t.Fatal("relay startup waited for blocked initial inventory")
+		}
+	}
+	if owner.Engine.Latest().Sequence != 0 {
+		t.Fatal("fixture unexpectedly completed inventory")
+	}
+}
 
 func TestRunningRuntimeAdoptsFirstEnrollmentAndCredentialRenewalWithoutRestart(t *testing.T) {
 	home := t.TempDir()

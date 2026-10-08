@@ -27,8 +27,8 @@ func assertCurrentOwner(t *testing.T, path string) {
 	if !windows.EqualSid(owner, u.User.Sid) {
 		t.Fatal("private state did not narrow token-default ownership to the current user")
 	}
-	acl, present, err := sd.DACL()
-	if err != nil || !present || acl == nil || acl.AceCount != 1 {
+	acl, defaulted, err := sd.DACL()
+	if err != nil || defaulted || acl == nil || acl.AceCount != 1 {
 		t.Fatal("private state does not have one explicit user ACL", err)
 	}
 }
@@ -78,6 +78,44 @@ func TestPrivateWindowsOwnerPolicyRejectsUnrelatedSID(t *testing.T) {
 	}
 	if allowed, err := tokenOwnsSID(foreign); err != nil || allowed {
 		t.Fatal("foreign owner accepted", err)
+	}
+}
+
+func TestPrivateWindowsACLRecheckRejectsBroaderOrInheritedPermissions(t *testing.T) {
+	u, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid := u.User.Sid.String()
+	desired, err := windows.SecurityDescriptorFromString("D:P(A;OICI;FA;;;" + sid + ")")
+	if err != nil {
+		t.Fatal(err)
+	}
+	acl, _, err := desired.DACL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, sddl string
+		match      bool
+	}{
+		{"exact", "D:P(A;OICI;FA;;;" + sid + ")", true},
+		{"parent inheritance enabled", "D:(A;OICI;FA;;;" + sid + ")", false},
+		{"foreign reader", "D:P(A;OICI;FA;;;" + sid + ")(A;;FR;;;WD)", false},
+		{"wrong user", "D:P(A;OICI;FA;;;WD)", false},
+		{"read only", "D:P(A;OICI;FR;;;" + sid + ")", false},
+		{"children unprotected", "D:P(A;;FA;;;" + sid + ")", false},
+		{"inherited ACE", "D:P(A;OICIID;FA;;;" + sid + ")", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sd, err := windows.SecurityDescriptorFromString(tc.sddl)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if sameProtectedDACL(sd, acl) != tc.match {
+				t.Fatal("incorrect private ACL decision")
+			}
+		})
 	}
 }
 

@@ -92,6 +92,14 @@ func TestOwnedReadsRefuseMutationOfOpenedObject(t *testing.T) {
 					}
 					body = []byte("{}\n")
 				}
+				if runtime.GOOS == "windows" {
+					// The native read handle denies concurrent writes as well as
+					// replacement; the stable snapshot must remain readable.
+					if err := os.WriteFile(path, body, 0600); err == nil {
+						t.Fatal("opened native file was writable")
+					}
+					return
+				}
 				if err := os.WriteFile(path, body, 0600); err != nil {
 					t.Fatal(err)
 				}
@@ -100,7 +108,7 @@ func TestOwnedReadsRefuseMutationOfOpenedObject(t *testing.T) {
 				}
 			}}
 			body, err := readStableFile(f, 4096)
-			if name == "replace pathname" {
+			if name == "replace pathname" || runtime.GOOS == "windows" {
 				if err != nil || string(body) != string(original) {
 					t.Fatal("replacement changed the opened snapshot", string(body), err)
 				}

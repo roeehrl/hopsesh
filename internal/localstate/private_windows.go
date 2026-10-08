@@ -3,6 +3,7 @@
 package localstate
 
 import (
+	"bytes"
 	"errors"
 	"golang.org/x/sys/windows"
 	"unsafe"
@@ -37,7 +38,7 @@ func secureOwnedHandle(h windows.Handle, directory bool) error {
 	if err != nil {
 		return err
 	}
-	sd, err := windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION)
+	sd, err := windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
 	if err != nil {
 		return err
 	}
@@ -56,13 +57,20 @@ func secureOwnedHandle(h windows.Handle, directory bool) error {
 	if directory {
 		sddl = "D:P(A;OICI;FA;;;" + u.User.Sid.String() + ")"
 	}
-	sd, err = windows.SecurityDescriptorFromString(sddl)
+	desired, err := windows.SecurityDescriptorFromString(sddl)
 	if err != nil {
 		return err
 	}
-	acl, _, err := sd.DACL()
+	acl, _, err := desired.DACL()
 	if err != nil {
 		return err
+	}
+	// SetSecurityInfo propagates inheritable directory ACEs to existing children.
+	// Rewriting an already-private parent for each read makes a large registry
+	// quadratic. Recheck the opened object's exact protected ACL every time, but
+	// only write when ownership or permissions actually need narrowing.
+	if windows.EqualSid(owner, u.User.Sid) && sameProtectedDACL(sd, acl) {
+		return nil
 	}
 	// Elevated Windows tokens can default new objects to Administrators. Narrow
 	// that exact token-default owner to the current user as well as the DACL;
@@ -75,6 +83,27 @@ func secureOwnedHandle(h windows.Handle, directory bool) error {
 		newOwner = u.User.Sid
 	}
 	return windows.SetSecurityInfo(h, windows.SE_FILE_OBJECT, security, newOwner, nil, acl, nil)
+}
+
+func sameProtectedDACL(sd *windows.SECURITY_DESCRIPTOR, desired *windows.ACL) bool {
+	control, _, err := sd.Control()
+	if err != nil || control&windows.SE_DACL_PROTECTED == 0 {
+		return false
+	}
+	actual, defaulted, err := sd.DACL()
+	if err != nil || defaulted || actual == nil || desired == nil || actual.AceCount != desired.AceCount {
+		return false
+	}
+	for i := uint32(0); i < uint32(actual.AceCount); i++ {
+		var a, b *windows.ACCESS_ALLOWED_ACE
+		if windows.GetAce(actual, i, &a) != nil || windows.GetAce(desired, i, &b) != nil || a == nil || b == nil || a.Header.AceSize != b.Header.AceSize {
+			return false
+		}
+		if !bytes.Equal(unsafe.Slice((*byte)(unsafe.Pointer(a)), int(a.Header.AceSize)), unsafe.Slice((*byte)(unsafe.Pointer(b)), int(b.Header.AceSize))) {
+			return false
+		}
+	}
+	return true
 }
 
 func tokenOwnsSID(owner *windows.SID) (bool, error) {

@@ -245,6 +245,7 @@ jobs:
           cache: npm
           cache-dependency-path: internal/devtools/webtest/package-lock.json
       - name: GUI build dependencies
+        working-directory: .
         run: bash scripts/install-ci-dependencies.sh libgtk-4-dev libwebkitgtk-6.0-dev
       - run: npm ci
       - run: npx playwright install --with-deps chromium webkit

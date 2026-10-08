@@ -110,6 +110,9 @@ func slowWorld(t *testing.T) slowFolders {
 		copyFile(t, self, filepath.Join(bin, "git.exe"))
 		t.Setenv("HOPSESH_TEST_REAL_GIT", real)
 		t.Setenv("HOPSESH_TEST_GIT_LOG", w.log)
+		// Each stand-in is this race-instrumented test binary. Its default
+		// one-second exit sleep is not Git latency and accumulates per probe.
+		t.Setenv("GORACE", strings.TrimSpace(os.Getenv("GORACE")+" atexit_sleep_ms=0"))
 		ProbeTimeout = 15 * time.Second // the stand-in is a large program, started for every call
 	} else {
 		script := "#!/bin/sh\ncase \"$*\" in *offloaded*) exec sleep 60 ;; *busy*) sleep 0.5 ;; esac\nexec '" + real + "' \"$@\"\n"

@@ -117,9 +117,12 @@ No network/approval settings, repository files or secrets were changed, and no
 connector was enrolled. This is a provider connectivity failure before signature
 verification, not a successful installation or lifecycle test.
 
-Zero Trust Free checkout requires accepting terms and excess-usage card charges;
-the user must complete that commitment. Its allowed-user Access application,
-real PKCE/headless browser approvals, billing alerts and measured long-duration
+The user completed Zero Trust Free activation in Chrome; the dashboard confirms
+the subscription is active. A staging Access application is prepared for the
+five enrollment browser paths, restricted to `roeehrl@gmail.com` with a 30-minute
+session. Applying that access grant awaits action-time confirmation. The Worker
+still lacks the application's audience, and browser enrollment remains closed.
+Real PKCE/headless browser approvals, billing alerts and measured long-duration
 hibernation/cost behavior remain unqualified. Provider default startup,
 pause/resume/rebuild and transcript visibility remain separate gates. The PR stays
 draft and the release stays unpublished.

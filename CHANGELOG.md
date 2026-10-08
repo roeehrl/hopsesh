@@ -42,6 +42,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Relay receiving starts independently of the first local inventory scan, so a
+  slow scan no longer delays connections after a runtime restart.
+- Reading large private-state registries on Windows avoids repeatedly propagating
+  unchanged directory permissions. Every read still verifies ownership and the
+  exact protected access list before accepting the file.
+
 - Installing a missing macOS app cannot replace another app or filesystem entry
   that appears while the signed download is being verified. Publication refuses
   replacement atomically; existing installations keep their updater workflow.
