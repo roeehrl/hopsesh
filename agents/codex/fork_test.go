@@ -53,3 +53,70 @@ func TestNativeForkUsesDeclaredParentAndVerifiedRecords(t *testing.T) {
 		t.Fatal("matching text without declared ancestry must not link")
 	}
 }
+
+func TestDeclaredForkBoundaryMustBeFullyVerified(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		delta   int
+		corrupt bool
+		profile bool
+		empty   bool
+	}{
+		{name: "complete"}, {name: "truncated parent", delta: 1}, {name: "mismatch before boundary", corrupt: true}, {name: "another profile", profile: true}, {name: "empty proof", empty: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			fh := newHost(t)
+			m := New()
+			in, _ := m.Detect(ctx, fh)
+			h := agent.Confine(fh, m.Spec(), in)
+			listing, _ := m.List(ctx, h, in)
+			var parent agent.Summary
+			for _, s := range listing.Sessions {
+				if string(s.Key.Session) == t1 {
+					parent = s
+				}
+			}
+			raw, _ := fh.FS().ReadFile(parent.Path, 1<<20)
+			lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+			records := make([]map[string]any, len(lines))
+			for i, l := range lines {
+				json.Unmarshal([]byte(l), &records[i])
+				records[i]["ordinal"] = i
+			}
+			encode := func() []byte {
+				var b strings.Builder
+				for _, r := range records {
+					x, _ := json.Marshal(r)
+					b.Write(x)
+					b.WriteByte('\n')
+				}
+				return []byte(b.String())
+			}
+			fh.Put(parent.Path, encode(), time.Now())
+			meta := records[0]["payload"].(map[string]any)
+			meta["id"] = t3
+			meta["forked_from_id"] = t1
+			meta["forked_from_ordinal_exclusive"] = len(records) + tc.delta
+			if tc.empty {
+				meta["forked_from_ordinal_exclusive"] = 1
+			}
+			if tc.corrupt {
+				records[1]["timestamp"] = "changed"
+			}
+			child := agent.Summary{Key: agent.SessionKey{Agent: "codex", Session: t3}, Path: path.Join(path.Dir(parent.Path), "rollout-child.jsonl")}
+			if tc.profile {
+				child.Key.Profile = "another"
+			}
+			fh.Put(child.Path, encode(), time.Now())
+			proof, err := m.VerifyNativeFork(ctx, h, in, parent, child)
+			if tc.name == "complete" {
+				if err != nil || len(proof) == 0 {
+					t.Fatalf("complete proof: %v %v", proof, err)
+				}
+			} else if err == nil {
+				t.Fatalf("accepted invalid ancestry: %v", proof)
+			}
+		})
+	}
+}

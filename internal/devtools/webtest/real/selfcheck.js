@@ -14,15 +14,21 @@
   const listed = await until(() => [...document.querySelectorAll("h1, h2")].some((h) => /All sessions/.test(h.textContent))
     && document.querySelectorAll(".row").length >= 2, 90000);
   if (!listed) return;
-  const { Call } = await import("/wails/runtime.js");
+  const { Call, Window } = await import("/wails/runtime.js");
   const call=(name,...args)=>Call.ByName("github.com/roeehrl/hopsesh/internal/ui/gui.App."+name,...args);
   const d=await call("DesktopSettings");
-  const input={mode:"app",close:"quit",attention:true,previews:true,login:d.login};
+  const input={mode:"app",close:"keep",attention:true,previews:true,login:d.login};
   for(const mode of ["app",...(d.capabilities.tray?["both"]:[]),...(d.capabilities.hideApp&&d.capabilities.tray?["tray"]:[]),"app"]) {
     await call("SaveDesktop",{...input,mode});
     const saved=await call("DesktopSettings");
     if(saved.effective!==mode)throw Error("Desktop mode not applied: "+mode);
   }
+  // Exercise the actual close hook with no tray: the webview and backend must
+  // survive, and the same route used by a second app launch must reopen it.
+  await Window.Close();
+  await new Promise(r=>setTimeout(r,300));
+  await call("QuickOpen","sessions","","");
+  if(!await until(()=>document.querySelectorAll(".row").length>=2,10000))throw Error("Background close could not reopen the existing window");
   const q=await call("QuickSnapshot");
   if(!q.scan||q.scan.total<2)throw Error("Quick access has no shared inventory");
   const entry=q.scan.groups.flatMap(g=>g.entries)[0];

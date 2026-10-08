@@ -38,7 +38,7 @@ func (f *fakeDesktop) Apply(p config.Desktop, login bool) error {
 func (f *fakeDesktop) Recheck() {}
 func (f *fakeDesktop) KeepOnClose() bool {
 	s := f.Snapshot()
-	return desktop.KeepOnClose(s.Preferences, s.Capabilities, false)
+	return desktop.KeepOnClose(s.Preferences)
 }
 func (f *fakeDesktop) OpenMain()             { f.mu.Lock(); defer f.mu.Unlock(); f.opens++ }
 func (f *fakeDesktop) CloseQuick()           {}
@@ -146,5 +146,26 @@ func TestDesktopSaveFailureRollsBack(t *testing.T) {
 	}
 	if a.snapshot().Cfg.Desktop.Placement() != before.Preferences.Placement() {
 		t.Fatal("memory preferences were not rolled back")
+	}
+}
+
+func TestBackgroundCloseWithoutTrayOrTerminal(t *testing.T) {
+	a, f := desktopApp(t)
+	f.s = desktop.State{Preferences: config.Desktop{}, Capabilities: desktop.Capabilities{}, Effective: "app"}
+	if a.TerminalRunning() != 0 {
+		t.Fatal("expected no terminals")
+	}
+	if cancel, hide := a.MainClosing(); !cancel || !hide {
+		t.Fatal("default close must hide and keep process alive even without a tray")
+	}
+	if err := a.QuickOpen("sessions", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if f.opens != 1 {
+		t.Fatal("reopen did not route to existing main window")
+	}
+	f.s.Preferences.Close = "quit"
+	if cancel, _ := a.MainClosing(); cancel {
+		t.Fatal("explicit Quit choice was ignored")
 	}
 }

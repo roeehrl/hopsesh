@@ -36,8 +36,8 @@ export function returnActions(e, open) {
         h("p", {class:"muted"}, r.reason || ""), h("p", {class:"mono"}, r.key),
         !canPlan ? h("p", {}, `To return to ${r.machine}, run Hopsesh on ${e.machine} or ${r.machine}.`) : null,
         h("div", {class:"dlg-foot"}, h("button", {class:"btn",onclick:()=>d.close()}, "Close"),
-          destination ? h("button", {class:"btn",onclick:()=>{d.close();open(destination)}}, "Show destination") : null,
-          canPlan && ["available", "verify", "diverged", "missing"].includes(r.status) ? h("button", {class:"btn primary",onclick:()=>{d.close();plan()}},
+          destination ? h("button", {class:"btn",onclick:()=>{d.close();return open(destination)}}, "Show destination") : null,
+          canPlan && ["available", "verify", "diverged", "missing"].includes(r.status) ? h("button", {class:"btn primary",onclick:()=>{d.close();return plan()}},
             r.status === "missing" ? "Review new session there" : r.status === "diverged" ? "Review plan keeping both branches" : "Verify and review plan") : null));
     };
     return { id: `return:${r.replica || r.machine + ":" + r.key}`, label, sub: `${r.status} · ${r.reason || r.key}`, candidate: r,
@@ -51,7 +51,7 @@ export function returnActions(e, open) {
 
 export function returnChooser(actions) {
   const d = dialog(h("h2", {}, "Choose where to move back"),
-    ...actions.map(a => h("div", {class:"return-choice"}, h("button", {class:"btn",onclick:()=>{d.close();a.run()}}, a.label),
+    ...actions.map(a => h("div", {class:"return-choice"}, h("button", {class:"btn",onclick:()=>{d.close();return a.run()}}, a.label),
       h("span", {class:"muted"}, a.sub), h("span", {class:"mono"}, a.candidate.key))),
     h("div", {class:"dlg-foot"}, h("button", {class:"btn",onclick:()=>d.close()}, "Cancel")));
 }

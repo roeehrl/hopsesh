@@ -14,8 +14,13 @@ const tick = (kind) => h("span", { class: "badge " + kind }, kind === "ok" ? "�
 
 // planHop opens the hop sheet for a cloud session.
 export async function planHop(e, cloud) {
+  const opening = {};
+  hop = opening;
+  fill(sheet, h("div", { class: "sheet-in" }, h("div", { class: "loading", role: "status" }, "Reading hand-off settings…"), h("button", { class: "btn", onclick: () => sheet.close() }, "Cancel")));
+  if (!sheet.open) sheet.showModal();
   let d = {};
   try { d = await api("HandoffDefaults", cloud); } catch { /* the defaults below */ }
+  if (hop !== opening || !sheet.open) return;
   hop = { e, cloud, opts: { untracked: [], historyFile: false, bundle: false, mark: d.mark !== false, cleanup: d.cleanup || "", brief: "", note: "", carryRules: false, env: "", startingDiff: false },
     plan: null, busy: false, applying: false };
   fill(sheet, h("div", { class: "sheet-in" }, h("div", { class: "loading", role: "status", style: "min-height:240px" }, "Working out both legs…")));
@@ -23,24 +28,33 @@ export async function planHop(e, cloud) {
   await replan();
 }
 
+let planning = Promise.resolve();
 async function replan() {
   const c = hop;
+  if (!c) return;
+  const revision = c.revision = (c.revision || 0) + 1;
   c.busy = true;
   const btn = sheet.querySelector("#hop-go");
   if (btn) btn.disabled = true;
   try {
-    const p = await api("PlanHop", c.e.machine, c.e.key, c.cloud, c.opts);
-    if (hop !== c) return;
+    const request = planning.then(() => {
+      if (hop !== c || c.revision !== revision) return null;
+      return api("PlanHop", c.e.machine, c.e.key, c.cloud, c.opts);
+    });
+    planning = request.catch(() => {});
+    const p = await request;
+    if (hop !== c || c.revision !== revision || !p) return;
     c.plan = p;
     c.busy = false;
     render();
   } catch (err) {
+    if (hop !== c || c.revision !== revision) return;
     c.busy = false;
     if (hop === c) problem(errText(err));
   }
 }
 
-const set = (k, v) => { hop.opts[k] = v; replan(); };
+const set = (k, v) => { hop.opts[k] = v; return replan(); };
 
 function problem(msg, journal) {
   fill(sheet, h("div", { class: "sheet-in", role: "alertdialog", "aria-labelledby": "hop-msg" },

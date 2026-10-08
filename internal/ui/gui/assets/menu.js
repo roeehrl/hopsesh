@@ -27,7 +27,7 @@ function item(it, level) {
       if (it.disabled) return;
       if (it.submenu) { openSub(el, it, level); return; }
       if (!it.keep) closeAll(true);
-      it.run?.(ev);
+      return it.run?.(ev);
     },
     onpointerenter: () => { if (it.submenu && !it.disabled) openSub(el, it, level); else closeFrom(level + 1); },
   },
@@ -84,7 +84,7 @@ function openSub(btn, it, level) {
   btn.setAttribute("aria-expanded", "true");
   const entry = { el, anchor: btn, side: true, onclose: () => btn.setAttribute("aria-expanded", "false"), build: it.submenu };
   stack.push(entry);
-  document.body.append(el);
+  (btn.closest("dialog[open]") || document.body).append(el);
   place(entry);
   el.addEventListener("keydown", (ev) => keys(ev, el));
   return el;
@@ -128,7 +128,7 @@ function show(el, anchor, opts) {
   const entry = { el, anchor, align: opts.align, width: opts.width, onclose: opts.onclose };
   stack.push(entry);
   anchor?.setAttribute?.("aria-expanded", "true");
-  document.body.append(el);
+  (anchor?.closest?.("dialog[open]") || document.body).append(el);
   place(entry);
   el.addEventListener("keydown", (ev) => keys(ev, el));
 }

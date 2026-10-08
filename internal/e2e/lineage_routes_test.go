@@ -163,6 +163,21 @@ func runLineageRoute(t *testing.T, route, start string, mask int, patterns ...st
 		currentAgent = nextAgent
 		current = findRouteSession(t, dst, mods[nextAgent], installs[to][nextAgent], p.Placement.Key)
 		seg := readAll(t, dst, mods[nextAgent], installs[to][nextAgent], current)
+		if pattern == "pressure" && p.Continue != nil && p.Continue.Report.Summarised > 0 {
+			request := fmt.Sprintf("ROUTE-WORK-%d-UNIQUE", i)
+			found := false
+			for _, n := range seg.Nodes {
+				if n.Actor == ir.User && strings.Contains(n.Text, request) {
+					if strings.Contains(n.Text, "Transfer context") {
+						t.Fatalf("hop %d: transfer context merged into actual user request", i)
+					}
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("hop %d: latest user request lost under context pressure", i)
+			}
+		}
 		var text strings.Builder
 		for _, n := range seg.Nodes {
 			text.WriteString(n.Text)

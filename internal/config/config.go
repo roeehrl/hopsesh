@@ -103,6 +103,8 @@ type Peer struct {
 
 // Terminal is how hopsesh opens sessions and steps in a terminal app.
 type Terminal struct {
+	Placement string `toml:"placement,omitempty"` // separate (default), bottom, right
+	Grouping  string `toml:"grouping,omitempty"`  // family (default), session, none
 	// App is the terminal app launches open in: "iterm2", "terminal-app" (macOS),
 	// "windows-terminal", "linux"; "" picks the best installed one (iTerm2 before
 	// Terminal on macOS).
@@ -173,10 +175,11 @@ var InspectorSections = []string{"conversation", "repository", "copies", "detail
 // means the app has not chosen yet (it picks once, by how many sessions the first scan
 // finds).
 type List struct {
-	GroupBy     string `toml:"group_by,omitempty"`     // ListGroups ("": repository)
-	SortBy      string `toml:"sort_by,omitempty"`      // ListSorts ("": last-active)
-	SortReverse bool   `toml:"sort_reverse,omitempty"` // oldest, Z–A or smallest first
-	Density     string `toml:"density,omitempty"`      // comfortable | compact
+	TerminalCollapsed []string `toml:"terminal_collapsed,omitempty"`
+	GroupBy           string   `toml:"group_by,omitempty"`     // ListGroups ("": repository)
+	SortBy            string   `toml:"sort_by,omitempty"`      // ListSorts ("": last-active)
+	SortReverse       bool     `toml:"sort_reverse,omitempty"` // oldest, Z–A or smallest first
+	Density           string   `toml:"density,omitempty"`      // comfortable | compact
 	// CollapseInactive starts groups whose newest session is more than 14 days old
 	// collapsed, unless the user expanded them.
 	CollapseInactive bool       `toml:"collapse_inactive,omitempty"`
@@ -207,7 +210,7 @@ type ListFilter struct {
 
 // The list's choices.
 var (
-	ListGroups     = []string{"repository", "location", "agent", "account", "tag", "status", "last-active", "none"}
+	ListGroups     = []string{"family", "repository", "location", "agent", "account", "tag", "status", "last-active", "none"}
 	ListSorts      = []string{"last-active", "title", "status", "size"}
 	ListDensities  = []string{"comfortable", "compact"}
 	ListStatuses   = []string{"needs", "working", "idle", "moved", "ended", "unknown"}
@@ -255,10 +258,13 @@ const (
 
 // Config is the user's configuration file.
 type Config struct {
-	Desktop  Desktop `toml:"desktop,omitempty"`
-	Schema   int     `toml:"schema"`
-	ReposDir string  `toml:"repos_dir"` // where clones go; default ~/git
-	Layout   string  `toml:"layout"`    // flat | ghq
+	FamilyNames map[string]string `toml:"family_names,omitempty"`
+	// Appearance is system (also the empty default), light or dark for app windows.
+	Appearance string  `toml:"appearance,omitempty"`
+	Desktop    Desktop `toml:"desktop,omitempty"`
+	Schema     int     `toml:"schema"`
+	ReposDir   string  `toml:"repos_dir"` // where clones go; default ~/git
+	Layout     string  `toml:"layout"`    // flat | ghq
 	// UpdateCheck is "on" or "off" once the person has answered whether the app may
 	// look for new releases once a day ("" = not asked yet).
 	UpdateCheck string `toml:"update_check,omitempty"`
@@ -549,6 +555,9 @@ var fontName = regexp.MustCompile(`^[\p{L}\p{N} ._,'"-]{0,120}$`)
 
 // Check reports settings hopsesh cannot act on.
 func (c Config) Check() error {
+	if err := CheckAppearance(c.Appearance); err != nil {
+		return err
+	}
 	if err := c.Desktop.Check(); err != nil {
 		return err
 	}
@@ -570,6 +579,24 @@ func (c Config) Check() error {
 	}
 	if !fontName.MatchString(c.Terminal.Font) {
 		return fmt.Errorf("terminal.font is %q: use a font family's name", c.Terminal.Font)
+	}
+	if len(c.List.TerminalCollapsed) > 200 {
+		return fmt.Errorf("too many collapsed terminal groups")
+	}
+	for _, id := range c.List.TerminalCollapsed {
+		if len(id) > 512 {
+			return fmt.Errorf("terminal group key too long")
+		}
+	}
+	switch c.Terminal.Placement {
+	case "", "separate", "bottom", "right":
+	default:
+		return fmt.Errorf("invalid terminal placement %q", c.Terminal.Placement)
+	}
+	switch c.Terminal.Grouping {
+	case "", "family", "session", "none":
+	default:
+		return fmt.Errorf("invalid terminal grouping %q", c.Terminal.Grouping)
 	}
 	switch c.Terminal.ScreenReader {
 	case "", "on", "off":

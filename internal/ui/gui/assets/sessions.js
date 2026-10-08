@@ -2,7 +2,7 @@
 // clouds), the sessions in the middle as one tree (grouped, sorted and filtered by
 // listview.js), the selected session on the right (inspector.js). Every action on a
 // session comes from actions.js, which the palette uses too.
-import { api, on, h, fill, icon, ICONS, view, state, screen, go, current, loading, toast, fail, cap, ago, agentBadge, machineStatus, sys, keys,
+import { loadError, api, on, h, fill, icon, ICONS, view, state, screen, go, current, loading, toast, fail, cap, ago, agentBadge, machineStatus, sys, keys,
   entries, selected, here, agentInfo, $, count, clouds, cloudOf, cloudState, cloudChip, dialog, errText, rich, cloudTitle } from "./core.js";
 import { planPicked } from "./plan.js";
 import { dividers, apply as applyLayout } from "./layout.js";
@@ -20,6 +20,7 @@ export { actionsFor } from "./actions.js";
 export async function scan() {
   if (state.scanning) return;
   state.scanning = true;
+  state.scanError = "";
   state.stale = false;
   freshness();
   if (!state.scan) {
@@ -34,8 +35,10 @@ export async function scan() {
     state.info = await api("Info");
     state.activity = await api("Activity").catch(() => state.activity);
   } catch (e) {
+    state.scanError = errText(e);
+    state.stale = true;
     state.scanning = false;
-    if (!state.scan) fill(view, h("div", { class: "loading err" }, String(e.message || e)));
+    if (!state.scan && current === "sessions") fill(view, loadError(e, () => go("sessions", true)));
     else fail(e);
     freshness();
     return;
@@ -74,7 +77,9 @@ setInterval(freshness, 30000);
 // menu is open, or another screen is shown.
 const HERE_EVERY = 60_000, ALL_AFTER = 5 * 60_000;
 const since = (iso) => (iso ? Date.now() - new Date(iso).getTime() : Infinity);
-const busy = () => !state.scan || state.scanning || current !== "sessions" || document.hidden || !!document.querySelector("dialog[open]") || isOpen();
+// A presence response between pointer-down and pointer-up must not replace the
+// button under the pointer: WebKit would then swallow the user's click.
+const busy = () => !state.scan || state.scanning || current !== "sessions" || document.hidden || !!document.querySelector("dialog[open], button:active") || isOpen();
 async function autoRefresh(all) {
   if (busy()) return;
   if (all) await scan(); else if (!state.info?.desktopManaged) await refreshHere();
@@ -148,7 +153,8 @@ function sidebar() {
   const dotFor = (m) => machineStatus(m.status)[0];
   const act = state.activity;
   const mine = all.filter((e) => e.machine === here() && !e.cloud);
-  const myAgents = [...new Set(mine.map((e) => e.agentName))].join(", ");
+  const local = s.machines.find((m) => m.local);
+  const agentSubtitle = (m) => (m?.agentNames || []).join(", ") || "No agents detected";
   const on = clouds().filter((c) => c.allowed);
   return h("nav", { class: "sidebar", id: "sidebar", "aria-label": "Places" },
     h("button", { class: "side-btn", "aria-current": cur("needs"), onclick: () => setScope({ kind: "needs" }) },
@@ -157,11 +163,11 @@ function sidebar() {
     h("button", { class: "side-btn", "aria-current": cur("all"), onclick: () => setScope({ kind: "all" }) }, icon(ICONS.all), "All sessions", h("span", { class: "count" }, all.length)),
     h("div", { class: "side-h" }, "Machines"),
     h("button", { class: "side-btn", "aria-current": cur("here"), onclick: () => setScope({ kind: "here" }) },
-      h("span", { class: "dot ok" }), h("span", { class: "label" }, h("span", {}, sys.Here), myAgents ? h("small", {}, myAgents) : null),
+      h("span", { class: "dot ok" }), h("span", { class: "label" }, h("span", {}, sys.Here), h("small", { title: (local?.agents || []).join(", ") }, agentSubtitle(local))),
       h("span", { class: "count" }, mine.length)),
     machines.map((m) => h("button", { class: "side-btn", "aria-current": cur("machine", m.name), onclick: () => setScope({ kind: "machine", value: m.name }) },
       h("span", { class: "dot " + dotFor(m) }),
-      h("span", { class: "label" }, h("span", {}, m.name), h("small", { class: dotFor(m) === "ok" ? "" : "warn" }, dotFor(m) === "ok" ? [m.os, m.hopsesh ? "hopsesh " + m.hopsesh : ""].filter(Boolean).join(" · ") : machineStatus(m.status)[1])),
+      h("span", { class: "label" }, h("span", {}, m.name), h("small", { class: dotFor(m) === "ok" ? "" : "warn", title: dotFor(m) === "ok" ? (m.agents || []).join(", ") : m.hint || m.error }, dotFor(m) === "ok" ? agentSubtitle(m) : machineStatus(m.status)[1])),
       h("span", { class: "count" }, m.status === "ok" ? m.sessions : ""))),
     h("button", { class: "side-btn", style: "color:var(--accent)", onclick: () => go("machines") }, icon(ICONS.plus), machines.length ? "Add a machine" : "Add your other machines"),
     clouds().length ? h("div", { class: "side-h" }, "Clouds") : null,
@@ -202,7 +208,7 @@ onTurnOn(turnOn);
 export async function pasteDialog(cloud) {
   const c = cloud ? cloudOf(cloud) : clouds().find((x) => x.fetchable);
   if (!c) { toast("No cloud can bring sessions here"); return; }
-  const checkouts = await api("Checkouts").catch(() => []);
+  const checkouts = await api("Checkouts");
   const input = h("input", { class: "field mono", id: "paste-link", placeholder: "claude.ai/code/…, session_… or cse_…", autocomplete: "off", spellcheck: "false" });
   const repo = repoSelect(checkouts);
   const msg = h("div", { class: "err", role: "alert" });
@@ -230,7 +236,7 @@ export async function pasteDialog(cloud) {
 export async function findDialog(cloud) {
   const c = cloud ? cloudOf(cloud) : clouds().find((x) => x.fetchable && x.partial);
   if (!c) { toast("No cloud has a picker of its own"); return; }
-  const checkouts = await api("Checkouts").catch(() => []);
+  const checkouts = await api("Checkouts");
   const repo = repoSelect(checkouts);
   const d = dialog(
     h("h2", { style: "margin:0;font-size:16px" }, `Find in ${c.agentName}`),
@@ -262,6 +268,7 @@ function updateNote() {
 // notices are things to set up, shown above the list until done or dismissed.
 function notices() {
   const out = [], i = state.info, s = state.scan;
+  if (state.scanError) out.push(h("div", { class: "card notice warn-card", role: "alert" }, h("span", {}, "Refresh failed. Showing the previous results. " + state.scanError), h("button", { class: "btn", onclick: () => go("sessions", true) }, "Retry refresh")));
   const picked = state.scope.kind === "machine" && s.machines.find((m) => m.name === state.scope.value);
   if (picked && picked.status !== "ok") out.push(h("div", { class: "card notice warn-card", role: "status" },
     h("div", { style: "flex:1 1 360px" }, h("b", {}, `${picked.name}: ${machineStatus(picked.status)[1]}`),
@@ -272,7 +279,7 @@ function notices() {
     h("div", { style: "flex:1 1 360px" }, h("b", {}, `macOS is blocking hopsesh from ${blocked.map((m) => m.name).join(", ")}`),
       h("div", { style: "font-size:12.5px" }, "If a macOS prompt is open, choose Allow. Otherwise turn hopsesh on under Privacy & Security › Local Network. Machines over Tailscale are not affected.")),
     h("button", { class: "btn", onclick: () => api("OpenLocalNetworkSettings").catch(fail) }, "Open Privacy & Security"),
-    h("button", { class: "btn", onclick: async () => { await api("RetryLocalNetwork"); scan().then(render); } }, "Try again")));
+    h("button", { class: "btn", onclick: async () => { await api("RetryLocalNetwork"); await scan(); render(); } }, "Try again")));
   const stray = strayWaiting();
   if (stray.length) out.push(h("div", { class: "card notice warn-card", role: "status" },
     h("div", { style: "flex:1 1 360px" }, h("b", {}, stray.length === 1 ? `“${stray[0].title}” is waiting for you` : `${stray.length} programs are waiting for you`),
@@ -333,7 +340,7 @@ function chipFor(e, p) {
   const tip = p.kind === "hopsesh" ? p.tabs.map((t) => `hopsesh Terminal — tab “${t.title}”${t.attention ? " · waiting" : ""}`).join("\n")
     : `${placeName(p, e)}${p.count > 1 ? ` — ${p.count} processes` : ""}${p.waiting ? " · waiting" : ""}`;
   return h("button", { class: "pchip" + (p.kind === "hopsesh" ? " hop" : ""), type: "button", tabindex: "-1", title: tip, "aria-label": `${words}${p.waiting ? ", waiting for you" : ""}: show`,
-    onclick: (ev) => { ev.stopPropagation(); showPlace(e, p); } },
+    onclick: (ev) => { ev.stopPropagation(); return showPlace(e, p); } },
     p.kind === "claude-app" || p.kind === "codex-app" ? agentBadge(e.agent, e.agentName) : placeIcon(p.kind, 11),
     h("span", { class: "pc-w" }, words), h("span", { class: "pc-n", "aria-hidden": "true" }, String(p.count || 1)),
     p.waiting ? h("span", { class: "dot needs", "aria-hidden": "true" }) : null);
@@ -392,7 +399,7 @@ function row(e, level) {
   for (const c of (e.copies || []).filter((c) => !(c.machine === e.machine && c.key === e.key))) chips.push(h("span", { class: "chip" + (c.newest ? " st-warn" : "") }, `${c.newest ? "newest: " : "also "}${copyWhere(c)}`));
   const where = e.cloud ? "cloud" : e.machine === here() ? sys.here : e.machine;
   return h("div", { class: "row", role: "treeitem", "aria-level": String(level), "aria-selected": sel ? "true" : "false", tabindex: sel ? "0" : "-1", "data-key": entryKey(e),
-      onclick: () => select(e), ondblclick: () => { if (p && !p.disabled) p.run(); } },
+      onclick: () => select(e), ondblclick: () => { if (p && !p.disabled) return p.run(); } },
     h("span", { class: "r-ic" }, agentBadge(e.agent, e.agentName, e.cloud ? cloudTitle(e.machine) : "")),
     h("div", { class: "r-main" },
       h("span", { class: "r-line" }, h("span", { class: "t", title: e.title }, e.title),
@@ -401,7 +408,7 @@ function row(e, level) {
       chips.length ? h("div", { class: "copies" }, chips) : null),
     h("div", { class: "r-state" }, h("span", { class: "chip st-" + k }, h("span", { class: "dot " + k }), words), h("span", { class: "w" }, `${where} · ${ago(e.lastActive)}`)),
     h("div", { class: "act" }, p ? h("button", { class: "btn small outline", tabindex: "-1", disabled: !!p.disabled, title: p.why || p.label, "aria-label": p.label,
-      onclick: (ev) => { ev.stopPropagation(); p.run(); } }, h("span", { class: "btn-t" }, p.short || p.label)) : null));
+      onclick: (ev) => { ev.stopPropagation(); return p.run(); } }, h("span", { class: "btn-t" }, p.short || p.label)) : null));
 }
 
 function copyWhere(c) {
@@ -437,7 +444,7 @@ onRows((el) => {
   if (!e || el.dataset.key !== entryKey(e)) return;
   if (mod) { openChevron(e); return; }
   const p = model(e).primary;
-  if (p && !p.disabled) p.run();
+  if (p && !p.disabled) return p.run();
 });
 
 // ---- Drawing ----
@@ -552,7 +559,7 @@ document.addEventListener("keydown", (ev) => {
     ev.preventDefault();
     if (ev.metaKey || ev.ctrlKey) { openChevron(e); return; }
     const p = model(e).primary;
-    if (p && !p.disabled) p.run();
+    if (p && !p.disabled) return p.run();
   }
 });
 

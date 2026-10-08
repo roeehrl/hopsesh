@@ -101,6 +101,7 @@ func TestToolWords(t *testing.T) {
 func TestSaveList(t *testing.T) {
 	home(t)
 	a := NewApp(all.Registry())
+	a.core.Cfg.List.TerminalCollapsed = []string{"family-one"}
 	defer a.Shutdown()
 	if l := a.Info().List; l.Decided || l.GroupBy != "repository" || l.SortBy != "last-active" || l.Density != "comfortable" {
 		t.Fatalf("defaults: %+v", l)
@@ -113,6 +114,9 @@ func TestSaveList(t *testing.T) {
 		Filter: FilterDTO{Status: []string{"working", "idle"}, Location: []string{"clouds"}, LocationNot: true, LastActive: "7d", Has: []string{"tab"}}}
 	if err := a.SaveList(in); err != nil {
 		t.Fatal(err)
+	}
+	if len(a.core.Cfg.List.TerminalCollapsed) != 1 {
+		t.Fatal("session display overwrote terminal collapse choices")
 	}
 	l := a.Info().List
 	if !l.Decided || l.GroupBy != "status" || !l.SortReverse || l.Density != "compact" || !l.CollapseInactive || len(l.Collapsed) != config.ListKeysMax ||

@@ -138,7 +138,7 @@ func liveInfo(les []liveEntry) agent.LiveInfo {
 	li := agent.LiveInfo{State: agent.Live, PID: top.PID, Status: status, App: top.Entrypoint == "claude-desktop"}
 	var named time.Time
 	for _, le := range les {
-		li.Procs = append(li.Procs, agent.LiveProc{PID: le.PID, App: le.Entrypoint == "claude-desktop", Waiting: le.WaitingFor != ""})
+		li.Procs = append(li.Procs, agent.LiveProc{PID: le.PID, ObservedAt: le.written, App: le.Entrypoint == "claude-desktop", Waiting: le.WaitingFor != ""})
 		if le.Name != "" && (li.Name == "" || le.written.After(named)) {
 			li.Name, named = le.Name, le.written
 		}

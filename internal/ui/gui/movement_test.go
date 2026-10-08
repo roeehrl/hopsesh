@@ -8,6 +8,7 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/agents/all"
 	"github.com/roeehrl/hopsesh/internal/app"
+	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
@@ -57,6 +58,7 @@ func TestResolveEntryFindsHiddenRawReplica(t *testing.T) {
 	a := NewApp(all.Registry())
 	key := agent.SessionKey{Agent: "claude", Session: "original"}
 	old := app.Entry{Machine: app.LocalName(), Agent: "claude", AgentName: "Claude Code", Session: agent.Summary{Key: key, Title: "Original", LastActivity: time.Now().Add(-time.Hour)}}
+	old.Lineage = &lineage.Manifest{Family: "family", Branch: "original"}
 	newer := old
 	newer.Machine = "studio"
 	newer.Session.Title = "Newer"

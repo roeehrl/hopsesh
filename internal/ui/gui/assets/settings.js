@@ -1,5 +1,5 @@
 // The Settings screen, in tabs: General, Agents, Terminal, Skill, Command line, Updates.
-import { api, h, fill, view, state, screen, go, loading, toast, fail, dialog, agentBadge, sys, cliHow, icon, ask, count, current } from "./core.js";
+import { api, on, h, fill, view, state, screen, go, loading, toast, fail, dialog, agentBadge, sys, cliHow, icon, ask, count, current, loadError, navigationID, errText } from "./core.js";
 import { desktopSettings } from "./desktop-settings.js";
 import { running } from "./term.js";
 
@@ -41,7 +41,7 @@ function cloudRow(a, c) {
 }
 
 let tab = "general";
-let s = null;
+let s = null, saving = false;
 
 const chip = ([text, cls]) => h("span", { class: "chip " + cls }, text);
 const title = (t, desc) => h("div", { style: "display:flex;flex-direction:column;gap:2px;min-width:0;flex:1 1 300px" }, h("span", { style: "font-weight:500" }, t), desc ? h("span", { class: "muted", style: "font-size:12px" }, desc) : null);
@@ -50,20 +50,24 @@ const card = (...kids) => h("section", { class: "card" }, h("div", { class: "dlg
 // Refresh shared defaults before acknowledging a save: the user can immediately
 // leave Settings and open a plan, which captures defaults from state.info.
 async function run(fn, done) {
+  if (saving) return;
+  saving = true; render();
   try {
     await fn();
     state.info = await api("Info");
     if (done) toast(done);
   } catch (e) { fail(e); }
+  saving = false;
   await load();
 }
 
 function save(patch) {
+  if (saving) return;
   // Apply the privacy switch before navigating away: returning to Sessions must
   // never briefly reveal a preview while SaveSettings/Info are still in flight.
   if (patch.previews !== undefined) state.info.previews = patch.previews;
   Object.assign(s, patch);
-  return run(() => api("SaveSettings", Object.assign({ layout: s.layout, movementNotices: s.movementNotices, markMoved: s.markMoved, syncCode: s.syncCode, pushSource: s.pushSource, updateCheck: s.updateCheck || "off", appIcons: s.appIcons, previews: s.previews }, patch)), "Saved");
+  return run(() => api("SaveSettings", Object.assign({ appearance: s.appearance, layout: s.layout, movementNotices: s.movementNotices, markMoved: s.markMoved, syncCode: s.syncCode, pushSource: s.pushSource, updateCheck: s.updateCheck || "off", appIcons: s.appIcons, previews: s.previews }, patch)), "Saved");
 }
 
 function toggle(key, label, desc) {
@@ -85,6 +89,9 @@ function general() {
       toggle("pushSource", "Push unpushed commits on the other machine first", "Off: commits are fetched straight from the other machine.")),
     noticeSetup(),
     card(h("span", { class: "sec-h" }, "Appearance"),
+      h("div", { class: "set-row" }, title("Color scheme", "Choose the look for Hopsesh, Quick access and the built-in terminal. System follows your device's appearance."),
+        h("select", { "aria-label": "Color scheme", disabled: saving, onchange: e => save({ appearance: e.target.value }) },
+          ["system", "light", "dark"].map(mode => h("option", { value: mode, selected: s.appearance === mode }, mode[0].toUpperCase() + mode.slice(1))))),
       toggle("appIcons", "Show each agent's own app icon", "When the agent's desktop app is installed here, its icon pictures the agent; otherwise hopsesh's own mark does."),
       toggle("previews", "Show conversation previews", "The inspector shows the end of the selected session's conversation, with Markdown formatting, read on its machine. Turn it off when you share your screen.")),
     card(h("span", { class: "sec-h" }, sys.Here),
@@ -120,24 +127,40 @@ function agents() {
 
 // terminal is Settings → Terminal: where sessions and steps open, the user's terminal app,
 // and the hopsesh Terminal window.
-let ds = null;
-function desktop() { return ds ? [desktopSettings({...ds,os:state.info.os})] : [h("p", {}, "Reading desktop settings…")]; }
-let ts = null;
+let ds = null, desktopError = null;
+function desktop() { if (desktopError) return [loadError(desktopError, load)]; return ds ? [desktopSettings({...ds,os:state.info.os})] : [h("p", {}, "Reading desktop settings…")]; }
+let ts = null, terminalError = "", loadSequence = 0;
+// The terminal has its own layout/group controls. Reflect committed preferences
+// without rebuilding Settings or dropping focus from an in-progress form edit.
+on("hopsesh:terminal-preferences", prefs => {
+  if (!ts) return;
+  for (const [key, label] of [["placement", "Terminal placement"], ["grouping", "Group terminal tabs"]]) {
+    ts[key] = prefs[key];
+    document.querySelectorAll(`[role="radiogroup"][aria-label="${label}"] [role="radio"]`).forEach(button => {
+      button.setAttribute("aria-checked", String(button.dataset.value === prefs[key]));
+    });
+  }
+});
 async function setTerm(patch) {
+  if (saving) return;
+  saving = true;
   const next = Object.assign({ app: ts.app, where: ts.where, font: ts.font, fontSize: ts.fontSize, scrollback: ts.scrollback, keepTabs: ts.keepTabs,
-    notify: ts.notify, closeEnded: ts.closeEnded, screenReader: ts.screenReader, systemConsole: ts.systemConsole }, patch);
-  ts = Object.assign({}, ts, patch); // a second change before this one's answer builds on it
+    grouping: ts.grouping, notify: ts.notify, closeEnded: ts.closeEnded, screenReader: ts.screenReader, systemConsole: ts.systemConsole }, patch);
+  ts = Object.assign({}, ts, patch); // reflect this change while the form is locked
+  render();
   try { await api("SetTerminalSettings", next); toast("Saved"); } catch (e) { fail(e); }
   ts = await api("TerminalSettings").catch(() => ts);
   state.info = await api("Info").catch(() => state.info);
+  saving = false;
   if (current === "settings") render(); // unless the user went on meanwhile
 }
 function seg(label, value, choices, onpick) {
   return h("div", { class: "seg", role: "radiogroup", "aria-label": label },
-    choices.map(([v, text]) => h("button", { role: "radio", "aria-checked": value === v ? "true" : "false", onclick: () => onpick(v) }, text)));
+    choices.map(([v, text]) => h("button", { role: "radio", "data-value": v, "aria-checked": value === v ? "true" : "false", onclick: () => onpick(v) }, text)));
 }
 const SHIELD = "M12 3 5 6v6c0 4.2 2.9 7.6 7 9 4.1-1.4 7-4.8 7-9V6z";
 function terminal() {
+  if (terminalError) return [loadError(terminalError, loadTerminal)];
   if (!ts) return [h("div", { class: "loading", role: "status" }, "Reading the terminal settings…")];
   const name = ts.name || sys.terminal;
   const installed = (ts.apps || []).filter((a) => a.installed);
@@ -146,10 +169,15 @@ function terminal() {
     h("span", {}, h("b", {}, label), h("span", { class: "muted" }, desc)));
   return [
     h("span", { class: "muted", style: "font-size:12.5px" }, "Where hopsesh runs Claude Code, Codex and your shell when you resume, bring back, hand off or sign in."),
+    card(h("span", { class: "sec-h" }, "Terminal workspace"),
+      h("div", {class:"set-row"}, title("Placement", "Move the view of the same running programs. Separate window remains the default until you choose a panel."),
+        seg("Terminal placement", ts.placement, [["bottom","Bottom panel"],["right","Right panel"],["separate","Separate window"]], async v => { try { await api("TerminalPlacement",v); } catch(e){fail(e);} })),
+      h("div", {class:"set-row"}, title("Group terminal tabs", "Conversation families contain verified forks. Copies across machines or agents remain on their conversation branch."),
+        seg("Group terminal tabs",ts.grouping,[["family","Family"],["session","Session"],["none","None"]],v=>setTerm({grouping:v})))),
     card(h("span", { class: "sec-h" }, "Where sessions open"),
-      h("div", { class: "set-row" }, title("Resume sessions, hand-offs and bring-backs", `Hand-offs, bring-backs and sign-ins use this window unless you choose ${name}, because hopsesh needs to see how they end. Every tab keeps Open in my terminal.`),
+      h("div", { class: "set-row" }, title("Resume sessions, hand-offs and bring-backs", `Hand-offs, bring-backs and sign-ins use Hopsesh Terminal unless you choose ${name}, because hopsesh needs to see how they end. Every tab keeps Open in my terminal.`),
         seg("Where sessions open", ts.where, [["here", "In this window"], ["terminal", `In ${name}`]], (v) => setTerm({ where: v }))),
-      h("span", { class: "muted", style: "font-size:12px" }, (ts.where === "terminal" ? `${name} keeps running after hopsesh quits.` : "In this window: a tab of the hopsesh Terminal window, which ends when hopsesh quits.")
+      h("span", { class: "muted", style: "font-size:12px" }, (ts.where === "terminal" ? `${name} keeps running after hopsesh quits.` : "In this window: a Hopsesh Terminal tab in your chosen panel or separate window. Its program ends when hopsesh quits.")
         + " This is where a session first resumes; a session's Resume menu picks another place, and hopsesh remembers it for that agent."),
       h("div", { class: "set-row" }, title("My terminal", `Where Open in my terminal goes. Now: ${ts.name}.`),
         h("select", { "aria-label": "My terminal", onchange: (e) => setTerm({ app: e.target.value }) },
@@ -284,6 +312,8 @@ const TABS = [["general", "General", general], ["desktop", "Desktop presence", d
 
 function render() {
   if (current !== "settings") return;
+  const page = view.querySelector(".page");
+  const scrollTop = page?.getAttribute("aria-labelledby") === "tab-" + tab ? page.scrollTop : 0;
   const [, name, body] = TABS.find((t) => t[0] === tab);
   fill(view, h("div", { class: "three" },
     h("nav", { class: "tabs", role: "tablist", "aria-label": "Settings", "aria-orientation": "vertical" },
@@ -296,14 +326,28 @@ function render() {
         } }, label)),
       h("button", {class:"tab",onclick:()=>go("accounts")}, "Accounts"),
       h("span", { class: "spacer" })),
-    h("div", { class: "page", role: "tabpanel", "aria-labelledby": "tab-" + tab }, h("div", { class: "page-in", style: "max-width:760px" }, h("h1", {}, name), body()))));
+    h("div", { class: "page", role: "tabpanel", "aria-labelledby": "tab-" + tab }, h("div", { class: "page-in", style: "max-width:760px" }, h("h1", {}, name), saving ? h("p", { role: "status" }, "Saving changes…") : null, h("fieldset", { class: "settings-fields", disabled: saving, "aria-busy": String(saving) }, body())))));
+  view.querySelector(".page").scrollTop = scrollTop;
 }
 
+async function loadTerminal() {
+  terminalError = ""; ts = null;
+  if (current === "settings" && tab === "terminal") render();
+  const n = loadSequence, visit = navigationID();
+  try { const result = await api("TerminalSettings"); if (n !== loadSequence || visit !== navigationID()) return; ts = result; }
+  catch (e) { if (n !== loadSequence || visit !== navigationID()) return; terminalError = errText(e); }
+  if (current === "settings" && tab === "terminal") render();
+}
 async function load() {
-  try { s = await api("Settings"); ds = await api("DesktopSettings"); } catch (e) { fail(e); return; }
-  if (current !== "settings") return;
+  const n = ++loadSequence, visit = navigationID();
+  const [settings, desktop] = await Promise.allSettled([api("Settings"), api("DesktopSettings")]);
+  if (n !== loadSequence || visit !== navigationID() || current !== "settings") return;
+  if (settings.status === "rejected") { fill(view, loadError(settings.reason, load)); return; }
+  s = settings.value;
+  ds = desktop.status === "fulfilled" ? desktop.value : null;
+  desktopError = desktop.status === "rejected" ? desktop.reason : null;
   render();
-  api("TerminalSettings").then((t) => { ts = t; if (tab === "terminal" && current === "settings") render(); }).catch(() => {});
+  await loadTerminal();
 }
 
 screen("settings", async (which) => {

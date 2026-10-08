@@ -4,10 +4,10 @@
 // off to ‹cloud›… (to a cloud). model(e) is a session's whole action row: its status line,
 // the primary (a split button whose menu lists the other places), Move ▾ and ⋯; the row's
 // button, ↩, ⌘↩ and the palette all come from it.
-import { api, state, sys, here, agentInfo, cloudOf, cloudTitle, toast, fail, errText, cap, entries, count, ago, h, icon, ICONS, agentBadge } from "./core.js";
+import { api, state, sys, here, agentInfo, cloudOf, cloudTitle, toast, fail, errText, cap, entries, count, ago, h, icon, ICONS, agentBadge, pending } from "./core.js";
 import { returnActions, returnChooser, showMovementDestination } from "./returns.js";
 import { planFor } from "./plan.js";
-import { tabs, resume, showTerminal, moveToTerminal, openShell, signIn } from "./term.js";
+import { tabs, resume, showTerminal, moveToTerminal, openShell, associateShell, signIn } from "./term.js";
 import { planHandoff } from "./handoff.js";
 import { planHop } from "./hop.js";
 
@@ -93,7 +93,10 @@ export function defaultPlace(e) {
 
 // resumeIn resumes a session in a place; picked from the menu, the place becomes the
 // agent's default.
-export async function resumeIn(e, place, remember = false) {
+export function resumeIn(e, place, remember = false) {
+  return pending(`Opening ${e.title}`, () => resumeOnce(e, place, remember), `resume:${key(e)}`);
+}
+async function resumeOnce(e, place, remember) {
   if (remember && place !== defaultPlace(e)) {
     try {
       await api("SetPlace", e.agent, place);
@@ -288,7 +291,7 @@ function moveGroups(e, local, inTab) {
     if (!peers.length) machine.push({ id: "send", label: "Send to another machine…", icon: icon(ICONS.here, 16), disabled: true, why: "No other machine with hopsesh is reached" });
   } else machine.push({ id: "bring", label: `Bring to ${sys.here}…`, icon: icon(ICONS.here, 16), run: () => planFor(e, { target: "" }) });
   out.push({ heading: "Machine", items: machine });
-  if (["claude","codex"].includes(e.agent)) out.push({heading:"Account",items:[block({id:"account",label:"Move to another account…",sub:"Choose a profile and review the portable conversation",run:()=>planFor(e,{target:e.agent})})]});
+  if (["claude","codex"].includes(e.agent)) out.push({heading:"Account",items:[block({id:"account",label:local ? "Move to another account…" : `Move to an account on ${sys.here}…`,sub:local ? "Choose a profile and review the portable conversation" : `Bring this session from ${e.machine} into a profile on ${sys.here}`,run:()=>planFor(e,{target:e.agent})})]});
   if (local && ["claude","codex"].includes(e.agent)) out.push({heading:"Context recovery",items:[block({id:"bounded",label:"Create bounded continuation…",sub:"Keep the original and archive; prepare a smaller working context on this branch",run:()=>planFor(e,{target:e.agent,bounded:true,targetProfile:e.profile?.id||""})})]});
   const agents = (e.continueIn || []).map((t) => block({ id: "continue:" + t.id, label: `Continue with ${t.name}${local ? "" : " on " + sys.here}…`, icon: agentBadge(t.id, t.name), run: () => planFor(e, { target: t.id }),
     chip: t.experimental ? h("span", { class: "chip st-warn mini" }, "experimental") : null }));
@@ -304,6 +307,7 @@ function more(e, local) {
   const onlyHere = local ? "" : `Only for sessions on ${sys.here}`;
   const out = [];
   if (!e.cloud) {
+    if(local && [...tabs.values()].some(t=>t.kind==="shell" && t.state!=="exited")) out.push({id:"associate-shell",label:"Organize a shell with this conversation…",run:()=>associateShell(e)});
     out.push({ id: "shell", label: "Open a shell in its folder", disabled: !local, why: onlyHere, run: () => openShell(e) });
     out.push({ id: "reveal", label: sys.mac ? "Reveal in Finder" : sys.win ? "Show in Explorer" : "Show in Files", disabled: !local, why: onlyHere,
       run: () => api("RevealEntry", e.machine, e.key).catch(fail) });
@@ -311,7 +315,7 @@ function more(e, local) {
       try { await api("CopyText", await api("ResumeCommand", e.machine, e.key)); toast("Copied the resume command"); } catch (err) { fail(err); }
     } });
   }
-  out.push({ id: "copy-id", label: "Copy session ID", run: async () => { await api("CopyText", e.cloud ? e.cloud.id : e.session || e.key.split("/").pop()).catch(fail); toast("Copied the session ID"); } });
+  out.push({ id: "copy-id", label: "Copy session ID", run: async () => { await api("CopyText", e.cloud ? e.cloud.id : e.session || e.key.split("/").pop()); toast("Copied the session ID"); } });
   if (!e.cloud) {
     out.push({ id: "rename", label: "Rename…", disabled: !e.canRename, why: e.canRename ? "" : `hopsesh can't rename ${e.agentName} sessions`, run: () => renameFn(e) });
     out.push({ id: "transcript", label: "Open transcript", disabled: !e.canPreview || !state.info?.previews,

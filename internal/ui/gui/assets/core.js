@@ -2,6 +2,9 @@
 // is untrusted and only ever inserted as text), app state, navigation and small formats.
 import { Call, Events } from "/wails/runtime.js";
 
+import { feedback } from "./feedback.js";
+export { pending } from "./feedback.js";
+
 const SVC = "github.com/roeehrl/hopsesh/internal/ui/gui.App.";
 export const api = (method, ...args) => Call.ByName(SVC + method, ...args);
 export const on = (name, fn) => Events.On(name, (ev) => fn(ev.data));
@@ -15,7 +18,7 @@ export function h(tag, attrs = {}, ...kids) {
   for (const [k, v] of Object.entries(attrs || {})) {
     if (v === undefined || v === null || v === false) continue;
     if (k === "class") el.className = v;
-    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), ["onclick", "onchange", "onsubmit", "ondblclick"].includes(k) ? feedback(el, v, fail) : v);
     else if (k === "style") el.setAttribute("style", v);
     else if (v === true) el.setAttribute(k, "");
     else el.setAttribute(k, v);
@@ -187,17 +190,30 @@ export function keys(spec) {
 const screens = {};
 export function screen(name, fn) { screens[name] = fn; }
 export let current = "";
-export function go(name, ...args) {
+let navigation = 0;
+export const navigationID = () => navigation;
+export async function go(name, ...args) {
+  const visit = ++navigation;
+  const changed = current !== name;
   current = name;
   $("#btn-back-sessions").hidden = name === "sessions";
   state.handoffOpen = null;
   $("#where").textContent = { sessions: "", activity: "Activity", machines: "Machines", settings: "Settings", accounts: "Accounts", done: "", brought: "" }[name] ?? "";
   document.body.dataset.screen = name; // the panes' buttons work on Sessions only
-  return screens[name](...args);
+  if (changed) loading({ sessions: "Reading sessions…", machines: "Reading machines…", accounts: "Reading accounts…", settings: "Reading settings…", activity: "Reading activity…" }[name] || "Loading…");
+  try { return await screens[name](...args); }
+  catch (error) { if (visit === navigation) fill(view, loadError(error, () => go(name, ...args))); }
+}
+
+// Failed reads are explicitly retryable. Writes never retry automatically.
+export function loadError(error, retry) {
+  return h("div", { class: "load-error", role: "alert" },
+    h("p", {}, "Couldn’t load this content. " + errText(error)),
+    h("button", { class: "btn", onclick: retry }, "Try again"));
 }
 
 export function loading(text) {
-  fill(view, h("div", { class: "loading", role: "status" }, text));
+  fill(view, h("div", { class: "loading", role: "status", "aria-live": "polite" }, text));
 }
 
 // The entry for the current selection, from the last scan.

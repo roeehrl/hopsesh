@@ -81,8 +81,8 @@ func TestBudgetSummarisesOldest(t *testing.T) {
 	if res.Report.Summarised == 0 || res.Report.Used > res.Report.Budget*12/10 {
 		t.Fatalf("report %+v", res.Report)
 	}
-	if !strings.Contains(res.Items[0].Text, "are summarised here to fit") || res.Items[0].Role != ir.RoleUser || res.Items[1].Role != ir.RoleAgent {
-		t.Fatalf("the digest leads the first kept user turn and roles alternate: %q", res.Items[0].Text[:60])
+	if !strings.Contains(res.Items[0].Text, "Transfer context") || res.Items[0].Role != ir.RoleUser || res.Items[1].Role != ir.RoleAgent {
+		t.Fatalf("context stays separate from the first kept user turn: %q", res.Items[0].Text[:60])
 	}
 }
 

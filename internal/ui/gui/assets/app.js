@@ -1,3 +1,4 @@
+import "./appearance.js";
 // hopsesh's window: boot, the menu's commands, and ssh's password questions. Plain ES
 // modules, no build step.
 import { api, on, h, fill, view, state, go, current, toast, fail, $, sys, setSystem, ask } from "./core.js";

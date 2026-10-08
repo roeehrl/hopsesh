@@ -103,7 +103,7 @@ type Briefing struct {
 	Missing     []string // differences in instructions, skills, MCP servers
 	ToolNames   string   // the target's own tool names, to use instead of the history's
 	Note        string   // a handoff note the source agent wrote, if any
-	Rules       []Rules  // the user's instructions for every project, carried when asked
+	Rules       []Rules  // selected source instruction text, carried when asked
 	// For a cloud briefing (Brief with BriefCloud):
 	Title       string   // the session's title
 	Unpushed    int      // commits the cloud gets that were not on the remote
@@ -116,7 +116,7 @@ type Briefing struct {
 	Repo     string
 }
 
-// Rules are the text of one global instruction file.
+// Rules are the text of one selected instruction file, quoted in the briefing.
 type Rules struct {
 	File string
 	Text string
@@ -161,6 +161,9 @@ func Render(r Request) Result {
 	if tokens(items) > left {
 		items = res.fitHistory(r, items, left)
 	}
+	if res.Report.Blocked != "" {
+		return res
+	}
 	items = append(items, briefItem, ack)
 	res.Items = items
 	res.Report.Used = tokens(items)
@@ -178,13 +181,16 @@ func (res *Result) history(r Request, nodes []ir.Node) []ir.Item {
 	resultCoverage := map[string][]ir.NodeID{}
 	fragments := map[ir.NodeID][]ir.Fragment{}
 	generated := map[ir.NodeID]bool{}
+	kinds := map[ir.NodeID]ir.Kind{}
 	for _, n := range nodes {
+		kinds[n.ID] = n.Kind
 		if n.Kind == ir.KindToolResult && n.Result != nil {
 			results[n.Result.CallID] = n.Result
 			resultCoverage[n.Result.CallID] = n.Coverage
 		}
 	}
 	var items []ir.Item
+	var lastKind ir.Kind
 	coverage := map[ir.NodeID][]ir.NodeID{}
 	for _, n := range nodes {
 		generated[n.ID] = n.Generated
@@ -213,13 +219,15 @@ func (res *Result) history(r Request, nodes []ir.Node) []ir.Item {
 				parts[i].Text = res.mapText(r, parts[i].Text)
 			}
 		}
-		if k := len(items); k > 0 && items[k-1].Role == role && items[k-1].Tool == nil && items[k-1].Generated == generated[node] {
-			items[k-1].Text += "\n\n" + text // keep roles alternating
+		kind := kinds[node]
+		if k := len(items); k > 0 && role == ir.RoleAgent && kind != ir.KindCompaction && lastKind != ir.KindCompaction && items[k-1].Role == role && items[k-1].Tool == nil && items[k-1].Generated == generated[node] {
+			items[k-1].Text += "\n\n" + text
 			items[k-1].Coverage = append(items[k-1].Coverage, coverage[node]...)
 			items[k-1].Fragments = append(items[k-1].Fragments, parts...)
 			return
 		}
 		items = append(items, ir.Item{Node: node, Generated: generated[node], Role: role, Time: ts, Text: text, Coverage: coverage[node], Fragments: parts, Fidelity: "text"})
+		lastKind = kind
 	}
 	for _, n := range nodes {
 		if n.Generated && !r.IncludeGenerated {
@@ -241,7 +249,7 @@ func (res *Result) history(r Request, nodes []ir.Node) []ir.Item {
 			}
 			add(ir.RoleAgent, n.ID, n.Time, plan.String())
 		case ir.KindCompaction:
-			add(ir.RoleUser, n.ID, n.Time, "[earlier conversation, as "+r.From+" summarised it]\n"+n.Text)
+			add(ir.RoleAgent, n.ID, n.Time, "### Earlier conversation summary from "+r.From+"\n\n"+quoteHistory(n.Text))
 		case ir.KindReasoning:
 			res.Report.Reasoning++
 		case ir.KindAttachment:
@@ -266,28 +274,6 @@ func (res *Result) history(r Request, nodes []ir.Node) []ir.Item {
 		}
 	}
 	return items
-}
-
-// digest summarises dropped items deterministically: the user's requests and what ran.
-func digest(from string, items []ir.Item) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "[hopsesh: the first %d steps of this conversation with %s are summarised here to fit]\n", len(items), from)
-	// Current task state belongs ahead of older requests when the digest is clipped.
-	for i := len(items) - 1; i >= 0; i-- {
-		if items[i].Role == ir.RoleAgent && items[i].Text != "" {
-			fmt.Fprintf(&b, "- latest agent reply (quoted): %s\n", clip(items[i].Text, 1000))
-			break
-		}
-	}
-	n := 0
-	for i := len(items) - 1; i >= 0 && n < 30; i-- {
-		it := items[i]
-		if it.Role == ir.RoleUser {
-			fmt.Fprintf(&b, "- the user asked (newest first): %s\n", clip(it.Text, 200))
-			n++
-		}
-	}
-	return b.String()
 }
 
 // nativeable: only calls a target agent has an exact equivalent for.
@@ -330,7 +316,9 @@ func flatten(from string, c *ir.ToolCall, out *ir.ToolResult, rep *Report) strin
 		lines := strings.Count(strings.TrimRight(out.Output, "\n"), "\n") + 1
 		fmt.Fprintf(&b, "[output · %d line(s)]\n%s\n[/output]", lines, strings.TrimRight(shorten(out.Output, rep), "\n"))
 	}
-	return b.String()
+	// Fence literal tool activity, including Markdown and fence-like output, so
+	// it cannot become prose or a forged heading in the receiving conversation.
+	return "**" + head + "]**\n\n" + literalHistory(strings.TrimPrefix(b.String(), head+"]\n"))
 }
 
 // shorten keeps the head and tail of a long output.
@@ -394,7 +382,7 @@ func briefing(r Request, rep *Report) string {
 			fmt.Fprintf(&b, "; %d long output(s) were shortened", rep.Truncated)
 		}
 		if rep.Summarised > 0 {
-			fmt.Fprintf(&b, "; the first %d steps are summarised", rep.Summarised)
+			fmt.Fprintf(&b, "; %d rendered history entries were shortened or condensed", rep.Summarised)
 		}
 		if rep.Reasoning > 0 {
 			fmt.Fprintf(&b, "; its hidden reasoning was not carried")
@@ -457,7 +445,7 @@ func summary(rep Report, r Request) string {
 		parts = append(parts, fmt.Sprintf("%d output(s) shortened to %d KB", rep.Truncated, outputMax/1000))
 	}
 	if rep.Summarised > 0 {
-		parts = append(parts, fmt.Sprintf("the first %d step(s) summarised to fit %d tokens", rep.Summarised, rep.Budget))
+		parts = append(parts, fmt.Sprintf("%d rendered history entries shortened or condensed to fit %d tokens", rep.Summarised, rep.Budget))
 	}
 	if rep.Attachments > 0 {
 		parts = append(parts, fmt.Sprintf("%d attachment(s) left out", rep.Attachments))
@@ -486,7 +474,7 @@ func BoundText(s string, limit int) string {
 
 func (res *Result) fitHistory(r Request, items []ir.Item, limit int) []ir.Item {
 	if limit < 64 {
-		res.Report.Summarised += len(items)
+		res.Report.Blocked = "insufficient context capacity to preserve conversation history and the current request"
 		return nil
 	}
 	keep := len(items)
@@ -496,22 +484,58 @@ func (res *Result) fitHistory(r Request, items []ir.Item, limit int) []ir.Item {
 		used += ir.ItemCost(items[keep])
 	}
 	old := items[:keep]
+	kept := append([]ir.Item(nil), items[keep:]...)
+	// A large adjacent agent/tool block must not evict the latest actual user
+	// request into the context extract. Keep that request as a separate message.
+	lastUser := -1
+	authoredRequests := map[ir.NodeID]bool{}
+	for _, n := range r.Nodes {
+		if n.Kind == ir.KindMessage && n.Actor == ir.User && !n.Generated {
+			authoredRequests[n.ID] = true
+		}
+	}
+	for i := range items {
+		if items[i].Role == ir.RoleUser && authoredRequests[items[i].Node] {
+			lastUser = i
+		}
+	}
+	if lastUser >= 0 && lastUser < keep {
+		u := items[lastUser]
+		u.Text = excerpt(u.Text, max(0, min(2000, limit/4)-32))
+		if u.Text != items[lastUser].Text {
+			res.Report.Summarised++
+			u.Fidelity = "summarized"
+		}
+		u.Fragments = []ir.Fragment{{Text: u.Text, Coverage: u.Coverage}}
+		kept = append([]ir.Item{u}, kept...)
+		old = append(append([]ir.Item(nil), old[:lastUser]...), old[lastUser+1:]...)
+		used = tokens(kept)
+	}
+	if len(old) == 0 {
+		return kept // no synthetic context without any source history to represent
+	}
 	var coverage []ir.NodeID
 	for _, it := range old {
 		coverage = append(coverage, it.Coverage...)
 	}
-	text := BoundText(digest(r.From, old), max(0, limit-used-32))
-	d := ir.Item{Node: "hopsesh/digest", Role: ir.RoleUser, Text: text, Coverage: coverage, Fidelity: "summarized"}
-	res.Report.Summarised += len(old)
-	kept := append([]ir.Item(nil), items[keep:]...)
-	if len(kept) > 0 && kept[0].Role == ir.RoleUser && kept[0].Tool == nil {
-		kept[0].Text = d.Text + "\n" + kept[0].Text
-		kept[0].Coverage = append(d.Coverage, kept[0].Coverage...)
-		kept[0].Fragments = append([]ir.Fragment{{Text: d.Text, Coverage: d.Coverage}}, kept[0].Fragments...)
-		kept[0].Fidelity = "summarized"
-		return kept
+	boundary := ir.Item{Node: "hopsesh/context-boundary", Role: ir.RoleAgent, Generated: true, Text: "[hopsesh] End of transfer context. Recent conversation follows in separate messages."}
+	separator := len(kept) == 0 || kept[0].Role == ir.RoleUser
+	left := limit - used - 32
+	if separator {
+		left -= ir.ItemCost(boundary)
 	}
-	return append([]ir.Item{d}, kept...)
+	if left < 64 {
+		res.Report.Blocked = "insufficient context capacity to keep transfer context separate from the current request"
+		return nil
+	}
+	text := res.historyContext(r, old, min(left, 12000))
+	d := ir.Item{Node: "hopsesh/digest", Role: ir.RoleUser, Text: text, Coverage: coverage, Fidelity: "summarized", Generated: len(coverage) == 0}
+	res.Report.Summarised += len(old)
+	result := []ir.Item{d}
+	if separator {
+		result = append(result, boundary)
+	}
+	return append(result, kept...)
 }
 
 func clip(s string, n int) string {

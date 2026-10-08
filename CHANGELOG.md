@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Choose System, Light or Dark in Settings → General → Appearance. The saved choice
+  updates Hopsesh, Quick access and open terminal tabs immediately; System follows
+  live OS changes. macOS native window chrome follows the same choice.
+
 - Durable movement notices and branch-aware return destinations. Transfers report
   preparation until new agent work is observed; forks keep the original available.
   Notices can be disabled without losing lineage or returns. Receipts now require
@@ -15,6 +19,31 @@ All notable changes to this project are documented here. The format follows
   See [movement and return](docs/movement-return.md).
 
 ### Fixed
+
+- Preserve transfer-review scroll position when options change, explain unavailable
+  account emails without repeating profile labels, match the close-behavior explanation
+  to the selected setting, and label missing journey origins instead of showing `/`.
+
+- Make window-close behavior default to keeping Hopsesh running in the background,
+  independently of menu-bar or tray placement on macOS, Windows and Linux. Preserve
+  explicit Quit preferences and reopen the hidden window when launching Hopsesh again.
+- Show selectable instruction files and text previews in transfer review, distinguish
+  account profiles from verified identity, explain live-source snapshots and deferred
+  moved labels, and place a remembered launch choice beside Continue. Single-account
+  destinations display their identity without a redundant Default selector.
+
+- Use the main window’s agent icons in Quick access. Put this machine first in
+  Accounts and give remote setup notices the same collapsible machine grouping.
+
+- Explain remote account setup prerequisites on the Accounts screen instead of
+  silently omitting connected machines without a Hopsesh identity. Replace the
+  sun-shaped Settings icon with a recognizable gear.
+
+- Show pending actions, screen loading, retryable read failures, and terminal
+  connection status throughout the GUI and Quick access. Keep previous sessions
+  visible during refresh, lock pending saves, prevent repeated session launches,
+  ignore obsolete navigation/plan responses, and stop reporting failed copies as
+  successful. Add delayed/failing-response browser scenarios to the CI GUI matrix.
 
 - Show a startup screen immediately while the bridge and first scan load. Report
   module/initialization failures with a reload action; keep shortcuts from operating

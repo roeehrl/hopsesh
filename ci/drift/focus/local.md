@@ -80,9 +80,20 @@ portable data with bounded retrieval, never native signed/private state or instr
 Large first records must remain discoverable. Check cloud edited briefs and return
 paths, capacity rollovers versus forks, retained originals with new independent work,
 archive transport/undo and truthful prepared-versus-running reports in GUI/TUI/CLI.
+The first bounded message is a labelled historical extract from original records:
+source compaction, actual agent reply, chronological substantive user requests, and
+separately framed tool activity. Never substitute a coalesced tool block for an agent
+reply or present extracted text as fresh task authorization. Preserve multiline source
+summaries, literal tool fences and the latest actual user request as a separate message,
+including when attachments or oversized agent blocks follow it. Consecutive user turns
+must not merge; generated boundaries carry no authored coverage. An empty extract must
+not invent a revision. Too little capacity blocks writing instead of dropping the request.
+Full portable text stays in the archive; no model-generated semantic summary is involved.
 Regression evidence: `internal/e2e/context_capacity_test.go`, mandatory
 `TestContextPressureRoutes` (ABABA/ABCA/ABCBCAB), SDK/module capacity tests and browser
-continuation/recovery tests. These static checks do not establish a paid model turn.
+continuation/recovery tests, plus `internal/core/convert/context_test.go` for source
+record selection and request/quote boundaries. These static checks do not establish a
+paid model turn.
 
 Movement notices and returns: read `docs/movement-return.md`,
 `internal/e2e/movement_test.go`, `internal/app/movement.go`, module `hooks.go`,
@@ -128,3 +139,35 @@ metadata is the only Desktop file read. Unsupported live focus remains explicit;
 no fallback merely activates the app. Check TTY launch timeout/exit status/cleanup,
 no visible tab, session UUID propagation, and default-profile/root gates with module,
 GUI service and browser tests.
+
+Transfer review instructions: inspect `internal/core/move/instructions.go` and the
+source-file packaging in `internal/app/peer.go`. The GUI previews declared global and
+current-project instruction files and carries only the selected text snapshot in the
+briefing, never overwriting destination rule files. Check path allowlists, missing and
+oversized files, imported/parent rules (currently not followed), scoped account roots,
+peer transport, and return-trip preservation. Agent account email/slug is display metadata,
+not proof of native replay permission; cross-agent moves must not claim a different login.
+Desktop availability and remembered launch choices must be checked against the actual
+profile and installed application. Drift findings should distinguish a newer upstream
+release from fixture coverage: help/schema probes do not certify model continuation or
+justify expanding `Spec.Tested` or removing experimental status without versioned evidence.
+
+
+Embedded terminal and conversation families (0.4.0): inspect
+`internal/ui/gui/terminal_host.go`, `internal/core/pty/{session,stream}.go`,
+`internal/ui/gui/assets/terminal`, `internal/app/families.go` and
+`internal/ui/gui/terminal_binding.go`. All placements use one PTY and the same
+restricted renderer; moving the view must never resume or fork an agent. Check
+xterm serialized alternate/normal buffers, cursor and modes, replay/resize ordering,
+backpressure, IME and stale-view input ownership when updating renderer dependencies.
+Native checks run separate/bottom/right on macOS/Linux and bundled Windows ConPTY.
+
+For agent releases, verify native parent metadata and exclusive ordinal boundaries,
+complete inherited prefixes, registry timestamps and PID/wrapper evidence after
+in-process fork/resume/clear. Unknown or conflicting associations stay explicit.
+Do not infer Claude native fork ancestry from titles or prompts, or count replicas
+as branches. Endpoint/profile/installation bindings scope identity. Native-only UI
+identities are presentation metadata and never portable-history authority. Include
+family grouping/rename/collapse and shell-association browser tests, TUI family
+tests and the round-trip scenario's one-family/one-branch assertion. A real-agent
+storage probe does not prove native window rehosting or account continuity.

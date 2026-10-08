@@ -81,6 +81,7 @@ func (a *App) SaveList(d ListDTO) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	c := a.core.Cfg
+	l.TerminalCollapsed = c.List.TerminalCollapsed
 	c.List = l
 	if err := c.Check(); err != nil {
 		return err

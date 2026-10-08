@@ -23,7 +23,7 @@
   --tl-end: 79px;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme]) {
     --bg: #171715; --panel: #1f1f1c; --side: #1b1b19; --bar: #222220; --line: #3a3934; --line2: #2c2b28; --hover: #262622;
     --ink: #ecebe5; --ink2: #d4d2c9; --muted: #a3a095; --faint: #7d7a71;
     --accent: #3cbcac; --accent-ink: #0d1514; --accent-soft: #173a36; --sel: #1d302d;
@@ -35,6 +35,18 @@
     --claude: #f0b393; --claude-soft: #3a261d; --codex: #b9c6e6; --codex-soft: #232a3c;
     --cloud: #a9c8e4; --cloud-soft: #1b2b3a; --cloud-dot: #5c9bd0; --cloud-band: #18232d; --cloud-line: #2a3a49;
   }
+}
+:root[data-theme="dark"] {
+    --bg: #171715; --panel: #1f1f1c; --side: #1b1b19; --bar: #222220; --line: #3a3934; --line2: #2c2b28; --hover: #262622;
+    --ink: #ecebe5; --ink2: #d4d2c9; --muted: #a3a095; --faint: #7d7a71;
+    --accent: #3cbcac; --accent-ink: #0d1514; --accent-soft: #173a36; --sel: #1d302d;
+    --ok: #8fd19e; --ok-soft: #1c3324; --ok-dot: #4cbf74;
+    --warn: #e3c27a; --warn-soft: #3a2f17;
+    --err: #f0948c; --err-soft: #3d1f1c; --err-dot: #e0604e;
+    --needs: #f0b77a; --needs-soft: #3d2a17; --needs-dot: #e08a3a;
+    --moved: #b9b6f0; --moved-soft: #26254a; --moved-dot: #8f8ce0;
+    --claude: #f0b393; --claude-soft: #3a261d; --codex: #b9c6e6; --codex-soft: #232a3c;
+    --cloud: #a9c8e4; --cloud-soft: #1b2b3a; --cloud-dot: #5c9bd0; --cloud-band: #18232d; --cloud-line: #2a3a49;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 13px/1.45 var(--sans); }
@@ -625,7 +637,13 @@ code { font-family: var(--mono); font-size: .92em; padding: 0 3px; border-radius
 .account-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr)); gap:16px; margin:16px 0 28px; }
 .account-card { display:flex; flex-direction:column; justify-content:space-between; gap:18px; padding:20px; border:1px solid var(--line); background:var(--panel); border-radius:12px; min-width:0; }
 .account-card h3 { margin:0 0 8px; }.account-card .mono { overflow-wrap:anywhere; }
-.account-group > summary { cursor:pointer; font-weight:600; padding:8px 0; }
+.account-group > summary { cursor:pointer; font-weight:600; padding:12px 0; }
+.account-group > summary > span { margin-right:12px; }
+.account-group > summary .muted { font-size:12px; font-weight:400; }
+.account-setup { gap:12px; margin-top:4px; }
+.account-setup p { margin:0; }
+.account-setup code { align-self:flex-start; max-width:100%; overflow-wrap:anywhere; }
+.account-setup button { align-self:flex-start; }
 .account-editor { background:var(--panel); color:var(--ink); border:1px solid var(--line); max-height:90vh; overflow:auto; width:min(540px,90vw); padding:28px; border-radius:14px; }
 .account-editor label { display:flex; flex-direction:column; gap:6px; margin:14px 0; }
 .account-editor .account-actions { justify-content:flex-end; margin-top:20px; position:sticky; bottom:-28px; padding:14px 0; background:var(--panel); }
@@ -633,3 +651,57 @@ code { font-family: var(--mono); font-size: .92em; padding: 0 3px; border-radius
 .return-choice { display:flex; flex-direction:column; align-items:flex-start; gap:5px; min-width:0; overflow-wrap:anywhere; }
 .return-choice .btn { height:auto; min-height:32px; max-width:100%; padding:8px 10px; white-space:normal; text-align:left; justify-content:flex-start; line-height:1.4; }
 .return-choice .mono, .movement-notice .mono { font-size:11px; overflow-wrap:anywhere; }
+
+/* Activity feedback is visible without blocking navigation or claiming progress. */
+.operation-status { position:fixed; right:16px; max-width:min(440px, calc(100vw - 32px)); padding:10px 14px; border:1px solid var(--line); border-radius:10px; background:var(--bg); color:var(--ink); box-shadow:0 3px 16px #0002; z-index:1500; font-size:12px; pointer-events:none; overflow-wrap:anywhere; }
+.operation-status::before, .loading[role=status]::before, button.is-pending::before { content:""; display:inline-block; width:12px; height:12px; margin-right:8px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; vertical-align:middle; animation:busy-turn .8s linear infinite; flex-shrink:0; }
+.is-pending { cursor:progress; }
+.load-error { padding:24px; line-height:1.5; }
+@keyframes busy-turn { to { transform:rotate(360deg); } }
+@media (prefers-reduced-motion:reduce) { .operation-status::before, .loading[role=status]::before, button.is-pending::before { animation:none; } }
+
+.settings-fields { border:0; padding:0; margin:0; min-width:0; display:flex; flex-direction:column; gap:16px; }
+
+/* Transfer review: account identity and file-level instruction disclosure. */
+.transfer-accounts {display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:16px;align-items:center;padding:12px 14px;background:var(--side);border-radius:10px}
+.transfer-accounts>div {display:flex;flex-direction:column;gap:5px;min-width:0;overflow-wrap:anywhere}
+.transfer-accounts .muted {font-size:12px}.transfer-accounts select {width:100%;min-width:0}
+.instruction-picker {border:1px solid var(--line);border-radius:8px;padding:12px}
+.instruction-picker summary {cursor:pointer;font-weight:500}.instruction-picker p {font-size:12px;line-height:1.5}
+.instruction-file {padding:10px 0;border-top:1px solid var(--line)}.instruction-file .mono {overflow-wrap:anywhere}
+.instruction-file details {margin:8px 0 0 24px}.instruction-text {max-height:280px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;background:var(--side);padding:12px;border-radius:6px}
+.launch-choice {display:flex;flex-direction:column;gap:6px;align-items:flex-end}.launch-notice {max-width:300px;font-size:11px}
+.transfer-launch #go>span:first-child {display:flex;flex-direction:column;gap:3px;text-align:left}.transfer-launch small {font-size:11px;font-weight:400}
+.transfer-launch .btn {height:auto;min-height:48px;padding-top:7px;padding-bottom:7px;line-height:1.25}
+.transfer-launch:has(.split-chevron) #go {border-radius:6px 0 0 6px}
+.transfer-launch .split-chevron {border-radius:0 6px 6px 0;border-left-color:color-mix(in srgb,var(--accent-ink) 35%,var(--accent))}
+.transfer-launch .split-chevron {min-width:40px}.sheet-foot .launch-choice {flex-shrink:0}
+@media(max-width:700px){.transfer-accounts {grid-template-columns:1fr}.account-arrow {display:none}.sheet-foot .launch-choice{max-width:100%;flex-shrink:1}}
+
+/* Persistent terminal host sits outside the changing view. Right placement replaces
+   the inspector rather than compressing four columns; narrow screens use bottom. */
+#terminal-workspace {position:fixed;z-index:15;bottom:0;left:var(--sb-w);right:0;height:var(--terminal-size,320px);background:var(--panel);border-top:1px solid var(--line);display:flex;flex-direction:column;min-width:0}
+#terminal-workspace[hidden]{display:none}
+#terminal-workspace iframe{width:100%;flex:1;min-height:0;border:0;background:var(--panel)}
+.terminal-workspace-bar{display:flex;gap:10px;align-items:center;padding:6px 10px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.terminal-workspace-bar .spacer{flex:1}
+.terminal-divider{height:6px;flex:0 0 6px;cursor:row-resize;background:var(--line2)}
+.terminal-divider:hover,.terminal-divider:focus-visible{background:var(--accent);outline:none}
+#terminal-workspace.resizing iframe{pointer-events:none}
+body.terminal-bottom #view{padding-bottom:var(--terminal-size,320px)}
+body.terminal-right #terminal-workspace{top:52px;left:auto;width:var(--terminal-size,640px);height:auto;border-left:1px solid var(--line);border-top:0}
+body.terminal-right #view{padding-right:var(--terminal-size,640px)}
+body.terminal-right #inspector{display:none}
+body.terminal-right .terminal-divider{position:absolute;left:0;top:0;bottom:0;width:6px;height:auto;cursor:col-resize}
+body.terminal-maximized #terminal-workspace{top:52px;left:0;height:auto}
+@media(max-width:1100px){.terminal-workspace-bar .muted{display:none}}
+
+body.terminal-right .layout{grid-template-columns:var(--sb-w) minmax(0,1fr) 0px}
+body.terminal-right .inspector{display:none}
+.family-ancestry{font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* A paint-contained view clips fixed descendants and traps their stacking order. */
+body.terminal-right.terminal-details #view {contain:none}
+body.terminal-right.terminal-details #inspector {display:block;position:fixed;z-index:16;right:0;top:var(--terminal-details-top,96px);bottom:0;width:var(--terminal-size);background:var(--panel);border-left:1px solid var(--line);overflow:auto}
+body.terminal-right.terminal-details #terminal-workspace iframe {visibility:hidden}
+body.terminal-right .divider[data-pane="inspector"]{display:none}
