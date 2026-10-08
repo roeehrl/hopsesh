@@ -16,6 +16,23 @@ import { openMenu, isOpen } from "./menu.js";
 export { statusOf, cloudBlock };
 export { actionsFor } from "./actions.js";
 
+// A family snapshot chooses one representative, which may differ from the copy
+// explicitly opened in the inspector. Resolve that exact copy from current raw
+// inventory; never keep an old entry after it disappears from the new family.
+export async function preserveSelectedCopy(scan) {
+  const selection = state.sel;
+  if (!selection) return;
+  const matches = e => e.machine === selection.machine && e.key === selection.key;
+  if (scan.groups.some(g => g.entries.some(matches))) return;
+  const group = scan.groups.find(g => g.entries.some(e => (e.copies || []).some(matches)));
+  if (!group) return;
+  const index = group.entries.findIndex(e => (e.copies || []).some(matches));
+  let copy;
+  try { copy = await api("ResolveEntry", selection.machine, selection.key); }
+  catch { return; } // removed or no longer readable: normal selection clearing applies
+  if (state.sel && matches(state.sel) && copy && matches(copy)) group.entries[index] = copy;
+}
+
 // scan reads every machine again. The list stays while it runs.
 export async function scan() {
   if (state.scanning) return;

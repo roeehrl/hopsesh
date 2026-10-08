@@ -13,7 +13,7 @@ import "./accounts.js";
 import { undoLast } from "./activity.js";
 import { openPalette } from "./palette.js";
 import { loadTabs, onTabs, showTerminal, tabs, exits } from "./term.js";
-import { render as renderSessions, listCommand, showEntry, reveal } from "./sessions.js";
+import { render as renderSessions, listCommand, showEntry, reveal, preserveSelectedCopy } from "./sessions.js";
 import { load as loadLayout, toggle as togglePane } from "./layout.js";
 
 $("#btn-search").onclick = openPalette;
@@ -72,6 +72,9 @@ on("hopsesh:quick",async()=>{
    const d=await api("QuickSnapshot");state.runtime=d.runtime;
    if(state.scanning)continue;
    if(d.scan&&d.scan.revision>(state.scan?.revision||0)) {
+    await preserveSelectedCopy(d.scan);
+    // An explicit refresh may finish while the hidden copy is being resolved.
+    if(state.scanning||d.scan.revision<=(state.scan?.revision||0))continue;
     state.scan=d.scan;state.presence=d.presence?.entries||{};quickPaint=true;
    } else if(d.scan?.revision===state.scan?.revision&&JSON.stringify(d.presence?.entries||{})!==JSON.stringify(state.presence||{})) {
     state.presence=d.presence?.entries||{};quickPaint=true;

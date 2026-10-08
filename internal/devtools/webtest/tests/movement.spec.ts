@@ -1,5 +1,5 @@
 import { test, expect, Page } from '@playwright/test';
-import { fresh, row, details } from './helpers';
+import { fresh, row, details, patchScans } from './helpers';
 
 test.afterEach(async({page})=>{await page.unrouteAll({behavior:'wait'})});
 
@@ -177,11 +177,12 @@ test('notice hook setup is explicit and installation is distinct from delivery',
 
 test('source notice selects the exact listed destination without planning',async({page})=>{
  const calls=await fixtures(page,[],null);
- const title=await page.evaluate(async()=>{
-  const core=await import('/core.js');const {inspector}=await import('/inspector.js');
-  const source=core.entries().find(e=>e.title==='Find the codeword');const destination=core.entries().find(e=>e.agent==='codex');
+ let title='';
+ await patchScans(page,scan=>{
+  const entries=scan.groups.flatMap(g=>g.entries);
+  const source=entries.find(e=>e.title==='Find the codeword');const destination=entries.find(e=>e.agent==='codex');
   source.movement={status:'prepared',text:'Prepared in Codex',machine:destination.machine,agent:destination.agent,key:destination.key,profile:destination.profile?.id || ''};
-  document.querySelector('#inspector').replaceWith(inspector(source));return destination.title;
+  title=destination.title;
  });
  await expect(details(page).locator('#act-primary')).toHaveText('Show destination');
  await expect(details(page).locator('#act-primary')).toBeEnabled();
@@ -191,11 +192,11 @@ test('source notice selects the exact listed destination without planning',async
 
 test('remote Codex source offers move back into the exact local Claude replica',async({page},info)=>{
  const calls=await fixtures(page,[]);
- await page.evaluate(async()=>{
-  const {selected,here}=await import('/core.js');const {inspector}=await import('/inspector.js');
-  const e={...selected(),machine:'remote-fixture',agent:'codex',agentName:'Codex',returns:[{replica:'original',machine:here(),agent:'claude',agentName:'Claude Code',profile:'personal',profileLabel:'Personal',key:'claude@personal/original',status:'available',reason:'New work can return',local:true}]};
-  document.querySelector('#inspector').replaceWith(inspector(e));
+ await patchScans(page,scan=>{
+  const e=scan.groups.flatMap(g=>g.entries).find(e=>e.title==='Find the codeword');
+  Object.assign(e,{machine:'remote-fixture',agent:'codex',agentName:'Codex',returns:[{replica:'original',machine:scan.machines.find(m=>m.local).name,agent:'claude',agentName:'Claude Code',profile:'personal',profileLabel:'Personal',key:'claude@personal/original',status:'available',reason:'New work can return',local:true}]});
  });
+ await row(page,'Find the codeword').click();
  await expect(details(page).locator('#act-primary')).toContainText('Move back to Claude Code');
  await page.screenshot({path:info.outputPath('remote-source-local-return.png'),fullPage:true});
  await details(page).locator('#act-primary').click();

@@ -57,7 +57,11 @@ func TestRelayPushSurvivesReceiverRestartAndPeerOwnedUndo(t *testing.T) {
 		}
 		t.Skip("relay dependencies are qualified in the relay matrix")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	// Compilation is not part of transport latency. This scenario runs device
+	// push/pull/restart/undo and four cloud import/retry/retire/undo journeys;
+	// bound setup/transfer commands separately as well as the complete scenario.
+	bin := buildHopsesh(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 	root := t.TempDir()
 	certFile, keyFile, pool := relayFixtureCertificate(t, root)
@@ -121,16 +125,20 @@ func TestRelayPushSurvivesReceiverRestartAndPeerOwnedUndo(t *testing.T) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	bin := buildHopsesh(t)
 	box := newMachineHome(t, root, "relay-box", false)
 	here := newMachineHome(t, root, "relay-here", true)
 	run := func(m machineHome, args ...string) []byte {
-		cmd := exec.CommandContext(ctx, bin, args...)
+		t.Helper()
+		started := time.Now()
+		bounded, done := context.WithTimeout(ctx, time.Minute)
+		defer done()
+		cmd := exec.CommandContext(bounded, bin, args...)
 		cmd.Env = append(m.env(), "SSL_CERT_FILE="+certFile)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("%s %v: %v\n%s", m.name, args, err, out)
 		}
+		t.Logf("%s %s completed in %s", m.name, args[0], time.Since(started).Round(time.Millisecond))
 		return out
 	}
 	setup := func(m machineHome) relay.PublicIdentity {
@@ -336,13 +344,18 @@ func qualifyCloudConnector(t *testing.T, ctx context.Context, bin, root, origin,
 		t.Fatal(err)
 	}
 	run := func(input []byte, args ...string) []byte {
-		cmd := exec.CommandContext(ctx, bin, args...)
+		t.Helper()
+		started := time.Now()
+		bounded, done := context.WithTimeout(ctx, 30*time.Second)
+		defer done()
+		cmd := exec.CommandContext(bounded, bin, args...)
 		cmd.Env = cloud.env()
 		cmd.Stdin = bytes.NewReader(input)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
-			t.Fatalf("cloud %s: %v\n%s", args[0], err, out)
+			t.Fatalf("cloud %s %s: %v\n%s", args[0], args[1], err, out)
 		}
+		t.Logf("cloud %s completed in %s", args[1], time.Since(started).Round(time.Millisecond))
 		return out
 	}
 	prepare := []string{"cloud-integration", "prepare", "--provider", "claude-hosted", "--session", sid, "--workspace", cloud.repo, "--native-root", filepath.Join(cloud.home, ".claude", "projects"), "--transcript", transcript, "--allow-transcript-export"}
@@ -468,6 +481,7 @@ func qualifyCloudConnector(t *testing.T, ctx context.Context, bin, root, origin,
 	// ledger and stable operation recovery. A sibling fork stays independent.
 	for _, target := range []string{"claude", "codex"} {
 		for _, fork := range []bool{false, true} {
+			t.Logf("cloud checkpoint journey: target=%s fork=%t", target, fork)
 			operation := fmt.Sprintf("cloud-checkpoint-%s-%t", target, fork)
 			args := []string{"cloud-integration", "import", instance.Public.ID, "--to", desktop.repo, "--in", target, "--operation-id", operation, "--yes"}
 			if fork {

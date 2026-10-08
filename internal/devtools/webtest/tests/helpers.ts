@@ -8,6 +8,26 @@ export async function fresh(page: Page) {
   await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible({ timeout: 30_000 });
 }
 
+// Synthetic session facts must survive the same background publications as real
+// inventory. Patch both the current view and every subsequent scan response.
+export async function patchScans(page: Page, change: (scan: any) => void) {
+  await page.route('**/call', async route => {
+    const method = route.request().postDataJSON().m;
+    if (!['InitialScan', 'Scan', 'RefreshHere', 'QuickSnapshot'].includes(method)) return route.fallback();
+    const response = await route.fetch();
+    const body = await response.json();
+    const scan = method === 'QuickSnapshot' ? body.result?.scan : body.result;
+    if (scan) change(scan);
+    return route.fulfill({json: body});
+  });
+  const scan = await page.evaluate(async () => (await import('/core.js')).state.scan);
+  change(scan);
+  await page.evaluate(async scan => {
+    (await import('/core.js')).state.scan = scan;
+    (await import('/sessions.js')).render();
+  }, scan);
+}
+
 // menu sends a Session-menu command, as the app's menu bar does.
 export async function menu(page: Page, cmd: string) {
   await page.evaluate((c) => (window as any).__emit("hopsesh:menu", c), cmd);

@@ -107,7 +107,7 @@ jobs:
         shell: bash
         env:
           HOPSESH_RELAY_REQUIRE_NODE: "1"
-        run: go test -race -count=1 -run 'TestRelayPush|TestCloudAdmissionSQLiteR2' -timeout 5m ./internal/e2e
+        run: go test -race -count=1 -v -run 'TestRelayPush|TestCloudAdmissionSQLiteR2' -timeout 5m ./internal/e2e
       - name: headless browser approval and native S256 callback
         shell: bash
         env:

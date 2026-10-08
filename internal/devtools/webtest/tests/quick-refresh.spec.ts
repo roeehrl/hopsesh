@@ -17,6 +17,7 @@ test('duplicate quick publications preserve splitter capture and keyboard focus;
   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
  };
  const divider=page.getByRole('separator',{name:'Resize sidebar'});
+ await expect(divider).toBeVisible();
  const box=(await divider.boundingBox())!;
  await page.mouse.move(box.x+box.width/2,box.y+box.height/2);
  await page.mouse.down();

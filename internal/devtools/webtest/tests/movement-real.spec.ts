@@ -28,6 +28,20 @@ test('real service resolves hidden original and reviews a safe separate return w
  await details(page).getByRole('button',{name:/Copies & history/}).click();
  await details(page).getByRole('button',{name:'Show copy',exact:true}).first().click();
  await expect(details(page).getByRole('heading',{name:'Find the codeword',exact:true})).toBeVisible();
+ // A newer background publication still chooses the Codex family representative.
+ // The explicitly inspected Claude copy must remain selected and actionable.
+ const background=(await (await page.request.post('/call',{data:{m:'QuickSnapshot',args:[]}})).json()).result;
+ background.scan.revision=await page.evaluate(async()=>((await import('/core.js')).state.scan.revision)+1);
+ expect(background.scan.groups.flatMap(g=>g.entries).some(e=>e.key===source.key)).toBe(false);
+ const publication=async route=>{
+  if(route.request().postDataJSON().m!=='QuickSnapshot')return route.fallback();
+  await route.fulfill({json:{result:background}});
+ };
+ await page.route('**/call',publication);
+ await page.evaluate(()=>(window as any).__emit('hopsesh:quick',null));
+ await expect.poll(()=>page.evaluate(async()=>(await import('/core.js')).state.scan.revision)).toBe(background.scan.revision);
+ await expect(details(page).getByRole('heading',{name:'Find the codeword',exact:true})).toBeVisible();
+ await page.unroute('**/call',publication);
  await expect(details(page).getByLabel('Movement notice')).toContainText('prepared');
  await expect(details(page).locator('#act-primary')).toHaveText('Show destination');
  await expect(details(page).locator('#act-primary')).toBeEnabled();
