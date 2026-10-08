@@ -1222,6 +1222,9 @@ func (m *model) viewDone(b *strings.Builder) {
 		fmt.Fprintf(b, "\n  %s %q already synchronized · 0 new messages, 0 transfers.\n", okSt.Render("✓"), p.Title)
 	} else if p.Kind == move.KindContinue {
 		fmt.Fprintf(b, "\n  %s %q is prepared for %s.\n", okSt.Render("✓"), p.Title, p.Agent)
+		for _, line := range strings.Split(lipgloss.NewStyle().Width(max(m.width-4, 20)).Render(p.ContinuationHint()), "\n") {
+			fmt.Fprintf(b, "  %s\n", line)
+		}
 	} else {
 		fmt.Fprintf(b, "\n  %s %q is prepared on %s: %d file(s), %s.\n", okSt.Render("✓"), p.Title, p.Target.Location, res.Files, move.Human(res.Bytes))
 	}

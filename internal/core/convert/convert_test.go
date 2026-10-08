@@ -28,7 +28,7 @@ func TestRenderHistory(t *testing.T) {
 	res := Render(Request{Nodes: session(), From: "Claude Code", To: "Codex", Fidelity: History, Window: 272000,
 		Mappings: []agent.Mapping{{From: "/src/demo", To: "/dst/demo"}}, Briefing: Briefing{SourceLoc: "studio", TargetLoc: "laptop", Head: "abc1234", Branch: "main"}})
 	if len(res.Items) != 4 {
-		t.Fatalf("want user, agent, briefing, acknowledgement; got %d items", len(res.Items))
+		t.Fatalf("want user, agent, briefing, import notice; got %d items", len(res.Items))
 	}
 	if res.Items[0].Role != ir.RoleUser || res.Items[1].Role != ir.RoleAgent || res.Items[2].Role != ir.RoleUser || res.Items[3].Role != ir.RoleAgent {
 		t.Fatal("roles must alternate")
@@ -66,7 +66,32 @@ func TestRenderNativeAndNote(t *testing.T) {
 	}
 	note := Render(Request{Nodes: session(), From: "Codex", To: "Claude Code", Fidelity: Note, Window: 1000000})
 	if len(note.Items) != 2 {
-		t.Fatalf("a note is only the briefing and its acknowledgement: %d", len(note.Items))
+		t.Fatalf("a note is only the briefing and its import notice: %d", len(note.Items))
+	}
+}
+
+func TestImportNoticeDoesNotImpersonateDestination(t *testing.T) {
+	for _, target := range []string{"Codex", "Claude Code"} {
+		for _, fidelity := range []Fidelity{History, Note} {
+			t.Run(target+"/"+string(fidelity), func(t *testing.T) {
+				res := Render(Request{Nodes: session(), From: "Source agent", To: target, Fidelity: fidelity, Window: 64000})
+				if res.Report.Blocked != "" || res.Report.Used > res.Report.Budget || len(res.Items) < 2 {
+					t.Fatalf("import failed: %+v", res.Report)
+				}
+				notice := res.Items[len(res.Items)-1]
+				if !notice.Generated || len(notice.Coverage) != 0 || !strings.HasPrefix(notice.Text, agent.NotePrefix) {
+					t.Fatalf("notice must be attributed to Hopsesh, without authored revision coverage: %+v", notice)
+				}
+				for _, want := range []string{"not by " + target, "No agent response", "Send your next message"} {
+					if !strings.Contains(notice.Text, want) {
+						t.Fatalf("notice conceals import state: %s", notice.Text)
+					}
+				}
+				if strings.Contains(notice.Text, "I'll") || strings.Contains(notice.Text, "Understood") {
+					t.Fatalf("import must not fabricate a model commitment: %s", notice.Text)
+				}
+			})
+		}
 	}
 }
 

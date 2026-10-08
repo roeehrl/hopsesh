@@ -3,6 +3,48 @@ import {fresh,row,action} from './helpers';
 test.beforeEach(async({page})=>fresh(page));
 async function plan(page){await row(page,'Find the codeword').click();await action(page,'move',/^Continue with Codex…/);await expect(page.locator('#sheet #go')).toBeEnabled();}
 
+test('desktop opening explains that the user must send the first message',async({page})=>{
+ // Simulate desktop availability; no native application is opened by this review test.
+ let desktopOptions;
+ await page.route('**/call',async route=>{
+  const request=route.request().postDataJSON();if(request.m!=='Plan'){await route.continue();return;}
+  if(request.args[3].app)desktopOptions={...request.args[3]};
+  request.args[3].app=false;
+  const response=await route.fetch({postData:JSON.stringify(request)}),body=await response.json();
+  body.result.can.app=true;body.result.can.appWhy='';await route.fulfill({json:body});
+ });
+ await plan(page);
+ await page.locator('#sheet').getByRole('checkbox',{name:/Send “Continue” when opening/}).check();
+ await expect(page.locator('#sheet #go')).toBeEnabled();
+ await page.getByRole('button',{name:'Choose where to open the continued session'}).click();
+ await page.getByRole('menuitemradio',{name:'Open in Codex app',exact:true}).click();
+ await expect(page.locator('#sheet .launch-notice')).toContainText('Opens the conversation only');
+ await expect(page.locator('#sheet .launch-notice')).toContainText('Send your next message in Codex');
+ await expect(page.locator('#sheet').getByRole('checkbox',{name:/Send “Continue” when opening/})).toHaveCount(0);
+ expect(desktopOptions?.go).toBe(false);
+ await page.getByRole('button',{name:'Choose where to open the continued session'}).click();
+ await page.getByRole('menuitemradio',{name:'Open in Hopsesh Terminal',exact:true}).click();
+ await expect(page.locator('#sheet').getByRole('checkbox',{name:/Send “Continue” when opening/})).not.toBeChecked();
+});
+
+test('a remote transfer keeps terminal prompting regardless of the local desktop preference',async({page})=>{
+ const localMachine=await page.evaluate(async()=>{const {here}=await import('/core.js');return here();});
+ await page.route('**/call',async route=>{
+  const req=route.request().postDataJSON();
+  if(req.m==='AccountDestinations' && req.args[0]==='remote-box'){await route.fulfill({json:{result:[]}});return;}
+  if(req.m!=='PushPlan'){await route.continue();return;}
+  const response=await route.fetch({postData:JSON.stringify({m:'Plan',args:[localMachine,req.args[0],req.args[2],req.args[3]]})});
+  const body=await response.json();body.result.machine='remote-box';await route.fulfill({json:body});
+ });
+ await row(page,'Find the codeword').click();
+ await page.evaluate(async()=>{
+  const {selected,state}=await import('/core.js');const {planFor}=await import('/plan.js');
+  state.info.places={codex:'app'};await planFor(selected(),{target:'codex',sendTo:'remote-box'});
+ });
+ await expect(page.locator('#sheet').getByRole('checkbox',{name:/Send “Continue” when opening/})).toBeVisible();
+ await expect(page.locator('#sheet')).not.toContainText('Opens the conversation only');
+});
+
 test('one destination shows its identity without a redundant default picker',async({page},testInfo)=>{
  await plan(page);
  const accounts=page.locator('.transfer-accounts');await expect(accounts).toContainText('Destination account');

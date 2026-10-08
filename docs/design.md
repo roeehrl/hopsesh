@@ -130,7 +130,7 @@ Optional interfaces add capabilities, computed from what a module implements (`a
 
 **The loss report** says what was kept and what was not (messages, tool calls as text, reasoning dropped, outputs shortened, steps summarised, paths mapped), and the plan shows it before anything is written.
 
-**The briefing** is a user note at the end of the history, followed by a short acknowledgement: where it came from, that the tool names in the history are not the target's, what to verify first (git status, the commit at transfer time), the open plan, instruction files only the other agent read, an optional handoff note the source agent wrote (`--note-file`), and with `--carry-rules` the user's instructions for every project of the source agent (otherwise they are reported). No prompt is sent unless `--go`.
+**The briefing** is a user note at the end of the history: where it came from, that the tool names in the history are not the target's, what to verify first (git status, the commit at transfer time), the open plan, instruction files only the other agent read, an optional handoff note the source agent wrote (`--note-file`), and with `--carry-rules` the user's instructions for every project of the source agent (otherwise they are reported). A generated `[hopsesh] Import ready` notice completes the message pair. It explicitly identifies Hopsesh as its author and says no model response was generated. No first message is sent unless `--go`; desktop opening only shows the session.
 
 **Another route:** `--via import` lets the target agent's own importer convert the session (Codex imports Claude Code sessions); hopsesh adds its briefing to the result and journals the new thread for undo.
 
@@ -311,7 +311,7 @@ The redesign (approved 2026-10-02):
 9. Lineage lives in a manifest beside each session and travels with it; immutable revision IDs and native projection receipts preserve provenance. Missing cross-agent receipts cannot be inferred from similar text.
 10. Canonical hashing: RFC 8785 + SHA-256.
 11. The local journal and audit log are a cache and a trail, not the source of truth.
-12. The briefing is an in-transcript note plus an acknowledgement; no automatic prompt (`--go`).
+12. The briefing is an in-transcript note plus an explicitly attributed Hopsesh import notice; no automatic first message unless `--go`. A prepared transcript is not evidence of an agent turn.
 13. Codex lists installed sessions at once (on for this machine).
 14. One skill, identical bytes in every agent's folder, with per-copy status and no drift.
 15. Global instructions are reported; `--carry-rules` carries them.

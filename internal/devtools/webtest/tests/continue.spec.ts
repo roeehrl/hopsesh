@@ -22,6 +22,8 @@ test("continue a Claude Code session in Codex, see where it has been, and undo",
   await sheet.getByRole("button", { name: /Continue in Codex/ }).click();
   await expect(page.getByRole("heading", { name: "“Find the codeword” is prepared for Codex" })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("Codex session written")).toBeVisible();
+  await expect(page.locator('.continuation-hint')).toContainText('Opening the session does not send a message');
+  await expect(page.locator('.continuation-hint')).toContainText('in Codex to start a turn');
 
   await page.getByRole("button", { name: /Back to sessions/ }).click();
   const moved = row(page, "Find the codeword (from Claude Code)");
@@ -67,6 +69,22 @@ test("a return with no new work opens the exact original without another transfe
   await action(page, "move", /^Open existing session in Claude Code/);
   expect((await resumed).postDataJSON().args.slice(0, 2)).toEqual([source.machine, source.key]);
   expect(plans).toEqual([]);
+});
+
+test("sending the first message is explicit and does not claim observed work", async ({page}) => {
+  await page.route('**/call', async route => {
+    const request = route.request().postDataJSON();
+    if (request.m === 'OpenResult') { await route.fulfill({json:{result:{where:request.args[0]}}}); return; }
+    await route.continue();
+  });
+  await row(page, "Find the codeword").click();
+  await action(page, "move", /^Continue with Codex…/);
+  const sheet = page.locator('#sheet');
+  await sheet.getByRole('checkbox', {name:/^Send “Continue” when opening/}).check();
+  await sheet.getByRole('button', {name:/Continue in Codex/}).click();
+  await expect(page.locator('.continuation-hint')).toContainText('sends “Continue.” to Codex');
+  await expect(page.locator('.continuation-hint')).toContainText('Check the agent for progress');
+  await expect(page.locator('.continuation-hint')).not.toContainText('starts working');
 });
 
 // The Windows screenshot world selects a remote session. Its action explicitly

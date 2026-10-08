@@ -141,8 +141,15 @@ func Render(r Request) Result {
 		items = res.history(r, nodes)
 	}
 	brief := res.mapText(r, briefing(r, &res.Report))
-	ack := ir.Item{Node: "hopsesh/ack", Role: ir.RoleAgent, Time: time.Now().UTC(), Generated: true, Text: "Understood. I'll check the working tree first, then continue from where the conversation stopped."}
-	available := res.Report.Budget - ir.ItemCost(ack) - 32
+	target := r.To
+	if target == "" {
+		target = "the destination agent"
+	}
+	// Keep the completed message pair, but never impersonate a model response or
+	// imply that writing/opening a transcript has started an agent turn.
+	ready := ir.Item{Node: "hopsesh/import-ready", Role: ir.RoleAgent, Time: time.Now().UTC(), Generated: true,
+		Text: fmt.Sprintf("[hopsesh] Import ready. This notice was written by Hopsesh, not by %s. No agent response to the briefing has been generated. Send your next message (for example, “Continue”) to start a new turn.", target)}
+	available := res.Report.Budget - ir.ItemCost(ready) - 32
 	if available < 128 {
 		res.Report.Blocked = "insufficient context capacity for a continuation; create a bounded continuation in a new session"
 		return res
@@ -157,14 +164,14 @@ func Render(r Request) Result {
 	}
 	briefItem := ir.Item{Node: "hopsesh/briefing", Role: ir.RoleUser, Time: time.Now().UTC(), Text: brief, Generated: true}
 	// Re-budget the complete payload after redaction, path mapping and framing.
-	left := res.Report.Budget - ir.ItemCost(briefItem) - ir.ItemCost(ack)
+	left := res.Report.Budget - ir.ItemCost(briefItem) - ir.ItemCost(ready)
 	if tokens(items) > left {
 		items = res.fitHistory(r, items, left)
 	}
 	if res.Report.Blocked != "" {
 		return res
 	}
-	items = append(items, briefItem, ack)
+	items = append(items, briefItem, ready)
 	res.Items = items
 	res.Report.Used = tokens(items)
 	if res.Report.Used > res.Report.Budget {
