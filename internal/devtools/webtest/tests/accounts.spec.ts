@@ -66,6 +66,17 @@ test('connected remote without identity explains account setup and clears after 
  await remote.locator('summary').click();
  await expect(notice).toBeVisible();await expect(notice).toContainText('SSH is connected');
  await remote.locator('summary').click();await expect(notice).toBeHidden();
+ // A filter render before the native toggle event is delivered must preserve
+ // the newest collapsed state, rather than the previous cached open state.
+ await page.evaluate(()=>{
+  const details=document.querySelector('[data-group="machine:remote-laptop"]') as HTMLDetailsElement;
+  details.open=true;
+  details.dispatchEvent(new Event('toggle'));
+  details.open=false;
+  const search=document.querySelector('[aria-label="Search accounts"]') as HTMLInputElement;
+  search.dispatchEvent(new Event('input',{bubbles:true}));
+ });
+ await expect(notice).toBeHidden();
  await page.getByRole('button',{name:'Scan accounts',exact:true}).click();
  await expect(page.getByRole('button',{name:'Scan accounts',exact:true})).toBeEnabled({timeout:30000});
  await expect(notice).toBeHidden();await remote.locator('summary').click();

@@ -42,6 +42,10 @@ function accountGroup(name,ps,m=null){
 }
 function render(){
  if(current!=='accounts')return;
+ // Native details toggles dispatch their event asynchronously. Capture the
+ // actual open state before replacing nodes so a scan/filter cannot lose a
+ // just-completed collapse while its old toggle event is still queued.
+ for(const el of view.querySelectorAll('.account-group'))expanded.set(el.dataset.group,el.open);
  const tagNames=new Map();for(const p of accounts)for(const t of p.tags||[])if(!tagNames.has(t.toLowerCase()))tagNames.set(t.toLowerCase(),t);
  const tags=[...tagNames.values()].sort((a,b)=>a.localeCompare(b));
  const visible=[...accounts].sort((a,b)=>byMachine(a.machine||'',b.machine||'')||a.name.localeCompare(b.name)).filter(p=>text(p).includes(query.toLowerCase())&&(!tag||(tag==='__untagged'?!p.tags?.length:p.tags?.some(t=>t.toLowerCase()===tag.toLowerCase()))));

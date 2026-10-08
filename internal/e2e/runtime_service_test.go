@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -23,6 +24,19 @@ func TestRuntimeNativeUserServiceLifecycle(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
+	// Capture before writeConfig redirects HOME/USERPROFILE. Native service
+	// management must use the actual OS user's infrastructure, even though all
+	// Hopsesh settings/state and agent roots remain in the disabled fixture.
+	keys := []string{"XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"}
+	if runtime.GOOS == "windows" {
+		keys = []string{"SystemRoot", "SystemDrive", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "USERNAME", "USERDOMAIN", "COMPUTERNAME", "PSModulePath"}
+	}
+	var supervisorEnv []string
+	for _, key := range keys {
+		if value := os.Getenv(key); value != "" {
+			supervisorEnv = append(supervisorEnv, key+"="+value)
+		}
+	}
 	bin := buildHopsesh(t)
 	box := newMachineHome(t, t.TempDir(), "native-user-service", false)
 	cfg := config.Defaults()
@@ -34,15 +48,11 @@ func TestRuntimeNativeUserServiceLifecycle(t *testing.T) {
 	run := func(args ...string) []byte {
 		t.Helper()
 		cmd := exec.CommandContext(ctx, bin, args...)
-		cmd.Env = box.env()
-		// The isolated CLI still needs the actual disposable runner's user bus.
 		// No unrelated environment or credentials are forwarded to the child.
-		for _, key := range []string{"XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"} {
-			if value := os.Getenv(key); value != "" {
-				cmd.Env = append(cmd.Env, key+"="+value)
-			}
-		}
+		cmd.Env = append(box.env(), supervisorEnv...)
+		started := time.Now()
 		out, err := cmd.CombinedOutput()
+		t.Logf("native runtime service %v completed in %s", args, time.Since(started).Round(time.Millisecond))
 		if err != nil {
 			t.Fatalf("native runtime service %v: %v\n%s", args, err, out)
 		}

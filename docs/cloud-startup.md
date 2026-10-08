@@ -57,6 +57,19 @@ chosen downloads origin. Preparing repository files does not establish that the
 download exists, a cloud session is running, or the relay is connected. Hosted
 defaults are qualified separately from these local installer and CLI tests.
 
+The current hosted qualification has verified Claude's actual `/compact`
+SessionStart callback and Codex's manually prepared observation-only connector,
+including reconnect and fresh-key renewal under one logical task. Automatic
+Codex startup, fresh environment publication, provider pause/rebuild and Claude
+transcript export remain unqualified. Claude's automatic reviewer refused the
+explicitly approved export command and exact temporary allow rules; no permission
+mode was weakened to work around it. See the [hosted qualification record](relay-hosted-qualification.md)
+for the tested versions, actual evidence and cleanup.
+
+A scoped cloud connector exits when its routing credential is refused with HTTP
+401/403. Restore it through explicit preparation/claim and independent approval
+of the fresh identity; an old cached credential must not silently renew access.
+
 ## Codex network qualification
 
 Allow the exact downloads and relay hostnames in the cloud environment's
