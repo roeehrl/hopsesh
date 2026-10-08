@@ -389,6 +389,7 @@ func (r *run) renderResult(p *move.Plan, res *move.Result) {
 		r.printf("\n✓ Conversation already synchronized; lineage receipts updated. 0 new messages, 0 transfers.\n")
 	} else if p.Kind == move.KindContinue {
 		r.printf("\n✓ %q is prepared for %s.\n", p.Title, p.Agent)
+		r.printf("  %s\n", p.ContinuationHint())
 	} else {
 		r.printf("\n✓ %q is on this machine: %d file(s), %s.\n", p.Title, res.Files, move.Human(res.Bytes))
 	}

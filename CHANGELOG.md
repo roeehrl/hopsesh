@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [0.4.0] - 2026-10-08
 
+- Imported conversations now end with a clearly attributed Hopsesh import notice, rather
+  than a fabricated agent promise to start working. GUI, CLI and TUI explain when the
+  destination still needs your first message; opening the desktop app only shows the chat.
+
 hopsesh now works with the coding agents' clouds: it hands a session to Claude Code on the
 web, Codex cloud, the GitHub Copilot cloud agent, Jules, Devin or Amp, brings their sessions
 home, and hands one cloud's session on to another, always through the vendors' own

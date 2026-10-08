@@ -25,4 +25,13 @@ func TestContextPlanAndPreparedResult(t *testing.T) {
 	if !strings.Contains(out.String(), "is prepared for Codex") || strings.Contains(out.String(), "continues in") {
 		t.Fatal(out.String())
 	}
+	if !strings.Contains(out.String(), "Opening the session does not send a message") {
+		t.Fatal(out.String())
+	}
+	p.Options.Go = true
+	out.Reset()
+	r.renderResult(p, &move.Result{})
+	if !strings.Contains(out.String(), "sends “Continue.” to Codex") || strings.Contains(out.String(), "does not send a message") {
+		t.Fatal(out.String())
+	}
 }

@@ -251,7 +251,9 @@ func (s *sc) pullArgs(extra ...string) []string {
 // arrived checks the target has the conversation, with the target's paths.
 func (r *runner) arrived(s *sc, on side, agent, cwd, otherCwd string) (Found, error) {
 	var fs []Found
-	if err := on.do("find", FindReq{Marker: s.marker, Needles: []string{s.text, cwd, otherCwd}}, &fs); err != nil {
+	const ready = "[hopsesh] Import ready."
+	const fakeReply = "Understood. I'll check the working tree first, then continue from where the conversation stopped."
+	if err := on.do("find", FindReq{Marker: s.marker, Needles: []string{s.text, cwd, otherCwd, ready, fakeReply}}, &fs); err != nil {
 		return Found{}, err
 	}
 	var got []Found
@@ -264,6 +266,9 @@ func (r *runner) arrived(s *sc, on side, agent, cwd, otherCwd string) (Found, er
 		return Found{}, fmt.Errorf("%s: want one %s session with the conversation, found %d (%+v)", on.label(), agent, len(got), fs)
 	}
 	f := got[0]
+	if s.row.To != s.row.From && (!f.Has[ready] || f.Has[fakeReply]) {
+		return f, fmt.Errorf("%s: imported history must identify Hopsesh's notice without claiming an agent turn in %s", on.label(), f.Path)
+	}
 	if !f.Has[s.text] {
 		return f, fmt.Errorf("%s: the conversation's text did not arrive intact in %s", on.label(), f.Path)
 	}

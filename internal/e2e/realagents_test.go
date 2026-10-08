@@ -15,6 +15,7 @@ import (
 
 	"github.com/roeehrl/hopsesh/agents/claude"
 	"github.com/roeehrl/hopsesh/agents/codex"
+	"github.com/roeehrl/hopsesh/internal/core/convert"
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/journal"
 	"github.com/roeehrl/hopsesh/internal/core/move"
@@ -103,8 +104,10 @@ func TestCodexListsWrittenThread(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	w, err := mod.Write(ctx, h, in, ir.WriteRequest{Mode: ir.WriteNew, Header: ir.Header{CWD: home, Title: "Find the codeword", Created: time.Now()},
-		Items: []ir.Item{{Role: ir.RoleUser, Text: "What is the codeword?"}, {Role: ir.RoleAgent, Text: "PLUM-7"}}})
+	nodes := []ir.Node{{Kind: ir.KindMessage, Actor: ir.User, Text: "What is the codeword?"}, {Kind: ir.KindMessage, Actor: ir.Agent, Text: "PLUM-7"}}
+	ir.Chain(nodes, "")
+	prepared := convert.Render(convert.Request{Nodes: nodes, From: "Claude Code", To: "Codex", Fidelity: convert.History, Window: 64000})
+	w, err := mod.Write(ctx, h, in, ir.WriteRequest{Mode: ir.WriteNew, Header: ir.Header{CWD: home, Title: "Find the codeword", Created: time.Now()}, Items: prepared.Items})
 	if err != nil {
 		t.Fatal(err)
 	}

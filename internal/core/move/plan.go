@@ -694,3 +694,15 @@ func num(s string) int {
 	}
 	return n
 }
+
+// ContinuationHint distinguishes a prepared transcript from an agent turn. Opening
+// an app does not submit a message; a terminal command may include the first prompt.
+func (p *Plan) ContinuationHint() string {
+	if p.Kind != KindContinue || p.NoWork {
+		return ""
+	}
+	if p.Options.Go {
+		return fmt.Sprintf("Opening the prepared command sends “Continue.” to %s. Check the agent for progress.", p.Agent)
+	}
+	return fmt.Sprintf("Ready for your next message. Opening the session does not send a message. Send “Continue” or your next instruction in %s to start a turn.", p.Agent)
+}

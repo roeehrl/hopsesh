@@ -106,6 +106,7 @@ func TestBrowsePlanAndContinue(t *testing.T) {
 	scr.waitFor(t, "Continue in Codex")
 	tm.Type("y")
 	scr.waitFor(t, "is prepared for Codex")
+	scr.waitFor(t, "Opening the session does not send a message")
 
 	tm.Type("q")
 	fm := tm.FinalModel(t, teatest.WithFinalTimeout(10*time.Second)).(*model)

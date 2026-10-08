@@ -783,32 +783,33 @@ func importsFrom(m agent.Module, from agent.ID) bool {
 
 // DoneDTO reports a finished move or continuation.
 type DoneDTO struct {
-	NoWork     bool     `json:"noWork"`
-	Kind       string   `json:"kind"`
-	Title      string   `json:"title"`
-	Agent      string   `json:"agent"`
-	Command    string   `json:"command"`
-	Files      int      `json:"files"`
-	Bytes      string   `json:"bytes"`
-	Paths      int      `json:"paths"`
-	Secrets    int      `json:"secrets"`
-	Redacted   bool     `json:"redacted"`
-	Cloned     bool     `json:"cloned"`
-	Worktree   string   `json:"worktree"`
-	Journal    string   `json:"journal"`
-	SourceHost string   `json:"sourceHost"`
-	Stopped    bool     `json:"stopped"`
-	Pushed     string   `json:"pushed"`
-	PushError  string   `json:"pushError"`
-	SyncNote   string   `json:"syncNote"`
-	SyncState  string   `json:"syncState"`
-	Mark       string   `json:"mark"`
-	MarkError  string   `json:"markError"`
-	Notice     string   `json:"notice"`
-	Warnings   []string `json:"warnings"`
-	InApp      bool     `json:"inApp"`             // it opens in the agent's desktop app
-	Machine    string   `json:"machine,omitempty"` // a push: where it went (start it there)
-	AuditDir   string   `json:"auditDir"`
+	NoWork           bool     `json:"noWork"`
+	Kind             string   `json:"kind"`
+	Title            string   `json:"title"`
+	Agent            string   `json:"agent"`
+	Command          string   `json:"command"`
+	Files            int      `json:"files"`
+	Bytes            string   `json:"bytes"`
+	Paths            int      `json:"paths"`
+	Secrets          int      `json:"secrets"`
+	Redacted         bool     `json:"redacted"`
+	Cloned           bool     `json:"cloned"`
+	Worktree         string   `json:"worktree"`
+	Journal          string   `json:"journal"`
+	SourceHost       string   `json:"sourceHost"`
+	Stopped          bool     `json:"stopped"`
+	Pushed           string   `json:"pushed"`
+	PushError        string   `json:"pushError"`
+	SyncNote         string   `json:"syncNote"`
+	SyncState        string   `json:"syncState"`
+	Mark             string   `json:"mark"`
+	MarkError        string   `json:"markError"`
+	Notice           string   `json:"notice"`
+	Warnings         []string `json:"warnings"`
+	InApp            bool     `json:"inApp"` // it opens in the agent's desktop app
+	ContinuationHint string   `json:"continuationHint,omitempty"`
+	Machine          string   `json:"machine,omitempty"` // a push: where it went (start it there)
+	AuditDir         string   `json:"auditDir"`
 	// Fetch is a session brought from a cloud: waiting for the user's terminal, or the
 	// code only.
 	Fetch *BroughtDTO `json:"fetch,omitempty"`
@@ -840,7 +841,7 @@ func (a *App) Apply() (*DoneDTO, error) {
 		Secrets: res.Secrets.Total, Redacted: p.Options.Redact, Cloned: res.Cloned, Worktree: res.Worktree, Journal: res.Journal,
 		SourceHost: p.Source.Location, Stopped: res.Stopped, Pushed: res.Pushed, PushError: res.PushError, SyncNote: res.SyncNote,
 		Mark: res.Mark, MarkError: res.MarkError, Notice: res.Notice, Warnings: res.Warnings, InApp: p.Options.App,
-		AuditDir: filepath.Join(config.StateDir(), "log")}
+		AuditDir: filepath.Join(config.StateDir(), "log"), ContinuationHint: p.ContinuationHint()}
 	if p.NoWork && p.SyncTo != nil && p.SyncTo.Title != "" {
 		d.Title = p.SyncTo.Title
 	}
