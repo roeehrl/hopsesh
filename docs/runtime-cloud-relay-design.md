@@ -1,6 +1,6 @@
 # Hopsesh runtime, cloud connector, and internet relay
 
-Status: approved for 0.5.0; researched and reconciled with current source on 2026-10-07. Implementation has started in the separate `codex/0.5-runtime-cloud-relay` worktree. The implemented subset and outstanding release gates are tracked in [0.5 implementation](0.5-implementation.md). Provider statements are documentation findings, not results of a live cloud experiment. No hosted relay, cloud environment, credentials or service registration has been deployed.
+Status: approved for 0.5.0; initial research/source snapshot dated 2026-10-07. Implementation and disposable hosted qualification have since progressed in the separate `codex/0.5-runtime-cloud-relay` worktree. Current progress is tracked in [0.5 implementation](0.5-implementation.md), with live evidence in [hosted qualification](relay-hosted-qualification.md). Section 13 records the 2026-10-09 reassessment against `ad5c8b6`. Earlier repository/provider observations below are dated design inputs, not current release or deployment status.
 
 This consolidates the earlier [presence proposal](daemon-presence-proposal.md) with desktop background operation, CLI administration, cloud bootstrap, and internet transport. It revises that proposal's hosting recommendation: use the desktop process when appropriate and the same backend in a headless process when needed. There is one Hopsesh product and one backend implementation.
 
@@ -360,3 +360,189 @@ Do not add an always-installed privileged service, automatic peer software insta
 - Reviewed online/offline encryption implementations, sustainable relay quotas, and measured cost/performance.
 
 These are qualification work items, not reasons to hold back the independently useful CLI administration and pure observation stages. Recommended initial product promise: “Manage Hopsesh from the CLI, keep it available in the background, see fresh state on approved endpoints, and move supported sessions over SSH or the internet with clear fidelity and lineage.”
+
+## 13. Qualification failures: research reassessment, 2026-10-09
+
+This review compares current primary documentation with source at `ad5c8b6` and
+the recorded disposable tests. Documentation, implemented behavior and live
+qualification are separate evidence. Recommendations below do not change provider
+permissions or turn unfinished capabilities into passed release gates.
+
+### Claude authorization
+
+Documented: protected `.claude` writes receive an additional check even when an
+allow rule matches. Cloud's **Accept edits** label corresponds to Manual/default
+behavior, not bypass mode. The docs describe a Recently denied manual retry UI,
+but our browser exposed only the mode selector; availability must be verified
+on the actual hosted surface. [Permission modes](https://code.claude.com/docs/en/permission-modes).
+
+The current classifier configuration reference offers `claude auto-mode config`
+and `claude auto-mode defaults --label …` for diagnosis. It excludes project/local
+settings from `autoMode`, distinguishes hard and soft denials, and says
+`/auto-mode-setup` is unavailable in cloud. `autoMode` is different from the
+`permissions.allow` command rules attempted in qualification. Inspect the installed
+version rather than assuming every current documented feature exists there.
+[Auto mode configuration](https://code.claude.com/docs/en/auto-mode-config).
+
+Observed: Claude 2.1.295 refused disposable export as Data Exfiltration and the
+temporary permission-file write as Self-Modification. No temporary rules or
+export completed. A label alone does not identify the effective rule tier.
+
+Recommendation: collect only relevant effective-rule/denial details, with secrets
+and unrelated infrastructure redacted. Prefer a provider-supported exact-action
+manual retry. If absent, prepare a concrete user-operated manual-approval flow in
+the actual cloud UI; a mode change is distinct from the approved command rule,
+and must not be silently substituted. Restore the prior mode afterward. Do not
+ask the model repeatedly to rewrite its own authorization. Do not substitute a
+setup script, hook, encoding or alternate shell to execute the denied action.
+If supported approval still fails, retain the capability restriction and a
+minimal synthetic reproduction for an explicitly authorized vendor report.
+
+For reusable onboarding, review public bootstrap files before starting the cloud
+task. Keep provisioning separate from session consent; never commit admissions,
+private keys, routing tokens or standing transcript-export permission. This is
+an architectural recommendation, not another route for the refused export.
+
+### Real provider lifecycle and diagnostic evidence
+
+Claude documents cached filesystem provisioning, not surviving setup processes.
+Idle VMs pause automatically and may later be reclaimed. Background Bash commands
+also have a finite lifetime: credential lifetime does not guarantee process
+availability. [Cloud environments](https://code.claude.com/docs/en/cloud-environments).
+Its hook contract distinguishes startup, resume, clear, compact and fork.
+Compaction does not establish VM rebuild. [Hooks](https://code.claude.com/docs/en/hooks#sessionstart).
+
+Source finding: `ReadSessionStart` validates `source`, but
+`internal/ui/cli/cloudintegration.go` discards it before saving an incarnation.
+`Begin` rotates keys for every invocation, including compact. Preserve this
+conservative authorization behavior, but retain the validated event reason and
+timestamp as private diagnostic metadata, separate from permission scope.
+Explicit CLI preparation must be identified as manual. Metadata must never
+prove a provider event by itself or grant access.
+
+Revised experiment: publish a reviewed environment, start a fresh task, record
+callback/process/identity evidence, leave it idle without synthetic keepalive
+traffic, then continue through the provider UI. Correlate the callback with
+provider resume evidence. Test reclaim/rebuild only when it actually happens;
+without a deterministic provider trigger, keep that row unqualified. Helper
+restart and `/compact` cannot pass it. Expired observations should show stale or
+disconnected, not imply that the provider task has ended.
+
+Current Codex uses a published environment's Install script and Start skill;
+existing tasks retain their state. Test changed networking in a new task. Its
+lifecycle differs from Legacy setup/maintenance scripts.
+[Current environments](https://learn.chatgpt.com/docs/environments/cloud-environments),
+[Legacy environments](https://learn.chatgpt.com/docs/environments/cloud-environment).
+Generic Codex hook documentation includes session identity and a nullable
+transcript path, explicitly warns that transcript format is not stable, and
+documents separate Work Cloud restrictions. This does not prove that command
+hooks run in the current hosted environment under test.
+[Codex hooks](https://learn.chatgpt.com/docs/hooks).
+
+Recommendation: qualify the Start skill in a newly published task; preserve an
+explicit unsupported result when native binding is unavailable. Observed ID
+environment variables are test evidence, not a documented identity API. Keep
+current Codex observation-only until an independently verified binding and
+supported transcript source pass. Do not derive identity from a scratch path
+or scan unrelated native transcripts.
+
+### Windows supervisor timeout
+
+Children inherit the parent environment unless the caller supplies a replacement.
+PowerShell `-NoProfile -NonInteractive` avoids profile loading and interactive
+prompts. Task Scheduler `InteractiveToken` requires an existing interactive
+login; it is not a pre-login service.
+[Process environment](https://learn.microsoft.com/en-us/windows/win32/procthread/environment-variables),
+[PowerShell arguments](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_powershell_exe?view=powershell-5.1),
+[Task logon types](https://learn.microsoft.com/en-us/windows/win32/taskschd/taskschedulerschema-logontype-simpletype).
+
+Observed: direct native COM querying passed, while isolated CLI enable timed
+out. `ad5c8b6` preserves selected Windows infrastructure/profile variables and
+keeps Hopsesh/agent state isolated. This is a plausible fixture repair, not yet
+a proven root cause. Production already uses those PowerShell flags and a
+bounded query deadline.
+
+Recommendation: compare direct COM and actual CLI with the same environment.
+If failure persists, capture separate timings for process launch, COM creation,
+Connect, GetFolder and GetTask. Log phase/error code, not task XML or environment
+values. Denied access and timeout must remain unknown rather than absent.
+Verify registration and runnable login context separately. Do not repeatedly
+increase timeouts or introduce a privileged service to make an unsuitable CI
+login context pass.
+
+### Relay retry behavior, hibernation and cost
+
+AWS recommends bounded exponential backoff with jitter, a single retry owner
+and idempotent operations. HTTP 403 should not be automatically repeated with
+the same credentials and can have causes other than revocation.
+[Retry guidance](https://docs.aws.amazon.com/wellarchitected/latest/framework/rel_mitigate_interaction_failure_limit_retries.html),
+[HTTP semantics](https://www.rfc-editor.org/rfc/rfc9110.html#section-15.5.4).
+
+Source finding: the cloud authorization-refusal exit is fixed and hosted-tested.
+However, `relay/connection.go`, `notifications.go`, `admission.go` and
+`enrollment_browser.go` use deterministic retry delays. Notification handshake
+errors are generic; HTTP reconciliation discovers authorization refusal.
+
+Recommendation: add shared bounded jitter for transient retries, preserve lease
+deadlines/cancellation, and honor applicable server retry delays. Keep device
+authorization's protocol polling interval intact. Spread fallback work without
+increasing healthy idle wakeups; do not delay committed-message draining. Test
+lost replies using the same operation/proof instead of repeating a fresh
+mutation. Distinguish CONNECT policy failure from authenticated origin refusal
+in diagnostics. Preserve the native runtime's separately authorized renewal.
+
+Keep one observer and coalesced change notifications: Apple recommends
+event-driven synchronization instead of frequent timers.
+[Apple energy guidance](https://developer.apple.com/library/archive/documentation/Performance/Conceptual/power_efficiency_guidelines_osx/Timers.html).
+Cloudflare hibernation requires its hibernating WebSocket API; timers/outgoing
+sockets can prevent it, and reconstruction needs durable state.
+[Cloudflare WebSockets](https://developers.cloudflare.com/durable-objects/best-practices/websockets/).
+The silent 30-minute result does not measure production reconciliation,
+reconnect storms, authorization objects and R2. Include them in the load/cost
+test; duration billing uses allocated memory rather than observed heap.
+[Cloudflare pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/).
+
+### Browser races and asynchronous retention
+
+The HTML standard queues/coalesces `details` toggle events, supporting the fix
+that captures actual `open` state before replacing nodes. Preserve unchanged
+inspector DOM and immediately invalidate previews on privacy changes.
+[HTML details element](https://html.spec.whatwg.org/multipage/interactive-elements.html#the-details-element).
+Use awaited web assertions and drain in-flight route handlers during teardown.
+Keep a failure fixture active until explicit retry; assert updated content,
+not incidental detachment. Avoid sleeps or additional retries that hide races.
+[Playwright assertions](https://playwright.dev/docs/test-assertions),
+[Route cleanup](https://playwright.dev/docs/api/class-page#page-unroute-all).
+
+R2 says lifecycle deletion typically occurs within 24 hours of `x-amz-expiration`,
+not at a guaranteed exact deadline. Record the actual expiration header and
+authenticated disappearance time. October 10 20:33 UTC is an earliest canary
+check, not a guaranteed pass time. Neither manual deletion nor a 403/network
+failure qualifies retention. [R2 lifecycle](https://developers.cloudflare.com/r2/buckets/object-lifecycles/).
+
+### Revised acceptance work and ordering
+
+These are required follow-ups, not claims that this research added or ran tests.
+Existing evidence remains in the qualification record. Deterministic simulation
+and native/provider validation must remain distinct.
+
+| Priority / layer | Scenario | Required result |
+| --- | --- | --- |
+| P0 / provider | Relevant rule diagnosis; supported exact-action retry | Unchanged scope; verified approved export or explicit blocked capability |
+| P0 / Windows | COM and CLI under the same environment; absent/denied/timed-out scheduler | Correct states and phase timings; no real-agent scanning or escalation |
+| P0 / Claude | Fresh and cached task startup | Actual callback; no setup-time identity or invitation copied |
+| P0 / provider | Idle continue; separately observed reclaim/rebuild | Correlated event/process evidence, fresh approval, old connector stopped |
+| P0 / current Codex | New published task; Start skill; missing identity | Startup evidence or unsupported state; no invented binding/export |
+| P1 / unit and CLI | Startup/resume/compact/fork/manual metadata | Exact reason persists; no transcript/secret logs; metadata grants no access |
+| P1 / protocol/load | Many clients disconnect together; network/429/5xx | Distributed bounded retries, prompt cancellation, no amplification |
+| P1 / protocol | Revoke during stream and HTTP fallback | Connector stops without stale-token retries or implicit reauthorization |
+| P1 / lifecycle matrix | A-B-A-B-A; A-B-C-B-C-A; independent fork renewal | Correct generations/lineage; original and fork approvals never cross |
+| P1 / browser | Toggle then immediate render; late preview/publication | Collapse, expansion, focus/scroll and dialog preserved; newer content wins |
+| P1 / retention | Orphan beyond actual expiration header | Authenticated absence without manual deletion; lag recorded |
+| P1 / hosted load | Normal reconciliation, storm, renewal, cleanup | Whole-service metrics/cost, bounded quotas, staging cleaned and paused |
+
+Implement local diagnostic/retry improvements while native CI runs. Repeat the
+disposable provider tests through supported approval and published environments.
+Retention still requires elapsed time, and wider load requires hosted evidence.
+Keep PR #71 draft until release gates pass. These findings neither reduce the
+approved scope nor silently waive qualification.

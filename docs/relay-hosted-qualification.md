@@ -58,6 +58,11 @@ mailbox alarms:
   the canary manually and then claim lifecycle success. An authenticated missing
   object response is required; authentication/network failures do not pass.
 
+That is an earliest observation threshold, not an exact deletion deadline.
+Record the actual `x-amz-expiration` header and disappearance time. R2 documents
+typical removal within 24 hours after that expiration value, with possible delays;
+see [lifecycle behavior](https://developers.cloudflare.com/r2/buckets/object-lifecycles/).
+
 The private local readback/record lives under the operator's
 `cloud-0.5/orphan-lifecycle` qualification directory. The object contains no
 session data or credentials. No shorter lifecycle rule replaced the deployed

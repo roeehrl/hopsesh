@@ -66,6 +66,11 @@ explicitly approved export command and exact temporary allow rules; no permissio
 mode was weakened to work around it. See the [hosted qualification record](relay-hosted-qualification.md)
 for the tested versions, actual evidence and cleanup.
 
+The [2026-10-09 research reassessment](runtime-cloud-relay-design.md#13-qualification-failures-research-reassessment-2026-10-09)
+distinguishes provider permission recovery from bootstrap installation and adds
+event-source evidence to the lifecycle qualification plan. Do not use setup or
+hook execution as an alternate path for an export the provider refused.
+
 A scoped cloud connector exits when its routing credential is refused with HTTP
 401/403. Restore it through explicit preparation/claim and independent approval
 of the fresh identity; an old cached credential must not silently renew access.
