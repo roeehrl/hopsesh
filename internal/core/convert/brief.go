@@ -54,7 +54,8 @@ func Brief(nodes []ir.Node, r BriefRequest) BriefResult {
 		return cloudBrief(nodes, r)
 	}
 	text := briefing(Request{From: r.From, To: r.To, Fidelity: Note, Briefing: r.Briefing}, &Report{})
-	return BriefResult{Text: text, Tokens: len(text) / 4}
+	bounded := BoundText(text, ir.FallbackWindow*3/10)
+	return BriefResult{Text: bounded, Tokens: len(bounded), Shortened: bounded != text}
 }
 
 func latestPlan(nodes []ir.Node) []ir.PlanEntry {
@@ -90,16 +91,18 @@ func cloudBrief(nodes []ir.Node, r BriefRequest) BriefResult {
 	for i, cut := range cloudCuts {
 		res.Text = cloudText(nodes, r, cut)
 		res.Shortened = i > 0
-		if len(res.Text)/4 <= CloudBudget {
+		if len(res.Text) <= CloudBudget {
 			break
 		}
 	}
-	if limit := CloudBudget * 4; len(res.Text) > limit {
-		res.Text = strings.ToValidUTF8(res.Text[:limit], "") + "\n[shortened to fit]"
+	if limit := CloudBudget; len(res.Text) > limit {
+		res.Text = BoundText(res.Text, limit)
 		res.Shortened = true
 	}
 	masked, n := scan.Redact([]byte(res.Text))
-	res.Text, res.Masked, res.Tokens = string(masked), n, len(masked)/4
+	res.Text = BoundText(string(masked), CloudBudget)
+	res.Shortened = res.Shortened || len(masked) > CloudBudget
+	res.Masked, res.Tokens = n, len(res.Text)
 	return res
 }
 

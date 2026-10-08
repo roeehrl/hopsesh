@@ -43,49 +43,26 @@ type Group struct {
 // reply to the move notice does not count).
 const keptWorking = 10 * time.Minute
 
-// Items merges copies of the same session: by lineage (across agents and places) or by
-// key (one agent, several places).
+// Items combines only verified copies. Unknown native identities remain scoped
+// to their endpoint, profile and installation, even when titles or IDs match.
 func (inv *Inventory) Items() []Item {
 	local := map[string]bool{}
 	for _, m := range inv.Machines {
 		local[m.Name] = m.Local
 	}
-	id := func(e Entry) string {
-		if e.Location.IsCloud() {
-			// A cloud session is a row of its own, next to its relatives here.
-			return "C:" + e.Location.Name + ":" + e.Session.Key.String()
-		}
-		if e.Lineage != nil && e.Lineage.Family != "" {
-			return "L:" + e.Lineage.Family + ":" + e.Lineage.Branch
-		}
-		return "K:" + e.Session.Key.String()
-	}
+	relationships := inv.Relationships()
 	by := map[string][]Entry{}
 	var order []string
 	for _, e := range inv.Entries {
-		k := id(e)
+		r := relationships[EntryIdentity(e.Machine, e.Session.Key.String())]
+		k := r.Family + ":" + r.Branch
+		if e.Location.IsCloud() {
+			k = "C:" + e.Location.Name + ":" + e.Session.Key.String()
+		}
 		if _, seen := by[k]; !seen {
 			order = append(order, k)
 		}
 		by[k] = append(by[k], e)
-	}
-	// Sessions keyed alone that a lineage group also contains join that group.
-	for _, k := range order {
-		if !strings.HasPrefix(k, "L:") {
-			continue
-		}
-		for _, e := range by[k] {
-			for _, r := range e.Lineage.Replicas {
-				if r.Line != e.Lineage.Branch {
-					continue
-				}
-				alone := "K:" + r.Key.String()
-				if es, ok := by[alone]; ok {
-					by[k] = append(by[k], es...)
-					delete(by, alone)
-				}
-			}
-		}
 	}
 	var out []Item
 	for _, k := range order {

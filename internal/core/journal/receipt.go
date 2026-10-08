@@ -22,6 +22,9 @@ type Receipt struct {
 func (j *Journal) WriteReceipt(fsys host.FS, machine, path string, body []byte, guardNative bool) error {
 	receipt := Receipt{Machine: machine, Path: path, Body: body}
 	if guardNative {
+		if fsys == nil {
+			return fmt.Errorf("cannot guard a receipt without a filesystem")
+		}
 		st, err := fileState(fsys, machine, strings.TrimSuffix(path, lineage.Suffix))
 		if err != nil {
 			return err
@@ -35,6 +38,9 @@ func (j *Journal) WriteReceipt(fsys host.FS, machine, path string, body []byte, 
 	j.mu.Unlock()
 	if err != nil {
 		return err
+	}
+	if fsys == nil {
+		return fmt.Errorf("source receipt queued until its machine is reachable")
 	}
 	if err = j.applyReceipt(fsys, index); err != nil {
 		return err

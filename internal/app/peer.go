@@ -134,11 +134,13 @@ func (s *peerSession) hello(ctx context.Context) peer.HelloReply {
 func (a *App) receiveOptions(o move.Options) move.Options {
 	d := a.DefaultOptions()
 	d.TargetProfile = o.TargetProfile
+	d.NewReplica, d.Bounded = o.NewReplica, o.Bounded
 	d.TargetDir, d.Clone, d.Worktree = o.TargetDir, o.Clone, o.Worktree
 	d.OperationID, d.TargetSession = o.OperationID, o.TargetSession
 	d.Fork, d.RemoteControl, d.Notify, d.Redact = o.Fork, o.RemoteControl, o.Notify, o.Redact
 	d.Mark, d.SyncCode, d.StopLocal, d.Conflict = o.Mark, o.SyncCode, o.StopLocal, o.Conflict
 	d.Fidelity, d.Native, d.Note, d.Go, d.CarryRules, d.Via = o.Fidelity, o.Native, o.Note, o.Go, o.CarryRules, o.Via
+	d.RuleFiles = append([]string(nil), o.RuleFiles...)
 	return d // never Push: the sender pushed before sending, if asked to
 }
 
@@ -410,9 +412,10 @@ func (a *App) packageOf(ctx context.Context, here *Machine, e Entry) (peer.Packa
 		}
 		pkg.Files = append(pkg.Files, host.SnapshotFile{Path: p, Data: data, Mode: fi.Mode().Perm(), ModTime: fi.ModTime()})
 	}
-	// The user's instructions for every project, for --carry-rules there.
-	for _, g := range mod.Spec().GlobalInstructions {
-		p := agent.Expand(g, h.Facts().Home, in.Roots, h.Path())
+	// The same declared source files shown by local instruction review. These are
+	// a read-only snapshot for the peer's briefing, never destination file writes.
+	for _, file := range move.InstructionSources(mod.Spec(), h, in, e.Session.CWD) {
+		p := file.Path
 		if data, err := h.FS().ReadFile(p, 1<<20); err == nil {
 			pkg.Files = append(pkg.Files, host.SnapshotFile{Path: p, Data: data, Mode: 0o600})
 		}

@@ -122,6 +122,24 @@ func (m *Module) Import(ctx context.Context, h agent.Host, in agent.Install, fro
 	if in.Binary == "" || !h.Facts().Local {
 		return "", fmt.Errorf("%w: Codex's importer needs codex installed on this machine", agent.ErrUnsupported)
 	}
+	capacity, err := m.ContextCapacity(ctx, h, in, nil)
+	if err != nil {
+		return "", err
+	}
+	// Keep a checked snapshot for recovery. Codex only imports paths in its detected
+	// Claude inventory, so pass the original path and verify it against this snapshot
+	// again after import. Core also measures the resulting native active context.
+	raw, err := h.FS().ReadFile(path, int64(capacity.Allowance()/2))
+	if err != nil {
+		return "", fmt.Errorf("vendor import input cannot fit safely; use portable history: %w", err)
+	}
+	if len(raw)*2 > capacity.Allowance() {
+		return "", fmt.Errorf("vendor import exceeds context allowance; use portable history")
+	}
+	snapshot := h.Path().Join(in.Root(home), "hopsesh", "imports", newUUID()+".jsonl")
+	if err = h.FS().WriteFile(snapshot, raw, 0o600); err != nil {
+		return "", err
+	}
 	item := map[string]any{"itemType": "SESSIONS", "description": "a session hopsesh brings over", "cwd": cwd,
 		"details": map[string]any{"sessions": []any{map[string]any{"cwd": cwd, "path": path, "title": title}}}}
 	reqs := []map[string]any{{"id": 2, "method": "externalAgentConfig/import",
@@ -159,6 +177,10 @@ func (m *Module) Import(ctx context.Context, h agent.Host, in agent.Install, fro
 		for _, t := range c.Results {
 			for _, s := range t.Successes {
 				if s.Target != "" {
+					current, err := h.FS().ReadFile(path, int64(capacity.Allowance()/2))
+					if err != nil || !bytes.Equal(current, raw) {
+						return agent.SessionID(s.Target), fmt.Errorf("source changed during vendor import; retain the imported session for undo and make a new plan")
+					}
 					return agent.SessionID(s.Target), nil
 				}
 			}

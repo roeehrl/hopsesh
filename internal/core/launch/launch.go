@@ -26,10 +26,9 @@ type Context struct {
 	Dirty          int
 	SecretsFound   int
 	Redacted       bool
-	OtherAccount   bool   // account-bound content was removed
-	Live           bool   // the source session was still running
-	Fork           bool   // the source keeps running
-	Notify         string // the module's instruction for telling the old session, if any
+	OtherAccount   bool // account-bound content was removed
+	Live           bool // the source session was still running
+	Fork           bool // the source keeps running
 }
 
 // StartPrompt is the first message of a moved session: what happened, what that implies,
@@ -79,24 +78,8 @@ func StartPrompt(c Context) string {
 	if c.Unpushed > 0 || c.Dirty > 0 {
 		fmt.Fprintf(&b, "4. Work out whether any of the work left behind on %s is needed to continue.\n", c.SourceLocation)
 	}
-	if c.Notify != "" {
-		b.WriteString("\n" + c.Notify + "\n")
-	}
 	b.WriteString("\nThen give me a short report of anything missing or different, and wait for my go-ahead before resuming the task.")
 	return b.String()
-}
-
-// OldSessionNotice is the text for the user to paste into the old session when the agent
-// cannot deliver it.
-func OldSessionNotice(targetLocation, targetCWD, newName string, fork bool) string {
-	s := fmt.Sprintf("[hopsesh] This conversation was copied to %s (%s)", targetLocation, targetCWD)
-	if newName != "" {
-		s += fmt.Sprintf(" and continues there as %q", newName)
-	}
-	if fork {
-		return s + ". Both copies are active; coordinate before editing shared files."
-	}
-	return s + ". Please stop working on this task here and don't edit these files any more."
 }
 
 // Shell renders a command for a shell family ("posix" or "powershell"). When promptFile

@@ -34,15 +34,30 @@ func (a *App) Resume(inv *Inventory, e Entry, o agent.ResumeOptions) (agent.Comm
 	if o.App && !agent.Has(mod, agent.CapApp) {
 		return agent.Command{}, fmt.Errorf("%w: %s has no desktop app hopsesh can open", agent.ErrUnsupported, mod.Spec().Name)
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	if o.App {
+		o.AppRunning = false
+		if e.Live.State == agent.Live && e.Live.App {
+			// Recheck ownership: a cached ID from before /clear must not be imported
+			// as a new chat by an application's focus URL.
+			if verifier, ok := mod.(agent.AppFocusVerifier); ok {
+				h, err := m.host.For(ctx, mod.Spec(), in, nil)
+				if err != nil {
+					return agent.Command{}, err
+				}
+				if err := verifier.VerifyAppFocus(ctx, h, in, e.Session.Key); err != nil {
+					return agent.Command{}, err
+				}
+			}
+			o.AppRunning = true
+		}
 		if check, ok := mod.(agent.AppChecker); ok {
 			if err := check.CheckApp(in, e.Session.Key, o); err != nil {
 				return agent.Command{}, err
 			}
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
 	if err := move.ValidateProfiles(ctx, move.Input{Source: move.Side{Machine: m.host, Module: mod, Install: in}}); err != nil {
 		return agent.Command{}, err
 	}

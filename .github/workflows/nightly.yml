@@ -139,9 +139,13 @@ jobs:
         run: go test ./internal/e2e/tuipty/ -count=1 -v
 
   matrix-triples:
-    name: scenario matrix, every triple (linux)
+    name: scenario matrix, every triple (linux ${{ matrix.shard }}/2)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
@@ -156,15 +160,18 @@ jobs:
           for p in cmd/hopsesh:hopsesh internal/devtools/hsmatrix:hsmatrix internal/devtools/fakeagent:fakeagent; do
             go build -o "bin/${p#*:}" "./${p%%:*}"
           done
-      - name: stateful account and lineage routes and recovery
+      - name: stateful movement, account and lineage routes and recovery
+        if: matrix.shard == 1 # these stateful tests run once; only the matrix rows are sharded
         env:
           HOPSESH_LINEAGE_NIGHTLY: "1"
-        run: go test ./internal/e2e -run 'TestLineage|TestAccountProfile' -race -count=1 -timeout 12m
-      - run: scripts/matrix-loopback.sh bin "linux→linux, covering triples" "$RUNNER_TEMP/hsmatrix" -t 3
+        run: go test ./internal/e2e -run 'TestMovement|TestLineage|TestAccountProfile|TestContext' -race -count=1 -timeout 12m
+      - run: scripts/matrix-loopback.sh bin "linux→linux, covering triples $SHARD" "$RUNNER_TEMP/hsmatrix" -t 3 -shard "$SHARD"
+        env:
+          SHARD: ${{ matrix.shard }}/2
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ failure() }}
         with:
-          name: nightly-matrix
+          name: nightly-matrix-${{ matrix.shard }}
           path: |
             ${{ runner.temp }}/hsmatrix/*.log
             ${{ runner.temp }}/hsmatrix/*.json

@@ -1,8 +1,9 @@
 // The command palette (⌘K, Ctrl+K): find a session and act on it, or run any command, from the keyboard.
-import { cloudOf, api, h, fill, icon, ICONS, state, go, current, toast, fail, agentBadge, entries, here, $, sys, keys, clouds, selected, cloudTitle } from "./core.js";
+import { cloudOf, api, h, fill, icon, ICONS, state, go, current, toast, fail, agentBadge, entries, here, $, sys, keys, clouds, selected, cloudTitle, pending } from "./core.js";
 import { pickHandoff } from "./handoff.js";
 import { actionsFor, statusOf, render as renderSessions, reveal, pasteDialog, showEntry, listCommand } from "./sessions.js";
 import { list } from "./listview.js";
+import { model } from "./actions.js";
 import { undoLast } from "./activity.js";
 import { showTerminal, openShell } from "./term.js";
 
@@ -92,12 +93,13 @@ const matches = (text, ws) => { const t = text.toLowerCase(); return ws.every((w
 // sessionItem is a session found: ↩ shows it in the list, ⌘↩ (Ctrl+Enter) runs its main
 // action. Its line says where it is: the repository, the machine, its state.
 function sessionItem(e, group) {
-  const acts = actionsFor(e);
+  const primary = model(e).primary;
+  const action = primary && !primary.disabled ? primary : null;
   const [, st] = statusOf(e);
   const repo = e.group.noRepo ? "" : e.group.name.replace(/ \(no remote\)$/, "");
   const where = e.cloud ? cloudTitle(e.machine) : e.machine === here() ? sys.here : e.machine;
   return { group, session: e, label: e.title, sub: [repo, where, st[0].toLowerCase() + st.slice(1), e.cloud?.pr ? "PR " + e.cloud.pr : ""].filter(Boolean).join(" · "),
-    hint: acts[0] ? `${keys("mod+enter")} ${acts[0].label}` : "", run: () => show(e), second: acts[0]?.run };
+    hint: action ? `${keys("mod+enter")} ${action.label}` : "", run: () => show(e), second: action?.run };
 }
 
 function build(q) {
@@ -144,7 +146,7 @@ function runAt(i, second) {
   const fn = second ? it.second : it.run;
   if (!fn) return;
   pal.close();
-  fn();
+  return pending(it.label, fn, "palette:" + it.label).catch(fail);
 }
 
 export function openPalette() {

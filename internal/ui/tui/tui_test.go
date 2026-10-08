@@ -105,12 +105,35 @@ func TestBrowsePlanAndContinue(t *testing.T) {
 	tm.Type("a") // continue it in the next agent instead
 	scr.waitFor(t, "Continue in Codex")
 	tm.Type("y")
-	scr.waitFor(t, "continues in Codex")
+	scr.waitFor(t, "is prepared for Codex")
+	scr.waitFor(t, "Opening the session does not send a message")
 
 	tm.Type("q")
 	fm := tm.FinalModel(t, teatest.WithFinalTimeout(10*time.Second)).(*model)
 	if fm.result == nil || fm.plan == nil || fm.plan.Continue == nil {
 		t.Fatalf("the continuation did not happen: mode %v, err %v", fm.mode, fm.err)
+	}
+	if fm.inv != nil {
+		fm.inv.Close()
+	}
+}
+
+func TestBrowseBoundedRecovery(t *testing.T) {
+	tm := teatest.NewTestModel(t, newModel(t), teatest.WithInitialTermSize(160, 50))
+	scr := watch(t, tm, 160, 50)
+	scr.waitFor(t, "Find the codeword")
+	tm.Type("/")
+	tm.Type("Find the")
+	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
+	tm.Type("b")
+	scr.waitFor(t, "Continue in Claude Code")
+	scr.waitFor(t, "capacity working context upper estimate")
+	tm.Type("y")
+	scr.waitFor(t, "is prepared for Claude Code")
+	tm.Type("q")
+	fm := tm.FinalModel(t, teatest.WithFinalTimeout(10*time.Second)).(*model)
+	if fm.result == nil || fm.plan == nil || !fm.plan.Options.Bounded || fm.plan.Placement.Key == fm.plan.Key {
+		t.Fatalf("bounded recovery was not applied: %v", fm.err)
 	}
 	if fm.inv != nil {
 		fm.inv.Close()

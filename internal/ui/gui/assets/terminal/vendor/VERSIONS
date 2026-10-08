@@ -1,4 +1,5 @@
 # xterm.js and addons vendored by internal/devtools/xtermfetch; the files' SHA-256 below.
+package @xterm/addon-serialize@0.14.0
 package @xterm/xterm@6.0.0
 package @xterm/addon-fit@0.11.0
 package @xterm/addon-webgl@0.19.0
@@ -7,6 +8,7 @@ package @xterm/addon-web-links@0.12.0
 package @xterm/addon-search@0.16.0
 2d87e1bddc73be9111de8beee5370c3bb7aac9c94e18e6f245f02ca741ef1769  addon-fit.mjs
 3ea90162233f867b938cd29b8ad98f589643436bbb5445bd11b825dc99ff0c04  addon-search.mjs
+6c93dff90bef3b7aac8664fa4c1cb4026bf4b701f3014a1fb88edde943dab906  addon-serialize.mjs
 37bb2d573c615661c875398be2a3497e02bd21d7202a5d1159f6ab70a8cfc2f2  addon-unicode11.mjs
 cce9cc1905c4d369dfa70ef0ed1eea12700754818a6c480d1fd94895dddd1a25  addon-web-links.mjs
 5ac2cbbb8a861ba99176eda0ee91f10c08de32d091e3488edf699ad111131ebb  addon-webgl.mjs

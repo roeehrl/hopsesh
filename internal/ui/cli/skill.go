@@ -15,11 +15,15 @@ import (
 	"github.com/roeehrl/hopsesh/internal/version"
 )
 
-// skillFiles renders this build's skill for the enabled agents.
+// skillFiles renders this build's skill for the enabled agents that keep sessions on
+// machines (the skill names the clouds itself); the app renders the same files.
 func (r *run) skillFiles() (map[string][]byte, string) {
 	bin := integrate.SkillBin()
 	var names, ids []string
 	for _, m := range r.app.Modules() {
+		if len(m.Spec().Roots) == 0 {
+			continue
+		}
 		names = append(names, m.Spec().Name)
 		ids = append(ids, string(m.Spec().ID))
 	}

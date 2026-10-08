@@ -12,7 +12,6 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/core/audit"
 	"github.com/roeehrl/hopsesh/internal/core/lnp"
-	"github.com/roeehrl/hopsesh/internal/core/proc"
 )
 
 // LocalNetworkError means macOS local network privacy is what stopped the connection.
@@ -53,11 +52,11 @@ type gatedTarget struct {
 // localTargets lists the places ssh (or its ProxyJump/ProxyCommand) will connect to that
 // need local network access. It reads ssh -G, so the user's ssh config decides.
 func (c *Conn) localTargets(ctx context.Context) []gatedTarget {
-	args := []string{"-G"}
+	var args []string
 	if c.override != "" {
 		args = append(args, "-o", "HostName="+c.override)
 	}
-	out, err := proc.CommandContext(ctx, c.sshBinary, append(args, c.Dest)...).Output()
+	out, err := c.sshConfig(ctx, append(args, c.Dest)...)
 	if err != nil {
 		return nil
 	}
@@ -100,7 +99,7 @@ func (c *Conn) localTargets(ctx context.Context) []gatedTarget {
 			h = hh
 			p, _ = strconv.Atoi(pp)
 		}
-		if sub, err := proc.CommandContext(ctx, c.sshBinary, "-G", h).Output(); err == nil {
+		if sub, err := c.sshConfig(ctx, h); err == nil {
 			for _, line := range strings.Split(string(sub), "\n") {
 				if v, ok := strings.CutPrefix(line, "hostname "); ok {
 					h = v

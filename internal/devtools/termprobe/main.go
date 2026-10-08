@@ -1,7 +1,7 @@
 // Command termprobe is the program of a terminal check (the app's terminal window in a test
 // build, see cmd/hopsesh-app/testport_on.go): in raw mode it prints its terminal's size,
 // asks the terminal what it is (DA1) as agent programs do at start, prints the answer,
-// and ends with 0 when one came (2 when none did within five seconds).
+// and ends with 0 when one came (2 when none did within thirty seconds).
 package main
 
 import (
@@ -39,7 +39,11 @@ func main() {
 		}
 	}()
 	reply := ""
-	timeout := time.After(5 * time.Second)
+	// The child starts before the terminal WebView and its stream attach. A cold
+	// WebView2 startup on a hosted runner can exceed five seconds; allow the
+	// buffered query to reach the actual emulator, within the app's one-minute
+	// test deadline. A missing response still fails, without retrying the query.
+	timeout := time.After(30 * time.Second)
 wait:
 	for !strings.HasSuffix(reply, "c") {
 		select {

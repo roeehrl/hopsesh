@@ -401,9 +401,9 @@ func followupCmd() *cobra.Command {
 a cloud whose command line can send one. The message starts a model turn in the cloud, which
 uses your plan's allowance. Nothing is sent until you confirm (or pass --yes).
 
-Claude Code cloud takes none from hopsesh: Claude Code 2.1 has no command that sends one
-outside its own terminal session, so open the session on claude.ai to write to it. Codex
-cloud takes none either.`,
+None of the clouds hopsesh reaches takes one yet: Claude Code 2.1 has no command that sends
+one outside its own terminal session, so open the session on claude.ai to write to it, and
+the Codex, gh, jules, devin and amp commands hopsesh drives have none either.`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(followers()) == 0 {

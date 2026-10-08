@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/roeehrl/hopsesh/internal/app"
+	"github.com/roeehrl/hopsesh/internal/core/launch"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/registry"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -34,6 +35,10 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 			limit, _ := cmd.Flags().GetInt("limit")
 			cloudOnly, _ := cmd.Flags().GetBool("cloud")
 			env, _ := cmd.Flags().GetString("env")
+			groupBy, _ := cmd.Flags().GetString("group-by")
+			if groupBy != "repository" && groupBy != "family" {
+				return fmt.Errorf("group-by must be repository or family")
+			}
 			if len(args) == 1 {
 				name := strings.TrimSuffix(args[0], ":")
 				if !r.app.IsCloud(name) {
@@ -59,8 +64,16 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 			}
 			inv.Entries = kept
 			groups := inv.Groups(r.app.LocalRoots())
+			if groupBy == "family" {
+				groups = inv.FamilyGroups()
+				for i := range groups {
+					if name := r.app.Cfg.FamilyNames[groups[i].Identity]; name != "" {
+						groups[i].Name = name
+					}
+				}
+			}
 			if r.jsonOut {
-				out := map[string]any{"machines": inv.Machines, "clouds": inv.Clouds, "groups": groups}
+				out := map[string]any{"machines": inv.Machines, "clouds": inv.Clouds, "groups": groups, "relationships": inv.Relationships()}
 				var adopted, waiting []app.Brought
 				for _, f := range inv.Adopted {
 					adopted = append(adopted, r.app.Brought(f))
@@ -111,6 +124,8 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 					head += "  " + g.Remote
 				}
 				switch {
+				case groupBy == "family":
+					head += fmt.Sprintf("  [%d branches]", len(g.Items))
 				case g.Local != "":
 					head += "  [here: " + g.Local + "]"
 				case g.Identity != "" && !strings.HasPrefix(g.Identity, "local:"):
@@ -125,7 +140,13 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 					}
 					e := it.Entry
 					s := e.Session
-					fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\t%s\n", e.Machine, e.AgentName, truncate(s.Title, 40), e.Status(), ago(s.LastActivity), shortID(s.Key.Session), truncate(s.CWD, 44))
+					fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\t%s\n", e.Machine, e.AgentName, truncate(s.Title, 40), movementStatus(e), ago(s.LastActivity), shortID(s.Key.Session), truncate(s.CWD, 44))
+					if e.Movement != nil {
+						fmt.Fprintf(tw, "  \t\t  movement [%s]: %s\t\t\t\t\n", e.Movement.Status, e.Movement.Text)
+					}
+					if len(e.Returns) > 0 {
+						fmt.Fprintf(tw, "  \t\t  %d move back destination(s); inspect with hopsesh show %s\t\t\t\t\n", len(e.Returns), launch.ShQuote(e.Machine+":"+s.Key.String()))
+					}
 					if len(it.Copies) > 1 {
 						fmt.Fprintf(tw, "  \t\t  %s\t\t\t\t\n", copiesLine(it))
 					}
@@ -141,7 +162,7 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 				tw.Flush()
 				r.printf("\n")
 			}
-			r.printf("Move one here: hopsesh pull [<machine>:]<id-or-title>   Continue in another agent: add --in <%s>\n", strings.Join(agentIDs(), "|"))
+			r.printf("Move one here: hopsesh pull [<machine>:]<id-or-title>   Continue in another agent: add --in <%s>\n", strings.Join(writerIDs(), "|"))
 			if cloudOnly {
 				r.printf("Bring one from a cloud: hopsesh pull <cloud>:<id> (or its link)\n")
 			}
@@ -149,6 +170,7 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 			return nil
 		},
 	}
+	cmd.Flags().String("group-by", "repository", "group sessions by repository or verified conversation family")
 	cmd.Flags().String("host", "", "only this machine (\"local\" for this one)")
 	cmd.Flags().String("agent", "", "only this agent ("+strings.Join(agentIDs(), ", ")+")")
 	cmd.Flags().String("repo", "", "only sessions whose repository or path contains this")
@@ -157,7 +179,7 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 	cmd.Flags().Bool("no-local", false, "skip this machine")
 	cmd.Flags().Bool("cloud", false, "only cloud sessions (and the local sessions their vendor mirrors)")
 	cmd.Flags().String("env", "", "only cloud sessions run in this environment (its id or name)")
-	cmd.Flags().Int("limit", 8, "sessions shown per repository (0 = all)")
+	cmd.Flags().Int("limit", 8, "sessions shown per group (0 = all)")
 	cmd.Flags().Bool("json", false, "output JSON")
 	return cmd
 }
@@ -169,6 +191,21 @@ func agentIDs() []string {
 	}
 	for _, id := range modules.IDs() {
 		out = append(out, string(id))
+	}
+	return out
+}
+
+// writerIDs are the agents a session can continue in (--in): those that write sessions
+// here, which leaves out the cloud-only modules.
+func writerIDs() []string {
+	var out []string
+	if modules == nil {
+		return out
+	}
+	for _, id := range modules.IDs() {
+		if m, ok := modules.Get(id); ok && agent.Has(m, agent.CapWrite) {
+			out = append(out, string(id))
+		}
 	}
 	return out
 }
@@ -290,7 +327,7 @@ func showCmd() *cobra.Command {
 			r.printf("  machine      %s\n", e.Machine)
 			r.printf("  agent        %s %s\n", e.AgentName, s.AgentVersion)
 			r.printf("  session      %s\n", s.Key)
-			r.printf("  status       %s, last active %s\n", e.Status(), ago(s.LastActivity))
+			r.printf("  status       %s, last active %s\n", movementStatus(e), ago(s.LastActivity))
 			r.printf("  directory    %s\n", s.CWD)
 			r.printf("  last prompt  “%s”\n", s.LastPrompt)
 			r.printf("  size         %d KB", s.Size/1024)
@@ -307,6 +344,7 @@ func showCmd() *cobra.Command {
 			} else if e.GitError != "" {
 				r.printf("  repository   unknown: %s\n", e.GitError)
 			}
+			r.renderMovement(e)
 			if l := e.Lineage; l != nil {
 				j := l.Journey()
 				r.printf("  lineage      branch %s · family %s\n", l.Branch, l.Family)
@@ -334,7 +372,11 @@ func agentsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "agents",
 		Short: "List the agents hopsesh supports and what is installed on this machine",
-		Args:  cobra.NoArgs,
+		Long: `Lists the agent modules this hopsesh carries, what each can do, its clouds, and what is
+installed on this machine. With --json each row also has the module's spec: its programs,
+data folders, the secrets it never opens, instruction files, features, desktop apps, and
+its clouds with their fidelity, needs and the upstream changes the drift check watches.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			r, err := newRun(cmd)
 			if err != nil {
@@ -410,4 +452,57 @@ func agentsCmd() *cobra.Command {
 	}
 	cmd.Flags().Bool("json", false, "output JSON")
 	return cmd
+}
+
+// renderMovement keeps last-seen facts separate from permission to write. Every
+// suggested transfer is a dry run with the exact account and native session key.
+func (r *run) renderMovement(e app.Entry) {
+	if n := e.Movement; n != nil {
+		r.printf("  movement     [%s] %s\n", n.Status, n.Text)
+		r.printf("  destination  %s %s on %s · profile %s\n", n.AgentName, n.Key, n.Machine, nonEmpty(n.ProfileLabel, n.Profile))
+		r.printf("  delivery     %s\n", n.Delivery)
+		if !n.CheckedAt.IsZero() {
+			r.printf("  checked      %s\n", n.CheckedAt.Format("2006-01-02 15:04:05Z07:00"))
+		}
+	}
+	for _, c := range e.Returns {
+		r.printf("  move back    %s · %s on %s [%s]\n", c.AgentName, nonEmpty(c.ProfileLabel, nonEmpty(c.Profile, "Default account")), c.Machine, c.Status)
+		r.printf("               %s · %s\n", c.Key, c.Reason)
+		r.printf("  review       %s\n", returnReviewCommand(e, c))
+	}
+}
+
+func returnReviewCommand(e app.Entry, c app.ReturnCandidate) string {
+	q := launch.ShQuote
+	if launch.DefaultShell() == "powershell" {
+		q = launch.PSQuote
+	}
+	switch c.Status {
+	case "same", "behind", "live":
+		return "hopsesh show " + q(c.Machine+":"+c.Key)
+	}
+	// A remote-to-remote return must be reviewed from an endpoint, never from an
+	// unrelated local copy with a coincidentally matching key.
+	prefix := ""
+	if !c.Local {
+		prefix = "On " + c.Machine + ": "
+	}
+	destination := " --target-session " + q(c.Key)
+	if c.Status == "missing" {
+		destination = " --new-session"
+		prefix += "New session (original missing): "
+	}
+	cmd := prefix + "hopsesh plan " + q(e.Machine+":"+e.Session.Key.String()) + " --in " + q(string(c.Agent)) + " --target-profile " + q(c.Profile) + destination
+	if c.Status == "diverged" {
+		cmd += " --keep-both"
+	}
+	return cmd
+}
+
+func movementStatus(e app.Entry) string {
+	s := e.Status()
+	if strings.HasPrefix(s, "continued ") {
+		return "previously " + s
+	}
+	return s
 }

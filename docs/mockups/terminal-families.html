@@ -1,0 +1,198 @@
+<style>
+  #hopsesh-terminal-proposal { color-scheme: light dark; }
+  #hopsesh-terminal-proposal .hs {
+    --hs-bg: light-dark(#faf9f6,#20211f); --hs-pane: light-dark(#ffffff,#282a27); --hs-soft: light-dark(#efeee9,#333630);
+    --hs-text: light-dark(#252822,#eeeee7); --hs-muted: light-dark(#62665c,#b5bbaf); --hs-line: light-dark(#dbddd4,#484c43);
+    --hs-accent: light-dark(#0b7167,#8adace); --hs-selected: light-dark(#e0f0ec,#254d45); --hs-warn: light-dark(#815317,#ecd194);
+    color:var(--hs-text); background:var(--hs-bg); border:1px solid var(--hs-line); border-radius:12px; overflow:hidden;
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; min-height:640px; position:relative;
+  }
+  #hopsesh-terminal-proposal .hs * { box-sizing:border-box; }
+  #hopsesh-terminal-proposal .hs button, #hopsesh-terminal-proposal .hs select { font:inherit; color:inherit; background:var(--hs-pane); border:1px solid var(--hs-line); border-radius:6px; padding:6px 10px; cursor:default; }
+  #hopsesh-terminal-proposal .hs button:hover { background:var(--hs-soft); }
+  #hopsesh-terminal-proposal .hs button:focus-visible, #hopsesh-terminal-proposal .hs select:focus-visible { outline:2px solid var(--hs-accent); outline-offset:2px; }
+  #hopsesh-terminal-proposal .hs button[aria-pressed=true] { background:var(--hs-selected); border-color:var(--hs-accent); }
+  #hopsesh-terminal-proposal .hs .quiet { background:transparent; border-color:transparent; }
+  #hopsesh-terminal-proposal .hs .top { min-height:58px; display:flex; align-items:center; gap:12px; padding:10px 16px; border-bottom:1px solid var(--hs-line); }
+  #hopsesh-terminal-proposal .hs .grow { flex:1; min-width:0; }
+  #hopsesh-terminal-proposal .hs .name { font-weight:600; }
+  #hopsesh-terminal-proposal .hs .muted { color:var(--hs-muted); font-size:12px; }
+  #hopsesh-terminal-proposal .hs .dots { display:flex; gap:6px; margin-right:15px; }
+  #hopsesh-terminal-proposal .hs .dots span { width:10px; height:10px; border-radius:50%; background:var(--hs-line); }
+  #hopsesh-terminal-proposal .hs .body { display:grid; grid-template-columns:148px minmax(0,1fr); }
+  #hopsesh-terminal-proposal .hs .places { border-right:1px solid var(--hs-line); padding:18px 10px; min-width:0; }
+  #hopsesh-terminal-proposal .hs .places p { margin:20px 8px 8px; font-size:11px; color:var(--hs-muted); letter-spacing:.07em; }
+  #hopsesh-terminal-proposal .hs .places div { padding:8px; }
+  #hopsesh-terminal-proposal .hs .places .current { background:var(--hs-selected); border-radius:6px; }
+  #hopsesh-terminal-proposal .hs .content { min-width:0; }
+  #hopsesh-terminal-proposal .hs .browse { display:grid; grid-template-columns:minmax(260px,1.2fr) minmax(220px,1fr); min-height:245px; }
+  #hopsesh-terminal-proposal .hs .session-list { padding:15px; min-width:0; }
+  #hopsesh-terminal-proposal .hs .rowbar { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+  #hopsesh-terminal-proposal .hs .family-head { display:flex; align-items:center; gap:6px; margin-bottom:6px; }
+  #hopsesh-terminal-proposal .hs .family-head button { text-align:left; flex:1; }
+  #hopsesh-terminal-proposal .hs .family-list { display:flex; flex-direction:column; gap:4px; padding-left:15px; }
+  #hopsesh-terminal-proposal .hs .branch { display:flex; align-items:center; text-align:left; justify-content:space-between; gap:8px; width:100%; }
+  #hopsesh-terminal-proposal .hs .branch small { display:block; font-size:12px; color:var(--hs-muted); }
+  #hopsesh-terminal-proposal .hs .badge { white-space:nowrap; font-size:12px; color:var(--hs-accent); }
+  #hopsesh-terminal-proposal .hs .attention { color:var(--hs-warn); }
+  #hopsesh-terminal-proposal .hs .inspector { border-left:1px solid var(--hs-line); padding:18px; min-width:0; }
+  #hopsesh-terminal-proposal .hs h3 { margin:0 0 8px; font:600 17px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+  #hopsesh-terminal-proposal .hs .inspector p { margin:9px 0; }
+  #hopsesh-terminal-proposal .hs .message { background:var(--hs-soft); padding:10px; border-radius:7px; margin-top:12px; }
+  #hopsesh-terminal-proposal .hs .terminal { border-top:1px solid var(--hs-line); min-width:0; background:var(--hs-pane); }
+  #hopsesh-terminal-proposal .hs .handle { height:7px; background:var(--hs-soft); display:flex; justify-content:center; }
+  #hopsesh-terminal-proposal .hs .handle:after { content:""; width:38px; height:3px; margin-top:2px; border-radius:2px; background:var(--hs-line); }
+  #hopsesh-terminal-proposal .hs .term-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:6px; padding:10px; }
+  #hopsesh-terminal-proposal .hs .term-toolbar label { display:flex; align-items:center; gap:6px; }
+  #hopsesh-terminal-proposal .hs .term-tabs { display:flex; flex-wrap:wrap; gap:5px; padding:0 10px 10px; border-bottom:1px solid var(--hs-line); }
+  #hopsesh-terminal-proposal .hs .term-context { padding:8px 14px; color:var(--hs-muted); font-size:12px; display:flex; flex-wrap:wrap; gap:8px; justify-content:space-between; }
+  #hopsesh-terminal-proposal .hs pre { white-space:pre-wrap; overflow-wrap:anywhere; font:13px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace; margin:0; padding:10px 16px 16px; min-height:180px; }
+  #hopsesh-terminal-proposal .hs .status { border-top:1px solid var(--hs-line); padding:7px 12px; font-size:12px; color:var(--hs-muted); display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+  #hopsesh-terminal-proposal .hs .hidden-terminal { padding:12px; border-top:1px solid var(--hs-line); }
+  #hopsesh-terminal-proposal .hs .external { padding:8px 15px; display:flex; align-items:center; gap:8px; font-size:12px; }
+  #hopsesh-terminal-proposal .hs .external-note { font-size:12px; padding:0 15px 8px; color:var(--hs-muted); }
+  #hopsesh-terminal-proposal .hs .overlay { position:absolute; inset:58px 0 0; background:var(--hs-bg); z-index:3; padding:24px; overflow:auto; }
+  #hopsesh-terminal-proposal .hs .overlay h3 { margin:0; }
+  #hopsesh-terminal-proposal .hs .setting { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:20px 0; border-bottom:1px solid var(--hs-line); }
+  #hopsesh-terminal-proposal .hs .setting select { max-width:50%; }
+  #hopsesh-terminal-proposal .hs .setting p { margin:5px 0 0; }
+  #hopsesh-terminal-proposal .hs .evidence { padding:12px; background:var(--hs-soft); border-radius:6px; }
+  #hopsesh-terminal-proposal .hs .evidence p { margin:8px 0; }
+  #hopsesh-terminal-proposal .hs .right .content { display:grid; grid-template-columns:minmax(245px,.85fr) minmax(0,1.4fr); }
+  #hopsesh-terminal-proposal .hs .right .browse { display:block; }
+  #hopsesh-terminal-proposal .hs .right .inspector { border:0; border-top:1px solid var(--hs-line); }
+  #hopsesh-terminal-proposal .hs .right .terminal { border-top:0; border-left:1px solid var(--hs-line); }
+  #hopsesh-terminal-proposal .hs .right .terminal pre { min-height:280px; }
+  #hopsesh-terminal-proposal .hs .detached .terminal { margin:18px; border:1px solid var(--hs-line); border-radius:9px; box-shadow:0 8px 25px light-dark(#20202018,#00000040); }
+  #hopsesh-terminal-proposal .hs .detached .browse { min-height:170px; }
+  #hopsesh-terminal-proposal .hs .detached .inspector .message { display:none; }
+  #hopsesh-terminal-proposal .hs .maximized .browse { display:none; }
+  #hopsesh-terminal-proposal .hs .maximized .content { display:block; }
+  #hopsesh-terminal-proposal .hs .maximized pre { min-height:385px; }
+  #hopsesh-terminal-proposal .hs [hidden] { display:none !important; }
+  @media(max-width:800px) {
+    #hopsesh-terminal-proposal .hs .body { grid-template-columns:1fr; }
+    #hopsesh-terminal-proposal .hs .places { display:none; }
+    #hopsesh-terminal-proposal .hs .right .content { grid-template-columns:minmax(230px,.85fr) minmax(0,1.3fr); }
+  }
+  @media(max-width:560px) {
+    #hopsesh-terminal-proposal .hs .browse, #hopsesh-terminal-proposal .hs .right .content { display:block; }
+    #hopsesh-terminal-proposal .hs .inspector { border:0; border-top:1px solid var(--hs-line); }
+    #hopsesh-terminal-proposal .hs .right .terminal { border-left:0; border-top:1px solid var(--hs-line); }
+    #hopsesh-terminal-proposal .hs .dots, #hopsesh-terminal-proposal .hs .top .muted { display:none; }
+    #hopsesh-terminal-proposal .hs .top { padding:10px; gap:6px; }
+    #hopsesh-terminal-proposal .hs .setting { flex-direction:column; align-items:flex-start; gap:10px; }
+    #hopsesh-terminal-proposal .hs .setting select { max-width:100%; width:100%; }
+    #hopsesh-terminal-proposal .hs .overlay { padding:16px; }
+    #hopsesh-terminal-proposal .hs .detached .terminal { margin:8px; }
+  }
+</style>
+<div id="hopsesh-terminal-proposal">
+  <div class="viz-carousel" aria-label="Hopsesh terminal placement designs">
+    <section data-variant="Bottom panel" data-layout="bottom" aria-label="Bottom panel design"></section>
+    <section data-variant="Side workspace" data-layout="right" aria-label="Side workspace design" hidden></section>
+    <section data-variant="Separate window" data-layout="detached" aria-label="Separate terminal window design" hidden></section>
+  </div>
+  <template id="hs-terminal-template">
+    <div class="hs" aria-label="Hopsesh terminal workspace mockup">
+      <header class="top"><div class="dots" aria-hidden="true"><span></span><span></span><span></span></div><span class="name">hopsesh</span><span class="muted grow">Design preview · sample family</span><button class="settings-open" aria-label="Terminal settings"><i data-lucide="settings-2" aria-hidden="true"></i></button></header>
+      <div class="body">
+        <aside class="places" aria-label="Places"><div>Needs you <span class="attention">1</span></div><div class="current">All sessions</div><p>MACHINES</p><div>This Mac</div><div>roee-macbook</div><p>CLOUDS</p><div>Claude Code cloud</div></aside>
+        <main class="content">
+          <section class="browse" aria-label="Sessions and details">
+            <div class="session-list">
+              <div class="rowbar"><span class="name">All sessions</span><span class="muted">By conversation family</span></div>
+              <div class="family-head"><button class="quiet family-toggle" aria-expanded="true">⌄ Oarbank <span class="muted">3 branches</span></button><span class="attention">1 needs you</span></div>
+              <div class="family-list" aria-label="Oarbank conversation family">
+                <button class="branch" data-branch="original" aria-pressed="true"><span>Original<small>Claude Code · this Mac · 2 copies</small></span><span class="badge">2 tabs</span></button>
+                <button class="branch" data-branch="seo" aria-pressed="false"><span>⑂ SEO experiment<small>Codex · this Mac · fork of Original</small></span><span class="badge attention">1 tab !</span></button>
+                <button class="branch" data-branch="packaging" aria-pressed="false"><span>⑂ Packaging fix<small>Claude Code · MacBook · fork of Original</small></span><span class="muted">External</span></button>
+              </div>
+            </div>
+            <aside class="inspector" aria-label="Selected conversation branch">
+              <h3 class="selected-title">Oarbank · Original</h3><div class="muted selected-meta">Claude Code · this Mac · personal@example.com</div>
+              <p class="selected-note">2 copies on this branch · 1 round trip</p>
+              <div class="rowbar"><button class="show-selected">Show terminals</button><button class="quiet relation-open">Family details</button></div>
+              <div class="message"><span class="muted">Recent conversation</span><p class="selected-message">The packaging changes are ready. I’m checking the release tests.</p></div>
+            </aside>
+          </section>
+          <section class="terminal" aria-label="Hopsesh Terminal">
+            <div class="handle" aria-hidden="true"></div>
+            <div class="term-toolbar"><span class="name terminal-title">Terminal</span><span class="grow"></span><label><span class="muted">Group</span><select class="group-select" aria-label="Group terminal tabs"><option value="family">Family</option><option value="session">Session</option><option value="none">None</option></select></label><button class="quiet maximize" aria-label="Maximize terminal"><i data-lucide="maximize-2" aria-hidden="true"></i></button><button class="quiet detach" aria-label="Move terminal to separate window"><i data-lucide="external-link" aria-hidden="true"></i></button><button class="quiet hide-terminal" aria-label="Hide terminal"><i data-lucide="minus" aria-hidden="true"></i></button></div>
+            <div class="term-tabs" role="group" aria-label="Open terminal tabs">
+              <button data-term="claude" aria-pressed="true">Claude Code <span class="muted">Original</span></button><button data-term="shell" aria-pressed="false">Shell <span class="muted">Original</span></button><button data-term="codex" aria-pressed="false">Codex <span class="muted">SEO</span> <span class="attention">!</span></button>
+            </div>
+            <div class="term-context"><span class="scope-label">Oarbank family · 3 Hopsesh tabs</span><span class="scope-lock">Pinned while you browse</span></div>
+            <div class="term-context"><span class="program-meta">Claude Code · this Mac · personal@example.com</span><span class="program-state">Running</span></div>
+            <pre class="output" aria-label="Sample terminal output">Claude Code — Oarbank / Original
+~/git/oarbank
+
+● Checking the packaging tests…
+  ✓ macOS package layout
+  ✓ Windows checksum line endings
+
+  Running the remaining checks.</pre>
+            <div class="external"><i data-lucide="monitor" aria-hidden="true"></i><span class="grow">Packaging fix · MacBook · iTerm2 · 1 external tab</span><button class="external-show">Show</button></div>
+            <div class="external-note" hidden>External tabs stay in iTerm2. This preview does not contact your MacBook.</div>
+            <div class="status"><span class="layout-status">Bottom panel</span><span>Hiding keeps all 3 programs running</span></div>
+          </section>
+          <div class="hidden-terminal" hidden><button class="restore-terminal">Show Terminal · 3 running · 1 needs you</button></div>
+        </main>
+      </div>
+      <section class="overlay settings" aria-label="Proposed terminal settings" hidden>
+        <div class="rowbar"><h3>Terminal settings</h3><button class="overlay-close">Back to sessions</button></div>
+        <div class="setting"><div><span class="name">Open Hopsesh Terminal</span><p class="muted">Existing users keep their current placement.</p></div><select class="placement" aria-label="Terminal placement"><option value="bottom">Main window · bottom</option><option value="right">Main window · right</option><option value="detached">Separate window</option></select></div>
+        <div class="setting"><div><span class="name">Group terminal tabs</span><p class="muted">Confirmed forks share a conversation family.</p></div><select class="settings-group" aria-label="Default terminal grouping"><option value="family">Conversation family</option><option value="session">Session</option><option value="none">No grouping</option></select></div>
+        <div class="setting"><div><span class="name">Follow session selection</span><p class="muted">Off keeps the current terminal visible as you browse.</p></div><input class="follow" type="checkbox" aria-label="Follow session selection"></div>
+        <div class="setting"><div><span class="name">Close successful ended tabs</span><p class="muted">Failed programs remain available to inspect.</p></div><input type="checkbox" checked aria-label="Close successful ended tabs"></div>
+        <p class="muted">Moving between Hopsesh layouts keeps the same program running. Quitting Hopsesh still asks before ending active programs.</p>
+      </section>
+      <section class="overlay relationships" aria-label="Conversation family relationships" hidden>
+        <div class="rowbar"><h3>Oarbank family</h3><button class="overlay-close">Back to sessions</button></div>
+        <p>3 branches · 4 copies · 3 Hopsesh tabs · 1 external tab</p>
+        <div class="evidence"><p><strong>Original</strong><br>Claude Code on this Mac ⇄ Codex on MacBook</p><p class="muted">Same branch · 1 round trip · Hopsesh movement receipts</p></div>
+        <div class="setting"><div><span class="name">⑂ SEO experiment</span><p>Forked from Original · Codex</p><p class="muted">Confirmed native fork reference · parent available</p></div><span class="attention">Needs you</span></div>
+        <div class="setting"><div><span class="name">⑂ Packaging fix</span><p>Forked from Original · Claude Code</p><p class="muted">Confirmed Hopsesh fork receipt</p></div><span class="muted">On MacBook</span></div>
+        <p class="muted">Copying or moving a branch does not create a fork. Each branch keeps its own work and round-trip history.</p>
+      </section>
+    </div>
+  </template>
+</div>
+<script>
+(() => {
+  const root=document.getElementById('hopsesh-terminal-proposal');
+  const template=root.querySelector('template');
+  const branches={original:['Oarbank · Original','Claude Code · this Mac · personal@example.com','2 copies on this branch · 1 round trip','The packaging changes are ready. I’m checking the release tests.'],seo:['SEO experiment','Codex · this Mac · personal@example.com','Fork of Original · needs your input','I have two title variants ready for review.'],packaging:['Packaging fix','Claude Code · MacBook · work@example.com','Fork of Original · open in iTerm2','The Windows packaging verification is running on MacBook.']};
+  const terminals={claude:{meta:'Claude Code · this Mac · personal@example.com',state:'Running',text:'Claude Code — Oarbank / Original\n~/git/oarbank\n\n● Checking the packaging tests…\n  ✓ macOS package layout\n  ✓ Windows checksum line endings\n\n  Running the remaining checks.'},shell:{meta:'Shell · Original · this Mac',state:'Idle',text:'~/git/oarbank $ git status --short\n M scripts/package-windows.ps1\n\n~/git/oarbank $'},codex:{meta:'Codex · SEO experiment · this Mac · personal@example.com',state:'Needs you',text:'Codex — Oarbank / SEO experiment\n~/git/oarbank-seo\n\nI have prepared two title variants.\n\nWhich version should I use?\n  1. A clear product description\n  2. A shorter task-focused title\n\nWaiting for your answer…'}};
+  root.querySelectorAll('[data-variant]').forEach(stage=>{
+    stage.append(template.content.cloneNode(true));
+    const app=stage.querySelector('.hs'), body=app.querySelector('.body');
+    const q=s=>app.querySelector(s); const qa=s=>app.querySelectorAll(s);
+    const state={layout:stage.dataset.layout,group:'family',branch:'original',active:'claude',follow:false,max:false,room:180};
+    function layout(){body.className='body '+state.layout+(state.max?' maximized':'');q('.placement').value=state.layout;q('.layout-status').textContent=({bottom:'Bottom panel',right:'Side workspace',detached:'Separate Hopsesh Terminal window'})[state.layout];q('.terminal-title').textContent=state.layout==='detached'?'hopsesh Terminal':'Terminal';q('.detach').setAttribute('aria-label',state.layout==='detached'?'Move terminal into main window':'Move terminal to separate window');q('.output').style.minHeight=state.room+'px';}
+    function terminal(id){state.active=id;qa('[data-term]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.term===id)));q('.program-meta').textContent=terminals[id].meta;q('.program-state').textContent=terminals[id].state;q('.output').textContent=terminals[id].text;}
+    function grouping(){q('.group-select').value=state.group;q('.settings-group').value=state.group;qa('[data-term]').forEach(b=>{b.hidden=state.group==='session'&&(state.branch==='seo'?b.dataset.term!=='codex':state.branch==='packaging'||b.dataset.term==='codex');});q('.scope-label').textContent=state.group==='family'?'Oarbank family · 3 Hopsesh tabs':state.group==='none'?'All Hopsesh terminals · 3 tabs':branches[state.branch][0]+' · '+(state.branch==='original'?'2 Hopsesh tabs':state.branch==='seo'?'1 Hopsesh tab':'1 external tab');if(state.group==='session'){if(state.branch==='packaging'){q('.program-meta').textContent='Claude Code · MacBook · iTerm2';q('.program-state').textContent='Open externally';q('.output').textContent='This branch is open in iTerm2 on MacBook.\n\nUse Show to focus its external terminal.\nIts live terminal is not embedded in Hopsesh.';}else terminal(state.branch==='seo'?'codex':'claude');}}
+    function show(){q('.terminal').hidden=false;q('.hidden-terminal').hidden=true;}
+    qa('[data-branch]').forEach(b=>b.onclick=()=>{state.branch=b.dataset.branch;qa('[data-branch]').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));const v=branches[state.branch];['.selected-title','.selected-meta','.selected-note','.selected-message'].forEach((s,i)=>q(s).textContent=v[i]);if(state.follow){state.group='session';grouping();show();}});
+    qa('[data-term]').forEach(b=>b.onclick=()=>terminal(b.dataset.term));
+    q('.family-toggle').onclick=()=>{q('.family-list').hidden=!q('.family-list').hidden;q('.family-toggle').setAttribute('aria-expanded',String(!q('.family-list').hidden));q('.family-toggle').firstChild.textContent=q('.family-list').hidden?'› Oarbank ':'⌄ Oarbank ';};
+    q('.show-selected').onclick=()=>{state.group='session';grouping();show();};
+    q('.group-select').onchange=e=>{state.group=e.target.value;grouping();};
+    q('.settings-group').onchange=e=>{state.group=e.target.value;grouping();};
+    q('.placement').onchange=e=>{state.layout=e.target.value;layout();};
+    function openPanel(selector){q(selector).hidden=false;body.inert=true;q('.settings-open').disabled=true;q(selector).querySelector('.overlay-close').focus();}
+    q('.settings-open').onclick=()=>openPanel('.settings');
+    q('.relation-open').onclick=()=>openPanel('.relationships');
+    qa('.overlay-close').forEach(b=>b.onclick=()=>{b.closest('.overlay').hidden=true;body.inert=false;q('.settings-open').disabled=false;q('.settings-open').focus();});
+    q('.follow').onchange=e=>{state.follow=e.target.checked;q('.scope-lock').textContent=state.follow?'Follows selected session':'Pinned while you browse';};
+    q('.maximize').onclick=()=>{state.max=!state.max;q('.maximize').setAttribute('aria-label',state.max?'Restore layout':'Maximize terminal');layout();};
+    q('.detach').onclick=()=>{state.layout=state.layout==='detached'?'bottom':'detached';layout();};
+    q('.hide-terminal').onclick=()=>{q('.terminal').hidden=true;q('.hidden-terminal').hidden=false;};
+    q('.restore-terminal').onclick=show;
+    q('.external-show').onclick=()=>q('.external-note').hidden=!q('.external-note').hidden;
+    layout();
+    if(globalThis.Tweak){const tweak=new Tweak({container:app,onChange:layout});tweak.addSlider(state,'room',{label:'Terminal height',min:150,max:380,step:10,unit:'px'});}
+  });
+  if(globalThis.lucide) lucide.createIcons({attrs:{width:16,height:16}});
+})();
+</script>

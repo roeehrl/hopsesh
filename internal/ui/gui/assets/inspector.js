@@ -3,10 +3,11 @@
 // open, the end of its conversation (safe, locally rendered Markdown), and its
 // repository, copies and details, which open and close app-wide.
 import { api, h, fill, icon, ICONS, state, sys, here, ago, when, bytes, agentBadge, cloudOf, cloudTitle, count, path, rich, fail, toast, dialog, errText, cap, $ } from "./core.js";
-import { model, statusLine, placeName, showPlace, placeCount, onInspector, liveOf, appWord } from "./actions.js";
+import { selectDestination, model, statusLine, placeName, showPlace, placeCount, onInspector, liveOf, appWord } from "./actions.js";
 import { openMenu, isOpen, openEl, closeAll } from "./menu.js";
 import { sectionOpen, setSection } from "./layout.js";
 import { markdown } from "./markdown.js";
+import { movementNotice, resolveDestination } from "./returns.js";
 import { tabs } from "./term.js";
 
 const AGENT_SHORT = { claude: "Claude", codex: "Codex" };
@@ -148,13 +149,13 @@ function conversation(e) {
   clearTimeout(previewTimer);
   previewTimer = setTimeout(async () => {
     let p;
-    try { p = await api("Preview", e.machine, e.key, wantN.get(e.machine + e.key) || 4); } catch (err) { p = { items: [], note: "Preview not available: " + errText(err) }; }
+    try { p = await api("Preview", e.machine, e.key, wantN.get(e.machine + e.key) || 4); } catch (err) { p = { items: [], failed: true, note: "Preview not available: " + errText(err) }; }
     if (body.isConnected && state.info?.previews) fillConversation(body, e, p);
   }, 120);
   return section("conversation", "Recent conversation", true, null, body);
 }
 
-const skeleton = () => h("div", { class: "skel", "aria-hidden": "true" }, h("span", { style: "width:30%" }), h("span", { style: "width:92%" }), h("span", { style: "width:70%" }));
+const skeleton = () => h("div", { class: "skel", role: "status" }, h("span", { class: "visually-hidden" }, "Reading conversation…"), h("span", { style: "width:30%" }), h("span", { style: "width:92%" }), h("span", { style: "width:70%" }));
 
 const who = (e) => AGENT_SHORT[e.agent] || e.agentName;
 function stamp(iso) { return iso ? h("span", { class: "msg-t", title: when(iso) }, ago(iso)) : null; }
@@ -208,6 +209,7 @@ function fillConversation(body, e, p) {
   kids.push(previewItems(e, p));
   if (p.note) kids.push(h("span", { class: "muted", style: "font-size:12px" }, p.note));
   else if (!(p.items || []).length) kids.push(h("span", { class: "muted", style: "font-size:12px" }, "No messages yet."));
+  if (p.failed) kids.push(h("button", { class: "link", onclick: () => refresh(e) }, "Try again"));
   kids.push(h("span", { class: "conv-foot" },
     p.more ? h("button", { class: "link", onclick: () => { const k = e.machine + e.key; wantN.set(k, (wantN.get(k) || 4) + 10); refresh(e); } }, "Load earlier") : null,
     h("button", { class: "link", onclick: () => transcript(e) }, "Open transcript")));
@@ -231,9 +233,9 @@ export async function transcript(e, n = 40) {
     h("footer", { class: "sheet-foot" }, h("span", { class: "spacer" }), h("button", { class: "btn primary", onclick: () => sheet.close() }, "Close"))));
   if (!sheet.open) sheet.showModal();
   let p;
-  try { p = await api("Preview", e.machine, e.key, n); } catch (err) { p = { items: [], note: errText(err) }; }
+  try { p = await api("Preview", e.machine, e.key, n); } catch (err) { p = { items: [], failed: true, note: errText(err) }; }
   body.removeAttribute("aria-busy");
-  fill(body, p.note ? h("span", { class: "muted" }, p.note) : null, previewItems(e, p, 1000, 1000),
+  fill(body, p.failed ? h("button", { class: "btn", onclick: () => transcript(e, n) }, "Try again") : null, p.note ? h("span", { class: "muted" }, p.note) : null, previewItems(e, p, 1000, 1000),
     p.more ? h("button", { class: "link", style: "align-self:flex-start", onclick: () => transcript(e, n + 40) }, "Load earlier") : null);
   for (const x of body.querySelectorAll(".msg-x")) x.classList.add("open");
 }
@@ -251,7 +253,7 @@ export function renameDialog(e) {
     toast(`Renamed to “${t}”. ${e.agentName} shows it too; Activity undoes it.`);
     await renamed();
   };
-  input.onkeydown = (ev) => { if (ev.key === "Enter") { ev.preventDefault(); go(); } };
+  input.onkeydown = (ev) => { if (ev.key === "Enter") { ev.preventDefault(); d.querySelector(".btn.primary").click(); } };
   const d = dialog(h("h2", { style: "margin:0;font-size:16px" }, "Rename session"),
     h("label", { for: "rename-title", style: "font-size:12.5px" }, "Title"), input,
     h("span", { class: "muted", style: "font-size:12px" }, `${e.agentName} keeps it in its own data, as its own rename does, so its session list shows it too.`), msg,
@@ -299,8 +301,11 @@ function copyPlace(c) {
 function history(e) {
   const others = (e.copies || []).filter((c) => !(c.machine === e.machine && c.key === e.key));
   const n = others.length + e.history.length + (e.mirror ? 1 : 0);
-  if (!n && !e.journey && !e.lineageError) return null;
+  if (!n && !e.journey && !e.lineageError && !e.movement && !e.relationship?.parent && !e.relationship?.issue) return null;
   return section("copies", "Copies & history", false, h("span", { class: "chip disc-n" }, String(n)),
+    e.relationship?.parent ? h("div",{class:"item"},h("strong",{},"Conversation family: "+e.relationship.name),h("span",{class:"muted"},(e.relationship.ancestors||[]).join(" → ")+" → "+e.relationship.branchName),h("span",{class:"muted"},e.relationship.evidence)) : null,
+    e.relationship?.issue ? h("div",{class:"item warn"},e.relationship.issue) : null,
+    e.movement ? h("div", {class:"muted"}, `Movement operation: ${e.movement.operation || "Not available in this scan"}`) : null,
     e.lineageError ? h("div", { class: "item warn" }, `Lineage unavailable: ${e.lineageError}`, e.canArchiveLineage ? h("p", {}, "Archive this metadata to start a new family. The native conversation is preserved; Activity can undo this.") : h("p",{},"Ancestry cannot be verified. Create a separate fork to transfer it independently."),
  e.canArchiveLineage ? h("button", {class:"btn small",onclick:async()=>{try{await api("ArchiveLineage",e.machine,e.key);toast("Lineage metadata archived. Activity can undo it.");await renamed();}catch(err){fail(err);}}},"Archive unsupported lineage") : null) : null,
  e.journey ? h("div", { class: "journey-counts" },
@@ -309,9 +314,9 @@ function history(e) {
  h("span", { class: "chip" }, `${e.journey.returns} returns to visited locations`),
  h("span", {class:"chip"}, `${e.journey.machineTransfers||0} machine transfers · ${e.journey.machineRoundTrips||0} machine round trips`),
  e.journey.fork ? h("span", { class: "chip",title:`Parent branch: ${e.journey.parentBranch}` }, "Separate fork") : null,
- h("span",{class:"muted",style:"font-size:12px"},`Origin: ${e.journey.origin}; branch ${e.journey.branch.slice(0,8)}`)) : null,
+ h("span",{class:"muted",style:"font-size:12px"},`Origin: ${e.journey.origin&&e.journey.origin!=="/"?e.journey.origin:"not recorded"}; branch ${e.journey.branch.slice(0,8)}`)) : null,
  others.length ? h("div", { class: "sub-h" }, "Other copies") : null,
-    others.map((c) => h("span", {}, copyPlace(c), h("span", { class: "muted" }, c.newest ? " · newest" : c.mark ? " · marked" : " · older"))),
+    others.map((c) => h("span", {}, copyPlace(c), h("span", { class: "muted" }, c.newest ? " · newest" : c.mark ? " · marked" : " · older"), " ", h("button",{class:"link",onclick:()=>resolveDestination(c).then(selectDestination).catch(fail)},"Show copy"))),
     e.mirror ? [h("div", { class: "sub-h" }, "Mirrored"), h("span", {}, `Remote Control keeps a copy on ${e.mirror.host} while it runs. `,
       h("button", { class: "link", onclick: () => api("OpenURL", e.mirror.url).catch(fail) }, "Open it"))] : null,
     e.history.length ? [h("div", { class: "sub-h" }, e.cloud ? "Lineage" : "Where it has been"),
@@ -324,7 +329,7 @@ function details(e) {
   const id = e.cloud ? e.cloud.id : e.session || e.key.split("/").pop();
   return section("details", "Details", false, null, h("dl", { class: "kv wide" },
     kv("Session ID", h("span", { class: "id-line" }, h("span", { class: "mono", style: "font-size:11.5px" }, id),
-      h("button", { class: "btn small", "aria-label": "Copy session ID", onclick: async () => { await api("CopyText", id).catch(fail); toast("Copied the session ID"); } }, "Copy"))),
+      h("button", { class: "btn small", "aria-label": "Copy session ID", onclick: async () => { await api("CopyText", id); toast("Copied the session ID"); } }, "Copy"))),
     kv("File", e.path ? path(e.path, 11) : null),
     kv("Size", e.sizeKB ? bytes(e.sizeKB * 1024) : null),
     kv("Agent", [e.agentName, e.agentVersion ? " " + e.agentVersion : ""].join("")),
@@ -350,5 +355,14 @@ export function inspector(e) {
   if (!e) return h("aside", { class: "inspector", id: "inspector", "aria-label": "Session details" }, h("div", { class: "empty" }, "Select a session to see what you can do with it."));
   const m = model(e);
   return h("aside", { class: "inspector", id: "inspector", "aria-label": e.cloud ? `Cloud ${e.cloud.noun || "session"} details` : "Session details", "data-key": e.machine + "\u0000" + e.key },
-    header(e), actionRow(e, m), openIn(e, m), conversation(e), repository(e), history(e), details(e), e.cloud ? cloudNotes(e) : null);
+    header(e), actionRow(e, m), movementNotice(e, selectDestination, () => {
+      setSection("copies", true); refresh(e); $("#sec-copies")?.scrollIntoView({block:"nearest"});
+    }), returnSection(m), openIn(e, m), conversation(e), repository(e), history(e), details(e), e.cloud ? cloudNotes(e) : null);
+}
+
+function returnSection(m) {
+  if (!m.returns?.length) return null;
+  return h("section", {class:"sec", "aria-label":"Return destinations"}, h("span", {class:"sec-h"}, "Move back to an existing session"),
+    m.returns.map(a => h("div", {class:"return-choice"}, h("button", {class:"btn",onclick:a.run}, a.label),
+      h("span", {class:"muted"}, a.sub), h("span", {class:"mono"}, a.candidate.key))));
 }

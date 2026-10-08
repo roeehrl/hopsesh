@@ -30,6 +30,12 @@ hopsesh accounts edit <profile-id> --name "Research" --tag Personal,Research
 hopsesh accounts forget <profile-id>
 ```
 
+Remote discovery requires an initialized Hopsesh machine identity. SSH alone can read
+sessions, but does not initialize remote account tracking. On the remote machine, install
+Hopsesh if needed and run `hopsesh accounts scan --machine local`, then click **Scan
+accounts** on the controlling machine. The GUI shows an account setup notice for reachable
+machines without that identity; scanning never silently installs or initializes remote software.
+
 `forget` removes only Hopsesh's registration. Vendor files, login and credentials remain.
 A known default root is rediscovered on the next scan. A remote custom root must first be
 registered by Hopsesh on its own machine. Scanning imports its stable registration ID and
@@ -44,6 +50,51 @@ Choose **Move → Move to another account…**, select the destination profile, 
 carries over and apply. Other-agent transfers also have a destination account selector.
 The plan identifies both profiles. An unqualified target uses the known default profile;
 it never silently chooses among custom accounts.
+
+The GUI shows the observed email or account label, with the runtime profile beneath it.
+A single destination is a static identity card; multiple destinations use a profile
+selector without an extra duplicate Default option. The arrow beside **Continue** chooses
+the agent desktop app, Hopsesh Terminal or the configured external terminal. The choice is
+remembered per agent and used when applying the transfer. Unsupported desktop destinations
+explain their restriction and fall back to the terminal preference.
+
+### Instruction review
+
+Expand **Source instructions** to inspect paths, scope and file text, then select individual
+files. Hopsesh discovers the module's declared global instruction files in the selected
+source profile and declared instruction files directly in the session's project directory.
+It does not resolve imports, parent-directory rules, skills, settings or automatic memory.
+Remote transfers package these same declared files for review. Arbitrary submitted paths
+are rejected, and a selected file that disappears or becomes unreadable blocks the plan.
+
+Selected text is quoted in the handoff briefing; destination instruction files are never
+created or overwritten. Each file is bounded to 8,000 bytes, and the final briefing can
+shorten it further to fit the context budget. Review **What the agent is told** for the
+final text. On a round trip, earlier quoted text may remain conversation history, but the
+original instruction files stay in place and edits are not synchronized back. Review the
+current source files on every transfer. The CLI's `--carry-rules` retains its global-only
+meaning; individual file selection is available in the GUI.
+
+This explicit selection follows the vendors' distinction between conversation context and
+persistent instructions: [Claude memory](https://code.claude.com/docs/en/memory) and
+[Codex AGENTS.md](https://developers.openai.com/codex/guides/agents-md). The launch control
+uses a default action with adjacent alternatives, following
+[split-button guidance](https://www.nngroup.com/articles/split-buttons/).
+
+### Review notices
+
+Cross-agent moves create portable conversation history and leave private vendor state out.
+Moving between runtime profiles does not prove that different people own the two logins;
+matching account labels also cannot establish permission to reuse private native state.
+An active source is transferred as a snapshot: later messages are not synchronized. Marking
+the source waits for its process to stop and does not itself stop that process.
+
+The weekly drift workflow checks current published agent versions against the tested
+versions, commands and schemas. It does not certify live resume behavior on every release.
+Codex native writing therefore remains experimental, with untested versions identified
+separately. See [drift detection](drift.md).
+
+### CLI examples
 
 ```sh
 hopsesh plan claude@<source-profile-id>/<session-id> --in codex --target-profile <target-profile-id>
@@ -108,6 +159,31 @@ OS launcher exit confirms dispatch, not that the vendor has loaded or indexed th
   vendor desktop indexing remain separate live acceptance checks; synthetic tests do not prove them.
 
 Storage is `accounts.json` in Hopsesh's state directory, guarded by a cross-process lock and
-atomic replacement. Lineage uses `lineage/4` and peers require protocol 4. Old receipt formats
+atomic replacement. Lineage uses `lineage/5` and peers require protocol 5. Old receipt formats
 are refused rather than silently assigned to a default account. The optional presence daemon
 is a separate future-release proposal, not required or installed by Accounts.
+
+### Opening a local session in Claude Desktop
+
+Hopsesh uses the [documented Claude Code launcher](https://code.claude.com/docs/en/desktop)
+`claude --desktop --resume <session-id>` for a saved local session. This requires
+Claude Code 2.1.285 or newer, macOS or Windows x64, Claude Desktop, and a subscription
+login. Claude checks installation, login and competing live sessions. API-key and
+third-party-provider logins are not supported by this launcher. Hopsesh waits for
+its result in a temporary terminal, reports errors, and leaves no terminal tab.
+The TUI preserves terminal input/output for the same command.
+
+An already-running Desktop session needs a different focus path: the CLI rejects it
+as in use. For a live session identified as belonging to Desktop on macOS, Hopsesh
+uses Desktop's own resume URL with that session's current CLI ID, after rechecking
+live ownership and verifying the public app bundle and version (2.19675.1 or newer).
+This is an observed implementation contract, not a documented public focus API;
+the upstream drift check covers it. Older/unverified builds and other platforms
+report that exact focus is unavailable. The
+[upstream duplicate-session issue](https://github.com/anthropics/claude-code/issues/80773)
+is why Hopsesh does not send historical IDs or blindly import to focus a chat.
+
+Both actions require the default account profile and native `.claude` root. They do
+not switch Desktop accounts, copy credentials, or send a message. Desktop can still
+ask for folder trust or sign-in. A successful launcher handoff alone does not prove
+that Desktop completed an import; any Desktop-side prompt must be completed there.

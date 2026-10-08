@@ -19,9 +19,6 @@ var _ agent.Reader = (*Module)(nil)
 // nativeFormat names Claude Code's transcript records in the IR.
 const nativeFormat = "claude.jsonl"
 
-// maxOutput bounds one tool output kept by the reader (renderers shorten further).
-const maxOutput = 256 << 10
-
 // chained is a transcript record that belongs to the conversation chain.
 type chained struct {
 	Type              string                 `json:"type"`
@@ -68,13 +65,13 @@ type block struct {
 // Read lifts the transcript's active branch (from the leaf Claude Code would resume back
 // to the start) into IR. From a cursor it returns only the nodes after cursor.Head, which
 // must still be on the branch (ErrDiverged otherwise).
-func (m *Module) Read(_ context.Context, h agent.Host, in agent.Install, s agent.Summary, from ir.Cursor) (ir.Segment, error) {
+func (m *Module) Read(ctx context.Context, h agent.Host, in agent.Install, s agent.Summary, from ir.Cursor) (ir.Segment, error) {
 	f, err := h.FS().Open(s.Path)
 	if err != nil {
 		return ir.Segment{}, err
 	}
 	defer f.Close()
-	recs, end, err := readRecords(f)
+	recs, end, err := readRecords(&ir.BoundedReader{Context: ctx, Reader: f})
 	if err != nil {
 		return ir.Segment{}, &agent.FormatError{Path: s.Path, Err: err}
 	}
@@ -255,10 +252,6 @@ func nodes(r chained) []ir.Node {
 			res := ir.ToolResult{CallID: b.ToolUseID, Status: ir.StatusCompleted, Output: resultText(b.Content)}
 			if b.IsError {
 				res.Status = ir.StatusFailed
-			}
-			if len(res.Output) > maxOutput {
-				res.OutputBytes = int64(len(res.Output))
-				res.Output = res.Output[:maxOutput]
 			}
 			out = append(out, ir.Node{Kind: ir.KindToolResult, Actor: ir.User, Time: ts, Result: &res})
 		case "image":

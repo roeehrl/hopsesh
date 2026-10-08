@@ -171,14 +171,14 @@ func TestLiveSeveralProcesses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := live[s1].Procs; len(got) != 1 || got[0] != (agent.LiveProc{PID: 4242}) {
+	if got := live[s1].Procs; len(got) != 1 || got[0].PID != 4242 || got[0].App || got[0].Waiting || got[0].ObservedAt.IsZero() {
 		t.Fatalf("a single terminal process: %+v", got)
 	}
 	l := live[s2]
 	if l.State != agent.Live || l.PID != 5002 || !l.App || l.Status != "waiting for permission" || l.Name != "newest name" {
 		t.Fatalf("the waiting process is the main one: %+v", l)
 	}
-	want := []agent.LiveProc{{PID: 5002, App: true, Waiting: true}, {PID: 5003}, {PID: 5001}}
+	want := []agent.LiveProc{{PID: 5002, App: true, Waiting: true, ObservedAt: t0.Add(-time.Minute)}, {PID: 5003, ObservedAt: t0.Add(time.Minute)}, {PID: 5001, ObservedAt: t0}}
 	if !slices.Equal(l.Procs, want) {
 		t.Fatalf("procs %+v, want %+v", l.Procs, want)
 	}

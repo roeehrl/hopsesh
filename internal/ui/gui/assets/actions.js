@@ -4,9 +4,10 @@
 // off to ‹cloud›… (to a cloud). model(e) is a session's whole action row: its status line,
 // the primary (a split button whose menu lists the other places), Move ▾ and ⋯; the row's
 // button, ↩, ⌘↩ and the palette all come from it.
-import { api, state, sys, here, agentInfo, cloudOf, cloudTitle, toast, fail, errText, cap, entries, count, ago, h, icon, ICONS, agentBadge } from "./core.js";
+import { api, state, sys, here, agentInfo, cloudOf, cloudTitle, toast, fail, errText, cap, entries, count, ago, h, icon, ICONS, agentBadge, pending } from "./core.js";
+import { returnActions, returnChooser, showMovementDestination } from "./returns.js";
 import { planFor } from "./plan.js";
-import { tabs, resume, showTerminal, moveToTerminal, openShell, signIn } from "./term.js";
+import { tabs, resume, showTerminal, moveToTerminal, openShell, associateShell, signIn } from "./term.js";
 import { planHandoff } from "./handoff.js";
 import { planHop } from "./hop.js";
 
@@ -92,7 +93,10 @@ export function defaultPlace(e) {
 
 // resumeIn resumes a session in a place; picked from the menu, the place becomes the
 // agent's default.
-export async function resumeIn(e, place, remember = false) {
+export function resumeIn(e, place, remember = false) {
+  return pending(`Opening ${e.title}`, () => resumeOnce(e, place, remember), `resume:${key(e)}`);
+}
+async function resumeOnce(e, place, remember) {
   if (remember && place !== defaultPlace(e)) {
     try {
       await api("SetPlace", e.agent, place);
@@ -132,6 +136,7 @@ const IN_TAB = "End it in hopsesh Terminal first";
 // select is the list's selection (sessions.js sets it), for "Go to the newer copy".
 let selectFn = () => {};
 export function onSelect(fn) { selectFn = fn; }
+export function selectDestination(e) { selectFn(e); }
 
 // model is a session's actions and the words around them.
 export function model(e) {
@@ -152,7 +157,7 @@ function localModel(e) {
     if (places.length) {
       const first = tab || places.find(canShow) || places[0];
       const show = (p) => ({ id: "show:" + p.kind, label: canShow(p) ? (p.kind === "ide" ? `Show ${placeName(p, e)}` : `Show in ${placeName(p, e)}`) : `Running in ${placeName(p, e)}`, short: "Show",
-        disabled: !canShow(p), why: canShow(p) ? "" : `hopsesh can't show a session in ${placeName(p, e)}`, run: () => showPlace(e, p) });
+        disabled: !canShow(p) || ((p.kind === "claude-app" || p.kind === "codex-app") && !e.canApp), why: ((p.kind === "claude-app" || p.kind === "codex-app") && !e.canApp) ? e.appWhy : canShow(p) ? "" : `hopsesh can't show a session in ${placeName(p, e)}`, run: () => showPlace(e, p) });
       m.primary = show(first);
       if (n >= 2) {
         m.twice = true;
@@ -163,8 +168,12 @@ function localModel(e) {
         m.chevronLabel = "Move it";
       } else if (first.kind === "ide") m.caption = sys.mac ? `hopsesh can't pick the tab inside ${placeName(first, e)}` : `hopsesh can't show a session in ${placeName(first, e)}`;
       else if (first.kind === "tmux" || first.kind === "ssh") { m.primary = null; m.caption = `Running in ${placeName(first, e)}; hopsesh can't show it`; }
-      else if (first.kind === "claude-app" || first.kind === "codex-app") m.caption = "The app opens on its last view";
-    } else if (/^(moved|continued)/.test(lv.status || "")) {
+      else if (first.kind === "claude-app" || first.kind === "codex-app") m.caption = e.canApp ? "Opens this conversation in the desktop app" : e.appWhy;
+    } else if (e.movement?.machine && e.movement?.key) {
+      m.primary = { id: "destination", label: "Show destination", run: () => showMovementDestination(e.movement, selectFn) };
+      m.chevron = resumePlaces(e).map(p => resumeItem(p));
+      m.chevronLabel = "Resume this copy";
+    } else if (/^(moved|continued|prepared|previously continued)/.test(lv.status || "")) {
       const [c, newer] = newestCopy(e);
       const other = !c ? "" : c.machine === e.machine ? `the copy in ${c.agentName} is newer` : `the copy on ${c.machine} is newer`;
       m.primary = { id: "newer", label: "Go to the newer copy", short: "Go to newer", disabled: !newer, why: newer ? "" : "The newer copy isn't in the list", run: () => newer && selectFn(newer) };
@@ -189,6 +198,30 @@ function localModel(e) {
     m.primary = { id: "bring", label: `Bring to ${sys.here}…`, short: "Bring…", run: () => planFor(e, { target: "" }) };
     if (lv.live) m.caption = `Still open on ${e.machine}; hopsesh marks that copy when it ends`;
     m.move = moveGroups(e, false, false);
+  }
+  if(local && e.contextOverflow) {
+    m.caption="The agent reported a context limit. The original is preserved; prepare a bounded continuation to recover.";
+    if(!sessionTabs(e).length && !lv.live) m.fix={label:"Create bounded continuation…",run:()=>planFor(e,{target:e.agent,bounded:true,targetProfile:e.profile?.id||""})};
+  }
+  m.returns = returnActions(e, (destination) => {
+    if (destination.machine !== here()) return selectFn(destination);
+    const places = placesOf(destination);
+    const show = places.find(canShow);
+    if (show) return showPlace(destination, show);
+    if (liveOf(destination).live) return selectFn(destination);
+    return resumeIn(destination, defaultPlace(destination));
+  });
+  if (m.returns.length) {
+    // A matching return takes the place of a generic local-agent continuation.
+    const agents = new Set(m.returns.filter(a => a.candidate.local).map(a => a.candidate.agent));
+    for (const group of m.move) group.items = group.items.filter(a => !a.id?.startsWith("continue:") || !agents.has(a.id.slice(9)));
+    m.move.unshift({heading:"Return",items:m.returns});
+    const promoted = m.returns.length === 1 ? m.returns[0] : {id:"return",label:"Choose where to move back…",run:()=>returnChooser(m.returns)};
+    if (!lv.live && !sessionTabs(e).length && !e.contextOverflow) {
+      m.chevron = [m.primary, ...m.chevron].filter(Boolean);
+      m.primary = promoted;
+      m.chevronLabel = "Other actions";
+    }
   }
   return m;
 }
@@ -258,7 +291,8 @@ function moveGroups(e, local, inTab) {
     if (!peers.length) machine.push({ id: "send", label: "Send to another machine…", icon: icon(ICONS.here, 16), disabled: true, why: "No other machine with hopsesh is reached" });
   } else machine.push({ id: "bring", label: `Bring to ${sys.here}…`, icon: icon(ICONS.here, 16), run: () => planFor(e, { target: "" }) });
   out.push({ heading: "Machine", items: machine });
-  if (["claude","codex"].includes(e.agent)) out.push({heading:"Account",items:[block({id:"account",label:"Move to another account…",sub:"Choose a profile and review the portable conversation",run:()=>planFor(e,{target:e.agent})})]});
+  if (["claude","codex"].includes(e.agent)) out.push({heading:"Account",items:[block({id:"account",label:local ? "Move to another account…" : `Move to an account on ${sys.here}…`,sub:local ? "Choose a profile and review the portable conversation" : `Bring this session from ${e.machine} into a profile on ${sys.here}`,run:()=>planFor(e,{target:e.agent})})]});
+  if (local && ["claude","codex"].includes(e.agent)) out.push({heading:"Context recovery",items:[block({id:"bounded",label:"Create bounded continuation…",sub:"Keep the original and archive; prepare a smaller working context on this branch",run:()=>planFor(e,{target:e.agent,bounded:true,targetProfile:e.profile?.id||""})})]});
   const agents = (e.continueIn || []).map((t) => block({ id: "continue:" + t.id, label: `Continue with ${t.name}${local ? "" : " on " + sys.here}…`, icon: agentBadge(t.id, t.name), run: () => planFor(e, { target: t.id }),
     chip: t.experimental ? h("span", { class: "chip st-warn mini" }, "experimental") : null }));
   if (agents.length) out.push({ heading: "Agent", items: agents });
@@ -273,6 +307,7 @@ function more(e, local) {
   const onlyHere = local ? "" : `Only for sessions on ${sys.here}`;
   const out = [];
   if (!e.cloud) {
+    if(local && [...tabs.values()].some(t=>t.kind==="shell" && t.state!=="exited")) out.push({id:"associate-shell",label:"Organize a shell with this conversation…",run:()=>associateShell(e)});
     out.push({ id: "shell", label: "Open a shell in its folder", disabled: !local, why: onlyHere, run: () => openShell(e) });
     out.push({ id: "reveal", label: sys.mac ? "Reveal in Finder" : sys.win ? "Show in Explorer" : "Show in Files", disabled: !local, why: onlyHere,
       run: () => api("RevealEntry", e.machine, e.key).catch(fail) });
@@ -280,7 +315,7 @@ function more(e, local) {
       try { await api("CopyText", await api("ResumeCommand", e.machine, e.key)); toast("Copied the resume command"); } catch (err) { fail(err); }
     } });
   }
-  out.push({ id: "copy-id", label: "Copy session ID", run: async () => { await api("CopyText", e.cloud ? e.cloud.id : e.session || e.key.split("/").pop()).catch(fail); toast("Copied the session ID"); } });
+  out.push({ id: "copy-id", label: "Copy session ID", run: async () => { await api("CopyText", e.cloud ? e.cloud.id : e.session || e.key.split("/").pop()); toast("Copied the session ID"); } });
   if (!e.cloud) {
     out.push({ id: "rename", label: "Rename…", disabled: !e.canRename, why: e.canRename ? "" : `hopsesh can't rename ${e.agentName} sessions`, run: () => renameFn(e) });
     out.push({ id: "transcript", label: "Open transcript", disabled: !e.canPreview || !state.info?.previews,
@@ -322,7 +357,8 @@ export function statusOf(e) {
   if (ts.length) return ts.some((t) => t.attention) ? ["needs", "Waiting for you"] : ["working", "Working"];
   if (lv.needs) return ["needs", "Needs you"];
   if (lv.live) return /idle/i.test(lv.status) ? ["idle", "Idle"] : ["working", "Working"];
-  if (/^(moved|continued)/.test(lv.status || "")) return ["moved", cap(lv.status)];
+  if (e.movement) return ["moved", `Movement ${e.movement.status}`];
+  if (/^(moved|continued|prepared|previously continued)/.test(lv.status || "")) return ["moved", cap((lv.status || "").replace(/^continued /, "previously continued "))];
   return ["ended", "Ended"];
 }
 
@@ -363,7 +399,7 @@ export function statusLine(e) {
   }
   const lv = liveOf(e);
   if (lv.live && e.machine !== here()) return [k, `${k === "needs" ? "Waiting for you" : k === "idle" ? "Idle" : "Working"} on ${e.machine}`, ago(e.lastActive)];
-  if (k === "moved") return [k, words, ago(e.lastActive)];
+  if (k === "moved") return [k, words, e.movement ? (Date.parse(e.movement.checkedAt) > 0 ? `checked ${ago(e.movement.checkedAt)}` : "Observation time unavailable") : ago(e.lastActive)];
   if (!e.hereNewest && e.machine === here()) {
     const [c] = newestCopy(e);
     if (c) return ["ended", "Older copy", `newest on ${whereWord(c.machine)}`];

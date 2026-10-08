@@ -14,8 +14,8 @@ import (
 
 var _ agent.Writer = (*Module)(nil)
 
-// window is a conservative usable context for Codex's default models.
-const window = 272_000
+// window is a conservative fallback; ContextCapacity resolves smaller custom limits.
+const window = ir.FallbackWindow
 
 // Profile says Codex's own tool calls cannot be forged safely, so history arrives as text.
 func (m *Module) Profile(agent.Install) ir.Profile { return ir.Profile{Window: window} }
@@ -25,6 +25,14 @@ func (m *Module) Profile(agent.Install) ir.Profile { return ir.Profile{Window: w
 // those events). Paginated appends preserve contiguous native ordinals.
 func (m *Module) Write(ctx context.Context, h agent.Host, in agent.Install, req ir.WriteRequest) (ir.WriteResult, error) {
 	fsys, pa := h.FS(), h.Path()
+	capacity, err := m.ContextCapacity(ctx, h, in, nil)
+	if err != nil {
+		return ir.WriteResult{}, err
+	}
+	if err = capacity.Check(req.Items); err != nil {
+		return ir.WriteResult{}, err
+	}
+
 	var file string
 	var from int64
 	var b strings.Builder
@@ -87,6 +95,14 @@ func (m *Module) Write(ctx context.Context, h agent.Host, in agent.Install, req 
 				return ir.WriteResult{}, fmt.Errorf("%w: native head changed", agent.ErrDiverged)
 			}
 		}
+
+		capacity, err = m.ContextCapacity(ctx, h, in, &agent.Summary{Path: file})
+		if err != nil {
+			return ir.WriteResult{}, err
+		}
+		if err = capacity.Check(req.Items); err != nil {
+			return ir.WriteResult{}, err
+		}
 		from = fi.Size()
 		recs, end, err := readLines(strings.NewReader(string(head)))
 		if err != nil {
@@ -138,7 +154,6 @@ func (m *Module) Write(ctx context.Context, h agent.Host, in agent.Install, req 
 		}
 		body = []byte(numbered.String())
 	}
-	var err error
 	if req.Mode == ir.WriteNew {
 		err = fsys.WriteFile(file, body, 0o600)
 	} else {

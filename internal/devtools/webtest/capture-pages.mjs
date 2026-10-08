@@ -125,7 +125,7 @@ try {
         .getByRole("button", { name: /Continue in Codex/ })
         .click();
       await expect(
-        p.getByRole("heading", { name: /continues in Codex/ }),
+        p.getByRole("heading", { name: /is prepared for Codex/ }),
       ).toBeVisible();
       await shot("continue-done");
       await menu("activity");

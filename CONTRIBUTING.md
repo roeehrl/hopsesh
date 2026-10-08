@@ -63,8 +63,9 @@ make app      # macOS only: builds dist/macos/hopsesh.app (unsigned unless SIGN_
 
 ## Add an agent module
 
-Each coding agent hopsesh supports (Claude Code and Codex today) is a module: a Go package under
-`agents/<id>/` behind a small SDK. Adding one, such as OpenCode
+Each coding agent hopsesh supports is a module: a Go package under `agents/<id>/` behind a
+small SDK. Claude Code and Codex keep sessions on machines; the GitHub Copilot cloud agent,
+Jules, Devin and Amp are cloud-only modules that reach their vendors' clouds. Adding one, such as OpenCode
 ([#10](https://github.com/roeehrl/hopsesh/issues/10)), doesn't touch the core. Please open an
 issue or discussion first so we can agree on the approach.
 
@@ -104,9 +105,26 @@ issue or discussion first so we can agree on the approach.
 | `PostInstaller` | registering an installed session with the agent |
 | `Reader` | being the source of "continue in" |
 | `Writer` | being the target of "continue in" (a profile with context window and native replay) |
+| `ContextSizer` | destination capacity and active-context accounting for safe writes |
 | `Importer` | "use the agent's own importer" (`--via import`) |
 | `Integrator` | where the skill and approval rules go |
-| `Notifier` | telling the old session where the work went |
+| `MovementHookIntegrator` | passive local movement notices on resume or prompt submission |
+
+**Cloud capabilities.** A module whose agent has a cloud declares it in `Spec.Clouds` (the
+program that drives it, fidelity each way, how code travels, what it needs, its sign-in
+command and what the drift check watches) and implements what its vendor's command line
+allows. A cloud-only module embeds `agent.NoLocal` and has no data folders. A cloud is
+reached only by running the vendor's own CLI through `agent.Host`: never a token, a login
+file or a vendor API.
+
+| Capability | Enables |
+|---|---|
+| `CloudLister` | its sessions in `hopsesh ls --cloud` and the app's Clouds group |
+| `CloudSender` (+ `CloudStepReader` for a step that needs the user's terminal) | hand-offs (`hopsesh handoff --to <cloud>`) |
+| `CloudFetcher` (+ `CloudAdopter` when the vendor writes the local copy itself) | bringing sessions home (`hopsesh pull <cloud>:<id>`) |
+| `CloudLinker` | pasted session links |
+| `CloudTester` | `hopsesh clouds test` |
+| `CloudFollower`, `CloudArchiver` | follow-ups and archiving (no shipped module has them yet) |
 
 **Features declared in `Spec.Features`** rather than as interfaces: `fork`, `remote-control` and
 `app`. When a module declares one, `Resume` must honour the matching `ResumeOptions` field
@@ -127,7 +145,9 @@ chips, the palette and Settings → Agents. The app picks the first of these tha
 **Required tests**
 - The conformance kit: `agenttest.Run(t, module, newHost)` from `sdk/agent/agenttest`. It
   covers listing, bundle, move plan, verify, resume and a round trip; writers get the writer
-  checks too.
+  checks too. A module with a cloud also runs `agenttest.RunCloud` (or `RunCloudWith`)
+  against a stand-in of its vendor's CLI (see `internal/testkit/fakecloud`), and marks in the
+  code every output shape it could not check against the real tool.
 - Fixtures copied from a real install into `agents/<id>/testdata/<version>/`, with all personal
   data replaced (alice, `/home/alice/…`), and no credentials or account files.
 - Unit tests for the module, and a complete `Spec` (the registry tests check it).

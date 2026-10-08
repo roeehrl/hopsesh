@@ -144,7 +144,7 @@ func (inv *Inventory) copiesOf(it Item) []Entry {
 func (a *App) DefaultOptions() move.Options {
 	return move.Options{
 		ReposDir: a.Cfg.ReposDir, GHQLayout: a.Cfg.Layout == "ghq", Mark: a.Cfg.MarkMovedOn(),
-		SyncCode: a.Cfg.SyncCodeOn(), Push: a.Cfg.PushSource,
+		SyncCode: a.Cfg.SyncCodeOn(), Push: a.Cfg.PushSource, Notify: a.Cfg.MovementNoticesOn(),
 	}
 }
 

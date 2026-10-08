@@ -4,8 +4,9 @@
 // chips, and the text filter. It is saved in the config ([list], SaveList); the text
 // filter is not. The list is one tree: group headers, then their sessions, with the
 // keyboard of the WAI-ARIA tree pattern.
-import { api, h, fill, icon, ICONS, state, sys, keys, here, cloudOf, cloudTitle, agentInfo, machineStatus, count, ago, toast } from "./core.js";
+import { api, h, fill, icon, ICONS, state, sys, keys, here, cloudOf, cloudTitle, agentInfo, machineStatus, count, ago, toast, dialog, fail } from "./core.js";
 import { openMenu, openPopover, update, closeAll, isOpen, openEl, refill } from "./menu.js";
+import { tabs as terminalTabs } from "./term.js";
 import { statusKey, placesOf, key as entryKey } from "./actions.js";
 
 const emptyFilter = () => ({ account:[],accountNot:false,tag:[],tagNot:false,status: [], statusNot: false, location: [], locationNot: false, agent: [], agentNot: false, repository: [], repositoryNot: false, lastActive: "", has: [], hasNot: false });
@@ -184,7 +185,9 @@ export function groupsOf(rows) {
   const map = new Map();
   const add = (k, make, e) => { if (!map.has(k)) map.set(k, Object.assign({ key: k, rows: [] }, make())); map.get(k).rows.push(e); };
   for (const e of rows) {
-    if (g === "repository") {
+    if (g === "family") {
+ const r=e.relationship; add("family:"+(r?.family || entryKey(e)),()=>({name:r?.name||e.title, family:true, branches:r?.branches||1}),e);
+ } else if (g === "repository") {
       const rk = repoKey(e);
       add("repository:" + rk, () => ({ name: e.group.noRepo ? "Outside a git checkout" : e.group.name, repo: e.group, last: !rk }), e);
     } else if (g === "location") {
@@ -197,10 +200,10 @@ export function groupsOf(rows) {
     else if (g === "last-active") { const b = bucket(e); add("last-active:" + b, () => ({ name: BUCKETS.find(([v]) => v === b)[1], bucket: b }), e); }
   }
   const out = [...map.values()];
-  for (const x of out) { x.rows = sortRows(x.rows); x.newest = Math.max(...x.rows.map(at)); }
+  for (const x of out) { x.rows = sortRows(x.rows); if(g === "family") x.rows.sort((a,b)=>(a.relationship?.depth||0)-(b.relationship?.depth||0)); x.newest = Math.max(...x.rows.map(at)); }
   const byActivity = (a, b) => (a.last ? 1 : 0) - (b.last ? 1 : 0) || b.newest - a.newest;
   const az = (a, b) => (a.last ? 1 : 0) - (b.last ? 1 : 0) || a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
-  if (g === "repository" || g === "agent" || g === "account" || g === "tag") out.sort(list.sortBy === "title" ? az : byActivity);
+  if (g === "family" || g === "repository" || g === "agent" || g === "account" || g === "tag") out.sort(list.sortBy === "title" ? az : byActivity);
   else if (g === "status") out.sort((a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status));
   else if (g === "last-active") out.sort((a, b) => BUCKETS.findIndex(([v]) => v === a.bucket) - BUCKETS.findIndex(([v]) => v === b.bucket));
   else if (g === "location") {
@@ -422,7 +425,7 @@ function displayContent() {
   return [
     h("div", { class: "dp-head" }, h("span", { class: "dp-title" }, "Display"), h("span", { class: "spacer" }), h("span", { class: "kbd" }, keys("mod+J"))),
     h("div", { class: "dp-grid" },
-      sel("dp-group", "Group by", list.groupBy, [["repository", "Repository"], ["location", "Location"], ["agent", "Agent"], ["account", "Account"], ["tag", "Account tag"], ["status", "Status"], ["last-active", "Last active"], ["none", "None"]], (v) => setDisplay({ groupBy: v })),
+      sel("dp-group", "Group by", list.groupBy, [["family", "Conversation family"], ["repository", "Repository"], ["location", "Location"], ["agent", "Agent"], ["account", "Account"], ["tag", "Account tag"], ["status", "Status"], ["last-active", "Last active"], ["none", "None"]], (v) => setDisplay({ groupBy: v })),
       h("label", { class: "dp-l", for: "dp-sort" }, "Sort by"),
       h("div", { class: "dp-sort" },
         h("select", { id: "dp-sort", onchange: (ev) => setDisplay({ sortBy: ev.target.value, sortReverse: false }) },
@@ -485,16 +488,24 @@ export function tree(groups, row, selKey) {
       h("span", { class: "chev" + (closed ? " closed" : ""), "aria-hidden": "true" }, icon(ICONS.chevron, 12)),
       groupMark(g),
       h("span", { class: "gname" }, g.name),
-      h("span", { class: "gcount" }, String(g.rows.length)),
+      h("span", { class: "gcount" }, g.family ? `${g.rows.length} of ${g.branches} branches` : String(g.rows.length)),
       needs ? h("span", { class: "gsum needs" }, h("span", { class: "dot needs" }), `${needs} need${needs === 1 ? "s" : ""} you`) : null,
       working ? h("span", { class: "gsum ok" }, h("span", { class: "dot working" }), `${working} working`) : null,
       h("span", { class: "spacer" }),
+      g.family ? h("button", {class:"btn icon", "aria-label":"Rename conversation family", title:"Rename conversation family", onclick:ev=>{ev.stopPropagation();renameFamily(g);}}, "✎") : null,
+      g.family ? h("span",{class:"gmeta"}, (()=>{const n=[...terminalTabs.values()].filter(t=>"family:"+t.relationship?.family===g.key).length;return n?`${n} terminal${n===1?"":"s"}`:"";})()) : null,
       groupRight(g, closed));
     const gi = h("div", { class: "grp" + (closed ? " closed" : ""), role: "treeitem", "aria-level": "1", "aria-expanded": closed ? "false" : "true", "aria-label": label,
       tabindex: "-1", "data-gkey": g.key }, head);
     if (!closed) {
       const body = h("div", { class: "gbody", role: "group", style: `contain-intrinsic-size: auto ${g.rows.length * (list.density === "compact" ? 32 : 60)}px` });
-      for (const e of g.rows) body.append(row(e, 2));
+      for (const e of g.rows) {
+       const item=row(e,2); if(g.family && e.relationship?.parent){
+         item.style.marginLeft=Math.min(e.relationship.depth||1,3)*18+"px";
+         item.prepend(h("span",{class:"family-ancestry muted",title:e.relationship.ancestors?.join(" → ")},"↳ Fork · "+(e.relationship.ancestors?.at(-1)||"Parent unavailable")));
+       }
+       body.append(item);
+     }
       gi.append(body);
     }
     if (first) { gi.tabIndex = 0; first = false; }
@@ -616,3 +627,9 @@ document.addEventListener("keydown", (ev) => {
   else if (k === "f") { ev.preventDefault(); inputEl?.focus(); inputEl?.select(); }
   else if (k === "j" && !ev.shiftKey) { ev.preventDefault(); displayCommand(); }
 });
+
+function renameFamily(g){
+ const input=h("input",{class:"field",value:g.name,"aria-label":"Family name",maxlength:200});
+ const d=dialog(h("h2",{},"Rename conversation family"),input,h("p",{class:"muted"},"This changes the group label in Hopsesh. Session titles and history stay unchanged."),h("div",{class:"dlg-foot"},h("button",{class:"btn",onclick:()=>d.close()},"Cancel"),h("button",{class:"btn primary",onclick:async()=>{try{await api("RenameFamily",g.key.slice(7),input.value.trim());for(const e of pool)if(e.relationship?.family===g.key.slice(7))e.relationship.name=input.value.trim()||e.title;d.close();redraw();}catch(e){fail(e);}}},"Save name")));
+ input.focus();input.select();
+}

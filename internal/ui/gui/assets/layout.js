@@ -121,6 +121,7 @@ function save() {
 // toggle shows or hides a pane. In a narrow window the sidebar's showing is for now (not
 // saved): it hides again when the window is narrow next time.
 export function toggle(which) {
+  if (which === "inspector" && document.body.classList.contains("terminal-right")) { dispatchEvent(new Event("terminal-session-details")); return; }
   if (which === "sidebar") {
     if (lay.sidebarHidden) { lay.sidebarHidden = false; override = narrow(); }
     else if (narrow()) override = !override;

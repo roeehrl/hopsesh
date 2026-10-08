@@ -86,6 +86,7 @@ type Spec struct {
 
 // Info is a tab as the window shows it.
 type Info struct {
+	PID     int       `json:"pid,omitempty"`
 	ID      string    `json:"id"`
 	Title   string    `json:"title"`
 	Program string    `json:"program"` // the program's file name

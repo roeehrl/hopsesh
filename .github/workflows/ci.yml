@@ -253,9 +253,11 @@ jobs:
           go build -o "bin/hopsesh$ext" ./cmd/hopsesh
           go build -o "bin/hsmatrix$ext" ./internal/devtools/hsmatrix
           go build -o "bin/fakeagent$ext" ./internal/devtools/fakeagent
-      - name: mandatory stateful account and lineage routes, forks and recovery
+      - name: mandatory stateful movement, account and lineage routes, forks and recovery
         shell: bash
-        run: go test ./internal/e2e -run 'TestLineage|TestAccountProfile' -race -count=1 -timeout 10m
+        run: |
+          go test ./internal/e2e -run 'TestMovement|TestLineage|TestAccountProfile|TestContext|TestInstruction' -race -count=1 -timeout 10m
+          go test ./internal/e2e/scenario -run 'TestScenarios/notice-hook' -race -count=1 -timeout 3m
       - name: scenario matrix over loopback SSH
         if: runner.os != 'Windows'
         run: scripts/matrix-loopback.sh bin "${{ matrix.family }}→${{ matrix.family }}" "$RUNNER_TEMP/hsmatrix"
@@ -525,3 +527,33 @@ jobs:
         with:
           version: "~> v2"
           args: check
+
+  terminal-native:
+    name: native terminal placements (${{ matrix.family }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {family: linux, os: ubuntu-24.04}
+          - {family: macos, os: macos-15}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: GUI build dependencies and a virtual display (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev xvfb dbus jq
+          # WebKitGTK sandboxes web content with bubblewrap, which needs unprivileged user
+          # namespaces; Ubuntu 24.04's AppArmor restricts them on this runner.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: separate, bottom and right views answer a real PTY through the restricted host
+        run: scripts/app-terminal-check.sh

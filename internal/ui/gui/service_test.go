@@ -100,6 +100,9 @@ func TestWindowContinuesInAnotherAgent(t *testing.T) {
 	if d.Kind != "continue" || d.Agent != "Codex" || !strings.Contains(d.Command, "codex") || d.Journal == "" {
 		t.Fatalf("done: %+v", d)
 	}
+	if !strings.Contains(d.ContinuationHint, "does not send a message") || !strings.Contains(d.ContinuationHint, "in Codex") {
+		t.Fatalf("writing a session must not claim that Codex started: %+v", d)
+	}
 
 	scan, err = a.Scan()
 	if err != nil {

@@ -6,6 +6,36 @@ test.beforeEach(async ({ page }) => fresh(page));
 const sidebar = (page: Page) => page.getByRole("navigation", { name: "Places" });
 const group = (page: Page, name: string | RegExp) => page.locator(".grp").filter({ has: page.locator(".gname").getByText(name) });
 
+test("machine sidebar subtitles show detected agents consistently even without sessions", async ({ page }) => {
+  await page.route("**/call", async route => {
+    if (!["InitialScan", "Scan", "RefreshHere"].includes(route.request().postDataJSON().m)) return route.continue();
+    const response = await route.fetch(), body = await response.json();
+    const local = body.result.machines.find((m: any) => m.local);
+    expect(local.agentNames).toContain("Claude Code");
+    expect(local.agentNames).toContain("Codex");
+    body.result.groups = [];
+    body.result.total = 0;
+    body.result.machines = [local,
+      { name: "other-mac", local: false, status: "ok", os: "darwin", hopsesh: "0.4.0", sessions: 0, agentNames: ["Claude Code", "Codex"], agents: ["Claude Code 2.1.288", "Codex 0.160.1"] },
+      { name: "empty-box", local: false, status: "ok", sessions: 0, agentNames: [], agents: [] },
+      { name: "offline-box", local: false, status: "unreachable", error: "Connection timed out", sessions: 4, agentNames: ["Claude Code"], agents: ["Claude Code 2.1.288"] },
+    ];
+    await route.fulfill({ json: body });
+  });
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible();
+  const local = sidebar(page).getByRole("button", { name: /^This (Mac|PC|computer)/ });
+  const remote = sidebar(page).getByRole("button", { name: /^other-mac/ });
+  await expect(local.locator("small")).toHaveText("Claude Code, Codex");
+  await expect(remote.locator("small")).toHaveText("Claude Code, Codex");
+  await expect(remote.locator("small")).toHaveAttribute("title", "Claude Code 2.1.288, Codex 0.160.1");
+  await expect(remote).not.toContainText(/darwin|hopsesh 0.4.0/);
+  await expect(sidebar(page).getByRole("button", { name: /^empty-box/ }).locator("small")).toHaveText("No agents detected");
+  await expect(sidebar(page).getByRole("button", { name: /^offline-box/ }).locator("small")).toHaveText("Not reachable");
+  await remote.click();
+  await expect(page.getByRole("heading", { name: "other-mac", exact: true })).toBeVisible();
+});
+
 test("lists sessions by repository, in one tree, with their agents and states", async ({ page }) => {
   await expect(page.getByRole("tree", { name: "Sessions" })).toHaveCount(1);
   await expect(group(page, "demo")).toHaveAttribute("aria-expanded", "true");
@@ -155,7 +185,7 @@ test("the inspector's menus close on Escape, a click elsewhere and another place
   await expect(places).toBeHidden();
 });
 
-test("a session open in the Claude app says so, and shows the app", async ({ page }) => {
+test("a session open in Claude reports unsupported exact opening instead of silently showing the app", async ({ page }) => {
   const key = await row(page, "Find the codeword").getAttribute("data-key");
   const id = key!.split("\u0000")[1].split("/")[1];
   expect((await page.request.post(`/live?session=${id}&entrypoint=claude-desktop`)).ok()).toBeTruthy();
@@ -166,10 +196,10 @@ test("a session open in the Claude app says so, and shows the app", async ({ pag
   await r.click();
   const d = details(page);
   await expect(d.locator(".ins-status")).toContainText("in Claude app");
-  await expect(d).toContainText("The app opens on its last view");
+  await expect(d).not.toContainText("The app opens on its last view");
   await expect(d.getByText("Open in", { exact: true })).toBeVisible();
-  await d.locator("#act-primary").click();
-  await expect.poll(async () => (await (await page.request.get("/terminal-test/links")).json()) as string[]).toContain("app:Claude");
+  await expect(d.locator("#act-primary")).toBeDisabled();
+  await expect(d).toContainText(process.platform === "linux" ? "Claude desktop opening requires macOS or Windows x64" : "Update Claude Code to 2.1.285");
   await page.locator("#btn-filter").click();
   await page.getByRole("menuitem", { name: /^Has/ }).click();
   await page.getByRole("menuitemcheckbox", { name: /^Open in a terminal tab/ }).click();
@@ -291,7 +321,7 @@ test("the palette finds a session and shows it; its action is on mod+Enter", asy
   await page.keyboard.press("Escape");
 });
 
-test("mod+Enter in the palette runs the main action: here, showing the Claude app", async ({ page }) => {
+test("mod+Enter cannot bypass a disabled desktop action or run a different action", async ({ page }) => {
   const key = await row(page, "Find the codeword").getAttribute("data-key");
   const id = key!.split("\u0000")[1].split("/")[1];
   expect((await page.request.post(`/live?session=${id}&entrypoint=claude-desktop`)).ok()).toBeTruthy();
@@ -301,7 +331,8 @@ test("mod+Enter in the palette runs the main action: here, showing the Claude ap
   const input = page.getByRole("combobox", { name: "Search sessions or run a command" });
   await input.fill("Find the codeword");
   await input.press(process.platform === "darwin" ? "Meta+Enter" : "Control+Enter");
-  await expect.poll(async () => (await (await page.request.get("/terminal-test/links")).json()) as string[]).toContain("app:Claude");
+  await expect(input).toBeVisible();
+  expect((await (await page.request.get("/terminal-test/links")).json()) as string[]).not.toContain("app:Claude");
 });
 
 test("rename: the agent's own title, undone from Activity", async ({ page }) => {

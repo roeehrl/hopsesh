@@ -2,6 +2,7 @@
 // each hopsesh:terminal event), their chips on session rows and in the sidebar, "Needs
 // you", the entry points' routing (In this window / In my terminal), and the quit
 // confirmation that lists the programs still running.
+import {showWorkspace} from "./terminal-workspace.js";
 import { api, on, h, state, toast, fail, sys, dialog, count, icon } from "./core.js";
 
 export const tabs = new Map(); // id → the tab (TermTab)
@@ -14,6 +15,12 @@ export async function loadTabs() {
   try {
     for (const t of await api("TerminalTabs")) tabs.set(t.id, t);
     for (const x of await api("ExternalExits")) exits.set(x.machine + "\u0000" + x.key, x);
+    // Native startup can open a tab before this document registers its event
+    // listeners. Recover the pending view from backend state, not event timing.
+    if (tabs.size) {
+      const workspace = await api("TerminalWorkspace");
+      if (workspace.placement !== "separate") await showWorkspace(workspace);
+    }
   } catch { /* no terminal here */ }
   changed();
 }
@@ -41,7 +48,7 @@ on("hopsesh:terminal", (t) => {
 const live = (t) => t.state !== "exited";
 // tabFor is the live tab a session runs in here, if any: its own, or the bring-back's
 // that saved it and still runs it.
-export const tabFor = (e) => [...tabs.values()].find((t) => (t.kind === "session" || t.kind === "bring") && t.key && t.machine === e.machine && t.key === e.key && live(t));
+export const tabFor = (e) => [...tabs.values()].find((t) => (t.kind === "session" || t.kind === "bring") && t.association !== "Session association not confirmed" && t.key && t.machine === e.machine && t.key === e.key && live(t));
 export const waiting = () => [...tabs.values()].filter((t) => t.attention);
 export const running = () => [...tabs.values()].filter(live);
 // strayWaiting are the waiting tabs no session row stands for (steps, sign-ins, shells).
@@ -105,7 +112,7 @@ function badge() {
   const b = document.querySelector("#btn-terminal");
   if (!b) return;
   const n = waiting().length, r = running().length;
-  b.hidden = tabs.size === 0;
+  b.hidden = false;
   const dot = b.querySelector(".term-n");
   dot.textContent = n ? String(n) : "";
   dot.hidden = !n;
@@ -158,3 +165,10 @@ document.addEventListener("keydown", (ev) => {
   ev.preventDefault();
   showTerminal();
 });
+
+export function associateShell(e) {
+ const shells=[...tabs.values()].filter(t=>t.kind==="shell" && live(t));
+ if(!shells.length){toast("Open a shell first.");return;}
+ const choose=h("select",{"aria-label":"Shell tab",class:"field"},shells.map(t=>h("option",{value:t.id},t.title)));
+ const d=dialog(h("h2",{},"Organize a shell with this conversation"),h("p",{class:"muted"},"This groups the tab for convenience. It does not change the shell’s folder or create a conversation fork."),choose,h("div",{class:"dlg-foot"},h("button",{class:"btn",onclick:()=>d.close()},"Cancel"),h("button",{class:"btn",onclick:async()=>{try{await api("AssociateShell",choose.value,"","");d.close();}catch(err){fail(err);}}},"Move to Other terminals"),h("button",{class:"btn primary",onclick:async()=>{try{await api("AssociateShell",choose.value,e.machine,e.key);d.close();toast("Shell grouped with this conversation");}catch(err){fail(err);}}},"Group shell here")));
+}

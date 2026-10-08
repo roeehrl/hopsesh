@@ -238,10 +238,6 @@ func applyPlan(ctx context.Context, p *Plan, in Input, env Env) (*Result, error)
 		res.PromptFile = promptFile
 	}
 	res.Command, res.Run = launch.Shell(p.Resume, res.PromptFile, launch.DefaultShell()), p.Resume
-	if p.Options.Notify && (!agent.Has(tgt.Module, agent.CapNotify) || !p.Options.RemoteControl) {
-		// The agent cannot tell the old session itself: the user pastes this there.
-		res.Notice = launch.OldSessionNotice(tgt.Machine.Name, p.Target.CWD, p.NewName, p.Options.Fork && p.Live)
-	}
 	if err := j.Seal(machinesOf(ctx, in)); err != nil {
 		res.Warnings = append(res.Warnings, "could not record what this changed, for a safe undo: "+err.Error())
 	}
@@ -508,7 +504,7 @@ func recordLineage(ctx context.Context, p *Plan, in Input, j *journal.Journal, m
 		loss = append(loss, "native reasoning omitted for another account")
 	}
 	st := m.ReplaceProjection(to, tgt, projection, p.sourceState.Heads, loss)
-	if err := m.AppendHop(lineage.Hop{ID: p.OperationID, Time: now, From: p.sourceReplica, To: to, Source: p.sourceState.ID, Target: st.ID, Kind: lineage.HopMove, Fork: p.sourceLine != p.targetLine}); err != nil {
+	if err := m.AppendHop(lineage.Hop{Notify: p.Options.Notify, ID: p.OperationID, Time: now, From: p.sourceReplica, To: to, Source: p.sourceState.ID, Target: st.ID, Kind: lineage.HopMove, Fork: p.sourceLine != p.targetLine}); err != nil {
 		return err
 	}
 	if err = m.Validate(); err != nil {
@@ -521,9 +517,10 @@ func recordLineage(ctx context.Context, p *Plan, in Input, j *journal.Journal, m
 		return nil
 	}
 	srcFS, err := in.Source.Machine.FS(ctx)
-	if err == nil {
-		err = j.WriteReceipt(srcFS, p.Source.Location, lineage.PathFor(in.Session.Path), m.ForBranch(p.sourceLine).Encode(), false)
+	if err != nil {
+		srcFS = nil
 	}
+	err = j.WriteReceipt(srcFS, p.Source.Location, lineage.PathFor(in.Session.Path), m.ForBranch(p.sourceLine).Encode(), false)
 	if err != nil {
 		res.Warnings = append(res.Warnings, "destination committed; source receipt acknowledgement pending: "+err.Error())
 	}

@@ -81,7 +81,7 @@ test("screenshots of the real window", async () => {
   await expect(sheet.getByRole("heading", { name: "Continue “Fix flaky checkout tests” in Codex" })).toBeVisible({ timeout: 60_000 });
   await shoot("02-continue-plan");
   await sheet.getByRole("button", { name: /Continue in Codex/ }).click();
-  await expect(page.getByRole("heading", { name: "“Fix flaky checkout tests” continues in Codex" })).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole("heading", { name: "“Fix flaky checkout tests” is prepared for Codex" })).toBeVisible({ timeout: 60_000 });
   await shoot("03-continue-result");
 
   await page.keyboard.press("Control+2");

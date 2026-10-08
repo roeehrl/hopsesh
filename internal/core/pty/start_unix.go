@@ -42,6 +42,7 @@ func start(argv []string, dir string, env []string, cols, rows int, _ string) (b
 func (u *unixTerm) Read(b []byte) (int, error)  { return u.pty.Master().Read(b) }
 func (u *unixTerm) Write(b []byte) (int, error) { return u.pty.Master().Write(b) }
 func (u *unixTerm) Resize(cols, rows int) error { return u.pty.Resize(cols, rows) }
+func (u *unixTerm) PID() int                    { return u.cmd.Process.Pid }
 func (u *unixTerm) ClosesOnExit() bool          { return true }
 func (u *unixTerm) Name() string                { return "pty" }
 

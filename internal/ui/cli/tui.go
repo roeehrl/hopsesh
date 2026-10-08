@@ -32,6 +32,9 @@ func (r *run) runTUI() error {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			command := proc.CommandContext(ctx, argv[0], argv[1:]...)
 			command.Dir = exit.RunDir
+			// Claude desktop opening requires terminal stdin and stdout. Bubble Tea
+			// has restored this terminal before returning the launch.
+			command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
 			command.Env = append(host.Without(os.Environ(), exit.Unset), exit.Env...)
 			err := command.Run()
 			cancel()

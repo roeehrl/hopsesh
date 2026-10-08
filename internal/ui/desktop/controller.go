@@ -17,20 +17,24 @@ import (
 // Controller is the only owner of desktop shell state. Native calls are serialized;
 // callbacks never acquire this mutex from the UI thread.
 type Controller struct {
-	published   atomic.Pointer[State]
-	ready       chan struct{}
-	background  atomic.Bool
-	suspended   atomic.Bool
-	ctx         context.Context
-	mu          sync.Mutex
-	app         *application.App
-	main, quick *application.WebviewWindow
-	tray        *application.SystemTray
-	state       State
-	cancel      context.CancelFunc
-	open        func(string)
-	changed     func()
-	attention   bool
+	published    atomic.Pointer[State]
+	ready        chan struct{}
+	background   atomic.Bool
+	suspended    atomic.Bool
+	ctx          context.Context
+	mu           sync.Mutex
+	app          *application.App
+	main, quick  *application.WebviewWindow
+	tray         *application.SystemTray
+	state        State
+	cancel       context.CancelFunc
+	open         func(string)
+	changed      func()
+	attention    bool
+	mainReady    atomic.Bool
+	mainPending  atomic.Bool
+	quickReady   atomic.Bool
+	quickPending atomic.Bool
 }
 
 func New(app *application.App, main *application.WebviewWindow, prefs config.Desktop, privileged func(*application.WebviewWindow), open func(string), changed func()) *Controller {
@@ -50,7 +54,27 @@ func New(app *application.App, main *application.WebviewWindow, prefs config.Des
 	if c.state.Capabilities.Tray {
 		c.makeTray()
 	}
-	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) { go c.start() })
+	// ApplicationStarted can precede creation of either native window. On
+	// Windows a placement error at that point used to focus a window whose
+	// WebView2 controller did not exist yet, from its nested creation pump.
+	var mainOnce, quickOnce sync.Once
+	main.OnWindowEvent(events.Common.WindowRuntimeReady, func(*application.WindowEvent) {
+		mainOnce.Do(func() {
+			go func() {
+				c.start()
+				c.mainReady.Store(true)
+				c.flushMain()
+			}()
+		})
+	})
+	c.quick.OnWindowEvent(events.Common.WindowRuntimeReady, func(*application.WindowEvent) {
+		quickOnce.Do(func() {
+			c.quickReady.Store(true)
+			if c.quickPending.Swap(false) {
+				go c.ShowQuick()
+			}
+		})
+	})
 	for _, event := range []events.ApplicationEventType{events.Common.SystemWillSleep, events.Common.ScreenLocked} {
 		app.Event.OnApplicationEvent(event, func(*application.ApplicationEvent) { c.suspended.Store(true); c.quick.Hide() })
 	}
@@ -66,6 +90,14 @@ func (c *Controller) makeTray() {
 	c.tray = c.app.SystemTray.New()
 	c.tray.AttachWindow(c.quick).OnClick(func() {
 		if c.suspended.Load() {
+			return
+		}
+		if !c.quickReady.Load() {
+			c.quickPending.Store(true)
+			// Readiness may have arrived between the load and store.
+			if c.quickReady.Load() && c.quickPending.Swap(false) {
+				c.ShowQuick()
+			}
 			return
 		}
 		c.fitQuick(c.tray)
@@ -212,10 +244,20 @@ func (c *Controller) Recheck() {
 }
 func (c *Controller) KeepOnClose() bool {
 	s := c.published.Load()
-	return KeepOnClose(s.Preferences, s.Capabilities, runtime.GOOS == "darwin")
+	return KeepOnClose(s.Preferences)
 }
-func (c *Controller) OpenMain()   { c.quick.Hide(); c.main.Show().Focus() }
-func (c *Controller) CloseQuick() { c.quick.Hide() }
+func (c *Controller) OpenMain() {
+	c.quickPending.Store(false)
+	c.mainPending.Store(true)
+	c.flushMain()
+}
+func (c *Controller) flushMain() {
+	if c.mainReady.Load() && c.mainPending.Swap(false) {
+		c.quick.Hide()
+		c.main.Show().Focus()
+	}
+}
+func (c *Controller) CloseQuick() { c.quickPending.Store(false); c.quick.Hide() }
 func (c *Controller) SetAttention(needs, tabs int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -277,6 +319,13 @@ func (c *Controller) fitQuick(tray *application.SystemTray) {
 
 func (c *Controller) showQuick(tray *application.SystemTray) {
 	if c.suspended.Load() {
+		return
+	}
+	if !c.quickReady.Load() {
+		c.quickPending.Store(true)
+		if c.quickReady.Load() && c.quickPending.Swap(false) {
+			c.showQuick(tray)
+		}
 		return
 	}
 	c.fitQuick(tray)

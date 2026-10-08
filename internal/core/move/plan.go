@@ -81,6 +81,8 @@ const (
 
 // Options are the user's choices.
 type Options struct {
+	Bounded       bool   `json:"bounded,omitempty"`    // new bounded replica on the same logical branch
+	NewReplica    bool   `json:"newReplica,omitempty"` // explicitly create a new native session; never auto-select an existing one
 	TargetProfile string `json:"targetProfile,omitempty"`
 	OperationID   string `json:"operationId,omitempty"`
 	TargetSession string `json:"targetSession,omitempty"`
@@ -107,6 +109,7 @@ type Options struct {
 	Note     string           // a handoff note the source agent wrote
 	// CarryRules adds the user's global instructions for the source agent to the briefing.
 	CarryRules bool
+	RuleFiles  []string // explicit subset of discovered source instruction paths
 	// Via is how another agent gets the session: "" (hopsesh converts it) or ViaImport (the
 	// target agent's own importer converts it; hopsesh adds its briefing).
 	Via string
@@ -228,6 +231,10 @@ type Endpoint struct {
 // Build works out a move. It reads (the bundle's file list, the target's copies) but
 // writes nothing.
 func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
+	if opt.NewReplica && opt.TargetSession != "" {
+		return nil, fmt.Errorf("a new session cannot also select an existing destination session")
+	}
+	in.Copies = activeCopies(ctx, in, opt)
 	src, tgt := in.Source, in.Target
 	copies := currentBranchCopies(in)
 	if opt.TargetSession != "" {
@@ -239,7 +246,7 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		}
 		copies = selected
 	}
-	if profileBoundary(in) || src.Module.Spec().ID != tgt.Module.Spec().ID || len(copies) == 1 && copies[0].Summary.Key != in.Session.Key {
+	if opt.NewReplica || opt.Bounded || profileBoundary(in) || src.Module.Spec().ID != tgt.Module.Spec().ID || len(copies) == 1 && copies[0].Summary.Key != in.Session.Key {
 		return buildContinue(ctx, in, opt)
 	}
 	if opt.Worktree == "" {
@@ -344,15 +351,11 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	planRoundTrip(p, in, opt)
 
 	p.NewName = launch.SessionName(p.Title, tgt.Machine.Name)
-	notify := ""
-	if n, ok := tgt.Module.(agent.Notifier); ok && opt.Notify {
-		notify = n.NotifyInstruction(p.OldName, src.Machine.Name, p.NewName, opt.Fork && p.Live)
-	}
 	p.StartPrompt = launch.StartPrompt(launch.Context{
 		AgentName: spec.Name, SourceLocation: src.Machine.Name, SourceOS: launch.OSName(src.Machine.Facts.OS), SourceVersion: s.AgentVersion,
 		SourceCWD: s.CWD, TargetLocation: tgt.Machine.Name, TargetOS: launch.OSName(tgt.Machine.Facts.OS), TargetCWD: cwd,
 		Branch: p.Repo.SourceBranch, WorktreeNote: worktreeNote(p), Unpushed: p.Repo.Unpushed, Dirty: p.Repo.Dirty,
-		Redacted: opt.Redact, OtherAccount: p.Options.OtherAccount, Live: p.Live, Fork: opt.Fork && p.Live, Notify: notify,
+		Redacted: opt.Redact, OtherAccount: p.Options.OtherAccount, Live: p.Live, Fork: opt.Fork && p.Live,
 	})
 	p.resumeOpts = agent.ResumeOptions{RemoteControl: p.Options.RemoteControl, App: opt.App && agent.Has(tgt.Module, agent.CapApp), Name: p.NewName, Prompt: p.StartPrompt}
 	if p.resumeOpts.App {
@@ -690,4 +693,16 @@ func num(s string) int {
 		n = n*10 + int(c-'0')
 	}
 	return n
+}
+
+// ContinuationHint distinguishes a prepared transcript from an agent turn. Opening
+// an app does not submit a message; a terminal command may include the first prompt.
+func (p *Plan) ContinuationHint() string {
+	if p.Kind != KindContinue || p.NoWork {
+		return ""
+	}
+	if p.Options.Go {
+		return fmt.Sprintf("Opening the prepared command sends “Continue.” to %s. Check the agent for progress.", p.Agent)
+	}
+	return fmt.Sprintf("Ready for your next message. Opening the session does not send a message. Send “Continue” or your next instruction in %s to start a turn.", p.Agent)
 }

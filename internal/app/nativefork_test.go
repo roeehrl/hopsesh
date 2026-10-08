@@ -75,3 +75,29 @@ func TestNativeForkDiscoveredBeforeFirstHopseshMove(t *testing.T) {
 		t.Fatal("copied history became new work")
 	}
 }
+
+// Discovery without a stored Hopsesh endpoint reserves different causal IDs on
+// each scan. UI grouping stays stable without persisting those temporary graphs.
+func TestNativeFamilyPresentationDoesNotDependOnReservedEndpoint(t *testing.T) {
+	makeInventory := func(endpoint string) *Inventory {
+		root := lineage.NewNative(endpoint, agent.SessionKey{Agent: "codex", Session: "root"})
+		root.Upsert(lineage.Replica{Key: agent.SessionKey{Agent: "codex", Session: "root"}, Endpoint: endpoint, Location: "A"})
+		child := root.Clone()
+		child.Branch = child.Fork("fork-operation", nil)
+		child.Upsert(lineage.Replica{Line: child.Branch, Key: agent.SessionKey{Agent: "codex", Session: "child"}, Endpoint: endpoint, Location: "A"})
+		return &Inventory{Entries: []Entry{{NativeRelationship: true, Machine: "A", Session: agent.Summary{Key: agent.SessionKey{Agent: "codex", Session: "root"}, Title: "Root"}, Lineage: root}, {NativeRelationship: true, Machine: "A", Session: agent.Summary{Key: agent.SessionKey{Agent: "codex", Session: "child"}, Title: "Child"}, Lineage: child}}}
+	}
+	a, b := makeInventory("reserved-a"), makeInventory("reserved-b")
+	ar, br := a.Relationships(), b.Relationships()
+	for key, r := range ar {
+		if r.Family != br[key].Family || r.Branch != br[key].Branch {
+			t.Fatalf("scan changed identity: %+v / %+v", r, br[key])
+		}
+	}
+	if len(a.FamilyGroups()) != 1 || ar[EntryIdentity("A", "codex/child")].Depth != 1 {
+		t.Fatal("native family lost ancestry")
+	}
+	if a.Entries[0].Lineage.Family == ar[EntryIdentity("A", "codex/root")].Family {
+		t.Fatal("presentation identity rewrote causal manifest")
+	}
+}

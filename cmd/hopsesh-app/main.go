@@ -52,6 +52,7 @@ func main() {
 		OnShutdown: svc.Shutdown,
 	})
 	svc.Wails = app
+	svc.AttachAppearance()
 	svc.Terms.Attach(app)
 	app.Menu.Set(menu(func(cmd string) { app.Event.Emit(gui.MenuEvent, cmd) }, svc.Terms.Toggle))
 	win := app.Window.NewWithOptions(application.WebviewWindowOptions{
@@ -85,7 +86,7 @@ func main() {
 		}
 	})
 	// macOS: clicking the Dock icon brings a hidden window back.
-	app.Event.OnApplicationEvent(events.Mac.ApplicationShouldHandleReopen, func(*application.ApplicationEvent) { win.Show().Focus() })
+	app.Event.OnApplicationEvent(events.Mac.ApplicationShouldHandleReopen, func(*application.ApplicationEvent) { svc.Terms.ShowMain() })
 	testHook(win, svc)
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
@@ -116,7 +117,7 @@ func menu(send func(cmd string), terminal func()) *application.Menu {
 	// The session list: Group By and Sort By (radio items; the window tells which is
 	// chosen, gui.SetListMenu), collapsing every group, compact rows and the Display popover.
 	v.AddSeparator()
-	groups := radios(v.AddSubmenu("Group By"), [][2]string{{"repository", "Repository"}, {"location", "Location"}, {"agent", "Agent"},
+	groups := radios(v.AddSubmenu("Group By"), [][2]string{{"family", "Conversation Family"}, {"repository", "Repository"}, {"location", "Location"}, {"agent", "Agent"},
 		{"status", "Status"}, {"last-active", "Last Active"}, {"none", "None"}}, "group:", send)
 	sorts := radios(v.AddSubmenu("Sort By"), [][2]string{{"last-active", "Last Active"}, {"title", "Title"}, {"status", "Status"}, {"size", "Size"}}, "sort:", send)
 	v.Add("Collapse All Groups").OnClick(func(*application.Context) { send("collapse-all") })

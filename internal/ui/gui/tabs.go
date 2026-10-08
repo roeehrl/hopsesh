@@ -186,6 +186,23 @@ func (a *App) sessionTab(c agent.Command, l app.Launch, meta TabMeta, title stri
 	var info pty.Info
 	if err == nil {
 		meta.Command, meta.External, meta.Rerun = displayCommand(c.Argv), true, true
+		meta.LaunchedKey = meta.Key
+		a.mu.Lock()
+		if a.inv != nil {
+			relations := a.inv.Relationships()
+			if r, ok := relations[app.EntryIdentity(meta.Machine, meta.Key)]; ok {
+				if name := a.core.Cfg.FamilyNames[r.Family]; name != "" {
+					r.Name = name
+				}
+				meta.Relationship = &r
+			}
+			for _, e := range a.inv.Entries {
+				if e.Machine == meta.Machine && e.Session.Key.String() == meta.Key && e.Profile != nil && e.Profile.Account != nil {
+					meta.Account = e.Profile.Account.Email
+				}
+			}
+		}
+		a.mu.Unlock()
 		info, err = a.Terms.Open(spec, TabSetup{Meta: meta, External: func(id string) error { return a.moveOut(id, l) }})
 	}
 	if err != nil {

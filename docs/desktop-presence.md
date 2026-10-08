@@ -2,7 +2,9 @@
 
 Settings → Desktop presence chooses where Hopsesh lives: Dock/taskbar/app launcher,
 menu bar/system tray, or both. New installations prefer both when a tray is available;
-existing settings without a desktop section retain their previous behavior.
+existing icon-placement preferences are preserved. Closing the main window defaults to
+**Keep running in background**, independently of icon placement, on macOS, Windows and
+Linux. An explicit **Quit Hopsesh** preference still quits.
 
 Click the status icon for Quick access. Focus shows local sessions needing attention
 and running locally. Recent and search include cached remote sessions, with the time
@@ -15,7 +17,9 @@ Login startup, what happens when the main window closes, the attention indicator
 Quick access message previews are separate preferences. Login startup is off unless
 the user enables it. The setting reads actual OS registration state and reports errors.
 Quit always uses the terminal-aware confirmation. Closing Quick access just dismisses
-it. User-pinned Dock/taskbar shortcuts are never changed.
+it. Without a tray, relaunch Hopsesh from the app launcher: the single-instance handler
+reopens the existing window and keeps running sessions intact. On macOS the Dock icon
+also reopens it. User-pinned Dock/taskbar shortcuts are never changed.
 
 macOS menu-bar-only removes the app from the Dock and app switcher. Windows tray-only
 hides the main window's taskbar and Alt+Tab entry; its terminal window remains reachable.
@@ -25,7 +29,7 @@ cannot promise hiding the taskbar entry, so strict tray-only is unavailable on L
 Both is offered when a tray is available. Host loss restores ordinary app access.
 
 The Go backend owns a shared session snapshot. Local discovery runs at most about once
-a minute while tray operation or a visible window needs it; presence refreshes every
+a minute while the app is running, including hidden without a tray; presence refreshes every
 5 seconds with a window visible and every 30 seconds in the background. Open terminal
 state changes update immediately. Sleep and screen-lock events suspend background
 refresh, and waking reconciles the cache on the next tick. Quick access's Refresh is local-only, even before

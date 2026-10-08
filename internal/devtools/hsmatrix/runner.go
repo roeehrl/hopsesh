@@ -42,6 +42,10 @@ func (localSide) do(op string, in, out any) error {
 		var r AppendReq
 		_ = json.Unmarshal(b, &r)
 		res, err = map[string]any{}, appendTurn(r)
+	case "remove":
+		var r RemoveReq
+		_ = json.Unmarshal(b, &r)
+		res, err = map[string]any{}, removeSession(r)
 	case "head":
 		var r HeadReq
 		_ = json.Unmarshal(b, &r)
@@ -208,11 +212,11 @@ func (r *runner) scenario(row Row) error {
 	}
 	s.dstCwd = tr.Cwd
 	switch row.Op {
-	case "move", "continue":
+	case "move", "continue", "bounded", "fork":
 		return r.pullAndUndo(s)
 	case "push":
 		return r.push(s)
-	case "roundtrip":
+	case "roundtrip", "quiet-roundtrip":
 		return r.roundtrip(s)
 	case "conflict":
 		return r.conflict(s)
@@ -226,6 +230,15 @@ func (s *sc) ref() string { return s.host + ":" + s.row.From + "/" + s.id }
 
 func (s *sc) pullArgs(extra ...string) []string {
 	args := []string{"pull", s.ref(), "--yes", "--json"}
+	if s.row.Op == "fork" {
+		args = append(args, "--fork")
+	}
+	if s.row.Op == "quiet-roundtrip" {
+		args = append(args, "--notify=false")
+	}
+	if s.row.Op == "bounded" {
+		args = append(args, "--bounded")
+	}
 	if s.row.To != s.row.From {
 		args = append(args, "--in", s.row.To)
 	}
@@ -238,7 +251,9 @@ func (s *sc) pullArgs(extra ...string) []string {
 // arrived checks the target has the conversation, with the target's paths.
 func (r *runner) arrived(s *sc, on side, agent, cwd, otherCwd string) (Found, error) {
 	var fs []Found
-	if err := on.do("find", FindReq{Marker: s.marker, Needles: []string{s.text, cwd, otherCwd}}, &fs); err != nil {
+	const ready = "[hopsesh] Import ready."
+	const fakeReply = "Understood. I'll check the working tree first, then continue from where the conversation stopped."
+	if err := on.do("find", FindReq{Marker: s.marker, Needles: []string{s.text, cwd, otherCwd, ready, fakeReply}}, &fs); err != nil {
 		return Found{}, err
 	}
 	var got []Found
@@ -251,6 +266,9 @@ func (r *runner) arrived(s *sc, on side, agent, cwd, otherCwd string) (Found, er
 		return Found{}, fmt.Errorf("%s: want one %s session with the conversation, found %d (%+v)", on.label(), agent, len(got), fs)
 	}
 	f := got[0]
+	if s.row.To != s.row.From && (!f.Has[ready] || f.Has[fakeReply]) {
+		return f, fmt.Errorf("%s: imported history must identify Hopsesh's notice without claiming an agent turn in %s", on.label(), f.Path)
+	}
 	if !f.Has[s.text] {
 		return f, fmt.Errorf("%s: the conversation's text did not arrive intact in %s", on.label(), f.Path)
 	}
@@ -322,17 +340,23 @@ func (r *runner) codeCame(s *sc) error {
 var cloudTitles = map[string]string{"claude-cloud": "Claude Code cloud", "codex-cloud": "Codex cloud"}
 
 func (r *runner) markPrefix(s *sc) string {
-	if s.row.To != s.row.From {
-		return "↪ continued in "
+	if s.row.Op == "fork" {
+		return ""
 	}
-	return "↪ continued in "
+	// The CLI scans fixture profiles as separate account scopes, so even a
+	// same-agent transfer uses portable preparation into the other profile.
+	return "↪ prepared in "
 }
 
 func (r *runner) pullAndUndo(s *sc) error {
 	if _, err := r.hs(true, s.pullArgs()...); err != nil {
 		return err
 	}
-	if _, err := r.arrived(s, r.here, s.row.To, s.dstCwd, s.srcCwd); err != nil {
+	f, err := r.arrived(s, r.here, s.row.To, s.dstCwd, s.srcCwd)
+	if err != nil {
+		return err
+	}
+	if err := checkMovement(f, 1, true, s.row.Op == "fork"); err != nil {
 		return err
 	}
 	if err := r.codeCame(s); err != nil {
@@ -384,17 +408,23 @@ func (r *runner) roundtrip(s *sc) error {
 	if err != nil {
 		return err
 	}
+	if err := checkMovement(f, 1, s.row.Op != "quiet-roundtrip", false); err != nil {
+		return err
+	}
 	back := "and back again " + s.marker
 	if err := r.here.do("append", AppendReq{Agent: s.row.To, Path: f.Path, ID: f.ID, Text: back}, &struct{}{}); err != nil {
 		return err
 	}
 	args := []string{"push", s.row.To + "/" + f.ID, s.host, "--yes", "--json"}
+	if s.row.Op == "quiet-roundtrip" {
+		args = append(args, "--notify=false")
+	}
 	if s.row.To != s.row.From {
 		args = append(args, "--in", s.row.From)
 	}
-	if s.row.Repo == "none" {
-		args = append(args, "--to", s.srcCwd)
-	}
+	// A return has an exact original repository, including unpushed/worktree
+	// cases. Do not make the test depend on incidental repository discovery.
+	args = append(args, "--to", s.srcCwd)
 	if _, err := r.hs(true, args...); err != nil {
 		return err
 	}
@@ -404,8 +434,14 @@ func (r *runner) roundtrip(s *sc) error {
 	}
 	for _, g := range fs {
 		if g.Agent == s.row.From && g.Mark == "" && g.Has[back] {
+			if err := checkMovement(g, 2, s.row.Op != "quiet-roundtrip", false); err != nil {
+				return err
+			}
 			if !g.Has[s.srcCwd] {
 				return fmt.Errorf("there: the copy that came home names the wrong folder (%s)", g.Path)
+			}
+			if s.row.Op == "roundtrip" {
+				return r.newSessionAfterMissingOriginal(s, f, g, back)
 			}
 			return nil
 		}
@@ -1047,6 +1083,43 @@ func (r *runner) cloudHop(row Row) error {
 		if left, _ := git(o.Bare, nil, "for-each-ref", "refs/heads/"+h.Branch); left != "" {
 			return fmt.Errorf("undo left the handoff branch: %s", left)
 		}
+	}
+	return nil
+}
+
+// Receipts cross the same helper/SSH boundary as native sessions. Every matrix
+// return checks durable metadata, including when movement notices are disabled.
+func checkMovement(f Found, transfers int, notify, fork bool) error {
+	if f.Graph == nil {
+		return fmt.Errorf("%s: missing movement receipt", f.Path)
+	}
+	hops := f.Graph.ActiveHops()
+	if len(hops) != transfers {
+		return fmt.Errorf("%s: movements=%d, want %d", f.Path, len(hops), transfers)
+	}
+	for _, h := range hops {
+		if h.Notify != notify {
+			return fmt.Errorf("%s: lost notify=%t preference", f.Path, notify)
+		}
+	}
+	last := hops[len(hops)-1]
+	if last.Fork != fork {
+		return fmt.Errorf("%s: fork=%t, want %t", f.Path, last.Fork, fork)
+	}
+	if _, ok := f.Graph.Departure(last.To); ok {
+		return fmt.Errorf("%s: arrival has departure notice", f.Path)
+	}
+	departure, departed := f.Graph.Departure(last.From)
+	if departed != notify || departed && departure.ID != last.ID {
+		return fmt.Errorf("%s: incorrect source departure", f.Path)
+	}
+	returns := f.Graph.ReturnReplicas(last.To)
+	if fork {
+		if len(returns) != 0 {
+			return fmt.Errorf("%s: fork offers parent as a return", f.Path)
+		}
+	} else if len(returns) == 0 || returns[0].ID != last.From {
+		return fmt.Errorf("%s: missing previous native replica in returns", f.Path)
 	}
 	return nil
 }

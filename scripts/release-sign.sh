@@ -2,7 +2,7 @@
 # Complete a draft hopsesh release on the maintainer's Mac. No signing key or Apple
 # credential ever leaves this machine.
 #
-#   scripts/release-sign.sh v0.3.0
+#   scripts/release-sign.sh v0.4.0
 #
 # 1. checks the draft release that the release workflow made for the tag, and verifies
 #    GitHub's build provenance for every file it contains;
@@ -48,6 +48,14 @@ say "Checking the draft release for $TAG"
 draft="$(gh release view "$TAG" -R "$REPO" --json isDraft --jq .isDraft 2>/dev/null)" \
   || die "no release for $TAG yet: push the tag and wait for the release workflow"
 [ "$draft" = true ] || die "$TAG is already published; refusing to change it"
+# A tag with a pre-release suffix (v0.4.0-rc.1) must be a pre-release, so that GitHub's
+# "latest release", which hopsesh update, the apps and the install scripts read, never
+# points to it; a plain vX.Y.Z must not be one.
+pre="$(gh release view "$TAG" -R "$REPO" --json isPrerelease --jq .isPrerelease)"
+case "$TAG" in
+  *-*) [ "$pre" = true ] || die "$TAG has a pre-release suffix but its draft is not a pre-release (GoReleaser's release.prerelease)" ;;
+  *) [ "$pre" = false ] || die "$TAG is a final version but its draft is a pre-release" ;;
+esac
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -145,4 +153,7 @@ gh release upload "$TAG" -R "$REPO" --clobber \
 
 say "Done. Review the draft, then publish it:"
 echo "  https://github.com/$REPO/releases/tag/$TAG   (drafts: https://github.com/$REPO/releases)"
-echo "  gh release edit $TAG -R $REPO --draft=false"
+case "$TAG" in
+  *-*) echo "  gh release edit $TAG -R $REPO --draft=false --prerelease   (a rehearsal: or gh release delete $TAG -R $REPO --cleanup-tag)" ;;
+  *) echo "  gh release edit $TAG -R $REPO --draft=false --latest" ;;
+esac

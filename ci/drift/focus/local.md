@@ -21,7 +21,7 @@ Check these surfaces against upstream changes:
   An upstream identity or storage change must not silently select another profile,
   adopt a session into the wrong account or infer identity from duplicate labels.
 - Transfers, forks and round trips: inspect `internal/core/move`, `internal/core/lineage`,
-  `internal/core/peer` and `internal/app`. Current contracts use lineage/4 and peer v4.
+  `internal/core/peer` and `internal/app`. Current contracts use lineage/5 and peer v5.
   Cross-account continuation uses a portable transcript with a fresh native ID, preserves
   the original, and excludes signed reasoning, opaque compaction and private agent state.
   Watch changed record shapes, native fork metadata, tool/message IDs, resume semantics
@@ -67,3 +67,107 @@ core profiles/lineage/move tests, `internal/e2e/lineage_routes_test.go`,
 CI matrices; a weekly real-agent probe is narrower and makes no paid model calls. Do not
 claim it tested authenticated cross-account continuation or actual desktop presentation.
 The optional presence daemon is a proposal for a later release, not shipped functionality.
+
+Context capacity and bounded recovery (0.4.0): inspect `sdk/ir/capacity.go`,
+`agents/{claude,codex}/capacity.go`, `internal/core/convert`, and every writer/importer.
+Watch effective model/profile context limits, Codex config profiles and compaction
+replacement_history, paginated ordinals/history_base, Claude active-branch compaction,
+and imported response items versus duplicate UI events. Unknown active state must
+not permit an append. Vendor import must preflight its complete snapshot and validate
+its output before opening; checking only the Hopsesh briefing repeats a known overflow.
+Final payload budgets include notes, plans, tools, redaction and framing. Archives are
+portable data with bounded retrieval, never native signed/private state or instructions.
+Large first records must remain discoverable. Check cloud edited briefs and return
+paths, capacity rollovers versus forks, retained originals with new independent work,
+archive transport/undo and truthful prepared-versus-running reports in GUI/TUI/CLI.
+The first bounded message is a labelled historical extract from original records:
+source compaction, actual agent reply, chronological substantive user requests, and
+separately framed tool activity. Never substitute a coalesced tool block for an agent
+reply or present extracted text as fresh task authorization. Preserve multiline source
+summaries, literal tool fences and the latest actual user request as a separate message,
+including when attachments or oversized agent blocks follow it. Consecutive user turns
+must not merge; generated boundaries carry no authored coverage. An empty extract must
+not invent a revision. Too little capacity blocks writing instead of dropping the request.
+Full portable text stays in the archive; no model-generated semantic summary is involved.
+Regression evidence: `internal/e2e/context_capacity_test.go`, mandatory
+`TestContextPressureRoutes` (ABABA/ABCA/ABCBCAB), SDK/module capacity tests and browser
+continuation/recovery tests, plus `internal/core/convert/context_test.go` for source
+record selection and request/quote boundaries. These static checks do not establish a
+paid model turn.
+
+Movement notices and returns: read `docs/movement-return.md`,
+`internal/e2e/movement_test.go`, `internal/app/movement.go`, module `hooks.go`,
+`sdk/agent/hooks*.go`, `sdk/agent/mark.go` and `internal/devtools/hsmatrix`.
+The contract is lineage/5 and peer protocol 5; strict decoding refuses old versions.
+Watch upstream SessionStart/UserPromptSubmit hook payloads, session/transcript identity,
+profile-root precedence, output visibility, synchronous command behavior and trust gates.
+Existing user hooks must survive installation/removal; unsupported vendor versions or
+platforms must report pending/unsupported delivery, not success. Hook delivery must never
+append native conversation nodes or establish authored work. Check prepared versus
+continued against actual new agent work, forked versus departed parents, divergence,
+last-checked observations, repeated returns, retry/undo and notices disabled while
+lineage and return discovery remain available. Return candidates use the actual branch
+and profile/binding, not labels; available/verify/same/behind/diverged/missing/live must
+remain honest as upstream readers, live detection and fork metadata change. No paid calls
+or writes to live vendor configuration are needed to validate these fixture scenarios.
+
+Portable return comparisons after a first account observation must verify the original
+native anchors across the binding rotation (`internal/core/move/portable_return.go`,
+`internal/e2e/movement_binding_test.go`). A changed binding alone is not independent
+conversation work, but it must never grant native append permission. Added or rewritten
+original work still blocks the return; successful portable copies retain the original.
+
+Missing-original returns carry explicit new-replica intent through GUI/TUI/CLI and the
+peer receiver. They must never select a surviving replica by accident. Hook commands
+pin the installation's config/state scope; default-root registration must not orphan
+older hooks. Failed or timed-out stdout writes remain retryable and cannot be reported
+as supplied. Repeated identical notices use validated operation/status identity even
+without a scan cache; lookup must not overwrite newer scan evidence.
+
+Claude desktop opening: review `agents/claude/desktop.go`, `internal/app/resume.go`,
+`internal/ui/gui/{termapps,sessions}.go`, `internal/ui/cli/tui.go` and SDK Command.TTY.
+The documented `claude --desktop --resume <uuid>` (2.1.285+, macOS / Windows x64)
+requires terminal stdin/stdout, a subscription login, and no conflicting options.
+It rejects even an already-running Desktop session. The narrow focus exception uses
+Desktop's own `claude://resume?session=<current-cli-id>` route only for a live session
+whose entrypoint identifies Desktop and a verified public macOS bundle (2.19675.1+).
+That route is an observed implementation contract, not a documented public focus API.
+Watch issue anthropics/claude-code#80773: older native/previous-/clear IDs can duplicate
+chats. Recheck live ownership on click. Never use a chat URL, guessed native ID, old
+lineage ID, hidden prompt or retry that imports after a focus failure. Public bundle
+metadata is the only Desktop file read. Unsupported live focus remains explicit;
+no fallback merely activates the app. Check TTY launch timeout/exit status/cleanup,
+no visible tab, session UUID propagation, and default-profile/root gates with module,
+GUI service and browser tests.
+
+Transfer review instructions: inspect `internal/core/move/instructions.go` and the
+source-file packaging in `internal/app/peer.go`. The GUI previews declared global and
+current-project instruction files and carries only the selected text snapshot in the
+briefing, never overwriting destination rule files. Check path allowlists, missing and
+oversized files, imported/parent rules (currently not followed), scoped account roots,
+peer transport, and return-trip preservation. Agent account email/slug is display metadata,
+not proof of native replay permission; cross-agent moves must not claim a different login.
+Desktop availability and remembered launch choices must be checked against the actual
+profile and installed application. Drift findings should distinguish a newer upstream
+release from fixture coverage: help/schema probes do not certify model continuation or
+justify expanding `Spec.Tested` or removing experimental status without versioned evidence.
+
+
+Embedded terminal and conversation families (0.4.0): inspect
+`internal/ui/gui/terminal_host.go`, `internal/core/pty/{session,stream}.go`,
+`internal/ui/gui/assets/terminal`, `internal/app/families.go` and
+`internal/ui/gui/terminal_binding.go`. All placements use one PTY and the same
+restricted renderer; moving the view must never resume or fork an agent. Check
+xterm serialized alternate/normal buffers, cursor and modes, replay/resize ordering,
+backpressure, IME and stale-view input ownership when updating renderer dependencies.
+Native checks run separate/bottom/right on macOS/Linux and bundled Windows ConPTY.
+
+For agent releases, verify native parent metadata and exclusive ordinal boundaries,
+complete inherited prefixes, registry timestamps and PID/wrapper evidence after
+in-process fork/resume/clear. Unknown or conflicting associations stay explicit.
+Do not infer Claude native fork ancestry from titles or prompts, or count replicas
+as branches. Endpoint/profile/installation bindings scope identity. Native-only UI
+identities are presentation metadata and never portable-history authority. Include
+family grouping/rename/collapse and shell-association browser tests, TUI family
+tests and the round-trip scenario's one-family/one-branch assertion. A real-agent
+storage probe does not prove native window rehosting or account continuity.

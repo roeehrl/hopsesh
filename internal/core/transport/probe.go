@@ -99,7 +99,7 @@ type ResolvedHost struct {
 
 // Resolve asks the local ssh client how it would connect to dest.
 func (c *Conn) Resolve(ctx context.Context) (*ResolvedHost, error) {
-	out, err := proc.CommandContext(ctx, c.sshBinary, "-G", c.Dest).Output()
+	out, err := c.sshConfig(ctx, c.Dest)
 	if err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) && len(bytes.TrimSpace(ee.Stderr)) > 0 {
@@ -123,6 +123,21 @@ func (c *Conn) Resolve(ctx context.Context) (*ResolvedHost, error) {
 		}
 	}
 	return r, nil
+}
+
+// sshConfig is a local settings lookup, not a connection or password prompt.
+// Includes, name canonicalization and Match exec can still block; bound this
+// preflight separately from the subsequent connection and privacy prompt.
+func (c *Conn) sshConfig(ctx context.Context, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	cmd := proc.CommandContext(ctx, c.sshBinary, append([]string{"-G"}, args...)...)
+	cmd.WaitDelay = 100 * time.Millisecond // a Match child may retain stdout
+	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("reading SSH settings for %s: %w", c.Dest, ctx.Err())
+	}
+	return out, err
 }
 
 // HostKey is a scanned host key.
