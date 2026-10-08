@@ -40,6 +40,12 @@ All notable changes to this project are documented here. The format follows
   verified native prefixes preserve checkpoint lineage. Checkpoint forks remain
   separate, and private change notifications shut down superseded connectors.
 
+### Fixed
+
+- After explicitly forking rewritten cloud history, later checkpoints continue
+  the accepted branch. Source acknowledgment recovers after interruption; undo
+  restores the previous task ledger without changing cloud vendor files.
+
 ## [0.4.0] - 2026-10-08
 
 hopsesh now works with the coding agents' clouds: it hands a session to Claude Code on the

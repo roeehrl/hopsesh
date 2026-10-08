@@ -523,7 +523,7 @@ func recordLineage(ctx context.Context, p *Plan, in Input, j *journal.Journal, m
 	if err != nil {
 		srcFS = nil
 	}
-	err = j.WriteReceipt(srcFS, receiptMachine, lineage.PathFor(receiptPath), m.ForBranch(p.sourceLine).Encode(), false)
+	err = writeSourceReceipt(j, in, srcFS, receiptMachine, lineage.PathFor(receiptPath), m.ForBranch(p.sourceLine).Encode())
 	if err != nil {
 		res.Warnings = append(res.Warnings, "destination committed; source receipt acknowledgement pending: "+err.Error())
 	}

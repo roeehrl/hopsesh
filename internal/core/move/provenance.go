@@ -29,6 +29,12 @@ func prepareLineage(ctx context.Context, p *Plan, in Input, seg *ir.Segment) err
 		} else if err = m.Merge(actual); err != nil {
 			return err
 		}
+		if in.CheckpointIdentity {
+			// A saved handoff capsule is historical proof, not the current branch
+			// selector. A reviewed rewritten checkpoint may have advanced the
+			// private task ledger to its explicitly accepted source fork.
+			m.Branch = actual.Branch
+		}
 	}
 	if m == nil {
 		id, err := in.Source.Machine.PrepareIdentity(ctx)

@@ -1,6 +1,7 @@
 package journal
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"strings"
@@ -12,20 +13,34 @@ import (
 // Receipt is a durable commit intention after native installation. Recovery replays
 // sidecars only; it never writes the conversation again.
 type Receipt struct {
-	Machine string `json:"machine"`
-	Path    string `json:"path"`
-	Body    []byte `json:"body"`
-	Native  *State `json:"native,omitempty"`
-	Applied bool   `json:"applied"`
+	CheckpointTask string `json:"checkpointTask,omitempty"`
+	Machine        string `json:"machine"`
+	Path           string `json:"path"`
+	Body           []byte `json:"body"`
+	Native         *State `json:"native,omitempty"`
+	Applied        bool   `json:"applied"`
 }
 
 func (j *Journal) WriteReceipt(fsys host.FS, machine, path string, body []byte, guardNative bool) error {
-	receipt := Receipt{Machine: machine, Path: path, Body: body}
+	return j.writeReceipt(fsys, Receipt{Machine: machine, Path: path, Body: body}, guardNative)
+}
+
+// WriteCloudCheckpointReceipt is reserved for a native-owned read-only task
+// ledger. It can advance a reviewed rewrite to its direct child branch without
+// allowing ordinary native or peer receipts to replace branch ownership.
+func (j *Journal) WriteCloudCheckpointReceipt(fsys host.FS, machine, path string, body []byte, task string) error {
+	if task == "" {
+		return errors.New("missing checkpoint task identity")
+	}
+	return j.writeReceipt(fsys, Receipt{Machine: machine, Path: path, Body: body, CheckpointTask: task}, false)
+}
+
+func (j *Journal) writeReceipt(fsys host.FS, receipt Receipt, guardNative bool) error {
 	if guardNative {
 		if fsys == nil {
 			return fmt.Errorf("cannot guard a receipt without a filesystem")
 		}
-		st, err := fileState(fsys, machine, strings.TrimSuffix(path, lineage.Suffix))
+		st, err := fileState(fsys, receipt.Machine, strings.TrimSuffix(receipt.Path, lineage.Suffix))
 		if err != nil {
 			return err
 		}
@@ -109,10 +124,15 @@ func (j *Journal) applyReceipt(fsys host.FS, index int) error {
 	if err != nil {
 		return err
 	}
+	if receipt.CheckpointTask != "" {
+		if _, err := fsys.Stat(strings.TrimSuffix(receipt.Path, lineage.Suffix)); !errors.Is(err, fs.ErrNotExist) {
+			return errors.New("checkpoint branch transitions require a private ledger without a native transcript")
+		}
+	}
 	if current, e := lineage.Read(fsys, strings.TrimSuffix(receipt.Path, lineage.Suffix)); e != nil {
 		return e
 	} else if current != nil {
-		if current.Family != m.Family || current.Branch != m.Branch {
+		if current.Family != m.Family || current.Branch != m.Branch && !checkpointBranchTransition(current, m, receipt.CheckpointTask) {
 			return fmt.Errorf("receipt would replace another branch")
 		}
 		if err = m.Merge(current); err != nil {
@@ -153,6 +173,27 @@ func (j *Journal) applyReceipt(fsys host.FS, index int) error {
 		j.After = append(j.After, after)
 	}
 	return j.saveLocked()
+}
+
+func checkpointBranchTransition(current, next *lineage.Manifest, task string) bool {
+	if task == "" {
+		return false
+	}
+	for _, branch := range next.Branches {
+		if branch.ID != next.Branch || branch.Parent != current.Branch {
+			continue
+		}
+		origin := next.Replica(branch.Origin)
+		if origin.Binding != task || origin.Key.Profile != task || !strings.HasPrefix(origin.Endpoint, "cloud:") {
+			return false
+		}
+		for _, previous := range current.Replicas {
+			if previous.Line == current.Branch && previous.Endpoint == origin.Endpoint && previous.Binding == task && previous.Key.Profile == task && previous.Key.Agent == origin.Key.Agent {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func receiptLock(fsys host.FS, path, owner string) (func(), error) {

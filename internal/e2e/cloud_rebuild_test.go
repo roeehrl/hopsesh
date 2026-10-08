@@ -156,6 +156,10 @@ func cloudRebuildCheckpoint(t *testing.T, linkedFork *bool) {
 		if result.Result.Journal == "" {
 			t.Fatal("cloud checkpoint had no durable native outcome")
 		}
+		durable, err := journal.Load(filepath.Join(desktop.home, "state"), result.Result.Journal)
+		if err != nil || durable.PendingReceipts() {
+			t.Fatal("checkpoint returned with an uncommitted lineage receipt", err)
+		}
 		destination := f.find(t, 'A', target, string(result.Plan.Placement.Key.Session))
 		receipt, err := lineage.Read(host.LocalFS(), destination.Path)
 		if err != nil || receipt == nil {
@@ -269,6 +273,57 @@ func cloudRebuildCheckpoint(t *testing.T, linkedFork *bool) {
 		old = instance
 	}
 	stopPrevious()
+	// A reviewed rewrite starts a separate source branch. Later unchanged
+	// checkpoints must continue that branch even when the original handoff
+	// capsule still describes its historical parent.
+	var nativeRecord map[string]any
+	lines := bytes.Split(bytes.TrimSpace(expectedBytes), []byte("\n"))
+	for i, line := range lines {
+		nativeRecord = nil
+		if json.Unmarshal(line, &nativeRecord) == nil && nativeRecord["type"] == "user" {
+			if message, ok := nativeRecord["message"].(map[string]any); ok {
+				message["content"] = "USER-REVIEWED-REWRITTEN-CLOUD-HISTORY"
+				lines[i], err = json.Marshal(nativeRecord)
+				if err != nil {
+					t.Fatal(err)
+				}
+				break
+			}
+		}
+	}
+	expectedBytes = append(bytes.Join(lines, []byte("\n")), '\n')
+	if err = os.WriteFile(transcript, expectedBytes, 0600); err != nil {
+		t.Fatal(err)
+	}
+	ledgerPath := lineage.PathFor(filepath.Join(desktop.home, "state", "cloud-checkpoints", task, "source.jsonl"))
+	ledgerBeforeRewrite, err := os.ReadFile(ledgerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewrittenInstance, _, stopRewritten := start(task)
+	rejected := exec.CommandContext(ctx, bin, "cloud-integration", "import", rewrittenInstance.Public.ID, "--to", desktop.repo, "--in", "claude", "--operation-id", "cloud-unreviewed-rewrite", "--yes")
+	rejected.Env = desktop.env()
+	if out, err := rejected.CombinedOutput(); err == nil || !bytes.Contains(out, []byte("native history")) {
+		t.Fatalf("rewritten history was not refused before explicit fork: %v %s", err, out)
+	}
+	rewritten, _, rewrittenOutcome := importCheckpoint(rewrittenInstance, "claude", "cloud-reviewed-rewrite", true)
+	if rewritten.Family != family || !rewritten.Journey().Fork {
+		t.Fatal("reviewed rewrite did not create an independent branch")
+	}
+	stopRewritten()
+	continuedInstance, _, stopContinued := start(task)
+	continued, _, continuedOutcome := importCheckpoint(continuedInstance, "codex", "cloud-after-reviewed-rewrite", false)
+	if continued.Family != family || continued.Branch != rewritten.Branch || !continued.Journey().Fork {
+		t.Fatal("later checkpoint lost the explicitly accepted rewrite branch")
+	}
+	stopContinued()
+	for _, operation := range []string{continuedOutcome.Journal, rewrittenOutcome.Journal} {
+		f.run(t, desktop, "undo", operation, "--yes", "--json")
+	}
+	ledgerAfterUndo, err := os.ReadFile(ledgerPath)
+	if err != nil || !bytes.Equal(ledgerBeforeRewrite, ledgerAfterUndo) {
+		t.Fatal("native undo did not restore the previous task branch", err)
+	}
 	instance, record, stop := start("")
 	defer stop()
 	independent, _, _ := importCheckpoint(instance, "claude", "cloud-independent-same-native-id", false)

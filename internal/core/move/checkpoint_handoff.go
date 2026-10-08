@@ -43,18 +43,21 @@ func seedCheckpointHandoff(m *lineage.Manifest, source lineage.Replica, seg *ir.
 		}
 	}
 	cloud := m.Replica(handoff.To)
-	if cloud.Key.Agent != source.Key.Agent || origin.Fork != (cloud.Line != source.Line) {
-		return errors.New("checkpoint handoff agent or fork boundary changed")
+	if cloud.Key.Agent != source.Key.Agent {
+		return errors.New("checkpoint handoff agent changed")
 	}
 	operation := "cloud-task-binding/" + origin.Task
 	for _, h := range m.Hops {
 		if h.ID == operation {
 			target := m.Replica(h.To)
-			if h.Kind != lineage.HopIdentity || h.From != cloud.ID || target.Endpoint != source.Endpoint || target.Binding != source.Binding || target.Line != source.Line || h.Fork != origin.Fork {
+			if h.Kind != lineage.HopIdentity || h.From != cloud.ID || target.Endpoint != source.Endpoint || target.Binding != source.Binding || target.Key.Agent != source.Key.Agent || h.Fork != origin.Fork || origin.Fork != (cloud.Line != target.Line) || !checkpointTaskDescendant(m, source.Line, target) {
 				return errors.New("checkpoint task is associated with a different handoff")
 			}
 			return nil
 		}
+	}
+	if origin.Fork != (cloud.Line != source.Line) {
+		return errors.New("checkpoint handoff fork boundary changed")
 	}
 	// Verify representation against a disposable clone. The vendor's outer task
 	// replica must not acquire a made-up native transcript identity or projection.
@@ -91,4 +94,32 @@ func seedCheckpointHandoff(m *lineage.Manifest, source lineage.Replica, seg *ir.
 		return fmt.Errorf("associate cloud identity: %w", err)
 	}
 	return m.Validate()
+}
+
+// A reviewed native-history rewrite can create descendants of the initially
+// linked task branch. Only branches originating from that same cloud task may
+// continue it; local checkpoint forks and other tasks cannot select its ledger.
+func checkpointTaskDescendant(m *lineage.Manifest, line string, task lineage.Replica) bool {
+	for range len(m.Branches) + 1 {
+		if line == task.Line {
+			return true
+		}
+		parent := ""
+		for _, branch := range m.Branches {
+			if branch.ID != line {
+				continue
+			}
+			origin := m.Replica(branch.Origin)
+			if origin.Endpoint != task.Endpoint || origin.Binding != task.Binding || origin.Key.Agent != task.Key.Agent || origin.Key.Profile != task.Key.Profile {
+				return false
+			}
+			parent = branch.Parent
+			break
+		}
+		if parent == "" {
+			return false
+		}
+		line = parent
+	}
+	return false
 }

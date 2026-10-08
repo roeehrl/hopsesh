@@ -719,7 +719,7 @@ func recordContinuation(ctx context.Context, p *Plan, in Input, j *journal.Journ
 	if reachErr != nil {
 		srcFS = nil
 	}
-	if e := j.WriteReceipt(srcFS, receiptMachine, lineage.PathFor(receiptPath), m.ForBranch(p.sourceLine).Encode(), false); e != nil {
+	if e := writeSourceReceipt(j, in, srcFS, receiptMachine, lineage.PathFor(receiptPath), m.ForBranch(p.sourceLine).Encode()); e != nil {
 		res.Warnings = append(res.Warnings, "destination committed; source receipt acknowledgement pending: "+e.Error())
 	}
 

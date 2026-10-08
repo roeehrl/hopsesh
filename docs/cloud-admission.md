@@ -89,6 +89,13 @@ inherits only the complete previously verified native prefix, checked by native
 anchors and content hashes. Rewritten or compacted history is refused unless the
 user explicitly chooses a separate fork; its fidelity warning remains attached.
 Checkpoint forks retain separate branches, and retries retain their native IDs.
+When a reviewed history rewrite creates a new source branch, the private task
+ledger selects that branch for subsequent unchanged checkpoints. This transition
+requires the same cloud task and a direct child branch; ordinary native receipts,
+other tasks and concurrent sibling branches cannot replace it. Interrupted receipt
+writes recover durably, and undo restores the prior private ledger. Cloud vendor
+files remain read-only. A saved handoff capsule continues to prove historical
+ancestry without resetting the task's current branch.
 This establishes checkpoint ancestry across approved incarnations. To connect a
 task to its prior local-to-cloud handoff, use **Settings → Internet delivery →
 Link task to saved handoff…** before reviewing the first checkpoint. Select the

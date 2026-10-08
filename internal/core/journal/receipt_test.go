@@ -1,6 +1,7 @@
 package journal
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -11,6 +12,111 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
+
+func TestCloudCheckpointBranchTransitionRecoversAndUndoesWithoutNativeFiles(t *testing.T) {
+	for _, mode := range []string{"recover and undo", "ordinary receipt", "wrong task", "other endpoint", "other profile", "other agent", "concurrent sibling", "native file"} {
+		t.Run(mode, func(t *testing.T) {
+			state, data := t.TempDir(), t.TempDir()
+			native := filepath.Join(data, "source.jsonl")
+			path := lineage.PathFor(native)
+			base := lineage.New("private-task-family")
+			root := lineage.Replica{Endpoint: "cloud:claude-hosted:task", Binding: "task", Location: "cloud", Key: agent.SessionKey{Agent: "claude", Profile: "task", Session: "native"}}
+			base.Upsert(root)
+			before := base.Encode()
+			if err := os.WriteFile(path, before, 0600); err != nil {
+				t.Fatal(err)
+			}
+			next := base.Clone()
+			next.Branch = next.Fork("reviewed-rewrite", nil)
+			root.Line = next.Branch
+			if mode == "other endpoint" {
+				root.Endpoint = "cloud:claude-hosted:someone-else"
+			}
+			if mode == "other profile" {
+				root.Key.Profile = "other-profile"
+			}
+			if mode == "other agent" {
+				root.Key.Agent = "codex"
+			}
+			next.Upsert(root)
+			if mode == "concurrent sibling" {
+				current := base.Clone()
+				current.Branch = current.Fork("another-reviewed-rewrite", nil)
+				root.Line = current.Branch
+				current.Upsert(root)
+				before = current.Encode()
+				if err := os.WriteFile(path, before, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if mode == "native file" {
+				if err := os.WriteFile(native, []byte("untouched native history"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			j, err := New(state, KindContinue, "reviewed private task fork")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode != "recover and undo" {
+				if mode == "ordinary receipt" {
+					err = j.WriteReceipt(host.LocalFS(), "local", path, next.Encode(), false)
+				} else {
+					task := "task"
+					if mode == "wrong task" {
+						task = "other-task"
+					}
+					err = j.WriteCloudCheckpointReceipt(host.LocalFS(), "local", path, next.Encode(), task)
+				}
+				if err == nil {
+					t.Fatal("unapproved branch replacement accepted")
+				}
+				body, e := os.ReadFile(path)
+				if e != nil || !bytes.Equal(body, before) {
+					t.Fatal("refusal changed ledger", e)
+				}
+				if mode == "native file" {
+					body, e := os.ReadFile(native)
+					if e != nil || string(body) != "untouched native history" {
+						t.Fatal("refusal changed native history", e)
+					}
+				}
+				return
+			}
+			offline := &failingReceiptFS{FS: host.LocalFS(), fail: true}
+			if err = j.WriteCloudCheckpointReceipt(offline, "local", path, next.Encode(), "task"); err == nil {
+				t.Fatal("write fault not exercised")
+			}
+			j, err = Load(state, j.ID)
+			if err != nil || !j.PendingReceipts() {
+				t.Fatal("transition intention was not durable", err)
+			}
+			reach := func(string) (host.FS, error) { return host.LocalFS(), nil }
+			for range 2 {
+				if err = j.RecoverReceipts(reach); err != nil {
+					t.Fatal(err)
+				}
+			}
+			actual, err := lineage.Read(host.LocalFS(), native)
+			if err != nil || actual.Branch != next.Branch || j.PendingReceipts() {
+				t.Fatal("recovery lost branch selection", err)
+			}
+			if _, err = os.Stat(native); !os.IsNotExist(err) {
+				t.Fatal("private ledger created a vendor transcript")
+			}
+			if err = j.Seal(reach); err != nil {
+				t.Fatal(err)
+			}
+			if err = j.Undo(t.Context(), Files(reach), false); err != nil {
+				t.Fatal(err)
+			}
+			body, err := os.ReadFile(path)
+			if err != nil || !bytes.Equal(body, before) {
+				t.Fatal("undo did not restore original private branch", err)
+			}
+		})
+	}
+}
 
 type failingReceiptFS struct {
 	host.FS

@@ -127,3 +127,59 @@ func TestCheckpointHandoffRefusesGuessedIdentityAndChangedBrief(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckpointHandoffContinuesOnlyTaskOwnedRewriteBranches(t *testing.T) {
+	for _, fork := range []bool{false, true} {
+		for _, mode := range []string{"same task", "local copy", "other task", "other profile", "sibling"} {
+			if mode == "sibling" && !fork {
+				continue // Every valid branch descends from the family root.
+			}
+			t.Run(map[bool]string{false: "original", true: "fork"}[fork]+"/"+mode, func(t *testing.T) {
+				m, source, origin := checkpointHandoffFixture(t, fork)
+				seg := checkpointSegment(origin.Brief, "cloud work")
+				if err := seedCheckpointHandoff(m, source, &seg, origin); err != nil {
+					t.Fatal(err)
+				}
+				state, err := m.Observe(m.Upsert(source), &seg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for depth := range 2 {
+					if mode == "sibling" && depth == 0 {
+						// A valid sibling of the linked task cannot acquire its
+						// association, even with the same task-shaped origin.
+						for _, branch := range m.Branches {
+							if branch.ID == source.Line {
+								m.Branch = branch.Parent
+								break
+							}
+						}
+					}
+					line := m.Fork("reviewed-rewrite-"+string(rune('0'+depth)), state.Heads)
+					m.Branch, source.Line = line, line
+					branchOwner := source
+					switch mode {
+					case "local copy":
+						branchOwner.Endpoint = "local-machine"
+					case "other task":
+						branchOwner.Binding = "other-task"
+					case "other profile":
+						branchOwner.Key.Profile = "other-profile"
+					}
+					m.Upsert(branchOwner)
+					if err := m.Validate(); err != nil {
+						t.Fatal("invalid branch fixture", err)
+					}
+					before := len(m.Hops)
+					err := seedCheckpointHandoff(m, source, &seg, origin)
+					if mode == "same task" && (err != nil || len(m.Hops) != before) {
+						t.Fatal("reviewed task rewrite lost its historical association", err)
+					}
+					if mode != "same task" && err == nil {
+						t.Fatal("unrelated branch adopted task ancestry")
+					}
+				}
+			})
+		}
+	}
+}
