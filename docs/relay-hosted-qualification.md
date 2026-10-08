@@ -53,6 +53,27 @@ explicitly unpause their disposable service. After the hosted run, the deployed
 relay was restored to paused and a real admission request returned HTTP 503
 with `paused`. Browser enrollment also remains unavailable without Access config.
 
+## Hosted expiry and authorization termination
+
+`TestRelayHostedRetention` passed under the race detector in 63 seconds. It uses
+an isolated namespace, three fresh identities and one disposable encrypted frame.
+An unacknowledged ten-second frame was present before expiry; the deployed
+Durable Object alarm then removed the mailbox row, replay tombstone and R2 delete
+intent. Operator counters reached zero retained bytes/messages/deletions while
+the daily admitted-frame count stayed one. Stats reads do not run maintenance,
+and the test did not acknowledge the frame. This exercises the actual alarm and
+R2 deletion path; it does not establish the separate two-day orphan lifecycle.
+
+The same run verified initial and post-commit WebSocket wake hints. Explicit
+self-revocation closed an existing stream with policy status 1008 and refused
+subsequent HTTP access with 403. A separate 60-second credential expired without
+revocation, also closing its existing stream with 1008 and refusing HTTP access.
+This verifies finite hosted lease termination, not long-duration hibernation cost.
+Cleanup revokes remaining fixture credentials; deployment is restored to paused.
+
+Use the same opt-in environment as above with
+`-run '^TestRelayHostedRetention$' -timeout 3m` to repeat this separate gate.
+
 ## Immutable downloads
 
 Version `0.5.0-staging.20261008.d93f24e` contains Linux amd64 and arm64 CLI archives
@@ -86,6 +107,15 @@ qualification input; final release artifacts still require the final commit and
 release workflow's provenance/signing checks.
 
 ## Outstanding hosted gates
+
+A fresh install-only task in the selected `hopsesh-cloud-smoke` Codex environment
+retried the now-live signed staging download on 2026-10-08. Its configured proxy
+was unreachable on port 8080: the bootstrap exited 1, the absent binary exited
+127, and the separate 20-second capabilities probe exited 7 with HTTP 000.
+The task reported Linux x86_64 and no current task ID in its provided context.
+No network/approval settings, repository files or secrets were changed, and no
+connector was enrolled. This is a provider connectivity failure before signature
+verification, not a successful installation or lifecycle test.
 
 Zero Trust Free checkout requires accepting terms and excess-usage card charges;
 the user must complete that commitment. Its allowed-user Access application,
