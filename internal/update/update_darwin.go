@@ -9,12 +9,13 @@ import (
 	"strings"
 
 	"github.com/roeehrl/hopsesh/internal/core/proc"
+	"golang.org/x/sys/unix"
 )
 
 // installMacApp replaces the app bundle with the hopsesh.app in a release disk image. The
 // new app is copied next to the old one (same volume), must be signed by the same team and
 // pass Gatekeeper (notarized), and then takes the old one's place in one rename.
-func installMacApp(ctx context.Context, bundle string, dmg []byte) error {
+func installMacApp(ctx context.Context, bundle string, dmg []byte, replace bool) error {
 	parent := filepath.Dir(bundle)
 	work, err := os.MkdirTemp(parent, ".hopsesh-update-")
 	if err != nil {
@@ -55,13 +56,26 @@ func installMacApp(ctx context.Context, bundle string, dmg []byte) error {
 	if out, err := proc.CommandContext(ctx, "spctl", "--assess", "--type", "execute", next).CombinedOutput(); err != nil {
 		return fmt.Errorf("macOS does not accept the new app (%s); not installing", strings.TrimSpace(string(out)))
 	}
+	return publishMacApp(next, bundle, replace)
+}
+
+func publishMacApp(next, bundle string, replace bool) error {
+	if !replace {
+		// The destination can appear after the missing-app review or while the
+		// signed image is being downloaded/verified. A final exclusive rename
+		// refuses even an empty directory or dangling link without touching it.
+		if err := unix.RenameatxNp(unix.AT_FDCWD, next, unix.AT_FDCWD, bundle, unix.RENAME_EXCL); err != nil {
+			return fmt.Errorf("cannot publish new app without replacing an existing destination: %w", err)
+		}
+		return nil
+	}
 	if _, err := os.Lstat(bundle); errors.Is(err, os.ErrNotExist) {
 		return os.Rename(next, bundle)
 	} else if err != nil {
 		return err
 	}
 
-	old := filepath.Join(work, "old.app")
+	old := filepath.Join(filepath.Dir(next), "old.app")
 	if err := os.Rename(bundle, old); err != nil {
 		return fmt.Errorf("cannot replace %s (%w); download the new app from the release page instead", bundle, err)
 	}

@@ -63,7 +63,7 @@ func InstallApp(ctx context.Context, rel *Release, target Target) error {
 	}
 	switch target.Kind {
 	case KindMacApp:
-		return installMacApp(ctx, target.Path, data)
+		return installMacApp(ctx, target.Path, data, false)
 	case KindWindowsApp:
 		stage, err := os.MkdirTemp(filepath.Dir(target.Path), ".hopsesh-install-")
 		if err != nil {

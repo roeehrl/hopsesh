@@ -72,6 +72,19 @@ Curl and Node fetched successfully. One Python urllib request received HTTP 403;
 its cause is not established. This does not qualify every user-agent or provider
 proxy path.
 
+## Local macOS candidate
+
+The same exported source built a universal GUI bundle and embedded CLI, signed
+with the local Developer ID identity and notarized with the existing Keychain
+profile. Apple accepted the DMG; both DMG and app tickets were stapled. The bundle
+stays outside Applications. A separate locally signed DMG manifest drives the
+opt-in `TestInstallSignedMacApp` fixture, which uses the production installer and
+Gatekeeper assessment against a temporary destination. It installs successfully,
+runs the embedded CLI's version command, and refuses existing/concurrently
+appearing destinations. The full updater race suite passes. This candidate is
+qualification input; final release artifacts still require the final commit and
+release workflow's provenance/signing checks.
+
 ## Outstanding hosted gates
 
 Zero Trust Free checkout requires accepting terms and excess-usage card charges;

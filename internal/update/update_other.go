@@ -7,6 +7,6 @@ import (
 	"errors"
 )
 
-func installMacApp(context.Context, string, []byte) error { return errors.New("not macOS") }
+func installMacApp(context.Context, string, []byte, bool) error { return errors.New("not macOS") }
 
 func setInstalledVersion(string) {}

@@ -42,6 +42,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Installing a missing macOS app cannot replace another app or filesystem entry
+  that appears while the signed download is being verified. Publication refuses
+  replacement atomically; existing installations keep their updater workflow.
+
 - After explicitly forking rewritten cloud history, later checkpoints continue
   the accepted branch. Source acknowledgment recovers after interruption; undo
   restores the previous task ledger without changing cloud vendor files.

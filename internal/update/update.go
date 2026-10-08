@@ -254,7 +254,7 @@ func Install(ctx context.Context, rel *Release) (Target, error) {
 	}
 	switch t.Kind {
 	case KindMacApp:
-		err = installMacApp(ctx, t.Path, data)
+		err = installMacApp(ctx, t.Path, data, true)
 	case KindWindowsApp:
 		err = installWindowsApp(t.Path, data, rel.Version)
 	default:
