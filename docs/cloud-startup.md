@@ -57,5 +57,26 @@ chosen downloads origin. Preparing repository files does not establish that the
 download exists, a cloud session is running, or the relay is connected. Hosted
 defaults are qualified separately from these local installer and CLI tests.
 
+## Codex network qualification
+
+Allow the exact downloads and relay hostnames in the cloud environment's
+additional allowed domains, then save and publish the environment. Keep the
+restricted preset and configured proxy; public downloads do not require network
+secrets. Check the running task's current environment status separately from the
+saved configuration, because an existing task can retain earlier settings.
+
+A curl exit 7 with HTTP/CONNECT `000` does not establish that the proxy is down.
+First distinguish proxy DNS resolution from TCP socket creation. A per-command
+sandbox can reject socket creation with `Operation not permitted` before the
+request reaches the proxy. Use the executor's supported command-approval workflow
+when available and permitted; do not disable the sandbox or bypass the proxy.
+Test an already-allowed HTTPS destination through the same proxy as a control.
+
+CONNECT `403` is a separate destination-policy refusal. Resolve it through the
+environment configuration workflow, then verify CONNECT success and an origin
+response. Only after connectivity succeeds, run the pinned signature-verifying
+installer and verify its binary version. Installation alone does not qualify
+task startup, native transcript export, or connector enrollment.
+
 Mechanisms follow [Claude's hook reference](https://code.claude.com/docs/en/hooks)
 and [Codex cloud environment configuration](https://learn.chatgpt.com/docs/environments/cloud-environments).

@@ -169,23 +169,47 @@ release workflow's provenance/signing checks.
 
 ## Provider qualification and hosted enrollment
 
-A fresh install-only task in the selected `hopsesh-cloud-smoke` Codex environment
-retried the now-live signed staging download on 2026-10-08. Its configured proxy
-was unreachable on port 8080: the bootstrap exited 1, the absent binary exited
-127, and the separate 20-second capabilities probe exited 7 with HTTP 000.
-The task reported Linux x86_64 and no current task ID in its provided context.
-No network/approval settings, repository files or secrets were changed, and no
-connector was enrolled. This is a provider connectivity failure before signature
-verification, not a successful installation or lifecycle test.
+The October 8 installation attempts returned curl exit 7 with HTTP/CONNECT
+`000`. Follow-up diagnosis on **2026-10-09 (Asia/Jerusalem)** established that the
+per-command sandbox rejected TCP socket creation with `Operation not permitted`.
+Proxy DNS resolution succeeded. The supported command-approval path reached
+already-allowed GitHub with CONNECT/HTTP 200, proving the proxy was available.
+Both Hopsesh hosts then returned CONNECT 403 because the restricted policy did
+not allow them. The earlier description of an unreachable provider proxy was
+incomplete; these were two separate permission layers.
 
-A second bounded attempt in the same default Codex task at 20:33 UTC on
-2026-10-08 returned curl exit 7, HTTP 000 and CONNECT 000 for both the signed
-checksums and capabilities endpoints: the configured proxy on port 8080 remains
-unreachable. No installer or connector was run after those failures. The supplied
-context exposes a source thread ID, not a verified current native task identity.
-The Claude cloud UI was also rechecked: weekly usage remains 100%, active sessions
-report the monthly spend limit, and the displayed weekly reset is October 9 at
-20:00 Asia/Jerusalem. No spending limit or provider network policy was changed.
+The user explicitly approved adding exactly `downloads.hopsesh.codonic.dev` and
+`relay.hopsesh.codonic.dev`. The environment editor saved and published those two
+domains while preserving the package-manager preset, private sharing, and empty
+network-secret/environment-variable configuration. The older install task still
+retained its original policy and correctly refused both destinations. The
+published configuration environment reached GitHub and both Hopsesh endpoints
+with curl exit 0, CONNECT 200 and origin HTTP 200 using normal TLS/proxy settings.
+Its runtime snapshot lists both approved hosts; `environment_status` reports
+current observations but policy state `unknown`, so the result establishes actual
+connectivity without claiming a formal policy-readiness attestation.
+
+After the user raised Claude's usage limit, a fresh disposable task in **Default**
+with `roeehrl/hopsesh-cloud-smoke` ran successfully using usage credits. Both
+Hopsesh endpoints returned CONNECT/HTTP 200; the GitHub homepage returned CONNECT
+200 and origin HTTP 400. The actual workspace is `/home/user/hopsesh-cloud-smoke`
+on Linux x86_64. Claude's session-info tool exposes cloud task
+`session_01NFYqYKdDjaLh2yLWavKqHD`; no local CLI session UUID is inferred from
+scratchpad paths. These connectivity checks do not establish startup, rebuild,
+native transcript export or connector lifecycle.
+
+The unchanged generated installer then passed in both providers. Release
+signature and archive SHA-256 checks completed before installing
+`0.5.0-staging.20261008.d93f24e` (commit `d93f24e`). Installer, `version`, and
+`cloud-integration --help` each exited 0. Codex installed under
+`/home/agent/.local/share/hopsesh/cloud/v0.5.0-staging.20261008.d93f24e/`;
+Claude installed under `/root/.local/share/hopsesh/cloud/v0.5.0-staging.20261008.d93f24e/`.
+Normal TLS/proxy settings were retained. These were disposable Linux amd64
+installations; no repository edits, connector enrollment, credentials or release
+pointer changes were performed. Codex used its supported per-command approval
+mechanism; Claude required no command approval. Network and install gates for
+these tested environments are satisfied. Published startup scripts, pause/resume,
+rebuild, export and connector lifecycle remain separate qualification work.
 
 The user completed Zero Trust Free activation in Chrome and approved creating
 the staging Access application. The saved application
