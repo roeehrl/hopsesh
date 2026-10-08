@@ -130,11 +130,20 @@ JSON validation errors for empty requests, without browser redirects. Chrome
 completed the real Cloudflare identity login and loaded the enrollment page.
 A disposable native CLI produced a device code; the browser review displayed
 its exact independently printed fingerprint. No peer permissions were granted.
-The final delivery-credential approvals await browser action-time confirmation.
-Staging was restored to paused afterward; `/v1/device/code` returned HTTP 503
-with `paused`, and the disposable CLI namespace contains no saved connection.
+With explicit user approval, both disposable delivery enrollments completed on
+2026-10-08 against source `51cb388`. The actual CLI exited successfully and saved
+its isolated connection. `TestRelayHostedAccessBrowser` passed under the race
+detector in 24.88 seconds: CLI mailbox access and zero peer grants, the native
+S256 PKCE loopback callback and token exchange, and distinct device credentials
+in the same Access-authenticated user's routing space. Cleanup self-revoked both
+credentials and verified that each subsequent mailbox request returned HTTP 403.
 
-`TestRelayHostedAccessBrowser` is the interactive follow-up: complete CLI login
+Staging was restored to paused afterward (deployment
+`d458a955-bfb8-4b12-b9b9-7e1d9cb69ef6`); a fresh POST to `/v1/device/code`
+returned HTTP 503 with `{"error":"paused"}`. The saved disposable CLI connection
+contains a revoked credential. The installed app and its settings were untouched.
+
+`TestRelayHostedAccessBrowser` is reusable interactive qualification: complete CLI login
 in a disposable namespace, then run with `HOPSESH_HOSTED_ACCESS=1` and
 `HOPSESH_HOSTED_ACCESS_CLI_STATE=/absolute/disposable/state/relay`. The test checks
 the CLI credential and zero peer grants, prints a second URL/fingerprint for the
@@ -149,7 +158,7 @@ HOPSESH_HOSTED_ACCESS_CLI_STATE=/absolute/disposable/state/relay \
 go test -race -count=1 -v -timeout 15m -run '^TestRelayHostedAccessBrowser$' ./internal/e2e
 ```
 
-Real PKCE/headless credential exchange, billing alerts and measured long-duration
+Billing alerts, observed two-day orphan expiry and measured long-duration
 hibernation/cost behavior remain unqualified. Provider default startup,
 pause/resume/rebuild and transcript visibility remain separate gates. The PR stays
 draft and the release stays unpublished.

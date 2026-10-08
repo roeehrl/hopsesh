@@ -1,8 +1,8 @@
 # Relay enrollment
 
 Status: implemented clients and handler contracts. Hosted Access policy, real
-sign-in and device/fingerprint review pass; final native credential exchanges
-remain a supervised qualification gate. See [hosted evidence](relay-hosted-qualification.md).
+sign-in, CLI device authorization and native desktop PKCE exchange pass, including
+revocation of both disposable credentials. See [hosted evidence](relay-hosted-qualification.md).
 The experimental relay has its own Worker, SQLite authorization/mailbox objects,
 private ciphertext R2 bucket and domains. It shares no product-site or Souvenir
 authorization state. Enrollment authorizes delivery only. Each endpoint still
@@ -82,8 +82,8 @@ Qualification covers the deployed handler's signature/Access/quota/expiry/CSRF/
 PKCE/retry contracts, Go client failures and cancellation, real CLI and native
 clients over verified HTTPS to the handlers, and Chromium/WebKit settings. The
 local browser fixture substitutes for Access only in the cross-language test;
-real Access deployment, sign-in and review now pass. Final hosted credential
-exchange and provider lifecycle qualification remain separate gates.
+real Access deployment, sign-in, CLI credential exchange and native PKCE callback
+and exchange now pass. Provider lifecycle qualification remains a separate gate.
 
 Sources: [device authorization](https://www.rfc-editor.org/rfc/rfc8628),
 [native OAuth](https://www.rfc-editor.org/rfc/rfc8252.html),
