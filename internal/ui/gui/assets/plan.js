@@ -201,7 +201,7 @@ function launchControl(p,blocked) {
  const label=place=>place==='app'?`${p.agent} app`:place==='here'?'Hopsesh Terminal':sys.terminal;
  const choices=[{id:'app',label:`Open in ${p.agent} app`,disabled:!p.can.app,why:p.can.appWhy||(!p.can.app?'Desktop opening is unavailable':null)},{id:'here',label:'Open in Hopsesh Terminal'},{id:'terminal',label:`Open in ${sys.terminal}`}];
  return h("div",{class:"launch-choice"},c.launchNotice?h("span",{class:"muted launch-notice"},c.launchNotice):null,
-  p.continue && c.launch === "app" ? h("span", {class:"muted launch-notice"}, `Opens the conversation only. Send your next message in ${p.agent} to start a turn.`) : null,
+  enabled && p.continue && c.launch === "app" ? h("span", {class:"muted launch-notice"}, `Opens the conversation only. Send your next message in ${p.agent} to start a turn.`) : null,
   h("div",{class:"split transfer-launch"},
   h("button",{class:"btn primary big",id:"go",disabled:blocked,onclick:apply},h("span",{},h("span",{},verb(p)),enabled?h("small",{},`Open in ${label(c.launch||opensIn())}`):null),h("span",{class:"kbd"},keys("mod+enter"))),
   enabled?h("button",{class:"btn primary big split-chevron",disabled:!!c.busy||!!c.applying,'aria-label':'Choose where to open the continued session','aria-haspopup':'menu','aria-expanded':'false',onclick:ev=>openMenu(ev.currentTarget,choices.map(choice=>({...choice,radio:(c.launch||opensIn())===choice.id,run:async()=>{await api('SetPlace',c.target||c.e.agent,choice.id);state.info.places||={};state.info.places[c.target||c.e.agent]=choice.id;c.launch=choice.id;c.launchNotice='';await replan();sheet.querySelector('#go')?.focus()}})),{label:'Open continued session in',align:'end',width:300})},'▾'):null));
@@ -279,7 +279,7 @@ function options(p) {
     p.mark !== "off" || !o.mark ? check(`Mark the source on ${sourcePlace(p)}`, "mark", markDesc) : null,
     r.sourceHead && !sameFolder(p) ? check("Bring the code to the session's commit", "syncCode", "Fetches if needed; fast-forwards only a clean checkout on the same branch.") : null,
     r.unpushed && r.sourceUpstream && !sameFolder(p) ? check(`Push ${count(r.unpushed, "commit")} on ${p.sourceHost} first`, "push", "With that machine's own git credentials.") : null,
-    cont && cur.launch !== "app" ? check("Send “Continue” when opening", "go", `The terminal launch sends the first message to ${p.agent}. Progress appears in the agent.`) : null,
+    cont && (p.machine || cur.launch !== "app") ? check("Send “Continue” when opening", "go", `The terminal launch sends the first message to ${p.agent}. Progress appears in the agent.`) : null,
     p.can.remoteControl ? check("Turn on Remote Control", "remoteControl", `Reach it from your phone or other machines, as ${p.newName}.`) : null,
     check("Record a movement notice", "notify", "Keep a durable Hopsesh notice on the source. Prepared means the destination was written; continued requires observed new work."),
     p.live && p.can.fork ? check("Keep the old session running too", "fork", "Both copies continue, instead of a hand-off.") : null,
