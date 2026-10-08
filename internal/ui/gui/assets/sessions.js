@@ -36,6 +36,7 @@ export async function preserveSelectedCopy(scan) {
 // scan reads every machine again. The list stays while it runs.
 export async function scan() {
   if (state.scanning) return;
+  const inspecting = current === "sessions" && !!view.querySelector("#inspector");
   state.scanning = true;
   state.scanError = "";
   state.stale = false;
@@ -48,7 +49,11 @@ export async function scan() {
     }
   }
   try {
-    state.scan = await api("Scan");
+    const scan = await api("Scan");
+    // Returning from a completed move should show its new representative;
+    // refreshing an existing inspector should retain the copy being reviewed.
+    if (inspecting) await preserveSelectedCopy(scan);
+    state.scan = scan;
     state.info = await api("Info");
     state.activity = await api("Activity").catch(() => state.activity);
   } catch (e) {

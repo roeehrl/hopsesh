@@ -26,8 +26,12 @@ or message expiry; no idle object timer prevents hibernation.
 Tests cover native idle suppression, hint latency, cancellation, proxy fallback,
 redirect refusal, unsafe frames, post-commit publication and attachment recovery.
 The actual local SQLite/R2 qualification exercises the real upgrade, wake hints,
-connection quota, credential renewal and revocation. Hosted hibernation behavior,
-provider proxies and measured OS energy usage remain separate release gates.
+connection quota, credential renewal and revocation. Hosted qualification also
+passes ten minutes without polling or pings, then a committed wake hint on the
+same connection, alarm cleanup, revocation and credential expiry. This finite
+idle-wake result does not establish billed hibernation duration; sustained cost,
+provider proxies and broader OS energy behavior remain separate qualifications.
+See [hosted evidence](relay-hosted-qualification.md).
 
 ## Source inventory updates
 

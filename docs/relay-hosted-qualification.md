@@ -25,6 +25,44 @@ multipart uploads after one day. It preserves a buffer beyond the maximum
 one-day mailbox lease. Reading back the deployed rule passes; this is policy
 verification, not an observed two-day expiry. R2 cleanup is asynchronous.
 
+## Billing and orphan-retention follow-up
+
+The live account Billing → Billable usage page was inspected on 2026-10-08.
+Its existing default budget alert is configured at **USD 10**, with one recipient
+(the account billing address). The page showed USD 0.00 usage cost for the
+September 12–October 11 cycle through October 8. This is a current account-level
+snapshot, not Hopsesh-only attribution or a forecast of production cost. No
+subscription, payment method, recipient or threshold was changed.
+
+The Mailbox namespace's last-24-hour metrics showed 5.61 GB-seconds billable
+duration, CPU P99 5.12 ms and memory P99 3.19 MB. All 16 invocation errors were
+classified as client disconnects; CPU-limit, memory-limit, internal and thrown
+exception counts were zero. These are cumulative staging samples, not an isolated
+idle-cost measurement or a production load test.
+
+The alert-configuration gate is satisfied. For staging, an alert triggers operator
+review and a manual pause of the Hopsesh relay while its usage is investigated.
+Alerts themselves do not cap spend or stop traffic, and unrelated account services
+must remain untouched. See [Cloudflare budget alerts](https://developers.cloudflare.com/billing/manage/budget-alerts/).
+
+The live ciphertext bucket's enabled two-day object-expiry and one-day
+multipart-abort rule was read back again. A 256-byte random disposable canary was
+uploaded directly to the private bucket, outside any mailbox, and its downloaded
+SHA256 matched on 2026-10-08 at 20:32:02 UTC. This isolates R2 orphan cleanup from
+mailbox alarms:
+
+- Bucket: `hopsesh-relay-experimental-ciphertext`
+- Key: `qualification/orphan-20261008T203148Z-d0020f34cd19557e`
+- SHA256: `ad941a5b48bb242361d74b488a5128c4b1064efec7238e93ab190301d403cfe0`
+- Observe after **2026-10-10 20:33 UTC**; expiration is asynchronous. Do not delete
+  the canary manually and then claim lifecycle success. An authenticated missing
+  object response is required; authentication/network failures do not pass.
+
+The private local readback/record lives under the operator's
+`cloud-0.5/orphan-lifecycle` qualification directory. The object contains no
+session data or credentials. No shorter lifecycle rule replaced the deployed
+retention policy. Actual orphan expiration remains pending elapsed time.
+
 ## Native hosted smoke
 
 `TestRelayHostedStaging` is explicitly opt-in and restricted to the relay hostname
@@ -74,6 +112,29 @@ Cleanup revokes remaining fixture credentials; deployment is restored to paused.
 Use the same opt-in environment as above with
 `-run '^TestRelayHostedRetention$' -timeout 3m` to repeat this separate gate.
 
+## Ten-minute idle notification qualification
+
+`TestRelayHostedIdleWake` passed under the race detector in **661.19 seconds**
+on 2026-10-08. An already subscribed client remained silent for ten minutes:
+no HTTP polling, WebSocket pings or operator reads. The existing stream then
+received the wake hint for a newly committed encrypted frame. The same run
+verified alarm-driven ciphertext/tombstone expiry, drained R2 deletion intents,
+and HTTP 403/WebSocket 1008 after both explicit revocation and lease expiry.
+All disposable credentials were revoked or expired during cleanup. Staging was
+restored to paused deployment `4dc1280e-71b4-451d-8e01-234fe98bbcf6`; a live
+POST to `/v1/device/code` returned HTTP 503 with `{"error":"paused"}`.
+
+This qualifies finite idle reconnection-free wakeup and authorization termination.
+It does not attribute billed duration to the idle interval or establish sustained
+load cost. The production client normally reconciles and pings every five minutes;
+this deliberately quieter transport fixture tests a longer silent connection.
+
+```sh
+HOPSESH_HOSTED_RELAY=1 HOPSESH_HOSTED_IDLE=1 \
+HOPSESH_HOSTED_RELAY_ADMIN_FILE=/absolute/private/operator-secret \
+go test -race -count=1 -v -timeout 13m -run '^TestRelayHostedIdleWake$' ./internal/e2e
+```
+
 ## Immutable downloads
 
 Version `0.5.0-staging.20261008.d93f24e` contains Linux amd64 and arm64 CLI archives
@@ -106,7 +167,7 @@ appearing destinations. The full updater race suite passes. This candidate is
 qualification input; final release artifacts still require the final commit and
 release workflow's provenance/signing checks.
 
-## Outstanding hosted gates
+## Provider qualification and hosted enrollment
 
 A fresh install-only task in the selected `hopsesh-cloud-smoke` Codex environment
 retried the now-live signed staging download on 2026-10-08. Its configured proxy
@@ -116,6 +177,15 @@ The task reported Linux x86_64 and no current task ID in its provided context.
 No network/approval settings, repository files or secrets were changed, and no
 connector was enrolled. This is a provider connectivity failure before signature
 verification, not a successful installation or lifecycle test.
+
+A second bounded attempt in the same default Codex task at 20:33 UTC on
+2026-10-08 returned curl exit 7, HTTP 000 and CONNECT 000 for both the signed
+checksums and capabilities endpoints: the configured proxy on port 8080 remains
+unreachable. No installer or connector was run after those failures. The supplied
+context exposes a source thread ID, not a verified current native task identity.
+The Claude cloud UI was also rechecked: weekly usage remains 100%, active sessions
+report the monthly spend limit, and the displayed weekly reset is October 9 at
+20:00 Asia/Jerusalem. No spending limit or provider network policy was changed.
 
 The user completed Zero Trust Free activation in Chrome and approved creating
 the staging Access application. The saved application
@@ -158,8 +228,8 @@ HOPSESH_HOSTED_ACCESS_CLI_STATE=/absolute/disposable/state/relay \
 go test -race -count=1 -v -timeout 15m -run '^TestRelayHostedAccessBrowser$' ./internal/e2e
 ```
 
-Billing alerts, observed two-day orphan expiry and measured long-duration
-hibernation/cost behavior remain unqualified. Provider default startup,
+Observed two-day orphan expiry and measured long-duration hibernation/cost
+behavior remain unqualified. The existing billing alert is verified above. Provider default startup,
 pause/resume/rebuild and transcript visibility remain separate gates. The PR stays
 draft and the release stays unpublished.
 

@@ -29,7 +29,10 @@ they are not exact accounting or a global monetary cap. The transactional daily
 meter bounds admitted encrypted traffic per account space, rather than the total
 Worker requests, R2 reads, failed publications or account invoice. Configure
 billing alerts, an alpha access policy and a manual pause threshold in hosted
-staging before launch. Do not advertise this infrastructure as free.
+staging before launch. Staging now has a verified existing USD 10 account-wide
+alert; reaching it requires operator review and a manual Hopsesh-only pause.
+The alert is informational and does not automatically enforce that pause. Do not
+advertise this infrastructure as free.
 
 The initial hosted account uses Workers Free, whose built-in HTTP CPU ceiling is
 10 ms. Cloudflare rejected a custom `cpu_ms` limit on that plan, so the checked-in
@@ -41,8 +44,9 @@ The private ciphertext bucket has a deployed two-day expiration rule and one-day
 multipart-abort rule. Its cleanup buffer exceeds the maximum one-day message
 lease. Logical mailbox expiry and durable deletion-intent alarms remain separate;
 R2 lifecycle removal is asynchronous and does not establish an exact deletion
-instant. The download bucket retains immutable release objects. Billing controls
-and Access enrollment remain release gates; see [hosted qualification](relay-hosted-qualification.md).
+instant. The download bucket retains immutable release objects. Access enrollment
+and budget-alert configuration are verified; observed orphan
+expiry and long-duration cost remain gates. See [hosted qualification](relay-hosted-qualification.md).
 
 Node contracts cover concurrent quota admission, duplicate retry, nonrefunding
 acknowledgment, byte refusal before R2 publication, rollover, pause/drain and

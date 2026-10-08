@@ -23,6 +23,21 @@ import (
 // packet disappearing here therefore exercises deployed DO alarms and R2 delete
 // intents, independently of the two-day orphan-object lifecycle policy.
 func TestRelayHostedRetention(t *testing.T) {
+	qualifyHostedRetention(t, 0)
+}
+
+// Finite idle-wake evidence: no mailbox polling or WebSocket keepalive from the
+// client during this interval. Billing/duration metrics must still be observed
+// separately; a surviving socket alone does not prove discounted hibernation.
+func TestRelayHostedIdleWake(t *testing.T) {
+	if os.Getenv("HOPSESH_HOSTED_IDLE") != "1" {
+		t.Skip("explicit ten-minute hosted idle qualification")
+	}
+	qualifyHostedRetention(t, 10*time.Minute)
+}
+
+func qualifyHostedRetention(t *testing.T, idle time.Duration) {
+	t.Helper()
 	if testing.Short() || os.Getenv("HOPSESH_HOSTED_RELAY") != "1" {
 		t.Skip("explicit hosted staging qualification")
 	}
@@ -35,7 +50,7 @@ func TestRelayHostedRetention(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), idle+2*time.Minute)
 	defer cancel()
 	client := &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	request := func(ctx context.Context, path, method, token string, value any) (int, []byte) {
@@ -107,13 +122,20 @@ func TestRelayHostedRetention(t *testing.T) {
 			t.Fatal("hosted notification did not deliver its bounded wake hint")
 		}
 	}
-	a, ta := enroll(180)
-	b, tb := enroll(180)
-	_, expiring := enroll(60)
-	expirySocket := subscribe(expiring)
-	readHint(expirySocket)
+	a, ta := enroll(int(idle.Seconds()) + 180)
+	b, tb := enroll(int(idle.Seconds()) + 180)
 	socket := subscribe(tb)
 	readHint(socket)
+	if idle > 0 {
+		t.Logf("beginning %s without HTTP polling, WebSocket pings or operator reads", idle)
+		timer := time.NewTimer(idle)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-timer.C:
+		}
+	}
 	e, err := relay.Seal(a, b.Public, space, space, []byte("disposable hosted retention fixture"), time.Now(), 10*time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -123,6 +145,14 @@ func TestRelayHostedRetention(t *testing.T) {
 		t.Fatal(err)
 	}
 	readHint(socket)
+	if idle > 0 {
+		t.Log("existing notification stream received committed mailbox change after idle")
+	}
+	// Start the independent expiry lease after the idle period, so its alarm
+	// cannot wake the mailbox while the idle behavior is being qualified.
+	_, expiring := enroll(60)
+	expirySocket := subscribe(expiring)
+	readHint(expirySocket)
 	stats := func() map[string]int64 {
 		t.Helper()
 		status, body := request(ctx, "/v1/operator/stats", "GET", string(admin), nil)
