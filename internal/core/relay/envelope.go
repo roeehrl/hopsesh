@@ -123,7 +123,7 @@ func opaque(s string) bool {
 	return true
 }
 func (e Envelope) Check(now time.Time) error {
-	if (e.Kind != "request" && e.Kind != "response") || e.Protocol != Protocol || !opaque(e.ID) || !opaque(e.Space) || !opaque(e.Operation) || !opaque(e.From) || !opaque(e.To) || e.From == e.To {
+	if (e.Kind != "request" && e.Kind != "response" && e.Kind != "observation") || e.Protocol != Protocol || !opaque(e.ID) || !opaque(e.Space) || !opaque(e.Operation) || !opaque(e.From) || !opaque(e.To) || e.From == e.To {
 		return errors.New("invalid relay envelope routing")
 	}
 	if e.Expires <= e.Created || e.Expires-e.Created > int64(MaxLifetime/time.Second) || e.Created > now.Unix()+60 || e.Expires <= now.Unix() {

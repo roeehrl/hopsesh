@@ -12,18 +12,21 @@ import (
 	"sync"
 	"time"
 
+	"github.com/roeehrl/hopsesh/internal/core/observe"
 	"github.com/roeehrl/hopsesh/internal/localstate"
 )
 
 // Service multiplexes replies and incoming requests through the owner's single
 // mailbox listener. Opening another GUI or CLI creates no extra relay poller.
 type Service struct {
-	Transport Transport
-	Processor Processor
-	Notify    func(error)
-	health    Health
-	mu        sync.Mutex
-	waiters   map[string]chan struct{}
+	Transport     Transport
+	Processor     Processor
+	Notify        func(error)
+	OnObservation func(context.Context, Grant, observe.Snapshot) error
+	health        Health
+	mu            sync.Mutex
+	waiters       map[string]chan struct{}
+	observations  map[string]observe.Snapshot
 }
 
 func replyKey(peer, op, method string) string {
@@ -122,16 +125,36 @@ func (s *Service) receive(ctx context.Context, e Envelope) error {
 }
 
 type Health struct {
-	DeliveryMode string    `json:"deliveryMode"`
-	Connected    bool      `json:"connected"`
-	LastSuccess  time.Time `json:"lastSuccess"`
-	Error        string    `json:"error,omitempty"`
-	Rejected     uint64    `json:"rejected"`
+	ObservationReceived uint64    `json:"observationReceived"`
+	ObservationSent     uint64    `json:"observationSent"`
+	ObservationFailed   uint64    `json:"observationFailed"`
+	ObservationError    string    `json:"observationError,omitempty"`
+	DeliveryMode        string    `json:"deliveryMode"`
+	Connected           bool      `json:"connected"`
+	LastSuccess         time.Time `json:"lastSuccess"`
+	Error               string    `json:"error,omitempty"`
+	Rejected            uint64    `json:"rejected"`
+}
+
+func (s *Service) ObservationDelivery(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err != nil {
+		s.health.ObservationFailed++
+	} else {
+		s.health.ObservationSent++
+	}
+}
+
+func (s *Service) ObservationProblem(message string) {
+	s.mu.Lock()
+	s.health.ObservationError = message
+	s.mu.Unlock()
 }
 
 func (s *Service) Health() Health { s.mu.Lock(); defer s.mu.Unlock(); return s.health }
 func (s *Service) Run(ctx context.Context) error {
-	return (Listener{Transport: s.Transport, Processor: s.Processor, OnResponse: s.receive, OnDeliveryMode: func(mode string) { s.mu.Lock(); s.health.DeliveryMode = mode; s.mu.Unlock() }, OnRejected: func() { s.mu.Lock(); s.health.Rejected++; s.mu.Unlock() }, Notify: func(err error) {
+	return (Listener{Transport: s.Transport, Processor: s.Processor, OnResponse: s.receive, OnObservation: s.receiveObservation, OnDeliveryMode: func(mode string) { s.mu.Lock(); s.health.DeliveryMode = mode; s.mu.Unlock() }, OnRejected: func() { s.mu.Lock(); s.health.Rejected++; s.mu.Unlock() }, Notify: func(err error) {
 		s.mu.Lock()
 		s.health.Connected = err == nil
 		s.health.Error = ""

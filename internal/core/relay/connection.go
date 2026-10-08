@@ -93,6 +93,7 @@ type Listener struct {
 	Processor      Processor
 	Notify         func(error)
 	OnResponse     func(context.Context, Envelope) error
+	OnObservation  func(context.Context, Envelope) error
 	OnRejected     func()
 	OnDeliveryMode func(string)
 }
@@ -113,18 +114,28 @@ func (l Listener) Run(ctx context.Context) error {
 		batch, err := l.Transport.Poll(ctx, cursor)
 		if err == nil {
 			for _, d := range batch.Messages {
-				if d.Envelope.Kind == "response" {
-					if l.OnResponse == nil {
+				if d.Envelope.Kind == "response" || d.Envelope.Kind == "observation" {
+					dispatch := l.OnResponse
+					if d.Envelope.Kind == "observation" {
+						dispatch = l.OnObservation
+					}
+					if dispatch == nil {
 						err = errors.New("relay has no reply dispatcher")
 						break
 					}
-					if err = l.OnResponse(ctx, d.Envelope); err != nil {
+					if err = dispatch(ctx, d.Envelope); err != nil {
 						if !permanent(err) {
 							break
 						}
-						if err = l.Processor.Store.Quarantine(ctx, d.Envelope, err); err != nil {
-							break
+						// Rejected replaceable inventory has no operation to recover.
+						// Count and acknowledge it without letting a revoked sender
+						// consume durable native-action quarantine slots forever.
+						if d.Envelope.Kind != "observation" {
+							if err = l.Processor.Store.Quarantine(ctx, d.Envelope, err); err != nil {
+								break
+							}
 						}
+						err = nil
 						if l.OnRejected != nil {
 							l.OnRejected()
 						}

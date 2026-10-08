@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"sync"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/observe"
+	"github.com/roeehrl/hopsesh/internal/core/relay"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
@@ -54,17 +56,73 @@ type remoteSlot struct {
 // authentication needs an explicit retry; network failures back off without
 // prompting for passwords, accepting host keys or starting vendor programs.
 type remoteObserver struct {
-	mu         sync.Mutex
-	states     map[string]RemoteObservation
-	requests   chan remoteRefresh
-	relayReady chan struct{}
-	collect    func(context.Context, config.Host) RemoteObservation
-	interval   time.Duration
-	timeout    time.Duration
+	stateDir            string
+	mu                  sync.Mutex
+	states              map[string]RemoteObservation
+	requests            chan remoteRefresh
+	relayReady          chan struct{}
+	observationReady    chan struct{}
+	pendingObservations map[string]RemoteObservation
+	collect             func(context.Context, config.Host) RemoteObservation
+	interval            time.Duration
+	timeout             time.Duration
 }
 
 func newRemoteObserver(a *App) *remoteObserver {
-	return &remoteObserver{states: map[string]RemoteObservation{}, requests: make(chan remoteRefresh), relayReady: make(chan struct{}, 1), collect: a.observeRemote, interval: 5 * time.Minute, timeout: 30 * time.Second}
+	r := &remoteObserver{states: map[string]RemoteObservation{}, requests: make(chan remoteRefresh), relayReady: make(chan struct{}, 1), observationReady: make(chan struct{}, 1), pendingObservations: map[string]RemoteObservation{}, collect: a.observeRemote, interval: 5 * time.Minute, timeout: 30 * time.Second}
+	if a != nil {
+		r.stateDir = a.StateDir
+	}
+	return r
+}
+
+func (r *remoteObserver) approved(ctx context.Context, h config.Host) bool {
+	if h.RelayID == "" || r.stateDir == "" {
+		return true
+	}
+	grant, err := (relay.Store{Directory: filepath.Join(r.stateDir, "relay")}).Grant(ctx, h.RelayID)
+	return err == nil && grant.Kind == "device" && grant.AllowsSend("observe", time.Now())
+}
+
+// Called only after current pinned-peer authentication and observe authorization.
+// Coalesce one latest update per configured machine; never block mailbox drain.
+func (r *remoteObserver) receiveRelayObservation(_ context.Context, grant relay.Grant, snapshot observe.Snapshot) error {
+	cfg, err := config.Load()
+	if err != nil || !cfg.Relay.Enabled {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, h := range cfg.Hosts {
+		if !h.Allowed || h.RelayID != grant.Peer.ID {
+			continue
+		}
+		m, entries, snap := relayInventory(h, snapshot, grant)
+		data, err := json.Marshal(Observation{Version: m.Hopsesh, Receive: m.Receive != nil && *m.Receive, OS: m.OS, Machine: h.Name, InventoryComplete: m.Status == StatusOK, Agents: m.Agents, Entries: entries})
+		if err != nil {
+			return err
+		}
+		snap.Data = data
+		if len(r.pendingObservations) >= 4096 {
+			return nil
+		}
+		r.pendingObservations[h.Name] = RemoteObservation{Binding: h, Phase: "done", Status: m.Status, Error: m.Error, Hint: m.Hint, Snapshot: snap, Started: snapshot.AttemptedAt, Finished: time.Now().UTC()}
+	}
+	select {
+	case r.observationReady <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+func newerRelaySnapshot(candidate, old observe.Snapshot) bool {
+	if candidate.AttemptedAt.Before(old.AttemptedAt) {
+		return false
+	}
+	if candidate.Epoch == old.Epoch {
+		return candidate.Sequence > old.Sequence
+	}
+	return candidate.AttemptedAt.After(old.AttemptedAt)
 }
 
 // A local connection transition can unblock failed remote scans. This is a
@@ -177,6 +235,22 @@ func (r *remoteObserver) run(ctx context.Context, engine *observe.Engine) {
 			slots[name] = &remoteSlot{binding: h, due: time.Now()}
 			r.publish(RemoteObservation{Binding: h, Phase: "queued"}, engine.Notify)
 		}
+		for name, s := range slots {
+			if !r.approved(ctx, s.binding) {
+				s.due = time.Time{}
+				if active == s && cancel != nil {
+					cancel()
+				}
+				r.mu.Lock()
+				state := r.states[name]
+				r.mu.Unlock()
+				if state.Status != StatusAuth {
+					state.Phase, state.Status, state.Error = "done", StatusAuth, "Remote inventory approval expired or was revoked"
+					state.Snapshot.Error = state.Error
+					r.publish(state, engine.Notify)
+				}
+			}
+		}
 	}
 	arm := func() {
 		timer.Stop()
@@ -246,6 +320,34 @@ func (r *remoteObserver) run(ctx context.Context, engine *observe.Engine) {
 				}
 			}
 			r.mu.Unlock()
+		case <-r.observationReady:
+			configure()
+			r.mu.Lock()
+			pending := r.pendingObservations
+			r.pendingObservations = map[string]RemoteObservation{}
+			r.mu.Unlock()
+			if engine.Latest().Paused {
+				break
+			}
+			for name, state := range pending {
+				s := slots[name]
+				if s == nil || s.binding != state.Binding || !r.approved(ctx, s.binding) {
+					continue
+				}
+				r.mu.Lock()
+				old := r.states[name]
+				r.mu.Unlock()
+				if !newerRelaySnapshot(state.Snapshot, old.Snapshot) {
+					continue
+				}
+				if state.Error != "" && len(old.Snapshot.Data) != 0 {
+					state.Snapshot.Data = old.Snapshot.Data
+					state.Snapshot.Error = state.Error
+				}
+				s.failures = 0
+				s.due = maxRelayReconcile(state.Snapshot, time.Now())
+				r.publish(state, engine.Notify)
+			}
 		case <-due:
 			var next *remoteSlot
 			for _, s := range slots {
@@ -282,6 +384,10 @@ func (r *remoteObserver) run(ctx context.Context, engine *observe.Engine) {
 				break
 			}
 			state := result.state
+			if !r.approved(ctx, s.binding) {
+				state.Status, state.Error = StatusAuth, "Remote inventory approval expired or was revoked"
+				state.Snapshot.Error = state.Error
+			}
 			state.Binding = result.binding
 			state.Phase = "done"
 			state.Finished = time.Now().UTC()
@@ -289,15 +395,26 @@ func (r *remoteObserver) run(ctx context.Context, engine *observe.Engine) {
 			previous := r.states[result.binding.Name]
 			r.mu.Unlock()
 			state.Started = previous.Started
-			state.Snapshot.Sequence = previous.Snapshot.Sequence + 1
-			state.Snapshot.AttemptedAt = state.Started
+			if s.binding.RelayID != "" && state.Status != StatusAuth && previous.Finished.After(state.Started) && (!newerRelaySnapshot(state.Snapshot, previous.Snapshot) || state.Error != "" && previous.Snapshot.Fresh(time.Now())) {
+				// A push received during the RPC is newer than its cached reply
+				// or connection error. Do not roll source evidence back.
+				reply(s, previous, nil)
+				break
+			}
+			if s.binding.RelayID == "" {
+				state.Snapshot.Sequence = previous.Snapshot.Sequence + 1
+				state.Snapshot.AttemptedAt = state.Started
+			}
 			if state.Error != "" {
 				if len(state.Snapshot.Data) == 0 {
 					state.Facts = previous.Facts
 					state.Snapshot = previous.Snapshot
 				}
-				state.Snapshot.Sequence = previous.Snapshot.Sequence + 1
-				state.Snapshot.AttemptedAt, state.Snapshot.Error = state.Started, state.Error
+				if s.binding.RelayID == "" {
+					state.Snapshot.Sequence = previous.Snapshot.Sequence + 1
+					state.Snapshot.AttemptedAt = state.Started
+				}
+				state.Snapshot.Error = state.Error
 				s.failures++
 				if !remoteNeedsExplicitRetry(state.Status) {
 					if s.binding.RelayID != "" && s.relayGeneration < relayGeneration {
@@ -315,16 +432,26 @@ func (r *remoteObserver) run(ctx context.Context, engine *observe.Engine) {
 					state.Snapshot.ObservedAt = state.Finished
 					state.Snapshot.ExpiresAt = state.Finished.Add(r.interval + time.Minute)
 				}
-				// Relayed freshness belongs to the source. Receipt on this
-				// owner cannot extend its validity; refresh before it expires.
-				remaining := time.Until(state.Snapshot.ExpiresAt)
-				s.due = state.Finished.Add(min(r.interval, max(time.Second, remaining*2/3)))
+				if s.binding.RelayID != "" {
+					// Healthy source publications renew before expiry. Only a
+					// missed update needs a fallback request; expiry stays visible.
+					s.due = maxRelayReconcile(state.Snapshot, state.Finished)
+				} else {
+					s.due = state.Finished.Add(r.interval)
+				}
 			}
 			r.publish(state, engine.Notify)
 			reply(s, state, nil)
 		}
 		arm()
 	}
+}
+
+func maxRelayReconcile(s observe.Snapshot, now time.Time) time.Time {
+	if s.Fresh(now) {
+		return s.ExpiresAt.Add(time.Second)
+	}
+	return now.Add(time.Minute)
 }
 
 func (a *App) observeRemote(ctx context.Context, h config.Host) RemoteObservation {
@@ -399,6 +526,13 @@ func (a *App) RemoteInventory(ctx context.Context, state RemoteObservation) *Inv
 	if h == nil || !h.Allowed || *h != state.Binding {
 		m.Status, m.Error = StatusError, "Machine approval changed"
 		return inv
+	}
+	if h.RelayID != "" {
+		grant, err := (relay.Store{Directory: filepath.Join(a.StateDir, "relay")}).Grant(ctx, h.RelayID)
+		if err != nil || grant.Kind != "device" || !grant.AllowsSend("observe", time.Now()) {
+			state.Snapshot.Error = "Remote inventory approval expired or was revoked"
+			m.Status, m.Error = StatusError, state.Snapshot.Error
+		}
 	}
 	var obs Observation
 	if err := json.Unmarshal(state.Snapshot.Data, &obs); err != nil {

@@ -29,5 +29,53 @@ The actual local SQLite/R2 qualification exercises the real upgrade, wake hints,
 connection quota, credential renewal and revocation. Hosted hibernation behavior,
 provider proxies and measured OS energy usage remain separate release gates.
 
+## Source inventory updates
+
+Native devices also publish signed, encrypted `observation` envelopes to paired
+devices that have incoming `observe` approval. Recipients require current outgoing
+`observe` approval for that pinned native device. These frames cannot dispatch a
+transfer, masquerade as a reply, or grant receive permission. Cloud credentials
+remain response-only at the gateway and cannot publish native inventory.
+
+The source projects each inventory through the exact current peer/root approval,
+using the same privacy filter as an explicit scan. It excludes other machines,
+process tables, watcher paths, account labels/tags and transport diagnostics.
+Comparing projected content ignores collection timestamps, so remote updates and
+mailbox health cannot echo across the mesh. One shared subscriber and an
+event-driven ten-second coalescing window replace repeated remote scans. A failed
+publication retries from the latest evidence at most once a minute, driven by
+shared collection events; no additional idle polling loop is installed.
+
+Only a still-fresh local collection can issue a six-minute remote inventory lease,
+measured from its original `observedAt`. Local presence keeps its shorter lease.
+Unchanged remote inventory renews after five minutes of new source observations.
+Changed, failed or paused state publishes through the same bounded path. Receipt,
+socket pings, duplicate/reordered frames and errors never renew source evidence.
+A missed renewal expires visibly and triggers the existing shared scan scheduler;
+the fallback runs after expiry, rather than racing each healthy publication.
+Approval expiry can shorten the lease. Current local approval is checked again
+before a queued update is installed and before cached inventory is displayed.
+
+An update is capped at 1 MiB before encryption and uses no native-operation or
+reply recovery record. The in-memory replay index retains source metadata only,
+is bounded to 4096 peers, and retires expired evidence. If an inventory exceeds
+the update bound, diagnostics report the failure and the regular scan path remains
+available. Runtime relay health exposes sent, received and failed update counts
+plus the outstanding delivery error, without paths or credentials.
+Rejected replaceable observations are counted and acknowledged without occupying
+the durable quarantine reserved for native operations.
+
+For four mutually paired idle devices, five-minute one-way renewal is 3456 frames
+per day, before startup scans, changes, transfers, retries and byte limits. The
+experimental 4096-frame/256-MiB daily ceiling is a small staging allowance, **not**
+a full-day guarantee for an active fleet. Quota exhaustion is reported and old
+evidence expires normally; this change does not raise paid service limits.
+
+Native race tests cover current approval/direction/role, altered envelopes,
+replays, source incarnation changes, overlong/future evidence, revocation and an
+older in-flight reply arriving after a newer pushed snapshot. The real SQLite/R2
+scenario runs separate CLI owners and verifies filesystem-driven publication,
+pause/resume propagation and bounded mesh traffic without explicit remote scans.
+
 Design follows [Cloudflare's WebSocket hibernation guidance](https://developers.cloudflare.com/durable-objects/best-practices/websockets/)
 and [Apple's guidance on replacing timers with notifications](https://developer.apple.com/library/archive/documentation/Performance/Conceptual/power_efficiency_guidelines_osx/Timers.html).

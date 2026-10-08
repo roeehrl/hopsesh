@@ -108,6 +108,7 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 				}
 				service := &relay.Service{Transport: relay.Transport{Base: current.URL, Space: current.Space, Token: current.Token, HTTP: httpClient}, Processor: relay.Processor{Identity: identity, Space: current.Space, Store: store, Handle: a.relayReceiver(engine.Latest, engine.Refresh)}}
 				service.Processor.Recover = service.Processor.Handle
+				service.OnObservation = remotes.receiveRelayObservation
 				wasConnected := false
 				service.Notify = func(err error) {
 					message := ""
@@ -139,9 +140,12 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 				relayContext = child
 				relayMu.Unlock()
 				childStop := startRelayTask(child, service)
+				publisherDone := make(chan struct{})
+				go func() { defer close(publisherDone); publishRelayObservations(child, engine, service) }()
 				stop = func() {
 					cancel()
 					childStop()
+					<-publisherDone
 					if httpClient != nil {
 						httpClient.CloseIdleConnections()
 					}
@@ -171,6 +175,16 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 		out.Remotes = remotes.latest()
 		if files != nil {
 			roots := runtimeWatchRoots(out.WatchRoots, a.StateDir)
+			// Watch exact known approval files, not delivery/recovery directories.
+			// New pairings also edit config; revoking a known CLI peer must wake
+			// the owner without mailbox ciphertext causing inventory feedback.
+			if cfg.Relay.Enabled {
+				if grants, e := (relay.Store{Directory: filepath.Join(a.StateDir, "relay")}).Grants(); e == nil {
+					for _, grant := range grants {
+						roots = append(roots, filepath.Join(a.StateDir, "relay", "peer-"+grant.Peer.ID+".json"))
+					}
+				}
+			}
 			if err = files.SetRoots(roots); err != nil {
 				out.Problems = append(out.Problems, "Change notifications degraded: "+err.Error())
 			}
@@ -183,6 +197,11 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 		relayMu.Lock()
 		if relayProblem != "" {
 			out.Problems = append(out.Problems, relayProblem)
+		}
+		if relayService != nil {
+			if issue := relayService.Health().ObservationError; issue != "" {
+				out.Problems = append(out.Problems, "Relay inventory delivery: "+issue)
+			}
 		}
 		relayMu.Unlock()
 		return json.Marshal(out)

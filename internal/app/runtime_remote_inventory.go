@@ -37,13 +37,14 @@ func (a *App) MergeRemoteObservations(ctx context.Context, next, previous *Inven
 		if !ok || state.Binding != h {
 			continue
 		}
-		if old != nil && ((state.Phase != "done" && len(state.Snapshot.Data) == 0) || newerThan[h.Name].After(state.Started)) {
+		fresh := a.RemoteInventory(ctx, state)
+		m := fresh.Machine(h.Name)
+		if old != nil && (h.RelayID == "" || m.Status == StatusOK) && ((state.Phase != "done" && len(state.Snapshot.Data) == 0) || newerThan[h.Name].After(state.Started)) {
+			fresh.Close()
 			next.Machines = append(next.Machines, old)
 			next.Entries = append(next.Entries, oldEntries...)
 			continue
 		}
-		fresh := a.RemoteInventory(ctx, state)
-		m := fresh.Machine(h.Name)
 		if old != nil && old.host != nil && m.host != nil && reflect.DeepEqual(old.host.Facts, m.host.Facts) {
 			m.host.Close()
 			m.host = old.host
@@ -53,7 +54,7 @@ func (a *App) MergeRemoteObservations(ctx context.Context, next, previous *Inven
 		next.Machines = append(next.Machines, fresh.Machines...)
 		next.Entries = append(next.Entries, fresh.Entries...)
 		var obs Observation
-		complete := state.Snapshot.Fresh(time.Now()) && json.Unmarshal(state.Snapshot.Data, &obs) == nil && obs.InventoryComplete
+		complete := m.Status == StatusOK && state.Snapshot.Fresh(time.Now()) && json.Unmarshal(state.Snapshot.Data, &obs) == nil && obs.InventoryComplete
 		if !complete {
 			for _, e := range oldEntries {
 				if slices.ContainsFunc(fresh.Entries, func(current Entry) bool { return current.Session.Key == e.Session.Key }) {

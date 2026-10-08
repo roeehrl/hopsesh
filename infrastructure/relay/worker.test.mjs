@@ -186,3 +186,17 @@ test('hibernated socket attachments are rechecked on renewal, revocation, author
  socket.closed=false;await f.storage.put('device:'+f.a,{...grant,expires:1});
  await new Mailbox(ctx,{ENROLLMENT_ADMIN:'test-operator-secret'}).refresh();assert.ok(socket.closed);
 });
+
+test('native observation frames share durable quota while cloud credentials remain response-only',async()=>{
+ const f=await fixture();
+ const e={...f.envelope('observation-message-001'),kind:'observation'};
+ assert.equal((await f.invoke('/v1/messages','POST',f.ta,e)).status,201);
+ const batch=await(await f.invoke('/v1/messages','GET',f.tb)).json();
+ assert.equal(batch.messages[0].envelope.kind,'observation');
+ assert.equal((await f.storage.get('day-budget')).frames,1);
+ // Replace the stored test grant role, keeping the same authenticated issuer.
+ const grant=await f.storage.get('device:'+f.a);
+ await f.storage.put('device:'+f.a,{...grant,kind:'cloud-session',issuer:f.b});
+ for(const kind of ['observation','request'])assert.equal((await f.invoke('/v1/messages','POST',f.ta,{...e,id:'cloud-attempt-'+kind,kind})).status,403);
+ assert.equal((await f.invoke('/v1/messages','POST',f.ta,{...e,id:'cloud-response-1234',kind:'response'})).status,201);
+});

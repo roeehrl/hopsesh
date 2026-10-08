@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Paired native machines publish approved inventory changes through the shared
+  encrypted relay connection. Idle renewals replace repeated remote scans;
+  source timestamps, expiry, pause state and current approvals remain explicit.
+
 - Review and install cloud startup files from Settings or the CLI. Claude's
   cloud-only hook prepares fresh keys quietly; Codex receives environment Start
   skill instructions. Existing settings are preserved, modified files are

@@ -58,20 +58,33 @@ func (a *App) scanRelaySnapshot(ctx context.Context, to config.Host, refresh boo
 		m.Error = err.Error()
 		return m, nil, snapshot
 	}
+	grant, _ := (relay.Store{Directory: filepath.Join(a.StateDir, "relay")}).Grant(ctx, to.RelayID)
+	return relayInventory(to, snapshot, grant)
+}
+
+func relayInventory(to config.Host, snapshot observe.Snapshot, grant relay.Grant) (*Machine, []Entry, observe.Snapshot) {
+	m := &Machine{Kind: agent.AtMachine, Name: to.Name, Destination: "relay", Status: StatusError}
+	if grant.Kind != "device" || !grant.AllowsSend("observe", time.Now()) {
+		m.Error = "Remote inventory approval expired or was revoked"
+		snapshot.Error = m.Error
+		return m, nil, snapshot
+	}
+	if grant.Expires != 0 && snapshot.ExpiresAt.After(time.Unix(grant.Expires, 0)) {
+		snapshot.ExpiresAt = time.Unix(grant.Expires, 0)
+	}
 	if !snapshot.Fresh(time.Now()) {
 		m.Error = "Remote observations are stale or unavailable; reconnect and refresh."
 		return m, nil, snapshot
 	}
 	var obs Observation
-	if err = json.Unmarshal(snapshot.Data, &obs); err != nil {
+	if err := json.Unmarshal(snapshot.Data, &obs); err != nil {
 		m.Error = err.Error()
 		return m, nil, snapshot
 	}
 	m.OS, m.Agents = obs.OS, obs.Agents
 	m.Hopsesh = obs.Version
 	receive := false
-	grant, e := (relay.Store{Directory: filepath.Join(a.StateDir, "relay")}).Grant(ctx, to.RelayID)
-	if e == nil {
+	if grant.Kind == "device" {
 		receive = obs.Receive && grant.AllowsSend("plan", time.Now()) && grant.AllowsSend("apply", time.Now())
 	}
 	m.Receive = &receive
@@ -145,14 +158,7 @@ func (a *App) relayReceiver(snapshot func() observe.Snapshot, refresh func(conte
 					return nil, err
 				}
 			}
-			var obs Observation
-			if err := json.Unmarshal(snap.Data, &obs); err != nil {
-				return nil, err
-			}
-			obs = relayObservation(obs, grant)
-			obs.Receive = cfg.Peer.Receive && grant.Allows("plan", time.Now()) && grant.Allows("apply", time.Now()) && len(grant.Roots) > 0
-			snap.Data, err = json.Marshal(obs)
-			return snap, err
+			return relaySnapshot(snap, grant, cfg.Peer.Receive, time.Now())
 		}
 		if method == "export" || method == "ack" {
 			return source.relayExport(ctx, grant, operation, method, params)

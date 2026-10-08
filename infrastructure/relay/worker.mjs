@@ -106,8 +106,8 @@ export function createHandler(storage,bucket,adminToken,space,clock=()=>Date.now
    }
    if(path==='/v1/messages'&&req.method==='POST'){
     const e=await bounded(req,LIMITS.frame);
-    if(grant.kind==='cloud-session'&&e.to!==grant.issuer)return json({error:'recipient'},403);
-    if(!['request','response'].includes(e.kind)||e.protocol!==1||e.space!==space||e.from!==device||!opaque(e.to)||e.to===device||!opaque(e.id)||!opaque(e.operation)||!Number.isInteger(e.created)||!Number.isInteger(e.expires)||e.expires<=now||e.created>now+60||e.expires<=e.created||e.expires-e.created>LIMITS.lifetime||typeof e.ciphertext!=='string'||typeof e.signature!=='string'||!e.ciphertext.length||e.signature.length!==88)return json({error:'envelope'},400);
+    if(grant.kind==='cloud-session'&&(e.to!==grant.issuer||e.kind!=='response'))return json({error:'recipient'},403);
+    if(!['request','response','observation'].includes(e.kind)||e.protocol!==1||e.space!==space||e.from!==device||!opaque(e.to)||e.to===device||!opaque(e.id)||!opaque(e.operation)||!Number.isInteger(e.created)||!Number.isInteger(e.expires)||e.expires<=now||e.created>now+60||e.expires<=e.created||e.expires-e.created>LIMITS.lifetime||typeof e.ciphertext!=='string'||typeof e.signature!=='string'||!e.ciphertext.length||e.signature.length!==88)return json({error:'envelope'},400);
     const target=await storage.get('device:'+e.to);if(!target||target.revoked||target.expires<=now)return json({error:'recipient'},403);
     const data=JSON.stringify(e),wireBytes=encoder.encode(data).length,sum=await hash(data),key=space+'/'+e.to+'/'+e.id;
     recipient=e.to;

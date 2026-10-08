@@ -11,8 +11,104 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/observe"
+	"github.com/roeehrl/hopsesh/internal/core/relay"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
+
+func TestPushedRemoteObservationWinsInFlightOldReplyAndRemoval(t *testing.T) {
+	id, err := relay.GenerateIdentity("disposable-source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := config.Host{Name: "source", RelayID: id.Public.ID, Via: "relay", Allowed: true}
+	cfg := config.Defaults()
+	cfg.Hosts, cfg.Relay.Enabled = []config.Host{h}, true
+	r := newRemoteObserver(nil)
+	started, release := make(chan struct{}), make(chan struct{})
+	now := time.Now().UTC()
+	data, _ := json.Marshal(Observation{InventoryComplete: true, Machine: h.Name, Entries: []Entry{{Session: agent.Summary{Key: agent.SessionKey{Agent: "claude", Session: "new-session"}}, Live: agent.LiveInfo{State: agent.Live}}}})
+	newest := observe.Snapshot{Epoch: "source-incarnation-123", Sequence: 10, AttemptedAt: now, ObservedAt: now, ExpiresAt: now.Add(relay.ObservationLease), Data: data}
+	r.collect = func(ctx context.Context, _ config.Host) RemoteObservation {
+		close(started)
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		old := newest
+		old.Sequence--
+		old.AttemptedAt = now.Add(-time.Second)
+		old.Data = json.RawMessage(`{"inventoryComplete":true,"entries":[]}`)
+		return RemoteObservation{Status: StatusOK, Snapshot: old}
+	}
+	engine, stop := remoteEngineFixture(t, cfg, r)
+	defer stop()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("initial scan missing")
+	}
+	grant := relay.Grant{Peer: id.Public, Kind: "device", SendMethods: []string{"observe"}}
+	if err := r.receiveRelayObservation(t.Context(), grant, newest); err != nil {
+		t.Fatal(err)
+	}
+	wait := func(check func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(time.Second)
+		for !check() {
+			if time.Now().After(deadline) {
+				t.Fatal("remote update missing")
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+	wait(func() bool {
+		states := r.latest()
+		return len(states) == 1 && states[0].Snapshot.Sequence == newest.Sequence
+	})
+	// Explicit refresh joins the in-flight old RPC and receives newer pushed
+	// evidence. It must not restart a second collection or roll inventory back.
+	reply := make(chan remoteRefreshReply, 1)
+	select {
+	case r.requests <- remoteRefresh{name: h.Name, reply: reply}:
+	case <-time.After(time.Second):
+		t.Fatal("refresh not accepted")
+	}
+	close(release)
+	select {
+	case out := <-reply:
+		if out.err != nil || out.state.Snapshot.Sequence != newest.Sequence {
+			t.Fatal("joined refresh lost new evidence", out.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("joined refresh did not finish")
+	}
+	states := r.latest()
+	if len(states) != 1 || states[0].Snapshot.Sequence != newest.Sequence || !states[0].Snapshot.ObservedAt.Equal(now) {
+		t.Fatal("old reply rolled back pushed observation", states)
+	}
+	var observation Observation
+	if err := json.Unmarshal(states[0].Snapshot.Data, &observation); err != nil || len(observation.Entries) != 1 || observation.Entries[0].Machine != h.Name {
+		t.Fatal("push inventory mapping", observation, err)
+	}
+	cfg, err = config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Hosts = nil
+	if err := config.Save(&cfg); err != nil {
+		t.Fatal(err)
+	}
+	engine.Notify()
+	wait(func() bool { return len(r.latest()) == 0 })
+	newest.Sequence++
+	if err := r.receiveRelayObservation(t.Context(), grant, newest); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	if len(r.latest()) != 0 {
+		t.Fatal("removed machine resurrected from push")
+	}
+}
 
 func remoteEngineFixture(t *testing.T, cfg config.Config, r *remoteObserver) (*observe.Engine, func()) {
 	t.Helper()
@@ -232,10 +328,18 @@ func TestRelayReadyRetriesFailedObservationWithoutRefreshingHealthyOrAuthPeers(t
 }
 
 func TestRemoteMergeRetainsFailedAndPartialEvidenceButRemovesCompleteAbsence(t *testing.T) {
-	h := config.Host{Name: "box", RelayID: "approved-id", Allowed: true, Via: "relay"}
+	id, err := relay.GenerateIdentity("approved-endpoint")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := config.Host{Name: "box", RelayID: id.Public.ID, Allowed: true, Via: "relay"}
 	cfg := config.Defaults()
 	cfg.Hosts = []config.Host{h}
 	a := New(cfg, nil, t.TempDir(), nil)
+	store := relay.Store{Directory: filepath.Join(a.StateDir, "relay")}
+	if err := store.Approve(t.Context(), relay.Grant{Peer: id.Public, Kind: "device", SendMethods: []string{"observe"}}); err != nil {
+		t.Fatal(err)
+	}
 	key := agent.SessionKey{Agent: "claude", Session: "session"}
 	old := &Inventory{Machines: []*Machine{{Name: h.Name}}, Entries: []Entry{{Machine: h.Name, Session: agent.Summary{Key: key}, Live: agent.LiveInfo{State: agent.Live}}}}
 	for _, complete := range []bool{false, true} {
