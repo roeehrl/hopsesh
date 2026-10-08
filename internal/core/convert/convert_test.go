@@ -149,6 +149,30 @@ func TestProjectionCoverageSurvivesCoalescingAndSummaries(t *testing.T) {
 	}
 }
 
+func TestVerifiedHandoffContextSurvivesFurtherMovesWithoutCopyingScaffolding(t *testing.T) {
+	nodes := []ir.Node{
+		{ID: "transfer-heading", Kind: ir.KindMessage, Actor: ir.User, Text: "OLD-GENERATED-SCAFFOLDING", Generated: true},
+		{ID: "handoff-summary", Kind: ir.KindMessage, Actor: ir.User, Text: "SAVED-HANDOFF-CONTEXT", Generated: true, Coverage: []ir.NodeID{"original-authored-head"}},
+		{ID: "cloud-work", Kind: ir.KindMessage, Actor: ir.Agent, Text: "NEW-CLOUD-WORK", Coverage: []ir.NodeID{"cloud-authored-head"}},
+	}
+	res := Render(Request{Nodes: nodes, From: "Claude Code", To: "Codex", Fidelity: History, Window: 1000000})
+	contextFound := false
+	for _, item := range res.Items {
+		if strings.Contains(item.Text, "OLD-GENERATED-SCAFFOLDING") {
+			t.Fatal("generated wrapper copied as task context")
+		}
+		if strings.Contains(item.Text, "SAVED-HANDOFF-CONTEXT") {
+			contextFound = true
+			if !item.Generated || len(item.Coverage) != 1 || item.Coverage[0] != "original-authored-head" {
+				t.Fatal("handoff context invented authorship or lost ancestry")
+			}
+		}
+	}
+	if !contextFound {
+		t.Fatal("moving a returned cloud checkpoint discarded its only representation of original context")
+	}
+}
+
 func TestGeneratedContextDoesNotBecomeNewWork(t *testing.T) {
 	nodes := []ir.Node{{Kind: ir.KindMessage, Actor: ir.User, Text: "generated-old-briefing", Generated: true}, {Kind: ir.KindMessage, Actor: ir.User, Text: "actual authored continuation", Coverage: []ir.NodeID{"revision"}}}
 	ir.Chain(nodes, "")

@@ -36,12 +36,14 @@ func TestRelayLineageSQLiteR2(t *testing.T) {
 	if testing.Short() || os.Getenv("HOPSESH_RELAY_PLATFORM") != "1" {
 		t.Skip("actual SQLite/R2 relay matrix")
 	}
-	ctx, _, origin, cert, client := startSQLiteRelayFixture(t, 3*time.Minute)
 	bin := buildHopsesh(t)
 	for _, mode := range []string{"push", "pull"} {
 		for _, route := range []string{"ABABA", "ABCA", "ABCBCAB"} {
 			for _, agents := range []string{"claude", "codex", "alternating"} {
 				t.Run(mode+"/"+route+"/"+agents, func(t *testing.T) {
+					// Independent routes must not consume each other's global gateway
+					// rate window. Preserve production limits in every local Worker.
+					ctx, _, origin, cert, client := startSQLiteRelayFixture(t, time.Minute)
 					fleet := newRelayFleet(t, ctx, bin, origin, cert, client)
 					sourceAgent := "claude"
 					if agents == "codex" {
@@ -107,6 +109,7 @@ func TestRelayLineageSQLiteR2(t *testing.T) {
 			}
 		}
 		t.Run(mode+"/independent-original-and-sibling-forks", func(t *testing.T) {
+			ctx, _, origin, cert, client := startSQLiteRelayFixture(t, time.Minute)
 			fleet := newRelayFleet(t, ctx, bin, origin, cert, client)
 			original := fleet.seed(t, "claude")
 			before, err := os.ReadFile(original.Path)

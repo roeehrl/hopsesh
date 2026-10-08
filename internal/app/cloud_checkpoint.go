@@ -21,11 +21,12 @@ import (
 )
 
 type cloudCheckpointRecord struct {
-	Peer     string                  `json:"peer"`
-	Export   cloudintegration.Export `json:"export"`
-	Prepared json.RawMessage         `json:"prepared,omitempty"`
-	Target   agent.ID                `json:"target"`
-	Options  move.Options            `json:"options"`
+	HandoffProof string                  `json:"handoffProof,omitempty"`
+	Peer         string                  `json:"peer"`
+	Export       cloudintegration.Export `json:"export"`
+	Prepared     json.RawMessage         `json:"prepared,omitempty"`
+	Target       agent.ID                `json:"target"`
+	Options      move.Options            `json:"options"`
 }
 
 // PlanCloudCheckpoint imports a sealed conversation into an explicitly selected
@@ -168,6 +169,20 @@ func (a *App) PlanCloudCheckpoint(ctx context.Context, inv *Inventory, id string
 		return fail(err)
 	}
 	input := move.Input{CheckpointIdentity: record.Export.Task != nil, Source: move.Side{Machine: snapshot, Module: sm, Install: sin}, Target: move.Side{Machine: here.host, Module: tm, Install: tin}, Session: agent.Summary{Key: agent.SessionKey{Agent: sourceID, Profile: sourceIdentity, Session: agent.SessionID(record.Export.Session)}, Path: native, CWD: record.Export.Workspace, Title: "Cloud conversation checkpoint"}, Live: agent.LiveInfo{State: agent.Unknown}, SourceReceipt: &move.ReceiptOwner{FS: host.LocalFS(), Machine: here.Name, NativePath: filepath.Join(ledgerDir, "source.jsonl")}}
+	handoffProof := ""
+	if record.Export.Task != nil {
+		link, graph, err := a.cloudHandoffLink(*record.Export.Task)
+		if err != nil {
+			return fail(err)
+		}
+		if link != nil {
+			input.CheckpointHandoff, input.Lineage = &link.Origin, graph
+			handoffProof = link.review()
+		}
+	}
+	if len(record.Prepared) > 0 && record.HandoffProof != handoffProof {
+		return fail(errors.New("cloud handoff association changed since this operation was reviewed; prepare a new checkpoint operation"))
+	}
 	reviewExpires := time.Now().Add(10 * time.Minute)
 	input.CheckSource = func(ctx context.Context) error {
 		if !reviewExpires.After(time.Now()) {
@@ -180,6 +195,17 @@ func (a *App) PlanCloudCheckpoint(ctx context.Context, inv *Inventory, id string
 		if record.Export.Task != nil {
 			if err = a.checkCloudTask(ctx, currentGrant, record.Export.Observation); err != nil {
 				return err
+			}
+			link, _, err := a.cloudHandoffLink(*record.Export.Task)
+			if err != nil {
+				return err
+			}
+			currentProof := ""
+			if link != nil {
+				currentProof = link.review()
+			}
+			if currentProof != handoffProof {
+				return errors.New("cloud handoff association changed since review")
 			}
 		}
 		if !record.Export.LeaseExpires.After(time.Now()) {
@@ -216,6 +242,10 @@ func (a *App) PlanCloudCheckpoint(ctx context.Context, inv *Inventory, id string
 	if record.Export.Task != nil {
 		p.Warnings = append(p.Warnings, fmt.Sprintf("Verified owner-issued logical task %s, generation %d. This checkpoint preserves exact native-prefix ancestry across approved rebuilds; it does not restore provider-private state.", record.Export.Task.ID, record.Export.Generation))
 	}
+	if input.CheckpointHandoff != nil {
+		p.Warnings = append(p.Warnings, "Linked to verified saved handoff "+input.CheckpointHandoff.Operation+". The task identity association preserves ancestry without counting another transfer; handoff briefing and conversion losses remain recorded.")
+	}
+	record.HandoffProof = handoffProof
 	if err = saveRelayRecord(recordPath, &record); err != nil {
 		return fail(err)
 	}

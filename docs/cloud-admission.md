@@ -89,9 +89,47 @@ inherits only the complete previously verified native prefix, checked by native
 anchors and content hashes. Rewritten or compacted history is refused unless the
 user explicitly chooses a separate fork; its fidelity warning remains attached.
 Checkpoint forks retain separate branches, and retries retain their native IDs.
-This establishes checkpoint ancestry across approved incarnations. Connecting
-that task to a prior local-to-cloud handoff still requires the saved handoff's
-separate provenance; matching text or IDs does not establish that relationship.
+This establishes checkpoint ancestry across approved incarnations. To connect a
+task to its prior local-to-cloud handoff, use **Settings → Internet delivery →
+Link task to saved handoff…** before reviewing the first checkpoint. Select the
+logical task and its saved handoff, review the original cloud session and family,
+then save. The list offers recent local handoffs with applied native receipts,
+filtered by provider; it never chooses an association from names or native IDs.
+
+The CLI exposes the same review and validation:
+
+```sh
+hopsesh cloud-integration handoffs
+hopsesh cloud-integration link-handoff TASK_ID SAVED_HANDOFF_ID --dry-run
+hopsesh cloud-integration link-handoff TASK_ID SAVED_HANDOFF_ID
+```
+
+For an independent cloud fork, issue a new logical task and select **Independent
+cloud fork** (CLI `--fork`). It inherits the saved family but has a separate
+branch and trip counts. A handoff can have only one continuation task; additional
+associations require an explicit fork. Each still needs fresh keys and approval.
+
+The native owner signs a private capsule containing the exact saved journal
+receipt, task identity, briefing and fork choice. Import must independently
+verify the saved briefing at the start of the conversation or the complete
+original native prefix with matching anchors and content hashes. Similar text
+or a claimed cloud ID cannot supply ancestry. Missing or edited evidence fails
+closed; generic import fork options cannot bypass the saved-proof check.
+
+The association is a causal identity event, not another transfer or round trip.
+Settings shows saved task ancestry; GUI/TUI journey history labels the verified
+identity event. Later transfers retain the briefing as inherited context without
+counting it as new authored work. Original handoff and conversion losses remain
+recorded; provider-private reasoning, code and process state are not reconstructed.
+
+Reviewing a checkpoint freezes its association. Remove an unstarted cached
+review before adding a link; removed review IDs remain retired. Once checkpoint
+lineage exists, keep it and use a new task for different ancestry. Linking is
+idempotent, and an existing different link cannot be overwritten. Undoing the
+saved handoff invalidates future use while its journal exists. A signed capsule
+can survive deliberate journal retirement. Private capsule storage is bounded to
+1,024 entries, 16 MiB each and 64 MiB total; signatures and ownership are rechecked
+before use. This local association does not enable unsupported provider export.
 
 **Revoke invitation** revokes the claim opportunity and any claimed routing
 lease. It remains available after the ten-minute claim window, through the
@@ -118,7 +156,11 @@ authorization and mailbox handlers, and separately against local workerd with
 SQLite Durable Objects and R2. It includes retry, original/fork independence,
 rebuild, revocation and status. The native checkpoint scenario additionally exercises
 six fresh incarnations, changed native IDs, original/fork branch independence,
-Claude/Codex local imports, stable retries and automatic old-process shutdown. Deterministic server contracts inject a lost
+Claude/Codex local imports, stable retries and automatic old-process shutdown.
+Saved-handoff and independent-cloud-fork rows additionally preserve briefing
+context through A→B→C→B→C→A→B with alternating agents and unchanged vendor files.
+These use disposable provider transcripts; they do not qualify real provider
+startup or lifecycle behavior. Deterministic server contracts inject a lost
 cross-object commit and verify native renewal, authority rotation and role
 boundaries. The local Wrangler fixture explicitly uses its local HTTPS origin
 so signed proofs match the tested service rather than the production route.

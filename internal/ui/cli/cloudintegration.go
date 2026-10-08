@@ -35,7 +35,7 @@ func cloudIntegrationCmd() *cobra.Command {
 	plan.Flags().StringVar(&version, "version", "", "immutable signed 0.5 release version")
 	plan.Flags().StringVar(&origin, "origin", cloudintegration.DownloadOrigin, "verified downloads HTTPS origin")
 	plan.Flags().BoolVar(&script, "script", false, "print only the installation shell script")
-	root.AddCommand(plan, cloudPrepareCmd(), cloudCurrentCmd(), cloudStartupInstallCmd(), cloudAuthorizeCmd(), cloudServeCmd(), cloudTicketCmd(), cloudTasksCmd(), cloudClaimCmd(), cloudRevokeTicketCmd(), cloudTicketStatusCmd(), cloudInspectCmd(), cloudCheckpointImportCmd(), cloudCheckpointCacheCmd())
+	root.AddCommand(plan, cloudPrepareCmd(), cloudCurrentCmd(), cloudStartupInstallCmd(), cloudAuthorizeCmd(), cloudServeCmd(), cloudTicketCmd(), cloudTasksCmd(), cloudHandoffsCmd(), cloudLinkHandoffCmd(), cloudClaimCmd(), cloudRevokeTicketCmd(), cloudTicketStatusCmd(), cloudInspectCmd(), cloudCheckpointImportCmd(), cloudCheckpointCacheCmd())
 	return root
 }
 

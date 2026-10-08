@@ -74,6 +74,7 @@ const (
 	HopMove     = "move"
 	HopContinue = "continue"
 	HopHandoff  = "handoff"
+	HopIdentity = "identity" // verified identity association, never a physical transfer
 	HopFetch    = "fetch"
 )
 
@@ -776,7 +777,7 @@ func (m *Manifest) Journey() Journey {
 		undone[c.Operation] = true
 	}
 	for _, h := range m.OrderedHops() {
-		if h.Line != m.Branch || h.Backup || undone[h.ID] {
+		if h.Line != m.Branch || h.Backup || undone[h.ID] || h.Kind == HopIdentity {
 			continue
 		}
 		from, to := m.Replica(h.From), m.Replica(h.To)
@@ -883,7 +884,7 @@ func (m *Manifest) Validate() error {
 	}
 	for _, h := range m.Hops {
 		switch h.Kind {
-		case HopMove, HopContinue, HopHandoff, HopFetch:
+		case HopMove, HopContinue, HopHandoff, HopFetch, HopIdentity:
 		default:
 			return fmt.Errorf("invalid hop kind %q", h.Kind)
 		}
@@ -894,6 +895,11 @@ func (m *Manifest) Validate() error {
 			return fmt.Errorf("invalid hop endpoints")
 		}
 		from, to := m.Replica(h.From), m.Replica(h.To)
+		if h.Kind == HopIdentity {
+			if !strings.HasPrefix(from.Endpoint, "cloud:") || !strings.HasPrefix(to.Endpoint, "cloud:") || from.Key.Agent != to.Key.Agent || h.Written != nil || h.Code != nil || h.Notify || h.Backup || h.Rollover != nil || h.Source == "" || h.Target == "" || !slices.Equal(m.State(h.Source).Heads, m.State(h.Target).Heads) {
+				return fmt.Errorf("invalid cloud identity association")
+			}
+		}
 		if h.Rollover != nil {
 			old := m.Replica(h.Rollover.Replica)
 			if old.ID == "" || old.Line != to.Line || old.Endpoint != to.Endpoint || old.Binding != to.Binding || old.Key.Agent != to.Key.Agent || old.Key.Profile != to.Key.Profile || old.ID == to.ID || h.Rollover.Cursor.Offset < 0 {

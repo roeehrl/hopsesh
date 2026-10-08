@@ -137,6 +137,31 @@ function cloudInvitation(refresh, tasks=[]) {
  const d=dialog(h("h2",{},"Invite one cloud session"),h("p",{class:"muted"},"The invitation can admit one fresh session identity for a bounded routing lease. A resume or rebuild needs a new invitation and approval."),form,error,status,h("div",{class:"dlg-foot"},h("button",{class:"btn",onclick:()=>d.close()},"Close"),button));
 }
 
+async function linkCloudHandoff(refresh,tasks) {
+ const task=h("select",{"aria-label":"Logical cloud task"},h("option",{value:""},"Choose a task…"),...tasks.map(t=>h("option",{value:t.id},`${t.provider} · ${t.session} · ${t.id.slice(0,12)}`)));
+ const handoff=h("select",{"aria-label":"Saved cloud handoff",disabled:true});
+ const fork=h("input",{type:"checkbox","aria-label":"Independent cloud fork"});
+ const status=h("div",{role:"status"}),error=h("p",{class:"err",role:"alert"});
+ const form=h("fieldset",{style:"border:0;padding:0;margin:0"},field("Cloud task",task),field("Saved handoff",handoff,"Only local handoffs with verified native receipts are offered. Names and session IDs alone do not establish ancestry."),field("Independent cloud fork",fork,"Enable only if this is a separate cloud fork. It inherits ancestry and keeps its own trip counts."));
+ let options=[],review=null,closed=false;
+ const save=h("button",{class:"btn primary",disabled:true},"Link reviewed handoff");
+ const prepare=h("button",{class:"btn",disabled:true},"Review ancestry");
+ const reset=()=>{review=null;save.disabled=true;status.replaceChildren();prepare.disabled=!task.value||!handoff.value;};
+ const choices=()=>{const selected=tasks.find(t=>t.id===task.value);const eligible=options.filter(o=>o.provider===selected?.provider);handoff.replaceChildren(h("option",{value:""},eligible.length ? "Choose a saved handoff…" : "No verified handoffs for this provider"),...eligible.map(o=>h("option",{value:o.journal},`${o.title||o.session} · ${o.session} · ${new Date(o.time).toLocaleDateString()}`)));handoff.disabled=!eligible.length;reset();};
+ task.addEventListener("change",choices);handoff.addEventListener("change",reset);fork.addEventListener("change",reset);
+ prepare.addEventListener("click",async()=>{
+  form.disabled=true;prepare.disabled=true;save.disabled=true;error.textContent="";
+  try{const next=await pending("Review saved handoff",()=>api("RelayPlanCloudHandoffLink",task.value,handoff.value,fork.checked));if(closed)return;review=next;status.replaceChildren(h("h3",{},next.handoff.title||next.handoff.session),h("p",{},`Saved cloud session: ${next.handoff.session}`),h("p",{class:"mono muted",style:"overflow-wrap:anywhere"},`Family: ${next.handoff.family}`),h("p",{},next.fork ? "Independent fork: shared ancestry, separate trip counts." : "Continuation of this saved handoff."),h("p",{class:"muted"},"Import still requires a fresh approved cloud identity and the exact saved briefing or verified native prefix. The association adds no transfer. Once checkpoint lineage exists, it cannot be replaced."));save.disabled=false;}catch(e){error.textContent=String(e?.message||e);}finally{form.disabled=false;prepare.disabled=!task.value||!handoff.value;}
+ });
+ save.addEventListener("click",async()=>{
+  if(!review)return;form.disabled=true;save.disabled=true;prepare.disabled=true;error.textContent="";
+  try{await pending("Link saved handoff",()=>api("RelayLinkCloudHandoff",task.value,handoff.value,fork.checked,review.review));if(closed)return;status.replaceChildren(h("p",{},"Saved handoff linked. The next checkpoint review will verify its conversation evidence and show the inherited journey."));await refresh();}catch(e){error.textContent=String(e?.message||e);form.disabled=false;prepare.disabled=false;review=null;}
+ });
+ const d=dialog(h("h2",{},"Link task to saved handoff"),h("p",{class:"muted"},"Choose the handoff that actually created this task, before importing its first checkpoint. Independent tasks remain separate unless you explicitly link them."),form,status,error,h("div",{class:"dlg-foot"},h("button",{class:"btn",onclick:()=>d.close()},"Close"),prepare,save));
+ d.addEventListener("close",()=>{closed=true;},{once:true});
+ try{options=await pending("Read saved handoffs",()=>api("RelayCloudHandoffOptions"));if(!closed)choices();}catch(e){if(!closed)error.textContent=String(e?.message||e);}
+}
+
 function invitationRow(ticket,r,expired,action,refresh) {
  const error=h("p",{class:"err",role:"alert"});
  const check=h("button",{class:"btn",disabled:!r.enrolled || expired,onclick:async()=>{
@@ -222,7 +247,8 @@ export function relaySettings(data, refresh) {
   r.enrolled ? h("p",{class:"muted"},`Routing credential expires ${new Date(r.expires*1000).toLocaleString()}. Receiving on this computer: ${r.receiveEnabled ? "enabled" : "disabled"}.`) : null,
   h("button",{class:"btn",onclick:()=>go("machines")},"Receiving and machines…"))),
   h("section",{class:"card"},h("div",{class:"dlg-body"},h("h2",{},"Cloud environment setup"),h("p",{class:"muted"},"Install a verified helper during setup, then prepare a fresh scoped connector in each actual task. Hosted lifecycle support is still being qualified."),h("div",{class:"set-row"},h("button",{class:"btn",onclick:cloudStartup},"Prepare cloud startup…"),h("button",{class:"btn",onclick:checkpointCache},"Manage cached checkpoints…")))),
-  h("section",{class:"card"},h("div",{class:"dlg-body"},h("h2",{},"Cloud invitations"),h("p",{class:"muted"},"Invitations authorize provisional delivery. Approve the fresh cloud fingerprint separately before requesting its conversation."),h("button",{class:"btn",disabled:!r.enrolled || expired,onclick:()=>cloudInvitation(refresh,r.tasks||[])},"Invite cloud session…"),
+  h("section",{class:"card"},h("div",{class:"dlg-body"},h("h2",{},"Cloud invitations"),h("p",{class:"muted"},"Invitations authorize provisional delivery. Approve the fresh cloud fingerprint separately before requesting its conversation."),h("button",{class:"btn",disabled:!r.enrolled || expired,onclick:()=>cloudInvitation(refresh,r.tasks||[])},"Invite cloud session…"),h("button",{class:"btn",disabled:!(r.tasks||[]).length,onclick:()=>void linkCloudHandoff(refresh,r.tasks||[])},"Link task to saved handoff…"),
+   (r.taskLinks||[]).length ? h("div",{},h("h3",{},"Saved task ancestry"),...(r.taskLinks||[]).map(link=>h("div",{class:"set-row"},h("div",{style:"min-width:0;overflow-wrap:anywhere"},h("b",{},(r.tasks||[]).find(task=>task.id===link.task)?.session||link.task.slice(0,12)),link.problem ? h("p",{class:"err"},link.problem) : h("p",{class:"muted"},`${link.fork ? "Independent fork" : "Continuation"} · saved handoff ${link.journal}`),link.family ? h("p",{class:"mono muted"},`Family ${link.family.slice(0,16)}`) : null)))) : null,
    !(r.admissions || []).length ? h("p",{class:"muted"},"No cloud invitations saved.") : r.admissions.map(ticket=>invitationRow(ticket,r,expired,action,refresh)))),
 
   h("section",{class:"card"},h("div",{class:"dlg-body"},h("h2",{},"Approved endpoints"),

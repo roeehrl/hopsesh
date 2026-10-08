@@ -522,6 +522,8 @@ func history(core *app.App, m *lineage.Manifest) []HopDTO {
 		}
 		what := "Moved to " + place(to.Location)
 		switch {
+		case h.Kind == lineage.HopIdentity:
+			what = "Verified cloud task identity from saved handoff"
 		case h.Kind == lineage.HopFetch:
 			what = fmt.Sprintf("Brought from %s to %s", place(from.Location), place(to.Location))
 		case h.Kind == lineage.HopHandoff:

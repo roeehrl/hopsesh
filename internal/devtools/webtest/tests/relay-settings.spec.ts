@@ -7,6 +7,94 @@ test.beforeEach(async ({ page }) => {
   await page.getByRole("tab", { name: "Internet delivery" }).click();
 });
 
+test("saved handoff ancestry requires explicit provider-matched choices and a fresh review", async ({page}) => {
+ const task={id:"a".repeat(32),provider:"claude-hosted",session:"rebuilt-native-session"};
+ const other={id:"b".repeat(32),provider:"codex-current",session:"other-provider-task"};
+ const handoff={journal:"saved-handoff",provider:task.provider,title:"Original source",session:"outer-cloud-session",family:"verified-family",time:new Date().toISOString()};
+ let reviews=0,saved=false;
+ await page.route("**/call",async route=>{
+  const request=route.request().postDataJSON();
+  if(request.m==="Settings"){
+   const response=await route.fetch(),body=await response.json();
+   body.result.relay={initialized:true,enrolled:true,enabled:true,expires:Date.now()/1000+3600,peers:[],tasks:[task,other],admissions:[],taskLinks:saved?[{task:task.id,journal:handoff.journal,family:handoff.family,fork:true}]:[]};
+   await route.fulfill({json:body});return;
+  }
+  if(request.m==="RelayCloudHandoffOptions"){await route.fulfill({json:{result:[handoff]}});return;}
+  if(request.m==="RelayPlanCloudHandoffLink"){
+   reviews++;expect(request.args).toEqual([task.id,handoff.journal,reviews>1]);
+   await route.fulfill({json:{result:{task:task.id,handoff,fork:reviews>1,review:`review-${reviews}`}}});return;
+  }
+  if(request.m==="RelayLinkCloudHandoff"){
+   expect(request.args).toEqual([task.id,handoff.journal,true,"review-2"]);saved=true;
+   await route.fulfill({json:{result:{}}});return;
+  }
+  await route.continue();
+ });
+ await page.getByRole("button",{name:"Refresh status",exact:true}).click();
+ await page.getByRole("button",{name:"Link task to saved handoff…"}).click();
+ const d=page.getByRole("dialog");
+ await expect(d.getByLabel("Logical cloud task")).toHaveValue("");
+ await expect(d.getByLabel("Saved cloud handoff")).toBeDisabled();
+ await expect(d.getByRole("button",{name:"Link reviewed handoff"})).toBeDisabled();
+ await d.getByLabel("Logical cloud task").selectOption(other.id);
+ await expect(d.getByLabel("Saved cloud handoff")).toBeDisabled();
+ await d.getByLabel("Logical cloud task").selectOption(task.id);
+ await expect(d.getByLabel("Saved cloud handoff")).toHaveValue("");
+ await d.getByLabel("Saved cloud handoff").selectOption(handoff.journal);
+ await expect(d.getByLabel("Independent cloud fork")).not.toBeChecked();
+ await d.getByRole("button",{name:"Review ancestry"}).click();
+ await expect(d.getByRole("status")).toContainText("Continuation of this saved handoff");
+ await expect(d.getByRole("button",{name:"Link reviewed handoff"})).toBeEnabled();
+ await d.getByLabel("Independent cloud fork").check();
+ await expect(d.getByRole("button",{name:"Link reviewed handoff"})).toBeDisabled();
+ await expect(d.getByRole("status")).toBeEmpty();
+ await d.getByRole("button",{name:"Review ancestry"}).click();
+ await expect(d.getByRole("status")).toContainText("Independent fork: shared ancestry, separate trip counts");
+ await d.getByRole("button",{name:"Link reviewed handoff"}).click();
+ await expect(d.getByRole("status")).toContainText("Saved handoff linked");
+ await d.getByRole("button",{name:"Close",exact:true}).click();
+ await expect(page.getByRole("heading",{name:"Saved task ancestry"})).toBeVisible();
+ await expect(page.getByText("Independent fork · saved handoff saved-handoff",{exact:true})).toBeVisible();
+ expect(saved).toBe(true);
+});
+
+test("a stale saved handoff review preserves choices and cannot be applied again without review", async ({page}) => {
+ const task={id:"c".repeat(32),provider:"claude-hosted",session:"task"};
+ const handoff={journal:"saved-source",provider:task.provider,title:"Saved source",session:"outer-session",family:"family",time:new Date().toISOString()};
+ let applies=0,reviews=0;
+ await page.route("**/call",async route=>{
+  const request=route.request().postDataJSON();
+  if(request.m==="Settings"){
+   const response=await route.fetch(),body=await response.json();
+   body.result.relay={initialized:true,enrolled:true,enabled:true,expires:Date.now()/1000+3600,peers:[],tasks:[task],admissions:[]};
+   await route.fulfill({json:body});return;
+  }
+  if(request.m==="RelayCloudHandoffOptions"){await route.fulfill({json:{result:[handoff]}});return;}
+  if(request.m==="RelayPlanCloudHandoffLink"){
+   reviews++;
+   await route.fulfill({json:reviews===1?{result:{task:task.id,handoff,fork:false,review:"first-review"}}:{error:"this task already has a reviewed checkpoint"}});return;
+  }
+  if(request.m==="RelayLinkCloudHandoff"){
+   applies++;await route.fulfill({json:{error:"saved handoff changed since review; review it again"}});return;
+  }
+  await route.continue();
+ });
+ await page.getByRole("button",{name:"Refresh status",exact:true}).click();
+ await page.getByRole("button",{name:"Link task to saved handoff…"}).click();
+ const d=page.getByRole("dialog");
+ await d.getByLabel("Logical cloud task").selectOption(task.id);
+ await d.getByLabel("Saved cloud handoff").selectOption(handoff.journal);
+ await d.getByRole("button",{name:"Review ancestry"}).click();
+ await d.getByRole("button",{name:"Link reviewed handoff"}).click();
+ await expect(d.getByRole("alert")).toContainText("saved handoff changed since review");
+ await expect(d.getByLabel("Saved cloud handoff")).toHaveValue(handoff.journal);
+ await expect(d.getByRole("button",{name:"Link reviewed handoff"})).toBeDisabled();
+ await d.getByRole("button",{name:"Review ancestry"}).click();
+ await expect(d.getByRole("alert")).toHaveText("this task already has a reviewed checkpoint");
+ await expect(d.getByRole("button",{name:"Link reviewed handoff"})).toBeDisabled();
+ expect(applies).toBe(1);
+});
+
 test("resuming cloud task identity is explicit and still requires a new claim and approval",async({page})=>{
  const task={id:"e".repeat(32),provider:"codex-current",created:Math.floor(Date.now()/1000)-3600,ownerFingerprint:"f".repeat(64)};
  let issued=0;

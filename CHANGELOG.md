@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Link a logical cloud task to a verified saved handoff in Settings or the CLI.
+  Original ancestry and briefing context survive later checkpoints and agent
+  changes; explicit cloud forks keep independent branches and trip counts.
+  Identity associations appear in journey history without counting a transfer.
+
 - Paired native machines publish approved inventory changes through the shared
   encrypted relay connection. Idle renewals replace repeated remote scans;
   source timestamps, expiry, pause state and current approvals remain explicit.

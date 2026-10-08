@@ -43,6 +43,9 @@ type Input struct {
 	// owner-issued logical task and the independently approved fresh claim.
 	// It permits exact native-prefix provenance across changed session IDs.
 	CheckpointIdentity bool
+	// CheckpointHandoff is an owner-reviewed saved local handoff, loaded and
+	// authenticated by native code. Peer payloads cannot supply this provenance.
+	CheckpointHandoff *CheckpointHandoff
 	// CheckSource rechecks current authorization before any destination write.
 	CheckSource func(context.Context) error
 	// AcknowledgeSource is a transport-owned commit of writes made to a source

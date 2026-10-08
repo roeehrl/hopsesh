@@ -27,18 +27,33 @@ type RelayPeerDTO struct {
 	Revoked     bool     `json:"revoked"`
 }
 type RelaySettingsDTO struct {
-	ReceiveEnabled bool                    `json:"receiveEnabled"`
-	Enabled        bool                    `json:"enabled"`
-	Initialized    bool                    `json:"initialized"`
-	Identity       *relay.PublicIdentity   `json:"identity,omitempty"`
-	Enrolled       bool                    `json:"enrolled"`
-	URL            string                  `json:"url,omitempty"`
-	Expires        int64                   `json:"expires,omitempty"`
-	Health         relay.Health            `json:"health"`
-	Peers          []RelayPeerDTO          `json:"peers"`
-	Admissions     []relay.AdmissionRecord `json:"admissions"`
-	Tasks          []relay.CloudTaskRecord `json:"tasks"`
-	Error          string                  `json:"error,omitempty"`
+	ReceiveEnabled bool                       `json:"receiveEnabled"`
+	Enabled        bool                       `json:"enabled"`
+	Initialized    bool                       `json:"initialized"`
+	Identity       *relay.PublicIdentity      `json:"identity,omitempty"`
+	Enrolled       bool                       `json:"enrolled"`
+	URL            string                     `json:"url,omitempty"`
+	Expires        int64                      `json:"expires,omitempty"`
+	Health         relay.Health               `json:"health"`
+	Peers          []RelayPeerDTO             `json:"peers"`
+	Admissions     []relay.AdmissionRecord    `json:"admissions"`
+	Tasks          []relay.CloudTaskRecord    `json:"tasks"`
+	TaskLinks      []app.CloudHandoffLinkInfo `json:"taskLinks"`
+	Error          string                     `json:"error,omitempty"`
+}
+
+func (a *App) RelayCloudHandoffOptions() ([]app.CloudHandoffOption, error) {
+	return a.snapshot().CloudHandoffOptions()
+}
+
+func (a *App) RelayPlanCloudHandoffLink(task, handoff string, fork bool) (app.CloudHandoffLinkPlan, error) {
+	return a.snapshot().PlanCloudHandoffLink(task, handoff, fork)
+}
+
+func (a *App) RelayLinkCloudHandoff(task, handoff string, fork bool, review string) (app.CloudHandoffLinkPlan, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return a.snapshot().LinkCloudHandoff(ctx, task, handoff, fork, review)
 }
 
 func (a *App) RelaySettings() RelaySettingsDTO {
@@ -87,6 +102,11 @@ func (a *App) RelaySettings() RelaySettingsDTO {
 		out.Tasks = rows
 	} else {
 		out.Error = "Cloud task history could not be read safely"
+	}
+	if links, err := core.CloudHandoffLinks(); err == nil {
+		out.TaskLinks = links
+	} else {
+		out.Error = "Saved cloud handoff associations could not be read safely"
 	}
 	return out
 }

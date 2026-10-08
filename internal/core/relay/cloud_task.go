@@ -77,6 +77,19 @@ type CloudTaskRecord struct {
 	Session          string `json:"session"`
 }
 
+// Task returns historical identity only, pinned to its native issuer. It never
+// authorizes a cloud incarnation; ResolveTask still verifies its current claim.
+func (s AdmissionStore) Task(id, owner string) (CloudTask, error) {
+	record, err := s.readTask(id)
+	if err != nil {
+		return CloudTask{}, err
+	}
+	if err := record.Task.Verify(owner); err != nil {
+		return CloudTask{}, err
+	}
+	return record.Task, nil
+}
+
 func (s AdmissionStore) taskPath(id string) (string, error) {
 	if !taskID(id) {
 		return "", errors.New("invalid logical cloud task ID")

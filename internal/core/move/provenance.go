@@ -71,7 +71,15 @@ func prepareLineage(ctx context.Context, p *Plan, in Input, seg *ir.Segment) err
 	}
 	var st lineage.State
 	if in.CheckpointIdentity && in.SourceReceipt != nil && in.Source.Machine.IsSnapshot() {
-		err = seedCheckpointPrefix(m, lineage.Replica{Endpoint: sourceID, Binding: in.Source.Install.BindingID(), Key: p.Key, Line: m.Branch, Location: p.Source.Location, AgentVersion: p.Source.Version, Time: seg.Header.Created}, seg)
+		source := lineage.Replica{Endpoint: sourceID, Binding: in.Source.Install.BindingID(), Key: p.Key, Line: m.Branch, Location: p.Source.Location, AgentVersion: p.Source.Version, Time: seg.Header.Created}
+		if in.CheckpointHandoff != nil {
+			if err = seedCheckpointHandoff(m, source, seg, *in.CheckpointHandoff); err != nil {
+				return err
+			}
+		}
+		if err == nil {
+			err = seedCheckpointPrefix(m, source, seg)
+		}
 	}
 	if err == nil {
 		p.sourceReplica, st, err = m.ObserveBinding(lineage.Replica{Endpoint: sourceID, Binding: in.Source.Install.BindingID(), Key: p.Key, Location: p.Source.Location, AgentVersion: p.Source.Version, Time: seg.Header.Created}, seg)

@@ -166,7 +166,8 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	bf.HistoryFile = archivePath
 	allowance := capacity.Allowance()
 	r := convert.Render(convert.Request{
-		Nodes: seg.Nodes, From: cp.From, To: spec.Name, Fidelity: fidelity,
+		IncludeGenerated: in.CheckpointHandoff != nil && cp.AppendTo == nil,
+		Nodes:            seg.Nodes, From: cp.From, To: spec.Name, Fidelity: fidelity,
 		Native: opt.Native && prof.NativeReplay, Window: capacity.EffectiveWindow(), Limit: &allowance, Mappings: p.Placement.Mappings, Redact: redact,
 		Briefing: bf,
 	})
