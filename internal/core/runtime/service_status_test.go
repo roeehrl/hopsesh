@@ -5,7 +5,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestServiceStatusUsesSupervisorAndNeverClaimsFileIsEnabled(t *testing.T) {
@@ -41,6 +43,28 @@ func TestServiceStatusUsesSupervisorAndNeverClaimsFileIsEnabled(t *testing.T) {
 		if s.Known || s.Enabled || s.Running || s.Error == "" {
 			t.Fatalf("failed query claimed service: %+v", s)
 		}
+	}
+}
+
+func TestWindowsServiceStatusRejectsIncompleteRepliesAndBoundsQueries(t *testing.T) {
+	p := ServicePlan{Platform: "windows", Path: filepath.Join(t.TempDir(), "absent"), Name: "test"}
+	for _, reply := range []string{`{}`, `null`, `{"registered":false}`, `{"registered":true,"enabled":null,"running":true}`, `garbage`} {
+		s := p.status(t.Context(), func(ctx context.Context, _ []string) ([]byte, error) {
+			deadline, ok := ctx.Deadline()
+			if !ok || time.Until(deadline) > 15*time.Second {
+				t.Fatal("OS service query has no bounded deadline")
+			}
+			return []byte(reply), nil
+		})
+		if s.Known || !strings.Contains(s.Error, "invalid supervisor response") {
+			t.Fatalf("incomplete status accepted: %q: %+v", reply, s)
+		}
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	s := p.status(ctx, func(ctx context.Context, _ []string) ([]byte, error) { return nil, ctx.Err() })
+	if s.Known || !strings.Contains(s.Error, "context canceled") {
+		t.Fatalf("canceled query lost its reason: %+v", s)
 	}
 }
 

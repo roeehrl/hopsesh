@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/roeehrl/hopsesh/internal/localstate"
 )
@@ -82,14 +83,25 @@ func (p ServicePlan) status(ctx context.Context, run serviceRunner) ServiceStatu
 	case "linux":
 		args = []string{"systemctl", "--user", "show", p.Name, "--property=LoadState,ActiveState,UnitFileState"}
 	case "windows":
-		name := strings.ReplaceAll(p.Name, "'", "''")
-		script := "$ErrorActionPreference='Stop'; try { $t=Get-ScheduledTask -TaskPath '\\' -TaskName '" + name + "'; @{registered=$true;enabled=$t.Settings.Enabled;running=($t.State -eq 'Running')} | ConvertTo-Json -Compress } catch { if ($_.FullyQualifiedErrorId -like 'NoMatchingMSFT_ScheduledTask*') { @{registered=$false;enabled=$false;running=$false} | ConvertTo-Json -Compress } else { throw } }"
+		// Query Task Scheduler directly. CIM's missing-task error identifiers
+		// differ by Windows version and must not be mistaken for a broken service.
+		script := windowsScheduler(p.Name) + `
+try { $t=$folder.GetTask($name) } catch {
+  $cause=$_.Exception
+  while ($cause.InnerException) { $cause=$cause.InnerException }
+  if ($cause.HResult -ne -2147024894) { throw }
+  @{registered=$false;enabled=$false;running=$false} | ConvertTo-Json -Compress
+  exit 0
+}
+@{registered=$true;enabled=[bool]$t.Enabled;running=($t.State -eq 4)} | ConvertTo-Json -Compress`
 		args = []string{"powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script}
 	default:
 		s.Error = "Login service is unsupported on this OS"
 		return s
 	}
-	b, queryErr := run(ctx, args)
+	queryContext, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	b, queryErr := run(queryContext, args)
 	text := string(b)
 	switch p.Platform {
 	case "darwin":
@@ -120,13 +132,22 @@ func (p ServicePlan) status(ctx context.Context, run serviceRunner) ServiceStatu
 			s.Running = values["ActiveState"] == "active" || values["ActiveState"] == "activating"
 		}
 	case "windows":
-		var value struct{ Registered, Enabled, Running bool }
-		if queryErr == nil && json.Unmarshal(b, &value) == nil {
-			s.Known, s.Registered, s.Enabled, s.Running = true, value.Registered, value.Enabled, value.Running
+		var value struct{ Registered, Enabled, Running *bool }
+		if queryErr == nil && json.Unmarshal(b, &value) == nil && value.Registered != nil && value.Enabled != nil && value.Running != nil {
+			s.Known, s.Registered, s.Enabled, s.Running = true, *value.Registered, *value.Enabled, *value.Running
 		}
 	}
 	if !s.Known {
 		s.Error = "OS login service status is unavailable"
+		if queryContext.Err() != nil {
+			s.Error += ": " + queryContext.Err().Error()
+		} else if queryErr != nil {
+			// Process errors contain the exit status, not raw OS output which
+			// may expose paths or task definitions in diagnostics.
+			s.Error += ": " + queryErr.Error()
+		} else {
+			s.Error += ": invalid supervisor response"
+		}
 	}
 	return s
 }
@@ -138,8 +159,13 @@ func (p ServicePlan) startRegistered(ctx context.Context) error {
 	case "linux":
 		return runService(ctx, p.Enable)
 	case "windows":
-		name := strings.ReplaceAll(p.Name, "'", "''")
-		return runService(ctx, [][]string{{"powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "Enable-ScheduledTask -TaskPath '\\' -TaskName '" + name + "' -ErrorAction Stop | Out-Null"}, {"schtasks", "/Run", "/TN", p.Name}})
+		return runService(ctx, [][]string{{"powershell.exe", "-NoProfile", "-NonInteractive", "-Command", windowsScheduler(p.Name) + "$t=$folder.GetTask($name); $t.Enabled=$true"}, {"schtasks", "/Run", "/TN", p.Name}})
 	}
 	return fmt.Errorf("unsupported service platform %s", p.Platform)
+}
+
+// The scheduler connection always targets the local machine and current user.
+// Only GetTask's ERROR_FILE_NOT_FOUND is absence; connection/access errors fail.
+func windowsScheduler(name string) string {
+	return "$ErrorActionPreference='Stop'; $service=New-Object -ComObject Schedule.Service; $service.Connect(); $folder=$service.GetFolder('\\'); $name='" + strings.ReplaceAll(name, "'", "''") + "'; "
 }
