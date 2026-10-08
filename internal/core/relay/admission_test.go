@@ -26,7 +26,11 @@ func signedAdmission(t *testing.T, origin string) (Identity, AdmissionTicket, Id
 	if err != nil {
 		t.Fatal(err)
 	}
-	ticket := AdmissionTicket{Schema: 1, Origin: origin, Ticket: strings.Repeat("b", 64), Provider: scope.Provider, Session: scope.Session, Expires: time.Now().Add(10 * time.Minute).Unix(), LeaseSeconds: 600, Owner: owner.Public}
+	task, err := newCloudTask(owner, scope.Provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticket := AdmissionTicket{Schema: 2, ID: strings.Repeat("e", 32), Task: task, Generation: 1, Origin: origin, Ticket: strings.Repeat("b", 64), Provider: scope.Provider, Session: scope.Session, Expires: time.Now().Add(10 * time.Minute).Unix(), LeaseSeconds: 600, Owner: owner.Public}
 	ticket.Signature = ed25519.Sign(owner.Signing, ticket.signed())
 	return owner, ticket, leaf, scope
 }
@@ -38,7 +42,7 @@ func TestAdmissionInvitationPinsEveryFieldAndIndependentFingerprint(t *testing.T
 	}
 	for _, mutate := range []func(*AdmissionTicket){
 		func(v *AdmissionTicket) { v.Origin = "https://other.invalid" }, func(v *AdmissionTicket) { v.Session = "fork" }, func(v *AdmissionTicket) { v.Provider = "codex-current" },
-		func(v *AdmissionTicket) { v.Expires++ }, func(v *AdmissionTicket) { v.LeaseSeconds++ }, func(v *AdmissionTicket) { v.Ticket = strings.Repeat("c", 64) },
+		func(v *AdmissionTicket) { v.Generation++ }, func(v *AdmissionTicket) { v.ID = strings.Repeat("c", 32) }, func(v *AdmissionTicket) { v.Task.ID = strings.Repeat("c", 32) }, func(v *AdmissionTicket) { v.Expires++ }, func(v *AdmissionTicket) { v.LeaseSeconds++ }, func(v *AdmissionTicket) { v.Ticket = strings.Repeat("c", 64) },
 		func(v *AdmissionTicket) { v.Schema++ }, func(v *AdmissionTicket) { v.Owner.Endpoint = "cloud/claude-hosted/reused" },
 	} {
 		copy := ticket
@@ -160,7 +164,7 @@ func TestAdmissionIssueAndRepeatedRevokeUseEnrolledOwner(t *testing.T) {
 	}
 	c := Connection{URL: server.URL, Device: owner.Public.ID, Token: "native-routing-secret", Space: "admission-space-12345", Expires: time.Now().Add(time.Hour).Unix(), CAFile: certFile}
 	store := AdmissionStore{Directory: filepath.Join(t.TempDir(), "invitations")}
-	record, err := store.Issue(t.Context(), owner, c, "claude-hosted", "native-session-123", 10*time.Minute)
+	record, err := store.IssueTask(t.Context(), owner, c, "claude-hosted", "native-session-123", 10*time.Minute, "")
 	if err != nil {
 		t.Fatal("private invitation issue failed", err)
 	}
@@ -193,7 +197,7 @@ func TestAdmissionIssueAndRepeatedRevokeUseEnrolledOwner(t *testing.T) {
 		t.Fatal("admission path escaped private store")
 	}
 	c.Device = strings.Repeat("f", 64)
-	if _, err = IssueAdmission(t.Context(), owner, c, "claude-hosted", "native-session-123", 10*time.Minute); err == nil || calls != 3 {
+	if _, err = store.IssueTask(t.Context(), owner, c, "claude-hosted", "native-session-123", 10*time.Minute, ""); err == nil || calls != 3 {
 		t.Fatal("another enrolled identity issued a ticket")
 	}
 }

@@ -15,6 +15,15 @@ import (
 // Check binds public observation to the independently approved incarnation.
 // Labels and paths returned by a connector never select another endpoint.
 func (o Observation) Check(peer relay.PublicIdentity, now time.Time) error {
+	// A valid historical signature is descriptive until the native issuer also
+	// verifies the invitation's claim against this independently approved peer.
+	if o.Task != nil {
+		if o.Task.Verify(o.Task.Owner.ID) != nil || o.Task.Provider != o.Provider || o.Generation < 1 || o.Generation >= 1<<53 || len(o.Admission) != 32 || strings.Trim(o.Admission, "0123456789abcdef") != "" {
+			return errors.New("invalid cloud task provenance")
+		}
+	} else if o.Admission != "" || o.Generation != 0 {
+		return errors.New("cloud admission has no task provenance")
+	}
 	if err := peer.Check(); err != nil {
 		return err
 	}

@@ -226,6 +226,14 @@ func Begin(ctx context.Context, parent string, scope Scope, ttl time.Duration) (
 }
 
 func Load(ctx context.Context, dir string) (Incarnation, error) {
+	return load(ctx, dir, false)
+}
+
+// LoadForClaim can repair a partially published task association, but cannot
+// revive an incarnation superseded by an equal or newer task generation.
+func LoadForClaim(ctx context.Context, dir string) (Incarnation, error) { return load(ctx, dir, true) }
+
+func load(ctx context.Context, dir string, forClaim bool) (Incarnation, error) {
 	var s Incarnation
 	if err := canonicalDirectory(dir); err != nil {
 		return s, err
@@ -246,7 +254,10 @@ func Load(ctx context.Context, dir string) (Incarnation, error) {
 	if err = s.check(); err != nil {
 		return s, err
 	}
-	if err = s.current(); err != nil {
+	if err = s.nativeCurrent(); err != nil {
+		return s, err
+	}
+	if err = s.taskCurrent(forClaim); err != nil {
 		return s, err
 	}
 	if _, err = localstate.ReadPrivateFile(filepath.Join(dir, "identity.json"), 8192); err != nil {
@@ -288,6 +299,13 @@ func Current(ctx context.Context, parent, provider, session, workspace string) (
 	return Load(ctx, filepath.Join(parent, string(id)))
 }
 func (s Incarnation) current() error {
+	if err := s.nativeCurrent(); err != nil {
+		return err
+	}
+	return s.taskCurrent(false)
+}
+
+func (s Incarnation) nativeCurrent() error {
 	b, err := localstate.ReadPrivateFile(s.activePath(), 32)
 	if err != nil {
 		return err
@@ -299,16 +317,19 @@ func (s Incarnation) current() error {
 }
 
 type Observation struct {
-	Provider            string    `json:"provider"`
-	Session             string    `json:"session"`
-	Incarnation         string    `json:"incarnation"`
-	Workspace           string    `json:"workspace"`
-	ObservedAt          time.Time `json:"observedAt"`
-	LeaseExpires        time.Time `json:"leaseExpires"`
-	TranscriptAvailable bool      `json:"transcriptAvailable"`
-	ExportAllowed       bool      `json:"exportAllowed"`
-	LastWrite           time.Time `json:"lastWrite,omitempty"`
-	Bytes               int64     `json:"bytes"`
+	Task                *relay.CloudTask `json:"task,omitempty"`
+	Admission           string           `json:"admission,omitempty"`
+	Generation          int64            `json:"generation,omitempty"`
+	Provider            string           `json:"provider"`
+	Session             string           `json:"session"`
+	Incarnation         string           `json:"incarnation"`
+	Workspace           string           `json:"workspace"`
+	ObservedAt          time.Time        `json:"observedAt"`
+	LeaseExpires        time.Time        `json:"leaseExpires"`
+	TranscriptAvailable bool             `json:"transcriptAvailable"`
+	ExportAllowed       bool             `json:"exportAllowed"`
+	LastWrite           time.Time        `json:"lastWrite,omitempty"`
+	Bytes               int64            `json:"bytes"`
 }
 
 // Handler has no shell, inventory, receive, undo, code-export or settings route.
@@ -339,7 +360,11 @@ func (s Incarnation) Handler(ctx context.Context, grant relay.Grant, operation, 
 	if grant.Expires > 0 && time.Unix(grant.Expires, 0).Before(leaseExpires) {
 		leaseExpires = time.Unix(grant.Expires, 0).UTC()
 	}
-	obs := Observation{Provider: s.Provider, Session: s.Session, Incarnation: s.ID, Workspace: s.Workspace, ObservedAt: time.Now().UTC(), LeaseExpires: leaseExpires, ExportAllowed: s.ExportTranscript && grant.Allows("export", time.Now())}
+	task, admission, generation, err := s.task(grant.Peer.ID)
+	if err != nil {
+		return nil, err
+	}
+	obs := Observation{Task: task, Admission: admission, Generation: generation, Provider: s.Provider, Session: s.Session, Incarnation: s.ID, Workspace: s.Workspace, ObservedAt: time.Now().UTC(), LeaseExpires: leaseExpires, ExportAllowed: s.ExportTranscript && grant.Allows("export", time.Now())}
 	if s.Transcript != "" {
 		st, err := os.Lstat(s.Transcript)
 		if err != nil && !os.IsNotExist(err) {
@@ -411,10 +436,21 @@ func (s Incarnation) Run(ctx context.Context) error {
 	deadline := min(s.Expires.Unix(), c.Expires)
 	ctx, cancel := context.WithDeadline(ctx, time.Unix(deadline, 0))
 	defer cancel()
+	ctx, stop := context.WithCancelCause(ctx)
+	join, err := s.watchScope(ctx, stop)
+	if err != nil {
+		stop(err)
+		return err
+	}
+	defer func() { stop(context.Canceled); join() }()
 	service := relay.Service{Transport: relay.Transport{Base: c.URL, Token: c.Token, Space: c.Space, HTTP: httpClient}, Processor: relay.Processor{Identity: identity, Space: c.Space, Store: store, Handle: s.Handler, Recover: s.Handler}, Notify: func(error) {
 		if s.current() != nil {
 			cancel()
 		}
 	}}
-	return service.Run(ctx)
+	err = service.Run(ctx)
+	if ctx.Err() != nil && errors.Is(err, context.Canceled) {
+		return context.Cause(ctx)
+	}
+	return err
 }

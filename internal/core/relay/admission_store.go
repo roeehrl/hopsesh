@@ -17,6 +17,8 @@ import (
 // one-use secret and signature; routing admission never implies peer approval.
 type AdmissionRecord struct {
 	ID               string `json:"id"`
+	TaskID           string `json:"taskId"`
+	Generation       int64  `json:"generation"`
 	Path             string `json:"path"`
 	Provider         string `json:"provider"`
 	Session          string `json:"session"`
@@ -45,7 +47,19 @@ func (s AdmissionStore) Check(ctx context.Context, c Connection, id string) (Adm
 	if json.Unmarshal(body, &ticket) != nil {
 		return AdmissionStatus{}, errors.New("invalid saved cloud invitation")
 	}
-	return CheckAdmission(ctx, c, ticket)
+	state, err := CheckAdmission(ctx, c, ticket)
+	if err != nil {
+		return state, err
+	}
+	current, err := s.readTask(ticket.Task.ID)
+	if err != nil {
+		return AdmissionStatus{}, err
+	}
+	if current.Generation < ticket.Generation || current.Task.Verify(c.Device) != nil {
+		return AdmissionStatus{}, errors.New("cloud task generation history is invalid")
+	}
+	state.Superseded = current.Generation > ticket.Generation
+	return state, nil
 }
 
 func (s AdmissionStore) path(id string) (string, error) {
@@ -81,10 +95,10 @@ func (s AdmissionStore) List() ([]AdmissionRecord, error) {
 			return nil, err
 		}
 		var ticket AdmissionTicket
-		if json.Unmarshal(body, &ticket) != nil || ticket.Verify(ticket.Owner.ID) != nil {
+		if json.Unmarshal(body, &ticket) != nil || ticket.ID != id || ticket.Verify(ticket.Owner.ID) != nil {
 			return nil, errors.New("saved cloud invitation is invalid")
 		}
-		row := AdmissionRecord{ID: id, Path: path, Provider: ticket.Provider, Session: ticket.Session, Origin: ticket.Origin, OwnerFingerprint: ticket.Owner.ID, Expires: ticket.Expires, LeaseSeconds: ticket.LeaseSeconds}
+		row := AdmissionRecord{ID: id, TaskID: ticket.Task.ID, Generation: ticket.Generation, Path: path, Provider: ticket.Provider, Session: ticket.Session, Origin: ticket.Origin, OwnerFingerprint: ticket.Owner.ID, Expires: ticket.Expires, LeaseSeconds: ticket.LeaseSeconds}
 		if b, err := localstate.ReadPrivateFile(path+".revoked", 16); err == nil {
 			if string(b) != "revoked\n" {
 				return nil, errors.New("invalid cloud revocation receipt")
@@ -102,7 +116,11 @@ func (s AdmissionStore) List() ([]AdmissionRecord, error) {
 	return rows, nil
 }
 
-func (s AdmissionStore) Issue(ctx context.Context, owner Identity, c Connection, provider, session string, lease time.Duration) (AdmissionRecord, error) {
+// IssueTask preserves logical identity only after explicit selection of an owner-issued task.
+func (s AdmissionStore) IssueTask(ctx context.Context, owner Identity, c Connection, provider, session string, lease time.Duration, resume string) (AdmissionRecord, error) {
+	if err := validateAdmissionRequest(owner, c, provider, session, lease); err != nil {
+		return AdmissionRecord{}, err
+	}
 	if err := os.MkdirAll(s.Directory, 0700); err != nil {
 		return AdmissionRecord{}, err
 	}
@@ -114,6 +132,10 @@ func (s AdmissionStore) Issue(ctx context.Context, owner Identity, c Connection,
 		return AdmissionRecord{}, err
 	}
 	defer lock.Close()
+	task, generation, err := s.selectTask(owner, provider, resume)
+	if err != nil {
+		return AdmissionRecord{}, err
+	}
 	rows, err := s.List()
 	if err != nil {
 		return AdmissionRecord{}, err
@@ -159,7 +181,12 @@ func (s AdmissionStore) Issue(ctx context.Context, owner Identity, c Connection,
 	if err = localstate.PrivateFile(staged); err != nil {
 		return AdmissionRecord{}, err
 	}
-	ticket, err := IssueAdmission(ctx, owner, c, provider, session, lease)
+	// A generation is reserved durably before issuing any authority. Failed
+	// issuance cannot reuse an old generation or restore its superseded access.
+	if err = s.saveTask(task, generation, session); err != nil {
+		return AdmissionRecord{}, err
+	}
+	ticket, err := issueAdmission(ctx, owner, c, provider, session, lease, id, task, generation)
 	if err != nil {
 		return AdmissionRecord{}, err
 	}
@@ -176,7 +203,7 @@ func (s AdmissionStore) Issue(ctx context.Context, owner Identity, c Connection,
 		return AdmissionRecord{}, errors.New("invitation issued but its private file could not be committed; no peer was approved")
 	}
 	good = true
-	return AdmissionRecord{ID: id, Path: path, Provider: provider, Session: session, Origin: ticket.Origin, OwnerFingerprint: owner.Public.ID, Expires: ticket.Expires, LeaseSeconds: ticket.LeaseSeconds}, nil
+	return AdmissionRecord{ID: id, TaskID: task.ID, Generation: generation, Path: path, Provider: provider, Session: session, Origin: ticket.Origin, OwnerFingerprint: owner.Public.ID, Expires: ticket.Expires, LeaseSeconds: ticket.LeaseSeconds}, nil
 }
 
 func (s AdmissionStore) Revoke(ctx context.Context, c Connection, id string) error {

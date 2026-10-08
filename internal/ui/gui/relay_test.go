@@ -37,7 +37,7 @@ func TestRelaySettingsDoesNotInitializeAndNeverExportsSecrets(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(config.StateDir(), "relay")); !os.IsNotExist(err) {
 		t.Fatal("passive settings created relay state", err)
 	}
-	if _, err := a.RelayIssueCloudAdmission("claude-hosted", "not-enrolled", 3600); err == nil {
+	if _, err := a.RelayIssueCloudAdmission("claude-hosted", "not-enrolled", 3600, ""); err == nil {
 		t.Fatal("cloud invitation issued before enrollment")
 	}
 	if _, err := os.Stat(filepath.Join(config.StateDir(), "relay")); !os.IsNotExist(err) {

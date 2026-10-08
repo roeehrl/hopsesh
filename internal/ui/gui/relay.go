@@ -37,6 +37,7 @@ type RelaySettingsDTO struct {
 	Health         relay.Health            `json:"health"`
 	Peers          []RelayPeerDTO          `json:"peers"`
 	Admissions     []relay.AdmissionRecord `json:"admissions"`
+	Tasks          []relay.CloudTaskRecord `json:"tasks"`
 	Error          string                  `json:"error,omitempty"`
 }
 
@@ -82,12 +83,17 @@ func (a *App) RelaySettings() RelaySettingsDTO {
 	} else {
 		out.Error = "Cloud invitations could not be read safely"
 	}
+	if rows, err := (relay.AdmissionStore{Directory: filepath.Join(core.StateDir, "cloud-admissions")}).Tasks(); err == nil {
+		out.Tasks = rows
+	} else {
+		out.Error = "Cloud task history could not be read safely"
+	}
 	return out
 }
 
 // RelayIssueCloudAdmission returns private file metadata only. A one-use
 // secret never crosses the browser bridge or clipboard.
-func (a *App) RelayIssueCloudAdmission(provider, session string, leaseSeconds int) (relay.AdmissionRecord, error) {
+func (a *App) RelayIssueCloudAdmission(provider, session string, leaseSeconds int, resume string) (relay.AdmissionRecord, error) {
 	core := a.snapshot()
 	store := relay.Store{Directory: filepath.Join(core.StateDir, "relay")}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -107,7 +113,7 @@ func (a *App) RelayIssueCloudAdmission(provider, session string, leaseSeconds in
 	if leaseSeconds < 60 || leaseSeconds > 86400 {
 		return relay.AdmissionRecord{}, errors.New("cloud routing lease must be between one minute and 24 hours")
 	}
-	return (relay.AdmissionStore{Directory: filepath.Join(core.StateDir, "cloud-admissions")}).Issue(ctx, owner, c, provider, session, time.Duration(leaseSeconds)*time.Second)
+	return (relay.AdmissionStore{Directory: filepath.Join(core.StateDir, "cloud-admissions")}).IssueTask(ctx, owner, c, provider, session, time.Duration(leaseSeconds)*time.Second, resume)
 }
 
 func (a *App) RelayRevokeCloudAdmission(id string) error {

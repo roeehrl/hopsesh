@@ -7,6 +7,42 @@ test.beforeEach(async ({ page }) => {
   await page.getByRole("tab", { name: "Internet delivery" }).click();
 });
 
+test("resuming cloud task identity is explicit and still requires a new claim and approval",async({page})=>{
+ const task={id:"e".repeat(32),provider:"codex-current",created:Math.floor(Date.now()/1000)-3600,ownerFingerprint:"f".repeat(64)};
+ let issued=0;
+ await page.route("**/call",async route=>{
+  const request=route.request().postDataJSON();
+  if(request.m==="Settings"){
+   const response=await route.fetch(),body=await response.json();
+   body.result.relay={initialized:true,enrolled:true,enabled:true,expires:Date.now()/1000+3600,peers:[],tasks:[task],admissions:[],identity:{id:task.ownerFingerprint}};
+   await route.fulfill({json:body});return;
+  }
+  if(request.m==="RelayIssueCloudAdmission"){
+   expect(request.args).toEqual([task.provider,"rebuilt-native-id",3600,task.id]);issued++;
+   await route.fulfill({json:{result:{id:"a".repeat(32),taskId:task.id,path:"/private/new-invitation.json",ownerFingerprint:task.ownerFingerprint,expires:Date.now()/1000+600}}});return;
+  }
+  await route.continue();
+ });
+ await page.getByRole("button",{name:"Refresh status",exact:true}).click();
+ await page.getByRole("button",{name:"Invite cloud session…"}).click();
+ const d=page.getByRole("dialog");
+ await expect(d.getByLabel("Cloud task continuity")).toHaveValue("");
+ await expect(d).toContainText("Matching names or native IDs never join tasks automatically");
+ await d.getByLabel("Cloud task continuity").selectOption(task.id);
+ await expect(d.getByLabel("Cloud invitation provider")).toHaveValue(task.provider);
+ await expect(d.getByLabel("Cloud invitation provider")).toBeDisabled();
+ await d.getByLabel("Cloud task continuity").selectOption("");
+ await expect(d.getByLabel("Cloud invitation provider")).toBeEnabled();
+ await d.getByLabel("Cloud task continuity").selectOption(task.id);
+ await d.getByLabel("Actual cloud session ID").fill("rebuilt-native-id");
+ expect(issued).toBe(0);
+ await d.getByRole("button",{name:"Create private invitation"}).click();
+ await expect(d.getByRole("status")).toContainText(`Logical task: ${task.id}`);
+ await expect(d.getByRole("status")).toContainText("does not approve a cloud endpoint or enable sharing");
+ await expect(d.getByRole("status")).toContainText("approve the fresh session's public identity");
+ expect(issued).toBe(1);
+});
+
 test("checkpoint cache cleanup stays explicit and keeps recovery errors reviewable",async({page})=>{
  let reads=0,removes=0;
  await page.route("**/call",async route=>{
@@ -213,7 +249,7 @@ test("cloud invitations require enrollment and show provisional routing separate
    await route.fulfill({json:body});return;
   }
   if(request.m==="RelayIssueCloudAdmission"){
-   expect(request.args).toEqual(["codex-current","actual-task-123",3600]);attempts++;
+   expect(request.args).toEqual(["codex-current","actual-task-123",3600,""]);attempts++;
    if(attempts===1){await route.fulfill({json:{error:"relay temporarily unavailable"}});return;}
    created=true;await route.fulfill({json:{result:record}});return;
   }

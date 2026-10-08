@@ -17,7 +17,7 @@ import (
 )
 
 func cloudTicketCmd() *cobra.Command {
-	var provider, session string
+	var provider, session, resume string
 	var lease time.Duration
 	c := &cobra.Command{Use: "ticket", Short: "Save a private one-use routing invitation for one real cloud session", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		store := relayStore()
@@ -33,15 +33,16 @@ func cloudTicketCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		record, err := (relay.AdmissionStore{Directory: filepath.Join(config.StateDir(), "cloud-admissions")}).Issue(cmd.Context(), identity, connection, provider, session, lease)
+		record, err := (relay.AdmissionStore{Directory: filepath.Join(config.StateDir(), "cloud-admissions")}).IssueTask(cmd.Context(), identity, connection, provider, session, lease, resume)
 		if err != nil {
 			return err
 		}
-		_, err = fmt.Fprintf(cmd.OutOrStdout(), "Private invitation saved at %s\nExpires %s. Supply this file through stdin to cloud-integration claim in that actual session. Keep it out of environment setup and cached images.\nCompare owner fingerprint independently: %s\nThe fresh cloud identity still needs approval on this device before sharing.\n", record.Path, time.Unix(record.Expires, 0).Format(time.RFC3339), public.ID)
+		_, err = fmt.Fprintf(cmd.OutOrStdout(), "Private invitation saved at %s\nExpires %s. Supply this file through stdin to cloud-integration claim in that actual session. Keep it out of environment setup and cached images.\nCompare owner fingerprint independently: %s\nLogical task: %s\nThe fresh cloud identity still needs approval on this device before sharing.\n", record.Path, time.Unix(record.Expires, 0).Format(time.RFC3339), public.ID, record.TaskID)
 		return err
 	}}
 	c.Flags().StringVar(&provider, "provider", "", "cloud execution surface")
 	c.Flags().StringVar(&session, "session", "", "the actual cloud task's native ID; never an environment ID")
+	c.Flags().StringVar(&resume, "resume-task", "", "explicitly preserve an owner-issued logical task ID across resume or rebuild; omit for a new task or fork")
 	c.Flags().DurationVar(&lease, "lease", time.Hour, "cloud routing lease, one minute to 24 hours")
 	return c
 }
@@ -61,7 +62,7 @@ func readAdmission(r io.Reader) (relay.AdmissionTicket, error) {
 func cloudClaimCmd() *cobra.Command {
 	var fingerprint, caFile string
 	c := &cobra.Command{Use: "claim <instance-directory>", Short: "Read a one-use invitation from stdin for this fresh session; remains provisional", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		instance, err := cloudintegration.Load(cmd.Context(), args[0])
+		instance, err := cloudintegration.LoadForClaim(cmd.Context(), args[0])
 		if err != nil {
 			return err
 		}
@@ -86,7 +87,10 @@ func cloudClaimCmd() *cobra.Command {
 			return err
 		}
 		// The invocation may have been superseded while waiting for the relay.
-		if _, err = cloudintegration.Load(cmd.Context(), instance.Directory); err != nil {
+		if _, err = cloudintegration.LoadForClaim(cmd.Context(), instance.Directory); err != nil {
+			return err
+		}
+		if err = instance.AssociateTask(cmd.Context(), ticket); err != nil {
 			return err
 		}
 		connection.CAFile = caFile
@@ -102,10 +106,12 @@ func cloudClaimCmd() *cobra.Command {
 		}
 		// Only public pairing information crosses stdout; credentials stay private.
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(struct {
-			State   string               `json:"state"`
-			Public  relay.PublicIdentity `json:"public"`
-			Expires int64                `json:"expires"`
-		}{"provisional-awaiting-peer-approval", instance.Public, connection.Expires})
+			State      string               `json:"state"`
+			Public     relay.PublicIdentity `json:"public"`
+			Expires    int64                `json:"expires"`
+			Task       string               `json:"taskId"`
+			Generation int64                `json:"generation"`
+		}{"provisional-awaiting-peer-approval", instance.Public, connection.Expires, ticket.Task.ID, ticket.Generation})
 	}}
 	c.Flags().StringVar(&fingerprint, "fingerprint", "", "owner's full fingerprint compared through a trusted channel")
 	c.Flags().StringVar(&caFile, "ca-file", "", "absolute local PEM trust root for a private relay")
@@ -153,10 +159,25 @@ func cloudTicketStatusCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		state, err := relay.CheckAdmission(cmd.Context(), connection, ticket)
+		var state relay.AdmissionStatus
+		if filepath.Dir(filepath.Clean(args[0])) == filepath.Join(config.StateDir(), "cloud-admissions") {
+			state, err = (relay.AdmissionStore{Directory: filepath.Join(config.StateDir(), "cloud-admissions")}).Check(cmd.Context(), connection, strings.TrimSuffix(filepath.Base(args[0]), ".json"))
+		} else {
+			state, err = relay.CheckAdmission(cmd.Context(), connection, ticket)
+		}
 		if err != nil {
 			return err
 		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(state)
+	}}
+}
+
+func cloudTasksCmd() *cobra.Command {
+	return &cobra.Command{Use: "tasks", Short: "List owner-issued logical cloud tasks available for explicit resume", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		rows, err := (relay.AdmissionStore{Directory: filepath.Join(config.StateDir(), "cloud-admissions")}).Tasks()
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(rows)
 	}}
 }

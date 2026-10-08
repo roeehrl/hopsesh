@@ -148,27 +148,39 @@ func (a *App) PlanCloudCheckpoint(ctx context.Context, inv *Inventory, id string
 	if !ok {
 		return fail(agent.ErrNotInstalled)
 	}
-	endpoint := "cloud:" + record.Export.Provider + ":" + id
+	sourceIdentity := id
+	if record.Export.Task != nil {
+		if err = a.checkCloudTask(ctx, grant, record.Export.Observation); err != nil {
+			return fail(err)
+		}
+		sourceIdentity = record.Export.Task.ID
+	}
+	endpoint := "cloud:" + record.Export.Provider + ":" + sourceIdentity
 	home := "/hopsesh-cloud-checkpoint"
 	native := path.Join(home, record.Export.Session+".jsonl")
 	snapshot := host.NewSnapshot(record.Export.Provider, host.Facts{OS: "linux", Home: home, Endpoint: endpoint}, []host.SnapshotFile{{Path: native, Data: record.Export.Data, Mode: 0600}})
-	sin := agent.Install{Agent: sourceID, Present: true, OS: "linux", Roots: map[string]string{"home": home}, Profile: &agent.RuntimeProfile{ID: id, Endpoint: endpoint, Agent: sourceID, Root: home, Name: "Approved cloud incarnation", Binding: id}}
-	ledgerDir := filepath.Join(root, id)
+	sin := agent.Install{Agent: sourceID, Present: true, OS: "linux", Roots: map[string]string{"home": home}, Profile: &agent.RuntimeProfile{ID: sourceIdentity, Endpoint: endpoint, Agent: sourceID, Root: home, Name: "Approved cloud task", Binding: sourceIdentity}}
+	ledgerDir := filepath.Join(root, sourceIdentity)
 	if err = os.MkdirAll(ledgerDir, 0700); err != nil {
 		return fail(err)
 	}
 	if err = localstate.PrivateDirectory(ledgerDir); err != nil {
 		return fail(err)
 	}
-	input := move.Input{Source: move.Side{Machine: snapshot, Module: sm, Install: sin}, Target: move.Side{Machine: here.host, Module: tm, Install: tin}, Session: agent.Summary{Key: agent.SessionKey{Agent: sourceID, Profile: id, Session: agent.SessionID(record.Export.Session)}, Path: native, CWD: record.Export.Workspace, Title: "Cloud conversation checkpoint"}, Live: agent.LiveInfo{State: agent.Unknown}, SourceReceipt: &move.ReceiptOwner{FS: host.LocalFS(), Machine: here.Name, NativePath: filepath.Join(ledgerDir, "source.jsonl")}}
+	input := move.Input{CheckpointIdentity: record.Export.Task != nil, Source: move.Side{Machine: snapshot, Module: sm, Install: sin}, Target: move.Side{Machine: here.host, Module: tm, Install: tin}, Session: agent.Summary{Key: agent.SessionKey{Agent: sourceID, Profile: sourceIdentity, Session: agent.SessionID(record.Export.Session)}, Path: native, CWD: record.Export.Workspace, Title: "Cloud conversation checkpoint"}, Live: agent.LiveInfo{State: agent.Unknown}, SourceReceipt: &move.ReceiptOwner{FS: host.LocalFS(), Machine: here.Name, NativePath: filepath.Join(ledgerDir, "source.jsonl")}}
 	reviewExpires := time.Now().Add(10 * time.Minute)
 	input.CheckSource = func(ctx context.Context) error {
 		if !reviewExpires.After(time.Now()) {
 			return errors.New("cloud checkpoint review expired; prepare it again")
 		}
-		_, err := a.checkCloudCheckpointAccess(ctx, id)
+		currentGrant, err := a.checkCloudCheckpointAccess(ctx, id)
 		if err != nil {
 			return err
+		}
+		if record.Export.Task != nil {
+			if err = a.checkCloudTask(ctx, currentGrant, record.Export.Observation); err != nil {
+				return err
+			}
 		}
 		if !record.Export.LeaseExpires.After(time.Now()) {
 			return errors.New("cloud incarnation lease expired since review")
@@ -200,7 +212,10 @@ func (a *App) PlanCloudCheckpoint(ctx context.Context, inv *Inventory, id string
 	if err != nil {
 		return fail(err)
 	}
-	p.Warnings = append(p.Warnings, fmt.Sprintf("Read-only cloud checkpoint: %d complete records; %d unfinished bytes excluded. Code and provider-private state are not included. Rebuilt incarnations require independent approval and start a new family unless verified handoff provenance is available.", record.Export.Checkpoint.Records, record.Export.Checkpoint.OmittedTail))
+	p.Warnings = append(p.Warnings, fmt.Sprintf("Read-only cloud checkpoint: %d complete records; %d unfinished bytes excluded. Code and provider-private state are not included. Fresh incarnations require independent approval. Explicit owner-issued task continuity preserves verified checkpoint lineage; cloud handoff ancestry requires its separate saved provenance.", record.Export.Checkpoint.Records, record.Export.Checkpoint.OmittedTail))
+	if record.Export.Task != nil {
+		p.Warnings = append(p.Warnings, fmt.Sprintf("Verified owner-issued logical task %s, generation %d. This checkpoint preserves exact native-prefix ancestry across approved rebuilds; it does not restore provider-private state.", record.Export.Task.ID, record.Export.Generation))
+	}
 	if err = saveRelayRecord(recordPath, &record); err != nil {
 		return fail(err)
 	}

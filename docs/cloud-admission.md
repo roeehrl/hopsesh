@@ -54,7 +54,44 @@ the first successful claim also binds its fresh incarnation and public keys.
 An identical retry returns the same credential, including after a failure
 between mailbox enrollment and authorization-object commit. A changed identity,
 scope or incarnation cannot reuse that invitation. A resume or rebuild requires
-a new invitation; an independent fork uses its own session ID and invitation.
+a new invitation. Choose **New task or independent fork** for unrelated work;
+matching native IDs, titles and environments never join their lineage.
+
+For a resume or rebuild, explicitly select the saved logical task in the GUI's
+**Task continuity** field. The CLI equivalent is:
+
+```sh
+hopsesh cloud-integration tasks
+hopsesh cloud-integration ticket --provider claude-hosted --session CURRENT_NATIVE_SESSION_ID --resume-task LOGICAL_TASK_ID --lease 1h
+```
+
+The logical task ID survives invitation expiry and a changed provider-native
+session ID. Each invitation reserves a higher owner-signed generation before
+requesting routing authority. Invalid local input is rejected before reservation.
+An uncertain network failure leaves its generation reserved; prepare a fresh
+invitation to continue. Previous generations cannot authorize new checkpoint
+imports. Old routing leases remain independently revocable until expiry.
+
+Claiming the new generation supersedes the previous connector in the same task
+state directory, including when the native session ID changed. Private filesystem
+notifications stop its listener and join it without another polling timer. A
+partially published association can recover its exact claim, but cannot roll back
+a newer generation. A fork has an independent logical task and generation.
+
+Native checkpoint review verifies the exact invitation's current claim against
+the independently approved cloud key, the owner's saved task and its latest
+generation. A historical task signature or connector-provided label alone cannot
+join lineage. The generation is rechecked before native installation. Each
+incarnation still requires its own fingerprint approval and export permission.
+
+Successive checkpoints preserve the same source ledger. A changed native ID
+inherits only the complete previously verified native prefix, checked by native
+anchors and content hashes. Rewritten or compacted history is refused unless the
+user explicitly chooses a separate fork; its fidelity warning remains attached.
+Checkpoint forks retain separate branches, and retries retain their native IDs.
+This establishes checkpoint ancestry across approved incarnations. Connecting
+that task to a prior local-to-cloud handoff still requires the saved handoff's
+separate provenance; matching text or IDs does not establish that relationship.
 
 **Revoke invitation** revokes the claim opportunity and any claimed routing
 lease. It remains available after the ten-minute claim window, through the
@@ -72,12 +109,16 @@ checkpoints and local peer permissions are independent of routing revocation.
 Server limits are 512 retained admission records and 16 per issuing native
 device. Claimed records remain available for revocation until their lease ends;
 alarms reclaim expired records. Native state retains at most 128 private
-invitations, pruning only once every possible claimed lease has ended.
+invitations, pruning only once every possible claimed lease has ended. Logical task
+history retains at most 10,000 bounded metadata records independently of routing
+secrets; a full task quota still permits explicitly resuming an existing task.
 
 The three-OS CI relay job exercises real Go and CLI clients against the actual
 authorization and mailbox handlers, and separately against local workerd with
 SQLite Durable Objects and R2. It includes retry, original/fork independence,
-rebuild, revocation and status. Deterministic server contracts inject a lost
+rebuild, revocation and status. The native checkpoint scenario additionally exercises
+six fresh incarnations, changed native IDs, original/fork branch independence,
+Claude/Codex local imports, stable retries and automatic old-process shutdown. Deterministic server contracts inject a lost
 cross-object commit and verify native renewal, authority rotation and role
 boundaries. The local Wrangler fixture explicitly uses its local HTTPS origin
 so signed proofs match the tested service rather than the production route.

@@ -256,9 +256,13 @@ func qualifyCloudAdmission(t *testing.T, ctx context.Context, bin, root, origin,
 		}
 		return out
 	}
-	issue := func(session string) ([]byte, string) {
+	issue := func(session string, resume ...string) ([]byte, string) {
 		t.Helper()
-		out := run(native, nil, true, "cloud-integration", "ticket", "--provider", "codex-current", "--session", session, "--lease", "10m")
+		args := []string{"cloud-integration", "ticket", "--provider", "codex-current", "--session", session, "--lease", "10m"}
+		if len(resume) > 0 {
+			args = append(args, "--resume-task", resume[0])
+		}
+		out := run(native, nil, true, args...)
 		lines := strings.Split(string(out), "\n")
 		path := strings.TrimPrefix(lines[0], "Private invitation saved at ")
 		body, err := localstate.ReadPrivateFile(path, 8192)
@@ -358,8 +362,30 @@ func qualifyCloudAdmission(t *testing.T, ctx context.Context, bin, root, origin,
 		t.Fatal("resume retained old local scope")
 	}
 	claim(rebuilt, ticket, false)
-	newTicket, _ := issue("original-cloud-session")
+	var originalTicket relay.AdmissionTicket
+	if json.Unmarshal(ticket, &originalTicket) != nil {
+		t.Fatal("original invitation decode")
+	}
+	newTicket, _ := issue("original-cloud-session", originalTicket.Task.ID)
+	var resumedTicket relay.AdmissionTicket
+	if json.Unmarshal(newTicket, &resumedTicket) != nil || resumedTicket.Task.ID != originalTicket.Task.ID || resumedTicket.ID == originalTicket.ID {
+		t.Fatal("rebuild lost logical task identity or reused admission")
+	}
+	var independentTicket relay.AdmissionTicket
+	if json.Unmarshal(forkTicket, &independentTicket) != nil || independentTicket.Task.ID == originalTicket.Task.ID {
+		t.Fatal("independent fork inherited original task identity")
+	}
 	claim(rebuilt, newTicket, true)
+	if err = admissions.ResolveTask(ctx, nativeConnection, resumedTicket.ID, resumedTicket.Task, rebuilt.Public, rebuilt.Provider, rebuilt.Session, resumedTicket.Generation); err != nil {
+		t.Fatal("rebuilt task did not resolve to its fresh claim", err)
+	}
+	if err = admissions.ResolveTask(ctx, nativeConnection, originalTicket.ID, originalTicket.Task, rebuilt.Public, rebuilt.Provider, rebuilt.Session, resumedTicket.Generation); err == nil {
+		t.Fatal("old invitation authorized new incarnation lineage")
+	}
+	var taskRows []relay.CloudTaskRecord
+	if err = json.Unmarshal(run(native, nil, true, "cloud-integration", "tasks"), &taskRows); err != nil || len(taskRows) != 2 {
+		t.Fatal("CLI logical task history lost resume/fork independence", err)
+	}
 	for range 2 {
 		run(native, nil, true, "cloud-integration", "revoke-ticket", path)
 	}

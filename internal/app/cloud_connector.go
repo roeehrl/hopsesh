@@ -60,6 +60,9 @@ func (a *App) CloudConnectorObservation(ctx context.Context, id string) (cloudin
 	if err = out.Check(grant.Peer, time.Now()); err != nil {
 		return cloudintegration.Observation{}, err
 	}
+	if err = a.checkCloudTask(ctx, grant, out); err != nil {
+		return cloudintegration.Observation{}, err
+	}
 	out.ExportAllowed = out.ExportAllowed && grant.AllowsSend("export", time.Now())
 	return out, nil
 }
@@ -78,6 +81,9 @@ func (a *App) CloudConnectorConversation(ctx context.Context, id string) (CloudC
 		return CloudConnectorPreview{}, err
 	}
 	if err = out.Check(grant.Peer, time.Now()); err != nil {
+		return CloudConnectorPreview{}, err
+	}
+	if err = a.checkCloudTask(ctx, grant, out.Observation); err != nil {
 		return CloudConnectorPreview{}, err
 	}
 	moduleID := agent.ID("claude")
@@ -108,4 +114,23 @@ func (a *App) CloudConnectorConversation(ctx context.Context, id string) (CloudC
 		return CloudConnectorPreview{}, errors.New("cloud conversation preview exceeds its bounded display limit")
 	}
 	return CloudConnectorPreview{Observation: out.Observation, Checkpoint: out.Checkpoint, SHA256: out.SHA256, Preview: preview}, nil
+}
+
+func (a *App) checkCloudTask(ctx context.Context, grant relay.Grant, observation cloudintegration.Observation) error {
+	if observation.Task == nil {
+		return nil
+	}
+	store := relay.Store{Directory: filepath.Join(a.StateDir, "relay")}
+	self, err := store.Public()
+	if err != nil {
+		return err
+	}
+	if observation.Task.Verify(self.ID) != nil {
+		return errors.New("cloud task provenance belongs to another native issuer")
+	}
+	c, err := store.Connection(ctx)
+	if err != nil {
+		return err
+	}
+	return (relay.AdmissionStore{Directory: filepath.Join(a.StateDir, "cloud-admissions")}).ResolveTask(ctx, c, observation.Admission, *observation.Task, grant.Peer, observation.Provider, observation.Session, observation.Generation)
 }

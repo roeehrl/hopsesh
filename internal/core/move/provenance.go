@@ -70,7 +70,14 @@ func prepareLineage(ctx context.Context, p *Plan, in Input, seg *ir.Segment) err
 		p.Target.ProfileName = in.Target.Install.Profile.Name
 	}
 	var st lineage.State
-	p.sourceReplica, st, err = m.ObserveBinding(lineage.Replica{Endpoint: sourceID, Binding: in.Source.Install.BindingID(), Key: p.Key, Location: p.Source.Location, AgentVersion: p.Source.Version, Time: seg.Header.Created}, seg)
+	if in.CheckpointIdentity && in.SourceReceipt != nil && in.Source.Machine.IsSnapshot() {
+		err = seedCheckpointPrefix(m, lineage.Replica{Endpoint: sourceID, Binding: in.Source.Install.BindingID(), Key: p.Key, Line: m.Branch, Location: p.Source.Location, AgentVersion: p.Source.Version, Time: seg.Header.Created}, seg)
+	}
+	if err == nil {
+		p.sourceReplica, st, err = m.ObserveBinding(lineage.Replica{Endpoint: sourceID, Binding: in.Source.Install.BindingID(), Key: p.Key, Location: p.Source.Location, AgentVersion: p.Source.Version, Time: seg.Header.Created}, seg)
+	} else {
+		p.sourceReplica = m.Upsert(lineage.Replica{Endpoint: sourceID, Binding: in.Source.Install.BindingID(), Key: p.Key, Line: m.Branch, Location: p.Source.Location, AgentVersion: p.Source.Version, Time: seg.Header.Created})
+	}
 	snapshot := false
 	if err != nil && (p.Options.Fork || p.Options.Conflict == ConflictKeepBoth) {
 		old, _ := m.LatestState(p.sourceReplica)

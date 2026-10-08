@@ -20,6 +20,9 @@ import (
 // The owner fingerprint must be compared independently at the actual session.
 type AdmissionTicket struct {
 	Schema       int            `json:"schema"`
+	ID           string         `json:"id"`
+	Task         CloudTask      `json:"task"`
+	Generation   int64          `json:"generation"`
 	Origin       string         `json:"origin"`
 	Ticket       string         `json:"ticket"`
 	Provider     string         `json:"provider"`
@@ -39,11 +42,11 @@ func admissionProvider(provider string) bool {
 func (t AdmissionTicket) signed() []byte {
 	t.Signature = nil
 	body, _ := json.Marshal(t)
-	return append([]byte("hopsesh-cloud-invitation-v1\x00"), body...)
+	return append([]byte("hopsesh-cloud-invitation-v2\x00"), body...)
 }
 
 func (t AdmissionTicket) Verify(fingerprint string) error {
-	if t.Schema != 1 || t.Owner.Check() != nil || fingerprint == "" || t.Owner.ID != fingerprint || t.Owner.Endpoint == "" || strings.HasPrefix(t.Owner.Endpoint, "cloud/") || !validDeviceCode(t.Ticket) || !admissionProvider(t.Provider) || !admissionName.MatchString(t.Session) || t.LeaseSeconds < 60 || t.LeaseSeconds > int(MaxLifetime/time.Second) || t.Expires < 1 || len(t.Signature) != ed25519.SignatureSize || !ed25519.Verify(t.Owner.Signing, t.signed(), t.Signature) {
+	if t.Schema != 2 || t.Generation < 1 || t.Generation >= 1<<53 || !taskID(t.ID) || t.Task.Verify(fingerprint) != nil || t.Task.Provider != t.Provider || t.Owner.Check() != nil || fingerprint == "" || t.Owner.ID != fingerprint || t.Owner.Endpoint == "" || strings.HasPrefix(t.Owner.Endpoint, "cloud/") || !validDeviceCode(t.Ticket) || !admissionProvider(t.Provider) || !admissionName.MatchString(t.Session) || t.LeaseSeconds < 60 || t.LeaseSeconds > int(MaxLifetime/time.Second) || t.Expires < 1 || len(t.Signature) != ed25519.SignatureSize || !ed25519.Verify(t.Owner.Signing, t.signed(), t.Signature) {
 		return errors.New("cloud admission signature, independently checked owner or scope is invalid")
 	}
 	origin, err := (Enrollment{Origin: t.Origin}).origin()
@@ -53,9 +56,17 @@ func (t AdmissionTicket) Verify(fingerprint string) error {
 	return nil
 }
 
-func IssueAdmission(ctx context.Context, identity Identity, connection Connection, provider, session string, lease time.Duration) (AdmissionTicket, error) {
-	var ticket AdmissionTicket
+func validateAdmissionRequest(identity Identity, connection Connection, provider, session string, lease time.Duration) error {
 	if identity.Check() != nil || identity.Public.Endpoint == "" || strings.HasPrefix(identity.Public.Endpoint, "cloud/") || connection.Device != identity.Public.ID || connection.Expires <= time.Now().Add(time.Minute).Unix() || !admissionProvider(provider) || !admissionName.MatchString(session) || lease < time.Minute || lease > MaxLifetime {
+		return errors.New("cloud admission needs an enrolled native device, a real provider/session ID and a bounded lease")
+	}
+	_, err := (Enrollment{Origin: connection.URL}).origin()
+	return err
+}
+
+func issueAdmission(ctx context.Context, identity Identity, connection Connection, provider, session string, lease time.Duration, id string, task CloudTask, generation int64) (AdmissionTicket, error) {
+	var ticket AdmissionTicket
+	if generation < 1 || generation >= 1<<53 || !taskID(id) || task.Verify(identity.Public.ID) != nil || task.Provider != provider || validateAdmissionRequest(identity, connection, provider, session, lease) != nil {
 		return ticket, errors.New("cloud admission needs an enrolled native device, a real provider/session ID and a bounded lease")
 	}
 	httpClient, err := connection.HTTPClient()
@@ -85,7 +96,7 @@ func IssueAdmission(ctx context.Context, identity Identity, connection Connectio
 	if status != http.StatusCreated || !validDeviceCode(response.Ticket) || response.Provider != provider || response.Session != session || response.Lease != seconds || response.Expires <= time.Now().Unix() || response.Expires > time.Now().Add(11*time.Minute).Unix() {
 		return ticket, errors.New("relay refused or returned an invalid cloud admission ticket")
 	}
-	ticket = AdmissionTicket{Schema: 1, Origin: origin, Ticket: response.Ticket, Provider: provider, Session: session, Expires: response.Expires, LeaseSeconds: seconds, Owner: identity.Public}
+	ticket = AdmissionTicket{Schema: 2, ID: id, Task: task, Generation: generation, Origin: origin, Ticket: response.Ticket, Provider: provider, Session: session, Expires: response.Expires, LeaseSeconds: seconds, Owner: identity.Public}
 	ticket.Signature = ed25519.Sign(identity.Signing, ticket.signed())
 	return ticket, nil
 }
@@ -178,6 +189,7 @@ func RevokeAdmission(ctx context.Context, connection Connection, ticket Admissio
 }
 
 type AdmissionStatus struct {
+	Superseded   bool            `json:"superseded,omitempty"`
 	Status       string          `json:"status"`
 	Provider     string          `json:"provider"`
 	Session      string          `json:"session"`
@@ -206,6 +218,8 @@ func CheckAdmission(ctx context.Context, c Connection, ticket AdmissionTicket) (
 	if err != nil {
 		return out, err
 	}
+	// Supersession is native historical authority, never a server assertion.
+	out.Superseded = false
 	valid := out.Status == "pending" || out.Status == "claimed" || out.Status == "revoked" || out.Status == "expired"
 	if status != http.StatusOK || !valid || out.Provider != ticket.Provider || out.Session != ticket.Session || out.Expires != ticket.Expires || out.LeaseExpires < 0 || out.LeaseExpires > ticket.Expires+int64(ticket.LeaseSeconds) {
 		return AdmissionStatus{}, errors.New("cloud claim status could not be confirmed")

@@ -39,6 +39,10 @@ type Input struct {
 	// SourceReceipt is a transport-owned local ledger for a read-only source.
 	// It is supplied only by native code, never by a peer payload or UI path.
 	SourceReceipt *ReceiptOwner
+	// CheckpointIdentity is supplied only after native verification of an
+	// owner-issued logical task and the independently approved fresh claim.
+	// It permits exact native-prefix provenance across changed session IDs.
+	CheckpointIdentity bool
 	// CheckSource rechecks current authorization before any destination write.
 	CheckSource func(context.Context) error
 	// AcknowledgeSource is a transport-owned commit of writes made to a source
