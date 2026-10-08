@@ -1,15 +1,88 @@
 {
- "$schema": "node_modules/wrangler/config-schema.json",
- "name": "hopsesh-relay-experimental",
- "main": "worker.mjs",
- "compatibility_date": "2026-10-07",
- "workers_dev": false,
- "routes": [{ "pattern": "relay.hopsesh.codonic.dev", "custom_domain": true }],
- "durable_objects": {"bindings": [{"name":"MAILBOX","class_name":"Mailbox"},{"name":"AUTHORIZATION","class_name":"Authorization"}]},
- "migrations": [{"tag":"v1","new_sqlite_classes":["Mailbox"]},{"tag":"v2","new_sqlite_classes":["Authorization"]}],
- "ratelimits": [{"name":"LOGIN_RATE","namespace_id":"512050001","simple":{"limit":120,"period":60}},{"name":"CODE_RATE","namespace_id":"512050002","simple":{"limit":10,"period":60}},{"name":"TRAFFIC_RATE","namespace_id":"512050003","simple":{"limit":240,"period":60}},{"name":"GLOBAL_TRAFFIC_RATE","namespace_id":"512050004","simple":{"limit":2400,"period":60}}],
- "vars":{"RELAY_PAUSED":"0","DAILY_FRAMES_PER_SPACE":"4096","DAILY_BYTES_PER_SPACE":"268435456"},
- "limits":{"cpu_ms":1000},
- "r2_buckets": [{"binding":"CIPHERTEXT","bucket_name":"hopsesh-relay-experimental-ciphertext"}],
- "observability": {"enabled":false}
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "hopsesh-relay-experimental",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-07",
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "relay.hopsesh.codonic.dev",
+      "custom_domain": true
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "MAILBOX",
+        "class_name": "Mailbox"
+      },
+      {
+        "name": "AUTHORIZATION",
+        "class_name": "Authorization"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "Mailbox"
+      ]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": [
+        "Authorization"
+      ]
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "LOGIN_RATE",
+      "namespace_id": "512050001",
+      "simple": {
+        "limit": 120,
+        "period": 60
+      }
+    },
+    {
+      "name": "CODE_RATE",
+      "namespace_id": "512050002",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    },
+    {
+      "name": "TRAFFIC_RATE",
+      "namespace_id": "512050003",
+      "simple": {
+        "limit": 240,
+        "period": 60
+      }
+    },
+    {
+      "name": "GLOBAL_TRAFFIC_RATE",
+      "namespace_id": "512050004",
+      "simple": {
+        "limit": 2400,
+        "period": 60
+      }
+    }
+  ],
+  "vars": {
+    "RELAY_PAUSED": "1",
+    "DAILY_FRAMES_PER_SPACE": "4096",
+    "DAILY_BYTES_PER_SPACE": "268435456"
+  },
+  "r2_buckets": [
+    {
+      "binding": "CIPHERTEXT",
+      "bucket_name": "hopsesh-relay-experimental-ciphertext"
+    }
+  ],
+  "observability": {
+    "enabled": false
+  },
+  "account_id": "d56d64bffb7a1372d6308b70504df6a1"
 }

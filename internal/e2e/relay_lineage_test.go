@@ -160,9 +160,15 @@ type relayFleet struct {
 	stop       map[byte]func()
 	lastSource agent.Summary
 	lastPlan   move.Plan
+	lastResult move.Result
 }
 
 func newRelayFleet(t *testing.T, ctx context.Context, bin, origin, cert string, client *http.Client, extra ...byte) *relayFleet {
+	t.Helper()
+	return newRelayFleetWithAdmission(t, ctx, bin, origin, cert, client, "fixture-admin-secret-with-32-bytes-minimum", false, extra...)
+}
+
+func newRelayFleetWithAdmission(t *testing.T, ctx context.Context, bin, origin, cert string, client *http.Client, admin string, revoke bool, extra ...byte) *relayFleet {
 	t.Helper()
 	root := t.TempDir()
 	space, err := relay.NewOperationID()
@@ -189,12 +195,16 @@ func newRelayFleet(t *testing.T, ctx context.Context, bin, origin, cert string, 
 			t.Fatal(err)
 		}
 		ids[key] = id
-		data, _ := json.Marshal(map[string]any{"device": id.ID, "ttl": 3600})
+		ttl := 3600
+		if revoke {
+			ttl = 600 // Hosted smoke credentials have a short upper bound even on interruption.
+		}
+		data, _ := json.Marshal(map[string]any{"device": id.ID, "ttl": ttl})
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, origin+"/v1/enrollment/register", bytes.NewReader(data))
 		if err != nil {
 			t.Fatal(err)
 		}
-		req.Header.Set("Authorization", "Bearer fixture-admin-secret-with-32-bytes-minimum")
+		req.Header.Set("Authorization", "Bearer "+admin)
 		req.Header.Set("X-Hopsesh-Space", space)
 		res, err := client.Do(req)
 		if err != nil {
@@ -207,6 +217,29 @@ func newRelayFleet(t *testing.T, ctx context.Context, bin, origin, cert string, 
 			t.Fatal("fleet enrollment", res.StatusCode, err)
 		}
 		connection.URL, connection.CAFile = origin, cert
+		if revoke {
+			// Registered before owner cleanup, so processes stop before revocation.
+			t.Cleanup(func() {
+				cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				req, err := http.NewRequestWithContext(cleanup, http.MethodPost, origin+"/v1/enrollment/revoke", nil)
+				if err != nil {
+					t.Error("construct hosted credential revocation", err)
+					return
+				}
+				req.Header.Set("Authorization", "Bearer "+connection.Token)
+				req.Header.Set("X-Hopsesh-Space", connection.Space)
+				res, err := client.Do(req)
+				if err != nil {
+					t.Error("hosted credential revocation failed")
+					return
+				}
+				_ = res.Body.Close()
+				if res.StatusCode != http.StatusOK {
+					t.Error("hosted credential revocation status", res.StatusCode)
+				}
+			})
+		}
 		if err = (relay.Store{Directory: filepath.Join(m.home, "state", "relay")}).SetConnection(ctx, connection); err != nil {
 			t.Fatal(err)
 		}
@@ -387,12 +420,13 @@ func (f *relayFleet) transfer(t *testing.T, from, to byte, s agent.Summary, targ
 		args = append(args, "--fork")
 	}
 	var result struct {
-		Plan move.Plan `json:"plan"`
+		Plan   move.Plan   `json:"plan"`
+		Result move.Result `json:"result"`
 	}
 	if err := json.Unmarshal(f.run(t, local, args...), &result); err != nil {
 		t.Fatal(err)
 	}
-	f.lastPlan = result.Plan
+	f.lastPlan, f.lastResult = result.Plan, result.Result
 	return f.find(t, to, target, string(result.Plan.Placement.Key.Session))
 }
 func (f *relayFleet) assertText(t *testing.T, key byte, s agent.Summary, agentName string, want, absent []string) {

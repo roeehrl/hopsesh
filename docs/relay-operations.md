@@ -31,11 +31,18 @@ Worker requests, R2 reads, failed publications or account invoice. Configure
 billing alerts, an alpha access policy and a manual pause threshold in hosted
 staging before launch. Do not advertise this infrastructure as free.
 
-The Worker also has a 1,000 ms CPU ceiling per invocation. Unreferenced R2 objects
-from a failed cross-service transaction require the bucket lifecycle policy;
-logical mailbox expiry and the durable deletion-intent alarm remain separate.
-Hosted lifecycle/billing controls require operator authentication and remain a
-release gate. Local tests do not establish deployed policy.
+The initial hosted account uses Workers Free, whose built-in HTTP CPU ceiling is
+10 ms. Cloudflare rejected a custom `cpu_ms` limit on that plan, so the checked-in
+configuration omits that paid-only setting. A future plan change must explicitly
+review the CPU ceiling (the proposed paid setting is 1,000 ms) and billing alerts.
+This is not a promise that all relay workloads fit the free plan.
+
+The private ciphertext bucket has a deployed two-day expiration rule and one-day
+multipart-abort rule. Its cleanup buffer exceeds the maximum one-day message
+lease. Logical mailbox expiry and durable deletion-intent alarms remain separate;
+R2 lifecycle removal is asynchronous and does not establish an exact deletion
+instant. The download bucket retains immutable release objects. Billing controls
+and Access enrollment remain release gates; see [hosted qualification](relay-hosted-qualification.md).
 
 Node contracts cover concurrent quota admission, duplicate retry, nonrefunding
 acknowledgment, byte refusal before R2 publication, rollover, pause/drain and

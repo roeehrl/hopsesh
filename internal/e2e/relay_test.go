@@ -73,7 +73,7 @@ func TestRelayPushSurvivesReceiverRestartAndPeerOwnedUndo(t *testing.T) {
 		}
 		port := listener.Addr().(*net.TCPAddr).Port
 		_ = listener.Close()
-		server = exec.CommandContext(ctx, node, filepath.Join(filepath.Dir(fixture), "node_modules", "wrangler", "wrangler-dist", "cli.js"), "dev", "--local", "--ip", "127.0.0.1", "--port", fmt.Sprint(port), "--inspector-port", "0", "--local-protocol", "https", "--https-key-path", keyFile, "--https-cert-path", certFile, "--persist-to", filepath.Join(root, "platform-state"), "--var", "ENROLLMENT_ADMIN:fixture-admin-secret-with-32-bytes-minimum", "--log-level", "error", "--show-interactive-dev-session=false")
+		server = exec.CommandContext(ctx, node, filepath.Join(filepath.Dir(fixture), "node_modules", "wrangler", "wrangler-dist", "cli.js"), "dev", "--local", "--ip", "127.0.0.1", "--port", fmt.Sprint(port), "--inspector-port", "0", "--local-protocol", "https", "--https-key-path", keyFile, "--https-cert-path", certFile, "--persist-to", filepath.Join(root, "platform-state"), "--var", "ENROLLMENT_ADMIN:fixture-admin-secret-with-32-bytes-minimum", "--var", "RELAY_PAUSED:0", "--log-level", "error", "--show-interactive-dev-session=false")
 		prepareRelayFixture(server)
 		server.Dir = filepath.Dir(fixture)
 		server.Env = append(os.Environ(), "WRANGLER_SEND_METRICS=false")
