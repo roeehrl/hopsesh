@@ -16,6 +16,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- GUI and TUI background scans keep independent settings snapshots, preventing
+  cloud settings changes from corrupting catalog keys or crashing active scans.
 - Claude/Codex sign-in detection, Codex initialization ordering, and account
   refresh when the vendor sign-in terminal exits. Remote discovery retains public
   owner-machine identity metadata and explains SSH/Keychain check limitations.
