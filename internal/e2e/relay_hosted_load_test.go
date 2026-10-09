@@ -31,11 +31,20 @@ func TestRelayHostedSteadyLoadAndReconnect(t *testing.T) {
 	if testing.Short() || os.Getenv("HOPSESH_HOSTED_RELAY") != "1" || os.Getenv("HOPSESH_HOSTED_LOAD") != "1" {
 		t.Skip("explicit sustained hosted staging qualification")
 	}
+	var soak time.Duration
+	if value := os.Getenv("HOPSESH_HOSTED_LOAD_DURATION"); value != "" {
+		var err error
+		soak, err = time.ParseDuration(value)
+		if err != nil || soak < 20*time.Minute || soak > 2*time.Hour {
+			t.Fatal("HOPSESH_HOSTED_LOAD_DURATION must be between 20m and 2h")
+		}
+	}
 	admin, err := localstate.ReadPrivateFile(os.Getenv("HOPSESH_HOSTED_RELAY_ADMIN_FILE"), 256)
 	if err != nil || len(admin) < 32 || strings.ContainsAny(string(admin), "\r\n") {
 		t.Fatal("hosted qualification needs the private operator secret file")
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Minute)
+	budget := max(20*time.Minute, soak+15*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), budget)
 	defer cancel()
 	const origin = "https://relay.hopsesh.codonic.dev"
 	const clients = 100
@@ -86,7 +95,7 @@ func TestRelayHostedSteadyLoadAndReconnect(t *testing.T) {
 	enroll := func(e *endpoint, space string) relay.Connection {
 		t.Helper()
 		var connection relay.Connection
-		status, err := request(ctx, space, string(admin), "POST", "/v1/enrollment/register", map[string]any{"device": e.identity.Public.ID, "ttl": 1500}, &connection)
+		status, err := request(ctx, space, string(admin), "POST", "/v1/enrollment/register", map[string]any{"device": e.identity.Public.ID, "ttl": int((budget + 5*time.Minute) / time.Second)}, &connection)
 		if err != nil || status != 201 || connection.Token == "" {
 			t.Fatal("hosted workload enrollment failed", status, err)
 		}
@@ -274,6 +283,20 @@ func TestRelayHostedSteadyLoadAndReconnect(t *testing.T) {
 	wait("notification connections after credential renewal", func() bool { return connected(before) })
 	steady()
 	publish(4)
+	if soak > 0 {
+		sequence := uint64(4)
+		for time.Since(started) < soak {
+			steady()
+			sequence++
+			publish(sequence)
+		}
+		// Recover again after the longer-lived connections and journals have
+		// accumulated normal source renewals, not only immediately after setup.
+		before = transport.upgradeSnapshot()
+		transport.disconnect()
+		wait("aged notification connection recovery", func() bool { return connected(before) })
+		publish(sequence + 1)
+	}
 	wait("ciphertext and deletion intent drain", func() bool {
 		for _, space := range spaces {
 			var counts struct{ Messages, CiphertextBytes, PendingDeletions, AdmittedFrames int }

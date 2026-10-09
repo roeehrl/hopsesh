@@ -616,6 +616,29 @@ Evidence: `/tmp/hopsesh-all-services-day.graphql` and `.json`,
 `/tmp/hopsesh-downloads-storage.json`, and
 `/tmp/hopsesh-downloads-load-window.json`.
 
+The sustained-load fixture now accepts `HOPSESH_HOSTED_LOAD_DURATION` from `20m`
+through `2h`. The default retains the qualified four-round workload. Extended
+runs publish at the normal five-minute observation renewal cadence until the
+requested minimum duration, then force another simultaneous reconnect and verify
+delivery and ciphertext drain. The native routing lease and test context cover
+the selected duration with explicit bounded cleanup margin; cloud invitations
+remain short-lived and immediately revoked. This avoids testing long runs with
+credentials that expire midway by construction. These are synthetic clients and
+do not grant access to any user conversation.
+
+For the one-hour qualification, temporarily unpause only the staging relay and
+run the following under an operator wrapper that always restores the paused
+deployment, including after failures. Verify HTTP 503 after restoration. Never
+treat a compiled/skipped opt-in test as hosted evidence.
+
+```sh
+HOPSESH_HOSTED_RELAY=1 HOPSESH_HOSTED_LOAD=1 \
+HOPSESH_HOSTED_LOAD_DURATION=1h \
+HOPSESH_HOSTED_RELAY_ADMIN_FILE=/absolute/private/operator-secret \
+go test -race -count=1 -v -timeout 85m \
+  -run '^TestRelayHostedSteadyLoadAndReconnect$' ./internal/e2e
+```
+
 ## Codex prepared-filesystem publication correction
 
 A fresh task from the earlier published configuration had neither the versioned
