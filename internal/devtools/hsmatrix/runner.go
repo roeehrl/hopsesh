@@ -138,9 +138,33 @@ var contents = map[string]string{
 // result is one row's outcome.
 type result struct {
 	Row     Row     `json:"row"`
+	Status  string  `json:"status"`
 	OK      bool    `json:"ok"`
 	Error   string  `json:"error,omitempty"`
+	Reason  string  `json:"reason,omitempty"`
 	Seconds float64 `json:"seconds"`
+}
+
+type unsupportedScenario string
+
+func (e unsupportedScenario) Error() string { return string(e) }
+
+func scenarioSupport(row Row, platform string) error {
+	if platform == "windows" && cloudOp(row.Op) {
+		return unsupportedScenario("the vendor-cloud fixture's repository hook requires a POSIX shell; this row did not execute")
+	}
+	return nil
+}
+
+func rowOutcome(err error) result {
+	if err == nil {
+		return result{Status: "passed", OK: true}
+	}
+	var unsupported unsupportedScenario
+	if errors.As(err, &unsupported) {
+		return result{Status: "unsupported", Reason: string(unsupported)}
+	}
+	return result{Status: "failed", Error: err.Error()}
 }
 
 func (r *runner) run(row Row) (res result) {
@@ -149,17 +173,14 @@ func (r *runner) run(row Row) (res result) {
 	r.there.log = r.log
 	r.log.printf("== %s\n", row)
 	defer func() {
-		res.Row, res.Seconds = row, time.Since(start).Seconds()
 		if p := recover(); p != nil {
-			res.Error = fmt.Sprint(p)
+			res = rowOutcome(fmt.Errorf("scenario panic: %v", p))
 		}
-		res.OK = res.Error == ""
-		name := fmt.Sprintf("row-%03d-%s.log", row.N, map[bool]string{true: "ok", false: "FAIL"}[res.OK])
-		_ = os.WriteFile(filepath.Join(r.out, name), []byte(r.log.b.String()+"\n"+res.Error+"\n"), 0o644)
+		res.Row, res.Seconds = row, time.Since(start).Seconds()
+		name := fmt.Sprintf("row-%03d-%s.log", row.N, res.Status)
+		_ = os.WriteFile(filepath.Join(r.out, name), []byte(r.log.b.String()+"\n"+res.Error+"\n"+res.Reason+"\n"), 0o644)
 	}()
-	if err := r.scenario(row); err != nil {
-		res.Error = err.Error()
-	}
+	res = rowOutcome(r.scenario(row))
 	return
 }
 
@@ -175,6 +196,9 @@ type sc struct {
 }
 
 func (r *runner) scenario(row Row) error {
+	if err := scenarioSupport(row, runtime.GOOS); err != nil {
+		return err
+	}
 	if row.Op == "skill" {
 		return r.skill()
 	}
@@ -546,10 +570,6 @@ func (r *runner) skill() error {
 // cloud's branch under hopsesh/from/claude-cloud/ (or says none was pushed), continues it in
 // Codex for claude→codex rows, and undo takes it all back.
 func (r *runner) fetch(row Row) error {
-	if runtime.GOOS == "windows" {
-		r.log.printf("skipped: the stand-in cloud's repository hook needs a POSIX shell\n")
-		return nil
-	}
 	if row.Location == "codex-cloud" {
 		return r.fetchCodex(row)
 	}
@@ -806,10 +826,6 @@ func (r *runner) cloudWorld(name string) (fakecloud.Origin, func(), error) {
 // brings the session home through the bring-back path. Undo takes it all back (the branch
 // with a lease; the cloud session stays, as a step owed).
 func (r *runner) handoff(row Row) error {
-	if runtime.GOOS == "windows" {
-		r.log.printf("skipped: the stand-in cloud's repository hook needs a POSIX shell\n")
-		return nil
-	}
 	id := newID()
 	marker := fmt.Sprintf("hsm%03dx%s", row.N, id[:6])
 	text := contents[row.Content] + " " + marker
@@ -977,10 +993,6 @@ func (r *runner) handoff(row Row) error {
 // this terminal, where Claude Code starts it). The second cloud's briefing carries the
 // row's words; one undo takes both legs back.
 func (r *runner) cloudHop(row Row) error {
-	if runtime.GOOS == "windows" {
-		r.log.printf("skipped: the stand-in cloud's repository hook needs a POSIX shell\n")
-		return nil
-	}
 	id := newID()
 	marker := fmt.Sprintf("hsm%03dx%s", row.N, id[:6])
 	title := contents[row.Content] + " " + marker

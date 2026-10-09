@@ -17,7 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
+	"runtime"
 	"strings"
 )
 
@@ -42,9 +42,10 @@ func main() {
 		strength := fl.Int("t", 2, "coverage: 2 = pairs, 3 = triples")
 		seedN := fl.Int64("seed", 1, "pairwise seed")
 		_ = fl.Parse(os.Args[2:])
-		rows := covering(*strength, *seedN)
-		if *all {
-			rows = every()
+		rows, _, err := selectedRows(*strength, *seedN, *all, "", "")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "hsmatrix:", err)
+			os.Exit(2)
 		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
@@ -71,41 +72,16 @@ func runMain(args []string) int {
 	only := fl.String("only", "", "comma-separated row numbers or ops to run")
 	shard := fl.String("shard", "", "k/n: run every n-th row starting at the k-th (1-based), to split a long run across jobs")
 	_ = fl.Parse(args)
-	rows := covering(*strength, *seedN)
-	if *all {
-		rows = every()
+	rows, coverage, err := selectedRows(*strength, *seedN, *all, *only, *shard)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "hsmatrix:", err)
+		return 2
 	}
-	if *only != "" {
-		keep := map[string]bool{}
-		for _, s := range strings.Split(*only, ",") {
-			keep[strings.TrimSpace(s)] = true
-		}
-		var sel []Row
-		for _, row := range rows {
-			if keep[strconv.Itoa(row.N)] || keep[row.Op] {
-				sel = append(sel, row)
-			}
-		}
-		rows = sel
-	}
-	if *shard != "" {
-		var k, n int
-		if _, err := fmt.Sscanf(*shard, "%d/%d", &k, &n); err != nil || n < 1 || k < 1 || k > n {
-			fmt.Fprintln(os.Stderr, "-shard wants k/n with 1 <= k <= n, got", *shard)
-			return 2
-		}
-		var sel []Row
-		for i, row := range rows {
-			if i%n == k-1 {
-				sel = append(sel, row)
-			}
-		}
-		rows = sel
-	}
-	// Rows that start in a cloud, and the skill row, need no other machine.
+	// Vendor-cloud fixtures run locally; unsupported rows must not connect to
+	// another machine merely to report why they could not execute.
 	needThere := false
 	for _, row := range rows {
-		needThere = needThere || row.Location != "claude-cloud" && row.Op != "skill"
+		needThere = needThere || scenarioSupport(row, runtime.GOOS) == nil && !cloudOp(row.Op) && row.Op != "skill"
 	}
 	if *there == "" && needThere {
 		fmt.Fprintln(os.Stderr, "-there is required")
@@ -166,23 +142,18 @@ func runMain(args []string) int {
 	}
 
 	var results []result
-	failed := 0
 	for _, row := range rows {
 		res := r.run(row)
 		results = append(results, res)
-		status := "ok  "
+		fmt.Printf("%s %5.1fs %s\n", res.Status, res.Seconds, row)
 		if !res.OK {
-			status = "FAIL"
-			failed++
-		}
-		fmt.Printf("%s %5.1fs %s\n", status, res.Seconds, row)
-		if !res.OK {
-			fmt.Println("     ", strings.ReplaceAll(firstLines(res.Error, 6), "\n", "\n      "))
+			fmt.Println("     ", strings.ReplaceAll(firstLines(res.Error+res.Reason, 6), "\n", "\n      "))
 		}
 	}
-	b, _ := json.MarshalIndent(map[string]any{"label": *label, "results": results}, "", "  ")
+	passed, failed, unsupported := resultCounts(results)
+	b, _ := json.MarshalIndent(map[string]any{"label": *label, "coverage": coverage, "qualificationComplete": coverage.Complete && failed == 0 && unsupported == 0, "passed": passed, "failed": failed, "unsupported": unsupported, "results": results}, "", "  ")
 	_ = os.WriteFile(filepath.Join(outDir, "results.json"), b, 0o644)
-	summary := grid(*label, results)
+	summary := fmt.Sprintf("Model: %s; t=%d; seed=%d; selected %d/%d generated rows, %d/%d valid interactions. Complete selection: %t.\n\n", coverage.Model, coverage.Strength, coverage.Seed, coverage.SelectedRows, coverage.GeneratedRows, coverage.SelectedInteractions, coverage.ValidInteractions, coverage.Complete) + grid(*label, results)
 	_ = os.WriteFile(filepath.Join(outDir, "summary.md"), []byte(summary), 0o644)
 	if p := os.Getenv("GITHUB_STEP_SUMMARY"); p != "" {
 		if f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
@@ -190,11 +161,28 @@ func runMain(args []string) int {
 			_ = f.Close()
 		}
 	}
-	fmt.Printf("\n%d of %d rows passed (%s)\n", len(results)-failed, len(results), *label)
+	fmt.Printf("\n%d passed, %d failed, %d unsupported of %d selected rows (%s)\n", passed, failed, unsupported, len(results), *label)
 	if failed > 0 {
 		return 1
 	}
+	if passed == 0 {
+		return 2
+	}
 	return 0
+}
+
+func resultCounts(results []result) (passed, failed, unsupported int) {
+	for _, r := range results {
+		switch r.Status {
+		case "passed":
+			passed++
+		case "unsupported":
+			unsupported++
+		default:
+			failed++
+		}
+	}
+	return
 }
 
 func firstLines(s string, n int) string {
@@ -208,17 +196,14 @@ func firstLines(s string, n int) string {
 // grid is the run summary: one line per row.
 func grid(label string, results []result) string {
 	var b strings.Builder
-	ok := 0
-	for _, r := range results {
-		if r.OK {
-			ok++
-		}
-	}
-	fmt.Fprintf(&b, "### Scenario matrix %s: %d of %d passed\n\n", label, ok, len(results))
+	passed, failed, unsupported := resultCounts(results)
+	fmt.Fprintf(&b, "### Scenario matrix %s: %d passed, %d failed, %d unsupported of %d selected rows\n\n", label, passed, failed, unsupported, len(results))
 	b.WriteString("| # | op | agents | content | repo | naming | location | result | s |\n|---|---|---|---|---|---|---|---|---|\n")
 	for _, r := range results {
 		mark := "✅"
-		if !r.OK {
+		if r.Status == "unsupported" {
+			mark = "Unsupported: " + strings.ReplaceAll(firstLines(r.Reason, 1), "|", "\\|")
+		} else if !r.OK {
 			mark = "❌ " + strings.ReplaceAll(firstLines(r.Error, 1), "|", "\\|")
 		}
 		fmt.Fprintf(&b, "| %d | %s | %s→%s | %s | %s | %s | %s | %s | %.0f |\n", r.Row.N, r.Row.Op, r.Row.From, r.Row.To,
