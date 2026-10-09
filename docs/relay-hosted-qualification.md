@@ -699,6 +699,23 @@ Its latest storage sample is now 12:20 and the downloads sample 12:30, both stil
 before cleanup. Preserve both reads: these changing adaptive aggregates are not
 an exact object ledger, post-cleanup storage proof or settled billing.
 
+The 16:42 UTC readback of the same fixed analytics interval reports unchanged
+summed requests, object invocations, storage operations and duration, apart from
+floating-point summation order. The latest R2 sample is still 12:30 UTC, before
+cleanup, so it cannot prove post-cleanup absence. The saved result is
+`/tmp/hopsesh-hour-soak-metrics-late.json`.
+
+A read-only billing check at 16:42 UTC confirms Workers Free and active R2 Paid.
+For September 12–October 11, the available billable-usage family is R2: 548 Class B
+operations, 129 Class A operations and 0.27 GB-month, with zero billable quantities
+and USD 0 recorded cost. These quantities still do not reconcile to the one-hour
+workload. Cloudflare distinguishes [billing-period usage](https://developers.cloudflare.com/billing/manage/billable-usage/)
+from operational analytics; this is current zero recorded overage, not settled
+test cost. The existing Wrangler credential cannot read the billing API (HTTP
+403); its scope and all subscriptions/settings were left unchanged. The bounded
+readback is saved privately under
+`~/.hopsesh-release/cloud-0.5/billing-browser-readback-20261009.json`.
+
 ## Codex prepared-filesystem publication correction
 
 A fresh task from the earlier published configuration had neither the versioned

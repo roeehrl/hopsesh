@@ -174,7 +174,7 @@ jobs:
         env:
           HOPSESH_RELAY_REQUIRE_NODE: "1"
           HOPSESH_RELAY_PLATFORM: "1"
-        run: go test -race -count=1 -v -run 'TestRelayAccountRebindingSQLiteR2|TestRelayPlatformDiagnosticsSQLiteR2' -timeout 5m ./internal/e2e
+        run: go test -race -count=1 -v -run 'TestRelayAccountRebindingSQLiteR2|TestRelayPlatformDiagnosticsSQLiteR2|TestRelayRejectedUploadSQLiteR2|TestRelayAdmissionIdleSQLiteR2' -timeout 5m ./internal/e2e
       - name: runtime, transport, permission and recovery covering pairs
         shell: bash
         run: go run ./internal/devtools/hsmatrix runtime-run -t 2 -out "$RUNNER_TEMP/runtime-matrix" -timeout 15m
