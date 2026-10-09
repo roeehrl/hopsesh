@@ -36,6 +36,7 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 	var relayService *relay.Service
 	var relayContext context.Context
 	var relayProblem string
+	var relayStartup = "starting supervisor"
 	var tasks []func(context.Context)
 	remotes := newRemoteObserver(a)
 	tasks = append(tasks, func(ctx context.Context) { remotes.run(ctx, engine) })
@@ -66,6 +67,11 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 				engine.Notify()
 			}
 		}
+		phase := func(message string) {
+			relayMu.Lock()
+			relayStartup = message
+			relayMu.Unlock()
+		}
 		initial := make(chan struct{}, 1)
 		initial <- struct{}{}
 		for {
@@ -81,6 +87,7 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 				// scan must not hold up relay startup after an owner restart.
 				initial = nil
 			}
+			phase("reading settings")
 			cfg, err := config.Load()
 			if err != nil {
 				halt()
@@ -89,10 +96,12 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 			}
 			if !cfg.Relay.Enabled {
 				halt()
+				phase("disabled in settings")
 				problem("")
 				continue
 			}
 			store := relay.Store{Directory: filepath.Join(a.StateDir, "relay")}
+			phase("reading routing credential")
 			current, err := store.Connection(ctx)
 			if err != nil {
 				halt()
@@ -103,11 +112,13 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 				continue
 			}
 			halt()
+			phase("reading device identity")
 			identity, err := store.Identity(ctx)
 			if err != nil || identity.Public.ID != current.Device {
 				problem("Relay identity or routing credential does not match this device")
 				continue
 			}
+			phase("configuring certificate trust")
 			httpClient, err := current.HTTPClient()
 			if err != nil {
 				problem("Relay trust configuration is invalid; check the explicitly configured certificate file")
@@ -256,9 +267,13 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 		case "relay.status":
 			relayMu.Lock()
 			service := relayService
+			problem, startup := relayProblem, relayStartup
 			relayMu.Unlock()
 			if service == nil {
-				return relay.Health{Error: "relay listener is not running"}, nil
+				if problem == "" {
+					problem = "relay listener unavailable: " + startup
+				}
+				return relay.Health{Error: problem}, nil
 			}
 			return service.Health(), nil
 		case "relay.call":

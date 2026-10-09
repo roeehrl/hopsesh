@@ -50,6 +50,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Relay status preserves initialization failures and identifies a pending startup
+  step instead of replacing every failure with a generic stopped-listener message.
+
 - Repository probes no longer wait for the full inactivity timeout when a fast
   folder finishes before its watchdog installs its signal handler. Canceling a
   local probe also terminates its child processes, avoiding stray background work.

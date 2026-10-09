@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -18,8 +19,97 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/registry"
 	"github.com/roeehrl/hopsesh/internal/core/relay"
 	localruntime "github.com/roeehrl/hopsesh/internal/core/runtime"
+	"github.com/roeehrl/hopsesh/internal/localstate"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
+
+func TestRuntimeRelayStatusReportsStartupFailure(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOPSESH_CONFIG_DIR", filepath.Join(home, "config"))
+	t.Setenv("HOPSESH_STATE_DIR", filepath.Join(home, "state"))
+	cfg := config.Defaults()
+	cfg.Relay.Enabled = true
+	if err := config.Save(&cfg); err != nil {
+		t.Fatal(err)
+	}
+	r, err := registry.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := New(cfg, r, config.StateDir(), nil)
+	defer a.Catalog.Close()
+	relayDir := filepath.Join(config.StateDir(), "relay")
+	if err := os.MkdirAll(relayDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := localstate.Lock(t.Context(), filepath.Join(relayDir, "state.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if lock != nil {
+			_ = lock.Close()
+		}
+	}()
+	owner, err := a.StartRuntime(t.Context(), "headless", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	client := localruntime.Client{Namespace: owner.Namespace}
+	// Hold the credential lock to distinguish a stalled initialization from a
+	// recorded failure. Reading status must not need that lock or an inventory.
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	for {
+		var health relay.Health
+		if err := client.Call(ctx, "relay.status", nil, &health); err != nil {
+			t.Fatal(err)
+		}
+		if health.Error == "relay listener unavailable: reading routing credential" {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("startup phase hidden from relay status: %+v", health)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	if err := lock.Close(); err != nil {
+		t.Fatal(err)
+	}
+	lock = nil
+	updates, unsubscribe := owner.Engine.Subscribe()
+	defer unsubscribe()
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	for {
+		select {
+		case snapshot := <-updates:
+			var observation Observation
+			if err := json.Unmarshal(snapshot.Data, &observation); err != nil {
+				t.Fatal(err)
+			}
+			for _, problem := range observation.Problems {
+				if !strings.HasPrefix(problem, "Relay unavailable:") {
+					continue
+				}
+				var health relay.Health
+				if err := client.Call(t.Context(), "relay.status", nil, &health); err != nil {
+					t.Fatal(err)
+				}
+				if health.Connected || health.Error != problem {
+					t.Fatalf("startup failure hidden from relay status: got %+v; want %q", health, problem)
+				}
+				return
+			}
+		case <-deadline.C:
+			t.Fatal("runtime did not publish missing credential failure")
+		}
+	}
+}
 
 type blockedRuntimeInventory struct {
 	agent.Module

@@ -368,6 +368,7 @@ func (f *relayFleet) start(t *testing.T, key byte) {
 			return
 		}
 		if time.Now().After(deadline) {
+			f.logHealth(t)
 			f.probeRelay(t, key)
 			stop()
 			t.Fatalf("fleet runtime startup %c: %v connected=%t mode=%s reason=%q\n%s", key, err, health.Connected, health.DeliveryMode, health.Error, logs.String())
