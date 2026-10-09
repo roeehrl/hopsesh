@@ -73,7 +73,11 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 				}
 			}
 			inv.Entries = kept
-			groups := inv.Groups(r.app.LocalRoots())
+			var roots []string
+			if !cached {
+				roots = r.app.LocalRoots()
+			}
+			groups := inv.Groups(roots)
 			if groupBy == "family" {
 				groups = inv.FamilyGroups()
 				for i := range groups {

@@ -246,7 +246,8 @@ func (m *model) buildRows() {
 			}
 		}
 	}
-	groups := m.inv.Groups(m.deps.App.LocalRoots())
+	// Browse publications use discovered metadata; checkout discovery belongs to planning.
+	groups := m.inv.Groups(nil)
 	if m.deps.App.Cfg.List.GroupBy == "family" {
 		groups = m.inv.FamilyGroups()
 	}
@@ -1197,9 +1198,9 @@ func (m *model) viewBrowseDetail(b *strings.Builder, w int) {
 		m.viewPicker(b)
 		return
 	}
-	hint := "\n  ↑↓ move · enter bring here · i continue in · b bounded copy · c hand off · h journey · a accounts · A move account · / search · g family/repository · r refresh · q quit"
+	hint := "\n  ↑↓ move · enter bring here · i continue in · b bounded copy · c hand off · h journey · a accounts · A move account · / search · g family/repository/account · r refresh · q quit"
 	if m.partialCloud() != nil {
-		hint = "\n  ↑↓ move · enter resume/bring · i continue in · b bounded copy · c hand off · p paste a cloud link · f find in a cloud · / search · g family/repository · r refresh · q quit"
+		hint = "\n  ↑↓ move · enter resume/bring · i continue in · b bounded copy · c hand off · p paste a cloud link · f find in a cloud · / search · g family/repository/account · r refresh · q quit"
 	}
 	b.WriteString(dim.Render(hint) + "\n")
 }
