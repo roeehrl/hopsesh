@@ -8,10 +8,20 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/testkit/runtimecases"
 )
+
+type runtimeReport struct {
+	Coverage        runtimecases.Coverage `json:"coverage"`
+	SelectionPassed bool                  `json:"selectionPassed"`
+	ModelQualified  bool                  `json:"modelQualified"`
+	Execution       string                `json:"execution"`
+	Results         []runtimecases.Result `json:"results"`
+}
 
 // runtime-run executes selected factor rows in the native integration harness.
 // It requires a source checkout with the relay's npm dependencies installed.
@@ -24,9 +34,26 @@ func runtimeMain(command string, args []string) int {
 	shard := flags.String("shard", "", "k/n: split the generated rows across jobs")
 	source := flags.String("source", ".", "Hopsesh source checkout with installed relay fixture dependencies")
 	out := flags.String("out", "hsmatrix-runtime-out", "result and execution-log directory")
+	reports := flags.String("reports", "", "runtime-verify: comma-separated report files from all shards")
 	timeout := flags.Duration("timeout", 15*time.Minute, "bounded native test deadline")
 	if err := flags.Parse(args); err != nil || len(flags.Args()) != 0 || *timeout <= 0 || *timeout > time.Hour {
 		fmt.Fprintln(os.Stderr, "invalid runtime matrix arguments or timeout")
+		return 2
+	}
+	if command == "runtime-verify" {
+		if *reports == "" || *only != "" || *shard != "" {
+			fmt.Fprintln(os.Stderr, "runtime-verify needs report files and the complete model selection")
+			return 2
+		}
+		if err := verifyRuntimeReports(*strength, *seed, strings.Split(*reports, ",")); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		fmt.Println("All runtime covering rows executed exactly once and passed across the supplied reports.")
+		return 0
+	}
+	if *reports != "" {
+		fmt.Fprintln(os.Stderr, "-reports is only valid with runtime-verify")
 		return 2
 	}
 	rows, coverage, err := runtimecases.Select(*strength, *seed, *only, *shard)
@@ -100,13 +127,7 @@ func runtimeMain(command string, args []string) int {
 		reportErr = runtimecases.VerifyResults(rows, results)
 	}
 	passed := runErr == nil && closeErr == nil && reportErr == nil
-	result := struct {
-		Coverage        runtimecases.Coverage `json:"coverage"`
-		SelectionPassed bool                  `json:"selectionPassed"`
-		ModelQualified  bool                  `json:"modelQualified"`
-		Execution       string                `json:"execution"`
-		Results         []runtimecases.Result `json:"results"`
-	}{coverage, passed, passed && coverage.CompleteSelection, execution, results}
+	result := runtimeReport{coverage, passed, passed && coverage.CompleteSelection, execution, results}
 	body, err = json.MarshalIndent(result, "", "  ")
 	if err == nil {
 		err = os.WriteFile(filepath.Join(output, "results.json"), body, 0600)
@@ -121,4 +142,47 @@ func runtimeMain(command string, args []string) int {
 		return 1
 	}
 	return 0
+}
+
+func verifyRuntimeReports(strength int, seed int64, paths []string) error {
+	all, _, err := runtimecases.Select(strength, seed, "", "")
+	if err != nil {
+		return err
+	}
+	seen := map[int]bool{}
+	for _, path := range paths {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		var report runtimeReport
+		if err := json.Unmarshal(body, &report); err != nil {
+			return err
+		}
+		if !report.SelectionPassed || len(report.Results) == 0 {
+			return fmt.Errorf("report %s has no passing executed selection", path)
+		}
+		var ids []string
+		for _, result := range report.Results {
+			if seen[result.Row.N] {
+				return fmt.Errorf("duplicate runtime row %d across reports", result.Row.N)
+			}
+			seen[result.Row.N] = true
+			ids = append(ids, fmt.Sprint(result.Row.N))
+		}
+		rows, coverage, err := runtimecases.Select(strength, seed, strings.Join(ids, ","), "")
+		if err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(report.Coverage, coverage) || report.ModelQualified != coverage.CompleteSelection {
+			return fmt.Errorf("report %s does not describe the current requested model and selection", path)
+		}
+		if err := runtimecases.VerifyResults(rows, report.Results); err != nil {
+			return fmt.Errorf("report %s: %w", path, err)
+		}
+	}
+	if len(seen) != len(all) {
+		return fmt.Errorf("incomplete runtime coverage: %d/%d generated rows", len(seen), len(all))
+	}
+	return nil
 }

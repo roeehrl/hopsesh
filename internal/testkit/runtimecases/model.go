@@ -1,6 +1,6 @@
 // Package runtimecases defines executable runtime qualification inputs shared
-// by hsmatrix and the native E2E harness. This native slice does not claim the
-// full provider/network-policy model in the 0.5 design.
+// by hsmatrix and the native E2E harness. Cloud rows run real connector processes
+// with disposable provider records; they do not qualify hosted provider VMs.
 package runtimecases
 
 import (
@@ -29,23 +29,22 @@ func (r Row) Values() []string {
 }
 
 func (r Row) String() string {
-	return fmt.Sprintf("%03d/%s/%s/%s/%s/%s/%s/%s", r.N, r.Host, r.Transport, r.Network, r.Integration, r.Scope, r.Topology, r.Failure)
+	return fmt.Sprintf("%03d/%s/%s/%s/%s/%s/%s/%s/%s", r.N, r.Host, r.Provider, r.Transport, r.Network, r.Integration, r.Scope, r.Topology, r.Failure)
 }
 
 var Factors = []string{"runtimeHost", "transport", "providerGeneration", "integrationLevel", "networkPolicy", "accountScope", "branchTopology", "failurePoint"}
 
 // Domains describe only values the executable native harness currently varies.
-// The fixed local provider remains visible so it cannot be mistaken for real
-// cloud-provider qualification.
+// Provider names in cloud rows select capability contracts, not hosted VMs.
 var Domains = [][]string{
-	{"one-shot", "desktop", "headless"},
+	{"one-shot", "desktop", "headless", "cloud"},
 	{"ssh", "relay-websocket", "relay-https"},
-	{"local"},
-	{"observed", "exportable"},
+	{"local", "claude-hosted", "codex-current", "codex-legacy", "work-cloud"},
+	{"observed", "exportable", "disconnected"},
 	{"unrestricted", "websocket-blocked", "post-blocked", "untrusted-ca"},
-	{"approved", "receive-disabled"},
+	{"approved", "receive-disabled", "wrong-owner"},
 	{"linear", "fork"},
-	{"none", "owner-restart", "grant-revoked", "sender-restart-after-apply", "receiver-restart-after-apply"},
+	{"none", "owner-restart", "grant-revoked", "sender-restart-after-apply", "receiver-restart-after-apply", "connector-restart", "rebuild"},
 }
 
 func (r Row) Validate() error {
@@ -57,6 +56,25 @@ func (r Row) Validate() error {
 		if !found {
 			return fmt.Errorf("unsupported %s value %q", Factors[i], value)
 		}
+	}
+	if (r.Host == "cloud") != (r.Provider != "local") {
+		return fmt.Errorf("provider capability fixtures require a cloud connector host")
+	}
+	if r.Host == "cloud" {
+		if r.Transport == "ssh" || r.Scope == "receive-disabled" || strings.HasSuffix(r.Failure, "-restart-after-apply") {
+			return fmt.Errorf("cloud connectors expose observe/export over the relay, never native receiving")
+		}
+		if r.Integration == "exportable" && (r.Provider == "codex-current" || r.Provider == "work-cloud") {
+			return fmt.Errorf("current Codex and Work Cloud have no qualified native transcript source")
+		}
+		if r.Integration == "disconnected" && (r.Network != "unrestricted" || r.Scope != "approved" || r.Failure != "none") {
+			return fmt.Errorf("disconnected preparation has no routing, network or owner authority")
+		}
+		if r.Scope == "wrong-owner" && (r.Network == "post-blocked" || r.Network == "untrusted-ca" || r.Failure == "grant-revoked") {
+			return fmt.Errorf("wrong-owner proof requires a reachable, approved primary owner")
+		}
+	} else if r.Integration == "disconnected" || r.Scope == "wrong-owner" || r.Failure == "connector-restart" || r.Failure == "rebuild" {
+		return fmt.Errorf("cloud preparation, issuer isolation and incarnation failures require a cloud host")
 	}
 	if r.Host == "one-shot" && r.Transport != "ssh" {
 		return fmt.Errorf("a one-shot sender has no relay runtime owner")
@@ -114,7 +132,7 @@ type Coverage struct {
 // filters. IDs identify full model combinations and never change with a seed.
 func Select(strength int, seed int64, only, shard string) ([]Row, Coverage, error) {
 	meta := Coverage{Model: Model, Factors: Factors, Domains: Domains, Strength: strength, Seed: seed,
-		Constraints: []string{"one-shot senders use SSH because no local relay owner is running", "relay-https varies blocked upgrades, denied POST and untrusted TLS; other transports use unrestricted networking", "all rows use unverified portable native account boundaries; scope varies peer receiving consent", "observation-only and grant revocation apply to the relay, not SSH login authority", "post-apply restart/retry requires an exportable approved relay transfer without network denial", "provider generation is local; cloud/provider capability coverage is separate"}}
+		Constraints: []string{"one-shot senders use SSH because no local relay owner is running", "relay-https varies blocked upgrades, denied POST and untrusted TLS; other transports use unrestricted networking", "native account boundaries are portable and unverified; native scope varies receiving consent", "cloud wrong-owner rows exercise pinned issuer isolation; cross-OS-user/account rebindings remain separate", "observation-only and grant revocation apply to the relay, not SSH login authority", "post-apply restart/retry requires an exportable approved native relay transfer without network denial", "cloud hosts run actual connectors with fixture provider records, not hosted VMs", "current Codex and Work Cloud cannot export native transcripts", "disconnected cloud preparation has no network authority; receiving is never a cloud capability", "wrong-owner checks require successful primary-owner access; connector restart and rebuild apply only to cloud hosts"}}
 	if strength != 2 && strength != 3 {
 		return nil, meta, fmt.Errorf("strength must be 2 or 3")
 	}

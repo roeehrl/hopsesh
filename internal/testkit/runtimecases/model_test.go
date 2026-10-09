@@ -41,16 +41,24 @@ func TestGeneratedRuntimeRowsCoverEveryValidPairAndTriple(t *testing.T) {
 	}
 }
 
-func TestNativeModelDoesNotClaimUnsupportedProviderOrNetworkCoverage(t *testing.T) {
+func TestNativeModelKeepsProviderAndNetworkCapabilityBoundaries(t *testing.T) {
+	providers := map[string]bool{}
 	for _, row := range All() {
-		if err := row.Validate(); err != nil || row.Provider != "local" || row.Host == "one-shot" && row.Transport != "ssh" || (row.Transport == "relay-https") != (row.Network != "unrestricted") || (row.Integration == "observed" || row.Failure == "grant-revoked") && row.Transport == "ssh" {
+		providers[row.Provider] = true
+		if err := row.Validate(); err != nil || (row.Host == "cloud") != (row.Provider != "local") || row.Host == "one-shot" && row.Transport != "ssh" || (row.Transport == "relay-https") != (row.Network != "unrestricted") || (row.Integration == "observed" || row.Failure == "grant-revoked") && row.Transport == "ssh" {
 			t.Fatal("native slice fabricated unsupported coverage", row, err)
 		}
+		if row.Integration == "exportable" && (row.Provider == "codex-current" || row.Provider == "work-cloud") {
+			t.Fatal("unqualified transcript export entered executable model", row)
+		}
+	}
+	if len(providers) != 5 {
+		t.Fatal("provider capability contracts omitted", providers)
 	}
 	row := All()[0]
 	row.Provider = "claude-hosted"
 	if row.Validate() == nil {
-		t.Fatal("unimplemented provider variation was accepted")
+		t.Fatal("provider variation on a non-cloud host was accepted")
 	}
 }
 

@@ -22,13 +22,13 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: hsmatrix run|rows|runtime-run|runtime-rows|agent …")
+		fmt.Fprintln(os.Stderr, "usage: hsmatrix run|rows|runtime-run|runtime-rows|runtime-verify|agent …")
 		os.Exit(2)
 	}
 	switch os.Args[1] {
 	case "terminal-exec":
 		os.Exit(terminalChild(os.Args[2:]))
-	case "runtime-run", "runtime-rows":
+	case "runtime-run", "runtime-rows", "runtime-verify":
 		os.Exit(runtimeMain(os.Args[1], os.Args[2:]))
 	case "agent":
 		if len(os.Args) < 3 {

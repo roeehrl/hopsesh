@@ -106,6 +106,10 @@ func TestRuntimeNativeMatrix(t *testing.T) {
 
 func runRuntimeNativeRow(t *testing.T, bin string, row runtimecases.Row) {
 	t.Helper()
+	if row.Host == "cloud" {
+		runRuntimeCloudRow(t, bin, row)
+		return
+	}
 	ctx, _, origin, cert, client := startSQLiteRelayFixture(t, 2*time.Minute)
 	f := newRelayFleet(t, ctx, bin, origin, cert, client)
 	if row.Network != "unrestricted" {
