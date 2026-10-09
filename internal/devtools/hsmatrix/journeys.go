@@ -65,6 +65,16 @@ func journeysMain(args []string) int {
 		return 2
 	}
 	log := &rowLog{}
+	// Setup failures happen before per-journey reports exist. Persist the exact
+	// endpoint/command and its diagnostics even when preflight exits early.
+	setupComplete := false
+	defer func() {
+		if !setupComplete {
+			if err := os.WriteFile(filepath.Join(*out, "setup.log"), []byte(log.b.String()), 0o600); err != nil {
+				fmt.Fprintln(os.Stderr, "save journey setup diagnostics:", err)
+			}
+		}
+	}()
 	for i, alias := range aliases {
 		endpoints[i] = remoteSide{dest: alias, helper: "hsmatrix", log: log}
 		var info map[string]string
@@ -91,13 +101,16 @@ func journeysMain(args []string) int {
 				continue
 			}
 			for _, argv := range [][]string{{"hosts", "add", alias, alias}, {"trust", alias, "--yes"}} {
+				log.printf("setup %s: hopsesh %q\n", aliases[i], argv)
 				if err := endpoint.do("command", commandReq{Args: argv}, &struct{}{}); err != nil {
+					log.printf("setup failed: %v\n", err)
 					fmt.Fprintln(os.Stderr, err)
 					return 1
 				}
 			}
 		}
 	}
+	setupComplete = true
 	type outcome struct {
 		Case    journeyCase `json:"case"`
 		Error   string      `json:"error,omitempty"`

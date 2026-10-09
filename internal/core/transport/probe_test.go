@@ -3,13 +3,21 @@ package transport
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"fmt"
+	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 )
 
 func TestSSHConfigLookupIsBounded(t *testing.T) {
@@ -45,6 +53,86 @@ func TestSSHConfigLookupIsBounded(t *testing.T) {
 	}
 }
 
+// Exercise the installed SSH executable, including native Windows argv/path
+// handling, against a real key exchange. Authentication deliberately fails:
+// collecting a public host key must not require a successful login.
+func TestHostKeyViaSSHNative(t *testing.T) {
+	bin, err := exec.LookPath("ssh")
+	if err != nil {
+		t.Skip("native SSH is not installed")
+	}
+	root := filepath.Join(t.TempDir(), "host keys with spaces")
+	if err := os.Mkdir(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		t.Setenv("TMP", root)
+		t.Setenv("TEMP", root)
+	} else {
+		t.Setenv("TMPDIR", root)
+	}
+	_, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := ssh.NewSignerFromKey(private)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+		cfg := &ssh.ServerConfig{PasswordCallback: func(ssh.ConnMetadata, []byte) (*ssh.Permissions, error) {
+			return nil, errors.New("fixture refuses authentication")
+		}}
+		cfg.AddHostKey(signer)
+		_, _, _, _ = ssh.NewServerConn(conn, cfg)
+	}()
+	t.Cleanup(func() { _ = listener.Close(); <-done })
+	c := &Conn{Dest: "ssh://hopsesh-key-fixture@" + listener.Addr().String(), sshBinary: bin}
+	recorded, err := c.hostKeyViaSSH(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := parseHostKeys(recorded, "fixture")
+	want := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(signer.PublicKey())))
+	if len(keys) != 1 || keys[0].Key != want {
+		t.Fatalf("wrong host key: %+v, want %s", keys, want)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("temporary trust leaked: %v %v", entries, err)
+	}
+}
+
+func TestHostKeyFallbackFailureDiagnostic(t *testing.T) {
+	c := &Conn{Dest: "fixture", sshBinary: filepath.Join(t.TempDir(), "missing-ssh")}
+	_, err := c.hostKeyViaSSH(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "missing-ssh") || !strings.Contains(err.Error(), "no host keys recorded") {
+		t.Fatalf("missing failure evidence: %v", err)
+	}
+	var d hostKeyDiagnostic
+	for range 3 {
+		if n, err := fmt.Fprint(&d, strings.Repeat("x", 2000)); n != 2000 || err != nil {
+			t.Fatalf("diagnostic writer interrupted SSH: %d %v", n, err)
+		}
+	}
+	if d.Len() != 2048 {
+		t.Fatalf("diagnostics not bounded: %d", d.Len())
+	}
+}
+
 // When ssh-keyscan returns no keys (Windows' does that for some OpenSSH servers), the key
 // comes from one ssh connection with a throwaway known_hosts: what ssh accepted into it.
 func TestHostKeyViaSSH(t *testing.T) {
@@ -63,7 +151,11 @@ func TestHostKeyViaSSH(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := &Conn{Dest: "studio", sshBinary: fake}
-	keys := parseHostKeys(c.hostKeyViaSSH(t.Context()), "[studio]:2222")
+	recorded, err := c.hostKeyViaSSH(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := parseHostKeys(recorded, "[studio]:2222")
 	if len(keys) != 1 || keys[0].Type != "ssh-ed25519" || keys[0].Line != "[studio]:2222 ssh-ed25519 "+key {
 		t.Fatalf("keys: %+v", keys)
 	}
