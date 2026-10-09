@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"encoding/base64"
 	"os"
 	"os/exec"
 	"syscall"
@@ -10,6 +11,15 @@ import (
 
 	"golang.org/x/sys/windows"
 )
+
+// Match Win32 OpenSSH's inherited descriptor record: no auxiliary handles and
+// three asynchronous non-socket descriptors. Go's replacement pipes are fresh
+// synchronous handles, so this metadata must not reach the new SSH process.
+func TestNativeSSHWithInheritedDescriptors(t *testing.T) {
+	t.Setenv(windowsSSHDescriptorState, base64.StdEncoding.EncodeToString([]byte{0, 0, 0, 0, 2, 2, 2, 0}))
+	t.Setenv("OPENSSH_STDIO_MODE", "nonsock")
+	TestNativeSSHCommandAndDiagnostics(t)
+}
 
 // The desktop and an SSH-hosted CLI may have no console. Run the same wire
 // assertions in that real process state so proc's production hiding behavior

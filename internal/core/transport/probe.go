@@ -21,7 +21,6 @@ import (
 	"unicode/utf16"
 
 	"github.com/roeehrl/hopsesh/internal/core/lnp"
-	"github.com/roeehrl/hopsesh/internal/core/proc"
 )
 
 // RunPowerShell runs a PowerShell script on a Windows machine (whatever its default ssh
@@ -131,7 +130,7 @@ func (c *Conn) Resolve(ctx context.Context) (*ResolvedHost, error) {
 func (c *Conn) sshConfig(ctx context.Context, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	cmd := proc.CommandContext(ctx, c.sshBinary, append([]string{"-G"}, args...)...)
+	cmd := sshCommandContext(ctx, c.sshBinary, append([]string{"-G"}, args...)...)
 	cmd.WaitDelay = 100 * time.Millisecond // a Match child may retain stdout
 	out, err := cmd.Output()
 	if ctx.Err() != nil {
@@ -187,7 +186,7 @@ func (c *Conn) ScanHostKeys(ctx context.Context) ([]HostKey, *ResolvedHost, erro
 	// -T bounds socket inactivity, not the process lifetime. A stalled native
 	// keyscan must leave time for the SSH fallback within the caller's deadline.
 	scanCtx, cancelScan := context.WithTimeout(ctx, 10*time.Second)
-	ks := proc.CommandContext(scanCtx, bin, "-T", "5", "-p", r.Port, r.HostName)
+	ks := sshCommandContext(scanCtx, bin, "-T", "5", "-p", r.Port, r.HostName)
 	ks.WaitDelay = 100 * time.Millisecond
 	var ksErr sshDiagnostic
 	ks.Stderr = &ksErr
@@ -268,7 +267,7 @@ func (c *Conn) hostKeyViaSSH(ctx context.Context) ([]byte, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	cmd := proc.CommandContext(ctx, c.sshBinary, append(args, c.Dest, "exit")...)
+	cmd := sshCommandContext(ctx, c.sshBinary, append(args, c.Dest, "exit")...)
 	var diagnostic sshDiagnostic
 	cmd.Stderr = &diagnostic
 	cmd.WaitDelay = 100 * time.Millisecond

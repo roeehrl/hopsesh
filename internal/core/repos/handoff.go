@@ -99,7 +99,7 @@ type Here struct{}
 func (Here) Run(ctx context.Context, dir string, env []string, args ...string) (string, error) {
 	cmd := proc.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
-	cmd.Env = append(append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never"), env...)
+	cmd.Env = proc.PipeEnvironment(append(append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never"), env...))
 	if os.Getenv("GIT_SSH_COMMAND") == "" && !hasEnv(env, "GIT_SSH_COMMAND") {
 		cmd.Env = append(cmd.Env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes")
 	}

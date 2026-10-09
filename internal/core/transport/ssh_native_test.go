@@ -1,11 +1,13 @@
 package transport
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -13,6 +15,8 @@ import (
 
 	"golang.org/x/crypto/ssh"
 )
+
+const windowsSSHDescriptorState = "c28fc6f98a2c44abbbd89d6a3037d0d9_POSIX_FD_STATE"
 
 // The installed client must send the remote command verbatim on every OS.
 // A real SSH server records the wire command; no local shell stand-in can prove
@@ -22,8 +26,11 @@ func TestNativeSSHCommandAndDiagnostics(t *testing.T) {
 	if err != nil {
 		t.Skip("native SSH is not installed")
 	}
-	version, _ := exec.Command(bin, "-V").CombinedOutput()
+	versionCtx, cancelVersion := context.WithTimeout(t.Context(), 5*time.Second)
+	version, _ := sshCommandContext(versionCtx, bin, "-V").CombinedOutput()
+	cancelVersion()
 	t.Logf("native client %s: %s", bin, strings.TrimSpace(string(version)))
+	t.Logf("inherited OpenSSH descriptor state present=%t; stdio mode present=%t", os.Getenv(windowsSSHDescriptorState) != "", os.Getenv("OPENSSH_STDIO_MODE") != "")
 	_, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)

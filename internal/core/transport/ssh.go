@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/core/audit"
-	"github.com/roeehrl/hopsesh/internal/core/proc"
 )
 
 // Errors classified from ssh's own output (ssh exits 255 for every connection problem).
@@ -221,12 +220,12 @@ func (c *Conn) run(ctx context.Context, remoteCmd string) ([]byte, error) {
 		defer cancel()
 	}
 	args := append(c.baseArgs(), c.Dest, "--", remoteCmd)
-	cmd := proc.CommandContext(ctx, c.sshBinary, args...)
+	cmd := sshCommandContext(ctx, c.sshBinary, args...)
 	// Proxy helpers can retain inherited output handles after ssh exits or is
 	// canceled. Bound pipe draining too, without killing unrelated descendants.
 	cmd.WaitDelay = 100 * time.Millisecond
 	if env != nil {
-		cmd.Env = append(os.Environ(), env...)
+		cmd.Env = append(cmd.Environ(), env...)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -267,9 +266,9 @@ func (c *Conn) sftpCommand(ctx context.Context) *exec.Cmd {
 	// ssh keeps the FIRST value of a repeated option, so these go before baseArgs.
 	args := append([]string{"-o", "Compression=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none"}, c.baseArgs()...)
 	args = append(args, "-s", c.Dest, "sftp")
-	cmd := proc.CommandContext(ctx, c.sshBinary, args...)
+	cmd := sshCommandContext(ctx, c.sshBinary, args...)
 	if env, err := c.passwordEnv(ctx); err == nil && env != nil {
-		cmd.Env = append(os.Environ(), env...)
+		cmd.Env = append(cmd.Environ(), env...)
 	}
 	return cmd
 }
@@ -316,9 +315,9 @@ func (c *Conn) StartPipe(ctx context.Context, remoteCmd string) (*Pipe, error) {
 	pctx, cancel := context.WithCancel(context.Background())
 	args := append([]string{"-o", "Compression=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none"}, c.baseArgs()...)
 	args = append(args, c.Dest, "--", remoteCmd)
-	cmd := proc.CommandContext(pctx, c.sshBinary, args...)
+	cmd := sshCommandContext(pctx, c.sshBinary, args...)
 	if env != nil {
-		cmd.Env = append(os.Environ(), env...)
+		cmd.Env = append(cmd.Environ(), env...)
 	}
 	in, err := cmd.StdinPipe()
 	if err != nil {
@@ -359,7 +358,7 @@ func (c *Conn) Close() {
 	// shutdown) hostage when ssh hangs reading config or contacting its master.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	cmd := proc.CommandContext(ctx, c.sshBinary, args...)
+	cmd := sshCommandContext(ctx, c.sshBinary, args...)
 	cmd.WaitDelay = 100 * time.Millisecond
 	_ = cmd.Run()
 }

@@ -495,6 +495,17 @@ actual authenticated mesh route. Preserve strict host trust and record the
 client version and process/pipe conditions before selecting a repair. A longer
 timeout or retrying an uncertain transfer would not demonstrate a fix.
 
+The subsequent `8b013a4` native diagnostic reproduces all six nested wire failures
+with OpenSSH 9.5p2, while the normal and console-less checks pass. Expected stdout
+arrives before the timeout. The [matching 9.5 implementation](https://github.com/PowerShell/openssh-portable/blob/59aba65cf2e2f423c09d12ad825c3b32a11f408f/contrib/win32/win32compat/w32fd.c#L117-L137)
+decodes inherited descriptor metadata and warns about stale state passing through
+a non-POSIX intermediary. The new candidate removes that metadata for Windows
+children using replacement Go pipes/null handles, including Git subprocesses;
+it does not remove authentication or chroot settings. An injected descriptor
+record tests the same case, and native SSH-hosted confirmation remains a required
+gate. Git operations also need this boundary because [Git delegates transport
+through its SSH command](https://git-scm.com/docs/git#Documentation/git.txt-codeGITSSHCOMMANDcode).
+
 ### Relay retry behavior, hibernation and cost
 
 October 9 native Windows follow-up: removing Wrangler's development proxy did
