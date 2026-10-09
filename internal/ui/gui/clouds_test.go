@@ -50,6 +50,7 @@ func TestCloudInTheWindow(t *testing.T) {
 	}
 	t.Setenv("PATH", bin+":"+testPath())
 	a := NewApp(all.Registry())
+	t.Cleanup(func() { _ = a.core.Catalog.Close() })
 	scan, err := a.Scan()
 	if err != nil {
 		t.Fatal(err)

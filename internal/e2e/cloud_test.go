@@ -120,7 +120,9 @@ func (w *cloudWorld) app() *app.App {
 		w.t.Fatal(err)
 	}
 	cfg.SetCloudAllowed("claude-cloud", true)
-	return app.New(cfg, all.Registry(), config.StateDir(), nil)
+	a := app.New(cfg, all.Registry(), config.StateDir(), nil)
+	w.t.Cleanup(func() { _ = a.Catalog.Close() })
+	return a
 }
 
 // plan pastes the session's link with the demo checkout and plans bringing it here.

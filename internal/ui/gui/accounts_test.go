@@ -16,6 +16,7 @@ import (
 func TestAccountPlanInvalidatedByEditAndRemoval(t *testing.T) {
 	home(t)
 	a := NewApp(all.Registry())
+	t.Cleanup(func() { _ = a.core.Catalog.Close() })
 	ctx := context.Background()
 	p, err := a.core.RegisterAccount(ctx, "", "claude", "Second personal", "", []string{" Personal ", "personal"})
 	if err != nil {
@@ -74,6 +75,7 @@ func TestAccountPlanInvalidatedByEditAndRemoval(t *testing.T) {
 func TestCodexDesktopAvailabilityAndExactThreadThroughService(t *testing.T) {
 	home(t)
 	a := NewApp(all.Registry())
+	t.Cleanup(func() { _ = a.core.Catalog.Close() })
 	scan, _ := a.Scan()
 	e := findEntry(t, scan, "claude/"+sid)
 	if _, err := a.Plan(e.Machine, e.Key, "codex", OptsDTO{}); err != nil {
@@ -127,6 +129,7 @@ func TestCodexDesktopAvailabilityAndExactThreadThroughService(t *testing.T) {
 func TestRegisterDefaultRootBeforeFirstScanStillAllowsUnqualifiedSelection(t *testing.T) {
 	home(t)
 	a := NewApp(all.Registry())
+	t.Cleanup(func() { _ = a.core.Catalog.Close() })
 	root := filepath.Join(os.Getenv("HOME"), ".claude")
 	p, err := a.core.RegisterAccount(context.Background(), "local", "claude", "My personal login", root, []string{"Personal"})
 	if err != nil {
@@ -154,6 +157,7 @@ func TestRegisterDefaultRootBeforeFirstScanStillAllowsUnqualifiedSelection(t *te
 func TestRemoteAccountSetupNoticeUsesEndpointIdentity(t *testing.T) {
 	home(t)
 	a := NewApp(all.Registry())
+	t.Cleanup(func() { _ = a.core.Catalog.Close() })
 	if _, err := a.Scan(); err != nil {
 		t.Fatal(err)
 	}

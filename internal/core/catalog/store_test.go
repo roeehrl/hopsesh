@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 )
@@ -36,7 +37,7 @@ func TestStoreSharedReadersAndScopedSnapshots(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	if st, err := os.Stat(filepath.Join(dir, "catalog", "sessions-v1.sqlite")); err != nil || st.Mode().Perm()&0077 != 0 {
+	if st, err := os.Stat(filepath.Join(dir, "catalog", "sessions-v1.sqlite")); err != nil || runtime.GOOS != "windows" && st.Mode().Perm()&0077 != 0 {
 		t.Fatalf("private file: %v %v", st, err)
 	}
 }
@@ -55,6 +56,24 @@ func TestSummaryInvalidationAndNegativeResult(t *testing.T) {
 	s.InvalidatePath("one")
 	if s.Load("a", "one", "v1", &got) {
 		t.Fatal("same-size rewrite remained cached")
+	}
+}
+
+func TestCloseReleasesCatalogFiles(t *testing.T) {
+	dir := t.TempDir()
+	s := New(dir)
+	s.Update("scope", func(_ []byte) any { return "saved" })
+	var saved string
+	if !s.Read("scope", &saved) || saved != "saved" {
+		t.Fatal("catalog did not open")
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Windows refuses to remove an open SQLite database. This checks lifecycle
+	// ownership directly instead of relying only on test-directory cleanup.
+	if err := os.RemoveAll(filepath.Join(dir, "catalog")); err != nil {
+		t.Fatalf("closed catalog kept file handles open: %v", err)
 	}
 }
 

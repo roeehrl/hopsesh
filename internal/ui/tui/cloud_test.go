@@ -94,6 +94,7 @@ func cloudModel(t *testing.T) (*model, fakecloud.Session) {
 		t.Fatal(err)
 	}
 	a := app.New(cfg, all.Registry(), config.StateDir(), nil)
+	t.Cleanup(func() { _ = a.Catalog.Close() })
 	if _, err := a.Paste(context.Background(), s.ID, repo); err != nil {
 		t.Fatal(err)
 	}

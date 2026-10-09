@@ -68,6 +68,7 @@ func home(t *testing.T) (repo string) {
 func TestWindowContinuesInAnotherAgent(t *testing.T) {
 	repo := home(t)
 	a := NewApp(all.Registry())
+	t.Cleanup(func() { _ = a.core.Catalog.Close() })
 	if m := a.Machines(); m.Machines == nil || m.Found == nil || m.Here.Name == "" {
 		t.Fatalf("empty lists for the window, not null: %+v", m)
 	}
@@ -148,6 +149,7 @@ func TestWindowContinuesInAnotherAgent(t *testing.T) {
 func TestWindowRoundTrip(t *testing.T) {
 	home(t)
 	a := NewApp(all.Registry())
+	t.Cleanup(func() { _ = a.core.Catalog.Close() })
 	scan, _ := a.Scan()
 	e := findEntry(t, scan, "claude/"+sid)
 	if _, err := a.Plan(e.Machine, e.Key, "codex", OptsDTO{Mark: true}); err != nil {
@@ -260,6 +262,7 @@ func TestWindowRoundTrip(t *testing.T) {
 func TestWindowMachines(t *testing.T) {
 	home(t)
 	a := NewApp(all.Registry())
+	t.Cleanup(func() { _ = a.core.Catalog.Close() })
 	if m := a.Machines(); m.Here.Receive || a.Info().Receive || len(m.Machines) != 0 {
 		t.Fatalf("fresh: %+v", m)
 	}
@@ -290,6 +293,7 @@ func TestWindowStartsFreshFromOldConfig(t *testing.T) {
 	os.MkdirAll(config.Dir(), 0o700)
 	os.WriteFile(config.Path(), []byte("repos_dir = \"/x\"\n"), 0o600)
 	a := NewApp(all.Registry())
+	t.Cleanup(func() { _ = a.core.Catalog.Close() })
 	if a.Info().ConfigError == "" {
 		t.Fatal("the old file must be reported")
 	}
@@ -319,6 +323,7 @@ func TestWindowKeepsNewerConfig(t *testing.T) {
 	newer := fmt.Sprintf("schema = %d\nrepos_dir = \"/x\"\n", config.Schema+1)
 	os.WriteFile(config.Path(), []byte(newer), 0o600)
 	a := NewApp(all.Registry())
+	t.Cleanup(func() { _ = a.core.Catalog.Close() })
 	info := a.Info()
 	if !info.ConfigNewer || !strings.Contains(info.ConfigError, "written by a newer hopsesh") || strings.Contains(info.ConfigError, "older hopsesh") {
 		t.Fatalf("the newer file must be reported as newer: %+v", info.ConfigError)
@@ -386,6 +391,7 @@ func TestWindowSendsToAnotherMachine(t *testing.T) {
 	home(t)
 	t.Setenv("HOPSESH_MACHINE", "here")
 	a := NewApp(all.Registry())
+	t.Cleanup(func() { _ = a.core.Catalog.Close() })
 	if err := a.AddHost("box", "box", false, false); err != nil {
 		t.Fatal(err)
 	}
@@ -466,6 +472,7 @@ func exeSuffix() string {
 func TestWindowAgentIcons(t *testing.T) {
 	home(t)
 	a := NewApp(all.Registry())
+	t.Cleanup(func() { _ = a.core.Catalog.Close() })
 	icons := func() map[string]string {
 		out := map[string]string{}
 		for _, ag := range a.Info().Agents {

@@ -25,6 +25,45 @@ test("add a machine, receive sessions, and remove the machine", async ({ page })
   await expect(page.locator(".mgrid", { hasText: "build-box" })).toHaveCount(0);
 });
 
+test("a completed machine scan cannot replace a pressed Remove button", async ({ page }) => {
+  let release!: () => void, completed = false, reloads = 0;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  await page.route("**/call", async route => {
+    const method = route.request().postDataJSON().m;
+    if (method === "ScanMachine") {
+      await pending;
+      completed = true;
+      return route.fulfill({ json: { error: "Fixture connection unavailable" } });
+    }
+    if (method === "Machines" && completed) {
+      const response = await route.fetch();
+      await route.fulfill({ response });
+      reloads++;
+      return;
+    }
+    return route.continue();
+  });
+  await menu(page, "machines");
+  await page.getByRole("button", { name: "Add by address…" }).click();
+  await page.getByLabel("Name").fill("press-box");
+  await page.getByLabel("SSH destination").fill("me@press-box.invalid");
+  await page.locator("#dlg").getByRole("button", { name: "Add", exact: true }).click();
+  const added = page.locator('.mgrid[data-machine="press-box"]');
+  await expect(added).toHaveAttribute("aria-busy", "true");
+  const remove = added.getByRole("button", { name: "Remove", exact: true });
+  await remove.hover();
+  await page.mouse.down();
+  await remove.evaluate(button => { (window as any).__pressedRemove = button; });
+  release();
+  await expect.poll(() => reloads).toBeGreaterThan(0);
+  await page.waitForTimeout(250); // allow the scheduled render to try while held
+  expect(await remove.evaluate(button => button === (window as any).__pressedRemove)).toBeTruthy();
+  await page.mouse.up();
+  await expect(page.locator("#dlg").getByRole("heading", { name: "Remove press-box?" })).toBeVisible();
+  await page.locator("#dlg").getByRole("button", { name: "Cancel" }).click();
+  await expect(added).toHaveAttribute("aria-busy", "false");
+});
+
 test("adding a machine starts one scan, disables Scan, and explains failures with Retry", async ({ page }) => {
   let scans = 0, release!: () => void;
   const pending = new Promise<void>(resolve => { release = resolve; });

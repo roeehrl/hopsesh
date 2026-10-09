@@ -27,6 +27,7 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 			if err != nil {
 				return err
 			}
+			defer r.app.Catalog.Close()
 			host, _ := cmd.Flags().GetString("host")
 			agentID, _ := cmd.Flags().GetString("agent")
 			repo, _ := cmd.Flags().GetString("repo")
@@ -334,6 +335,7 @@ func showCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			defer r.app.Catalog.Close()
 			ref := app.ParseRef(args[0])
 			inv := r.scanFor(cmd, ref.Machine, ref)
 			defer inv.Close()
@@ -404,6 +406,7 @@ its clouds with their fidelity, needs and the upstream changes the drift check w
 			if err != nil {
 				return err
 			}
+			defer r.app.Catalog.Close()
 			ctx, cancel := ctxTimeout(1)
 			defer cancel()
 			inv := r.app.Scan(ctx, app.ScanOptions{Hosts: []string{app.LocalName()}, SkipGit: true})

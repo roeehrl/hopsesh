@@ -33,6 +33,7 @@ func movementHookFixture(t *testing.T) (*App, *host.Machine, string) {
 		t.Fatal(err)
 	}
 	a := New(config.Config{}, reg, filepath.Join(dir, "state"), nil)
+	t.Cleanup(func() { _ = a.Catalog.Close() })
 	m := &host.Machine{Local: true, Name: "test-machine", Facts: host.Facts{Home: dir, OS: runtime.GOOS, Endpoint: strings.Repeat("a", 64), Env: map[string]string{"CLAUDE_CONFIG_DIR": root}, Binaries: map[string]agent.BinaryFact{"claude": {Path: "/fake/claude", Version: "2.1.284 (Claude Code)"}}}}
 	return a, m, root
 }

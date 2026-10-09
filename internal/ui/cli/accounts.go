@@ -17,6 +17,7 @@ func accountsCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		defer r.app.Catalog.Close()
 		ps, err := r.app.Accounts()
 		if err != nil {
 			return err
@@ -50,6 +51,7 @@ func accountsCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		defer r.app.Catalog.Close()
 		machine, _ := cmd.Flags().GetString("machine")
 		inv := r.scanWith(cmd, machine, app.ScanOptions{SkipGit: true, ForceAccounts: true})
 		defer inv.Close()
@@ -71,6 +73,7 @@ func accountsCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		defer r.app.Catalog.Close()
 		machine, _ := cmd.Flags().GetString("machine")
 		root, _ := cmd.Flags().GetString("root")
 		tags, _ := cmd.Flags().GetStringSlice("tag")
@@ -96,6 +99,7 @@ func accountsCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		defer r.app.Catalog.Close()
 		ps, err := r.app.Accounts()
 		if err != nil {
 			return err
@@ -123,6 +127,7 @@ func accountsCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		defer r.app.Catalog.Close()
 		ps, err := r.app.Accounts()
 		if err != nil {
 			return err
@@ -139,6 +144,7 @@ func accountsCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		defer r.app.Catalog.Close()
 		c, err := r.app.AccountLogin(cmd.Context(), args[0])
 		if err != nil {
 			return err
@@ -160,6 +166,7 @@ func accountsCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		defer r.app.Catalog.Close()
 		p, err := r.app.RefreshAccount(cmd.Context(), args[0])
 		if err != nil {
 			return err

@@ -12,6 +12,7 @@ import (
 func TestScanMachinePreservesOtherResultsAndSnapshots(t *testing.T) {
 	home(t)
 	a := NewApp(all.Registry())
+	t.Cleanup(func() { _ = a.core.Catalog.Close() })
 	// Invalid destination fails before any network connection.
 	a.core.Cfg.Hosts = []config.Host{{Name: "target", Destination: "", Allowed: true}}
 	old := &app.Inventory{
@@ -49,6 +50,7 @@ func TestScanMachinePreservesOtherResultsAndSnapshots(t *testing.T) {
 func TestScanMachineQueuedRequestsCoalesceAndRemovalWins(t *testing.T) {
 	home(t)
 	a := NewApp(all.Registry())
+	t.Cleanup(func() { _ = a.core.Catalog.Close() })
 	a.core.Cfg.Hosts = []config.Host{{Name: "target", Destination: "", Allowed: true}}
 	a.scanMu.Lock()
 	done := make(chan error, 1)

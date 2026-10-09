@@ -52,7 +52,9 @@ func allowed(t *testing.T, clouds ...string) *app.App {
 	for _, c := range clouds {
 		cfg.SetCloudAllowed(c, true)
 	}
-	return app.New(cfg, all.Registry(), config.StateDir(), nil)
+	a := app.New(cfg, all.Registry(), config.StateDir(), nil)
+	t.Cleanup(func() { _ = a.Catalog.Close() })
+	return a
 }
 
 func TestBringFromCopilot(t *testing.T) {

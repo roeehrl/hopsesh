@@ -10,6 +10,10 @@ let data = null;
 on('hopsesh:discovery',d=>{if(current==='machines'&&!d.discovering&&!document.querySelector('dialog[open]'))reload().catch(fail)});
 const scanning = new Set();
 const scanErrors = new Map();
+let pointerHeld = false, renderTimer = 0;
+document.addEventListener("pointerdown", () => { pointerHeld = true; }, true);
+window.addEventListener("pointerup", () => { pointerHeld = false; }, true);
+window.addEventListener("pointercancel", () => { pointerHeld = false; }, true);
 
 
 let read = 0;
@@ -228,6 +232,12 @@ function envTable(c) {
 
 function render() {
   if (current !== "machines") return;
+  // A scan can finish between pointerdown and click. Keep its result, but do
+  // not replace the button the user is pressing or a dialog they are reading.
+  if (pointerHeld || document.querySelector("dialog[open], button:active")) {
+    if (!renderTimer) renderTimer = setTimeout(() => { renderTimer = 0; render(); }, 100);
+    return;
+  }
   const d = data;
   if (!d) return;
   const receive = h("button", { class: "switch", role: "switch", "aria-checked": d.here.receive ? "true" : "false", "aria-label": "Receive sessions from my other machines",

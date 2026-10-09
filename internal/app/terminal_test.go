@@ -41,6 +41,7 @@ func terminalRole() (int, bool) {
 		return 1, true
 	}
 	a := New(cfg, all.Registry(), config.StateDir(), nil)
+	defer a.Catalog.Close()
 	tio := TerminalIO{In: os.Stdin, Out: os.Stdout, Err: os.Stdout, Labels: term.IsTerminal(int(os.Stdout.Fd())), Hold: os.Getenv("TERMAPP_HOLD") == "1"}
 	if err := a.RunTicket(os.Getenv("TERMAPP_TICKET"), tio); err != nil {
 		fmt.Printf("verb error: %v\r\n", err)

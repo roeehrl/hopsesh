@@ -117,12 +117,14 @@ test('a blocked plan still allows changing its launcher',async({page})=>{
 test('missing source identity is explained without a duplicate profile label',async({page})=>{
  // Remove only the public observation, never the stable profile ID.
  await page.route('**/call',async route=>{const r=route.request().postDataJSON();if(!['InitialScan','Scan','RefreshHere','Plan'].includes(r.m)){await route.continue();return;}const response=await route.fetch(),body=await response.json();for(const g of body.result.groups||[])for(const e of g.entries||[])if(e.profile)e.profile.account=null;if(body.result.sourceEntry?.profile)body.result.sourceEntry.profile.account=null;await route.fulfill({json:body});});
- await page.reload();await plan(page);
+ await page.reload();await expect(page.locator("#fresh")).toContainText("updated",{timeout:30_000});await plan(page);
  const source=page.locator('.transfer-accounts>div').first();await expect(source).toContainText('Email unavailable');const name=await source.locator('b').innerText();expect((await source.innerText()).split(name).length-1).toBe(1);
 });
 
 
 test('transfer review uses the freshly checked source sign-in',async({page})=>{
+ const reset=await page.request.post('/reset?movement=1');expect(reset.ok()).toBeTruthy();
+ await page.goto('/');await expect(page.locator('#fresh')).toContainText('updated',{timeout:30_000});
  await page.evaluate(async()=>{const path='/core.js',core=await import(path);const entry=core.entries().find((e:any)=>e.title==='Find the codeword');entry.profile.account=null});
  await plan(page);
  await expect(page.locator('.transfer-accounts>div').first()).toContainText('alice@example.com');

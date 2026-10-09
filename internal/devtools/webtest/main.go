@@ -179,6 +179,8 @@ func main() {
 		if svc != nil {
 			svc.Shutdown()
 		}
+		_ = os.Unsetenv("FAKE_MOVEMENT_ACCOUNT")
+		_ = os.Unsetenv("FAKE_CODEX_EMAIL")
 		if err := os.RemoveAll(h); err != nil {
 			return err
 		}
