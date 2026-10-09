@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {generateKeyPairSync,sign} from 'node:crypto';
 import {decodeJwt} from 'jose';
-import worker,{Authorization,createHandler} from './worker.mjs';
+import worker,{Authorization,createHandler,LIMITS,maintain} from './worker.mjs';
 import {digest} from './authorization.mjs';
 import {createAdmissionHandler,maintainAdmission,ADMISSION_LIMITS} from './admission.mjs';
 class Storage {
@@ -83,6 +83,30 @@ test('real Authorization and Mailbox scope cloud routing to its issuer and revok
  assert.equal((await mailbox(new Request('https://relay.test/v1/messages',{method:'POST',headers:{Authorization:'Bearer '+connection.token},body:JSON.stringify(envelope)}))).status,403);
  const revoke=await obj.fetch(new Request('https://relay.test/v1/cloud/revoke',{method:'POST',headers,body:new URLSearchParams({ticket:ticket.ticket})}));assert.equal(revoke.status,200);
  assert.equal((await mailbox(new Request('https://relay.test/v1/messages',{headers:{Authorization:'Bearer '+connection.token}}))).status,403);
+});
+test('full mailbox admission is a capacity refusal, leaves the ticket pending and can succeed after expiry',async()=>{
+ const authStorage=new Storage(),mailboxStorage=new Storage(),space='a'.repeat(64),admin='operator-secret-with-at-least-32-bytes';
+ const now=Date.now(),bucket={put:async()=>{},get:async()=>null,delete:async()=>{}};
+ const mailbox=createHandler(mailboxStorage,bucket,admin,space,()=>now);
+ const register=device=>mailbox(new Request('https://relay.test/v1/enrollment/register',{method:'POST',headers:{Authorization:'Bearer '+admin},body:JSON.stringify({device,ttl:3600})}));
+ const native=await(await register('native-device-12345')).json();
+ for(let i=1;i<LIMITS.devices;i++)assert.equal((await register('filler-device-'+String(i).padStart(4,'0'))).status,201);
+ const obj=new Authorization({storage:authStorage},{ENROLLMENT_ADMIN:admin,MAILBOX:{idFromName:s=>s,get:()=>({fetch:mailbox})}});
+ const headers={'Content-Type':'application/x-www-form-urlencoded','X-Hopsesh-Principal':space,'X-Hopsesh-Issuer':native.device,'X-Hopsesh-Credential':await digest(native.token)};
+ const call=(path,body,native=false)=>obj.fetch(new Request('https://relay.test'+path,{method:'POST',headers:native?headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(body)}));
+ const ticket=await(await call('/v1/cloud/tickets',{provider:'claude-hosted',session:'capacity-fixture',lease_seconds:'3600'},true)).json();
+ const f=await fixture(),identity=await cloudIdentity(),args=f.claimArgs(ticket,identity);
+ const refused=await call('/v1/cloud/claim',args);
+ assert.equal(refused.status,409);assert.deepEqual(await refused.json(),{error:'capacity_exceeded'});
+ assert.equal(await mailboxStorage.get('device-count'),LIMITS.devices);
+ assert.equal(await mailboxStorage.get('device:'+identity.public.id),undefined);
+ assert.equal((await(await call('/v1/cloud/status',{ticket:ticket.ticket},true)).json()).status,'pending');
+ // Expire only a filler through the real cleanup path; the native issuer stays valid.
+ const filler=await mailboxStorage.get('device:filler-device-0001');filler.expires=Math.floor(now/1000)-1;await mailboxStorage.put('device:filler-device-0001',filler);
+ await maintain(mailboxStorage,bucket,Math.floor(now/1000));
+ const admitted=await call('/v1/cloud/claim',args);assert.equal(admitted.status,200);
+ assert.equal((await admitted.json()).device,identity.public.id);
+ assert.equal(await mailboxStorage.get('device-count'),LIMITS.devices);
 });
 test('a cloud credential cannot issue another ticket or forge issuer headers before paid allocation',async()=>{
  let allocated=0;const space='a'.repeat(64),admin='operator-secret-with-at-least-32-bytes',storage=new Storage(),mailbox=createHandler(storage,{put:async()=>{}},admin,space);

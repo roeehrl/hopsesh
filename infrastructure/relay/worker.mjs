@@ -1,7 +1,7 @@
 import {SignJWT, jwtVerify} from 'jose';
 import {createAuthorizationHandler, maintainAuthorization, accessPrincipal, response} from './authorization.mjs';
 import {deviceAsset} from './device-page.mjs';
-import {createAdmissionHandler,maintainAdmission} from './admission.mjs';
+import {createAdmissionHandler,maintainAdmission,AdmissionCapacityError} from './admission.mjs';
 import {digest} from './authorization.mjs';
 // Experimental Hopsesh-only infrastructure. Payloads stay encrypted end to end.
 const encoder = new TextEncoder();
@@ -232,7 +232,7 @@ export class Authorization {
   const mailbox=async(space,path,body)=>this.env.MAILBOX.get(this.env.MAILBOX.idFromName(space)).fetch(new Request(new URL(path,req.url),{method:'POST',headers:{'Content-Type':'application/json','X-Hopsesh-Space':space,Authorization:'Bearer '+this.env.ENROLLMENT_ADMIN},body:JSON.stringify(body)}));
   if(new URL(req.url).pathname.startsWith('/v1/cloud/')){
    const authorize=async(space,device,credential)=>{const r=await mailbox(space,'/v1/enrollment/check',{device,credential});return r.ok&&(await r.json()).active===true};
-   const enroll=async(space,device,ttl,issuer,admission)=>{const r=await mailbox(space,'/v1/enrollment/register',{device,ttl,kind:'cloud-session',issuer,admission});if(r.status!==201)throw new Error('enrollment');return r.json()};
+   const enroll=async(space,device,ttl,issuer,admission)=>{const r=await mailbox(space,'/v1/enrollment/register',{device,ttl,kind:'cloud-session',issuer,admission});if(r.status===429)throw new AdmissionCapacityError();if(r.status!==201)throw new Error('enrollment');return r.json()};
    const revoke=async(space,device,issuer)=>{const r=await mailbox(space,'/v1/enrollment/revoke-device',{device,issuer});if(!r.ok)throw new Error('revocation')};
    return createAdmissionHandler(this.ctx.storage,enroll,authorize,revoke)(req);
   }

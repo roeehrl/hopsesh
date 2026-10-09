@@ -100,7 +100,7 @@ func TestSendIsATerminalStep(t *testing.T) {
 		t.Error("a briefing without hopsesh's prefix is refused")
 	}
 	if _, ok := any(m).(agent.CloudFollower); ok {
-		t.Error("Claude Code has no non-interactive follow-up; the module must not claim one")
+		t.Error("the module must not advertise cloud follow-up before integration and qualification")
 	}
 	if cl, _ := m.Spec().FindCloud("claude-cloud"); !strings.Contains(cl.NoFollowUp, "claude.ai") {
 		t.Errorf("the cloud says why there is no follow-up: %q", cl.NoFollowUp)

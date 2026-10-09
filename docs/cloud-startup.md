@@ -51,7 +51,16 @@ again. The startup reason never changes task identity, peer approval or lineage.
 
 Codex writes `.hopsesh/cloud-install-codex-current.sh` and
 `.hopsesh/codex-start.md`. Copy their contents into the environment's Install
-script and Start skill fields. This is a documented instruction mechanism,
+script and Start skill fields. In the editable setup conversation, ask Codex to
+**execute the verified Install script and check the installed helper version**
+before publishing. Saving those fields alone does not prepare the filesystem.
+Do not run `prepare` in this setup: reusable images must contain no session keys.
+Publish the prepared environment, then start a new task to verify the inherited
+binary and actual Start skill delivery. Existing tasks keep their own state;
+repository refresh does not rerun installation or startup. This follows
+[Codex's environment publication model](https://learn.chatgpt.com/docs/environments/cloud-environments).
+
+The Start skill is a documented instruction mechanism,
 whose actual per-task startup, pause/resume and rebuild behavior still needs
 qualification. If the real task ID is unavailable, session binding must be
 reported unsupported. Current Codex Cloud native transcript export is also

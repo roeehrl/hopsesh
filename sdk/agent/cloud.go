@@ -469,8 +469,8 @@ type CloudCheck struct {
 	Text string `json:"text"`
 }
 
-// CloudFollower sends a follow-up message to a cloud session (fakecloud remote message;
-// none of the vendors' CLIs hopsesh drives has a non-interactive one as of 2026-10).
+// CloudFollower sends a follow-up message to a cloud session. Modules implement
+// it only after integrating and qualifying their vendor's command.
 type CloudFollower interface {
 	FollowUp(ctx context.Context, h Host, in Install, id SessionID, text string) (CloudSession, error)
 }

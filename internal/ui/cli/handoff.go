@@ -370,7 +370,7 @@ func (r *run) renderHandedOff(res *move.Result) {
 }
 
 // noFollowUpYet is what followup says while no cloud takes a follow-up from hopsesh.
-const noFollowUpYet = "no cloud accepts a follow-up from hopsesh yet: Claude Code has no command that sends one outside its own terminal session, and the other clouds' commands have none. Write to the session on its own page"
+const noFollowUpYet = "hopsesh has no integrated and qualified cloud follow-up command yet. Write to the session on its own page"
 
 // followers are the clouds whose module sends follow-ups (agent.CloudFollower).
 func followers() []string {
@@ -401,9 +401,8 @@ func followupCmd() *cobra.Command {
 a cloud whose command line can send one. The message starts a model turn in the cloud, which
 uses your plan's allowance. Nothing is sent until you confirm (or pass --yes).
 
-None of the clouds hopsesh reaches takes one yet: Claude Code 2.1 has no command that sends
-one outside its own terminal session, so open the session on claude.ai to write to it, and
-the Codex, gh, jules, devin and amp commands hopsesh drives have none either.`,
+No cloud follow-up command is integrated and qualified in this release. Open the
+session on its provider's page to write to it.`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(followers()) == 0 {

@@ -191,6 +191,15 @@ least 34 minutes; the duration override is bounded between ten minutes and one h
 
 ## Immutable downloads
 
+The newer immutable helper `0.5.0-staging.20261009.f134df2` was independently
+read back over HTTPS: its manifest and signature match local bytes, OpenSSL
+verifies the signature, and both archive sizes and hashes match the manifest.
+Linux amd64 is 7,095,378 bytes (SHA256
+`27159fe8d1a56ceea55b755fd42c6332e43d7412528d27a37e25ec6056d39f4b`);
+Linux arm64 is 6,367,587 bytes (SHA256
+`df6c64245b2d41241b599a76acfd684e91b4b67cb11c49b713bbec1cc01e10e1`).
+This is staging distribution evidence, not a final release.
+
 Version `0.5.0-staging.20261008.d93f24e` contains Linux amd64 and arm64 CLI archives
 built from exact Git-exported source `d93f24e`. The existing local release key
 signed the manifest; the bundled public key matches it. No Git tag, GitHub release,
@@ -394,3 +403,42 @@ Sources: [Worker limits](https://developers.cloudflare.com/workers/platform/limi
 [SQLite Durable Objects on Free](https://developers.cloudflare.com/durable-objects/platform/pricing/),
 [R2 lifecycle behavior](https://developers.cloudflare.com/r2/buckets/object-lifecycles/),
 and [automatic Custom Domain certificates](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/).
+
+## October 9 sustained-load failure and correction
+
+The first 100-logical-client workload ran from 09:00:18 UTC to 09:16:37 UTC
+including cleanup. All clients received three authenticated observation rounds,
+including reconnection after forced connection loss. The complete test **failed**
+while claiming a cloud invitation. Its four spaces held 32/32/32/4 native devices;
+cloud admission needed another slot in the first, already-full space. The Mailbox
+correctly refused at its production 32-device ceiling, but Authorization converted
+that refusal into HTTP 503, so the client retried until its nine-minute lease ended.
+
+A regression using the actual Authorization/Mailbox handlers reproduced the 503.
+Capacity now returns `409 capacity_exceeded`, with an actionable client error and
+no automatic retry; ordinary gateway 429 throttling retains bounded retries.
+The invitation remains pending and can be claimed after expiry cleanup releases
+capacity. All 43 Worker/download contracts and the relay race suite pass.
+The sustained workload now distributes 100 native clients as 25 per space, leaving
+room for cloud claims without increasing production quotas. Each renewal/claim
+phase logs its start/completion; cleanup registration precedes ticket parsing.
+A full corrected hosted rerun is required before this gate closes.
+
+The failed run revoked its test credentials, restored the relay to paused, and
+verified HTTP 503. Its partial delivery results do not qualify sustained load,
+cloud renewal, or whole-service cost.
+
+## Codex prepared-filesystem publication correction
+
+A fresh task from the earlier published configuration had neither the versioned
+helper nor supplied Start skill evidence. Reading an editable draft inherited
+from that publication confirmed both fields were present (2,520 and 707
+characters). The missing helper was not an unsaved script: setup had not executed
+it before publication. Current OpenAI documentation states that publishing
+captures the prepared filesystem, and repository refresh does not rerun setup.
+The generated guidance now requires executing the verified installer in the
+editable setup, checking its version, publishing, then qualifying a new task.
+No incarnation is created in reusable setup. A new setup successfully installed
+and verified `0.5.0-staging.20261009.f134df2`; fresh-task inheritance and Start skill
+execution are being tested separately. See
+[Codex cloud environments](https://learn.chatgpt.com/docs/environments/cloud-environments).

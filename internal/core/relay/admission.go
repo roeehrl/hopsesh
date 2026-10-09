@@ -147,6 +147,9 @@ func ClaimAdmission(ctx context.Context, ticket AdmissionTicket, ownerFingerprin
 			return Connection{}, err
 		}
 		if err == nil && status < 500 && status != http.StatusTooManyRequests {
+			if status == http.StatusConflict && out.Error == "capacity_exceeded" {
+				return Connection{}, errors.New("cloud admission refused: the relay space has reached its device limit; wait for unused routing leases to expire, then retry this invitation if it is still valid")
+			}
 			code := "refused"
 			switch out.Error {
 			case "invalid_request", "invalid_identity", "invalid_proof", "invalid_grant", "access_denied", "already_claimed", "expired_token":

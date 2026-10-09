@@ -96,16 +96,19 @@ test('conversation preview has spoken loading feedback and an explicit retry', a
 });
 
 test('quick access initial failure and refresh failure recover', async ({ page }) => {
-  let initial = true;
+  await page.addInitScript(() => {
+    document.addEventListener('click', event => {
+      if ((event.target as Element)?.closest('.load-error button')) (window as any).__quickRetryStarted = true;
+    }, true);
+  });
   await page.route('**/call', async r => {
     const m = r.request().postDataJSON().m;
     // Keep the outage active through background publications, until the user
     // explicitly retries. One failed response can otherwise immediately recover.
-    if (m === 'QuickSnapshot' && initial) await error(r);
+    if (m === 'QuickSnapshot' && !await page.evaluate(() => Boolean((window as any).__quickRetryStarted))) await error(r);
     else if (m === 'QuickRefresh') await error(r); else await r.continue();
   });
   await page.goto('/quick.html'); await expect(page.getByRole('alert')).toContainText('Synthetic slow-service failure');
-  initial = false;
   await page.getByRole('button', { name: 'Try again' }).click(); const refresh = page.locator('.quick-refresh');
   await expect(refresh).toBeEnabled(); await refresh.click(); await expect(refresh).toBeEnabled(); await expect(refresh).toContainText('Refresh');
   await expect(page.locator('#quick-error')).toContainText('Synthetic slow-service failure');

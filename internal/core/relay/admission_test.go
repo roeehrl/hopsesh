@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
@@ -11,9 +12,27 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestAdmissionCapacityStopsWithoutRetry(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"error":"capacity_exceeded"}`))
+	}))
+	defer server.Close()
+	owner, ticket, leaf, scope := signedAdmission(t, server.URL)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	_, err := ClaimAdmission(ctx, ticket, owner.Public.ID, leaf, scope, server.Client())
+	if err == nil || !strings.Contains(err.Error(), "device limit") || calls.Load() != 1 || ctx.Err() != nil {
+		t.Fatalf("capacity must return actionable refusal without retries: calls=%d error=%v", calls.Load(), err)
+	}
+}
 
 func signedAdmission(t *testing.T, origin string) (Identity, AdmissionTicket, Identity, CloudClaim) {
 	t.Helper()

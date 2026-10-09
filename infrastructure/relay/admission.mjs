@@ -3,6 +3,9 @@ import {authorizationForm,checkPublicIdentity,verifyIdentitySignature,digest,res
 // One-use provisional routing admission. Claiming a ticket never approves the
 // fresh cloud identity on a desktop or grants any device/native receiver method.
 export const ADMISSION_LIMITS=Object.freeze({pending:512,perDevice:16,ticket:600,lease:86400});
+// A full mailbox needs capacity to be released, not automatic claim retries.
+// Keep this distinct from transient gateway throttling (HTTP 429).
+export class AdmissionCapacityError extends Error {}
 const random=()=>Array.from(crypto.getRandomValues(new Uint8Array(32))).map(v=>v.toString(16).padStart(2,'0')).join('');
 const error=(value,status=400)=>response({error:value},status);
 const name=value=>typeof value==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(value);
@@ -62,7 +65,7 @@ export function createAdmissionHandler(storage,enroll,authorize,revoke,clock=()=
     if(state.claim&&state.claim!==claim)return error('already_claimed',409);
     if(!state.connection){
      const ttl=Math.min(state.ttl,lease-now);
-     try{state.connection=await enroll(state.principal,publicIdentity.id,ttl,{device:state.issuer,credential:state.credential},await digest(key+'\0'+claim))}catch{return error('temporarily_unavailable',503)}
+     try{state.connection=await enroll(state.principal,publicIdentity.id,ttl,{device:state.issuer,credential:state.credential},await digest(key+'\0'+claim))}catch(e){return e instanceof AdmissionCapacityError?error('capacity_exceeded',409):error('temporarily_unavailable',503)}
      state.claim=claim;state.status='claimed';state.public=publicIdentity;state.retainUntil=state.connection.expires;
      await tx.put(key,state);
     }

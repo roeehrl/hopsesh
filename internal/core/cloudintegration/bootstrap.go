@@ -52,7 +52,7 @@ func Plan(provider, version, origin string) (Bootstrap, error) {
 		p.ClaudeHookEntry = json.RawMessage(`{"matcher":"startup|resume|clear|compact|fork","hooks":[{"type":"command","command":"sh \"$CLAUDE_PROJECT_DIR\"/.hopsesh/cloud-session-start.sh","timeout":10}]}`)
 	case "codex-current":
 		p.Callback = "Start skill"
-		p.Reason = "Install during environment preparation. A Start skill is an instruction, not a guaranteed lifecycle callback; installed helpers remain disconnected until a real session starts and authenticates."
+		p.Reason = "Run the Install script in the editable environment setup and verify the helper before publishing: new tasks inherit the prepared filesystem. Saving the script alone does not install it. Save the Start skill, publish, then verify startup in a new task. A Start skill is an instruction, not a guaranteed lifecycle callback; the helper remains disconnected until that task authenticates."
 		p.StartSkill = "At the start of each task, locate the verified binary at $HOME/.local/share/hopsesh/cloud/v" + version + "/hopsesh. Run cloud-integration prepare --provider codex-current --workspace <absolute checked-out repository> --session <actual task ID>. Use the real task ID from the task context; if unavailable, report that session binding is unsupported rather than making one up. Do not prepare during installation, reuse a prior incarnation, copy setup secrets, enable a device receiver, or claim connected until a pinned peer and bounded routing credential authorize this incarnation and its connector is running. Current Codex Cloud native transcript export remains unavailable until qualified."
 	case "codex-legacy":
 		p.Callback = "Explicit task invocation"
