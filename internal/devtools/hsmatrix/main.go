@@ -23,10 +23,12 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: hsmatrix run|rows|agent …")
+		fmt.Fprintln(os.Stderr, "usage: hsmatrix run|rows|runtime-run|runtime-rows|agent …")
 		os.Exit(2)
 	}
 	switch os.Args[1] {
+	case "runtime-run", "runtime-rows":
+		os.Exit(runtimeMain(os.Args[1], os.Args[2:]))
 	case "agent":
 		if len(os.Args) < 3 {
 			fmt.Fprintln(os.Stderr, "usage: hsmatrix agent seed|find|append|remove|head|base")

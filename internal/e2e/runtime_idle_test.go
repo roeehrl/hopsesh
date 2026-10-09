@@ -67,6 +67,7 @@ func TestRuntimeIdleClientsDoNotMultiplyCollections(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	waitRuntimeIdle(t, ctx, client)
 	for _, count := range []int{0, 1, 5} {
 		t.Run(string(rune('0'+count))+"-clients", func(t *testing.T) {
 			watchCtx, stop := context.WithCancel(ctx)
@@ -117,5 +118,38 @@ func TestRuntimeIdleClientsDoNotMultiplyCollections(t *testing.T) {
 				t.Fatal("native process counters are invalid")
 			}
 		})
+	}
+}
+
+// waitRuntimeIdle observes scheduler state, not a guessed startup sleep. A
+// bounded quiet interval also allows peer publications already in transit to
+// arrive. Call only before adding the clients whose behavior is measured.
+func waitRuntimeIdle(t *testing.T, ctx context.Context, client localruntime.Client) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	quietFor := observe.Defaults().MaxDelay + observe.Defaults().Debounce
+	var previous observe.Metrics
+	var quietSince time.Time
+	for {
+		var current observe.Metrics
+		if err := client.Call(ctx, "metrics", nil, &current); err != nil {
+			t.Fatal("runtime settling metrics unavailable", err)
+		}
+		if current.Collecting || current.Pending || current.Paused || current.Collections != previous.Collections || current.Notifications != previous.Notifications {
+			quietSince = time.Time{}
+		} else if quietSince.IsZero() {
+			quietSince = time.Now()
+		} else if time.Since(quietSince) >= quietFor {
+			return
+		}
+		previous = current
+		if time.Now().After(deadline) {
+			t.Fatalf("runtime did not reach an idle baseline: %+v", current)
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("runtime settling cancelled", ctx.Err())
+		case <-time.After(25 * time.Millisecond):
+		}
 	}
 }

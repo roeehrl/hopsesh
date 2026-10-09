@@ -12,6 +12,9 @@ on:
   pull_request: # changes to these runs are tested before they land
     paths:
       - .github/workflows/nightly.yml
+      - .github/workflows/runtime-matrix.yml
+      - internal/testkit/runtimecases/**
+      - internal/e2e/runtime_matrix_test.go
       - scripts/app-selfcheck.sh
       - scripts/install-ci-dependencies.sh
       - scripts/app-terminal-check.sh
@@ -31,6 +34,10 @@ concurrency: # a newer push to the same pull request replaces the run; scheduled
   cancel-in-progress: true
 
 jobs:
+  runtime-triples:
+    uses: ./.github/workflows/runtime-matrix.yml
+    with:
+      strength: 3
   real-agents:
     name: latest agents (${{ matrix.family }})
     strategy:

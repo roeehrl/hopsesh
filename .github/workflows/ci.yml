@@ -159,6 +159,15 @@ jobs:
           HOPSESH_RELAY_REQUIRE_NODE: "1"
           HOPSESH_RELAY_PLATFORM: "1"
         run: go test -race -count=1 -v -run '^TestMixedTransportLineageSQLiteR2$' -timeout 5m ./internal/e2e
+      - name: runtime, transport, permission and recovery covering pairs
+        shell: bash
+        run: go run ./internal/devtools/hsmatrix runtime-run -t 2 -out "$RUNNER_TEMP/runtime-matrix" -timeout 15m
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: runtime-matrix-${{ matrix.family }}
+          path: ${{ runner.temp }}/runtime-matrix
+          retention-days: 7
 
   lint:
     runs-on: ubuntu-24.04

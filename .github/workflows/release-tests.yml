@@ -11,6 +11,7 @@ on:
   pull_request: # changes to this run are tested before they land
     paths:
       - .github/workflows/release-tests.yml
+      - .github/workflows/runtime-matrix.yml
 
 permissions:
   contents: read
@@ -20,6 +21,10 @@ concurrency: # a newer push to the same pull request replaces the run; scheduled
   cancel-in-progress: true
 
 jobs:
+  runtime-triples:
+    uses: ./.github/workflows/runtime-matrix.yml
+    with:
+      strength: 3
   matrix:
     name: scenarios (${{ matrix.label }})
     strategy:

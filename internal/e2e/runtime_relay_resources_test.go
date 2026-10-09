@@ -74,6 +74,10 @@ func TestRuntimeRelayThreeProfilesThreePeersSQLiteR2(t *testing.T) {
 		}
 	}
 	client := clients['A']
+	// A fresh complete publication can still have a coalesced follow-up queued
+	// by the other owners' initial observations. Settle before adding test
+	// subscribers; settling afterward would hide subscriber-induced work.
+	waitRuntimeIdle(t, ctx, client)
 	var status localruntime.Status
 	if err := client.Call(ctx, "status", nil, &status); err != nil {
 		t.Fatal(err)

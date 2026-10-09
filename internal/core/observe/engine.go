@@ -54,6 +54,8 @@ type Metrics struct {
 	CollectionNanos     int64  `json:"collectionNanos"`
 	LastCollectionNanos int64  `json:"lastCollectionNanos"`
 	Paused              bool   `json:"paused"`
+	Collecting          bool   `json:"collecting"`
+	Pending             bool   `json:"pending"`
 }
 type Engine struct {
 	mu        sync.Mutex
@@ -106,6 +108,7 @@ func (e *Engine) Metrics() Metrics {
 	defer e.mu.Unlock()
 	m := e.metrics
 	m.Subscribers, m.Paused = len(e.subs), e.paused
+	m.Pending = !e.closed && (m.Pending || len(e.wake) > 0)
 	return m
 }
 
@@ -225,6 +228,7 @@ func (e *Engine) Run(ctx context.Context) error {
 		e.mu.Lock()
 		defer e.mu.Unlock()
 		e.closed = true
+		e.metrics.Collecting, e.metrics.Pending = false, false
 		for ch := range e.subs {
 			close(ch)
 			delete(e.subs, ch)
@@ -259,6 +263,7 @@ func (e *Engine) Run(ctx context.Context) error {
 			}
 		case <-e.wake:
 			e.mu.Lock()
+			e.metrics.Pending = true
 			paused, seq := e.paused, e.latest.Sequence
 			e.mu.Unlock()
 			if paused != previousPause || (active != nil && seq != generation) {
@@ -289,6 +294,7 @@ func (e *Engine) Run(ctx context.Context) error {
 			paused, seq := e.paused, e.latest.Sequence
 			if !paused {
 				e.metrics.Collections++
+				e.metrics.Collecting, e.metrics.Pending = true, false
 			}
 			e.mu.Unlock()
 			if paused {
@@ -317,6 +323,7 @@ func (e *Engine) Run(ctx context.Context) error {
 			active()
 			active = nil
 			e.mu.Lock()
+			e.metrics.Collecting = false
 			paused := e.paused
 			e.metrics.LastCollectionNanos = int64(r.elapsed)
 			e.metrics.CollectionNanos += int64(r.elapsed)
@@ -337,6 +344,7 @@ func (e *Engine) Run(ctx context.Context) error {
 			} else {
 				dirty = true
 			}
+			e.metrics.Pending = dirty
 			e.mu.Unlock()
 			if paused {
 				continue

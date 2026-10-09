@@ -57,6 +57,65 @@ func TestSubscribersShareCollectionAndCannotRenewFreshness(t *testing.T) {
 	})
 }
 
+// Fresh data can coexist with scheduled or in-flight work. Resource consumers
+// must be able to distinguish that state before taking an idle baseline.
+func TestMetricsDistinguishFreshPublicationFromIdleScheduler(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var calls atomic.Int32
+		release := make(chan struct{})
+		e, stop := running(t, func(ctx context.Context) (json.RawMessage, error) {
+			if calls.Add(1) == 2 {
+				select {
+				case <-release:
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			}
+			return json.RawMessage(`{"fresh":true}`), nil
+		})
+		stopped := false
+		defer func() {
+			if !stopped {
+				stop()
+			}
+		}()
+		synctest.Wait()
+		if m := e.Metrics(); m.Pending || m.Collecting || !e.Latest().Fresh(time.Now()) {
+			t.Fatal("initial idle state not visible", m)
+		}
+		e.Notify()
+		synctest.Wait()
+		if m := e.Metrics(); !m.Pending || m.Collecting {
+			t.Fatal("debounced work reported idle", m)
+		}
+		time.Sleep(Defaults().Debounce)
+		synctest.Wait()
+		if m := e.Metrics(); m.Pending || !m.Collecting {
+			t.Fatal("running collector not reported", m)
+		}
+		e.Notify()
+		synctest.Wait()
+		if m := e.Metrics(); !m.Pending || !m.Collecting {
+			t.Fatal("follow-up during collection was hidden", m)
+		}
+		close(release)
+		synctest.Wait()
+		if m := e.Metrics(); !m.Pending || m.Collecting || !e.Latest().Fresh(time.Now()) {
+			t.Fatal("fresh publication concealed pending follow-up", m)
+		}
+		time.Sleep(Defaults().Debounce)
+		synctest.Wait()
+		if m := e.Metrics(); m.Pending || m.Collecting || m.Collections != 3 {
+			t.Fatal("completed work did not become idle", m)
+		}
+		stop()
+		stopped = true
+		if m := e.Metrics(); m.Pending || m.Collecting {
+			t.Fatal("closed owner retained active work indicators", m)
+		}
+	})
+}
+
 func TestForegroundRefreshCannotAcceptAnOlderInFlightAttempt(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var calls atomic.Int32

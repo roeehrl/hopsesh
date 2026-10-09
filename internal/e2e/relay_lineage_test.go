@@ -153,14 +153,16 @@ func TestRelayLineageSQLiteR2(t *testing.T) {
 }
 
 type relayFleet struct {
-	ctx        context.Context
-	bin, cert  string
-	homes      map[byte]machineHome
-	places     map[byte]location
-	stop       map[byte]func()
-	lastSource agent.Summary
-	lastPlan   move.Plan
-	lastResult move.Result
+	ctx          context.Context
+	bin, cert    string
+	homes        map[byte]machineHome
+	places       map[byte]location
+	stop         map[byte]func()
+	ownerModes   map[byte]string // native matrix may host the shared desktop backend
+	deliveryMode string          // empty requires notifications; policy tests assert HTTP fallback
+	lastSource   agent.Summary
+	lastPlan     move.Plan
+	lastResult   move.Result
 }
 
 func newRelayFleet(t *testing.T, ctx context.Context, bin, origin, cert string, client *http.Client, extra ...byte) *relayFleet {
@@ -318,6 +320,14 @@ func (f *relayFleet) start(t *testing.T, key byte) {
 	m := f.homes[key]
 	cmd := exec.CommandContext(f.ctx, f.bin, "runtime", "serve")
 	cmd.Env = m.env()
+	if f.ownerModes[key] == "desktop" {
+		executable, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cmd = exec.CommandContext(f.ctx, executable, "-test.run=^TestRuntimeMatrixDesktopOwner$")
+		cmd.Env = append(m.env(), "HOPSESH_MATRIX_DESKTOP_OWNER=1")
+	}
 	var logs bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &logs, &logs
 	if err := cmd.Start(); err != nil {
@@ -343,12 +353,16 @@ func (f *relayFleet) start(t *testing.T, key byte) {
 	f.stop[key] = stop
 	t.Cleanup(stop)
 	deadline := time.Now().Add(10 * time.Second)
+	wantMode := f.deliveryMode
+	if wantMode == "" {
+		wantMode = "notifications"
+	}
 	var health relay.Health
 	for {
 		bounded, cancel := context.WithTimeout(f.ctx, 200*time.Millisecond)
 		err = client.Call(bounded, "relay.status", nil, &health)
 		cancel()
-		if err == nil && health.Connected && health.DeliveryMode == "notifications" {
+		if err == nil && health.Connected && health.DeliveryMode == wantMode {
 			return
 		}
 		if time.Now().After(deadline) {
