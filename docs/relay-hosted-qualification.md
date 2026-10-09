@@ -621,3 +621,13 @@ Cleanup proof: `/tmp/hopsesh-generated-startup-cleanup.png`.
 This qualifies instruction discovery, missing-ID
 refusal, explicitly bound preparation and same-task continuity; it does not claim
 automatic ID discovery, VM pause/rebuild or a running connector.
+
+A read-only lifecycle follow-up in that task found only
+`cloud_environment.environment_status({})` (current readiness/configuration) and
+`wait_for_environment({environment_id})` (waiting for an already-starting instance)
+in its supported runtime interfaces. The reported snapshot had desired/observed
+phase `running`, current observations and connected transport; its two spec
+revisions were 6. No pause/resume/restart/rebuild mutation or historical lifecycle
+event was exposed in that task's catalog. Ordinary follow-up therefore remains
+continuation evidence only. This does not establish that no such provider
+capability exists anywhere, nor waive the real pause/rebuild qualification gate.
