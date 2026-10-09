@@ -250,6 +250,31 @@ build and installer logs are `/tmp/hopsesh-candidate-3650f60-build.log` and
 `/tmp/hopsesh-candidate-3650f60-install.log`. No GitHub release or cloud download
 publication was performed for this candidate.
 
+Source `8b013a4` was exported without working-tree changes and built as universal
+candidate `0.5.0-staging.20261009.8b013a4`. Local Developer ID signing, Apple
+notarization and app/DMG stapling succeeded. Its signed manifest verifies against
+the checked-in release public key. The production installer passed new installation,
+embedded-CLI version verification, existing-app refusal and preservation of a
+destination appearing during download (4.075 seconds including race overhead).
+The separate complete updater race suite passed in 1.349 seconds.
+
+A hands-on check of that exact signed app used a disposable four-session home.
+Row selection opened the inspector without starting a terminal; resizing it from
+360 to 500 pixels preserved selection and exposed the full resume label. User
+and agent messages had distinct styling. Move omitted unconfigured clouds.
+Settings showed the shared runtime running in the app and internet delivery
+uninitialized, with authorization-dependent controls disabled. Back to sessions
+restored the selected row and inspector width. The disposable process exited
+cleanly. A subsequent accessibility observation reopened the candidate without
+the fixture environment; it displayed the incompatible-settings guard and was
+immediately quit without accepting migration or changing settings. Process
+inspection confirmed that no candidate process remained.
+
+Artifacts remain under `/tmp/hopsesh-candidate-8b013a4.L10SnM/macos`.
+Evidence: `/tmp/hopsesh-candidate-8b013a4-{build,install,updater,ui}.log` and
+`/tmp/hopsesh-candidate-8b013a4-inspector.png`. This focused signed-app check does
+not replace the full native/browser suite or final-release provenance.
+
 ## Provider qualification and hosted enrollment
 
 The October 8 installation attempts returned curl exit 7 with HTTP/CONNECT
