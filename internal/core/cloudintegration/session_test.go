@@ -36,11 +36,41 @@ func sessionFixture(t *testing.T) (string, Scope) {
 	return filepath.Join(dir, "sessions"), s
 }
 
+func TestStartupReasonPersistsWithoutGrantingAccess(t *testing.T) {
+	parent, scope := sessionFixture(t)
+	scope.ExportTranscript = false
+	for _, source := range []string{"startup", "resume", "clear", "compact", "fork", "manual"} {
+		s, err := Begin(t.Context(), parent, scope, source, time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := Current(t.Context(), parent, scope.Provider, scope.Session, scope.Workspace)
+		if err != nil || loaded.ID != s.ID || loaded.Source != source || loaded.Scope != scope {
+			t.Fatalf("startup reason or scope changed: %s, %+v, %v", source, loaded, err)
+		}
+		grant := relay.Grant{Kind: "cloud-session", Methods: []string{"observe", "export"}, Expires: time.Now().Add(time.Hour).Unix()}
+		observation, err := loaded.Handler(t.Context(), grant, "", "observe", nil)
+		if err != nil || observation.(Observation).Source != source || observation.(Observation).ExportAllowed {
+			t.Fatal("startup metadata lost or widened observation", observation, err)
+		}
+		if _, err := loaded.Handler(t.Context(), grant, "", "export", nil); err == nil {
+			t.Fatal("startup reason granted export access", source)
+		}
+		if _, err := Begin(t.Context(), parent, scope, "untrusted\nsecret", time.Hour); err == nil {
+			t.Fatal("unknown startup reason accepted")
+		}
+		current, err := Current(t.Context(), parent, scope.Provider, scope.Session, scope.Workspace)
+		if err != nil || current.ID != s.ID {
+			t.Fatal("invalid startup replaced the current identity", err)
+		}
+	}
+}
+
 func TestCloudConnectorStopsAfterRoutingCredentialRevocation(t *testing.T) {
 	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
 		t.Run(fmt.Sprint(status), func(t *testing.T) {
 			parent, scope := sessionFixture(t)
-			s, err := Begin(t.Context(), parent, scope, time.Hour)
+			s, err := Begin(t.Context(), parent, scope, "manual", time.Hour)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -86,7 +116,7 @@ func TestCloudIncarnationsNeverReuseSetupKeysAcrossResumeRebuildAndFork(t *testi
 			current.Session = "fork456"
 			current.Transcript = filepath.Join(filepath.Dir(scope.Transcript), "fork456.jsonl")
 		}
-		s, err := Begin(t.Context(), parent, current, time.Hour)
+		s, err := Begin(t.Context(), parent, current, "manual", time.Hour)
 		if err != nil {
 			t.Fatal(source, err)
 		}
@@ -110,20 +140,20 @@ func TestCloudIncarnationsNeverReuseSetupKeysAcrossResumeRebuildAndFork(t *testi
 
 func TestRestartSupersedesOldConnectorButForkKeepsOriginalAuthorized(t *testing.T) {
 	parent, scope := sessionFixture(t)
-	original, err := Begin(t.Context(), parent, scope, time.Hour)
+	original, err := Begin(t.Context(), parent, scope, "manual", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	forkScope := scope
 	forkScope.Session = "fork456"
 	forkScope.Transcript = filepath.Join(filepath.Dir(scope.Transcript), "fork456.jsonl")
-	if _, err = Begin(t.Context(), parent, forkScope, time.Hour); err != nil {
+	if _, err = Begin(t.Context(), parent, forkScope, "manual", time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = Load(t.Context(), original.Directory); err != nil {
 		t.Fatal("fork invalidated original", err)
 	}
-	if _, err = Begin(t.Context(), parent, scope, time.Hour); err != nil {
+	if _, err = Begin(t.Context(), parent, scope, "manual", time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = Load(t.Context(), original.Directory); err == nil {
@@ -133,7 +163,7 @@ func TestRestartSupersedesOldConnectorButForkKeepsOriginalAuthorized(t *testing.
 
 func TestCloudHandlerCannotWidenSessionOrAccessDeviceOperations(t *testing.T) {
 	parent, scope := sessionFixture(t)
-	s, err := Begin(t.Context(), parent, scope, time.Hour)
+	s, err := Begin(t.Context(), parent, scope, "manual", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +213,7 @@ func TestCloudHandlerCannotWidenSessionOrAccessDeviceOperations(t *testing.T) {
 
 func TestCloudObservationUsesEffectivePeerLeaseAndExportPermission(t *testing.T) {
 	parent, scope := sessionFixture(t)
-	s, err := Begin(t.Context(), parent, scope, time.Hour)
+	s, err := Begin(t.Context(), parent, scope, "manual", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +246,7 @@ func TestCloudScopeRefusesOtherSessionsLinksAndUnsupportedNativeVisibility(t *te
 	} {
 		s := scope
 		mutate(&s)
-		if _, err := Begin(t.Context(), parent, s, time.Hour); err == nil {
+		if _, err := Begin(t.Context(), parent, s, "manual", time.Hour); err == nil {
 			t.Fatal("invalid scope accepted", s)
 		}
 	}
@@ -226,7 +256,7 @@ func TestCloudScopeRefusesOtherSessionsLinksAndUnsupportedNativeVisibility(t *te
 	if err := os.Symlink(filepath.Join(scope.Workspace, "abc123.jsonl"), scope.Transcript); err != nil {
 		t.Skip("symlink unavailable", err)
 	}
-	if _, err := Begin(t.Context(), parent, scope, time.Hour); err == nil {
+	if _, err := Begin(t.Context(), parent, scope, "manual", time.Hour); err == nil {
 		t.Fatal("linked transcript accepted")
 	}
 }
@@ -250,7 +280,7 @@ func TestSessionStartRequiresCloudMarkerAndDocumentedInput(t *testing.T) {
 
 func TestCloudLeaseCannotBeRefreshedByCachedCredentialsOrChangedIdentity(t *testing.T) {
 	parent, scope := sessionFixture(t)
-	s, err := Begin(t.Context(), parent, scope, time.Hour)
+	s, err := Begin(t.Context(), parent, scope, "manual", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

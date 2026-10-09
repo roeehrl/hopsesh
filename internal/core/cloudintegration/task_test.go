@@ -57,7 +57,7 @@ func TestCloudLogicalTaskSupersedesChangedNativeIDsWithoutInvalidatingFork(t *te
 	parent, scope := sessionFixture(t)
 	issue := taskInvitationIssuer(t)
 	ticket := issue(scope.Session, "")
-	original, err := Begin(t.Context(), parent, scope, time.Hour)
+	original, err := Begin(t.Context(), parent, scope, "manual", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestCloudLogicalTaskSupersedesChangedNativeIDsWithoutInvalidatingFork(t *te
 	forkScope := scope
 	forkScope.Session = "fork-native"
 	forkScope.Transcript = filepath.Join(filepath.Dir(scope.Transcript), forkScope.Session+".jsonl")
-	fork, err := Begin(t.Context(), parent, forkScope, time.Hour)
+	fork, err := Begin(t.Context(), parent, forkScope, "manual", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestCloudLogicalTaskSupersedesChangedNativeIDsWithoutInvalidatingFork(t *te
 	rebuiltScope := scope
 	rebuiltScope.Session = "rebuilt-native"
 	rebuiltScope.Transcript = filepath.Join(filepath.Dir(scope.Transcript), rebuiltScope.Session+".jsonl")
-	rebuilt, err := Begin(t.Context(), parent, rebuiltScope, time.Hour)
+	rebuilt, err := Begin(t.Context(), parent, rebuiltScope, "manual", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestCloudLogicalTaskSupersedesChangedNativeIDsWithoutInvalidatingFork(t *te
 	}
 	// A freshly generated key cannot reuse an older generation even if its
 	// native ID has a separate startup slot and the old association is absent.
-	older, err := Begin(t.Context(), parent, scope, time.Hour)
+	older, err := Begin(t.Context(), parent, scope, "manual", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestCloudTaskAssociationRepairsInterruptedPublicationWithoutRollback(t *tes
 	parent, scope := sessionFixture(t)
 	issue := taskInvitationIssuer(t)
 	ticket := issue(scope.Session, "")
-	instance, err := Begin(t.Context(), parent, scope, time.Hour)
+	instance, err := Begin(t.Context(), parent, scope, "manual", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestCloudTaskAssociationRepairsInterruptedPublicationWithoutRollback(t *tes
 	if _, err = Load(t.Context(), instance.Directory); err != nil {
 		t.Fatal(err)
 	}
-	other, err := Begin(t.Context(), parent, scope, time.Hour)
+	other, err := Begin(t.Context(), parent, scope, "manual", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestCloudScopeWatchJoinsOnChangedNativeIDTaskRebuild(t *testing.T) {
 	parent, scope := sessionFixture(t)
 	issue := taskInvitationIssuer(t)
 	ticket := issue(scope.Session, "")
-	first, err := Begin(t.Context(), parent, scope, time.Hour)
+	first, err := Begin(t.Context(), parent, scope, "manual", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestCloudScopeWatchJoinsOnChangedNativeIDTaskRebuild(t *testing.T) {
 	rebuiltScope := scope
 	rebuiltScope.Session = "changed-native-session"
 	rebuiltScope.Transcript = filepath.Join(filepath.Dir(scope.Transcript), rebuiltScope.Session+".jsonl")
-	rebuilt, err := Begin(t.Context(), parent, rebuiltScope, time.Hour)
+	rebuilt, err := Begin(t.Context(), parent, rebuiltScope, "manual", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

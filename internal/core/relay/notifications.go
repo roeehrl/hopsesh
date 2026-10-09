@@ -31,7 +31,11 @@ func (t Transport) notificationSocket(ctx context.Context) (*websocket.Conn, boo
 	socket, response, err := websocket.Dial(handshake, origin, &websocket.DialOptions{HTTPClient: &client, HTTPHeader: headers})
 	if err != nil {
 		unsupported := response != nil && (response.StatusCode == 404 || response.StatusCode == 405 || response.StatusCode == 426 || response.StatusCode == 501)
-		return nil, unsupported, errors.New("relay notifications unavailable; using bounded HTTP reconciliation")
+		failure := errors.New("relay notifications unavailable; using bounded HTTP reconciliation")
+		if response != nil && (response.StatusCode == 429 || response.StatusCode >= 500) {
+			failure = withRetryAfter(failure, response.Header.Get("Retry-After"), time.Now())
+		}
+		return nil, unsupported, failure
 	}
 	socket.SetReadLimit(256)
 	return socket, false, nil
@@ -112,7 +116,7 @@ func (t Transport) notifications(ctx context.Context, wake chan<- struct{}, stat
 		} else {
 			delay = min(time.Minute, delay*2)
 		}
-		timer := time.NewTimer(delay)
+		timer := time.NewTimer(retryDelay(delay, err))
 		select {
 		case <-ctx.Done():
 			timer.Stop()

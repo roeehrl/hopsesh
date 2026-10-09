@@ -70,6 +70,7 @@ func cloudPrepareCmd() *cobra.Command {
 	var hook, quiet bool
 	var ttl time.Duration
 	c := &cobra.Command{Use: "prepare", Short: "Create fresh keys for one real cloud session; remains disconnected until authorized", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		source := "manual"
 		if hook {
 			// The installed hook must be a no-op locally, not an error in the agent's context.
 			if os.Getenv("CLAUDE_CODE_REMOTE") != "true" {
@@ -79,6 +80,7 @@ func cloudPrepareCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			source = in.Source
 			scope.Provider, scope.Session, scope.Workspace, scope.Transcript = "claude-hosted", in.Session, in.Workspace, in.Transcript
 		}
 		if scope.Workspace != "" {
@@ -112,7 +114,7 @@ func cloudPrepareCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		s, err := cloudintegration.Begin(cmd.Context(), parent, scope, ttl)
+		s, err := cloudintegration.Begin(cmd.Context(), parent, scope, source, ttl)
 		if err != nil {
 			return err
 		}

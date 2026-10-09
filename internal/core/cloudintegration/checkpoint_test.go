@@ -13,7 +13,7 @@ import (
 
 func TestCloudExportSealsCompleteRecordsAndReportsPartialFinalWrite(t *testing.T) {
 	parent, scope := sessionFixture(t)
-	s, err := Begin(t.Context(), parent, scope, time.Hour)
+	s, err := Begin(t.Context(), parent, scope, "manual", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

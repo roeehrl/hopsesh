@@ -121,13 +121,13 @@ func (e Enrollment) Browser(ctx context.Context, identity Identity, open func(st
 		if err == nil && status == http.StatusOK {
 			return e.connection(grant, identity.Public.ID)
 		}
-		if err != nil && !errors.Is(err, errEnrollmentNetwork) {
+		if err != nil && !errors.Is(err, errEnrollmentNetwork) && !errors.Is(err, errEnrollmentTemporary) {
 			return Connection{}, err
 		}
 		if err == nil && status < 500 && status != http.StatusTooManyRequests {
 			return Connection{}, errors.New("relay browser approval expired or was refused; start a new login explicitly")
 		}
-		if err = e.pause(exchange, delay); err != nil {
+		if err = e.pause(exchange, retryDelay(delay, err)); err != nil {
 			return Connection{}, err
 		}
 	}

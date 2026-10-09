@@ -17,6 +17,7 @@ import (
 const DefaultOrigin = "https://relay.hopsesh.codonic.dev"
 
 var errEnrollmentNetwork = errors.New("relay login HTTPS connection failed; check network access and trust roots")
+var errEnrollmentTemporary = errors.New("relay login temporarily unavailable")
 
 // DeviceAuthorization never leaves the in-memory login operation. In particular
 // its device code is not returned by settings, diagnostics or CLI output.
@@ -68,7 +69,7 @@ func (e Enrollment) request(ctx context.Context, path string, values url.Values,
 	return e.requestAuthorized(ctx, path, values, out, "")
 }
 
-func (e Enrollment) requestAuthorized(ctx context.Context, path string, values url.Values, out any, token string) (int, error) {
+func (e Enrollment) requestAuthorized(ctx context.Context, path string, values url.Values, out any, token string) (status int, err error) {
 	origin, err := e.origin()
 	if err != nil {
 		return 0, err
@@ -97,6 +98,9 @@ func (e Enrollment) requestAuthorized(ctx context.Context, path string, values u
 		return 0, errEnrollmentNetwork
 	}
 	defer r.Body.Close()
+	if r.StatusCode == http.StatusTooManyRequests || r.StatusCode >= 500 {
+		defer func() { err = withRetryAfter(errEnrollmentTemporary, r.Header.Get("Retry-After"), time.Now()) }()
+	}
 	if r.StatusCode >= 300 && r.StatusCode < 400 {
 		return r.StatusCode, errors.New("relay login redirect refused")
 	}
@@ -168,15 +172,11 @@ func (e Enrollment) Wait(ctx context.Context, flow DeviceAuthorization, device s
 			if ctx.Err() != nil {
 				return Connection{}, ctx.Err()
 			}
-			if !errors.Is(err, errEnrollmentNetwork) {
+			if !errors.Is(err, errEnrollmentNetwork) && !errors.Is(err, errEnrollmentTemporary) {
 				return Connection{}, err
 			}
 			// Back off on transport failures; never busy-loop a degraded service.
-			interval = min(interval*2, time.Minute)
-			continue
-		}
-		if status == http.StatusTooManyRequests || status >= 500 {
-			interval = min(interval*2, time.Minute)
+			interval = max(interval, min(interval*2, time.Minute), retryFloor(err))
 			continue
 		}
 		if status == http.StatusOK {

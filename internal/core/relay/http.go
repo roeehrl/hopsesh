@@ -52,7 +52,7 @@ func (t Transport) endpoint(path string) (string, error) {
 	}
 	return strings.TrimRight(u.String(), "/") + path, nil
 }
-func (t Transport) request(ctx context.Context, method, path string, body any, out any) error {
+func (t Transport) request(ctx context.Context, method, path string, body any, out any) (err error) {
 	u, err := t.endpoint(path)
 	if err != nil {
 		return err
@@ -85,6 +85,9 @@ func (t Transport) request(ctx context.Context, method, path string, body any, o
 		return errors.New("relay HTTPS connection failed; check proxy, trust roots and network access")
 	}
 	defer r.Body.Close()
+	if r.StatusCode == 429 || r.StatusCode >= 500 {
+		defer func() { err = withRetryAfter(err, r.Header.Get("Retry-After"), time.Now()) }()
+	}
 	if r.StatusCode < 200 || r.StatusCode >= 300 {
 		// Only fixed protocol codes affect diagnostics. Never reflect a proxy's
 		// arbitrary response body, headers, credentials or URLs into the UI/log.

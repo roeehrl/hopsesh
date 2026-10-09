@@ -14,7 +14,7 @@ func TestCloudCheckpointConsumerRefusesAlteredIdentityScopeAndFidelity(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	observation := Observation{Provider: "claude-hosted", Session: "actual-session", Incarnation: "0123456789abcdef0123456789abcdef", Workspace: "/workspace/repo", ObservedAt: now, LeaseExpires: now.Add(time.Hour), TranscriptAvailable: true, ExportAllowed: true}
+	observation := Observation{Source: "startup", Provider: "claude-hosted", Session: "actual-session", Incarnation: "0123456789abcdef0123456789abcdef", Workspace: "/workspace/repo", ObservedAt: now, LeaseExpires: now.Add(time.Hour), TranscriptAvailable: true, ExportAllowed: true}
 	original, err := sealedExport(observation, []byte("{\"sessionId\":\"actual-session\",\"content\":\"complete\"}\n{\"unfinished\":"))
 	if err != nil {
 		t.Fatal(err)
@@ -28,6 +28,8 @@ func TestCloudCheckpointConsumerRefusesAlteredIdentityScopeAndFidelity(t *testin
 	}{
 		{"other incarnation", func(e *Export) { e.Incarnation = "ffffffffffffffffffffffffffffffff" }},
 		{"other provider", func(e *Export) { e.Provider = "codex-current" }},
+		{"untrusted startup reason", func(e *Export) { e.Source = "secret\nsettings" }},
+		{"missing startup reason", func(e *Export) { e.Source = "" }},
 		{"relative workspace", func(e *Export) { e.Workspace = "../repo" }},
 		{"expired lease", func(e *Export) { e.LeaseExpires = now.Add(-time.Second) }},
 		{"stale observation", func(e *Export) { e.ObservedAt = now.Add(-6 * time.Minute) }},
@@ -57,7 +59,7 @@ func TestCurrentCloudSurfaceCannotAdvertiseUnqualifiedNativeExport(t *testing.T)
 		if err != nil {
 			t.Fatal(err)
 		}
-		observation := Observation{Provider: provider, Session: "actual-task", Incarnation: "0123456789abcdef0123456789abcdef", Workspace: "/workspace/repo", ObservedAt: now, LeaseExpires: now.Add(time.Hour)}
+		observation := Observation{Source: "manual", Provider: provider, Session: "actual-task", Incarnation: "0123456789abcdef0123456789abcdef", Workspace: "/workspace/repo", ObservedAt: now, LeaseExpires: now.Add(time.Hour)}
 		if err = observation.Check(id.Public, now); err != nil {
 			t.Fatal(err)
 		}

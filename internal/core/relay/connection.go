@@ -183,26 +183,37 @@ func (l Listener) Run(ctx context.Context) error {
 			delay = min(60*time.Second, delay*2)
 		}
 		wait := delay
+		if err != nil {
+			wait = retryDelay(delay, err)
+		}
 		if connected && err == nil {
 			wait = 5 * time.Minute
 		}
 		t := time.NewTimer(wait)
-		select {
-		case <-ctx.Done():
-			t.Stop()
-			return ctx.Err()
-		case <-t.C:
-		case connected = <-state:
-			t.Stop()
-			if l.OnDeliveryMode != nil {
-				mode := "http-fallback"
-				if connected {
-					mode = "notifications"
+	waiting:
+		for {
+			select {
+			case <-ctx.Done():
+				t.Stop()
+				return ctx.Err()
+			case <-t.C:
+				break waiting
+			case connected = <-state:
+				if l.OnDeliveryMode != nil {
+					mode := "http-fallback"
+					if connected {
+						mode = "notifications"
+					}
+					l.OnDeliveryMode(mode)
 				}
-				l.OnDeliveryMode(mode)
+			case <-wake:
 			}
-		case <-wake:
-			t.Stop()
+			// Notifications are hints, not permission to bypass error backoff or a
+			// server Retry-After. Keep consuming them without restarting the timer.
+			if err == nil {
+				t.Stop()
+				break
+			}
 		}
 	}
 }

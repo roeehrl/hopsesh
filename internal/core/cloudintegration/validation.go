@@ -15,6 +15,9 @@ import (
 // Check binds public observation to the independently approved incarnation.
 // Labels and paths returned by a connector never select another endpoint.
 func (o Observation) Check(peer relay.PublicIdentity, now time.Time) error {
+	if !validStartupSource(o.Source) {
+		return errors.New("invalid cloud startup reason")
+	}
 	// A valid historical signature is descriptive until the native issuer also
 	// verifies the invitation's claim against this independently approved peer.
 	if o.Task != nil {

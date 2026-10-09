@@ -42,6 +42,13 @@ presence of a routing credential. A fork has its own slot; preparing it does
 not supersede its original. See [cloud admission](cloud-admission.md) for claim,
 independent fingerprint approval, scoped serving and revocation.
 
+Incarnation records and scoped observations retain the actual hook `source`
+(`startup`, `resume`, `clear`, `compact`, or `fork`). Explicit CLI preparation is
+recorded as `manual`, including instruction-driven Codex preparation. This is
+diagnostic evidence, never proof of VM replacement or permission to export.
+Unknown or missing reasons are refused; old staging incarnations must be prepared
+again. The startup reason never changes task identity, peer approval or lineage.
+
 Codex writes `.hopsesh/cloud-install-codex-current.sh` and
 `.hopsesh/codex-start.md`. Copy their contents into the environment's Install
 script and Start skill fields. This is a documented instruction mechanism,

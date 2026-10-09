@@ -67,11 +67,21 @@ type Scope struct {
 // restored filesystem does not authorize old keys for a new invocation.
 type Incarnation struct {
 	Scope
+	Source    string               `json:"source"` // diagnostic startup reason; grants no authority
 	ID        string               `json:"incarnation"`
 	Directory string               `json:"directory"`
 	Public    relay.PublicIdentity `json:"public"`
 	Created   time.Time            `json:"created"`
 	Expires   time.Time            `json:"expires"`
+}
+
+func validStartupSource(source string) bool {
+	switch source {
+	case "startup", "resume", "clear", "compact", "fork", "manual":
+		return true
+	default:
+		return false
+	}
 }
 
 var sessionName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
@@ -149,8 +159,11 @@ func canonicalDirectory(p string) error {
 	return nil
 }
 
-func Begin(ctx context.Context, parent string, scope Scope, ttl time.Duration) (Incarnation, error) {
+func Begin(ctx context.Context, parent string, scope Scope, source string, ttl time.Duration) (Incarnation, error) {
 	var s Incarnation
+	if !validStartupSource(source) {
+		return s, errors.New("unsupported session startup source")
+	}
 	if err := scope.check(); err != nil {
 		return s, err
 	}
@@ -190,7 +203,7 @@ func Begin(ctx context.Context, parent string, scope Scope, ttl time.Duration) (
 		return s, err
 	}
 	now := time.Now().UTC()
-	s = Incarnation{Scope: scope, ID: id, Directory: dir, Public: identity.Public, Created: now, Expires: now.Add(ttl)}
+	s = Incarnation{Scope: scope, Source: source, ID: id, Directory: dir, Public: identity.Public, Created: now, Expires: now.Add(ttl)}
 	body, err := json.Marshal(s)
 	if err == nil {
 		err = os.WriteFile(filepath.Join(dir, "session.json"), body, 0600)
@@ -248,7 +261,7 @@ func load(ctx context.Context, dir string, forClaim bool) (Incarnation, error) {
 	if err = json.Unmarshal(b, &s); err != nil {
 		return s, err
 	}
-	if s.Directory != dir || s.ID != filepath.Base(dir) || len(s.ID) != 32 || s.Public.Endpoint != "cloud/"+s.Provider+"/"+s.ID || s.Expires.Sub(s.Created) > relay.MaxLifetime || !s.Expires.After(time.Now()) || s.Created.After(time.Now().Add(time.Minute)) {
+	if !validStartupSource(s.Source) || s.Directory != dir || s.ID != filepath.Base(dir) || len(s.ID) != 32 || s.Public.Endpoint != "cloud/"+s.Provider+"/"+s.ID || s.Expires.Sub(s.Created) > relay.MaxLifetime || !s.Expires.After(time.Now()) || s.Created.After(time.Now().Add(time.Minute)) {
 		return s, errors.New("cloud session incarnation is invalid or expired; start a fresh connector")
 	}
 	if err = s.check(); err != nil {
@@ -323,6 +336,7 @@ type Observation struct {
 	Provider            string           `json:"provider"`
 	Session             string           `json:"session"`
 	Incarnation         string           `json:"incarnation"`
+	Source              string           `json:"source"`
 	Workspace           string           `json:"workspace"`
 	ObservedAt          time.Time        `json:"observedAt"`
 	LeaseExpires        time.Time        `json:"leaseExpires"`
@@ -364,7 +378,7 @@ func (s Incarnation) Handler(ctx context.Context, grant relay.Grant, operation, 
 	if err != nil {
 		return nil, err
 	}
-	obs := Observation{Task: task, Admission: admission, Generation: generation, Provider: s.Provider, Session: s.Session, Incarnation: s.ID, Workspace: s.Workspace, ObservedAt: time.Now().UTC(), LeaseExpires: leaseExpires, ExportAllowed: s.ExportTranscript && grant.Allows("export", time.Now())}
+	obs := Observation{Task: task, Admission: admission, Generation: generation, Provider: s.Provider, Session: s.Session, Incarnation: s.ID, Source: s.Source, Workspace: s.Workspace, ObservedAt: time.Now().UTC(), LeaseExpires: leaseExpires, ExportAllowed: s.ExportTranscript && grant.Allows("export", time.Now())}
 	if s.Transcript != "" {
 		st, err := os.Lstat(s.Transcript)
 		if err != nil && !os.IsNotExist(err) {

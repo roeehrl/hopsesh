@@ -126,7 +126,7 @@ func ClaimAdmission(ctx context.Context, ticket AdmissionTicket, ownerFingerprin
 	}
 	values.Set("proof", base64.StdEncoding.EncodeToString(ed25519.Sign(identity.Signing, []byte(message))))
 	client := Enrollment{Origin: ticket.Origin, HTTP: httpClient}
-	ctx, cancel := context.WithDeadline(ctx, time.Unix(ticket.Expires, 0))
+	ctx, cancel := context.WithDeadline(ctx, time.Unix(min(ticket.Expires, scope.Expires), 0))
 	defer cancel()
 	for delay := time.Second; ; delay = min(8*time.Second, delay*2) {
 		var out struct {
@@ -143,7 +143,7 @@ func ClaimAdmission(ctx context.Context, ticket AdmissionTicket, ownerFingerprin
 			out.URL = ticket.Origin
 			return out.Connection, nil
 		}
-		if err != nil && !errors.Is(err, errEnrollmentNetwork) {
+		if err != nil && !errors.Is(err, errEnrollmentNetwork) && !errors.Is(err, errEnrollmentTemporary) {
 			return Connection{}, err
 		}
 		if err == nil && status < 500 && status != http.StatusTooManyRequests {
@@ -154,7 +154,7 @@ func ClaimAdmission(ctx context.Context, ticket AdmissionTicket, ownerFingerprin
 			}
 			return Connection{}, fmt.Errorf("cloud admission refused (HTTP %d, %s); check expiry, revocation, session binding and prior claims", status, code)
 		}
-		if err = client.pause(ctx, delay); err != nil {
+		if err = client.pause(ctx, retryDelay(delay, err)); err != nil {
 			return Connection{}, err
 		}
 	}
