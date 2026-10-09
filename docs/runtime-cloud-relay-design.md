@@ -478,6 +478,15 @@ login context pass.
 
 ### Relay retry behavior, hibernation and cost
 
+October 9 native Windows follow-up: removing Wrangler's development proxy did
+not eliminate all intermittent request failures. Cloudflare's upstream
+[unread-body reset report](https://github.com/cloudflare/workers-sdk/issues/15819)
+documents a Windows/service-binding failure mode, but it does not establish the
+cause of our valid-request and startup failures. Keep production policy and
+retry behavior unchanged while collecting redacted transport cause/phase and
+fresh-connection diagnostics. Never convert a transport failure into the expected
+authorization refusal or increase readiness deadlines solely to get a pass.
+
 AWS recommends bounded exponential backoff with jitter, a single retry owner
 and idempotent operations. HTTP 403 should not be automatically repeated with
 the same credentials and can have causes other than revocation.

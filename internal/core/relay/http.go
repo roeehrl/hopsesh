@@ -3,14 +3,18 @@ package relay
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -82,7 +86,7 @@ func (t Transport) request(ctx context.Context, method, path string, body any, o
 	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	r, err := c.Do(req)
 	if err != nil {
-		return errors.New("relay HTTPS connection failed; check proxy, trust roots and network access")
+		return relayHTTPFailure("request", err)
 	}
 	defer r.Body.Close()
 	if r.StatusCode == 429 || r.StatusCode >= 500 {
@@ -119,7 +123,7 @@ func (t Transport) request(ctx context.Context, method, path string, body any, o
 	}
 	b, err := io.ReadAll(io.LimitReader(r.Body, MaxWireBytes+1))
 	if err != nil {
-		return err
+		return relayHTTPFailure("response-body", err)
 	}
 	if len(b) > MaxWireBytes {
 		return errors.New("relay response exceeds limit")
@@ -128,6 +132,48 @@ func (t Transport) request(ctx context.Context, method, path string, body any, o
 		return nil
 	}
 	return json.Unmarshal(b, out)
+}
+
+// Keep diagnostics actionable without retaining the raw transport error, which
+// can contain a proxy URL, certificate names or other private infrastructure.
+// Only context sentinels survive as causes; classification does not add retries.
+func relayHTTPFailure(phase string, err error) error {
+	kind := "network"
+	var cause error
+	var dns *net.DNSError
+	var certificate *tls.CertificateVerificationError
+	var unknown x509.UnknownAuthorityError
+	var invalid x509.CertificateInvalidError
+	var hostname x509.HostnameError
+	var network net.Error
+	var errno syscall.Errno
+	switch {
+	case errors.Is(err, context.Canceled):
+		kind, cause = "canceled", context.Canceled
+	case errors.Is(err, context.DeadlineExceeded):
+		kind, cause = "timeout", context.DeadlineExceeded
+	case errors.As(err, &certificate), errors.As(err, &unknown), errors.As(err, &invalid), errors.As(err, &hostname):
+		kind = "certificate"
+	case errors.As(err, &dns):
+		kind = "dns"
+	case errors.Is(err, syscall.ECONNRESET):
+		kind = "connection-reset"
+	case errors.Is(err, syscall.ECONNREFUSED):
+		kind = "connection-refused"
+	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
+		kind = "connection-closed"
+	case errors.As(err, &network) && network.Timeout():
+		kind = "timeout"
+	case errors.As(err, &errno):
+		// Native Windows socket errors use Winsock codes rather than the
+		// portable syscall constants above. Numeric OS codes contain no URLs.
+		kind = fmt.Sprintf("os-error-%d", uint64(errno))
+	}
+	message := fmt.Sprintf("relay HTTPS connection failed; check proxy, trust roots and network access (phase=%s cause=%s)", phase, kind)
+	if cause != nil {
+		return fmt.Errorf("%s: %w", message, cause)
+	}
+	return errors.New(message)
 }
 func (t Transport) Submit(ctx context.Context, e Envelope) error {
 	return t.request(ctx, http.MethodPost, "/v1/messages", e, nil)

@@ -368,11 +368,39 @@ func (f *relayFleet) start(t *testing.T, key byte) {
 			return
 		}
 		if time.Now().After(deadline) {
+			f.probeRelay(t, key)
 			stop()
 			t.Fatalf("fleet runtime startup %c: %v connected=%t mode=%s reason=%q\n%s", key, err, health.Connected, health.DeliveryMode, health.Error, logs.String())
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// Diagnose a failed row through a fresh verified connection, without repeating
+// its operation or extending its readiness deadline. Only status/counts escape;
+// the returned mailbox ciphertext is never logged or acknowledged here.
+func (f *relayFleet) probeRelay(t *testing.T, key byte) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	store := relay.Store{Directory: filepath.Join(f.homes[key].home, "state", "relay")}
+	connection, err := store.Connection(ctx)
+	if err != nil {
+		t.Logf("disposable owner %c diagnostic connection unavailable", key)
+		return
+	}
+	client, err := connection.HTTPClient()
+	if err != nil {
+		t.Logf("disposable owner %c diagnostic trust unavailable", key)
+		return
+	}
+	if client == nil {
+		client = &http.Client{Transport: http.DefaultTransport.(*http.Transport).Clone(), Timeout: 5 * time.Second}
+	}
+	defer client.CloseIdleConnections()
+	started := time.Now()
+	batch, err := (relay.Transport{Base: connection.URL, Space: connection.Space, Token: connection.Token, HTTP: client}).Poll(ctx, 0)
+	t.Logf("disposable owner %c fresh-connection probe elapsed=%s messages=%d error=%v", key, time.Since(started).Round(time.Millisecond), len(batch.Messages), err)
 }
 func (f *relayFleet) seed(t *testing.T, agentName string) agent.Summary {
 	t.Helper()

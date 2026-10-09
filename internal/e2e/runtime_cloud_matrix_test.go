@@ -355,6 +355,8 @@ func runRuntimeCloudRow(t *testing.T, bin string, row runtimecases.Row) {
 	}
 	var widened json.RawMessage
 	if err := call('A', instance, "observe", map[string]string{"session": "unapproved-session"}, &widened); err == nil || !strings.Contains(err.Error(), "cannot widen the bound session") || len(widened) != 0 {
+		f.logHealth(t)
+		f.probeRelay(t, 'A')
 		t.Fatal("cloud request widened bound session", err)
 	}
 	var exported cloudintegration.Export
