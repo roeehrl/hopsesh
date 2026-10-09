@@ -50,6 +50,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Trusting an SSH machine with an explicit host-key alias and a nonstandard
+  port records the name OpenSSH actually checks. Host-key collection failures
+  also retain the fallback client's error instead of showing only a server banner.
+  A stalled keyscan leaves time for the fallback instead of consuming the whole
+  trust request deadline.
+
 - Internet delivery status updates when notifications connect or disconnect,
   including while incoming messages are continuously arriving.
 

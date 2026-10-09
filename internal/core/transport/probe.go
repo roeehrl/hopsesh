@@ -184,15 +184,24 @@ func (c *Conn) ScanHostKeys(ctx context.Context) ([]HostKey, *ResolvedHost, erro
 			gated = append(gated, t)
 		}
 	}
-	ks := proc.CommandContext(ctx, bin, "-T", "5", "-p", r.Port, r.HostName)
-	var ksErr bytes.Buffer
+	// -T bounds socket inactivity, not the process lifetime. A stalled native
+	// keyscan must leave time for the SSH fallback within the caller's deadline.
+	scanCtx, cancelScan := context.WithTimeout(ctx, 10*time.Second)
+	ks := proc.CommandContext(scanCtx, bin, "-T", "5", "-p", r.Port, r.HostName)
+	ks.WaitDelay = 100 * time.Millisecond
+	var ksErr hostKeyDiagnostic
 	ks.Stderr = &ksErr
 	out, err := ks.Output()
+	if scanCtx.Err() != nil {
+		err = scanCtx.Err()
+	}
+	cancelScan()
 	name := r.HostName
 	if r.HostKeyAlias != "" {
+		// OpenSSH uses an explicit HostKeyAlias verbatim, including on a
+		// nonstandard port. Adding [alias]:port would trust a different name.
 		name = r.HostKeyAlias
-	}
-	if r.Port != "22" {
+	} else if r.Port != "22" {
 		name = "[" + name + "]:" + r.Port
 	}
 	keys := parseHostKeys(out, name)
@@ -275,12 +284,15 @@ func (c *Conn) hostKeyViaSSH(ctx context.Context) ([]byte, error) {
 }
 
 // Keep SSH diagnostics useful without retaining unbounded remote banner output.
-type hostKeyDiagnostic struct{ bytes.Buffer }
+type hostKeyDiagnostic struct{ buffer bytes.Buffer }
+
+func (d *hostKeyDiagnostic) Len() int       { return d.buffer.Len() }
+func (d *hostKeyDiagnostic) String() string { return d.buffer.String() }
 
 func (d *hostKeyDiagnostic) Write(p []byte) (int, error) {
 	n := len(p)
 	if remaining := 2048 - d.Len(); remaining > 0 {
-		_, _ = d.Buffer.Write(p[:min(n, remaining)])
+		_, _ = d.buffer.Write(p[:min(n, remaining)])
 	}
 	return n, nil
 }

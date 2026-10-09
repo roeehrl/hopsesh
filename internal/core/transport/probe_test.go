@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -130,6 +131,59 @@ func TestHostKeyFallbackFailureDiagnostic(t *testing.T) {
 	}
 	if d.Len() != 2048 {
 		t.Fatalf("diagnostics not bounded: %d", d.Len())
+	}
+	// exec copies a subprocess pipe with io.Copy; an embedded Buffer's
+	// promoted ReadFrom would bypass a bounded Write implementation.
+	d = hostKeyDiagnostic{}
+	if _, err := io.Copy(&d, struct{ io.Reader }{strings.NewReader(strings.Repeat("y", 6000))}); err != nil || d.Len() != 2048 {
+		t.Fatalf("subprocess-copy diagnostics not bounded: %d %v", d.Len(), err)
+	}
+}
+
+func TestStalledKeyscanLeavesTimeForFallback(t *testing.T) {
+	// A native executable keeps this process/deadline regression runnable on
+	// Windows too. Its keyscan ignores -T, as the failing native scan did.
+	dir := t.TempDir()
+	source := filepath.Join(dir, "ssh.go")
+	body := `package main
+import ("fmt"; "os"; "strings"; "time")
+func main() {
+ if os.Args[1] == "-G" { fmt.Print("hostname 127.0.0.1\nport 2222\nuser fixture\n"); return }
+ if os.Args[1] == "-T" { fmt.Fprintln(os.Stderr, "# fixture SSH banner"); time.Sleep(30*time.Second); os.Exit(1) }
+ for _, a := range os.Args[1:] { if strings.HasPrefix(a, "UserKnownHostsFile=") {
+  p := strings.Trim(strings.TrimPrefix(a, "UserKnownHostsFile="), "\"")
+  if err := os.WriteFile(p, []byte("fixture ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcH\n"), 0600); err != nil { panic(err) }
+  os.Exit(255)
+ } }
+ panic("unexpected arguments")
+}`
+	if err := os.WriteFile(source, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	name := "ssh-keyscan"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	bin := filepath.Join(dir, name)
+	cmd := exec.CommandContext(t.Context(), "go", "build", "-o", bin, source)
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build keyscan fixture: %v %s", err, b)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	c := &Conn{Dest: "fixture", StateDir: dir, sshBinary: bin}
+	start := time.Now()
+	keys, _, err := c.ScanHostKeys(ctx)
+	if err != nil || len(keys) != 1 || ctx.Err() != nil || time.Since(start) > 15*time.Second {
+		t.Fatalf("keyscan starved fallback after %v: keys=%v error=%v caller=%v", time.Since(start), keys, err, ctx.Err())
+	}
+	short, stop := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer stop()
+	start = time.Now()
+	keys, _, err = c.ScanHostKeys(short)
+	if len(keys) != 0 || !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > time.Second {
+		t.Fatalf("scan ignored shorter caller deadline: keys=%v error=%v elapsed=%v", keys, err, time.Since(start))
 	}
 }
 

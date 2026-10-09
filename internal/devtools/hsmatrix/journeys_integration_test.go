@@ -89,8 +89,8 @@ func TestJourneyCLIOverSSH(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fmt.Fprintf(&sshConfig, "Host %s\n HostName 127.0.0.1\n Port %s\n User fixture\n IdentityFile %s\n IdentitiesOnly yes\n IdentityAgent none\n StrictHostKeyChecking yes\n UserKnownHostsFile %s\n GlobalKnownHostsFile /dev/null\n", alias, port, keyFile, filepath.Join(root, "known_hosts"))
-		fmt.Fprintf(&knownHosts, "[127.0.0.1]:%s %s", port, ssh.MarshalAuthorizedKey(hostKey))
+		fmt.Fprintf(&sshConfig, "Host %s\n HostName 127.0.0.1\n Port %s\n HostKeyAlias %s\n User fixture\n IdentityFile %s\n IdentitiesOnly yes\n IdentityAgent none\n StrictHostKeyChecking yes\n UserKnownHostsFile %s\n GlobalKnownHostsFile /dev/null\n", alias, port, alias, keyFile, filepath.Join(root, "known_hosts"))
+		fmt.Fprintf(&knownHosts, "%s %s", alias, ssh.MarshalAuthorizedKey(hostKey))
 	}
 	configPath := filepath.Join(root, "ssh_config")
 	if err := os.WriteFile(configPath, []byte(sshConfig.String()), 0600); err != nil {
