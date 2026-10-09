@@ -12,6 +12,7 @@ on:
   pull_request: # changes to these runs are tested before they land
     paths:
       - .github/workflows/nightly.yml
+      - .github/workflows/release-tests.yml # owns their shared runtime matrix on PRs
       - .github/workflows/runtime-matrix.yml
       - internal/testkit/runtimecases/**
       - internal/e2e/runtime_matrix_test.go

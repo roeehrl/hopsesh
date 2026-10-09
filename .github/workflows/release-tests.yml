@@ -22,6 +22,9 @@ concurrency: # a newer push to the same pull request replaces the run; scheduled
 
 jobs:
   runtime-triples:
+    # Nightly owns this identical matrix on PRs, including changes to this file.
+    # Tags and explicit release qualification still execute their own full copy.
+    if: github.event_name != 'pull_request'
     # Same-commit reference; retain the supported ./ form until actionlint parses $/.
     uses: ./.github/workflows/runtime-matrix.yml # zizmor: ignore[self-repository]
     with:
