@@ -37,7 +37,7 @@ func TestRuntimeNativeUserServiceLifecycle(t *testing.T) {
 		}
 	}
 	bin := buildHopsesh(t)
-	box := newMachineHome(t, t.TempDir(), "native-user-service", false)
+	box := newMachineHome(t, t.TempDir(), "native-user-service-é-📁", false)
 	cfg := config.Defaults()
 	cfg.Agents = map[string]config.Agent{}
 	for _, m := range all.Modules() {

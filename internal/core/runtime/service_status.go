@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -83,7 +84,7 @@ func (p ServicePlan) definitionPresent() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if len(b) > 64<<10 || string(b) != p.Definition {
+	if len(b) > 64<<10 || !bytes.Equal(b, p.definitionBytes()) {
 		return false, errors.New("login registration differs from this plan; disable it with its original executable before replacing")
 	}
 	return true, nil

@@ -32,7 +32,7 @@ func TestServiceStatusUsesSupervisorAndNeverClaimsFileIsEnabled(t *testing.T) {
 		if err = os.MkdirAll(filepath.Dir(p.Path), 0700); err != nil {
 			t.Fatal(err)
 		}
-		if err = os.WriteFile(p.Path, []byte(p.Definition), 0600); err != nil {
+		if err = os.WriteFile(p.Path, p.definitionBytes(), 0600); err != nil {
 			t.Fatal(err)
 		}
 		s := p.status(context.Background(), func(context.Context, []string) ([]byte, error) { return []byte(tc.response), nil })

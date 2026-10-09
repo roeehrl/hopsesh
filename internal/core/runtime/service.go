@@ -3,6 +3,7 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode/utf16"
 )
 
 // ServicePlan is a reviewable per-user login registration. It never requests
@@ -79,7 +81,7 @@ func PlanService(n Namespace, exe, platform, home, uid string) (ServicePlan, err
 		// the invoking shell's credentials, proxy tokens or unrelated environment.
 		p.Path = filepath.Join(n.Directory, "login-task.xml")
 		args := `--config-dir ` + windowsQuote(n.Config) + ` --state-dir ` + windowsQuote(n.State) + ` runtime serve`
-		p.Definition = `<?xml version="1.0" encoding="UTF-8"?><Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"><Triggers><LogonTrigger><Enabled>true</Enabled><UserId>` + xmlText(uid) + `</UserId></LogonTrigger></Triggers><Principals><Principal id="Owner"><UserId>` + xmlText(uid) + `</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals><Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><ExecutionTimeLimit>PT0S</ExecutionTimeLimit><RestartOnFailure><Interval>PT30S</Interval><Count>3</Count></RestartOnFailure></Settings><Actions Context="Owner"><Exec><Command>` + xmlText(exe) + `</Command><Arguments>` + xmlText(args) + `</Arguments></Exec></Actions></Task>`
+		p.Definition = `<?xml version="1.0"?><Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"><Triggers><LogonTrigger><Enabled>true</Enabled><UserId>` + xmlText(uid) + `</UserId></LogonTrigger></Triggers><Principals><Principal id="Owner"><UserId>` + xmlText(uid) + `</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals><Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><ExecutionTimeLimit>PT0S</ExecutionTimeLimit><RestartOnFailure><Interval>PT1M</Interval><Count>3</Count></RestartOnFailure></Settings><Actions Context="Owner"><Exec><Command>` + xmlText(exe) + `</Command><Arguments>` + xmlText(args) + `</Arguments></Exec></Actions></Task>`
 		p.Enable = [][]string{{"schtasks", "/Create", "/TN", p.Name, "/XML", p.Path, "/F"}, {"schtasks", "/Run", "/TN", p.Name}}
 		p.Disable = [][]string{{"schtasks", "/Delete", "/TN", p.Name, "/F"}}
 		p.Stop = [][]string{{"schtasks", "/End", "/TN", p.Name}}
@@ -88,6 +90,24 @@ func PlanService(n Namespace, exe, platform, home, uid string) (ServicePlan, err
 	}
 	return p, nil
 }
+
+// definitionBytes is the exact file representation used for publication and
+// ownership checks. The reviewable Definition remains ordinary Unicode text.
+// schtasks imports UTF-16LE with a BOM; omit a contradictory XML encoding
+// declaration so the same definition also parses correctly in UTF-8 review JSON.
+func (p ServicePlan) definitionBytes() []byte {
+	if p.Platform != "windows" {
+		return []byte(p.Definition)
+	}
+	units := utf16.Encode([]rune(p.Definition))
+	b := make([]byte, 2+2*len(units))
+	b[0], b[1] = 0xff, 0xfe
+	for i, unit := range units {
+		binary.LittleEndian.PutUint16(b[2+2*i:], unit)
+	}
+	return b
+}
+
 func windowsQuote(s string) string {
 	var b strings.Builder
 	b.WriteByte('"')
@@ -161,7 +181,7 @@ func (p ServicePlan) EnableAtLogin(ctx context.Context) error {
 	}
 	defer os.Remove(f.Name())
 	if err = f.Chmod(0600); err == nil {
-		_, err = f.WriteString(p.Definition)
+		_, err = f.Write(p.definitionBytes())
 	}
 	if err == nil {
 		err = f.Sync()
