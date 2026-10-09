@@ -500,7 +500,9 @@ export function render() {
   content.scrollTop = top;
   const ins=view.querySelector(".inspector");if(ins)ins.scrollTop=inspectorTop;
   if(inputID){const input=document.getElementById(inputID);input?.focus({preventScroll:true});if(inputSelection)input?.setSelectionRange(...inputSelection)}
-  else if(active?.isConnected && active!==document.body)active.focus({preventScroll:true});
+  // An unchanged iframe can still own a focused input in its child document.
+  // Refocusing the frame itself blurs that input and drops subsequent keys.
+  else if(active?.isConnected && active!==document.body && document.activeElement!==active)active.focus({preventScroll:true});
   if (focusKey) rowByKey(content, focusKey)?.focus({ preventScroll: true });
   else if (focusGroup) content.querySelector(`.grp[data-gkey="${CSS.escape(focusGroup)}"]`)?.focus({ preventScroll: true });
 }

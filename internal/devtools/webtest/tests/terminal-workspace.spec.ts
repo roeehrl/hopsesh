@@ -59,6 +59,29 @@ test('dock transfer preserves screen and rejects old view capability',async({pag
  const old=await page.request.get(ws.url);expect(old.status()).toBe(403);
 });
 
+test('background session repaint preserves input focus inside the docked terminal',async({page,context})=>{
+ await page.request.post('/terminal-test/open?title=Typing%20during%20discovery');
+ const ws=await page.evaluate(async()=> (await import('/core.js')).api('TerminalWorkspace'));
+ const detached=await context.newPage();await detached.goto(ws.url+'&renderer=dom');
+ await expect.poll(()=>detached.evaluate(()=>window.hopseshTerminal?.text())).toContain('termfake: ready');
+ await detached.getByLabel('Terminal placement').selectOption('bottom');
+ const embedded=page.frameLocator('#terminal-workspace iframe');
+ await expect(embedded.locator('.term')).toBeVisible();
+ await expect(embedded.locator('#connection')).toBeHidden();
+ const screen=()=>embedded.locator('.term').evaluate(()=>window.hopseshTerminal?.text());
+ await expect.poll(screen).toContain('termfake: ready');
+ const input=embedded.locator('.term:not([hidden]) .xterm-helper-textarea');
+ await input.focus();await page.keyboard.type('before refresh ');
+ const content=await page.locator('#view .content').elementHandle();
+ await page.evaluate(async()=> (await import('/sessions.js')).backgroundRender());
+ await expect.poll(()=>content!.evaluate(el=>el.isConnected)).toBe(false);
+ // The parent document sees the iframe as active. Focusing that same iframe
+ // again blurs its actual input, silently discarding the rest of a typed line.
+ await expect(input).toBeFocused();
+ await page.keyboard.type('after refresh');await page.keyboard.press('Enter');
+ await expect.poll(screen).toContain('typed=before refresh after refresh');
+});
+
 test('alternate screen, cursor, PID and later input survive repeated dock and detach',async({page,context})=>{
  await page.request.post('/terminal-test/open?title=Full%20screen');
  const workspace=()=>page.evaluate(async()=> (await import('/core.js')).api('TerminalWorkspace'));

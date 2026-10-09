@@ -625,9 +625,9 @@ jobs:
         if: ${{ !cancelled() }}
         uses: test-summary/action@37b508cfee6d4d080eedd00b5bb240a6a784a6a5 # v2.6
         with:
-          paths: |
-            internal/devtools/webtest/test-results/junit-real.xml
-            internal/devtools/webtest/test-results-shots/junit-shots.xml
+          # The optional WSL screenshot lane may not run; summarize the reports
+          # that were actually produced without inventing a missing-file failure.
+          paths: internal/devtools/webtest/test-results*/junit-*.xml
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ failure() }}
         with:
