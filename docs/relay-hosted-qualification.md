@@ -219,6 +219,20 @@ proxy path.
 
 ## Local macOS candidate
 
+Source `fc154b4` was exported and built as universal candidate
+`0.5.0-staging.20261009.fc154b4`. Local Developer ID signing, Apple notarization,
+both staples and Gatekeeper assessment pass. The signed-manifest production
+installer and complete updater race suite pass in 3.918 seconds, including
+existing/concurrently appearing destination refusal. The embedded CLI preserves
+one owner across repeated start, observes all four fixture sessions, and stops
+cleanly. Native desktop self-check and all three terminal placements pass from
+the same source. The DMG is 41,238,728 bytes with SHA256
+`0b7d8d633285fe5f2c0b9035f77ed8fd5769d4f25ff7a66d8c92d35de3a2c374`.
+Artifacts are under `/tmp/hopsesh-candidate-fc154b4.LYQUx7/macos`; the numerical
+record is `/tmp/hopsesh-candidate-fc154b4-evidence.json`, with build, installation
+and CLI evidence paths. No GitHub release or cloud download publication was
+performed, and the installed 0.4 app remains untouched.
+
 The same exported source built a universal GUI bundle and embedded CLI, signed
 with the local Developer ID identity and notarized with the existing Keychain
 profile. Apple accepted the DMG; both DMG and app tickets were stapled. The bundle

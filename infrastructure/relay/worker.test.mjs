@@ -21,21 +21,28 @@ async function fixture(events,policy){
  const envelope=(id='message-123456789')=>({kind:"request",protocol:1,id,space,from:a,to:b,operation:'operation-123456',created:Math.floor(clock/1000),expires:Math.floor(clock/1000)+300,ciphertext:'opaque-encrypted-payload',signature:'x'.repeat(88)});
  return{storage,bucket,invoke,ta,tb,a,b,envelope,advance:ms=>clock+=ms};
 }
-test('serialized daily traffic ceiling survives acknowledgment, duplicate retry and midnight rollover',async()=>{
- const f=await fixture(undefined,{dailyFrames:2,dailyBytes:100000});
- const statuses=await Promise.all(Array.from({length:12},(_,i)=>f.invoke('/v1/messages','POST',f.ta,f.envelope('budget-message-'+String(i).padStart(4,'0'))).then(r=>r.status)));
- assert.equal(statuses.filter(s=>s===201).length,2);assert.equal(statuses.filter(s=>s===429).length,10);
- assert.equal(f.bucket.values.size,2);
- const batch=await(await f.invoke('/v1/messages','GET',f.tb)).json();
- await f.invoke('/v1/ack','POST',f.tb,{cursor:batch.cursor});
- assert.equal((await f.invoke('/v1/messages','POST',f.ta,f.envelope('new-budget-message'))).status,429,'ack must not refund daily admission');
- assert.equal((await f.invoke('/v1/messages','POST',f.ta,f.envelope('budget-message-0000'))).status,200,'committed retry must not consume another reservation');
- const stored=await f.storage.get('day-budget');assert.equal(stored.frames,2);
- // Move the existing counter to yesterday: the next transaction rolls it over
- // without an idle timer or extra maintenance wakeup.
- await f.storage.put('day-budget',{...stored,day:stored.day-1});
- assert.equal((await f.invoke('/v1/messages','POST',f.ta,f.envelope('rollover-message-001'))).status,201);
- assert.equal((await f.storage.get('day-budget')).frames,1);
+test('serialized daily traffic ceiling survives acknowledgment, duplicate retry and midnight rollover',async t=>{
+ for(const reverse of [false,true])await t.test(reverse?'reverse submission order':'forward submission order',async()=>{
+  const f=await fixture(undefined,{dailyFrames:2,dailyBytes:100000});
+  const frames=Array.from({length:12},(_,index)=>f.envelope('budget-message-'+String(reverse?11-index:index).padStart(4,'0')));
+  const statuses=await Promise.all(frames.map(frame=>f.invoke('/v1/messages','POST',f.ta,frame).then(r=>r.status)));
+  assert.equal(statuses.filter(s=>s===201).length,2);assert.equal(statuses.filter(s=>s===429).length,10);
+  assert.equal(f.bucket.values.size,2);
+  const batch=await(await f.invoke('/v1/messages','GET',f.tb)).json();
+  assert.equal((await f.invoke('/v1/ack','POST',f.tb,{cursor:batch.cursor})).status,200);
+  assert.equal((await f.invoke('/v1/messages','POST',f.ta,f.envelope('new-budget-message'))).status,429,'ack must not refund daily admission');
+  // Concurrent submissions can reach the transaction in any order. Retry only
+  // frames proven committed, preserving their exact bytes after acknowledgment.
+  for(const [index,status]of statuses.entries())if(status===201){
+   assert.equal((await f.invoke('/v1/messages','POST',f.ta,frames[index])).status,200,'committed retry must not consume another reservation');
+  }
+  const stored=await f.storage.get('day-budget');assert.equal(stored.frames,2);
+  // Move the existing counter to yesterday: the next transaction rolls it over
+  // without an idle timer or extra maintenance wakeup.
+  await f.storage.put('day-budget',{...stored,day:stored.day-1});
+  assert.equal((await f.invoke('/v1/messages','POST',f.ta,f.envelope('rollover-message-001'))).status,201);
+  assert.equal((await f.storage.get('day-budget')).frames,1);
+ });
 });
 test('byte budget blocks before R2 publication and operator metrics disclose counts only',async()=>{
  const f=await fixture(undefined,{dailyBytes:1,dailyFrames:99999999});

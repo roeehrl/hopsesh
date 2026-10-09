@@ -82,6 +82,26 @@ reduction claim. The private numerical reports are
 `/tmp/hopsesh-0.5-gui-coalition-report-2.json`; the second also hashes the executed
 ad-hoc-signed copies independently of the source executables.
 
+The clean `fc154b4` follow-up passes the same workload in 147.44 seconds. Its
+baseline executable SHA256 matches the earlier recorded 0.4 binary; the baseline
+CLI was rebuilt from exported `a894a9e`. The current app was built from the clean
+commit with the qualification-only hooks. No other local qualification workload
+ran during measurement. Results retain eight attributed processes per sample:
+
+| Sample | CPU, one core | Summed footprint, bytes | Interrupt wakeups / 30s |
+| --- | ---: | ---: | ---: |
+| 0.4 baseline | 1.262% | 174,299,328 | 3,436 |
+| Current, zero extra clients | 0.185% | 178,149,568 | 348 |
+| Current, one extra client | 0.809% | 184,260,824 | 921 |
+| Current, five extra clients | 0.127% | 178,116,800 | 306 |
+
+All current samples satisfy the existing CPU, additional-memory and wakeup
+budgets. Shared ownership, collection counts and subscriber cleanup assertions
+also pass. This remains finite idle evidence, not whole-machine energy or a
+long-term leak test. Raw counters and binary digests are in
+`/tmp/hopsesh-fc154b4-gui-resource-report.json`; the execution log is
+`/tmp/hopsesh-fc154b4-gui-resource.log`.
+
 Counter and attribution contracts follow Apple's
 [task rusage implementation](https://github.com/apple-oss-distributions/xnu/blob/main/osfmk/kern/bsd_kern.c),
 [private process-info definitions](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/proc_info_private.h),
