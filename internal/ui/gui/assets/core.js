@@ -218,7 +218,9 @@ export function loading(text) {
 
 // The entry for the current selection, from the last scan.
 export function entries() {
-  return state.scan ? state.scan.groups.flatMap((g) => g.entries.map((e) => Object.assign({ group: g }, e))) : [];
+  if(!state.scan)return [];
+  const groups=state.list?.groupBy==='account' ? [...state.scan.groups,...(state.scan.profileCopies||[])] : state.scan.groups;
+  return groups.flatMap(g=>g.entries.map(e=>Object.assign({group:g},e)));
 }
 export function selected() {
   const s = state.sel;
@@ -266,3 +268,8 @@ export function ask({ title, body, ok, danger = false }) {
     d.returnValue = "";
   });
 }
+
+// Profiles identify state roots, not the historical owner of every conversation.
+export const accountLabel = p => p?.account?.email || p?.name || "No account profile";
+export const accountTitle = p => p ? `Stored in ${p.name} (${p.root}). ${p.account?.loggedIn ? `${p.error ? "Last known" : "Current"} sign-in: ${p.account.email || p.account.label || p.account.provider}.` : "Current sign-in not confirmed."} ${p.error ? p.error+". " : ""}This does not establish who originally created the session.` : "No registered account profile";
+export const accountGroupLabel = e => e.profile ? `${accountLabel(e.profile)} · ${e.agentName} · ${e.machine === here() ? sys.Here : e.machine}${e.profile.account?.email && !e.profile.default ? " · "+e.profile.name : ""}` : "No account profile";

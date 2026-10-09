@@ -8,6 +8,7 @@ package codex
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -117,7 +118,7 @@ type line struct {
 
 // List walks sessions/YYYY/MM/DD, newest first. Sub-agent threads are left out, as
 // Codex's own pickers do.
-func (m *Module) List(_ context.Context, h agent.Host, in agent.Install) (agent.Listing, error) {
+func (m *Module) List(ctx context.Context, h agent.Host, in agent.Install) (agent.Listing, error) {
 	files, err := rollouts(h, in)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -125,7 +126,9 @@ func (m *Module) List(_ context.Context, h agent.Host, in agent.Install) (agent.
 		}
 		return agent.Listing{}, err
 	}
+	sort.Slice(files, func(i, j int) bool { return files[i].info.ModTime().After(files[j].info.ModTime()) })
 	titles := names(h, in)
+	titleSalt := fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprint(titles))))
 	out := agent.Listing{Sessions: make([]agent.Summary, 0, len(files))}
 	sums := make([]*agent.Summary, len(files))
 	errs := make([]error, len(files))
@@ -136,7 +139,22 @@ func (m *Module) List(_ context.Context, h agent.Host, in agent.Install) (agent.
 		sem <- struct{}{}
 		go func() {
 			defer func() { <-sem; wg.Done() }()
-			sums[i], errs[i] = summarize(h, f)
+			sums[i], errs[i] = agent.ListingSummary(ctx, h, f.path, f.info, "codex-summary-1:"+titleSalt, nil, func() (*agent.Summary, error) {
+				s, err := summarize(h, f)
+				if s != nil {
+					s.Key.Profile = in.ProfileID()
+					if t := titles[string(s.Key.Session)]; t != "" {
+						s.Title, s.TitleSource = t, "custom"
+						if mk, orig, ok := agent.ParseMarkTitle(t); ok {
+							s.Mark, s.Title = &mk, orig
+						}
+					}
+				}
+				return s, err
+			})
+			if s := sums[i]; s != nil {
+				s.Key.Profile = in.ProfileID()
+			}
 		}()
 	}
 	wg.Wait()
@@ -179,18 +197,27 @@ func rollouts(h agent.Host, in agent.Install) ([]rollout, error) {
 		if !y.IsDir() || !numeric(y.Name()) {
 			continue
 		}
-		months, _ := fsys.ReadDir(pa.Join(root, y.Name()))
+		months, err := fsys.ReadDir(pa.Join(root, y.Name()))
+		if err != nil {
+			return out, err
+		}
 		for _, mo := range months {
 			if !mo.IsDir() || !numeric(mo.Name()) {
 				continue
 			}
-			days, _ := fsys.ReadDir(pa.Join(root, y.Name(), mo.Name()))
+			days, err := fsys.ReadDir(pa.Join(root, y.Name(), mo.Name()))
+			if err != nil {
+				return out, err
+			}
 			for _, d := range days {
 				if !d.IsDir() || !numeric(d.Name()) {
 					continue
 				}
 				dir := pa.Join(root, y.Name(), mo.Name(), d.Name())
-				entries, _ := fsys.ReadDir(dir)
+				entries, err := fsys.ReadDir(dir)
+				if err != nil {
+					return out, err
+				}
 				for _, e := range entries {
 					if isRollout(e.Name()) && !e.IsDir() {
 						out = append(out, rollout{pa.Join(dir, e.Name()), e})
@@ -787,3 +814,12 @@ func (m *Module) Stop(ctx context.Context, h agent.Host, in agent.Install, s age
 }
 
 func toSlash(p string) string { return strings.ReplaceAll(p, `\`, "/") }
+
+// SessionWatchPaths excludes logs, credentials and unrelated caches.
+func (m *Module) SessionWatchPaths(in agent.Install, pa agent.Path) []string {
+	root := in.Root(home)
+	if root == "" {
+		return nil
+	}
+	return []string{pa.Join(root, "sessions"), pa.Join(root, "archived_sessions"), pa.Join(root, "session_index.jsonl"), pa.Join(root, "hopsesh")}
+}

@@ -8,20 +8,21 @@ import (
 // RuntimeProfile is a pinned, agent-specific state root, independent of account labels.
 // Binding describes the observed login; it is not a credential or proof of ownership.
 type RuntimeProfile struct {
-	CheckedAt  time.Time `json:"checkedAt,omitempty"`
-	Machine    string    `json:"machine,omitempty"`
-	ID         string    `json:"id"`
-	Endpoint   string    `json:"endpoint"`
-	Agent      ID        `json:"agent"`
-	Name       string    `json:"name"`
-	Tags       []string  `json:"tags"`
-	Root       string    `json:"root"`
-	Default    bool      `json:"default"`
-	Managed    bool      `json:"managed"`
-	Generation int       `json:"generation"`
-	Binding    string    `json:"binding,omitempty"`
-	Account    *Account  `json:"account,omitempty"`
-	Error      string    `json:"error,omitempty"`
+	IdentitySource string    `json:"identitySource,omitempty"`
+	CheckedAt      time.Time `json:"checkedAt,omitempty"`
+	Machine        string    `json:"machine,omitempty"`
+	ID             string    `json:"id"`
+	Endpoint       string    `json:"endpoint"`
+	Agent          ID        `json:"agent"`
+	Name           string    `json:"name"`
+	Tags           []string  `json:"tags"`
+	Root           string    `json:"root"`
+	Default        bool      `json:"default"`
+	Managed        bool      `json:"managed"`
+	Generation     int       `json:"generation"`
+	Binding        string    `json:"binding,omitempty"`
+	Account        *Account  `json:"account,omitempty"`
+	Error          string    `json:"error,omitempty"`
 }
 
 func (in Install) ProfileID() string {

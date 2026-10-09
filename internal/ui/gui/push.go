@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/peer"
@@ -16,6 +17,8 @@ import (
 // PushPlan asks hopsesh on another machine to plan receiving a session from this one, in
 // its own agent (target "") or another. The connection stays open for PushApply.
 func (a *App) PushPlan(key, machine, target string, o OptsDTO) (*PlanDTO, error) {
+	doneSelection := a.beginSelection()
+	defer doneSelection()
 	core := a.snapshot()
 	a.mu.Lock()
 	inv := a.inv
@@ -35,6 +38,10 @@ func (a *App) PushPlan(key, machine, target string, o OptsDTO) (*PlanDTO, error)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
+	inv, e, err = a.selectionInventory(ctx, core, inv, e)
+	if err != nil {
+		return nil, err
+	}
 	p, err := core.StartPush(ctx, inv, e, *to, agent.ID(target), o.options(core.DefaultOptions()))
 	if errors.Is(err, peer.ErrRefused) {
 		return nil, fmt.Errorf("%s does not receive sessions yet: on %s, turn on Receive sessions in hopsesh's settings (or run hopsesh receive on), then try again", machine, machine)
@@ -50,6 +57,8 @@ func (a *App) PushPlan(key, machine, target string, o OptsDTO) (*PlanDTO, error)
 		tm, _ = core.Module(e.Agent)
 	}
 	d := planDTO(p.Plan, e, tm)
+	freshEntry := entryDTO(core, inv, app.Item{Entry: e}, continueTargets(core, inv))
+	d.SourceEntry = &freshEntry
 	d.Machine = machine
 	return d, nil
 }

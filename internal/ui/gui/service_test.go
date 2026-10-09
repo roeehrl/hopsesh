@@ -90,6 +90,9 @@ func TestWindowContinuesInAnotherAgent(t *testing.T) {
 	if p.Kind != "continue" || p.Continue == nil || p.Continue.Relation != "new" || len(p.Blockers) > 0 || p.TargetCWD != repo {
 		t.Fatalf("plan: %+v %+v", p, p.Continue)
 	}
+	if p.SourceEntry == nil || p.SourceEntry.Key != e.Key || p.SourceEntry.Profile == nil {
+		t.Fatalf("review must carry the validated source profile: %+v", p.SourceEntry)
+	}
 	if !strings.Contains(p.Continue.Briefing, "Claude Code") || p.Continue.Report.Summary == "" {
 		t.Fatalf("the plan must show the briefing and what is carried: %+v", p.Continue)
 	}

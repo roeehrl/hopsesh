@@ -12,15 +12,16 @@ import (
 
 // Copy is one copy of a session that exists in several places or agents.
 type Copy struct {
-	Machine    string           `json:"machine"`
-	Agent      agent.ID         `json:"agent"`
-	AgentName  string           `json:"agentName"`
-	Key        agent.SessionKey `json:"key"`
-	Local      bool             `json:"local,omitempty"`
-	LastActive time.Time        `json:"lastActive"`
-	Mark       *agent.Mark      `json:"mark,omitempty"`
-	Live       bool             `json:"live,omitempty"`
-	Newest     bool             `json:"newest,omitempty"`
+	Profile    *agent.RuntimeProfile `json:"profile,omitempty"`
+	Machine    string                `json:"machine"`
+	Agent      agent.ID              `json:"agent"`
+	AgentName  string                `json:"agentName"`
+	Key        agent.SessionKey      `json:"key"`
+	Local      bool                  `json:"local,omitempty"`
+	LastActive time.Time             `json:"lastActive"`
+	Mark       *agent.Mark           `json:"mark,omitempty"`
+	Live       bool                  `json:"live,omitempty"`
+	Newest     bool                  `json:"newest,omitempty"`
 }
 
 // Item is one session, shown as its newest copy, with every copy when there are several.
@@ -72,7 +73,7 @@ func (inv *Inventory) Items() []Item {
 		}
 		cs := make([]Copy, len(es))
 		for i, e := range es {
-			cs[i] = Copy{Machine: e.Machine, Agent: e.Agent, AgentName: e.AgentName, Key: e.Session.Key, Local: local[e.Machine],
+			cs[i] = Copy{Profile: e.Profile, Machine: e.Machine, Agent: e.Agent, AgentName: e.AgentName, Key: e.Session.Key, Local: local[e.Machine],
 				LastActive: e.Session.LastActivity, Mark: e.Session.Mark, Live: e.Live.State == agent.Live}
 		}
 		pick := newest(cs)

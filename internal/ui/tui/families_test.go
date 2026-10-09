@@ -42,7 +42,7 @@ func TestFamilyNavigationAndCollapsePersistence(t *testing.T) {
 	}
 	next.key("g")
 	saved, err = config.Load()
-	if err != nil || saved.List.GroupBy != "repository" {
+	if err != nil || saved.List.GroupBy != "account" {
 		t.Fatal("group preference not saved")
 	}
 }

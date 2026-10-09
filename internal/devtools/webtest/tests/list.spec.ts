@@ -141,6 +141,7 @@ test("groups collapse and stay so; ⌥-click and Display do all of them", async 
   await page.waitForTimeout(600);
   await page.reload();
   await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator("#fresh")).toContainText("updated");
   await expect(demo).toHaveAttribute("aria-expanded", "false");
   // Saved per grouping: by agent, every group is open.
   const d = await display(page);

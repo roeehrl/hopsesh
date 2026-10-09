@@ -7,6 +7,12 @@ exec hopsesh accounts add claude 'Second personal' --tag Personal,personal --jso
 stdout 'Second personal'
 cp stdout second-account.json
 account-id second-account.json
+# A single profile check uses public CLI status and does not perform a session scan.
+exec hopsesh accounts refresh $ACCOUNT_ID --json
+stdout '"identitySource": "local"'
+stdout '"checkedAt"'
+exec hopsesh ls --host local --no-git --group-by account --json
+stdout '"identity": "account:'
 exec hopsesh accounts list --json
 stdout 'First personal'
 stdout 'Second personal'

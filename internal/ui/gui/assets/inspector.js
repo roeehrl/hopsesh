@@ -2,7 +2,7 @@
 // it runs, one line of facts), its action row ([Primary ▾] [Move ▾] [⋯]), where it is
 // open, the end of its conversation (safe, locally rendered Markdown), and its
 // repository, copies and details, which open and close app-wide.
-import { api, h, fill, icon, ICONS, state, sys, here, ago, when, bytes, agentBadge, cloudOf, cloudTitle, count, path, rich, fail, toast, dialog, errText, cap, $ } from "./core.js";
+import { accountLabel, accountTitle, api, h, fill, icon, ICONS, state, sys, here, ago, when, bytes, agentBadge, cloudOf, cloudTitle, count, path, rich, fail, toast, dialog, errText, cap, $ } from "./core.js";
 import { selectDestination, model, statusLine, placeName, showPlace, placeCount, onInspector, liveOf, appWord } from "./actions.js";
 import { openMenu, isOpen, openEl, closeAll } from "./menu.js";
 import { sectionOpen, setSection } from "./layout.js";
@@ -83,7 +83,7 @@ function header(e) {
   const [k, lead, rest, cl, twice] = statusLine(e);
   const g = e.group;
   const facts = [];
-  if(e.profile) facts.push(h("span",{title:e.profile.root},`${e.profile.name}${e.profile.tags?.length?" · "+e.profile.tags.join(", "):""}`));
+  if(e.profile) facts.push(h("span",{title:accountTitle(e.profile)},`${accountLabel(e.profile)}${e.profile.tags?.length?" · "+e.profile.tags.join(", "):""}`));
   if (e.cloud) {
     if (e.cloud.repo || !g.noRepo) facts.push(h("span", {}, (e.cloud.repo || g.name).split("/").pop()));
     if (e.cloud.branch) facts.push(h("span", { class: "mono" }, e.cloud.branch));
@@ -316,7 +316,7 @@ function history(e) {
  e.journey.fork ? h("span", { class: "chip",title:`Parent branch: ${e.journey.parentBranch}` }, "Separate fork") : null,
  h("span",{class:"muted",style:"font-size:12px"},`Origin: ${e.journey.origin&&e.journey.origin!=="/"?e.journey.origin:"not recorded"}; branch ${e.journey.branch.slice(0,8)}`)) : null,
  others.length ? h("div", { class: "sub-h" }, "Other copies") : null,
-    others.map((c) => h("span", {}, copyPlace(c), h("span", { class: "muted" }, c.newest ? " · newest" : c.mark ? " · marked" : " · older"), " ", h("button",{class:"link",onclick:()=>resolveDestination(c).then(selectDestination).catch(fail)},"Show copy"))),
+    others.map((c) => h("span", {}, copyPlace(c), c.profile ? h("span",{title:accountTitle(c.profile)}," · "+accountLabel(c.profile)) : null, h("span", { class: "muted" }, c.newest ? " · newest" : c.mark ? " · marked" : " · older"), " ", h("button",{class:"link",onclick:()=>resolveDestination(c).then(selectDestination).catch(fail)},"Show copy"))),
     e.mirror ? [h("div", { class: "sub-h" }, "Mirrored"), h("span", {}, `Remote Control keeps a copy on ${e.mirror.host} while it runs. `,
       h("button", { class: "link", onclick: () => api("OpenURL", e.mirror.url).catch(fail) }, "Open it"))] : null,
     e.history.length ? [h("div", { class: "sub-h" }, e.cloud ? "Lineage" : "Where it has been"),
@@ -351,13 +351,19 @@ function cloudNotes(e) {
 }
 
 // inspector is the selected session's pane (or what selecting one does).
-export function inspector(e) {
+export function inspector(e, previous=null) {
   if (!e) return h("aside", { class: "inspector", id: "inspector", "aria-label": "Session details" }, h("div", { class: "empty" }, "Select a session to see what you can do with it."));
   const m = model(e);
-  return h("aside", { class: "inspector", id: "inspector", "aria-label": e.cloud ? `Cloud ${e.cloud.noun || "session"} details` : "Session details", "data-key": e.machine + "\u0000" + e.key },
+  const {group,observedAt,...item}=e;
+  const signature=JSON.stringify([item,{...group,entries:undefined},statusLine(e),m.primary?.label,m.primary?.disabled,state.info?.previews,state.info?.agents,[...tabs.values()].filter(t=>t.machine===e.machine&&t.key===e.key).map(t=>[t.id,t.state,t.attention])]);
+  const same=previous?.dataset.key===e.machine+"\u0000"+e.key;
+  if(same && previous.dataset.signature===signature) return previous;
+  const conversationKey=JSON.stringify([e.machine,e.key,e.lastActive,e.sizeKB,e.canPreview,state.info?.previews]);
+  const retained=same && previous.dataset.conversationKey===conversationKey ? previous.querySelector('#sec-conversation')?.parentElement : null;
+  return h("aside", { class: "inspector", id: "inspector", "aria-label": e.cloud ? `Cloud ${e.cloud.noun || "session"} details` : "Session details", "data-key": e.machine + "\u0000" + e.key, "data-signature":signature, "data-conversation-key":conversationKey },
     header(e), actionRow(e, m), movementNotice(e, selectDestination, () => {
       setSection("copies", true); refresh(e); $("#sec-copies")?.scrollIntoView({block:"nearest"});
-    }), returnSection(m), openIn(e, m), conversation(e), repository(e), history(e), details(e), e.cloud ? cloudNotes(e) : null);
+    }), returnSection(m), openIn(e, m), retained || conversation(e), repository(e), history(e), details(e), e.cloud ? cloudNotes(e) : null);
 }
 
 function returnSection(m) {

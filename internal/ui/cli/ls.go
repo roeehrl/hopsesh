@@ -31,13 +31,14 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 			agentID, _ := cmd.Flags().GetString("agent")
 			repo, _ := cmd.Flags().GetString("repo")
 			liveOnly, _ := cmd.Flags().GetBool("live")
+			noLocal, _ := cmd.Flags().GetBool("no-local")
 			noGit, _ := cmd.Flags().GetBool("no-git")
 			limit, _ := cmd.Flags().GetInt("limit")
 			cloudOnly, _ := cmd.Flags().GetBool("cloud")
 			env, _ := cmd.Flags().GetString("env")
 			groupBy, _ := cmd.Flags().GetString("group-by")
-			if groupBy != "repository" && groupBy != "family" {
-				return fmt.Errorf("group-by must be repository or family")
+			if groupBy != "repository" && groupBy != "family" && groupBy != "account" {
+				return fmt.Errorf("group-by must be repository, family or account")
 			}
 			if len(args) == 1 {
 				name := strings.TrimSuffix(args[0], ":")
@@ -46,13 +47,22 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 				}
 				cloudOnly, host = true, name
 			}
-			inv := r.scan(cmd, host, noGit)
+			cached, _ := cmd.Flags().GetBool("cached")
+			inv := r.app.CachedInventory()
+			if !cached {
+				inv = r.scan(cmd, host, noGit)
+			} else if !r.jsonOut {
+				r.printf("Saved sessions; presence and availability have not been checked.\n")
+			}
+
 			defer inv.Close()
 			kept := inv.Entries[:0]
 			for _, e := range inv.Entries {
 				mirrored := e.Session.Mirror != nil && (host == "" || r.app.IsCloud(host) && e.Session.Mirror.Cloud == host)
 				switch {
+				case noLocal && e.Machine == app.LocalName():
 				case cloudOnly && !e.Location.IsCloud() && !mirrored:
+				case (host == "local" || host == ".") && e.Machine != app.LocalName():
 				case host != "" && host != "local" && host != "." && e.Machine != host && !(cloudOnly && mirrored):
 				case agentID != "" && string(e.Agent) != agentID:
 				case liveOnly && e.Live.State != agent.Live:
@@ -71,6 +81,9 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 						groups[i].Name = name
 					}
 				}
+			}
+			if groupBy == "account" {
+				groups = inv.AccountGroups()
 			}
 			if r.jsonOut {
 				out := map[string]any{"machines": inv.Machines, "clouds": inv.Clouds, "groups": groups, "relationships": inv.Relationships()}
@@ -126,6 +139,7 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 				switch {
 				case groupBy == "family":
 					head += fmt.Sprintf("  [%d branches]", len(g.Items))
+				case groupBy == "account":
 				case g.Local != "":
 					head += "  [here: " + g.Local + "]"
 				case g.Identity != "" && !strings.HasPrefix(g.Identity, "local:"):
@@ -141,6 +155,9 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 					e := it.Entry
 					s := e.Session
 					fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\t%s\n", e.Machine, e.AgentName, truncate(s.Title, 40), movementStatus(e), ago(s.LastActivity), shortID(s.Key.Session), truncate(s.CWD, 44))
+					if e.Profile != nil {
+						fmt.Fprintf(tw, "  \t\t  profile: %s\t\t\t\t\n", app.AccountLabel(e.Profile))
+					}
 					if e.Movement != nil {
 						fmt.Fprintf(tw, "  \t\t  movement [%s]: %s\t\t\t\t\n", e.Movement.Status, e.Movement.Text)
 					}
@@ -170,11 +187,12 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 			return nil
 		},
 	}
-	cmd.Flags().String("group-by", "repository", "group sessions by repository or verified conversation family")
+	cmd.Flags().String("group-by", "repository", "group sessions by repository, verified conversation family or account profile")
 	cmd.Flags().String("host", "", "only this machine (\"local\" for this one)")
 	cmd.Flags().String("agent", "", "only this agent ("+strings.Join(agentIDs(), ", ")+")")
 	cmd.Flags().String("repo", "", "only sessions whose repository or path contains this")
 	cmd.Flags().Bool("live", false, "only open sessions")
+	cmd.Flags().Bool("cached", false, "show saved session metadata immediately, without contacting machines; presence is unknown")
 	cmd.Flags().Bool("no-git", false, "skip the git probe (faster)")
 	cmd.Flags().Bool("no-local", false, "skip this machine")
 	cmd.Flags().Bool("cloud", false, "only cloud sessions (and the local sessions their vendor mirrors)")

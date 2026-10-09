@@ -161,7 +161,7 @@ func (s *peerSession) planReceive(ctx context.Context, req peer.PlanRequest) (*p
 		return nil, fmt.Errorf("the session's files are larger than %s", move.Human(maxPackage))
 	}
 	s.snap = host.NewSnapshot(pkg.Location, host.Facts{OS: pkg.Facts.OS, Arch: pkg.Facts.Arch, Home: pkg.Facts.Home, Endpoint: pkg.Facts.Endpoint}, pkg.Files)
-	inv := s.a.Scan(ctx, ScanOptions{Hosts: []string{LocalName()}, GitFor: s.a.GitFor(Ref{Query: string(pkg.Session.Key.Session)})})
+	inv := s.a.Scan(ctx, ScanOptions{Hosts: []string{LocalName()}, NoCache: true, GitFor: s.a.GitFor(Ref{Query: string(pkg.Session.Key.Session)})})
 	in := pkg.Install
 	in.Present = true
 	src := &Machine{Kind: agent.AtMachine, Name: pkg.Location, Status: StatusOK, OS: pkg.Facts.OS, host: s.snap, account: pkg.Account,

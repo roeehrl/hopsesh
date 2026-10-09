@@ -14,6 +14,16 @@ import (
 // Resume is the command that continues a session that is already on this machine.
 func (a *App) Resume(inv *Inventory, e Entry, o agent.ResumeOptions) (agent.Command, error) {
 	m := inv.Machine(e.Machine)
+	if e.Cached || inv.Discovering || m != nil && m.host == nil {
+		ctx, done := context.WithTimeout(context.Background(), time.Minute)
+		defer done()
+		fresh, entry, err := a.FreshSelection(ctx, e)
+		if err != nil {
+			return agent.Command{}, err
+		}
+		defer fresh.Close()
+		inv, e, m = fresh, entry, fresh.Machine(entry.Machine)
+	}
 	if m == nil || !m.Local {
 		return agent.Command{}, errors.New("the session is not on this machine; bring it here first")
 	}

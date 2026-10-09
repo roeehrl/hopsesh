@@ -1,12 +1,13 @@
 // The Machines screen: this machine (and whether it receives sessions), the machines you
 // added, and the ones discovery found. hopsesh connects only to machines you added.
-import { api, h, fill, icon, ICONS, view, state, screen, loading, toast, fail, errText, cap, dialog, ask, machineStatus, sys, when, current, rich, navigationID, loadError } from "./core.js";
+import { on, api, h, fill, icon, ICONS, view, state, screen, loading, toast, fail, errText, cap, dialog, ask, machineStatus, sys, when, current, rich, navigationID, loadError } from "./core.js";
 import { signIn, onSignedIn } from "./term.js";
 
 // A sign-in tab ended well: the card shows the new check.
 onSignedIn(() => { if (current === "machines") reload(); });
 
 let data = null;
+on('hopsesh:discovery',d=>{if(current==='machines'&&!d.discovering&&!document.querySelector('dialog[open]'))reload().catch(fail)});
 const scanning = new Set();
 const scanErrors = new Map();
 
@@ -38,7 +39,7 @@ async function scanMachine(name) {
   scanning.add(name);
   scanErrors.delete(name);
   if (current === "machines") render();
-  try { await api("ScanMachine", name); state.stale = true; }
+  try { await api("ScanMachine", name); state.scan=await api("ScanSnapshot"); state.stale = false; }
   catch (e) { scanErrors.set(name, errText(e)); }
   finally { scanning.delete(name); await reload(); }
 }
@@ -253,6 +254,7 @@ function render() {
         : h("div", { class: "empty" }, "No machines yet. Add one found below, or by its address.")),
     h("section", { class: "card" },
       h("div", { class: "card-h stacked" }, h("h2", { class: "name" }, "Found on your network"), h("span", { class: "muted", style: "font-size:12px" }, "From Tailscale and ~/.ssh/config. Nothing is contacted until you add it.")),
+      d.discoveryError ? h("p",{class:"warn",role:"status"},d.discoveryError,". SSH aliases are still shown.") : null,
       d.found.length ? d.found.map(foundRow) : h("div", { class: "empty" }, "No other machines found. Add one by its address.")),
     d.clouds.length ? [h("div", { id: "clouds", style: "display:flex;flex-direction:column;gap:4px;margin-top:8px;scroll-margin-top:16px" }, h("h2", { style: "margin:0;font-size:17px" }, "Clouds"),
       h("span", { class: "muted", style: "font-size:12.5px" }, "hopsesh reaches each cloud through that agent's own command, signed in as you. Signing in happens in that command, never in hopsesh. Nothing goes to a cloud you haven't turned on.")),

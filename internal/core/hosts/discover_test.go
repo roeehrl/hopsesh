@@ -1,8 +1,10 @@
 package hosts
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -86,5 +88,39 @@ func TestTailscaleBinarySetting(t *testing.T) {
 	t.Setenv("HOPSESH_TAILSCALE", "/opt/ts/bin/tailscale")
 	if b := tailscaleBinary(); b != "/opt/ts/bin/tailscale" {
 		t.Fatalf("named: %q", b)
+	}
+}
+
+func TestTailscaleWithoutMagicDNSAndInactiveState(t *testing.T) {
+	peers, err := parseTailscale([]byte(`{"BackendState":"Running","Peer":{"a":{"HostName":"Laptop","OS":"linux","TailscaleIPs":["100.64.0.4"]}}}`))
+	if err != nil || len(peers) != 1 || peers[0].Destination != "100.64.0.4" || peers[0].Name != "Laptop" {
+		t.Fatal(peers, err)
+	}
+	if _, err := parseTailscale([]byte(`{"BackendState":"NeedsLogin"}`)); err == nil {
+		t.Fatal("silently hid a signed-out Tailscale")
+	}
+}
+
+func TestTailscaleCommandForcesCLIModeAndKeepsSSHAliasesOnFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX CLI fixture")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	os.MkdirAll(filepath.Join(home, ".ssh"), 0700)
+	os.WriteFile(filepath.Join(home, ".ssh", "config"), []byte("Host backup\n HostName 10.0.0.7\n"), 0600)
+	cli := filepath.Join(t.TempDir(), "tailscale")
+	script := "#!/bin/sh\n[ \"$TAILSCALE_BE_CLI\" = 1 ] || exit 1\nprintf '%s\\n' '" + tsJSON + "'\n"
+	os.WriteFile(cli, []byte(script), 0700)
+	t.Setenv("HOPSESH_TAILSCALE", cli)
+	t.Setenv("TAILSCALE_BE_CLI", "0")
+	peers, err := Discover(context.Background())
+	if err != nil || len(peers) < 2 {
+		t.Fatal(peers, err)
+	}
+	os.WriteFile(cli, []byte("#!/bin/sh\nexit 1\n"), 0700)
+	peers, err = Discover(context.Background())
+	if err == nil || len(peers) != 1 || peers[0].Name != "backup" {
+		t.Fatal("discovery failure hid valid SSH aliases", peers, err)
 	}
 }

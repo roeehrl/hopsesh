@@ -4,7 +4,7 @@
 // chips, and the text filter. It is saved in the config ([list], SaveList); the text
 // filter is not. The list is one tree: group headers, then their sessions, with the
 // keyboard of the WAI-ARIA tree pattern.
-import { api, h, fill, icon, ICONS, state, sys, keys, here, cloudOf, cloudTitle, agentInfo, machineStatus, count, ago, toast, dialog, fail } from "./core.js";
+import { accountGroupLabel, api, h, fill, icon, ICONS, state, sys, keys, here, cloudOf, cloudTitle, agentInfo, machineStatus, count, ago, toast, dialog, fail } from "./core.js";
 import { openMenu, openPopover, update, closeAll, isOpen, openEl, refill } from "./menu.js";
 import { tabs as terminalTabs } from "./term.js";
 import { statusKey, placesOf, key as entryKey } from "./actions.js";
@@ -15,6 +15,7 @@ export const DEFAULTS = { groupBy: "repository", sortBy: "last-active", sortReve
 // list is the display as chosen; text is the text filter (not saved).
 export const list = Object.assign({ decided: false, collapsed: [], expanded: [], filter: emptyFilter(), text: "" }, DEFAULTS);
 
+state.list = list;
 let loaded = false;
 // load takes the saved display (Info), once.
 export function load(l) {
@@ -45,7 +46,7 @@ export function onChange(fn) { redraw = fn; }
 // decide picks the rows once, by how many sessions the first scan finds: 150 or more get
 // compact rows with the inactive groups collapsed, and a toast says so.
 export function decide(total, openDisplay) {
-  if (list.decided) return;
+  if (list.decided || !total || state.scan?.cached || state.scan?.discovering || state.scanning) return;
   if (total >= 150) {
     list.density = "compact";
     list.collapseInactive = true;
@@ -76,7 +77,7 @@ const LOCATION = () => [["here", sys.Here], ["machines", "Other machines"], ["cl
 
 // FACETS are the filters: their words, values (with their names) and each session's.
 const FACETS = {
- account:{name:"Account",values:()=>[...new Map(pool.map(e=>[e.profile?.id||"",e.profile?.name||"No account profile"]))],of:e=>[e.profile?.id||""]},
+ account:{name:"Account",values:()=>[...new Map(pool.map(e=>[e.profile?.id||"",accountGroupLabel(e)]))],of:e=>[e.profile?.id||""]},
  tag:{name:"Account tag",values:()=>[...new Map(pool.flatMap(e=>e.profile?.tags?.length?e.profile.tags:["Untagged"]).map(t=>[t.toLowerCase(),t]))].sort((a,b)=>a[0].localeCompare(b[0])),of:e=>(e.profile?.tags?.length?e.profile.tags:["Untagged"]).map(t=>t.toLowerCase())},
   status: { name: "Status", values: () => STATUS.map(([v, n]) => [v, n]), of: (e) => [statusKey(e)] },
   location: { name: "Location", values: LOCATION, of: (e) => [locationOf(e)] },
@@ -193,7 +194,7 @@ export function groupsOf(rows) {
     } else if (g === "location") {
       const loc = e.cloud ? "cloud:" + e.machine : e.machine;
       add("location:" + loc, () => ({ name: e.cloud ? cloudTitle(e.machine) : e.machine === here() ? sys.Here : e.machine, machine: e.cloud ? null : e.machine, cloud: e.cloud ? e.machine : null }), e);
-    } else if(g==="account") add("account:"+(e.profile?.id||""),()=>({name:e.profile?.name||"No account profile"}),e);
+    } else if(g==="account") add("account:"+(e.profile?.id||""),()=>({name:accountGroupLabel(e)}),e);
     else if(g==="tag") for(const t of e.profile?.tags?.length?e.profile.tags:["Untagged"]) add("tag:"+t.toLowerCase(),()=>({name:t}),e);
     else if (g === "agent") add("agent:" + e.agent, () => ({ name: e.agentName, agent: e.agent }), e);
     else if (g === "status") { const k = statusKey(e); add("status:" + k, () => ({ name: STATUS.find(([v]) => v === k)[1], status: k }), e); }
@@ -464,7 +465,23 @@ export { focusTree };
 
 // tree draws the groups: a header (chevron, name, count, what needs you and what works)
 // and, open, its sessions (row draws one). Collapsed groups have no rows built.
+let chunkObserver=null, chunksByKey=new Map();
+function chunkedRows(body,rows,makeRow){
+ if(rows.length<250){for(const e of rows)body.append(makeRow(e));return}
+ for(let start=0;start<rows.length;start+=50){
+  const entries=rows.slice(start,start+50),height=entries.length*(list.density==="compact"?36:72);
+  const chunk=h("div",{class:"session-chunk",role:"none",style:`min-height:${height}px`});
+  const mount=()=>{if(chunk.childElementCount)return;chunk.style.minHeight="";chunk.append(...entries.map(makeRow));};
+  chunk.__mount=mount;
+  for(const e of entries)chunksByKey.set(entryKey(e),mount);
+  body.append(chunk);if(start===0)mount();chunkObserver.observe(chunk);
+ }
+}
 export function tree(groups, row, selKey) {
+ chunkObserver?.disconnect();chunksByKey=new Map();
+ chunkObserver=new IntersectionObserver(changes=>{
+  for(const c of changes){const chunk=c.target;if(c.isIntersecting)chunk.__mount();else if(chunk.childElementCount&&!chunk.contains(document.activeElement)&&!chunk.querySelector('[aria-selected="true"]')){chunk.style.minHeight=chunk.getBoundingClientRect().height+"px";chunk.replaceChildren()}}
+ },{rootMargin:"500px"});
   lastGroups = groups;
   const flat = groups.length === 1 && groups[0].flat;
   const t = h("div", { class: "tree" + (list.density === "compact" ? " compact" : ""), role: "tree", "aria-label": "Sessions", onkeydown: treeKeys });
@@ -473,7 +490,7 @@ export function tree(groups, row, selKey) {
     if (flat) {
       // Group by None: one level, the sessions in one card.
       const card = h("div", { class: "grp flat", role: "none" });
-      for (const e of g.rows) card.append(row(e, 1));
+      chunkedRows(card,g.rows,e=>row(e,1));
       const firstRow = card.querySelector(".row");
       if (firstRow) firstRow.tabIndex = 0;
       t.append(card);
@@ -499,13 +516,13 @@ export function tree(groups, row, selKey) {
       tabindex: "-1", "data-gkey": g.key }, head);
     if (!closed) {
       const body = h("div", { class: "gbody", role: "group", style: `contain-intrinsic-size: auto ${g.rows.length * (list.density === "compact" ? 32 : 60)}px` });
-      for (const e of g.rows) {
+      chunkedRows(body,g.rows,e=>{
        const item=row(e,2); if(g.family && e.relationship?.parent){
          item.style.marginLeft=Math.min(e.relationship.depth||1,3)*18+"px";
          item.prepend(h("span",{class:"family-ancestry muted",title:e.relationship.ancestors?.join(" → ")},"↳ Fork · "+(e.relationship.ancestors?.at(-1)||"Parent unavailable")));
        }
-       body.append(item);
-     }
+       return item;
+     });
       gi.append(body);
     }
     if (first) { gi.tabIndex = 0; first = false; }
@@ -521,6 +538,7 @@ export function tree(groups, row, selKey) {
 // rowByKey is the row of a session (its data-key holds machine NUL key, which a CSS
 // selector can't name).
 export function rowByKey(root, k) {
+ chunksByKey.get(k)?.();
   for (const r of root.querySelectorAll(".row")) if (r.dataset.key === k) return r;
   return null;
 }
@@ -567,9 +585,10 @@ let typed = "", typedAt = 0;
 // letters go to a title.
 function treeKeys(ev) {
   if (ev.target.closest(".act")) return;
-  const items = [...treeEl.querySelectorAll('[role="treeitem"]')];
+  const logical=lastGroups.flatMap(g=>g.flat?g.rows.map(e=>({key:entryKey(e),title:e.title})): [{group:g.key},...collapsed(g)?[]:g.rows.map(e=>({key:entryKey(e),title:e.title}))]);
+  const element=x=>x?.key?rowByKey(treeEl,x.key):x?.group?[...treeEl.querySelectorAll(".grp")].find(g=>g.dataset.gkey===x.group):null;
   const cur = ev.target.closest('[role="treeitem"]');
-  const i = items.indexOf(cur);
+  const i=logical.findIndex(x=>x.key?x.key===cur?.dataset.key:x.group===cur?.dataset.gkey);
   const isGroup = cur?.classList.contains("grp");
   const g = isGroup ? lastGroups.find((x) => x.key === cur.dataset.gkey) : null;
   const all = sys.mac ? ev.altKey : ev.ctrlKey;
@@ -580,10 +599,10 @@ function treeKeys(ev) {
     else selectRow(el);
   };
   switch (ev.key) {
-    case "ArrowDown": to(items[i + 1]); return;
-    case "ArrowUp": to(items[Math.max(0, i - 1)]); return;
-    case "Home": to(items[0]); return;
-    case "End": to(items[items.length - 1]); return;
+    case "ArrowDown": to(element(logical[i+1])); return;
+    case "ArrowUp": to(element(logical[Math.max(0,i-1)])); return;
+    case "Home": to(element(logical[0])); return;
+    case "End": to(element(logical.at(-1))); return;
     case "ArrowLeft":
       if (all && (ev.altKey || ev.ctrlKey)) { ev.preventDefault(); setAll(true); return; }
       if (isGroup && g && !collapsed(g)) { ev.preventDefault(); toggleGroup(g); }
@@ -592,7 +611,7 @@ function treeKeys(ev) {
     case "ArrowRight":
       if (all && (ev.altKey || ev.ctrlKey)) { ev.preventDefault(); setAll(false); return; }
       if (isGroup && g && collapsed(g)) { ev.preventDefault(); toggleGroup(g); }
-      else if (isGroup) to(cur.querySelector('.gbody [role="treeitem"]'));
+      else if (isGroup) to(element(logical[i+1]));
       return;
     case "*": ev.preventDefault(); setAll(false); return;
     case " ": case "Enter":
@@ -603,10 +622,10 @@ function treeKeys(ev) {
   if (ev.key.length === 1 && /\S/.test(ev.key) && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
     typed = Date.now() - typedAt > 700 ? ev.key.toLowerCase() : typed + ev.key.toLowerCase();
     typedAt = Date.now();
-    const rows = items.filter((x) => !x.classList.contains("grp"));
-    const start = Math.max(0, rows.indexOf(cur) + (typed.length === 1 ? 1 : 0));
-    const hit = rows.slice(start).concat(rows.slice(0, start)).find((x) => (x.querySelector(".t")?.textContent || "").toLowerCase().startsWith(typed));
-    if (hit) to(hit);
+    const rows=logical.filter(x=>x.key);
+    const start = Math.max(0, rows.findIndex(x=>x.key===cur?.dataset.key) + (typed.length === 1 ? 1 : 0));
+    const hit = rows.slice(start).concat(rows.slice(0, start)).find((x) => (x.title || "").toLowerCase().startsWith(typed));
+    if (hit) to(element(hit));
   }
 }
 

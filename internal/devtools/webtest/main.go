@@ -191,7 +191,7 @@ func main() {
 		if err := cloudWorld(h); err != nil {
 			return err
 		}
-		svc = gui.NewApp(all.Registry())
+		svc = gui.NewApp(all.Registry(), gui.WithoutSessionWatching())
 		svc.Emitter = relay
 		if where == "" {
 			where = gui.WhereTerminal
@@ -779,7 +779,7 @@ var (
 
 func relay(name string, data any) {
 	switch name {
-	case "hopsesh:terminal-main", gui.TerminalPreferencesEvent, gui.TerminalWorkspaceEvent, gui.AppearanceEvent, gui.TerminalEvent, gui.QuitEvent, gui.SignedInEvent, gui.TerminalAppEvent, gui.ExternalExitEvent:
+	case gui.AccountEvent, gui.DiscoveryEvent, "hopsesh:terminal-main", gui.TerminalPreferencesEvent, gui.TerminalWorkspaceEvent, gui.AppearanceEvent, gui.TerminalEvent, gui.QuitEvent, gui.SignedInEvent, gui.TerminalAppEvent, gui.ExternalExitEvent:
 	default:
 		return
 	}

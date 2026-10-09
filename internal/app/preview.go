@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/roeehrl/hopsesh/internal/core/host"
+	"path/filepath"
+	"strings"
 
 	"github.com/roeehrl/hopsesh/internal/core/audit"
 	"github.com/roeehrl/hopsesh/internal/core/journal"
@@ -141,4 +144,78 @@ func (a *App) LiveHere(ctx context.Context, inv *Inventory) map[agent.SessionKey
 		}
 	}
 	return out
+}
+
+// PreviewSelected resolves a registered source without enumerating sessions or
+// borrowing a background scan's connection. It never reads saved transcript text.
+func (a *App) PreviewSelected(ctx context.Context, e Entry, n int) (agent.Preview, error) {
+	if e.Location.IsCloud() {
+		return agent.Preview{}, ErrNoPreview
+	}
+	mod, ok := a.Module(e.Agent)
+	if !ok {
+		return agent.Preview{}, fmt.Errorf("agent is turned off")
+	}
+	p, ok := mod.(agent.Previewer)
+	if !ok {
+		return agent.Preview{}, ErrNoPreview
+	}
+	var m *host.Machine
+	var err error
+	if e.Machine == LocalName() {
+		m = &host.Machine{Name: LocalName(), Local: true, Facts: host.ProbeLocalFast(ctx, a.Specs()), Log: a.Log}
+	} else {
+		m, err = a.accountMachine(ctx, e.Machine)
+	}
+	if err != nil {
+		return agent.Preview{}, err
+	}
+	defer m.Close()
+	h, err := m.For(ctx, mod.Spec(), agent.Install{}, nil)
+	if err != nil {
+		return agent.Preview{}, err
+	}
+	in := agent.DefaultInstall(mod.Spec(), h)
+	if e.Session.Key.Profile != "" {
+		ps, err := a.Accounts()
+		if err != nil {
+			return agent.Preview{}, err
+		}
+		found := false
+		endpoint, err := m.ReadIdentity(ctx)
+		if err != nil {
+			return agent.Preview{}, err
+		}
+		for _, profile := range ps {
+			if profile.ID != e.Session.Key.Profile || profile.Agent != e.Agent || profile.Machine != e.Machine || profile.Endpoint != endpoint {
+				continue
+			}
+			in.Profile = &profile
+			in.Accounts = mod.Spec().Accounts
+			in.Roots = map[string]string{"home": profile.Root}
+			h, err = m.For(ctx, mod.Spec(), in, nil)
+			if err != nil {
+				return agent.Preview{}, err
+			}
+			in = agent.DefaultInstall(mod.Spec(), h)
+			in.Profile = &profile
+			in.Accounts = mod.Spec().Accounts
+			found = true
+			break
+		}
+		if !found {
+			return agent.Preview{}, fmt.Errorf("account root changed or was removed; refresh this machine")
+		}
+	}
+	// An old catalog must not redirect a preview outside the selected state root.
+	root := in.Root("home")
+	rel, within := m.Path().Rel(root, e.Session.Path)
+	if !within || rel == ".." || strings.HasPrefix(rel, "../") || strings.HasPrefix(rel, `..\`) || filepath.IsAbs(rel) {
+		return agent.Preview{}, fmt.Errorf("session path is outside its account root")
+	}
+	h, err = m.For(ctx, mod.Spec(), in, nil)
+	if err != nil {
+		return agent.Preview{}, err
+	}
+	return p.Preview(ctx, h, in, e.Session, n)
 }

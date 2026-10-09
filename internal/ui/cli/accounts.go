@@ -31,7 +31,11 @@ func accountsCmd() *cobra.Command {
 				if p.Account.Email != "" {
 					status += " · " + p.Account.Email
 				}
-				status += " · " + p.Account.Confidence
+				if !p.Account.LoggedIn {
+					status = "signed out"
+				} else {
+					status = "signed in · " + status
+				}
 			}
 			if p.Error != "" {
 				status = p.Error
@@ -141,12 +145,35 @@ func accountsCmd() *cobra.Command {
 		}
 		run, _ := cmd.Flags().GetBool("run")
 		if run {
-			return r.runHere(cmd.Context(), c)
+			if err := r.runHere(cmd.Context(), c); err != nil {
+				return err
+			}
+			_, err = r.app.RefreshAccount(cmd.Context(), args[0])
+			return err
 		}
 		r.printf("%s\n", launch.Shell(c, "", launch.DefaultShell()))
 		return nil
 	}}
 	login.Flags().Bool("run", false, "run the vendor-owned sign-in now")
-	root.AddCommand(list, scan, add, edit, forget, login)
+	refresh := &cobra.Command{Use: "refresh <profile-id>", Short: "Check one profile’s public sign-in metadata", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		r, err := newRun(cmd)
+		if err != nil {
+			return err
+		}
+		p, err := r.app.RefreshAccount(cmd.Context(), args[0])
+		if err != nil {
+			return err
+		}
+		if r.jsonOut {
+			return r.emitJSON(p)
+		}
+		if p.Error != "" {
+			return fmt.Errorf("account check: %s", p.Error)
+		}
+		r.printf("%s: checked on %s\n", p.Name, p.Machine)
+		return nil
+	}}
+	refresh.Flags().Bool("json", false, "output JSON")
+	root.AddCommand(list, scan, add, edit, forget, login, refresh)
 	return root
 }

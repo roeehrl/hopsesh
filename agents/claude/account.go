@@ -14,12 +14,13 @@ import (
 
 // authStatus is what `claude auth status --json` reports. Only public login metadata is kept.
 type authStatus struct {
-	Email        string `json:"email"`
-	LoggedIn     bool   `json:"loggedIn"`
-	Method       string `json:"authMethod"`       // claude.ai | api-key | …
-	Provider     string `json:"apiProvider"`      // firstParty | bedrock | vertex | …
-	OrgID        string `json:"orgId"`            // identifies the organization, not the user
-	Subscription string `json:"subscriptionType"` // pro | max | team | enterprise | …
+	Email           string `json:"email"`
+	LoggedIn        bool   `json:"loggedIn"`
+	Method          string `json:"authMethod"`  // claude.ai | api-key | …
+	Provider        string `json:"apiProvider"` // firstParty | bedrock | vertex | …
+	OrgID           string `json:"orgId"`       // identifies the organization, not the user
+	ConfigDirectory string `json:"configDirectory"`
+	Subscription    string `json:"subscriptionType"` // pro | max | team | enterprise | …
 }
 
 // Account asks claude which login it uses (it reads its own credentials; hopsesh never
@@ -37,7 +38,10 @@ func (m *Module) Account(ctx context.Context, h agent.Host, in agent.Install) (a
 	if err := json.Unmarshal(r.Stdout, &a); err != nil {
 		return agent.Account{}, &agent.FormatError{Path: "claude auth status", Err: err}
 	}
-	if r.Code != 0 && a.LoggedIn {
+	if a.ConfigDirectory != "" && h.Path().Clean(a.ConfigDirectory) != h.Path().Clean(in.Root("home")) {
+		return agent.Account{}, fmt.Errorf("claude reported a different configuration directory; re-register this profile")
+	}
+	if r.Code > 1 || r.Code != 0 && a.LoggedIn {
 		return agent.Account{}, fmt.Errorf("claude auth status exited %d", r.Code)
 	}
 	return account(a), nil

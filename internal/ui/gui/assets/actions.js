@@ -347,6 +347,7 @@ const CLOUD_STATES = { running: ["running", "Running"], idle: ["idle", "Idle"], 
   archived: ["ended", "Archived"], unknown: ["unknown", "State not known"] };
 export function statusOf(e) {
   if (e.cloud) {
+    if(e.cached)return ["unknown","Checking status"];
     const st = CLOUD_STATES[e.cloud.state];
     if (st && e.cloud.state !== "unknown") return st;
     const host = (e.cloud.url.match(/^https:\/\/([^/]+)/) || [])[1];
@@ -357,6 +358,7 @@ export function statusOf(e) {
   if (ts.length) return ts.some((t) => t.attention) ? ["needs", "Waiting for you"] : ["working", "Working"];
   if (lv.needs) return ["needs", "Needs you"];
   if (lv.live) return /idle/i.test(lv.status) ? ["idle", "Idle"] : ["working", "Working"];
+  if (e.cached && !state.presence?.[key(e)]) return ["unknown", "Checking status"];
   if (e.movement) return ["moved", `Movement ${e.movement.status}`];
   if (/^(moved|continued|prepared|previously continued)/.test(lv.status || "")) return ["moved", cap((lv.status || "").replace(/^continued /, "previously continued "))];
   return ["ended", "Ended"];
@@ -374,7 +376,7 @@ export function statusKey(e) {
     return "unknown";
   }
   const k = statusOf(e)[0];
-  return k === "needs" || k === "working" || k === "idle" || k === "moved" ? k : "ended";
+  return k === "needs" || k === "working" || k === "idle" || k === "moved" || k === "unknown" ? k : "ended";
 }
 
 // statusLine is the inspector's status line: [dot kind, the state and where it runs,

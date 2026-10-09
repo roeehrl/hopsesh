@@ -29,18 +29,19 @@ test("slow initial scan shows what is happening instead of an empty window", asy
     await route.continue();
   });
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Finding your sessions…" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Search sessions or run a command" })).toBeDisabled();
+  await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Search sessions or run a command" })).toBeEnabled();
+  await expect(page.locator("#fresh")).toContainText("Finding sessions");
   release();
   await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible({ timeout: 30000 });
 });
 
-for (const target of ["module", "bridge", "scan"]) {
+for (const target of ["module", "bridge"]) {
   test(`startup ${target} failure is visible and reload recovers`, async ({ page }) => {
     let failed = false;
     await page.route(target === "module" ? "**/app.js" : "**/call", async (route) => {
       const method = target === "module" ? "" : route.request().postDataJSON().m;
-      const hit = target === "module" || method === ({ bridge: "Info", tabs: "TerminalTabs", scan: "InitialScan" } as Record<string, string>)[target];
+      const hit = target === "module" || method === ({ bridge: "Bootstrap", tabs: "TerminalTabs", scan: "InitialScan" } as Record<string, string>)[target];
       if (!failed && hit) {
         failed = true;
         if (target === "module") await route.abort("failed");
@@ -54,3 +55,16 @@ for (const target of ["module", "bridge", "scan"]) {
     await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible({ timeout: 30000 });
   });
 }
+
+ test("initial scan failure leaves the browser usable and retry recovers",async({page})=>{
+  let failed=false;
+  await page.route("**/call",async route=>{
+   if(!failed && route.request().postDataJSON().m==="InitialScan") { failed=true;await route.fulfill({status:500,contentType:"application/json",body:JSON.stringify({error:"Synthetic startup failure"})});}
+   else await route.continue();
+  });
+  await page.goto("/");
+  await expect(page.getByRole("heading",{name:"All sessions"})).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText("Synthetic startup failure");
+  await page.getByRole("button",{name:"Retry refresh"}).click();
+  await expect(page.locator("#fresh")).toContainText("updated");
+ });

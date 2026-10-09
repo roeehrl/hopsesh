@@ -7,6 +7,7 @@ import (
 	"github.com/roeehrl/hopsesh/sdk/agent"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -190,5 +191,172 @@ func TestRemoteAccountSetupNoticeUsesEndpointIdentity(t *testing.T) {
 				t.Fatal("render initialized remote identity")
 			}
 		})
+	}
+}
+
+func TestAccountsIdentifyLocalProfilesWithoutLiveInventory(t *testing.T) {
+	home(t)
+	a := NewApp(all.Registry())
+	defer a.Shutdown()
+	p, err := a.core.RegisterAccount(context.Background(), "", "claude", "Cached personal", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.inv = nil
+	accounts, err := a.Accounts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range accounts {
+		if v.ID == p.ID {
+			if !v.Local || !v.Stale {
+				t.Fatal("locality incorrectly depends on a live scan", v)
+			}
+			return
+		}
+	}
+	t.Fatal("profile missing")
+}
+
+func TestAccountSignInCompletionRefreshesTheSelectedProfile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX fake vendor CLI; portable account refresh is covered by scenario matrix")
+	}
+	home(t)
+	bin := t.TempDir()
+	script := `#!/bin/sh
+case "$1" in
+ --version) echo '2.1.284'; exit 0;;
+esac
+if [ "$1" = auth ] && [ "$2" = login ]; then touch "$CLAUDE_CONFIG_DIR/signed-in"; exit 0; fi
+if [ "$1" = auth ] && [ "$2" = status ]; then
+ if [ -f "$CLAUDE_CONFIG_DIR/signed-in" ]; then
+  printf '{"loggedIn":true,"email":"signed-in@example.com","authMethod":"claude.ai","configDirectory":"%s"}\n' "$CLAUDE_CONFIG_DIR"
+ else
+  printf '{"loggedIn":false,"configDirectory":"%s"}\n' "$CLAUDE_CONFIG_DIR"; exit 1
+ fi
+ exit 0
+fi
+exit 1
+`
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+testPath())
+	a := NewApp(all.Registry())
+	defer a.Shutdown()
+	if _, err := a.Scan(); err != nil {
+		t.Fatal(err)
+	}
+	ps, err := a.core.Accounts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var profile agent.RuntimeProfile
+	for _, p := range ps {
+		if p.Agent == "claude" {
+			profile = p
+			break
+		}
+	}
+	if profile.ID == "" || profile.Account == nil || profile.Account.LoggedIn {
+		t.Fatalf("initial account: %+v", profile)
+	}
+	before := a.inv
+	signedIn := make(chan agent.RuntimeProfile, 1)
+	a.Emitter = func(name string, data any) {
+		if name == AccountEvent {
+			if p, ok := data.(agent.RuntimeProfile); ok && p.ID == profile.ID && p.Account != nil && p.Account.LoggedIn {
+				signedIn <- p
+			}
+		}
+	}
+	a.Terms = NewTerminals("test")
+	opened, err := a.LoginAccount(profile.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opened.Tab == "" {
+		t.Fatal("sign-in did not use tracked terminal")
+	}
+	select {
+	case p := <-signedIn:
+		if p.Account.Email != "signed-in@example.com" || p.IdentitySource != "local" {
+			t.Fatalf("refresh: %+v", p)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("sign-in exited without refreshing account")
+	}
+	a.mu.Lock()
+	after := a.inv
+	a.mu.Unlock()
+	if after == before {
+		t.Fatal("account refresh reused a published inventory")
+	}
+	for _, entry := range before.Entries {
+		if entry.Profile != nil && entry.Profile.ID == profile.ID && entry.Profile.Account.LoggedIn {
+			t.Fatal("account refresh mutated an old publication")
+		}
+	}
+	for _, entry := range after.Entries {
+		if entry.Profile != nil && entry.Profile.ID == profile.ID && !entry.Profile.Account.LoggedIn {
+			t.Fatal("new publication missed refreshed sign-in")
+		}
+	}
+}
+
+// Account grouping keeps physical source copies visible after lineage selects the
+// destination as the representative in the ordinary session list.
+func TestAccountGroupingRetainsSourceAndDestinationCopies(t *testing.T) {
+	home(t)
+	a := NewApp(all.Registry())
+	defer a.Shutdown()
+	profile, err := a.core.RegisterAccount(context.Background(), "", "claude", "Second personal", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scan, err := a.Scan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := findEntry(t, scan, "claude/"+sid)
+	if source.Profile == nil {
+		t.Fatal("source profile missing")
+	}
+	if _, err = a.Plan(source.Machine, source.Key, "claude", OptsDTO{TargetProfile: profile.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = a.Apply(); err != nil {
+		t.Fatal(err)
+	}
+	scan, err = a.Scan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]int{}
+	for _, group := range append(append([]GroupDTO{}, scan.Groups...), scan.ProfileCopies...) {
+		for _, entry := range group.Entries {
+			if entry.Profile != nil && (entry.Session == sid || entry.Profile.ID == profile.ID) {
+				seen[entry.Profile.ID]++
+			}
+		}
+	}
+	if seen[source.Profile.ID] != 1 || seen[profile.ID] != 1 {
+		t.Fatalf("lost or duplicated account copies: %v", seen)
+	}
+	if len(scan.ProfileCopies) == 0 {
+		t.Fatal("source copy missing from account grouping")
+	}
+	for _, group := range scan.ProfileCopies {
+		for _, entry := range group.Entries {
+			if entry.Profile == nil {
+				t.Fatal("copy has no profile")
+			}
+			for _, copy := range entry.Copies {
+				if copy.Profile == nil {
+					t.Fatal("inspector copy has no profile")
+				}
+			}
+		}
 	}
 }

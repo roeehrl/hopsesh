@@ -159,7 +159,8 @@ func (localExec) Run(ctx context.Context, argv []string, o agent.RunOptions) (ag
 	}
 	var out, errb bytes.Buffer
 	answered := make(chan struct{})
-	cmd.Stdout, cmd.Stderr = &watchWriter{buf: &out, until: o.StdinUntil, hit: answered}, &errb
+	next := make(chan []byte, 16)
+	cmd.Stdout, cmd.Stderr = &watchWriter{buf: &out, until: o.StdinUntil, hit: answered, reply: o.StdinReply, next: next}, &errb
 	if err := cmd.Start(); err != nil {
 		return agent.Result{}, err
 	}
@@ -168,13 +169,25 @@ func (localExec) Run(ctx context.Context, argv []string, o agent.RunOptions) (ag
 		defer close(exited)
 		go func() {
 			_, _ = hold.Write(o.Stdin)
-			select {
-			case <-time.After(o.HoldStdin):
-			case <-answered:
-			case <-exited:
-			case <-ctx.Done():
+			timer := time.NewTimer(o.HoldStdin)
+			defer timer.Stop()
+			defer hold.Close()
+			for {
+				select {
+				case input := <-next:
+					if _, err := hold.Write(input); err != nil {
+						return
+					}
+				case <-timer.C:
+					return
+				case <-answered:
+					return
+				case <-exited:
+					return
+				case <-ctx.Done():
+					return
+				}
 			}
-			hold.Close()
 		}()
 	}
 	err := cmd.Wait()
@@ -209,14 +222,40 @@ func Without(env, unset []string) []string {
 
 // watchWriter collects output and signals once it contains until.
 type watchWriter struct {
-	buf   *bytes.Buffer
-	until []byte
-	hit   chan struct{}
-	done  bool
+	buf     *bytes.Buffer
+	until   []byte
+	hit     chan struct{}
+	done    bool
+	reply   func([]byte) ([]byte, bool)
+	next    chan []byte
+	pending []byte
 }
 
 func (w *watchWriter) Write(p []byte) (int, error) {
 	n, err := w.buf.Write(p)
+	if !w.done && w.reply != nil {
+		w.pending = append(w.pending, p...)
+		for {
+			i := bytes.IndexByte(w.pending, '\n')
+			if i < 0 {
+				break
+			}
+			input, done := w.reply(w.pending[:i])
+			w.pending = w.pending[i+1:]
+			if len(input) > 0 {
+				w.next <- input
+			}
+			if done {
+				w.done = true
+				close(w.hit)
+				break
+			}
+		}
+		// An oversized non-protocol line must not grow the framing buffer forever.
+		if len(w.pending) > 64<<20 {
+			w.pending = nil
+		}
+	}
 	if !w.done && len(w.until) > 0 && bytes.Contains(w.buf.Bytes(), w.until) {
 		w.done = true
 		close(w.hit)

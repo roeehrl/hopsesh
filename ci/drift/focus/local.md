@@ -171,3 +171,24 @@ identities are presentation metadata and never portable-history authority. Inclu
 family grouping/rename/collapse and shell-association browser tests, TUI family
 tests and the round-trip scenario's one-family/one-branch assertion. A real-agent
 storage probe does not prove native window rehosting or account continuity.
+
+Session discovery shares a disposable SQLite summary catalog across GUI, Quick,
+TUI and CLI (`internal/core/catalog`, `internal/app/{catalog,watch,scan}.go`,
+`sdk/agent/listing.go`). Check storage layouts, title/rename/mark sidecars, Claude
+subagent directories and Codex session_index.jsonl dependencies: changes must
+invalidate summaries. Parser changes require a new summary salt. Watch events are
+hints with reconciliation and overflow handling. SessionWatchProvider paths must
+exclude vendor diagnostics to avoid self-triggering listing loops; failed/partial scans never prove
+deletion. Cached metadata is not live presence or transfer/account authority. Check
+progressive loading, account/root namespace changes, cancelled/late publications,
+selected-file previews, shared collector leases and large-list keyboard navigation.
+Run discovery browser tests, TestSessionDiscovery and session-discovery.txtar on
+macOS/Linux/Windows. Never store credentials or transcript bodies in the catalog.
+
+Account refresh and discovery now rely on vendor public identity responses: watch
+Claude auth status configDirectory/authMethod/exit code and Codex app-server initialize
+handshake plus account/read nullable identity fields. Exercise JSON field reordering,
+login-completion refresh, SSH keychain limitations, owner registry metadata provenance,
+and independent same-email roots. Tailscale scripts must force TAILSCALE_BE_CLI=1;
+cover DNS-less peers, BackendState and visible partial discovery errors. Refreshing
+metadata must preserve a selected conversation DOM, focus and source-only scan scope.
