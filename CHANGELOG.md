@@ -50,6 +50,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Accounts refreshes from shared runtime notifications instead of polling every
+  two seconds. Sign-in checks sleep until a freshness deadline and stop off
+  screen; background changes preserve active filters and account dialogs.
+
 - Relay status preserves initialization failures and identifies a pending startup
   step instead of replacing every failure with a generic stopped-listener message.
 

@@ -200,6 +200,7 @@ export async function go(name, ...args) {
   state.handoffOpen = null;
   $("#where").textContent = { sessions: "", activity: "Activity", machines: "Machines", settings: "Settings", accounts: "Accounts", done: "", brought: "" }[name] ?? "";
   document.body.dataset.screen = name; // the panes' buttons work on Sessions only
+  document.dispatchEvent(new CustomEvent("hopsesh:navigation", { detail: name }));
   if (changed) loading({ sessions: "Reading sessions…", machines: "Reading machines…", accounts: "Reading accounts…", settings: "Reading settings…", activity: "Reading activity…" }[name] || "Loading…");
   try { return await screens[name](...args); }
   catch (error) { if (visit === navigation) fill(view, loadError(error, () => go(name, ...args))); }

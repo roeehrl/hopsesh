@@ -38,7 +38,13 @@
   phase('checking shared Quick inventory');
   if(!q.scan||q.scan.total<2)throw Error("Quick access has no shared inventory");
   const entry=q.scan.groups.flatMap(g=>g.entries)[0];
-  await call("QuickOpen","sessions",entry.machine,entry.key);
+  try {
+    await call("QuickOpen","sessions",entry.machine,entry.key);
+  } catch (error) {
+    const current=await call("ScanSnapshot");
+    phase('Quick selection rejected: '+JSON.stringify({requested:{machine:entry.machine,key:entry.key},quickRevision:q.scan.revision,quickCached:q.scan.cached,quickDiscovering:q.scan.discovering,currentRevision:current.revision,currentDiscovering:current.discovering,current:current.groups.flatMap(g=>g.entries).map(e=>({machine:e.machine,key:e.key}))}));
+    throw error;
+  }
   if(!await until(()=>document.querySelector('.row[aria-selected="true"]'),10000))throw Error("Quick access did not select a row");
   if(d.capabilities.tray){
     phase('opening native Quick popup');
@@ -50,7 +56,8 @@
     phase('completed without native tray');
   }
 })().catch(async error=>{
-  console.error('hopsesh selfcheck failed: '+(error.stack||error));
+  const detail=[error?.message||String(error),error?.stack].filter(Boolean).join('\n');
+  console.error('hopsesh selfcheck failed: '+detail);
   const { Events } = await import('/wails/runtime.js');
-  await Events.Emit('hopsesh:selfcheck','FAILED: '+(error.stack||error));
+  await Events.Emit('hopsesh:selfcheck','FAILED: '+detail);
 });

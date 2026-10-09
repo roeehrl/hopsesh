@@ -78,8 +78,10 @@ func (s remoteSide) do(op string, in, out any) error {
 	cmd.Stdin = bytes.NewReader(b)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	started := time.Now()
 	err := cmd.Run()
 	if s.log != nil {
+		s.log.printf("helper endpoint=%s operation=%s elapsed=%s\n", s.dest, op, time.Since(started).Round(time.Millisecond))
 		s.log.printf("there$ hsmatrix agent %s %s\n%s%s", op, b, stdout.String(), stderr.String())
 	}
 	if err != nil {

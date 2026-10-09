@@ -1,14 +1,49 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
+
+func TestJourneyProgressNeverQualifiesPartialOrUnverifiedExecution(t *testing.T) {
+	dir := t.TempDir()
+	var results []journeyOutcome
+	for _, c := range journeyCases() {
+		results = append(results, journeyOutcome{Case: c, Seconds: 1})
+		if err := saveJourneyProgress(dir, "tested-source", results); err != nil {
+			t.Fatal(err)
+		}
+		body, err := os.ReadFile(filepath.Join(dir, "progress.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var report struct {
+			SourceRevision        string           `json:"sourceRevision"`
+			QualificationComplete bool             `json:"qualificationComplete"`
+			ExpectedCases         int              `json:"expectedCases"`
+			CompletedCases        int              `json:"completedCases"`
+			Passed                int              `json:"passed"`
+			Cases                 []journeyOutcome `json:"cases"`
+		}
+		if err := json.Unmarshal(body, &report); err != nil {
+			t.Fatal(err)
+		}
+		if report.QualificationComplete || report.ExpectedCases != 24 || report.CompletedCases != len(results) || report.Passed != len(results) || len(report.Cases) != len(results) || report.SourceRevision != "tested-source" {
+			t.Fatalf("interrupted or unverified execution misreported: %+v", report)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "results.json")); !os.IsNotExist(err) {
+		t.Fatal("progress was published as final source-verified results", err)
+	}
+}
 
 func TestJourneyRouteCoverage(t *testing.T) {
 	seen := map[string]bool{}

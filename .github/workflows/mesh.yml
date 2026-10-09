@@ -37,7 +37,7 @@ jobs:
     runs-on: ${{ fromJSON('{"linux":"ubuntu-24.04","windows":"windows-2025","macos":"macos-15"}')[matrix.node] }}
     # The full run keeps three native hosts for both directed pairs and 24
     # ordered journeys. Measured journeys alone exceeded the old 45m peer lease.
-    timeout-minutes: ${{ github.event_name == 'pull_request' && 75 || 180 }}
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 75 || 240 }}
     env:
       NODE: ${{ matrix.node }}
       NODES: ${{ github.event_name == 'pull_request' && 'macos windows' || 'linux windows macos' }}
@@ -112,7 +112,9 @@ jobs:
         run: bin/meshrdv barrier -peers "pairs-linux pairs-macos pairs-windows" -dir rdv -wait 30m
       - name: ordered journeys across three native machines
         if: github.event_name != 'pull_request' && matrix.node == 'linux'
-        timeout-minutes: 90
+        # The measured 20 successful journeys took 85m; four six-hop cases
+        # remained. Keep their individual deadlines and allow the full model.
+        timeout-minutes: 150
         run: bin/hsmatrix journeys -nodes hs-linux,hs-macos,hs-windows -out "$RUNNER_TEMP/mesh/journeys"
       - name: done marker
         if: always()
@@ -125,10 +127,10 @@ jobs:
           retention-days: 1
       - name: wait for the other runners (they may still be using this one)
         if: always() && steps.connect.outcome == 'success'
-        # Cover the 30m pair barrier, 90m journey stage and publication margin.
+        # Cover pair-completion skew, the 30m barrier, 150m journeys and cleanup.
         # Individual transfer/assertion deadlines remain unchanged.
         env:
-          PEER_WAIT: ${{ github.event_name == 'pull_request' && '45m' || '130m' }}
+          PEER_WAIT: ${{ github.event_name == 'pull_request' && '45m' || '210m' }}
         run: bin/meshrdv barrier -node "$NODE" -peers "$peers" -dir rdv -wait "$PEER_WAIT"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()

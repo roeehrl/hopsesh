@@ -22,6 +22,43 @@ type journeyCase struct {
 	Fork   bool     `json:"fork"`
 }
 
+type journeyOutcome struct {
+	Case    journeyCase `json:"case"`
+	Error   string      `json:"error,omitempty"`
+	Seconds float64     `json:"seconds"`
+}
+
+// An interrupted workflow retains completed cases without representing them as
+// a complete qualification or claiming post-execution source verification.
+func saveJourneyProgress(directory, revision string, results []journeyOutcome) error {
+	failed := 0
+	for _, result := range results {
+		if result.Error != "" {
+			failed++
+		}
+	}
+	body, err := json.MarshalIndent(map[string]any{"model": "three-native-machines/v1", "sourceRevision": revision, "qualificationComplete": false, "expectedCases": len(journeyCases()), "completedCases": len(results), "passed": len(results) - failed, "failed": failed, "cases": results}, "", "  ")
+	if err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(directory, ".journey-progress-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if _, err = f.Write(body); err == nil {
+		err = f.Sync()
+	}
+	closeErr := f.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	return os.Rename(f.Name(), filepath.Join(directory, "progress.json"))
+}
+
 // Route order is part of the model: pairwise combinations cannot substitute for
 // visiting C, revisiting B and finally returning to the branch's origin.
 func journeyCases() []journeyCase {
@@ -124,18 +161,13 @@ func journeysMain(args []string) int {
 		return 1
 	}
 	setupComplete = true
-	type outcome struct {
-		Case    journeyCase `json:"case"`
-		Error   string      `json:"error,omitempty"`
-		Seconds float64     `json:"seconds"`
-	}
-	var results []outcome
+	var results []journeyOutcome
 	failed := 0
 	for i, c := range journeyCases() {
 		log.b.Reset()
 		start := time.Now()
 		err := runJourney(c, endpoints, aliases)
-		res := outcome{Case: c, Seconds: time.Since(start).Seconds()}
+		res := journeyOutcome{Case: c, Seconds: time.Since(start).Seconds()}
 		if err != nil {
 			failed++
 			res.Error = err.Error()
@@ -143,6 +175,10 @@ func journeysMain(args []string) int {
 		results = append(results, res)
 		fmt.Printf("%s %.1fs %s\n", c.Name, res.Seconds, res.Error)
 		if err := os.WriteFile(filepath.Join(*out, fmt.Sprintf("journey-%02d.log", i)), []byte(log.b.String()+"\n"+res.Error), 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		if err := saveJourneyProgress(*out, revision, results); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
