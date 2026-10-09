@@ -256,13 +256,24 @@ func cloudRebuildCheckpoint(t *testing.T, linkedFork *bool) {
 			current := f.find(t, 'A', "codex", string(convertedPlan.Placement.Key.Session))
 			base := converted.Journey().Transfers
 			route := "ABCBCAB"
+			work := []string{savedBrief, "CLOUD-WORK-AFTER-HANDOFF"}
+			currentAgent := "codex"
 			for hop := 0; hop < len(route)-1; hop++ {
+				sentinel := fmt.Sprintf("AFTER-CLOUD-MIXED-HOP-%d", hop)
+				f.appendWork(t, current, currentAgent, sentinel)
+				work = append(work, sentinel)
 				target := "codex"
 				if route[hop+1] == 'B' {
 					target = "claude"
 				}
-				current = f.transfer(t, route[hop], route[hop+1], current, target, "push", false, fmt.Sprintf("linked-cloud-travel-%d-1234", hop))
-				f.assertText(t, route[hop+1], current, target, []string{savedBrief, "CLOUD-WORK-AFTER-HANDOFF"}, nil)
+				operation := fmt.Sprintf("linked-cloud-travel-%d-1234", hop)
+				if hop%2 == 0 {
+					current = f.pushSSH(t, route[hop], route[hop+1], current, target, false, operation)
+				} else {
+					current = f.transfer(t, route[hop], route[hop+1], current, target, "push", false, operation)
+				}
+				currentAgent = target
+				f.assertText(t, route[hop+1], current, target, work, nil)
 				graph, err := lineage.Read(host.LocalFS(), current.Path)
 				if err != nil || graph == nil || graph.Family != family || graph.Journey().Transfers != base+hop+1 || graph.Journey().Fork != wantFork {
 					t.Fatal("multi-hop return lost task context, ancestry or branch-local counters", err)

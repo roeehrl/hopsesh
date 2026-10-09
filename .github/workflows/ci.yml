@@ -153,6 +153,12 @@ jobs:
           HOPSESH_RELAY_REQUIRE_NODE: "1"
           HOPSESH_RELAY_PLATFORM: "1"
         run: go test -race -count=1 -v -run 'TestRelayOperatorBudgetSQLiteR2|TestRelayLoadSQLiteR2|TestRuntimeRelayThreeProfilesThreePeersSQLiteR2|TestRelayObservationChangesSQLiteR2' -timeout 5m ./internal/e2e
+      - name: authenticated SSH and relay mixed journeys
+        shell: bash
+        env:
+          HOPSESH_RELAY_REQUIRE_NODE: "1"
+          HOPSESH_RELAY_PLATFORM: "1"
+        run: go test -race -count=1 -v -run '^TestMixedTransportLineageSQLiteR2$' -timeout 5m ./internal/e2e
 
   lint:
     runs-on: ubuntu-24.04
