@@ -2,7 +2,7 @@ module github.com/roeehrl/hopsesh
 
 go 1.26.0
 
-toolchain go1.27.1
+toolchain go1.27.2
 
 require (
 	charm.land/bubbletea/v2 v2.0.10

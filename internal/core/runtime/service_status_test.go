@@ -68,6 +68,18 @@ func TestWindowsServiceStatusRejectsIncompleteRepliesAndBoundsQueries(t *testing
 	}
 }
 
+func TestSchedulerPhaseNeverIncludesUntrustedOutput(t *testing.T) {
+	for _, tc := range []struct{ stderr, want string }{
+		{"private path and secret", "PowerShell startup"},
+		{"hopsesh-service-phase=create\r\nhopsesh-service-phase=connect\r\nraw secret", "Task Scheduler connect"},
+		{"hopsesh-service-phase=task\nhopsesh-service-phase=private-secret", "Task Scheduler task"},
+	} {
+		if got := schedulerPhase(tc.stderr); got != tc.want {
+			t.Fatalf("phase %q; want %q", got, tc.want)
+		}
+	}
+}
+
 func TestServiceDefinitionRejectsLinksAndOtherDefinitions(t *testing.T) {
 	root := t.TempDir()
 	p := ServicePlan{Path: filepath.Join(root, "service"), Definition: "expected"}

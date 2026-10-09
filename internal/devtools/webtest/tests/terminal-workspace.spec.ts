@@ -127,7 +127,9 @@ test('shared observation during a press does not swallow the shell grouping menu
  await page.evaluate(()=>window.__emit('hopsesh:quick',null));
  await requested;
  const button=page.getByRole('button',{name:'More actions',exact:true});
+ await expect(button).toBeVisible();
  const box=await button.boundingBox();
+ expect(box).not.toBeNull();
  await page.mouse.move(box!.x+box!.width/2,box!.y+box!.height/2);
  await page.mouse.down();release();
  await expect.poll(()=>page.evaluate(async()=>Boolean((await import('/core.js')).state.presence['test-presence']))).toBe(true);

@@ -29,13 +29,37 @@ type serviceRunner func(context.Context, []string) ([]byte, error)
 func serviceQuery(ctx context.Context, args []string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.Env = append(os.Environ(), "LC_ALL=C")
-	var b boundedServiceOutput
-	cmd.Stdout, cmd.Stderr = &b, &b
+	cmd.WaitDelay = time.Second
+	var b, stderr boundedServiceOutput
+	cmd.Stdout, cmd.Stderr = &b, &stderr
 	err := cmd.Run()
-	if b.overflow {
+	if b.overflow || stderr.overflow {
 		return nil, errors.New("OS service response exceeded its size limit")
 	}
-	return []byte(b.text.String()), err
+	if len(args) > 0 && args[0] == "powershell.exe" {
+		if err != nil {
+			cause := err
+			if ctx.Err() != nil {
+				cause = ctx.Err()
+			}
+			err = fmt.Errorf("%w during %s", cause, schedulerPhase(stderr.text.String()))
+		}
+		return []byte(b.text.String()), err
+	}
+	return []byte(b.text.String() + stderr.text.String()), err
+}
+
+// Only fixed phase labels can enter diagnostics; never expose PowerShell's raw
+// stderr, which may include task definitions, paths or environment values.
+func schedulerPhase(stderr string) string {
+	phase := "PowerShell startup"
+	for _, line := range strings.Split(stderr, "\n") {
+		switch strings.TrimSpace(line) {
+		case "hopsesh-service-phase=create", "hopsesh-service-phase=connect", "hopsesh-service-phase=folder", "hopsesh-service-phase=task", "hopsesh-service-phase=properties":
+			phase = "Task Scheduler " + strings.TrimPrefix(strings.TrimSpace(line), "hopsesh-service-phase=")
+		}
+	}
+	return phase
 }
 
 type boundedServiceOutput struct {
@@ -86,6 +110,7 @@ func (p ServicePlan) status(ctx context.Context, run serviceRunner) ServiceStatu
 		// Query Task Scheduler directly. CIM's missing-task error identifiers
 		// differ by Windows version and must not be mistaken for a broken service.
 		script := windowsScheduler(p.Name) + `
+[Console]::Error.WriteLine('hopsesh-service-phase=task')
 try { $t=$folder.GetTask($name) } catch {
   $cause=$_.Exception
   while ($cause.InnerException) { $cause=$cause.InnerException }
@@ -93,6 +118,7 @@ try { $t=$folder.GetTask($name) } catch {
   @{registered=$false;enabled=$false;running=$false} | ConvertTo-Json -Compress
   exit 0
 }
+[Console]::Error.WriteLine('hopsesh-service-phase=properties')
 @{registered=$true;enabled=[bool]$t.Enabled;running=($t.State -eq 4)} | ConvertTo-Json -Compress`
 		args = []string{"powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script}
 	default:
@@ -139,12 +165,12 @@ try { $t=$folder.GetTask($name) } catch {
 	}
 	if !s.Known {
 		s.Error = "OS login service status is unavailable"
-		if queryContext.Err() != nil {
-			s.Error += ": " + queryContext.Err().Error()
-		} else if queryErr != nil {
+		if queryErr != nil {
 			// Process errors contain the exit status, not raw OS output which
 			// may expose paths or task definitions in diagnostics.
 			s.Error += ": " + queryErr.Error()
+		} else if queryContext.Err() != nil {
+			s.Error += ": " + queryContext.Err().Error()
 		} else {
 			s.Error += ": invalid supervisor response"
 		}
@@ -167,5 +193,5 @@ func (p ServicePlan) startRegistered(ctx context.Context) error {
 // The scheduler connection always targets the local machine and current user.
 // Only GetTask's ERROR_FILE_NOT_FOUND is absence; connection/access errors fail.
 func windowsScheduler(name string) string {
-	return "$ErrorActionPreference='Stop'; $service=New-Object -ComObject Schedule.Service; $service.Connect(); $folder=$service.GetFolder('\\'); $name='" + strings.ReplaceAll(name, "'", "''") + "'; "
+	return "$ErrorActionPreference='Stop'; [Console]::Error.WriteLine('hopsesh-service-phase=create'); $service=New-Object -ComObject Schedule.Service; [Console]::Error.WriteLine('hopsesh-service-phase=connect'); $service.Connect(); [Console]::Error.WriteLine('hopsesh-service-phase=folder'); $folder=$service.GetFolder('\\'); $name='" + strings.ReplaceAll(name, "'", "''") + "'; "
 }

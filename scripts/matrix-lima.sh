@@ -4,11 +4,12 @@
 # throwaway macOS user (hsremote) over this Mac's sshd the macOS one. macOS → Linux runs
 # here; Linux → macOS runs inside the VM. Used by CI on macos-15-intel; needs sudo.
 #
-#   scripts/matrix-lima.sh <macOS bin dir> <Linux bin dir> <out dir>
+#   scripts/matrix-lima.sh <macOS bin dir> <Linux bin dir> <out dir> [k/n shard]
 set -eu
 # shellcheck source=lib/testhost.sh
 . "$(dirname "$0")/lib/testhost.sh"
 BIN=$(cd "$1" && pwd); LBIN=$(cd "$2" && pwd); mkdir -p "$3"; OUT=$(cd "$3" && pwd)
+SHARD=${4:-1/1}
 U=hsremote
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
@@ -57,12 +58,14 @@ chmod 600 ~/.ssh/config
 
 failed=0
 echo "== macOS → Linux"
-(cd / && "$BIN/hsmatrix" run -hopsesh "$BIN/hopsesh" -there hsm-lima -alias hsm-lima -label 'macos→linux' -out "$OUT/m2l") || failed=$((failed + 1))
+(cd / && "$BIN/hsmatrix" run -shard "$SHARD" -hopsesh "$BIN/hopsesh" -there hsm-lima -alias hsm-lima -label 'macos→linux' -out "$OUT/m2l") || failed=$((failed + 1))
 
 echo "== Linux → macOS"
+# The guest shell expands its positional shard argument.
+# shellcheck disable=SC2016
 G sudo -u hsremote -H sh -c '
   printf "Host hsm-mac\n  HostName host.lima.internal\n  User hsremote\n" >> ~/.ssh/config
-  cd ~ && hsmatrix run -hopsesh /usr/local/bin/hopsesh -there hsremote@host.lima.internal -alias hsm-mac -label "linux→macos" -out /tmp/l2m' || failed=$((failed + 1))
+  cd ~ && hsmatrix run -shard "$1" -hopsesh /usr/local/bin/hopsesh -there hsremote@host.lima.internal -alias hsm-mac -label "linux→macos" -out /tmp/l2m' sh "$SHARD" || failed=$((failed + 1))
 G sudo chmod -R a+rX /tmp/l2m 2>/dev/null || true
 limactl copy -r hs:/tmp/l2m "$OUT/" 2>/dev/null || true
 if [ -f "$OUT/l2m/summary.md" ] && [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then cat "$OUT/l2m/summary.md" >> "$GITHUB_STEP_SUMMARY"; fi

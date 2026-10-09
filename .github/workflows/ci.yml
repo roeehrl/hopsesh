@@ -341,7 +341,11 @@ jobs:
           retention-days: 7
 
   os-pairs-windows-linux:
-    name: os pairs (windows↔linux)
+    name: os pairs (windows↔linux ${{ matrix.shard }}/4)
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     runs-on: windows-2025
     timeout-minutes: 45
     steps:
@@ -364,16 +368,20 @@ jobs:
           done
       - name: scenario matrix, Windows → Linux (WSL2) and Linux → Windows
         shell: pwsh
-        run: ./scripts/matrix-wsl.ps1 -Bin bin -LinuxBin bin-linux -Out "$env:RUNNER_TEMP\hsmatrix"
+        run: ./scripts/matrix-wsl.ps1 -Bin bin -LinuxBin bin-linux -Out "$env:RUNNER_TEMP\hsmatrix" -Shard '${{ matrix.shard }}/4'
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ failure() }}
         with:
-          name: os-pairs-windows-linux
+          name: os-pairs-windows-linux-${{ matrix.shard }}
           path: ${{ runner.temp }}/hsmatrix/
           retention-days: 7
 
   os-pairs-macos-linux:
-    name: os pairs (macos↔linux)
+    name: os pairs (macos↔linux ${{ matrix.shard }}/4)
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     runs-on: macos-15-intel
     timeout-minutes: 60
     steps:
@@ -394,11 +402,11 @@ jobs:
             CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "bin-linux/${p#*:}" "./${p%%:*}"
           done
       - name: scenario matrix, macOS → Linux (Lima VM) and Linux → macOS
-        run: scripts/matrix-lima.sh bin bin-linux "$RUNNER_TEMP/hsmatrix"
+        run: scripts/matrix-lima.sh bin bin-linux "$RUNNER_TEMP/hsmatrix" '${{ matrix.shard }}/4'
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ failure() }}
         with:
-          name: os-pairs-macos-linux
+          name: os-pairs-macos-linux-${{ matrix.shard }}
           path: ${{ runner.temp }}/hsmatrix/
           retention-days: 7
 
