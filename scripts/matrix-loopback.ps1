@@ -26,6 +26,10 @@ foreach ($a in 'claude', 'codex') { Copy-Item (Join-Path $Bin 'fakeagent.exe') (
 $machine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
 if (($machine -split ';') -notcontains $tools) { [Environment]::SetEnvironmentVariable('Path', "$tools;$machine", 'Machine') }
 $env:Path = "$tools;$env:Path"
+# A setup-only GitHub Actions step cannot change the runner process's inherited
+# PATH. Publish the same tools for later steps, including the local cloud rows
+# driven from Git Bash; the machine PATH above serves incoming SSH sessions.
+if ($env:GITHUB_PATH) { Add-Content -LiteralPath $env:GITHUB_PATH -Value $tools -Encoding utf8 }
 
 # OpenSSH server, key login for this account, cmd.exe as the remote shell.
 if (-not (Get-Service sshd -ErrorAction SilentlyContinue)) {

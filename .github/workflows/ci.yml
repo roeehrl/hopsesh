@@ -495,12 +495,15 @@ jobs:
           $probe = Join-Path $env:RUNNER_TEMP 'hopsesh-ssh-wire.test.exe'
           go test -c -race -o $probe ./internal/core/transport
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & $probe '-test.run=^TestNativeSSH(CommandAndDiagnostics|WithoutConsole)$' -test.v
+          & $probe '-test.run=^TestNativeSSH(CommandAndDiagnostics|WithoutConsole)$' '-test.v'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $knownHosts = Join-Path $env:RUNNER_TEMP 'hopsesh-ssh-wire.known_hosts'
           $hostKey = (Get-Content -LiteralPath "$env:ProgramData\ssh\ssh_host_ed25519_key.pub" -Raw).Trim()
           Set-Content -LiteralPath $knownHosts -Value "127.0.0.1 $hostKey" -Encoding ascii
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=`"$knownHosts`"" "$env:USERNAME@127.0.0.1" "`"$probe`" -test.run=^TestNativeSSHCommandAndDiagnostics$ -test.v"
+          $quotedProbe = $probe.Replace("'", "''")
+          $remoteScript = "& '$quotedProbe' '-test.run=^TestNativeSSHCommandAndDiagnostics$' '-test.v'; exit " + '$LASTEXITCODE'
+          $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($remoteScript))
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=`"$knownHosts`"" "$env:USERNAME@127.0.0.1" "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand $encoded"
           exit $LASTEXITCODE
       - name: a PowerShell script longer than a command line, over the same server
         shell: pwsh
