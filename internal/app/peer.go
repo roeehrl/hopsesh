@@ -231,6 +231,25 @@ func (a *App) StartPush(ctx context.Context, inv *Inventory, e Entry, to config.
 	if here == nil || e.Machine != here.Name {
 		return nil, errors.New("only a session on this machine can be pushed; to bring one here, pull it")
 	}
+	// A shared discovery follower has browsing data but no live host handle.
+	// Resolve the exact source again before dialing or pushing repository code.
+	var fresh *Inventory
+	if e.Cached || inv.Discovering || here.host == nil {
+		var err error
+		fresh, e, err = a.FreshSelection(ctx, e)
+		if err != nil {
+			return nil, err
+		}
+		here = fresh.Local()
+		defer func() {
+			if fresh != nil {
+				fresh.Close()
+			}
+		}()
+	}
+	if here == nil || here.host == nil {
+		return nil, errors.New("this machine was not scanned")
+	}
 	if opt.OperationID == "" && to.RelayID != "" {
 		var err error
 		if opt.OperationID, err = relay.NewOperationID(); err != nil {
@@ -240,6 +259,13 @@ func (a *App) StartPush(ctx context.Context, inv *Inventory, e Entry, to config.
 	c, hr, closeFn, err := a.dialPeer(ctx, to, opt.OperationID)
 	if err != nil {
 		return nil, err
+	}
+	if fresh != nil {
+		// Commit still needs this source. Transfer ownership to Push.Close,
+		// which also releases it on every subsequent planning failure.
+		owned, peerClose := fresh, closeFn
+		closeFn = func() { peerClose(); owned.Close() }
+		fresh = nil
 	}
 	mod, _ := a.Module(e.Agent)
 	install, _ := here.InstallProfile(e.Agent, e.Session.Key.Profile)

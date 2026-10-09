@@ -203,7 +203,10 @@ func (f *relayFleet) pushSSH(t *testing.T, from, to byte, source agent.Summary, 
 	a := app.New(cfg, all.Registry(), filepath.Join(m.home, "state"), nil)
 	defer a.Catalog.Close()
 	a.PeerDial = endpoint.dial
-	inv := a.Scan(f.ctx, app.ScanOptions{Hosts: []string{m.name}})
+	a.Scan(f.ctx, app.ScanOptions{Hosts: []string{m.name}}).Close()
+	// Exercise the persisted browsing selection on every route, rather than
+	// depending on whether a concurrent runtime collector wins the scan lease.
+	inv := a.CachedInventory()
 	defer inv.Close()
 	e, err := inv.Find(app.ParseRef(string(source.Key.Agent) + "/" + string(source.Key.Session)))
 	if err != nil {
