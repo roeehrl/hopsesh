@@ -1,5 +1,6 @@
 /bin/
 /dist/
+/hsmatrix-runtime-out/
 *.test
 *.out
 coverage.*

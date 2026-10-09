@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -16,11 +17,39 @@ import (
 )
 
 type runtimeReport struct {
+	Source          runtimeSource         `json:"source"`
+	SourceUnchanged bool                  `json:"sourceUnchanged"`
 	Coverage        runtimecases.Coverage `json:"coverage"`
 	SelectionPassed bool                  `json:"selectionPassed"`
 	ModelQualified  bool                  `json:"modelQualified"`
 	Execution       string                `json:"execution"`
 	Results         []runtimecases.Result `json:"results"`
+}
+
+// Dirty runs remain useful development evidence, but cannot qualify a release.
+// Both the runner and aggregator bind evidence to their actual Git checkout.
+type runtimeSource struct {
+	Revision string `json:"revision"`
+	Dirty    bool   `json:"dirty"`
+}
+
+func readRuntimeSource(root string) (runtimeSource, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	git := func(args ...string) ([]byte, error) {
+		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd.Dir = root
+		return cmd.Output()
+	}
+	head, err := git("rev-parse", "--verify", "HEAD")
+	if err != nil {
+		return runtimeSource{}, fmt.Errorf("read runtime source revision: %w", err)
+	}
+	status, err := git("status", "--porcelain=v1", "--untracked-files=all")
+	if err != nil {
+		return runtimeSource{}, fmt.Errorf("read runtime source changes: %w", err)
+	}
+	return runtimeSource{Revision: strings.TrimSpace(string(head)), Dirty: len(status) != 0}, nil
 }
 
 // runtime-run executes selected factor rows in the native integration harness.
@@ -45,11 +74,16 @@ func runtimeMain(command string, args []string) int {
 			fmt.Fprintln(os.Stderr, "runtime-verify needs report files and the complete model selection")
 			return 2
 		}
-		if err := verifyRuntimeReports(*strength, *seed, strings.Split(*reports, ",")); err != nil {
+		expected, err := readRuntimeSource(*source)
+		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
-		fmt.Println("All runtime covering rows executed exactly once and passed across the supplied reports.")
+		if err := verifyRuntimeReports(*strength, *seed, strings.Split(*reports, ","), expected); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		fmt.Printf("All runtime covering rows executed exactly once and passed at clean source revision %s.\n", expected.Revision)
 		return 0
 	}
 	if *reports != "" {
@@ -81,6 +115,11 @@ func runtimeMain(command string, args []string) int {
 	if _, err := os.Stat(filepath.Join(root, "internal", "e2e", "runtime_matrix_test.go")); err != nil {
 		fmt.Fprintln(os.Stderr, "-source must contain the native runtime matrix harness:", err)
 		return 2
+	}
+	sourceBefore, err := readRuntimeSource(root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
 	}
 	output, err := filepath.Abs(*out)
 	if err != nil {
@@ -126,8 +165,14 @@ func runtimeMain(command string, args []string) int {
 	if reportErr == nil {
 		reportErr = runtimecases.VerifyResults(rows, results)
 	}
-	passed := runErr == nil && closeErr == nil && reportErr == nil
-	result := runtimeReport{coverage, passed, passed && coverage.CompleteSelection, execution, results}
+	sourceAfter, sourceErr := readRuntimeSource(root)
+	unchanged := sourceErr == nil && sourceBefore == sourceAfter
+	passed := runErr == nil && closeErr == nil && reportErr == nil && unchanged
+	result := runtimeReport{
+		Source: sourceBefore, SourceUnchanged: unchanged, Coverage: coverage,
+		SelectionPassed: passed, ModelQualified: passed && coverage.CompleteSelection && !sourceBefore.Dirty,
+		Execution: execution, Results: results,
+	}
 	body, err = json.MarshalIndent(result, "", "  ")
 	if err == nil {
 		err = os.WriteFile(filepath.Join(output, "results.json"), body, 0600)
@@ -137,14 +182,18 @@ func runtimeMain(command string, args []string) int {
 		return 1
 	}
 	fmt.Printf("\nModel %s: %d/%d generated rows, %d/%d interactions at t=%d; selection passed=%t; model qualified=%t.\n", coverage.Model, coverage.SelectedRows, coverage.GeneratedRows, coverage.SelectedInteractions, coverage.ValidInteractions, coverage.Strength, passed, result.ModelQualified)
+	fmt.Printf("Source revision %s; dirty=%t; unchanged=%t.\n", sourceBefore.Revision, sourceBefore.Dirty, unchanged)
 	if !passed {
-		fmt.Fprintf(os.Stderr, "native run=%v; log=%v; verified report=%v\n", runErr, closeErr, reportErr)
+		fmt.Fprintf(os.Stderr, "native run=%v; log=%v; verified report=%v; source unchanged=%t; source error=%v\n", runErr, closeErr, reportErr, unchanged, sourceErr)
 		return 1
 	}
 	return 0
 }
 
-func verifyRuntimeReports(strength int, seed int64, paths []string) error {
+func verifyRuntimeReports(strength int, seed int64, paths []string, expected runtimeSource) error {
+	if expected.Revision == "" || expected.Dirty {
+		return fmt.Errorf("runtime qualification requires a clean source checkout with a known revision")
+	}
 	all, _, err := runtimecases.Select(strength, seed, "", "")
 	if err != nil {
 		return err
@@ -158,6 +207,9 @@ func verifyRuntimeReports(strength int, seed int64, paths []string) error {
 		var report runtimeReport
 		if err := json.Unmarshal(body, &report); err != nil {
 			return err
+		}
+		if !report.SourceUnchanged || report.Source != expected {
+			return fmt.Errorf("report %s is not bound to unchanged clean source revision %s", path, expected.Revision)
 		}
 		if !report.SelectionPassed || len(report.Results) == 0 {
 			return fmt.Errorf("report %s has no passing executed selection", path)
