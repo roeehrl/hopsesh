@@ -29,7 +29,7 @@ stdout '"path": ".env"'
 stdout '"markTitle": "↪ continued in Claude Code cloud"'
 stdout '"terminal": "Claude Code starts the session in a terminal'
 stdout '"folder": ".*hopsesh-state/handoff/github.com/example/demo"'
-stdout '"noFollowUp": "hopsesh can.t send a Claude Code cloud session a message'
+stdout '"noFollowUp": "hopsesh has not yet integrated and qualified Claude Code.s cloud follow-up command'
 ! grep 'cloud' $WORK/agents.log
 
 exec git -C demo status --porcelain
@@ -43,7 +43,7 @@ stdout 'Session session_01\w+ is running'
 stdout 'Branch hopsesh/handoff/\d{8}-11111111 on github.com/example/demo'
 stdout 'Stayed here: .env'
 stdout 'This session is now marked "↪ continued in Claude Code cloud"'
-stdout 'Follow-ups: hopsesh can.t send a Claude Code cloud session a message'
+stdout 'Follow-ups: hopsesh has not yet integrated and qualified Claude Code.s cloud follow-up command'
 grep 'claude --cloud \[hopsesh\] This task continues' $WORK/agents.log
 grep 'claude: the terminal answered DA1' $WORK/agents.log
 grep 'claude: asked whether .*hopsesh-state/handoff/github.com/example/demo is trusted' $WORK/agents.log
@@ -62,9 +62,9 @@ stdout '"location": "claude-cloud"'
 # No cloud takes a follow-up from hopsesh yet: the command is hidden, and run directly it
 # says so and fails, whatever it is given.
 ! exec hopsesh followup claude-cloud:session_01Nope000000 'and add a test' --yes
-stderr 'no cloud accepts a follow-up from hopsesh yet'
+stderr 'hopsesh has no integrated and qualified cloud follow-up command yet'
 ! exec hopsesh followup
-stderr 'no cloud accepts a follow-up from hopsesh yet'
+stderr 'hopsesh has no integrated and qualified cloud follow-up command yet'
 exec hopsesh --help
 ! stdout 'followup'
 exec hopsesh __complete f

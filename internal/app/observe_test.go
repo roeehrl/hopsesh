@@ -129,6 +129,28 @@ func TestObserveRejectsRegistrationChangedDuringCollection(t *testing.T) {
 	}
 }
 
+func TestObserveRetriesEndpointReplacedDuringCollection(t *testing.T) {
+	mod := &registrationDuringListing{Module: claude.New()}
+	a, _, _ := observerFixture(t, mod)
+	if err := os.MkdirAll(config.Dir(), 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(config.Dir(), "endpoint-id")
+	if err := os.WriteFile(path, []byte(strings.Repeat("a", 64)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Repeat("b", 64)
+	mod.change = func() {
+		if err := os.WriteFile(path, []byte(want), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, err := a.ObserveLocal(t.Context())
+	if err != nil || !out.InventoryComplete || out.Endpoint != want || len(out.Entries) != 1 {
+		t.Fatalf("collection retained replaced endpoint: endpoint=%q, complete=%v, entries=%d, error=%v", out.Endpoint, out.InventoryComplete, len(out.Entries), err)
+	}
+}
+
 func (m partialInventory) List(ctx context.Context, h agent.Host, in agent.Install) (agent.Listing, error) {
 	ls, err := m.Module.List(ctx, h, in)
 	ls.Errors = append(ls.Errors, agent.SessionError{Path: "unreadable-session.jsonl", Err: errors.New("permission denied")})

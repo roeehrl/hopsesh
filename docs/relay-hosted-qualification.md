@@ -491,3 +491,12 @@ preparation or connector was used to turn that negative startup result into a
 pass. Prepared installation inheritance is qualified; Start skill delivery and
 real pause/rebuild remain open. See
 [Codex cloud environments](https://learn.chatgpt.com/docs/environments/cloud-environments).
+
+The October 9 read-only setup follow-up still reads a nonempty 707-character
+`start_skill` from its saved draft. The supported field accepts agent instructions
+as a string, with no documented filename/front matter or explicit invocation
+requirement. However, that setup's read interface exposes a draft whose base
+predates the current published configuration; it cannot prove the published
+field contents. The fresh-task absence remains a failed delivery qualification,
+with cause unverified. No settings, permissions or publication were changed by
+this diagnostic; no preparation keys or connector were created.

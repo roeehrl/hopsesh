@@ -60,7 +60,7 @@ func (a *App) observeMachine(ctx context.Context, m *host.Machine) (Observation,
 	if !m.Local {
 		out.OS, out.Version = m.Facts.OS, hopseshVersion(m.Facts.Binaries[host.Hopsesh.Name])
 	}
-	endpoint, err := m.ReadIdentity(ctx)
+	endpoint, err := m.RefreshIdentity(ctx)
 	if err != nil {
 		return out, err
 	}
@@ -247,7 +247,7 @@ func (a *App) observeMachine(ctx context.Context, m *host.Machine) (Observation,
 	// Explicit discovery may initialize/register the default account while this
 	// passive collection runs. Publishing its older unprofiled keys afterward
 	// would replace the registered rows and then duplicate them on the next scan.
-	currentEndpoint, identityErr := m.ReadIdentity(ctx)
+	currentEndpoint, identityErr := m.RefreshIdentity(ctx)
 	currentProfiles, profilesErr := a.Accounts()
 	if identityErr != nil || profilesErr != nil || currentEndpoint != endpoint || !reflect.DeepEqual(ps, currentProfiles) {
 		out.InventoryComplete = false

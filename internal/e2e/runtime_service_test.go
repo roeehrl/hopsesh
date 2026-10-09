@@ -31,7 +31,17 @@ func TestRuntimeNativeUserServiceLifecycle(t *testing.T) {
 	// Hopsesh settings/state and agent roots remain in the disabled fixture.
 	keys := []string{"XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"}
 	if runtime.GOOS == "windows" {
-		keys = []string{"SystemRoot", "SystemDrive", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "USERNAME", "USERDOMAIN", "COMPUTERNAME", "PSModulePath"}
+		// COM activation depends on the OS installation and user environment,
+		// not just the PowerShell executable's location. Keep Windows' standard
+		// infrastructure variables without forwarding runner tokens or secrets.
+		keys = []string{
+			"SystemRoot", "SystemDrive", "WINDIR", "COMSPEC", "PATHEXT", "OS",
+			"ProgramData", "ALLUSERSPROFILE", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432",
+			"CommonProgramFiles", "CommonProgramFiles(x86)", "CommonProgramW6432",
+			"PROCESSOR_ARCHITECTURE", "PROCESSOR_ARCHITEW6432", "PROCESSOR_IDENTIFIER", "PROCESSOR_LEVEL", "PROCESSOR_REVISION", "NUMBER_OF_PROCESSORS",
+			"TEMP", "TMP", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA",
+			"USERNAME", "USERDOMAIN", "USERDOMAIN_ROAMINGPROFILE", "COMPUTERNAME", "LOGONSERVER", "SESSIONNAME", "PSModulePath",
+		}
 	}
 	var supervisorEnv []string
 	for _, key := range keys {
@@ -52,6 +62,9 @@ func TestRuntimeNativeUserServiceLifecycle(t *testing.T) {
 		cmd := exec.CommandContext(ctx, bin, args...)
 		// No unrelated environment or credentials are forwarded to the child.
 		cmd.Env = append(box.env(), supervisorEnv...)
+		// USERPROFILE must remain the real OS user's for Task Scheduler. Agent
+		// roots stay explicit and disposable even if a module is later enabled.
+		cmd.Env = append(cmd.Env, "CLAUDE_CONFIG_DIR="+filepath.Join(box.home, ".claude"), "CODEX_HOME="+filepath.Join(box.home, ".codex"))
 		started := time.Now()
 		out, err := cmd.CombinedOutput()
 		t.Logf("native runtime service %v completed in %s", args, time.Since(started).Round(time.Millisecond))

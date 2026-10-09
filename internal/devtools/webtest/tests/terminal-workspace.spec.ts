@@ -112,6 +112,12 @@ test('failed replacement keeps the source usable and composing text postpones a 
 
 test('shared observation during a press does not swallow the shell grouping menu',async({page})=>{
  await page.request.post('/terminal-test/open?title=Build%20shell&kind=shell');
+ // The cached list is interactive before InitialScan finishes. Quick snapshots
+ // are intentionally ignored during that explicit scan; qualify the subsequent
+ // background repaint instead of racing the startup ownership boundary.
+ await expect.poll(()=>page.evaluate(async()=>{
+  const {state}=await import('/core.js');return !state.scanning&&!state.scan?.discovering;
+ })).toBe(true);
  await row(page,'Find the codeword').click();
  let release!:()=>void;
  const responseGate=new Promise<void>(resolve=>release=resolve);
