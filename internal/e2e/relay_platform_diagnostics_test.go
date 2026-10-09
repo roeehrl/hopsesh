@@ -13,10 +13,10 @@ import (
 )
 
 // Local Explorer captures workerd binding failures even when Wrangler's terminal
-// logger is empty. Query only bounded span diagnostics; never request attributes,
-// headers, console messages, bodies, stored records or credentials.
+// logger is empty. Query bounded spans plus the numeric HTTP status; never return
+// arbitrary attributes, headers, console messages, bodies, records or credentials.
 func relayPlatformDiagnostics(ctx context.Context, origin string, client *http.Client) ([]byte, error) {
-	const query = `SELECT substr(service,1,80) AS service, substr(kind,1,80) AS kind, substr(outcome,1,80) AS outcome, duration_ms, substr(error,1,1024) AS error FROM spans ORDER BY (error IS NOT NULL) DESC, start_ms DESC LIMIT 32`
+	const query = `SELECT substr(service,1,80) AS service, substr(kind,1,80) AS kind, substr(outcome,1,80) AS outcome, duration_ms, substr(error,1,1024) AS error, CASE WHEN json_type(attributes, '$."http.response.status_code"') = 'integer' THEN json_extract(attributes, '$."http.response.status_code"') END AS http_status FROM spans WHERE kind IN ('http','fetch') OR error IS NOT NULL ORDER BY (error IS NOT NULL) DESC, start_ms DESC LIMIT 32`
 	body, _ := json.Marshal(map[string]string{"sql": query})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, origin+"/cdn-cgi/local/explorer/api/local/observability/query", bytes.NewReader(body))
 	if err != nil {
@@ -41,7 +41,7 @@ func relayPlatformDiagnostics(ctx context.Context, origin string, client *http.C
 	if err := json.NewDecoder(io.LimitReader(res.Body, 64<<10)).Decode(&reply); err != nil {
 		return nil, err
 	}
-	if !reply.Success || len(reply.Result.Columns) != 5 || len(reply.Result.Rows) > 32 {
+	if !reply.Success || len(reply.Result.Columns) != 6 || len(reply.Result.Rows) > 32 {
 		return nil, fmt.Errorf("invalid local span query result")
 	}
 	return json.Marshal(reply.Result)
@@ -58,6 +58,9 @@ func TestRelayPlatformDiagnosticsSQLiteR2(t *testing.T) {
 	}
 	if !bytes.Contains(result, []byte(`"hopsesh-relay-experimental"`)) {
 		t.Fatal("readiness request was not captured by local tracing", string(result))
+	}
+	if !bytes.Contains(result, []byte(`"http_status"`)) || !bytes.Contains(result, []byte(`,200]`)) {
+		t.Fatal("readiness HTTP status was not captured", string(result))
 	}
 	t.Logf("bounded local spans: %s", result)
 }

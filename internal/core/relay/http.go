@@ -86,7 +86,7 @@ func (t Transport) request(ctx context.Context, method, path string, body any, o
 	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	r, err := c.Do(req)
 	if err != nil {
-		return relayHTTPFailure("request", err)
+		return relayHTTPFailure(relayRequestOperation(method, path), "request", err)
 	}
 	defer r.Body.Close()
 	if r.StatusCode == 429 || r.StatusCode >= 500 {
@@ -123,7 +123,7 @@ func (t Transport) request(ctx context.Context, method, path string, body any, o
 	}
 	b, err := io.ReadAll(io.LimitReader(r.Body, MaxWireBytes+1))
 	if err != nil {
-		return relayHTTPFailure("response-body", err)
+		return relayHTTPFailure(relayRequestOperation(method, path), "response-body", err)
 	}
 	if len(b) > MaxWireBytes {
 		return errors.New("relay response exceeds limit")
@@ -134,10 +134,25 @@ func (t Transport) request(ctx context.Context, method, path string, body any, o
 	return json.Unmarshal(b, out)
 }
 
+// Only fixed operation names may enter diagnostics, never a path or query value.
+func relayRequestOperation(method, path string) string {
+	path, _, _ = strings.Cut(path, "?")
+	switch method + " " + path {
+	case "GET /v1/messages":
+		return "poll"
+	case "POST /v1/messages":
+		return "submit"
+	case "POST /v1/ack":
+		return "ack"
+	default:
+		return "unknown"
+	}
+}
+
 // Keep diagnostics actionable without retaining the raw transport error, which
 // can contain a proxy URL, certificate names or other private infrastructure.
 // Only context sentinels survive as causes; classification does not add retries.
-func relayHTTPFailure(phase string, err error) error {
+func relayHTTPFailure(operation, phase string, err error) error {
 	kind := "network"
 	var cause error
 	var dns *net.DNSError
@@ -169,7 +184,7 @@ func relayHTTPFailure(phase string, err error) error {
 		// portable syscall constants above. Numeric OS codes contain no URLs.
 		kind = fmt.Sprintf("os-error-%d", uint64(errno))
 	}
-	message := fmt.Sprintf("relay HTTPS connection failed; check proxy, trust roots and network access (phase=%s cause=%s)", phase, kind)
+	message := fmt.Sprintf("relay HTTPS connection failed; check proxy, trust roots and network access (operation=%s phase=%s cause=%s)", operation, phase, kind)
 	if cause != nil {
 		return fmt.Errorf("%s: %w", message, cause)
 	}

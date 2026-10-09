@@ -91,13 +91,32 @@ func TestHTTPFailureDiagnosticsIdentifyCauseWithoutPrivateDetails(t *testing.T) 
 				if responseBody {
 					phase = "response-body"
 				}
-				if !strings.Contains(err.Error(), "phase="+phase) {
+				if !strings.Contains(err.Error(), "phase="+phase) || !strings.Contains(err.Error(), "operation=poll") {
 					t.Fatal("lost failure phase", err)
 				}
 				if errors.Is(tc.err, context.Canceled) && !errors.Is(err, context.Canceled) || errors.Is(tc.err, context.DeadlineExceeded) && !errors.Is(err, context.DeadlineExceeded) {
 					t.Fatal("lost context cancellation identity", err)
 				}
 			})
+		}
+	}
+}
+
+func TestHTTPFailureOperationNeverIncludesRequestDetails(t *testing.T) {
+	const secret = "private-token-and-path"
+	for _, tc := range []struct{ method, path, want string }{
+		{"GET", "/v1/messages?cursor=" + secret, "poll"},
+		{"POST", "/v1/messages", "submit"},
+		{"POST", "/v1/ack", "ack"},
+		{"GET", "/" + secret, "unknown"},
+		{secret, "/v1/messages", "unknown"},
+	} {
+		transport := Transport{Base: DefaultOrigin, Space: "diagnostic-space", Token: secret, HTTP: &http.Client{Transport: retryRoundTrip(func(*http.Request) (*http.Response, error) {
+			return nil, errors.New(secret)
+		})}}
+		err := transport.request(t.Context(), tc.method, tc.path, nil, nil)
+		if err == nil || !strings.Contains(err.Error(), "operation="+tc.want) || strings.Contains(err.Error(), secret) {
+			t.Fatalf("unsafe or missing operation diagnostic: %v", err)
 		}
 	}
 }

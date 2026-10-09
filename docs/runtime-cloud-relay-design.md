@@ -502,8 +502,11 @@ decodes inherited descriptor metadata and warns about stale state passing throug
 a non-POSIX intermediary. The new candidate removes that metadata for Windows
 children using replacement Go pipes/null handles, including Git subprocesses;
 it does not remove authentication or chroot settings. An injected descriptor
-record tests the same case, and native SSH-hosted confirmation remains a required
-gate. Git operations also need this boundary because [Git delegates transport
+record tests the same case. Native Windows job `113981093205` at `962562c`
+subsequently passes all six checks in each process mode, including actual
+SSH-hosted execution with inherited descriptor metadata present (0.28 seconds).
+Ten repeated PowerShell-over-SSH checks also pass. Full three-OS journeys remain
+separate qualification. Git operations also need this boundary because [Git delegates transport
 through its SSH command](https://git-scm.com/docs/git#Documentation/git.txt-codeGITSSHCOMMANDcode).
 
 ### Relay retry behavior, hibernation and cost
