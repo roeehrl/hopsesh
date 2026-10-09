@@ -22,11 +22,16 @@ test("machine sidebar subtitles show detected agents consistently even without s
       { name: "offline-box", local: false, status: "unreachable", error: "Connection timed out", sessions: 4, agentNames: ["Claude Code"], agents: ["Claude Code 2.1.288"] },
     ];
   });
+  // Reload publishes usable cached/partial machine rows first. Keep the route
+  // alive through InitialScan before teardown checks the final detected agents.
+  const scanned = page.waitForResponse(r => r.url().endsWith('/call') && r.request().postDataJSON()?.m === 'InitialScan');
   await page.reload();
+  expect((await scanned).ok()).toBeTruthy();
+  await expect(page.locator('#fresh')).toContainText('updated');
   await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible();
   const local = sidebar(page).getByRole("button", { name: /^This (Mac|PC|computer)/ });
   const remote = sidebar(page).getByRole("button", { name: /^other-mac/ });
-  await expect(local.locator("small")).toHaveText("Claude Code, Codex");
+  await expect(local.locator("small[title]")).toHaveText("Claude Code, Codex");
   await expect(remote.locator("small")).toHaveText("Claude Code, Codex");
   await expect(remote.locator("small")).toHaveAttribute("title", "Claude Code 2.1.288, Codex 0.160.1");
   await expect(remote).not.toContainText(/darwin|hopsesh 0.4.0/);

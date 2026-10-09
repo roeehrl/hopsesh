@@ -78,6 +78,14 @@ func (t Transport) request(ctx context.Context, method, path string, body any, o
 	req.Header.Set("Authorization", "Bearer "+t.Token)
 	req.Header.Set("X-Hopsesh-Space", t.Space)
 	req.Header.Set("Content-Type", "application/json")
+	if method == http.MethodPost && (path == "/v1/messages" || path == "/v1/ack") {
+		// Message IDs deduplicate the exact envelope; acknowledging the same
+		// cursor is also idempotent. Let net/http recover eligible failures on
+		// an already-used connection by replaying the original bytes. A nil
+		// slice is Go's local replay hint and sends no header to the relay.
+		// Fresh-connection failures and HTTP policy responses are not retried.
+		req.Header["Idempotency-Key"] = nil
+	}
 	c := http.Client{Timeout: 30 * time.Second}
 	if t.HTTP != nil {
 		c = *t.HTTP

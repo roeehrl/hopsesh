@@ -70,6 +70,12 @@ jobs:
           node-version: 24
       - name: install the latest Claude Code and Codex
         run: npm install -g --silent @anthropic-ai/claude-code@latest @openai/codex@latest # zizmor: ignore[adhoc-packages]
+      - name: installed vendor launchers work without a model call
+        # npm can succeed while a missing optional native package leaves only
+        # the JS launcher. Preserve that vendor error before testing discovery.
+        run: |
+          claude --version
+          codex --version
       - name: hopsesh finds them and reads their versions
         run: |
           ext=""; [ "$RUNNER_OS" = Windows ] && ext=.exe

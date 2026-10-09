@@ -150,13 +150,25 @@ jobs:
         env:
           HOPSESH_RELAY_REQUIRE_NODE: "1"
           HOPSESH_RELAY_PLATFORM: "1"
-        run: go test -race -count=1 -v -run '^TestRelayLineageSQLiteR2$/^push$' -timeout 5m ./internal/e2e
+        run: |
+          # Each route retains its one-minute fixture deadline. Separate route
+          # families so ten sequential Windows scenarios do not share one 5m budget.
+          result=0
+          for route in ABABA ABCA ABCBCAB independent-original-and-sibling-forks; do
+            go test -race -count=1 -v -run "^TestRelayLineageSQLiteR2$/^push$/^${route}$" -timeout 5m ./internal/e2e || result=1
+          done
+          exit "$result"
       - name: actual SQLite/R2 pull routes and independent forks
         shell: bash
         env:
           HOPSESH_RELAY_REQUIRE_NODE: "1"
           HOPSESH_RELAY_PLATFORM: "1"
-        run: go test -race -count=1 -v -run '^TestRelayLineageSQLiteR2$/^pull$' -timeout 5m ./internal/e2e
+        run: |
+          result=0
+          for route in ABABA ABCA ABCBCAB independent-original-and-sibling-forks; do
+            go test -race -count=1 -v -run "^TestRelayLineageSQLiteR2$/^pull$/^${route}$" -timeout 5m ./internal/e2e || result=1
+          done
+          exit "$result"
       - name: actual SQLite/R2 notifications, load and resource bounds
         shell: bash
         env:

@@ -820,6 +820,13 @@ test cost. The existing Wrangler credential cannot read the billing API (HTTP
 readback is saved privately under
 `~/.hopsesh-release/cloud-0.5/billing-browser-readback-20261009.json`.
 
+Refreshing the same signed-in billing page at 19:24:50 UTC returned the same
+548 Class B operations, 129 Class A operations and 0.27 GB-month, with zero
+billable quantities and USD 0. This remains unreconciled billing-period usage,
+not settled attribution for the qualification workload. No account settings or
+subscriptions changed. The bounded readback is saved privately as
+`~/.hopsesh-release/cloud-0.5/billing-readback-late-20261009.json`.
+
 A separate post-cleanup storage query now covers `12:38:00–17:43:01 UTC`.
 The earlier fixed workload interval ended at `12:37:51 UTC`, so repeatedly
 reading that interval could not establish later storage state. After routine

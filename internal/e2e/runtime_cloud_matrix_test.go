@@ -386,14 +386,21 @@ func assertCloudWrongOwnerRejected(t *testing.T, f *relayFleet, instance cloudin
 	defer cancel()
 	client := runtimeMatrixClient(t, f.homes['B'])
 	var result json.RawMessage
-	done := make(chan error, 1)
+	var callErr error
+	done := make(chan struct{})
 	go func() {
-		done <- client.Call(ctx, "relay.call", map[string]any{"peer": instance.Public.ID, "operation": operation, "method": "observe"}, &result)
+		defer close(done)
+		callErr = client.Call(ctx, "relay.call", map[string]any{"peer": instance.Public.ID, "operation": operation, "method": "observe"}, &result)
 	}()
 	defer func() {
 		cancel()
-		if err := <-done; err == nil || len(result) != 0 {
-			t.Error("wrong owner received cloud observation", err)
+		<-done
+		if callErr == nil || len(result) != 0 {
+			t.Error("wrong owner received cloud observation", callErr)
+		} else if t.Failed() {
+			// A failed submit cannot qualify rejection by the connector. Preserve
+			// its redacted transport cause instead of reporting only our timeout.
+			t.Logf("wrong-owner delivery request ended: %v", callErr)
 		}
 	}()
 	for {
@@ -422,7 +429,13 @@ func assertCloudWrongOwnerRejected(t *testing.T, f *relayFleet, instance cloudin
 			}
 		}
 		select {
+		case <-done:
+			f.logHealth(t)
+			f.probeRelay(t, 'B')
+			t.Fatal("wrong-owner request ended before durable rejection", callErr)
 		case <-ctx.Done():
+			f.logHealth(t)
+			f.probeRelay(t, 'B')
 			t.Fatal("missing durable rejection for actual wrong-owner delivery", ctx.Err())
 		case <-time.After(20 * time.Millisecond):
 		}

@@ -131,7 +131,11 @@ test("bounded recovery keeps the original and explains capacity and archive", as
   await sheet.getByRole("button", {name: /Continue in Claude Code/}).click();
   await expect(page.getByRole("heading", {name: /is prepared for Claude Code/})).toBeVisible();
   await expect(page.getByText("Claude Code session written", {exact: true})).toBeVisible();
+  // Early discovery preserves the inspected original while this same-agent
+  // family is reconciled. Assert its final representative after the requested scan.
+  const refreshed = page.waitForResponse(r => r.url().endsWith('/call') && r.request().postDataJSON()?.m === 'Scan');
   await page.getByRole("button", {name: /Back to sessions/}).click();
+  expect((await refreshed).ok()).toBeTruthy();
   await expect(row(page, "Find the codeword (from Claude Code)")).toBeVisible();
 });
 
