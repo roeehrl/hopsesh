@@ -1,15 +1,19 @@
 package gui
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/roeehrl/hopsesh/agents/claude"
 	"github.com/roeehrl/hopsesh/internal/agents/all"
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
+	"github.com/roeehrl/hopsesh/internal/core/registry"
 	"github.com/roeehrl/hopsesh/internal/ui/desktop"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
@@ -144,7 +148,7 @@ func TestQuickRouteSurvivesColdWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := a.TakeQuickRoute()
-	if r == nil || r.Key != e.Key || r.Machine != e.Machine || f.opens != 1 {
+	if r == nil || r.Key != e.Key || r.Machine != e.Machine || r.Path != e.Path || f.opens != 1 {
 		t.Fatalf("route %+v", r)
 	}
 	if a.TakeQuickRoute() != nil {
@@ -258,6 +262,77 @@ func TestQuickRegistrationFallbackRefusesDifferentOrUncertainAccounts(t *testing
 				}
 			} else if err == nil {
 				t.Fatal("preview accepted an untrusted or ambiguous shorthand")
+			}
+		})
+	}
+}
+
+type heldQuickPreview struct {
+	*claude.Module
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (m *heldQuickPreview) Preview(ctx context.Context, h agent.Host, in agent.Install, s agent.Summary, n int) (agent.Preview, error) {
+	close(m.entered)
+	select {
+	case <-m.release:
+		return m.Module.Preview(ctx, h, in, s, n)
+	case <-ctx.Done():
+		return agent.Preview{}, ctx.Err()
+	}
+}
+
+func TestQuickPreviewHidesReadCompletedAfterPreviewsDisabled(t *testing.T) {
+	for _, scope := range []string{"desktop", "general"} {
+		t.Run(scope, func(t *testing.T) {
+			home(t)
+			mod := &heldQuickPreview{Module: claude.New(), entered: make(chan struct{}), release: make(chan struct{})}
+			release := sync.OnceFunc(func() { close(mod.release) })
+			defer release()
+			reg, err := registry.New(mod)
+			if err != nil {
+				t.Fatal(err)
+			}
+			a := NewApp(reg)
+			t.Cleanup(func() { _ = a.core.Catalog.Close() })
+			t.Cleanup(a.Shutdown)
+			a.Desktop = &fakeDesktop{s: desktop.State{Preferences: a.snapshot().Cfg.Desktop, Capabilities: desktop.Capabilities{Tray: true, HideApp: true}, Effective: "both"}}
+			scan, err := a.ScanAccounts()
+			if err != nil {
+				t.Fatal(err)
+			}
+			entry := findEntry(t, scan, "claude/"+sid)
+			type result struct {
+				preview *PreviewDTO
+				err     error
+			}
+			done := make(chan result, 1)
+			go func() {
+				p, err := a.QuickPreview(entry.Machine, entry.Key)
+				done <- result{p, err}
+			}()
+			select {
+			case <-mod.entered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("preview did not reach the conversation reader")
+			}
+			if scope == "desktop" {
+				err = a.SaveDesktop(DesktopInput{Mode: "tray", Close: "keep", Previews: false})
+			} else {
+				err = a.SetPreviews(false)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			release()
+			select {
+			case got := <-done:
+				if got.err != nil || got.preview == nil || len(got.preview.Items) != 0 || got.preview.First != nil || got.preview.Note == "" {
+					t.Fatalf("disabled previews returned conversation data: %+v %v", got.preview, got.err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("preview did not finish after releasing its reader")
 			}
 		})
 	}

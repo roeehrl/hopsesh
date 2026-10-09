@@ -107,3 +107,21 @@ Counter and attribution contracts follow Apple's
 [private process-info definitions](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/proc_info_private.h),
 and [coalition definitions](https://github.com/apple-oss-distributions/xnu/blob/main/osfmk/mach/coalition.h).
 The scheduling goal follows [Apple's timer guidance](https://developer.apple.com/library/archive/documentation/Performance/Conceptual/power_efficiency_guidelines_osx/Timers.html).
+
+The clean `3dfa2f0` follow-up includes the consolidated Accounts notification and
+freshness scheduler. It passes the same complete workload in 168.66 seconds,
+without overlapping local builds or other qualification workloads. The baseline
+source executable SHA256 still matches `6ef69bffdc58e3e0ac70cb1b81f82f41562985e2573842b5ae32b91cc71981dd`.
+
+| Sample | CPU, one core | Summed footprint, bytes | Interrupt wakeups / 30s |
+| --- | ---: | ---: | ---: |
+| 0.4 baseline | 1.118% | 173,119,488 | 3,012 |
+| Current, zero extra clients | 0.126% | 179,968,096 | 274 |
+| Current, one extra client | 0.316% | 184,408,184 | 619 |
+| Current, five extra clients | 0.103% | 181,295,224 | 173 |
+
+All samples retain eight attributed processes; CPU, incremental footprint and
+wakeup budgets, runtime ownership and subscriber cleanup pass. This is finite
+idle evidence for `3dfa2f0`, not a whole-machine energy or final-release claim.
+Evidence: `/tmp/hopsesh-3dfa2f0-gui-resource-report.json` and
+`/tmp/hopsesh-3dfa2f0-gui-resource.log`.

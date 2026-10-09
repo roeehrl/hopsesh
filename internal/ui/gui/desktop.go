@@ -39,6 +39,7 @@ type QuickRoute struct {
 	Screen  string `json:"screen"`
 	Machine string `json:"machine"`
 	Key     string `json:"key"`
+	Path    string `json:"path,omitempty"` // browsing identity across initial default-account registration
 }
 type QuickDTO struct {
 	Runtime    RuntimeDTO    `json:"runtime"`
@@ -234,7 +235,13 @@ func (a *App) QuickPreview(machine, key string) (*PreviewDTO, error) {
 	if err != nil {
 		return nil, err
 	}
-	return a.Preview(machine, key, 2)
+	preview, err := a.Preview(machine, key, 2)
+	// The user can hide Quick previews while the native conversation is read.
+	// Recheck before returning content, including the first-message summary.
+	if !a.DesktopSettings().Preferences.PreviewsOn() {
+		return &PreviewDTO{Items: []PreviewItemDTO{}, Note: "Message previews are hidden."}, nil
+	}
+	return preview, err
 }
 
 // Initial account discovery scopes the default root's previously unscoped
@@ -244,6 +251,10 @@ func (a *App) QuickPreview(machine, key string) (*PreviewDTO, error) {
 func (a *App) quickSelectionKey(machine, key string) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	return a.quickSelectionKeyLocked(machine, key)
+}
+
+func (a *App) quickSelectionKeyLocked(machine, key string) (string, error) {
 	_, original := a.find(machine, key)
 	if original == nil {
 		return key, nil
@@ -284,15 +295,22 @@ func (a *App) QuickOpen(screen, machine, key string) error {
 	default:
 		return errors.New("unknown Quick access destination")
 	}
+	path := ""
 	if machine != "" || key != "" {
 		var err error
-		key, err = a.quickSelectionKey(machine, key)
+		a.mu.Lock()
+		key, err = a.quickSelectionKeyLocked(machine, key)
+		if err == nil {
+			e, _ := a.find(machine, key)
+			path = e.Session.Path
+		}
+		a.mu.Unlock()
 		if err != nil {
 			return err
 		}
 	}
 	a.quick.mu.Lock()
-	a.quick.route = &QuickRoute{Screen: screen, Machine: machine, Key: key}
+	a.quick.route = &QuickRoute{Screen: screen, Machine: machine, Key: key, Path: path}
 	a.quick.mu.Unlock()
 	if a.Desktop != nil {
 		a.Desktop.OpenMain()

@@ -16,6 +16,27 @@ import { openMenu, isOpen } from "./menu.js";
 export { statusOf, cloudBlock };
 export { actionsFor } from "./actions.js";
 
+// Browsing can outlive first-time default-account registration. Only the same
+// native file on this machine may acquire its default profile; explicit profile
+// keys remain exact, and movement APIs still validate their own current scope.
+export function browsingEntry(scan, selection) {
+  if (!scan || !selection) return null;
+  const all=[...scan.groups,...(scan.profileCopies||[])].flatMap(g=>g.entries);
+  const exact=all.find(e=>e.machine===selection.machine&&e.key===selection.key);
+  if (exact) return exact;
+  const slash=selection.key?.indexOf('/')??-1;
+  if (slash<1 || !selection.path || !scan.machines.some(m=>m.local&&m.name===selection.machine)) return null;
+  const agent=selection.key.slice(0,slash),session=selection.key.slice(slash+1);
+  if (agent.includes('@') || !session) return null;
+  const matches=new Map();
+  for (const e of all) {
+    const p=e.profile;
+    if (e.machine===selection.machine && !e.cached && e.location!=='cloud' && e.path===selection.path &&
+        e.agent===agent && p?.default && p.agent===agent && p.endpoint && p.id && e.key===`${agent}@${p.id}/${session}`) matches.set(e.key,e);
+  }
+  return matches.size===1 ? matches.values().next().value : null;
+}
+
 // A family snapshot chooses one representative, which may differ from the copy
 // explicitly opened in the inspector. Resolve that exact copy from current raw
 // inventory; never keep an old entry after it disappears from the new family.
@@ -24,6 +45,12 @@ export async function preserveSelectedCopy(scan) {
   if (!selection) return;
   const matches = e => e.machine === selection.machine && e.key === selection.key;
   if (scan.groups.some(g => g.entries.some(matches))) return;
+  const old=entries().find(matches);
+  const registered=old&&browsingEntry(scan,old);
+  if (registered) {
+    state.sel={machine:registered.machine,key:registered.key};
+    return;
+  }
   const group = scan.groups.find(g => g.entries.some(e => (e.copies || []).some(matches)));
   if (!group) return;
   const index = group.entries.findIndex(e => (e.copies || []).some(matches));

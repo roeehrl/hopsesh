@@ -1,6 +1,92 @@
 import { test, expect } from '@playwright/test';
 import { fresh, row } from './helpers';
 
+test('a queued Quick route survives default account registration before the main window handles it', async ({page}) => {
+ await fresh(page);
+ const scan=await page.evaluate(async()=>structuredClone((await import('/core.js')).state.scan));
+ const entry=scan.groups.flatMap(g=>g.entries).find(e=>e.profile?.default&&e.path);
+ expect(entry).toBeTruthy();
+ const oldKey=entry.agent+'/'+entry.session;
+ expect(oldKey).not.toBe(entry.key);
+ await page.route('**/call',async route=>{
+  if(route.request().postDataJSON().m!=='TakeQuickRoute')return route.fallback();
+  await route.fulfill({json:{result:{screen:'sessions',machine:entry.machine,key:oldKey,path:entry.path}}});
+ });
+ await page.evaluate(()=>(window as any).__emit('hopsesh:quick-route',null));
+ await expect(row(page,entry.title)).toHaveAttribute('aria-selected','true');
+ await expect(row(page,entry.title)).toHaveClass(/flash/);
+ expect((await (await page.request.post('/call',{data:{m:'TerminalTabs',args:[]}})).json()).result).toHaveLength(0);
+});
+
+test('a selected native session remains selected when background discovery registers its default account', async ({page}) => {
+ await fresh(page);
+ await page.route('**/call',async route=>{
+  if(route.request().postDataJSON().m!=='Preview')return route.fallback();
+  await route.fulfill({json:{result:{items:[],more:false}}});
+ });
+ const expected=await page.evaluate(async()=>{
+  const {state}=await import('/core.js');
+  const {render,queueScan}=await import('/sessions.js');
+  const fresh=structuredClone(state.scan);
+  const current=fresh.groups.flatMap(g=>g.entries).find(e=>e.profile?.default&&e.path);
+  const old=structuredClone(current);old.key=old.agent+'/'+old.session;old.profile=null;
+  state.scan={...fresh,groups:[{...fresh.groups[0],entries:[old]}]};
+  state.sel={machine:old.machine,key:old.key};render();
+  fresh.revision++;queueScan(fresh);
+  return {title:current.title,key:current.key,revision:fresh.revision};
+ });
+ await expect.poll(()=>page.evaluate(async()=>(await import('/core.js')).state.scan.revision)).toBe(expected.revision);
+ await expect.poll(()=>page.evaluate(async()=>(await import('/core.js')).state.sel?.key)).toBe(expected.key);
+ await expect(row(page,expected.title)).toHaveAttribute('aria-selected','true');
+});
+
+test('browsing registration refuses another account, file, machine or uncertain candidate', async ({page}) => {
+ await fresh(page);
+ const results=await page.evaluate(async()=>{
+  const {state}=await import('/core.js');
+  const {browsingEntry}=await import('/sessions.js');
+  const original=state.scan.groups.flatMap(g=>g.entries).find(e=>e.profile?.default&&e.path);
+  const results={};
+  for(const name of ['same-file','explicit-profile','different-file','non-default','cached','remote','cloud','ambiguous']){
+   const e=structuredClone(original),selection={machine:e.machine,key:e.agent+'/'+e.session,path:e.path};
+   const scan={...state.scan,machines:structuredClone(state.scan.machines),groups:[{entries:[e]}],profileCopies:[]};
+   if(name==='explicit-profile')selection.key=e.agent+'@another-account/'+e.session;
+   if(name==='different-file')e.path+='.another';
+   if(name==='non-default')e.profile.default=false;
+   if(name==='cached')e.cached=true;
+   if(name==='remote')scan.machines.find(m=>m.name===e.machine).local=false;
+   if(name==='cloud')e.location='cloud';
+   if(name==='ambiguous'){
+    const other=structuredClone(e);other.profile.id='another-default';other.key=other.agent+'@another-default/'+other.session;scan.groups[0].entries.push(other);
+   }
+   results[name]=browsingEntry(scan,selection)?.key||null;
+  }
+  return {results,expected:original.key};
+ });
+ expect(results.results['same-file']).toBe(results.expected);
+ for(const [name,value] of Object.entries(results.results))if(name!=='same-file')expect(value,name).toBeNull();
+});
+
+test('Quick routes reveal the exact native copy when family grouping shows a different representative', async ({page}) => {
+ await fresh(page);
+ const snapshot=await page.evaluate(async()=>structuredClone((await import('/core.js')).state.scan));
+ const [source,representative]=snapshot.groups.flatMap(g=>g.entries);
+ expect(source.key).not.toBe(representative.key);
+ representative.copies=[{machine:source.machine,key:source.key}];
+ snapshot.groups=[{...snapshot.groups[0],entries:[representative]}];
+ snapshot.revision+=100;
+ await page.route('**/call',async route=>{
+  const method=route.request().postDataJSON().m;
+  if(method==='TakeQuickRoute')return route.fulfill({json:{result:{screen:'sessions',machine:source.machine,key:source.key,path:source.path}}});
+  if(method==='ScanSnapshot')return route.fulfill({json:{result:snapshot}});
+  return route.fallback();
+ });
+ await page.evaluate(()=>(window as any).__emit('hopsesh:quick-route',null));
+ await expect(row(page,source.title)).toHaveAttribute('aria-selected','true');
+ await expect(row(page,source.title)).toHaveClass(/flash/);
+ expect(await page.evaluate(async()=>(await import('/core.js')).state.sel.key)).toBe(source.key);
+});
+
 test('duplicate quick publications preserve splitter capture and keyboard focus; new scans wait for interaction', async ({page}) => {
  await fresh(page);
  await row(page,'Find the codeword').click();

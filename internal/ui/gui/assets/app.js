@@ -13,7 +13,7 @@ import "./accounts.js";
 import { undoLast } from "./activity.js";
 import { openPalette } from "./palette.js";
 import { loadTabs, onTabs, showTerminal, tabs, exits } from "./term.js";
-import { listCommand, showEntry, reveal, scan, acceptScan, queueScan, backgroundRender } from "./sessions.js";
+import { listCommand, showEntry, reveal, scan, acceptScan, queueScan, backgroundRender, browsingEntry } from "./sessions.js";
 import { load as loadLayout, toggle as togglePane } from "./layout.js";
 
 $("#btn-search").onclick = openPalette;
@@ -40,10 +40,13 @@ async function quickRoute() {
  const r=await api("TakeQuickRoute");if(!r)return;
  if(r.screen==="settings"){await go("settings","desktop");return}
  if(r.screen==="terminals"){await showTerminal();return}
- const snapshot=await api("QuickSnapshot");if(snapshot.scan)acceptScan(snapshot.scan);
+ const snapshot=await api("ScanSnapshot");if(snapshot)acceptScan(snapshot);
  await go("sessions");
- const e=state.scan?.groups.flatMap(g=>g.entries).find(e=>e.machine===r.machine&&e.key===r.key);
+ if(!r.machine&&!r.key)return;
+ let e=browsingEntry(state.scan,r);
+ if(!e&&state.scan?.groups.some(g=>g.entries.some(e=>(e.copies||[]).some(c=>c.machine===r.machine&&c.key===r.key))))e=await api("ResolveEntry",r.machine,r.key);
  if(e){showEntry(e);reveal()}
+ else toast("This session is no longer in the current list. Refresh its machine.");
 }
 on("hopsesh:machine-scan",()=>machineScanChanged().catch(fail));
 on("hopsesh:quick-route",()=>quickRoute().catch(fail));

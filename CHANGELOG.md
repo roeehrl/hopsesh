@@ -55,6 +55,9 @@ All notable changes to this project are documented here. The format follows
   remain exact; uncertain or ambiguous matches are refused, and hidden previews
   stay hidden. Browsing saved conversations does not require an available agent
   sign-in check.
+- Queued Quick routes and existing selections survive default-account registration
+  in the main window, while explicit account keys and different native files stay
+  separate. Turning off Quick previews also suppresses reads already in progress.
 
 - Accounts refreshes from shared runtime notifications instead of polling every
   two seconds. Sign-in checks sleep until a freshness deadline and stop off

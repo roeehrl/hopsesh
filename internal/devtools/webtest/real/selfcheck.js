@@ -45,7 +45,11 @@
     phase('Quick selection rejected: '+JSON.stringify({requested:{machine:entry.machine,key:entry.key},quickRevision:q.scan.revision,quickCached:q.scan.cached,quickDiscovering:q.scan.discovering,currentRevision:current.revision,currentDiscovering:current.discovering,current:current.groups.flatMap(g=>g.entries).map(e=>({machine:e.machine,key:e.key}))}));
     throw error;
   }
-  if(!await until(()=>document.querySelector('.row[aria-selected="true"]'),10000))throw Error("Quick access did not select a row");
+  if(!await until(()=>document.querySelector('.row[aria-selected="true"]'),10000)){
+    const {state,current}=await import('/core.js');
+    phase('Quick selection not rendered: '+JSON.stringify({requested:{machine:entry.machine,key:entry.key},screen:current,selected:state.sel,scanning:state.scanning,revision:state.scan?.revision,current:state.scan?.groups.flatMap(g=>g.entries).map(e=>({machine:e.machine,key:e.key}))}));
+    throw Error("Quick access did not select a row");
+  }
   if(d.capabilities.tray){
     phase('opening native Quick popup');
     await call("SaveDesktop",{...input,mode:"both"});
