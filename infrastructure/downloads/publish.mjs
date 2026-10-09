@@ -5,7 +5,6 @@ import {readFile,lstat,open,mkdtemp,rm} from 'node:fs/promises';
 import {constants} from 'node:fs';
 import os from 'node:os';
 import {Readable} from 'node:stream';
-import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 
 async function boundedRegularFile(file,limit){
@@ -76,7 +75,7 @@ export async function publish(version,directory,origin,token,fetcher=fetch,publi
  }
 }
 
-if(process.argv[1]===fileURLToPath(import.meta.url)){
+if(import.meta.main){
  try{
   const [version,directory]=process.argv.slice(2);
   if(!version||!directory)throw new Error('Usage: node publish.mjs <0.5-version> <signed-release-directory>');

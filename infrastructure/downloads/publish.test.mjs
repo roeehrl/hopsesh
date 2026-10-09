@@ -4,7 +4,32 @@ import {createHash,generateKeyPairSync,sign} from 'node:crypto';
 import {mkdtemp,writeFile,rm,symlink,rename} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import {spawnSync} from 'node:child_process';
+import {fileURLToPath,pathToFileURL} from 'node:url';
 import {publish} from './publish.mjs';
+
+test('publisher CLI runs through a directory alias while imports remain inert',async()=>{
+ const dir=await mkdtemp(path.join(os.tmpdir(),'hopsesh-publication-entry-'));
+ try{
+  const source=fileURLToPath(new URL('.',import.meta.url));
+  const alias=path.join(dir,'release-source');
+  await symlink(source,alias,process.platform==='win32'?'junction':'dir');
+  for(const entry of [path.join(source,'publish.mjs'),path.join(alias,'publish.mjs')]){
+   // Missing arguments must fail before any credential lookup or publication.
+   // A symlink in argv used to make the entry guard silently return success.
+   const result=spawnSync(process.execPath,[entry],{encoding:'utf8',timeout:10000});
+   assert.ifError(result.error);
+   assert.equal(result.status,1,entry+' silently skipped the CLI');
+   assert.match(result.stderr,/Usage: node publish\.mjs/);
+   assert.equal(result.stdout,'');
+   const imported=spawnSync(process.execPath,['--input-type=module','-e',`await import(${JSON.stringify(pathToFileURL(entry).href)})`],{encoding:'utf8',timeout:10000});
+   assert.ifError(imported.error);
+   assert.equal(imported.status,0,imported.stderr);
+   assert.equal(imported.stderr,'');
+   assert.equal(imported.stdout,'');
+  }
+ }finally{await rm(dir,{recursive:true,force:true})}
+});
 
 test('publisher validates all signed objects before mutation and retries immutable objects safely',async()=>{
  const {publicKey,privateKey}=generateKeyPairSync('ec',{namedCurve:'prime256v1'});

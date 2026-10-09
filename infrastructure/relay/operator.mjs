@@ -1,5 +1,3 @@
-import {fileURLToPath} from 'node:url';
-
 // Read a private operator credential from stdin, never command arguments or UI.
 // The output contains allowlisted counters, never routing identities or payloads.
 export async function operatorStats(input,fetcher=fetch){
@@ -15,7 +13,7 @@ export async function operatorStats(input,fetcher=fetch){
  out.limits={};for(const key of ['dailyFrames','dailyBytes']){if(!Number.isSafeInteger(data.limits?.[key])||data.limits[key]<1)throw Error('invalid operator limits');out.limits[key]=data.limits[key]}
  return out;
 }
-if(process.argv[1]===fileURLToPath(import.meta.url)){
+if(import.meta.main){
  try{let text='';for await(const chunk of process.stdin){text+=chunk;if(Buffer.byteLength(text)>8192)throw Error('private operator input exceeds limit')};const out=await operatorStats(JSON.parse(text));process.stdout.write(JSON.stringify(out)+'\n')}
  catch{process.stderr.write('operator status failed; check private configuration, authentication and connectivity\n');process.exitCode=1}
 }

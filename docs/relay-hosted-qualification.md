@@ -191,6 +191,22 @@ least 34 minutes; the duration override is bounded between ten minutes and one h
 
 ## Immutable downloads
 
+The `6207913` Linux helpers are published as
+`0.5.0-staging.20261009.6207913`. Independent HTTPS readback at 20:27:10 UTC
+matches the locally signed manifest, signature and both archives byte-for-byte;
+OpenSSL verifies the downloaded signature against the repository's public key.
+Linux amd64 is 9,010,765 bytes, SHA256
+`75e18c82734c33c0d297989415da6f54de6b3383a1a45a02239e359660f30e39`;
+Linux arm64 is 8,248,612 bytes, SHA256
+`3218ba426e4019e51033f21dddb0a3dfb516199e748659a3176a1134321a90f3`.
+The initial publisher invocation through `/tmp` silently skipped its CLI and
+produced no objects; HTTP 404 readback caught the failure. Fixing entry-point
+detection also fixes the operator statistics CLI. The successful retry used
+the corrected publisher through an actual directory alias. Existing published
+versions, latest pointers, provider configuration and the installed app were not
+changed. Evidence:
+`/tmp/hopsesh-0.5-signed-staging/0.5.0-staging.20261009.6207913/{build.json,publication-fixed.log,hosted-readback.json}`.
+
 The newer immutable helper `0.5.0-staging.20261009.f134df2` was independently
 read back over HTTPS: its manifest and signature match local bytes, OpenSSL
 verifies the signature, and both archive sizes and hashes match the manifest.
@@ -971,3 +987,16 @@ not a passed VM lifecycle gate. The visible Cloud chat, Header actions and Chat
 actions controls expose no pause/rebuild operation in this task. No preparation,
 connection, permission change or lifecycle mutation was performed. Screenshot:
 `/tmp/hopsesh-codex-idle-continuation-20261009.jpg`.
+
+At 20:27 UTC the same disposable task installed and ran the signed `6207913`
+helper through its unchanged verified installer, using a temporary copy with
+only the version pin changed. Expanded command output confirms successful
+installation, the exact version/commit and `cloud-integration --help`. The smoke
+repository remains clean at `85876c9`; the previously removed incarnation stays
+absent, and the older pinned helper is retained. No startup files, environment
+configuration, permissions or connector credentials changed. This qualifies
+current-helper installation in an existing task, not automatic startup or a
+fresh published environment. At 20:27:47 UTC the boot-ID hash still matched the
+17:40 sample, with uptime increasing from 6 h 29 min to 9 h 17 min. It establishes
+the same kernel boot, not a reclaimed-VM rebuild. Screenshot:
+`/tmp/hopsesh-codex-6207913-install.png`.

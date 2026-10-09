@@ -8,6 +8,10 @@ route refuses redirects and emits only allowlisted counters. Device credentials
 cannot access operator status. No session content, endpoint identity or account
 label appears in that response.
 
+Run the local operator and download publisher with Node 24.2 or newer (CI uses
+Node 24). Both use the native ES-module entry-point flag, so paths containing
+directory symlinks work and importing their functions performs no operation.
+
 Every mailbox transaction enforces a daily UTC admission ceiling: at most 4,096
 new envelopes and 256 MiB of serialized encrypted envelopes per account space.
 `DAILY_FRAMES_PER_SPACE` and `DAILY_BYTES_PER_SPACE` may tighten these values;
