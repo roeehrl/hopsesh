@@ -2,7 +2,7 @@
 // clouds), the sessions in the middle as one tree (grouped, sorted and filtered by
 // listview.js), the selected session on the right (inspector.js). Every action on a
 // session comes from actions.js, which the palette uses too.
-import { loadError, api, on, h, fill, icon, ICONS, view, state, screen, go, current, loading, toast, fail, cap, ago, agentBadge, machineStatus, sys, keys,
+import { accountLabel, accountTitle, loadError, api, on, h, fill, icon, ICONS, view, state, screen, go, current, loading, toast, fail, cap, ago, agentBadge, machineStatus, sys, keys,
   entries, selected, here, agentInfo, $, count, clouds, cloudOf, cloudState, cloudChip, dialog, errText, rich, cloudTitle } from "./core.js";
 import { planPicked } from "./plan.js";
 import { dividers, apply as applyLayout } from "./layout.js";
@@ -17,8 +17,14 @@ export { statusOf, cloudBlock };
 export { actionsFor } from "./actions.js";
 
 // scan reads every machine again. The list stays while it runs.
-export async function scan() {
-  if (state.scanning) return;
+let pendingScan=null;
+export async function scan(method = "Scan", background = false) {
+  if (state.scanning) {
+    // A newly pasted cloud link or explicit refresh must not disappear merely
+    // because an earlier progressive scan has already queried that source.
+    if(!pendingScan) pendingScan=(async()=>{while(state.scanning)await new Promise(resolve=>setTimeout(resolve,50));pendingScan=null;return scan(method,background)})();
+    return pendingScan;
+  }
   state.scanning = true;
   state.scanError = "";
   state.stale = false;
@@ -31,7 +37,8 @@ export async function scan() {
     }
   }
   try {
-    state.scan = await api("Scan");
+    const result=await api(method);
+    if(background)queueScan(result);else acceptScan(result);
     state.info = await api("Info");
     state.activity = await api("Activity").catch(() => state.activity);
   } catch (e) {
@@ -46,26 +53,27 @@ export async function scan() {
   state.scanning = false;
   state.presence = {}; // the scan's own is newer
   freshness();
-  if (state.sel && !selected()) state.sel = null;
+  if (!background && !pendingScan && state.sel && !selected()) state.sel = null;
 }
 
 // refreshHere reads this machine again (RefreshHere), keeping what the last scan found
 // elsewhere: quiet, with the list kept as it is until the answer comes.
-async function refreshHere() {
+async function refreshHere(background = false) {
   if (state.scanning || !state.scan) return;
   state.scanning = true;
   try {
-    state.scan = await api("RefreshHere");
+    const result=await api("RefreshHere");
+    if(background)queueScan(result);else acceptScan(result);
     state.presence = {};
   } catch { /* the next refresh tries again; the list stays */ }
   state.scanning = false;
   freshness();
-  if (state.sel && !selected()) state.sel = null;
+  if (!background && state.sel && !selected()) state.sel = null;
 }
 
 function freshness() {
   const el = $("#fresh");
-  el.textContent = state.scanning ? "Refreshing…" : state.scan ? "updated " + ago(state.scan.updated) : "";
+  el.textContent = state.scanning || state.scan?.discovering ? (entries().length ? `${entries().length} sessions found · Checking for changes…` : "Finding sessions…") : state.scan?.cached ? "Showing saved sessions · Checking for changes…" : state.scan?.updated ? "updated " + ago(state.scan.updated) : "Not checked yet";
   const other = state.scan && state.scan.elsewhere !== state.scan.updated;
   el.title = other ? `${sys.Here}: ${ago(state.scan.updated)}. Your other machines and the clouds: ${ago(state.scan.elsewhere)}.` : "";
 }
@@ -79,15 +87,14 @@ const HERE_EVERY = 60_000, ALL_AFTER = 5 * 60_000;
 const since = (iso) => (iso ? Date.now() - new Date(iso).getTime() : Infinity);
 // A presence response between pointer-down and pointer-up must not replace the
 // button under the pointer: WebKit would then swallow the user's click.
-const busy = () => !state.scan || state.scanning || current !== "sessions" || document.hidden || !!document.querySelector("dialog[open], button:active") || isOpen();
+const busy = () => pointerHeld || !state.scan || state.scanning || current !== "sessions" || document.hidden || !!document.querySelector("dialog[open], button:active") || isOpen();
 async function autoRefresh(all) {
   if (busy()) return;
-  if (all) await scan(); else if (!state.info?.desktopManaged) await refreshHere();
-  if (busy() && !state.scanning) return; // something opened meanwhile: drawn when it closes
-  render();
+  if (all) await scan("Scan",true); else if (!state.info?.desktopManaged) await refreshHere(true);
+  backgroundRender();
 }
-setInterval(() => { if (document.hasFocus() && since(state.scan?.updated) >= HERE_EVERY) autoRefresh(since(state.scan?.elsewhere) >= ALL_AFTER * 2); }, 15_000);
-const comeBack = () => { if (!document.hidden && since(state.scan?.updated) >= HERE_EVERY / 2) autoRefresh(since(state.scan?.elsewhere) >= ALL_AFTER); };
+setInterval(() => { if (document.hasFocus() && (since(state.scan?.elsewhere) >= ALL_AFTER * 2 || since(state.scan?.updated) >= HERE_EVERY)) autoRefresh(since(state.scan?.elsewhere) >= ALL_AFTER * 2); }, 15_000);
+const comeBack = () => { if (!document.hidden && (since(state.scan?.elsewhere) >= ALL_AFTER || since(state.scan?.updated) >= HERE_EVERY / 2)) autoRefresh(since(state.scan?.elsewhere) >= ALL_AFTER); };
 document.addEventListener("visibilitychange", comeBack);
 window.addEventListener("focus", comeBack);
 
@@ -112,7 +119,7 @@ async function pollPresence() {
     if (sig !== presSig) {
       presSig = sig;
       state.presence = p.entries;
-      if (current === "sessions" && !busy()) render();
+      if (current === "sessions") backgroundRender();
     }
   }
   presenceSoon(presenceEvery());
@@ -154,7 +161,8 @@ function sidebar() {
   const act = state.activity;
   const mine = all.filter((e) => e.machine === here() && !e.cloud);
   const local = s.machines.find((m) => m.local);
-  const agentSubtitle = (m) => (m?.agentNames || []).join(", ") || "No agents detected";
+  const agentSubtitle = (m) => (m?.agentNames || []).join(", ") || (m?.phase === "reading" ? "Reading sessions…" : "No agents detected");
+  const scanSubtitle=m=>m?.phase==="reading"?"Reading sessions…":m?.phase==="saved"?`Saved · last checked ${ago(m.checkedAt)||"previously"}`:"";
   const on = clouds().filter((c) => c.allowed);
   return h("nav", { class: "sidebar", id: "sidebar", "aria-label": "Places" },
     h("button", { class: "side-btn", "aria-current": cur("needs"), onclick: () => setScope({ kind: "needs" }) },
@@ -163,11 +171,11 @@ function sidebar() {
     h("button", { class: "side-btn", "aria-current": cur("all"), onclick: () => setScope({ kind: "all" }) }, icon(ICONS.all), "All sessions", h("span", { class: "count" }, all.length)),
     h("div", { class: "side-h" }, "Machines"),
     h("button", { class: "side-btn", "aria-current": cur("here"), onclick: () => setScope({ kind: "here" }) },
-      h("span", { class: "dot ok" }), h("span", { class: "label" }, h("span", {}, sys.Here), h("small", { title: (local?.agents || []).join(", ") }, agentSubtitle(local))),
+      h("span", { class: "dot ok" }), h("span", { class: "label" }, h("span", {}, sys.Here), h("small", { title: (local?.agents || []).join(", ") }, agentSubtitle(local)), scanSubtitle(local) ? h("small",{},scanSubtitle(local)) : null),
       h("span", { class: "count" }, mine.length)),
     machines.map((m) => h("button", { class: "side-btn", "aria-current": cur("machine", m.name), onclick: () => setScope({ kind: "machine", value: m.name }) },
       h("span", { class: "dot " + dotFor(m) }),
-      h("span", { class: "label" }, h("span", {}, m.name), h("small", { class: dotFor(m) === "ok" ? "" : "warn", title: dotFor(m) === "ok" ? (m.agents || []).join(", ") : m.hint || m.error }, dotFor(m) === "ok" ? agentSubtitle(m) : machineStatus(m.status)[1])),
+      h("span", { class: "label" }, h("span", {}, m.name), h("small", { class: dotFor(m) === "ok" ? "" : "warn", title: dotFor(m) === "ok" ? (m.agents || []).join(", ") : m.hint || m.error }, dotFor(m) === "ok" ? agentSubtitle(m) : machineStatus(m.status)[1]),scanSubtitle(m) ? h("small",{},scanSubtitle(m)) : null),
       h("span", { class: "count" }, m.status === "ok" ? m.sessions : ""))),
     h("button", { class: "side-btn", style: "color:var(--accent)", onclick: () => go("machines") }, icon(ICONS.plus), machines.length ? "Add a machine" : "Add your other machines"),
     clouds().length ? h("div", { class: "side-h" }, "Clouds") : null,
@@ -268,6 +276,8 @@ function updateNote() {
 // notices are things to set up, shown above the list until done or dismissed.
 function notices() {
   const out = [], i = state.info, s = state.scan;
+  if (state.scanning || s.discovering || s.cached) out.push(h("div",{class:"discovery-note",role:"status","aria-live":"polite"},s.cached ? "Showing saved sessions. Checking for changes…" : `${entries().length} sessions found. Other sources may still be loading.`,h("button",{class:"link",onclick:()=>api("CancelScan")},"Stop checking")));
+  if(state.scope.kind==="all") for(const m of s.machines.filter(m=>m.status!=="ok" || m.phase==="error")) out.push(h("div",{class:"card notice warn-card",role:"status"},h("span",{},`${m.name===here()?sys.Here:m.name}: ${m.error||machineStatus(m.status)[1]}. Saved sessions remain available.`),h("button",{class:"btn",onclick:async()=>{if(m.local)await refreshHere();else {await api("ScanMachine",m.name);acceptScan(await api("ScanSnapshot"))}render()}},"Retry")));
   if (state.scanError) out.push(h("div", { class: "card notice warn-card", role: "alert" }, h("span", {}, "Refresh failed. Showing the previous results. " + state.scanError), h("button", { class: "btn", onclick: () => go("sessions", true) }, "Retry refresh")));
   const picked = state.scope.kind === "machine" && s.machines.find((m) => m.name === state.scope.value);
   if (picked && picked.status !== "ok") out.push(h("div", { class: "card notice warn-card", role: "status" },
@@ -391,6 +401,7 @@ function row(e, level) {
   if(e.journey?.fork) bits.push("separate fork");
  if(e.journey?.roundTrips) bits.push(`${e.journey.roundTrips} round trips`);
  const chips = presenceChips(e);
+if(e.profile) chips.push(h("span", {class:"chip account-chip",title:accountTitle(e.profile)},accountLabel(e.profile)));
   if (e.cloud) chips.push(cloudChip(e.machine));
   if (e.cloud?.pr) chips.push(h("span", { class: "chip st-moved" }, "PR " + e.cloud.pr));
   if (e.mirror) chips.push(mirrorChip(e.mirror));
@@ -430,7 +441,7 @@ export function select(e, focus = true) {
     if (r) { r.setAttribute("aria-selected", "true"); r.tabIndex = 0; if (focus) { r.focus({ preventScroll: true }); inView(r, false); } }
   }
   const old = $("#inspector");
-  if (old) { old.replaceWith(inspector(e)); applyLayout(); }
+  if (old) { old.replaceWith(inspector(e, old)); applyLayout(); }
 }
 onSelect((e) => showEntry(e));
 
@@ -452,6 +463,7 @@ onRows((el) => {
 let lastShown = [], lastScope = [];
 function body(shown, inScope) {
   if (!shown.length) {
+    if(state.scanning || state.scan.discovering) return h("div",{class:"empty",role:"status"},"Looking for sessions in this view… Results appear as they are found.");
     const hidden = inScope.length - shown.length;
     if (hidden > 0) return h("div", { class: "empty" }, h("span", {}, "No sessions match · ", count(hidden, "session"), " hidden by filters · ",
       h("button", { class: "link", onclick: () => { clearFilters(); if (list.text) { list.text = ""; $("#list-filter").value = ""; refreshList(); } } }, "Clear filters")));
@@ -483,6 +495,11 @@ onChange((full = true) => (full ? render() : refreshList()));
 
 export function render() {
   if (!state.scan || current !== "sessions") return;
+  decide(entries().length, () => toggleDisplay());
+  const active=document.activeElement;
+  const inputID=active?.matches?.("input") ? active.id : null;
+  const inputSelection=inputID ? [active.selectionStart,active.selectionEnd] : null;
+  const inspectorTop=view.querySelector(".inspector")?.scrollTop||0;
   const old = view.querySelector(".content");
   const top = old ? old.scrollTop : 0;
   const focusKey = document.activeElement?.closest?.(".tree [data-key]")?.dataset.key;
@@ -490,13 +507,21 @@ export function render() {
   const inScope = scoped();
   const shown = applyFilters(inScope, state.scope);
   // A selection the list doesn't show goes (another place, a filter, a refresh).
-  if (state.sel && !shown.some((x) => x.machine === state.sel.machine && x.key === state.sel.key)) { state.sel = null; state.handoffOpen = null; }
+  if (!state.scanning && !pendingScan && !state.scan.discovering && state.sel && !shown.some((x) => x.machine === state.sel.machine && x.key === state.sel.key)) { state.sel = null; state.handoffOpen = null; }
   const content = h("section", { class: "content" }, toolbar(scopeTitle(), state.scope), h("div", { class: "list" }, notices(), body(shown, inScope)));
-  fill(view, h("div", { class: "three layout" }, sidebar(), content, inspector(selected()), dividers()));
+  const previous=view.querySelector("#inspector"),nextInspector=inspector(selected(),previous),layout=view.querySelector(".three.layout");
+  if(layout&&previous&&old){
+    layout.querySelector(".sidebar").replaceWith(sidebar());
+    old.replaceWith(content);
+    if(nextInspector!==previous)previous.replaceWith(nextInspector);
+  }else fill(view,h("div",{class:"three layout"},sidebar(),content,nextInspector,dividers()));
   counts(shown.length, inScope.length, state.scope);
   lastShown = shown; lastScope = inScope;
   applyLayout();
   content.scrollTop = top;
+  const ins=view.querySelector(".inspector");if(ins)ins.scrollTop=inspectorTop;
+  if(inputID){const input=document.getElementById(inputID);input?.focus({preventScroll:true});if(inputSelection)input?.setSelectionRange(...inputSelection)}
+  else if(active?.isConnected && active!==document.body)active.focus({preventScroll:true});
   if (focusKey) rowByKey(content, focusKey)?.focus({ preventScroll: true });
   else if (focusGroup) content.querySelector(`.grp[data-gkey="${CSS.escape(focusGroup)}"]`)?.focus({ preventScroll: true });
 }
@@ -603,3 +628,33 @@ function inView(r, center) {
   else if (rb.top < lb.top + top) list.scrollTop -= lb.top + top - rb.top + 8;
   else if (rb.bottom > lb.bottom) list.scrollTop += rb.bottom - lb.bottom + 8;
 }
+
+// One latest pending publication. Never replace a control between pointer-down
+// and pointer-up, nor close an open menu, dialog or transfer review.
+let discoveryPending=null,discoveryPresence=null,discoveryTimer=0,pointerHeld=false,backgroundDirty=false;
+document.addEventListener("pointerdown",()=>{pointerHeld=true},true);
+window.addEventListener("pointerup",()=>{pointerHeld=false},true);
+window.addEventListener("pointercancel",()=>{pointerHeld=false},true);
+export function acceptScan(scan){
+ if(scan?.revision && state.scan?.revision && scan.revision<=state.scan.revision)return false;
+ state.scan=scan;freshness();return true;
+}
+function scheduleDiscovery(){if(!discoveryTimer)discoveryTimer=setTimeout(drawDiscovery,150)}
+export function backgroundRender(){backgroundDirty=true;scheduleDiscovery()}
+export function queueScan(d,presence=null){
+ if(!d || (discoveryPending?.revision && d.revision<discoveryPending.revision))return;
+ discoveryPending=d;discoveryPresence=presence;scheduleDiscovery();
+}
+function drawDiscovery(){
+ discoveryTimer=0;
+ if(!discoveryPending&&!backgroundDirty)return;
+ if(pointerHeld || document.querySelector("dialog[open],button:active") || isOpen()) {scheduleDiscovery();return}
+ let changed=backgroundDirty;backgroundDirty=false;
+ if(discoveryPending){
+  const d=discoveryPending,presence=discoveryPresence;discoveryPending=null;discoveryPresence=null;
+  if(acceptScan(d)){state.presence=presence||{};changed=true}
+ }
+ if(changed&&current==="sessions")render();
+}
+on("hopsesh:discovery",d=>queueScan(d));
+on("hopsesh:accounts",async()=>{try{queueScan(await api("ScanSnapshot"))}catch{}});

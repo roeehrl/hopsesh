@@ -184,18 +184,15 @@ func (e remoteExec) runPiped(ctx context.Context, line string, o agent.RunOption
 	var out bytes.Buffer
 	answered := make(chan struct{})
 	read := make(chan struct{})
+	next := make(chan []byte, 16)
+	writer := &watchWriter{buf: &out, until: o.StdinUntil, hit: answered, reply: o.StdinReply, next: next}
 	go func() {
 		defer close(read)
 		buf := make([]byte, 32<<10)
-		hit := false
 		for {
 			n, rerr := p.Out.Read(buf)
 			mu.Lock()
-			out.Write(buf[:n])
-			if !hit && len(o.StdinUntil) > 0 && bytes.Contains(out.Bytes(), o.StdinUntil) {
-				hit = true
-				close(answered)
-			}
+			_, _ = writer.Write(buf[:n])
 			mu.Unlock()
 			if rerr != nil {
 				return
@@ -207,11 +204,24 @@ func (e remoteExec) runPiped(ctx context.Context, line string, o agent.RunOption
 		return agent.Result{}, err
 	}
 	if o.HoldStdin > 0 {
-		select {
-		case <-time.After(o.HoldStdin):
-		case <-answered:
-		case <-read:
-		case <-ctx.Done():
+		timer := time.NewTimer(o.HoldStdin)
+		defer timer.Stop()
+	waiting:
+		for {
+			select {
+			case input := <-next:
+				if _, err := p.In.Write(input); err != nil {
+					break waiting
+				}
+			case <-timer.C:
+				break waiting
+			case <-answered:
+				break waiting
+			case <-read:
+				break waiting
+			case <-ctx.Done():
+				break waiting
+			}
 		}
 	}
 	werr := p.Close() // closes the input, waits for the program

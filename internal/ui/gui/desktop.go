@@ -166,6 +166,12 @@ func (a *App) RecheckDesktop() desktop.State {
 }
 func (a *App) QuickSnapshot() QuickDTO {
 	a.quick.mu.Lock()
+	missing := a.quick.scan == nil
+	a.quick.mu.Unlock()
+	if missing {
+		a.CachedScan()
+	}
+	a.quick.mu.Lock()
 	scan, err := a.quick.scan, a.quick.err
 	presence := a.quick.presence
 	a.quick.mu.Unlock()
@@ -308,6 +314,28 @@ func (a *App) QuickQuit() {
 
 // InitialScan does not contact remote machines during a quiet login launch.
 func (a *App) InitialScan() (*ScanDTO, error) {
+	if a.watchLocal {
+		a.watchOnce.Do(func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			a.mu.Lock()
+			a.watchCancel = cancel
+			a.watchDone = make(chan struct{})
+			watchDone := a.watchDone
+			a.mu.Unlock()
+			core := a.snapshot()
+			go func() {
+				defer close(watchDone)
+				core.WatchSessions(ctx, func() {
+					a.mu.Lock()
+					reviewing := a.plan != nil && a.res == nil || a.push != nil
+					a.mu.Unlock()
+					if !reviewing {
+						go a.refreshQuick()
+					}
+				}, a.snapshot)
+			}()
+		})
+	}
 	if shell, ok := a.Desktop.(interface{ BackgroundLaunch() bool }); ok && shell.BackgroundLaunch() {
 		return a.RefreshHere()
 	}

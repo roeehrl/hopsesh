@@ -95,7 +95,7 @@ func (r *run) scan(cmd *cobra.Command, only string, skipGit bool) *app.Inventory
 // their folders (see App.GitFor), so an unrelated folder git is slow to read does not
 // hold the command up.
 func (r *run) scanFor(cmd *cobra.Command, only string, ref app.Ref) *app.Inventory {
-	return r.scanWith(cmd, only, app.ScanOptions{GitFor: r.app.GitFor(ref)})
+	return r.scanWith(cmd, only, app.ScanOptions{NoCache: true, GitFor: r.app.GitFor(ref)})
 }
 
 func (r *run) scanWith(cmd *cobra.Command, only string, o app.ScanOptions) *app.Inventory {

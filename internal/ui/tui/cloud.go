@@ -131,7 +131,7 @@ func (m *model) fetchCmd(cloud string, id agent.SessionID) tea.Cmd {
 			return planDone{err: err}
 		}
 		p, in, err := a.Plan(ctx, inv, e, target, opts)
-		return pickedDone{entry: e, plan: planDone{p, in, err}}
+		return pickedDone{entry: e, plan: planDone{plan: p, input: in, err: err}}
 	}
 }
 
@@ -199,7 +199,7 @@ func (m *model) replan() tea.Cmd {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
 			p, in, err := a.Plan(ctx, inv, e, target, opts)
-			return planDone{p, in, err}
+			return planDone{plan: p, input: in, err: err}
 		}
 	}
 	return m.planCmd()

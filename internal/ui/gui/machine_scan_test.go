@@ -12,6 +12,7 @@ import (
 func TestScanMachinePreservesOtherResultsAndSnapshots(t *testing.T) {
 	home(t)
 	a := NewApp(all.Registry())
+	t.Cleanup(func() { _ = a.core.Catalog.Close() })
 	// Invalid destination fails before any network connection.
 	a.core.Cfg.Hosts = []config.Host{{Name: "target", Destination: "", Allowed: true}}
 	old := &app.Inventory{
@@ -26,8 +27,13 @@ func TestScanMachinePreservesOtherResultsAndSnapshots(t *testing.T) {
 		if a.inv == old || old.Machines[1].Status != "ok" || len(old.Entries) != 4 || old.Entries[1].Machine != "target" {
 			t.Fatal("modified an existing inventory snapshot")
 		}
-		if len(a.inv.Machines) != 3 || len(a.inv.Entries) != 3 || a.inv.Machine("other") != old.Machine("other") {
+		if len(a.inv.Machines) != 3 || len(a.inv.Entries) != 4 || a.inv.Machine("other") != old.Machine("other") {
 			t.Fatal("lost or duplicated another machine's results")
+		}
+		for _, e := range a.inv.Entries {
+			if e.Machine == "target" && (!e.Cached || e.Live.State != "unknown") {
+				t.Fatal("failed source still claims fresh presence")
+			}
 		}
 		s := a.MachineScans()["target"]
 		if s.Phase != "done" || s.Error == "" || s.Started == "" || s.Finished == "" {
@@ -44,6 +50,7 @@ func TestScanMachinePreservesOtherResultsAndSnapshots(t *testing.T) {
 func TestScanMachineQueuedRequestsCoalesceAndRemovalWins(t *testing.T) {
 	home(t)
 	a := NewApp(all.Registry())
+	t.Cleanup(func() { _ = a.core.Catalog.Close() })
 	a.core.Cfg.Hosts = []config.Host{{Name: "target", Destination: "", Allowed: true}}
 	a.scanMu.Lock()
 	done := make(chan error, 1)

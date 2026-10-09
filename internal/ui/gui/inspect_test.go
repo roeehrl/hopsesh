@@ -101,6 +101,7 @@ func TestToolWords(t *testing.T) {
 func TestSaveList(t *testing.T) {
 	home(t)
 	a := NewApp(all.Registry())
+	t.Cleanup(func() { _ = a.core.Catalog.Close() })
 	a.core.Cfg.List.TerminalCollapsed = []string{"family-one"}
 	defer a.Shutdown()
 	if l := a.Info().List; l.Decided || l.GroupBy != "repository" || l.SortBy != "last-active" || l.Density != "comfortable" {

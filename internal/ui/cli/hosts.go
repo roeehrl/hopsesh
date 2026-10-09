@@ -28,6 +28,7 @@ merged with the ones you configured. Only machines you allow are ever contacted.
 			if err != nil {
 				return err
 			}
+			defer r.app.Catalog.Close()
 			ctx, cancel := ctxTimeout(1)
 			defer cancel()
 			cands, _ := hosts.Discover(ctx)
@@ -98,6 +99,7 @@ func hostsAllowCmd(allow bool) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			defer r.app.Catalog.Close()
 			ctx, cancel := ctxTimeout(1)
 			defer cancel()
 			cands, _ := hosts.Discover(ctx)
@@ -149,6 +151,7 @@ to be asked every time). hopsesh hosts setup-key <name> later switches it to key
 			if err != nil {
 				return err
 			}
+			defer r.app.Catalog.Close()
 			h := config.Host{Name: args[0], Destination: args[1], Via: "manual", Allowed: true}
 			if pw, _ := cmd.Flags().GetBool("password"); pw {
 				h.Auth = "password"
@@ -189,6 +192,7 @@ them in hopsesh's own known_hosts. Your ~/.ssh/known_hosts is never modified.`,
 			if err != nil {
 				return err
 			}
+			defer r.app.Catalog.Close()
 			h := r.app.Cfg.FindHost(args[0])
 			dest := args[0]
 			if h != nil {

@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { row,details,action } from './helpers';
 
 test('real service resolves hidden original and reviews a safe separate return when native append is blocked',async({page},info)=>{
+ test.setTimeout(120000);
  const reset=await page.request.post('/reset?movement=1');expect(reset.ok()).toBeTruthy();
  await page.goto('/');await expect(page.getByRole('heading',{name:'All sessions',exact:true})).toBeVisible();
  await row(page,'Find the codeword').click();
@@ -15,6 +16,8 @@ test('real service resolves hidden original and reviews a safe separate return w
  await expect(page.getByText('Movement notice',{exact:true})).toBeVisible();
  await page.getByRole('button',{name:'Back to sessions',exact:true}).click();
  await row(page,'Find the codeword (from Claude Code)').click();
+ // Rows are usable before return-candidate verification finishes.
+ await expect(details(page).locator('#act-primary')).toContainText('Open existing session in Claude Code',{timeout:30000});
  const converted=await page.evaluate(async()=>{
   const {selected}=await import('/core.js');const e=selected();return {machine:e.machine,key:e.key,returns:e.returns};
  });

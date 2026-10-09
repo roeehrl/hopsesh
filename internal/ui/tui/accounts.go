@@ -283,14 +283,17 @@ func (m *model) accountKeys(k string) (tea.Model, tea.Cmd) {
 				if err != nil {
 					return accountsDone{err: err}
 				}
-				return accountLoginReady{c}
+				return accountLoginReady{command: c, profile: p.ID}
 			}
 		}
 	}
 	return m, nil
 }
 
-type accountLoginReady struct{ command agent.Command }
+type accountLoginReady struct {
+	command agent.Command
+	profile string
+}
 
 func (m *model) viewAccounts(b *strings.Builder) {
 	a := &m.accts
@@ -323,7 +326,10 @@ func (m *model) viewAccounts(b *strings.Builder) {
 		p := a.rows[item.profile]
 		label := "not checked"
 		if p.Account != nil {
-			label = p.Account.Email + " · " + p.Account.Label + " · " + p.Account.Confidence
+			label = "signed out"
+			if p.Account.LoggedIn {
+				label = "signed in · " + nonEmptyAccount(p.Account.Email, p.Account.Label)
+			}
 		}
 		if p.Error != "" {
 			label = p.Error

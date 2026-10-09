@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 	"unicode"
@@ -139,7 +140,7 @@ func (a *App) RegisterAccount(ctx context.Context, machine string, id agent.ID, 
 }
 func (a *App) accountMachine(ctx context.Context, name string) (*host.Machine, error) {
 	if name == "" || name == "local" || name == LocalName() {
-		return a.localMachine(ctx), nil
+		return &host.Machine{Name: LocalName(), Local: true, Facts: host.ProbeLocalFast(ctx, a.Specs()), Log: a.Log}, nil
 	}
 	h := a.Cfg.FindHost(name)
 	if h == nil || !h.Allowed {
@@ -150,7 +151,7 @@ func (a *App) accountMachine(ctx context.Context, name string) (*host.Machine, e
 
 // profileInstalls discovers only the module's known default and registered roots.
 // Remote discovery never initializes an endpoint or creates a root.
-func (a *App) profileInstalls(ctx context.Context, m *host.Machine, mod agent.Module, base agent.Install, force bool) ([]agent.Install, error) {
+func (a *App) profileInstalls(ctx context.Context, m *host.Machine, mod agent.Module, base agent.Install, force bool, deferIdentity ...bool) ([]agent.Install, error) {
 	if mod.Spec().Accounts == nil {
 		return []agent.Install{base}, nil
 	}
@@ -274,12 +275,17 @@ func (a *App) profileInstalls(ctx context.Context, m *host.Machine, mod agent.Mo
 			out = append(out, in)
 			continue
 		}
-		if ap, ok := mod.(agent.AccountProber); ok && in.Binary != "" && (force || p.CheckedAt.IsZero() || time.Since(p.CheckedAt) > 5*time.Minute) {
+		ownerRecent := !m.Local && p.IdentitySource == "owner" && p.Account != nil && !p.CheckedAt.IsZero() && recentAccountObservation(p.CheckedAt)
+		if ap, ok := mod.(agent.AccountProber); ok && !ownerRecent && !(len(deferIdentity) > 0 && deferIdentity[0]) && (force || p.CheckedAt.IsZero() || time.Since(p.CheckedAt) > 5*time.Minute) {
 			ch, e := m.For(ctx, mod.Spec(), in, nil)
 			var acct agent.Account
+			if e == nil && in.Binary == "" {
+				e = fmt.Errorf("%w: %s CLI is unavailable; install it on this machine to check sign-in", agent.ErrNotInstalled, mod.Spec().Name)
+			}
 			if e == nil {
 				acct, e = ap.Account(ctx, ch, in)
 			}
+			e = accountProbeVisibility(m, acct, e)
 			problem := ""
 			var observed *agent.Account
 			if e != nil {
@@ -287,7 +293,11 @@ func (a *App) profileInstalls(ctx context.Context, m *host.Machine, mod agent.Mo
 			} else {
 				observed = &acct
 			}
-			fresh, e := a.accountStore().Observe(p.ID, observed, problem)
+			source := "ssh"
+			if m.Local {
+				source = "local"
+			}
+			fresh, e := a.accountStore().ObserveFrom(p.ID, observed, problem, source)
 			if e != nil {
 				return nil, e
 			}
@@ -308,7 +318,10 @@ func (a *App) AccountLogin(ctx context.Context, id string) (agent.Command, error
 	if err != nil {
 		return agent.Command{}, err
 	}
-	m := a.localMachine(ctx)
+	m, err := a.accountMachine(ctx, "")
+	if err != nil {
+		return agent.Command{}, err
+	}
 	defer m.Close()
 	endpoint, err := m.ReadIdentity(ctx)
 	if err != nil {
@@ -441,4 +454,135 @@ func rootsEqual(m *host.Machine, fsys host.FS, a, b string) bool {
 		return ae == nil && be == nil && os.SameFile(ai, bi)
 	}
 	return false
+}
+
+// LocalAccountEndpoint reads identity without launching an agent or contacting peers.
+func (a *App) LocalAccountEndpoint(ctx context.Context) (string, error) {
+	home, _ := os.UserHomeDir()
+	m := &host.Machine{Local: true, Name: LocalName(), Facts: host.Facts{Home: home, OS: runtime.GOOS, Env: map[string]string{"HOPSESH_CONFIG_DIR": os.Getenv("HOPSESH_CONFIG_DIR")}}}
+	return m.ReadIdentity(ctx)
+}
+
+// RefreshAccount probes exactly one registered profile and preserves the last known
+// account when the check fails. It never reads credential files or copies logins.
+func (a *App) RefreshAccount(ctx context.Context, id string) (agent.RuntimeProfile, error) {
+	ps, err := a.Accounts()
+	if err != nil {
+		return agent.RuntimeProfile{}, err
+	}
+	for _, p := range ps {
+		if p.ID != id {
+			continue
+		}
+		source := "ssh"
+		if p.Machine == "" || p.Machine == "local" || p.Machine == LocalName() {
+			source = "local"
+		}
+		failed := func(problem error) (agent.RuntimeProfile, error) {
+			fresh, saveErr := a.accountStore().ObserveFrom(p.ID, nil, problem.Error(), source)
+			if saveErr != nil {
+				return p, errors.Join(problem, saveErr)
+			}
+			return fresh, problem
+		}
+		machine := p.Machine
+		// Local endpoint identity survives a hostname change; the display name does not.
+		if local, e := a.LocalAccountEndpoint(ctx); e == nil && local != "" && p.Endpoint == local {
+			machine, source = "local", "local"
+		}
+		m, err := a.accountMachine(ctx, machine)
+		if err != nil {
+			return failed(err)
+		}
+		defer m.Close()
+		endpoint, err := m.ReadIdentity(ctx)
+		if err != nil {
+			return failed(err)
+		}
+		if endpoint != p.Endpoint {
+			return failed(errors.New("machine identity changed; scan accounts again"))
+		}
+		mod, ok := a.Module(p.Agent)
+		if !ok {
+			return failed(errors.New("agent is disabled"))
+		}
+		if !m.Local {
+			if err := a.discoverRemoteProfiles(ctx, m, endpoint, p.Agent, ps); err != nil {
+				return failed(err)
+			}
+			fresh, err := a.Accounts()
+			if err != nil {
+				return failed(err)
+			}
+			for _, v := range fresh {
+				if v.ID == id {
+					p = v
+					break
+				}
+			}
+			if p.IdentitySource == "owner" && p.Account != nil && recentAccountObservation(p.CheckedAt) {
+				return p, nil
+			}
+		}
+		scoped := agent.Install{Agent: p.Agent, Accounts: mod.Spec().Accounts, Profile: &p, Roots: map[string]string{"home": p.Root}}
+		fsys, err := m.FS(ctx)
+		if err != nil {
+			return failed(err)
+		}
+		root, err := fsys.RealPath(p.Root)
+		if err != nil || m.Path().Clean(root) != p.Root {
+			return failed(errors.New("account root changed; re-register it"))
+		}
+		h, err := m.For(ctx, mod.Spec(), scoped, nil)
+		if err != nil {
+			return failed(err)
+		}
+		in, err := mod.Detect(ctx, h)
+		if err != nil {
+			return failed(err)
+		}
+		in.Profile = &p
+		ch, err := m.For(ctx, mod.Spec(), in, nil)
+		if err != nil {
+			return failed(err)
+		}
+		prober, ok := mod.(agent.AccountProber)
+		if !ok {
+			return p, agent.ErrUnsupported
+		}
+		if in.Binary == "" {
+			return failed(fmt.Errorf("%w: %s CLI is unavailable; install it on this machine to check sign-in", agent.ErrNotInstalled, mod.Spec().Name))
+		}
+		account, probeErr := prober.Account(ctx, ch, in)
+		probeErr = accountProbeVisibility(m, account, probeErr)
+		var observed *agent.Account
+		problem := ""
+		if probeErr == nil {
+			observed = &account
+		} else {
+			problem = probeErr.Error()
+		}
+		source = "ssh"
+		if m.Local {
+			source = "local"
+		}
+		fresh, saveErr := a.accountStore().ObserveFrom(p.ID, observed, problem, source)
+		return fresh, errors.Join(probeErr, saveErr)
+	}
+	return agent.RuntimeProfile{}, errors.New("account not found")
+}
+
+// Reject implausibly future-dated observations rather than trusting them indefinitely.
+func recentAccountObservation(at time.Time) bool {
+	age := time.Since(at)
+	return !at.IsZero() && age >= -time.Minute && age < 5*time.Minute
+}
+
+// An SSH process on macOS may lack the owner's unlocked Keychain. Absence of a
+// visible login there is not proof that the desktop account signed out.
+func accountProbeVisibility(m *host.Machine, account agent.Account, err error) error {
+	if err == nil && !m.Local && m.Facts.OS == "darwin" && !account.LoggedIn {
+		return fmt.Errorf("no sign-in is visible over SSH on %s. The macOS Keychain may be unavailable; check sign-in in Hopsesh on that machine. Last known account is retained", m.Name)
+	}
+	return err
 }

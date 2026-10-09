@@ -26,6 +26,9 @@ async function paste(page: Page, id: string) {
 }
 
 test("a Claude Code cloud session goes on to Codex cloud through this machine, and one undo takes both legs back", async ({ page }) => {
+  // Includes cloud setup, two plans, a terminal import, a hand-off and both undos.
+  // Keep the test budget larger than the individual hand-off expectation below.
+  test.setTimeout(90_000);
   await post(page, "cloud=codex-cloud&env=env_api&title=" + encodeURIComponent("An earlier task"));
   const id = await post(page, "handed=1");
   await turnOn(page, "Claude Code cloud");

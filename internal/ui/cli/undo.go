@@ -30,6 +30,7 @@ lost; --force undoes it anyway.`,
 			if err != nil {
 				return err
 			}
+			defer r.app.Catalog.Close()
 			if list, _ := cmd.Flags().GetBool("list"); list {
 				acts, err := r.app.Activities()
 				if err != nil {

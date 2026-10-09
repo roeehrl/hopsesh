@@ -77,7 +77,9 @@ func cloudApp(t *testing.T, reg *registry.Registry, allowed ...string) *App {
 	for _, c := range allowed {
 		cfg.SetCloudAllowed(c, true)
 	}
-	return New(cfg, reg, config.StateDir(), nil)
+	a := New(cfg, reg, config.StateDir(), nil)
+	t.Cleanup(func() { _ = a.Catalog.Close() })
+	return a
 }
 
 func calls(log string) string {

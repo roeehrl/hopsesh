@@ -48,6 +48,7 @@ func desktopApp(t *testing.T) (*App, *fakeDesktop) {
 	t.Helper()
 	home(t)
 	a := NewApp(all.Registry())
+	t.Cleanup(func() { _ = a.core.Catalog.Close() })
 	f := &fakeDesktop{s: desktop.State{Preferences: a.snapshot().Cfg.Desktop, Capabilities: desktop.Capabilities{Tray: true, HideApp: true}, Effective: "both"}}
 	a.Desktop = f
 	t.Cleanup(a.Shutdown)

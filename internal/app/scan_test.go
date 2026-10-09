@@ -46,6 +46,7 @@ func TestScanListsSessionInConfiguredFolder(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := New(cfg, all.Registry(), config.StateDir(), nil)
+	t.Cleanup(func() { _ = a.Catalog.Close() })
 	inv := a.Scan(context.Background(), ScanOptions{SkipGit: true})
 	defer inv.Close()
 	for _, m := range inv.Machines {

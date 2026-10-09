@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/pty"
+	"github.com/roeehrl/hopsesh/internal/core/repos"
 	"github.com/roeehrl/hopsesh/internal/core/termapp"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
@@ -254,21 +256,45 @@ type CheckoutDTO struct {
 	Path     string `json:"path"`
 }
 
-// Checkouts are the repositories the last scan found checked out here.
+// Checkouts resolves local folders on demand, including sessions published before
+// repository enrichment completes. It neither borrows transports nor starts a scan.
 func (a *App) Checkouts() []CheckoutDTO {
 	core := a.snapshot()
 	a.mu.Lock()
-	inv := a.inv
-	a.mu.Unlock()
-	out := []CheckoutDTO{}
-	if inv == nil {
-		return out
-	}
-	for _, g := range inv.Groups(core.LocalRoots()) {
-		if g.Local != "" {
-			out = append(out, CheckoutDTO{Name: g.Name, Identity: g.Identity, Path: g.Local})
+	dirs := map[string]bool{}
+	if a.inv != nil {
+		for _, e := range a.inv.Entries {
+			if m := a.inv.Machine(e.Machine); m != nil && m.Local && e.Session.CWD != "" {
+				dirs[e.Session.CWD] = true
+			}
 		}
 	}
+	a.mu.Unlock()
+	paths := make([]string, 0, len(dirs))
+	for dir := range dirs {
+		paths = append(paths, dir)
+	}
+	sort.Strings(paths)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	states, _ := repos.ProbeLocal(ctx, paths, core.Reg.Worktrees())
+	out := []CheckoutDTO{}
+	seen := map[string]bool{}
+	for _, g := range states {
+		if !g.IsRepo || g.Identity == "" || g.Error != "" {
+			continue
+		}
+		path := g.MainWorktree
+		if path == "" {
+			path = g.Toplevel
+		}
+		if path == "" || seen[g.Identity] {
+			continue
+		}
+		seen[g.Identity] = true
+		out = append(out, CheckoutDTO{Name: repos.Name(g.Identity), Identity: g.Identity, Path: path})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 

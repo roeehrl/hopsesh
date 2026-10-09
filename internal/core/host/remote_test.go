@@ -1,6 +1,7 @@
 package host
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"os"
@@ -82,5 +83,58 @@ func TestWindowsCommandLine(t *testing.T) {
 	want := `Set-Location 'C:\Users\me'; $env:CODEX_HOME='C:\Users\me\.codex'; & 'C:\Program Files\Codex\codex.exe' 'app-server'; exit $LASTEXITCODE`
 	if !strings.HasSuffix(script, want) {
 		t.Fatalf("script: %s", script)
+	}
+}
+
+// The interactive exchange must work locally and over SSH, including chunked output.
+func TestProtocolExec(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX transport shim; framing is covered on every OS")
+	}
+	for _, remote := range []bool{false, true} {
+		var runner agent.Exec = localExec{}
+		if remote {
+			m := &Machine{Name: "box", Conn: fakeSSH(t), Facts: Facts{OS: "linux"}}
+			defer m.Close()
+			runner = m.Exec()
+		}
+		start := time.Now()
+		result, err := runner.Run(context.Background(), []string{"sh", "-c", `read a; printf '{ "result": {}, '; printf '"id": 1 }\n'; read b; printf '{ "id":2, "result":{"value":"%s"} }\n' "$b"; cat >/dev/null`}, agent.RunOptions{Stdin: []byte("initialize\n"), HoldStdin: 10 * time.Second, Timeout: 15 * time.Second, StdinReply: func(line []byte) ([]byte, bool) {
+			if strings.Contains(string(line), `"id": 1`) {
+				return []byte("request\n"), false
+			}
+			return nil, strings.Contains(string(line), `"id":2`)
+		}})
+		if err != nil || result.Code != 0 || !strings.Contains(string(result.Stdout), `"value":"request"`) {
+			t.Fatal(remote, result, err)
+		}
+		if time.Since(start) > 5*time.Second {
+			t.Fatal("exchange waited for timeout instead of response")
+		}
+	}
+}
+
+func TestProtocolFramingHandlesChunks(t *testing.T) {
+	var buf bytes.Buffer
+	done := make(chan struct{})
+	next := make(chan []byte, 1)
+	writer := &watchWriter{buf: &buf, hit: done, next: next, reply: func(line []byte) ([]byte, bool) {
+		if string(line) == "ready" {
+			return []byte("request"), false
+		}
+		return nil, string(line) == "answer"
+	}}
+	for _, chunk := range []string{"rea", "dy\na", "nswer\n"} {
+		if _, err := writer.Write([]byte(chunk)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if string(<-next) != "request" {
+		t.Fatal("missing next request")
+	}
+	select {
+	case <-done:
+	default:
+		t.Fatal("missing completion")
 	}
 }
