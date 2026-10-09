@@ -183,6 +183,7 @@ func pull(cmd *cobra.Command, refArg string) error {
 	if err != nil {
 		return err
 	}
+	defer r.app.Catalog.Close()
 	if to, _ := cmd.Flags().GetString("to"); r.app.IsCloud(to) {
 		if dry, _ := cmd.Flags().GetBool("dry-run"); !dry {
 			return fmt.Errorf("to hand a session off to %s, use: hopsesh handoff %s --to %s", to, refArg, to)

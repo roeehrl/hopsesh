@@ -30,6 +30,8 @@ type HopPlanDTO struct {
 // PlanHop works out handing a cloud session on to another cloud through this machine, and
 // keeps the plan for ApplyHop. Nothing changes.
 func (a *App) PlanHop(machine, key, cloud string, o HandoffOptsDTO) (*HopPlanDTO, error) {
+	done := a.beginSelection()
+	defer done()
 	core := a.snapshot()
 	a.mu.Lock()
 	e, err := a.find(machine, key)
@@ -40,6 +42,10 @@ func (a *App) PlanHop(machine, key, cloud string, o HandoffOptsDTO) (*HopPlanDTO
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+	inv, e, err = a.selectionInventory(ctx, core, inv, e)
+	if err != nil {
+		return nil, err
+	}
 	opt := core.HandoffDefaults(cloud)
 	opt.Mark, opt.Note, opt.CarryRules, opt.Env = o.Mark, o.Note, o.CarryRules, o.Env
 	if o.Cleanup != "" {

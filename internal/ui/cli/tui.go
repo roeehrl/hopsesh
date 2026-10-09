@@ -48,6 +48,13 @@ func (r *run) runTUI() error {
 			l.Kind, l.Key = termapp.KindSession, exit.Key
 		}
 		runErr := r.runInThisTerminal(l)
+		if exit.Account != "" {
+			_, _ = r.app.RefreshAccount(context.Background(), exit.Account)
+			if runErr != nil {
+				return runErr
+			}
+			continue
+		}
 		if exit.Adopt == "" {
 			return runErr
 		}

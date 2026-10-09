@@ -11,6 +11,7 @@ import (
 func TestAppearanceSettingsPersistAndNotify(t *testing.T) {
 	home(t)
 	a := NewApp(all.Registry())
+	t.Cleanup(func() { _ = a.core.Catalog.Close() })
 	if a.Appearance() != "system" || a.Settings().Appearance != "system" {
 		t.Fatal("default must follow system")
 	}

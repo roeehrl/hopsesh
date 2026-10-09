@@ -13,6 +13,7 @@ import (
 func TestMachineSubtitlesUseDetectedAgentsWithoutSessions(t *testing.T) {
 	home(t)
 	a := NewApp(all.Registry())
+	t.Cleanup(func() { _ = a.core.Catalog.Close() })
 	states := []app.AgentState{
 		{Agent: "codex", Name: "Codex", Install: agent.Install{Version: "0.160.1", Binary: "/bin/codex", Roots: map[string]string{"data": "/codex"}}},
 		{Agent: "claude", Name: "Claude Code", Install: agent.Install{Version: "2.1.288", Present: true, Roots: map[string]string{"data": "/claude"}}},

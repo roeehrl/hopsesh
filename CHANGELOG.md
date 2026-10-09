@@ -6,6 +6,33 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+
+- Saved session metadata appears immediately in GUI, Quick access, TUI and
+  `hopsesh ls --cached`, with progressive discovery, independent source retries,
+  private summary caching and reconciled local file notifications.
+- Session account labels and grouping across GUI, TUI and CLI. Account groups
+  include retained source copies after a move and keep same-email profiles separate.
+
+### Fixed
+
+- GUI and TUI background scans keep independent settings snapshots, preventing
+  cloud settings changes from corrupting catalog keys or crashing active scans.
+- Claude/Codex sign-in detection, Codex initialization ordering, and account
+  refresh when the vendor sign-in terminal exits. Remote discovery retains public
+  owner-machine identity metadata and explains SSH/Keychain check limitations.
+- Background refreshes preserve selected conversations, focus, menus and scroll;
+  early summaries retain provisional repository metadata during enrichment.
+  Large session lists render bounded rows while preserving keyboard navigation.
+- Scanning one machine does not rescan every peer. Remote reconciliation runs
+  independently of local updates; Tailscale CLI failures are visible and peers
+  without MagicDNS remain discoverable.
+
+### Security
+
+- Build with Go 1.27.2, which fixes the standard-library vulnerabilities reported
+  against the previous pinned toolchain.
+
 ## [0.4.0] - 2026-10-08
 
 - Imported conversations now end with a clearly attributed Hopsesh import notice, rather

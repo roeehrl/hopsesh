@@ -19,11 +19,9 @@ import (
 // its output lines once until appears in them (or wait passes). Codex stops at the end of
 // its input before answering, so the input stays open until then.
 func appServer(ctx context.Context, h agent.Host, in agent.Install, reqs []map[string]any, until string, wait time.Duration) ([][]byte, error) {
-	all := append([]map[string]any{
-		{"id": 1, "method": "initialize", "params": map[string]any{"clientInfo": map[string]any{"name": "hopsesh", "version": "1"}}},
-		{"method": "initialized"},
-	}, reqs...)
+	initialize, _ := marshal(map[string]any{"id": 1, "method": "initialize", "params": map[string]any{"clientInfo": map[string]any{"name": "hopsesh", "version": "1"}}})
 	var stdin bytes.Buffer
+	all := append([]map[string]any{{"method": "initialized"}}, reqs...)
 	for _, r := range all {
 		b, err := marshal(r)
 		if err != nil {
@@ -32,8 +30,34 @@ func appServer(ctx context.Context, h agent.Host, in agent.Install, reqs []map[s
 		stdin.Write(b)
 		stdin.WriteByte('\n')
 	}
+	initialized := false
+	untilID := 0
+	if strings.HasPrefix(until, `{"id":`) {
+		_, _ = fmt.Sscanf(until, `{"id":%d,`, &untilID)
+	}
+	untilMethod := strings.TrimSuffix(strings.TrimPrefix(until, `"method":"`), `"`)
+	exchange := func(line []byte) ([]byte, bool) {
+		var r reply
+		if json.Unmarshal(line, &r) != nil {
+			return nil, false
+		}
+		if r.Method != "" {
+			return nil, untilID == 0 && r.Method == untilMethod
+		}
+		if r.ID != nil && *r.ID == 1 && !initialized && (r.Error != nil || len(r.Result) > 0) {
+			initialized = true
+			if r.Error != nil {
+				return nil, true
+			}
+			return stdin.Bytes(), false
+		}
+		done := untilID != 0 && r.ID != nil && *r.ID == untilID || untilID == 0 && r.Method == untilMethod
+		// Stop immediately on a request error instead of waiting for an impossible completion.
+		return nil, done || r.ID != nil && *r.ID > 1 && r.Error != nil
+	}
+
 	res, err := h.Exec().Run(ctx, []string{in.Binary, "app-server"}, agent.RunOptions{
-		Stdin: stdin.Bytes(), HoldStdin: wait, StdinUntil: []byte(until), Timeout: wait + 30*time.Second,
+		Stdin: append(initialize, '\n'), HoldStdin: wait, StdinReply: exchange, Timeout: wait + 5*time.Second,
 		Env: []string{"CODEX_HOME=" + in.Root(home)},
 	})
 	if err != nil {
@@ -45,12 +69,16 @@ func appServer(ctx context.Context, h agent.Host, in agent.Install, reqs []map[s
 	for sc.Scan() {
 		lines = append(lines, append([]byte(nil), sc.Bytes()...))
 	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
 	return lines, nil
 }
 
 // reply is an app-server answer or notification.
 type reply struct {
 	ID     *int            `json:"id"`
+	Result json.RawMessage `json:"result"`
 	Method string          `json:"method"`
 	Params json.RawMessage `json:"params"`
 	Error  *struct {

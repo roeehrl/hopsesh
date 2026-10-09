@@ -86,7 +86,7 @@ func TestRemoteObservationKeepsLocalPreferencesAndIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := decoded[0]
-	if len(got.Tags) > 0 || got.Account.Key != "" || got.Account.Email != "" || got.Account.Label != "" || got.Binding != remote.Binding {
+	if len(got.Tags) > 0 || got.Account.Key != "" || got.Account.Email != remote.Account.Email || got.Account.Label != remote.Account.Label || got.Binding != remote.Binding {
 		t.Fatalf("unexpected discovery: %+v", got)
 	}
 	if err = s.ImportObservation(p.ID, got); err != nil {
@@ -135,5 +135,35 @@ func TestChangingConfiguredDefaultPreservesIdentityAndInvalidatesPlans(t *testin
 	same, _ := s.List()
 	if same[1].Generation != ps[1].Generation {
 		t.Fatal("unchanged default invalidated plans")
+	}
+}
+
+func TestFailedOwnerObservationPreservesPublicIdentityAndSanitizesError(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	p, err := s.Register(agent.RuntimeProfile{Endpoint: "remote", Agent: "claude", Root: "/home/user/.claude", Name: "My personal"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err = s.ObserveFrom(p.ID, &agent.Account{Email: "personal@example.com", LoggedIn: true, Observation: "one"}, "", "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote := p
+	remote.CheckedAt = p.CheckedAt.Add(time.Second)
+	remote.Error = "a private owner-machine error"
+	b, _ := json.Marshal(disk{Version: 1, Profiles: []agent.RuntimeProfile{remote}})
+	decoded, err := DecodeRegistrations(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded[0].Error == remote.Error || decoded[0].Error == "" {
+		t.Fatal("owner error not safely surfaced")
+	}
+	if err := s.ImportObservation(p.ID, decoded[0]); err != nil {
+		t.Fatal(err)
+	}
+	ps, _ := s.List()
+	if ps[0].Account.Email != p.Account.Email || ps[0].Error == "" || ps[0].Binding != p.Binding {
+		t.Fatal("failed owner check lost last known identity")
 	}
 }

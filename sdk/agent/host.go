@@ -98,6 +98,9 @@ type RunOptions struct {
 	// of their input before answering it.
 	HoldStdin  time.Duration
 	StdinUntil []byte
+	// StdinReply receives complete output lines and may send the next protocol input.
+	// Returning done closes stdin. It must not block or retain the supplied line.
+	StdinReply func([]byte) (input []byte, done bool)
 	Timeout    time.Duration
 }
 

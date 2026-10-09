@@ -99,7 +99,8 @@ func TestImportPinsInputWithoutRedirectingVendorDiscovery(t *testing.T) {
 			path := "/home/alice/.claude/projects/demo/session.jsonl"
 			fh.Put(path, []byte("original\n"), time.Now())
 			fh.Programs["codex"] = func(_ []string, o agent.RunOptions) agent.Result {
-				if !strings.Contains(string(o.Stdin), path) {
+				input, _ := o.StdinReply([]byte(`{"id":1,"result":{}}`))
+				if !strings.Contains(string(input), path) {
 					t.Fatal("vendor received an undetectable snapshot path")
 				}
 				if changed {

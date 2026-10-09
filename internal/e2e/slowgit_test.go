@@ -82,6 +82,7 @@ func TestSlowGitFolder(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := app.New(cfg, all.Registry(), config.StateDir(), nil)
+	t.Cleanup(func() { _ = a.Catalog.Close() })
 	ctx := context.Background()
 
 	start := time.Now()

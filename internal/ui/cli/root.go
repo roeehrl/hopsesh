@@ -36,6 +36,7 @@ Unofficial; not affiliated with or endorsed by Anthropic or OpenAI.`,
 			if err != nil {
 				return err
 			}
+			defer r.app.Catalog.Close()
 			if !r.interactive() {
 				return cmd.Help()
 			}

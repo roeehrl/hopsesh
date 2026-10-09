@@ -36,6 +36,7 @@ func TestWindowTerminalStep(t *testing.T) {
 	t.Setenv("PATH", bin+":"+testPath())
 	t.Setenv("FAKE_CLOUD_DIR", t.TempDir())
 	a := NewApp(all.Registry())
+	t.Cleanup(func() { _ = a.core.Catalog.Close() })
 	a.core.Cfg.Terminal.Resume = config.ResumeTerminal // the user's terminal app (the hopsesh Terminal: tabs_test.go)
 	core := a.snapshot()
 	folder := filepath.Join(core.StateDir, "handoff", "github.com", "example", "demo")

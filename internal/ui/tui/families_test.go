@@ -1,13 +1,38 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
+	"github.com/roeehrl/hopsesh/internal/core/repos"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
+
+func TestProgressiveBrowseDoesNotDiscoverUnrelatedCheckouts(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	core := &app.App{Cfg: config.Defaults()}
+	core.Cfg.ReposDir = filepath.Join(home, "git")
+	gitDir := filepath.Join(core.Cfg.ReposDir, "unrelated", ".git")
+	if err := os.MkdirAll(gitDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "config"), []byte("[remote \"origin\"]\nurl = https://github.com/example/demo.git\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	inv := &app.Inventory{Machines: []*app.Machine{{Name: "remote"}}, Entries: []app.Entry{{Machine: "remote", Session: agent.Summary{Key: agent.SessionKey{Agent: "claude", Session: "fixture"}}, Git: &repos.GitState{IsRepo: true, Identity: "github.com/example/demo", Remote: "https://github.com/example/demo.git"}}}}
+	m := &model{deps: Deps{App: core}, inv: inv, mode: modeBrowse}
+	m.buildRows()
+	if len(m.rows) != 2 || strings.Contains(m.rows[0].header, "unrelated") {
+		t.Fatal("browsing searched unrelated checkouts instead of using discovery metadata")
+	}
+}
 
 func TestFamilyNavigationAndCollapsePersistence(t *testing.T) {
 	t.Setenv("HOPSESH_CONFIG_DIR", t.TempDir())
@@ -42,7 +67,7 @@ func TestFamilyNavigationAndCollapsePersistence(t *testing.T) {
 	}
 	next.key("g")
 	saved, err = config.Load()
-	if err != nil || saved.List.GroupBy != "repository" {
+	if err != nil || saved.List.GroupBy != "account" {
 		t.Fatal("group preference not saved")
 	}
 }

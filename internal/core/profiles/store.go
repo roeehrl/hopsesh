@@ -207,6 +207,11 @@ func (s Store) Forget(id string, generation int) error {
 // Observe records public login metadata and rotates the opaque binding after an
 // observable account change. Limited metadata never upgrades to verified identity.
 func (s Store) Observe(id string, account *agent.Account, problem string) (agent.RuntimeProfile, error) {
+	return s.ObserveFrom(id, account, problem, "")
+}
+
+// ObserveFrom retains the origin of public metadata; failures preserve the last known login.
+func (s Store) ObserveFrom(id string, account *agent.Account, problem, source string) (agent.RuntimeProfile, error) {
 	var out agent.RuntimeProfile
 	err := s.Update(func(ps *[]agent.RuntimeProfile) error {
 		for i := range *ps {
@@ -222,6 +227,9 @@ func (s Store) Observe(id string, account *agent.Account, problem string) (agent
 				p.Account = account
 			}
 			p.Error = problem
+			if source != "" {
+				p.IdentitySource = source
+			}
 			p.CheckedAt = time.Now().UTC()
 			out = *p
 			return nil
@@ -231,8 +239,8 @@ func (s Store) Observe(id string, account *agent.Account, problem string) (agent
 	return out, err
 }
 
-// DecodeRegistrations reads a peer's known non-secret registry. Its tags and login
-// labels are excluded; public observation fingerprints preserve the owner's binding.
+// DecodeRegistrations reads a peer's known non-secret registry. Tags and account
+// keys stay private; vendor-reported email and plan are public identity metadata.
 func DecodeRegistrations(b []byte) ([]agent.RuntimeProfile, error) {
 	var d disk
 	if err := json.Unmarshal(b, &d); err != nil {
@@ -246,14 +254,15 @@ func DecodeRegistrations(b []byte) ([]agent.RuntimeProfile, error) {
 		p.Tags = nil
 		if p.Account != nil {
 			a := *p.Account
-			a.Email = ""
 			a.Key = ""
-			a.Label = ""
 			p.Account = &a
 		}
-		p.Error = ""
+		if p.Error != "" {
+			p.Error = "Account check failed on the owner machine; last known sign-in shown"
+		}
 		p.Generation = 1
 		p.Managed = false
+		p.IdentitySource = "owner"
 	}
 	return d.Profiles, nil
 }
@@ -276,7 +285,9 @@ func (s Store) ImportObservation(id string, remote agent.RuntimeProfile) error {
 				}
 				p.Binding = remote.Binding
 				p.Account = remote.Account
+				p.IdentitySource = "owner"
 				p.CheckedAt = remote.CheckedAt
+				p.Error = remote.Error
 			}
 			return nil
 		}

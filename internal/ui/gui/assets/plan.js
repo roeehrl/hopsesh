@@ -61,6 +61,7 @@ async function replan() {
     const p = await request;
     if (cur !== c || c.revision !== revision || !p) return;
     c.plan = p;
+if(p.sourceEntry && c.e) c.e={...c.e,...p.sourceEntry};
     if(!c.sendTo && p.kind!=="fetch") {
       if(c.launch==="app"&&!p.can.app){c.launch=opensIn();c.launchNotice=p.can.appWhy||"Desktop opening is unavailable for this destination.";}
       const app=c.launch==="app";

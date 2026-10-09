@@ -1,0 +1,20 @@
+# Browsing metadata survives another process, but never authorizes a deleted session.
+git-repo repo https://github.com/example/catalog.git
+claude-session 11111111-2222-4333-8444-555555555555 repo 'Catalog fixture' 'Find the codeword'
+exec hopsesh ls --host local --json
+stdout 'Catalog fixture'
+# Cached browsing must not search unrelated checkout directories.
+git-repo 000-cache-trap https://github.com/example/catalog.git
+exec hopsesh ls --cached --host local --json
+stdout 'Catalog fixture'
+! stdout '000-cache-trap'
+stdout '"cached": true'
+stdout '"state": "unknown"'
+exec hopsesh ls --cached --no-local --json
+! stdout 'Catalog fixture'
+# A successful empty source scan removes the saved row.
+rm -r $HOME/.claude/projects
+exec hopsesh ls --host local --no-git --json
+! stdout 'Catalog fixture'
+exec hopsesh ls --cached --host local --json
+! stdout 'Catalog fixture'

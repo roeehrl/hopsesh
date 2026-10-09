@@ -32,6 +32,7 @@ only through that agent's own command, signed in as you, and never one you have 
 			if err != nil {
 				return err
 			}
+			defer r.app.Catalog.Close()
 			inv := r.scanClouds(cmd)
 			defer inv.Close()
 			if r.jsonOut {
@@ -131,6 +132,7 @@ func cloudsAllowCmd(allow bool) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			defer r.app.Catalog.Close()
 			for _, name := range args {
 				if !r.app.IsCloud(name) {
 					return fmt.Errorf("unknown cloud %q (see hopsesh clouds)", name)
@@ -152,6 +154,7 @@ func cloudsTestCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			defer r.app.Catalog.Close()
 			if len(args) == 0 {
 				for _, m := range r.app.Modules() {
 					if _, ok := m.(agent.CloudTester); ok {
@@ -231,6 +234,7 @@ hopsesh undo pushes the branches back.`,
 			if err != nil {
 				return err
 			}
+			defer r.app.Catalog.Close()
 			ctx, cancel := ctxTimeout(5)
 			defer cancel()
 			cands := r.app.CleanupCandidates(ctx)
@@ -316,6 +320,7 @@ hopsesh hands it off to the second cloud with the choices the hop was planned wi
 			if err != nil {
 				return err
 			}
+			defer r.app.Catalog.Close()
 			ctx, cancel := ctxTimeout(30)
 			defer cancel()
 			progress := func(s string) { r.printf("  • %s\n", s) }
@@ -361,6 +366,7 @@ repository that had none.`,
 			if err != nil {
 				return err
 			}
+			defer r.app.Catalog.Close()
 			_, cl, ok := r.app.CloudModule(args[0])
 			if !ok {
 				return fmt.Errorf("unknown cloud %q (see hopsesh clouds)", args[0])

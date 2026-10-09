@@ -420,8 +420,12 @@ and [§14](docs/design.md#14-the-command-line-tool-from-the-app).
 1. **Discovery** reads `tailscale status --json` and your `~/.ssh/config`. It connects to
    nothing until you allow a machine.
 2. **Listing** connects with your system `ssh` (strict host-key checking, ControlMaster) and
-   reads the head and tail of each transcript over SFTP. One batched `git` probe per machine
-   adds branch, worktree and unpushed/uncommitted counts.
+   shows saved session metadata immediately, then discovers each source in the background.
+   Unchanged Claude/Codex transcripts reuse parsed summaries; newly found rows appear before
+   enrichment finishes. One batched `git` probe per machine adds branch, worktree and
+   unpushed/uncommitted counts. Failed scans retain saved rows with unknown live status.
+   `hopsesh ls --cached` reads saved results without SSH or agent commands. See
+   [session discovery](docs/session-discovery.md) for refresh and cache behavior.
 3. **Moving** builds a plan, then copies the session's files into a staging folder. It
    rewrites paths in one pass, so ids, signatures and encrypted content are never touched.
    It checks the result, installs it where the agent looks for it, and keeps an undo

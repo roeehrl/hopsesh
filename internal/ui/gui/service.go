@@ -9,11 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -41,26 +39,34 @@ const MenuEvent = "hopsesh:menu"
 
 // App is the service bound to the frontend.
 type App struct {
-	Desktop   DesktopShell `json:"-"`
-	desktopMu sync.Mutex
-	quick     quickState
-	mu        sync.Mutex
-	scanMu    sync.Mutex // serialize inventory refreshes
-	scans     map[string]MachineScan
-	core      *app.App // its Cfg is the saved configuration; calls work on snapshots
-	cfgErr    error    // the configuration file could not be used (see StartFresh)
-	inv       *app.Inventory
-	invAt     time.Time // when inv last read the other machines and the clouds
-	plan      *move.Plan
-	input     move.Input
-	res       *move.Result
-	push      *app.Push // a push planned on another machine, its connection open
-	pw        *pwBroker
-	appIcons  map[agent.ID]string // installed apps' icons, read once ("" when none)
-	pwOnce    sync.Once
-	step      *pendingStep // the terminal step a hand-off waits for
-	quitting  atomic.Bool  // the user confirmed quitting (or an update restarts the app)
-	termName  atomic.Value // the user's terminal app's name, for the terminal window (a string)
+	Desktop        DesktopShell `json:"-"`
+	closing        bool
+	watchDone      chan struct{}
+	watchOnce      sync.Once
+	watchLocal     bool
+	watchCancel    context.CancelFunc
+	selectionReads int
+	scanCancel     context.CancelFunc
+	scanRevision   atomic.Uint64
+	desktopMu      sync.Mutex
+	quick          quickState
+	mu             sync.Mutex
+	scanMu         sync.Mutex // serialize inventory refreshes
+	scans          map[string]MachineScan
+	core           *app.App // its Cfg is the saved configuration; calls work on snapshots
+	cfgErr         error    // the configuration file could not be used (see StartFresh)
+	inv            *app.Inventory
+	invAt          time.Time // when inv last read the other machines and the clouds
+	plan           *move.Plan
+	input          move.Input
+	res            *move.Result
+	push           *app.Push // a push planned on another machine, its connection open
+	pw             *pwBroker
+	appIcons       map[agent.ID]string // installed apps' icons, read once ("" when none)
+	pwOnce         sync.Once
+	step           *pendingStep // the terminal step a hand-off waits for
+	quitting       atomic.Bool  // the user confirmed quitting (or an update restarts the app)
+	termName       atomic.Value // the user's terminal app's name, for the terminal window (a string)
 	// Wails is the running application (events, clipboard, dialogs).
 	Wails *application.App `json:"-"`
 	// Terms are the terminal's tabs and window (not bound to the window: see terminal.go).
@@ -69,12 +75,22 @@ type App struct {
 	Emitter func(name string, data any) `json:"-"`
 }
 
+// Option configures service behavior before any discovery starts.
+type Option func(*App)
+
+// WithoutSessionWatching lets headless fixture services publish changes explicitly.
+// Desktop applications watch local session files by default.
+func WithoutSessionWatching() Option { return func(a *App) { a.watchLocal = false } }
+
 // NewApp loads the configuration for the modules in reg. A configuration an older hopsesh
 // wrote is reported by Info, not returned: the window offers to start fresh.
-func NewApp(reg *registry.Registry) *App {
+func NewApp(reg *registry.Registry, options ...Option) *App {
 	cfg, err := config.Load()
 	log, _ := audit.Open(filepath.Join(config.StateDir(), "log"))
-	a := &App{cfgErr: err, Terms: NewTerminals(version.Version)}
+	a := &App{cfgErr: err, Terms: NewTerminals(version.Version), watchLocal: true}
+	for _, option := range options {
+		option(a)
+	}
 	a.core = app.New(cfg, reg, config.StateDir(), log)
 	a.core.Passwords = a.passwordFor
 	a.core.Steps = a.runStep
@@ -88,8 +104,7 @@ func (a *App) snapshot() *app.App {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	c := *a.core
-	c.Cfg.Hosts = slices.Clone(a.core.Cfg.Hosts)
-	c.Cfg.Agents = maps.Clone(a.core.Cfg.Agents)
+	c.Cfg = a.core.Cfg.Clone()
 	return &c
 }
 
@@ -179,17 +194,24 @@ type Info struct {
 }
 
 // Info returns app and machine information.
-func (a *App) Info() Info {
+func (a *App) Info() Info { return a.info(false) }
+
+// Bootstrap is configuration-only: integration checks cannot hold first paint.
+func (a *App) Bootstrap() Info { return a.info(true) }
+func (a *App) info(fast bool) Info {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	files, bin := a.skillFiles()
-	skill := a.snapshot().Skill(ctx, files, bin)
+	skillState := "checking"
+	if !fast {
+		files, bin := a.skillFiles()
+		skillState = a.snapshot().Skill(ctx, files, bin).State
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	cfg := a.core.Cfg
 	info := Info{DesktopManaged: a.Desktop != nil, Version: version.Version, OS: runtime.GOOS, Host: app.LocalName(), ReposDir: cfg.ReposDir,
 		AuditDir: filepath.Join(config.StateDir(), "log"), UpdateCheck: cfg.UpdateCheck,
-		SkillState: skill.State, SkillPrompt: cfg.SkillPrompt, Receive: cfg.Peer.Receive,
+		SkillState: skillState, SkillPrompt: cfg.SkillPrompt, Receive: cfg.Peer.Receive,
 		SetupDismissed: cfg.SetupPrompt == "declined", Layout: layoutOf(cfg.Window, cfg.Inspector),
 		List: listOf(cfg.List), Places: map[string]string{}, Previews: cfg.PreviewsOn()}
 	for k, ag := range cfg.Agents {
@@ -204,16 +226,25 @@ func (a *App) Info() Info {
 	for _, h := range cfg.Hosts {
 		info.HasHosts = info.HasHosts || h.Allowed
 	}
-	info.Agents = a.agentsLocked()
-	if cfg.CLIPrompt != "declined" {
+	if fast {
+		for _, m := range a.core.Reg.All() {
+			s := m.Spec()
+			info.Agents = append(info.Agents, AgentDTO{ID: s.ID, Name: s.Name, Stability: s.Stability, Enabled: a.core.Cfg.AgentEnabled(string(s.ID)), Capabilities: agent.Capabilities(m), Tested: s.Tested, Icon: "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(s.Icon.SVG))})
+		}
+	} else {
+		info.Agents = a.agentsLocked()
+	}
+	if !fast && cfg.CLIPrompt != "declined" {
 		info.CLIOffer = cliOffer()
 	}
 	info.Defaults.MovementNotices = cfg.MovementNoticesOn()
 	info.Defaults.MarkMoved, info.Defaults.SyncCode, info.Defaults.PushSource = cfg.MarkMovedOn(), cfg.SyncCodeOn(), cfg.PushSource
 	info.LocalNetwork.Gated = lnp.Gated()
 	info.LocalNetwork.FirstRun = lnp.FirstRun(config.StateDir())
-	if t := a.core.MyTerminal(ctx); t != nil && runtime.GOOS == "darwin" {
-		info.Terminal = t.Name()
+	if !fast {
+		if t := a.core.MyTerminal(ctx); t != nil && runtime.GOOS == "darwin" {
+			info.Terminal = t.Name()
+		}
 	}
 	if f := listMenu; f != nil {
 		f(info.List.GroupBy, info.List.SortBy, info.List.Density == "compact")
@@ -488,6 +519,21 @@ func (a *App) SetReposDir(dir string) error {
 
 // Shutdown closes connections and ends the terminal's tabs.
 func (a *App) Shutdown() {
+	a.mu.Lock()
+	a.closing = true
+	watchCancel := a.watchCancel
+	watchDone := a.watchDone
+	scanCancel := a.scanCancel
+	a.mu.Unlock()
+	if watchCancel != nil {
+		watchCancel()
+	}
+	if scanCancel != nil {
+		scanCancel()
+	}
+	if watchDone != nil {
+		<-watchDone
+	}
 	if a.quick.cancel != nil {
 		a.quick.cancel()
 	}
@@ -497,8 +543,13 @@ func (a *App) Shutdown() {
 	if a.Terms != nil {
 		a.Terms.CloseAll()
 	}
+	a.scanMu.Lock()
+	defer a.scanMu.Unlock()
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.core.Catalog != nil {
+		_ = a.core.Catalog.Close()
+	}
 	if a.inv != nil {
 		a.inv.Close()
 	}

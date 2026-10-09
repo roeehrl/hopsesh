@@ -22,6 +22,7 @@ func doctorCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			defer r.app.Catalog.Close()
 			type check struct {
 				Name   string `json:"name"`
 				OK     bool   `json:"ok"`

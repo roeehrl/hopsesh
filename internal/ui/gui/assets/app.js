@@ -13,7 +13,7 @@ import "./accounts.js";
 import { undoLast } from "./activity.js";
 import { openPalette } from "./palette.js";
 import { loadTabs, onTabs, showTerminal, tabs, exits } from "./term.js";
-import { render as renderSessions, listCommand, showEntry, reveal } from "./sessions.js";
+import { render as renderSessions, listCommand, showEntry, reveal, scan, acceptScan, queueScan, backgroundRender } from "./sessions.js";
 import { load as loadLayout, toggle as togglePane } from "./layout.js";
 
 $("#btn-search").onclick = openPalette;
@@ -30,7 +30,7 @@ onTabs(() => {
   const sig = JSON.stringify([[...tabs.values()].map((t) => [t.kind, t.machine, t.key, t.attention, t.state === "exited"]), [...exits.values()].map((x) => [x.key, x.code])]);
   if (sig === shownTabs || current !== "sessions") { shownTabs = sig; return; }
   shownTabs = sig;
-  renderSessions(); // keeps the focus and the scroll
+  backgroundRender(); // defer while a pointer, menu or dialog owns the controls
 });
 
 // Native Quick access requests also survive a cold main-window boot.
@@ -40,13 +40,13 @@ async function quickRoute() {
  const r=await api("TakeQuickRoute");if(!r)return;
  if(r.screen==="settings"){await go("settings","desktop");return}
  if(r.screen==="terminals"){await showTerminal();return}
- const snapshot=await api("QuickSnapshot");if(snapshot.scan)state.scan=snapshot.scan;
+ const snapshot=await api("QuickSnapshot");if(snapshot.scan)acceptScan(snapshot.scan);
  await go("sessions");
  const e=state.scan?.groups.flatMap(g=>g.entries).find(e=>e.machine===r.machine&&e.key===r.key);
  if(e){showEntry(e);reveal()}
 }
 on("hopsesh:quick-route",()=>quickRoute().catch(fail));
-on("hopsesh:quick",async()=>{if(!mainReady||state.scanning)return;const d=await api("QuickSnapshot");if(d.scan){state.scan=d.scan;state.presence=d.presence?.entries||{};if(current==="sessions"&&!document.querySelector("dialog[open]"))renderSessions()}});
+on("hopsesh:quick",async()=>{if(!mainReady||state.scanning)return;const d=await api("QuickSnapshot");if(d.scan)queueScan(d.scan,d.presence?.entries||{})});
 
 // The app menu (and its shortcuts) sends these.
 on("hopsesh:menu", menuCommand);
@@ -175,17 +175,15 @@ function configError() {
 // failures. Nothing can silently leave an empty window while the bridge is busy.
 export async function start() {
   for (const r of await api("PendingPasswords").catch(() => [])) askPassword(r);
-  state.info = await api("Info");
+  state.info = await api("Bootstrap");
   setSystem(state.info.os, state.info.terminal);
   loadLayout(state.info.layout);
   if (state.info.configError) { configError(); mainReady = true; return; }
-  $("#startup-title").textContent = "Finding your sessions…";
-  $("#startup-detail").textContent = "Reading local sessions and checking your configured machines. This can take a moment.";
-  await loadTabs();
-  state.scan = await api("InitialScan");
-  await go("sessions");
+  state.scan = await api("CachedScan");
   mainReady = true;
-  await quickRoute();
+  await go("sessions");
+  loadTabs().catch(fail);
+  scan("InitialScan").then(()=>{if(current==="sessions")renderSessions();return quickRoute()}).catch(fail);
   if (state.info.updateCheck === "on") {
     api("CheckUpdate").then((update) => {
       state.update = update;

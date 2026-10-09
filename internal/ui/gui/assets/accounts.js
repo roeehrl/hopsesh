@@ -1,13 +1,23 @@
-import {api,h,fill,view,state,screen,go,here,toast,fail,ask,errText,current,navigationID,sys} from './core.js';
+import {api,h,fill,view,state,screen,go,here,toast,fail,ask,errText,current,navigationID,sys,on,ago} from './core.js';
+const checking=new Set(), scanningMachines=new Set(), lastAttempt=new Map();
 let accounts=[], query='', tag='', group='machine', busy=false, problem='';
 const expanded=new Map();
 const localMachine=name=>(state.scan?.machines||[]).some(m=>m.local&&m.name===name);
 const byMachine=(a,b)=>Number(localMachine(b))-Number(localMachine(a))||a.localeCompare(b);
 const text=(p)=>[p.name,p.agent,p.machine,p.root,p.account?.email,...(p.tags||[])].join(' ').toLowerCase();
-const status=(p)=>p.error || p.account?.isolationWhy || (p.stale?'Machine has not been checked':p.account?.loggedIn ? `${p.account.email || p.account.label || p.account.provider} · ${p.account.confidence || 'unverified'} identity`:'Sign-in not verified');
+const status=p=>p.error ? `Check failed: ${p.error}${p.account?.email ? " · Last known: "+p.account.email : ""}` : !p.account ? 'Not checked yet' : `${p.account.loggedIn ? "Signed in · "+(p.account.email || p.account.label || p.account.provider || "Account name unavailable") : p.identitySource==='ssh' ? "No sign-in visible over SSH · Sign-in on the machine may differ" : 'Signed out'}${p.stale ? ' · Last known' : ''}`;
+async function check(p){if(checking.has(p.id))return;lastAttempt.set(p.id,Date.now());checking.add(p.id);render();try{await api('RefreshAccount',p.id);state.scan=await api('ScanSnapshot');await reload()}catch(e){problem=errText(e);await reload()}finally{checking.delete(p.id);if(current==='accounts')render()}}
+on('hopsesh:accounts',()=>{reload().catch(fail)});
+let refreshing=false;
+setInterval(async()=>{if(current!=='accounts'||document.hidden||refreshing||busy||document.querySelector('dialog[open]'))return;refreshing=true;try{const result=await api('Accounts');if(JSON.stringify(result)!==JSON.stringify(accounts)){accounts=result;render()}}catch{}finally{refreshing=false}},2000);
+
+// Refresh stale sign-in metadata one profile at a time. Watcher-driven local
+// scans must not starve remote identities; failed checks retry after five minutes.
+setInterval(()=>{if(current!=='accounts'||document.hidden||busy||checking.size||scanningMachines.size||document.querySelector('dialog[open]')||document.activeElement?.matches('input,select'))return;const p=accounts.find(p=>p.stale&&Date.now()-(lastAttempt.get(p.id)||0)>=300000);if(p)check(p).catch(fail)},15000);
+
 let read=0;
 async function reload(){const n=++read,visit=navigationID();const result=await api('Accounts');if(n!==read||visit!==navigationID())return;accounts=result;if(current==='accounts')render();}
-async function scan(){if(busy)return;busy=true;problem='';render();try{state.scan=await api('ScanAccounts');state.stale=true;await reload();}catch(e){problem=errText(e)}finally{busy=false;if(current==='accounts')render()}}
+async function scan(){if(busy)return;busy=true;problem='';render();try{state.scan=await api('ScanAccounts');state.stale=false;await reload();}catch(e){problem=errText(e)}finally{busy=false;if(current==='accounts')render()}}
 function editor(p){
  const dlg=document.createElement('dialog');dlg.className='account-editor';
  const name=h('input',{class:'field',value:p?.name||'',required:true,maxlength:120});
@@ -25,19 +35,19 @@ function editor(p){
  h('div',{class:'account-actions'},h('button',{class:'btn',type:'button',onclick:()=>dlg.close()},'Cancel'),submit));
  dlg.append(form);document.body.append(dlg);dlg.addEventListener('close',()=>dlg.remove());dlg.showModal();name.focus();
 }
-function row(p){return h('article',{class:'account-card','data-profile':p.id},h('div',{},h('h3',{},p.name),h('div',{class:'muted'},`${p.agent==='claude'?'Claude Code':'Codex'} · ${p.machine||'Machine unavailable'}`),h('p',{class:p.error?'err':'muted'},status(p)),h('div',{class:'account-tags'},(p.tags||[]).map(t=>h('span',{class:'pill'},t))),h('details',{},h('summary',{},'Profile details'),h('p',{class:'mono'},p.root),h('p',{class:'mono'},p.id))),
- h('div',{class:'account-actions'},h('button',{class:'btn small',onclick:()=>editor(p)},'Edit'),h('button',{class:'btn small',disabled:!p.local||busy,title:p.local?'Sign in using the vendor CLI':'Sign in on this account’s machine',onclick:async()=>{try{await api('LoginAccount',p.id);toast('Complete sign-in in the terminal, then scan accounts.')}catch(e){fail(e)}}},'Sign in'),h('button',{class:'btn small',onclick:async()=>{if(!await ask({title:`Forget ${p.name}?`,body:'This removes the registration. Vendor files and credentials stay on the machine. A default root may be discovered again.',ok:'Forget'}))return;try{await api('ForgetAccount',p.id,p.generation);await reload();state.stale=true}catch(e){fail(e)}}},'Forget')))}
+function row(p){return h('article',{class:'account-card','data-profile':p.id},h('div',{},h('h3',{},p.name),h('div',{class:'muted'},`${p.agent==='claude'?'Claude Code':'Codex'} · ${p.machine||'Machine unavailable'}`),h('p',{class:p.error?'err':'muted'},status(p)),h('div',{class:'account-tags'},(p.tags||[]).map(t=>h('span',{class:'pill'},t))),h('details',{},h('summary',{},'Profile details'),h('p',{class:'mono'},p.root),h('p',{class:'mono'},p.id),h('p',{class:'muted'},`Last checked ${p.checkedAt && !p.checkedAt.startsWith('0001-') ? ago(p.checkedAt) : 'never'} · ${p.identitySource==='owner'?'Reported by Hopsesh on '+p.machine:p.identitySource==='ssh'?'Checked over SSH':p.identitySource==='local'?'Checked on this machine':'Last saved observation'}`),h('p',{class:'muted'},'The agent reports its current sign-in. Email and organization are not a verified identity or proof of who created older sessions.'),p.account?.isolationWhy?h('p',{class:'warn'},p.account.isolationWhy):null)),
+ h('div',{class:'account-actions'},h('button',{class:'btn small',disabled:busy||checking.has(p.id),'aria-label':`Check sign-in for ${p.name} on ${p.machine}`,onclick:()=>check(p)},checking.has(p.id)?'Checking…':'Check sign-in'),h('button',{class:'btn small',onclick:()=>editor(p)},'Edit'),h('button',{class:'btn small',disabled:!p.local||busy,title:p.local?'Sign in using the vendor CLI':'Sign in on this account’s machine',onclick:async()=>{try{await api('LoginAccount',p.id);toast('Complete sign-in in the terminal. Your account refreshes automatically when it finishes.')}catch(e){fail(e)}}},'Sign in'),h('button',{class:'btn small',onclick:async()=>{if(!await ask({title:`Forget ${p.name}?`,body:'This removes the registration. Vendor files and credentials stay on the machine. A default root may be discovered again.',ok:'Forget'}))return;try{await api('ForgetAccount',p.id,p.generation);await reload();state.stale=true}catch(e){fail(e)}}},'Forget')))}
 function setupNotice(m){return h('aside',{class:'account-card account-setup','aria-label':`Account setup on ${m.name}`},
  h('p',{},'SSH is connected and sessions can be read. Set up Hopsesh on this machine to discover its accounts.'),
  h('p',{class:'muted'},`Install Hopsesh on ${m.name} if needed, then run this command there:`),h('code',{},'hopsesh accounts scan --machine local'),
- h('p',{class:'muted'},'Then click Scan accounts here. Scanning from this computer does not install or initialize Hopsesh remotely.'),
+ h('p',{class:'muted'},'Then click Scan this machine here. Scanning from this computer does not install or initialize Hopsesh remotely.'),
  h('button',{class:'btn small',onclick:()=>go('machines')},'Manage machines'));}
 function accountGroup(name,ps,m=null){
  const machine=group==='machine'||!!m, k=(machine?'machine':group)+':'+name;
  const local=machine&&localMachine(name), setup=!!m?.accountSetupRequired;
  const label=local?`${sys.Here} · ${name}`:name;
  return h('details',{class:'account-group','data-group':k,open:expanded.get(k)??!setup,ontoggle:ev=>{if(ev.target.isConnected)expanded.set(k,ev.target.open)}},
-  h('summary',{},h('span',{},label),h('span',{class:setup?'pill warn':'muted'},setup?'Account setup required':`${ps.length} account${ps.length===1?'':'s'}`)),
+  h('summary',{},h('span',{},label),h('span',{class:setup?'pill warn':'muted'},setup?'Account setup required':`${ps.length} account${ps.length===1?'':'s'}`),machine?h('button',{class:'btn small',disabled:busy||scanningMachines.has(name),onclick:async ev=>{ev.preventDefault();ev.stopPropagation();scanningMachines.add(name);render();try{if(local)state.scan=await api('RefreshHere');else{await api('ScanMachine',name);state.scan=await api('ScanSnapshot')}state.stale=false;await reload()}catch(e){problem=errText(e)}finally{scanningMachines.delete(name);if(current==='accounts')render()} }},scanningMachines.has(name)?'Scanning…':'Scan this machine'):null),
   ps.length?h('div',{class:'account-grid'},ps.map(row)):null,setup?setupNotice(m):null);
 }
 function render(){
@@ -59,6 +69,6 @@ function render(){
  problem?h('p',{class:'err',role:'alert'},problem):null,
  h('div',{'aria-live':'polite'},`${visible.length} accounts`),sections,
  !visible.length&&!setupMachines.length?h('p',{class:'muted'},'No matching accounts. Scan known roots or add an account.'):null,
- h('p',{class:'muted'},'Discovery checks known default roots and registered roots on allowed machines with an initialized Hopsesh identity. Sign-in metadata can be limited; a matching email is never treated as proof of account identity.'))));
+ h('p',{class:'muted'},'Discovery checks known default roots and registered roots on allowed machines with an initialized Hopsesh identity. Each card identifies the current sign-in for a separate state root. Emails do not establish ownership of older sessions.'))));
 }
 screen('accounts',async()=>{const visit=navigationID();await reload();if(visit===navigationID()&&!accounts.length)await scan()});

@@ -33,6 +33,7 @@ func newModel(t *testing.T) *model {
 		t.Fatal(err)
 	}
 	a := app.New(cfg, all.Registry(), config.StateDir(), nil)
+	t.Cleanup(func() { _ = a.Catalog.Close() })
 	return &model{deps: Deps{App: a, Describe: func(app.Entry) string { return "" }}, mode: modeLoading, started: time.Now(), opts: a.DefaultOptions()}
 }
 

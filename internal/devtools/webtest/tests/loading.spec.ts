@@ -140,7 +140,7 @@ test('session refresh keeps results visible and exposes a persistent retry on fa
     if (r.request().postDataJSON().m === 'Scan' && first) { first = false; await wait.promise; await error(r); } else await r.continue();
   });
   await page.locator('#btn-refresh').click();
-  await expect(row(page, 'Find the codeword')).toBeVisible(); await expect(page.locator('#fresh')).toHaveText('Refreshing…');
+  await expect(row(page, 'Find the codeword')).toBeVisible(); await expect(page.locator('#fresh')).toContainText('Checking for changes…');
   wait.release(); await expect(page.getByRole('alert')).toContainText('Showing the previous results');
   await page.getByRole('button', { name: 'Retry refresh' }).click(); await expect(page.getByRole('alert')).toHaveCount(0);
 });

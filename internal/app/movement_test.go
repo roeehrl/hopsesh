@@ -23,6 +23,7 @@ func movementFixture(t *testing.T) (*App, *lineage.Manifest, lineage.ReplicaID, 
 	t.Helper()
 	t.Setenv("HOPSESH_CONFIG_DIR", t.TempDir())
 	a := New(config.Defaults(), all.Registry(), t.TempDir(), nil)
+	t.Cleanup(func() { _ = a.Catalog.Close() })
 	g := lineage.New("movement-test")
 	from := g.Upsert(lineage.Replica{Location: LocalName(), Key: agent.SessionKey{Agent: "claude", Session: "alice-session"}})
 	to := g.Upsert(lineage.Replica{Location: "bob-laptop", Key: agent.SessionKey{Agent: "codex", Session: "bob-session"}})
@@ -164,6 +165,7 @@ func TestMovementPreferenceDefaults(t *testing.T) {
 		t.Fatal("not on by default")
 	}
 	a := New(c, all.Registry(), t.TempDir(), nil)
+	t.Cleanup(func() { _ = a.Catalog.Close() })
 	if !a.DefaultOptions().Notify {
 		t.Fatal("move did not inherit default")
 	}
@@ -179,6 +181,7 @@ func TestMovementEnrichmentReadsNativeWorkAndReturnRelations(t *testing.T) {
 	mod := claude.New()
 	root := t.TempDir()
 	a := New(config.Defaults(), all.Registry(), t.TempDir(), nil)
+	t.Cleanup(func() { _ = a.Catalog.Close() })
 	g := lineage.New("native-enrichment")
 	var entries []Entry
 	var machines []*Machine

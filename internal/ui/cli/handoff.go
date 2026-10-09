@@ -150,6 +150,7 @@ func handoff(cmd *cobra.Command, refArg, cloud string) error {
 	if err != nil {
 		return err
 	}
+	defer r.app.Catalog.Close()
 	if !r.app.IsCloud(cloud) {
 		return fmt.Errorf("unknown cloud %q (see hopsesh clouds)", cloud)
 	}
@@ -416,6 +417,7 @@ the Codex, gh, jules, devin and amp commands hopsesh drives have none either.`,
 			if err != nil {
 				return err
 			}
+			defer r.app.Catalog.Close()
 			cloud, id, ok := r.cloudRef(args[0])
 			if !ok || id == "" {
 				return fmt.Errorf("%q names no cloud session: use <cloud>:<id> or the session's link", args[0])

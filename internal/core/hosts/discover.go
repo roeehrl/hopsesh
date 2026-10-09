@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,17 +35,18 @@ type Candidate struct {
 
 // Discover merges Tailscale peers and ~/.ssh/config aliases.
 func Discover(ctx context.Context) ([]Candidate, error) {
-	ts, _ := Tailscale(ctx)
+	ts, err := Tailscale(ctx)
 	aliases := SSHConfigAliases(filepath.Join(home(), ".ssh", "config"))
-	return Merge(ts, aliases), nil
+	return Merge(ts, aliases), err
 }
 
 // tsStatus is the part of `tailscale status --json` hopsesh uses. Tailscale documents this
 // structure as unstable, so every field is optional.
 type tsStatus struct {
-	Self *tsPeer           `json:"Self"`
-	Peer map[string]tsPeer `json:"Peer"`
-	User map[string]struct {
+	BackendState string            `json:"BackendState"`
+	Self         *tsPeer           `json:"Self"`
+	Peer         map[string]tsPeer `json:"Peer"`
+	User         map[string]struct {
 		LoginName   string `json:"LoginName"`
 		DisplayName string `json:"DisplayName"`
 	} `json:"User"`
@@ -71,9 +73,11 @@ func Tailscale(ctx context.Context) ([]Candidate, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	out, err := proc.CommandContext(ctx, bin, "status", "--json").Output()
+	cmd := proc.CommandContext(ctx, bin, "status", "--json")
+	cmd.Env = append(os.Environ(), "TAILSCALE_BE_CLI=1")
+	out, err := cmd.Output()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Tailscale discovery failed: %w", err)
 	}
 	return parseTailscale(out)
 }
@@ -83,13 +87,27 @@ func parseTailscale(out []byte) ([]Candidate, error) {
 	if err := json.Unmarshal(out, &st); err != nil {
 		return nil, err
 	}
+	if st.BackendState != "" && st.BackendState != "Running" {
+		return nil, fmt.Errorf("Tailscale is %s; connect or sign in to discover machines", st.BackendState)
+	}
 	var selfUser int64
 	var res []Candidate
 	conv := func(p tsPeer, self bool) Candidate {
 		on := p.Online || self
 		dns := strings.TrimSuffix(p.DNSName, ".")
+		destination := dns
+		if destination == "" && len(p.TailscaleIPs) > 0 {
+			destination = p.TailscaleIPs[0]
+		}
+		name := firstLabel(dns)
+		if name == "" {
+			name = p.HostName
+		}
+		if name == "" {
+			name = destination
+		}
 		c := Candidate{
-			Name: firstLabel(dns), Destination: dns, Via: []string{"tailscale"}, OS: normOS(p.OS),
+			Name: name, Destination: destination, Via: []string{"tailscale"}, OS: normOS(p.OS),
 			Online: &on, DNSName: dns, IPs: p.TailscaleIPs, SSHHostKeys: p.SSHHostKeys, Self: self, LastSeen: p.LastSeen,
 		}
 		if u, ok := st.User[itoa(p.UserID)]; ok {
@@ -108,7 +126,7 @@ func parseTailscale(out []byte) ([]Candidate, error) {
 	sort.Strings(keys)
 	for _, k := range keys {
 		p := st.Peer[k]
-		if p.Expired || mobileOS(p.OS) || p.DNSName == "" {
+		if p.Expired || mobileOS(p.OS) || p.DNSName == "" && len(p.TailscaleIPs) == 0 {
 			continue
 		}
 		c := conv(p, false)
