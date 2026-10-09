@@ -188,7 +188,7 @@ function cloudStartup() {
  const apply=h("button",{class:"btn primary",disabled:true},"Install reviewed startup files");
  apply.addEventListener("click",async()=>{
   if(!preview)return;apply.disabled=true;form.disabled=true;prepare.disabled=true;error.textContent="";
-  try{const id=preview.id;await pending("Install reviewed cloud startup files",()=>api("CloudStartupApply",id));result.append(h("p",{},"Startup files installed. No cloud identity was created or enrolled."));preview=null;form.disabled=true;prepare.disabled=true;}
+  try{const id=preview.id;await pending("Install reviewed cloud startup files",()=>api("CloudStartupApply",id));result.append(h("p",{},"Startup files installed locally. Commit and push the reviewed files to the cloud environment’s selected branch, prepare and publish its setup, then verify the files and helper in a new task. No cloud identity was created or enrolled."));preview=null;form.disabled=true;prepare.disabled=true;}
   catch(e){error.textContent=String(e?.message||e);preview=null;prepare.disabled=false;form.disabled=false;}
  });
  const prepare=h("button",{class:"btn",onclick:async()=>{
@@ -197,7 +197,7 @@ function cloudStartup() {
   try{
    preview=await api("CloudStartupPreview",provider.value,version.value.trim(),origin.value.trim(),repository);
    const p=preview.setup;
-   result.replaceChildren(h("h3",{},"Review startup changes"),...p.changes.map(change=>h("p",{class:"mono"},`${change.action} · ${change.path}`)),h("p",{class:"muted"},p.reason),h("p",{},p.provider==="claude-hosted" ? "The cloud-only SessionStart hook prepares fresh keys quietly. Setup installs the binary; an actual session must claim an invitation and receive fingerprint approval separately." : "Paste the generated install script and Start skill into the provider's environment setup. A Start skill is an instruction; lifecycle support remains unqualified."),
+   result.replaceChildren(h("h3",{},"Review startup changes"),...p.changes.map(change=>h("p",{class:"mono"},`${change.action} · ${change.path}`)),h("p",{class:"muted"},p.reason),h("p",{},p.provider==="claude-hosted" ? "The cloud-only SessionStart hook prepares fresh keys quietly. Setup installs the binary; an actual session must claim an invitation and receive fingerprint approval separately." : "Review the AGENTS.md startup guidance, commit and push the generated files, then update and publish the provider environment. Repository guidance and Start skill instructions require a real task identity; automatic lifecycle support remains unqualified."),
     h("button",{class:"btn",onclick:()=>api("CopyText",p.installScript).catch(fail)},"Copy environment install script"),p.startSkill ? h("button",{class:"btn",onclick:()=>api("CopyText",p.startSkill).catch(fail)},"Copy Start skill instructions") : null);
    apply.disabled=false;
   }catch(e){error.textContent=String(e?.message||e);preview=null}

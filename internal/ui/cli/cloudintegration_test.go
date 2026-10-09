@@ -3,11 +3,57 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/roeehrl/hopsesh/internal/core/cloudintegration"
 )
+
+func TestCloudStartupCLIReviewsAndInstallsGuidanceWithoutIdentity(t *testing.T) {
+	repo, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := filepath.Join(t.TempDir(), "unused-state")
+	t.Setenv("HOPSESH_STATE_DIR", state)
+	for _, preview := range []bool{true, false} {
+		cmd := cloudStartupInstallCmd()
+		args := []string{repo, "--provider", "codex-current", "--version", "0.5.0"}
+		if preview {
+			args = append(args, "--dry-run")
+		}
+		cmd.SetArgs(args)
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		if err = cmd.ExecuteContext(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		var result struct {
+			cloudintegration.RepositorySetup
+			Applied bool `json:"applied"`
+		}
+		if err = json.Unmarshal(out.Bytes(), &result); err != nil || result.Applied == preview || result.Connected {
+			t.Fatal("incorrect startup review outcome", err)
+		}
+		found := false
+		for _, change := range result.Changes {
+			if change.Path == "AGENTS.md" && change.Action == "create" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("review omitted repository guidance")
+		}
+		_, err = os.Stat(filepath.Join(repo, "AGENTS.md"))
+		if preview && !os.IsNotExist(err) || !preview && err != nil {
+			t.Fatal("preview/apply wrote unexpected repository state", err)
+		}
+		if _, err = os.Stat(state); !os.IsNotExist(err) {
+			t.Fatal("repository setup created runtime or cloud identity state", err)
+		}
+	}
+}
 
 func TestCloudPrepareRetainsActualHookReasonAndManualOrigin(t *testing.T) {
 	dir, err := filepath.EvalSymlinks(t.TempDir())

@@ -541,6 +541,20 @@ and native/provider validation must remain distinct.
 | P1 / retention | Orphan beyond actual expiration header | Authenticated absence without manual deletion; lag recorded |
 | P1 / hosted load | Normal reconciliation, storm, renewal, cleanup | Whole-service metrics/cost, bounded quotas, staging cleaned and paused |
 
+The subsequent Codex experiment distinguishes instruction delivery from task
+identity. The published Start skill failed a minimal nonsecret marker probe;
+root repository guidance succeeded after setup explicitly updated its cached
+checkout. The task read `AGENTS.md` from disk after initial runtime checks,
+but no documented current task ID was available. The revised implementation
+therefore adds an explicitly reviewed, ownership-checked `AGENTS.md` block that
+points to disconnected startup instructions. It preserves unrelated text and
+refuses overrides, altered blocks and stale reviews. Setup/local/other-agent
+execution is excluded. Actual task identity must come from documented context
+or an explicitly supplied current task URL; environment/configuration IDs are
+never substitutes. Neither mechanism is represented as a guaranteed callback.
+See [repository guidance](https://learn.chatgpt.com/docs/agent-configuration/agents-md)
+and the [experiment evidence](relay-hosted-qualification.md#codex-prepared-filesystem-publication-correction).
+
 Implement local diagnostic/retry improvements while native CI runs. Repeat the
 disposable provider tests through supported approval and published environments.
 Retention still requires elapsed time, and wider load requires hosted evidence.

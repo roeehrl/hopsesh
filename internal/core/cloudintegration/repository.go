@@ -41,6 +41,7 @@ type startupOwnership struct {
 	Version  string            `json:"version"`
 	Files    map[string]string `json:"files"`
 	Hook     string            `json:"hook,omitempty"`
+	Guidance string            `json:"guidance,omitempty"`
 }
 
 func startupHash(body []byte) string { sum := sha256.Sum256(body); return hex.EncodeToString(sum[:]) }
@@ -141,6 +142,11 @@ func PlanRepository(provider, version, origin, repository string) (*RepositorySe
 		}
 		plan.before[name] = before
 	}
+	if provider == "codex-current" {
+		if err = plan.codexGuidance(root, &record); err != nil {
+			return nil, err
+		}
+	}
 	if provider == "claude-hosted" {
 		name := ".claude/settings.json"
 		before, err := readStartup(root, name)
@@ -228,7 +234,7 @@ func PlanRepository(provider, version, origin, repository string) (*RepositorySe
 	}
 	record.Schema, record.Provider, record.Version = 1, provider, version
 	for name, body := range plan.files {
-		if name != ".claude/settings.json" {
+		if name != ".claude/settings.json" && name != "AGENTS.md" {
 			record.Files[name] = startupHash(body)
 		}
 	}
@@ -286,7 +292,7 @@ func (p *RepositorySetup) Apply(ctx context.Context) error {
 			if name == p.record {
 				return 2
 			}
-			if name == ".claude/settings.json" {
+			if name == ".claude/settings.json" || name == "AGENTS.md" {
 				return 1
 			}
 			return 0

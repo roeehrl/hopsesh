@@ -239,6 +239,17 @@ race detector in 2.36 seconds, including preserving a destination that appears
 during download. The installed 0.4 application remains untouched. These are
 staging artifacts, not a published GitHub release or final release attestation.
 
+Source `3650f60` was separately exported and built as universal candidate
+`0.5.0-staging.20261009.3650f60`. Local Developer ID signing, Apple notarization and
+both app/DMG stapling succeeded. The signed-manifest production installer passed
+new installation, embedded-CLI version verification, existing-app refusal and
+concurrently appearing destination preservation (2.76 seconds). The entire
+macOS updater package passed under the race detector (4.34 seconds). Artifacts
+remain outside Applications under `/tmp/hopsesh-candidate-3650f60.2iG1j7/macos`;
+build and installer logs are `/tmp/hopsesh-candidate-3650f60-build.log` and
+`/tmp/hopsesh-candidate-3650f60-install.log`. No GitHub release or cloud download
+publication was performed for this candidate.
+
 ## Provider qualification and hosted enrollment
 
 The October 8 installation attempts returned curl exit 7 with HTTP/CONNECT
@@ -488,6 +499,34 @@ remain unknown, not zero. Billing also applies account-level included usage and
 rounding, so multiplying this short test's counts by unit prices is not an
 invoice; see [R2 pricing](https://developers.cloudflare.com/r2/pricing/).
 
+A further October 9 readback adds a **post-cleanup R2 sample at 10:40 UTC**:
+one object, 256 payload bytes, 43 metadata bytes and zero uploads. The SQL samples
+remain 417,792 Mailbox bytes and 16,384 Authorization bytes at 10:15 UTC.
+The result is `/tmp/hopsesh-load-storage-post-cleanup.json`. The residual R2 size
+is consistent with the retained orphan canary, but aggregate analytics do not
+identify its key or prove its expiration. No manual deletion was used to obtain
+this result. The short-window post-cleanup storage observation is now available;
+peak/billing-period storage and actual orphan expiration remain separate.
+
+Cost interpretation was rechecked against current primary pricing pages. The
+Worker's request duration is not billed CPU; use its measured CPU milliseconds.
+For Durable Objects, the periodic dataset reports 13.894412416 total GB-seconds
+across both classes; do not derive duration charges from overlapping HTTP/stream
+wall times. Its invocation dataset has 3,251 HTTP, 99 alarm and 301 hibernation
+events. Do not classify all 301 hibernation events as incoming billable messages:
+the periodic dataset reports zero inbound messages and 701 outbound messages,
+and outgoing messages are free. Billing applies its own event classification,
+included allocation and rounding. See
+[Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/)
+and [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/).
+
+R2 successful puts are Class A; gets and bucket heads are Class B; deletes are
+free operations. SQL reads, writes and stored bytes use the SQLite dimensions,
+not the older key-value storage rates. Neither sparse storage samples nor the
+100-client burst should be linearly extrapolated into a monthly invoice. Account
+usage, included allocations, billing-unit rounding, daily storage peaks and
+download-service storage must be included in the final operating-cost estimate.
+
 ## Codex prepared-filesystem publication correction
 
 A fresh task from the earlier published configuration had neither the versioned
@@ -527,3 +566,58 @@ The task's earlier categorical absence claim is therefore narrowed to no
 accessible startup instructions or observed invocation. Delivery versus lookup
 remains unresolved; automatic startup still does not pass. Both diagnostics were
 read-only, with no preparation, keys, connections or permission changes.
+
+A separate minimal delivery experiment prepended a nonsecret local-file marker
+instruction to the Start skill, reviewed it through the setup UI and published
+the prepared environment. A new task received an ordinary README-summary request
+with no prohibition on startup. Its source version was
+`7633e54b-2d4d-4006-9163-ec513f170c7b~cecfgver_6ac8c49aeca08197966b0a04df2cd3eb`.
+The helper was inherited, but the marker was absent; the task reported no Start
+instructions in initial context and no execution. This removes task-ID binding
+as the sole explanation of that experiment's failure. It does not locate the
+provider's internal delivery fault or qualify automatic startup. Screenshot:
+`/tmp/hopsesh-start-skill-proof-result.png`. A fresh supported Edit workflow
+restored the original 707-character Start skill and published it; the diagnostic
+prefix is no longer in the published configuration.
+
+Official [repository guidance](https://learn.chatgpt.com/docs/agent-configuration/agents-md)
+is a separate documented instruction mechanism. A nonsecret `AGENTS.md` marker
+probe was committed as `b16380d` in the disposable `hopsesh-cloud-smoke` repository
+to test that route independently. It authorizes only a local diagnostic file,
+skips setup/local/Claude execution, and grants no connector or transcript access.
+The first task inherited the old `b80bcbd` checkout, making its negative result
+invalid for this route. Setup was explicitly fast-forwarded to `b16380d` and
+republished. Fresh task `01a1204d-203c-7500-9543-602d1938f07c` then read the root
+instructions from disk and created the diagnostic before answering its ordinary
+README request. Read-only verification found HEAD `b16380d`, only untracked
+`.hopsesh/`, and the expected marker/reason with timestamp
+`2026-10-09T10:55:28.455991Z`. No proof was repaired during verification.
+The instructions were read after initial runtime checks, not supplied before
+the first action. The task found no documented current task ID: only environment
+and configuration IDs. This qualifies repository-instruction discovery in that
+task, not automatic identity binding or connector startup. The generated setup
+now includes reviewed, ownership-checked repository guidance while retaining an
+explicit unsupported state when the actual task identity is unavailable.
+
+The generated setup was then installed through the actual CLI into the disposable
+repository and committed as `85876c9`, replacing the diagnostic marker probe.
+Fresh editable setup fast-forwarded to that exact commit, retained the verified
+`0.5.0-staging.20261009.f134df2` helper, saved the generated 1,130-byte Start skill
+and published without creating keys. Task `01a1205b-2d3c-7339-aa04-a5b26f3e4050`
+read the checked-in instructions during an ordinary README request and reported
+unsupported identity binding without preparing an incarnation. After its exact
+current URL was supplied explicitly, passive `current` found no helper state;
+preparation created incarnation `a46d6209717bc7ad37e4200e8f5d3cee`, bound to that
+task, with source `manual`, expiry `2026-10-09T12:12:08.880072089Z` and no routing
+credential, approved peer or transcript-export grant. The next ordinary message
+retained the same ID and expiry and reported disconnected/awaiting authorization.
+Screenshots: `/tmp/hopsesh-generated-startup-published.png`,
+`/tmp/hopsesh-generated-startup-missing-identity.png` and
+`/tmp/hopsesh-generated-startup-continuity.png`. Cleanup verified that no connector
+was running, removed only that incarnation and its exact current-slot pointer,
+and confirmed passive `current` could no longer find it. The repository remained
+clean at `85876c9`; no network credentials were issued or needed revocation.
+Cleanup proof: `/tmp/hopsesh-generated-startup-cleanup.png`.
+This qualifies instruction discovery, missing-ID
+refusal, explicitly bound preparation and same-task continuity; it does not claim
+automatic ID discovery, VM pause/rebuild or a running connector.

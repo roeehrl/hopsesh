@@ -18,9 +18,10 @@ All notable changes to this project are documented here. The format follows
   source timestamps, expiry, pause state and current approvals remain explicit.
 
 - Review and install cloud startup files from Settings or the CLI. Claude's
-  cloud-only hook prepares fresh keys quietly; Codex setup includes environment
-  Start skill instructions with an explicit unqualified-startup status.
-  Existing settings are preserved, modified files are
+  cloud-only hook prepares fresh keys quietly; Codex setup includes reviewed
+  repository guidance and optional environment Start skill instructions with an
+  explicit unqualified-startup status. Missing task identity remains unsupported.
+  Existing settings and unrelated repository instructions are preserved, modified files are
   refused, and stale previews cannot overwrite concurrent edits.
 
 - Cloud session invitations in CLI and Settings: admit one fresh provider/session

@@ -27,6 +27,13 @@ or hook is refused; installation does not overwrite it. Repeated installation
 is idempotent. File access is pinned to the chosen repository with `os.Root`;
 links, oversized settings and nonregular targets are refused.
 
+Review, commit and push these public startup files to the branch selected by the
+cloud environment before starting a new cloud task. A local installation does
+not update the provider's checkout. Run the copied install script during the
+provider's environment preparation and verify the helper there. Then check the
+actual repository commit and startup files in a fresh task; cached setup or an
+older published checkout can otherwise omit the hook entirely.
+
 The SessionStart script is a no-op unless `CLAUDE_CODE_REMOTE=true`. On startup,
 resume, clear, compact or fork, it reads the documented input and prepares a fresh
 scoped incarnation. It uses `--quiet` so successful startup does not inject its
@@ -50,20 +57,34 @@ Unknown or missing reasons are refused; old staging incarnations must be prepare
 again. The startup reason never changes task identity, peer approval or lineage.
 
 Codex writes `.hopsesh/cloud-install-codex-current.sh` and
-`.hopsesh/codex-start.md`. Copy their contents into the environment's Install
-script and Start skill fields. In the editable setup conversation, ask Codex to
+`.hopsesh/codex-start.md`, and adds a small marked block to root `AGENTS.md` that
+points normal cloud tasks to those startup instructions. Existing instructions
+outside the block are preserved byte-for-byte. Modified/removed Hopsesh blocks,
+ambiguous markers, linked files and root `AGENTS.override.md` are refused rather
+than overwritten. The review includes the `AGENTS.md` change; a new override or
+concurrent edit invalidates it. No existing repository instructions cross the
+GUI bridge. The root document must fit the default 32 KiB instruction budget;
+global or nested guidance may further affect delivery. See
+[Codex repository guidance](https://learn.chatgpt.com/docs/agent-configuration/agents-md).
+
+Copy the generated install script and optional Start skill into the environment
+configuration. In the editable setup conversation, ask Codex to
 **execute the verified Install script and check the installed helper version**
 before publishing. Saving those fields alone does not prepare the filesystem.
 Do not run `prepare` in this setup: reusable images must contain no session keys.
 Publish the prepared environment, then start a new task to verify the inherited
-binary and actual Start skill delivery. Existing tasks keep their own state;
+binary, intended repository commit and actual repository instruction delivery. Existing tasks keep their own state;
 repository refresh does not rerun installation or startup. This follows
 [Codex's environment publication model](https://learn.chatgpt.com/docs/environments/cloud-environments).
 
-The Start skill is a documented instruction mechanism,
-whose actual per-task startup, pause/resume and rebuild behavior still needs
-qualification. If the real task ID is unavailable, session binding must be
-reported unsupported. Current Codex Cloud native transcript export is also
+Both repository guidance and Start skill are instruction mechanisms, not
+guaranteed process callbacks. Setup/edit, local and other-agent sessions are
+excluded. If a documented real task ID is unavailable, the task must report
+unsupported binding and request its current task URL; it must never substitute
+a checkout path, environment ID or configuration ID. Instructions prepare at
+most once for the current incarnation and grant no connection, enrollment,
+export or permission change. Actual automatic preparation, pause/resume and
+rebuild still require qualification. Current Codex Cloud native transcript export is also
 unqualified. Legacy Codex and Work Cloud do not receive invented repository
 callbacks. Claude and current Codex startup files can coexist independently in
 the same repository, including different pinned helper versions.
@@ -75,8 +96,9 @@ defaults are qualified separately from these local installer and CLI tests.
 
 The current hosted qualification has verified Claude's actual `/compact`
 SessionStart callback and Codex's manually prepared observation-only connector,
-including reconnect and fresh-key renewal under one logical task. Automatic
-Codex startup, fresh environment publication, provider pause/rebuild and Claude
+including reconnect and fresh-key renewal under one logical task. Fresh Codex
+publication and inherited helper installation have also passed. Automatic
+Codex startup, provider pause/rebuild and Claude
 transcript export remain unqualified. Claude's automatic reviewer refused the
 explicitly approved export command and exact temporary allow rules; no permission
 mode was weakened to work around it. See the [hosted qualification record](relay-hosted-qualification.md)

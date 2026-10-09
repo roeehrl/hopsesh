@@ -157,7 +157,7 @@ func TestCodexStartupExportsInstructionsWithoutInventingCallbackOrEnrollment(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.CallbackSupported || plan.Connected || plan.Callback != "Start skill" {
+	if plan.CallbackSupported || plan.Connected || plan.Callback != "Repository guidance / Start skill" {
 		t.Fatal("startup instructions became a guaranteed callback")
 	}
 	if err = plan.Apply(t.Context()); err != nil {
