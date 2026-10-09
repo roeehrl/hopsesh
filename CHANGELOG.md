@@ -50,6 +50,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Failed transfers preserve the source machine's scan error and recovery hint
+  instead of reporting only that a session was not found. SFTP startup obeys
+  cancellation and deadlines; closing a session stops and reaps its SSH process
+  even when the server ignores end-of-input.
+
 - Trusting an SSH machine with an explicit host-key alias and a nonstandard
   port records the name OpenSSH actually checks. Host-key collection failures
   also retain the fallback client's error instead of showing only a server banner.

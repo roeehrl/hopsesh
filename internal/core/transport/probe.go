@@ -189,7 +189,7 @@ func (c *Conn) ScanHostKeys(ctx context.Context) ([]HostKey, *ResolvedHost, erro
 	scanCtx, cancelScan := context.WithTimeout(ctx, 10*time.Second)
 	ks := proc.CommandContext(scanCtx, bin, "-T", "5", "-p", r.Port, r.HostName)
 	ks.WaitDelay = 100 * time.Millisecond
-	var ksErr hostKeyDiagnostic
+	var ksErr sshDiagnostic
 	ks.Stderr = &ksErr
 	out, err := ks.Output()
 	if scanCtx.Err() != nil {
@@ -269,7 +269,7 @@ func (c *Conn) hostKeyViaSSH(ctx context.Context) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	cmd := proc.CommandContext(ctx, c.sshBinary, append(args, c.Dest, "exit")...)
-	var diagnostic hostKeyDiagnostic
+	var diagnostic sshDiagnostic
 	cmd.Stderr = &diagnostic
 	cmd.WaitDelay = 100 * time.Millisecond
 	runErr := cmd.Run() // the login may fail; the key is recorded first
@@ -284,12 +284,12 @@ func (c *Conn) hostKeyViaSSH(ctx context.Context) ([]byte, error) {
 }
 
 // Keep SSH diagnostics useful without retaining unbounded remote banner output.
-type hostKeyDiagnostic struct{ buffer bytes.Buffer }
+type sshDiagnostic struct{ buffer bytes.Buffer }
 
-func (d *hostKeyDiagnostic) Len() int       { return d.buffer.Len() }
-func (d *hostKeyDiagnostic) String() string { return d.buffer.String() }
+func (d *sshDiagnostic) Len() int       { return d.buffer.Len() }
+func (d *sshDiagnostic) String() string { return d.buffer.String() }
 
-func (d *hostKeyDiagnostic) Write(p []byte) (int, error) {
+func (d *sshDiagnostic) Write(p []byte) (int, error) {
 	n := len(p)
 	if remaining := 2048 - d.Len(); remaining > 0 {
 		_, _ = d.buffer.Write(p[:min(n, remaining)])

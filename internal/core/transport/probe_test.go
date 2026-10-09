@@ -123,7 +123,7 @@ func TestHostKeyFallbackFailureDiagnostic(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "missing-ssh") || !strings.Contains(err.Error(), "no host keys recorded") {
 		t.Fatalf("missing failure evidence: %v", err)
 	}
-	var d hostKeyDiagnostic
+	var d sshDiagnostic
 	for range 3 {
 		if n, err := fmt.Fprint(&d, strings.Repeat("x", 2000)); n != 2000 || err != nil {
 			t.Fatalf("diagnostic writer interrupted SSH: %d %v", n, err)
@@ -134,7 +134,7 @@ func TestHostKeyFallbackFailureDiagnostic(t *testing.T) {
 	}
 	// exec copies a subprocess pipe with io.Copy; an embedded Buffer's
 	// promoted ReadFrom would bypass a bounded Write implementation.
-	d = hostKeyDiagnostic{}
+	d = sshDiagnostic{}
 	if _, err := io.Copy(&d, struct{ io.Reader }{strings.NewReader(strings.Repeat("y", 6000))}); err != nil || d.Len() != 2048 {
 		t.Fatalf("subprocess-copy diagnostics not bounded: %d %v", d.Len(), err)
 	}
