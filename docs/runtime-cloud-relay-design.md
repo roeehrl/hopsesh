@@ -386,11 +386,17 @@ version rather than assuming every current documented feature exists there.
 
 Observed: Claude 2.1.295 refused disposable export as Data Exfiltration and the
 temporary permission-file write as Self-Modification. No temporary rules or
-export completed. A label alone does not identify the effective rule tier.
+export completed. The subsequently reviewed command output shows the effective
+configuration equals the installed shipped defaults in all four sections:
+Data Exfiltration is the hard-deny rule, Self-Modification is a soft-deny rule,
+and the relay/download domains are absent from the environment list. This
+establishes the effective tiers; it does not reveal the classifier's internal
+reasoning for the permission-file refusal. See the
+[qualification record](relay-hosted-qualification.md#actual-startup-and-scoped-connector-tests).
 
-Recommendation: collect only relevant effective-rule/denial details, with secrets
-and unrelated infrastructure redacted. Prefer a provider-supported exact-action
-manual retry. If absent, prepare a concrete user-operated manual-approval flow in
+Recommendation: retain only relevant effective-rule/denial details, with secrets
+and unrelated infrastructure redacted; this diagnostic is now complete. Prefer a
+provider-supported exact-action manual retry. If absent, prepare a concrete user-operated manual-approval flow in
 the actual cloud UI; a mode change is distinct from the approved command rule,
 and must not be silently substituted. Restore the prior mode afterward. Do not
 ask the model repeatedly to rewrite its own authorization. Do not substitute a

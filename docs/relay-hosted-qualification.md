@@ -361,6 +361,28 @@ transcript was exported. The owner revoked that unused invitation. Permission
 modes and unrelated settings were not changed; these refusals remain an external
 qualification blocker, not a successful export test.
 
+The completed read-only diagnostic in the same disposable conversation was
+reviewed directly on October 9. Its command output compares `claude auto-mode
+config` with the installed CLI's shipped defaults: all four sections are
+identical, and the relay/download domains are absent from the environment list.
+The effective rule inventory puts Data Exfiltration in `hard_deny` and
+Self-Modification in `soft_deny`. This explains why repeating the same export
+request under unchanged Auto settings is not a useful next test. The precise
+classifier reasoning for the permission-file refusal is not exposed; the
+configuration comparison does not establish it. No new diagnostic command,
+permission change, export or enrollment was needed to recover this evidence.
+The UI still shows Auto; only its menu and existing tool-output disclosures were
+opened. Evidence: [disposable qualification conversation](https://claude.ai/code/session_01NFYqYKdDjaLh2yLWavKqHD)
+and `/tmp/hopsesh-claude-effective-rules-20261009.png`.
+
+The [configuration reference](https://code.claude.com/docs/en/auto-mode-config)
+distinguishes classifier context from command permission rules and excludes
+project settings from `autoMode`. Do not respond by silently trusting the relay,
+editing classifier rules or routing the refused export through setup/hooks.
+The separately proposed temporary manual-mode experiment remains unapproved
+and unexecuted. Read-only diagnosis is complete; actual authorized export and
+connector lifecycle remain open.
+
 For current Codex Cloud, `CODEX_SESSION_ID` and `CODEX_THREAD_ID` matched the actual
 provider UI chat ID `01a11d8e-638b-738d-92e9-58933275d04e`. This is an observed
 binding in this environment, not a documented future lifecycle guarantee. Manual
