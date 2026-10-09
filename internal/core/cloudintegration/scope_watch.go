@@ -1,6 +1,7 @@
 package cloudintegration
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,16 +13,30 @@ import (
 	"github.com/roeehrl/hopsesh/internal/localstate"
 )
 
-// Two private directory watches retire superseded connectors without another
-// polling timer. No vendor transcript or sibling relay delivery wakes this path.
+// Directory watches retire superseded connectors without another polling timer.
+// No vendor transcript or sibling relay delivery triggers scope validation.
 // A failed scope watch stops access rather than extending a stale incarnation.
 func (s Incarnation) watchScope(ctx context.Context, cancel context.CancelCauseFunc) (func(), error) {
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
 	}
-	relevant := map[string]bool{s.activePath(): true, filepath.Join(s.Directory, "task.json"): true}
-	b, err := localstate.ReadPrivateFile(filepath.Join(s.Directory, "task.json"), 8192)
+	// Install watches before reading the initial association, so a change
+	// between observation and subscription cannot leave the wrong task watched.
+	parent := filepath.Dir(s.Directory)
+	scopeDirectories := map[string]bool{parent: true, s.Directory: true}
+	// Watching the containing directory also observes a rename of the sessions
+	// directory on backends that only report changes to a watched directory's
+	// children. Only the two exact scope directories can invalidate this host.
+	for _, dir := range []string{filepath.Dir(parent), parent, s.Directory} {
+		if err = w.Add(dir); err != nil {
+			_ = w.Close()
+			return nil, err
+		}
+	}
+	taskPath := filepath.Join(s.Directory, "task.json")
+	relevant := map[string]bool{s.activePath(): true, taskPath: true}
+	b, err := localstate.ReadPrivateFile(taskPath, 8192)
 	if err == nil {
 		var a taskAssociation
 		if json.Unmarshal(b, &a) != nil || a.Task.Verify(a.Task.Owner.ID) != nil {
@@ -32,12 +47,6 @@ func (s Incarnation) watchScope(ctx context.Context, cancel context.CancelCauseF
 	} else if !os.IsNotExist(err) {
 		_ = w.Close()
 		return nil, err
-	}
-	for _, dir := range []string{filepath.Dir(s.Directory), s.Directory} {
-		if err = w.Add(dir); err != nil {
-			_ = w.Close()
-			return nil, err
-		}
 	}
 	if err = s.current(); err != nil {
 		_ = w.Close()
@@ -57,7 +66,25 @@ func (s Incarnation) watchScope(ctx context.Context, cancel context.CancelCauseF
 					}
 					return
 				}
+				if scopeDirectories[event.Name] && event.Op&(fsnotify.Rename|fsnotify.Remove) != 0 {
+					cancel(errors.New("cloud scope directory moved or removed; restart the connector"))
+					return
+				}
 				if relevant[event.Name] {
+					if event.Name == taskPath {
+						current, err := localstate.ReadPrivateFile(taskPath, 8192)
+						if err != nil && !os.IsNotExist(err) {
+							cancel(err)
+							return
+						}
+						// Association is fixed for this running connector. In
+						// particular, deleting it must not silently drop logical
+						// task supersession checks and retain the old access.
+						if !bytes.Equal(current, b) {
+							cancel(errors.New("cloud task association changed; restart the connector"))
+							return
+						}
+					}
 					if err := s.current(); err != nil {
 						cancel(err)
 						return

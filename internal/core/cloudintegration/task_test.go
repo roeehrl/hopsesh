@@ -205,3 +205,67 @@ func TestCloudScopeWatchJoinsOnChangedNativeIDTaskRebuild(t *testing.T) {
 		t.Fatal("scope change lost its shutdown reason", context.Cause(ctx))
 	}
 }
+
+func TestCloudScopeWatchStopsWhenTaskAssociationIsRemoved(t *testing.T) {
+	parent, scope := sessionFixture(t)
+	ticket := taskInvitationIssuer(t)(scope.Session, "")
+	instance, err := Begin(t.Context(), parent, scope, "manual", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := instance.AssociateTask(t.Context(), ticket); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancelCause(t.Context())
+	join, err := instance.watchScope(ctx, cancel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { cancel(context.Canceled); join() }()
+	// Losing this file must not turn an associated connector into an
+	// unassociated one that ignores later logical-task supersession.
+	if err := os.Remove(filepath.Join(instance.Directory, "task.json")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ctx.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("connector stayed active after losing its logical-task association")
+	}
+	if !strings.Contains(context.Cause(ctx).Error(), "association changed") {
+		t.Fatal("association removal lost its shutdown reason", context.Cause(ctx))
+	}
+}
+
+func TestCloudScopeWatchStopsWhenDirectoryIsMoved(t *testing.T) {
+	for _, directory := range []string{"incarnation", "parent"} {
+		t.Run(directory, func(t *testing.T) {
+			parent, scope := sessionFixture(t)
+			instance, err := Begin(t.Context(), parent, scope, "manual", time.Hour)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancelCause(t.Context())
+			join, err := instance.watchScope(ctx, cancel)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { cancel(context.Canceled); join() }()
+			path := instance.Directory
+			if directory == "parent" {
+				path = parent
+			}
+			if err := os.Rename(path, path+"-moved"); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-ctx.Done():
+			case <-time.After(5 * time.Second):
+				t.Fatal("connector kept running after its watched directory moved")
+			}
+			if !strings.Contains(context.Cause(ctx).Error(), "scope directory") {
+				t.Fatal("directory change lost its shutdown reason", context.Cause(ctx))
+			}
+		})
+	}
+}

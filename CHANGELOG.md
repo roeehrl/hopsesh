@@ -50,6 +50,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Cloud connectors stop when their task association changes or their state
+  directories move, preserving supersession checks without polling. Watchers
+  subscribe before reading task metadata so startup cannot miss a scope change.
+
 - Cloud task lookup rejects a copied or corrupted current-session pointer that
   refers to another provider, session or workspace, instead of returning that
   task's identity. Lookup remains read-only and preserves independent forks.
