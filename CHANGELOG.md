@@ -50,6 +50,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Repository probes no longer wait for the full inactivity timeout when a fast
+  folder finishes before its watchdog installs its signal handler. Canceling a
+  local probe also terminates its child processes, avoiding stray background work.
+- Push refreshes cached or incomplete source selections before opening a peer
+  connection, preventing stale-source failures and crashes after cached discovery.
+- Relay HTTP recovery retries eligible exact submissions and acknowledgments on
+  failed reused connections, without replaying policy refusals or fresh failures.
+
 - Failed transfers preserve the source machine's scan error and recovery hint
   instead of reporting only that a session was not found. SFTP startup obeys
   cancellation and deadlines; closing a session stops and reaps its SSH process

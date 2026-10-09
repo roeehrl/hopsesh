@@ -114,6 +114,8 @@ func TimeoutError(seconds string) string {
 // partial output. Only sh, sleep, kill, wc and mktemp are needed (no timeout(1), which
 // macOS lacks). A git that cannot be killed (waiting on a cloud drive) is left behind,
 // holding none of the script's output, so the script still ends.
+// The watchdog also checks completion: a fast folder can finish before the shell
+// installs its TERM handler, so the signal alone cannot guarantee prompt cleanup.
 const probeScript = `
 hp_git() { git --no-optional-locks -c core.fsmonitor=false "$@"; hp_rc=$?; printf . >&3; return $hp_rc; }
 hp_one() {
@@ -154,7 +156,9 @@ for d in "$@"; do
     trap 'kill $hp_s 2>/dev/null; exit 0' TERM
     hp_idle=0; hp_last=
     while :; do
+      [ -f "$hp_o.ok" ] && exit 0
       sleep 1 & hp_s=$!; wait $hp_s
+      [ -f "$hp_o.ok" ] && exit 0
       hp_now=$(wc -c <"$hp_o.tick" 2>/dev/null)
       if [ "$hp_now" = "$hp_last" ]; then hp_idle=$((hp_idle + 1)); else hp_last=$hp_now; hp_idle=0; fi
       if [ "$hp_idle" -ge "$hp_limit" ]; then kill -9 $hp_p 2>/dev/null; exit 0; fi
@@ -340,6 +344,7 @@ func ProbeLocal(ctx context.Context, dirs, excl []string) ([]GitState, error) {
 	}
 	script, args := ProbeScript(dirs, excl, ProbeTimeout)
 	cmd := proc.CommandContext(ctx, sh, append([]string{"-c", script, "hopsesh-probe"}, args[1:]...)...)
+	configureProbeCancellation(cmd)
 	// The script leaves a git it could not stop behind; should one still hold the output
 	// open, stop waiting for it shortly after the shell has ended.
 	cmd.WaitDelay = 2 * time.Second

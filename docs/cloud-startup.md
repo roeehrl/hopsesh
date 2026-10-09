@@ -94,12 +94,16 @@ chosen downloads origin. Preparing repository files does not establish that the
 download exists, a cloud session is running, or the relay is connected. Hosted
 defaults are qualified separately from these local installer and CLI tests.
 
-The current hosted qualification has verified Claude's actual `/compact`
-SessionStart callback and Codex's manually prepared observation-only connector,
-including reconnect and fresh-key renewal under one logical task. Fresh Codex
-publication and inherited helper installation have also passed. Automatic
-Codex startup, provider pause/rebuild and Claude
-transcript export remain unqualified. Claude's automatic reviewer refused the
+The current hosted qualification has verified Claude's actual `/compact`, cold
+and cached startup callbacks, plus idle continuation producing fresh disconnected
+identities with source `resume`. The cached continuation retained its native
+session and repository while acquiring a new boot/process and fresh keys; that
+does not establish a reclaimed-VM rebuild or authorized connector continuation.
+Codex's manually prepared observation-only connector passed reconnect and
+fresh-key renewal under one logical task. Fresh Codex publication and inherited
+helper installation also passed. Automatic Codex startup, provider rebuilds,
+authorized Claude connector continuation and Claude transcript export remain
+unqualified. Claude's automatic reviewer refused the
 explicitly approved export command and exact temporary allow rules; no permission
 mode was weakened to work around it. See the [hosted qualification record](relay-hosted-qualification.md)
 for the tested versions, actual evidence and cleanup.

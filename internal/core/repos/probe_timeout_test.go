@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 	"unicode/utf16"
+
+	"github.com/roeehrl/hopsesh/internal/core/proc"
 )
 
 // The test binary is the stand-in git when HOPSESH_TEST_REAL_GIT is set.
@@ -39,6 +41,9 @@ func standInGit(real string) int {
 	for _, a := range os.Args[1:] {
 		switch {
 		case strings.Contains(a, "offloaded"):
+			if marker := os.Getenv("HOPSESH_TEST_PROBE_PID"); marker != "" {
+				_ = os.WriteFile(marker, []byte(strconv.Itoa(os.Getpid())), 0600)
+			}
 			time.Sleep(time.Minute)
 			return 1
 		case strings.Contains(a, "busy"):
@@ -245,5 +250,30 @@ func TestProbeScriptsCarryTheLimit(t *testing.T) {
 	}
 	if strings.Contains(sh, "@LIMIT@") || strings.Contains(ps, "@LIMIT@") || strings.Contains(sh, "@EXCLUDES@") || strings.Contains(ps, "@EXCLUDES@") {
 		t.Fatal("a placeholder was left")
+	}
+}
+
+// Fault-inject the lost TERM observed when a fast folder finishes while its
+// watchdog is still installing the signal handler. Completion must not depend
+// solely on that signal or consume the whole Git inactivity deadline.
+func TestProbeWatchdogRecognizesCompletedFolderWithoutSignal(t *testing.T) {
+	script, args := ProbeScript([]string{filepath.Join(t.TempDir(), "missing")}, nil, 30*time.Second)
+	script = "kill() { case \"$1\" in -9) command kill \"$@\" ;; *) return 0 ;; esac; }\n" + script
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	sh, err := findSh()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := proc.CommandContext(ctx, sh, append([]string{"-c", script, "probe-test"}, args[1:]...)...)
+	configureProbeCancellation(cmd)
+	cmd.WaitDelay = time.Second
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("completed folder waited for the inactivity deadline: %v", err)
+	}
+	states := ParseProbe(out, nil)
+	if len(states) != 1 || states[0].Exists || states[0].Error != "" {
+		t.Fatalf("missing folder result changed: %+v", states)
 	}
 }

@@ -1,5 +1,36 @@
 # Hosted 0.5 staging qualification
 
+## October 9 follow-up evidence at `81da701`
+
+The universal macOS candidate `0.5.0-staging.20261009.81da701` is signed,
+notarized and stapled. Apple submission `078e69dd-71c1-4f50-895a-10905ded892e`
+was accepted with no issues. The DMG is 41,243,494 bytes, SHA256
+`61dab7cb6ac5ce290b50f284d0aaef54c64df14593daf5b28b3c85ab4793b145`.
+App/DMG staples and Gatekeeper validate; the complete production installer/updater
+race suite passes in 4.133 seconds. The embedded CLI reuses one runtime owner,
+observes four disposable sessions and stops cleanly. Evidence is
+`/tmp/hopsesh-candidate-81da701-evidence.json` and its referenced logs.
+
+Qualification initially launched the embedded CLI before app stapling. A
+controlled comparison reproduced stapler error 73 on a launched copy; an
+unlaunched copy with identical non-ticket contents stapled successfully. Runtime
+verification was repeated after completed stapling. Preserve the original failure
+and comparison in the evidence; this was a qualification-ordering correction,
+not a product or security-policy change. This candidate remains staging-only.
+
+The existing cached-start Claude task was continued at 20:48 UTC. Actual expanded
+command outputs show a new boot/process, the same native session and clean
+repository, and an automatically prepared fresh disconnected incarnation with
+source `resume`, awaiting authorization with transcript export disabled. A second
+passive read retained that incarnation. The helper remains pinned to `f134df2`;
+the relevant preparation/current and Claude hook code is unchanged through
+`81da701`. An intermediate expired incarnation also records `resume`, but its
+provider trigger is unknown. No manual preparation, claim, connector, export or
+permission change occurred. Evidence:
+`/tmp/hopsesh-claude-cached-idle-resume-20261009.json` and its screenshot.
+These observations qualify cached-task idle continuation and fresh disconnected
+preparation, not reclaimed-VM rebuilding or authorized connector continuation.
+
 2026-10-08, isolated codonic.dev account resources. This is a qualification record,
 not a published 0.5 release or a claim that provider lifecycle gates passed.
 
