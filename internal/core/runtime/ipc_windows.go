@@ -47,7 +47,7 @@ func dial(ctx context.Context, n Namespace) (net.Conn, error) {
 		if err == nil {
 			var token windows.Token
 			err = windows.OpenProcessToken(h, windows.TOKEN_QUERY, &token)
-			windows.CloseHandle(h)
+			_ = windows.CloseHandle(h)
 			if err == nil {
 				u, e := token.GetTokenUser()
 				token.Close()

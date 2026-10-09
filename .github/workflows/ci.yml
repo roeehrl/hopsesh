@@ -116,6 +116,11 @@ jobs:
       - name: one observer with zero, one and multiple idle clients
         shell: bash
         run: go test -race -count=1 -run TestRuntimeIdleClients -timeout 2m ./internal/e2e
+      - name: actual cross-user namespace, state and IPC isolation
+        shell: bash
+        env:
+          HOPSESH_RUNTIME_CROSS_USER: "1"
+        run: go test -race -count=1 -v -run '^TestRuntimeDifferentOSUserIsolation$' -timeout 2m ./internal/core/runtime
       - name: prepare disposable Linux user manager
         if: runner.os == 'Linux'
         shell: bash
