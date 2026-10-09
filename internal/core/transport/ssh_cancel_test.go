@@ -1,0 +1,68 @@
+package transport
+
+import (
+	"context"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"testing"
+	"time"
+)
+
+func TestSSHRunPreservesCancellation(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "ssh.go")
+	// Partial output is not proof of successful execution. A stalled SSH client
+	// killed by CommandContext yields ExitError (code 1 on Windows), which must
+	// never be mistaken for the remote command's own status.
+	body := `package main
+import ("fmt"; "os"; "time")
+func main() {
+ for _, arg := range os.Args[1:] { if arg == "-G" { fmt.Print("hostname 127.0.0.1\nport 22\n"); return } }
+ fmt.Println("Linux"); time.Sleep(3*time.Second)
+}
+`
+	if err := os.WriteFile(source, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, "ssh")
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
+	if out, err := exec.CommandContext(t.Context(), "go", "build", "-o", bin, source).CombinedOutput(); err != nil {
+		t.Fatalf("build SSH fixture: %v\n%s", err, out)
+	}
+	for _, kind := range []string{"caller deadline", "connection deadline", "caller cancellation"} {
+		t.Run(kind, func(t *testing.T) {
+			ctx := t.Context()
+			c := &Conn{Dest: "fixture", StateDir: dir, sshBinary: bin, Timeout: time.Minute}
+			want := context.DeadlineExceeded
+			switch kind {
+			case "caller deadline":
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, 200*time.Millisecond)
+				defer cancel()
+			case "connection deadline":
+				c.Timeout = 200 * time.Millisecond
+			case "caller cancellation":
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				defer cancel()
+				timer := time.AfterFunc(200*time.Millisecond, cancel)
+				defer timer.Stop()
+				want = context.Canceled
+			}
+			start := time.Now()
+			out, err := c.Run(ctx, "uname -s")
+			var remote *RemoteError
+			if !errors.Is(err, want) || errors.As(err, &remote) || time.Since(start) > 2*time.Second {
+				t.Fatalf("%s misclassified: stdout=%q error=%v elapsed=%v", kind, out, err, time.Since(start))
+			}
+			if want == context.DeadlineExceeded && !errors.Is(err, ErrUnreachable) {
+				t.Fatalf("deadline lost transport failure classification: %v", err)
+			}
+		})
+	}
+}

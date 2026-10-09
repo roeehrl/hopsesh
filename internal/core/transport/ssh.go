@@ -229,6 +229,11 @@ func (c *Conn) run(ctx context.Context, remoteCmd string) ([]byte, error) {
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	start := time.Now()
 	err = cmd.Run()
+	// CommandContext may return ExitError for the process it killed (exit 1 on
+	// Windows). That is a local cancellation, never a remote command status.
+	if err != nil && ctx.Err() != nil {
+		err = ctx.Err()
+	}
 	c.Log.Write(audit.Entry{Action: "ssh.exec", Host: c.Dest, Detail: map[string]any{
 		"command": firstLine(remoteCmd), "ms": time.Since(start).Milliseconds(), "ok": err == nil}})
 	if err != nil {
@@ -366,7 +371,10 @@ func classify(err error, stderr string) error {
 		return &RemoteError{Code: ee.ExitCode(), Stderr: strings.TrimSpace(stderr)}
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return fmt.Errorf("%w (timed out)", ErrUnreachable)
+		return fmt.Errorf("%w (timed out): %w", ErrUnreachable, err)
+	}
+	if errors.Is(err, context.Canceled) {
+		return err
 	}
 	low := strings.ToLower(stderr)
 	switch {

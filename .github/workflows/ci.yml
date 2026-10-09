@@ -497,7 +497,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $probe '-test.run=^TestNativeSSH(CommandAndDiagnostics|WithoutConsole)$' -test.v
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$env:USERNAME@127.0.0.1" "`"$probe`" -test.run=^TestNativeSSHCommandAndDiagnostics$ -test.v"
+          $knownHosts = Join-Path $env:RUNNER_TEMP 'hopsesh-ssh-wire.known_hosts'
+          $hostKey = (Get-Content -LiteralPath "$env:ProgramData\ssh\ssh_host_ed25519_key.pub" -Raw).Trim()
+          Set-Content -LiteralPath $knownHosts -Value "127.0.0.1 $hostKey" -Encoding ascii
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=`"$knownHosts`"" "$env:USERNAME@127.0.0.1" "`"$probe`" -test.run=^TestNativeSSHCommandAndDiagnostics$ -test.v"
           exit $LASTEXITCODE
       - name: a PowerShell script longer than a command line, over the same server
         shell: pwsh
