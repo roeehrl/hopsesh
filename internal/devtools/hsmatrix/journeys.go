@@ -108,7 +108,20 @@ func journeysMain(args []string) int {
 					return 1
 				}
 			}
+			var probe matrixProbeResult
+			if err := endpoint.do("probe", alias, &probe); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return 1
+			}
+			if probe.Error != "" || probe.Facts.OS != platforms[j] {
+				fmt.Fprintf(os.Stderr, "native route %s -> %s: expected OS %s; probe=%+v\n", aliases[i], alias, platforms[j], probe)
+				return 1
+			}
 		}
+	}
+	if err := os.WriteFile(filepath.Join(*out, "setup.log"), []byte(log.b.String()), 0600); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
 	}
 	setupComplete = true
 	type outcome struct {

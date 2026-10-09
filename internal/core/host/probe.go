@@ -157,13 +157,22 @@ func probeRemote(ctx context.Context, c *transport.Conn, w probeWants) (Facts, e
 		f.OS = normUname(f.OS)
 		return f, nil
 	}
+	unameOut, unameErr := out, err
 	out, err = c.RunPowerShell(ctx, windowsProbe(w))
 	if err != nil {
-		return Facts{}, fmt.Errorf("could not identify the remote system: %w", err)
+		return Facts{}, fmt.Errorf("could not identify the remote system: uname output=%q, error=%v; PowerShell: %w", probeDiagnostic(string(unameOut)), unameErr, err)
 	}
 	f := parseProbe(out)
 	f.OS = "windows"
 	return f, nil
+}
+
+func probeDiagnostic(s string) string {
+	const limit = 1024
+	if len(s) > limit {
+		return s[:limit] + "…"
+	}
+	return s
 }
 
 // posixProbe prints tab-separated facts: os, arch, home, env NAME value, bin NAME path,

@@ -119,6 +119,14 @@ func TestMatrixCommandRejectsOtherExecutablesAndEmptyRequests(t *testing.T) {
 	}
 }
 
+func TestMatrixProbeRefusesNonFixtureDestinations(t *testing.T) {
+	for _, destination := range []string{"", "production", "-F/etc/ssh/config", "user@host"} {
+		if _, err := matrixProbe(destination); err == nil {
+			t.Fatal("accepted non-fixture route", destination)
+		}
+	}
+}
+
 func TestJourneySourceRefusesMissingStaleAndDirtyBinaries(t *testing.T) {
 	valid := map[string]string{"helperRevision": "current", "appRevision": "current", "helperModified": "false", "appModified": "false"}
 	if err := verifyJourneySource(valid, "current"); err != nil {

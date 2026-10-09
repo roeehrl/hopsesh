@@ -18,8 +18,10 @@ import (
 	"time"
 
 	"github.com/roeehrl/hopsesh/agents/claude"
+	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
+	"github.com/roeehrl/hopsesh/internal/core/transport"
 )
 
 // The helper does on one machine what a scenario needs there: make a repository and a
@@ -503,6 +505,11 @@ func helperMain(op string) error {
 	var out any
 	var err error
 	switch op {
+	case "probe":
+		var destination string
+		if err = dec.Decode(&destination); err == nil {
+			out, err = matrixProbe(destination)
+		}
 	case "command":
 		var r commandReq
 		if err = dec.Decode(&r); err == nil {
@@ -555,6 +562,37 @@ func helperMain(op string) error {
 		return err
 	}
 	return json.NewEncoder(os.Stdout).Encode(out)
+}
+
+// Probe through the endpoint's own native SSH client before running journeys.
+// A controller reaching B proves nothing about B's route to C. Retain resolved
+// routing and both probe attempts in the disposable qualification log.
+type matrixProbeResult struct {
+	Route *transport.ResolvedHost `json:"route"`
+	Facts host.Facts              `json:"facts"`
+	Error string                  `json:"error,omitempty"`
+}
+
+func matrixProbe(destination string) (matrixProbeResult, error) {
+	var result matrixProbeResult
+	if destination != "hs-linux" && destination != "hs-macos" && destination != "hs-windows" {
+		return result, fmt.Errorf("probe requires a disposable mesh alias")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	c, err := transport.NewConn(destination, config.StateDir(), nil)
+	if err != nil {
+		return result, err
+	}
+	defer c.Close()
+	result.Route, err = c.Resolve(ctx)
+	if err == nil {
+		result.Facts, err = host.ProbeRemote(ctx, c, nil)
+	}
+	if err != nil {
+		result.Error = err.Error()
+	}
+	return result, nil
 }
 
 func matrixBuildSource(build *debug.BuildInfo) (revision, modified string) {
