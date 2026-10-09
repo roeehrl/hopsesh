@@ -309,7 +309,17 @@ func explainMissing(err error, inv *app.Inventory) error {
 	var problems []string
 	for _, m := range inv.Machines {
 		if m.Status != app.StatusOK {
-			problems = append(problems, m.Name+": "+m.Status)
+			problem := m.Name + ": " + m.Status
+			// Keep the original scan failure: a second scan may succeed and
+			// cannot explain why this operation failed. Quote and bound remote
+			// output so multiline stderr cannot take over the terminal.
+			if m.Error != "" {
+				problem += fmt.Sprintf("; cause: %q", truncate(m.Error, 1024))
+			}
+			if m.Hint != "" {
+				problem += fmt.Sprintf("; hint: %q", truncate(m.Hint, 1024))
+			}
+			problems = append(problems, problem)
 		}
 	}
 	if len(problems) > 0 {
