@@ -136,6 +136,56 @@ func TestMixedTransportLineageSQLiteR2(t *testing.T) {
 			})
 		}
 	}
+	t.Run("interleaved-parent-and-fork", func(t *testing.T) {
+		ctx, _, origin, cert, client := startSQLiteRelayFixture(t, 2*time.Minute)
+		f := newRelayFleet(t, ctx, bin, origin, cert, client)
+		parent := f.seed(t, "claude")
+		child := f.pushSSH(t, 'A', 'B', parent, "codex", true, "interleaved-fork-birth-123456789")
+		f.appendWork(t, parent, "claude", "INTERLEAVED-PARENT-OUT")
+		parent = f.transfer(t, 'A', 'C', parent, "codex", "push", false, "interleaved-parent-out-123456789")
+		f.appendWork(t, child, "codex", "INTERLEAVED-CHILD-OUT")
+		child = f.transfer(t, 'B', 'A', child, "claude", "push", false, "interleaved-child-out-123456789")
+		f.appendWork(t, parent, "codex", "INTERLEAVED-PARENT-RETURN")
+		parent = f.pushSSH(t, 'C', 'A', parent, "claude", false, "interleaved-parent-return-123456789")
+		f.appendWork(t, child, "claude", "INTERLEAVED-CHILD-RETURN")
+		child = f.pushSSH(t, 'A', 'C', child, "claude", false, "interleaved-child-third-machine-123456789")
+		child = f.transfer(t, 'C', 'B', child, "codex", "push", false, "interleaved-child-return-123456789")
+		parentWork := []string{"INTERLEAVED-PARENT-OUT", "INTERLEAVED-PARENT-RETURN"}
+		childWork := []string{"INTERLEAVED-CHILD-OUT", "INTERLEAVED-CHILD-RETURN"}
+		f.assertText(t, 'A', parent, "claude", parentWork, childWork)
+		f.assertText(t, 'B', child, "codex", childWork, parentWork)
+		pg, err := lineage.Read(host.LocalFS(), parent.Path)
+		if err != nil || pg == nil {
+			t.Fatal("parent receipt missing", err)
+		}
+		cg, err := lineage.Read(host.LocalFS(), child.Path)
+		if err != nil || cg == nil {
+			t.Fatal("child receipt missing", err)
+		}
+		if pg.Family != cg.Family || pg.Branch == cg.Branch || pg.Journey().Fork || !cg.Journey().Fork || pg.Journey().Transfers != 2 || pg.Journey().RoundTrips != 1 || cg.Journey().Transfers != 3 || cg.Journey().RoundTrips != 1 {
+			t.Fatal("interleaved original/fork journeys lost independent ancestry", pg.Journey(), cg.Journey())
+		}
+		// Direct module listing has no app profile scope. Use the actual
+		// destination key from the final native movement plan for receipt lookup.
+		key := f.lastPlan.Placement.Key
+		if key.Agent != child.Key.Agent || key.Session != child.Key.Session || key.Profile == "" {
+			t.Fatal("final movement lost its destination profile identity", key, child.Key)
+		}
+		_, current, ok := cg.FindOnBranch(key, f.homes['B'].name, cg.Branch)
+		if !ok {
+			t.Fatal("current fork replica missing", key)
+		}
+		returned := map[string]bool{}
+		for _, candidate := range cg.ReturnReplicas(current) {
+			if candidate.Line != cg.Branch {
+				t.Fatal("fork offered its parent's return destination")
+			}
+			returned[candidate.Location] = true
+		}
+		if !returned[f.homes['A'].name] || !returned[f.homes['C'].name] {
+			t.Fatal("interleaved fork lost prior return destinations", returned)
+		}
+	})
 }
 
 func (f *relayFleet) pushSSH(t *testing.T, from, to byte, source agent.Summary, target string, fork bool, operation string, expectRefused ...bool) agent.Summary {

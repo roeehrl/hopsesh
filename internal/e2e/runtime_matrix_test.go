@@ -108,8 +108,11 @@ func runRuntimeNativeRow(t *testing.T, bin string, row runtimecases.Row) {
 	t.Helper()
 	ctx, _, origin, cert, client := startSQLiteRelayFixture(t, 2*time.Minute)
 	f := newRelayFleet(t, ctx, bin, origin, cert, client)
-	if row.Network == "websocket-blocked" {
-		f.blockWebSockets(t, origin, client)
+	if row.Network != "unrestricted" {
+		f.applyNetworkPolicy(t, origin, client, row.Network)
+	}
+	if row.Network == "post-blocked" {
+		f.assertRelayFailure(t, row, "observe", "POST access is required", "before-scope")
 	}
 	original := f.seed(t, "claude")
 	f.appendWork(t, original, "claude", "NATIVE-MATRIX-SOURCE-WORK")
@@ -158,23 +161,36 @@ func runRuntimeNativeRow(t *testing.T, bin string, row runtimecases.Row) {
 		observedNative = f.observationOnly(t)
 	}
 	if row.Failure == "owner-restart" {
-		var before, after localruntime.Status
-		receiver := runtimeMatrixClient(t, f.homes['B'])
-		if err := receiver.Call(ctx, "status", nil, &before); err != nil {
+		f.restartRuntime(t, 'B')
+	}
+	if row.Failure == "grant-revoked" {
+		store := relay.Store{Directory: filepath.Join(f.homes['A'].home, "state", "relay")}
+		identity, err := (relay.Store{Directory: filepath.Join(f.homes['B'].home, "state", "relay")}).Identity(f.ctx)
+		if err != nil {
 			t.Fatal(err)
 		}
-		f.stop['B']()
-		f.start(t, 'B')
-		if err := receiver.Call(ctx, "status", nil, &after); err != nil || before.Epoch == after.Epoch {
-			t.Fatal("receiver restart did not replace runtime epoch", err)
+		if err := store.Revoke(f.ctx, identity.Public.ID); err != nil {
+			t.Fatal(err)
 		}
 	}
+	wantObserveFailure := ""
+	switch row.Network {
+	case "post-blocked":
+		wantObserveFailure = "POST access is required"
+	case "untrusted-ca":
+		wantObserveFailure = "check proxy, trust roots and network access"
+	}
+	if row.Failure == "grant-revoked" {
+		wantObserveFailure = relay.ErrRevoked.Error()
+	}
 	if row.Integration == "observed" {
-		f.assertObservationOnly(t, row, observedNative)
+		f.assertObservationOnly(t, row, observedNative, wantObserveFailure)
+	} else if wantObserveFailure != "" {
+		f.assertRelayFailure(t, row, "observe", wantObserveFailure)
 	}
 	fork := row.Topology == "fork"
 	operation := fmt.Sprintf("runtime-matrix-row-%d-123456789", row.N)
-	if row.Scope == "receive-disabled" || row.Integration == "observed" {
+	if row.Scope == "receive-disabled" || row.Integration == "observed" || wantObserveFailure != "" {
 		if row.Transport == "ssh" {
 			f.pushSSH(t, 'A', 'B', original, "codex", fork, operation, true)
 		} else {
@@ -186,10 +202,13 @@ func runRuntimeNativeRow(t *testing.T, bin string, row runtimecases.Row) {
 			cmd.Env = f.homes['A'].env()
 			out, err := cmd.CombinedOutput()
 			want := "does not receive"
-			if row.Integration == "observed" {
+			if wantObserveFailure != "" {
+				want = wantObserveFailure
+			}
+			if row.Integration == "observed" || row.Failure == "grant-revoked" {
 				want = relay.ErrRevoked.Error()
 			}
-			if err == nil || !bytes.Contains(out, []byte(want)) {
+			if err == nil || !bytes.Contains(out, []byte(want)) || bytes.Contains(out, []byte("PRIVATE-PROXY-ERROR")) {
 				t.Fatalf("disabled relay receiver was not explicitly refused: %v %s", err, out)
 			}
 		}
@@ -205,6 +224,31 @@ func runRuntimeNativeRow(t *testing.T, bin string, row runtimecases.Row) {
 			arrival = f.transfer(t, 'A', 'B', original, "codex", "push", fork, operation)
 		}
 		f.appendWork(t, arrival, "codex", "NATIVE-MATRIX-DESTINATION-WORK")
+		if row.Failure == "sender-restart-after-apply" || row.Failure == "receiver-restart-after-apply" {
+			beforeRetry, err := os.ReadFile(arrival.Path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			key := byte('B')
+			if row.Failure == "sender-restart-after-apply" {
+				key = 'A'
+			}
+			f.restartRuntime(t, key)
+			retried := f.transfer(t, 'A', 'B', original, "codex", "push", fork, operation)
+			afterRetry, err := os.ReadFile(retried.Path)
+			if err != nil || arrival.Key != retried.Key || arrival.Path != retried.Path || !bytes.Equal(beforeRetry, afterRetry) {
+				t.Fatal("retry after owner restart replaced destination work or created another native session", err)
+			}
+			files, err := filepath.Glob(filepath.Join(f.homes['B'].home, ".codex", "sessions", "*", "*", "*", "*.jsonl"))
+			if err != nil || len(files) != 1 {
+				t.Fatal("post-apply retry left an extra or displaced native session", files, err)
+			}
+			listed, listErr := os.Stat(files[0])
+			returned, returnErr := os.Stat(arrival.Path)
+			if listErr != nil || returnErr != nil || !os.SameFile(listed, returned) {
+				t.Fatal("retry returned a different native file", listErr, returnErr)
+			}
+		}
 		f.assertText(t, 'B', arrival, "codex", []string{"NATIVE-MATRIX-SOURCE-WORK", "NATIVE-MATRIX-DESTINATION-WORK"}, nil)
 		graph, err := lineage.Read(host.LocalFS(), arrival.Path)
 		if err != nil || graph == nil || graph.Journey().Fork != fork || len(graph.ActiveHops()) != 1 || graph.ActiveHops()[0].ID != operation || arrival.Key.Session == original.Key.Session {
@@ -214,6 +258,20 @@ func runRuntimeNativeRow(t *testing.T, bin string, row runtimecases.Row) {
 	after, err := os.ReadFile(original.Path)
 	if err != nil || !bytes.Equal(before, after) {
 		t.Fatal("runtime matrix mutated the source native conversation", err)
+	}
+}
+
+func (f *relayFleet) restartRuntime(t *testing.T, key byte) {
+	t.Helper()
+	var before, after localruntime.Status
+	client := runtimeMatrixClient(t, f.homes[key])
+	if err := client.Call(f.ctx, "status", nil, &before); err != nil {
+		t.Fatal(err)
+	}
+	f.stop[key]()
+	f.start(t, key)
+	if err := client.Call(f.ctx, "status", nil, &after); err != nil || before.Epoch == after.Epoch || before.Mode != after.Mode {
+		t.Fatal("owner restart did not replace epoch while preserving host mode", err)
 	}
 }
 
@@ -268,7 +326,7 @@ func (f *relayFleet) observationOnly(t *testing.T) string {
 	return f.find(t, 'B', "claude", sid).Path
 }
 
-func (f *relayFleet) assertObservationOnly(t *testing.T, row runtimecases.Row, native string) {
+func (f *relayFleet) assertObservationOnly(t *testing.T, row runtimecases.Row, native, wantObserveFailure string) {
 	t.Helper()
 	before, err := os.ReadFile(native)
 	if err != nil {
@@ -281,13 +339,17 @@ func (f *relayFleet) assertObservationOnly(t *testing.T, row runtimecases.Row, n
 	call := func(method string, result any) error {
 		return runtimeMatrixClient(t, f.homes['A']).Call(f.ctx, "relay.call", map[string]any{"peer": identity.Public.ID, "operation": fmt.Sprintf("matrix-observe-%d-%s", row.N, method), "method": method, "params": map[string]any{"refresh": true}}, result)
 	}
-	var snapshot observe.Snapshot
-	if err := call("observe", &snapshot); err != nil || !snapshot.Fresh(time.Now()) {
-		t.Fatal("observation-only permission did not deliver fresh metadata", err)
-	}
-	var observation app.Observation
-	if err := json.Unmarshal(snapshot.Data, &observation); err != nil || !observation.InventoryComplete || len(observation.Entries) != 1 || observation.Entries[0].Session.Key.Session != sid || observation.Receive || bytes.Contains(snapshot.Data, []byte(observationPrivateText)) {
-		t.Fatal("observation-only response lost metadata or exposed native contents/receiving", err)
+	if wantObserveFailure != "" {
+		f.assertRelayFailure(t, row, "observe", wantObserveFailure)
+	} else {
+		var snapshot observe.Snapshot
+		if err := call("observe", &snapshot); err != nil || !snapshot.Fresh(time.Now()) {
+			t.Fatal("observation-only permission did not deliver fresh metadata", err)
+		}
+		var observation app.Observation
+		if err := json.Unmarshal(snapshot.Data, &observation); err != nil || !observation.InventoryComplete || len(observation.Entries) != 1 || observation.Entries[0].Session.Key.Session != sid || observation.Receive || bytes.Contains(snapshot.Data, []byte(observationPrivateText)) {
+			t.Fatal("observation-only response lost metadata or exposed native contents/receiving", err)
+		}
 	}
 	for _, method := range []string{"preview", "export", "plan", "apply", "undo"} {
 		var result json.RawMessage
@@ -301,10 +363,23 @@ func (f *relayFleet) assertObservationOnly(t *testing.T, row runtimecases.Row, n
 	}
 }
 
-// All owners are moved behind a TLS-verifying policy proxy that rejects every
-// WebSocket upgrade. The mailbox and encrypted native transfers must continue
-// through the production HTTP fallback, with its real reconciliation intervals.
-func (f *relayFleet) blockWebSockets(t *testing.T, origin string, upstream *http.Client) {
+func (f *relayFleet) assertRelayFailure(t *testing.T, row runtimecases.Row, method, want string, stage ...string) {
+	t.Helper()
+	identity, err := (relay.Store{Directory: filepath.Join(f.homes['B'].home, "state", "relay")}).Identity(f.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result json.RawMessage
+	err = runtimeMatrixClient(t, f.homes['A']).Call(f.ctx, "relay.call", map[string]any{"peer": identity.Public.ID, "operation": fmt.Sprintf("matrix-refused-%d-%s-%s", row.N, method, strings.Join(stage, "-")), "method": method, "params": map[string]any{"refresh": true}}, &result)
+	if err == nil || !strings.Contains(err.Error(), want) || len(result) != 0 || strings.Contains(err.Error(), "PRIVATE-PROXY-ERROR") {
+		t.Fatal("denied policy did not return an empty, classified, sanitized failure", err)
+	}
+}
+
+// All owners use a policy proxy and production reconciliation intervals. A
+// blocked upgrade permits HTTPS fallback; denied POST and bad TLS must fail
+// without bypassing the policy or installing any native conversation.
+func (f *relayFleet) applyNetworkPolicy(t *testing.T, origin string, upstream *http.Client, policy string) {
 	t.Helper()
 	for _, stop := range f.stop {
 		stop()
@@ -316,10 +391,18 @@ func (f *relayFleet) blockWebSockets(t *testing.T, origin string, upstream *http
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	proxy.Transport = upstream.Transport
 	var denied atomic.Int64
+	var posts atomic.Int64
+	var requests atomic.Int64
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
 		if r.URL.Path == "/v1/notifications" || r.Header.Get("Upgrade") != "" {
 			denied.Add(1)
 			http.Error(w, "WebSocket upgrades disabled by fixture network policy", http.StatusNotImplemented)
+			return
+		}
+		if policy == "post-blocked" && r.Method == http.MethodPost {
+			posts.Add(1)
+			http.Error(w, "PRIVATE-PROXY-ERROR", http.StatusMethodNotAllowed)
 			return
 		}
 		proxy.ServeHTTP(w, r)
@@ -328,6 +411,22 @@ func (f *relayFleet) blockWebSockets(t *testing.T, origin string, upstream *http
 	caFile := filepath.Join(t.TempDir(), "policy-ca.pem")
 	if err := os.WriteFile(caFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}), 0600); err != nil {
 		t.Fatal(err)
+	}
+	if policy == "untrusted-ca" {
+		caFile = f.cert // the fixture origin's independent CA cannot authenticate this proxy
+		body, err := os.ReadFile(caFile)
+		block, _ := pem.Decode(body)
+		if err != nil || block == nil || bytes.Equal(block.Bytes, server.Certificate().Raw) {
+			t.Fatal("policy fixture did not supply an independent untrusted certificate", err)
+		}
+		f.healthError = "check proxy, trust roots and network access"
+	}
+	if policy == "post-blocked" {
+		// GET polling may succeed while inventory publication or acknowledgement
+		// POSTs fail. Both states are truthful; the explicit call below must
+		// still prove POST refusal and absence of private response content.
+		f.healthError = "POST access is required"
+		f.healthMayConnect = true
 	}
 	f.deliveryMode = "http-fallback"
 	for _, key := range []byte{'A', 'B', 'C'} {
@@ -342,9 +441,17 @@ func (f *relayFleet) blockWebSockets(t *testing.T, origin string, upstream *http
 		}
 		f.start(t, key)
 	}
-	if denied.Load() < int64(len(f.homes)) {
+	if policy != "untrusted-ca" && denied.Load() < int64(len(f.homes)) {
 		t.Fatal("HTTP fallback matrix did not reject every owner's WebSocket upgrade")
 	}
+	t.Cleanup(func() {
+		if policy == "untrusted-ca" && requests.Load() != 0 {
+			t.Error("untrusted TLS policy accepted authenticated HTTP traffic")
+		}
+		if policy == "post-blocked" && posts.Load() == 0 {
+			t.Error("POST-denied policy was never exercised")
+		}
+	})
 }
 
 func runtimeMatrixClient(t *testing.T, home machineHome) localruntime.Client {

@@ -614,17 +614,26 @@ func (m *Manifest) Merge(o *Manifest) error {
 }
 func (m *Manifest) hopTips(line string) []string {
 	have := map[string]bool{}
+	parents := map[string][]string{}
+	var ancestors []string
 	for _, h := range m.Hops {
+		parents[h.ID] = h.Parents
 		if h.Line == line && !h.Backup {
 			have[h.ID] = true
+			ancestors = append(ancestors, h.Parents...)
 		}
 	}
-	for _, h := range m.Hops {
-		if h.Backup {
-			continue
-		}
-		for _, p := range h.Parents {
-			delete(have, p)
+	// A different branch observing this tip must not retire it. Remove only
+	// ancestors of this branch's own hops, following intervening cross-branch
+	// edges as well. Otherwise parent work can sever a fork's first movement.
+	seen := map[string]bool{}
+	for len(ancestors) > 0 {
+		id := ancestors[len(ancestors)-1]
+		ancestors = ancestors[:len(ancestors)-1]
+		if !seen[id] {
+			seen[id] = true
+			delete(have, id)
+			ancestors = append(ancestors, parents[id]...)
 		}
 	}
 	var out []string
@@ -634,16 +643,18 @@ func (m *Manifest) hopTips(line string) []string {
 	return unique(out)
 }
 func (m *Manifest) AppendHop(h Hop) error {
+	replayed := false
 	for _, old := range m.Hops {
 		if old.ID == h.ID && len(h.Parents) == 0 {
 			h.Parents = slices.Clone(old.Parents)
+			replayed = true
 			break
 		}
 	}
 	if h.Line == "" {
 		h.Line = m.Replica(h.To).Line
 	}
-	if len(h.Parents) == 0 {
+	if len(h.Parents) == 0 && !replayed {
 		h.Parents = m.hopTips(h.Line)
 		// A new fork observes its source branch, and a later transfer from the
 		// same original observes forks already recorded beside that original.

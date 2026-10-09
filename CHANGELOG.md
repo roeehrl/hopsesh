@@ -50,6 +50,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Moving an original after creating a fork preserves the fork's ancestry and
+  return destinations. Retrying the first transfer keeps its original receipt
+  instead of reporting a conflicting causal history.
+
 - Background GUI and TUI scans keep independent settings snapshots. Cloud consent
   and environment edits cannot alter an in-flight scan or crash catalog hashing;
   copied settings retain their revision for conflict-safe saves.

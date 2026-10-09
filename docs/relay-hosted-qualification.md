@@ -686,6 +686,19 @@ actual asynchronous orphan expiration and broader provider/OS acceptance remain
 open. The query and first result are `/tmp/hopsesh-hour-soak-metrics.graphql` and
 `/tmp/hopsesh-hour-soak-metrics.json`.
 
+A later read of the same fixed interval is retained separately in
+`/tmp/hopsesh-hour-soak-metrics-refresh.json`. It reports 8,474 relay Worker
+requests, 8,803.984 CPU ms and 514 disconnects, still with zero Worker execution
+errors. Mailbox attribution is 9,247 invocations, 50.960725376 GB-s, 179,140 SQL
+reads and 25,944 writes; authorization attribution is 20 invocations,
+0.253935744 GB-s, 24 reads and 16 writes. Mailbox disconnect-class errors are
+420; both object classes still report zero CPU-limit, memory-limit and fatal
+internal errors. Download Worker attribution is unchanged. Ciphertext R2 reports
+1,510 puts, 1,534 gets, 1,198 successful deletes and 145 delete-404 responses.
+Its latest storage sample is now 12:20 and the downloads sample 12:30, both still
+before cleanup. Preserve both reads: these changing adaptive aggregates are not
+an exact object ledger, post-cleanup storage proof or settled billing.
+
 ## Codex prepared-filesystem publication correction
 
 A fresh task from the earlier published configuration had neither the versioned

@@ -29,7 +29,7 @@ func (r Row) Values() []string {
 }
 
 func (r Row) String() string {
-	return fmt.Sprintf("%03d/%s/%s/%s/%s/%s/%s", r.N, r.Host, r.Transport, r.Integration, r.Scope, r.Topology, r.Failure)
+	return fmt.Sprintf("%03d/%s/%s/%s/%s/%s/%s/%s", r.N, r.Host, r.Transport, r.Network, r.Integration, r.Scope, r.Topology, r.Failure)
 }
 
 var Factors = []string{"runtimeHost", "transport", "providerGeneration", "integrationLevel", "networkPolicy", "accountScope", "branchTopology", "failurePoint"}
@@ -42,10 +42,10 @@ var Domains = [][]string{
 	{"ssh", "relay-websocket", "relay-https"},
 	{"local"},
 	{"observed", "exportable"},
-	{"unrestricted", "websocket-blocked"},
+	{"unrestricted", "websocket-blocked", "post-blocked", "untrusted-ca"},
 	{"approved", "receive-disabled"},
 	{"linear", "fork"},
-	{"none", "owner-restart"},
+	{"none", "owner-restart", "grant-revoked", "sender-restart-after-apply", "receiver-restart-after-apply"},
 }
 
 func (r Row) Validate() error {
@@ -61,11 +61,17 @@ func (r Row) Validate() error {
 	if r.Host == "one-shot" && r.Transport != "ssh" {
 		return fmt.Errorf("a one-shot sender has no relay runtime owner")
 	}
-	if (r.Transport == "relay-https") != (r.Network == "websocket-blocked") {
-		return fmt.Errorf("HTTPS fallback rows must exercise blocked WebSocket upgrades")
+	if (r.Transport == "relay-https") != (r.Network != "unrestricted") {
+		return fmt.Errorf("HTTPS policy rows must exercise blocked upgrades, blocked POST or untrusted TLS")
 	}
 	if r.Integration == "observed" && r.Transport == "ssh" {
 		return fmt.Errorf("session-scoped observation-only grants belong to the relay; SSH login authority is separate")
+	}
+	if r.Failure == "grant-revoked" && r.Transport == "ssh" {
+		return fmt.Errorf("relay grant revocation does not revoke independent SSH login authority")
+	}
+	if strings.HasSuffix(r.Failure, "-restart-after-apply") && (r.Transport == "ssh" || r.Integration != "exportable" || r.Scope != "approved" || r.Network == "post-blocked" || r.Network == "untrusted-ca") {
+		return fmt.Errorf("post-apply runtime recovery requires an approved, deliverable native relay transfer")
 	}
 	return nil
 }
@@ -108,7 +114,7 @@ type Coverage struct {
 // filters. IDs identify full model combinations and never change with a seed.
 func Select(strength int, seed int64, only, shard string) ([]Row, Coverage, error) {
 	meta := Coverage{Model: Model, Factors: Factors, Domains: Domains, Strength: strength, Seed: seed,
-		Constraints: []string{"one-shot senders use SSH because no local relay owner is running", "relay-https exercises blocked WebSocket upgrades; other transports use unrestricted networking", "all rows use unverified portable native account boundaries; scope varies peer receiving consent", "observation-only grants apply to the relay, not SSH login authority", "provider generation is local; cloud/provider capability coverage is separate"}}
+		Constraints: []string{"one-shot senders use SSH because no local relay owner is running", "relay-https varies blocked upgrades, denied POST and untrusted TLS; other transports use unrestricted networking", "all rows use unverified portable native account boundaries; scope varies peer receiving consent", "observation-only and grant revocation apply to the relay, not SSH login authority", "post-apply restart/retry requires an exportable approved relay transfer without network denial", "provider generation is local; cloud/provider capability coverage is separate"}}
 	if strength != 2 && strength != 3 {
 		return nil, meta, fmt.Errorf("strength must be 2 or 3")
 	}

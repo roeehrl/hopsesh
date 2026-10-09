@@ -153,16 +153,18 @@ func TestRelayLineageSQLiteR2(t *testing.T) {
 }
 
 type relayFleet struct {
-	ctx          context.Context
-	bin, cert    string
-	homes        map[byte]machineHome
-	places       map[byte]location
-	stop         map[byte]func()
-	ownerModes   map[byte]string // native matrix may host the shared desktop backend
-	deliveryMode string          // empty requires notifications; policy tests assert HTTP fallback
-	lastSource   agent.Summary
-	lastPlan     move.Plan
-	lastResult   move.Result
+	ctx              context.Context
+	bin, cert        string
+	homes            map[byte]machineHome
+	places           map[byte]location
+	stop             map[byte]func()
+	ownerModes       map[byte]string // native matrix may host the shared desktop backend
+	deliveryMode     string          // empty requires notifications; policy tests assert HTTP fallback
+	healthError      string          // policy matrix expects a disconnected owner with this diagnostic
+	healthMayConnect bool            // GET-only policy may report healthy polling before a refused POST
+	lastSource       agent.Summary
+	lastPlan         move.Plan
+	lastResult       move.Result
 }
 
 func newRelayFleet(t *testing.T, ctx context.Context, bin, origin, cert string, client *http.Client, extra ...byte) *relayFleet {
@@ -362,7 +364,7 @@ func (f *relayFleet) start(t *testing.T, key byte) {
 		bounded, cancel := context.WithTimeout(f.ctx, 200*time.Millisecond)
 		err = client.Call(bounded, "relay.status", nil, &health)
 		cancel()
-		if err == nil && health.Connected && health.DeliveryMode == wantMode {
+		if err == nil && ((f.healthError == "" || f.healthMayConnect) && health.Connected && health.DeliveryMode == wantMode || f.healthError != "" && !health.Connected && strings.Contains(health.Error, f.healthError)) {
 			return
 		}
 		if time.Now().After(deadline) {
