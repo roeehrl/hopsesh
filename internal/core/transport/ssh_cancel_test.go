@@ -18,9 +18,18 @@ func TestSSHRunPreservesCancellation(t *testing.T) {
 	// killed by CommandContext yields ExitError (code 1 on Windows), which must
 	// never be mistaken for the remote command's own status.
 	body := `package main
-import ("fmt"; "os"; "time")
+import ("fmt"; "os"; "os/exec"; "time")
 func main() {
+ if len(os.Args) == 2 && os.Args[1] == "hold-pipe" { time.Sleep(3*time.Second); return }
  for _, arg := range os.Args[1:] { if arg == "-G" { fmt.Print("hostname 127.0.0.1\nport 22\n"); return } }
+ mode := os.Args[len(os.Args)-1]
+ if mode == "parent-exits" || mode == "parent-canceled" {
+  child := exec.Command(os.Args[0], "hold-pipe")
+  child.Stdout, child.Stderr = os.Stdout, os.Stderr
+  if err := child.Start(); err != nil { panic(err) }
+  child.Process.Release()
+  if mode == "parent-exits" { return }
+ }
  fmt.Println("Linux"); time.Sleep(3*time.Second)
 }
 `
@@ -62,6 +71,30 @@ func main() {
 			}
 			if want == context.DeadlineExceeded && !errors.Is(err, ErrUnreachable) {
 				t.Fatalf("deadline lost transport failure classification: %v", err)
+			}
+		})
+	}
+	for _, mode := range []string{"parent-exits", "parent-canceled"} {
+		t.Run("retained output pipe/"+mode, func(t *testing.T) {
+			c := &Conn{Dest: "fixture", StateDir: dir, sshBinary: bin, Timeout: time.Minute}
+			want := exec.ErrWaitDelay
+			if mode == "parent-canceled" {
+				c.Timeout = 200 * time.Millisecond
+				want = context.DeadlineExceeded
+			}
+			start := time.Now()
+			// The independently exiting fixture child is deliberately not killed:
+			// the transport must close its own pipes, not arbitrary descendants.
+			// Leave time for that finite child to exit before TempDir removes its
+			// executable (Windows prevents removing a running executable).
+			t.Cleanup(func() {
+				if remaining := 4*time.Second - time.Since(start); remaining > 0 {
+					time.Sleep(remaining)
+				}
+			})
+			_, err := c.Run(t.Context(), mode)
+			if time.Since(start) > 2*time.Second || !errors.Is(err, want) {
+				t.Fatalf("retained pipe escaped command bound: error=%v elapsed=%v", err, time.Since(start))
 			}
 		})
 	}

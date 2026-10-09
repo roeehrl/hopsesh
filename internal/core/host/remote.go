@@ -343,8 +343,13 @@ func (l remoteLocks) Holders(ctx context.Context, paths []string) (map[string][]
 	}
 	var held []string
 	for _, p := range paths {
-		if states[p] == agent.LockHeld {
+		switch states[p] {
+		case agent.LockFree:
+			continue
+		case agent.LockHeld:
 			held = append(held, p)
+		default:
+			return nil, fmt.Errorf("%w: cannot determine holders of remote lock %q", agent.ErrUnsupported, p)
 		}
 	}
 	if len(held) == 0 {

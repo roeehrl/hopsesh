@@ -222,6 +222,9 @@ func (c *Conn) run(ctx context.Context, remoteCmd string) ([]byte, error) {
 	}
 	args := append(c.baseArgs(), c.Dest, "--", remoteCmd)
 	cmd := proc.CommandContext(ctx, c.sshBinary, args...)
+	// Proxy helpers can retain inherited output handles after ssh exits or is
+	// canceled. Bound pipe draining too, without killing unrelated descendants.
+	cmd.WaitDelay = 100 * time.Millisecond
 	if env != nil {
 		cmd.Env = append(os.Environ(), env...)
 	}
@@ -391,7 +394,7 @@ func classify(err error, stderr string) error {
 		strings.Contains(low, "network is unreachable"), strings.Contains(low, "operation timed out"):
 		return fmt.Errorf("%w: %s", ErrUnreachable, strings.TrimSpace(stderr))
 	}
-	return fmt.Errorf("ssh: %v: %s", err, strings.TrimSpace(stderr))
+	return fmt.Errorf("ssh: %w: %s", err, strings.TrimSpace(stderr))
 }
 
 // RemoteError is a remote command that ran but failed.

@@ -23,7 +23,7 @@ func processExists(pid int) bool {
 	if err != nil {
 		return false
 	}
-	defer windows.CloseHandle(h)
+	defer func() { _ = windows.CloseHandle(h) }()
 	if id, err := windows.GetProcessId(h); err != nil || int(id) != pid {
 		return false
 	}
@@ -42,8 +42,8 @@ func terminate(int) error {
 // probeLock is not available on Windows yet.
 func probeLock(string) agent.LockState { return agent.LockUnknown }
 
-// lockHolders is not available on Windows yet.
-func lockHolders(context.Context, string) ([]int, error) {
+// Unknown ownership must not look like an unlocked, already stopped session.
+func (localLocks) Holders(context.Context, []string) (map[string][]int, error) {
 	return nil, fmt.Errorf("%w: finding which program holds a lock on Windows", agent.ErrUnsupported)
 }
 
