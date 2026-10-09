@@ -1,0 +1,7 @@
+{
+  "cwd": "/Users/alice/git/demo",
+  "hook_event_name": "SessionEnd",
+  "reason": "other",
+  "session_id": "00000000-0000-4000-8000-000000000001",
+  "transcript_path": "/Users/alice/.agent/sessions/00000000-0000-4000-8000-000000000001.jsonl"
+}
