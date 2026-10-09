@@ -1,6 +1,7 @@
 /bin/
 /dist/
 /hsmatrix-runtime-out/
+/hsmatrix-journeys-out/
 *.test
 *.out
 coverage.*

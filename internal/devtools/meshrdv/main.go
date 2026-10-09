@@ -170,6 +170,18 @@ func waitFor(name, dest string, d time.Duration) error {
 // its sshd through dumbpipe and names it hs-<peer> in ~/.ssh/config.
 func connect(node string, peers []string, dir string, d time.Duration) error {
 	cfg := &strings.Builder{}
+	selfBytes, err := os.ReadFile(filepath.Join(dir, "public", "peer.json"))
+	if err != nil {
+		return err
+	}
+	var self Peer
+	if err := json.Unmarshal(selfBytes, &self); err != nil {
+		return err
+	}
+	if self.Node != node {
+		return fmt.Errorf("local peer identity mismatch")
+	}
+	fmt.Fprintf(cfg, "\nHost hs-%s\n  HostName 127.0.0.1\n  Port 22\n  User %s\n  HostKeyAlias hs-%s\n", node, self.User, node)
 	for i, p := range peers {
 		dest := filepath.Join(dir, "peers", p)
 		if err := waitFor("peer-"+p, dest, d); err != nil {
@@ -204,6 +216,18 @@ func connect(node string, peers []string, dir string, d time.Duration) error {
 	}
 	_, _ = f.WriteString(cfg.String())
 	f.Close()
+	// In the disposable Unix mesh, SSH commands run as hsremote rather than the
+	// workflow user. Give that account this job's ephemeral client key and exact
+	// tunnel aliases so B can pull from C directly. No production keys are used.
+	if runtime.GOOS != "windows" {
+		if self.User != "hsremote" {
+			return fmt.Errorf("refusing to provision unexpected mesh user %q", self.User)
+		}
+		cmd := exec.Command("sudo", "sh", "-c", `h=$(eval echo ~hsremote); install -o hsremote -m 0600 "$1" "$h/.ssh/id_ed25519" && install -o hsremote -m 0600 "$2" "$h/.ssh/config"`, "mesh-client", filepath.Join(sshDir, "id_ed25519"), filepath.Join(sshDir, "config"))
+		if b, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("provision disposable mesh client: %w: %s", err, b)
+		}
+	}
 	// Each tunnel answers before the matrix starts (the peer may still be setting up).
 	for _, p := range peers {
 		var last []byte

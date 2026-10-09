@@ -2,14 +2,18 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"debug/buildinfo"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -196,6 +200,24 @@ func seed(r SeedReq) (SeedRes, error) {
 		res.Head = h
 	}
 	if !r.Session {
+		// An empty native destination still needs the vendor's data directory.
+		// Journey rows prepare every endpoint before its first import, without
+		// seeding an extra conversation that could hide duplicate arrivals.
+		var directory string
+		switch r.Agent {
+		case "claude":
+			directory = claudeDir()
+		case "codex":
+			directory = filepath.Join(codexDir(), "sessions")
+		case "":
+		default:
+			return res, fmt.Errorf("unknown agent %q", r.Agent)
+		}
+		if directory != "" {
+			if err := os.MkdirAll(directory, 0700); err != nil {
+				return res, err
+			}
+		}
 		return res, nil
 	}
 	var err error
@@ -481,6 +503,11 @@ func helperMain(op string) error {
 	var out any
 	var err error
 	switch op {
+	case "command":
+		var r commandReq
+		if err = dec.Decode(&r); err == nil {
+			out, err = matrixCommand(r)
+		}
 	case "seed":
 		var r SeedReq
 		if err = dec.Decode(&r); err == nil {
@@ -511,7 +538,16 @@ func helperMain(op string) error {
 			out = map[string]string{"head": h}
 		}
 	case "base":
-		out = map[string]string{"base": base(), "home": homeDir()}
+		info := map[string]string{"base": base(), "home": homeDir(), "os": runtime.GOOS}
+		if build, ok := debug.ReadBuildInfo(); ok {
+			info["helperRevision"], info["helperModified"] = matrixBuildSource(build)
+		}
+		if path, e := exec.LookPath("hopsesh"); e == nil {
+			if build, e := buildinfo.ReadFile(path); e == nil {
+				info["appRevision"], info["appModified"] = matrixBuildSource(build)
+			}
+		}
+		out = info
 	default:
 		err = fmt.Errorf("unknown helper op %q", op)
 	}
@@ -519,4 +555,51 @@ func helperMain(op string) error {
 		return err
 	}
 	return json.NewEncoder(os.Stdout).Encode(out)
+}
+
+func matrixBuildSource(build *debug.BuildInfo) (revision, modified string) {
+	for _, setting := range build.Settings {
+		switch setting.Key {
+		case "vcs.revision":
+			revision = setting.Value
+		case "vcs.modified":
+			modified = setting.Value
+		}
+	}
+	return
+}
+
+// Only the disposable matrix helper exposes this operation. Structured argv avoids
+// a second remote shell parsing paths and session text on different OS families.
+type commandReq struct {
+	Args []string `json:"args"`
+}
+
+func matrixCommand(r commandReq) (json.RawMessage, error) {
+	if len(r.Args) == 0 {
+		return nil, fmt.Errorf("missing matrix command")
+	}
+	switch r.Args[0] {
+	case "hosts", "trust", "receive", "pull", "push":
+	case "accounts":
+		if len(r.Args) != 2 || r.Args[1] != "scan" {
+			return nil, fmt.Errorf("only disposable account discovery is supported")
+		}
+	default:
+		return nil, fmt.Errorf("unsupported matrix command %q", r.Args[0])
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "hopsesh", r.Args...)
+	b, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("matrix command %s: %w: %s", r.Args[0], err, tail(string(b), 4000))
+	}
+	if r.Args[0] == "pull" || r.Args[0] == "push" {
+		if !json.Valid(b) {
+			return nil, fmt.Errorf("matrix movement returned invalid JSON: %s", tail(string(b), 4000))
+		}
+		return b, nil
+	}
+	return json.RawMessage(`{}`), nil
 }

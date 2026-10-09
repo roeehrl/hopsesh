@@ -58,6 +58,11 @@ jobs:
         uses: test-summary/action@37b508cfee6d4d080eedd00b5bb240a6a784a6a5 # v2.6
         with:
           paths: junit-${{ matrix.family }}.xml
+      - name: ordered journey orchestrator over authenticated loopback SSH
+        if: runner.os != 'Windows'
+        env:
+          HOPSESH_JOURNEY_TEST: "1"
+        run: go test -race -count=1 -v -run '^TestJourneyCLIOverSSH$' -timeout 6m ./internal/devtools/hsmatrix
       - name: tests that passed only on a rerun
         if: ${{ !cancelled() && hashFiles('reruns.txt') != '' }}
         shell: bash

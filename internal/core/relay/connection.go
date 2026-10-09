@@ -113,9 +113,27 @@ func (l Listener) Run(ctx context.Context) error {
 	go func() { defer close(done); l.Transport.notifications(child, wake, state) }()
 	defer func() { cancel(); <-done }()
 	connected := false
+	reportState := func(value bool) {
+		connected = value
+		if l.OnDeliveryMode != nil {
+			mode := "http-fallback"
+			if connected {
+				mode = "notifications"
+			}
+			l.OnDeliveryMode(mode)
+		}
+	}
 	var cursor, acknowledged uint64
 	delay := time.Second
 	for {
+		// Draining committed batches bypasses the idle wait below. Consume a
+		// pending stream transition here too so continuous traffic cannot hide
+		// the completed handshake or retain a disconnected stream's mode.
+		select {
+		case value := <-state:
+			reportState(value)
+		default:
+		}
 		batch, err := l.Transport.Poll(ctx, cursor)
 		if err == nil {
 			for _, d := range batch.Messages {
@@ -207,14 +225,8 @@ func (l Listener) Run(ctx context.Context) error {
 				return ctx.Err()
 			case <-t.C:
 				break waiting
-			case connected = <-state:
-				if l.OnDeliveryMode != nil {
-					mode := "http-fallback"
-					if connected {
-						mode = "notifications"
-					}
-					l.OnDeliveryMode(mode)
-				}
+			case value := <-state:
+				reportState(value)
 			case <-wake:
 			case <-l.RequestActivity:
 				if connected {

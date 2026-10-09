@@ -50,6 +50,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Internet delivery status updates when notifications connect or disconnect,
+  including while incoming messages are continuously arriving.
+
 - Active internet requests wake the shared HTTP fallback receiver to collect
   replies promptly. Completed, canceled and expired requests return to idle
   reconciliation; healthy WebSocket delivery keeps using notifications.
