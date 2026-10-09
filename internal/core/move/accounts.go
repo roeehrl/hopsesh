@@ -38,6 +38,14 @@ func ValidateProfiles(ctx context.Context, in Input) error {
 			if !p.Default && now.IsolationWhy != "" {
 				return fmt.Errorf("account %q: %s", p.Name, now.IsolationWhy)
 			}
+			// An unknown default login (for example a locked macOS Keychain
+			// over SSH) is not evidence that a login changed. Portable transfers
+			// across profiles can prepare a fresh copy without claiming account
+			// continuity. Never extend this to native replay, named profiles or
+			// a previously observed login, and still reject a new visible login.
+			if p.Account == nil && p.Default && profileBoundary(in) && !now.LoggedIn && now.Observation != "" {
+				continue
+			}
 			if p.Account == nil || now.Observation != p.Account.Observation || now.LoggedIn != p.Account.LoggedIn || now.Provider != p.Account.Provider {
 				return fmt.Errorf("account %q login changed; scan accounts and create a new plan", p.Name)
 			}

@@ -14,6 +14,7 @@ func lineageCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		defer r.app.Catalog.Close()
 		ref := app.ParseRef(args[0])
 		inv := r.scanFor(cmd, ref.Machine, ref)
 		defer inv.Close()
@@ -35,6 +36,7 @@ func lineageCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		defer r.app.Catalog.Close()
 		ctx, cancel := ctxTimeout(2)
 		defer cancel()
 		if err = r.app.RecoverReceipts(ctx, args[0]); err != nil {

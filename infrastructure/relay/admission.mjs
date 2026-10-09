@@ -65,7 +65,7 @@ export function createAdmissionHandler(storage,enroll,authorize,revoke,clock=()=
     if(state.claim&&state.claim!==claim)return error('already_claimed',409);
     if(!state.connection){
      const ttl=Math.min(state.ttl,lease-now);
-     try{state.connection=await enroll(state.principal,publicIdentity.id,ttl,{device:state.issuer,credential:state.credential},await digest(key+'\0'+claim))}catch(e){return e instanceof AdmissionCapacityError?error('capacity_exceeded',409):error('temporarily_unavailable',503)}
+     try{state.connection=await enroll(state.principal,publicIdentity.id,ttl,{device:state.issuer,credential:state.credential},await digest(key+'\0'+claim),Math.min(lease,now+state.ttl))}catch(e){return e instanceof AdmissionCapacityError?error('capacity_exceeded',409):error('temporarily_unavailable',503)}
      state.claim=claim;state.status='claimed';state.public=publicIdentity;state.retainUntil=state.connection.expires;
      await tx.put(key,state);
     }

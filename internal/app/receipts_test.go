@@ -18,6 +18,7 @@ import (
 func TestRecoverReceiptsPreservesLaterNativeWorkAndUndoGuard(t *testing.T) {
 	t.Setenv("HOPSESH_MACHINE", "A")
 	a := New(config.Defaults(), all.Registry(), t.TempDir(), nil)
+	t.Cleanup(func() { _ = a.Catalog.Close() })
 	native := filepath.Join(t.TempDir(), "native.jsonl")
 	j, _ := journal.New(a.StateDir, journal.KindMove, "pending ack")
 	if err := j.WriteFile(host.LocalFS(), "A", native, []byte("original"), 0600); err != nil {

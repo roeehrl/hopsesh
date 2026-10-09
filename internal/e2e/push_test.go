@@ -139,6 +139,7 @@ func TestPushToPeer(t *testing.T) {
 	here.writeConfig(t, cfg) // also points this process at "here"
 
 	a := app.New(cfg, all.Registry(), filepath.Join(here.home, "state"), nil)
+	t.Cleanup(func() { _ = a.Catalog.Close() })
 	a.PeerDial = dialProcess(bin, box)
 	ctx := context.Background()
 	inv := a.Scan(ctx, app.ScanOptions{Hosts: []string{"here"}})
@@ -265,6 +266,7 @@ func TestAccountProfilePeerDestinations(t *testing.T) {
 	cfg.Hosts = []config.Host{{Name: "box", Destination: "box", Allowed: true}}
 	here.writeConfig(t, cfg)
 	a := app.New(cfg, all.Registry(), filepath.Join(here.home, "state"), nil)
+	t.Cleanup(func() { _ = a.Catalog.Close() })
 	a.PeerDial = dialProcess(bin, box)
 	ctx := context.Background()
 	for _, id := range []string{"claude", "codex"} {

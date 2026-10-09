@@ -89,6 +89,46 @@ func TestObserveUninitializedInstallationDoesNotWrite(t *testing.T) {
 
 type partialInventory struct{ agent.Module }
 
+type registrationDuringListing struct {
+	agent.Module
+	change func()
+}
+
+func (m *registrationDuringListing) List(ctx context.Context, h agent.Host, in agent.Install) (agent.Listing, error) {
+	out, err := m.Module.List(ctx, h, in)
+	if m.change != nil {
+		change := m.change
+		m.change = nil
+		change()
+	}
+	return out, err
+}
+
+func TestObserveRejectsRegistrationChangedDuringCollection(t *testing.T) {
+	mod := &registrationDuringListing{Module: claude.New()}
+	a, _, root := observerFixture(t, mod)
+	mod.change = func() {
+		endpoint := strings.Repeat("a", 64)
+		if err := os.MkdirAll(config.Dir(), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(config.Dir(), "endpoint-id"), []byte(endpoint), 0600); err != nil {
+			t.Fatal(err)
+		}
+		canonical, err := filepath.EvalSymlinks(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = a.accountStore().Register(agent.RuntimeProfile{ID: "registered", Agent: "claude", Endpoint: endpoint, Root: canonical, Name: "Personal"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, err := a.ObserveLocal(t.Context())
+	if err != nil || !out.InventoryComplete || len(out.Entries) != 1 || out.Entries[0].Session.Key.Profile != "registered" {
+		t.Fatalf("collection did not retry the changed registration: %+v, %v", out, err)
+	}
+}
+
 func (m partialInventory) List(ctx context.Context, h agent.Host, in agent.Install) (agent.Listing, error) {
 	ls, err := m.Module.List(ctx, h, in)
 	ls.Errors = append(ls.Errors, agent.SessionError{Path: "unreadable-session.jsonl", Err: errors.New("permission denied")})

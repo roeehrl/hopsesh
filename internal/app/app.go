@@ -12,6 +12,7 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/audit"
+	"github.com/roeehrl/hopsesh/internal/core/catalog"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/registry"
 	"github.com/roeehrl/hopsesh/internal/core/termapp"
@@ -22,6 +23,7 @@ import (
 // App holds what every use case needs.
 type App struct {
 	activity      *runtimeActivity
+	Catalog       *catalog.Store
 	movementReads *movementReadCache
 	Cfg           config.Config
 	Reg           *registry.Registry // every compiled-in module
@@ -54,7 +56,7 @@ type App struct {
 
 // New returns an App for the modules and configuration.
 func New(cfg config.Config, reg *registry.Registry, stateDir string, log *audit.Log) *App {
-	return &App{activity: &runtimeActivity{}, movementReads: &movementReadCache{entries: map[string]movementRead{}}, Cfg: cfg, Reg: reg, StateDir: stateDir, Audit: log, Log: slog.Default(), tests: &cloudTests{m: map[string]cloudTest{}}}
+	return &App{activity: &runtimeActivity{}, Catalog: catalog.New(stateDir), movementReads: &movementReadCache{entries: map[string]movementRead{}}, Cfg: cfg, Reg: reg, StateDir: stateDir, Audit: log, Log: slog.Default(), tests: &cloudTests{m: map[string]cloudTest{}}}
 }
 
 // Modules returns the enabled modules.

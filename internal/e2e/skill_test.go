@@ -30,6 +30,7 @@ func TestSkillInEveryAgentWithoutDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := app.New(config.Defaults(), reg, t.TempDir(), nil)
+	t.Cleanup(func() { _ = a.Catalog.Close() })
 	ctx := context.Background()
 	files, _ := skill.Render(skill.NewParams("hopsesh", "0.3.0", []string{"Claude Code", "Codex"}, []string{"claude", "codex"}))
 

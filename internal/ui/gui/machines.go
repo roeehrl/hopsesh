@@ -59,9 +59,10 @@ type FoundRow struct {
 
 // MachinesDTO is the Machines screen.
 type MachinesDTO struct {
-	Here     HereDTO      `json:"here"`
-	Machines []MachineRow `json:"machines"`
-	Found    []FoundRow   `json:"found"`
+	DiscoveryError string       `json:"discoveryError,omitempty"`
+	Here           HereDTO      `json:"here"`
+	Machines       []MachineRow `json:"machines"`
+	Found          []FoundRow   `json:"found"`
 	// Clouds are the agents' clouds hopsesh can do something with, as the last scan found
 	// them (nil before a scan).
 	Clouds []CloudDTO `json:"clouds"`
@@ -72,11 +73,14 @@ type MachinesDTO struct {
 func (a *App) Machines() MachinesDTO {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	cands, _ := hosts.Discover(ctx)
+	cands, discoveryErr := hosts.Discover(ctx)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	out := MachinesDTO{Here: HereDTO{Name: app.LocalName(), Hopsesh: version.Version, Receive: a.core.Cfg.Peer.Receive, Agents: []string{}},
 		Machines: []MachineRow{}, Found: []FoundRow{}, Clouds: []CloudDTO{}}
+	if discoveryErr != nil {
+		out.DiscoveryError = discoveryErr.Error()
+	}
 	if a.inv != nil {
 		core := *a.core
 		out.Clouds = shownClouds(&core, a.inv)

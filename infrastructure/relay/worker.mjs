@@ -65,7 +65,11 @@ export function createHandler(storage,bucket,adminToken,space,clock=()=>Date.now
     if(!opaque(body.device)||!Number.isInteger(body.ttl)||body.ttl<(kind==='cloud-session'?1:60)||body.ttl>LIMITS.lifetime)return json({error:'enrollment'},400);
     if(body.admission!==undefined&&(kind!=='cloud-session'||! /^[a-f0-9]{64}$/.test(body.admission)))return json({error:'enrollment'},400);
     if(kind==='cloud-session'&&!body.issuer)return json({error:'enrollment'},400);
-    let ttl=body.ttl;
+    // Preserve the absolute signed lease across Authorization -> Mailbox delay.
+    // A relative TTL recomputed by each object would extend the cloud's authority.
+    if(body.expires!==undefined&&(!Number.isInteger(body.expires)||body.expires<=now||kind!=='cloud-session'))return json({error:'enrollment'},400);
+    if(body.admission&&body.expires===undefined)return json({error:'enrollment'},400);
+    let ttl=body.expires===undefined?body.ttl:Math.min(body.ttl,body.expires-now);
     if(body.issuer){const issuer=await storage.get('device:'+body.issuer.device);if(kind!=='cloud-session'||!issuer||issuer.revoked||issuer.kind!=='device'||issuer.expires<=now||issuer.token!==body.issuer.credential||issuer.authority!==await hash(adminToken))return json({error:'authorization'},403);ttl=Math.min(ttl,issuer.expires-now);if(ttl<1)return json({error:'authorization'},403)}
     const secret=Array.from(crypto.getRandomValues(new Uint8Array(32))).map(v=>v.toString(16).padStart(2,'0')).join('');
     const credential=await new SignJWT({space,device:body.device,kind,nonce:secret}).setProtectedHeader({alg:'HS256',typ:'JWT'}).setIssuer('hopsesh-relay-v1').setAudience('hopsesh-relay-mailbox').setIssuedAt(now).setExpirationTime(now+ttl).sign(encoder.encode(adminToken));
@@ -78,7 +82,7 @@ export function createHandler(storage,bucket,adminToken,space,clock=()=>Date.now
      // Reconstruct the same credential after a cross-object response or commit
      // failure. Never rotate or resurrect this admission on retry.
      if(body.admission&&old){
-      if(old.admission!==body.admission||old.revoked||old.expires<=now||old.kind!==kind||old.issuer!==body.issuer.device||old.authority!==await hash(adminToken))return json({error:'admission-conflict'},409);
+      if(old.admission!==body.admission||old.revoked||old.expires<=now||old.kind!==kind||old.issuer!==body.issuer.device||old.authority!==await hash(adminToken)||old.expires>body.expires)return json({error:'admission-conflict'},409);
       const replay=await new SignJWT({space,device:body.device,kind,nonce:old.nonce}).setProtectedHeader({alg:'HS256',typ:'JWT'}).setIssuer('hopsesh-relay-v1').setAudience('hopsesh-relay-mailbox').setIssuedAt(old.issuedAt).setExpirationTime(old.expires).sign(encoder.encode(adminToken));
       if(await hash(replay)!==old.token)return json({error:'admission-conflict'},409);
       return json({token:replay,space,device:body.device,expires:old.expires},201);
@@ -232,7 +236,7 @@ export class Authorization {
   const mailbox=async(space,path,body)=>this.env.MAILBOX.get(this.env.MAILBOX.idFromName(space)).fetch(new Request(new URL(path,req.url),{method:'POST',headers:{'Content-Type':'application/json','X-Hopsesh-Space':space,Authorization:'Bearer '+this.env.ENROLLMENT_ADMIN},body:JSON.stringify(body)}));
   if(new URL(req.url).pathname.startsWith('/v1/cloud/')){
    const authorize=async(space,device,credential)=>{const r=await mailbox(space,'/v1/enrollment/check',{device,credential});return r.ok&&(await r.json()).active===true};
-   const enroll=async(space,device,ttl,issuer,admission)=>{const r=await mailbox(space,'/v1/enrollment/register',{device,ttl,kind:'cloud-session',issuer,admission});if(r.status===429)throw new AdmissionCapacityError();if(r.status!==201)throw new Error('enrollment');return r.json()};
+   const enroll=async(space,device,ttl,issuer,admission,expires)=>{const r=await mailbox(space,'/v1/enrollment/register',{device,ttl,kind:'cloud-session',issuer,admission,expires});if(r.status===429)throw new AdmissionCapacityError();if(r.status!==201)throw new Error('enrollment');return r.json()};
    const revoke=async(space,device,issuer)=>{const r=await mailbox(space,'/v1/enrollment/revoke-device',{device,issuer});if(!r.ok)throw new Error('revocation')};
    return createAdmissionHandler(this.ctx.storage,enroll,authorize,revoke)(req);
   }

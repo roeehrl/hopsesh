@@ -68,6 +68,7 @@ func terminalStepCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			defer r.app.Catalog.Close()
 			tio := r.terminalIO(cmd)
 			err = r.app.RunStepFile(args[0], tio)
 			if tio.Hold {
@@ -96,6 +97,7 @@ func terminalOpenCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			defer r.app.Catalog.Close()
 			return r.app.RunTicket(args[0], r.terminalIO(cmd))
 		},
 	}

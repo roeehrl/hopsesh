@@ -12,17 +12,15 @@ async function fixtures(page:Page, returns:any[], movement:any=null) {
    calls.push(req);return route.fulfill({json:{error:'Test stopped after read-only plan request'}});
   }
   if(req.m==='AccountDestinations') return route.fulfill({json:{result:[]}});
-  if(['InitialScan','Scan','RefreshHere','QuickSnapshot'].includes(req.m)) {
-   const response=await route.fetch();const body=await response.json();
-   const scan=req.m==='QuickSnapshot'?body.result?.scan:body.result;
-   for(const g of scan?.groups||[]) for(const e of g.entries||[]) if(e.title==='Find the codeword') {
-    e.returns=returns.map(r=>({...r,machine:r.local?e.machine:r.machine}));e.movement=movement;
-   }
-   return route.fulfill({json:body});
-  }
   return route.continue();
  });
- await fresh(page);await row(page,'Find the codeword').click();
+ await fresh(page);
+ await patchScans(page,scan=>{
+  for(const g of scan?.groups||[]) for(const e of g.entries||[]) if(e.title==='Find the codeword') {
+   e.returns=returns.map(r=>({...r,machine:r.local?e.machine:r.machine}));e.movement=movement;
+  }
+ });
+ await row(page,'Find the codeword').click();
  return calls;
 }
 

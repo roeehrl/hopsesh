@@ -1,26 +1,26 @@
 import { test, expect, type Page } from "@playwright/test";
-import { fresh, row, menu, details, action } from "./helpers";
+import { fresh, row, menu, details, action, patchScans } from "./helpers";
 
 test.beforeEach(async ({ page }) => fresh(page));
+test.afterEach(async ({ page }) => { await page.unrouteAll({ behavior: "wait" }); });
 
 const sidebar = (page: Page) => page.getByRole("navigation", { name: "Places" });
 const group = (page: Page, name: string | RegExp) => page.locator(".grp").filter({ has: page.locator(".gname").getByText(name) });
 
 test("machine sidebar subtitles show detected agents consistently even without sessions", async ({ page }) => {
-  await page.route("**/call", async route => {
-    if (!["InitialScan", "Scan", "RefreshHere"].includes(route.request().postDataJSON().m)) return route.continue();
-    const response = await route.fetch(), body = await response.json();
-    const local = body.result.machines.find((m: any) => m.local);
-    expect(local.agentNames).toContain("Claude Code");
-    expect(local.agentNames).toContain("Codex");
-    body.result.groups = [];
-    body.result.total = 0;
-    body.result.machines = [local,
+  await patchScans(page, scan => {
+    const local = scan.machines.find((m: any) => m.local);
+    if (!scan.discovering) {
+      expect(local.agentNames).toContain("Claude Code");
+      expect(local.agentNames).toContain("Codex");
+    }
+    scan.groups = [];
+    scan.total = 0;
+    scan.machines = [local,
       { name: "other-mac", local: false, status: "ok", os: "darwin", hopsesh: "0.4.0", sessions: 0, agentNames: ["Claude Code", "Codex"], agents: ["Claude Code 2.1.288", "Codex 0.160.1"] },
       { name: "empty-box", local: false, status: "ok", sessions: 0, agentNames: [], agents: [] },
       { name: "offline-box", local: false, status: "unreachable", error: "Connection timed out", sessions: 4, agentNames: ["Claude Code"], agents: ["Claude Code 2.1.288"] },
     ];
-    await route.fulfill({ json: body });
   });
   await page.reload();
   await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible();

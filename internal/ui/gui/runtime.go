@@ -153,7 +153,7 @@ func (a *App) acceptRuntimeSnapshot(s observe.Snapshot) {
 	// Keep the latest owner snapshot above, without closing those transports or
 	// acknowledging its sequence; a later update or explicit scan adopts it.
 	a.mu.Lock()
-	reviewing := a.plan != nil && a.res == nil || a.push != nil
+	reviewing := a.closing || a.selectionReads > 0 || a.plan != nil && a.res == nil || a.push != nil
 	a.mu.Unlock()
 	if reviewing {
 		return
@@ -278,6 +278,9 @@ func (a *App) runtimeSleep(paused bool) {
 func (a *App) RefreshHere() (*ScanDTO, error) {
 	a.mu.Lock()
 	cfgErr := a.cfgErr
+	if a.closing {
+		cfgErr = errors.New("app is shutting down")
+	}
 	a.mu.Unlock()
 	if cfgErr != nil {
 		return nil, cfgErr

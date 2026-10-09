@@ -63,6 +63,8 @@ type HandoffPlanDTO struct {
 // PlanHandoff works out handing a session off to a cloud and keeps the plan for
 // ApplyHandoff. Nothing changes.
 func (a *App) PlanHandoff(machine, key, cloud string, o HandoffOptsDTO) (*HandoffPlanDTO, error) {
+	doneSelection := a.beginSelection()
+	defer doneSelection()
 	core := a.snapshot()
 	a.mu.Lock()
 	e, err := a.find(machine, key)
@@ -73,6 +75,10 @@ func (a *App) PlanHandoff(machine, key, cloud string, o HandoffOptsDTO) (*Handof
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+	inv, e, err = a.selectionInventory(ctx, core, inv, e)
+	if err != nil {
+		return nil, err
+	}
 	opt := core.HandoffDefaults(cloud)
 	opt.Untracked, opt.HistoryFile, opt.Bundle, opt.Mark = o.Untracked, o.HistoryFile, o.Bundle, o.Mark
 	opt.Brief, opt.Note, opt.CarryRules = o.Brief, o.Note, o.CarryRules

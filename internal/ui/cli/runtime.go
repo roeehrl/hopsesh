@@ -61,6 +61,7 @@ This command does not enable remote receiving.`, RunE: func(cmd *cobra.Command, 
 				return err
 			}
 			source := app.New(cfg, modules, config.StateDir(), nil)
+			defer source.Catalog.Close()
 			if watch {
 				opts := observe.Defaults()
 				opts.Reconcile = interval

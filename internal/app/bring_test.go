@@ -13,6 +13,7 @@ import (
 // is here; else Claude Code; else any agent here that takes sessions; else none.
 func TestBringTarget(t *testing.T) {
 	a := New(config.Config{}, all.Registry(), t.TempDir(), nil)
+	t.Cleanup(func() { _ = a.Catalog.Close() })
 	inv := func(ids ...agent.ID) *Inventory {
 		m := &Machine{Name: "here", Local: true}
 		for _, id := range ids {

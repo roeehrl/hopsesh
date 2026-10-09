@@ -40,7 +40,19 @@ All notable changes to this project are documented here. The format follows
   verified native prefixes preserve checkpoint lineage. Checkpoint forks remain
   separate, and private change notifications shut down superseded connectors.
 
+- Saved session metadata appears immediately in GUI, Quick access, TUI and
+  `hopsesh ls --cached`, with progressive discovery, independent source retries,
+  private summary caching and reconciled local file notifications.
+- Session account labels and grouping across GUI, TUI and CLI. Account groups
+  include retained source copies after a move and keep same-email profiles separate.
+
 ### Fixed
+
+- Cloud admission preserves the signed absolute lease across relay objects;
+  network latency cannot extend a connector's authority.
+- Progressive startup preserves pressed controls. Shared observation watches
+  Claude's process registry, retries concurrent account registration, and avoids
+  creating an unused browsing database merely to invalidate it.
 
 - Background inventory notifications no longer replay an already displayed scan
   or interrupt splitter dragging, keyboard resizing and form editing. Public
@@ -61,6 +73,21 @@ All notable changes to this project are documented here. The format follows
 - After explicitly forking rewritten cloud history, later checkpoints continue
   the accepted branch. Source acknowledgment recovers after interruption; undo
   restores the previous task ledger without changing cloud vendor files.
+
+- Claude/Codex sign-in detection, Codex initialization ordering, and account
+  refresh when the vendor sign-in terminal exits. Remote discovery retains public
+  owner-machine identity metadata and explains SSH/Keychain check limitations.
+- Background refreshes preserve selected conversations, focus, menus and scroll;
+  early summaries retain provisional repository metadata during enrichment.
+  Large session lists render bounded rows while preserving keyboard navigation.
+- Scanning one machine does not rescan every peer. Remote reconciliation runs
+  independently of local updates; Tailscale CLI failures are visible and peers
+  without MagicDNS remain discoverable.
+
+### Security
+
+- Build with Go 1.27.2, which fixes the standard-library vulnerabilities reported
+  against the previous pinned toolchain.
 
 ## [0.4.0] - 2026-10-08
 

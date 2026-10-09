@@ -60,6 +60,7 @@ func openSession(cmd *cobra.Command, refArg string) error {
 	if err != nil {
 		return err
 	}
+	defer r.app.Catalog.Close()
 	ref := app.ParseRef(refArg)
 	if ref.Machine != "" && ref.Machine != "local" && ref.Machine != app.LocalName() {
 		return fmt.Errorf("open resumes sessions on this machine; bring it here first: hopsesh pull %s", refArg)
@@ -180,6 +181,7 @@ Python API, install its Claude Code integration, or write profiles.`,
 			if err != nil {
 				return err
 			}
+			defer r.app.Catalog.Close()
 			ctx, cancel := ctxTimeout(1)
 			defer cancel()
 			use, _ := cmd.Flags().GetString("use")

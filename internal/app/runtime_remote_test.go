@@ -398,3 +398,43 @@ func TestRelayedObservationKeepsSourceFreshnessRatherThanReceiptTime(t *testing.
 		time.Sleep(time.Millisecond)
 	}
 }
+
+func TestLocalPublicationsDoNotPostponeRemoteReconciliation(t *testing.T) {
+	h := config.Host{Name: "box", Destination: "user@box", Allowed: true}
+	cfg := config.Defaults()
+	cfg.Hosts = []config.Host{h}
+	r := newRemoteObserver(nil)
+	r.interval = 40 * time.Millisecond
+	collected := make(chan struct{}, 100)
+	r.collect = func(context.Context, config.Host) RemoteObservation {
+		collected <- struct{}{}
+		return RemoteObservation{Status: StatusOK}
+	}
+	engine, stop := remoteEngineFixture(t, cfg, r)
+	defer stop()
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(2 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				engine.Notify()
+			}
+		}
+	}()
+	defer func() { cancel(); <-done }()
+	// The initial scan and two scheduled renewals must occur while local
+	// publications continue; stopping local traffic must not be what frees them.
+	for range 3 {
+		select {
+		case <-collected:
+		case <-time.After(2 * time.Second):
+			t.Fatal("local publication postponed remote reconciliation")
+		}
+	}
+}

@@ -428,6 +428,51 @@ The failed run revoked its test credentials, restored the relay to paused, and
 verified HTTP 503. Its partial delivery results do not qualify sustained load,
 cloud renewal, or whole-service cost.
 
+### Absolute lease expiry and successful rerun
+
+The capacity-corrected run passed its first three delivery rounds but failed
+claim validation with `relay returned a widened cloud admission credential`.
+Authorization calculated a relative TTL from the signed absolute lease, then
+Mailbox added that TTL to its later clock, extending expiry by cross-object
+latency. The Go client correctly refused that credential. Authorization now
+forwards the absolute expiry, and Mailbox clamps issuance and replay to that
+bound. A real-handler test advances the Mailbox clock for claim and retry: it
+fails before the fix and passes afterward. All 44 Worker/download contracts pass.
+
+The corrected hosted race test passed in **753.65 seconds**, starting
+2026-10-09 09:43:50 UTC. All 100 clients in four spaces received rounds at
+09:44:27, 09:49:59, 09:50:38 and 09:56:13. This includes two five-minute steady
+intervals, forced disconnect/reconnect, native routing renewal, cloud claim and
+revocation in every space, and ciphertext drain. Client counters report 3,117
+HTTP requests, 301 WebSocket handshakes and zero rate-limited responses.
+Fixture credential cleanup completed; paused deployment
+`ff82b644-9a45-40ce-8a57-e4ed167ca4b3` returned HTTP 503 at 09:56:54 UTC.
+The tested unpaused deployment was `dc7e7202-f31a-4b75-a893-b68d2e5c7a79`.
+
+GraphQL metrics covering 09:43:00 through 09:58:00 UTC include setup and cleanup:
+
+| Component | Observed metric |
+| --- | --- |
+| Worker | 3,229 estimated requests, 0 execution errors; 4,092,066 microseconds aggregate CPU |
+| Mailbox | 13.691949056 GB-seconds; 47,287 SQLite reads / 7,122 writes |
+| Authorization | 0.20246336 GB-seconds; 18 SQLite reads / 13 writes |
+| Both object classes | 0 CPU-limit, memory-limit or fatal internal errors |
+| R2 operations | 433 successful puts, 349 gets, 422 deletes, 4 bucket heads; 24 delete responses were HTTP 404 |
+
+Adaptive dataset counts are estimates and can settle later; they are not exact
+client counters or an invoice. Invocation datasets classify 303 Mailbox stream
+closures as disconnect errors during deliberate reconnect/drain. R2 delete 404s
+are recorded separately from successful cleanup; the functional drain assertions
+passed. No R2 storage samples were returned for this short window, so it does not
+prove zero storage usage. Full storage attribution, account-level billing/rounding
+and the elapsed orphan-retention canary remain required before declaring the
+whole-service cost/retention gate complete. Worker elapsed request duration and
+long-lived stream wall time are not Durable Object billed GB-seconds.
+
+Metrics are retained locally in `/tmp/hopsesh-load-success-window-final.json`;
+the query is `/tmp/hopsesh-load-success-window.graphql`. The test transcript is
+`/tmp/hopsesh-hosted-load-expiry-fixed.log`. These files contain no credentials.
+
 ## Codex prepared-filesystem publication correction
 
 A fresh task from the earlier published configuration had neither the versioned
@@ -440,5 +485,9 @@ The generated guidance now requires executing the verified installer in the
 editable setup, checking its version, publishing, then qualifying a new task.
 No incarnation is created in reusable setup. A new setup successfully installed
 and verified `0.5.0-staging.20261009.f134df2`; fresh-task inheritance and Start skill
-execution are being tested separately. See
+execution were tested separately: the new task inherited the verified helper,
+reported no supplied Start skill, and created no public incarnation. No manual
+preparation or connector was used to turn that negative startup result into a
+pass. Prepared installation inheritance is qualified; Start skill delivery and
+real pause/rebuild remain open. See
 [Codex cloud environments](https://learn.chatgpt.com/docs/environments/cloud-environments).

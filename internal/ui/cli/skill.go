@@ -50,6 +50,7 @@ and hopsesh reports any copy that drifted.
 			if err != nil {
 				return err
 			}
+			defer r.app.Catalog.Close()
 			files, bin := r.skillFiles()
 			rep := r.app.Skill(context.Background(), files, bin)
 			if r.jsonOut {
@@ -70,6 +71,7 @@ and hopsesh reports any copy that drifted.
 			if err != nil {
 				return err
 			}
+			defer r.app.Catalog.Close()
 			force, _ := cmd.Flags().GetBool("force")
 			rules, _ := cmd.Flags().GetBool("add-rules")
 			files, bin := r.skillFiles()
@@ -108,6 +110,7 @@ and hopsesh reports any copy that drifted.
 			if err != nil {
 				return err
 			}
+			defer r.app.Catalog.Close()
 			force, _ := cmd.Flags().GetBool("force")
 			files, bin := r.skillFiles()
 			if err := r.app.RemoveSkill(context.Background(), files, bin, force); err != nil {

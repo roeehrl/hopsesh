@@ -138,6 +138,7 @@ func noticesCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				defer r.app.Catalog.Close()
 				bin, err := os.Executable()
 				if err != nil {
 					return err

@@ -367,7 +367,7 @@ func (a *App) continueHop(ctx context.Context, rec *Hop, hj *journal.Journal, re
 	}
 	// This machine for the copy, and the next cloud for what its listing names (the
 	// environments' names).
-	inv := a.Scan(ctx, ScanOptions{Hosts: []string{LocalName(), rec.To}, GitFor: func(e Entry) bool { return e.Session.Key.Agent == key.Agent && e.Session.Key.Session == key.Session }})
+	inv := a.Scan(ctx, ScanOptions{Hosts: []string{LocalName(), rec.To}, NoCache: true, GitFor: func(e Entry) bool { return e.Session.Key.Agent == key.Agent && e.Session.Key.Session == key.Session }})
 	defer inv.Close()
 	var e *Entry
 	for i := range inv.Entries {

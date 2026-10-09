@@ -56,18 +56,18 @@ func wants(specs []agent.Spec) probeWants {
 }
 
 // ProbeLocal learns this machine's facts for the given modules.
-func ProbeLocal(ctx context.Context, specs []agent.Spec) Facts {
+func ProbeLocal(ctx context.Context, specs []agent.Spec) Facts { return probeLocal(ctx, specs, true) }
+
+// ProbeLocalFast resolves roots and executable paths without launching agents or
+// checking desktop protocols. Browsing can start before version enrichment.
+func ProbeLocalFast(ctx context.Context, specs []agent.Spec) Facts {
 	return probeLocal(ctx, specs, false)
 }
 
-// ObserveLocal resolves roots and executable paths without starting vendor programs,
-// checking login, or launching desktop protocol helpers. Observation must be safe on
-// an uninitialized installation and on a machine without a graphical session.
-func ObserveLocal(ctx context.Context, specs []agent.Spec) Facts {
-	return probeLocal(ctx, specs, true)
-}
+// ObserveLocal collects passive path facts without invoking vendor programs.
+func ObserveLocal(ctx context.Context, specs []agent.Spec) Facts { return ProbeLocalFast(ctx, specs) }
 
-func probeLocal(ctx context.Context, specs []agent.Spec, passive bool) Facts {
+func probeLocal(ctx context.Context, specs []agent.Spec, detailed bool) Facts {
 	w := wants(specs)
 	home, _ := os.UserHomeDir()
 	f := Facts{OS: runtime.GOOS, Arch: runtime.GOARCH, Home: home, Env: map[string]string{}, Binaries: map[string]agent.BinaryFact{}}
@@ -80,7 +80,7 @@ func probeLocal(ctx context.Context, specs []agent.Spec, passive bool) Facts {
 			continue
 		}
 		bf := agent.BinaryFact{Path: p}
-		if !passive && len(b.VersionArgs) > 0 {
+		if detailed && len(b.VersionArgs) > 0 {
 			vctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			out, _ := proc.CommandContext(vctx, p, b.VersionArgs...).Output()
 			cancel()
@@ -92,7 +92,7 @@ func probeLocal(ctx context.Context, specs []agent.Spec, passive bool) Facts {
 	f.HasGit = err == nil
 	f.DesktopProtocols = map[string]bool{}
 	for _, s := range specs {
-		if !passive && s.DesktopScheme != "" {
+		if detailed && s.DesktopScheme != "" {
 			f.DesktopProtocols[s.DesktopScheme] = registeredDesktopProtocol(ctx, s.DesktopScheme)
 		}
 	}

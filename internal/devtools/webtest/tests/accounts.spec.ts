@@ -90,3 +90,59 @@ test('connected remote without identity explains account setup and clears after 
  initialized=true;await page.getByRole('button',{name:'Scan accounts',exact:true}).click();
  await expect(notice).toHaveCount(0);
 });
+
+test('public identity states are clear and account groups use email without merging profiles',async({page})=>{
+ let profiles:any[]=[];
+ await page.route('**/call',async route=>{
+ const method=route.request().postDataJSON().m;
+ if(method!=='Accounts')return route.continue();
+ const response=await route.fetch(),body=await response.json();profiles=body.result;
+ for(const p of profiles){p.account={loggedIn:true,email:'two.personal@example.com',confidence:'limited',provider:p.agent};p.stale=false;p.error='';p.identitySource=p.local?'local':'owner'}
+ await route.fulfill({json:body});
+ });
+ await page.locator('#btn-settings').click();await page.getByRole('button',{name:'Accounts',exact:true}).click();
+ await expect(page.locator('.account-card').first()).toContainText('Signed in · two.personal@example.com');
+ await expect(page.locator('.accounts-page')).not.toContainText('limited identity');
+ const card=page.locator('.account-card').first();await card.getByText('Profile details',{exact:true}).click();await expect(card).toContainText('not a verified identity');
+ await page.evaluate(async p=>{const path='/core.js',core=await import(path),scan=structuredClone(core.state.scan);const all=scan.groups.flatMap((g:any)=>g.entries);all[0].profile={...p,id:'first',name:'First personal'};all[1].profile={...p,id:'second',name:'Second personal'};scan.revision+=100;core.state.scan=scan;},profiles[0]);
+ await page.getByRole('button',{name:'Back to sessions',exact:true}).click();await page.locator('#btn-display').click();await page.locator('#dp-group').selectOption('account');await page.keyboard.press('Escape');
+ await expect(page.locator('.gname').filter({hasText:'two.personal@example.com'})).toHaveCount(2);
+ await expect(page.locator('.account-chip').filter({hasText:'two.personal@example.com'})).toHaveCount(2);
+});
+
+test('scanning an account machine does not show every machine as scanning',async({page})=>{
+ await page.route('**/call',async route=>{
+  const m=route.request().postDataJSON().m;
+  if(m==='Accounts'){
+   const response=await route.fetch(),body=await response.json();body.result.push({...body.result[0],id:'remote-profile',machine:'remote-laptop',local:false});
+   return route.fulfill({json:body});
+  }
+  if(m==='ScanMachine')return route.fulfill({json:{result:null}});
+  return route.continue();
+ });
+ await page.locator('#btn-settings').click();await page.getByRole('button',{name:'Accounts',exact:true}).click();
+ const local=page.locator('.account-group').first(),remote=page.locator('[data-group="machine:remote-laptop"]');
+ await expect(remote).toBeVisible();
+ let release!:()=>void;const wait=new Promise<void>(r=>release=r);
+ await page.route('**/call',async route=>{if(route.request().postDataJSON().m!=='ScanMachine')return route.fallback();await wait;await route.fulfill({json:{result:null}})});
+ await remote.getByRole('button',{name:'Scan this machine'}).click();
+ await expect(remote.getByRole('button',{name:'Scanning…'})).toBeDisabled();
+ await expect(local.getByRole('button',{name:'Scan this machine'})).toBeEnabled();
+ release();await expect(remote.getByRole('button',{name:'Scan this machine'})).toBeEnabled();
+});
+
+
+test('account grouping shows retained source and destination copies after a transfer',async({page})=>{
+ await page.locator('#btn-settings').click();await page.getByRole('button',{name:'Accounts',exact:true}).click();
+ await page.getByRole('button',{name:'Add account',exact:true}).click();const editor=page.locator('dialog.account-editor');
+ await editor.getByLabel('Name',{exact:true}).fill('Second personal');await editor.getByRole('button',{name:'Add account',exact:true}).click();
+ await expect(editor).toHaveCount(0);await expect(page.getByRole('button',{name:'Scan accounts',exact:true})).toBeEnabled({timeout:30000});
+ await page.getByRole('button',{name:'Back to sessions',exact:true}).click();await row(page,'Find the codeword').click();
+ await details(page).getByRole('button',{name:'Move',exact:true}).click();await page.getByRole('menuitem',{name:/Move to another account/}).click();
+ const choice=page.getByLabel('Destination account'),id=await choice.locator('option').filter({hasText:'Second personal'}).getAttribute('value');await choice.selectOption(id!);
+ await expect(page.locator('#sheet')).toContainText('portable conversation');await page.locator('#sheet').getByRole('button',{name:/Continue in Claude Code/}).click();
+ await expect(page.getByText('Claude Code session written',{exact:true})).toBeVisible({timeout:30000});await page.getByRole('button',{name:'Back to sessions',exact:true}).click();
+ await page.locator('#btn-display').click();await page.locator('#dp-group').selectOption('account');await page.keyboard.press('Escape');
+ await expect(page.locator('.gname').filter({hasText:'Second personal'})).toHaveCount(1);
+ await expect(row(page,'Find the codeword')).toHaveCount(1);await expect(row(page,'Find the codeword (from Claude Code)')).toHaveCount(1);
+});

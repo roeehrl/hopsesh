@@ -48,6 +48,7 @@ func desktopApp(t *testing.T) (*App, *fakeDesktop) {
 	t.Helper()
 	home(t)
 	a := NewApp(all.Registry())
+	t.Cleanup(func() { _ = a.core.Catalog.Close() })
 	f := &fakeDesktop{s: desktop.State{Preferences: a.snapshot().Cfg.Desktop, Capabilities: desktop.Capabilities{Tray: true, HideApp: true}, Effective: "both"}}
 	a.Desktop = f
 	t.Cleanup(a.Shutdown)
@@ -109,6 +110,27 @@ func TestQuickPublicationRevisionDoesNotDependOnTimestamp(t *testing.T) {
 		t.Fatal("scan publications are not immutable and ordered within a second")
 	}
 }
+func TestDiscoveryAndRuntimeUseOnePublicationOrder(t *testing.T) {
+	a, _ := desktopApp(t)
+	first := a.CachedScan()
+	snapshot := a.ScanSnapshot()
+	if snapshot.Revision <= first.Revision {
+		t.Fatal("snapshot did not advance publication order")
+	}
+	runtime := &ScanDTO{}
+	a.publishQuick(runtime)
+	if runtime.Revision <= snapshot.Revision {
+		t.Fatal("runtime publication restarted the revision clock")
+	}
+	a.publishQuick(snapshot)
+	if a.QuickSnapshot().Scan != runtime {
+		t.Fatal("late discovery replaced the newer runtime publication")
+	}
+	if snapshot.Revision >= runtime.Revision {
+		t.Fatal("publication mutated an older visible DTO")
+	}
+}
+
 func TestQuickRouteSurvivesColdWindow(t *testing.T) {
 	a, f := desktopApp(t)
 	d, err := a.RefreshHere()

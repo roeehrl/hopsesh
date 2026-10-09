@@ -41,6 +41,7 @@ Better still, let hopsesh set that up for you: hopsesh hosts setup-key <machine>
 			if err != nil {
 				return err
 			}
+			defer r.app.Catalog.Close()
 			h := r.app.Cfg.FindHost(args[0])
 			if h == nil {
 				return fmt.Errorf("unknown machine %q (add it first: hopsesh hosts add %s <ssh-destination>)", args[0], args[0])
@@ -133,6 +134,7 @@ the default ~/.ssh/id_* names). When there is none, hopsesh offers to create
 			if err != nil {
 				return err
 			}
+			defer r.app.Catalog.Close()
 			h := r.app.Cfg.FindHost(args[0])
 			if h == nil {
 				return fmt.Errorf("unknown machine %q (add it first: hopsesh hosts add %s <ssh-destination> --password)", args[0], args[0])

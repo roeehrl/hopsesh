@@ -95,7 +95,7 @@ func (m *Module) Detect(_ context.Context, h agent.Host) (agent.Install, error) 
 
 // List summarises every transcript under <config>/projects, newest first. Subagent-only
 // and bookkeeping-only transcripts are left out, as Claude Code's own picker does.
-func (m *Module) List(_ context.Context, h agent.Host, in agent.Install) (agent.Listing, error) {
+func (m *Module) List(ctx context.Context, h agent.Host, in agent.Install) (agent.Listing, error) {
 	pa, fsys := h.Path(), h.FS()
 	projects := pa.Join(in.Root(home), "projects")
 	dirs, err := fsys.ReadDir(projects)
@@ -155,7 +155,8 @@ func (m *Module) List(_ context.Context, h agent.Host, in agent.Install) (agent.
 	}
 	wg.Wait()
 
-	infos := make([]*info, len(jobs))
+	sort.Slice(jobs, func(i, j int) bool { return jobs[i].info.ModTime().After(jobs[j].info.ModTime()) })
+	infos := make([]*agent.Summary, len(jobs))
 	errs := make([]error, len(jobs))
 	next := make(chan int)
 	for w := 0; w < workers; w++ {
@@ -165,7 +166,17 @@ func (m *Module) List(_ context.Context, h agent.Host, in agent.Install) (agent.
 			for i := range next {
 				j := jobs[i]
 				side := j.sidecar
-				infos[i], errs[i] = summarize(fsys, pa, j.file, j.info, &side)
+				sid := strings.TrimSuffix(pa.Base(j.file), ".jsonl")
+				deps := []string{pa.Join(pa.Dir(j.file), sid, "custom-title.json"), pa.Join(pa.Dir(j.file), sid, "subagents")}
+				infos[i], errs[i] = agent.ListingSummary(ctx, h, j.file, j.info, "claude-summary-1", deps, func() (*agent.Summary, error) {
+					s, err := summarize(fsys, pa, j.file, j.info, &side)
+					if err != nil || s.IsSidechain || !s.HasMessages {
+						return nil, err
+					}
+					sum := s.summary()
+					sum.Key.Profile = in.ProfileID()
+					return &sum, nil
+				})
 			}
 		}()
 	}
@@ -181,10 +192,10 @@ func (m *Module) List(_ context.Context, h agent.Host, in agent.Install) (agent.
 			out.Errors = append(out.Errors, agent.SessionError{Path: jobs[i].file, Err: errs[i]})
 			continue
 		}
-		if s.IsSidechain || !s.HasMessages {
+		if s == nil {
 			continue
 		}
-		out.Sessions = append(out.Sessions, s.summary())
+		out.Sessions = append(out.Sessions, *s)
 	}
 	sort.Slice(out.Sessions, func(i, j int) bool { return out.Sessions[i].LastActivity.After(out.Sessions[j].LastActivity) })
 	for i := range out.Sessions {
@@ -449,3 +460,12 @@ func encodeRecord(fields map[string]any) []byte {
 func toSlash(p string) string { return strings.ReplaceAll(p, `\`, "/") }
 
 func isNotExist(err error) bool { return errors.Is(err, fs.ErrNotExist) }
+
+// SessionWatchPaths excludes logs, credentials and unrelated caches.
+func (m *Module) SessionWatchPaths(in agent.Install, pa agent.Path) []string {
+	root := in.Root(home)
+	if root == "" {
+		return nil
+	}
+	return []string{pa.Join(root, "projects"), pa.Join(root, "sessions"), pa.Join(root, "hopsesh")}
+}

@@ -48,6 +48,7 @@ func TestDesktopTTYReportsFailureAndCleansUp(t *testing.T) {
 func TestShowClaudeAppKeepsSelectedSessionAndReportsAvailability(t *testing.T) {
 	home(t)
 	a := NewApp(all.Registry())
+	t.Cleanup(func() { _ = a.core.Catalog.Close() })
 	if _, err := a.Scan(); err != nil {
 		t.Fatal(err)
 	}

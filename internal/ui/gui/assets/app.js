@@ -13,7 +13,7 @@ import "./accounts.js";
 import { undoLast } from "./activity.js";
 import { openPalette } from "./palette.js";
 import { loadTabs, onTabs, showTerminal, tabs, exits } from "./term.js";
-import { render as renderSessions, listCommand, showEntry, reveal, preserveSelectedCopy } from "./sessions.js";
+import { listCommand, showEntry, reveal, scan, acceptScan, queueScan, backgroundRender } from "./sessions.js";
 import { load as loadLayout, toggle as togglePane } from "./layout.js";
 
 $("#btn-search").onclick = openPalette;
@@ -30,7 +30,7 @@ onTabs(() => {
   const sig = JSON.stringify([[...tabs.values()].map((t) => [t.kind, t.machine, t.key, t.attention, t.state === "exited"]), [...exits.values()].map((x) => [x.key, x.code])]);
   if (sig === shownTabs || current !== "sessions") { shownTabs = sig; return; }
   shownTabs = sig;
-  renderSessions(); // keeps the focus and the scroll
+  backgroundRender(); // defer while a pointer, menu or dialog owns the controls
 });
 
 // Native Quick access requests also survive a cold main-window boot.
@@ -40,28 +40,15 @@ async function quickRoute() {
  const r=await api("TakeQuickRoute");if(!r)return;
  if(r.screen==="settings"){await go("settings","desktop");return}
  if(r.screen==="terminals"){await showTerminal();return}
- const snapshot=await api("QuickSnapshot");if(snapshot.scan)state.scan=snapshot.scan;
+ const snapshot=await api("QuickSnapshot");if(snapshot.scan)acceptScan(snapshot.scan);
  await go("sessions");
  const e=state.scan?.groups.flatMap(g=>g.entries).find(e=>e.machine===r.machine&&e.key===r.key);
  if(e){showEntry(e);reveal()}
 }
 on("hopsesh:machine-scan",()=>machineScanChanged().catch(fail));
 on("hopsesh:quick-route",()=>quickRoute().catch(fail));
-// A notification may arrive after Scan already returned this exact publication.
-// Ignore duplicates and older responses; replacing the whole screen here used to
-// interrupt splitter drags, keyboard focus and conversation previews.
-let quickReading=false, quickAgain=false, quickPaint=false, pointerDown=false, quickPaintTimer;
-function paintQuick() {
- if(!quickPaint||state.scanning||current!=="sessions"||document.hidden)return;
- if(pointerDown||document.body.classList.contains("resizing")||document.querySelector("dialog[open], [role=menu], button:active")||document.activeElement?.matches("input, textarea, select, .divider"))return;
- quickPaint=false;renderSessions();
-}
-// Let the complete pointer/click sequence dispatch before replacing its target.
-// This is a one-shot coalescer, not a background poll.
-function scheduleQuickPaint() { if(!quickPaint)return;clearTimeout(quickPaintTimer);quickPaintTimer=setTimeout(paintQuick,100); }
-document.addEventListener("pointerdown",()=>{pointerDown=true;},true);
-for(const event of ["pointerup","pointercancel"])document.addEventListener(event,()=>{pointerDown=false;scheduleQuickPaint();},true);
-for(const event of ["click","keyup","focusout","close"])document.addEventListener(event,scheduleQuickPaint,true);
+// Coalesce concurrent notifications; Sessions owns ordered adoption and painting.
+let quickReading=false, quickAgain=false;
 on("hopsesh:quick",async()=>{
  if(!mainReady)return;
  quickAgain=true;if(quickReading)return;
@@ -70,16 +57,7 @@ on("hopsesh:quick",async()=>{
   while(quickAgain) {
    quickAgain=false;
    const d=await api("QuickSnapshot");state.runtime=d.runtime;
-   if(state.scanning)continue;
-   if(d.scan&&d.scan.revision>(state.scan?.revision||0)) {
-    await preserveSelectedCopy(d.scan);
-    // An explicit refresh may finish while the hidden copy is being resolved.
-    if(state.scanning||d.scan.revision<=(state.scan?.revision||0))continue;
-    state.scan=d.scan;state.presence=d.presence?.entries||{};quickPaint=true;
-   } else if(d.scan?.revision===state.scan?.revision&&JSON.stringify(d.presence?.entries||{})!==JSON.stringify(state.presence||{})) {
-    state.presence=d.presence?.entries||{};quickPaint=true;
-   }
-   scheduleQuickPaint();
+   if(!state.scanning&&d.scan)queueScan(d.scan,d.presence?.entries||{});
   }
  } catch(e) { fail(e); } finally { quickReading=false; }
 });
@@ -211,17 +189,15 @@ function configError() {
 // failures. Nothing can silently leave an empty window while the bridge is busy.
 export async function start() {
   for (const r of await api("PendingPasswords").catch(() => [])) askPassword(r);
-  state.info = await api("Info");
+  state.info = await api("Bootstrap");
   setSystem(state.info.os, state.info.terminal);
   loadLayout(state.info.layout);
   if (state.info.configError) { configError(); mainReady = true; return; }
-  $("#startup-title").textContent = "Finding your sessions…";
-  $("#startup-detail").textContent = "Reading local sessions and checking your configured machines. This can take a moment.";
-  await loadTabs();
-  state.scan = await api("InitialScan");
-  await go("sessions");
+  state.scan = await api("CachedScan");
   mainReady = true;
-  await quickRoute();
+  await go("sessions");
+  loadTabs().catch(fail);
+  scan("InitialScan").then(()=>{backgroundRender();return quickRoute()}).catch(fail);
   if (state.info.updateCheck === "on") {
     api("CheckUpdate").then((update) => {
       state.update = update;

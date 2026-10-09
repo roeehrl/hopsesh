@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -43,6 +44,8 @@ type Machine struct {
 	Error       string             `json:"error,omitempty"`
 	Hint        string             `json:"hint,omitempty"`
 	OS          string             `json:"os,omitempty"`
+	Phase       string             `json:"phase,omitempty"`
+	CheckedAt   time.Time          `json:"checkedAt,omitempty"`
 	Agents      []AgentState       `json:"agents"`
 	// Hopsesh is the version of hopsesh installed there ("" when none was found).
 	Hopsesh string `json:"hopsesh,omitempty"`
@@ -92,6 +95,7 @@ func (m *Machine) InstallProfile(id agent.ID, profile string) (agent.Install, bo
 
 // Entry is one session at one location: a machine, or a cloud.
 type Entry struct {
+	Cached             bool              `json:"cached,omitempty"`
 	NativeRelationship bool              `json:"nativeRelationship,omitempty"` // verified during this scan; no persisted family receipt
 	Returns            []ReturnCandidate `json:"returns,omitempty"`
 	Movement           *MovementNotice   `json:"movement,omitempty"`
@@ -120,9 +124,10 @@ type Entry struct {
 
 // Inventory is the result of a scan.
 type Inventory struct {
-	Machines []*Machine `json:"machines"`
-	Clouds   []*Cloud   `json:"clouds"`
-	Entries  []Entry    `json:"entries"`
+	Discovering bool       `json:"discovering,omitempty"`
+	Machines    []*Machine `json:"machines"`
+	Clouds      []*Cloud   `json:"clouds"`
+	Entries     []Entry    `json:"entries"`
 	// Adopted are sessions brought from a cloud that this scan found and adopted (their
 	// driver wrote them since); Waiting, the ones still waiting for it.
 	Adopted []*move.Fetch `json:"adopted,omitempty"`
@@ -162,14 +167,26 @@ func (inv *Inventory) Local() *Machine {
 type ScanOptions struct {
 	SharedRemotes   bool // use the owner's remote evidence instead of client collections
 	RemoteSnapshots []RemoteObservation
-	LocalSnapshot   *Observation // a shared passive source; skips local adoption and vendor probes
-	ForceAccounts   bool         // explicitly refresh public login metadata
-	Hosts           []string     // only these machines and clouds ("" or none: every allowed one)
-	NoLocal         bool         // leave this machine out
-	SkipGit         bool         // no git state (faster)
+	LocalSnapshot   *Observation     // a shared passive source; skips local adoption and vendor probes
+	NoCache         bool             // fresh action validation never reads cached summaries
+	Progress        func(ScanUpdate) // serialized immutable batches; never owns transports
+	ForceAccounts   bool             // explicitly refresh public login metadata
+	Hosts           []string         // only these machines and clouds ("" or none: every allowed one)
+	NoLocal         bool             // leave this machine out
+	SkipGit         bool             // no git state (faster)
 	// GitFor, when set, limits the git probe to the folders of the sessions it accepts (the
 	// others get no git state); see App.GitFor.
 	GitFor func(Entry) bool
+}
+
+// ScanUpdate describes one independently progressing source. Preliminary rows
+// have unknown presence and require fresh validation before an action.
+type ScanUpdate struct {
+	Machine  *Machine
+	Clouds   []*Cloud
+	Entries  []Entry
+	Complete bool
+	Listed   bool // summaries and lineage are ready, before slower enrichment
 }
 
 // Scan reads this machine, the allowed machines and the clouds in parallel. A machine or
@@ -177,22 +194,87 @@ type ScanOptions struct {
 // clouds are listed through this machine once its own sessions are listed (their lineage
 // names the cloud copies hopsesh made), alongside the other machines.
 func (a *App) Scan(ctx context.Context, o ScanOptions) *Inventory {
+	started := time.Now()
+	defer func() {
+		a.Log.Debug("session discovery completed", "duration", time.Since(started), "cache", !o.NoCache)
+	}()
+
+	followed, release := a.discoveryLease(ctx, o)
+	defer release()
+	if followed != nil {
+		wanted := map[string]bool{}
+		for _, name := range o.Hosts {
+			wanted[name] = true
+		}
+		followed.Machines = slices.DeleteFunc(followed.Machines, func(m *Machine) bool { return (o.NoLocal && m.Local) || (len(wanted) > 0 && !wanted[m.Name]) })
+		followed.Clouds = slices.DeleteFunc(followed.Clouds, func(c *Cloud) bool { return len(wanted) > 0 && !wanted[c.Name] })
+		followed.Entries = slices.DeleteFunc(followed.Entries, func(e Entry) bool {
+			return (o.NoLocal && e.Machine == LocalName()) || (len(wanted) > 0 && !wanted[e.Machine])
+		})
+		return followed
+	}
+	cached := a.CachedInventory()
+	localEntries := make(chan []Entry, 1)
+	var localListed sync.Once
+	var publishMu sync.Mutex
+	lastSaved := time.Time{}
+	lastSavedScope := ""
+	progress := o.Progress
+	publish := func(u ScanUpdate) {
+		publishMu.Lock()
+		defer publishMu.Unlock()
+		if u.Listed && u.Machine != nil && u.Machine.Local {
+			localListed.Do(func() { localEntries <- slices.Clone(u.Entries) })
+		}
+		scope := a.CatalogScope()
+		if !o.NoCache && (scope != lastSavedScope || time.Since(lastSaved) > 250*time.Millisecond || u.Complete) {
+			update := &Inventory{Discovering: !u.Complete, Clouds: u.Clouds, Entries: u.Entries}
+			if u.Machine != nil {
+				update.Machines = []*Machine{u.Machine}
+			}
+			a.saveCatalog(update, started)
+			lastSaved = time.Now()
+			lastSavedScope = scope
+		}
+		if progress != nil {
+			progress(u)
+		}
+	}
+	if progress != nil {
+		o.Progress = publish
+	}
 	a.tests.forget() // a sign-in since shows on the next plan
 	inv := &Inventory{}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	add := func(m *Machine, es []Entry) {
+		m.Phase = "done"
+		if m.Status == StatusOK {
+			m.CheckedAt = time.Now().UTC()
+		} else {
+			m.Phase = "error"
+		}
+		for _, st := range m.Agents {
+			if st.Error != "" {
+				m.Phase = "error"
+			}
+		}
 		mu.Lock()
 		inv.Machines = append(inv.Machines, m)
 		inv.Entries = append(inv.Entries, es...)
 		mu.Unlock()
+		publish(ScanUpdate{Machine: m, Entries: es, Complete: true})
 	}
 	want := map[string]bool{}
 	for _, h := range o.Hosts {
 		want[h] = true
 	}
-	local := sync.OnceValue(func() *host.Machine { return a.localMachine(ctx) })
-	localEntries := make(chan []Entry, 1)
+	local := sync.OnceValue(func() *host.Machine {
+		if progress != nil {
+			return &host.Machine{Name: LocalName(), Local: true, Facts: host.ProbeLocalFast(ctx, a.Specs()), Log: a.Log}
+		}
+		return a.localMachine(ctx)
+	})
 	if !o.NoLocal && (len(want) == 0 || want[LocalName()]) {
 		wg.Add(1)
 		go func() {
@@ -200,7 +282,7 @@ func (a *App) Scan(ctx context.Context, o ScanOptions) *Inventory {
 			if o.LocalSnapshot != nil {
 				cached := a.ObservationInventory(ctx, *o.LocalSnapshot)
 				add(cached.Local(), cached.Entries)
-				localEntries <- cached.Entries
+				localListed.Do(func() { localEntries <- cached.Entries })
 				return
 			}
 			adopted, waiting := a.adoptWaiting(ctx, local())
@@ -209,7 +291,7 @@ func (a *App) Scan(ctx context.Context, o ScanOptions) *Inventory {
 			mu.Lock()
 			inv.Adopted, inv.Waiting = adopted, waiting
 			mu.Unlock()
-			localEntries <- es
+			localListed.Do(func() { localEntries <- es })
 		}()
 	} else {
 		localEntries <- nil
@@ -225,11 +307,17 @@ func (a *App) Scan(ctx context.Context, o ScanOptions) *Inventory {
 		go func() {
 			defer wg.Done()
 			mine := <-localEntries
-			cs, es := a.scanClouds(ctx, local(), clouds, knownClouds(mine, clouds, a.Pasted()), mine)
+			cloudMachine := local()
+			if progress != nil {
+				cloudMachine = a.localMachine(ctx)
+				defer cloudMachine.Close()
+			}
+			cs, es := a.scanClouds(ctx, cloudMachine, clouds, knownClouds(mine, clouds, a.Pasted()), mine)
 			mu.Lock()
 			inv.Clouds = cs
 			inv.Entries = append(inv.Entries, es...)
 			mu.Unlock()
+			publish(ScanUpdate{Clouds: cs, Entries: es, Complete: true})
 		}()
 	}
 	for _, h := range a.Cfg.Hosts {
@@ -270,6 +358,24 @@ func (a *App) Scan(ctx context.Context, o ScanOptions) *Inventory {
 		}()
 	}
 	wg.Wait()
+	// Preserve last-known rows only for failed/incomplete sources.
+	for _, m := range inv.Machines {
+		merged := MergeDiscovery(cached, ScanUpdate{Machine: m, Entries: machineEntries(inv, m.Name), Complete: true})
+		for _, e := range merged.Entries {
+			if e.Machine == m.Name && e.Cached {
+				inv.Entries = append(inv.Entries, e)
+			}
+		}
+	}
+	for _, c := range inv.Clouds {
+		if c.Error != "" {
+			for _, e := range cached.Entries {
+				if e.Machine == c.Name {
+					inv.Entries = append(inv.Entries, e)
+				}
+			}
+		}
+	}
 	a.EnrichMovement(ctx, inv)
 	sort.SliceStable(inv.Machines, func(i, j int) bool {
 		if inv.Machines[i].Local != inv.Machines[j].Local {
@@ -280,7 +386,20 @@ func (a *App) Scan(ctx context.Context, o ScanOptions) *Inventory {
 	sort.SliceStable(inv.Entries, func(i, j int) bool {
 		return inv.Entries[i].Session.LastActivity.After(inv.Entries[j].Session.LastActivity)
 	})
+	if !o.NoCache {
+		a.saveCatalog(inv, started)
+	}
 	return inv
+}
+
+func machineEntries(inv *Inventory, name string) []Entry {
+	var out []Entry
+	for _, e := range inv.Entries {
+		if e.Machine == name {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 func (a *App) localMachine(ctx context.Context) *host.Machine {
@@ -326,7 +445,7 @@ var errNeedsPassword = errors.New("this machine logs in with a password")
 // scanMachine lists every enabled agent's sessions on a reached machine.
 func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o ScanOptions) (*Machine, []Entry) {
 	m := &Machine{Kind: agent.AtMachine, Name: hm.Name, Destination: dest, Local: hm.Local, Status: StatusOK, OS: hm.Facts.OS, host: hm,
-		Hopsesh: hopseshVersion(hm.Facts.Binaries[host.Hopsesh.Name])}
+		Hopsesh: hopseshVersion(hm.Facts.Binaries[host.Hopsesh.Name]), Phase: "reading"}
 	fsys, err := hm.FS(ctx)
 	if err != nil {
 		m.Status, m.Error, m.Hint = StatusError, "SFTP: "+err.Error(), "the machine's SSH server must allow the sftp subsystem"
@@ -344,18 +463,26 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 			st.Error = err.Error()
 		}
 
-		installs, scanErr := a.profileInstalls(ctx, hm, mod, st.Install, o.ForceAccounts)
+		installs, scanErr := a.profileInstalls(ctx, hm, mod, st.Install, o.ForceAccounts, o.Progress != nil)
 		if scanErr != nil {
 			st.Error = scanErr.Error()
 			m.Agents = append(m.Agents, st)
 			continue
 		}
+		// Registering another default profile changes the inventory namespace.
+		// Carry already discovered rows into that namespace before its listing.
+		if o.Progress != nil && len(entries) > 0 {
+			partial := *m
+			partial.Agents = slices.Clone(m.Agents)
+			partial.host = nil
+			o.Progress(ScanUpdate{Machine: &partial, Entries: slices.Clone(entries)})
+		}
 		for _, in := range installs {
 			state := AgentState{Agent: spec.ID, Name: spec.Name, Install: in, Error: st.Error}
-			if in.Profile != nil {
-				if in.Profile.Error != "" {
-					state.Error = in.Profile.Error
-				}
+			// A failed identity probe does not make a successful directory
+			// enumeration incomplete. Keep auth errors on the profile card.
+			if !in.Present && in.Profile != nil && in.Profile.Error != "" {
+				state.Error = in.Profile.Error
 			}
 			m.Agents = append(m.Agents, state)
 			if !in.Present {
@@ -364,7 +491,40 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 			ch, e := hm.For(ctx, spec, in, nil)
 			if e == nil {
 				var l agent.Listing
-				l, e = mod.List(ctx, ch, in)
+				listCtx := ctx
+				// The module reports summaries before live/git/lineage enrichment.
+				var batchMu sync.Mutex
+				var batch []Entry
+				firstBatch := true
+				found := func(sum agent.Summary) {
+					if o.Progress == nil {
+						return
+					}
+					sum.Key.Profile = in.ProfileID()
+					batchMu.Lock()
+					defer batchMu.Unlock()
+					batch = append(batch, Entry{Cached: true, Location: agent.MachineLocation(hm.Name), Machine: hm.Name, Agent: spec.ID, AgentName: spec.Name, Session: sum, Profile: in.Profile, Live: agent.LiveInfo{State: agent.Unknown}})
+					if firstBatch || len(batch) >= 25 {
+						partial := *m
+						partial.Agents = append([]AgentState(nil), m.Agents...)
+						partial.host = nil
+						o.Progress(ScanUpdate{Machine: &partial, Entries: batch})
+						batch = nil
+						firstBatch = false
+					}
+				}
+				if !o.NoCache {
+					listCtx = a.listingContext(ctx, hm.Name, in, found)
+				} else if o.Progress != nil {
+					listCtx = agent.WithListingHooks(ctx, agent.ListingHooks{Found: found})
+				}
+				l, e = mod.List(listCtx, ch, in)
+				if len(batch) > 0 && o.Progress != nil {
+					partial := *m
+					partial.Agents = append([]AgentState(nil), m.Agents...)
+					partial.host = nil
+					o.Progress(ScanUpdate{Machine: &partial, Entries: batch})
+				}
 				if e == nil {
 					for i := range l.Sessions {
 						l.Sessions[i].Key.Profile = in.ProfileID()
@@ -381,6 +541,65 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 		}
 	}
 
+	if o.Progress != nil {
+		partial := *m
+		partial.Agents = append([]AgentState(nil), m.Agents...)
+		partial.host = nil
+		o.Progress(ScanUpdate{Machine: &partial, Entries: entries, Listed: true})
+	}
+	if hm.Local && o.Progress != nil {
+		endpoint := hm.Facts.Endpoint
+		hm.Facts = host.ProbeLocal(ctx, a.Specs())
+		hm.Facts.Endpoint = endpoint
+		for i := range m.Agents {
+			st := &m.Agents[i]
+			if mod, ok := a.Module(st.Agent); ok {
+				if h, err := hm.For(ctx, mod.Spec(), st.Install, nil); err == nil {
+					if detailed, err := mod.Detect(ctx, h); err == nil {
+						st.Install.Version = detailed.Version
+						st.Install.Binary = detailed.Binary
+						st.Install.Desktop = detailed.Desktop
+						st.Install.DesktopVersion = detailed.DesktopVersion
+						st.Install.DesktopWhy = detailed.DesktopWhy
+					}
+				}
+			}
+		}
+	}
+	if o.Progress != nil {
+		for _, mod := range a.Modules() {
+			h, err := hm.For(ctx, mod.Spec(), agent.Install{}, nil)
+			if err != nil {
+				continue
+			}
+			base, err := mod.Detect(ctx, h)
+			if err != nil {
+				continue
+			}
+			installs, err := a.profileInstalls(ctx, hm, mod, base, o.ForceAccounts)
+			if err != nil {
+				for i := range m.Agents {
+					if m.Agents[i].Agent == mod.Spec().ID {
+						m.Agents[i].Error = err.Error()
+					}
+				}
+				continue
+			}
+			for _, in := range installs {
+				for i := range m.Agents {
+					st := &m.Agents[i]
+					if st.Agent == mod.Spec().ID && st.Install.ProfileID() == in.ProfileID() {
+						st.Install = in
+					}
+				}
+				for i := range entries {
+					if entries[i].Agent == mod.Spec().ID && entries[i].Session.Key.Profile == in.ProfileID() {
+						entries[i].Profile = in.Profile
+					}
+				}
+			}
+		}
+	}
 	if !o.SkipGit {
 		var dirs []string
 		seen := map[string]bool{}
@@ -526,6 +745,9 @@ func saveRoute(stateDir, dest, via string) {
 // Status is a session's state in words: "live …", where it went ("moved to studio"),
 // "ended", or a cloud session's state ("running", "state unknown").
 func (e Entry) Status() string {
+	if e.Cached {
+		return "state unknown"
+	}
 	switch {
 	case e.Cloud != nil:
 		if e.Cloud.State == agent.CloudUnknown || e.Cloud.State == "" {

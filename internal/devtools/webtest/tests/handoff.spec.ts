@@ -87,7 +87,7 @@ test("the hand-off sheet: briefing, branch, what stays, options; done, then undo
   // No cloud takes a follow-up from hopsesh: there is no button, and Claude Code's cloud
   // says where to write to the session instead.
   await expect(page.getByRole("button", { name: "Send a follow-up…" })).toHaveCount(0);
-  await expect(page.locator("#ho-nofollow")).toContainText("hopsesh can't send a Claude Code cloud session a message");
+  await expect(page.locator("#ho-nofollow")).toContainText("hopsesh has not yet integrated and qualified Claude Code's cloud follow-up command");
 
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   const dlg = page.locator("#dlg");

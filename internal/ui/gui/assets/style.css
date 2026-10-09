@@ -706,3 +706,5 @@ body.terminal-right.terminal-details #view {contain:none}
 body.terminal-right.terminal-details #inspector {display:block;position:fixed;z-index:16;right:0;top:var(--terminal-details-top,96px);bottom:0;width:var(--terminal-size);background:var(--panel);border-left:1px solid var(--line);overflow:auto}
 body.terminal-right.terminal-details #terminal-workspace iframe {visibility:hidden}
 body.terminal-right .divider[data-pane="inspector"]{display:none}
+
+.discovery-note { color:var(--muted);font-size:12px;padding:10px 12px;border-left:2px solid var(--accent);margin-bottom:10px; }

@@ -63,6 +63,10 @@ func (a *App) HandoffTargets(inv *Inventory, e Entry) []HandoffTarget {
 			t.Why = trimSentinel(c.Error)
 		case c.Status == CloudError:
 			t.Why = nonEmpty(c.Error, "it could not be reached")
+		case e.Cached && e.Git == nil:
+			// Browsing has not checked the repository yet. Opening a review
+			// performs fresh source validation; unknown is not a refusal.
+			t.OK, t.Note = true, "Gets a briefing and the code on a branch · Repository checked before review"
 		case e.Git == nil || !e.Git.IsRepo || e.Git.Identity == "":
 			t.Why = "this session isn't in a git repository with a remote"
 		case src != nil && !src.Local && src.OS == "windows":

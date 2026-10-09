@@ -16,6 +16,7 @@ import (
 func TestEntryMovementContract(t *testing.T) {
 	home(t)
 	a := NewApp(all.Registry())
+	t.Cleanup(func() { _ = a.core.Catalog.Close() })
 	checked := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	e := app.Entry{Machine: app.LocalName(), Agent: "codex", AgentName: "Codex", Session: agent.Summary{Key: agent.SessionKey{Agent: "codex", Session: "source"}}, ObservedAt: checked,
 		Returns:  []app.ReturnCandidate{{Replica: "replica", Machine: "studio", Agent: "claude", AgentName: "Claude Code", Profile: "work", ProfileLabel: "Work", Key: "claude@work/original", Status: "verify", Reason: "offline"}},
@@ -39,6 +40,7 @@ func TestEntryMovementContract(t *testing.T) {
 func TestMovementNoticeSettingsPersist(t *testing.T) {
 	home(t)
 	a := NewApp(all.Registry())
+	t.Cleanup(func() { _ = a.core.Catalog.Close() })
 	if !a.Info().Defaults.MovementNotices || !a.Settings().MovementNotices {
 		t.Fatal("notices should default on")
 	}
@@ -47,6 +49,7 @@ func TestMovementNoticeSettingsPersist(t *testing.T) {
 			t.Fatal(err)
 		}
 		reloaded := NewApp(all.Registry())
+		t.Cleanup(func() { _ = reloaded.core.Catalog.Close() })
 		if reloaded.Info().Defaults.MovementNotices != on || reloaded.Settings().MovementNotices != on {
 			t.Fatal("notice preference not persisted", on)
 		}
@@ -56,6 +59,7 @@ func TestMovementNoticeSettingsPersist(t *testing.T) {
 func TestResolveEntryFindsHiddenRawReplica(t *testing.T) {
 	home(t)
 	a := NewApp(all.Registry())
+	t.Cleanup(func() { _ = a.core.Catalog.Close() })
 	key := agent.SessionKey{Agent: "claude", Session: "original"}
 	old := app.Entry{Machine: app.LocalName(), Agent: "claude", AgentName: "Claude Code", Session: agent.Summary{Key: key, Title: "Original", LastActivity: time.Now().Add(-time.Hour)}}
 	old.Lineage = &lineage.Manifest{Family: "family", Branch: "original"}

@@ -2,7 +2,7 @@
 // clouds), the sessions in the middle as one tree (grouped, sorted and filtered by
 // listview.js), the selected session on the right (inspector.js). Every action on a
 // session comes from actions.js, which the palette uses too.
-import { loadError, api, on, h, fill, icon, ICONS, view, state, screen, go, current, loading, toast, fail, cap, ago, agentBadge, machineStatus, sys, keys,
+import { accountLabel, accountTitle, loadError, api, on, h, fill, icon, ICONS, view, state, screen, go, current, loading, toast, fail, cap, ago, agentBadge, machineStatus, sys, keys,
   entries, selected, here, agentInfo, $, count, clouds, cloudOf, cloudState, cloudChip, dialog, errText, rich, cloudTitle } from "./core.js";
 import { planPicked } from "./plan.js";
 import { dividers, apply as applyLayout } from "./layout.js";
@@ -34,9 +34,17 @@ export async function preserveSelectedCopy(scan) {
 }
 
 // scan reads every machine again. The list stays while it runs.
-export async function scan() {
-  if (state.scanning) return;
+let pendingScan=null, scanCompletion=Promise.resolve();
+export async function scan(method = "Scan", background = false) {
+  if (state.scanning) {
+    // A newly pasted cloud link or explicit refresh must not disappear merely
+    // because an earlier progressive scan has already queried that source.
+    if(!pendingScan) pendingScan=scanCompletion.then(()=>{pendingScan=null;return scan(method,background)});
+    return pendingScan;
+  }
   const inspecting = current === "sessions" && !!view.querySelector("#inspector");
+  let finished;
+  scanCompletion=new Promise(resolve=>{finished=resolve});
   state.scanning = true;
   state.scanError = "";
   state.stale = false;
@@ -49,34 +57,37 @@ export async function scan() {
     }
   }
   try {
-    const scan = await api("Scan");
-    // Returning from a completed move should show its new representative;
-    // refreshing an existing inspector should retain the copy being reviewed.
-    if (inspecting) await preserveSelectedCopy(scan);
-    state.scan = scan;
+    const result=await api(method);
+    if (inspecting) await preserveSelectedCopy(result);
+    if(background)queueScan(result);else acceptScan(result);
     state.info = await api("Info");
     state.activity = await api("Activity").catch(() => state.activity);
   } catch (e) {
     state.scanError = errText(e);
     state.stale = true;
     state.scanning = false;
+    finished();
     if (!state.scan && current === "sessions") fill(view, loadError(e, () => go("sessions", true)));
     else fail(e);
     freshness();
     return;
   }
   state.scanning = false;
+  finished();
   state.presence = {}; // the scan's own is newer
   freshness();
-  if (state.sel && !selected()) state.sel = null;
+  if (!background && !pendingScan && state.sel && !selected()) state.sel = null;
 }
+
+// Explicit source retry shares scan ordering; background collection belongs to the runtime.
+async function refreshHere() { return scan("RefreshHere"); }
 
 function freshness() {
   const el = $("#fresh");
   const rt=state.runtime;
   const observation=rt?.snapshot;
-  const stale=observation?.paused || rt?.error || (observation?.expiresAt && Date.parse(observation.expiresAt)<Date.now());
-  el.textContent = stale ? observation?.paused ? "Observation paused" : "Showing cached sessions" : state.scanning ? "Refreshing…" : state.scan ? "updated " + ago(state.scan.updated) : "";
+  const stale=observation?.paused || rt?.error || (observation?.sequence>0 && observation?.expiresAt && Date.parse(observation.expiresAt)<Date.now());
+  el.textContent = observation?.paused ? "Observation paused" : state.scanning || state.scan?.discovering ? (entries().length ? `${entries().length} sessions found · Checking for changes…` : "Finding sessions…") : stale ? "Showing cached sessions" : state.scan?.cached ? "Showing saved sessions · Checking for changes…" : state.scan?.updated ? "updated " + ago(state.scan.updated) : "Not checked yet";
   const other = state.scan && state.scan.elsewhere !== state.scan.updated;
   el.title = other ? `${sys.Here}: ${ago(state.scan.updated)}. Your other machines and the clouds: ${ago(state.scan.elsewhere)}.` : "";
 }
@@ -123,7 +134,8 @@ function sidebar() {
   const act = state.activity;
   const mine = all.filter((e) => e.machine === here() && !e.cloud);
   const local = s.machines.find((m) => m.local);
-  const agentSubtitle = (m) => (m?.agentNames || []).join(", ") || "No agents detected";
+  const agentSubtitle = (m) => (m?.agentNames || []).join(", ") || (m?.phase === "reading" ? "Reading sessions…" : "No agents detected");
+  const scanSubtitle=m=>m?.phase==="reading"?"Reading sessions…":m?.phase==="saved"?`Saved · last checked ${ago(m.checkedAt)||"previously"}`:"";
   const on = clouds().filter((c) => c.allowed);
   return h("nav", { class: "sidebar", id: "sidebar", "aria-label": "Places" },
     h("button", { class: "side-btn", "aria-current": cur("needs"), onclick: () => setScope({ kind: "needs" }) },
@@ -132,11 +144,11 @@ function sidebar() {
     h("button", { class: "side-btn", "aria-current": cur("all"), onclick: () => setScope({ kind: "all" }) }, icon(ICONS.all), "All sessions", h("span", { class: "count" }, all.length)),
     h("div", { class: "side-h" }, "Machines"),
     h("button", { class: "side-btn", "aria-current": cur("here"), onclick: () => setScope({ kind: "here" }) },
-      h("span", { class: "dot ok" }), h("span", { class: "label" }, h("span", {}, sys.Here), h("small", { title: (local?.agents || []).join(", ") }, agentSubtitle(local))),
+      h("span", { class: "dot ok" }), h("span", { class: "label" }, h("span", {}, sys.Here), h("small", { title: (local?.agents || []).join(", ") }, agentSubtitle(local)), scanSubtitle(local) ? h("small",{},scanSubtitle(local)) : null),
       h("span", { class: "count" }, mine.length)),
     machines.map((m) => h("button", { class: "side-btn", "aria-current": cur("machine", m.name), onclick: () => setScope({ kind: "machine", value: m.name }) },
       h("span", { class: "dot " + dotFor(m) }),
-      h("span", { class: "label" }, h("span", {}, m.name), h("small", { class: dotFor(m) === "ok" ? "" : "warn", title: dotFor(m) === "ok" ? (m.agents || []).join(", ") : m.hint || m.error }, dotFor(m) === "ok" ? agentSubtitle(m) : machineStatus(m.status)[1])),
+      h("span", { class: "label" }, h("span", {}, m.name), h("small", { class: dotFor(m) === "ok" ? "" : "warn", title: dotFor(m) === "ok" ? (m.agents || []).join(", ") : m.hint || m.error }, dotFor(m) === "ok" ? agentSubtitle(m) : machineStatus(m.status)[1]),scanSubtitle(m) ? h("small",{},scanSubtitle(m)) : null),
       h("span", { class: "count" }, m.status === "ok" ? m.sessions : ""))),
     h("button", { class: "side-btn", style: "color:var(--accent)", onclick: () => go("machines") }, icon(ICONS.plus), machines.length ? "Add a machine" : "Add your other machines"),
     clouds().length ? h("div", { class: "side-h" }, "Clouds") : null,
@@ -237,6 +249,8 @@ function updateNote() {
 // notices are things to set up, shown above the list until done or dismissed.
 function notices() {
   const out = [], i = state.info, s = state.scan;
+  if (state.scanning || s.discovering || s.cached) out.push(h("div",{class:"discovery-note",role:"status","aria-live":"polite"},s.cached ? "Showing saved sessions. Checking for changes…" : `${entries().length} sessions found. Other sources may still be loading.`,h("button",{class:"link",onclick:()=>api("CancelScan")},"Stop checking")));
+  if(state.scope.kind==="all") for(const m of s.machines.filter(m=>m.status!=="ok" || m.phase==="error")) out.push(h("div",{class:"card notice warn-card",role:"status"},h("span",{},`${m.name===here()?sys.Here:m.name}: ${m.error||machineStatus(m.status)[1]}. Saved sessions remain available.`),h("button",{class:"btn",onclick:async()=>{if(m.local)await refreshHere();else {await api("ScanMachine",m.name);acceptScan(await api("ScanSnapshot"))}render()}},"Retry")));
   if (state.scanError) out.push(h("div", { class: "card notice warn-card", role: "alert" }, h("span", {}, "Refresh failed. Showing the previous results. " + state.scanError), h("button", { class: "btn", onclick: () => go("sessions", true) }, "Retry refresh")));
   const picked = state.scope.kind === "machine" && s.machines.find((m) => m.name === state.scope.value);
   if (picked && picked.status !== "ok") out.push(h("div", { class: "card notice warn-card", role: "status" },
@@ -360,6 +374,7 @@ function row(e, level) {
   if(e.journey?.fork) bits.push("separate fork");
  if(e.journey?.roundTrips) bits.push(`${e.journey.roundTrips} round trips`);
  const chips = presenceChips(e);
+if(e.profile) chips.push(h("span", {class:"chip account-chip",title:accountTitle(e.profile)},accountLabel(e.profile)));
   if (e.cloud) chips.push(cloudChip(e.machine));
   if (e.cloud?.pr) chips.push(h("span", { class: "chip st-moved" }, "PR " + e.cloud.pr));
   if (e.mirror) chips.push(mirrorChip(e.mirror));
@@ -421,6 +436,7 @@ onRows((el) => {
 let lastShown = [], lastScope = [];
 function body(shown, inScope) {
   if (!shown.length) {
+    if(state.scanning || state.scan.discovering) return h("div",{class:"empty",role:"status"},"Looking for sessions in this view… Results appear as they are found.");
     const hidden = inScope.length - shown.length;
     if (hidden > 0) return h("div", { class: "empty" }, h("span", {}, "No sessions match · ", count(hidden, "session"), " hidden by filters · ",
       h("button", { class: "link", onclick: () => { clearFilters(); if (list.text) { list.text = ""; $("#list-filter").value = ""; refreshList(); } } }, "Clear filters")));
@@ -452,6 +468,11 @@ onChange((full = true) => (full ? render() : refreshList()));
 
 export function render() {
   if (!state.scan || current !== "sessions") return;
+  decide(entries().length, () => toggleDisplay());
+  const active=document.activeElement;
+  const inputID=active?.matches?.("input") ? active.id : null;
+  const inputSelection=inputID ? [active.selectionStart,active.selectionEnd] : null;
+  const inspectorTop=view.querySelector(".inspector")?.scrollTop||0;
   const old = view.querySelector(".content");
   const top = old ? old.scrollTop : 0;
   const focusKey = document.activeElement?.closest?.(".tree [data-key]")?.dataset.key;
@@ -459,10 +480,10 @@ export function render() {
   const inScope = scoped();
   const shown = applyFilters(inScope, state.scope);
   // A selection the list doesn't show goes (another place, a filter, a refresh).
-  if (state.sel && !shown.some((x) => x.machine === state.sel.machine && x.key === state.sel.key)) { state.sel = null; state.handoffOpen = null; }
+  if (!state.scanning && !pendingScan && !state.scan.discovering && state.sel && !shown.some((x) => x.machine === state.sel.machine && x.key === state.sel.key)) { state.sel = null; state.handoffOpen = null; }
   const content = h("section", { class: "content" }, toolbar(scopeTitle(), state.scope), h("div", { class: "list" }, notices(), body(shown, inScope)));
   const layout = view.querySelector(".three.layout");
-  if (layout) {
+  if (layout && old && layout.querySelector("#inspector")) {
     layout.querySelector("#sidebar").replaceWith(sidebar());
     old.replaceWith(content);
     const pane = layout.querySelector("#inspector");
@@ -477,6 +498,9 @@ export function render() {
   lastShown = shown; lastScope = inScope;
   applyLayout();
   content.scrollTop = top;
+  const ins=view.querySelector(".inspector");if(ins)ins.scrollTop=inspectorTop;
+  if(inputID){const input=document.getElementById(inputID);input?.focus({preventScroll:true});if(inputSelection)input?.setSelectionRange(...inputSelection)}
+  else if(active?.isConnected && active!==document.body)active.focus({preventScroll:true});
   if (focusKey) rowByKey(content, focusKey)?.focus({ preventScroll: true });
   else if (focusGroup) content.querySelector(`.grp[data-gkey="${CSS.escape(focusGroup)}"]`)?.focus({ preventScroll: true });
 }
@@ -582,3 +606,44 @@ function inView(r, center) {
   else if (rb.top < lb.top + top) list.scrollTop -= lb.top + top - rb.top + 8;
   else if (rb.bottom > lb.bottom) list.scrollTop += rb.bottom - lb.bottom + 8;
 }
+
+// Adopt ordered state promptly; paint only after the current interaction ends.
+// Discovery, Quick access and terminal events share this one coalescer.
+let discoveryPending=null,discoveryPresence=null,discoveryReading=false,discoveryTimer=0,pointerHeld=false,backgroundDirty=false;
+document.addEventListener("pointerdown",()=>{pointerHeld=true},true);
+for(const event of ["pointerup","pointercancel"])window.addEventListener(event,()=>{pointerHeld=false;scheduleDiscovery()},true);
+for(const event of ["click","keyup","focusout","close","visibilitychange"])document.addEventListener(event,scheduleDiscovery,true);
+window.addEventListener("focus",scheduleDiscovery);
+export function acceptScan(scan){
+ if(!scan || (scan.revision && state.scan?.revision && scan.revision<=state.scan.revision))return false;
+ state.scan=scan;freshness();return true;
+}
+function scheduleDiscovery(){if(backgroundDirty&&!discoveryTimer)discoveryTimer=setTimeout(drawDiscovery,100)}
+export function backgroundRender(){backgroundDirty=true;scheduleDiscovery()}
+export function queueScan(d,presence=null){
+ if(!d || (discoveryPending?.revision && d.revision<discoveryPending.revision))return;
+ discoveryPending=d;discoveryPresence=presence;
+ if(!discoveryReading)adoptDiscovery();
+}
+async function adoptDiscovery(){
+ discoveryReading=true;
+ try {
+  while(discoveryPending){
+   const d=discoveryPending,presence=discoveryPresence;discoveryPending=null;discoveryPresence=null;
+   if(!d.revision||d.revision>(state.scan?.revision||0)){
+    await preserveSelectedCopy(d);
+    if(acceptScan(d)){state.presence=presence||{};backgroundRender()}
+   }else if(d.revision===state.scan?.revision&&presence!==null&&JSON.stringify(presence)!==JSON.stringify(state.presence||{})){
+    state.presence=presence;backgroundRender();
+   }
+  }
+ } finally {discoveryReading=false}
+}
+function drawDiscovery(){
+ discoveryTimer=0;
+ if(!backgroundDirty||current!=="sessions"||document.hidden)return;
+ if(pointerHeld||document.body.classList.contains("resizing")||document.querySelector("dialog[open],button:active")||isOpen()||document.activeElement?.matches("input,textarea,select,.divider"))return;
+ backgroundDirty=false;render();
+}
+on("hopsesh:discovery",d=>queueScan(d));
+on("hopsesh:accounts",async()=>{try{queueScan(await api("ScanSnapshot"))}catch{}});

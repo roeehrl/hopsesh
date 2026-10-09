@@ -29,7 +29,6 @@ type DesktopShell interface {
 }
 type quickState struct {
 	mu         sync.Mutex
-	revision   uint64
 	scan       *ScanDTO
 	err        string
 	route      *QuickRoute
@@ -130,6 +129,12 @@ func (a *App) RecheckDesktop() desktop.State {
 }
 func (a *App) QuickSnapshot() QuickDTO {
 	a.quick.mu.Lock()
+	missing := a.quick.scan == nil
+	a.quick.mu.Unlock()
+	if missing {
+		a.CachedScan()
+	}
+	a.quick.mu.Lock()
 	scan, err := a.quick.scan, a.quick.err
 	a.quick.mu.Unlock()
 	a.mu.Lock()
@@ -143,8 +148,13 @@ func (a *App) QuickSnapshot() QuickDTO {
 // creates an independent remote scan loop.
 func (a *App) publishQuick(scan *ScanDTO) {
 	a.quick.mu.Lock()
-	a.quick.revision++
-	scan.Revision = a.quick.revision
+	if scan.Revision == 0 {
+		scan.Revision = a.scanRevision.Add(1)
+	}
+	if a.quick.scan != nil && scan.Revision <= a.quick.scan.Revision {
+		a.quick.mu.Unlock()
+		return
+	}
 	a.quick.scan = scan
 	a.quick.err = ""
 	a.quick.mu.Unlock()

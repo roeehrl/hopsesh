@@ -84,6 +84,26 @@ test('real Authorization and Mailbox scope cloud routing to its issuer and revok
  const revoke=await obj.fetch(new Request('https://relay.test/v1/cloud/revoke',{method:'POST',headers,body:new URLSearchParams({ticket:ticket.ticket})}));assert.equal(revoke.status,200);
  assert.equal((await mailbox(new Request('https://relay.test/v1/messages',{headers:{Authorization:'Bearer '+connection.token}}))).status,403);
 });
+test('cross-object latency cannot extend a signed cloud lease or its replayed credential',async()=>{
+ const authStorage=new Storage(),mailboxStorage=new Storage(),space='a'.repeat(64),admin='operator-secret-with-at-least-32-bytes';
+ let delay=0;
+ const mailbox=createHandler(mailboxStorage,{put:async()=>{},get:async()=>null,delete:async()=>{}},admin,space,()=>Date.now()+delay);
+ const native=await(await mailbox(new Request('https://relay.test/v1/enrollment/register',{method:'POST',headers:{Authorization:'Bearer '+admin},body:JSON.stringify({device:'native-device-12345',ttl:3600})}))).json();
+ const obj=new Authorization({storage:authStorage},{ENROLLMENT_ADMIN:admin,MAILBOX:{idFromName:s=>s,get:()=>({fetch:mailbox})}});
+ const headers={'Content-Type':'application/x-www-form-urlencoded','X-Hopsesh-Principal':space,'X-Hopsesh-Issuer':native.device,'X-Hopsesh-Credential':await digest(native.token)};
+ const call=(path,body,native=false)=>obj.fetch(new Request('https://relay.test'+path,{method:'POST',headers:native?headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(body)}));
+ const ticket=await(await call('/v1/cloud/tickets',{provider:'claude-hosted',session:'delayed-claim',lease_seconds:'600'},true)).json();
+ const f=await fixture(),identity=await cloudIdentity(),expires=f.now()+540,args=f.claimArgs(ticket,identity,{lease_expires:String(expires)});
+ // The Mailbox receives registration in a later second than Authorization.
+ delay=2000;
+ const result=await call('/v1/cloud/claim',args);assert.equal(result.status,200);
+ const connection=await result.json();
+ assert.ok(connection.expires<=expires,'cross-object latency widened the signed lease');
+ assert.equal(decodeJwt(connection.token).exp,connection.expires);
+ assert.equal((await mailboxStorage.get('device:'+identity.public.id)).expires,connection.expires);
+ delay=4000;
+ assert.deepEqual(await(await call('/v1/cloud/claim',args)).json(),connection,'retry extended or rotated the credential');
+});
 test('full mailbox admission is a capacity refusal, leaves the ticket pending and can succeed after expiry',async()=>{
  const authStorage=new Storage(),mailboxStorage=new Storage(),space='a'.repeat(64),admin='operator-secret-with-at-least-32-bytes';
  const now=Date.now(),bucket={put:async()=>{},get:async()=>null,delete:async()=>{}};

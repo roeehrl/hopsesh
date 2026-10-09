@@ -221,6 +221,11 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 		watchProblem = fmt.Sprintf("Change notifications unavailable: %v; reconciliation remains active", err)
 	}
 	if files != nil {
+		files.SetChanged(func(path string) {
+			if a.Catalog != nil {
+				a.Catalog.InvalidatePath(path)
+			}
+		})
 		tasks = append(tasks, func(ctx context.Context) {
 			for {
 				select {

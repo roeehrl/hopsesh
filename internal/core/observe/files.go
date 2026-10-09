@@ -16,6 +16,7 @@ import (
 // symlinks, reads file contents, or creates a missing watched root. Reconciliation
 // remains necessary for network filesystems, overflow and watcher resource limits.
 type Files struct {
+	changed  func(string)
 	mu       sync.Mutex
 	w        *fsnotify.Watcher
 	roots    []string
@@ -37,6 +38,9 @@ func NewFiles(limit int, notify func()) (*Files, error) {
 	go f.run()
 	return f, nil
 }
+
+// SetChanged installs an optional cache invalidation callback.
+func (f *Files) SetChanged(changed func(string)) { f.mu.Lock(); f.changed = changed; f.mu.Unlock() }
 
 func (f *Files) Problems() <-chan error { return f.problems }
 func (f *Files) Close() error           { err := f.w.Close(); <-f.done; return err }
@@ -169,8 +173,12 @@ func (f *Files) run() {
 			}
 			f.mu.Lock()
 			relevant := f.relevant(event.Name)
+			changed := f.changed
 			f.mu.Unlock()
 			if relevant {
+				if changed != nil {
+					changed(event.Name)
+				}
 				f.notify()
 			}
 		case err, ok := <-f.w.Errors:

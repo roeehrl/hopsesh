@@ -1,11 +1,13 @@
 package gui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/roeehrl/hopsesh/internal/app"
@@ -133,6 +135,8 @@ func (a *App) fellBack(why error) string {
 // Terminal window or in the user's terminal app (where: "here", "terminal", or "" for the
 // setting). A session that runs in a tab already is shown instead.
 func (a *App) ResumeSession(machine, key, where string) (*OpenedDTO, error) {
+	doneSelection := a.beginSelection()
+	defer doneSelection()
 	if a.Terms != nil {
 		if id := a.Terms.liveSessionTab(machine, key); id != "" {
 			a.Terms.Focus(id)
@@ -161,6 +165,12 @@ func (a *App) ResumeSession(machine, key, where string) (*OpenedDTO, error) {
 	}
 	if !local {
 		return nil, errors.New("the session is not on this machine; hop it here first")
+	}
+	preflight, done := context.WithTimeout(context.Background(), time.Minute)
+	defer done()
+	inv, e, err = a.selectionInventory(preflight, core, inv, e)
+	if err != nil {
+		return nil, err
 	}
 	c, err := core.Resume(inv, e, agent.ResumeOptions{})
 	if err != nil {

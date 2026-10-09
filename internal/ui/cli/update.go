@@ -22,6 +22,7 @@ func updateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			defer r.app.Catalog.Close()
 			ctx, cancel := ctxTimeout(5)
 			defer cancel()
 			rel, err := update.Latest(ctx)

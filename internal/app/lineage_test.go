@@ -26,6 +26,7 @@ func TestArchiveUnsupportedLineagePreservesNativeAndUndo(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := New(config.Config{}, all.Registry(), t.TempDir(), nil)
+	t.Cleanup(func() { _ = a.Catalog.Close() })
 	inv := &Inventory{Machines: []*Machine{{Name: "here", Local: true, host: &host.Machine{Name: "here", Local: true, Facts: host.Facts{Home: home}}}}}
 	e := Entry{Machine: "here", Session: agent.Summary{Key: agent.SessionKey{Agent: "claude", Session: "archive-test"}, Path: native}}
 	j, err := a.ArchiveLineage(context.Background(), inv, e)

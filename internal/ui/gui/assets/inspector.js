@@ -2,7 +2,7 @@
 // it runs, one line of facts), its action row ([Primary ▾] [Move ▾] [⋯]), where it is
 // open, the end of its conversation (safe, locally rendered Markdown), and its
 // repository, copies and details, which open and close app-wide.
-import { api, h, fill, icon, ICONS, state, sys, here, ago, when, bytes, agentBadge, cloudOf, cloudTitle, count, path, rich, fail, toast, dialog, errText, cap, $ } from "./core.js";
+import { accountLabel, accountTitle, api, h, fill, icon, ICONS, state, sys, here, ago, when, bytes, agentBadge, cloudOf, cloudTitle, count, path, rich, fail, toast, dialog, errText, cap, $ } from "./core.js";
 import { selectDestination, model, statusLine, placeName, showPlace, placeCount, onInspector, liveOf, appWord } from "./actions.js";
 import { openMenu, isOpen, openEl, closeAll } from "./menu.js";
 import { sectionOpen, setSection } from "./layout.js";
@@ -52,7 +52,7 @@ export function actionRow(e, m = model(e)) {
       hasMove ? h("button", { class: "btn act-move", id: "act-move", "aria-haspopup": "menu", "aria-expanded": "false", onclick: (ev) => toggle(ev.currentTarget, moveItems(m.move), "Move", "end") },
         "Move", icon(ICONS.chevron, 10)) : null,
       h("button", { class: "btn icon act-more", id: "act-more", "aria-label": "More actions", "aria-haspopup": "menu", "aria-expanded": "false", title: "More actions",
-        onclick: (ev) => toggle(ev.currentTarget, m.more, "More actions", "end") }, h("span", { "aria-hidden": "true", class: "dots" }, "⋯"))),
+        onclick: (ev) => toggle(ev.currentTarget, model(e).more, "More actions", "end") }, h("span", { "aria-hidden": "true", class: "dots" }, "⋯"))),
     m.caption ? h("span", { class: "act-caption" + (m.twice ? " warn" : ""), id: "act-caption" }, m.twice ? icon(["M12 4 2.5 20h19z", "M12 10v4M12 17v.5"], 13) : null, m.caption) : null);
 }
 
@@ -83,7 +83,7 @@ function header(e) {
   const [k, lead, rest, cl, twice] = statusLine(e);
   const g = e.group;
   const facts = [];
-  if(e.profile) facts.push(h("span",{title:e.profile.root},`${e.profile.name}${e.profile.tags?.length?" · "+e.profile.tags.join(", "):""}`));
+  if(e.profile) facts.push(h("span",{title:accountTitle(e.profile)},`${accountLabel(e.profile)}${e.profile.tags?.length?" · "+e.profile.tags.join(", "):""}`));
   if (e.cloud) {
     if (e.cloud.repo || !g.noRepo) facts.push(h("span", {}, (e.cloud.repo || g.name).split("/").pop()));
     if (e.cloud.branch) facts.push(h("span", { class: "mono" }, e.cloud.branch));
@@ -332,7 +332,7 @@ function history(e) {
  e.journey.fork ? h("span", { class: "chip",title:`Parent branch: ${e.journey.parentBranch}` }, "Separate fork") : null,
  h("span",{class:"muted",style:"font-size:12px"},`Origin: ${e.journey.origin&&e.journey.origin!=="/"?e.journey.origin:"not recorded"}; branch ${e.journey.branch.slice(0,8)}`)) : null,
  others.length ? h("div", { class: "sub-h" }, "Other copies") : null,
-    others.map((c) => h("span", {}, copyPlace(c), h("span", { class: "muted" }, c.newest ? " · newest" : c.mark ? " · marked" : " · older"), " ", h("button",{class:"link",onclick:()=>resolveDestination(c).then(selectDestination).catch(fail)},"Show copy"))),
+    others.map((c) => h("span", {}, copyPlace(c), c.profile ? h("span",{title:accountTitle(c.profile)}," · "+accountLabel(c.profile)) : null, h("span", { class: "muted" }, c.newest ? " · newest" : c.mark ? " · marked" : " · older"), " ", h("button",{class:"link",onclick:()=>resolveDestination(c).then(selectDestination).catch(fail)},"Show copy"))),
     e.mirror ? [h("div", { class: "sub-h" }, "Mirrored"), h("span", {}, `Remote Control keeps a copy on ${e.mirror.host} while it runs. `,
       h("button", { class: "link", onclick: () => api("OpenURL", e.mirror.url).catch(fail) }, "Open it"))] : null,
     e.history.length ? [h("div", { class: "sub-h" }, e.cloud ? "Lineage" : "Where it has been"),
@@ -372,7 +372,7 @@ export function inspector(e, force = false) {
   const previous = $("#inspector");
   const localTabs = [...tabs.values()].filter(t => t.machine === e.machine && t.key === e.key)
     .map(t => [t.id, t.kind, t.state, t.attention]);
-  const { group, ...entry } = e;
+  const { group, observedAt, ...entry } = e;
   const groupFacts = group && Object.fromEntries(Object.entries(group).filter(([key]) => key !== "entries"));
   const signature = JSON.stringify([entry, groupFacts, state.info, state.scan?.peers, state.scan?.clouds, here(), liveOf(e), localTabs, sys]);
   if (!force && previous?.inspectorSignature === signature) {

@@ -37,6 +37,7 @@ func runtimeCommands() []*cobra.Command {
 		ctx, cancel := signal.NotifyContext(cmd.Context(), runtimeSignals()...)
 		defer cancel()
 		source := app.New(cfg, modules, config.StateDir(), nil)
+		defer source.Catalog.Close()
 		source.Log = logger
 		host, err := source.StartRuntime(ctx, "headless", func() error { return nil })
 		if err != nil {

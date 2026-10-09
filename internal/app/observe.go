@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"reflect"
 	"runtime"
 	"slices"
 	"strings"
@@ -34,6 +35,8 @@ type Observation struct {
 	WatchRoots        []string            `json:"watchRoots"`
 }
 
+var errObservationBindingChanged = errors.New("account registration changed during observation; retry collection")
+
 // ObserveLocal never adopts imports, registers accounts, changes login bindings,
 // applies pending movement marks, or starts vendor programs. Existing bindings are
 // cached registration metadata, not fresh observations of the logged-in account.
@@ -41,6 +44,11 @@ func (a *App) ObserveLocal(ctx context.Context) (Observation, error) {
 	m := &host.Machine{Name: LocalName(), Local: true, Facts: host.ObserveLocal(ctx, a.Specs()), Log: a.Log}
 	defer m.Close()
 	out, err := a.observeMachine(ctx, m)
+	// Registration can finish during the first GUI scan. Retry that transient
+	// boundary immediately instead of displaying a stale error until fallback.
+	for attempts := 1; attempts < 3 && errors.Is(err, errObservationBindingChanged) && ctx.Err() == nil; attempts++ {
+		out, err = a.observeMachine(ctx, m)
+	}
 	if err != nil {
 		out.InventoryComplete = false
 	}
@@ -121,9 +129,13 @@ func (a *App) observeMachine(ctx context.Context, m *host.Machine) (Observation,
 				state.Error = in.Profile.Error
 			}
 			out.Agents = append(out.Agents, state)
-			for _, root := range in.Roots {
-				if root != "" {
-					out.WatchRoots = append(out.WatchRoots, root)
+			if provider, ok := mod.(agent.SessionWatchProvider); ok {
+				out.WatchRoots = append(out.WatchRoots, provider.SessionWatchPaths(in, m.Path())...)
+			} else {
+				for _, root := range in.Roots {
+					if root != "" {
+						out.WatchRoots = append(out.WatchRoots, root)
+					}
 				}
 			}
 			if !in.Present {
@@ -232,6 +244,17 @@ func (a *App) observeMachine(ctx context.Context, m *host.Machine) (Observation,
 	slices.SortFunc(out.Entries, func(a, b Entry) int {
 		return strings.Compare(string(a.Agent)+"/"+a.Session.Key.String(), string(b.Agent)+"/"+b.Session.Key.String())
 	})
+	// Explicit discovery may initialize/register the default account while this
+	// passive collection runs. Publishing its older unprofiled keys afterward
+	// would replace the registered rows and then duplicate them on the next scan.
+	currentEndpoint, identityErr := m.ReadIdentity(ctx)
+	currentProfiles, profilesErr := a.Accounts()
+	if identityErr != nil || profilesErr != nil || currentEndpoint != endpoint || !reflect.DeepEqual(ps, currentProfiles) {
+		out.InventoryComplete = false
+		out.Entries = nil
+		out.Agents = nil
+		return out, errObservationBindingChanged
+	}
 	return out, ctx.Err()
 }
 

@@ -132,7 +132,7 @@ func (a *App) Preview(machine, key string, n int) (*PreviewDTO, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
-	p, err := core.Preview(ctx, inv, e, n)
+	p, err := core.PreviewSelected(ctx, e, n)
 	switch {
 	case errors.Is(err, app.ErrNoPreview):
 		return &PreviewDTO{Items: []PreviewItemDTO{}, Note: fmt.Sprintf("%s's conversations can't be previewed yet.", e.AgentName)}, nil
@@ -231,6 +231,8 @@ func toolWords(tools map[string]int) string {
 // Rename gives a session a new title in its agent's own data (Claude Code's custom title,
 // Codex's thread name), as their own rename does; Activity undoes it.
 func (a *App) Rename(machine, key, title string) error {
+	doneSelection := a.beginSelection()
+	defer doneSelection()
 	core := a.snapshot()
 	a.mu.Lock()
 	e, err := a.find(machine, key)
@@ -241,6 +243,10 @@ func (a *App) Rename(machine, key, title string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	inv, e, err = a.selectionInventory(ctx, core, inv, e)
+	if err != nil {
+		return err
+	}
 	_, err = core.Rename(ctx, inv, e, title)
 	return err
 }
@@ -406,11 +412,19 @@ func SetRevealHook(f func(path string) error) { revealHook = f }
 // ResumeCommand is the command that resumes a session on this machine, for the user's
 // shell (copied from the ⋯ menu).
 func (a *App) ResumeCommand(machine, key string) (string, error) {
+	done := a.beginSelection()
+	defer done()
 	core := a.snapshot()
 	a.mu.Lock()
 	e, err := a.find(machine, key)
 	inv := a.inv
 	a.mu.Unlock()
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	inv, e, err = a.selectionInventory(ctx, core, inv, e)
 	if err != nil {
 		return "", err
 	}

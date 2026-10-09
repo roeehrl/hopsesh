@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { fresh, row, menu, action, patchScans } from "./helpers";
+import { fresh, row, menu, action, patchScans, details } from "./helpers";
 
 test.beforeEach(async ({ page }) => fresh(page));
 
@@ -61,6 +61,8 @@ test("a return with no new work opens the exact original without another transfe
   await expect(page.getByRole("heading", { name: /is prepared for Codex/ })).toBeVisible({ timeout: 30_000 });
   await page.getByRole("button", { name: /Back to sessions/ }).click();
   await row(page, "Find the codeword (from Claude Code)").click();
+  // Return candidates arrive with verified lineage enrichment, after early rows.
+  await expect(details(page).getByRole("button", {name:/^Open existing session in Claude Code/}).first()).toBeVisible();
   const plans: string[] = [];
   page.on('request', request => {
     if (request.url().endsWith('/call') && ['Plan', 'PushPlan', 'Apply'].includes(request.postDataJSON()?.m)) plans.push(request.postDataJSON().m);

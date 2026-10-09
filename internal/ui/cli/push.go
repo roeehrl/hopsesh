@@ -65,6 +65,7 @@ func push(cmd *cobra.Command, refArg, machine string) error {
 	if err != nil {
 		return err
 	}
+	defer r.app.Catalog.Close()
 	to := r.app.Cfg.FindHost(machine)
 	if to == nil || !to.Allowed {
 		return fmt.Errorf("%s is not an allowed machine (hopsesh hosts allow %s)", machine, machine)
@@ -166,6 +167,7 @@ func peerCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			defer r.app.Catalog.Close()
 			return r.app.Serve(context.Background(), os.Stdin, os.Stdout)
 		},
 	}
@@ -187,6 +189,7 @@ own agents and keeps its own undo record. Off by default.`,
 			if err != nil {
 				return err
 			}
+			defer r.app.Catalog.Close()
 			if len(args) == 1 {
 				switch args[0] {
 				case "on", "off":

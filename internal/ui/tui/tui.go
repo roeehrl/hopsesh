@@ -5,6 +5,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -24,6 +25,7 @@ import (
 
 // Exit is what the TUI asks its caller to do after it closes.
 type Exit struct {
+	Account string // refresh this profile after vendor sign-in completes
 	Desktop bool
 	Env     []string
 	RunDir  string   // start the agent here...
@@ -78,34 +80,38 @@ type row struct {
 }
 
 type model struct {
-	collapsed     map[string]bool
-	returnCursor  int
-	returnTo      *app.ReturnCandidate
-	returnPush    *app.Push
-	accts         accountView
-	deps          Deps
-	copied        bool // the resume command was copied on the done screen
-	mode          mode
-	width         int
-	height        int
-	inv           *app.Inventory
-	rows          []row
-	cursor        int
-	offset        int
-	filter        string
-	editing       bool
-	opts          move.Options
-	target        agent.ID // the agent to continue in ("" = the session's own)
-	plan          *move.Plan
-	destinations  []agent.Summary
-	journeyOffset int
-	planning      bool // a new plan is being worked out; the one shown is out of date
-	input         move.Input
-	sel           row
-	result        *move.Result
-	err           error
-	exit          *Exit
-	started       time.Time
+	emitScan       func(uint64, *app.Inventory)
+	scanGeneration uint64
+	scanning       bool
+	scanCancel     context.CancelFunc
+	collapsed      map[string]bool
+	returnCursor   int
+	returnTo       *app.ReturnCandidate
+	returnPush     *app.Push
+	accts          accountView
+	deps           Deps
+	copied         bool // the resume command was copied on the done screen
+	mode           mode
+	width          int
+	height         int
+	inv            *app.Inventory
+	rows           []row
+	cursor         int
+	offset         int
+	filter         string
+	editing        bool
+	opts           move.Options
+	target         agent.ID // the agent to continue in ("" = the session's own)
+	plan           *move.Plan
+	destinations   []agent.Summary
+	journeyOffset  int
+	planning       bool // a new plan is being worked out; the one shown is out of date
+	input          move.Input
+	sel            row
+	result         *move.Result
+	err            error
+	exit           *Exit
+	started        time.Time
 	// Clouds: a session planned from a pasted link or the vendor's picker (not a row), what
 	// came back from a cloud, and the link being pasted.
 	picked  *app.Entry
@@ -124,8 +130,17 @@ type model struct {
 	refreshRuntime bool
 }
 
-type scanDone struct{ inv *app.Inventory }
+type scanDone struct {
+	inv        *app.Inventory
+	generation uint64
+}
+type discoveryRequested struct{}
+type scanPartial struct {
+	inv        *app.Inventory
+	generation uint64
+}
 type planDone struct {
+	inv   *app.Inventory
 	plan  *move.Plan
 	input move.Input
 	err   error
@@ -142,12 +157,29 @@ func Run(d Deps) (*Exit, error) {
 	m := &model{deps: d, mode: modeLoading, started: time.Now(), opts: opts}
 	defer m.closeReturnPush()
 	prog := tea.NewProgram(m)
+	m.emitScan = func(gen uint64, inv *app.Inventory) { prog.Send(scanPartial{inv, gen}) }
 	if d.Runtime != nil {
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
 		go func() { defer close(done); watchRuntime(ctx, *d.Runtime, prog.Send) }()
 		defer func() { cancel(); <-done }()
+	} else {
+		watchCtx, stopWatch := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		watchCore := *d.App
+		b, _ := json.Marshal(d.App.Cfg)
+		_ = json.Unmarshal(b, &watchCore.Cfg)
+		go func() {
+			defer close(done)
+			watchCore.WatchSessions(watchCtx, func() { prog.Send(discoveryRequested{}) })
+		}()
+		defer func() { stopWatch(); <-done }()
 	}
+	defer func() {
+		if m.scanCancel != nil {
+			m.scanCancel()
+		}
+	}()
 	// A hand-off whose driver needs a terminal gets this one, the UI paused meanwhile.
 	prev := d.App.Steps
 	d.App.Steps = stepper(prog.Send)
@@ -163,14 +195,35 @@ func Run(d Deps) (*Exit, error) {
 	return fm.exit, nil
 }
 
-func (m *model) Init() tea.Cmd {
-	a := m.deps.App
+func (m *model) Init() tea.Cmd { return m.discover(app.ScanOptions{}) }
+func (m *model) discover(options app.ScanOptions) tea.Cmd {
+	core := *m.deps.App
+	b, _ := json.Marshal(m.deps.App.Cfg)
+	_ = json.Unmarshal(b, &core.Cfg)
+	a := &core
+	m.scanning = true
+	m.scanGeneration++
+	generation := m.scanGeneration
+	if m.inv != nil {
+		m.mode = modeBrowse
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	if m.scanCancel != nil {
+		m.scanCancel()
+	}
+	m.scanCancel = cancel
+	emit := m.emitScan
 	runtime, refresh := m.deps.Runtime, m.refreshRuntime
 	m.refreshRuntime = false
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
-		opts := app.ScanOptions{}
+		partial := a.CachedInventory()
+		partial.Discovering = true
+		if emit != nil {
+			emit(generation, partial)
+		}
+		last := time.Time{}
+		opts := options
 		if runtime != nil {
 			o, err := sharedLocal(ctx, *runtime, refresh)
 			if err != nil {
@@ -178,8 +231,36 @@ func (m *model) Init() tea.Cmd {
 			}
 			opts.LocalSnapshot = &o
 			opts.SharedRemotes = true
+			opts.RemoteSnapshots = o.Remotes
 		}
-		return scanDone{a.Scan(ctx, opts)}
+		if emit != nil {
+			opts.Progress = func(u app.ScanUpdate) {
+				partial = app.MergeDiscovery(partial, u)
+				if time.Since(last) >= 150*time.Millisecond || u.Complete {
+					last = time.Now()
+					b, _ := json.Marshal(partial)
+					display := &app.Inventory{}
+					_ = json.Unmarshal(b, display)
+					emit(generation, display)
+				}
+			}
+		}
+		fresh := a.Scan(ctx, opts)
+		if len(opts.Hosts) > 0 {
+			merged := a.CachedInventory()
+			for _, source := range fresh.Machines {
+				var es []app.Entry
+				for _, e := range fresh.Entries {
+					if e.Machine == source.Name {
+						es = append(es, e)
+					}
+				}
+				merged = app.MergeDiscovery(merged, app.ScanUpdate{Machine: source, Entries: es, Complete: true})
+			}
+			merged.Discovering = false
+			fresh = merged
+		}
+		return scanDone{fresh, generation}
 	}
 }
 
@@ -193,9 +274,13 @@ func (m *model) buildRows() {
 			}
 		}
 	}
-	groups := m.inv.Groups(m.deps.App.LocalRoots())
+	// Browse publications use discovered metadata; checkout discovery belongs to planning.
+	groups := m.inv.Groups(nil)
 	if m.deps.App.Cfg.List.GroupBy == "family" {
 		groups = m.inv.FamilyGroups()
+	}
+	if m.deps.App.Cfg.List.GroupBy == "account" {
+		groups = m.inv.AccountGroups()
 	}
 	f := strings.ToLower(m.filter)
 	relations := m.inv.Relationships()
@@ -205,7 +290,7 @@ func (m *model) buildRows() {
 			it := &g.Items[i]
 			e := it.Entry
 			s := e.Session
-			if f != "" && !strings.Contains(strings.ToLower(s.Title+" "+s.LastPrompt+" "+s.CWD+" "+g.Name+" "+e.Machine+" "+e.AgentName), f) {
+			if f != "" && !strings.Contains(strings.ToLower(s.Title+" "+s.LastPrompt+" "+app.AccountLabel(e.Profile)+" "+s.CWD+" "+g.Name+" "+e.Machine+" "+e.AgentName), f) {
 				continue
 			}
 			rows = append(rows, row{item: it, groupKey: g.Identity, relationship: relations[app.EntryIdentity(e.Machine, s.Key.String())]})
@@ -225,7 +310,7 @@ func (m *model) buildRows() {
 		}
 		if g.Local != "" {
 			h += "  · here: " + g.Local
-		} else if m.deps.App.Cfg.List.GroupBy != "family" && g.Identity != "" && !strings.HasPrefix(g.Identity, "local:") {
+		} else if m.deps.App.Cfg.List.GroupBy == "repository" && g.Identity != "" && !strings.HasPrefix(g.Identity, "local:") {
 			h += "  · not cloned here"
 		}
 		m.rows = append(m.rows, row{header: h, groupKey: g.Identity})
@@ -239,7 +324,7 @@ func (m *model) buildRows() {
 
 func (m *model) nextSelectable(from, dir int) int {
 	for i := from; i >= 0 && i < len(m.rows); i += dir {
-		if m.rows[i].item != nil || m.deps.App.Cfg.List.GroupBy == "family" {
+		if m.rows[i].item != nil || m.deps.App.Cfg.List.GroupBy == "family" || m.deps.App.Cfg.List.GroupBy == "account" {
 			return i
 		}
 	}
@@ -311,17 +396,63 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.accts.rebuild()
 	case accountLoginReady:
 		c := msg.command
-		m.exit = &Exit{RunDir: c.Dir, RunArgv: c.Argv, Env: c.Env, Unset: c.Unset}
+		m.exit = &Exit{Account: msg.profile, RunDir: c.Dir, RunArgv: c.Argv, Env: c.Env, Unset: c.Unset}
 		return m, tea.Quit
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+	case discoveryRequested:
+		if m.mode == modeBrowse && !m.planning && !m.scanning {
+			return m, m.discover(app.ScanOptions{Hosts: []string{app.LocalName()}})
+		}
+		return m, nil
+	case scanPartial:
+		if msg.generation != m.scanGeneration {
+			return m, nil
+		}
+		if m.planning || m.mode != modeLoading && m.mode != modeBrowse {
+			return m, nil
+		}
+		identity := ""
+		if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil {
+			e := m.rows[m.cursor].item.Entry
+			identity = app.EntryIdentity(e.Machine, e.Session.Key.String())
+		}
+		m.inv = msg.inv
+		m.mode = modeBrowse
+		m.buildRows()
+		for i, r := range m.rows {
+			if r.item != nil && app.EntryIdentity(r.item.Entry.Machine, r.item.Entry.Session.Key.String()) == identity {
+				m.cursor = i
+				break
+			}
+		}
 	case scanDone:
+		if msg.generation != 0 && msg.generation != m.scanGeneration {
+			msg.inv.Close()
+			return m, nil
+		}
+		m.scanning = false
+		if m.planning || m.mode != modeLoading && m.mode != modeBrowse {
+			msg.inv.Close()
+			return m, nil
+		}
+		identity := ""
+		if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil {
+			e := m.rows[m.cursor].item.Entry
+			identity = app.EntryIdentity(e.Machine, e.Session.Key.String())
+		}
 		if m.inv != nil {
 			m.inv.Close()
 		}
 		m.inv = msg.inv
 		m.mode = modeBrowse
 		m.buildRows()
+		for i, r := range m.rows {
+			if r.item != nil && app.EntryIdentity(r.item.Entry.Machine, r.item.Entry.Session.Key.String()) == identity {
+				m.cursor = i
+				break
+			}
+		}
 		if m.latestRuntime != nil {
 			m.applyRuntime(*m.latestRuntime)
 		}
@@ -347,6 +478,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.brought, m.notice, m.mode = nil, "", modeLoading
 		return m, m.Init()
 	case planDone:
+		if msg.inv != nil {
+			if m.inv != nil {
+				m.inv.Close()
+			}
+			m.inv = msg.inv
+		}
 		m.planning = false
 		if msg.err != nil {
 			m.err, m.mode = msg.err, modeError
@@ -512,7 +649,7 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		case "/":
 			m.editing = true
 		case "left", "right":
-			if m.cursor < len(m.rows) && m.deps.App.Cfg.List.GroupBy == "family" {
+			if m.cursor < len(m.rows) && (m.deps.App.Cfg.List.GroupBy == "family" || m.deps.App.Cfg.List.GroupBy == "account") {
 				groupKey := m.rows[m.cursor].groupKey
 				if m.collapsed == nil {
 					m.collapsed = map[string]bool{}
@@ -528,9 +665,12 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "g":
-			if m.deps.App.Cfg.List.GroupBy == "family" {
+			switch m.deps.App.Cfg.List.GroupBy {
+			case "family":
+				m.deps.App.Cfg.List.GroupBy = "account"
+			case "account":
 				m.deps.App.Cfg.List.GroupBy = "repository"
-			} else {
+			default:
 				m.deps.App.Cfg.List.GroupBy = "family"
 			}
 			m.saveFamilyGrouping()
@@ -736,8 +876,16 @@ func (m *model) planCmd() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
+		var owned *app.Inventory
+		if e.Cached || inv.Discovering {
+			fresh, entry, err := a.FreshSelection(ctx, e)
+			if err != nil {
+				return planDone{err: err}
+			}
+			inv, e, owned = fresh, entry, fresh
+		}
 		p, in, err := a.Plan(ctx, inv, e, target, opts)
-		return planDone{p, in, err}
+		return planDone{plan: p, input: in, err: err, inv: owned}
 	}
 }
 
@@ -871,6 +1019,9 @@ func (m *model) View() tea.View {
 	case modeLoading:
 		fmt.Fprintf(&b, "\n  Scanning this machine and %d allowed machine(s)… %s\n", countAllowed(m.deps.App), dim.Render(time.Since(m.started).Truncate(time.Second).String()))
 	case modeBrowse:
+		if m.scanning {
+			fmt.Fprintf(&b, "  %d sessions found · checking for changes…\n", len(m.inv.Entries))
+		}
 		m.viewBrowse(&b)
 	case modeReturns:
 		m.viewReturns(&b)
@@ -1032,6 +1183,9 @@ func (m *model) viewBrowseDetail(b *strings.Builder, w int) {
 		s := e.Session
 		b.WriteString(dim.Render(strings.Repeat("─", min(w, 120))) + "\n")
 		fmt.Fprintf(b, "  %s  %s\n", bold.Render(truncate(s.Title, w-24)), dim.Render(s.Key.String()))
+		if e.Profile != nil {
+			fmt.Fprintf(b, "  Stored in profile: %s · %s\n", app.AccountLabel(e.Profile), e.Profile.Name)
+		}
 		if c := e.Cloud; c != nil {
 			head := e.Location.Name + " · " + e.AgentName + " · " + e.Status() + "  "
 			fmt.Fprintf(b, "  %s%s\n", cloudSt.Render(head), link(c.URL, truncate(c.URL, w-6-len([]rune(head)))))
@@ -1102,9 +1256,9 @@ func (m *model) viewBrowseDetail(b *strings.Builder, w int) {
 		m.viewPicker(b)
 		return
 	}
-	hint := "\n  ↑↓ move · enter bring here · i continue in · b bounded copy · c hand off · h journey · a accounts · A move account · / search · g family/repository · r refresh · q quit"
+	hint := "\n  ↑↓ move · enter bring here · i continue in · b bounded copy · c hand off · h journey · a accounts · A move account · / search · g family/repository/account · r refresh · q quit"
 	if m.partialCloud() != nil {
-		hint = "\n  ↑↓ move · enter resume/bring · i continue in · b bounded copy · c hand off · p paste a cloud link · f find in a cloud · / search · g family/repository · r refresh · q quit"
+		hint = "\n  ↑↓ move · enter resume/bring · i continue in · b bounded copy · c hand off · p paste a cloud link · f find in a cloud · / search · g family/repository/account · r refresh · q quit"
 	}
 	b.WriteString(dim.Render(hint) + "\n")
 }

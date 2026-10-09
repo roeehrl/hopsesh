@@ -1,19 +1,39 @@
 import { expect, type Page } from "@playwright/test";
 
+const scanChanges = new WeakMap<Page, ((scan: any) => void)[]>();
+async function fixtureEvents(page: Page) {
+  if (scanChanges.has(page)) return;
+  scanChanges.set(page, []);
+  await page.routeWebSocket('**/events', socket => {
+    const server = socket.connectToServer();
+    server.onMessage(message => {
+      const event = JSON.parse(message.toString());
+      if (event.name === 'hopsesh:discovery' && event.data) {
+        for (const change of scanChanges.get(page) || []) change(event.data);
+      }
+      socket.send(JSON.stringify(event));
+    });
+  });
+}
+
 // fresh starts every test from a new demo home and waits for the first scan.
 export async function fresh(page: Page) {
+  await fixtureEvents(page);
   const r = await page.request.post("/reset");
   expect(r.ok(), await r.text()).toBeTruthy();
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator("#fresh")).toContainText("updated",{timeout:30_000});
 }
 
 // Synthetic session facts must survive the same background publications as real
 // inventory. Patch both the current view and every subsequent scan response.
 export async function patchScans(page: Page, change: (scan: any) => void) {
+  await fixtureEvents(page);
+  scanChanges.get(page)!.push(change);
   await page.route('**/call', async route => {
     const method = route.request().postDataJSON().m;
-    if (!['InitialScan', 'Scan', 'RefreshHere', 'QuickSnapshot'].includes(method)) return route.fallback();
+    if (!['InitialScan', 'Scan', 'RefreshHere', 'QuickSnapshot', 'ScanSnapshot', 'CachedScan'].includes(method)) return route.fallback();
     const response = await route.fetch();
     const body = await response.json();
     const scan = method === 'QuickSnapshot' ? body.result?.scan : body.result;
