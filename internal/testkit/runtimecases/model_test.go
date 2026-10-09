@@ -43,7 +43,7 @@ func TestGeneratedRuntimeRowsCoverEveryValidPairAndTriple(t *testing.T) {
 
 func TestNativeModelDoesNotClaimUnsupportedProviderOrNetworkCoverage(t *testing.T) {
 	for _, row := range All() {
-		if err := row.Validate(); err != nil || row.Provider != "local" || row.Integration != "exportable" || row.Host == "one-shot" && row.Transport != "ssh" || (row.Transport == "relay-https") != (row.Network == "websocket-blocked") {
+		if err := row.Validate(); err != nil || row.Provider != "local" || row.Host == "one-shot" && row.Transport != "ssh" || (row.Transport == "relay-https") != (row.Network == "websocket-blocked") || row.Integration == "observed" && row.Transport == "ssh" {
 			t.Fatal("native slice fabricated unsupported coverage", row, err)
 		}
 	}

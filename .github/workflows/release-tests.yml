@@ -22,7 +22,8 @@ concurrency: # a newer push to the same pull request replaces the run; scheduled
 
 jobs:
   runtime-triples:
-    uses: ./.github/workflows/runtime-matrix.yml
+    # Same-commit reference; retain the supported ./ form until actionlint parses $/.
+    uses: ./.github/workflows/runtime-matrix.yml # zizmor: ignore[self-repository]
     with:
       strength: 3
   matrix:

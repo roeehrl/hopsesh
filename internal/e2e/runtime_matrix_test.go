@@ -18,15 +18,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/roeehrl/hopsesh/agents/claude"
 	"github.com/roeehrl/hopsesh/internal/agents/all"
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/host"
+	"github.com/roeehrl/hopsesh/internal/core/journal"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
+	"github.com/roeehrl/hopsesh/internal/core/observe"
 	"github.com/roeehrl/hopsesh/internal/core/relay"
 	localruntime "github.com/roeehrl/hopsesh/internal/core/runtime"
 	"github.com/roeehrl/hopsesh/internal/testkit/runtimecases"
 	"github.com/roeehrl/hopsesh/sdk/agent"
+	"github.com/roeehrl/hopsesh/sdk/ir"
 )
 
 // The desktop backend runs in its own process/environment, as it does in the
@@ -149,6 +153,10 @@ func runRuntimeNativeRow(t *testing.T, bin string, row runtimecases.Row) {
 		cfg.Peer.Receive = false
 		m.writeConfig(t, cfg)
 	}
+	var observedNative string
+	if row.Integration == "observed" {
+		observedNative = f.observationOnly(t)
+	}
 	if row.Failure == "owner-restart" {
 		var before, after localruntime.Status
 		receiver := runtimeMatrixClient(t, f.homes['B'])
@@ -161,9 +169,12 @@ func runRuntimeNativeRow(t *testing.T, bin string, row runtimecases.Row) {
 			t.Fatal("receiver restart did not replace runtime epoch", err)
 		}
 	}
+	if row.Integration == "observed" {
+		f.assertObservationOnly(t, row, observedNative)
+	}
 	fork := row.Topology == "fork"
 	operation := fmt.Sprintf("runtime-matrix-row-%d-123456789", row.N)
-	if row.Scope == "receive-disabled" {
+	if row.Scope == "receive-disabled" || row.Integration == "observed" {
 		if row.Transport == "ssh" {
 			f.pushSSH(t, 'A', 'B', original, "codex", fork, operation, true)
 		} else {
@@ -174,7 +185,11 @@ func runRuntimeNativeRow(t *testing.T, bin string, row runtimecases.Row) {
 			cmd := exec.CommandContext(ctx, bin, args...)
 			cmd.Env = f.homes['A'].env()
 			out, err := cmd.CombinedOutput()
-			if err == nil || !bytes.Contains(out, []byte("does not receive")) {
+			want := "does not receive"
+			if row.Integration == "observed" {
+				want = relay.ErrRevoked.Error()
+			}
+			if err == nil || !bytes.Contains(out, []byte(want)) {
 				t.Fatalf("disabled relay receiver was not explicitly refused: %v %s", err, out)
 			}
 		}
@@ -199,6 +214,90 @@ func runRuntimeNativeRow(t *testing.T, bin string, row runtimecases.Row) {
 	after, err := os.ReadFile(original.Path)
 	if err != nil || !bytes.Equal(before, after) {
 		t.Fatal("runtime matrix mutated the source native conversation", err)
+	}
+}
+
+const observationPrivateText = "OBSERVATION-ONLY-MUST-NOT-EXPORT-THIS-TURN"
+
+// Populate a remote native session, then restrict only the A -> B direction to
+// observation. Reverse-direction and unrelated peer approvals stay unchanged.
+func (f *relayFleet) observationOnly(t *testing.T) string {
+	t.Helper()
+	loc := f.places['B']
+	module := claude.New()
+	j, err := journal.New(t.TempDir(), journal.KindContinue, "observation-only fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := loc.m.For(f.ctx, module.Spec(), loc.in, j)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = module.Write(f.ctx, h, loc.in, ir.WriteRequest{Mode: ir.WriteNew, SessionID: sid, Header: ir.Header{CWD: f.homes['B'].repo, Title: "Observation fixture"}, Items: []ir.Item{{Node: "public-title", Role: ir.RoleUser, Text: "Observation fixture"}, {Node: "private-user", Role: ir.RoleUser, Text: observationPrivateText + ": user"}, {Node: "private-turn", Role: ir.RoleAgent, Text: observationPrivateText + ": assistant"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stores := map[byte]relay.Store{}
+	ids := map[byte]string{}
+	for _, key := range []byte{'A', 'B'} {
+		store := relay.Store{Directory: filepath.Join(f.homes[key].home, "state", "relay")}
+		identity, err := store.Identity(f.ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stores[key], ids[key] = store, identity.Public.ID
+	}
+	for _, key := range []byte{'A', 'B'} {
+		other := byte('A')
+		if key == 'A' {
+			other = 'B'
+		}
+		grant, err := stores[key].Grant(f.ctx, ids[other])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if key == 'A' {
+			grant.SendMethods = []string{"observe"}
+		} else {
+			grant.Methods = []string{"observe"}
+		}
+		if err := stores[key].Approve(f.ctx, grant); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return f.find(t, 'B', "claude", sid).Path
+}
+
+func (f *relayFleet) assertObservationOnly(t *testing.T, row runtimecases.Row, native string) {
+	t.Helper()
+	before, err := os.ReadFile(native)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := (relay.Store{Directory: filepath.Join(f.homes['B'].home, "state", "relay")}).Identity(f.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := func(method string, result any) error {
+		return runtimeMatrixClient(t, f.homes['A']).Call(f.ctx, "relay.call", map[string]any{"peer": identity.Public.ID, "operation": fmt.Sprintf("matrix-observe-%d-%s", row.N, method), "method": method, "params": map[string]any{"refresh": true}}, result)
+	}
+	var snapshot observe.Snapshot
+	if err := call("observe", &snapshot); err != nil || !snapshot.Fresh(time.Now()) {
+		t.Fatal("observation-only permission did not deliver fresh metadata", err)
+	}
+	var observation app.Observation
+	if err := json.Unmarshal(snapshot.Data, &observation); err != nil || !observation.InventoryComplete || len(observation.Entries) != 1 || observation.Entries[0].Session.Key.Session != sid || observation.Receive || bytes.Contains(snapshot.Data, []byte(observationPrivateText)) {
+		t.Fatal("observation-only response lost metadata or exposed native contents/receiving", err)
+	}
+	for _, method := range []string{"preview", "export", "plan", "apply", "undo"} {
+		var result json.RawMessage
+		if err := call(method, &result); err == nil || !strings.Contains(err.Error(), relay.ErrRevoked.Error()) || len(result) != 0 {
+			t.Fatal("observation-only grant permitted a data or mutation method", method, err)
+		}
+	}
+	after, err := os.ReadFile(native)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("observation-only methods changed remote native data", err)
 	}
 }
 

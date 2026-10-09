@@ -82,30 +82,23 @@ func TestEmptyMatrixRunFailsBeforeTouchingMachines(t *testing.T) {
 	}
 }
 
-func TestUnsupportedCloudFixturesNeverCountAsPassed(t *testing.T) {
+func TestUnavailableRuntimeCapabilitiesNeverCountAsPassed(t *testing.T) {
 	var results []result
-	for _, op := range []string{"fetch", "handoff", "cloud-roundtrip", "cloud-hop"} {
-		row := Row{Op: op}
-		err := scenarioSupport(row, "windows")
+	for range 3 {
+		err := unsupportedScenario("required ConPTY fixture is unavailable")
 		res := rowOutcome(err)
-		if err == nil || res.OK || res.Status != "unsupported" || res.Reason == "" {
+		if res.OK || res.Status != "unsupported" || res.Reason == "" {
 			t.Fatal("unexecuted Windows cloud fixture reported as passed", res)
 		}
 		results = append(results, res)
-		if err = scenarioSupport(row, "linux"); err != nil {
-			t.Fatal("supported native fixture was excluded", err)
-		}
-	}
-	if err := scenarioSupport(Row{Op: "repeat-roundtrip"}, "windows"); err != nil {
-		t.Fatal("Windows native movement is supported", err)
 	}
 	results = append(results, rowOutcome(nil), rowOutcome(errors.New("real failure")))
 	passed, failed, unsupported := resultCounts(results)
-	if passed != 1 || failed != 1 || unsupported != 4 {
+	if passed != 1 || failed != 1 || unsupported != 3 {
 		t.Fatal("unsupported rows entered the pass count", passed, failed, unsupported)
 	}
 	output := grid("qualification", results)
-	if !strings.Contains(output, "1 passed, 1 failed, 4 unsupported") || strings.Count(output, "✅") != 1 || !strings.Contains(output, "Unsupported:") {
+	if !strings.Contains(output, "1 passed, 1 failed, 3 unsupported") || strings.Count(output, "✅") != 1 || !strings.Contains(output, "Unsupported:") {
 		t.Fatal("summary conceals unexecuted rows", output)
 	}
 }

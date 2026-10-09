@@ -30,7 +30,8 @@ func relaySnapshot(snap observe.Snapshot, grant relay.Grant, receive bool, now t
 }
 
 // Pairing shares the approved inventory and stable account binding IDs, never
-// cached account labels, email, profile tags, process tables or watcher paths.
+// conversation previews, cached account labels, email, profile tags, process
+// tables or watcher paths. Preview/export requires a separate authorized call.
 func relayObservation(obs Observation, grant relay.Grant) Observation {
 	obs.Remotes = nil
 	obs.Processes, obs.WatchRoots = nil, nil
@@ -52,6 +53,7 @@ func relayObservation(obs Observation, grant relay.Grant) Observation {
 			continue
 		}
 		e.Profile = profile(e.Profile)
+		e.Session.LastPrompt = ""
 		e.Live.PID = 0
 		e.Live.Procs = nil
 		entries = append(entries, e)

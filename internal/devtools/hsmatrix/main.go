@@ -17,7 +17,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -27,6 +26,8 @@ func main() {
 		os.Exit(2)
 	}
 	switch os.Args[1] {
+	case "terminal-exec":
+		os.Exit(terminalChild(os.Args[2:]))
 	case "runtime-run", "runtime-rows":
 		os.Exit(runtimeMain(os.Args[1], os.Args[2:]))
 	case "agent":
@@ -79,11 +80,10 @@ func runMain(args []string) int {
 		fmt.Fprintln(os.Stderr, "hsmatrix:", err)
 		return 2
 	}
-	// Vendor-cloud fixtures run locally; unsupported rows must not connect to
-	// another machine merely to report why they could not execute.
+	// Vendor-cloud fixtures run locally, including native Windows cloud rows.
 	needThere := false
 	for _, row := range rows {
-		needThere = needThere || scenarioSupport(row, runtime.GOOS) == nil && !cloudOp(row.Op) && row.Op != "skill"
+		needThere = needThere || !cloudOp(row.Op) && row.Op != "skill"
 	}
 	if *there == "" && needThere {
 		fmt.Fprintln(os.Stderr, "-there is required")
@@ -167,7 +167,7 @@ func runMain(args []string) int {
 	if failed > 0 {
 		return 1
 	}
-	if passed == 0 {
+	if passed == 0 || unsupported > 0 {
 		return 2
 	}
 	return 0

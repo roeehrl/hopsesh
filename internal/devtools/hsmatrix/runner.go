@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -149,13 +148,6 @@ type unsupportedScenario string
 
 func (e unsupportedScenario) Error() string { return string(e) }
 
-func scenarioSupport(row Row, platform string) error {
-	if platform == "windows" && cloudOp(row.Op) {
-		return unsupportedScenario("the vendor-cloud fixture's repository hook requires a POSIX shell; this row did not execute")
-	}
-	return nil
-}
-
 func rowOutcome(err error) result {
 	if err == nil {
 		return result{Status: "passed", OK: true}
@@ -196,9 +188,6 @@ type sc struct {
 }
 
 func (r *runner) scenario(row Row) error {
-	if err := scenarioSupport(row, runtime.GOOS); err != nil {
-		return err
-	}
 	if row.Op == "skill" {
 		return r.skill()
 	}

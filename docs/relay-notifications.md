@@ -43,7 +43,9 @@ remain response-only at the gateway and cannot publish native inventory.
 
 The source projects each inventory through the exact current peer/root approval,
 using the same privacy filter as an explicit scan. It excludes other machines,
-process tables, watcher paths, account labels/tags and transport diagnostics.
+process tables, watcher paths, account labels/tags, last-message previews and
+transport diagnostics. Inventory never includes `LastPrompt`, even if the peer
+has export permission; conversation previews require a separate authorized call.
 Comparing projected content ignores collection timestamps, so remote updates and
 mailbox health cannot echo across the mesh. One shared subscriber and an
 event-driven ten-second coalescing window replace repeated remote scans. A failed

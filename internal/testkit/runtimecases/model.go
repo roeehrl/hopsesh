@@ -29,19 +29,19 @@ func (r Row) Values() []string {
 }
 
 func (r Row) String() string {
-	return fmt.Sprintf("%03d/%s/%s/%s/%s/%s", r.N, r.Host, r.Transport, r.Scope, r.Topology, r.Failure)
+	return fmt.Sprintf("%03d/%s/%s/%s/%s/%s/%s", r.N, r.Host, r.Transport, r.Integration, r.Scope, r.Topology, r.Failure)
 }
 
 var Factors = []string{"runtimeHost", "transport", "providerGeneration", "integrationLevel", "networkPolicy", "accountScope", "branchTopology", "failurePoint"}
 
 // Domains describe only values the executable native harness currently varies.
-// Fixed local/exportable values remain visible so they cannot be mistaken for
-// provider or integration-level variation.
+// The fixed local provider remains visible so it cannot be mistaken for real
+// cloud-provider qualification.
 var Domains = [][]string{
 	{"one-shot", "desktop", "headless"},
 	{"ssh", "relay-websocket", "relay-https"},
 	{"local"},
-	{"exportable"},
+	{"observed", "exportable"},
 	{"unrestricted", "websocket-blocked"},
 	{"approved", "receive-disabled"},
 	{"linear", "fork"},
@@ -63,6 +63,9 @@ func (r Row) Validate() error {
 	}
 	if (r.Transport == "relay-https") != (r.Network == "websocket-blocked") {
 		return fmt.Errorf("HTTPS fallback rows must exercise blocked WebSocket upgrades")
+	}
+	if r.Integration == "observed" && r.Transport == "ssh" {
+		return fmt.Errorf("session-scoped observation-only grants belong to the relay; SSH login authority is separate")
 	}
 	return nil
 }
@@ -105,7 +108,7 @@ type Coverage struct {
 // filters. IDs identify full model combinations and never change with a seed.
 func Select(strength int, seed int64, only, shard string) ([]Row, Coverage, error) {
 	meta := Coverage{Model: Model, Factors: Factors, Domains: Domains, Strength: strength, Seed: seed,
-		Constraints: []string{"one-shot senders use SSH because no local relay owner is running", "relay-https exercises blocked WebSocket upgrades; other transports use unrestricted networking", "all rows use unverified portable native account boundaries; scope varies peer receiving consent", "provider generation is local and integration level is exportable; cloud/provider capability coverage is separate"}}
+		Constraints: []string{"one-shot senders use SSH because no local relay owner is running", "relay-https exercises blocked WebSocket upgrades; other transports use unrestricted networking", "all rows use unverified portable native account boundaries; scope varies peer receiving consent", "observation-only grants apply to the relay, not SSH login authority", "provider generation is local; cloud/provider capability coverage is separate"}}
 	if strength != 2 && strength != 3 {
 		return nil, meta, fmt.Errorf("strength must be 2 or 3")
 	}

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 	"time"
@@ -9,6 +10,33 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/relay"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
+
+func TestRelayObservationNeverPublishesConversationPreview(t *testing.T) {
+	now := time.Now().UTC()
+	private := "private conversation prompt"
+	obs := Observation{InventoryComplete: true, Entries: []Entry{{Session: agent.Summary{Title: "Approved session label", LastPrompt: private}}}}
+	data, err := json.Marshal(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := observe.Snapshot{Epoch: "source-incarnation-123", Sequence: 1, ObservedAt: now, ExpiresAt: now.Add(time.Minute), Data: data}
+	for _, methods := range [][]string{{"observe"}, {"observe", "preview", "export"}} {
+		projected, err := relaySnapshot(source, relay.Grant{Kind: "device", Methods: methods}, false, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got Observation
+		if err := json.Unmarshal(projected.Data, &got); err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(projected.Data, []byte(private)) || len(got.Entries) != 1 || got.Entries[0].Session.Title != "Approved session label" || got.Entries[0].Session.LastPrompt != "" {
+			t.Fatal("inventory exposed conversation contents or lost session metadata")
+		}
+		if !bytes.Equal(source.Data, data) || obs.Entries[0].Session.LastPrompt != private {
+			t.Fatal("remote projection altered local conversation preview")
+		}
+	}
+}
 
 func TestRelayLeaseNeedsFreshLocalEvidenceAndDigestIgnoresOnlyObservationTimes(t *testing.T) {
 	now := time.Now().UTC()
