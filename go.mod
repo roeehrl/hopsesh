@@ -14,7 +14,7 @@ require (
 	github.com/charmbracelet/x/exp/teatest/v2 v2.0.0-20261001101533-953920dd3285
 	github.com/charmbracelet/x/vt v0.0.0-20261001101533-953920dd3285
 	github.com/charmbracelet/x/xpty v0.1.4
-	github.com/coder/websocket v1.8.14
+	github.com/coder/websocket v1.8.15
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/muesli/cancelreader v0.2.2
@@ -24,7 +24,7 @@ require (
 	github.com/tc-hib/winres v0.3.1
 	github.com/wailsapp/wails/v3 v3.0.0-beta.27
 	golang.org/x/crypto v0.56.0
-	golang.org/x/image v0.41.0
+	golang.org/x/image v0.46.0
 	golang.org/x/sys v0.48.0
 	golang.org/x/term v0.46.0
 	golang.org/x/text v0.42.0
