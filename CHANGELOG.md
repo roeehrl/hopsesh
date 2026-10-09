@@ -50,6 +50,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Relay recovery no longer inherits the slow healthy-idle polling interval after
+  a transient failure. Consecutive failures retain bounded jitter and server
+  retry delays; HTTP status errors identify the failed operation safely.
+
 - Cloud connectors stop when their task association changes or their state
   directories move, preserving supersession checks without polling. Watchers
   subscribe before reading task metadata so startup cannot miss a scope change.

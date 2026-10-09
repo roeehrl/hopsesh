@@ -124,7 +124,7 @@ func (l Listener) Run(ctx context.Context) error {
 		}
 	}
 	var cursor, acknowledged uint64
-	delay := time.Second
+	idleDelay, failureDelay := time.Second, time.Second
 	for {
 		// Draining committed batches bypasses the idle wait below. Consume a
 		// pending stream transition here too so continuous traffic cannot hide
@@ -199,15 +199,21 @@ func (l Listener) Run(ctx context.Context) error {
 		if l.Notify != nil {
 			l.Notify(err)
 		}
-		if err == nil && len(batch.Messages) > 0 {
-			delay = time.Second
-			continue // Drain committed batches without adding per-message latency.
+		var wait time.Duration
+		if err == nil {
+			// Successful empty polls are healthy, not failed attempts. Keep
+			// their energy-saving cadence separate from error recovery so one
+			// transient failure after idle does not inherit a minute of backoff.
+			failureDelay = time.Second
+			if len(batch.Messages) > 0 {
+				idleDelay = time.Second
+				continue // Drain committed batches without adding per-message latency.
+			}
+			idleDelay = min(MaxHTTPReconcileInterval, idleDelay*2)
+			wait = idleDelay
 		} else {
-			delay = min(MaxHTTPReconcileInterval, delay*2)
-		}
-		wait := delay
-		if err != nil {
-			wait = retryDelay(delay, err)
+			failureDelay = min(MaxHTTPReconcileInterval, failureDelay*2)
+			wait = retryDelay(failureDelay, err)
 		}
 		if connected && err == nil {
 			wait = 5 * time.Minute

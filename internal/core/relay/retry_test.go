@@ -97,6 +97,53 @@ func TestSimultaneousRelayFailuresRespectServerDelayAndSpreadRetries(t *testing.
 	})
 }
 
+func TestHealthyIdleDoesNotAccumulateFailureBackoff(t *testing.T) {
+	for _, status := range []int{http.StatusBadGateway, http.StatusTooManyRequests} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				idleUntil := time.Now().Add(2 * time.Minute)
+				var failure time.Time
+				var recovery time.Duration
+				polls, retries := 0, 0
+				transport := Transport{Base: DefaultOrigin, Token: "fixture", Space: "idle-recovery-space", HTTP: &http.Client{Transport: retryRoundTrip(func(r *http.Request) (*http.Response, error) {
+					if r.URL.Path == "/v1/notifications" {
+						return retryResponse(501, "", ""), nil
+					}
+					polls++
+					if time.Now().Before(idleUntil) {
+						return retryResponse(200, "", `{"messages":[],"cursor":0}`), nil
+					}
+					if failure.IsZero() {
+						failure = time.Now()
+						after := ""
+						if status == http.StatusTooManyRequests {
+							after = "10"
+						}
+						return retryResponse(status, after, ""), nil
+					}
+					retries++
+					recovery = time.Since(failure)
+					cancel()
+					return retryResponse(200, "", `{"messages":[],"cursor":0}`), nil
+				})}}
+				err := (Listener{Transport: transport}).Run(ctx)
+				if !errors.Is(err, context.Canceled) || polls < 5 || retries != 1 {
+					t.Fatalf("idle recovery did not finish: polls=%d retries=%d error=%v", polls, retries, err)
+				}
+				floor := 2 * time.Second
+				if status == http.StatusTooManyRequests {
+					floor = 10 * time.Second
+				}
+				if recovery < floor || recovery >= floor+time.Second {
+					t.Fatalf("healthy idle changed first-failure backoff: recovery=%s want=[%s,%s)", recovery, floor, floor+time.Second)
+				}
+			})
+		})
+	}
+}
+
 func TestClaimRetryPreservesProofAndStopsAtIncarnationLease(t *testing.T) {
 	for _, mode := range []string{"lost-reply", "lease", "cancel"} {
 		t.Run(mode, func(t *testing.T) {

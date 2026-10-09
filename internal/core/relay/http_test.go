@@ -111,12 +111,17 @@ func TestHTTPFailureOperationNeverIncludesRequestDetails(t *testing.T) {
 		{"GET", "/" + secret, "unknown"},
 		{secret, "/v1/messages", "unknown"},
 	} {
-		transport := Transport{Base: DefaultOrigin, Space: "diagnostic-space", Token: secret, HTTP: &http.Client{Transport: retryRoundTrip(func(*http.Request) (*http.Response, error) {
-			return nil, errors.New(secret)
-		})}}
-		err := transport.request(t.Context(), tc.method, tc.path, nil, nil)
-		if err == nil || !strings.Contains(err.Error(), "operation="+tc.want) || strings.Contains(err.Error(), secret) {
-			t.Fatalf("unsafe or missing operation diagnostic: %v", err)
+		for _, status := range []int{0, http.StatusBadGateway} {
+			transport := Transport{Base: DefaultOrigin, Space: "diagnostic-space", Token: secret, HTTP: &http.Client{Transport: retryRoundTrip(func(*http.Request) (*http.Response, error) {
+				if status != 0 {
+					return retryResponse(status, "", secret), nil
+				}
+				return nil, errors.New(secret)
+			})}}
+			err := transport.request(t.Context(), tc.method, tc.path, nil, nil)
+			if err == nil || !strings.Contains(err.Error(), "operation="+tc.want) || strings.Contains(err.Error(), secret) {
+				t.Fatalf("unsafe or missing operation diagnostic (status=%d): %v", status, err)
+			}
 		}
 	}
 }

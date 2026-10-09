@@ -127,7 +127,7 @@ func (t Transport) request(ctx context.Context, method, path string, body any, o
 		case 409:
 			return errors.New("relay message ID reused with different content")
 		}
-		return fmt.Errorf("relay request failed with HTTP %d", r.StatusCode)
+		return fmt.Errorf("relay request failed with HTTP %d (operation=%s)", r.StatusCode, relayRequestOperation(method, path))
 	}
 	b, err := io.ReadAll(io.LimitReader(r.Body, MaxWireBytes+1))
 	if err != nil {

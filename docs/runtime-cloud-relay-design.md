@@ -511,6 +511,25 @@ through its SSH command](https://git-scm.com/docs/git#Documentation/git.txt-code
 
 ### Relay retry behavior, hibernation and cost
 
+The subsequent Windows row-085 failure at `a7fec5c` returned a proxy HTTP 502
+after an upstream reset; a fresh connection succeeded. Deterministic investigation
+found that healthy idle polling incorrectly accumulated failure backoff. Keep
+idle reconciliation and consecutive-failure backoff independent: a successful
+empty poll resets the failure counter without accelerating healthy polling.
+Retain capped jitter, Retry-After and cancellation/lease limits. This is an
+implementation decision supported by the reproduced delay defect, not proof of
+the exact Windows failure's HTTP operation or its eventual native resolution.
+Add fixed operation labels to HTTP status diagnostics to distinguish poll,
+submit and acknowledgment without logging URLs, credentials or proxy bodies.
+
+[Google's retry guidance](https://docs.cloud.google.com/storage/docs/retry-strategy#exponential-backoff)
+recommends exponential backoff with jitter for eligible response/idempotency
+conditions. [Go's transport contract](https://pkg.go.dev/net/http#Transport)
+limits automatic replay to eligible network errors on previously successful
+connections and replayable idempotent requests. Preserve those transport rules;
+correct listener scheduling rather than adding blanket immediate retries or
+loosening the native readiness assertion.
+
 October 9 native Windows follow-up: removing Wrangler's development proxy did
 not eliminate all intermittent request failures. Cloudflare's upstream
 [unread-body reset report](https://github.com/cloudflare/workers-sdk/issues/15819)
