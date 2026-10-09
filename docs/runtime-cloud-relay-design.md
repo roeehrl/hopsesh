@@ -476,6 +476,22 @@ Verify registration and runnable login context separately. Do not repeatedly
 increase timeouts or introduce a privileged service to make an unsuitable CI
 login context pass.
 
+### Windows directory-watch lifetime
+
+Native CI exposed a platform constraint in the new scope-move test. Windows
+refuses a parent directory rename while a descendant has an open handle;
+[Microsoft's rename contract](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_file_rename_information)
+documents this restriction. The pinned fsnotify Windows backend uses shared-delete
+directory handles, but watching the incarnation still holds a descendant open.
+This does not demonstrate a missed rename event: the requested move did not occur.
+
+Qualification must distinguish those outcomes. Successful moves must cancel the
+connector. A Windows-only parent refusal must leave the exact scope current and
+the destination absent, then succeed after watcher shutdown; the old scope must
+subsequently fail validation. Arbitrary permission errors, skips, and leaked
+handles do not pass. Unix parent moves and Windows incarnation moves continue
+to exercise real notification-driven shutdown without a new polling timer.
+
 ### Nested Windows SSH
 
 The three-native-OS run `37970868425` failed before any journey: Windows resolved

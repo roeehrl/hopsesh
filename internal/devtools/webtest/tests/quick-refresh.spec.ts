@@ -40,6 +40,30 @@ test('a selected native session remains selected when background discovery regis
  await expect(row(page,expected.title)).toHaveAttribute('aria-selected','true');
 });
 
+for (const groupBy of ['repository','account']) test(`an inspected family copy stays visible once in ${groupBy} grouping after account enrichment`, async ({page}) => {
+ await fresh(page);
+ const expected=await page.evaluate(async(groupBy)=>{
+  const {state}=await import('/core.js');
+  const {render,queueScan}=await import('/sessions.js');
+  state.list.groupBy=groupBy;
+  const scan=structuredClone(state.scan);
+  const original=scan.groups.flatMap(g=>g.entries).find(e=>e.title==='Find the codeword');
+  state.sel={machine:original.machine,key:original.key};render();
+  const copy=structuredClone(original);
+  copy.key='codex/other-copy';copy.agent='codex';copy.title='Family representative';
+  copy.copies=[{machine:original.machine,key:original.key}];
+  scan.groups=[{...scan.groups[0],entries:[copy]}];
+  scan.profileCopies=[{...scan.groups[0],entries:[original]}];
+  scan.revision++;queueScan(scan);
+  return {title:original.title,key:original.key,revision:scan.revision};
+ },groupBy);
+ await expect.poll(()=>page.evaluate(async()=>(await import('/core.js')).state.scan.revision)).toBe(expected.revision);
+ await expect(row(page,expected.title)).toHaveCount(1);
+ await expect(row(page,expected.title)).toHaveAttribute('aria-selected','true');
+ await expect(page.getByRole('complementary',{name:'Session details'}).getByRole('heading',{name:expected.title,exact:true})).toBeVisible();
+ expect(await page.evaluate(async()=>(await import('/core.js')).selected()?.key)).toBe(expected.key);
+});
+
 test('browsing registration refuses another account, file, machine or uncertain candidate', async ({page}) => {
  await fresh(page);
  const results=await page.evaluate(async()=>{

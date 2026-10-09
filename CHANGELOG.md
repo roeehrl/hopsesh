@@ -50,6 +50,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Keep an explicitly inspected family copy visible through account enrichment
+  and refresh, without duplicating it in account groups. A completed transfer
+  releases source inspection so the destination family is visible on return.
+
 - Relay recovery no longer inherits the slow healthy-idle polling interval after
   a transient failure. Consecutive failures retain bounded jitter and server
   retry delays; HTTP status errors identify the failed operation safely.

@@ -41,21 +41,26 @@ export function browsingEntry(scan, selection) {
 // explicitly opened in the inspector. Resolve that exact copy from current raw
 // inventory; never keep an old entry after it disappears from the new family.
 export async function preserveSelectedCopy(scan) {
-  const selection = state.sel;
+  if (current !== "sessions" || !view.querySelector("#inspector")) return;
+  let selection = state.sel;
   if (!selection) return;
   const matches = e => e.machine === selection.machine && e.key === selection.key;
   if (scan.groups.some(g => g.entries.some(matches))) return;
   const old=entries().find(matches);
   const registered=old&&browsingEntry(scan,old);
   if (registered) {
-    state.sel={machine:registered.machine,key:registered.key};
-    return;
+    selection={machine:registered.machine,key:registered.key};
+    state.sel=selection;
+    if (state.list?.groupBy === "account" || scan.groups.some(g => g.entries.some(matches))) return;
   }
   const group = scan.groups.find(g => g.entries.some(e => (e.copies || []).some(matches)));
   if (!group) return;
   const index = group.entries.findIndex(e => (e.copies || []).some(matches));
-  let copy;
-  try { copy = await api("ResolveEntry", selection.machine, selection.key); }
+  // Account enrichment includes hidden family members in profileCopies. They
+  // are not list rows outside account grouping, so keep the explicitly chosen
+  // member as the family's representative using that fresh inventory entry.
+  let copy=registered;
+  try { if (!copy) copy = await api("ResolveEntry", selection.machine, selection.key); }
   catch { return; } // removed or no longer readable: normal selection clearing applies
   if (state.sel && matches(state.sel) && copy && matches(copy)) group.entries[index] = copy;
 }

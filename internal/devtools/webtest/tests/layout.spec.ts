@@ -104,7 +104,8 @@ test("a narrow window hides the sidebar for now, and brings it back when wide ag
   // Nothing of that was saved.
   await page.reload();
   await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible({ timeout: 30_000 });
-  expect(await width(page, "#sidebar")).toBe(220);
+  // The cached heading can paint before the restored grid finishes layout.
+  await expect.poll(() => width(page, "#sidebar")).toBe(220);
 });
 
 test("the inspector's width follows the window until set: 30% of the room, at most 60% and what leaves the list 440px", async ({ page }) => {

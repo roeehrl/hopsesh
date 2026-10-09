@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -250,13 +251,43 @@ func TestCloudScopeWatchStopsWhenDirectoryIsMoved(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer func() { cancel(context.Canceled); join() }()
+			joined := false
+			defer func() {
+				cancel(context.Canceled)
+				if !joined {
+					join()
+				}
+			}()
 			path := instance.Directory
 			if directory == "parent" {
 				path = parent
 			}
 			if err := os.Rename(path, path+"-moved"); err != nil {
-				t.Fatal(err)
+				// Windows refuses a parent rename while its child watch has an
+				// open handle. Qualify that native refusal rather than pretending
+				// a rename occurred, or accepting arbitrary permission failures.
+				if runtime.GOOS != "windows" || directory != "parent" || !os.IsPermission(err) {
+					t.Fatal(err)
+				}
+				if ctx.Err() != nil || instance.current() != nil {
+					t.Fatal("denied parent move changed the active scope", context.Cause(ctx))
+				}
+				if _, err := os.Stat(path + "-moved"); !os.IsNotExist(err) {
+					t.Fatal("denied parent move created a destination", err)
+				}
+				cancel(context.Canceled)
+				join()
+				joined = true
+				// This must succeed after closing the watcher: an unrelated ACL
+				// failure is not accepted as proof of Windows handle protection.
+				if err := os.Rename(path, path+"-moved"); err != nil {
+					t.Fatal("scope watcher did not release its directory handles", err)
+				}
+				if err := instance.current(); err == nil {
+					t.Fatal("moved scope remained current after watcher shutdown")
+				}
+				t.Log("Windows refused the live parent move; unchanged scope and handle release verified")
+				return
 			}
 			select {
 			case <-ctx.Done():

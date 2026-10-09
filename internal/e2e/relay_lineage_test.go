@@ -354,20 +354,34 @@ func (f *relayFleet) start(t *testing.T, key byte) {
 	}
 	f.stop[key] = stop
 	t.Cleanup(stop)
-	deadline := time.Now().Add(10 * time.Second)
+	started := time.Now()
+	deadline := started.Add(10 * time.Second)
 	wantMode := f.deliveryMode
 	if wantMode == "" {
 		wantMode = "notifications"
 	}
-	var health relay.Health
+	var transitions []string
+	var previous string
 	for {
+		// Error is omitted from healthy JSON responses. Reusing a destination
+		// retains an old initialization error after the listener has started.
+		var health relay.Health
 		bounded, cancel := context.WithTimeout(f.ctx, 200*time.Millisecond)
 		err = client.Call(bounded, "relay.status", nil, &health)
 		cancel()
+		phase := fmt.Sprintf("statusAvailable=%t connected=%t mode=%s reason=%q", err == nil, health.Connected, health.DeliveryMode, health.Error)
+		if phase != previous {
+			previous = phase
+			transitions = append(transitions, fmt.Sprintf("%s %s", time.Since(started).Round(time.Millisecond), phase))
+			if len(transitions) > 32 {
+				transitions = transitions[len(transitions)-32:]
+			}
+		}
 		if err == nil && ((f.healthError == "" || f.healthMayConnect) && health.Connected && health.DeliveryMode == wantMode || f.healthError != "" && !health.Connected && strings.Contains(health.Error, f.healthError)) {
 			return
 		}
 		if time.Now().After(deadline) {
+			t.Logf("disposable owner %c startup transitions:\n%s", key, strings.Join(transitions, "\n"))
 			f.logHealth(t)
 			f.probeRelay(t, key)
 			stop()
