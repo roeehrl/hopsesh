@@ -527,6 +527,95 @@ not the older key-value storage rates. Neither sparse storage samples nor the
 usage, included allocations, billing-unit rounding, daily storage peaks and
 download-service storage must be included in the final operating-cost estimate.
 
+## Whole-service usage and operating-cost interpretation, October 9
+
+The live Workers plans page identifies **Free** as the current plan. Its $5/month
+Paid card is an available upgrade, not a subscription charge already incurred.
+The read-only account-settings API returns `standard`, which identifies a usage
+model and does not establish the subscription. Subscription API access returned
+403 with the existing OAuth scopes; the signed-in UI supplied the plan evidence
+without requesting broader credentials or changing the plan.
+
+The refreshed billing page says usage is observed through October 9 and shows
+$0.00 for its selected R2 products: 231 Class B operations, 9 Class A operations,
+and 0.27 GB-months. These account-level billing rows have not caught up with the
+larger operation counts below. They do not establish a final invoice or a
+Hopsesh-only zero-cost result.
+
+The combined GraphQL query covers **October 9 00:00:00–11:27:54 UTC**, including
+failed and successful load attempts, startup experiments and cleanup. Every
+dataset returned fewer than its 1,000-group limit and no query error. Adaptive
+counts remain estimates. Namespaces/buckets are restricted to these two Hopsesh
+services; unrelated account applications are not attributed to Hopsesh.
+
+| Component | Observed usage in this interval |
+| --- | --- |
+| Relay Worker | 8,139 requests; 10,091.562 CPU ms; 0 execution errors |
+| Downloads Worker | 87 requests; 51.671 CPU ms; 0 execution errors |
+| Mailbox objects | 8,825 invocations; 34.832461056 GB-s; 124,635 SQL rows read; 19,162 written |
+| Authorization objects | 81 invocations; 0.649179648 GB-s; 91 SQL rows read; 23 written |
+| Ciphertext R2 operations | 1,017 successful puts; 898 gets; 12 bucket heads; 1,061 successful deletes; 121 delete-404 responses |
+| Downloads R2 operations | 4 successful puts; 14 gets; 34,750,623 response bytes |
+| Downloads storage, 10:40 UTC | 12 objects; 40,333,400 payload bytes; 1,450 metadata bytes; no multipart uploads |
+| Ciphertext storage, 10:40 UTC | 1 object; 256 payload bytes; 43 metadata bytes; no multipart uploads |
+| SQL storage, 10:15 UTC | 417,792 Mailbox bytes; 16,384 Authorization bytes |
+
+Neither object class reported CPU-limit, memory-limit or fatal internal errors.
+The Mailbox invocation dataset includes 714 errors, all in the disconnect class;
+these are retained as reconnect/drain evidence rather than erased by the zero
+execution-error result. No downloads requests/operations were observed inside
+the shorter successful-load window; its wider-day usage and retained release
+objects above must still be included in whole-service accounting.
+
+Combined Hopsesh measurements consume 8,226 Worker requests, 8,906 object
+invocations, 35.481640704 GB-s, 124,726 SQL reads and 19,185 SQL writes in the
+partial day. Relative to Free's respective daily allocations, these are about
+8.23%, 8.91%, 0.27%, 2.49% and 19.19%. Invocation analytics and billing event
+classification are not identical. These percentages describe Hopsesh's measured
+contribution, **not available account headroom**, because other applications
+share the allocations. This interval is not a full-day sustained-load result.
+
+For a future paid deployment, use the following monthly planning worksheet. It
+describes total account usage, with other applications subtracted only when
+calculating Hopsesh's incremental cost; included allocations cannot be claimed
+twice. Rates are USD, checked October 9, and exclude taxes or unrelated products.
+
+| Meter | Included amount | Excess rate |
+| --- | --- | --- |
+| Workers subscription | Account base plan | $5/month |
+| Worker requests / CPU | 10 million / 30 million CPU ms | $0.30 / million requests; $0.02 / million CPU ms |
+| Object requests / duration | 1 million / 400,000 GB-s | $0.15 / million; $12.50 / million GB-s |
+| SQL reads / writes / storage | 25 billion / 50 million / 5 GB-month | $0.001 / million; $1 / million; $0.20 / GB-month |
+| R2 Standard storage / Class A / Class B | 10 GB-month / 1 million / 10 million | $0.015 / GB-month; $4.50 / million; $0.36 / million |
+
+Apply each product's billing-unit rounding to excess usage. In particular, a
+small excess above the object-duration allowance can add a whole $12.50 unit;
+the existing $10 alert is not a hard spending cap. R2 storage uses daily peaks
+over the billing period; the sparse samples above cannot determine that meter.
+Count successful puts as Class A and gets/heads as Class B; deletes and standard
+internet egress are free. Worker CPU and object GB-seconds are separate meters.
+Sources: [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/),
+[Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/),
+[R2 pricing](https://developers.cloudflare.com/r2/pricing/).
+
+The paid base case is $5 only if all account meters remain within their included
+allocations. No monthly traffic or dollar forecast is inferred by multiplying
+the short load burst. Capacity planning requires separately stated active spaces,
+approved peer relationships, inventory-change and transfer rates, serialized
+bytes, reconnect frequency, release downloads, and measured active object time.
+Retaining the present download payload for a whole month with no additions would
+represent about 0.0403 GB-month before account aggregation/rounding; this is a
+storage-only planning assumption, not a measured billing-period total.
+
+This closes the previously missing downloads attribution and verifies the actual
+plan. The existing quota, pause, enrollment and budget-alert controls remain in
+force. A longer representative soak, settled billing-period reconciliation and
+actual asynchronous orphan expiration remain unqualified. The account was not
+upgraded, the relay was not unpaused, and no objects were deleted for this readback.
+Evidence: `/tmp/hopsesh-all-services-day.graphql` and `.json`,
+`/tmp/hopsesh-downloads-storage.json`, and
+`/tmp/hopsesh-downloads-load-window.json`.
+
 ## Codex prepared-filesystem publication correction
 
 A fresh task from the earlier published configuration had neither the versioned
