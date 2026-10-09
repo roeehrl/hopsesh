@@ -639,6 +639,53 @@ go test -race -count=1 -v -timeout 85m \
   -run '^TestRelayHostedSteadyLoadAndReconnect$' ./internal/e2e
 ```
 
+## One-hour, 100-client qualification, October 9
+
+The extended hosted race test passes in **3,798.10 seconds**. The workload began
+at **11:33:51 UTC**, delivered 14 observation rounds to all 100 logical clients
+across four authorization spaces, and finished its final delivery/drain checks
+at **12:36:59 UTC**. It exercised ordinary five-minute renewals, simultaneous
+connection recovery both near startup and after the hour, native routing-token
+renewal, scoped cloud invitation/claim/revocation, and ciphertext/deletion-intent
+drain. The instrumented client recorded 8,401 HTTP requests, 414 WebSocket
+handshake attempts and **zero HTTP 429 responses**. These are synthetic inventory
+clients, not 100 real provider VMs or conversation-transfer throughput evidence.
+
+Credential cleanup passed. The operator wrapper restored the paused deployment
+`93eeebc3-057e-4e82-84d6-6affcb5d63cd` and verified HTTP 503 from device enrollment
+at **12:37:42 UTC**, exiting successfully. Staging is paused again. Logs:
+`/tmp/hopsesh-hour-soak-20261009.log`, `/tmp/hopsesh-hour-soak-pause.log`.
+
+The first whole-service analytics read covers **11:33:51–12:37:51 UTC**, including
+credential cleanup and pause restoration. No query errors or truncated group
+limits were returned. These adaptive analytics are provisional: ingestion lag,
+sampling and billing classifications prevent exact reconciliation with client
+counters or a settled invoice.
+
+| Component | First interval readback |
+| --- | --- |
+| Relay Worker | 8,459 requests; 8,774.602 CPU ms; 0 execution errors; 507 client disconnects |
+| Downloads Worker | 1 request; 0.582 CPU ms; 0 execution errors |
+| Mailbox objects | 9,230 invocations; 50.864271232 GB-s; 178,180 SQL rows read; 25,738 written |
+| Authorization objects | 13 invocations; 0.251552512 GB-s; 24 SQL rows read; 16 written |
+| Ciphertext R2 | 1,434 successful puts; 1,410 gets; 1,139 successful deletes; 130 delete-404 responses |
+| Downloads R2 | No operation rows returned inside this interval; retained storage still applies |
+
+Neither object class reported CPU-limit, memory-limit or fatal internal errors.
+Mailbox analytics retain 410 invocation errors in client/response-stream disconnect classes;
+these must not be confused with zero Worker execution errors or silently removed.
+The latest available storage samples precede test completion: the ciphertext
+bucket at 11:50 contains the one 256-byte retention canary; the downloads bucket
+at 12:00 contains 12 objects and 40,333,400 payload bytes. They are not post-cleanup
+storage proof. Actual test-space drain was verified through authenticated operator
+counters, while the orphan canary remains deliberately untouched for its separate
+lifecycle-expiration gate.
+
+This qualifies the bounded one-hour workload. Settled service/billing accounting,
+actual asynchronous orphan expiration and broader provider/OS acceptance remain
+open. The query and first result are `/tmp/hopsesh-hour-soak-metrics.graphql` and
+`/tmp/hopsesh-hour-soak-metrics.json`.
+
 ## Codex prepared-filesystem publication correction
 
 A fresh task from the earlier published configuration had neither the versioned
