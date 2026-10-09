@@ -210,9 +210,19 @@ func runRuntimeCloudRow(t *testing.T, bin string, row runtimecases.Row) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		bounded, cancel := context.WithTimeout(ctx, 20*time.Second)
+		requestLimit := 20 * time.Second
+		if row.Network == "websocket-blocked" {
+			// An idle receiver may legitimately wait its full fallback interval.
+			// The sender's pending call wakes its own listener, so allow one
+			// receiver interval plus transport/processing, not two idle periods.
+			requestLimit = relay.MaxHTTPReconcileInterval + 15*time.Second
+		}
+		bounded, cancel := context.WithTimeout(ctx, requestLimit)
 		defer cancel()
-		return runtimeMatrixClient(t, f.homes[owner]).Call(bounded, "relay.call", map[string]any{"peer": item.Public.ID, "operation": operation, "method": method, "params": params}, result)
+		started := time.Now()
+		err = runtimeMatrixClient(t, f.homes[owner]).Call(bounded, "relay.call", map[string]any{"peer": item.Public.ID, "operation": operation, "method": method, "params": params}, result)
+		t.Logf("cloud request owner=%c method=%s elapsed=%s failed=%t", owner, method, time.Since(started).Round(time.Millisecond), err != nil)
+		return err
 	}
 	observe := func(item cloudintegration.Incarnation, result *cloudintegration.Observation) error {
 		t.Helper()
@@ -237,6 +247,7 @@ func runRuntimeCloudRow(t *testing.T, bin string, row runtimecases.Row) {
 		}
 		var sibling cloudintegration.Observation
 		if err := observe(fork, &sibling); err != nil || sibling.Task == nil || sibling.Task.ID != forkRecord.TaskID || sibling.Session != fork.Session || sibling.Incarnation != fork.ID {
+			f.logHealth(t)
 			t.Fatal("original lifecycle changed independent fork scope", err)
 		}
 	}

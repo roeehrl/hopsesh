@@ -88,14 +88,19 @@ func (s Store) Connection(ctx context.Context) (Connection, error) {
 	return c, err
 }
 
+// MaxHTTPReconcileInterval bounds healthy idle reconciliation without a socket.
+const MaxHTTPReconcileInterval = time.Minute
+
 type Listener struct {
-	Transport      Transport
-	Processor      Processor
-	Notify         func(error)
-	OnResponse     func(context.Context, Envelope) error
-	OnObservation  func(context.Context, Envelope) error
-	OnRejected     func()
-	OnDeliveryMode func(string)
+	Transport       Transport
+	Processor       Processor
+	Notify          func(error)
+	OnResponse      func(context.Context, Envelope) error
+	OnObservation   func(context.Context, Envelope) error
+	OnRejected      func()
+	OnDeliveryMode  func(string)
+	RequestActivity <-chan struct{}
+	ActiveRequests  func() bool
 }
 
 // Run shares one notification stream and HTTP reconciliation across all clients.
@@ -180,7 +185,7 @@ func (l Listener) Run(ctx context.Context) error {
 			delay = time.Second
 			continue // Drain committed batches without adding per-message latency.
 		} else {
-			delay = min(60*time.Second, delay*2)
+			delay = min(MaxHTTPReconcileInterval, delay*2)
 		}
 		wait := delay
 		if err != nil {
@@ -188,6 +193,10 @@ func (l Listener) Run(ctx context.Context) error {
 		}
 		if connected && err == nil {
 			wait = 5 * time.Minute
+		} else if err == nil && l.ActiveRequests != nil && l.ActiveRequests() {
+			// The peer can still be idle, but a sender actively waiting for its
+			// reply must not add a second minute of local reconciliation delay.
+			wait = min(wait, time.Second)
 		}
 		t := time.NewTimer(wait)
 	waiting:
@@ -207,6 +216,10 @@ func (l Listener) Run(ctx context.Context) error {
 					l.OnDeliveryMode(mode)
 				}
 			case <-wake:
+			case <-l.RequestActivity:
+				if connected {
+					continue // Healthy notification streams already signal replies.
+				}
 			}
 			// Notifications are hints, not permission to bypass error backoff or a
 			// server Retry-After. Keep consuming them without restarting the timer.

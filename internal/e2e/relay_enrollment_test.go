@@ -433,7 +433,11 @@ func startSQLiteRelayFixture(t *testing.T, timeout time.Duration, vars ...string
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
 	_ = listener.Close()
-	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	// Keep the platform alive through failure diagnostics in Cleanup. t.Context
+	// is canceled before cleanup callbacks, which would kill workerd before its
+	// captured exception spans could be queried. The explicit deadline and joined
+	// cleanup still bound the fixture's lifetime.
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	t.Cleanup(cancel)
 	server := exec.CommandContext(ctx, node, filepath.Join(fixture, "node_modules", "wrangler", "wrangler-dist", "cli.js"), "dev", "--local", "--ip", "127.0.0.1", "--port", fmt.Sprint(port), "--inspector-port", "0", "--local-protocol", "https", "--local-upstream", fmt.Sprintf("127.0.0.1:%d", port), "--https-key-path", key, "--https-cert-path", cert, "--persist-to", filepath.Join(root, "platform-state"), "--var", "ENROLLMENT_ADMIN:fixture-admin-secret-with-32-bytes-minimum", "--var", "RELAY_PAUSED:0", "--log-level", "error", "--show-interactive-dev-session=false")
 	for _, value := range vars {
@@ -448,7 +452,15 @@ func startSQLiteRelayFixture(t *testing.T, timeout time.Duration, vars ...string
 	if err = server.Start(); err != nil {
 		t.Fatal(err)
 	}
+	origin := fmt.Sprintf("https://127.0.0.1:%d", port)
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}, Timeout: 5 * time.Second}
 	t.Cleanup(func() {
+		if t.Failed() {
+			bounded, stop := context.WithTimeout(context.Background(), 5*time.Second)
+			spans, err := relayPlatformDiagnostics(bounded, origin, client)
+			stop()
+			t.Logf("local SQLite/R2 platform spans: %s error=%v", spans, err)
+		}
 		_ = server.Process.Signal(os.Interrupt)
 		cancel()
 		_ = server.Wait()
@@ -463,8 +475,6 @@ func startSQLiteRelayFixture(t *testing.T, timeout time.Duration, vars ...string
 			t.Logf("local SQLite/R2 platform failure log:\n%s", body)
 		}
 	})
-	origin := fmt.Sprintf("https://127.0.0.1:%d", port)
-	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}, Timeout: 5 * time.Second}
 	deadline := time.Now().Add(20 * time.Second)
 	for {
 		res, err := client.Get(origin + "/v1/capabilities")

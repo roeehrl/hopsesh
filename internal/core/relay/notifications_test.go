@@ -44,9 +44,10 @@ func TestNotificationListenerSleepsWakesAndJoins(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	modes := make(chan string, 8)
+	activity := make(chan struct{}, 8)
 	done := make(chan error, 1)
 	go func() {
-		done <- (Listener{Transport: transport, OnDeliveryMode: func(mode string) { modes <- mode }}).Run(ctx)
+		done <- (Listener{Transport: transport, RequestActivity: activity, ActiveRequests: func() bool { return true }, OnDeliveryMode: func(mode string) { modes <- mode }}).Run(ctx)
 	}()
 	socket := <-socketReady
 	select {
@@ -59,6 +60,9 @@ func TestNotificationListenerSleepsWakesAndJoins(t *testing.T) {
 	}
 	time.Sleep(100 * time.Millisecond)
 	before := polls.Load()
+	for range 8 {
+		activity <- struct{}{}
+	}
 	time.Sleep(2300 * time.Millisecond)
 	if polls.Load() != before {
 		t.Fatal("healthy idle stream kept polling", before, polls.Load())

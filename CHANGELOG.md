@@ -50,6 +50,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Active internet requests wake the shared HTTP fallback receiver to collect
+  replies promptly. Completed, canceled and expired requests return to idle
+  reconciliation; healthy WebSocket delivery keeps using notifications.
+
+- Concurrent transfers from separate machines preserve both source lineage
+  receipts, even when their local journal IDs match. Recovery of the same journal
+  cannot take over a receipt lock held by another active recovery process.
+
 - Moving an original after creating a fork preserves the fork's ancestry and
   return destinations. Retrying the first transfer keeps its original receipt
   instead of reporting a conflicting causal history.

@@ -14,6 +14,16 @@ WebSocket refusal falls back to adaptive HTTP reconciliation (up to one minute
 while idle), with bounded notification reconnect attempts. Settings and private
 runtime status distinguish notifications from HTTP fallback.
 
+An outgoing request wakes that same listener after submission. While HTTP
+fallback has pending replies, healthy reconciliation runs at most once a second;
+server Retry-After and failure backoff still take precedence. Completing,
+canceling or reaching the request's signed lease removes that demand, returning
+to adaptive idle reconciliation. A healthy notification socket does not add
+polling for pending requests. An idle remote receiver may still take up to one
+minute to collect the request; senders no longer add another idle minute to
+retrieve a committed reply. Deterministic clock tests cover wakeup, return to
+idle, request expiry and Retry-After, alongside actual socket idle tests.
+
 The `/v1/notifications` upgrade requires the same verified HTTPS origin, JWT and
 current mailbox grant as encrypted delivery. Credentials stay in headers, never
 URLs. Native clients refuse redirects and oversized, binary or unexpected frames.

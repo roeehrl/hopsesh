@@ -4,14 +4,150 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
+
+type heldReceiptFS struct {
+	host.FS
+	path    string
+	ready   chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (f *heldReceiptFS) CreateExclusive(path string, data []byte, mode fs.FileMode) error {
+	return f.FS.(interface {
+		CreateExclusive(string, []byte, fs.FileMode) error
+	}).CreateExclusive(path, data, mode)
+}
+
+func (f *heldReceiptFS) WriteFile(path string, data []byte, mode fs.FileMode) error {
+	if path == f.path {
+		f.once.Do(func() { close(f.ready); <-f.release })
+	}
+	return f.FS.WriteFile(path, data, mode)
+}
+
+func TestReceiptOwnershipSeparatesIdenticalJournalIDsAcrossMachines(t *testing.T) {
+	testReceiptOwnership(t, false)
+}
+
+func TestReceiptOwnershipRefusesConcurrentRecoveryOfSameJournal(t *testing.T) {
+	testReceiptOwnership(t, true)
+}
+
+func TestReceiptWithoutDurableOwnerCannotClaimLock(t *testing.T) {
+	j, err := New(t.TempDir(), KindMove, "missing owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	j.ReceiptOwner = ""
+	native := filepath.Join(t.TempDir(), "source.jsonl")
+	m := lineage.New("missing-owner")
+	m.Upsert(lineage.Replica{Endpoint: "A", Location: "A", Key: agent.SessionKey{Agent: "claude", Session: "source"}})
+	if err := j.WriteReceipt(host.LocalFS(), "source", lineage.PathFor(native), m.Encode(), false); err == nil {
+		t.Fatal("missing owner accepted")
+	}
+	for _, path := range []string{lineage.PathFor(native), lineage.PathFor(native) + ".receipt-lock"} {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("missing owner changed receipt state", err)
+		}
+	}
+}
+
+func testReceiptOwnership(t *testing.T, sameJournal bool) {
+	t.Helper()
+	firstState, secondState := t.TempDir(), t.TempDir()
+	first, err := New(firstState, KindMove, "first machine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := New(secondState, KindMove, "second machine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Local timestamp/sequence IDs can legitimately collide on two machines.
+	if first.ID != second.ID {
+		path := filepath.Join(Dir(secondState), first.ID)
+		if err := os.Rename(second.dir, path); err != nil {
+			t.Fatal(err)
+		}
+		second.ID, second.dir = first.ID, path
+	}
+	if err := second.Save(); err != nil {
+		t.Fatal(err)
+	}
+	native := filepath.Join(t.TempDir(), "source.jsonl")
+	if err := os.WriteFile(native, []byte("unchanged native history"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	base := lineage.New("independent-receipt-owners")
+	key := agent.SessionKey{Agent: "claude", Session: "source"}
+	base.Upsert(lineage.Replica{Endpoint: "A", Location: "A", Key: key})
+	left, right := base.Clone(), base.Clone()
+	left.Upsert(lineage.Replica{Endpoint: "B", Location: "B", Key: key})
+	right.Upsert(lineage.Replica{Endpoint: "C", Location: "C", Key: key})
+	path := lineage.PathFor(native)
+	gate := &heldReceiptFS{FS: host.LocalFS(), path: path, ready: make(chan struct{}), release: make(chan struct{})}
+	done := make(chan error, 1)
+	finished := make(chan struct{})
+	var release sync.Once
+	unblock := func() { release.Do(func() { close(gate.release) }) }
+	go func() {
+		defer close(finished)
+		done <- first.WriteReceipt(gate, "source", path, left.Encode(), false)
+	}()
+	defer func() { unblock(); <-finished }()
+	select {
+	case <-gate.ready:
+	case err := <-done:
+		t.Fatal("first receipt did not hold its write", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("first receipt did not reach the barrier")
+	}
+	if sameJournal {
+		secondState = firstState
+		second, err = Load(firstState, first.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = second.RecoverReceipts(func(string) (host.FS, error) { return host.LocalFS(), nil })
+	} else {
+		err = second.WriteReceipt(host.LocalFS(), "source", path, right.Encode(), false)
+	}
+	unblock()
+	if firstErr := <-done; firstErr != nil {
+		t.Fatal(firstErr)
+	}
+	if err == nil || !second.PendingReceipts() {
+		t.Fatal("another caller took over an active receipt lock")
+	}
+	// The distinct ownership token must survive process replacement as well.
+	reloaded, err := Load(secondState, second.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reloaded.RecoverReceipts(func(string) (host.FS, error) { return host.LocalFS(), nil }); err != nil || reloaded.PendingReceipts() {
+		t.Fatal("pending receipt did not recover", err)
+	}
+	merged, err := lineage.Read(host.LocalFS(), native)
+	want := 3
+	if sameJournal {
+		want = 2
+	}
+	if err != nil || merged == nil || len(merged.Replicas) != want {
+		t.Fatal("concurrent source acknowledgement was lost", err)
+	}
+}
 
 func TestCloudCheckpointBranchTransitionRecoversAndUndoesWithoutNativeFiles(t *testing.T) {
 	for _, mode := range []string{"recover and undo", "ordinary receipt", "wrong task", "other endpoint", "other profile", "other agent", "concurrent sibling", "native file"} {
@@ -204,7 +340,7 @@ func TestReceiptLockKeepsBusyAckDurableAndRecoversOwnCrash(t *testing.T) {
 		t.Fatal("locked metadata was overwritten")
 	}
 	// Simulate this operation's crash after acquiring ownership, before writing.
-	os.WriteFile(path+".receipt-lock", []byte(j.ID), 0600)
+	os.WriteFile(path+".receipt-lock", []byte(j.ReceiptOwner), 0600)
 	disk, err := Load(state, j.ID)
 	if err != nil {
 		t.Fatal(err)

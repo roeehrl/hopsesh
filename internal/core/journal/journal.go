@@ -7,6 +7,7 @@ package journal
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -104,6 +105,9 @@ type Journal struct {
 	Keys            []agent.SessionKey `json:"keys"` // the sessions it created or changed
 	Entries         []Entry            `json:"entries"`
 	Undone          bool               `json:"undone,omitempty"`
+	// ReceiptOwner is globally unique and durable. The display ID is only unique
+	// inside one state directory and cannot identify a lock owner on another host.
+	ReceiptOwner string `json:"receiptOwner"`
 	// Remote are journals of the same operation kept by hopsesh on other machines (a push):
 	// undoing this one undoes them too.
 	Remote []Remote `json:"remote,omitempty"`
@@ -161,7 +165,7 @@ func New(stateDir, kind, title string) (*Journal, error) {
 		}
 		id = fmt.Sprintf("%s-%03d", base, n)
 	}
-	j := &Journal{ID: id, Kind: kind, Title: title, Time: time.Now().UTC(), dir: filepath.Join(Dir(stateDir), id)}
+	j := &Journal{ID: id, ReceiptOwner: rand.Text(), Kind: kind, Title: title, Time: time.Now().UTC(), dir: filepath.Join(Dir(stateDir), id)}
 	if err := os.MkdirAll(filepath.Join(j.dir, "backup"), 0o700); err != nil {
 		return nil, err
 	}

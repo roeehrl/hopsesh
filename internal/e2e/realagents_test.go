@@ -2,9 +2,9 @@ package e2e
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,26 +61,66 @@ func codexHome(t *testing.T, home string) string {
 // codexList lists threads the way `codex resume` does: from Codex's index only.
 func codexList(t *testing.T, bin, home string) string {
 	t.Helper()
-	in := `{"id":1,"method":"initialize","params":{"clientInfo":{"name":"hopsesh-test","version":"1"}}}` + "\n" +
-		`{"method":"initialized"}` + "\n" + `{"id":2,"method":"thread/list","params":{"useStateDbOnly":true}}` + "\n"
-	cmd := exec.Command("sh", "-c", `{ cat; sleep 3; } | "$0" app-server`, bin)
-	cmd.Env = append(os.Environ(), "CODEX_HOME="+home)
-	cmd.Stdin = strings.NewReader(in)
-	out, err := cmd.Output()
+	out, err := codexListExchange(t.Context(), []string{bin, "app-server"}, home)
 	if err != nil {
-		t.Fatalf("codex app-server: %v", err)
+		t.Fatal(err)
 	}
-	for _, l := range bytes.Split(out, []byte("\n")) {
+	return out
+}
+
+// Keep stdin open until the requested response, and send no application request
+// until initialize succeeds. This independent client checks Codex's own index;
+// a fixed sleep before EOF can truncate a valid slow response on a busy runner.
+func codexListExchange(ctx context.Context, argv []string, home string) (string, error) {
+	initialize := []byte(`{"id":1,"method":"initialize","params":{"clientInfo":{"name":"hopsesh-test","version":"1"}}}` + "\n")
+	initialized := false
+	var result json.RawMessage
+	var protocolErr error
+	exchange := func(line []byte) ([]byte, bool) {
 		var r struct {
 			ID     int             `json:"id"`
 			Result json.RawMessage `json:"result"`
+			Error  json.RawMessage `json:"error"`
 		}
-		if json.Unmarshal(l, &r) == nil && r.ID == 2 {
-			return string(r.Result)
+		if json.Unmarshal(line, &r) != nil || r.ID != 1 && r.ID != 2 {
+			return nil, false
 		}
+		if len(r.Error) > 0 && string(r.Error) != "null" {
+			protocolErr = fmt.Errorf("codex request %d failed: %s", r.ID, r.Error)
+			return nil, true
+		}
+		if len(r.Result) == 0 {
+			return nil, false
+		}
+		if r.ID == 1 && !initialized {
+			initialized = true
+			return []byte("{\"method\":\"initialized\"}\n{\"id\":2,\"method\":\"thread/list\",\"params\":{\"useStateDbOnly\":true}}\n"), false
+		}
+		if r.ID == 2 {
+			if !initialized {
+				protocolErr = fmt.Errorf("codex thread/list answered before initialization")
+			} else {
+				result = append(json.RawMessage(nil), r.Result...)
+			}
+			return nil, true
+		}
+		return nil, false
 	}
-	t.Fatalf("no thread/list answer: %s", out)
-	return ""
+	m := &host.Machine{Local: true}
+	out, err := m.Exec().Run(ctx, argv, agent.RunOptions{
+		Stdin: initialize, HoldStdin: 15 * time.Second, Timeout: 20 * time.Second,
+		StdinReply: exchange, Env: []string{"CODEX_HOME=" + home},
+	})
+	if err != nil {
+		return "", fmt.Errorf("codex app-server: %w", err)
+	}
+	if protocolErr != nil {
+		return "", protocolErr
+	}
+	if out.Code != 0 || len(result) == 0 {
+		return "", fmt.Errorf("codex thread/list missing (exit %d): %s\n%s", out.Code, out.Stdout, out.Stderr)
+	}
+	return string(result), nil
 }
 
 // A thread hopsesh writes into a Codex home whose index is already built shows up in

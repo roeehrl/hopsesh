@@ -26,6 +26,7 @@ type Service struct {
 	health        Health
 	mu            sync.Mutex
 	waiters       map[string]chan struct{}
+	activity      chan struct{}
 	observations  map[string]observe.Snapshot
 }
 
@@ -153,8 +154,22 @@ func (s *Service) ObservationProblem(message string) {
 }
 
 func (s *Service) Health() Health { s.mu.Lock(); defer s.mu.Unlock(); return s.health }
+
+func (s *Service) requestActivity() chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.activity == nil {
+		s.activity = make(chan struct{}, 1)
+	}
+	return s.activity
+}
+
 func (s *Service) Run(ctx context.Context) error {
-	return (Listener{Transport: s.Transport, Processor: s.Processor, OnResponse: s.receive, OnObservation: s.receiveObservation, OnDeliveryMode: func(mode string) { s.mu.Lock(); s.health.DeliveryMode = mode; s.mu.Unlock() }, OnRejected: func() { s.mu.Lock(); s.health.Rejected++; s.mu.Unlock() }, Notify: func(err error) {
+	return (Listener{Transport: s.Transport, Processor: s.Processor, OnResponse: s.receive, OnObservation: s.receiveObservation, RequestActivity: s.requestActivity(), ActiveRequests: func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return len(s.waiters) > 0
+	}, OnDeliveryMode: func(mode string) { s.mu.Lock(); s.health.DeliveryMode = mode; s.mu.Unlock() }, OnRejected: func() { s.mu.Lock(); s.health.Rejected++; s.mu.Unlock() }, Notify: func(err error) {
 		s.mu.Lock()
 		s.health.Connected = err == nil
 		s.health.Error = ""
@@ -232,6 +247,7 @@ func (s *Service) callSmall(ctx context.Context, peer, operation, method, permis
 				old.Expires = expiry
 				return writeJSON(path, old)
 			}
+			expiry = old.Expires
 			return nil
 		}
 		if !os.IsNotExist(e) {
@@ -268,6 +284,12 @@ func (s *Service) callSmall(ctx context.Context, peer, operation, method, permis
 	if err = s.Transport.Submit(ctx, e); err != nil {
 		return nil, err
 	}
+	select {
+	case s.requestActivity() <- struct{}{}:
+	default:
+	}
+	lease := time.NewTimer(time.Until(time.Unix(expiry, 0)))
+	defer lease.Stop()
 	for {
 		var envelope Envelope
 		path := filepath.Join(s.Processor.Store.Directory, "reply-"+key+".json")
@@ -305,6 +327,8 @@ func (s *Service) callSmall(ctx context.Context, peer, operation, method, permis
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
+		case <-lease.C:
+			return nil, errors.New("relay request lease expired; retry the operation to recover its outcome")
 		case <-ch:
 		}
 	}

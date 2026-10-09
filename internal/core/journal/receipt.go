@@ -4,10 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"path/filepath"
 	"strings"
 
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
+	"github.com/roeehrl/hopsesh/internal/localstate"
 )
 
 // Receipt is a durable commit intention after native installation. Recovery replays
@@ -114,8 +116,19 @@ func (j *Journal) PendingReceipts() bool {
 // Snapshot filesystems are private to one peer request; their returned writes are
 // merged again by the sender against its actual filesystem.
 func (j *Journal) applyReceipt(fsys host.FS, index int) error {
+	if j.ReceiptOwner == "" || j.dir == "" {
+		return errors.New("journal has no durable receipt ownership token")
+	}
+	// Recovering a durable remote lock with our own token is safe only when no
+	// other local caller is applying this journal. Hold an OS lock across the
+	// remote union/write/unlock, including calls from separately loaded journals.
+	local, err := localstate.TryLock(filepath.Join(j.dir, "receipt-apply.lock"))
+	if err != nil {
+		return fmt.Errorf("journal receipt is already being applied: %w", err)
+	}
+	defer local.Close()
 	receipt := j.Receipts[index]
-	unlock, err := receiptLock(fsys, receipt.Path, j.ID)
+	unlock, err := receiptLock(fsys, receipt.Path, j.ReceiptOwner)
 	if err != nil {
 		return err
 	}
@@ -209,7 +222,8 @@ func receiptLock(fsys host.FS, path, owner string) (func(), error) {
 		if e != nil || string(existing) != owner {
 			return nil, fmt.Errorf("lineage receipt is locked by another operation; acknowledgement remains pending: %w", err)
 		}
-		// Only the same durable journal may recover its lock after a process exits.
+		// Only the same durable journal token may recover its lock after a
+		// process exits. Local timestamp IDs can collide across machines.
 	}
 	return func() { _ = fsys.Remove(lock) }, nil
 }
