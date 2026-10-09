@@ -167,8 +167,7 @@ func Run(d Deps) (*Exit, error) {
 		watchCtx, stopWatch := context.WithCancel(context.Background())
 		done := make(chan struct{})
 		watchCore := *d.App
-		b, _ := json.Marshal(d.App.Cfg)
-		_ = json.Unmarshal(b, &watchCore.Cfg)
+		watchCore.Cfg = d.App.Cfg.Clone()
 		go func() {
 			defer close(done)
 			watchCore.WatchSessions(watchCtx, func() { prog.Send(discoveryRequested{}) })
@@ -198,8 +197,7 @@ func Run(d Deps) (*Exit, error) {
 func (m *model) Init() tea.Cmd { return m.discover(app.ScanOptions{}) }
 func (m *model) discover(options app.ScanOptions) tea.Cmd {
 	core := *m.deps.App
-	b, _ := json.Marshal(m.deps.App.Cfg)
-	_ = json.Unmarshal(b, &core.Cfg)
+	core.Cfg = m.deps.App.Cfg.Clone()
 	a := &core
 	m.scanning = true
 	m.scanGeneration++

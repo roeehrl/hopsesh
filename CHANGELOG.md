@@ -18,8 +18,9 @@ All notable changes to this project are documented here. The format follows
   source timestamps, expiry, pause state and current approvals remain explicit.
 
 - Review and install cloud startup files from Settings or the CLI. Claude's
-  cloud-only hook prepares fresh keys quietly; Codex receives environment Start
-  skill instructions. Existing settings are preserved, modified files are
+  cloud-only hook prepares fresh keys quietly; Codex setup includes environment
+  Start skill instructions with an explicit unqualified-startup status.
+  Existing settings are preserved, modified files are
   refused, and stale previews cannot overwrite concurrent edits.
 
 - Cloud session invitations in CLI and Settings: admit one fresh provider/session
@@ -47,6 +48,10 @@ All notable changes to this project are documented here. The format follows
   include retained source copies after a move and keep same-email profiles separate.
 
 ### Fixed
+
+- Background GUI and TUI scans keep independent settings snapshots. Cloud consent
+  and environment edits cannot alter an in-flight scan or crash catalog hashing;
+  copied settings retain their revision for conflict-safe saves.
 
 - Cloud admission preserves the signed absolute lease across relay objects;
   network latency cannot extend a connector's authority.

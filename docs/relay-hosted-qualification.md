@@ -473,6 +473,21 @@ Metrics are retained locally in `/tmp/hopsesh-load-success-window-final.json`;
 the query is `/tmp/hopsesh-load-success-window.graphql`. The test transcript is
 `/tmp/hopsesh-hosted-load-expiry-fixed.log`. These files contain no credentials.
 
+The later SQL-storage query uses `durableObjectsSqlStorageGroups` (the SQL
+dataset, separate from the older storage dataset). Its 09:15 UTC samples report
+131,072 bytes for Mailbox and 16,384 for Authorization; at 10:15 UTC they report
+417,792 and 16,384 bytes respectively. These bracket the load but do not measure
+its peak or isolate new storage from existing staging databases. A later R2
+readback includes a 09:40 UTC sample with two objects, 1,352 payload bytes and
+68 metadata bytes, followed by 09:50 UTC with one 256-byte object, 43 metadata
+bytes and zero uploads. These are sampled storage evidence, not the peak or a
+post-completion sample (the workload ended at 09:56:13). The query and results
+are retained in `/tmp/hopsesh-load-storage-final.graphql`, `.json` and
+`/tmp/hopsesh-load-storage-refreshed.json`. Missing or delayed samples
+remain unknown, not zero. Billing also applies account-level included usage and
+rounding, so multiplying this short test's counts by unit prices is not an
+invoice; see [R2 pricing](https://developers.cloudflare.com/r2/pricing/).
+
 ## Codex prepared-filesystem publication correction
 
 A fresh task from the earlier published configuration had neither the versioned
@@ -500,3 +515,15 @@ predates the current published configuration; it cannot prove the published
 field contents. The fresh-task absence remains a failed delivery qualification,
 with cause unverified. No settings, permissions or publication were changed by
 this diagnostic; no preparation keys or connector were created.
+
+A subsequent fresh Settings → Edit flow created a draft from the current
+publication. Its draft base and attached runtime source configuration versions
+match; it retains the 2,520-character installer and 707-character Start skill,
+and the executable helper is present (18,219,168 bytes, mode 755). This removes
+the stale-draft ambiguity about configured content. The actual task separately
+checked its supported executor/cloud skill catalogs and environment status:
+none expose the configured Start instructions or a historical delivery audit.
+The task's earlier categorical absence claim is therefore narrowed to no
+accessible startup instructions or observed invocation. Delivery versus lookup
+remains unresolved; automatic startup still does not pass. Both diagnostics were
+read-only, with no preparation, keys, connections or permission changes.

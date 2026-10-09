@@ -33,8 +33,12 @@ kill "$pid" 2>/dev/null || true
 pkill -f "$WORK/hopsesh-app" 2>/dev/null || true
 if [ -z "$ok" ]; then
   echo "the app did not list the demo sessions and answer through its backend in time" >&2
-  echo "--- the app's log, first lines" >&2
-  head -n 60 "$WORK/app.log" >&2
+  echo "--- the app's startup log" >&2
+  head -n 30 "$WORK/app.log" >&2
+  echo "--- selfcheck progress and failures" >&2
+  grep 'hopsesh .*selfcheck' "$WORK/app.log" >&2 || true
+  echo "--- the app's final log (includes errors after WebKit startup)" >&2
+  tail -n 120 "$WORK/app.log" >&2
   exit 1
 fi
 echo "the real app checked desktop modes, session routing and the native popup when supported"

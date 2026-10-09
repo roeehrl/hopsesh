@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -36,15 +37,38 @@ func testAssets(next http.Handler) http.Handler { return next }
 // (the self-check on macOS and Linux, where there is no debugging port), and opens the
 // terminal check in HOPSESH_E2E_TERMINAL. Test builds only.
 func testHook(w *application.WebviewWindow, svc *gui.App) {
+	svc.Wails.Event.On("hopsesh:selfcheck", func(event *application.CustomEvent) {
+		if message, ok := event.Data.(string); ok {
+			fmt.Printf("hopsesh selfcheck [%s]: %.4096s\n", event.Sender, message)
+		}
+	})
 	if path := os.Getenv("HOPSESH_E2E_QUICK_SCRIPT"); path != "" {
 		if quick, ok := svc.Wails.Window.GetByName("quick-access"); ok {
 			var quickOnce sync.Once
-			quick.OnWindowEvent(events.Common.WindowRuntimeReady, func(*application.WindowEvent) {
+			var ready, requested atomic.Bool
+			runQuick := func() {
+				if !ready.Load() || !requested.Load() {
+					return
+				}
 				quickOnce.Do(func() {
+					if webview, ok := quick.(*application.WebviewWindow); ok {
+						testConsole(webview)
+					}
 					if b, err := os.ReadFile(path); err == nil {
 						quick.ExecJS(string(b))
 					}
 				})
+			}
+			// The popup must not write the success marker while the main check is
+			// still changing desktop modes or testing session navigation. Either
+			// window may become ready first, so retain both sides of this barrier.
+			quick.OnWindowEvent(events.Common.WindowRuntimeReady, func(*application.WindowEvent) {
+				ready.Store(true)
+				runQuick()
+			})
+			svc.Wails.Event.On("hopsesh:selfcheck-quick-start", func(*application.CustomEvent) {
+				requested.Store(true)
+				runQuick()
 			})
 		}
 	}

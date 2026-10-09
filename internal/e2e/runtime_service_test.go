@@ -30,19 +30,6 @@ func TestRuntimeNativeUserServiceLifecycle(t *testing.T) {
 	// management must use the actual OS user's infrastructure, even though all
 	// Hopsesh settings/state and agent roots remain in the disabled fixture.
 	keys := []string{"XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"}
-	if runtime.GOOS == "windows" {
-		// COM activation depends on the OS installation and user environment,
-		// not just the PowerShell executable's location. Keep Windows' standard
-		// infrastructure variables without forwarding runner tokens or secrets.
-		keys = []string{
-			"SystemRoot", "SystemDrive", "WINDIR", "COMSPEC", "PATHEXT", "OS",
-			"ProgramData", "ALLUSERSPROFILE", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432",
-			"CommonProgramFiles", "CommonProgramFiles(x86)", "CommonProgramW6432",
-			"PROCESSOR_ARCHITECTURE", "PROCESSOR_ARCHITEW6432", "PROCESSOR_IDENTIFIER", "PROCESSOR_LEVEL", "PROCESSOR_REVISION", "NUMBER_OF_PROCESSORS",
-			"TEMP", "TMP", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA",
-			"USERNAME", "USERDOMAIN", "USERDOMAIN_ROAMINGPROFILE", "COMPUTERNAME", "LOGONSERVER", "SESSIONNAME", "PSModulePath",
-		}
-	}
 	var supervisorEnv []string
 	for _, key := range keys {
 		if value := os.Getenv(key); value != "" {
@@ -60,10 +47,23 @@ func TestRuntimeNativeUserServiceLifecycle(t *testing.T) {
 	run := func(args ...string) []byte {
 		t.Helper()
 		cmd := exec.CommandContext(ctx, bin, args...)
-		// No unrelated environment or credentials are forwarded to the child.
 		cmd.Env = append(box.env(), supervisorEnv...)
-		// USERPROFILE must remain the real OS user's for Task Scheduler. Agent
-		// roots stay explicit and disposable even if a module is later enabled.
+		if runtime.GOOS == "windows" {
+			// This exercises native OS integration, not a simulated machine's
+			// stripped environment. COM activation repeatedly timed out under
+			// that fixture, even with standard Windows variables restored, while
+			// the same read-only query passed under the original environment.
+			// Preserve the actual OS context just as an ordinary CLI launch does;
+			// override only Hopsesh's namespace. Task XML contains explicit config
+			// and state flags, never a copy of this environment.
+			cmd.Env = append([]string{}, originalEnv...)
+			for _, kv := range box.env() {
+				if strings.HasPrefix(kv, "HOPSESH_") {
+					cmd.Env = append(cmd.Env, kv)
+				}
+			}
+		}
+		// Agent roots stay explicit and disposable even if a module is later enabled.
 		cmd.Env = append(cmd.Env, "CLAUDE_CONFIG_DIR="+filepath.Join(box.home, ".claude"), "CODEX_HOME="+filepath.Join(box.home, ".codex"))
 		started := time.Now()
 		out, err := cmd.CombinedOutput()

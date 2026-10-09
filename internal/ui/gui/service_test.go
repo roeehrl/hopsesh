@@ -22,6 +22,33 @@ import (
 
 const sid = "0b6c6a8e-1d2f-4c3b-9a7e-5f4d3c2b1a01"
 
+func TestSnapshotKeepsIndependentCloudConfiguration(t *testing.T) {
+	home(t)
+	a := NewApp(all.Registry())
+	t.Cleanup(func() { _ = a.core.Catalog.Close() })
+	if err := a.SetCloudAllowed("codex-cloud", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.SetCloudEnvironment("codex-cloud", "github.com/example/demo", "before"); err != nil {
+		t.Fatal(err)
+	}
+	before := a.snapshot()
+	scope := before.CatalogScope()
+	if err := a.SetCloudEnvironment("codex-cloud", "github.com/example/demo", "after"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.SetCloudAllowed("codex-cloud", false); err != nil {
+		t.Fatal(err)
+	}
+	if !before.Cfg.CloudAllowed("codex-cloud") || before.Cfg.Clouds["codex-cloud"].Environments["github.com/example/demo"] != "before" || before.CatalogScope() != scope {
+		t.Fatal("window settings mutated an in-flight scan's configuration")
+	}
+	before.Cfg.SetCloudEnvironment("codex-cloud", "github.com/example/demo", "private")
+	if a.snapshot().Cfg.Clouds["codex-cloud"].Environments["github.com/example/demo"] != "after" {
+		t.Fatal("scan snapshot mutated the window's current configuration")
+	}
+}
+
 // home is a machine with Claude Code (one session, from the fixtures) and Codex (no
 // sessions yet), in temporary folders.
 func home(t *testing.T) (repo string) {
