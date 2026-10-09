@@ -8,8 +8,10 @@ import (
 	"testing"
 
 	"github.com/roeehrl/hopsesh/internal/agents/all"
+	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/ui/desktop"
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 type fakeDesktop struct {
@@ -153,6 +155,111 @@ func TestQuickRouteSurvivesColdWindow(t *testing.T) {
 	}
 	if len(a.TerminalTabs()) != 0 {
 		t.Fatal("selection launched a terminal")
+	}
+}
+
+func TestQuickSelectionSurvivesInitialAccountDiscovery(t *testing.T) {
+	a, f := desktopApp(t)
+	observation, err := a.core.ObserveLocal(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.inv = a.core.ObservationInventory(t.Context(), observation)
+	before := a.CachedScan()
+	old := findEntry(t, before, "claude/"+sid)
+	if old.Profile != nil {
+		t.Fatal("fixture already registered its account")
+	}
+	after, err := a.ScanAccounts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := findEntry(t, after, "claude/"+sid)
+	if current.Key == old.Key || current.Profile == nil || current.Path != old.Path {
+		t.Fatalf("fixture did not register the same native file: before=%s %s after=%s %s", old.Key, old.Path, current.Key, current.Path)
+	}
+	if err := a.QuickOpen("sessions", old.Machine, old.Key); err != nil {
+		t.Fatalf("visible native session became unselectable during account discovery: %v", err)
+	}
+	route := a.TakeQuickRoute()
+	if route == nil || route.Key != current.Key || route.Machine != current.Machine || f.opens != 1 || len(a.TerminalTabs()) != 0 {
+		t.Fatalf("Quick did not select the current account without launching a terminal: %+v", route)
+	}
+	preview, err := a.QuickPreview(old.Machine, old.Key)
+	if err != nil || preview == nil || len(preview.Items) == 0 {
+		t.Fatalf("Quick lost the existing conversation preview: %+v %v", preview, err)
+	}
+	if len(a.TerminalTabs()) != 0 || f.opens != 1 {
+		t.Fatal("preview opened a window or terminal")
+	}
+	if err := a.SaveDesktop(DesktopInput{Mode: "tray", Close: "keep", Previews: false}); err != nil {
+		t.Fatal(err)
+	}
+	if preview, err := a.QuickPreview(old.Machine, old.Key); err != nil || preview == nil || len(preview.Items) != 0 {
+		t.Fatalf("registration bypassed disabled previews: %+v %v", preview, err)
+	}
+}
+
+func TestQuickRegistrationFallbackRefusesDifferentOrUncertainAccounts(t *testing.T) {
+	for _, name := range []string{"explicit-profile", "non-default", "duplicate-default", "cached", "remote", "wrong-endpoint", "wrong-profile", "wrong-agent", "cloud", "missing-session"} {
+		t.Run(name, func(t *testing.T) {
+			a, f := desktopApp(t)
+			scan, err := a.ScanAccounts()
+			if err != nil {
+				t.Fatal(err)
+			}
+			current := findEntry(t, scan, "claude/"+sid)
+			entry, err := a.find(current.Machine, current.Key)
+			if err != nil || entry.Profile == nil {
+				t.Fatalf("missing registered fixture: %v", err)
+			}
+			profile := *entry.Profile
+			entry.Profile = &profile
+			key := "claude/" + sid
+			switch name {
+			case "explicit-profile":
+				key = "claude@missing/" + sid
+			case "non-default":
+				profile.Default = false
+			case "cached":
+				entry.Cached = true
+			case "remote":
+				a.inv.Machine(current.Machine).Local = false
+			case "wrong-endpoint":
+				profile.Endpoint = "another-machine"
+			case "wrong-profile":
+				profile.ID = "another-profile"
+			case "wrong-agent":
+				profile.Agent = "codex"
+			case "cloud":
+				entry.Location.Kind = agent.AtCloud
+			case "missing-session":
+				key = "claude/missing"
+			}
+			a.inv.Entries = []app.Entry{entry}
+			if name == "duplicate-default" {
+				other := entry
+				otherProfile := profile
+				otherProfile.ID = "another-default"
+				other.Profile = &otherProfile
+				other.Session.Key.Profile = otherProfile.ID
+				a.inv.Entries = append(a.inv.Entries, other)
+			}
+			if err := a.QuickOpen("sessions", current.Machine, key); err == nil {
+				t.Fatal("untrusted or ambiguous shorthand opened a session")
+			}
+			if a.TakeQuickRoute() != nil || f.opens != 0 || len(a.TerminalTabs()) != 0 {
+				t.Fatal("failed selection had navigation or terminal side effects")
+			}
+			preview, err := a.QuickPreview(current.Machine, key)
+			if name == "remote" {
+				if err != nil || preview == nil || len(preview.Items) != 0 {
+					t.Fatalf("Quick read a remote conversation: %+v %v", preview, err)
+				}
+			} else if err == nil {
+				t.Fatal("preview accepted an untrusted or ambiguous shorthand")
+			}
+		})
 	}
 }
 func TestQuickAttentionLocalOnly(t *testing.T) {

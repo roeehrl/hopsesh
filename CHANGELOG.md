@@ -50,6 +50,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Quick access keeps a local session selectable and previewable when first-time
+  account discovery registers its default account. Explicit account selections
+  remain exact; uncertain or ambiguous matches are refused, and hidden previews
+  stay hidden. Browsing saved conversations does not require an available agent
+  sign-in check.
+
 - Accounts refreshes from shared runtime notifications instead of polling every
   two seconds. Sign-in checks sleep until a freshness deadline and stop off
   screen; background changes preserve active filters and account dialogs.

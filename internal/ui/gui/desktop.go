@@ -8,6 +8,7 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/ui/desktop"
+	"github.com/roeehrl/hopsesh/sdk/agent"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 )
@@ -228,8 +229,55 @@ func (a *App) QuickPreview(machine, key string) (*PreviewDTO, error) {
 	if !local {
 		return &PreviewDTO{Items: []PreviewItemDTO{}, Note: "Open session details to read the conversation on its machine."}, nil
 	}
+	var err error
+	key, err = a.quickSelectionKey(machine, key)
+	if err != nil {
+		return nil, err
+	}
 	return a.Preview(machine, key, 2)
 }
+
+// Initial account discovery scopes the default root's previously unscoped
+// session keys. Resolve that browsing-only shorthand like the core's default
+// account lookup. Explicit profiles never migrate, and a cached/remote/ambiguous
+// account cannot supply this transition. Transfers retain their strict keys.
+func (a *App) quickSelectionKey(machine, key string) (string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	_, original := a.find(machine, key)
+	if original == nil {
+		return key, nil
+	}
+	want, err := agent.ParseKey(key)
+	if err != nil || want.Profile != "" || a.inv == nil {
+		return "", original
+	}
+	m := a.inv.Machine(machine)
+	if m == nil || !m.Local || m.Host() == nil || m.Host().Facts.Endpoint == "" {
+		return "", original
+	}
+	resolved := ""
+	for _, e := range a.inv.Entries {
+		p := e.Profile
+		if e.Machine != machine || e.Cached || e.Location.IsCloud() || e.Session.Key.Agent != want.Agent || e.Session.Key.Session != want.Session {
+			continue
+		}
+		// Profile.Error can describe an unavailable sign-in check. Browsing a
+		// freshly observed conversation does not require a working agent CLI.
+		if p == nil || !p.Default || p.ID == "" || p.ID != e.Session.Key.Profile || p.Agent != want.Agent || p.Endpoint != m.Host().Facts.Endpoint {
+			continue
+		}
+		if resolved != "" {
+			return "", original
+		}
+		resolved = e.Session.Key.String()
+	}
+	if resolved == "" {
+		return "", original
+	}
+	return resolved, nil
+}
+
 func (a *App) QuickOpen(screen, machine, key string) error {
 	switch screen {
 	case "sessions", "settings", "terminals":
@@ -237,9 +285,8 @@ func (a *App) QuickOpen(screen, machine, key string) error {
 		return errors.New("unknown Quick access destination")
 	}
 	if machine != "" || key != "" {
-		a.mu.Lock()
-		_, err := a.find(machine, key)
-		a.mu.Unlock()
+		var err error
+		key, err = a.quickSelectionKey(machine, key)
 		if err != nil {
 			return err
 		}
