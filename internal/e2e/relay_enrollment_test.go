@@ -439,10 +439,8 @@ func startSQLiteRelayFixture(t *testing.T, timeout time.Duration, vars ...string
 	// cleanup still bound the fixture's lifetime.
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	t.Cleanup(cancel)
-	server := exec.CommandContext(ctx, node, filepath.Join(fixture, "node_modules", "wrangler", "wrangler-dist", "cli.js"), "dev", "--local", "--ip", "127.0.0.1", "--port", fmt.Sprint(port), "--inspector-port", "0", "--local-protocol", "https", "--local-upstream", fmt.Sprintf("127.0.0.1:%d", port), "--https-key-path", key, "--https-cert-path", cert, "--persist-to", filepath.Join(root, "platform-state"), "--var", "ENROLLMENT_ADMIN:fixture-admin-secret-with-32-bytes-minimum", "--var", "RELAY_PAUSED:0", "--log-level", "error", "--show-interactive-dev-session=false")
-	for _, value := range vars {
-		server.Args = append(server.Args, "--var", value)
-	}
+	server := exec.CommandContext(ctx, node, filepath.Join(fixture, "platform-fixture.mjs"), root, fmt.Sprint(port), key, cert)
+	server.Args = append(server.Args, vars...)
 	prepareRelayFixture(server)
 	server.Dir = fixture
 	server.Env = append(os.Environ(), "WRANGLER_SEND_METRICS=false")
