@@ -765,6 +765,18 @@ test cost. The existing Wrangler credential cannot read the billing API (HTTP
 readback is saved privately under
 `~/.hopsesh-release/cloud-0.5/billing-browser-readback-20261009.json`.
 
+A separate post-cleanup storage query now covers `12:38:00–17:43:01 UTC`.
+The earlier fixed workload interval ended at `12:37:51 UTC`, so repeatedly
+reading that interval could not establish later storage state. After routine
+refresh of the existing Wrangler OAuth login (no scope change), the corrected
+query returned ciphertext samples at 13:00 and 17:20 with one object, 256 payload
+bytes, 43 metadata bytes and zero multipart uploads. This is consistent with
+only the deliberately retained orphan canary; aggregate analytics do not identify
+individual objects. Downloads retained 12 objects and 40,333,400 payload bytes,
+with zero multipart uploads; the latest metadata total was 1,458 bytes. This adds
+post-cleanup storage evidence, not natural-expiry or settled-cost proof. The query
+and response are `/tmp/hopsesh-post-cleanup-storage-20261009.{graphql,json}`.
+
 ## Codex prepared-filesystem publication correction
 
 A fresh task from the earlier published configuration had neither the versioned
@@ -869,3 +881,17 @@ revisions were 6. No pause/resume/restart/rebuild mutation or historical lifecyc
 event was exposed in that task's catalog. Ordinary follow-up therefore remains
 continuation evidence only. This does not establish that no such provider
 capability exists anywhere, nor waive the real pause/rebuild qualification gate.
+
+The same task was continued at 17:40 UTC after its last 11:17 UTC diagnostic.
+Expanded command outputs confirm clean HEAD `85876c9`, the same pinned helper
+version (mtime `09:27:43.459390244 UTC`), and continued absence of the deliberately
+removed incarnation. At `17:40:28 UTC`, kernel uptime was 6 h 29 min and the
+boot-ID SHA256 was
+`b41f074e90fba56a170f232259b3e44db3822cd0f3b46474fdbda8c5a4c05e7d`.
+Current readiness remained running/connected with both reported spec revisions
+12. No earlier boot-ID sample exists, and a revision change alone does not prove
+pause, resume or replacement. This is additional saved-state continuity evidence,
+not a passed VM lifecycle gate. The visible Cloud chat, Header actions and Chat
+actions controls expose no pause/rebuild operation in this task. No preparation,
+connection, permission change or lifecycle mutation was performed. Screenshot:
+`/tmp/hopsesh-codex-idle-continuation-20261009.jpg`.
