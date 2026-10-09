@@ -296,6 +296,55 @@ rebuild, export and connector lifecycle remain separate qualification work.
 
 ### Actual startup and scoped connector tests
 
+October 9 follow-up now qualifies cold and cached preparation and an actual idle
+resume, with the signed `0.5.0-staging.20261009.f134df2` helper and disposable
+repository HEAD `6a3bc59aaa76d9469ee5fef449664da052cda9a8`. The preparation/current
+implementation and Claude hook template are unchanged from that helper's source.
+These checks used passive `current` reads, not manual prepare/claim/serve/export:
+
+| Evidence | Cold session | Second session from the prepared filesystem | Cold session resumed after idle |
+| --- | --- | --- | --- |
+| Observation UTC | 14:54:51 | 17:01–17:03 | 17:07:38 |
+| Native session | `74756201-21a8-59c2-93ca-2dd815c313da` | `89f6d0c3-682c-5e86-98c5-73112433b997` | Same as cold session |
+| Incarnation | `9218173754d900100f4a36962f523cd7` | `1567c788a700a6df624380af607d582d` | `3a6591fdb7df34446cedb5bbe6f2c3b6` |
+| Hook source | `startup` | `startup` | `resume` |
+| Created UTC | 14:54:40.910259701 | 17:01:22.373094396 | 17:07:27.287955796 |
+| Expires UTC | 15:54:40.910259701 | 18:01:22.373094396 | 18:07:27.287955796 |
+| Claude PID / start UTC | 85 / 14:53:32 | 95 / 17:01:19 | 96 / 17:07:23 |
+
+The second session's installed binary had mtime `14:54:40.076076965` and ctime
+`14:54:40.084076965`, predating its `17:01:16` VM boot. The installer copies into a
+new staged file without preserving archive timestamps. Together with its existing
+verified binary and fresh disconnected session identity, this is evidence of
+cached filesystem startup, not a setup process surviving the cache. Its passive
+metadata remained unchanged across a second message.
+
+The older conversation resumed through the normal provider UI after 2 h 13 min.
+Its boot-ID SHA256 changed from
+`4f1da756ca32ee574b5115337a54c74331ddb122c033138c5b9e1a8696388607` to
+`a2a4a549496b572ef79b67f7974242a5098e9f04e74a126885455374ee3f3d69`, and uptime was
+16.8 seconds at observation. Repository HEAD, clean working tree, native session
+and helper version survived. The actual passive command output reports `resume`,
+the new incarnation and public fingerprint
+`63143220edd105c27b2824917f9919afb25f3faee23648b26d52476431bee7dd`.
+It remained `awaiting-authorization` with export disabled; the old disconnected
+identity had expired before resume. No relay grant or export was created.
+
+This qualifies automatic fresh identity preparation on real idle continuation.
+It does not distinguish provider disk restoration from a reclaimed-VM rebuild,
+nor qualify resumption of an authorized connector. Those remain separate gates.
+Claude usage allowed these requests after its plan reset; no spending cap changed.
+Disposable cleanup and restoration of the prior empty Default setup remain due
+after the remaining provider experiments. Local screenshot:
+`/tmp/hopsesh-claude-idle-resume-20261009.jpg`.
+
+Provider evidence: [cold/resumed conversation](https://claude.ai/code/session_01V3Tcohv8MixKd8W5YgEZzG),
+[cached-start conversation](https://claude.ai/code/session_01TtytpXbADqnirHZXmXDNPm).
+These contain only disposable qualification prompts and selected diagnostics.
+The distinction follows the documented
+[filesystem caching and automatic idle pause](https://code.claude.com/docs/en/cloud-environments)
+and [reclaimed-VM behavior](https://code.claude.com/docs/en/claude-code-on-the-web).
+
 On October 8 UTC / October 9 Israel time, the generated Claude startup hook was
 installed in the disposable repository after explicit user approval. A real
 `/compact` invocation then ran `SessionStart` and created disconnected incarnation

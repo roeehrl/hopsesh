@@ -22,6 +22,8 @@ func TestNativeSSHCommandAndDiagnostics(t *testing.T) {
 	if err != nil {
 		t.Skip("native SSH is not installed")
 	}
+	version, _ := exec.Command(bin, "-V").CombinedOutput()
+	t.Logf("native client %s: %s", bin, strings.TrimSpace(string(version)))
 	_, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -30,10 +32,16 @@ func TestNativeSSHCommandAndDiagnostics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, test := range []struct{ name, command string }{
-		{"OS detection", "uname -s"},
-		{"POSIX quoting", "sh -c 'printf \"a\\nb\\n\"'"},
-		{"PowerShell encoding", PowerShellCommand("Write-Error 'probe failed'; exit 17")},
+	for _, test := range []struct {
+		name, command string
+		code          uint32
+	}{
+		{"successful OS detection", "uname -s", 0},
+		{"successful POSIX quoting", "sh -c 'printf \"a\\nb\\n\"'", 0},
+		{"successful PowerShell encoding", PowerShellCommand("Write-Output 'Darwin'; exit 0"), 0},
+		{"failed OS detection", "uname -s", 17},
+		{"failed POSIX quoting", "sh -c 'printf \"a\\nb\\n\"'", 17},
+		{"failed PowerShell encoding", PowerShellCommand("Write-Error 'probe failed'; exit 17"), 17},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -43,7 +51,7 @@ func TestNativeSSHCommandAndDiagnostics(t *testing.T) {
 			defer listener.Close()
 			observed := make(chan string, 1)
 			done := make(chan error, 1)
-			go func() { done <- recordSSHCommand(listener, signer, observed) }()
+			go func() { done <- recordSSHCommand(listener, signer, observed, test.code) }()
 			t.Cleanup(func() {
 				_ = listener.Close()
 				if err := <-done; err != nil {
@@ -61,7 +69,13 @@ func TestNativeSSHCommandAndDiagnostics(t *testing.T) {
 			}
 			out, err := c.Run(t.Context(), test.command)
 			var remote *RemoteError
-			if string(out) != "Darwin\n" || !errors.As(err, &remote) || remote.Code != 17 || remote.Stderr != "#< CLIXML\nprobe failed after header" {
+			if string(out) != "Darwin\n" {
+				t.Fatalf("native stdout lost: stdout=%q error=%v", out, err)
+			}
+			if test.code == 0 && err != nil {
+				t.Fatalf("successful remote command reported failure: %v", err)
+			}
+			if test.code != 0 && (!errors.As(err, &remote) || remote.Code != int(test.code) || remote.Stderr != "#< CLIXML\nprobe failed after header") {
 				t.Fatalf("native output/diagnostics lost: stdout=%q error=%v", out, err)
 			}
 			select {
@@ -76,7 +90,7 @@ func TestNativeSSHCommandAndDiagnostics(t *testing.T) {
 	}
 }
 
-func recordSSHCommand(listener net.Listener, signer ssh.Signer, observed chan<- string) error {
+func recordSSHCommand(listener net.Listener, signer ssh.Signer, observed chan<- string, exitCode uint32) error {
 	conn, err := listener.Accept()
 	if err != nil {
 		return err
@@ -115,7 +129,7 @@ func recordSSHCommand(listener net.Listener, signer ssh.Signer, observed chan<- 
 			_, _ = fmt.Fprint(channel, "Darwin\n")
 			_, _ = fmt.Fprint(channel.Stderr(), "#< CLIXML\n")
 			_, _ = fmt.Fprint(channel.Stderr(), "probe failed after header\n")
-			_, err = channel.SendRequest("exit-status", false, ssh.Marshal(struct{ Code uint32 }{17}))
+			_, err = channel.SendRequest("exit-status", false, ssh.Marshal(struct{ Code uint32 }{exitCode}))
 			_ = channel.Close()
 			_ = server.Wait() // let the native client close after consuming exit status
 			return err

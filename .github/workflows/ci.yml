@@ -489,6 +489,16 @@ jobs:
       - run: go build -o bin/hopsesh.exe ./cmd/hopsesh
       - shell: pwsh
         run: ./scripts/windows-peer-test.ps1 -Bin bin/hopsesh.exe
+      - name: native SSH commands locally and inside an SSH session
+        shell: pwsh
+        run: |
+          $probe = Join-Path $env:RUNNER_TEMP 'hopsesh-ssh-wire.test.exe'
+          go test -c -race -o $probe ./internal/core/transport
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $probe '-test.run=^TestNativeSSH(CommandAndDiagnostics|WithoutConsole)$' -test.v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$env:USERNAME@127.0.0.1" "`"$probe`" -test.run=^TestNativeSSHCommandAndDiagnostics$ -test.v"
+          exit $LASTEXITCODE
       - name: a PowerShell script longer than a command line, over the same server
         shell: pwsh
         run: |
