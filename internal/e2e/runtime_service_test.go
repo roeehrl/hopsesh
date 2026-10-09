@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,6 +25,7 @@ func TestRuntimeNativeUserServiceLifecycle(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
+	originalEnv := os.Environ()
 	// Capture before writeConfig redirects HOME/USERPROFILE. Native service
 	// management must use the actual OS user's infrastructure, even though all
 	// Hopsesh settings/state and agent roots remain in the disabled fixture.
@@ -54,6 +56,9 @@ func TestRuntimeNativeUserServiceLifecycle(t *testing.T) {
 		out, err := cmd.CombinedOutput()
 		t.Logf("native runtime service %v completed in %s", args, time.Since(started).Round(time.Millisecond))
 		if err != nil {
+			if runtime.GOOS == "windows" {
+				diagnoseWindowsScheduler(t, cmd.Env, originalEnv)
+			}
 			t.Fatalf("native runtime service %v: %v\n%s", args, err, out)
 		}
 		return out
@@ -133,5 +138,42 @@ func TestRuntimeNativeUserServiceLifecycle(t *testing.T) {
 	run("runtime", "disable")
 	if err = client.WaitReleased(ctx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Compare the exact CLI fixture environment with the runner's original OS
+// environment only after a failure. Both probes are read-only, local COM calls;
+// neither invokes Hopsesh, loads a user profile, reads agent files nor prints
+// environment values. This distinguishes environment damage from a scheduler
+// or process-context failure without widening the tested CLI's credentials.
+func diagnoseWindowsScheduler(t *testing.T, isolated, original []string) {
+	t.Helper()
+	const script = `$ErrorActionPreference='Stop'
+[Console]::WriteLine('phase=create')
+$service=New-Object -ComObject Schedule.Service
+[Console]::WriteLine('phase=connect')
+$service.Connect()
+[Console]::WriteLine('phase=folder')
+$folder=$service.GetFolder('\')
+[Console]::WriteLine('phase=ready')`
+	for _, probe := range []struct {
+		name string
+		env  []string
+	}{{"CLI fixture", isolated}, {"original OS", original}} {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
+		cmd.Env = probe.env
+		cmd.WaitDelay = time.Second
+		started := time.Now()
+		out, err := cmd.Output()
+		phase := "startup"
+		for _, line := range strings.Split(string(out), "\n") {
+			switch strings.TrimSpace(line) {
+			case "phase=create", "phase=connect", "phase=folder", "phase=ready":
+				phase = strings.TrimSpace(line)
+			}
+		}
+		t.Logf("read-only scheduler probe %s: %s elapsed=%s error=%v deadline=%v", probe.name, phase, time.Since(started).Round(time.Millisecond), err, ctx.Err())
+		cancel()
 	}
 }

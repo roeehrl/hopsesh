@@ -698,7 +698,7 @@ func (r *runner) fetchCodex(row Row) error {
 	head, _ := git(sr.Cwd, nil, "rev-parse", "HEAD")
 	title := contents[row.Content] + " " + marker
 	cs, err := fakecloud.Open(os.Getenv("FAKE_CLOUD_DIR")).Seed(fakecloud.Session{Cloud: fakecloud.CodexCloud, Title: title, Repo: "github.com/hsm-matrix/" + name,
-		CloneURL: o.FileURL(), Branch: "main", Base: strings.TrimSpace(head), Code: "branch", Env: "env_hsm", EnvLabel: "hsm",
+		CloneURL: o.FileURL(), Branch: "main", Base: strings.TrimSpace(head), Code: "branch", Env: "env_hsm_" + name, EnvLabel: name,
 		Messages: []fakecloud.Message{{Role: "user", Text: title}}})
 	if err != nil {
 		return err
@@ -830,7 +830,7 @@ func (r *runner) handoff(row Row) error {
 	}
 	to := []string{"--to", cloud}
 	if cloud == "codex-cloud" {
-		to = append(to, "--env", "env_hsm")
+		to = append(to, "--env", "env_hsm_"+name)
 	}
 	ref := row.From + "/" + id
 	if row.Repo == "none" {
@@ -1005,7 +1005,7 @@ func (r *runner) cloudHop(row Row) error {
 	seed := fakecloud.Session{Cloud: fakecloud.ClaudeCloud, Title: title, Repo: "github.com/hsm-matrix/" + name, CloneURL: o.FileURL(), Branch: "main",
 		Base: strings.TrimSpace(head), Code: "branch", Messages: []fakecloud.Message{{Role: "user", Text: title}, {Role: "assistant", Text: "On it."}}} // started on the web
 	if from == "codex-cloud" {
-		seed.Cloud, seed.Env, seed.EnvLabel, seed.Messages = fakecloud.CodexCloud, "env_hsm", "hsm", []fakecloud.Message{{Role: "user", Text: title}}
+		seed.Cloud, seed.Env, seed.EnvLabel, seed.Messages = fakecloud.CodexCloud, "env_hsm_"+name, name, []fakecloud.Message{{Role: "user", Text: title}}
 	}
 	cs, err := fakecloud.Open(os.Getenv("FAKE_CLOUD_DIR")).Seed(seed)
 	if err != nil {
@@ -1021,7 +1021,7 @@ func (r *runner) cloudHop(row Row) error {
 		}
 	}
 	if from == "codex-cloud" {
-		if _, err := r.hs(true, "clouds", "env", "codex-cloud", "github.com/hsm-matrix/"+name, "env_hsm"); err != nil {
+		if _, err := r.hs(true, "clouds", "env", "codex-cloud", "github.com/hsm-matrix/"+name, "env_hsm_"+name); err != nil {
 			return err
 		}
 	} else if _, err := r.hs(true, "plan", "https://claude.ai/code/"+cs.ID, "--to", sr.Cwd, "--json"); err != nil {
@@ -1029,7 +1029,7 @@ func (r *runner) cloudHop(row Row) error {
 	}
 	args := []string{"handoff", from + ":" + cs.ID, "--to", to, "--to-dir", sr.Cwd, "--yes", "--json"}
 	if to == "codex-cloud" {
-		args = append(args, "--env", "env_hsm")
+		args = append(args, "--env", "env_hsm_"+name)
 	}
 	run := r.hs
 	if to == "claude-cloud" {
