@@ -104,8 +104,7 @@ func (a *App) snapshot() *app.App {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	c := *a.core
-	b, _ := json.Marshal(a.core.Cfg)
-	_ = json.Unmarshal(b, &c.Cfg)
+	c.Cfg = a.core.Cfg.Clone()
 	return &c
 }
 
