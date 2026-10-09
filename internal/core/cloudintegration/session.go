@@ -309,7 +309,16 @@ func Current(ctx context.Context, parent, provider, session, workspace string) (
 	if len(id) != 32 || strings.Trim(string(id), "0123456789abcdef") != "" {
 		return Incarnation{}, errors.New("invalid cloud incarnation pointer")
 	}
-	return Load(ctx, filepath.Join(parent, string(id)))
+	s, err := Load(ctx, filepath.Join(parent, string(id)))
+	if err != nil {
+		return Incarnation{}, err
+	}
+	// The pointer is an index, not proof of task identity. A restored or copied
+	// slot can point at an otherwise valid incarnation for a different task.
+	if s.Provider != provider || s.Session != session || s.Workspace != workspace {
+		return Incarnation{}, errors.New("current incarnation does not match the requested cloud task")
+	}
+	return s, nil
 }
 func (s Incarnation) current() error {
 	if err := s.nativeCurrent(); err != nil {

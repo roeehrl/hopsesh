@@ -66,6 +66,52 @@ func TestStartupReasonPersistsWithoutGrantingAccess(t *testing.T) {
 	}
 }
 
+func TestCurrentRejectsPointerToAnotherCloudTask(t *testing.T) {
+	for _, dimension := range []string{"provider", "session", "workspace"} {
+		t.Run(dimension, func(t *testing.T) {
+			parent, requested := sessionFixture(t)
+			requested.Transcript, requested.NativeRoot, requested.ExportTranscript = "", "", false
+			original, err := Begin(t.Context(), parent, requested, "manual", time.Hour)
+			if err != nil {
+				t.Fatal(err)
+			}
+			other := requested
+			switch dimension {
+			case "provider":
+				other.Provider = "codex-current"
+			case "session":
+				other.Session = "independent-fork"
+			case "workspace":
+				other.Workspace = filepath.Join(filepath.Dir(requested.Workspace), "other-repo")
+				if err := os.Mkdir(other.Workspace, 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			foreign, err := Begin(t.Context(), parent, other, "manual", time.Hour)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// A copied or corrupted slot must not bind a task to another task's
+			// otherwise valid keys. Both incarnations existed independently.
+			if err := os.WriteFile(original.activePath(), []byte(foreign.ID), 0600); err != nil {
+				t.Fatal(err)
+			}
+			got, err := Current(t.Context(), parent, requested.Provider, requested.Session, requested.Workspace)
+			if err == nil || got.ID != "" {
+				t.Fatalf("lookup exposed another task's incarnation: id=%q error=%v", got.ID, err)
+			}
+			loaded, err := Current(t.Context(), parent, other.Provider, other.Session, other.Workspace)
+			if err != nil || loaded.ID != foreign.ID {
+				t.Fatalf("refusal damaged the independent task: id=%q error=%v", loaded.ID, err)
+			}
+			pointer, err := os.ReadFile(original.activePath())
+			if err != nil || string(pointer) != foreign.ID {
+				t.Fatal("passive lookup rewrote the pointer", err)
+			}
+		})
+	}
+}
+
 func TestCloudConnectorStopsAfterRoutingCredentialRevocation(t *testing.T) {
 	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
 		t.Run(fmt.Sprint(status), func(t *testing.T) {

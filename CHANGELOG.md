@@ -50,6 +50,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Cloud task lookup rejects a copied or corrupted current-session pointer that
+  refers to another provider, session or workspace, instead of returning that
+  task's identity. Lookup remains read-only and preserves independent forks.
+
 - Quick access keeps a local session selectable and previewable when first-time
   account discovery registers its default account. Explicit account selections
   remain exact; uncertain or ambiguous matches are refused, and hidden previews
