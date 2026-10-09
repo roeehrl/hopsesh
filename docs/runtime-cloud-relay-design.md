@@ -476,6 +476,25 @@ Verify registration and runnable login context separately. Do not repeatedly
 increase timeouts or introduce a privileged service to make an unsuitable CI
 login context pass.
 
+### Nested Windows SSH
+
+The three-native-OS run `37970868425` failed before any journey: Windows resolved
+and trusted its Linux alias, then its system probe timed out. The preceding
+Linux/macOS probes passed; tunnel logs reported no error. This distinguishes
+controller reachability from an SSH client running inside the Windows session.
+
+Upstream Windows OpenSSH has reports of [nested SSH with redirected pipes
+hanging](https://github.com/PowerShell/Win32-OpenSSH/issues/1748) and [NUL input
+redirection hanging](https://github.com/PowerShell/Win32-OpenSSH/issues/1470).
+These reports concern older versions and are hypotheses, not an established
+explanation for this runner. The current CI diagnostic compares the native
+client's wire command/output/exit handling from a normal process, a process
+without a console and an SSH-hosted process. Wait for that native evidence;
+if it cannot reproduce the failure, add a bounded read-only probe against the
+actual authenticated mesh route. Preserve strict host trust and record the
+client version and process/pipe conditions before selecting a repair. A longer
+timeout or retrying an uncertain transfer would not demonstrate a fix.
+
 ### Relay retry behavior, hibernation and cost
 
 October 9 native Windows follow-up: removing Wrangler's development proxy did

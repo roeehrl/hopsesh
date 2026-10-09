@@ -275,6 +275,14 @@ Evidence: `/tmp/hopsesh-candidate-8b013a4-{build,install,updater,ui}.log` and
 `/tmp/hopsesh-candidate-8b013a4-inspector.png`. This focused signed-app check does
 not replace the full native/browser suite or final-release provenance.
 
+Independent `codesign`, Gatekeeper and stapler readbacks accept that candidate
+as Notarized Developer ID with valid app/DMG tickets. Its embedded signed CLI
+starts a headless owner; repeated start and status preserve the same owner
+identity. A completed observation contains the four disposable sessions, and
+stop makes the runtime unavailable. No login service was registered. Evidence:
+`/tmp/hopsesh-candidate-8b013a4-{signatures,cli-runtime,cli-observation}.log`.
+The artifact-to-source record is `/tmp/hopsesh-candidate-8b013a4-evidence.json`.
+
 ## Provider qualification and hosted enrollment
 
 The October 8 installation attempts returned curl exit 7 with HTTP/CONNECT

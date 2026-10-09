@@ -61,37 +61,27 @@ func TestRelayPushSurvivesReceiverRestartAndPeerOwnedUndo(t *testing.T) {
 	// push/pull/restart/undo and four cloud import/retry/retire/undo journeys;
 	// bound setup/transfer commands separately as well as the complete scenario.
 	bin := buildHopsesh(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
-	defer cancel()
 	root := t.TempDir()
-	certFile, keyFile, pool := relayFixtureCertificate(t, root)
-	server := exec.CommandContext(ctx, node, fixture)
-	server.Env = append(os.Environ(), "HOPSESH_RELAY_FIXTURE_CERT="+certFile, "HOPSESH_RELAY_FIXTURE_KEY="+keyFile)
+	var ctx context.Context
+	var certFile string
+	var httpClient *http.Client
 	var ready struct {
 		URL string `json:"url"`
 	}
 	if os.Getenv("HOPSESH_RELAY_PLATFORM") == "1" {
-		listener, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatal(err)
-		}
-		port := listener.Addr().(*net.TCPAddr).Port
-		_ = listener.Close()
-		server = exec.CommandContext(ctx, node, filepath.Join(filepath.Dir(fixture), "node_modules", "wrangler", "wrangler-dist", "cli.js"), "dev", "--local", "--ip", "127.0.0.1", "--port", fmt.Sprint(port), "--inspector-port", "0", "--local-protocol", "https", "--https-key-path", keyFile, "--https-cert-path", certFile, "--persist-to", filepath.Join(root, "platform-state"), "--var", "ENROLLMENT_ADMIN:fixture-admin-secret-with-32-bytes-minimum", "--var", "RELAY_PAUSED:0", "--log-level", "error", "--show-interactive-dev-session=false")
-		prepareRelayFixture(server)
-		server.Dir = filepath.Dir(fixture)
-		server.Env = append(os.Environ(), "WRANGLER_SEND_METRICS=false")
-		log, err := os.Create(filepath.Join(root, "platform.log"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer log.Close()
-		server.Stdout, server.Stderr = log, log
-		if err = server.Start(); err != nil {
-			t.Fatal(err)
-		}
-		ready.URL = fmt.Sprintf("https://127.0.0.1:%d", port)
+		// Use the same deployment bundle, verified TLS and SQLite/R2 bindings as
+		// the other native qualification lanes. Wrangler's development proxy is
+		// not part of the deployed relay and must not be an alternate test path.
+		ctx, _, ready.URL, certFile, httpClient = startSQLiteRelayFixture(t, 4*time.Minute)
 	} else {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.Background(), 4*time.Minute)
+		defer cancel()
+		var keyFile string
+		var pool *x509.CertPool
+		certFile, keyFile, pool = relayFixtureCertificate(t, root)
+		server := exec.CommandContext(ctx, node, fixture)
+		server.Env = append(os.Environ(), "HOPSESH_RELAY_FIXTURE_CERT="+certFile, "HOPSESH_RELAY_FIXTURE_KEY="+keyFile)
 		stdout, err := server.StdoutPipe()
 		if err != nil {
 			t.Fatal(err)
@@ -100,6 +90,7 @@ func TestRelayPushSurvivesReceiverRestartAndPeerOwnedUndo(t *testing.T) {
 		if err = server.Start(); err != nil {
 			t.Fatal(err)
 		}
+		defer func() { _ = server.Process.Signal(os.Interrupt); cancel(); _ = server.Wait() }()
 		line, err := bufio.NewReader(stdout).ReadBytes('\n')
 		if err != nil {
 			t.Fatal(err)
@@ -107,23 +98,21 @@ func TestRelayPushSurvivesReceiverRestartAndPeerOwnedUndo(t *testing.T) {
 		if err = json.Unmarshal(line, &ready); err != nil {
 			t.Fatal(err)
 		}
-	}
-	defer func() { _ = server.Process.Signal(os.Interrupt); cancel(); _ = server.Wait() }()
-	httpClient := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}, Timeout: 10 * time.Second}
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		res, err := httpClient.Get(ready.URL + "/v1/capabilities")
-		if err == nil {
-			_ = res.Body.Close()
-			if res.StatusCode == 200 {
-				break
+		httpClient = &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}, Timeout: 10 * time.Second}
+		deadline := time.Now().Add(30 * time.Second)
+		for {
+			res, err := httpClient.Get(ready.URL + "/v1/capabilities")
+			if err == nil {
+				_ = res.Body.Close()
+				if res.StatusCode == 200 {
+					break
+				}
 			}
+			if time.Now().After(deadline) {
+				t.Fatalf("local handler fixture did not become ready: %v", err)
+			}
+			time.Sleep(100 * time.Millisecond)
 		}
-		if time.Now().After(deadline) {
-			log, _ := os.ReadFile(filepath.Join(root, "platform.log"))
-			t.Fatalf("local platform did not become ready: %v\n%s", err, log)
-		}
-		time.Sleep(100 * time.Millisecond)
 	}
 	box := newMachineHome(t, root, "relay-box", false)
 	here := newMachineHome(t, root, "relay-here", true)
