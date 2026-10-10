@@ -254,6 +254,9 @@ func cloudRebuildCheckpoint(t *testing.T, linkedFork *bool) {
 		}
 		if linkedFork != nil && rebuild == 2 {
 			current := f.find(t, 'A', "codex", string(convertedPlan.Placement.Key.Session))
+			// Earlier rebuilds left more Codex copies of this branch on A. A return appends to
+			// one exact session, so the way back names the one this route left from.
+			home := string(current.Key.Session)
 			base := converted.Journey().Transfers
 			route := "ABCBCAB"
 			work := []string{savedBrief, "CLOUD-WORK-AFTER-HANDOFF"}
@@ -268,7 +271,11 @@ func cloudRebuildCheckpoint(t *testing.T, linkedFork *bool) {
 				}
 				operation := fmt.Sprintf("linked-cloud-travel-%d-1234", hop)
 				if hop%2 == 0 {
-					current = f.pushSSH(t, route[hop], route[hop+1], current, target, false, operation)
+					into := ""
+					if route[hop+1] == 'A' {
+						into = home
+					}
+					current = f.pushSSHTo(t, route[hop], route[hop+1], current, target, false, operation, into)
 				} else {
 					current = f.transfer(t, route[hop], route[hop+1], current, target, "push", false, operation)
 				}

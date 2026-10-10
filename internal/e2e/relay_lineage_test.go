@@ -73,8 +73,10 @@ func TestRelayLineageSQLiteR2(t *testing.T) {
 						if graph == nil || graph.Journey().Transfers != hop+1 {
 							t.Fatalf("hop %d lost or duplicated lineage: %+v", hop, graph)
 						}
-						if to == 'A' && (!fleet.lastPlan.Options.OtherAccount || string(current.Key.Session) == sid) {
-							t.Fatal("unverified account return did not preserve its original with a portable replica", current.Key)
+						// A return appends to the exact original, across accounts too; its earlier
+						// work is checked above.
+						if to == 'A' && string(current.Key.Session) != sid {
+							t.Fatal("return did not append to its exact original", current.Key)
 						}
 						// Restart the destination after the second committed hop, repeat the
 						// frozen operation and verify no native write or new arrival was added.

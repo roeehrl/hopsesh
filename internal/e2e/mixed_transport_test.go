@@ -190,6 +190,13 @@ func TestMixedTransportLineageSQLiteR2(t *testing.T) {
 
 func (f *relayFleet) pushSSH(t *testing.T, from, to byte, source agent.Summary, target string, fork bool, operation string, expectRefused ...bool) agent.Summary {
 	t.Helper()
+	return f.pushSSHTo(t, from, to, source, target, fork, operation, "", expectRefused...)
+}
+
+// pushSSHTo returns into an explicitly chosen destination session, as a person must when
+// several copies of the branch already exist there.
+func (f *relayFleet) pushSSHTo(t *testing.T, from, to byte, source agent.Summary, target string, fork bool, operation, targetSession string, expectRefused ...bool) agent.Summary {
+	t.Helper()
 	endpoint := newPeerSSH(t, f.ctx, f.bin, f.homes[to])
 	m := f.homes[from]
 	for _, kv := range m.env() {
@@ -214,7 +221,7 @@ func (f *relayFleet) pushSSH(t *testing.T, from, to byte, source agent.Summary, 
 	}
 	// Only the connection is supplied by the fixture. Production planning,
 	// native application and both source/destination receipt writers execute.
-	p, err := a.StartPush(f.ctx, inv, e, config.Host{Name: f.homes[to].name, Destination: endpoint.address, Allowed: true}, agent.ID(target), move.Options{TargetDir: f.homes[to].repo, Notify: true, Fork: fork, OperationID: operation})
+	p, err := a.StartPush(f.ctx, inv, e, config.Host{Name: f.homes[to].name, Destination: endpoint.address, Allowed: true}, agent.ID(target), move.Options{TargetDir: f.homes[to].repo, Notify: true, Fork: fork, OperationID: operation, TargetSession: targetSession})
 	if len(expectRefused) > 0 && expectRefused[0] {
 		if p != nil {
 			p.Close()
@@ -229,7 +236,11 @@ func (f *relayFleet) pushSSH(t *testing.T, from, to byte, source agent.Summary, 
 	}
 	defer p.Close()
 	if len(p.Plan.Blockers) != 0 {
-		t.Fatal("SSH movement blocked", p.Plan.Blockers)
+		var destinations []string
+		for _, d := range p.Plan.Destinations {
+			destinations = append(destinations, d.Key.String())
+		}
+		t.Fatalf("SSH movement %c->%c blocked %v; source %s; candidate destinations %v", from, to, p.Plan.Blockers, source.Key, destinations)
 	}
 	if _, err = p.Commit(f.ctx); err != nil {
 		t.Fatal(err)
