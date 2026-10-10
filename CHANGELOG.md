@@ -23,6 +23,10 @@ All notable changes to this project are documented here. The format follows
   did not change. When one copy of a moved session grows, only that copy is read again.
 - An idle app writes nothing: the discovery lease is an OS file lock instead of a
   database row, and the catalog is not rewritten for check times or row order alone.
+- The app no longer rescans for every write another agent makes to its session: changes
+  refresh this machine at most every 5 seconds while you look at hopsesh (its window
+  focused or the menu bar list open) and every 5 minutes otherwise, and a change no
+  longer deletes cached summaries from the catalog.
 - Two front ends opening the catalog at the same moment no longer leave one of them
   without it.
 

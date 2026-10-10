@@ -34,11 +34,6 @@ func (a *App) WatchSessions(ctx context.Context, changed func(), current ...func
 		}
 	}
 	defer watch.Close()
-	watch.SetChanged(func(path string) {
-		if a.Catalog != nil {
-			a.Catalog.InvalidatePath(path)
-		}
-	})
 	roots := func() []string {
 		core := a
 		if len(current) > 0 {
@@ -48,6 +43,7 @@ func (a *App) WatchSessions(ctx context.Context, changed func(), current ...func
 	}
 
 	_ = watch.SetRoots(roots())
+	rooted := time.Now()
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
 	var timer *time.Timer
@@ -67,9 +63,8 @@ func (a *App) WatchSessions(ctx context.Context, changed func(), current ...func
 				due = timer.C
 			}
 		case <-watch.Problems():
-			if a.Catalog != nil {
-				a.Catalog.Invalidate()
-			}
+			// Browsing summaries are keyed by each file's size and mtime, so a missed
+			// event needs a rescan, not a cleared cache.
 			if timer == nil {
 				timer = time.NewTimer(300 * time.Millisecond)
 				due = timer.C
@@ -77,10 +72,15 @@ func (a *App) WatchSessions(ctx context.Context, changed func(), current ...func
 		case <-due:
 			timer = nil
 			due = nil
-			_ = watch.SetRoots(roots())
+			// Rereading the roots probes the agents' installs: not on every write.
+			if time.Since(rooted) >= 30*time.Second {
+				_ = watch.SetRoots(roots())
+				rooted = time.Now()
+			}
 			changed()
 		case <-tick.C:
 			_ = watch.SetRoots(roots())
+			rooted = time.Now()
 			changed()
 		}
 	}

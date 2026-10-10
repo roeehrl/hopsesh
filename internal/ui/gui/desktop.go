@@ -73,8 +73,8 @@ func (a *App) AttachDesktop(main *application.WebviewWindow) {
 					continue
 				}
 				fg := false
-				if shell, ok := a.Desktop.(interface{ Foreground() bool }); ok {
-					fg = shell.Foreground()
+				if shell, ok := a.Desktop.(interface{ Attended() bool }); ok {
+					fg = shell.Attended()
 				}
 				a.quick.mu.Lock()
 				scanned := a.quick.scan
@@ -323,6 +323,49 @@ func (a *App) QuickQuit() {
 	}
 }
 
+// watchRefresh turns session file changes into refreshes of this machine, at most one
+// per watchGapForeground while someone looks at hopsesh (its window focused or the menu
+// bar popup open) and one per quickRefreshBackground otherwise: other agents write their sessions constantly, and an
+// app nobody is looking at must not rescan for each write. A change inside the gap is
+// not lost; it refreshes when the gap ends.
+func (a *App) watchRefresh(ctx context.Context) func() {
+	var mu sync.Mutex
+	var last time.Time
+	var pending *time.Timer
+	var run func()
+	run = func() {
+		mu.Lock()
+		gap := watchGapForeground
+		if shell, ok := a.Desktop.(interface{ Attended() bool }); ok && !shell.Attended() {
+			gap = quickRefreshBackground
+		}
+		if wait := gap - time.Since(last); wait > 0 {
+			if pending == nil && ctx.Err() == nil {
+				pending = time.AfterFunc(wait, func() {
+					mu.Lock()
+					pending = nil
+					mu.Unlock()
+					run()
+				})
+			}
+			mu.Unlock()
+			return
+		}
+		last = time.Now()
+		mu.Unlock()
+		a.mu.Lock()
+		reviewing := a.plan != nil && a.res == nil || a.push != nil
+		a.mu.Unlock()
+		if !reviewing && ctx.Err() == nil {
+			go a.refreshQuick()
+		}
+	}
+	return run
+}
+
+// watchGapForeground spaces change-driven refreshes while a hopsesh window is in front.
+const watchGapForeground = 5 * time.Second
+
 // InitialScan does not contact remote machines during a quiet login launch.
 func (a *App) InitialScan() (*ScanDTO, error) {
 	if a.watchLocal {
@@ -336,14 +379,7 @@ func (a *App) InitialScan() (*ScanDTO, error) {
 			core := a.snapshot()
 			go func() {
 				defer close(watchDone)
-				core.WatchSessions(ctx, func() {
-					a.mu.Lock()
-					reviewing := a.plan != nil && a.res == nil || a.push != nil
-					a.mu.Unlock()
-					if !reviewing {
-						go a.refreshQuick()
-					}
-				}, a.snapshot)
+				core.WatchSessions(ctx, a.watchRefresh(ctx), a.snapshot)
 			}()
 		})
 	}
