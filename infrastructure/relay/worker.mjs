@@ -9,6 +9,12 @@ export const LIMITS = Object.freeze({ frame: 24 * 1024 * 1024, bytes: 64 * 1024 
 const opaque = s => typeof s === 'string' && /^[A-Za-z0-9_-]{16,128}$/.test(s);
 const hash = async s => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(s)))).map(v => v.toString(16).padStart(2,'0')).join('');
 const json = (v,status=200) => new Response(JSON.stringify(v),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
+async function dispatch(namespace,name,req){
+ // Infrastructure exceptions propagate outside the object's own handler.
+ // Preserve uncertainty: no immediate retry, and no reuse of a broken stub.
+ try{return await namespace.get(namespace.idFromName(name)).fetch(req)}
+ catch{return json({error:'temporarily_unavailable'},503)}
+}
 async function schedule(storage,when,now=Date.now()){
  const old=await storage.getAlarm();if(!old||old<=now||when<old)await storage.setAlarm(when);
 }
@@ -333,7 +339,7 @@ export default {async fetch(req,env){
   try{
    if(!(await env.LOGIN_RATE.limit({key:'cloud:'+ip})).success||!(await env.LOGIN_RATE.limit({key:'global:'+url.pathname})).success||url.pathname==='/v1/cloud/claim'&&!(await env.CODE_RATE.limit({key:'cloud:'+ip})).success)return response({error:'quota'},429);
   }catch{return response({error:'temporarily_unavailable'},503)}
-  return env.AUTHORIZATION.get(env.AUTHORIZATION.idFromName('hopsesh-device-enrollment-v1')).fetch(new Request(req,{headers}));
+  return dispatch(env.AUTHORIZATION,'hopsesh-device-enrollment-v1',new Request(req,{headers}));
  }
  if(url.pathname.startsWith('/v1/device/')||url.pathname.startsWith('/v1/authorization/')||['/device','/device.js','/device.css'].includes(url.pathname)){
   if(!env.AUTHORIZATION||!env.LOGIN_RATE||!env.CODE_RATE||!env.ACCESS_TEAM_DOMAIN||!env.ACCESS_AUDIENCE||!env.ENROLLMENT_ADMIN||env.ENROLLMENT_ADMIN.length<32)return response({error:'temporarily_unavailable'},503);
@@ -350,7 +356,7 @@ export default {async fetch(req,env){
   if(req.method!=='POST'||!['/v1/device/code','/v1/device/token','/v1/device/review','/v1/device/approve','/v1/authorization/request','/v1/authorization/token'].includes(url.pathname))return response({error:'invalid_request'},404);
   const headers=new Headers(req.headers);headers.delete('X-Hopsesh-Principal');if(principal)headers.set('X-Hopsesh-Principal',principal);
   headers.set('X-Hopsesh-External-Origin',url.origin);
-  return env.AUTHORIZATION.get(env.AUTHORIZATION.idFromName('hopsesh-device-enrollment-v1')).fetch(new Request(req,{headers}));
+  return dispatch(env.AUTHORIZATION,'hopsesh-device-enrollment-v1',new Request(req,{headers}));
  }
  const space=req.headers.get('X-Hopsesh-Space');if(!opaque(space))return json({error:'space'},400);
  const token=(req.headers.get('authorization')||'').replace(/^Bearer /,'');
@@ -376,5 +382,5 @@ export default {async fetch(req,env){
    }
   }catch{return json({error:'temporarily_unavailable'},503)}
  }
- return env.MAILBOX.get(env.MAILBOX.idFromName(space)).fetch(req);
+ return dispatch(env.MAILBOX,space,req);
 }};

@@ -187,6 +187,42 @@ test('gateway rate limiter outages preserve authorization and never allocate dow
  });
 });
 
+test('gateway contains Durable Object dispatch exceptions without replaying or changing responses',async t=>{
+ const admin='operator-secret-with-at-least-32-bytes',space='space-12345678901',device='endpoint-A-123456';
+ const token=await new SignJWT({space,device,kind:'device'}).setProtectedHeader({alg:'HS256'}).setIssuer('hopsesh-relay-v1').setAudience('hopsesh-relay-mailbox').setIssuedAt().setExpirationTime('1h').sign(new TextEncoder().encode(admin));
+ for(const path of ['/v1/messages','/v1/ack','/v1/notifications','/v1/enrollment/register','/v1/cloud/tickets','/v1/cloud/claim','/v1/device/code','/v1/device/token','/v1/authorization/request'])for(const stage of ['identity','stub','fetch'])await t.test(path+' '+stage,async()=>{
+  let fail=true,identities=0,stubs=0,fetches=0,downstream;
+  const error=Object.assign(new Error('private-object-transport-details'),{retryable:true});
+  const object={
+   idFromName(){identities++;if(fail&&stage==='identity')throw error;return 'object'},
+   get(){stubs++;if(fail&&stage==='stub')throw error;return{fetch:async()=>{fetches++;if(fail&&stage==='fetch')throw error;return downstream}}},
+  };
+  const env={ENROLLMENT_ADMIN:admin,ACCESS_TEAM_DOMAIN:'team.cloudflareaccess.com',ACCESS_AUDIENCE:'test-audience',MAILBOX:object,AUTHORIZATION:object};
+  for(const key of ['LOGIN_RATE','CODE_RATE','TRAFFIC_RATE','GLOBAL_TRAFFIC_RATE'])env[key]={limit:async()=>({success:true})};
+  const request=()=>new Request('https://relay.test'+path,{method:path==='/v1/notifications'?'GET':'POST',headers:{Authorization:'Bearer '+(path==='/v1/enrollment/register'?admin:token),'X-Hopsesh-Space':space,'CF-Connecting-IP':'192.0.2.1',Upgrade:'websocket'}});
+  const unavailable=await worker.fetch(request(),env);
+  assert.equal(unavailable.status,503);
+  assert.deepEqual(await unavailable.json(),{error:'temporarily_unavailable'});
+  assert.equal(identities,1,'never retry an uncertain dispatch inside the gateway');
+  assert.equal(stubs,stage==='identity'?0:1);
+  assert.equal(fetches,stage==='fetch'?1:0);
+  // Overload and unclassified exceptions also must not trigger immediate retries.
+  if(stage==='fetch')for(const properties of [{overloaded:true},{}]){
+   delete error.retryable;delete error.overloaded;Object.assign(error,properties);
+   const before=fetches;
+   assert.equal((await worker.fetch(request(),env)).status,503);
+   assert.equal(fetches,before+1);
+  }
+  fail=false;
+  for(const status of [200,403,429,503]){
+   downstream=new Response('downstream-body',{status,headers:{'Retry-After':'17'}});
+   const before=stubs;
+   assert.equal(await worker.fetch(request(),env),downstream,'preserve exact downstream response, including upgrade/stream metadata');
+   assert.equal(stubs,before+1,'a subsequent request obtains a fresh stub');
+  }
+ });
+});
+
 test('R2 deletion failure cannot leave a missing object at the head of a mailbox',async()=>{
  const f=await fixture();
  await f.invoke('/v1/messages','POST',f.ta,f.envelope());
