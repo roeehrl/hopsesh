@@ -1,10 +1,16 @@
 name: native qualification diagnostics
 on:
   workflow_dispatch:
+    inputs:
+      target:
+        type: choice
+        default: all
+        options: [all, scheduler, codex-cleanup]
 permissions:
   contents: read
 jobs:
   scheduler:
+    if: inputs.target != 'codex-cleanup'
     runs-on: windows-2025
     timeout-minutes: 35
     steps:
@@ -47,6 +53,7 @@ jobs:
           path: '*.log'
           retention-days: 7
   codex-cleanup:
+    if: inputs.target != 'scheduler'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
