@@ -192,7 +192,7 @@ func TestRelayHostedSteadyLoadAndReconnect(t *testing.T) {
 			now := time.Now().UTC()
 			snapshot := observe.Snapshot{Epoch: e.identity.Public.ID, Sequence: sequence, AttemptedAt: now, ObservedAt: now, ExpiresAt: now.Add(relay.ObservationLease), Data: json.RawMessage(`{"inventoryComplete":true}`)}
 			if err := e.service.PublishObservation(ctx, e.to, snapshot); err != nil {
-				t.Fatal("hosted observation publication failed", "round", sequence, "client", index, time.Now().UTC().Format(time.RFC3339), err)
+				t.Fatal("hosted observation publication failed", "round", sequence, "client", index, time.Now().UTC().Format(time.RFC3339), err, "HTTPS failures", transport.failureSnapshot())
 			}
 		}
 		wait("100 authenticated observations", func() bool {
