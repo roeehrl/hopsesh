@@ -41,7 +41,7 @@ export function healthNotice(onChange) {
     body: "The protection hooks and the skill run it; without it, originals are not blocked or advised.",
     act: ["Install the command", async () => { try { await api("InstallCLI", true); toast("Installed the hopsesh command"); await loadHookHealth(true); onChange(); } catch (e) { fail(e); } }] });
   for (const p of d.problems || []) {
-    if (p.state === "settings" || p.state === "unsupported") continue; // shown in Settings
+    if (p.state === "settings" || p.state === "unsupported" || !p.agent) continue; // shown in Settings
     items.push({ title: `${agentName(p.agent)}${p.label ? " · " + p.label : ""}: ${p.state === "needs-review" ? "approve the hopsesh hooks" : p.state === "not-installed" ? "protection hook not installed" : "hooks not working"}`,
       body: p.message, fix: p.fix, events: p.events,
       act: p.state === "not-installed" ? ["Install hook", async () => { try { await withCLI(() => api("InstallNoticeHooks", p.agent, p.profile)); toast("Installed the protection hook"); onChange(); } catch (e) { fail(e); } }]
@@ -80,7 +80,7 @@ export function role(e) {
     if (g?.mode === "released" || dep.status === "diverged")
       return { kind: "diverged", glyph: "!", chip: "Diverged", tone: "st-warn", line: dep.status === "diverged" ? `Original · continued after moving to ${to} · moving back needs a comparison` : `Original · block removed · moved to ${to}` };
     const blocked = g?.mode === "block";
-    return { kind: blocked ? "blocked" : "moved-out", glyph: blocked ? "◆" : "◇", chip: "Moved out", tone: blocked && g.effective ? "st-ended" : "st-warn", icon: blocked ? "lock" : "warn",
+    return { kind: blocked ? "blocked" : "moved-out", glyph: blocked && g.effective ? "◆" : "◇", chip: "Moved out", tone: blocked && g.effective ? "st-ended" : "st-warn", icon: blocked ? "lock" : "warn",
       line: `Original · moved to ${to}${blocked ? (g.effective ? " · blocked until you move back" : " · not blocked: " + (g.problem || "hooks not ready")) : g?.mode === "advise" ? (g.effective ? " · advised" : " · not advised: " + (g.problem || "hooks not ready")) : ""}` };
   }
   if (dep && dep.status === "forked") return { kind: "forked-out", glyph: "⑂", chip: "Fork made", tone: "st-idle", line: `Original · a separate fork continues in ${dep.cloud || where(dep.agentName || dep.agent, dep.machine)}` };

@@ -545,7 +545,7 @@ func movementHookExecutable() (string, error) {
 	if bin, err := exec.LookPath("hopsesh"); err == nil {
 		return filepath.Abs(bin)
 	}
-	return "", errors.New("install the hopsesh command-line tool before setting up movement hooks")
+	return "", errors.New("install the hopsesh command before installing the protection hooks")
 }
 
 func (a *App) movementDeliveryPath(id agent.ID, profile, sessionID string) string {

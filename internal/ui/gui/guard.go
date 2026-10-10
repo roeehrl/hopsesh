@@ -74,7 +74,7 @@ func (a *App) HookHealth(force bool) (HookHealthDTO, error) {
 	hooks, err := core.NoticeHooks(ctx)
 	d.Hooks = hooks
 	d.Problems = hookProblems(hooks, d.Mode)
-	if err != nil && len(hooks) == 0 {
+	if err != nil && len(hooks) == 0 && d.CLIReady { // without the command, that card says it
 		d.Problems = append(d.Problems, HookProblem{State: "unknown", Message: "hopsesh could not check the protection hooks: " + err.Error()})
 	}
 	health.mu.Lock()

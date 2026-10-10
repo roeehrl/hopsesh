@@ -417,7 +417,7 @@ function noticeSetup() {
   const trustWords = (t) => !t ? "" : t.state === "trusted" ? " · trusted by the agent" : t.state === "needs-review" ? " · waiting for your approval in the agent" : t.state === "disabled" ? " · turned off in the agent" : t.state === "missing" ? " · not seen by the agent" : " · trust not verified";
   return card(h("span", {class:"sec-h"}, "Protection hooks"),
     h("span", {class:"muted"}, "Blocking and warnings work through a small hook each agent runs before a prompt. The hooks run the hopsesh command. Codex runs a new hook only after you approve it in Codex (/hooks); hopsesh checks and tells you, and never approves hooks for you."),
-    s.noticeHooksError ? h("span", {class:"warn"}, s.noticeHooksError) : null,
+    s.noticeHooksError && s.cliReady ? h("span", {class:"warn"}, s.noticeHooksError) : null,
     !s.cliReady ? h("span", {class:"warn"}, "The hopsesh command is not installed; installing a hook installs it first.") : null,
     ...hooks.map(hook => h("div", {class:"set-row"},
       title(`${hook.agent} · ${hook.profileLabel || hook.profile || "Default account"}`, `${hook.installed ? "Installed" : "Not installed"}${hook.installed ? trustWords(hook.trust) : ""}${hook.reason ? " · " + hook.reason : ""}`),

@@ -170,6 +170,9 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	}
 	bf.HistoryFile = archivePath
 	bf.HistoryRecords = bytes.Count(cp.archive, []byte{'\n'})
+	if err := agent.CheckSpace(targetHost.FS(), archivePath, int64(len(cp.archive))); err != nil {
+		p.Blockers = append(p.Blockers, err.Error())
+	}
 	allowance := capacity.Allowance()
 	r := convert.Render(convert.Request{
 		Nodes: seg.Nodes, From: cp.From, To: spec.Name, Fidelity: fidelity,
@@ -504,6 +507,9 @@ func importThen(ctx context.Context, p *Plan, in Input, h agent.Host, j *journal
 		return ir.WriteResult{}, importErr
 	}
 	newArchive := h.Path().Join(tgt.Install.Root(tgt.Module.Spec().Roots[0].Name), "hopsesh", "archives", string(id)+".jsonl")
+	if err = agent.CheckSpace(h.FS(), newArchive, int64(len(cp.archive))); err != nil {
+		return ir.WriteResult{}, err
+	}
 	if err = h.FS().WriteFile(newArchive, cp.archive, 0o600); err != nil {
 		return ir.WriteResult{}, err
 	}
@@ -616,6 +622,9 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 	h, err := tgt.Machine.For(ctx, tgt.Module.Spec(), tgt.Install, j)
 	if err != nil {
 		return res, err
+	}
+	if err := agent.CheckSpace(h.FS(), cp.Report.Archive, int64(len(cp.archive))); err != nil {
+		return nil, err
 	}
 	if err := h.FS().WriteFile(cp.Report.Archive, cp.archive, 0o600); err != nil {
 		return res, fmt.Errorf("preserving portable archive: %w", err)

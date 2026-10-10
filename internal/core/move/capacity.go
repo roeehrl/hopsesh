@@ -74,6 +74,9 @@ func portableWrite(ctx context.Context, h agent.Host, m agent.Module, in agent.I
 	if err = capacity.Check(rendered.Items); err != nil {
 		return req, rendered, rolled, err
 	}
+	if err = agent.CheckSpace(h.FS(), path, int64(len(archive))); err != nil {
+		return req, rendered, rolled, err
+	}
 	if err = h.FS().WriteFile(path, archive, 0o600); err != nil {
 		return req, rendered, rolled, fmt.Errorf("preserving portable history: %w", err)
 	}

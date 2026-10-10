@@ -132,6 +132,7 @@ const (
 	StageArchive = "archive" // building or merging the portable archive
 	StageNative  = "native"  // reading a whole native file (fork, recovery, verification)
 	StageContext = "context" // the receiving agent's context
+	StageDisk    = "disk"    // free disk space where the archive or session is written
 )
 
 // Settings that raise each stage's limit (config keys under [history]).
@@ -141,6 +142,7 @@ var limitSettings = map[string]string{
 	StageArchive: "history.archive_mb",
 	StageNative:  "history.native_file_mb",
 	StageContext: "history.context_budget",
+	StageDisk:    "",
 }
 
 // ErrLimit matches every LimitError.
@@ -166,6 +168,7 @@ func (e *LimitError) Error() string {
 		StageArchive: "portable archive exceeds the archive size limit",
 		StageNative:  "native file exceeds the native file size limit",
 		StageContext: "incoming context exceeds the context budget",
+		StageDisk:    "not enough free disk space",
 	}[e.Stage]
 	if what == "" {
 		what = e.Stage + " limit reached"
