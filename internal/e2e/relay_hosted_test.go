@@ -17,6 +17,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/internal/core/relay"
 	"github.com/roeehrl/hopsesh/internal/localstate"
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 // Stats reads do not perform mailbox maintenance. An expired, unacknowledged
@@ -268,6 +269,7 @@ func TestRelayHostedStaging(t *testing.T) {
 	current, sourceAgent := f.seed(t, "claude"), "claude"
 	route := "ABCA"
 	var sentinels []string
+	var atC agent.Summary // the branch's copy on C, which a later return there extends
 	for hop := 0; hop < len(route)-1; hop++ {
 		from, to := route[hop], route[hop+1]
 		sentinel := fmt.Sprintf("HOSTED-DISPOSABLE-WORK-%d", hop)
@@ -298,6 +300,9 @@ func TestRelayHostedStaging(t *testing.T) {
 			}
 		}
 		sourceAgent = target
+		if to == 'C' {
+			atC = current
+		}
 	}
 	graph, err := lineage.Read(host.LocalFS(), current.Path)
 	if err != nil || graph == nil {
@@ -312,13 +317,22 @@ func TestRelayHostedStaging(t *testing.T) {
 	child = f.transfer(t, 'B', 'C', child, "codex", "pull", false, "hosted-fork-travel-123456789")
 	f.assertText(t, 'C', child, "codex", append(sentinels, "HOSTED-FORK-ONLY"), []string{"HOSTED-ORIGINAL-ONLY"})
 	f.appendWork(t, original, sourceAgent, "HOSTED-ORIGINAL-ONLY")
+	beforeC, err := os.ReadFile(atC.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	moved := f.transfer(t, 'A', 'C', original, "claude", "push", false, "hosted-original-travel-12345678")
 	f.assertText(t, 'C', moved, "claude", append(sentinels, "HOSTED-ORIGINAL-ONLY"), []string{"HOSTED-FORK-ONLY"})
 	if f.lastResult.Journal == "" {
 		t.Fatal("hosted native transfer has no undo journal")
 	}
 	f.run(t, f.homes['A'], "undo", f.lastResult.Journal, "--yes", "--json")
-	if _, err = os.Stat(moved.Path); !os.IsNotExist(err) {
+	if moved.Path == atC.Path {
+		// The return appended to C's exact copy: undo restores it byte for byte.
+		if after, err := os.ReadFile(moved.Path); err != nil || !bytes.Equal(after, beforeC) {
+			t.Fatal("hosted peer undo did not restore the appended native session", err)
+		}
+	} else if _, err = os.Stat(moved.Path); !os.IsNotExist(err) {
 		t.Fatal("hosted peer undo left the newly written native session", err)
 	}
 	f.assertText(t, 'C', child, "codex", []string{"HOSTED-FORK-ONLY"}, []string{"HOSTED-ORIGINAL-ONLY"})
