@@ -192,3 +192,13 @@ login-completion refresh, SSH keychain limitations, owner registry metadata prov
 and independent same-email roots. Tailscale scripts must force TAILSCALE_BE_CLI=1;
 cover DNS-less peers, BackendState and visible partial discovery errors. Refreshing
 metadata must preserve a selected conversation DOM, focus and source-only scan scope.
+
+Portable original-session returns are a separate contract from native replay:
+Claude/Codex `Profile.PortableAppend` permits ordinary text deltas in a pinned
+receiving root, with verified native anchors, historical binding segments,
+current-login rechecks and no active writer. Check adapter changes against this
+contract, binding-scoped selection, GUI return discovery and retry deduplication.
+Claude context sizing also relies on assistant usage input/cache/output totals,
+active-branch/compaction semantics, exact model IDs with documented default windows,
+and local/project context overrides. A changed model window or usage schema affects
+these capacity checks even when CLI flags remain unchanged; report such changes.

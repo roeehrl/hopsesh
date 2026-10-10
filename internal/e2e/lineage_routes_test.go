@@ -247,7 +247,7 @@ func runLineageRoute(t *testing.T, route, start string, mask int, patterns ...st
 		if journey.Transfers != transfers {
 			t.Fatalf("transfers %+v at hop %d", journey, i)
 		}
-		if pattern != "accounts" && pattern != "pressure" && to == 'A' && current.Key.Session != sid {
+		if pattern != "pressure" && to == 'A' && current.Key.Session != sid {
 			t.Fatalf("return must select original: %s", current.Key)
 		}
 	}

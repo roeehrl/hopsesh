@@ -48,9 +48,12 @@ and scoped provenance. A receiving peer resolves its own configured profile and 
    delivered representation and losses. Dropped reasoning does not become a new authored revision.
 4. Cross-account return selects the exact original replica, line and binding, then computes missing
    authored revisions from validated provenance. It must not select “the Claude copy on this Mac.”
-5. Native append is permitted only with a module-verified identity/compatibility contract, stable
-   native anchors and no active writer. Limited or unknown identity uses a new portable replica
-   or a clearly described separate branch; it cannot silently append protected native state.
+5. Protected native replay is permitted only with a module-verified identity/compatibility
+   contract. Separately, a module may support appending ordinary portable text to an exact
+   original in the selected profile, with verified native anchors, missing-revision coverage,
+   current root/login revalidation and no active writer. This preserves old protected records
+   in place; it never imports source-private state or infers cross-provider account equality.
+   A binding observation starts a new segment without reassigning historical authorship.
 6. Revalidate profile generation, observed binding, root and native heads at plan, apply and launch.
    Reject observed changes. Where the vendor cannot expose a distinction, explicitly mark it
    unverified and avoid operations requiring that distinction; a timestamp is not proof.

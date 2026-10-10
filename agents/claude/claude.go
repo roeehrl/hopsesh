@@ -68,7 +68,7 @@ func (*Module) Spec() agent.Spec {
 			VersionArgs: []string{"--version"},
 		}},
 		Roots:              []agent.Root{{Name: home, Env: []string{"CLAUDE_CONFIG_DIR"}, Default: map[string]string{"*": "~/.claude"}}},
-		LoginEnv:           []string{"CLAUDE_CONFIG_DIR"},
+		LoginEnv:           []string{"CLAUDE_CONFIG_DIR", "ANTHROPIC_MODEL", "CLAUDE_CODE_DISABLE_1M_CONTEXT", "CLAUDE_CODE_AUTO_COMPACT_WINDOW"},
 		Secrets:            []string{"{home}/.credentials.json", "{home}/sessions/*.key"},
 		Worktrees:          []string{worktreesDir},
 		Instructions:       []string{"CLAUDE.md", "AGENTS.md"},

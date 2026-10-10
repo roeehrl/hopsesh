@@ -2,7 +2,7 @@ import { test,expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { row,details,action } from './helpers';
 
-test('real service resolves hidden original and reviews a fresh same-branch return when native append is blocked',async({page},info)=>{
+test('real service resolves hidden original and appends return work to that exact session',async({page},info)=>{
  test.setTimeout(120000);
  const reset=await page.request.post('/reset?movement=1');expect(reset.ok()).toBeTruthy();
  await page.goto('/');await expect(page.getByRole('heading',{name:'All sessions',exact:true})).toBeVisible();
@@ -64,36 +64,27 @@ test('real service resolves hidden original and reviews a fresh same-branch retu
  const plan=(await (await planned).json()).result;
  await info.attach('return-plan.json',{body:JSON.stringify(plan,null,2),contentType:'application/json'});
  await page.screenshot({path:info.outputPath('real-move-back-plan.png'),fullPage:true});
- expect(plan.blockers).toEqual([expect.stringContaining('cannot update the original session across agent or account profiles')]);
+ expect(plan.blockers || []).toEqual([]);
+ expect(plan.reviewNewSession || false).toBe(false);
  await expect(page.locator('#sheet')).toContainText(source.key);
- await expect(page.locator('#sheet #go')).toBeDisabled();
- expect(plan.reviewNewSession).toBe(true);
- await expect(page.locator('#sheet')).toContainText('This does not mean you changed accounts.');
- await page.locator('#sheet').getByText('The original session cannot be updated across these agent or account profiles').scrollIntoViewIfNeeded();
- await page.screenshot({path:info.outputPath('real-move-back-blocker.png'),fullPage:true});
+ await expect(page.locator('#sheet #go')).toBeEnabled();
  const originalBytes=await readFile(original.path);
- const replanned=page.waitForResponse(r=>r.url().endsWith('/call') && r.request().postDataJSON().m==='Plan');
- await page.locator('#sheet').getByRole('button',{name:'Review new session on the same branch',exact:true}).click();
- const response=await replanned;
- expect(response.request().postDataJSON().args[3]).toMatchObject({targetSession:'',fork:false,newReplica:true,conflict:''});
- const portable=(await response.json()).result;
- await info.attach('return-portable-plan.json',{body:JSON.stringify(portable,null,2),contentType:'application/json'});
- expect(portable.blockers || []).toEqual([]);
- await expect(page.locator('#sheet')).toContainText('New session on the same lineage branch; the original session will be preserved');
- await expect(page.locator('#sheet #go')).toBeEnabled({timeout:30000});
- await page.screenshot({path:info.outputPath('real-move-back-portable-plan.png'),fullPage:true});
+ await page.screenshot({path:info.outputPath('real-move-back-original-plan.png'),fullPage:true});
  await page.locator('#sheet #go').click();
  await expect(page.getByRole('heading',{name:/is prepared for Claude Code/})).toBeVisible({timeout:30000});
- await page.screenshot({path:info.outputPath('real-move-back-portable-done.png'),fullPage:true});
- expect(await readFile(original.path)).toEqual(originalBytes);
+ const after=await readFile(original.path);
+ expect(after.subarray(0,originalBytes.length)).toEqual(originalBytes);
+ expect(after.subarray(originalBytes.length).toString()).toContain('Fixture return checkpoint completed.');
+ expect(after.subarray(originalBytes.length).toString()).not.toContain('PLUM-7');
  await page.getByRole('button',{name:'Back to sessions',exact:true}).click();
  const scan=await page.request.post('/call',{data:{m:'Scan',args:[]}});
  const entries=(await scan.json()).result.groups.flatMap(g=>g.entries);
  const returned=[];
- for(const e of entries.filter(e=>e.agent==='claude' && e.key!==source.key && e.path)) {
+ for(const e of entries.filter(e=>e.agent==='claude' && e.key===source.key && e.path)) {
   if((await readFile(e.path,'utf8')).includes('Fixture return checkpoint completed.')) returned.push(e);
  }
  expect(returned).toHaveLength(1);
+ expect(returned[0].key).toBe(source.key);
  const originalGraph=JSON.parse(await readFile(original.path+'.hopsesh.json','utf8'));
  const returnedGraph=JSON.parse(await readFile(returned[0].path+'.hopsesh.json','utf8'));
  expect(returnedGraph.family).toBe(originalGraph.family);

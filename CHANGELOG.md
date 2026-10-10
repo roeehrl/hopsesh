@@ -8,10 +8,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- Agent return reviews with unverified login continuity can create a fresh session
-  on the same lineage branch instead of forcing a fork. GUI, TUI and CLI explain
-  that the warning does not imply a changed account, retain the chosen profile,
-  preserve both original sessions and still require a fork for independent work.
+- Claude/Codex round trips reuse the exact original session across runtime profiles
+  and first login observations, appending only missing portable work while preserving
+  original records, IDs and historical bindings. Independent work and live writers
+  still block; adapters without portable append retain a same-branch copy fallback.
+- Claude return capacity uses native request usage and documented model windows
+  instead of forcing long sessions into a new copy through a 64K byte fallback.
+  Context overrides are rechecked, and genuinely full destinations still roll over.
 
 ## [0.4.1] - 2026-10-10
 

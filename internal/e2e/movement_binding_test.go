@@ -9,15 +9,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/roeehrl/hopsesh/agents/claude"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/profiles"
 	"github.com/roeehrl/hopsesh/sdk/agent"
+	"github.com/roeehrl/hopsesh/sdk/ir"
 )
 
 // Exact matrix regression: a remote default profile was discovered before its
 // first public account observation. The return receiver probes it locally, which
-// rotates its binding. Unchanged native history is still comparable for a fresh
-// portable return; this never grants permission to append under the new binding.
+// rotates its binding. Portable delta appends preserve the exact original, native
+// anchors and historical authorship; they never replay source-private state.
 func TestMovementQuietReturnAfterAccountObservation(t *testing.T) {
 	for _, from := range []string{"claude", "codex"} {
 		for _, to := range []string{"claude", "codex"} {
@@ -120,33 +122,61 @@ func TestMovementQuietReturnAfterAccountObservation(t *testing.T) {
 						if !planned.Options.OtherAccount || planned.Placement.Key.Session == left.Key.Session || planned.Continue.Relation != move.RelationNew {
 							t.Fatal("return under unverified binding must create a separate portable native session")
 						}
-						// Explicit native append is still forbidden, even though comparison succeeds.
+						// Returning to the exact original appends only missing portable work.
+						// Limited metadata and a first account observation are not native
+						// replay permission, but neither prevents ordinary text appends.
 						selected := opt
 						selected.NewReplica = false
 						selected.TargetSession = left.Key.String()
-						blocked, err := move.Build(ctx, back, selected)
-						if err != nil || !blocked.ReviewNewSession || !strings.Contains(strings.Join(blocked.Blockers, " "), "without verified native compatibility") {
-							t.Fatalf("binding change must not grant native append permission: %v %v", blocked, err)
-						}
-						// Review a fresh replica without forking or discarding conflict checks.
-						selected.TargetSession, selected.NewReplica = "", true
 						planned, err = move.Build(ctx, back, selected)
-						if err != nil || len(planned.Blockers) != 0 || planned.ReviewNewSession || planned.Options.Fork || planned.Continue.AppendTo != nil {
-							t.Fatalf("unsafe portable return review: %+v %v", planned, err)
+						if err != nil || len(planned.Blockers) != 0 || planned.ReviewNewSession || planned.Options.Fork || planned.Continue.AppendTo == nil || planned.Placement.Key != left.Key {
+							t.Fatalf("original return was not selected: %+v %v", planned, err)
+						}
+						unsupported := back
+						unsupported.Target.Module = &noPortableAppend{back.Target.Module}
+						blocked, err := move.Build(ctx, unsupported, selected)
+						if err != nil || !blocked.ReviewNewSession || len(blocked.Blockers) == 0 {
+							t.Fatalf("adapter without append contract accepted return: %+v %v", blocked, err)
+						}
+						if from == "claude" {
+							late := back
+							late.Target.Module = &lateClaudeWriter{claude.New()}
+							if _, err := move.Apply(ctx, planned, late, move.Env{StateDir: t.TempDir()}); err == nil || !strings.Contains(err.Error(), "destination copy is open") {
+								t.Fatalf("writer started after planning was ignored: %v", err)
+							}
+							if !bytes.Equal(original, movementBytes(t, left.Path)) {
+								t.Fatal("late live writer guard changed original")
+							}
 						}
 						if _, err := move.Apply(ctx, planned, back, env); err != nil {
 							t.Fatal(err)
 						}
 						home := movementProfileSession(t, a, target, planned.Placement.Key)
-						if !mentions(readAll(t, a, target.Module, target.Install, home), "BINDING-RETURN-WORK") {
-							t.Fatal("portable return lost new work")
+						after := movementBytes(t, left.Path)
+						if !bytes.HasPrefix(after, original) {
+							t.Fatal("return rewrote original native records")
 						}
-						if !bytes.Equal(original, movementBytes(t, left.Path)) {
-							t.Fatal("portable return changed original native bytes")
+						delta := string(after[len(original):])
+						if !strings.Contains(delta, "BINDING-RETURN-WORK") {
+							t.Fatal("return lost new work")
+						}
+						seed := "PLUM-7"
+						if from == "codex" {
+							seed = "MOVEMENT-SEED"
+						}
+						if strings.Contains(delta, seed) {
+							t.Fatal("return reimported original history")
+						}
+						// Durable retry of the same operation must not duplicate the append.
+						if _, err := move.Apply(ctx, planned, back, env); err != nil {
+							t.Fatal(err)
+						}
+						if !bytes.Equal(after, movementBytes(t, left.Path)) {
+							t.Fatal("retry duplicated return work")
 						}
 						g := movementGraph(t, home)
 						if g.Family != back.Lineage.Family || g.Branch != back.Lineage.Branch {
-							t.Fatal("portable return became an unrelated family or separate fork")
+							t.Fatal("original return became an unrelated family or separate fork")
 						}
 						if len(g.ActiveHops()) != 2 {
 							t.Fatalf("return lost movement receipts: %+v", g.Hops)
@@ -176,4 +206,29 @@ func movementProfileSession(t *testing.T, l location, side move.Side, key agent.
 	}
 	t.Fatalf("missing profile session %s", key)
 	return agent.Summary{}
+}
+
+// An adapter must explicitly opt into portable original-session appends.
+type noPortableAppend struct{ agent.Module }
+
+func (m *noPortableAppend) Profile(in agent.Install) ir.Profile {
+	p := m.Module.(agent.Writer).Profile(in)
+	p.PortableAppend = false
+	return p
+}
+func (m *noPortableAppend) Write(ctx context.Context, h agent.Host, in agent.Install, r ir.WriteRequest) (ir.WriteResult, error) {
+	return m.Module.(agent.Writer).Write(ctx, h, in, r)
+}
+func (m *noPortableAppend) Read(ctx context.Context, h agent.Host, in agent.Install, s agent.Summary, c ir.Cursor) (ir.Segment, error) {
+	return m.Module.(agent.Reader).Read(ctx, h, in, s, c)
+}
+
+type lateClaudeWriter struct{ *claude.Module }
+
+func (*lateClaudeWriter) Live(_ context.Context, _ agent.Host, _ agent.Install, ids []agent.SessionID) (map[agent.SessionID]agent.LiveInfo, error) {
+	out := map[agent.SessionID]agent.LiveInfo{}
+	for _, id := range ids {
+		out[id] = agent.LiveInfo{State: agent.Live}
+	}
+	return out, nil
 }

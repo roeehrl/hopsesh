@@ -85,15 +85,21 @@ func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
 			if m == nil || m.host == nil {
 				continue
 			}
-			r, id, ok := g.ForBranch(e.Lineage.Branch).FindEndpoint(e.Session.Key, m.host.Facts.Endpoint)
+			in, installed := m.InstallProfile(e.Agent, e.Session.Key.Profile)
+			branch := g.ForBranch(e.Lineage.Branch)
+			r, id, ok := branch.FindBinding(e.Session.Key, m.host.Facts.Endpoint, in.BindingID())
+			if !ok {
+				r, id, ok = branch.FindEndpoint(e.Session.Key, m.host.Facts.Endpoint)
+			}
 			if !ok {
 				continue
 			}
 			ids[i] = id
 			observation := movementObservation{entry: e}
-			in, ok := m.InstallProfile(e.Agent, e.Session.Key.Profile)
 			mod, enabled := a.Module(e.Agent)
-			if !ok || !enabled || in.BindingID() != r.Binding {
+			writer, writable := mod.(agent.Writer)
+			portable := writable && writer.Profile(in).PortableAppend
+			if !installed || !enabled || in.BindingID() != r.Binding && !portable {
 				observed[id] = observation
 				continue
 			}
@@ -115,18 +121,40 @@ func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
 							observation.agentAnchors[anchor] = true
 						}
 					}
-					observation.state, err = g.Observe(id, &seg)
+					if in.BindingID() != r.Binding {
+						_, observation.state, err = branch.ObserveBinding(lineage.Replica{Key: r.Key, Endpoint: r.Endpoint, Binding: in.BindingID(), Location: r.Location, Line: r.Line}, &seg)
+						if err == nil {
+							err = g.Merge(branch)
+						}
+						// Observation is ephemeral; route ancestry remains the committed graph.
+					} else {
+						observation.state, err = g.Observe(id, &seg)
+					}
 					observation.valid = err == nil
 					observation.checked = e.ObservedAt
 				}
 			}
 			observed[id] = observation
+			// Historical bindings name the same native file. They share the fresh
+			// observation for presentation, without rewriting their authorship.
+			for _, old := range g.Replicas {
+				if old.Key == r.Key && old.Endpoint == r.Endpoint && old.Line == r.Line {
+					observed[old.ID] = observation
+				}
+			}
 		}
 		for i, id := range ids {
 			e := &inv.Entries[i]
 			e.Returns = nil
 			e.Movement = nil
+			seen := map[string]bool{}
 			for _, r := range g.ReturnReplicas(id) {
+				physical := r.Endpoint + "\x00" + r.Key.String()
+				current := g.Replica(id)
+				if seen[physical] || r.Endpoint == current.Endpoint && r.Key == current.Key {
+					continue
+				}
+				seen[physical] = true
 				if retiredReturn(g, r.ID, observed) {
 					continue
 				}

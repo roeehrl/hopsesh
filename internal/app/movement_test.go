@@ -255,6 +255,16 @@ func TestMovementEnrichmentReadsNativeWorkAndReturnRelations(t *testing.T) {
 	if n := inv.Entries[0].Movement; n == nil || n.Status != "continued" {
 		t.Fatalf("continued: %+v", n)
 	}
+	// A first account observation changes only the binding. The exact native
+	// original is still measurable; scanning must not label it missing/unverified.
+	machines[0].Agents[0].Install.Profile = &agent.RuntimeProfile{Root: machines[0].Agents[0].Install.Root("home"), Default: true, Binding: "first-observation"}
+	a.EnrichMovement(ctx, inv)
+	if got := inv.Entries[1].Returns; len(got) != 1 || got[0].Status != "available" {
+		t.Fatalf("binding observation hid original: %+v", got)
+	}
+	if n := inv.Entries[0].Movement; n == nil || n.Status != "continued" {
+		t.Fatalf("binding observation erased movement: %+v", n)
+	}
 	// Renaming either machine changes display/routing labels, never endpoint identity.
 	inv.Machines[0].Name, inv.Entries[0].Machine = "renamed-desktop", "renamed-desktop"
 	inv.Machines[1].Name, inv.Entries[1].Machine = "renamed-laptop", "renamed-laptop"

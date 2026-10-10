@@ -38,12 +38,22 @@ type chained struct {
 		Role    string          `json:"role"`
 		Model   string          `json:"model"`
 		Content json.RawMessage `json:"content"`
+		Usage   *contextUsage   `json:"usage"`
 	} `json:"message"`
 	// metadata records
 	CustomTitle  string `json:"customTitle"`
 	AITitle      string `json:"aiTitle"`
 	LeafUUID     string `json:"leafUuid"`
 	RelocatedCWD string `json:"relocatedCwd"`
+}
+
+// The last completed request reports the active prompt, including cached input.
+// Iteration details repeat these totals and must not be counted again.
+type contextUsage struct {
+	Input       int `json:"input_tokens"`
+	CacheRead   int `json:"cache_read_input_tokens"`
+	CacheCreate int `json:"cache_creation_input_tokens"`
+	Output      int `json:"output_tokens"`
 }
 
 type block struct {

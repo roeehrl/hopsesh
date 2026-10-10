@@ -55,24 +55,28 @@ by endpoint, agent, profile/binding, session and branch, never by display name a
 Returning clears that departure; an undone transfer produces no active notice. Fork
 notices describe the separate branch and leave the parent available.
 
-A profile's first public account observation can rotate its previously unobserved
-binding. For a portable return, Hopsesh verifies the original's native anchors against
-its earlier receipt before comparing conversation coverage under the new binding.
-Unchanged history remains comparable; added independent work and rewritten history still
-block the return. This comparison never grants native append permission across an
-unverified binding: a successful portable return creates a fresh native session and leaves
-the original byte-identical.
+Claude Code and Codex explicitly support appending ordinary portable text to an
+original session in the selected agent/profile root. A return verifies that exact
+session's native anchors and lineage, computes missing authored revisions, and
+appends only the new work. Its native ID, earlier records and branch remain intact.
+Cross-agent conversion does not require matching Claude/Codex profile IDs or emails.
+Source-private reasoning, signatures and tool state are never replayed across profiles.
 
-An unverified binding does **not** mean the user changed accounts. Hopsesh's opaque
-binding records an observation of sign-in metadata, not a credential or ownership
-proof. A first successful observation or changed vendor-reported metadata can rotate
-it even when the displayed email is unchanged. Matching emails across Claude and
-Codex do not establish native replay permission.
+A profile's first public account observation can rotate Hopsesh's opaque binding.
+That observation is not proof the user changed accounts. Verified native anchors
+carry earlier authorship into a new binding segment; historical provenance is not
+rewritten. Portable text append uses the receiving profile's current binding and
+rechecks its public login, pinned root, native head and activity before writing.
+Independent work, rewritten history and an open destination still block the return.
+Modules without an explicit portable-append contract keep the fresh-session fallback.
 
-The explicit-return guard also applies when different agent/account profiles require
-portable conversion, even if the destination binding has stayed unchanged. Its
-warning describes missing native compatibility across those profiles, not an observed
-account change. Normal account refreshes retain unchanged observations and bindings.
+Claude capacity uses the resumed branch's last complete request usage (including
+cached input), plus conservative byte estimates for later records. Documented models
+with a default 1M context window use that window; unknown models retain the small
+fallback. User/project settings, configured compaction limits and the receiving
+machine's context overrides are fingerprinted and rechecked. A genuinely full or
+unmeasurable destination still receives a separately reviewed bounded continuation.
+This never silently discards or overwrites the original history.
 
 When an explicit return cannot update the original, the GUI offers **Review new
 session on the same branch**; the TUI offers **N** in the blocked plan. Both review
@@ -116,15 +120,14 @@ retry and undo. It checks native identity, receipt queries, no-work returns and 
 conversation nodes. `movement_binding_test.go` reproduces first-observation binding rotation across all four
 agent pairings, with both unchanged observed bindings and first-observation rotation,
 including unchanged, independently extended and rewritten originals, and
-checks that explicit native append remains forbidden. `lineage_recovery_test.go` checks notice and return metadata after a
+checks original-ID portable delta appends, unchanged byte prefixes and idempotent retries. `lineage_recovery_test.go` checks notice and return metadata after a
 simulated interruption. `lineage_routes_test.go` checks the queries at every stop in
 ABABA, ABCA and ABCBCAB routes, including profile and account routes.
 
 The scenario matrix adds `quiet-roundtrip` and `fork` to ordinary round trips. Its helper
 reads receipts on each side of SSH; the runner checks active hops, notify preferences,
-return candidates and departures. Matrix stand-ins have unverified account bindings, so
-portable returns may create new native IDs; the real-module tests separately prove
-original-ID returns with compatible account scope. PR CI runs these over Linux,
+return candidates and departures. The real-module tests prove original-ID returns across runtime profiles and binding
+observations, with explicit fresh-session and capacity-rollover scenarios tested separately. PR CI runs these over Linux,
 macOS and Windows loopback SSH and supported OS pairs. Nightly runs cover triples and
 longer stateful histories. The dedicated e2e steps select `TestMovement` alongside
 lineage, account and context scenarios.

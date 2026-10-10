@@ -272,6 +272,20 @@ func (m *Manifest) FindEndpoint(key agent.SessionKey, endpoint string) (Replica,
 	}
 	return found, found.ID, found.ID != ""
 }
+
+// FindBinding selects the current segment of one physical session without
+// confusing it with its retained historical login segments.
+func (m *Manifest) FindBinding(key agent.SessionKey, endpoint, binding string) (Replica, ReplicaID, bool) {
+	if m == nil {
+		return Replica{}, "", false
+	}
+	for _, r := range m.Replicas {
+		if r.Key == key && r.Endpoint == endpoint && r.Binding == binding && r.Line == m.Branch {
+			return m.Replica(r.ID), r.ID, true
+		}
+	}
+	return Replica{}, "", false
+}
 func (m *Manifest) FindOnBranch(key agent.SessionKey, location, line string) (Replica, ReplicaID, bool) {
 	if m == nil {
 		return Replica{}, "", false

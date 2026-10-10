@@ -125,6 +125,7 @@ func modules() []module {
 // Upstream changes can break shared consumers even when the adapter still compiles.
 // These paths also give the reviewer the regression scenarios and current contracts.
 var profileIntegrationFiles = []string{
+	"sdk/ir/ir.go", "sdk/ir/capacity.go", "sdk/agent/capacity.go",
 	"sdk/agent/runtime_profile.go", "internal/core/profiles", "internal/core/lineage",
 	"internal/core/move", "internal/core/peer", "internal/core/host", "internal/app",
 	"internal/ui/gui", "internal/ui/tui", "internal/ui/cli",

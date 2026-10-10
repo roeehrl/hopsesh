@@ -292,7 +292,11 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 	if p.manifest == nil || opt.Fork {
 		return
 	}
-	if opt.OtherAccount || opt.NewReplica {
+	// A portable text append does not replay the source's native account-bound
+	// state. Modules explicitly opt in; lineage, root, cursor and live-writer
+	// checks below still apply to the exact original in the selected profile.
+	portableAppend := in.Target.Module.(agent.Writer).Profile(in.Target.Install).PortableAppend
+	if opt.NewReplica || opt.OtherAccount && !portableAppend {
 		if opt.TargetSession != "" {
 			p.ReviewNewSession = true
 			p.Blockers = append(p.Blockers, "cannot update the original session across agent or account profiles without verified native compatibility; remove --target-session and use --new-session to review a portable session on the same lineage branch")
@@ -366,6 +370,10 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 			p.Blockers = append(p.Blockers, "only the destination copy has new work; continue it there")
 			return
 		case lineage.Subset(target, source):
+			if c.Summary.CWD != "" && realIntended(c.Summary.CWD) != realIntended(p.Target.CWD) {
+				p.Blockers = append(p.Blockers, "the original session belongs to "+c.Summary.CWD+"; choose that folder or create a separate fork for a different folder")
+				return
+			}
 			cp.Relation = RelationAppend
 			s := c.Summary
 			cp.AppendTo = &s
@@ -579,6 +587,17 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 	if err != nil {
 		return nil, err
 	}
+	if cp.AppendTo != nil {
+		if detector, ok := tgt.Module.(agent.LiveDetector); ok {
+			live, err := detector.Live(ctx, preflightHost, tgt.Install, []agent.SessionID{cp.AppendTo.Key.Session})
+			if err != nil {
+				return nil, fmt.Errorf("cannot recheck destination activity: %w", err)
+			}
+			if live[cp.AppendTo.Key.Session].State == agent.Live {
+				return nil, fmt.Errorf("the destination copy is open; quit it first and refresh the plan")
+			}
+		}
+	}
 	if capacity != cp.Report.Capacity {
 		return nil, fmt.Errorf("destination capacity changed since planning; refresh the plan")
 	}
@@ -688,7 +707,7 @@ func recordContinuation(ctx context.Context, p *Plan, in Input, j *journal.Journ
 	st := m.Deliver(to, w.Cursor, w.Projection, p.sourceState.Heads, append(append([]string(nil), p.sourceState.Loss...), conversionLoss(p.Continue.Report)...))
 	var rollover *lineage.Rollover
 	if p.Continue.Rollover != nil {
-		_, id, ok := m.FindEndpoint(p.Continue.Rollover.Key, in.Target.Machine.Facts.Endpoint)
+		_, id, ok := m.FindBinding(p.Continue.Rollover.Key, in.Target.Machine.Facts.Endpoint, in.Target.Install.BindingID())
 		if ok {
 			rollover = &lineage.Rollover{Replica: id, Cursor: p.Continue.RolloverCursor}
 		}
