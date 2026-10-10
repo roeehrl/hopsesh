@@ -5,12 +5,12 @@ on:
       target:
         type: choice
         default: all
-        options: [all, scheduler, codex-cleanup]
+        options: [all, scheduler, codex-cleanup, git-probe]
 permissions:
   contents: read
 jobs:
   scheduler:
-    if: inputs.target != 'codex-cleanup'
+    if: inputs.target == 'all' || inputs.target == 'scheduler'
     runs-on: windows-2025
     timeout-minutes: 35
     steps:
@@ -53,7 +53,7 @@ jobs:
           path: '*.log'
           retention-days: 7
   codex-cleanup:
-    if: inputs.target != 'scheduler'
+    if: inputs.target == 'all' || inputs.target == 'codex-cleanup'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -77,4 +77,33 @@ jobs:
         with:
           name: codex-cleanup-diagnostics
           path: codex-cleanup.*
+          retention-days: 7
+  git-probe:
+    if: inputs.target == 'git-probe'
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: native PowerShell parent
+        shell: pwsh
+        run: |
+          go test -race -count=1 -v -run 'TestProbeWindowsShellDiagnostic|TestProbeLocalSlowFolder|TestProbeCancellationStopsChildren' -timeout 3m ./internal/core/repos 2>&1 | Tee-Object git-pwsh.log
+          if ($LASTEXITCODE -ne 0) { throw 'PowerShell parent probe failed' }
+      - name: native Bash parent matching primary CI
+        if: always()
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -race -count=1 -v -run 'TestProbeWindowsShellDiagnostic|TestProbeLocalSlowFolder|TestProbeCancellationStopsChildren' -timeout 3m ./internal/core/repos 2>&1 | tee git-bash.log
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: git-probe-diagnostics
+          path: 'git-*.log'
           retention-days: 7
