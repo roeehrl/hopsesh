@@ -4,6 +4,7 @@
 // off to ‹cloud›… (to a cloud). model(e) is a session's whole action row: its status line,
 // the primary (a split button whose menu lists the other places), Move ▾ and ⋯; the row's
 // button, ↩, ⌘↩ and the palette all come from it.
+import { refreshSelection } from "./sessions.js";
 import { role, removeBlock, restoreBlock } from "./guard.js";
 import { go, api, state, sys, here, agentInfo, cloudOf, cloudTitle, toast, fail, errText, cap, entries, count, ago, h, icon, ICONS, agentBadge, pending } from "./core.js";
 import { returnActions, returnChooser, showMovementDestination } from "./returns.js";
@@ -174,8 +175,8 @@ function localModel(e) {
       const n = e.departure || e.movement;
       m.primary = { id: "destination", label: "Open moved copy", short: "Moved copy", run: () => showMovementDestination(n, selectFn) };
       m.chevron = resumePlaces(e).map(p => resumeItem(p));
-      if (e.guard?.mode === "block" && e.machine === here()) m.chevron.push({ id: "remove-block", label: "Remove block…", sub: "Continue here; moving back then needs a comparison", run: () => removeBlock(e, () => go("sessions", true)) });
-      if (e.guard?.mode === "released" && e.machine === here()) m.chevron.push({ id: "restore-block", label: "Block again", sub: "Until you move the session back", run: () => restoreBlock(e, () => go("sessions", true)) });
+      if (e.guard?.mode === "block" && e.machine === here()) m.chevron.push({ id: "remove-block", label: "Remove block…", sub: "Continue here; moving back then needs a comparison", run: () => removeBlock(e, () => refreshSelection()) });
+      if (e.guard?.mode === "released" && e.machine === here()) m.chevron.push({ id: "restore-block", label: "Block again", sub: "Until you move the session back", run: () => restoreBlock(e, () => refreshSelection()) });
       m.chevronLabel = "Other choices";
     } else if (/^(moved|continued|prepared|previously continued)/.test(lv.status || "")) {
       const [c, newer] = newestCopy(e);
@@ -349,7 +350,17 @@ export function actionsFor(e) {
 // statusOf is a session's state for its row: [kind, words].
 const CLOUD_STATES = { running: ["running", "Running"], idle: ["idle", "Idle"], done: ["done", "Done"], failed: ["error", "Failed"],
   archived: ["ended", "Archived"], unknown: ["unknown", "State not known"] };
+// known keeps each session's last settled status, so a background read (whose rows are
+// "checking" until presence answers) shows what was known instead of flickering.
+const known = new Map();
 export function statusOf(e) {
+  const st = statusNow(e);
+  const k = key(e);
+  if (st[0] === "unknown" && st[1] === "Checking status" && known.has(k)) return known.get(k);
+  if (!(st[0] === "unknown" && st[1] === "Checking status")) known.set(k, st);
+  return st;
+}
+function statusNow(e) {
   if (e.cloud) {
     if(e.cached)return ["unknown","Checking status"];
     const st = CLOUD_STATES[e.cloud.state];

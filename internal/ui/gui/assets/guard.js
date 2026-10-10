@@ -77,8 +77,10 @@ export function role(e) {
   const dep = e.departure, ar = e.arrival, g = e.guard;
   if (dep && dep.status !== "forked") {
     const to = dep.cloud || where(dep.agentName || dep.agent, dep.machine);
-    if (g?.mode === "released" || dep.status === "diverged")
-      return { kind: "diverged", glyph: "!", chip: "Diverged", tone: "st-warn", line: dep.status === "diverged" ? `Original · continued after moving to ${to} · moving back needs a comparison` : `Original · block removed · moved to ${to}` };
+    if (dep.status === "diverged")
+      return { kind: "diverged", glyph: "!", chip: "Diverged", tone: "st-warn", line: `Original · continued after moving to ${to} · moving back needs a comparison` };
+    if (g?.mode === "released")
+      return { kind: "unblocked", glyph: "!", chip: "Unblocked", tone: "st-warn", line: `Original · moved to ${to} · block removed; continuing here diverges` };
     const blocked = g?.mode === "block";
     return { kind: blocked ? "blocked" : "moved-out", glyph: blocked && g.effective ? "◆" : "◇", chip: "Moved out", tone: blocked && g.effective ? "st-ended" : "st-warn", icon: blocked ? "lock" : "warn",
       line: `Original · moved to ${to}${blocked ? (g.effective ? " · blocked until you move back" : " · not blocked: " + (g.problem || "hooks not ready")) : g?.mode === "advise" ? (g.effective ? " · advised" : " · not advised: " + (g.problem || "hooks not ready")) : ""}` };

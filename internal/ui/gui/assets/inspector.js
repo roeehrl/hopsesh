@@ -360,7 +360,7 @@ function cloudNotes(e) {
 
 // inspector is the selected session's pane (or what selecting one does).
 export function inspector(e, previous=null) {
-  if (!e) return h("aside", { class: "inspector", id: "inspector", "aria-label": "Session details" }, h("div", { class: "empty" }, "Select a session to see what you can do with it."));
+  if (!e) return previous && !previous.dataset.key ? previous : h("aside", { class: "inspector", id: "inspector", "aria-label": "Session details" }, h("div", { class: "empty" }, "Select a session to see what you can do with it."));
   const m = model(e);
   const {group,observedAt,...item}=e;
   const signature=JSON.stringify([item,{...group,entries:undefined},statusLine(e),m.primary?.label,m.primary?.disabled,state.info?.previews,state.info?.agents,[...tabs.values()].filter(t=>t.machine===e.machine&&t.key===e.key).map(t=>[t.id,t.state,t.attention])]);

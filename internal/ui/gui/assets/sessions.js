@@ -5,7 +5,7 @@
 import { accountLabel, accountTitle, loadError, api, on, h, fill, icon, ICONS, view, state, screen, go, current, loading, toast, fail, cap, ago, agentBadge, machineStatus, sys, keys,
   entries, selected, here, agentInfo, $, count, clouds, cloudOf, cloudState, cloudChip, dialog, errText, rich, cloudTitle } from "./core.js";
 import { planPicked } from "./plan.js";
-import { healthNotice, loadHookHealth, withCLI, chip as roleChip } from "./guard.js";
+import { healthNotice, loadHookHealth, hookHealth, withCLI, chip as roleChip } from "./guard.js";
 import { dividers, apply as applyLayout } from "./layout.js";
 import { exitOf, exitWords, waiting, strayWaiting, showTerminal, tabs, onTabs } from "./term.js";
 import { model, statusOf, statusKey, placesOf, placeCount, placeName, showPlace, cloudBlock, onSelect, onTurnOn, key as entryKey } from "./actions.js";
@@ -277,7 +277,9 @@ function updateNote() {
 // notices are things to set up, shown above the list until done or dismissed.
 function notices() {
   const out = [], i = state.info, s = state.scan;
-  if (state.scanning || s.discovering || s.cached) out.push(h("div",{class:"discovery-note",role:"status","aria-live":"polite"},s.cached ? "Showing saved sessions. Checking for changes…" : `${entries().length} sessions found. Other sources may still be loading.`,h("button",{class:"link",onclick:()=>api("CancelScan")},"Stop checking")));
+  // Only until the first complete read: later refreshes say so in the header, so the list
+  // does not jump as a banner comes and goes.
+  if (!readOnce && (state.scanning || s.discovering || s.cached)) out.push(h("div",{class:"discovery-note",role:"status","aria-live":"polite"},s.cached ? "Showing saved sessions. Checking for changes…" : `${entries().length} sessions found. Other sources may still be loading.`,h("button",{class:"link",onclick:()=>api("CancelScan")},"Stop checking")));
   if(state.scope.kind==="all") for(const m of s.machines.filter(m=>m.status!=="ok" || m.phase==="error")) out.push(h("div",{class:"card notice warn-card",role:"status"},h("span",{},`${m.name===here()?sys.Here:m.name}: ${m.error||machineStatus(m.status)[1]}. Saved sessions remain available.`),h("button",{class:"btn",onclick:async()=>{if(m.local)await refreshHere();else {await api("ScanMachine",m.name);acceptScan(await api("ScanSnapshot"))}render()}},"Retry")));
   if (state.scanError) out.push(h("div", { class: "card notice warn-card", role: "alert" }, h("span", {}, "Refresh failed. Showing the previous results. " + state.scanError), h("button", { class: "btn", onclick: () => go("sessions", true) }, "Retry refresh")));
   const picked = state.scope.kind === "machine" && s.machines.find((m) => m.name === state.scope.value);
@@ -497,6 +499,7 @@ export function refreshList() {
 }
 onChange((full = true) => (full ? render() : refreshList()));
 
+let built = { content: "", side: "" }; // the list and sidebar markup as render last built them
 export function render() {
   if (!state.scan || current !== "sessions") return;
   decide(entries().length, () => toggleDisplay());
@@ -508,31 +511,79 @@ export function render() {
   const top = old ? old.scrollTop : 0;
   const focusKey = document.activeElement?.closest?.(".tree [data-key]")?.dataset.key;
   const focusGroup = document.activeElement?.closest?.(".tree [data-gkey]")?.dataset.gkey;
+  keepPinned();
   const inScope = scoped();
   const shown = applyFilters(inScope, state.scope);
   // A selection the list doesn't show goes (another place, a filter, a refresh).
   if (!state.scanning && !pendingScan && !state.scan.discovering && state.sel && !shown.some((x) => x.machine === state.sel.machine && x.key === state.sel.key)) { state.sel = null; state.handoffOpen = null; }
   const content = h("section", { class: "content" }, toolbar(scopeTitle(), state.scope), h("div", { class: "list" }, notices(), body(shown, inScope)));
   const previous=view.querySelector("#inspector"),nextInspector=inspector(selected(),previous),layout=view.querySelector(".three.layout");
+  // Replace only what changed: rebuilding identical rows makes icons and the list flicker.
+  // Compare with the markup as last built: layout and counts adjust the live nodes later.
+  let live=content;
+  const side=sidebar(),contentHTML=content.outerHTML,sideHTML=side.outerHTML;
   if(layout&&previous&&old){
-    layout.querySelector(".sidebar").replaceWith(sidebar());
-    old.replaceWith(content);
+    if(sideHTML!==built.side)layout.querySelector(".sidebar").replaceWith(side);
+    if(contentHTML===built.content){
+      live=old;
+      // The filter field is one element that each new toolbar adopts: give it back.
+      const input=content.querySelector("#list-filter"),label=old.querySelector("label.tb-search");
+      if(input&&label&&input.parentNode!==label)label.insertBefore(input,label.querySelector(".kbd"));
+    }else old.replaceWith(content);
     if(nextInspector!==previous)previous.replaceWith(nextInspector);
-  }else fill(view,h("div",{class:"three layout"},sidebar(),content,nextInspector,dividers()));
+  }else fill(view,h("div",{class:"three layout"},side,content,nextInspector,dividers()));
+  built={content:contentHTML,side:sideHTML};
   counts(shown.length, inScope.length, state.scope);
   lastShown = shown; lastScope = inScope;
   applyLayout();
-  content.scrollTop = top;
+  live.scrollTop = top;
   const ins=view.querySelector(".inspector");if(ins)ins.scrollTop=inspectorTop;
   if(inputID){const input=document.getElementById(inputID);input?.focus({preventScroll:true});if(inputSelection)input?.setSelectionRange(...inputSelection)}
   else if(active?.isConnected && active!==document.body)active.focus({preventScroll:true});
-  if (focusKey) rowByKey(content, focusKey)?.focus({ preventScroll: true });
-  else if (focusGroup) content.querySelector(`.grp[data-gkey="${CSS.escape(focusGroup)}"]`)?.focus({ preventScroll: true });
+  if (focusKey) rowByKey(live, focusKey)?.focus({ preventScroll: true });
+  else if (focusGroup) live.querySelector(`.grp[data-gkey="${CSS.escape(focusGroup)}"]`)?.focus({ preventScroll: true });
 }
 
 // showEntry selects a session from elsewhere (the palette, Go to the newer copy, a
 // notification): its place if it isn't in this one, no filter that hides it, its group
 // open; then it is shown landing.
+// pinned is a copy shown in place of its branch's row (Show copy, Go to the newer copy);
+// it stays selected across scans, and is read again so it is never stale.
+let pinned = null;
+function keepPinned() {
+  const s = state.sel;
+  if (!pinned || !s || pinned.machine !== s.machine || pinned.key !== s.key) return;
+  if (entries().some((x) => x.machine === s.machine && x.key === s.key)) return;
+  for (const g of state.scan?.groups || []) {
+    const i = g.entries.findIndex((x) => (x.copies || []).some((c) => c.machine === s.machine && c.key === s.key));
+    if (i >= 0) {
+      g.entries[i] = pinned;
+      api("ResolveEntry", s.machine, s.key).then((fresh) => {
+        if (!fresh || !pinned || pinned.key !== fresh.key) return;
+        const changed = JSON.stringify(fresh) !== JSON.stringify(pinned);
+        Object.assign(pinned, fresh);
+        if (changed && current === "sessions") render();
+      }).catch(() => {});
+      return;
+    }
+  }
+}
+
+// refreshSelection reads the selected session again (after removing or restoring its block)
+// and redraws it in place, then reads everything again quietly.
+export async function refreshSelection() {
+  const s = state.sel;
+  if (s) {
+    try {
+      const fresh = await api("ResolveEntry", s.machine, s.key);
+      for (const g of state.scan?.groups || []) for (const x of g.entries) if (x.machine === s.machine && x.key === s.key) Object.assign(x, fresh);
+      if (pinned && pinned.machine === s.machine && pinned.key === s.key) Object.assign(pinned, fresh);
+      if (current === "sessions") render();
+    } catch { /* the background scan below shows it */ }
+  }
+  scan("Scan", true);
+}
+
 export function showEntry(e) {
   const k = entryKey(e);
   if (!entries().some(x=>entryKey(x)===k)) {
@@ -542,6 +593,7 @@ export function showEntry(e) {
     if (i<0) return;
     const {group:ignored,...copy}=e;
     group.entries[i]=copy;
+    pinned=copy;
     e=Object.assign({group},copy);
     toast(`Showing ${e.agentName} on ${e.machine === here() ? sys.here : e.machine}; other copies remain in Copies & history.`);
   }
@@ -610,12 +662,18 @@ export function listCommand(cmd) {
 
 screen("sessions", async (rescan = false) => {
   loadList(state.info?.list);
-  if (!state.scan || rescan || state.stale) await scan();
+  // With sessions already read, show them at once and read again in the background: the
+  // list updates in place when the answer comes, never through a blocking screen.
+  const again = state.scan && (rescan || state.stale);
+  if (!state.scan) await scan();
   if (!state.scan || current !== "sessions") return;
   decide(entries().length, () => toggleDisplay());
   render();
-  // Asking Codex whether it trusts the hooks starts its app-server: off the first paint.
-  loadHookHealth().then(() => { if (current === "sessions") render(); });
+  if (again) scan("Scan", true);
+  // Asking Codex whether it trusts the hooks starts its app-server: off the first paint,
+  // and the list is drawn again only when the answer changes what it shows.
+  const before = JSON.stringify(hookHealth()?.problems || null);
+  loadHookHealth().then((d) => { if (current === "sessions" && JSON.stringify(d?.problems || null) !== before) render(); });
   const r = view.querySelector('.row[aria-selected="true"]');
   if (r) inView(r, false);
   presenceSoon(presenceEvery());
@@ -641,9 +699,16 @@ let discoveryPending=null,discoveryPresence=null,discoveryTimer=0,pointerHeld=fa
 document.addEventListener("pointerdown",()=>{pointerHeld=true},true);
 window.addEventListener("pointerup",()=>{pointerHeld=false},true);
 window.addEventListener("pointercancel",()=>{pointerHeld=false},true);
+let readOnce = false; // a complete scan (not saved, not still discovering) has been shown
+let completeAt = 0;   // when the last complete scan was shown
+// Once a complete scan is on screen, a new read's partial snapshots (repositories pending,
+// machines "reading", rows "checking") are held back and only its finished result is shown,
+// so nothing regroups or flickers. A read that takes longer than 30 s shows its progress.
 export function acceptScan(scan){
  if(scan?.revision && state.scan?.revision && scan.revision<=state.scan.revision)return false;
- state.scan=scan;freshness();return true;
+ const partial=scan.discovering||scan.cached;
+ if(partial&&readOnce&&Date.now()-completeAt<30000)return false;
+ state.scan=scan;if(!partial){readOnce=true;completeAt=Date.now();}freshness();return true;
 }
 function scheduleDiscovery(){if(!discoveryTimer)discoveryTimer=setTimeout(drawDiscovery,150)}
 export function backgroundRender(){backgroundDirty=true;scheduleDiscovery()}

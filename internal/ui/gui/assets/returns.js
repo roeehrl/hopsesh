@@ -1,5 +1,6 @@
 // Candidates come only from the app's verified branch inventory. Never infer a
 // return from copy timestamps or from a fork's parent journey.
+import { refreshSelection } from "./sessions.js";
 import { api, h, dialog, here, sys, state, entries, when, agentBadge, fail, go } from "./core.js";
 import { removeBlock, restoreBlock } from "./guard.js";
 import { planFor } from "./plan.js";
@@ -101,8 +102,8 @@ export function movementNotice(e, show, viewJourney) {
     Date.parse(n.checkedAt) > 0 ? h("span", {class:"muted"}, `Checked ${when(n.checkedAt)}`) : null,
     h("div", {style:"display:flex;gap:6px;flex-wrap:wrap"},
       h("button", {class:"btn small primary",onclick:()=>showMovementDestination(n,show)}, "Open moved copy"),
-      local && g?.mode === "block" ? h("button", {class:"btn small danger",onclick:()=>removeBlock(e,()=>go("sessions",true))}, "Remove block…") : null,
-      local && g?.mode === "released" ? h("button", {class:"btn small",onclick:()=>restoreBlock(e,()=>go("sessions",true))}, "Block again") : null,
+      local && g?.mode === "block" ? h("button", {class:"btn small danger",onclick:()=>removeBlock(e,()=>refreshSelection())}, "Remove block…") : null,
+      local && g?.mode === "released" ? h("button", {class:"btn small",onclick:()=>restoreBlock(e,()=>refreshSelection())}, "Block again") : null,
       h("button", {class:"btn small",onclick:viewJourney}, "View journey"),
       local && n.status !== "forked" ? h("button", {class:"btn small",onclick:()=>planFor(e,{target:e.agent,targetProfile:e.profile?.id || "",fork:true})}, "Fork here instead…") : null));
 }
