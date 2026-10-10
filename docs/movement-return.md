@@ -1,56 +1,72 @@
-# Movement notices and return destinations
+# Protecting the original, and return destinations
 
 A transfer prepares another copy of a conversation. It does not establish that an agent
 has continued working. Hopsesh records movement beside the native transcript and derives
-notices and return destinations when it scans sessions. Hopsesh never appends native
-user, assistant or tool messages to deliver these notices. The vendor controls how
-hook context is displayed and retained during a normal session turn.
+the moved-out state, the moved copy's origin and return destinations when it scans
+sessions. Hopsesh never changes a session's title to show movement and never appends
+native user, assistant or tool messages to the original.
 
-`movement_notices` defaults to true in `config.toml`. Set it to false to hide movement
-notices; `--notify=false` disables the notice for a particular transfer. This leaves
-lineage, return discovery, comparison, conflict detection and undo intact. Native title
-marks are controlled separately by `mark_moved`/`--mark`. A cross-agent title mark says
-“prepared in”; it cannot prove subsequent work. Callers using `move.Options` directly
-must set `Notify: true` when they want a notice; config defaults apply in the app layer.
+## Block, advise or leave alone
 
-When a return cannot safely append, the [conversation conflict review](return-conflict-review.md)
-shows verified differences and the effects of creating a separate conversation. A
-difference does not prove that work happened after a move; old incomplete transfers
-may have omitted already saved messages. Notice hooks supply context, not an exclusive
-ownership lock that prevents the original from being continued.
+`original` in `config.toml` (Settings › General › "When a session moves, the original")
+decides what the copy left behind does until the session moves back:
 
-**Label the source session title** is the GUI name for `mark_moved`/`--mark`.
-It changes the title through the agent module, for example to “↪ prepared in Codex”.
-For a live source, labeling waits until its process ends. A title label does not send
-a prompt, stop the agent, lock the conversation, or synchronize later work. Movement
-notice recording and hook installation are separate controls.
+- `block` (the default): the agent refuses new prompts in the original and shows why, so
+  the moved copy stays the one source of truth and moving back is a clean return.
+- `advise`: the agent is told (and shows) that the session moved; work can continue.
+- `off`: the original is left alone.
 
-## Native agent setup
+`--notify=false` (or unchecking "Block the original until you move back" in the plan)
+leaves one transfer's original alone. Moving back clears the block or advice by itself.
+To keep working in one original anyway, remove its block: the app's "Remove block…"
+(with a warning), the TUI's `U` (press twice), or `hopsesh unblock <session>`; "Block
+again" / `hopsesh unblock --restore` puts it back. A removed block applies to that
+movement only; a later move blocks again. Continuing in an unblocked original makes the
+copies diverge, so moving back then needs the
+[conversation conflict review](return-conflict-review.md) or a separate fork.
 
-In **Hopsesh → Settings → General**, **Record movement notices** controls the default-on
-recording preference. Under **Movement notice delivery**, **Set up local notice hooks**
-enables delivery inside supported native agents; recording alone does not install hooks.
-That section also shows each hook's installation status. Alternatively, use
-`hopsesh notices install`. Installation covers
-supported local Claude Code and Codex roots, including registered account profiles. To
-select one profile, use `hopsesh notices install --agent claude --profile <profile-id>`.
-`hopsesh notices status` reports installation and disabled/unsupported reasons;
-`hopsesh notices remove` removes only Hopsesh's hooks, preserving unrelated hooks.
-Run setup on each machine where native sessions should receive notices. Remote machine
-registration alone does not install hooks there.
+A difference does not prove that work happened after a move; old incomplete transfers
+may have omitted already saved messages. A separate fork never blocks its parent.
 
-Hooks deliver a short notice when a session starts/resumes or the user submits a prompt.
-They never start a model turn, stop a session, or edit its transcript.
-Delivery is deduplicated per movement and status; another round trip can produce a new
-notice even when its wording is identical. Vendor trust, project policy and disabled-hook
-settings still apply. “Supplied to hook” records Hopsesh's output, not proof that the
-model read it. Already-running sessions receive a notice at the next supported event.
+Earlier versions could label the source title (“↪ prepared in Codex · …”). Hopsesh still
+reads such a label so it does not show as part of the title, and a session without
+lineage that carries one is shown with the movement it describes; a return clears it.
+
+## Protection hooks
+
+Blocking and advice work through a hook the agent runs on `SessionStart` and
+`UserPromptSubmit`. Block mode answers `UserPromptSubmit` with
+`{"decision":"block","reason":…}` on every prompt (Claude Code and Codex both refuse the
+prompt and show the reason); `SessionStart` cannot block, so it explains the block. Advise
+mode adds context once per movement and status. Hooks never start a model turn, stop a
+session, or edit its transcript; they fail open on errors and time out after 2 seconds.
+
+Install them in **Settings › General › Protection hooks**, or with
+`hopsesh notices install` (`--agent claude --profile <profile-id>` for one profile);
+`hopsesh notices status` and `remove` report and remove only hopsesh's hooks. The hooks
+and the skill run the hopsesh command, so installing either from the app requires it
+(the app offers to install it first). Run setup on each machine whose originals should be
+protected; registering a remote machine does not install hooks there.
+
+**Codex reviews every new or changed hook** and skips it silently until the user trusts
+it (`/hooks` in the CLI, or the app's Review hooks prompt). Hopsesh asks Codex itself
+(`codex app-server`, `hooks/list`) whether it trusts the hopsesh hooks, shows "waiting for
+your approval" in Settings, `hopsesh notices status` and a Sessions warning, and never
+approves hooks on the user's behalf. The hook command stays the same across hopsesh
+updates (the app's bundled CLI path), so an update does not ask for review again. The app
+shows an original as blocked only when its agent's hook is installed and trusted.
 
 The current adapters accept stable Claude Code 2.x from 2.1.284 and stable Codex 0.x from
 0.160.0; unknown or prerelease versions are refused pending validation. Windows commands
 use explicit PowerShell handling; macOS and Linux use the configured command shell.
-Disabling movement notices stops delivery without deleting lineage or the installed hook
-configuration. Uninstall the hooks separately if desired.
+
+## Indicators
+
+Every view uses the same words, with a glyph that also works without color:
+`◆ Moved out` (blocked), `◇ Moved out` (advised or unprotected), `! Diverged` /
+`Unblocked`, `● Moved copy` (the active copy, with where it came from), `↩ Returned`,
+`⑂ Fork`. The app shows the chip in the row and a line under the title in the inspector;
+`hopsesh ls`/`show` and the TUI print the same words.
 
 ## Persisted contract
 
@@ -63,7 +79,7 @@ peer protocols are refused, with no automatic migration or compatibility fallbac
 previously visited replicas on the same branch, most recent first. It excludes the
 current replica, sibling branches and a fork's parent. A native replica is identified
 by endpoint, agent, profile/binding, session and branch, never by display name alone.
-`Departure(current)` reports an unambiguous active departure with notices enabled.
+`Departure(current)` reports an unambiguous active departure with protection recorded (`notify`); `Departed(current)` ignores `notify` and drives the moved-out state.
 Returning clears that departure; an undone transfer produces no active notice. Fork
 notices describe the separate branch and leave the parent available.
 

@@ -42,7 +42,7 @@ and scoped provenance. A receiving peer resolves its own configured profile and 
 1. Give replicas explicit runtime-profile and login-binding references. Keep machine identity
    distinct; do not overload a machine label or concatenate an untyped account string into it.
 2. Include these references in target selection, locks, receipts, expected-state fingerprints,
-   operation journals, moved marks, scan caches, grouped inventory, terminal tickets and peer
+   operation journals, movement statuses, scan caches, grouped inventory, terminal tickets and peer
    requests. A sibling profile with the same native session ID must remain independently selectable.
 3. Keep revisions' logical identities across sanitization and agent conversion. Receipts describe
    delivered representation and losses. Dropped reasoning does not become a new authored revision.

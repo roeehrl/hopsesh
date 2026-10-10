@@ -6,7 +6,46 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+
+- The original of a moved session is blocked until you move it back (default), or only
+  advised, or left alone (Settings › General, `original` in `config.toml`). Block mode
+  refuses new prompts through the agent's hook and explains why; moving back clears it.
+  "Remove block…" in the app, `U` in the TUI or `hopsesh unblock <session>` releases one
+  original, with a warning that continuing there makes the copies diverge.
+- Clear moved / original indicators: `◆ Moved out`, `● Moved copy`, `↩ Returned`,
+  `! Diverged` with where the session went or came from, in the list, inspector, TUI and
+  `hopsesh ls`/`show`. The old `movement_notices` setting is replaced by `original`.
+- Codex hook trust: hopsesh asks Codex whether it trusts the hopsesh hooks and says when
+  they are waiting for your approval in Codex (`/hooks`), instead of assuming installed
+  hooks run. It never approves hooks for you.
+- Installing the skill or the hooks from the app requires the hopsesh command, which the
+  app offers to install first; a broken command link is reported.
+- Settings › History (and `hopsesh history`): a lower context budget for transfers,
+  "recent turns only" for older history, and memory/record/archive/file limits. Reaching a
+  limit stops before anything is written and names the setting; history is never
+  silently truncated. `pull --context-budget/--older` and the plan override them once.
+
+### Changed
+
+- Session titles are no longer changed to show movement; hopsesh shows it in its own
+  views. A move, continuation, push or hand-off leaves the source's title as it was, and
+  the destination gets the session's own title (no "(from …)" suffix). The list, TUI and
+  app derive "moved to", "prepared in" and "continued in" from lineage. The `mark_moved`
+  setting, `--no-mark`, the "Label the source session title" toggles and the deferred
+  labels for open sessions are gone; an old `mark_moved` line in `config.toml` is ignored.
+  Labels written by earlier versions are still read so they don't show as part of a
+  title, and a return still clears them. For module authors: the `Marker` capability,
+  `agent.Mark`, `MarkTitle` and `ParseMarkTitle` are removed; `Summary.LegacyLabel` and
+  `StripLegacyLabel` read old labels.
+
 ### Fixed
+
+- A new Claude Code session's context uses the account's current model (from its most
+  recent sessions) instead of a 64K fallback; Codex uses the window it reports itself.
+- Transfers use the whole context budget: space the older-history extract leaves goes to
+  more recent turns verbatim. The plan no longer repeats the carry-over summary as a
+  warning.
 
 - Open originals have a clear return status card and guided exit instructions,
   with an explicit check-and-review action instead of silently switching apps.

@@ -3,6 +3,7 @@
 import { api, on, h, fill, view, state, screen, go, loading, toast, fail, dialog, agentBadge, sys, cliHow, icon, ask, count, current, loadError, navigationID, errText } from "./core.js";
 import { desktopSettings } from "./desktop-settings.js";
 import { running } from "./term.js";
+import { withCLI, loadHookHealth } from "./guard.js";
 
 const SKILL_TEXT = {
   absent: ["Not installed", "st-ended"],
@@ -21,7 +22,7 @@ const CLI_TEXT = {
   foreign: ["Points to a different program", "st-warn"],
 };
 const CAPS = {
-  live: "sees open sessions", stop: "quits open sessions", mark: "marks copies left behind", account: "knows its account",
+  live: "sees open sessions", stop: "quits open sessions", account: "knows its account",
   sanitize: "moves between accounts", read: "continues in other agents", write: "takes sessions from other agents",
   "native-replay": "replays commands natively", integrate: "can use the hopsesh skill", fork: "can fork", "remote-control": "remote control",
   app: "desktop app", import: "has its own importer", "post-install": "registers moved sessions",
@@ -68,7 +69,7 @@ function save(patch) {
   // never briefly reveal a preview while SaveSettings/Info are still in flight.
   if (patch.previews !== undefined) state.info.previews = patch.previews;
   Object.assign(s, patch);
-  return run(() => api("SaveSettings", Object.assign({ appearance: s.appearance, layout: s.layout, movementNotices: s.movementNotices, markMoved: s.markMoved, syncCode: s.syncCode, pushSource: s.pushSource, updateCheck: s.updateCheck || "off", appIcons: s.appIcons, previews: s.previews }, patch)), "Saved");
+  return run(() => api("SaveSettings", Object.assign({ appearance: s.appearance, layout: s.layout, original: s.original, syncCode: s.syncCode, pushSource: s.pushSource, updateCheck: s.updateCheck || "off", appIcons: s.appIcons, previews: s.previews }, patch)), "Saved");
 }
 
 function toggle(key, label, desc) {
@@ -84,8 +85,8 @@ function general() {
       h("div", { class: "set-row" }, title("Clone layout", "Where a repository goes inside the repos folder."),
         h("select", { "aria-label": "Clone layout", onchange: (e) => save({ layout: e.target.value }) },
           h("option", { value: "flat", selected: s.layout === "flat" }, "<repos>/<name>"), h("option", { value: "ghq", selected: s.layout === "ghq" }, "<repos>/<host>/<owner>/<name>"))),
-      toggle("movementNotices", "Record movement notices", "Records where work was prepared or continued. Installed notice hooks supply context to the agent; they do not lock the original or guarantee a visible warning."),
-      toggle("markMoved", "Label the source session title", "Adds a destination label such as “↪ prepared in Codex” to the title. This is a visual reminder, not a lock; further work remains possible."),
+      h("div", { class: "set-row" }, title("When a session moves, the original", "Blocked: the copy left behind refuses new prompts until you move the session back, so moving back stays a clean return (recommended). Warned: you can still continue it, but the copies may diverge. Moving back always clears this; you can also remove it from one original."),
+        seg("When a session moves, the original", s.original || "block", [["block", "Is blocked"], ["advise", "Shows a warning"], ["off", "Is left alone"]], (v) => save({ original: v }))),
       toggle("syncCode", "Bring the code along", "Fetch the session's commit (from the other machine if it isn't pushed) and fast-forward a clean checkout."),
       toggle("pushSource", "Push unpushed commits on the other machine first", "Off: commits are fetched straight from the other machine.")),
     noticeSetup(),
@@ -223,7 +224,7 @@ function terminal() {
 function skill() {
   const sk = s.skill || {}, copies = sk.copies || [], rules = sk.rules || [];
   const addRules = h("input", { type: "checkbox" });
-  const install = (force, withRules, done) => run(() => api("InstallSkill", force, withRules), done);
+  const install = (force, withRules, done) => run(() => withCLI(() => api("InstallSkill", force, withRules)), done);
   const acts = [];
   if (sk.state === "absent") acts.push(h("button", { class: "btn primary", onclick: () => install(false, addRules.checked, "Installed the hopsesh skill") }, "Install the skill"));
   if (sk.state === "stale" || sk.state === "broken") acts.push(h("button", { class: "btn primary", onclick: () => install(false, addRules.checked, "Updated the hopsesh skill") }, sk.state === "broken" ? "Repair" : "Update"));
@@ -412,13 +413,18 @@ screen("settings", async (which) => {
 
 function noticeSetup() {
   const hooks = s.noticeHooks || [];
-  return card(h("span", {class:"sec-h"}, "Movement notice delivery"),
-    h("span", {class:"muted"}, "Hopsesh keeps movement notices. Install local hooks to show them when an agent session starts. Installation does not prove delivery; the agent's hook trust settings still apply."),
+  const off = s.original === "off";
+  const trustWords = (t) => !t ? "" : t.state === "trusted" ? " · trusted by the agent" : t.state === "needs-review" ? " · waiting for your approval in the agent" : t.state === "disabled" ? " · turned off in the agent" : t.state === "missing" ? " · not seen by the agent" : " · trust not verified";
+  return card(h("span", {class:"sec-h"}, "Protection hooks"),
+    h("span", {class:"muted"}, "Blocking and warnings work through a small hook each agent runs before a prompt. The hooks run the hopsesh command. Codex runs a new hook only after you approve it in Codex (/hooks); hopsesh checks and tells you, and never approves hooks for you."),
     s.noticeHooksError ? h("span", {class:"warn"}, s.noticeHooksError) : null,
+    !s.cliReady ? h("span", {class:"warn"}, "The hopsesh command is not installed; installing a hook installs it first.") : null,
     ...hooks.map(hook => h("div", {class:"set-row"},
-      title(`${hook.agent} · ${hook.profileLabel || hook.profile || "Default account"}`, `${hook.installed ? "Installed" : "Not installed"}${!hook.enabled ? " · notices disabled" : ""}${hook.reason ? " · " + hook.reason : ""}${hook.evidence ? " · " + hook.evidence : ""}`),
-      hook.path ? h("span", {class:"mono",style:"font-size:11px;overflow-wrap:anywhere"}, hook.path) : null,
-      hook.installed ? h("button", {class:"btn",onclick:()=>run(()=>api("RemoveNoticeHooks",hook.agent,hook.profile),"Notice hook removed")}, "Remove hook")
-      : h("button", {class:"btn",disabled:!hook.supported || !s.movementNotices,onclick:()=>run(()=>api("InstallNoticeHooks",hook.agent,hook.profile),"Notice hook installed; delivery depends on agent settings")}, "Install hook"))),
-    h("button", {class:"btn",disabled:!s.movementNotices,onclick:()=>run(()=>api("InstallNoticeHooks","",""),"Local notice hooks installed; delivery depends on agent settings")}, "Set up local notice hooks"));
+      title(`${hook.agent} · ${hook.profileLabel || hook.profile || "Default account"}`, `${hook.installed ? "Installed" : "Not installed"}${hook.installed ? trustWords(hook.trust) : ""}${hook.reason ? " · " + hook.reason : ""}`),
+      hook.trust && hook.trust.state !== "trusted" && hook.trust.fix ? h("span", {class:"muted",style:"font-size:12px"}, hook.trust.fix) : null,
+      hook.installed ? h("button", {class:"btn",onclick:()=>run(()=>api("RemoveNoticeHooks",hook.agent,hook.profile),"Hook removed")}, "Remove hook")
+      : h("button", {class:"btn",disabled:!hook.supported || off,onclick:()=>run(()=>withCLI(()=>api("InstallNoticeHooks",hook.agent,hook.profile)),"Hook installed")}, "Install hook"))),
+    h("div", {style:"display:flex;gap:8px;flex-wrap:wrap"},
+      h("button", {class:"btn",disabled:off,onclick:()=>run(()=>withCLI(()=>api("InstallNoticeHooks","","")),"Hooks installed")}, "Install all hooks"),
+      h("button", {class:"btn",onclick:()=>run(()=>loadHookHealth(true))}, "Check again")));
 }

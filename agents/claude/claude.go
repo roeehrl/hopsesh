@@ -35,7 +35,6 @@ var (
 	_ agent.Module           = (*Module)(nil)
 	_ agent.LiveDetector     = (*Module)(nil)
 	_ agent.Stopper          = (*Module)(nil)
-	_ agent.Marker           = (*Module)(nil)
 	_ agent.AccountProber    = (*Module)(nil)
 	_ agent.Sanitizer        = (*Module)(nil)
 	_ agent.Integrator       = (*Module)(nil)
@@ -217,7 +216,7 @@ func (s *info) summary() agent.Summary {
 		AgentVersion: s.Version,
 		WorktreeRoot: s.WorktreeRoot,
 		Subagents:    s.Subagents,
-		Mark:         s.Mark,
+		LegacyLabel:  s.LegacyLabel,
 		Path:         s.File,
 		Mirror:       s.Mirror,
 	}
@@ -350,14 +349,14 @@ func sameRoots(a, b agent.Install) bool { return a.Root(home) == b.Root(home) }
 
 // policy protects signed thinking, opaque data and record identifiers, drops Remote
 // Control bridge records (a copy must not reattach to the source's link) and any
-// "moved"/"continued" marks the copy carried.
+// "moved"/"continued" title labels an older hopsesh wrote on the copy.
 func policy() agent.RewritePolicy {
 	return agent.RewritePolicy{
 		Protect: []string{"thinking", "signature", "data", "uuid", "parentUuid", "sessionId", "leafUuid",
 			"messageId", "promptId", "requestId", "logicalParentUuid"},
 		DropRecords: []agent.FieldMatch{
 			{Field: "type", Values: []string{"bridge-session"}},
-			{Field: "customTitle", Prefixes: agent.MarkPrefixes()},
+			{Field: "customTitle", Prefixes: agent.LegacyLabelPrefixes()},
 		},
 	}
 }
@@ -422,13 +421,6 @@ func (m *Module) Resume(in agent.Install, key agent.SessionKey, p agent.Placemen
 // a resumed session then believes it is a child: with CLAUDE_CODE_CHILD_SESSION it saves
 // no transcript at all. A session hopsesh resumes is never anyone's child.
 var sessionMarkers = []string{"CLAUDE_CODE_CHILD_SESSION", "CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_ENTRYPOINT"}
-
-// Mark retitles the copy left behind with a custom-title record (what /rename writes), so
-// Claude Code's own resume list shows where it went. The file's time is kept.
-func (m *Module) Mark(_ context.Context, h agent.Host, in agent.Install, s agent.Summary, mk agent.Mark) error {
-	rec := encodeRecord(map[string]any{"type": "custom-title", "customTitle": agent.MarkTitle(mk, s.Title), "sessionId": string(s.Key.Session)})
-	return h.FS().Append(s.Path, append(rec, '\n'), agent.AppendOptions{NewLine: true, KeepMtime: true, Standalone: true})
-}
 
 // record encodes a transcript record with its keys in a fixed order (type first), like
 // Claude Code writes them.

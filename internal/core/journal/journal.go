@@ -91,7 +91,7 @@ type Entry struct {
 	Keep bool `json:"keep,omitempty"`
 }
 
-// Journal is the undo record of one operation (a move, a continuation, a mark).
+// Journal is the undo record of one operation (a move, a continuation, a hand-off).
 type Journal struct {
 	UndoTime   time.Time          `json:"undoTime,omitempty"`
 	Receipts   []Receipt          `json:"receipts,omitempty"`
@@ -132,9 +132,8 @@ func Dir(stateDir string) string { return filepath.Join(stateDir, "journal") }
 const (
 	KindMove     = "move"     // a session brought here in its own agent
 	KindContinue = "continue" // a session continued in another agent
-	KindPush     = "push"     // a session sent to another machine (its mark and lineage here)
-	KindMark     = "mark"     // a mark owed to a copy left behind
-	KindHandoff  = "handoff"  // a session handed off to a cloud (a branch, a cloud session, marks)
+	KindPush     = "push"     // a session sent to another machine (its lineage here)
+	KindHandoff  = "handoff"  // a session handed off to a cloud (a branch, a cloud session, lineage)
 	KindFetch    = "fetch"    // a session brought from a cloud (a worktree, an adopted session)
 	KindHop      = "hop"      // a cloud session handed on to another cloud through this machine (Parts)
 	KindCleanup  = "cleanup"  // branches deleted on a remote once their work was merged

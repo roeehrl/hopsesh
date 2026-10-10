@@ -164,7 +164,7 @@ func (m *Module) Write(ctx context.Context, h agent.Host, in agent.Install, req 
 	if err != nil {
 		return ir.WriteResult{}, err
 	}
-	if req.Header.Title != "" { // on an append, this also clears a "continued in" mark
+	if req.Header.Title != "" { // on an append, this also clears a legacy title label
 		if err := setName(h, in, sid, req.Header.Title); err != nil {
 			return ir.WriteResult{}, err
 		}

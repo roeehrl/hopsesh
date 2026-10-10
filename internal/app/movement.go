@@ -34,17 +34,19 @@ type ReturnCandidate struct {
 }
 
 type MovementNotice struct {
-	ProfileLabel string    `json:"profileLabel,omitempty"`
-	Operation    string    `json:"operation"`
-	Status       string    `json:"status"`
-	Text         string    `json:"text"`
-	Machine      string    `json:"machine"`
-	Agent        agent.ID  `json:"agent"`
-	AgentName    string    `json:"agentName"`
-	Key          string    `json:"key"`
-	Profile      string    `json:"profile"`
-	CheckedAt    time.Time `json:"checkedAt"`
-	Delivery     string    `json:"delivery"`
+	ProfileLabel string   `json:"profileLabel,omitempty"`
+	Operation    string   `json:"operation"`
+	Status       string   `json:"status"`
+	Text         string   `json:"text"`
+	Machine      string   `json:"machine"`
+	Agent        agent.ID `json:"agent"`
+	AgentName    string   `json:"agentName"`
+	// Cloud is the destination cloud's title, when the session went to a cloud.
+	Cloud     string    `json:"cloud,omitempty"`
+	Key       string    `json:"key"`
+	Profile   string    `json:"profile"`
+	CheckedAt time.Time `json:"checkedAt"`
+	Delivery  string    `json:"delivery"`
 }
 
 type movementObservation struct {
@@ -148,6 +150,12 @@ func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
 			e := &inv.Entries[i]
 			e.Returns = nil
 			e.Movement = nil
+			e.Departure, e.Arrival = nil, nil
+			if hop, ok := g.Departed(id); ok {
+				e.Departure = a.describeDeparture(g, id, hop, observed)
+			} else {
+				e.Arrival = a.arrival(g, id)
+			}
 			seen := map[string]bool{}
 			for _, r := range g.ReturnReplicas(id) {
 				physical := r.Endpoint + "\x00" + r.Key.String()
@@ -240,8 +248,17 @@ func (a *App) movementNotice(g *lineage.Manifest, id lineage.ReplicaID, observed
 	if !ok {
 		return nil
 	}
+	return a.describeDeparture(g, id, hop, observed)
+}
+
+// describeDeparture says where a hop away from replica id went and what is known of the
+// work there (prepared, continued, diverged or forked), from lineage and observation.
+func (a *App) describeDeparture(g *lineage.Manifest, id lineage.ReplicaID, hop lineage.Hop, observed map[lineage.ReplicaID]movementObservation) *MovementNotice {
 	dst := g.Replica(hop.To)
 	n := &MovementNotice{Operation: hop.ID, Status: "prepared", Machine: dst.Location, Agent: dst.Key.Agent, AgentName: a.agentName(dst.Key.Agent), Key: dst.Key.String(), Profile: dst.Key.Profile, Delivery: "pending"}
+	if _, cl, ok := a.cloudModule(dst.Location); ok {
+		n.Cloud = cl.Title
+	}
 	target := observed[hop.To]
 	if target.entry != nil {
 		n.Machine = target.entry.Machine
@@ -366,6 +383,7 @@ func (a *App) SessionMovementNotice(ctx context.Context, id agent.ID, profile, s
 type MovementNoticeDetails struct {
 	Key       agent.SessionKey
 	Text      string
+	Summary   string // where the session went, without the advice (for a block reason)
 	Operation string
 	Status    string
 }
@@ -442,6 +460,7 @@ func (a *App) MovementNoticeDetailsForPath(ctx context.Context, id agent.ID, pro
 		return details, nil
 	}
 	details.Text, details.Operation, details.Status = hookNoticeText(n), n.Operation, n.Status
+	details.Summary = strings.TrimSuffix(strings.TrimPrefix(hookNoticeText(n), "Hopsesh status: "), " Check the destination before continuing; continuing here may create separate work.")
 	return details, nil
 }
 

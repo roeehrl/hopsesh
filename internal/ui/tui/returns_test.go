@@ -17,11 +17,11 @@ func TestMovementDetailsFit24RowTerminal(t *testing.T) {
 		for _, movement := range []bool{false, true} {
 			for _, returns := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%d/movement=%t/returns=%t", width, movement, returns), func(t *testing.T) {
-					m := &model{width: width, height: 24, mode: modeBrowse, inv: &app.Inventory{}, deps: Deps{Describe: func(app.Entry) string { return "main · clean" }}}
+					m := &model{width: width, height: 24, mode: modeBrowse, inv: &app.Inventory{}, deps: Deps{App: &app.App{StateDir: t.TempDir()}, Describe: func(app.Entry) string { return "main · clean" }}}
 					e := app.Entry{Machine: "studio", Agent: "codex", AgentName: "Codex", Lineage: lineage.New("fixture"),
 						Session: agent.Summary{Key: agent.SessionKey{Agent: "codex", Session: "fixture"}, Title: "Return checkpoint", LastPrompt: "Continue the work"}}
 					if movement {
-						e.Movement = &app.MovementNotice{Status: "prepared", Text: "Prepared in Claude Code; work has not yet been observed."}
+						e.Departure = &app.MovementNotice{Operation: "op1", Status: "prepared", Agent: "claude", AgentName: "Claude Code", Machine: "studio", Text: "Prepared in Claude Code; work has not yet been observed."}
 					}
 					if returns {
 						e.Returns = []app.ReturnCandidate{{Status: "available"}}
@@ -39,7 +39,7 @@ func TestMovementDetailsFit24RowTerminal(t *testing.T) {
 					if lines > 24 || m.cursor < m.offset || m.cursor >= m.offset+m.listHeight() {
 						t.Fatalf("selected row or footer clipped: %d rows\n%s", lines, view)
 					}
-					if !strings.Contains(view, "q quit") || movement && !strings.Contains(view, "Movement [prepared]") || returns && !strings.Contains(view, "[R] move back") {
+					if !strings.Contains(view, "q quit") || movement && !strings.Contains(view, "◆ Moved out · moved to Claude Code on studio; blocked until you move back") || returns && !strings.Contains(view, "[R] move back") {
 						t.Fatal("movement, return action or footer missing", view)
 					}
 				})

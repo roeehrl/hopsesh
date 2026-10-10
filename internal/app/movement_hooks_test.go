@@ -141,8 +141,7 @@ func TestMovementNoticeHookGateAndSafeFiles(t *testing.T) {
 			t.Fatal("accepted settings symlink")
 		}
 	}
-	off := false
-	a.Cfg.MovementNotices = &off
+	a.Cfg.Original = config.OriginalOff
 	if _, err = a.MovementNoticeHooks(context.Background(), "install", "claude", "", "/opt/hopsesh"); err == nil {
 		t.Fatal("installed while disabled")
 	}

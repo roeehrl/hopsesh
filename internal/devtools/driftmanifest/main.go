@@ -136,7 +136,7 @@ var profileIntegrationFiles = []string{
 	"internal/e2e/scenario/testdata/accounts.txtar",
 	"internal/devtools/webtest/tests/accounts.spec.ts",
 	"internal/devtools/webtest/tests/movement.spec.ts", "internal/devtools/webtest/tests/movement-real.spec.ts",
-	"docs/movement-return.md", "sdk/agent/mark.go", "sdk/agent/hooks.go", "sdk/agent/hooks_json.go",
+	"docs/movement-return.md", "sdk/agent/label.go", "sdk/agent/hooks.go", "sdk/agent/hooks_json.go",
 	"internal/config/config.go",
 	"internal/devtools/hsmatrix", ".github/workflows/ci.yml", ".github/workflows/nightly.yml",
 	"docs/accounts.md", "docs/account-lineage-contract.md",

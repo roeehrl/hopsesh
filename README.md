@@ -236,8 +236,15 @@ start it. Details: [docs/design.md §8](docs/design.md#8-continuing-in-another-a
 
 Move a session to your laptop, or into Codex, work on it, and bring it back later:
 
-- **The copy left behind is marked** in its agent's own list: `↪ moved to <machine> · <title>`
-  or `↪ continued in Codex on <machine> · <title>`.
+- **Titles stay as they are.** hopsesh never renames a session to show where it went: the
+  copy left behind and the new copy keep the session's title. hopsesh's own list, TUI and
+  app show the movement instead (`◆ Moved out · moved to Codex on <machine>`, `● Moved
+  copy`, `↩ Returned`).
+- **The original waits for you.** By default the copy left behind refuses new prompts until
+  you move the session back, so the two never drift apart and moving back is a clean
+  return. Choose "Shows a warning" or "Is left alone" in Settings, or remove the block from
+  one original with a warning (`hopsesh unblock`). Codex asks you to approve hopsesh's hook
+  once (`/hooks`); hopsesh tells you when it is waiting.
 - **One row per session.** Listings combine the copies of a session across machines and
   agents. `hopsesh pull <id-or-title>` without a machine name brings back the newest one,
   into the folder it came from.
@@ -370,7 +377,7 @@ both back.
 ### Undo and branch clean-up
 
 `hopsesh undo` takes back what a hand-off did here: the handoff branch (only while the cloud
-hasn't pushed to it, and not when you chose to keep it) and the mark on the session. The
+hasn't pushed to it, and not when you chose to keep it) and its record of the hand-off. The
 cloud session itself stays in the vendor's list, for you to archive there: no vendor's
 command line can archive one. Undoing a bring-back removes the worktree, the copy and the
 branches it made. Once a hand-off's work is merged into the default branch,
@@ -544,8 +551,8 @@ added to the original, so nothing in the original is lost.
 <details>
 <summary><b>What if the session is still running on the other machine?</b></summary>
 
-By default hopsesh copies it as it is and hands it off: the copy left behind is marked when
-that session ends. With `--fork`, both copies continue independently. hopsesh refuses to
+By default hopsesh copies it as it is and hands it off: later messages in the copy left
+behind stay there. With `--fork`, both copies continue independently. hopsesh refuses to
 replace a session that's open on this machine, unless `--stop-local` quits it first. For
 Codex that works only between turns, because Codex has no graceful way to stop mid-turn: if
 it's working, hopsesh asks you to let it finish. Listings show running sessions as "live

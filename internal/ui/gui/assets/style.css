@@ -741,3 +741,7 @@ body.terminal-right .divider[data-pane="inspector"]{display:none}
 .conflict-outcome .btn { align-self: flex-start; }
 @media (max-width: 760px) { .comparison-grid { grid-template-columns: minmax(0,1fr); } }
 @media (min-width: 481px) and (max-width: 700px) { .sheet .transfer-accounts { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+
+/* Moved / original / returned: a chip plus words under the title, never in it. */
+.ins-lineage { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; }
+.chip.role-chip { white-space: nowrap; }

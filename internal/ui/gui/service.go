@@ -189,10 +189,10 @@ type Info struct {
 	Previews bool `json:"previews"`
 	Receive  bool `json:"receive"` // other machines' hopsesh may send sessions here
 	Defaults struct {
-		MovementNotices bool `json:"movementNotices"`
-		MarkMoved       bool `json:"markMoved"`
-		SyncCode        bool `json:"syncCode"`
-		PushSource      bool `json:"pushSource"`
+		MovementNotices bool   `json:"movementNotices"`
+		Original        string `json:"original"`
+		SyncCode        bool   `json:"syncCode"`
+		PushSource      bool   `json:"pushSource"`
 	} `json:"defaults"`
 }
 
@@ -241,7 +241,8 @@ func (a *App) info(fast bool) Info {
 		info.CLIOffer = cliOffer()
 	}
 	info.Defaults.MovementNotices = cfg.MovementNoticesOn()
-	info.Defaults.MarkMoved, info.Defaults.SyncCode, info.Defaults.PushSource = cfg.MarkMovedOn(), cfg.SyncCodeOn(), cfg.PushSource
+	info.Defaults.Original = cfg.OriginalGuard()
+	info.Defaults.SyncCode, info.Defaults.PushSource = cfg.SyncCodeOn(), cfg.PushSource
 	info.LocalNetwork.Gated = lnp.Gated()
 	info.LocalNetwork.FirstRun = lnp.FirstRun(config.StateDir())
 	if !fast {

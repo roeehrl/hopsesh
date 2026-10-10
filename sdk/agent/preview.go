@@ -68,7 +68,8 @@ type Renamer interface {
 const MaxTitle = 200
 
 // CheckTitle validates a title given to Rename and returns it trimmed: it must not be
-// empty, longer than MaxTitle, hold control characters or look like a mark title.
+// empty, longer than MaxTitle, hold control characters or look like a label an older hopsesh wrote (it would be
+// read as one).
 func CheckTitle(title string) (string, error) {
 	t := strings.TrimSpace(title)
 	switch {
@@ -79,9 +80,9 @@ func CheckTitle(title string) (string, error) {
 	case strings.IndexFunc(t, unicode.IsControl) >= 0:
 		return "", errors.New("a title cannot contain control characters or line breaks")
 	}
-	for _, p := range MarkPrefixes() {
+	for _, p := range LegacyLabelPrefixes() {
 		if strings.HasPrefix(t, p) {
-			return "", fmt.Errorf("a title cannot start with %q: hopsesh marks copies left behind that way", strings.TrimSpace(p))
+			return "", fmt.Errorf("a title cannot start with %q: older hopsesh versions labelled copies left behind that way", strings.TrimSpace(p))
 		}
 	}
 	return t, nil

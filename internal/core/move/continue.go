@@ -116,15 +116,18 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	relateContinue(ctx, p, in, &seg, opt)
 	if opt.OtherAccount {
 		if src.Module.Spec().ID != spec.ID {
-			p.Warnings = append(p.Warnings, "Moving between agents uses portable conversation text. Agent-private reasoning and internal state are not transferred; the original session remains available.")
+			p.Warnings = append(p.Warnings, "Moving between agents uses portable conversation text. Agent-private reasoning and internal state are not transferred; the original session is kept unchanged.")
 		} else {
 			p.Warnings = append(p.Warnings, "These are different runtime profiles. Login metadata cannot prove that account-bound session data is reusable, even when email addresses match. Hopsesh carries portable conversation text and keeps the original session.")
 		}
 	}
 
-	title := fmt.Sprintf("%s (from %s)", nonEmpty(s.Title, "session"), cp.From)
+	// The destination keeps the session's own title: hopsesh shows movement in its own
+	// views, never in titles. A return keeps the destination's title (which also clears a
+	// legacy label an older hopsesh wrote there).
+	title := s.Title
 	if cp.AppendTo != nil {
-		title = cp.AppendTo.Title // its own title again, in place of a "continued in" mark
+		title = cp.AppendTo.Title
 	}
 	cp.header = ir.Header{CWD: cwd, Title: title, GitBranch: nonEmpty(p.Repo.SourceBranch, s.GitBranch), Model: seg.Header.Model, Created: seg.Header.Created}
 	targetHost, err := tgt.Machine.For(ctx, spec, tgt.Install, nil)
@@ -201,9 +204,6 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		if it.Node == "hopsesh/briefing" || strings.Contains(it.Text, "[hopsesh] This conversation was moved") {
 			cp.Briefing = it.Text
 		}
-	}
-	if cp.Report.Reasoning > 0 || cp.Report.Truncated > 0 || cp.Report.Summarised > 0 {
-		p.Warnings = append(p.Warnings, "what does not carry over: "+cp.Report.Summary)
 	}
 	planContinueWarnings(p, in, opt)
 	planRoundTrip(p, in, opt)
@@ -557,24 +557,6 @@ func importThen(ctx context.Context, p *Plan, in Input, h agent.Host, j *journal
 	return w, nil
 }
 
-// markNative marks the source agent's copy kept here as continued in the target agent, so
-// it is not resumed by mistake (returning to it with hopsesh clears the mark).
-func markNative(ctx context.Context, p *Plan, j *journal.Journal, path string, res *Result) {
-	ns := p.nativeIn.Target
-	marker, ok := ns.Module.(agent.Marker)
-	if !ok {
-		return
-	}
-	h, err := ns.Machine.For(ctx, ns.Module.Spec(), ns.Install, j)
-	if err == nil {
-		s := agent.Summary{Key: p.native.Placement.Key, Title: p.Title, CWD: p.Target.CWD, Path: path}
-		err = marker.Mark(ctx, h, ns.Install, s, agent.Mark{Kind: agent.MarkPrepared, Location: p.Target.Location, AgentName: p.Agent})
-	}
-	if err != nil {
-		res.Warnings = append(res.Warnings, "could not mark the native copy here: "+err.Error())
-	}
-}
-
 // applyContinue writes the converted session and records the hop.
 func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, error) {
 	step := func(s string) {
@@ -693,8 +675,6 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 			res.Warnings = append(res.Warnings, "after writing: "+err.Error())
 		}
 	}
-	mark := agent.Mark{Kind: agent.MarkPrepared, Location: p.Target.Location, AgentName: tgt.Module.Spec().Name}
-	markWith(ctx, p, in, j, env, cp.head, mark, res)
 	res.Command, res.Run = launch.Shell(p.Resume, "", launch.DefaultShell()), p.Resume
 	if err := j.Seal(machinesOf(ctx, in)); err != nil {
 		res.Warnings = append(res.Warnings, "could not record what this changed, for a safe undo: "+err.Error())
@@ -735,9 +715,6 @@ func recordContinuation(ctx context.Context, p *Plan, in Input, j *journal.Journ
 		if err := j.WriteReceipt(host.LocalFS(), p.Target.Location, lineage.PathFor(nativeDst), m.ForBranch(p.sourceLine).Encode(), true); err != nil {
 			return err
 		}
-		if !p.Options.Fork {
-			markNative(ctx, p, j, nativeDst, res)
-		}
 	}
 	srcFS, reachErr := in.Source.Machine.FS(ctx)
 	if reachErr != nil {
@@ -763,8 +740,5 @@ func liveSnapshotNotice(p *Plan) string {
 		place += " (this machine)"
 	}
 	notice := "The source session on " + place + " is still running. This transfer uses a snapshot; later source messages are not automatically synchronized."
-	if p.Mark == MarkWhenStopped || p.Options.Mark {
-		notice += " Its moved label is deferred until it stops; marking does not stop the process."
-	}
 	return notice
 }

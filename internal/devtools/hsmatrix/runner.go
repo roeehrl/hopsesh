@@ -258,7 +258,7 @@ func (r *runner) arrived(s *sc, on side, agent, cwd, otherCwd string) (Found, er
 	}
 	var got []Found
 	for _, f := range fs {
-		if f.Agent == agent && f.Mark == "" {
+		if f.Agent == agent && f.Label == "" {
 			got = append(got, f)
 		}
 	}
@@ -286,19 +286,17 @@ func (r *runner) arrived(s *sc, on side, agent, cwd, otherCwd string) (Found, er
 	return f, nil
 }
 
-// marked checks the source copy's mark ("" checks it has none).
-func (r *runner) marked(s *sc, on side, prefix string) error {
+// unlabelled checks the source copy's title carries no label: hopsesh never changes titles
+// to show movement.
+func (r *runner) unlabelled(s *sc, on side) error {
 	var fs []Found
 	if err := on.do("find", FindReq{Marker: s.marker}, &fs); err != nil {
 		return err
 	}
 	for _, f := range fs {
 		if f.ID == s.id && f.Agent == s.row.From && f.Path == s.srcFile {
-			if prefix == "" && f.Mark != "" {
-				return fmt.Errorf("%s: the source copy is still marked %q", on.label(), f.Mark)
-			}
-			if prefix != "" && !strings.HasPrefix(f.Mark, prefix) {
-				return fmt.Errorf("%s: the source copy's mark is %q, want %q…", on.label(), f.Mark, prefix)
+			if f.Label != "" {
+				return fmt.Errorf("%s: the source copy's title was labelled %q", on.label(), f.Label)
 			}
 			return nil
 		}
@@ -336,18 +334,6 @@ func (r *runner) codeCame(s *sc) error {
 	return nil
 }
 
-// cloudTitles are the clouds' names in a mark ("continued in Claude Code cloud").
-var cloudTitles = map[string]string{"claude-cloud": "Claude Code cloud", "codex-cloud": "Codex cloud"}
-
-func (r *runner) markPrefix(s *sc) string {
-	if s.row.Op == "fork" {
-		return ""
-	}
-	// The CLI scans fixture profiles as separate account scopes, so even a
-	// same-agent transfer uses portable preparation into the other profile.
-	return "↪ prepared in "
-}
-
 func (r *runner) pullAndUndo(s *sc) error {
 	if _, err := r.hs(true, s.pullArgs()...); err != nil {
 		return err
@@ -362,7 +348,7 @@ func (r *runner) pullAndUndo(s *sc) error {
 	if err := r.codeCame(s); err != nil {
 		return err
 	}
-	if err := r.marked(s, r.there, r.markPrefix(s)); err != nil {
+	if err := r.unlabelled(s, r.there); err != nil {
 		return err
 	}
 	if _, err := r.hs(true, "undo", "--yes"); err != nil {
@@ -371,7 +357,7 @@ func (r *runner) pullAndUndo(s *sc) error {
 	if err := r.gone(s, r.here, s.row.To); err != nil {
 		return err
 	}
-	return r.marked(s, r.there, "")
+	return r.unlabelled(s, r.there)
 }
 
 func (r *runner) push(s *sc) error {
@@ -387,7 +373,7 @@ func (r *runner) push(s *sc) error {
 	if _, err := r.arrived(s, r.there, s.row.To, s.dstCwd, s.srcCwd); err != nil {
 		return err
 	}
-	if err := r.marked(s, r.here, r.markPrefix(s)); err != nil {
+	if err := r.unlabelled(s, r.here); err != nil {
 		return err
 	}
 	if _, err := r.hs(true, "undo", "--yes"); err != nil {
@@ -396,7 +382,7 @@ func (r *runner) push(s *sc) error {
 	if err := r.gone(s, r.there, s.row.To); err != nil {
 		return err
 	}
-	return r.marked(s, r.here, "")
+	return r.unlabelled(s, r.here)
 }
 
 // roundtrip: there → here, a turn here, then back there by push; there's copy has the turn.
@@ -433,7 +419,7 @@ func (r *runner) roundtrip(s *sc) error {
 		return err
 	}
 	for _, g := range fs {
-		if g.Agent == s.row.From && g.Mark == "" && g.Has[back] {
+		if g.Agent == s.row.From && g.Label == "" && g.Has[back] {
 			if err := checkMovement(g, 2, s.row.Op != "quiet-roundtrip", false); err != nil {
 				return err
 			}
@@ -446,7 +432,7 @@ func (r *runner) roundtrip(s *sc) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("there: no unmarked copy with the turn added here (%+v)", fs)
+	return fmt.Errorf("there: no unlabelled copy with the turn added here (%+v)", fs)
 }
 
 // conflict: both copies change after a move; a second move is refused until --keep-both.
@@ -515,7 +501,7 @@ func (r *runner) undoUsed(s *sc) error {
 	if err := r.gone(s, r.here, s.row.To); err != nil {
 		return err
 	}
-	return r.marked(s, r.there, "")
+	return r.unlabelled(s, r.there)
 }
 
 // skill: install the hopsesh skill in every agent here, then remove it.
@@ -645,7 +631,7 @@ func (r *runner) fetch(row Row) error {
 	}
 	ok := false
 	for _, f := range fs {
-		ok = ok || f.Agent == row.To && f.Mark == "" && f.Has[text] && f.Has[b.Worktree]
+		ok = ok || f.Agent == row.To && f.Label == "" && f.Has[text] && f.Has[b.Worktree]
 	}
 	if !ok {
 		return fmt.Errorf("here: no %s session with the conversation in %s (%+v)", row.To, b.Worktree, fs)
@@ -799,7 +785,7 @@ func (r *runner) cloudWorld(name string) (fakecloud.Origin, func(), error) {
 // plays it; Codex cloud runs it in an environment): the
 // plan's code (the branch as it is when clean and pushed, else a snapshot on a handoff
 // branch, with the untracked draft when asked), the briefing with the session's words,
-// the checkout left as it was, the mark; a cloud round trip then lets the cloud work and
+// the checkout and the session's title left as they were; a cloud round trip then lets the cloud work and
 // brings the session home through the bring-back path. Undo takes it all back (the branch
 // with a lease; the cloud session stays, as a step owed).
 func (r *runner) handoff(row Row) error {
@@ -870,7 +856,6 @@ func (r *runner) handoff(row Row) error {
 		Handoff struct {
 			Session, Branch, Snapshot string
 			Reuse, Pushed             bool
-			MarkText                  string `json:"markText"`
 		} `json:"handoff"`
 	}
 	if i := strings.Index(out, "{\n"); i < 0 || json.Unmarshal([]byte(out[i:]), &res) != nil {
@@ -906,12 +891,10 @@ func (r *runner) handoff(row Row) error {
 	if err := r.here.do("find", FindReq{Marker: marker}, &fs); err != nil {
 		return err
 	}
-	marked := false
 	for _, f := range fs {
-		marked = marked || f.ID == id && strings.Contains(f.Mark, "continued in "+cloudTitles[cloud])
-	}
-	if !marked {
-		return fmt.Errorf("the session here is not marked (%+v)", fs)
+		if f.ID == id && f.Label != "" {
+			return fmt.Errorf("the session here was labelled %q; titles must stay as they were", f.Label)
+		}
 	}
 	undos := 1
 	if row.Op == "cloud-roundtrip" {
@@ -960,8 +943,8 @@ func (r *runner) handoff(row Row) error {
 		return err
 	}
 	for _, f := range fs {
-		if f.ID == id && f.Mark != "" {
-			return fmt.Errorf("undo left the mark %q", f.Mark)
+		if f.ID == id && f.Label != "" {
+			return fmt.Errorf("the session here carries the title label %q", f.Label)
 		}
 	}
 	return nil

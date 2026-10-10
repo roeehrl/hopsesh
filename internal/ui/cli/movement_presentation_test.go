@@ -32,7 +32,7 @@ func TestNotifyFlagUsesConfigUnlessExplicit(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			r := &run{app: &app.App{Cfg: config.Config{MovementNotices: &configured}}}
+			r := &run{app: &app.App{Cfg: config.Config{Original: map[bool]string{true: "", false: config.OriginalOff}[configured]}}}
 			o, err := r.pullOptions(cmd)
 			if err != nil {
 				t.Fatal(err)

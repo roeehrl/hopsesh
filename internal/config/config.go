@@ -269,11 +269,12 @@ type Config struct {
 	// UpdateCheck is "on" or "off" once the person has answered whether the app may
 	// look for new releases once a day ("" = not asked yet).
 	UpdateCheck string `toml:"update_check,omitempty"`
-	// Round trips. MarkMoved and SyncCode default to on (nil); PushSource to off.
-	MovementNotices *bool `toml:"movement_notices,omitempty"` // show movement notices (default on)
-	MarkMoved       *bool `toml:"mark_moved,omitempty"`       // mark the copy left behind
-	SyncCode        *bool `toml:"sync_code,omitempty"`        // fetch and fast-forward the checkout here
-	PushSource      bool  `toml:"push_source,omitempty"`      // push unpushed commits on the source first
+	// Original is how the copy left behind by a move is protected until the session moves
+	// back: "block" (the default, ""), "advise" or "off". SyncCode defaults to on (nil),
+	// PushSource to off.
+	Original   string `toml:"original,omitempty"`
+	SyncCode   *bool  `toml:"sync_code,omitempty"`   // fetch and fast-forward the checkout here
+	PushSource bool   `toml:"push_source,omitempty"` // push unpushed commits on the source first
 	// SkillPrompt remembers the answer to "let your agents use hopsesh?": "" (not asked),
 	// "declined", or the skill revision last offered.
 	SkillPrompt string `toml:"skill_prompt,omitempty"`
@@ -498,9 +499,6 @@ func (c *Config) UpsertHost(h Host) {
 // AgentEnabled reports whether an agent module is in use.
 func (c Config) AgentEnabled(id string) bool { return !c.Agents[id].Disabled }
 
-// MarkMovedOn reports whether copies left behind are marked (default on).
-func (c Config) MarkMovedOn() bool { return c.MarkMoved == nil || *c.MarkMoved }
-
 // PreviewsOn reports whether the app shows conversation previews (default on).
 func (c Config) PreviewsOn() bool { return c.Previews == nil || *c.Previews }
 
@@ -616,6 +614,11 @@ func (c Config) Check() error {
 	}
 	if err := c.History.check(); err != nil {
 		return err
+	}
+	switch c.Original {
+	case "", OriginalBlock, OriginalAdvise, OriginalOff:
+	default:
+		return fmt.Errorf("original is %q: use %q, %q or %q", c.Original, OriginalBlock, OriginalAdvise, OriginalOff)
 	}
 	if err := c.Desktop.Check(); err != nil {
 		return err
@@ -764,5 +767,21 @@ func oneOfEach(name string, vals, allowed []string) error {
 // UsesPassword reports whether the machine logs in with a password.
 func (h Host) UsesPassword() bool { return h.Auth == "password" }
 
-// MovementNoticesOn controls source-session notices independently of lineage.
-func (c Config) MovementNoticesOn() bool { return c.MovementNotices == nil || *c.MovementNotices }
+// Protection choices for the copy left behind (config "original").
+const (
+	OriginalBlock  = "block"
+	OriginalAdvise = "advise"
+	OriginalOff    = "off"
+)
+
+// OriginalGuard is how the copy left behind is protected: block (default), advise or off.
+func (c Config) OriginalGuard() string {
+	if c.Original == "" {
+		return OriginalBlock
+	}
+	return c.Original
+}
+
+// MovementNoticesOn reports whether moves record a notice for the copy left behind (the
+// block or the advice needs one); independent of lineage, which is always kept.
+func (c Config) MovementNoticesOn() bool { return c.OriginalGuard() != OriginalOff }

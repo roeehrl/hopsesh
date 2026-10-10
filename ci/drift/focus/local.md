@@ -97,7 +97,7 @@ paid model turn.
 
 Movement notices and returns: read `docs/movement-return.md`,
 `internal/e2e/movement_test.go`, `internal/app/movement.go`, module `hooks.go`,
-`sdk/agent/hooks*.go`, `sdk/agent/mark.go` and `internal/devtools/hsmatrix`.
+`sdk/agent/hooks*.go`, `sdk/agent/label.go` and `internal/devtools/hsmatrix`.
 The contract is lineage/5 and peer protocol 5; strict decoding refuses old versions.
 Watch upstream SessionStart/UserPromptSubmit hook payloads, session/transcript identity,
 profile-root precedence, output visibility, synchronous command behavior and trust gates.
@@ -191,7 +191,7 @@ storage probe does not prove native window rehosting or account continuity.
 
 Session discovery shares a disposable SQLite summary catalog across GUI, Quick,
 TUI and CLI (`internal/core/catalog`, `internal/app/{catalog,watch,scan}.go`,
-`sdk/agent/listing.go`). Check storage layouts, title/rename/mark sidecars, Claude
+`sdk/agent/listing.go`). Check storage layouts, title/rename sidecars (and legacy title labels), Claude
 subagent directories and Codex session_index.jsonl dependencies: changes must
 invalidate summaries. Parser changes require a new summary salt. Watch events are
 hints with reconciliation and overflow handling. SessionWatchProvider paths must

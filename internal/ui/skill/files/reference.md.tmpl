@@ -44,7 +44,6 @@ a hand-off (a cloud session itself stays in the cloud).
 | `--brief-file <path>` | the briefing the user wrote, instead of hopsesh's |
 | `--carry-rules` | add the user's instructions for every project to the briefing (only when the user asks) |
 | `--cleanup after-merge\|on-undo\|never` | when hopsesh deletes the handoff branch |
-| `--no-mark` | do not mark the session here |
 
 ## plan and pull flags
 
@@ -62,21 +61,20 @@ a hand-off (a cloud session itself stays in the cloud).
 | `--worktree auto\|create\|main` | recreate the session's worktree (auto), always use one, or the main checkout |
 | `--fork` | the old session keeps running; both continue |
 | `--rc` | turn the agent's remote control on, where it has one |
-| `--notify` | the moved session tells the old one where the work went (agents that can) |
+| `--notify` | protect the original until the session moves back: blocked or warned, per the user's setting (default on; `--notify=false` leaves it alone) |
 | `--redact` | redact likely secrets in the copy |
 | `--stop-local` | quit a copy of this session open here first |
 | `--keep-both` / `--replace` | when both copies changed: keep both / replace the copy here |
 | `--no-sync` | leave the checkout alone (default: fetch, and fast-forward when clean) |
-| `--no-mark` | do not mark the copy left behind |
 | `--push` | push the source branch's unpushed commits first |
 
 ## JSON
 
 `plan --json` prints the plan: `kind` (`move` or `continue`), `key`, `title`, `agent`,
-`source`, `target.cwd`, `repo`, `sync`, `mark`, `conflict`, `warnings`, `blockers`, and for
+`source`, `target.cwd`, `repo`, `sync`, `conflict`, `warnings`, `blockers`, and for
 another agent `continue` (`relation`, `report`, `briefing`). `pull --json --yes` prints
 `{"plan": …, "result": …, "command": "…"}`; the result has `journal` (for undo), `syncNote`,
-`mark`, `markError`, `pushed`, `pushError`, `warnings`. `handoff --json --yes` prints
+`pushed`, `pushError`, `warnings`. `handoff --json --yes` prints
 `{"plan": …, "result": …, "handoff": …}` (and `error` when a step failed); `handoff` has
 `session`, `url`, `branch`, `env`, `noun`, `steps`, `stayed`, `failed`, `message`, `manual`,
 `pasted` (the user gave the session's link by hand) and `noFollowUp`. A pull from a cloud prints `{"plan": …, "result": …, "brought": …}`; `brought`

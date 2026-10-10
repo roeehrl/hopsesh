@@ -86,8 +86,8 @@ uses a default action with adjacent alternatives, following
 Cross-agent moves create portable conversation history and leave private vendor state out.
 Moving between runtime profiles does not prove that different people own the two logins;
 matching account labels also cannot establish permission to reuse private native state.
-An active source is transferred as a snapshot: later messages are not synchronized. Marking
-the source waits for its process to stop and does not itself stop that process.
+An active source is transferred as a snapshot: later messages are not synchronized, and
+hopsesh does not stop that process or change its title.
 
 The weekly drift workflow checks current published agent versions against the tested
 versions, commands and schemas. It does not certify live resume behavior on every release.

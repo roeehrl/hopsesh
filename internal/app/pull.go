@@ -144,7 +144,7 @@ func (inv *Inventory) copiesOf(it Item) []Entry {
 // DefaultOptions are move options from the configuration.
 func (a *App) DefaultOptions() move.Options {
 	return move.Options{
-		ReposDir: a.Cfg.ReposDir, GHQLayout: a.Cfg.Layout == "ghq", Mark: a.Cfg.MarkMovedOn(),
+		ReposDir: a.Cfg.ReposDir, GHQLayout: a.Cfg.Layout == "ghq",
 		SyncCode: a.Cfg.SyncCodeOn(), Push: a.Cfg.PushSource, Notify: a.Cfg.MovementNoticesOn(),
 		Limits: a.Cfg.History.Limits(),
 	}

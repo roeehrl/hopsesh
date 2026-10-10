@@ -1,6 +1,6 @@
 // Package move moves a session between locations with the same agent: plan (pure
 // decisions, nothing written) and apply (stage, rewrite, verify, install with a journal,
-// record lineage, mark the copy left behind). Every agent-specific step is the module's.
+// record lineage). Every agent-specific step is the module's.
 package move
 
 import (
@@ -97,7 +97,6 @@ type Options struct {
 	Notify        bool // tell the old session it moved on
 	Redact        bool
 	App           bool // open in the agent's desktop app
-	Mark          bool // mark the copy left behind
 	SyncCode      bool // bring the checkout to the session's commit
 	Push          bool // push unpushed commits on the source first
 	StopLocal     bool // quit a copy of this session that is open here
@@ -150,13 +149,6 @@ const (
 	ConflictKeepBoth = "keep-both"
 )
 
-// Mark states.
-const (
-	MarkNow         = "now"          // right after the move
-	MarkWhenStopped = "when-stopped" // the copy left behind is still open: on a later scan
-	MarkOff         = "off"
-)
-
 // Kinds of plans.
 const (
 	KindMove     = "move"     // the same agent, another place
@@ -191,7 +183,6 @@ type Plan struct {
 	Conflict string          `json:"conflict,omitempty"`
 	Warnings []string        `json:"warnings,omitempty"`
 	Blockers []string        `json:"blockers,omitempty"`
-	Mark     string          `json:"mark"`
 	StopHere bool            `json:"stopHere,omitempty"` // quit the copy open here first
 	Push     bool            `json:"push,omitempty"`
 	Sync     string          `json:"sync,omitempty"`
@@ -529,24 +520,10 @@ func planWarnings(p *Plan, in Input, opt Options) {
 	}
 }
 
-// planRoundTrip decides marking, pushing and code sync.
+// planRoundTrip warns about a copy already moved on, and decides pushing and code sync.
 func planRoundTrip(p *Plan, in Input, opt Options) {
-	switch {
-	case p.NoWork:
-		p.Mark = MarkOff
-	case p.Kind == KindMove && p.Placement.Key != p.Key:
-		p.Mark = MarkOff // keep-both: both copies stay
-	case !opt.Mark || (p.Kind == KindMove && p.Source.Location == p.Target.Location):
-		p.Mark = MarkOff
-	case p.Options.Fork:
-		p.Mark = MarkOff // both continue on purpose
-	case p.Live:
-		p.Mark = MarkWhenStopped
-	default:
-		p.Mark = MarkNow
-	}
-	if m := in.Session.Mark; m != nil {
-		p.Warnings = append(p.Warnings, fmt.Sprintf("this copy on %s was already moved on (%s); the newest copy is probably elsewhere", p.Source.Location, agent.MarkTitle(*m, "")))
+	if hop, ok := p.manifest.Departed(p.sourceReplica); ok {
+		p.Warnings = append(p.Warnings, fmt.Sprintf("this copy on %s was already moved on (to %s); the newest copy is probably elsewhere", p.Source.Location, p.manifest.Replica(hop.To).Location))
 	}
 	r := p.Repo
 	remote := p.Source.Location != p.Target.Location

@@ -114,12 +114,11 @@ func TestMovementHookCacheIsRevokedByReturnUndoAndPreference(t *testing.T) {
 	if s := read(); !strings.Contains(s, "Prepared in Codex on bob-laptop") {
 		t.Fatalf("notice missing %q", s)
 	}
-	off := false
-	a.Cfg.MovementNotices = &off
+	a.Cfg.Original = config.OriginalOff
 	if read() != "" {
 		t.Fatal("disabled notice delivered")
 	}
-	a.Cfg.MovementNotices = nil
+	a.Cfg.Original = ""
 	original := g.Clone()
 	if err := g.AppendHop(lineage.Hop{Kind: lineage.HopContinue, ID: "return", From: to, To: from, Notify: true}); err != nil {
 		t.Fatal(err)
@@ -169,8 +168,7 @@ func TestMovementPreferenceDefaults(t *testing.T) {
 	if !a.DefaultOptions().Notify {
 		t.Fatal("move did not inherit default")
 	}
-	off := false
-	a.Cfg.MovementNotices = &off
+	a.Cfg.Original = config.OriginalOff
 	if a.DefaultOptions().Notify {
 		t.Fatal("move ignored off preference")
 	}

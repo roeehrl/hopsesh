@@ -190,14 +190,14 @@ func TestFutureHandoffStaleCheckpointAndEndMetadata(t *testing.T) {
 	if err != nil || afterCapacity != capacity {
 		t.Fatalf("end metadata changed capacity: %+v %v", afterCapacity, err)
 	}
-	if err := m.Mark(ctx, h, in, s, agent.Mark{Kind: agent.MarkPrepared, AgentName: "Codex"}); err != nil {
+	if err := m.Rename(ctx, h, in, s, "Renamed after the end metadata"); err != nil {
 		t.Fatal(err)
 	}
 	marked, err := m.Read(ctx, h, in, s, ir.Cursor{})
 	if err != nil || !reflect.DeepEqual(after.Nodes, marked.Nodes) || marked.Cursor.Offset <= after.Cursor.Offset {
-		t.Fatalf("title marker changed conversation evidence: %v %v", marked.Cursor, err)
+		t.Fatalf("a title record changed conversation evidence: %v %v", marked.Cursor, err)
 	}
-	// A plan made before the metadata/mark is still stale for a native append.
+	// A plan made before the metadata/title is still stale for a native append.
 	if _, err := m.Write(ctx, h, in, ir.WriteRequest{Mode: ir.WriteAppend, SessionID: s1, Expect: before.Cursor}); !errors.Is(err, agent.ErrDiverged) {
 		t.Fatalf("stale physical cursor accepted: %v", err)
 	}

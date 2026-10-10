@@ -127,8 +127,6 @@ func (m *model) handoffKeys(k string) (tea.Model, tea.Cmd) {
 		}
 	case "h":
 		m.ho.opts.HistoryFile = !m.ho.opts.HistoryFile
-	case "m":
-		m.ho.opts.Mark = !m.ho.opts.Mark
 	case "U":
 		if hp.CanBundle {
 			m.ho.opts.Bundle = !m.ho.opts.Bundle
@@ -276,7 +274,6 @@ func (m *model) viewHandoffPlan(b *strings.Builder) {
 	if hp.HistoryFile {
 		b.WriteString("    " + warnSt.Render(hp.HistoryWarning) + "\n")
 	}
-	fmt.Fprintf(b, "  %s Mark this session %q  %s\n", box(p.Mark != move.MarkOff), strings.TrimPrefix(hp.MarkTitle, "↪ "), dim.Render("[m]"))
 	if hp.CanBundle {
 		fmt.Fprintf(b, "  %s Upload the repository instead of pushing a branch  %s\n", box(hp.Code == agent.ViaBundle), dim.Render("[U]"))
 	}
@@ -387,14 +384,6 @@ func (m *model) viewHandoffDone(b *strings.Builder) {
 	if len(r.Stayed) > 0 {
 		fmt.Fprintf(b, "   stayed on this machine  %s\n", strings.Join(r.Stayed, " · "))
 	}
-	switch m.result.Mark {
-	case "done":
-		fmt.Fprintf(b, "   ↪ this session is now marked “%s”\n", strings.TrimPrefix(r.MarkText, "↪ "))
-	case "pending":
-		b.WriteString("   ↪ this session is marked once it ends\n")
-	case "failed":
-		b.WriteString("   " + warnSt.Render("! could not mark this session: "+m.result.MarkError) + "\n")
-	}
 	for _, w := range m.result.Warnings {
 		b.WriteString("   " + warnSt.Render("! "+w) + "\n")
 	}
@@ -408,9 +397,9 @@ func (m *model) viewHandoffDone(b *strings.Builder) {
 	if m.ho.notice != "" {
 		b.WriteString("\n   " + okSt.Render(m.ho.notice) + "\n")
 	}
-	undo := "deletes the branch and the mark"
+	undo := "deletes the branch"
 	if !r.Pushed {
-		undo = "deletes the mark"
+		undo = "takes back hopsesh's record of it"
 	}
 	b.WriteString(dim.Render("\n   o open in browser · y copy link · u undo ("+undo+"; "+strings.TrimSuffix(lowerFirst(r.Manual), ".")+") · enter back to the list · q quit") + "\n")
 }

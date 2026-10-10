@@ -48,7 +48,7 @@ func (r *runner) newSessionAfterMissingOriginal(s *sc, source, survivor Found, i
 			return fmt.Errorf("new-session recreated the missing original's native ID")
 		case survivor.ID:
 			preserved++
-			if f.Path != survivor.Path || f.SHA256 != survivor.SHA256 || f.Mark != survivor.Mark {
+			if f.Path != survivor.Path || f.SHA256 != survivor.SHA256 || f.Label != survivor.Label {
 				return fmt.Errorf("new-session modified the surviving native copy")
 			}
 		default:
@@ -56,7 +56,7 @@ func (r *runner) newSessionAfterMissingOriginal(s *sc, source, survivor Found, i
 			if f.ID != string(p.Placement.Key.Session) {
 				return fmt.Errorf("new-session did not create the receiver's planned native ID")
 			}
-			if f.Mark != "" || !f.Has[incoming] || !f.Has[s.srcCwd] {
+			if f.Label != "" || !f.Has[incoming] || !f.Has[s.srcCwd] {
 				return fmt.Errorf("new-session lost incoming work or destination folder: %+v", f)
 			}
 			if f.Graph == nil || f.Graph.Branch != survivor.Graph.Branch {

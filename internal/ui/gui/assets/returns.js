@@ -1,6 +1,7 @@
 // Candidates come only from the app's verified branch inventory. Never infer a
 // return from copy timestamps or from a fork's parent journey.
-import { api, h, dialog, here, sys, state, entries, when, agentBadge, fail } from "./core.js";
+import { api, h, dialog, here, sys, state, entries, when, agentBadge, fail, go } from "./core.js";
+import { removeBlock, restoreBlock } from "./guard.js";
 import { planFor } from "./plan.js";
 import { sessionExitHelp } from "./session-exit.js";
 
@@ -81,16 +82,27 @@ export async function showMovementDestination(n, show) {
 }
 
 export function movementNotice(e, show, viewJourney) {
-  const n = e.movement;
+  const n = e.departure || e.movement;
   if (!n) return null;
-  const explanation = {prepared:"Destination prepared; new work has not been observed.", continued:"New work was observed at the destination.", diverged:"The conversations contain different work; compare their histories before returning.", forked:"A separate branch was prepared; it does not return into its parent."}[n.status] || n.status;
-  return h("section", {class:"sec movement-notice", "aria-label":"Movement notice"},
-    h("span", {class:"sec-h"}, `Movement · ${n.status}`), h("span", {}, (n.text || "").replace(/ Last checked \d{4}-\d{2}-\d{2}T\S+\.$/, "")), h("span", {class:"muted"}, explanation),
-    h("span", {}, `${n.agentName || n.agent} · ${n.profileLabel || n.profile || "Default account"} on ${n.machine}`),
-    h("span", {class:"mono"}, n.key),
+  const g = e.guard, local = e.machine === here();
+  const to = n.cloud || `${n.agentName || n.agent} on ${n.machine}`;
+  const explanation = {prepared:"The moved copy is ready; no new work there yet.", continued:"Work continued in the moved copy.", diverged:"Both copies have new work; compare them before moving back.", forked:"A separate fork; it does not return into this original."}[n.status] || n.status;
+  const protection = !g ? null
+    : g.mode === "block" ? (g.effective ? ["ok", "Blocked until you move the session back. New prompts here are refused."] : ["warn", "Not blocked: " + (g.problem || "the agent's hook is not ready.")])
+    : g.mode === "advise" ? (g.effective ? ["ok", "Advised: the agent warns before you continue here."] : ["warn", "Not advised: " + (g.problem || "the agent's hook is not ready.")])
+    : g.mode === "released" ? ["warn", "Block removed. Continuing here makes the copies diverge; moving back then needs a comparison."]
+    : ["muted", "Not protected (Settings › General)."];
+  return h("section", {class:"sec movement-notice", "aria-label":"Moved out"},
+    h("span", {class:"sec-h"}, n.status === "forked" ? "Fork made" : "Moved out"),
+    h("span", {}, `${n.status === "forked" ? "Forked to" : "Moved to"} ${to}${n.profileLabel ? " · " + n.profileLabel : ""}`),
+    h("span", {class:"muted"}, explanation),
+    protection ? h("span", {class: protection[0]}, protection[1]) : null,
+    g && !g.effective && g.fix ? h("span", {class:"muted", style:"font-size:12px"}, g.fix) : null,
     Date.parse(n.checkedAt) > 0 ? h("span", {class:"muted"}, `Checked ${when(n.checkedAt)}`) : null,
-    n.delivery ? h("span", {class:"muted"}, n.delivery === "supplied-to-hook" ? "Supplied to the agent hook; model reading is not verified." : `Delivery: ${n.delivery}`) : null,
-    h("button", {class:"btn small",onclick:()=>showMovementDestination(n,show)}, "Show destination"),
-    h("button", {class:"btn small",onclick:viewJourney}, "View journey"),
-    e.machine === here() ? h("button", {class:"btn small",onclick:()=>planFor(e,{target:e.agent,targetProfile:e.profile?.id || "",fork:true})}, "Continue separately here…") : null);
+    h("div", {style:"display:flex;gap:6px;flex-wrap:wrap"},
+      h("button", {class:"btn small primary",onclick:()=>showMovementDestination(n,show)}, "Open moved copy"),
+      local && g?.mode === "block" ? h("button", {class:"btn small danger",onclick:()=>removeBlock(e,()=>go("sessions",true))}, "Remove block…") : null,
+      local && g?.mode === "released" ? h("button", {class:"btn small",onclick:()=>restoreBlock(e,()=>go("sessions",true))}, "Block again") : null,
+      h("button", {class:"btn small",onclick:viewJourney}, "View journey"),
+      local && n.status !== "forked" ? h("button", {class:"btn small",onclick:()=>planFor(e,{target:e.agent,targetProfile:e.profile?.id || "",fork:true})}, "Fork here instead…") : null));
 }

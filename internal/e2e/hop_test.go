@@ -131,7 +131,7 @@ func TestHopClaudeCloudToCodexCloud(t *testing.T) {
 	if err != nil || f.Adopted == nil || f.Adopted.Outcome != move.FetchComplete || f.Adopted.Check != move.CheckedBrief {
 		t.Fatalf("the first leg: %+v %v", f, err)
 	}
-	// The copy here: both hops in its lineage, and marked as continued in Codex.
+	// The copy here: both hops in its lineage, which says it continued in Codex cloud.
 	inv2 := a.Scan(ctx, app.ScanOptions{Hosts: []string{"here"}})
 	defer inv2.Close()
 	copyHere, err := inv2.Find(app.ParseRef(h.Key))
@@ -142,8 +142,8 @@ func TestHopClaudeCloudToCodexCloud(t *testing.T) {
 	for _, x := range copyHere.Lineage.Hops {
 		kinds = append(kinds, x.Kind)
 	}
-	if strings.Join(kinds, ",") != lineage.HopFetch+","+lineage.HopHandoff || copyHere.Session.Mark == nil || copyHere.Session.Mark.AgentName != "Codex cloud" {
-		t.Fatalf("lineage %v, mark %+v", kinds, copyHere.Session.Mark)
+	if strings.Join(kinds, ",") != lineage.HopFetch+","+lineage.HopHandoff || copyHere.Status() != "continued in Codex cloud" || copyHere.Session.LegacyLabel != nil {
+		t.Fatalf("lineage %v, status %q", kinds, copyHere.Status())
 	}
 	// One journal, both legs.
 	hj, err := journal.Load(a.StateDir, res.Journal)
@@ -355,8 +355,6 @@ func TestBringCodexTaskIntoTheOriginal(t *testing.T) {
 	if len(hp.Blockers) > 0 {
 		t.Fatalf("plan: %v", hp.Blockers)
 	}
-	opt.Mark = false // the original stays as it was left
-	_, hp = planCodex(t, a, opt)
 	hres, err := a.Apply(ctx, hp, move.Input{}, nil)
 	if err != nil {
 		t.Fatal(err)

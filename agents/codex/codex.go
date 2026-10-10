@@ -146,8 +146,8 @@ func (m *Module) List(ctx context.Context, h agent.Host, in agent.Install) (agen
 					s.Key.Profile = in.ProfileID()
 					if t := titles[string(s.Key.Session)]; t != "" {
 						s.Title, s.TitleSource = t, "custom"
-						if mk, orig, ok := agent.ParseMarkTitle(t); ok {
-							s.Mark, s.Title = &mk, orig
+						if l, orig, ok := agent.StripLegacyLabel(t); ok {
+							s.LegacyLabel, s.Title = &l, orig
 						}
 					}
 				}
@@ -166,8 +166,8 @@ func (m *Module) List(ctx context.Context, h agent.Host, in agent.Install) (agen
 		case s != nil:
 			if t := titles[string(s.Key.Session)]; t != "" {
 				s.Title, s.TitleSource = t, "custom"
-				if mk, orig, ok := agent.ParseMarkTitle(t); ok {
-					s.Mark, s.Title = &mk, orig
+				if l, orig, ok := agent.StripLegacyLabel(t); ok {
+					s.LegacyLabel, s.Title = &l, orig
 				}
 			}
 			out.Sessions = append(out.Sessions, *s)
@@ -274,12 +274,6 @@ func setName(h agent.Host, in agent.Install, sid, name string) error {
 	// takes out only this line.
 	p := h.Path().Join(in.Root(home), "session_index.jsonl")
 	return h.FS().Append(p, append(line, '\n'), agent.AppendOptions{NewLine: true, Standalone: true})
-}
-
-// Mark names the thread left behind "↪ moved to …" (or "continued in …"), which Codex's
-// own thread list shows.
-func (m *Module) Mark(ctx context.Context, h agent.Host, in agent.Install, s agent.Summary, mk agent.Mark) error {
-	return setName(h, in, string(s.Key.Session), agent.MarkTitle(mk, s.Title))
 }
 
 // headChunk and tailChunk bound what a listing reads of each rollout.

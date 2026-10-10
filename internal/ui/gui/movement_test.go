@@ -8,6 +8,7 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/agents/all"
 	"github.com/roeehrl/hopsesh/internal/app"
+	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -45,7 +46,8 @@ func TestMovementNoticeSettingsPersist(t *testing.T) {
 		t.Fatal("notices should default on")
 	}
 	for _, on := range []bool{false, true} {
-		if err := a.SaveSettings(SettingsInput{Layout: "flat", MovementNotices: on, Previews: true}); err != nil {
+		original := map[bool]string{true: config.OriginalBlock, false: config.OriginalOff}[on]
+		if err := a.SaveSettings(SettingsInput{Layout: "flat", Original: original, Previews: true}); err != nil {
 			t.Fatal(err)
 		}
 		reloaded := NewApp(all.Registry())

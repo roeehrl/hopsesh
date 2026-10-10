@@ -57,11 +57,16 @@ type AgentOpt struct {
 
 // EntryDTO is one session row.
 type EntryDTO struct {
-	Cached          bool                  `json:"cached,omitempty"`
-	Relationship    app.Relationship      `json:"relationship"`
-	ObservedAt      time.Time             `json:"observedAt,omitempty"`
-	Returns         []app.ReturnCandidate `json:"returns,omitempty"`
-	Movement        *app.MovementNotice   `json:"movement,omitempty"`
+	Cached       bool                  `json:"cached,omitempty"`
+	Relationship app.Relationship      `json:"relationship"`
+	ObservedAt   time.Time             `json:"observedAt,omitempty"`
+	Returns      []app.ReturnCandidate `json:"returns,omitempty"`
+	Movement     *app.MovementNotice   `json:"movement,omitempty"`
+	// Departure: this copy moved on (to where, and what is known there). Arrival: how it
+	// came here. Guard: how this original is protected until the session moves back.
+	Departure       *app.MovementNotice   `json:"departure,omitempty"`
+	Arrival         *app.Arrival          `json:"arrival,omitempty"`
+	Guard           *GuardDTO             `json:"guard,omitempty"`
 	ContextOverflow bool                  `json:"contextOverflow,omitempty"`
 	CanApp          bool                  `json:"canApp"`
 	AppWhy          string                `json:"appWhy,omitempty"`
@@ -126,14 +131,14 @@ type EntryDTO struct {
 
 // CopyDTO is one copy of a session, on some machine and in some agent.
 type CopyDTO struct {
-	Profile   *agent.RuntimeProfile `json:"profile,omitempty"`
-	Machine   string                `json:"machine"`
-	Agent     agent.ID              `json:"agent"`
-	AgentName string                `json:"agentName"`
-	Key       string                `json:"key"` // agent/session, as EntryDTO.Key
-	Local     bool                  `json:"local"`
-	Mark      *agent.Mark           `json:"mark,omitempty"`
-	Newest    bool                  `json:"newest"`
+	Profile    *agent.RuntimeProfile `json:"profile,omitempty"`
+	Machine    string                `json:"machine"`
+	Agent      agent.ID              `json:"agent"`
+	AgentName  string                `json:"agentName"`
+	Key        string                `json:"key"` // agent/session, as EntryDTO.Key
+	Local      bool                  `json:"local"`
+	LeftBehind bool                  `json:"leftBehind,omitempty"` // moved on since
+	Newest     bool                  `json:"newest"`
 }
 
 // HopDTO is one step of a session's history.
@@ -540,7 +545,7 @@ func entryDTO(core *app.App, inv *app.Inventory, it app.Item, targets []AgentOpt
 	e, s := it.Entry, it.Entry.Session
 	e.Cached = e.Cached || inv.Discovering
 	title, source := titleFor(s, e.Live.Name)
-	d := EntryDTO{Cached: e.Cached, ObservedAt: e.ObservedAt, Returns: e.Returns, Movement: e.Movement, Profile: e.Profile, Machine: e.Machine, Agent: e.Agent, AgentName: e.AgentName, Key: s.Key.String(), Title: title, TitleSource: source,
+	d := EntryDTO{Cached: e.Cached, ObservedAt: e.ObservedAt, Returns: e.Returns, Movement: e.Movement, Departure: e.Departure, Arrival: e.Arrival, Guard: guardFor(core, e), Profile: e.Profile, Machine: e.Machine, Agent: e.Agent, AgentName: e.AgentName, Key: s.Key.String(), Title: title, TitleSource: source,
 		Session: string(s.Key.Session), Path: s.Path, AgentVersion: s.AgentVersion, CanRename: core.CanRename(e), Places: []PlaceDTO{},
 		Status: statusWords(core, e), Live: e.Live.State == agent.Live, LastActive: s.LastActivity.Format(time.RFC3339),
 		ContextOverflow: s.ContextOverflow, LastPrompt: s.LastPrompt, CWD: s.CWD, SizeKB: s.Size / 1024, ContinueIn: []AgentOpt{},
@@ -589,7 +594,7 @@ func entryDTO(core *app.App, inv *app.Inventory, it app.Item, targets []AgentOpt
 		d.HereNewest = m.Local
 	}
 	for _, c := range it.Copies {
-		d.Copies = append(d.Copies, CopyDTO{Profile: c.Profile, Machine: c.Machine, Agent: c.Agent, AgentName: c.AgentName, Key: c.Key.String(), Local: c.Local, Mark: c.Mark, Newest: c.Newest})
+		d.Copies = append(d.Copies, CopyDTO{Profile: c.Profile, Machine: c.Machine, Agent: c.Agent, AgentName: c.AgentName, Key: c.Key.String(), Local: c.Local, LeftBehind: c.LeftBehind, Newest: c.Newest})
 		switch {
 		case c.Local && c.Newest:
 			d.HereNewest = true
@@ -642,17 +647,18 @@ func cloudTitleOf(core *app.App, loc string) string {
 	return ""
 }
 
-// statusWords is an entry's state in words, a cloud named by its title: a session marked
-// before marks named clouds that way reads "continued in Claude Code cloud" too.
+// statusWords is an entry's state in words, a cloud named by its title: an old title label
+// that named a cloud by its location ("continued in Codex on codex-cloud") reads
+// "continued in Codex cloud" too.
 func statusWords(core *app.App, e app.Entry) string {
 	st := e.Status()
+	if l := e.Session.LegacyLabel; l != nil && e.Departure == nil && e.Lineage == nil && l.Kind == agent.LabelContinued {
+		if t := cloudTitleOf(core, l.Location); t != "" {
+			st = "continued in " + t
+		}
+	}
 	if strings.HasPrefix(st, "continued ") {
 		st = "previously " + st
-	}
-	if mk := e.Session.Mark; mk != nil && mk.Kind == agent.MarkContinued && strings.TrimPrefix(st, "previously ") == app.MarkWords(*mk) {
-		if t := cloudTitleOf(core, mk.Location); t != "" {
-			return "previously continued in " + t
-		}
 	}
 	return st
 }
@@ -752,7 +758,6 @@ type OptsDTO struct {
 	RemoteControl bool   `json:"remoteControl"`
 	Notify        bool   `json:"notify"`
 	Redact        bool   `json:"redact"`
-	Mark          bool   `json:"mark"`
 	SyncCode      bool   `json:"syncCode"`
 	Push          bool   `json:"push"`
 	StopLocal     bool   `json:"stopLocal"`
@@ -786,7 +791,7 @@ func (o OptsDTO) options(d move.Options) move.Options {
 	d.Fork, d.RemoteControl, d.Notify, d.Redact, d.App = o.Fork, o.RemoteControl, o.Notify, o.Redact, o.App
 	d.OperationID, d.TargetSession = o.OperationID, o.TargetSession
 	d.TargetProfile = o.TargetProfile
-	d.Mark, d.SyncCode, d.Push, d.StopLocal, d.Conflict = o.Mark, o.SyncCode, o.Push, o.StopLocal, o.Conflict
+	d.SyncCode, d.Push, d.StopLocal, d.Conflict = o.SyncCode, o.Push, o.StopLocal, o.Conflict
 	d.Fidelity, d.Native, d.Note, d.Go = convert.Fidelity(nonEmpty(o.Fidelity, string(convert.History))), o.Native, strings.TrimSpace(o.Note), o.Go
 	d.RuleFiles = o.RuleFiles
 	d.CarryRules, d.CodeOnly, d.AppendOriginal = o.CarryRules, o.CodeOnly, o.Append
@@ -849,7 +854,6 @@ type PlanDTO struct {
 	Mappings      []agent.Mapping  `json:"mappings"`
 	Files         int              `json:"files"`
 	Bytes         int64            `json:"bytes"`
-	Mark          string           `json:"mark"`
 	Sync          string           `json:"sync"`
 	FromSource    bool             `json:"syncFromSource"`
 	Push          bool             `json:"push"`
@@ -956,7 +960,7 @@ func (a *App) EndReturnDestination(token string) error {
 func planDTO(p *move.Plan, e app.Entry, tm agent.Module) *PlanDTO {
 	d := &PlanDTO{SourceProfile: p.Source.ProfileName, TargetProfile: p.Target.ProfileName, NoWork: p.NoWork, Destinations: p.Destinations, Kind: p.Kind, Title: p.Title, Agent: p.Agent, FromAgent: e.AgentName, SourceHost: p.Source.Location,
 		SourceOS: p.Source.OS, SourceCWD: p.Source.CWD, TargetCWD: p.Target.CWD, Live: p.Live, Repo: p.Repo,
-		Mappings: p.Placement.Mappings, Files: len(p.Files.Files), Bytes: p.Bytes, Mark: p.Mark, Sync: p.Sync,
+		Mappings: p.Placement.Mappings, Files: len(p.Files.Files), Bytes: p.Bytes, Sync: p.Sync,
 		FromSource: p.SyncFromSource, Push: p.Push, StopHere: p.StopHere, Conflict: p.Conflict,
 		Warnings: p.Warnings, Blockers: p.Blockers, NewName: p.NewName, OtherAcct: p.Placement.OtherAccount, ReviewNewSession: p.ReviewNewSession,
 		SetAside: len(p.SetAside), NativeCopy: p.NativeCopy, Options: p.Options, SessionKey: p.Key, SourceAgent: e.Agent,
@@ -1002,8 +1006,6 @@ type DoneDTO struct {
 	PushError        string   `json:"pushError"`
 	SyncNote         string   `json:"syncNote"`
 	SyncState        string   `json:"syncState"`
-	Mark             string   `json:"mark"`
-	MarkError        string   `json:"markError"`
 	Notice           string   `json:"notice"`
 	Warnings         []string `json:"warnings"`
 	InApp            bool     `json:"inApp"` // it opens in the agent's desktop app
@@ -1040,7 +1042,7 @@ func (a *App) Apply() (*DoneDTO, error) {
 	d := &DoneDTO{NoWork: p.NoWork, Kind: p.Kind, Title: p.Title, Agent: p.Agent, Command: res.Command, Files: res.Files, Bytes: move.Human(res.Bytes),
 		Secrets: res.Secrets.Total, Redacted: p.Options.Redact, Cloned: res.Cloned, Worktree: res.Worktree, Journal: res.Journal,
 		SourceHost: p.Source.Location, Stopped: res.Stopped, Pushed: res.Pushed, PushError: res.PushError, SyncNote: res.SyncNote,
-		Mark: res.Mark, MarkError: res.MarkError, Notice: res.Notice, Warnings: res.Warnings, InApp: p.Options.App,
+		Notice: res.Notice, Warnings: res.Warnings, InApp: p.Options.App,
 		AuditDir: filepath.Join(config.StateDir(), "log"), ContinuationHint: p.ContinuationHint()}
 	if p.NoWork && p.SyncTo != nil && p.SyncTo.Title != "" {
 		d.Title = p.SyncTo.Title

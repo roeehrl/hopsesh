@@ -62,7 +62,7 @@ func TestMovementQuietReturnAfterAccountObservation(t *testing.T) {
 						}
 						in.Session.Key.Profile = in.Source.Install.ProfileID()
 						env := move.Env{StateDir: t.TempDir()}
-						p, _ := applyMovement(t, in, move.Options{TargetDir: b.repo, Mark: true, Notify: false}, env)
+						p, _ := applyMovement(t, in, move.Options{TargetDir: b.repo, Notify: false}, env)
 						dst := movementProfileSession(t, b, in.Target, p.Placement.Key)
 						if to == "claude" {
 							appendTurn(t, dst.Path, "BINDING-RETURN-WORK")
@@ -105,7 +105,7 @@ func TestMovementQuietReturnAfterAccountObservation(t *testing.T) {
 						original := movementBytes(t, left.Path)
 						back := move.Input{Source: in.Target, Session: dst, Lineage: movementGraph(t, dst), Target: target,
 							Copies: []move.Copy{{Summary: left, Lineage: movementGraph(t, left)}}}
-						opt := move.Options{TargetDir: a.repo, Mark: true, Notify: false, NewReplica: true}
+						opt := move.Options{TargetDir: a.repo, Notify: false, NewReplica: true}
 						planned, err := move.Build(ctx, back, opt)
 						if err != nil {
 							t.Fatal(err)

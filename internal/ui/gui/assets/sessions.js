@@ -5,6 +5,7 @@
 import { accountLabel, accountTitle, loadError, api, on, h, fill, icon, ICONS, view, state, screen, go, current, loading, toast, fail, cap, ago, agentBadge, machineStatus, sys, keys,
   entries, selected, here, agentInfo, $, count, clouds, cloudOf, cloudState, cloudChip, dialog, errText, rich, cloudTitle } from "./core.js";
 import { planPicked } from "./plan.js";
+import { healthNotice, loadHookHealth, withCLI, chip as roleChip } from "./guard.js";
 import { dividers, apply as applyLayout } from "./layout.js";
 import { exitOf, exitWords, waiting, strayWaiting, showTerminal, tabs, onTabs } from "./term.js";
 import { model, statusOf, statusKey, placesOf, placeCount, placeName, showPlace, cloudBlock, onSelect, onTurnOn, key as entryKey } from "./actions.js";
@@ -300,7 +301,8 @@ function notices() {
   if (state.scope.kind !== "all") return out;
   if (i.skillState === "stale" || i.skillState === "broken") out.push(h("div", { class: "card notice" },
     h("b", { style: "flex:1 1 360px" }, i.skillState === "stale" ? "The hopsesh skill is out of date" : "The hopsesh skill is damaged"),
-    h("button", { class: "btn primary", onclick: async () => { try { await api("InstallSkill", false, false); toast("Updated the hopsesh skill"); } catch (e) { fail(e); } state.info = await api("Info"); render(); } }, i.skillState === "stale" ? "Update it" : "Repair it")));
+    h("button", { class: "btn primary", onclick: async () => { try { await withCLI(() => api("InstallSkill", false, false)); toast("Updated the hopsesh skill"); } catch (e) { fail(e); } state.info = await api("Info"); render(); } }, i.skillState === "stale" ? "Update it" : "Repair it")));
+  out.push(healthNotice(render));
   out.push(setupLine());
   return out;
 }
@@ -403,6 +405,8 @@ function row(e, level) {
  const chips = presenceChips(e);
 if(e.profile) chips.push(h("span", {class:"chip account-chip",title:accountTitle(e.profile)},accountLabel(e.profile)));
   if (e.cloud) chips.push(cloudChip(e.machine));
+  const rc = roleChip(e);
+  if (rc) chips.unshift(rc);
   if (e.cloud?.pr) chips.push(h("span", { class: "chip st-moved" }, "PR " + e.cloud.pr));
   if (e.mirror) chips.push(mirrorChip(e.mirror));
   const ext = !e.live && e.machine === here() && !placesOf(e).length ? exitOf(e) : null;
@@ -610,6 +614,8 @@ screen("sessions", async (rescan = false) => {
   if (!state.scan || current !== "sessions") return;
   decide(entries().length, () => toggleDisplay());
   render();
+  // Asking Codex whether it trusts the hooks starts its app-server: off the first paint.
+  loadHookHealth().then(() => { if (current === "sessions") render(); });
   const r = view.querySelector('.row[aria-selected="true"]');
   if (r) inView(r, false);
   presenceSoon(presenceEvery());

@@ -138,7 +138,7 @@ func (a *App) receiveOptions(o move.Options) move.Options {
 	d.TargetDir, d.Clone, d.Worktree = o.TargetDir, o.Clone, o.Worktree
 	d.OperationID, d.TargetSession = o.OperationID, o.TargetSession
 	d.Fork, d.RemoteControl, d.Notify, d.Redact = o.Fork, o.RemoteControl, o.Notify, o.Redact
-	d.Mark, d.SyncCode, d.StopLocal, d.Conflict = o.Mark, o.SyncCode, o.StopLocal, o.Conflict
+	d.SyncCode, d.StopLocal, d.Conflict = o.SyncCode, o.StopLocal, o.Conflict
 	d.Fidelity, d.Native, d.Note, d.Go, d.CarryRules, d.Via = o.Fidelity, o.Native, o.Note, o.Go, o.CarryRules, o.Via
 	d.RuleFiles = append([]string(nil), o.RuleFiles...)
 	// How much history the destination receives is the sender's choice; memory, record,
@@ -428,8 +428,7 @@ func (a *App) packageOf(ctx context.Context, here *Machine, e Entry) (peer.Packa
 }
 
 // Commit carries out the push: the other machine installs or converts the session, then
-// this machine records, in its own journal, what changes for its copy (the mark and the
-// lineage), and keeps a mark owed while the copy here is still open.
+// this machine records, in its own journal, what changes for its copy (its lineage).
 func (p *Push) Commit(ctx context.Context) (*PushResult, error) {
 	if err := p.a.checkAccountRegistration(p.source.Install); err != nil {
 		return nil, err
@@ -461,11 +460,6 @@ func (p *Push) Commit(ctx context.Context) (*PushResult, error) {
 	}
 	if err := j.Seal(func(string) (host.FS, error) { return host.LocalFS(), nil }); err != nil {
 		reply.Result.Warnings = append(reply.Result.Warnings, "could not record what this changed here, for a safe undo: "+err.Error())
-	}
-	if o := reply.Result.Owed; o != nil {
-		if err := lineage.AddPending(a.StateDir, *o); err != nil {
-			reply.Result.Mark, reply.Result.MarkError = "failed", err.Error()
-		}
 	}
 	a.Audit.Write(audit.Entry{Action: "push", Host: p.to.Name, Session: e.Session.Key.String(), Detail: map[string]any{"journal": j.ID, "remote": reply.Journal, "writes": len(reply.Writes)}})
 	return out, nil

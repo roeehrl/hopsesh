@@ -13,7 +13,7 @@ let cur = null; // { e, target, sendTo, opts, plan, busy, applying }
 function defaults() {
   const d = state.info.defaults;
   return { worktree: "auto", remoteControl: false, notify: d.movementNotices !== false, fork: false, redact: false, clone: false, targetDir: "", reposDir: "",
-    mark: d.markMoved, syncCode: d.syncCode, push: d.pushSource, stopLocal: false, app: false, conflict: "",
+    syncCode: d.syncCode, push: d.pushSource, stopLocal: false, app: false, conflict: "",
     fidelity: "history", native: false, note: "", go: false, carryRules: false, ruleFiles: [], via: "", codeOnly: false, append: false, contextBudget: 0, older: "" };
 }
 
@@ -170,7 +170,6 @@ function summaryContent(p) {
   if (r.worktree) add.push("1 worktree");
   if (p.setAside) chg.push(`${count(p.setAside, "older copy", "older copies")} set aside`);
   if (p.stopHere) chg.push("1 quit here first");
-  if (p.mark !== "off") chg.push(`1 title labeled on ${sourcePlace(p)}${p.mark === "when-stopped" ? " when it ends" : ""}`);
   return h("div", { class: "summary", "aria-label": "What changes" },
     add.map((x) => h("span", { class: "add" }, "+ " + x)), chg.map((x) => h("span", { class: "chg" }, "~ " + x)),
     h("span", { class: "none" }, "0 removed"), h("span", { class: "spacer" }), h("span", { class: "muted" }, "Undo any time from Activity"));
@@ -328,15 +327,14 @@ function checks(p) {
 
 function options(p) {
   const r = p.repo, o = cur.opts, cont = p.continue;
-  const markDesc = p.mark === "when-stopped" ? "Adds the destination to its title after the source process stops. This does not lock it, stop it, or synchronize later messages."
-    : "Adds the destination to its title. This is a visual reminder; it does not lock the conversation or block further work.";
   const opts = [
-    p.mark !== "off" || !o.mark ? check(`Label the source title on ${sourcePlace(p)}`, "mark", markDesc) : null,
     r.sourceHead && !sameFolder(p) ? check("Bring the code to the session's commit", "syncCode", "Fetches if needed; fast-forwards only a clean checkout on the same branch.") : null,
     r.unpushed && r.sourceUpstream && !sameFolder(p) ? check(`Push ${count(r.unpushed, "commit")} on ${p.sourceHost} first`, "push", "With that machine's own git credentials.") : null,
     cont && (p.machine || cur.launch !== "app") ? check("Send “Continue” when opening", "go", `The terminal launch sends the first message to ${p.agent}. Progress appears in the agent.`) : null,
     p.can.remoteControl ? check("Turn on Remote Control", "remoteControl", `Reach it from your phone or other machines, as ${p.newName}.`) : null,
-    check("Record a movement notice", "notify", "Records where this conversation went. Installed agent hooks can supply a reminder on resume or a new prompt; this does not block further work in the original."),
+    state.info?.defaults?.original === "advise"
+      ? check("Warn in the original", "notify", "Until you move back, the copy left behind warns before you continue there (through the agent's hopsesh hook).")
+      : check("Block the original until you move back", "notify", "The copy left behind refuses new prompts until you move the session back, so moving back stays a clean return (through the agent's hopsesh hook). Off: the original is left alone."),
     p.live && p.can.fork && !p.conflict ? check("Keep the old session running too", "fork", "Both copies continue, instead of a hand-off.") : null,
     check("Redact likely secrets", "redact", "In this copy only."),
   ];
@@ -565,9 +563,6 @@ function happened(d, p) {
   if (d.pushError) out.push(item("warn", `Could not push on ${d.sourceHost}`, d.pushError));
   else if (d.pushed) out.push(item("ok", `Pushed the session's branch on ${d.sourceHost}`, ""));
   if (d.syncNote) out.push(item(["up-to-date", "fast-forwarded", "ahead"].includes(d.syncState) ? "ok" : "warn", "Code: " + d.syncNote, ""));
-  if (d.mark === "done") out.push(item("ok", `The source title on ${d.sourceHost} is labeled`, "Its session list there shows where the work went."));
-  if (d.mark === "pending") out.push(item("ok", `The copy on ${d.sourceHost} is still open`, "Its title is labeled after it ends; Activity shows the pending label. It remains usable."));
-  if (d.mark === "failed") out.push(item("warn", `Could not mark the copy on ${d.sourceHost}`, d.markError));
   for (const w of d.warnings || []) out.push(item("warn", cap(w), ""));
   return out;
 }
@@ -594,12 +589,12 @@ screen("done", (d, p, o) => {
         : `Its first message tells ${d.agent} where the session came from and asks it to check the repository and files before going on.`))),
     h("section", { class: "card" }, h("div", { class: "dlg-body" }, h("span", { class: "sec-h" }, "What happened"), happened(d, p),
       p.continue && !d.noWork ? h("details", {}, h("summary", { style: "cursor:pointer;font-size:12.5px" }, "Show the loss report"), h("div", { style: "margin-top:10px" }, boxes(p))) : null)),
-    d.notice ? h("section", { class: "card" }, h("div", { class: "dlg-body" }, h("b", {}, "Movement notice"),
-      h("span", { class: "muted", style: "font-size:12px" }, "The source records where the destination was prepared. Observed new work is reported separately."),
+    d.notice ? h("section", { class: "card" }, h("div", { class: "dlg-body" }, h("b", {}, "The original"),
+      h("span", { class: "muted", style: "font-size:12px" }, "What the copy left behind says until you move back. Sessions shows whether its agent's hook can enforce it."),
       h("div", { style: "display:flex;gap:8px;align-items:flex-start" }, h("div", { class: "term", style: "flex:1" }, d.notice),
         h("button", { class: "btn", onclick: async () => { await api("CopyText", d.notice); toast("Copied"); } }, "Copy")))) : null,
     h("div", { style: "display:flex;gap:10px;align-items:center;flex-wrap:wrap" },
-      h("button", { class: "btn", title: d.machine ? `Undoes both machines: the copy on ${d.machine} and the mark here` : "", onclick: doUndo }, "Undo", h("span", { class: "kbd" }, keys("mod+alt+Z"))),
+      h("button", { class: "btn", title: d.machine ? `Undoes both machines: the copy on ${d.machine} and the record here` : "", onclick: doUndo }, "Undo", h("span", { class: "kbd" }, keys("mod+alt+Z"))),
       h("span", { class: "muted", style: "font-size:12px" }, "Undo stays in Activity for as long as nothing happens on top of it. ",
         h("button", { class: "link", onclick: () => api("Reveal", d.auditDir).catch(fail) }, "Audit log"))))));
   view.querySelector("#open")?.focus();

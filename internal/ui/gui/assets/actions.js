@@ -4,7 +4,8 @@
 // off to ‹cloud›… (to a cloud). model(e) is a session's whole action row: its status line,
 // the primary (a split button whose menu lists the other places), Move ▾ and ⋯; the row's
 // button, ↩, ⌘↩ and the palette all come from it.
-import { api, state, sys, here, agentInfo, cloudOf, cloudTitle, toast, fail, errText, cap, entries, count, ago, h, icon, ICONS, agentBadge, pending } from "./core.js";
+import { role, removeBlock, restoreBlock } from "./guard.js";
+import { go, api, state, sys, here, agentInfo, cloudOf, cloudTitle, toast, fail, errText, cap, entries, count, ago, h, icon, ICONS, agentBadge, pending } from "./core.js";
 import { returnActions, returnChooser, showMovementDestination } from "./returns.js";
 import { planFor } from "./plan.js";
 import { tabs, resume, showTerminal, moveToTerminal, openShell, associateShell, signIn } from "./term.js";
@@ -169,10 +170,13 @@ function localModel(e) {
       } else if (first.kind === "ide") m.caption = sys.mac ? `hopsesh can't pick the tab inside ${placeName(first, e)}` : `hopsesh can't show a session in ${placeName(first, e)}`;
       else if (first.kind === "tmux" || first.kind === "ssh") { m.primary = null; m.caption = `Running in ${placeName(first, e)}; hopsesh can't show it`; }
       else if (first.kind === "claude-app" || first.kind === "codex-app") m.caption = e.canApp ? "Opens this conversation in the desktop app" : e.appWhy;
-    } else if (e.movement?.machine && e.movement?.key) {
-      m.primary = { id: "destination", label: "Show destination", run: () => showMovementDestination(e.movement, selectFn) };
+    } else if ((e.departure || e.movement)?.machine && (e.departure || e.movement)?.key) {
+      const n = e.departure || e.movement;
+      m.primary = { id: "destination", label: "Open moved copy", short: "Moved copy", run: () => showMovementDestination(n, selectFn) };
       m.chevron = resumePlaces(e).map(p => resumeItem(p));
-      m.chevronLabel = "Resume this copy";
+      if (e.guard?.mode === "block" && e.machine === here()) m.chevron.push({ id: "remove-block", label: "Remove block…", sub: "Continue here; moving back then needs a comparison", run: () => removeBlock(e, () => go("sessions", true)) });
+      if (e.guard?.mode === "released" && e.machine === here()) m.chevron.push({ id: "restore-block", label: "Block again", sub: "Until you move the session back", run: () => restoreBlock(e, () => go("sessions", true)) });
+      m.chevronLabel = "Other choices";
     } else if (/^(moved|continued|prepared|previously continued)/.test(lv.status || "")) {
       const [c, newer] = newestCopy(e);
       const other = !c ? "" : c.machine === e.machine ? `the copy in ${c.agentName} is newer` : `the copy on ${c.machine} is newer`;
@@ -196,7 +200,7 @@ function localModel(e) {
     m.move = moveGroups(e, true, !!tab);
   } else {
     m.primary = { id: "bring", label: `Bring to ${sys.here}…`, short: "Bring…", run: () => planFor(e, { target: "" }) };
-    if (lv.live) m.caption = `Still open on ${e.machine}; hopsesh marks that copy when it ends`;
+    if (lv.live) m.caption = `Still open on ${e.machine}; later messages there stay there`;
     m.move = moveGroups(e, false, false);
   }
   if(local && e.contextOverflow) {
@@ -359,7 +363,8 @@ export function statusOf(e) {
   if (lv.needs) return ["needs", "Needs you"];
   if (lv.live) return /idle/i.test(lv.status) ? ["idle", "Idle"] : ["working", "Working"];
   if (e.cached && !state.presence?.[key(e)]) return ["unknown", "Checking status"];
-  if (e.movement) return ["moved", `Movement ${e.movement.status}`];
+  const r = role(e);
+  if (r && (e.departure)) return ["moved", r.line.replace(/^Original · /, "")];
   if (/^(moved|continued|prepared|previously continued)/.test(lv.status || "")) return ["moved", cap((lv.status || "").replace(/^continued /, "previously continued "))];
   return ["ended", "Ended"];
 }
@@ -401,7 +406,7 @@ export function statusLine(e) {
   }
   const lv = liveOf(e);
   if (lv.live && e.machine !== here()) return [k, `${k === "needs" ? "Waiting for you" : k === "idle" ? "Idle" : "Working"} on ${e.machine}`, ago(e.lastActive)];
-  if (k === "moved") return [k, words, e.movement ? (Date.parse(e.movement.checkedAt) > 0 ? `checked ${ago(e.movement.checkedAt)}` : "Observation time unavailable") : ago(e.lastActive)];
+  if (k === "moved") { const n = e.departure || e.movement; return [k, words, n && Date.parse(n.checkedAt) > 0 ? `checked ${ago(n.checkedAt)}` : ago(e.lastActive)]; }
   if (!e.hereNewest && e.machine === here()) {
     const [c] = newestCopy(e);
     if (c) return ["ended", "Older copy", `newest on ${whereWord(c.machine)}`];

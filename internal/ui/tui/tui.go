@@ -80,6 +80,9 @@ type row struct {
 }
 
 type model struct {
+	// unblockArmed is the entry whose block U removes on a second press (after the warning).
+	unblockArmed   string
+	guardNote      string // the result of U, under the selected session
 	emitScan       func(uint64, *app.Inventory)
 	scanGeneration uint64
 	scanning       bool
@@ -574,7 +577,37 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 			m.journeyOffset = max(0, m.journeyOffset-max(1, m.height-5))
 		}
 	case modeBrowse:
+		if k != "U" {
+			m.unblockArmed = ""
+		}
 		switch k {
+		case "U":
+			if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil {
+				e := m.rows[m.cursor].item.Entry
+				ro := m.deps.App.Role(e)
+				if ro == nil || e.Departure == nil || e.Machine != app.LocalName() {
+					break
+				}
+				id := e.Machine + "\x00" + e.Session.Key.String()
+				switch {
+				case ro.Word == "Unblocked":
+					if err := m.deps.App.RestoreBlock(e.Session.Key); err != nil {
+						m.guardNote = "could not block again: " + err.Error()
+					} else {
+						m.guardNote = "Blocked again until you move it back."
+					}
+				case ro.Kind != "blocked":
+				case m.unblockArmed != id:
+					m.unblockArmed = id
+				default:
+					m.unblockArmed = ""
+					if err := m.deps.App.ReleaseOriginal(e.Session.Key, e.Departure.Operation); err != nil {
+						m.guardNote = "could not remove the block: " + err.Error()
+					} else {
+						m.guardNote = "Block removed. Continuing here makes the copies diverge; U blocks it again."
+					}
+				}
+			}
 		case "R":
 			m.openReturns()
 		case "D":
@@ -788,9 +821,6 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 			return m, m.planCmd()
 		case "x":
 			m.opts.Redact = !m.opts.Redact
-			return m, m.planCmd()
-		case "m":
-			m.opts.Mark = !m.opts.Mark
 			return m, m.planCmd()
 		case "s":
 			m.opts.SyncCode = !m.opts.SyncCode
@@ -1173,6 +1203,9 @@ func (m *model) viewBrowse(b *strings.Builder) {
 		if strings.HasPrefix(status, "continued ") {
 			status = "previously " + status
 		}
+		if ro := m.deps.App.Role(e); ro != nil && e.Departure != nil {
+			status = ro.Glyph + " " + ro.Word + " · " + ro.Line
+		}
 		switch {
 		case e.Live.State == agent.Live:
 			status = liveSt.Render(status)
@@ -1237,8 +1270,21 @@ func (m *model) viewBrowseDetail(b *strings.Builder, w int) {
 			return
 		}
 		fmt.Fprintf(b, "  %s  %s %s  %s\n", e.Machine, e.AgentName, s.AgentVersion, s.CWD)
-		if e.Movement != nil {
-			fmt.Fprintf(b, "  Movement [%s]: %s\n", e.Movement.Status, truncate(e.Movement.Text, w-25))
+		if ro := m.deps.App.Role(e); ro != nil {
+			fmt.Fprintf(b, "  %s %s · %s\n", ro.Glyph, ro.Word, truncate(ro.Line, w-20))
+			if e.Machine == app.LocalName() {
+				switch {
+				case m.unblockArmed == e.Machine+"\x00"+e.Session.Key.String():
+					fmt.Fprintf(b, "  %s\n", warnSt.Render("Remove the block? If you continue here the copies diverge, and moving back needs a comparison instead of a clean return. Press U again to remove it; any other key keeps it."))
+				case ro.Kind == "blocked":
+					fmt.Fprintf(b, "  %s\n", dim.Render("[U] remove block…"))
+				case ro.Word == "Unblocked":
+					fmt.Fprintf(b, "  %s\n", dim.Render("[U] block again"))
+				}
+			}
+		}
+		if m.guardNote != "" {
+			fmt.Fprintf(b, "  %s\n", dim.Render(m.guardNote))
 		}
 		if len(e.Returns) > 0 {
 			fmt.Fprintf(b, "  [R] move back / show destination (%d choices; same branch)\n", len(e.Returns))
@@ -1268,8 +1314,8 @@ func (m *model) viewBrowseDetail(b *strings.Builder, w int) {
 				switch {
 				case c.Newest:
 					p += " (newest)"
-				case c.Mark != nil:
-					p += " (" + app.MarkWords(*c.Mark) + ")"
+				case c.LeftBehind:
+					p += " (moved on)"
 				default:
 					p += " (older)"
 				}
@@ -1385,12 +1431,6 @@ func (m *model) viewPlanBody(b *strings.Builder) {
 	if p.Sync != "" {
 		fmt.Fprintf(b, "  code  %s\n", p.Sync)
 	}
-	switch p.Mark {
-	case move.MarkNow:
-		fmt.Fprintf(b, "  title label on %s (visual reminder, not a lock)\n", p.Source.Location)
-	case move.MarkWhenStopped:
-		fmt.Fprintf(b, "  title label on %s after it ends (visual reminder, not a lock)\n", p.Source.Location)
-	}
 	for _, w := range p.Warnings {
 		b.WriteString("  " + warnSt.Render("! "+w) + "\n")
 	}
@@ -1417,10 +1457,10 @@ func (m *model) viewPlanBody(b *strings.Builder) {
 	if m.returnTo != nil {
 		agentLabel = "destination agent"
 	}
-	fmt.Fprintf(b, "\n  %s %s  [c] clone %s  [w] worktree %s  [r] remote control %s  [n] movement notice %s  [f] fork %s  [x] redact %s\n",
+	fmt.Fprintf(b, "\n  %s %s  [c] clone %s  [w] worktree %s  [r] remote control %s  [n] protect original %s  [f] fork %s  [x] redact %s\n",
 		agentLabel, target, on(m.opts.Clone), string(m.opts.Worktree), on(m.opts.RemoteControl), on(m.opts.Notify), on(m.opts.Fork), on(m.opts.Redact))
-	fmt.Fprintf(b, "  [m] label old title %s  [s] sync code %s  [p] push on %s %s  [k] quit copy open here %s\n",
-		on(m.opts.Mark), on(m.opts.SyncCode), p.Source.Location, on(m.opts.Push), on(m.opts.StopLocal))
+	fmt.Fprintf(b, "  [s] sync code %s  [p] push on %s %s  [k] quit copy open here %s\n",
+		on(m.opts.SyncCode), p.Source.Location, on(m.opts.Push), on(m.opts.StopLocal))
 }
 
 func (m *model) viewPlanFooter(b *strings.Builder) {
@@ -1563,19 +1603,11 @@ func (m *model) viewDone(b *strings.Builder) {
 	if res.SyncNote != "" {
 		fmt.Fprintf(b, "  code: %s\n", res.SyncNote)
 	}
-	switch res.Mark {
-	case "done":
-		fmt.Fprintf(b, "  the copy on %s is marked\n", p.Source.Location)
-	case "pending":
-		fmt.Fprintf(b, "  the copy on %s is marked once it ends\n", p.Source.Location)
-	case "failed":
-		b.WriteString("  " + warnSt.Render("! could not mark the copy on "+p.Source.Location+": "+res.MarkError) + "\n")
-	}
 	if m.returnTo != nil && !m.returnTo.Local {
 		fmt.Fprintf(b, "\n  Prepared on %s; run the following command there.\n", m.returnTo.Machine)
 	}
 	if res.Notice != "" {
-		fmt.Fprintf(b, "\n  Movement notice: %s\n", res.Notice)
+		fmt.Fprintf(b, "\n  The original: %s\n", res.Notice)
 	}
 	b.WriteString("\n  Continue it:\n\n")
 	family := launch.DefaultShell()

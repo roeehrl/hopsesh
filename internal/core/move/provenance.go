@@ -84,7 +84,6 @@ func prepareLineage(ctx context.Context, p *Plan, in Input, seg *ir.Segment) err
 		st, err = m.Observe(p.sourceReplica, seg)
 		snapshot = true
 		p.Options.Fork = true
-		p.Mark = MarkOff
 		p.Warnings = append(p.Warnings, "Native history changed; this transfer starts a separate branch from its current snapshot.")
 	}
 	if err != nil {
@@ -99,7 +98,6 @@ func prepareLineage(ctx context.Context, p *Plan, in Input, seg *ir.Segment) err
 func forkLine(p *Plan) {
 	p.targetLine = p.manifest.Fork(p.OperationID, p.sourceState.Heads)
 	p.Options.Fork = true
-	p.Mark = MarkOff
 }
 func targetState(ctx context.Context, p *Plan, in Input, c Copy) (lineage.State, ir.Segment, error) {
 	reader, ok := in.Target.Module.(agent.Reader)

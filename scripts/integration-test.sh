@@ -78,7 +78,7 @@ LOCAL_ID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["plan
 GOT="$CLAUDE_CONFIG_DIR/projects/$TSLUG/$LOCAL_ID.jsonl"
 [ -f "$GOT" ] || fail "second pull did not install its reported destination"
 RFILE="$RHOME/.claude/projects/$SLUG/$ID.jsonl"
-sudo grep -Eq 'prepared in Claude Code on here' "$RFILE" || fail "box's copy is not marked after the pull"
+sudo grep -q '↪' "$RFILE" && fail "box's copy was relabelled by the pull: titles must stay as they were"
 # Continue the native chain before returning. A workless visit only syncs receipts.
 python3 - "$GOT" "$LOCAL_ID" <<'PYTHON'
 import json, sys
@@ -107,14 +107,14 @@ if [ -z "$RETURN_ID" ] || [ "$RETURN_ID" = "$ID" ]; then
 fi
 RETURN_FILE="$RHOME/.claude/projects/$SLUG/$RETURN_ID.jsonl"
 sudo test -f "$RETURN_FILE" || fail "box did not install the reported return destination"
-sudo cat "$RETURN_FILE" | grep '"type":"custom-title"' | tail -n 1 | grep -Eq 'moved to |continued in |prepared in ' && fail "the returned copy still carries a mark"
+sudo cat "$RETURN_FILE" | grep '"type":"custom-title"' | tail -n 1 | grep -q '↪' && fail "the returned copy carries a title label"
 sudo grep -q 'SSH return sentinel' "$RETURN_FILE" || fail "box did not receive this machine's new work"
 sudo grep -q 'SSH return sentinel' "$RFILE" && fail "unverified return changed the original conversation"
-tail -n 2 "$GOT" | grep -q 'prepared in Claude Code on ' || fail "the copy here is not marked as prepared" # box names itself
+grep -q '↪' "$GOT" && fail "the copy here was relabelled by the push"
 "$BIN" undo "$JOURNAL" --yes
 sudo test -f "$RETURN_FILE" && fail "undo left the returned portable copy"
-tail -n 2 "$GOT" | grep -Eq 'moved to |continued in |prepared in ' && fail "undo left the mark here"
-sudo grep -Eq 'prepared in Claude Code on here' "$RFILE" || fail "undo did not restore box's own copy"
+grep -q '↪' "$GOT" && fail "the copy here carries a title label after undo"
+sudo grep -q '↪' "$RFILE" && fail "box's own copy carries a title label after undo"
 
 # A machine that does not receive refuses.
 as_remote /usr/local/bin/hopsesh receive off >/dev/null

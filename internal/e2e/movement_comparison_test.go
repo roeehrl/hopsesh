@@ -27,7 +27,7 @@ func TestMovementConversationConflictReview(t *testing.T) {
 			const shared = "CONFLICT-REVIEW-SHARED-WORK"
 			appendComparisonWork(t, route[0], in.Session.Path, shared, shared+"-REPLY")
 			in.Session = findRouteSession(t, a, in.Source.Module, in.Source.Install, in.Session.Key)
-			outbound, _ := applyMovement(t, in, move.Options{TargetDir: b.repo, Mark: true, Notify: true}, env)
+			outbound, _ := applyMovement(t, in, move.Options{TargetDir: b.repo, Notify: true}, env)
 			original := findRouteSession(t, a, in.Source.Module, in.Source.Install, in.Session.Key)
 			incoming := findRouteSession(t, b, in.Target.Module, in.Target.Install, outbound.Placement.Key)
 			originalGraph, incomingGraph := movementGraph(t, original), movementGraph(t, incoming)
@@ -50,7 +50,7 @@ func TestMovementConversationConflictReview(t *testing.T) {
 			incoming = findRouteSession(t, b, in.Target.Module, in.Target.Install, incoming.Key)
 			back := move.Input{Source: in.Target, Session: incoming, Lineage: incomingGraph, Target: in.Source,
 				Copies: []move.Copy{{Summary: original, Lineage: originalGraph}}}
-			opt := move.Options{TargetDir: a.repo, TargetSession: original.Key.String(), Mark: true, Notify: true}
+			opt := move.Options{TargetDir: a.repo, TargetSession: original.Key.String(), Notify: true}
 			originalBytes, incomingBytes := movementBytes(t, original.Path), movementBytes(t, incoming.Path)
 			before := comparisonFixtureBytes(t, a.m.Facts.Home, b.m.Facts.Home, env.StateDir)
 			sourceLineage, targetLineage := incomingGraph.Encode(), originalGraph.Encode()
@@ -222,7 +222,7 @@ func testMovementCheckpointReturn(t *testing.T, replay bool) {
 	if before.Cursor.Offset != int64(len(transcript)) {
 		t.Fatalf("reader cursor %d did not include the complete native file (%d)", before.Cursor.Offset, len(transcript))
 	}
-	outbound, _ := applyMovement(t, in, move.Options{TargetDir: b.repo, Mark: true, Notify: true}, env)
+	outbound, _ := applyMovement(t, in, move.Options{TargetDir: b.repo, Notify: true}, env)
 	original := findRouteSession(t, a, in.Source.Module, in.Source.Install, in.Session.Key)
 	incoming := findRouteSession(t, b, in.Target.Module, in.Target.Install, outbound.Placement.Key)
 	carried := readAll(t, b, in.Target.Module, in.Target.Install, incoming)
@@ -262,7 +262,7 @@ func testMovementCheckpointReturn(t *testing.T, replay bool) {
 	incoming = findRouteSession(t, b, in.Target.Module, in.Target.Install, incoming.Key)
 	back := move.Input{Source: in.Target, Session: incoming, Lineage: movementGraph(t, incoming), Target: in.Source,
 		Copies: []move.Copy{{Summary: original, Lineage: movementGraph(t, original)}}}
-	opt := move.Options{TargetDir: a.repo, TargetSession: original.Key.String(), Mark: true, Notify: true}
+	opt := move.Options{TargetDir: a.repo, TargetSession: original.Key.String(), Notify: true}
 	buildReturn := func(cursor ir.Cursor) *move.Plan {
 		t.Helper()
 		files := comparisonFixtureBytes(t, a.m.Facts.Home, b.m.Facts.Home, env.StateDir)

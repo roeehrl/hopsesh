@@ -34,6 +34,9 @@ type MovementHookStatus struct {
 	Supported    bool     `json:"supported"`
 	Reason       string   `json:"reason,omitempty"`
 	Evidence     string   `json:"evidence,omitempty"`
+	// Trust is the agent's own answer for agents that skip untrusted hooks (Codex): an
+	// installed hook delivers nothing until the user trusts it there.
+	Trust *agent.HookTrust `json:"trust,omitempty"`
 }
 
 // MovementNoticeHooks manages hooks only on this machine. A nonempty profile is
@@ -140,6 +143,14 @@ func (a *App) movementNoticeHooks(ctx context.Context, m *host.Machine, action s
 				if err == nil {
 					old, err = readMovementHookFile(st.Path)
 					st.Installed = err == nil && hi.File.Has(old)
+				}
+			}
+			if err == nil && st.Installed && st.Enabled {
+				if tr, ok := mod.(agent.HookTrustReporter); ok {
+					if command, e := agent.NoticeHookCommand(bin, mod.Spec().ID, in.ProfileID(), dirs...); e == nil {
+						trust := tr.HookTrust(ctx, hookHost, in, []string{command})
+						st.Trust = &trust
+					}
 				}
 			}
 			if err != nil {
@@ -489,11 +500,16 @@ func migratingMovementHookFile(current *agent.HookFile, legacy []*agent.HookFile
 // NoticeHooks is the GUI's local hook setup status. Installed means the exact
 // current integration is present; it does not imply vendor trust or delivery.
 func (a *App) NoticeHooks(ctx context.Context) ([]MovementHookStatus, error) {
+	return a.NoticeHooksFor(ctx, "", "")
+}
+
+// NoticeHooksFor reports one agent's (or every agent's) hooks, as installed by this app.
+func (a *App) NoticeHooksFor(ctx context.Context, id agent.ID, profile string) ([]MovementHookStatus, error) {
 	bin, err := movementHookExecutable()
 	if err != nil {
 		return nil, err
 	}
-	return a.MovementNoticeHooks(ctx, "status", "", "", bin)
+	return a.MovementNoticeHooks(ctx, "status", id, profile, bin)
 }
 
 // InstallNoticeHooks is an explicit setup action; defaults being on does not

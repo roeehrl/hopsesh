@@ -139,7 +139,7 @@ func runLineageRoute(t *testing.T, route, start string, mask int, patterns ...st
 				input.Copies = append(input.Copies, move.Copy{Summary: copy, Lineage: cm})
 			}
 		}
-		p, err := move.Build(ctx, input, move.Options{TargetDir: dst.repo, Mark: true, Notify: true})
+		p, err := move.Build(ctx, input, move.Options{TargetDir: dst.repo, Notify: true})
 		if err != nil {
 			t.Fatal(err)
 		}
