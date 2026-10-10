@@ -45,6 +45,12 @@ export function sanitizeTail(event) {
   return result;
 }
 
+// A handled 503/429 has an "ok" execution outcome. Keep its already-redacted
+// status so temporary failures remain visible after adding exception boundaries.
+export function shouldCaptureTail(event, first = false) {
+  return first || event.exceptions.length > 0 || event.outcome !== 'ok' || event.status === 429 || event.status >= 500;
+}
+
 // Wrangler prints pretty JSON, possibly split anywhere across stream chunks.
 // Ignore banners and discard oversized events without retaining their contents.
 export function tailDecoder(emit, maxBytes = 256 * 1024) {
@@ -98,7 +104,7 @@ if (import.meta.main) {
   child.stdout.setEncoding('utf8');
   child.stdout.on('data', tailDecoder(event => {
     if (count >= 4096) return stop();
-    if (event.exceptions.length || event.outcome !== 'ok' || count === 0) {
+    if (shouldCaptureTail(event, count === 0)) {
       count++;
       process.stdout.write(JSON.stringify(event) + '\n');
     }

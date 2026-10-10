@@ -1,6 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sanitizeTail, tailDecoder } from './tail-diagnostics.mjs';
+import { sanitizeTail, shouldCaptureTail, tailDecoder } from './tail-diagnostics.mjs';
+
+test('handled server and rate failures remain visible without recording successful traffic', () => {
+  for (const status of [101, 200, 201, 204, 400, 403, 429, 500, 502, 503]) {
+    const event = sanitizeTail({ outcome: 'ok', event: { response: { status }, request: { url: 'https://private/v1/messages?secret-query', body: 'secret-body' } } });
+    assert.equal(shouldCaptureTail(event), status === 429 || status >= 500);
+    assert.equal(shouldCaptureTail(event, true), true);
+    assert.ok(!JSON.stringify(event).includes('secret'));
+  }
+  assert.equal(shouldCaptureTail(sanitizeTail({ outcome: 'exception' })), true);
+  assert.equal(shouldCaptureTail(sanitizeTail({ outcome: 'ok', exceptions: [{ message: 'private-details' }] })), true);
+});
 
 test('tail diagnostics drop arbitrary fields and retain only bounded correlation metadata', () => {
   const event = {
