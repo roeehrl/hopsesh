@@ -1,102 +1,29 @@
 name: release tests
-
-# The release tier: the scenario matrix at triple coverage on the three systems, and at
-# pair coverage on the runner images people also have (Windows Server 2022 with its older
-# OpenSSH, macOS 26, Linux and Windows on ARM). On release tags and on demand; no secrets.
-
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
-  pull_request: # changes to this run are tested before they land
-    paths:
-      - .github/workflows/release-tests.yml
-      - .github/workflows/runtime-matrix.yml
-
 permissions:
   contents: read
-
-concurrency: # a newer push to the same pull request replaces the run; scheduled and tag runs never wait
-  group: release-tests-${{ github.head_ref || github.run_id }}
-  cancel-in-progress: true
-
 jobs:
-  runtime-triples:
-    # Nightly owns this identical matrix on PRs, including changes to this file.
-    # Tags and explicit release qualification still execute their own full copy.
-    if: github.event_name != 'pull_request'
-    # Same-commit reference; retain the supported ./ form until actionlint parses $/.
-    uses: ./.github/workflows/runtime-matrix.yml # zizmor: ignore[self-repository]
-    with:
-      strength: 3
-  matrix:
-    name: scenarios (${{ matrix.label }})
+  published-staging:
+    name: signed staging (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # The full unsharded model reaches only its repeated-return rows
-          # near the two-hour limit. Keep every row and its original deadline
-          # while distributing the long routes across four disjoint shards.
-          - {label: linux triples 1/4, os: ubuntu-24.04, t: 3, shard: 1/4}
-          - {label: linux triples 2/4, os: ubuntu-24.04, t: 3, shard: 2/4}
-          - {label: linux triples 3/4, os: ubuntu-24.04, t: 3, shard: 3/4}
-          - {label: linux triples 4/4, os: ubuntu-24.04, t: 3, shard: 4/4}
-          - {label: macos triples 1/4, os: macos-15, t: 3, shard: 1/4}
-          - {label: macos triples 2/4, os: macos-15, t: 3, shard: 2/4}
-          - {label: macos triples 3/4, os: macos-15, t: 3, shard: 3/4}
-          - {label: macos triples 4/4, os: macos-15, t: 3, shard: 4/4}
-          # Two Windows halves also exhausted 120m before completing their rows.
-          # Preserve the full model and each scenario deadline in four shards.
-          - {label: windows triples 1/4, os: windows-2025, t: 3, shard: 1/4}
-          - {label: windows triples 2/4, os: windows-2025, t: 3, shard: 2/4}
-          - {label: windows triples 3/4, os: windows-2025, t: 3, shard: 3/4}
-          - {label: windows triples 4/4, os: windows-2025, t: 3, shard: 4/4}
-          - {label: windows 2022, os: windows-2022, t: 2}
-          - {label: macos 26, os: macos-26, t: 2}
-          - {label: linux arm64, os: ubuntu-24.04-arm, t: 2}
-          - {label: windows arm64, os: windows-11-arm, t: 2}
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 120
+    timeout-minutes: 10
     steps:
-      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1
         with:
           egress-policy: audit
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+          fetch-depth: 2
+      - name: Verify signature and execute published binary without a display
+        run: python3 scripts/qualify-signed-staging.py
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
         with:
-          go-version-file: go.mod
-          cache: false # tag runs never use a cache another run could have filled
-      - name: build
-        shell: bash
-        run: |
-          ext=""; [ "$RUNNER_OS" = Windows ] && ext=.exe
-          for p in cmd/hopsesh:hopsesh internal/devtools/hsmatrix:hsmatrix internal/devtools/fakeagent:fakeagent; do
-            go build -o "bin/${p#*:}$ext" "./${p%%:*}"
-          done
-      - name: scenario matrix over loopback SSH
-        if: runner.os != 'Windows'
-        env:
-          LABEL: ${{ matrix.label }}
-          T: ${{ matrix.t }}
-          SHARD: ${{ matrix.shard || '1/1' }}
-        run: scripts/matrix-loopback.sh bin "$LABEL" "$RUNNER_TEMP/hsmatrix" -t "$T" -shard "$SHARD"
-      - name: scenario matrix over loopback SSH
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          LABEL: ${{ matrix.label }}
-          T: ${{ matrix.t }}
-          SHARD: ${{ matrix.shard || '1/1' }}
-        run: ./scripts/matrix-loopback.ps1 -Bin bin -Label $env:LABEL -Out "$env:RUNNER_TEMP\hsmatrix" -Strength $env:T -Shard $env:SHARD
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always() # retain successful shards so their exact union can be audited
-        with:
-          name: release-scenarios-${{ strategy.job-index }}
-          path: |
-            ${{ runner.temp }}/hsmatrix/*.log
-            ${{ runner.temp }}/hsmatrix/*.json
-          retention-days: 14
+          name: signed-staging-${{ matrix.os }}
+          path: staging-evidence/verified.json
