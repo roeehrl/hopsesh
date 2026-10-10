@@ -30,6 +30,21 @@ var contentReads atomic.Int64
 // transcriptReads counts the native transcripts movement observation read.
 var transcriptReads atomic.Int64
 
+// scans counts discovery scans started in this process.
+var scans atomic.Int64
+
+// Counters is the work scans did in this process, for resource budgets in tests and
+// the idle benchmark: they count work instead of timing it, so they do not flake.
+type Counters struct {
+	Scans           int64 `json:"scans"`
+	ContentReads    int64 `json:"contentReads"`    // transcripts and sidecars opened
+	TranscriptReads int64 `json:"transcriptReads"` // native transcripts read for movement
+}
+
+func ResourceCounters() Counters {
+	return Counters{Scans: scans.Load(), ContentReads: contentReads.Load(), TranscriptReads: transcriptReads.Load()}
+}
+
 // statKey names one file's observed version.
 type statKey struct {
 	Size     int64

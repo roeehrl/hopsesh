@@ -195,6 +195,7 @@ type ScanUpdate struct {
 // clouds are listed through this machine once its own sessions are listed (their lineage
 // names the cloud copies hopsesh made), alongside the other machines.
 func (a *App) Scan(ctx context.Context, o ScanOptions) *Inventory {
+	scans.Add(1)
 	started := time.Now()
 	defer func() {
 		a.Log.Debug("session discovery completed", "duration", time.Since(started), "cache", !o.NoCache)

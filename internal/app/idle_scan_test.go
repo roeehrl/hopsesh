@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -19,7 +20,10 @@ import (
 )
 
 // movedPair is one session moved between two machines, both read in this test.
-func movedPair(t *testing.T) (*App, *Inventory) {
+func movedPair(t *testing.T) (*App, *Inventory) { return movedPairSized(t, 0) }
+
+// movedPairSized adds extra turns to the transcript, for a large lineage graph.
+func movedPairSized(t testing.TB, turns int) (*App, *Inventory) {
 	t.Helper()
 	ctx := context.Background()
 	mod := claude.New()
@@ -38,6 +42,9 @@ func movedPair(t *testing.T) (*App, *Inventory) {
 			t.Fatal(err)
 		}
 		native := `{"type":"user","uuid":"u1","sessionId":"session","message":{"role":"user","content":"Fix tests"}}` + "\n"
+		for n := range turns {
+			native += fmt.Sprintf(`{"type":"assistant","uuid":"t%d","parentUuid":"%s","sessionId":"session","message":{"role":"assistant","content":[{"type":"text","text":"step %d of the work, with enough words to look like a real turn"}]}}`+"\n", n, parent(n), n)
+		}
 		if err := os.WriteFile(path, []byte(native), 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -76,6 +83,13 @@ func movedPair(t *testing.T) (*App, *Inventory) {
 		}
 	}
 	return a, &Inventory{Entries: entries, Machines: machines}
+}
+
+func parent(n int) string {
+	if n == 0 {
+		return "u1"
+	}
+	return fmt.Sprintf("t%d", n-1)
 }
 
 func movementView(inv *Inventory) string {
@@ -167,3 +181,4 @@ func TestIdleRescanTouchesNothing(t *testing.T) {
 		}
 	}
 }
+
