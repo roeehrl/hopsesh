@@ -91,6 +91,7 @@ func MergeDiscovery(old *Inventory, u ScanUpdate) *Inventory {
 			}
 		}
 	}
+	rebindDiscoveryDefaults(next, u.Entries)
 	by := map[string]int{}
 	for i, e := range next.Entries {
 		by[EntryIdentity(e.Machine, e.Session.Key.String())] = i
@@ -122,6 +123,66 @@ func MergeDiscovery(old *Inventory, u ScanUpdate) *Inventory {
 	}
 	return next
 }
+
+// Passive observation can precede first-time default-account registration. A
+// partial listing must replace that local file's shorthand, not display another
+// copy until the whole machine finishes. Explicit profiles and remote/cloud
+// identities remain exact; this is browsing metadata, never action authority.
+func rebindDiscoveryDefaults(inv *Inventory, incoming []Entry) {
+	type nativeFile struct {
+		machine string
+		key     agent.SessionKey
+		path    string
+	}
+	fileOf := func(e Entry) nativeFile {
+		key := e.Session.Key
+		key.Profile = ""
+		return nativeFile{e.Machine, key, e.Session.Path}
+	}
+	local := map[string]bool{}
+	for _, m := range inv.Machines {
+		local[m.Name] = m.Local
+	}
+	candidates := map[nativeFile]Entry{}
+	ambiguous := map[nativeFile]bool{}
+	for _, e := range incoming {
+		p := e.Profile
+		if !local[e.Machine] || e.Location.IsCloud() || e.Session.Path == "" || p == nil || !p.Default || p.ID == "" || p.Endpoint == "" || p.Root == "" || p.Agent != e.Agent || e.Session.Key.Agent != e.Agent || e.Session.Key.Profile != p.ID {
+			continue
+		}
+		f := fileOf(e)
+		if prior, ok := candidates[f]; ok && (prior.Session.Key != e.Session.Key || prior.Profile.Endpoint != p.Endpoint || prior.Profile.Root != p.Root) {
+			ambiguous[f] = true
+		}
+		candidates[f] = e
+	}
+	existing := map[string]bool{}
+	for _, e := range inv.Entries {
+		existing[EntryIdentity(e.Machine, e.Session.Key.String())] = true
+	}
+	for _, entries := range [][]Entry{inv.Entries, incoming} {
+		for _, e := range entries {
+			if c, ok := candidates[fileOf(e)]; ok && e.Session.Key.Profile != "" && e.Session.Key != c.Session.Key {
+				ambiguous[fileOf(e)] = true
+			}
+		}
+	}
+	kept := inv.Entries[:0]
+	for _, e := range inv.Entries {
+		f := fileOf(e)
+		if c, ok := candidates[f]; ok && !ambiguous[f] && !e.Location.IsCloud() && e.Agent == c.Agent && e.Session.Key.Profile == "" && e.Profile == nil {
+			if existing[EntryIdentity(c.Machine, c.Session.Key.String())] {
+				continue
+			}
+			e.Session.Key = c.Session.Key
+			e.Profile = c.Profile
+			e.Cached = true
+		}
+		kept = append(kept, e)
+	}
+	inv.Entries = kept
+}
+
 func (a *App) listingContext(ctx context.Context, machine string, in agent.Install, found func(agent.Summary)) context.Context {
 	if a.Catalog == nil {
 		return ctx
