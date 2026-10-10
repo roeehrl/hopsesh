@@ -100,7 +100,7 @@ func readAnalysisLinesWithLimits(ctx context.Context, r io.Reader, retainedLimit
 			return nil, 0, &ir.LimitError{Stage: ir.StageRead, Limit: retainedLimit, Size: retained, Detail: "Codex retained conversation; no history was truncated"}
 		}
 		if len(records) >= analysisRecordCountLimit {
-			return nil, 0, fmt.Errorf("Codex transcript exceeds %d native records", analysisRecordCountLimit)
+			return nil, 0, fmt.Errorf("transcript exceeds %d native Codex records", analysisRecordCountLimit)
 		}
 		records = append(records, l)
 	}

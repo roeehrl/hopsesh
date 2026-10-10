@@ -102,17 +102,14 @@ PYTHON
 JOURNAL=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["result"]["journal"])' "$WORK/push.json")
 [ -n "$JOURNAL" ] || { cat "$WORK/push.json"; fail "push printed no journal"; }
 RETURN_ID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["plan"]["placement"]["key"]["session"])' "$WORK/push.json")
-if [ -z "$RETURN_ID" ] || [ "$RETURN_ID" = "$ID" ]; then
-  fail "unverified return did not preserve the original session"
-fi
-RETURN_FILE="$RHOME/.claude/projects/$SLUG/$RETURN_ID.jsonl"
-sudo test -f "$RETURN_FILE" || fail "box did not install the reported return destination"
-sudo cat "$RETURN_FILE" | grep '"type":"custom-title"' | tail -n 1 | grep -q '↪' && fail "the returned copy carries a title label"
-sudo grep -q 'SSH return sentinel' "$RETURN_FILE" || fail "box did not receive this machine's new work"
-sudo grep -q 'SSH return sentinel' "$RFILE" && fail "unverified return changed the original conversation"
+# A return adds only the new work to the exact original on box (no separate copy).
+[ "$RETURN_ID" = "$ID" ] || { cat "$WORK/push.json"; fail "the return did not go back to box's original session"; }
+sudo cat "$RFILE" | grep '"type":"custom-title"' | tail -n 1 | grep -q '↪' && fail "the original carries a title label"
+sudo grep -q 'SSH return sentinel' "$RFILE" || fail "box's original did not receive this machine's new work"
 grep -q '↪' "$GOT" && fail "the copy here was relabelled by the push"
 "$BIN" undo "$JOURNAL" --yes
-sudo test -f "$RETURN_FILE" && fail "undo left the returned portable copy"
+sudo test -f "$RFILE" || fail "undo removed box's original session"
+sudo grep -q 'SSH return sentinel' "$RFILE" && fail "undo left the returned work in box's original"
 grep -q '↪' "$GOT" && fail "the copy here carries a title label after undo"
 sudo grep -q '↪' "$RFILE" && fail "box's own copy carries a title label after undo"
 

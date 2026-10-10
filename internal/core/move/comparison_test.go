@@ -131,7 +131,23 @@ func TestComparisonIdentityAndNoMutation(t *testing.T) {
 	beforeManifest := string(f.p.manifest.Encode())
 	beforeSource, _ := json.Marshal(f.source)
 	beforeTarget, _ := json.Marshal(f.target)
-	beforeInput, _ := json.Marshal(f.in)
+	// Machines carry connection callbacks that do not marshal: compare the data that does.
+	inputData := func() string {
+		b, err := json.Marshal(struct {
+			Session                      agent.Summary
+			Live                         agent.LiveInfo
+			Git                          any
+			Lineage                      *lineage.Manifest
+			Copies                       []Copy
+			Worktrees                    []string
+			SourceInstall, TargetInstall agent.Install
+		}{f.in.Session, f.in.Live, f.in.Git, f.in.Lineage, f.in.Copies, f.in.Worktrees, f.in.Source.Install, f.in.Target.Install})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	beforeInput := inputData()
 	got := BuildComparison(f.p, f.in, f.c, f.source, f.target, f.st, nil)
 	want := ComparisonIdentity{Agent: "test", AgentName: "Test agent", Profile: "target-profile", ProfileName: "Destination label", Machine: "Destination Mac", MachineID: "target-machine", Title: "Destination title", Key: f.c.Summary.Key}
 	if !reflect.DeepEqual(got.Destination.Identity, want) || got.Source.Identity.Key != f.in.Session.Key {
@@ -140,8 +156,8 @@ func TestComparisonIdentityAndNoMutation(t *testing.T) {
 	afterPlan, _ := json.Marshal(f.p)
 	afterSource, _ := json.Marshal(f.source)
 	afterTarget, _ := json.Marshal(f.target)
-	afterInput, _ := json.Marshal(f.in)
-	if string(beforePlan) != string(afterPlan) || beforeManifest != string(f.p.manifest.Encode()) || string(beforeSource) != string(afterSource) || string(beforeTarget) != string(afterTarget) || string(beforeInput) != string(afterInput) {
+	afterInput := inputData()
+	if string(beforePlan) != string(afterPlan) || beforeManifest != string(f.p.manifest.Encode()) || string(beforeSource) != string(afterSource) || string(beforeTarget) != string(afterTarget) || beforeInput != afterInput {
 		t.Fatal("comparison mutated its planning inputs")
 	}
 }
