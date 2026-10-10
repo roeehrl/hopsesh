@@ -244,6 +244,25 @@ func TestCodexStop(t *testing.T) {
 		t.Skip("python3 drives the TUI")
 	}
 	home, cwd := codexHome(t, t.TempDir()), t.TempDir()
+	t.Cleanup(func() {
+		// Newer Codex TUIs bootstrap a managed server and updater inside this
+		// disposable home. Stopping the thread does not own the updater's
+		// lifetime. Shut down that home's vendor management before TempDir
+		// cleanup removes its PID records; never target the user's daemon.
+		if _, err := os.Stat(filepath.Join(home, "app-server-daemon")); os.IsNotExist(err) {
+			return
+		} else if err != nil {
+			t.Errorf("inspect disposable Codex daemon: %v", err)
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		stop := exec.CommandContext(ctx, bin, "app-server", "daemon", "stop")
+		stop.Env = append(os.Environ(), "CODEX_HOME="+home)
+		if out, err := stop.CombinedOutput(); err != nil {
+			t.Errorf("stop disposable Codex daemon: %v: %s", err, out)
+		}
+	})
 	login := exec.Command(bin, "login", "--with-api-key")
 	login.Env = append(os.Environ(), "CODEX_HOME="+home)
 	login.Stdin = strings.NewReader("sk-hopsesh-test-not-a-real-key") // never used: no prompt is sent
