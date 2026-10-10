@@ -330,7 +330,9 @@ export default {async fetch(req,env){
    try{const {payload}=await jwtVerify(token,encoder.encode(env.ENROLLMENT_ADMIN),{algorithms:['HS256'],issuer:'hopsesh-relay-v1',audience:'hopsesh-relay-mailbox'});if(!opaque(payload.space)||!opaque(payload.device)||payload.kind!=='device')return response({error:'access_denied'},403);headers.set('X-Hopsesh-Principal',payload.space);headers.set('X-Hopsesh-Issuer',payload.device);headers.set('X-Hopsesh-Credential',await digest(token))}catch{return response({error:'access_denied'},403)}
   }
   const ip=req.headers.get('CF-Connecting-IP');if(!ip)return response({error:'invalid_request'},400);
-  if(!(await env.LOGIN_RATE.limit({key:'cloud:'+ip})).success||!(await env.LOGIN_RATE.limit({key:'global:'+url.pathname})).success||url.pathname==='/v1/cloud/claim'&&!(await env.CODE_RATE.limit({key:'cloud:'+ip})).success)return response({error:'quota'},429);
+  try{
+   if(!(await env.LOGIN_RATE.limit({key:'cloud:'+ip})).success||!(await env.LOGIN_RATE.limit({key:'global:'+url.pathname})).success||url.pathname==='/v1/cloud/claim'&&!(await env.CODE_RATE.limit({key:'cloud:'+ip})).success)return response({error:'quota'},429);
+  }catch{return response({error:'temporarily_unavailable'},503)}
   return env.AUTHORIZATION.get(env.AUTHORIZATION.idFromName('hopsesh-device-enrollment-v1')).fetch(new Request(req,{headers}));
  }
  if(url.pathname.startsWith('/v1/device/')||url.pathname.startsWith('/v1/authorization/')||['/device','/device.js','/device.css'].includes(url.pathname)){
@@ -340,8 +342,10 @@ export default {async fetch(req,env){
   let principal;
   if(!publicRoute){try{principal=await accessPrincipal(req,env)}catch{return response({error:'access_denied'},403)}}
   const ip=req.headers.get('CF-Connecting-IP');if(!ip)return response({error:'invalid_request'},400);
-  if(!(await env.LOGIN_RATE.limit({key:'ip:'+ip})).success||!(await env.LOGIN_RATE.limit({key:'global:'+url.pathname})).success)return response({error:'temporarily_unavailable'},429);
-  if(['/v1/device/code','/v1/authorization/request'].includes(url.pathname)&&!(await env.CODE_RATE.limit({key:ip})).success)return response({error:'temporarily_unavailable'},429);
+  try{
+   if(!(await env.LOGIN_RATE.limit({key:'ip:'+ip})).success||!(await env.LOGIN_RATE.limit({key:'global:'+url.pathname})).success)return response({error:'temporarily_unavailable'},429);
+   if(['/v1/device/code','/v1/authorization/request'].includes(url.pathname)&&!(await env.CODE_RATE.limit({key:ip})).success)return response({error:'temporarily_unavailable'},429);
+  }catch{return response({error:'temporarily_unavailable'},503)}
   if(req.method==='GET'){const asset=deviceAsset(url.pathname);if(asset)return asset}
   if(req.method!=='POST'||!['/v1/device/code','/v1/device/token','/v1/device/review','/v1/device/approve','/v1/authorization/request','/v1/authorization/token'].includes(url.pathname))return response({error:'invalid_request'},404);
   const headers=new Headers(req.headers);headers.delete('X-Hopsesh-Principal');if(principal)headers.set('X-Hopsesh-Principal',principal);
@@ -356,15 +360,21 @@ export default {async fetch(req,env){
  if(['/v1/enrollment/register','/v1/enrollment/check','/v1/enrollment/revoke-device','/v1/operator/stats'].includes(url.pathname)){
   if(!token||await hash(token)!==await hash(env.ENROLLMENT_ADMIN))return json({error:'authorization'},403);
  }else{
+  let payload;
   try{
-   const {payload}=await jwtVerify(token,encoder.encode(env.ENROLLMENT_ADMIN),{algorithms:['HS256'],issuer:'hopsesh-relay-v1',audience:'hopsesh-relay-mailbox'});
+   ({payload}=await jwtVerify(token,encoder.encode(env.ENROLLMENT_ADMIN),{algorithms:['HS256'],issuer:'hopsesh-relay-v1',audience:'hopsesh-relay-mailbox'}));
    if(payload.space!==space||!opaque(payload.device)||!['device','cloud-session'].includes(payload.kind))return json({error:'authorization'},403);
+  }catch{return json({error:'authorization'},403)}
+  // An unavailable rate service is not a credential rejection. Keep the
+  // request outside the mailbox until rate checks can succeed, without
+  // telling an otherwise authorized cloud connector to discard its lease.
+  try{
    if(['/v1/messages','/v1/ack'].includes(url.pathname)&&env.TRAFFIC_RATE&&(!(await env.TRAFFIC_RATE.limit({key:'device:'+space+':'+payload.device})).success||env.GLOBAL_TRAFFIC_RATE&&!(await env.GLOBAL_TRAFFIC_RATE.limit({key:'global:mailbox'})).success))return json({error:'quota'},429);
    if(url.pathname==='/v1/notifications'){
     if(url.protocol!=='https:'||req.method!=='GET'||url.search||req.headers.get('Upgrade')?.toLowerCase()!=='websocket')return json({error:'websocket-required'},426);
     if(!env.LOGIN_RATE||!(await env.LOGIN_RATE.limit({key:'notifications:'+space+':'+payload.device})).success||!(await env.LOGIN_RATE.limit({key:'global:notifications'})).success)return json({error:'quota'},429);
    }
-  }catch{return json({error:'authorization'},403)}
+  }catch{return json({error:'temporarily_unavailable'},503)}
  }
  return env.MAILBOX.get(env.MAILBOX.idFromName(space)).fetch(req);
 }};
