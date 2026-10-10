@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -12,6 +13,80 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/relay"
 	localruntime "github.com/roeehrl/hopsesh/internal/core/runtime"
 )
+
+func readRelayFleetObservation(ctx context.Context, client localruntime.Client) (observe.Snapshot, app.Observation, error) {
+	var snapshot observe.Snapshot
+	var observation app.Observation
+	if err := client.Call(ctx, "snapshot", nil, &snapshot); err != nil {
+		return snapshot, observation, err
+	}
+	// Relay readiness and inventory readiness are independent. Keep the caller's
+	// existing bounded readiness loop pending until the first collection; an
+	// empty or malformed payload after successful publication is still an error.
+	if len(snapshot.Data) == 0 && snapshot.ObservedAt.IsZero() {
+		return snapshot, observation, nil
+	}
+	err := json.Unmarshal(snapshot.Data, &observation)
+	return snapshot, observation, err
+}
+
+// A listening runtime deliberately does not wait for inventory. Exercise that
+// ordering through real IPC so qualification waits for evidence instead of
+// treating an unpublished snapshot as malformed inventory.
+func TestRelayFleetObservationBeforeFirstCollection(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	entered, release := make(chan struct{}, 1), make(chan struct{})
+	engine, err := observe.New(observe.Defaults(), func(ctx context.Context) (json.RawMessage, error) {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-release:
+			return json.Marshal(app.Observation{InventoryComplete: true})
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	namespace, err := localruntime.NewNamespace(filepath.Join(t.TempDir(), "config"), filepath.Join(t.TempDir(), "state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := localruntime.Start(ctx, namespace, engine, "headless", "test", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	select {
+	case <-entered:
+	case <-ctx.Done():
+		t.Fatal("collector did not start", ctx.Err())
+	}
+	client := localruntime.Client{Namespace: namespace}
+	snapshot, observation, err := readRelayFleetObservation(ctx, client)
+	if err != nil {
+		t.Fatal("unpublished inventory must remain pending", err)
+	}
+	if snapshot.Sequence != 0 || snapshot.Fresh(time.Now()) || observation.InventoryComplete {
+		t.Fatal("unpublished inventory was reported ready")
+	}
+	updates, unsubscribe := engine.Subscribe()
+	defer unsubscribe()
+	close(release)
+	select {
+	case <-updates:
+	case <-ctx.Done():
+		t.Fatal("collector did not publish", ctx.Err())
+	}
+	snapshot, observation, err = readRelayFleetObservation(ctx, client)
+	if err != nil || !snapshot.Fresh(time.Now()) || !observation.InventoryComplete {
+		t.Fatal("published inventory was not delivered", err)
+	}
+}
 
 // Real filesystem -> shared source -> authenticated encrypted publication ->
 // SQLite/R2 notification -> recipient runtime. No explicit remote Scan calls.
@@ -31,12 +106,8 @@ func TestRelayObservationChangesSQLiteR2(t *testing.T) {
 	}
 	remote := func() app.RemoteObservation {
 		t.Helper()
-		var snapshot observe.Snapshot
-		if err := clients['B'].Call(ctx, "snapshot", nil, &snapshot); err != nil {
-			t.Fatal(err)
-		}
-		var obs app.Observation
-		if err := json.Unmarshal(snapshot.Data, &obs); err != nil {
+		snapshot, obs, err := readRelayFleetObservation(ctx, clients['B'])
+		if err != nil {
 			t.Fatal(err)
 		}
 		for _, state := range obs.Remotes {
@@ -44,7 +115,7 @@ func TestRelayObservationChangesSQLiteR2(t *testing.T) {
 				return state
 			}
 		}
-		return app.RemoteObservation{}
+		return app.RemoteObservation{Error: snapshot.Error}
 	}
 	wait := func(label string, check func(app.RemoteObservation) bool) app.RemoteObservation {
 		t.Helper()

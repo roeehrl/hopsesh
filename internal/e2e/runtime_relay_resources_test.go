@@ -42,9 +42,8 @@ func TestRuntimeRelayThreeProfilesThreePeersSQLiteR2(t *testing.T) {
 	deadline := time.Now().Add(30 * time.Second)
 	for key, client := range clients {
 		for {
-			var snapshot observe.Snapshot
-			var observation app.Observation
-			if err := client.Call(ctx, "snapshot", nil, &snapshot); err != nil || json.Unmarshal(snapshot.Data, &observation) != nil {
+			snapshot, observation, err := readRelayFleetObservation(ctx, client)
+			if err != nil {
 				t.Fatal("fleet observation unavailable", err)
 			}
 			ready := snapshot.Fresh(time.Now()) && len(observation.Remotes) == 3
