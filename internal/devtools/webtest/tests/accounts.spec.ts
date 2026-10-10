@@ -1,5 +1,5 @@
 import {test,expect} from '@playwright/test';
-import {fresh,row,details} from './helpers';
+import {fresh,row,agentRow,details} from './helpers';
 test.beforeEach(async({page})=>fresh(page));
 test('arbitrary account names, tags, edits, and a scoped transfer destination',async({page},testInfo)=>{
  await page.locator('#btn-settings').click();await page.getByRole('button',{name:'Accounts',exact:true}).click();
@@ -40,7 +40,7 @@ test('Codex desktop action remains visible and explains why a custom account use
  const choice=page.getByLabel('Destination account');const id=await choice.locator('option').filter({hasText:'Research Codex'}).getAttribute('value');await choice.selectOption(id!);
  await expect(page.locator('#sheet')).toContainText('portable conversation');await page.locator('#sheet').getByRole('button',{name:/Continue in Codex/}).click();
  await expect(page.getByText('Codex session written',{exact:true})).toBeVisible({timeout:30000});await page.getByRole('button',{name:'Back to sessions',exact:true}).click();
- await row(page,'Find the codeword (from Claude Code)').click();await details(page).locator('#act-chevron').click();
+ await agentRow(page,'Find the codeword','Codex').click();await details(page).locator('#act-chevron').click();
  const app=page.getByRole('menuitem',{name:/Resume in Codex app/});await expect(app).toBeVisible();await expect(app).toHaveAttribute('aria-disabled','true');await expect(app).toContainText(/account (root|profile)/);
 });
 
@@ -128,5 +128,8 @@ test('account grouping shows retained source and destination copies after a tran
  await expect(page.getByText('Claude Code session written',{exact:true})).toBeVisible({timeout:30000});await page.getByRole('button',{name:'Back to sessions',exact:true}).click();
  await page.locator('#btn-display').click();await page.locator('#dp-group').selectOption('account');await page.keyboard.press('Escape');
  await expect(page.locator('.gname').filter({hasText:'Second personal'})).toHaveCount(1);
- await expect(row(page,'Find the codeword')).toHaveCount(1);await expect(row(page,'Find the codeword (from Claude Code)')).toHaveCount(1);
+ // Both copies keep the title; one is listed under each account.
+ await expect(row(page,'Find the codeword')).toHaveCount(2);
+ const second=page.locator('[role="treeitem"][aria-level="1"]').filter({has:page.locator('.gname',{hasText:'Second personal'})});
+ await expect(second.locator('.row').filter({has:page.locator('.t').getByText('Find the codeword',{exact:true})})).toHaveCount(1);
 });

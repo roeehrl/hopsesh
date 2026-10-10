@@ -54,3 +54,14 @@ export async function filter(page: Page, value: string | RegExp, facet = "") {
   await page.keyboard.press("Escape");
   if (facet) await page.keyboard.press("Escape");
 }
+
+// agentRow is the session row with exactly this title in one agent. Titles are never
+// changed by a move, so the original and its moved copy share a title; the agent's icon
+// tells them apart.
+export const agentRow = (page: Page, title: string, agent: string) =>
+  row(page, title).filter({ has: page.locator(`.r-ic img[alt="${agent}"], .r-ic [title="${agent}"]`) });
+
+// roleRow is the session row with exactly this title whose role chip names this role
+// ("Moved out", "Moved copy", "Returned", "Unblocked", "Diverged", …).
+export const roleRow = (page: Page, title: string, role: string) =>
+  row(page, title).filter({ has: page.locator(".role-chip", { hasText: role }) });

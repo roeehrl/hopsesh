@@ -66,7 +66,7 @@ async function fixtures(page:Page, returns:any[], movement:any=null) {
 
 test('remote return plans the exact account and native destination; prepared is not working',async({page},info)=>{
  const calls=await fixtures(page,[candidate()],{status:'prepared',text:'Prepared in Codex on studio',agent:'codex',agentName:'Codex',machine:'studio',profile:'work',key:'codex@work/original',checkedAt:'2026-01-02T03:04:05Z',delivery:'pending'});
- await expect(details(page).getByLabel('Movement notice')).toContainText('new work has not been observed');
+ await expect(details(page).getByLabel('Moved out',{exact:true})).toContainText('no new work there yet');
  await expect(details(page).locator('#act-primary')).toContainText('Move back to Codex');
  await page.screenshot({path:info.outputPath('return-prepared.png'),fullPage:true});
  await details(page).locator('#act-primary').click();
@@ -232,11 +232,11 @@ test('real backend comparison omits private reasoning from both sides before sen
  const scan=await call('Scan');
  const original=scan.groups.flatMap((g:any)=>g.entries).find((e:any)=>e.title==='Find the codeword');
  expect(original.path).toContain('hopsesh-webtest-');
- const plan=await call('Plan',[original.machine,original.key,'codex',{app:false,notify:true,worktree:'auto',mark:false,conflict:''}]);
+ const plan=await call('Plan',[original.machine,original.key,'codex',{app:false,notify:true,worktree:'auto',conflict:''}]);
  expect(plan.blockers || []).toEqual([]);
  await call('Apply'); // Fixture setup only: writes to the isolated demo home, no launch.
  const convertedScan=await call('Scan');
- const converted=convertedScan.groups.flatMap((g:any)=>g.entries).find((e:any)=>e.agent==='codex' && e.title==='Find the codeword (from Claude Code)');
+ const converted=convertedScan.groups.flatMap((g:any)=>g.entries).find((e:any)=>e.agent==='codex' && e.title==='Find the codeword'); // titles are never changed by a move
  expect(converted.path).toContain('hopsesh-webtest-');
  const destinationPrivate='DESTINATION_PRIVATE_REASONING_'+randomUUID(),sourcePrivate='SOURCE_PRIVATE_REASONING_'+randomUUID();
  const records=(await readFile(original.path,'utf8')).trim().split('\n').map(line=>JSON.parse(line));
@@ -246,7 +246,7 @@ test('real backend comparison omits private reasoning from both sides before sen
  await appendFile(converted.path,JSON.stringify({timestamp:new Date().toISOString(),type:'response_item',payload:{type:'reasoning',id:randomUUID(),summary:[{type:'summary_text',text:sourcePrivate}],encrypted_content:'private-fixture-ciphertext'}})+'\n');
  const work=await page.request.post('/movement-work',{params:{machine:converted.machine,key:converted.key}});expect(work.ok(),await work.text()).toBeTruthy();
  const before=await Promise.all([readFile(original.path),readFile(converted.path)]);
- const returned=await call('Plan',[converted.machine,converted.key,'claude',{targetProfile:original.profile?.id || '',targetSession:original.key,app:false,notify:true,worktree:'auto',mark:false,conflict:''}]);
+ const returned=await call('Plan',[converted.machine,converted.key,'claude',{targetProfile:original.profile?.id || '',targetSession:original.key,app:false,notify:true,worktree:'auto',conflict:''}]);
  const comparison=returned.continue.comparison;
  expect(comparison).toBeTruthy();expect(comparison.verified).toBe(true);expect(comparison.classification).toBe('diverged');
  expect(comparison.source.counts.other).toBeGreaterThan(0);expect(comparison.destination.counts.other).toBeGreaterThan(0);
@@ -414,19 +414,22 @@ test('a fork with no candidates never infers a return to its parent',async({page
  await expect(details(page).getByLabel('Return destinations')).toHaveCount(0);
 });
 
-test('movement notice setting persists and same-agent plans expose the override',async({page})=>{
+test('original-protection setting persists and same-agent plans expose the override',async({page})=>{
  await fresh(page);await page.locator('#btn-settings').click();
- const toggle=page.getByRole('checkbox',{name:/Record movement notices/});await expect(toggle).toBeChecked();
+ const choice=page.getByRole('radiogroup',{name:'When a session moves, the original',exact:true});
+ const blocked=choice.getByRole('radio',{name:'Is blocked',exact:true}),alone=choice.getByRole('radio',{name:'Is left alone',exact:true});
+ await expect(blocked).toHaveAttribute('aria-checked','true');
+ await expect(choice.getByRole('radio',{name:'Shows a warning',exact:true})).toHaveAttribute('aria-checked','false');
  // Hold the real post-save Info response: a fast click after "Saved" must not
  // create a plan from the previous cached defaults, regardless of network timing.
  let saving=false;
  let releaseInfo!:()=>void, infoHeld!:()=>void;
  const gate=new Promise<void>(resolve=>{releaseInfo=resolve});
  const held=new Promise<void>(resolve=>{infoHeld=resolve});
- const plans:any[]=[];
+ const plans:any[]=[],saved:any[]=[];
  await page.route('**/call',async route=>{
   const req=route.request().postDataJSON();
-  if(req.m==='SaveSettings') saving=true;
+  if(req.m==='SaveSettings'){saving=true;saved.push(req.args[0]);}
   if(req.m==='Plan') plans.push(req.args[3]);
   if(req.m==='Info' && saving) {
    saving=false;
@@ -437,19 +440,22 @@ test('movement notice setting persists and same-agent plans expose the override'
   return route.continue();
  });
  try {
-  await toggle.uncheck();await held;
+  await alone.click();await held;
   await expect(page.getByText('Saved',{exact:true})).not.toBeVisible();
  } finally {releaseInfo()}
  await expect(page.getByText('Saved',{exact:true})).toBeVisible();
+ expect(saved.at(-1)).toMatchObject({original:'off'});expect(saved.at(-1)).not.toHaveProperty('movementNotices');
+ await expect(alone).toHaveAttribute('aria-checked','true');
  await page.getByRole('button',{name:'Back to sessions',exact:true}).click();await row(page,'Find the codeword').click();
  await details(page).getByRole('button',{name:'Move',exact:true}).click();await page.getByRole('menuitem',{name:/Move to another account/}).click();
- const notice=page.getByRole('checkbox',{name:/Record a movement notice/});await expect(notice).not.toBeChecked();
+ const notice=page.getByRole('checkbox',{name:/Block the original until you move back/});await expect(notice).not.toBeChecked();
  await expect.poll(()=>plans.at(-1)?.notify).toBe(false);
  await notice.check();await expect(notice).toBeChecked();
  await expect.poll(()=>plans.at(-1)?.notify).toBe(true);
  await page.locator('#sheet').getByRole('button',{name:'Cancel',exact:true}).click();
  await page.reload();await page.locator('#btn-settings').click();
- await expect(toggle).not.toBeChecked(); // The per-move override did not change the saved default.
+ await expect(alone).toHaveAttribute('aria-checked','true'); // The per-move override did not change the saved default.
+ await expect(blocked).toHaveAttribute('aria-checked','false');
 });
 
 test('missing destination reviews a new session without reusing its original key',async({page})=>{
@@ -463,32 +469,37 @@ test('missing destination reviews a new session without reusing its original key
 
 test('source notice has destination, journey and explicit separate continuation controls',async({page})=>{
  const calls=await fixtures(page,[],{status:'prepared',text:'Prepared elsewhere',machine:'studio',agent:'codex',key:'codex/original',checkedAt:'0001-01-01T00:00:00Z'});
- const notice=details(page).getByLabel('Movement notice');
+ const notice=details(page).getByLabel('Moved out',{exact:true});
  await expect(notice).not.toContainText('Checked');
- await notice.getByRole('button',{name:'Show destination',exact:true}).click();
+ await notice.getByRole('button',{name:'Open moved copy',exact:true}).click();
  await expect(page.getByRole('dialog').last()).toContainText('Scan studio');await page.getByRole('dialog').last().getByRole('button',{name:'Close',exact:true}).click();
  await notice.getByRole('button',{name:'View journey',exact:true}).click();
  await expect(details(page).locator('#sec-copies')).toBeVisible();
- await expect(details(page).locator('#sec-copies')).toContainText('Movement operation:');
- await notice.getByRole('button',{name:'Continue separately here…',exact:true}).click();
+ await notice.getByRole('button',{name:'Fork here instead…',exact:true}).click();
  await expect.poll(()=>calls.length).toBe(1);expect(calls[0].m).toBe('Plan');expect(calls[0].args[2]).toBe('claude');expect(calls[0].args[3]).toMatchObject({fork:true,newReplica:true,targetSession:''});
 });
 
-test('cross-agent plan exposes durable notice override',async({page})=>{
+test('cross-agent plan exposes the block-the-original override',async({page})=>{
  await fresh(page);await row(page,'Find the codeword').click();
  await details(page).getByRole('button',{name:'Move',exact:true}).click();await page.getByRole('menuitem',{name:/^Continue with Codex/}).click();
  const sheet=page.locator('#sheet');
- await expect(sheet.getByText('Adds the destination to its title. This is a visual reminder; it does not lock the conversation or block further work.',{exact:true})).toBeVisible();
- await expect(sheet.getByText('Records where this conversation went. Installed agent hooks can supply a reminder on resume or a new prompt; this does not block further work in the original.',{exact:true})).toBeVisible();
- const notice=page.getByRole('checkbox',{name:/Record a movement notice/});await expect(notice).toBeChecked();await notice.uncheck();await expect(notice).not.toBeChecked();
+ await expect(sheet.getByText("The copy left behind refuses new prompts until you move the session back, so moving back stays a clean return (through the agent's hopsesh hook). Off: the original is left alone.",{exact:true})).toBeVisible();
+ await expect(sheet).not.toContainText('Adds the destination to its title'); // titles are never changed
+ await expect(sheet.getByRole('checkbox',{name:/Warn in the original/})).toHaveCount(0);
+ const notice=page.getByRole('checkbox',{name:/Block the original until you move back/});await expect(notice).toBeChecked();await notice.uncheck();await expect(notice).not.toBeChecked();
  await expect(page.locator('#sheet')).not.toContainText('asks the agent to tell the old one');
 });
 
-test('notice hook setup is explicit and installation is distinct from delivery',async({page})=>{
- const installs:any[]=[];
+test('protection hook setup is explicit and asks for the hopsesh command first',async({page})=>{
+ const installs:any[]=[],cli:any[]=[];let cliInstalled=false;
  await page.route('**/call',async route=>{
   const req=route.request().postDataJSON();
-  if(req.m==='InstallNoticeHooks'){installs.push(req);return route.fulfill({json:{result:[]}})}
+  if(req.m==='InstallNoticeHooks'){
+   installs.push(req);
+   if(!cliInstalled) return route.fulfill({json:{error:'cli-required: the hopsesh command is not installed; the skill and the protection hooks run it. Install the command first (Settings › Command line).'}});
+   return route.fulfill({json:{result:[]}});
+  }
+  if(req.m==='InstallCLI'){cli.push(req);cliInstalled=true;return route.fulfill({json:{result:null}})}
   if(req.m==='Settings'){
    const res=await route.fetch();const body=await res.json();
    body.result.noticeHooks=[{agent:'claude',profile:'work',profileLabel:'Work · alice@example.com',supported:true,installed:false,enabled:true,path:'/home/alice/.claude/settings.json'}];body.result.noticeHooksError='';
@@ -497,10 +508,35 @@ test('notice hook setup is explicit and installation is distinct from delivery',
   return route.continue();
  });
  await fresh(page);await page.locator('#btn-settings').click();
- await expect(page.getByText(/Installation does not prove delivery/)).toBeVisible();expect(installs).toHaveLength(0);
+ await expect(page.getByText('Protection hooks',{exact:true})).toBeVisible();expect(installs).toHaveLength(0);
+ await expect(page.getByText('Movement notice delivery')).toHaveCount(0);
  await expect(page.getByText('claude · Work · alice@example.com',{exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Install all hooks',exact:true})).toBeEnabled();
+ await expect(page.getByRole('button',{name:'Check again',exact:true}).last()).toBeVisible();
  await page.getByRole('button',{name:'Install hook',exact:true}).click();
- await expect.poll(()=>installs.length).toBe(1);expect(installs[0].args).toEqual(['claude','work']);
+ // The backend refuses without the command; the window offers to install it, then retries.
+ const ask=page.getByRole('dialog').filter({hasText:'Install the hopsesh command first?'});
+ await expect(ask).toBeVisible();expect(cli).toHaveLength(0);
+ await expect(ask).toContainText('the protection hooks run it');
+ await ask.getByRole('button',{name:'Install command and continue',exact:true}).click();
+ await expect.poll(()=>cli.length).toBe(1);
+ await expect.poll(()=>installs.length).toBe(2);expect(installs[0].args).toEqual(['claude','work']);expect(installs[1].args).toEqual(['claude','work']);
+});
+
+test('declining the hopsesh command leaves the protection hook uninstalled',async({page})=>{
+ const installs:any[]=[],cli:any[]=[];
+ await page.route('**/call',async route=>{
+  const req=route.request().postDataJSON();
+  if(req.m==='InstallNoticeHooks'){installs.push(req);return route.fulfill({json:{error:'cli-required: the hopsesh command is not installed; the skill and the protection hooks run it. Install the command first (Settings › Command line).'}});}
+  if(req.m==='InstallCLI'){cli.push(req);return route.fulfill({json:{result:null}})}
+  return route.continue();
+ });
+ await fresh(page);await page.locator('#btn-settings').click();
+ await page.getByRole('button',{name:'Install all hooks',exact:true}).click();
+ const ask=page.getByRole('dialog').filter({hasText:'Install the hopsesh command first?'});
+ await ask.getByRole('button',{name:'Cancel',exact:true}).click();
+ await expect(ask).toHaveCount(0);
+ expect(installs).toHaveLength(1);expect(installs[0].args).toEqual(['','']);expect(cli).toHaveLength(0);
 });
 
 
@@ -512,7 +548,7 @@ test('source notice selects the exact listed destination without planning',async
   source.movement={status:'prepared',text:'Prepared in Codex',machine:destination.machine,agent:destination.agent,key:destination.key,profile:destination.profile?.id || ''};
   document.querySelector('#inspector').replaceWith(inspector(source));return destination.title;
  });
- await expect(details(page).locator('#act-primary')).toHaveText('Show destination');
+ await expect(details(page).locator('#act-primary')).toHaveText('Open moved copy');
  await expect(details(page).locator('#act-primary')).toBeEnabled();
  await details(page).locator('#act-primary').click();
  await expect(details(page).getByRole('heading',{name:title,exact:true})).toBeVisible();expect(calls).toHaveLength(0);

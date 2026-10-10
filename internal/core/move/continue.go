@@ -291,7 +291,7 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 		if opt.Fork {
 			p.Warnings = append(p.Warnings, "A bounded continuation will be created on a separate fork. The original remains available.")
 		} else {
-			p.Warnings = append(p.Warnings, "A separate bounded continuation will be created. The original remains available; this is not a new conversation branch.")
+			p.Warnings = append(p.Warnings, "A separate bounded continuation will be created on the same conversation branch. The original is kept unchanged and, like any moved original, protected until you move back.")
 		}
 		return
 	}

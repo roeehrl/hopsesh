@@ -13,7 +13,7 @@ export async function withCLI(fn) {
     const msg = errText(e);
     if (!msg.startsWith("cli-required: ")) throw e;
     const yes = await ask({ title: "Install the hopsesh command first?", ok: "Install command and continue",
-      body: msg.slice("cli-required: ".length).replace(/ Install the command first.*$/, "") + ". It links the command into ~/.local/bin (no password)." });
+      body: (() => { const why = msg.slice("cli-required: ".length).replace(/ Install the command first.*$/, "").replace(/\.$/, ""); return why[0].toUpperCase() + why.slice(1) + ". Installing links the command into ~/.local/bin (no password)."; })() });
     if (!yes) return null;
     await api("InstallCLI", true);
     return fn();
@@ -89,6 +89,7 @@ export function role(e) {
   if (ar) {
     const from = where(ar.agentName || ar.agent, ar.machine);
     if (ar.kind === "returned") return { kind: "returned", glyph: "↩", chip: "Returned", tone: "st-idle", line: `Moved back from ${from}${day(ar.at) ? " · " + day(ar.at) : ""} · block cleared` };
+    if (ar.kind === "continuation") return { kind: "continuation", glyph: "↳", chip: "Continuation", tone: "st-idle", line: `Bounded continuation of ${from} · the original is kept` };
     if (ar.fork) return { kind: "fork", glyph: "⑂", chip: "Fork", tone: "st-idle", line: `Forked from ${from}${day(ar.at) ? " · " + day(ar.at) : ""}` };
     return { kind: "moved", glyph: "●", chip: "Moved copy", tone: "st-working", line: `Moved from ${from}${day(ar.at) ? " · " + day(ar.at) : ""} · the active copy` };
   }

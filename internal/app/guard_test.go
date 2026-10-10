@@ -57,6 +57,10 @@ func TestRoleWords(t *testing.T) {
 	if r := a.Role(e); r.Kind != "returned" || r.Line != "moved back from Claude Code on studio" {
 		t.Fatalf("returned: %+v", r)
 	}
+	e.Arrival.Kind = "continuation"
+	if r := a.Role(e); r.Kind != "continuation" || r.Word != "Continuation" {
+		t.Fatalf("bounded continuation shown as a move: %+v", r)
+	}
 	if a.Role(Entry{}) != nil {
 		t.Fatal("a copy that never moved has no role")
 	}

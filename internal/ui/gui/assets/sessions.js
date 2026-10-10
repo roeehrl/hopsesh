@@ -47,7 +47,7 @@ export async function scan(method = "Scan", background = false) {
     state.stale = true;
     state.scanning = false;
     if (!state.scan && current === "sessions") fill(view, loadError(e, () => go("sessions", true)));
-    else fail(e);
+    else { fail(e); if (current === "sessions") render(); } // the previous results stay, with Retry
     freshness();
     return;
   }
@@ -557,7 +557,9 @@ function keepPinned() {
   for (const g of state.scan?.groups || []) {
     const i = g.entries.findIndex((x) => (x.copies || []).some((c) => c.machine === s.machine && c.key === s.key));
     if (i >= 0) {
-      g.entries[i] = pinned;
+      // Beside its branch's row, not instead of it: the newest copy (a returned original)
+      // stays visible while the copy the user opened stays selected.
+      g.entries.splice(i + 1, 0, pinned);
       api("ResolveEntry", s.machine, s.key).then((fresh) => {
         if (!fresh || !pinned || pinned.key !== fresh.key) return;
         const changed = JSON.stringify(fresh) !== JSON.stringify(pinned);

@@ -121,7 +121,7 @@ func BlockReason(notice string, key agent.SessionKey) string {
 // had left. It is the moved copy's side of a Departure.
 type Arrival struct {
 	Operation string    `json:"operation"`
-	Kind      string    `json:"kind"` // moved | continued | fetched | handoff | returned
+	Kind      string    `json:"kind"` // moved | continued | fetched | handoff | returned | continuation
 	Fork      bool      `json:"fork,omitempty"`
 	Machine   string    `json:"machine"`
 	Agent     agent.ID  `json:"agent"`
@@ -151,6 +151,10 @@ func (a *App) arrival(g *lineage.Manifest, id lineage.ReplicaID) *Arrival {
 		ar.Kind = "fetched"
 	case lineage.HopHandoff:
 		ar.Kind = "handoff"
+	}
+	if hop.Rollover != nil {
+		ar.Kind = "continuation" // a bounded continuation: the original is kept and not blocked
+		return ar
 	}
 	// Moved back: this copy had left earlier on the same line.
 	for _, h := range g.OrderedHops() {
@@ -208,6 +212,8 @@ func (a *App) Role(e Entry) *RoleInfo {
 			return &RoleInfo{Kind: "returned", Glyph: "↩", Word: "Returned", Line: "moved back from " + from}
 		case ar.Fork:
 			return &RoleInfo{Kind: "fork", Glyph: "⑂", Word: "Fork", Line: "forked from " + from}
+		case ar.Kind == "continuation":
+			return &RoleInfo{Kind: "continuation", Glyph: "↳", Word: "Continuation", Line: "bounded continuation of " + from + "; the original is kept"}
 		}
 		return &RoleInfo{Kind: "moved", Glyph: "●", Word: "Moved copy", Line: "moved from " + from + "; the active copy"}
 	}
