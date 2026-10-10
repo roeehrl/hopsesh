@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -103,7 +102,11 @@ func TestCloudConnectHookSQLiteR2(t *testing.T) {
 		t.Fatal("connector was not started", err)
 	}
 	pid, _ := strconv.Atoi(string(pidBody))
-	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	t.Cleanup(func() {
+		if p, err := os.FindProcess(pid); err == nil {
+			_ = p.Kill()
+		}
+	})
 	if !strings.Contains(decision(prompt(cloudintegration.StatusPrompt)), "connected until") {
 		t.Fatal("status does not report the connection")
 	}
