@@ -157,6 +157,12 @@ func qualifyHostedRetention(t *testing.T, idle time.Duration) {
 	if idle > 0 {
 		t.Log("existing notification stream received committed mailbox change after idle")
 	}
+	// Deliberately discard the first publication hint. With no mailbox poll,
+	// ACK, reconnect or operator read, only the deployed notification alarm can
+	// produce the replacement hint. The message remains unacknowledged so the
+	// same fixture also verifies natural ciphertext expiry below.
+	readHint(socket)
+	t.Log("deployed notification alarm recovered a discarded incoming hint without polling")
 	// Start the independent expiry lease after the idle period, so its alarm
 	// cannot wake the mailbox while the idle behavior is being qualified.
 	_, expiring := enroll(60)

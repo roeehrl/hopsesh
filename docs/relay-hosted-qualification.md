@@ -1,5 +1,30 @@
 # Hosted 0.5 staging qualification
 
+## October 10 durable-notification qualification in progress
+
+Staging was unpaused at 04:03:38 UTC for deployment
+`eb0c1f84-8d34-4fcf-990f-de6fa0586cbd`. The qualification runs from a clean,
+isolated checkout at `7c8b42e22912d9133370fbdfa110902464bf3f9b`; development
+changes cannot alter its running inputs. Retention and native staging movement
+pass in 61.11s and 32.85s. The one-hour, 100-client workload started at
+04:05:21 UTC. Its first three rounds reach every client, and sampled native
+renewal, cloud invitation claim and revocation pass. These are progress results,
+not a completed load/cost qualification. The wrapper restores a paused deployment
+on exit and verifies HTTP 503 with the paused error; that terminal verification
+is still pending. Earlier paused-state entries are historical.
+
+The follow-up hosted fixture additionally requires an alarm-generated replacement
+after discarding the initial publication hint, before making any other request.
+That assertion is absent from the frozen run and needs separate live execution.
+The actual local SQLite/R2 loss-recovery test already passes on all three OSes.
+
+A passive audit of the existing Codex task at 04:06 UTC confirms the previous
+kernel boot, a clean repository at `85876c96ffa94f92772b8323cf5cb635a6f2f5e5`
+and the pinned `8453f83` staging helper. `cloud-integration current` returns
+exit 1 with no current incarnation. No manual preparation, enrollment, serving,
+export or permission change was performed. This does not qualify automatic
+startup or VM reclamation. Evidence: `qualification/codex-idle-20261010/audit.json`.
+
 ## October 9 follow-up evidence at `81da701`
 
 The universal macOS candidate `0.5.0-staging.20261009.81da701` is signed,
