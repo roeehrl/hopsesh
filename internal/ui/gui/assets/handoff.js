@@ -94,7 +94,7 @@ function summary(p) {
   if (x.code === "bundle") add.push("1 upload");
   else if (x.code === "starting-diff") add.push("1 starting diff");
   else if (!x.reuse && x.branch) add.push(`1 branch on ${x.host}`);
-  const chg = p.mark !== "off" ? ["this session marked" + (p.mark === "when-stopped" ? " when it ends" : "")] : [];
+  const chg = p.mark !== "off" ? ["source title labeled" + (p.mark === "when-stopped" ? " when it ends" : "")] : [];
   return h("div", { class: "summary", "aria-label": "What changes" },
     add.map((s) => h("span", { class: "add" }, "+ " + s)), chg.map((s) => h("span", { class: "chg" }, "~ " + s)),
     h("span", { class: "none" }, "0 removed"), h("span", { class: "spacer" }),
@@ -191,7 +191,7 @@ function options(p) {
     h("label", { class: "opt" }, h("input", { type: "checkbox", checked: x.historyFile, onchange: (ev) => set("historyFile", ev.target.checked) }),
       h("span", {}, h("b", {}, "Also commit the conversation as ", mono(x.historyPath)), h("span", { class: "warn", style: "display:block;font-size:12px" }, x.historyWarning))),
     h("label", { class: "opt" }, h("input", { type: "checkbox", checked: p.mark !== "off" && o.mark, onchange: (ev) => set("mark", ev.target.checked) }),
-      h("span", {}, `Mark this session “${markWords(x.markTitle)}”`)),
+      h("span", {}, `Label this session title “${markWords(x.markTitle)}”`, h("span", {class:"muted",style:"display:block"}, "Visual reminder only; it does not lock the conversation or block further work."))),
     x.code === "branch" && !x.reuse ? h("div", { style: "display:flex;align-items:center;gap:12px;flex-wrap:wrap" },
       h("label", { for: "ho-cleanup", style: "font-size:12.5px;font-weight:500;flex:0 0 100px" }, "Branch"),
       h("select", { id: "ho-cleanup", style: "flex:1 1 320px;max-width:460px", onchange: (ev) => set("cleanup", ev.target.value) },

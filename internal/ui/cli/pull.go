@@ -43,7 +43,7 @@ func addPullFlags(cmd *cobra.Command) {
 	f.Bool("notify", false, "record a durable movement notice (default from config; --notify=false disables it)")
 	f.Bool("redact", false, "redact likely secrets in the copy")
 	f.Bool("stop-local", false, "if this session is open on this machine, quit it first")
-	f.Bool("no-mark", false, "do not mark the copy left behind")
+	f.Bool("no-mark", false, "do not label the source title (a reminder, not a lock)")
 	f.Bool("no-sync", false, "do not fetch or fast-forward the checkout here to the session's commit")
 	f.Bool("push", false, "first push the session branch's unpushed commits on the other machine")
 	f.Bool("replace", false, "when the copy here changed too, replace it anyway (hopsesh undo brings it back)")

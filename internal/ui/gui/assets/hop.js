@@ -101,7 +101,7 @@ function render() {
       h("section", { class: "sec", style: "gap:12px" }, h("span", { class: "sec-h" }, "Options"),
         t.envNeeded ? envPicker(t) : null,
         h("label", { class: "opt" }, h("input", { type: "checkbox", checked: p.mark !== "off" && hop.opts.mark, onchange: (ev) => set("mark", ev.target.checked) }),
-          h("span", {}, `Mark the copy here “${(t.markTitle || "").replace(/^↪\s*/, "")}”`))),
+          h("span", {}, `Label the title here “${(t.markTitle || "").replace(/^↪\s*/, "")}”`, h("span", {class:"muted",style:"display:block"}, "Visual reminder only; it does not lock the conversation or block further work.")))),
       h("section", { class: "sec", style: "gap:8px" }, h("span", { class: "sec-h" }, "Checks"),
         h("div", { class: "checks-line" }, checks.map((c) => h("span", {}, tick(c.state === "warn" ? "warn" : "ok"), " ", c.text))),
         (p.blockers || []).map((b) => h("div", { class: "item" }, tick("err"), h("span", { class: "err" }, cap(b)))),

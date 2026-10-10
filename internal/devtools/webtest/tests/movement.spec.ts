@@ -461,6 +461,9 @@ test('source notice has destination, journey and explicit separate continuation 
 test('cross-agent plan exposes durable notice override',async({page})=>{
  await fresh(page);await row(page,'Find the codeword').click();
  await details(page).getByRole('button',{name:'Move',exact:true}).click();await page.getByRole('menuitem',{name:/^Continue with Codex/}).click();
+ const sheet=page.locator('#sheet');
+ await expect(sheet.getByText('Adds the destination to its title. This is a visual reminder; it does not lock the conversation or block further work.',{exact:true})).toBeVisible();
+ await expect(sheet.getByText('Records where this conversation went. Installed agent hooks can supply a reminder on resume or a new prompt; this does not block further work in the original.',{exact:true})).toBeVisible();
  const notice=page.getByRole('checkbox',{name:/Record a movement notice/});await expect(notice).toBeChecked();await notice.uncheck();await expect(notice).not.toBeChecked();
  await expect(page.locator('#sheet')).not.toContainText('asks the agent to tell the old one');
 });

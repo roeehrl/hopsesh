@@ -1372,9 +1372,9 @@ func (m *model) viewPlanBody(b *strings.Builder) {
 	}
 	switch p.Mark {
 	case move.MarkNow:
-		fmt.Fprintf(b, "  mark  the copy on %s is marked\n", p.Source.Location)
+		fmt.Fprintf(b, "  title label on %s (visual reminder, not a lock)\n", p.Source.Location)
 	case move.MarkWhenStopped:
-		fmt.Fprintf(b, "  mark  the copy on %s is open; marked once it ends\n", p.Source.Location)
+		fmt.Fprintf(b, "  title label on %s after it ends (visual reminder, not a lock)\n", p.Source.Location)
 	}
 	for _, w := range p.Warnings {
 		b.WriteString("  " + warnSt.Render("! "+w) + "\n")
@@ -1404,7 +1404,7 @@ func (m *model) viewPlanBody(b *strings.Builder) {
 	}
 	fmt.Fprintf(b, "\n  %s %s  [c] clone %s  [w] worktree %s  [r] remote control %s  [n] movement notice %s  [f] fork %s  [x] redact %s\n",
 		agentLabel, target, on(m.opts.Clone), string(m.opts.Worktree), on(m.opts.RemoteControl), on(m.opts.Notify), on(m.opts.Fork), on(m.opts.Redact))
-	fmt.Fprintf(b, "  [m] mark old copy %s  [s] sync code %s  [p] push on %s %s  [k] quit copy open here %s\n",
+	fmt.Fprintf(b, "  [m] label old title %s  [s] sync code %s  [p] push on %s %s  [k] quit copy open here %s\n",
 		on(m.opts.Mark), on(m.opts.SyncCode), p.Source.Location, on(m.opts.Push), on(m.opts.StopLocal))
 }
 

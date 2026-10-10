@@ -19,6 +19,12 @@ difference does not prove that work happened after a move; old incomplete transf
 may have omitted already saved messages. Notice hooks supply context, not an exclusive
 ownership lock that prevents the original from being continued.
 
+**Label the source session title** is the GUI name for `mark_moved`/`--mark`.
+It changes the title through the agent module, for example to “↪ prepared in Codex”.
+For a live source, labeling waits until its process ends. A title label does not send
+a prompt, stop the agent, lock the conversation, or synchronize later work. Movement
+notice recording and hook installation are separate controls.
+
 ## Native agent setup
 
 In **Hopsesh → Settings → General**, **Record movement notices** controls the default-on

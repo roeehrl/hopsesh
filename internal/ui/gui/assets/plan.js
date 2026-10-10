@@ -170,7 +170,7 @@ function summaryContent(p) {
   if (r.worktree) add.push("1 worktree");
   if (p.setAside) chg.push(`${count(p.setAside, "older copy", "older copies")} set aside`);
   if (p.stopHere) chg.push("1 quit here first");
-  if (p.mark !== "off") chg.push(`1 marked on ${sourcePlace(p)}${p.mark === "when-stopped" ? " when it ends" : ""}`);
+  if (p.mark !== "off") chg.push(`1 title labeled on ${sourcePlace(p)}${p.mark === "when-stopped" ? " when it ends" : ""}`);
   return h("div", { class: "summary", "aria-label": "What changes" },
     add.map((x) => h("span", { class: "add" }, "+ " + x)), chg.map((x) => h("span", { class: "chg" }, "~ " + x)),
     h("span", { class: "none" }, "0 removed"), h("span", { class: "spacer" }), h("span", { class: "muted" }, "Undo any time from Activity"));
@@ -314,15 +314,15 @@ function checks(p) {
 
 function options(p) {
   const r = p.repo, o = cur.opts, cont = p.continue;
-  const markDesc = p.mark === "when-stopped" ? "Adds a moved label after the source process stops. This option does not stop it or synchronize later messages."
-    : "Its title says where the work went, so it isn't resumed by mistake.";
+  const markDesc = p.mark === "when-stopped" ? "Adds the destination to its title after the source process stops. This does not lock it, stop it, or synchronize later messages."
+    : "Adds the destination to its title. This is a visual reminder; it does not lock the conversation or block further work.";
   const opts = [
-    p.mark !== "off" || !o.mark ? check(`Mark the source on ${sourcePlace(p)}`, "mark", markDesc) : null,
+    p.mark !== "off" || !o.mark ? check(`Label the source title on ${sourcePlace(p)}`, "mark", markDesc) : null,
     r.sourceHead && !sameFolder(p) ? check("Bring the code to the session's commit", "syncCode", "Fetches if needed; fast-forwards only a clean checkout on the same branch.") : null,
     r.unpushed && r.sourceUpstream && !sameFolder(p) ? check(`Push ${count(r.unpushed, "commit")} on ${p.sourceHost} first`, "push", "With that machine's own git credentials.") : null,
     cont && (p.machine || cur.launch !== "app") ? check("Send “Continue” when opening", "go", `The terminal launch sends the first message to ${p.agent}. Progress appears in the agent.`) : null,
     p.can.remoteControl ? check("Turn on Remote Control", "remoteControl", `Reach it from your phone or other machines, as ${p.newName}.`) : null,
-    check("Record a movement notice", "notify", "Keep a durable Hopsesh notice on the source. Prepared means the destination was written; continued requires observed new work."),
+    check("Record a movement notice", "notify", "Records where this conversation went. Installed agent hooks can supply a reminder on resume or a new prompt; this does not block further work in the original."),
     p.live && p.can.fork && !p.conflict ? check("Keep the old session running too", "fork", "Both copies continue, instead of a hand-off.") : null,
     check("Redact likely secrets", "redact", "In this copy only."),
   ];
@@ -551,8 +551,8 @@ function happened(d, p) {
   if (d.pushError) out.push(item("warn", `Could not push on ${d.sourceHost}`, d.pushError));
   else if (d.pushed) out.push(item("ok", `Pushed the session's branch on ${d.sourceHost}`, ""));
   if (d.syncNote) out.push(item(["up-to-date", "fast-forwarded", "ahead"].includes(d.syncState) ? "ok" : "warn", "Code: " + d.syncNote, ""));
-  if (d.mark === "done") out.push(item("ok", `The copy on ${d.sourceHost} is marked`, "Its session list there shows where the work went."));
-  if (d.mark === "pending") out.push(item("ok", `The copy on ${d.sourceHost} is still open`, "It is marked once it ends; Activity shows it until then."));
+  if (d.mark === "done") out.push(item("ok", `The source title on ${d.sourceHost} is labeled`, "Its session list there shows where the work went."));
+  if (d.mark === "pending") out.push(item("ok", `The copy on ${d.sourceHost} is still open`, "Its title is labeled after it ends; Activity shows the pending label. It remains usable."));
   if (d.mark === "failed") out.push(item("warn", `Could not mark the copy on ${d.sourceHost}`, d.markError));
   for (const w of d.warnings || []) out.push(item("warn", cap(w), ""));
   return out;

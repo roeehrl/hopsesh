@@ -48,7 +48,7 @@ Nothing changes until you confirm (or pass --yes). hopsesh undo <id> here undoes
 	f.Bool("fork", false, "keep this session running (both continue) instead of handing off")
 	f.Bool("rc", false, "turn the agent's remote control on there, where it has one")
 	f.Bool("redact", false, "redact likely secrets in the copy")
-	f.Bool("no-mark", false, "do not mark the copy here")
+	f.Bool("no-mark", false, "do not label the source title (a reminder, not a lock)")
 	f.Bool("notify", false, "record a durable movement notice (default from config; --notify=false disables it)")
 	f.Bool("no-sync", false, "do not fetch or fast-forward the checkout there")
 	f.Bool("push", false, "first push the session branch's unpushed commits from here")
