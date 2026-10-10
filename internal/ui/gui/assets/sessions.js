@@ -2,7 +2,7 @@
 // clouds), the sessions in the middle as one tree (grouped, sorted and filtered by
 // listview.js), the selected session on the right (inspector.js). Every action on a
 // session comes from actions.js, which the palette uses too.
-import { accountLabel, accountTitle, loadError, api, on, h, fill, icon, ICONS, view, state, screen, go, current, loading, toast, fail, cap, ago, agentBadge, machineStatus, sys, keys,
+import { accountLabel, accountShown, accountTitle, loadError, api, on, h, fill, icon, ICONS, view, state, screen, go, current, loading, toast, fail, cap, ago, agentBadge, machineStatus, sys, keys,
   entries, selected, here, agentInfo, $, count, clouds, cloudOf, cloudState, cloudChip, dialog, errText, rich, cloudTitle } from "./core.js";
 import { planPicked } from "./plan.js";
 import { healthNotice, loadHookHealth, hookHealth, withCLI, chip as roleChip } from "./guard.js";
@@ -414,7 +414,7 @@ function row(e, level) {
   if(e.journey?.fork) bits.push("separate fork");
  if(e.journey?.roundTrips) bits.push(`${e.journey.roundTrips} round trips`);
  const chips = presenceChips(e);
-if(e.profile) chips.push(h("span", {class:"chip account-chip",title:accountTitle(e.profile)},accountLabel(e.profile)));
+if(accountShown(e.profile)) chips.push(h("span", {class:"chip account-chip",title:accountTitle(e.profile)},accountShown(e.profile)));
   if (e.cloud) chips.push(cloudChip(e.machine));
   const rc = roleChip(e);
   if (rc) chips.unshift(rc);
@@ -432,7 +432,7 @@ if(e.profile) chips.push(h("span", {class:"chip account-chip",title:accountTitle
         h("span", { class: "b" }, [repoWord, branch].filter(Boolean).join(" · "))),
       h("span", { class: "s" }, bits.join(" · ") || " "),
       chips.length ? h("div", { class: "copies" }, chips) : null),
-    h("div", { class: "r-state" }, h("span", { class: "chip st-" + k }, h("span", { class: "dot " + k }), words), h("span", { class: "w" }, `${where} · ${ago(e.lastActive)}`)),
+    h("div", { class: "r-state" }, h("span", { class: "chip st-" + k, title: words }, h("span", { class: "dot " + k }), h("span", { class: "chip-t" }, words)), h("span", { class: "w" }, `${where} · ${ago(e.lastActive)}`)),
     h("div", { class: "act" }, p ? h("button", { class: "btn small outline", tabindex: "-1", disabled: !!p.disabled, title: p.why || p.label, "aria-label": p.label,
       onclick: (ev) => { ev.stopPropagation(); return p.run(); } }, h("span", { class: "btn-t" }, p.short || p.label)) : null));
 }

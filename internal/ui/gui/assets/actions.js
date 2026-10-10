@@ -375,7 +375,7 @@ function statusNow(e) {
   if (lv.live) return /idle/i.test(lv.status) ? ["idle", "Idle"] : ["working", "Working"];
   if (e.cached && !state.presence?.[key(e)]) return ["unknown", "Checking status"];
   const r = role(e);
-  if (r && (e.departure)) return ["moved", r.line.replace(/^Original · /, "")];
+  if (r && e.departure) return ["moved", r.short];
   if (/^(moved|continued|prepared|previously continued)/.test(lv.status || "")) return ["moved", cap((lv.status || "").replace(/^continued /, "previously continued "))];
   return ["ended", "Ended"];
 }

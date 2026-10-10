@@ -237,6 +237,13 @@ func profileLabel(p *agent.RuntimeProfile) string {
 	if p == nil {
 		return ""
 	}
+	// A default profile's name ("Codex default") repeats the agent: the account says it all.
+	if p.Default {
+		if p.Account != nil && p.Account.Email != "" {
+			return p.Account.Email
+		}
+		return ""
+	}
 	if p.Account != nil && p.Account.Email != "" {
 		return p.Name + " · " + p.Account.Email
 	}
