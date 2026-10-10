@@ -50,6 +50,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Progressive default-account registration replaces the original local session
+  row instead of temporarily showing it twice. TUI selection follows that same
+  native file through partial scans, completed scans and runtime updates;
+  explicit accounts and ambiguous bindings remain separate.
+
 - Keep an explicitly inspected family copy visible through account enrichment
   and refresh, without duplicating it in account groups. A completed transfer
   releases source inspection so the destination family is visible on return.

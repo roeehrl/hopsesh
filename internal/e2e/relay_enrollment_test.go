@@ -426,7 +426,7 @@ func startSQLiteRelayFixture(t *testing.T, timeout time.Duration, vars ...string
 	}
 	fixture, _ := filepath.Abs("../../infrastructure/relay")
 	root := t.TempDir()
-	cert, key, pool := relayFixtureCertificate(t, root)
+	cert, key, _ := relayFixtureCertificate(t, root)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -451,7 +451,7 @@ func startSQLiteRelayFixture(t *testing.T, timeout time.Duration, vars ...string
 		t.Fatal(err)
 	}
 	origin := fmt.Sprintf("https://127.0.0.1:%d", port)
-	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}, Timeout: 5 * time.Second}
+	client := sqliteRelayFixtureClient(t, cert)
 	t.Cleanup(func() {
 		if t.Failed() {
 			bounded, stop := context.WithTimeout(context.Background(), 5*time.Second)
@@ -473,19 +473,38 @@ func startSQLiteRelayFixture(t *testing.T, timeout time.Duration, vars ...string
 			t.Logf("local SQLite/R2 platform failure log:\n%s", body)
 		}
 	})
-	deadline := time.Now().Add(20 * time.Second)
+	ready, stopReady := context.WithTimeout(ctx, 20*time.Second)
+	defer stopReady()
 	for {
-		res, err := client.Get(origin + "/v1/capabilities")
+		req, err := http.NewRequestWithContext(ready, http.MethodGet, origin+"/v1/capabilities", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := client.Do(req)
 		if err == nil {
 			_ = res.Body.Close()
 			if res.StatusCode == 200 {
 				break
 			}
 		}
-		if time.Now().After(deadline) {
+		if ready.Err() != nil {
 			t.Fatal("local platform not ready", err)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	return ctx, root, origin, cert, client
+}
+
+func sqliteRelayFixtureClient(t *testing.T, cert string) *http.Client {
+	t.Helper()
+	// Exercise the same verified HTTPS client and request budget as native
+	// owners. The old fixture-only five-second timeout could abandon a cold
+	// Windows SQLite enrollment even after the platform committed it. Each
+	// scenario's context still bounds setup; no enrollment is retried here.
+	client, err := (relay.Connection{CAFile: cert}).HTTPClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(client.CloseIdleConnections)
+	return client
 }
