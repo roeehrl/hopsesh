@@ -814,6 +814,8 @@ type ContinueDTO struct {
 
 // PlanDTO is a plan as the window shows it.
 type PlanDTO struct {
+	ReviewNewSession bool `json:"reviewNewSession,omitempty"`
+
 	SourceEntry   *EntryDTO        `json:"sourceEntry,omitempty"`
 	SourceProfile string           `json:"sourceProfile,omitempty"`
 	TargetProfile string           `json:"targetProfile,omitempty"`
@@ -912,7 +914,7 @@ func planDTO(p *move.Plan, e app.Entry, tm agent.Module) *PlanDTO {
 		SourceOS: p.Source.OS, SourceCWD: p.Source.CWD, TargetCWD: p.Target.CWD, Live: p.Live, Repo: p.Repo,
 		Mappings: p.Placement.Mappings, Files: len(p.Files.Files), Bytes: p.Bytes, Mark: p.Mark, Sync: p.Sync,
 		FromSource: p.SyncFromSource, Push: p.Push, StopHere: p.StopHere, Conflict: p.Conflict,
-		Warnings: p.Warnings, Blockers: p.Blockers, NewName: p.NewName, OtherAcct: p.Placement.OtherAccount,
+		Warnings: p.Warnings, Blockers: p.Blockers, NewName: p.NewName, OtherAcct: p.Placement.OtherAccount, ReviewNewSession: p.ReviewNewSession,
 		SetAside: len(p.SetAside), NativeCopy: p.NativeCopy, Options: p.Options, SessionKey: p.Key, SourceAgent: e.Agent,
 		Can: CanDTO{Fork: agent.Has(tm, agent.CapFork), RemoteControl: agent.Has(tm, agent.CapRemoteControl),
 			App: agent.Has(tm, agent.CapApp), Native: !p.Options.OtherAccount && agent.Has(tm, agent.CapNativeReplay),

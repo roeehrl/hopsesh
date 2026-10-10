@@ -164,6 +164,10 @@ const (
 
 // Plan is a move, worked out without changing anything.
 type Plan struct {
+	// ReviewNewSession offers a fresh portable plan, not permission to apply this
+	// blocked one. The new plan must still check destination coverage and divergence.
+	ReviewNewSession bool `json:"reviewNewSession,omitempty"`
+
 	NoWork       bool             `json:"noWork,omitempty"`
 	SyncTo       *agent.Summary   `json:"syncTo,omitempty"`
 	OperationID  string           `json:"operationId"`

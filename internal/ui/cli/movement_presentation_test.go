@@ -1,13 +1,27 @@
 package cli
 
 import (
+	"bytes"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
+	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
+
+func TestUnverifiedReturnExplainsSameBranchReview(t *testing.T) {
+	var out bytes.Buffer
+	r := &run{out: &out}
+	r.renderPlan(&move.Plan{ReviewNewSession: true, Options: move.Options{TargetSession: "claude@work/original", TargetProfile: "work"}})
+	for _, text := range []string{"does not mean you changed accounts", "remove --target-session and add --new-session", "same lineage branch", "independent destination work still requires --keep-both"} {
+		if !strings.Contains(out.String(), text) {
+			t.Fatalf("missing %q in %s", text, out.String())
+		}
+	}
+}
 
 func TestNotifyFlagUsesConfigUnlessExplicit(t *testing.T) {
 	for _, configured := range []bool{false, true} {

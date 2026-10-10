@@ -383,6 +383,9 @@ func (r *run) renderPlan(p *move.Plan) {
 	for _, b := range p.Blockers {
 		r.printf("  ✗ %s\n", b)
 	}
+	if p.ReviewNewSession {
+		r.printf("  This does not mean you changed accounts. To review a fresh session on the same lineage branch, remove --target-session and add --new-session. Keep the selected destination account. Both original sessions are preserved; independent destination work still requires --keep-both.\n")
+	}
 }
 
 func (r *run) renderResult(p *move.Plan, res *move.Result) {

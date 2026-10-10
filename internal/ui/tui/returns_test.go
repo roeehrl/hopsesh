@@ -132,3 +132,30 @@ func TestMissingReturnClearsExactSessionForNewSessionReview(t *testing.T) {
 		t.Fatal("missing session was reused", m.opts)
 	}
 }
+
+func TestUnverifiedReturnReviewsSameBranchWithoutBypassingConflict(t *testing.T) {
+	m := newModel(t)
+	m.mode = modePlan
+	m.plan = &move.Plan{ReviewNewSession: true, Blockers: []string{"unverified account binding"}}
+	m.returnTo = &app.ReturnCandidate{Profile: "work", Key: "claude@work/original", Local: true}
+	m.sel = row{item: &app.Item{Entry: app.Entry{Machine: app.LocalName()}}}
+	m.opts = move.Options{TargetProfile: "work", TargetSession: "claude@work/original", Fork: true, Conflict: move.ConflictKeepBoth}
+	var b strings.Builder
+	m.viewPlan(&b)
+	if !strings.Contains(b.String(), "[N] review a new session on the same lineage branch") || !strings.Contains(b.String(), "does not mean you changed accounts") {
+		t.Fatal(b.String())
+	}
+	m.planning = true
+	if _, cmd := m.key("N"); cmd != nil {
+		t.Fatal("changed a pending review")
+	}
+	m.planning = false
+	if _, cmd := m.key("N"); cmd == nil || m.opts.TargetProfile != "work" || m.opts.TargetSession != "" || !m.opts.NewReplica || m.opts.Fork || m.opts.Conflict != "" {
+		t.Fatalf("incorrect portable review options: %+v", m.opts)
+	}
+	m.planning = false
+	m.plan.ReviewNewSession = false
+	if _, cmd := m.key("N"); cmd != nil {
+		t.Fatal("offered a resolution absent from the current plan")
+	}
+}

@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Fixed
+
+- Agent return reviews with unverified login continuity can create a fresh session
+  on the same lineage branch instead of forcing a fork. GUI, TUI and CLI explain
+  that the warning does not imply a changed account, retain the chosen profile,
+  preserve both original sessions and still require a fork for independent work.
+
 ## [0.4.1] - 2026-10-10
 
 ### Added

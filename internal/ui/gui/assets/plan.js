@@ -119,7 +119,7 @@ function summary(p) {
     profiles.map(x=>h("option",{value:x.id,selected:chosen?.id===x.id},`${identity(x)}${identity(x)!==x.name?' · '+x.name:''}${x.default?' · Default profile':''}`)))
    :h("b",{},identity(chosen)),h("span",{class:"muted"},chosen?`${identity(chosen)!==chosen.name?chosen.name+' · ':''}${chosen.default?'Default profile':'Named profile'}${!chosen.account?.email&&!chosen.account?.label?' · Email unavailable':''}`:"Account not identified"))):null;
  const summaryBody=summaryContent(p);
- return h("div",{},cur.returnCandidate ? h("div",{class:"summary"}, `Move back destination: ${cur.returnCandidate.agentName} · ${cur.returnCandidate.profileLabel || cur.returnCandidate.profile || "Default account"} · ${cur.returnCandidate.machine}`, h("span",{class:"mono"},cur.opts.targetSession || (cur.opts.fork ? "New separate branch; the original session will be preserved" : "New session; the missing original will not be reused"))) : null,accountChoice,summaryBody);
+ return h("div",{},cur.returnCandidate ? h("div",{class:"summary"}, `Move back destination: ${cur.returnCandidate.agentName} · ${cur.returnCandidate.profileLabel || cur.returnCandidate.profile || "Default account"} · ${cur.returnCandidate.machine}`, h("span",{class:"mono"},cur.opts.targetSession || (cur.opts.fork ? "New separate branch; the original session will be preserved" : "New session on the same lineage branch; the original session will be preserved"))) : null,accountChoice,summaryBody);
 }
 function summaryContent(p) {
  if(p.noWork) return h("div",{class:"summary","aria-label":"What changes"},"Conversation already synchronized. Update lineage receipts; 0 new messages, 0 transfers.");
@@ -248,9 +248,9 @@ function repository(p) {
 // blocker turns a reason the plan cannot go ahead into words and the buttons that fix it.
 function blocker(p, b) {
   const o = cur.opts, cont = p.continue;
-  if (cur.returnCandidate && /cannot append to a native replica under an unverified account binding/.test(b)) return item("err", plain(b),
-    "The original cannot be safely updated under this account binding. Review creating a new session on a separate branch; both existing sessions will be preserved.",
-    h("button", {class:"btn small",onclick:()=>{Object.assign(cur.opts,{targetSession:"",fork:true,newReplica:true,conflict:"keep-both"});return replan();}}, "Review keeping both as separate sessions"));
+  if (p.reviewNewSession && /cannot update the original session across agent or account profiles/.test(b)) return item("err", "The original session cannot be updated across these agent or account profiles",
+    "This does not mean you changed accounts. Hopsesh cannot verify native compatibility for updating the original file across these profiles. Review a fresh session on the same lineage branch; both existing sessions will be preserved. Independent work still requires a separate fork.",
+    h("button", {class:"btn small",onclick:()=>{Object.assign(cur.opts,{targetSession:"",fork:false,newReplica:true,conflict:""});return replan();}}, "Review new session on the same branch"));
   if (/^--via import only/.test(b)) return item("err", `${p.agent}'s importer only starts a new session`, "", h("button", { class: "btn small", style: "align-self:flex-start", onclick: () => set("via", "") }, "Use hopsesh's conversion instead"));
   if (/^--via import reads/.test(b)) return item("err", `${p.agent}'s importer needs ${cont.from} installed here`, "", h("button", { class: "btn small", style: "align-self:flex-start", onclick: () => set("via", "") }, "Use hopsesh's conversion instead"));
   if (p.conflict && b.startsWith(p.conflict)) return item("err", "Both copies changed: " + p.conflict, "Nothing is merged. Pick what to keep.",

@@ -2,7 +2,7 @@ import { test,expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { row,details,action } from './helpers';
 
-test('real service resolves hidden original and reviews a safe separate return when native append is blocked',async({page},info)=>{
+test('real service resolves hidden original and reviews a fresh same-branch return when native append is blocked',async({page},info)=>{
  test.setTimeout(120000);
  const reset=await page.request.post('/reset?movement=1');expect(reset.ok()).toBeTruthy();
  await page.goto('/');await expect(page.getByRole('heading',{name:'All sessions',exact:true})).toBeVisible();
@@ -64,25 +64,27 @@ test('real service resolves hidden original and reviews a safe separate return w
  const plan=(await (await planned).json()).result;
  await info.attach('return-plan.json',{body:JSON.stringify(plan,null,2),contentType:'application/json'});
  await page.screenshot({path:info.outputPath('real-move-back-plan.png'),fullPage:true});
- expect(plan.blockers).toEqual([expect.stringContaining('cannot append to a native replica under an unverified account binding')]);
+ expect(plan.blockers).toEqual([expect.stringContaining('cannot update the original session across agent or account profiles')]);
  await expect(page.locator('#sheet')).toContainText(source.key);
  await expect(page.locator('#sheet #go')).toBeDisabled();
- await page.locator('#sheet').getByText(/Cannot append to a native replica/).scrollIntoViewIfNeeded();
+ expect(plan.reviewNewSession).toBe(true);
+ await expect(page.locator('#sheet')).toContainText('This does not mean you changed accounts.');
+ await page.locator('#sheet').getByText('The original session cannot be updated across these agent or account profiles').scrollIntoViewIfNeeded();
  await page.screenshot({path:info.outputPath('real-move-back-blocker.png'),fullPage:true});
  const originalBytes=await readFile(original.path);
  const replanned=page.waitForResponse(r=>r.url().endsWith('/call') && r.request().postDataJSON().m==='Plan');
- await page.locator('#sheet').getByRole('button',{name:'Review keeping both as separate sessions',exact:true}).click();
+ await page.locator('#sheet').getByRole('button',{name:'Review new session on the same branch',exact:true}).click();
  const response=await replanned;
- expect(response.request().postDataJSON().args[3]).toMatchObject({targetSession:'',fork:true,newReplica:true,conflict:'keep-both'});
- const fork=(await response.json()).result;
- await info.attach('return-fork-plan.json',{body:JSON.stringify(fork,null,2),contentType:'application/json'});
- expect(fork.blockers || []).toEqual([]);
- await expect(page.locator('#sheet')).toContainText('New separate branch; the original session will be preserved');
+ expect(response.request().postDataJSON().args[3]).toMatchObject({targetSession:'',fork:false,newReplica:true,conflict:''});
+ const portable=(await response.json()).result;
+ await info.attach('return-portable-plan.json',{body:JSON.stringify(portable,null,2),contentType:'application/json'});
+ expect(portable.blockers || []).toEqual([]);
+ await expect(page.locator('#sheet')).toContainText('New session on the same lineage branch; the original session will be preserved');
  await expect(page.locator('#sheet #go')).toBeEnabled({timeout:30000});
- await page.screenshot({path:info.outputPath('real-move-back-fork-plan.png'),fullPage:true});
+ await page.screenshot({path:info.outputPath('real-move-back-portable-plan.png'),fullPage:true});
  await page.locator('#sheet #go').click();
  await expect(page.getByRole('heading',{name:/is prepared for Claude Code/})).toBeVisible({timeout:30000});
- await page.screenshot({path:info.outputPath('real-move-back-fork-done.png'),fullPage:true});
+ await page.screenshot({path:info.outputPath('real-move-back-portable-done.png'),fullPage:true});
  expect(await readFile(original.path)).toEqual(originalBytes);
  await page.getByRole('button',{name:'Back to sessions',exact:true}).click();
  const scan=await page.request.post('/call',{data:{m:'Scan',args:[]}});
@@ -92,10 +94,16 @@ test('real service resolves hidden original and reviews a safe separate return w
   if((await readFile(e.path,'utf8')).includes('Fixture return checkpoint completed.')) returned.push(e);
  }
  expect(returned).toHaveLength(1);
- expect(returned[0].returns || []).toEqual([]);
+ const originalGraph=JSON.parse(await readFile(original.path+'.hopsesh.json','utf8'));
+ const returnedGraph=JSON.parse(await readFile(returned[0].path+'.hopsesh.json','utf8'));
+ expect(returnedGraph.family).toBe(originalGraph.family);
+ expect(returnedGraph.branch).toBe(originalGraph.branch);
+ expect(returnedGraph.hops).toHaveLength(2);
+ expect(returnedGraph.hops.every(h=>!h.fork)).toBe(true);
+ expect(returned[0].returns).toEqual(expect.arrayContaining([expect.objectContaining({key:converted.key})]));
  await row(page,returned[0].title).click();
- await expect(details(page).getByLabel('Return destinations')).toHaveCount(0);
+ await expect(details(page).getByLabel('Return destinations')).toBeVisible();
  await expect(details(page).locator('.skel')).toHaveCount(0);
  await expect(page.locator('#toast')).not.toHaveClass(/show/);
- await page.screenshot({path:info.outputPath('real-returned-separate-branch.png'),fullPage:true});
+ await page.screenshot({path:info.outputPath('real-returned-same-branch.png'),fullPage:true});
 });

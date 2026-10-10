@@ -63,6 +63,25 @@ block the return. This comparison never grants native append permission across a
 unverified binding: a successful portable return creates a fresh native session and leaves
 the original byte-identical.
 
+An unverified binding does **not** mean the user changed accounts. Hopsesh's opaque
+binding records an observation of sign-in metadata, not a credential or ownership
+proof. A first successful observation or changed vendor-reported metadata can rotate
+it even when the displayed email is unchanged. Matching emails across Claude and
+Codex do not establish native replay permission.
+
+The explicit-return guard also applies when different agent/account profiles require
+portable conversion, even if the destination binding has stayed unchanged. Its
+warning describes missing native compatibility across those profiles, not an observed
+account change. Normal account refreshes retain unchanged observations and bindings.
+
+When an explicit return cannot update the original, the GUI offers **Review new
+session on the same branch**; the TUI offers **N** in the blocked plan. Both review
+`NewReplica` with the chosen destination profile retained, the exact destination
+session cleared and fork/conflict overrides disabled. The CLI explains removing
+`--target-session` and adding `--new-session`. This replans a fresh portable replica;
+it does not apply the blocked plan or force a fork. Independent or rewritten
+destination work still blocks until the user explicitly chooses separate branches.
+
 ## Scan results
 
 `Entry.Returns` supplies destination identities and an explanatory reason with each status:
@@ -95,7 +114,8 @@ independent destination work still requires an explicit separate fork.
 homes for all four agent pairings, transfer/return with notices on/off, fork, persisted
 retry and undo. It checks native identity, receipt queries, no-work returns and unchanged
 conversation nodes. `movement_binding_test.go` reproduces first-observation binding rotation across all four
-agent pairings, including unchanged, independently extended and rewritten originals, and
+agent pairings, with both unchanged observed bindings and first-observation rotation,
+including unchanged, independently extended and rewritten originals, and
 checks that explicit native append remains forbidden. `lineage_recovery_test.go` checks notice and return metadata after a
 simulated interruption. `lineage_routes_test.go` checks the queries at every stop in
 ABABA, ABCA and ABCBCAB routes, including profile and account routes.

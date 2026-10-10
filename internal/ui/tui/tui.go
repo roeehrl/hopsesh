@@ -702,6 +702,12 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 			if !m.planning && m.cycleDestination() {
 				return m, m.planCmd()
 			}
+		case "N":
+			if !m.planning && m.plan.ReviewNewSession {
+				m.opts.TargetSession, m.opts.Conflict = "", ""
+				m.opts.NewReplica, m.opts.Fork = true, false
+				return m, m.planCmd()
+			}
 		case "c":
 			m.opts.Clone = !m.opts.Clone
 			return m, m.planCmd()
@@ -1283,7 +1289,11 @@ func (m *model) viewPlan(b *strings.Builder) {
 		return dim.Render("off")
 	}
 	if m.returnTo != nil {
-		fmt.Fprintf(b, "  Move back account: %s → %s · exact session %s\n", p.Source.ProfileName, p.Target.ProfileName, m.opts.TargetSession)
+		if m.opts.NewReplica && !m.opts.Fork {
+			fmt.Fprintf(b, "  Move back account: %s → %s · new session on the same lineage branch; original preserved\n", p.Source.ProfileName, p.Target.ProfileName)
+		} else {
+			fmt.Fprintf(b, "  Move back account: %s → %s · exact session %s\n", p.Source.ProfileName, p.Target.ProfileName, m.opts.TargetSession)
+		}
 	} else {
 		fmt.Fprintf(b, "  Account: %s → %s [A] change account · [D] desktop app %s\n", p.Source.ProfileName, p.Target.ProfileName, on(m.opts.App))
 	}
@@ -1306,6 +1316,9 @@ func (m *model) viewPlan(b *strings.Builder) {
 	if len(p.Blockers) == 0 {
 		b.WriteString(dim.Render("\n  y/enter: go · esc: back\n"))
 	} else {
+		if p.ReviewNewSession {
+			b.WriteString("\n  This does not mean you changed accounts. Native compatibility across these profiles is unverified.\n  [N] review a new session on the same lineage branch; both originals stay.\n")
+		}
 		b.WriteString(dim.Render("\n  resolve the ✗ first · esc: back\n"))
 	}
 }

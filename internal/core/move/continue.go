@@ -294,7 +294,8 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 	}
 	if opt.OtherAccount || opt.NewReplica {
 		if opt.TargetSession != "" {
-			p.Blockers = append(p.Blockers, "cannot append to a native replica under an unverified account binding; clear the destination session to create a portable copy")
+			p.ReviewNewSession = true
+			p.Blockers = append(p.Blockers, "cannot update the original session across agent or account profiles without verified native compatibility; remove --target-session and use --new-session to review a portable session on the same lineage branch")
 		}
 		// A fresh return preserves existing copies, but must still detect independent
 		// destination work instead of silently treating divergent histories as one line.
