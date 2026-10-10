@@ -38,7 +38,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/qualification"
           git rev-parse HEAD > "$RUNNER_TEMP/qualification/source.txt"
           git status --porcelain >> "$RUNNER_TEMP/qualification/source.txt"
-          git hash-object infrastructure/relay/worker.mjs infrastructure/relay/worker.test.mjs >> "$RUNNER_TEMP/qualification/source.txt"
+          git hash-object infrastructure/relay/worker.mjs infrastructure/relay/worker.test.mjs infrastructure/relay/admission.mjs infrastructure/relay/admission.test.mjs infrastructure/relay/authorization.mjs infrastructure/relay/authorization.test.mjs >> "$RUNNER_TEMP/qualification/source.txt"
       - name: Worker contracts including precommit and postcommit storage failures
         run: npm test 2>&1 | tee "$RUNNER_TEMP/qualification/contracts.log"
         working-directory: infrastructure/relay
@@ -48,7 +48,7 @@ jobs:
         env:
           HOPSESH_RELAY_REQUIRE_NODE: "1"
           HOPSESH_RELAY_PLATFORM: "1"
-        run: go test -race -count=1 -v -run 'TestRelayOperatorBudgetSQLiteR2|TestRelayLoadSQLiteR2|TestRuntimeRelayThreeProfilesThreePeersSQLiteR2|TestRelayObservationChangesSQLiteR2' -timeout 5m ./internal/e2e 2>&1 | tee "$RUNNER_TEMP/qualification/relay-observation.log"
+        run: go test -race -count=1 -v -run 'TestRelayOperatorBudgetSQLiteR2|TestRelayLoadSQLiteR2|TestRuntimeRelayThreeProfilesThreePeersSQLiteR2|TestRelayObservationChangesSQLiteR2|TestRelayAdmissionIdleSQLiteR2|TestRelayRejectedUploadSQLiteR2' -timeout 5m ./internal/e2e 2>&1 | tee "$RUNNER_TEMP/qualification/relay-observation.log"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
