@@ -276,7 +276,6 @@ function blocker(p, b) {
   if (/destination copy is open/.test(b)) return item("err", `End the original ${p.agent} session before adding new work`,
     `${sessionExitHelp()} ${p.endDestinationToken ? 'Hopsesh can ask only this original session to exit, including its open terminal and desktop instances. This interrupts any work it is running; other conversations are unaffected. Its saved history is preserved. You will review a fresh plan before anything is added.' : 'Ending this session from Hopsesh is unavailable for this destination. End it using your agent’s session controls or terminal exit command, then check again. If your desktop app has no session exit control, quit that app; this also ends its other running conversations.'}`,
     h("div",{style:"display:flex;gap:8px;flex-wrap:wrap"},
-      p.endDestinationToken ? h("button",{id:"end-original",class:"btn outline small",disabled:cur.busy,onclick:endOriginal},"End original session and check again") : null,
       h("button", {class:"btn small",disabled:cur.busy,onclick:()=>replan()}, "Check again")));
   if (p.reviewNewSession && /cannot update the original session across agent or account profiles/.test(b)) return item("err", "The original session cannot be updated across these agent or account profiles",
     "This does not mean you changed accounts. Hopsesh cannot verify native compatibility for updating the original file across these profiles. Review a fresh session on the same lineage branch; both existing sessions will be preserved. Independent work still requires a separate fork.",
@@ -340,6 +339,7 @@ function render() {
   const there = p.machine ? `on ${p.machine}` : `on ${sys.here}`;
   const title = p.machine ? `Send “${p.title}” to ${p.machine}` : p.continue ? `Continue “${p.title}” in ${p.agent}` : `Bring “${p.title}” here`;
   const blocked = (p.blockers || []).length > 0;
+  const endOriginalFirst = !!p.endDestinationToken;
   fill(sheet, h("div", { class: "sheet-in" },
     h("header", { class: "sheet-head" },
       h("h2", { id: "sheet-title" }, title),
@@ -348,11 +348,14 @@ function render() {
         h("span", { style: "color:var(--accent)", "aria-label": "to" }, "→"),
         agentChip(p.continue ? cur.target : p.sourceAgent, p.agent), h("span", {}, there), h("span", { class: "mono muted", style: "font-size:11.5px" }, p.targetCwd)),
       summary(p)),
-    h("div", { class: "sheet-body" }, cur.recoveryNotice ? h("p",{role:"status",class:"notice"},cur.recoveryNotice) : null, p.continue ? conversation(p) : null, repository(p), checks(p), options(p), paths(p)),
+    h("div", { class: "sheet-body" }, cur.recoveryNotice ? h("p",{role:"status",class:"notice"},cur.recoveryNotice) : null,
+      endOriginalFirst ? checks(p) : null, p.continue ? conversation(p) : null, repository(p), !endOriginalFirst ? checks(p) : null, options(p), paths(p)),
     h("footer", { class: "sheet-foot" },
-      h("span", { class: "muted", style: "font-size:12px;flex:1 1 260px" }, `New work is added only when you ${p.continue ? "continue" : p.machine ? "send it" : "hop"}. The original on ${p.machine ? sys.here : sourcePlace(p)} is never deleted.`),
+      h("span", { class: "muted", style: "font-size:12px;flex:1 1 260px" }, endOriginalFirst
+        ? "Ends only the original session. Saved history stays intact. You review again before adding new work."
+        : `New work is added only when you ${p.continue ? "continue" : p.machine ? "send it" : "hop"}. The original on ${p.machine ? sys.here : sourcePlace(p)} is never deleted.`),
       h("button", { class: "btn", onclick: () => sheet.close() }, "Cancel"),
-      launchControl(p,blocked))));
+      endOriginalFirst ? h("button",{id:"end-original",class:"btn primary big",disabled:cur.busy,onclick:endOriginal},"End original session and check again") : launchControl(p,blocked))));
 }
 
 async function apply() {

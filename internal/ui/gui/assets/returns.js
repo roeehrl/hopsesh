@@ -28,29 +28,10 @@ export function returnActions(e, open) {
       try { return open(await resolveDestination(r), {showOnly:true}); } catch (err) { fail(err); }
     };
     const review = async () => {
-      let destination = returnDestination(r);
-      if (r.status === "live" && !destination) {
-        try { destination = await resolveDestination(r); } catch { /* instructions still available */ }
-      }
-      if (r.status === "live") {
-        const name = r.agentName || r.agent;
-        const d = dialog(h("div", {class:"return-guide"},
-          h("span", {class:"chip st-warn"}, "Action needed"),
-          h("h2", {}, `Move back to ${name}`),
-          h("div", {class:"return-original"}, agentBadge(r.agent, name), h("strong", {}, destination?.title || r.title || "Original conversation"),
-            h("span", {class:"muted"}, `${r.local ? sys.Here : r.machine} · ${r.profileLabel || "Default account"}`)),
-          h("p", {}, "The original conversation is still open. Exit it first so its running agent cannot overwrite the new work Hopsesh adds."),
-          h("ol", {class:"return-steps"},
-            h("li", {}, h("strong", {}, "Show the original conversation"), h("button", {class:"btn small",onclick:()=>{d.close(); return showOriginal();}}, "Show original session")),
-            h("li", {}, h("strong", {}, "Review the return"), h("p", {}, sessionExitHelp(!!destination?.app))),
-            h("li", {}, h("strong", {}, "End the original from the review"), h("p", {}, "When supported by this agent and machine, choose “End original session and check again”. This interrupts any work in the original and refreshes the review. Adding the new work still requires your approval."))),
-          h("p", {class:"return-preserved"}, "Saved history is preserved. If the original is open in several places, exit it in each place."),
-          !canPlan ? h("p", {}, `To review the return, run Hopsesh on ${e.machine} or ${r.machine}.`) : null,
-          h("div", {class:"dlg-foot"}, h("button", {class:"btn",onclick:()=>d.close()}, "Cancel"),
-            canPlan ? h("button", {class:"btn primary",onclick:()=>{d.close(); return plan();}}, "Review return") : null)));
-        return;
-      }
+      if (r.status === "live" && canPlan) return plan();
+      const destination = returnDestination(r);
       const explanation = r.status === "diverged" ? "Both copies changed. Review a plan that keeps both branches as separate sessions."
+        : r.status === "live" ? `The original session is still running on ${r.machine}. ${sessionExitHelp(!!destination?.app)}`
         : r.status === "verify" ? "This destination has not been verified. Planning must reach it and check the exact session before any change."
         : r.status === "missing" ? "The original destination session is missing. You can review creating a new session there; this does not reuse or restore the missing original."
         : r.status === "same" ? "The destination already has this conversation."
@@ -64,7 +45,7 @@ export function returnActions(e, open) {
           canPlan && ["available", "verify", "diverged", "missing"].includes(r.status) ? h("button", {class:"btn primary",onclick:()=>{d.close();return plan()}},
             r.status === "missing" ? "Review new session there" : r.status === "diverged" ? "Review plan keeping both branches" : "Verify and review plan") : null));
     };
-    return { id: `return:${r.replica || r.machine + ":" + r.key}`, label, sub: r.status === "live" ? `Original still open on ${r.local ? sys.here : r.machine}. Exit it first; click for instructions.` : `${r.status} · ${r.reason || r.key}`, candidate: r, showOriginal,
+    return { id: `return:${r.replica || r.machine + ":" + r.key}`, label, sub: r.status === "live" ? `Original still running on ${r.local ? sys.here : r.machine}. Review ending it before adding new work.` : `${r.status} · ${r.reason || r.key}`, candidate: r, showOriginal,
       run: () => {
         if (inspect) return resolveDestination(r).then(open).catch(() => review());
         if (r.status === "available" && canPlan) return plan();
@@ -83,7 +64,7 @@ export function returnCard(a) {
     h("span", {class:"return-original-name"}, destination?.title || r.title || "Original conversation"),
     h("span", {class:"muted"}, `${r.local ? sys.Here : r.machine} · ${r.profileLabel || "Default account"}`),
     h("p", {}, "Exit the original before adding your new work. Its saved history stays available."),
-    h("div", {class:"return-card-actions"}, h("button", {class:"btn outline",onclick:a.run}, "How to move back…"),
+    h("div", {class:"return-card-actions"}, h("button", {class:"btn outline",onclick:a.run}, "Review move back…"),
       h("button", {class:"btn",onclick:a.showOriginal}, "Show original session")));
 }
 

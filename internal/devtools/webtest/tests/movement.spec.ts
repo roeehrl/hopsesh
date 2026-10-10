@@ -77,7 +77,7 @@ test('same and behind candidates never plan a transfer',async({page})=>{
  expect(calls).toHaveLength(0);
 });
 
-test('open original explains how to exit and rechecks the exact original only on request',async({page},info)=>{
+test('open original opens one review directly and pins the exact original without stopping it',async({page})=>{
  const calls=await fixtures(page,[candidate({agent:'claude',agentName:'Claude Code',title:'oarbank',profile:'personal',profileLabel:'roee@example.com',key:'claude@personal/original',status:'live',local:true})]);
  const launches:any[]=[];
  await page.route('**/call',async route=>{
@@ -93,37 +93,22 @@ test('open original explains how to exit and rechecks the exact original only on
  await expect(card).not.toContainText('claude@personal/original');
  await details(page).getByRole('button',{name:'Move',exact:true}).click();
  const item=page.getByRole('menuitem',{name:/^Move back to Claude Code/});
- await expect(item).toContainText('Exit it first');
+ await expect(item).toContainText('Review ending it');
  await item.click();
- const d=page.getByRole('dialog').filter({has:page.getByRole('heading',{name:'Move back to Claude Code',exact:true})});
- await expect(d).toContainText('oarbank');
- await expect(d).toContainText('leave its agent running in the background');
- await expect(d).toContainText('End original session and check again');
- await expect(d).not.toContainText('⌘W');
- await expect(d).toContainText('Saved history is preserved');
- expect(launches).toHaveLength(0);expect(calls).toHaveLength(0);
- for(const theme of ['light','dark']) {
-  await page.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);
-  await expect(d).toBeInViewport();
-  expect(await d.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBeTruthy();
-  await page.screenshot({path:info.outputPath(`open-original-${theme}.png`),fullPage:true});
- }
- await d.getByRole('button',{name:'Review return',exact:true}).click();
  await expect.poll(()=>calls.length).toBe(1);
+ await expect(page.getByRole('dialog')).toHaveCount(1);
+ await expect(page.locator('.return-guide')).toHaveCount(0);
  expect(calls[0].args[3]).toMatchObject({targetProfile:'personal',targetSession:'claude@personal/original',fork:false,newReplica:false,stopLocal:false});
  expect(launches).toHaveLength(0);
 });
 
-test('remote original instructions name the destination and terminal exit without starting it',async({page})=>{
- const calls=await fixtures(page,[candidate({agent:'claude',agentName:'Claude Code',status:'live',machine:'remote-studio'})]);
- await details(page).getByLabel('Return destinations').getByRole('button',{name:'How to move back…',exact:true}).click();
- const d=page.getByRole('dialog').last();
- await expect(d).toContainText('remote-studio');
- await expect(d).toContainText('type /exit');
- await expect(d).toContainText('exit it in each place');
- expect(calls).toHaveLength(0);
- await d.getByRole('button',{name:'Cancel',exact:true}).click();
- await expect(d).not.toBeVisible();
+test('remote open original goes directly to its destination review without starting it',async({page})=>{
+ const calls=await fixtures(page,[candidate({agent:'claude',agentName:'Claude Code',status:'live',machine:'remote-studio',key:'claude@work/original'})]);
+ await details(page).getByLabel('Return destinations').getByRole('button',{name:'Review move back…',exact:true}).click();
+ await expect.poll(()=>calls.length).toBe(1);
+ expect(calls[0]).toMatchObject({m:'PushPlan',args:[expect.any(String),'remote-studio','claude',expect.objectContaining({targetSession:'claude@work/original'})]});
+ await expect(page.getByRole('dialog')).toHaveCount(1);
+ await expect(page.locator('.return-guide')).toHaveCount(0);
 });
 
 for(const outcome of ['ended','timeout','unsupported']) test(`ending the reviewed original is explicit and never applies the return: ${outcome}`,async({page})=>{
@@ -152,16 +137,22 @@ for(const outcome of ['ended','timeout','unsupported']) test(`ending the reviewe
   return route.fallback();
  });
  await details(page).locator('#act-primary').click();
- await page.getByRole('button',{name:'Review return',exact:true}).click();
  const sheet=page.locator('#sheet');
+ await expect(page.getByRole('dialog')).toHaveCount(1);
+ await expect(page.locator('.return-guide')).toHaveCount(0);
  await expect(sheet).toContainText('leave its agent running in the background');
- await expect(sheet.locator('#go')).toBeDisabled();
+ if(outcome==='unsupported') await expect(sheet.locator('#go')).toBeDisabled();
+ else await expect(sheet.locator('#go')).toHaveCount(0);
  expect(actions).toHaveLength(0);
  const end=sheet.getByRole('button',{name:'End original session and check again',exact:true});
  if(outcome==='unsupported') {
   await expect(end).toHaveCount(0);await expect(sheet).toContainText('unavailable for this destination');return;
  }
  await expect(sheet).toContainText('other conversations are unaffected');
+ await expect(end).toBeInViewport();
+ await expect(sheet.locator('.sheet-foot #end-original')).toBeVisible();
+ await sheet.locator('.sheet-body').evaluate(el=>el.scrollTop=el.scrollHeight);
+ await expect(end).toBeInViewport();
  const reviewedPlans=plans;
  await end.click();
  await expect(sheet.getByRole('button',{name:'Ending original session…',exact:true})).toBeDisabled();
@@ -177,7 +168,7 @@ for(const outcome of ['ended','timeout','unsupported']) test(`ending the reviewe
   await expect(sheet.locator('#go')).toHaveCount(0);
   await sheet.getByRole('button',{name:'Check again and review',exact:true}).click();
   await expect(end).toBeVisible();
-  await expect(sheet.locator('#go')).toBeDisabled();
+  await expect(sheet.locator('#go')).toHaveCount(0);
  }
  expect(actions).toHaveLength(1); // No Apply or agent launch without another user action.
 });

@@ -71,11 +71,13 @@ Independent work, rewritten history and an open destination still block the retu
 Modules without an explicit portable-append contract keep the fresh-session fallback.
 
 An open original appears as an actionable return card. Choosing **Move back** opens
-instructions instead of switching apps. Closing a desktop conversation tab can leave
+the return review directly, with no separate explanation dialog. Closing a desktop
+conversation tab can leave
 its agent process running; Cmd+W is not evidence that Claude Code released its session.
-**Review return** plans against the exact original. When the destination module
+The review plans against the exact original. When the destination module
 implements `agent.Stopper` and `agent.LiveDetector` and its host supports graceful
-termination, the local review offers **End original session and check again**.
+termination, the local review offers **End original session and check again** in
+its fixed bottom action bar. The blocker appears above the conversation details.
 The move layer validates the pinned destination, account, root and native cursor,
 then delegates all process handling to that module. Claude's module reads its own
 registry and asks every process for that session to exit normally; no other
