@@ -46,9 +46,12 @@ jobs:
           - {label: macos triples 2/4, os: macos-15, t: 3, shard: 2/4}
           - {label: macos triples 3/4, os: macos-15, t: 3, shard: 3/4}
           - {label: macos triples 4/4, os: macos-15, t: 3, shard: 4/4}
-          # Windows runs a row in about 40 s: two halves stay well inside the job limit.
-          - {label: windows triples 1/2, os: windows-2025, t: 3, shard: 1/2}
-          - {label: windows triples 2/2, os: windows-2025, t: 3, shard: 2/2}
+          # Two Windows halves also exhausted 120m before completing their rows.
+          # Preserve the full model and each scenario deadline in four shards.
+          - {label: windows triples 1/4, os: windows-2025, t: 3, shard: 1/4}
+          - {label: windows triples 2/4, os: windows-2025, t: 3, shard: 2/4}
+          - {label: windows triples 3/4, os: windows-2025, t: 3, shard: 3/4}
+          - {label: windows triples 4/4, os: windows-2025, t: 3, shard: 4/4}
           - {label: windows 2022, os: windows-2022, t: 2}
           - {label: macos 26, os: macos-26, t: 2}
           - {label: linux arm64, os: ubuntu-24.04-arm, t: 2}
