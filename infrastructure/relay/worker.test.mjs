@@ -340,6 +340,29 @@ test('committed mailbox hints survive loss and hibernation until acknowledgment'
 });
 
 
+test('new traffic cannot postpone an overdue durable notification until message expiry',async t=>{
+ for(const action of ['publish','enroll'])await t.test(action,async t=>{
+  t.mock.timers.enable({apis:['Date'],now:Date.now()});
+  const f=await fixture({changed:async()=>{},refresh:async()=>{}});
+  assert.equal((await f.invoke('/v1/messages','POST',f.ta,f.envelope())).status,201);
+  const due=await f.storage.getAlarm();
+  // The alarm is due but its invocation has not started. Real dispatch can lag;
+  // another request must not replace that work with its much later expiration.
+  t.mock.timers.tick(1500);f.advance(1500);assert.ok(due<Date.now());
+  if(action==='publish')assert.equal((await f.invoke('/v1/messages','POST',f.ta,f.envelope('second-overdue-message'))).status,201);
+  else assert.equal((await f.invoke('/v1/enrollment/register','POST','test-operator-secret',{device:'new-overdue-device',ttl:3600})).status,201);
+  assert.ok(await f.storage.getAlarm()>Date.now(),'overdue alarm is explicitly rearmed');
+  assert.ok(await f.storage.getAlarm()<=Date.now()+1000,'new traffic must preserve prompt notification recovery');
+  const hints=[];const grant=await f.storage.get('device:'+f.b);
+  const socket={readyState:1,deserializeAttachment:()=>({device:f.b,token:grant.token}),close(){this.readyState=3},send(body){hints.push(body)}};
+  const mailbox=new Mailbox({storage:f.storage,getWebSockets:tag=>!tag||tag==='device:'+f.b?[socket]:[]},{CIPHERTEXT:f.bucket,ENROLLMENT_ADMIN:'test-operator-secret'});
+  const advance=await f.storage.getAlarm()-Date.now();t.mock.timers.tick(advance);f.advance(advance);f.storage.alarm=null;
+  await mailbox.alarm();
+  assert.deepEqual(hints,['{"type":"mailbox-changed"}']);
+  assert.equal((await f.storage.get('quota:'+f.b)).count,action==='publish'?2:1,'alarm must not acknowledge delivery');
+ });
+});
+
 test('notification retries stop for offline, revoked and expired recipients',async t=>{
  for(const reason of ['offline','revoked','expired'])await t.test(reason,async t=>{
   t.mock.timers.enable({apis:['Date'],now:Date.now()});
