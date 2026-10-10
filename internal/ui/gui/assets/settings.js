@@ -435,6 +435,13 @@ screen("settings", async (which) => {
   await load();
 });
 
+// hookName is the agent's name, with the account only when the agent has several here.
+const AGENT_NAMES = { claude: "Claude Code", codex: "Codex" };
+function hookName(hook, hooks) {
+  const name = AGENT_NAMES[hook.agent] || hook.agent;
+  return hooks.filter((x) => x.agent === hook.agent).length > 1 ? `${name} (${hook.profileLabel || hook.profile || "default account"})` : name;
+}
+
 function noticeSetup() {
   const hooks = s.noticeHooks || [];
   const off = s.original === "off";
@@ -444,7 +451,7 @@ function noticeSetup() {
     s.noticeHooksError && s.cliReady ? h("span", {class:"warn"}, s.noticeHooksError) : null,
     !s.cliReady ? h("span", {class:"warn"}, "The hopsesh command is not installed; installing a hook installs it first.") : null,
     ...hooks.map(hook => h("div", {class:"set-row"},
-      title(`${hook.agent} · ${hook.profileLabel || hook.profile || "Default account"}`, `${hook.installed ? "Installed" : "Not installed"}${hook.installed ? trustWords(hook.trust) : ""}${hook.reason ? " · " + hook.reason : ""}`),
+      title(hookName(hook, hooks), `${hook.installed ? "Installed" : "Not installed"}${hook.installed ? trustWords(hook.trust) : ""}${hook.reason ? " · " + hook.reason : ""}`),
       hook.trust && hook.trust.state !== "trusted" && hook.trust.fix ? h("span", {class:"muted",style:"font-size:12px"}, hook.trust.fix) : null,
       hook.installed ? h("button", {class:"btn",onclick:()=>run(()=>api("RemoveNoticeHooks",hook.agent,hook.profile),"Hook removed")}, "Remove hook")
       : h("button", {class:"btn",disabled:!hook.supported || off,onclick:()=>run(()=>withCLI(()=>api("InstallNoticeHooks",hook.agent,hook.profile)),"Hook installed")}, "Install hook"))),

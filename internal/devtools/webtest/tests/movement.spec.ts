@@ -81,7 +81,7 @@ test('multiple returns require explicit selection and replace generic Continue w
  await details(page).locator('#act-primary').click();
  const d=page.getByRole('dialog').filter({has:page.getByRole('heading',{name:'Choose where to move back'})});
  await expect(d).toBeVisible();expect(calls).toHaveLength(0);
- await d.getByRole('button',{name:/Move back to Codex · Personal/}).click();
+ await d.getByRole('button',{name:/Move back to Codex \(Personal\)/}).click();
  await expect.poll(()=>calls.length).toBe(1);expect(calls[0].args[3]).toMatchObject({targetProfile:'personal',targetSession:'codex@personal/other'});
 });
 
@@ -305,7 +305,7 @@ test('open original opens one review directly and pins the exact original withou
  const card=details(page).getByLabel('Return destinations');
  await expect(card).toContainText('Original conversation still open');
  await expect(card).toContainText('oarbank');
- await expect(card).toContainText('roee@example.com');
+ await expect(card).not.toContainText('Default account'); // one account: the agent's name is enough
  await expect(card).not.toContainText('claude@personal/original');
  await details(page).getByRole('button',{name:'Move',exact:true}).click();
  const item=page.getByRole('menuitem',{name:/^Move back to Claude Code/});
@@ -509,7 +509,7 @@ test('protection hook setup is explicit and asks for the hopsesh command first',
  await fresh(page);await page.locator('#btn-settings').click();
  await expect(page.getByText('Protection hooks',{exact:true})).toBeVisible();expect(installs).toHaveLength(0);
  await expect(page.getByText('Movement notice delivery')).toHaveCount(0);
- await expect(page.getByText('claude · Work · alice@example.com',{exact:true})).toBeVisible();
+ await expect(page.getByText('Claude Code',{exact:true}).first()).toBeVisible(); // one account: no account label
  await expect(page.getByRole('button',{name:'Install all hooks',exact:true})).toBeEnabled();
  await expect(page.getByRole('button',{name:'Check again',exact:true}).last()).toBeVisible();
  await page.getByRole('button',{name:'Install hook',exact:true}).click();

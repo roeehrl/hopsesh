@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Changed
+
+- The Sessions protection warning is one card: a short checklist (the hopsesh command,
+  then each agent), one "Set up protection" button that installs the command and every
+  hook, "Approve in Codex…" only when Codex's approval is the last step, and "Not now".
+- Agents are named without account labels ("Codex", not "Codex · Codex default ·
+  you@example.com"); the account appears only when an agent has several. A moved original's
+  row says where it went in a few words, and its details say it once.
+
+### Fixed
+
+- A moved original's status no longer runs under the row's action button, and counts read
+  "1 transfer", not "1 transfers".
+
 ## [0.4.2] - 2026-10-10
 
 ### Added

@@ -219,6 +219,18 @@ export function loading(text) {
   fill(view, h("div", { class: "loading", role: "status", "aria-live": "polite" }, text));
 }
 
+// manyAccounts: the agent is signed in with more than one account among the sessions read,
+// so naming the account tells copies apart (otherwise the agent's name is enough).
+export function manyAccounts(agent) {
+  const ids = new Set();
+  for (const e of entries()) {
+    if (e.agent === agent && e.profile?.id) ids.add(e.profile.id);
+    for (const r of e.returns || []) if (r.agent === agent && r.profile) ids.add(r.profile);
+    for (const c of e.copies || []) if (c.agent === agent && c.profile?.id) ids.add(c.profile.id);
+  }
+  return ids.size > 1;
+}
+
 // The entry for the current selection, from the last scan.
 export function entries() {
   if(!state.scan)return [];
@@ -274,5 +286,8 @@ export function ask({ title, body, ok, danger = false }) {
 
 // Profiles identify state roots, not the historical owner of every conversation.
 export const accountLabel = p => p?.account?.email || p?.name || "No account profile";
+// accountShown is what names an account next to a session: its email, or a profile's own
+// name ("Work"); a default profile's name ("Codex default") only repeats the agent.
+export const accountShown = p => p?.account?.email || (p && !p.default ? p.name : "") || "";
 export const accountTitle = p => p ? `Stored in ${p.name} (${p.root}). ${p.account?.loggedIn ? `${p.error ? "Last known" : "Current"} sign-in: ${p.account.email || p.account.label || p.account.provider}.` : "Current sign-in not confirmed."} ${p.error ? p.error+". " : ""}This does not establish who originally created the session.` : "No registered account profile";
 export const accountGroupLabel = e => e.profile ? `${accountLabel(e.profile)} · ${e.agentName} · ${e.machine === here() ? sys.Here : e.machine}${e.profile.account?.email && !e.profile.default ? " · "+e.profile.name : ""}` : "No account profile";

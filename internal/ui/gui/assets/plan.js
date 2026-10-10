@@ -1,6 +1,6 @@
 // The plan sheet (what a hop, continuation or send will do, with its choices), its
 // progress, and the Done screen.
-import { api, on, h, fill, view, state, screen, go, current, toast, fail, errText, cap, agentChip, here, $, count, sys, keys, cloudChip, cloudOf } from "./core.js";
+import { api, on, h, fill, view, state, screen, go, current, toast, fail, errText, cap, agentChip, here, $, count, sys, keys, cloudChip, cloudOf, manyAccounts } from "./core.js";
 import { openMenu, closeAll } from "./menu.js";
 import { undo } from "./activity.js";
 import { openResult, where as opensIn } from "./term.js";
@@ -152,7 +152,7 @@ function summary(p) {
     profiles.map(x=>h("option",{value:x.id,selected:chosen?.id===x.id},`${identity(x)}${identity(x)!==x.name?' · '+x.name:''}${x.default?' · Default profile':''}`)))
    :h("b",{},identity(chosen)),h("span",{class:"muted"},chosen?`${identity(chosen)!==chosen.name?chosen.name+' · ':''}${chosen.default?'Default profile':'Named profile'}${!chosen.account?.email&&!chosen.account?.label?' · Email unavailable':''}`:"Account not identified"))):null;
  const summaryBody=summaryContent(p);
- return h("div",{},cur.returnCandidate ? h("details",{class:"return-destination-identity"},h("summary",{},`Original destination: ${cur.returnCandidate.agentName} · ${cur.returnCandidate.profileLabel || "Selected account"} · ${cur.returnCandidate.machine}`),
+ return h("div",{},cur.returnCandidate ? h("details",{class:"return-destination-identity"},h("summary",{},`Original destination: ${cur.returnCandidate.agentName}${manyAccounts(cur.returnCandidate.agent) && cur.returnCandidate.profileLabel ? " (" + cur.returnCandidate.profileLabel + ")" : ""} on ${cur.returnCandidate.machine}`),
   h("code",{},cur.opts.targetSession || (cur.opts.fork ? "New separate conversation branch; the original is preserved" : "New session; the original is preserved"))) : null,accountChoice,summaryBody);
 }
 function summaryContent(p) {

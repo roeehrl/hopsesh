@@ -32,33 +32,62 @@ export async function loadHookHealth(force = false) {
 const AGENT = { claude: "Claude Code", codex: "Codex" };
 const agentName = id => AGENT[id] || id;
 
-// healthNotice is the Sessions view's warning when originals cannot be protected.
+// healthNotice is the Sessions view's one card for what protection still needs: a short
+// checklist (the command, then each agent) and one action that sets up everything hopsesh
+// can, plus the one step only the agent can do (approving its hooks in Codex).
+let dismissed = false;
 export function healthNotice(onChange) {
   const d = health;
-  if (!d) return null;
-  const items = [];
-  if (!d.cliReady && d.mode !== "off") items.push({ title: d.cli?.state === "dangling" ? "The hopsesh command points to a missing app" : "The hopsesh command is not installed",
-    body: "The protection hooks and the skill run it; without it, originals are not blocked or advised.",
-    act: ["Install the command", async () => { try { await api("InstallCLI", true); toast("Installed the hopsesh command"); await loadHookHealth(true); onChange(); } catch (e) { fail(e); } }] });
-  for (const p of d.problems || []) {
-    if (p.state === "settings" || p.state === "unsupported" || !p.agent) continue; // shown in Settings
-    items.push({ title: `${agentName(p.agent)}${p.label ? " · " + p.label : ""}: ${p.state === "needs-review" ? "approve the hopsesh hooks" : p.state === "not-installed" ? "protection hook not installed" : "hooks not working"}`,
-      body: p.message, fix: p.fix, events: p.events,
-      act: p.state === "not-installed" ? ["Install hook", async () => { try { await withCLI(() => api("InstallNoticeHooks", p.agent, p.profile)); toast("Installed the protection hook"); onChange(); } catch (e) { fail(e); } }]
-        : ["How to approve", () => trustHelp(p, onChange)] });
+  if (!d || dismissed || d.mode === "off") return null;
+  const hooks = (d.hooks || []).filter((x) => x.supported && x.enabled);
+  const several = (id) => hooks.filter((x) => x.agent === id).length > 1;
+  const rows = [];
+  rows.push({ ok: d.cliReady, name: "hopsesh command", note: d.cliReady ? "" : d.cli?.state === "dangling" ? "points to a moved or deleted app" : "not installed" });
+  for (const x of hooks) {
+    const t = x.trust?.state;
+    const name = agentName(x.agent) + (several(x.agent) ? ` (${x.profileLabel || x.profile || "default account"})` : "");
+    rows.push(!x.installed ? { ok: false, name, note: "not set up" }
+      : t === "needs-review" ? { ok: false, wait: true, name, note: "waiting for your approval in " + agentName(x.agent) }
+      : t === "disabled" ? { ok: false, wait: true, name, note: "turned off in " + agentName(x.agent) }
+      : t === "missing" ? { ok: false, name, note: "not seen by " + agentName(x.agent) }
+      : t === "unknown" ? { ok: true, name, note: "set up (approval not checked)" }
+      : { ok: true, name, note: "" });
   }
-  if (!items.length) return null;
-  return h("div", { class: "card notice warn-card", role: "status", "aria-label": "Movement protection" },
-    h("div", { style: "flex:1 1 360px;display:flex;flex-direction:column;gap:4px" },
-      h("b", {}, d.mode === "block" ? "Moved sessions' originals are not blocked" : "Moved sessions' originals are not advised"),
-      items.map(it => h("div", { style: "font-size:12.5px" }, h("b", {}, it.title + ". "), it.body))),
-    items.map(it => h("button", { class: "btn", onclick: it.act[1] }, it.act[0])),
-    h("button", { class: "btn", onclick: async () => { await loadHookHealth(true); onChange(); } }, "Check again"));
+  if (rows.every((r) => r.ok)) return null;
+  const setup = rows.some((r) => !r.ok && !r.wait);
+  const waiting = hooks.find((x) => x.installed && (x.trust?.state === "needs-review" || x.trust?.state === "disabled"));
+  const blocking = d.mode === "block";
+  const title = setup ? "Protect moved sessions" : `Approve hopsesh in ${agentName(waiting.agent)} to finish`;
+  const why = blocking
+    ? "When you move a session, hopsesh blocks the copy you left until you move it back, so the two never drift apart."
+    : "When you move a session, hopsesh warns in the copy you left until you move it back.";
+  const run = async () => {
+    try {
+      if (!d.cliReady) await api("InstallCLI", true);
+      await api("InstallNoticeHooks", "", "");
+      const after = await loadHookHealth(true);
+      const left = (after?.hooks || []).some((x) => x.trust?.state === "needs-review");
+      toast(left ? "Set up. One step left: approve the hooks in Codex." : "Protection is set up");
+    } catch (e) { fail(e); }
+    onChange();
+  };
+  return h("section", { class: "card notice warn-card protect-card", role: "status", "aria-label": "Movement protection" },
+    h("div", { class: "protect-body" },
+      h("b", {}, title),
+      h("span", { class: "muted" }, setup ? why + " This needs:" : "hopsesh set up its hook; Codex runs a new hook only after you approve it."),
+      h("ul", { class: "protect-list" }, rows.map((r) => h("li", { class: r.ok ? "ok" : r.wait ? "wait" : "todo" },
+        h("span", { class: "mark", "aria-hidden": "true" }, r.ok ? "✓" : r.wait ? "!" : "○"),
+        h("span", {}, r.name), r.note ? h("span", { class: "muted" }, " · " + r.note) : null)))),
+    h("div", { class: "protect-actions" },
+      setup ? h("button", { class: "btn primary", onclick: run }, "Set up protection") : null,
+      waiting ? h("button", { class: setup ? "btn" : "btn primary", onclick: () => trustHelp(waiting, onChange) }, `Approve in ${agentName(waiting.agent)}…`) : null,
+      h("button", { class: "btn", onclick: () => { dismissed = true; onChange(); } }, "Not now"),
+      h("button", { class: "link", onclick: async () => { await loadHookHealth(true); onChange(); } }, "Check again")));
 }
 
 function trustHelp(p, onChange) {
   const d = dialog(h("h2", { style: "margin:0;font-size:16px" }, `Approve the hopsesh hooks in ${agentName(p.agent)}`),
-    h("p", { style: "margin:0;line-height:1.5" }, p.message),
+    h("p", { style: "margin:0;line-height:1.5" }, `${agentName(p.agent)} runs a new or changed hook only after you approve it, so hopsesh can't block or warn there yet.`),
     h("ol", { style: "margin:0;padding-left:18px;line-height:1.6" },
       h("li", {}, `Open ${agentName(p.agent)}. In the app, answer its Review hooks prompt; in the terminal, run `, h("code", {}, "/hooks"), "."),
       h("li", {}, "Check that each hopsesh hook runs ", h("code", {}, "hopsesh notice-hook"), ", then trust it (Allow all, or select both)."),
@@ -78,14 +107,15 @@ export function role(e) {
   if (dep && dep.status !== "forked") {
     const to = dep.cloud || where(dep.agentName || dep.agent, dep.machine);
     if (dep.status === "diverged")
-      return { kind: "diverged", glyph: "!", chip: "Diverged", tone: "st-warn", line: `Original · continued after moving to ${to} · moving back needs a comparison` };
+      return { kind: "diverged", glyph: "!", chip: "Diverged", tone: "st-warn", short: `Moved to ${to}`, line: "Both copies changed; moving back needs a comparison" };
     if (g?.mode === "released")
-      return { kind: "unblocked", glyph: "!", chip: "Unblocked", tone: "st-warn", line: `Original · moved to ${to} · block removed; continuing here diverges` };
+      return { kind: "unblocked", glyph: "!", chip: "Unblocked", tone: "st-warn", short: `Moved to ${to}`, line: "Block removed; continuing here makes the copies diverge" };
     const blocked = g?.mode === "block";
     return { kind: blocked ? "blocked" : "moved-out", glyph: blocked && g.effective ? "◆" : "◇", chip: "Moved out", tone: blocked && g.effective ? "st-ended" : "st-warn", icon: blocked ? "lock" : "warn",
-      line: `Original · moved to ${to}${blocked ? (g.effective ? " · blocked until you move back" : " · not blocked: " + (g.problem || "hooks not ready")) : g?.mode === "advise" ? (g.effective ? " · advised" : " · not advised: " + (g.problem || "hooks not ready")) : ""}` };
+      short: `Moved to ${to}`,
+      line: blocked ? (g.effective ? "Blocked until you move it back" : "Not blocked yet: protection isn't set up") : g?.mode === "advise" ? (g.effective ? "Warns before you continue here" : "No warning yet: protection isn't set up") : "Left as it is" };
   }
-  if (dep && dep.status === "forked") return { kind: "forked-out", glyph: "⑂", chip: "Fork made", tone: "st-idle", line: `Original · a separate fork continues in ${dep.cloud || where(dep.agentName || dep.agent, dep.machine)}` };
+  if (dep && dep.status === "forked") { const to = dep.cloud || where(dep.agentName || dep.agent, dep.machine); return { kind: "forked-out", glyph: "⑂", chip: "Fork made", tone: "st-idle", short: `Forked to ${to}`, line: `A separate fork continues in ${to}` }; }
   if (ar) {
     const from = where(ar.agentName || ar.agent, ar.machine);
     if (ar.kind === "returned") return { kind: "returned", glyph: "↩", chip: "Returned", tone: "st-idle", line: `Moved back from ${from}${day(ar.at) ? " · " + day(ar.at) : ""} · block cleared` };
