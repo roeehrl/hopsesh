@@ -16,7 +16,11 @@ async function dispatch(namespace,name,req){
  catch{return json({error:'temporarily_unavailable'},503)}
 }
 async function schedule(storage,when,now=Date.now()){
- const old=await storage.getAlarm();if(!old||old<=now||when<old)await storage.setAlarm(when);
+ const old=await storage.getAlarm();
+ // Dispatch can lag behind a due alarm. Rearm its existing work promptly;
+ // a new envelope/device expiry must never postpone that pending work.
+ const next=Math.max(now+1,Math.min(old??Infinity,when));
+ if(old!==next)await storage.setAlarm(next);
 }
 // Persist with the message, before attempting its best-effort WebSocket hint.
 // One coalesced retry per recipient survives hibernation; ACK ends the demand.

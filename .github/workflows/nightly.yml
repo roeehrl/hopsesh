@@ -1,12 +1,23 @@
-name: native Windows startup diagnostic
+name: overdue relay alarm native qualification
 on:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  runtime:
-    runs-on: windows-2025
-    timeout-minutes: 30
+  relay:
+    name: corrected relay (${{ matrix.family }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {family: linux, os: ubuntu-24.04}
+          - {family: macos, os: macos-15}
+          - {family: windows, os: windows-2025}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -20,12 +31,26 @@ jobs:
           node-version: 24
       - run: npm ci
         working-directory: infrastructure/relay
-      - name: complete original 33-row Windows shard with failure diagnostics
-        shell: bash
-        run: go run ./internal/devtools/hsmatrix runtime-run -t 3 -shard 2/4 -out "$RUNNER_TEMP/runtime-matrix" -timeout 20m
+      - name: record exact source
+        run: |
+          mkdir -p "$RUNNER_TEMP/relay-evidence"
+          git rev-parse HEAD HEAD:infrastructure/relay HEAD:internal/e2e HEAD:internal/core/relay > "$RUNNER_TEMP/relay-evidence/source.txt"
+          test -z "$(git status --porcelain)"
+      - name: all infrastructure contracts
+        working-directory: infrastructure/relay
+        run: npm test > "$RUNNER_TEMP/relay-evidence/contracts.log" 2>&1
+      - name: core relay race tests
+        run: go test -race ./internal/core/relay -count=1 -v -timeout=10m > "$RUNNER_TEMP/relay-evidence/core-relay.log" 2>&1
+      - name: real SQLite R2 cloud lineage notification and resource tests
+        env:
+          HOPSESH_RELAY_PLATFORM: '1'
+          HOPSESH_RELAY_REQUIRE_NODE: '1'
+        run: |
+          go test -race ./internal/e2e -run '^Test(Cloud.*|MixedTransport.*|Relay.*|RuntimeRelay.*)SQLiteR2$' -count=1 -v -timeout=12m > "$RUNNER_TEMP/relay-evidence/platform.log" 2>&1
+          test -z "$(git status --porcelain)"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: ${{ !cancelled() }}
         with:
-          name: runtime-windows-initial-startup-diagnostic
-          path: ${{ runner.temp }}/runtime-matrix
+          name: overdue-relay-${{ matrix.family }}
+          path: ${{ runner.temp }}/relay-evidence
           retention-days: 14

@@ -1,5 +1,37 @@
 # Hosted 0.5 staging qualification
 
+## October 10 paid-plan recovery and overdue-notification fix
+
+The Cloudflare Workers plans page now labels **Paid** as **Current plan**
+(observed October 10 at approximately 09:39 UTC). This supersedes the Free-plan
+snapshots below. The user completed the upgrade; no billing action was performed
+by the agent. Paid activation alone does not qualify the previously failed run.
+
+The failed load fixture kept its 100 credentials only in memory. Individual
+revocation cannot be replayed after its process exits. Enrollment leases were
+80 minutes; all initial enrollments preceded the first observation at 07:35:05
+UTC, so their authority expired no later than 08:55:05 UTC. No renewal was
+reached. This is an expiry bound from the harness and logs, **not verified
+revocation or stored-data deletion**. Preserve the original cleanup failures.
+
+A separate deterministic regression reproduces a Worker bug: while a durable
+notification alarm is overdue but not yet invoked, new publication or enrollment
+can replace it with a later message/device expiry. Scheduling now keeps the
+previous earliest work, explicitly rearming overdue work promptly. Both traffic
+cases fail before the fix and pass afterward; the alarm emits a content-free
+hint without acknowledging any message. No deadline or retry was relaxed.
+
+All 119 infrastructure tests and the Worker dry run pass. All 14 selected real
+SQLite/R2 platform tests pass under the race detector in 379.941 seconds,
+including multi-hop/fork lineage, cloud checkpoints, account rebinding, 100
+logical endpoints, notification recovery, idle admission and runtime resources.
+Evidence is archived in `qualification/overdue-alarm-20261010/verified.json`,
+including the exact patch and hashes. This is local macOS evidence; it does not
+explain the three original intermittent Windows failures or replace hosted and
+native final-source qualification. Staging remains paused until the frozen
+corrected source is deployed for its bounded hosted run.
+
+
 ## Hosted daily write allowance exhausted — October 10
 
 Final-source `7011675` passes retention (62.02s) and movement (31.80s), then
