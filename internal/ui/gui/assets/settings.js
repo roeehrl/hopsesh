@@ -44,6 +44,7 @@ function cloudRow(a, c) {
 
 let tab = "general";
 let s = null, saving = false;
+let checkingUpdate = false, updateError = "";
 
 const chip = ([text, cls]) => h("span", { class: "chip " + cls }, text);
 const title = (t, desc) => h("div", { style: "display:flex;flex-direction:column;gap:2px;min-width:0;flex:1 1 300px" }, h("span", { style: "font-weight:500" }, t), desc ? h("span", { class: "muted", style: "font-size:12px" }, desc) : null);
@@ -274,14 +275,26 @@ function cli() {
 }
 
 function updates() {
-  const u = state.update;
+  const u = checkingUpdate || updateError ? null : state.update;
   return [card(
-    h("div", { class: "set-row" }, title(`hopsesh ${s.version}`, u?.newer ? `hopsesh ${u.latest} is available.` : u ? "This is the newest version." : ""),
+    h("div", { class: "set-row" }, title(`hopsesh ${s.version}`, checkingUpdate ? "Checking GitHub for the newest release…" : u?.newer ? `hopsesh ${u.latest} is available.` : u?.latest ? "This is the newest version." : ""),
       u?.newer && u.canInstall ? h("button", { class: "btn primary", onclick: (ev) => installUpdate(ev.currentTarget, u) }, "Install and restart") : null,
       u?.newer ? h("button", { class: u.canInstall ? "btn" : "btn primary", onclick: () => api("OpenURL", u.url).catch(fail) }, "See what's new") : null,
-      s.updateCheck === "on" ? h("button", { class: "btn", onclick: async () => { try { state.update = await api("CheckUpdate"); } catch (e) { fail(e); } render(); } }, "Check now") : null),
+      h("button", { class: "btn", disabled: checkingUpdate, onclick: checkUpdateNow }, checkingUpdate ? "Checking…" : "Check now")),
+    updateError ? h("div", { role: "alert", class: "warn" }, updateError) : null,
     h("label", { class: "opt" }, h("input", { type: "checkbox", checked: s.updateCheck === "on", onchange: (e) => save({ updateCheck: e.target.checked ? "on" : "off" }) }),
       h("span", {}, h("b", {}, "Check GitHub once a day for new versions"), h("span", { class: "muted" }, "Only the release list is fetched; nothing about you is sent."))))];
+}
+
+async function checkUpdateNow() {
+  if (checkingUpdate) return;
+  checkingUpdate = true; updateError = "";
+  ++state.updateCheckRevision;
+  state.update = null;
+  render();
+  try { state.update = await api("LatestRelease"); }
+  catch (e) { updateError = errText(e); fail(e); }
+  finally { checkingUpdate = false; render(); }
 }
 
 // installUpdate installs the new version over this app (the backend verifies it first),

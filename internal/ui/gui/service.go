@@ -408,8 +408,8 @@ func (a *App) InstallUpdate() error {
 	return nil
 }
 
-// LatestRelease looks for the newest release now, whatever the daily check is set to: the
-// user asked, from the page that says a newer hopsesh wrote the configuration.
+// LatestRelease is a user-requested check: always fetch now, regardless of the daily
+// check's opt-in or cached result, and report failures to the window.
 func (a *App) LatestRelease() (*UpdateDTO, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()

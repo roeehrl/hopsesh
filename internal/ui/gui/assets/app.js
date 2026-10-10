@@ -144,6 +144,7 @@ function configError() {
   }
   const update = async (btn) => {
     btn.disabled = true;
+    fill(btn, "Checking for updates…");
     try {
       const u = await api("LatestRelease");
       if (u.newer && u.canInstall) {
@@ -185,7 +186,9 @@ export async function start() {
   loadTabs().catch(fail);
   scan("InitialScan").then(()=>{if(current==="sessions")renderSessions();return quickRoute()}).catch(fail);
   if (state.info.updateCheck === "on") {
+    const revision = state.updateCheckRevision;
     api("CheckUpdate").then((update) => {
+      if (revision !== state.updateCheckRevision) return;
       state.update = update;
       if (update?.newer && current === "sessions") go("sessions");
     }).catch(() => {}); // offline; update checking must not hold startup open

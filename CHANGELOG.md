@@ -43,6 +43,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- GUI “Check now” fetches the latest release immediately, even when daily automatic
+  checks are off. Manual checks show progress and failures instead of reporting a
+  cached or unavailable result as the newest version.
 - A new Claude Code session's context uses the account's current model (from its most
   recent sessions) instead of a 64K fallback; Codex uses the window it reports itself.
 - Transfers use the whole context budget: space the older-history extract leaves goes to
