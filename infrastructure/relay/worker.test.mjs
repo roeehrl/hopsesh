@@ -9,7 +9,7 @@ class Storage {
  async list({prefix='',limit=Infinity}={}){return new Map([...this.values].filter(([k])=>k.startsWith(prefix)).sort(([a],[b])=>a.localeCompare(b)).slice(0,limit))}
  async setAlarm(t){this.alarm=t}
  async getAlarm(){return this.alarm}
- async transaction(fn){let release;const before=this.tail;this.tail=new Promise(r=>release=r);await before;const tx=new Storage();tx.values=structuredClone(this.values);try{const result=await fn(tx);this.values=tx.values;return result}finally{release()}}
+ async transaction(fn){let release;const before=this.tail;this.tail=new Promise(r=>release=r);await before;const tx=new Storage();tx.values=structuredClone(this.values);tx.alarm=this.alarm;try{const result=await fn(tx);this.values=tx.values;this.alarm=tx.alarm;return result}finally{release()}}
 }
 class Bucket {constructor(){this.values=new Map()}async put(k,v){this.values.set(k,v)}async get(k){const v=this.values.get(k);return v===undefined?null:{text:async()=>v}}async delete(k){this.values.delete(k)}}
 async function fixture(events,policy){
@@ -206,4 +206,88 @@ test('native observation frames share durable quota while cloud credentials rema
  await f.storage.put('device:'+f.a,{...grant,kind:'cloud-session',issuer:f.b});
  for(const kind of ['observation','request'])assert.equal((await f.invoke('/v1/messages','POST',f.ta,{...e,id:'cloud-attempt-'+kind,kind})).status,403);
  assert.equal((await f.invoke('/v1/messages','POST',f.ta,{...e,id:'cloud-response-1234',kind:'response'})).status,201);
+});
+
+
+test('committed mailbox hints survive loss and hibernation until acknowledgment',async t=>{
+ t.mock.timers.enable({apis:['Date'],now:Date.now()});
+ let mailbox;const delivered=[];let attempts=0;
+ const f=await fixture({changed:device=>mailbox.changed(device),refresh:async()=>{}});
+ const grant=await f.storage.get('device:'+f.b);
+ const socket={readyState:1,deserializeAttachment:()=>({device:f.b,token:grant.token}),close(){this.readyState=3},send(body){if(++attempts>1)delivered.push(body)}};
+ const ctx={storage:f.storage,getWebSockets:tag=>!tag||tag==='device:'+f.b?[socket]:[]};
+ const env={CIPHERTEXT:f.bucket,ENROLLMENT_ADMIN:'test-operator-secret'};
+ mailbox=new Mailbox(ctx,env);
+ assert.equal((await f.invoke('/v1/messages','POST',f.ta,f.envelope())).status,201);
+ assert.equal(attempts,1);assert.equal(delivered.length,0,'simulate loss after a successful send');
+ assert.equal(typeof await f.storage.getAlarm(),'number');
+ assert.ok(await f.storage.getAlarm()<=Date.now()+1000,'pending delivery must wake before the request lease expires');
+ const alarm=async ms=>{t.mock.timers.tick(ms);f.advance(ms);f.storage.alarm=null;mailbox=new Mailbox(ctx,env);await mailbox.alarm()};
+ await alarm(1001);
+ assert.deepEqual(delivered,['{"type":"mailbox-changed"}']);
+ assert.equal(f.bucket.values.size,1,'a notification is not a delivery acknowledgment');
+ const batch=await(await f.invoke('/v1/messages','GET',f.tb)).json();
+ await alarm(2001);
+ assert.equal(delivered.length,2,'an unrelated read must not silence pending delivery');
+ assert.equal((await f.invoke('/v1/ack','POST',f.tb,{cursor:batch.cursor})).status,200);
+ await alarm(4001);
+ assert.equal(delivered.length,2,'acknowledged mailbox must stop notification retries');
+ assert.equal((await f.storage.list({prefix:'notify:'})).size,0);
+ assert.ok(await f.storage.getAlarm()>Date.now()+30000,'empty mailbox returns to expiry-only maintenance');
+});
+
+
+test('notification retries stop for offline, revoked and expired recipients',async t=>{
+ for(const reason of ['offline','revoked','expired'])await t.test(reason,async t=>{
+  t.mock.timers.enable({apis:['Date'],now:Date.now()});
+  let mailbox;const f=await fixture({changed:device=>mailbox.changed(device),refresh:async()=>{}});
+  const grant=await f.storage.get('device:'+f.b);let attempts=0;
+  const socket={readyState:1,deserializeAttachment:()=>({device:f.b,token:grant.token}),close(){this.readyState=3},send(){attempts++}};
+  const ctx={storage:f.storage,getWebSockets:tag=>(!tag||tag==='device:'+f.b)&&socket.readyState===1?[socket]:[]};
+  const env={CIPHERTEXT:f.bucket,ENROLLMENT_ADMIN:'test-operator-secret'};
+  mailbox=new Mailbox(ctx,env);
+  const e=f.envelope();if(reason==='expired')e.expires=e.created+1;
+  assert.equal((await f.invoke('/v1/messages','POST',f.ta,e)).status,201);
+  if(reason==='offline')socket.close();
+  if(reason==='revoked')await f.invoke('/v1/enrollment/revoke','POST',f.tb,{});
+  t.mock.timers.tick(1500);f.storage.alarm=null;
+  await new Mailbox(ctx,env).alarm();
+  assert.equal(attempts,1);assert.equal((await f.storage.list({prefix:'notify:'})).size,0);
+  assert.ok(await f.storage.getAlarm()>Date.now()+30000,'inactive recipient must not retain a fast alarm');
+ });
+});
+
+test('pending notification retry backs off, retains partial ACK and does not overwrite concurrent publication',async t=>{
+ t.mock.timers.enable({apis:['Date'],now:Date.now()});
+ let mailbox;let duringHint;
+ const f=await fixture({changed:device=>mailbox.changed(device),refresh:async()=>{}});
+ const grant=await f.storage.get('device:'+f.b);let hints=0;
+ const socket={readyState:1,deserializeAttachment:()=>({device:f.b,token:grant.token}),close(){this.readyState=3},send(){hints++}};
+ const ctx={storage:f.storage,getWebSockets:tag=>!tag||tag==='device:'+f.b?[socket]:[]};
+ const env={CIPHERTEXT:f.bucket,ENROLLMENT_ADMIN:'test-operator-secret'};mailbox=new Mailbox(ctx,env);
+ await f.invoke('/v1/messages','POST',f.ta,f.envelope('first-pending-message'));
+ await f.invoke('/v1/messages','POST',f.ta,f.envelope('second-pending-message'));
+ await f.invoke('/v1/ack','POST',f.tb,{cursor:1});
+ assert.equal((await f.storage.get('notify:'+f.b)).sequence,2,'partial ACK retains newer demand');
+ for(const expected of [2000,4000,8000,16000,30000,30000]){
+  const pending=await f.storage.get('notify:'+f.b),advance=pending.at-Date.now();
+  t.mock.timers.tick(advance);f.advance(advance);f.storage.alarm=null;
+  mailbox=new Mailbox(ctx,env);await mailbox.alarm();
+  const next=await f.storage.get('notify:'+f.b);
+  assert.equal(next.delay,expected);assert.equal(next.at,Date.now()+expected);
+  assert.equal(await f.storage.getAlarm(),next.at,'one shared alarm follows actual pending work');
+ }
+ const before=await f.storage.get('notify:'+f.b);t.mock.timers.tick(before.at-Date.now());f.advance(before.delay);
+ mailbox=new Mailbox(ctx,env);
+ const changed=mailbox.changed.bind(mailbox);
+ mailbox.changed=async device=>{
+  const online=await changed(device);
+  if(!duringHint){duringHint=true;await f.invoke('/v1/messages','POST',f.ta,f.envelope('new-concurrent-message'))}
+  return online;
+ };
+ await mailbox.alarm();
+ const current=await f.storage.get('notify:'+f.b);
+ assert.equal(current.sequence,3);assert.equal(current.delay,1000);
+ assert.ok(current.at<=Date.now()+1000,'new delivery must retain its prompt schedule');
+ assert.ok(hints>=8);
 });
