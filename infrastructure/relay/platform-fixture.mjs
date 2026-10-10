@@ -5,8 +5,13 @@ import {readFileSync, writeFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {Miniflare, Log, LogLevel, convertV4MiniflareOptions} from 'miniflare';
-import {unstable_getMiniflareWorkerOptions} from 'wrangler';
+const started = performance.now();
+const phase = name => console.error(`[fixture-phase] elapsed_ms=${Math.round(performance.now() - started)} phase=${name}`);
+phase('imports-start');
+const {Miniflare, Log, LogLevel, convertV4MiniflareOptions} = await import('miniflare');
+phase('miniflare-imported');
+const {unstable_getMiniflareWorkerOptions} = await import('wrangler');
+phase('wrangler-imported');
 
 const [root, portText, key, cert, ...overrides] = process.argv.slice(2);
 const port = Number(portText);
@@ -29,15 +34,18 @@ writeFileSync(configPath, JSON.stringify(config));
 const output = join(root, 'build');
 const bundle = join(output, 'worker.js');
 const require = createRequire(import.meta.url);
+phase('bundle-start');
 execFileSync(process.execPath, [require.resolve('wrangler'), 'deploy', '--dry-run',
   '--config', configPath, '--outdir', output], {
   cwd: root, timeout: 15000, stdio: 'pipe',
   env: {...process.env, WRANGLER_SEND_METRICS: 'false'},
 });
+phase('bundle-complete');
 const {workerOptions, externalWorkers} = unstable_getMiniflareWorkerOptions(configPath);
 // Wrangler has already resolved source module rules into this deployment bundle.
 // Pass its explicit module instead of applying source globs a second time.
 delete workerOptions.modulesRules;
+phase('options-resolved');
 const platform = new Miniflare(convertV4MiniflareOptions({
   host: '127.0.0.1', port, httpsKey: readFileSync(key, 'utf8'), httpsCert: readFileSync(cert, 'utf8'),
   cf: false, log: new Log(LogLevel.ERROR),
@@ -53,4 +61,6 @@ const stop = () => stopping ??= platform.dispose().catch(error => {
 });
 process.once('SIGINT', stop);
 process.once('SIGTERM', stop);
+phase('waiting-ready');
 await platform.ready;
+phase('ready');
