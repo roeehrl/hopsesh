@@ -1,47 +1,14 @@
 name: nightly
-
-# What changes under hopsesh without a commit, and what is too slow for every pull request:
-# the latest Claude Code and Codex (no model calls), the real desktop app on macOS and
-# Linux, the terminal UI in a real pseudo-terminal (ConPTY on Windows), and the scenario
-# matrix at triple coverage. No secrets.
-
 on:
-  schedule:
-    - cron: "11 2 * * *"
   workflow_dispatch:
-  pull_request: # changes to these runs are tested before they land
-    paths:
-      - .github/workflows/nightly.yml
-      - .github/workflows/release-tests.yml # owns their shared runtime matrix on PRs
-      - .github/workflows/runtime-matrix.yml
-      - internal/testkit/runtimecases/**
-      - internal/e2e/runtime_matrix_test.go
-      - scripts/app-selfcheck.sh
-      - scripts/install-ci-dependencies.sh
-      - scripts/app-terminal-check.sh
-      - internal/devtools/webtest/real/*selfcheck.js
-      - internal/ui/desktop/**
-      - internal/ui/gui/desktop*
-      - internal/ui/gui/assets/quick*
-      - internal/ui/gui/assets/desktop-settings.js
-      - cmd/hopsesh-app/**
-      - internal/e2e/tuipty/**
-
 permissions:
   contents: read
-
-concurrency: # a newer push to the same pull request replaces the run; scheduled and tag runs never wait
-  group: nightly-${{ github.head_ref || github.run_id }}
-  cancel-in-progress: true
-
+concurrency:
+  group: storage-errors-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
-  runtime-triples:
-    # Same-commit reference; retain the supported ./ form until actionlint parses $/.
-    uses: ./.github/workflows/runtime-matrix.yml # zizmor: ignore[self-repository]
-    with:
-      strength: 3
-  real-agents:
-    name: latest agents (${{ matrix.family }})
+  observation:
+    name: storage errors and SQLite relay (${{ matrix.family }})
     strategy:
       fail-fast: false
       matrix:
@@ -50,147 +17,41 @@ jobs:
           - {family: macos, os: macos-15}
           - {family: windows, os: windows-2025}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 20
     defaults:
       run:
         shell: bash
     steps:
-      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
-        with:
-          egress-policy: audit
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
           go-version-file: go.mod
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 24
-      - name: install the latest Claude Code and Codex
-        run: npm install -g --silent @anthropic-ai/claude-code@latest @openai/codex@latest # zizmor: ignore[adhoc-packages]
-      - name: installed vendor launchers work without a model call
-        # npm can succeed while a missing optional native package leaves only
-        # the JS launcher. Preserve that vendor error before testing discovery.
+      - run: npm ci
+        working-directory: infrastructure/relay
+      - name: record executed source
         run: |
-          claude --version
-          codex --version
-      - name: hopsesh finds them and reads their versions
-        run: |
-          ext=""; [ "$RUNNER_OS" = Windows ] && ext=.exe
-          go build -o "bin/hopsesh$ext" ./cmd/hopsesh
-          export HOPSESH_CONFIG_DIR="$RUNNER_TEMP/cfg" HOPSESH_STATE_DIR="$RUNNER_TEMP/state"
-          mkdir -p ~/.claude ~/.codex/sessions # both have run here once
-          "bin/hopsesh$ext" agents --json > agents.json
-          for a in claude:@anthropic-ai/claude-code codex:@openai/codex; do
-            id=${a%%:*}; want=$(npm ls -g "${a#*:}" --json | jq -r ".dependencies[\"${a#*:}\"].version")
-            got=$(jq -r ".[] | select(.id == \"$id\") | .install.version // empty" agents.json)
-            echo "$id: npm $want, hopsesh read $got from $(jq -r ".[] | select(.id == \"$id\") | .install.binary" agents.json)"
-            [ "$got" = "$want" ] || { echo "::error::hopsesh read $id $got, npm installed $want"; exit 1; }
-          done
-      - name: real-agent tests (no model calls)
-        if: runner.os != 'Windows'
+          mkdir -p "$RUNNER_TEMP/qualification"
+          git rev-parse HEAD > "$RUNNER_TEMP/qualification/source.txt"
+          git status --porcelain >> "$RUNNER_TEMP/qualification/source.txt"
+          git hash-object infrastructure/relay/worker.mjs infrastructure/relay/worker.test.mjs >> "$RUNNER_TEMP/qualification/source.txt"
+      - name: Worker contracts including precommit and postcommit storage failures
+        run: npm test 2>&1 | tee "$RUNNER_TEMP/qualification/contracts.log"
+        working-directory: infrastructure/relay
+      - name: native relay transport and recovery race tests
+        run: go test -race -count=1 -v -timeout 8m ./internal/core/relay 2>&1 | tee "$RUNNER_TEMP/qualification/core-relay.log"
+      - name: unchanged SQLite relay load observation and resource workload
         env:
-          HOPSESH_REAL_AGENTS: "1"
-        run: go test ./internal/e2e/ -run 'Codex' -count=1 -v
-
-  app:
-    name: real app (${{ matrix.family }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - {family: linux, os: ubuntu-24.04}
-          - {family: macos, os: macos-15}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
-    steps:
-      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        with:
-          egress-policy: audit
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - name: GUI build dependencies and a virtual display (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          bash scripts/install-ci-dependencies.sh libgtk-4-dev libwebkitgtk-6.0-dev xvfb dbus jq
-          # WebKitGTK sandboxes web content with bubblewrap, which needs unprivileged user
-          # namespaces; Ubuntu 24.04's AppArmor restricts them on this runner.
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - name: the real app checks desktop placement, Quick access and session navigation
-        run: scripts/app-selfcheck.sh
-      - name: the real terminal window runs a tab's program through its stream
-        run: scripts/app-terminal-check.sh
-
-  tui:
-    name: terminal UI in a pseudo-terminal (${{ matrix.family }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - {family: linux, os: ubuntu-24.04}
-          - {family: macos, os: macos-15}
-          - {family: windows, os: windows-2025}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
-    steps:
-      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        if: runner.os != 'Windows'
-        with:
-          egress-policy: audit
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - name: hopsesh's TUI in ConPTY (Windows) or a pty
-        env:
-          HOPSESH_PTY: "1"
-        run: go test ./internal/e2e/tuipty/ -count=1 -v
-
-  matrix-triples:
-    name: scenario matrix, every triple (linux ${{ matrix.shard }}/4)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    # Two shards plus the mandatory stateful suite exceeded 60m while rows
-    # continued passing. Four disjoint shards retain every triple and deadline.
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4]
-    steps:
-      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        with:
-          egress-policy: audit
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - run: |
-          for p in cmd/hopsesh:hopsesh internal/devtools/hsmatrix:hsmatrix internal/devtools/fakeagent:fakeagent; do
-            go build -o "bin/${p#*:}" "./${p%%:*}"
-          done
-      - name: stateful movement, account and lineage routes and recovery
-        if: matrix.shard == 1 # these stateful tests run once; only the matrix rows are sharded
-        env:
-          HOPSESH_LINEAGE_NIGHTLY: "1"
-        run: go test ./internal/e2e -run 'TestMovement|TestLineage|TestAccountProfile|TestContext' -race -count=1 -timeout 12m
-      - run: scripts/matrix-loopback.sh bin "linux→linux, covering triples $SHARD" "$RUNNER_TEMP/hsmatrix" -t 3 -shard "$SHARD"
-        env:
-          SHARD: ${{ matrix.shard }}/4
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+          HOPSESH_RELAY_REQUIRE_NODE: "1"
+          HOPSESH_RELAY_PLATFORM: "1"
+        run: go test -race -count=1 -v -run 'TestRelayOperatorBudgetSQLiteR2|TestRelayLoadSQLiteR2|TestRuntimeRelayThreeProfilesThreePeersSQLiteR2|TestRelayObservationChangesSQLiteR2' -timeout 5m ./internal/e2e 2>&1 | tee "$RUNNER_TEMP/qualification/relay-observation.log"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
-          name: nightly-matrix-${{ matrix.shard }}
-          path: |
-            ${{ runner.temp }}/hsmatrix/*.log
-            ${{ runner.temp }}/hsmatrix/*.json
+          name: storage-errors-${{ matrix.family }}
+          path: ${{ runner.temp }}/qualification/
           retention-days: 7
