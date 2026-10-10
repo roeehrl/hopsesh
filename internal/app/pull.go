@@ -159,6 +159,9 @@ func (a *App) Plan(ctx context.Context, inv *Inventory, e Entry, target agent.ID
 	}
 	src := inv.Machine(e.Machine)
 	here := inv.Local()
+	if src != nil && src.Destination == "relay" && src.host == nil {
+		return a.planRelayPull(ctx, inv, e, target, opt)
+	}
 	if src == nil || src.host == nil {
 		return nil, move.Input{}, fmt.Errorf("%s was not reached", e.Machine)
 	}
@@ -181,6 +184,29 @@ func (a *App) Plan(ctx context.Context, inv *Inventory, e Entry, target agent.ID
 		return nil, move.Input{}, fmt.Errorf("%w: %s has no data folder on this machine yet; start it here once, then try again", agent.ErrNotInstalled, tm.Spec().Name)
 	}
 	sin, _ := src.InstallProfile(e.Agent, e.Session.Key.Profile)
+	// A never-initialized remote endpoint has no profile during passive scanning.
+	// Pin its default root against the reserved endpoint before the first review;
+	// otherwise Apply creates the identity and the next scan changes the source
+	// profile/binding, making the same committed operation impossible to retry.
+	if sin.Profile == nil && sm.Spec().Accounts != nil && !src.host.IsSnapshot() {
+		if _, err := src.host.PrepareIdentity(ctx); err != nil {
+			return nil, move.Input{}, err
+		}
+		installs, err := a.profileInstalls(ctx, src.host, sm, sin, false)
+		if err != nil {
+			return nil, move.Input{}, err
+		}
+		for _, install := range installs {
+			if install.Profile != nil && install.Profile.Default && install.Present {
+				sin = install
+				e.Session.Key.Profile, e.Profile = install.ProfileID(), install.Profile
+				break
+			}
+		}
+		if sin.Profile == nil {
+			return nil, move.Input{}, errors.New("source default profile could not be pinned; scan its accounts and retry")
+		}
+	}
 	in := move.Input{
 		Source:    move.Side{Machine: src.host, Module: sm, Install: sin},
 		Session:   e.Session,
@@ -256,6 +282,12 @@ func (a *App) account(ctx context.Context, m *Machine, mod agent.Module, in agen
 
 // Apply carries out a plan.
 func (a *App) Apply(ctx context.Context, p *move.Plan, in move.Input, progress func(string)) (*move.Result, error) {
+	finished, activityErr := a.beginRuntimeAction()
+	if activityErr != nil {
+		return nil, activityErr
+	}
+	defer finished()
+
 	if p.Kind == move.KindHop {
 		return a.applyHop(ctx, p, progress)
 	}
@@ -267,7 +299,13 @@ func (a *App) Apply(ctx context.Context, p *move.Plan, in move.Input, progress f
 			}
 		}
 	}
-	return move.Apply(ctx, p, in, move.Env{StateDir: a.StateDir, Audit: a.Audit, Progress: progress, Step: a.Steps})
+	res, err := move.Apply(ctx, p, in, move.Env{StateDir: a.StateDir, Audit: a.Audit, Progress: progress, Step: a.Steps})
+	if err == nil && in.AcknowledgeSource != nil {
+		if err = in.AcknowledgeSource(ctx, p, res); err != nil && res != nil {
+			res.Warnings = append(res.Warnings, "Destination committed; source acknowledgment is pending: "+err.Error())
+		}
+	}
+	return res, err
 }
 
 // gitFetchFunc is how to fetch from a repository on a machine over SSH (nil for this

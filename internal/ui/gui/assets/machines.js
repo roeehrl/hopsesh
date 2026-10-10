@@ -1,6 +1,6 @@
 // The Machines screen: this machine (and whether it receives sessions), the machines you
 // added, and the ones discovery found. hopsesh connects only to machines you added.
-import { on, api, h, fill, icon, ICONS, view, state, screen, loading, toast, fail, errText, cap, dialog, ask, machineStatus, sys, when, current, rich, navigationID, loadError } from "./core.js";
+import { on, api, h, fill, icon, ICONS, view, state, screen, go, loading, toast, fail, errText, cap, dialog, ask, machineStatus, sys, when, current, rich, navigationID, loadError } from "./core.js";
 import { signIn, onSignedIn } from "./term.js";
 
 // A sign-in tab ended well: the card shows the new check.
@@ -48,37 +48,18 @@ async function scanMachine(name) {
   finally { scanning.delete(name); await reload(); }
 }
 
-// Keep a running scan visible across navigation without repeating network discovery.
-let polling = false;
-setInterval(async () => {
-  if (current !== "machines" || document.hidden || polling || !data) return;
-  polling = true;
-  try {
-    const states = await api("MachineScans");
-    let finished = false, changed = false;
-    for (const m of data.machines) {
-      const next = states?.[m.name];
-      if (JSON.stringify(m.scan) !== JSON.stringify(next)) {
-        finished ||= next?.phase === "done";
-        m.scan = next;
-        changed = true;
-      }
-    }
-    if (finished) await reload();
-    else if (changed && !document.querySelector("dialog[open]")) render();
-  } catch { /* the next poll retries; the previous result stays */ }
-  finally { polling = false; }
-}, 1000);
+// Backend phase notifications keep all views in sync without a client poll.
+export async function machineScanChanged() {
+ if (!data) return;
+ const states = await api("MachineScans");
+ let finished=false;
+ for(const m of data.machines){const next=states?.[m.name];finished ||= next?.phase === "done" && JSON.stringify(m.scan)!==JSON.stringify(next);m.scan=next;}
+ if(current!=="machines")return;
+ if(finished)await reload();else if(!document.querySelector("dialog[open]"))render();
+}
 
-// Added machines scan immediately. Healthy rows refresh every five minutes while
-// Machines is visible; failed connections need an explicit Retry (no repeated prompts).
-setInterval(() => {
-  if (current !== "machines" || document.hidden || !document.hasFocus() || document.querySelector("dialog[open]") || !data) return;
-  for (const m of data.machines) {
-    const last = Date.parse(m.scan?.finished || "") || 0;
-    if (!activeScan(m) && !failedScan(m) && Date.now() - last >= 300000) scanMachine(m.name);
-  }
-}, 15000);
+// The shared runtime schedules remote observations even when this view is closed.
+// Phase notifications update rows; Scan is an explicit retry after authentication.
 
 function statusCell(m) {
   if (activeScan(m)) return h("div", { role: "status", "aria-live": "polite", class: "scan-status" },
@@ -91,7 +72,7 @@ function statusCell(m) {
   return h("div", { style: "display:flex;flex-direction:column;gap:3px;min-width:0" },
     h("span", { style: "display:flex;gap:7px;align-items:center" }, h("span", { class: "dot " + k }), words),
     m.status === "ok" ? h("span", { class: "muted", style: "font-size:12px" }, [`${m.sessions} session${m.sessions === 1 ? "" : "s"}`, m.agents.join(", ")].filter(Boolean).join(" · ")) : null,
-    m.status === "ok" ? h("span", { class: m.hopsesh ? "muted" : "warn", style: "font-size:12px" }, m.hopsesh ? `hopsesh ${m.hopsesh}: you can send sessions there` : "No hopsesh there: you can bring sessions from it, not send to it") : null,
+    m.status === "ok" ? h("span", { class: m.hopsesh ? "muted" : "warn", style: "font-size:12px" }, m.hopsesh ? `hopsesh ${m.hopsesh}: ${m.receive === false ? "receiving is not approved for this connection" : "you can send sessions there"}` : "No hopsesh there: you can bring sessions from it, not send to it") : null,
     m.status !== "ok" && m.hint ? h("span", { class: "muted", style: "font-size:12px" }, rich(cap(m.hint))) : null,
     error && error !== m.error ? h("span", { class: "err" }, error) : null,
     m.scan?.finished ? h("span", { class: "muted", style: "font-size:11px" }, "Last checked " + when(m.scan.finished)) : null,
@@ -100,10 +81,10 @@ function statusCell(m) {
 }
 
 function machineRow(m) {
-  const login = m.auth === "password" ? (m.keychain ? `Password, in ${sys.vault}` : "Password, asked each time") : "SSH key";
+  const login = m.relay ? "Encrypted relay" : m.auth === "password" ? (m.keychain ? `Password, in ${sys.vault}` : "Password, asked each time") : "SSH key";
   return h("div", { class: "mgrid", "data-machine": m.name, "aria-busy": activeScan(m) ? "true" : "false" },
     h("div", { style: "min-width:0" }, h("div", { style: "font-weight:500" }, m.name), h("div", { class: "mono muted", style: "font-size:11px;overflow-wrap:anywhere" }, m.destination + (m.os ? ` · ${m.os}` : ""))),
-    h("div", {}, h("button", { class: "btn small", title: "How hopsesh logs in to this machine", onclick: () => loginDialog(m) }, login)),
+    h("div", {}, h("button", { class: "btn small", title: "How hopsesh logs in to this machine", onclick: () => m.relay ? go("settings","relay") : loginDialog(m) }, login)),
     statusCell(m),
     h("div", { style: "display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end" },
       h("button", { class: "btn small", disabled: activeScan(m), "aria-label": `${activeScan(m) ? "Scanning" : failedScan(m) ? "Retry scan" : "Scan"} ${m.name}`, onclick: () => scanMachine(m.name) }, activeScan(m) ? "Scanning…" : failedScan(m) ? "Retry scan" : "Scan"),
@@ -248,7 +229,7 @@ function render() {
     } });
   fill(view, h("div", { class: "page" }, h("div", { class: "page-in" },
     h("h1", {}, "Machines"),
-    h("span", { class: "muted" }, "hopsesh connects only to the machines you add, with your own ssh and keys, and only reads your coding agents' session folders until you hop a session."),
+    h("span", { class: "muted" }, "Connect machines using your SSH access or approved Internet delivery. Sharing session information and receiving transfers use the permissions you grant."),
     h("section", { class: "card" }, h("div", { class: "line-item" },
       h("span", { class: "ico push" }, icon(ICONS.here, 15)),
       h("div", { style: "flex:1 1 300px;min-width:0;display:flex;flex-direction:column;gap:3px" },
@@ -259,7 +240,7 @@ function render() {
           h("span", { class: "muted", style: "font-size:12px" }, d.here.receive ? "On: “Send to…” on your other machines can deliver sessions here." : `Off: ${sys.here} refuses sessions sent from other machines.`)),
         receive))),
     h("section", { class: "card" },
-      h("div", { class: "card-h" }, h("div", {}, h("h2", { class: "name" }, "Your machines"), h("div", { class: "muted", style: "font-size:12px" }, "Scanned when added, then every 5 minutes while this page is active. Failed scans wait for Retry.")), h("span", { class: "spacer" }), h("button", { class: "btn small", onclick: addDialog }, icon(ICONS.plus, 12), "Add by address…")),
+      h("div", { class: "card-h" }, h("div", {}, h("h2", { class: "name" }, "Your machines"), h("div", { class: "muted", style: "font-size:12px" }, "While Hopsesh is running, new machines are scanned automatically. SSH machines refresh every 5 minutes; Internet delivery receives shared updates. Connection failures retry with increasing delays. Login or host-key problems need your attention, then Retry.")), h("span", { class: "spacer" }), h("button", { class: "btn small", onclick: addDialog }, icon(ICONS.plus, 12), "Add by address…")),
       d.machines.length ? [h("div", { class: "mgrid h" }, h("span", {}, "Machine"), h("span", {}, "Login"), h("span", {}, "Last scan"), h("span", {})), d.machines.map(machineRow)]
         : h("div", { class: "empty" }, "No machines yet. Add one found below, or by its address.")),
     h("section", { class: "card" },

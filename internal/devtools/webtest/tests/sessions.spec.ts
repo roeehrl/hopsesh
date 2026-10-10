@@ -1,32 +1,37 @@
 import { test, expect, type Page } from "@playwright/test";
-import { fresh, row, menu, details, action } from "./helpers";
+import { fresh, row, menu, details, action, patchScans } from "./helpers";
 
 test.beforeEach(async ({ page }) => fresh(page));
+test.afterEach(async ({ page }) => { await page.unrouteAll({ behavior: "wait" }); });
 
 const sidebar = (page: Page) => page.getByRole("navigation", { name: "Places" });
 const group = (page: Page, name: string | RegExp) => page.locator(".grp").filter({ has: page.locator(".gname").getByText(name) });
 
 test("machine sidebar subtitles show detected agents consistently even without sessions", async ({ page }) => {
-  await page.route("**/call", async route => {
-    if (!["InitialScan", "Scan", "RefreshHere"].includes(route.request().postDataJSON().m)) return route.continue();
-    const response = await route.fetch(), body = await response.json();
-    const local = body.result.machines.find((m: any) => m.local);
-    expect(local.agentNames).toContain("Claude Code");
-    expect(local.agentNames).toContain("Codex");
-    body.result.groups = [];
-    body.result.total = 0;
-    body.result.machines = [local,
+  await patchScans(page, scan => {
+    const local = scan.machines.find((m: any) => m.local);
+    if (!scan.discovering) {
+      expect(local.agentNames).toContain("Claude Code");
+      expect(local.agentNames).toContain("Codex");
+    }
+    scan.groups = [];
+    scan.total = 0;
+    scan.machines = [local,
       { name: "other-mac", local: false, status: "ok", os: "darwin", hopsesh: "0.4.0", sessions: 0, agentNames: ["Claude Code", "Codex"], agents: ["Claude Code 2.1.288", "Codex 0.160.1"] },
       { name: "empty-box", local: false, status: "ok", sessions: 0, agentNames: [], agents: [] },
       { name: "offline-box", local: false, status: "unreachable", error: "Connection timed out", sessions: 4, agentNames: ["Claude Code"], agents: ["Claude Code 2.1.288"] },
     ];
-    await route.fulfill({ json: body });
   });
+  // Reload publishes usable cached/partial machine rows first. Keep the route
+  // alive through InitialScan before teardown checks the final detected agents.
+  const scanned = page.waitForResponse(r => r.url().endsWith('/call') && r.request().postDataJSON()?.m === 'InitialScan');
   await page.reload();
+  expect((await scanned).ok()).toBeTruthy();
+  await expect(page.locator('#fresh')).toContainText('updated');
   await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible();
   const local = sidebar(page).getByRole("button", { name: /^This (Mac|PC|computer)/ });
   const remote = sidebar(page).getByRole("button", { name: /^other-mac/ });
-  await expect(local.locator("small")).toHaveText("Claude Code, Codex");
+  await expect(local.locator("small[title]")).toHaveText("Claude Code, Codex");
   await expect(remote.locator("small")).toHaveText("Claude Code, Codex");
   await expect(remote.locator("small")).toHaveAttribute("title", "Claude Code 2.1.288, Codex 0.160.1");
   await expect(remote).not.toContainText(/darwin|hopsesh 0.4.0/);
@@ -256,16 +261,14 @@ test("a copy left behind offers the newer one, and resuming it anyway", async ({
   await page.keyboard.press("Escape");
 });
 
-test("the list refreshes this machine by itself while the window is in front", async ({ page }) => {
-  await page.clock.install();
+test("filesystem notifications refresh session presence without client polling", async ({ page }) => {
   await page.goto("/");
   await expect(row(page, "Find the codeword")).toBeVisible({ timeout: 30_000 });
   await expect(row(page, "Find the codeword").locator(".chip.st-ended")).toBeVisible();
   const key = await row(page, "Find the codeword").getAttribute("data-key");
   const id = key!.split("\u0000")[1].split("/")[1];
   expect((await page.request.post(`/live?session=${id}&entrypoint=cli`)).ok()).toBeTruthy();
-  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-  await page.clock.fastForward("01:30");
+
   await expect(row(page, "Find the codeword").locator(".chip.st-idle")).toBeVisible({ timeout: 30_000 });
 });
 

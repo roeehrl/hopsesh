@@ -8,8 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
-	"path/filepath"
 
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/journal"
@@ -54,17 +52,11 @@ func applyCloudOperation(ctx context.Context, p *Plan, in Input, env Env) (*Resu
 	}{p.Kind, p.Key.String(), source, target, version, account, opt})
 	sum := sha256.Sum256(body)
 	intent := hex.EncodeToString(sum[:])
-	if err := os.MkdirAll(filepath.Dir(operationPath(env, p.OperationID)), 0700); err != nil {
-		return nil, err
-	}
-	lock, err := os.OpenFile(operationPath(env, p.OperationID)+".lock", os.O_CREATE|os.O_RDWR, 0600)
+	lock, err := lockOperation(env.StateDir, p.OperationID)
 	if err != nil {
-		return nil, err
-	}
-	defer lock.Close()
-	if err = lockOperationFile(lock); err != nil {
 		return nil, fmt.Errorf("cloud operation is already being applied: %w", err)
 	}
+	defer lock.Close()
 	stored, err := operationLoad(env, p.OperationID)
 	if err == nil {
 		if stored.Intent != intent {

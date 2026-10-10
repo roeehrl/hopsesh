@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 	"unicode/utf16"
+
+	"github.com/roeehrl/hopsesh/internal/core/proc"
 )
 
 // The test binary is the stand-in git when HOPSESH_TEST_REAL_GIT is set.
@@ -39,6 +41,9 @@ func standInGit(real string) int {
 	for _, a := range os.Args[1:] {
 		switch {
 		case strings.Contains(a, "offloaded"):
+			if marker := os.Getenv("HOPSESH_TEST_PROBE_PID"); marker != "" {
+				_ = os.WriteFile(marker, []byte(strconv.Itoa(os.Getpid())), 0600)
+			}
 			time.Sleep(time.Minute)
 			return 1
 		case strings.Contains(a, "busy"):
@@ -102,6 +107,7 @@ func slowWorld(t *testing.T) slowFolders {
 	t.Cleanup(func() { _ = os.RemoveAll(bin) })
 	old := ProbeTimeout
 	t.Cleanup(func() { ProbeTimeout = old })
+	probePath := os.Getenv("PATH")
 	if runtime.GOOS == "windows" {
 		self, err := os.Executable()
 		if err != nil {
@@ -110,7 +116,21 @@ func slowWorld(t *testing.T) slowFolders {
 		copyFile(t, self, filepath.Join(bin, "git.exe"))
 		t.Setenv("HOPSESH_TEST_REAL_GIT", real)
 		t.Setenv("HOPSESH_TEST_GIT_LOG", w.log)
+		// Each stand-in is this race-instrumented test binary. Its default
+		// one-second exit sleep is not Git latency and accumulates per probe.
+		t.Setenv("GORACE", strings.TrimSpace(os.Getenv("GORACE")+" atexit_sleep_ms=0"))
 		ProbeTimeout = 15 * time.Second // the stand-in is a large program, started for every call
+		// From PowerShell, findSh can resolve Git/bin/sh.exe, a wrapper that
+		// prepends the real Git and defeats this fixture's PATH injection.
+		// Use its actual sibling shell, as a Git Bash parent already does.
+		sh, err := findSh()
+		if err != nil {
+			t.Fatal(err)
+		}
+		direct := filepath.Join(filepath.Dir(sh), "..", "usr", "bin")
+		if info, err := os.Stat(filepath.Join(direct, "sh.exe")); err == nil && !info.IsDir() {
+			probePath = direct + string(os.PathListSeparator) + probePath
+		}
 	} else {
 		script := "#!/bin/sh\ncase \"$*\" in *offloaded*) exec sleep 60 ;; *busy*) sleep 0.5 ;; esac\nexec '" + real + "' \"$@\"\n"
 		if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o700); err != nil {
@@ -118,7 +138,7 @@ func slowWorld(t *testing.T) slowFolders {
 		}
 		ProbeTimeout = 2 * time.Second
 	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+probePath)
 	return w
 }
 
@@ -242,5 +262,30 @@ func TestProbeScriptsCarryTheLimit(t *testing.T) {
 	}
 	if strings.Contains(sh, "@LIMIT@") || strings.Contains(ps, "@LIMIT@") || strings.Contains(sh, "@EXCLUDES@") || strings.Contains(ps, "@EXCLUDES@") {
 		t.Fatal("a placeholder was left")
+	}
+}
+
+// Fault-inject the lost TERM observed when a fast folder finishes while its
+// watchdog is still installing the signal handler. Completion must not depend
+// solely on that signal or consume the whole Git inactivity deadline.
+func TestProbeWatchdogRecognizesCompletedFolderWithoutSignal(t *testing.T) {
+	script, args := ProbeScript([]string{filepath.Join(t.TempDir(), "missing")}, nil, 30*time.Second)
+	script = "kill() { case \"$1\" in -9) command kill \"$@\" ;; *) return 0 ;; esac; }\n" + script
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	sh, err := findSh()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := proc.CommandContext(ctx, sh, append([]string{"-c", script, "probe-test"}, args[1:]...)...)
+	configureProbeCancellation(cmd)
+	cmd.WaitDelay = time.Second
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("completed folder waited for the inactivity deadline: %v", err)
+	}
+	states := ParseProbe(out, nil)
+	if len(states) != 1 || states[0].Exists || states[0].Error != "" {
+		t.Fatalf("missing folder result changed: %+v", states)
 	}
 }

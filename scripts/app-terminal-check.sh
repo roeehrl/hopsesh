@@ -11,6 +11,11 @@ cd "$(dirname "$0")/.."
 WORK=$(mktemp -d "${RUNNER_TEMP:-/tmp}/hsterm.XXXXXX")
 go build -tags e2e -o "$WORK/hopsesh-app" ./cmd/hopsesh-app
 go build -o "$WORK/termprobe" ./internal/devtools/termprobe
+# Match the other native-window checks: settings alone do not isolate vendor
+# discovery. Prepare a disposable agent home and remove real agents from PATH
+# after building, before any window can start its background scans.
+go run ./internal/devtools/webtest -home "$WORK/home" -prepare > "$WORK/env.json"
+eval "$(jq -r 'to_entries[] | "export \(.key)=\(.value | @sh)"' "$WORK/env.json")"
 for placement in ${HOPSESH_E2E_TERMINAL_PLACEMENT:-separate bottom right}; do
 mkdir -p "$WORK/$placement/config" "$WORK/$placement/state"
 export HOPSESH_E2E_TERMINAL_PLACEMENT="$placement"

@@ -237,7 +237,10 @@ func (res *Result) history(r Request, nodes []ir.Node) []ir.Item {
 		lastKind = kind
 	}
 	for _, n := range nodes {
-		if n.Generated && !r.IncludeGenerated {
+		// Verified handoff context can represent earlier authored revisions.
+		// Keep that representation on subsequent moves; discard only generated
+		// scaffolding with no inherited coverage unless explicitly requested.
+		if n.Generated && !r.IncludeGenerated && len(n.Coverage) == 0 {
 			continue
 		}
 		switch n.Kind {

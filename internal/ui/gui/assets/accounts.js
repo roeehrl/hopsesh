@@ -6,18 +6,62 @@ const localMachine=name=>(state.scan?.machines||[]).some(m=>m.local&&m.name===na
 const byMachine=(a,b)=>Number(localMachine(b))-Number(localMachine(a))||a.localeCompare(b);
 const text=(p)=>[p.name,p.agent,p.machine,p.root,p.account?.email,...(p.tags||[])].join(' ').toLowerCase();
 const status=p=>p.error ? `Check failed: ${p.error}${p.account?.email ? " · Last known: "+p.account.email : ""}` : !p.account ? 'Not checked yet' : `${p.account.loggedIn ? "Signed in · "+(p.account.email || p.account.label || p.account.provider || "Account name unavailable") : p.identitySource==='ssh' ? "No sign-in visible over SSH · Sign-in on the machine may differ" : 'Signed out'}${p.stale ? ' · Last known' : ''}`;
-async function check(p){if(checking.has(p.id))return;lastAttempt.set(p.id,Date.now());checking.add(p.id);render();try{await api('RefreshAccount',p.id);state.scan=await api('ScanSnapshot');await reload()}catch(e){problem=errText(e);await reload()}finally{checking.delete(p.id);if(current==='accounts')render()}}
-on('hopsesh:accounts',()=>{reload().catch(fail)});
-let refreshing=false;
-setInterval(async()=>{if(current!=='accounts'||document.hidden||refreshing||busy||document.querySelector('dialog[open]'))return;refreshing=true;try{const result=await api('Accounts');if(JSON.stringify(result)!==JSON.stringify(accounts)){accounts=result;render()}}catch{}finally{refreshing=false}},2000);
+async function check(p){if(checking.has(p.id))return;lastAttempt.set(p.id,Date.now());checking.add(p.id);render();try{await api('RefreshAccount',p.id);state.scan=await api('ScanSnapshot');await reload()}catch(e){problem=errText(e);await reload()}finally{checking.delete(p.id);if(current==='accounts')render();scheduleUpdate()}}
 
-// Refresh stale sign-in metadata one profile at a time. Watcher-driven local
-// scans must not starve remote identities; failed checks retry after five minutes.
-setInterval(()=>{if(current!=='accounts'||document.hidden||busy||checking.size||scanningMachines.size||document.querySelector('dialog[open]')||document.activeElement?.matches('input,select'))return;const p=accounts.find(p=>p.stale&&Date.now()-(lastAttempt.get(p.id)||0)>=300000);if(p)check(p).catch(fail)},15000);
+// Source publications replace the former two-second account reads. Keep one
+// pending read/render while typing, clicking, or reviewing an account dialog.
+let needsRead=false,needsRender=false,refreshing=false,updateTimer=0,checkTimer=0,checkDue=0,pointerHeld=false;
+const visible=()=>current==='accounts'&&!document.hidden;
+const interacting=()=>busy||checking.size||scanningMachines.size||pointerHeld||!!document.querySelector('dialog[open]')||document.activeElement?.matches('input,select,textarea,[contenteditable="true"]');
+function scheduleUpdate(){
+ if(!visible()){clearTimeout(checkTimer);checkTimer=0;return}
+ if(!updateTimer)updateTimer=setTimeout(update,100);
+}
+function requestUpdate(){needsRead=true;scheduleUpdate()}
+async function update(){
+ updateTimer=0;
+ if(!visible()||interacting()||refreshing){scheduleCheck();return}
+ if(needsRead){
+  needsRead=false;refreshing=true;
+  try{await reload(true)}catch(e){fail(e)}finally{refreshing=false}
+ }
+ if(visible()&&!interacting()&&needsRender){needsRender=false;render()}
+ scheduleCheck();
+ if(needsRead&&!interacting())scheduleUpdate();
+}
+const due=p=>Math.max((Date.parse(p.checkedAt)||0)+300000,(lastAttempt.get(p.id)||0)+300000);
+function scheduleCheck(){
+ if(!visible()||interacting()||!accounts.length){clearTimeout(checkTimer);checkTimer=0;return}
+ if(refreshing)return;
+ const next=Math.min(...accounts.map(due));
+ if(checkTimer&&checkDue===next)return;
+ clearTimeout(checkTimer);checkDue=next;
+ // Stale sign-in checks remain foreground actions, one profile at a time.
+ // Sleep until the next actual expiry; no timer runs on another screen.
+ checkTimer=setTimeout(()=>{
+  checkTimer=0;
+  if(!visible()||interacting())return;
+  const p=accounts.find(p=>due(p)<=Date.now());
+  if(p)check(p).catch(fail);else scheduleCheck();
+ },Math.max(15000,next-Date.now()));
+}
+for(const event of ['hopsesh:accounts','hopsesh:runtime','hopsesh:discovery'])on(event,requestUpdate);
+document.addEventListener('pointerdown',()=>{pointerHeld=true},true);
+for(const event of ['pointerup','pointercancel'])window.addEventListener(event,()=>{pointerHeld=false;scheduleUpdate()},true);
+for(const event of ['click','keyup','focusout','close','visibilitychange','hopsesh:navigation'])document.addEventListener(event,scheduleUpdate,true);
+window.addEventListener('focus',requestUpdate);
 
 let read=0;
-async function reload(){const n=++read,visit=navigationID();const result=await api('Accounts');if(n!==read||visit!==navigationID())return;accounts=result;if(current==='accounts')render();}
-async function scan(){if(busy)return;busy=true;problem='';render();try{state.scan=await api('ScanAccounts');state.stale=false;await reload();}catch(e){problem=errText(e)}finally{busy=false;if(current==='accounts')render()}}
+async function reload(background=false){
+ if(!background)needsRead=false;
+ const n=++read,visit=navigationID();const result=await api('Accounts');
+ if(n!==read||visit!==navigationID())return;
+ const changed=JSON.stringify(result)!==JSON.stringify(accounts);accounts=result;
+ if(background){needsRender ||= changed}
+ else{needsRender=false;if(current==='accounts')render()}
+ scheduleCheck();
+}
+async function scan(){if(busy)return;busy=true;problem='';render();try{state.scan=await api('ScanAccounts');state.stale=false;await reload();}catch(e){problem=errText(e)}finally{busy=false;if(current==='accounts')render();scheduleUpdate()}}
 function editor(p){
  const dlg=document.createElement('dialog');dlg.className='account-editor';
  const name=h('input',{class:'field',value:p?.name||'',required:true,maxlength:120});
@@ -47,11 +91,15 @@ function accountGroup(name,ps,m=null){
  const local=machine&&localMachine(name), setup=!!m?.accountSetupRequired;
  const label=local?`${sys.Here} · ${name}`:name;
  return h('details',{class:'account-group','data-group':k,open:expanded.get(k)??!setup,ontoggle:ev=>{if(ev.target.isConnected)expanded.set(k,ev.target.open)}},
-  h('summary',{},h('span',{},label),h('span',{class:setup?'pill warn':'muted'},setup?'Account setup required':`${ps.length} account${ps.length===1?'':'s'}`),machine?h('button',{class:'btn small',disabled:busy||scanningMachines.has(name),onclick:async ev=>{ev.preventDefault();ev.stopPropagation();scanningMachines.add(name);render();try{if(local)state.scan=await api('RefreshHere');else{await api('ScanMachine',name);state.scan=await api('ScanSnapshot')}state.stale=false;await reload()}catch(e){problem=errText(e)}finally{scanningMachines.delete(name);if(current==='accounts')render()} }},scanningMachines.has(name)?'Scanning…':'Scan this machine'):null),
+  h('summary',{},h('span',{},label),h('span',{class:setup?'pill warn':'muted'},setup?'Account setup required':`${ps.length} account${ps.length===1?'':'s'}`),machine?h('button',{class:'btn small',disabled:busy||scanningMachines.has(name),onclick:async ev=>{ev.preventDefault();ev.stopPropagation();scanningMachines.add(name);render();try{if(local)state.scan=await api('RefreshHere');else{await api('ScanMachine',name);state.scan=await api('ScanSnapshot')}state.stale=false;await reload()}catch(e){problem=errText(e)}finally{scanningMachines.delete(name);if(current==='accounts')render();scheduleUpdate()} }},scanningMachines.has(name)?'Scanning…':'Scan this machine'):null),
   ps.length?h('div',{class:'account-grid'},ps.map(row)):null,setup?setupNotice(m):null);
 }
 function render(){
  if(current!=='accounts')return;
+ // Native details toggles dispatch their event asynchronously. Capture the
+ // actual open state before replacing nodes so a scan/filter cannot lose a
+ // just-completed collapse while its old toggle event is still queued.
+ for(const el of view.querySelectorAll('.account-group'))expanded.set(el.dataset.group,el.open);
  const tagNames=new Map();for(const p of accounts)for(const t of p.tags||[])if(!tagNames.has(t.toLowerCase()))tagNames.set(t.toLowerCase(),t);
  const tags=[...tagNames.values()].sort((a,b)=>a.localeCompare(b));
  const visible=[...accounts].sort((a,b)=>byMachine(a.machine||'',b.machine||'')||a.name.localeCompare(b.name)).filter(p=>text(p).includes(query.toLowerCase())&&(!tag||(tag==='__untagged'?!p.tags?.length:p.tags?.some(t=>t.toLowerCase()===tag.toLowerCase()))));

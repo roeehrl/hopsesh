@@ -59,6 +59,29 @@ test('dock transfer preserves screen and rejects old view capability',async({pag
  const old=await page.request.get(ws.url);expect(old.status()).toBe(403);
 });
 
+test('background session repaint preserves input focus inside the docked terminal',async({page,context})=>{
+ await page.request.post('/terminal-test/open?title=Typing%20during%20discovery');
+ const ws=await page.evaluate(async()=> (await import('/core.js')).api('TerminalWorkspace'));
+ const detached=await context.newPage();await detached.goto(ws.url+'&renderer=dom');
+ await expect.poll(()=>detached.evaluate(()=>window.hopseshTerminal?.text())).toContain('termfake: ready');
+ await detached.getByLabel('Terminal placement').selectOption('bottom');
+ const embedded=page.frameLocator('#terminal-workspace iframe');
+ await expect(embedded.locator('.term')).toBeVisible();
+ await expect(embedded.locator('#connection')).toBeHidden();
+ const screen=()=>embedded.locator('.term').evaluate(()=>window.hopseshTerminal?.text());
+ await expect.poll(screen).toContain('termfake: ready');
+ const input=embedded.locator('.term:not([hidden]) .xterm-helper-textarea');
+ await input.focus();await page.keyboard.type('before refresh ');
+ const content=await page.locator('#view .content').elementHandle();
+ await page.evaluate(async()=> (await import('/sessions.js')).backgroundRender());
+ await expect.poll(()=>content!.evaluate(el=>el.isConnected)).toBe(false);
+ // The parent document sees the iframe as active. Focusing that same iframe
+ // again blurs its actual input, silently discarding the rest of a typed line.
+ await expect(input).toBeFocused();
+ await page.keyboard.type('after refresh');await page.keyboard.press('Enter');
+ await expect.poll(screen).toContain('typed=before refresh after refresh');
+});
+
 test('alternate screen, cursor, PID and later input survive repeated dock and detach',async({page,context})=>{
  await page.request.post('/terminal-test/open?title=Full%20screen');
  const workspace=()=>page.evaluate(async()=> (await import('/core.js')).api('TerminalWorkspace'));
@@ -110,23 +133,32 @@ test('failed replacement keeps the source usable and composing text postpones a 
  await expect.poll(()=>detached.evaluate(()=>window.hopseshTerminal?.text())).toContain('typed=still here');
 });
 
-test('presence refresh during a press does not swallow the shell grouping menu',async({page})=>{
+test('shared observation during a press does not swallow the shell grouping menu',async({page})=>{
  await page.request.post('/terminal-test/open?title=Build%20shell&kind=shell');
+ // The cached list is interactive before InitialScan finishes. Quick snapshots
+ // are intentionally ignored during that explicit scan; qualify the subsequent
+ // background repaint instead of racing the startup ownership boundary.
+ await expect.poll(()=>page.evaluate(async()=>{
+  const {state}=await import('/core.js');return !state.scanning&&!state.scan?.discovering;
+ })).toBe(true);
  await row(page,'Find the codeword').click();
  let release!:()=>void;
  const responseGate=new Promise<void>(resolve=>release=resolve);
  let reached!:()=>void;
  const requested=new Promise<void>(resolve=>reached=resolve);
  await page.route('**/call',async route=>{
-  if(route.request().postDataJSON().m!=='Presence')return route.continue();
+  if(route.request().postDataJSON().m!=='QuickSnapshot')return route.continue();
   reached();await responseGate;
-  await route.fulfill({json:{result:{entries:{'test-presence':[]}}}});
+  const response=await route.fetch();const body=await response.json();
+  body.result.presence={entries:{'test-presence':[]}};
+  await route.fulfill({json:body});
  });
- await page.evaluate(()=>window.dispatchEvent(new Event('focus')));
+ await page.evaluate(()=>window.__emit('hopsesh:quick',null));
  await requested;
  const button=page.getByRole('button',{name:'More actions',exact:true});
- const box=await button.boundingBox();
- await page.mouse.move(box!.x+box!.width/2,box!.y+box!.height/2);
+ // Resolve a stable action target after any already-scheduled repaint. A
+ // separate visibility check and bounding-box read race that earlier repaint.
+ await button.hover();
  await page.mouse.down();release();
  await expect.poll(()=>page.evaluate(async()=>Boolean((await import('/core.js')).state.presence['test-presence']))).toBe(true);
  await page.mouse.up();

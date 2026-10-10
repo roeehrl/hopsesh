@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -50,6 +51,24 @@ func probeLock(p string) agent.LockState {
 	}
 	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 	return agent.LockFree
+}
+
+func (localLocks) Holders(ctx context.Context, paths []string) (map[string][]int, error) {
+	out := map[string][]int{}
+	for _, p := range paths {
+		switch probeLock(p) {
+		case agent.LockFree:
+			continue
+		case agent.LockUnknown:
+			return nil, fmt.Errorf("%w: cannot determine holders of lock %q", agent.ErrUnsupported, p)
+		}
+		pids, err := lockHolders(ctx, p)
+		if err != nil {
+			return nil, err
+		}
+		out[p] = pids
+	}
+	return out, nil
 }
 
 // lockHolders finds the processes holding a lock on p: from /proc/locks on Linux (by the

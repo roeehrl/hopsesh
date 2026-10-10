@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -28,14 +27,11 @@ type world struct {
 }
 
 func newWorld(t *testing.T) *world {
-	if runtime.GOOS == "windows" {
-		t.Skip("the pre-receive hook and the fixtures assume a POSIX shell")
-	}
 	dir := t.TempDir()
 	w := &world{t: t, home: filepath.Join(dir, "home"), store: filepath.Join(dir, "cloud"), log: filepath.Join(dir, "agents.log")}
 	w.repo = filepath.Join(w.home, "git", "demo")
 	gitConfig := filepath.Join(dir, "gitconfig")
-	w.vars = map[string]string{"HOME": w.home, "FAKE_CLOUD_DIR": w.store, "FAKE_AGENT_LOG": w.log, "GIT_CONFIG_GLOBAL": gitConfig,
+	w.vars = map[string]string{"HOME": w.home, "USERPROFILE": w.home, "FAKE_CLOUD_DIR": w.store, "FAKE_AGENT_LOG": w.log, "GIT_CONFIG_GLOBAL": gitConfig,
 		"GIT_CONFIG_NOSYSTEM": "1", "GIT_AUTHOR_NAME": "Sam Doe", "GIT_AUTHOR_EMAIL": "sam@example.com",
 		"GIT_COMMITTER_NAME": "Sam Doe", "GIT_COMMITTER_EMAIL": "sam@example.com", "CLAUDE_CONFIG_DIR": "",
 		"CLAUDE_CODE_CHILD_SESSION": "", "ANTHROPIC_API_KEY": ""} // the tests may run inside an agent's session
@@ -112,6 +108,27 @@ func TestOriginKeepsTheGitHubIdentity(t *testing.T) {
 	}
 	if url := w.git("ls-remote", "--get-url", "origin"); !strings.HasPrefix(url, "file://") {
 		t.Fatalf("git must reach the bare repository, got %s", url)
+	}
+}
+
+// Git invokes the fixture hook itself, including Git for Windows' bundled
+// shell. Missing/broken hook execution must fail qualification, never skip it.
+func TestOriginRefusedPushPreservesRemoteRef(t *testing.T) {
+	w := newWorld(t)
+	before := w.git("ls-remote", "origin", "refs/heads/main")
+	w.git("commit", "-q", "--allow-empty", "-m", "new work")
+	t.Setenv("FAKE_CLOUD_FAIL", "push-refused")
+	_, err := git(nil, w.repo, "push", "origin", "main")
+	if err == nil || !strings.Contains(err.Error(), "refused: branch protection (fake)") {
+		t.Fatal("fixture hook did not explicitly refuse the push", err)
+	}
+	if after := w.git("ls-remote", "origin", "refs/heads/main"); after != before {
+		t.Fatal("refused push changed the remote branch")
+	}
+	t.Setenv("FAKE_CLOUD_FAIL", "")
+	w.git("push", "-q", "origin", "main")
+	if after := w.git("ls-remote", "origin", "refs/heads/main"); after == before || !strings.HasPrefix(after, w.git("rev-parse", "HEAD")) {
+		t.Fatal("approved retry did not publish the exact local commit")
 	}
 }
 

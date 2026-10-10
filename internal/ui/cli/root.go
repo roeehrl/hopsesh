@@ -4,6 +4,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/spf13/cobra"
 
@@ -43,11 +44,30 @@ Unofficial; not affiliated with or endorsed by Anthropic or OpenAI.`,
 			return r.runTUI()
 		},
 	}
+	root.PersistentFlags().String("config-dir", "", "use this settings namespace")
+	root.PersistentFlags().String("state-dir", "", "use this state namespace")
+	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
+		for _, item := range []struct{ flag, env string }{{"config-dir", "HOPSESH_CONFIG_DIR"}, {"state-dir", "HOPSESH_STATE_DIR"}} {
+			if cmd.Flags().Changed(item.flag) {
+				value, err := cmd.Flags().GetString(item.flag)
+				if err != nil {
+					return err
+				}
+				if value == "" {
+					return fmt.Errorf("%s cannot be empty", item.flag)
+				}
+				if err := os.Setenv(item.env, value); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
 	root.PersistentFlags().Bool("password-stdin", false, "for machines that log in with a password: read it from standard input (for scripts)")
 	root.SetOut(out)
 	root.SetErr(out)
 	root.AddCommand(
-		versionCmd(), updateCmd(), accountsCmd(), agentsCmd(), hostsCmd(), cloudsCmd(), trustCmd(), doctorCmd(),
+		versionCmd(), updateCmd(), accountsCmd(), agentsCmd(), hostsCmd(), cloudsCmd(), trustCmd(), doctorCmd(), runtimeCmd(), settingsCmd(), appCmd(), relayCmd(), cloudIntegrationCmd(),
 		lsCmd(), showCmd(), archiveCmd(), lineageCmd(), pullCmd(), planCmd(), pushCmd(), handoffCmd(), followupCmd(), receiveCmd(), peerCmd(), undoCmd(), skillCmd(), noticesCmd(), noticeHookCmd(),
 		openCmd(), terminalsCmd(), terminalStepCmd(), terminalOpenCmd(),
 	)

@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { fresh, row, menu, action, details } from "./helpers";
+import { fresh, row, menu, action, patchScans, details } from "./helpers";
 
 test.beforeEach(async ({ page }) => fresh(page));
 
@@ -93,18 +93,18 @@ test("sending the first message is explicit and does not claim observed work", a
 // names the destination PC; a local-only locator waits forever on that menu.
 test("remote continuation names this PC and retains its source when planning", async ({ page }) => {
   await page.evaluate(async () => {
-    const { state, setSystem } = await import(/* @vite-ignore */ '/core.js');
-    const { render } = await import(/* @vite-ignore */ '/sessions.js');
+    const { setSystem } = await import(/* @vite-ignore */ '/core.js');
     setSystem('windows', 'Windows Terminal');
-    const entry = state.scan.groups.flatMap(g => g.entries).find(e => e.title === 'Find the codeword');
+  });
+  await patchScans(page, scan => {
+    const entry = scan.groups.flatMap(g => g.entries).find(e => e.title === 'Find the codeword');
     entry.machine = 'remote-fixture';
-    state.scan.machines.push({ name: 'remote-fixture', local: false, status: 'ok', agents: ['claude'] });
-    render();
+    if (!scan.machines.some(m => m.name === 'remote-fixture')) scan.machines.push({ name: 'remote-fixture', local: false, status: 'ok', agents: ['claude'] });
   });
   await page.route('**/call', async route => {
     const request = route.request().postDataJSON();
     if (request.m === 'Plan') return route.fulfill({ json: { error: 'Remote plan captured for regression test' } });
-    return route.continue();
+    return route.fallback();
   });
   await row(page, 'Find the codeword').click();
   await page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'Move', exact: true }).click();
@@ -131,7 +131,11 @@ test("bounded recovery keeps the original and explains capacity and archive", as
   await sheet.getByRole("button", {name: /Continue in Claude Code/}).click();
   await expect(page.getByRole("heading", {name: /is prepared for Claude Code/})).toBeVisible();
   await expect(page.getByText("Claude Code session written", {exact: true})).toBeVisible();
+  // Early discovery preserves the inspected original while this same-agent
+  // family is reconciled. Assert its final representative after the requested scan.
+  const refreshed = page.waitForResponse(r => r.url().endsWith('/call') && r.request().postDataJSON()?.m === 'Scan');
   await page.getByRole("button", {name: /Back to sessions/}).click();
+  expect((await refreshed).ok()).toBeTruthy();
   await expect(row(page, "Find the codeword (from Claude Code)")).toBeVisible();
 });
 
@@ -147,12 +151,9 @@ test("oversized note is bounded and disclosed before apply", async ({ page }) =>
 });
 
 test("a recorded context error offers bounded recovery in session details", async ({ page }) => {
-  await page.evaluate(async () => {
-    const { state } = await import(/* @vite-ignore */ '/core.js');
-    const { render } = await import(/* @vite-ignore */ '/sessions.js');
-    const entry = state.scan.groups.flatMap(g => g.entries).find(e => e.title === 'Find the codeword');
+  await patchScans(page, scan => {
+    const entry = scan.groups.flatMap(g => g.entries).find(e => e.title === 'Find the codeword');
     entry.contextOverflow = true;
-    render();
   });
   await row(page, 'Find the codeword').click();
   const details = page.getByRole('complementary', { name: 'Session details' });

@@ -3,15 +3,113 @@ package app
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/peer"
 )
+
+func TestPushRevalidatesBrowsingSourceBeforeConnecting(t *testing.T) {
+	for _, scenario := range []string{"cached", "hostless", "discovering", "deleted"} {
+		t.Run(scenario, func(t *testing.T) {
+			a := catalogApp(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			inv := a.Scan(ctx, ScanOptions{NoCache: true, SkipGit: true})
+			defer inv.Close()
+			var e Entry
+			for _, candidate := range inv.Entries {
+				if candidate.Agent == "claude" {
+					e = candidate
+					break
+				}
+			}
+			if e.Session.Path == "" {
+				t.Fatal("missing fixture session")
+			}
+			original := e.Session
+			if scenario == "deleted" {
+				if err := os.Remove(filepath.FromSlash(original.Path)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			e.Session.Title = "stale browsing title"
+			e.Session.Path = filepath.Join(t.TempDir(), "stale-path.jsonl")
+			switch scenario {
+			case "cached", "deleted":
+				e.Cached = true
+			case "hostless":
+				inv.Local().host = nil
+			case "discovering":
+				inv.Discovering = true
+			}
+			requests := make(chan peer.PlanRequest, 1)
+			dials := 0
+			a.PeerDial = func(ctx context.Context, _ config.Host) (*PeerConn, error) {
+				dials++
+				cr, sw := io.Pipe()
+				sr, cw := io.Pipe()
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					defer sw.Close()
+					_ = peer.Serve(ctx, sr, sw, func(_ context.Context, method string, raw json.RawMessage) (any, error) {
+						switch method {
+						case peer.MethodHello:
+							return peer.HelloReply{Protocol: peer.Protocol, Receive: true, Agents: []peer.AgentInfo{{ID: "claude", Present: true}}}, nil
+						case peer.MethodPlan:
+							var req peer.PlanRequest
+							if err := json.Unmarshal(raw, &req); err != nil {
+								return nil, err
+							}
+							requests <- req
+							return peer.PlanReply{Plan: &move.Plan{}}, nil
+						default:
+							return nil, errors.New("unexpected peer method")
+						}
+					})
+				}()
+				return &PeerConn{Out: cr, In: cw, Close: func() {
+					_ = cw.Close()
+					_ = sr.Close()
+					_ = cr.Close()
+					<-done
+				}}, nil
+			}
+			p, err := a.StartPush(ctx, inv, e, config.Host{Name: "destination"}, "claude", move.Options{})
+			if p != nil {
+				defer p.Close()
+			}
+			if scenario == "deleted" {
+				if err == nil || !strings.Contains(err.Error(), "no longer available") || dials != 0 {
+					t.Fatal("deleted source was not rejected before connecting", err, dials)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case req := <-requests:
+				if req.Package.Session.Key != original.Key || req.Package.Session.Path != original.Path || req.Package.Session.Title != original.Title || len(req.Package.Files) == 0 || p.source.Machine == nil {
+					t.Fatal("push did not bind the freshly validated native source", req.Package.Session)
+				}
+			case <-ctx.Done():
+				t.Fatal("no package reached the peer")
+			}
+			p.Close()
+			p.Close() // owned refresh and peer close exactly once
+		})
+	}
+}
 
 // hopsesh peer starts directly in the form the Windows machine's ssh shell takes.
 func TestPeerCommandWindows(t *testing.T) {

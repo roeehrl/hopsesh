@@ -56,7 +56,8 @@ type movementObservation struct {
 
 // EnrichMovement joins receipt metadata and observes native content in memory. It
 // never writes remote files or alters journaled sidecars during a scan.
-func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
+func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) { a.enrichMovement(ctx, inv, false) }
+func (a *App) enrichMovement(ctx context.Context, inv *Inventory, passive bool) {
 	graphs := map[string]*lineage.Manifest{}
 	invalid := map[string]bool{}
 	for _, e := range inv.Entries {
@@ -103,6 +104,9 @@ func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
 			}
 			h, err := m.host.For(ctx, mod.Spec(), in, nil)
 			if err == nil {
+				if passive {
+					h = observationHost{h}
+				}
 				seg, readErr := a.readMovementSegment(ctx, reader, h, in, *e, m.host.Facts.Endpoint)
 				if readErr == nil {
 					observation.agentAnchors = map[string]bool{}

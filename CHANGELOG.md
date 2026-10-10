@@ -8,16 +8,169 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Shared background runtime for desktop, TUI and headless CLI hosts, with private
+  same-user IPC, one observer/scheduler, coalesced filesystem notifications and
+  cached source freshness. Runtime health, settings and per-user login startup
+  can be administered from the CLI without opening a graphical app.
+- Detect, review and install a missing desktop app from the CLI using verified
+  release manifests. Existing apps retain their updater path, with interrupted
+  publication/rollback and concurrent-install protection.
+- Experimental recipient-encrypted internet delivery for approved machines,
+  including push/pull, repository-scoped receiving/sharing, offline queues,
+  durable receipts, recovery and undo. Repeated returns, multi-hop journeys and
+  independent forks retain the same causal lineage across SSH and relay routes.
+- Separate experimental relay and signed-download services with scoped device
+  authorization, admission/storage quotas, logical expiry, asynchronous ciphertext
+  cleanup, bounded diagnostics and operator pause controls.
+
+- Link a logical cloud task to a verified saved handoff in Settings or the CLI.
+  Original ancestry and briefing context survive later checkpoints and agent
+  changes; explicit cloud forks keep independent branches and trip counts.
+  Identity associations appear in journey history without counting a transfer.
+
+- Paired native machines publish approved inventory changes through the shared
+  encrypted relay connection. Idle renewals replace repeated remote scans;
+  source timestamps, expiry, pause state and current approvals remain explicit.
+
+- Review and install cloud startup files from Settings or the CLI. Claude's
+  cloud-only hook prepares fresh keys quietly; Codex setup includes reviewed
+  repository guidance and optional environment Start skill instructions with an
+  explicit unqualified-startup status. Missing task identity remains unsupported.
+  Existing settings and unrelated repository instructions are preserved, modified files are
+  refused, and stale previews cannot overwrite concurrent edits.
+
+- Cloud session invitations in CLI and Settings: admit one fresh provider/session
+  incarnation, check provisional claim status and revoke its delivery lease.
+  Independent fingerprint approval still controls sharing; rebuilds and forks
+  use fresh invitations. Retry preserves the original scoped credential.
+
+- Optional relay browser approval: desktop uses an external browser with S256 PKCE
+  and a temporary loopback callback; headless machines use `hopsesh relay login`
+  with a short-lived code. Approval grants delivery only, separate from local
+  conversation sharing and receiving. Private credentials stay in local state.
+- Passive `hopsesh runtime observe` snapshots and `--watch` subscriptions do not
+  initialize accounts, probe login, adopt imports or apply movement marks.
+- Explicit logical cloud task continuity across approved resumes and rebuilds.
+  Fresh keys and owner-signed generations supersede old connector access while
+  verified native prefixes preserve checkpoint lineage. Checkpoint forks remain
+  separate, and private change notifications shut down superseded connectors.
+
 - Saved session metadata appears immediately in GUI, Quick access, TUI and
   `hopsesh ls --cached`, with progressive discovery, independent source retries,
   private summary caching and reconciled local file notifications.
 - Session account labels and grouping across GUI, TUI and CLI. Account groups
   include retained source copies after a move and keep same-email profiles separate.
 
+### Changed
+
+- Configuration uses schema 5. Schema 4 files from 0.4 are refused rather than
+  migrated. The app can preserve the incompatible file as a backup and start
+  fresh; accounts, machines and approvals must be configured again. Resetting
+  configuration does not remove native conversation files.
+
 ### Fixed
 
-- GUI and TUI background scans keep independent settings snapshots, preventing
-  cloud settings changes from corrupting catalog keys or crashing active scans.
+- Progressive default-account registration replaces the original local session
+  row instead of temporarily showing it twice. TUI selection follows that same
+  native file through partial scans, completed scans and runtime updates;
+  explicit accounts and ambiguous bindings remain separate.
+
+- Keep an explicitly inspected family copy visible through account enrichment
+  and refresh, without duplicating it in account groups. A completed transfer
+  releases source inspection so the destination family is visible on return.
+
+- Relay recovery no longer inherits the slow healthy-idle polling interval after
+  a transient failure. Consecutive failures retain bounded jitter and server
+  retry delays; HTTP status errors identify the failed operation safely.
+
+- Cloud connectors stop when their task association changes or their state
+  directories move, preserving supersession checks without polling. Watchers
+  subscribe before reading task metadata so startup cannot miss a scope change.
+
+- Cloud task lookup rejects a copied or corrupted current-session pointer that
+  refers to another provider, session or workspace, instead of returning that
+  task's identity. Lookup remains read-only and preserves independent forks.
+
+- Quick access keeps a local session selectable and previewable when first-time
+  account discovery registers its default account. Explicit account selections
+  remain exact; uncertain or ambiguous matches are refused, and hidden previews
+  stay hidden. Browsing saved conversations does not require an available agent
+  sign-in check.
+- Queued Quick routes and existing selections survive default-account registration
+  in the main window, while explicit account keys and different native files stay
+  separate. Turning off Quick previews also suppresses reads already in progress.
+
+- Accounts refreshes from shared runtime notifications instead of polling every
+  two seconds. Sign-in checks sleep until a freshness deadline and stop off
+  screen; background changes preserve active filters and account dialogs.
+
+- Relay status preserves initialization failures and identifies a pending startup
+  step instead of replacing every failure with a generic stopped-listener message.
+
+- Repository probes no longer wait for the full inactivity timeout when a fast
+  folder finishes before its watchdog installs its signal handler. Canceling a
+  local probe also terminates its child processes, avoiding stray background work.
+- Push refreshes cached or incomplete source selections before opening a peer
+  connection, preventing stale-source failures and crashes after cached discovery.
+- Relay HTTP recovery retries eligible exact submissions and acknowledgments on
+  failed reused connections, without replaying policy refusals or fresh failures.
+
+- Failed transfers preserve the source machine's scan error and recovery hint
+  instead of reporting only that a session was not found. SFTP startup obeys
+  cancellation and deadlines; closing a session stops and reaps its SSH process
+  even when the server ignores end-of-input.
+
+- Trusting an SSH machine with an explicit host-key alias and a nonstandard
+  port records the name OpenSSH actually checks. Host-key collection failures
+  also retain the fallback client's error instead of showing only a server banner.
+  A stalled keyscan leaves time for the fallback instead of consuming the whole
+  trust request deadline.
+
+- Internet delivery status updates when notifications connect or disconnect,
+  including while incoming messages are continuously arriving.
+
+- Active internet requests wake the shared HTTP fallback receiver to collect
+  replies promptly. Completed, canceled and expired requests return to idle
+  reconciliation; healthy WebSocket delivery keeps using notifications.
+
+- Concurrent transfers from separate machines preserve both source lineage
+  receipts, even when their local journal IDs match. Recovery of the same journal
+  cannot take over a receipt lock held by another active recovery process.
+
+- Moving an original after creating a fork preserves the fork's ancestry and
+  return destinations. Retrying the first transfer keeps its original receipt
+  instead of reporting a conflicting causal history.
+
+- Background GUI and TUI scans keep independent settings snapshots. Cloud consent
+  and environment edits cannot alter an in-flight scan or crash catalog hashing;
+  copied settings retain their revision for conflict-safe saves.
+
+- Cloud admission preserves the signed absolute lease across relay objects;
+  network latency cannot extend a connector's authority.
+- Progressive startup preserves pressed controls. Shared observation watches
+  Claude's process registry, retries concurrent account registration, and avoids
+  creating an unused browsing database merely to invalidate it.
+
+- Background inventory notifications no longer replay an already displayed scan
+  or interrupt splitter dragging, keyboard resizing and form editing. Public
+  pairing fingerprints wrap within compact enrollment dialogs.
+- Cloud observations accept canonical Windows workspace paths when inspected
+  from another operating system; remote metadata never grants local file access.
+
+- Relay receiving starts independently of the first local inventory scan, so a
+  slow scan no longer delays connections after a runtime restart.
+- Reading large private-state registries on Windows avoids repeatedly propagating
+  unchanged directory permissions. Every read still verifies ownership and the
+  exact protected access list before accepting the file.
+
+- Installing a missing macOS app cannot replace another app or filesystem entry
+  that appears while the signed download is being verified. Publication refuses
+  replacement atomically; existing installations keep their updater workflow.
+
+- After explicitly forking rewritten cloud history, later checkpoints continue
+  the accepted branch. Source acknowledgment recovers after interruption; undo
+  restores the previous task ledger without changing cloud vendor files.
+
 - Claude/Codex sign-in detection, Codex initialization ordering, and account
   refresh when the vendor sign-in terminal exits. Remote discovery retains public
   owner-machine identity metadata and explains SSH/Keychain check limitations.

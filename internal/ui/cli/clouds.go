@@ -140,7 +140,7 @@ func cloudsAllowCmd(allow bool) *cobra.Command {
 				r.app.Cfg.SetCloudAllowed(name, allow)
 				r.printf("%s: %s\n", name, map[bool]string{true: "allowed", false: "denied"}[allow])
 			}
-			return config.Save(r.app.Cfg)
+			return config.Save(&r.app.Cfg)
 		},
 	}
 }
@@ -329,7 +329,9 @@ hopsesh hands it off to the second cloud with the choices the hop was planned wi
 			}
 			res, err := r.app.ContinueHop(ctx, args[0], progress)
 			if res != nil && res.Hop != nil && res.Hop.Remembered {
-				_ = config.Save(r.app.Cfg)
+				if saveErr := config.Save(&r.app.Cfg); saveErr != nil {
+					r.printf("Conversation continued; could not save environment preference: %v\n", saveErr)
+				}
 			}
 			if r.jsonOut {
 				out := map[string]any{"result": res}
@@ -379,7 +381,7 @@ repository that had none.`,
 					env = strings.TrimSpace(args[2])
 				}
 				r.app.Cfg.SetCloudEnvironment(cl.Name, args[1], env)
-				if err := config.Save(r.app.Cfg); err != nil {
+				if err := config.Save(&r.app.Cfg); err != nil {
 					return err
 				}
 				if env == "" {

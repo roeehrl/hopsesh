@@ -125,9 +125,9 @@ messages and steps stay in the cloud (`fetch.loss`). A Copilot session's log and
 thread come back as text, written as a new session of the agent they were handed off from
 (else Claude Code; `--in <agent>` if the user names another), with Copilot's pull request
 branch in a new worktree. Jules and Devin bring back their code only: pass `--code-only`. No
-cloud takes follow-ups from hopsesh: Claude Code has no command that sends one outside its
-own terminal session (`handoff.noFollowUp` says so), so the user writes to a Claude Code
-cloud session on its page (`handoff.url`).
+cloud follow-up command is integrated and qualified in this release
+(`handoff.noFollowUp` explains availability), so the user writes to a cloud session
+on its provider's page (`handoff.url`).
 
 A cloud session goes on to another cloud ("hand this Claude Code cloud session on to Codex
 cloud") through this machine: `{{.Bin}} plan <cloud>:<id> --to <other cloud> --json` shows

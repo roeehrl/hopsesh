@@ -69,9 +69,23 @@ func (m machineHome) writeConfig(t *testing.T, c config.Config) {
 		k, v, _ := strings.Cut(kv, "=")
 		t.Setenv(k, v)
 	}
-	if err := config.Save(c); err != nil {
+	// Fixture setup replaces only this isolated machine's settings, retaining
+	// the current revision so subsequent setup changes obey the real CAS.
+	current, err := config.Load()
+	if err != nil {
 		t.Fatal(err)
 	}
+	body, err := json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = json.Unmarshal(body, &current); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Save(&current); err != nil {
+		t.Fatal(err)
+	}
+
 }
 
 // buildHopsesh builds the command once per test run.

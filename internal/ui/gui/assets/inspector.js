@@ -52,7 +52,7 @@ export function actionRow(e, m = model(e)) {
       hasMove ? h("button", { class: "btn act-move", id: "act-move", "aria-haspopup": "menu", "aria-expanded": "false", onclick: (ev) => toggle(ev.currentTarget, moveItems(m.move), "Move", "end") },
         "Move", icon(ICONS.chevron, 10)) : null,
       h("button", { class: "btn icon act-more", id: "act-more", "aria-label": "More actions", "aria-haspopup": "menu", "aria-expanded": "false", title: "More actions",
-        onclick: (ev) => toggle(ev.currentTarget, m.more, "More actions", "end") }, h("span", { "aria-hidden": "true", class: "dots" }, "⋯"))),
+        onclick: (ev) => toggle(ev.currentTarget, model(e).more, "More actions", "end") }, h("span", { "aria-hidden": "true", class: "dots" }, "⋯"))),
     m.caption ? h("span", { class: "act-caption" + (m.twice ? " warn" : ""), id: "act-caption" }, m.twice ? icon(["M12 4 2.5 20h19z", "M12 10v4M12 17v.5"], 13) : null, m.caption) : null);
 }
 
@@ -137,22 +137,34 @@ function openIn(e, m) {
 // ---- The conversation ----
 
 let previewTimer = 0;
+let previewRevision = 0;
 const wantN = new Map(); // how many messages the user asked to see, by session
 
 // conversation is the Recent conversation section, filled once the preview is read (after
 // 120 ms on the same selection; a skeleton meanwhile).
 function conversation(e) {
   if (e.cloud || !e.canPreview || !state.info?.previews) return null;
-  const body = h("div", { class: "conv", "aria-live": "polite", "aria-busy": "true" }, skeleton());
+  const previous = $("#inspector");
+  const existing = previous?.dataset.key === e.machine + "\u0000" + e.key ? previous.querySelector(".conv") : null;
+  const body = existing || h("div", { class: "conv", "aria-live": "polite", "aria-busy": "true" }, skeleton());
   // The backend validates the file's current size/mtime before reusing a preview.
   // Scan metadata can be a minute old, so it cannot safely key a second cache here.
   clearTimeout(previewTimer);
+  const revision = ++previewRevision;
   previewTimer = setTimeout(async () => {
     let p;
     try { p = await api("Preview", e.machine, e.key, wantN.get(e.machine + e.key) || 4); } catch (err) { p = { items: [], failed: true, note: "Preview not available: " + errText(err) }; }
-    if (body.isConnected && state.info?.previews) fillConversation(body, e, p);
+    if (revision === previewRevision && body.isConnected && state.info?.previews) {
+      // Revalidate against the backend on every publication, but keep readable
+      // messages, selection and expansion while an unchanged preview is loaded.
+      const signature = JSON.stringify([p, e.titleSource, e.agent, e.agentName]);
+      if (body.previewSignature !== signature) {
+        fillConversation(body, e, p);
+        body.previewSignature = signature;
+      }
+    }
   }, 120);
-  return section("conversation", "Recent conversation", true, null, body);
+  return existing ? existing.closest(".sec") : section("conversation", "Recent conversation", true, null, body);
 }
 
 const skeleton = () => h("div", { class: "skel", role: "status" }, h("span", { class: "visually-hidden" }, "Reading conversation…"), h("span", { style: "width:30%" }), h("span", { style: "width:92%" }), h("span", { style: "width:70%" }));
@@ -219,7 +231,11 @@ function fillConversation(body, e, p) {
 // refresh draws the inspector again for the same session.
 function refresh(e) {
   const old = $("#inspector");
-  if (old && old.dataset.key === e.machine + "\u0000" + e.key) old.replaceWith(inspector(e));
+  if (old && old.dataset.key === e.machine + "\u0000" + e.key) {
+    const scroll = old.scrollTop, next = inspector(e, true);
+    old.replaceWith(next);
+    next.scrollTop = scroll;
+  }
 }
 
 // transcript is a read-only sheet with the end of the conversation, longer, unclamped.
@@ -351,19 +367,25 @@ function cloudNotes(e) {
 }
 
 // inspector is the selected session's pane (or what selecting one does).
-export function inspector(e, previous=null) {
+export function inspector(e, force = false) {
   if (!e) return h("aside", { class: "inspector", id: "inspector", "aria-label": "Session details" }, h("div", { class: "empty" }, "Select a session to see what you can do with it."));
+  const previous = $("#inspector");
+  const localTabs = [...tabs.values()].filter(t => t.machine === e.machine && t.key === e.key)
+    .map(t => [t.id, t.kind, t.state, t.attention]);
+  const { group, observedAt, ...entry } = e;
+  const groupFacts = group && Object.fromEntries(Object.entries(group).filter(([key]) => key !== "entries"));
+  const signature = JSON.stringify([entry, groupFacts, state.info, state.scan?.peers, state.scan?.clouds, here(), liveOf(e), localTabs, sys]);
+  if (!force && previous?.inspectorSignature === signature) {
+    conversation(e);
+    return previous;
+  }
   const m = model(e);
-  const {group,observedAt,...item}=e;
-  const signature=JSON.stringify([item,{...group,entries:undefined},statusLine(e),m.primary?.label,m.primary?.disabled,state.info?.previews,state.info?.agents,[...tabs.values()].filter(t=>t.machine===e.machine&&t.key===e.key).map(t=>[t.id,t.state,t.attention])]);
-  const same=previous?.dataset.key===e.machine+"\u0000"+e.key;
-  if(same && previous.dataset.signature===signature) return previous;
-  const conversationKey=JSON.stringify([e.machine,e.key,e.lastActive,e.sizeKB,e.canPreview,state.info?.previews]);
-  const retained=same && previous.dataset.conversationKey===conversationKey ? previous.querySelector('#sec-conversation')?.parentElement : null;
-  return h("aside", { class: "inspector", id: "inspector", "aria-label": e.cloud ? `Cloud ${e.cloud.noun || "session"} details` : "Session details", "data-key": e.machine + "\u0000" + e.key, "data-signature":signature, "data-conversation-key":conversationKey },
+  const pane = h("aside", { class: "inspector", id: "inspector", "aria-label": e.cloud ? `Cloud ${e.cloud.noun || "session"} details` : "Session details", "data-key": e.machine + "\u0000" + e.key },
     header(e), actionRow(e, m), movementNotice(e, selectDestination, () => {
       setSection("copies", true); refresh(e); $("#sec-copies")?.scrollIntoView({block:"nearest"});
-    }), returnSection(m), openIn(e, m), retained || conversation(e), repository(e), history(e), details(e), e.cloud ? cloudNotes(e) : null);
+    }), returnSection(m), openIn(e, m), conversation(e), repository(e), history(e), details(e), e.cloud ? cloudNotes(e) : null);
+  pane.inspectorSignature = signature;
+  return pane;
 }
 
 function returnSection(m) {

@@ -1,6 +1,7 @@
 import {test,expect} from '@playwright/test';
-import {fresh,row,action} from './helpers';
+import {fresh,row,action,patchScans} from './helpers';
 test.beforeEach(async({page})=>fresh(page));
+test.afterEach(async({page})=>page.unrouteAll({behavior:'wait'}));
 async function plan(page){await row(page,'Find the codeword').click();await action(page,'move',/^Continue with Codex…/);await expect(page.locator('#sheet #go')).toBeEnabled();}
 
 test('desktop opening explains that the user must send the first message',async({page})=>{
@@ -116,7 +117,8 @@ test('a blocked plan still allows changing its launcher',async({page})=>{
 
 test('missing source identity is explained without a duplicate profile label',async({page})=>{
  // Remove only the public observation, never the stable profile ID.
- await page.route('**/call',async route=>{const r=route.request().postDataJSON();if(!['InitialScan','Scan','RefreshHere','Plan'].includes(r.m)){await route.continue();return;}const response=await route.fetch(),body=await response.json();for(const g of body.result.groups||[])for(const e of g.entries||[])if(e.profile)e.profile.account=null;if(body.result.sourceEntry?.profile)body.result.sourceEntry.profile.account=null;await route.fulfill({json:body});});
+ await patchScans(page,scan=>{for(const g of scan.groups||[])for(const e of g.entries||[])if(e.profile)e.profile.account=null;});
+ await page.route("**/call",async route=>{if(route.request().postDataJSON().m!=="Plan"){await route.fallback();return;}const response=await route.fetch(),body=await response.json();if(body.result.sourceEntry?.profile)body.result.sourceEntry.profile.account=null;await route.fulfill({json:body});});
  await page.reload();await expect(page.locator("#fresh")).toContainText("updated",{timeout:30_000});await plan(page);
  const source=page.locator('.transfer-accounts>div').first();await expect(source).toContainText('Email unavailable');const name=await source.locator('b').innerText();expect((await source.innerText()).split(name).length-1).toBe(1);
 });

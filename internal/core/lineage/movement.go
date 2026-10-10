@@ -1,6 +1,6 @@
 package lineage
 
-// ActiveHops excludes undone operations and implementation-only native backups.
+// ActiveHops excludes undone operations, native backups and identity associations.
 // OrderedHops supplies causal ordering; wall-clock timestamps are not authorities.
 func (m *Manifest) ActiveHops() []Hop {
 	if m == nil {
@@ -12,7 +12,7 @@ func (m *Manifest) ActiveHops() []Hop {
 	}
 	var out []Hop
 	for _, h := range m.OrderedHops() {
-		if !h.Backup && !undone[h.ID] {
+		if !h.Backup && !undone[h.ID] && h.Kind != HopIdentity {
 			out = append(out, h)
 		}
 	}
@@ -142,7 +142,7 @@ func (m *Manifest) movementHistory() movementHistory {
 	}
 	for _, h := range g.ordered {
 		g.byID[h.ID] = h
-		if !h.Backup && !undone[h.ID] {
+		if !h.Backup && !undone[h.ID] && h.Kind != HopIdentity {
 			g.active = append(g.active, h)
 		}
 	}

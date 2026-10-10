@@ -1,0 +1,85 @@
+name: native runtime matrix
+
+# Reused by nightly and release qualification. Uses disposable local services
+# and no credentials; provider VM qualification remains a separate live gate.
+on:
+  workflow_call:
+    inputs:
+      strength:
+        type: number
+        default: 3
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    name: runtime covering t=${{ inputs.strength }} (${{ matrix.family }} ${{ matrix.shard }}/4)
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+        family: [linux, macos, windows]
+        include:
+          - {family: linux, os: ubuntu-24.04}
+          - {family: macos, os: macos-15}
+          - {family: windows, os: windows-2025}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false # release callers never trust another run's build cache
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - run: npm ci
+        working-directory: infrastructure/relay
+      - name: execute selected native rows and verify coverage report
+        shell: bash
+        env:
+          STRENGTH: ${{ inputs.strength }}
+          SHARD: ${{ matrix.shard }}
+        run: go run ./internal/devtools/hsmatrix runtime-run -t "$STRENGTH" -shard "$SHARD/4" -out "$RUNNER_TEMP/runtime-matrix" -timeout 20m
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: runtime-triples-${{ matrix.family }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/runtime-matrix
+          retention-days: 14
+
+  coverage:
+    name: verify complete runtime coverage (${{ matrix.family }})
+    needs: runtime
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        family: [linux, macos, windows]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: runtime-triples-${{ matrix.family }}-*
+          path: ${{ runner.temp }}/runtime-reports
+      - name: verify all rows passed exactly once across four shards
+        env:
+          FAMILY: ${{ matrix.family }}
+          STRENGTH: ${{ inputs.strength }}
+        run: |
+          reports=()
+          for shard in 1 2 3 4; do
+            reports+=("$RUNNER_TEMP/runtime-reports/runtime-triples-$FAMILY-$shard/results.json")
+          done
+          joined=$(IFS=,; echo "${reports[*]}")
+          go run ./internal/devtools/hsmatrix runtime-verify -t "$STRENGTH" -reports "$joined"

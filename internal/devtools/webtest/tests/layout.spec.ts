@@ -8,7 +8,13 @@ import { fresh, menu } from "./helpers";
 
 test.beforeEach(async ({ page }) => fresh(page));
 
-const width = (page: Page, sel: string) => page.locator(sel).evaluate((el) => Math.round(el.getBoundingClientRect().width));
+// Discovery can replace a pane between resolving a locator's element handle and
+// evaluating it. Select and measure in one browser task so detached old nodes
+// cannot report a false zero; assertions still enforce the actual dimensions.
+const width = (page: Page, sel: string) => page.evaluate((sel) => {
+  const el = document.querySelector(sel);
+  return el ? Math.round(el.getBoundingClientRect().width) : -1;
+}, sel);
 const divider = (page: Page, name: string) => page.getByRole("separator", { name });
 
 async function dragBy(page: Page, name: string, dx: number) {
@@ -22,8 +28,8 @@ async function dragBy(page: Page, name: string, dx: number) {
 }
 
 test("dragging a divider resizes its pane within its limits; past half the minimum it hides", async ({ page }) => {
-  expect(await width(page, "#sidebar")).toBe(220);
-  expect(await width(page, "#inspector")).toBe(360);
+  await expect.poll(() => width(page, "#sidebar")).toBe(220);
+  await expect.poll(() => width(page, "#inspector")).toBe(360);
   await dragBy(page, "Resize sidebar", 60);
   await expect.poll(() => width(page, "#sidebar")).toBe(280);
   await dragBy(page, "Resize sidebar", 200); // clamped at 320
@@ -81,8 +87,8 @@ test("the layout is kept across a reload", async ({ page }) => {
   await page.waitForTimeout(600); // saved after 300 ms
   await page.reload();
   await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible({ timeout: 30_000 });
-  expect(await width(page, "#sidebar")).toBe(260);
-  expect(await width(page, "#inspector")).toBe(0);
+  await expect.poll(() => width(page, "#sidebar")).toBe(260);
+  await expect.poll(() => width(page, "#inspector")).toBe(0);
 });
 
 test("a narrow window hides the sidebar for now, and brings it back when wide again", async ({ page }) => {
@@ -104,7 +110,8 @@ test("a narrow window hides the sidebar for now, and brings it back when wide ag
   // Nothing of that was saved.
   await page.reload();
   await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible({ timeout: 30_000 });
-  expect(await width(page, "#sidebar")).toBe(220);
+  // The cached heading can paint before the restored grid finishes layout.
+  await expect.poll(() => width(page, "#sidebar")).toBe(220);
 });
 
 test("the inspector's width follows the window until set: 30% of the room, at most 60% and what leaves the list 440px", async ({ page }) => {
@@ -122,8 +129,11 @@ test("the inspector's width follows the window until set: 30% of the room, at mo
 });
 
 test("the list's own width decides compact rows: below 600px they are one line", async ({ page }) => {
-  const rowHeight = () => page.locator(".row").first().evaluate((el) => Math.round(el.getBoundingClientRect().height));
-  expect(await rowHeight()).toBeGreaterThan(40); // comfortable
+  const rowHeight = () => page.evaluate(() => {
+    const row = document.querySelector(".row");
+    return row ? Math.round(row.getBoundingClientRect().height) : -1;
+  });
+  await expect.poll(rowHeight).toBeGreaterThan(40); // comfortable
   await divider(page, "Resize inspector").focus();
   await page.keyboard.press("End"); // a wide inspector leaves the list under 600px
   await expect.poll(() => width(page, ".content")).toBeLessThan(600);

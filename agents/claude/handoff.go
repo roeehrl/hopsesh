@@ -32,9 +32,9 @@ import (
 // hopsesh never answers it, never writes Claude Code's settings to skip it, and never
 // types into Claude Code.
 //
-// No follow-up: there is no non-interactive form (the -p one is refused), and attaching
-// to a running session (`claude --cloud <id>`) is "not enabled" on accounts per the docs
-// (anthropics/claude-code#97813 asks for it), so the cloud declares NoFollowUp.
+// Newer Claude documentation describes -p --cloud <id> for follow-ups. This
+// module has not qualified that distinct command across supported CLI versions,
+// so it still declares NoFollowUp rather than inferring support from --cloud.
 
 var _ agent.CloudSender = (*Module)(nil)
 var _ agent.CloudStepReader = (*Module)(nil)
@@ -48,7 +48,7 @@ const (
 )
 
 // noFollowUp is said where a follow-up would be.
-const noFollowUp = "hopsesh can't send a Claude Code cloud session a message: Claude Code 2.1 has no command that does it outside its own terminal session. Open the session on claude.ai to write to it."
+const noFollowUp = "hopsesh has not yet integrated and qualified Claude Code's cloud follow-up command. Open the session on claude.ai to write to it."
 
 // SendCloud checks the login, then returns the command that starts the cloud session with
 // the briefing as its first prompt: `claude --cloud <brief>` in r.Dir, whose current

@@ -202,7 +202,7 @@ Python API, install its Claude Code integration, or write profiles.`,
 				if err := c.Check(); err != nil {
 					return err
 				}
-				if err := config.Save(c); err != nil {
+				if err := config.Save(&c); err != nil {
 					return err
 				}
 				r.app.Cfg = c

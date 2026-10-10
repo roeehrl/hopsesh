@@ -162,11 +162,18 @@ type Client struct {
 	dec    *json.Decoder
 	next   int
 	broken error // a call was abandoned mid-way: replies no longer line up
+	rpc    func(context.Context, string, json.RawMessage) (json.RawMessage, error)
 }
 
 // NewClient talks to a peer over r (its output) and w (its input).
 func NewClient(r io.Reader, w io.Writer) *Client {
 	return &Client{enc: newEncoder(w), dec: json.NewDecoder(r)}
+}
+
+// NewRPCClient uses the same typed peer protocol over a message transport.
+// Its caller owns authorization, delivery and durable deduplication.
+func NewRPCClient(call func(context.Context, string, json.RawMessage) (json.RawMessage, error)) *Client {
+	return &Client{rpc: call}
 }
 
 // newEncoder writes one JSON value per line in ASCII only: anything else is escaped
@@ -227,6 +234,13 @@ func (c *Client) Call(ctx context.Context, method string, params, result any) er
 	p, err := json.Marshal(params)
 	if err != nil {
 		return err
+	}
+	if c.rpc != nil {
+		body, err := c.rpc(ctx, method, p)
+		if err != nil || result == nil {
+			return err
+		}
+		return json.Unmarshal(body, result)
 	}
 	type reply struct {
 		m   message

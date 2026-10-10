@@ -18,6 +18,8 @@ import (
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/launch"
 	"github.com/roeehrl/hopsesh/internal/core/move"
+	"github.com/roeehrl/hopsesh/internal/core/observe"
+	localruntime "github.com/roeehrl/hopsesh/internal/core/runtime"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -46,6 +48,7 @@ type Exit struct {
 
 // Deps are what the TUI needs from the CLI.
 type Deps struct {
+	Runtime  *localruntime.Client // optional shared local owner; no healthy-client polling
 	App      *app.App
 	Describe func(app.Entry) string // branch/worktree line
 	// Adopted is a fetch (its journal) to show first: what came back from a cloud.
@@ -121,7 +124,10 @@ type model struct {
 	// stepPaste asks for the link of a session a terminal step did not show.
 	stepPaste *stepPaste
 	// steps receives what the hand-off sends the program (tests: no program runs).
-	steps chan tea.Msg
+	steps          chan tea.Msg
+	latestRuntime  *observe.Snapshot
+	runtimeProblem error
+	refreshRuntime bool
 }
 
 type scanDone struct {
@@ -152,11 +158,22 @@ func Run(d Deps) (*Exit, error) {
 	defer m.closeReturnPush()
 	prog := tea.NewProgram(m)
 	m.emitScan = func(gen uint64, inv *app.Inventory) { prog.Send(scanPartial{inv, gen}) }
-	watchCtx, stopWatch := context.WithCancel(context.Background())
-	defer stopWatch()
-	watchCore := *d.App
-	watchCore.Cfg = d.App.Cfg.Clone()
-	go watchCore.WatchSessions(watchCtx, func() { prog.Send(discoveryRequested{}) })
+	if d.Runtime != nil {
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() { defer close(done); watchRuntime(ctx, *d.Runtime, prog.Send) }()
+		defer func() { cancel(); <-done }()
+	} else {
+		watchCtx, stopWatch := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		watchCore := *d.App
+		watchCore.Cfg = d.App.Cfg.Clone()
+		go func() {
+			defer close(done)
+			watchCore.WatchSessions(watchCtx, func() { prog.Send(discoveryRequested{}) })
+		}()
+		defer func() { stopWatch(); <-done }()
+	}
 	defer func() {
 		if m.scanCancel != nil {
 			m.scanCancel()
@@ -194,6 +211,8 @@ func (m *model) discover(options app.ScanOptions) tea.Cmd {
 	}
 	m.scanCancel = cancel
 	emit := m.emitScan
+	runtime, refresh := m.deps.Runtime, m.refreshRuntime
+	m.refreshRuntime = false
 	return func() tea.Msg {
 		defer cancel()
 		partial := a.CachedInventory()
@@ -203,6 +222,15 @@ func (m *model) discover(options app.ScanOptions) tea.Cmd {
 		}
 		last := time.Time{}
 		opts := options
+		if runtime != nil {
+			o, err := sharedLocal(ctx, *runtime, refresh)
+			if err != nil {
+				return runtimeScanError{err}
+			}
+			opts.LocalSnapshot = &o
+			opts.SharedRemotes = true
+			opts.RemoteSnapshots = o.Remotes
+		}
 		if emit != nil {
 			opts.Progress = func(u app.ScanUpdate) {
 				partial = app.MergeDiscovery(partial, u)
@@ -303,6 +331,22 @@ func (m *model) nextSelectable(from, dir int) int {
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case runtimeSnapshot:
+		m.runtimeProblem = nil
+		m.latestRuntime = &msg.Snapshot
+		if m.mode == modeBrowse && !m.planning {
+			m.applyRuntime(msg.Snapshot)
+		}
+	case runtimeDisconnected:
+		m.runtimeProblem = msg.err
+		if m.runtimeProblem == nil {
+			m.runtimeProblem = fmt.Errorf("shared runtime disconnected")
+		}
+		if m.mode == modeBrowse && !m.planning {
+			m.invalidateRuntime(msg.err)
+		}
+	case runtimeScanError:
+		m.err, m.mode = msg.err, modeError
 	case returnPlanDone:
 		m.returnPush = msg.push
 		if msg.err != nil {
@@ -366,20 +410,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.planning || m.mode != modeLoading && m.mode != modeBrowse {
 			return m, nil
 		}
-		identity := ""
-		if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil {
-			e := m.rows[m.cursor].item.Entry
-			identity = app.EntryIdentity(e.Machine, e.Session.Key.String())
-		}
 		m.inv = msg.inv
 		m.mode = modeBrowse
-		m.buildRows()
-		for i, r := range m.rows {
-			if r.item != nil && app.EntryIdentity(r.item.Entry.Machine, r.item.Entry.Session.Key.String()) == identity {
-				m.cursor = i
-				break
-			}
-		}
+		m.rebuildRuntimeRows()
 	case scanDone:
 		if msg.generation != 0 && msg.generation != m.scanGeneration {
 			msg.inv.Close()
@@ -390,22 +423,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			msg.inv.Close()
 			return m, nil
 		}
-		identity := ""
-		if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil {
-			e := m.rows[m.cursor].item.Entry
-			identity = app.EntryIdentity(e.Machine, e.Session.Key.String())
-		}
 		if m.inv != nil {
 			m.inv.Close()
 		}
 		m.inv = msg.inv
 		m.mode = modeBrowse
-		m.buildRows()
-		for i, r := range m.rows {
-			if r.item != nil && app.EntryIdentity(r.item.Entry.Machine, r.item.Entry.Session.Key.String()) == identity {
-				m.cursor = i
-				break
-			}
+		m.rebuildRuntimeRows()
+		if m.latestRuntime != nil {
+			m.applyRuntime(*m.latestRuntime)
 		}
 		if j := m.deps.Hop; j != "" {
 			m.deps.Hop = ""
@@ -476,7 +501,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case tea.KeyPressMsg:
-		return m.key(msg.String())
+		next, cmd := m.key(msg.String())
+		if m.mode == modeBrowse && !m.planning {
+			if m.runtimeProblem != nil {
+				m.invalidateRuntime(m.runtimeProblem)
+			} else if m.latestRuntime != nil {
+				m.applyRuntime(*m.latestRuntime)
+			}
+		}
+		return next, cmd
 	}
 	return m, nil
 }
@@ -620,6 +653,7 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 			m.buildRows()
 		case "r":
 			m.mode = modeLoading
+			m.refreshRuntime = true
 			return m, m.Init()
 		case "enter":
 			if m.cursor < len(m.rows) && m.rows[m.cursor].item == nil && m.deps.App.Cfg.List.GroupBy == "family" {
@@ -852,7 +886,9 @@ func (m *model) applyCmd() tea.Cmd {
 		defer cancel()
 		res, err := a.Apply(ctx, p, in, nil)
 		if err == nil && p.Handoff != nil && a.RememberEnv(p) {
-			_ = config.Save(a.Cfg)
+			if saveErr := config.Save(&a.Cfg); saveErr != nil {
+				err = fmt.Errorf("session transferred; environment preference was not saved: %w", saveErr)
+			}
 		}
 		return applyDone{res, err}
 	}
@@ -1455,7 +1491,7 @@ func (m *model) saveFamilyGrouping() {
 			c.List.Collapsed = append(c.List.Collapsed, "family:"+k)
 		}
 	}
-	if err := config.Save(*c); err != nil {
+	if err := config.Save(c); err != nil {
 		m.err = err
 	}
 }

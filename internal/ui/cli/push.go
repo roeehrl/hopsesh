@@ -194,7 +194,7 @@ own agents and keeps its own undo record. Off by default.`,
 				switch args[0] {
 				case "on", "off":
 					r.app.Cfg.Peer.Receive = args[0] == "on"
-					if err := config.Save(r.app.Cfg); err != nil {
+					if err := config.Save(&r.app.Cfg); err != nil {
 						return err
 					}
 				default:

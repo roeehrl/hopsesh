@@ -291,21 +291,6 @@ func (localLocks) Probe(_ context.Context, paths []string) (map[string]agent.Loc
 	return out, nil
 }
 
-func (localLocks) Holders(ctx context.Context, paths []string) (map[string][]int, error) {
-	out := map[string][]int{}
-	for _, p := range paths {
-		if probeLock(p) != agent.LockHeld {
-			continue
-		}
-		pids, err := lockHolders(ctx, p)
-		if err != nil {
-			return nil, err
-		}
-		out[p] = pids
-	}
-	return out, nil
-}
-
 // LocalFS is this machine's filesystem.
 func LocalFS() FS { return localFS{} }
 

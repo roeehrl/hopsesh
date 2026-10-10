@@ -467,5 +467,5 @@ func (m *Module) SessionWatchPaths(in agent.Install, pa agent.Path) []string {
 	if root == "" {
 		return nil
 	}
-	return []string{pa.Join(root, "projects"), pa.Join(root, "hopsesh")}
+	return []string{pa.Join(root, "projects"), pa.Join(root, "sessions"), pa.Join(root, "hopsesh")}
 }

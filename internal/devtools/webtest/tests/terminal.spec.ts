@@ -42,6 +42,38 @@ async function ready(t: Page) {
 
 test.beforeEach(async ({ page }) => here(page));
 
+test("a single terminal stays visible when its selected session group changes", async ({ page, context }) => {
+  await openFake(page, "title=Association%20change");
+  const t = await context.newPage();
+  let publish!: () => void;
+  await t.routeWebSocket(url => url.searchParams.get("name") === "hopsesh.terminal.tabs", socket => {
+    const server = socket.connectToServer();
+    server.onMessage(message => {
+      socket.send(message);
+      const snapshot = JSON.parse(message.toString());
+      if (!snapshot.tabs?.length) return;
+      publish = () => {
+        // Focus selects the launch-time group; passive association can later
+        // discover a different family while the same process/tab stays alive.
+        socket.send(JSON.stringify({select: snapshot.tabs[0].id}));
+        socket.send(JSON.stringify({...snapshot, tabs: snapshot.tabs.map(info => ({
+          ...info, title: "Association change confirmed", relationship: {...info.relationship, family: "discovered-family", name: "Discovered family"},
+        }))}));
+      };
+    });
+  });
+  await t.goto("/terminal/?renderer=dom");
+  const visible = tab(t, /Association change/);
+  await expect(visible).toBeVisible();
+  await ready(t);
+  publish();
+  await expect(tab(t, /Association change confirmed/)).toBeVisible();
+  await focusTerminal(t);
+  await t.keyboard.insertText("still reachable");
+  await t.keyboard.press("Enter");
+  await expect.poll(() => screen(t)).toContain("typed=still reachable");
+});
+
 test("a tab runs its program: the emulator answers DA1 and DA2, and keys, Shift+Return and IME text reach it", async ({ page, context }) => {
   await openFake(page, "title=" + encodeURIComponent("Fix the parser · termfake"));
   const t = await terminal(context);

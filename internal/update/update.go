@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -64,8 +65,15 @@ type Release struct {
 }
 
 // Latest fetches the newest published release.
-func Latest(ctx context.Context) (*Release, error) {
-	req, _ := http.NewRequestWithContext(ctx, "GET", API+"/repos/"+Repo+"/releases/latest", nil)
+func Latest(ctx context.Context) (*Release, error) { return fetchRelease(ctx, "latest") }
+func ByVersion(ctx context.Context, version string) (*Release, error) {
+	if _, ok := parse(version); !ok {
+		return nil, errors.New("release version must be a semantic version")
+	}
+	return fetchRelease(ctx, "tags/"+url.PathEscape("v"+strings.TrimPrefix(version, "v")))
+}
+func fetchRelease(ctx context.Context, route string) (*Release, error) {
+	req, _ := http.NewRequestWithContext(ctx, "GET", API+"/repos/"+Repo+"/releases/"+route, nil)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	resp, err := client().Do(req)
 	if err != nil {
@@ -246,7 +254,7 @@ func Install(ctx context.Context, rel *Release) (Target, error) {
 	}
 	switch t.Kind {
 	case KindMacApp:
-		err = installMacApp(ctx, t.Path, data)
+		err = installMacApp(ctx, t.Path, data, true)
 	case KindWindowsApp:
 		err = installWindowsApp(t.Path, data, rel.Version)
 	default:
@@ -329,10 +337,16 @@ func installWindowsApp(dir string, zipData []byte, version string) error {
 				if err != nil {
 					return err
 				}
-				b, err := io.ReadAll(io.LimitReader(rc, 200<<20))
+				b, err := io.ReadAll(io.LimitReader(rc, (200<<20)+1))
 				rc.Close()
 				if err != nil {
 					return err
+				}
+				if len(b) > 200<<20 {
+					return fmt.Errorf("%s exceeds the app archive file limit", n)
+				}
+				if files[n] != nil {
+					return fmt.Errorf("duplicate app archive file %s", n)
 				}
 				files[n] = b
 			}
@@ -348,31 +362,12 @@ func installWindowsApp(dir string, zipData []byte, version string) error {
 			names = append(names, n)
 		}
 	}
-	for _, n := range names {
-		p := filepath.Join(dir, filepath.FromSlash(n))
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(p+".new", files[n], 0o755); err != nil {
-			return fmt.Errorf("cannot write to %s (%w); run the installer from the release page instead", dir, err)
-		}
+	if err := publishWindowsAppFiles(dir, files, names, (*os.Root).Rename); err != nil {
+		return err
 	}
-	for i, n := range names {
-		p := filepath.Join(dir, filepath.FromSlash(n))
-		var err error
-		if isFile(p) {
-			err = swap(p, p+".new")
-		} else {
-			err = os.Rename(p+".new", p)
-		}
-		if err != nil {
-			for _, m := range names[i:] {
-				os.Remove(filepath.Join(dir, filepath.FromSlash(m)) + ".new")
-			}
-			return err
-		}
+	if version != "" {
+		setInstalledVersion(version)
 	}
-	setInstalledVersion(version)
 	return nil
 }
 
@@ -389,9 +384,7 @@ func CleanUp() {
 	}
 	switch t.Kind {
 	case KindWindowsApp:
-		for _, n := range append([]string{"hopsesh-app.exe", "hopsesh.exe"}, conptyFiles...) {
-			_ = os.Remove(filepath.Join(t.Path, filepath.FromSlash(n)) + ".old")
-		}
+		cleanupWindowsApp(t.Path)
 	case KindMacApp:
 		old, _ := filepath.Glob(filepath.Join(filepath.Dir(t.Path), ".hopsesh-update-*"))
 		for _, d := range old {
@@ -480,7 +473,7 @@ func extract(archive []byte, name string) ([]byte, error) {
 					return nil, err
 				}
 				defer rc.Close()
-				return io.ReadAll(io.LimitReader(rc, 200<<20))
+				return io.ReadAll(io.LimitReader(rc, (200<<20)+1))
 			}
 		}
 		return nil, fmt.Errorf("%s not in archive", want)

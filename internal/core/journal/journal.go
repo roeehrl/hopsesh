@@ -7,6 +7,7 @@ package journal
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -93,16 +94,20 @@ type Entry struct {
 
 // Journal is the undo record of one operation (a move, a continuation, a mark).
 type Journal struct {
-	UndoTime   time.Time          `json:"undoTime,omitempty"`
-	Receipts   []Receipt          `json:"receipts,omitempty"`
-	TransferID string             `json:"transferId,omitempty"`
-	ID         string             `json:"id"`
-	Kind       string             `json:"kind"` // what kind of operation (Kind*)
-	Title      string             `json:"title"`
-	Time       time.Time          `json:"time"`
-	Keys       []agent.SessionKey `json:"keys"` // the sessions it created or changed
-	Entries    []Entry            `json:"entries"`
-	Undone     bool               `json:"undone,omitempty"`
+	Acknowledgments []Acknowledgment   `json:"acknowledgments,omitempty"`
+	UndoTime        time.Time          `json:"undoTime,omitempty"`
+	Receipts        []Receipt          `json:"receipts,omitempty"`
+	TransferID      string             `json:"transferId,omitempty"`
+	ID              string             `json:"id"`
+	Kind            string             `json:"kind"` // what kind of operation (Kind*)
+	Title           string             `json:"title"`
+	Time            time.Time          `json:"time"`
+	Keys            []agent.SessionKey `json:"keys"` // the sessions it created or changed
+	Entries         []Entry            `json:"entries"`
+	Undone          bool               `json:"undone,omitempty"`
+	// ReceiptOwner is globally unique and durable. The display ID is only unique
+	// inside one state directory and cannot identify a lock owner on another host.
+	ReceiptOwner string `json:"receiptOwner"`
 	// Remote are journals of the same operation kept by hopsesh on other machines (a push):
 	// undoing this one undoes them too.
 	Remote []Remote `json:"remote,omitempty"`
@@ -160,7 +165,7 @@ func New(stateDir, kind, title string) (*Journal, error) {
 		}
 		id = fmt.Sprintf("%s-%03d", base, n)
 	}
-	j := &Journal{ID: id, Kind: kind, Title: title, Time: time.Now().UTC(), dir: filepath.Join(Dir(stateDir), id)}
+	j := &Journal{ID: id, ReceiptOwner: rand.Text(), Kind: kind, Title: title, Time: time.Now().UTC(), dir: filepath.Join(Dir(stateDir), id)}
 	if err := os.MkdirAll(filepath.Join(j.dir, "backup"), 0o700); err != nil {
 		return nil, err
 	}
@@ -813,6 +818,9 @@ func (j *Journal) UndoAfter(ctx context.Context, r Reach, force bool, later []*J
 	return j.undo(ctx, r, force, func(machine, path string) bool { return touched[machine+"\x00"+path] })
 }
 func (j *Journal) undo(ctx context.Context, r Reach, force bool, skip func(string, string) bool) error {
+	if j.PendingAcknowledgments() {
+		return errors.New("remote acknowledgment is pending; recover it before undo")
+	}
 	if !force {
 		if err := j.changed(ctx, r, skip); err != nil {
 			return err

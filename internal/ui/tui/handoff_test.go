@@ -69,7 +69,7 @@ func TestHandoffFromTheList(t *testing.T) {
 	r := m.result.Handoff
 	for _, want := range []string{"✓ Handed off to Claude Code cloud", "id      " + r.Session, "↪ this session is now marked “continued in Claude Code cloud”",
 		"When it finishes: select the claude-cloud row and press enter to bring it here.", "o open in browser · y copy link · u undo",
-		"hopsesh can't send a Claude Code cloud session a message"} {
+		"hopsesh has not yet integrated and qualified Claude Code's cloud follow-up command."} {
 		if !strings.Contains(v, want) {
 			t.Errorf("the done view lacks %q:\n%s", want, v)
 		}

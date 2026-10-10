@@ -1,15 +1,21 @@
 package gui
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/roeehrl/hopsesh/agents/claude"
 	"github.com/roeehrl/hopsesh/internal/agents/all"
+	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
+	"github.com/roeehrl/hopsesh/internal/core/registry"
 	"github.com/roeehrl/hopsesh/internal/ui/desktop"
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 type fakeDesktop struct {
@@ -98,6 +104,39 @@ func TestQuickRefreshFirstScanStaysLocal(t *testing.T) {
 		t.Fatal("local refresh claims remote freshness")
 	}
 }
+
+func TestQuickPublicationRevisionDoesNotDependOnTimestamp(t *testing.T) {
+	a, _ := desktopApp(t)
+	first := &ScanDTO{Updated: "2026-10-08T19:00:00Z"}
+	second := &ScanDTO{Updated: first.Updated}
+	a.publishQuick(first)
+	before := first.Revision
+	a.publishQuick(second)
+	if before == 0 || first.Revision != before || second.Revision <= before || a.QuickSnapshot().Scan.Revision != second.Revision {
+		t.Fatal("scan publications are not immutable and ordered within a second")
+	}
+}
+func TestDiscoveryAndRuntimeUseOnePublicationOrder(t *testing.T) {
+	a, _ := desktopApp(t)
+	first := a.CachedScan()
+	snapshot := a.ScanSnapshot()
+	if snapshot.Revision <= first.Revision {
+		t.Fatal("snapshot did not advance publication order")
+	}
+	runtime := &ScanDTO{}
+	a.publishQuick(runtime)
+	if runtime.Revision <= snapshot.Revision {
+		t.Fatal("runtime publication restarted the revision clock")
+	}
+	a.publishQuick(snapshot)
+	if a.QuickSnapshot().Scan != runtime {
+		t.Fatal("late discovery replaced the newer runtime publication")
+	}
+	if snapshot.Revision >= runtime.Revision {
+		t.Fatal("publication mutated an older visible DTO")
+	}
+}
+
 func TestQuickRouteSurvivesColdWindow(t *testing.T) {
 	a, f := desktopApp(t)
 	d, err := a.RefreshHere()
@@ -109,7 +148,7 @@ func TestQuickRouteSurvivesColdWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := a.TakeQuickRoute()
-	if r == nil || r.Key != e.Key || r.Machine != e.Machine || f.opens != 1 {
+	if r == nil || r.Key != e.Key || r.Machine != e.Machine || r.Path != e.Path || f.opens != 1 {
 		t.Fatalf("route %+v", r)
 	}
 	if a.TakeQuickRoute() != nil {
@@ -120,6 +159,182 @@ func TestQuickRouteSurvivesColdWindow(t *testing.T) {
 	}
 	if len(a.TerminalTabs()) != 0 {
 		t.Fatal("selection launched a terminal")
+	}
+}
+
+func TestQuickSelectionSurvivesInitialAccountDiscovery(t *testing.T) {
+	a, f := desktopApp(t)
+	observation, err := a.core.ObserveLocal(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.inv = a.core.ObservationInventory(t.Context(), observation)
+	before := a.CachedScan()
+	old := findEntry(t, before, "claude/"+sid)
+	if old.Profile != nil {
+		t.Fatal("fixture already registered its account")
+	}
+	after, err := a.ScanAccounts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := findEntry(t, after, "claude/"+sid)
+	if current.Key == old.Key || current.Profile == nil || current.Path != old.Path {
+		t.Fatalf("fixture did not register the same native file: before=%s %s after=%s %s", old.Key, old.Path, current.Key, current.Path)
+	}
+	if err := a.QuickOpen("sessions", old.Machine, old.Key); err != nil {
+		t.Fatalf("visible native session became unselectable during account discovery: %v", err)
+	}
+	route := a.TakeQuickRoute()
+	if route == nil || route.Key != current.Key || route.Machine != current.Machine || f.opens != 1 || len(a.TerminalTabs()) != 0 {
+		t.Fatalf("Quick did not select the current account without launching a terminal: %+v", route)
+	}
+	preview, err := a.QuickPreview(old.Machine, old.Key)
+	if err != nil || preview == nil || len(preview.Items) == 0 {
+		t.Fatalf("Quick lost the existing conversation preview: %+v %v", preview, err)
+	}
+	if len(a.TerminalTabs()) != 0 || f.opens != 1 {
+		t.Fatal("preview opened a window or terminal")
+	}
+	if err := a.SaveDesktop(DesktopInput{Mode: "tray", Close: "keep", Previews: false}); err != nil {
+		t.Fatal(err)
+	}
+	if preview, err := a.QuickPreview(old.Machine, old.Key); err != nil || preview == nil || len(preview.Items) != 0 {
+		t.Fatalf("registration bypassed disabled previews: %+v %v", preview, err)
+	}
+}
+
+func TestQuickRegistrationFallbackRefusesDifferentOrUncertainAccounts(t *testing.T) {
+	for _, name := range []string{"explicit-profile", "non-default", "duplicate-default", "cached", "remote", "wrong-endpoint", "wrong-profile", "wrong-agent", "cloud", "missing-session"} {
+		t.Run(name, func(t *testing.T) {
+			a, f := desktopApp(t)
+			scan, err := a.ScanAccounts()
+			if err != nil {
+				t.Fatal(err)
+			}
+			current := findEntry(t, scan, "claude/"+sid)
+			entry, err := a.find(current.Machine, current.Key)
+			if err != nil || entry.Profile == nil {
+				t.Fatalf("missing registered fixture: %v", err)
+			}
+			profile := *entry.Profile
+			entry.Profile = &profile
+			key := "claude/" + sid
+			switch name {
+			case "explicit-profile":
+				key = "claude@missing/" + sid
+			case "non-default":
+				profile.Default = false
+			case "cached":
+				entry.Cached = true
+			case "remote":
+				a.inv.Machine(current.Machine).Local = false
+			case "wrong-endpoint":
+				profile.Endpoint = "another-machine"
+			case "wrong-profile":
+				profile.ID = "another-profile"
+			case "wrong-agent":
+				profile.Agent = "codex"
+			case "cloud":
+				entry.Location.Kind = agent.AtCloud
+			case "missing-session":
+				key = "claude/missing"
+			}
+			a.inv.Entries = []app.Entry{entry}
+			if name == "duplicate-default" {
+				other := entry
+				otherProfile := profile
+				otherProfile.ID = "another-default"
+				other.Profile = &otherProfile
+				other.Session.Key.Profile = otherProfile.ID
+				a.inv.Entries = append(a.inv.Entries, other)
+			}
+			if err := a.QuickOpen("sessions", current.Machine, key); err == nil {
+				t.Fatal("untrusted or ambiguous shorthand opened a session")
+			}
+			if a.TakeQuickRoute() != nil || f.opens != 0 || len(a.TerminalTabs()) != 0 {
+				t.Fatal("failed selection had navigation or terminal side effects")
+			}
+			preview, err := a.QuickPreview(current.Machine, key)
+			if name == "remote" {
+				if err != nil || preview == nil || len(preview.Items) != 0 {
+					t.Fatalf("Quick read a remote conversation: %+v %v", preview, err)
+				}
+			} else if err == nil {
+				t.Fatal("preview accepted an untrusted or ambiguous shorthand")
+			}
+		})
+	}
+}
+
+type heldQuickPreview struct {
+	*claude.Module
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (m *heldQuickPreview) Preview(ctx context.Context, h agent.Host, in agent.Install, s agent.Summary, n int) (agent.Preview, error) {
+	close(m.entered)
+	select {
+	case <-m.release:
+		return m.Module.Preview(ctx, h, in, s, n)
+	case <-ctx.Done():
+		return agent.Preview{}, ctx.Err()
+	}
+}
+
+func TestQuickPreviewHidesReadCompletedAfterPreviewsDisabled(t *testing.T) {
+	for _, scope := range []string{"desktop", "general"} {
+		t.Run(scope, func(t *testing.T) {
+			home(t)
+			mod := &heldQuickPreview{Module: claude.New(), entered: make(chan struct{}), release: make(chan struct{})}
+			release := sync.OnceFunc(func() { close(mod.release) })
+			defer release()
+			reg, err := registry.New(mod)
+			if err != nil {
+				t.Fatal(err)
+			}
+			a := NewApp(reg)
+			t.Cleanup(func() { _ = a.core.Catalog.Close() })
+			t.Cleanup(a.Shutdown)
+			a.Desktop = &fakeDesktop{s: desktop.State{Preferences: a.snapshot().Cfg.Desktop, Capabilities: desktop.Capabilities{Tray: true, HideApp: true}, Effective: "both"}}
+			scan, err := a.ScanAccounts()
+			if err != nil {
+				t.Fatal(err)
+			}
+			entry := findEntry(t, scan, "claude/"+sid)
+			type result struct {
+				preview *PreviewDTO
+				err     error
+			}
+			done := make(chan result, 1)
+			go func() {
+				p, err := a.QuickPreview(entry.Machine, entry.Key)
+				done <- result{p, err}
+			}()
+			select {
+			case <-mod.entered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("preview did not reach the conversation reader")
+			}
+			if scope == "desktop" {
+				err = a.SaveDesktop(DesktopInput{Mode: "tray", Close: "keep", Previews: false})
+			} else {
+				err = a.SetPreviews(false)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			release()
+			select {
+			case got := <-done:
+				if got.err != nil || got.preview == nil || len(got.preview.Items) != 0 || got.preview.First != nil || got.preview.Note == "" {
+					t.Fatalf("disabled previews returned conversation data: %+v %v", got.preview, got.err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("preview did not finish after releasing its reader")
+			}
+		})
 	}
 }
 func TestQuickAttentionLocalOnly(t *testing.T) {

@@ -7,7 +7,8 @@
 param(
   [Parameter(Mandatory)][string]$Bin,
   [Parameter(Mandatory)][string]$LinuxBin,
-  [Parameter(Mandatory)][string]$Out
+  [Parameter(Mandatory)][string]$Out,
+  [ValidatePattern('^[1-9][0-9]*/[1-9][0-9]*$')][string]$Shard = '1/1'
 )
 $ErrorActionPreference = 'Stop'
 $distro = 'Ubuntu-24.04'
@@ -74,7 +75,7 @@ Add-Content -Path 'C:\ProgramData\ssh\administrators_authorized_keys' -Value $gu
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
 $failed = 0
 Write-Host '== Windows → Linux'
-& (Join-Path (Resolve-Path $Bin).Path 'hsmatrix.exe') run -hopsesh (Join-Path (Resolve-Path $Bin).Path 'hopsesh.exe') -there "hsremote@$ip" -alias hsm-wsl -label 'windows→linux' -out (Join-Path $Out 'w2l')
+& (Join-Path (Resolve-Path $Bin).Path 'hsmatrix.exe') run -shard $Shard -hopsesh (Join-Path (Resolve-Path $Bin).Path 'hopsesh.exe') -there "hsremote@$ip" -alias hsm-wsl -label 'windows→linux' -out (Join-Path $Out 'w2l')
 if ($LASTEXITCODE -ne 0) { $failed++ }
 
 Write-Host '== Linux → Windows'
@@ -84,7 +85,7 @@ $code = InWsl @"
 printf 'Host hsm-win\n  HostName $gw\n  User $env:USERNAME\n' >> ~/.ssh/config
 cd ~
 code=0
-hsmatrix run -hopsesh /usr/local/bin/hopsesh -there '$env:USERNAME@$gw' -alias hsm-win -label 'linux→windows' -out /tmp/l2w || code=`$?
+hsmatrix run -shard '$Shard' -hopsesh /usr/local/bin/hopsesh -there '$env:USERNAME@$gw' -alias hsm-win -label 'linux→windows' -out /tmp/l2w || code=`$?
 cp -r /tmp/l2w/. '$(WslPath $l2w)/' 2>/dev/null || true
 exit `$code
 "@ 'hsremote'

@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,6 +11,22 @@ import (
 
 func TestSessionWatchExcludesProbeDiagnostics(t *testing.T) {
 	a := catalogApp(t)
+	observation, err := a.ObserveLocal(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, roots := range map[string][]string{"standalone": a.sessionWatchRoots(t.Context()), "shared runtime": observation.WatchRoots} {
+		t.Run(name, func(t *testing.T) { checkSessionWatchRoots(t, roots) })
+	}
+}
+
+func checkSessionWatchRoots(t *testing.T, roots []string) {
+	t.Helper()
+	home, _ := os.UserHomeDir()
+	registry := filepath.Join(home, ".claude", "sessions", "1234.json")
+	if err := os.MkdirAll(filepath.Dir(registry), 0700); err != nil {
+		t.Fatal(err)
+	}
 	changed := make(chan string, 20)
 	watch, err := observe.NewFiles(4096, func() {})
 	if err != nil {
@@ -19,10 +34,9 @@ func TestSessionWatchExcludesProbeDiagnostics(t *testing.T) {
 	}
 	defer watch.Close()
 	watch.SetChanged(func(path string) { changed <- path })
-	if err = watch.SetRoots(a.sessionWatchRoots(context.Background())); err != nil {
+	if err = watch.SetRoots(roots); err != nil {
 		t.Fatal(err)
 	}
-	home, _ := os.UserHomeDir()
 	debug := filepath.Join(home, ".claude", "debug")
 	if err = os.MkdirAll(debug, 0700); err != nil {
 		t.Fatal(err)
@@ -45,8 +59,11 @@ func TestSessionWatchExcludesProbeDiagnostics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err = os.WriteFile(registry, []byte(`{"pid":1234,"status":"idle"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
 	deadline := time.After(2 * time.Second)
-	seen := false
+	seen, presenceSeen := false, false
 	for {
 		select {
 		case path := <-changed:
@@ -56,9 +73,15 @@ func TestSessionWatchExcludesProbeDiagnostics(t *testing.T) {
 			if path == file {
 				seen = true
 			}
+			if path == registry {
+				presenceSeen = true
+			}
 		case <-deadline:
 			if !seen {
 				t.Fatal("session change was not detected")
+			}
+			if !presenceSeen {
+				t.Fatal("process registry change was not detected")
 			}
 			return
 		}

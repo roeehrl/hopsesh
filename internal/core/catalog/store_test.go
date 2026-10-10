@@ -59,6 +59,31 @@ func TestSummaryInvalidationAndNegativeResult(t *testing.T) {
 	}
 }
 
+func TestInvalidationDoesNotCreateUnusedCatalog(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "state")
+	s := New(dir)
+	defer s.Close()
+	s.InvalidatePath("changed-session")
+	s.Invalidate()
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("invalidation created unused state: %v", err)
+	}
+	// A catalog created later by another front end must still be invalidated.
+	writer := New(dir)
+	defer writer.Close()
+	writer.Save("scope", "changed-session", "same-signature", "old")
+	s.InvalidatePath("changed-session")
+	var got string
+	if writer.Load("scope", "changed-session", "same-signature", &got) {
+		t.Fatal("late-created catalog retained stale summary")
+	}
+	writer.Save("scope", "other-session", "signature", "old")
+	s.Invalidate()
+	if writer.Load("scope", "other-session", "signature", &got) {
+		t.Fatal("whole-catalog invalidation retained stale summary")
+	}
+}
+
 func TestCloseReleasesCatalogFiles(t *testing.T) {
 	dir := t.TempDir()
 	s := New(dir)

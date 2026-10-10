@@ -8,10 +8,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
+	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/internal/testkit/fakecloud"
 )
 
@@ -74,12 +74,23 @@ func (remoteSide) label() string { return "there" }
 
 func (s remoteSide) do(op string, in, out any) error {
 	b, _ := json.Marshal(in)
-	cmd := exec.Command("ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "LogLevel=ERROR", s.dest, s.helper+" agent "+op)
+	logLevel := "ERROR"
+	if os.Getenv("HOPSESH_MATRIX_SSH_DEBUG") == "1" {
+		logLevel = "DEBUG2"
+	}
+	cmd := exec.Command("ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "LogLevel="+logLevel, s.dest, s.helper+" agent "+op)
 	cmd.Stdin = bytes.NewReader(b)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	started := time.Now()
 	err := cmd.Run()
+	// Keep connection diagnostics for failed disposable mesh commands without
+	// flooding every successful journey or changing any retry/deadline behavior.
+	if err == nil && logLevel == "DEBUG2" {
+		stderr.Reset()
+	}
 	if s.log != nil {
+		s.log.printf("helper endpoint=%s operation=%s elapsed=%s\n", s.dest, op, time.Since(started).Round(time.Millisecond))
 		s.log.printf("there$ hsmatrix agent %s %s\n%s%s", op, b, stdout.String(), stderr.String())
 	}
 	if err != nil {
@@ -137,9 +148,26 @@ var contents = map[string]string{
 // result is one row's outcome.
 type result struct {
 	Row     Row     `json:"row"`
+	Status  string  `json:"status"`
 	OK      bool    `json:"ok"`
 	Error   string  `json:"error,omitempty"`
+	Reason  string  `json:"reason,omitempty"`
 	Seconds float64 `json:"seconds"`
+}
+
+type unsupportedScenario string
+
+func (e unsupportedScenario) Error() string { return string(e) }
+
+func rowOutcome(err error) result {
+	if err == nil {
+		return result{Status: "passed", OK: true}
+	}
+	var unsupported unsupportedScenario
+	if errors.As(err, &unsupported) {
+		return result{Status: "unsupported", Reason: string(unsupported)}
+	}
+	return result{Status: "failed", Error: err.Error()}
 }
 
 func (r *runner) run(row Row) (res result) {
@@ -148,17 +176,14 @@ func (r *runner) run(row Row) (res result) {
 	r.there.log = r.log
 	r.log.printf("== %s\n", row)
 	defer func() {
-		res.Row, res.Seconds = row, time.Since(start).Seconds()
 		if p := recover(); p != nil {
-			res.Error = fmt.Sprint(p)
+			res = rowOutcome(fmt.Errorf("scenario panic: %v", p))
 		}
-		res.OK = res.Error == ""
-		name := fmt.Sprintf("row-%03d-%s.log", row.N, map[bool]string{true: "ok", false: "FAIL"}[res.OK])
-		_ = os.WriteFile(filepath.Join(r.out, name), []byte(r.log.b.String()+"\n"+res.Error+"\n"), 0o644)
+		res.Row, res.Seconds = row, time.Since(start).Seconds()
+		name := fmt.Sprintf("row-%03d-%s.log", row.N, res.Status)
+		_ = os.WriteFile(filepath.Join(r.out, name), []byte(r.log.b.String()+"\n"+res.Error+"\n"+res.Reason+"\n"), 0o644)
 	}()
-	if err := r.scenario(row); err != nil {
-		res.Error = err.Error()
-	}
+	res = rowOutcome(r.scenario(row))
 	return
 }
 
@@ -218,6 +243,8 @@ func (r *runner) scenario(row Row) error {
 		return r.push(s)
 	case "roundtrip", "quiet-roundtrip":
 		return r.roundtrip(s)
+	case "repeat-roundtrip", "fork-roundtrip":
+		return r.repeatRoundtrip(s)
 	case "conflict":
 		return r.conflict(s)
 	case "undo-used":
@@ -543,10 +570,6 @@ func (r *runner) skill() error {
 // cloud's branch under hopsesh/from/claude-cloud/ (or says none was pushed), continues it in
 // Codex for claude→codex rows, and undo takes it all back.
 func (r *runner) fetch(row Row) error {
-	if runtime.GOOS == "windows" {
-		r.log.printf("skipped: the stand-in cloud's repository hook needs a POSIX shell\n")
-		return nil
-	}
 	if row.Location == "codex-cloud" {
 		return r.fetchCodex(row)
 	}
@@ -695,7 +718,7 @@ func (r *runner) fetchCodex(row Row) error {
 	head, _ := git(sr.Cwd, nil, "rev-parse", "HEAD")
 	title := contents[row.Content] + " " + marker
 	cs, err := fakecloud.Open(os.Getenv("FAKE_CLOUD_DIR")).Seed(fakecloud.Session{Cloud: fakecloud.CodexCloud, Title: title, Repo: "github.com/hsm-matrix/" + name,
-		CloneURL: o.FileURL(), Branch: "main", Base: strings.TrimSpace(head), Code: "branch", Env: "env_hsm", EnvLabel: "hsm",
+		CloneURL: o.FileURL(), Branch: "main", Base: strings.TrimSpace(head), Code: "branch", Env: "env_hsm_" + name, EnvLabel: name,
 		Messages: []fakecloud.Message{{Role: "user", Text: title}}})
 	if err != nil {
 		return err
@@ -803,10 +826,6 @@ func (r *runner) cloudWorld(name string) (fakecloud.Origin, func(), error) {
 // brings the session home through the bring-back path. Undo takes it all back (the branch
 // with a lease; the cloud session stays, as a step owed).
 func (r *runner) handoff(row Row) error {
-	if runtime.GOOS == "windows" {
-		r.log.printf("skipped: the stand-in cloud's repository hook needs a POSIX shell\n")
-		return nil
-	}
 	id := newID()
 	marker := fmt.Sprintf("hsm%03dx%s", row.N, id[:6])
 	text := contents[row.Content] + " " + marker
@@ -827,7 +846,7 @@ func (r *runner) handoff(row Row) error {
 	}
 	to := []string{"--to", cloud}
 	if cloud == "codex-cloud" {
-		to = append(to, "--env", "env_hsm")
+		to = append(to, "--env", "env_hsm_"+name)
 	}
 	ref := row.From + "/" + id
 	if row.Repo == "none" {
@@ -974,10 +993,6 @@ func (r *runner) handoff(row Row) error {
 // this terminal, where Claude Code starts it). The second cloud's briefing carries the
 // row's words; one undo takes both legs back.
 func (r *runner) cloudHop(row Row) error {
-	if runtime.GOOS == "windows" {
-		r.log.printf("skipped: the stand-in cloud's repository hook needs a POSIX shell\n")
-		return nil
-	}
 	id := newID()
 	marker := fmt.Sprintf("hsm%03dx%s", row.N, id[:6])
 	title := contents[row.Content] + " " + marker
@@ -1002,7 +1017,7 @@ func (r *runner) cloudHop(row Row) error {
 	seed := fakecloud.Session{Cloud: fakecloud.ClaudeCloud, Title: title, Repo: "github.com/hsm-matrix/" + name, CloneURL: o.FileURL(), Branch: "main",
 		Base: strings.TrimSpace(head), Code: "branch", Messages: []fakecloud.Message{{Role: "user", Text: title}, {Role: "assistant", Text: "On it."}}} // started on the web
 	if from == "codex-cloud" {
-		seed.Cloud, seed.Env, seed.EnvLabel, seed.Messages = fakecloud.CodexCloud, "env_hsm", "hsm", []fakecloud.Message{{Role: "user", Text: title}}
+		seed.Cloud, seed.Env, seed.EnvLabel, seed.Messages = fakecloud.CodexCloud, "env_hsm_"+name, name, []fakecloud.Message{{Role: "user", Text: title}}
 	}
 	cs, err := fakecloud.Open(os.Getenv("FAKE_CLOUD_DIR")).Seed(seed)
 	if err != nil {
@@ -1018,7 +1033,7 @@ func (r *runner) cloudHop(row Row) error {
 		}
 	}
 	if from == "codex-cloud" {
-		if _, err := r.hs(true, "clouds", "env", "codex-cloud", "github.com/hsm-matrix/"+name, "env_hsm"); err != nil {
+		if _, err := r.hs(true, "clouds", "env", "codex-cloud", "github.com/hsm-matrix/"+name, "env_hsm_"+name); err != nil {
 			return err
 		}
 	} else if _, err := r.hs(true, "plan", "https://claude.ai/code/"+cs.ID, "--to", sr.Cwd, "--json"); err != nil {
@@ -1026,7 +1041,7 @@ func (r *runner) cloudHop(row Row) error {
 	}
 	args := []string{"handoff", from + ":" + cs.ID, "--to", to, "--to-dir", sr.Cwd, "--yes", "--json"}
 	if to == "codex-cloud" {
-		args = append(args, "--env", "env_hsm")
+		args = append(args, "--env", "env_hsm_"+name)
 	}
 	run := r.hs
 	if to == "claude-cloud" {
@@ -1093,7 +1108,12 @@ func checkMovement(f Found, transfers int, notify, fork bool) error {
 	if f.Graph == nil {
 		return fmt.Errorf("%s: missing movement receipt", f.Path)
 	}
-	hops := f.Graph.ActiveHops()
+	var hops []lineage.Hop
+	for _, h := range f.Graph.ActiveHops() {
+		if h.Line == f.Graph.Branch {
+			hops = append(hops, h)
+		}
+	}
 	if len(hops) != transfers {
 		return fmt.Errorf("%s: movements=%d, want %d", f.Path, len(hops), transfers)
 	}

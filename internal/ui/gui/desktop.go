@@ -1,16 +1,16 @@
 package gui
 
 import (
-	"context"
 	"errors"
 	"runtime"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/ui/desktop"
+	"github.com/roeehrl/hopsesh/sdk/agent"
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 const QuickEvent = "hopsesh:quick"
@@ -29,20 +29,20 @@ type DesktopShell interface {
 	Stop()
 }
 type quickState struct {
-	presence   *PresenceDTO
 	mu         sync.Mutex
 	scan       *ScanDTO
 	err        string
 	route      *QuickRoute
 	refreshing atomic.Bool
-	cancel     context.CancelFunc
 }
 type QuickRoute struct {
 	Screen  string `json:"screen"`
 	Machine string `json:"machine"`
 	Key     string `json:"key"`
+	Path    string `json:"path,omitempty"` // browsing identity across initial default-account registration
 }
 type QuickDTO struct {
+	Runtime    RuntimeDTO    `json:"runtime"`
 	Agents     []AgentDTO    `json:"agents"`
 	Presence   *PresenceDTO  `json:"presence"`
 	Scan       *ScanDTO      `json:"scan"`
@@ -58,53 +58,18 @@ type QuickDTO struct {
 func (a *App) AttachDesktop(main *application.WebviewWindow) {
 	a.Desktop = desktop.New(a.Wails, main, a.snapshot().Cfg.Desktop, a.Terms.Privileged, func(screen string) { _ = a.QuickOpen(screen, "", "") }, func() { a.emit(QuickEvent, nil) })
 	a.Terms.RaiseMain = a.Desktop.OpenMain
-	ctx, cancel := context.WithCancel(context.Background())
-	a.quick.cancel = cancel
-	go func() {
-		ticker := time.NewTicker(5 * time.Second)
-		lastScan, lastPresence := time.Time{}, time.Time{}
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if shell, ok := a.Desktop.(interface{ Suspended() bool }); ok && shell.Suspended() {
-					continue
-				}
-				fg := false
-				if shell, ok := a.Desktop.(interface{ Foreground() bool }); ok {
-					fg = shell.Foreground()
-				}
-				a.quick.mu.Lock()
-				scanned := a.quick.scan
-				a.quick.mu.Unlock()
-				if scanned != nil {
-					if at, err := time.Parse(time.RFC3339, scanned.Updated); err == nil && at.After(lastScan) {
-						lastScan = at
-					}
-				}
-				if time.Since(lastScan) >= time.Minute {
-					a.refreshQuick()
-					lastScan = time.Now()
-				}
-				interval := 30 * time.Second
-				if fg {
-					interval = 5 * time.Second
-				}
-				if time.Since(lastPresence) >= interval {
-					if p, err := a.Presence(); err == nil {
-						a.quick.mu.Lock()
-						a.quick.presence = p
-						a.quick.mu.Unlock()
-						a.updateQuickAttention()
-						a.emit(QuickEvent, nil)
-					}
-					lastPresence = time.Now()
-				}
-			}
-		}
-	}()
+	if err := a.connectRuntime(); err != nil {
+		a.backend.mu.Lock()
+		a.backend.problem = err.Error()
+		a.backend.mu.Unlock()
+	}
+	for _, event := range []events.ApplicationEventType{events.Common.SystemWillSleep, events.Common.ScreenLocked} {
+		a.Wails.Event.OnApplicationEvent(event, func(*application.ApplicationEvent) { a.runtimeSleep(true) })
+	}
+	for _, event := range []events.ApplicationEventType{events.Common.SystemDidWake, events.Common.ScreenUnlocked} {
+		a.Wails.Event.OnApplicationEvent(event, func(*application.ApplicationEvent) { go a.runtimeSleep(false) })
+	}
+
 }
 func (a *App) DesktopSettings() desktop.State {
 	if a.Desktop != nil {
@@ -173,20 +138,26 @@ func (a *App) QuickSnapshot() QuickDTO {
 	}
 	a.quick.mu.Lock()
 	scan, err := a.quick.scan, a.quick.err
-	presence := a.quick.presence
 	a.quick.mu.Unlock()
 	a.mu.Lock()
 	agents := a.agentsLocked()
 	a.mu.Unlock()
-	return QuickDTO{Agents: agents, Presence: presence, Scan: scan, Tabs: a.TerminalTabs(), Desktop: a.DesktopSettings(), OS: runtime.GOOS, Refreshing: a.quick.refreshing.Load(), Error: err}
+	live, _ := a.Presence()
+	return QuickDTO{Runtime: a.RuntimeStatus(), Agents: agents, Presence: live, Scan: scan, Tabs: a.TerminalTabs(), Desktop: a.DesktopSettings(), OS: runtime.GOOS, Refreshing: a.quick.refreshing.Load(), Error: err}
 }
 
 // publishQuick shares immutable scan DTOs. It never starts a second inventory or
 // creates an independent remote scan loop.
 func (a *App) publishQuick(scan *ScanDTO) {
 	a.quick.mu.Lock()
+	if scan.Revision == 0 {
+		scan.Revision = a.scanRevision.Add(1)
+	}
+	if a.quick.scan != nil && scan.Revision <= a.quick.scan.Revision {
+		a.quick.mu.Unlock()
+		return
+	}
 	a.quick.scan = scan
-	a.quick.presence = nil
 	a.quick.err = ""
 	a.quick.mu.Unlock()
 	a.updateQuickAttention()
@@ -198,7 +169,6 @@ func (a *App) updateQuickAttention() {
 	}
 	a.quick.mu.Lock()
 	scan := a.quick.scan
-	presence := a.quick.presence
 	a.quick.mu.Unlock()
 	needs := map[string]bool{}
 	if scan != nil {
@@ -212,11 +182,7 @@ func (a *App) updateQuickAttention() {
 				}
 				k := e.Machine + "\x00" + e.Key
 				waiting := e.Needs
-				if presence != nil {
-					if p, ok := presence.Entries[k]; ok {
-						waiting = p.Needs
-					}
-				}
+
 				if local && waiting {
 					needs[k] = true
 				}
@@ -264,24 +230,87 @@ func (a *App) QuickPreview(machine, key string) (*PreviewDTO, error) {
 	if !local {
 		return &PreviewDTO{Items: []PreviewItemDTO{}, Note: "Open session details to read the conversation on its machine."}, nil
 	}
-	return a.Preview(machine, key, 2)
+	var err error
+	key, err = a.quickSelectionKey(machine, key)
+	if err != nil {
+		return nil, err
+	}
+	preview, err := a.Preview(machine, key, 2)
+	// The user can hide Quick previews while the native conversation is read.
+	// Recheck before returning content, including the first-message summary.
+	if !a.DesktopSettings().Preferences.PreviewsOn() {
+		return &PreviewDTO{Items: []PreviewItemDTO{}, Note: "Message previews are hidden."}, nil
+	}
+	return preview, err
 }
+
+// Initial account discovery scopes the default root's previously unscoped
+// session keys. Resolve that browsing-only shorthand like the core's default
+// account lookup. Explicit profiles never migrate, and a cached/remote/ambiguous
+// account cannot supply this transition. Transfers retain their strict keys.
+func (a *App) quickSelectionKey(machine, key string) (string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.quickSelectionKeyLocked(machine, key)
+}
+
+func (a *App) quickSelectionKeyLocked(machine, key string) (string, error) {
+	_, original := a.find(machine, key)
+	if original == nil {
+		return key, nil
+	}
+	want, err := agent.ParseKey(key)
+	if err != nil || want.Profile != "" || a.inv == nil {
+		return "", original
+	}
+	m := a.inv.Machine(machine)
+	if m == nil || !m.Local || m.Host() == nil || m.Host().Facts.Endpoint == "" {
+		return "", original
+	}
+	resolved := ""
+	for _, e := range a.inv.Entries {
+		p := e.Profile
+		if e.Machine != machine || e.Cached || e.Location.IsCloud() || e.Session.Key.Agent != want.Agent || e.Session.Key.Session != want.Session {
+			continue
+		}
+		// Profile.Error can describe an unavailable sign-in check. Browsing a
+		// freshly observed conversation does not require a working agent CLI.
+		if p == nil || !p.Default || p.ID == "" || p.ID != e.Session.Key.Profile || p.Agent != want.Agent || p.Endpoint != m.Host().Facts.Endpoint {
+			continue
+		}
+		if resolved != "" {
+			return "", original
+		}
+		resolved = e.Session.Key.String()
+	}
+	if resolved == "" {
+		return "", original
+	}
+	return resolved, nil
+}
+
 func (a *App) QuickOpen(screen, machine, key string) error {
 	switch screen {
 	case "sessions", "settings", "terminals":
 	default:
 		return errors.New("unknown Quick access destination")
 	}
+	path := ""
 	if machine != "" || key != "" {
+		var err error
 		a.mu.Lock()
-		_, err := a.find(machine, key)
+		key, err = a.quickSelectionKeyLocked(machine, key)
+		if err == nil {
+			e, _ := a.find(machine, key)
+			path = e.Session.Path
+		}
 		a.mu.Unlock()
 		if err != nil {
 			return err
 		}
 	}
 	a.quick.mu.Lock()
-	a.quick.route = &QuickRoute{Screen: screen, Machine: machine, Key: key}
+	a.quick.route = &QuickRoute{Screen: screen, Machine: machine, Key: key, Path: path}
 	a.quick.mu.Unlock()
 	if a.Desktop != nil {
 		a.Desktop.OpenMain()
@@ -314,30 +343,11 @@ func (a *App) QuickQuit() {
 
 // InitialScan does not contact remote machines during a quiet login launch.
 func (a *App) InitialScan() (*ScanDTO, error) {
-	if a.watchLocal {
-		a.watchOnce.Do(func() {
-			ctx, cancel := context.WithCancel(context.Background())
-			a.mu.Lock()
-			a.watchCancel = cancel
-			a.watchDone = make(chan struct{})
-			watchDone := a.watchDone
-			a.mu.Unlock()
-			core := a.snapshot()
-			go func() {
-				defer close(watchDone)
-				core.WatchSessions(ctx, func() {
-					a.mu.Lock()
-					reviewing := a.plan != nil && a.res == nil || a.push != nil
-					a.mu.Unlock()
-					if !reviewing {
-						go a.refreshQuick()
-					}
-				}, a.snapshot)
-			}()
-		})
-	}
 	if shell, ok := a.Desktop.(interface{ BackgroundLaunch() bool }); ok && shell.BackgroundLaunch() {
 		return a.RefreshHere()
+	}
+	if err := a.connectRuntime(); err != nil {
+		return nil, err
 	}
 	return a.Scan()
 }

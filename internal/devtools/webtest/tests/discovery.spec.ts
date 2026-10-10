@@ -41,19 +41,21 @@ test('unrelated discovery and presence updates preserve the selected conversatio
  await expect(details(page).getByRole('button',{name:'Recent conversation',exact:true})).toBeFocused();
 });
 
-test('recent local discoveries do not postpone remote reconciliation',async({page})=>{
- await page.clock.install();await fresh(page);await page.bringToFront();let scans=0;
+test('local publications share runtime refresh without browser remote polling',async({page})=>{
+ await page.clock.install();await fresh(page);let scans=0,refreshes=0;
  await page.route('**/call',async route=>{
-  if(route.request().postDataJSON().m!=='Scan')return route.continue();
-  scans++;const result=await page.evaluate(async()=>{const path='/core.js';return structuredClone((await import(path)).state.scan)});
-  result.updated=result.elsewhere=new Date().toISOString();result.revision+=100;result.discovering=false;
-  await route.fulfill({json:{result}});
+  const method=route.request().postDataJSON().m;
+  if(method==='Scan'||method==='RefreshHere'||method==='Presence')scans++;
+  if(method==='RuntimeRefresh'){refreshes++;await route.fulfill({json:{result:null}});return;}
+  return route.continue();
  });
  await page.evaluate(async()=>{const path='/core.js',core=await import(path);core.state.scan.updated=new Date().toISOString();core.state.scan.elsewhere=new Date(Date.now()-11*60000).toISOString()});
- await page.clock.fastForward(16000);
- await expect.poll(()=>scans).toBe(1);
+ await page.clock.fastForward(11*60000);
+ expect(scans).toBe(0);
+ await page.evaluate(()=>window.dispatchEvent(new Event('focus')));
+ await expect.poll(()=>refreshes).toBe(1);
+ expect(scans).toBe(0);
 });
-
 
 test('Quick and terminal updates cannot replace a pressed row or an open menu',async({page})=>{
  await fresh(page);await row(page,'Find the codeword').click();
@@ -67,4 +69,19 @@ test('Quick and terminal updates cannot replace a pressed row or an open menu',a
  await page.evaluate(()=>{(window as any).__menu=document.querySelector('[role=menu]');(window as any).__emit('hopsesh:terminal',{id:'unrelated',state:'exited'})});
  await page.waitForTimeout(250);await expect(page.getByRole('menu')).toBeVisible();expect(await page.evaluate(()=>document.querySelector('[role=menu]')===(window as any).__menu)).toBeTruthy();
  await page.keyboard.press('Escape');
+});
+
+test('initial discovery completion preserves the control pressed after early results',async({page})=>{
+ await page.request.post('/reset');const wait=gate();
+ await page.route('**/call',async route=>{if(route.request().postDataJSON().m!=='InitialScan')return route.continue();const response=await route.fetch();await wait.promise;await route.fulfill({response});});
+ try {
+  await page.goto('/');await row(page,'Find the codeword').click();
+  const button=page.getByRole('button',{name:'More actions',exact:true});await button.hover();
+  await button.evaluate(el=>{(window as any).__initialPressed=el});
+  await page.mouse.down();wait.release();
+  await expect.poll(()=>page.evaluate(async()=>{const path='/core.js';return (await import(path)).state.scanning})).toBe(false);
+  expect(await page.evaluate(()=>(window as any).__initialPressed===document.querySelector('#act-more'))).toBeTruthy();
+  await page.mouse.up();
+  await expect(page.getByRole('menuitem',{name:'Open transcript',exact:true})).toBeVisible();
+ } finally {wait.release()}
 });

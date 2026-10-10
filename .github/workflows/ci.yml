@@ -39,7 +39,7 @@ jobs:
           go-version-file: go.mod
       - name: GUI build dependencies (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
+        run: bash scripts/install-ci-dependencies.sh libgtk-4-dev libwebkitgtk-6.0-dev
       - name: vet
         run: go vet ./...
       - name: the terminal's bundled pseudoconsole (Windows)
@@ -58,6 +58,19 @@ jobs:
         uses: test-summary/action@37b508cfee6d4d080eedd00b5bb240a6a784a6a5 # v2.6
         with:
           paths: junit-${{ matrix.family }}.xml
+      - name: ordered journey orchestrator over authenticated loopback SSH
+        if: runner.os != 'Windows'
+        env:
+          HOPSESH_JOURNEY_TEST: "1"
+        run: |
+          # Each family retains all four agent assignments and both fork modes.
+          # The fixture's five-minute deadline bounds one family, rather than
+          # expiring midway through 24 sequential journeys on a slower runner.
+          result=0
+          for route in ABCA ABCBCAB ABCACBA; do
+            go test -race -count=1 -v -run "^TestJourneyCLIOverSSH$/^${route}-" -timeout 6m ./internal/devtools/hsmatrix || result=1
+          done
+          exit "$result"
       - name: tests that passed only on a rerun
         if: ${{ !cancelled() && hashFiles('reruns.txt') != '' }}
         shell: bash
@@ -70,6 +83,127 @@ jobs:
           retention-days: 7
       - name: build
         run: go build -trimpath ./cmd/hopsesh
+
+  relay:
+    name: encrypted relay (${{ matrix.family }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {family: linux, os: ubuntu-24.04}
+          - {family: macos, os: macos-15}
+          - {family: windows, os: windows-2025}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: infrastructure/relay/package-lock.json
+      - run: npm ci
+        working-directory: infrastructure/relay
+      - name: deployed handler contracts, auth, quotas, retention and cursors
+        run: npm test
+        working-directory: infrastructure/relay
+      - name: actual Worker handler with native encrypted endpoints
+        shell: bash
+        env:
+          HOPSESH_RELAY_REQUIRE_NODE: "1"
+        run: go test -race -count=1 -timeout 5m ./internal/core/relay ./internal/core/cloudintegration ./internal/localstate ./internal/core/runtime ./internal/config ./internal/archtest
+      - name: relay transfer restart and peer-owned undo
+        shell: bash
+        env:
+          HOPSESH_RELAY_REQUIRE_NODE: "1"
+        run: go test -race -count=1 -v -run 'TestRelayPush|TestCloudAdmissionSQLiteR2' -timeout 5m ./internal/e2e
+      - name: headless browser approval and native S256 callback
+        shell: bash
+        env:
+          HOPSESH_RELAY_REQUIRE_NODE: "1"
+        run: go test -race -count=1 -run TestRelayEnrollment -timeout 2m ./internal/e2e
+      - name: one observer with zero, one and multiple idle clients
+        shell: bash
+        run: go test -race -count=1 -run TestRuntimeIdleClients -timeout 2m ./internal/e2e
+      - name: actual cross-user namespace, state and IPC isolation
+        shell: bash
+        env:
+          HOPSESH_RUNTIME_CROSS_USER: "1"
+        run: go test -race -count=1 -v -run '^TestRuntimeDifferentOSUserIsolation$' -timeout 2m ./internal/core/runtime
+      - name: prepare disposable Linux user manager
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo loginctl enable-linger "$(id -un)"
+          sudo systemctl start "user@$(id -u).service"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
+      - name: native user service handover and repeated lifecycle
+        shell: bash
+        env:
+          HOPSESH_RUNTIME_SERVICE: "1"
+        run: go test -race -count=1 -run TestRuntimeNativeUserServiceLifecycle -timeout 2m ./internal/e2e
+      - name: actual SQLite/R2 transfers and cloud checkpoints
+        shell: bash
+        env:
+          HOPSESH_RELAY_REQUIRE_NODE: "1"
+          HOPSESH_RELAY_PLATFORM: "1"
+        run: go test -race -count=1 -v -run 'TestRelayPush|TestCloudAdmissionSQLiteR2|TestCloudRebuildCheckpointSQLiteR2|TestCloudHandoffCheckpointSQLiteR2' -timeout 5m ./internal/e2e
+      - name: actual SQLite/R2 push routes and independent forks
+        shell: bash
+        env:
+          HOPSESH_RELAY_REQUIRE_NODE: "1"
+          HOPSESH_RELAY_PLATFORM: "1"
+        run: |
+          # Each route retains its one-minute fixture deadline. Separate route
+          # families so ten sequential Windows scenarios do not share one 5m budget.
+          result=0
+          for route in ABABA ABCA ABCBCAB independent-original-and-sibling-forks; do
+            go test -race -count=1 -v -run "^TestRelayLineageSQLiteR2$/^push$/^${route}$" -timeout 5m ./internal/e2e || result=1
+          done
+          exit "$result"
+      - name: actual SQLite/R2 pull routes and independent forks
+        shell: bash
+        env:
+          HOPSESH_RELAY_REQUIRE_NODE: "1"
+          HOPSESH_RELAY_PLATFORM: "1"
+        run: |
+          result=0
+          for route in ABABA ABCA ABCBCAB independent-original-and-sibling-forks; do
+            go test -race -count=1 -v -run "^TestRelayLineageSQLiteR2$/^pull$/^${route}$" -timeout 5m ./internal/e2e || result=1
+          done
+          exit "$result"
+      - name: actual SQLite/R2 notifications, load and resource bounds
+        shell: bash
+        env:
+          HOPSESH_RELAY_REQUIRE_NODE: "1"
+          HOPSESH_RELAY_PLATFORM: "1"
+        run: go test -race -count=1 -v -run 'TestRelayOperatorBudgetSQLiteR2|TestRelayLoadSQLiteR2|TestRuntimeRelayThreeProfilesThreePeersSQLiteR2|TestRelayObservationChangesSQLiteR2' -timeout 5m ./internal/e2e
+      - name: authenticated SSH and relay mixed journeys
+        shell: bash
+        env:
+          HOPSESH_RELAY_REQUIRE_NODE: "1"
+          HOPSESH_RELAY_PLATFORM: "1"
+        run: go test -race -count=1 -v -run '^TestMixedTransportLineageSQLiteR2$' -timeout 5m ./internal/e2e
+      - name: accepted relay plans refuse changed source and destination accounts
+        shell: bash
+        env:
+          HOPSESH_RELAY_REQUIRE_NODE: "1"
+          HOPSESH_RELAY_PLATFORM: "1"
+        run: go test -race -count=1 -v -run 'TestRelayAccountRebindingSQLiteR2|TestRelayPlatformDiagnosticsSQLiteR2|TestRelayRejectedUploadSQLiteR2|TestRelayAdmissionIdleSQLiteR2' -timeout 5m ./internal/e2e
+      - name: runtime, transport, permission and recovery covering pairs
+        shell: bash
+        run: go run ./internal/devtools/hsmatrix runtime-run -t 2 -out "$RUNNER_TEMP/runtime-matrix" -timeout 15m
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: runtime-matrix-${{ matrix.family }}
+          path: ${{ runner.temp }}/runtime-matrix
+          retention-days: 7
 
   lint:
     runs-on: ubuntu-24.04
@@ -84,7 +218,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
+      - run: bash scripts/install-ci-dependencies.sh libgtk-4-dev libwebkitgtk-6.0-dev
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.14.0
@@ -102,7 +236,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
+      - run: bash scripts/install-ci-dependencies.sh libgtk-4-dev libwebkitgtk-6.0-dev
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
   testbundle:
@@ -180,7 +314,8 @@ jobs:
           cache: npm
           cache-dependency-path: internal/devtools/webtest/package-lock.json
       - name: GUI build dependencies
-        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
+        working-directory: .
+        run: bash scripts/install-ci-dependencies.sh libgtk-4-dev libwebkitgtk-6.0-dev
       - run: npm ci
       - run: npx playwright install --with-deps chromium webkit
       - name: window tests (Chromium and WebKit, the real service on a demo home)
@@ -225,16 +360,21 @@ jobs:
       - run: scripts/password-test.sh
 
   scenarios:
-    name: scenarios (${{ matrix.family }})
+    name: scenarios (${{ matrix.family }}${{ matrix.shard && format(' {0}', matrix.shard) || '' }})
+    # Windows exceeded the shared 45m job budget after 76 passing rows.
+    # Partition every row; keep stateful suites once and all scenario deadlines.
     strategy:
       fail-fast: false
       matrix:
         include:
           - {family: linux, os: ubuntu-24.04}
           - {family: macos, os: macos-15}
-          - {family: windows, os: windows-2025}
+          - {family: windows, os: windows-2025, shard: 1/4}
+          - {family: windows, os: windows-2025, shard: 2/4}
+          - {family: windows, os: windows-2025, shard: 3/4}
+          - {family: windows, os: windows-2025, shard: 4/4}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
@@ -256,18 +396,22 @@ jobs:
       # These durable-write suites can exceed one shared ten-minute deadline on
       # Windows. Keep every route and the race detector, with bounded batches.
       - name: mandatory stateful movement and instruction routes
+        if: ${{ !matrix.shard || matrix.shard == '1/4' }}
         shell: bash
         run: |
           go test ./internal/e2e -run 'TestMovement|TestInstruction' -race -count=1 -timeout 10m
       - name: mandatory lineage and context routes, forks and recovery
+        if: ${{ !matrix.shard || matrix.shard == '1/4' }}
         shell: bash
         run: |
           go test ./internal/e2e -run 'TestLineage|TestContext' -race -count=1 -timeout 10m
       - name: mandatory account routes and progressive discovery
+        if: ${{ !matrix.shard || matrix.shard == '1/4' }}
         shell: bash
         run: |
           go test ./internal/e2e -run 'TestAccountProfile|TestSessionDiscovery' -race -count=1 -timeout 10m
       - name: mandatory account, notice-hook and discovery scenarios
+        if: ${{ !matrix.shard || matrix.shard == '1/4' }}
         shell: bash
         run: |
           go test ./internal/e2e/scenario -run 'TestScenarios/(accounts|notice-hook|session-discovery)' -race -count=1 -timeout 3m
@@ -277,18 +421,24 @@ jobs:
       - name: scenario matrix over loopback SSH
         if: runner.os == 'Windows'
         shell: pwsh
-        run: ./scripts/matrix-loopback.ps1 -Bin bin -Label "windows→windows" -Out "$env:RUNNER_TEMP\hsmatrix"
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: ./scripts/matrix-loopback.ps1 -Bin bin -Label "windows→windows $env:SHARD" -Out "$env:RUNNER_TEMP\hsmatrix" -Shard $env:SHARD
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: ${{ failure() }}
+        if: always()
         with:
-          name: scenarios-${{ matrix.family }}
+          name: scenarios-${{ matrix.family }}-${{ strategy.job-index }}
           path: |
             ${{ runner.temp }}/hsmatrix/*.log
             ${{ runner.temp }}/hsmatrix/*.json
           retention-days: 7
 
   os-pairs-windows-linux:
-    name: os pairs (windows↔linux)
+    name: os pairs (windows↔linux ${{ matrix.shard }}/4)
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     runs-on: windows-2025
     timeout-minutes: 45
     steps:
@@ -311,16 +461,20 @@ jobs:
           done
       - name: scenario matrix, Windows → Linux (WSL2) and Linux → Windows
         shell: pwsh
-        run: ./scripts/matrix-wsl.ps1 -Bin bin -LinuxBin bin-linux -Out "$env:RUNNER_TEMP\hsmatrix"
+        run: ./scripts/matrix-wsl.ps1 -Bin bin -LinuxBin bin-linux -Out "$env:RUNNER_TEMP\hsmatrix" -Shard '${{ matrix.shard }}/4'
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: ${{ failure() }}
+        if: always()
         with:
-          name: os-pairs-windows-linux
+          name: os-pairs-windows-linux-${{ matrix.shard }}
           path: ${{ runner.temp }}/hsmatrix/
           retention-days: 7
 
   os-pairs-macos-linux:
-    name: os pairs (macos↔linux)
+    name: os pairs (macos↔linux ${{ matrix.shard }}/4)
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     runs-on: macos-15-intel
     timeout-minutes: 60
     steps:
@@ -341,11 +495,11 @@ jobs:
             CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "bin-linux/${p#*:}" "./${p%%:*}"
           done
       - name: scenario matrix, macOS → Linux (Lima VM) and Linux → macOS
-        run: scripts/matrix-lima.sh bin bin-linux "$RUNNER_TEMP/hsmatrix"
+        run: scripts/matrix-lima.sh bin bin-linux "$RUNNER_TEMP/hsmatrix" '${{ matrix.shard }}/4'
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: ${{ failure() }}
+        if: always()
         with:
-          name: os-pairs-macos-linux
+          name: os-pairs-macos-linux-${{ matrix.shard }}
           path: ${{ runner.temp }}/hsmatrix/
           retention-days: 7
 
@@ -366,6 +520,22 @@ jobs:
       - run: go build -o bin/hopsesh.exe ./cmd/hopsesh
       - shell: pwsh
         run: ./scripts/windows-peer-test.ps1 -Bin bin/hopsesh.exe
+      - name: native SSH commands locally and inside an SSH session
+        shell: pwsh
+        run: |
+          $probe = Join-Path $env:RUNNER_TEMP 'hopsesh-ssh-wire.test.exe'
+          go test -c -race -o $probe ./internal/core/transport
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $probe '-test.run=^TestNativeSSH(CommandAndDiagnostics|WithoutConsole|WithInheritedDescriptors)$' '-test.v'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $knownHosts = Join-Path $env:RUNNER_TEMP 'hopsesh-ssh-wire.known_hosts'
+          $hostKey = (Get-Content -LiteralPath "$env:ProgramData\ssh\ssh_host_ed25519_key.pub" -Raw).Trim()
+          Set-Content -LiteralPath $knownHosts -Value "127.0.0.1 $hostKey" -Encoding ascii
+          $quotedProbe = $probe.Replace("'", "''")
+          $remoteScript = "& '$quotedProbe' '-test.run=^TestNativeSSHCommandAndDiagnostics$' '-test.v'; exit " + '$LASTEXITCODE'
+          $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($remoteScript))
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=`"$knownHosts`"" "$env:USERNAME@127.0.0.1" "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand $encoded"
+          exit $LASTEXITCODE
       - name: a PowerShell script longer than a command line, over the same server
         shell: pwsh
         run: |
@@ -386,7 +556,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - run: sudo apt-get update && sudo apt-get install -y nsis zip
+      - run: bash scripts/install-ci-dependencies.sh nsis zip
       - name: build the app, its zip and the installer (amd64 and arm64)
         env:
           VERSION: 0.0.0-ci
@@ -486,9 +656,9 @@ jobs:
         if: ${{ !cancelled() }}
         uses: test-summary/action@37b508cfee6d4d080eedd00b5bb240a6a784a6a5 # v2.6
         with:
-          paths: |
-            internal/devtools/webtest/test-results/junit-real.xml
-            internal/devtools/webtest/test-results-shots/junit-shots.xml
+          # The optional WSL screenshot lane may not run; summarize the reports
+          # that were actually produced without inventing a missing-file failure.
+          paths: internal/devtools/webtest/test-results*/junit-*.xml
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ failure() }}
         with:
@@ -564,7 +734,7 @@ jobs:
       - name: GUI build dependencies and a virtual display (Linux)
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev xvfb dbus jq
+          bash scripts/install-ci-dependencies.sh libgtk-4-dev libwebkitgtk-6.0-dev xvfb dbus jq
           # WebKitGTK sandboxes web content with bubblewrap, which needs unprivileged user
           # namespaces; Ubuntu 24.04's AppArmor restricts them on this runner.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0

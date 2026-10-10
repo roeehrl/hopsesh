@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/roeehrl/hopsesh/internal/config"
@@ -15,6 +16,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/peer"
+	"github.com/roeehrl/hopsesh/internal/core/relay"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
 	"github.com/roeehrl/hopsesh/internal/version"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -205,12 +207,13 @@ type Push struct {
 	Peer   peer.HelloReply
 	Pushed string // the branch was pushed first ("" when not)
 
-	source move.Side
-	a      *App
-	to     config.Host
-	e      Entry
-	client *peer.Client
-	close  func()
+	source    move.Side
+	a         *App
+	to        config.Host
+	e         Entry
+	client    *peer.Client
+	close     func()
+	operation string // stable relay operation, empty for an SSH push
 }
 
 // PushResult is a finished push.
@@ -228,13 +231,48 @@ func (a *App) StartPush(ctx context.Context, inv *Inventory, e Entry, to config.
 	if here == nil || e.Machine != here.Name {
 		return nil, errors.New("only a session on this machine can be pushed; to bring one here, pull it")
 	}
-	c, hr, closeFn, err := a.dialPeer(ctx, to)
+	// A shared discovery follower has browsing data but no live host handle.
+	// Resolve the exact source again before dialing or pushing repository code.
+	var fresh *Inventory
+	if e.Cached || inv.Discovering || here.host == nil {
+		var err error
+		fresh, e, err = a.FreshSelection(ctx, e)
+		if err != nil {
+			return nil, err
+		}
+		here = fresh.Local()
+		defer func() {
+			if fresh != nil {
+				fresh.Close()
+			}
+		}()
+	}
+	if here == nil || here.host == nil {
+		return nil, errors.New("this machine was not scanned")
+	}
+	if opt.OperationID == "" && to.RelayID != "" {
+		var err error
+		if opt.OperationID, err = relay.NewOperationID(); err != nil {
+			return nil, err
+		}
+	}
+	c, hr, closeFn, err := a.dialPeer(ctx, to, opt.OperationID)
 	if err != nil {
 		return nil, err
+	}
+	if fresh != nil {
+		// Commit still needs this source. Transfer ownership to Push.Close,
+		// which also releases it on every subsequent planning failure.
+		owned, peerClose := fresh, closeFn
+		closeFn = func() { peerClose(); owned.Close() }
+		fresh = nil
 	}
 	mod, _ := a.Module(e.Agent)
 	install, _ := here.InstallProfile(e.Agent, e.Session.Key.Profile)
 	p := &Push{source: move.Side{Machine: here.host, Module: mod, Install: install}, a: a, to: to, e: e, client: c, Peer: hr, close: closeFn}
+	if to.RelayID != "" {
+		p.operation = opt.OperationID
+	}
 	if !hr.Receive {
 		p.Close()
 		return nil, peer.Refused(to.Name)
@@ -275,7 +313,15 @@ func (a *App) StartPush(ctx context.Context, inv *Inventory, e Entry, to config.
 		return nil, err
 	}
 	var reply peer.PlanReply
-	if err := p.client.Call(ctx, peer.MethodPlan, peer.PlanRequest{Package: pkg, Target: target, Options: opt}, &reply); err != nil {
+	request := peer.PlanRequest{Package: pkg, Target: target, Options: opt}
+	if p.operation != "" {
+		request, err = p.frozenRequest(ctx, request)
+		if err != nil {
+			p.Close()
+			return nil, err
+		}
+	}
+	if err := p.client.Call(ctx, peer.MethodPlan, request, &reply); err != nil {
 		p.Close()
 		return nil, err
 	}
@@ -294,8 +340,33 @@ type PeerConn struct {
 
 // dialPeer starts hopsesh peer on a configured machine (over SSH, or a.PeerDial) and says
 // hello.
-func (a *App) dialPeer(ctx context.Context, to config.Host) (*peer.Client, peer.HelloReply, func(), error) {
+func (a *App) dialPeer(ctx context.Context, to config.Host, operations ...string) (*peer.Client, peer.HelloReply, func(), error) {
 	var hr peer.HelloReply
+	if to.RelayID != "" {
+		if !to.Allowed || !a.Cfg.Relay.Enabled {
+			return nil, hr, nil, errors.New("relay machine access is disabled")
+		}
+		var err error
+		op := ""
+		if len(operations) > 0 {
+			op = operations[0]
+		}
+		if op == "" {
+			if op, err = relay.NewOperationID(); err != nil {
+				return nil, hr, nil, err
+			}
+		}
+		c := peer.NewRPCClient(func(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
+			var result json.RawMessage
+			err := a.relayCall(ctx, to, op, method, params, &result)
+			return result, err
+		})
+		err = c.Call(ctx, peer.MethodHello, peer.Hello{Protocol: peer.Protocol, Version: version.Version, From: LocalName()}, &hr)
+		if err == nil && hr.Protocol != peer.Protocol {
+			err = peer.ErrProtocol
+		}
+		return c, hr, func() {}, err
+	}
 	dial := a.PeerDial
 	if dial == nil {
 		dial = a.sshPeer
@@ -427,6 +498,23 @@ func (a *App) packageOf(ctx context.Context, here *Machine, e Entry) (peer.Packa
 // this machine records, in its own journal, what changes for its copy (the mark and the
 // lineage), and keeps a mark owed while the copy here is still open.
 func (p *Push) Commit(ctx context.Context) (*PushResult, error) {
+	finished, err := p.a.beginRuntimeAction()
+	if err != nil {
+		return nil, err
+	}
+	defer finished()
+	var outgoing *relayOutgoing
+	if p.operation != "" {
+		var lock *os.File
+		outgoing, lock, err = p.beginSourceCommit(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer lock.Close()
+		if outgoing.Phase == "completed" && outgoing.Result != nil {
+			return outgoing.Result, nil
+		}
+	}
 	if err := p.a.checkAccountRegistration(p.source.Install); err != nil {
 		return nil, err
 	}
@@ -452,6 +540,12 @@ func (p *Push) Commit(ctx context.Context) (*PushResult, error) {
 	if err := j.AddRemote(p.to.Name, reply.Journal); err != nil {
 		return out, err
 	}
+	if outgoing != nil {
+		outgoing.Phase, outgoing.Journal = "source-started", j.ID
+		if err = saveRelayOutgoing(p.outgoingPath(), outgoing); err != nil {
+			return out, err
+		}
+	}
 	if err := a.replay(ctx, e, j, reply.Writes); err != nil {
 		reply.Result.Warnings = append(reply.Result.Warnings, "could not update the copy here: "+err.Error())
 	}
@@ -464,6 +558,12 @@ func (p *Push) Commit(ctx context.Context) (*PushResult, error) {
 		}
 	}
 	a.Audit.Write(audit.Entry{Action: "push", Host: p.to.Name, Session: e.Session.Key.String(), Detail: map[string]any{"journal": j.ID, "remote": reply.Journal, "writes": len(reply.Writes)}})
+	if outgoing != nil {
+		outgoing.Phase, outgoing.Result = "completed", out
+		if err = saveRelayOutgoing(p.outgoingPath(), outgoing); err != nil {
+			return out, err
+		}
+	}
 	return out, nil
 }
 

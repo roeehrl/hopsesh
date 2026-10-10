@@ -202,6 +202,7 @@ dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--p
 dialog::backdrop { background: rgba(30,29,26,.5); }
 .dlg { width: min(520px, calc(100vw - 32px)); }
 .dlg-body { padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+.dlg-body > .muted { overflow-wrap: anywhere; }
 .dlg-foot { display: flex; gap: 8px; justify-content: flex-end; align-items: center; flex-wrap: wrap; }
 .sheet { width: min(840px, calc(100vw - 32px)); max-height: calc(100vh - 48px); }
 .sheet-in { display: flex; flex-direction: column; max-height: calc(100vh - 50px); }

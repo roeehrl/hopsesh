@@ -2,6 +2,28 @@ package main
 
 import "testing"
 
+func TestTripleCoverageIncludesEveryValidInteraction(t *testing.T) {
+	positions := tuples(len(dims), 3)
+	missing := map[string]bool{}
+	for _, c := range allCombos() {
+		for _, p := range positions {
+			missing[tkey(p, c)] = true
+		}
+	}
+	for _, row := range covering(3, 1) {
+		v := []string{row.Op, row.From + ">" + row.To, row.Content, row.Repo, row.Naming, row.Location}
+		if !valid(v) {
+			t.Fatalf("invalid triple-tier row: %s", row)
+		}
+		for _, p := range positions {
+			delete(missing, tkey(p, v))
+		}
+	}
+	if len(missing) != 0 {
+		t.Fatalf("release matrix omitted %d valid three-way interactions", len(missing))
+	}
+}
+
 // Pairwise rows cover every pair of values that some valid combination has, and only valid
 // combinations; the same seed gives the same rows.
 func TestPairwiseCoversEveryValidPair(t *testing.T) {
@@ -70,7 +92,7 @@ func TestCloudRows(t *testing.T) {
 // triples and OS-pair jobs use the same model and receipt assertions.
 func TestMovementRows(t *testing.T) {
 	rows := pairwise(1)
-	for _, op := range []string{"roundtrip", "quiet-roundtrip", "fork"} {
+	for _, op := range []string{"roundtrip", "repeat-roundtrip", "fork-roundtrip", "quiet-roundtrip", "fork"} {
 		for _, agents := range []string{"claude>claude", "codex>codex", "claude>codex", "codex>claude"} {
 			found := false
 			for _, r := range rows {

@@ -193,7 +193,7 @@ func main() {
 		if err := cloudWorld(h); err != nil {
 			return err
 		}
-		svc = gui.NewApp(all.Registry(), gui.WithoutSessionWatching())
+		svc = gui.NewApp(all.Registry())
 		svc.Emitter = relay
 		if where == "" {
 			where = gui.WhereTerminal
@@ -772,8 +772,7 @@ func openFake(terms *gui.Terminals, title string, trust, quiet bool, kind, as st
 	return terms.Open(spec, gui.TabSetup{Meta: meta})
 }
 
-// The events the window gets from the service in the browser tests: the terminal's (the
-// other events keep the older tests as they were written).
+// Forward runtime and terminal source events through the same browser bridge.
 var (
 	eventsMu sync.Mutex
 	eventWS  = map[*websocket.Conn]bool{}
@@ -781,7 +780,7 @@ var (
 
 func relay(name string, data any) {
 	switch name {
-	case gui.AccountEvent, gui.DiscoveryEvent, "hopsesh:terminal-main", gui.TerminalPreferencesEvent, gui.TerminalWorkspaceEvent, gui.AppearanceEvent, gui.TerminalEvent, gui.QuitEvent, gui.SignedInEvent, gui.TerminalAppEvent, gui.ExternalExitEvent:
+	case gui.AccountEvent, gui.DiscoveryEvent, gui.MachineScanEvent, gui.QuickEvent, gui.RuntimeEvent, "hopsesh:terminal-main", gui.TerminalPreferencesEvent, gui.TerminalWorkspaceEvent, gui.AppearanceEvent, gui.TerminalEvent, gui.QuitEvent, gui.SignedInEvent, gui.TerminalAppEvent, gui.ExternalExitEvent:
 	default:
 		return
 	}

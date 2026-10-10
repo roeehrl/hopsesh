@@ -508,6 +508,9 @@ function happened(d, p) {
 }
 
 screen("done", (d, p, o) => {
+  // A completed transfer ends inspection of its source. Returning to Sessions
+  // should use the current family representative, not keep pinning the source.
+  if (!d.noWork) state.sel = null;
   const where = d.machine ? `on ${d.machine}` : `on ${sys.here}`;
   const resultPlace=o.launch==='here'||o.launch==='terminal'?o.launch:opensIn();
   const open = () => (d.inApp ? api("OpenResult", "").catch(fail) : openResult(resultPlace));

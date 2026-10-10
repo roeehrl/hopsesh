@@ -39,12 +39,12 @@ const MenuEvent = "hopsesh:menu"
 
 // App is the service bound to the frontend.
 type App struct {
-	Desktop        DesktopShell `json:"-"`
-	closing        bool
-	watchDone      chan struct{}
-	watchOnce      sync.Once
-	watchLocal     bool
-	watchCancel    context.CancelFunc
+	backend      runtimeLink
+	relayLogin   relayLoginState
+	cloudStartup cloudStartupState
+	Desktop      DesktopShell `json:"-"`
+	closing      bool
+
 	selectionReads int
 	scanCancel     context.CancelFunc
 	scanRevision   atomic.Uint64
@@ -75,22 +75,12 @@ type App struct {
 	Emitter func(name string, data any) `json:"-"`
 }
 
-// Option configures service behavior before any discovery starts.
-type Option func(*App)
-
-// WithoutSessionWatching lets headless fixture services publish changes explicitly.
-// Desktop applications watch local session files by default.
-func WithoutSessionWatching() Option { return func(a *App) { a.watchLocal = false } }
-
 // NewApp loads the configuration for the modules in reg. A configuration an older hopsesh
 // wrote is reported by Info, not returned: the window offers to start fresh.
-func NewApp(reg *registry.Registry, options ...Option) *App {
+func NewApp(reg *registry.Registry) *App {
 	cfg, err := config.Load()
 	log, _ := audit.Open(filepath.Join(config.StateDir(), "log"))
-	a := &App{cfgErr: err, Terms: NewTerminals(version.Version), watchLocal: true}
-	for _, option := range options {
-		option(a)
-	}
+	a := &App{cfgErr: err, Terms: NewTerminals(version.Version)}
 	a.core = app.New(cfg, reg, config.StateDir(), log)
 	a.core.Passwords = a.passwordFor
 	a.core.Steps = a.runStep
@@ -113,7 +103,7 @@ func (a *App) save() error {
 	if a.cfgErr != nil {
 		return a.cfgErr // never overwrite a file the user has not set aside
 	}
-	return config.Save(a.core.Cfg)
+	return config.Save(&a.core.Cfg)
 }
 
 // AgentDTO is one agent module.
@@ -521,22 +511,14 @@ func (a *App) SetReposDir(dir string) error {
 func (a *App) Shutdown() {
 	a.mu.Lock()
 	a.closing = true
-	watchCancel := a.watchCancel
-	watchDone := a.watchDone
+
 	scanCancel := a.scanCancel
 	a.mu.Unlock()
-	if watchCancel != nil {
-		watchCancel()
-	}
 	if scanCancel != nil {
 		scanCancel()
 	}
-	if watchDone != nil {
-		<-watchDone
-	}
-	if a.quick.cancel != nil {
-		a.quick.cancel()
-	}
+	a.RelayCancelLogin()
+	a.stopRuntime()
 	if a.Desktop != nil {
 		a.Desktop.Stop()
 	}
@@ -558,6 +540,23 @@ func (a *App) Shutdown() {
 
 // emit sends an event to the window (nothing without one).
 func (a *App) emit(name string, data any) {
+	if name == TerminalEvent {
+		a.backend.mu.Lock()
+		owner := a.backend.owner
+		client := a.backend.client
+		connected := a.backend.cancel != nil
+		a.backend.mu.Unlock()
+		if owner != nil {
+			owner.Engine.Notify()
+		} else if connected {
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = client.Call(ctx, "refresh", nil, nil)
+			}()
+		}
+	}
+
 	switch {
 	case a.Wails != nil:
 		a.Wails.Event.Emit(name, data)

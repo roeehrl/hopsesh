@@ -50,8 +50,12 @@ test("screenshots of the real window", async () => {
   await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible({ timeout: 60_000 });
   await expect(row("Fix flaky checkout tests")).toBeVisible({ timeout: 90_000 }); // studio, over SSH
   await expect(row("Storybook stories for the header")).toBeVisible();
+  // Publish the settled inventory and preview, not an intermediate discovery
+  // frame with pending repository/account enrichment and a loading skeleton.
+  await expect(page.locator("#fresh")).toContainText("updated", { timeout: 90_000 });
   await row("Fix flaky checkout tests").click();
   await expect(page.getByRole("complementary", { name: "Session details" })).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "Session details" }).getByText("the checkout e2e tests fail about one run in ten, find out why", { exact: true })).toBeVisible();
   await shoot("01-sessions");
 
   await page.keyboard.press("Control+3");

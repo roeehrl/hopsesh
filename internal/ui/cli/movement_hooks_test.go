@@ -246,7 +246,7 @@ func TestNoticeHookCommandEndToEndNeverChangesTranscript(t *testing.T) {
 	cfg := config.Defaults()
 	off := false
 	cfg.MovementNotices = &off
-	if err = config.Save(cfg); err != nil {
+	if err = config.Save(&cfg); err != nil {
 		t.Fatal(err)
 	}
 	if got := run("SessionStart", ""); got != "" {

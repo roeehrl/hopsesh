@@ -63,6 +63,10 @@ func ProbeLocal(ctx context.Context, specs []agent.Spec) Facts { return probeLoc
 func ProbeLocalFast(ctx context.Context, specs []agent.Spec) Facts {
 	return probeLocal(ctx, specs, false)
 }
+
+// ObserveLocal collects passive path facts without invoking vendor programs.
+func ObserveLocal(ctx context.Context, specs []agent.Spec) Facts { return ProbeLocalFast(ctx, specs) }
+
 func probeLocal(ctx context.Context, specs []agent.Spec, detailed bool) Facts {
 	w := wants(specs)
 	home, _ := os.UserHomeDir()
@@ -123,7 +127,22 @@ func candidates(b agent.Binary, goos string) []string {
 // ProbeRemote learns a machine's facts in one round trip, with a script generated from
 // the modules' Specs (no module code runs on the remote machine).
 func ProbeRemote(ctx context.Context, c *transport.Conn, specs []agent.Spec) (Facts, error) {
+	return probeRemote(ctx, c, wants(specs))
+}
+
+// ObserveRemote resolves remote paths and roots without invoking vendor binaries.
+func ObserveRemote(ctx context.Context, c *transport.Conn, specs []agent.Spec) (Facts, error) {
 	w := wants(specs)
+	w.bins = append([]agent.Binary(nil), w.bins...)
+	for i := range w.bins {
+		if i != 0 {
+			w.bins[i].VersionArgs = nil
+		}
+	}
+	return probeRemote(ctx, c, w)
+}
+
+func probeRemote(ctx context.Context, c *transport.Conn, w probeWants) (Facts, error) {
 	out, err := c.Run(ctx, "uname -s")
 	var re *transport.RemoteError
 	if err != nil && !errors.As(err, &re) {
@@ -138,13 +157,22 @@ func ProbeRemote(ctx context.Context, c *transport.Conn, specs []agent.Spec) (Fa
 		f.OS = normUname(f.OS)
 		return f, nil
 	}
+	unameOut, unameErr := out, err
 	out, err = c.RunPowerShell(ctx, windowsProbe(w))
 	if err != nil {
-		return Facts{}, fmt.Errorf("could not identify the remote system: %w", err)
+		return Facts{}, fmt.Errorf("could not identify the remote system: uname output=%q, error=%v; PowerShell: %w", probeDiagnostic(string(unameOut)), unameErr, err)
 	}
 	f := parseProbe(out)
 	f.OS = "windows"
 	return f, nil
+}
+
+func probeDiagnostic(s string) string {
+	const limit = 1024
+	if len(s) > limit {
+		return s[:limit] + "…"
+	}
+	return s
 }
 
 // posixProbe prints tab-separated facts: os, arch, home, env NAME value, bin NAME path,

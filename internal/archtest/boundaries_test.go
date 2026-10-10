@@ -22,6 +22,7 @@ type rule struct {
 }
 
 var rules = []rule{
+	{"internal/localstate", []string{"internal/core/", "internal/config", "internal/app", "internal/ui/", "agents/", "cmd/"}, "OS state primitives have no application or configuration dependencies"},
 	{"sdk/", []string{"internal/", "agents/", "cmd/"}, "the SDK is the contract; it depends on nothing of hopsesh"},
 	{"agents/", []string{"internal/", "cmd/"}, "modules see machines only through the SDK"},
 	{"internal/core/", []string{"internal/app", "internal/ui/", "internal/agents/", "agents/", "cmd/"}, "the core is agent-agnostic and below the use cases"},

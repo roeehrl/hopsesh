@@ -58,9 +58,9 @@ func recordSync(ctx context.Context, p *Plan, in Input, j *journal.Journal, res 
 	if err = j.WriteReceipt(fsys, p.Target.Location, lineage.PathFor(p.SyncTo.Path), m.ForBranch(p.targetLine).Encode(), true); err != nil {
 		return err
 	}
-	fsys, err = in.Source.Machine.FS(ctx)
+	fsys, receiptMachine, receiptPath, err := sourceReceipt(ctx, in)
 	if err == nil {
-		err = j.WriteReceipt(fsys, p.Source.Location, lineage.PathFor(in.Session.Path), m.ForBranch(p.sourceLine).Encode(), false)
+		err = writeSourceReceipt(j, in, fsys, receiptMachine, lineage.PathFor(receiptPath), m.ForBranch(p.sourceLine).Encode())
 	}
 	if err != nil {
 		res.Warnings = append(res.Warnings, "source receipt acknowledgement pending: "+err.Error())

@@ -1,0 +1,23 @@
+{
+  "$schema": "../relay/node_modules/wrangler/config-schema.json",
+  "name": "hopsesh-downloads-experimental",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-07",
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "downloads.hopsesh.codonic.dev",
+      "custom_domain": true
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "RELEASES",
+      "bucket_name": "hopsesh-downloads-experimental-releases"
+    }
+  ],
+  "observability": {
+    "enabled": false
+  },
+  "account_id": "d56d64bffb7a1372d6308b70504df6a1"
+}

@@ -109,15 +109,25 @@ func (s *Store) Save(scope, path, signature string, value any) {
 }
 
 func (s *Store) Invalidate() {
-	if s.open() == nil {
+	if s.openExisting() == nil {
 		_, _ = s.db.Exec("DELETE FROM summaries")
 	}
 }
 
 func (s *Store) InvalidatePath(path string) {
-	if s.open() == nil {
+	if s.openExisting() == nil {
 		_, _ = s.db.Exec("DELETE FROM summaries WHERE path=?", path)
 	}
+}
+
+// Watchers invalidate existing browsing metadata without creating state for a
+// passive observer that has never used the catalog. Do not consume once on
+// absence: another front end may create a catalog before the next file event.
+func (s *Store) openExisting() error {
+	if _, err := os.Stat(filepath.Join(s.dir, "sessions-v1.sqlite")); err != nil {
+		return err
+	}
+	return s.open()
 }
 
 // Update serializes source merges across processes, avoiding lost updates when

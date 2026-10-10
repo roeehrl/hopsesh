@@ -1,6 +1,9 @@
-import {test,expect} from '@playwright/test';
+import {test,expect,type Page} from '@playwright/test';
 import {fresh,row,details} from './helpers';
 test.beforeEach(async({page})=>fresh(page));
+// The account fixture patches background snapshots too. Drain its in-flight
+// requests before closing the page so teardown cannot abort route.fetch().
+test.afterEach(async({page})=>page.unrouteAll({behavior:'wait'}));
 test('arbitrary account names, tags, edits, and a scoped transfer destination',async({page},testInfo)=>{
  await page.locator('#btn-settings').click();await page.getByRole('button',{name:'Accounts',exact:true}).click();
  for(const name of ['First personal','Second personal']){
@@ -47,9 +50,11 @@ test('Codex desktop action remains visible and explains why a custom account use
 test('connected remote without identity explains account setup and clears after initialization',async({page},testInfo)=>{
  let initialized=false;
  await page.route('**/call',async route=>{
-  if(route.request().postDataJSON().m!=='ScanAccounts'){await route.continue();return;}
+  const method=route.request().postDataJSON().m;
+  if(!['ScanAccounts','QuickSnapshot'].includes(method)){await route.continue();return;}
   const response=await route.fetch();const body=await response.json();
-  body.result.machines.push({name:'remote-laptop',status:'ok',local:false,agents:['Claude Code'],sessions:12,hopsesh:'',accountSetupRequired:!initialized});
+  const scan=method==='QuickSnapshot'?body.result?.scan:body.result;
+  scan?.machines.push({name:'remote-laptop',status:'ok',local:false,agents:['Claude Code'],sessions:12,hopsesh:'',accountSetupRequired:!initialized});
   await route.fulfill({json:body});
  });
  await page.locator('#btn-settings').click();await page.getByRole('button',{name:'Accounts',exact:true}).click();
@@ -61,6 +66,17 @@ test('connected remote without identity explains account setup and clears after 
  await remote.locator('summary').click();
  await expect(notice).toBeVisible();await expect(notice).toContainText('SSH is connected');
  await remote.locator('summary').click();await expect(notice).toBeHidden();
+ // A filter render before the native toggle event is delivered must preserve
+ // the newest collapsed state, rather than the previous cached open state.
+ await page.evaluate(()=>{
+  const details=document.querySelector('[data-group="machine:remote-laptop"]') as HTMLDetailsElement;
+  details.open=true;
+  details.dispatchEvent(new Event('toggle'));
+  details.open=false;
+  const search=document.querySelector('[aria-label="Search accounts"]') as HTMLInputElement;
+  search.dispatchEvent(new Event('input',{bubbles:true}));
+ });
+ await expect(notice).toBeHidden();
  await page.getByRole('button',{name:'Scan accounts',exact:true}).click();
  await expect(page.getByRole('button',{name:'Scan accounts',exact:true})).toBeEnabled({timeout:30000});
  await expect(notice).toBeHidden();await remote.locator('summary').click();
@@ -129,4 +145,88 @@ test('account grouping shows retained source and destination copies after a tran
  await page.locator('#btn-display').click();await page.locator('#dp-group').selectOption('account');await page.keyboard.press('Escape');
  await expect(page.locator('.gname').filter({hasText:'Second personal'})).toHaveCount(1);
  await expect(row(page,'Find the codeword')).toHaveCount(1);await expect(row(page,'Find the codeword (from Claude Code)')).toHaveCount(1);
+});
+
+// Freeze unrelated source publications so these checks exercise one explicit
+// notification and the client's idle/deadline behavior deterministically.
+async function accountNotificationFixture(page:Page){
+ await page.clock.install();await page.reload();await expect(page.locator("#fresh")).toContainText("updated",{timeout:30000});
+ let profile={id:'notification-profile',agent:'claude',name:'Notification account',machine:'test-mac',root:'/disposable/account',local:true,generation:1,tags:[],checkedAt:new Date().toISOString(),stale:false,account:{loggedIn:true,email:'before@example.com'}};
+ let checks=0;
+ await page.route('**/call',async route=>{
+  const method=route.request().postDataJSON().m;
+  if(method==='Accounts')return route.fulfill({json:{result:[profile]}});
+  if(method==='RefreshAccount'){checks++;profile={...profile,checkedAt:new Date().toISOString()};return route.fulfill({json:{result:profile}})}
+  return route.continue();
+ });
+ await page.evaluate(()=>{
+  const win=window as any,emit=win.__emit,fetch=window.fetch.bind(window);
+  win.__accountEmit=emit;
+  win.__emit=(name:string,data:any)=>{if(!['hopsesh:runtime','hopsesh:accounts','hopsesh:discovery'].includes(name))emit(name,data)};
+  win.__accountReads=0;
+  window.fetch=(input,init)=>{if(typeof init?.body==='string'&&JSON.parse(init.body).m==='Accounts')win.__accountReads++;return fetch(input,init)};
+ });
+ await page.locator('#btn-settings').click();await page.getByRole('button',{name:'Accounts',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Notification account',exact:true})).toBeVisible();
+ return {changeEmail:(email:string)=>{profile={...profile,account:{...profile.account,email}}},makeStale:()=>{profile={...profile,checkedAt:new Date(Date.now()-600000).toISOString(),stale:true}},checks:()=>checks};
+}
+
+test('idle accounts use notifications instead of periodic backend reads',async({page})=>{
+ const fixture=await accountNotificationFixture(page);
+ const before=await page.evaluate(()=>(window as any).__accountReads);
+ await page.clock.fastForward(10000);
+ expect(await page.evaluate(()=>(window as any).__accountReads)).toBe(before);
+ fixture.changeEmail('after@example.com');
+ await page.evaluate(()=>{for(let i=0;i<20;i++)(window as any).__accountEmit('hopsesh:runtime',null)});
+ await expect(page.locator('.account-card')).toContainText('after@example.com');
+ expect(await page.evaluate(()=>(window as any).__accountReads)).toBe(before+1);
+});
+
+test('account notifications preserve a focused filter and apply after blur',async({page})=>{
+ const fixture=await accountNotificationFixture(page);
+ const search=page.getByLabel('Search accounts');await search.fill('account');
+ fixture.changeEmail('updated@example.com');
+ await page.evaluate(()=>(window as any).__accountEmit('hopsesh:accounts',null));
+ // Crossing the old polling interval also catches an unsolicited repaint.
+ await page.clock.fastForward(3000);
+ await expect(search).toBeFocused();await expect(search).toHaveValue('account');
+ await page.getByRole('heading',{name:'Accounts',exact:true}).click();
+ await expect(page.locator('.account-card')).toContainText('updated@example.com');
+});
+
+test('account sign-in checks follow freshness deadlines and stop off screen',async({page})=>{
+ const fixture=await accountNotificationFixture(page);
+ await page.clock.fastForward(4*60*1000);
+ expect(fixture.checks()).toBe(0);
+ await page.clock.fastForward(75000);
+ await expect.poll(fixture.checks).toBe(1);
+ await page.getByRole('button',{name:'Back to sessions',exact:true}).click();
+ await page.clock.fastForward(6*60*1000);
+ expect(fixture.checks()).toBe(1);
+});
+
+test('account notifications defer reads while an editor is open and refresh after closing',async({page})=>{
+ const fixture=await accountNotificationFixture(page);
+ await page.getByRole('button',{name:'Add account',exact:true}).click();
+ const editor=page.locator('dialog.account-editor');await editor.getByLabel('Name',{exact:true}).fill('Unfinished name');
+ const before=await page.evaluate(()=>(window as any).__accountReads);
+ fixture.changeEmail('after-dialog@example.com');
+ await page.evaluate(()=>(window as any).__accountEmit('hopsesh:runtime',null));
+ await page.clock.fastForward(3000);
+ expect(await page.evaluate(()=>(window as any).__accountReads)).toBe(before);
+ await expect(editor.getByLabel('Name',{exact:true})).toBeFocused();
+ await expect(editor.getByLabel('Name',{exact:true})).toHaveValue('Unfinished name');
+ await editor.getByRole('button',{name:'Cancel'}).click();
+ await expect(page.locator('.account-card')).toContainText('after-dialog@example.com');
+});
+
+test('frequent account notifications do not postpone an overdue sign-in check',async({page})=>{
+ const fixture=await accountNotificationFixture(page);fixture.makeStale();
+ for(let i=0;i<4;i++){
+  const before=await page.evaluate(()=>(window as any).__accountReads);
+  await page.evaluate(()=>(window as any).__accountEmit('hopsesh:runtime',null));
+  await expect.poll(()=>page.evaluate(()=>(window as any).__accountReads)).toBeGreaterThan(before);
+  await page.clock.fastForward(5000);
+ }
+ await expect.poll(fixture.checks).toBe(1);
 });

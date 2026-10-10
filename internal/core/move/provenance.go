@@ -15,11 +15,11 @@ import (
 // prepareLineage snapshots the entire causal graph. Planning never mutates inventory.
 func prepareLineage(ctx context.Context, p *Plan, in Input, seg *ir.Segment) error {
 	m := in.Lineage.Clone()
-	fsys, err := in.Source.Machine.FS(ctx)
+	fsys, _, sourcePath, err := sourceReceipt(ctx, in)
 	if err != nil {
 		return err
 	}
-	actual, err := lineage.Read(fsys, in.Session.Path)
+	actual, err := lineage.Read(fsys, sourcePath)
 	if err != nil {
 		return err
 	}
@@ -28,6 +28,12 @@ func prepareLineage(ctx context.Context, p *Plan, in Input, seg *ir.Segment) err
 			m = actual.Clone()
 		} else if err = m.Merge(actual); err != nil {
 			return err
+		}
+		if in.CheckpointIdentity {
+			// A saved handoff capsule is historical proof, not the current branch
+			// selector. A reviewed rewritten checkpoint may have advanced the
+			// private task ledger to its explicitly accepted source fork.
+			m.Branch = actual.Branch
 		}
 	}
 	if m == nil {
@@ -70,7 +76,22 @@ func prepareLineage(ctx context.Context, p *Plan, in Input, seg *ir.Segment) err
 		p.Target.ProfileName = in.Target.Install.Profile.Name
 	}
 	var st lineage.State
-	p.sourceReplica, st, err = m.ObserveBinding(lineage.Replica{Endpoint: sourceID, Binding: in.Source.Install.BindingID(), Key: p.Key, Location: p.Source.Location, AgentVersion: p.Source.Version, Time: seg.Header.Created}, seg)
+	if in.CheckpointIdentity && in.SourceReceipt != nil && in.Source.Machine.IsSnapshot() {
+		source := lineage.Replica{Endpoint: sourceID, Binding: in.Source.Install.BindingID(), Key: p.Key, Line: m.Branch, Location: p.Source.Location, AgentVersion: p.Source.Version, Time: seg.Header.Created}
+		if in.CheckpointHandoff != nil {
+			if err = seedCheckpointHandoff(m, source, seg, *in.CheckpointHandoff); err != nil {
+				return err
+			}
+		}
+		if err == nil {
+			err = seedCheckpointPrefix(m, source, seg)
+		}
+	}
+	if err == nil {
+		p.sourceReplica, st, err = m.ObserveBinding(lineage.Replica{Endpoint: sourceID, Binding: in.Source.Install.BindingID(), Key: p.Key, Location: p.Source.Location, AgentVersion: p.Source.Version, Time: seg.Header.Created}, seg)
+	} else {
+		p.sourceReplica = m.Upsert(lineage.Replica{Endpoint: sourceID, Binding: in.Source.Install.BindingID(), Key: p.Key, Line: m.Branch, Location: p.Source.Location, AgentVersion: p.Source.Version, Time: seg.Header.Created})
+	}
 	snapshot := false
 	if err != nil && (p.Options.Fork || p.Options.Conflict == ConflictKeepBoth) {
 		old, _ := m.LatestState(p.sourceReplica)

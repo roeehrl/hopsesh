@@ -7,13 +7,13 @@ import "./plan.js";
 import "./brought.js";
 import "./handoff.js";
 import "./hop.js";
-import "./machines.js";
+import { machineScanChanged } from "./machines.js";
 import "./settings.js";
 import "./accounts.js";
 import { undoLast } from "./activity.js";
 import { openPalette } from "./palette.js";
 import { loadTabs, onTabs, showTerminal, tabs, exits } from "./term.js";
-import { render as renderSessions, listCommand, showEntry, reveal, scan, acceptScan, queueScan, backgroundRender } from "./sessions.js";
+import { listCommand, showEntry, reveal, scan, acceptScan, queueScan, backgroundRender, browsingEntry } from "./sessions.js";
 import { load as loadLayout, toggle as togglePane } from "./layout.js";
 
 $("#btn-search").onclick = openPalette;
@@ -40,13 +40,30 @@ async function quickRoute() {
  const r=await api("TakeQuickRoute");if(!r)return;
  if(r.screen==="settings"){await go("settings","desktop");return}
  if(r.screen==="terminals"){await showTerminal();return}
- const snapshot=await api("QuickSnapshot");if(snapshot.scan)acceptScan(snapshot.scan);
+ const snapshot=await api("ScanSnapshot");if(snapshot)acceptScan(snapshot);
  await go("sessions");
- const e=state.scan?.groups.flatMap(g=>g.entries).find(e=>e.machine===r.machine&&e.key===r.key);
+ if(!r.machine&&!r.key)return;
+ let e=browsingEntry(state.scan,r);
+ if(!e&&state.scan?.groups.some(g=>g.entries.some(e=>(e.copies||[]).some(c=>c.machine===r.machine&&c.key===r.key))))e=await api("ResolveEntry",r.machine,r.key);
  if(e){showEntry(e);reveal()}
+ else toast("This session is no longer in the current list. Refresh its machine.");
 }
+on("hopsesh:machine-scan",()=>machineScanChanged().catch(fail));
 on("hopsesh:quick-route",()=>quickRoute().catch(fail));
-on("hopsesh:quick",async()=>{if(!mainReady||state.scanning)return;const d=await api("QuickSnapshot");if(d.scan)queueScan(d.scan,d.presence?.entries||{})});
+// Coalesce concurrent notifications; Sessions owns ordered adoption and painting.
+let quickReading=false, quickAgain=false;
+on("hopsesh:quick",async()=>{
+ if(!mainReady)return;
+ quickAgain=true;if(quickReading)return;
+ quickReading=true;
+ try {
+  while(quickAgain) {
+   quickAgain=false;
+   const d=await api("QuickSnapshot");state.runtime=d.runtime;
+   if(!state.scanning&&d.scan)queueScan(d.scan,d.presence?.entries||{});
+  }
+ } catch(e) { fail(e); } finally { quickReading=false; }
+});
 
 // The app menu (and its shortcuts) sends these.
 on("hopsesh:menu", menuCommand);
@@ -183,7 +200,7 @@ export async function start() {
   mainReady = true;
   await go("sessions");
   loadTabs().catch(fail);
-  scan("InitialScan").then(()=>{if(current==="sessions")renderSessions();return quickRoute()}).catch(fail);
+  scan("InitialScan").then(()=>{backgroundRender();return quickRoute()}).catch(fail);
   if (state.info.updateCheck === "on") {
     api("CheckUpdate").then((update) => {
       state.update = update;

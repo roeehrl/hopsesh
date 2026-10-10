@@ -13,7 +13,7 @@
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 ![macOS · Linux · Windows](https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-0b6b62)
 
-[Install](#install) · [Quick start](#quick-start) · [Another agent](#continue-in-another-agent) · [Round trips](#round-trips) · [Push](#send-a-session-to-another-machine) · [Cloud sessions](#cloud-sessions) · [Ask your agent](#use-it-from-your-agent) · [Why not…?](#why-not) · [FAQ](#faq)
+[Install](#install) · [Quick start](#quick-start) · [Another agent](#continue-in-another-agent) · [Round trips](#round-trips) · [Push](#send-a-session-to-another-machine) · [Background runtime](#keep-hopsesh-available) · [Internet delivery](#internet-delivery) · [Cloud sessions](#cloud-sessions) · [Ask your agent](#use-it-from-your-agent) · [Why not…?](#why-not) · [FAQ](#faq)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hero-dark.gif">
@@ -30,8 +30,8 @@ brings the one you pick here: in the same agent, or continued in the other one, 
 repository, worktree and paths fixed up. Then it gives you the command to continue.
 
 - **Finds your machines** from Tailscale and `~/.ssh/config`, and connects only to the ones you
-  allow, with your own `ssh`, keys and agent. Nothing to install on the other machines.
-  Machines without SSH keys can log in with a password.
+  allow, with your own `ssh`, keys and agent. Direct SSH pulls need no Hopsesh installation
+  on the source. Machines without SSH keys can log in with a password.
 - **Lists every session of every agent** (Claude Code and Codex) by repository: machine, agent,
   path, branch, worktree, last prompt, last activity, whether it's running, and where else
   it has been.
@@ -48,6 +48,12 @@ repository, worktree and paths fixed up. Then it gives you the command to contin
   cloud (and, experimentally, Copilot, Jules, Devin or Amp), brings their sessions home, and
   hands one cloud's session on to another, all through the vendors' own commands, signed in
   as you.
+- **Optional encrypted internet delivery** connects approved Hopsesh endpoints through a
+  relay when you do not have a direct SSH route. Enrollment, observation, sharing and
+  receiving have separate permissions; the hosted relay remains experimental.
+- **One shared background runtime** serves the GUI, TUI and CLI, with change notifications,
+  cached observations, per-machine scan status and one remote scheduler. Headless machines
+  can keep receiving without a graphical app.
 - **Works from inside your agent**: ask Claude Code or Codex "bring my laptop session here" and
   it plans with hopsesh, then moves only after you say yes.
 - **Multiple accounts**: name and tag independent Claude Code and Codex profiles, discover
@@ -96,13 +102,15 @@ Both check the download against the release's `checksums.txt` and its signature,
   `sudo apt install ./hopsesh_<version>_linux_amd64.deb`.
 - **From source** (Go 1.26+): `go install github.com/roeehrl/hopsesh/cmd/hopsesh@latest`
 
-The other machines need only an SSH server (Remote Login on macOS, OpenSSH on Windows) and
-their sessions. To continue in another agent, that agent must be installed here.
+For a direct SSH pull, the source needs only an SSH server (Remote Login on macOS, OpenSSH
+on Windows) and its sessions. Internet delivery requires Hopsesh at both ends and approved
+relay access. To continue in another agent, that agent must be installed at the destination.
 
-**Upgrading from 0.3?** 0.4 stores its settings in a new format and doesn't read the old
-file: the app offers to set it aside and start fresh (the old file stays next to the new
-one), and the command line names the file to move aside. Then add and allow your machines
-again; your sessions are not affected. Update hopsesh on each machine where you run it.
+**Upgrading to 0.5?** Settings use schema 5; the schema 4 configuration from 0.4 is
+incompatible and is not migrated. The app offers to set it aside and start fresh, preserving
+the old file as a backup; the CLI names the file to move aside. Reconfigure accounts,
+machines and approvals before using them. Native conversation files are not removed by
+resetting configuration. Update Hopsesh on each machine where you run it.
 
 ## Quick start
 
@@ -130,6 +138,8 @@ hopsesh pull 7f3c2a1e                          # no machine name: bring back the
 hopsesh push 7f3c2a1e laptop                   # send it to a machine that runs hopsesh
 hopsesh hosts add nas alice@192.168.1.20 --password   # a machine without SSH keys
 hopsesh doctor studio                          # agents, SSH, host trust and the skill
+hopsesh runtime observe                        # passive local snapshot; no state changes
+hopsesh runtime observe --watch                # watch changes as JSON lines, without a GUI
 hopsesh undo                                   # undo the newest move (--list shows more)
 ```
 
@@ -198,6 +208,44 @@ from the agent's own process and the terminal it runs on (for Codex, from hopses
 the launch), never from anything the tab shows. It never types into a tab or reads one, and
 never changes iTerm2's settings: it doesn't turn on the Python API or install iTerm2's
 Claude Code integration.
+
+## Keep Hopsesh available
+
+The desktop, terminal UI and CLI share one local runtime for each settings/state namespace.
+It owns observation and delivery; opening another client does not start another collector.
+The desktop settings control login startup and whether closing the main window keeps the
+app running. A headless host needs no graphical app or display:
+
+```sh
+hopsesh runtime status                # current owner, if one is running
+hopsesh runtime start --headless      # start a host, or report the existing owner
+hopsesh runtime observe --watch       # subscribe to shared snapshots
+hopsesh runtime doctor                # redacted health; no conversation or credentials
+hopsesh settings get                  # shared settings and revision
+hopsesh runtime enable --plan         # inspect this user's login registration
+hopsesh runtime enable                # register the headless host at login
+hopsesh runtime login-status          # actual registration and supervisor state
+```
+
+`runtime stop` asks the owner to stop safely; active transfers prevent shutdown.
+`runtime disable` removes the headless login registration through the same guarded path.
+A desktop owner keeps its integrated terminals: finish transfers and quit it before
+switching to headless login hosting. Registration is per OS user, not an always-available
+privileged system daemon. Starting the runtime alone does not enable receiving.
+
+`hopsesh app status` detects a desktop installation without opening it. On macOS and
+Windows, `hopsesh app install --plan` reviews a missing-app installation and
+`hopsesh app install` verifies the signed release before installing. It refuses to replace
+an existing app; use the updater for that. `hopsesh app open` opens the installed app.
+
+The CLI and GUI use the same validated settings. `hopsesh settings set <key> <value>`
+changes one field; `--revision <revision>` refuses a stale edit. Local filesystem changes
+are coalesced into notifications, with fallback reconciliation. Newly approved machines
+scan automatically. Healthy direct machines normally refresh every five minutes; transient
+network failures back off, while authentication or host-key failures need explicit action.
+Machine rows show progress/errors and disable their scan button while a scan is active.
+Cached rows remain visible; a lost connection makes evidence stale rather than proving
+that a session finished. See [runtime resource qualification](docs/runtime-resource-qualification.md).
 
 ## Continue in another agent
 
@@ -270,6 +318,38 @@ session's files; it can't read or run anything else on the sender. Nothing chang
 confirm, and `hopsesh undo` on the sender reverses both machines. Both sides must speak the same
 hopsesh protocol version; otherwise hopsesh asks you to update. Details:
 [docs/design.md §11](docs/design.md#11-peers-working-with-hopsesh-on-the-other-machine).
+
+## Internet delivery
+
+Experimental internet delivery connects approved endpoints through verified HTTPS, with
+WebSocket notifications where the network allows them and HTTP fallback otherwise. Both
+machines run Hopsesh. Direct SSH remains available without relay enrollment or a hosted
+Hopsesh account; a hosted relay requires operator-approved access and may be unavailable.
+
+In **Settings → Internet delivery**, create the endpoint identity and choose **Connect in
+browser**. On a headless machine:
+
+```sh
+hopsesh relay init
+hopsesh relay login
+```
+
+Open the displayed approval URL, enter the code when requested, and compare the full
+fingerprint with the machine that started the request. Enrollment authorizes delivery,
+not access to conversations. Approve each peer, repository scope and required capabilities
+separately. To accept incoming sessions, also enable receiving on the destination.
+The CLI offers the same controls through `hopsesh relay pair --help`.
+
+The relay stores recipient-encrypted packets and processes routing and authorization
+metadata. It cannot decrypt the packets with the public keys it holds. A queued packet is
+not a completed move: durable operations, receipts and Activity distinguish delivery,
+application and recovery. Revocation blocks new authorized work; it cannot erase copies
+already received. Repeated returns and independently travelling forks use the same causal
+lineage as SSH; retries and reconnects do not add hops.
+
+See [device enrollment](docs/relay-enrollment.md), [notification behavior](docs/relay-notifications.md)
+and [operator quotas, retention and cost limits](docs/relay-operations.md). The hosted
+service is experimental; a billing alert is not a hard spending cap.
 
 ## Cloud sessions
 
@@ -394,6 +474,31 @@ saw it. Undo pushes them back. `delete_branch = "never"` or `"on-undo"` under
   every tool; parts of Claude Code cloud and Codex cloud were also checked against the real
   tools by hand, the experimental clouds not yet.
 
+## Optional cloud connector
+
+The vendor-command handoffs above and the 0.5 cloud helper are separate integrations. The
+helper runs inside a chosen cloud environment and exposes only an explicitly bound session,
+with observation and transcript export approved independently. It cannot receive transfers,
+run commands on your machines or grant itself peer access.
+
+**Settings → Internet delivery → Prepare cloud startup** previews the provider-specific
+files and a pinned, verified helper version. Existing unrelated settings and instructions
+are preserved. Publish the reviewed files to the repository and environment the task will
+actually use. Reusable environment setup installs only the binary and public scripts;
+session keys and invitations are created separately for actual tasks.
+
+| Provider helper | Current capability boundary |
+| --- | --- |
+| Claude hosted | Cold/cached/compact startup and idle continuation have live evidence. Authorized connector export/resume and reclaimed-VM rebuild qualification remain open. |
+| Current Codex cloud | Verified installation, explicit task-URL binding, scoped observation and reconnect have live evidence. Repository guidance/Start skill instructions are not guaranteed callbacks; automatic startup/identity and VM rebuild remain unqualified. Native transcript export is unavailable. |
+
+A prepared helper does not mean a connected session, and observation approval does not
+permit export. Resume uses an explicitly selected logical task with fresh keys; independent
+forks keep separate identities and ancestry. Follow the [startup guide](docs/cloud-startup.md)
+and [cloud admission guide](docs/cloud-admission.md). The
+[qualification record](docs/relay-hosted-qualification.md) records actual provider evidence;
+local fixture tests do not establish provider lifecycle support.
+
 ## Use it from your agent
 
 ```sh
@@ -439,9 +544,11 @@ including the file-format traps hopsesh handles, are in [docs/design.md](docs/de
 
 ### How it treats your data
 
-- **Your machines only.** Sessions travel over your own SSH. There's no hopsesh server, no
-  relay and no telemetry. A session goes to a vendor's cloud only when you hand it off. The app can check GitHub once a day for new versions, only
-  if you say yes.
+- **Choose where data goes.** Local use and direct SSH need no hosted Hopsesh account.
+  Optional internet delivery passes recipient-encrypted packets through a relay, which
+  processes routing/authentication metadata and asynchronous retention. Cloud handoffs and
+  connectors require explicit setup and scope. Hopsesh sends no product analytics; optional
+  update checks contact GitHub, and cloud preparation downloads verified release archives.
 - **Read-only until you say go.** Each machine needs your permission, and every move is shown
   as a plan first.
 - **Never moves credentials.** Logins, keys, live sockets and account data stay where they
@@ -451,8 +558,8 @@ including the file-format traps hopsesh handles, are in [docs/design.md](docs/de
 - **Transcripts can hold secrets.** hopsesh scans for likely secrets while moving and can
   redact the copy (`--redact`). Every remote action goes to a local audit log.
 - **Only your agents talk to their models.** hopsesh never calls the Anthropic or OpenAI API.
-- **Clouds only through your agents.** A vendor's cloud is reached only through that agent's
-  own command, signed in as you, and only once you allow it; hopsesh never reads its login
+- **Vendor handoffs use your agents.** A handoff invokes the vendor's own command,
+  signed in as you, after you allow that cloud; hopsesh never reads its login
   or calls its servers. A hand-off sends a briefing (secrets masked, best effort) and a
   branch; credential-like files never go, and the snapshot commit names nothing but an
   opaque id.
@@ -489,10 +596,12 @@ Related projects, with different trade-offs:
 <details>
 <summary><b>Does anything leave my machines?</b></summary>
 
-Only what you hand off to a cloud. Sessions go directly between your machines over SSH.
-hopsesh has no server and no telemetry, and it never calls the Anthropic or OpenAI API. A
-hand-off sends a briefing and a branch to the cloud you chose, through that vendor's own
-command, signed in as you (see [Cloud sessions](#cloud-sessions)).
+Direct SSH transfers go between your machines. Optional internet delivery sends
+recipient-encrypted packets through a relay along with routing and authorization metadata.
+A vendor handoff sends a briefing and branch to the cloud you select; a cloud connector
+runs there with separately approved observation/export scope. Hopsesh sends no product
+analytics or model inference requests. See [Internet delivery](#internet-delivery),
+[Cloud sessions](#cloud-sessions) and [the helper](#optional-cloud-connector).
 </details>
 
 <details>
@@ -500,7 +609,9 @@ command, signed in as you (see [Cloud sessions](#cloud-sessions)).
 
 No. Any machine you can `ssh` to works, including aliases, ProxyJump and ProxyCommand from
 your `~/.ssh/config`. Tailscale just makes machines easy to find. When an alias's LAN name
-doesn't resolve, hopsesh falls back to the machine's Tailscale name.
+doesn't resolve, hopsesh falls back to the machine's Tailscale name. Optional
+[internet delivery](#internet-delivery) provides a relay route without Tailscale or an
+inbound SSH port, with Hopsesh and approved relay access at both ends.
 </details>
 
 <details>
@@ -528,8 +639,10 @@ the machine to keys and forgets the password. This works for macOS and Linux mac
 <details>
 <summary><b>Does the other machine need hopsesh installed?</b></summary>
 
-No. `pull` only needs an SSH server there. hopsesh on the other machine is needed only to
-`push` from here to there (it must also run `hopsesh receive on`).
+A direct SSH pull needs only an SSH server and session files on the source. Sending to a
+machine requires Hopsesh there with receiving enabled (`hopsesh receive on`). Internet
+delivery requires Hopsesh at both ends, enrollment and appropriate peer permissions; a
+headless CLI host is sufficient.
 </details>
 
 <details>

@@ -23,6 +23,12 @@ const errNothingToUndo = "nothing to undo"
 // is "". Writes on other machines are undone over SSH. Unless force, it refuses when a file
 // the operation wrote changed since (that later work would be lost).
 func (a *App) Undo(ctx context.Context, match string, force bool) (*journal.Journal, error) {
+	finished, activityErr := a.beginRuntimeAction()
+	if activityErr != nil {
+		return nil, activityErr
+	}
+	defer finished()
+
 	js, err := a.Journals()
 	if err != nil {
 		return nil, err
@@ -39,6 +45,9 @@ func (a *App) Undo(ctx context.Context, match string, force bool) (*journal.Jour
 	}
 	if j == nil {
 		return nil, errors.New(errNothingToUndo + map[bool]string{true: "", false: " for " + match}[match == ""])
+	}
+	if j.PendingAcknowledgments() {
+		return j, errors.New("source acknowledgment is pending; retry the receipt before undoing this operation")
 	}
 	if j.PartOf != "" && j.ID != match {
 		// A leg of a hop: undo the whole hop (a leg named by its own id is undone alone).
@@ -136,6 +145,8 @@ func (a *App) Activities() ([]Activity, error) {
 		switch {
 		case j.Undone:
 			act.Why = "undone"
+		case j.PendingAcknowledgments():
+			act.CanUndo, act.Why = false, "source acknowledgment is pending; retry the receipt first"
 		case len(j.Parts) > 0:
 			// A hop can be undone while each of its legs can.
 			var later []*journal.Journal
