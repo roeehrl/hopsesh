@@ -8,6 +8,21 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Shared background runtime for desktop, TUI and headless CLI hosts, with private
+  same-user IPC, one observer/scheduler, coalesced filesystem notifications and
+  cached source freshness. Runtime health, settings and per-user login startup
+  can be administered from the CLI without opening a graphical app.
+- Detect, review and install a missing desktop app from the CLI using verified
+  release manifests. Existing apps retain their updater path, with interrupted
+  publication/rollback and concurrent-install protection.
+- Experimental recipient-encrypted internet delivery for approved machines,
+  including push/pull, repository-scoped receiving/sharing, offline queues,
+  durable receipts, recovery and undo. Repeated returns, multi-hop journeys and
+  independent forks retain the same causal lineage across SSH and relay routes.
+- Separate experimental relay and signed-download services with scoped device
+  authorization, admission/storage quotas, logical expiry, asynchronous ciphertext
+  cleanup, bounded diagnostics and operator pause controls.
+
 - Link a logical cloud task to a verified saved handoff in Settings or the CLI.
   Original ancestry and briefing context survive later checkpoints and agent
   changes; explicit cloud forks keep independent branches and trip counts.
@@ -33,10 +48,8 @@ All notable changes to this project are documented here. The format follows
   and a temporary loopback callback; headless machines use `hopsesh relay login`
   with a short-lived code. Approval grants delivery only, separate from local
   conversation sharing and receiving. Private credentials stay in local state.
-- 0.5 foundation: `hopsesh runtime observe` reads local sessions without initializing
-  accounts, probing login, adopting imports or applying movement marks. `--watch`
-  coalesces filesystem notifications with bounded fallback reconciliation and reports
-  source freshness, errors and profile-scoped session identities, without requiring a GUI.
+- Passive `hopsesh runtime observe` snapshots and `--watch` subscriptions do not
+  initialize accounts, probe login, adopt imports or apply movement marks.
 - Explicit logical cloud task continuity across approved resumes and rebuilds.
   Fresh keys and owner-signed generations supersede old connector access while
   verified native prefixes preserve checkpoint lineage. Checkpoint forks remain
@@ -47,6 +60,13 @@ All notable changes to this project are documented here. The format follows
   private summary caching and reconciled local file notifications.
 - Session account labels and grouping across GUI, TUI and CLI. Account groups
   include retained source copies after a move and keep same-email profiles separate.
+
+### Changed
+
+- Configuration uses schema 5. Schema 4 files from 0.4 are refused rather than
+  migrated. The app can preserve the incompatible file as a backup and start
+  fresh; accounts, machines and approvals must be configured again. Resetting
+  configuration does not remove native conversation files.
 
 ### Fixed
 
