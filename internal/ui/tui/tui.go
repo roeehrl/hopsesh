@@ -410,20 +410,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.planning || m.mode != modeLoading && m.mode != modeBrowse {
 			return m, nil
 		}
-		identity := ""
-		if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil {
-			e := m.rows[m.cursor].item.Entry
-			identity = app.EntryIdentity(e.Machine, e.Session.Key.String())
-		}
 		m.inv = msg.inv
 		m.mode = modeBrowse
-		m.buildRows()
-		for i, r := range m.rows {
-			if r.item != nil && app.EntryIdentity(r.item.Entry.Machine, r.item.Entry.Session.Key.String()) == identity {
-				m.cursor = i
-				break
-			}
-		}
+		m.rebuildRuntimeRows()
 	case scanDone:
 		if msg.generation != 0 && msg.generation != m.scanGeneration {
 			msg.inv.Close()
@@ -434,23 +423,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			msg.inv.Close()
 			return m, nil
 		}
-		identity := ""
-		if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil {
-			e := m.rows[m.cursor].item.Entry
-			identity = app.EntryIdentity(e.Machine, e.Session.Key.String())
-		}
 		if m.inv != nil {
 			m.inv.Close()
 		}
 		m.inv = msg.inv
 		m.mode = modeBrowse
-		m.buildRows()
-		for i, r := range m.rows {
-			if r.item != nil && app.EntryIdentity(r.item.Entry.Machine, r.item.Entry.Session.Key.String()) == identity {
-				m.cursor = i
-				break
-			}
-		}
+		m.rebuildRuntimeRows()
 		if m.latestRuntime != nil {
 			m.applyRuntime(*m.latestRuntime)
 		}

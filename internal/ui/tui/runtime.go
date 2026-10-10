@@ -153,14 +153,50 @@ func (m *model) rebuildRuntimeRows() {
 	offset := m.offset
 	m.buildRows()
 	if selected != nil {
+		index := -1
 		for i, r := range m.rows {
 			if r.item != nil && r.item.Entry.Machine == selected.Machine && r.item.Entry.Location == selected.Location && r.item.Entry.Session.Key == selected.Session.Key {
-				m.cursor = i
-				m.offset = offset
+				index = i
 				break
 			}
+		}
+		if index < 0 {
+			index = m.registeredDefaultRow(*selected)
+		}
+		if index >= 0 {
+			m.cursor, m.offset = index, offset
 		}
 	}
 	m.offset = min(m.offset, max(0, len(m.rows)-m.listHeight()))
 	m.scroll()
+}
+
+// First-time default registration changes a browsing key, not the native file.
+// Resolve only that local file, with a single current default binding. Plans and
+// transfers still perform their own fresh scope checks.
+func (m *model) registeredDefaultRow(selected app.Entry) int {
+	local := m.inv.Machine(selected.Machine)
+	if local == nil || !local.Local || selected.Location.IsCloud() || selected.Session.Path == "" || selected.Session.Key.Profile != "" || selected.Profile != nil {
+		return -1
+	}
+	var key agent.SessionKey
+	for _, e := range m.inv.Entries {
+		p := e.Profile
+		if e.Machine != selected.Machine || e.Location != selected.Location || e.Agent != selected.Agent || e.Session.Path != selected.Session.Path || e.Session.Key.Session != selected.Session.Key.Session || e.Session.Key.Agent != selected.Session.Key.Agent || e.Cached && !m.inv.Discovering || p == nil || !p.Default || p.ID == "" || p.Endpoint == "" || p.Root == "" || p.Agent != e.Agent || e.Session.Key.Profile != p.ID {
+			continue
+		}
+		if key.Profile != "" && key != e.Session.Key {
+			return -1
+		}
+		key = e.Session.Key
+	}
+	if key.Profile == "" {
+		return -1
+	}
+	for i, r := range m.rows {
+		if r.item != nil && r.item.Entry.Machine == selected.Machine && r.item.Entry.Location == selected.Location && r.item.Entry.Session.Key == key && r.item.Entry.Session.Path == selected.Session.Path {
+			return i
+		}
+	}
+	return -1
 }
