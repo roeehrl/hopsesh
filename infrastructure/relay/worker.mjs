@@ -12,6 +12,14 @@ const json = (v,status=200) => new Response(JSON.stringify(v),{status,headers:{'
 async function schedule(storage,when,now=Date.now()){
  const old=await storage.getAlarm();if(!old||old<=now||when<old)await storage.setAlarm(when);
 }
+// Persist with the message, before attempting its best-effort WebSocket hint.
+// One coalesced retry per recipient survives hibernation; ACK ends the demand.
+async function armNotification(storage,device,now){
+ const quota=await storage.get('quota:'+device);if(!quota?.count)return;
+ const previous=await storage.get('notify:'+device);
+ const pending={sequence:await storage.get('sequence:'+device),at:Math.min(previous?.at??Infinity,now+1000),delay:1000};
+ await storage.put('notify:'+device,pending);await schedule(storage,pending.at,now);
+}
 async function bounded(req, max) {
   const advertised=Number(req.headers.get('content-length')||0);
   if(advertised>max)throw new Error('too-large');
@@ -91,7 +99,7 @@ export function createHandler(storage,bucket,adminToken,space,clock=()=>Date.now
      await tx.put('device:'+body.device,{token:key,expires:now+ttl,revoked:false,kind,issuer:body.issuer?.device,authority:await hash(adminToken),...(body.admission?{admission:body.admission,nonce:secret,issuedAt:now}:{})});
      await tx.put('token:'+key,body.device);
      if(!old)await tx.put('device-count',count+1);
-     await schedule(storage,(now+ttl)*1000,clock());
+     await schedule(tx,(now+ttl)*1000,clock());
      return json({token:credential,space,device:body.device,expires:now+ttl},201);
     });
    }
@@ -101,7 +109,7 @@ export function createHandler(storage,bucket,adminToken,space,clock=()=>Date.now
    if(!grant||grant.revoked||grant.expires<=now||grant.token!==tokenHash||grant.authority!==await hash(adminToken))return json({error:'authorization'},403);
    if(path==='/v1/notifications'){
     if(req.method!=='GET'||req.headers.get('Upgrade')?.toLowerCase()!=='websocket'||url.search)return json({error:'websocket-required'},426);
-    return events?.subscribe?events.subscribe(device,grant):json({error:'notifications-unavailable'},501);
+    return events?.subscribe?await events.subscribe(device,grant):json({error:'notifications-unavailable'},501);
    }
    if(path==='/v1/enrollment/revoke'){
     if(req.method!=='POST')return json({error:'method'},405);
@@ -133,7 +141,8 @@ export function createHandler(storage,bucket,adminToken,space,clock=()=>Date.now
      await tx.put('id:'+device+':'+e.id,{sum,sequence,expires:e.expires});await tx.put('id-count',tombstones+1);
      await tx.put('sequence:'+e.to,sequence);await tx.put('quota:'+e.to,{bytes:q.bytes+wireBytes,count:q.count+1});
      await tx.put('day-budget',{day,frames:budget.frames+1,bytes:budget.bytes+wireBytes});
-     await schedule(storage,e.expires*1000,clock());
+     if(events?.changed)await armNotification(tx,e.to,clock());
+     await schedule(tx,e.expires*1000,clock());
      return json({sequence},201);
     });
    }
@@ -159,7 +168,7 @@ export function createHandler(storage,bucket,adminToken,space,clock=()=>Date.now
   if(events&&result.ok){try{
    if(recipient&&result.status===201)await events.changed(recipient);
    if(new URL(req.url).pathname.startsWith('/v1/enrollment/'))await events.refresh();
-  }catch{/* HTTP reconciliation recovers missed hints. */}}
+  }catch{/* Durable notification demand and HTTP reconciliation recover missed hints. */}}
   return result;
  };
 }
@@ -173,6 +182,7 @@ async function removeMessages(storage,bucket,device,predicate){
   // after rollback and permanently block a mailbox on a missing object.
   for(const [k,m]of rows){if(!predicate(m))continue;await tx.put('delete:'+m.key,m.key);await tx.delete(k);q.bytes-=m.bytes;q.count--;}
   await tx.put('quota:'+device,q);
+  if(q.count===0)await tx.delete('notify:'+device);
  });
  await schedule(storage,Date.now()+60000);
  await retryDeletes(storage,bucket);
@@ -181,7 +191,7 @@ async function retryDeletes(storage,bucket){
  const rows=await storage.list({prefix:'delete:'});
  for(const [key,object]of rows){try{await bucket.delete(object);await storage.delete(key)}catch{throw new Error('storage')}}
 }
-export async function maintain(storage,bucket,now=Math.floor(Date.now()/1000)){
+export async function maintain(storage,bucket,now=Math.floor(Date.now()/1000),reconcileNotifications){
  const devices=await storage.list({prefix:'device:'});
  for(const [key,d]of devices)await removeMessages(storage,bucket,key.slice(7),m=>m.expires<=now||d.expires<=now||d.revoked);
  await storage.transaction(async tx=>{
@@ -190,19 +200,35 @@ export async function maintain(storage,bucket,now=Math.floor(Date.now()/1000)){
   // Expired routing credentials cannot resurrect an old mailbox. Re-enrollment
   // still needs operator authorization and independent local key approval.
   for(const[key,d]of await tx.list({prefix:'device:'}))if(d.expires<=now||d.revoked){await tx.delete('token:'+d.token);await tx.delete(key);deviceCount--}
+  for(const[key]of await tx.list({prefix:'notify:'})){
+   const device=key.slice(7),grant=await tx.get('device:'+device),quota=await tx.get('quota:'+device);
+   if(!grant||grant.revoked||grant.expires<=now||!quota?.count)await tx.delete(key);
+  }
   await tx.put('id-count',Math.max(0,ids));await tx.put('device-count',Math.max(0,deviceCount));
  });
  await retryDeletes(storage,bucket);
+ // Resolve pending notification work before computing the next shared alarm,
+ // so an old due hint cannot leave an unnecessary one-second wake scheduled.
+ if(reconcileNotifications)await reconcileNotifications();
  // Wake at the next real expiry, not every minute while devices are idle.
  let next=Infinity;
  for(const prefix of ['device:','id:','message:'])for(const [,v]of await storage.list({prefix}))next=Math.min(next,v.expires);
  const deletes=await storage.list({prefix:'delete:',limit:1});
  if(deletes.size)next=Math.min(next,now+60);
+ for(const[,pending]of await storage.list({prefix:'notify:'}))next=Math.min(next,pending.at/1000);
  if(Number.isFinite(next))await storage.setAlarm(Math.max(Date.now()+1000,next*1000));
 }
 export class Mailbox {
  constructor(ctx,env){this.ctx=ctx;this.env=env}
- subscribe(device,grant){
+ async subscribe(device,grant){
+  if(this.ctx.getWebSockets('device:'+device).length>=4||this.ctx.getWebSockets().length>=128)return json({error:'quota'},429);
+  const active=await this.ctx.storage.transaction(async tx=>{
+   const current=await tx.get('device:'+device);
+   if(!current||current.revoked||current.expires<=Date.now()/1000||current.token!==grant.token||current.authority!==grant.authority)return false;
+   await armNotification(tx,device,Date.now());return true;
+  });
+  if(!active)return json({error:'authorization'},403);
+  // The durable rearm yields: concurrent handshakes must recheck capacity.
   if(this.ctx.getWebSockets('device:'+device).length>=4||this.ctx.getWebSockets().length>=128)return json({error:'quota'},429);
   const pair=new WebSocketPair(),client=pair[0],server=pair[1];
   this.ctx.acceptWebSocket(server,['device:'+device]);
@@ -220,14 +246,37 @@ export class Mailbox {
  }
  async changed(device){
   await this.refresh();
-  for(const socket of this.ctx.getWebSockets('device:'+device)){try{socket.send('{"type":"mailbox-changed"}')}catch{}}
+  let online=false;
+  for(const socket of this.ctx.getWebSockets('device:'+device)){
+   if(socket.readyState!==1)continue;
+   online=true;
+   try{socket.send('{"type":"mailbox-changed"}')}catch{try{socket.close(1011,'notification delivery failed')}catch{}}
+  }
+  return online;
+ }
+ async retryNotifications(){
+  const storage=this.ctx.storage,now=Date.now();
+  for(const[key,pending]of await storage.list({prefix:'notify:'})){
+   if(pending.at>now)continue;
+   let online=true;
+   try{online=await this.changed(key.slice(7))}catch{/* Retain bounded retry after transient storage failure. */}
+   await storage.transaction(async tx=>{
+    const current=await tx.get(key);
+    // A concurrent publication/ACK owns its newer schedule. Never erase it.
+    if(!current||current.sequence!==pending.sequence||current.at!==pending.at)return;
+    if(!online){await tx.delete(key);return} // Reconnection rearms any pending mailbox.
+    const delay=Math.min(pending.delay*2,30000),at=Date.now()+delay;
+    await tx.put(key,{...current,at,delay});await schedule(tx,at);
+   });
+  }
  }
  async fetch(req){const space=req.headers.get('X-Hopsesh-Space');return createHandler(this.ctx.storage,this.env.CIPHERTEXT,this.env.ENROLLMENT_ADMIN,space,()=>Date.now(),{subscribe:(d,g)=>this.subscribe(d,g),changed:d=>this.changed(d),refresh:()=>this.refresh()},operatorPolicy(this.env))(req)}
  webSocketMessage(socket){socket.close(1008,'notifications are read only')}
  webSocketError(socket){try{socket.close(1011,'notification connection ended')}catch{}}
  async alarm(){
-  await maintain(this.ctx.storage,this.env.CIPHERTEXT);
-  await this.refresh();
+  await maintain(this.ctx.storage,this.env.CIPHERTEXT,Math.floor(Date.now()/1000),async()=>{
+   await this.refresh();await this.retryNotifications();
+  });
  }
 }
 export class Authorization {

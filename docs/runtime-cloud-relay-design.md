@@ -4,6 +4,34 @@ Status: approved for 0.5.0; initial research/source snapshot dated 2026-10-07. I
 
 This consolidates the earlier [presence proposal](daemon-presence-proposal.md) with desktop background operation, CLI administration, cloud bootstrap, and internet transport. It revises that proposal's hosting recommendation: use the desktop process when appropriate and the same backend in a headless process when needed. There is one Hopsesh product and one backend implementation.
 
+## Notification-loss recovery refinement — 2026-10-10
+
+Qualification found two distinct gaps: a sender could leave a committed reply
+behind its connected socket's idle timer, and an idle recipient could miss an
+incoming request entirely until that request's short lease expired. The caller
+now reconciles while it has outstanding requests. Recipient recovery additionally
+needs durable server-side notification demand; faster sender polling cannot wake
+another endpoint.
+
+Persist one coalesced pending hint per recipient with message publication, and
+use the existing shared alarm to retry at 1 / 2 / 4 / 8 / 16 / 30-second intervals,
+bounded at 30 seconds. Acknowledgment removes demand when the mailbox is empty;
+partial acknowledgment preserves later messages. Expiry/revocation clears demand.
+Offline sockets stop retries, and an authenticated reconnection rearms a nonempty
+mailbox. Compare the pending sequence and schedule before changing it so a late
+retry cannot overwrite newer publication or acknowledgment. Hints contain no
+conversation content and never replay native operations.
+
+This follows Cloudflare's [single-alarm scheduling and at-least-once execution
+model](https://developers.cloudflare.com/durable-objects/api/alarms/). State lives
+in storage rather than ordinary timers or an in-memory queue, preserving
+[WebSocket hibernation](https://developers.cloudflare.com/durable-objects/best-practices/websockets/).
+The actual SQLite/R2 regression discards the first hint, performs no recipient
+HTTP poll, and requires a replacement before the request lease expires. It fails
+before the correction and passes afterward. Native three-OS and revised hosted
+load/cost qualification remain necessary; earlier hosted measurements do not
+qualify this changed alarm behavior.
+
 ## 1. Recommended decisions
 
 | Question | Recommendation |
