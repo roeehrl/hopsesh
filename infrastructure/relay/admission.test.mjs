@@ -104,6 +104,37 @@ test('cross-object latency cannot extend a signed cloud lease or its replayed cr
  delay=4000;
  assert.deepEqual(await(await call('/v1/cloud/claim',args)).json(),connection,'retry extended or rotated the credential');
 });
+test('mailbox authorization outages stay temporary across every cloud admission route',async t=>{
+ for(const mode of ['http-500','http-503','http-429','throw','invalid-json','invalid-shape'])await t.test(mode,async()=>{
+  const authStorage=new Storage(),mailboxStorage=new Storage(),space='a'.repeat(64),admin='operator-secret-with-at-least-32-bytes';
+  const mailbox=createHandler(mailboxStorage,{put:async()=>{},get:async()=>null,delete:async()=>{}},admin,space);
+  const native=await(await mailbox(new Request('https://relay.test/v1/enrollment/register',{method:'POST',headers:{Authorization:'Bearer '+admin},body:JSON.stringify({device:'native-device-12345',ttl:3600})}))).json();
+  let broken=false;
+  const gateway=async req=>{
+   if(broken&&new URL(req.url).pathname==='/v1/enrollment/check'){
+    if(mode==='throw')throw new Error('private-outage-details');
+    return new Response(mode==='invalid-shape'?JSON.stringify({active:'private-outage-details'}):'private-outage-details',{status:mode.startsWith('invalid-')?200:Number(mode.slice(5))});
+   }
+   return mailbox(req);
+  };
+  const obj=new Authorization({storage:authStorage},{ENROLLMENT_ADMIN:admin,MAILBOX:{idFromName:s=>s,get:()=>({fetch:gateway})}});
+  const headers={'Content-Type':'application/x-www-form-urlencoded','X-Hopsesh-Principal':space,'X-Hopsesh-Issuer':native.device,'X-Hopsesh-Credential':await digest(native.token)};
+  const call=(path,body)=>obj.fetch(new Request('https://relay.test'+path,{method:'POST',headers,body:new URLSearchParams(body)}));
+  const issue={provider:'claude-hosted',session:'session-fixture',lease_seconds:'3600'};
+  const ticket=await(await call('/v1/cloud/tickets',issue)).json(),identity=await cloudIdentity(),f=await fixture();
+  const claim=f.claimArgs(ticket,identity),before=structuredClone([...authStorage.values]);
+  broken=true;
+  for(const [path,body]of [['tickets',issue],['status',{ticket:ticket.ticket}],['revoke',{ticket:ticket.ticket}],['claim',claim]]){
+   const response=await call('/v1/cloud/'+path,body);
+   assert.equal(response.status,503,'outage must not become invalid input or an authorization denial');
+   assert.deepEqual(await response.json(),{error:'temporarily_unavailable'});
+   assert.deepEqual([...authStorage.values],before,'outage mutated the pending ticket');
+   assert.equal(await mailboxStorage.get('device:'+identity.public.id),undefined);
+  }
+  broken=false;
+  assert.equal((await call('/v1/cloud/claim',claim)).status,200,'same approved ticket can recover after outage');
+ });
+});
 test('full mailbox admission is a capacity refusal, leaves the ticket pending and can succeed after expiry',async()=>{
  const authStorage=new Storage(),mailboxStorage=new Storage(),space='a'.repeat(64),admin='operator-secret-with-at-least-32-bytes';
  const now=Date.now(),bucket={put:async()=>{},get:async()=>null,delete:async()=>{}};

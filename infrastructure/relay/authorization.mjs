@@ -57,13 +57,13 @@ export function createAuthorizationHandler(storage,enroll,clock=()=>Date.now()) 
   const url=new URL(req.url),origin=req.headers.get('X-Hopsesh-External-Origin')||url.origin,path=url.pathname,now=Math.floor(clock()/1000);
   try {
    if(req.method!=='POST')return failure('invalid_request',405);
-   const values=await authorizationForm(req);
+   let values;try{values=await authorizationForm(req)}catch{return failure('invalid_request')}
    if(path==='/v1/device/code'||path==='/v1/authorization/request') {
     const native=path==='/v1/authorization/request';
     if(values.get('client_id')!==(native?'hopsesh-desktop-v1':'hopsesh-headless-v1')||values.get('scope')!=='relay.routing')return failure('invalid_scope');
     let browser;
-    if(native){if(values.get('response_type')!=='code'||values.get('code_challenge_method')!=='S256'||! /^[A-Za-z0-9_-]{43}$/.test(values.get('code_challenge')||'')||! /^[a-f0-9]{64}$/.test(values.get('state')||''))return failure('invalid_request');browser={redirect:nativeRedirect(values.get('redirect_uri')),challenge:values.get('code_challenge'),state:values.get('state')}}
-    const identity=await identityProof(values,origin);
+    if(native){if(values.get('response_type')!=='code'||values.get('code_challenge_method')!=='S256'||! /^[A-Za-z0-9_-]{43}$/.test(values.get('code_challenge')||'')||! /^[a-f0-9]{64}$/.test(values.get('state')||''))return failure('invalid_request');try{browser={redirect:nativeRedirect(values.get('redirect_uri')),challenge:values.get('code_challenge'),state:values.get('state')}}catch{return failure('invalid_request')}}
+    let identity;try{identity=await identityProof(values,origin)}catch{return failure('invalid_request')}
     const deviceCode=random(32),key='request:'+await digest(deviceCode),userCode=random(5).toUpperCase().replace(/(.{5})(.{5})/,'$1-$2');
     return await storage.transaction(async tx=>{
      if((await tx.list({prefix:'request:',limit:AUTH_LIMITS.pending})).size>=AUTH_LIMITS.pending)return failure('temporarily_unavailable',429);
@@ -129,7 +129,7 @@ export function createAuthorizationHandler(storage,enroll,clock=()=>Date.now()) 
     }
     await tx.put(key,state);return response({approved:decision==='approve',...(redirect?{redirect_uri:redirect.toString()}:{})});
    });
-  }catch{return failure('invalid_request')}
+  }catch{return failure('temporarily_unavailable',503)}
  };
 }
 export async function maintainAuthorization(storage,now=Math.floor(Date.now()/1000)) {
