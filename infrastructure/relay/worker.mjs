@@ -20,14 +20,20 @@ async function armNotification(storage,device,now){
  const pending={sequence:await storage.get('sequence:'+device),at:Math.min(previous?.at??Infinity,now+1000),delay:1000};
  await storage.put('notify:'+device,pending);await schedule(storage,pending.at,now);
 }
+class RequestBodyError extends Error {
+ constructor(code='invalid-request',status=400){super(code);this.status=status}
+}
 async function bounded(req, max) {
   const advertised=Number(req.headers.get('content-length')||0);
-  if(advertised>max)throw new Error('too-large');
-  const reader=req.body?.getReader();if(!reader)throw new Error('bad-body');
+  if(advertised>max)throw new RequestBodyError('frame',413);
+  const reader=req.body?.getReader();if(!reader)throw new RequestBodyError();
   let length=0;const chunks=[];
-  for(;;){const {value,done}=await reader.read();if(done)break;length+=value.length;if(length>max){await reader.cancel();throw new Error('too-large')}chunks.push(value)}
+  for(;;){const {value,done}=await reader.read();if(done)break;length+=value.length;if(length>max){try{await reader.cancel()}catch{}throw new RequestBodyError('frame',413)}chunks.push(value)}
   const result=new Uint8Array(length);let offset=0;for(const c of chunks){result.set(c,offset);offset+=c.length}
-  return JSON.parse(new TextDecoder().decode(result));
+  let value;
+  try{value=JSON.parse(new TextDecoder().decode(result))}catch{throw new RequestBodyError()}
+  if(!value||typeof value!=='object'||Array.isArray(value))throw new RequestBodyError();
+  return value;
 }
 // This exact handler is used by the deployed Durable Object and deterministic
 // tests. Storage transactions serialize quotas, revocation and cursor updates.
@@ -160,7 +166,13 @@ export function createHandler(storage,bucket,adminToken,space,clock=()=>Date.now
     return json({acknowledged:cursor});
    }
    return json({error:'method-or-route'},['/v1/messages','/v1/ack'].includes(path)?405:404);
-  }catch(e){return json({error:e?.message==='too-large'?'frame':e?.message==='storage'?'storage':'invalid-request'},e?.message==='too-large'?413:e?.message==='storage'?503:400)}
+  }catch(e){
+   if(e instanceof RequestBodyError)return json({error:e.message},e.status);
+   // Only validated request-body errors are client faults. Storage, signing or
+   // subscription failures must remain server failures, including an uncertain
+   // response after commit. Exact envelope retries use the durable tombstone.
+   return json({error:'unavailable'},503);
+  }
   };
   const result=await handle();
   // Hints follow the committed transaction. A failed hint must never turn an

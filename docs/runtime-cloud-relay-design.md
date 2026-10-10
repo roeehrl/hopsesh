@@ -687,3 +687,29 @@ inspected cloud interfaces. This is a bounded finding, not proof that no provide
 control exists anywhere. Keep the live rebuild gate open; do not substitute
 republishing an environment, creating another chat or restarting Hopsesh for a
 provider rebuild. Evidence: `qualification/codex-lifecycle-recheck-20261010/audit.json`.
+
+### Hosted HTTP failures and exception boundaries — 2026-10-10
+
+The failed 100-client run records HTTP 500 and object exceptions but no captured
+exception text; its cause is unresolved. Do not infer that the missing
+`webSocketClose` method causes the hibernation errors. The inspected
+[workerd close-dispatch source at a pinned revision](https://github.com/cloudflare/workerd/blob/a68d28aab029fe2c509ce42b3af9fe689b26670a/src/workerd/api/global-scope.c%2B%2B#L940-L956)
+permits an absent handler; the
+[documented compatibility flag](https://developers.cloudflare.com/durable-objects/api/base/#websocketclose)
+automatically completes the close handshake for our compatibility date. This
+narrows a hypothesis; it does not prove which runtime build served the failure.
+
+Independent fault injection identifies a real classification defect: exceptions
+from grant lookup, ciphertext publication/read, stored JSON decoding and a lost
+post-commit response were all returned as HTTP 400. Explicit request-body errors
+must remain 400/413; unexpected internal errors must be bounded, redacted 503
+responses. Retrying the exact committed envelope must preserve its sequence and
+charge the quota once. This correction is distinct from the still-unexplained
+outer HTTP 500 and requires its own platform qualification.
+
+Cloudflare's [error-handling guidance](https://developers.cloudflare.com/durable-objects/best-practices/error-handling/)
+distinguishes retryable exceptions from overload and requires idempotency before
+retrying. The correction changes classification, not the workload's retry or
+failure assertions; it adds no automatic Worker retry. Bounded
+[live tail capture](https://developers.cloudflare.com/durable-objects/observability/troubleshooting/)
+remains necessary to diagnose the prior unhandled failure.

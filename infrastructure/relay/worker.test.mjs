@@ -21,6 +21,45 @@ async function fixture(events,policy){
  const envelope=(id='message-123456789')=>({kind:"request",protocol:1,id,space,from:a,to:b,operation:'operation-123456',created:Math.floor(clock/1000),expires:Math.floor(clock/1000)+300,ciphertext:'opaque-encrypted-payload',signature:'x'.repeat(88)});
  return{storage,bucket,invoke,ta,tb,a,b,envelope,advance:ms=>clock+=ms};
 }
+test('unexpected mailbox storage failures are retryable server errors with no leaked details',async t=>{
+ for(const stage of ['grant-read','ciphertext-write','ciphertext-read','stored-json','after-commit'])await t.test(stage,async()=>{
+  const f=await fixture(),frame=f.envelope();
+  let restore=()=>{},method='POST',token=f.ta,body=frame;
+  const fail=()=>{throw new Error('private-storage-details')};
+  if(stage==='grant-read'){
+   const original=f.storage.get;f.storage.get=fail;restore=()=>{f.storage.get=original};
+  }else if(stage==='ciphertext-write'){
+   const original=f.bucket.put;f.bucket.put=fail;restore=()=>{f.bucket.put=original};
+  }else if(stage==='after-commit'){
+   const original=f.storage.transaction;f.storage.transaction=async fn=>{await original.call(f.storage,fn);fail()};restore=()=>{f.storage.transaction=original};
+  }else{
+   assert.equal((await f.invoke('/v1/messages','POST',f.ta,frame)).status,201);
+   const original=f.bucket.get;
+   f.bucket.get=stage==='stored-json'?async()=>({text:async()=>'{private-storage-details'}):fail;
+   restore=()=>{f.bucket.get=original};method='GET';token=f.tb;body=undefined;
+  }
+  const response=await f.invoke('/v1/messages',method,token,body);
+  assert.equal(response.status,503,'an internal failure is not invalid client input');
+  assert.deepEqual(await response.json(),{error:'unavailable'});
+  restore();
+  const retry=await f.invoke('/v1/messages','POST',f.ta,frame);
+  assert.equal(retry.status,['after-commit','ciphertext-read','stored-json'].includes(stage)?200:201);
+  assert.equal((await f.storage.get('quota:'+f.b)).count,1,'exact retry cannot duplicate committed delivery');
+  assert.equal((await f.storage.get('day-budget')).frames,1,'exact retry cannot double charge the daily budget');
+ });
+});
+test('malformed request bodies remain client errors, independently of stored JSON failures',async()=>{
+ const f=await fixture();
+ for(const body of [null,[],false,1,'text',undefined]){
+  assert.equal((await f.invoke('/v1/messages','POST',f.ta,body)).status,400);
+  assert.equal((await f.invoke('/v1/ack','POST',f.ta,body)).status,400);
+  assert.equal((await f.invoke('/v1/enrollment/register','POST','test-operator-secret',body)).status,400);
+ }
+ const handle=createHandler(f.storage,f.bucket,'test-operator-secret','space-12345678901');
+ const malformed=await handle(new Request('https://relay.test/v1/messages',{method:'POST',headers:{Authorization:'Bearer '+f.ta},body:'{private-invalid-json'}));
+ assert.equal(malformed.status,400);
+ assert.deepEqual(await malformed.json(),{error:'invalid-request'});
+});
 test('serialized daily traffic ceiling survives acknowledgment, duplicate retry and midnight rollover',async t=>{
  for(const reverse of [false,true])await t.test(reverse?'reverse submission order':'forward submission order',async()=>{
   const f=await fixture(undefined,{dailyFrames:2,dailyBytes:100000});
