@@ -110,10 +110,11 @@ type meta struct {
 
 // line is one rollout record.
 type line struct {
-	Ordinal   *uint64         `json:"ordinal,omitempty"`
-	Timestamp string          `json:"timestamp"`
-	Type      string          `json:"type"`
-	Payload   json.RawMessage `json:"payload"`
+	Ordinal      *uint64         `json:"ordinal,omitempty"`
+	Timestamp    string          `json:"timestamp"`
+	Type         string          `json:"type"`
+	Payload      json.RawMessage `json:"payload"`
+	compactBytes *int            // bounded analysis: replacement context size, without retaining its repeated payload
 }
 
 // List walks sessions/YYYY/MM/DD, newest first. Sub-agent threads are left out, as

@@ -1,6 +1,7 @@
 package move
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -165,6 +166,7 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		return nil, err
 	}
 	bf.HistoryFile = archivePath
+	bf.HistoryRecords = bytes.Count(cp.archive, []byte{'\n'})
 	allowance := capacity.Allowance()
 	r := convert.Render(convert.Request{
 		Nodes: seg.Nodes, From: cp.From, To: spec.Name, Fidelity: fidelity,

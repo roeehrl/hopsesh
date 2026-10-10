@@ -57,6 +57,15 @@ func portableWrite(ctx context.Context, h agent.Host, m agent.Module, in agent.I
 	path := h.Path().Join(in.Root(m.Spec().Roots[0].Name), "hopsesh", "archives", req.SessionID+".jsonl")
 	r.Briefing.HistoryFile = path
 	r.Briefing.TargetOS = h.Facts().OS
+	sourceID := r.Briefing.SourceID
+	if original != nil {
+		sourceID = string(original.Key.Session)
+	}
+	archive, err := preservedArchive(h, m, in, sourceID, full, r)
+	if err != nil {
+		return req, convert.Result{}, rolled, err
+	}
+	r.Briefing.HistoryRecords = bytes.Count(archive, []byte{'\n'})
 	rendered := convert.Render(r)
 	rendered.Report.Capacity = capacity
 	rendered.Report.Archive = path
@@ -64,14 +73,6 @@ func portableWrite(ctx context.Context, h agent.Host, m agent.Module, in agent.I
 		return req, rendered, rolled, fmt.Errorf("%s", rendered.Report.Blocked)
 	}
 	if err = capacity.Check(rendered.Items); err != nil {
-		return req, rendered, rolled, err
-	}
-	sourceID := r.Briefing.SourceID
-	if original != nil {
-		sourceID = string(original.Key.Session)
-	}
-	archive, err := preservedArchive(h, m, in, sourceID, full, r)
-	if err != nil {
 		return req, rendered, rolled, err
 	}
 	if err = h.FS().WriteFile(path, archive, 0o600); err != nil {

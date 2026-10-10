@@ -64,7 +64,7 @@ func (m *Module) ContextCapacity(ctx context.Context, h agent.Host, in agent.Ins
 		return c, err
 	}
 	defer f.Close()
-	recs, _, err := readLines(&ir.BoundedReader{Context: ctx, Reader: f})
+	recs, _, err := readAnalysisLines(ctx, f)
 	if err != nil {
 		return c, err
 	}
@@ -78,18 +78,12 @@ func (m *Module) ContextCapacity(ctx context.Context, h agent.Host, in agent.Ins
 	for _, r := range recs {
 		switch r.Type {
 		case "compacted":
-			var compact struct {
-				Replacement []json.RawMessage `json:"replacement_history"`
-			}
-			if json.Unmarshal(r.Payload, &compact) != nil || compact.Replacement == nil {
+			if r.compactBytes == nil {
 				c.Unknown = true
 				continue
 			}
-			c.Existing = 0
+			c.Existing = *r.compactBytes
 			c.Unknown = false
-			for _, it := range compact.Replacement {
-				c.Existing += len(it) + 32
-			}
 		case "response_item":
 			c.Existing += len(r.Payload) + 32
 		}
