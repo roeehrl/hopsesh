@@ -120,10 +120,12 @@ func TestCollectorLeaseExpiresAndIndependentSourceUpdates(t *testing.T) {
 	if !a.Claim("scan", "one") || b.Claim("scan", "two") {
 		t.Fatal("collectors not coalesced")
 	}
-	_, _ = a.db.Exec("UPDATE leases SET expires=0")
+	a.Close() // a crashed owner's lock goes with its process
 	if !b.Claim("scan", "two") {
 		t.Fatal("crashed collector blocked forever")
 	}
+	a = New(dir)
+	defer a.Close()
 	a.Release("scan", "one")
 	if a.Claim("scan", "three") {
 		t.Fatal("old collector released someone else's lease")

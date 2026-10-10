@@ -24,6 +24,8 @@ type movementRead struct {
 }
 
 func (a *App) readMovementSegment(ctx context.Context, r agent.Reader, h agent.Host, in agent.Install, e Entry, endpoint string) (ir.Segment, error) {
+	contentReads.Add(1)
+	transcriptReads.Add(1)
 	ctx = a.limited(ctx)
 	if a.movementReads == nil {
 		return r.Read(ctx, h, in, e.Session, ir.Cursor{})

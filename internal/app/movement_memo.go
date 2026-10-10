@@ -100,20 +100,20 @@ func (f familyObservation) recall(inv *Inventory, observed map[lineage.ReplicaID
 
 // movementFingerprint names everything a family's observation depends on: each copy's
 // native file (size and last activity), its machine, install and presentation, and the
-// receipts in the family graph (which only grow).
-func (a *App) movementFingerprint(ctx context.Context, inv *Inventory, family string, g *lineage.Manifest) string {
+// receipts each copy's sidecar holds.
+func (a *App) movementFingerprint(ctx context.Context, inv *Inventory, family string) string {
 	type copyInput struct {
-		Identity, Endpoint, Status, Binding, Version, Path, Title, Live, State string
-		Size, FileSize                                                         int64
-		Activity, Modified                                                     time.Time
-		Installed                                                              bool
+		Identity, Endpoint, Status, Binding, Version, Path, Title, Live, State, Lineage string
+		Size, FileSize                                                                  int64
+		Activity, Modified                                                              time.Time
+		Installed                                                                       bool
 	}
 	var copies []copyInput
 	for _, e := range inv.Entries {
 		if e.Lineage == nil || e.Lineage.Family != family || e.LineageError != "" || e.Cached {
 			continue
 		}
-		c := copyInput{Identity: EntryIdentity(e.Machine, e.Session.Key.String()), Path: e.Session.Path, Size: e.Session.Size, Activity: e.Session.LastActivity, Title: e.Session.Title, Live: e.Live.Name, State: string(e.Live.State)}
+		c := copyInput{Lineage: manifestPrint(e.Lineage), Identity: EntryIdentity(e.Machine, e.Session.Key.String()), Path: e.Session.Path, Size: e.Session.Size, Activity: e.Session.LastActivity, Title: e.Session.Title, Live: e.Live.Name, State: string(e.Live.State)}
 		if m := inv.Machine(e.Machine); m != nil {
 			c.Status = string(m.Status)
 			if m.host != nil {
@@ -133,16 +133,6 @@ func (a *App) movementFingerprint(ctx context.Context, inv *Inventory, family st
 		copies = append(copies, c)
 	}
 	slices.SortFunc(copies, func(x, y copyInput) int { return strings.Compare(x.Identity, y.Identity) })
-	last := func(n int, id func(int) string) string {
-		if n == 0 {
-			return ""
-		}
-		return id(n - 1)
-	}
-	graph := []any{g.Branch, len(g.Branches), len(g.Replicas), len(g.Revisions), len(g.States), len(g.Hops), len(g.Compensations),
-		last(len(g.Revisions), func(i int) string { return string(g.Revisions[i].ID) }),
-		last(len(g.States), func(i int) string { return string(g.States[i].ID) }),
-		last(len(g.Hops), func(i int) string { return g.Hops[i].ID })}
-	b, _ := json.Marshal([]any{copies, graph})
+	b, _ := json.Marshal(copies)
 	return fmt.Sprintf("%x", sha256.Sum256(b))
 }

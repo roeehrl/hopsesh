@@ -17,6 +17,14 @@ All notable changes to this project are documented here. The format follows
   of megabytes for a long Codex session) when nothing in that session changed, or rewrite
   each session's movement record. In the background the menu bar's list refreshes every
   five minutes instead of every minute.
+- Refreshing unchanged sessions is nearly free: lineage files, native fork checks, each
+  conversation family's comparison and each folder's git state are reused until a file
+  they come from changes (by size and modification time), so a refresh opens nothing that
+  did not change. When one copy of a moved session grows, only that copy is read again.
+- An idle app writes nothing: the discovery lease is an OS file lock instead of a
+  database row, and the catalog is not rewritten for check times or row order alone.
+- Two front ends opening the catalog at the same moment no longer leave one of them
+  without it.
 
 ## [0.4.3] - 2026-10-10
 

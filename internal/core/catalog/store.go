@@ -5,7 +5,9 @@ package catalog
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -20,6 +22,8 @@ type Store struct {
 	once sync.Once
 	db   *sql.DB
 	err  error
+	mu   sync.Mutex
+	held map[string]heldLease // collector leases this store holds
 }
 
 func New(dir string) *Store { return &Store{dir: filepath.Join(dir, "catalog")} }
@@ -41,13 +45,12 @@ func (s *Store) open() error {
 			return
 		}
 		f.Close()
-		s.db, s.err = sql.Open("sqlite", p)
+		s.db, s.err = sql.Open("sqlite", "file:"+p+"?_pragma=busy_timeout(1000)")
 		if s.err != nil {
 			return
 		}
 		s.db.SetMaxOpenConns(1)
-		_, s.err = s.db.Exec(`PRAGMA busy_timeout=100; PRAGMA journal_mode=WAL; PRAGMA journal_size_limit=8388608;
-CREATE TABLE IF NOT EXISTS leases(scope TEXT PRIMARY KEY,owner TEXT NOT NULL,expires INTEGER NOT NULL);
+		s.err = setup(s.db, `PRAGMA busy_timeout=1000; PRAGMA journal_mode=WAL; PRAGMA journal_size_limit=8388608;
 CREATE TABLE IF NOT EXISTS snapshots (scope TEXT PRIMARY KEY, started INTEGER NOT NULL, body BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS summaries (scope TEXT NOT NULL, path TEXT NOT NULL, signature TEXT NOT NULL, touched INTEGER NOT NULL, body BLOB NOT NULL, PRIMARY KEY(scope,path));`)
 		if coded, ok := s.err.(interface{ Code() int }); ok && (coded.Code() == 11 || coded.Code() == 26) {
@@ -61,19 +64,34 @@ CREATE TABLE IF NOT EXISTS summaries (scope TEXT NOT NULL, path TEXT NOT NULL, s
 					return
 				}
 				f.Close()
-				s.db, s.err = sql.Open("sqlite", p)
+				s.db, s.err = sql.Open("sqlite", "file:"+p+"?_pragma=busy_timeout(1000)")
 				if s.err != nil {
 					return
 				}
 				s.db.SetMaxOpenConns(1)
-				_, s.err = s.db.Exec(`PRAGMA busy_timeout=100;PRAGMA journal_mode=WAL;PRAGMA journal_size_limit=8388608;
-CREATE TABLE leases(scope TEXT PRIMARY KEY,owner TEXT NOT NULL,expires INTEGER NOT NULL);
+				_, s.err = s.db.Exec(`PRAGMA busy_timeout=1000;PRAGMA journal_mode=WAL;PRAGMA journal_size_limit=8388608;
 CREATE TABLE snapshots(scope TEXT PRIMARY KEY,started INTEGER NOT NULL,body BLOB NOT NULL);
 CREATE TABLE summaries(scope TEXT NOT NULL,path TEXT NOT NULL,signature TEXT NOT NULL,touched INTEGER NOT NULL,body BLOB NOT NULL,PRIMARY KEY(scope,path));`)
 			}
 		}
 	})
 	return s.err
+}
+
+// setup runs the schema, retrying while another process is opening the same catalog:
+// switching to WAL can report SQLITE_BUSY at once instead of waiting.
+func setup(db *sql.DB, schema string) error {
+	var err error
+	for range 40 {
+		if _, err = db.Exec(schema); err == nil {
+			return nil
+		}
+		if coded, ok := err.(interface{ Code() int }); !ok || coded.Code()&0xff != 5 {
+			return err
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return err
 }
 
 func (s *Store) Read(scope string, dst any) bool {
@@ -176,35 +194,68 @@ func (s *Store) reclaim() {
 }
 
 func (s *Store) Close() error {
+	s.mu.Lock()
+	for scope, h := range s.held {
+		unlockFile(h.f)
+		h.f.Close()
+		delete(s.held, scope)
+	}
+	s.mu.Unlock()
 	if s.db != nil {
 		return s.db.Close()
 	}
 	return nil
 }
 
-// Claim coalesces browsing collectors across front ends. A failed cache is not a
-// reason to block discovery; a crashed owner's lease expires without a daemon.
+// Claim coalesces browsing collectors across front ends. It is an OS file lock, not a
+// database row: holding, renewing and releasing it writes nothing, and a crashed
+// owner's lock is released with its process. A lock that cannot be taken for any
+// reason other than another holder never blocks discovery.
 func (s *Store) Claim(scope, owner string) bool {
-	if s.open() != nil {
+	if s.dir == "catalog" {
 		return true
 	}
-	result, err := s.db.Exec(`INSERT INTO leases VALUES(?,?,?) ON CONFLICT(scope) DO UPDATE SET owner=excluded.owner,expires=excluded.expires WHERE leases.expires<? OR leases.owner=excluded.owner`, scope, owner, time.Now().Add(15*time.Second).UnixNano(), time.Now().UnixNano())
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if h, ok := s.held[scope]; ok {
+		return h.owner == owner
+	}
+	dir := filepath.Join(s.dir, "leases")
+	if os.MkdirAll(dir, 0700) != nil {
+		return true
+	}
+	sum := sha256.Sum256([]byte(scope))
+	f, err := os.OpenFile(filepath.Join(dir, hex.EncodeToString(sum[:12])+".lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
-		// Only contention can indicate an active collector. A failed cache must
-		// not make every front end wait for a lease it can never read.
-		if coded, ok := err.(interface{ Code() int }); ok {
-			code := coded.Code() & 0xff
-			if code == 5 || code == 6 {
-				return false
-			}
-		}
 		return true
 	}
-	n, _ := result.RowsAffected()
-	return n > 0
-}
-func (s *Store) Release(scope, owner string) {
-	if s.open() == nil {
-		_, _ = s.db.Exec("DELETE FROM leases WHERE scope=? AND owner=?", scope, owner)
+	ok, err := tryLock(f)
+	if err != nil {
+		f.Close()
+		return true
 	}
+	if !ok {
+		f.Close()
+		return false
+	}
+	if s.held == nil {
+		s.held = map[string]heldLease{}
+	}
+	s.held[scope] = heldLease{owner, f}
+	return true
+}
+
+func (s *Store) Release(scope, owner string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if h, ok := s.held[scope]; ok && h.owner == owner {
+		unlockFile(h.f)
+		h.f.Close()
+		delete(s.held, scope)
+	}
+}
+
+type heldLease struct {
+	owner string
+	f     *os.File
 }

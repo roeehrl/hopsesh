@@ -61,33 +61,38 @@ type movementObservation struct {
 // EnrichMovement joins receipt metadata and observes native content in memory. It
 // never writes remote files or alters journaled sidecars during a scan.
 func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
-	graphs := map[string]*lineage.Manifest{}
-	invalid := map[string]bool{}
 	// Saved rows (Cached) carry a lineage outline, not the revision graph, and keep the
 	// movement they were saved with: only rows read in this scan are compared.
-	for _, e := range inv.Entries {
+	families := map[string][]int{}
+	var order []string
+	for i, e := range inv.Entries {
 		if e.Lineage == nil || e.LineageError != "" || e.Cached {
 			continue
 		}
-		family := e.Lineage.Family
-		if graphs[family] == nil {
-			graphs[family] = e.Lineage.Clone()
-		} else if graphs[family].Merge(e.Lineage) != nil {
-			invalid[family] = true
+		if _, ok := families[e.Lineage.Family]; !ok {
+			order = append(order, e.Lineage.Family)
 		}
+		families[e.Lineage.Family] = append(families[e.Lineage.Family], i)
 	}
-	for family, g := range graphs {
-		if invalid[family] {
-			continue
-		}
+	for _, family := range order {
 		observed := map[lineage.ReplicaID]movementObservation{}
 		ids := map[int]lineage.ReplicaID{}
-		fingerprint := a.movementFingerprint(ctx, inv, family, g)
+		var g *lineage.Manifest
+		fingerprint := a.movementFingerprint(ctx, inv, family)
 		if memo, ok := a.movementMemo.get(family, fingerprint); ok {
+			if memo.graph == nil {
+				continue // the family's receipts conflict
+			}
 			g = memo.recall(inv, observed, ids)
 		} else {
-			a.observeFamily(ctx, inv, family, g, observed, ids)
+			g = committedGraph(inv, family, families[family])
+			if g != nil {
+				a.observeFamily(ctx, inv, family, g, observed, ids)
+			}
 			a.movementMemo.put(family, fingerprint, g, inv, observed, ids)
+			if g == nil {
+				continue
+			}
 		}
 		for i, id := range ids {
 			e := &inv.Entries[i]
@@ -173,6 +178,7 @@ func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
 // observeFamily reads each copy in one lineage family and observes its native content
 // against the family graph g (in memory; nothing is written).
 func (a *App) observeFamily(ctx context.Context, inv *Inventory, family string, g *lineage.Manifest, observed map[lineage.ReplicaID]movementObservation, ids map[int]lineage.ReplicaID) {
+	committed := committedPrint(inv, family)
 	for i := range inv.Entries {
 		e := &inv.Entries[i]
 		if e.Lineage == nil || e.Lineage.Family != family || e.LineageError != "" || e.Cached {
@@ -183,7 +189,7 @@ func (a *App) observeFamily(ctx context.Context, inv *Inventory, family string, 
 			continue
 		}
 		in, installed := m.InstallProfile(e.Agent, e.Session.Key.Profile)
-		branch := g.ForBranch(e.Lineage.Branch)
+		branch := recordCopy(g, e.Lineage.Branch)
 		r, id, ok := branch.FindBinding(e.Session.Key, m.host.Facts.Endpoint, in.BindingID())
 		if !ok {
 			r, id, ok = branch.FindEndpoint(e.Session.Key, m.host.Facts.Endpoint)
@@ -205,6 +211,22 @@ func (a *App) observeFamily(ctx context.Context, inv *Inventory, family string, 
 			continue
 		}
 		h, err := m.host.For(ctx, mod.Spec(), in, nil)
+		var copyKey string
+		var before graphRecords
+		if err == nil {
+			// An unchanged copy against unchanged receipts observes the same way: replay
+			// it instead of rereading and rehashing its whole transcript.
+			if st, statErr := statOf(h.FS(), e.Session.Path); statErr == nil && !st.Missing {
+				copyKey = copyObservationKey(committed, *e, st, in, r, id)
+				if c, ok := copyObservations.get(copyKey); ok {
+					c.replay(g)
+					observation.state, observation.valid, observation.agentAnchors, observation.checked = c.state, c.valid, c.agentAnchors, e.ObservedAt
+					err = errRecalled
+				} else {
+					before = recordsOf(g)
+				}
+			}
+		}
 		if err == nil {
 			seg, readErr := a.readMovementSegment(ctx, reader, h, in, *e, m.host.Facts.Endpoint)
 			if readErr == nil {
@@ -229,6 +251,9 @@ func (a *App) observeFamily(ctx context.Context, inv *Inventory, family string, 
 				}
 				observation.valid = err == nil
 				observation.checked = e.ObservedAt
+				if copyKey != "" && ctx.Err() == nil {
+					copyObservations.put(copyKey, copyObservation{state: observation.state, valid: observation.valid, agentAnchors: observation.agentAnchors, added: recordsOf(g).since(before)})
+				}
 			}
 		}
 		observed[id] = observation
@@ -354,6 +379,27 @@ type cachedMovement struct {
 	Notice *MovementNotice  `json:"notice"`
 }
 
+// sameMovementRecord ignores a check time less than an hour newer.
+func sameMovementRecord(old, now cachedMovement) bool {
+	strip := func(r cachedMovement) cachedMovement {
+		if r.Notice != nil {
+			n := *r.Notice
+			if !n.CheckedAt.IsZero() {
+				n.Text = strings.TrimSuffix(n.Text, " Last checked "+n.CheckedAt.UTC().Format(time.RFC3339)+".")
+			}
+			n.CheckedAt = time.Time{}
+			r.Notice = &n
+		}
+		return r
+	}
+	if old.Notice != nil && now.Notice != nil && now.Notice.CheckedAt.Sub(old.Notice.CheckedAt) >= time.Hour {
+		return false
+	}
+	a, _ := json.Marshal(strip(old))
+	b, _ := json.Marshal(strip(now))
+	return bytes.Equal(a, b)
+}
+
 func digest(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
 func (a *App) movementCachePath(key agent.SessionKey) string {
 	return filepath.Join(a.StateDir, "movement", digest([]byte(key.String()))+".json")
@@ -362,6 +408,17 @@ func (a *App) cacheMovement(e Entry) {
 	if e.Lineage == nil || e.Session.Path == "" {
 		return
 	}
+	// Unchanged sidecar, same notice: the record is current without reading anything.
+	st, err := statOf(host.LocalFS(), lineage.PathFor(e.Session.Path))
+	if err != nil || st.Missing {
+		return
+	}
+	seen := movementRecords.key(e, st)
+	if prev, ok := movementRecords.get(e.Session.Path); ok && prev == seen {
+		return
+	}
+	defer movementRecords.put(e.Session.Path, seen)
+	contentReads.Add(1)
 	b, err := host.LocalFS().ReadFile(lineage.PathFor(e.Session.Path), 16<<20)
 	if err != nil {
 		return
@@ -373,8 +430,12 @@ func (a *App) cacheMovement(e Entry) {
 		return
 	}
 	// The record already says this for this exact sidecar: nothing to check or write.
-	if old, err := os.ReadFile(path); err == nil && bytes.Equal(old, data) {
-		return
+	// Only the check time moving on is refreshed at most hourly.
+	if old, err := os.ReadFile(path); err == nil {
+		var prev cachedMovement
+		if bytes.Equal(old, data) || json.Unmarshal(old, &prev) == nil && sameMovementRecord(prev, rec) {
+			return
+		}
 	}
 	current, err := lineage.Parse(b)
 	if err != nil || digest(current.Encode()) != digest(e.Lineage.Encode()) {

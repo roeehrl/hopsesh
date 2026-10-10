@@ -196,8 +196,9 @@ func (a *App) saveCatalog(inv *Inventory, started time.Time) {
 			merged.Entries[i] = catalogEntry(merged.Entries[i])
 		}
 		// An idle app rescans the same sessions: keep the stored snapshot, and write
-		// nothing, unless what browsing shows changed or the check times are an hour old.
-		if sameCatalog(&previous, merged) && latestSource(saved.Sources).After(time.Now().Add(-catalogRefresh)) {
+		// nothing, unless what browsing shows changed. Saved check times then show the
+		// last change, which is all a saved row claims.
+		if sameCatalog(&previous, merged) {
 			return json.RawMessage(old)
 		}
 		saved.Sources = sources
@@ -208,9 +209,6 @@ func (a *App) saveCatalog(inv *Inventory, started time.Time) {
 
 // catalogProgressEvery spaces the partial saves other front ends follow during a scan.
 const catalogProgressEvery = 2 * time.Second
-
-// catalogRefresh is how stale the stored check times may get while nothing else changes.
-const catalogRefresh = time.Hour
 
 // catalogEntry is what the catalog keeps of a row: what browsing shows before the first
 // scan, without live state (CachedInventory resets it) or the lineage revision graph.
@@ -223,34 +221,51 @@ func catalogEntry(e Entry) Entry {
 	return e
 }
 
-// sameCatalog compares two snapshots without the times every scan refreshes.
+// sameCatalog compares two snapshots without the times every scan refreshes (any
+// "checkedAt" or "observedAt"), the scan phase, and the order rows were listed in.
 func sameCatalog(a, b *Inventory) bool {
-	strip := func(inv *Inventory) []byte {
-		c := *inv
-		c.Machines = nil
-		for _, m := range inv.Machines {
-			mm := *m
-			mm.CheckedAt, mm.Phase = time.Time{}, ""
-			c.Machines = append(c.Machines, &mm)
-		}
-		c.Entries = slices.Clone(inv.Entries)
-		for i := range c.Entries {
-			c.Entries[i].ObservedAt = time.Time{}
-		}
-		b, _ := json.Marshal(c)
-		return b
-	}
-	return bytes.Equal(strip(a), strip(b))
+	return bytes.Equal(catalogContent(a), catalogContent(b))
 }
 
-func latestSource(ts map[string]time.Time) time.Time {
-	var t time.Time
-	for _, v := range ts {
-		if v.After(t) {
-			t = v
+func catalogContent(inv *Inventory) []byte {
+	raw, _ := json.Marshal(inv)
+	var v any
+	if json.Unmarshal(raw, &v) != nil {
+		return raw
+	}
+	var strip func(any) any
+	strip = func(v any) any {
+		switch x := v.(type) {
+		case map[string]any:
+			delete(x, "checkedAt")
+			delete(x, "observedAt")
+			delete(x, "phase")
+			for k, c := range x {
+				x[k] = strip(c)
+			}
+		case []any:
+			for i, c := range x {
+				x[i] = strip(c)
+			}
+		}
+		return v
+	}
+	v = strip(v)
+	if m, ok := v.(map[string]any); ok {
+		for _, list := range []string{"entries", "machines", "clouds"} {
+			if rows, ok := m[list].([]any); ok {
+				keys := make([]string, len(rows))
+				for i, r := range rows {
+					b, _ := json.Marshal(r)
+					keys[i] = string(b)
+				}
+				slices.Sort(keys)
+				m[list] = keys
+			}
 		}
 	}
-	return t
+	b, _ := json.Marshal(v)
+	return b
 }
 
 // discoveryLease lets simultaneous GUI, Quick, TUI and CLI browsers follow one

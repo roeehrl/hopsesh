@@ -7,6 +7,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 	"github.com/roeehrl/hopsesh/sdk/ir"
+	"slices"
 )
 
 func nativeForkManifests(ctx context.Context, hm *host.Machine, h agent.Host, mod agent.Module, in agent.Install, ss []agent.Summary, manifests []*lineage.Manifest, problems []string) {
@@ -17,6 +18,27 @@ func nativeForkManifests(ctx context.Context, hm *host.Machine, h agent.Host, mo
 	reader, ok := mod.(agent.Reader)
 	if !ok {
 		return
+	}
+	// Verification reads and hashes whole transcripts; an unchanged set is not reverified.
+	inputs, cacheable := forkInputs(hm, h, in, ss, manifests, problems)
+	if cacheable && inputs == "" {
+		return // no native forks
+	}
+	if r, ok := forks.get(inputs); cacheable && ok {
+		copy(manifests, r.manifests)
+		copy(problems, r.problems)
+		return
+	}
+	contentReads.Add(1)
+	transient := false
+	if cacheable {
+		defer func() {
+			// Problems follow from these file versions; a failed identity or a cancelled
+			// scan may not, so those results are not kept.
+			if !transient && ctx.Err() == nil {
+				forks.put(inputs, forkResult{slices.Clone(manifests), slices.Clone(problems)})
+			}
+		}()
 	}
 	by := map[agent.SessionID]int{}
 	for i, s := range ss {
@@ -50,6 +72,7 @@ func nativeForkManifests(ctx context.Context, hm *host.Machine, h agent.Host, mo
 			}
 			endpoint, err := hm.PrepareIdentity(ctx)
 			if err != nil {
+				transient = true
 				problems[i] = err.Error()
 				continue
 			}

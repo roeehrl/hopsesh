@@ -17,12 +17,12 @@ func TestMovementMemoRebindsRowsAndMissesOnChange(t *testing.T) {
 		return Entry{Machine: "one", Lineage: g, Session: agent.Summary{Key: agent.SessionKey{Agent: "codex", Session: agent.SessionID(id)}, Size: size}}
 	}
 	first := &Inventory{Entries: []Entry{row("a", 10), row("b", 20)}}
-	fp := a.movementFingerprint(t.Context(), first, "family", g)
+	fp := a.movementFingerprint(t.Context(), first, "family")
 	observed := map[lineage.ReplicaID]movementObservation{"ra": {entry: &first.Entries[0], valid: true}, "rb": {entry: &first.Entries[1]}}
 	a.movementMemo.put("family", fp, g, first, observed, map[int]lineage.ReplicaID{0: "ra", 1: "rb"})
 
 	second := &Inventory{Entries: []Entry{row("b", 20), row("a", 10)}}
-	memo, ok := a.movementMemo.get("family", a.movementFingerprint(t.Context(), second, "family", g))
+	memo, ok := a.movementMemo.get("family", a.movementFingerprint(t.Context(), second, "family"))
 	if !ok {
 		t.Fatal("an unchanged family missed the memo")
 	}
@@ -34,7 +34,7 @@ func TestMovementMemoRebindsRowsAndMissesOnChange(t *testing.T) {
 		t.Fatalf("recall bound the wrong rows: %v", gotIDs)
 	}
 	third := &Inventory{Entries: []Entry{row("a", 11), row("b", 20)}}
-	if _, ok := a.movementMemo.get("family", a.movementFingerprint(t.Context(), third, "family", g)); ok {
+	if _, ok := a.movementMemo.get("family", a.movementFingerprint(t.Context(), third, "family")); ok {
 		t.Fatal("a grown transcript reused the old observation")
 	}
 }
