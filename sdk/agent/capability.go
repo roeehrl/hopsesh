@@ -15,7 +15,6 @@ type Capability string
 const (
 	CapLive          Capability = "live"           // LiveDetector
 	CapStop          Capability = "stop"           // Stopper
-	CapMark          Capability = "mark"           // Marker: the agent's own "moved" mark
 	CapAccount       Capability = "account"        // AccountProber
 	CapSanitize      Capability = "sanitize"       // Sanitizer: same-agent move to another account
 	CapPostInstall   Capability = "post-install"   // PostInstaller
@@ -39,13 +38,6 @@ type LiveDetector interface {
 // Stopper asks an open session to end, waiting up to grace.
 type Stopper interface {
 	Stop(ctx context.Context, h Host, in Install, s Summary, grace time.Duration) error
-}
-
-// Marker records, in the agent's own data, that a copy was left behind ("↪ moved to …"),
-// so the agent's own session list shows it. The core's lineage manifest records it in
-// any case.
-type Marker interface {
-	Mark(ctx context.Context, h Host, in Install, s Summary, m Mark) error
 }
 
 // AccountProber identifies the login the agent uses on a machine, without reading
@@ -131,7 +123,6 @@ func Capabilities(m Module) []Capability {
 	}
 	_, live := m.(LiveDetector)
 	_, stop := m.(Stopper)
-	_, mark := m.(Marker)
 	_, acct := m.(AccountProber)
 	_, san := m.(Sanitizer)
 	_, post := m.(PostInstaller)
@@ -148,7 +139,6 @@ func Capabilities(m Module) []Capability {
 	_, carchive := m.(CloudArchiver)
 	add(live, CapLive)
 	add(stop, CapStop)
-	add(mark, CapMark)
 	add(acct, CapAccount)
 	add(san, CapSanitize)
 	add(post, CapPostInstall)

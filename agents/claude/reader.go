@@ -2,11 +2,13 @@ package claude
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -38,12 +40,22 @@ type chained struct {
 		Role    string          `json:"role"`
 		Model   string          `json:"model"`
 		Content json.RawMessage `json:"content"`
+		Usage   *contextUsage   `json:"usage"`
 	} `json:"message"`
 	// metadata records
 	CustomTitle  string `json:"customTitle"`
 	AITitle      string `json:"aiTitle"`
 	LeafUUID     string `json:"leafUuid"`
 	RelocatedCWD string `json:"relocatedCwd"`
+}
+
+// The last completed request reports the active prompt, including cached input.
+// Iteration details repeat these totals and must not be counted again.
+type contextUsage struct {
+	Input       int `json:"input_tokens"`
+	CacheRead   int `json:"cache_read_input_tokens"`
+	CacheCreate int `json:"cache_creation_input_tokens"`
+	Output      int `json:"output_tokens"`
 }
 
 type block struct {
@@ -75,7 +87,10 @@ func (m *Module) Read(ctx context.Context, h agent.Host, in agent.Install, s age
 	if err != nil {
 		return ir.Segment{}, &agent.FormatError{Path: s.Path, Err: err}
 	}
-	branch := activeBranch(recs)
+	branch, err := activeBranch(recs)
+	if err != nil {
+		return ir.Segment{}, err
+	}
 	seg := ir.Segment{Header: ir.Header{Agent: string(id), SessionID: string(s.Key.Session), CWD: s.CWD, Title: s.Title, GitBranch: s.GitBranch}}
 	for _, i := range branch {
 		r := recs[i]
@@ -141,41 +156,93 @@ func isChain(t string) bool {
 	return t == "user" || t == "assistant" || t == "system" || t == "attachment"
 }
 
-// activeBranch returns record indexes from the root to the leaf Claude Code resumes: the
-// last last-prompt record's leaf, else the last non-sidechain message.
-func activeBranch(recs []chained) []int {
+func (r chained) parentUUID() string {
+	if r.ParentUUID != nil {
+		return *r.ParentUUID
+	}
+	return r.LogicalParentUUID // across a compaction boundary
+}
+
+// activeBranch follows the latest last-prompt checkpoint and any unambiguous
+// continuation written after it. A checkpoint can precede the assistant's response;
+// it must not hide descendants already present when a transfer reads the file.
+// Record order and parent links establish continuation, never timestamps. A later
+// checkpoint selecting an earlier leaf remains an explicit rewind.
+func activeBranch(recs []chained) ([]int, error) {
 	byUUID := map[string]int{}
+	occurrences := map[string][]int{}
 	leaf := -1
 	for i, r := range recs {
 		if isChain(r.Type) && r.UUID != "" {
 			byUUID[r.UUID] = i
+			occurrences[r.UUID] = append(occurrences[r.UUID], i)
 			if !r.IsSidechain && (r.Type == "user" || r.Type == "assistant") {
 				leaf = i
 			}
 		}
 	}
+	before := func(uuid string, index int) (int, bool) {
+		list := occurrences[uuid]
+		pos := sort.SearchInts(list, index) - 1
+		if pos < 0 {
+			return 0, false
+		}
+		return list[pos], true
+	}
 	for i := len(recs) - 1; i >= 0; i-- {
 		if recs[i].Type == "last-prompt" && recs[i].LeafUUID != "" {
-			if j, ok := byUUID[recs[i].LeafUUID]; ok {
-				leaf = j
+			j, ok := before(recs[i].LeafUUID, i)
+			if !ok || j >= i || recs[j].IsSidechain {
+				return nil, fmt.Errorf("%w: Claude checkpoint has no preceding main-branch leaf", agent.ErrDiverged)
+			}
+			leaf = j
+			reachable := map[string]int{recs[j].UUID: j}
+			children := map[int]int{}
+			for k := i + 1; k < len(recs); k++ {
+				r := recs[k]
+				if !isChain(r.Type) || r.UUID == "" || r.IsSidechain {
+					continue
+				}
+				parent, extends := reachable[r.parentUUID()]
+				if !extends {
+					continue // unrelated branches cannot extend this checkpoint
+				}
+				if _, duplicate := reachable[r.UUID]; duplicate || byUUID[r.UUID] != k {
+					return nil, fmt.Errorf("%w: Claude continuation has a repeated native anchor", agent.ErrDiverged)
+				}
+				if _, sibling := children[parent]; sibling {
+					return nil, fmt.Errorf("%w: Claude checkpoint has ambiguous continuations", agent.ErrDiverged)
+				}
+				children[parent] = k
+				reachable[r.UUID] = k
+				leaf = k
 			}
 			break
 		}
 	}
 	var out []int
-	seen := map[int]bool{}
-	for i := leaf; i >= 0 && !seen[i]; {
-		seen[i] = true
-		out = append(out, i)
-		r := recs[i]
-		parent := ""
-		if r.ParentUUID != nil {
-			parent = *r.ParentUUID
-		} else if r.LogicalParentUUID != "" {
-			parent = r.LogicalParentUUID // across a compaction boundary
+	seen := map[string]int{}
+	for i := leaf; i >= 0; {
+		if recs[i].IsSidechain {
+			return nil, fmt.Errorf("%w: Claude branch has cyclic or sidechain ancestry", agent.ErrDiverged)
 		}
-		j, ok := byUUID[parent]
+		r := recs[i]
+		if previous, duplicate := seen[r.UUID]; duplicate {
+			if !sameAuthoredRecord(recs[previous], r) {
+				return nil, fmt.Errorf("%w: Claude replay changed a native record", agent.ErrDiverged)
+			}
+		} else {
+			seen[r.UUID] = i
+			out = append(out, i)
+		}
+		// Compaction replays earlier UUIDs with reparented preserved messages.
+		// Resolve the parent occurrence preceding this physical record. A global
+		// latest-UUID lookup can loop from a boundary into its own retained tail.
+		j, ok := before(r.parentUUID(), i)
 		if !ok {
+			if _, forward := byUUID[r.parentUUID()]; forward {
+				return nil, fmt.Errorf("%w: Claude branch has a forward parent reference", agent.ErrDiverged)
+			}
 			break
 		}
 		i = j
@@ -183,7 +250,22 @@ func activeBranch(recs []chained) []int {
 	for a, b := 0, len(out)-1; a < b; a, b = a+1, b-1 {
 		out[a], out[b] = out[b], out[a]
 	}
-	return out
+	return out, nil
+}
+
+// Parent rewiring and usage metadata may change during native compaction replay;
+// authored content must remain identical before a duplicate anchor is deduplicated.
+func sameAuthoredRecord(a, b chained) bool {
+	if a.Type != b.Type || a.IsMeta != b.IsMeta || a.IsCompactSummary != b.IsCompactSummary {
+		return false
+	}
+	if (a.Origin == nil) != (b.Origin == nil) || a.Origin != nil && a.Origin.Kind != b.Origin.Kind {
+		return false
+	}
+	if a.Message == nil || b.Message == nil {
+		return a.Message == nil && b.Message == nil
+	}
+	return a.Message.Role == b.Message.Role && a.Message.Model == b.Message.Model && bytes.Equal(a.Message.Content, b.Message.Content)
 }
 
 // nodes turns one chained record into IR nodes.

@@ -43,8 +43,8 @@ the unpushed commits and changed files. Your checkout, index and branch are not 
 Untracked files go only when you name them (--untracked), and files that look like
 credentials (.env, *.pem, *.key, …) never go.
 
-The session here is marked "continued in <cloud>" (--no-mark to skip). Nothing changes
-until you confirm (or pass --yes). hopsesh undo deletes the branch and the mark; the cloud
+The session here keeps its title; hopsesh ls shows where it went. Nothing changes until
+you confirm (or pass --yes). hopsesh undo deletes the branch; the cloud
 session itself stays in the cloud until you archive it there. Allow the cloud first:
 hopsesh clouds allow <cloud>. The cloud session uses your plan's allowance.
 
@@ -81,7 +81,6 @@ is in here (where the cloud's text is written), --to-dir the repository's checko
 	f.String("to", "", "the cloud ("+strings.Join(cloudNames(), ", ")+")")
 	f.String("note-file", "", "a handoff note for the briefing (what is done, what is next)")
 	f.Bool("carry-rules", false, "add your instructions for every project of the session's agent to the briefing (the cloud does not see them otherwise)")
-	f.Bool("no-mark", false, "do not mark the session here")
 	f.Bool("dry-run", false, "show the plan and stop")
 	f.Bool("yes", false, "do not ask for confirmation")
 	f.Bool("json", false, "output JSON")
@@ -118,9 +117,6 @@ func (r *run) handoffOptions(cmd *cobra.Command, cloud string) (move.Options, er
 		o.Bundle, _ = f.GetBool("bundle")
 	}
 	o.Untracked, _ = f.GetStringArray("untracked")
-	if v, _ := f.GetBool("no-mark"); v {
-		o.Mark = false
-	}
 	o.CarryRules, _ = f.GetBool("carry-rules")
 	o.Env, _ = f.GetString("env")
 	o.Attempts, _ = f.GetInt("attempts")
@@ -270,12 +266,6 @@ func (r *run) renderHandoffPlan(p *move.Plan) {
 	if hp.HistoryFile {
 		r.printf("  history   the conversation goes on the branch as %s. %s\n", hp.HistoryPath, hp.HistoryWarning)
 	}
-	switch p.Mark {
-	case move.MarkNow:
-		r.printf("  mark      this session becomes %q\n", hp.MarkTitle)
-	case move.MarkWhenStopped:
-		r.printf("  mark      %q once it ends (it is still open)\n", hp.MarkTitle)
-	}
 	if hp.EnvNeeded {
 		switch {
 		case hp.Env != "":
@@ -351,14 +341,6 @@ func (r *run) renderHandedOff(res *move.Result) {
 	}
 	if len(hr.Stayed) > 0 {
 		r.printf("  Stayed here: %s\n", strings.Join(hr.Stayed, ", "))
-	}
-	switch res.Mark {
-	case "done":
-		r.printf("  This session is now marked %q.\n", hr.MarkText)
-	case "pending":
-		r.printf("  This session is still open; it is marked once it ends.\n")
-	case "failed":
-		r.printf("  ! Could not mark this session: %s\n", res.MarkError)
 	}
 	for _, w := range res.Warnings {
 		r.printf("  ! %s\n", w)
@@ -564,9 +546,6 @@ func (r *run) renderHopPlan(p *move.Plan) {
 					r.printf("  env?      --env %s   %s\n", e.Value, e.Label)
 				}
 			}
-		}
-		if p.Mark == move.MarkNow {
-			r.printf("  mark      the copy here becomes %q\n", t.MarkTitle)
 		}
 		if t.Terminal != "" {
 			r.printf("  terminal  %s\n", t.Terminal)

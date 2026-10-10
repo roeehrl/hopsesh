@@ -114,12 +114,11 @@ func TestMovementHookCacheIsRevokedByReturnUndoAndPreference(t *testing.T) {
 	if s := read(); !strings.Contains(s, "Prepared in Codex on bob-laptop") {
 		t.Fatalf("notice missing %q", s)
 	}
-	off := false
-	a.Cfg.MovementNotices = &off
+	a.Cfg.Original = config.OriginalOff
 	if read() != "" {
 		t.Fatal("disabled notice delivered")
 	}
-	a.Cfg.MovementNotices = nil
+	a.Cfg.Original = ""
 	original := g.Clone()
 	if err := g.AppendHop(lineage.Hop{Kind: lineage.HopContinue, ID: "return", From: to, To: from, Notify: true}); err != nil {
 		t.Fatal(err)
@@ -169,8 +168,7 @@ func TestMovementPreferenceDefaults(t *testing.T) {
 	if !a.DefaultOptions().Notify {
 		t.Fatal("move did not inherit default")
 	}
-	off := false
-	a.Cfg.MovementNotices = &off
+	a.Cfg.Original = config.OriginalOff
 	if a.DefaultOptions().Notify {
 		t.Fatal("move ignored off preference")
 	}
@@ -204,7 +202,7 @@ func TestMovementEnrichmentReadsNativeWorkAndReturnRelations(t *testing.T) {
 			t.Fatal(err)
 		}
 		key := agent.SessionKey{Agent: "claude", Session: "session"}
-		e := Entry{Machine: name, Agent: "claude", Session: agent.Summary{Key: key, Path: path}, ObservedAt: time.Now().UTC()}
+		e := Entry{Machine: name, Agent: "claude", Session: agent.Summary{Key: key, Path: path, Title: "Session on " + name}, ObservedAt: time.Now().UTC()}
 		id := g.Upsert(lineage.Replica{Location: name, Endpoint: name, Key: key})
 		ids = append(ids, id)
 		seg, err := mod.Read(ctx, h, in, e.Session, ir.Cursor{})
@@ -233,7 +231,7 @@ func TestMovementEnrichmentReadsNativeWorkAndReturnRelations(t *testing.T) {
 	}
 	inv := &Inventory{Entries: entries, Machines: machines}
 	a.EnrichMovement(ctx, inv)
-	if got := inv.Entries[1].Returns; len(got) != 1 || got[0].Status != "same" {
+	if got := inv.Entries[1].Returns; len(got) != 1 || got[0].Status != "same" || got[0].Title != inv.Entries[0].Session.Title {
 		t.Fatalf("synchronized return: %+v", got)
 	}
 	if n := inv.Entries[0].Movement; n == nil || n.Status != "prepared" {
@@ -254,6 +252,16 @@ func TestMovementEnrichmentReadsNativeWorkAndReturnRelations(t *testing.T) {
 	}
 	if n := inv.Entries[0].Movement; n == nil || n.Status != "continued" {
 		t.Fatalf("continued: %+v", n)
+	}
+	// A first account observation changes only the binding. The exact native
+	// original is still measurable; scanning must not label it missing/unverified.
+	machines[0].Agents[0].Install.Profile = &agent.RuntimeProfile{Root: machines[0].Agents[0].Install.Root("home"), Default: true, Binding: "first-observation"}
+	a.EnrichMovement(ctx, inv)
+	if got := inv.Entries[1].Returns; len(got) != 1 || got[0].Status != "available" {
+		t.Fatalf("binding observation hid original: %+v", got)
+	}
+	if n := inv.Entries[0].Movement; n == nil || n.Status != "continued" {
+		t.Fatalf("binding observation erased movement: %+v", n)
 	}
 	// Renaming either machine changes display/routing labels, never endpoint identity.
 	inv.Machines[0].Name, inv.Entries[0].Machine = "renamed-desktop", "renamed-desktop"

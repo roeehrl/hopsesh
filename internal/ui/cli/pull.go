@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode"
 
 	"github.com/spf13/cobra"
 
@@ -39,17 +40,18 @@ func addPullFlags(cmd *cobra.Command) {
 	f.String("worktree", "auto", "auto: recreate the worktree if the session used one; create: always use a worktree on the session's branch; main: use the main checkout")
 	f.Bool("fork", false, "keep the source session running (both continue) instead of handing off")
 	f.Bool("rc", false, "turn the agent's remote control on, where it has one")
-	f.Bool("notify", false, "record a durable movement notice (default from config; --notify=false disables it)")
+	f.Bool("notify", false, "protect the original until you move back: blocked or warned as set by hopsesh's original setting (default on unless set to off; --notify=false leaves it alone)")
 	f.Bool("redact", false, "redact likely secrets in the copy")
 	f.Bool("stop-local", false, "if this session is open on this machine, quit it first")
-	f.Bool("no-mark", false, "do not mark the copy left behind")
 	f.Bool("no-sync", false, "do not fetch or fast-forward the checkout here to the session's commit")
 	f.Bool("push", false, "first push the session branch's unpushed commits on the other machine")
 	f.Bool("replace", false, "when the copy here changed too, replace it anyway (hopsesh undo brings it back)")
+	f.Int("context-budget", 0, "for another agent: lower the destination context budget for this transfer (upper-estimate units; 0: the setting, see hopsesh history)")
+	f.String("older", "", "for another agent: extract (labeled extract plus recent turns) or recent (recent turns only); default from hopsesh history")
 	f.String("operation-id", "", "idempotency key for retrying the same transfer")
 	f.String("target-profile", "", "destination account profile ID (hopsesh accounts list)")
 	f.String("target-session", "", "explicit destination session when a branch has several replicas here")
-	f.Bool("keep-both", false, "when both copies changed, keep both (this one comes in as a separate session)")
+	f.Bool("keep-both", false, "preserve different conversation histories by creating a separate session")
 	f.Bool("app", false, "open it in the agent's desktop app instead of the terminal (agents that can)")
 	f.Bool("run", false, "start the agent in the new location when done")
 	f.String("terminal", "", "with --run: start it in a new tab of this terminal app instead of here (see hopsesh terminals)")
@@ -94,9 +96,6 @@ func (r *run) pullOptions(cmd *cobra.Command) (move.Options, error) {
 	default:
 		return o, fmt.Errorf("--via is import or hopsesh, not %q", via)
 	}
-	if v, _ := f.GetBool("no-mark"); v {
-		o.Mark = false
-	}
 	if v, _ := f.GetBool("no-sync"); v {
 		o.SyncCode = false
 	}
@@ -109,6 +108,16 @@ func (r *run) pullOptions(cmd *cobra.Command) (move.Options, error) {
 	case flagSet(f.GetBool("keep-both")):
 		o.Conflict = move.ConflictKeepBoth
 	}
+	if v, _ := f.GetInt("context-budget"); v != 0 {
+		o.Limits.ContextBudget = v
+	}
+	if v, _ := f.GetString("older"); v != "" {
+		o.Limits.Older = v
+	}
+	if err := o.Limits.Check(); err != nil {
+		return o, fmt.Errorf("--context-budget/--older: %w", err)
+	}
+	o.Limits = o.Limits.Normalize()
 	fid, _ := f.GetString("fidelity")
 	switch convert.Fidelity(fid) {
 	case convert.History, convert.Note:
@@ -141,8 +150,8 @@ Without a machine name, hopsesh takes the newest copy of the session, which is h
 session comes back after working on it elsewhere. A session that went to another agent
 and back gets only the new work added to its original, which stays byte for byte.
 
-The copy left behind is marked (--no-mark to skip). The checkout here is fetched and, when
-clean, fast-forwarded to the session's commit (--no-sync to skip). Nothing changes until
+The copy left behind keeps its title; hopsesh ls shows where it went. The checkout here is
+fetched and, when clean, fast-forwarded to the session's commit (--no-sync to skip). Nothing changes until
 you confirm (or pass --yes).
 
 From a cloud (<cloud>:<id>, or the session's link; hopsesh clouds lists them): hopsesh
@@ -333,7 +342,11 @@ func (r *run) renderPlan(p *move.Plan) {
 	if p.Options.TargetSession != "" {
 		r.printf("  returning %s · account %s\n", p.Options.TargetSession, p.Options.TargetProfile)
 	}
-	r.printf("  notice    %t (durable movement notice)\n", p.Options.Notify)
+	guard := "protected until you move back"
+	if r.app != nil {
+		guard += " (" + r.app.Cfg.OriginalGuard() + ")"
+	}
+	r.printf("  original  %s\n", map[bool]string{true: guard, false: "left alone"}[p.Options.Notify])
 	switch p.Repo.Action {
 	case move.RepoUse:
 		r.printf("  repo      use %s", p.Repo.LocalPath)
@@ -354,6 +367,7 @@ func (r *run) renderPlan(p *move.Plan) {
 		r.printf("  code      %s\n", p.Sync)
 	}
 	if c := p.Continue; c != nil {
+		r.renderComparison(c.Comparison)
 		switch c.Relation {
 		case move.RelationAppend:
 			r.printf("  session   add the new work to %s here (%s)\n", c.AppendTo.Key, c.AppendTo.Title)
@@ -371,18 +385,114 @@ func (r *run) renderPlan(p *move.Plan) {
 	} else {
 		r.printf("  files     %d (%s)\n", len(p.Files.Files), move.Human(p.Bytes))
 	}
-	switch p.Mark {
-	case move.MarkNow:
-		r.printf("  left copy marked on %s\n", p.Source.Location)
-	case move.MarkWhenStopped:
-		r.printf("  left copy marked on %s once it ends (it is still open)\n", p.Source.Location)
-	}
 	for _, w := range p.Warnings {
 		r.printf("  ! %s\n", w)
 	}
 	for _, b := range p.Blockers {
 		r.printf("  ✗ %s\n", b)
 	}
+	if p.ReviewNewSession {
+		r.printf("  This does not mean you changed accounts. To review a fresh session on the same lineage branch, remove --target-session and add --new-session. Keep the selected destination account. Both original sessions are preserved; independent destination work still requires --keep-both.\n")
+	}
+	if p.Continue != nil && (p.Conflict != "" || p.Options.Conflict == move.ConflictKeepBoth) {
+		if p.Options.Conflict == move.ConflictKeepBoth {
+			r.printf("  outcome   create a separate %s session; both originals preserved. Destination-only work is not combined.\n", p.Agent)
+		} else {
+			r.printf("  review    add --keep-both to review a separate %s session; both originals preserved.\n", p.Agent)
+		}
+		r.printf("  cancel    declining confirmation changes neither original.\n")
+	}
+}
+
+func (r *run) renderComparison(c *move.Comparison) {
+	if c == nil {
+		return
+	}
+	if c.Verified {
+		r.printf("  comparison %s · %d shared revisions · up to 2 sample messages per side\n", comparisonLine(c.Reason, 240), c.SharedRevisions)
+	} else {
+		r.printf("  comparison unavailable · %s\n", comparisonLine(c.Reason, 240))
+	}
+	for _, side := range []struct {
+		label string
+		data  move.ComparisonSide
+	}{{"source", c.Source}, {"destination", c.Destination}} {
+		s, id := side.data, side.data.Identity
+		agentName := id.AgentName
+		if agentName == "" {
+			agentName = string(id.Agent)
+		}
+		profile := id.ProfileName
+		if profile == "" {
+			profile = id.Profile
+		}
+		if profile == "" {
+			profile = "Default account"
+		}
+		machine := id.Machine
+		if machine == "" {
+			machine = id.MachineID
+		}
+		r.printf("  %s %s · %s on %s · %q\n", side.label, comparisonLine(agentName, 120), comparisonLine(profile, 120), comparisonLine(machine, 120), comparisonLine(id.Title, 160))
+		r.printf("    session %s\n", comparisonLine(id.Key.String(), 0))
+		if id.MachineID != "" && id.MachineID != machine {
+			r.printf("    endpoint %s\n", comparisonLine(id.MachineID, 0))
+		}
+		if !c.Verified || !s.ExclusiveKnown {
+			r.printf("    unique work unknown · %s\n", comparisonLine(s.Reason, 240))
+			if s.PreviewBasis != "saved-history" {
+				continue
+			}
+		} else {
+			r.printf("    unique: %d revisions · %d records · %d messages (%d user, %d assistant) · %d tools · %d other\n", s.Revisions, s.Counts.Nodes, s.Counts.Messages, s.Counts.UserMessages, s.Counts.AssistantMessages, s.Counts.Tools, s.Counts.Other)
+		}
+		if s.PreviewBasis == "saved-history" {
+			r.printf("    Recent saved messages; relationship unverified, not proof of unique work\n")
+		}
+		shown, shortened := 0, s.Truncated || s.PreviewOmitted > 0
+		for _, sample := range s.Preview {
+			if sample.Role != "user" && sample.Role != "assistant" || sample.Text == "" {
+				continue
+			}
+			if shown == 2 {
+				shortened = true
+				break
+			}
+			text := comparisonLine(sample.Text, 240)
+			shortened = shortened || sample.Truncated || text != comparisonLine(sample.Text, 0)
+			r.printf("    %s: %s\n", sample.Role, text)
+			shown++
+		}
+		if shortened || s.Counts.Messages > shown {
+			if s.PreviewBasis == "saved-history" {
+				r.printf("    saved history excerpts shortened or omitted; unique work remains unknown\n")
+			} else {
+				r.printf("    excerpts shortened or omitted; counts above are exact\n")
+			}
+		}
+	}
+}
+
+// Core previews are allowlisted; terminal presentation also keeps identity and
+// excerpts on one line and excludes control/format characters.
+func comparisonLine(s string, limit int) string {
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return ' '
+		}
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, s)
+	s = strings.Join(strings.Fields(s), " ")
+	if limit > 0 {
+		runes := []rune(s)
+		if len(runes) > limit {
+			s = string(runes[:limit-1]) + "…"
+		}
+	}
+	return s
 }
 
 func (r *run) renderResult(p *move.Plan, res *move.Result) {
@@ -410,21 +520,13 @@ func (r *run) renderResult(p *move.Plan, res *move.Result) {
 	if res.SyncNote != "" {
 		r.printf("  Code: %s.\n", res.SyncNote)
 	}
-	switch res.Mark {
-	case "done":
-		r.printf("  The copy on %s is marked.\n", p.Source.Location)
-	case "pending":
-		r.printf("  The copy on %s is still open; it is marked once it ends (on a later scan).\n", p.Source.Location)
-	case "failed":
-		r.printf("  ! Could not mark the copy on %s: %s\n", p.Source.Location, res.MarkError)
-	}
 	for _, w := range res.Warnings {
 		r.printf("  ! %s\n", w)
 	}
 	r.printf("  Undo with: hopsesh undo %s\n\n", res.Journal)
 	r.printf("Continue it:\n\n  %s\n", res.Command)
 	if res.Notice != "" {
-		r.printf("\nMovement notice:\n  %s\n", res.Notice)
+		r.printf("\nThe original:\n  %s\n", res.Notice)
 	}
 	r.offerSkill()
 }

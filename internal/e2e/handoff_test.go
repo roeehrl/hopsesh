@@ -139,9 +139,9 @@ func (w *handoffWorld) statusOf() string {
 
 // The whole hand-off: a plan that says what goes and what stays, a snapshot on a handoff
 // branch (the checkout untouched), the cloud session started with the briefing from a
-// worktree on that branch, lineage and the mark; then the cloud works, and the session
-// comes back with the cloud's work through the bring-back path; undo of the hand-off
-// deletes the branch and the mark and owes the archive.
+// worktree on that branch, and lineage (the session's title stays as it was); then the
+// cloud works, and the session comes back with the cloud's work through the bring-back
+// path; undo of the hand-off deletes the branch and owes the archive.
 func TestHandoffToClaudeCloudAndBack(t *testing.T) {
 	w := newHandoffWorld(t)
 	w.dirty()
@@ -164,8 +164,8 @@ func TestHandoffToClaudeCloudAndBack(t *testing.T) {
 		!strings.Contains(hp.Brief, "fix TestParseQuoted next") || !strings.Contains(hp.Brief, hp.Branch) || hp.Tokens == 0 || hp.Tokens > 2100 {
 		t.Fatalf("brief: %d tokens\n%s", hp.Tokens, hp.Brief)
 	}
-	if hp.MarkTitle != "↪ continued in Claude Code cloud" || p.Mark != move.MarkNow || len(hp.Steps) != 5 {
-		t.Fatalf("mark and steps: %s %s %v", hp.MarkTitle, p.Mark, hp.Steps)
+	if strings.Join(hp.Steps, ",") != "snapshot,push,start,lineage" {
+		t.Fatalf("steps: %v", hp.Steps)
 	}
 	before := w.statusOf()
 	res, err := a.Apply(ctx, p, move.Input{}, nil)
@@ -181,7 +181,7 @@ func TestHandoffToClaudeCloudAndBack(t *testing.T) {
 			t.Errorf("step %s: %s %s", st.Name, st.State, st.Detail)
 		}
 	}
-	if !strings.HasPrefix(hr.Session, "session_01") || hr.URL != "https://claude.ai/code/"+hr.Session || !hr.Pushed || res.Mark != "done" {
+	if !strings.HasPrefix(hr.Session, "session_01") || hr.URL != "https://claude.ai/code/"+hr.Session || !hr.Pushed {
 		t.Fatalf("result: %+v", hr)
 	}
 	// The cloud got the briefing and the snapshot branch, from a worktree on it.
@@ -216,8 +216,9 @@ func TestHandoffToClaudeCloudAndBack(t *testing.T) {
 		t.Fatalf("the hand-off folder holds the branch %s", b)
 	}
 
-	// The scan: the session here is marked and points at the cloud session, which is
-	// listed through the lineage with the original it came from.
+	// The scan: the session here keeps its title, its status comes from the lineage, and
+	// it points at the cloud session, which is listed through the lineage with the
+	// original it came from.
 	inv2 := a.Scan(ctx, app.ScanOptions{})
 	defer inv2.Close()
 	var local, cloud *app.Entry
@@ -229,7 +230,8 @@ func TestHandoffToClaudeCloudAndBack(t *testing.T) {
 			cloud = &inv2.Entries[i]
 		}
 	}
-	if local == nil || local.Session.Mark == nil || agent.MarkTitle(*local.Session.Mark, "") != hp.MarkTitle || local.Lineage == nil {
+	if local == nil || local.Session.LegacyLabel != nil || local.Session.Title != p.Title || local.Lineage == nil || local.Departure == nil ||
+		local.Status() != "continued in Claude Code cloud" || !local.MovedOn() {
 		t.Fatalf("the session here: %+v", local)
 	}
 	hop := local.Lineage.Hops[len(local.Lineage.Hops)-1]
@@ -276,8 +278,8 @@ func TestHandoffToClaudeCloudAndBack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Undo of the hand-off: the branch goes (with a lease), the mark goes, the cloud
-	// session is a step the user owes.
+	// Undo of the hand-off: the branch goes (with a lease), the session here is no longer
+	// moved on, the cloud session is a step the user owes.
 	j, err := a.Undo(ctx, res.Journal, false)
 	if err != nil {
 		t.Fatal(err)
@@ -291,8 +293,8 @@ func TestHandoffToClaudeCloudAndBack(t *testing.T) {
 	inv3 := a.Scan(ctx, app.ScanOptions{Hosts: []string{"here"}})
 	defer inv3.Close()
 	for _, e := range inv3.Entries {
-		if string(e.Session.Key.Session) == demoSession && e.Session.Mark != nil {
-			t.Fatal("undo leaves the mark")
+		if string(e.Session.Key.Session) == demoSession && (e.Departure != nil || e.Status() != "ended") {
+			t.Fatalf("undo leaves the session moved on: %s", e.Status())
 		}
 	}
 	if after := w.statusOf(); after != before {
@@ -308,7 +310,7 @@ func TestHandoffReusesAPushedBranch(t *testing.T) {
 	inv, p := w.planHandoff(a, a.HandoffDefaults("claude-cloud"))
 	defer inv.Close()
 	hp := p.Handoff
-	if len(p.Blockers) > 0 || !hp.Reuse || hp.Branch != "main" || strings.Join(hp.Steps, ",") != "start,lineage,mark" {
+	if len(p.Blockers) > 0 || !hp.Reuse || hp.Branch != "main" || strings.Join(hp.Steps, ",") != "start,lineage" {
 		t.Fatalf("plan: %+v %+v", p.Blockers, hp)
 	}
 	res, err := a.Apply(ctx, p, move.Input{}, nil)

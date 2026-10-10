@@ -159,12 +159,12 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 					}
 					e := it.Entry
 					s := e.Session
-					fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\t%s\n", e.Machine, e.AgentName, truncate(s.Title, 40), movementStatus(e), ago(s.LastActivity), shortID(s.Key.Session), truncate(s.CWD, 44))
+					fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\t%s\n", e.Machine, e.AgentName, truncate(s.Title, 40), r.movementStatus(e), ago(s.LastActivity), shortID(s.Key.Session), truncate(s.CWD, 44))
 					if e.Profile != nil {
 						fmt.Fprintf(tw, "  \t\t  profile: %s\t\t\t\t\n", app.AccountLabel(e.Profile))
 					}
-					if e.Movement != nil {
-						fmt.Fprintf(tw, "  \t\t  movement [%s]: %s\t\t\t\t\n", e.Movement.Status, e.Movement.Text)
+					if ro := r.app.Role(e); ro != nil && e.Departure == nil {
+						fmt.Fprintf(tw, "  \t\t  %s %s · %s\t\t\t\t\n", ro.Glyph, ro.Word, ro.Line)
 					}
 					if len(e.Returns) > 0 {
 						fmt.Fprintf(tw, "  \t\t  %d move back destination(s); inspect with hopsesh show %s\t\t\t\t\n", len(e.Returns), launch.ShQuote(e.Machine+":"+s.Key.String()))
@@ -308,8 +308,8 @@ func copiesLine(it app.Item) string {
 		switch {
 		case c.Newest:
 			p += ": newest"
-		case c.Mark != nil:
-			p += ": " + app.MarkWords(*c.Mark)
+		case c.LeftBehind:
+			p += ": moved on"
 		default:
 			p += ": older copy"
 		}
@@ -351,7 +351,7 @@ func showCmd() *cobra.Command {
 			r.printf("  machine      %s\n", e.Machine)
 			r.printf("  agent        %s %s\n", e.AgentName, s.AgentVersion)
 			r.printf("  session      %s\n", s.Key)
-			r.printf("  status       %s, last active %s\n", movementStatus(e), ago(s.LastActivity))
+			r.printf("  status       %s, last active %s\n", r.movementStatus(e), ago(s.LastActivity))
 			r.printf("  directory    %s\n", s.CWD)
 			r.printf("  last prompt  “%s”\n", s.LastPrompt)
 			r.printf("  size         %d KB", s.Size/1024)
@@ -482,10 +482,14 @@ its clouds with their fidelity, needs and the upstream changes the drift check w
 // renderMovement keeps last-seen facts separate from permission to write. Every
 // suggested transfer is a dry run with the exact account and native session key.
 func (r *run) renderMovement(e app.Entry) {
-	if n := e.Movement; n != nil {
-		r.printf("  movement     [%s] %s\n", n.Status, n.Text)
-		r.printf("  destination  %s %s on %s · profile %s\n", n.AgentName, n.Key, n.Machine, nonEmpty(n.ProfileLabel, n.Profile))
-		r.printf("  delivery     %s\n", n.Delivery)
+	if ro := r.app.Role(e); ro != nil {
+		r.printf("  journey      %s %s · %s\n", ro.Glyph, ro.Word, ro.Line)
+		if ro.Kind == "blocked" && e.Machine == app.LocalName() {
+			r.printf("               continue here anyway: hopsesh unblock %s\n", e.Session.Key.Session)
+		}
+	}
+	if n := e.Departure; n != nil {
+		r.printf("  moved to     %s %s on %s · profile %s [%s]\n", n.AgentName, n.Key, n.Machine, nonEmpty(n.ProfileLabel, n.Profile), n.Status)
 		if !n.CheckedAt.IsZero() {
 			r.printf("  checked      %s\n", n.CheckedAt.Format("2006-01-02 15:04:05Z07:00"))
 		}
@@ -524,7 +528,10 @@ func returnReviewCommand(e app.Entry, c app.ReturnCandidate) string {
 	return cmd
 }
 
-func movementStatus(e app.Entry) string {
+func (r *run) movementStatus(e app.Entry) string {
+	if ro := r.app.Role(e); ro != nil && e.Departure != nil {
+		return ro.Glyph + " " + strings.ToLower(ro.Word[:1]) + ro.Word[1:] + " · " + ro.Line
+	}
 	s := e.Status()
 	if strings.HasPrefix(s, "continued ") {
 		return "previously " + s

@@ -162,7 +162,7 @@ func TestRealPromptFilters(t *testing.T) {
 	}
 }
 
-func TestMovedMark(t *testing.T) {
+func TestLegacyLabel(t *testing.T) {
 	f := "/t/moved/s1.jsonl"
 	body := `{"type":"user","uuid":"u1","parentUuid":null,"sessionId":"s1","cwd":"/Users/alice/p","timestamp":"2026-10-01T10:00:00Z","message":{"role":"user","content":"hello"}}` + "\n" +
 		`{"type":"custom-title","customTitle":"fix tests","sessionId":"s1"}` + "\n" +
@@ -172,11 +172,11 @@ func TestMovedMark(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.Mark == nil || s.Mark.Location != "laptop" || s.Title != "fix tests" {
-		t.Fatalf("got mark=%+v title=%q", s.Mark, s.Title)
+	if s.LegacyLabel == nil || s.LegacyLabel.Location != "laptop" || s.Title != "fix tests" {
+		t.Fatalf("got label=%+v title=%q", s.LegacyLabel, s.Title)
 	}
 	if s.LastActivity.Format(time.RFC3339) != "2026-10-01T10:00:00Z" {
-		t.Fatalf("the mark must not change last activity: %v", s.LastActivity)
+		t.Fatalf("a title label must not change last activity: %v", s.LastActivity)
 	}
 }
 

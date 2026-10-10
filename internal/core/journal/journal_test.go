@@ -384,7 +384,7 @@ func TestParts(t *testing.T) {
 		t.Fatalf("two journals at once: %s then %s", hop.ID, leg.ID)
 	}
 	for i := 0; i < 20; i++ {
-		if _, err := New(state, KindMark, "many"); err != nil {
+		if _, err := New(state, KindMove, "many"); err != nil {
 			t.Fatal(err)
 		}
 	}

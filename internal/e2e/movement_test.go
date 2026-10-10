@@ -17,8 +17,8 @@ import (
 	"github.com/roeehrl/hopsesh/sdk/ir"
 )
 
-// All reads and writes use the real modules, isolated in fixture homes. A native
-// title mark is metadata; enabling movement notices must never add conversation work.
+// All reads and writes use the real modules, isolated in fixture homes. Titles never show
+// movement; enabling movement notices must never add conversation work.
 func TestMovementTransferReturn(t *testing.T) {
 	for _, from := range []string{"claude", "codex"} {
 		for _, to := range []string{"claude", "codex"} {
@@ -30,14 +30,14 @@ func TestMovementTransferReturn(t *testing.T) {
 						ctx := context.Background()
 						env := move.Env{StateDir: t.TempDir()}
 						before := readAll(t, a, in.Source.Module, in.Source.Install, in.Session)
-						p, res := applyMovement(t, in, move.Options{TargetDir: b.repo, Mark: true, Notify: notify}, env)
+						p, res := applyMovement(t, in, move.Options{TargetDir: b.repo, Notify: notify}, env)
 						left := findRouteSession(t, a, in.Source.Module, in.Source.Install, in.Session.Key)
 						dst := findRouteSession(t, b, in.Target.Module, in.Target.Install, p.Placement.Key)
 						if got := readAll(t, a, in.Source.Module, in.Source.Install, left); !reflect.DeepEqual(before.Nodes, got.Nodes) {
 							t.Fatal("movement notice changed the source conversation nodes")
 						}
-						if from != to && (left.Mark == nil || left.Mark.Kind != agent.MarkPrepared) {
-							t.Fatalf("transfer only prepares the other agent: %+v", left.Mark)
+						if left.LegacyLabel != nil || left.Title != in.Session.Title || dst.Title != in.Session.Title {
+							t.Fatalf("titles stay as they were: %q -> left %q, destination %q", in.Session.Title, left.Title, dst.Title)
 						}
 						nodeCounts = append(nodeCounts, len(readAll(t, b, in.Target.Module, in.Target.Install, dst).Nodes))
 						for _, s := range []agent.Summary{left, dst} {
@@ -49,6 +49,12 @@ func TestMovementTransferReturn(t *testing.T) {
 							h := hops[0]
 							if d, ok := g.Departure(h.From); ok != notify || ok && d.ID != h.ID {
 								t.Fatalf("source departure: %+v, %t", d, ok)
+							}
+							if d, ok := g.Departed(h.From); !ok || d.ID != h.ID {
+								t.Fatalf("the source moved on whether or not a notice was asked for: %+v, %t", d, ok)
+							}
+							if _, ok := g.Departed(h.To); ok {
+								t.Fatal("the arrival has not moved on")
 							}
 							if _, ok := g.Departure(h.To); ok {
 								t.Fatal("arrival must not have a departure notice")
@@ -80,7 +86,7 @@ func TestMovementTransferReturn(t *testing.T) {
 							appendCodexTurn(t, dst.Path, "MOVEMENT-RETURN-WORK", "MOVEMENT-RETURN-REPLY")
 						}
 						back.Session = findRouteSession(t, b, in.Target.Module, in.Target.Install, dst.Key)
-						returned, _ := applyMovement(t, back, move.Options{TargetDir: a.repo, Mark: true, Notify: notify}, env)
+						returned, _ := applyMovement(t, back, move.Options{TargetDir: a.repo, Notify: notify}, env)
 						if returned.Placement.Key != in.Session.Key {
 							t.Fatalf("return lost original native identity: %s", returned.Placement.Key)
 						}
@@ -90,8 +96,11 @@ func TestMovementTransferReturn(t *testing.T) {
 						if len(hops) != 2 || hops[1].Notify != notify || g.Journey().RoundTrips != 1 {
 							t.Fatalf("return metadata: %+v", g)
 						}
-						if _, ok := g.Departure(hops[1].To); ok || home.Mark != nil {
-							t.Fatal("return must clear the original's movement notice and title mark")
+						if _, ok := g.Departure(hops[1].To); ok || home.LegacyLabel != nil {
+							t.Fatal("return must clear the original's movement notice")
+						}
+						if _, ok := g.Departed(hops[1].To); ok {
+							t.Fatal("a returned original is current again")
 						}
 						if got := g.ReturnReplicas(hops[1].To); len(got) != 1 || got[0].ID != hops[0].To {
 							t.Fatalf("return candidate after round trip: %+v", got)
@@ -116,7 +125,7 @@ func TestMovementForkAndUndo(t *testing.T) {
 				a, b, in := movementInput(t, from, to)
 				before := readAll(t, a, in.Source.Module, in.Source.Install, in.Session)
 				env := move.Env{StateDir: t.TempDir()}
-				p, res := applyMovement(t, in, move.Options{TargetDir: b.repo, Fork: true, Mark: true, Notify: true}, env)
+				p, res := applyMovement(t, in, move.Options{TargetDir: b.repo, Fork: true, Notify: true}, env)
 				dst := findRouteSession(t, b, in.Target.Module, in.Target.Install, p.Placement.Key)
 				g := movementGraph(t, dst)
 				hops := g.ActiveHops()
@@ -167,7 +176,7 @@ func TestMovementNativeBackupIsNotReturnDestination(t *testing.T) {
 	}
 	in.Native = &move.NativeSide{Target: move.Side{Machine: b.m, Module: claude.New(), Install: b.in}}
 	before := readAll(t, a, in.Source.Module, in.Source.Install, in.Session)
-	p, _ := applyMovement(t, in, move.Options{TargetDir: b.repo, Mark: true, Notify: true}, move.Env{StateDir: t.TempDir()})
+	p, _ := applyMovement(t, in, move.Options{TargetDir: b.repo, Notify: true}, move.Env{StateDir: t.TempDir()})
 	dst := findRouteSession(t, b, in.Target.Module, in.Target.Install, p.Placement.Key)
 	g := movementGraph(t, dst)
 	if len(g.Hops) != 2 || len(g.ActiveHops()) != 1 {
@@ -178,8 +187,8 @@ func TestMovementNativeBackupIsNotReturnDestination(t *testing.T) {
 		t.Fatalf("unvisited backup offered as return: %+v", returns)
 	}
 	backup := list(t, b)[sid]
-	if backup.Mark == nil || backup.Mark.Kind != agent.MarkPrepared {
-		t.Fatalf("backup may report preparation, never actual continuation: %+v", backup.Mark)
+	if backup.LegacyLabel != nil || backup.Title != in.Session.Title {
+		t.Fatalf("the backup keeps the session's title: %q %+v", backup.Title, backup.LegacyLabel)
 	}
 	if !reflect.DeepEqual(before.Nodes,
 		readAll(t, a, in.Source.Module, in.Source.Install, list(t, a)[sid]).Nodes) {

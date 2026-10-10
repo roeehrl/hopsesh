@@ -2,12 +2,13 @@
 // it runs, one line of facts), its action row ([Primary ▾] [Move ▾] [⋯]), where it is
 // open, the end of its conversation (safe, locally rendered Markdown), and its
 // repository, copies and details, which open and close app-wide.
+import { role, chip as roleChip } from "./guard.js";
 import { accountLabel, accountTitle, api, h, fill, icon, ICONS, state, sys, here, ago, when, bytes, agentBadge, cloudOf, cloudTitle, count, path, rich, fail, toast, dialog, errText, cap, $ } from "./core.js";
 import { selectDestination, model, statusLine, placeName, showPlace, placeCount, onInspector, liveOf, appWord } from "./actions.js";
 import { openMenu, isOpen, openEl, closeAll } from "./menu.js";
 import { sectionOpen, setSection } from "./layout.js";
 import { markdown } from "./markdown.js";
-import { movementNotice, resolveDestination } from "./returns.js";
+import { movementNotice, resolveDestination, returnCard } from "./returns.js";
 import { tabs } from "./term.js";
 
 const AGENT_SHORT = { claude: "Claude", codex: "Codex" };
@@ -38,7 +39,7 @@ function toggle(btn, items, label, align) {
 // moveItems flattens Move ▾'s groups into a menu with headings.
 function moveItems(groups) {
   const out = [];
-  groups.forEach((g, i) => { if (i) out.push({ sep: true }); out.push({ heading: g.heading }, ...g.items); });
+  groups.filter(g=>g.items.length).forEach((g, i) => { if (i) out.push({ sep: true }); out.push({ heading: g.heading }, ...g.items); });
   return out;
 }
 
@@ -79,6 +80,13 @@ function section(name, title, def, badge, ...kids) {
 }
 
 // header is the title, the status line and the facts.
+// lineageLine says what this copy is in its journey, under the title (never in it).
+function lineageLine(e) {
+  const r = role(e);
+  if (!r) return null;
+  return h("span", { class: "ins-lineage", "aria-label": `${r.chip}. ${r.line}` }, roleChip(e), " ", h("span", { class: "muted" }, r.line));
+}
+
 function header(e) {
   const [k, lead, rest, cl, twice] = statusLine(e);
   const g = e.group;
@@ -101,6 +109,7 @@ function header(e) {
   return h("div", { class: "ins-head" },
     h("div", { class: "ins-title" }, agentBadge(e.agent, e.agentName, e.cloud ? cloudTitle(e.machine) : ""),
       h("h2", { title: e.title + (e.canRename ? " (double-click to rename)" : ""), ondblclick: e.canRename ? () => renameDialog(e) : null }, e.title)),
+    lineageLine(e),
     derived && e.canRename ? h("span", { class: "ins-derived" }, e.titleSource === "none" ? "No title yet · " : `Title from ${e.titleSource === "reply" ? "first reply" : "first prompt"} · `,
       h("button", { class: "link", onclick: () => renameDialog(e) }, "Rename…")) : null,
     h("span", { class: "ins-status" }, h("span", { class: "dot " + (twice ? "needs" : k) }),
@@ -305,7 +314,6 @@ function history(e) {
   return section("copies", "Copies & history", false, h("span", { class: "chip disc-n" }, String(n)),
     e.relationship?.parent ? h("div",{class:"item"},h("strong",{},"Conversation family: "+e.relationship.name),h("span",{class:"muted"},(e.relationship.ancestors||[]).join(" → ")+" → "+e.relationship.branchName),h("span",{class:"muted"},e.relationship.evidence)) : null,
     e.relationship?.issue && e.relationship.issue !== e.lineageError ? h("div",{class:"item warn"},e.relationship.issue) : null,
-    e.movement ? h("div", {class:"muted"}, `Movement operation: ${e.movement.operation || "Not available in this scan"}`) : null,
     e.lineageError ? h("div", { class: "item warn" }, `Lineage unavailable: ${e.lineageError}`, e.canArchiveLineage ? h("p", {}, "Archive this metadata to start a new family. The native conversation is preserved; Activity can undo this.") : h("p",{},"Its parent conversation is archived, unreadable or depended on for history. If the parent is archived, unarchive it in its agent and refresh."),
  e.canArchiveLineage ? h("button", {class:"btn small",onclick:async()=>{try{await api("ArchiveLineage",e.machine,e.key);toast("Lineage metadata archived. Activity can undo it.");await renamed();}catch(err){fail(err);}}},"Archive unsupported lineage") : null) : null,
  e.journey ? h("div", { class: "journey-counts" },
@@ -316,7 +324,7 @@ function history(e) {
  e.journey.fork ? h("span", { class: "chip",title:`Parent branch: ${e.journey.parentBranch}` }, "Separate fork") : null,
  h("span",{class:"muted",style:"font-size:12px"},`Origin: ${e.journey.origin&&e.journey.origin!=="/"?e.journey.origin:"not recorded"}; branch ${e.journey.branch.slice(0,8)}`)) : null,
  others.length ? h("div", { class: "sub-h" }, "Other copies") : null,
-    others.map((c) => h("span", {}, copyPlace(c), c.profile ? h("span",{title:accountTitle(c.profile)}," · "+accountLabel(c.profile)) : null, h("span", { class: "muted" }, c.newest ? " · newest" : c.mark ? " · marked" : " · older"), " ", h("button",{class:"link",onclick:()=>resolveDestination(c).then(selectDestination).catch(fail)},"Show copy"))),
+    others.map((c) => h("span", {}, copyPlace(c), c.profile ? h("span",{title:accountTitle(c.profile)}," · "+accountLabel(c.profile)) : null, h("span", { class: "muted" }, c.newest ? " · newest" : c.leftBehind ? " · moved on" : " · older"), " ", h("button",{class:"link",onclick:()=>resolveDestination(c).then(selectDestination).catch(fail)},"Show copy"))),
     e.mirror ? [h("div", { class: "sub-h" }, "Mirrored"), h("span", {}, `Remote Control keeps a copy on ${e.mirror.host} while it runs. `,
       h("button", { class: "link", onclick: () => api("OpenURL", e.mirror.url).catch(fail) }, "Open it"))] : null,
     e.history.length ? [h("div", { class: "sub-h" }, e.cloud ? "Lineage" : "Where it has been"),
@@ -352,7 +360,7 @@ function cloudNotes(e) {
 
 // inspector is the selected session's pane (or what selecting one does).
 export function inspector(e, previous=null) {
-  if (!e) return h("aside", { class: "inspector", id: "inspector", "aria-label": "Session details" }, h("div", { class: "empty" }, "Select a session to see what you can do with it."));
+  if (!e) return previous && !previous.dataset.key ? previous : h("aside", { class: "inspector", id: "inspector", "aria-label": "Session details" }, h("div", { class: "empty" }, "Select a session to see what you can do with it."));
   const m = model(e);
   const {group,observedAt,...item}=e;
   const signature=JSON.stringify([item,{...group,entries:undefined},statusLine(e),m.primary?.label,m.primary?.disabled,state.info?.previews,state.info?.agents,[...tabs.values()].filter(t=>t.machine===e.machine&&t.key===e.key).map(t=>[t.id,t.state,t.attention])]);
@@ -369,6 +377,5 @@ export function inspector(e, previous=null) {
 function returnSection(m) {
   if (!m.returns?.length) return null;
   return h("section", {class:"sec", "aria-label":"Return destinations"}, h("span", {class:"sec-h"}, "Move back to an existing session"),
-    m.returns.map(a => h("div", {class:"return-choice"}, h("button", {class:"btn",onclick:a.run}, a.label),
-      h("span", {class:"muted"}, a.sub), h("span", {class:"mono"}, a.candidate.key))));
+    m.returns.map(returnCard));
 }

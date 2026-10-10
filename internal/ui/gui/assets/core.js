@@ -200,7 +200,8 @@ export async function go(name, ...args) {
   state.handoffOpen = null;
   $("#where").textContent = { sessions: "", activity: "Activity", machines: "Machines", settings: "Settings", accounts: "Accounts", done: "", brought: "" }[name] ?? "";
   document.body.dataset.screen = name; // the panes' buttons work on Sessions only
-  if (changed) loading({ sessions: "Reading sessions…", machines: "Reading machines…", accounts: "Reading accounts…", settings: "Reading settings…", activity: "Reading activity…" }[name] || "Loading…");
+  // Sessions already read stay on screen while they are read again (no blank "Reading…").
+  if (changed && !(name === "sessions" && state.scan)) loading({ sessions: "Reading sessions…", machines: "Reading machines…", accounts: "Reading accounts…", settings: "Reading settings…", activity: "Reading activity…" }[name] || "Loading…");
   try { return await screens[name](...args); }
   catch (error) { if (visit === navigation) fill(view, loadError(error, () => go(name, ...args))); }
 }

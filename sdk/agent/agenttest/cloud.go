@@ -87,10 +87,10 @@ func RunCloudWith(t *testing.T, m agent.Module, programs Programs, o CloudOption
 			t.Fatal("a Spec needs a name, a vendor, binaries and tested versions")
 		}
 		for _, c := range spec.Clouds {
-			for _, mk := range []agent.Mark{{Kind: agent.MarkMoved, Location: c.Name}, {Kind: agent.MarkContinued, AgentName: spec.Name, Location: c.Name}} {
-				got, title, ok := agent.ParseMarkTitle(agent.MarkTitle(mk, "a title"))
+			for _, label := range []string{"↪ moved to " + c.Name + " · a title", "↪ continued in " + spec.Name + " on " + c.Name + " · a title"} {
+				got, title, ok := agent.StripLegacyLabel(label)
 				if !ok || got.Location != c.Name || title != "a title" {
-					t.Errorf("cloud %s does not survive a mark title: %+v %q", c.Name, got, title)
+					t.Errorf("cloud %s does not read back from a legacy title label: %+v %q", c.Name, got, title)
 				}
 			}
 			if c.Up == agent.FidNative {

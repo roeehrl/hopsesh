@@ -10,15 +10,18 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/launch"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/sdk/agent"
+	"github.com/roeehrl/hopsesh/sdk/ir"
 )
 
 // Exit is what the TUI asks its caller to do after it closes.
@@ -77,6 +80,9 @@ type row struct {
 }
 
 type model struct {
+	// unblockArmed is the entry whose block U removes on a second press (after the warning).
+	unblockArmed   string
+	guardNote      string // the result of U, under the selected session
 	emitScan       func(uint64, *app.Inventory)
 	scanGeneration uint64
 	scanning       bool
@@ -100,6 +106,8 @@ type model struct {
 	opts           move.Options
 	target         agent.ID // the agent to continue in ("" = the session's own)
 	plan           *move.Plan
+	planOffset     int
+	planGeneration uint64
 	destinations   []agent.Summary
 	journeyOffset  int
 	planning       bool // a new plan is being worked out; the one shown is out of date
@@ -138,6 +146,10 @@ type planDone struct {
 	plan  *move.Plan
 	input move.Input
 	err   error
+}
+type reviewedPlanDone struct {
+	generation uint64
+	msg        tea.Msg
 }
 type applyDone struct {
 	res *move.Result
@@ -303,6 +315,21 @@ func (m *model) nextSelectable(from, dir int) int {
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case reviewedPlanDone:
+		if msg.generation != m.planGeneration {
+			switch done := msg.msg.(type) {
+			case planDone:
+				if done.inv != nil {
+					done.inv.Close()
+				}
+			case returnPlanDone:
+				if done.push != nil {
+					done.push.Close()
+				}
+			}
+			return m, nil
+		}
+		return m.Update(msg.msg)
 	case returnPlanDone:
 		m.returnPush = msg.push
 		if msg.err != nil {
@@ -429,6 +456,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.brought, m.notice, m.mode = nil, "", modeLoading
 		return m, m.Init()
 	case planDone:
+		m.planOffset = 0
 		if msg.inv != nil {
 			if m.inv != nil {
 				m.inv.Close()
@@ -549,7 +577,37 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 			m.journeyOffset = max(0, m.journeyOffset-max(1, m.height-5))
 		}
 	case modeBrowse:
+		if k != "U" {
+			m.unblockArmed = ""
+		}
 		switch k {
+		case "U":
+			if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil {
+				e := m.rows[m.cursor].item.Entry
+				ro := m.deps.App.Role(e)
+				if ro == nil || e.Departure == nil || e.Machine != app.LocalName() {
+					break
+				}
+				id := e.Machine + "\x00" + e.Session.Key.String()
+				switch {
+				case ro.Word == "Unblocked":
+					if err := m.deps.App.RestoreBlock(e.Session.Key); err != nil {
+						m.guardNote = "could not block again: " + err.Error()
+					} else {
+						m.guardNote = "Blocked again until you move it back."
+					}
+				case ro.Kind != "blocked":
+				case m.unblockArmed != id:
+					m.unblockArmed = id
+				default:
+					m.unblockArmed = ""
+					if err := m.deps.App.ReleaseOriginal(e.Session.Key, e.Departure.Operation); err != nil {
+						m.guardNote = "could not remove the block: " + err.Error()
+					} else {
+						m.guardNote = "Block removed. Continuing here makes the copies diverge; U blocks it again."
+					}
+				}
+			}
 		case "R":
 			m.openReturns()
 		case "D":
@@ -680,6 +738,9 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 			}
 		}
 	case modePlan:
+		if k == "R" && (m.planning || m.returnTo != nil || m.plan.Kind == move.KindContinue || m.plan.Continue != nil) {
+			return m, nil
+		}
 		if m.returnTo != nil && (k == "a" || k == "A" || k == "d" || k == "R") {
 			return m, nil
 		}
@@ -689,17 +750,45 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 			}
 		}
 		switch k {
+		case "down", "up", "pgdown", "pgup", "home", "end":
+			if m.plan.Continue != nil && m.plan.Continue.Comparison != nil {
+				switch k {
+				case "down":
+					m.planOffset++
+				case "up":
+					m.planOffset = max(0, m.planOffset-1)
+				case "pgdown":
+					m.planOffset += max(1, m.height/2)
+				case "pgup":
+					m.planOffset = max(0, m.planOffset-max(1, m.height/2))
+				case "home":
+					m.planOffset = 0
+				case "end":
+					var body strings.Builder
+					m.viewPlanBody(&body)
+					m.planOffset = strings.Count(ansi.Wrap(body.String(), max(20, m.width), ""), "\n")
+				}
+			}
 		case "esc", "q":
 			m.closeReturnPush()
+			m.planGeneration++
+			m.planning = false
 			m.returnTo = nil
+			m.opts.Conflict = ""
 			m.mode = modeBrowse
 		case "y", "enter":
-			if !m.planning && len(m.plan.Blockers) == 0 { // never the plan being replaced
+			if !m.planning && m.canConfirmPlan() { // never the plan being replaced
 				m.mode = modeApplying
 				return m, m.applyCmd()
 			}
 		case "d":
 			if !m.planning && m.cycleDestination() {
+				return m, m.planCmd()
+			}
+		case "N":
+			if !m.planning && m.plan.ReviewNewSession {
+				m.opts.TargetSession, m.opts.Conflict = "", ""
+				m.opts.NewReplica, m.opts.Fork = true, false
 				return m, m.planCmd()
 			}
 		case "c":
@@ -733,9 +822,6 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		case "x":
 			m.opts.Redact = !m.opts.Redact
 			return m, m.planCmd()
-		case "m":
-			m.opts.Mark = !m.opts.Mark
-			return m, m.planCmd()
 		case "s":
 			m.opts.SyncCode = !m.opts.SyncCode
 			return m, m.planCmd()
@@ -745,11 +831,20 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		case "k":
 			m.opts.StopLocal = !m.opts.StopLocal
 			return m, m.planCmd()
+		case "o":
+			m.opts.Limits.Older = map[bool]string{true: ir.OlderExtract, false: ir.OlderRecent}[m.opts.Limits.Normalize().Older == ir.OlderRecent]
+			return m, m.planCmd()
+		case "b":
+			m.opts.Limits.ContextBudget = nextBudget(m.opts.Limits.ContextBudget)
+			return m, m.planCmd()
 		case "R":
 			m.opts.Conflict = map[bool]string{true: "", false: move.ConflictReplace}[m.opts.Conflict == move.ConflictReplace]
 			return m, m.planCmd()
 		case "B":
-			m.opts.Conflict = map[bool]string{true: "", false: move.ConflictKeepBoth}[m.opts.Conflict == move.ConflictKeepBoth]
+			if m.planning || m.plan.Conflict == "" && m.opts.Conflict == "" {
+				return m, nil
+			}
+			m.opts.Conflict = move.ConflictKeepBoth
 			return m, m.planCmd()
 		}
 	case modeDone:
@@ -805,17 +900,17 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 
 func (m *model) planCmd() tea.Cmd {
 	if m.returnTo != nil && !m.returnTo.Local {
-		return m.returnPushPlanCmd()
+		return m.trackPlan(m.returnPushPlanCmd())
 	}
 	if m.ho.cloud != "" {
 		return m.handoffPlanCmd()
 	}
 	if m.picked != nil {
-		return m.replan()
+		return m.trackPlan(m.replan())
 	}
 	m.planning = true
 	a, inv, e, target, opts := m.deps.App, m.inv, m.sel.item.Entry, m.target, m.opts
-	return func() tea.Msg {
+	return m.trackPlan(func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 		var owned *app.Inventory
@@ -828,7 +923,24 @@ func (m *model) planCmd() tea.Cmd {
 		}
 		p, in, err := a.Plan(ctx, inv, e, target, opts)
 		return planDone{plan: p, input: in, err: err, inv: owned}
+	})
+}
+
+func (m *model) trackPlan(cmd tea.Cmd) tea.Cmd {
+	m.planGeneration++
+	generation := m.planGeneration
+	return func() tea.Msg { return reviewedPlanDone{generation, cmd()} }
+}
+
+func (m *model) canConfirmPlan() bool {
+	p := m.plan
+	if len(p.Blockers) != 0 {
+		return false
 	}
+	if p.Conflict != "" && (p.Kind == move.KindContinue || p.Continue != nil || m.returnTo != nil) {
+		return m.opts.Conflict == move.ConflictKeepBoth && p.Options.Conflict == move.ConflictKeepBoth
+	}
+	return true
 }
 
 func (m *model) applyCmd() tea.Cmd {
@@ -978,7 +1090,11 @@ func (m *model) View() tea.View {
 		case move.KindHop:
 			m.viewHopPlan(&b)
 		default:
-			m.viewPlan(&b)
+			if m.plan.Continue != nil && m.plan.Continue.Comparison != nil {
+				m.viewComparisonPlan(&b)
+			} else {
+				m.viewPlan(&b)
+			}
 		}
 	case modeApplying:
 		switch m.plan.Kind {
@@ -1087,6 +1203,9 @@ func (m *model) viewBrowse(b *strings.Builder) {
 		if strings.HasPrefix(status, "continued ") {
 			status = "previously " + status
 		}
+		if ro := m.deps.App.Role(e); ro != nil && e.Departure != nil {
+			status = ro.Glyph + " " + ro.Word + " · " + ro.Line
+		}
 		switch {
 		case e.Live.State == agent.Live:
 			status = liveSt.Render(status)
@@ -1151,8 +1270,21 @@ func (m *model) viewBrowseDetail(b *strings.Builder, w int) {
 			return
 		}
 		fmt.Fprintf(b, "  %s  %s %s  %s\n", e.Machine, e.AgentName, s.AgentVersion, s.CWD)
-		if e.Movement != nil {
-			fmt.Fprintf(b, "  Movement [%s]: %s\n", e.Movement.Status, truncate(e.Movement.Text, w-25))
+		if ro := m.deps.App.Role(e); ro != nil {
+			fmt.Fprintf(b, "  %s %s · %s\n", ro.Glyph, ro.Word, truncate(ro.Line, w-20))
+			if e.Machine == app.LocalName() {
+				switch {
+				case m.unblockArmed == e.Machine+"\x00"+e.Session.Key.String():
+					fmt.Fprintf(b, "  %s\n", warnSt.Render("Remove the block? If you continue here the copies diverge, and moving back needs a comparison instead of a clean return. Press U again to remove it; any other key keeps it."))
+				case ro.Kind == "blocked":
+					fmt.Fprintf(b, "  %s\n", dim.Render("[U] remove block…"))
+				case ro.Word == "Unblocked":
+					fmt.Fprintf(b, "  %s\n", dim.Render("[U] block again"))
+				}
+			}
+		}
+		if m.guardNote != "" {
+			fmt.Fprintf(b, "  %s\n", dim.Render(m.guardNote))
 		}
 		if len(e.Returns) > 0 {
 			fmt.Fprintf(b, "  [R] move back / show destination (%d choices; same branch)\n", len(e.Returns))
@@ -1182,8 +1314,8 @@ func (m *model) viewBrowseDetail(b *strings.Builder, w int) {
 				switch {
 				case c.Newest:
 					p += " (newest)"
-				case c.Mark != nil:
-					p += " (" + app.MarkWords(*c.Mark) + ")"
+				case c.LeftBehind:
+					p += " (moved on)"
 				default:
 					p += " (older)"
 				}
@@ -1204,6 +1336,30 @@ func (m *model) viewBrowseDetail(b *strings.Builder, w int) {
 }
 
 func (m *model) viewPlan(b *strings.Builder) {
+	m.viewPlanBody(b)
+	m.viewPlanFooter(b)
+}
+
+// Comparisons can exceed a small terminal. Keep the explicit choice and cancel
+// outcome visible while scrolling evidence and repository/options details.
+func (m *model) viewComparisonPlan(b *strings.Builder) {
+	var body, footer strings.Builder
+	m.viewPlanBody(&body)
+	m.viewPlanFooter(&footer)
+	width := max(20, m.width)
+	lines := strings.Split(strings.TrimSuffix(ansi.Wrap(body.String(), width, ""), "\n"), "\n")
+	foot := ansi.Wrap(footer.String(), width, "")
+	if !strings.HasSuffix(foot, "\n") {
+		foot += "\n"
+	}
+	height := max(1, m.height-1-strings.Count(foot, "\n")-1)
+	m.planOffset = min(m.planOffset, max(0, len(lines)-height))
+	b.WriteString(strings.Join(lines[m.planOffset:min(len(lines), m.planOffset+height)], "\n") + "\n")
+	b.WriteString(dim.Render("  ↑↓ / pgup/pgdown scroll review") + "\n")
+	b.WriteString(foot)
+}
+
+func (m *model) viewPlanBody(b *strings.Builder) {
 	p := m.plan
 	verb := "Move"
 	if p.Kind == move.KindContinue {
@@ -1227,6 +1383,9 @@ func (m *model) viewPlan(b *strings.Builder) {
 		b.WriteString("  updating the plan…\n")
 	}
 	fmt.Fprintf(b, "  from  %s  %s (%s)\n  to    %s  %s\n", p.Source.Location, p.Source.CWD, p.Key.Agent, p.Target.Location, p.Target.CWD)
+	if p.Continue != nil {
+		m.viewComparison(b, p.Continue.Comparison)
+	}
 	r := p.Repo
 	switch r.Action {
 	case move.RepoUse:
@@ -1250,8 +1409,16 @@ func (m *model) viewPlan(b *strings.Builder) {
 		fmt.Fprintf(b, "  carries %s\n", c.Report.Summary)
 		fmt.Fprintf(b, "  capacity %s\n", c.Report.ContextSummary())
 		if c.Report.Archive != "" {
-			fmt.Fprintf(b, "  archive %s\n", c.Report.Archive)
+			fmt.Fprintf(b, "  archive %s · %d record(s) preserved\n", c.Report.Archive, c.Report.ArchiveRecords)
 		}
+		if c.Report.OldestIncluded != "" && (c.Report.Summarised > 0 || c.Report.Omitted > 0) {
+			fmt.Fprintf(b, "  context starts at %q\n", c.Report.OldestIncluded)
+		}
+		budget := "auto"
+		if l := m.opts.Limits.Normalize(); l.ContextBudget > 0 {
+			budget = fmt.Sprintf("≤%dk", l.ContextBudget/1000)
+		}
+		fmt.Fprintf(b, "  [b] context budget %s  [o] older history: %s\n", budget, map[string]string{ir.OlderExtract: "extract + recent", ir.OlderRecent: "recent turns only"}[m.opts.Limits.Normalize().Older])
 	} else {
 		fmt.Fprintf(b, "  files %d (%s) · %d path mapping(s)\n", len(p.Files.Files), move.Human(p.Bytes), len(p.Placement.Mappings))
 	}
@@ -1263,12 +1430,6 @@ func (m *model) viewPlan(b *strings.Builder) {
 	}
 	if p.Sync != "" {
 		fmt.Fprintf(b, "  code  %s\n", p.Sync)
-	}
-	switch p.Mark {
-	case move.MarkNow:
-		fmt.Fprintf(b, "  mark  the copy on %s is marked\n", p.Source.Location)
-	case move.MarkWhenStopped:
-		fmt.Fprintf(b, "  mark  the copy on %s is open; marked once it ends\n", p.Source.Location)
 	}
 	for _, w := range p.Warnings {
 		b.WriteString("  " + warnSt.Render("! "+w) + "\n")
@@ -1283,7 +1444,11 @@ func (m *model) viewPlan(b *strings.Builder) {
 		return dim.Render("off")
 	}
 	if m.returnTo != nil {
-		fmt.Fprintf(b, "  Move back account: %s → %s · exact session %s\n", p.Source.ProfileName, p.Target.ProfileName, m.opts.TargetSession)
+		if m.opts.NewReplica && !m.opts.Fork {
+			fmt.Fprintf(b, "  Move back account: %s → %s · new session on the same lineage branch; original preserved\n", p.Source.ProfileName, p.Target.ProfileName)
+		} else {
+			fmt.Fprintf(b, "  Move back account: %s → %s · exact session %s\n", p.Source.ProfileName, p.Target.ProfileName, m.opts.TargetSession)
+		}
 	} else {
 		fmt.Fprintf(b, "  Account: %s → %s [A] change account · [D] desktop app %s\n", p.Source.ProfileName, p.Target.ProfileName, on(m.opts.App))
 	}
@@ -1292,22 +1457,127 @@ func (m *model) viewPlan(b *strings.Builder) {
 	if m.returnTo != nil {
 		agentLabel = "destination agent"
 	}
-	fmt.Fprintf(b, "\n  %s %s  [c] clone %s  [w] worktree %s  [r] remote control %s  [n] movement notice %s  [f] fork %s  [x] redact %s\n",
+	fmt.Fprintf(b, "\n  %s %s  [c] clone %s  [w] worktree %s  [r] remote control %s  [n] protect original %s  [f] fork %s  [x] redact %s\n",
 		agentLabel, target, on(m.opts.Clone), string(m.opts.Worktree), on(m.opts.RemoteControl), on(m.opts.Notify), on(m.opts.Fork), on(m.opts.Redact))
-	fmt.Fprintf(b, "  [m] mark old copy %s  [s] sync code %s  [p] push on %s %s  [k] quit copy open here %s\n",
-		on(m.opts.Mark), on(m.opts.SyncCode), p.Source.Location, on(m.opts.Push), on(m.opts.StopLocal))
+	fmt.Fprintf(b, "  [s] sync code %s  [p] push on %s %s  [k] quit copy open here %s\n",
+		on(m.opts.SyncCode), p.Source.Location, on(m.opts.Push), on(m.opts.StopLocal))
+}
+
+func (m *model) viewPlanFooter(b *strings.Builder) {
+	p := m.plan
 	if p.Conflict != "" || m.opts.Conflict != "" {
-		if m.returnTo != nil {
-			fmt.Fprintf(b, "  both copies changed: [B] preserve both as separate branches %s\n", on(m.opts.Conflict == move.ConflictKeepBoth))
-		} else {
-			fmt.Fprintf(b, "  both copies changed: [R] replace the one here %s  [B] keep both %s\n", on(m.opts.Conflict == move.ConflictReplace), on(m.opts.Conflict == move.ConflictKeepBoth))
+		if m.returnTo == nil && p.Kind != move.KindContinue && p.Continue == nil {
+			fmt.Fprintf(b, "  [R] replace the one here (selected: %t)\n", m.opts.Conflict == move.ConflictReplace)
+		}
+		fmt.Fprintf(b, "  [B] review separate %s session; both originals preserved\n", comparisonLine(p.Agent, 120))
+		if m.opts.Conflict == move.ConflictKeepBoth {
+			b.WriteString("  Separate session selected; destination-only work is not combined.\n")
 		}
 	}
-	if len(p.Blockers) == 0 {
-		b.WriteString(dim.Render("\n  y/enter: go · esc: back\n"))
-	} else {
-		b.WriteString(dim.Render("\n  resolve the ✗ first · esc: back\n"))
+	if m.planning {
+		b.WriteString("  Updating review; wait to confirm · esc: cancel; changes neither original\n")
+		return
 	}
+	if m.canConfirmPlan() {
+		if m.opts.Conflict == move.ConflictKeepBoth {
+			fmt.Fprintf(b, "  enter: confirm separate %s session · esc: cancel; changes neither original\n", comparisonLine(p.Agent, 120))
+		} else {
+			b.WriteString(dim.Render("\n  y/enter: go · esc: cancel; changes neither original\n"))
+		}
+	} else {
+		if p.ReviewNewSession {
+			b.WriteString("\n  This does not mean you changed accounts. Native compatibility across these profiles is unverified.\n  [N] review a new session on the same lineage branch; both originals stay.\n")
+		}
+		b.WriteString(dim.Render("\n  resolve the ✗ first · esc: cancel; changes neither original\n"))
+	}
+}
+
+func (m *model) viewComparison(b *strings.Builder, c *move.Comparison) {
+	if c == nil {
+		return
+	}
+	if c.Verified {
+		fmt.Fprintf(b, "  Conversation: %s · %d shared revisions\n", comparisonLine(c.Reason, 160), c.SharedRevisions)
+	} else {
+		fmt.Fprintf(b, "  Comparison unavailable: %s\n", comparisonLine(c.Reason, 160))
+	}
+	for _, side := range []struct {
+		label string
+		data  move.ComparisonSide
+	}{{"source", c.Source}, {"destination", c.Destination}} {
+		s, id := side.data, side.data.Identity
+		name := id.AgentName
+		if name == "" {
+			name = string(id.Agent)
+		}
+		profile := id.ProfileName
+		if profile == "" {
+			profile = id.Profile
+		}
+		if profile == "" {
+			profile = "Default account"
+		}
+		machine := id.Machine
+		if machine == "" {
+			machine = id.MachineID
+		}
+		fmt.Fprintf(b, "  %s: %s · %s on %s · %q\n    %s\n", side.label, comparisonLine(name, 120), comparisonLine(profile, 120), comparisonLine(machine, 120), comparisonLine(id.Title, 120), comparisonLine(id.Key.String(), 0))
+		if id.MachineID != "" && id.MachineID != machine {
+			fmt.Fprintf(b, "    endpoint %s\n", comparisonLine(id.MachineID, 0))
+		}
+		if !c.Verified || !s.ExclusiveKnown {
+			fmt.Fprintf(b, "    unique work unknown · %s\n", comparisonLine(s.Reason, 160))
+			if s.PreviewBasis != "saved-history" {
+				continue
+			}
+		} else {
+			fmt.Fprintf(b, "    unique: %d revisions · %d records · %d messages (%d user, %d assistant) · %d tools · %d other\n", s.Revisions, s.Counts.Nodes, s.Counts.Messages, s.Counts.UserMessages, s.Counts.AssistantMessages, s.Counts.Tools, s.Counts.Other)
+		}
+		if s.PreviewBasis == "saved-history" {
+			b.WriteString("    Recent saved messages; relationship unverified, not proof of unique work\n")
+		}
+		shown, shortened := 0, s.Truncated || s.PreviewOmitted > 0
+		for _, sample := range s.Preview {
+			if sample.Role != "user" && sample.Role != "assistant" || sample.Text == "" {
+				continue
+			}
+			if shown == 2 {
+				shortened = true
+				break
+			}
+			text := comparisonLine(sample.Text, max(24, min(120, m.width-18)))
+			shortened = shortened || sample.Truncated || text != comparisonLine(sample.Text, 0)
+			fmt.Fprintf(b, "    %s: %s\n", sample.Role, text)
+			shown++
+		}
+		if shortened || s.Counts.Messages > shown {
+			if s.PreviewBasis == "saved-history" {
+				b.WriteString("    saved history excerpts shortened or omitted; unique work remains unknown\n")
+			} else {
+				b.WriteString("    excerpts shortened or omitted; counts are exact\n")
+			}
+		}
+	}
+}
+
+func comparisonLine(s string, limit int) string {
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return ' '
+		}
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, s)
+	s = strings.Join(strings.Fields(s), " ")
+	if limit > 0 {
+		runes := []rune(s)
+		if len(runes) > limit {
+			s = string(runes[:limit-1]) + "…"
+		}
+	}
+	return s
 }
 
 func (m *model) viewDone(b *strings.Builder) {
@@ -1333,19 +1603,11 @@ func (m *model) viewDone(b *strings.Builder) {
 	if res.SyncNote != "" {
 		fmt.Fprintf(b, "  code: %s\n", res.SyncNote)
 	}
-	switch res.Mark {
-	case "done":
-		fmt.Fprintf(b, "  the copy on %s is marked\n", p.Source.Location)
-	case "pending":
-		fmt.Fprintf(b, "  the copy on %s is marked once it ends\n", p.Source.Location)
-	case "failed":
-		b.WriteString("  " + warnSt.Render("! could not mark the copy on "+p.Source.Location+": "+res.MarkError) + "\n")
-	}
 	if m.returnTo != nil && !m.returnTo.Local {
 		fmt.Fprintf(b, "\n  Prepared on %s; run the following command there.\n", m.returnTo.Machine)
 	}
 	if res.Notice != "" {
-		fmt.Fprintf(b, "\n  Movement notice: %s\n", res.Notice)
+		fmt.Fprintf(b, "\n  The original: %s\n", res.Notice)
 	}
 	b.WriteString("\n  Continue it:\n\n")
 	family := launch.DefaultShell()
@@ -1458,4 +1720,15 @@ func (m *model) saveFamilyGrouping() {
 	if err := config.Save(*c); err != nil {
 		m.err = err
 	}
+}
+
+// nextBudget cycles the plan's context budget through the settings' choices.
+func nextBudget(cur int) int {
+	choices := config.HistoryContextBudgets
+	for i, v := range choices {
+		if v == cur {
+			return choices[(i+1)%len(choices)]
+		}
+	}
+	return choices[0]
 }

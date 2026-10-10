@@ -1,8 +1,8 @@
 import { test,expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
-import { row,details,action } from './helpers';
+import { row,agentRow,details,action } from './helpers';
 
-test('real service resolves hidden original and reviews a safe separate return when native append is blocked',async({page},info)=>{
+test('real service resolves hidden original and appends return work to that exact session',async({page},info)=>{
  test.setTimeout(120000);
  const reset=await page.request.post('/reset?movement=1');expect(reset.ok()).toBeTruthy();
  await page.goto('/');await expect(page.getByRole('heading',{name:'All sessions',exact:true})).toBeVisible();
@@ -13,17 +13,17 @@ test('real service resolves hidden original and reviews a safe separate return w
  await action(page,'move',/^Continue with Codex/);
  await page.locator('#sheet').getByRole('button',{name:/Continue in Codex/}).click();
  await expect(page.getByRole('heading',{name:/is prepared for Codex/})).toBeVisible({timeout:30000});
- await expect(page.getByText('Movement notice',{exact:true})).toBeVisible();
+ await expect(page.getByText('The original',{exact:true})).toBeVisible();
  await page.getByRole('button',{name:'Back to sessions',exact:true}).click();
- await row(page,'Find the codeword (from Claude Code)').click();
+ await agentRow(page,'Find the codeword','Codex').click();
  // Rows are usable before return-candidate verification finishes.
  await expect(details(page).locator('#act-primary')).toContainText('Open existing session in Claude Code',{timeout:30000});
  const converted=await page.evaluate(async()=>{
   const {selected}=await import('/core.js');const e=selected();return {machine:e.machine,key:e.key,returns:e.returns};
  });
  expect(converted.returns).toEqual(expect.arrayContaining([expect.objectContaining({key:source.key,status:'same'})]));
- // The original is collapsed into the branch's displayed Codex copy.
- await expect(row(page,'Find the codeword')).toHaveCount(0);
+ // The original is collapsed into the branch's displayed Codex copy (same title).
+ await expect(row(page,'Find the codeword')).toHaveCount(1);await expect(agentRow(page,'Find the codeword','Codex')).toHaveCount(1);
  const resolve=await page.request.post('/call',{data:{m:'ResolveEntry',args:[source.machine,source.key]}});
  const original=(await resolve.json()).result;
  expect(original.key).toBe(source.key);
@@ -31,21 +31,22 @@ test('real service resolves hidden original and reviews a safe separate return w
  await details(page).getByRole('button',{name:/Copies & history/}).click();
  await details(page).getByRole('button',{name:'Show copy',exact:true}).first().click();
  await expect(details(page).getByRole('heading',{name:'Find the codeword',exact:true})).toBeVisible();
- await expect(details(page).getByLabel('Movement notice')).toContainText('prepared');
- await expect(details(page).locator('#act-primary')).toHaveText('Show destination');
+ await expect(details(page).getByLabel('Moved out',{exact:true})).toContainText('no new work there yet');
+ await expect(details(page).locator('#act-primary')).toHaveText('Open moved copy');
  await expect(details(page).locator('#act-primary')).toBeEnabled();
- await expect(details(page).getByLabel('Movement notice')).not.toContainText('Last checked');
+ await expect(details(page).getByLabel('Moved out',{exact:true})).not.toContainText('Last checked');
  await expect(details(page).locator('.skel')).toHaveCount(0);
  await page.screenshot({path:info.outputPath('real-source-prepared-hidden-copy.png'),fullPage:true});
  const separatePlan=page.waitForResponse(r=>r.url().endsWith('/call') && r.request().postDataJSON().m==='Plan');
- await details(page).getByLabel('Movement notice').getByRole('button',{name:'Continue separately here…',exact:true}).click();
+ await details(page).getByLabel('Moved out',{exact:true}).getByRole('button',{name:'Fork here instead…',exact:true}).click();
  const separate=(await (await separatePlan).json()).result;
  await info.attach('separate-plan.json',{body:JSON.stringify(separate,null,2),contentType:'application/json'});
  await page.screenshot({path:info.outputPath('real-separate-plan.png'),fullPage:true});
  expect.soft(separate.blockers || [],'same-agent fork plan must preserve original and permit a new session').toEqual([]);
  await page.locator('#sheet').getByRole('button',{name:'Cancel',exact:true}).click();
  await details(page).locator('#act-primary').click();
- await expect(details(page).getByRole('heading',{name:'Find the codeword (from Claude Code)',exact:true})).toBeVisible();
+ await expect(details(page).getByRole('heading',{name:'Find the codeword',exact:true})).toBeVisible();
+ await expect.poll(()=>page.evaluate(async()=>{const {selected}=await import('/core.js');return selected()?.key;})).toBe(converted.key);
  // Same/behind opens the exact prior native session, not the branch representative.
  const resume=page.waitForRequest(r=>r.url().endsWith('/call') && r.postDataJSON().m==='ResumeSession');
  await details(page).locator('#act-primary').click();
@@ -53,7 +54,7 @@ test('real service resolves hidden original and reviews a safe separate return w
  const work=await page.request.post('/movement-work',{params:{machine:converted.machine,key:converted.key}});
  expect(work.ok(),await work.text()).toBeTruthy();
  await page.locator('#btn-refresh').click();
- await row(page,'Find the codeword (from Claude Code)').click();
+ await agentRow(page,'Find the codeword','Codex').click();
  await expect(details(page).locator('#act-primary')).toContainText('Move back to Claude Code');
  const choice=details(page).getByLabel('Return destinations').getByRole('button');
  const dimensions=await choice.evaluate(el=>({height:el.clientHeight,content:el.scrollHeight}));
@@ -64,38 +65,43 @@ test('real service resolves hidden original and reviews a safe separate return w
  const plan=(await (await planned).json()).result;
  await info.attach('return-plan.json',{body:JSON.stringify(plan,null,2),contentType:'application/json'});
  await page.screenshot({path:info.outputPath('real-move-back-plan.png'),fullPage:true});
- expect(plan.blockers).toEqual([expect.stringContaining('cannot append to a native replica under an unverified account binding')]);
+ expect(plan.blockers || []).toEqual([]);
+ expect(plan.reviewNewSession || false).toBe(false);
  await expect(page.locator('#sheet')).toContainText(source.key);
- await expect(page.locator('#sheet #go')).toBeDisabled();
- await page.locator('#sheet').getByText(/Cannot append to a native replica/).scrollIntoViewIfNeeded();
- await page.screenshot({path:info.outputPath('real-move-back-blocker.png'),fullPage:true});
+ await expect(page.locator('#sheet #go')).toBeEnabled();
  const originalBytes=await readFile(original.path);
- const replanned=page.waitForResponse(r=>r.url().endsWith('/call') && r.request().postDataJSON().m==='Plan');
- await page.locator('#sheet').getByRole('button',{name:'Review keeping both as separate sessions',exact:true}).click();
- const response=await replanned;
- expect(response.request().postDataJSON().args[3]).toMatchObject({targetSession:'',fork:true,newReplica:true,conflict:'keep-both'});
- const fork=(await response.json()).result;
- await info.attach('return-fork-plan.json',{body:JSON.stringify(fork,null,2),contentType:'application/json'});
- expect(fork.blockers || []).toEqual([]);
- await expect(page.locator('#sheet')).toContainText('New separate branch; the original session will be preserved');
- await expect(page.locator('#sheet #go')).toBeEnabled({timeout:30000});
- await page.screenshot({path:info.outputPath('real-move-back-fork-plan.png'),fullPage:true});
+ await page.screenshot({path:info.outputPath('real-move-back-original-plan.png'),fullPage:true});
  await page.locator('#sheet #go').click();
  await expect(page.getByRole('heading',{name:/is prepared for Claude Code/})).toBeVisible({timeout:30000});
- await page.screenshot({path:info.outputPath('real-move-back-fork-done.png'),fullPage:true});
- expect(await readFile(original.path)).toEqual(originalBytes);
+ const after=await readFile(original.path);
+ expect(after.subarray(0,originalBytes.length)).toEqual(originalBytes);
+ expect(after.subarray(originalBytes.length).toString()).toContain('Fixture return checkpoint completed.');
+ expect(after.subarray(originalBytes.length).toString()).not.toContain('PLUM-7');
  await page.getByRole('button',{name:'Back to sessions',exact:true}).click();
  const scan=await page.request.post('/call',{data:{m:'Scan',args:[]}});
  const entries=(await scan.json()).result.groups.flatMap(g=>g.entries);
  const returned=[];
- for(const e of entries.filter(e=>e.agent==='claude' && e.key!==source.key && e.path)) {
+ for(const e of entries.filter(e=>e.agent==='claude' && e.key===source.key && e.path)) {
   if((await readFile(e.path,'utf8')).includes('Fixture return checkpoint completed.')) returned.push(e);
  }
  expect(returned).toHaveLength(1);
- expect(returned[0].returns || []).toEqual([]);
- await row(page,returned[0].title).click();
- await expect(details(page).getByLabel('Return destinations')).toHaveCount(0);
+ expect(returned[0].key).toBe(source.key);
+ const originalGraph=JSON.parse(await readFile(original.path+'.hopsesh.json','utf8'));
+ const returnedGraph=JSON.parse(await readFile(returned[0].path+'.hopsesh.json','utf8'));
+ expect(returnedGraph.family).toBe(originalGraph.family);
+ expect(returnedGraph.branch).toBe(originalGraph.branch);
+ expect(returnedGraph.hops).toHaveLength(2);
+ expect(returnedGraph.hops.every(h=>!h.fork)).toBe(true);
+ expect(returned[0].returns).toEqual(expect.arrayContaining([expect.objectContaining({key:converted.key})]));
+ // The Codex copy stays pinned in the list (it was shown last); the returned original is
+ // its newest copy, reached through Copies & history.
+ await agentRow(page,returned[0].title,'Codex').click();
+ const copies=details(page).getByRole('button',{name:/Copies & history/});
+ if((await copies.getAttribute('aria-expanded'))!=='true') await copies.click();
+ await details(page).locator('#sec-copies span').filter({hasText:'· newest'}).getByRole('button',{name:'Show copy',exact:true}).click();
+ await expect.poll(()=>page.evaluate(async()=>{const {selected}=await import('/core.js');return selected()?.key;})).toBe(source.key);
+ await expect(details(page).getByLabel('Return destinations')).toBeVisible();
  await expect(details(page).locator('.skel')).toHaveCount(0);
  await expect(page.locator('#toast')).not.toHaveClass(/show/);
- await page.screenshot({path:info.outputPath('real-returned-separate-branch.png'),fullPage:true});
+ await page.screenshot({path:info.outputPath('real-returned-same-branch.png'),fullPage:true});
 });

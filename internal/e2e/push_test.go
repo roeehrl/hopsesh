@@ -103,9 +103,9 @@ func dialProcess(bin string, other machineHome) func(context.Context, config.Hos
 }
 
 // A push sends a Claude Code session from this machine to hopsesh on another, which
-// installs it with its own module; this machine marks its copy, records the lineage in its
-// own journal, and one undo here undoes both sides. A machine that does not receive
-// refuses.
+// installs it with its own module; this machine records the lineage (and so where its copy
+// went) in its own journal, and one undo here undoes both sides. A machine that does not
+// receive refuses.
 func TestPushToPeer(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds hopsesh")
@@ -134,7 +134,7 @@ func TestPushToPeer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	p, err := a.StartPush(ctx, inv, e, cfg.Hosts[0], "", move.Options{TargetDir: box.repo, Mark: true})
+	p, err := a.StartPush(ctx, inv, e, cfg.Hosts[0], "", move.Options{TargetDir: box.repo})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,14 +152,11 @@ func TestPushToPeer(t *testing.T) {
 	if err != nil || !strings.Contains(string(b), `"cwd":"`+jsonText(box.repo)) || strings.Contains(string(b), `"cwd":"`+jsonText(here.repo)) {
 		t.Fatalf("the session is on box with box's paths: %v\n%s", err, b)
 	}
-	if res.Result.Mark != "done" {
-		t.Fatalf("mark: %+v", res.Result)
-	}
 	inv.Close()
 	inv = a.Scan(ctx, app.ScanOptions{Hosts: []string{"here"}})
 	e, _ = inv.Find(app.ParseRef(sid))
-	if e.Session.Mark == nil || e.Session.Mark.Location != "box" || e.Lineage == nil || len(e.Lineage.Hops) != 1 {
-		t.Fatalf("the copy here is marked and carries the lineage: %+v %+v", e.Session.Mark, e.Lineage)
+	if e.Session.LegacyLabel != nil || e.Lineage == nil || len(e.Lineage.Hops) != 1 || e.Status() != "moved to box" {
+		t.Fatalf("the copy here carries the lineage, which says where it went: %q %+v", e.Status(), e.Lineage)
 	}
 
 	// One undo here undoes both machines.
@@ -171,12 +168,12 @@ func TestPushToPeer(t *testing.T) {
 	}
 	inv.Close()
 	inv = a.Scan(ctx, app.ScanOptions{Hosts: []string{"here"}})
-	if e, _ = inv.Find(app.ParseRef(sid)); e.Session.Mark != nil {
-		t.Fatalf("undo must remove the mark here: %+v", e.Session.Mark)
+	if e, _ = inv.Find(app.ParseRef(sid)); e.Status() != "ended" {
+		t.Fatalf("after undo the copy here is no longer moved on: %q", e.Status())
 	}
 
 	// Continue in Codex on box.
-	p, err = a.StartPush(ctx, inv, e, cfg.Hosts[0], "codex", move.Options{TargetDir: box.repo, Mark: true})
+	p, err = a.StartPush(ctx, inv, e, cfg.Hosts[0], "codex", move.Options{TargetDir: box.repo})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +261,7 @@ func TestAccountProfilePeerDestinations(t *testing.T) {
 				t.Fatal(err)
 			}
 			target := profiles[id]
-			push, err := a.StartPush(ctx, inv, e, cfg.Hosts[0], agent.ID(id), move.Options{TargetDir: box.repo, TargetProfile: target.ID, Mark: true})
+			push, err := a.StartPush(ctx, inv, e, cfg.Hosts[0], agent.ID(id), move.Options{TargetDir: box.repo, TargetProfile: target.ID})
 			if err != nil {
 				t.Fatal(err)
 			}

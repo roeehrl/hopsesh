@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/roeehrl/hopsesh/sdk/ir"
 )
 
 // Schema is the configuration format. Files in another format are refused, never read:
@@ -268,11 +269,12 @@ type Config struct {
 	// UpdateCheck is "on" or "off" once the person has answered whether the app may
 	// look for new releases once a day ("" = not asked yet).
 	UpdateCheck string `toml:"update_check,omitempty"`
-	// Round trips. MarkMoved and SyncCode default to on (nil); PushSource to off.
-	MovementNotices *bool `toml:"movement_notices,omitempty"` // show movement notices (default on)
-	MarkMoved       *bool `toml:"mark_moved,omitempty"`       // mark the copy left behind
-	SyncCode        *bool `toml:"sync_code,omitempty"`        // fetch and fast-forward the checkout here
-	PushSource      bool  `toml:"push_source,omitempty"`      // push unpushed commits on the source first
+	// Original is how the copy left behind by a move is protected until the session moves
+	// back: "block" (the default, ""), "advise" or "off". SyncCode defaults to on (nil),
+	// PushSource to off.
+	Original   string `toml:"original,omitempty"`
+	SyncCode   *bool  `toml:"sync_code,omitempty"`   // fetch and fast-forward the checkout here
+	PushSource bool   `toml:"push_source,omitempty"` // push unpushed commits on the source first
 	// SkillPrompt remembers the answer to "let your agents use hopsesh?": "" (not asked),
 	// "declined", or the skill revision last offered.
 	SkillPrompt string `toml:"skill_prompt,omitempty"`
@@ -296,8 +298,63 @@ type Config struct {
 	List List `toml:"list,omitempty"`
 	// Previews shows the end of a session's conversation in the app's inspector (default
 	// on; off for people who share their screen).
-	Previews *bool  `toml:"previews,omitempty"`
-	Hosts    []Host `toml:"hosts"`
+	Previews *bool `toml:"previews,omitempty"`
+	// History is how much history a transfer carries and the resources it may use.
+	History History `toml:"history,omitempty"`
+	Hosts   []Host  `toml:"hosts"`
+}
+
+// History limits. Zero means automatic or the default; see ir.Limits. Canonical history
+// is never truncated: reaching a resource limit stops the transfer with the setting
+// named, and only the receiving context keeps a labeled subset (the rest stays in the
+// portable archive).
+type History struct {
+	// ContextBudget optionally lowers the receiving context (0: automatic, from the
+	// destination model). It can never raise what the model allows.
+	ContextBudget int `toml:"context_budget,omitempty" json:"contextBudget"`
+	// Older is how history older than the recent turns is carried: "extract" (default)
+	// or "recent" (recent turns only).
+	Older string `toml:"older,omitempty" json:"older"`
+	// Advanced resource budgets, in MiB.
+	ReadMemoryMB int `toml:"read_memory_mb,omitempty" json:"readMemoryMB"`
+	RecordMB     int `toml:"record_mb,omitempty" json:"recordMB"`
+	ArchiveMB    int `toml:"archive_mb,omitempty" json:"archiveMB"`
+	NativeFileMB int `toml:"native_file_mb,omitempty" json:"nativeFileMB"`
+}
+
+// History choices offered by the app (any value within the ceilings is valid in the file).
+var (
+	HistoryContextBudgets = []int{0, 16_000, 32_000, 64_000, 128_000, 256_000}
+	HistoryReadMemoryMBs  = []int{256, 512, 1024, 2048, 4096}
+	HistoryRecordMBs      = []int{32, 64, 128, 256}
+	HistoryArchiveMBs     = []int{256, 512, 1024, 2048, 4096, 8192}
+	HistoryNativeFileMBs  = []int{1024, 2048, 4096, 8192}
+)
+
+// Limits is the operation policy for these settings, with defaults and ceilings applied.
+func (h History) Limits() ir.Limits {
+	return h.raw().Normalize()
+}
+
+func (h History) raw() ir.Limits {
+	return ir.Limits{
+		ReadBytes: int64(h.ReadMemoryMB) << 20, RecordBytes: int64(h.RecordMB) << 20,
+		ArchiveBytes: int64(h.ArchiveMB) << 20, NativeFileBytes: int64(h.NativeFileMB) << 20,
+		ContextBudget: h.ContextBudget, Older: h.Older,
+	}
+}
+
+func (h History) check() error {
+	if h.ReadMemoryMB < 0 || h.RecordMB < 0 || h.ArchiveMB < 0 || h.NativeFileMB < 0 {
+		return fmt.Errorf("history: sizes must be positive (or left out for the default)")
+	}
+	if err := h.raw().Check(); err != nil {
+		return fmt.Errorf("history: %w", err)
+	}
+	if l := h.Limits(); h.RecordMB > 0 && l.RecordBytes > l.ReadBytes {
+		return fmt.Errorf("history.record_mb (%d) cannot exceed history.read_memory_mb", h.RecordMB)
+	}
+	return nil
 }
 
 // Defaults returns the configuration used when no file exists.
@@ -442,9 +499,6 @@ func (c *Config) UpsertHost(h Host) {
 // AgentEnabled reports whether an agent module is in use.
 func (c Config) AgentEnabled(id string) bool { return !c.Agents[id].Disabled }
 
-// MarkMovedOn reports whether copies left behind are marked (default on).
-func (c Config) MarkMovedOn() bool { return c.MarkMoved == nil || *c.MarkMoved }
-
 // PreviewsOn reports whether the app shows conversation previews (default on).
 func (c Config) PreviewsOn() bool { return c.Previews == nil || *c.Previews }
 
@@ -557,6 +611,14 @@ var fontName = regexp.MustCompile(`^[\p{L}\p{N} ._,'"-]{0,120}$`)
 func (c Config) Check() error {
 	if err := CheckAppearance(c.Appearance); err != nil {
 		return err
+	}
+	if err := c.History.check(); err != nil {
+		return err
+	}
+	switch c.Original {
+	case "", OriginalBlock, OriginalAdvise, OriginalOff:
+	default:
+		return fmt.Errorf("original is %q: use %q, %q or %q", c.Original, OriginalBlock, OriginalAdvise, OriginalOff)
 	}
 	if err := c.Desktop.Check(); err != nil {
 		return err
@@ -705,5 +767,21 @@ func oneOfEach(name string, vals, allowed []string) error {
 // UsesPassword reports whether the machine logs in with a password.
 func (h Host) UsesPassword() bool { return h.Auth == "password" }
 
-// MovementNoticesOn controls source-session notices independently of lineage.
-func (c Config) MovementNoticesOn() bool { return c.MovementNotices == nil || *c.MovementNotices }
+// Protection choices for the copy left behind (config "original").
+const (
+	OriginalBlock  = "block"
+	OriginalAdvise = "advise"
+	OriginalOff    = "off"
+)
+
+// OriginalGuard is how the copy left behind is protected: block (default), advise or off.
+func (c Config) OriginalGuard() string {
+	if c.Original == "" {
+		return OriginalBlock
+	}
+	return c.Original
+}
+
+// MovementNoticesOn reports whether moves record a notice for the copy left behind (the
+// block or the advice needs one); independent of lineage, which is always kept.
+func (c Config) MovementNoticesOn() bool { return c.OriginalGuard() != OriginalOff }

@@ -6,7 +6,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 )
 
@@ -14,7 +13,7 @@ import (
 type ActivityDTO struct {
 	PendingReceipt bool     `json:"pendingReceipt"`
 	ID             string   `json:"id"`
-	Kind           string   `json:"kind"` // move | continue | push | mark | fetch
+	Kind           string   `json:"kind"` // move | continue | push | fetch | handoff | hop | …
 	Title          string   `json:"title"`
 	When           string   `json:"when"` // RFC 3339
 	Changes        int      `json:"changes"`
@@ -46,30 +45,21 @@ type HandoffActivityDTO struct {
 	Noun       string `json:"noun"` // what the cloud calls its sessions ("task")
 }
 
-// OwedDTO is a mark waiting for a copy left behind to end.
-type OwedDTO struct {
-	Title    string `json:"title"`
-	Location string `json:"location"`
-	Mark     string `json:"mark"` // "moved to studio", "continued in Codex on studio"
-	Since    string `json:"since"`
-}
-
 // ActivityListDTO is the Activity screen.
 type ActivityListDTO struct {
 	Items []ActivityDTO `json:"items"`
-	Owed  []OwedDTO     `json:"owed"`
 	// Waiting are fetches whose copy the agent's own command has not written yet.
 	Waiting []BroughtDTO `json:"waiting"`
 }
 
-// Activity lists what hopsesh did, newest first, and the marks still owed.
+// Activity lists what hopsesh did, newest first.
 func (a *App) Activity() (*ActivityListDTO, error) {
 	core := a.snapshot()
 	acts, err := core.Activities()
 	if err != nil {
 		return nil, err
 	}
-	out := &ActivityListDTO{Items: []ActivityDTO{}, Owed: []OwedDTO{}, Waiting: []BroughtDTO{}}
+	out := &ActivityListDTO{Items: []ActivityDTO{}, Waiting: []BroughtDTO{}}
 	fetches := map[string]BroughtDTO{}
 	if fs, err := core.Fetches(); err == nil {
 		for _, f := range fs {
@@ -109,13 +99,6 @@ func (a *App) Activity() (*ActivityListDTO, error) {
 			}
 		}
 		out.Items = append(out.Items, d)
-	}
-	owed, err := core.OwedMarks()
-	if err != nil {
-		return nil, err
-	}
-	for _, p := range owed {
-		out.Owed = append(out.Owed, OwedDTO{Title: p.Title, Location: p.Location, Mark: app.MarkWords(p.Mark), Since: p.Time.Format(time.RFC3339)})
 	}
 	return out, nil
 }

@@ -1,7 +1,9 @@
-// The Settings screen, in tabs: General, Agents, Terminal, Skill, Command line, Updates.
+// The Settings screen, in tabs: General, Desktop presence, Agents, History, Terminal, Skill,
+// Command line, Updates.
 import { api, on, h, fill, view, state, screen, go, loading, toast, fail, dialog, agentBadge, sys, cliHow, icon, ask, count, current, loadError, navigationID, errText } from "./core.js";
 import { desktopSettings } from "./desktop-settings.js";
 import { running } from "./term.js";
+import { withCLI, loadHookHealth } from "./guard.js";
 
 const SKILL_TEXT = {
   absent: ["Not installed", "st-ended"],
@@ -20,7 +22,7 @@ const CLI_TEXT = {
   foreign: ["Points to a different program", "st-warn"],
 };
 const CAPS = {
-  live: "sees open sessions", stop: "quits open sessions", mark: "marks copies left behind", account: "knows its account",
+  live: "sees open sessions", stop: "quits open sessions", account: "knows its account",
   sanitize: "moves between accounts", read: "continues in other agents", write: "takes sessions from other agents",
   "native-replay": "replays commands natively", integrate: "can use the hopsesh skill", fork: "can fork", "remote-control": "remote control",
   app: "desktop app", import: "has its own importer", "post-install": "registers moved sessions",
@@ -67,7 +69,7 @@ function save(patch) {
   // never briefly reveal a preview while SaveSettings/Info are still in flight.
   if (patch.previews !== undefined) state.info.previews = patch.previews;
   Object.assign(s, patch);
-  return run(() => api("SaveSettings", Object.assign({ appearance: s.appearance, layout: s.layout, movementNotices: s.movementNotices, markMoved: s.markMoved, syncCode: s.syncCode, pushSource: s.pushSource, updateCheck: s.updateCheck || "off", appIcons: s.appIcons, previews: s.previews }, patch)), "Saved");
+  return run(() => api("SaveSettings", Object.assign({ appearance: s.appearance, layout: s.layout, original: s.original, syncCode: s.syncCode, pushSource: s.pushSource, updateCheck: s.updateCheck || "off", appIcons: s.appIcons, previews: s.previews }, patch)), "Saved");
 }
 
 function toggle(key, label, desc) {
@@ -83,8 +85,8 @@ function general() {
       h("div", { class: "set-row" }, title("Clone layout", "Where a repository goes inside the repos folder."),
         h("select", { "aria-label": "Clone layout", onchange: (e) => save({ layout: e.target.value }) },
           h("option", { value: "flat", selected: s.layout === "flat" }, "<repos>/<name>"), h("option", { value: "ghq", selected: s.layout === "ghq" }, "<repos>/<host>/<owner>/<name>"))),
-      toggle("movementNotices", "Record movement notices", "Keep a durable notice of where work was prepared or continued. Each move can override this default."),
-      toggle("markMoved", "Mark the copy left behind", "Its title says where the work went (“↪ moved to …”), so it isn't resumed by mistake."),
+      h("div", { class: "set-row" }, title("When a session moves, the original", "Blocked: the copy left behind refuses new prompts until you move the session back, so moving back stays a clean return (recommended). Warned: you can still continue it, but the copies may diverge. Moving back always clears this; you can also remove it from one original."),
+        seg("When a session moves, the original", s.original || "block", [["block", "Is blocked"], ["advise", "Shows a warning"], ["off", "Is left alone"]], (v) => save({ original: v }))),
       toggle("syncCode", "Bring the code along", "Fetch the session's commit (from the other machine if it isn't pushed) and fast-forward a clean checkout."),
       toggle("pushSource", "Push unpushed commits on the other machine first", "Off: commits are fetched straight from the other machine.")),
     noticeSetup(),
@@ -222,7 +224,7 @@ function terminal() {
 function skill() {
   const sk = s.skill || {}, copies = sk.copies || [], rules = sk.rules || [];
   const addRules = h("input", { type: "checkbox" });
-  const install = (force, withRules, done) => run(() => api("InstallSkill", force, withRules), done);
+  const install = (force, withRules, done) => run(() => withCLI(() => api("InstallSkill", force, withRules)), done);
   const acts = [];
   if (sk.state === "absent") acts.push(h("button", { class: "btn primary", onclick: () => install(false, addRules.checked, "Installed the hopsesh skill") }, "Install the skill"));
   if (sk.state === "stale" || sk.state === "broken") acts.push(h("button", { class: "btn primary", onclick: () => install(false, addRules.checked, "Updated the hopsesh skill") }, sk.state === "broken" ? "Repair" : "Update"));
@@ -308,7 +310,60 @@ async function preview() {
   } catch (e) { fail(e); }
 }
 
-const TABS = [["general", "General", general], ["desktop", "Desktop presence", desktop], ["agents", "Agents", agents], ["terminal", "Terminal", terminal], ["skill", "Skill", skill], ["cli", "Command line", cli], ["updates", "Updates", updates]];
+// history is Settings → History: how much conversation a transfer carries into the
+// destination's context, and the resources reading and preserving history may use.
+let hs = null, historyError = "";
+const kib = (n) => n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
+const mib = (n) => n >= 1024 ? `${n / 1024} GB` : `${n} MB`;
+async function setHistory(patch) {
+  if (saving) return;
+  saving = true;
+  const next = Object.assign({ contextBudget: hs.contextBudget, older: hs.older, readMemoryMB: hs.readMemoryMB, recordMB: hs.recordMB, archiveMB: hs.archiveMB, nativeFileMB: hs.nativeFileMB }, patch);
+  hs = Object.assign({}, hs, patch);
+  render();
+  try { await api("SetHistorySettings", next); toast("Saved"); } catch (e) { fail(e); }
+  hs = await api("HistorySettings").catch(() => hs);
+  saving = false;
+  if (current === "settings") render();
+}
+function sizeRow(key, label, desc, choices, defBytes) {
+  const def = defBytes / (1 << 20);
+  const value = hs[key] || def;
+  return h("div", { class: "set-row" }, title(label, desc),
+    h("select", { "aria-label": label, onchange: (e) => setHistory({ [key]: Number(e.target.value) }) },
+      [...new Set([...choices, value])].sort((a, b) => a - b).map((n) => h("option", { value: n, selected: value === n }, mib(n) + (n === def ? " (default)" : "")))));
+}
+function history() {
+  if (historyError) return [loadError(historyError, loadHistory)];
+  if (!hs) return [h("div", { class: "loading", role: "status" }, "Reading the history settings…")];
+  const d = hs.defaults;
+  return [
+    h("span", { class: "muted", style: "font-size:12.5px" }, "When a session continues in another agent, hopsesh gives the destination a bounded working context and keeps the complete conversation in a portable archive the agent can consult."),
+    card(h("span", { class: "sec-h" }, "Handoff context"),
+      h("div", { class: "set-row" }, title("Context budget", "Automatic uses up to 30% of the destination model's context, less what the session already holds. A smaller budget leaves the agent more room to work; it can never exceed what the model allows."),
+        h("select", { "aria-label": "Context budget", onchange: (e) => setHistory({ contextBudget: Number(e.target.value) }) },
+          hs.contextBudgets.map((n) => h("option", { value: n, selected: (hs.contextBudget || 0) === n }, n ? `Up to ${kib(n)} (estimate)` : "Automatic (recommended)")))),
+      h("div", { class: "set-row" }, title("Older conversation", "What happens to history that does not fit. Either way, nothing is lost: omitted history stays in the portable archive, and the agent is told it was left out."),
+        seg("Older conversation", hs.older || "extract", [["extract", "Extract + recent turns"], ["recent", "Recent turns only"]], (v) => setHistory({ older: v }))),
+      h("span", { class: "muted", style: "font-size:12px" }, (hs.older === "recent"
+        ? "Recent turns only: the destination gets the newest complete turns and a note saying how many older entries were left out."
+        : "Extract: the latest native summary or earlier briefing, recent requests and the last agent reply, condensed and labeled as an extract (not an AI summary), then the recent turns.")
+        + " Sizes are conservative upper estimates, not exact token counts.")),
+    card(h("span", { class: "sec-h" }, "Resources (advanced)"),
+      h("span", { class: "muted", style: "font-size:12px" }, "Limits that keep a very large session from exhausting memory or disk. When one is reached, the transfer stops before anything is written, names the limit, and leaves the source and any existing destination unchanged. History is never silently truncated."),
+      sizeRow("readMemoryMB", "Reading memory", "Conversation a native transcript may hold in memory while hopsesh reads it.", hs.readMemoryMBs, d.readBytes),
+      sizeRow("recordMB", "Largest record", "One native record (a single message or tool result). Cannot exceed reading memory.", hs.recordMBs, d.recordBytes),
+      sizeRow("archiveMB", "Portable archive", "The preserved archive, including earlier transfers. Also the disk it may use per session.", hs.archiveMBs, d.archiveBytes),
+      sizeRow("nativeFileMB", "Native file checks", "Whole native files read to verify forks, recover an interrupted write, or check a staged copy.", hs.nativeFileMBs, d.nativeFileBytes)),
+  ];
+}
+async function loadHistory() {
+  historyError = ""; hs = null;
+  try { hs = await api("HistorySettings"); } catch (e) { historyError = errText(e); }
+  if (current === "settings" && tab === "history") render();
+}
+
+const TABS = [["general", "General", general], ["desktop", "Desktop presence", desktop], ["agents", "Agents", agents], ["history", "History", history], ["terminal", "Terminal", terminal], ["skill", "Skill", skill], ["cli", "Command line", cli], ["updates", "Updates", updates]];
 
 function render() {
   if (current !== "settings") return;
@@ -347,7 +402,7 @@ async function load() {
   ds = desktop.status === "fulfilled" ? desktop.value : null;
   desktopError = desktop.status === "rejected" ? desktop.reason : null;
   render();
-  await loadTerminal();
+  await Promise.all([loadTerminal(), loadHistory()]);
 }
 
 screen("settings", async (which) => {
@@ -358,13 +413,18 @@ screen("settings", async (which) => {
 
 function noticeSetup() {
   const hooks = s.noticeHooks || [];
-  return card(h("span", {class:"sec-h"}, "Movement notice delivery"),
-    h("span", {class:"muted"}, "Hopsesh keeps movement notices. Install local hooks to show them when an agent session starts. Installation does not prove delivery; the agent's hook trust settings still apply."),
-    s.noticeHooksError ? h("span", {class:"warn"}, s.noticeHooksError) : null,
+  const off = s.original === "off";
+  const trustWords = (t) => !t ? "" : t.state === "trusted" ? " · trusted by the agent" : t.state === "needs-review" ? " · waiting for your approval in the agent" : t.state === "disabled" ? " · turned off in the agent" : t.state === "missing" ? " · not seen by the agent" : " · trust not verified";
+  return card(h("span", {class:"sec-h"}, "Protection hooks"),
+    h("span", {class:"muted"}, "Blocking and warnings work through a small hook each agent runs before a prompt. The hooks run the hopsesh command. Codex runs a new hook only after you approve it in Codex (/hooks); hopsesh checks and tells you, and never approves hooks for you."),
+    s.noticeHooksError && s.cliReady ? h("span", {class:"warn"}, s.noticeHooksError) : null,
+    !s.cliReady ? h("span", {class:"warn"}, "The hopsesh command is not installed; installing a hook installs it first.") : null,
     ...hooks.map(hook => h("div", {class:"set-row"},
-      title(`${hook.agent} · ${hook.profileLabel || hook.profile || "Default account"}`, `${hook.installed ? "Installed" : "Not installed"}${!hook.enabled ? " · notices disabled" : ""}${hook.reason ? " · " + hook.reason : ""}${hook.evidence ? " · " + hook.evidence : ""}`),
-      hook.path ? h("span", {class:"mono",style:"font-size:11px;overflow-wrap:anywhere"}, hook.path) : null,
-      hook.installed ? h("button", {class:"btn",onclick:()=>run(()=>api("RemoveNoticeHooks",hook.agent,hook.profile),"Notice hook removed")}, "Remove hook")
-      : h("button", {class:"btn",disabled:!hook.supported || !s.movementNotices,onclick:()=>run(()=>api("InstallNoticeHooks",hook.agent,hook.profile),"Notice hook installed; delivery depends on agent settings")}, "Install hook"))),
-    h("button", {class:"btn",disabled:!s.movementNotices,onclick:()=>run(()=>api("InstallNoticeHooks","",""),"Local notice hooks installed; delivery depends on agent settings")}, "Set up local notice hooks"));
+      title(`${hook.agent} · ${hook.profileLabel || hook.profile || "Default account"}`, `${hook.installed ? "Installed" : "Not installed"}${hook.installed ? trustWords(hook.trust) : ""}${hook.reason ? " · " + hook.reason : ""}`),
+      hook.trust && hook.trust.state !== "trusted" && hook.trust.fix ? h("span", {class:"muted",style:"font-size:12px"}, hook.trust.fix) : null,
+      hook.installed ? h("button", {class:"btn",onclick:()=>run(()=>api("RemoveNoticeHooks",hook.agent,hook.profile),"Hook removed")}, "Remove hook")
+      : h("button", {class:"btn",disabled:!hook.supported || off,onclick:()=>run(()=>withCLI(()=>api("InstallNoticeHooks",hook.agent,hook.profile)),"Hook installed")}, "Install hook"))),
+    h("div", {style:"display:flex;gap:8px;flex-wrap:wrap"},
+      h("button", {class:"btn",disabled:off,onclick:()=>run(()=>withCLI(()=>api("InstallNoticeHooks","","")),"Hooks installed")}, "Install all hooks"),
+      h("button", {class:"btn",onclick:()=>run(()=>loadHookHealth(true))}, "Check again")));
 }

@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { fresh, row, menu, action, details } from "./helpers";
+import { fresh, row, agentRow, roleRow, menu, action, details } from "./helpers";
 
 test.beforeEach(async ({ page }) => fresh(page));
 
@@ -26,7 +26,7 @@ test("continue a Claude Code session in Codex, see where it has been, and undo",
   await expect(page.locator('.continuation-hint')).toContainText('in Codex to start a turn');
 
   await page.getByRole("button", { name: /Back to sessions/ }).click();
-  const moved = row(page, "Find the codeword (from Claude Code)");
+  const moved = agentRow(page, "Find the codeword", "Codex"); // the copy keeps its title
   await expect(moved).toBeVisible({ timeout: 30_000 });
   await expect(moved).not.toContainText("[hopsesh]");
   await moved.click();
@@ -45,7 +45,7 @@ test("continue a Claude Code session in Codex, see where it has been, and undo",
   await expect(page.locator(".line-item", { hasText: "Find the codeword → Codex" }).getByText("Undone")).toBeVisible();
 
   await menu(page, "sessions");
-  await expect(row(page, "Find the codeword (from Claude Code)")).toHaveCount(0, { timeout: 30_000 });
+  await expect(agentRow(page, "Find the codeword", "Codex")).toHaveCount(0, { timeout: 30_000 });
 });
 
 
@@ -60,7 +60,7 @@ test("a return with no new work opens the exact original without another transfe
   await page.locator("#sheet").getByRole("button", { name: /Continue in Codex/ }).click();
   await expect(page.getByRole("heading", { name: /is prepared for Codex/ })).toBeVisible({ timeout: 30_000 });
   await page.getByRole("button", { name: /Back to sessions/ }).click();
-  await row(page, "Find the codeword (from Claude Code)").click();
+  await agentRow(page, "Find the codeword", "Codex").click();
   // Return candidates arrive with verified lineage enrichment, after early rows.
   await expect(details(page).getByRole("button", {name:/^Open existing session in Claude Code/}).first()).toBeVisible();
   const plans: string[] = [];
@@ -126,13 +126,16 @@ test("bounded recovery keeps the original and explains capacity and archive", as
   await expect(sheet.getByRole("heading", {name: /Continue.*Claude Code/})).toBeVisible();
   await expect(sheet).toContainText("Working context:");
   await expect(sheet).toContainText("Portable history preserved separately");
-  await expect(sheet).toContainText("The original remains available");
+  await expect(sheet).toContainText("The original is kept unchanged");
   await expect(sheet.getByRole("checkbox", { name: /Replay shell commands|own importer/ })).toHaveCount(0);
   await sheet.getByRole("button", {name: /Continue in Claude Code/}).click();
   await expect(page.getByRole("heading", {name: /is prepared for Claude Code/})).toBeVisible();
   await expect(page.getByText("Claude Code session written", {exact: true})).toBeVisible();
   await page.getByRole("button", {name: /Back to sessions/}).click();
-  await expect(row(page, "Find the codeword (from Claude Code)")).toBeVisible();
+  // The bounded copy keeps the title and says it continues the original, kept as its copy.
+  const copy = roleRow(page, "Find the codeword", "Continuation");
+  await expect(copy).toBeVisible();
+  await expect(copy).toContainText("also Claude Code here");
 });
 
 test("oversized note is bounded and disclosed before apply", async ({ page }) => {
@@ -158,5 +161,5 @@ test("a recorded context error offers bounded recovery in session details", asyn
   const details = page.getByRole('complementary', { name: 'Session details' });
   await expect(details).toContainText('The agent reported a context limit');
   await details.getByRole('button', { name: 'Create bounded continuation…', exact: true }).click();
-  await expect(page.locator('#sheet')).toContainText('The original remains available');
+  await expect(page.locator('#sheet')).toContainText('The original is kept unchanged');
 });

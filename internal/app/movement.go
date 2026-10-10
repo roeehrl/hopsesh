@@ -26,6 +26,7 @@ type ReturnCandidate struct {
 	AgentName    string   `json:"agentName"`
 	Profile      string   `json:"profile"`
 	ProfileLabel string   `json:"profileLabel"`
+	Title        string   `json:"title,omitempty"`
 	Key          string   `json:"key"`
 	Status       string   `json:"status"`
 	Reason       string   `json:"reason"`
@@ -33,17 +34,19 @@ type ReturnCandidate struct {
 }
 
 type MovementNotice struct {
-	ProfileLabel string    `json:"profileLabel,omitempty"`
-	Operation    string    `json:"operation"`
-	Status       string    `json:"status"`
-	Text         string    `json:"text"`
-	Machine      string    `json:"machine"`
-	Agent        agent.ID  `json:"agent"`
-	AgentName    string    `json:"agentName"`
-	Key          string    `json:"key"`
-	Profile      string    `json:"profile"`
-	CheckedAt    time.Time `json:"checkedAt"`
-	Delivery     string    `json:"delivery"`
+	ProfileLabel string   `json:"profileLabel,omitempty"`
+	Operation    string   `json:"operation"`
+	Status       string   `json:"status"`
+	Text         string   `json:"text"`
+	Machine      string   `json:"machine"`
+	Agent        agent.ID `json:"agent"`
+	AgentName    string   `json:"agentName"`
+	// Cloud is the destination cloud's title, when the session went to a cloud.
+	Cloud     string    `json:"cloud,omitempty"`
+	Key       string    `json:"key"`
+	Profile   string    `json:"profile"`
+	CheckedAt time.Time `json:"checkedAt"`
+	Delivery  string    `json:"delivery"`
 }
 
 type movementObservation struct {
@@ -85,15 +88,21 @@ func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
 			if m == nil || m.host == nil {
 				continue
 			}
-			r, id, ok := g.ForBranch(e.Lineage.Branch).FindEndpoint(e.Session.Key, m.host.Facts.Endpoint)
+			in, installed := m.InstallProfile(e.Agent, e.Session.Key.Profile)
+			branch := g.ForBranch(e.Lineage.Branch)
+			r, id, ok := branch.FindBinding(e.Session.Key, m.host.Facts.Endpoint, in.BindingID())
+			if !ok {
+				r, id, ok = branch.FindEndpoint(e.Session.Key, m.host.Facts.Endpoint)
+			}
 			if !ok {
 				continue
 			}
 			ids[i] = id
 			observation := movementObservation{entry: e}
-			in, ok := m.InstallProfile(e.Agent, e.Session.Key.Profile)
 			mod, enabled := a.Module(e.Agent)
-			if !ok || !enabled || in.BindingID() != r.Binding {
+			writer, writable := mod.(agent.Writer)
+			portable := writable && writer.Profile(in).PortableAppend
+			if !installed || !enabled || in.BindingID() != r.Binding && !portable {
 				observed[id] = observation
 				continue
 			}
@@ -115,18 +124,46 @@ func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
 							observation.agentAnchors[anchor] = true
 						}
 					}
-					observation.state, err = g.Observe(id, &seg)
+					if in.BindingID() != r.Binding {
+						_, observation.state, err = branch.ObserveBinding(lineage.Replica{Key: r.Key, Endpoint: r.Endpoint, Binding: in.BindingID(), Location: r.Location, Line: r.Line}, &seg)
+						if err == nil {
+							err = g.Merge(branch)
+						}
+						// Observation is ephemeral; route ancestry remains the committed graph.
+					} else {
+						observation.state, err = g.Observe(id, &seg)
+					}
 					observation.valid = err == nil
 					observation.checked = e.ObservedAt
 				}
 			}
 			observed[id] = observation
+			// Historical bindings name the same native file. They share the fresh
+			// observation for presentation, without rewriting their authorship.
+			for _, old := range g.Replicas {
+				if old.Key == r.Key && old.Endpoint == r.Endpoint && old.Line == r.Line {
+					observed[old.ID] = observation
+				}
+			}
 		}
 		for i, id := range ids {
 			e := &inv.Entries[i]
 			e.Returns = nil
 			e.Movement = nil
+			e.Departure, e.Arrival = nil, nil
+			if hop, ok := g.Departed(id); ok {
+				e.Departure = a.describeDeparture(g, id, hop, observed)
+			} else {
+				e.Arrival = a.arrival(g, id)
+			}
+			seen := map[string]bool{}
 			for _, r := range g.ReturnReplicas(id) {
+				physical := r.Endpoint + "\x00" + r.Key.String()
+				current := g.Replica(id)
+				if seen[physical] || r.Endpoint == current.Endpoint && r.Key == current.Key {
+					continue
+				}
+				seen[physical] = true
 				if retiredReturn(g, r.ID, observed) {
 					continue
 				}
@@ -142,6 +179,10 @@ func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
 						c.Local = current.Local
 					}
 					c.ProfileLabel = profileLabel(o.entry.Profile)
+					c.Title = o.entry.Session.Title
+					if o.entry.Live.Name != "" {
+						c.Title = o.entry.Live.Name
+					}
 					if o.valid && observed[id].valid {
 						s, t := g.Covered(observed[id].state.Heads), g.Covered(o.state.Heads)
 						switch {
@@ -156,11 +197,11 @@ func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
 							c.Reason = "Review and add the missing conversation"
 						default:
 							c.Status = "diverged"
-							c.Reason = "Both copies contain independent work; preserve separate branches"
+							c.Reason = "Conversation histories differ; review the messages before returning"
 						}
 						if o.entry.Live.State == agent.Live && c.Status == "available" {
 							c.Status = "live"
-							c.Reason = "Destination is open; review before returning"
+							c.Reason = "Exit the original conversation before adding new work; its saved history is preserved"
 						}
 					}
 				} else if m != nil && m.Status == StatusOK && m.host != nil && m.host.Facts.Endpoint == r.Endpoint {
@@ -207,8 +248,17 @@ func (a *App) movementNotice(g *lineage.Manifest, id lineage.ReplicaID, observed
 	if !ok {
 		return nil
 	}
+	return a.describeDeparture(g, id, hop, observed)
+}
+
+// describeDeparture says where a hop away from replica id went and what is known of the
+// work there (prepared, continued, diverged or forked), from lineage and observation.
+func (a *App) describeDeparture(g *lineage.Manifest, id lineage.ReplicaID, hop lineage.Hop, observed map[lineage.ReplicaID]movementObservation) *MovementNotice {
 	dst := g.Replica(hop.To)
 	n := &MovementNotice{Operation: hop.ID, Status: "prepared", Machine: dst.Location, Agent: dst.Key.Agent, AgentName: a.agentName(dst.Key.Agent), Key: dst.Key.String(), Profile: dst.Key.Profile, Delivery: "pending"}
+	if _, cl, ok := a.cloudModule(dst.Location); ok {
+		n.Cloud = cl.Title
+	}
 	target := observed[hop.To]
 	if target.entry != nil {
 		n.Machine = target.entry.Machine
@@ -236,7 +286,7 @@ func (a *App) movementNotice(g *lineage.Manifest, id lineage.ReplicaID, observed
 	case "continued":
 		n.Text = "This branch continued in " + where + ". This copy may lack later work."
 	case "diverged":
-		n.Text = "Both this copy and the copy in " + where + " contain independent work. Review before moving."
+		n.Text = "This conversation and the copy in " + where + " contain different work. Compare the histories before moving."
 	case "forked":
 		n.Text = "A separate fork was prepared in " + where + ". This original branch remains available."
 		if continued {
@@ -333,6 +383,7 @@ func (a *App) SessionMovementNotice(ctx context.Context, id agent.ID, profile, s
 type MovementNoticeDetails struct {
 	Key       agent.SessionKey
 	Text      string
+	Summary   string // where the session went, without the advice (for a block reason)
 	Operation string
 	Status    string
 }
@@ -409,6 +460,7 @@ func (a *App) MovementNoticeDetailsForPath(ctx context.Context, id agent.ID, pro
 		return details, nil
 	}
 	details.Text, details.Operation, details.Status = hookNoticeText(n), n.Operation, n.Status
+	details.Summary = strings.TrimSuffix(strings.TrimPrefix(hookNoticeText(n), "Hopsesh status: "), " Check the destination before continuing; continuing here may create separate work.")
 	return details, nil
 }
 
