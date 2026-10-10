@@ -434,9 +434,15 @@ func (r *run) renderComparison(c *move.Comparison) {
 		}
 		if !c.Verified || !s.ExclusiveKnown {
 			r.printf("    unique work unknown · %s\n", comparisonLine(s.Reason, 240))
-			continue
+			if s.PreviewBasis != "saved-history" {
+				continue
+			}
+		} else {
+			r.printf("    unique: %d revisions · %d records · %d messages (%d user, %d assistant) · %d tools · %d other\n", s.Revisions, s.Counts.Nodes, s.Counts.Messages, s.Counts.UserMessages, s.Counts.AssistantMessages, s.Counts.Tools, s.Counts.Other)
 		}
-		r.printf("    unique: %d revisions · %d records · %d messages (%d user, %d assistant) · %d tools · %d other\n", s.Revisions, s.Counts.Nodes, s.Counts.Messages, s.Counts.UserMessages, s.Counts.AssistantMessages, s.Counts.Tools, s.Counts.Other)
+		if s.PreviewBasis == "saved-history" {
+			r.printf("    Recent saved messages; relationship unverified, not proof of unique work\n")
+		}
 		shown, shortened := 0, s.Truncated || s.PreviewOmitted > 0
 		for _, sample := range s.Preview {
 			if sample.Role != "user" && sample.Role != "assistant" || sample.Text == "" {
@@ -452,7 +458,11 @@ func (r *run) renderComparison(c *move.Comparison) {
 			shown++
 		}
 		if shortened || s.Counts.Messages > shown {
-			r.printf("    excerpts shortened or omitted; counts above are exact\n")
+			if s.PreviewBasis == "saved-history" {
+				r.printf("    saved history excerpts shortened or omitted; unique work remains unknown\n")
+			} else {
+				r.printf("    excerpts shortened or omitted; counts above are exact\n")
+			}
 		}
 	}
 }

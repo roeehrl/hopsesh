@@ -116,10 +116,14 @@ Conversation conflict review: inspect `docs/return-conflict-review.md`,
 `internal/e2e/movement_comparison_test.go`. Claude's last-prompt is a checkpoint,
 not necessarily the final saved response: follow only unambiguous descendants written
 after it, preserve explicit later rewinds, and reject ambiguous native branches inside
-the Claude module. Shutdown/checkpoint metadata alone must not invent new authored work.
+the Claude module. Compaction replay ancestry uses preceding physical UUID occurrences;
+identical authored messages are deduplicated, while changed replay content and forward
+references remain rejected. Shutdown/checkpoint metadata alone must not invent new authored work.
 Never grant legacy incomplete receipts coverage of omitted messages. Comparison evidence
 uses fresh causal coverage and bounded ordinary-message/tool-name excerpts; private
 reasoning and raw tool input/output stay hidden. Unavailable evidence is not divergence.
+An old receipt that rejects newly exposed historical records can show bounded saved
+messages explicitly labeled relationship-unverified, without exclusive counts or coverage.
 GUI/TUI/CLI must identify both histories, explain that a difference does not establish
 when work was written, and require explicit review then confirmation for a separate
 conversation. Cancellation preserves both originals; notices are not ownership locks.

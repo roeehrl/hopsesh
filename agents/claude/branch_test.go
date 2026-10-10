@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"testing"
@@ -326,5 +328,50 @@ func TestAmbiguousCheckpointRejectedByModuleConsumers(t *testing.T) {
 	after, _ := fh.Get(s.Path)
 	if !bytes.Equal(body, after) {
 		t.Fatal("failed module operation changed the transcript")
+	}
+}
+
+// Native compaction can replay preserved messages under the same UUIDs and
+// reparent their head to a compact summary. The boundary's logical parent names
+// the pre-boundary tail, not the replayed tail that follows it on disk.
+func TestActiveBranchCompactionReplayOccurrences(t *testing.T) {
+	u := branchMessage("user", "root", "", "question")
+	head := branchMessage("assistant", "head", "root", "saved response")
+	tail := branchMessage("user", "tail", "head", "follow up")
+	boundary := branchRecord("system", "boundary", "")
+	boundary["parentUuid"], boundary["logicalParentUuid"] = nil, "tail"
+	summary := branchMessage("user", "summary", "boundary", "compact summary")
+	summary["isCompactSummary"] = true
+	replayHead := branchMessage("assistant", "head", "summary", "saved response")
+	final := branchMessage("assistant", "final", "tail", "final response")
+	for _, rewrite := range []bool{false, true} {
+		t.Run(fmt.Sprint("rewritten=", rewrite), func(t *testing.T) {
+			replay := maps.Clone(replayHead)
+			if rewrite {
+				replay["message"] = map[string]any{"role": "assistant", "content": "rewritten response"}
+			}
+			recs, _, err := readRecords(bytes.NewReader(branchJSON(t, u, head, tail, boundary, summary, replay, tail, final, branchCheckpoint("final"))))
+			if err != nil {
+				t.Fatal(err)
+			}
+			indexes, err := activeBranch(recs)
+			if rewrite {
+				if !errors.Is(err, agent.ErrDiverged) {
+					t.Fatalf("rewritten UUID accepted: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, i := range indexes {
+				got = append(got, recs[i].UUID)
+			}
+			want := []string{"root", "boundary", "summary", "head", "tail", "final"}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("replay branch=%v want=%v", got, want)
+			}
+		})
 	}
 }

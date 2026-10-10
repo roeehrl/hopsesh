@@ -1,6 +1,7 @@
 package move
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -304,5 +305,24 @@ func TestComparisonPreviewBoundsPreserveCounts(t *testing.T) {
 	text, truncated := comparisonText("safe\x1b\x00\u202E"+strings.Repeat("t", 200), comparisonToolLimit)
 	if !truncated || utf8.RuneCountInString(text) != comparisonToolLimit || strings.ContainsAny(text, "\x1b\x00\u202E") {
 		t.Fatal("tool-name cap or control filtering failed")
+	}
+}
+
+func TestComparisonSavedHistoryDoesNotGrantCoverage(t *testing.T) {
+	f := newComparisonFixture(t, []ir.Node{comparisonMessage("incoming", "incoming saved response", ir.Agent)}, []ir.Node{comparisonMessage("historical", "previously omitted saved response", ir.Agent)}, false)
+	f.target.Nodes = append(f.target.Nodes, ir.Node{Kind: ir.KindReasoning, Text: "private reasoning sentinel", Reasoning: &ir.Reasoning{Opaque: true}}, ir.Node{Kind: ir.KindToolResult, Result: &ir.ToolResult{Output: "private result sentinel"}})
+	before := f.p.manifest.Encode()
+	got := BuildComparison(f.p, f.in, f.c, f.source, f.target, lineage.State{}, agent.ErrDiverged)
+	for _, side := range []ComparisonSide{got.Source, got.Destination} {
+		if got.Verified || got.Classification != "unavailable" || side.ExclusiveKnown || side.Revisions != 0 || side.Counts != (ComparisonCounts{}) || side.PreviewBasis != "saved-history" || len(side.Preview) == 0 {
+			t.Fatalf("saved excerpts became causal proof: %+v", got)
+		}
+	}
+	body, _ := json.Marshal(got)
+	if !strings.Contains(string(body), "previously omitted saved response") || strings.Contains(string(body), "private reasoning sentinel") || strings.Contains(string(body), "private result sentinel") {
+		t.Fatalf("saved history privacy: %s", body)
+	}
+	if !bytes.Equal(before, f.p.manifest.Encode()) {
+		t.Fatal("preview changed lineage")
 	}
 }

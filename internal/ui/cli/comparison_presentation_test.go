@@ -84,3 +84,21 @@ func TestCLIExplicitSeparatePlanNamesConfirmedOutcome(t *testing.T) {
 		t.Fatal(out.String())
 	}
 }
+
+func TestCLIComparisonUnverifiedSavedHistoryIsInspectable(t *testing.T) {
+	c := cliComparisonFixture()
+	c.Verified = false
+	c.Source.PreviewBasis, c.Destination.PreviewBasis = "saved-history", "saved-history"
+	var out bytes.Buffer
+	(&run{out: &out}).renderComparison(c)
+	for _, want := range []string{"Recent saved messages; relationship unverified", "user: Source request", "assistant: Destination independently fixed the bug", "unique work remains unknown"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("missing %q: %s", want, out.String())
+		}
+	}
+	for _, absent := range []string{"unique:", "counts above are exact", "8 shared"} {
+		if strings.Contains(out.String(), absent) {
+			t.Fatalf("saved excerpts grant causal proof: %s", out.String())
+		}
+	}
+}

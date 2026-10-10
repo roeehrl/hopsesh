@@ -141,6 +141,14 @@ func TestMovementConversationConflictReview(t *testing.T) {
 // A checkpoint emitted before the completed response must not truncate a future
 // handoff. Ending Claude afterward changes the physical cursor, not its coverage.
 func TestMovementStaleClaudeCheckpointReturn(t *testing.T) {
+	testMovementCheckpointReturn(t, false)
+}
+
+func TestMovementCompactionReplayReturn(t *testing.T) {
+	testMovementCheckpointReturn(t, true)
+}
+
+func testMovementCheckpointReturn(t *testing.T, replay bool) {
 	a, b, in := movementInput(t, "claude", "codex")
 	ctx := context.Background()
 	env := move.Env{StateDir: t.TempDir()}
@@ -168,17 +176,47 @@ func TestMovementStaleClaudeCheckpointReturn(t *testing.T) {
 				map[string]any{"type": "last-prompt", "leafUuid": "checkpoint-attachment", "lastPrompt": "What is the codeword in notes.txt?", "sessionId": sid})...)
 		}
 	}
+	sharedCount, shift := 5, 0
+	if replay {
+		// Claude replays preserved UUIDs with a reparented head. Its logical
+		// boundary parent names the earlier physical tail, not the replayed tail.
+		originalRecords := append([]byte(nil), transcript...)
+		transcript = append(transcript, checkpointRecords(t,
+			map[string]any{"type": "system", "uuid": "compact-boundary", "parentUuid": nil, "logicalParentUuid": "a2", "sessionId": sid},
+			map[string]any{"type": "user", "uuid": "compact-summary", "parentUuid": "compact-boundary", "isCompactSummary": true, "sessionId": sid, "message": map[string]any{"role": "user", "content": "A saved summary."}})...)
+		for _, line := range bytes.Split(originalRecords, []byte("\n")) {
+			if len(line) == 0 {
+				continue
+			}
+			var record map[string]any
+			if err := json.Unmarshal(line, &record); err != nil {
+				t.Fatal(err)
+			}
+			if record["type"] == "last-prompt" {
+				continue
+			}
+			if record["uuid"] == "u1" {
+				record["parentUuid"] = "compact-summary"
+			}
+			transcript = append(transcript, checkpointRecords(t, record)...)
+		}
+		transcript = append(transcript, checkpointRecords(t, map[string]any{"type": "last-prompt", "leafUuid": "a2", "sessionId": sid})...)
+		sharedCount, shift = 6, 1
+	}
 	if err := os.WriteFile(in.Session.Path, transcript, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	in.Session = findRouteSession(t, a, in.Source.Module, in.Source.Install, in.Session.Key)
 	before := readAll(t, a, in.Source.Module, in.Source.Install, in.Session)
 	wantKinds := []ir.Kind{ir.KindMessage, ir.KindReasoning, ir.KindToolCall, ir.KindToolResult, ir.KindMessage}
+	if replay {
+		wantKinds = append([]ir.Kind{ir.KindCompaction}, wantKinds...)
+	}
 	var kinds []ir.Kind
 	for _, n := range before.Nodes {
 		kinds = append(kinds, n.Kind)
 	}
-	if !reflect.DeepEqual(kinds, wantKinds) || before.Nodes[3].Result == nil || before.Nodes[3].Result.Output != "The codeword is PLUM-7." || !strings.Contains(before.Nodes[4].Text, "PLUM-7 (from") || before.Nodes[4].Native.Anchor != "a2/0" {
+	if !reflect.DeepEqual(kinds, wantKinds) || before.Nodes[3+shift].Result == nil || before.Nodes[3+shift].Result.Output != "The codeword is PLUM-7." || !strings.Contains(before.Nodes[4+shift].Text, "PLUM-7 (from") || before.Nodes[4+shift].Native.Anchor != "a2/0" {
 		t.Fatalf("stale checkpoint omitted the completed assistant/tool response: %+v", before.Nodes)
 	}
 	if before.Cursor.Offset != int64(len(transcript)) {
@@ -199,7 +237,7 @@ func TestMovementStaleClaudeCheckpointReturn(t *testing.T) {
 	source, sourceOK := g.LatestState(hops[0].From)
 	target, targetOK := g.LatestState(hops[0].To)
 	shared := g.Covered(source.Heads)
-	if !sourceOK || !targetOK || len(shared) != 5 || !reflect.DeepEqual(shared, g.Covered(target.Heads)) {
+	if !sourceOK || !targetOK || len(shared) != sharedCount || !reflect.DeepEqual(shared, g.Covered(target.Heads)) {
 		t.Fatal("handoff did not preserve all five logical revisions, including the final response")
 	}
 	afterHandoff := readAll(t, a, in.Source.Module, in.Source.Install, original)
@@ -242,7 +280,7 @@ func TestMovementStaleClaudeCheckpointReturn(t *testing.T) {
 			t.Fatalf("return did not pin the fresh physical destination cursor: %+v; want %+v", p.ExpectedDestination, cursor)
 		}
 		c := p.Continue.Comparison
-		if c == nil || !c.Verified || c.Classification != "source-only" || c.SharedRevisions != 5 {
+		if c == nil || !c.Verified || c.Classification != "source-only" || c.SharedRevisions != sharedCount {
 			t.Fatalf("checkpoint return has inconsistent shared coverage: %+v", c)
 		}
 		assertComparisonSide(t, c.Source, back.Source, incoming, "codex", returnedWork)
@@ -303,7 +341,7 @@ func TestMovementStaleClaudeCheckpointReturn(t *testing.T) {
 	}
 	finalSource, okSource := finalGraph.LatestState(finalHops[1].From)
 	finalTarget, okTarget := finalGraph.LatestState(finalHops[1].To)
-	if !okSource || !okTarget || len(finalGraph.Covered(finalTarget.Heads)) != 8 || !reflect.DeepEqual(finalGraph.Covered(finalSource.Heads), finalGraph.Covered(finalTarget.Heads)) {
+	if !okSource || !okTarget || len(finalGraph.Covered(finalTarget.Heads)) != sharedCount+3 || !reflect.DeepEqual(finalGraph.Covered(finalSource.Heads), finalGraph.Covered(finalTarget.Heads)) {
 		t.Fatal("return coverage must contain exactly five shared and three Codex revisions")
 	}
 }

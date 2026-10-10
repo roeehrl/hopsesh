@@ -23,11 +23,12 @@ function sideCard(side, heading) {
     side.exclusiveKnown ? h("div",{class:"comparison-counts"},h("strong",{},`${count(counts.messages || 0,'message')} · ${count(counts.tools || 0,'tool call')}`),
       h("span",{class:"muted"},`${count(counts.userMessages || 0,'message')} from you · ${count(counts.assistantMessages || 0,'agent reply','agent replies')}${counts.other?` · ${counts.other} other records (contents hidden)`:''}`))
       : h("p",{class:"notice"},side.reason || "Changes could not be verified; counts are unavailable."),
+    side.previewBasis === "saved-history" ? h("p",{class:"muted"},"Recent saved messages · relationship unverified. These excerpts are not proof of unique work."):null,
     recent.length?h("ol",{class:"comparison-excerpts"},recent.map(x=>excerpt(x,identity.agentName || 'Agent')))
       : side.exclusiveKnown?h("p",{class:"muted"},counts.messages ? "Message text is unavailable in the bounded preview." : "No ordinary messages unique to this conversation."):null,
-    messages.length>3 || tools.length ? h("details",{class:"comparison-more"},h("summary",{},"View more changed messages and tool activity"),
+    messages.length>3 || tools.length ? h("details",{class:"comparison-more"},h("summary",{},side.exclusiveKnown?"View more changed messages and tool activity":"View more saved messages and tool activity"),
       h("ol",{class:"comparison-excerpts"},preview.map(x=>excerpt(x,identity.agentName || 'Agent')))):null,
-    side.truncated || side.previewOmitted ? h("p",{class:"muted comparison-limit"},`Bounded preview${side.previewOmitted?` · ${side.previewOmitted} ordinary message/tool excerpts omitted`:''}. Counts include all verified changes; long messages are shortened.`):null,
+    side.truncated || side.previewOmitted ? h("p",{class:"muted comparison-limit"},`Bounded preview${side.previewOmitted?` · ${side.previewOmitted} ordinary message/tool excerpts omitted`:''}. ${side.exclusiveKnown?'Counts include all verified changes; long messages are shortened.':'History excerpts are shortened; exclusive counts are unavailable.'}`):null,
     h("details",{class:"comparison-receipt"},h("summary",{},"Session identity"),h("code",{},key(side))));
 }
 

@@ -2,11 +2,13 @@ package claude
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -168,18 +170,28 @@ func (r chained) parentUUID() string {
 // checkpoint selecting an earlier leaf remains an explicit rewind.
 func activeBranch(recs []chained) ([]int, error) {
 	byUUID := map[string]int{}
+	occurrences := map[string][]int{}
 	leaf := -1
 	for i, r := range recs {
 		if isChain(r.Type) && r.UUID != "" {
 			byUUID[r.UUID] = i
+			occurrences[r.UUID] = append(occurrences[r.UUID], i)
 			if !r.IsSidechain && (r.Type == "user" || r.Type == "assistant") {
 				leaf = i
 			}
 		}
 	}
+	before := func(uuid string, index int) (int, bool) {
+		list := occurrences[uuid]
+		pos := sort.SearchInts(list, index) - 1
+		if pos < 0 {
+			return 0, false
+		}
+		return list[pos], true
+	}
 	for i := len(recs) - 1; i >= 0; i-- {
 		if recs[i].Type == "last-prompt" && recs[i].LeafUUID != "" {
-			j, ok := byUUID[recs[i].LeafUUID]
+			j, ok := before(recs[i].LeafUUID, i)
 			if !ok || j >= i || recs[j].IsSidechain {
 				return nil, fmt.Errorf("%w: Claude checkpoint has no preceding main-branch leaf", agent.ErrDiverged)
 			}
@@ -209,16 +221,28 @@ func activeBranch(recs []chained) ([]int, error) {
 		}
 	}
 	var out []int
-	seen := map[int]bool{}
+	seen := map[string]int{}
 	for i := leaf; i >= 0; {
-		if seen[i] || recs[i].IsSidechain {
+		if recs[i].IsSidechain {
 			return nil, fmt.Errorf("%w: Claude branch has cyclic or sidechain ancestry", agent.ErrDiverged)
 		}
-		seen[i] = true
-		out = append(out, i)
 		r := recs[i]
-		j, ok := byUUID[r.parentUUID()]
+		if previous, duplicate := seen[r.UUID]; duplicate {
+			if !sameAuthoredRecord(recs[previous], r) {
+				return nil, fmt.Errorf("%w: Claude replay changed a native record", agent.ErrDiverged)
+			}
+		} else {
+			seen[r.UUID] = i
+			out = append(out, i)
+		}
+		// Compaction replays earlier UUIDs with reparented preserved messages.
+		// Resolve the parent occurrence preceding this physical record. A global
+		// latest-UUID lookup can loop from a boundary into its own retained tail.
+		j, ok := before(r.parentUUID(), i)
 		if !ok {
+			if _, forward := byUUID[r.parentUUID()]; forward {
+				return nil, fmt.Errorf("%w: Claude branch has a forward parent reference", agent.ErrDiverged)
+			}
 			break
 		}
 		i = j
@@ -227,6 +251,21 @@ func activeBranch(recs []chained) ([]int, error) {
 		out[a], out[b] = out[b], out[a]
 	}
 	return out, nil
+}
+
+// Parent rewiring and usage metadata may change during native compaction replay;
+// authored content must remain identical before a duplicate anchor is deduplicated.
+func sameAuthoredRecord(a, b chained) bool {
+	if a.Type != b.Type || a.IsMeta != b.IsMeta || a.IsCompactSummary != b.IsCompactSummary {
+		return false
+	}
+	if (a.Origin == nil) != (b.Origin == nil) || a.Origin != nil && a.Origin.Kind != b.Origin.Kind {
+		return false
+	}
+	if a.Message == nil || b.Message == nil {
+		return a.Message == nil && b.Message == nil
+	}
+	return a.Message.Role == b.Message.Role && a.Message.Model == b.Message.Model && bytes.Equal(a.Message.Content, b.Message.Content)
 }
 
 // nodes turns one chained record into IR nodes.

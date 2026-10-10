@@ -206,6 +206,22 @@ test('unavailable comparison reports unknown changes without claiming independen
  expect(changes).toEqual([]);
 });
 
+test('saved history remains inspectable when causal receipt verification is unavailable',async({page})=>{
+ const comparison=comparisonFixture();
+ Object.assign(comparison,{classification:'unavailable',verified:false,reason:'An older move may have omitted existing history.',sharedRevisions:0});
+ for(const side of [comparison.source,comparison.destination]) Object.assign(side,{exclusiveKnown:false,status:'unavailable',reason:'Exclusive counts could not be verified.',previewBasis:'saved-history',counts:{},truncated:true,previewOmitted:4});
+ const {changes}=await conflictFixture(page,comparison);
+ const review=page.getByLabel('Conversation differences');
+ await expect(review.locator('.comparison-counts')).toHaveCount(0);
+ await expect(review.getByText('Recent saved messages · relationship unverified. These excerpts are not proof of unique work.',{exact:true})).toHaveCount(2);
+ await expect(review.locator('.comparison-message').first()).toBeVisible();
+ await expect(review).toContainText('exclusive counts are unavailable');
+ await expect(review).not.toContainText('Counts include all verified changes');
+ await expect(review).toContainText('This does not prove that both gained new work');
+ await page.locator('#sheet').getByRole('button',{name:'Cancel return',exact:true}).click();
+ expect(changes).toEqual([]);
+});
+
 test('real backend comparison omits private reasoning from both sides before sending its DTO',async({page})=>{
  test.setTimeout(120000);
  const reset=await page.request.post('/reset?movement=1');expect(reset.ok()).toBeTruthy();

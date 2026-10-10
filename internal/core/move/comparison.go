@@ -50,6 +50,7 @@ type ComparisonSide struct {
 	Preview        []ComparisonPreview `json:"preview"`
 	Truncated      bool                `json:"truncated"`
 	PreviewOmitted int                 `json:"previewOmitted"`
+	PreviewBasis   string              `json:"previewBasis,omitempty"` // saved-history when exclusivity is unknown
 }
 
 // ComparisonCounts are exact even when previews are shortened or omitted.
@@ -114,6 +115,11 @@ func BuildComparison(p *Plan, in Input, c Copy, sourceSegment, targetSegment ir.
 	if targetErr != nil {
 		out.Destination.Reason = comparisonUnavailableReason(targetErr)
 		out.Source.Reason = "Exclusive counts require verified destination evidence."
+		if errors.Is(targetErr, agent.ErrDiverged) && len(targetSegment.Nodes) > 0 {
+			out.Reason = "Saved messages can be inspected, but their relationship to the earlier receipt could not be verified. An older move may have omitted existing history."
+			comparisonSavedPreview(&out.Source, sourceSegment.Nodes)
+			comparisonSavedPreview(&out.Destination, targetSegment.Nodes)
+		}
 		return out
 	}
 	if st.ID == "" || !comparisonReplica(m, st, in.Target, c.Summary.Key) {
@@ -170,6 +176,33 @@ func BuildComparison(p *Plan, in Input, c Copy, sourceSegment, targetSegment ir.
 		out.Reason = "Both sessions cover the same verified conversation revisions."
 	}
 	return out
+}
+
+// A reader can successfully expose saved text while an old receipt cannot verify
+// its ancestry (for example after a reader fix reveals previously omitted history).
+// Show bounded recent saved messages for inspection, never as exclusive revisions.
+func comparisonSavedPreview(side *ComparisonSide, nodes []ir.Node) {
+	var recent []ir.Node
+	eligible := 0
+	for i := len(nodes) - 1; i >= 0; i-- {
+		n := nodes[i]
+		if n.Generated || n.Reasoning != nil || n.Kind == ir.KindReasoning {
+			continue
+		}
+		if !(n.Kind == ir.KindMessage && (n.Actor == ir.User || n.Actor == ir.Agent) || n.Kind == ir.KindToolCall && n.Tool != nil && n.Tool.Kind != ir.ToolThink) {
+			continue
+		}
+		eligible++
+		if len(recent) < comparisonPreviewLimit {
+			recent = append(recent, n)
+		}
+	}
+	slices.Reverse(recent)
+	comparisonSummarize(side, recent)
+	side.Counts = ComparisonCounts{}
+	side.PreviewBasis = "saved-history"
+	side.PreviewOmitted += eligible - len(recent)
+	side.Truncated = side.Truncated || side.PreviewOmitted > 0
 }
 
 func comparisonSide(side Side, s agent.Summary) ComparisonSide {
