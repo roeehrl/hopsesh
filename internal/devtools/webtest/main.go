@@ -181,6 +181,8 @@ func main() {
 		}
 		_ = os.Unsetenv("FAKE_MOVEMENT_ACCOUNT")
 		_ = os.Unsetenv("FAKE_CODEX_EMAIL")
+		_ = os.Unsetenv("FAKE_CODEX_VERSION")
+		_ = os.Unsetenv("FAKE_CODEX_HOOKS")
 		if err := os.RemoveAll(h); err != nil {
 			return err
 		}
@@ -363,6 +365,27 @@ func main() {
 		if r.URL.Query().Get("movement") == "1" {
 			_ = os.Setenv("FAKE_MOVEMENT_ACCOUNT", "1")
 			_ = os.Setenv("FAKE_CODEX_EMAIL", "alice@example.com")
+		}
+		if p := r.URL.Query().Get("protection"); p != "" {
+			// protection=blocked: the hopsesh command is installed and Codex trusts hopsesh's
+			// protection hooks, so a moved original is blocked. protection=review: the hooks
+			// are installed but wait for the user's approval in Codex (/hooks).
+			if err := protectionWorld(h, p); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			mu.RLock()
+			app := svc
+			mu.RUnlock()
+			// Scan first: it registers the Codex account profile the hooks are installed for.
+			if _, err := app.Scan(); err != nil {
+				http.Error(w, "scanning: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if _, err := app.InstallNoticeHooks("", ""); err != nil {
+				http.Error(w, "installing the protection hooks: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
 		}
 		if r.URL.Query().Get("terminal") == gui.WhereHere {
 			// In the app's own terminal the stand-in Claude Code asks whether it trusts a
@@ -813,4 +836,30 @@ func serveEvents(w http.ResponseWriter, r *http.Request) {
 	delete(eventWS, c)
 	eventsMu.Unlock()
 	_ = c.CloseNow()
+}
+
+// protectionWorld installs a stand-in hopsesh command (a regular file in ~/.local/bin, on
+// PATH) and makes the stand-in Codex a version with hooks whose hooks/list reports them
+// trusted (blocked) or waiting for review (review).
+func protectionWorld(h, mode string) error {
+	trust := map[string]string{"blocked": "trusted", "review": "untrusted"}[mode]
+	if trust == "" {
+		return fmt.Errorf("protection is blocked or review, not %q", mode)
+	}
+	bin := filepath.Join(h, ".local", "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		return err
+	}
+	name := "hopsesh"
+	script := "#!/bin/sh\necho \"hopsesh (webtest stand-in)\"\n"
+	if runtime.GOOS == "windows" {
+		name, script = "hopsesh.cmd", "@echo hopsesh (webtest stand-in)\r\n"
+	}
+	if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o755); err != nil {
+		return err
+	}
+	os.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	os.Setenv("FAKE_CODEX_VERSION", "0.160.1")
+	os.Setenv("FAKE_CODEX_HOOKS", trust)
+	return nil
 }

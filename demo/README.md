@@ -10,7 +10,10 @@ owning two computers. Every user, repository, path and prompt here is invented.
 
 Git remotes are `github.com/acme/*`, mapped with `insteadOf` to local bare repositories, so
 cloning works offline. `claude` and `codex` are small stubs (`claude-stub.sh`, `codex-stub.sh`)
-that answer version and account checks; no model is involved.
+that answer version and account checks; no model is involved. The laptop installs hopsesh's
+protection hooks, and the Codex stub reports them trusted, so a moved original shows as
+blocked (◆ Moved out). Set `DEMO_HOOK_TRUST=untrusted` in alice's environment to show the app's
+"approve the hopsesh hooks" warning instead.
 
 ## Use it
 
