@@ -31,7 +31,7 @@ jobs:
       - name: cold native scheduler query
         shell: pwsh
         run: |
-          & .\scheduler-diagnostic.exe -test.run '^TestSchedulerPhaseDiagnostic$' -test.v -test.count=3 -test.timeout=1m 2>&1 | Tee-Object scheduler-cold.log
+          & .\scheduler-diagnostic.exe '-test.run=^TestSchedulerPhaseDiagnostic$' '-test.v' '-test.count=3' '-test.timeout=1m' 2>&1 | Tee-Object scheduler-cold.log
           if ($LASTEXITCODE -ne 0) { throw 'Cold scheduler diagnostic failed' }
       - name: scheduler during broad race suite
         if: always()
@@ -40,7 +40,7 @@ jobs:
           $suite = Start-Process go -ArgumentList @('test','-race','-count=1','-timeout','25m','./...') -RedirectStandardOutput broad-race.log -RedirectStandardError broad-race-error.log -PassThru
           $probeExit = 0
           for ($i = 0; $i -lt 45; $i++) {
-            & .\scheduler-diagnostic.exe -test.run '^TestSchedulerPhaseDiagnostic$' -test.v -test.count=1 -test.timeout=30s 2>&1 | Tee-Object -Append scheduler-loaded.log
+            & .\scheduler-diagnostic.exe '-test.run=^TestSchedulerPhaseDiagnostic$' '-test.v' '-test.count=1' '-test.timeout=30s' 2>&1 | Tee-Object -Append scheduler-loaded.log
             if ($LASTEXITCODE -ne 0) { $probeExit = 1 }
             Start-Sleep -Seconds 5
           }
