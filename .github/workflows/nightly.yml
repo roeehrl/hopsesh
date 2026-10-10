@@ -5,7 +5,7 @@ on:
       target:
         type: choice
         default: all
-        options: [all, scheduler, codex-cleanup, git-probe, runtime-startup, pty-flow, relay-forks, ssh-drain, relay-reconcile]
+        options: [all, scheduler, codex-cleanup, git-probe, runtime-startup, pty-flow, relay-forks, ssh-drain, relay-reconcile, ci-shards]
 permissions:
   contents: read
 jobs:
@@ -264,4 +264,120 @@ jobs:
         with:
           name: relay-reconcile-${{ matrix.os }}
           path: relay-reconcile.log
+          retention-days: 7
+
+  scenarios:
+    if: inputs.target == 'ci-shards'
+    name: scenarios (${{ matrix.family }}${{ matrix.shard && format(' {0}', matrix.shard) || '' }})
+    # Windows exceeded the shared 45m job budget after 76 passing rows.
+    # Partition every row; keep stateful suites once and all scenario deadlines.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {family: windows, os: windows-2025, shard: 1/4}
+          - {family: windows, os: windows-2025, shard: 2/4}
+          - {family: windows, os: windows-2025, shard: 3/4}
+          - {family: windows, os: windows-2025, shard: 4/4}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: build hopsesh, the matrix runner and the stand-in agents
+        shell: bash
+        run: |
+          ext=""; [ "$RUNNER_OS" = Windows ] && ext=.exe
+          go build -o "bin/hopsesh$ext" ./cmd/hopsesh
+          go build -o "bin/hsmatrix$ext" ./internal/devtools/hsmatrix
+          go build -o "bin/fakeagent$ext" ./internal/devtools/fakeagent
+      # These durable-write suites can exceed one shared ten-minute deadline on
+      # Windows. Keep every route and the race detector, with bounded batches.
+      - name: mandatory stateful movement and instruction routes
+        if: ${{ !matrix.shard || matrix.shard == '1/4' }}
+        shell: bash
+        run: |
+          go test ./internal/e2e -run 'TestMovement|TestInstruction' -race -count=1 -timeout 10m
+      - name: mandatory lineage and context routes, forks and recovery
+        if: ${{ !matrix.shard || matrix.shard == '1/4' }}
+        shell: bash
+        run: |
+          go test ./internal/e2e -run 'TestLineage|TestContext' -race -count=1 -timeout 10m
+      - name: mandatory account routes and progressive discovery
+        if: ${{ !matrix.shard || matrix.shard == '1/4' }}
+        shell: bash
+        run: |
+          go test ./internal/e2e -run 'TestAccountProfile|TestSessionDiscovery' -race -count=1 -timeout 10m
+      - name: mandatory account, notice-hook and discovery scenarios
+        if: ${{ !matrix.shard || matrix.shard == '1/4' }}
+        shell: bash
+        run: |
+          go test ./internal/e2e/scenario -run 'TestScenarios/(accounts|notice-hook|session-discovery)' -race -count=1 -timeout 3m
+      - name: scenario matrix over loopback SSH
+        if: runner.os != 'Windows'
+        run: scripts/matrix-loopback.sh bin "${{ matrix.family }}→${{ matrix.family }}" "$RUNNER_TEMP/hsmatrix"
+      - name: scenario matrix over loopback SSH
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: ./scripts/matrix-loopback.ps1 -Bin bin -Label "windows→windows $env:SHARD" -Out "$env:RUNNER_TEMP\hsmatrix" -Shard $env:SHARD
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: scenarios-${{ matrix.family }}-${{ strategy.job-index }}
+          path: |
+            ${{ runner.temp }}/hsmatrix/*.log
+            ${{ runner.temp }}/hsmatrix/*.json
+          retention-days: 7
+
+
+  matrix-triples:
+    if: inputs.target == 'ci-shards'
+    name: scenario matrix, every triple (linux ${{ matrix.shard }}/4)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    # Two shards plus the mandatory stateful suite exceeded 60m while rows
+    # continued passing. Four disjoint shards retain every triple and deadline.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: |
+          for p in cmd/hopsesh:hopsesh internal/devtools/hsmatrix:hsmatrix internal/devtools/fakeagent:fakeagent; do
+            go build -o "bin/${p#*:}" "./${p%%:*}"
+          done
+      - name: stateful movement, account and lineage routes and recovery
+        if: matrix.shard == 1 # these stateful tests run once; only the matrix rows are sharded
+        env:
+          HOPSESH_LINEAGE_NIGHTLY: "1"
+        run: go test ./internal/e2e -run 'TestMovement|TestLineage|TestAccountProfile|TestContext' -race -count=1 -timeout 12m
+      - run: scripts/matrix-loopback.sh bin "linux→linux, covering triples $SHARD" "$RUNNER_TEMP/hsmatrix" -t 3 -shard "$SHARD"
+        env:
+          SHARD: ${{ matrix.shard }}/4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: nightly-matrix-${{ matrix.shard }}
+          path: |
+            ${{ runner.temp }}/hsmatrix/*.log
+            ${{ runner.temp }}/hsmatrix/*.json
           retention-days: 7
