@@ -8,6 +8,7 @@ async function world(page: Page, mode: string) {
   expect(r.ok(), await r.text()).toBeTruthy();
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator("#fresh")).toContainText("updated", { timeout: 30_000 });
 }
 
 test("review: the Sessions warning asks to approve the hopsesh hooks in Codex", async ({ page }) => {
