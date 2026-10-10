@@ -745,3 +745,21 @@ body.terminal-right .divider[data-pane="inspector"]{display:none}
 /* Moved / original / returned: a chip plus words under the title, never in it. */
 .ins-lineage { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; }
 .chip.role-chip { white-space: nowrap; }
+
+/* Movement protection: one card, a checklist, one action. */
+.protect-card { flex-direction: column; align-items: stretch; gap: 10px; }
+.protect-body { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
+.protect-body > b { font-size: 13.5px; }
+.protect-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.protect-list li { display: flex; align-items: baseline; gap: 6px; }
+.protect-list .mark { width: 1em; text-align: center; font-weight: 600; }
+.protect-list li.ok .mark { color: var(--ok); }
+.protect-list li.wait .mark { color: var(--warn); }
+.protect-list li.todo .mark { color: var(--muted); }
+.protect-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.protect-actions .link { margin-left: auto; }
+
+/* A long status never runs under the row's action: it ends with an ellipsis. */
+.row .r-state { max-width: 100%; overflow: hidden; }
+.row .r-state .chip { max-width: 100%; min-width: 0; }
+.row .r-state .chip-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -46,6 +46,7 @@ type HookProblem struct {
 var health struct {
 	mu  sync.Mutex
 	dto *HookHealthDTO
+	app *App // the app the check was for: another one (a fresh start) checks again
 }
 
 // CLIReady reports whether the hopsesh command is installed where the skill and hooks
@@ -60,7 +61,7 @@ func CLIReady(st integrate.CLIStatus) bool {
 // from the last five minutes is reused.
 func (a *App) HookHealth(force bool) (HookHealthDTO, error) {
 	health.mu.Lock()
-	if !force && health.dto != nil && time.Since(health.dto.Checked) < 5*time.Minute {
+	if !force && health.dto != nil && health.app == a && time.Since(health.dto.Checked) < 5*time.Minute {
 		d := *health.dto
 		health.mu.Unlock()
 		return d, nil
@@ -78,7 +79,7 @@ func (a *App) HookHealth(force bool) (HookHealthDTO, error) {
 		d.Problems = append(d.Problems, HookProblem{State: "unknown", Message: "hopsesh could not check the protection hooks: " + err.Error()})
 	}
 	health.mu.Lock()
-	health.dto = &d
+	health.dto, health.app = &d, a
 	health.mu.Unlock()
 	return d, nil
 }

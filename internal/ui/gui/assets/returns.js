@@ -1,12 +1,12 @@
 // Candidates come only from the app's verified branch inventory. Never infer a
 // return from copy timestamps or from a fork's parent journey.
 import { refreshSelection } from "./sessions.js";
-import { api, h, dialog, here, sys, state, entries, when, agentBadge, fail, go } from "./core.js";
+import { api, h, dialog, here, sys, state, entries, when, agentBadge, fail, go, manyAccounts } from "./core.js";
 import { removeBlock, restoreBlock } from "./guard.js";
 import { planFor } from "./plan.js";
 import { sessionExitHelp } from "./session-exit.js";
 
-export const returnPlace = (r) => `${r.agentName || r.agent} · ${r.profileLabel || r.profile || "Default account"} on ${r.local ? sys.here : r.machine}`;
+export const returnPlace = (r) => `${r.agentName || r.agent}${manyAccounts(r.agent) && r.profileLabel ? ` (${r.profileLabel})` : ""} on ${r.local ? sys.here : r.machine}`;
 export const returnDestination = (r) => entries().find(e => e.machine === r.machine && e.key === r.key && (!r.profile || e.profile?.id === r.profile));
 
 export async function resolveDestination(r) {
@@ -64,7 +64,7 @@ export function returnCard(a) {
   return h("div", {class:"return-blocked"},
     h("div", {class:"return-blocked-head"}, agentBadge(r.agent,r.agentName), h("strong", {}, "Original conversation still open")),
     h("span", {class:"return-original-name"}, destination?.title || r.title || "Original conversation"),
-    h("span", {class:"muted"}, `${r.local ? sys.Here : r.machine} · ${r.profileLabel || "Default account"}`),
+    h("span", {class:"muted"}, `${r.local ? sys.Here : r.machine}${manyAccounts(r.agent) && r.profileLabel ? " · " + r.profileLabel : ""}`),
     h("p", {}, "Exit the original before adding your new work. Its saved history stays available."),
     h("div", {class:"return-card-actions"}, h("button", {class:"btn outline",onclick:a.run}, "Review move back…"),
       h("button", {class:"btn",onclick:a.showOriginal}, "Show original session")));
@@ -95,7 +95,7 @@ export function movementNotice(e, show, viewJourney) {
     : ["muted", "Not protected (Settings › General)."];
   return h("section", {class:"sec movement-notice", "aria-label":"Moved out"},
     h("span", {class:"sec-h"}, n.status === "forked" ? "Fork made" : "Moved out"),
-    h("span", {}, `${n.status === "forked" ? "Forked to" : "Moved to"} ${to}${n.profileLabel ? " · " + n.profileLabel : ""}`),
+    h("span", {}, `${n.status === "forked" ? "Forked to" : "Moved to"} ${to}${manyAccounts(n.agent) && n.profileLabel ? " · " + n.profileLabel : ""}`),
     h("span", {class:"muted"}, explanation),
     protection ? h("span", {class: protection[0]}, protection[1]) : null,
     g && !g.effective && g.fix ? h("span", {class:"muted", style:"font-size:12px"}, g.fix) : null,
