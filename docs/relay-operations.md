@@ -44,6 +44,24 @@ configuration omits that paid-only setting. A future plan change must explicitly
 review the CPU ceiling (the proposed paid setting is 1,000 ms) and billing alerts.
 This is not a promise that all relay workloads fit the free plan.
 
+Before a hosted load run, inspect current UTC-day account usage and reserve capacity
+for the entire workload **and cleanup**. Include SQLite writes, not just HTTP
+requests: key/value puts, deletes and `setAlarm()` are billed as row writes. The
+Free allowance is 100,000 rows written per day across Durable Objects; it resets
+at 00:00 UTC. Repeated qualification runs on October 10 exhausted it, causing
+HTTP 503 for submissions and revocation and failures in expiry alarms. Pausing
+new work cannot restore exhausted provider capacity. Keep the failure and pending
+cleanup visible; do not claim successful revocation or retry load while exhausted.
+Once capacity is available, verify outstanding cleanup before starting another
+complete run. Never delete the natural-retention canary to make a test pass.
+
+The redacted tail category `daily-write-quota` matches the exact provider error;
+unknown exception text stays hashed. Usage analytics may lag, and Hopsesh's
+per-space traffic limits do not reserve Cloudflare's account-wide allowance.
+A Workers Paid upgrade changes account-wide billing and requires explicit
+approval; the $10 alert remains informational rather than a spending cap.
+See [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/).
+
 The private ciphertext bucket has a deployed two-day expiration rule and one-day
 multipart-abort rule. Its cleanup buffer exceeds the maximum one-day message
 lease. Logical mailbox expiry and durable deletion-intent alarms remain separate;

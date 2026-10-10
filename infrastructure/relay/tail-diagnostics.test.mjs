@@ -2,6 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { sanitizeTail, shouldCaptureTail, tailDecoder } from './tail-diagnostics.mjs';
 
+test('hosted daily write quota is recognizable without exposing arbitrary exception text', () => {
+  const message = 'Exceeded allowed rows written in Durable Objects free tier.';
+  const event = sanitizeTail({ outcome: 'exception', event: { scheduledTime: 1791618033338 }, exceptions: [{ name: 'Error', message }] });
+  assert.equal(event.kind, 'alarm');
+  assert.equal(event.exceptions[0].category, 'daily-write-quota');
+  // Matches all five errors retained from the October 10 hosted failure.
+  assert.equal(event.exceptions[0].messageHash, '68ef9806a386bf8a1e43fe24b9c2362373e1641d085ac261f99ff3e62c4b7a2b');
+  assert.equal(shouldCaptureTail(event), true);
+  assert.ok(!JSON.stringify(event).includes(message));
+  const changed = sanitizeTail({ exceptions: [{ message: message + ' private tenant details' }] });
+  assert.equal(changed.exceptions[0].category, 'unclassified');
+  assert.ok(!JSON.stringify(changed).includes('private tenant details'));
+});
+
 test('handled server and rate failures remain visible without recording successful traffic', () => {
   for (const status of [101, 200, 201, 204, 400, 403, 429, 500, 502, 503]) {
     const event = sanitizeTail({ outcome: 'ok', event: { response: { status }, request: { url: 'https://private/v1/messages?secret-query', body: 'secret-body' } } });

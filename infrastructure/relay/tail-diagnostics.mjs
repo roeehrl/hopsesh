@@ -12,6 +12,7 @@ const messages = new Map([
   ['Durable Object is overloaded. Requests queued for too long.', 'overloaded-wait'],
   ['The script will never generate a response.', 'response-never-generated'],
   ['Network connection lost.', 'network-lost'],
+  ['Exceeded allowed rows written in Durable Objects free tier.', 'daily-write-quota'],
 ]);
 
 export function sanitizeTail(event) {

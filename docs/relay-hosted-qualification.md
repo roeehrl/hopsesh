@@ -1,5 +1,34 @@
 # Hosted 0.5 staging qualification
 
+## Hosted daily write allowance exhausted — October 10
+
+Final-source `7011675` passes retention (62.02s) and movement (31.80s), then
+fails the one-hour load during round 2 at 07:40:10 UTC with HTTP 503. All five
+retained alarm exceptions have SHA256
+`68ef9806a386bf8a1e43fe24b9c2362373e1641d085ac261f99ff3e62c4b7a2b`,
+which exactly matches `Exceeded allowed rows written in Durable Objects free tier.`
+The account dashboard still shows Workers Free. Initial metrics for the two relay
+namespaces from midnight through 07:50 UTC report 103,456 SQL rows written;
+Cloudflare documents a 100,000 daily allowance. This establishes this failure's
+cause; it does not explain the earlier HTTP 500.
+
+All 100 load credential cleanup calls also return 503. They are not recorded as
+revoked. Staging is verified paused at 07:40:34 UTC and the 173-event diagnostic
+capture closes explicitly. The immutable failure evidence, metric queries/results,
+original running checkpoint and audit script are archived in
+`qualification/7011675/hosted/verified-failure.json`. Metrics can lag and are not
+settled billing. Restore capacity through the daily reset or an explicitly approved
+plan change, then verify cleanup and rerun the complete workload. The diagnostic
+allowlist now recognizes only the exact quota string; arbitrary exception details
+remain hashed. All 116 infrastructure contracts pass without skips.
+
+Current-source native Linux and macOS lifecycle evidence is archived separately in
+`qualification/7011675/native-{linux,macos}-lifecycle/verified.json`. These actual
+logout/reboot qualifications do not substitute for the remaining Windows gate.
+
+Reference: [Durable Objects pricing and daily reset](https://developers.cloudflare.com/durable-objects/platform/pricing/).
+
+
 ## October 10 completed diagnostic and corrected acceptance
 
 The frozen `a909f32` diagnostic, using the unchanged `7c8b42e` production Worker,
