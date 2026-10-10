@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {SignJWT} from 'jose';
 import worker, {createHandler, Mailbox, LIMITS, maintain} from './worker.mjs';
 class Storage {
  constructor(){this.values=new Map();this.alarm=null;this.tail=Promise.resolve()}
@@ -157,6 +158,33 @@ test('unauthenticated namespace cannot allocate a paid Durable Object',async()=>
  assert.equal((await worker.fetch(req,env)).status,403);assert.equal(allocated,0);
  const enrollment=new Request('https://relay.test/v1/enrollment/register',{method:'POST',headers:{'X-Hopsesh-Space':'invented-space-123','Authorization':'Bearer forged'},body:'{}'});
  assert.equal((await worker.fetch(enrollment,env)).status,403);assert.equal(allocated,0);
+});
+
+test('gateway rate limiter outages preserve authorization and never allocate downstream objects',async t=>{
+ const admin='operator-secret-with-at-least-32-bytes',space='space-12345678901',device='endpoint-A-123456';
+ for(const kind of ['device','cloud-session'])for(const [path,binding,failAt]of [
+  ['/v1/messages','TRAFFIC_RATE',1],['/v1/ack','GLOBAL_TRAFFIC_RATE',1],
+  ['/v1/notifications','LOGIN_RATE',1],['/v1/notifications','LOGIN_RATE',2],
+  ...(kind==='device'?[
+   ['/v1/cloud/tickets','LOGIN_RATE',1],['/v1/cloud/claim','LOGIN_RATE',2],
+   ['/v1/cloud/claim','CODE_RATE',1],['/v1/device/code','LOGIN_RATE',1],
+   ['/v1/device/token','LOGIN_RATE',2],['/v1/authorization/request','CODE_RATE',1],
+  ]:[]),
+ ])await t.test(kind+' '+path+' '+binding+' '+failAt,async()=>{
+  const token=await new SignJWT({space,device,kind}).setProtectedHeader({alg:'HS256'}).setIssuer('hopsesh-relay-v1').setAudience('hopsesh-relay-mailbox').setIssuedAt().setExpirationTime('1h').sign(new TextEncoder().encode(admin));
+  let allocated=0,calls=0,mode='throw';
+  const object={idFromName(){allocated++;return 'object'},get(){return{fetch:async()=>new Response('accepted')}}};
+  const env={ENROLLMENT_ADMIN:admin,ACCESS_TEAM_DOMAIN:'team.cloudflareaccess.com',ACCESS_AUDIENCE:'test-audience',MAILBOX:object,AUTHORIZATION:object};
+  for(const key of ['LOGIN_RATE','CODE_RATE','TRAFFIC_RATE','GLOBAL_TRAFFIC_RATE'])env[key]={limit:async()=>({success:true})};
+  env[binding]={limit:async()=>{if(++calls===failAt){if(mode==='throw')throw new Error('private-rate-service-details');if(mode==='deny')return{success:false}}return{success:true}}};
+  const request=()=>new Request('https://relay.test'+path,{method:path==='/v1/notifications'?'GET':'POST',headers:{Authorization:'Bearer '+token,'X-Hopsesh-Space':space,'CF-Connecting-IP':'192.0.2.1',Upgrade:'websocket'}});
+  const unavailable=await worker.fetch(request(),env);
+  assert.equal(unavailable.status,503,'infrastructure failure must not revoke a valid connector');
+  assert.deepEqual(await unavailable.json(),{error:'temporarily_unavailable'});
+  assert.equal(allocated,0);
+  calls=0;mode='deny';assert.equal((await worker.fetch(request(),env)).status,429);assert.equal(allocated,0);
+  calls=0;mode='ok';assert.equal((await worker.fetch(request(),env)).status,200);assert.equal(allocated,1);
+ });
 });
 
 test('R2 deletion failure cannot leave a missing object at the head of a mailbox',async()=>{
