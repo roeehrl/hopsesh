@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -53,6 +54,11 @@ func TestRelayHostedSteadyLoadAndReconnect(t *testing.T) {
 	started := time.Now().UTC()
 	t.Log("whole-service workload starts", started.Format(time.RFC3339))
 	transport := newHostedLoadTransport()
+	t.Cleanup(func() {
+		for _, failure := range transport.failureSnapshot() {
+			t.Logf("bounded HTTPS failure: %+v", failure)
+		}
+	})
 	defer transport.base.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	request := func(ctx context.Context, space, token, method, path string, body any, out any) (int, error) {
@@ -182,11 +188,11 @@ func TestRelayHostedSteadyLoadAndReconnect(t *testing.T) {
 	}
 	publish := func(sequence uint64) {
 		t.Helper()
-		for _, e := range endpoints {
+		for index, e := range endpoints {
 			now := time.Now().UTC()
 			snapshot := observe.Snapshot{Epoch: e.identity.Public.ID, Sequence: sequence, AttemptedAt: now, ObservedAt: now, ExpiresAt: now.Add(relay.ObservationLease), Data: json.RawMessage(`{"inventoryComplete":true}`)}
 			if err := e.service.PublishObservation(ctx, e.to, snapshot); err != nil {
-				t.Fatal("hosted observation publication failed", sequence, err)
+				t.Fatal("hosted observation publication failed", "round", sequence, "client", index, time.Now().UTC().Format(time.RFC3339), err)
 			}
 		}
 		wait("100 authenticated observations", func() bool {
@@ -320,6 +326,7 @@ type hostedLoadTransport struct {
 	mu                          sync.Mutex
 	connections                 map[*hostedLoadConn]struct{}
 	successfulUpgrades          map[string]int
+	failures                    []hostedHTTPFailure
 	requests, upgrades, limited atomic.Int64
 }
 type hostedLoadConn struct {
@@ -355,6 +362,7 @@ func (r *hostedLoadTransport) RoundTrip(req *http.Request) (*http.Response, erro
 		r.upgrades.Add(1)
 	}
 	response, err := r.base.RoundTrip(req)
+	r.recordFailure(req, response, err)
 	if response != nil && response.StatusCode == http.StatusSwitchingProtocols && req.URL.Path == "/v1/notifications" {
 		r.mu.Lock()
 		r.successfulUpgrades[strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer ")]++
@@ -364,6 +372,86 @@ func (r *hostedLoadTransport) RoundTrip(req *http.Request) (*http.Response, erro
 		r.limited.Add(1)
 	}
 	return response, err
+}
+
+// Diagnostics intentionally exclude arbitrary errors, bodies, URLs, headers and
+// identifiers. Keep only fixed routes and a validated Cloudflare correlation ID.
+type hostedHTTPFailure struct {
+	At        string
+	Route     string
+	Status    int
+	Transport bool
+	Ray       string
+}
+
+var hostedRayPattern = regexp.MustCompile(`^[0-9a-fA-F]{16}-[A-Z]{3}$`)
+
+func (r *hostedLoadTransport) recordFailure(req *http.Request, response *http.Response, err error) {
+	if err == nil && (response == nil || response.StatusCode < 400) {
+		return
+	}
+	failure := hostedHTTPFailure{At: time.Now().UTC().Format(time.RFC3339Nano), Route: "other", Transport: err != nil}
+	if req != nil && req.URL != nil {
+		switch req.URL.Path {
+		case "/v1/messages", "/v1/notifications", "/v1/ack", "/v1/enrollment/register", "/v1/enrollment/revoke", "/v1/enrollment/renew":
+			failure.Route = req.URL.Path
+		}
+	}
+	if response != nil {
+		failure.Status = response.StatusCode
+		if ray := response.Header.Get("CF-Ray"); hostedRayPattern.MatchString(ray) {
+			failure.Ray = ray
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	const limit = 32
+	if len(r.failures) == limit {
+		copy(r.failures, r.failures[1:])
+		r.failures = r.failures[:limit-1]
+	}
+	r.failures = append(r.failures, failure)
+}
+
+func (r *hostedLoadTransport) failureSnapshot() []hostedHTTPFailure {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]hostedHTTPFailure(nil), r.failures...)
+}
+
+func TestHostedLoadDiagnosticsBoundedAndRedacted(t *testing.T) {
+	r := newHostedLoadTransport()
+	defer r.base.CloseIdleConnections()
+	req, err := http.NewRequest("POST", "https://private.invalid/v1/messages?token=secret-query", strings.NewReader("secret-body"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer secret-token")
+	response := &http.Response{StatusCode: 500, Header: http.Header{"Cf-Ray": {"0123456789abcdef-TLV"}, "Secret": {"secret-header"}}}
+	r.recordFailure(req, response, errors.New("secret-error"))
+	first := r.failureSnapshot()
+	if len(first) != 1 || first[0].Ray != "0123456789abcdef-TLV" || first[0].Route != "/v1/messages" || !first[0].Transport {
+		t.Fatalf("missing correlation metadata: %+v", first)
+	}
+	req.URL.Path = "/secret-path"
+	response.Header.Set("CF-Ray", "secret-invalid-ray")
+	for i := range 40 {
+		response.StatusCode = 500 + i
+		r.recordFailure(req, response, nil)
+	}
+	last := r.failureSnapshot()
+	if len(last) != 32 || last[0].Status != 508 || last[31].Status != 539 || first[0].Status != 500 {
+		t.Fatalf("ring or detached snapshot incorrect: %+v", last)
+	}
+	encoded, err := json.Marshal(last)
+	if err != nil || strings.Contains(string(encoded), "secret") || last[0].Route != "other" || last[0].Ray != "" {
+		t.Fatalf("unsafe diagnostics: %s, %v", encoded, err)
+	}
+	response.StatusCode = 200
+	r.recordFailure(req, response, nil)
+	if got := r.failureSnapshot(); got[31].Status != 539 {
+		t.Fatal("successful response changed failure history")
+	}
 }
 func (r *hostedLoadTransport) upgradeSnapshot() map[string]int {
 	r.mu.Lock()
