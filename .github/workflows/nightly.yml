@@ -5,7 +5,7 @@ on:
       target:
         type: choice
         default: all
-        options: [all, scheduler, codex-cleanup, git-probe, runtime-startup]
+        options: [all, scheduler, codex-cleanup, git-probe, runtime-startup, pty-flow]
 permissions:
   contents: read
 jobs:
@@ -143,4 +143,43 @@ jobs:
         with:
           name: runtime-startup-diagnostics
           path: ${{ runner.temp }}/startup
+          retention-days: 7
+
+  pty-flow:
+    if: inputs.target == 'pty-flow'
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: bundled pseudoconsole matches the broad CI environment
+        shell: pwsh
+        run: |
+          go run ./internal/devtools/conptyfetch -arch amd64 -out "$env:RUNNER_TEMP/conpty"
+          "HOPSESH_CONPTY_DIR=$env:RUNNER_TEMP/conpty" >> $env:GITHUB_ENV
+      - run: go vet ./...
+      - name: flow progress under actual broad-suite concurrency
+        shell: bash
+        run: |
+          go run gotest.tools/gotestsum@v1.13.0 --format github-actions \
+            --jsonfile pty-flow-broad.jsonl --junitfile pty-flow-broad.xml \
+            --packages ./... -- -race -count=1 -timeout 25m 2>&1 | tee pty-flow-broad.log
+      - name: independent focused flow samples
+        if: always()
+        shell: bash
+        run: |
+          go test -race -count=3 -run '^TestFlowControl$' -v -timeout 4m ./internal/core/pty 2>&1 | tee pty-flow-focused.log
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: pty-flow-diagnostics
+          path: |
+            pty-flow-*.log
+            pty-flow-*.jsonl
+            pty-flow-*.xml
           retention-days: 7

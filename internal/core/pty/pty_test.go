@@ -357,8 +357,27 @@ func TestFlowControl(t *testing.T) {
 	if s.Info().State == pty.Exited {
 		t.Fatal("the program finished while the window was behind")
 	}
+	t.Logf("flow paused drawn=%d backend=%s", held, s.Info().Backend)
+	progress, stopProgress := context.WithCancel(t.Context())
+	progressDone := make(chan struct{})
+	started := time.Now()
+	go func() {
+		defer close(progressDone)
+		tick := time.NewTicker(5 * time.Second)
+		defer tick.Stop()
+		for {
+			select {
+			case <-progress.Done():
+				return
+			case <-tick.C:
+				t.Logf("flow progress elapsed=%s drawn=%d state=%s", time.Since(started).Round(time.Millisecond), w.Drawn(), s.Info().State)
+			}
+		}
+	}()
+	defer func() { stopProgress(); <-progressDone }()
 	w.AckAll()
 	if _, err := w.WaitState(pty.Exited, 60*time.Second); err != nil {
+		t.Logf("flow timeout elapsed=%s drawn=%d info=%+v", time.Since(started), w.Drawn(), s.Info())
 		t.Fatal(err)
 	}
 	if d := w.Drawn(); d < total {
