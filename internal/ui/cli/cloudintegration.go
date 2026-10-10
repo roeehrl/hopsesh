@@ -19,9 +19,9 @@ import (
 func cloudIntegrationCmd() *cobra.Command {
 	root := &cobra.Command{Use: "cloud-integration", Short: "Prepare verified installation for a specific cloud execution surface"}
 	var provider, version, origin string
-	var script bool
+	var script, export bool
 	plan := &cobra.Command{Use: "plan", Short: "Print an immutable verified install script and honest startup requirements", Args: cobra.NoArgs, Annotations: map[string]string{"hopsesh.passive": "true"}, RunE: func(cmd *cobra.Command, _ []string) error {
-		p, err := cloudintegration.Plan(provider, version, origin)
+		p, err := cloudintegration.PlanWith(provider, version, origin, cloudintegration.Options{AllowTranscriptExport: export})
 		if err != nil {
 			return err
 		}
@@ -35,7 +35,8 @@ func cloudIntegrationCmd() *cobra.Command {
 	plan.Flags().StringVar(&version, "version", "", "immutable signed 0.5 release version")
 	plan.Flags().StringVar(&origin, "origin", cloudintegration.DownloadOrigin, "verified downloads HTTPS origin")
 	plan.Flags().BoolVar(&script, "script", false, "print only the installation shell script")
-	root.AddCommand(plan, cloudPrepareCmd(), cloudCurrentCmd(), cloudStartupInstallCmd(), cloudAuthorizeCmd(), cloudServeCmd(), cloudTicketCmd(), cloudTasksCmd(), cloudHandoffsCmd(), cloudLinkHandoffCmd(), cloudClaimCmd(), cloudRevokeTicketCmd(), cloudTicketStatusCmd(), cloudInspectCmd(), cloudCheckpointImportCmd(), cloudCheckpointCacheCmd())
+	plan.Flags().BoolVar(&export, "allow-transcript-export", false, "Claude cloud: let a desktop-approved owner import conversation checkpoints")
+	root.AddCommand(plan, cloudPrepareCmd(), cloudCurrentCmd(), cloudStartupInstallCmd(), cloudAuthorizeCmd(), cloudServeCmd(), cloudTicketCmd(), cloudTasksCmd(), cloudHandoffsCmd(), cloudLinkHandoffCmd(), cloudClaimCmd(), cloudRevokeTicketCmd(), cloudTicketStatusCmd(), cloudInspectCmd(), cloudCheckpointImportCmd(), cloudCheckpointCacheCmd(), cloudConnectHookCmd())
 	return root
 }
 
@@ -178,7 +179,7 @@ func cloudCurrentCmd() *cobra.Command {
 
 func cloudStartupInstallCmd() *cobra.Command {
 	var provider, version, origin string
-	var preview bool
+	var preview, export bool
 	c := &cobra.Command{Use: "install-startup <repository>", Short: "Install reviewed provider startup files; never create a cloud identity during setup", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		repo, err := filepath.Abs(args[0])
 		if err != nil {
@@ -188,7 +189,7 @@ func cloudStartupInstallCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		plan, err := cloudintegration.PlanRepository(provider, version, origin, repo)
+		plan, err := cloudintegration.PlanRepositoryWith(provider, version, origin, repo, cloudintegration.Options{AllowTranscriptExport: export})
 		if err != nil {
 			return err
 		}
@@ -206,6 +207,7 @@ func cloudStartupInstallCmd() *cobra.Command {
 	c.Flags().StringVar(&version, "version", "", "immutable signed 0.5 release version")
 	c.Flags().StringVar(&origin, "origin", cloudintegration.DownloadOrigin, "verified downloads HTTPS origin")
 	c.Flags().BoolVar(&preview, "dry-run", false, "preview exact changed file names without writing configuration")
+	c.Flags().BoolVar(&export, "allow-transcript-export", false, "Claude cloud: let a desktop-approved owner import conversation checkpoints; off by default")
 	return c
 }
 

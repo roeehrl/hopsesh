@@ -41,6 +41,7 @@ type startupOwnership struct {
 	Version  string            `json:"version"`
 	Files    map[string]string `json:"files"`
 	Hook     string            `json:"hook,omitempty"`
+	Prompt   string            `json:"promptHook,omitempty"`
 	Guidance string            `json:"guidance,omitempty"`
 }
 
@@ -94,7 +95,11 @@ func readStartup(root *os.Root, name string) ([]byte, error) {
 }
 
 func PlanRepository(provider, version, origin, repository string) (*RepositorySetup, error) {
-	p, err := Plan(provider, version, origin)
+	return PlanRepositoryWith(provider, version, origin, repository, Options{})
+}
+
+func PlanRepositoryWith(provider, version, origin, repository string, o Options) (*RepositorySetup, error) {
+	p, err := PlanWith(provider, version, origin, o)
 	if err != nil {
 		return nil, err
 	}
@@ -129,6 +134,7 @@ func PlanRepository(provider, version, origin, repository string) (*RepositorySe
 	plan.files[".hopsesh/cloud-install-"+provider+".sh"] = []byte(p.InstallScript)
 	if provider == "claude-hosted" {
 		plan.files[".hopsesh/cloud-session-start.sh"] = []byte(p.ClaudeHookScript)
+		plan.files[".hopsesh/cloud-session-connect.sh"] = []byte(p.ClaudePromptScript)
 	} else {
 		plan.files[".hopsesh/codex-start.md"] = []byte(p.StartSkill + "\n")
 	}
@@ -161,60 +167,10 @@ func PlanRepository(provider, version, origin, repository string) (*RepositorySe
 		if raw, ok := settings["hooks"]; ok && (json.Unmarshal(raw, &hooks) != nil || hooks == nil) {
 			return nil, errors.New("repository Claude hooks settings are not a valid JSON object")
 		}
-		entries := []json.RawMessage{}
-		if raw, ok := hooks["SessionStart"]; ok && (json.Unmarshal(raw, &entries) != nil || entries == nil) {
-			return nil, errors.New("repository SessionStart hooks are not an array")
+		if record.Hook, err = mergeHookEvent(hooks, "SessionStart", p.ClaudeHookEntry, record.Hook); err != nil {
+			return nil, err
 		}
-		var desired struct {
-			Hooks []struct {
-				Command string `json:"command"`
-			} `json:"hooks"`
-		}
-		if err = json.Unmarshal(p.ClaudeHookEntry, &desired); err != nil || len(desired.Hooks) != 1 {
-			return nil, errors.New("invalid generated cloud startup hook")
-		}
-		merged := []json.RawMessage{}
-		installed := false
-		for _, entry := range entries {
-			var candidate struct {
-				Hooks []struct {
-					Command string `json:"command"`
-				} `json:"hooks"`
-			}
-			if json.Unmarshal(entry, &candidate) != nil {
-				return nil, errors.New("invalid Claude SessionStart hook entry")
-			}
-			ours := false
-			for _, hook := range candidate.Hooks {
-				if hook.Command == desired.Hooks[0].Command {
-					ours = true
-				}
-			}
-			if !ours {
-				merged = append(merged, entry)
-				continue
-			}
-			entryHash, hashErr := startupHookHash(entry)
-			if hashErr != nil {
-				return nil, hashErr
-			}
-			desiredHash, hashErr := startupHookHash(p.ClaudeHookEntry)
-			if hashErr != nil {
-				return nil, hashErr
-			}
-			if entryHash != desiredHash && record.Hook != entryHash {
-				return nil, errors.New("hopsesh cloud hook was modified; inspect it before installing")
-			}
-			if !installed {
-				merged = append(merged, p.ClaudeHookEntry)
-				installed = true
-			}
-		}
-		if !installed {
-			merged = append(merged, p.ClaudeHookEntry)
-		}
-		hooks["SessionStart"], err = json.Marshal(merged)
-		if err != nil {
+		if record.Prompt, err = mergeHookEvent(hooks, "UserPromptSubmit", p.ClaudePromptEntry, record.Prompt); err != nil {
 			return nil, err
 		}
 		settings["hooks"], err = json.Marshal(hooks)
@@ -227,10 +183,6 @@ func PlanRepository(provider, version, origin, repository string) (*RepositorySe
 		}
 		plan.files[name] = append(body, '\n')
 		plan.before[name] = before
-		record.Hook, err = startupHookHash(p.ClaudeHookEntry)
-		if err != nil {
-			return nil, err
-		}
 	}
 	record.Schema, record.Provider, record.Version = 1, provider, version
 	for name, body := range plan.files {
@@ -346,4 +298,63 @@ func (p *RepositorySetup) Apply(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// mergeHookEvent installs hopsesh's entry for one hook event, keeping every other
+// entry. An existing hopsesh entry is replaced only if it is unchanged from what
+// hopsesh last installed; a hand-edited one is left for the person to inspect.
+func mergeHookEvent(hooks map[string]json.RawMessage, event string, entry json.RawMessage, recorded string) (string, error) {
+	entries := []json.RawMessage{}
+	if raw, ok := hooks[event]; ok && (json.Unmarshal(raw, &entries) != nil || entries == nil) {
+		return "", fmt.Errorf("repository %s hooks are not an array", event)
+	}
+	type commands struct {
+		Hooks []struct {
+			Command string `json:"command"`
+		} `json:"hooks"`
+	}
+	var desired commands
+	if err := json.Unmarshal(entry, &desired); err != nil || len(desired.Hooks) != 1 {
+		return "", errors.New("invalid generated cloud startup hook")
+	}
+	desiredHash, err := startupHookHash(entry)
+	if err != nil {
+		return "", err
+	}
+	merged := []json.RawMessage{}
+	installed := false
+	for _, existing := range entries {
+		var candidate commands
+		if json.Unmarshal(existing, &candidate) != nil {
+			return "", fmt.Errorf("invalid Claude %s hook entry", event)
+		}
+		ours := false
+		for _, hook := range candidate.Hooks {
+			if hook.Command == desired.Hooks[0].Command {
+				ours = true
+			}
+		}
+		if !ours {
+			merged = append(merged, existing)
+			continue
+		}
+		existingHash, err := startupHookHash(existing)
+		if err != nil {
+			return "", err
+		}
+		if existingHash != desiredHash && recorded != existingHash {
+			return "", errors.New("hopsesh cloud hook was modified; inspect it before installing")
+		}
+		if !installed {
+			merged = append(merged, entry)
+			installed = true
+		}
+	}
+	if !installed {
+		merged = append(merged, entry)
+	}
+	if hooks[event], err = json.Marshal(merged); err != nil {
+		return "", err
+	}
+	return desiredHash, nil
 }

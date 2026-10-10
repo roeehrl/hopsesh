@@ -176,3 +176,41 @@ Hosted relay deployment, Access configuration and actual default provider
 startup/pause/rebuild remain separate release gates. Current Codex Cloud native
 transcript export remains unsupported until qualified. Installed helpers and
 successful local admission tests do not establish provider lifecycle support.
+
+## Claude cloud sessions: connect from the session's own chat
+
+To bring a Claude cloud session to this machine, use `hopsesh pull` with its
+claude.ai link. That uses Claude's own teleport and carries the whole
+conversation; nothing in the cloud session has to send anything.
+
+Live conversation checkpoints are optional. Claude's Auto permission mode refuses
+the agent running the claim, connector or export commands, so the agent never runs
+them. Instead, the repository's own hooks act on two messages *you* send:
+
+1. Install the startup files once (`cloud-integration install-startup <repo>
+   --provider claude-hosted`, adding `--allow-transcript-export` only if you want
+   to import conversation checkpoints) and commit them. The SessionStart hook
+   prepares a fresh, disconnected identity at every start and resume.
+2. In the cloud session, send `hopsesh status`. The prompt hook blocks that message
+   (Claude never sees it) and shows the native session ID, the identity's
+   fingerprint and the command to run on your machine.
+3. On your machine, run the shown command:
+
+   ```sh
+   hopsesh cloud-integration ticket --provider claude-hosted --session NATIVE_SESSION_ID --connect-code
+   ```
+
+   It prints one `hopsesh-connect …` line: your fingerprint and the one-use
+   invitation. Send that line as a message in the session within ten minutes.
+4. The prompt hook claims it for the prepared identity, starts the connector in the
+   background and blocks the message, so neither the line nor the invitation enters
+   the conversation. It shows the identity to approve.
+5. Approve that identity on your machine, comparing the fingerprint with the
+   session's message, before observing or importing it.
+
+Every other message passes through the hook untouched. A resume or rebuild prepares
+a new identity, and the connector stops when the VM pauses: send `hopsesh status`
+and a new code again. Multi-repository sessions run no repository hooks. This is
+your authorization path, not a way around Claude's reviewer: you install the hooks,
+you send each code, export stays off unless you enabled it, and your machine
+still approves every identity.

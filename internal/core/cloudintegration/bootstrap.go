@@ -17,21 +17,40 @@ import (
 const DownloadOrigin = "https://downloads.hopsesh.codonic.dev"
 
 type Bootstrap struct {
-	Provider          string          `json:"provider"`
-	Version           string          `json:"version"`
-	Origin            string          `json:"origin"`
-	InstallScript     string          `json:"installScript"`
-	ClaudeHookScript  string          `json:"claudeHookScript,omitempty"`
-	ClaudeHookEntry   json.RawMessage `json:"claudeHookEntry,omitempty"`
-	StartSkill        string          `json:"startSkill,omitempty"`
-	Callback          string          `json:"callback"`
-	CallbackSupported bool            `json:"callbackSupported"` // documented mechanism, not live qualification
-	Reason            string          `json:"reason"`
-	Connected         bool            `json:"connected"`
+	Provider         string          `json:"provider"`
+	Version          string          `json:"version"`
+	Origin           string          `json:"origin"`
+	InstallScript    string          `json:"installScript"`
+	ClaudeHookScript string          `json:"claudeHookScript,omitempty"`
+	ClaudeHookEntry  json.RawMessage `json:"claudeHookEntry,omitempty"`
+	// The prompt hook claims an owner's connect code that the person pastes into the
+	// session; the agent never sees the code or runs the connector.
+	ClaudePromptScript string          `json:"claudePromptScript,omitempty"`
+	ClaudePromptEntry  json.RawMessage `json:"claudePromptEntry,omitempty"`
+	TranscriptExport   bool            `json:"transcriptExport,omitempty"`
+	StartSkill         string          `json:"startSkill,omitempty"`
+	Callback           string          `json:"callback"`
+	CallbackSupported  bool            `json:"callbackSupported"` // documented mechanism, not live qualification
+	Reason             string          `json:"reason"`
+	Connected          bool            `json:"connected"`
+}
+
+// Options are the owner's choices for generated startup files.
+type Options struct {
+	// AllowTranscriptExport lets a pinned, desktop-approved owner import this
+	// session's conversation checkpoints. Off by default.
+	AllowTranscriptExport bool
 }
 
 func Plan(provider, version, origin string) (Bootstrap, error) {
+	return PlanWith(provider, version, origin, Options{})
+}
+
+func PlanWith(provider, version, origin string, o Options) (Bootstrap, error) {
 	p := Bootstrap{Provider: provider, Version: version, Origin: origin}
+	if o.AllowTranscriptExport && provider != "claude-hosted" {
+		return p, errors.New("transcript export can only be enabled for Claude cloud startup")
+	}
 	if !regexp.MustCompile(`^0\.5\.[0-9]+(?:-[A-Za-z0-9][A-Za-z0-9.-]*)?$`).MatchString(version) {
 		return p, errors.New("cloud bootstrap requires an explicit immutable 0.5 release version")
 	}
@@ -47,9 +66,16 @@ func Plan(provider, version, origin string) (Bootstrap, error) {
 	case "claude-hosted":
 		p.Callback = "SessionStart (single repository)"
 		p.CallbackSupported = true
-		p.Reason = "Setup installs the binary. A separate SessionStart hook must start a fresh session-scoped connector. Multi-repository startup requires separate qualification."
-		p.ClaudeHookScript = "#!/bin/sh\nset -eu\n[ \"${CLAUDE_CODE_REMOTE:-}\" = true ] || exit 0\nexec \"$HOME/.local/share/hopsesh/cloud/v" + version + "/hopsesh\" cloud-integration prepare --claude-hook --quiet\n"
+		p.Reason = "To bring a Claude cloud session to this machine, use hopsesh pull with its claude.ai link (Claude's own teleport, the whole conversation). Optional live checkpoints: setup installs the binary, the SessionStart hook prepares a fresh disconnected identity, and you connect it by sending \"hopsesh status\" and then a connect code from this machine as messages in that session. Hooks, not the agent, handle both and keep them out of the conversation. Multi-repository sessions run no repository hooks."
+		export := ""
+		if o.AllowTranscriptExport {
+			export, p.TranscriptExport = " --allow-transcript-export", true
+		}
+		bin := "\"$HOME/.local/share/hopsesh/cloud/v" + version + "/hopsesh\""
+		p.ClaudeHookScript = "#!/bin/sh\nset -eu\n[ \"${CLAUDE_CODE_REMOTE:-}\" = true ] || exit 0\nexec " + bin + " cloud-integration prepare --claude-hook --quiet" + export + "\n"
 		p.ClaudeHookEntry = json.RawMessage(`{"matcher":"startup|resume|clear|compact|fork","hooks":[{"type":"command","command":"sh \"$CLAUDE_PROJECT_DIR\"/.hopsesh/cloud-session-start.sh","timeout":10}]}`)
+		p.ClaudePromptScript = "#!/bin/sh\nset -eu\n[ \"${CLAUDE_CODE_REMOTE:-}\" = true ] || exit 0\nexec " + bin + " cloud-integration connect-hook\n"
+		p.ClaudePromptEntry = json.RawMessage(`{"hooks":[{"type":"command","command":"sh \"$CLAUDE_PROJECT_DIR\"/.hopsesh/cloud-session-connect.sh","timeout":30}]}`)
 	case "codex-current":
 		p.Callback = "Repository guidance / Start skill"
 		p.Reason = "Review and commit the repository startup instructions, then update the editable environment checkout to that commit. Run the Install script and verify the helper before publishing: new tasks inherit the prepared filesystem. Saving the script alone does not install it. Repository guidance and the optional Start skill are instructions, not guaranteed lifecycle callbacks. Verify delivery and actual task identity in a fresh task; preparation remains disconnected."
