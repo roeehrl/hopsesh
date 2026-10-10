@@ -152,6 +152,9 @@ func (a *App) DefaultOptions() move.Options {
 // cloud session is brought from its cloud (a fetch).
 func (a *App) Plan(ctx context.Context, inv *Inventory, e Entry, target agent.ID, opt move.Options) (*move.Plan, move.Input, error) {
 	if e.LineageError != "" && (e.CanArchiveLineage || !opt.Fork) {
+		if !e.CanArchiveLineage {
+			return nil, move.Input{}, fmt.Errorf("cannot transfer until its ancestry can be verified: %s; if the parent conversation is archived, unarchive it and refresh", e.LineageError)
+		}
 		return nil, move.Input{}, fmt.Errorf("cannot transfer with unsupported or damaged lineage: %s; archive the sidecar explicitly to start a new family", e.LineageError)
 	}
 	if e.Location.IsCloud() {

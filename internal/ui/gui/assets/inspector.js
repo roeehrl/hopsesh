@@ -304,9 +304,9 @@ function history(e) {
   if (!n && !e.journey && !e.lineageError && !e.movement && !e.relationship?.parent && !e.relationship?.issue) return null;
   return section("copies", "Copies & history", false, h("span", { class: "chip disc-n" }, String(n)),
     e.relationship?.parent ? h("div",{class:"item"},h("strong",{},"Conversation family: "+e.relationship.name),h("span",{class:"muted"},(e.relationship.ancestors||[]).join(" → ")+" → "+e.relationship.branchName),h("span",{class:"muted"},e.relationship.evidence)) : null,
-    e.relationship?.issue ? h("div",{class:"item warn"},e.relationship.issue) : null,
+    e.relationship?.issue && e.relationship.issue !== e.lineageError ? h("div",{class:"item warn"},e.relationship.issue) : null,
     e.movement ? h("div", {class:"muted"}, `Movement operation: ${e.movement.operation || "Not available in this scan"}`) : null,
-    e.lineageError ? h("div", { class: "item warn" }, `Lineage unavailable: ${e.lineageError}`, e.canArchiveLineage ? h("p", {}, "Archive this metadata to start a new family. The native conversation is preserved; Activity can undo this.") : h("p",{},"Ancestry cannot be verified. Create a separate fork to transfer it independently."),
+    e.lineageError ? h("div", { class: "item warn" }, `Lineage unavailable: ${e.lineageError}`, e.canArchiveLineage ? h("p", {}, "Archive this metadata to start a new family. The native conversation is preserved; Activity can undo this.") : h("p",{},"Its parent conversation is archived, unreadable or depended on for history. If the parent is archived, unarchive it in its agent and refresh."),
  e.canArchiveLineage ? h("button", {class:"btn small",onclick:async()=>{try{await api("ArchiveLineage",e.machine,e.key);toast("Lineage metadata archived. Activity can undo it.");await renamed();}catch(err){fail(err);}}},"Archive unsupported lineage") : null) : null,
  e.journey ? h("div", { class: "journey-counts" },
  h("span", { class: "chip" }, `${e.journey.transfers} transfers`),
