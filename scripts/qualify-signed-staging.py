@@ -1,20 +1,18 @@
 """Execute the published, signature-verified staging binary on native Linux runners."""
-import hashlib,json,os,pathlib,platform,subprocess,tarfile,tempfile,urllib.request
+import hashlib,json,os,pathlib,platform,subprocess,tarfile,tempfile
 VERSION='0.5.0-staging.20261010.7011675'
 SOURCE='701167583d0b147c5f2f265e763ff22e91310e9b'
 ARCH={'x86_64':'amd64','aarch64':'arm64'}[platform.machine()]
 ORIGIN=f'https://downloads.hopsesh.codonic.dev/releases/v{VERSION}/'
 ROOT=pathlib.Path.cwd()
 OUT=ROOT/'staging-evidence';OUT.mkdir()
-class NoRedirect(urllib.request.HTTPRedirectHandler):
- def redirect_request(self,*args,**kwargs): raise RuntimeError('unexpected download redirect')
-opener=urllib.request.build_opener(NoRedirect)
 archive=f'hopsesh_{VERSION}_linux_{ARCH}.tar.gz'
+# Exercise the download client and restrictions used by Hopsesh's generated
+# bootstrap, not Python urllib (rejected by this origin's Browser Integrity Check).
 for name in ['checksums.txt','checksums.txt.sig',archive]:
- with opener.open(ORIGIN+name,timeout=45) as r:
-  assert r.status==200
-  data=r.read(32*1024*1024+1);assert len(data)<=32*1024*1024
- (OUT/name).write_bytes(data)
+ p=subprocess.run(['curl','--fail','--silent','--show-error','--proto','=https','--max-time','60','--max-filesize','33554432','--write-out','%{http_code}','--output',str(OUT/name),ORIGIN+name],capture_output=True,text=True,timeout=65)
+ assert p.returncode==0 and p.stdout=='200',(name,p.returncode,p.stdout,p.stderr)
+ assert (OUT/name).stat().st_size<=32*1024*1024
 subprocess.run(['openssl','dgst','-sha256','-verify',str(ROOT/'packaging/release-key.pub'),'-signature',str(OUT/'checksums.txt.sig'),str(OUT/'checksums.txt')],check=True)
 checks={}
 for line in (OUT/'checksums.txt').read_text().splitlines():
