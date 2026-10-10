@@ -697,7 +697,8 @@ screen("sessions", async (rescan = false) => {
   // Asking Codex whether it trusts the hooks starts its app-server: off the first paint,
   // and the list is drawn again only when the answer changes what it shows.
   const before = JSON.stringify(hookHealth()?.problems || null);
-  loadHookHealth().then((d) => { if (current === "sessions" && JSON.stringify(d?.problems || null) !== before) render(); });
+  // Redraw like any background change: never under a pressed pointer or an open menu.
+  loadHookHealth().then((d) => { if (current === "sessions" && JSON.stringify(d?.problems || null) !== before) backgroundRender(); });
   const r = view.querySelector('.row[aria-selected="true"]');
   if (r) inView(r, false);
 });

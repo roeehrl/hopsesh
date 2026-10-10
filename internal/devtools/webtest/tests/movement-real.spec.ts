@@ -113,12 +113,12 @@ test('real service resolves hidden original and appends return work to that exac
  expect(returnedGraph.hops).toHaveLength(2);
  expect(returnedGraph.hops.every(h=>!h.fork)).toBe(true);
  expect(returned[0].returns).toEqual(expect.arrayContaining([expect.objectContaining({key:converted.key})]));
- // The Codex copy stays pinned in the list (it was shown last); the returned original is
- // its newest copy, reached through Copies & history.
- await agentRow(page,returned[0].title,'Codex').click();
+ // The shared runtime publishes the return at once: the branch's row is now the returned
+ // original (its newest copy), and the Codex copy stays reachable through Copies & history.
+ await agentRow(page,returned[0].title,'Claude Code').click();
  const copies=details(page).getByRole('button',{name:/Copies & history/});
  if((await copies.getAttribute('aria-expanded'))!=='true') await copies.click();
- await details(page).locator('#sec-copies span').filter({hasText:'· newest'}).getByRole('button',{name:'Show copy',exact:true}).click();
+ await expect(details(page).locator('#sec-copies')).toContainText('Codex');
  await expect.poll(()=>page.evaluate(async()=>{const {selected}=await import('/core.js');return selected()?.key;})).toBe(source.key);
  await expect(details(page).getByLabel('Return destinations')).toBeVisible();
  await expect(details(page).locator('.skel')).toHaveCount(0);

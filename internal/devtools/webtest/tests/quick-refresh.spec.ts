@@ -165,8 +165,15 @@ test('a new scan arriving between pointer down and click keeps the selected sess
   return route.fulfill({json:{result:snapshot}});
  });
  const title=row(page,'Find the codeword').locator('.t');
- const box=(await title.boundingBox())!;
- await page.mouse.move(box.x+box.width/2,box.y+box.height/2);
+ // A late publication from opening the page can still move the list: press only once the
+ // pointer is over the row, measured again after any such render.
+ await expect.poll(async()=>{
+  const box=await title.boundingBox();
+  if(!box)return false; // detached while the list is replaced
+  const x=box.x+box.width/2,y=box.y+box.height/2;
+  await page.mouse.move(x,y);
+  return page.evaluate(([x,y])=>document.elementFromPoint(x,y)?.closest('.row')?.textContent?.includes('Find the codeword')??false,[x,y]);
+ }).toBe(true);
  await page.mouse.down();
  await page.evaluate(()=>(window as any).__emit('hopsesh:quick',null));
  await expect.poll(()=>page.evaluate(async()=>{const {state}=await import('/core.js');return state.scan.revision;})).toBe(snapshot.scan.revision);
