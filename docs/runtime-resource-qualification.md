@@ -1,5 +1,27 @@
 # Native desktop resource qualification
 
+The October 10 current-source rerun at clean `524452a` passes in 148.07 seconds,
+including the latest local Worker exception boundaries and native diagnostics.
+The baseline source binary still matches SHA256
+`6ef69bffdc58e3e0ac70cb1b81f82f41562985e2573842b5ae32b91cc71981dd`.
+The current executable's embedded VCS revision matches the report and records an
+unmodified build. No concurrent local build or qualification ran during sampling.
+
+| Sample | CPU, one core | Summed footprint, bytes | Interrupt wakeups / 30s |
+| --- | ---: | ---: | ---: |
+| 0.4 baseline | 1.182% | 172,611,584 | 3,385 |
+| Current, zero extra clients | 0.134% | 178,214,984 | 273 |
+| Current, one extra client | 0.767% | 182,589,536 | 590 |
+| Current, five extra clients | 0.093% | 179,705,928 | 190 |
+
+Independent audit recomputes CPU, memory and wakeup totals from the retained
+process counters, checks stable coalition membership and all eight process
+identities, and verifies every existing resource threshold. Collection deltas
+are zero/one/zero; shared owner and cancelled-subscriber cleanup assertions pass.
+Evidence and executable build metadata are archived in
+`qualification/524452a/gui-resource/verified.json`. This is finite native idle
+qualification, not whole-machine energy, hosted load or Windows acceptance.
+
 `TestGUIRelayResourcesSQLiteR2` is an opt-in macOS test of real native windows,
 three registered local profiles, three approved relay peers, and zero/one/five
 additional IPC subscribers. The peers use real CLI owners, verified local HTTPS,
