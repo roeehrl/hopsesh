@@ -671,3 +671,19 @@ disposable provider tests through supported approval and published environments.
 Retention still requires elapsed time, and wider load requires hosted evidence.
 Keep PR #71 draft until release gates pass. These findings neither reduce the
 approved scope nor silently waive qualification.
+
+### Codex lifecycle control recheck — 2026-10-10
+
+The current [environment guide](https://learn.chatgpt.com/docs/environments/cloud-environments)
+still separates published prepared files from an existing task's saved state.
+Repository refresh does not rerun installation/startup commands, and Start skill
+is described as instructions rather than a guaranteed callback. Its seven-day
+saved-state recovery window is not a deterministic VM-reclamation deadline.
+Repeated probe turns therefore cannot prove that a rebuild happened.
+
+The [CLI reference](https://learn.chatgpt.com/docs/cli/reference#codex-cloud) and
+installed `codex-cli 0.160.1` expose no forced same-task rebuild command in the
+inspected cloud interfaces. This is a bounded finding, not proof that no provider
+control exists anywhere. Keep the live rebuild gate open; do not substitute
+republishing an environment, creating another chat or restarting Hopsesh for a
+provider rebuild. Evidence: `qualification/codex-lifecycle-recheck-20261010/audit.json`.
