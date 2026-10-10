@@ -18,7 +18,7 @@ export function createAdmissionHandler(storage,enroll,authorize,revoke,clock=()=
   const url=new URL(req.url),origin=req.headers.get('X-Hopsesh-External-Origin')||url.origin,now=Math.floor(clock()/1000);
   try{
    if(req.method!=='POST')return error('invalid_request',405);
-   const values=await authorizationForm(req);
+   let values;try{values=await authorizationForm(req)}catch{return error('invalid_request')}
    if(url.pathname==='/v1/cloud/tickets'){
     const principal=req.headers.get('X-Hopsesh-Principal'),device=req.headers.get('X-Hopsesh-Issuer'),credential=req.headers.get('X-Hopsesh-Credential');
     if(!/^[A-Za-z0-9_-]{16,128}$/.test(principal||'')||!name(device)||! /^[a-f0-9]{64}$/.test(credential||''))return error('access_denied',403);
@@ -72,7 +72,7 @@ export function createAdmissionHandler(storage,enroll,authorize,revoke,clock=()=
     if(state.connection.expires<=now)return error('expired_token');
     return response({...state.connection,kind:'cloud-session',provisional:true});
    });
-  }catch{return error('invalid_request')}
+  }catch{return error('temporarily_unavailable',503)}
  };
 }
 export async function maintainAdmission(storage,now=Math.floor(Date.now()/1000)){

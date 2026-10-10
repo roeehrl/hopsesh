@@ -32,6 +32,31 @@ async function fixture(){
  const signedArgs=extra=>{const body={...args,...extra};const message='hopsesh-relay-login-v1\0https://relay.test\0'+nonce+'\0'+identity+'\0'+['client_id','scope','redirect_uri','code_challenge','state'].map(k=>body[k]||'').join('\0');body.proof=sign(null,Buffer.from(message),privateKey).toString('base64');return body};
  return {storage,principal,invoke,browser,issue,token,args,signedArgs,id,advance:s=>clock+=s*1000,now:()=>Math.floor(clock/1000),enrollments:()=>enrollments};
 }
+test('device and desktop enrollment storage outages are temporary without changing approvals',async()=>{
+ const f=await fixture(),flow=await f.issue();
+ const review=await(await f.browser('/v1/device/review',{user_code:flow.user_code})).json();
+ const verifier='v'.repeat(64),challenge=Buffer.from(await crypto.subtle.digest('SHA-256',Buffer.from(verifier))).toString('base64url');
+ const desktop=f.signedArgs({client_id:'hopsesh-desktop-v1',response_type:'code',redirect_uri:'http://127.0.0.1:43210/callback',code_challenge_method:'S256',code_challenge:challenge,state:'c'.repeat(64)});
+ const before=structuredClone([...f.storage.values]),original=f.storage.transaction;
+ f.storage.transaction=async()=>{throw new Error('private-storage-details')};
+ f.advance(5);
+ const calls=[
+  ()=>f.invoke('/v1/device/code',f.args),
+  ()=>f.invoke('/v1/authorization/request',desktop),
+  ()=>f.token(flow),
+  ()=>f.invoke('/v1/authorization/token',{client_id:'hopsesh-desktop-v1',grant_type:'authorization_code',code:'a'.repeat(64),code_verifier:verifier,redirect_uri:desktop.redirect_uri}),
+  ()=>f.browser('/v1/device/review',{user_code:flow.user_code}),
+  ()=>f.browser('/v1/device/approve',{user_code:flow.user_code,nonce:review.nonce,decision:'approve'}),
+ ];
+ for(const call of calls){
+  const response=await call();assert.equal(response.status,503);
+  assert.deepEqual(await response.json(),{error:'temporarily_unavailable'});
+  assert.deepEqual([...f.storage.values],before);assert.equal(f.enrollments(),0);
+ }
+ f.storage.transaction=original;
+ assert.equal((await f.browser('/v1/device/approve',{user_code:flow.user_code,nonce:review.nonce,decision:'approve'})).status,200);
+ assert.equal((await f.token(flow)).status,200);assert.equal(f.enrollments(),1);
+});
 test('signed device request, browser review and approval create only one routing credential',async()=>{
  const f=await fixture(),flow=await f.issue();assert.equal(flow.verification_uri,'https://relay.test/device');
  assert.equal(flow.interval,5);assert.equal(flow.expires_in,600);
