@@ -228,7 +228,7 @@ func (a *App) Scan(ctx context.Context, o ScanOptions) *Inventory {
 			localListed.Do(func() { localEntries <- slices.Clone(u.Entries) })
 		}
 		scope := a.CatalogScope()
-		if !o.NoCache && (scope != lastSavedScope || time.Since(lastSaved) > 250*time.Millisecond || u.Complete) {
+		if !o.NoCache && (scope != lastSavedScope || time.Since(lastSaved) > catalogProgressEvery || u.Complete) {
 			update := &Inventory{Discovering: !u.Complete, Clouds: u.Clouds, Entries: u.Entries}
 			if u.Machine != nil {
 				update.Machines = []*Machine{u.Machine}

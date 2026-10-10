@@ -1,11 +1,13 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"github.com/roeehrl/hopsesh/sdk/agent"
+	"maps"
 	"os"
 	"slices"
 	"time"
@@ -166,30 +168,89 @@ func (a *App) saveCatalog(inv *Inventory, started time.Time) {
 	a.Catalog.Update(a.CatalogScope(), func(old []byte) any {
 		saved := catalogSnapshot{}
 		_ = json.Unmarshal(old, &saved)
-		if saved.Sources == nil {
-			saved.Sources = map[string]time.Time{}
+		previous := saved.Inventory
+		previous.Entries = slices.Clone(previous.Entries)
+		sources := maps.Clone(saved.Sources)
+		if sources == nil {
+			sources = map[string]time.Time{}
 		}
 		merged := &saved.Inventory
 		for _, m := range inv.Machines {
-			if saved.Sources[m.Name].After(started) {
+			if sources[m.Name].After(started) {
 				continue
 			}
 			merged = MergeDiscovery(merged, ScanUpdate{Machine: m, Entries: machineEntries(inv, m.Name), Complete: !inv.Discovering})
-			saved.Sources[m.Name] = started
+			sources[m.Name] = started
 		}
 		for _, c := range inv.Clouds {
-			if saved.Sources[c.Name].After(started) {
+			if sources[c.Name].After(started) {
 				continue
 			}
 			merged = MergeDiscovery(merged, ScanUpdate{Clouds: []*Cloud{c}, Entries: machineEntries(inv, c.Name), Complete: !inv.Discovering})
-			saved.Sources[c.Name] = started
+			sources[c.Name] = started
 		}
 		merged.Discovering = false
 		merged.Adopted = nil
 		merged.Waiting = nil
+		for i := range merged.Entries {
+			merged.Entries[i] = catalogEntry(merged.Entries[i])
+		}
+		// An idle app rescans the same sessions: keep the stored snapshot, and write
+		// nothing, unless what browsing shows changed or the check times are an hour old.
+		if sameCatalog(&previous, merged) && latestSource(saved.Sources).After(time.Now().Add(-catalogRefresh)) {
+			return json.RawMessage(old)
+		}
+		saved.Sources = sources
 		saved.Inventory = *merged
 		return saved
 	})
+}
+
+// catalogProgressEvery spaces the partial saves other front ends follow during a scan.
+const catalogProgressEvery = 2 * time.Second
+
+// catalogRefresh is how stale the stored check times may get while nothing else changes.
+const catalogRefresh = time.Hour
+
+// catalogEntry is what the catalog keeps of a row: what browsing shows before the first
+// scan, without live state (CachedInventory resets it) or the lineage revision graph.
+// Transfers never plan from a saved row (Plan refuses cached rows).
+func catalogEntry(e Entry) Entry {
+	e.Lineage = e.Lineage.Outline()
+	e.Live = agent.LiveInfo{}
+	e.Returns = nil
+	e.Movement = nil
+	return e
+}
+
+// sameCatalog compares two snapshots without the times every scan refreshes.
+func sameCatalog(a, b *Inventory) bool {
+	strip := func(inv *Inventory) []byte {
+		c := *inv
+		c.Machines = nil
+		for _, m := range inv.Machines {
+			mm := *m
+			mm.CheckedAt, mm.Phase = time.Time{}, ""
+			c.Machines = append(c.Machines, &mm)
+		}
+		c.Entries = slices.Clone(inv.Entries)
+		for i := range c.Entries {
+			c.Entries[i].ObservedAt = time.Time{}
+		}
+		b, _ := json.Marshal(c)
+		return b
+	}
+	return bytes.Equal(strip(a), strip(b))
+}
+
+func latestSource(ts map[string]time.Time) time.Time {
+	var t time.Time
+	for _, v := range ts {
+		if v.After(t) {
+			t = v
+		}
+	}
+	return t
 }
 
 // discoveryLease lets simultaneous GUI, Quick, TUI and CLI browsers follow one

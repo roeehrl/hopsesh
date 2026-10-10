@@ -84,7 +84,13 @@ func (a *App) AttachDesktop(main *application.WebviewWindow) {
 						lastScan = at
 					}
 				}
-				if time.Since(lastScan) >= time.Minute {
+				// In the background the menu bar's list refreshes every few minutes;
+				// an app nobody is looking at should do almost nothing.
+				every := quickRefreshBackground
+				if fg {
+					every = time.Minute
+				}
+				if time.Since(lastScan) >= every {
 					a.refreshQuick()
 					lastScan = time.Now()
 				}
@@ -106,6 +112,11 @@ func (a *App) AttachDesktop(main *application.WebviewWindow) {
 		}
 	}()
 }
+
+// quickRefreshBackground is how often the menu bar's sessions refresh while no
+// hopsesh window is in front.
+const quickRefreshBackground = 5 * time.Minute
+
 func (a *App) DesktopSettings() desktop.State {
 	if a.Desktop != nil {
 		return a.Desktop.Snapshot()

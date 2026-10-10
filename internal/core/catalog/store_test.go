@@ -169,3 +169,36 @@ func TestCollectorCacheFailureDoesNotBlockBrowsing(t *testing.T) {
 		}
 	}
 }
+
+func TestUnchangedUpdateWritesNothing(t *testing.T) {
+	s := New(t.TempDir())
+	defer s.Close()
+	body := map[string]string{"title": "same"}
+	s.Update("scope", func(_ []byte) any { return body })
+	var first int64
+	if err := s.db.QueryRow("SELECT started FROM snapshots WHERE scope='scope'").Scan(&first); err != nil {
+		t.Fatal(err)
+	}
+	s.Update("scope", func(_ []byte) any { return body })
+	var again int64
+	_ = s.db.QueryRow("SELECT started FROM snapshots WHERE scope='scope'").Scan(&again)
+	if again != first {
+		t.Fatal("an identical snapshot was rewritten")
+	}
+}
+
+func TestShrunkCatalogGivesSpaceBack(t *testing.T) {
+	dir := t.TempDir()
+	s := New(dir)
+	defer s.Close()
+	big := make([]byte, 48<<20)
+	s.Update("scope", func(_ []byte) any { return big })
+	s.Update("scope", func(_ []byte) any { return "small" })
+	info, err := os.Stat(filepath.Join(dir, "catalog", "sessions-v1.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() > 4<<20 {
+		t.Fatalf("catalog stayed %d bytes after its snapshot shrank", info.Size())
+	}
+}

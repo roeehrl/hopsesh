@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -62,8 +63,10 @@ type movementObservation struct {
 func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
 	graphs := map[string]*lineage.Manifest{}
 	invalid := map[string]bool{}
+	// Saved rows (Cached) carry a lineage outline, not the revision graph, and keep the
+	// movement they were saved with: only rows read in this scan are compared.
 	for _, e := range inv.Entries {
-		if e.Lineage == nil || e.LineageError != "" {
+		if e.Lineage == nil || e.LineageError != "" || e.Cached {
 			continue
 		}
 		family := e.Lineage.Family
@@ -79,72 +82,12 @@ func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
 		}
 		observed := map[lineage.ReplicaID]movementObservation{}
 		ids := map[int]lineage.ReplicaID{}
-		for i := range inv.Entries {
-			e := &inv.Entries[i]
-			if e.Lineage == nil || e.Lineage.Family != family || e.LineageError != "" {
-				continue
-			}
-			m := inv.Machine(e.Machine)
-			if m == nil || m.host == nil {
-				continue
-			}
-			in, installed := m.InstallProfile(e.Agent, e.Session.Key.Profile)
-			branch := g.ForBranch(e.Lineage.Branch)
-			r, id, ok := branch.FindBinding(e.Session.Key, m.host.Facts.Endpoint, in.BindingID())
-			if !ok {
-				r, id, ok = branch.FindEndpoint(e.Session.Key, m.host.Facts.Endpoint)
-			}
-			if !ok {
-				continue
-			}
-			ids[i] = id
-			observation := movementObservation{entry: e}
-			mod, enabled := a.Module(e.Agent)
-			writer, writable := mod.(agent.Writer)
-			portable := writable && writer.Profile(in).PortableAppend
-			if !installed || !enabled || in.BindingID() != r.Binding && !portable {
-				observed[id] = observation
-				continue
-			}
-			reader, ok := mod.(agent.Reader)
-			if !ok {
-				continue
-			}
-			h, err := m.host.For(ctx, mod.Spec(), in, nil)
-			if err == nil {
-				seg, readErr := a.readMovementSegment(ctx, reader, h, in, *e, m.host.Facts.Endpoint)
-				if readErr == nil {
-					observation.agentAnchors = map[string]bool{}
-					for ni, n := range seg.Nodes {
-						if n.Actor == ir.Agent || n.Kind == ir.KindToolCall {
-							anchor := fmt.Sprintf("node:%d", ni)
-							if n.Native != nil && n.Native.Anchor != "" {
-								anchor = n.Native.Anchor
-							}
-							observation.agentAnchors[anchor] = true
-						}
-					}
-					if in.BindingID() != r.Binding {
-						_, observation.state, err = branch.ObserveBinding(lineage.Replica{Key: r.Key, Endpoint: r.Endpoint, Binding: in.BindingID(), Location: r.Location, Line: r.Line}, &seg)
-						if err == nil {
-							err = g.Merge(branch)
-						}
-						// Observation is ephemeral; route ancestry remains the committed graph.
-					} else {
-						observation.state, err = g.Observe(id, &seg)
-					}
-					observation.valid = err == nil
-					observation.checked = e.ObservedAt
-				}
-			}
-			observed[id] = observation
-			// Historical bindings name the same native file. They share the fresh
-			// observation for presentation, without rewriting their authorship.
-			for _, old := range g.Replicas {
-				if old.Key == r.Key && old.Endpoint == r.Endpoint && old.Line == r.Line {
-					observed[old.ID] = observation
-				}
-			}
+		fingerprint := a.movementFingerprint(ctx, inv, family, g)
+		if memo, ok := a.movementMemo.get(family, fingerprint); ok {
+			g = memo.recall(inv, observed, ids)
+		} else {
+			a.observeFamily(ctx, inv, family, g, observed, ids)
+			a.movementMemo.put(family, fingerprint, g, inv, observed, ids)
 		}
 		for i, id := range ids {
 			e := &inv.Entries[i]
@@ -222,6 +165,78 @@ func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
 				if e.Movement != nil && a.MovementNoticeDelivery(e.Agent, e.Session.Key.Profile, string(e.Session.Key.Session), hookNoticeText(e.Movement), MovementNoticeIdentity{Operation: e.Movement.Operation, Status: e.Movement.Status}) {
 					e.Movement.Delivery = "supplied-to-hook"
 				}
+			}
+		}
+	}
+}
+
+// observeFamily reads each copy in one lineage family and observes its native content
+// against the family graph g (in memory; nothing is written).
+func (a *App) observeFamily(ctx context.Context, inv *Inventory, family string, g *lineage.Manifest, observed map[lineage.ReplicaID]movementObservation, ids map[int]lineage.ReplicaID) {
+	for i := range inv.Entries {
+		e := &inv.Entries[i]
+		if e.Lineage == nil || e.Lineage.Family != family || e.LineageError != "" || e.Cached {
+			continue
+		}
+		m := inv.Machine(e.Machine)
+		if m == nil || m.host == nil {
+			continue
+		}
+		in, installed := m.InstallProfile(e.Agent, e.Session.Key.Profile)
+		branch := g.ForBranch(e.Lineage.Branch)
+		r, id, ok := branch.FindBinding(e.Session.Key, m.host.Facts.Endpoint, in.BindingID())
+		if !ok {
+			r, id, ok = branch.FindEndpoint(e.Session.Key, m.host.Facts.Endpoint)
+		}
+		if !ok {
+			continue
+		}
+		ids[i] = id
+		observation := movementObservation{entry: e}
+		mod, enabled := a.Module(e.Agent)
+		writer, writable := mod.(agent.Writer)
+		portable := writable && writer.Profile(in).PortableAppend
+		if !installed || !enabled || in.BindingID() != r.Binding && !portable {
+			observed[id] = observation
+			continue
+		}
+		reader, ok := mod.(agent.Reader)
+		if !ok {
+			continue
+		}
+		h, err := m.host.For(ctx, mod.Spec(), in, nil)
+		if err == nil {
+			seg, readErr := a.readMovementSegment(ctx, reader, h, in, *e, m.host.Facts.Endpoint)
+			if readErr == nil {
+				observation.agentAnchors = map[string]bool{}
+				for ni, n := range seg.Nodes {
+					if n.Actor == ir.Agent || n.Kind == ir.KindToolCall {
+						anchor := fmt.Sprintf("node:%d", ni)
+						if n.Native != nil && n.Native.Anchor != "" {
+							anchor = n.Native.Anchor
+						}
+						observation.agentAnchors[anchor] = true
+					}
+				}
+				if in.BindingID() != r.Binding {
+					_, observation.state, err = branch.ObserveBinding(lineage.Replica{Key: r.Key, Endpoint: r.Endpoint, Binding: in.BindingID(), Location: r.Location, Line: r.Line}, &seg)
+					if err == nil {
+						err = g.Merge(branch)
+					}
+					// Observation is ephemeral; route ancestry remains the committed graph.
+				} else {
+					observation.state, err = g.Observe(id, &seg)
+				}
+				observation.valid = err == nil
+				observation.checked = e.ObservedAt
+			}
+		}
+		observed[id] = observation
+		// Historical bindings name the same native file. They share the fresh
+		// observation for presentation, without rewriting their authorship.
+		for _, old := range g.Replicas {
+			if old.Key == r.Key && old.Endpoint == r.Endpoint && old.Line == r.Line {
+				observed[old.ID] = observation
 			}
 		}
 	}
@@ -351,17 +366,21 @@ func (a *App) cacheMovement(e Entry) {
 	if err != nil {
 		return
 	}
+	rec := cachedMovement{Key: e.Session.Key, Path: e.Session.Path, Digest: digest(b), Notice: e.Movement}
+	path := a.movementCachePath(e.Session.Key)
+	data, err := json.Marshal(rec)
+	if err != nil {
+		return
+	}
+	// The record already says this for this exact sidecar: nothing to check or write.
+	if old, err := os.ReadFile(path); err == nil && bytes.Equal(old, data) {
+		return
+	}
 	current, err := lineage.Parse(b)
 	if err != nil || digest(current.Encode()) != digest(e.Lineage.Encode()) {
 		return
 	}
-	rec := cachedMovement{Key: e.Session.Key, Path: e.Session.Path, Digest: digest(b), Notice: e.Movement}
-	path := a.movementCachePath(e.Session.Key)
 	if os.MkdirAll(filepath.Dir(path), 0700) != nil {
-		return
-	}
-	data, err := json.Marshal(rec)
-	if err != nil {
 		return
 	}
 	f, err := os.CreateTemp(filepath.Dir(path), ".notice-")

@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Fixed
+
+- The desktop app no longer burns CPU and rewrites its session catalog while idle. The
+  catalog stored each session's full lineage revision graph (tens of megabytes on a long
+  session) and rewrote it several times per refresh, about 20 MB/s of disk writes. It now
+  keeps only what browsing shows (78 MB → 0.4 MB on a busy machine), writes nothing when a
+  refresh finds no change, gives back the space once, and keeps its journal small.
+- Refreshes no longer re-read and re-hash every moved session's whole transcript (hundreds
+  of megabytes for a long Codex session) when nothing in that session changed, or rewrite
+  each session's movement record. In the background the menu bar's list refreshes every
+  five minutes instead of every minute.
+
 ## [0.4.3] - 2026-10-10
 
 ### Changed

@@ -3,6 +3,7 @@
 package catalog
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -45,7 +46,7 @@ func (s *Store) open() error {
 			return
 		}
 		s.db.SetMaxOpenConns(1)
-		_, s.err = s.db.Exec(`PRAGMA busy_timeout=100; PRAGMA journal_mode=WAL;
+		_, s.err = s.db.Exec(`PRAGMA busy_timeout=100; PRAGMA journal_mode=WAL; PRAGMA journal_size_limit=8388608;
 CREATE TABLE IF NOT EXISTS leases(scope TEXT PRIMARY KEY,owner TEXT NOT NULL,expires INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS snapshots (scope TEXT PRIMARY KEY, started INTEGER NOT NULL, body BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS summaries (scope TEXT NOT NULL, path TEXT NOT NULL, signature TEXT NOT NULL, touched INTEGER NOT NULL, body BLOB NOT NULL, PRIMARY KEY(scope,path));`)
@@ -65,7 +66,7 @@ CREATE TABLE IF NOT EXISTS summaries (scope TEXT NOT NULL, path TEXT NOT NULL, s
 					return
 				}
 				s.db.SetMaxOpenConns(1)
-				_, s.err = s.db.Exec(`PRAGMA busy_timeout=100;PRAGMA journal_mode=WAL;
+				_, s.err = s.db.Exec(`PRAGMA busy_timeout=100;PRAGMA journal_mode=WAL;PRAGMA journal_size_limit=8388608;
 CREATE TABLE leases(scope TEXT PRIMARY KEY,owner TEXT NOT NULL,expires INTEGER NOT NULL);
 CREATE TABLE snapshots(scope TEXT PRIMARY KEY,started INTEGER NOT NULL,body BLOB NOT NULL);
 CREATE TABLE summaries(scope TEXT NOT NULL,path TEXT NOT NULL,signature TEXT NOT NULL,touched INTEGER NOT NULL,body BLOB NOT NULL,PRIMARY KEY(scope,path));`)
@@ -138,8 +139,8 @@ func (s *Store) Update(scope string, merge func([]byte) any) {
 	var old []byte
 	_ = conn.QueryRowContext(context.Background(), "SELECT body FROM snapshots WHERE scope=?", scope).Scan(&old)
 	b, err := json.Marshal(merge(old))
-	if err != nil {
-		return
+	if err != nil || bytes.Equal(b, old) {
+		return // unchanged: an idle rescan writes nothing
 	}
 	if _, err = conn.ExecContext(context.Background(), `INSERT INTO snapshots VALUES(?,?,?) ON CONFLICT(scope) DO UPDATE SET started=excluded.started,body=excluded.body`, scope, time.Now().UnixNano(), b); err != nil {
 		return
@@ -155,6 +156,23 @@ func (s *Store) collect() {
 	_, _ = s.db.Exec("DELETE FROM summaries WHERE rowid IN (SELECT rowid FROM summaries ORDER BY touched DESC LIMIT -1 OFFSET 100000)")
 	_, _ = s.db.Exec("DELETE FROM snapshots WHERE started<?", time.Now().Add(-30*24*time.Hour).UnixNano())
 	_, _ = s.db.Exec("DELETE FROM snapshots WHERE rowid IN (SELECT rowid FROM snapshots ORDER BY started DESC LIMIT -1 OFFSET 100)")
+	s.reclaim()
+}
+
+// reclaim gives back space once most of the file is free (after snapshots shrink),
+// so a catalog that once held large rows does not stay large. It rewrites the live
+// rows once, then the next collection finds little to free and writes nothing.
+func (s *Store) reclaim() {
+	var free, pages, size int64
+	if s.db.QueryRow("PRAGMA freelist_count").Scan(&free) != nil || s.db.QueryRow("PRAGMA page_count").Scan(&pages) != nil || s.db.QueryRow("PRAGMA page_size").Scan(&size) != nil {
+		return
+	}
+	if free*size < 32<<20 || free*2 < pages {
+		return
+	}
+	if _, err := s.db.Exec("VACUUM"); err == nil {
+		_, _ = s.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	}
 }
 
 func (s *Store) Close() error {

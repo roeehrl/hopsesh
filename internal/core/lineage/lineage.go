@@ -184,6 +184,26 @@ func (m *Manifest) Clone() *Manifest {
 	_ = json.Unmarshal(b, &out)
 	return &out
 }
+
+// Outline is what browsing shows (family, branches, replicas, hops and the losses their
+// states record) without the revision graph, which can run to many megabytes per session.
+// It is for display only: it does not validate, and transfers read the full manifest.
+func (m *Manifest) Outline() *Manifest {
+	if m == nil {
+		return nil
+	}
+	out := &Manifest{Format: m.Format, Family: m.Family, Branch: m.Branch, Branches: slices.Clone(m.Branches), Replicas: slices.Clone(m.Replicas), Hops: slices.Clone(m.Hops), Compensations: slices.Clone(m.Compensations)}
+	used := map[StateID]bool{}
+	for _, h := range m.Hops {
+		used[h.Source], used[h.Target] = true, true
+	}
+	for _, s := range m.States {
+		if used[s.ID] && len(s.Loss) > 0 {
+			out.States = append(out.States, State{ID: s.ID, Replica: s.Replica, Loss: s.Loss})
+		}
+	}
+	return out
+}
 func (m *Manifest) Encode() []byte {
 	b, _ := json.MarshalIndent(m, "", "  ")
 	return append(b, '\n')
