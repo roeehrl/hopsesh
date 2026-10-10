@@ -26,6 +26,7 @@ type ReturnCandidate struct {
 	AgentName    string   `json:"agentName"`
 	Profile      string   `json:"profile"`
 	ProfileLabel string   `json:"profileLabel"`
+	Title        string   `json:"title,omitempty"`
 	Key          string   `json:"key"`
 	Status       string   `json:"status"`
 	Reason       string   `json:"reason"`
@@ -170,6 +171,10 @@ func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
 						c.Local = current.Local
 					}
 					c.ProfileLabel = profileLabel(o.entry.Profile)
+					c.Title = o.entry.Session.Title
+					if o.entry.Live.Name != "" {
+						c.Title = o.entry.Live.Name
+					}
 					if o.valid && observed[id].valid {
 						s, t := g.Covered(observed[id].state.Heads), g.Covered(o.state.Heads)
 						switch {

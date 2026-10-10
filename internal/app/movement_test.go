@@ -204,7 +204,7 @@ func TestMovementEnrichmentReadsNativeWorkAndReturnRelations(t *testing.T) {
 			t.Fatal(err)
 		}
 		key := agent.SessionKey{Agent: "claude", Session: "session"}
-		e := Entry{Machine: name, Agent: "claude", Session: agent.Summary{Key: key, Path: path}, ObservedAt: time.Now().UTC()}
+		e := Entry{Machine: name, Agent: "claude", Session: agent.Summary{Key: key, Path: path, Title: "Session on " + name}, ObservedAt: time.Now().UTC()}
 		id := g.Upsert(lineage.Replica{Location: name, Endpoint: name, Key: key})
 		ids = append(ids, id)
 		seg, err := mod.Read(ctx, h, in, e.Session, ir.Cursor{})
@@ -233,7 +233,7 @@ func TestMovementEnrichmentReadsNativeWorkAndReturnRelations(t *testing.T) {
 	}
 	inv := &Inventory{Entries: entries, Machines: machines}
 	a.EnrichMovement(ctx, inv)
-	if got := inv.Entries[1].Returns; len(got) != 1 || got[0].Status != "same" {
+	if got := inv.Entries[1].Returns; len(got) != 1 || got[0].Status != "same" || got[0].Title != inv.Entries[0].Session.Title {
 		t.Fatalf("synchronized return: %+v", got)
 	}
 	if n := inv.Entries[0].Movement; n == nil || n.Status != "prepared" {

@@ -78,7 +78,7 @@ test('same and behind candidates never plan a transfer',async({page})=>{
 });
 
 test('open original explains how to exit and rechecks the exact original only on request',async({page},info)=>{
- const calls=await fixtures(page,[candidate({agent:'claude',agentName:'Claude Code',profile:'personal',profileLabel:'roee@example.com',key:'claude@personal/original',status:'live',local:true})]);
+ const calls=await fixtures(page,[candidate({agent:'claude',agentName:'Claude Code',title:'oarbank',profile:'personal',profileLabel:'roee@example.com',key:'claude@personal/original',status:'live',local:true})]);
  const launches:any[]=[];
  await page.route('**/call',async route=>{
   const req=route.request().postDataJSON();
@@ -88,6 +88,7 @@ test('open original explains how to exit and rechecks the exact original only on
  });
  const card=details(page).getByLabel('Return destinations');
  await expect(card).toContainText('Original conversation still open');
+ await expect(card).toContainText('oarbank');
  await expect(card).toContainText('roee@example.com');
  await expect(card).not.toContainText('claude@personal/original');
  await details(page).getByRole('button',{name:'Move',exact:true}).click();

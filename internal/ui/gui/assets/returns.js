@@ -37,7 +37,7 @@ export function returnActions(e, open) {
         const d = dialog(h("div", {class:"return-guide"},
           h("span", {class:"chip st-warn"}, "Action needed"),
           h("h2", {}, `Move back to ${name}`),
-          h("div", {class:"return-original"}, agentBadge(r.agent, name), h("strong", {}, destination?.title || "Original conversation"),
+          h("div", {class:"return-original"}, agentBadge(r.agent, name), h("strong", {}, destination?.title || r.title || "Original conversation"),
             h("span", {class:"muted"}, `${r.local ? sys.Here : r.machine} · ${r.profileLabel || "Default account"}`)),
           h("p", {}, "The original conversation is still open. Exit it first so its running agent cannot overwrite the new work Hopsesh adds."),
           h("ol", {class:"return-steps"},
@@ -80,7 +80,7 @@ export function returnCard(a) {
   const destination=returnDestination(r);
   return h("div", {class:"return-blocked"},
     h("div", {class:"return-blocked-head"}, agentBadge(r.agent,r.agentName), h("strong", {}, "Original conversation still open")),
-    h("span", {class:"return-original-name"}, destination?.title || r.agentName || r.agent),
+    h("span", {class:"return-original-name"}, destination?.title || r.title || "Original conversation"),
     h("span", {class:"muted"}, `${r.local ? sys.Here : r.machine} · ${r.profileLabel || "Default account"}`),
     h("p", {}, "Exit the original before adding your new work. Its saved history stays available."),
     h("div", {class:"return-card-actions"}, h("button", {class:"btn outline",onclick:a.run}, "How to move back…"),
