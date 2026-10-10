@@ -235,6 +235,23 @@ func TestCodexAccount(t *testing.T) {
 	}
 }
 
+func TestCodexTUIFixtureCleanup(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux subreaper ownership")
+	}
+	py, err := exec.LookPath("python3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, py, "testdata/codex_tui_test.py")
+	cmd.WaitDelay = time.Second
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("fixture descendant ownership: %v: %s", err, out)
+	}
+}
+
 // Quitting a real Codex TUI that has a thread open: hopsesh finds the process holding the
 // thread's writer lock, checks it is codex and idle, and quits it; the rollout stays whole.
 func TestCodexStop(t *testing.T) {
@@ -282,12 +299,23 @@ func TestCodexStop(t *testing.T) {
 		t.Fatal(err)
 	}
 	before, _ := os.ReadFile(w.Path)
-	tui := exec.Command(py, "testdata/codex_tui.py", bin, home, w.SessionID, cwd)
+	tuiCtx, cancelTUI := context.WithCancel(context.Background())
+	defer cancelTUI()
+	tui := exec.CommandContext(tuiCtx, py, "testdata/codex_tui.py", bin, home, w.SessionID, cwd)
+	// Give the fixture time to reap its own detached descendants on Linux.
+	// A wedged fixture still fails and is killed after the bounded grace period.
+	tui.Cancel = func() error { return tui.Process.Signal(os.Interrupt) }
+	tui.WaitDelay = 10 * time.Second
 	out, _ := tui.StdoutPipe()
 	if err := tui.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = tui.Process.Kill(); _ = tui.Wait() }()
+	defer func() {
+		cancelTUI()
+		if err := tui.Wait(); err != nil && err != context.Canceled {
+			t.Errorf("reap Codex TUI fixture: %v", err)
+		}
+	}()
 	line, _ := bufio.NewReader(out).ReadString('\n')
 	if !strings.HasPrefix(line, "open ") {
 		t.Fatalf("Codex did not open the thread: %q", line)
