@@ -286,7 +286,19 @@ func (f *relayFleet) run(t *testing.T, m machineHome, args ...string) []byte {
 	cmd.Env = m.env()
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
+	diagnosticDone := make(chan struct{})
+	diagnostic := time.AfterFunc(8*time.Second, func() {
+		defer close(diagnosticDone)
+		t.Logf("slow relay CLI while fixture is live: machine=%s verb=%s", m.name, args[0])
+		f.logHealth(t)
+		for _, key := range []byte{'A', 'B', 'C'} {
+			f.probeRelay(t, key)
+		}
+	})
 	out, err := cmd.Output()
+	if !diagnostic.Stop() {
+		<-diagnosticDone
+	}
 	t.Logf("relay CLI end machine=%s verb=%s elapsed=%v error=%v fixture_error=%v", m.name, args[0], time.Since(started), err, f.ctx.Err())
 	if err != nil {
 		f.logHealth(t)
@@ -306,7 +318,7 @@ func (f *relayFleet) logHealth(t *testing.T) {
 		client := localruntime.Client{Namespace: namespace}
 		var health relay.Health
 		if err := client.Call(ctx, "relay.status", nil, &health); err == nil {
-			t.Logf("disposable owner %c relay connected=%t mode=%s rejected=%d reason=%q", key, health.Connected, health.DeliveryMode, health.Rejected, health.Error)
+			t.Logf("disposable owner %c relay connected=%t mode=%s rejected=%d reason=%q lastSuccess=%s observed=%d sent=%d failed=%d observationError=%q", key, health.Connected, health.DeliveryMode, health.Rejected, health.Error, health.LastSuccess, health.ObservationReceived, health.ObservationSent, health.ObservationFailed, health.ObservationError)
 		}
 		var snapshot observe.Snapshot
 		var observation app.Observation
