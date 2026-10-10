@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Fixed
+
+- GUI “Check now” fetches the latest release immediately, even when daily automatic
+  checks are off. Manual checks show progress and failures instead of reporting a
+  cached or unavailable result as the newest version.
+
 ## [0.4.1] - 2026-10-10
 
 ### Added

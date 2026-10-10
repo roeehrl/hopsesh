@@ -155,6 +155,7 @@ export const state = {
   presence: {}, // where this machine's sessions are open now, by machine NUL key (Presence)
   sel: null, // { machine, key }
   update: null,
+  updateCheckRevision: 0, // a manual check supersedes any pending daily check
   activity: null, // the last Activity list, for the sidebar's undo count
 };
 

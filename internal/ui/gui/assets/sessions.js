@@ -266,7 +266,16 @@ function repoSelect(checkouts) {
 // updateNote asks once whether hopsesh may check for releases, then links a newer one.
 function updateNote() {
   if (state.info.updateCheck === "") {
-    const answer = async (yes) => { await api("SetUpdateCheck", yes).catch(fail); state.info = await api("Info"); if (yes) state.update = await api("CheckUpdate").catch(() => null); render(); };
+    const answer = async (yes) => {
+      await api("SetUpdateCheck", yes).catch(fail);
+      state.info = await api("Info");
+      if (yes) {
+        const revision = state.updateCheckRevision;
+        const update = await api("CheckUpdate").catch(() => null);
+        if (revision === state.updateCheckRevision) state.update = update;
+      }
+      render();
+    };
     return h("span", {}, "Check GitHub daily for new versions? ", h("button", { class: "link", onclick: () => answer(true) }, "Yes"), " · ", h("button", { class: "link", onclick: () => answer(false) }, "No"));
   }
   if (state.update?.newer) return h("button", { class: "link", style: "text-align:left", onclick: () => go("settings", "updates") }, `hopsesh ${state.update.latest} is available`);
