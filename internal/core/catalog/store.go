@@ -177,7 +177,7 @@ func (s *Store) collect() {
 	s.reclaim()
 }
 
-// reclaim gives back space once most of the file is free (after snapshots shrink),
+// reclaim gives back space once a quarter of the file is free (after snapshots shrink),
 // so a catalog that once held large rows does not stay large. It rewrites the live
 // rows once, then the next collection finds little to free and writes nothing.
 func (s *Store) reclaim() {
@@ -185,7 +185,7 @@ func (s *Store) reclaim() {
 	if s.db.QueryRow("PRAGMA freelist_count").Scan(&free) != nil || s.db.QueryRow("PRAGMA page_count").Scan(&pages) != nil || s.db.QueryRow("PRAGMA page_size").Scan(&size) != nil {
 		return
 	}
-	if free*size < 32<<20 || free*2 < pages {
+	if free*size < 32<<20 || free*4 < pages {
 		return
 	}
 	if _, err := s.db.Exec("VACUUM"); err == nil {
