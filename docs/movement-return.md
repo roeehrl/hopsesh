@@ -123,14 +123,14 @@ destination work still blocks until the user explicitly chooses separate branche
 | `verify` | Current destination state or identity has not been verified. |
 | `same` | Both copies already cover the same conversation. |
 | `behind` | The destination contains newer work than this copy. |
-| `diverged` | Both copies have independent work; preserve branches and review the conflict. |
+| `diverged` | Each history contains work absent from the other; compare the messages before reviewing a separate branch. |
 | `missing` | A successful scan of the expected binding did not find the original. |
 | `live` | The destination needs incoming work but is open; review before returning. |
 
 `Entry.Movement` is optional. `prepared` means delivery succeeded but subsequent authored
 work has not been observed; `continued` requires newly observed agent work. Imported
 history, title changes and hook delivery do not establish continuation. `diverged` means
-both copies contain independent work. `forked` describes a separate fork. A last-checked
+each history contains work absent from the other, without establishing when that work was written. `forked` describes a separate fork. A last-checked
 time describes the observation; cached or unreachable destinations are not new live
 observations. Return actions still build and review the ordinary move plan.
 

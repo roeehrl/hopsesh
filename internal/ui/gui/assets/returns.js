@@ -30,7 +30,7 @@ export function returnActions(e, open) {
     const review = async () => {
       if (["live", "diverged", "verify", "missing"].includes(r.status) && canPlan) return plan();
       const destination = returnDestination(r);
-      const explanation = r.status === "diverged" ? "Both copies changed. Review a plan that keeps both branches as separate sessions."
+      const explanation = r.status === "diverged" ? "The conversations contain different work. Compare the histories before reviewing a separate session."
         : r.status === "live" ? `The original session is still running on ${r.machine}. ${sessionExitHelp(!!destination?.app)}`
         : r.status === "verify" ? "This destination has not been verified. Planning must reach it and check the exact session before any change."
         : r.status === "missing" ? "The original destination session is missing. You can review creating a new session there; this does not reuse or restore the missing original."
@@ -83,7 +83,7 @@ export async function showMovementDestination(n, show) {
 export function movementNotice(e, show, viewJourney) {
   const n = e.movement;
   if (!n) return null;
-  const explanation = {prepared:"Destination prepared; new work has not been observed.", continued:"New work was observed at the destination.", diverged:"Both copies changed; preserve both branches when reviewing a return.", forked:"A separate branch was prepared; it does not return into its parent."}[n.status] || n.status;
+  const explanation = {prepared:"Destination prepared; new work has not been observed.", continued:"New work was observed at the destination.", diverged:"The conversations contain different work; compare their histories before returning.", forked:"A separate branch was prepared; it does not return into its parent."}[n.status] || n.status;
   return h("section", {class:"sec movement-notice", "aria-label":"Movement notice"},
     h("span", {class:"sec-h"}, `Movement · ${n.status}`), h("span", {}, (n.text || "").replace(/ Last checked \d{4}-\d{2}-\d{2}T\S+\.$/, "")), h("span", {class:"muted"}, explanation),
     h("span", {}, `${n.agentName || n.agent} · ${n.profileLabel || n.profile || "Default account"} on ${n.machine}`),

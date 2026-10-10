@@ -53,7 +53,7 @@ Nothing changes until you confirm (or pass --yes). hopsesh undo <id> here undoes
 	f.Bool("no-sync", false, "do not fetch or fast-forward the checkout there")
 	f.Bool("push", false, "first push the session branch's unpushed commits from here")
 	f.Bool("replace", false, "when the copy there changed too, replace it anyway")
-	f.Bool("keep-both", false, "when both copies changed, keep both")
+	f.Bool("keep-both", false, "preserve different conversation histories by creating a separate session")
 	f.Bool("dry-run", false, "show the plan and stop")
 	f.Bool("yes", false, "do not ask for confirmation")
 	f.Bool("json", false, "output JSON")

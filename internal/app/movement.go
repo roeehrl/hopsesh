@@ -189,7 +189,7 @@ func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
 							c.Reason = "Review and add the missing conversation"
 						default:
 							c.Status = "diverged"
-							c.Reason = "Both copies contain independent work; preserve separate branches"
+							c.Reason = "Conversation histories differ; review the messages before returning"
 						}
 						if o.entry.Live.State == agent.Live && c.Status == "available" {
 							c.Status = "live"
@@ -269,7 +269,7 @@ func (a *App) movementNotice(g *lineage.Manifest, id lineage.ReplicaID, observed
 	case "continued":
 		n.Text = "This branch continued in " + where + ". This copy may lack later work."
 	case "diverged":
-		n.Text = "Both this copy and the copy in " + where + " contain independent work. Review before moving."
+		n.Text = "This conversation and the copy in " + where + " contain different work. Compare the histories before moving."
 	case "forked":
 		n.Text = "A separate fork was prepared in " + where + ". This original branch remains available."
 		if continued {

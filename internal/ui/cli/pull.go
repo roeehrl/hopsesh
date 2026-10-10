@@ -50,7 +50,7 @@ func addPullFlags(cmd *cobra.Command) {
 	f.String("operation-id", "", "idempotency key for retrying the same transfer")
 	f.String("target-profile", "", "destination account profile ID (hopsesh accounts list)")
 	f.String("target-session", "", "explicit destination session when a branch has several replicas here")
-	f.Bool("keep-both", false, "when both copies changed, keep both (this one comes in as a separate session)")
+	f.Bool("keep-both", false, "preserve different conversation histories by creating a separate session")
 	f.Bool("app", false, "open it in the agent's desktop app instead of the terminal (agents that can)")
 	f.Bool("run", false, "start the agent in the new location when done")
 	f.String("terminal", "", "with --run: start it in a new tab of this terminal app instead of here (see hopsesh terminals)")

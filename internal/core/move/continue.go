@@ -390,7 +390,7 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 			return
 		default:
 			cp.Relation = RelationDiverged
-			p.Conflict = "both sessions contain independent work; preserve them as separate branches"
+			p.Conflict = "conversation histories contain different work; review the differences before returning"
 		}
 	}
 	if opt.Conflict == ConflictKeepBoth {
