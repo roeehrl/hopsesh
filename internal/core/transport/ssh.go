@@ -222,8 +222,10 @@ func (c *Conn) run(ctx context.Context, remoteCmd string) ([]byte, error) {
 	args := append(c.baseArgs(), c.Dest, "--", remoteCmd)
 	cmd := sshCommandContext(ctx, c.sshBinary, args...)
 	// Proxy helpers can retain inherited output handles after ssh exits or is
-	// canceled. Bound pipe draining too, without killing unrelated descendants.
-	cmd.WaitDelay = 100 * time.Millisecond
+	// canceled. Allow finite output draining after successful exit: a 100ms
+	// grace can discard pending output and turn success into ErrWaitDelay.
+	// Still bound stuck inherited pipes, without killing unrelated descendants.
+	cmd.WaitDelay = time.Second
 	if env != nil {
 		cmd.Env = append(cmd.Environ(), env...)
 	}

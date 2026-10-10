@@ -5,7 +5,7 @@ on:
       target:
         type: choice
         default: all
-        options: [all, scheduler, codex-cleanup, git-probe, runtime-startup, pty-flow, relay-forks]
+        options: [all, scheduler, codex-cleanup, git-probe, runtime-startup, pty-flow, relay-forks, ssh-drain]
 permissions:
   contents: read
 jobs:
@@ -212,4 +212,30 @@ jobs:
         with:
           name: relay-forks-diagnostics
           path: relay-forks.log
+          retention-days: 7
+
+  ssh-drain:
+    if: inputs.target == 'ssh-drain'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: native transport race suite without retries
+        shell: bash
+        run: go test -race -count=1 -v -timeout 8m ./internal/core/transport 2>&1 | tee ssh-drain.log
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: ssh-drain-${{ matrix.os }}
+          path: ssh-drain.log
           retention-days: 7
