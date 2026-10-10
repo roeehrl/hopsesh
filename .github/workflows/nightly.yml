@@ -93,14 +93,14 @@ jobs:
       - name: native PowerShell parent
         shell: pwsh
         run: |
-          go test -race -count=1 -v -run 'TestProbeWindowsShellDiagnostic|TestProbeLocalSlowFolder|TestProbeCancellationStopsChildren' -timeout 3m ./internal/core/repos 2>&1 | Tee-Object git-pwsh.log
+          go test -race -count=1 -v -timeout 3m ./internal/core/repos 2>&1 | Tee-Object git-pwsh.log
           if ($LASTEXITCODE -ne 0) { throw 'PowerShell parent probe failed' }
       - name: native Bash parent matching primary CI
         if: always()
         shell: bash
         run: |
           set -o pipefail
-          go test -race -count=1 -v -run 'TestProbeWindowsShellDiagnostic|TestProbeLocalSlowFolder|TestProbeCancellationStopsChildren' -timeout 3m ./internal/core/repos 2>&1 | tee git-bash.log
+          go test -race -count=1 -v -timeout 3m ./internal/core/repos 2>&1 | tee git-bash.log
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
