@@ -1,5 +1,44 @@
 # Hosted 0.5 staging qualification
 
+## October 10 completed diagnostic and corrected acceptance
+
+The frozen `a909f32` diagnostic, using the unchanged `7c8b42e` production Worker,
+passes 14 rounds to 100 clients, aged reconnect, native renewal, cloud
+admission/revocation and ciphertext drain in 3,885.78s. It records 9,221 HTTP
+requests, 673 WebSocket handshakes and 256 rate-limited requests. Its redacted
+tail has 163 records and no exceptions; no close marker was emitted, although
+post-run process inspection confirms no capture process remains. Paused staging
+is verified at 06:11:52 UTC. This does not establish the original HTTP 500 cause.
+
+Whole-service adaptive analytics for 05:06:49–06:11:53 UTC, including cleanup,
+return fewer than the 1,000-group limit in every dataset and no query errors:
+
+| Component | Observed usage |
+| --- | --- |
+| Relay Worker | 9,275 requests; 7,957.962 CPU ms; zero execution errors; 487 disconnects |
+| Downloads Worker | 1 request; 0.546 CPU ms; zero execution errors |
+| Mailbox objects | 46.22282816 GB-s; 262,001 SQL rows read; 36,070 written |
+| Authorization objects | 0.254626432 GB-s; 24 SQL rows read; 16 written |
+| Ciphertext R2 | 4,361 operations; 1,509,840 response bytes |
+| Latest returned SQL storage sample, 05:15 UTC | Mailbox 671,744 bytes; authorization 16,384 bytes |
+| Latest returned ciphertext storage sample, 05:40 UTC | One 256-byte object; 43 metadata bytes; no multipart uploads |
+| Latest returned downloads storage sample, 05:50 UTC | 20 objects; 74,860,448 payload bytes; 2,382 metadata bytes |
+
+Neither object class reports CPU-limit, memory-limit or fatal internal errors.
+Mailbox invocation errors remain recorded: 403 client-disconnected HTTP calls,
+17 response-stream disconnects and one client-disconnected alarm. Adaptive
+analytics and client counters are different meters. Sparse storage samples do
+not prove final cleanup, and these estimates are not settled billing. Evidence:
+`qualification/a909f32-hosted-diagnostic/{verified,metrics-verified}.json`.
+
+Corrected hosted acceptance at clean `1e7dd9a` starts at 06:20:13 UTC. The
+production blobs match native-qualified `b5c7640`. Hosted retention (61.84s)
+and staging movement (33.90s) pass; the one-hour load starts at 06:21:57 UTC
+and remains incomplete. Staging is temporarily unpaused for this isolated run;
+its wrapper restores paused deployment and explicitly joins diagnostic capture.
+The capture now retains handled 429/5xx statuses as well as exceptional
+outcomes. Evidence: `qualification/1e7dd9a-hosted/checkpoint.json`.
+
 ## October 10 durable-notification qualification in progress
 
 Staging was unpaused at 04:03:38 UTC for deployment
