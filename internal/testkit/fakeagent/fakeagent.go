@@ -50,6 +50,10 @@ func Codex() int {
 	logCall("codex " + strings.Join(os.Args[1:], " "))
 	switch {
 	case len(os.Args) > 1 && os.Args[1] == "--version":
+		if v := os.Getenv("FAKE_CODEX_VERSION"); v != "" {
+			fmt.Println("codex-cli " + v)
+			break
+		}
 		fmt.Println(fakecloud.CodexVersionLine)
 	case len(os.Args) > 1 && os.Args[1] == "app-server":
 		return appServer()
@@ -141,6 +145,15 @@ func appServer() int {
 			} else {
 				answer(map[string]any{"account": nil, "requiresOpenaiAuth": true})
 			}
+		case "hooks/list":
+			// $FAKE_CODEX_HOOKS (trusted | untrusted | modified) is how Codex reviewed the hooks
+			// in $CODEX_HOME/hooks.json; unset, this Codex predates hooks/list.
+			trust := os.Getenv("FAKE_CODEX_HOOKS")
+			if trust == "" {
+				_ = out.Encode(map[string]any{"id": *req.ID, "error": map[string]any{"message": "unknown method " + req.Method}})
+				break
+			}
+			answer(map[string]any{"data": []any{map[string]any{"cwd": home, "hooks": listHooks(home, trust), "warnings": []any{}, "errors": []any{}}}})
 		case "externalAgentConfig/import":
 			answer(map[string]any{})
 			id, err := importSession(home, req.Params)
@@ -230,4 +243,29 @@ func importSession(home string, params json.RawMessage) (string, error) {
 		appendIndex(home, id, s.Title)
 	}
 	return id, nil
+}
+
+// listHooks reports every command hook in hooks.json the way Codex's hooks/list does.
+func listHooks(home, trust string) []any {
+	var file struct {
+		Hooks map[string][]struct {
+			Hooks []struct {
+				Command string `json:"command"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	b, err := os.ReadFile(filepath.Join(home, "hooks.json"))
+	if err != nil || json.Unmarshal(b, &file) != nil {
+		return []any{}
+	}
+	out := []any{}
+	for event, groups := range file.Hooks {
+		name := strings.ToLower(event[:1]) + event[1:]
+		for _, g := range groups {
+			for _, h := range g.Hooks {
+				out = append(out, map[string]any{"eventName": name, "handlerType": "command", "command": h.Command, "enabled": true, "isManaged": false, "source": "user", "trustStatus": trust})
+			}
+		}
+	}
+	return out
 }
