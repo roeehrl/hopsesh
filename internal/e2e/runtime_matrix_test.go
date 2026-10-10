@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"net/http/httputil"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -394,11 +396,59 @@ func (f *relayFleet) applyNetworkPolicy(t *testing.T, origin string, upstream *h
 	}
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	proxy.Transport = upstream.Transport
+	// Failure-only, bounded transport evidence distinguishes a blocked upstream
+	// request from mailbox processing inside an owner. Never retain credentials,
+	// request/response bodies, URL values, headers or raw transport errors.
+	owners := map[string]byte{}
+	for key, home := range f.homes {
+		connection, err := (relay.Store{Directory: filepath.Join(home.home, "state", "relay")}).Connection(f.ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		owners["Bearer "+connection.Token] = key
+	}
+	started := time.Now()
+	var traceMu sync.Mutex
+	var traces []string
+	traceEvent := func(id int64, owner byte, operation, phase string) {
+		traceMu.Lock()
+		defer traceMu.Unlock()
+		if len(traces) == 256 {
+			copy(traces, traces[1:])
+			traces = traces[:255]
+		}
+		traces = append(traces, fmt.Sprintf("%s request=%d owner=%c operation=%s phase=%s", time.Since(started).Round(time.Millisecond), id, owner, operation, phase))
+	}
+	t.Cleanup(func() {
+		if t.Failed() {
+			traceMu.Lock()
+			defer traceMu.Unlock()
+			t.Logf("disposable policy proxy transport transitions (last 256):\n%s", strings.Join(traces, "\n"))
+		}
+	})
 	var denied atomic.Int64
 	var posts atomic.Int64
 	var requests atomic.Int64
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests.Add(1)
+		id := requests.Add(1)
+		owner, ok := owners[r.Header.Get("Authorization")]
+		if !ok {
+			owner = '?'
+		}
+		operation := "other"
+		switch r.Method + " " + r.URL.Path {
+		case "GET /v1/messages":
+			operation = "poll"
+		case "POST /v1/messages":
+			operation = "submit"
+		case "POST /v1/ack":
+			operation = "ack"
+		case "GET /v1/notifications":
+			operation = "notifications"
+		}
+		record := func(phase string) { traceEvent(id, owner, operation, phase) }
+		record("accepted")
+		defer func() { record(fmt.Sprintf("finished-canceled=%t", r.Context().Err() != nil)) }()
 		if r.URL.Path == "/v1/notifications" || r.Header.Get("Upgrade") != "" {
 			denied.Add(1)
 			http.Error(w, "WebSocket upgrades disabled by fixture network policy", http.StatusNotImplemented)
@@ -409,6 +459,14 @@ func (f *relayFleet) applyNetworkPolicy(t *testing.T, origin string, upstream *h
 			http.Error(w, "PRIVATE-PROXY-ERROR", http.StatusMethodNotAllowed)
 			return
 		}
+		r = r.WithContext(httptrace.WithClientTrace(r.Context(), &httptrace.ClientTrace{
+			GetConn: func(string) { record("upstream-connection-requested") },
+			GotConn: func(info httptrace.GotConnInfo) { record(fmt.Sprintf("upstream-connected-reused=%t", info.Reused)) },
+			WroteRequest: func(info httptrace.WroteRequestInfo) {
+				record(fmt.Sprintf("upstream-request-written-error=%t", info.Err != nil))
+			},
+			GotFirstResponseByte: func() { record("upstream-first-response-byte") },
+		}))
 		proxy.ServeHTTP(w, r)
 	}))
 	t.Cleanup(server.Close)
