@@ -713,3 +713,53 @@ retrying. The correction changes classification, not the workload's retry or
 failure assertions; it adds no automatic Worker retry. Bounded
 [live tail capture](https://developers.cloudflare.com/durable-objects/observability/troubleshooting/)
 remains necessary to diagnose the prior unhandled failure.
+
+### Windows policy-proxy failures — 2026-10-10
+
+Two follow-up runtime shards at `8f2542c` fail behind the fixture's HTTPS
+policy proxy. Row 168 misses owner B's startup deadline; the listener has not
+reported a delivery mode, while local inventory and a later fresh-connection
+mailbox probe succeed. Row 89 has three healthy HTTP-fallback owners, then its
+submit receives HTTP 502 after the proxy observes an upstream Windows socket
+reset. Both rows pass in separate local macOS executions. These facts do not
+prove a shared cause, a deadlock, or a production-server failure.
+
+The [Go transport contract](https://go.dev/src/net/http/transport.go) permits
+limited replay on a previously used connection when the request is idempotent
+and its body is replayable. Our native submit/ack transport already provides
+those properties. A reverse proxy's independent upstream request is another
+transport boundary; a returned HTTP 502 is not the same as a native socket
+error. This distinction is a diagnostic hypothesis, not justification for
+retrying arbitrary policy responses or weakening the failure assertions.
+
+The open [workerd issue 7634](https://github.com/cloudflare/workerd/issues/7634)
+reports Windows resets when an unread request body crosses a service binding.
+Its reproduction includes early responses and delayed client reads. Our
+successful submit handler reads the bounded body before accepting an envelope;
+the retained failures do not establish that the issue's unread-body trigger
+occurred. The broader [workers-sdk issue 15002](https://github.com/cloudflare/workers-sdk/issues/15002)
+reports development-runtime connection loss, but does not identify our failure
+either. Do not change pinned dependencies or disable connection reuse merely
+because a report has a similar error string.
+
+Bounded, failure-only fixture traces now identify owner A/B/C, fixed operation
+names, elapsed time, upstream connection reuse, request-write completion, first
+response byte and handler completion/cancellation. They omit credentials,
+headers, URL values, content and raw transport errors. Separate native Windows
+runs execute each original failed shard with unchanged rows, assertions and
+deadlines; every original failure remains archived. A passing diagnostic sample
+alone cannot establish the cause or close full-source acceptance.
+
+A third failure, row 502 in Windows shard 2, occurs during initial owner C
+startup, before the network-policy proxy exists. A/B are healthy using
+notifications; both C readiness and a fresh independent poll expire. The
+platform's later diagnostic endpoint still responds. The retained SQLite alarm
+cancellation line alone does not explain the stall. Windows fixture shutdown
+already invokes bounded `taskkill /T /F` and joins the child, so process leakage
+also remains a hypothesis rather than an established defect.
+
+The fresh failure probe now records bounded TCP/TLS/request/response stages to
+locate a stall without introducing another proxy, changing runtime transport,
+extending readiness, or retrying the scenario. Successful diagnostic shards 1
+and 4 retain their exact original 34/33-row selections; neither closes the
+original failure. The next Windows diagnostic preserves original shard 2.

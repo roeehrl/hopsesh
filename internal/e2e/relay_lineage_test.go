@@ -413,9 +413,11 @@ func (f *relayFleet) probeRelay(t *testing.T, key byte) {
 		client = &http.Client{Transport: http.DefaultTransport.(*http.Transport).Clone(), Timeout: 5 * time.Second}
 	}
 	defer client.CloseIdleConnections()
+	ctx, trace := relayProbeTrace(ctx)
 	started := time.Now()
 	batch, err := (relay.Transport{Base: connection.URL, Space: connection.Space, Token: connection.Token, HTTP: client}).Poll(ctx, 0)
 	t.Logf("disposable owner %c fresh-connection probe elapsed=%s messages=%d error=%v", key, time.Since(started).Round(time.Millisecond), len(batch.Messages), err)
+	t.Logf("disposable owner %c fresh-connection transport transitions:\n%s", key, trace())
 }
 func (f *relayFleet) seed(t *testing.T, agentName string) agent.Summary {
 	t.Helper()
