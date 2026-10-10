@@ -125,3 +125,19 @@ wakeup budgets, runtime ownership and subscriber cleanup pass. This is finite
 idle evidence for `3dfa2f0`, not a whole-machine energy or final-release claim.
 Evidence: `/tmp/hopsesh-3dfa2f0-gui-resource-report.json` and
 `/tmp/hopsesh-3dfa2f0-gui-resource.log`.
+
+The October 10 follow-up at clean `f1147a6` (tree equal to `4da3ee4`) passes
+in 149.31 seconds. The same baseline source binary is verified by SHA256.
+The controlled test ran separately from hosted load and other local builds.
+
+| Sample | CPU, one core | Summed footprint, bytes | Interrupt wakeups / 30s |
+| --- | ---: | ---: | ---: |
+| 0.4 baseline | 1.100% | 173,267,160 | 3,216 |
+| Current, zero extra clients | 0.116% | 173,987,984 | 272 |
+| Current, one extra client | 0.736% | 181,213,328 | 811 |
+| Current, five extra clients | 0.095% | 175,069,328 | 172 |
+
+All existing resource, shared ownership and subscriber-cleanup assertions pass;
+collection deltas are zero/one/zero. Evidence is archived in
+`qualification/4da3ee4/gui-resource/verified.json`. This finite native workload
+does not qualify whole-machine energy, long-term leaks or hosted reliability.
