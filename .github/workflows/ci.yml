@@ -62,7 +62,15 @@ jobs:
         if: runner.os != 'Windows'
         env:
           HOPSESH_JOURNEY_TEST: "1"
-        run: go test -race -count=1 -v -run '^TestJourneyCLIOverSSH$' -timeout 6m ./internal/devtools/hsmatrix
+        run: |
+          # Each family retains all four agent assignments and both fork modes.
+          # The fixture's five-minute deadline bounds one family, rather than
+          # expiring midway through 24 sequential journeys on a slower runner.
+          result=0
+          for route in ABCA ABCBCAB ABCACBA; do
+            go test -race -count=1 -v -run "^TestJourneyCLIOverSSH$/^${route}-" -timeout 6m ./internal/devtools/hsmatrix || result=1
+          done
+          exit "$result"
       - name: tests that passed only on a rerun
         if: ${{ !cancelled() && hashFiles('reruns.txt') != '' }}
         shell: bash
