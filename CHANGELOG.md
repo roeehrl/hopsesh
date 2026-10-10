@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## [0.4.1] - 2026-10-10
+
 ### Added
 
 - Saved session metadata appears immediately in GUI, Quick access, TUI and
@@ -519,6 +521,7 @@ is refused and set aside (the app offers this), and machines are added again.
 - The terminal UI no longer carries out a plan you pressed `y` on while a changed one was
   still being worked out.
 
+[0.4.1]: https://github.com/roeehrl/hopsesh/releases/tag/v0.4.1
 [0.4.0]: https://github.com/roeehrl/hopsesh/releases/tag/v0.4.0
 [0.3.1]: https://github.com/roeehrl/hopsesh/releases/tag/v0.3.1
 [0.3.0]: https://github.com/roeehrl/hopsesh/releases/tag/v0.3.0
