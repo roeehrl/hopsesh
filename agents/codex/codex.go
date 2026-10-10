@@ -406,6 +406,21 @@ func summarize(h agent.Host, r rollout) (*agent.Summary, error) {
 	return s, nil
 }
 
+// readHead reads up to headChunk bytes from the start of a rollout, however large it is.
+func readHead(h agent.Host, path string) ([]byte, error) {
+	f, err := h.FS().Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	head := make([]byte, headChunk)
+	n, err := f.ReadAt(head, 0)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, err
+	}
+	return head[:n], nil
+}
+
 // firstMeta decodes the session_meta record that starts every rollout.
 func firstMeta(b []byte) (meta, error) {
 	ls := lines(b, false)
@@ -520,10 +535,7 @@ func (m *Module) Bundle(_ context.Context, h agent.Host, in agent.Install, s age
 		}
 	}
 
-	head, err := h.FS().ReadFile(s.Path, headChunk)
-	if err != nil && !errors.Is(err, io.EOF) {
-		head = nil
-	}
+	head, _ := readHead(h, s.Path)
 	if mt, err := firstMeta(head); err == nil && mt.HistoryBase != nil && mt.HistoryBase.ThreadID != "" {
 		// A fork reads its parent's rollout by byte offset: it travels unchanged.
 		if files, err := rollouts(h, in); err == nil {
