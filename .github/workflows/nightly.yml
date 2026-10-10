@@ -5,7 +5,7 @@ on:
       target:
         type: choice
         default: all
-        options: [all, scheduler, codex-cleanup, git-probe]
+        options: [all, scheduler, codex-cleanup, git-probe, runtime-startup]
 permissions:
   contents: read
 jobs:
@@ -106,4 +106,41 @@ jobs:
         with:
           name: git-probe-diagnostics
           path: 'git-*.log'
+          retention-days: 7
+
+  runtime-startup:
+    if: inputs.target == 'runtime-startup'
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+      - run: npm ci
+        working-directory: infrastructure/relay
+      - name: record full shard and independent startup samples without retries
+        shell: bash
+        run: |
+          failure=0
+          if ! go run ./internal/devtools/hsmatrix runtime-run -t 3 -shard 4/4 -out "$RUNNER_TEMP/startup/shard" -timeout 20m; then
+            failure=1
+          fi
+          for sample in 1 2 3 4 5; do
+            if ! go run ./internal/devtools/hsmatrix runtime-run -t 3 -only 457 -out "$RUNNER_TEMP/startup/sample-$sample" -timeout 3m; then
+              failure=1
+            fi
+          done
+          exit "$failure"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: runtime-startup-diagnostics
+          path: ${{ runner.temp }}/startup
           retention-days: 7

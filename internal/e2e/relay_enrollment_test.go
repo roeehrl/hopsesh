@@ -462,7 +462,8 @@ func startSQLiteRelayFixture(t *testing.T, timeout time.Duration, vars ...string
 		_ = server.Process.Signal(os.Interrupt)
 		cancel()
 		_ = server.Wait()
-		if t.Failed() {
+		{
+			// Diagnostic branch: retain phases for every independent startup.
 			// Read only after Wait joins the output writers. These are the
 			// isolated local platform's logs, never hosted service logs.
 			body := logs.Bytes()
@@ -470,7 +471,7 @@ func startSQLiteRelayFixture(t *testing.T, timeout time.Duration, vars ...string
 			if len(body) > limit {
 				body = body[len(body)-limit:]
 			}
-			t.Logf("local SQLite/R2 platform failure log:\n%s", body)
+			t.Logf("local SQLite/R2 platform startup log:\n%s", body)
 		}
 	})
 	ready, stopReady := context.WithTimeout(ctx, 20*time.Second)
