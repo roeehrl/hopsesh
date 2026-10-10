@@ -86,3 +86,13 @@ func TestArchiveWriterMergesPriorRecordByRecord(t *testing.T) {
 		t.Fatal("prior records must come first, unchanged")
 	}
 }
+
+func TestExtractSurplusGoesToRecentTurns(t *testing.T) {
+	res := Render(Request{Nodes: turns(200, 1500), From: "Codex", To: "Claude Code", Fidelity: History, Window: 64000})
+	if res.Report.Blocked != "" {
+		t.Fatal(res.Report.Blocked)
+	}
+	if res.Report.Used < res.Report.Budget*7/10 || res.Report.Used > res.Report.Budget {
+		t.Fatalf("working context %d of %d: budget left unused", res.Report.Used, res.Report.Budget)
+	}
+}

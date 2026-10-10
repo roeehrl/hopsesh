@@ -585,6 +585,33 @@ func (res *Result) fitHistory(r Request, items []ir.Item, limit int) []ir.Item {
 		return nil
 	}
 	text := res.historyContext(r, old, min(left, 12000))
+	// The extract is usually far below its cap. Give the unused budget to more recent
+	// turns verbatim (contiguous, newest first), then rebuild the extract for what remains.
+	if spare := left - len(text) - 64; spare > 0 {
+		grown := 0
+		for len(old) > 0 && grown+ir.ItemCost(old[len(old)-1]) <= spare {
+			grown += ir.ItemCost(old[len(old)-1])
+			kept = append([]ir.Item{old[len(old)-1]}, kept...)
+			old = old[:len(old)-1]
+		}
+		if grown > 0 {
+			used = tokens(kept)
+			separator = len(kept) == 0 || kept[0].Role == ir.RoleUser
+			left = limit - used - 32
+			if separator {
+				left -= ir.ItemCost(boundary)
+			}
+			if len(old) == 0 {
+				res.oldestIncluded(kept)
+				return kept
+			}
+			coverage = coverage[:0]
+			for _, it := range old {
+				coverage = append(coverage, it.Coverage...)
+			}
+			text = res.historyContext(r, old, min(left, 12000))
+		}
+	}
 	d := ir.Item{Node: "hopsesh/digest", Role: ir.RoleUser, Text: text, Coverage: coverage, Fidelity: "summarized", Generated: len(coverage) == 0}
 	res.Report.Summarised += len(old)
 	res.oldestIncluded(kept)

@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/roeehrl/hopsesh/sdk/agent"
 	"github.com/roeehrl/hopsesh/sdk/ir"
@@ -111,6 +114,14 @@ func (m *Module) ContextCapacity(ctx context.Context, h agent.Host, in agent.Ins
 			c.Model = nativeModel
 		}
 	}
+	if c.Model == "" {
+		// A new session uses the account's default model, which no settings file names.
+		// The newest transcripts here show which model that default currently is.
+		if model := recentModel(h, in); model != "" {
+			c.Model = model
+			c.Source = "model inferred from this account's most recent Claude Code sessions"
+		}
+	}
 	// Only exact model IDs with a documented default 1M window qualify. An alias,
 	// old opt-in [1m] variant, or custom gateway never grants a larger cap.
 	switch c.Model {
@@ -137,4 +148,71 @@ func (m *Module) ContextCapacity(ctx context.Context, h agent.Host, in agent.Ins
 		c.Window = min(c.Window, compact)
 	}
 	return c, nil
+}
+
+// recentModel is the model of the newest assistant record in the most recently written
+// transcripts, read from their tails only.
+func recentModel(h agent.Host, in agent.Install) string {
+	fsys, pa := h.FS(), h.Path()
+	projects := pa.Join(in.Root(home), "projects")
+	dirs, err := fsys.ReadDir(projects)
+	if err != nil {
+		return ""
+	}
+	type file struct {
+		path string
+		mod  int64
+	}
+	var files []file
+	for _, d := range dirs {
+		if !d.IsDir() {
+			continue
+		}
+		entries, err := fsys.ReadDir(pa.Join(projects, d.Name()))
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".jsonl") {
+				files = append(files, file{pa.Join(projects, d.Name(), e.Name()), e.ModTime().UnixNano()})
+			}
+		}
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].mod > files[j].mod })
+	for _, f := range files[:min(len(files), 5)] {
+		if m := tailModel(fsys, f.path); m != "" {
+			return m
+		}
+	}
+	return ""
+}
+
+func tailModel(fsys agent.FS, p string) string {
+	f, err := fsys.Open(p)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return ""
+	}
+	n := min(fi.Size(), 256<<10)
+	buf := make([]byte, n)
+	if _, err = f.ReadAt(buf, fi.Size()-n); err != nil && !errors.Is(err, io.EOF) {
+		return ""
+	}
+	lines := strings.Split(string(buf), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		var r struct {
+			Type    string `json:"type"`
+			Message struct {
+				Model string `json:"model"`
+			} `json:"message"`
+		}
+		if json.Unmarshal([]byte(lines[i]), &r) == nil && r.Type == "assistant" && r.Message.Model != "" && r.Message.Model != "<synthetic>" {
+			return r.Message.Model
+		}
+	}
+	return ""
 }
