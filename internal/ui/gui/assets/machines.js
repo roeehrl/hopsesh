@@ -229,7 +229,7 @@ function render() {
     } });
   fill(view, h("div", { class: "page" }, h("div", { class: "page-in" },
     h("h1", {}, "Machines"),
-    h("span", { class: "muted" }, "hopsesh connects only to the machines you add, with your own ssh and keys, and only reads your coding agents' session folders until you hop a session."),
+    h("span", { class: "muted" }, "Connect machines using your SSH access or approved Internet delivery. Sharing session information and receiving transfers use the permissions you grant."),
     h("section", { class: "card" }, h("div", { class: "line-item" },
       h("span", { class: "ico push" }, icon(ICONS.here, 15)),
       h("div", { style: "flex:1 1 300px;min-width:0;display:flex;flex-direction:column;gap:3px" },
@@ -240,7 +240,7 @@ function render() {
           h("span", { class: "muted", style: "font-size:12px" }, d.here.receive ? "On: “Send to…” on your other machines can deliver sessions here." : `Off: ${sys.here} refuses sessions sent from other machines.`)),
         receive))),
     h("section", { class: "card" },
-      h("div", { class: "card-h" }, h("div", {}, h("h2", { class: "name" }, "Your machines"), h("div", { class: "muted", style: "font-size:12px" }, "Scanned when added, then every 5 minutes while this page is active. Failed scans wait for Retry.")), h("span", { class: "spacer" }), h("button", { class: "btn small", onclick: addDialog }, icon(ICONS.plus, 12), "Add by address…")),
+      h("div", { class: "card-h" }, h("div", {}, h("h2", { class: "name" }, "Your machines"), h("div", { class: "muted", style: "font-size:12px" }, "While Hopsesh is running, new machines are scanned automatically. SSH machines refresh every 5 minutes; Internet delivery receives shared updates. Connection failures retry with increasing delays. Login or host-key problems need your attention, then Retry.")), h("span", { class: "spacer" }), h("button", { class: "btn small", onclick: addDialog }, icon(ICONS.plus, 12), "Add by address…")),
       d.machines.length ? [h("div", { class: "mgrid h" }, h("span", {}, "Machine"), h("span", {}, "Login"), h("span", {}, "Last scan"), h("span", {})), d.machines.map(machineRow)]
         : h("div", { class: "empty" }, "No machines yet. Add one found below, or by its address.")),
     h("section", { class: "card" },
