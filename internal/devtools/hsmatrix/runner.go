@@ -74,12 +74,21 @@ func (remoteSide) label() string { return "there" }
 
 func (s remoteSide) do(op string, in, out any) error {
 	b, _ := json.Marshal(in)
-	cmd := exec.Command("ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "LogLevel=ERROR", s.dest, s.helper+" agent "+op)
+	logLevel := "ERROR"
+	if os.Getenv("HOPSESH_MATRIX_SSH_DEBUG") == "1" {
+		logLevel = "DEBUG2"
+	}
+	cmd := exec.Command("ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "LogLevel="+logLevel, s.dest, s.helper+" agent "+op)
 	cmd.Stdin = bytes.NewReader(b)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	started := time.Now()
 	err := cmd.Run()
+	// Keep connection diagnostics for failed disposable mesh commands without
+	// flooding every successful journey or changing any retry/deadline behavior.
+	if err == nil && logLevel == "DEBUG2" {
+		stderr.Reset()
+	}
 	if s.log != nil {
 		s.log.printf("helper endpoint=%s operation=%s elapsed=%s\n", s.dest, op, time.Since(started).Round(time.Millisecond))
 		s.log.printf("there$ hsmatrix agent %s %s\n%s%s", op, b, stdout.String(), stderr.String())

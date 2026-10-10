@@ -112,6 +112,8 @@ jobs:
         run: bin/meshrdv barrier -peers "pairs-linux pairs-macos pairs-windows" -dir rdv -wait 30m
       - name: ordered journeys across three native machines
         if: github.event_name != 'pull_request' && matrix.node == 'linux'
+        env:
+          HOPSESH_MATRIX_SSH_DEBUG: "1"
         # The measured 20 successful journeys took 85m; four six-hop cases
         # remained. Keep their individual deadlines and allow the full model.
         timeout-minutes: 150
@@ -132,6 +134,18 @@ jobs:
         env:
           PEER_WAIT: ${{ github.event_name == 'pull_request' && '45m' || '210m' }}
         run: bin/meshrdv barrier -node "$NODE" -peers "$peers" -dir rdv -wait "$PEER_WAIT"
+      - name: retain disposable SSH server diagnostics
+        if: always()
+        timeout-minutes: 2
+        run: |
+          mkdir -p rdv
+          # Runner owns the output files; dollar expansion belongs to PowerShell.
+          # shellcheck disable=SC2016,SC2024
+          case "$RUNNER_OS" in
+            Linux) sudo journalctl -u ssh -u sshd --since '4 hours ago' --no-pager > rdv/sshd.log 2>&1 || echo 'SSH journal collection unavailable' >> rdv/sshd.log ;;
+            macOS) sudo log show --last 4h --style compact --predicate 'process == "sshd" OR process == "sshd-session"' > rdv/sshd.log 2>&1 || echo 'SSH log collection unavailable' >> rdv/sshd.log ;;
+            Windows) powershell.exe -NoProfile -NonInteractive -Command '$ErrorActionPreference="Stop"; Get-WinEvent -LogName OpenSSH/Operational -MaxEvents 5000 | Select-Object TimeCreated,Id,Message | ConvertTo-Json -Depth 3' > rdv/sshd.log 2>&1 || echo 'SSH event collection unavailable' >> rdv/sshd.log ;;
+          esac
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
