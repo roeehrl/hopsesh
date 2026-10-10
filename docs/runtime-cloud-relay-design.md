@@ -749,3 +749,17 @@ headers, URL values, content and raw transport errors. Separate native Windows
 runs execute each original failed shard with unchanged rows, assertions and
 deadlines; every original failure remains archived. A passing diagnostic sample
 alone cannot establish the cause or close full-source acceptance.
+
+A third failure, row 502 in Windows shard 2, occurs during initial owner C
+startup, before the network-policy proxy exists. A/B are healthy using
+notifications; both C readiness and a fresh independent poll expire. The
+platform's later diagnostic endpoint still responds. The retained SQLite alarm
+cancellation line alone does not explain the stall. Windows fixture shutdown
+already invokes bounded `taskkill /T /F` and joins the child, so process leakage
+also remains a hypothesis rather than an established defect.
+
+The fresh failure probe now records bounded TCP/TLS/request/response stages to
+locate a stall without introducing another proxy, changing runtime transport,
+extending readiness, or retrying the scenario. Successful diagnostic shards 1
+and 4 retain their exact original 34/33-row selections; neither closes the
+original failure. The next Windows diagnostic preserves original shard 2.
