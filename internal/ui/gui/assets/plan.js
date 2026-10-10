@@ -4,6 +4,7 @@ import { api, on, h, fill, view, state, screen, go, current, toast, fail, errTex
 import { openMenu, closeAll } from "./menu.js";
 import { undo } from "./activity.js";
 import { openResult, where as opensIn } from "./term.js";
+import { sessionExitHelp } from "./session-exit.js";
 
 const sheet = $("#sheet");
 let cur = null; // { e, target, sendTo, opts, plan, busy, applying }
@@ -248,6 +249,9 @@ function repository(p) {
 // blocker turns a reason the plan cannot go ahead into words and the buttons that fix it.
 function blocker(p, b) {
   const o = cur.opts, cont = p.continue;
+  if (/destination copy is open/.test(b)) return item("err", `Exit the original ${p.agent} conversation before adding new work`,
+    `${sessionExitHelp(cur.target || cur.e?.agent)} Its saved history is preserved. Exit this conversation in every place where it is open, then check again.`,
+    h("button", {class:"btn small",onclick:()=>replan()}, "Check again"));
   if (p.reviewNewSession && /cannot update the original session across agent or account profiles/.test(b)) return item("err", "The original session cannot be updated across these agent or account profiles",
     "This does not mean you changed accounts. Hopsesh cannot verify native compatibility for updating the original file across these profiles. Review a fresh session on the same lineage branch; both existing sessions will be preserved. Independent work still requires a separate fork.",
     h("button", {class:"btn small",onclick:()=>{Object.assign(cur.opts,{targetSession:"",fork:false,newReplica:true,conflict:""});return replan();}}, "Review new session on the same branch"));

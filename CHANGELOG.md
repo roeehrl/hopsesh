@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Open originals have a clear return status card and guided exit instructions,
+  with an explicit check-and-review action instead of silently switching apps.
+  Move menus omit empty sections and explain the blocker without internal IDs.
 - Claude/Codex round trips reuse the exact original session across runtime profiles
   and first login observations, appending only missing portable work while preserving
   original records, IDs and historical bindings. Independent work and live writers

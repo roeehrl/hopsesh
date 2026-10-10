@@ -63,9 +63,9 @@ test('diverged return plans with keep-both and cannot overwrite a branch',async(
  await expect.poll(()=>calls.length).toBe(1);expect(calls[0].args[3].conflict).toBe('keep-both');
 });
 
-test('same, behind and live candidates never plan a transfer',async({page})=>{
- const calls=await fixtures(page,['same','behind','live'].map(status=>candidate({status,replica:status})));
- for(const status of ['same','behind','live']) {
+test('same and behind candidates never plan a transfer',async({page})=>{
+ const calls=await fixtures(page,['same','behind'].map(status=>candidate({status,replica:status})));
+ for(const status of ['same','behind']) {
   await page.evaluate(async status=>{
    const core=await import('/core.js');const {model}=await import('/actions.js');
    const e=core.entries().find(e=>e.title==='Find the codeword');model(e).returns.find(a=>a.candidate.status===status).run();
@@ -75,6 +75,54 @@ test('same, behind and live candidates never plan a transfer',async({page})=>{
   await dialog.getByRole('button',{name:'Close',exact:true}).click();
  }
  expect(calls).toHaveLength(0);
+});
+
+test('open original explains how to exit and rechecks the exact original only on request',async({page},info)=>{
+ const calls=await fixtures(page,[candidate({agent:'claude',agentName:'Claude Code',profile:'personal',profileLabel:'roee@example.com',key:'claude@personal/original',status:'live',local:true})]);
+ const launches:any[]=[];
+ await page.route('**/call',async route=>{
+  const req=route.request().postDataJSON();
+  if(req.m==='ResolveEntry') return route.fulfill({json:{result:{machine:req.args[0],key:req.args[1],title:'oarbank',agent:'claude',agentName:'Claude Code',app:'Claude',live:true,profile:{id:'personal'}}}});
+  if(['ShowPlace','ResumeEntry','Apply','PushApply'].includes(req.m)) { launches.push(req); return route.fulfill({json:{result:null}}); }
+  return route.fallback();
+ });
+ const card=details(page).getByLabel('Return destinations');
+ await expect(card).toContainText('Original conversation still open');
+ await expect(card).toContainText('roee@example.com');
+ await expect(card).not.toContainText('claude@personal/original');
+ await details(page).getByRole('button',{name:'Move',exact:true}).click();
+ const item=page.getByRole('menuitem',{name:/^Move back to Claude Code/});
+ await expect(item).toContainText('Exit it first');
+ await item.click();
+ const d=page.getByRole('dialog').filter({has:page.getByRole('heading',{name:'Move back to Claude Code',exact:true})});
+ await expect(d).toContainText('oarbank');
+ await expect(d).toContainText('Code tab');
+ await expect(d).toContainText('⌘W on Mac or Ctrl+W on Windows');
+ await expect(d).toContainText('Esc only stops');
+ await expect(d).toContainText('Saved history is preserved');
+ expect(launches).toHaveLength(0);expect(calls).toHaveLength(0);
+ for(const theme of ['light','dark']) {
+  await page.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);
+  await expect(d).toBeInViewport();
+  expect(await d.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBeTruthy();
+  await page.screenshot({path:info.outputPath(`open-original-${theme}.png`),fullPage:true});
+ }
+ await d.getByRole('button',{name:'Check again and review return',exact:true}).click();
+ await expect.poll(()=>calls.length).toBe(1);
+ expect(calls[0].args[3]).toMatchObject({targetProfile:'personal',targetSession:'claude@personal/original',fork:false,newReplica:false,stopLocal:false});
+ expect(launches).toHaveLength(0);
+});
+
+test('remote original instructions name the destination and terminal exit without starting it',async({page})=>{
+ const calls=await fixtures(page,[candidate({agent:'claude',agentName:'Claude Code',status:'live',machine:'remote-studio'})]);
+ await details(page).getByLabel('Return destinations').getByRole('button',{name:'How to move back…',exact:true}).click();
+ const d=page.getByRole('dialog').last();
+ await expect(d).toContainText('remote-studio');
+ await expect(d).toContainText('type /exit');
+ await expect(d).toContainText('exit it in each place');
+ expect(calls).toHaveLength(0);
+ await d.getByRole('button',{name:'Cancel',exact:true}).click();
+ await expect(d).not.toBeVisible();
 });
 
 test('a fork with no candidates never infers a return to its parent',async({page})=>{

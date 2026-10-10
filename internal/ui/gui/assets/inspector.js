@@ -7,7 +7,7 @@ import { selectDestination, model, statusLine, placeName, showPlace, placeCount,
 import { openMenu, isOpen, openEl, closeAll } from "./menu.js";
 import { sectionOpen, setSection } from "./layout.js";
 import { markdown } from "./markdown.js";
-import { movementNotice, resolveDestination } from "./returns.js";
+import { movementNotice, resolveDestination, returnCard } from "./returns.js";
 import { tabs } from "./term.js";
 
 const AGENT_SHORT = { claude: "Claude", codex: "Codex" };
@@ -38,7 +38,7 @@ function toggle(btn, items, label, align) {
 // moveItems flattens Move ▾'s groups into a menu with headings.
 function moveItems(groups) {
   const out = [];
-  groups.forEach((g, i) => { if (i) out.push({ sep: true }); out.push({ heading: g.heading }, ...g.items); });
+  groups.filter(g=>g.items.length).forEach((g, i) => { if (i) out.push({ sep: true }); out.push({ heading: g.heading }, ...g.items); });
   return out;
 }
 
@@ -369,6 +369,5 @@ export function inspector(e, previous=null) {
 function returnSection(m) {
   if (!m.returns?.length) return null;
   return h("section", {class:"sec", "aria-label":"Return destinations"}, h("span", {class:"sec-h"}, "Move back to an existing session"),
-    m.returns.map(a => h("div", {class:"return-choice"}, h("button", {class:"btn",onclick:a.run}, a.label),
-      h("span", {class:"muted"}, a.sub), h("span", {class:"mono"}, a.candidate.key))));
+    m.returns.map(returnCard));
 }

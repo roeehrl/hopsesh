@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -187,29 +188,33 @@ func TestWindowRoundTrip(t *testing.T) {
 	if !strings.HasPrefix(cx.Title, there.Title) || cx.LastPrompt != "Now in uppercase" {
 		t.Fatalf("the Codex thread has the session's title and its real last prompt: %+v", cx)
 	}
+	beforeReturn, err := os.ReadFile(e.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	p, err := a.Plan(cx.Machine, cx.Key, "claude", OptsDTO{Mark: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Continue.Relation != "new" || p.Continue.AppendTo != "" {
+	if p.Continue.Relation != "append" || p.Continue.AppendTo != e.Title {
 		t.Fatalf("back: %+v", p.Continue)
 	}
 	back, err := a.Apply()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(back.Command, sid) {
+	if !strings.Contains(back.Command, sid) {
 		t.Fatalf("done: %+v", back)
 	}
 	scan, _ = a.Scan()
 	original, readErr := os.ReadFile(e.Path)
-	if readErr != nil || strings.Contains(string(original), "Now in uppercase") {
-		t.Fatal("portable return modified protected original", readErr)
+	if readErr != nil || !bytes.HasPrefix(original, beforeReturn) || !strings.Contains(string(original[len(beforeReturn):]), "Now in uppercase") {
+		t.Fatal("portable return must preserve original records and append the new work", readErr)
 	}
 	var cl EntryDTO
 	for _, group := range scan.Groups {
 		for _, entry := range group.Entries {
-			if entry.Agent == "claude" && entry.Session != sid && entry.LastPrompt == "Now in uppercase" {
+			if entry.Agent == "claude" && entry.Session == sid && entry.LastPrompt == "Now in uppercase" {
 				cl = entry
 			}
 		}

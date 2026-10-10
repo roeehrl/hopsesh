@@ -70,6 +70,14 @@ rechecks its public login, pinned root, native head and activity before writing.
 Independent work, rewritten history and an open destination still block the return.
 Modules without an explicit portable-append contract keep the fresh-session fallback.
 
+An open original appears as an actionable return card. Choosing **Move back** opens
+instructions instead of switching apps. In Claude Desktop, select the original in
+the Code tab and close that session with Cmd+W on macOS or Ctrl+W on Windows. In a
+Claude Code terminal, type `/exit`. Stopping a response is not enough: the process
+must release the conversation so its in-memory state cannot overwrite appended work.
+Saved history is preserved. **Check again and review return** plans against the exact
+original and rechecks activity; it does not stop processes or apply a transfer.
+
 Claude capacity uses the resumed branch's last complete request usage (including
 cached input), plus conservative byte estimates for later records. Documented models
 with a default 1M context window use that window; unknown models retain the small

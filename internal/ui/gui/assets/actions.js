@@ -203,12 +203,12 @@ function localModel(e) {
     m.caption="The agent reported a context limit. The original is preserved; prepare a bounded continuation to recover.";
     if(!sessionTabs(e).length && !lv.live) m.fix={label:"Create bounded continuation…",run:()=>planFor(e,{target:e.agent,bounded:true,targetProfile:e.profile?.id||""})};
   }
-  m.returns = returnActions(e, (destination) => {
+  m.returns = returnActions(e, (destination, {showOnly=false}={}) => {
     if (destination.machine !== here()) return selectFn(destination);
     const places = placesOf(destination);
     const show = places.find(canShow);
     if (show) return showPlace(destination, show);
-    if (liveOf(destination).live) return selectFn(destination);
+    if (showOnly || liveOf(destination).live) return selectFn(destination);
     return resumeIn(destination, defaultPlace(destination));
   });
   if (m.returns.length) {

@@ -188,7 +188,7 @@ func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
 						}
 						if o.entry.Live.State == agent.Live && c.Status == "available" {
 							c.Status = "live"
-							c.Reason = "Destination is open; review before returning"
+							c.Reason = "Exit the original conversation before adding new work; its saved history is preserved"
 						}
 					}
 				} else if m != nil && m.Status == StatusOK && m.host != nil && m.host.Facts.Endpoint == r.Endpoint {

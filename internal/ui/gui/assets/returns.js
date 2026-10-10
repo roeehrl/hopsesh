@@ -1,7 +1,8 @@
 // Candidates come only from the app's verified branch inventory. Never infer a
 // return from copy timestamps or from a fork's parent journey.
-import { api, h, dialog, here, sys, state, entries, when } from "./core.js";
+import { api, h, dialog, here, sys, state, entries, when, agentBadge, fail } from "./core.js";
 import { planFor } from "./plan.js";
+import { sessionExitHelp } from "./session-exit.js";
 
 export const returnPlace = (r) => `${r.agentName || r.agent} · ${r.profileLabel || r.profile || "Default account"} on ${r.local ? sys.here : r.machine}`;
 export const returnDestination = (r) => entries().find(e => e.machine === r.machine && e.key === r.key && (!r.profile || e.profile?.id === r.profile));
@@ -17,18 +18,41 @@ export async function resolveDestination(r) {
 export function returnActions(e, open) {
   return (e.returns || []).map((r) => {
     const place = returnPlace(r);
-    const inspect = ["same", "behind", "live"].includes(r.status);
-    const label = inspect ? `${r.local && r.status !== "live" ? "Open existing session" : "Show destination"} in ${place}` : r.status === "available" ? `Move back to ${place}…`
-      : r.status === "verify" ? `Verify move back to ${place}…` : `Review move back to ${place}…`;
+    const inspect = ["same", "behind"].includes(r.status);
+    const label = inspect ? `${r.local ? "Open existing session" : "Show destination"} in ${place}` : r.status === "available" ? `Move back to ${place}…`
+      : r.status === "live" ? `Move back to ${r.agentName || r.agent}…` : r.status === "verify" ? `Verify move back to ${place}…` : `Review move back to ${place}…`;
     const plan = () => planFor(e, { target: r.agent, targetProfile: r.profile, targetSession: r.status === "missing" ? "" : r.key,
       sendTo: r.local ? "" : r.machine, returnCandidate: r });
     const canPlan = r.local || e.machine === here();
-    const review = () => {
-      const destination = returnDestination(r);
+    const showOriginal = async () => {
+      try { return open(await resolveDestination(r), {showOnly:true}); } catch (err) { fail(err); }
+    };
+    const review = async () => {
+      let destination = returnDestination(r);
+      if (r.status === "live" && !destination) {
+        try { destination = await resolveDestination(r); } catch { /* instructions still available */ }
+      }
+      if (r.status === "live") {
+        const name = r.agentName || r.agent;
+        const d = dialog(h("div", {class:"return-guide"},
+          h("span", {class:"chip st-warn"}, "Action needed"),
+          h("h2", {}, `Move back to ${name}`),
+          h("div", {class:"return-original"}, agentBadge(r.agent, name), h("strong", {}, destination?.title || "Original conversation"),
+            h("span", {class:"muted"}, `${r.local ? sys.Here : r.machine} · ${r.profileLabel || "Default account"}`)),
+          h("p", {}, "The original conversation is still open. Exit it first so its running agent cannot overwrite the new work Hopsesh adds."),
+          h("ol", {class:"return-steps"},
+            h("li", {}, h("strong", {}, "Show the original conversation"), h("button", {class:"btn small",onclick:()=>{d.close(); return showOriginal();}}, "Show original session")),
+            h("li", {}, h("strong", {}, "End the running session"), h("p", {}, sessionExitHelp(r.agent, !!destination?.app))),
+            h("li", {}, h("strong", {}, "Return here and check again"), h("p", {}, "Hopsesh checks that it has exited, then shows a review for adding the missing work to the same original session."))),
+          h("p", {class:"return-preserved"}, "Saved history is preserved. If the original is open in several places, exit it in each place."),
+          !canPlan ? h("p", {}, `To review the return, run Hopsesh on ${e.machine} or ${r.machine}.`) : null,
+          h("div", {class:"dlg-foot"}, h("button", {class:"btn",onclick:()=>d.close()}, "Cancel"),
+            canPlan ? h("button", {class:"btn primary",onclick:()=>{d.close(); return plan();}}, "Check again and review return") : null)));
+        return;
+      }
       const explanation = r.status === "diverged" ? "Both copies changed. Review a plan that keeps both branches as separate sessions."
         : r.status === "verify" ? "This destination has not been verified. Planning must reach it and check the exact session before any change."
         : r.status === "missing" ? "The original destination session is missing. You can review creating a new session there; this does not reuse or restore the missing original."
-        : r.status === "live" ? "The destination is running. Show it and end it there before returning new work."
         : r.status === "same" ? "The destination already has this conversation."
         : r.status === "behind" ? "The destination has newer work. Open that copy to continue."
         : "Review this return destination.";
@@ -40,7 +64,7 @@ export function returnActions(e, open) {
           canPlan && ["available", "verify", "diverged", "missing"].includes(r.status) ? h("button", {class:"btn primary",onclick:()=>{d.close();return plan()}},
             r.status === "missing" ? "Review new session there" : r.status === "diverged" ? "Review plan keeping both branches" : "Verify and review plan") : null));
     };
-    return { id: `return:${r.replica || r.machine + ":" + r.key}`, label, sub: `${r.status} · ${r.reason || r.key}`, candidate: r,
+    return { id: `return:${r.replica || r.machine + ":" + r.key}`, label, sub: r.status === "live" ? `Original still open on ${r.local ? sys.here : r.machine}. Exit it first; click for instructions.` : `${r.status} · ${r.reason || r.key}`, candidate: r, showOriginal,
       run: () => {
         if (inspect) return resolveDestination(r).then(open).catch(() => review());
         if (r.status === "available" && canPlan) return plan();
@@ -49,10 +73,23 @@ export function returnActions(e, open) {
   });
 }
 
+export function returnCard(a) {
+  const r=a.candidate;
+  if (r.status !== "live") return h("div", {class:"return-choice"}, h("button", {class:"btn",onclick:a.run}, a.label),
+    h("span", {class:"muted"}, a.sub), h("span", {class:"mono"}, r.key));
+  const destination=returnDestination(r);
+  return h("div", {class:"return-blocked"},
+    h("div", {class:"return-blocked-head"}, agentBadge(r.agent,r.agentName), h("strong", {}, "Original conversation still open")),
+    h("span", {class:"return-original-name"}, destination?.title || r.agentName || r.agent),
+    h("span", {class:"muted"}, `${r.local ? sys.Here : r.machine} · ${r.profileLabel || "Default account"}`),
+    h("p", {}, "Exit the original before adding your new work. Its saved history stays available."),
+    h("div", {class:"return-card-actions"}, h("button", {class:"btn outline",onclick:a.run}, "How to move back…"),
+      h("button", {class:"btn",onclick:a.showOriginal}, "Show original session")));
+}
+
 export function returnChooser(actions) {
   const d = dialog(h("h2", {}, "Choose where to move back"),
-    ...actions.map(a => h("div", {class:"return-choice"}, h("button", {class:"btn",onclick:()=>{d.close();return a.run()}}, a.label),
-      h("span", {class:"muted"}, a.sub), h("span", {class:"mono"}, a.candidate.key))),
+    ...actions.map(a => returnCard({...a,run:()=>{d.close();return a.run()},showOriginal:()=>{d.close();return a.showOriginal()}})),
     h("div", {class:"dlg-foot"}, h("button", {class:"btn",onclick:()=>d.close()}, "Cancel")));
 }
 
