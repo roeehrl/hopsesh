@@ -1,0 +1,9 @@
+{
+  "cwd": "/Users/alice/git/demo",
+  "hook_event_name": "SessionStart",
+  "model": "fixture",
+  "permission_mode": "default",
+  "session_id": "00000000-0000-4000-8000-000000000001",
+  "source": "startup",
+  "transcript_path": "/Users/alice/.agent/sessions/00000000-0000-4000-8000-000000000001.jsonl"
+}

@@ -1,0 +1,23 @@
+{
+  "cwd": "/Users/alice/git/demo",
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "PermissionRequest",
+  "permission_mode": "default",
+  "permission_suggestions": [
+    {
+      "destination": "session",
+      "mode": "acceptEdits",
+      "type": "setMode"
+    }
+  ],
+  "prompt_id": "00000000-0000-4000-8000-000000000002",
+  "session_id": "00000000-0000-4000-8000-000000000001",
+  "tool_input": {
+    "content": "mycnc-hook-fixture",
+    "file_path": "/Users/alice/git/demo/effect.txt"
+  },
+  "tool_name": "Write",
+  "transcript_path": "/Users/alice/.agent/sessions/00000000-0000-4000-8000-000000000001.jsonl"
+}
