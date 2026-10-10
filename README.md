@@ -164,7 +164,8 @@ PowerShell) and keeps passwords in Windows Credential Manager. It updates itself
 
 ### The hopsesh Terminal
 
-The app has a terminal of its own: a **hopsesh Terminal** window with tabs. **Resume in
+The app has a terminal of its own: the **hopsesh Terminal**, with tabs, docked below or beside
+your sessions or in a window of its own. **Resume in
 hopsesh Terminal** runs a session there, and so do the steps Claude Code needs a terminal for
 (a hand-off to its cloud, bringing a session back), cloud sign-ins and **Open a shell in its
 folder**. hopsesh starts the
@@ -176,7 +177,13 @@ run in a tab and wait for you. Ctrl+` moves between the terminal and your sessio
 hopsesh ends the programs in its tabs, so it asks first; for work that must outlive the app,
 use your terminal app.
 
-Settings → Terminal chooses where sessions and steps open (**In this window** or **In my
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/terminal-dark.png">
+  <img src="docs/assets/terminal-light.png" alt="The hopsesh Terminal docked below the sessions list: a tab where Claude Code asks whether it trusts hopsesh's hand-off folder, with a note that hopsesh never answers for you, and a second tab running a resumed session" width="900">
+</picture>
+
+Settings → Terminal chooses where the terminal sits (bottom panel, right panel or separate
+window), where sessions and steps open (**In this window** or **In my
 terminal**; a session's Resume menu picks another place, remembered for that agent), your terminal app, the font, its size and how much scrollback each tab keeps
 (in memory only). Programs in a tab can never read your clipboard, links open only after you
 confirm the whole address, and nothing a tab shows is written to disk or a log. Sign-in and
@@ -308,6 +315,11 @@ cloud session too), **Bring to this Mac…** on a cloud session, and a card per 
 **Machines** (Turn on, Test and **Sign in**, which runs the vendor's own login command in a
 terminal tab that records nothing). In the terminal UI, `c`
 hands off and `enter` brings a cloud session here.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/handoff-dark.png">
+  <img src="docs/assets/handoff-light.png" alt="Handing a Claude Code session to Claude Code cloud: the plan shows what carries over, what changes and what stays, the briefing the cloud agent gets, the branch hopsesh pushes, and the files that stay on this Mac" width="900">
+</picture>
 
 ### What goes up: a briefing and the code
 
