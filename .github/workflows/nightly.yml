@@ -20,12 +20,12 @@ jobs:
           node-version: 24
       - run: npm ci
         working-directory: infrastructure/relay
-      - name: complete original 34-row Windows shard with failure diagnostics
+      - name: complete original 33-row Windows shard with failure diagnostics
         shell: bash
-        run: go run ./internal/devtools/hsmatrix runtime-run -t 3 -shard 1/4 -out "$RUNNER_TEMP/runtime-matrix" -timeout 20m
+        run: go run ./internal/devtools/hsmatrix runtime-run -t 3 -shard 4/4 -out "$RUNNER_TEMP/runtime-matrix" -timeout 20m
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: ${{ !cancelled() }}
         with:
-          name: runtime-windows-startup-diagnostic
+          name: runtime-windows-submit-diagnostic
           path: ${{ runner.temp }}/runtime-matrix
           retention-days: 14
