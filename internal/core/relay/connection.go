@@ -217,9 +217,11 @@ func (l Listener) Run(ctx context.Context) error {
 		}
 		if connected && err == nil {
 			wait = 5 * time.Minute
-		} else if err == nil && l.ActiveRequests != nil && l.ActiveRequests() {
-			// The peer can still be idle, but a sender actively waiting for its
-			// reply must not add a second minute of local reconciliation delay.
+		}
+		if err == nil && l.ActiveRequests != nil && l.ActiveRequests() {
+			// Notification hints are best-effort even while the socket is open.
+			// Only an outstanding caller needs prompt mailbox reconciliation;
+			// after its reply, cancellation or expiry, idle cadence resumes.
 			wait = min(wait, time.Second)
 		}
 		t := time.NewTimer(wait)
@@ -235,8 +237,8 @@ func (l Listener) Run(ctx context.Context) error {
 				reportState(value)
 			case <-wake:
 			case <-l.RequestActivity:
-				if connected {
-					continue // Healthy notification streams already signal replies.
+				if connected && (l.ActiveRequests == nil || !l.ActiveRequests()) {
+					continue // Stale activity must not wake an idle notification stream.
 				}
 			}
 			// Notifications are hints, not permission to bypass error backoff or a

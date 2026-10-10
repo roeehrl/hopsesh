@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -47,7 +48,7 @@ func TestNotificationListenerSleepsWakesAndJoins(t *testing.T) {
 	activity := make(chan struct{}, 8)
 	done := make(chan error, 1)
 	go func() {
-		done <- (Listener{Transport: transport, RequestActivity: activity, ActiveRequests: func() bool { return true }, OnDeliveryMode: func(mode string) { modes <- mode }}).Run(ctx)
+		done <- (Listener{Transport: transport, RequestActivity: activity, ActiveRequests: func() bool { return false }, OnDeliveryMode: func(mode string) { modes <- mode }}).Run(ctx)
 	}()
 	socket := <-socketReady
 	select {
@@ -210,5 +211,109 @@ func TestNotificationFramesRefuseBinaryOversizedAndPayloads(t *testing.T) {
 				t.Fatal("notification payload accepted or exposed", err)
 			}
 		})
+	}
+}
+
+// A connected notification socket is not a delivery guarantee: the server may
+// commit a message even if emitting its best-effort hint fails. An active caller
+// must reconcile the durable mailbox without waiting for the idle interval.
+func TestActiveRequestRecoversCommittedReplyWithoutNotification(t *testing.T) {
+	a, b := identities(t)
+	store := Store{Directory: privateTemp(t)}
+	if err := store.Approve(t.Context(), Grant{Peer: b.Public, Kind: "device", SendMethods: []string{"observe"}}); err != nil {
+		t.Fatal(err)
+	}
+	const space = "missed-hint-test-space"
+	var mu sync.Mutex
+	var pending *Envelope
+	var availableAt time.Time
+	var polls atomic.Int32
+	socketReady := make(chan *websocket.Conn, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/notifications" {
+			socket, err := websocket.Accept(w, r, nil)
+			if err != nil {
+				return
+			}
+			defer socket.CloseNow()
+			socketReady <- socket
+			_, _, _ = socket.Read(r.Context())
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/messages" {
+			var request Envelope
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Error(err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			if _, err := Open(b, a.Public, request, space, time.Now()); err != nil {
+				t.Error(err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			reply, err := sealKind(b, a.Public, space, request.Operation, "response", []byte(`{"method":"observe","outcome":{"result":{"ready":true}}}`), time.Now(), time.Minute)
+			if err != nil {
+				t.Error(err)
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			pending = &reply // Deliberately omit the best-effort socket hint.
+			availableAt = time.Now().Add(250 * time.Millisecond)
+			w.WriteHeader(http.StatusCreated)
+			return
+		}
+		if r.Method == http.MethodGet {
+			polls.Add(1)
+			batch := Batch{}
+			if pending != nil && !time.Now().Before(availableAt) {
+				batch.Messages = []Delivery{{Sequence: 1, Envelope: *pending}}
+				batch.Cursor = 1
+				pending = nil
+			}
+			_ = json.NewEncoder(w).Encode(batch)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	service := Service{Transport: Transport{Base: server.URL, Space: space, Token: "fixture", AllowLoopback: true}, Processor: Processor{Identity: a, Space: space, Store: store}}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- service.Run(ctx) }()
+	defer func() { cancel(); <-done }()
+	socket := <-socketReady
+	deadline := time.Now().Add(2 * time.Second)
+	for service.Health().DeliveryMode != "notifications" && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if service.Health().DeliveryMode != "notifications" {
+		t.Fatal("notification stream did not connect")
+	}
+	before := service.Health().LastSuccess
+	if err := socket.Write(ctx, websocket.MessageText, []byte(`{"type":"mailbox-changed"}`)); err != nil {
+		t.Fatal(err)
+	}
+	for !service.Health().LastSuccess.After(before) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if !service.Health().LastSuccess.After(before) {
+		t.Fatal("initial empty mailbox did not reconcile")
+	}
+	bounded, stop := context.WithTimeout(ctx, 3*time.Second)
+	defer stop()
+	result, err := service.Call(bounded, b.Public.ID, "committed-without-hint", "observe", nil)
+	if err != nil || string(result) != `{"ready":true}` {
+		t.Fatalf("committed reply waited behind connected stream: result=%s error=%v", result, err)
+	}
+	// Finishing the request removes its short reconciliation deadline. Leave
+	// room for one already-scheduled poll, then verify the idle socket sleeps.
+	time.Sleep(1100 * time.Millisecond)
+	idlePolls := polls.Load()
+	time.Sleep(1100 * time.Millisecond)
+	if polls.Load() != idlePolls {
+		t.Fatal("completed request retained fast notification reconciliation")
 	}
 }
