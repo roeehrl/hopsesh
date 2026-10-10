@@ -6,6 +6,8 @@ test('real service resolves hidden original and appends return work to that exac
  test.setTimeout(120000);
  const reset=await page.request.post('/reset?movement=1');expect(reset.ok()).toBeTruthy();
  await page.goto('/');await expect(page.getByRole('heading',{name:'All sessions',exact:true})).toBeVisible();
+ // Act on a finished scan: while sessions are still being discovered, the agents to continue in are not known yet.
+ await expect(page.locator('#fresh')).toContainText('updated',{timeout:30000});
  await row(page,'Find the codeword').click();
  const source=await page.evaluate(async()=>{
   const {entries}=await import('/core.js');const e=entries().find(e=>e.title==='Find the codeword');return {machine:e.machine,key:e.key};
