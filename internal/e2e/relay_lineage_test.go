@@ -276,11 +276,18 @@ func newRelayFleetWithAdmission(t *testing.T, ctx context.Context, bin, origin, 
 
 func (f *relayFleet) run(t *testing.T, m machineHome, args ...string) []byte {
 	t.Helper()
+	started := time.Now()
+	remaining := time.Duration(0)
+	if deadline, ok := f.ctx.Deadline(); ok {
+		remaining = time.Until(deadline)
+	}
+	t.Logf("relay CLI start machine=%s verb=%s fixture_remaining=%v", m.name, args[0], remaining)
 	cmd := exec.CommandContext(f.ctx, f.bin, args...)
 	cmd.Env = m.env()
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
+	t.Logf("relay CLI end machine=%s verb=%s elapsed=%v error=%v fixture_error=%v", m.name, args[0], time.Since(started), err, f.ctx.Err())
 	if err != nil {
 		f.logHealth(t)
 		t.Fatalf("%s %v: %v\n%s", m.name, args, err, stderr.String())
