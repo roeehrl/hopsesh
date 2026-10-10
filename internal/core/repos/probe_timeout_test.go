@@ -107,6 +107,7 @@ func slowWorld(t *testing.T) slowFolders {
 	t.Cleanup(func() { _ = os.RemoveAll(bin) })
 	old := ProbeTimeout
 	t.Cleanup(func() { ProbeTimeout = old })
+	probePath := os.Getenv("PATH")
 	if runtime.GOOS == "windows" {
 		self, err := os.Executable()
 		if err != nil {
@@ -119,6 +120,17 @@ func slowWorld(t *testing.T) slowFolders {
 		// one-second exit sleep is not Git latency and accumulates per probe.
 		t.Setenv("GORACE", strings.TrimSpace(os.Getenv("GORACE")+" atexit_sleep_ms=0"))
 		ProbeTimeout = 15 * time.Second // the stand-in is a large program, started for every call
+		// From PowerShell, findSh can resolve Git/bin/sh.exe, a wrapper that
+		// prepends the real Git and defeats this fixture's PATH injection.
+		// Use its actual sibling shell, as a Git Bash parent already does.
+		sh, err := findSh()
+		if err != nil {
+			t.Fatal(err)
+		}
+		direct := filepath.Join(filepath.Dir(sh), "..", "usr", "bin")
+		if info, err := os.Stat(filepath.Join(direct, "sh.exe")); err == nil && !info.IsDir() {
+			probePath = direct + string(os.PathListSeparator) + probePath
+		}
 	} else {
 		script := "#!/bin/sh\ncase \"$*\" in *offloaded*) exec sleep 60 ;; *busy*) sleep 0.5 ;; esac\nexec '" + real + "' \"$@\"\n"
 		if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o700); err != nil {
@@ -126,7 +138,7 @@ func slowWorld(t *testing.T) slowFolders {
 		}
 		ProbeTimeout = 2 * time.Second
 	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+probePath)
 	return w
 }
 
