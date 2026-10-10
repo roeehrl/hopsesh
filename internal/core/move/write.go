@@ -240,7 +240,7 @@ func appendWritten(ctx context.Context, p *Plan, env Env, j *journal.Journal, no
 	m.Deliver(to, w.Cursor, w.Projection, source.Heads, append(append(append([]string(nil), source.Loss...), fp.Loss...), conversionLoss(r.Report)...))
 	var rollover *lineage.Rollover
 	if rolled {
-		_, oldID, ok := m.FindEndpoint(old.Key, in.Machine.Facts.Endpoint)
+		_, oldID, ok := m.FindBinding(old.Key, in.Machine.Facts.Endpoint, tin.BindingID())
 		if ok {
 			rollover = &lineage.Rollover{Replica: oldID, Cursor: fp.originalHead}
 		}

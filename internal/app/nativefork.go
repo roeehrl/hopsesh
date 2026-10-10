@@ -22,10 +22,21 @@ func nativeForkManifests(ctx context.Context, hm *host.Machine, h agent.Host, mo
 	for i, s := range ss {
 		by[s.Key.Session] = i
 	}
+	// A self-contained fork whose parent was deleted is a conversation of its own.
+	orphans, _ := mod.(agent.NativeForkOrphans)
+	orphaned := make([]bool, len(ss))
+	for i, s := range ss {
+		if _, listed := by[s.NativeParent]; listed || orphans == nil || manifests[i] != nil || problems[i] != "" || s.NativeParent == "" {
+			continue
+		}
+		if gone, err := orphans.NativeParentGone(ctx, h, in, s); err == nil && gone {
+			orphaned[i] = true
+		}
+	}
 	for pass := 0; pass < len(ss); pass++ {
 		changed := false
 		for i, s := range ss {
-			if manifests[i] != nil || problems[i] != "" || s.NativeParent == "" {
+			if manifests[i] != nil || problems[i] != "" || s.NativeParent == "" || orphaned[i] {
 				continue
 			}
 			parent, ok := by[s.NativeParent]
@@ -80,7 +91,7 @@ func nativeForkManifests(ctx context.Context, hm *host.Machine, h agent.Host, mo
 		}
 	}
 	for i, s := range ss {
-		if s.NativeParent != "" && manifests[i] == nil && problems[i] == "" {
+		if s.NativeParent != "" && manifests[i] == nil && problems[i] == "" && !orphaned[i] {
 			problems[i] = "native fork ancestry is unresolved or cyclic; preserve a separate branch"
 		}
 	}

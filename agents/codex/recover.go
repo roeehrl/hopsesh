@@ -28,7 +28,7 @@ func (m *Module) RecoverWrite(ctx context.Context, h agent.Host, in agent.Instal
 	}
 	start, prefixCount := 1, 0
 	if req.Mode == ir.WriteAppend {
-		body, e := h.FS().ReadFile(sum.Path, 1<<30)
+		body, e := agent.ReadNative(ctx, h.FS(), sum.Path)
 		if e != nil {
 			return ir.WriteResult{}, e
 		}

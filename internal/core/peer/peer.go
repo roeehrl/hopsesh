@@ -133,7 +133,7 @@ type PlanReply struct {
 }
 
 // ApplyReply is what the peer did, and what the sender must do on its side: the writes
-// meant for its copy (marks, lineage), and a mark owed once its open copy ends.
+// meant for its copy (its lineage).
 type ApplyReply struct {
 	Result  *move.Result         `json:"result"`
 	Writes  []host.SnapshotWrite `json:"writes,omitempty"`

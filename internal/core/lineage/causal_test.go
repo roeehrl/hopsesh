@@ -67,6 +67,33 @@ func TestCausalMergeOrderAndConcurrentWork(t *testing.T) {
 		}
 	}
 }
+
+func TestMergeUnobservedBranchOrigin(t *testing.T) {
+	empty := New("reset-family")
+	observed := empty.Clone()
+	a := observed.Upsert(Replica{Key: agent.SessionKey{Agent: "codex", Session: "source"}, Endpoint: "A", Location: "A"})
+	observeText(t, observed, a, "existing work")
+	before := string(empty.Encode())
+	x, y := empty.Clone(), observed.Clone()
+	if err := x.Merge(observed); err != nil {
+		t.Fatal(err)
+	}
+	if err := y.Merge(empty); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(x, y) || string(empty.Encode()) != before {
+		t.Fatal("origin initialization mutated inventory or depends on merge direction")
+	}
+	if len(x.States) != len(observed.States) || len(x.Revisions) != len(observed.Revisions) {
+		t.Fatal("origin initialization invented coverage")
+	}
+	competing := empty.Clone()
+	competing.Upsert(Replica{Key: agent.SessionKey{Agent: "codex", Session: "other"}, Endpoint: "B", Location: "B"})
+	snapshot := string(x.Encode())
+	if err := x.Merge(competing); err == nil || string(x.Encode()) != snapshot {
+		t.Fatal("two established origins must conflict atomically")
+	}
+}
 func TestProjectionAcknowledgesOnlyDestination(t *testing.T) {
 	m := New("F")
 	a := m.Upsert(Replica{Key: agent.SessionKey{Agent: "claude", Session: "a"}, Location: "A"})

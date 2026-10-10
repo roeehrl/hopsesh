@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/core/host"
@@ -24,25 +23,23 @@ import (
 )
 
 type relayExportRecord struct {
-	Peer        string       `json:"peer"`
-	Endpoint    string       `json:"endpoint"`
-	Operation   string       `json:"operation"`
-	Package     peer.Package `json:"exportPackage"`
-	AckDigest   string       `json:"ackDigest,omitempty"`
-	Journal     string       `json:"journal,omitempty"`
-	Completed   bool         `json:"completed,omitempty"`
-	MarkSkipped bool         `json:"markSkipped,omitempty"`
+	Peer      string       `json:"peer"`
+	Endpoint  string       `json:"endpoint"`
+	Operation string       `json:"operation"`
+	Package   peer.Package `json:"exportPackage"`
+	AckDigest string       `json:"ackDigest,omitempty"`
+	Journal   string       `json:"journal,omitempty"`
+	Completed bool         `json:"completed,omitempty"`
 }
 
 type relayAckReply struct {
-	Journal     string `json:"journal"`
-	MarkSkipped bool   `json:"markSkipped,omitempty"`
+	Journal string `json:"journal"`
 }
 
+// relayPullAck carries only the destination's lineage receipt. The source's title is
+// never changed: its moved status is derived from that lineage.
 type relayPullAck struct {
-	Receipt []byte           `json:"receipt"`
-	Mark    *agent.Mark      `json:"mark,omitempty"`
-	Owed    *lineage.Pending `json:"owed,omitempty"`
+	Receipt []byte `json:"receipt"`
 }
 
 func readRelayExport(path string) (*relayExportRecord, error) {
@@ -99,6 +96,8 @@ func saveRelayRecord(path string, value any) error {
 // Export is resolved from the source's own passive inventory. The requester can
 // select a key, never supply a filesystem path, native root or substitute metadata.
 func (a *App) relayExport(ctx context.Context, grant relay.Grant, op, method string, params json.RawMessage) (any, error) {
+	// Reading and packaging native history uses this machine's resource limits.
+	ctx = a.limited(ctx)
 	path := a.relayTransferPath("export/"+grant.Peer.ID, op)
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, err
@@ -194,7 +193,7 @@ func (a *App) relayExport(ctx context.Context, grant relay.Grant, op, method str
 			return nil, errors.New("source acknowledgment was undone or rebound")
 		}
 		if r.Completed {
-			return relayAckReply{Journal: j.ID, MarkSkipped: r.MarkSkipped}, nil
+			return relayAckReply{Journal: j.ID}, nil
 		}
 	} else {
 		j, err = journal.New(a.StateDir, journal.KindPush, "Acknowledge session brought to another machine")
@@ -218,88 +217,6 @@ func (a *App) relayExport(ctx context.Context, grant relay.Grant, op, method str
 	} else if err = j.RecoverReceipts(func(string) (host.FS, error) { return host.LocalFS(), nil }); err != nil {
 		return nil, err
 	}
-	if ack.Owed != nil {
-		pending, e := lineage.LoadPending(a.StateDir)
-		if e != nil {
-			return nil, e
-		}
-		found := false
-		for _, p := range pending {
-			if p.Operation == ack.Owed.Operation && p.Key == ack.Owed.Key && p.Replica == ack.Owed.Replica {
-				found = true
-				break
-			}
-		}
-		if !found {
-			err = lineage.AddPending(a.StateDir, *ack.Owed)
-		}
-		if err != nil {
-			return nil, err
-		}
-	}
-	if ack.Mark != nil {
-		// Re-observe before marking: a crashed acknowledgment may already have
-		// appended the title. Never duplicate that native append on recovery.
-		obs, err := a.ObserveLocal(ctx)
-		if err != nil {
-			return nil, err
-		}
-		inv := a.ObservationInventory(ctx, obs)
-		defer inv.Close()
-		found := false
-		for _, e := range inv.Entries {
-			if e.Session.Key != r.Package.Session.Key {
-				continue
-			}
-			found = true
-			if e.Live.State != agent.Ended {
-				return nil, errors.New("source is active or its state is unknown; receipt is committed, retry marking when idle")
-			}
-			if e.Session.Mark != nil && *e.Session.Mark == *ack.Mark {
-				break
-			}
-			// A copy that continued working after export must keep its title.
-			// Compare the exact frozen main file, never an observation timestamp.
-			var frozen []byte
-			for _, f := range r.Package.Files {
-				if f.Path == r.Package.Session.Path {
-					frozen = f.Data
-					break
-				}
-			}
-			current, eRead := localstate.ReadOwnedFile(e.Session.Path, relay.MaxObjectBytes)
-			if eRead != nil {
-				return nil, eRead
-			}
-			if len(frozen) == 0 || !bytes.Equal(frozen, current) {
-				r.MarkSkipped = true
-				break
-			}
-			mod, ok := a.Module(e.Agent)
-			if !ok {
-				return nil, agent.ErrUnsupported
-			}
-			marker, ok := mod.(agent.Marker)
-			if !ok {
-				break
-			}
-			in, ok := inv.Local().InstallProfile(e.Agent, e.Session.Key.Profile)
-			if !ok {
-				return nil, agent.ErrNotInstalled
-			}
-			h, err := inv.Local().host.For(ctx, mod.Spec(), in, j)
-			if err != nil {
-				return nil, err
-			}
-			if err = marker.Mark(ctx, h, in, e.Session, *ack.Mark); err != nil {
-				return nil, err
-			}
-			break
-		}
-		if !found {
-			return nil, errors.New("source copy is no longer present; receipt is committed but its title could not be marked")
-		}
-	}
 	if err = j.Seal(func(string) (host.FS, error) { return host.LocalFS(), nil }); err != nil {
 		return nil, err
 	}
@@ -307,7 +224,7 @@ func (a *App) relayExport(ctx context.Context, grant relay.Grant, op, method str
 	if err = saveRelayRecord(path, r); err != nil {
 		return nil, err
 	}
-	return relayAckReply{Journal: j.ID, MarkSkipped: r.MarkSkipped}, nil
+	return relayAckReply{Journal: j.ID}, nil
 }
 
 func validateRelayAck(r *relayExportRecord, grant relay.Grant, ack relayPullAck) error {
@@ -331,43 +248,6 @@ func validateRelayAck(r *relayExportRecord, grant relay.Grant, ack relayPullAck)
 	from, to := m.Replica(hop.From), m.Replica(hop.To)
 	if from.Endpoint != r.Package.Facts.Endpoint || from.Key != r.Package.Session.Key || to.Endpoint != grant.Endpoint || to.Endpoint == "" {
 		return errors.New("acknowledgment changed the approved source or destination binding")
-	}
-	checkMark := func(mark agent.Mark) error {
-		if hop.Fork || mark.Location != to.Location || len(mark.AgentName) > 100 || strings.ContainsAny(mark.AgentName, "\x00\r\n") {
-			return errors.New("invalid source mark scope")
-		}
-		switch mark.Kind {
-		case agent.MarkPrepared, agent.MarkMoved:
-			if mark.Agent != "" && mark.Agent != to.Key.Agent {
-				return errors.New("source mark changed destination agent")
-			}
-		case agent.MarkContinued:
-			if mark.Agent != to.Key.Agent {
-				return errors.New("continuation mark changed destination agent")
-			}
-		default:
-			return errors.New("unknown source mark kind")
-		}
-		return nil
-	}
-	if ack.Mark != nil {
-		if err = checkMark(*ack.Mark); err != nil {
-			return err
-		}
-	}
-	if ack.Mark != nil && ack.Owed != nil {
-		return errors.New("source mark must be immediate or pending, not both")
-	}
-	if ack.Owed != nil && (hop.Fork || ack.Owed.Operation != r.Operation || ack.Owed.Key != r.Package.Session.Key || ack.Owed.Path != r.Package.Session.Path || ack.Owed.Replica != from.ID || ack.Owed.Branch != from.Line || ack.Owed.Location != from.Location || ack.Owed.Title != r.Package.Session.Title) {
-		return errors.New("pending mark widened the exported session")
-	}
-	if ack.Owed != nil {
-		if err = checkMark(ack.Owed.Mark); err != nil {
-			return err
-		}
-		if ack.Owed.Head != string(m.State(hop.Source).Head) {
-			return errors.New("pending mark changed the exported conversation head")
-		}
 	}
 	return nil
 }
@@ -486,7 +366,7 @@ func (a *App) planRelayPull(ctx context.Context, inv *Inventory, e Entry, target
 			return errors.New("destination produced no durable result")
 		}
 		if r.Ack == nil {
-			ack := &relayPullAck{Owed: result.Owed}
+			ack := &relayPullAck{}
 			for _, w := range r.Writes {
 				if w.Op == "write" && w.Path == lineage.PathFor(pkg.Session.Path) {
 					ack.Receipt = w.Data
@@ -494,13 +374,6 @@ func (a *App) planRelayPull(ctx context.Context, inv *Inventory, e Entry, target
 			}
 			if len(ack.Receipt) == 0 {
 				return errors.New("destination committed without a source lineage receipt")
-			}
-			if accepted.Mark == move.MarkNow && !accepted.Options.Fork {
-				mark := agent.Mark{Kind: agent.MarkMoved, Location: accepted.Target.Location}
-				if accepted.Kind == move.KindContinue {
-					mark.Kind, mark.AgentName = agent.MarkPrepared, accepted.Agent
-				}
-				ack.Mark = &mark
 			}
 			r.Ack, r.Result = ack, result
 			if err = saveRelayRecord(path, &r); err != nil {
@@ -527,10 +400,6 @@ func (a *App) planRelayPull(ctx context.Context, inv *Inventory, e Entry, target
 				return errors.New("source acknowledgment returned no journal")
 			}
 			r.SourceJournal = reply.Journal
-			if reply.MarkSkipped {
-				result.Mark = "off"
-				result.Warnings = append(result.Warnings, "The source copy changed after export. Its lineage receipt was acknowledged and its title was left unchanged.")
-			}
 			if err = saveRelayRecord(path, &r); err != nil {
 				return err
 			}

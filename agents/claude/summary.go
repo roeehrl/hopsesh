@@ -35,7 +35,7 @@ type info struct {
 	File        string
 	Title       string
 	TitleSource string // custom | ai | summary | prompt | reply | none
-	Mark        *agent.Mark
+	LegacyLabel *agent.LegacyLabel
 	CWD         string // project directory: relocated cwd, else the launch cwd
 	LastCWD     string // shell cwd of the newest record (may be a subdirectory)
 	// WorktreeRoot is set when CWD is a Claude-managed worktree (<repo>/.claude/worktrees/<name>):
@@ -139,8 +139,8 @@ func summarize(fsys agent.FS, pa agent.Path, file string, fi fs.FileInfo, hasSid
 		}
 		s.Subagents = countSubagents(fsys, pa, file, s.ID)
 	}
-	if m, title, ok := agent.ParseMarkTitle(s.Title); ok {
-		s.Mark = &m
+	if l, title, ok := agent.StripLegacyLabel(s.Title); ok {
+		s.LegacyLabel = &l
 		s.Title = title
 		if s.Title == "" {
 			s.Title = s.LastPrompt

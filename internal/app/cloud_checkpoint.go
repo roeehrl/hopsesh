@@ -52,7 +52,7 @@ func (a *App) PlanCloudCheckpoint(ctx context.Context, inv *Inventory, id string
 	if err != nil || !st.IsDir() {
 		return fail(errors.New("choose an existing local working directory"))
 	}
-	opt.TargetDir, opt.NewReplica, opt.Mark, opt.Notify = dir, true, false, false
+	opt.TargetDir, opt.NewReplica, opt.Notify = dir, true, false
 	if opt.OperationID == "" {
 		opt.OperationID, err = relay.NewOperationID()
 		if err != nil {

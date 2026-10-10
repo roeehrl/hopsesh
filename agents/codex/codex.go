@@ -110,10 +110,11 @@ type meta struct {
 
 // line is one rollout record.
 type line struct {
-	Ordinal   *uint64         `json:"ordinal,omitempty"`
-	Timestamp string          `json:"timestamp"`
-	Type      string          `json:"type"`
-	Payload   json.RawMessage `json:"payload"`
+	Ordinal      *uint64         `json:"ordinal,omitempty"`
+	Timestamp    string          `json:"timestamp"`
+	Type         string          `json:"type"`
+	Payload      json.RawMessage `json:"payload"`
+	compactBytes *int            // bounded analysis: replacement context size, without retaining its repeated payload
 }
 
 // List walks sessions/YYYY/MM/DD, newest first. Sub-agent threads are left out, as
@@ -145,8 +146,8 @@ func (m *Module) List(ctx context.Context, h agent.Host, in agent.Install) (agen
 					s.Key.Profile = in.ProfileID()
 					if t := titles[string(s.Key.Session)]; t != "" {
 						s.Title, s.TitleSource = t, "custom"
-						if mk, orig, ok := agent.ParseMarkTitle(t); ok {
-							s.Mark, s.Title = &mk, orig
+						if l, orig, ok := agent.StripLegacyLabel(t); ok {
+							s.LegacyLabel, s.Title = &l, orig
 						}
 					}
 				}
@@ -165,8 +166,8 @@ func (m *Module) List(ctx context.Context, h agent.Host, in agent.Install) (agen
 		case s != nil:
 			if t := titles[string(s.Key.Session)]; t != "" {
 				s.Title, s.TitleSource = t, "custom"
-				if mk, orig, ok := agent.ParseMarkTitle(t); ok {
-					s.Mark, s.Title = &mk, orig
+				if l, orig, ok := agent.StripLegacyLabel(t); ok {
+					s.LegacyLabel, s.Title = &l, orig
 				}
 			}
 			out.Sessions = append(out.Sessions, *s)
@@ -273,12 +274,6 @@ func setName(h agent.Host, in agent.Install, sid, name string) error {
 	// takes out only this line.
 	p := h.Path().Join(in.Root(home), "session_index.jsonl")
 	return h.FS().Append(p, append(line, '\n'), agent.AppendOptions{NewLine: true, Standalone: true})
-}
-
-// Mark names the thread left behind "↪ moved to …" (or "continued in …"), which Codex's
-// own thread list shows.
-func (m *Module) Mark(ctx context.Context, h agent.Host, in agent.Install, s agent.Summary, mk agent.Mark) error {
-	return setName(h, in, string(s.Key.Session), agent.MarkTitle(mk, s.Title))
 }
 
 // headChunk and tailChunk bound what a listing reads of each rollout.
@@ -405,6 +400,21 @@ func summarize(h agent.Host, r rollout) (*agent.Summary, error) {
 	return s, nil
 }
 
+// readHead reads up to headChunk bytes from the start of a rollout, however large it is.
+func readHead(h agent.Host, path string) ([]byte, error) {
+	f, err := h.FS().Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	head := make([]byte, headChunk)
+	n, err := f.ReadAt(head, 0)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, err
+	}
+	return head[:n], nil
+}
+
 // firstMeta decodes the session_meta record that starts every rollout.
 func firstMeta(b []byte) (meta, error) {
 	ls := lines(b, false)
@@ -519,10 +529,7 @@ func (m *Module) Bundle(_ context.Context, h agent.Host, in agent.Install, s age
 		}
 	}
 
-	head, err := h.FS().ReadFile(s.Path, headChunk)
-	if err != nil && !errors.Is(err, io.EOF) {
-		head = nil
-	}
+	head, _ := readHead(h, s.Path)
 	if mt, err := firstMeta(head); err == nil && mt.HistoryBase != nil && mt.HistoryBase.ThreadID != "" {
 		// A fork reads its parent's rollout by byte offset: it travels unchanged.
 		if files, err := rollouts(h, in); err == nil {
@@ -561,12 +568,12 @@ func (m *Module) PlanMove(src, dst agent.Install, s agent.Summary, b agent.Bundl
 }
 
 // Verify checks that the staged rollout starts in the target folder, as the target thread.
-func (m *Module) Verify(_ context.Context, h agent.Host, mp agent.MovePlan, staged map[string]string, p agent.Placement) error {
+func (m *Module) Verify(ctx context.Context, h agent.Host, mp agent.MovePlan, staged map[string]string, p agent.Placement) error {
 	for _, f := range mp.Files {
 		if f.From.Role != agent.RoleMain {
 			continue
 		}
-		b, err := h.FS().ReadFile(staged[agent.StagedKey(f)], 1<<30)
+		b, err := agent.ReadNative(ctx, h.FS(), staged[agent.StagedKey(f)])
 		if err != nil {
 			return err
 		}

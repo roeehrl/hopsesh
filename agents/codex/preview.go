@@ -222,15 +222,12 @@ func withImages(text string, images int) string {
 	return text + strings.Repeat(" "+agent.ImageMark, images)
 }
 
-// Rename names the thread in session_index.jsonl, as Codex's own rename does, keeping a
-// copy's "moved" mark.
+// Rename names the thread in session_index.jsonl, as Codex's own rename does (a legacy
+// title label goes with the old name).
 func (m *Module) Rename(_ context.Context, h agent.Host, in agent.Install, s agent.Summary, title string) error {
 	t, err := agent.CheckTitle(title)
 	if err != nil {
 		return err
-	}
-	if s.Mark != nil {
-		t = agent.MarkTitle(*s.Mark, t)
 	}
 	return setName(h, in, string(s.Key.Session), t)
 }

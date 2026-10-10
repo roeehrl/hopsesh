@@ -60,6 +60,37 @@ func (m *Manifest) ReturnReplicas(current ReplicaID) []Replica {
 	return out
 }
 
+// Departed returns where a replica's branch went after it: the latest hop on its line,
+// when the replica left that line and has not been returned to since. It is the
+// committed movement record, whether or not the move asked for a notice; a fork leaves
+// its parent current and is not a departure.
+func (m *Manifest) Departed(current ReplicaID) (Hop, bool) {
+	if m == nil || !m.HasReplica(current) {
+		return Hop{}, false
+	}
+	line := m.Replica(current).Line
+	g := m.movementHistory()
+	var route []Hop
+	left := false
+	for _, h := range g.active {
+		if h.Line != line || h.Fork {
+			continue
+		}
+		route = append(route, h)
+		if h.From == current {
+			left = true
+		}
+	}
+	if !left {
+		return Hop{}, false
+	}
+	last, ok := g.latest(route)
+	if !ok || last.To == current {
+		return Hop{}, false
+	}
+	return last, true
+}
+
 // Departure returns the latest unambiguous route away from a replica. A return
 // clears it. Fork notices describe a separate branch and never retire the parent.
 func (m *Manifest) Departure(current ReplicaID) (Hop, bool) {

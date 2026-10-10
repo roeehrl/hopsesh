@@ -123,12 +123,13 @@ func TestPlanMoveAndRules(t *testing.T) {
 	}
 }
 
-// Marks and titles are thread names in session_index.jsonl; hopsesh's own messages are
-// not shown as prompts, and a thread holding only a briefing is still listed.
-func TestMarkTitleAndNotes(t *testing.T) {
+// Titles are thread names in session_index.jsonl (a label an older hopsesh wrote there
+// reads back apart from the title); hopsesh's own messages are not shown as prompts, and a
+// thread holding only a briefing is still listed.
+func TestLegacyLabelTitleAndNotes(t *testing.T) {
 	h, in, byID := setup(t)
 	m, ctx := New(), context.Background()
-	if err := m.Mark(ctx, h, in, byID[t3], agent.Mark{Kind: agent.MarkContinued, Agent: "claude", AgentName: "Claude Code", Location: "studio"}); err != nil {
+	if err := setName(h, in, string(byID[t3].Key.Session), "↪ continued in Claude Code on studio · README cleanup"); err != nil {
 		t.Fatal(err)
 	}
 	res, err := m.Write(ctx, h, in, ir.WriteRequest{Mode: ir.WriteNew, Header: ir.Header{CWD: "/home/u/git/demo", Title: "Fix the parser"},
@@ -144,8 +145,8 @@ func TestMarkTitleAndNotes(t *testing.T) {
 	for _, s := range l.Sessions {
 		got[string(s.Key.Session)] = s
 	}
-	if s := got[t3]; s.Mark == nil || s.Mark.AgentName != "Claude Code" || s.Mark.Location != "studio" || s.Title != "README cleanup" {
-		t.Fatalf("marked thread: %+v %+v", s, s.Mark)
+	if s := got[t3]; s.LegacyLabel == nil || s.LegacyLabel.AgentName != "Claude Code" || s.LegacyLabel.Location != "studio" || s.Title != "README cleanup" {
+		t.Fatalf("labelled thread: %+v %+v", s, s.LegacyLabel)
 	}
 	n, ok := got[res.SessionID]
 	if !ok || n.Title != "Fix the parser" || n.LastPrompt != "" {
@@ -222,26 +223,27 @@ func TestStopAndStatus(t *testing.T) {
 	}
 }
 
-// A copy that comes home replaces a marked one; the mark lives in the shared index, so
-// installing names the thread again (its original title when the move carries none).
-func TestAfterInstallClearsTheMark(t *testing.T) {
+// A copy that comes home may replace one an older hopsesh labelled; the label lives in the
+// shared index, so installing names the thread again (its original title when the move
+// carries none).
+func TestAfterInstallClearsALegacyLabel(t *testing.T) {
 	h, in, byID := setup(t)
 	m := New()
 	ctx := context.Background()
-	if err := m.Mark(ctx, h, in, byID[t3], agent.Mark{Kind: agent.MarkMoved, Location: "laptop"}); err != nil {
+	if err := setName(h, in, string(byID[t3].Key.Session), "↪ moved to laptop · README cleanup"); err != nil {
 		t.Fatal(err)
 	}
-	if l, _ := m.List(ctx, h, in); find(l.Sessions, t3).Mark == nil {
-		t.Fatal("the thread should be marked")
+	if l, _ := m.List(ctx, h, in); find(l.Sessions, t3).LegacyLabel == nil {
+		t.Fatal("the thread should carry the legacy label")
 	}
 	noCodex := in
-	noCodex.Binary = "" // the mark is cleared without codex's app-server
+	noCodex.Binary = "" // the label is cleared without codex's app-server
 	if err := m.AfterInstall(ctx, h, noCodex, byID[t3].Key, agent.Placement{}); err != nil {
 		t.Fatal(err)
 	}
 	l, _ := m.List(ctx, h, in)
-	if s := find(l.Sessions, t3); s.Mark != nil || s.Title != "README cleanup" {
-		t.Fatalf("after coming home: mark %+v, title %q", s.Mark, s.Title)
+	if s := find(l.Sessions, t3); s.LegacyLabel != nil || s.Title != "README cleanup" {
+		t.Fatalf("after coming home: label %+v, title %q", s.LegacyLabel, s.Title)
 	}
 }
 
@@ -252,4 +254,31 @@ func find(ss []agent.Summary, id string) agent.Summary {
 		}
 	}
 	return agent.Summary{}
+}
+
+// A paginated fork reads its parent's rollout, so the bundle carries it, even when the
+// fork has grown far past the head that holds its session_meta.
+func TestBundleCarriesPaginatedParentOfLargeFork(t *testing.T) {
+	h, in, byID := setup(t)
+	s := byID[t1]
+	raw, err := h.FS().ReadFile(s.Path, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, rest, _ := strings.Cut(string(raw), "\n")
+	first = strings.Replace(first, `"cwd":`, `"history_base":{"thread_id":"`+t3+`"},"cwd":`, 1)
+	pad := strings.Repeat(`{"timestamp":"2026-10-01T00:00:00Z","type":"event_msg","payload":{"type":"token_count"}}`+"\n", 2*headChunk/80)
+	if err := h.FS().WriteFile(s.Path, []byte(first+"\n"+rest+pad), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	b, err := New().Bundle(context.Background(), h, in, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range b.Files {
+		if strings.HasSuffix(f.Rel, "-"+t3+".jsonl") && f.Role == agent.RoleSide {
+			return
+		}
+	}
+	t.Fatalf("parent rollout not bundled: %+v", b.Files)
 }

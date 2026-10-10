@@ -42,7 +42,7 @@ func TestLineageThreeDestinationsHaveIndependentReceipts(t *testing.T) {
 	ctx := context.Background()
 	env := move.Env{StateDir: t.TempDir()}
 	in := move.Input{Source: move.Side{Machine: a.m, Module: cl, Install: a.in}, Session: list(t, a)[sid], Target: move.Side{Machine: b.m, Module: cx, Install: ci}, Native: &move.NativeSide{Target: move.Side{Machine: b.m, Module: cl, Install: b.in}}}
-	p, err := move.Build(ctx, in, move.Options{TargetDir: b.repo, Mark: true})
+	p, err := move.Build(ctx, in, move.Options{TargetDir: b.repo})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestLineageThreeDestinationsHaveIndependentReceipts(t *testing.T) {
 	th = listAgent(t, b, cx, ci)[0]
 	lin, _ := lineage.Read(host.LocalFS(), th.Path)
 	back := move.Input{Source: move.Side{Machine: b.m, Module: cx, Install: ci}, Session: th, Lineage: lin, Target: move.Side{Machine: b.m, Module: cl, Install: b.in}, Copies: []move.Copy{{Summary: list(t, b)[sid]}}}
-	p, err = move.Build(ctx, back, move.Options{TargetDir: b.repo, Mark: true})
+	p, err = move.Build(ctx, back, move.Options{TargetDir: b.repo})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestLineageForkBranchesRemainIndependent(t *testing.T) {
 	ctx := context.Background()
 	env := move.Env{StateDir: t.TempDir()}
 	in := input(t, a, b)
-	p, err := move.Build(ctx, in, move.Options{TargetDir: b.repo, Mark: true})
+	p, err := move.Build(ctx, in, move.Options{TargetDir: b.repo})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestLineageForkMultiHopDoesNotReplaceOriginal(t *testing.T) {
 	original := list(t, a)[sid]
 	before, _ := os.ReadFile(original.Path)
 	in := input(t, a, b)
-	p, err := move.Build(ctx, in, move.Options{TargetDir: b.repo, Fork: true, Mark: true})
+	p, err := move.Build(ctx, in, move.Options{TargetDir: b.repo, Fork: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestLineageForkMultiHopDoesNotReplaceOriginal(t *testing.T) {
 			m, _ := lineage.Read(host.LocalFS(), s.Path)
 			in.Copies = append(in.Copies, move.Copy{Summary: s, Lineage: m})
 		}
-		p, e = move.Build(ctx, in, move.Options{TargetDir: leg[1].repo, Mark: true})
+		p, e = move.Build(ctx, in, move.Options{TargetDir: leg[1].repo})
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -575,7 +575,7 @@ func TestLineageConsecutiveUndoPreservesNativeGuards(t *testing.T) {
 			ctx := context.Background()
 			env := move.Env{StateDir: t.TempDir()}
 			in := input(t, a, b)
-			p, err := move.Build(ctx, in, move.Options{TargetDir: b.repo, Mark: true})
+			p, err := move.Build(ctx, in, move.Options{TargetDir: b.repo})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -587,7 +587,7 @@ func TestLineageConsecutiveUndoPreservesNativeGuards(t *testing.T) {
 				appendTurn(t, list(t, b)[sid].Path, "keep this native work")
 			}
 			in = input(t, b, c)
-			p, err = move.Build(ctx, in, move.Options{TargetDir: c.repo, Mark: true})
+			p, err = move.Build(ctx, in, move.Options{TargetDir: c.repo})
 			if err != nil {
 				t.Fatal(err)
 			}

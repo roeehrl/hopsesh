@@ -106,6 +106,14 @@ func (f confinedFS) Open(p string) (File, error) {
 	return f.c.h.FS().Open(p)
 }
 
+// FreeSpace passes through when the confined filesystem can tell (see SpaceReporter).
+func (f confinedFS) FreeSpace(p string) (int64, error) {
+	if sr, ok := f.c.h.FS().(SpaceReporter); ok {
+		return sr.FreeSpace(p)
+	}
+	return 0, ErrUnsupported
+}
+
 func (f confinedFS) ReadFile(p string, limit int64) ([]byte, error) {
 	if err := f.c.readable(p); err != nil {
 		return nil, err

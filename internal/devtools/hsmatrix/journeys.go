@@ -372,7 +372,7 @@ func runJourney(c journeyCase, endpoints [3]side, aliases []string) error {
 	if err != nil {
 		return err
 	}
-	if preserved.SHA256 != original.SHA256 || preserved.Mark != original.Mark || preserved.Graph == nil || preserved.Graph.Branch == branch {
+	if preserved.SHA256 != original.SHA256 || preserved.Graph == nil || preserved.Graph.Branch == branch {
 		return fmt.Errorf("travelling fork changed its original or merged branches")
 	}
 	own := "independent-original-" + marker

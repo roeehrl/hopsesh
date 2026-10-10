@@ -112,7 +112,7 @@ func TestCheckTitle(t *testing.T) {
 	if got, err := CheckTitle("  Fix the parser  "); err != nil || got != "Fix the parser" {
 		t.Fatalf("%q %v", got, err)
 	}
-	for _, bad := range []string{"", "   ", "two\nlines", "tab\there", strings.Repeat("x", MaxTitle+1), MarkTitle(Mark{Kind: MarkMoved, Location: "x"}, "t")} {
+	for _, bad := range []string{"", "   ", "two\nlines", "tab\there", strings.Repeat("x", MaxTitle+1), "↪ moved to x · t"} {
 		if _, err := CheckTitle(bad); err == nil {
 			t.Errorf("CheckTitle(%q) accepted", bad)
 		}

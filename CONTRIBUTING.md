@@ -100,7 +100,6 @@ issue or discussion first so we can agree on the approach.
 |---|---|
 | `LiveDetector` | open / working / idle state |
 | `Stopper` | `--stop-local` (quit an open session) |
-| `Marker` | the "↪ moved to …" mark in the agent's own list |
 | `AccountProber`, `Sanitizer` | detecting the account, and moves across accounts |
 | `PostInstaller` | registering an installed session with the agent |
 | `Reader` | being the source of "continue in" |

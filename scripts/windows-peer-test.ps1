@@ -86,12 +86,12 @@ foreach ($want in @('バグを直して', '修复错误', '直しました。 �
 }
 if ($text.Contains($projJson)) { Write-Host $text; Fail 'the old path is still in the session on box' }
 $here = [IO.File]::ReadAllText((Join-Path $sessionDir "$id.jsonl"), [Text.Encoding]::UTF8)
-if ($here -notmatch 'prepared in Claude Code on ') { Fail 'the copy here is not marked as prepared' }
+if ($here.Contains([string][char]0x21AA)) { Fail 'the copy here was relabelled: titles must stay as they were' }
 
 & $Bin undo $journal --yes | Out-Null
 if (Test-Path $got) { Fail 'undo left the copy on box' }
 $here = [IO.File]::ReadAllText((Join-Path $sessionDir "$id.jsonl"), [Text.Encoding]::UTF8)
-if ($here -match 'moved to |continued in |prepared in ') { Fail 'undo left the mark here' }
+if ($here.Contains([string][char]0x21AA)) { Fail 'the copy here carries a title label after undo' }
 
 # box's own settings: without this machine's scratch configuration.
 $saved = @{}

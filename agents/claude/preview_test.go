@@ -227,7 +227,7 @@ func TestRename(t *testing.T) {
 	if after, _ := fh.FS().Stat(a.Path); !after.ModTime().Equal(before.ModTime()) {
 		t.Fatal("a rename must keep the file's time")
 	}
-	// A moved copy keeps its mark.
+	// Renaming a copy an older hopsesh labelled drops the label with the old title.
 	if err := m.Rename(ctx, h, in, b, "Flags"); err != nil {
 		t.Fatal(err)
 	}
@@ -239,8 +239,8 @@ func TestRename(t *testing.T) {
 				t.Errorf("renamed: %q/%q", s.Title, s.TitleSource)
 			}
 		case s2:
-			if s.Title != "Flags" || s.Mark == nil || s.Mark.Location != "studio" {
-				t.Errorf("renamed copy: %q %+v", s.Title, s.Mark)
+			if s.Title != "Flags" || s.LegacyLabel != nil {
+				t.Errorf("renamed copy: %q %+v", s.Title, s.LegacyLabel)
 			}
 		}
 	}

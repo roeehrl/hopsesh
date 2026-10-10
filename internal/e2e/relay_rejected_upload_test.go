@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -19,29 +20,31 @@ func TestRelayRejectedUploadSQLiteR2(t *testing.T) {
 	_, _, origin, _, client := startSQLiteRelayFixture(t, time.Minute)
 	// Exercise idle connection reuse as well as early rejection before reading
 	// a body. A dev proxy failure must not be mistaken for a policy refusal.
+	// The follow-up uses the production submit path: a listener may close a
+	// pooled connection after refusing an unread body, and the native client
+	// replays message submissions only on such a reused connection.
+	transport := relay.Transport{Base: origin, Token: "unapproved-token", Space: "unapproved-space-12345", HTTP: client}
 	for i := range 6 {
 		time.Sleep(5 * time.Second)
-		for _, size := range []int{1200000, 64} {
-			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, origin+"/v1/messages", bytes.NewReader(bytes.Repeat([]byte("x"), size)))
-			if err != nil {
-				t.Fatal(err)
-			}
-			req.Header.Set("X-Hopsesh-Space", "unapproved-space-12345")
-			reply, err := client.Do(req)
-			if err != nil && size == 1200000 {
-				// An early refusal may close the large upload while the client
-				// is still writing. The following small request must survive.
-				t.Logf("early upload close on round %d: %v", i, err)
-				continue
-			}
-			if err != nil {
-				t.Fatalf("request %d size %d: %v", i, size, err)
-			}
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, origin+"/v1/messages", bytes.NewReader(bytes.Repeat([]byte("x"), 1200000)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("X-Hopsesh-Space", "unapproved-space-12345")
+		reply, err := client.Do(req)
+		if err != nil {
+			// An early refusal may close the large upload while the client
+			// is still writing. The following small request must survive.
+			t.Logf("early upload close on round %d: %v", i, err)
+		} else {
 			body, err := io.ReadAll(io.LimitReader(reply.Body, 4096))
 			_ = reply.Body.Close()
 			if err != nil || reply.StatusCode != http.StatusForbidden {
-				t.Fatalf("request %d size %d: HTTP %d: %s: %v", i, size, reply.StatusCode, body, err)
+				t.Fatalf("request %d large upload: HTTP %d: %s: %v", i, reply.StatusCode, body, err)
 			}
+		}
+		if err := transport.Submit(t.Context(), relay.Envelope{}); !errors.Is(err, relay.ErrAuthorizationRefused) {
+			t.Fatalf("request %d small submission: %v", i, err)
 		}
 	}
 }

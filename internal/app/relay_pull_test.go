@@ -104,15 +104,6 @@ func TestRelayPullAcknowledgmentRejectsOtherEndpointsSessionsAndPendingPaths(t *
 	if err := validateRelayAck(&changed, grant, ack); err == nil {
 		t.Fatal("changed native session accepted")
 	}
-	ack.Mark = &agent.Mark{Kind: agent.MarkMoved, Location: "another-machine"}
-	if err := validateRelayAck(record, grant, ack); err == nil {
-		t.Fatal("mark targets another machine")
-	}
-	ack.Mark = nil
-	ack.Owed = &lineage.Pending{Operation: record.Operation, Key: record.Package.Session.Key, Path: filepath.Join(t.TempDir(), "unrelated.jsonl")}
-	if err := validateRelayAck(record, grant, ack); err == nil {
-		t.Fatal("pending mark escaped the exported native path")
-	}
 }
 
 func TestRelayObservationRedactsCachedProfilesAndHonorsApprovedRoots(t *testing.T) {

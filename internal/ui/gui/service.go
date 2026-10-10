@@ -67,6 +67,9 @@ type App struct {
 	step           *pendingStep // the terminal step a hand-off waits for
 	quitting       atomic.Bool  // the user confirmed quitting (or an update restarts the app)
 	termName       atomic.Value // the user's terminal app's name, for the terminal window (a string)
+
+	endDestinationToken string // one use, tied to the latest exact return review
+	endDestinationPlan  *move.Plan
 	// Wails is the running application (events, clipboard, dialogs).
 	Wails *application.App `json:"-"`
 	// Terms are the terminal's tabs and window (not bound to the window: see terminal.go).
@@ -176,10 +179,10 @@ type Info struct {
 	Previews bool `json:"previews"`
 	Receive  bool `json:"receive"` // other machines' hopsesh may send sessions here
 	Defaults struct {
-		MovementNotices bool `json:"movementNotices"`
-		MarkMoved       bool `json:"markMoved"`
-		SyncCode        bool `json:"syncCode"`
-		PushSource      bool `json:"pushSource"`
+		MovementNotices bool   `json:"movementNotices"`
+		Original        string `json:"original"`
+		SyncCode        bool   `json:"syncCode"`
+		PushSource      bool   `json:"pushSource"`
 	} `json:"defaults"`
 }
 
@@ -228,7 +231,8 @@ func (a *App) info(fast bool) Info {
 		info.CLIOffer = cliOffer()
 	}
 	info.Defaults.MovementNotices = cfg.MovementNoticesOn()
-	info.Defaults.MarkMoved, info.Defaults.SyncCode, info.Defaults.PushSource = cfg.MarkMovedOn(), cfg.SyncCodeOn(), cfg.PushSource
+	info.Defaults.Original = cfg.OriginalGuard()
+	info.Defaults.SyncCode, info.Defaults.PushSource = cfg.SyncCodeOn(), cfg.PushSource
 	info.LocalNetwork.Gated = lnp.Gated()
 	info.LocalNetwork.FirstRun = lnp.FirstRun(config.StateDir())
 	if !fast {
@@ -394,8 +398,8 @@ func (a *App) InstallUpdate() error {
 	return nil
 }
 
-// LatestRelease looks for the newest release now, whatever the daily check is set to: the
-// user asked, from the page that says a newer hopsesh wrote the configuration.
+// LatestRelease is a user-requested check: always fetch now, regardless of the daily
+// check's opt-in or cached result, and report failures to the window.
 func (a *App) LatestRelease() (*UpdateDTO, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()

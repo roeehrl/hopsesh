@@ -209,6 +209,10 @@ type Segment struct {
 type Profile struct {
 	Window       int  `json:"window"`       // the target model's usable context, in tokens
 	NativeReplay bool `json:"nativeReplay"` // can render tool calls as its own tool pairs
+	// PortableAppend writes ordinary text turns into an existing session in the
+	// selected root. It preserves its old records and never imports source-private
+	// state. This is independent of permission to replay native tool/reasoning data.
+	PortableAppend bool `json:"portableAppend,omitempty"`
 }
 
 // WriteMode is whether a write creates a session or extends one.

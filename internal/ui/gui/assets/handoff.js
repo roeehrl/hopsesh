@@ -9,7 +9,7 @@ import { showTerminal, tabFor, IN_A_TAB } from "./term.js";
 const sheet = $("#sheet");
 let hc = null; // { e, cloud, opts, plan, busy, applying }
 
-const STEP = { snapshot: "Snapshot", push: "Push branch", start: "Start cloud session", lineage: "Record lineage", mark: "Mark this session" };
+const STEP = { snapshot: "Snapshot", push: "Push branch", start: "Start cloud session", lineage: "Record lineage" };
 
 // menuItem is one cloud in the palette's Hand off to… picker: its name (its id in the tooltip), what going
 // there means, or why it can't.
@@ -41,7 +41,7 @@ export async function planHandoff(e, cloud, bundle = false) {
   let d = {};
   try { d = await api("HandoffDefaults", cloud); } catch { /* the defaults below */ }
   if (hc !== opening || !sheet.open) return;
-  hc = { e, cloud, opts: { untracked: [], historyFile: !!d.historyFile, bundle: bundle || !!d.bundle, mark: d.mark !== false, cleanup: d.cleanup || "", brief: "", note: "", carryRules: false,
+  hc = { e, cloud, opts: { untracked: [], historyFile: !!d.historyFile, bundle: bundle || !!d.bundle, cleanup: d.cleanup || "", brief: "", note: "", carryRules: false,
     env: "", startingDiff: false },
     plan: null, busy: false, applying: false };
   fill(sheet, h("div", { class: "sheet-in" }, h("div", { class: "loading", role: "status", style: "min-height:240px" }, "Working out the hand-off…")));
@@ -86,7 +86,6 @@ function problem(msg) {
 const mono = (s) => h("span", { class: "mono", style: "font-size:12px" }, s);
 const tick = (kind) => h("span", { class: "badge " + kind }, kind === "ok" ? "✓" : kind === "err" ? "✕" : "!");
 const thousands = (n) => n.toLocaleString("en-US");
-const markWords = (t) => t.replace(/^↪\s*/, "");
 
 function summary(p) {
   const x = p.handoff;
@@ -94,11 +93,10 @@ function summary(p) {
   if (x.code === "bundle") add.push("1 upload");
   else if (x.code === "starting-diff") add.push("1 starting diff");
   else if (!x.reuse && x.branch) add.push(`1 branch on ${x.host}`);
-  const chg = p.mark !== "off" ? ["this session marked" + (p.mark === "when-stopped" ? " when it ends" : "")] : [];
   return h("div", { class: "summary", "aria-label": "What changes" },
-    add.map((s) => h("span", { class: "add" }, "+ " + s)), chg.map((s) => h("span", { class: "chg" }, "~ " + s)),
+    add.map((s) => h("span", { class: "add" }, "+ " + s)),
     h("span", { class: "none" }, "0 removed"), h("span", { class: "spacer" }),
-    h("span", { class: "muted" }, `Undo from Activity removes ${x.reuse || x.code !== "branch" ? "" : "the branch and "}the mark`));
+    h("span", { class: "muted" }, x.reuse || x.code !== "branch" ? "Undo from Activity takes back hopsesh's record of it" : "Undo from Activity deletes the branch"));
 }
 
 function conversation(p) {
@@ -183,15 +181,13 @@ function envNoteWords(text) {
 }
 
 function options(p) {
-  const x = p.handoff, o = hc.opts;
+  const x = p.handoff;
   return h("section", { class: "sec", style: "gap:12px" }, h("span", { class: "sec-h" }, "Options"),
     x.envNeeded ? envPicker(x) : null,
     x.canStartingDiff ? h("label", { class: "opt" }, h("input", { type: "checkbox", checked: x.code === "starting-diff", onchange: (ev) => set("startingDiff", ev.target.checked) }),
       h("span", {}, h("b", {}, `Send the changes with the ${x.noun} as a starting diff instead of a branch`), h("span", { class: "muted", style: "display:block;font-size:12px" }, x.startingDiffOffer + "."))) : null,
     h("label", { class: "opt" }, h("input", { type: "checkbox", checked: x.historyFile, onchange: (ev) => set("historyFile", ev.target.checked) }),
       h("span", {}, h("b", {}, "Also commit the conversation as ", mono(x.historyPath)), h("span", { class: "warn", style: "display:block;font-size:12px" }, x.historyWarning))),
-    h("label", { class: "opt" }, h("input", { type: "checkbox", checked: p.mark !== "off" && o.mark, onchange: (ev) => set("mark", ev.target.checked) }),
-      h("span", {}, `Mark this session “${markWords(x.markTitle)}”`)),
     x.code === "branch" && !x.reuse ? h("div", { style: "display:flex;align-items:center;gap:12px;flex-wrap:wrap" },
       h("label", { for: "ho-cleanup", style: "font-size:12.5px;font-weight:500;flex:0 0 100px" }, "Branch"),
       h("select", { id: "ho-cleanup", style: "flex:1 1 320px;max-width:460px", onchange: (ev) => set("cleanup", ev.target.value) },
@@ -240,7 +236,7 @@ function steps(names, states) {
       : st.state === "running" ? h("span", { class: "step-ic run" }, "…") : h("span", { class: "step-ic" });
     return h("div", { class: "step", role: "listitem", "data-step": n, "data-state": st.state }, ic,
       h("div", { style: "display:flex;flex-direction:column;gap:2px" }, h("span", { style: st.state === "running" ? "font-weight:600" : st.state === "todo" ? "color:var(--muted)" : "" },
-        STEP[n] + (st.notDone ? " · not done" + (n === "mark" ? ", it stays as it was" : "") : "")),
+        (STEP[n] || n) + (st.notDone ? " · not done" : "")),
         st.detail ? h("span", { class: st.state === "failed" ? "mono err" : "muted", style: "font-size:11.5px" }, st.detail) : null));
   }));
 }
@@ -359,7 +355,7 @@ screen("handedoff", (d) => {
   const open = () => api("OpenURL", r.url).catch(fail);
   const copy = async () => { await api("CopyText", r.url); toast("Copied"); };
   const doUndo = async () => {
-    let what = r.pushed ? `This deletes the branch ${r.branch}${r.markText ? " and the mark on the session here" : ""}.` : r.markText ? "This takes the mark off the session here." : "There is nothing of hopsesh's to remove here.";
+    let what = r.pushed ? `This deletes the branch ${r.branch}.` : "This takes back hopsesh's record of the hand-off.";
     if (d.via) what = `This undoes both legs: the hand-off (${what.replace(/^This /, "").replace(/\.$/, "")}), then the copy brought here from ${d.via.fromTitle} and its worktree.`;
     const yes = await ask({ title: "Undo the hand-off?", ok: "Undo hand-off", body: `${what} ${r.manual}` });
     if (yes && await undo(d.journal, d.title)) go("sessions", true);
@@ -383,7 +379,6 @@ screen("handedoff", (d) => {
         : r.code === "starting-diff" ? h("div", { class: "item" }, tick("ok"), h("span", {}, "The changes went with it as a starting diff, on ", mono(r.branch), "; nothing pushed")) : null,
       (r.stayed || []).length ? h("div", { class: "item" }, h("span", { class: "badge warn" }, "•"), h("span", {}, `Stayed on ${sys.here}: `, r.stayed.map((s, i) => [i ? ", " : "", s]))) : null,
       d.via ? h("div", { class: "item", id: "ho-via" }, tick("ok"), h("span", {}, `Brought here from ${d.via.fromTitle} first: `, mono(d.via.key || ""), d.via.worktree ? [" in ", mono(d.via.worktree)] : null)) : null,
-      r.markText ? h("div", { class: "item" }, tick("ok"), h("span", {}, `The session here is marked “${markWords(r.markText)}”`)) : null,
       (d.warnings || []).map((w) => h("div", { class: "item" }, tick("warn"), h("span", {}, cap(w)))))),
     h("div", { class: "hint", role: "note" }, r.hint),
     h("div", { style: "display:flex;gap:10px;align-items:center;flex-wrap:wrap" },

@@ -124,16 +124,16 @@ func TestWindowsSeparatorTranslation(t *testing.T) {
 	}
 }
 
-func TestDropMovedMarks(t *testing.T) {
+func TestDropLegacyLabels(t *testing.T) {
 	in := `{"type":"custom-title","customTitle":"fix tests","sessionId":"s"}` + "\n" +
 		`{"type":"custom-title","customTitle":"↪ moved to laptop · fix tests","sessionId":"s"}` + "\n"
-	out, st := run(t, in, Options{Policy: agent.RewritePolicy{DropRecords: []agent.FieldMatch{{Field: "customTitle", Prefixes: agent.MarkPrefixes()}}}})
+	out, st := run(t, in, Options{Policy: agent.RewritePolicy{DropRecords: []agent.FieldMatch{{Field: "customTitle", Prefixes: agent.LegacyLabelPrefixes()}}}})
 	if st.DroppedRecords != 1 || strings.Contains(out, "moved to") || !strings.Contains(out, `"fix tests"`) {
 		t.Fatalf("got %q %+v", out, st)
 	}
 	out, _ = run(t, in, Options{})
 	if !strings.Contains(out, "moved to") {
-		t.Fatal("marks are kept unless asked")
+		t.Fatal("legacy labels are kept unless asked")
 	}
 }
 

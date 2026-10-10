@@ -19,7 +19,7 @@ func applyNoWork(ctx context.Context, p *Plan, in Input, env Env) (*Result, erro
 		return nil, err
 	}
 	j.AddKey(p.Placement.Key)
-	res := &Result{Journal: j.ID, Mark: MarkOff}
+	res := &Result{Journal: j.ID}
 	if err = applyRepo(ctx, p, in, env, res, func(string) {}); err != nil {
 		return res, err
 	}

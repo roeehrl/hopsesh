@@ -197,15 +197,12 @@ func hasImage(raw json.RawMessage) bool {
 	return false
 }
 
-// Rename retitles the session with a custom-title record, what /rename writes, keeping a
-// copy's "moved" mark and the file's time.
+// Rename retitles the session with a custom-title record, what /rename writes, keeping
+// the file's time (a legacy title label goes with the old title).
 func (m *Module) Rename(_ context.Context, h agent.Host, in agent.Install, s agent.Summary, title string) error {
 	t, err := agent.CheckTitle(title)
 	if err != nil {
 		return err
-	}
-	if s.Mark != nil {
-		t = agent.MarkTitle(*s.Mark, t)
 	}
 	rec := encodeRecord(map[string]any{"type": "custom-title", "customTitle": t, "sessionId": string(s.Key.Session)})
 	return h.FS().Append(s.Path, append(rec, '\n'), agent.AppendOptions{NewLine: true, KeepMtime: true, Standalone: true})

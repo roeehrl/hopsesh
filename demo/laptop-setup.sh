@@ -17,6 +17,9 @@ done
 # History for Activity and "Where it has been": one hop from studio, one continuation here.
 su - alice -c 'hopsesh pull "studio:Terraform: move staging to arm64" --clone --yes >/dev/null'
 su - alice -c 'hopsesh pull "Paginate /v2/orders" --in codex --yes >/dev/null'
+# Protection hooks (hopsesh is on PATH in /usr/local/bin), so a moved original shows as
+# blocked. The Codex stand-in trusts them unless DEMO_HOOK_TRUST=untrusted.
+su - alice -c 'hopsesh notices install >/dev/null'
 cat >> /home/alice/.bashrc <<'RC'
 export PS1='\[\e[2m\]alice@laptop\[\e[0m\] \[\e[36m\]\w\[\e[0m\] $ '
 cd ~

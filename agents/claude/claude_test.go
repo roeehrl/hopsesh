@@ -60,8 +60,8 @@ func TestListAndBundle(t *testing.T) {
 	if a.Title != "Find the codeword" || a.CWD != "/home/u/git/demo" || a.Subagents != 1 || a.GitBranch != "main" {
 		t.Fatalf("summary 1: %+v", a)
 	}
-	if b.Mark == nil || b.Mark.Kind != agent.MarkMoved || b.Mark.Location != "studio" || b.Title != "Feature flag" {
-		t.Fatalf("a moved copy: %+v %+v", b, b.Mark)
+	if b.LegacyLabel == nil || b.LegacyLabel.Kind != agent.LabelMoved || b.LegacyLabel.Location != "studio" || b.Title != "Feature flag" {
+		t.Fatalf("a copy an older hopsesh labelled: %+v %+v", b, b.LegacyLabel)
 	}
 	if b.WorktreeRoot != "/home/u/git/demo" {
 		t.Fatalf("worktree root %q", b.WorktreeRoot)
@@ -117,7 +117,7 @@ func TestPlanMoveElsewhere(t *testing.T) {
 	}
 }
 
-func TestLiveStopMarkAccount(t *testing.T) {
+func TestLiveStopLegacyLabelAccount(t *testing.T) {
 	fh, h, in, byID := setup(t)
 	m := New()
 	ctx := context.Background()
@@ -137,13 +137,15 @@ func TestLiveStopMarkAccount(t *testing.T) {
 	if err := m.Stop(ctx, h, in, byID[s1], time.Second); err != nil || fh.PIDs[4242] {
 		t.Fatalf("stop: %v", err)
 	}
-	if err := m.Mark(ctx, h, in, byID[s1], agent.Mark{Kind: agent.MarkContinued, AgentName: "Codex", Location: "laptop"}); err != nil {
+	// A label an older hopsesh wrote reads back apart from the title.
+	rec := encodeRecord(map[string]any{"type": "custom-title", "customTitle": "↪ continued in Codex on laptop · Find the codeword", "sessionId": s1})
+	if err := h.FS().Append(byID[s1].Path, append(rec, '\n'), agent.AppendOptions{NewLine: true, KeepMtime: true, Standalone: true}); err != nil {
 		t.Fatal(err)
 	}
 	l, _ := m.List(ctx, h, in)
 	for _, s := range l.Sessions {
-		if string(s.Key.Session) == s1 && (s.Mark == nil || s.Mark.AgentName != "Codex" || s.Title != "Find the codeword") {
-			t.Fatalf("marked copy reads back as %+v %+v", s, s.Mark)
+		if string(s.Key.Session) == s1 && (s.LegacyLabel == nil || s.LegacyLabel.AgentName != "Codex" || s.Title != "Find the codeword") {
+			t.Fatalf("labelled copy reads back as %+v %+v", s, s.LegacyLabel)
 		}
 	}
 	acct, err := m.Account(ctx, h, in)

@@ -17,6 +17,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/repos"
 	"github.com/roeehrl/hopsesh/sdk/agent"
+	"github.com/roeehrl/hopsesh/sdk/ir"
 )
 
 // Bringing sessions home from vendor clouds: the links the user pasted, planning a fetch,
@@ -326,6 +327,7 @@ func (a *App) adopt(ctx context.Context, lm *host.Machine, f *move.Fetch, exited
 	if f.Profile != nil && (in.BindingID() != f.Profile.Binding || in.Profile.Root != f.Profile.Root) {
 		return nil, errors.New("cloud return account changed; do not adopt this copy into a different login")
 	}
+	ctx = ir.WithLimits(ctx, a.Cfg.History.Limits())
 	return move.AdoptFetch(ctx, f, move.Side{Machine: lm, Module: mod, Install: in}, move.Env{StateDir: a.StateDir, Audit: a.Audit}, exited)
 }
 

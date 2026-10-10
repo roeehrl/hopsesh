@@ -341,7 +341,7 @@ func (a *App) PlanPicked(cloud, id, checkout, target string, o OptsDTO) (*PlanDT
 // fetchPlanDTO is a fetch plan as the window shows it.
 func fetchPlanDTO(p *move.Plan, e app.Entry) *PlanDTO {
 	d := &PlanDTO{Kind: p.Kind, Title: p.Title, Agent: p.Agent, FromAgent: e.AgentName, SourceHost: p.Source.Location, TargetCWD: p.Target.CWD,
-		Warnings: p.Warnings, Blockers: p.Blockers, Conflict: p.Conflict, Mark: p.Mark, Repo: p.Repo, Mappings: []agent.Mapping{},
+		Warnings: p.Warnings, Blockers: p.Blockers, Conflict: p.Conflict, Repo: p.Repo, Mappings: []agent.Mapping{},
 		Options: p.Options, SessionKey: p.Key, SourceAgent: e.Agent, Fetch: p.Fetch, Machine: ""}
 	if d.Warnings == nil {
 		d.Warnings = []string{}

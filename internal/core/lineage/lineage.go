@@ -273,6 +273,20 @@ func (m *Manifest) FindEndpoint(key agent.SessionKey, endpoint string) (Replica,
 	}
 	return found, found.ID, found.ID != ""
 }
+
+// FindBinding selects the current segment of one physical session without
+// confusing it with its retained historical login segments.
+func (m *Manifest) FindBinding(key agent.SessionKey, endpoint, binding string) (Replica, ReplicaID, bool) {
+	if m == nil {
+		return Replica{}, "", false
+	}
+	for _, r := range m.Replicas {
+		if r.Key == key && r.Endpoint == endpoint && r.Binding == binding && r.Line == m.Branch {
+			return m.Replica(r.ID), r.ID, true
+		}
+	}
+	return Replica{}, "", false
+}
 func (m *Manifest) FindOnBranch(key agent.SessionKey, location, line string) (Replica, ReplicaID, bool) {
 	if m == nil {
 		return Replica{}, "", false
@@ -596,7 +610,7 @@ func (m *Manifest) Merge(o *Manifest) error {
 		_ = json.Unmarshal(b, &x)
 		return x.ID
 	}
-	for _, pair := range [][2]any{{&next.Branches, o.Branches}, {&next.Replicas, o.Replicas}, {&next.Revisions, o.Revisions}, {&next.States, o.States}, {&next.Hops, o.Hops}, {&next.Compensations, o.Compensations}} {
+	for _, pair := range [][2]any{{&next.Branches, incoming.Branches}, {&next.Replicas, incoming.Replicas}, {&next.Revisions, incoming.Revisions}, {&next.States, incoming.States}, {&next.Hops, incoming.Hops}, {&next.Compensations, incoming.Compensations}} {
 		b, err := union(pair[0], pair[1], key)
 		if err != nil {
 			return err

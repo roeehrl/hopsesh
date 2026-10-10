@@ -101,3 +101,78 @@ func TestNativeFamilyPresentationDoesNotDependOnReservedEndpoint(t *testing.T) {
 		t.Fatal("presentation identity rewrote causal manifest")
 	}
 }
+
+// A legacy fork holds its parent's records, so once Codex deletes the parent the fork is a
+// conversation of its own. An archived parent or a paginated fork still needs the parent.
+func TestNativeForkWithDeletedParent(t *testing.T) {
+	const goneID = "01a0fe1c-0000-7000-8000-0000000000aa"
+	const childID = "01a0fe1c-0000-7000-8000-00000000000b"
+	for _, tc := range []struct {
+		name     string
+		archived bool
+		paged    bool
+		blocked  bool
+	}{
+		{name: "deleted"},
+		{name: "archived", archived: true, blocked: true},
+		{name: "paginated", paged: true, blocked: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			fh := agenttest.NewFakeHost("/home/u")
+			if err := fh.Load("../../agents/codex/testdata/0.153.2", "/home/u/.codex"); err != nil {
+				t.Fatal(err)
+			}
+			fh.AddBinary("codex", "codex-cli 0.153.2")
+			m := codex.New()
+			in, err := m.Detect(ctx, fh)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h := agent.Confine(fh, m.Spec(), in)
+			ls, _ := m.List(ctx, h, in)
+			src := ls.Sessions[0]
+			raw, _ := h.FS().ReadFile(src.Path, 1<<20)
+			lines := strings.Split(string(raw), "\n")
+			var meta map[string]any
+			json.Unmarshal([]byte(lines[0]), &meta)
+			payload := meta["payload"].(map[string]any)
+			payload["id"] = childID
+			payload["forked_from_id"] = goneID
+			payload["history_mode"] = "legacy"
+			if tc.paged {
+				payload["history_base"] = map[string]any{"thread_id": goneID}
+			}
+			first, _ := json.Marshal(meta)
+			lines[0] = string(first)
+			fh.Put(path.Join(path.Dir(src.Path), "rollout-2026-10-01T13-00-00-"+childID+".jsonl"), []byte(strings.Join(lines, "\n")), time.Now())
+			if tc.archived {
+				fh.Put("/home/u/.codex/archived_sessions/rollout-2026-10-01T12-00-00-"+goneID+".jsonl", []byte(lines[0]+"\n"), time.Now())
+			}
+			ls, err = m.List(ctx, h, in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			graphs := make([]*lineage.Manifest, len(ls.Sessions))
+			problems := make([]string, len(ls.Sessions))
+			hm := &host.Machine{Name: "A", Local: true, Facts: host.Facts{Home: "/home/u", Endpoint: strings.Repeat("ab", 32)}}
+			nativeForkManifests(ctx, hm, h, m, in, ls.Sessions, graphs, problems)
+			found := false
+			for i, s := range ls.Sessions {
+				if string(s.Key.Session) != childID {
+					continue
+				}
+				found = true
+				if blocked := problems[i] != ""; blocked != tc.blocked {
+					t.Fatalf("blocked = %v (%q), want %v", blocked, problems[i], tc.blocked)
+				}
+				if graphs[i] != nil {
+					t.Fatal("an orphaned fork must not join a family it cannot verify")
+				}
+			}
+			if !found {
+				t.Fatal("child not listed")
+			}
+		})
+	}
+}

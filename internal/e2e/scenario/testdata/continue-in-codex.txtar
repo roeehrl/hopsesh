@@ -1,6 +1,6 @@
 # A Claude Code session continues in Codex on the same machine: Codex lists the new thread
-# under the session's name (app-server thread/read and thread/name/set), the original is
-# marked, the briefing is not the thread's last prompt, and undo takes it all back.
+# under the session's own name (app-server thread/read and thread/name/set), the original
+# keeps its title and shows where it went (from lineage), the briefing is not the thread's last prompt, and undo takes it all back.
 git-repo proj https://github.com/example/proj.git
 claude-session 11111111-2222-4333-8444-555555555555 proj 'Fix the parser' 'please fix the parser in'
 
@@ -8,15 +8,17 @@ exec hopsesh pull 11111111-2222-4333-8444-555555555555 --in codex --yes --json
 stdout '"kind": "continue"'
 grep 'codex app-server thread/read' $WORK/agents.log
 grep 'codex app-server thread/name/set' $WORK/agents.log
-grep '"thread_name":"Fix the parser' $HOME/.codex/session_index.jsonl
+grep '"thread_name":"Fix the parser"' $HOME/.codex/session_index.jsonl
+! grep '↪' $HOME/.codex/session_index.jsonl
 
 exec hopsesh ls --json --no-git
 stdout '"agent": "codex",\s+"agentName": "Codex",\s+"session"'
 stdout '"lastPrompt": "please fix the parser in'
 ! stdout 'lastPrompt": "\[hopsesh\]'
-stdout '"kind": "prepared"'
+stdout '"leftBehind": true'
+! stdout '"legacyLabel"'
 
 exec hopsesh undo --yes
 exec hopsesh ls --json --no-git
 ! stdout '"agent": "codex",\s+"agentName": "Codex",\s+"session"'
-! stdout '"kind": "prepared"'
+! stdout '"leftBehind"'

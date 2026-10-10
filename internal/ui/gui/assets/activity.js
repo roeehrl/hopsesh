@@ -1,5 +1,4 @@
-// The Activity screen: what hopsesh did here, newest first, with Undo, and the marks still
-// waiting for a copy left behind to end.
+// The Activity screen: what hopsesh did here, newest first, with Undo.
 import { navigationID, loadError, pending, api, h, fill, icon, ICONS, view, state, screen, go, current, loading, toast, fail, errText, ago, when, ask, sys, cloudTitle } from "./core.js";
 
 // undo reverses an operation. When the session was used since, it says what changed and
@@ -42,7 +41,7 @@ const KINDS = {
   move: { label: "Hopped here", ico: ICONS.down, cls: "" },
   continue: { label: "Continued", ico: ICONS.arrow, cls: "continue" },
   push: { label: "Sent", ico: ICONS.send, cls: "push" },
-  mark: { label: "Marked", ico: ICONS.mark, cls: "mark" },
+  mark: { label: "Labeled title (older version)", ico: ICONS.mark, cls: "mark" }, // journals of earlier versions, still undoable
   fetch: { label: "Brought", ico: ICONS.cloud, cls: "cloud" },
   handoff: { label: "Handed off", ico: ICONS.send, cls: "cloud" },
   hop: { label: "Handed on", ico: ICONS.cloud, cls: "cloud" },
@@ -70,7 +69,7 @@ function handoffText(x) {
   return {
     title: x.title.endsWith(tail) ? `“${x.title.slice(0, -tail.length)}”${tail}` : x.title,
     detail: [`${o.machine} → ${o.cloudTitle || cloudTitle(o.cloud)}`, o.session, o.branch ? "branch " + o.branch : ""].filter(Boolean).join(" · "),
-    note: `Undo ${o.pushed ? "deletes the branch and " : "removes "}the mark. The ${o.noun || "session"} stays in ${o.cloudTitle}; archive it there if you want it gone.`,
+    note: `Undo ${o.pushed ? "deletes the branch and " : ""}removes hopsesh's record of the hand-off. The ${o.noun || "session"} stays in ${o.cloudTitle}; archive it there if you want it gone.`,
   };
 }
 
@@ -128,11 +127,6 @@ async function render(reload = false) {
       a.waiting.map((w) => h("div", { class: "line-item" }, h("span", { class: "ico cloud" }, icon(ICONS.cloud, 15)),
         h("div", { style: "flex:1 1 300px;min-width:0;font-size:12.5px" }, `“${w.title}” is being copied from ${w.cloudTitle} in ${sys.terminal}. hopsesh adds it here when the copy appears, or on its next scan.`),
         h("button", { class: "btn small", onclick: () => go("brought", w) }, "Show")))) : null,
-    a.owed.length ? h("section", { class: "card" },
-      h("div", { class: "card-h stacked" }, h("h2", { class: "name" }, "Waiting to mark"), h("span", { class: "muted", style: "font-size:12px" }, "Copies left open elsewhere: hopsesh marks them on its next scan after they end.")),
-      a.owed.map((o) => h("div", { class: "line-item" }, h("span", { class: "ico mark" }, icon(ICONS.clock, 15)),
-        h("div", { style: "flex:1 1 300px;min-width:0" }, h("div", {}, o.title), h("span", { class: "muted", style: "font-size:12px" }, `${o.location} · will say “${o.mark}”`)),
-        h("span", { class: "muted", style: "font-size:12px" }, "since " + ago(o.since))))) : null,
     branchesCard(),
     h("section", { class: "card" }, a.items.length ? a.items.filter((x) => !x.part).map(row) : h("div", { class: "empty" }, "Nothing yet. Hops, continuations and sends show up here, with Undo.")))));
 }

@@ -21,7 +21,6 @@ type HopPlanDTO struct {
 	Kind     string        `json:"kind"` // "hop"
 	Title    string        `json:"title"`
 	Agent    string        `json:"agent"`
-	Mark     string        `json:"mark"`
 	Warnings []string      `json:"warnings"`
 	Blockers []string      `json:"blockers"`
 	Hop      *move.HopPlan `json:"hop"`
@@ -47,7 +46,7 @@ func (a *App) PlanHop(machine, key, cloud string, o HandoffOptsDTO) (*HopPlanDTO
 		return nil, err
 	}
 	opt := core.HandoffDefaults(cloud)
-	opt.Mark, opt.Note, opt.CarryRules, opt.Env = o.Mark, o.Note, o.CarryRules, o.Env
+	opt.Note, opt.CarryRules, opt.Env = o.Note, o.CarryRules, o.Env
 	if o.Cleanup != "" {
 		opt.Cleanup = o.Cleanup
 	}
@@ -58,7 +57,7 @@ func (a *App) PlanHop(machine, key, cloud string, o HandoffOptsDTO) (*HopPlanDTO
 	a.mu.Lock()
 	a.plan, a.input, a.res = p, move.Input{}, nil
 	a.mu.Unlock()
-	d := &HopPlanDTO{Kind: p.Kind, Title: p.Title, Agent: p.Agent, Mark: p.Mark, Warnings: p.Warnings, Blockers: p.Blockers, Hop: p.Hop}
+	d := &HopPlanDTO{Kind: p.Kind, Title: p.Title, Agent: p.Agent, Warnings: p.Warnings, Blockers: p.Blockers, Hop: p.Hop}
 	if d.Warnings == nil {
 		d.Warnings = []string{}
 	}
@@ -162,7 +161,7 @@ func (a *App) hopDone(core *app.App, title string, res *move.Result, err error) 
 		}
 	}
 	if r := res.Handoff; r != nil {
-		d.Handoff = &HandedOffDTO{Journal: res.Journal, Title: title, Agent: d.agentName(), Mark: res.Mark, Warnings: d.Warnings, Handoff: r}
+		d.Handoff = &HandedOffDTO{Journal: res.Journal, Title: title, Agent: d.agentName(), Warnings: d.Warnings, Handoff: r}
 		if u := r.BranchURL; u != "" {
 			handoffPagesMu.Lock()
 			handoffPages[u] = true
