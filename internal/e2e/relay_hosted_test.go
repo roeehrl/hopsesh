@@ -209,9 +209,8 @@ func qualifyHostedRetention(t *testing.T, idle time.Duration) {
 		t.Helper()
 		read, done := context.WithTimeout(ctx, timeout)
 		defer done()
-		_, _, err := socket.Read(read)
-		if websocket.CloseStatus(err) != websocket.StatusPolicyViolation {
-			t.Fatal("ended authorization did not close notification stream with policy violation")
+		if err := readRelayPolicyClose(read, socket); err != nil {
+			t.Fatal(err)
 		}
 	}
 	assertClosed(socket, 10*time.Second)
@@ -223,6 +222,26 @@ func qualifyHostedRetention(t *testing.T, idle time.Duration) {
 		t.Fatal("expired credential retained HTTP access", status)
 	}
 	t.Log("explicit revocation and lease expiry closed existing WebSockets and refused subsequent HTTP requests")
+}
+
+// Frames queued before revocation precede the close frame on the wire. Retention
+// deliberately leaves its message unacknowledged, so durable retry hints may be
+// waiting here. Accept only those bounded hints and require the actual 1008 close
+// within the original deadline; a still-open or malformed stream cannot pass.
+func readRelayPolicyClose(ctx context.Context, socket *websocket.Conn) error {
+	for range 33 {
+		kind, body, err := socket.Read(ctx)
+		if err != nil {
+			if websocket.CloseStatus(err) == websocket.StatusPolicyViolation {
+				return nil
+			}
+			return fmt.Errorf("ended authorization did not close notification stream with policy violation: %w", err)
+		}
+		if kind != websocket.MessageText || string(body) != `{"type":"mailbox-changed"}` {
+			return fmt.Errorf("unexpected frame before notification policy close")
+		}
+	}
+	return fmt.Errorf("notification policy close exceeded queued-hint bound")
 }
 
 // Explicit opt-in only: this runs real native endpoints against the isolated
