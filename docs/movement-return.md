@@ -71,12 +71,23 @@ Independent work, rewritten history and an open destination still block the retu
 Modules without an explicit portable-append contract keep the fresh-session fallback.
 
 An open original appears as an actionable return card. Choosing **Move back** opens
-instructions instead of switching apps. In Claude Desktop, select the original in
-the Code tab and close that session with Cmd+W on macOS or Ctrl+W on Windows. In a
-Claude Code terminal, type `/exit`. Stopping a response is not enough: the process
-must release the conversation so its in-memory state cannot overwrite appended work.
-Saved history is preserved. **Check again and review return** plans against the exact
-original and rechecks activity; it does not stop processes or apply a transfer.
+instructions instead of switching apps. Closing a desktop conversation tab can leave
+its agent process running; Cmd+W is not evidence that Claude Code released its session.
+**Review return** plans against the exact original. When the destination module
+implements `agent.Stopper` and `agent.LiveDetector` and its host supports graceful
+termination, the local review offers **End original session and check again**.
+The move layer validates the pinned destination, account, root and native cursor,
+then delegates all process handling to that module. Claude's module reads its own
+registry and asks every process for that session to exit normally; no other
+conversation is stopped, and no process is forcibly killed.
+
+The action consumes the review's one-use token and invalidates its plan even if
+stopping fails. A fresh review includes any records saved during shutdown. It never
+applies the transfer automatically. Saved history remains intact. Codex does not
+implement `Stopper`, and the Windows host cannot gracefully signal sessions, so those
+destinations show manual instructions and **Check again**. In a terminal, use the
+agent's exit command, such as `/exit`. If the desktop app has no session exit control,
+quitting that app ends its other conversations too; the UI explains that consequence.
 
 Claude capacity uses the resumed branch's last complete request usage (including
 cached input), plus conservative byte estimates for later records. Documented models

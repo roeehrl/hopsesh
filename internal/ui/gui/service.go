@@ -67,6 +67,9 @@ type App struct {
 	step           *pendingStep // the terminal step a hand-off waits for
 	quitting       atomic.Bool  // the user confirmed quitting (or an update restarts the app)
 	termName       atomic.Value // the user's terminal app's name, for the terminal window (a string)
+
+	endDestinationToken string // one use, tied to the latest exact return review
+	endDestinationPlan  *move.Plan
 	// Wails is the running application (events, clipboard, dialogs).
 	Wails *application.App `json:"-"`
 	// Terms are the terminal's tabs and window (not bound to the window: see terminal.go).

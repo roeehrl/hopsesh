@@ -83,7 +83,7 @@ test('open original explains how to exit and rechecks the exact original only on
  await page.route('**/call',async route=>{
   const req=route.request().postDataJSON();
   if(req.m==='ResolveEntry') return route.fulfill({json:{result:{machine:req.args[0],key:req.args[1],title:'oarbank',agent:'claude',agentName:'Claude Code',app:'Claude',live:true,profile:{id:'personal'}}}});
-  if(['ShowPlace','ResumeEntry','Apply','PushApply'].includes(req.m)) { launches.push(req); return route.fulfill({json:{result:null}}); }
+  if(['ShowPlace','ResumeEntry','Apply','PushApply','EndReturnDestination'].includes(req.m)) { launches.push(req); return route.fulfill({json:{result:null}}); }
   return route.fallback();
  });
  const card=details(page).getByLabel('Return destinations');
@@ -97,9 +97,9 @@ test('open original explains how to exit and rechecks the exact original only on
  await item.click();
  const d=page.getByRole('dialog').filter({has:page.getByRole('heading',{name:'Move back to Claude Code',exact:true})});
  await expect(d).toContainText('oarbank');
- await expect(d).toContainText('Code tab');
- await expect(d).toContainText('⌘W on Mac or Ctrl+W on Windows');
- await expect(d).toContainText('Esc only stops');
+ await expect(d).toContainText('leave its agent running in the background');
+ await expect(d).toContainText('End original session and check again');
+ await expect(d).not.toContainText('⌘W');
  await expect(d).toContainText('Saved history is preserved');
  expect(launches).toHaveLength(0);expect(calls).toHaveLength(0);
  for(const theme of ['light','dark']) {
@@ -108,7 +108,7 @@ test('open original explains how to exit and rechecks the exact original only on
   expect(await d.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBeTruthy();
   await page.screenshot({path:info.outputPath(`open-original-${theme}.png`),fullPage:true});
  }
- await d.getByRole('button',{name:'Check again and review return',exact:true}).click();
+ await d.getByRole('button',{name:'Review return',exact:true}).click();
  await expect.poll(()=>calls.length).toBe(1);
  expect(calls[0].args[3]).toMatchObject({targetProfile:'personal',targetSession:'claude@personal/original',fork:false,newReplica:false,stopLocal:false});
  expect(launches).toHaveLength(0);
@@ -124,6 +124,62 @@ test('remote original instructions name the destination and terminal exit withou
  expect(calls).toHaveLength(0);
  await d.getByRole('button',{name:'Cancel',exact:true}).click();
  await expect(d).not.toBeVisible();
+});
+
+for(const outcome of ['ended','timeout','unsupported']) test(`ending the reviewed original is explicit and never applies the return: ${outcome}`,async({page})=>{
+ await fixtures(page,[candidate({agent:'claude',agentName:'Claude Code',status:'live',local:true,key:'claude/original'})]);
+ const actions:any[]=[];let plans=0;let ended=false;
+ await page.route('**/call',async route=>{
+  const req=route.request().postDataJSON();
+  if(req.m==='Plan') {
+   plans++;
+   // Keep the real service's complete conversion report; only inject the live
+   // destination and the stop result. No real user's process can be targeted.
+   const response=await route.fetch({postData:JSON.stringify({...req,args:[req.args[0],req.args[1],'codex',{...req.args[3],targetProfile:'',targetSession:'',app:false}]})});
+   const body=await response.json();
+   expect(body.error).toBeFalsy();
+   Object.assign(body.result,{agent:'Claude Code',blockers:ended?[]:['the destination copy is open; quit it first'],endDestinationToken:!ended && outcome!=='unsupported'?'review-token':undefined});
+   Object.assign(body.result.continue,{relation:'append',appendTo:'Original codeword conversation'});
+   return route.fulfill({json:body});
+  }
+  if(req.m==='EndReturnDestination') {
+   actions.push(req);
+   await new Promise(resolve=>setTimeout(resolve,250));
+   ended=outcome==='ended';
+   return route.fulfill({json:ended?{result:null}:{error:'The original session did not exit in time'}});
+  }
+  if(['Apply','PushApply','ResumeEntry','ShowPlace'].includes(req.m)){actions.push(req);return route.fulfill({json:{result:null}})}
+  return route.fallback();
+ });
+ await details(page).locator('#act-primary').click();
+ await page.getByRole('button',{name:'Review return',exact:true}).click();
+ const sheet=page.locator('#sheet');
+ await expect(sheet).toContainText('leave its agent running in the background');
+ await expect(sheet.locator('#go')).toBeDisabled();
+ expect(actions).toHaveLength(0);
+ const end=sheet.getByRole('button',{name:'End original session and check again',exact:true});
+ if(outcome==='unsupported') {
+  await expect(end).toHaveCount(0);await expect(sheet).toContainText('unavailable for this destination');return;
+ }
+ await expect(sheet).toContainText('other conversations are unaffected');
+ const reviewedPlans=plans;
+ await end.click();
+ await expect(sheet.getByRole('button',{name:'Ending original session…',exact:true})).toBeDisabled();
+ await expect.poll(()=>actions.length).toBe(1);
+ expect(actions[0]).toMatchObject({m:'EndReturnDestination',args:['review-token']});
+ if(outcome==='ended') {
+  await expect(sheet).toContainText('Original session ended. Review the refreshed plan');
+  expect(plans).toBeGreaterThan(reviewedPlans);
+  await expect(sheet.locator('#go')).toBeEnabled();
+  await expect(end).toHaveCount(0);
+ } else {
+  await expect(sheet).toContainText('did not exit in time');
+  await expect(sheet.locator('#go')).toHaveCount(0);
+  await sheet.getByRole('button',{name:'Check again and review',exact:true}).click();
+  await expect(end).toBeVisible();
+  await expect(sheet.locator('#go')).toBeDisabled();
+ }
+ expect(actions).toHaveLength(1); // No Apply or agent launch without another user action.
 });
 
 test('a fork with no candidates never infers a return to its parent',async({page})=>{

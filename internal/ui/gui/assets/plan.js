@@ -62,6 +62,7 @@ async function replan() {
     const p = await request;
     if (cur !== c || c.revision !== revision || !p) return;
     c.plan = p;
+    if(c.recoveryNotice && (p.blockers||[]).some(b=>/destination copy is open/.test(b))) c.recoveryNotice='The original session started running again. End it before adding the new work.';
 if(p.sourceEntry && c.e) c.e={...c.e,...p.sourceEntry};
     if(!c.sendTo && p.kind!=="fetch") {
       if(c.launch==="app"&&!p.can.app){c.launch=opensIn();c.launchNotice=p.can.appWhy||"Desktop opening is unavailable for this destination.";}
@@ -80,6 +81,29 @@ if(p.sourceEntry && c.e) c.e={...c.e,...p.sourceEntry};
 }
 
 const set = (k, v) => { cur.opts[k] = v; return replan(); };
+
+async function endOriginal() {
+  const c=cur;
+  if (!c?.plan?.endDestinationToken || c.busy || c.applying) return;
+  const token=c.plan.endDestinationToken;
+  c.busy=true;
+  sheet.querySelector('.sheet-body').inert=true;
+  const status=sheet.querySelector('#end-original');
+  if(status){status.disabled=true;status.textContent='Ending original session…';}
+  try {
+    await api('EndReturnDestination',token);
+    if(cur!==c)return;
+    c.recoveryNotice='Original session ended. Review the refreshed plan before adding your new work.';
+    await replan();
+  } catch(err) {
+    if(cur!==c)return;
+    // Even a failed stop may have saved final work. The consumed plan is unusable.
+    c.busy=false;c.plan=null;
+    problem(errText(err),{label:'Check again and review',run:replan});
+  } finally {
+    if(cur===c){const body=sheet.querySelector('.sheet-body');if(body)body.inert=false;}
+  }
+}
 
 function problem(msg, back) {
   fill(sheet, h("div", { class: "sheet-in" },
@@ -249,9 +273,11 @@ function repository(p) {
 // blocker turns a reason the plan cannot go ahead into words and the buttons that fix it.
 function blocker(p, b) {
   const o = cur.opts, cont = p.continue;
-  if (/destination copy is open/.test(b)) return item("err", `Exit the original ${p.agent} conversation before adding new work`,
-    `${sessionExitHelp(cur.target || cur.e?.agent)} Its saved history is preserved. Exit this conversation in every place where it is open, then check again.`,
-    h("button", {class:"btn small",onclick:()=>replan()}, "Check again"));
+  if (/destination copy is open/.test(b)) return item("err", `End the original ${p.agent} session before adding new work`,
+    `${sessionExitHelp()} ${p.endDestinationToken ? 'Hopsesh can ask only this original session to exit, including its open terminal and desktop instances. This interrupts any work it is running; other conversations are unaffected. Its saved history is preserved. You will review a fresh plan before anything is added.' : 'Ending this session from Hopsesh is unavailable for this destination. End it using your agent’s session controls or terminal exit command, then check again. If your desktop app has no session exit control, quit that app; this also ends its other running conversations.'}`,
+    h("div",{style:"display:flex;gap:8px;flex-wrap:wrap"},
+      p.endDestinationToken ? h("button",{id:"end-original",class:"btn outline small",disabled:cur.busy,onclick:endOriginal},"End original session and check again") : null,
+      h("button", {class:"btn small",disabled:cur.busy,onclick:()=>replan()}, "Check again")));
   if (p.reviewNewSession && /cannot update the original session across agent or account profiles/.test(b)) return item("err", "The original session cannot be updated across these agent or account profiles",
     "This does not mean you changed accounts. Hopsesh cannot verify native compatibility for updating the original file across these profiles. Review a fresh session on the same lineage branch; both existing sessions will be preserved. Independent work still requires a separate fork.",
     h("button", {class:"btn small",onclick:()=>{Object.assign(cur.opts,{targetSession:"",fork:false,newReplica:true,conflict:""});return replan();}}, "Review new session on the same branch"));
@@ -322,9 +348,9 @@ function render() {
         h("span", { style: "color:var(--accent)", "aria-label": "to" }, "→"),
         agentChip(p.continue ? cur.target : p.sourceAgent, p.agent), h("span", {}, there), h("span", { class: "mono muted", style: "font-size:11.5px" }, p.targetCwd)),
       summary(p)),
-    h("div", { class: "sheet-body" }, p.continue ? conversation(p) : null, repository(p), checks(p), options(p), paths(p)),
+    h("div", { class: "sheet-body" }, cur.recoveryNotice ? h("p",{role:"status",class:"notice"},cur.recoveryNotice) : null, p.continue ? conversation(p) : null, repository(p), checks(p), options(p), paths(p)),
     h("footer", { class: "sheet-foot" },
-      h("span", { class: "muted", style: "font-size:12px;flex:1 1 260px" }, `Nothing changes until you ${p.continue ? "continue" : p.machine ? "send it" : "hop"}. The original on ${p.machine ? sys.here : sourcePlace(p)} is never deleted.`),
+      h("span", { class: "muted", style: "font-size:12px;flex:1 1 260px" }, `New work is added only when you ${p.continue ? "continue" : p.machine ? "send it" : "hop"}. The original on ${p.machine ? sys.here : sourcePlace(p)} is never deleted.`),
       h("button", { class: "btn", onclick: () => sheet.close() }, "Cancel"),
       launchControl(p,blocked))));
 }

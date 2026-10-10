@@ -42,12 +42,12 @@ export function returnActions(e, open) {
           h("p", {}, "The original conversation is still open. Exit it first so its running agent cannot overwrite the new work Hopsesh adds."),
           h("ol", {class:"return-steps"},
             h("li", {}, h("strong", {}, "Show the original conversation"), h("button", {class:"btn small",onclick:()=>{d.close(); return showOriginal();}}, "Show original session")),
-            h("li", {}, h("strong", {}, "End the running session"), h("p", {}, sessionExitHelp(r.agent, !!destination?.app))),
-            h("li", {}, h("strong", {}, "Return here and check again"), h("p", {}, "Hopsesh checks that it has exited, then shows a review for adding the missing work to the same original session."))),
+            h("li", {}, h("strong", {}, "Review the return"), h("p", {}, sessionExitHelp(!!destination?.app))),
+            h("li", {}, h("strong", {}, "End the original from the review"), h("p", {}, "When supported by this agent and machine, choose “End original session and check again”. This interrupts any work in the original and refreshes the review. Adding the new work still requires your approval."))),
           h("p", {class:"return-preserved"}, "Saved history is preserved. If the original is open in several places, exit it in each place."),
           !canPlan ? h("p", {}, `To review the return, run Hopsesh on ${e.machine} or ${r.machine}.`) : null,
           h("div", {class:"dlg-foot"}, h("button", {class:"btn",onclick:()=>d.close()}, "Cancel"),
-            canPlan ? h("button", {class:"btn primary",onclick:()=>{d.close(); return plan();}}, "Check again and review return") : null)));
+            canPlan ? h("button", {class:"btn primary",onclick:()=>{d.close(); return plan();}}, "Review return") : null)));
         return;
       }
       const explanation = r.status === "diverged" ? "Both copies changed. Review a plan that keeps both branches as separate sessions."

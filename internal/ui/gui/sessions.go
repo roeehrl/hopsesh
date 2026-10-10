@@ -2,6 +2,7 @@ package gui
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -814,7 +815,8 @@ type ContinueDTO struct {
 
 // PlanDTO is a plan as the window shows it.
 type PlanDTO struct {
-	ReviewNewSession bool `json:"reviewNewSession,omitempty"`
+	EndDestinationToken string `json:"endDestinationToken,omitempty"`
+	ReviewNewSession    bool   `json:"reviewNewSession,omitempty"`
 
 	SourceEntry   *EntryDTO        `json:"sourceEntry,omitempty"`
 	SourceProfile string           `json:"sourceProfile,omitempty"`
@@ -890,6 +892,13 @@ func (a *App) planEntry(core *app.App, inv *app.Inventory, e app.Entry, target s
 	}
 	a.mu.Lock()
 	a.plan, a.input, a.res = p, in, nil
+	a.endDestinationToken = ""
+	a.endDestinationPlan = nil
+	if move.CanEndDestination(p, in) {
+		a.endDestinationToken = rand.Text()
+		a.endDestinationPlan = p
+	}
+	endToken := a.endDestinationToken
 	a.mu.Unlock()
 	if p.Kind == move.KindFetch {
 		d := fetchPlanDTO(p, e)
@@ -898,6 +907,7 @@ func (a *App) planEntry(core *app.App, inv *app.Inventory, e app.Entry, target s
 		return d, nil
 	}
 	d := planDTO(p, e, in.Target.Module)
+	d.EndDestinationToken = endToken
 	freshEntry := entryDTO(core, inv, app.Item{Entry: e}, continueTargets(core, inv))
 	d.SourceEntry = &freshEntry
 	if checker, ok := in.Target.Module.(agent.AppChecker); ok {
@@ -907,6 +917,27 @@ func (a *App) planEntry(core *app.App, inv *app.Inventory, e app.Entry, target s
 		}
 	}
 	return d, nil
+}
+
+// EndReturnDestination consumes a review's one-use token. Invalidate the old
+// plan before stopping, even on failure: an agent may save work as it exits.
+// The window must request a fresh plan; this action cannot apply a transfer.
+func (a *App) EndReturnDestination(token string) error {
+	core := a.snapshot()
+	a.mu.Lock()
+	if token == "" || token != a.endDestinationToken || a.plan == nil || a.plan != a.endDestinationPlan {
+		a.mu.Unlock()
+		return errors.New("return review changed; review the plan again before ending the original")
+	}
+	p, in := a.plan, a.input
+	a.endDestinationToken, a.plan = "", nil
+	a.endDestinationPlan = nil
+	a.mu.Unlock()
+	doneSelection := a.beginSelection()
+	defer doneSelection()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return core.EndDestination(ctx, p, in)
 }
 
 func planDTO(p *move.Plan, e app.Entry, tm agent.Module) *PlanDTO {
