@@ -803,6 +803,7 @@ type CanDTO struct {
 
 // ContinueDTO is the conversion part of a plan.
 type ContinueDTO struct {
+	Comparison   *move.Comparison         `json:"comparison,omitempty"`
 	Instructions []move.InstructionSource `json:"instructions"`
 	From         string                   `json:"from"`
 	Fidelity     string                   `json:"fidelity"`
@@ -951,7 +952,7 @@ func planDTO(p *move.Plan, e app.Entry, tm agent.Module) *PlanDTO {
 			App: agent.Has(tm, agent.CapApp), Native: !p.Options.OtherAccount && agent.Has(tm, agent.CapNativeReplay),
 			Import: !p.Options.OtherAccount && importsFrom(tm, e.Agent)}}
 	if c := p.Continue; c != nil {
-		d.Continue = &ContinueDTO{Instructions: c.Instructions, From: c.From, Fidelity: string(c.Fidelity), Relation: c.Relation, Report: c.Report, Briefing: c.Briefing, Via: c.Via}
+		d.Continue = &ContinueDTO{Comparison: c.Comparison, Instructions: c.Instructions, From: c.From, Fidelity: string(c.Fidelity), Relation: c.Relation, Report: c.Report, Briefing: c.Briefing, Via: c.Via}
 		if c.AppendTo != nil {
 			d.Continue.AppendTo = c.AppendTo.Title
 		}

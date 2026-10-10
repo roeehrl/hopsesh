@@ -48,7 +48,7 @@ func TestMovementDetailsFit24RowTerminal(t *testing.T) {
 	}
 }
 
-func TestReturnSelectionExactProfileAndPreservesDivergence(t *testing.T) {
+func TestReturnSelectionExactProfileRequiresExplicitConflictChoice(t *testing.T) {
 	m := newModel(t)
 	e := app.Entry{Machine: app.LocalName(), Agent: "codex", Returns: []app.ReturnCandidate{
 		{Agent: "claude", Profile: "first", Key: "claude@first/original", Local: true, Status: "available"},
@@ -61,11 +61,60 @@ func TestReturnSelectionExactProfileAndPreservesDivergence(t *testing.T) {
 	}
 	m.returnKeys("down")
 	_, cmd := m.returnKeys("enter")
-	if cmd == nil || m.opts.TargetProfile != "second" || m.opts.TargetSession != "claude@second/original" || m.opts.Conflict != move.ConflictKeepBoth {
+	if cmd == nil || m.opts.TargetProfile != "second" || m.opts.TargetSession != "claude@second/original" || m.opts.Conflict != "" {
 		t.Fatalf("wrong return: %+v", m.opts)
 	}
 	if _, cmd = m.returnKeys("enter"); cmd != nil {
 		t.Fatal("double plan while verifying")
+	}
+	// The initial blocked review is not consent to preserve a separate branch.
+	m.Update(planDone{plan: &move.Plan{Kind: move.KindContinue, Agent: "Claude Code", Conflict: "independent work", Continue: &move.ContinuePlan{Relation: move.RelationDiverged}, Blockers: []string{"choose --keep-both"}}})
+	if _, cmd = m.key("enter"); cmd != nil || m.mode != modePlan {
+		t.Fatal("return applied without an explicit choice")
+	}
+	if _, cmd = m.key("R"); cmd != nil || m.opts.Conflict != "" {
+		t.Fatal("unsupported replacement selected")
+	}
+	if _, cmd = m.key("B"); cmd == nil || m.opts.Conflict != move.ConflictKeepBoth || !m.planning || m.mode != modePlan {
+		t.Fatal("B must request review, not apply", m.opts)
+	}
+	if _, cmd = m.key("enter"); cmd != nil {
+		t.Fatal("applied the stale plan before separate-session review")
+	}
+	if _, cmd = m.key("B"); cmd != nil || m.opts.Conflict != move.ConflictKeepBoth {
+		t.Fatal("changed the conflict choice during review")
+	}
+	m.Update(planDone{plan: &move.Plan{Kind: move.KindContinue, Agent: "Claude Code", Conflict: "independent work", Continue: &move.ContinuePlan{Relation: move.RelationNew}, Options: m.opts}})
+	if _, cmd = m.key("enter"); cmd == nil || m.mode != modeApplying {
+		t.Fatal("reviewed explicit choice could not be confirmed")
+	}
+}
+
+func TestContinueConflictCannotSelectUnsupportedReplacement(t *testing.T) {
+	for _, p := range []*move.Plan{
+		{Kind: move.KindContinue, Conflict: "independent work"},
+		{Continue: &move.ContinuePlan{}, Conflict: "unavailable evidence"},
+	} {
+		m := &model{mode: modePlan, plan: p}
+		if _, cmd := m.key("R"); cmd != nil || m.opts.Conflict != "" {
+			t.Fatal("continuation replacement selected", m.opts)
+		}
+		var b strings.Builder
+		m.viewPlan(&b)
+		if strings.Contains(b.String(), "[R] replace") || !strings.Contains(b.String(), "[B] review separate") {
+			t.Fatal(b.String())
+		}
+	}
+}
+
+func TestReturnEscapeCancelsSeparateSessionReview(t *testing.T) {
+	m := newModel(t)
+	m.mode = modePlan
+	m.plan = &move.Plan{Kind: move.KindContinue, Conflict: "independent work"}
+	m.returnTo = &app.ReturnCandidate{Local: true}
+	m.opts.Conflict = move.ConflictKeepBoth
+	if _, cmd := m.key("esc"); cmd != nil || m.mode != modeBrowse || m.returnTo != nil || m.opts.Conflict != "" {
+		t.Fatal("escape did not cancel without applying", m.opts)
 	}
 }
 

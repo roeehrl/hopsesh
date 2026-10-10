@@ -50,11 +50,19 @@ func (m *Module) RecoverWrite(ctx context.Context, h agent.Host, in agent.Instal
 		if e != nil {
 			return ir.WriteResult{}, e
 		}
-		for _, index := range activeBranch(recs) {
+		branch, e := activeBranch(recs)
+		if e != nil {
+			return ir.WriteResult{}, e
+		}
+		for _, index := range branch {
 			prefix.Nodes = append(prefix.Nodes, nodes(recs[index])...)
 		}
 		ir.Chain(prefix.Nodes, "")
-		if len(prefix.Nodes) > 0 && prefix.Nodes[len(prefix.Nodes)-1].ID != req.Expect.Head {
+		var head ir.NodeID
+		if len(prefix.Nodes) > 0 {
+			head = prefix.Nodes[len(prefix.Nodes)-1].ID
+		}
+		if head != req.Expect.Head {
 			return ir.WriteResult{}, agent.ErrDiverged
 		}
 	}

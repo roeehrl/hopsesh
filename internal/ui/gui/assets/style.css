@@ -713,3 +713,31 @@ body.terminal-right.terminal-details #terminal-workspace iframe {visibility:hidd
 body.terminal-right .divider[data-pane="inspector"]{display:none}
 
 .discovery-note { color:var(--muted);font-size:12px;padding:10px 12px;border-left:2px solid var(--accent);margin-bottom:10px; }
+/* Conversation conflict evidence stays in the transfer review. */
+.conflict-review { gap: 12px; }
+.conflict-review h3, .comparison-side h4, .conflict-review p { margin: 0; }
+.comparison-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; }
+.return-destination-identity { font-size: 12px; margin-bottom: 8px; overflow-wrap: anywhere; }
+.return-destination-identity summary { cursor: pointer; color: var(--muted); }
+.sheet-head { flex-shrink: 0; max-height: 45vh; overflow: auto; }
+.sheet-body { min-height: 0; }
+.sheet-foot { flex-shrink: 0; }
+.sheet-foot #review-separate, .sheet-foot #end-original { max-width: 100%; height: auto; min-height: 36px; padding-top: 6px; padding-bottom: 6px; white-space: normal; }
+.comparison-side { min-width: 0; display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; overflow-wrap: anywhere; }
+.comparison-counts, .conflict-outcome { display: flex; flex-direction: column; gap: 6px; }
+.comparison-excerpts { display: flex; flex-direction: column; gap: 8px; padding: 0; margin: 0; list-style: none; }
+.comparison-message { border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 12px; }
+.comparison-message.user { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.comparison-message.agent { background: color-mix(in srgb, var(--muted) 7%, transparent); }
+.comparison-message-head { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 11px; margin-bottom: 5px; }
+.comparison-message .markdown > :first-child { margin-top: 0; }
+.comparison-message .markdown > :last-child { margin-bottom: 0; }
+.comparison-message pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.comparison-more summary, .comparison-receipt summary { cursor: pointer; font-size: 12px; }
+.comparison-more[open] > ol { margin-top: 8px; }
+.comparison-tool { display: flex; gap: 4px; flex-wrap: wrap; font-size: 12px; }
+.comparison-limit, .comparison-receipt { font-size: 11px; }
+.conflict-outcome { border-top: 1px solid var(--line); padding-top: 12px; }
+.conflict-outcome .btn { align-self: flex-start; }
+@media (max-width: 760px) { .comparison-grid { grid-template-columns: minmax(0,1fr); } }
+@media (min-width: 481px) and (max-width: 700px) { .sheet .transfer-accounts { grid-template-columns: repeat(2,minmax(0,1fr)); } }

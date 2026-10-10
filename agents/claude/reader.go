@@ -85,7 +85,10 @@ func (m *Module) Read(ctx context.Context, h agent.Host, in agent.Install, s age
 	if err != nil {
 		return ir.Segment{}, &agent.FormatError{Path: s.Path, Err: err}
 	}
-	branch := activeBranch(recs)
+	branch, err := activeBranch(recs)
+	if err != nil {
+		return ir.Segment{}, err
+	}
 	seg := ir.Segment{Header: ir.Header{Agent: string(id), SessionID: string(s.Key.Session), CWD: s.CWD, Title: s.Title, GitBranch: s.GitBranch}}
 	for _, i := range branch {
 		r := recs[i]
@@ -151,9 +154,19 @@ func isChain(t string) bool {
 	return t == "user" || t == "assistant" || t == "system" || t == "attachment"
 }
 
-// activeBranch returns record indexes from the root to the leaf Claude Code resumes: the
-// last last-prompt record's leaf, else the last non-sidechain message.
-func activeBranch(recs []chained) []int {
+func (r chained) parentUUID() string {
+	if r.ParentUUID != nil {
+		return *r.ParentUUID
+	}
+	return r.LogicalParentUUID // across a compaction boundary
+}
+
+// activeBranch follows the latest last-prompt checkpoint and any unambiguous
+// continuation written after it. A checkpoint can precede the assistant's response;
+// it must not hide descendants already present when a transfer reads the file.
+// Record order and parent links establish continuation, never timestamps. A later
+// checkpoint selecting an earlier leaf remains an explicit rewind.
+func activeBranch(recs []chained) ([]int, error) {
 	byUUID := map[string]int{}
 	leaf := -1
 	for i, r := range recs {
@@ -166,25 +179,45 @@ func activeBranch(recs []chained) []int {
 	}
 	for i := len(recs) - 1; i >= 0; i-- {
 		if recs[i].Type == "last-prompt" && recs[i].LeafUUID != "" {
-			if j, ok := byUUID[recs[i].LeafUUID]; ok {
-				leaf = j
+			j, ok := byUUID[recs[i].LeafUUID]
+			if !ok || j >= i || recs[j].IsSidechain {
+				return nil, fmt.Errorf("%w: Claude checkpoint has no preceding main-branch leaf", agent.ErrDiverged)
+			}
+			leaf = j
+			reachable := map[string]int{recs[j].UUID: j}
+			children := map[int]int{}
+			for k := i + 1; k < len(recs); k++ {
+				r := recs[k]
+				if !isChain(r.Type) || r.UUID == "" || r.IsSidechain {
+					continue
+				}
+				parent, extends := reachable[r.parentUUID()]
+				if !extends {
+					continue // unrelated branches cannot extend this checkpoint
+				}
+				if _, duplicate := reachable[r.UUID]; duplicate || byUUID[r.UUID] != k {
+					return nil, fmt.Errorf("%w: Claude continuation has a repeated native anchor", agent.ErrDiverged)
+				}
+				if _, sibling := children[parent]; sibling {
+					return nil, fmt.Errorf("%w: Claude checkpoint has ambiguous continuations", agent.ErrDiverged)
+				}
+				children[parent] = k
+				reachable[r.UUID] = k
+				leaf = k
 			}
 			break
 		}
 	}
 	var out []int
 	seen := map[int]bool{}
-	for i := leaf; i >= 0 && !seen[i]; {
+	for i := leaf; i >= 0; {
+		if seen[i] || recs[i].IsSidechain {
+			return nil, fmt.Errorf("%w: Claude branch has cyclic or sidechain ancestry", agent.ErrDiverged)
+		}
 		seen[i] = true
 		out = append(out, i)
 		r := recs[i]
-		parent := ""
-		if r.ParentUUID != nil {
-			parent = *r.ParentUUID
-		} else if r.LogicalParentUUID != "" {
-			parent = r.LogicalParentUUID // across a compaction boundary
-		}
-		j, ok := byUUID[parent]
+		j, ok := byUUID[r.parentUUID()]
 		if !ok {
 			break
 		}
@@ -193,7 +226,7 @@ func activeBranch(recs []chained) []int {
 	for a, b := 0, len(out)-1; a < b; a, b = a+1, b-1 {
 		out[a], out[b] = out[b], out[a]
 	}
-	return out
+	return out, nil
 }
 
 // nodes turns one chained record into IR nodes.

@@ -28,7 +28,7 @@ export function returnActions(e, open) {
       try { return open(await resolveDestination(r), {showOnly:true}); } catch (err) { fail(err); }
     };
     const review = async () => {
-      if (r.status === "live" && canPlan) return plan();
+      if (["live", "diverged", "verify", "missing"].includes(r.status) && canPlan) return plan();
       const destination = returnDestination(r);
       const explanation = r.status === "diverged" ? "Both copies changed. Review a plan that keeps both branches as separate sessions."
         : r.status === "live" ? `The original session is still running on ${r.machine}. ${sessionExitHelp(!!destination?.app)}`

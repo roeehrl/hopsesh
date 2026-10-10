@@ -111,6 +111,19 @@ and profile/binding, not labels; available/verify/same/behind/diverged/missing/l
 remain honest as upstream readers, live detection and fork metadata change. No paid calls
 or writes to live vendor configuration are needed to validate these fixture scenarios.
 
+Conversation conflict review: inspect `docs/return-conflict-review.md`,
+`internal/core/move/comparison.go`, `agents/claude/branch_test.go` and
+`internal/e2e/movement_comparison_test.go`. Claude's last-prompt is a checkpoint,
+not necessarily the final saved response: follow only unambiguous descendants written
+after it, preserve explicit later rewinds, and reject ambiguous native branches inside
+the Claude module. Shutdown/checkpoint metadata alone must not invent new authored work.
+Never grant legacy incomplete receipts coverage of omitted messages. Comparison evidence
+uses fresh causal coverage and bounded ordinary-message/tool-name excerpts; private
+reasoning and raw tool input/output stay hidden. Unavailable evidence is not divergence.
+GUI/TUI/CLI must identify both histories, explain that a difference does not establish
+when work was written, and require explicit review then confirmation for a separate
+conversation. Cancellation preserves both originals; notices are not ownership locks.
+
 Portable return comparisons after a first account observation must verify the original
 native anchors across the binding rotation (`internal/core/move/portable_return.go`,
 `internal/e2e/movement_binding_test.go`). A changed binding alone is not independent

@@ -30,6 +30,7 @@ const (
 
 // ContinuePlan is how a session continues in another agent.
 type ContinuePlan struct {
+	Comparison     *Comparison         `json:"comparison,omitempty"`
 	Instructions   []InstructionSource `json:"instructions"`
 	From           string              `json:"from"` // source agent name
 	Fidelity       convert.Fidelity    `json:"fidelity"`
@@ -304,7 +305,8 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 		// A fresh return preserves existing copies, but must still detect independent
 		// destination work instead of silently treating divergent histories as one line.
 		for _, c := range currentBranchCopies(in) {
-			st, _, err := targetState(ctx, p, in, c)
+			st, targetSegment, err := targetState(ctx, p, in, c)
+			cp.Comparison = BuildComparison(p, in, c, *seg, targetSegment, st, err)
 			if err != nil || !lineage.Subset(p.manifest.Covered(st.Heads), p.manifest.Covered(p.sourceState.Heads)) {
 				if opt.Conflict == ConflictKeepBoth {
 					forkLine(p)
@@ -348,7 +350,8 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 		return
 	}
 	c := candidates[0]
-	st, _, err := targetState(ctx, p, in, c)
+	st, targetSegment, err := targetState(ctx, p, in, c)
+	cp.Comparison = BuildComparison(p, in, c, *seg, targetSegment, st, err)
 	if err != nil {
 		p.Conflict = "cannot safely append: " + err.Error()
 		cp.Relation = RelationDiverged

@@ -81,7 +81,11 @@ func (m *Module) ContextCapacity(ctx context.Context, h agent.Host, in agent.Ins
 			return c, err
 		}
 		nativeModel := ""
-		for _, i := range activeBranch(recs) {
+		branch, err := activeBranch(recs)
+		if err != nil {
+			return c, err
+		}
+		for _, i := range branch {
 			r := recs[i]
 			if r.IsCompactSummary {
 				c.Existing = 0

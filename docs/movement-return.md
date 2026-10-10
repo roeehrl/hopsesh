@@ -13,6 +13,12 @@ marks are controlled separately by `mark_moved`/`--mark`. A cross-agent title ma
 “prepared in”; it cannot prove subsequent work. Callers using `move.Options` directly
 must set `Notify: true` when they want a notice; config defaults apply in the app layer.
 
+When a return cannot safely append, the [conversation conflict review](return-conflict-review.md)
+shows verified differences and the effects of creating a separate conversation. A
+difference does not prove that work happened after a move; old incomplete transfers
+may have omitted already saved messages. Notice hooks supply context, not an exclusive
+ownership lock that prevents the original from being continued.
+
 ## Native agent setup
 
 In **Hopsesh → Settings → General**, **Record movement notices** controls the default-on

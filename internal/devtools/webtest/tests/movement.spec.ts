@@ -1,9 +1,48 @@
-import { test, expect, Page } from '@playwright/test';
+import { test, expect, Page, Route } from '@playwright/test';
 import { fresh, row, details } from './helpers';
+import { appendFile, readFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 
 test.afterEach(async({page})=>{await page.unrouteAll({behavior:'wait'})});
 
 const candidate = (patch={}) => ({replica:'original',machine:'studio',agent:'codex',agentName:'Codex',profile:'work',profileLabel:'Work',key:'codex@work/original',status:'available',reason:'Same branch; new work can return',local:false,...patch});
+// Preserve every field of the real conversion/repository/capability report.
+// Only the conflict evidence or live destination is injected by each test.
+async function realPlan(route:Route, req:any) {
+ const response=await route.fetch({postData:JSON.stringify({...req,args:[req.args[0],req.args[1],'codex',{...req.args[3],targetProfile:'',targetSession:'',app:false}]})});
+ const body=await response.json();
+ expect(body.error).toBeFalsy();expect(body.result.continue).toBeTruthy();
+ return body.result;
+}
+const changingCall = (method:string) => /^(Apply|PushApply|Resume|Stop|EndReturnDestination|OpenResult|ShowPlace)/.test(method);
+const comparisonFixture = () => ({
+ classification:'diverged',verified:true,reason:'Both sessions contain verified independent conversation work.',sharedRevisions:17,
+ source:{identity:{agent:'codex',agentName:'Codex',profile:'work',profileName:'Source work account',machine:'source-studio',machineId:'source-endpoint',title:'Actual incoming conversation',key:{agent:'codex',profile:'work',session:'incoming-session'}},status:'verified',exclusiveKnown:true,revisions:8,
+  counts:{nodes:8,messages:6,userMessages:3,assistantMessages:3,tools:1,other:1},
+  preview:[{kind:'message',role:'user',text:'Earlier incoming checkpoint',time:'2026-10-09T08:00:00Z',truncated:false},{kind:'tool_call',tool:'Bash',time:'2026-10-09T08:01:00Z',truncated:false},{kind:'message',role:'assistant',text:'Incoming checkpoint completed',truncated:false},{kind:'message',role:'user',text:'Review **incoming** changes',truncated:false},{kind:'message',role:'assistant',text:'Incoming work is ready',truncated:false}],truncated:true,previewOmitted:2},
+ destination:{identity:{agent:'claude',agentName:'Claude Code',profile:'personal',profileName:'Destination personal account',machine:'destination-mbp',machineId:'destination-endpoint',title:'Actual original conversation',key:{agent:'claude',profile:'personal',session:'original-session'}},status:'verified',exclusiveKnown:true,revisions:3,
+  counts:{nodes:3,messages:2,userMessages:1,assistantMessages:1,tools:1,other:0},
+  preview:[{kind:'message',role:'user',text:'Keep the destination-only decision',truncated:false},{kind:'tool_call',tool:'Read',truncated:false},{kind:'message',role:'assistant',text:'Destination-only decision retained',truncated:false}],truncated:false,previewOmitted:0}
+});
+async function conflictFixture(page:Page, comparison=comparisonFixture()) {
+ await fixtures(page,[candidate({status:'diverged',agent:'claude',agentName:'Claude Code',profile:'personal',profileLabel:'Stale candidate account',title:'Stale candidate title',key:'claude@personal/original-session',local:true})]);
+ const plans:any[]=[], changes:any[]=[];
+ await page.route('**/call',async route=>{
+  const req=route.request().postDataJSON();
+  if(req.m==='Plan') {
+   plans.push(req);
+   const plan=await realPlan(route,req);
+   Object.assign(plan,{agent:'Claude Code',fromAgent:'Codex',sourceAgent:'codex',conflict:'destination has independent work',blockers:req.args[3].conflict==='keep-both'?[]:['destination has independent work; choose --keep-both'],endDestinationToken:undefined});
+   Object.assign(plan.continue,{relation:req.args[3].conflict==='keep-both'?'new':'diverged',comparison});
+   return route.fulfill({json:{result:plan}});
+  }
+  if(changingCall(req.m)) {changes.push(req);return route.fulfill({json:{error:'Review must not change or launch either session'}})}
+  return route.fallback();
+ });
+ await details(page).locator('#act-primary').click();
+ await expect(page.locator('.conflict-review')).toBeVisible();
+ return {plans,changes};
+}
 async function fixtures(page:Page, returns:any[], movement:any=null) {
  const calls:any[]=[];
  await page.route('**/call',async route=>{
@@ -47,20 +86,182 @@ test('multiple returns require explicit selection and replace generic Continue w
  await expect.poll(()=>calls.length).toBe(1);expect(calls[0].args[3]).toMatchObject({targetProfile:'personal',targetSession:'codex@personal/other'});
 });
 
-test('offline return reviews before verification; divergence preserves both branches',async({page})=>{
+test('unverified return directly reviews the exact destination in one dialog',async({page})=>{
  const calls=await fixtures(page,[candidate({status:'verify'})]);
  await details(page).locator('#act-primary').click();
- await expect(page.getByRole('dialog').last()).toContainText('has not been verified');expect(calls).toHaveLength(0);
- await page.getByRole('button',{name:'Verify and review plan',exact:true}).click();
- await expect.poll(()=>calls.length).toBe(1);expect(calls[0].args[3].targetSession).toBe('codex@work/original');
+ await expect.poll(()=>calls.length).toBe(1);
+ await expect(page.getByRole('dialog')).toHaveCount(1);
+ await expect(page.locator('.return-guide')).toHaveCount(0);
+ expect(calls[0]).toMatchObject({m:'PushPlan',args:[expect.any(String),'studio','codex',expect.objectContaining({targetSession:'codex@work/original',targetProfile:'work',conflict:'',stopLocal:false})]});
+ await expect(page.locator('#sheet')).toContainText('Test stopped after read-only plan request');
 });
 
-test('diverged return plans with keep-both and cannot overwrite a branch',async({page})=>{
+test('diverged return directly requests comparison without selecting keep-both',async({page})=>{
  const calls=await fixtures(page,[candidate({status:'diverged',local:true})]);
  await details(page).locator('#act-primary').click();
- await expect(page.getByRole('dialog').last()).toContainText('Both copies changed');
- await page.getByRole('button',{name:'Review plan keeping both branches'}).click();
- await expect.poll(()=>calls.length).toBe(1);expect(calls[0].args[3].conflict).toBe('keep-both');
+ await expect.poll(()=>calls.length).toBe(1);
+ expect(calls[0].m).toBe('Plan');
+ expect(calls[0].args[3]).toMatchObject({targetProfile:'work',targetSession:'codex@work/original',conflict:'',fork:false,newReplica:false,stopLocal:false});
+ await expect(page.getByRole('dialog')).toHaveCount(1);
+ await expect(page.locator('.return-guide')).toHaveCount(0);
+ await expect(page.locator('#sheet')).toContainText('Test stopped after read-only plan request');
+});
+
+test('conflict review shows actual identities, causal counts and expandable changed-message previews',async({page})=>{
+ const {plans,changes}=await conflictFixture(page);
+ const review=page.getByLabel('Conversation differences');
+ await expect(page.getByRole('dialog')).toHaveCount(1);
+ for(const text of ['Codex','Source work account','source-studio','Actual incoming conversation','Claude Code','Destination personal account','destination-mbp','Actual original conversation','codex@work/incoming-session','claude@personal/original-session']) await expect(review).toContainText(text);
+ await expect(review).not.toContainText('Stale candidate');
+ await expect(review).toContainText(/17.*shared|shared.*17/i);
+ await expect(review.getByLabel('Incoming conversation').locator('.comparison-counts')).toContainText('6 messages · 1 tool call');
+ await expect(review.getByLabel('Existing destination conversation').locator('.comparison-counts')).toContainText('2 messages · 1 tool call');
+ await expect(review).toContainText('Incoming work is ready');
+ await expect(review).toContainText('Destination-only decision retained');
+ await expect(review.locator('strong')).toContainText(['incoming']);
+ await expect(review.getByText('Earlier incoming checkpoint',{exact:true})).not.toBeVisible();
+ await review.getByLabel('Incoming conversation').getByText('View more changed messages and tool activity',{exact:true}).click();
+ await expect(review.getByText('Earlier incoming checkpoint',{exact:true})).toBeVisible();
+ await expect(review).toContainText(/shorten|omitted|bounded|preview/i);
+ expect(plans[0].args[3]).toMatchObject({conflict:'',targetSession:'claude@personal/original-session',stopLocal:false});
+ await expect(page.locator('#sheet #go, #sheet #end-original')).toHaveCount(0);
+ expect(changes).toEqual([]);
+});
+
+test('review separate Claude Code session only replans with keep-both before explicit creation',async({page})=>{
+ const {plans,changes}=await conflictFixture(page);
+ const sheet=page.locator('#sheet');
+ await expect(sheet.locator('#go, #end-original')).toHaveCount(0);
+ const before=plans.length;
+ await sheet.getByRole('button',{name:'Review separate Claude Code session',exact:true}).click();
+ await expect(sheet.locator('#go')).toContainText('Create separate Claude Code session');
+ await expect(sheet.locator('#go')).toBeEnabled();
+ expect(plans.length).toBeGreaterThan(before);
+ for(const req of plans.slice(before)) expect(req.args[3]).toMatchObject({conflict:'keep-both',targetSession:'claude@personal/original-session',targetProfile:'personal',fork:false,newReplica:false,stopLocal:false});
+ expect(changes).toEqual([]);
+ await expect(page.getByRole('dialog')).toHaveCount(1);
+ await expect(sheet).toContainText('existing destination conversation is unchanged');
+ await sheet.getByRole('button',{name:'Cancel return',exact:true}).click();
+ await expect(sheet).not.toBeVisible();
+ expect(changes).toEqual([]);
+});
+
+test('Cancel return preserves both existing native conversations without applying, resuming or stopping',async({page})=>{
+ const {plans,changes}=await conflictFixture(page);
+ const scan=await page.request.post('/call',{data:{m:'Scan',args:[]}});
+ const body=await scan.json();expect(body.error).toBeFalsy();
+ const entries=body.result.groups.flatMap((g:any)=>g.entries);
+ const originals=[entries.find((e:any)=>e.title==='Find the codeword'),entries.find((e:any)=>e.agent==='codex' && e.path)];
+ expect(originals.every(e=>!!e?.path)).toBe(true);
+ const before=await Promise.all(originals.map(e=>readFile(e.path)));
+ const reviewed=plans.length;
+ await page.locator('#sheet').getByRole('button',{name:'Cancel return',exact:true}).click();
+ await expect(page.getByRole('dialog')).toHaveCount(0);
+ expect(plans).toHaveLength(reviewed);expect(changes).toEqual([]);
+ const after=await Promise.all(originals.map(e=>readFile(e.path)));
+ expect(after).toEqual(before);
+});
+
+test('hostile comparison Markdown stays inert and never fetches remote images or opens links',async({page})=>{
+ const comparison=comparisonFixture();
+ comparison.source.preview[4].text=[
+  '**Safe formatting**',
+  '<script>window.conflictExecuted=true</script>',
+  '<img src="https://example.com/conflict-tracker.png" onerror="window.conflictExecuted=true">',
+  '[Unsafe](javascript:alert(1))',
+  '[Encoded unsafe](jav&#x61;script:alert(1))',
+  '![Tracking image](https://example.com/conflict-image.png)',
+  '[Documentation](https://example.com/conflict-docs)',
+  '```html\n<iframe src="https://example.com/conflict-frame"></iframe>\n```'
+ ].join('\n\n');
+ const network:string[]=[];
+ page.on('request',req=>{if(new URL(req.url()).hostname==='example.com')network.push(req.url())});
+ const {changes}=await conflictFixture(page,comparison);
+ const review=page.getByLabel('Conversation differences');
+ await expect(review.locator('strong')).toContainText(['Safe formatting']);
+ await expect(review).toContainText('<script>window.conflictExecuted=true</script>');
+ await expect(review.locator('img, script, iframe, [onerror], [onclick]')).toHaveCount(0);
+ // Recent excerpts also occur in the collapsed full-preview list.
+ await expect(review.locator('a')).toHaveCount(2);
+ await expect(review.locator('a:not([href="https://example.com/conflict-docs"])')).toHaveCount(0);
+ await expect(review.getByRole('link',{name:'Documentation',exact:true}).first()).toHaveAttribute('href','https://example.com/conflict-docs');
+ expect(await page.evaluate(()=>(window as any).conflictExecuted)).toBeUndefined();
+ expect(network).toEqual([]);expect(changes).toEqual([]);
+ await expect(page.getByRole('dialog')).toHaveCount(1);
+});
+
+test('unavailable comparison reports unknown changes without claiming independent work',async({page})=>{
+ const comparison=comparisonFixture();
+ Object.assign(comparison,{classification:'unavailable',verified:false,reason:'Destination conversation or causal evidence could not be verified.',sharedRevisions:0});
+ for(const side of [comparison.source,comparison.destination]) Object.assign(side,{exclusiveKnown:false,status:'unavailable',reason:'Changes could not be verified; counts are unavailable.',preview:[],truncated:false,previewOmitted:0});
+ const {changes}=await conflictFixture(page,comparison);
+ const review=page.getByLabel('Conversation differences');
+ await expect(review).toContainText('This does not prove that both gained new work');
+ await expect(review).toContainText(comparison.reason);
+ await expect(review.locator('.comparison-counts')).toHaveCount(0);
+ await expect(review.locator('.comparison-message')).toHaveCount(0);
+ await expect(page.locator('#sheet #go, #sheet #end-original')).toHaveCount(0);
+ await expect(page.locator('#sheet #review-separate')).toBeEnabled();
+ await page.locator('#sheet').getByRole('button',{name:'Cancel return',exact:true}).click();
+ expect(changes).toEqual([]);
+});
+
+test('real backend comparison omits private reasoning from both sides before sending its DTO',async({page})=>{
+ test.setTimeout(120000);
+ const reset=await page.request.post('/reset?movement=1');expect(reset.ok()).toBeTruthy();
+ const call=async(m:string,args:any[]=[])=>{
+  const response=await page.request.post('/call',{data:{m,args}});
+  expect(response.ok()).toBeTruthy();const body=await response.json();expect(body.error).toBeFalsy();return body.result;
+ };
+ const scan=await call('Scan');
+ const original=scan.groups.flatMap((g:any)=>g.entries).find((e:any)=>e.title==='Find the codeword');
+ expect(original.path).toContain('hopsesh-webtest-');
+ const plan=await call('Plan',[original.machine,original.key,'codex',{app:false,notify:true,worktree:'auto',mark:false,conflict:''}]);
+ expect(plan.blockers || []).toEqual([]);
+ await call('Apply'); // Fixture setup only: writes to the isolated demo home, no launch.
+ const convertedScan=await call('Scan');
+ const converted=convertedScan.groups.flatMap((g:any)=>g.entries).find((e:any)=>e.agent==='codex' && e.title==='Find the codeword (from Claude Code)');
+ expect(converted.path).toContain('hopsesh-webtest-');
+ const destinationPrivate='DESTINATION_PRIVATE_REASONING_'+randomUUID(),sourcePrivate='SOURCE_PRIVATE_REASONING_'+randomUUID();
+ const records=(await readFile(original.path,'utf8')).trim().split('\n').map(line=>JSON.parse(line));
+ const last=records.filter(r=>r.type==='assistant').at(-1);
+ const destinationRecord={...last,parentUuid:last.uuid,uuid:randomUUID(),timestamp:new Date().toISOString(),message:{...last.message,id:randomUUID(),content:[{type:'thinking',thinking:destinationPrivate,signature:'private-fixture-signature'},{type:'text',text:'Public destination-only checkpoint'}]}};
+ await appendFile(original.path,JSON.stringify(destinationRecord)+'\n');
+ await appendFile(converted.path,JSON.stringify({timestamp:new Date().toISOString(),type:'response_item',payload:{type:'reasoning',id:randomUUID(),summary:[{type:'summary_text',text:sourcePrivate}],encrypted_content:'private-fixture-ciphertext'}})+'\n');
+ const work=await page.request.post('/movement-work',{params:{machine:converted.machine,key:converted.key}});expect(work.ok(),await work.text()).toBeTruthy();
+ const before=await Promise.all([readFile(original.path),readFile(converted.path)]);
+ const returned=await call('Plan',[converted.machine,converted.key,'claude',{targetProfile:original.profile?.id || '',targetSession:original.key,app:false,notify:true,worktree:'auto',mark:false,conflict:''}]);
+ const comparison=returned.continue.comparison;
+ expect(comparison).toBeTruthy();expect(comparison.verified).toBe(true);expect(comparison.classification).toBe('diverged');
+ expect(comparison.source.counts.other).toBeGreaterThan(0);expect(comparison.destination.counts.other).toBeGreaterThan(0);
+ expect(comparison.source.preview).toEqual(expect.arrayContaining([expect.objectContaining({kind:'message',text:'Fixture return checkpoint completed.'})]));
+ expect(comparison.destination.preview).toEqual(expect.arrayContaining([expect.objectContaining({kind:'message',text:'Public destination-only checkpoint'})]));
+ const payload=JSON.stringify(returned);
+ for(const secret of [destinationPrivate,sourcePrivate,'private-fixture-signature','private-fixture-ciphertext']) expect(payload).not.toContain(secret);
+ for(const side of [comparison.source,comparison.destination]) for(const preview of side.preview) {
+  expect(['message','tool_call']).toContain(preview.kind);
+  expect(Object.keys(preview).every(key=>['kind','role','text','tool','time','truncated'].includes(key))).toBe(true);
+ }
+ expect(await Promise.all([readFile(original.path),readFile(converted.path)])).toEqual(before);
+});
+
+test('narrow conflict review wraps evidence and keeps its footer visible while the body scrolls',async({page},info)=>{
+ await page.setViewportSize({width:640,height:560});
+ const comparison=comparisonFixture();
+ comparison.source.identity.title='Actual incoming conversation '+ 'long-title-'.repeat(16);
+ comparison.source.preview[4].text='long-unbroken-evidence-'.repeat(35);
+ await conflictFixture(page,comparison);
+ const sheet=page.locator('#sheet'),body=sheet.locator('.sheet-body'),footer=sheet.locator('.sheet-foot');
+ const review=footer.getByRole('button',{name:'Review separate Claude Code session',exact:true}),cancel=footer.getByRole('button',{name:'Cancel return',exact:true});
+ await expect(page.getByRole('dialog')).toHaveCount(1);
+ for(const target of [sheet,sheet.locator('.conflict-review')]) expect(await target.evaluate(el=>el.scrollWidth<=el.clientWidth+1)).toBe(true);
+ await expect(review).toBeInViewport();await expect(cancel).toBeInViewport();
+ const first=await footer.boundingBox();expect(first).toBeTruthy();
+ await body.evaluate(el=>el.scrollTop=el.scrollHeight);
+ expect(await body.evaluate(el=>el.scrollTop)).toBeGreaterThan(0);
+ await expect(review).toBeInViewport();await expect(cancel).toBeInViewport();
+ const last=await footer.boundingBox();expect(last).toBeTruthy();expect(Math.abs(last!.y-first!.y)).toBeLessThan(2);
+ await page.screenshot({path:info.outputPath('return-conflict-narrow-footer.png')});
 });
 
 test('same and behind candidates never plan a transfer',async({page})=>{
@@ -111,29 +312,32 @@ test('remote open original goes directly to its destination review without start
  await expect(page.locator('.return-guide')).toHaveCount(0);
 });
 
-for(const outcome of ['ended','timeout','unsupported']) test(`ending the reviewed original is explicit and never applies the return: ${outcome}`,async({page})=>{
+for(const outcome of ['ended','timeout','unsupported','diverged']) test(`ending the reviewed original is explicit and never applies the return: ${outcome}`,async({page})=>{
  await fixtures(page,[candidate({agent:'claude',agentName:'Claude Code',status:'live',local:true,key:'claude/original'})]);
- const actions:any[]=[];let plans=0;let ended=false;
+ const actions:any[]=[],planOptions:any[]=[];let plans=0;let ended=false;
  await page.route('**/call',async route=>{
   const req=route.request().postDataJSON();
   if(req.m==='Plan') {
    plans++;
+   planOptions.push(req.args[3]);
    // Keep the real service's complete conversion report; only inject the live
    // destination and the stop result. No real user's process can be targeted.
-   const response=await route.fetch({postData:JSON.stringify({...req,args:[req.args[0],req.args[1],'codex',{...req.args[3],targetProfile:'',targetSession:'',app:false}]})});
-   const body=await response.json();
-   expect(body.error).toBeFalsy();
-   Object.assign(body.result,{agent:'Claude Code',blockers:ended?[]:['the destination copy is open; quit it first'],endDestinationToken:!ended && outcome!=='unsupported'?'review-token':undefined});
-   Object.assign(body.result.continue,{relation:'append',appendTo:'Original codeword conversation'});
-   return route.fulfill({json:body});
+   const plan=await realPlan(route,req);
+   Object.assign(plan,{agent:'Claude Code',blockers:ended?[]:['the destination copy is open; quit it first'],endDestinationToken:!ended && outcome!=='unsupported'?'review-token':undefined});
+   Object.assign(plan.continue,{relation:'append',appendTo:'Original codeword conversation'});
+   if(ended && outcome==='diverged') {
+    Object.assign(plan,{conflict:'destination has independent work',blockers:['destination has independent work; choose --keep-both']});
+    Object.assign(plan.continue,{relation:'diverged',comparison:comparisonFixture()});
+   }
+   return route.fulfill({json:{result:plan}});
   }
   if(req.m==='EndReturnDestination') {
    actions.push(req);
    await new Promise(resolve=>setTimeout(resolve,250));
-   ended=outcome==='ended';
+   ended=outcome==='ended' || outcome==='diverged';
    return route.fulfill({json:ended?{result:null}:{error:'The original session did not exit in time'}});
   }
-  if(['Apply','PushApply','ResumeEntry','ShowPlace'].includes(req.m)){actions.push(req);return route.fulfill({json:{result:null}})}
+  if(changingCall(req.m)){actions.push(req);return route.fulfill({json:{result:null}})}
   return route.fallback();
  });
  await details(page).locator('#act-primary').click();
@@ -152,13 +356,23 @@ for(const outcome of ['ended','timeout','unsupported']) test(`ending the reviewe
  await expect(end).toBeInViewport();
  await expect(sheet.locator('.sheet-foot #end-original')).toBeVisible();
  await sheet.locator('.sheet-body').evaluate(el=>el.scrollTop=el.scrollHeight);
+ if(outcome==='diverged') expect(await sheet.locator('.sheet-body').evaluate(el=>el.scrollTop)).toBeGreaterThan(0);
  await expect(end).toBeInViewport();
  const reviewedPlans=plans;
  await end.click();
  await expect(sheet.getByRole('button',{name:'Ending original session…',exact:true})).toBeDisabled();
  await expect.poll(()=>actions.length).toBe(1);
  expect(actions[0]).toMatchObject({m:'EndReturnDestination',args:['review-token']});
- if(outcome==='ended') {
+ if(outcome==='diverged') {
+  await expect(sheet.getByLabel('Conversation differences')).toBeVisible();
+  await expect(sheet.getByLabel('Conversation differences').getByRole('heading',{name:'The conversations have different work',exact:true})).toBeInViewport();
+  await expect.poll(()=>sheet.locator('.sheet-body').evaluate(el=>el.scrollTop)).toBe(0);
+  await expect(sheet.locator('#review-separate')).toBeInViewport();
+  await expect(sheet.locator('#go, #end-original')).toHaveCount(0);
+  await expect(page.getByRole('dialog')).toHaveCount(1);
+  expect(plans).toBeGreaterThan(reviewedPlans);
+  for(const opts of planOptions) expect(opts).toMatchObject({conflict:'',targetSession:'claude/original',fork:false,newReplica:false,stopLocal:false});
+ } else if(outcome==='ended') {
   await expect(sheet).toContainText('Original session ended. Review the refreshed plan');
   expect(plans).toBeGreaterThan(reviewedPlans);
   await expect(sheet.locator('#go')).toBeEnabled();
@@ -225,9 +439,10 @@ test('movement notice setting persists and same-agent plans expose the override'
 test('missing destination reviews a new session without reusing its original key',async({page})=>{
  const calls=await fixtures(page,[candidate({status:'missing',local:true})]);
  await details(page).locator('#act-primary').click();
- await expect(page.getByRole('dialog').last()).toContainText('does not reuse or restore the missing original');
- await page.getByRole('button',{name:'Review new session there'}).click();
- await expect.poll(()=>calls.length).toBe(1);expect(calls[0].args[3]).toMatchObject({targetSession:'',targetProfile:'work',newReplica:true,fork:false});
+ await expect.poll(()=>calls.length).toBe(1);expect(calls[0].args[3]).toMatchObject({targetSession:'',targetProfile:'work',newReplica:true,fork:false,conflict:'',stopLocal:false});
+ await expect(page.getByRole('dialog')).toHaveCount(1);
+ await expect(page.locator('.return-guide')).toHaveCount(0);
+ await expect(page.locator('#sheet')).toContainText('Test stopped after read-only plan request');
 });
 
 test('source notice has destination, journey and explicit separate continuation controls',async({page})=>{

@@ -105,7 +105,11 @@ func (m *Module) Write(ctx context.Context, h agent.Host, in agent.Install, req 
 		if err != nil {
 			return ir.WriteResult{}, err
 		}
-		if b := activeBranch(recs); len(b) > 0 {
+		b, err := activeBranch(recs)
+		if err != nil {
+			return ir.WriteResult{}, err
+		}
+		if len(b) > 0 {
 			w.parent = recs[b[len(b)-1]].UUID
 		}
 		w.cwd = s.CWD

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode"
 
 	"github.com/spf13/cobra"
 
@@ -354,6 +355,7 @@ func (r *run) renderPlan(p *move.Plan) {
 		r.printf("  code      %s\n", p.Sync)
 	}
 	if c := p.Continue; c != nil {
+		r.renderComparison(c.Comparison)
 		switch c.Relation {
 		case move.RelationAppend:
 			r.printf("  session   add the new work to %s here (%s)\n", c.AppendTo.Key, c.AppendTo.Title)
@@ -386,6 +388,95 @@ func (r *run) renderPlan(p *move.Plan) {
 	if p.ReviewNewSession {
 		r.printf("  This does not mean you changed accounts. To review a fresh session on the same lineage branch, remove --target-session and add --new-session. Keep the selected destination account. Both original sessions are preserved; independent destination work still requires --keep-both.\n")
 	}
+	if p.Continue != nil && (p.Conflict != "" || p.Options.Conflict == move.ConflictKeepBoth) {
+		if p.Options.Conflict == move.ConflictKeepBoth {
+			r.printf("  outcome   create a separate %s session; both originals preserved. Destination-only work is not combined.\n", p.Agent)
+		} else {
+			r.printf("  review    add --keep-both to review a separate %s session; both originals preserved.\n", p.Agent)
+		}
+		r.printf("  cancel    declining confirmation changes neither original.\n")
+	}
+}
+
+func (r *run) renderComparison(c *move.Comparison) {
+	if c == nil {
+		return
+	}
+	if c.Verified {
+		r.printf("  comparison %s · %d shared revisions · up to 2 sample messages per side\n", comparisonLine(c.Reason, 240), c.SharedRevisions)
+	} else {
+		r.printf("  comparison unavailable · %s\n", comparisonLine(c.Reason, 240))
+	}
+	for _, side := range []struct {
+		label string
+		data  move.ComparisonSide
+	}{{"source", c.Source}, {"destination", c.Destination}} {
+		s, id := side.data, side.data.Identity
+		agentName := id.AgentName
+		if agentName == "" {
+			agentName = string(id.Agent)
+		}
+		profile := id.ProfileName
+		if profile == "" {
+			profile = id.Profile
+		}
+		if profile == "" {
+			profile = "Default account"
+		}
+		machine := id.Machine
+		if machine == "" {
+			machine = id.MachineID
+		}
+		r.printf("  %s %s · %s on %s · %q\n", side.label, comparisonLine(agentName, 120), comparisonLine(profile, 120), comparisonLine(machine, 120), comparisonLine(id.Title, 160))
+		r.printf("    session %s\n", comparisonLine(id.Key.String(), 0))
+		if id.MachineID != "" && id.MachineID != machine {
+			r.printf("    endpoint %s\n", comparisonLine(id.MachineID, 0))
+		}
+		if !c.Verified || !s.ExclusiveKnown {
+			r.printf("    unique work unknown · %s\n", comparisonLine(s.Reason, 240))
+			continue
+		}
+		r.printf("    unique: %d revisions · %d records · %d messages (%d user, %d assistant) · %d tools · %d other\n", s.Revisions, s.Counts.Nodes, s.Counts.Messages, s.Counts.UserMessages, s.Counts.AssistantMessages, s.Counts.Tools, s.Counts.Other)
+		shown, shortened := 0, s.Truncated || s.PreviewOmitted > 0
+		for _, sample := range s.Preview {
+			if sample.Role != "user" && sample.Role != "assistant" || sample.Text == "" {
+				continue
+			}
+			if shown == 2 {
+				shortened = true
+				break
+			}
+			text := comparisonLine(sample.Text, 240)
+			shortened = shortened || sample.Truncated || text != comparisonLine(sample.Text, 0)
+			r.printf("    %s: %s\n", sample.Role, text)
+			shown++
+		}
+		if shortened || s.Counts.Messages > shown {
+			r.printf("    excerpts shortened or omitted; counts above are exact\n")
+		}
+	}
+}
+
+// Core previews are allowlisted; terminal presentation also keeps identity and
+// excerpts on one line and excludes control/format characters.
+func comparisonLine(s string, limit int) string {
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return ' '
+		}
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, s)
+	s = strings.Join(strings.Fields(s), " ")
+	if limit > 0 {
+		runes := []rune(s)
+		if len(runes) > limit {
+			s = string(runes[:limit-1]) + "…"
+		}
+	}
+	return s
 }
 
 func (r *run) renderResult(p *move.Plan, res *move.Result) {
