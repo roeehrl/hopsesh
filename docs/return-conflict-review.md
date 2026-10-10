@@ -36,6 +36,61 @@ Core tests cover exclusive causal coverage, coalesced fragments, generated recor
 
 ## Large Codex rollouts and archive consultation
 
+### Follow-up proposal: global history and resource settings (not implemented)
+
+Large histories are not a Codex-only concern. The current sweep found the shared
+`sdk/ir.BoundedReader` 256 MiB cap still used by Claude's reader and capacity
+analysis, the same cap in portable archive creation/merging, and independent
+1 GiB native-file guards in fork/recovery/write paths. Preview windows and cloud
+log limits serve different purposes and should not be exposed as a single
+"maximum session size" slider.
+
+Research supports compact working context plus retrievable history. Anthropic
+describes [compaction, persistent notes and on-demand context retrieval](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents),
+and its [context editing](https://platform.claude.com/docs/en/build-with-claude/context-editing)
+removes old tool outputs with explicit placeholders and configurable thresholds.
+OpenAI offers [context compaction](https://developers.openai.com/api/docs/guides/compaction).
+These provider facilities do not make vendor-private summaries portable between
+agents. Configurable resource limits with hard implementation ceilings are also
+an established pattern; see [SQLite runtime limits](https://www.sqlite.org/limits.html).
+
+Recommended settings and behavior:
+
+- **Handoff context:** Automatic by default; optionally a smaller user budget,
+  always bounded by the receiving module's model/context allowance. Report
+  conservative estimates honestly; a user setting cannot enlarge the model.
+- **Older context:** retain native readable summaries when valid, explicit
+  condensed extracts, the latest actual request, and recent complete turns.
+  Offer "recent turns only" as an alternative. Label omitted content and retain
+  it in the portable archive. Do not claim a deterministic extract is an AI
+  summary. Do not add paid summarization calls implicitly.
+- **Analysis resources:** an advanced validated memory budget; reaching it should
+  use disk-backed processing where supported, rather than truncate canonical
+  source history. A configurable disk allowance remains a hard stop if there is
+  insufficient space; source files and existing destinations stay unchanged.
+- **Transfer review:** separate included-context counts from archive preservation
+  counts; inspect the oldest included boundary and excerpts. Permit a per-transfer
+  override and return a structured limit error with the affected stage and
+  a link to the appropriate setting.
+
+Implementation belongs in shared configuration, SDK policy and the conversion /
+archive pipeline; native record interpretation, branch selection, compaction
+semantics and model capacity remain inside each agent module. Keep policy scoped
+to each operation, including remote operations, rather than mutable global
+variables. Persist archive references and coverage independently of shortened
+receiving context. Never treat omitted or unread history as verified coverage.
+
+Stages: (1) separate read-memory, record, archive-disk and model-context budgets;
+(2) add streaming/disk-backed archive and lineage processing plus paged module
+readers; (3) expose validated global settings in GUI/CLI/TUI and per-transfer
+review; (4) run both-agent, both-direction scenarios in Linux/macOS/Windows
+matrices. Include repeated multi-party returns/forks, huge tool records, malformed
+records, tool-pair boundaries, Unicode, cancellation, low disk space, remote
+policy propagation and original-file preservation after failure. Changing only
+the cap or keeping a tail is insufficient for a safe native append/return.
+
+### Implemented fix
+
 Codex persists repeated compaction replacement histories and runtime metadata; see its [rollout reconstruction](https://github.com/openai/codex/blob/main/codex-rs/core/src/session/rollout_reconstruction.rs) and [model context storage](https://github.com/openai/codex/blob/main/codex-rs/rollout/src/model_context.rs). Raw file size is not working-context size. The Codex module scans complete records incrementally, retaining conversation-bearing payloads and compaction message text while calculating replacement-context size independently. It retains every valid native record position/ordinal, validates paginated history, checks cancellation between bounded read fragments, and rejects oversized records or retained conversation explicitly. It never silently truncates conversation text. Other modules' decoding limits are unchanged.
 
 The shared portable handoff explicitly requires bounded archive consultation before continuation: opening context, the last ten preserved records, and targeted search/pagination/chunks for relevant decisions and unfinished work. Offsets come from the actual merged archive, including earlier transfers. The complete handoff remains subject to the receiving model's payload budget. An agent must state what it consulted and report unavailable access; archived text never grants new authorization. This is an instruction, not proof that a model obeyed it.
