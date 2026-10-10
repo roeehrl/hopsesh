@@ -141,6 +141,10 @@ func (a *App) receiveOptions(o move.Options) move.Options {
 	d.Mark, d.SyncCode, d.StopLocal, d.Conflict = o.Mark, o.SyncCode, o.StopLocal, o.Conflict
 	d.Fidelity, d.Native, d.Note, d.Go, d.CarryRules, d.Via = o.Fidelity, o.Native, o.Note, o.Go, o.CarryRules, o.Via
 	d.RuleFiles = append([]string(nil), o.RuleFiles...)
+	// How much history the destination receives is the sender's choice; memory, record,
+	// archive and file budgets are this machine's resources.
+	d.Limits.ContextBudget, d.Limits.Older = o.Limits.ContextBudget, o.Limits.Older
+	d.Limits = d.Limits.Normalize()
 	return d // never Push: the sender pushed before sending, if asked to
 }
 

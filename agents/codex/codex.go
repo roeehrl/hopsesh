@@ -562,12 +562,12 @@ func (m *Module) PlanMove(src, dst agent.Install, s agent.Summary, b agent.Bundl
 }
 
 // Verify checks that the staged rollout starts in the target folder, as the target thread.
-func (m *Module) Verify(_ context.Context, h agent.Host, mp agent.MovePlan, staged map[string]string, p agent.Placement) error {
+func (m *Module) Verify(ctx context.Context, h agent.Host, mp agent.MovePlan, staged map[string]string, p agent.Placement) error {
 	for _, f := range mp.Files {
 		if f.From.Role != agent.RoleMain {
 			continue
 		}
-		b, err := h.FS().ReadFile(staged[agent.StagedKey(f)], 1<<30)
+		b, err := agent.ReadNative(ctx, h.FS(), staged[agent.StagedKey(f)])
 		if err != nil {
 			return err
 		}

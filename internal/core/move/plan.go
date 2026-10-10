@@ -132,6 +132,9 @@ type Options struct {
 	// StartingDiff sends the changes with the cloud session as a starting diff, on a branch
 	// already on the remote, instead of pushing a handoff branch.
 	StartingDiff bool
+	// Limits is the history and resource policy for this operation (ir.Limits). Readers,
+	// writers and the archive see it through the operation's context.
+	Limits ir.Limits `json:"limits,omitempty"`
 }
 
 // Via choices: the target agent's own importer, or hopsesh's conversion even when the
@@ -235,6 +238,7 @@ type Endpoint struct {
 // Build works out a move. It reads (the bundle's file list, the target's copies) but
 // writes nothing.
 func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
+	ctx = ir.WithLimits(ctx, opt.Limits)
 	if opt.NewReplica && opt.TargetSession != "" {
 		return nil, fmt.Errorf("a new session cannot also select an existing destination session")
 	}

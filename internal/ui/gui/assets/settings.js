@@ -1,4 +1,5 @@
-// The Settings screen, in tabs: General, Agents, Terminal, Skill, Command line, Updates.
+// The Settings screen, in tabs: General, Desktop presence, Agents, History, Terminal, Skill,
+// Command line, Updates.
 import { api, on, h, fill, view, state, screen, go, loading, toast, fail, dialog, agentBadge, sys, cliHow, icon, ask, count, current, loadError, navigationID, errText } from "./core.js";
 import { desktopSettings } from "./desktop-settings.js";
 import { running } from "./term.js";
@@ -308,7 +309,60 @@ async function preview() {
   } catch (e) { fail(e); }
 }
 
-const TABS = [["general", "General", general], ["desktop", "Desktop presence", desktop], ["agents", "Agents", agents], ["terminal", "Terminal", terminal], ["skill", "Skill", skill], ["cli", "Command line", cli], ["updates", "Updates", updates]];
+// history is Settings → History: how much conversation a transfer carries into the
+// destination's context, and the resources reading and preserving history may use.
+let hs = null, historyError = "";
+const kib = (n) => n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
+const mib = (n) => n >= 1024 ? `${n / 1024} GB` : `${n} MB`;
+async function setHistory(patch) {
+  if (saving) return;
+  saving = true;
+  const next = Object.assign({ contextBudget: hs.contextBudget, older: hs.older, readMemoryMB: hs.readMemoryMB, recordMB: hs.recordMB, archiveMB: hs.archiveMB, nativeFileMB: hs.nativeFileMB }, patch);
+  hs = Object.assign({}, hs, patch);
+  render();
+  try { await api("SetHistorySettings", next); toast("Saved"); } catch (e) { fail(e); }
+  hs = await api("HistorySettings").catch(() => hs);
+  saving = false;
+  if (current === "settings") render();
+}
+function sizeRow(key, label, desc, choices, defBytes) {
+  const def = defBytes / (1 << 20);
+  const value = hs[key] || def;
+  return h("div", { class: "set-row" }, title(label, desc),
+    h("select", { "aria-label": label, onchange: (e) => setHistory({ [key]: Number(e.target.value) }) },
+      [...new Set([...choices, value])].sort((a, b) => a - b).map((n) => h("option", { value: n, selected: value === n }, mib(n) + (n === def ? " (default)" : "")))));
+}
+function history() {
+  if (historyError) return [loadError(historyError, loadHistory)];
+  if (!hs) return [h("div", { class: "loading", role: "status" }, "Reading the history settings…")];
+  const d = hs.defaults;
+  return [
+    h("span", { class: "muted", style: "font-size:12.5px" }, "When a session continues in another agent, hopsesh gives the destination a bounded working context and keeps the complete conversation in a portable archive the agent can consult."),
+    card(h("span", { class: "sec-h" }, "Handoff context"),
+      h("div", { class: "set-row" }, title("Context budget", "Automatic uses up to 30% of the destination model's context, less what the session already holds. A smaller budget leaves the agent more room to work; it can never exceed what the model allows."),
+        h("select", { "aria-label": "Context budget", onchange: (e) => setHistory({ contextBudget: Number(e.target.value) }) },
+          hs.contextBudgets.map((n) => h("option", { value: n, selected: (hs.contextBudget || 0) === n }, n ? `Up to ${kib(n)} (estimate)` : "Automatic (recommended)")))),
+      h("div", { class: "set-row" }, title("Older conversation", "What happens to history that does not fit. Either way, nothing is lost: omitted history stays in the portable archive, and the agent is told it was left out."),
+        seg("Older conversation", hs.older || "extract", [["extract", "Extract + recent turns"], ["recent", "Recent turns only"]], (v) => setHistory({ older: v }))),
+      h("span", { class: "muted", style: "font-size:12px" }, (hs.older === "recent"
+        ? "Recent turns only: the destination gets the newest complete turns and a note saying how many older entries were left out."
+        : "Extract: the latest native summary or earlier briefing, recent requests and the last agent reply, condensed and labeled as an extract (not an AI summary), then the recent turns.")
+        + " Sizes are conservative upper estimates, not exact token counts.")),
+    card(h("span", { class: "sec-h" }, "Resources (advanced)"),
+      h("span", { class: "muted", style: "font-size:12px" }, "Limits that keep a very large session from exhausting memory or disk. When one is reached, the transfer stops before anything is written, names the limit, and leaves the source and any existing destination unchanged. History is never silently truncated."),
+      sizeRow("readMemoryMB", "Reading memory", "Conversation a native transcript may hold in memory while hopsesh reads it.", hs.readMemoryMBs, d.readBytes),
+      sizeRow("recordMB", "Largest record", "One native record (a single message or tool result). Cannot exceed reading memory.", hs.recordMBs, d.recordBytes),
+      sizeRow("archiveMB", "Portable archive", "The preserved archive, including earlier transfers. Also the disk it may use per session.", hs.archiveMBs, d.archiveBytes),
+      sizeRow("nativeFileMB", "Native file checks", "Whole native files read to verify forks, recover an interrupted write, or check a staged copy.", hs.nativeFileMBs, d.nativeFileBytes)),
+  ];
+}
+async function loadHistory() {
+  historyError = ""; hs = null;
+  try { hs = await api("HistorySettings"); } catch (e) { historyError = errText(e); }
+  if (current === "settings" && tab === "history") render();
+}
+
+const TABS = [["general", "General", general], ["desktop", "Desktop presence", desktop], ["agents", "Agents", agents], ["history", "History", history], ["terminal", "Terminal", terminal], ["skill", "Skill", skill], ["cli", "Command line", cli], ["updates", "Updates", updates]];
 
 function render() {
   if (current !== "settings") return;
@@ -347,7 +401,7 @@ async function load() {
   ds = desktop.status === "fulfilled" ? desktop.value : null;
   desktopError = desktop.status === "rejected" ? desktop.reason : null;
   render();
-  await loadTerminal();
+  await Promise.all([loadTerminal(), loadHistory()]);
 }
 
 screen("settings", async (which) => {

@@ -47,6 +47,8 @@ func addPullFlags(cmd *cobra.Command) {
 	f.Bool("no-sync", false, "do not fetch or fast-forward the checkout here to the session's commit")
 	f.Bool("push", false, "first push the session branch's unpushed commits on the other machine")
 	f.Bool("replace", false, "when the copy here changed too, replace it anyway (hopsesh undo brings it back)")
+	f.Int("context-budget", 0, "for another agent: lower the destination context budget for this transfer (upper-estimate units; 0: the setting, see hopsesh history)")
+	f.String("older", "", "for another agent: extract (labeled extract plus recent turns) or recent (recent turns only); default from hopsesh history")
 	f.String("operation-id", "", "idempotency key for retrying the same transfer")
 	f.String("target-profile", "", "destination account profile ID (hopsesh accounts list)")
 	f.String("target-session", "", "explicit destination session when a branch has several replicas here")
@@ -110,6 +112,16 @@ func (r *run) pullOptions(cmd *cobra.Command) (move.Options, error) {
 	case flagSet(f.GetBool("keep-both")):
 		o.Conflict = move.ConflictKeepBoth
 	}
+	if v, _ := f.GetInt("context-budget"); v != 0 {
+		o.Limits.ContextBudget = v
+	}
+	if v, _ := f.GetString("older"); v != "" {
+		o.Limits.Older = v
+	}
+	if err := o.Limits.Check(); err != nil {
+		return o, fmt.Errorf("--context-budget/--older: %w", err)
+	}
+	o.Limits = o.Limits.Normalize()
 	fid, _ := f.GetString("fidelity")
 	switch convert.Fidelity(fid) {
 	case convert.History, convert.Note:

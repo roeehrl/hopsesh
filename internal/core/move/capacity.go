@@ -3,10 +3,8 @@ package move
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"strings"
 
@@ -49,6 +47,7 @@ func portableWrite(ctx context.Context, h agent.Host, m agent.Module, in agent.I
 		r.Nodes = full
 	}
 	allowance := capacity.Allowance()
+	r.Limits = ir.LimitsFrom(ctx)
 	r.Window = capacity.EffectiveWindow()
 	r.Limit = &allowance
 	if req.SessionID == "" || req.SessionID == "." || req.SessionID == ".." || strings.ContainsAny(req.SessionID, "/\\") {
@@ -84,41 +83,32 @@ func portableWrite(ctx context.Context, h agent.Host, m agent.Module, in agent.I
 
 // Archive lookup is deterministic under the selected agent/account root. Neither
 // a model message nor an imported archive can nominate an arbitrary file to read.
+// The prior archive is re-read record by record under the current redaction/mapping
+// policy, then the new history is merged in, without holding several copies.
 func preservedArchive(h agent.Host, m agent.Module, in agent.Install, id string, nodes []ir.Node, r convert.Request) ([]byte, error) {
-	fresh, err := convert.Archive(nodes, r)
-	if err != nil {
-		return nil, err
-	}
-	if id == "" || strings.ContainsAny(id, "/\\") || id == ".." {
-		return fresh, nil
-	}
-	path := h.Path().Join(in.Root(m.Spec().Roots[0].Name), "hopsesh", "archives", id+".jsonl")
-	prior, err := h.FS().ReadFile(path, ir.MaxTranscriptBytes)
-	if errors.Is(err, fs.ErrNotExist) {
-		return fresh, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	// Prior archives pass the same selected redaction/mapping policy again.
-	var oldNodes []ir.Node
-	dec := json.NewDecoder(bytes.NewReader(prior))
-	for {
-		var n ir.Node
-		err = dec.Decode(&n)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
+	w := convert.NewArchiveWriter(r)
+	if id != "" && !strings.ContainsAny(id, "/\\") && id != ".." {
+		path := h.Path().Join(in.Root(m.Spec().Roots[0].Name), "hopsesh", "archives", id+".jsonl")
+		f, err := h.FS().Open(path)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+		case err != nil:
 			return nil, err
+		default:
+			err = w.AddArchive(f)
+			f.Close()
+			if err != nil {
+				return nil, fmt.Errorf("reading the preserved archive: %w", err)
+			}
 		}
-		oldNodes = append(oldNodes, n)
 	}
-	prior, err = convert.Archive(oldNodes, r)
-	if err != nil {
+	if err := w.AddNodes(nodes); err != nil {
 		return nil, err
 	}
-	return convert.MergeArchives(prior, fresh)
+	if err := w.AddBriefing(); err != nil {
+		return nil, err
+	}
+	return w.Bytes(), nil
 }
 
 // activeCopies excludes a retained rollover replica only while its native cursor is

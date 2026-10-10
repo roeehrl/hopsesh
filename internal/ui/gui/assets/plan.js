@@ -14,7 +14,7 @@ function defaults() {
   const d = state.info.defaults;
   return { worktree: "auto", remoteControl: false, notify: d.movementNotices !== false, fork: false, redact: false, clone: false, targetDir: "", reposDir: "",
     mark: d.markMoved, syncCode: d.syncCode, push: d.pushSource, stopLocal: false, app: false, conflict: "",
-    fidelity: "history", native: false, note: "", go: false, carryRules: false, ruleFiles: [], via: "", codeOnly: false, append: false };
+    fidelity: "history", native: false, note: "", go: false, carryRules: false, ruleFiles: [], via: "", codeOnly: false, append: false, contextBudget: 0, older: "" };
 }
 
 // planFor opens the sheet for a session: target "" keeps its agent, sendTo pushes it;
@@ -179,14 +179,26 @@ function summaryContent(p) {
 // boxes splits a conversion report into what is carried, changed and left out.
 function boxes(p) {
   const c = p.continue, rep = c.report;
-  const carried = rep.method === "vendor-import" ? ["History converted by the agent’s importer", "Hopsesh briefing added"] : rep.fidelity === "note" ? ["A briefing only"] : rep.stepsSummarised ? ["Bounded history", "Full portable text in the archive"] : [count(rep.messages, "message"),
+  const carried = rep.method === "vendor-import" ? ["History converted by the agent’s importer", "Hopsesh briefing added"] : rep.fidelity === "note" ? ["A briefing only"] : rep.stepsSummarised || rep.entriesOmitted ? ["Bounded history", "Full portable text in the archive"] : [count(rep.messages, "message"),
     rep.nativeCalls ? `${count(rep.nativeCalls, "command")} as ${p.agent}'s own, ${count(rep.toolCalls - rep.nativeCalls, "tool call")} as text` : `${count(rep.toolCalls, "tool call")}, as text`];
-  const changed = [rep.outputsShortened && `${count(rep.outputsShortened, "long output")} shortened`, rep.stepsSummarised && `${count(rep.stepsSummarised, "oldest step")} summarised to fit`,
+  const changed = [rep.outputsShortened && `${count(rep.outputsShortened, "long output")} shortened`, rep.stepsSummarised && `${count(rep.stepsSummarised, "older entry", "older entries")} condensed into a labeled extract`,
+    rep.entriesOmitted && `${count(rep.entriesOmitted, "older entry", "older entries")} left out (kept in the archive)`, rep.userBudget && `Context budget lowered to ${rep.userBudget.toLocaleString()}`,
     rep.briefShortened && "Briefing shortened to fit", rep.pathsMapped && `${count(rep.pathsMapped, "path")} mapped to ${p.machine || "this machine"}`, rep.redactions && `${count(rep.redactions, "likely secret")} redacted`,
     rep.attachmentsAsPlaceholders && `${count(rep.attachmentsAsPlaceholders, "attachment")} as placeholders`].filter(Boolean);
   const lost = rep.method === "vendor-import" ? ["Vendor import fidelity has not been verified"] : rep.reasoningDropped ? [count(rep.reasoningDropped, "reasoning block"), `private to ${c.from}`] : ["Nothing"];
   const box = (cls, title, lines) => h("div", { class: "box " + cls }, h("b", {}, title), lines.map((l, i) => h("span", { class: i ? "muted" : "" }, l)));
   return h("div", { class: "three-boxes" }, box("kept", "Carried over", carried), box("changed", "Changed", changed.length ? changed : ["Nothing"]), box("lost", "Left out", lost));
+}
+
+// contextChoice overrides Settings → History for this transfer only.
+function contextChoice(o) {
+  const budgets = state.info?.contextBudgets || [0, 16000, 32000, 64000, 128000, 256000];
+  return h("div", { style: "display:flex;align-items:center;gap:10px;flex-wrap:wrap" },
+    h("span", { class: "muted", style: "font-size:12.5px" }, "This transfer:"),
+    h("select", { "aria-label": "Context budget for this transfer", onchange: (e) => set("contextBudget", Number(e.target.value)) },
+      budgets.map((n) => h("option", { value: n, selected: (o.contextBudget || 0) === n }, n ? `Budget up to ${Math.round(n / 1000)}k` : "Budget from Settings"))),
+    h("div", { class: "seg", role: "radiogroup", "aria-label": "Older conversation for this transfer" },
+      [["", "Older: from Settings"], ["extract", "Extract + recent"], ["recent", "Recent turns only"]].map(([v, t]) => h("button", { role: "radio", "aria-checked": (o.older || "") === v ? "true" : "false", onclick: () => set("older", v) }, t))));
 }
 
 function conversation(p) {
@@ -206,7 +218,9 @@ function conversation(p) {
         [["history", "History + bounded context"], ["note", "Briefing only"]].map(([v, t]) => h("button", { role: "radio", "aria-checked": o.fidelity === v ? "true" : "false", onclick: () => set("fidelity", v) }, t)))),
     relation ? item("ok", relation, "") : null,
     item("ok", `${c.report.method === "vendor-import" ? "Import input upper estimate" : "Working context"}: ${c.report.usedTokens.toLocaleString()} / ${c.report.budgetTokens.toLocaleString()} upper estimate`, `${c.report.capacity?.source || "Conservative static check"}. A successful model continuation has not been observed.`),
-    c.report.archive ? item("ok", "Portable history preserved separately", c.report.archive) : null,
+    c.report.archive ? item("ok", c.report.archiveRecords ? `Portable history preserved separately · ${count(c.report.archiveRecords, "record")}` : "Portable history preserved separately", c.report.archive) : null,
+    c.report.oldestIncluded && (c.report.stepsSummarised || c.report.entriesOmitted) ? item("ok", "Working context starts at", `“${c.report.oldestIncluded}”`) : null,
+    imported || o.fidelity === "note" ? null : contextChoice(o),
     imported ? item("ok", `${p.agent}'s own importer converts the conversation`, "hopsesh adds its briefing at the end and keeps the rest of the plan.") : boxes(p),
     h("label", { for: "note", style: "font-size:12.5px" }, `A note for ${p.agent} (optional)`), note,
     h("details", {}, h("summary", { style: "cursor:pointer;font-size:12.5px" }, `What ${p.agent} is told`),

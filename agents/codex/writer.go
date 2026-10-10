@@ -79,7 +79,7 @@ func (m *Module) Write(ctx context.Context, h agent.Host, in agent.Install, req 
 		if fi.Size() != req.Expect.Offset {
 			return ir.WriteResult{}, fmt.Errorf("%w: %s changed since it was read", agent.ErrDiverged, sid)
 		}
-		head, err := fsys.ReadFile(file, 1<<30)
+		head, err := agent.ReadNative(ctx, fsys, file)
 		if err != nil {
 			return ir.WriteResult{}, err
 		}

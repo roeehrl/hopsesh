@@ -92,7 +92,7 @@ func TestArchiveRetainsTextAndDropsPrivateState(t *testing.T) {
 			t.Fatal("private data archived")
 		}
 	}
-	merged, err := MergeArchives(raw, raw)
+	merged, err := MergeArchives(0, raw, raw)
 	if err != nil || string(merged) != string(raw) {
 		t.Fatalf("archive retry duplicated content: %v", err)
 	}

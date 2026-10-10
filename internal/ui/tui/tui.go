@@ -21,6 +21,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/launch"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/sdk/agent"
+	"github.com/roeehrl/hopsesh/sdk/ir"
 )
 
 // Exit is what the TUI asks its caller to do after it closes.
@@ -800,6 +801,12 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		case "k":
 			m.opts.StopLocal = !m.opts.StopLocal
 			return m, m.planCmd()
+		case "o":
+			m.opts.Limits.Older = map[bool]string{true: ir.OlderExtract, false: ir.OlderRecent}[m.opts.Limits.Normalize().Older == ir.OlderRecent]
+			return m, m.planCmd()
+		case "b":
+			m.opts.Limits.ContextBudget = nextBudget(m.opts.Limits.ContextBudget)
+			return m, m.planCmd()
 		case "R":
 			m.opts.Conflict = map[bool]string{true: "", false: move.ConflictReplace}[m.opts.Conflict == move.ConflictReplace]
 			return m, m.planCmd()
@@ -1356,8 +1363,16 @@ func (m *model) viewPlanBody(b *strings.Builder) {
 		fmt.Fprintf(b, "  carries %s\n", c.Report.Summary)
 		fmt.Fprintf(b, "  capacity %s\n", c.Report.ContextSummary())
 		if c.Report.Archive != "" {
-			fmt.Fprintf(b, "  archive %s\n", c.Report.Archive)
+			fmt.Fprintf(b, "  archive %s · %d record(s) preserved\n", c.Report.Archive, c.Report.ArchiveRecords)
 		}
+		if c.Report.OldestIncluded != "" && (c.Report.Summarised > 0 || c.Report.Omitted > 0) {
+			fmt.Fprintf(b, "  context starts at %q\n", c.Report.OldestIncluded)
+		}
+		budget := "auto"
+		if l := m.opts.Limits.Normalize(); l.ContextBudget > 0 {
+			budget = fmt.Sprintf("≤%dk", l.ContextBudget/1000)
+		}
+		fmt.Fprintf(b, "  [b] context budget %s  [o] older history: %s\n", budget, map[string]string{ir.OlderExtract: "extract + recent", ir.OlderRecent: "recent turns only"}[m.opts.Limits.Normalize().Older])
 	} else {
 		fmt.Fprintf(b, "  files %d (%s) · %d path mapping(s)\n", len(p.Files.Files), move.Human(p.Bytes), len(p.Placement.Mappings))
 	}
@@ -1673,4 +1688,15 @@ func (m *model) saveFamilyGrouping() {
 	if err := config.Save(*c); err != nil {
 		m.err = err
 	}
+}
+
+// nextBudget cycles the plan's context budget through the settings' choices.
+func nextBudget(cur int) int {
+	choices := config.HistoryContextBudgets
+	for i, v := range choices {
+		if v == cur {
+			return choices[(i+1)%len(choices)]
+		}
+	}
+	return choices[0]
 }

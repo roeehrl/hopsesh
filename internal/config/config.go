@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/roeehrl/hopsesh/sdk/ir"
 )
 
 // Schema is the configuration format. Files in another format are refused, never read:
@@ -296,8 +297,63 @@ type Config struct {
 	List List `toml:"list,omitempty"`
 	// Previews shows the end of a session's conversation in the app's inspector (default
 	// on; off for people who share their screen).
-	Previews *bool  `toml:"previews,omitempty"`
-	Hosts    []Host `toml:"hosts"`
+	Previews *bool `toml:"previews,omitempty"`
+	// History is how much history a transfer carries and the resources it may use.
+	History History `toml:"history,omitempty"`
+	Hosts   []Host  `toml:"hosts"`
+}
+
+// History limits. Zero means automatic or the default; see ir.Limits. Canonical history
+// is never truncated: reaching a resource limit stops the transfer with the setting
+// named, and only the receiving context keeps a labeled subset (the rest stays in the
+// portable archive).
+type History struct {
+	// ContextBudget optionally lowers the receiving context (0: automatic, from the
+	// destination model). It can never raise what the model allows.
+	ContextBudget int `toml:"context_budget,omitempty" json:"contextBudget"`
+	// Older is how history older than the recent turns is carried: "extract" (default)
+	// or "recent" (recent turns only).
+	Older string `toml:"older,omitempty" json:"older"`
+	// Advanced resource budgets, in MiB.
+	ReadMemoryMB int `toml:"read_memory_mb,omitempty" json:"readMemoryMB"`
+	RecordMB     int `toml:"record_mb,omitempty" json:"recordMB"`
+	ArchiveMB    int `toml:"archive_mb,omitempty" json:"archiveMB"`
+	NativeFileMB int `toml:"native_file_mb,omitempty" json:"nativeFileMB"`
+}
+
+// History choices offered by the app (any value within the ceilings is valid in the file).
+var (
+	HistoryContextBudgets = []int{0, 16_000, 32_000, 64_000, 128_000, 256_000}
+	HistoryReadMemoryMBs  = []int{256, 512, 1024, 2048, 4096}
+	HistoryRecordMBs      = []int{32, 64, 128, 256}
+	HistoryArchiveMBs     = []int{256, 512, 1024, 2048, 4096, 8192}
+	HistoryNativeFileMBs  = []int{1024, 2048, 4096, 8192}
+)
+
+// Limits is the operation policy for these settings, with defaults and ceilings applied.
+func (h History) Limits() ir.Limits {
+	return h.raw().Normalize()
+}
+
+func (h History) raw() ir.Limits {
+	return ir.Limits{
+		ReadBytes: int64(h.ReadMemoryMB) << 20, RecordBytes: int64(h.RecordMB) << 20,
+		ArchiveBytes: int64(h.ArchiveMB) << 20, NativeFileBytes: int64(h.NativeFileMB) << 20,
+		ContextBudget: h.ContextBudget, Older: h.Older,
+	}
+}
+
+func (h History) check() error {
+	if h.ReadMemoryMB < 0 || h.RecordMB < 0 || h.ArchiveMB < 0 || h.NativeFileMB < 0 {
+		return fmt.Errorf("history: sizes must be positive (or left out for the default)")
+	}
+	if err := h.raw().Check(); err != nil {
+		return fmt.Errorf("history: %w", err)
+	}
+	if l := h.Limits(); h.RecordMB > 0 && l.RecordBytes > l.ReadBytes {
+		return fmt.Errorf("history.record_mb (%d) cannot exceed history.read_memory_mb", h.RecordMB)
+	}
+	return nil
 }
 
 // Defaults returns the configuration used when no file exists.
@@ -556,6 +612,9 @@ var fontName = regexp.MustCompile(`^[\p{L}\p{N} ._,'"-]{0,120}$`)
 // Check reports settings hopsesh cannot act on.
 func (c Config) Check() error {
 	if err := CheckAppearance(c.Appearance); err != nil {
+		return err
+	}
+	if err := c.History.check(); err != nil {
 		return err
 	}
 	if err := c.Desktop.Check(); err != nil {

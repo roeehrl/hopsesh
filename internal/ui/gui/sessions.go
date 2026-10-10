@@ -25,6 +25,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/repos"
 	"github.com/roeehrl/hopsesh/internal/core/termapp"
 	"github.com/roeehrl/hopsesh/sdk/agent"
+	"github.com/roeehrl/hopsesh/sdk/ir"
 )
 
 // ProgressEvent carries the steps of a move or continuation to the window.
@@ -765,6 +766,10 @@ type OptsDTO struct {
 	CarryRules bool     `json:"carryRules"`
 	RuleFiles  []string `json:"ruleFiles"`
 	Via        string   `json:"via"` // "" or "import"
+	// This transfer only: a lower context budget (0: the setting) and how older history
+	// is carried ("": the setting).
+	ContextBudget int    `json:"contextBudget"`
+	Older         string `json:"older"`
 	// Bringing a session from a cloud: the branch only; add its work to the session it was
 	// handed off from.
 	CodeOnly bool `json:"codeOnly"`
@@ -788,6 +793,13 @@ func (o OptsDTO) options(d move.Options) move.Options {
 	if o.Via == move.ViaImport {
 		d.Via = move.ViaImport
 	}
+	if o.ContextBudget > 0 {
+		d.Limits.ContextBudget = o.ContextBudget
+	}
+	if o.Older == ir.OlderExtract || o.Older == ir.OlderRecent {
+		d.Limits.Older = o.Older
+	}
+	d.Limits = d.Limits.Normalize()
 	return d
 }
 

@@ -36,7 +36,7 @@ Core tests cover exclusive causal coverage, coalesced fragments, generated recor
 
 ## Large Codex rollouts and archive consultation
 
-### Follow-up proposal: global history and resource settings (not implemented)
+### Global history and resource settings
 
 Large histories are not a Codex-only concern. The current sweep found the shared
 `sdk/ir.BoundedReader` 256 MiB cap still used by Claude's reader and capacity
@@ -88,6 +88,27 @@ matrices. Include repeated multi-party returns/forks, huge tool records, malform
 records, tool-pair boundaries, Unicode, cancellation, low disk space, remote
 policy propagation and original-file preservation after failure. Changing only
 the cap or keeping a tail is insufficient for a safe native append/return.
+
+Implemented (stages 1 and 3, part of 2):
+
+- `ir.Limits` carries separate read-memory, record, archive and native-file budgets
+  plus the context budget and older-context mode, per operation: in `move.Options`
+  and the operation's context (`ir.WithLimits`), never in globals. Defaults equal the
+  previous constants; `Normalize` enforces hard ceilings.
+- Every reached limit is an `ir.LimitError` naming its stage and the `[history]`
+  setting. The Claude and Codex readers, Codex record analysis, the portable archive
+  and whole-file fork/recovery/verification reads (`agent.ReadNative`) use them.
+- The portable archive is built by `convert.ArchiveWriter`: the prior archive is
+  re-read record by record and merged without holding several copies.
+- `convert.Render` applies the user budget (lower only) and `recent` mode, which
+  replaces the extract with a labeled omission notice that carries no coverage. The
+  report separates included context from `archiveRecords` and shows `oldestIncluded`.
+- Settings → History (GUI), `hopsesh history` (CLI), and per-transfer overrides in the
+  GUI plan, `pull --context-budget/--older` and the TUI plan (`b`, `o`). Peers apply the
+  sender's context policy and their own resource budgets.
+
+Remaining: paged module readers and fully disk-backed lineage processing (readers still
+return whole segments), a free-disk preflight, and the cross-OS scenario matrix.
 
 ### Implemented fix
 

@@ -11,7 +11,6 @@ import (
 	"github.com/roeehrl/hopsesh/sdk/ir"
 )
 
-const analysisRecordLimit = 32 << 20
 const analysisRecordCountLimit = 1_000_000
 
 // Large rollouts repeat replacement histories and runtime metadata. Scan them
@@ -19,7 +18,8 @@ const analysisRecordCountLimit = 1_000_000
 // native anchors and pagination verification remain identical to readLines.
 // The retained conversation cap is independent of the raw file's byte length.
 func readAnalysisLines(ctx context.Context, r io.Reader) ([]line, int64, error) {
-	return readAnalysisLinesWithLimits(ctx, r, ir.MaxTranscriptBytes, analysisRecordLimit)
+	l := ir.LimitsFrom(ctx)
+	return readAnalysisLinesWithLimits(ctx, r, l.ReadBytes, l.RecordBytes)
 }
 
 func readAnalysisLinesWithLimits(ctx context.Context, r io.Reader, retainedLimit, recordLimit int64) ([]line, int64, error) {
@@ -35,7 +35,7 @@ func readAnalysisLinesWithLimits(ctx context.Context, r io.Reader, retainedLimit
 			}
 			part, err := br.ReadSlice('\n')
 			if int64(len(raw)+len(part)) > recordLimit {
-				return nil, 0, fmt.Errorf("Codex native record exceeds %d bytes; cannot safely analyze this record", recordLimit)
+				return nil, 0, &ir.LimitError{Stage: ir.StageRecord, Limit: recordLimit, Size: int64(len(raw) + len(part)), Detail: fmt.Sprintf("Codex native record at byte %d cannot be analyzed safely", offset)}
 			}
 			raw = append(raw, part...)
 			if err == io.EOF {
@@ -97,7 +97,7 @@ func readAnalysisLinesWithLimits(ctx context.Context, r io.Reader, retainedLimit
 		}
 		retained += int64(len(l.Payload))
 		if retained > retainedLimit {
-			return nil, 0, fmt.Errorf("Codex retained conversation exceeds %d bytes; no history was truncated", retainedLimit)
+			return nil, 0, &ir.LimitError{Stage: ir.StageRead, Limit: retainedLimit, Size: retained, Detail: "Codex retained conversation; no history was truncated"}
 		}
 		if len(records) >= analysisRecordCountLimit {
 			return nil, 0, fmt.Errorf("Codex transcript exceeds %d native records", analysisRecordCountLimit)

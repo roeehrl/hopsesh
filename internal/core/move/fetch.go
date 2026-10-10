@@ -150,6 +150,7 @@ type FetchPlan struct {
 // BuildFetch works out a fetch. It asks git and the driver read-only questions; it writes
 // nothing.
 func BuildFetch(ctx context.Context, in FetchInput, opt Options) (*Plan, error) {
+	ctx = ir.WithLimits(ctx, opt.Limits)
 	spec, cl, s := in.Module.Spec(), in.Cloud, in.Session
 	title := s.Title
 	if title == "" {

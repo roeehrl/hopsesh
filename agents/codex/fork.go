@@ -25,11 +25,11 @@ func nativeValue(payload []byte) []byte {
 // VerifyNativeFork uses Codex's forked_from_id and optional exclusive ordinal, then
 // compares copied native records. Text, timestamps or a title do not imply ancestry.
 func (m *Module) VerifyNativeFork(ctx context.Context, h agent.Host, in agent.Install, parent, child agent.Summary) ([]agent.NativeInheritance, error) {
-	pb, err := h.FS().ReadFile(parent.Path, 1<<30)
+	pb, err := agent.ReadNative(ctx, h.FS(), parent.Path)
 	if err != nil {
 		return nil, err
 	}
-	cb, err := h.FS().ReadFile(child.Path, 1<<30)
+	cb, err := agent.ReadNative(ctx, h.FS(), child.Path)
 	if err != nil {
 		return nil, err
 	}

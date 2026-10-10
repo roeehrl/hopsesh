@@ -14,6 +14,7 @@ import (
 // applyPending writes marks owed to copies on this machine that were still open when they
 // moved on. A copy that gained new work afterwards was kept in use: it is not marked.
 func (a *App) applyPending(ctx context.Context, m *Machine, entries []Entry) {
+	ctx = a.limited(ctx)
 	all, err := lineage.LoadPending(a.StateDir)
 	if err != nil || len(all) == 0 {
 		return

@@ -161,7 +161,7 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	}
 	archivePath := targetHost.Path().Join(tgt.Install.Root(spec.Roots[0].Name), "hopsesh", "archives", string(p.Placement.Key.Session)+".jsonl")
 	bf := briefingFor(p, srcHost, src, s, spec, tgt.Machine.Name, cwd, opt)
-	cp.archive, err = preservedArchive(srcHost, src.Module, src.Install, string(s.Key.Session), fullNodes, convert.Request{Mappings: p.Placement.Mappings, Redact: redact, Briefing: bf})
+	cp.archive, err = preservedArchive(srcHost, src.Module, src.Install, string(s.Key.Session), fullNodes, convert.Request{Mappings: p.Placement.Mappings, Redact: redact, Briefing: bf, Limits: opt.Limits})
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +171,7 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	r := convert.Render(convert.Request{
 		Nodes: seg.Nodes, From: cp.From, To: spec.Name, Fidelity: fidelity,
 		Native: opt.Native && prof.NativeReplay, Window: capacity.EffectiveWindow(), Limit: &allowance, Mappings: p.Placement.Mappings, Redact: redact,
-		Briefing: bf,
+		Briefing: bf, Limits: opt.Limits,
 	})
 	cp.items, cp.Report = r.Items, r.Report
 	cp.Report.Capacity = capacity

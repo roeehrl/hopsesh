@@ -285,6 +285,7 @@ var stepLabels = map[string]string{StepSnapshot: "Snapshot", StepPush: "Push bra
 // BuildHandoff works out a hand-off. It reads (git's state, the conversation, the driver's
 // login, the remote's branches) and writes nothing.
 func BuildHandoff(ctx context.Context, in HandoffInput, opt Options) (*Plan, error) {
+	ctx = ir.WithLimits(ctx, opt.Limits)
 	cl := in.Cloud
 	if _, ok := in.Module.(agent.CloudSender); !ok {
 		return nil, fmt.Errorf("%w: hopsesh does not reach %s yet", agent.ErrUnsupported, cl.Title)

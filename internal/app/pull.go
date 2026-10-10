@@ -13,6 +13,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/repos"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
 	"github.com/roeehrl/hopsesh/sdk/agent"
+	"github.com/roeehrl/hopsesh/sdk/ir"
 )
 
 // Ref names a session: [machine:][agent/]<id, id prefix or title>.
@@ -145,6 +146,7 @@ func (a *App) DefaultOptions() move.Options {
 	return move.Options{
 		ReposDir: a.Cfg.ReposDir, GHQLayout: a.Cfg.Layout == "ghq", Mark: a.Cfg.MarkMovedOn(),
 		SyncCode: a.Cfg.SyncCodeOn(), Push: a.Cfg.PushSource, Notify: a.Cfg.MovementNoticesOn(),
+		Limits: a.Cfg.History.Limits(),
 	}
 }
 
@@ -376,4 +378,10 @@ func windowsBundle(h *host.Machine, dir string) func(context.Context, string) (s
 		f.Close()
 		return f.Name(), func() { os.Remove(f.Name()) }, nil
 	}
+}
+
+// limited scopes the configured history limits to work outside a move plan (movement
+// reads, pending labels, native fork checks).
+func (a *App) limited(ctx context.Context) context.Context {
+	return ir.WithLimits(ctx, a.Cfg.History.Limits())
 }
