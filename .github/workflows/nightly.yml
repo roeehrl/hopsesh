@@ -155,13 +155,15 @@ jobs:
         run: go test ./internal/e2e/tuipty/ -count=1 -v
 
   matrix-triples:
-    name: scenario matrix, every triple (linux ${{ matrix.shard }}/2)
+    name: scenario matrix, every triple (linux ${{ matrix.shard }}/4)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    # Two shards plus the mandatory stateful suite exceeded 60m while rows
+    # continued passing. Four disjoint shards retain every triple and deadline.
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3, 4]
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
@@ -183,9 +185,9 @@ jobs:
         run: go test ./internal/e2e -run 'TestMovement|TestLineage|TestAccountProfile|TestContext' -race -count=1 -timeout 12m
       - run: scripts/matrix-loopback.sh bin "linux→linux, covering triples $SHARD" "$RUNNER_TEMP/hsmatrix" -t 3 -shard "$SHARD"
         env:
-          SHARD: ${{ matrix.shard }}/2
+          SHARD: ${{ matrix.shard }}/4
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: ${{ failure() }}
+        if: always()
         with:
           name: nightly-matrix-${{ matrix.shard }}
           path: |

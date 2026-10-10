@@ -360,14 +360,19 @@ jobs:
       - run: scripts/password-test.sh
 
   scenarios:
-    name: scenarios (${{ matrix.family }})
+    name: scenarios (${{ matrix.family }}${{ matrix.shard && format(' {0}', matrix.shard) || '' }})
+    # Windows exceeded the shared 45m job budget after 76 passing rows.
+    # Partition every row; keep stateful suites once and all scenario deadlines.
     strategy:
       fail-fast: false
       matrix:
         include:
           - {family: linux, os: ubuntu-24.04}
           - {family: macos, os: macos-15}
-          - {family: windows, os: windows-2025}
+          - {family: windows, os: windows-2025, shard: 1/4}
+          - {family: windows, os: windows-2025, shard: 2/4}
+          - {family: windows, os: windows-2025, shard: 3/4}
+          - {family: windows, os: windows-2025, shard: 4/4}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
@@ -391,18 +396,22 @@ jobs:
       # These durable-write suites can exceed one shared ten-minute deadline on
       # Windows. Keep every route and the race detector, with bounded batches.
       - name: mandatory stateful movement and instruction routes
+        if: ${{ !matrix.shard || matrix.shard == '1/4' }}
         shell: bash
         run: |
           go test ./internal/e2e -run 'TestMovement|TestInstruction' -race -count=1 -timeout 10m
       - name: mandatory lineage and context routes, forks and recovery
+        if: ${{ !matrix.shard || matrix.shard == '1/4' }}
         shell: bash
         run: |
           go test ./internal/e2e -run 'TestLineage|TestContext' -race -count=1 -timeout 10m
       - name: mandatory account routes and progressive discovery
+        if: ${{ !matrix.shard || matrix.shard == '1/4' }}
         shell: bash
         run: |
           go test ./internal/e2e -run 'TestAccountProfile|TestSessionDiscovery' -race -count=1 -timeout 10m
       - name: mandatory account, notice-hook and discovery scenarios
+        if: ${{ !matrix.shard || matrix.shard == '1/4' }}
         shell: bash
         run: |
           go test ./internal/e2e/scenario -run 'TestScenarios/(accounts|notice-hook|session-discovery)' -race -count=1 -timeout 3m
@@ -412,11 +421,13 @@ jobs:
       - name: scenario matrix over loopback SSH
         if: runner.os == 'Windows'
         shell: pwsh
-        run: ./scripts/matrix-loopback.ps1 -Bin bin -Label "windows→windows" -Out "$env:RUNNER_TEMP\hsmatrix"
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: ./scripts/matrix-loopback.ps1 -Bin bin -Label "windows→windows $env:SHARD" -Out "$env:RUNNER_TEMP\hsmatrix" -Shard $env:SHARD
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: ${{ failure() }}
+        if: always()
         with:
-          name: scenarios-${{ matrix.family }}
+          name: scenarios-${{ matrix.family }}-${{ strategy.job-index }}
           path: |
             ${{ runner.temp }}/hsmatrix/*.log
             ${{ runner.temp }}/hsmatrix/*.json

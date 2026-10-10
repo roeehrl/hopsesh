@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -61,6 +62,38 @@ func TestMatrixSelectionReportsOnlyActualCoverage(t *testing.T) {
 	}
 	if len(seen) != len(rows) {
 		t.Fatal("shards lost generated rows")
+	}
+}
+
+func TestFourShardsRetainEveryPairAndTripleRow(t *testing.T) {
+	for _, strength := range []int{2, 3} {
+		t.Run(fmt.Sprintf("strength-%d", strength), func(t *testing.T) {
+			all, coverage, err := selectedRows(strength, 1, false, "", "")
+			if err != nil || !coverage.Complete {
+				t.Fatal("full reference model", coverage, err)
+			}
+			want := map[int]Row{}
+			for _, row := range all {
+				want[row.N] = row
+			}
+			seen := map[int]bool{}
+			for shard := 1; shard <= 4; shard++ {
+				rows, meta, err := selectedRows(strength, 1, false, "", fmt.Sprintf("%d/4", shard))
+				if err != nil || meta.GeneratedRows != len(all) || meta.SelectedRows != len(rows) || meta.ValidInteractions != coverage.ValidInteractions {
+					t.Fatal("shard changed reference coverage", meta, err)
+				}
+				for _, row := range rows {
+					if seen[row.N] || !reflect.DeepEqual(want[row.N], row) {
+						t.Fatal("duplicate, altered or unexpected row", row)
+					}
+					seen[row.N] = true
+				}
+			}
+			if len(seen) != len(want) {
+				t.Fatal("four shards omit generated scenarios", len(seen), len(want))
+			}
+			t.Logf("four disjoint shards retain all %d rows and %d interactions", len(all), coverage.ValidInteractions)
+		})
 	}
 }
 
