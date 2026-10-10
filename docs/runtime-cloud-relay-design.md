@@ -763,3 +763,16 @@ locate a stall without introducing another proxy, changing runtime transport,
 extending readiness, or retrying the scenario. Successful diagnostic shards 1
 and 4 retain their exact original 34/33-row selections; neither closes the
 original failure. The next Windows diagnostic preserves original shard 2.
+
+Pinned-runtime source review adds a separate lead: workerd `1.20261006.1`
+contains the unguarded deferred move-later alarm drain corrected by
+[upstream PR 7464](https://github.com/cloudflare/workerd/pull/7464), merged
+October 9 as `2093b5b1b2d62146129e2b4a6bffc002fa57e454`. GitHub's live API and
+commit diff confirm the merge; the cached web page still described an open PR.
+The upstream regression reproduces a scheduled alarm being moved later than
+its stored time. It does not reproduce an HTTP startup stall or TCP reset.
+Our warning is emitted when the requested alarm precedes the confirmed stored
+alarm and the runtime reschedules it; that warning alone does not prove the
+deferred-drain defect occurred. Keep this version-specific lead separate from
+the unexplained Windows failures, and do not claim a dependency update fixes
+them without a matching reproduction and controlled comparison.
