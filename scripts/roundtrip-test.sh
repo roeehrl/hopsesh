@@ -101,13 +101,10 @@ as_b "$HS" hosts add back "$A@127.0.0.1" >/dev/null
 as_b "$HS" trust back --yes >/dev/null
 as_b "$HS" pull "back:$AID" --yes --json > "$WORK/pull2.json" 2>&1 || { cat "$WORK/pull2.json"; fail "hop back"; }
 RETURN_ID=$(python3 -c 'import json,sys; p=json.load(open(sys.argv[1]))["plan"]; assert p["kind"]=="continue" and not p.get("conflict"); print(p["placement"]["key"]["session"])' "$WORK/pull2.json")
-if [ -z "$RETURN_ID" ] || [ "$RETURN_ID" = "$ID" ]; then
-  fail "unverified return did not use a fresh ID"
-fi
-sudo grep -q "continued on back" "$BFILE" && fail "return changed the preserved original"
-BFILE="$BHOME/.claude/projects/$SLUG_B/$RETURN_ID.jsonl"
-sudo test -f "$BFILE" || fail "no reported return copy on box"
-sudo grep -q "continued on back" "$BFILE" || fail "box should now have the newer copy"
+# A return adds only the new work to box's exact original session.
+[ "$RETURN_ID" = "$ID" ] || { cat "$WORK/pull2.json"; fail "the return did not go back to box's original session"; }
+sudo test -f "$BFILE" || fail "box's original session is missing"
+sudo grep -q "continued on back" "$BFILE" || fail "box's original should now have back's new work"
 if sudo cat "$BFILE" | grep '"type":"custom-title"' | tail -n 1 | grep -q '↪'; then fail "the copy that came home must not carry a title label"; fi
 [ "$(sh_b 'git -C ~/rt rev-parse HEAD')" = "$THREE" ] || fail "box's checkout should be at back's commit"
 sudo grep -q '↪' "$AFILE" && fail "back's copy was relabelled: titles must stay as they were"
