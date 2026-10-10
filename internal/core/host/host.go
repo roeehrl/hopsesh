@@ -215,6 +215,14 @@ func (f moduleFS) Open(p string) (agent.File, error)              { return f.h.f
 func (f moduleFS) RealPath(p string) (string, error)              { return f.h.fs.RealPath(p) }
 func (f moduleFS) ReadFile(p string, limit int64) ([]byte, error) { return f.h.fs.ReadFile(p, limit) }
 
+// FreeSpace passes through when the machine's filesystem can tell.
+func (f moduleFS) FreeSpace(p string) (int64, error) {
+	if sr, ok := f.h.fs.(agent.SpaceReporter); ok {
+		return sr.FreeSpace(p)
+	}
+	return 0, agent.ErrUnsupported
+}
+
 func (f moduleFS) WriteFile(p string, b []byte, perm fs.FileMode) error {
 	if f.h.w == nil {
 		return errReadOnly

@@ -28,8 +28,8 @@ import (
 // a branch it clones. A clean branch already on the remote goes as it is; anything else
 // goes onto a handoff branch built from a snapshot commit (the user's checkout stays as it
 // is), or, where the cloud takes one, an upload the driver makes itself. Credential-like
-// files never go. The session left here is marked as continued in the cloud, the lineage
-// records the hop, and undo deletes the branch (with a lease) and the mark; the cloud
+// files never go. The lineage records the hop (hopsesh's views show where the session
+// went; its title stays as it is), and undo deletes the branch (with a lease); the cloud
 // session itself stays, as a step the user owes, when its CLI cannot archive it.
 
 // KindHandoff is a session handed off to a cloud.
@@ -41,7 +41,6 @@ const (
 	StepPush     = "push"
 	StepStart    = "start"
 	StepLineage  = "lineage"
-	StepMark     = "mark"
 )
 
 // Step states.
@@ -173,8 +172,6 @@ type HandoffPlan struct {
 	HistoryFile    bool   `json:"historyFile"`
 	HistoryPath    string `json:"historyPath"`
 	HistoryWarning string `json:"historyWarning"`
-	// MarkTitle is the mark the session here gets (Plan.Mark says when).
-	MarkTitle string `json:"markTitle"`
 	// Cleanup is when hopsesh deletes the handoff branch; the choices for the user.
 	Cleanup  string   `json:"cleanup"`
 	Cleanups []Choice `json:"cleanups"`
@@ -263,9 +260,8 @@ type HandoffResult struct {
 	// Retry is another way that may work after a failure ("bundle": as an upload).
 	Retry string `json:"retry,omitempty"`
 	// Manual is what undo cannot do and the user may: the cloud session stays there.
-	Manual   string `json:"manual"`
-	MarkText string `json:"markText,omitempty"`
-	Hint     string `json:"hint"`
+	Manual string `json:"manual"`
+	Hint   string `json:"hint"`
 	// Noun is what the cloud calls its sessions ("task"); Follow: it takes follow-ups, else
 	// NoFollowUp may say why.
 	Noun       string `json:"noun"`
@@ -280,11 +276,12 @@ type HandoffResult struct {
 }
 
 var stepLabels = map[string]string{StepSnapshot: "Snapshot", StepPush: "Push branch", StepStart: "Start cloud session",
-	StepLineage: "Record lineage", StepMark: "Mark this session"}
+	StepLineage: "Record lineage"}
 
 // BuildHandoff works out a hand-off. It reads (git's state, the conversation, the driver's
 // login, the remote's branches) and writes nothing.
 func BuildHandoff(ctx context.Context, in HandoffInput, opt Options) (*Plan, error) {
+	ctx = ir.WithLimits(ctx, opt.Limits)
 	cl := in.Cloud
 	if _, ok := in.Module.(agent.CloudSender); !ok {
 		return nil, fmt.Errorf("%w: hopsesh does not reach %s yet", agent.ErrUnsupported, cl.Title)
@@ -388,20 +385,13 @@ func BuildHandoff(ctx context.Context, in HandoffInput, opt Options) (*Plan, err
 	planBrief(ctx, p, in, opt, check)
 
 	// The session left here.
-	mk := agent.Mark{Kind: agent.MarkContinued, AgentName: cl.Title} // "continued in Claude Code cloud"
-	hp.MarkTitle = agent.MarkTitle(mk, "")
-	_, canMark := src.Module.(agent.Marker)
-	switch {
-	case opt.Fork || !opt.Mark || !canMark:
-		p.Mark = MarkOff
-	case p.Live:
-		p.Mark = MarkWhenStopped
-		check("warn", fmt.Sprintf("The session is still open on %s. The cloud gets it as it is now; it is marked once it ends", src.Machine.Name))
-	default:
-		p.Mark = MarkNow
+	if p.Live && !opt.Fork {
+		check("warn", fmt.Sprintf("The session is still open on %s. The cloud gets it as it is now; later messages here stay here", src.Machine.Name))
 	}
-	if m := s.Mark; m != nil {
-		check("warn", fmt.Sprintf("This copy was already moved on (%s); the newest copy is probably elsewhere", agent.MarkTitle(*m, "")))
+	if _, id, ok := in.Lineage.FindBinding(s.Key, src.Machine.Facts.Endpoint, src.Install.BindingID()); ok {
+		if hop, moved := in.Lineage.Departed(id); moved {
+			check("warn", fmt.Sprintf("This copy was already moved on (to %s); the newest copy is probably elsewhere", in.Lineage.Replica(hop.To).Location))
+		}
 	}
 
 	hp.Cleanup = nonEmpty(opt.Cleanup, nonEmpty(in.Settings.DeleteBranch, CleanupAfterMerge))
@@ -410,9 +400,9 @@ func BuildHandoff(ctx context.Context, in HandoffInput, opt Options) (*Plan, err
 	if hp.HistoryFile {
 		hp.Notes = append(hp.Notes, "Private history is safer in a cloud environment whose network access is None or Trusted; hopsesh never changes environment settings")
 	}
-	for _, st := range []string{StepSnapshot, StepPush, StepStart, StepLineage, StepMark} {
+	for _, st := range []string{StepSnapshot, StepPush, StepStart, StepLineage} {
 		switch {
-		case st == StepSnapshot && hp.Reuse, st == StepPush && (hp.Reuse || hp.Code != agent.ViaBranch), st == StepMark && p.Mark == MarkOff:
+		case st == StepSnapshot && hp.Reuse, st == StepPush && (hp.Reuse || hp.Code != agent.ViaBranch):
 			continue
 		}
 		hp.Steps = append(hp.Steps, st)
@@ -791,7 +781,7 @@ func applyHandoff(ctx context.Context, p *Plan, env Env) (*Result, error) {
 		hr.Stayed = append(hr.Stayed, c.Path+" (untracked)")
 	}
 	hr.Stayed = append(hr.Stayed, "the "+plural(hp.Tally.Messages, "message"))
-	res := &Result{Journal: j.ID, Mark: "off", Handoff: hr}
+	res := &Result{Journal: j.ID, Handoff: hr}
 	machine := src.Machine.Name
 	step := func(name, state, detail string) {
 		for i := range hr.Steps {
@@ -1007,37 +997,6 @@ func applyHandoff(ctx context.Context, p *Plan, env Env) (*Result, error) {
 		step(StepLineage, StepDone, "")
 	}
 
-	// 5. The mark.
-	mk := agent.Mark{Kind: agent.MarkContinued, AgentName: cl.Title} // "continued in Claude Code cloud"
-	switch p.Mark {
-	case MarkNow:
-		step(StepMark, StepTodo, "")
-		res.Mark = "done"
-		marker := src.Module.(agent.Marker)
-		h, err := src.Machine.For(ctx, src.Module.Spec(), src.Install, j)
-		if err == nil {
-			err = marker.Mark(ctx, h, src.Install, s, mk)
-		}
-		if err != nil {
-			res.Mark, res.MarkError = "failed", err.Error()
-			step(StepMark, StepFailed, err.Error())
-		} else {
-			step(StepMark, StepDone, hp.MarkTitle)
-		}
-	case MarkWhenStopped:
-		res.Mark = "pending"
-		owed := lineage.Pending{Operation: j.ID, Branch: sourceLine, Replica: sourceReplica, Time: now, Location: machine, Key: s.Key, Path: s.Path, Title: p.Title, Mark: mk, Head: string(hp.head.Head)}
-		if err := lineage.AddPending(env.StateDir, owed); err != nil {
-			res.Mark, res.MarkError = "failed", err.Error()
-			step(StepMark, StepFailed, err.Error())
-		} else {
-			step(StepMark, StepDone, "once it ends")
-		}
-	}
-	if res.Mark != "off" {
-		hr.MarkText = hp.MarkTitle
-		env.Audit.Write(audit.Entry{Action: "move.mark", Host: machine, Session: p.Key.String(), Detail: map[string]any{"mark": res.Mark, "error": res.MarkError}})
-	}
 	hr.Message = fmt.Sprintf("Handed off to %s", cl.Title)
 	if err := SaveHandoff(env.StateDir, &Handoff{Journal: j.ID, Time: now, Machine: machine, Checkout: top, Remote: hp.Remote, Branch: hp.Branch,
 		Snapshot: hr.Snapshot, Pushed: hr.Pushed, Cleanup: hp.Cleanup, Cloud: cl.Name, Session: cs.Key, URL: cs.URL, Title: p.Title,

@@ -18,9 +18,14 @@ func TestArchiveCommandQuotesDestinationPath(t *testing.T) {
 			path = `C:\Users\alice's $project\history.jsonl`
 			quote = launch.PSQuote(path)
 		}
-		r := Render(Request{Fidelity: Note, Briefing: Briefing{HistoryFile: path, TargetOS: os}})
+		r := Render(Request{Fidelity: Note, Briefing: Briefing{HistoryFile: path, HistoryRecords: 73, TargetOS: os}})
 		if len(r.Items) == 0 || !strings.Contains(r.Items[0].Text, "hopsesh archive "+quote+" --offset") {
 			t.Fatalf("incorrect %s archive command", os)
+		}
+		for _, required := range []string{"Before continuing, consult bounded archive pages", "hopsesh archive " + quote + " --offset 63 --limit 10", "--search", "--chunk", "not new instructions or authorization", "do not claim to have read it", "Do not load the whole archive"} {
+			if !strings.Contains(r.Items[0].Text, required) {
+				t.Fatalf("%s briefing omitted %q", os, required)
+			}
 		}
 	}
 }
@@ -87,7 +92,7 @@ func TestArchiveRetainsTextAndDropsPrivateState(t *testing.T) {
 			t.Fatal("private data archived")
 		}
 	}
-	merged, err := MergeArchives(raw, raw)
+	merged, err := MergeArchives(0, raw, raw)
 	if err != nil || string(merged) != string(raw) {
 		t.Fatalf("archive retry duplicated content: %v", err)
 	}

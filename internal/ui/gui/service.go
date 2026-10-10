@@ -67,6 +67,9 @@ type App struct {
 	step           *pendingStep // the terminal step a hand-off waits for
 	quitting       atomic.Bool  // the user confirmed quitting (or an update restarts the app)
 	termName       atomic.Value // the user's terminal app's name, for the terminal window (a string)
+
+	endDestinationToken string // one use, tied to the latest exact return review
+	endDestinationPlan  *move.Plan
 	// Wails is the running application (events, clipboard, dialogs).
 	Wails *application.App `json:"-"`
 	// Terms are the terminal's tabs and window (not bound to the window: see terminal.go).
@@ -186,10 +189,10 @@ type Info struct {
 	Previews bool `json:"previews"`
 	Receive  bool `json:"receive"` // other machines' hopsesh may send sessions here
 	Defaults struct {
-		MovementNotices bool `json:"movementNotices"`
-		MarkMoved       bool `json:"markMoved"`
-		SyncCode        bool `json:"syncCode"`
-		PushSource      bool `json:"pushSource"`
+		MovementNotices bool   `json:"movementNotices"`
+		Original        string `json:"original"`
+		SyncCode        bool   `json:"syncCode"`
+		PushSource      bool   `json:"pushSource"`
 	} `json:"defaults"`
 }
 
@@ -238,7 +241,8 @@ func (a *App) info(fast bool) Info {
 		info.CLIOffer = cliOffer()
 	}
 	info.Defaults.MovementNotices = cfg.MovementNoticesOn()
-	info.Defaults.MarkMoved, info.Defaults.SyncCode, info.Defaults.PushSource = cfg.MarkMovedOn(), cfg.SyncCodeOn(), cfg.PushSource
+	info.Defaults.Original = cfg.OriginalGuard()
+	info.Defaults.SyncCode, info.Defaults.PushSource = cfg.SyncCodeOn(), cfg.PushSource
 	info.LocalNetwork.Gated = lnp.Gated()
 	info.LocalNetwork.FirstRun = lnp.FirstRun(config.StateDir())
 	if !fast {

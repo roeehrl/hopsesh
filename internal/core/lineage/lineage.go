@@ -272,6 +272,20 @@ func (m *Manifest) FindEndpoint(key agent.SessionKey, endpoint string) (Replica,
 	}
 	return found, found.ID, found.ID != ""
 }
+
+// FindBinding selects the current segment of one physical session without
+// confusing it with its retained historical login segments.
+func (m *Manifest) FindBinding(key agent.SessionKey, endpoint, binding string) (Replica, ReplicaID, bool) {
+	if m == nil {
+		return Replica{}, "", false
+	}
+	for _, r := range m.Replicas {
+		if r.Key == key && r.Endpoint == endpoint && r.Binding == binding && r.Line == m.Branch {
+			return m.Replica(r.ID), r.ID, true
+		}
+	}
+	return Replica{}, "", false
+}
 func (m *Manifest) FindOnBranch(key agent.SessionKey, location, line string) (Replica, ReplicaID, bool) {
 	if m == nil {
 		return Replica{}, "", false
@@ -531,6 +545,37 @@ func (m *Manifest) Merge(o *Manifest) error {
 		return err
 	}
 	next := m.Clone()
+	incoming := o.Clone()
+	// A freshly reset branch has no origin until its first replica is observed.
+	// Catalog observation may initialize it before the persisted empty manifest
+	// is read during planning. That is additive initialization, not conflicting
+	// ancestry. Only accept an unset origin when that side has no replica on the
+	// branch; two established origins or different fork boundaries still conflict.
+	unobserved := func(graph *Manifest, branch Branch) bool {
+		if branch.Origin != "" {
+			return false
+		}
+		for _, replica := range graph.Replicas {
+			if replica.Line == branch.ID {
+				return false
+			}
+		}
+		return true
+	}
+	for i := range next.Branches {
+		for j := range incoming.Branches {
+			a, b := &next.Branches[i], &incoming.Branches[j]
+			if a.ID != b.ID || a.Parent != b.Parent || !slices.Equal(a.ForkHeads, b.ForkHeads) {
+				continue
+			}
+			if unobserved(next, *a) {
+				a.Origin = b.Origin
+			}
+			if unobserved(incoming, *b) {
+				b.Origin = a.Origin
+			}
+		}
+	}
 	union := func(dst, src any, key func(json.RawMessage) string) (json.RawMessage, error) {
 		a, _ := json.Marshal(dst)
 		b, _ := json.Marshal(src)
@@ -566,7 +611,7 @@ func (m *Manifest) Merge(o *Manifest) error {
 		_ = json.Unmarshal(b, &x)
 		return x.ID
 	}
-	for _, pair := range [][2]any{{&next.Branches, o.Branches}, {&next.Replicas, o.Replicas}, {&next.Revisions, o.Revisions}, {&next.States, o.States}, {&next.Hops, o.Hops}, {&next.Compensations, o.Compensations}} {
+	for _, pair := range [][2]any{{&next.Branches, incoming.Branches}, {&next.Replicas, incoming.Replicas}, {&next.Revisions, incoming.Revisions}, {&next.States, incoming.States}, {&next.Hops, incoming.Hops}, {&next.Compensations, incoming.Compensations}} {
 		b, err := union(pair[0], pair[1], key)
 		if err != nil {
 			return err

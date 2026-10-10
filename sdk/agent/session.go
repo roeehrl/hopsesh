@@ -20,8 +20,9 @@ type Summary struct {
 	// repository (for example <repo>/.claude/worktrees/<name>).
 	WorktreeRoot string `json:"worktreeRoot,omitempty"`
 	Subagents    int    `json:"subagents,omitempty"`
-	// Mark is set when the agent's own data says this copy was left behind by a move.
-	Mark *Mark `json:"mark,omitempty"`
+	// LegacyLabel is set when the title carried a label an older hopsesh wrote on a copy
+	// left behind (Title is then the title without it).
+	LegacyLabel *LegacyLabel `json:"legacyLabel,omitempty"`
 	// Path is the session's main file on its machine (the lineage manifest sits beside it).
 	Path string `json:"path"`
 	// Account is the module's opaque account fingerprint for the session, when the agent
@@ -32,22 +33,22 @@ type Summary struct {
 	Mirror *CloudLink `json:"mirror,omitempty"`
 }
 
-// MarkKind says why a copy was left behind.
-type MarkKind string
+// LabelKind is what a legacy label said happened to a copy left behind.
+type LabelKind string
 
 const (
-	MarkPrepared  MarkKind = "prepared"  // destination written; no inference claimed
-	MarkMoved     MarkKind = "moved"     // the session moved to another location
-	MarkContinued MarkKind = "continued" // the session continues in another agent
+	LabelPrepared  LabelKind = "prepared"  // destination written; no inference claimed
+	LabelMoved     LabelKind = "moved"     // the session moved to another location
+	LabelContinued LabelKind = "continued" // the session continues in another agent
 )
 
-// Mark describes a copy left behind.
-type Mark struct {
-	Kind     MarkKind `json:"kind"`
-	Location string   `json:"location,omitempty"` // where it went: a machine's or a cloud's name
-	Agent    ID       `json:"agent,omitempty"`    // the agent it continues in (MarkContinued)
-	// AgentName is that agent's display name, as a mark title carries it (the core
-	// resolves Agent from it).
+// LegacyLabel is what a title label written by an older hopsesh said (StripLegacyLabel).
+type LegacyLabel struct {
+	Kind     LabelKind `json:"kind"`
+	Location string    `json:"location,omitempty"` // where it went: a machine's or a cloud's name
+	Agent    ID        `json:"agent,omitempty"`    // the agent it continues in (LabelContinued)
+	// AgentName is that agent's display name, as the label carried it (the core resolves
+	// Agent from it).
 	AgentName string `json:"agentName,omitempty"`
 }
 

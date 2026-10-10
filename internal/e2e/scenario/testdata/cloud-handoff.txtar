@@ -3,7 +3,7 @@
 # terminal (claude --cloud runs there through hopsesh's relay: the user answers Claude Code's
 # question whether hopsesh's hand-off folder is trusted, and hopsesh reads the session's
 # link; the checkout untouched, the driver run without the variables an agent's own session
-# passes on), marked, refused a follow-up with the reason, and undone (the branch deleted,
+# passes on), its title left as it was, refused a follow-up with the reason, and undone (the branch deleted,
 # the cloud session owed). Without a terminal, as an agent runs it, the plan says why not.
 [windows] skip 'the stand-in origin needs a POSIX shell'
 env CLAUDE_CODE_CHILD_SESSION=1
@@ -26,7 +26,6 @@ stdout '"branch": "hopsesh/handoff/\d{8}-11111111"'
 stdout '"brief": "\[hopsesh\] This task continues a Claude Code session'
 stdout '"untracked": \[\s*"notes.txt"'
 stdout '"path": ".env"'
-stdout '"markTitle": "↪ continued in Claude Code cloud"'
 stdout '"terminal": "Claude Code starts the session in a terminal'
 stdout '"folder": ".*hopsesh-state/handoff/github.com/example/demo"'
 stdout '"noFollowUp": "hopsesh can.t send a Claude Code cloud session a message'
@@ -42,7 +41,7 @@ stdout '✓ Handed off to Claude Code cloud'
 stdout 'Session session_01\w+ is running'
 stdout 'Branch hopsesh/handoff/\d{8}-11111111 on github.com/example/demo'
 stdout 'Stayed here: .env'
-stdout 'This session is now marked "↪ continued in Claude Code cloud"'
+! stdout 'marked'
 stdout 'Follow-ups: hopsesh can.t send a Claude Code cloud session a message'
 grep 'claude --cloud \[hopsesh\] This task continues' $WORK/agents.log
 grep 'claude: the terminal answered DA1' $WORK/agents.log
@@ -56,7 +55,9 @@ exec git -C origins/origins/demo.git branch --list 'hopsesh/handoff/*'
 stdout 'hopsesh/handoff/'
 
 exec hopsesh ls --json
-stdout '"kind": "continued"'
+stdout '"departure": \{\s+"operation": "[^"]+",\s+"status": "prepared"'
+stdout '"cloud": "Claude Code cloud"'
+! stdout '"legacyLabel"'
 stdout '"location": "claude-cloud"'
 
 # No cloud takes a follow-up from hopsesh yet: the command is hidden, and run directly it

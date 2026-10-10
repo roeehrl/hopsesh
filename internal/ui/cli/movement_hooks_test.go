@@ -165,12 +165,18 @@ func TestNoticeHookCommandEndToEndNeverChangesTranscript(t *testing.T) {
 		t.Fatal(err)
 	}
 	configDir, stateDir := config.Dir(), config.StateDir()
+	// Advise mode: a notice once per event. Block mode is TestNoticeHookBlocksOriginal.
+	advise := config.Defaults()
+	advise.Original = config.OriginalAdvise
+	if err := config.Save(advise); err != nil {
+		t.Fatal(err)
+	}
 	wrongConfig := filepath.Join(dir, "wrong config")
 	wrongState := filepath.Join(dir, "wrong state")
 	if err := os.MkdirAll(wrongConfig, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(wrongConfig, "config.toml"), []byte("movement_notices = false\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(wrongConfig, "config.toml"), []byte("original = \"off\"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	run := func(event, profile string) string {
@@ -244,8 +250,7 @@ func TestNoticeHookCommandEndToEndNeverChangesTranscript(t *testing.T) {
 		t.Fatal("hook appended transcript or lineage work")
 	}
 	cfg := config.Defaults()
-	off := false
-	cfg.MovementNotices = &off
+	cfg.Original = config.OriginalOff
 	if err = config.Save(cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -321,5 +326,85 @@ func TestNoticeHookFailedOrTimedOutStdoutRetries(t *testing.T) {
 				t.Fatal("successfully written notice repeated")
 			}
 		})
+	}
+}
+
+func TestNoticeHookBlocksOriginalUntilReleasedOrReturned(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "claude")
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+	t.Setenv("CLAUDE_CONFIG_DIR", root)
+	t.Setenv("CODEX_HOME", filepath.Join(dir, "codex"))
+	t.Setenv("HOPSESH_CONFIG_DIR", filepath.Join(dir, "config"))
+	t.Setenv("HOPSESH_STATE_DIR", filepath.Join(dir, "state"))
+	t.Setenv("HOPSESH_MACHINE", "alice-desktop")
+	path := filepath.Join(root, "projects", "test", "alice-session.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	g := lineage.New("block-command")
+	key := agent.SessionKey{Agent: "claude", Session: "alice-session"}
+	from := g.Upsert(lineage.Replica{Location: "alice-desktop", Key: key})
+	to := g.Upsert(lineage.Replica{Location: "bob-laptop", Key: agent.SessionKey{Agent: "codex", Session: "bob-session"}})
+	source := ir.Segment{Nodes: []ir.Node{{Kind: ir.KindMessage, Actor: ir.User, Text: "Fix tests"}}, Cursor: ir.Cursor{Head: "one", Offset: 20}}
+	st, err := g.Observe(from, &source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst := g.Deliver(to, source.Cursor, st.Projection, st.Heads, nil)
+	if err = g.AppendHop(lineage.Hop{Kind: lineage.HopContinue, ID: "move-one", From: from, To: to, Source: st.ID, Target: dst.ID, Notify: true}); err != nil {
+		t.Fatal(err)
+	}
+	write := func() {
+		if err := os.WriteFile(lineage.PathFor(path), g.Encode(), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write()
+	run := func(event string) string {
+		t.Helper()
+		var out bytes.Buffer
+		rootCmd := NewRoot(&out, all.Registry())
+		rootCmd.SetArgs([]string{"notice-hook", "--agent", "claude", "--profile", ""})
+		input, _ := json.Marshal(map[string]string{"session_id": "alice-session", "transcript_path": path, "hook_event_name": event})
+		rootCmd.SetIn(bytes.NewReader(input))
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatal(err)
+		}
+		return out.String()
+	}
+	for range 2 { // a block repeats on every prompt
+		var got struct{ Decision, Reason string }
+		if out := run("UserPromptSubmit"); json.Unmarshal([]byte(out), &got) != nil || got.Decision != "block" || !strings.Contains(got.Reason, "Codex on bob-laptop") || !strings.Contains(got.Reason, "hopsesh unblock alice-session") {
+			t.Fatalf("prompt not blocked: %q", out)
+		}
+	}
+	if out := run("SessionStart"); !strings.Contains(out, "Blocked by hopsesh") || strings.Contains(out, `"decision"`) {
+		t.Fatalf("session start must explain the block without deciding: %q", out)
+	}
+	a := app.New(config.Defaults(), all.Registry(), config.StateDir(), nil)
+	if err := a.ReleaseOriginal(key, "move-one"); err != nil {
+		t.Fatal(err)
+	}
+	if out := run("UserPromptSubmit"); strings.Contains(out, `"decision"`) {
+		t.Fatalf("a released original is still blocked: %q", out)
+	}
+	if err := a.RestoreBlock(key); err != nil {
+		t.Fatal(err)
+	}
+	if out := run("UserPromptSubmit"); !strings.Contains(out, `"decision":"block"`) {
+		t.Fatalf("restore did not block again: %q", out)
+	}
+	// Moving back clears the block without any release.
+	if err := g.AppendHop(lineage.Hop{Kind: lineage.HopContinue, ID: "return-one", From: to, To: from, Parents: []string{"move-one"}, Notify: true}); err != nil {
+		t.Fatal(err)
+	}
+	write()
+	if out := run("UserPromptSubmit"); out != "" {
+		t.Fatalf("a returned original is still blocked: %q", out)
 	}
 }

@@ -3,6 +3,7 @@ package gui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -23,11 +24,11 @@ type SettingsDTO struct {
 	Appearance       string                   `json:"appearance"`
 	NoticeHooks      []app.MovementHookStatus `json:"noticeHooks"`
 	NoticeHooksError string                   `json:"noticeHooksError,omitempty"`
-	MovementNotices  bool                     `json:"movementNotices"`
+	MovementNotices  bool                     `json:"movementNotices"` // the original is protected (block or advise)
+	Original         string                   `json:"original"`        // block | advise | off
 	Version          string                   `json:"version"`
 	ReposDir         string                   `json:"reposDir"`
 	Layout           string                   `json:"layout"` // flat | ghq
-	MarkMoved        bool                     `json:"markMoved"`
 	SyncCode         bool                     `json:"syncCode"`
 	PushSource       bool                     `json:"pushSource"`
 	UpdateChk        string                   `json:"updateCheck"`
@@ -36,6 +37,7 @@ type SettingsDTO struct {
 	Agents           []AgentDTO               `json:"agents"`
 
 	CLI         integrate.CLIStatus `json:"cli"`
+	CLIReady    bool                `json:"cliReady"` // the skill and hooks can run hopsesh
 	Skill       app.SkillReport     `json:"skill"`
 	SkillBin    string              `json:"skillBin"`
 	SkillPrompt string              `json:"skillPrompt"`
@@ -80,23 +82,22 @@ func (a *App) Settings() SettingsDTO {
 	defer a.mu.Unlock()
 	cfg := a.core.Cfg
 	return SettingsDTO{Appearance: cfg.AppearanceMode(), NoticeHooks: hooks, NoticeHooksError: hookProblem, Version: version.Version, ReposDir: cfg.ReposDir, Layout: nonEmpty(cfg.Layout, "flat"),
-		MovementNotices: cfg.MovementNoticesOn(), MarkMoved: cfg.MarkMovedOn(), SyncCode: cfg.SyncCodeOn(), PushSource: cfg.PushSource, UpdateChk: cfg.UpdateCheck, AppIcons: cfg.AppIconsOn(), Previews: cfg.PreviewsOn(),
-		Agents: a.agentsLocked(), CLI: integrate.CheckCLI(), Skill: rep, SkillBin: bin, SkillPrompt: cfg.SkillPrompt,
+		MovementNotices: cfg.MovementNoticesOn(), Original: cfg.OriginalGuard(), SyncCode: cfg.SyncCodeOn(), PushSource: cfg.PushSource, UpdateChk: cfg.UpdateCheck, AppIcons: cfg.AppIconsOn(), Previews: cfg.PreviewsOn(),
+		Agents: a.agentsLocked(), CLI: integrate.CheckCLI(), CLIReady: CLIReady(integrate.CheckCLI()), Skill: rep, SkillBin: bin, SkillPrompt: cfg.SkillPrompt,
 		LocalNetworkGated: lnp.Gated(), ConfigDir: config.Dir(), StateDir: config.StateDir()}
 }
 
 // SettingsInput are the settings the user can change.
 type SettingsInput struct {
 	// Nil preserves the current choice for callers changing unrelated settings.
-	Appearance      *string `json:"appearance,omitempty"`
-	MovementNotices bool    `json:"movementNotices"`
-	Layout          string  `json:"layout"`
-	MarkMoved       bool    `json:"markMoved"`
-	SyncCode        bool    `json:"syncCode"`
-	PushSource      bool    `json:"pushSource"`
-	UpdateChk       string  `json:"updateCheck"`
-	AppIcons        bool    `json:"appIcons"`
-	Previews        bool    `json:"previews"`
+	Appearance *string `json:"appearance,omitempty"`
+	Original   string  `json:"original"` // block | advise | off ("" keeps the current choice)
+	Layout     string  `json:"layout"`
+	SyncCode   bool    `json:"syncCode"`
+	PushSource bool    `json:"pushSource"`
+	UpdateChk  string  `json:"updateCheck"`
+	AppIcons   bool    `json:"appIcons"`
+	Previews   bool    `json:"previews"`
 }
 
 // SaveSettings stores the user's choices.
@@ -130,10 +131,17 @@ func (a *App) saveSettingsLocked(in SettingsInput) error {
 	case "on", "off":
 		a.core.Cfg.UpdateCheck = in.UpdateChk
 	}
-	notices := in.MovementNotices
-	a.core.Cfg.MovementNotices = &notices
-	mark, sync := in.MarkMoved, in.SyncCode
-	a.core.Cfg.MarkMoved, a.core.Cfg.SyncCode = &mark, &sync
+	switch in.Original {
+	case config.OriginalBlock:
+		a.core.Cfg.Original = "" // the default
+	case config.OriginalAdvise, config.OriginalOff:
+		a.core.Cfg.Original = in.Original
+	case "":
+	default:
+		return fmt.Errorf("original is %q: use block, advise or off", in.Original)
+	}
+	sync := in.SyncCode
+	a.core.Cfg.SyncCode = &sync
 	a.core.Cfg.PushSource = in.PushSource
 	icons := in.AppIcons
 	a.core.Cfg.AppIcons = &icons
@@ -195,6 +203,9 @@ func (a *App) AddCLIToPath() (string, error) {
 // files in each; addRules also adds each agent's approval rules (read-only commands run
 // without asking, moves always ask).
 func (a *App) InstallSkill(force, addRules bool) (app.SkillReport, error) {
+	if err := requireCLI(); err != nil {
+		return app.SkillReport{}, err
+	}
 	ctx, cancel := ctx20()
 	defer cancel()
 	files, bin := a.skillFiles()
@@ -271,4 +282,21 @@ func (a *App) Reveal(path string) error {
 		return nil
 	}
 	return proc.Command("xdg-open", filepath.Dir(path)).Run()
+}
+
+// ErrCLIRequired starts the error the window shows as "install the command first": the
+// skill tells agents to run hopsesh, and the protection hooks run it, so both need it.
+const ErrCLIRequired = "cli-required: "
+
+func requireCLI() error {
+	st := integrate.CheckCLI()
+	if CLIReady(st) {
+		return nil
+	}
+	why := "the hopsesh command is not installed"
+	switch st.State {
+	case integrate.CLIDangling:
+		why = "the hopsesh command points to an app that moved or was removed"
+	}
+	return errors.New(ErrCLIRequired + why + "; the skill and the protection hooks run it. Install the command first (Settings › Command line).")
 }

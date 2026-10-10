@@ -98,7 +98,12 @@ type Entry struct {
 	NativeRelationship bool              `json:"nativeRelationship,omitempty"` // verified during this scan; no persisted family receipt
 	Returns            []ReturnCandidate `json:"returns,omitempty"`
 	Movement           *MovementNotice   `json:"movement,omitempty"`
-	ObservedAt         time.Time         `json:"observedAt,omitempty"`
+	// Departure is where this copy's branch went since, from lineage (whether or not
+	// movement notices are on): this copy was moved on.
+	Departure *MovementNotice `json:"departure,omitempty"`
+	// Arrival is how this copy came here (when it has not moved on since).
+	Arrival    *Arrival  `json:"arrival,omitempty"`
+	ObservedAt time.Time `json:"observedAt,omitempty"`
 	// Location is where the session lives. Machine is the machine whose files hold it, or
 	// the cloud's name for a cloud session (so "claude-cloud:<id>" names one).
 	Location          agent.Location    `json:"location"`
@@ -590,7 +595,6 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 			}
 		}
 	}
-	a.applyPending(ctx, m, entries)
 	return m, entries
 }
 
@@ -726,14 +730,52 @@ func (e Entry) Status() string {
 			return "live running"
 		}
 		return "live " + e.Live.Status
-	case e.Session.Mark != nil:
-		return MarkWords(*e.Session.Mark)
+	case e.Departure != nil:
+		return departureWords(e.Agent, *e.Departure)
+	case e.Lineage == nil && e.Session.LegacyLabel != nil:
+		return legacyLabelWords(*e.Session.LegacyLabel)
 	}
 	return "ended"
 }
 
-// MarkWords is a mark in words ("moved to studio", "continued in Codex on studio").
-func MarkWords(m agent.Mark) string { return strings.TrimPrefix(agent.MarkTitle(m, ""), "↪ ") }
+// MovedOn reports whether this copy was left behind by a move: lineage records a
+// departure, or, for a copy without lineage, an older hopsesh labelled its title.
+func (e Entry) MovedOn() bool {
+	return e.Departure != nil || (e.Lineage == nil && e.Session.LegacyLabel != nil)
+}
+
+// departureWords says where a copy of agent went: "moved to studio", "continued in Codex
+// on studio", "prepared in Codex on studio", "continued in Claude Code cloud".
+func departureWords(agentID agent.ID, d MovementNotice) string {
+	switch {
+	case d.Cloud != "":
+		return "continued in " + d.Cloud
+	case d.Agent == agentID:
+		return "moved to " + d.Machine
+	case d.Status == "continued" || d.Status == "diverged":
+		return "continued in " + d.AgentName + " on " + d.Machine
+	}
+	return "prepared in " + d.AgentName + " on " + d.Machine
+}
+
+// legacyLabelWords is what a title label of an older hopsesh said, in the same words.
+func legacyLabelWords(l agent.LegacyLabel) string {
+	switch l.Kind {
+	case agent.LabelMoved:
+		return "moved to " + l.Location
+	case agent.LabelPrepared, agent.LabelContinued:
+		w := "continued in "
+		if l.Kind == agent.LabelPrepared {
+			w = "prepared in "
+		}
+		w += l.AgentName
+		if l.Location != "" {
+			w += " on " + l.Location
+		}
+		return w
+	}
+	return "ended"
+}
 
 // listedEntries are one agent's listed sessions on a machine, with their live state and
 // lineage.

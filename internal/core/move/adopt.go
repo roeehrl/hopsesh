@@ -412,7 +412,7 @@ func appendOriginal(ctx context.Context, f *Fetch, side Side, j *journal.Journal
 		return err
 	}
 	m := f.Lineage.Clone()
-	_, from, ok := m.FindEndpoint(ad.Key, side.Machine.Facts.Endpoint)
+	_, from, ok := m.FindBinding(ad.Key, side.Machine.Facts.Endpoint, side.Install.BindingID())
 	if !ok {
 		return fmt.Errorf("brought session has no receipt")
 	}

@@ -273,7 +273,7 @@ test("one line of setup left, on All sessions only, closed for good with ✕", a
   const setup = page.getByRole("note", { name: "Finish setting up" });
   await expect(setup).toContainText(/Finish setting up \(\d of 3 done\):/);
   await expect(setup.getByRole("button", { name: "Add machines" })).toBeVisible();
-  await expect(page.locator(".notice")).toHaveCount(0); // no setup cards
+  await expect(page.locator(".notice:not([aria-label=\"Movement protection\"])")).toHaveCount(0); // no setup cards (the protection-health warning is separate)
   await sidebar(page).getByRole("button", { name: /^This (Mac|PC|computer)/ }).click();
   await expect(setup).toHaveCount(0);
   await sidebar(page).getByRole("button", { name: /All sessions/ }).click();

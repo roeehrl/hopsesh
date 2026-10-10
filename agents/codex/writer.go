@@ -18,7 +18,9 @@ var _ agent.Writer = (*Module)(nil)
 const window = ir.FallbackWindow
 
 // Profile says Codex's own tool calls cannot be forged safely, so history arrives as text.
-func (m *Module) Profile(agent.Install) ir.Profile { return ir.Profile{Window: window} }
+func (m *Module) Profile(agent.Install) ir.Profile {
+	return ir.Profile{Window: window, PortableAppend: true}
+}
 
 // Write emits a legacy-mode rollout (no ordinals): session_meta, then each message as a
 // response_item with its user_message/agent_message event (Codex titles threads from
@@ -77,7 +79,7 @@ func (m *Module) Write(ctx context.Context, h agent.Host, in agent.Install, req 
 		if fi.Size() != req.Expect.Offset {
 			return ir.WriteResult{}, fmt.Errorf("%w: %s changed since it was read", agent.ErrDiverged, sid)
 		}
-		head, err := fsys.ReadFile(file, 1<<30)
+		head, err := agent.ReadNative(ctx, fsys, file)
 		if err != nil {
 			return ir.WriteResult{}, err
 		}
@@ -162,7 +164,7 @@ func (m *Module) Write(ctx context.Context, h agent.Host, in agent.Install, req 
 	if err != nil {
 		return ir.WriteResult{}, err
 	}
-	if req.Header.Title != "" { // on an append, this also clears a "continued in" mark
+	if req.Header.Title != "" { // on an append, this also clears a legacy title label
 		if err := setName(h, in, sid, req.Header.Title); err != nil {
 			return ir.WriteResult{}, err
 		}

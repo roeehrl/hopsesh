@@ -14,10 +14,10 @@ func undoCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "undo [<journal-id or session-id>]",
 		Short: "Undo a move, continuation or hand-off (the newest one, or the one named)",
-		Long: `Reverses everything a move, continuation or mark wrote: new files are removed, replaced
+		Long: `Reverses everything a move, continuation or hand-off wrote: new files are removed, replaced
 files come back, appended records are cut off, set-aside copies return. Writes on other
 machines are undone over SSH. Clones and worktrees are kept. A hand-off's branch is deleted
-(only while it is as hopsesh pushed it) and its mark taken off; the cloud session stays in
+(only while it is as hopsesh pushed it); the cloud session stays in
 the cloud, to archive there (with delete_branch = never the branch stays too). A hop from
 one cloud to another is undone as a whole, its hand-off first; a branch clean-up pushes the
 branches back. --list shows what can be undone.

@@ -301,3 +301,32 @@ func TestMovementReturnIdentityIsReplicaScoped(t *testing.T) {
 	f.hop(t, "actual-return", "other", "A", true, "other-profile")
 	f.check(t, "A", "", "other", "B")
 }
+
+// Departed is the committed movement record behind "moved to …" statuses: it does not
+// depend on notices, a return clears it, a fork does not set it, and undo restores it.
+func TestDepartedIgnoresNoticesAndForks(t *testing.T) {
+	f := newMovementFixture("A", "B", "C")
+	departed := func(current, want string) {
+		t.Helper()
+		h, ok := f.m.Departed(f.ids[current])
+		if ok != (want != "") || h.ID != want {
+			t.Errorf("Departed(%s) = (%s, %t), want %q", current, h.ID, ok, want)
+		}
+	}
+	f.hop(t, "h1", "A", "B", false)
+	departed("A", "h1")
+	departed("B", "")
+	f.hop(t, "h2", "B", "C", false, "h1")
+	departed("A", "h2") // where the branch is now
+	departed("B", "h2")
+	departed("C", "")
+	f.hop(t, "h3", "C", "A", true, "h2")
+	departed("A", "")
+	departed("C", "h3")
+	f.fork(t, "f1", "A", "F", true, "h3")
+	departed("A", "")
+	departed("F", "")
+	f.undo(t, "h3")
+	departed("A", "h2")
+	departed("C", "")
+}

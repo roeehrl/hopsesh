@@ -19,7 +19,7 @@ type Copy struct {
 	Key        agent.SessionKey      `json:"key"`
 	Local      bool                  `json:"local,omitempty"`
 	LastActive time.Time             `json:"lastActive"`
-	Mark       *agent.Mark           `json:"mark,omitempty"`
+	LeftBehind bool                  `json:"leftBehind,omitempty"` // moved on since (Entry.MovedOn)
 	Live       bool                  `json:"live,omitempty"`
 	Newest     bool                  `json:"newest,omitempty"`
 }
@@ -39,8 +39,8 @@ type Group struct {
 	Items    []Item `json:"items"`
 }
 
-// keptWorking is how much newer a copy marked as left behind must be than the newest
-// unmarked copy before it counts as the newest again (someone kept working on it; a short
+// keptWorking is how much newer a copy left behind must be than the newest copy not left
+// behind before it counts as the newest again (someone kept working on it; a short
 // reply to the move notice does not count).
 const keptWorking = 10 * time.Minute
 
@@ -74,7 +74,7 @@ func (inv *Inventory) Items() []Item {
 		cs := make([]Copy, len(es))
 		for i, e := range es {
 			cs[i] = Copy{Profile: e.Profile, Machine: e.Machine, Agent: e.Agent, AgentName: e.AgentName, Key: e.Session.Key, Local: local[e.Machine],
-				LastActive: e.Session.LastActivity, Mark: e.Session.Mark, Live: e.Live.State == agent.Live}
+				LastActive: e.Session.LastActivity, LeftBehind: e.MovedOn(), Live: e.Live.State == agent.Live}
 		}
 		pick := newest(cs)
 		it := Item{Entry: es[pick]}
@@ -95,7 +95,7 @@ func (inv *Inventory) Items() []Item {
 func newest(cs []Copy) int {
 	best, bestLeft := -1, -1
 	for i, c := range cs {
-		if c.Mark == nil {
+		if !c.LeftBehind {
 			if best < 0 || c.LastActive.After(cs[best].LastActive) || (c.LastActive.Equal(cs[best].LastActive) && c.Live) {
 				best = i
 			}

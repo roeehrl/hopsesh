@@ -13,11 +13,16 @@ func (a *App) NoticeHooks() ([]app.MovementHookStatus, error) {
 	return a.snapshot().NoticeHooks(ctx)
 }
 func (a *App) InstallNoticeHooks(id, profile string) ([]app.MovementHookStatus, error) {
+	if err := requireCLI(); err != nil {
+		return nil, err
+	}
+	defer func() { _, _ = a.HookHealth(true) }()
 	ctx, cancel := ctx20()
 	defer cancel()
 	return a.snapshot().InstallNoticeHooks(ctx, agent.ID(id), profile)
 }
 func (a *App) RemoveNoticeHooks(id, profile string) ([]app.MovementHookStatus, error) {
+	defer func() { _, _ = a.HookHealth(true) }()
 	ctx, cancel := ctx20()
 	defer cancel()
 	return a.snapshot().RemoveNoticeHooks(ctx, agent.ID(id), profile)

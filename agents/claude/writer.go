@@ -20,7 +20,7 @@ const window = ir.FallbackWindow
 
 // Profile says Claude Code takes long histories, and tool calls can be replayed natively.
 func (m *Module) Profile(agent.Install) ir.Profile {
-	return ir.Profile{Window: window, NativeReplay: true}
+	return ir.Profile{Window: window, NativeReplay: true, PortableAppend: true}
 }
 
 // Write emits Claude Code transcript records: a chain of user and assistant records with
@@ -32,8 +32,10 @@ func (m *Module) Write(ctx context.Context, h agent.Host, in agent.Install, req 
 	if err != nil {
 		return ir.WriteResult{}, err
 	}
-	if err = capacity.Check(req.Items); err != nil {
-		return ir.WriteResult{}, err
+	if req.Mode == ir.WriteNew {
+		if err = capacity.Check(req.Items); err != nil {
+			return ir.WriteResult{}, err
+		}
 	}
 
 	w := writer{version: in.Version, cwd: req.Header.CWD, branch: req.Header.GitBranch, model: claudeModel(req.Header.Model)}
@@ -86,7 +88,7 @@ func (m *Module) Write(ctx context.Context, h agent.Host, in agent.Install, req 
 			}
 		}
 
-		capacity, err = m.ContextCapacity(ctx, h, in, &agent.Summary{Path: file})
+		capacity, err = m.ContextCapacity(ctx, h, in, s)
 		if err != nil {
 			return ir.WriteResult{}, err
 		}
@@ -103,7 +105,11 @@ func (m *Module) Write(ctx context.Context, h agent.Host, in agent.Install, req 
 		if err != nil {
 			return ir.WriteResult{}, err
 		}
-		if b := activeBranch(recs); len(b) > 0 {
+		b, err := activeBranch(recs)
+		if err != nil {
+			return ir.WriteResult{}, err
+		}
+		if len(b) > 0 {
 			w.parent = recs[b[len(b)-1]].UUID
 		}
 		w.cwd = s.CWD
@@ -173,7 +179,7 @@ func (w *writer) records(req ir.WriteRequest) []byte {
 			w.line(&b, it, "assistant", []any{map[string]any{"type": "text", "text": it.Text}}, "end_turn")
 		}
 	}
-	if req.Header.Title != "" { // on an append, this also clears a "continued in" mark
+	if req.Header.Title != "" { // on an append, this also clears a legacy title label
 		b.Write(encodeRecord(map[string]any{"type": "custom-title", "customTitle": req.Header.Title, "sessionId": w.session}))
 		b.WriteByte('\n')
 	}

@@ -142,7 +142,7 @@ func TestCodexImportRoute(t *testing.T) {
 	in := move.Input{Source: move.Side{Machine: here.m, Module: claude.New(), Install: here.in}, Session: list(t, here)[sid],
 		Target: move.Side{Machine: here.m, Module: codex.New(), Install: ci}}
 	ctx := context.Background()
-	p, err := move.Build(ctx, in, move.Options{Via: move.ViaImport, Mark: true})
+	p, err := move.Build(ctx, in, move.Options{Via: move.ViaImport})
 	if err != nil || len(p.Blockers) > 0 || p.Continue.Via != move.ViaImport {
 		t.Fatalf("plan: %v %v", err, p)
 	}

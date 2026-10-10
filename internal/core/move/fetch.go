@@ -150,6 +150,7 @@ type FetchPlan struct {
 // BuildFetch works out a fetch. It asks git and the driver read-only questions; it writes
 // nothing.
 func BuildFetch(ctx context.Context, in FetchInput, opt Options) (*Plan, error) {
+	ctx = ir.WithLimits(ctx, opt.Limits)
 	spec, cl, s := in.Module.Spec(), in.Cloud, in.Session
 	title := s.Title
 	if title == "" {
@@ -165,7 +166,7 @@ func BuildFetch(ctx context.Context, in FetchInput, opt Options) (*Plan, error) 
 		fp.Diff = true // the code comes as the cloud's patch, whichever checkout it lands in
 	}
 	p := &Plan{Kind: KindFetch, Key: s.Key, Title: title, Agent: spec.Name, Source: Endpoint{Location: cl.Name},
-		Target: Endpoint{Location: in.Machine.Name, OS: in.Machine.Facts.OS, Version: in.Install.Version}, Options: opt, Mark: MarkOff,
+		Target: Endpoint{Location: in.Machine.Name, OS: in.Machine.Facts.OS, Version: in.Install.Version}, Options: opt,
 		Fetch: fp, fetchIn: &in}
 	if err := assignCloudOperation(p, opt); err != nil {
 		return nil, err
@@ -603,7 +604,7 @@ func applyFetch(ctx context.Context, p *Plan, env Env) (*Result, error) {
 		j.AddKey(p.Key)
 	}
 	machine, top := in.Machine.Name, fp.Checkout
-	res := &Result{Journal: j.ID, Mark: MarkOff, Fetch: &FetchResult{Worktree: fp.Worktree, Base: fp.Base}}
+	res := &Result{Journal: j.ID, Fetch: &FetchResult{Worktree: fp.Worktree, Base: fp.Base}}
 	base := fp.Base
 	if fp.BranchState == BranchPushed {
 		step("fetching " + fp.CloudBranch + " into " + fp.Ref)
