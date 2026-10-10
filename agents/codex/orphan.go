@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"strings"
 
@@ -19,17 +18,11 @@ func (m *Module) NativeParentGone(ctx context.Context, h agent.Host, in agent.In
 	if child.NativeParent == "" {
 		return false, nil
 	}
-	f, err := h.FS().Open(child.Path)
+	head, err := readHead(h, child.Path)
 	if err != nil {
 		return false, err
 	}
-	head := make([]byte, headChunk)
-	n, err := f.ReadAt(head, 0)
-	f.Close()
-	if err != nil && !errors.Is(err, io.EOF) {
-		return false, err
-	}
-	mt, err := firstMeta(head[:n])
+	mt, err := firstMeta(head)
 	if err != nil {
 		return false, err
 	}

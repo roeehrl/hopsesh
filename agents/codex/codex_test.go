@@ -253,3 +253,30 @@ func find(ss []agent.Summary, id string) agent.Summary {
 	}
 	return agent.Summary{}
 }
+
+// A paginated fork reads its parent's rollout, so the bundle carries it, even when the
+// fork has grown far past the head that holds its session_meta.
+func TestBundleCarriesPaginatedParentOfLargeFork(t *testing.T) {
+	h, in, byID := setup(t)
+	s := byID[t1]
+	raw, err := h.FS().ReadFile(s.Path, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, rest, _ := strings.Cut(string(raw), "\n")
+	first = strings.Replace(first, `"cwd":`, `"history_base":{"thread_id":"`+t3+`"},"cwd":`, 1)
+	pad := strings.Repeat(`{"timestamp":"2026-10-01T00:00:00Z","type":"event_msg","payload":{"type":"token_count"}}`+"\n", 2*headChunk/80)
+	if err := h.FS().WriteFile(s.Path, []byte(first+"\n"+rest+pad), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	b, err := New().Bundle(context.Background(), h, in, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range b.Files {
+		if strings.HasSuffix(f.Rel, "-"+t3+".jsonl") && f.Role == agent.RoleSide {
+			return
+		}
+	}
+	t.Fatalf("parent rollout not bundled: %+v", b.Files)
+}
