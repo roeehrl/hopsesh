@@ -476,7 +476,7 @@ func (f *relayFleet) transfer(t *testing.T, from, to byte, s agent.Summary, targ
 		local = dst
 		args = []string{"pull", src.name + ":" + string(s.Key.Agent) + "/" + string(s.Key.Session)}
 	}
-	args = append(args, "--in", target, "--to", dst.repo, "--no-sync", "--no-mark", "--notify", "--operation-id", operation, "--yes", "--json")
+	args = append(args, "--in", target, "--to", dst.repo, "--no-sync", "--notify", "--operation-id", operation, "--yes", "--json")
 	if fork {
 		args = append(args, "--fork")
 	}

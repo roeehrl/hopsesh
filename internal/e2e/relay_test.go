@@ -244,7 +244,7 @@ func TestRelayPushSurvivesReceiverRestartAndPeerOwnedUndo(t *testing.T) {
 	}
 	_, stopBox := start(box)
 	_, stopHere := start(here)
-	args := []string{"push", sid, box.name, "--in", "codex", "--to", box.repo, "--no-sync", "--no-mark", "--operation-id", "relay-restart-op-123456", "--yes", "--json"}
+	args := []string{"push", sid, box.name, "--in", "codex", "--to", box.repo, "--no-sync", "--operation-id", "relay-restart-op-123456", "--yes", "--json"}
 	planJSON := run(here, append(append([]string(nil), args...), "--dry-run")...)
 	stopBox()
 	_, _ = start(box)
@@ -296,7 +296,7 @@ func TestRelayPushSurvivesReceiverRestartAndPeerOwnedUndo(t *testing.T) {
 	run(here, "undo", result.Result.Journal, "--yes", "--json")
 	// Reverse direction: source inventory is obtained over the relay, the exact
 	// native package is frozen, and the local planner commits its source receipt.
-	pullArgs := []string{"pull", here.name + ":claude/" + sid, "--in", "codex", "--to", box.repo, "--no-sync", "--no-mark", "--operation-id", "relay-pull-op-12345678", "--yes", "--json"}
+	pullArgs := []string{"pull", here.name + ":claude/" + sid, "--in", "codex", "--to", box.repo, "--no-sync", "--operation-id", "relay-pull-op-12345678", "--yes", "--json"}
 	var pullResult struct {
 		Result move.Result `json:"result"`
 	}

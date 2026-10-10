@@ -200,7 +200,7 @@ func runRuntimeNativeRow(t *testing.T, bin string, row runtimecases.Row) {
 		if row.Transport == "ssh" {
 			f.pushSSH(t, 'A', 'B', original, "codex", fork, operation, true)
 		} else {
-			args := []string{"push", "claude/" + string(original.Key.Session), f.homes['B'].name, "--in", "codex", "--to", f.homes['B'].repo, "--no-sync", "--no-mark", "--notify", "--operation-id", operation, "--yes", "--json"}
+			args := []string{"push", "claude/" + string(original.Key.Session), f.homes['B'].name, "--in", "codex", "--to", f.homes['B'].repo, "--no-sync", "--notify", "--operation-id", operation, "--yes", "--json"}
 			if fork {
 				args = append(args, "--fork")
 			}
