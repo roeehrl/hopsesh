@@ -12,6 +12,9 @@ All notable changes to this project are documented here. The format follows
   history starts at the compaction boundary, whose link to the earlier conversation
   points at a message copied after it; hopsesh refused it as "both copies changed:
   Claude branch has a forward parent reference".
+- The move review no longer offers "Block the original" together with "Keep the old
+  session running too". Keeping it running makes a separate fork, which is never blocked;
+  the block option now turns off while it is ticked, and says why.
 - `hopsesh notices status` (and install and remove) run through the `hopsesh` command link
   recognise the hooks the app installed, instead of reporting them absent and installing
   a second set.

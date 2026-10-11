@@ -129,8 +129,8 @@ function item(kind, title, desc, ...extra) {
 // plain drops the command-line advice from a plan's message; the sheet offers buttons.
 const plain = (s) => cap(s.split(/;\s*/).filter((x) => !/--[a-z]/.test(x)).join("; ").replace(/\s*\([^)]*--[a-z][^)]*\)/g, ""));
 
-function check(label, key, desc, value = cur.opts[key], to = (on) => on) {
-  return h("label", { class: "opt" }, h("input", { type: "checkbox", checked: value, onchange: (ev) => set(key, to(ev.target.checked)) }),
+function check(label, key, desc, value = cur.opts[key], to = (on) => on, disabled = false) {
+  return h("label", { class: "opt" + (disabled ? " off" : "") }, h("input", { type: "checkbox", checked: value, disabled, "data-opt": key, onchange: (ev) => set(key, to(ev.target.checked)) }),
     h("span", {}, h("b", {}, label), desc ? h("span", { class: "muted" }, desc) : null));
 }
 
@@ -327,15 +327,21 @@ function checks(p) {
 
 function options(p) {
   const r = p.repo, o = cur.opts, cont = p.continue;
+  const canFork = p.live && p.can.fork && !p.conflict, forked = canFork && !!o.fork;
   const opts = [
     r.sourceHead && !sameFolder(p) ? check("Bring the code to the session's commit", "syncCode", "Fetches if needed; fast-forwards only a clean checkout on the same branch.") : null,
     r.unpushed && r.sourceUpstream && !sameFolder(p) ? check(`Push ${count(r.unpushed, "commit")} on ${p.sourceHost} first`, "push", "With that machine's own git credentials.") : null,
     cont && (p.machine || cur.launch !== "app") ? check("Send “Continue” when opening", "go", `The terminal launch sends the first message to ${p.agent}. Progress appears in the agent.`) : null,
     p.can.remoteControl ? check("Turn on Remote Control", "remoteControl", `Reach it from your phone or other machines, as ${p.newName}.`) : null,
-    state.info?.defaults?.original === "advise"
+    // A separate fork is never blocked or warned: both copies continue on their own, so
+    // there is nothing to move back to. The two choices exclude each other on screen.
+    forked ? (state.info?.defaults?.original === "advise"
+      ? check("Warn in the original", "notify", "Off while both copies keep running: a separate fork is never warned.", false, undefined, true)
+      : check("Block the original until you move back", "notify", "Off while both copies keep running: a separate fork is never blocked.", false, undefined, true))
+    : state.info?.defaults?.original === "advise"
       ? check("Warn in the original", "notify", "Until you move back, the copy left behind warns before you continue there (through the agent's hopsesh hook).")
       : check("Block the original until you move back", "notify", "The copy left behind refuses new prompts until you move the session back, so moving back stays a clean return (through the agent's hopsesh hook). Off: the original is left alone."),
-    p.live && p.can.fork && !p.conflict ? check("Keep the old session running too", "fork", "Both copies continue, instead of a hand-off.") : null,
+    canFork ? check("Keep the old session running too", "fork", "Both copies continue as separate conversations, instead of a hand-off. The original is not blocked.") : null,
     check("Redact likely secrets", "redact", "In this copy only."),
   ];
   return h("section", { class: "sec", style: "gap:10px" }, h("span", { class: "sec-h" }, "Options"), h("div", { class: "opts-grid" }, opts),
