@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -80,6 +81,18 @@ type App struct {
 
 // Option configures service behavior before any discovery starts.
 type Option func(*App)
+
+// MemoryLimit keeps the desktop app's resident memory near what it uses: Go's collector
+// otherwise lets the heap grow to twice the live data before collecting, so one large
+// session read left hundreds of megabytes resident. It costs nothing while idle.
+const MemoryLimit = 384 << 20
+
+// LimitMemory applies MemoryLimit unless GOMEMLIMIT sets one.
+func LimitMemory() {
+	if os.Getenv("GOMEMLIMIT") == "" {
+		debug.SetMemoryLimit(MemoryLimit)
+	}
+}
 
 // WithoutSessionWatching lets headless fixture services publish changes explicitly.
 // Desktop applications watch local session files by default.

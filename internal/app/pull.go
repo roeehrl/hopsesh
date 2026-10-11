@@ -153,6 +153,10 @@ func (a *App) DefaultOptions() move.Options {
 // Plan works out how a session comes here, in the same agent or (target set) another. A
 // cloud session is brought from its cloud (a fetch).
 func (a *App) Plan(ctx context.Context, inv *Inventory, e Entry, target agent.ID, opt move.Options) (*move.Plan, move.Input, error) {
+	if e.Cached {
+		// A saved row is for browsing; its lineage is an outline. Plan from a fresh read.
+		return nil, move.Input{}, fmt.Errorf("this session on %s was not read just now; refresh %s and try again", e.Machine, e.Machine)
+	}
 	if e.LineageError != "" && (e.CanArchiveLineage || !opt.Fork) {
 		if !e.CanArchiveLineage {
 			return nil, move.Input{}, fmt.Errorf("cannot transfer until its ancestry can be verified: %s; if the parent conversation is archived, unarchive it and refresh", e.LineageError)
