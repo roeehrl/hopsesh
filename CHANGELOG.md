@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Fixed
+
+- A Claude Code session forked after it was compacted can be moved and continued. Its
+  history starts at the compaction boundary, whose link to the earlier conversation
+  points at a message copied after it; hopsesh refused it as "both copies changed:
+  Claude branch has a forward parent reference".
+- `hopsesh notices status` (and install and remove) run through the `hopsesh` command link
+  recognise the hooks the app installed, instead of reporting them absent and installing
+  a second set.
+
 ## [0.4.3] - 2026-10-11
 
 ### Changed

@@ -240,7 +240,11 @@ func activeBranch(recs []chained) ([]int, error) {
 		// latest-UUID lookup can loop from a boundary into its own retained tail.
 		j, ok := before(r.parentUUID(), i)
 		if !ok {
-			if _, forward := byUUID[r.parentUUID()]; forward {
+			// A compaction boundary's logical parent is the conversation before it. A
+			// session forked after compaction starts at the boundary, and the record its
+			// logical parent names is a preserved message copied after it: the history
+			// in this file starts here. A real parent that comes later is still refused.
+			if _, forward := byUUID[r.parentUUID()]; forward && r.ParentUUID != nil {
 				return nil, fmt.Errorf("%w: Claude branch has a forward parent reference", agent.ErrDiverged)
 			}
 			break
