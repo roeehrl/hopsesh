@@ -15,6 +15,8 @@ All notable changes to this project are documented here. The format follows
 - The move review no longer offers "Block the original" together with "Keep the old
   session running too". Keeping it running makes a separate fork, which is never blocked;
   the block option now turns off while it is ticked, and says why.
+- Opening a moved session in the Codex app shows its command without an empty
+  `cd ''` in front.
 - `hopsesh notices status` (and install and remove) run through the `hopsesh` command link
   recognise the hooks the app installed, instead of reporting them absent and installing
   a second set.
