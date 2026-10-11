@@ -127,7 +127,7 @@ func (c *Conn) Resolve(ctx context.Context) (*ResolvedHost, error) {
 
 // sshConfigTimeout bounds the settings lookup. Starting ssh can take several seconds
 // on a busy Windows machine (antivirus scans each launch); 5 s failed there in CI.
-const sshConfigTimeout = 15 * time.Second
+var sshConfigTimeout = 15 * time.Second // tests shorten it
 
 // sshConfig is a local settings lookup, not a connection or password prompt.
 // Includes, name canonicalization and Match exec can still block; bound this
