@@ -47,7 +47,7 @@ export function returnActions(e, open) {
           canPlan && ["available", "verify", "diverged", "missing"].includes(r.status) ? h("button", {class:"btn primary",onclick:()=>{d.close();return plan()}},
             r.status === "missing" ? "Review new session there" : r.status === "diverged" ? "Review plan keeping both branches" : "Verify and review plan") : null));
     };
-    return { id: `return:${r.replica || r.machine + ":" + r.key}`, label, sub: r.status === "live" ? `Original still running on ${r.local ? sys.here : r.machine}. Review ending it before adding new work.` : `${r.status} · ${r.reason || r.key}`, candidate: r, showOriginal,
+    return { id: `return:${r.replica || r.machine + ":" + r.key}`, label, sub: r.status === "live" ? `Original still running on ${r.local ? sys.here : r.machine}. Review how to add your new work.` : `${r.status} · ${r.reason || r.key}`, candidate: r, showOriginal,
       run: () => {
         if (inspect) return resolveDestination(r).then(open).catch(() => review());
         if (r.status === "available" && canPlan) return plan();
@@ -65,7 +65,9 @@ export function returnCard(a) {
     h("div", {class:"return-blocked-head"}, agentBadge(r.agent,r.agentName), h("strong", {}, "Original conversation still open")),
     h("span", {class:"return-original-name"}, destination?.title || r.title || "Original conversation"),
     h("span", {class:"muted"}, `${r.local ? sys.Here : r.machine}${manyAccounts(r.agent) && r.profileLabel ? " · " + r.profileLabel : ""}`),
-    h("p", {}, "Exit the original before adding your new work. Its saved history stays available."),
+    h("p", {}, destination?.guard?.mode === "block" && destination.guard.effective
+      ? "Review adding your new work to this protected original, then reopen it to load the new messages."
+      : "Review the move back to check whether this open original can receive your new work."),
     h("div", {class:"return-card-actions"}, h("button", {class:"btn outline",onclick:a.run}, "Review move back…"),
       h("button", {class:"btn",onclick:a.showOriginal}, "Show original session")));
 }

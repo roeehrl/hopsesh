@@ -310,7 +310,7 @@ test('open original opens one review directly and pins the exact original withou
  await expect(card).not.toContainText('claude@personal/original');
  await details(page).getByRole('button',{name:'Move',exact:true}).click();
  const item=page.getByRole('menuitem',{name:/^Move back to Claude Code/});
- await expect(item).toContainText('Review ending it');
+ await expect(item).toContainText('Review how to add your new work');
  await item.click();
  await expect.poll(()=>calls.length).toBe(1);
  await expect(page.getByRole('dialog')).toHaveCount(1);
