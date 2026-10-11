@@ -430,12 +430,13 @@ if(accountShown(e.profile)) chips.push(h("span", {class:"chip account-chip",titl
     else chips.push(h("span", { class: "chip" + (c.newest ? " st-warn" : "") }, `${c.newest ? "newest: " : "also "}${copyWhere(c)}`));
   }
   const where = e.cloud ? "cloud" : e.machine === here() ? sys.here : e.machine;
-  const el = h("div", { class: "row", role: "treeitem", "aria-level": String(level), "aria-selected": sel ? "true" : "false", tabindex: sel ? "0" : "-1", "data-key": entryKey(e),
+  const el = h("div", { class: "row" + (rc ? " has-role" : ""), role: "treeitem", "aria-level": String(level), "aria-selected": sel ? "true" : "false", tabindex: sel ? "0" : "-1", "data-key": entryKey(e),
       onclick: () => select(e), ondblclick: () => { if (p && !p.disabled) return p.run(); } },
     h("span", { class: "r-ic" }, agentBadge(e.agent, e.agentName, e.cloud ? cloudTitle(e.machine) : "")),
     h("div", { class: "r-main" },
-      h("span", { class: "r-line" }, h("span", { class: "t", title: e.title }, e.title), rc,
+      h("span", { class: "r-line" }, h("span", { class: "t", title: e.title }, e.title),
         h("span", { class: "b" }, [repoWord, branch].filter(Boolean).join(" · "))),
+      rc ? h("span", {class:"movement-role"}, rc) : null,
       h("span", { class: "s" }, bits.join(" · ") || " "),
       chips.length ? h("div", { class: "copies" }, chips) : null),
     h("div", { class: "r-state" }, h("span", { class: "chip st-" + k, title: words }, h("span", { class: "dot " + k }), h("span", { class: "chip-t" }, words)), h("span", { class: "w" }, `${where} · ${ago(e.lastActive)}`)),

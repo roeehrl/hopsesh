@@ -769,3 +769,9 @@ body.terminal-right .divider[data-pane="inspector"]{display:none}
 .row.subrow .r-line { gap: 6px; align-items: center; }
 .row.subrow .t { font-weight: 400; color: var(--muted); }
 .r-line .role-chip { flex: none; margin-left: 6px; }
+
+/* Keep the title readable when a movement label names another agent. */
+.tree .row.has-role .r-main { flex-direction: column; align-items: stretch; }
+.tree .row.has-role .r-line { flex: none; }
+.tree .row.has-role .movement-role { display: flex; }
+.tree .row.has-role .movement-role .role-chip { max-width: 100%; }
