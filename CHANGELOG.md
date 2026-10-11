@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Fixed
+
+- Adding or trusting a machine no longer fails with "reading SSH settings … context
+  deadline exceeded" when ssh is slow to start (common on busy Windows machines).
+
 ## [0.4.3] - 2026-10-11
 
 ### Changed
