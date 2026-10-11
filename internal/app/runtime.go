@@ -12,6 +12,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/version"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +36,7 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 	var engine *observe.Engine
 	var files *observe.Files
 	var watchProblem string
+	var ownRoots []string
 	var watchMu sync.Mutex
 	var relayMu sync.Mutex
 	var relayService *relay.Service
@@ -195,19 +197,25 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 		}
 		out.Remotes = remotes.latest()
 		if files != nil {
-			roots := runtimeWatchRoots(out.WatchRoots, a.StateDir)
+			// Agents' session folders are watched only while someone looks; hopsesh's
+			// own files (settings, accounts, journals, relay state) always are.
+			own := runtimeWatchRoots(nil, a.StateDir)
 			// Watch exact known approval files, not delivery/recovery directories.
 			// New pairings also edit config; revoking a known CLI peer must wake
 			// the owner without mailbox ciphertext causing inventory feedback.
 			if cfg.Relay.Enabled {
 				if grants, e := (relay.Store{Directory: filepath.Join(a.StateDir, "relay")}).Grants(); e == nil {
 					for _, grant := range grants {
-						roots = append(roots, filepath.Join(a.StateDir, "relay", "peer-"+grant.Peer.ID+".json"))
+						own = append(own, filepath.Join(a.StateDir, "relay", "peer-"+grant.Peer.ID+".json"))
 					}
 				}
 			}
-			if unwatched(engine) {
-				roots = nil
+			watchMu.Lock()
+			ownRoots = own
+			watchMu.Unlock()
+			roots := own
+			if !unwatched(engine) {
+				roots = append(slices.Clone(out.WatchRoots), own...)
 			}
 			if err = files.SetRoots(roots); err != nil {
 				out.Problems = append(out.Problems, "Change notifications degraded: "+err.Error())
@@ -239,9 +247,10 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 		watchProblem = fmt.Sprintf("Change notifications unavailable: %v; reconciliation remains active", err)
 	}
 	if files != nil {
-		// While nobody looks, hold no watches at all: each file event wakes the process
-		// many times, and agents write their sessions constantly. The idle reconcile
-		// covers that time; the next attended client's collection re-arms them.
+		// While nobody looks, drop the watches on agents' session folders: each file
+		// event wakes the process many times, and agents write their sessions
+		// constantly. The idle reconcile covers that time; the next attended client's
+		// collection re-arms them. Hopsesh's own files stay watched.
 		// Hopsesh's own files (settings, accounts, journals, relay state) change through
 		// someone's action: observe at once. Only agents' session writes are spaced.
 		own := []string{filepath.Clean(config.Dir()), filepath.Clean(a.StateDir)}
@@ -258,7 +267,10 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 		})
 		engine.OnAttention(func(attended bool) {
 			if !attended && unwatched(engine) {
-				_ = files.SetRoots(nil)
+				watchMu.Lock()
+				own := ownRoots
+				watchMu.Unlock()
+				_ = files.SetRoots(own)
 			}
 		})
 		tasks = append(tasks, func(ctx context.Context) {
@@ -401,6 +413,6 @@ func runtimeWatchRoots(agentRoots []string, state string) []string {
 	return roots
 }
 
-// unwatched is whether the owner holds no file watches now: nobody looks at any client
-// and the observer is idle-spaced.
+// unwatched is whether the owner leaves agents' session folders unwatched now: nobody
+// looks at any client and the observer is idle-spaced.
 func unwatched(e *observe.Engine) bool { return e.Options().Idle > 0 && !e.Attended() }

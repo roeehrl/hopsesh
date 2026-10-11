@@ -264,3 +264,58 @@ func TestRunningRuntimeAdoptsFirstEnrollmentAndCredentialRenewalWithoutRestart(t
 		t.Fatal("enrollment restarted local owner", err)
 	}
 }
+
+// With nobody looking, the runtime stops watching agents' session folders but still
+// watches hopsesh's own files: enabling the relay or another settings change must not
+// wait for the five-minute idle reconcile.
+func TestUnattendedRuntimeStillObservesItsOwnSettings(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOPSESH_CONFIG_DIR", filepath.Join(home, "config"))
+	t.Setenv("HOPSESH_STATE_DIR", filepath.Join(home, "state"))
+	cfg := config.Defaults()
+	if err := config.Save(&cfg); err != nil {
+		t.Fatal(err)
+	}
+	r, err := registry.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := New(cfg, r, config.StateDir(), nil).StartRuntime(t.Context(), "headless", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	if owner.Engine.Options().Idle == 0 {
+		t.Fatal("the runtime is not idle-spaced")
+	}
+	updates, unsubscribe := owner.Engine.Subscribe() // not attended
+	defer unsubscribe()
+	var first observe.Snapshot
+	select {
+	case first = <-updates:
+	case <-time.After(10 * time.Second):
+		t.Fatal("no initial observation")
+	}
+	time.Sleep(time.Second) // past the debounce of the initial collection
+	current, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	current.Relay.Enabled = !current.Relay.Enabled
+	if err = config.Save(&current); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case s := <-updates:
+			if s.AttemptedAt.After(first.AttemptedAt) {
+				return
+			}
+		case <-deadline:
+			t.Fatal("an unattended runtime ignored a settings change")
+		}
+	}
+}
