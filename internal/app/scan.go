@@ -195,6 +195,7 @@ type ScanUpdate struct {
 // clouds are listed through this machine once its own sessions are listed (their lineage
 // names the cloud copies hopsesh made), alongside the other machines.
 func (a *App) Scan(ctx context.Context, o ScanOptions) *Inventory {
+	scans.Add(1)
 	started := time.Now()
 	defer func() {
 		a.Log.Debug("session discovery completed", "duration", time.Since(started), "cache", !o.NoCache)
@@ -215,6 +216,7 @@ func (a *App) Scan(ctx context.Context, o ScanOptions) *Inventory {
 		return followed
 	}
 	cached := a.CachedInventory()
+	cold := len(cached.Machines) == 0 && len(cached.Clouds) == 0
 	localEntries := make(chan []Entry, 1)
 	var localListed sync.Once
 	var publishMu sync.Mutex
@@ -228,7 +230,11 @@ func (a *App) Scan(ctx context.Context, o ScanOptions) *Inventory {
 			localListed.Do(func() { localEntries <- slices.Clone(u.Entries) })
 		}
 		scope := a.CatalogScope()
-		if !o.NoCache && (scope != lastSavedScope || time.Since(lastSaved) > 250*time.Millisecond || u.Complete) {
+		// Partial results are saved only for a first discovery (other front ends follow
+		// them); otherwise the saved snapshot already serves them, and flipping it to a
+		// partial state and back would write it twice per refresh.
+		partial := cold && (scope != lastSavedScope || time.Since(lastSaved) > catalogProgressEvery)
+		if !o.NoCache && (u.Complete || partial) {
 			update := &Inventory{Discovering: !u.Complete, Clouds: u.Clouds, Entries: u.Entries}
 			if u.Machine != nil {
 				update.Machines = []*Machine{u.Machine}
@@ -575,23 +581,59 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 	if !o.SkipGit {
 		var dirs []string
 		seen := map[string]bool{}
+		activity := map[string]time.Time{}
 		for _, e := range entries {
-			if d := e.Session.CWD; d != "" && !seen[d] && (o.GitFor == nil || o.GitFor(e)) {
-				seen[d] = true
-				dirs = append(dirs, d)
+			if d := e.Session.CWD; d != "" && (o.GitFor == nil || o.GitFor(e)) {
+				if !seen[d] {
+					seen[d] = true
+					dirs = append(dirs, d)
+				}
+				if e.Session.LastActivity.After(activity[d]) {
+					activity[d] = e.Session.LastActivity
+				}
 			}
 		}
-		states, err := hm.GitProbe(ctx, dirs, a.Reg.Worktrees())
-		if err != nil && len(dirs) > 0 { // once more: a dropped connection is not "no repository"
-			states, err = hm.GitProbe(ctx, dirs, a.Reg.Worktrees())
-		}
+		// Browsing reuses a folder's git state until something suggests it changed;
+		// actions (GitFor, NoCache) always read it fresh.
 		by := map[string]*repos.GitState{}
+		reuse := !o.NoCache && o.GitFor == nil
+		probe := dirs
+		if reuse {
+			probe = nil
+			for _, d := range dirs {
+				if st, ok := reusableGit(hm.Name, hm.Local, d, activity[d]); ok {
+					by[d] = &st
+				} else {
+					probe = append(probe, d)
+				}
+			}
+		}
+		probed := time.Now()
+		var states []repos.GitState
+		var err error
+		if len(probe) > 0 {
+			states, err = hm.GitProbe(ctx, probe, a.Reg.Worktrees())
+			if err != nil { // once more: a dropped connection is not "no repository"
+				states, err = hm.GitProbe(ctx, probe, a.Reg.Worktrees())
+			}
+		}
 		for i := range states {
 			by[states[i].Dir] = &states[i]
+			if err == nil {
+				rememberGit(hm.Name, hm.Local, states[i], probed)
+			}
+		}
+		probedDir := map[string]bool{}
+		for _, d := range probe {
+			probedDir[d] = true
 		}
 		for i := range entries {
 			if d := entries[i].Session.CWD; d != "" && seen[d] {
-				setGit(&entries[i], by[d], err)
+				if probedDir[d] {
+					setGit(&entries[i], by[d], err)
+				} else {
+					setGit(&entries[i], by[d], nil)
+				}
 			}
 		}
 	}
@@ -624,7 +666,7 @@ func hopseshVersion(b agent.BinaryFact) string {
 }
 
 // readManifests reads the lineage beside each session, in parallel.
-func readManifests(fsys host.FS, ss []agent.Summary) ([]*lineage.Manifest, []string) {
+func readManifests(machine string, fsys host.FS, ss []agent.Summary) ([]*lineage.Manifest, []string) {
 	problems := make([]string, len(ss))
 	out := make([]*lineage.Manifest, len(ss))
 	var wg sync.WaitGroup
@@ -634,11 +676,7 @@ func readManifests(fsys host.FS, ss []agent.Summary) ([]*lineage.Manifest, []str
 		sem <- struct{}{}
 		go func() {
 			defer func() { <-sem; wg.Done() }()
-			var err error
-			out[i], err = lineage.Read(fsys, s.Path)
-			if err != nil {
-				problems[i] = err.Error()
-			}
+			out[i], problems[i] = readSidecar(machine, fsys, s.Path)
 		}()
 	}
 	wg.Wait()
@@ -790,7 +828,7 @@ func listedEntries(ctx context.Context, hm *host.Machine, fsys host.FS, mod agen
 		}
 		live, _ = ld.Live(ctx, ch, st.Install, ids)
 	}
-	manifests, problems := readManifests(fsys, l.Sessions)
+	manifests, problems := readManifests(hm.Name, fsys, l.Sessions)
 	persistedFamilies := map[string]bool{}
 	for _, m := range manifests {
 		if m != nil {

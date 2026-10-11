@@ -9,9 +9,23 @@ import (
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
+// WatchOptions tune WatchSessions for a front end.
+type WatchOptions struct {
+	// Active reports whether anyone is looking (nil: always). While nobody is, the
+	// watcher holds no watches at all: every file event costs the process tens of
+	// wakeups, and agents write their sessions many times a second. The front end's own
+	// background refresh covers that time; looking again re-arms and refreshes once.
+	Active func() bool
+	// Current returns the app whose configuration names the roots (nil: this one).
+	Current func() *App
+}
+
+// activeCheck is how often an inactive watcher asks whether anyone is looking again.
+const activeCheck = 2 * time.Second
+
 // WatchSessions uses the same bounded directory watcher as the 0.5 runtime.
 // Reconciliation still covers network filesystems, overflow, and missed events.
-func (a *App) WatchSessions(ctx context.Context, changed func(), current ...func() *App) {
+func (a *App) WatchSessions(ctx context.Context, changed func(), opts WatchOptions) {
 	wake := make(chan struct{}, 1)
 	watch, err := observe.NewFiles(4096, func() {
 		select {
@@ -34,22 +48,29 @@ func (a *App) WatchSessions(ctx context.Context, changed func(), current ...func
 		}
 	}
 	defer watch.Close()
-	watch.SetChanged(func(path string) {
-		if a.Catalog != nil {
-			a.Catalog.InvalidatePath(path)
-		}
-	})
 	roots := func() []string {
 		core := a
-		if len(current) > 0 {
-			core = current[0]()
+		if opts.Current != nil {
+			core = opts.Current()
 		}
 		return core.sessionWatchRoots(ctx)
 	}
 
-	_ = watch.SetRoots(roots())
+	active := func() bool { return opts.Active == nil || opts.Active() }
+	armed := active()
+	rooted := time.Time{}
+	if armed {
+		_ = watch.SetRoots(roots())
+		rooted = time.Now()
+	}
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
+	var check <-chan time.Time
+	if opts.Active != nil {
+		t := time.NewTicker(activeCheck)
+		defer t.Stop()
+		check = t.C
+	}
 	var timer *time.Timer
 	var due <-chan time.Time
 	defer func() {
@@ -61,15 +82,32 @@ func (a *App) WatchSessions(ctx context.Context, changed func(), current ...func
 		select {
 		case <-ctx.Done():
 			return
+		case <-check:
+			switch now := active(); {
+			case now && !armed:
+				armed = true
+				_ = watch.SetRoots(roots())
+				rooted = time.Now()
+				changed()
+			case !now && armed:
+				armed = false
+				_ = watch.SetRoots(nil)
+				if timer != nil {
+					timer.Stop()
+					timer, due = nil, nil
+				}
+			}
 		case <-wake:
+			if !armed {
+				continue
+			}
 			if timer == nil {
 				timer = time.NewTimer(300 * time.Millisecond)
 				due = timer.C
 			}
 		case <-watch.Problems():
-			if a.Catalog != nil {
-				a.Catalog.Invalidate()
-			}
+			// Browsing summaries are keyed by each file's size and mtime, so a missed
+			// event needs a rescan, not a cleared cache.
 			if timer == nil {
 				timer = time.NewTimer(300 * time.Millisecond)
 				due = timer.C
@@ -77,10 +115,18 @@ func (a *App) WatchSessions(ctx context.Context, changed func(), current ...func
 		case <-due:
 			timer = nil
 			due = nil
-			_ = watch.SetRoots(roots())
+			// Rereading the roots probes the agents' installs: not on every write.
+			if time.Since(rooted) >= 30*time.Second {
+				_ = watch.SetRoots(roots())
+				rooted = time.Now()
+			}
 			changed()
 		case <-tick.C:
+			if !armed {
+				continue // the front end's background refresh covers this
+			}
 			_ = watch.SetRoots(roots())
+			rooted = time.Now()
 			changed()
 		}
 	}

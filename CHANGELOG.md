@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## [0.4.3] - 2026-10-11
+
 ### Changed
 
 - The Sessions protection warning is one card: a short checklist (the hopsesh command,
@@ -16,6 +18,43 @@ All notable changes to this project are documented here. The format follows
   row says where it went in a few words, and its details say it once.
 
 ### Fixed
+
+- The desktop app no longer burns CPU and rewrites its session catalog while idle. The
+  catalog stored each session's full lineage revision graph (tens of megabytes on a long
+  session) and rewrote it several times per refresh, about 20 MB/s of disk writes. It now
+  keeps only what browsing shows (78 MB → 0.4 MB on a busy machine), writes nothing when a
+  refresh finds no change, gives back the space once, and keeps its journal small.
+- Refreshes no longer re-read and re-hash every moved session's whole transcript (hundreds
+  of megabytes for a long Codex session) when nothing in that session changed, or rewrite
+  each session's movement record. In the background the menu bar's list refreshes every
+  five minutes instead of every minute.
+- Refreshing unchanged sessions is nearly free: lineage files, native fork checks, each
+  conversation family's comparison and each folder's git state are reused until a file
+  they come from changes (by size and modification time), so a refresh opens nothing that
+  did not change. When one copy of a moved session grows, only that copy is read again.
+- An idle app writes nothing: the discovery lease is an OS file lock instead of a
+  database row, and the catalog is not rewritten for check times or row order alone.
+- The app no longer rescans for every write another agent makes to its session: changes
+  refresh this machine at most every 5 seconds while you look at hopsesh (its window
+  focused or the menu bar list open) and every 5 minutes otherwise, and a change no
+  longer deletes cached summaries from the catalog.
+- While nobody looks at hopsesh it stops watching session files altogether (each file
+  event cost the app tens of wakeups, and agents write their sessions many times a
+  second): an idle app now wakes about twice a second instead of over a hundred times.
+  Looking at it again re-arms the watch and refreshes.
+- A large native Codex fork no longer costs minutes of CPU and gigabytes of memory at
+  every start: fork verification streams both rollouts instead of reading them whole,
+  a lineage too large to record is refused before it is built, and finding the newest
+  revisions of a long history is linear instead of quadratic.
+- The desktop app keeps its memory near what it uses (a soft limit of 384 MiB, which
+  `GOMEMLIMIT` overrides) instead of letting one large session read leave hundreds of
+  megabytes resident.
+- CI holds the app's idle resource use to budgets on Linux and macOS (`idle resources`):
+  nobody looking means no rescans, no session reads, no writes, under 1% CPU and few
+  wakeups, while another agent keeps writing its session and a large native fork is
+  verified at the start.
+- Two front ends opening the catalog at the same moment no longer leave one of them
+  without it.
 
 - A moved original's status no longer runs under the row's action button, and counts read
   "1 transfer", not "1 transfers".
@@ -592,6 +631,7 @@ is refused and set aside (the app offers this), and machines are added again.
 - The terminal UI no longer carries out a plan you pressed `y` on while a changed one was
   still being worked out.
 
+[0.4.3]: https://github.com/roeehrl/hopsesh/releases/tag/v0.4.3
 [0.4.2]: https://github.com/roeehrl/hopsesh/releases/tag/v0.4.2
 [0.4.1]: https://github.com/roeehrl/hopsesh/releases/tag/v0.4.1
 [0.4.0]: https://github.com/roeehrl/hopsesh/releases/tag/v0.4.0

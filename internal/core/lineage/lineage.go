@@ -184,6 +184,26 @@ func (m *Manifest) Clone() *Manifest {
 	_ = json.Unmarshal(b, &out)
 	return &out
 }
+
+// Outline is what browsing shows (family, branches, replicas, hops and the losses their
+// states record) without the revision graph, which can run to many megabytes per session.
+// It is for display only: it does not validate, and transfers read the full manifest.
+func (m *Manifest) Outline() *Manifest {
+	if m == nil {
+		return nil
+	}
+	out := &Manifest{Format: m.Format, Family: m.Family, Branch: m.Branch, Branches: slices.Clone(m.Branches), Replicas: slices.Clone(m.Replicas), Hops: slices.Clone(m.Hops), Compensations: slices.Clone(m.Compensations)}
+	used := map[StateID]bool{}
+	for _, h := range m.Hops {
+		used[h.Source], used[h.Target] = true, true
+	}
+	for _, s := range m.States {
+		if used[s.ID] && len(s.Loss) > 0 {
+			out.States = append(out.States, State{ID: s.ID, Replica: s.Replica, Loss: s.Loss})
+		}
+	}
+	return out
+}
 func (m *Manifest) Encode() []byte {
 	b, _ := json.MarshalIndent(m, "", "  ")
 	return append(b, '\n')
@@ -364,22 +384,34 @@ func (m *Manifest) Covered(heads []ir.NodeID) map[ir.NodeID]bool {
 	}
 	return out
 }
+
+// Heads keeps the ids no other id descends from. One walk over the ancestors of the
+// whole set (it was one graph walk per id, quadratic for a long native fork).
 func (m *Manifest) Heads(ids []ir.NodeID) []ir.NodeID {
 	ids = unique(ids)
-	keep := map[ir.NodeID]bool{}
-	for _, id := range ids {
-		keep[id] = true
+	by := make(map[ir.NodeID]Revision, len(m.Revisions))
+	for _, r := range m.Revisions {
+		by[r.ID] = r
 	}
+	ancestor := map[ir.NodeID]bool{}
+	var todo []ir.NodeID
 	for _, id := range ids {
-		for a := range m.Covered([]ir.NodeID{id}) {
-			if a != id {
-				delete(keep, a)
-			}
+		todo = append(todo, by[id].Parents...)
+	}
+	for len(todo) > 0 {
+		id := todo[len(todo)-1]
+		todo = todo[:len(todo)-1]
+		if ancestor[id] {
+			continue
 		}
+		ancestor[id] = true
+		todo = append(todo, by[id].Parents...)
 	}
 	var out []ir.NodeID
-	for id := range keep {
-		out = append(out, id)
+	for _, id := range ids {
+		if !ancestor[id] {
+			out = append(out, id)
+		}
 	}
 	return unique(out)
 }
@@ -811,9 +843,50 @@ func (m *Manifest) Journey() Journey {
 	return j
 }
 
+// ErrTooLarge is a lineage that cannot be written (Read refuses more than maxSize).
+var ErrTooLarge = fmt.Errorf("lineage exceeds %d bytes", maxSize)
+
+// compactSize is a lower bound of the encoded size: each record's compact JSON. It
+// costs one small encoding per record, not one document of the whole graph (hundreds
+// of megabytes for a long native fork, built just to be measured).
+func (m *Manifest) compactSize() int {
+	n := 0
+	add := func(v any) {
+		b, _ := json.Marshal(v)
+		n += len(b)
+	}
+	for _, r := range m.Revisions {
+		add(r)
+		if n > maxSize {
+			return n
+		}
+	}
+	for _, s := range m.States {
+		add(s)
+		if n > maxSize {
+			return n
+		}
+	}
+	for _, r := range m.Replicas {
+		add(r)
+	}
+	for _, h := range m.Hops {
+		add(h)
+	}
+	return n
+}
+
+// Writable reports a lineage too large to be written, cheaply (see compactSize).
+func (m *Manifest) Writable() error {
+	if m.compactSize() > maxSize {
+		return ErrTooLarge
+	}
+	return nil
+}
+
 func (m *Manifest) Validate() error {
-	if len(m.Encode()) > maxSize {
-		return fmt.Errorf("lineage exceeds %d bytes", maxSize)
+	if m.compactSize() > maxSize || len(m.Encode()) > maxSize {
+		return ErrTooLarge
 	}
 	if m.Format != Format {
 		return fmt.Errorf("lineage format %q is not %q", m.Format, Format)

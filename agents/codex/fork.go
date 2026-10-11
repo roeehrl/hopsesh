@@ -1,11 +1,13 @@
 package codex
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"strings"
+	"io"
 
 	"github.com/roeehrl/hopsesh/sdk/agent"
 	"github.com/roeehrl/hopsesh/sdk/ir"
@@ -25,19 +27,32 @@ func nativeValue(payload []byte) []byte {
 // VerifyNativeFork uses Codex's forked_from_id and optional exclusive ordinal, then
 // compares copied native records. Text, timestamps or a title do not imply ancestry.
 func (m *Module) VerifyNativeFork(ctx context.Context, h agent.Host, in agent.Install, parent, child agent.Summary) ([]agent.NativeInheritance, error) {
-	pb, err := agent.ReadNative(ctx, h.FS(), parent.Path)
+	// The prefix check walks both files line by line: it never holds a whole rollout
+	// (hundreds of megabytes for a long session) or its parsed lines in memory.
+	pf, err := openNative(ctx, h.FS(), parent.Path)
 	if err != nil {
 		return nil, err
 	}
-	cb, err := agent.ReadNative(ctx, h.FS(), child.Path)
+	defer pf.Close()
+	cf, err := openNative(ctx, h.FS(), child.Path)
 	if err != nil {
 		return nil, err
 	}
-	pm, err := firstMeta(pb)
+	defer cf.Close()
+	pr, cr := newLineStream(pf), newLineStream(cf)
+	pl, pok, err := pr.next()
 	if err != nil {
 		return nil, err
 	}
-	cm, err := firstMeta(cb)
+	cl, cok, err := cr.next()
+	if err != nil {
+		return nil, err
+	}
+	pm, err := metaOf(pl, pok)
+	if err != nil {
+		return nil, err
+	}
+	cm, err := metaOf(cl, cok)
 	if err != nil {
 		return nil, err
 	}
@@ -47,42 +62,58 @@ func (m *Module) VerifyNativeFork(ctx context.Context, h agent.Host, in agent.In
 	if cm.HistoryBase != nil {
 		return nil, fmt.Errorf("%w: paginated fork ancestry is not materialized", agent.ErrUnsupported)
 	}
-	pr, _, err := readLines(strings.NewReader(string(pb)))
-	if err != nil {
-		return nil, err
+	boundary := cm.ForkedFromOrdinalExclusive
+	if boundary != nil && *boundary < 2 {
+		return nil, fmt.Errorf("%w: declared fork boundary is not materialized", agent.ErrDiverged)
 	}
-	cr, _, err := readLines(strings.NewReader(string(cb)))
-	if err != nil {
-		return nil, err
+	ordinal := func(l line, i uint64) bool { return l.Ordinal != nil && *l.Ordinal == i }
+	if boundary != nil && (!ordinal(pl, 0) || !ordinal(cl, 0)) {
+		return nil, fmt.Errorf("%w: fork prefix ordinals are missing or discontinuous", agent.ErrDiverged)
 	}
-	if boundary := cm.ForkedFromOrdinalExclusive; boundary != nil {
-		if *boundary < 2 || *boundary > uint64(len(pr)) || *boundary > uint64(len(cr)) {
+	last, comparing := 1, true
+	for i := uint64(1); ; i++ {
+		if pl, pok, err = pr.next(); err != nil {
+			return nil, err
+		}
+		if cl, cok, err = cr.next(); err != nil {
+			return nil, err
+		}
+		before := boundary != nil && i < *boundary
+		if before && (!pok || !cok) {
 			return nil, fmt.Errorf("%w: declared fork boundary is not materialized", agent.ErrDiverged)
 		}
-		for i := uint64(0); i < *boundary; i++ {
-			if pr[i].Ordinal == nil || cr[i].Ordinal == nil || *pr[i].Ordinal != i || *cr[i].Ordinal != i {
-				return nil, fmt.Errorf("%w: fork prefix ordinals are missing or discontinuous", agent.ErrDiverged)
+		if before && (!ordinal(pl, i) || !ordinal(cl, i)) {
+			return nil, fmt.Errorf("%w: fork prefix ordinals are missing or discontinuous", agent.ErrDiverged)
+		}
+		if comparing {
+			if !pok || !cok {
+				comparing = false
+			} else {
+				if boundary != nil {
+					if pl.Ordinal == nil {
+						return nil, fmt.Errorf("%w: fork boundary requires native ordinals", agent.ErrUnsupported)
+					}
+					if *pl.Ordinal >= *boundary {
+						comparing = false
+					}
+				}
+				if comparing && (pl.Type != cl.Type || pl.Timestamp != cl.Timestamp || !bytes.Equal(nativeValue(pl.Payload), nativeValue(cl.Payload))) {
+					if boundary != nil {
+						return nil, fmt.Errorf("%w: history differs before declared fork boundary", agent.ErrDiverged)
+					}
+					comparing = false
+				}
+				if comparing {
+					last++
+				}
 			}
 		}
-	}
-	last := 1
-	for last < len(pr) && last < len(cr) {
-		if cm.ForkedFromOrdinalExclusive != nil {
-			if pr[last].Ordinal == nil {
-				return nil, fmt.Errorf("%w: fork boundary requires native ordinals", agent.ErrUnsupported)
-			}
-			if *pr[last].Ordinal >= *cm.ForkedFromOrdinalExclusive {
-				break
-			}
-		}
-		if pr[last].Type != cr[last].Type || pr[last].Timestamp != cr[last].Timestamp || !bytes.Equal(nativeValue(pr[last].Payload), nativeValue(cr[last].Payload)) {
-			if cm.ForkedFromOrdinalExclusive != nil {
-				return nil, fmt.Errorf("%w: history differs before declared fork boundary", agent.ErrDiverged)
-			}
+		if !comparing && !before {
 			break
 		}
-		last++
 	}
+	pf.Close()
+	cf.Close()
 	ps, err := m.Read(ctx, h, in, parent, ir.Cursor{})
 	if err != nil {
 		return nil, err
@@ -112,4 +143,67 @@ func (m *Module) VerifyNativeFork(ctx context.Context, h agent.Host, in agent.In
 		return nil, fmt.Errorf("%w: native fork has no verified inherited conversation", agent.ErrDiverged)
 	}
 	return out, nil
+}
+
+// openNative opens a native file for streaming, within the native file size limit.
+func openNative(ctx context.Context, fsys agent.FS, p string) (agent.File, error) {
+	limit := ir.LimitsFrom(ctx).NativeFileBytes
+	if fi, err := fsys.Stat(p); err == nil && fi.Size() > limit {
+		return nil, &ir.LimitError{Stage: ir.StageNative, Limit: limit, Size: fi.Size(), Detail: p}
+	}
+	return fsys.Open(p)
+}
+
+// lineStream yields a rollout's records one at a time, with readLines' rules: a line
+// that is not a record is skipped (an error in paginated history), and a partial last
+// line is not a record.
+type lineStream struct {
+	br        *bufio.Reader
+	off       int64
+	started   bool
+	paginated bool
+}
+
+func newLineStream(r io.Reader) *lineStream { return &lineStream{br: bufio.NewReaderSize(r, 1<<20)} }
+
+func (s *lineStream) next() (line, bool, error) {
+	for {
+		b, err := s.br.ReadBytes('\n')
+		if err == io.EOF {
+			return line{}, false, nil
+		}
+		if err != nil {
+			return line{}, false, err
+		}
+		s.off += int64(len(b))
+		var l line
+		if json.Unmarshal(b, &l) == nil && l.Type != "" {
+			if !s.started && l.Type == "session_meta" {
+				var mt meta
+				if json.Unmarshal(l.Payload, &mt) == nil {
+					s.paginated = mt.HistoryMode == "paginated"
+				}
+			}
+			s.started = true
+			return l, true, nil
+		}
+		if s.paginated {
+			return line{}, false, fmt.Errorf("%w: invalid record in paginated history at byte %d", agent.ErrDiverged, s.off)
+		}
+	}
+}
+
+// metaOf is firstMeta for a rollout's first record.
+func metaOf(l line, ok bool) (meta, error) {
+	if !ok || l.Type != "session_meta" {
+		return meta{}, errors.New("a rollout starts with session_meta")
+	}
+	var m meta
+	if err := json.Unmarshal(l.Payload, &m); err != nil {
+		return meta{}, err
+	}
+	if m.ID == "" || m.CWD == "" {
+		return meta{}, errors.New("session_meta lacks id or cwd")
+	}
+	return m, nil
 }

@@ -2,11 +2,13 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 	"github.com/roeehrl/hopsesh/sdk/ir"
+	"slices"
 )
 
 func nativeForkManifests(ctx context.Context, hm *host.Machine, h agent.Host, mod agent.Module, in agent.Install, ss []agent.Summary, manifests []*lineage.Manifest, problems []string) {
@@ -17,6 +19,27 @@ func nativeForkManifests(ctx context.Context, hm *host.Machine, h agent.Host, mo
 	reader, ok := mod.(agent.Reader)
 	if !ok {
 		return
+	}
+	// Verification reads and hashes whole transcripts; an unchanged set is not reverified.
+	inputs, cacheable := forkInputs(hm, h, in, ss, manifests, problems)
+	if cacheable && inputs == "" {
+		return // no native forks
+	}
+	if r, ok := forks.get(inputs); cacheable && ok {
+		copy(manifests, r.manifests)
+		copy(problems, r.problems)
+		return
+	}
+	contentReads.Add(1)
+	transient := false
+	if cacheable {
+		defer func() {
+			// Problems follow from these file versions; a failed identity or a cancelled
+			// scan may not, so those results are not kept.
+			if !transient && ctx.Err() == nil {
+				forks.put(inputs, forkResult{slices.Clone(manifests), slices.Clone(problems)})
+			}
+		}()
 	}
 	by := map[agent.SessionID]int{}
 	for i, s := range ss {
@@ -50,6 +73,7 @@ func nativeForkManifests(ctx context.Context, hm *host.Machine, h agent.Host, mo
 			}
 			endpoint, err := hm.PrepareIdentity(ctx)
 			if err != nil {
+				transient = true
 				problems[i] = err.Error()
 				continue
 			}
@@ -66,7 +90,14 @@ func nativeForkManifests(ctx context.Context, hm *host.Machine, h agent.Host, mo
 				problems[i] = err.Error()
 				continue
 			}
-			manifests[parent] = pm.Clone()
+			// A parent whose graph cannot be written cannot carry a fork's ancestry either:
+			// say so now, before reading both rollouts to verify the fork.
+			if err := pm.Writable(); err != nil {
+				problems[i] = fmt.Sprintf("native fork ancestry: %v", err)
+				continue
+			}
+			previous := manifests[parent]
+			manifests[parent] = pm // a clone of its own (above)
 
 			proof, err := verifier.VerifyNativeFork(ctx, h, in, ss[parent], s)
 			if err != nil {
@@ -81,6 +112,9 @@ func nativeForkManifests(ctx context.Context, hm *host.Machine, h agent.Host, mo
 			m, err := pm.AdoptNativeFork(pid, lineage.Replica{Key: s.Key, Endpoint: endpoint, Binding: in.BindingID(), Location: hm.Name, AgentVersion: s.AgentVersion, Time: seg.Header.Created}, proof, &seg)
 			if err != nil {
 				problems[i] = fmt.Sprintf("native fork ancestry: %v", err)
+				if pm.Writable() != nil || errors.Is(err, lineage.ErrTooLarge) {
+					manifests[parent] = previous
+				}
 				continue
 			}
 			manifests[i] = m
