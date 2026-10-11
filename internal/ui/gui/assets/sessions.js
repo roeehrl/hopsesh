@@ -436,10 +436,8 @@ if(accountShown(e.profile)) chips.push(h("span", {class:"chip account-chip",titl
     h("div", { class: "r-main" },
       h("span", { class: "r-line" }, h("span", { class: "t", title: e.title }, e.title),
         h("span", { class: "b" }, [repoWord, branch].filter(Boolean).join(" · "))),
-      rc ? h("span", {class:"movement-role"}, rc, chips) : null,
-      h("span", { class: "s" }, bits.join(" · ") || " "),
-      !rc && chips.length ? h("div", { class: "copies" }, chips) : null),
-    h("div", { class: "r-state" }, h("span", { class: "chip st-" + k, title: words }, h("span", { class: "dot " + k }), h("span", { class: "chip-t" }, words)), h("span", { class: "w" }, `${where} · ${ago(e.lastActive)}`)),
+      h("span", { class: "s" }, bits.join(" · ") || " ")),
+    rowStatus(k, words, rc, chips, `${where} · ${ago(e.lastActive)}`),
     h("div", { class: "act" }, p ? h("button", { class: "btn small outline", tabindex: "-1", disabled: !!p.disabled, title: p.why || p.label, "aria-label": p.label,
       onclick: (ev) => { ev.stopPropagation(); return p.run(); } }, h("span", { class: "btn-t" }, p.short || p.label)) : null));
   if (!lines.length) return el;
@@ -460,9 +458,18 @@ function copyLine(e, c, ce, level) {
       "aria-label": `${which}: ${roleChip(ce)?.textContent?.trim() || words}`, onclick: (ev) => { ev.stopPropagation(); select(Object.assign({ group: e.group }, ce)); } },
     h("span", { class: "r-ic sub-ic", "aria-hidden": "true" }, "↳"),
     h("div", { class: "r-main" },
-      h("span", { class: "r-line" }, agentBadge(ce.agent, ce.agentName, ""), h("span", { class: "t" }, which), roleChip(ce))),
-    h("div", { class: "r-state" }, h("span", { class: "chip st-" + k, title: words }, h("span", { class: "dot " + k }), h("span", { class: "chip-t" }, words)), h("span", { class: "w" }, `${where} · ${ago(ce.lastActive)}`)),
+      h("span", { class: "r-line" }, agentBadge(ce.agent, ce.agentName, ""), h("span", { class: "t" }, which))),
+    rowStatus(k, words, roleChip(ce), [], `${where} · ${ago(ce.lastActive)}`),
     h("div", { class: "act" }));
+}
+
+// Status and movement indicators share the metadata column, clear of the title.
+function rowStatus(k, words, role, chips, when) {
+  return h("div", {class:"r-state"},
+    h("div", {class:"r-status"},
+      h("span", {class:"chip st-" + k, title:words}, h("span", {class:"dot " + k}), h("span", {class:"chip-t"}, words)),
+      role || chips.length ? h("div", {class:"r-indicators"}, role, chips) : null),
+    h("span", {class:"w"}, when));
 }
 
 function copyWhere(c) {

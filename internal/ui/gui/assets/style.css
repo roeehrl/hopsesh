@@ -770,11 +770,18 @@ body.terminal-right .divider[data-pane="inspector"]{display:none}
 .row.subrow .t { font-weight: 400; color: var(--muted); }
 .r-line .role-chip { flex: none; margin-left: 6px; }
 
-/* Keep the title readable when a movement label names another agent. */
-.tree .row.has-role .r-main { flex-direction: column; align-items: stretch; }
-.tree .row.has-role .r-line { flex: none; }
-.tree .row.has-role .movement-role { display: flex; }
-.tree .row.has-role .movement-role .role-chip { max-width: 100%; }
-
-.tree .row.has-role { height: auto; min-height: 56px; }
-.tree .row.has-role .movement-role { gap: 6px; flex-wrap: wrap; align-items: center; }
+/* Metadata belongs beside the title, in the status column. */
+.row { grid-template-columns: 22px minmax(0, 1fr) minmax(124px, 180px) 92px; }
+.row .r-status { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.row .r-indicators { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
+.row .r-indicators .role-chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree.compact .row { position: relative; grid-template-columns: 16px minmax(0, 1fr) minmax(124px, 170px) 114px; height: auto; min-height: 32px; padding-top: 5px; padding-bottom: 5px; }
+.tree.compact .row .r-main { display: block; }
+.tree.compact .row .r-line { width: 100%; }
+.tree.compact .row .r-indicators > :not(.keep):not(.role-chip) { display: none; }
+.tree.compact .row .act { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); background: var(--panel); }
+@container list (max-width: 599px) {
+ .tree .row { position: relative; grid-template-columns: 16px minmax(0, 1fr) minmax(100px, 160px) 100px; height: auto; min-height: 32px; padding-top: 5px; padding-bottom: 5px; }
+ .tree .row .r-main { display: block; }
+ .tree .row .r-indicators > :not(.keep):not(.role-chip) { display: none; }
+}

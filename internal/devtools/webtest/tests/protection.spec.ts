@@ -42,7 +42,12 @@ test("blocked: a moved original is blocked and says so", async ({ page }) => {
     list.density = "compact";
     render();
   });
-  const movedBox = await roleRow(page, "Find the codeword", "Moved from").boundingBox();
+  const movedRow = roleRow(page, "Find the codeword", "Moved from");
+  await expect(movedRow.locator(".r-main .role-chip, .r-main .pchip")).toHaveCount(0);
+  const titleColumn = await movedRow.locator(".r-main").boundingBox();
+  const metadataColumn = await movedRow.locator(".r-status").boundingBox();
+  expect(metadataColumn!.x).toBeGreaterThanOrEqual(titleColumn!.x + titleColumn!.width);
+  const movedBox = await movedRow.boundingBox();
   const originalBox = await original.boundingBox();
   expect(originalBox!.y).toBeGreaterThanOrEqual(movedBox!.y + movedBox!.height);
   await roleRow(page, "Find the codeword", "Moved from").press("ArrowDown");
