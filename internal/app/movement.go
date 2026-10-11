@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -719,7 +720,12 @@ func localNoticeEndpoint(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	m := &host.Machine{Local: true, Name: LocalName(), Facts: host.Facts{Home: home, OS: runtime.GOOS, Env: map[string]string{"HOPSESH_CONFIG_DIR": os.Getenv("HOPSESH_CONFIG_DIR")}}}
+	// The default folder named explicitly is still the default installation.
+	dir := os.Getenv("HOPSESH_CONFIG_DIR")
+	if dir != "" && config.SameDir(dir, config.DefaultDir()) {
+		dir = ""
+	}
+	m := &host.Machine{Local: true, Name: LocalName(), Facts: host.Facts{Home: home, OS: runtime.GOOS, Env: map[string]string{"HOPSESH_CONFIG_DIR": dir}}}
 	defer m.Close()
 	return m.ReadIdentity(ctx)
 }

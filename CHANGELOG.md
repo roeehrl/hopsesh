@@ -17,6 +17,11 @@ All notable changes to this project are documented here. The format follows
   `push` no longer take `--fork`: that option made a separate copy that was never blocked,
   silently overriding "Block the original". Separate copies hopsesh still makes on its own
   (both copies changed, bounded continuations) are called separate conversations.
+- Blocking or warning in a moved session's original works on a default install. The
+  protection hooks always pass the settings and state folders; naming the default
+  folders explicitly made hopsesh look for this machine's identity in the wrong place,
+  so the hook let every prompt through. A flag naming the default folder now changes
+  nothing.
 - An original that once had a separate copy is blocked again when it is moved. The move
   and the earlier copy were judged ambiguous, so no notice reached the agent's hook and
   the original was not blocked, while hopsesh showed it blocked.

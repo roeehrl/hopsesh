@@ -369,6 +369,11 @@ func Dir() string {
 	if d := os.Getenv("HOPSESH_CONFIG_DIR"); d != "" {
 		return d
 	}
+	return DefaultDir()
+}
+
+// DefaultDir is the configuration directory when HOPSESH_CONFIG_DIR is not set.
+func DefaultDir() string {
 	if runtime.GOOS == "windows" {
 		if d := os.Getenv("APPDATA"); d != "" {
 			return filepath.Join(d, "hopsesh")
@@ -388,6 +393,11 @@ func StateDir() string {
 	if d := os.Getenv("HOPSESH_STATE_DIR"); d != "" {
 		return d
 	}
+	return DefaultStateDir()
+}
+
+// DefaultStateDir is the state directory when HOPSESH_STATE_DIR is not set.
+func DefaultStateDir() string {
 	if runtime.GOOS == "windows" {
 		if d := os.Getenv("LOCALAPPDATA"); d != "" {
 			return filepath.Join(d, "hopsesh")
@@ -398,6 +408,19 @@ func StateDir() string {
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".local", "state", "hopsesh")
+}
+
+// SameDir reports whether two folder paths name the same folder (cleaned, links resolved
+// when they exist).
+func SameDir(a, b string) bool {
+	clean := func(p string) string {
+		p = filepath.Clean(p)
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			return r
+		}
+		return p
+	}
+	return clean(a) == clean(b)
 }
 
 // Path is the configuration file.
