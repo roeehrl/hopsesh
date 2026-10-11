@@ -11,6 +11,7 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/agents/all"
 	"github.com/roeehrl/hopsesh/internal/config"
+	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -61,5 +62,29 @@ func TestReopenNoticeUntilTheOriginalIsReloaded(t *testing.T) {
 	}
 	if _, _, handled = a.ReopenNotice(ctx, "claude", "", "original", "UserPromptSubmit", ""); handled {
 		t.Fatal("still refused after the reopen")
+	}
+}
+
+func TestReopenGuardRejectsUnprotectedOriginal(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	a := New(config.Defaults(), all.Registry(), t.TempDir(), nil)
+	t.Cleanup(func() { _ = a.Catalog.Close() })
+	scope, err := a.noticeScope(context.Background(), "claude", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := agent.SessionKey{Agent: "claude", Profile: scope.ID, Session: "original"}
+	p := &move.Plan{Placement: agent.Placement{Key: key}, Continue: &move.ContinuePlan{AppendTo: &agent.Summary{Key: key}}}
+	p.Options.OpenBlockedOriginal = key.String()
+	if err := a.noteReopen(p); err == nil {
+		t.Fatal("unprotected original accepted")
+	}
+	if _, err := os.Stat(a.reopenPath(key)); !os.IsNotExist(err) {
+		t.Fatal("rejected return wrote a guard", err)
 	}
 }

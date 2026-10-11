@@ -8,6 +8,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Session list entries show where a conversation moved from or to, with the original
+  visible as a selectable line underneath. The same movement labels appear in details,
+  the terminal UI and CLI.
+- Repository groups render their session rows without deferred WebKit visibility, which
+  could leave an expanded group blank until another redraw.
+- A return whose original is missing offers a reviewed new session on the same branch.
+  A changed account observation no longer hides a missing original after a complete scan.
+- The reopen guard is persisted before adding history to an open blocked original;
+  protection is checked again before apply, and persistence errors stop the transfer.
+
 - A Claude Code session forked after it was compacted can be moved and continued. Its
   history starts at the compaction boundary, whose link to the earlier conversation
   points at a message copied after it; hopsesh refused it as "both copies changed:
@@ -18,7 +28,7 @@ All notable changes to this project are documented here. The format follows
   silently overriding "Block the original". Separate copies hopsesh still makes on its own
   (both copies changed, bounded continuations) are called separate conversations.
 - Moving back adds to the original even while it is open in its agent, when hopsesh
-  blocks it: nobody can type there, so nothing can be lost. Its hook then asks you to
+  blocks new prompts through a verified protection hook. Its hook then asks you to
   reopen it, which loads the new work, and stops asking once it is reopened. The review
   no longer tells you to end the session or quit the agent's app.
 - Moving back adds to an original that is close to its context limit when the new work

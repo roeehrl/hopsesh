@@ -3,7 +3,7 @@
 // listview.js), the selected session on the right (inspector.js). Every action on a
 // session comes from actions.js, which the palette uses too.
 import { accountLabel, accountShown, accountTitle, loadError, api, on, h, fill, icon, ICONS, view, state, screen, go, current, loading, toast, fail, cap, ago, agentBadge, machineStatus, sys, keys,
-  entries, selected, here, agentInfo, $, count, clouds, cloudOf, cloudState, cloudChip, dialog, errText, rich, cloudTitle } from "./core.js";
+  entries, selected, copyEntry, here, agentInfo, $, count, clouds, cloudOf, cloudState, cloudChip, dialog, errText, rich, cloudTitle } from "./core.js";
 import { planPicked } from "./plan.js";
 import { healthNotice, loadHookHealth, hookHealth, withCLI, chip as roleChip } from "./guard.js";
 import { dividers, apply as applyLayout } from "./layout.js";
@@ -417,24 +417,51 @@ function row(e, level) {
 if(accountShown(e.profile)) chips.push(h("span", {class:"chip account-chip",title:accountTitle(e.profile)},accountShown(e.profile)));
   if (e.cloud) chips.push(cloudChip(e.machine));
   const rc = roleChip(e);
-  if (rc) chips.unshift(rc);
   if (e.cloud?.pr) chips.push(h("span", { class: "chip st-moved" }, "PR " + e.cloud.pr));
   if (e.mirror) chips.push(mirrorChip(e.mirror));
   const ext = !e.live && e.machine === here() && !placesOf(e).length ? exitOf(e) : null;
   if (ext) chips.push(h("span", { class: "chip " + (ext.code === 0 ? "st-idle" : ext.closed ? "st-ended" : "st-error"), title: `How its last run in ${ext.terminal} ended` }, `${exitWords(ext)} in ${ext.terminal}`));
-  for (const c of (e.copies || []).filter((c) => !(c.machine === e.machine && c.key === e.key))) chips.push(h("span", { class: "chip" + (c.newest ? " st-warn" : "") }, `${c.newest ? "newest: " : "also "}${copyWhere(c)}`));
+  // Other copies of this conversation are lines of their own under it (an original left
+  // behind by a move among them); one not in this scan stays a chip.
+  const lines = [];
+  for (const c of (e.copies || []).filter((c) => !(c.machine === e.machine && c.key === e.key))) {
+    const ce = copyEntry(c.machine, c.key);
+    if (ce) lines.push(copyLine(e, c, ce, level + 1));
+    else chips.push(h("span", { class: "chip" + (c.newest ? " st-warn" : "") }, `${c.newest ? "newest: " : "also "}${copyWhere(c)}`));
+  }
   const where = e.cloud ? "cloud" : e.machine === here() ? sys.here : e.machine;
-  return h("div", { class: "row", role: "treeitem", "aria-level": String(level), "aria-selected": sel ? "true" : "false", tabindex: sel ? "0" : "-1", "data-key": entryKey(e),
+  const el = h("div", { class: "row", role: "treeitem", "aria-level": String(level), "aria-selected": sel ? "true" : "false", tabindex: sel ? "0" : "-1", "data-key": entryKey(e),
       onclick: () => select(e), ondblclick: () => { if (p && !p.disabled) return p.run(); } },
     h("span", { class: "r-ic" }, agentBadge(e.agent, e.agentName, e.cloud ? cloudTitle(e.machine) : "")),
     h("div", { class: "r-main" },
-      h("span", { class: "r-line" }, h("span", { class: "t", title: e.title }, e.title),
+      h("span", { class: "r-line" }, h("span", { class: "t", title: e.title }, e.title), rc,
         h("span", { class: "b" }, [repoWord, branch].filter(Boolean).join(" · "))),
       h("span", { class: "s" }, bits.join(" · ") || " "),
       chips.length ? h("div", { class: "copies" }, chips) : null),
     h("div", { class: "r-state" }, h("span", { class: "chip st-" + k, title: words }, h("span", { class: "dot " + k }), h("span", { class: "chip-t" }, words)), h("span", { class: "w" }, `${where} · ${ago(e.lastActive)}`)),
     h("div", { class: "act" }, p ? h("button", { class: "btn small outline", tabindex: "-1", disabled: !!p.disabled, title: p.why || p.label, "aria-label": p.label,
       onclick: (ev) => { ev.stopPropagation(); return p.run(); } }, h("span", { class: "btn-t" }, p.short || p.label)) : null));
+  if (!lines.length) return el;
+  const out = document.createDocumentFragment();
+  out.append(el, ...lines);
+  return out;
+}
+
+// copyLine is another copy of a session's conversation, as a line under its row: which
+// copy it is ("Claude Code original" for one left behind by a move), its role (where it
+// moved, whether it is blocked), its state and when it was last used. It selects that copy.
+function copyLine(e, c, ce, level) {
+  const [k, words] = statusOf(ce);
+  const sel = state.sel && state.sel.machine === ce.machine && state.sel.key === ce.key;
+  const which = c.leftBehind ? `${ce.agentName} original` : ce.agentName;
+  const where = ce.machine === here() ? sys.here : ce.machine;
+  return h("div", { class: "row subrow", role: "treeitem", "aria-level": String(level), "aria-selected": sel ? "true" : "false", tabindex: sel ? "0" : "-1", "data-key": entryKey(ce),
+      "aria-label": `${which}: ${roleChip(ce)?.textContent?.trim() || words}`, onclick: (ev) => { ev.stopPropagation(); select(Object.assign({ group: e.group }, ce)); } },
+    h("span", { class: "r-ic sub-ic", "aria-hidden": "true" }, "↳"),
+    h("div", { class: "r-main" },
+      h("span", { class: "r-line" }, agentBadge(ce.agent, ce.agentName, ""), h("span", { class: "t" }, which), roleChip(ce))),
+    h("div", { class: "r-state" }, h("span", { class: "chip st-" + k, title: words }, h("span", { class: "dot " + k }), h("span", { class: "chip-t" }, words)), h("span", { class: "w" }, `${where} · ${ago(ce.lastActive)}`)),
+    h("div", { class: "act" }));
 }
 
 function copyWhere(c) {
@@ -463,7 +490,7 @@ onSelect((e) => showEntry(e));
 // The tree's keys select rows and run their actions.
 onRows((el) => {
   const [machine, key] = el.dataset.key.split("\u0000");
-  const e = entries().find((x) => x.machine === machine && x.key === key);
+  const e = entries().find((x) => x.machine === machine && x.key === key) || copyEntry(machine, key);
   if (e) select(e);
 }, (el, mod) => {
   const e = selected();

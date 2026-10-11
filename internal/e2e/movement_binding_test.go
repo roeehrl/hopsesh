@@ -149,6 +149,14 @@ func TestMovementQuietReturnAfterAccountObservation(t *testing.T) {
 								t.Fatal("late live writer guard changed original")
 							}
 						}
+						// An original that is gone (deleted, archived) is said plainly, with a
+						// new session on the same branch as the way on, never a dead end.
+						gone := selected
+						gone.TargetSession = agent.SessionKey{Agent: left.Key.Agent, Profile: left.Key.Profile, Session: "deleted-original"}.String()
+						missing, err := move.Build(ctx, back, gone)
+						if err != nil || !missing.ReviewNewSession || !strings.Contains(strings.Join(missing.Blockers, " "), "not here any more") {
+							t.Fatalf("missing original was a dead end: %+v %v", missing, err)
+						}
 						applyIn := back
 						if from == "claude" {
 							// An original open in its agent but blocked by hopsesh may be added

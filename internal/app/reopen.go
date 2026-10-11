@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -63,20 +64,53 @@ func (a *App) reopenPath(key agent.SessionKey) string {
 }
 
 // noteReopen records a return that added to an open, blocked original.
-func (a *App) noteReopen(p *move.Plan) {
+func (a *App) noteReopen(p *move.Plan) error {
 	if p == nil || p.Continue == nil || p.Continue.AppendTo == nil || p.Options.OpenBlockedOriginal == "" || p.Options.OpenBlockedOriginal != p.Continue.AppendTo.Key.String() {
-		return
+		return nil
 	}
-	rec := reopenRecord{Key: p.Placement.Key, Operation: p.OperationID, From: p.Continue.From, At: time.Now().UTC()}
+	key := p.Continue.AppendTo.Key
+	details, err := a.MovementNoticeDetailsForPath(context.Background(), key.Agent, key.Profile, string(key.Session), p.Continue.AppendTo.Path)
+	if err != nil {
+		return err
+	}
+	if a.OriginalGuard(details.Key, details.Operation, details.Status) != GuardBlock {
+		return fmt.Errorf("the original is no longer blocked; refresh the return plan")
+	}
+	statuses, err := a.NoticeHooksFor(context.Background(), key.Agent, key.Profile)
+	if err != nil {
+		return err
+	}
+	ready := false
+	for _, st := range statuses {
+		if st.Installed && st.Enabled && (st.Trust == nil || st.Trust.State == agent.HookTrusted) {
+			ready = true
+		}
+	}
+	if !ready {
+		return fmt.Errorf("the original's protection hook is no longer ready; refresh the return plan")
+	}
+	rec := reopenRecord{Key: key, Operation: p.OperationID, From: p.Continue.From, At: time.Now().UTC()}
 	b, err := json.Marshal(rec)
 	if err != nil {
-		return
+		return err
 	}
 	path := a.reopenPath(rec.Key)
-	if os.MkdirAll(filepath.Dir(path), 0o700) != nil {
-		return
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
 	}
-	_ = os.WriteFile(path, b, 0o600)
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".reopen-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err = tmp.Write(b); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err = tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 // ReopenNotice answers the original's hook while it must be reopened. A fresh start or

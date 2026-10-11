@@ -33,12 +33,14 @@ test("blocked: a moved original is blocked and says so", async ({ page }) => {
   await page.locator("#sheet").getByRole("button", { name: /Continue in Codex/ }).click();
   await expect(page.getByRole("heading", { name: /is prepared for Codex/ })).toBeVisible({ timeout: 30_000 });
   await page.getByRole("button", { name: "Back to sessions", exact: true }).click();
-  await roleRow(page, "Find the codeword", "Moved copy").click();
-  await details(page).getByRole("button", { name: /Copies & history/ }).click();
-  await details(page).getByRole("button", { name: "Show copy", exact: true }).first().click();
+  await roleRow(page, "Find the codeword", "Moved from").click();
+  const original = page.locator(".subrow").filter({hasText:"Claude Code original"});
+  await expect(original).toContainText("Moved to Codex");
+  await roleRow(page, "Find the codeword", "Moved from").press("ArrowDown");
+  await expect(original).toBeFocused();
   await expect(details(page).locator(".ins-lineage")).toContainText("◆", { timeout: 30_000 });
   await expect(details(page).locator(".ins-lineage")).toContainText("Blocked until you move it back");
-  await expect(details(page).getByLabel("Moved out", { exact: true })).toContainText("Blocked until you move the session back");
+  await expect(details(page).getByLabel("Where it went", { exact: true })).toContainText("Blocked until you move the session back");
 });
 
 test("setup: one card, one action, agents named without account labels", async ({ page }) => {

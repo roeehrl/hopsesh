@@ -87,21 +87,21 @@ export function movementNotice(e, show, viewJourney) {
   if (!n) return null;
   const g = e.guard, local = e.machine === here();
   const to = n.cloud || `${n.agentName || n.agent} on ${n.machine}`;
-  const explanation = {prepared:"The moved copy is ready; no new work there yet.", continued:"Work continued in the moved copy.", diverged:"Both copies have new work; compare them before moving back.", forked:"A separate fork; it does not return into this original."}[n.status] || n.status;
+  const explanation = {prepared:`The ${n.agentName || n.agent} session is ready; no new work there yet.`, continued:`Work continued in ${n.agentName || n.agent}.`, diverged:"Both copies have new work; compare them before moving back.", forked:"A separate fork; it does not return into this original."}[n.status] || n.status;
   const protection = !g ? null
     : g.mode === "block" ? (g.effective ? ["ok", "Blocked until you move the session back. New prompts here are refused."] : ["warn", "Not blocked: " + (g.problem || "the agent's hook is not ready.")])
     : g.mode === "advise" ? (g.effective ? ["ok", "Advised: the agent warns before you continue here."] : ["warn", "Not advised: " + (g.problem || "the agent's hook is not ready.")])
     : g.mode === "released" ? ["warn", "Block removed. Continuing here makes the copies diverge; moving back then needs a comparison."]
     : ["muted", "Not protected (Settings › General)."];
-  return h("section", {class:"sec movement-notice", "aria-label":"Moved out"},
-    h("span", {class:"sec-h"}, n.status === "forked" ? "Separate copy" : "Moved out"),
+  return h("section", {class:"sec movement-notice", "aria-label":"Where it went"},
+    h("span", {class:"sec-h"}, n.status === "forked" ? "Separate copy" : `Moved to ${n.cloud || n.agentName || n.agent}`),
     h("span", {}, `${n.status === "forked" ? "Copied to" : "Moved to"} ${to}${manyAccounts(n.agent) && n.profileLabel ? " · " + n.profileLabel : ""}`),
     h("span", {class:"muted"}, explanation),
     protection ? h("span", {class: protection[0]}, protection[1]) : null,
     g && !g.effective && g.fix ? h("span", {class:"muted", style:"font-size:12px"}, g.fix) : null,
     Date.parse(n.checkedAt) > 0 ? h("span", {class:"muted"}, `Checked ${when(n.checkedAt)}`) : null,
     h("div", {style:"display:flex;gap:6px;flex-wrap:wrap"},
-      h("button", {class:"btn small primary",onclick:()=>showMovementDestination(n,show)}, "Open moved copy"),
+      h("button", {class:"btn small primary",onclick:()=>showMovementDestination(n,show)}, `Open in ${n.cloud || n.agentName || n.agent}`),
       local && g?.mode === "block" ? h("button", {class:"btn small danger",onclick:()=>removeBlock(e,()=>refreshSelection())}, "Remove block…") : null,
       local && g?.mode === "released" ? h("button", {class:"btn small",onclick:()=>restoreBlock(e,()=>refreshSelection())}, "Block again") : null,
       h("button", {class:"btn small",onclick:viewJourney}, "View journey"),

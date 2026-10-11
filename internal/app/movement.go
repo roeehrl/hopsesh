@@ -166,8 +166,8 @@ func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
 						}
 					}
 				} else if m != nil && m.Status == StatusOK && m.host != nil && m.host.Facts.Endpoint == r.Endpoint {
-					in, exists := m.InstallProfile(r.Key.Agent, r.Key.Profile)
-					if exists && in.BindingID() == r.Binding && completeAgentListing(m, r.Key) {
+					_, exists := m.InstallProfile(r.Key.Agent, r.Key.Profile)
+					if exists && completeAgentListing(m, r.Key) {
 						c.Status = "missing"
 						c.Reason = "Original session was not found; review creating a new session"
 					}

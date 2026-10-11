@@ -279,11 +279,12 @@ func (a *App) Apply(ctx context.Context, p *move.Plan, in move.Input, progress f
 			}
 		}
 	}
-	res, err := move.Apply(ctx, p, in, move.Env{StateDir: a.StateDir, Audit: a.Audit, Progress: progress, Step: a.Steps})
-	if err == nil {
-		a.noteReopen(p)
+	// Persist the reopen guard before changing history or clearing the old departure.
+	// If apply fails, reopening loads the original history and clears the guard.
+	if err := a.noteReopen(p); err != nil {
+		return nil, err
 	}
-	return res, err
+	return move.Apply(ctx, p, in, move.Env{StateDir: a.StateDir, Audit: a.Audit, Progress: progress, Step: a.Steps})
 }
 
 // gitFetchFunc is how to fetch from a repository on a machine over SSH (nil for this

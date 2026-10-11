@@ -273,6 +273,13 @@ func TestMovementEnrichmentReadsNativeWorkAndReturnRelations(t *testing.T) {
 	if n := inv.Entries[0].Movement; n == nil || n.Machine != "renamed-laptop" || !strings.Contains(n.Text, "renamed-laptop") {
 		t.Fatalf("renamed notice: %+v", n)
 	}
+	// A complete listing can prove the original is missing even after a binding
+	// observation changes. Offline or incomplete listings still cannot prove absence.
+	missingInv := &Inventory{Machines: inv.Machines, Entries: []Entry{inv.Entries[1]}}
+	a.EnrichMovement(ctx, missingInv)
+	if got := missingInv.Entries[0].Returns; len(got) != 1 || got[0].Status != "missing" {
+		t.Fatalf("binding change hid missing original: %+v", got)
+	}
 	// A local-only refresh retains the last successful remote observation and timestamp.
 	checked := inv.Entries[0].Movement.CheckedAt
 	inv.Entries = inv.Entries[:1]

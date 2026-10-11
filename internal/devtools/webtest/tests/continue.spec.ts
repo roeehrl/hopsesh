@@ -135,7 +135,7 @@ test("bounded recovery keeps the original and explains capacity and archive", as
   // The bounded copy keeps the title and says it continues the original, kept as its copy.
   const copy = roleRow(page, "Find the codeword", "Continuation");
   await expect(copy).toBeVisible();
-  await expect(copy).toContainText("also Claude Code here");
+  await expect(copy.locator("xpath=following-sibling::*[1]")).toContainText("Claude Code");
 });
 
 test("oversized note is bounded and disclosed before apply", async ({ page }) => {

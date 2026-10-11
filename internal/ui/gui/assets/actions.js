@@ -173,7 +173,8 @@ function localModel(e) {
       else if (first.kind === "claude-app" || first.kind === "codex-app") m.caption = e.canApp ? "Opens this conversation in the desktop app" : e.appWhy;
     } else if ((e.departure || e.movement)?.machine && (e.departure || e.movement)?.key) {
       const n = e.departure || e.movement;
-      m.primary = { id: "destination", label: "Open moved copy", short: "Moved copy", run: () => showMovementDestination(n, selectFn) };
+      const there = n.cloud || n.agentName || n.agent;
+      m.primary = { id: "destination", label: `Open in ${there}`, short: `Open in ${there}`, run: () => showMovementDestination(n, selectFn) };
       m.chevron = resumePlaces(e).map(p => resumeItem(p));
       if (e.guard?.mode === "block" && e.machine === here()) m.chevron.push({ id: "remove-block", label: "Remove block…", sub: "Continue here; moving back then needs a comparison", run: () => removeBlock(e, () => refreshSelection()) });
       if (e.guard?.mode === "released" && e.machine === here()) m.chevron.push({ id: "restore-block", label: "Block again", sub: "Until you move the session back", run: () => restoreBlock(e, () => refreshSelection()) });

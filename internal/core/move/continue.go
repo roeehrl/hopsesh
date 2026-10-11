@@ -344,7 +344,10 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 		}
 		candidates = selected
 		if len(candidates) == 0 {
-			p.Blockers = append(p.Blockers, "selected destination does not belong to this branch")
+			// The original was deleted, archived or is under another account: say so,
+			// and offer a new session on the same branch instead of a dead end.
+			p.ReviewNewSession = true
+			p.Blockers = append(p.Blockers, "the original destination session is not here any more; continue in a new session on the same branch")
 			return
 		}
 	}

@@ -33,13 +33,13 @@ test('real service resolves hidden original and appends return work to that exac
  await details(page).getByRole('button',{name:/Copies & history/}).click();
  await details(page).getByRole('button',{name:'Show copy',exact:true}).first().click();
  await expect(details(page).getByRole('heading',{name:'Find the codeword',exact:true})).toBeVisible();
- await expect(details(page).getByLabel('Moved out',{exact:true})).toContainText('no new work there yet');
- await expect(details(page).locator('#act-primary')).toHaveText('Open moved copy');
+ await expect(details(page).getByLabel('Where it went',{exact:true})).toContainText('no new work there yet');
+ await expect(details(page).locator('#act-primary')).toHaveText(/^Open in /);
  await expect(details(page).locator('#act-primary')).toBeEnabled();
- await expect(details(page).getByLabel('Moved out',{exact:true})).not.toContainText('Last checked');
+ await expect(details(page).getByLabel('Where it went',{exact:true})).not.toContainText('Last checked');
  await expect(details(page).locator('.skel')).toHaveCount(0);
  await page.screenshot({path:info.outputPath('real-source-prepared-hidden-copy.png'),fullPage:true});
- await expect(details(page).getByLabel('Moved out',{exact:true}).getByRole('button',{name:/Fork here instead/})).toHaveCount(0);
+ await expect(details(page).getByLabel('Where it went',{exact:true}).getByRole('button',{name:/Fork here instead/})).toHaveCount(0);
  await details(page).locator('#act-primary').click();
  await expect(details(page).getByRole('heading',{name:'Find the codeword',exact:true})).toBeVisible();
  await expect.poll(()=>page.evaluate(async()=>{const {selected}=await import('/core.js');return selected()?.key;})).toBe(converted.key);
