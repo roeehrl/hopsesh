@@ -125,7 +125,7 @@ func TestPresenceConfirmsDelayedNativePIDWithoutScan(t *testing.T) {
 	mod.mu.Unlock()
 	// Reject late frames if a scan replaced the inventory or another selection
 	// currently owns reads. The same evidence confirms once ownership is stable.
-	for _, scenario := range []string{"replacement", "selection", "scan"} {
+	for _, scenario := range []string{"replacement", "selection"} {
 		t.Run(scenario, func(t *testing.T) {
 			entered, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
 			mod.mu.Lock()
@@ -140,8 +140,6 @@ func TestPresenceConfirmsDelayedNativePIDWithoutScan(t *testing.T) {
 				a.inv = &copy
 			case "selection":
 				a.selectionReads++
-			case "scan":
-				a.scanMu.Lock()
 			}
 			a.mu.Unlock()
 			close(release)
@@ -155,9 +153,6 @@ func TestPresenceConfirmsDelayedNativePIDWithoutScan(t *testing.T) {
 				a.selectionReads--
 			}
 			a.mu.Unlock()
-			if scenario == "scan" {
-				a.scanMu.Unlock()
-			}
 			mod.mu.Lock()
 			mod.onLive = nil
 			mod.mu.Unlock()
@@ -172,6 +167,34 @@ func TestPresenceConfirmsDelayedNativePIDWithoutScan(t *testing.T) {
 	}
 	if a.inv != owned || len(owned.Entries[0].Live.Procs) != 0 || app.ResourceCounters().Scans != scans {
 		t.Fatal("Presence mutated borrowed inventory or required another scan")
+	}
+}
+
+func TestPresenceBindingDoesNotWaitForUnrelatedDiscovery(t *testing.T) {
+	a, mod, info, e := presencePTYFixture(t)
+	if _, err := a.Presence(); err != nil {
+		t.Fatal(err)
+	}
+	if a.TerminalTabs()[0].Association != "Session association not confirmed" {
+		t.Fatal("startup was confirmed without native PID evidence")
+	}
+	mod.mu.Lock()
+	mod.pid = info.PID
+	mod.mu.Unlock()
+	a.mu.Lock()
+	a.inv.Discovering = true
+	owned := a.inv
+	a.mu.Unlock()
+	// A remote scan owns this mutex while the native local inventory stays valid.
+	a.scanMu.Lock()
+	if _, err := a.Presence(); err != nil {
+		a.scanMu.Unlock()
+		t.Fatal(err)
+	}
+	a.scanMu.Unlock()
+	tab := a.TerminalTabs()[0]
+	if tab.Association != "Confirmed by native process registry" || tab.Key != e.Session.Key.String() || tab.PID != info.PID || tab.Started != info.Started || a.inv != owned {
+		t.Fatalf("remote discovery starved local native binding: %+v", tab)
 	}
 }
 

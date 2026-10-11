@@ -821,7 +821,7 @@ function mergeLocalScan(previous, scan) {
 export function acceptScan(scan){
  if(scan?.revision && state.scan?.revision && scan.revision<=state.scan.revision)return false;
  const partial=scan.discovering||scan.cached;
- if(partial&&readOnce) {
+ if(partial&&(readOnce||state.scan?.cached)) {
   const merged=mergeLocalScan(state.scan,scan);
   if(!merged)return false;
   scan=merged;

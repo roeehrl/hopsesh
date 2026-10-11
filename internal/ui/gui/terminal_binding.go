@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/app"
+	"github.com/roeehrl/hopsesh/internal/core/audit"
 	"github.com/roeehrl/hopsesh/internal/core/presence"
 	"github.com/roeehrl/hopsesh/internal/core/pty"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -48,12 +49,9 @@ func (a *App) bindTerminalSessions(inv *app.Inventory) {
 }
 
 // Presence supplies new native evidence without changing the published inventory.
-// A scan owns scanMu; never publish an older frame while that scan is in flight.
+// Commit checks the exact inventory owner under mu; an unrelated remote scan
+// must not prevent fresh local process evidence from associating an owned PTY.
 func (a *App) bindTerminalPresence(owned, snapshot *app.Inventory, live map[agent.SessionKey]agent.LiveInfo, table presence.Table) {
-	if !a.scanMu.TryLock() {
-		return
-	}
-	defer a.scanMu.Unlock()
 	observed := *snapshot
 	observed.Entries = slices.Clone(snapshot.Entries)
 	for i := range observed.Entries {
@@ -70,7 +68,7 @@ func (a *App) bindTerminalPresence(owned, snapshot *app.Inventory, live map[agen
 }
 
 func (a *App) bindTerminalSnapshot(owned, observed *app.Inventory, table presence.Table) {
-	if a.Terms == nil || observed.Discovering {
+	if a.Terms == nil {
 		return
 	}
 	relationships := observed.Relationships()
@@ -87,6 +85,20 @@ func (a *App) bindTerminalSnapshot(owned, observed *app.Inventory, table presenc
 			continue
 		}
 		found, ambiguous := boundEntry(observed, table, tab, key)
+		if tab.Association != "Confirmed by native process registry" {
+			// Bounded, message-free native evidence for diagnosing a live failure.
+			// PID/start time come from the owned PTY; Procs come from LiveDetector.
+			candidates := []map[string]any{}
+			for _, e := range observed.Entries {
+				if e.Machine == tab.Machine && e.Session.Key == key {
+					candidates = append(candidates, map[string]any{"key": e.Session.Key.String(), "state": e.Live.State, "pid": e.Live.PID, "procs": e.Live.Procs})
+				}
+			}
+			a.snapshot().Audit.Write(audit.Entry{Action: "terminal.binding.probe", Host: tab.Machine, Session: key.String(), Detail: map[string]any{
+				"tab": tab.ID, "ptyPID": tab.PID, "ptyStarted": tab.Started, "ptyParent": table[tab.PID].PPID,
+				"discovering": observed.Discovering, "candidates": candidates, "matched": found != nil, "ambiguous": ambiguous,
+			}})
+		}
 		a.commitTerminalBinding(owned, tab, key, found, ambiguous, relationships)
 	}
 }
@@ -111,8 +123,20 @@ func (a *App) commitTerminalBinding(owned *app.Inventory, tab TermTab, key agent
 		stale = stale || a.historyStale[app.EntryIdentity(found.Machine, found.Session.Key.String())]
 	}
 	if a.inv != owned || a.closing || a.selectionReads > 0 || a.reviewBusyLocked() || stale {
+		reason := "inventory changed"
+		switch {
+		case a.closing:
+			reason = "app closing"
+		case a.selectionReads > 0:
+			reason = "selection read in progress"
+		case a.reviewBusyLocked():
+			reason = "review or action owns inventory"
+		case stale:
+			reason = "History evidence invalidated"
+		}
 		a.mu.Unlock()
 		a.Terms.mu.Unlock()
+		a.snapshot().Audit.Write(audit.Entry{Action: "terminal.binding.deferred", Host: tab.Machine, Session: key.String(), Detail: map[string]any{"tab": tab.ID, "ptyPID": tab.PID, "ptyStarted": tab.Started, "reason": reason}})
 		return
 	}
 	// Commit with both owners locked; emitting the update happens afterwards,

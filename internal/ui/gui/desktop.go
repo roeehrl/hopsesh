@@ -92,7 +92,9 @@ func (a *App) AttachDesktop(main *application.WebviewWindow) {
 					every = time.Minute
 				}
 				if time.Since(lastScan) >= every {
-					a.refreshQuick()
+					// A scan may wait behind a long remote scan. It must not
+					// postpone the independent native-process Presence tick.
+					go a.refreshQuick()
 					lastScan = time.Now()
 				}
 				interval := 30 * time.Second

@@ -204,6 +204,7 @@ func main() {
 		return svc.SetTerminalSettings(gui.TerminalSettingsInput{Where: where, KeepTabs: true, Notify: true, CloseEnded: closeEnded, FontSize: set.FontSize, Scrollback: set.Scrollback})
 	}
 	http.HandleFunc("/events", serveEvents)
+	registerCachedMovementWorld(&mu, h, &svc)
 	gui.SetTerminal(background)
 	if self, err := os.Executable(); err == nil {
 		gui.SetStepProgram(self)
