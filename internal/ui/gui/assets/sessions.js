@@ -436,9 +436,9 @@ if(accountShown(e.profile)) chips.push(h("span", {class:"chip account-chip",titl
     h("div", { class: "r-main" },
       h("span", { class: "r-line" }, h("span", { class: "t", title: e.title }, e.title),
         h("span", { class: "b" }, [repoWord, branch].filter(Boolean).join(" · "))),
-      rc ? h("span", {class:"movement-role"}, rc) : null,
+      rc ? h("span", {class:"movement-role"}, rc, chips) : null,
       h("span", { class: "s" }, bits.join(" · ") || " "),
-      chips.length ? h("div", { class: "copies" }, chips) : null),
+      !rc && chips.length ? h("div", { class: "copies" }, chips) : null),
     h("div", { class: "r-state" }, h("span", { class: "chip st-" + k, title: words }, h("span", { class: "dot " + k }), h("span", { class: "chip-t" }, words)), h("span", { class: "w" }, `${where} · ${ago(e.lastActive)}`)),
     h("div", { class: "act" }, p ? h("button", { class: "btn small outline", tabindex: "-1", disabled: !!p.disabled, title: p.why || p.label, "aria-label": p.label,
       onclick: (ev) => { ev.stopPropagation(); return p.run(); } }, h("span", { class: "btn-t" }, p.short || p.label)) : null));

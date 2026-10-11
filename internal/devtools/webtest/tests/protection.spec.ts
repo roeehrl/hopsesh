@@ -36,6 +36,15 @@ test("blocked: a moved original is blocked and says so", async ({ page }) => {
   await roleRow(page, "Find the codeword", "Moved from").click();
   const original = page.locator(".subrow").filter({hasText:"Claude Code original"});
   await expect(original).toContainText("Moved to Codex");
+  await page.evaluate(async () => {
+    const {list} = await import('/listview.js');
+    const {render} = await import('/sessions.js');
+    list.density = "compact";
+    render();
+  });
+  const movedBox = await roleRow(page, "Find the codeword", "Moved from").boundingBox();
+  const originalBox = await original.boundingBox();
+  expect(originalBox!.y).toBeGreaterThanOrEqual(movedBox!.y + movedBox!.height);
   await roleRow(page, "Find the codeword", "Moved from").press("ArrowDown");
   await expect(original).toBeFocused();
   await expect(details(page).locator(".ins-lineage")).toContainText("◆", { timeout: 30_000 });

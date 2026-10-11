@@ -775,3 +775,6 @@ body.terminal-right .divider[data-pane="inspector"]{display:none}
 .tree .row.has-role .r-line { flex: none; }
 .tree .row.has-role .movement-role { display: flex; }
 .tree .row.has-role .movement-role .role-chip { max-width: 100%; }
+
+.tree .row.has-role { height: auto; min-height: 56px; }
+.tree .row.has-role .movement-role { gap: 6px; flex-wrap: wrap; align-items: center; }
