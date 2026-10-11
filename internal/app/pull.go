@@ -279,10 +279,44 @@ func (a *App) Apply(ctx context.Context, p *move.Plan, in move.Input, progress f
 			}
 		}
 	}
-	// Persist the reopen guard before changing history or clearing the old departure.
-	// If apply fails, reopening loads the original history and clears the guard.
-	if err := a.noteReopen(p); err != nil {
-		return nil, err
+	if p.Continue != nil && p.Continue.AppendTo != nil && p.Options.OpenBlockedOriginal == p.Continue.AppendTo.Key.String() {
+		if len(p.Blockers) > 0 {
+			return nil, fmt.Errorf("%w: %s", move.ErrBlocked, strings.Join(p.Blockers, "; "))
+		}
+		if err := move.ValidateSource(ctx, p, in); err != nil {
+			return nil, err
+		}
+		// Blocked clients still append diagnostics using their old parent UUID.
+		// Close this exact native client before writing, then re-read the destination
+		// because exiting can flush metadata. No conversation is archived.
+		if err := a.checkBlockedOriginal(p); err != nil {
+			return nil, err
+		}
+		if err := move.EndDestination(ctx, p, in); err != nil {
+			return nil, err
+		}
+		for i := range in.Copies {
+			if in.Copies[i].Summary.Key == p.Continue.AppendTo.Key {
+				in.Copies[i].Live = agent.LiveInfo{State: agent.Ended}
+			}
+		}
+		opt := p.Options
+		opt.OpenBlockedOriginal = ""
+		opt.OperationID = p.OperationID
+		fresh, err := move.Build(ctx, in, opt)
+		if err != nil {
+			return nil, err
+		}
+		if fresh.Kind != p.Kind || fresh.Placement.Key != p.Placement.Key || fresh.Continue == nil || fresh.Continue.Relation != move.RelationAppend || len(fresh.Blockers) > 0 {
+			return nil, fmt.Errorf("return destination changed while closing its client; review a fresh plan")
+		}
+		if fresh.SourceCursor() != p.SourceCursor() {
+			return nil, fmt.Errorf("source changed while closing the original; review a fresh plan")
+		}
+		// Keep the rebuilt cursor and cleared teardown option in the caller's plan.
+		// Retrying an interrupted write must reach move.Apply's operation recovery,
+		// rather than checking the destination against the pre-close cursor again.
+		*p = *fresh
 	}
 	return move.Apply(ctx, p, in, move.Env{StateDir: a.StateDir, Audit: a.Audit, Progress: progress, Step: a.Steps})
 }

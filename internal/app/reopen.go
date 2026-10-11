@@ -16,10 +16,9 @@ import (
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
-// A return may add to an original that is still open in its agent when hopsesh blocks
-// that original: nobody can type there, so the history it holds in memory cannot grow.
-// What it holds is now stale, so the original's hook keeps refusing prompts and asks for
-// the session to be reopened, which loads the new work, until a fresh start or resume.
+// Protected originals can be restarted for a return without archiving them.
+// Their clients must exit before writing: even rejected prompts can append stale
+// parent links. Legacy reopen records remain readable for already installed builds.
 
 // openBlockedOriginal is the return candidate of e that is open on this machine and
 // blocked by hopsesh through an installed (and, for agents that ask, trusted) hook; ""
@@ -63,8 +62,8 @@ func (a *App) reopenPath(key agent.SessionKey) string {
 	return filepath.Join(a.StateDir, "movement-reopen", hex.EncodeToString(sum[:])+".json")
 }
 
-// noteReopen records a return that added to an open, blocked original.
-func (a *App) noteReopen(p *move.Plan) error {
+// checkBlockedOriginal revalidates protection before closing the original client.
+func (a *App) checkBlockedOriginal(p *move.Plan) error {
 	if p == nil || p.Continue == nil || p.Continue.AppendTo == nil || p.Options.OpenBlockedOriginal == "" || p.Options.OpenBlockedOriginal != p.Continue.AppendTo.Key.String() {
 		return nil
 	}
@@ -89,28 +88,7 @@ func (a *App) noteReopen(p *move.Plan) error {
 	if !ready {
 		return fmt.Errorf("the original's protection hook is no longer ready; refresh the return plan")
 	}
-	rec := reopenRecord{Key: key, Operation: p.OperationID, From: p.Continue.From, At: time.Now().UTC()}
-	b, err := json.Marshal(rec)
-	if err != nil {
-		return err
-	}
-	path := a.reopenPath(rec.Key)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".reopen-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err = tmp.Write(b); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err = tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
+	return nil
 }
 
 // ReopenNotice answers the original's hook while it must be reopened. A fresh start or

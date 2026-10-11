@@ -10,6 +10,10 @@ All notable changes to this project are documented here. The format follows
 
 - Background refreshes update list cells in place and keep compact rows at a stable
   height. Completed session lists stay visible throughout slower background reads.
+- Session actions stay in the inspector instead of appearing over metadata on hover.
+  Ending a reviewed original refreshes both sides before offering the move back.
+- Unknown agent windows no longer display a made-up terminal badge or offer a Show action.
+  Resuming the default Claude profile keeps its existing configuration and onboarding state.
 - Native-fork cache results follow session identity rather than listing position.
   Reordering or adding sessions no longer attaches another conversation’s originals.
 - Inspecting an original no longer replaces its conversation's parent row or adds
@@ -26,8 +30,6 @@ All notable changes to this project are documented here. The format follows
   could leave an expanded group blank until another redraw.
 - A return whose original is missing offers a reviewed new session on the same branch.
   A changed account observation no longer hides a missing original after a complete scan.
-- The reopen guard is persisted before adding history to an open blocked original;
-  protection is checked again before apply, and persistence errors stop the transfer.
 
 - A Claude Code session forked after it was compacted can be moved and continued. Its
   history starts at the compaction boundary, whose link to the earlier conversation
@@ -38,15 +40,18 @@ All notable changes to this project are documented here. The format follows
   `push` no longer take `--fork`: that option made a separate copy that was never blocked,
   silently overriding "Block the original". Separate copies hopsesh still makes on its own
   (both copies changed, bounded continuations) are called separate conversations.
-- Moving back adds to the original even while it is open in its agent, when hopsesh
-  blocks new prompts through a verified protection hook. Its hook then asks you to
-  reopen it, which loads the new work, and stops asking once it is reopened. The review
-  no longer tells you to end the session or quit the agent's app.
-- Moving back adds to an original that is close to its context limit when the new work
-  fits. Its measured usage already includes its instructions and tools, so hopsesh now
-  keeps only room for the next reply; it used to start a new session for six messages to
-  a session at 87% of 1M. When a new session is still needed, the review says why, and no
-  longer asks you to end the original, which is not written.
+- Moving back into a protected open original closes only its exact agent client before
+  appending, then lets you reopen the same conversation without archiving it. Blocked clients
+  still write bookkeeping with an old parent UUID; writing while they stayed open could
+  leave returned messages outside the resumed history.
+- Returning clears notices about forks from an earlier residency, so an unblocked
+  original does not incorrectly say its old separate copy is still the destination.
+- Large compact summaries and diagnostic attachments no longer make a real Claude
+  session disappear when the lightweight head/tail windows contain only metadata.
+- Return capacity accounts for instructions and tools already included in the original's
+  measured usage. Near-limit originals carry a warning that the agent may need its own
+  compaction before answering. When a new session is needed, the review explains why
+  and does not ask you to end an original that will not be written.
 - Blocking or warning in a moved session's original works on a default install. The
   protection hooks always pass the settings and state folders; naming the default
   folders explicitly made hopsesh look for this machine's identity in the wrong place,

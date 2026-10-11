@@ -66,7 +66,7 @@ export function returnCard(a) {
     h("span", {class:"return-original-name"}, destination?.title || r.title || "Original conversation"),
     h("span", {class:"muted"}, `${r.local ? sys.Here : r.machine}${manyAccounts(r.agent) && r.profileLabel ? " · " + r.profileLabel : ""}`),
     h("p", {}, destination?.guard?.mode === "block" && destination.guard.effective
-      ? "Review adding your new work to this protected original, then reopen it to load the new messages."
+      ? "Hopsesh can close this protected conversation’s agent, add your new work, and reopen the same original. Nothing is archived."
       : "Review the move back to check whether this open original can receive your new work."),
     h("div", {class:"return-card-actions"}, h("button", {class:"btn outline",onclick:a.run}, "Review move back…"),
       h("button", {class:"btn",onclick:a.showOriginal}, "Show original session")));

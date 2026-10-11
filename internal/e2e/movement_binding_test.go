@@ -179,7 +179,9 @@ func TestMovementQuietReturnAfterAccountObservation(t *testing.T) {
 							if err != nil || len(open.Blockers) != 0 || open.Continue.AppendTo == nil || !strings.Contains(strings.Join(open.Warnings, " "), "The original is open") {
 								t.Fatalf("blocked open original was not added to: %+v %v", open, err)
 							}
-							planned, applyIn = open, late
+							if _, err := move.Apply(ctx, open, late, env); err == nil || !strings.Contains(err.Error(), "destination copy is open") {
+								t.Fatalf("live blocked destination was written without closing it: %v", err)
+							}
 						}
 						if _, err := move.Apply(ctx, planned, applyIn, env); err != nil {
 							t.Fatal(err)

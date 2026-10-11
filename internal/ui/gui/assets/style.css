@@ -771,7 +771,7 @@ body.terminal-right .divider[data-pane="inspector"]{display:none}
 .r-line .role-chip { flex: none; margin-left: 6px; }
 
 /* Metadata belongs beside the title, in the status column. */
-.row { grid-template-columns: 22px minmax(0, 1fr) minmax(124px, 180px) 92px; }
+.row { grid-template-columns: 22px minmax(0, 1fr) minmax(124px, 180px); }
 .row .r-status { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .row .r-indicators { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
 .row .r-indicators .role-chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

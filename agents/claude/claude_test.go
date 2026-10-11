@@ -2,6 +2,7 @@ package claude
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -228,6 +229,101 @@ func TestResumeDropsSessionMarkers(t *testing.T) {
 		if !slices.Contains(c.Unset, v) {
 			t.Errorf("resume keeps %s: %v", v, c.Unset)
 		}
+	}
+}
+
+func TestResumeUsesDetectedMachineNativeDefaultConfig(t *testing.T) {
+	// The detected machine's home deliberately differs from the launcher's.
+	// An explicit native default must still read ~/.claude.json, not a new
+	// <CLAUDE_CONFIG_DIR>/.claude.json that triggers first-run onboarding.
+	for _, explicit := range []bool{false, true} {
+		for _, registered := range []bool{false, true} {
+			t.Run(strings.Join([]string{map[bool]string{false: "implicit", true: "explicit"}[explicit],
+				map[bool]string{false: "unregistered", true: "registered"}[registered]}, "/"), func(t *testing.T) {
+				fh := agenttest.NewFakeHost("/remote/alice")
+				facts := fh.Facts()
+				facts.Home = "/remote/alice"
+				facts.Env = map[string]string{}
+				if explicit {
+					facts.Env["CLAUDE_CONFIG_DIR"] = "/remote/alice/.claude"
+				}
+				facts.Binaries = map[string]agent.BinaryFact{"claude": {Path: "/remote/bin/claude", Version: "2.1.284"}}
+				in, err := New().Detect(context.Background(), desktopHost{fh, facts})
+				if err != nil {
+					t.Fatal(err)
+				}
+				// Install metadata must survive serialization across machines and
+				// preserve the same launch policy without consulting local HOME.
+				b, err := json.Marshal(in)
+				if err != nil {
+					t.Fatal(err)
+				}
+				in = agent.Install{}
+				if err := json.Unmarshal(b, &in); err != nil {
+					t.Fatal(err)
+				}
+				if registered {
+					in.Profile = &agent.RuntimeProfile{ID: "default", Root: in.Root(home), Default: true}
+				}
+				c := New().Resume(in, agent.SessionKey{Agent: id, Session: s1}, agent.Placement{CWD: "/remote/repo"}, agent.ResumeOptions{})
+				if !slices.Contains(c.Unset, "CLAUDE_CONFIG_DIR") {
+					t.Fatalf("default can inherit alternate config: %+v", c)
+				}
+				for _, e := range c.Env {
+					if strings.HasPrefix(e, "CLAUDE_CONFIG_DIR=") {
+						t.Fatalf("default launch forces onboarding config: %+v", c)
+					}
+				}
+				if !slices.Contains(c.Argv, s1) || c.Dir != "/remote/repo" || (registered && c.Argv[0] != "/remote/bin/claude") {
+					t.Fatalf("changed exact-session launch: %+v", c)
+				}
+				if registered {
+					for _, key := range New().Spec().Accounts.Unset {
+						if !slices.Contains(c.Unset, key) {
+							t.Fatalf("default retained credential override %s: %+v", key, c)
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestResumeKeepsCustomProfileConfigIsolation(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		root       string
+		defaultTag bool
+		metadata   bool
+	}{
+		{"custom", "/remote/alice/work-claude", false, true},
+		{"custom marked default", "/remote/alice/work-claude", true, true},
+		{"custom named .claude", "/remote/other/.claude", true, true},
+		{"native root selected as custom", "/remote/alice/.claude", false, true},
+		{"missing detection metadata", "/remote/alice/.claude", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fh := agenttest.NewFakeHost("/remote/alice")
+			facts := fh.Facts()
+			facts.Env = map[string]string{"CLAUDE_CONFIG_DIR": tc.root}
+			in, err := New().Detect(context.Background(), desktopHost{fh, facts})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !tc.metadata {
+				in.NativeDefaultRoot = ""
+			}
+			in.Profile = &agent.RuntimeProfile{ID: "work", Root: tc.root, Default: tc.defaultTag}
+			c := New().Resume(in, agent.SessionKey{Agent: id, Profile: "work", Session: s1}, agent.Placement{}, agent.ResumeOptions{})
+			if !slices.Contains(c.Env, "CLAUDE_CONFIG_DIR="+tc.root) || !slices.Contains(c.Unset, "CLAUDE_CONFIG_DIR") {
+				t.Fatalf("custom root can fall back to another profile: %+v", c)
+			}
+			for _, key := range New().Spec().Accounts.Unset {
+				if !slices.Contains(c.Unset, key) {
+					t.Fatalf("custom profile retained override %s: %+v", key, c)
+				}
+			}
+		})
 	}
 }
 

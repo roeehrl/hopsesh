@@ -38,7 +38,7 @@ export function placeName(p, e) {
     case "tmux": return "tmux";
     case "ssh": return "an ssh login";
   }
-  return e?.app ? `${e.app} app` : "a terminal";
+  return e?.app ? `${e.app} app` : "Unknown window";
 }
 
 // sessionTabs are the live hopsesh Terminal tabs that run a session (its own, and a
@@ -50,7 +50,7 @@ export function sessionTabs(e) {
 
 // placesOf is where a session on this machine is open: hopsesh's own tabs (the window
 // knows them), then what presence found (terminal apps, the agent's app, editors, tmux,
-// ssh). A session that runs where nothing tells is "a terminal".
+// ssh). Unknown hosts retain liveness without claiming a particular window.
 export function placesOf(e) {
   if (e.cloud || e.machine !== here()) return [];
   const out = [];
@@ -64,7 +64,7 @@ export function placesOf(e) {
 export const placeCount = (ps) => ps.reduce((n, p) => n + (p.count || 1), 0);
 
 // canShow: hopsesh can bring that place forward (tmux and ssh: it can't).
-const canShow = (p) => p.kind !== "tmux" && p.kind !== "ssh" && !(p.kind === "ide" && !sys.mac);
+const canShow = (p) => p.kind !== "unknown" && p.kind !== "tmux" && p.kind !== "ssh" && !(p.kind === "ide" && !sys.mac);
 
 // show brings a place forward: a tab of the hopsesh Terminal window, the terminal app's
 // tab (found only now, by FindTab), the agent's app, or the editor.
@@ -153,7 +153,7 @@ function localModel(e) {
     icon: p.id === "app" ? agentBadge(e.agent, e.agentName) : icon(p.id === "here" ? ["M3 4h18v16H3z", "m7 10 3 2.5L7 15M12 15h5"] : ["M3 4h18v16H3z", "M3 9h18"], 16) });
   if (local) {
     const places = placesOf(e);
-    m.places = places;
+    m.places = places.filter(p => p.kind !== "unknown");
     const n = placeCount(places);
     const tab = places.find((p) => p.kind === "hopsesh");
     const moved = e.departure || e.movement;
@@ -172,6 +172,7 @@ function localModel(e) {
         m.chevronLabel = "Move it";
       } else if (first.kind === "ide") m.caption = sys.mac ? `hopsesh can't pick the tab inside ${placeName(first, e)}` : `hopsesh can't show a session in ${placeName(first, e)}`;
       else if (first.kind === "tmux" || first.kind === "ssh") { m.primary = null; m.caption = `Running in ${placeName(first, e)}; hopsesh can't show it`; }
+      else if (first.kind === "unknown") { m.primary = null; m.caption = "This session is running; its window could not be identified."; }
       else if (first.kind === "claude-app" || first.kind === "codex-app") m.caption = e.canApp ? "Opens this conversation in the desktop app" : e.appWhy;
     } else if ((e.departure || e.movement)?.machine && (e.departure || e.movement)?.key) {
       const n = e.departure || e.movement;

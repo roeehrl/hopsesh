@@ -82,8 +82,8 @@ const (
 // Options are the user's choices.
 type Options struct {
 	// OpenBlockedOriginal names an original that is open in its agent but blocked by
-	// hopsesh (its hook refuses new prompts): a return may add to it while it is open,
-	// and its hook then asks for it to be reopened to load the new work.
+	// hopsesh: apply closes its exact native client and rebuilds the append plan.
+	// A block does not prevent that client from writing stale bookkeeping.
 	OpenBlockedOriginal string `json:"openBlockedOriginal,omitempty"`
 	Bounded             bool   `json:"bounded,omitempty"`    // new bounded replica on the same logical branch
 	NewReplica          bool   `json:"newReplica,omitempty"` // explicitly create a new native session; never auto-select an existing one

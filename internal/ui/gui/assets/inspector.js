@@ -134,6 +134,7 @@ function openIn(e, m) {
       }
       continue;
     }
+    if (p.kind === "unknown") continue;
     const can = p.kind !== "tmux" && p.kind !== "ssh" && !(p.kind === "ide" && !sys.mac);
     lines.push(h("div", { class: "open-line" }, h("span", { class: "open-ic" }, placeIcon(p.kind) || agentBadge(e.agent, e.agentName)),
       h("span", { class: "open-t" }, placeName(p, e), p.count > 1 ? h("span", { class: "muted" }, ` — ${p.count} processes`) : null,

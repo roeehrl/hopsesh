@@ -372,7 +372,7 @@ function chipFor(e, p) {
 // presenceChips are at most two places, then "+N" (a popover lists them all), and
 // "Open twice" when two processes write one session.
 function presenceChips(e) {
-  const ps = placesOf(e);
+  const ps = placesOf(e).filter(p => p.kind !== "unknown");
   if (!ps.length) return [];
   const out = ps.slice(0, 2).map((p, i) => { const c = chipFor(e, p); if (!i) c.classList.add("keep"); return c; });
   if (ps.length > 2) out.push(h("button", { class: "pchip more", type: "button", tabindex: "-1", title: ps.slice(2).map((p) => placeName(p, e)).join(", "),
@@ -388,11 +388,9 @@ function mirrorChip(m) {
 }
 
 // row is one session in the tree: its agent, title and branch, the last prompt and where
-// it is open (comfortable rows), its state with where and when, and its main action.
+// it is open (comfortable rows), and its state with where and when.
 function row(e, level) {
   const [k, words] = statusOf(e);
-  const m = model(e);
-  const p = m.primary;
   const sel = state.sel && state.sel.machine === e.machine && state.sel.key === e.key;
   const bits = [];
   let branch = "";
@@ -438,9 +436,7 @@ if(accountShown(e.profile)) chips.push(h("span", {class:"chip account-chip",titl
       h("span", { class: "r-line" }, h("span", { class: "t", title: e.title }, e.title),
         h("span", { class: "b" }, [repoWord, branch].filter(Boolean).join(" · "))),
       h("span", { class: "s" }, bits.join(" · ") || " ")),
-    rowStatus(k, words, rc, chips, `${where} · ${ago(e.lastActive)}`),
-    h("div", { class: "act" }, p ? h("button", { class: "btn small outline", tabindex: "-1", disabled: !!p.disabled, title: p.why || p.label, "aria-label": p.label,
-      onclick: (ev) => { ev.stopPropagation(); return p.run(); } }, h("span", { class: "btn-t" }, p.short || p.label)) : null));
+    rowStatus(k, words, rc, chips, `${where} · ${ago(e.lastActive)}`));
   if (!lines.length) return el;
   const out = document.createDocumentFragment();
   out.append(el, ...lines);
@@ -461,8 +457,7 @@ function copyLine(e, c, ce, level) {
     h("div", { class: "r-main" },
       h("span", { class: "r-line" }, agentBadge(ce.agent, ce.agentName, ""), h("span", { class: "t", title: ce.title || e.title }, ce.title || e.title)),
       h("span", {class:"s copy-label"}, which)),
-    rowStatus(k, words, roleChip(ce), [], `${where} · ${ago(ce.lastActive)}`),
-    h("div", { class: "act" }));
+    rowStatus(k, words, roleChip(ce), [], `${where} · ${ago(ce.lastActive)}`));
 }
 
 // Status and movement indicators share the metadata column, clear of the title.

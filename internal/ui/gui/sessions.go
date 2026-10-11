@@ -952,9 +952,27 @@ func (a *App) EndReturnDestination(token string) error {
 	a.mu.Unlock()
 	doneSelection := a.beginSelection()
 	defer doneSelection()
+	// Exiting can flush transcript records. The next review must refresh both
+	// sides instead of reusing the browsing inventory's old live/cursor evidence.
+	defer a.invalidateReturnSelection(p)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	return core.EndDestination(ctx, p, in)
+}
+
+func (a *App) invalidateReturnSelection(p *move.Plan) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.inv == nil {
+		return
+	}
+	for i := range a.inv.Entries {
+		e := &a.inv.Entries[i]
+		if e.Machine == p.Source.Location && e.Session.Key == p.Key || e.Machine == p.Target.Location && e.Session.Key == p.Placement.Key {
+			e.Cached = true
+			e.Live.State = agent.Unknown
+		}
+	}
 }
 
 func planDTO(p *move.Plan, e app.Entry, tm agent.Module) *PlanDTO {

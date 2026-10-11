@@ -157,6 +157,9 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		p.Blockers = slices.DeleteFunc(p.Blockers, func(b string) bool { return b == "the destination copy is open; quit it first" })
 		p.Warnings = slices.DeleteFunc(p.Warnings, func(w string) bool { return w == openBlockedNote(spec.Name) })
 	}
+	if cp.AppendTo != nil && capacity.Existing > capacity.EffectiveWindow()*7/10 {
+		p.Warnings = append(p.Warnings, "The original is near its context limit. It may need the agent's own compaction before answering; complete conversation history remains preserved.")
+	}
 	prof := writer.Profile(tgt.Install)
 	var redact func([]byte) ([]byte, int)
 	if opt.Redact {
@@ -597,7 +600,7 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 			if err != nil {
 				return nil, fmt.Errorf("cannot recheck destination activity: %w", err)
 			}
-			if live[cp.AppendTo.Key.Session].State == agent.Live && p.Options.OpenBlockedOriginal != cp.AppendTo.Key.String() {
+			if live[cp.AppendTo.Key.Session].State == agent.Live {
 				return nil, fmt.Errorf("the destination copy is open; quit it first and refresh the plan")
 			}
 		}
@@ -763,8 +766,7 @@ func liveSnapshotNotice(p *Plan) string {
 	return notice
 }
 
-// openBlockedNote is the review's line for adding to an original that is open but
-// blocked: it is written now, and its hook asks for it to be reopened before use.
+// openBlockedNote explains the exact native client restart required before appending.
 func openBlockedNote(agentName string) string {
-	return "The original is open in " + agentName + ". Your new work is added to it now; reopen it in " + agentName + " to continue with it (until then it refuses new prompts and says so)."
+	return "The original is open in " + agentName + ". Hopsesh closes only this conversation's agent before adding your new work, then you can reopen the same conversation. Nothing is archived."
 }

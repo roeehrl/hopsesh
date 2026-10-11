@@ -175,6 +175,16 @@ func TestMovementForkKeepsOriginalAvailable(t *testing.T) {
 	f.check(t, "B", "", "A")
 }
 
+func TestReturnClearsEarlierForkNoticeButKeepsANewFork(t *testing.T) {
+	f := newMovementFixture("A", "B")
+	f.hop(t, "move", "A", "B", true)
+	f.fork(t, "older-fork", "A", "C", true, "move")
+	f.hop(t, "return", "B", "A", true, "move")
+	f.check(t, "A", "", "B")
+	f.fork(t, "new-fork", "A", "D", true, "return")
+	f.check(t, "A", "new-fork", "B")
+}
+
 func TestMovementSiblingAndParentExclusions(t *testing.T) {
 	f := newMovementFixture("A", "B")
 	f.hop(t, "parent-route", "A", "B", true)

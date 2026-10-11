@@ -118,6 +118,27 @@ func (m *Manifest) Departure(current ReplicaID) (Hop, bool) {
 		if !ok {
 			return Hop{}, false
 		}
+		if last.To == current {
+			returned := false
+			for _, h := range route {
+				if h.From == current && h.To != current {
+					returned = true
+					break
+				}
+			}
+			if returned {
+				// A return starts a new residency. Fork notices from before that
+				// return must not reappear after the movement notice is cleared.
+				// A newly created fork remains visible when it follows the return.
+				var after []Hop
+				for _, h := range forks {
+					if g.ancestors([]string{h.ID})[last.ID] {
+						after = append(after, h)
+					}
+				}
+				forks = after
+			}
+		}
 		if last.To != current {
 			var departures []Hop
 			for _, h := range route {

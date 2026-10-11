@@ -81,7 +81,7 @@ func TestReopenGuardRejectsUnprotectedOriginal(t *testing.T) {
 	key := agent.SessionKey{Agent: "claude", Profile: scope.ID, Session: "original"}
 	p := &move.Plan{Placement: agent.Placement{Key: key}, Continue: &move.ContinuePlan{AppendTo: &agent.Summary{Key: key}}}
 	p.Options.OpenBlockedOriginal = key.String()
-	if err := a.noteReopen(p); err == nil {
+	if err := a.checkBlockedOriginal(p); err == nil {
 		t.Fatal("unprotected original accepted")
 	}
 	if _, err := os.Stat(a.reopenPath(key)); !os.IsNotExist(err) {

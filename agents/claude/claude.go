@@ -88,6 +88,11 @@ func (*Module) Spec() agent.Spec {
 // Detect resolves the config folder and the claude binary.
 func (m *Module) Detect(_ context.Context, h agent.Host) (agent.Install, error) {
 	in := agent.DefaultInstall(m.Spec(), h)
+	if h.Facts().Home != "" {
+		// Resume has no Host: carry this machine's native default as launch
+		// metadata, separately from data roots used by watching and mappings.
+		in.NativeDefaultRoot = h.Path().Join(h.Facts().Home, ".claude")
+	}
 	detectDesktop(h, &in)
 	return in, nil
 }
@@ -413,7 +418,24 @@ func (m *Module) Resume(in agent.Install, key agent.SessionKey, p agent.Placemen
 	if o.Prompt != "" {
 		argv = append(argv, o.Prompt)
 	}
-	return in.ScopeCommand(agent.Command{Argv: argv, Dir: p.CWD, Unset: sessionMarkers, Wait: o.App, TTY: o.App})
+	c := in.ScopeCommand(agent.Command{Argv: argv, Dir: p.CWD, Unset: sessionMarkers, Wait: o.App, TTY: o.App})
+	// Claude treats an explicit CLAUDE_CONFIG_DIR, even ~/.claude, as an
+	// alternate installation and reads .claude.json inside it instead of ~.
+	// Keep ScopeCommand's credential isolation, but let a verified native default
+	// use the vendor's normal config lookup. Custom profiles stay explicitly scoped.
+	root := in.NativeDefaultRoot
+	if root != "" && in.Root(home) == root && (in.Profile == nil || in.Profile.Default && in.Profile.Root == root) {
+		env := c.Env[:0]
+		for _, e := range c.Env {
+			k, _, _ := strings.Cut(e, "=")
+			if k != "CLAUDE_CONFIG_DIR" && !(in.OS == "windows" && strings.EqualFold(k, "CLAUDE_CONFIG_DIR")) {
+				env = append(env, e)
+			}
+		}
+		c.Env = env
+		c.Unset = append(c.Unset, "CLAUDE_CONFIG_DIR")
+	}
+	return c
 }
 
 // sessionMarkers are variables a Claude Code session sets for the programs it starts. A
