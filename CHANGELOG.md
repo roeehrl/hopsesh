@@ -27,6 +27,9 @@ All notable changes to this project are documented here. The format follows
   refresh this machine at most every 5 seconds while you look at hopsesh (its window
   focused or the menu bar list open) and every 5 minutes otherwise, and a change no
   longer deletes cached summaries from the catalog.
+- CI holds the app's idle resource use to budgets on Linux and macOS (`idle resources`):
+  nobody looking means no rescans, no session reads, no writes and under 1% CPU, while
+  another agent keeps writing its session.
 - Two front ends opening the catalog at the same moment no longer leave one of them
   without it.
 
