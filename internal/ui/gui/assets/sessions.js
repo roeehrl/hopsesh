@@ -9,7 +9,7 @@ import { healthNotice, loadHookHealth, hookHealth, withCLI, chip as roleChip } f
 import { dividers, apply as applyLayout } from "./layout.js";
 import { exitOf, exitWords, waiting, strayWaiting, showTerminal, tabs, onTabs } from "./term.js";
 import { model, statusOf, statusKey, placesOf, placeCount, placeName, showPlace, cloudBlock, onSelect, onTurnOn, key as entryKey } from "./actions.js";
-import { list, load as loadList, toolbar, counts, apply as applyFilters, groupsOf, tree, onChange, onRows, decide, toggleDisplay, clearFilters, activeFacets,
+import { list, load as loadList, toolbar, counts, apply as applyFilters, groupsOf, tree, adoptTree, onChange, onRows, decide, toggleDisplay, clearFilters, activeFacets,
   openGroupOf, focusTree, rowByKey, setAll, displayCommand, toggleFilter, save as saveList } from "./listview.js";
 import { inspector, openChevron, onRenamed, placeIcon } from "./inspector.js";
 import { openMenu, isOpen } from "./menu.js";
@@ -426,12 +426,13 @@ if(accountShown(e.profile)) chips.push(h("span", {class:"chip account-chip",titl
   const lines = [];
   for (const c of (e.copies || []).filter((c) => !(c.machine === e.machine && c.key === e.key))) {
     const ce = copyEntry(c.machine, c.key);
-    if (ce) lines.push(copyLine(e, c, ce, level + 1));
+    if (ce && !entries().some(x => entryKey(x) === entryKey(ce))) lines.push(copyLine(e, c, ce, level + 1));
+    else if (ce) continue;
     else chips.push(h("span", { class: "chip" + (c.newest ? " st-warn" : "") }, `${c.newest ? "newest: " : "also "}${copyWhere(c)}`));
   }
   const where = e.cloud ? "cloud" : e.machine === here() ? sys.here : e.machine;
   const el = h("div", { class: "row" + (rc ? " has-role" : ""), role: "treeitem", "aria-level": String(level), "aria-selected": sel ? "true" : "false", tabindex: sel ? "0" : "-1", "data-key": entryKey(e),
-      onclick: () => select(e), ondblclick: () => { if (p && !p.disabled) return p.run(); } },
+      onclick: () => select(e), ondblclick: () => { const fresh = entries().find(x => entryKey(x) === entryKey(e)) || copyEntry(e.machine, e.key) || e; const action = model(fresh).primary; if (action && !action.disabled) return action.run(); } },
     h("span", { class: "r-ic" }, agentBadge(e.agent, e.agentName, e.cloud ? cloudTitle(e.machine) : "")),
     h("div", { class: "r-main" },
       h("span", { class: "r-line" }, h("span", { class: "t", title: e.title }, e.title),
@@ -458,18 +459,23 @@ function copyLine(e, c, ce, level) {
       "aria-label": `${which}: ${roleChip(ce)?.textContent?.trim() || words}`, onclick: (ev) => { ev.stopPropagation(); select(Object.assign({ group: e.group }, ce)); } },
     h("span", { class: "r-ic sub-ic", "aria-hidden": "true" }, "↳"),
     h("div", { class: "r-main" },
-      h("span", { class: "r-line" }, agentBadge(ce.agent, ce.agentName, ""), h("span", { class: "t" }, which))),
+      h("span", { class: "r-line" }, agentBadge(ce.agent, ce.agentName, ""), h("span", { class: "t", title: ce.title || e.title }, ce.title || e.title)),
+      h("span", {class:"s copy-label"}, which)),
     rowStatus(k, words, roleChip(ce), [], `${where} · ${ago(ce.lastActive)}`),
     h("div", { class: "act" }));
 }
 
 // Status and movement indicators share the metadata column, clear of the title.
 function rowStatus(k, words, role, chips, when) {
+  const presence = chips.find(c => c.matches?.(".pchip.keep"));
+  const extras = chips.filter(c => c !== presence);
+  const age = when.startsWith(sys.here + " · ") ? when.slice(sys.here.length + 3) : when;
   return h("div", {class:"r-state"},
     h("div", {class:"r-status"},
-      h("span", {class:"chip st-" + k, title:words}, h("span", {class:"dot " + k}), h("span", {class:"chip-t"}, words)),
-      role || chips.length ? h("div", {class:"r-indicators"}, role, chips) : null),
-    h("span", {class:"w"}, when));
+      h("div", {class:"status-top"},
+        h("span", {class:"chip st-" + k, title:words}, h("span", {class:"dot " + k}), h("span", {class:"chip-t"}, words)), presence),
+      h("div", {class:"r-indicators"}, role, extras)),
+    h("span", {class:"w", title:when}, age));
 }
 
 function copyWhere(c) {
@@ -480,6 +486,7 @@ function copyWhere(c) {
 // ---- Selection: attributes change, the inspector is drawn again; the list stays ----
 
 export function select(e, focus = true) {
+  e = entries().find(x => entryKey(x) === entryKey(e)) || copyEntry(e.machine, e.key) || e;
   state.sel = { machine: e.machine, key: e.key };
   state.handoffOpen = null;
   const t = view.querySelector(".tree");
@@ -529,7 +536,7 @@ export function refreshList() {
   if (!l) return render();
   const inScope = scoped();
   const shown = applyFilters(inScope, state.scope);
-  const dropped = state.sel && !shown.some((x) => x.machine === state.sel.machine && x.key === state.sel.key);
+  const dropped = state.sel && !showsEntry(shown, state.sel);
   if (dropped) state.sel = null;
   const focusIn = l.contains(document.activeElement) ? document.activeElement.closest("[data-key],[data-gkey]") : null;
   const fk = focusIn?.dataset.key, gk = focusIn?.dataset.gkey;
@@ -543,6 +550,33 @@ export function refreshList() {
 }
 onChange((full = true) => (full ? render() : refreshList()));
 
+// Preserve row identity, focus and loaded icons during metadata refreshes. Only
+// changed cells are replaced; copy selection never changes the scan's grouping.
+function reconcileList(old, next) {
+  if (!old || old.nodeType !== next.nodeType || old.nodeName !== next.nodeName) return next;
+  if (old.nodeType !== 1) { if (old.textContent !== next.textContent) old.textContent = next.textContent; return old; }
+  if (next.classList.contains("session-chunk")) return next;
+  if (old.outerHTML === next.outerHTML) return old;
+  const structural = next.matches(".content,.list,.tree,.grp,.gbody,.row,.r-state,.r-status,.status-top,.r-indicators");
+  if (!structural) return next;
+  for (const a of [...old.attributes]) if (!next.hasAttribute(a.name)) old.removeAttribute(a.name);
+  for (const a of next.attributes) if (old.getAttribute(a.name) !== a.value) old.setAttribute(a.name,a.value);
+  const key = n => n.nodeType === 1 ? n.dataset.key || n.dataset.gkey : null;
+  const children = [...old.childNodes], used = new Set();
+  let at = old.firstChild;
+  for (const n of [...next.childNodes]) {
+    const k = key(n);
+    const candidate = k ? children.find(c => !used.has(c) && key(c) === k)
+      : children.find(c => !used.has(c) && !key(c) && c.nodeName === n.nodeName && (c.nodeType !== 1 || c.className === n.className));
+    const child = candidate ? reconcileList(candidate,n) : n;
+    if (candidate) used.add(candidate);
+    if (child !== at) old.insertBefore(child,at);
+    at = child.nextSibling;
+  }
+  while (at) { const remove = at; at = at.nextSibling; remove.remove(); }
+  return old;
+}
+
 let built = { content: "", side: "" }; // the list and sidebar markup as render last built them
 export function render() {
   if (!state.scan || current !== "sessions") return;
@@ -555,11 +589,10 @@ export function render() {
   const top = old ? old.scrollTop : 0;
   const focusKey = document.activeElement?.closest?.(".tree [data-key]")?.dataset.key;
   const focusGroup = document.activeElement?.closest?.(".tree [data-gkey]")?.dataset.gkey;
-  keepPinned();
   const inScope = scoped();
   const shown = applyFilters(inScope, state.scope);
   // A selection the list doesn't show goes (another place, a filter, a refresh).
-  if (!state.scanning && !pendingScan && !state.scan.discovering && state.sel && !shown.some((x) => x.machine === state.sel.machine && x.key === state.sel.key)) { state.sel = null; state.handoffOpen = null; }
+  if (!state.scanning && !pendingScan && !state.scan.discovering && state.sel && !showsEntry(shown, state.sel)) { state.sel = null; state.handoffOpen = null; }
   const content = h("section", { class: "content" }, toolbar(scopeTitle(), state.scope), h("div", { class: "list" }, notices(), body(shown, inScope)));
   const previous=view.querySelector("#inspector"),nextInspector=inspector(selected(),previous),layout=view.querySelector(".three.layout");
   // Replace only what changed: rebuilding identical rows makes icons and the list flicker.
@@ -573,9 +606,10 @@ export function render() {
       // The filter field is one element that each new toolbar adopts: give it back.
       const input=content.querySelector("#list-filter"),label=old.querySelector("label.tb-search");
       if(input&&label&&input.parentNode!==label)label.insertBefore(input,label.querySelector(".kbd"));
-    }else old.replaceWith(content);
+    }else { reconcileList(old, content); live = old; adoptTree(old.querySelector(".tree")); }
     if(nextInspector!==previous)previous.replaceWith(nextInspector);
   }else fill(view,h("div",{class:"three layout"},side,content,nextInspector,dividers()));
+  adoptTree(live.querySelector(".tree"));
   built={content:contentHTML,side:sideHTML};
   counts(shown.length, inScope.length, state.scope);
   lastShown = shown; lastScope = inScope;
@@ -591,28 +625,11 @@ export function render() {
 // showEntry selects a session from elsewhere (the palette, Go to the newer copy, a
 // notification): its place if it isn't in this one, no filter that hides it, its group
 // open; then it is shown landing.
-// pinned is a copy shown in place of its branch's row (Show copy, Go to the newer copy);
-// it stays selected across scans, and is read again so it is never stale.
-let pinned = null;
-function keepPinned() {
-  const s = state.sel;
-  if (!pinned || !s || pinned.machine !== s.machine || pinned.key !== s.key) return;
-  if (entries().some((x) => x.machine === s.machine && x.key === s.key)) return;
-  for (const g of state.scan?.groups || []) {
-    const i = g.entries.findIndex((x) => (x.copies || []).some((c) => c.machine === s.machine && c.key === s.key));
-    if (i >= 0) {
-      // Beside its branch's row, not instead of it: the newest copy (a returned original)
-      // stays visible while the copy the user opened stays selected.
-      g.entries.splice(i + 1, 0, pinned);
-      api("ResolveEntry", s.machine, s.key).then((fresh) => {
-        if (!fresh || !pinned || pinned.key !== fresh.key) return;
-        const changed = JSON.stringify(fresh) !== JSON.stringify(pinned);
-        Object.assign(pinned, fresh);
-        if (changed && current === "sessions") render();
-      }).catch(() => {});
-      return;
-    }
-  }
+// A child selection belongs to its conversation's row without replacing or
+// inserting entries in the scan. Native identities stay attached to their parent.
+function showsEntry(rows, selection) {
+  return rows.some(e => e.machine === selection.machine && e.key === selection.key ||
+    (e.copies || []).some(c => c.machine === selection.machine && c.key === selection.key));
 }
 
 // refreshSelection reads the selected session again (after removing or restoring its block)
@@ -622,8 +639,8 @@ export async function refreshSelection() {
   if (s) {
     try {
       const fresh = await api("ResolveEntry", s.machine, s.key);
-      for (const g of state.scan?.groups || []) for (const x of g.entries) if (x.machine === s.machine && x.key === s.key) Object.assign(x, fresh);
-      if (pinned && pinned.machine === s.machine && pinned.key === s.key) Object.assign(pinned, fresh);
+      for (const g of [...(state.scan?.groups || []), ...(state.scan?.profileCopies || [])]) for (const x of g.entries) if (x.machine === s.machine && x.key === s.key) Object.assign(x, fresh);
+      if (state.resolvedSelection?.machine === s.machine && state.resolvedSelection.key === s.key) Object.assign(state.resolvedSelection, fresh);
       if (current === "sessions") render();
     } catch { /* the background scan below shows it */ }
   }
@@ -632,24 +649,15 @@ export async function refreshSelection() {
 
 export function showEntry(e) {
   const k = entryKey(e);
-  if (!entries().some(x=>entryKey(x)===k)) {
-    const group=e.group || state.scan?.groups.find(g=>g.entries.some(x=>(x.copies || []).some(c=>c.machine===e.machine && c.key===e.key)));
-    if (!group) { toast("This copy is not in the current scan; refresh its machine."); return; }
-    const i=group.entries.findIndex(x=>(x.copies || []).some(c=>c.machine===e.machine && c.key===e.key));
-    if (i<0) return;
-    const {group:ignored,...copy}=e;
-    group.entries[i]=copy;
-    pinned=copy;
-    e=Object.assign({group},copy);
-    toast(`Showing ${e.agentName} on ${e.machine === here() ? sys.here : e.machine}; other copies remain in Copies & history.`);
+  if (!entries().some(x => entryKey(x) === k) && !copyEntry(e.machine, e.key)) {
+    const group = state.scan?.groups.find(g => g.entries.some(x => (x.copies || []).some(c => c.machine === e.machine && c.key === e.key)));
+    if (!group) { toast("This session is not in the current scan; refresh its machine."); return; }
+    state.resolvedSelection = Object.assign({}, e, {group});
   }
-  const inScope = () => scoped().some((x) => entryKey(x) === k);
-  if (!inScope()) state.scope = { kind: "all" };
-  if (!applyFilters(scoped(), state.scope).some((x) => entryKey(x) === k)) {
-    if (activeFacets(state.scope).length) toast("Filters cleared to show it");
+  if (!showsEntry(scoped(), e)) state.scope = {kind:"all"};
+  if (!showsEntry(applyFilters(scoped(), state.scope), e)) {
     list.text = "";
-    const f = $("#list-filter");
-    if (f) f.value = "";
+    const f = $("#list-filter"); if (f) f.value = "";
     clearFilters();
   }
   openGroupOf(e, applyFilters(scoped(), state.scope));
@@ -748,15 +756,14 @@ document.addEventListener("pointerdown",()=>{pointerHeld=true},true);
 window.addEventListener("pointerup",()=>{pointerHeld=false},true);
 window.addEventListener("pointercancel",()=>{pointerHeld=false},true);
 let readOnce = false; // a complete scan (not saved, not still discovering) has been shown
-let completeAt = 0;   // when the last complete scan was shown
 // Once a complete scan is on screen, a new read's partial snapshots (repositories pending,
 // machines "reading", rows "checking") are held back and only its finished result is shown,
-// so nothing regroups or flickers. A read that takes longer than 30 s shows its progress.
+// so nothing regroups or flickers. Read progress is shown separately from the rows.
 export function acceptScan(scan){
  if(scan?.revision && state.scan?.revision && scan.revision<=state.scan.revision)return false;
  const partial=scan.discovering||scan.cached;
- if(partial&&readOnce&&Date.now()-completeAt<30000)return false;
- state.scan=scan;if(!partial){readOnce=true;completeAt=Date.now();}freshness();return true;
+ if(partial&&readOnce)return false;
+ state.scan=scan;if(!partial)readOnce=true;freshness();return true;
 }
 function scheduleDiscovery(){if(!discoveryTimer)discoveryTimer=setTimeout(drawDiscovery,150)}
 export function backgroundRender(){backgroundDirty=true;scheduleDiscovery()}

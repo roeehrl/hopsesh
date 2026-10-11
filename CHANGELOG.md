@@ -8,6 +8,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Background refreshes update list cells in place and keep compact rows at a stable
+  height. Completed session lists stay visible throughout slower background reads.
+- Native-fork cache results follow session identity rather than listing position.
+  Reordering or adding sessions no longer attaches another conversation’s originals.
+- Inspecting an original no longer replaces its conversation's parent row or adds
+  duplicate rows after a refresh. Child rows name the actual session; blocked originals
+  show “Blocked” and lead to the destination rather than resuming the protected source.
+- The movement ledger no longer has an invisible 16 MiB cap. Settings → History exposes
+  its size limit (64 MiB by default, up to 512 MiB), and limit failures link to that setting.
+  Complete movement history is preserved, including ledgers larger than the former cap.
+
 - Session list entries show where a conversation moved from or to, with the original
   visible as a selectable line underneath. The same movement labels appear in details,
   the terminal UI and CLI.

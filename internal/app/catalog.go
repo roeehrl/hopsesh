@@ -45,6 +45,22 @@ func (a *App) CachedInventory() *Inventory {
 		e.Live = agent.LiveInfo{State: agent.Unknown}
 		e.Returns = nil
 		e.Movement = nil
+		// Older caches could attach fork results by listing position. Never publish
+		// another native session's receipt as this entry's original relationship.
+		if e.Lineage != nil {
+			owns := false
+			for _, r := range e.Lineage.Replicas {
+				if r.Key.Agent == e.Session.Key.Agent && r.Key.Session == e.Session.Key.Session {
+					owns = true
+					break
+				}
+			}
+			if !owns {
+				e.Lineage = nil
+				e.Departure = nil
+				e.Arrival = nil
+			}
+		}
 		if e.Cloud != nil {
 			c := *e.Cloud
 			c.State = agent.CloudUnknown

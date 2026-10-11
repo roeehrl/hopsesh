@@ -247,6 +247,8 @@ export function copyEntry(machine, key) {
     const home = state.scan.groups.find((gr) => gr.entries.some((x) => (x.copies || []).some((c) => c.machine === machine && c.key === key)));
     return Object.assign({ group: home || g }, e);
   }
+  const resolved = state.resolvedSelection;
+  if (resolved?.machine === machine && resolved.key === key) return resolved;
   return null;
 }
 export const here = () => (state.scan?.machines.find((m) => m.local) || {}).name || state.info?.host;

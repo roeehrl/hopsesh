@@ -442,7 +442,7 @@ func (a *App) cacheMovement(e Entry) {
 	}
 	defer movementRecords.put(e.Session.Path, seen)
 	contentReads.Add(1)
-	b, err := host.LocalFS().ReadFile(lineage.PathFor(e.Session.Path), 16<<20)
+	b, err := host.LocalFS().ReadFile(lineage.PathFor(e.Session.Path), a.Cfg.History.Limits().LineageBytes)
 	if err != nil {
 		return
 	}
@@ -460,7 +460,7 @@ func (a *App) cacheMovement(e Entry) {
 			return
 		}
 	}
-	current, err := lineage.Parse(b)
+	current, err := lineage.Parse(b, a.Cfg.History.Limits())
 	if err != nil || digest(current.Encode()) != digest(e.Lineage.Encode()) {
 		return
 	}
@@ -540,11 +540,11 @@ func (a *App) MovementNoticeDetailsForPath(ctx context.Context, id agent.ID, pro
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
 		return details, fmt.Errorf("notice transcript is outside the selected agent profile")
 	}
-	b, err := host.LocalFS().ReadFile(side, 16<<20)
+	b, err := host.LocalFS().ReadFile(side, a.Cfg.History.Limits().LineageBytes)
 	if err != nil {
 		return details, nil
 	}
-	g, err := lineage.Parse(b)
+	g, err := lineage.Parse(b, a.Cfg.History.Limits())
 	if err != nil {
 		return details, err
 	}
@@ -663,7 +663,7 @@ func (a *App) retainMovement(e *Entry) {
 	if err != nil || json.Unmarshal(b, &previous) != nil || previous.Key != e.Session.Key || previous.Notice == nil || previous.Notice.Operation != e.Movement.Operation {
 		return
 	}
-	side, err := host.LocalFS().ReadFile(lineage.PathFor(e.Session.Path), 16<<20)
+	side, err := host.LocalFS().ReadFile(lineage.PathFor(e.Session.Path), a.Cfg.History.Limits().LineageBytes)
 	if err != nil || previous.Digest != digest(side) {
 		return
 	}

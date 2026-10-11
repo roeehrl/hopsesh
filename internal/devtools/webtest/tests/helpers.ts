@@ -16,7 +16,7 @@ export async function menu(page: Page, cmd: string) {
 
 // row is the session row with exactly this title.
 export const row = (page: Page, title: string) =>
-  page.locator(".row").filter({ has: page.locator(".t").getByText(title, { exact: true }) });
+  page.locator(".row:not(.subrow)").filter({ has: page.locator(".t").getByText(title, { exact: true }) });
 
 // turnOnCloud turns a cloud on the way the window offers it: the sidebar's "Turn on a
 // cloud…" opens Machines at its clouds, the cloud's switch, then back to the sessions

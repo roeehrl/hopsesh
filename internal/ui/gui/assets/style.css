@@ -785,3 +785,14 @@ body.terminal-right .divider[data-pane="inspector"]{display:none}
  .tree .row .r-main { display: block; }
  .tree .row .r-indicators > :not(.keep):not(.role-chip) { display: none; }
 }
+
+/* Metadata arrives incrementally: keep a stable two-line row throughout a scan. */
+.row .status-top { display: flex; gap: 6px; align-items: center; min-width: 0; overflow: hidden; }
+.row .status-top > .chip, .row .status-top > .pchip { flex: 0 0 auto; }
+.row .r-indicators { flex-wrap: nowrap; min-height: 20px; overflow: hidden; }
+.tree.compact .row { height: 50px; min-height: 50px; }
+.tree .row.subrow .copy-label { display: block; }
+.row .r-status .role-chip { font-size: 11px; }
+@container list (max-width: 599px) {
+ .tree .row { height: 50px; min-height: 50px; }
+}

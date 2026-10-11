@@ -23,7 +23,7 @@ import (
 
 const Suffix = ".hopsesh.json"
 const Format = "lineage/5"
-const maxSize = 16 << 20
+const maxSize = int(ir.DefaultLineageBytes)
 
 type ReplicaID string
 type StateID string
@@ -123,6 +123,7 @@ type Compensation struct {
 }
 
 type Manifest struct {
+	sizeLimit     int
 	Format        string         `json:"hopsesh"`
 	Family        string         `json:"family"`
 	Branch        string         `json:"branch"` // branch of the native session beside this manifest
@@ -147,21 +148,33 @@ func NewNative(endpoint string, key agent.SessionKey) *Manifest {
 	return New(hash([]string{"native-family", endpoint, key.String()}))
 }
 func PathFor(main string) string { return main + Suffix }
-func Read(fsys agent.FS, main string) (*Manifest, error) {
-	b, err := fsys.ReadFile(PathFor(main), maxSize)
+func Read(fsys agent.FS, main string, limits ...ir.Limits) (*Manifest, error) {
+	l := ir.DefaultLimits()
+	if len(limits) > 0 {
+		l = limits[0].Normalize()
+	}
+	if stat, err := fsys.Stat(PathFor(main)); err == nil && stat.Size() > l.LineageBytes {
+		return nil, ledgerSizeError(l.LineageBytes, stat.Size())
+	}
+	b, err := fsys.ReadFile(PathFor(main), l.LineageBytes)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return Parse(b)
+	return Parse(b, l)
 }
-func Parse(b []byte) (*Manifest, error) {
-	if len(b) > maxSize {
-		return nil, fmt.Errorf("lineage exceeds %d bytes", maxSize)
+func Parse(b []byte, limits ...ir.Limits) (*Manifest, error) {
+	l := ir.DefaultLimits()
+	if len(limits) > 0 {
+		l = limits[0].Normalize()
+	}
+	if int64(len(b)) > l.LineageBytes {
+		return nil, ledgerSizeError(l.LineageBytes, int64(len(b)))
 	}
 	var m Manifest
+	m.SetLimits(l)
 	decoder := json.NewDecoder(bytes.NewReader(b))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&m); err != nil {
@@ -182,6 +195,7 @@ func (m *Manifest) Clone() *Manifest {
 	b, _ := json.Marshal(m)
 	var out Manifest
 	_ = json.Unmarshal(b, &out)
+	out.sizeLimit = m.sizeLimit
 	return &out
 }
 
@@ -844,7 +858,26 @@ func (m *Manifest) Journey() Journey {
 }
 
 // ErrTooLarge is a lineage that cannot be written (Read refuses more than maxSize).
-var ErrTooLarge = fmt.Errorf("lineage exceeds %d bytes", maxSize)
+var ErrTooLarge = errors.New("movement ledger exceeds its size limit")
+
+type ledgerLimitError struct{ *ir.LimitError }
+
+func (e *ledgerLimitError) Unwrap() error { return e.LimitError }
+
+func (e *ledgerLimitError) Is(target error) bool {
+	return target == ErrTooLarge || target == ir.ErrLimit
+}
+func ledgerSizeError(limit, size int64) error {
+	return &ledgerLimitError{&ir.LimitError{Stage: ir.StageLineage, Limit: limit, Size: size}}
+}
+func (m *Manifest) SetLimits(l ir.Limits) { m.sizeLimit = int(l.Normalize().LineageBytes) }
+func (m *Manifest) limit() int {
+	if m.sizeLimit > 0 {
+		return m.sizeLimit
+	}
+	return maxSize
+}
+func (m *Manifest) tooLarge() error { return ledgerSizeError(int64(m.limit()), int64(m.compactSize())) }
 
 // compactSize is a lower bound of the encoded size: each record's compact JSON. It
 // costs one small encoding per record, not one document of the whole graph (hundreds
@@ -857,13 +890,13 @@ func (m *Manifest) compactSize() int {
 	}
 	for _, r := range m.Revisions {
 		add(r)
-		if n > maxSize {
+		if n > m.limit() {
 			return n
 		}
 	}
 	for _, s := range m.States {
 		add(s)
-		if n > maxSize {
+		if n > m.limit() {
 			return n
 		}
 	}
@@ -878,15 +911,15 @@ func (m *Manifest) compactSize() int {
 
 // Writable reports a lineage too large to be written, cheaply (see compactSize).
 func (m *Manifest) Writable() error {
-	if m.compactSize() > maxSize {
-		return ErrTooLarge
+	if m.compactSize() > m.limit() {
+		return m.tooLarge()
 	}
 	return nil
 }
 
 func (m *Manifest) Validate() error {
-	if m.compactSize() > maxSize || len(m.Encode()) > maxSize {
-		return ErrTooLarge
+	if m.compactSize() > m.limit() || len(m.Encode()) > m.limit() {
+		return m.tooLarge()
 	}
 	if m.Format != Format {
 		return fmt.Errorf("lineage format %q is not %q", m.Format, Format)

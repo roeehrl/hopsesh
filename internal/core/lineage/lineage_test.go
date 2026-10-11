@@ -1,12 +1,55 @@
 package lineage
 
 import (
+	"errors"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/roeehrl/hopsesh/sdk/agent"
 	"github.com/roeehrl/hopsesh/sdk/ir"
 )
+
+func TestLedgerBudgetPreservesHistoryBeyondLegacyLimit(t *testing.T) {
+	m := New("large-history")
+	id := m.Upsert(Replica{Key: agent.SessionKey{Agent: "claude", Session: "source"}, Location: "here"})
+	text := strings.Repeat("x", 17<<20)
+	seg := ir.Segment{Nodes: []ir.Node{{Kind: ir.KindMessage, Text: text}}, Cursor: ir.Cursor{Head: "head", Offset: 10}}
+	observed, err := m.Observe(id, &seg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Imported fragments retain their portable text in the ledger. Native-only
+	// revisions store hashes, so a large native message alone is not a large ledger.
+	projection := slices.Clone(observed.Projection)
+	projection[0].Fragments = []ir.Fragment{{Text: text, Coverage: projection[0].Coverage}}
+	m.Deliver(id, ir.Cursor{Head: "imported", Offset: 20}, projection, observed.Heads, nil)
+	b := m.Encode()
+	if len(b) <= 16<<20 {
+		t.Fatal("fixture did not reach the former limit")
+	}
+	parsed, err := Parse(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(parsed.Encode()) != string(b) {
+		t.Fatal("ledger history changed")
+	}
+	_, err = Parse(b, ir.Limits{LineageBytes: 16 << 20})
+	var limit *ir.LimitError
+	if !errors.Is(err, ErrTooLarge) || !errors.As(err, &limit) || limit.Setting() != "history.lineage_mb" {
+		t.Fatalf("missing actionable limit: %v", err)
+	}
+	parsed.SetLimits(ir.Limits{LineageBytes: 16 << 20})
+	if !errors.Is(parsed.Clone().Writable(), ErrTooLarge) {
+		t.Fatal("clone lost its operation budget")
+	}
+	parsed.SetLimits(ir.Limits{LineageBytes: 32 << 20})
+	if err := parsed.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestMergeCausalReceipts(t *testing.T) {
 	m := New("L")

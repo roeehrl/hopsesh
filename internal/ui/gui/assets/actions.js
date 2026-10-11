@@ -156,7 +156,9 @@ function localModel(e) {
     m.places = places;
     const n = placeCount(places);
     const tab = places.find((p) => p.kind === "hopsesh");
-    if (places.length) {
+    const moved = e.departure || e.movement;
+    const guardedDeparture = e.guard?.mode === "block" && moved?.machine && moved?.key;
+    if (places.length && !guardedDeparture) {
       const first = tab || places.find(canShow) || places[0];
       const show = (p) => ({ id: "show:" + p.kind, label: canShow(p) ? (p.kind === "ide" ? `Show ${placeName(p, e)}` : `Show in ${placeName(p, e)}`) : `Running in ${placeName(p, e)}`, short: "Show",
         disabled: !canShow(p) || ((p.kind === "claude-app" || p.kind === "codex-app") && !e.canApp), why: ((p.kind === "claude-app" || p.kind === "codex-app") && !e.canApp) ? e.appWhy : canShow(p) ? "" : `hopsesh can't show a session in ${placeName(p, e)}`, run: () => showPlace(e, p) });
@@ -223,7 +225,7 @@ function localModel(e) {
     for (const group of m.move) group.items = group.items.filter(a => !a.id?.startsWith("continue:") || !agents.has(a.id.slice(9)));
     m.move.unshift({heading:"Return",items:m.returns});
     const promoted = m.returns.length === 1 ? m.returns[0] : {id:"return",label:"Choose where to move back…",run:()=>returnChooser(m.returns)};
-    if (!lv.live && !sessionTabs(e).length && !e.contextOverflow) {
+    if (!(e.guard?.mode === "block" && (e.departure || e.movement)) && !lv.live && !sessionTabs(e).length && !e.contextOverflow) {
       m.chevron = [m.primary, ...m.chevron].filter(Boolean);
       m.primary = promoted;
       m.chevronLabel = "Other actions";
@@ -370,6 +372,7 @@ function statusNow(e) {
     return ["unknown", host ? `Status on ${host}` : CLOUD_STATES.unknown[1]];
   }
   const lv = liveOf(e);
+  if (e.departure && e.guard?.mode === "block" && e.guard.effective) return ["moved", "Blocked"];
   const ts = e.machine === here() ? sessionTabs(e) : [];
   if (ts.length) return ts.some((t) => t.attention) ? ["needs", "Waiting for you"] : ["working", "Working"];
   if (lv.needs) return ["needs", "Needs you"];
@@ -410,6 +413,7 @@ export function statusLine(e) {
   const ps = placesOf(e);
   const n = placeCount(ps);
   const where = e.machine === here() ? sys.here : e.machine;
+  if (e.departure && e.guard?.mode === "block" && e.guard.effective) return ["moved", "Blocked", `${where} · ${ago(e.lastActive)}`];
   if (n >= 2) return ["needs", `${k === "needs" ? "Waiting for you" : k === "idle" ? "Idle" : "Working"} in ${count(ps.length > 1 ? ps.length : n, "place")}`, `${where} · ${ago(e.lastActive)}`, null, true];
   if (ps.length) {
     const p = ps[0];

@@ -13,6 +13,7 @@ type HistorySettingsDTO struct {
 	ReadMemoryMBs  []int `json:"readMemoryMBs"`
 	RecordMBs      []int `json:"recordMBs"`
 	ArchiveMBs     []int `json:"archiveMBs"`
+	LineageMBs     []int `json:"lineageMBs"`
 	NativeFileMBs  []int `json:"nativeFileMBs"`
 	// Effective values after defaults, shown next to "Default".
 	Effective ir.Limits `json:"effective"`
@@ -25,7 +26,7 @@ func (a *App) HistorySettings() HistorySettingsDTO {
 	h := a.core.Cfg.History
 	a.mu.Unlock()
 	return HistorySettingsDTO{History: h, ContextBudgets: config.HistoryContextBudgets, ReadMemoryMBs: config.HistoryReadMemoryMBs,
-		RecordMBs: config.HistoryRecordMBs, ArchiveMBs: config.HistoryArchiveMBs, NativeFileMBs: config.HistoryNativeFileMBs,
+		RecordMBs: config.HistoryRecordMBs, ArchiveMBs: config.HistoryArchiveMBs, LineageMBs: config.HistoryLineageMBs, NativeFileMBs: config.HistoryNativeFileMBs,
 		Effective: h.Limits(), Defaults: ir.DefaultLimits()}
 }
 
@@ -41,6 +42,7 @@ func (a *App) SetHistorySettings(in config.History) error {
 	zero(&in.ReadMemoryMB, d.ReadBytes)
 	zero(&in.RecordMB, d.RecordBytes)
 	zero(&in.ArchiveMB, d.ArchiveBytes)
+	zero(&in.LineageMB, d.LineageBytes)
 	zero(&in.NativeFileMB, d.NativeFileBytes)
 	if in.Older == ir.OlderExtract {
 		in.Older = ""

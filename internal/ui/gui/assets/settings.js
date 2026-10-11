@@ -331,7 +331,7 @@ const mib = (n) => n >= 1024 ? `${n / 1024} GB` : `${n} MB`;
 async function setHistory(patch) {
   if (saving) return;
   saving = true;
-  const next = Object.assign({ contextBudget: hs.contextBudget, older: hs.older, readMemoryMB: hs.readMemoryMB, recordMB: hs.recordMB, archiveMB: hs.archiveMB, nativeFileMB: hs.nativeFileMB }, patch);
+  const next = Object.assign({ contextBudget: hs.contextBudget, older: hs.older, readMemoryMB: hs.readMemoryMB, recordMB: hs.recordMB, archiveMB: hs.archiveMB, lineageMB: hs.lineageMB, nativeFileMB: hs.nativeFileMB }, patch);
   hs = Object.assign({}, hs, patch);
   render();
   try { await api("SetHistorySettings", next); toast("Saved"); } catch (e) { fail(e); }
@@ -367,6 +367,7 @@ function history() {
       sizeRow("readMemoryMB", "Reading memory", "Conversation a native transcript may hold in memory while hopsesh reads it.", hs.readMemoryMBs, d.readBytes),
       sizeRow("recordMB", "Largest record", "One native record (a single message or tool result). Cannot exceed reading memory.", hs.recordMBs, d.recordBytes),
       sizeRow("archiveMB", "Portable archive", "The preserved archive, including earlier transfers. Also the disk it may use per session.", hs.archiveMBs, d.archiveBytes),
+      sizeRow("lineageMB", "Movement ledger", "Saved transfer history and return checkpoints. Raising this limit preserves the complete ledger; nothing is truncated.", hs.lineageMBs, d.lineageBytes),
       sizeRow("nativeFileMB", "Native file checks", "Whole native files read to verify forks, recover an interrupted write, or check a staged copy.", hs.nativeFileMBs, d.nativeFileBytes)),
   ];
 }

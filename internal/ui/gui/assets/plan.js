@@ -114,6 +114,11 @@ async function endOriginal() {
 }
 
 function problem(msg, back) {
+  if (/history\.lineage_mb|lineage exceeds \d+ bytes/.test(msg)) {
+    const limit = msg.match(/\((\d+) MiB/)?.[1];
+    msg = `The saved movement history reached its size limit${limit ? ` (${limit} MiB)` : ""}. Increase “Movement ledger” in Settings → History → Resources, then review the transfer again. Existing history has not been truncated.`;
+    back = {label:"Open history settings",run:()=>{sheet.close();go("settings","history");}};
+  }
   fill(sheet, h("div", { class: "sheet-in" },
     h("div", { class: "sheet-body" }, h("div", { class: "item" }, h("span", { class: "badge err" }, "✕"), h("div", { class: "err", style: "line-height:1.5" }, msg))),
     h("div", { class: "sheet-foot" }, h("span", { class: "spacer" }),

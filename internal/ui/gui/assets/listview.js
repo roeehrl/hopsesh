@@ -238,7 +238,7 @@ export function setCollapsed(g, closed) {
 // open opens the group a session is in (a session picked from the palette, a notification
 // or Reveal), whatever the user chose before: the only time the app opens a group itself.
 export function openGroupOf(e, rows) {
-  const g = groupsOf(rows).find((x) => x.rows.some((r) => entryKey(r) === entryKey(e)));
+  const g = groupsOf(rows).find((x) => x.rows.some((r) => entryKey(r) === entryKey(e) || (r.copies || []).some(c => entryKey(c) === entryKey(e))));
   if (g && collapsed(g)) setCollapsed(g, false);
 }
 
@@ -537,6 +537,9 @@ export function tree(groups, row, selKey) {
 
 // rowByKey is the row of a session (its data-key holds machine NUL key, which a CSS
 // selector can't name).
+// render may retain the live tree and update its rows in place.
+export function adoptTree(root) { treeEl = root; }
+
 export function rowByKey(root, k) {
  chunksByKey.get(k)?.();
   for (const r of root.querySelectorAll(".row")) if (r.dataset.key === k) return r;
