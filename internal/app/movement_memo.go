@@ -27,6 +27,8 @@ const movementMemoFamilies = 32
 
 type familyObservation struct {
 	fingerprint string
+	outputs     map[string]familyOutput // entry identity -> statuses derived last time
+	notices     bool                    // whether movement notices were on for outputs
 	graph       *lineage.Manifest
 	observed    map[lineage.ReplicaID]rememberedObservation
 	ids         map[string]lineage.ReplicaID // entry identity -> replica
@@ -135,4 +137,58 @@ func (a *App) movementFingerprint(ctx context.Context, inv *Inventory, family st
 	slices.SortFunc(copies, func(x, y copyInput) int { return strings.Compare(x.Identity, y.Identity) })
 	b, _ := json.Marshal(copies)
 	return fmt.Sprintf("%x", sha256.Sum256(b))
+}
+
+// familyOutput is what EnrichMovement derived for one row.
+type familyOutput struct {
+	departure, movement *MovementNotice
+	arrival             *Arrival
+	returns             []ReturnCandidate
+}
+
+func outputOf(e Entry) familyOutput {
+	return familyOutput{departure: copyNotice(e.Departure), movement: copyNotice(e.Movement), arrival: copyArrival(e.Arrival), returns: slices.Clone(e.Returns)}
+}
+
+// apply gives a row its remembered statuses, checked now.
+func (o familyOutput) apply(e *Entry, checked time.Time) {
+	e.Departure, e.Movement, e.Arrival, e.Returns = restamp(copyNotice(o.departure), checked), restamp(copyNotice(o.movement), checked), copyArrival(o.arrival), slices.Clone(o.returns)
+}
+
+func copyNotice(n *MovementNotice) *MovementNotice {
+	if n == nil {
+		return nil
+	}
+	c := *n
+	return &c
+}
+
+func copyArrival(a *Arrival) *Arrival {
+	if a == nil {
+		return nil
+	}
+	c := *a
+	return &c
+}
+
+// restamp moves a notice's check time (and the sentence that states it) to checked.
+func restamp(n *MovementNotice, checked time.Time) *MovementNotice {
+	if n == nil || n.CheckedAt.IsZero() || checked.IsZero() {
+		return n
+	}
+	n.Text = strings.TrimSuffix(n.Text, " Last checked "+n.CheckedAt.UTC().Format(time.RFC3339)+".") + " Last checked " + checked.UTC().Format(time.RFC3339) + "."
+	n.CheckedAt = checked
+	return n
+}
+
+func (m *movementMemo) keepOutputs(family, fingerprint string, notices bool, outputs map[string]familyOutput) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if f, ok := m.families[family]; ok && f.fingerprint == fingerprint {
+		f.outputs, f.notices = outputs, notices
+		m.families[family] = f
+	}
 }

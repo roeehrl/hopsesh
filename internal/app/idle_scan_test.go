@@ -182,3 +182,31 @@ func TestIdleRescanTouchesNothing(t *testing.T) {
 	}
 }
 
+// An unchanged refresh of a large moved session allocates almost nothing: it must not
+// parse, clone or rehash the graph (thousands of revisions) or the transcript again.
+func TestUnchangedRefreshAllocationBudget(t *testing.T) {
+	ctx := context.Background()
+	a, inv := movedPairSized(t, 5000)
+	a.EnrichMovement(ctx, inv)
+	if n := len(inv.Entries[0].Lineage.Revisions); n < 5000 {
+		t.Fatalf("graph has %d revisions, want a large one", n)
+	}
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	refreshes := uint64(5)
+	if os.Getenv("HS_REFRESHES") != "" {
+		refreshes = 25
+	}
+	for range refreshes {
+		a.EnrichMovement(ctx, inv)
+	}
+	runtime.ReadMemStats(&after)
+	perRefresh := (after.TotalAlloc - before.TotalAlloc) / refreshes
+	// Rereading this session costs several megabytes; recalling it, tens of kilobytes.
+	const budget = 512 << 10
+	if perRefresh > budget {
+		t.Fatalf("an unchanged refresh allocated %d KiB, budget %d KiB", perRefresh>>10, budget>>10)
+	}
+	t.Logf("unchanged refresh: %d KiB allocated", perRefresh>>10)
+}

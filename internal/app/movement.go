@@ -79,11 +79,22 @@ func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
 		ids := map[int]lineage.ReplicaID{}
 		var g *lineage.Manifest
 		fingerprint := a.movementFingerprint(ctx, inv, family)
+		notices := a.Cfg.MovementNoticesOn()
 		if memo, ok := a.movementMemo.get(family, fingerprint); ok {
 			if memo.graph == nil {
 				continue // the family's receipts conflict
 			}
 			g = memo.recall(inv, observed, ids)
+			// Same copies, same receipts: the statuses are the ones computed last time
+			// (deriving them walks the whole revision graph per copy).
+			if memo.outputs != nil && memo.notices == notices {
+				for i := range ids {
+					e := &inv.Entries[i]
+					memo.outputs[EntryIdentity(e.Machine, e.Session.Key.String())].apply(e, e.ObservedAt)
+					a.publishMovement(inv, e)
+				}
+				continue
+			}
 		} else {
 			g = committedGraph(inv, family, families[family])
 			if g != nil {
@@ -94,6 +105,7 @@ func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
 				continue
 			}
 		}
+		outputs := map[string]familyOutput{}
 		for i, id := range ids {
 			e := &inv.Entries[i]
 			e.Returns = nil
@@ -161,17 +173,13 @@ func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
 				}
 				e.Returns = append(e.Returns, c)
 			}
-			if a.Cfg.MovementNoticesOn() {
+			if notices {
 				e.Movement = a.movementNotice(g, id, observed)
 			}
-			if m := inv.Machine(e.Machine); m != nil && m.Local {
-				a.retainMovement(e)
-				a.cacheMovement(*e)
-				if e.Movement != nil && a.MovementNoticeDelivery(e.Agent, e.Session.Key.Profile, string(e.Session.Key.Session), hookNoticeText(e.Movement), MovementNoticeIdentity{Operation: e.Movement.Operation, Status: e.Movement.Status}) {
-					e.Movement.Delivery = "supplied-to-hook"
-				}
-			}
+			outputs[EntryIdentity(e.Machine, e.Session.Key.String())] = outputOf(*e)
+			a.publishMovement(inv, e)
 		}
+		a.movementMemo.keepOutputs(family, fingerprint, notices, outputs)
 	}
 }
 
@@ -264,6 +272,20 @@ func (a *App) observeFamily(ctx context.Context, inv *Inventory, family string, 
 				observed[old.ID] = observation
 			}
 		}
+	}
+}
+
+// publishMovement hands a local copy's movement to its agent's hook and keeps its
+// record current (both skip work when nothing changed).
+func (a *App) publishMovement(inv *Inventory, e *Entry) {
+	m := inv.Machine(e.Machine)
+	if m == nil || !m.Local {
+		return
+	}
+	a.retainMovement(e)
+	a.cacheMovement(*e)
+	if e.Movement != nil && a.MovementNoticeDelivery(e.Agent, e.Session.Key.Profile, string(e.Session.Key.Session), hookNoticeText(e.Movement), MovementNoticeIdentity{Operation: e.Movement.Operation, Status: e.Movement.Status}) {
+		e.Movement.Delivery = "supplied-to-hook"
 	}
 }
 

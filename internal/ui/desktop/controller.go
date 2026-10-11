@@ -291,6 +291,7 @@ func (c *Controller) BackgroundLaunch() bool {
 		return false
 	}
 }
+
 // Attended is whether someone is looking at hopsesh now: its window has focus or the
 // menu bar popup is open. A window left open behind other apps is not.
 func (c *Controller) Attended() bool { return c.main.IsFocused() || c.quick.IsVisible() }
