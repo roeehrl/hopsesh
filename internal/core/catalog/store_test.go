@@ -169,6 +169,7 @@ func TestCollectorCacheFailureDoesNotBlockBrowsing(t *testing.T) {
 		if !s.Claim("scope", "reader") {
 			t.Fatal("unwritable cache blocks discovery")
 		}
+		s.Release("scope", "reader") // an open lock file cannot be removed on Windows
 	}
 }
 
