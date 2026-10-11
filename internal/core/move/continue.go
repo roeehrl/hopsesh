@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -151,7 +152,10 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		if err != nil {
 			return nil, err
 		}
-		p.Warnings = append(p.Warnings, "The destination has insufficient verified context capacity. Create a bounded continuation on the same branch; the existing session remains available.")
+		p.Warnings = append(p.Warnings, "The original session is too full to add to, so this starts a new session that continues it; the original stays as it is.")
+		// The original is not written, so whether it is open no longer matters.
+		p.Blockers = slices.DeleteFunc(p.Blockers, func(b string) bool { return b == "the destination copy is open; quit it first" })
+		p.Warnings = slices.DeleteFunc(p.Warnings, func(w string) bool { return w == openBlockedNote(spec.Name) })
 	}
 	prof := writer.Profile(tgt.Install)
 	var redact func([]byte) ([]byte, int)
@@ -389,7 +393,11 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 			s.Key.Profile = in.Target.Install.ProfileID()
 			p.Placement.Key = s.Key
 			if c.Live.State == agent.Live {
-				p.Blockers = append(p.Blockers, "the destination copy is open; quit it first")
+				if opt.OpenBlockedOriginal != "" && opt.OpenBlockedOriginal == c.Summary.Key.String() {
+					p.Warnings = append(p.Warnings, openBlockedNote(in.Target.Module.Spec().Name))
+				} else {
+					p.Blockers = append(p.Blockers, "the destination copy is open; quit it first")
+				}
 			}
 			seg.Nodes = missingNodes(seg.Nodes, target)
 			return
@@ -586,7 +594,7 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 			if err != nil {
 				return nil, fmt.Errorf("cannot recheck destination activity: %w", err)
 			}
-			if live[cp.AppendTo.Key.Session].State == agent.Live {
+			if live[cp.AppendTo.Key.Session].State == agent.Live && p.Options.OpenBlockedOriginal != cp.AppendTo.Key.String() {
 				return nil, fmt.Errorf("the destination copy is open; quit it first and refresh the plan")
 			}
 		}
@@ -750,4 +758,10 @@ func liveSnapshotNotice(p *Plan) string {
 	}
 	notice := "The source session on " + place + " is still running. This transfer uses a snapshot; later source messages are not automatically synchronized."
 	return notice
+}
+
+// openBlockedNote is the review's line for adding to an original that is open but
+// blocked: it is written now, and its hook asks for it to be reopened before use.
+func openBlockedNote(agentName string) string {
+	return "The original is open in " + agentName + ". Your new work is added to it now; reopen it in " + agentName + " to continue with it (until then it refuses new prompts and says so)."
 }

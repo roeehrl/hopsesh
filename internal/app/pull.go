@@ -240,6 +240,9 @@ func (a *App) Plan(ctx context.Context, inv *Inventory, e Entry, target agent.ID
 			opt.Via = move.ViaImport
 		}
 	}
+	if opt.OpenBlockedOriginal == "" {
+		opt.OpenBlockedOriginal = a.openBlockedOriginal(ctx, inv, e)
+	}
 	p, err := move.Build(ctx, in, opt)
 	return p, in, err
 }
@@ -276,7 +279,11 @@ func (a *App) Apply(ctx context.Context, p *move.Plan, in move.Input, progress f
 			}
 		}
 	}
-	return move.Apply(ctx, p, in, move.Env{StateDir: a.StateDir, Audit: a.Audit, Progress: progress, Step: a.Steps})
+	res, err := move.Apply(ctx, p, in, move.Env{StateDir: a.StateDir, Audit: a.Audit, Progress: progress, Step: a.Steps})
+	if err == nil {
+		a.noteReopen(p)
+	}
+	return res, err
 }
 
 // gitFetchFunc is how to fetch from a repository on a machine over SSH (nil for this

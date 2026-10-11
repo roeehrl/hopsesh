@@ -26,7 +26,7 @@ type preparedMovementNotice struct {
 	// then the reason the agent shows. A block repeats on every prompt.
 	Block bool
 }
-type movementNoticePrepare func(context.Context, agent.ID, string, string, string, string) (preparedMovementNotice, error)
+type movementNoticePrepare func(ctx context.Context, id agent.ID, profile, session, path, event, source string) (preparedMovementNotice, error)
 
 func noticeHookCmd() *cobra.Command {
 	var id, profile string
@@ -35,12 +35,16 @@ func noticeHookCmd() *cobra.Command {
 			useDirFlags(cmd)
 			// A hook fails open and emits no diagnostics or non-JSON output. Do not use
 			// newRun: no audit log, skill offers, password readers, or session scan.
-			return runPreparedNoticeHook(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), agent.ID(id), profile, func(ctx context.Context, id agent.ID, profile, session, path, event string) (preparedMovementNotice, error) {
+			return runPreparedNoticeHook(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), agent.ID(id), profile, func(ctx context.Context, id agent.ID, profile, session, path, event, source string) (preparedMovementNotice, error) {
 				cfg, err := config.Load()
 				if err != nil || cfg.OriginalGuard() == app.GuardOff {
 					return preparedMovementNotice{}, nil
 				}
 				a := app.New(cfg, modules, config.StateDir(), nil)
+				// Work was added while this window was open: reopening loads it.
+				if text, block, handled := a.ReopenNotice(ctx, id, profile, session, event, source); handled {
+					return preparedMovementNotice{Text: text, Block: block}, nil
+				}
 				details, err := a.MovementNoticeDetailsForPath(ctx, id, profile, session, path)
 				if err != nil || details.Key.Session == "" {
 					return preparedMovementNotice{}, err
@@ -83,12 +87,13 @@ func runPreparedNoticeHook(ctx context.Context, in io.Reader, out io.Writer, id 
 			SessionID      string `json:"session_id"`
 			TranscriptPath string `json:"transcript_path"`
 			Event          string `json:"hook_event_name"`
+			Source         string `json:"source"` // SessionStart: startup, resume, clear or compact
 		}
 		if json.Unmarshal(raw, &payload) != nil || payload.SessionID == "" || len(payload.SessionID) > 256 || strings.ContainsFunc(payload.SessionID, unicode.IsControl) || len(payload.TranscriptPath) > 4096 || strings.ContainsRune(payload.TranscriptPath, 0) || payload.Event != "SessionStart" && payload.Event != "UserPromptSubmit" {
 			return
 		}
 		// Path is untrusted input, used solely by the app's bounded local resolver.
-		prepared, err := prepare(ctx, id, profile, payload.SessionID, payload.TranscriptPath, payload.Event)
+		prepared, err := prepare(ctx, id, profile, payload.SessionID, payload.TranscriptPath, payload.Event, payload.Source)
 		notice := prepared.Text
 		if err != nil || notice == "" || ctx.Err() != nil {
 			return

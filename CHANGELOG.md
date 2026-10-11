@@ -17,6 +17,15 @@ All notable changes to this project are documented here. The format follows
   `push` no longer take `--fork`: that option made a separate copy that was never blocked,
   silently overriding "Block the original". Separate copies hopsesh still makes on its own
   (both copies changed, bounded continuations) are called separate conversations.
+- Moving back adds to the original even while it is open in its agent, when hopsesh
+  blocks it: nobody can type there, so nothing can be lost. Its hook then asks you to
+  reopen it, which loads the new work, and stops asking once it is reopened. The review
+  no longer tells you to end the session or quit the agent's app.
+- Moving back adds to an original that is close to its context limit when the new work
+  fits. Its measured usage already includes its instructions and tools, so hopsesh now
+  keeps only room for the next reply; it used to start a new session for six messages to
+  a session at 87% of 1M. When a new session is still needed, the review says why, and no
+  longer asks you to end the original, which is not written.
 - Blocking or warning in a moved session's original works on a default install. The
   protection hooks always pass the settings and state folders; naming the default
   folders explicitly made hopsesh look for this machine's identity in the wrong place,

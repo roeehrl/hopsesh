@@ -81,27 +81,31 @@ const (
 
 // Options are the user's choices.
 type Options struct {
-	Bounded       bool   `json:"bounded,omitempty"`    // new bounded replica on the same logical branch
-	NewReplica    bool   `json:"newReplica,omitempty"` // explicitly create a new native session; never auto-select an existing one
-	TargetProfile string `json:"targetProfile,omitempty"`
-	OperationID   string `json:"operationId,omitempty"`
-	TargetSession string `json:"targetSession,omitempty"`
-	TargetDir     string // resume here (skips repository matching)
-	Clone         bool   // clone the repository when it is not here
-	ReposDir      string
-	ExtraRoots    []string // more folders to look for checkouts in
-	GHQLayout     bool
-	Worktree      WorktreeMode
-	Fork          bool // keep the source session running (both continue)
-	RemoteControl bool
-	Notify        bool // tell the old session it moved on
-	Redact        bool
-	App           bool // open in the agent's desktop app
-	SyncCode      bool // bring the checkout to the session's commit
-	Push          bool // push unpushed commits on the source first
-	StopLocal     bool // quit a copy of this session that is open here
-	Conflict      string
-	OtherAccount  bool // the target is signed in to another account (set by the planner)
+	// OpenBlockedOriginal names an original that is open in its agent but blocked by
+	// hopsesh (its hook refuses new prompts): a return may add to it while it is open,
+	// and its hook then asks for it to be reopened to load the new work.
+	OpenBlockedOriginal string `json:"openBlockedOriginal,omitempty"`
+	Bounded             bool   `json:"bounded,omitempty"`    // new bounded replica on the same logical branch
+	NewReplica          bool   `json:"newReplica,omitempty"` // explicitly create a new native session; never auto-select an existing one
+	TargetProfile       string `json:"targetProfile,omitempty"`
+	OperationID         string `json:"operationId,omitempty"`
+	TargetSession       string `json:"targetSession,omitempty"`
+	TargetDir           string // resume here (skips repository matching)
+	Clone               bool   // clone the repository when it is not here
+	ReposDir            string
+	ExtraRoots          []string // more folders to look for checkouts in
+	GHQLayout           bool
+	Worktree            WorktreeMode
+	Fork                bool // keep the source session running (both continue)
+	RemoteControl       bool
+	Notify              bool // tell the old session it moved on
+	Redact              bool
+	App                 bool // open in the agent's desktop app
+	SyncCode            bool // bring the checkout to the session's commit
+	Push                bool // push unpushed commits on the source first
+	StopLocal           bool // quit a copy of this session that is open here
+	Conflict            string
+	OtherAccount        bool // the target is signed in to another account (set by the planner)
 	// Continuing in another agent.
 	Fidelity convert.Fidelity // history (default) or note
 	Native   bool             // render exact tool calls as the target's own (when it can)
