@@ -42,7 +42,7 @@
     await call("QuickOpen","sessions",entry.machine,entry.key);
   } catch (error) {
     const current=await call("ScanSnapshot");
-    phase('Quick selection rejected: '+JSON.stringify({requested:{machine:entry.machine,key:entry.key},quickRevision:q.scan.revision,quickCached:q.scan.cached,quickDiscovering:q.scan.discovering,currentRevision:current.revision,currentDiscovering:current.discovering,current:current.groups.flatMap(g=>g.entries).map(e=>({machine:e.machine,key:e.key}))}));
+    phase('Quick selection rejected: '+JSON.stringify({requested:{machine:entry.machine,key:entry.key},quickRevision:q.scan.revision,quickCached:q.scan.cached,quickDiscovering:q.scan.discovering,currentRevision:current.revision,currentDiscovering:current.discovering,current:current.groups.flatMap(g=>g.entries).map(e=>({machine:e.machine,key:e.key,cached:!!e.cached,location:e.location,path:e.path,profile:e.profile&&{id:e.profile.id,default:e.profile.default,agent:e.profile.agent,endpoint:e.profile.endpoint}})),machines:(current.machines||[]).map(m=>({name:m.name,local:m.local,status:m.status,phase:m.phase}))}));
     throw error;
   }
   if(!await until(()=>document.querySelector('.row[aria-selected="true"]'),10000)){
