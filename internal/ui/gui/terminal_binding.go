@@ -2,8 +2,10 @@ package gui
 
 import (
 	"context"
+	"os"
 	"reflect"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/app"
@@ -12,6 +14,61 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/pty"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
+
+// Codex's shared daemon owns the writer locks on behalf of unrelated CLI clients.
+// Its initialize handshake has no client PID/thread association. Use the vendor's
+// per-invocation embedded server for owned session tabs, so native lock evidence
+// can still prove ancestry (including a native /new or /fork). This does not change
+// profile roots, authentication, hooks, or commands opened in an external terminal.
+// --no-daemon is supported since 0.156.0; unknown/older versions stay unchanged.
+// Source: openai/codex rust-v0.160.1, tui/src/cli.rs and tui/src/daemon_startup.rs.
+func (a *App) ownedSessionCommand(c agent.Command, meta TabMeta) agent.Command {
+	key, err := agent.ParseKey(meta.Key)
+	if err != nil || key.Agent != "codex" || meta.Machine != app.LocalName() || meta.Kind != TabSession || len(c.Argv) < 2 || (c.Argv[1] != "resume" && c.Argv[1] != "fork") {
+		return c
+	}
+	a.mu.Lock()
+	var in agent.Install
+	if a.inv != nil {
+		if local := a.inv.Local(); local != nil {
+			in, _ = local.InstallProfile(key.Agent, key.Profile)
+		}
+	}
+	a.mu.Unlock()
+	// Version evidence belongs to this exact scoped executable, not another
+	// wrapper or a bare name that PATH could resolve differently at launch.
+	if in.Agent != "codex" || in.Binary == "" || !agent.HookVersionAtLeast(in.Version, "0.156.0") || c.Argv[0] != in.Binary || slices.Contains(c.Argv, "--no-daemon") {
+		return c
+	}
+	// --no-daemon conflicts with an explicit remote endpoint. Never change that
+	// transport/authentication choice, including an inherited endpoint not removed
+	// by the already-scoped command. Vendor daemon-auto-start is optional, whereas
+	// daemon-only `agents` is excluded by the resume/fork gate above.
+	for _, arg := range c.Argv[2:] {
+		if arg == "--remote" || strings.HasPrefix(arg, "--remote=") || arg == "--remote-auth-token-env" || strings.HasPrefix(arg, "--remote-auth-token-env=") {
+			return c
+		}
+	}
+	endpoint := os.Getenv("CODEX_APP_SERVER_ADDRESS")
+	endpointName := func(name string) bool {
+		return name == "CODEX_APP_SERVER_ADDRESS" || in.OS == "windows" && strings.EqualFold(name, "CODEX_APP_SERVER_ADDRESS")
+	}
+	for _, name := range c.Unset {
+		if endpointName(name) {
+			endpoint = ""
+		}
+	}
+	for _, env := range c.Env {
+		if name, v, ok := strings.Cut(env, "="); ok && endpointName(name) {
+			endpoint = v
+		}
+	}
+	if endpoint != "" {
+		return c
+	}
+	c.Argv = append([]string{c.Argv[0], c.Argv[1], "--no-daemon"}, c.Argv[2:]...)
+	return c
+}
 
 // descendsFrom verifies a process chain in one native snapshot. The root is a
 // still-owned PTY child: its process handle has not exited, so its PID cannot
