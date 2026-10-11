@@ -10,6 +10,11 @@ import (
 // AdoptNativeFork requires module-verified native inheritance. It returns a new branch
 // view without modifying the parent's manifest or its native session.
 func (m *Manifest) AdoptNativeFork(parent ReplicaID, child Replica, proof []agent.NativeInheritance, seg *ir.Segment) (*Manifest, error) {
+	// The fork records a revision per new child node; a graph that cannot be written is
+	// refused before it is built (Validate would refuse it after).
+	if size := m.compactSize(); size > maxSize || (len(m.Revisions) > 0 && size+len(seg.Nodes)*size/len(m.Revisions) > maxSize) {
+		return nil, ErrTooLarge
+	}
 	out := m.Clone()
 	known := map[string]ir.Projection{}
 	for _, st := range out.States {

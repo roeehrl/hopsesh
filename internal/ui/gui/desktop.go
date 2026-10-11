@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/ui/desktop"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -336,7 +337,7 @@ func (a *App) watchRefresh(ctx context.Context) func() {
 	run = func() {
 		mu.Lock()
 		gap := watchGapForeground
-		if shell, ok := a.Desktop.(interface{ Attended() bool }); ok && !shell.Attended() {
+		if !a.attended() {
 			gap = quickRefreshBackground
 		}
 		if wait := gap - time.Since(last); wait > 0 {
@@ -363,6 +364,14 @@ func (a *App) watchRefresh(ctx context.Context) func() {
 	return run
 }
 
+// attended is whether someone looks at hopsesh (no desktop shell: always).
+func (a *App) attended() bool {
+	if shell, ok := a.Desktop.(interface{ Attended() bool }); ok {
+		return shell.Attended()
+	}
+	return true
+}
+
 // watchGapForeground spaces change-driven refreshes while a hopsesh window is in front.
 const watchGapForeground = 5 * time.Second
 
@@ -379,7 +388,7 @@ func (a *App) InitialScan() (*ScanDTO, error) {
 			core := a.snapshot()
 			go func() {
 				defer close(watchDone)
-				core.WatchSessions(ctx, a.watchRefresh(ctx), a.snapshot)
+				core.WatchSessions(ctx, a.watchRefresh(ctx), app.WatchOptions{Active: a.attended, Current: a.snapshot})
 			}()
 		})
 	}

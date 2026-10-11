@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/pprof"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -58,24 +59,31 @@ type phase struct {
 	DiskWritten     int64   `json:"diskWrittenBytes"` // by the app's process (-1: unknown here)
 	CatalogChanged  bool    `json:"catalogChanged"`
 	HeapAfterGCMiB  uint64  `json:"heapAfterGCMiB"`
+	WakeupsPerSec   float64 `json:"wakeupsPerSec"` // -1: unknown here
+	PeakHeapMiB     uint64  `json:"peakHeapMiB"`   // whole run, cold start included
 	CPUPerScanMilli float64 `json:"cpuPerScanMs,omitempty"`
 }
 
 func main() {
 	sessions := flag.Int("sessions", 300, "generated sessions")
 	large := flag.Int("large", 3, "of which large (many turns)")
+	keep := flag.String("keep", "", "build the home here and keep it (profiling); measure nothing")
+	forkMB := flag.Int("fork-mb", 60, "size of a Codex rollout with a native fork (verified at the cold start), MiB")
 	warmup := flag.Duration("warmup", 45*time.Second, "settling time before measuring")
 	idle := flag.Duration("idle", 2*time.Minute, "unattended measurement")
 	attended := flag.Duration("attended", 30*time.Second, "attended measurement")
 	writeEvery := flag.Duration("write-every", 250*time.Millisecond, "how often the writer appends to a session")
 	out := flag.String("json", "", "write results here")
 	writeTo := flag.String("writer", "", "internal: be the other agent, appending to this session")
+	goroutines := flag.String("goroutines", "", "after warmup, write every goroutine's stack here (finding wakeups)")
 	// Budgets.
 	maxIdleCPU := flag.Float64("max-idle-cpu", 1.0, "unattended CPU, percent of one core")
 	maxIdleScans := flag.Int64("max-idle-scans", 1, "unattended rescans")
 	maxIdleReads := flag.Int64("max-idle-reads", 0, "unattended transcript and sidecar reads")
 	maxIdleDisk := flag.Int64("max-idle-disk", 256<<10, "unattended bytes written by the app")
 	maxHeap := flag.Uint64("max-heap", 200, "heap after GC, MiB")
+	maxPeak := flag.Uint64("max-peak-heap", 512, "heap in use at its highest, cold start included, MiB")
+	maxIdleWakeups := flag.Float64("max-idle-wakeups", 20, "unattended wakeups per second (macOS: CPU wakeups; Linux: voluntary context switches)")
 	maxScanCPU := flag.Float64("max-scan-cpu", 1500, "CPU per attended rescan, milliseconds")
 	flag.Parse()
 	if *writeTo != "" {
@@ -83,21 +91,56 @@ func main() {
 		return
 	}
 
-	home, err := os.MkdirTemp("", "hopsesh-idlebench-")
-	must(err)
-	defer os.RemoveAll(home)
+	gui.LimitMemory() // as the desktop app does
+	home := *keep
+	if home == "" {
+		h, err := os.MkdirTemp("", "hopsesh-idlebench-")
+		must(err)
+		defer os.RemoveAll(h)
+		home = h
+	} else {
+		must(os.MkdirAll(home, 0o700))
+	}
 	home, _ = filepath.EvalSymlinks(home)
 	for k, v := range testkit.Env(home) {
 		os.Setenv(k, v)
 	}
 	must(testkit.DemoHome(home))
 	target := must1(generate(home, *sessions, *large))
+	must(codexFork(home, *forkMB))
+	if *keep != "" {
+		return
+	}
 
+	// The highest heap in use, sampled during the cold first scan and while attended
+	// (sampling wakes the process, so it is off while measuring an unattended app).
+	var peak atomic.Uint64
+	sample := func() (stop func()) {
+		done := make(chan struct{})
+		go func() {
+			t := time.NewTicker(100 * time.Millisecond)
+			defer t.Stop()
+			for {
+				var ms runtime.MemStats
+				runtime.ReadMemStats(&ms)
+				if ms.HeapInuse > peak.Load() {
+					peak.Store(ms.HeapInuse)
+				}
+				select {
+				case <-done:
+					return
+				case <-t.C:
+				}
+			}
+		}()
+		return func() { close(done) }
+	}
+	stopSampling := sample()
 	svc := gui.NewApp(all.Registry())
 	sh := &shell{s: desktop.State{Capabilities: desktop.Capabilities{Tray: true}, Effective: "both"}}
 	svc.Desktop = sh
 	defer svc.Shutdown()
-	_, err = svc.InitialScan()
+	_, err := svc.InitialScan()
 	must(err)
 
 	// The other agent is its own process: its writes are not the app's.
@@ -107,12 +150,21 @@ func main() {
 	defer func() { _ = other.Process.Kill(); _ = other.Wait() }()
 
 	time.Sleep(*warmup)
+	stopSampling()
+	if *goroutines != "" {
+		if f, err := os.Create(*goroutines); err == nil {
+			_ = pprof.Lookup("goroutine").WriteTo(f, 1)
+			f.Close()
+		}
+	}
 	catalog := filepath.Join(home, "state", "catalog")
 	results := []phase{
 		measure("unattended", *idle, catalog),
 	}
 	sh.attended.Store(true)
+	stopSampling = sample()
 	results = append(results, measure("attended", *attended, catalog))
+	stopSampling()
 
 	var fails []string
 	u, at := results[0], results[1]
@@ -126,7 +178,11 @@ func main() {
 	check(u.ContentReads <= *maxIdleReads, "unattended content reads %d > %d", u.ContentReads, *maxIdleReads)
 	check(u.DiskWritten < 0 || u.DiskWritten <= *maxIdleDisk, "unattended disk writes %d B > %d B", u.DiskWritten, *maxIdleDisk)
 	check(!u.CatalogChanged || u.Scans > 0, "the catalog changed with no rescan")
+	check(u.WakeupsPerSec < 0 || u.WakeupsPerSec <= *maxIdleWakeups, "unattended wakeups %.1f/s > %.1f/s", u.WakeupsPerSec, *maxIdleWakeups)
 	check(u.HeapAfterGCMiB <= *maxHeap && at.HeapAfterGCMiB <= *maxHeap, "heap after GC %d/%d MiB > %d MiB", u.HeapAfterGCMiB, at.HeapAfterGCMiB, *maxHeap)
+	peakMiB := peak.Load() >> 20
+	check(peakMiB <= *maxPeak, "peak heap in use %d MiB > %d MiB", peakMiB, *maxPeak)
+	results[0].PeakHeapMiB, results[1].PeakHeapMiB = peakMiB, peakMiB
 	// Attended: refreshes follow writes, but spaced (the 5 s gap), and each one is cheap.
 	maxAttended := int64(math.Ceil(at.Seconds/5)) + 1
 	check(at.Scans <= maxAttended, "attended rescans %d > %d (one per 5 s)", at.Scans, maxAttended)
@@ -181,6 +237,66 @@ func generate(home string, n, large int) (string, error) {
 	return target, nil
 }
 
+// codexFork pads a demo Codex rollout to size MiB with copies of its own records and
+// adds a native fork of it: discovery verifies the fork at the cold start by comparing
+// the two rollouts, the path that once held whole rollouts in memory.
+func codexFork(home string, size int) error {
+	var tmpl string
+	_ = filepath.Walk(filepath.Join(home, ".codex", "sessions"), func(p string, fi os.FileInfo, err error) error {
+		if err == nil && tmpl == "" && strings.HasSuffix(p, ".jsonl") {
+			tmpl = p
+		}
+		return nil
+	})
+	if tmpl == "" {
+		return fmt.Errorf("no demo Codex rollout")
+	}
+	body, err := os.ReadFile(tmpl)
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(strings.TrimRight(string(body), "\n"), "\n")
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &meta); err != nil {
+		return err
+	}
+	var record string
+	for _, l := range lines[1:] {
+		if strings.Contains(l, `"type":"response_item"`) {
+			record = l
+			break
+		}
+	}
+	if record == "" {
+		return fmt.Errorf("no record to repeat in %s", tmpl)
+	}
+	const parentID, childID = "01a1d1e0-0000-7000-8000-00000000f0a1", "01a1d1e0-0000-7000-8000-00000000f0a2"
+	rollout := func(id, forkedFrom string) error {
+		payload := meta["payload"].(map[string]any)
+		payload["id"] = id
+		delete(payload, "forked_from_id")
+		if forkedFrom != "" {
+			payload["forked_from_id"] = forkedFrom
+		}
+		head, _ := json.Marshal(meta)
+		var b strings.Builder
+		b.Write(head)
+		b.WriteByte('\n')
+		for _, l := range lines[1:] {
+			b.WriteString(l + "\n")
+		}
+		for b.Len() < size<<20 {
+			b.WriteString(record + "\n")
+		}
+		name := filepath.Join(filepath.Dir(tmpl), "rollout-2026-10-01T09-00-00-"+id+".jsonl")
+		return os.WriteFile(name, []byte(b.String()), 0o600)
+	}
+	if err := rollout(parentID, ""); err != nil {
+		return err
+	}
+	return rollout(childID, parentID)
+}
+
 func writer(path string, every time.Duration) {
 	t := time.NewTicker(every)
 	defer t.Stop()
@@ -196,12 +312,12 @@ func writer(path string, every time.Duration) {
 }
 
 func measure(name string, d time.Duration, catalog string) phase {
-	c0, cat0, d0 := app.ResourceCounters(), catalogState(catalog), diskWritten()
+	c0, cat0, d0, k0 := app.ResourceCounters(), catalogState(catalog), diskWritten(), wakeups()
 	cpu0 := cpuTime()
 	start := time.Now()
 	time.Sleep(d)
 	el := time.Since(start).Seconds()
-	c1, cat1, d1 := app.ResourceCounters(), catalogState(catalog), diskWritten()
+	c1, cat1, d1, k1 := app.ResourceCounters(), catalogState(catalog), diskWritten(), wakeups()
 	cpu := (cpuTime() - cpu0).Seconds()
 	runtime.GC()
 	var ms runtime.MemStats
@@ -210,6 +326,10 @@ func measure(name string, d time.Duration, catalog string) phase {
 		CPUSeconds: round(cpu), CPUPercent: round(100 * cpu / el), CatalogChanged: cat0 != cat1, HeapAfterGCMiB: ms.HeapAlloc >> 20, DiskWritten: -1}
 	if d0 >= 0 && d1 >= 0 {
 		p.DiskWritten = d1 - d0
+	}
+	p.WakeupsPerSec = -1
+	if k0 >= 0 && k1 >= 0 {
+		p.WakeupsPerSec = round(float64(k1-k0) / el)
 	}
 	if p.Scans > 0 {
 		p.CPUPerScanMilli = round(1000 * cpu / float64(p.Scans))
@@ -246,9 +366,9 @@ func report(results []phase, fails []string, out string) {
 	if s := os.Getenv("GITHUB_STEP_SUMMARY"); s != "" {
 		f, err := os.OpenFile(s, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644)
 		if err == nil {
-			fmt.Fprintf(f, "### Idle resources (%s)\n\n| phase | s | rescans | content reads | CPU %% | CPU per rescan ms | disk written B | catalog changed | heap MiB |\n|---|---|---|---|---|---|---|---|---|\n", runtime.GOOS)
+			fmt.Fprintf(f, "### Idle resources (%s)\n\n| phase | s | rescans | content reads | CPU %% | CPU per rescan ms | disk written B | wakeups/s | catalog changed | heap MiB |\n|---|---|---|---|---|---|---|---|---|---|\n", runtime.GOOS)
 			for _, p := range results {
-				fmt.Fprintf(f, "| %s | %.0f | %d | %d | %.2f | %.0f | %d | %v | %d |\n", p.Name, p.Seconds, p.Scans, p.ContentReads, p.CPUPercent, p.CPUPerScanMilli, p.DiskWritten, p.CatalogChanged, p.HeapAfterGCMiB)
+				fmt.Fprintf(f, "| %s | %.0f | %d | %d | %.2f | %.0f | %d | %.1f | %v | %d |\n", p.Name, p.Seconds, p.Scans, p.ContentReads, p.CPUPercent, p.CPUPerScanMilli, p.DiskWritten, p.WakeupsPerSec, p.CatalogChanged, p.HeapAfterGCMiB)
 			}
 			for _, fl := range fails {
 				fmt.Fprintf(f, "\n- ❌ %s", fl)

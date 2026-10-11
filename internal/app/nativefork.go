@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
@@ -89,7 +90,14 @@ func nativeForkManifests(ctx context.Context, hm *host.Machine, h agent.Host, mo
 				problems[i] = err.Error()
 				continue
 			}
-			manifests[parent] = pm.Clone()
+			// A parent whose graph cannot be written cannot carry a fork's ancestry either:
+			// say so now, before reading both rollouts to verify the fork.
+			if err := pm.Writable(); err != nil {
+				problems[i] = fmt.Sprintf("native fork ancestry: %v", err)
+				continue
+			}
+			previous := manifests[parent]
+			manifests[parent] = pm // a clone of its own (above)
 
 			proof, err := verifier.VerifyNativeFork(ctx, h, in, ss[parent], s)
 			if err != nil {
@@ -104,6 +112,9 @@ func nativeForkManifests(ctx context.Context, hm *host.Machine, h agent.Host, mo
 			m, err := pm.AdoptNativeFork(pid, lineage.Replica{Key: s.Key, Endpoint: endpoint, Binding: in.BindingID(), Location: hm.Name, AgentVersion: s.AgentVersion, Time: seg.Header.Created}, proof, &seg)
 			if err != nil {
 				problems[i] = fmt.Sprintf("native fork ancestry: %v", err)
+				if pm.Writable() != nil || errors.Is(err, lineage.ErrTooLarge) {
+					manifests[parent] = previous
+				}
 				continue
 			}
 			manifests[i] = m

@@ -168,7 +168,7 @@ func Run(d Deps) (*Exit, error) {
 	defer stopWatch()
 	watchCore := *d.App
 	watchCore.Cfg = d.App.Cfg.Clone()
-	go watchCore.WatchSessions(watchCtx, func() { prog.Send(discoveryRequested{}) })
+	go watchCore.WatchSessions(watchCtx, func() { prog.Send(discoveryRequested{}) }, app.WatchOptions{})
 	defer func() {
 		if m.scanCancel != nil {
 			m.scanCancel()
