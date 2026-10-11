@@ -83,7 +83,7 @@ func TestOwnershipDeathRestartAndSharedSubscriptions(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		done := make(chan error, 1)
 		go func() {
-			done <- client.Watch(ctx, func(s observe.Snapshot) error { snapshots[i] = s; cancel(); return nil })
+			done <- client.Watch(ctx, false, func(s observe.Snapshot) error { snapshots[i] = s; cancel(); return nil })
 		}()
 		select {
 		case <-done:
@@ -159,7 +159,7 @@ func TestIPCSizeLimitAndDisconnectedWatchDoNotPreventShutdown(t *testing.T) {
 	c.Close()
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- (Client{n}).Watch(ctx, func(observe.Snapshot) error { cancel(); return nil }) }()
+	go func() { done <- (Client{n}).Watch(ctx, false, func(observe.Snapshot) error { cancel(); return nil }) }()
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):

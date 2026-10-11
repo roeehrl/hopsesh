@@ -87,9 +87,12 @@ func (a *App) connectRuntime() error {
 		defer close(ended)
 		delay := time.Second
 		for {
-			err := client.Watch(ctx, func(s observe.Snapshot) error { a.acceptRuntimeSnapshot(s); return nil })
+			err, refocused := a.watchRuntime(ctx, client)
 			if ctx.Err() != nil {
 				return
+			}
+			if refocused {
+				continue // subscribe again with the new attention
 			}
 			a.backend.mu.Lock()
 			a.backend.problem = err.Error()
@@ -115,6 +118,51 @@ func (a *App) connectRuntime() error {
 	}()
 	return nil
 }
+
+// watchRuntime streams the owner's snapshots, subscribed as attended while someone
+// looks at hopsesh. It returns early, reporting refocused, when that changes.
+func (a *App) watchRuntime(ctx context.Context, client localruntime.Client) (err error, refocused bool) {
+	looking := a.attended()
+	wctx, stop := context.WithCancel(ctx)
+	defer stop()
+	changed := make(chan struct{})
+	go func() {
+		t := time.NewTicker(attentionCheck)
+		defer t.Stop()
+		for {
+			select {
+			case <-wctx.Done():
+				return
+			case <-t.C:
+				if a.attended() != looking {
+					close(changed)
+					stop()
+					return
+				}
+			}
+		}
+	}()
+	err = client.Watch(wctx, looking, func(s observe.Snapshot) error { a.acceptRuntimeSnapshot(s); return nil })
+	select {
+	case <-changed:
+		return err, ctx.Err() == nil
+	default:
+		return err, false
+	}
+}
+
+// attentionCheck is how often the app asks whether someone looks at hopsesh.
+const attentionCheck = 2 * time.Second
+
+// attended is whether someone looks at hopsesh: its window focused or the menu bar
+// list open (no desktop shell: always).
+func (a *App) attended() bool {
+	if shell, ok := a.Desktop.(interface{ Attended() bool }); ok {
+		return shell.Attended()
+	}
+	return true
+}
+
 func (a *App) stopRuntime() {
 	a.backend.mu.Lock()
 	cancel, done, owner := a.backend.cancel, a.backend.done, a.backend.owner
@@ -299,7 +347,7 @@ func (a *App) RefreshHere() (*ScanDTO, error) {
 	}
 	var received observe.Snapshot
 	complete := errors.New("observation received")
-	err := client.Watch(ctx, func(s observe.Snapshot) error {
+	err := client.Watch(ctx, false, func(s observe.Snapshot) error {
 		if s.Epoch == previous.Epoch && s.Sequence <= previous.Sequence {
 			return nil
 		}

@@ -41,6 +41,7 @@ var errObservationBindingChanged = errors.New("account registration changed duri
 // applies pending movement marks, or starts vendor programs. Existing bindings are
 // cached registration metadata, not fresh observations of the logged-in account.
 func (a *App) ObserveLocal(ctx context.Context) (Observation, error) {
+	scans.Add(1)
 	m := &host.Machine{Name: LocalName(), Local: true, Facts: host.ObserveLocal(ctx, a.Specs()), Log: a.Log}
 	defer m.Close()
 	out, err := a.observeMachine(ctx, m)
@@ -184,7 +185,7 @@ func (a *App) observeMachine(ctx context.Context, m *host.Machine) (Observation,
 					out.Problems = append(out.Problems, fmt.Sprintf("%s/%s presence: %v", spec.ID, in.ProfileID(), err))
 				}
 			}
-			manifests, problems := readManifests(fsys, listing.Sessions)
+			manifests, problems := readManifests(m.Name, fsys, listing.Sessions)
 			for i, s := range listing.Sessions {
 				if manifests[i] == nil && problems[i] == "" && s.NativeParent != "" {
 					problems[i] = "Native fork ancestry requires verification before transfer"

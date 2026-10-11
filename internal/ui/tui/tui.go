@@ -182,7 +182,7 @@ func Run(d Deps) (*Exit, error) {
 		watchCore.Cfg = d.App.Cfg.Clone()
 		go func() {
 			defer close(done)
-			watchCore.WatchSessions(watchCtx, func() { prog.Send(discoveryRequested{}) })
+			watchCore.WatchSessions(watchCtx, func() { prog.Send(discoveryRequested{}) }, app.WatchOptions{})
 		}()
 		defer func() { stopWatch(); <-done }()
 	}

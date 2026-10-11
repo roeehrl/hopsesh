@@ -48,6 +48,13 @@ make app      # macOS only: builds dist/macos/hopsesh.app (unsigned unless SIGN_
   running `internal/testkit/termfake`). `playwright.real.config.ts` drives the real Windows window instead and needs
   `HOPSESH_APP_EXE` pointing at a `-tags e2e` build. That build tag opens a debugging port:
   never ship it.
+- Resource budgets: an app nobody is looking at must do almost nothing. Tests count work
+  (`app.ResourceCounters`: rescans, transcript and sidecar reads) and catalog writes instead
+  of timing anything, and `go run ./internal/devtools/idlebench` runs the real app service on
+  a generated busy home while another "agent" writes a session, failing when rescans, CPU,
+  disk writes, content reads or memory exceed their budgets (CI: `idle resources`). If a
+  change makes refreshes do more, make it stat-gated, or raise a budget in the same PR and
+  say why.
 - `demo/record.sh shell` gives you two made-up machines (see [demo/README.md](demo/README.md)),
   so you can test listing and moving sessions without a second computer. If you change what
   the TUI or app shows, re-record the demo with `demo/record.sh`.

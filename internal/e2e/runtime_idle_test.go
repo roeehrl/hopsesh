@@ -76,7 +76,7 @@ func TestRuntimeIdleClientsDoNotMultiplyCollections(t *testing.T) {
 			for range count {
 				ready := make(chan struct{}, 1)
 				watchers.Go(func() {
-					_ = client.Watch(watchCtx, func(observe.Snapshot) error {
+					_ = client.Watch(watchCtx, false, func(observe.Snapshot) error {
 						select {
 						case ready <- struct{}{}:
 						default:

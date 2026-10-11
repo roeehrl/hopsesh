@@ -29,6 +29,7 @@ func (r *run) runTUI() error {
 		}
 		cancel()
 		if deps.Runtime == nil {
+			localruntime.LimitMemory() // this process collects for every client
 			owner, startErr := r.app.StartRuntime(context.Background(), "headless", func() error {
 				return errors.New("an interactive terminal owns this runtime; finish transfers and exit the terminal UI to stop it")
 			})

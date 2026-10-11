@@ -339,7 +339,7 @@ func TestGUIRelayResourcesSQLiteR2(t *testing.T) {
 		for range count {
 			ready := make(chan struct{}, 1)
 			wg.Go(func() {
-				_ = local.Watch(watchCtx, func(observe.Snapshot) error {
+				_ = local.Watch(watchCtx, false, func(observe.Snapshot) error {
 					select {
 					case ready <- struct{}{}:
 					default:

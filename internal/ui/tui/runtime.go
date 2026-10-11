@@ -22,7 +22,7 @@ type runtimeScanError struct{ err error }
 func watchRuntime(ctx context.Context, c localruntime.Client, send func(tea.Msg)) {
 	delay := time.Second
 	for {
-		err := c.Watch(ctx, func(s observe.Snapshot) error { delay = time.Second; send(runtimeSnapshot{s}); return nil })
+		err := c.Watch(ctx, true, func(s observe.Snapshot) error { delay = time.Second; send(runtimeSnapshot{s}); return nil })
 		if ctx.Err() != nil {
 			return
 		}
@@ -55,7 +55,7 @@ func sharedLocal(ctx context.Context, c localruntime.Client, refresh bool) (app.
 			}
 		}
 		received := errors.New("shared observation received")
-		err := c.Watch(ctx, func(next observe.Snapshot) error {
+		err := c.Watch(ctx, true, func(next observe.Snapshot) error {
 			if next.Epoch == old.Epoch && next.Sequence <= old.Sequence {
 				return nil
 			}

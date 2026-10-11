@@ -291,6 +291,44 @@ jobs:
           advanced-security: false
           annotations: true
 
+  idle:
+    # The desktop app's idle resource budgets: the real GUI service, watching sessions,
+    # on a generated busy home while another "agent" writes a session four times a
+    # second. Nobody looking: no rescans, no content reads, no writes, under 1% CPU.
+    # Someone looking: at most one rescan per 5 s, each cheap. Budgets catch regressions
+    # of several times, not runner noise.
+    name: idle resources (${{ matrix.family }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {family: linux, os: ubuntu-24.04}
+          - {family: macos, os: macos-15}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: GUI build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
+      - name: build the bench
+        run: go build -o "$RUNNER_TEMP/idlebench" ./internal/devtools/idlebench
+      - name: idle and attended budgets
+        run: '"$RUNNER_TEMP/idlebench" -json "$RUNNER_TEMP/idle.json"'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: idle-${{ matrix.family }}
+          path: ${{ runner.temp }}/idle.json
+          retention-days: 14
+
   gui:
     name: gui (browser)
     runs-on: ubuntu-24.04

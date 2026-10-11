@@ -172,10 +172,18 @@ func (h *Host) serve(ctx context.Context, c net.Conn) {
 		h.Engine.Pause(req.Method == "pause")
 		_ = reply(h.Engine.Latest(), nil)
 	case "refresh":
-		h.Engine.Notify()
+		h.Engine.Request()
 		_ = reply(h.Engine.Latest(), nil)
 	case "watch":
-		updates, cancel := h.Engine.Subscribe()
+		var in struct {
+			Attended bool `json:"attended"`
+		}
+		_ = json.Unmarshal(req.Params, &in)
+		subscribe := h.Engine.Subscribe
+		if in.Attended {
+			subscribe = h.Engine.SubscribeAttended
+		}
+		updates, cancel := subscribe()
 		defer cancel()
 		// A disconnected watcher cancels without waiting for another filesystem event.
 		disconnected := make(chan struct{})
@@ -315,8 +323,13 @@ func (c Client) Call(ctx context.Context, method string, params, out any) error 
 	}
 	return json.Unmarshal(r.Data, out)
 }
-func (c Client) Watch(ctx context.Context, receive func(observe.Snapshot) error) error {
-	conn, close, err := c.connect(ctx, "watch", nil)
+
+// Watch streams snapshots. attended says someone is looking at this client: while
+// nobody looks at any, the owner observes changes only every few minutes.
+func (c Client) Watch(ctx context.Context, attended bool, receive func(observe.Snapshot) error) error {
+	conn, close, err := c.connect(ctx, "watch", struct {
+		Attended bool `json:"attended"`
+	}{attended})
 	if err != nil {
 		return err
 	}

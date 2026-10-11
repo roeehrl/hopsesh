@@ -28,6 +28,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/proc"
 	"github.com/roeehrl/hopsesh/internal/core/pty"
 	"github.com/roeehrl/hopsesh/internal/core/registry"
+	localruntime "github.com/roeehrl/hopsesh/internal/core/runtime"
 	"github.com/roeehrl/hopsesh/internal/update"
 	"github.com/roeehrl/hopsesh/internal/version"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -77,6 +78,12 @@ type App struct {
 	// Emitter takes the window's events when there is no Wails app (the browser tests).
 	Emitter func(name string, data any) `json:"-"`
 }
+
+// MemoryLimit is the desktop app's soft memory limit (see localruntime.MemoryLimit).
+const MemoryLimit = localruntime.MemoryLimit
+
+// LimitMemory applies MemoryLimit unless GOMEMLIMIT sets one.
+func LimitMemory() { localruntime.LimitMemory() }
 
 // NewApp loads the configuration for the modules in reg. A configuration an older hopsesh
 // wrote is reported by Info, not returned: the window offers to start fresh.

@@ -20,6 +20,7 @@ import (
 )
 
 func main() {
+	gui.LimitMemory()
 	if transport.IsAskpass() {
 		os.Exit(transport.AskpassMain(os.Args[1:])) // ssh asking for a password, see transport
 	}

@@ -112,7 +112,7 @@ This command does not enable remote receiving.`, RunE: func(cmd *cobra.Command, 
 	return cmd
 }
 func watchRuntime(ctx context.Context, c localruntime.Client, encoder *json.Encoder) error {
-	err := c.Watch(ctx, func(s observe.Snapshot) error { return encoder.Encode(s) })
+	err := c.Watch(ctx, true, func(s observe.Snapshot) error { return encoder.Encode(s) })
 	if ctx.Err() != nil {
 		return nil
 	}

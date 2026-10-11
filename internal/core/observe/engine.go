@@ -18,10 +18,39 @@ type Options struct {
 	MaxDelay  time.Duration
 	Timeout   time.Duration
 	FreshFor  time.Duration
+	// Gap spaces change-driven collections while someone looks at a client (0: none).
+	Gap time.Duration
+	// Idle spaces change-driven and fallback collections while nobody does (0: no
+	// difference). Agents write their sessions many times a second; an observer nobody
+	// is looking at must not collect for each write. Snapshots then stay fresh for
+	// Idle, so relay peers do not see this source's evidence expire in between.
+	Idle time.Duration
 }
 
 func Defaults() Options {
 	return Options{Reconcile: time.Minute, Debounce: 250 * time.Millisecond, MaxDelay: 2 * time.Second, Timeout: 30 * time.Second, FreshFor: 90 * time.Second}
+}
+
+func (o Options) valid() bool {
+	return o.Reconcile > 0 && o.Debounce > 0 && o.MaxDelay >= o.Debounce && o.Timeout > 0 && o.FreshFor > 0 && o.Gap >= 0 && o.Idle >= 0
+}
+
+// spacing is the least time between collection starts that a change may cause, and
+// reconcile the fallback interval, for the current attention.
+func (o Options) spacing(attended bool) time.Duration {
+	if attended || o.Idle == 0 {
+		return o.Gap
+	}
+	return o.Idle
+}
+func (o Options) reconcile(attended bool) time.Duration {
+	if attended {
+		return o.Reconcile
+	}
+	return max(o.Reconcile, o.Idle)
+}
+func (o Options) freshFor(attended bool) time.Duration {
+	return o.FreshFor + o.reconcile(attended) - o.Reconcile
 }
 
 type Snapshot struct {
@@ -47,6 +76,7 @@ type Collector func(context.Context) (json.RawMessage, error)
 // nor introduces a timer; they contain no source paths or conversation data.
 type Metrics struct {
 	Subscribers         int    `json:"subscribers"`
+	Attended            int    `json:"attended"`
 	Notifications       uint64 `json:"notifications"`
 	Coalesced           uint64 `json:"coalesced"`
 	Collections         uint64 `json:"collections"`
@@ -66,13 +96,16 @@ type Engine struct {
 	wake      chan struct{}
 	configure chan struct{}
 	paused    bool
+	urgent    bool // the pending request skips the change spacing
+	attended  int  // subscribers someone is looking at
+	onAttend  func(bool)
 	started   bool
 	closed    bool
 	metrics   Metrics
 }
 
 func New(o Options, collect Collector) (*Engine, error) {
-	if collect == nil || o.Reconcile <= 0 || o.Debounce <= 0 || o.MaxDelay < o.Debounce || o.Timeout <= 0 || o.FreshFor <= 0 {
+	if collect == nil || !o.valid() {
 		return nil, errors.New("invalid observation scheduler options")
 	}
 	var epoch [16]byte
@@ -85,7 +118,7 @@ func New(o Options, collect Collector) (*Engine, error) {
 // UpdateOptions changes scheduling at a single serialized boundary. It does not
 // renew the freshness of any cached observation.
 func (e *Engine) UpdateOptions(o Options) error {
-	if o.Reconcile <= 0 || o.Debounce <= 0 || o.MaxDelay < o.Debounce || o.Timeout <= 0 || o.FreshFor <= 0 {
+	if !o.valid() {
 		return errors.New("invalid observation scheduler options")
 	}
 	e.mu.Lock()
@@ -107,41 +140,100 @@ func (e *Engine) Metrics() Metrics {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	m := e.metrics
-	m.Subscribers, m.Paused = len(e.subs), e.paused
+	m.Subscribers, m.Attended, m.Paused = len(e.subs), e.attended, e.paused
 	m.Pending = !e.closed && (m.Pending || len(e.wake) > 0)
 	return m
 }
 
 // Subscribe replays the current snapshot, without renewing freshness. Slow clients
 // receive the newest snapshot and cannot block the collector or accumulate a queue.
-func (e *Engine) Subscribe() (<-chan Snapshot, func()) {
+func (e *Engine) Subscribe() (<-chan Snapshot, func()) { return e.subscribe(false) }
+
+// SubscribeAttended is Subscribe for a client someone is looking at. While at least one
+// is subscribed, collections follow changes within Gap; the first one asks for a
+// collection at once, since the latest snapshot may be up to Idle old.
+func (e *Engine) SubscribeAttended() (<-chan Snapshot, func()) { return e.subscribe(true) }
+
+func (e *Engine) subscribe(attended bool) (<-chan Snapshot, func()) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	ch := make(chan Snapshot, 1)
 	if e.closed {
+		e.mu.Unlock()
 		close(ch)
 		return ch, func() {}
 	}
-	e.subs[ch] = true
+	e.subs[ch] = attended
 	if e.latest.Sequence != 0 {
 		ch <- e.latest.clone()
+	}
+	var hook func(bool)
+	if attended {
+		e.attended++
+		if e.attended == 1 {
+			e.requestLocked()
+			hook = e.onAttend
+		}
+	}
+	e.mu.Unlock()
+	if hook != nil {
+		hook(true)
 	}
 	var once sync.Once
 	return ch, func() {
 		once.Do(func() {
 			e.mu.Lock()
-			defer e.mu.Unlock()
-			if e.subs[ch] {
+			var hook func(bool)
+			if looked, ok := e.subs[ch]; ok {
 				delete(e.subs, ch)
 				close(ch)
+				if looked {
+					e.attended--
+					e.reconfigureLocked()
+					if e.attended == 0 {
+						hook = e.onAttend
+					}
+				}
+			}
+			e.mu.Unlock()
+			if hook != nil {
+				hook(false)
 			}
 		})
 	}
 }
 
+// Attended reports whether someone looks at any subscribed client.
+func (e *Engine) Attended() bool { e.mu.Lock(); defer e.mu.Unlock(); return e.attended > 0 }
+
+// OnAttention is called when the first attended client subscribes (true) and when the
+// last one leaves (false), outside the engine's lock. Set it before Run.
+func (e *Engine) OnAttention(f func(attended bool)) { e.mu.Lock(); e.onAttend = f; e.mu.Unlock() }
+
+func (e *Engine) reconfigureLocked() {
+	select {
+	case e.configure <- struct{}{}:
+	default:
+	}
+}
+
+// Notify reports a change. Collections it causes are spaced by Gap or Idle.
 func (e *Engine) Notify() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.notifyLocked()
+}
+
+// Request asks for a collection now: an explicit refresh, not a reported change.
+func (e *Engine) Request() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.requestLocked()
+}
+func (e *Engine) requestLocked() {
+	e.urgent = true
+	e.notifyLocked()
+}
+func (e *Engine) notifyLocked() {
 	e.metrics.Notifications++
 	select {
 	case e.wake <- struct{}{}:
@@ -157,7 +249,7 @@ func (e *Engine) Refresh(ctx context.Context) (Snapshot, error) {
 	requested := time.Now()
 	updates, close := e.Subscribe()
 	defer close()
-	e.Notify()
+	e.Request()
 	for {
 		select {
 		case <-ctx.Done():
@@ -190,8 +282,8 @@ func (e *Engine) Pause(paused bool) {
 		e.latest.ExpiresAt = time.Time{}
 		e.publishLocked()
 	}
+	e.requestLocked()
 	e.mu.Unlock()
-	e.Notify()
 }
 
 func (e *Engine) publishLocked() {
@@ -211,6 +303,7 @@ type result struct {
 	started    time.Time
 	generation uint64
 	elapsed    time.Duration
+	freshFor   time.Duration
 }
 
 // Run owns one timer and at most one collection. Notifications arriving during a
@@ -248,10 +341,25 @@ func (e *Engine) Run(ctx context.Context) error {
 		}
 	}()
 	var dirty bool
-	var first time.Time
+	var first, lastStart time.Time
 	var generation uint64
 	var previousPause bool
 	arm := func(d time.Duration) { timer.Stop(); timer.Reset(d); due = timer.C }
+	attention := func() (attended, urgent bool) {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		return e.attended > 0, e.urgent
+	}
+	// soon arms a change-driven collection: debounced, bounded by MaxDelay, and no
+	// sooner than the spacing after the previous start unless explicitly requested.
+	soon := func(now time.Time) {
+		attended, urgent := attention()
+		delay := min(opts.Debounce, max(time.Duration(0), first.Add(opts.MaxDelay).Sub(now)))
+		if !urgent && !lastStart.IsZero() {
+			delay = max(delay, lastStart.Add(opts.spacing(attended)).Sub(now))
+		}
+		arm(delay)
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -259,7 +367,15 @@ func (e *Engine) Run(ctx context.Context) error {
 		case <-e.configure:
 			opts = e.Options()
 			if active == nil {
-				arm(opts.Reconcile)
+				attended, _ := attention()
+				switch {
+				case dirty && !first.IsZero():
+					soon(time.Now())
+				case lastStart.IsZero():
+					arm(0)
+				default:
+					arm(opts.reconcile(attended))
+				}
 			}
 		case <-e.wake:
 			e.mu.Lock()
@@ -286,13 +402,14 @@ func (e *Engine) Run(ctx context.Context) error {
 			if first.IsZero() {
 				first = now
 			}
-			delay := min(opts.Debounce, max(time.Duration(0), first.Add(opts.MaxDelay).Sub(now)))
-			arm(delay)
+			soon(now)
 		case <-due:
 			due = nil
 			e.mu.Lock()
 			paused, seq := e.paused, e.latest.Sequence
+			attended := e.attended > 0
 			if !paused {
+				e.urgent = false
 				e.metrics.Collections++
 				e.metrics.Collecting, e.metrics.Pending = true, false
 			}
@@ -301,6 +418,8 @@ func (e *Engine) Run(ctx context.Context) error {
 				continue
 			}
 			dirty, first = false, time.Time{}
+			lastStart = time.Now()
+			fresh := opts.freshFor(attended)
 			cctx, cancel := context.WithTimeout(ctx, opts.Timeout)
 			active, generation = cancel, seq
 			collectors.Add(1)
@@ -315,7 +434,7 @@ func (e *Engine) Run(ctx context.Context) error {
 					err = errors.New("collector returned invalid JSON")
 				}
 				select {
-				case results <- result{data: append(json.RawMessage(nil), data...), err: err, started: started, generation: seq, elapsed: time.Since(started)}:
+				case results <- result{data: append(json.RawMessage(nil), data...), err: err, started: started, generation: seq, elapsed: time.Since(started), freshFor: fresh}:
 				case <-ctx.Done():
 				}
 			}()
@@ -338,22 +457,23 @@ func (e *Engine) Run(ctx context.Context) error {
 				} else {
 					e.latest.Data = r.data
 					e.latest.ObservedAt = r.started
-					e.latest.ExpiresAt = r.started.Add(opts.FreshFor)
+					e.latest.ExpiresAt = r.started.Add(r.freshFor)
 				}
 				e.publishLocked()
 			} else {
 				dirty = true
 			}
 			e.metrics.Pending = dirty
+			attended := e.attended > 0
 			e.mu.Unlock()
 			if paused {
 				continue
 			}
 			if dirty {
 				first = time.Now()
-				arm(opts.Debounce)
+				soon(first)
 			} else {
-				arm(opts.Reconcile)
+				arm(opts.reconcile(attended))
 			}
 		}
 	}

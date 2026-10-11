@@ -69,8 +69,8 @@ func (a *App) AttachDesktop(main *application.WebviewWindow) {
 	for _, event := range []events.ApplicationEventType{events.Common.SystemDidWake, events.Common.ScreenUnlocked} {
 		a.Wails.Event.OnApplicationEvent(event, func(*application.ApplicationEvent) { go a.runtimeSleep(false) })
 	}
-
 }
+
 func (a *App) DesktopSettings() desktop.State {
 	if a.Desktop != nil {
 		return a.Desktop.Snapshot()

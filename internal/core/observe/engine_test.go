@@ -359,3 +359,63 @@ func TestReconfigureChangesDeadlineWithoutRefreshingCachedEvidence(t *testing.T)
 		}
 	})
 }
+
+// Changes nobody looks at are collected once per Idle; an attended client brings the
+// Gap back and asks for one collection at once; explicit requests skip the spacing.
+func TestAttentionSpacesChangeDrivenCollections(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var calls atomic.Int32
+		o := Defaults()
+		o.Gap, o.Idle = 5*time.Second, 5*time.Minute
+		e, err := New(o, func(context.Context) (json.RawMessage, error) { calls.Add(1); return json.RawMessage(`{}`), nil })
+		if err != nil {
+			t.Fatal(err)
+		}
+		var attention []bool
+		e.OnAttention(func(attended bool) { attention = append(attention, attended) })
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		go func() { _ = e.Run(ctx) }()
+		synctest.Wait()
+		if calls.Load() != 1 {
+			t.Fatal("no initial collection")
+		}
+		// An agent writes four times a second for a minute, nobody looking.
+		for range 240 {
+			e.Notify()
+			time.Sleep(250 * time.Millisecond)
+		}
+		synctest.Wait()
+		if calls.Load() != 1 {
+			t.Fatalf("unattended writes collected %d times within a minute", calls.Load()-1)
+		}
+		if s := e.Latest(); !s.Fresh(time.Now()) {
+			t.Fatal("an idle-spaced snapshot expired before the next collection")
+		}
+		updates, leave := e.SubscribeAttended()
+		<-updates
+		synctest.Wait()
+		if calls.Load() != 2 || !e.Attended() || len(attention) != 1 || !attention[0] {
+			t.Fatalf("attention did not collect at once: %d calls, hooks %v", calls.Load(), attention)
+		}
+		for range 40 { // ten seconds of writes: two collections, 5 s apart
+			e.Notify()
+			time.Sleep(250 * time.Millisecond)
+		}
+		synctest.Wait()
+		if got := calls.Load(); got < 3 || got > 4 {
+			t.Fatalf("attended writes collected %d times in 10 s", got-2)
+		}
+		before := calls.Load()
+		e.Request()
+		time.Sleep(time.Second)
+		synctest.Wait()
+		if calls.Load() != before+1 {
+			t.Fatal("an explicit request waited for the gap")
+		}
+		leave()
+		if e.Attended() || len(attention) != 2 || attention[1] {
+			t.Fatalf("the last attended client left without a hook: %v", attention)
+		}
+	})
+}

@@ -39,6 +39,7 @@ func runtimeCommands() []*cobra.Command {
 		source := app.New(cfg, modules, config.StateDir(), nil)
 		defer source.Catalog.Close()
 		source.Log = logger
+		localruntime.LimitMemory() // this process collects for every client
 		host, err := source.StartRuntime(ctx, "headless", func() error { return nil })
 		if err != nil {
 			logger.Error("runtime startup failed", "error", "owner or listener unavailable")

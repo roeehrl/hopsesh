@@ -225,7 +225,7 @@ func (r *remoteObserver) run(ctx context.Context, engine *observe.Engine) {
 				r.mu.Lock()
 				delete(r.states, name)
 				r.mu.Unlock()
-				engine.Notify()
+				engine.Request()
 			}
 		}
 		for name, h := range wanted {
@@ -233,7 +233,7 @@ func (r *remoteObserver) run(ctx context.Context, engine *observe.Engine) {
 				continue
 			}
 			slots[name] = &remoteSlot{binding: h, due: time.Now()}
-			r.publish(RemoteObservation{Binding: h, Phase: "queued"}, engine.Notify)
+			r.publish(RemoteObservation{Binding: h, Phase: "queued"}, engine.Request)
 		}
 		for name, s := range slots {
 			if !r.approved(ctx, s.binding) {
@@ -247,7 +247,7 @@ func (r *remoteObserver) run(ctx context.Context, engine *observe.Engine) {
 				if state.Status != StatusAuth {
 					state.Phase, state.Status, state.Error = "done", StatusAuth, "Remote inventory approval expired or was revoked"
 					state.Snapshot.Error = state.Error
-					r.publish(state, engine.Notify)
+					r.publish(state, engine.Request)
 				}
 			}
 		}
@@ -346,7 +346,7 @@ func (r *remoteObserver) run(ctx context.Context, engine *observe.Engine) {
 				}
 				s.failures = 0
 				s.due = maxRelayReconcile(state.Snapshot, time.Now())
-				r.publish(state, engine.Notify)
+				r.publish(state, engine.Request)
 			}
 		case <-due:
 			var next *remoteSlot
@@ -365,7 +365,7 @@ func (r *remoteObserver) run(ctx context.Context, engine *observe.Engine) {
 			state := r.states[next.binding.Name]
 			r.mu.Unlock()
 			state.Phase, state.Started = "scanning", time.Now().UTC()
-			r.publish(state, engine.Notify)
+			r.publish(state, engine.Request)
 			child, done := context.WithTimeout(ctx, r.timeout)
 			cancel = done
 			tasks.Go(func() {
@@ -440,7 +440,7 @@ func (r *remoteObserver) run(ctx context.Context, engine *observe.Engine) {
 					s.due = state.Finished.Add(r.interval)
 				}
 			}
-			r.publish(state, engine.Notify)
+			r.publish(state, engine.Request)
 			reply(s, state, nil)
 		}
 		arm()

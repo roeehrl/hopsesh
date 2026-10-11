@@ -1,11 +1,13 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"github.com/roeehrl/hopsesh/sdk/agent"
+	"maps"
 	"os"
 	"slices"
 	"time"
@@ -227,30 +229,104 @@ func (a *App) saveCatalog(inv *Inventory, started time.Time) {
 	a.Catalog.Update(a.CatalogScope(), func(old []byte) any {
 		saved := catalogSnapshot{}
 		_ = json.Unmarshal(old, &saved)
-		if saved.Sources == nil {
-			saved.Sources = map[string]time.Time{}
+		previous := saved.Inventory
+		previous.Entries = slices.Clone(previous.Entries)
+		sources := maps.Clone(saved.Sources)
+		if sources == nil {
+			sources = map[string]time.Time{}
 		}
 		merged := &saved.Inventory
 		for _, m := range inv.Machines {
-			if saved.Sources[m.Name].After(started) {
+			if sources[m.Name].After(started) {
 				continue
 			}
 			merged = MergeDiscovery(merged, ScanUpdate{Machine: m, Entries: machineEntries(inv, m.Name), Complete: !inv.Discovering})
-			saved.Sources[m.Name] = started
+			sources[m.Name] = started
 		}
 		for _, c := range inv.Clouds {
-			if saved.Sources[c.Name].After(started) {
+			if sources[c.Name].After(started) {
 				continue
 			}
 			merged = MergeDiscovery(merged, ScanUpdate{Clouds: []*Cloud{c}, Entries: machineEntries(inv, c.Name), Complete: !inv.Discovering})
-			saved.Sources[c.Name] = started
+			sources[c.Name] = started
 		}
 		merged.Discovering = false
 		merged.Adopted = nil
 		merged.Waiting = nil
+		for i := range merged.Entries {
+			merged.Entries[i] = catalogEntry(merged.Entries[i])
+		}
+		// An idle app rescans the same sessions: keep the stored snapshot, and write
+		// nothing, unless what browsing shows changed. Saved check times then show the
+		// last change, which is all a saved row claims.
+		if sameCatalog(&previous, merged) {
+			return json.RawMessage(old)
+		}
+		saved.Sources = sources
 		saved.Inventory = *merged
 		return saved
 	})
+}
+
+// catalogProgressEvery spaces the partial saves other front ends follow during a scan.
+const catalogProgressEvery = 2 * time.Second
+
+// catalogEntry is what the catalog keeps of a row: what browsing shows before the first
+// scan, without live state (CachedInventory resets it) or the lineage revision graph.
+// Transfers never plan from a saved row (Plan refuses cached rows).
+func catalogEntry(e Entry) Entry {
+	e.Lineage = e.Lineage.Outline()
+	e.Live = agent.LiveInfo{}
+	e.Returns = nil
+	e.Movement = nil
+	return e
+}
+
+// sameCatalog compares two snapshots without the times every scan refreshes (any
+// "checkedAt" or "observedAt"), the scan phase, and the order rows were listed in.
+func sameCatalog(a, b *Inventory) bool {
+	return bytes.Equal(catalogContent(a), catalogContent(b))
+}
+
+func catalogContent(inv *Inventory) []byte {
+	raw, _ := json.Marshal(inv)
+	var v any
+	if json.Unmarshal(raw, &v) != nil {
+		return raw
+	}
+	var strip func(any) any
+	strip = func(v any) any {
+		switch x := v.(type) {
+		case map[string]any:
+			delete(x, "checkedAt")
+			delete(x, "observedAt")
+			delete(x, "phase")
+			for k, c := range x {
+				x[k] = strip(c)
+			}
+		case []any:
+			for i, c := range x {
+				x[i] = strip(c)
+			}
+		}
+		return v
+	}
+	v = strip(v)
+	if m, ok := v.(map[string]any); ok {
+		for _, list := range []string{"entries", "machines", "clouds"} {
+			if rows, ok := m[list].([]any); ok {
+				keys := make([]string, len(rows))
+				for i, r := range rows {
+					b, _ := json.Marshal(r)
+					keys[i] = string(b)
+				}
+				slices.Sort(keys)
+				m[list] = keys
+			}
+		}
+	}
+	b, _ := json.Marshal(v)
+	return b
 }
 
 // discoveryLease lets simultaneous GUI, Quick, TUI and CLI browsers follow one

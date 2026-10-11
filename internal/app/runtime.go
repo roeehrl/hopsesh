@@ -12,6 +12,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/version"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -25,6 +26,9 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 	}
 	opts := observe.Defaults()
 	opts.Reconcile = a.Cfg.Runtime.Interval()
+	// Refreshes follow changes at most every 5 s while someone looks at a client, and
+	// every 5 min otherwise: other agents write their sessions constantly.
+	opts.Gap, opts.Idle = 5*time.Second, 5*time.Minute
 	if len(overrides) > 0 {
 		opts = overrides[0]
 	}
@@ -64,7 +68,7 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 			relayProblem = message
 			relayMu.Unlock()
 			if changed {
-				engine.Notify()
+				engine.Request()
 			}
 		}
 		phase := func(message string) {
@@ -146,7 +150,7 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 					remotes.relayConnected()
 				}
 				if changed {
-					engine.Notify()
+					engine.Request()
 				}
 			}
 			relayMu.Lock()
@@ -202,6 +206,9 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 					}
 				}
 			}
+			if unwatched(engine) {
+				roots = nil
+			}
 			if err = files.SetRoots(roots); err != nil {
 				out.Problems = append(out.Problems, "Change notifications degraded: "+err.Error())
 			}
@@ -232,9 +239,26 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 		watchProblem = fmt.Sprintf("Change notifications unavailable: %v; reconciliation remains active", err)
 	}
 	if files != nil {
+		// While nobody looks, hold no watches at all: each file event wakes the process
+		// many times, and agents write their sessions constantly. The idle reconcile
+		// covers that time; the next attended client's collection re-arms them.
+		// Hopsesh's own files (settings, accounts, journals, relay state) change through
+		// someone's action: observe at once. Only agents' session writes are spaced.
+		own := []string{filepath.Clean(config.Dir()), filepath.Clean(a.StateDir)}
+		if home, err := os.UserHomeDir(); err == nil {
+			own = append(own, filepath.Join(home, ".hopsesh"))
+		}
 		files.SetChanged(func(path string) {
-			if a.Catalog != nil {
-				a.Catalog.InvalidatePath(path)
+			for _, dir := range own {
+				if rel, err := filepath.Rel(dir, path); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+					engine.Request()
+					return
+				}
+			}
+		})
+		engine.OnAttention(func(attended bool) {
+			if !attended && unwatched(engine) {
+				_ = files.SetRoots(nil)
 			}
 		})
 		tasks = append(tasks, func(ctx context.Context) {
@@ -327,7 +351,7 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 			}
 			out, err := config.SetSetting(in.Key, in.Value, &in.Revision)
 			if err == nil {
-				engine.Notify()
+				engine.Request()
 			}
 			return out, err
 		default:
@@ -376,3 +400,7 @@ func runtimeWatchRoots(agentRoots []string, state string) []string {
 	}
 	return roots
 }
+
+// unwatched is whether the owner holds no file watches now: nobody looks at any client
+// and the observer is idle-spaced.
+func unwatched(e *observe.Engine) bool { return e.Options().Idle > 0 && !e.Attended() }
