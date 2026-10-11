@@ -52,7 +52,7 @@ func TestShellUnset(t *testing.T) {
 	}
 }
 
-// An app link opens without a folder: the shown command has no empty "cd ''".
+// An app link opens without a folder: the shown command has no empty "cd ”".
 func TestShellWithoutFolder(t *testing.T) {
 	c := agent.Command{Argv: []string{"/usr/bin/open", "-a", "/Applications/ChatGPT.app", "codex://threads/ec0eff80"}}
 	if sh := Shell(c, "", "posix"); sh != `/usr/bin/open -a /Applications/ChatGPT.app codex://threads/ec0eff80` {
