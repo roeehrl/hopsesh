@@ -88,10 +88,40 @@ func descendsFrom(table presence.Table, pid, root int) bool {
 	}
 	return false
 }
-func (a *App) bindTerminalSessions(inv *app.Inventory) {
+
+const associationChecking = "Checking session association"
+
+type terminalBindingControls struct{ external, rerun bool }
+
+type terminalBindingRead struct {
+	sequence uint64
+	source   string
+	checking bool
+}
+
+func (a *App) beginTerminalBindingRead(source string) terminalBindingRead {
+	if a.Terms == nil {
+		return terminalBindingRead{}
+	}
+	a.Terms.mu.Lock()
+	a.Terms.bindingSequence++
+	read := terminalBindingRead{sequence: a.Terms.bindingSequence, source: source}
+	a.Terms.mu.Unlock()
+	return read
+}
+
+func (a *App) bindingRead(read []terminalBindingRead, source string) terminalBindingRead {
+	if len(read) > 0 {
+		return read[0]
+	}
+	return a.beginTerminalBindingRead(source)
+}
+
+func (a *App) bindTerminalSessions(inv *app.Inventory, reads ...terminalBindingRead) {
 	if a.Terms == nil {
 		return
 	}
+	read := a.bindingRead(reads, "scan")
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	table, err := presence.Snapshot(ctx)
@@ -102,13 +132,14 @@ func (a *App) bindTerminalSessions(inv *app.Inventory) {
 	observed := *inv
 	observed.Entries = slices.Clone(inv.Entries)
 	a.mu.Unlock()
-	a.bindTerminalSnapshot(inv, &observed, table)
+	a.bindTerminalSnapshot(inv, &observed, table, read)
 }
 
 // Presence supplies new native evidence without changing the published inventory.
 // Commit checks the exact inventory owner under mu; an unrelated remote scan
 // must not prevent fresh local process evidence from associating an owned PTY.
-func (a *App) bindTerminalPresence(owned, snapshot *app.Inventory, live map[agent.SessionKey]agent.LiveInfo, table presence.Table) {
+func (a *App) bindTerminalPresence(owned, snapshot *app.Inventory, live map[agent.SessionKey]agent.LiveInfo, table presence.Table, reads ...terminalBindingRead) {
+	read := a.bindingRead(reads, "presence")
 	observed := *snapshot
 	observed.Entries = slices.Clone(snapshot.Entries)
 	for i := range observed.Entries {
@@ -121,13 +152,14 @@ func (a *App) bindTerminalPresence(owned, snapshot *app.Inventory, live map[agen
 			}
 		}
 	}
-	a.bindTerminalSnapshot(owned, &observed, table)
+	a.bindTerminalSnapshot(owned, &observed, table, read)
 }
 
-func (a *App) bindTerminalSnapshot(owned, observed *app.Inventory, table presence.Table) {
+func (a *App) bindTerminalSnapshot(owned, observed *app.Inventory, table presence.Table, reads ...terminalBindingRead) {
 	if a.Terms == nil {
 		return
 	}
+	read := a.bindingRead(reads, "snapshot")
 	relationships := observed.Relationships()
 	for _, tab := range a.Terms.Tabs() {
 		if tab.Kind != TabSession || tab.Machine != app.LocalName() || tab.PID == 0 || tab.State == pty.Exited {
@@ -142,6 +174,8 @@ func (a *App) bindTerminalSnapshot(owned, observed *app.Inventory, table presenc
 			continue
 		}
 		found, ambiguous := boundEntry(observed, table, tab, key)
+		observation := read
+		observation.checking = bindingIsChecking(observed, tab)
 		if tab.Association != "Confirmed by native process registry" {
 			// Bounded, message-free native evidence for diagnosing a live failure.
 			// PID/start time come from the owned PTY; Procs come from LiveDetector.
@@ -156,19 +190,37 @@ func (a *App) bindTerminalSnapshot(owned, observed *app.Inventory, table presenc
 				"discovering": observed.Discovering, "candidates": candidates, "matched": found != nil, "ambiguous": ambiguous,
 			}})
 		}
-		a.commitTerminalBinding(owned, tab, key, found, ambiguous, relationships)
+		a.commitTerminalBinding(owned, tab, key, found, ambiguous, relationships, observation)
 	}
 }
 
+// Missing discovery data or a failed native read is not evidence that the last
+// verified session ended. Retain it only as last-known, explicitly checking;
+// a known Ended/Live mismatch or ambiguity still removes the association.
+func bindingIsChecking(inv *app.Inventory, tab TermTab) bool {
+	for _, e := range inv.Entries {
+		if e.Machine == tab.Machine && e.Session.Key.String() == tab.Key {
+			return e.Live.State == agent.Unknown
+		}
+	}
+	return inv.Discovering
+}
+
 // Commit only evidence already verified by boundEntry against a native process snapshot.
-func (a *App) commitTerminalBinding(owned *app.Inventory, tab TermTab, key agent.SessionKey, found *app.Entry, ambiguous bool, relationships map[string]app.Relationship) {
+func (a *App) commitTerminalBinding(owned *app.Inventory, tab TermTab, key agent.SessionKey, found *app.Entry, ambiguous bool, relationships map[string]app.Relationship, reads ...terminalBindingRead) {
+	read := a.bindingRead(reads, "snapshot")
+	skip := func(reason string) {
+		a.snapshot().Audit.Write(audit.Entry{Action: "terminal.binding.deferred", Host: tab.Machine, Session: key.String(), Detail: map[string]any{"tab": tab.ID, "ptyPID": tab.PID, "ptyStarted": tab.Started, "reason": reason, "source": read.source, "sequence": read.sequence}})
+	}
 	// Recheck the exact owned process after observing the table/registry.
 	session, ok := a.Terms.Manager().Get(tab.ID)
 	if !ok {
+		skip("owned PTY no longer exists")
 		return
 	}
 	info := session.Info()
 	if info.State == pty.Exited || info.PID != tab.PID || info.Started != tab.Started {
+		skip("owned PTY lifetime changed")
 		return
 	}
 	// Terminal exit callbacks already acquire Terms.mu before App.mu.
@@ -193,7 +245,7 @@ func (a *App) commitTerminalBinding(owned *app.Inventory, tab TermTab, key agent
 		}
 		a.mu.Unlock()
 		a.Terms.mu.Unlock()
-		a.snapshot().Audit.Write(audit.Entry{Action: "terminal.binding.deferred", Host: tab.Machine, Session: key.String(), Detail: map[string]any{"tab": tab.ID, "ptyPID": tab.PID, "ptyStarted": tab.Started, "reason": reason}})
+		skip(reason)
 		return
 	}
 	// Commit with both owners locked; emitting the update happens afterwards,
@@ -203,14 +255,35 @@ func (a *App) commitTerminalBinding(owned *app.Inventory, tab TermTab, key agent
 	if current.State == pty.Exited || current.PID != tab.PID || current.Started != tab.Started || tb == nil || tb.meta.Key != tab.Key || tb.meta.LaunchedKey != tab.LaunchedKey || tb.meta.Kind != tab.Kind {
 		a.mu.Unlock()
 		a.Terms.mu.Unlock()
+		skip("tab metadata or PTY lifetime changed")
 		return
 	}
+	if read.sequence < tb.bindingSequence {
+		a.mu.Unlock()
+		a.Terms.mu.Unlock()
+		skip("older native observation")
+		return
+	}
+	tb.bindingSequence = read.sequence
 	m := &tb.meta
 	before := *m
 	if ambiguous || found == nil {
-		m.Association, m.Relationship = "Session association not confirmed", nil
+		if !ambiguous && read.checking && (m.Association == "Confirmed by native process registry" || m.Association == associationChecking) {
+			if m.Association != associationChecking {
+				tb.checkingControls = &terminalBindingControls{external: m.External, rerun: m.Rerun}
+			}
+			m.Association = associationChecking
+			m.External, m.Rerun = false, false
+		} else {
+			m.Association, m.Relationship = "Session association not confirmed", nil
+			tb.checkingControls = nil
+		}
 	} else {
 		e := *found
+		if before.Association == associationChecking && e.Session.Key.String() == before.Key && tb.checkingControls != nil {
+			m.External, m.Rerun = tb.checkingControls.external, tb.checkingControls.rerun
+		}
+		tb.checkingControls = nil
 		r := relationships[app.EntryIdentity(e.Machine, e.Session.Key.String())]
 		if name := a.core.Cfg.FamilyNames[r.Family]; name != "" {
 			r.Name = name
@@ -228,9 +301,11 @@ func (a *App) commitTerminalBinding(owned *app.Inventory, tab TermTab, key agent
 		m.Association = "Confirmed by native process registry"
 	}
 	changed := !reflect.DeepEqual(before, *m)
+	after := *m
 	a.mu.Unlock()
 	a.Terms.mu.Unlock()
 	if changed {
+		a.snapshot().Audit.Write(audit.Entry{Action: "terminal.binding.commit", Host: tab.Machine, Session: after.Key, Detail: map[string]any{"tab": tab.ID, "ptyPID": tab.PID, "ptyStarted": tab.Started, "from": before.Association, "association": after.Association, "matched": found != nil, "ambiguous": ambiguous, "source": read.source, "sequence": read.sequence}})
 		a.Terms.changed(info)
 	}
 }

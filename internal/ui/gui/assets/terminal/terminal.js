@@ -211,6 +211,7 @@ function watchTrust(t, text) {
 // update takes a tab's new state (from its stream or the list).
 function update(t, i) {
   const before = t.info;
+  if (i.kind && before.revision !== undefined && (i.revision || 0) < before.revision) return;
   // List messages are complete metadata snapshots; omitted optional fields clear
   // earlier associations. Per-PTY state frames contain only Info and are merged.
   t.info = i.kind ? {...i} : Object.assign({}, t.info, i);
@@ -325,7 +326,7 @@ function shortcuts() {
 // ---- drawing the window ------------------------------------------------------------------
 
 function groupKey(t){return prefs.grouping==="none"?"":prefs.grouping==="session"?(t.info.machine+"/"+(t.info.key||t.id)):(t.info.relationship?.family||"other");}
-function groupName(t){return prefs.grouping==="session"?(t.info.relationship?.branchName||t.info.title):(t.info.relationship?.name||"Other terminals");}
+function groupName(t){const name=prefs.grouping==="session"?(t.info.relationship?.branchName||t.info.title):(t.info.relationship?.name||"Other terminals");return t.info.association==="Checking session association"?"Last verified: "+name:name;}
 function drawGroups(){
  const el=$("#terminal-groups");
  if(prefs.grouping==="none" || tabs.size<2){el.replaceChildren();return;}
@@ -405,9 +406,9 @@ function paint() {
   if (i.kind === "signin") runs.replaceChildren("Runs ", h("span", { class: "mono" }, i.command), " · your browser opens the sign-in page; hopsesh never sees it");
   else if (i.kind === "shell") runs.replaceChildren("Your login shell ", h("span", { class: "mono" }, (i.command || "").replace(/^your login shell /, "")), " in ", h("span", { class: "mono" }, home(i.dir)));
   else runs.replaceChildren(t.info.machine ? `${t.info.machine}${t.info.account ? " · "+t.info.account : ""} · ` : "", "Runs ", h("span", { class: "mono" }, i.command || i.program), " in ", h("span", { class: "mono" }, home(i.dir)), " · started " + ago(i.started));
-  if(i.relationship?.branchName) runs.append(" · "+i.relationship.branchName);
- if (i.association === "Session association not confirmed") {
-  runs.append(" · Session association not confirmed");
+  if(i.relationship?.branchName) runs.append(" · "+(i.association === "Checking session association" ? "Last verified branch: " : "")+i.relationship.branchName);
+ if (i.association === "Session association not confirmed" || i.association === "Checking session association") {
+  runs.append(" · " + i.association);
   if(i.pid) runs.append(` · PTY PID ${i.pid}`);
  }
  runs.title = `${i.command || i.program}\n${i.dir}\nPTY PID: ${i.pid || "not available"}\nStarted: ${i.started || "not available"}`;

@@ -301,10 +301,11 @@ func (a *App) Presence() (*PresenceDTO, error) {
 	core := a.snapshot()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	binding := a.beginTerminalBindingRead("presence")
 	live := core.LiveHere(ctx, inv)
 	table, tableErr := presence.Snapshot(ctx)
 	if tableErr == nil {
-		a.bindTerminalPresence(owned, inv, live, table)
+		a.bindTerminalPresence(owned, inv, live, table, binding)
 	}
 	self := os.Getpid()
 	here := inv.Local()

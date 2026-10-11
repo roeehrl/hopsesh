@@ -42,19 +42,23 @@ type startupCodex struct {
 	*codex.Module
 	mu     sync.Mutex
 	pid    int
+	state  agent.Liveness
 	onLive func()
 }
 
 func (m *startupCodex) Live(_ context.Context, _ agent.Host, _ agent.Install, ids []agent.SessionID) (map[agent.SessionID]agent.LiveInfo, error) {
 	m.mu.Lock()
-	pid, wait := m.pid, m.onLive
+	pid, wait, state := m.pid, m.onLive, m.state
 	m.mu.Unlock()
 	if wait != nil {
 		wait()
 	}
 	out := map[agent.SessionID]agent.LiveInfo{}
 	for _, id := range ids {
-		li := agent.LiveInfo{State: agent.Live, Status: "idle"}
+		if state == "" {
+			state = agent.Live
+		}
+		li := agent.LiveInfo{State: state, Status: "idle"}
 		if pid > 0 {
 			li.PID = pid
 			li.Procs = []agent.LiveProc{{PID: pid, ObservedAt: time.Now().UTC()}}

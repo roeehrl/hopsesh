@@ -222,6 +222,7 @@ func (a *App) scanAccounts(forceAccounts bool) (*ScanDTO, error) {
 	a.mu.Unlock()
 
 	last := time.Time{}
+	binding := a.beginTerminalBindingRead("scan")
 	inv := core.Scan(ctx, app.ScanOptions{ForceAccounts: forceAccounts, Progress: func(u app.ScanUpdate) {
 		if reviewing {
 			return
@@ -278,7 +279,7 @@ func (a *App) scanAccounts(forceAccounts bool) (*ScanDTO, error) {
 	a.historyObservedLocked(inv)
 	a.closePushLocked()
 	a.mu.Unlock()
-	a.bindTerminalSessions(inv)
+	a.bindTerminalSessions(inv, binding)
 	d := scanDTO(core, inv, now, now)
 	d.Revision = a.scanRevision.Add(1)
 	d = a.bindAdopted(d)
@@ -345,6 +346,7 @@ func (a *App) RefreshHere() (*ScanDTO, error) {
 	a.scanCancel = cancel
 	a.mu.Unlock()
 	defer func() { a.mu.Lock(); a.scanCancel = nil; a.mu.Unlock() }()
+	binding := a.beginTerminalBindingRead("scan")
 	fresh := core.Scan(ctx, app.ScanOptions{Hosts: []string{app.LocalName()}})
 	now := time.Now()
 	a.mu.Lock()
@@ -381,7 +383,7 @@ func (a *App) RefreshHere() (*ScanDTO, error) {
 	a.historyObservedLocked(fresh)
 	at := a.invAt
 	a.mu.Unlock()
-	a.bindTerminalSessions(inv)
+	a.bindTerminalSessions(inv, binding)
 	d := scanDTO(core, inv, now, at)
 	d.Revision = a.scanRevision.Add(1)
 	return a.bindAdopted(d), nil
@@ -1117,6 +1119,11 @@ func (a *App) OpenResult(where string) (*OpenedDTO, error) {
 	if p == nil || res == nil {
 		return nil, errors.New("nothing was moved")
 	}
+	if a.Terms != nil {
+		if _, err := a.Terms.sessionTabRoute(app.LocalName(), p.Placement.Key.String()); err != nil {
+			return nil, err
+		}
+	}
 	if p.Options.App {
 		return &OpenedDTO{Where: "app"}, start(p.Resume)
 	}
@@ -1135,7 +1142,11 @@ func (a *App) OpenResult(where string) (*OpenedDTO, error) {
 	}
 	key := l.Key.String()
 	if a.Terms != nil {
-		if id := a.Terms.liveSessionTab(app.LocalName(), key); id != "" {
+		id, err := a.Terms.sessionTabRoute(app.LocalName(), key)
+		if err != nil {
+			return nil, err
+		}
+		if id != "" {
 			a.Terms.Focus(id)
 			return &OpenedDTO{Where: WhereShown, Tab: id}, nil
 		}
@@ -1187,8 +1198,14 @@ func (a *App) ResumeEntry(machine, key string, inApp bool) error {
 	if err != nil {
 		return err
 	}
-	if a.Terms != nil && a.Terms.liveSessionTab(machine, key) != "" {
-		return fmt.Errorf("%w in the hopsesh Terminal window: show that tab instead", app.ErrOpenElsewhere)
+	if a.Terms != nil {
+		id, err := a.Terms.sessionTabRoute(machine, key)
+		if err != nil {
+			return err
+		}
+		if id != "" {
+			return fmt.Errorf("%w in the hopsesh Terminal window: show that tab instead", app.ErrOpenElsewhere)
+		}
 	}
 	preflight, done := context.WithTimeout(context.Background(), time.Minute)
 	defer done()

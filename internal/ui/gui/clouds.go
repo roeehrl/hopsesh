@@ -422,7 +422,11 @@ func (a *App) OpenBrought(journal, where string) (*OpenedDTO, error) {
 	l.Key, _ = agent.ParseKey(b.Key)
 	key := l.Key.String()
 	if a.Terms != nil {
-		if id := a.Terms.liveSessionTab(app.LocalName(), key); id != "" {
+		id, err := a.Terms.sessionTabRoute(app.LocalName(), key)
+		if err != nil {
+			return nil, err
+		}
+		if id != "" {
 			a.Terms.Focus(id)
 			return &OpenedDTO{Where: WhereShown, Tab: id}, nil
 		}
