@@ -341,7 +341,7 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 					}
 				}
 				if !selected {
-					p.Blockers = append(p.Blockers, "destination native session already exists outside the selected branch; create a separate fork")
+					p.Blockers = append(p.Blockers, "destination native session already exists outside the selected branch; keep them as separate conversations")
 				}
 			}
 		}
@@ -451,7 +451,7 @@ func changedSinceItLeft(ctx context.Context, p *Plan, in Input, c Copy) string {
 		source, target := p.manifest.Covered(p.sourceState.Heads), p.manifest.Covered(st.Heads)
 		if lineage.Subset(source, target) && lineage.Subset(target, source) {
 			if c.Summary.CWD != "" && realIntended(c.Summary.CWD) != realIntended(p.Target.CWD) {
-				p.Blockers = append(p.Blockers, "destination is synchronized in "+c.Summary.CWD+"; choose that folder or create a separate fork for a different folder")
+				p.Blockers = append(p.Blockers, "destination is synchronized in "+c.Summary.CWD+"; choose that folder or keep them as separate conversations")
 				return ""
 			}
 			p.NoWork = true

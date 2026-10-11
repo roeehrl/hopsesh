@@ -94,8 +94,8 @@ export function movementNotice(e, show, viewJourney) {
     : g.mode === "released" ? ["warn", "Block removed. Continuing here makes the copies diverge; moving back then needs a comparison."]
     : ["muted", "Not protected (Settings › General)."];
   return h("section", {class:"sec movement-notice", "aria-label":"Moved out"},
-    h("span", {class:"sec-h"}, n.status === "forked" ? "Fork made" : "Moved out"),
-    h("span", {}, `${n.status === "forked" ? "Forked to" : "Moved to"} ${to}${manyAccounts(n.agent) && n.profileLabel ? " · " + n.profileLabel : ""}`),
+    h("span", {class:"sec-h"}, n.status === "forked" ? "Separate copy" : "Moved out"),
+    h("span", {}, `${n.status === "forked" ? "Copied to" : "Moved to"} ${to}${manyAccounts(n.agent) && n.profileLabel ? " · " + n.profileLabel : ""}`),
     h("span", {class:"muted"}, explanation),
     protection ? h("span", {class: protection[0]}, protection[1]) : null,
     g && !g.effective && g.fix ? h("span", {class:"muted", style:"font-size:12px"}, g.fix) : null,
@@ -105,5 +105,5 @@ export function movementNotice(e, show, viewJourney) {
       local && g?.mode === "block" ? h("button", {class:"btn small danger",onclick:()=>removeBlock(e,()=>refreshSelection())}, "Remove block…") : null,
       local && g?.mode === "released" ? h("button", {class:"btn small",onclick:()=>restoreBlock(e,()=>refreshSelection())}, "Block again") : null,
       h("button", {class:"btn small",onclick:viewJourney}, "View journey"),
-      local && n.status !== "forked" ? h("button", {class:"btn small",onclick:()=>planFor(e,{target:e.agent,targetProfile:e.profile?.id || "",fork:true})}, "Fork here instead…") : null));
+      null));
 }

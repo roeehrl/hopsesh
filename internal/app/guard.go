@@ -189,7 +189,7 @@ func (a *App) Role(e Entry) *RoleInfo {
 	if n := e.Departure; n != nil {
 		to := place(n.AgentName, n.Agent, n.Machine, n.Cloud)
 		if n.Status == "forked" {
-			return &RoleInfo{Kind: "forked-out", Glyph: "⑂", Word: "Fork made", Line: "a separate fork continues in " + to}
+			return &RoleInfo{Kind: "forked-out", Glyph: "⑂", Word: "Separate copy", Line: "a separate conversation continues in " + to}
 		}
 		mode := a.OriginalGuard(e.Session.Key, n.Operation, n.Status)
 		released := a.Cfg.OriginalGuard() != GuardOff && a.Released(e.Session.Key, n.Operation)
@@ -211,7 +211,7 @@ func (a *App) Role(e Entry) *RoleInfo {
 		case ar.Kind == "returned":
 			return &RoleInfo{Kind: "returned", Glyph: "↩", Word: "Returned", Line: "moved back from " + from}
 		case ar.Fork:
-			return &RoleInfo{Kind: "fork", Glyph: "⑂", Word: "Fork", Line: "forked from " + from}
+			return &RoleInfo{Kind: "fork", Glyph: "⑂", Word: "Separate copy", Line: "separate conversation from " + from}
 		case ar.Kind == "continuation":
 			return &RoleInfo{Kind: "continuation", Glyph: "↳", Word: "Continuation", Line: "bounded continuation of " + from + "; the original is kept"}
 		}

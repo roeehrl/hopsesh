@@ -357,9 +357,9 @@ func (a *App) describeDeparture(g *lineage.Manifest, id lineage.ReplicaID, hop l
 	case "diverged":
 		n.Text = "This conversation and the copy in " + where + " contain different work. Compare the histories before moving."
 	case "forked":
-		n.Text = "A separate fork was prepared in " + where + ". This original branch remains available."
+		n.Text = "A separate conversation was prepared in " + where + ". This one is not blocked and stays available."
 		if continued {
-			n.Text = "A separate fork continued in " + where + ". This original branch remains available."
+			n.Text = "A separate conversation continued in " + where + ". This one is not blocked and stays available."
 		}
 	default:
 		n.Text = "Prepared in " + where + ". Work there has not yet been observed."

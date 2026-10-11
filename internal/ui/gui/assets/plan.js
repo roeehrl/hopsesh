@@ -153,7 +153,7 @@ function summary(p) {
    :h("b",{},identity(chosen)),h("span",{class:"muted"},chosen?`${identity(chosen)!==chosen.name?chosen.name+' · ':''}${chosen.default?'Default profile':'Named profile'}${!chosen.account?.email&&!chosen.account?.label?' · Email unavailable':''}`:"Account not identified"))):null;
  const summaryBody=summaryContent(p);
  return h("div",{},cur.returnCandidate ? h("details",{class:"return-destination-identity"},h("summary",{},`Original destination: ${cur.returnCandidate.agentName}${manyAccounts(cur.returnCandidate.agent) && cur.returnCandidate.profileLabel ? " (" + cur.returnCandidate.profileLabel + ")" : ""} on ${cur.returnCandidate.machine}`),
-  h("code",{},cur.opts.targetSession || (cur.opts.fork ? "New separate conversation branch; the original is preserved" : "New session; the original is preserved"))) : null,accountChoice,summaryBody);
+  h("code",{},cur.opts.targetSession || "New session; the original is preserved")) : null,accountChoice,summaryBody);
 }
 function summaryContent(p) {
  if (p.conflict && (p.blockers || []).length && !cur.opts.conflict) return h("div", {class:"summary", "aria-label":"What changes"}, "Return paused. No session will change until you review a plan and confirm it.");
@@ -327,21 +327,14 @@ function checks(p) {
 
 function options(p) {
   const r = p.repo, o = cur.opts, cont = p.continue;
-  const canFork = p.live && p.can.fork && !p.conflict, forked = canFork && !!o.fork;
   const opts = [
     r.sourceHead && !sameFolder(p) ? check("Bring the code to the session's commit", "syncCode", "Fetches if needed; fast-forwards only a clean checkout on the same branch.") : null,
     r.unpushed && r.sourceUpstream && !sameFolder(p) ? check(`Push ${count(r.unpushed, "commit")} on ${p.sourceHost} first`, "push", "With that machine's own git credentials.") : null,
     cont && (p.machine || cur.launch !== "app") ? check("Send “Continue” when opening", "go", `The terminal launch sends the first message to ${p.agent}. Progress appears in the agent.`) : null,
     p.can.remoteControl ? check("Turn on Remote Control", "remoteControl", `Reach it from your phone or other machines, as ${p.newName}.`) : null,
-    // A separate fork is never blocked or warned: both copies continue on their own, so
-    // there is nothing to move back to. The two choices exclude each other on screen.
-    forked ? (state.info?.defaults?.original === "advise"
-      ? check("Warn in the original", "notify", "Off while both copies keep running: a separate fork is never warned.", false, undefined, true)
-      : check("Block the original until you move back", "notify", "Off while both copies keep running: a separate fork is never blocked.", false, undefined, true))
-    : state.info?.defaults?.original === "advise"
+    state.info?.defaults?.original === "advise"
       ? check("Warn in the original", "notify", "Until you move back, the copy left behind warns before you continue there (through the agent's hopsesh hook).")
       : check("Block the original until you move back", "notify", "The copy left behind refuses new prompts until you move the session back, so moving back stays a clean return (through the agent's hopsesh hook). Off: the original is left alone."),
-    canFork ? check("Keep the old session running too", "fork", "Both copies continue as separate conversations, instead of a hand-off. The original is not blocked.") : null,
     check("Redact likely secrets", "redact", "In this copy only."),
   ];
   return h("section", { class: "sec", style: "gap:10px" }, h("span", { class: "sec-h" }, "Options"), h("div", { class: "opts-grid" }, opts),

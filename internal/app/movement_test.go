@@ -439,7 +439,7 @@ func TestMovementForkPreservesObservedContinuation(t *testing.T) {
 	checked := time.Now().UTC()
 	observed := map[lineage.ReplicaID]movementObservation{target: {valid: true, checked: checked, state: continued, agentAnchors: map[string]bool{"node:1": true}}}
 	n := a.movementNotice(g, source, observed)
-	if n == nil || n.Status != "forked" || !strings.Contains(n.Text, "continued") || !strings.Contains(n.Text, "original branch remains available") || n.CheckedAt != checked {
+	if n == nil || n.Status != "forked" || !strings.Contains(n.Text, "continued") || !strings.Contains(n.Text, "not blocked and stays available") || n.CheckedAt != checked {
 		t.Fatalf("fork lost continuation evidence: %+v", n)
 	}
 	if strings.Contains(n.Text, "prepared") {

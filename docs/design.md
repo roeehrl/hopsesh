@@ -147,7 +147,7 @@ hopsesh agents [--json]                        # modules, capabilities, what is 
 hopsesh plan [<machine>:][<agent>/]<id|title> [flags]     # never writes
 hopsesh pull [<machine>:][<agent>/]<id|title> [--in A] [--fidelity history|note] [--native]
           [--via import] [--note-file F] [--carry-rules] [--go] [--to DIR] [--clone]
-          [--worktree auto|create|main] [--fork] [--rc] [--notify] [--redact] [--app]
+          [--worktree auto|create|main] [--rc] [--notify] [--redact] [--app]
           [--stop-local] [--keep-both|--replace] [--no-sync] [--push] [--run [--terminal T]]
 hopsesh pull <cloud>:<id>|<cloud link> [--in A] [--code-only] [--append] [--to DIR] [--run]   # bring one home
 hopsesh push [<agent>/]<id|title> <machine> [same choices]

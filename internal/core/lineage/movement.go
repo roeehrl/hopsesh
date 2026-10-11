@@ -92,17 +92,21 @@ func (m *Manifest) Departed(current ReplicaID) (Hop, bool) {
 }
 
 // Departure returns the latest unambiguous route away from a replica. A return
-// clears it. Fork notices describe a separate branch and never retire the parent.
+// clears it. Fork notices describe a separate branch and never retire the parent,
+// so a move away from this copy decides its notice whatever separate copies were
+// made from it: they sit on other branches and are never ordered against the move
+// (a real move after an earlier separate copy was once called ambiguous, and the
+// original was left unblocked while hopsesh showed it blocked).
 func (m *Manifest) Departure(current ReplicaID) (Hop, bool) {
 	if m == nil || !m.HasReplica(current) {
 		return Hop{}, false
 	}
 	line := m.Replica(current).Line
 	g := m.movementHistory()
-	var route, candidates []Hop
+	var route, candidates, forks []Hop
 	for _, h := range g.active {
 		if h.Fork && h.From == current {
-			candidates = append(candidates, h)
+			forks = append(forks, h)
 		}
 		if h.Line == line {
 			route = append(route, h)
@@ -129,6 +133,9 @@ func (m *Manifest) Departure(current ReplicaID) (Hop, bool) {
 				candidates = append(candidates, last)
 			}
 		}
+	}
+	if len(candidates) == 0 {
+		candidates = forks // no move away: a separate copy's notice, if any
 	}
 	// Select before applying Notify: an opted-out or concurrent departure must
 	// never expose an older enabled notice. An inbound hop does not retire forks.

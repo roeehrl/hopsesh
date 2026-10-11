@@ -122,7 +122,7 @@ func targetState(ctx context.Context, p *Plan, in Input, c Copy) (lineage.State,
 	}
 	replica, id, ok := p.manifest.FindBinding(c.Summary.Key, in.Target.Machine.Facts.Endpoint, in.Target.Install.BindingID())
 	if !ok || replica.Binding != in.Target.Install.BindingID() {
-		return lineage.State{}, seg, fmt.Errorf("destination session has no verified lineage; choose a separate fork")
+		return lineage.State{}, seg, fmt.Errorf("destination session has no verified lineage; keep them as separate conversations")
 	}
 	if p.ExpectedDestination == nil {
 		p.ExpectedDestination = map[string]ir.Cursor{}

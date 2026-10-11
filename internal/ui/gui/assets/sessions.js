@@ -411,7 +411,7 @@ function row(e, level) {
     else if (e.lastPrompt) bits.push(`“${e.lastPrompt}”`);
   }
   const repoWord = list.groupBy === "repository" || e.group.noRepo ? "" : e.group.name.replace(/ \(no remote\)$/, "");
-  if(e.journey?.fork) bits.push("separate fork");
+  if(e.journey?.fork) bits.push("separate conversation");
  if(e.journey?.roundTrips) bits.push(`${e.journey.roundTrips} round trips`);
  const chips = presenceChips(e);
 if(accountShown(e.profile)) chips.push(h("span", {class:"chip account-chip",title:accountTitle(e.profile)},accountShown(e.profile)));

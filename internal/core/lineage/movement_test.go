@@ -149,10 +149,15 @@ func TestMovementConcurrentTips(t *testing.T) {
 		f.check(t, "A", "")
 	})
 	t.Run("move and fork", func(t *testing.T) {
+		// A separate copy never retires its source; a move does. The move decides the
+		// source's notice (and its block) however the two hops are ordered.
 		f := newMovementFixture("A", "B")
-		f.hop(t, "move", "A", "B", true)
 		f.fork(t, "fork", "A", "C", true)
-		f.check(t, "A", "")
+		f.hop(t, "move", "A", "B", true)
+		f.check(t, "A", "move")
+		if h, ok := f.m.Departure(f.ids["A"]); !ok || h.Fork || h.To != f.ids["B"] {
+			t.Fatalf("the move must decide the source's notice: %+v %v", h, ok)
+		}
 	})
 }
 

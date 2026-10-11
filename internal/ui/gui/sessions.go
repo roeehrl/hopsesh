@@ -718,7 +718,7 @@ func history(core *app.App, m *lineage.Manifest) []HopDTO {
 			what += " · bounded continuation; original retained"
 		}
 		if h.Fork {
-			what += " (separate fork)"
+			what += " (separate conversation)"
 		}
 		for _, c := range m.Compensations {
 			if c.Operation == h.ID {

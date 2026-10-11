@@ -289,7 +289,7 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 			cp.RolloverCursor = seg.Cursor
 		}
 		if opt.Fork {
-			p.Warnings = append(p.Warnings, "A bounded continuation will be created on a separate fork. The original remains available.")
+			p.Warnings = append(p.Warnings, "A bounded continuation will be created as a separate conversation. The original remains available.")
 		} else {
 			p.Warnings = append(p.Warnings, "A separate bounded continuation will be created on the same conversation branch. The original is kept unchanged and, like any moved original, protected until you move back.")
 		}
@@ -366,7 +366,7 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 		case lineage.Subset(source, target) && lineage.Subset(target, source):
 			cp.Relation = RelationSame
 			if c.Summary.CWD != "" && realIntended(c.Summary.CWD) != realIntended(p.Target.CWD) {
-				p.Blockers = append(p.Blockers, "destination is synchronized in "+c.Summary.CWD+"; choose that folder or create a separate fork for a different folder")
+				p.Blockers = append(p.Blockers, "destination is synchronized in "+c.Summary.CWD+"; choose that folder or keep them as separate conversations")
 				return
 			}
 			p.NoWork = true
@@ -379,7 +379,7 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 			return
 		case lineage.Subset(target, source):
 			if c.Summary.CWD != "" && realIntended(c.Summary.CWD) != realIntended(p.Target.CWD) {
-				p.Blockers = append(p.Blockers, "the original session belongs to "+c.Summary.CWD+"; choose that folder or create a separate fork for a different folder")
+				p.Blockers = append(p.Blockers, "the original session belongs to "+c.Summary.CWD+"; choose that folder or keep them as separate conversations")
 				return
 			}
 			cp.Relation = RelationAppend
@@ -401,7 +401,7 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 	if opt.Conflict == ConflictKeepBoth {
 		forkLine(p)
 		cp.Relation = RelationNew
-		p.Warnings = append(p.Warnings, p.Conflict+"; a separate fork will be created")
+		p.Warnings = append(p.Warnings, p.Conflict+"; it will be kept as a separate conversation")
 	} else {
 		p.Blockers = append(p.Blockers, p.Conflict+"; choose --keep-both")
 	}

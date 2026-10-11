@@ -39,13 +39,7 @@ test('real service resolves hidden original and appends return work to that exac
  await expect(details(page).getByLabel('Moved out',{exact:true})).not.toContainText('Last checked');
  await expect(details(page).locator('.skel')).toHaveCount(0);
  await page.screenshot({path:info.outputPath('real-source-prepared-hidden-copy.png'),fullPage:true});
- const separatePlan=page.waitForResponse(r=>r.url().endsWith('/call') && r.request().postDataJSON().m==='Plan');
- await details(page).getByLabel('Moved out',{exact:true}).getByRole('button',{name:'Fork here instead…',exact:true}).click();
- const separate=(await (await separatePlan).json()).result;
- await info.attach('separate-plan.json',{body:JSON.stringify(separate,null,2),contentType:'application/json'});
- await page.screenshot({path:info.outputPath('real-separate-plan.png'),fullPage:true});
- expect.soft(separate.blockers || [],'same-agent fork plan must preserve original and permit a new session').toEqual([]);
- await page.locator('#sheet').getByRole('button',{name:'Cancel',exact:true}).click();
+ await expect(details(page).getByLabel('Moved out',{exact:true}).getByRole('button',{name:/Fork here instead/})).toHaveCount(0);
  await details(page).locator('#act-primary').click();
  await expect(details(page).getByRole('heading',{name:'Find the codeword',exact:true})).toBeVisible();
  await expect.poll(()=>page.evaluate(async()=>{const {selected}=await import('/core.js');return selected()?.key;})).toBe(converted.key);

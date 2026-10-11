@@ -164,10 +164,10 @@ test("a recorded context error offers bounded recovery in session details", asyn
   await expect(page.locator('#sheet')).toContainText('The original is kept unchanged');
 });
 
-// Keeping the old session running makes a separate fork, which is never blocked: the
-// review must not offer both (it once showed "Block the original" ticked next to it and
-// silently dropped the block).
-test("keeping the old session running turns off blocking the original, and says why", async ({ page }) => {
+// A move is always a move: the review of an open session offers no "keep the old
+// session running too" (a separate copy that was never blocked, and silently overrode
+// "Block the original").
+test("an open session's review moves it and blocks the original, with no keep-both option", async ({ page }) => {
   const key = await row(page, "Find the codeword").getAttribute("data-key");
   const id = key!.split("\u0000")[1].split("/")[1];
   expect((await page.request.post(`/live?session=${id}&entrypoint=cli`)).ok()).toBeTruthy();
@@ -176,19 +176,8 @@ test("keeping the old session running turns off blocking the original, and says 
   await action(page, "move", /^Continue with Codex…/);
   const sheet = page.locator("#sheet");
   await expect(sheet.getByRole("heading", { name: "Continue “Find the codeword” in Codex" })).toBeVisible({ timeout: 30_000 });
-
-  const block = sheet.locator('input[data-opt="notify"]');
-  const keep = sheet.locator('input[data-opt="fork"]');
-  await expect(block).toBeChecked();
-  await expect(block).toBeEnabled();
-  await expect(keep).not.toBeChecked();
-
-  await keep.check();
-  await expect(block).not.toBeChecked({ timeout: 30_000 });
-  await expect(block).toBeDisabled();
-  await expect(sheet).toContainText("a separate fork is never blocked");
-
-  await keep.uncheck();
-  await expect(block).toBeChecked({ timeout: 30_000 });
-  await expect(block).toBeEnabled();
+  await expect(sheet.locator('input[data-opt="notify"]')).toBeChecked();
+  await expect(sheet.locator('input[data-opt="fork"]')).toHaveCount(0);
+  await expect(sheet).not.toContainText("Keep the old session running");
+  await expect(sheet).not.toContainText(/\bfork\b/i);
 });

@@ -12,9 +12,14 @@ All notable changes to this project are documented here. The format follows
   history starts at the compaction boundary, whose link to the earlier conversation
   points at a message copied after it; hopsesh refused it as "both copies changed:
   Claude branch has a forward parent reference".
-- The move review no longer offers "Block the original" together with "Keep the old
-  session running too". Keeping it running makes a separate fork, which is never blocked;
-  the block option now turns off while it is ticked, and says why.
+- A move is always a move. The review no longer offers "Keep the old session running
+  too", the source notice no longer offers "Fork here instead…", and `hopsesh pull` and
+  `push` no longer take `--fork`: that option made a separate copy that was never blocked,
+  silently overriding "Block the original". Separate copies hopsesh still makes on its own
+  (both copies changed, bounded continuations) are called separate conversations.
+- An original that once had a separate copy is blocked again when it is moved. The move
+  and the earlier copy were judged ambiguous, so no notice reached the agent's hook and
+  the original was not blocked, while hopsesh showed it blocked.
 - Opening a moved session in the Codex app shows its command without an empty
   `cd ''` in front.
 - `hopsesh notices status` (and install and remove) run through the `hopsesh` command link

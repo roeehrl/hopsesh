@@ -467,7 +467,7 @@ test('missing destination reviews a new session without reusing its original key
  await expect(page.locator('#sheet')).toContainText('Test stopped after read-only plan request');
 });
 
-test('source notice has destination, journey and explicit separate continuation controls',async({page})=>{
+test('source notice has destination and journey controls',async({page})=>{
  const calls=await fixtures(page,[],{status:'prepared',text:'Prepared elsewhere',machine:'studio',agent:'codex',key:'codex/original',checkedAt:'0001-01-01T00:00:00Z'});
  const notice=details(page).getByLabel('Moved out',{exact:true});
  await expect(notice).not.toContainText('Checked');
@@ -475,8 +475,7 @@ test('source notice has destination, journey and explicit separate continuation 
  await expect(page.getByRole('dialog').last()).toContainText('Scan studio');await page.getByRole('dialog').last().getByRole('button',{name:'Close',exact:true}).click();
  await notice.getByRole('button',{name:'View journey',exact:true}).click();
  await expect(details(page).locator('#sec-copies')).toBeVisible();
- await notice.getByRole('button',{name:'Fork here instead…',exact:true}).click();
- await expect.poll(()=>calls.length).toBe(1);expect(calls[0].m).toBe('Plan');expect(calls[0].args[2]).toBe('claude');expect(calls[0].args[3]).toMatchObject({fork:true,newReplica:true,targetSession:''});
+ await expect(notice.getByRole('button',{name:/Fork here instead/})).toHaveCount(0); // a move is never turned into a separate copy from here
 });
 
 test('cross-agent plan exposes the block-the-original override',async({page})=>{

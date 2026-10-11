@@ -451,7 +451,7 @@ func (m *Manifest) Observe(replica ReplicaID, seg *ir.Segment) (State, error) {
 	}
 	for anchor := range by {
 		if !seen[anchor] {
-			return State{}, fmt.Errorf("%w: history was compacted or rewound; create a separate fork", agent.ErrDiverged)
+			return State{}, fmt.Errorf("%w: history was compacted or rewound; keep them as separate conversations", agent.ErrDiverged)
 		}
 	}
 	lastKnown := -1

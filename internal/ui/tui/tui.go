@@ -1299,7 +1299,7 @@ func (m *model) viewBrowseDetail(b *strings.Builder, w int) {
 			j := e.Lineage.Journey()
 			fork := ""
 			if j.Fork {
-				fork = " · separate fork"
+				fork = " · separate conversation"
 			}
 			fmt.Fprintf(b, "  %d transfers · %d round trips to origin · %d returns%s\n", j.Transfers, j.RoundTrips, j.Returns, fork)
 			fmt.Fprintf(b, "  %d machine transfers · %d machine round trips\n", j.MachineTransfers, j.MachineRoundTrips)
