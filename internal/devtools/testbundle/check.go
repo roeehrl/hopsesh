@@ -39,6 +39,7 @@ type slot struct {
 var slots = []slot{
 	{agent: "claude", dir: "hooks", kind: "hook", schema: "claude-hook.schema.json", event: "hook_event_name"},
 	{agent: "claude", dir: "registry", kind: "registry", schema: "claude-registry.schema.json", more: claudeReads},
+	{agent: "codex", dir: "hooks", kind: "hook", schema: "codex-hook.schema.json", event: "hook_event_name"},
 	{agent: "codex", dir: "notify", kind: "notify", schema: "codex-notify.schema.json"},
 }
 

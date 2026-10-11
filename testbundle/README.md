@@ -75,6 +75,7 @@ testbundle/<agent>/<agent version>/<slot>/[<Event>/]<name>.json
 |---|---|---|---|
 | `claude` | `hooks/<Event>/` | the JSON a hook command reads on its standard input; the folder is its `hook_event_name` (`Notification`, `Stop`, …) | `claude-hook.schema.json` |
 | `claude` | `registry/` | a running-session registry entry (`<config>/sessions/<pid>.json`), such as one with `waitingFor` | `claude-registry.schema.json` |
+| `codex` | `hooks/<Event>/` | JSON on hook command standard input, under its `hook_event_name` | `codex-hook.schema.json` |
 | `codex` | `notify/` | the JSON Codex passes to its `notify` program | `codex-notify.schema.json` |
 
 The rules:
@@ -102,3 +103,20 @@ go run ./internal/devtools/testbundle check
 
 CI runs the same check, builds the bundle, and runs the stand-in from it. A release then
 publishes your files in that version's bundle; earlier bundles never change.
+
+## MyCNC live hook captures
+
+The Claude 2.1.289 and Codex 0.160.1 hook contributions were captured on 9 October
+2026 using the actual CLIs, disposable homes and a loopback scripted model.
+MyCNC's `Scripts/check-agent-hooks.py` runs permission allow/deny cases, verifies
+exact file effects or their absence and observes process exit. Codex also checks
+that untrusted hooks do not execute. Paths and session identities are synthetic;
+all input fields/types are preserved. `allow.json` and `deny.json` name the case,
+not a decision encoded in that input. Denial has no PostToolUse event.
+
+Both PermissionRequest inputs lack `tool_use_id`; only PreToolUse/PostToolUse
+have it. These fixtures do not establish a receipt for a particular hook reply,
+or authorize adopting another process's approval channel. They do not qualify
+Hopsesh runtime hooks, external inference, every tool/mode or device delivery.
+The corresponding versioned MyCNC provenance contains SHA-256 hashes of these
+26 identical payloads under `protocol/agents/hooks/fixtures/`.
