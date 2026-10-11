@@ -89,8 +89,11 @@ export function movementNotice(e, show, viewJourney) {
   if (!n) return null;
   const g = e.guard, local = e.machine === here();
   const to = n.cloud || `${n.agentName || n.agent} on ${n.machine}`;
-  const explanation = {prepared:`The ${n.agentName || n.agent} session is ready; no new work there yet.`, continued:`Work continued in ${n.agentName || n.agent}.`, diverged:"Both copies have new work; compare them before moving back.", forked:"A separate fork; it does not return into this original."}[n.status] || n.status;
+  const checked = Date.parse(n.checkedAt) > 0;
+  const summary = {prepared:`The ${n.agentName || n.agent} session is ready; no new work there yet.`, continued:`Work continued in ${n.agentName || n.agent}.`, diverged:"Both copies have new work; compare them before moving back.", forked:"A separate fork; it does not return into this original."}[n.status] || n.status;
+  const explanation = n.status !== "forked" && !checked ? `Checking for work in ${n.agentName || n.agent}; the saved movement receipt does not verify its current state.` : (e.cached ? "Last known: " : "") + summary;
   const protection = !g ? null
+    : g.checking || e.cached ? ["muted", "Checking current protection for this original…"]
     : g.mode === "block" ? (g.effective ? ["ok", "Blocked until you move the session back. New prompts here are refused."] : ["warn", "Not blocked: " + (g.problem || "the agent's hook is not ready.")])
     : g.mode === "advise" ? (g.effective ? ["ok", "Advised: the agent warns before you continue here."] : ["warn", "Not advised: " + (g.problem || "the agent's hook is not ready.")])
     : g.mode === "released" ? ["warn", "Block removed. Continuing here makes the copies diverge; moving back then needs a comparison."]
@@ -101,7 +104,7 @@ export function movementNotice(e, show, viewJourney) {
     h("span", {class:"muted"}, explanation),
     protection ? h("span", {class: protection[0]}, protection[1]) : null,
     g && !g.effective && g.fix ? h("span", {class:"muted", style:"font-size:12px"}, g.fix) : null,
-    Date.parse(n.checkedAt) > 0 ? h("span", {class:"muted"}, `Checked ${when(n.checkedAt)}`) : null,
+    checked ? h("span", {class:"muted"}, `${e.cached ? "Last checked" : "Checked"} ${when(n.checkedAt)}`) : null,
     h("div", {style:"display:flex;gap:6px;flex-wrap:wrap"},
       h("button", {class:"btn small primary",onclick:()=>showMovementDestination(n,show)}, `Open in ${n.cloud || n.agentName || n.agent}`),
       local && g?.mode === "block" ? h("button", {class:"btn small danger",onclick:()=>removeBlock(e,()=>refreshSelection())}, "Remove block…") : null,

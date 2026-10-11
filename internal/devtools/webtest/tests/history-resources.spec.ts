@@ -36,6 +36,21 @@ test('History ledger limit persists, rejects intact history, and retries without
   const nativeBefore = await readFile(fixture.path);
   const originalBefore = await readFile(original);
   const originalLedgerBefore = await readFile(original + '.hopsesh.json');
+  // The oversized fragment must represent new native work in the destination,
+  // rather than making an unchanged conversation appear ready to move back.
+  const nativeRecord = JSON.parse(nativeBefore.toString().trimEnd().split('\n').at(-1)!);
+  expect(nativeRecord.payload).toMatchObject({type:'message', role:'assistant'});
+  const nativeWork = nativeRecord.payload.content.map((c:any) => c.text || '').join('\n');
+  expect(Buffer.byteLength(nativeWork)).toBe(fixture.fragmentBytes);
+  expect(digest(nativeWork)).toBe(fixture.fragmentHash);
+  expect(originalBefore.includes(Buffer.from('LEDGER-BEGIN\n'))).toBe(false);
+  const seededGraph = JSON.parse(ledgerBefore.toString());
+  const originalRevisions = new Set(JSON.parse(originalLedgerBefore.toString()).revisions.map((r:any) => r.id));
+  const destinationCoverage = seededGraph.states.flatMap((s:any) => s.projection || [])
+    .flatMap((p:any) => p.fragments || []).filter((f:any) => digest(f.text) === fixture.fragmentHash)
+    .flatMap((f:any) => f.coverage || []);
+  expect(destinationCoverage.length).toBeGreaterThan(0);
+  expect(destinationCoverage.every((id:string) => !originalRevisions.has(id))).toBe(true);
 
   await history(page);
   await saveLedger(page, '16');
@@ -45,6 +60,9 @@ test('History ledger limit persists, rejects intact history, and retries without
   const settings = await page.request.post('/call', {data:{m:'HistorySettings', args:[]}});
   expect((await settings.json()).result).toMatchObject({lineageMB:16, effective:{lineageBytes:16 << 20}});
   await page.getByRole('button', {name:'Back to sessions', exact:true}).click();
+  // Reload first publishes the saved pre-work return candidate. Wait for the
+  // authoritative scan under the new limit before opening the retained menu.
+  await expect(page.locator('#fresh')).toContainText('updated', {timeout:30_000});
   await agentRow(page, 'Find the codeword', 'Codex').click();
   await action(page, 'move', /^(Continue with|Move back to) Claude Code/);
   await expect(page.locator('#sheet')).toContainText('saved movement history reached its size limit');

@@ -108,14 +108,14 @@ export function role(e) {
   const short = (name, agent, machine, cloud) => cloud || ((name || agent || "?") + (machine && machine !== e.machine ? ` on ${machine}` : ""));
   if (dep && dep.status !== "forked") {
     const to = dep.cloud || where(dep.agentName || dep.agent, dep.machine), toShort = short(dep.agentName, dep.agent, dep.machine, dep.cloud);
-    if (dep.status === "diverged")
-      return { kind: "diverged", glyph: "!", chip: "Both changed", tone: "st-warn", short: `Moved to ${toShort}`, line: "Both copies changed; moving back needs a comparison" };
+    if (dep.status === "diverged" && (!e.cached || Date.parse(dep.checkedAt) > 0))
+      return { kind: "diverged", glyph: "!", chip: "Both changed", tone: "st-warn", short: `Moved to ${toShort}`, line: (e.cached ? "Last known: " : "") + "Both copies changed; moving back needs a comparison" };
     if (g?.mode === "released")
       return { kind: "unblocked", glyph: "!", chip: "Unblocked", tone: "st-warn", short: `Moved to ${toShort}`, line: `Moved to ${to}; block removed, continuing here makes the copies diverge` };
     const blocked = g?.mode === "block";
     return { kind: blocked ? "blocked" : "moved-out", glyph: blocked && g.effective ? "◆" : "◇", chip: `Moved to ${toShort}`, tone: blocked && g.effective ? "st-ended" : "st-warn", icon: blocked ? "lock" : "warn",
       short: `Moved to ${toShort}`,
-      line: blocked ? (g.effective ? "Blocked until you move it back" : "Not blocked yet: protection isn't set up") : g?.mode === "advise" ? (g.effective ? "Warns before you continue here" : "No warning yet: protection isn't set up") : "Left as it is" };
+      line: e.cached || g?.checking ? "Checking current movement and protection status" : blocked ? (g.effective ? "Blocked until you move it back" : "Not blocked yet: protection isn't set up") : g?.mode === "advise" ? (g.effective ? "Warns before you continue here" : "No warning yet: protection isn't set up") : "Left as it is" };
   }
   if (dep && dep.status === "forked") { const to = dep.cloud || where(dep.agentName || dep.agent, dep.machine); return { kind: "forked-out", glyph: "⑂", chip: "Separate copy", tone: "st-idle", short: `Copied to ${short(dep.agentName, dep.agent, dep.machine, dep.cloud)}`, line: `A separate conversation continues in ${to}; this one is not blocked` }; }
   if (ar) {
