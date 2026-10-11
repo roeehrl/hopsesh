@@ -202,6 +202,10 @@ func (e *Engine) subscribe(attended bool) (<-chan Snapshot, func()) {
 	}
 }
 
+// Attend counts as an attended client until release is called, without receiving
+// snapshots: for a source someone watches from elsewhere, such as a relay peer.
+func (e *Engine) Attend() (release func()) { _, leave := e.subscribe(true); return leave }
+
 // Attended reports whether someone looks at any subscribed client.
 func (e *Engine) Attended() bool { e.mu.Lock(); defer e.mu.Unlock(); return e.attended > 0 }
 

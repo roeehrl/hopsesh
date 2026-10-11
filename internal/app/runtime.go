@@ -37,6 +37,7 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 	var files *observe.Files
 	var watchProblem string
 	var ownRoots []string
+	var agentsWatched bool
 	var watchMu sync.Mutex
 	var relayMu sync.Mutex
 	var relayService *relay.Service
@@ -214,8 +215,19 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 			ownRoots = own
 			watchMu.Unlock()
 			roots := own
-			if !unwatched(engine) {
+			watching := !unwatched(engine)
+			if watching {
 				roots = append(slices.Clone(out.WatchRoots), own...)
+			}
+			// A session written between this collection's listing and arming its
+			// watches would wait for the fallback: collect once more after arming,
+			// within the usual spacing.
+			watchMu.Lock()
+			rearmed := watching && !agentsWatched
+			agentsWatched = watching
+			watchMu.Unlock()
+			if rearmed {
+				defer engine.Notify()
 			}
 			if err = files.SetRoots(roots); err != nil {
 				out.Problems = append(out.Problems, "Change notifications degraded: "+err.Error())
@@ -269,6 +281,7 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 			if !attended && unwatched(engine) {
 				watchMu.Lock()
 				own := ownRoots
+				agentsWatched = false
 				watchMu.Unlock()
 				_ = files.SetRoots(own)
 			}

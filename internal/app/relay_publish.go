@@ -43,6 +43,14 @@ func observationDigest(snap observe.Snapshot) ([32]byte, error) {
 func publishRelayObservations(ctx context.Context, engine *observe.Engine, service *relay.Service) {
 	updates, unsubscribe := engine.Subscribe()
 	defer unsubscribe()
+	// A peer allowed to observe this machine is someone looking: while there is one,
+	// the source follows session changes as it does for an attended window.
+	var release func()
+	defer func() {
+		if release != nil {
+			release()
+		}
+	}()
 	last := map[string]publishedObservation{}
 	timer := time.NewTimer(time.Hour)
 	timer.Stop()
@@ -71,6 +79,10 @@ func publishRelayObservations(ctx context.Context, engine *observe.Engine, servi
 		attempted = time.Now()
 		cfg, err := config.Load()
 		if err != nil || !cfg.Relay.Enabled {
+			if err == nil && release != nil {
+				release()
+				release = nil
+			}
 			continue
 		}
 		grants, err := service.Processor.Store.Grants()
@@ -111,6 +123,13 @@ func publishRelayObservations(ctx context.Context, engine *observe.Engine, servi
 				old = publishedObservation{digest: digest, observed: snapshot.ObservedAt}
 			}
 			last[grant.Peer.ID] = old
+		}
+		switch {
+		case len(wanted) > 0 && release == nil:
+			release = engine.Attend()
+		case len(wanted) == 0 && release != nil:
+			release()
+			release = nil
 		}
 		problem := ""
 		for id, state := range last {
