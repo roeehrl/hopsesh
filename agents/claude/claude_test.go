@@ -234,8 +234,8 @@ func TestResumeDropsSessionMarkers(t *testing.T) {
 
 func TestResumeUsesDetectedMachineNativeDefaultConfig(t *testing.T) {
 	// The detected machine's home deliberately differs from the launcher's.
-	// An explicit native default must still read ~/.claude.json, not a new
-	// <CLAUDE_CONFIG_DIR>/.claude.json that triggers first-run onboarding.
+	// Native lookup reads ~/.claude.json; an explicit user override instead
+	// selects <CLAUDE_CONFIG_DIR>/.claude.json, even at the same data root.
 	for _, explicit := range []bool{false, true} {
 		for _, registered := range []bool{false, true} {
 			t.Run(strings.Join([]string{map[bool]string{false: "implicit", true: "explicit"}[explicit],
@@ -265,14 +265,20 @@ func TestResumeUsesDetectedMachineNativeDefaultConfig(t *testing.T) {
 				if registered {
 					in.Profile = &agent.RuntimeProfile{ID: "default", Root: in.Root(home), Default: true}
 				}
+				if (in.NativeDefaultRoot != "") == explicit {
+					t.Fatalf("wrong detection metadata for explicit=%v: %+v", explicit, in)
+				}
 				c := New().Resume(in, agent.SessionKey{Agent: id, Session: s1}, agent.Placement{CWD: "/remote/repo"}, agent.ResumeOptions{})
-				if !slices.Contains(c.Unset, "CLAUDE_CONFIG_DIR") {
+				if (!explicit || registered) && !slices.Contains(c.Unset, "CLAUDE_CONFIG_DIR") {
 					t.Fatalf("default can inherit alternate config: %+v", c)
 				}
 				for _, e := range c.Env {
-					if strings.HasPrefix(e, "CLAUDE_CONFIG_DIR=") {
+					if !explicit && strings.HasPrefix(e, "CLAUDE_CONFIG_DIR=") {
 						t.Fatalf("default launch forces onboarding config: %+v", c)
 					}
+				}
+				if explicit && registered && !slices.Contains(c.Env, "CLAUDE_CONFIG_DIR=/remote/alice/.claude") {
+					t.Fatalf("explicit native-path override lost: %+v", c)
 				}
 				if !slices.Contains(c.Argv, s1) || c.Dir != "/remote/repo" || (registered && c.Argv[0] != "/remote/bin/claude") {
 					t.Fatalf("changed exact-session launch: %+v", c)

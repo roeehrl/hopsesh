@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/sdk/ir"
 )
@@ -60,5 +61,27 @@ func (a *App) SetHistorySettings(in config.History) error {
 		a.core.Cfg.History = prev
 		return err
 	}
+	if prev != in {
+		// Do not mutate a published inventory while scans/actions still read it.
+		// The next selection re-reads its source with the newly saved limits.
+		if a.historyStale == nil {
+			a.historyStale = map[string]bool{}
+		}
+		if a.inv != nil {
+			for _, e := range a.inv.Entries {
+				a.historyStale[app.EntryIdentity(e.Machine, e.Session.Key.String())] = true
+			}
+		}
+		a.invalidateReviewsLocked()
+	}
 	return nil
+}
+
+// Call only after publishing observations made under the current settings.
+func (a *App) historyObservedLocked(inv *app.Inventory) {
+	for _, e := range inv.Entries {
+		if !e.Cached {
+			delete(a.historyStale, app.EntryIdentity(e.Machine, e.Session.Key.String()))
+		}
+	}
 }

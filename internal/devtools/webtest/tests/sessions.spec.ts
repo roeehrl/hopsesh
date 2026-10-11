@@ -208,17 +208,26 @@ test("a session open in Claude reports unsupported exact opening instead of sile
   await expect(r).toHaveCount(0); // A desktop-app window is not a terminal tab.
 });
 
-test("a session open in a terminal is shown where it runs, never opened twice", async ({ page }) => {
+test("an unidentified running window has no invented terminal action or duplicate resume", async ({ page }) => {
   const key = await row(page, "Find the codeword").getAttribute("data-key");
   const id = key!.split("\u0000")[1].split("/")[1];
   expect((await page.request.post(`/live?session=${id}&entrypoint=cli`)).ok()).toBeTruthy();
   await menu(page, "refresh");
+  // The stand-in process may inherit a real terminal on a developer's Mac but
+  // has no identifiable window on CI. Exercise that latter case explicitly.
+  await page.evaluate(async key => {
+    const {state} = await import('/core.js');
+    const {render} = await import('/sessions.js');
+    state.presence[key] = {live:true,status:'idle',needs:false,app:'',places:[]};
+    render();
+  }, key!);
   const r = row(page, "Find the codeword");
-  await expect(r.locator(".pchip")).toHaveCount(1);
+  await expect(r.locator(".pchip")).toHaveCount(0);
   await r.click();
-  await expect(details(page).getByRole("button", { name: /^Show/ }).first()).toBeVisible({ timeout: 30_000 });
-  await expect(details(page).locator("#act-primary")).toHaveText(/^Show/);
-  await expect(details(page).locator(".ins-status")).toContainText(/^(Idle|Working) in /);
+  await expect(details(page)).toContainText("This session is running; its window could not be identified.");
+  await expect(details(page).locator("#act-primary")).toHaveCount(0);
+  await expect(details(page).getByRole("button", {name:/^(Show|Resume in)/})).toHaveCount(0);
+  await expect(details(page).locator(".ins-status")).toContainText(/^Idle/);
 });
 
 test("a session in a tab of the hopsesh Terminal: Show it, Move waits until it ends, and two places warn", async ({ page }) => {

@@ -268,6 +268,14 @@ func (a *App) Scan(ctx context.Context, o ScanOptions) *Inventory {
 				m.Phase = "error"
 			}
 		}
+		// Local receipts are ready independently of slow remote/cloud sources.
+		// Publish their movement with the completed local batch, rather than
+		// making a retained session list wait for the whole scan to finish.
+		if m.Local && progress != nil {
+			ready := &Inventory{Machines: []*Machine{m}, Entries: es}
+			a.EnrichMovement(ctx, ready)
+			es = ready.Entries
+		}
 		mu.Lock()
 		inv.Machines = append(inv.Machines, m)
 		inv.Entries = append(inv.Entries, es...)

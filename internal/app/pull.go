@@ -211,9 +211,24 @@ func (a *App) Plan(ctx context.Context, inv *Inventory, e Entry, target agent.ID
 			related[r.Key] = true
 		}
 	}
+	var destinationEntries []Entry
 	for _, c := range inv.Entries {
 		if c.Machine == here.Name && c.Agent == target && c.Session.Key.Profile == tin.ProfileID() && related[c.Session.Key] {
-			in.Copies = append(in.Copies, move.Copy{Summary: c.Session, Live: c.Live, Lineage: c.Lineage})
+			destinationEntries = append(destinationEntries, c)
+		}
+	}
+	if !opt.Fork && !opt.NewReplica {
+		if err := recheckDestinationLive(ctx, in.Target, destinationEntries, opt.TargetSession); err != nil {
+			return nil, move.Input{}, err
+		}
+	}
+	// These are private entry copies: browsing publications keep their observation,
+	// while both the append gate and protected-original handling use fresh evidence.
+	returnInventory := &Inventory{}
+	for _, c := range destinationEntries {
+		in.Copies = append(in.Copies, move.Copy{Summary: c.Session, Live: c.Live, Lineage: c.Lineage})
+		if opt.TargetSession == "" || c.Session.Key.String() == opt.TargetSession || string(c.Session.Key.Session) == opt.TargetSession {
+			returnInventory.Entries = append(returnInventory.Entries, c)
 		}
 	}
 	if target == e.Agent {
@@ -241,10 +256,62 @@ func (a *App) Plan(ctx context.Context, inv *Inventory, e Entry, target agent.ID
 		}
 	}
 	if opt.OpenBlockedOriginal == "" {
-		opt.OpenBlockedOriginal = a.openBlockedOriginal(ctx, inv, e)
+		opt.OpenBlockedOriginal = a.openBlockedOriginal(ctx, returnInventory, e)
 	}
 	p, err := move.Build(ctx, in, opt)
 	return p, in, err
+}
+
+// recheckDestinationLive probes only related local copies eligible for this plan.
+// A complete browsing inventory can still predate a close or a restart.
+func recheckDestinationLive(ctx context.Context, target move.Side, entries []Entry, selected string) error {
+	if !target.Machine.Local || target.Machine.IsSnapshot() {
+		return nil
+	}
+	detector, ok := target.Module.(agent.LiveDetector)
+	if !ok {
+		return nil
+	}
+	var ids []agent.SessionID
+	seen := map[agent.SessionID]bool{}
+	for _, e := range entries {
+		key := e.Session.Key
+		if selected != "" && key.String() != selected && string(key.Session) != selected {
+			continue
+		}
+		if !seen[key.Session] {
+			ids = append(ids, key.Session)
+			seen[key.Session] = true
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	h, err := target.Machine.For(ctx, target.Module.Spec(), target.Install, nil)
+	if err != nil {
+		return fmt.Errorf("cannot recheck destination activity: %w", err)
+	}
+	live, err := detector.Live(ctx, h, target.Install, ids)
+	if err != nil {
+		return fmt.Errorf("cannot recheck destination activity: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if live[id].State != agent.Live && live[id].State != agent.Ended {
+			return fmt.Errorf("cannot verify whether destination session %s is open; check again before returning", id)
+		}
+	}
+	for i := range entries {
+		if seen[entries[i].Session.Key.Session] {
+			entries[i].Live = live[entries[i].Session.Key.Session]
+		}
+	}
+	return nil
 }
 
 func (a *App) account(ctx context.Context, m *Machine, mod agent.Module, in agent.Install) *agent.Account {

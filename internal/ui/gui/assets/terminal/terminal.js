@@ -406,8 +406,11 @@ function paint() {
   else if (i.kind === "shell") runs.replaceChildren("Your login shell ", h("span", { class: "mono" }, (i.command || "").replace(/^your login shell /, "")), " in ", h("span", { class: "mono" }, home(i.dir)));
   else runs.replaceChildren(t.info.machine ? `${t.info.machine}${t.info.account ? " · "+t.info.account : ""} · ` : "", "Runs ", h("span", { class: "mono" }, i.command || i.program), " in ", h("span", { class: "mono" }, home(i.dir)), " · started " + ago(i.started));
   if(i.relationship?.branchName) runs.append(" · "+i.relationship.branchName);
- if (i.association === "Session association not confirmed") runs.append(" · Session association not confirmed");
- runs.title = `${i.command || i.program}\n${i.dir}`;
+ if (i.association === "Session association not confirmed") {
+  runs.append(" · Session association not confirmed");
+  if(i.pid) runs.append(` · PTY PID ${i.pid}`);
+ }
+ runs.title = `${i.command || i.program}\n${i.dir}\nPTY PID: ${i.pid || "not available"}\nStarted: ${i.started || "not available"}`;
   $("#t-external").hidden = !i.external || (done && i.kind === "step");
   $("#t-reader").setAttribute("aria-pressed", prefs.screenReader ? "true" : "false");
 

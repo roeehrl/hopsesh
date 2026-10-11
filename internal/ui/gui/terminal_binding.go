@@ -2,6 +2,8 @@ package gui
 
 import (
 	"context"
+	"reflect"
+	"slices"
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/app"
@@ -38,7 +40,40 @@ func (a *App) bindTerminalSessions(inv *app.Inventory) {
 	if err != nil {
 		return
 	}
-	relationships := inv.Relationships()
+	a.mu.Lock()
+	observed := *inv
+	observed.Entries = slices.Clone(inv.Entries)
+	a.mu.Unlock()
+	a.bindTerminalSnapshot(inv, &observed, table)
+}
+
+// Presence supplies new native evidence without changing the published inventory.
+// A scan owns scanMu; never publish an older frame while that scan is in flight.
+func (a *App) bindTerminalPresence(owned, snapshot *app.Inventory, live map[agent.SessionKey]agent.LiveInfo, table presence.Table) {
+	if !a.scanMu.TryLock() {
+		return
+	}
+	defer a.scanMu.Unlock()
+	observed := *snapshot
+	observed.Entries = slices.Clone(snapshot.Entries)
+	for i := range observed.Entries {
+		e := &observed.Entries[i]
+		if e.Machine == app.LocalName() {
+			if li, ok := live[e.Session.Key]; ok {
+				e.Live = li
+			} else {
+				e.Live = agent.LiveInfo{State: agent.Unknown}
+			}
+		}
+	}
+	a.bindTerminalSnapshot(owned, &observed, table)
+}
+
+func (a *App) bindTerminalSnapshot(owned, observed *app.Inventory, table presence.Table) {
+	if a.Terms == nil || observed.Discovering {
+		return
+	}
+	relationships := observed.Relationships()
 	for _, tab := range a.Terms.Tabs() {
 		if tab.Kind != TabSession || tab.Machine != app.LocalName() || tab.PID == 0 || tab.State == pty.Exited {
 			continue
@@ -51,36 +86,71 @@ func (a *App) bindTerminalSessions(inv *app.Inventory) {
 		if err != nil {
 			continue
 		}
-		found, ambiguous := boundEntry(inv, table, tab, key)
-		// Recheck the exact owned process after observing the table/registry.
-		session, ok := a.Terms.Manager().Get(tab.ID)
-		if !ok || session.Info().State == pty.Exited {
-			continue
-		}
-		if ambiguous || found == nil {
-			a.Terms.setMeta(tab.ID, func(m *TabMeta) { m.Association = "Session association not confirmed"; m.Relationship = nil })
-			continue
-		}
+		found, ambiguous := boundEntry(observed, table, tab, key)
+		a.commitTerminalBinding(owned, tab, key, found, ambiguous, relationships)
+	}
+}
+
+// Commit only evidence already verified by boundEntry against a native process snapshot.
+func (a *App) commitTerminalBinding(owned *app.Inventory, tab TermTab, key agent.SessionKey, found *app.Entry, ambiguous bool, relationships map[string]app.Relationship) {
+	// Recheck the exact owned process after observing the table/registry.
+	session, ok := a.Terms.Manager().Get(tab.ID)
+	if !ok {
+		return
+	}
+	info := session.Info()
+	if info.State == pty.Exited || info.PID != tab.PID || info.Started != tab.Started {
+		return
+	}
+	// Terminal exit callbacks already acquire Terms.mu before App.mu.
+	// Use that same order, and recheck ownership/lifetime before committing.
+	a.Terms.mu.Lock()
+	a.mu.Lock()
+	stale := a.historyStale[app.EntryIdentity(tab.Machine, key.String())]
+	if found != nil {
+		stale = stale || a.historyStale[app.EntryIdentity(found.Machine, found.Session.Key.String())]
+	}
+	if a.inv != owned || a.closing || a.selectionReads > 0 || a.reviewBusyLocked() || stale {
+		a.mu.Unlock()
+		a.Terms.mu.Unlock()
+		return
+	}
+	// Commit with both owners locked; emitting the update happens afterwards,
+	// because terminal notifications can call back into the app.
+	tb := a.Terms.tabs[tab.ID]
+	current := session.Info()
+	if current.State == pty.Exited || current.PID != tab.PID || current.Started != tab.Started || tb == nil || tb.meta.Key != tab.Key || tb.meta.LaunchedKey != tab.LaunchedKey || tb.meta.Kind != tab.Kind {
+		a.mu.Unlock()
+		a.Terms.mu.Unlock()
+		return
+	}
+	m := &tb.meta
+	before := *m
+	if ambiguous || found == nil {
+		m.Association, m.Relationship = "Session association not confirmed", nil
+	} else {
 		e := *found
 		r := relationships[app.EntryIdentity(e.Machine, e.Session.Key.String())]
-		a.mu.Lock()
 		if name := a.core.Cfg.FamilyNames[r.Family]; name != "" {
 			r.Name = name
 		}
-		a.mu.Unlock()
-		a.Terms.setMeta(tab.ID, func(m *TabMeta) {
-			if m.Key != e.Session.Key.String() {
-				m.External = false
-				m.Rerun = false
-			}
-			m.Account = ""
-			if e.Profile != nil && e.Profile.Account != nil {
-				m.Account = e.Profile.Account.Email
-			}
-			m.Key = e.Session.Key.String()
-			m.Relationship = &r
-			m.Association = "Confirmed by native process registry"
-		})
+		if m.Key != e.Session.Key.String() {
+			m.External = false
+			m.Rerun = false
+		}
+		m.Account = ""
+		if e.Profile != nil && e.Profile.Account != nil {
+			m.Account = e.Profile.Account.Email
+		}
+		m.Key = e.Session.Key.String()
+		m.Relationship = &r
+		m.Association = "Confirmed by native process registry"
+	}
+	changed := !reflect.DeepEqual(before, *m)
+	a.mu.Unlock()
+	a.Terms.mu.Unlock()
+	if changed {
+		a.Terms.changed(info)
 	}
 }
 

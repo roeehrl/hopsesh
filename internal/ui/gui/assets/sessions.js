@@ -547,8 +547,9 @@ onChange((full = true) => (full ? render() : refreshList()));
 
 // Preserve row identity, focus and loaded icons during metadata refreshes. Only
 // changed cells are replaced; copy selection never changes the scan's grouping.
-function reconcileList(old, next) {
+function reconcileList(old, next, rows = null, usedRows = new Set()) {
   if (!old || old.nodeType !== next.nodeType || old.nodeName !== next.nodeName) return next;
+  if (!rows) rows = new Map([...old.querySelectorAll('.row[data-key]')].map(n => [n.dataset.key, n]));
   if (old.nodeType !== 1) { if (old.textContent !== next.textContent) old.textContent = next.textContent; return old; }
   if (next.classList.contains("session-chunk")) return next;
   if (old.outerHTML === next.outerHTML) return old;
@@ -561,9 +562,19 @@ function reconcileList(old, next) {
   let at = old.firstChild;
   for (const n of [...next.childNodes]) {
     const k = key(n);
-    const candidate = k ? children.find(c => !used.has(c) && key(c) === k)
+    const candidate = k ? children.find(c => !used.has(c) && key(c) === k) || (n.matches?.('.row') && !usedRows.has(k) ? rows.get(k) : null)
       : children.find(c => !used.has(c) && !key(c) && c.nodeName === n.nodeName && (c.nodeType !== 1 || c.className === n.className));
-    const child = candidate ? reconcileList(candidate,n) : n;
+    const child = candidate ? reconcileList(candidate,n,rows,usedRows) : n;
+    if (candidate && n.matches?.('.row')) usedRows.add(k);
+    // A new repository/group can still contain an existing native row. Move its
+    // node with its identity instead of rebuilding it when membership changes.
+    if (!candidate && n.nodeType === 1) for (const row of [...n.querySelectorAll('.row[data-key]')]) {
+      const previous = rows.get(row.dataset.key);
+      if (previous && !usedRows.has(row.dataset.key)) {
+        usedRows.add(row.dataset.key);
+        row.replaceWith(reconcileList(previous,row,rows,usedRows));
+      }
+    }
     if (candidate) used.add(candidate);
     if (child !== at) old.insertBefore(child,at);
     at = child.nextSibling;
@@ -751,13 +762,70 @@ document.addEventListener("pointerdown",()=>{pointerHeld=true},true);
 window.addEventListener("pointerup",()=>{pointerHeld=false},true);
 window.addEventListener("pointercancel",()=>{pointerHeld=false},true);
 let readOnce = false; // a complete scan (not saved, not still discovering) has been shown
-// Once a complete scan is on screen, a new read's partial snapshots (repositories pending,
-// machines "reading", rows "checking") are held back and only its finished result is shown,
-// so nothing regroups or flickers. Read progress is shown separately from the rows.
+// Retain unfinished sources, but a ready local source can change movement and
+// membership before the global scan finishes. Never mutate an older snapshot.
+function mergeLocalScan(previous, scan) {
+ if(scan.cached)return null;
+ const newer=(at,before)=>{
+  const time=Date.parse(at),old=Date.parse(before);
+  if(!Number.isFinite(time))return false;
+  if(!Number.isFinite(old))return true;
+  if(time!==old)return time>old;
+  const fraction=value=>Number((value.match(/\.(\d+)/)?.[1]||'').padEnd(9,'0'));
+  return fraction(at)>fraction(before);
+ };
+ const oldMachines=new Map((previous.machines||[]).map(m=>[m.name,m]));
+ const local=new Set((scan.machines||[]).filter(m=>m.local).map(m=>m.name));
+ const finished=new Set((scan.machines||[]).filter(m=>m.local&&['done','error'].includes(m.phase)&&
+  newer(m.checkedAt,oldMachines.get(m.name)?.checkedAt)).map(m=>m.name));
+ const complete=new Set((scan.machines||[]).filter(m=>finished.has(m.name)&&m.phase==='done'&&m.status==='ok'&&!m.error).map(m=>m.name));
+ const records=new Map();
+ for(const lane of ['groups','profileCopies'])for(const group of previous[lane]||[])for(const entry of group.entries)
+  records.set(entryKey(entry),{entry,group,lane});
+ const incoming=[];
+ for(const lane of ['groups','profileCopies'])for(const group of scan[lane]||[])for(const entry of group.entries)
+  incoming.push({entry,group,lane});
+ const ready=new Set(incoming.filter(({entry:e})=>local.has(e.machine)&&(finished.has(e.machine)&&newer(e.observedAt,records.get(entryKey(e))?.entry.observedAt)||complete.has(e.machine)||!e.cached&&
+  newer(e.observedAt,records.get(entryKey(e))?.entry.observedAt))).map(({entry})=>entryKey(entry)));
+ if(!complete.size&&!ready.size)return null;
+ const previousRecords=new Map(records);
+ for(const [key,{entry}] of records)if(complete.has(entry.machine)||ready.has(key))records.delete(key);
+ for(const record of incoming) {
+  const {entry:e}=record,key=entryKey(e);
+  if(ready.has(key))records.set(key,record);
+  else if(records.has(key)&&(e.copies||[]).some(c=>ready.has(entryKey(c)))) {
+   // A pending copy keeps its metadata, but may become a child of the
+   // newly current local copy. Its native identity must appear only once.
+   records.set(key,{...record,entry:{...previousRecords.get(key).entry,copies:e.copies}});
+  }
+ }
+ const children=new Set([...records.values()].filter(r=>r.lane==='groups').flatMap(r=>(r.entry.copies||[]).map(entryKey)));
+ for(const record of records.values())if(record.lane==='profileCopies'&&!children.has(entryKey(record.entry)))
+  record.lane='groups'; // an unfinished remote copy must remain visible if its local parent disappeared
+ const lanes={groups:[],profileCopies:[]},groups={groups:new Map(),profileCopies:new Map()};
+ for(const {entry,group,lane} of records.values()) {
+  const key=JSON.stringify([group.name,group.remote,group.local,group.noRepo,group.noRemote]);
+  if(!groups[lane].has(key)) {
+   const copy={...group,entries:[]};groups[lane].set(key,copy);lanes[lane].push(copy);
+  }
+  groups[lane].get(key).entries.push(entry);
+ }
+ const machines=[...(previous.machines||[])];
+ for(const m of scan.machines||[])if(finished.has(m.name)) {
+  const i=machines.findIndex(old=>old.name===m.name);
+  if(i<0)machines.push(m);else machines[i]=m;
+ }
+ return {...previous,...lanes,machines:machines.map(m=>({...m,sessions:[...records.values()].filter(r=>r.entry.machine===m.name).length})),
+  total:records.size,revision:scan.revision,discovering:true};
+}
 export function acceptScan(scan){
  if(scan?.revision && state.scan?.revision && scan.revision<=state.scan.revision)return false;
  const partial=scan.discovering||scan.cached;
- if(partial&&readOnce)return false;
+ if(partial&&readOnce) {
+  const merged=mergeLocalScan(state.scan,scan);
+  if(!merged)return false;
+  scan=merged;
+ }
  state.scan=scan;if(!partial)readOnce=true;freshness();return true;
 }
 function scheduleDiscovery(){if(!discoveryTimer)discoveryTimer=setTimeout(drawDiscovery,150)}

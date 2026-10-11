@@ -157,7 +157,7 @@ func newProtectedReturnFixture(t *testing.T) *protectedReturnFixture {
 		t.Fatal(err)
 	}
 	source := agent.Summary{Key: out.Placement.Key, CWD: home, Title: "Continuation"}
-	ls, err := m.Module.List(ctx, h, m.install)
+	ls, err := m.List(ctx, h, m.install)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +215,7 @@ func readReturnFile(t *testing.T, path string) []byte {
 
 func (f *protectedReturnFixture) appendSource(t *testing.T, text string) {
 	t.Helper()
-	seg, err := f.m.Module.Read(context.Background(), f.h, f.m.install, f.in.Session, ir.Cursor{})
+	seg, err := f.m.Read(context.Background(), f.h, f.m.install, f.in.Session, ir.Cursor{})
 	if err != nil {
 		t.Fatal(err)
 	}

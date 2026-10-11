@@ -143,8 +143,9 @@ type Root struct {
 
 // Install is an agent as found on one machine.
 type Install struct {
-	// NativeDefaultRoot is launch metadata derived from the detected machine's
-	// home. It is not a declared data root and grants no filesystem access.
+	// NativeDefaultRoot is launch metadata verified by the module from the detected
+	// machine's home and original environment. Empty means native config lookup is
+	// unverified or explicitly overridden. It grants no filesystem access.
 	NativeDefaultRoot string            `json:"nativeDefaultRoot,omitempty"`
 	Accounts          *ProfileSpec      `json:"-"`
 	OS                string            `json:"os,omitempty"`

@@ -340,6 +340,17 @@ func main() {
 			}
 		}
 	})
+	http.HandleFunc("/history-ledger", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if err := seedHistoryLedger(w, r, svc, h); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+	})
 	http.HandleFunc("/dirty", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "POST only", http.StatusMethodNotAllowed)

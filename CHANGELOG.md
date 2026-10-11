@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Local movement updates appear while other machines are still loading, preserving
+  pending remote rows and selection. Return plans recheck the exact destination's
+  current activity instead of requiring an already closed client to be ended again.
+- Claude's verified default profile uses native configuration lookup for account
+  probes and sign-in as well as resuming; explicit and custom roots stay isolated.
+- Raising a History resource limit permits an immediate retry without a manual
+  refresh. Settings invalidate obsolete reviews while preserving active transfers
+  and their transports. Delayed process evidence can confirm terminal association
+  without another scan, and concurrent tab exit does not deadlock that refresh.
 - Background refreshes update list cells in place and keep compact rows at a stable
   height. Completed session lists stay visible throughout slower background reads.
 - Session actions stay in the inspector instead of appearing over metadata on hover.

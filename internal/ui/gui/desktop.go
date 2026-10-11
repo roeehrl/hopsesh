@@ -355,7 +355,7 @@ func (a *App) watchRefresh(ctx context.Context) func() {
 		last = time.Now()
 		mu.Unlock()
 		a.mu.Lock()
-		reviewing := a.plan != nil && a.res == nil || a.push != nil
+		reviewing := a.reviewBusyLocked()
 		a.mu.Unlock()
 		if !reviewing && ctx.Err() == nil {
 			go a.refreshQuick()

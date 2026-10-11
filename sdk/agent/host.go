@@ -29,9 +29,13 @@ type Facts struct {
 	OS               string          `json:"os"`      // darwin | linux | windows
 	Arch             string          `json:"arch"`
 	Home             string          `json:"home"`
-	// Env holds the variables the module's Spec declares (Roots[].Env, LoginEnv), as set on
-	// that machine ("" when unset).
+	// Env holds the variables the module's Spec declares (Roots[].Env, LoginEnv),
+	// with pinned profile roots applied ("" when unset).
 	Env map[string]string `json:"env"`
+	// UserEnv preserves the declared machine environment before profile scoping.
+	// Nil means Env has not been scoped. Detection can distinguish a user's
+	// explicit config override from a root injected for a pinned profile.
+	UserEnv map[string]string `json:"userEnv,omitempty"`
 	// Binaries are the module's Spec binaries as found there.
 	Binaries map[string]BinaryFact `json:"binaries"`
 }

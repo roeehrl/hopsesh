@@ -89,9 +89,12 @@ test('real service resolves hidden original and appends return work to that exac
  expect(returnedGraph.hops).toHaveLength(2);
  expect(returnedGraph.hops.every(h=>!h.fork)).toBe(true);
  expect(returned[0].returns).toEqual(expect.arrayContaining([expect.objectContaining({key:converted.key})]));
- // The Codex copy stays pinned in the list (it was shown last); the returned original is
- // its newest copy, reached through Copies & history.
- await agentRow(page,returned[0].title,'Codex').click();
+ // A settled refresh can make either native copy the parent. The exact Codex
+ // identity remains selectable as a parent or child, independent of role text.
+ const codexCopy=page.locator(`.tree .row[data-key$=${JSON.stringify(converted.key)}]`);
+ await expect(codexCopy).toHaveAttribute('data-key',converted.machine+'\0'+converted.key);
+ await codexCopy.click();
+ await expect.poll(()=>page.evaluate(async()=>{const {selected}=await import('/core.js');return selected()?.key;})).toBe(converted.key);
  const copies=details(page).getByRole('button',{name:/Copies & history/});
  if((await copies.getAttribute('aria-expanded'))!=='true') await copies.click();
  await details(page).locator('#sec-copies span').filter({hasText:'· newest'}).getByRole('button',{name:'Show copy',exact:true}).click();

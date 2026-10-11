@@ -68,3 +68,72 @@ test('Quick and terminal updates cannot replace a pressed row or an open menu',a
  await page.waitForTimeout(250);await expect(page.getByRole('menu')).toBeVisible();expect(await page.evaluate(()=>document.querySelector('[role=menu]')===(window as any).__menu)).toBeTruthy();
  await page.keyboard.press('Escape');
 });
+
+test('third-hop local metadata reparents existing rows while remote discovery remains pending',async({page})=>{
+ await fresh(page);
+ const result=await page.evaluate(async()=>{
+  const {state,selected}=await import('/core.js');
+  const {acceptScan,render,showEntry}=await import('/sessions.js');
+  const {list}=await import('/listview.js');
+  const base=structuredClone(state.scan),machine=base.machines.find(m=>m.local),sample=base.groups.flatMap(g=>g.entries)[0];
+  const a={...sample,machine:machine.name,key:'claude/local-A',session:'local-A',agent:'claude',agentName:'Claude Code',title:'Local conversation',cached:false,
+   observedAt:'2026-10-11T12:00:00Z',copies:[],journey:{transfers:2,branch:'fixture-branch',family:'fixture-family',roundTrips:1,returns:1},arrival:{kind:'returned',agentName:'Codex'},departure:null,guard:null};
+  const b={...a,key:'codex/local-B',session:'local-B',agent:'codex',agentName:'Codex',arrival:null,departure:{agent:'claude',agentName:'Claude Code'},guard:{mode:'block',effective:true}};
+  const archived={...a,key:'claude/archived',session:'archived',title:'Archived local',copies:[]};
+  const remote={...sample,machine:'pending-remote',key:'claude/remote',session:'remote',title:'Retained remote',copies:[],cached:false};
+  const copies=[{machine:a.machine,key:a.key,agent:a.agent,newest:true},{machine:b.machine,key:b.key,agent:b.agent,leftBehind:true}];
+  a.copies=copies;b.copies=copies;
+  const group={...base.groups[0],name:'Before transfer',entries:[a,archived]},remoteGroup={...group,name:'Remote repository',entries:[remote]};
+  const before={...base,revision:base.revision+100,discovering:false,cached:false,groups:[group,remoteGroup],profileCopies:[{...group,entries:[b]}],total:4,
+   machines:[{...machine,phase:'done',checkedAt:'2026-10-11T12:00:00.123Z',sessions:3},{...machine,name:remote.machine,local:false,phase:'done',sessions:1}]};
+  acceptScan(before);list.groupBy='repository';list.text='';state.sel=null;render();showEntry(a);
+  const node=[...document.querySelectorAll('.row')].find(n=>n.getAttribute('data-key')===a.machine+'\0'+a.key);
+  node.focus();const original=JSON.stringify(before);
+  const newCopies=[{machine:a.machine,key:a.key,agent:a.agent,leftBehind:true},{machine:b.machine,key:b.key,agent:b.agent,newest:true}];
+  const source={...a,cached:true,journey:{...a.journey,transfers:3},arrival:null,departure:{operation:'hop-3',agent:'codex',agentName:'Codex'},guard:{mode:'block',effective:true},copies:newCopies};
+  const target={...b,cached:true,journey:{...b.journey,transfers:3},arrival:{operation:'hop-3',kind:'returned',agentName:'Claude Code'},departure:null,guard:null,copies:newCopies};
+  const afterGroup={...group,name:'After transfer',remote:'https://github.com/example/after-transfer.git'};
+  const after={...before,revision:before.revision+1,discovering:true,groups:[{...afterGroup,entries:[target]}],profileCopies:[{...afterGroup,entries:[source]}],
+   machines:[{...before.machines[0],checkedAt:'2026-10-11T12:00:00.123001Z',sessions:2},{...before.machines[1],phase:'reading'}]};
+  const accepted=acceptScan(after);render();
+  const chosen=selected(),liveNode=[...document.querySelectorAll('.row')].find(n=>n.getAttribute('data-key')===a.machine+'\0'+a.key);
+  const rows=[...state.scan.groups,...state.scan.profileCopies].flatMap(g=>g.entries);
+  const snapshot=structuredClone(state.scan),older={...before,revision:after.revision-1};
+  const lateAccepted=acceptScan(older);
+  return {accepted,lateAccepted,selection:state.sel.key,selected:chosen.key,selectedHops:chosen.journey.transfers,sourceBlocked:chosen.guard.mode,
+   target:rows.find(e=>e.key===b.key),remote:rows.find(e=>e.key===remote.key),archived:rows.some(e=>e.key===archived.key),
+   parents:state.scan.groups.flatMap(g=>g.entries).map(e=>e.key),copies:state.scan.profileCopies.flatMap(g=>g.entries).map(e=>e.key),
+   total:state.scan.total,localCount:state.scan.machines[0].sessions,sameNode:node===liveNode,focused:document.activeElement===node,sourceRole:liveNode.textContent,
+   previousUnchanged:original===JSON.stringify(before),lateUnchanged:JSON.stringify(snapshot)===JSON.stringify(state.scan)};
+ });
+ expect(result.accepted).toBe(true);expect(result.lateAccepted).toBe(false);expect(result.lateUnchanged).toBe(true);
+ expect(result.selection).toBe('claude/local-A');expect(result.selected).toBe('claude/local-A');expect(result.selectedHops).toBe(3);
+ expect(result.sourceBlocked).toBe('block');expect(result.target.departure).toBeNull();expect(result.target.arrival.operation).toBe('hop-3');
+ expect(result.parents).toEqual(expect.arrayContaining(['codex/local-B','claude/remote']));expect(result.parents).not.toContain('claude/local-A');
+ expect(result.copies).toEqual(['claude/local-A']);expect(result.archived).toBe(false);expect(result.remote.title).toBe('Retained remote');
+ expect(result.total).toBe(3);expect(result.localCount).toBe(2);expect(result.sameNode).toBe(true);expect(result.focused).toBe(true);expect(result.previousUnchanged).toBe(true);
+ expect(result.sourceRole).toContain('Moved to Codex');
+});
+
+test('partial local discovery updates ready rows but removes missing locals only after local completion',async({page})=>{
+ await fresh(page);
+ const result=await page.evaluate(async()=>{
+  const {state}=await import('/core.js'),{acceptScan}=await import('/sessions.js');
+  const before=structuredClone(state.scan),machine=before.machines.find(m=>m.local),locals=before.groups.flatMap(g=>g.entries).filter(e=>e.machine===machine.name);
+  const first=locals[0],missing=locals[1];
+  const incoming={...before,revision:before.revision+1,discovering:true,profileCopies:[],groups:[{...before.groups[0],entries:[{...first,cached:false,observedAt:'2099-01-01T00:00:00Z',title:'Ready local update'}]}],
+   machines:before.machines.map(m=>m.local?{...m,phase:'reading'}:m)};
+  const accepted=acceptScan(incoming),during=state.scan.groups.flatMap(g=>g.entries);
+  const pendingRetained=during.some(e=>e.key===missing.key),readyUpdated=during.find(e=>e.key===first.key).title;
+  const failed={...incoming,revision:incoming.revision+1,groups:[{...incoming.groups[0],entries:[{...incoming.groups[0].entries[0],cached:true,observedAt:'2099-01-01T00:01:00Z',title:'Ready despite unrelated profile error'}]}],
+   machines:incoming.machines.map(m=>m.local?{...m,phase:'error',status:'ok',error:'Another profile is unreadable',checkedAt:'2099-01-01T00:01:00Z',sessions:1}:m)};
+  const failedAccepted=acceptScan(failed),failedRows=state.scan.groups.flatMap(g=>g.entries);
+  const failedRetained=failedRows.some(e=>e.key===missing.key),failedUpdated=failedRows.find(e=>e.key===first.key).title;
+  const complete={...failed,revision:failed.revision+1,machines:incoming.machines.map(m=>m.local?{...m,phase:'done',status:'ok',error:'',checkedAt:'2099-01-01T00:02:00Z',sessions:1}:m)};
+  const completed=acceptScan(complete),after=state.scan.groups.flatMap(g=>g.entries);
+  return {accepted,pendingRetained,readyUpdated,failedAccepted,failedRetained,failedUpdated,completed,removed:!after.some(e=>e.key===missing.key),count:state.scan.total};
+ });
+ expect(result.accepted).toBe(true);expect(result.readyUpdated).toBe('Ready local update');expect(result.pendingRetained).toBe(true);
+ expect(result.failedAccepted).toBe(true);expect(result.failedRetained).toBe(true);expect(result.failedUpdated).toBe('Ready despite unrelated profile error');
+ expect(result.completed).toBe(true);expect(result.removed).toBe(true);expect(result.count).toBeGreaterThanOrEqual(1);
+});

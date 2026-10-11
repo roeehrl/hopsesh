@@ -194,9 +194,9 @@ func (a *App) scanAccounts(forceAccounts bool) (*ScanDTO, error) {
 		return nil, cfgErr
 	}
 	core := a.snapshot()
-	scanConfig, _ := json.Marshal([]any{core.Cfg.Hosts, core.Cfg.Agents, core.Cfg.Clouds})
+	scanConfig, _ := json.Marshal([]any{core.Cfg.Hosts, core.Cfg.Agents, core.Cfg.Clouds, core.Cfg.History})
 	configCurrent := func() bool {
-		b, _ := json.Marshal([]any{a.core.Cfg.Hosts, a.core.Cfg.Agents, a.core.Cfg.Clouds})
+		b, _ := json.Marshal([]any{a.core.Cfg.Hosts, a.core.Cfg.Agents, a.core.Cfg.Clouds, a.core.Cfg.History})
 		return string(b) == string(scanConfig)
 	}
 	for _, h := range core.Cfg.Hosts {
@@ -218,7 +218,7 @@ func (a *App) scanAccounts(forceAccounts bool) (*ScanDTO, error) {
 	}
 	initial := owned
 	partial := owned
-	reviewing := a.plan != nil && a.res == nil || a.push != nil
+	reviewing := a.reviewBusyLocked()
 	a.mu.Unlock()
 
 	last := time.Time{}
@@ -236,7 +236,7 @@ func (a *App) scanAccounts(forceAccounts bool) (*ScanDTO, error) {
 		display := &app.Inventory{}
 		_ = json.Unmarshal(b, display)
 		a.mu.Lock()
-		if !configCurrent() || a.inv != owned || a.selectionReads > 0 || a.plan != nil && a.res == nil || a.push != nil {
+		if !configCurrent() || a.inv != owned || a.selectionReads > 0 || a.reviewBusyLocked() {
 			a.mu.Unlock()
 			return
 		}
@@ -258,7 +258,7 @@ func (a *App) scanAccounts(forceAccounts bool) (*ScanDTO, error) {
 	}
 	now := time.Now()
 	a.mu.Lock()
-	if !configCurrent() || reviewing || a.inv != owned || a.selectionReads > 0 || a.plan != nil && a.res == nil || a.push != nil {
+	if !configCurrent() || reviewing || a.inv != owned || a.selectionReads > 0 || a.reviewBusyLocked() {
 		current := a.inv
 		a.mu.Unlock()
 		if current != initial {
@@ -275,6 +275,7 @@ func (a *App) scanAccounts(forceAccounts bool) (*ScanDTO, error) {
 		a.inv.Close()
 	}
 	a.inv, a.invAt, a.plan, a.res = inv, now, nil, nil
+	a.historyObservedLocked(inv)
 	a.closePushLocked()
 	a.mu.Unlock()
 	a.bindTerminalSessions(inv)
@@ -329,7 +330,7 @@ func (a *App) RefreshHere() (*ScanDTO, error) {
 	defer a.scanMu.Unlock()
 	a.mu.Lock()
 	closing := a.closing
-	reviewing := a.plan != nil && a.res == nil || a.push != nil || a.selectionReads > 0
+	reviewing := a.reviewBusyLocked() || a.selectionReads > 0
 	a.mu.Unlock()
 	if reviewing {
 		return a.ScanSnapshot(), nil
@@ -347,6 +348,11 @@ func (a *App) RefreshHere() (*ScanDTO, error) {
 	fresh := core.Scan(ctx, app.ScanOptions{Hosts: []string{app.LocalName()}})
 	now := time.Now()
 	a.mu.Lock()
+	if core.Cfg.History != a.core.Cfg.History {
+		a.mu.Unlock()
+		fresh.Close()
+		return a.ScanSnapshot(), nil
+	}
 	old := a.inv
 	if old == nil {
 		old = &app.Inventory{}
@@ -372,6 +378,7 @@ func (a *App) RefreshHere() (*ScanDTO, error) {
 		return inv.Entries[i].Session.LastActivity.After(inv.Entries[j].Session.LastActivity)
 	})
 	a.inv = inv
+	a.historyObservedLocked(fresh)
 	at := a.invAt
 	a.mu.Unlock()
 	a.bindTerminalSessions(inv)
@@ -879,7 +886,10 @@ type PlanDTO struct {
 func (a *App) Plan(machine, key, target string, o OptsDTO) (*PlanDTO, error) {
 	doneSelection := a.beginSelection()
 	defer doneSelection()
-	core := a.snapshot()
+	core, generation, err := a.reviewSnapshot()
+	if err != nil {
+		return nil, err
+	}
 	a.mu.Lock()
 	e, err := a.find(machine, key)
 	inv := a.inv
@@ -887,15 +897,15 @@ func (a *App) Plan(machine, key, target string, o OptsDTO) (*PlanDTO, error) {
 	if err != nil {
 		return nil, err
 	}
-	return a.planEntry(core, inv, e, target, o)
+	return a.planEntry(core, generation, inv, e, target, o)
 }
 
 // planEntry plans a session (a row, or a cloud session not listed) and keeps the plan for
 // Apply.
-func (a *App) planEntry(core *app.App, inv *app.Inventory, e app.Entry, target string, o OptsDTO) (*PlanDTO, error) {
+func (a *App) planEntry(core *app.App, generation uint64, inv *app.Inventory, e app.Entry, target string, o OptsDTO) (*PlanDTO, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	inv, e, err := a.selectionInventory(ctx, core, inv, e)
+	inv, e, err := a.selectionInventory(ctx, core, inv, e, generation)
 	if err != nil {
 		return nil, err
 	}
@@ -907,10 +917,14 @@ func (a *App) planEntry(core *app.App, inv *app.Inventory, e app.Entry, target s
 	if err != nil {
 		return nil, err
 	}
+	if err := a.publishReview(generation, p, in); err != nil {
+		return nil, err
+	}
 	a.mu.Lock()
-	a.plan, a.input, a.res = p, in, nil
-	a.endDestinationToken = ""
-	a.endDestinationPlan = nil
+	if err := a.checkReviewLocked(generation); err != nil || a.plan != p {
+		a.mu.Unlock()
+		return nil, errReviewChanged
+	}
 	if move.CanEndDestination(p, in) {
 		a.endDestinationToken = rand.Text()
 		a.endDestinationPlan = p
@@ -946,10 +960,17 @@ func (a *App) EndReturnDestination(token string) error {
 		a.mu.Unlock()
 		return errors.New("return review changed; review the plan again before ending the original")
 	}
+	if err := a.checkReviewLocked(a.planGeneration); err != nil {
+		a.mu.Unlock()
+		return err
+	}
 	p, in := a.plan, a.input
+	generation := a.planGeneration
+	a.actionRunning = true
 	a.endDestinationToken, a.plan = "", nil
 	a.endDestinationPlan = nil
 	a.mu.Unlock()
+	defer a.finishAction(generation, p, nil)
 	doneSelection := a.beginSelection()
 	defer doneSelection()
 	// Exiting can flush transcript records. The next review must refresh both
@@ -1037,13 +1058,11 @@ type DoneDTO struct {
 
 // Apply carries out the last plan, sending each step to the window.
 func (a *App) Apply() (*DoneDTO, error) {
-	core := a.snapshot()
-	a.mu.Lock()
-	p, in := a.plan, a.input
-	a.mu.Unlock()
-	if p == nil {
-		return nil, errors.New("no plan; choose the session again")
+	core, p, in, release, err := a.beginPlanAction("")
+	if err != nil {
+		return nil, err
 	}
+	defer release()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 	res, err := core.Apply(ctx, p, in, func(step string) { a.emit(ProgressEvent, step) })
