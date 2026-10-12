@@ -3,6 +3,7 @@ package pty
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -36,7 +37,11 @@ func (w *inputWriter) Write(p []byte) (int, error) {
 	}
 	w.data = append(w.data, p[:n]...)
 	w.calls++
-	return n, w.err
+	err := w.err
+	if n == len(p) && errors.Is(err, io.ErrShortWrite) {
+		err = nil
+	}
+	return n, err
 }
 
 func inputSession(t *testing.T, w *inputWriter) (*Session, *viewer) {
@@ -85,7 +90,13 @@ func inputErrors(s *Session, v *viewer) string {
 }
 
 func TestInputShortWritesPreserveControlSequencesAndMessageOrder(t *testing.T) {
-	w := &inputWriter{limit: 2}
+	for _, err := range []error{nil, io.ErrShortWrite} {
+		t.Run(fmt.Sprint(err), func(t *testing.T) { testInputShortWrites(t, err) })
+	}
+}
+
+func testInputShortWrites(t *testing.T, err error) {
+	w := &inputWriter{limit: 2, err: err}
 	s, v := inputSession(t, w)
 	first := []byte("\x1b[200~日本語\n\x1b[201~")
 	second := []byte("\x1b]11;rgb:1f1f/1f1f/1c1c\x1b\\")

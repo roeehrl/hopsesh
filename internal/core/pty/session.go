@@ -319,6 +319,11 @@ func (s *Session) feed() {
 						n, err = 0, io.ErrShortWrite
 					}
 					written += n
+					// io.ErrShortWrite reports known forward progress; complete only
+					// the unsent suffix. Other failures stop the input stream.
+					if n > 0 && written < len(p) && errors.Is(err, io.ErrShortWrite) {
+						err = nil
+					}
 					if err == nil && n == 0 {
 						err = io.ErrShortWrite
 					}
