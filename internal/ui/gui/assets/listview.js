@@ -559,7 +559,7 @@ function groupMark(g) {
 function groupRight(g, closed) {
   const out = [];
   if (closed && g.newest && Date.now() - g.newest > INACTIVE) out.push(h("span", { class: "gmeta" }, `last active ${ago(new Date(g.newest).toISOString())}`));
-  if (g.repo && !g.repo.noRepo) {
+  if (g.repo && !g.repo.noRepo && !g.repo.repoPending) {
     if (g.repo.remote) out.push(h("span", { class: "mono gremote", title: g.repo.remote }, g.repo.remote));
     out.push(h("span", { class: "gmeta " + (g.repo.local ? "ok" : g.repo.noRemote ? "" : "warn") }, g.repo.noRemote ? "A checkout without a remote" : g.repo.local ? "Cloned here" : `Not on ${sys.here}`));
   }

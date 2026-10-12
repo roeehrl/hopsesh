@@ -152,12 +152,13 @@ type HopDTO struct {
 
 // GroupDTO is one repository.
 type GroupDTO struct {
-	Name     string     `json:"name"`
-	Remote   string     `json:"remote"`
-	Local    string     `json:"local"`
-	NoRepo   bool       `json:"noRepo"`   // not in a git checkout
-	NoRemote bool       `json:"noRemote"` // a checkout without a remote (matched by path only)
-	Entries  []EntryDTO `json:"entries"`
+	Name        string     `json:"name"`
+	Remote      string     `json:"remote"`
+	Local       string     `json:"local"`
+	NoRepo      bool       `json:"noRepo"`                // not in a git checkout
+	NoRemote    bool       `json:"noRemote"`              // a checkout without a remote (matched by path only)
+	RepoPending bool       `json:"repoPending,omitempty"` // repository discovery has not established availability
+	Entries     []EntryDTO `json:"entries"`
 }
 
 // ScanDTO is the result of a scan.
@@ -433,6 +434,7 @@ func scanDTO(core *app.App, inv *app.Inventory, updated, elsewhere time.Time, ta
 		if inv.Discovering && gd.NoRepo {
 			gd.Name = "Repository details pending"
 			gd.NoRepo = false
+			gd.RepoPending = true
 		}
 		for _, it := range g.Items {
 			d := entryDTO(core, inv, it, targets)
@@ -470,6 +472,7 @@ func scanDTO(core *app.App, inv *app.Inventory, updated, elsewhere time.Time, ta
 					extra.Name, extra.NoRepo, extra.NoRemote = filepath.Base(git.Toplevel)+" (no remote)", false, true
 				} else if inv.Discovering {
 					extra.Name, extra.NoRepo = "Repository details pending", false
+					extra.RepoPending = true
 				}
 				out.ProfileCopies = append(out.ProfileCopies, extra)
 			}

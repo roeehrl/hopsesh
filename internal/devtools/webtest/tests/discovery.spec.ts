@@ -2,6 +2,26 @@ import {test,expect} from '@playwright/test';
 import {fresh,row,details} from './helpers';
 import {readFile,appendFile} from 'node:fs/promises';
 const gate=()=>{let release!:()=>void;const promise=new Promise<void>(r=>release=r);return {promise,release};};
+test('pending repository details make no claim about local checkout availability',async({page})=>{
+ await page.request.post('/reset');
+ const snapshot=(await (await page.request.post('/call',{data:{m:'Scan',a:[]}})).json()).result;
+ const pending=structuredClone(snapshot);pending.revision+=100;pending.cached=true;pending.discovering=true;
+ pending.groups=pending.groups.map((g:any)=>({...g,name:'Repository details pending',remote:'',local:'',noRepo:false,noRemote:false,repoPending:true}));
+ const known=structuredClone(pending);known.revision+=100;known.cached=false;known.discovering=false;
+ known.groups=known.groups.map((g:any)=>({...g,name:'Uncloned repository',remote:'https://example.test/uncloned.git',repoPending:false}));
+ const wait=gate();
+ await page.route('**/call',async route=>{
+  const method=route.request().postDataJSON().m;
+  if(method==='CachedScan')return route.fulfill({json:{result:pending}});
+  if(method==='InitialScan'){await wait.promise;return route.fulfill({json:{result:known}});}
+  return route.continue();
+ });
+ await page.goto('/');
+ const group=page.getByRole('treeitem',{name:/Repository details pending/}).first();
+ await expect(group).toBeVisible();await expect(group).not.toContainText(/Not on this/);await expect(group).not.toContainText('Cloned here');
+ wait.release();
+ await expect(page.getByRole('treeitem',{name:/Uncloned repository/}).first()).toContainText(/Not on this/);
+});
 test('found sessions can be searched and previewed before the final scan response',async({page})=>{
  await page.request.post('/reset');const wait=gate();
  await page.route('**/call',async route=>{if(route.request().postDataJSON().m!=='InitialScan')return route.continue();const response=await route.fetch();await wait.promise;await route.fulfill({response});});

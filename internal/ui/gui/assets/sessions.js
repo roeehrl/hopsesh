@@ -804,7 +804,7 @@ function mergeLocalScan(previous, scan) {
   record.lane='groups'; // an unfinished remote copy must remain visible if its local parent disappeared
  const lanes={groups:[],profileCopies:[]},groups={groups:new Map(),profileCopies:new Map()};
  for(const {entry,group,lane} of records.values()) {
-  const key=JSON.stringify([group.name,group.remote,group.local,group.noRepo,group.noRemote]);
+  const key=JSON.stringify([group.name,group.remote,group.local,group.noRepo,group.noRemote,group.repoPending]);
   if(!groups[lane].has(key)) {
    const copy={...group,entries:[]};groups[lane].set(key,copy);lanes[lane].push(copy);
   }
