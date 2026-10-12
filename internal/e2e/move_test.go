@@ -63,6 +63,11 @@ func seed(t *testing.T, l location) {
 			return err
 		}
 		rel, _ := filepath.Rel(fix, p)
+		// Static fixture PIDs can alias unrelated runner processes during fresh
+		// activity checks. Live-session tests create their own owned registries.
+		if strings.HasPrefix(filepath.ToSlash(rel), "sessions/") {
+			return nil
+		}
 		b, _ := os.ReadFile(p)
 		b = []byte(strings.ReplaceAll(string(b), "/home/u/git/demo", jsonText(l.repo)))
 		rel = strings.ReplaceAll(rel, "-home-u-git-demo", claude.Slug(l.repo))
