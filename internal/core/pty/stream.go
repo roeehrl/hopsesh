@@ -225,6 +225,9 @@ func (s *Session) attach() *viewer {
 		clear(back)
 	}
 	v.push('z', nil) // replay boundary: renderer restores at the old size before fitting
+	if s.inputErr != nil {
+		v.push(frameError, []byte(s.inputErr.Error()))
+	}
 	s.cancelHandoff()
 	s.flow.Broadcast()
 	return v
