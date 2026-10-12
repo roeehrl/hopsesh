@@ -48,6 +48,10 @@ make app      # macOS only: builds dist/macos/hopsesh.app (unsigned unless SIGN_
   running `internal/testkit/termfake`). `playwright.real.config.ts` drives the real Windows window instead and needs
   `HOPSESH_APP_EXE` pointing at a `-tags e2e` build. That build tag opens a debugging port:
   never ship it.
+  Run `npm test` from `internal/devtools/webtest` for the browser suite. Its test-process
+  recorder saves failing JSON parser stacks, input hashes, and bounded excerpts in
+  `test-results/json-diagnostics/`, included in CI's failure artifacts. It rethrows the
+  original exception. `WEBTEST_JSON_DIAGNOSTICS` selects a different diagnostic directory.
 - Resource budgets: an app nobody is looking at must do almost nothing. Tests count work
   (`app.ResourceCounters`: rescans, transcript and sidecar reads) and catalog writes instead
   of timing anything, and `go run ./internal/devtools/idlebench` runs the real app service on
