@@ -1,4 +1,4 @@
-import {api,h,fill,view,state,screen,go,here,toast,fail,ask,errText,current,navigationID,sys,on,ago} from './core.js';
+import {api,h,fill,view,state,screen,go,here,toast,fail,ask,errText,current,navigationID,sys,on,ago,icon,ICONS} from './core.js';
 const checking=new Set(), scanningMachines=new Set(), lastAttempt=new Map();
 let accounts=[], query='', tag='', group='machine', busy=false, problem='';
 const expanded=new Map();
@@ -35,8 +35,24 @@ function editor(p){
  h('div',{class:'account-actions'},h('button',{class:'btn',type:'button',onclick:()=>dlg.close()},'Cancel'),submit));
  dlg.append(form);document.body.append(dlg);dlg.addEventListener('close',()=>dlg.remove());dlg.showModal();name.focus();
 }
-function row(p){return h('article',{class:'account-card','data-profile':p.id},h('div',{},h('h3',{},p.name),h('div',{class:'muted'},`${p.agent==='claude'?'Claude Code':'Codex'} · ${p.machine||'Machine unavailable'}`),h('p',{class:p.error?'err':'muted'},status(p)),h('div',{class:'account-tags'},(p.tags||[]).map(t=>h('span',{class:'pill'},t))),h('details',{},h('summary',{},'Profile details'),h('p',{class:'mono'},p.root),h('p',{class:'mono'},p.id),h('p',{class:'muted'},`Last checked ${p.checkedAt && !p.checkedAt.startsWith('0001-') ? ago(p.checkedAt) : 'never'} · ${p.identitySource==='owner'?'Reported by Hopsesh on '+p.machine:p.identitySource==='ssh'?'Checked over SSH':p.identitySource==='local'?'Checked on this machine':'Last saved observation'}`),h('p',{class:'muted'},'The agent reports its current sign-in. Email and organization are not a verified identity or proof of who created older sessions.'),p.account?.isolationWhy?h('p',{class:'warn'},p.account.isolationWhy):null)),
- h('div',{class:'account-actions'},h('button',{class:'btn small',disabled:busy||checking.has(p.id),'aria-label':`Check sign-in for ${p.name} on ${p.machine}`,onclick:()=>check(p)},checking.has(p.id)?'Checking…':'Check sign-in'),h('button',{class:'btn small',onclick:()=>editor(p)},'Edit'),h('button',{class:'btn small',disabled:!p.local||busy,title:p.local?'Sign in using the vendor CLI':'Sign in on this account’s machine',onclick:async()=>{try{await api('LoginAccount',p.id);toast('Complete sign-in in the terminal. Your account refreshes automatically when it finishes.')}catch(e){fail(e)}}},'Sign in'),h('button',{class:'btn small',onclick:async()=>{if(!await ask({title:`Forget ${p.name}?`,body:'This removes the registration. Vendor files and credentials stay on the machine. A default root may be discovered again.',ok:'Forget'}))return;try{await api('ForgetAccount',p.id,p.generation);await reload();state.stale=true}catch(e){fail(e)}}},'Forget')))}
+// needsSignIn: the profile has no working sign-in to show (signed out, or its check
+// failed). A signed-in profile offers no Sign in: signing an existing profile in to
+// another account is how one root ends up holding two accounts' sessions; another
+// account gets a profile of its own (Add account).
+const needsSignIn=p=>!!p.account&&!p.account.loggedIn&&p.identitySource!=='ssh'||!!p.error;
+const checked=p=>p.checkedAt&&!p.checkedAt.startsWith('0001-')?`Checked ${ago(p.checkedAt)}`:'Not checked yet';
+function signIn(p){return h('button',{class:'btn small primary',disabled:!p.local||busy,title:p.local?`Sign in to ${p.name} using ${p.agent==='claude'?'Claude Code':'Codex'}’s own login`:'Sign in on this account’s machine',onclick:async()=>{try{await api('LoginAccount',p.id);toast('Complete sign-in in the terminal. Your account refreshes automatically when it finishes.')}catch(e){fail(e)}}},p.error?'Sign in again':'Sign in')}
+function row(p){
+ const busyHere=busy||checking.has(p.id);
+ return h('article',{class:'account-card','data-profile':p.id},h('div',{},h('h3',{},p.name),h('div',{class:'muted'},`${p.agent==='claude'?'Claude Code':'Codex'} · ${p.machine||'Machine unavailable'}`),
+  h('div',{class:'account-status'},h('p',{class:p.error?'err':'muted'},status(p)),
+   h('span',{class:'account-checked muted'},checking.has(p.id)?'Checking…':checked(p)),
+   h('button',{class:'btn icon small',disabled:busyHere,title:'Check the sign-in again','aria-label':`Check sign-in for ${p.name} on ${p.machine} again`,onclick:()=>check(p)},icon(ICONS.refresh,13))),
+  h('div',{class:'account-tags'},(p.tags||[]).map(t=>h('span',{class:'pill'},t))),
+  h('details',{},h('summary',{},'Profile details'),h('p',{class:'mono'},p.root),h('p',{class:'mono'},p.id),h('p',{class:'muted'},`${checked(p)} · ${p.identitySource==='owner'?'Reported by Hopsesh on '+p.machine:p.identitySource==='ssh'?'Checked over SSH':p.identitySource==='local'?'Checked on this machine':'Last saved observation'}`),
+   h('p',{class:'muted'},'This is who is signed in to the profile now. Each session shows the account its agent recorded running it, which can differ when the profile was signed in to another account before; a session without that record shows no account. To use another account, add a profile for it rather than signing this one in again.'),p.account?.isolationWhy?h('p',{class:'warn'},p.account.isolationWhy):null)),
+ h('div',{class:'account-actions'},needsSignIn(p)?signIn(p):null,h('button',{class:'btn small',onclick:()=>editor(p)},'Edit'),
+  h('button',{class:'btn small danger forget',onclick:async()=>{if(!await ask({title:`Forget ${p.name}?`,body:'This removes the registration. Vendor files and credentials stay on the machine. A default root may be discovered again.',ok:'Forget'}))return;try{await api('ForgetAccount',p.id,p.generation);await reload();state.stale=true}catch(e){fail(e)}}},'Forget')))}
 function setupNotice(m){return h('aside',{class:'account-card account-setup','aria-label':`Account setup on ${m.name}`},
  h('p',{},'SSH is connected and sessions can be read. Set up Hopsesh on this machine to discover its accounts.'),
  h('p',{class:'muted'},`Install Hopsesh on ${m.name} if needed, then run this command there:`),h('code',{},'hopsesh accounts scan --machine local'),
@@ -69,6 +85,6 @@ function render(){
  problem?h('p',{class:'err',role:'alert'},problem):null,
  h('div',{'aria-live':'polite'},`${visible.length} accounts`),sections,
  !visible.length&&!setupMachines.length?h('p',{class:'muted'},'No matching accounts. Scan known roots or add an account.'):null,
- h('p',{class:'muted'},'Discovery checks known default roots and registered roots on allowed machines with an initialized Hopsesh identity. Each card identifies the current sign-in for a separate state root. Emails do not establish ownership of older sessions.'))));
+ h('p',{class:'muted'},'Discovery checks known default roots and registered roots on allowed machines with an initialized Hopsesh identity. Each card shows who is signed in to a separate state root now. Sessions show the account their agent recorded running them, which can be an account the root was signed in to before.'))));
 }
 screen('accounts',async()=>{const visit=navigationID();await reload();if(visit===navigationID()&&!accounts.length)await scan()});

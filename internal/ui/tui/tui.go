@@ -272,7 +272,7 @@ func (m *model) buildRows() {
 			it := &g.Items[i]
 			e := it.Entry
 			s := e.Session
-			if f != "" && !strings.Contains(strings.ToLower(s.Title+" "+s.LastPrompt+" "+app.AccountLabel(e.Profile)+" "+s.CWD+" "+g.Name+" "+e.Machine+" "+e.AgentName), f) {
+			if f != "" && !strings.Contains(strings.ToLower(s.Title+" "+s.LastPrompt+" "+app.OwnerLabel(m.inv.Logins().OwnerOf(e))+" "+s.CWD+" "+g.Name+" "+e.Machine+" "+e.AgentName), f) {
 				continue
 			}
 			rows = append(rows, row{item: it, groupKey: g.Identity, relationship: relations[app.EntryIdentity(e.Machine, s.Key.String())]})
@@ -1243,7 +1243,7 @@ func (m *model) viewBrowseDetail(b *strings.Builder, w int) {
 		b.WriteString(dim.Render(strings.Repeat("─", min(w, 120))) + "\n")
 		fmt.Fprintf(b, "  %s  %s\n", bold.Render(truncate(s.Title, w-24)), dim.Render(s.Key.String()))
 		if e.Profile != nil {
-			fmt.Fprintf(b, "  Stored in profile: %s · %s\n", app.AccountLabel(e.Profile), e.Profile.Name)
+			fmt.Fprintf(b, "  %s\n", app.OwnerLine(m.inv.Logins().OwnerOf(e), e.Profile))
 		}
 		if c := e.Cloud; c != nil {
 			head := e.Location.Name + " · " + e.AgentName + " · " + e.Status() + "  "

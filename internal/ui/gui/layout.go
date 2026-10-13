@@ -18,12 +18,13 @@ type LayoutDTO struct {
 	SidebarHidden   bool     `json:"sidebarHidden"`
 	InspectorWidth  int      `json:"inspectorWidth"`
 	InspectorHidden bool     `json:"inspectorHidden"`
+	StatusWidth     int      `json:"statusWidth"` // the session list's status column (0: its default)
 	SectionsOpen    []string `json:"sectionsOpen"`
 	SectionsClosed  []string `json:"sectionsClosed"`
 }
 
 func layoutOf(w config.Window, in config.Inspector) LayoutDTO {
-	d := LayoutDTO{SidebarWidth: w.SidebarWidth, SidebarHidden: w.SidebarHidden, InspectorWidth: w.InspectorWidth, InspectorHidden: w.InspectorHidden,
+	d := LayoutDTO{SidebarWidth: w.SidebarWidth, SidebarHidden: w.SidebarHidden, InspectorWidth: w.InspectorWidth, InspectorHidden: w.InspectorHidden, StatusWidth: w.StatusWidth,
 		SectionsOpen: nonNil(in.Open), SectionsClosed: nonNil(in.Closed)}
 	if d.SidebarWidth == 0 {
 		d.SidebarWidth = config.SidebarWidth
@@ -39,6 +40,9 @@ func (a *App) SaveLayout(l LayoutDTO) error {
 	in := config.Inspector{Open: known(l.SectionsOpen, config.InspectorSections), Closed: known(l.SectionsClosed, config.InspectorSections)}
 	if l.InspectorWidth > 0 {
 		w.InspectorWidth = min(max(l.InspectorWidth, config.InspectorMin), config.InspectorMax)
+	}
+	if l.StatusWidth > 0 {
+		w.StatusWidth = min(max(l.StatusWidth, config.StatusMin), config.StatusMax)
 	}
 	if w.SidebarWidth == config.SidebarWidth {
 		w.SidebarWidth = 0

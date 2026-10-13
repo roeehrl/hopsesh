@@ -87,8 +87,9 @@ test('public identity states are clear and account groups use email without merg
  await page.locator('#btn-settings').click();await page.getByRole('button',{name:'Accounts',exact:true}).click();
  await expect(page.locator('.account-card').first()).toContainText('Signed in · two.personal@example.com');
  await expect(page.locator('.accounts-page')).not.toContainText('limited identity');
- const card=page.locator('.account-card').first();await card.getByText('Profile details',{exact:true}).click();await expect(card).toContainText('not a verified identity');
- await page.evaluate(async p=>{const path='/core.js',core=await import(path),scan=structuredClone(core.state.scan);const all=scan.groups.flatMap((g:any)=>g.entries);all[0].profile={...p,id:'first',name:'First personal'};all[1].profile={...p,id:'second',name:'Second personal'};scan.revision+=100;core.state.scan=scan;},profiles[0]);
+ const card=page.locator('.account-card').first();await card.getByText('Profile details',{exact:true}).click();await expect(card).toContainText('who is signed in to the profile now');
+ await expect(card.getByRole('button',{name:'Sign in',exact:true})).toHaveCount(0);await expect(card.getByRole('button',{name:/Check sign-in for/})).toBeVisible();
+ await page.evaluate(async p=>{const path='/core.js',core=await import(path),scan=structuredClone(core.state.scan);const all=scan.groups.flatMap((g:any)=>g.entries);all[0].profile={...p,id:'first',name:'First personal'};all[1].profile={...p,id:'second',name:'Second personal'};for(const e of all.slice(0,2))e.owner={recorded:true,current:true,email:'two.personal@example.com'};scan.revision+=100;core.state.scan=scan;},profiles[0]);
  await page.getByRole('button',{name:'Back to sessions',exact:true}).click();await page.locator('#btn-display').click();await page.locator('#dp-group').selectOption('account');await page.keyboard.press('Escape');
  await expect(page.locator('.gname').filter({hasText:'two.personal@example.com'})).toHaveCount(2);
  await expect(page.locator('.account-chip').filter({hasText:'two.personal@example.com'})).toHaveCount(2);
@@ -132,4 +133,22 @@ test('account grouping shows retained source and destination copies after a tran
  await expect(row(page,'Find the codeword')).toHaveCount(2);
  const second=page.locator('[role="treeitem"][aria-level="1"]').filter({has:page.locator('.gname',{hasText:'Second personal'})});
  await expect(second.locator('.row').filter({has:page.locator('.t').getByText('Find the codeword',{exact:true})})).toHaveCount(1);
+});
+
+test('a signed-in profile offers no Sign in; a signed-out or failed one does',async({page})=>{
+ await page.route('**/call',async route=>{
+  if(route.request().postDataJSON().m!=='Accounts')return route.continue();
+  const response=await route.fetch(),body=await response.json(),base=body.result[0];
+  body.result=[{...base,id:'in',name:'Signed in one',local:true,error:'',stale:false,identitySource:'local',account:{loggedIn:true,email:'in@example.com',provider:'firstParty'}},
+   {...base,id:'out',name:'Signed out one',local:true,error:'',stale:false,identitySource:'local',account:{loggedIn:false,label:'not logged in'}},
+   {...base,id:'bad',name:'Failed one',local:true,error:'claude auth status exited 2',stale:false,identitySource:'local',account:{loggedIn:true,email:'old@example.com'}}];
+  await route.fulfill({json:body});
+ });
+ await page.locator('#btn-settings').click();await page.getByRole('button',{name:'Accounts',exact:true}).click();
+ const card=n=>page.locator('.account-card').filter({has:page.getByRole('heading',{name:n,exact:true})});
+ await expect(card('Signed in one')).toContainText('Signed in · in@example.com');
+ await expect(card('Signed in one').getByRole('button',{name:/^Sign in/})).toHaveCount(0);
+ await expect(card('Signed in one').getByRole('button',{name:'Check sign-in for Signed in one on '+(await card('Signed in one').locator('.muted').first().textContent())!.split(' · ')[1]+' again'})).toBeVisible();
+ await expect(card('Signed out one').getByRole('button',{name:'Sign in',exact:true})).toBeVisible();
+ await expect(card('Failed one').getByRole('button',{name:'Sign in again',exact:true})).toBeVisible();
 });

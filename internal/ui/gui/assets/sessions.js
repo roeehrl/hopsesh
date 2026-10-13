@@ -6,7 +6,7 @@ import { accountLabel, accountShown, accountTitle, loadError, api, on, h, fill, 
   entries, selected, copyEntry, here, agentInfo, $, count, clouds, cloudOf, cloudState, cloudChip, dialog, errText, rich, cloudTitle } from "./core.js";
 import { planPicked } from "./plan.js";
 import { healthNotice, loadHookHealth, hookHealth, withCLI, chip as roleChip } from "./guard.js";
-import { dividers, apply as applyLayout } from "./layout.js";
+import { dividers, apply as applyLayout, statusHeader } from "./layout.js";
 import { exitOf, exitWords, waiting, strayWaiting, showTerminal, tabs, onTabs } from "./term.js";
 import { model, statusOf, statusKey, placesOf, placeCount, placeName, showPlace, cloudBlock, onSelect, onTurnOn, key as entryKey } from "./actions.js";
 import { list, load as loadList, toolbar, counts, apply as applyFilters, groupsOf, tree, adoptTree, onChange, onRows, decide, toggleDisplay, clearFilters, activeFacets,
@@ -384,7 +384,7 @@ function presenceChips(e) {
 
 // mirrorChip links a session's copy on the vendor's site (Remote Control).
 function mirrorChip(m) {
-  return h("button", { class: "chip claude-link", tabindex: "-1", title: m.url, onclick: (ev) => { ev.stopPropagation(); api("OpenURL", m.url).catch(fail); } }, icon(ICONS.external, 11), "mirrored on " + m.host);
+  return h("button", { class: "chip claude-link", tabindex: "-1", title: `Mirrored on ${m.host} by Remote Control · open ${m.url}`, "aria-label": `Open the copy mirrored on ${m.host}`, onclick: (ev) => { ev.stopPropagation(); api("OpenURL", m.url).catch(fail); } }, icon(ICONS.external, 11), h("span", { class: "chip-t" }, m.host));
 }
 
 // row is one session in the tree: its agent, title and branch, the last prompt and where
@@ -412,7 +412,7 @@ function row(e, level) {
   if(e.journey?.fork) bits.push("separate conversation");
  if(e.journey?.roundTrips) bits.push(`${e.journey.roundTrips} round trips`);
  const chips = presenceChips(e);
-if(accountShown(e.profile)) chips.push(h("span", {class:"chip account-chip",title:accountTitle(e.profile)},accountShown(e.profile)));
+if(accountShown(e)) chips.push(h("span", {class:"chip account-chip"+(e.owner?.recorded?"":" unrecorded"),title:accountTitle(e)},h("span",{class:"chip-t"},accountShown(e))));
   if (e.cloud) chips.push(cloudChip(e.machine));
   const rc = roleChip(e);
   if (e.cloud?.pr) chips.push(h("span", { class: "chip st-moved" }, "PR " + e.cloud.pr));
@@ -521,7 +521,7 @@ function body(shown, inScope) {
       h("button", { class: "link", onclick: () => { clearFilters(); if (list.text) { list.text = ""; $("#list-filter").value = ""; refreshList(); } } }, "Clear filters")));
     return h("div", { class: "empty" }, state.scope.kind === "needs" ? "Nothing needs you right now." : "No sessions here.");
   }
-  return tree(groupsOf(shown), row, state.sel ? state.sel.machine + "\u0000" + state.sel.key : "");
+  return [statusHeader(list.density === "compact"), tree(groupsOf(shown), row, state.sel ? state.sel.machine + "\u0000" + state.sel.key : "")];
 }
 
 // refreshList draws the list again (a filter, the display, a group) and keeps the
