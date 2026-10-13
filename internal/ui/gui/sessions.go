@@ -71,11 +71,14 @@ type EntryDTO struct {
 	CanApp          bool                  `json:"canApp"`
 	AppWhy          string                `json:"appWhy,omitempty"`
 	Profile         *agent.RuntimeProfile `json:"profile,omitempty"`
-	Machine         string                `json:"machine"`
-	Agent           agent.ID              `json:"agent"`
-	AgentName       string                `json:"agentName"`
-	Key             string                `json:"key"` // agent/session
-	Title           string                `json:"title"`
+	// Owner is the account that ran it, as the agent recorded it (Profile's sign-in is
+	// only who is signed in to its root now).
+	Owner     app.SessionOwner `json:"owner"`
+	Machine   string           `json:"machine"`
+	Agent     agent.ID         `json:"agent"`
+	AgentName string           `json:"agentName"`
+	Key       string           `json:"key"` // agent/session
+	Title     string           `json:"title"`
 	// TitleSource is where the title comes from: custom (renamed), live (the running
 	// agent's name for it), generated (the agent's own title), prompt (the first prompt),
 	// reply (the first reply) or none ("Untitled · folder").
@@ -562,7 +565,7 @@ func entryDTO(core *app.App, inv *app.Inventory, it app.Item, targets []AgentOpt
 		Status: statusWords(core, e), Live: e.Live.State == agent.Live, LastActive: s.LastActivity.Format(time.RFC3339),
 		ContextOverflow: s.ContextOverflow, LastPrompt: s.LastPrompt, CWD: s.CWD, SizeKB: s.Size / 1024, ContinueIn: []AgentOpt{},
 		Needs:   e.Live.State == agent.Live && strings.HasPrefix(e.Live.Status, "waiting"),
-		Journey: journey(e.Lineage), LineageError: e.LineageError, CanArchiveLineage: e.CanArchiveLineage, History: history(core, e.Lineage), Location: string(e.Location.Kind), Cloud: cloudEntryDTO(core, e), Mirror: mirrorDTO(s.Mirror)}
+		Journey: journey(e.Lineage), LineageError: e.LineageError, CanArchiveLineage: e.CanArchiveLineage, History: history(core, e.Lineage), Location: string(e.Location.Kind), Cloud: cloudEntryDTO(core, e), Mirror: mirrorDTO(s.Mirror), Owner: inv.Logins().OwnerOf(e)}
 	if e.Machine == app.LocalName() && !e.Location.IsCloud() {
 		if mod, ok := core.Module(e.Agent); ok && agent.Has(mod, agent.CapApp) {
 			d.CanApp = true

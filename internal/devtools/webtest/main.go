@@ -378,6 +378,15 @@ func main() {
 			_ = os.Setenv("FAKE_MOVEMENT_ACCOUNT", "1")
 			_ = os.Setenv("FAKE_CODEX_EMAIL", "alice@example.com")
 		}
+		if r.URL.Query().Get("owners") == "1" {
+			// Claude Code is signed in to alice@example.com (org-fixture) now; one demo
+			// session records that it ran under another account, one under alice's.
+			_ = os.Setenv("FAKE_MOVEMENT_ACCOUNT", "1")
+			if err := ownersWorld(h); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
 		if p := r.URL.Query().Get("protection"); p != "" {
 			// protection=blocked: the hopsesh command is installed and Codex trusts hopsesh's
 			// protection hooks, so a moved original is blocked. protection=review: the hooks
@@ -853,6 +862,33 @@ func serveEvents(w http.ResponseWriter, r *http.Request) {
 // protectionWorld installs a stand-in hopsesh command (a regular file in ~/.local/bin, on
 // PATH) and makes the stand-in Codex a version with hooks whose hooks/list reports them
 // trusted (blocked) or waiting for review (review).
+// ownersWorld appends Remote Control records naming the account that ran two demo Claude
+// Code sessions: the first under another account (org-previous), the second under the one
+// signed in now (org-fixture).
+func ownersWorld(h string) error {
+	files, err := filepath.Glob(filepath.Join(h, ".claude", "projects", "*", "0b6c6a8e-1d2f-4c3b-9a7e-5f4d3c2b1a0[12].jsonl"))
+	if err != nil || len(files) != 2 {
+		return fmt.Errorf("the demo's two Claude Code sessions: %v %v", files, err)
+	}
+	for i, f := range files {
+		org := []string{"org-previous", "org-fixture"}[i]
+		id := strings.TrimSuffix(filepath.Base(f), ".jsonl")
+		rec := fmt.Sprintf(`{"type":"bridge-session","sessionId":%q,"bridgeSessionId":"cse_01Owner%dFixture","lastSequenceNum":0,"ownerAccountUuid":"acct-%s","ownerOrganizationUuid":%q}`+"\n", id, i, org, org)
+		fh, err := os.OpenFile(f, os.O_APPEND|os.O_WRONLY, 0)
+		if err != nil {
+			return err
+		}
+		_, err = fh.WriteString(rec)
+		if cerr := fh.Close(); err == nil {
+			err = cerr
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func protectionWorld(h, mode string) error {
 	trust := map[string]string{"blocked": "trusted", "review": "untrusted"}[mode]
 	if trust == "" {

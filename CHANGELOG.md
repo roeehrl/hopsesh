@@ -10,6 +10,21 @@ All notable changes to this project are documented here. The format follows
 
 - Adding or trusting a machine no longer fails with "reading SSH settings … context
   deadline exceeded" when ssh is slow to start (common on busy Windows machines).
+- Sessions show the account that ran them, as Claude Code recorded it, instead of
+  whichever account their profile is signed in to now. A profile that was signed in to
+  another account before no longer labels that account's sessions with the new email;
+  unrecorded sessions claim no account. Account filters and grouping follow suit.
+- Status chips in the session list no longer get cut off mid-word: the account email
+  shortens with an ellipsis and the Remote Control link folds to its icon when space is
+  short, with the full text in tooltips and Details.
+- Accounts offer **Sign in** only when a profile is signed out or its check failed; the
+  sign-in check is a refresh button beside the status.
+
+### Added
+
+- The session list's status column is resizable from its header: drag, use the arrow
+  keys (Shift for larger steps, Home/End, Enter to reset), or double-click to fit what the
+  rows show. The width is remembered.
 
 ## [0.4.4] - 2026-10-13
 

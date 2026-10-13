@@ -90,6 +90,7 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 			if groupBy == "account" {
 				groups = inv.AccountGroups()
 			}
+			logins := inv.Logins()
 			if r.jsonOut {
 				out := map[string]any{"machines": inv.Machines, "clouds": inv.Clouds, "groups": groups, "relationships": inv.Relationships()}
 				var adopted, waiting []app.Brought
@@ -161,7 +162,7 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 					s := e.Session
 					fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\t%s\n", e.Machine, e.AgentName, truncate(s.Title, 40), r.movementStatus(e), ago(s.LastActivity), shortID(s.Key.Session), truncate(s.CWD, 44))
 					if e.Profile != nil {
-						fmt.Fprintf(tw, "  \t\t  profile: %s\t\t\t\t\n", app.AccountLabel(e.Profile))
+						fmt.Fprintf(tw, "  \t\t  %s\t\t\t\t\n", app.OwnerLine(logins.OwnerOf(e), e.Profile))
 					}
 					if ro := r.app.Role(e); ro != nil && e.Departure == nil {
 						fmt.Fprintf(tw, "  \t\t  %s %s · %s\t\t\t\t\n", ro.Glyph, ro.Word, ro.Line)
