@@ -1,0 +1,178 @@
+{
+  "observedAtUTC": "2026-10-13T19:38:31.794683+00:00",
+  "repository": "roeehrl/hopsesh",
+  "tag": "v0.4.4",
+  "sourceCommit": "7e92613541e71824fdc543fa334c810523514d79",
+  "assetCount": 28,
+  "review": "Official signing/provenance completed; downloaded signed manifest, all hashes, notarized universal Mac app and embedded version independently verified. Current remote asset sizes and published digests compared with these local reviewed bytes.",
+  "assets": [
+    {
+      "name": "checksums.txt",
+      "id": "RA_kwDOU4xH5s4mBPYk",
+      "size": 2609,
+      "sha256": "a3e4a12f1ec1c6587cda4e96a5eef95f99036cd35f82bd1807db43fa775eb42b"
+    },
+    {
+      "name": "checksums.txt.sig",
+      "id": "RA_kwDOU4xH5s4mBPZJ",
+      "size": 71,
+      "sha256": "084431b4107f3442edf02caf9e232b655a1ad1a862c78d4d67d7bd63606c3fc1"
+    },
+    {
+      "name": "hopsesh-0.4.4-macos-universal.dmg",
+      "id": "RA_kwDOU4xH5s4mBPYw",
+      "size": 39467727,
+      "sha256": "972ee421bb1617e14d3f38bf9033de31eea909f814b1ce62240767e5149ab30f"
+    },
+    {
+      "name": "hopsesh-0.4.4-windows-amd64-app.zip",
+      "id": "RA_kwDOU4xH5s4mBNIu",
+      "size": 19477962,
+      "sha256": "3103abc6cb64a48d989844688b3816685f6238c769146a5af0773ff62dd041da"
+    },
+    {
+      "name": "hopsesh-0.4.4-windows-amd64-setup.exe",
+      "id": "RA_kwDOU4xH5s4mBNIe",
+      "size": 15077046,
+      "sha256": "693f1436bcb4bf66a83d4ff014e0d1289fb4f65a8f77fade038a8c435e8a8e03"
+    },
+    {
+      "name": "hopsesh-0.4.4-windows-arm64-app.zip",
+      "id": "RA_kwDOU4xH5s4mBNIg",
+      "size": 17221030,
+      "sha256": "ed7aff52626d88e93f367e8e46dadd827a59e8b9d64f1fd3c36cb7e4d6f2a424"
+    },
+    {
+      "name": "hopsesh-0.4.4-windows-arm64-setup.exe",
+      "id": "RA_kwDOU4xH5s4mBNIf",
+      "size": 12653385,
+      "sha256": "e62f260b43e4721d426662cfd2796549c52eb0e89c07942f2277c5837bb5c097"
+    },
+    {
+      "name": "hopsesh-macos-universal.dmg",
+      "id": "RA_kwDOU4xH5s4mBPYo",
+      "size": 39467727,
+      "sha256": "972ee421bb1617e14d3f38bf9033de31eea909f814b1ce62240767e5149ab30f"
+    },
+    {
+      "name": "hopsesh-testbundle-0.4.4.tar.gz",
+      "id": "RA_kwDOU4xH5s4mBNUn",
+      "size": 9841980,
+      "sha256": "8852efe7521e283ca298953e6d9306e77a901fc337c625b777109980035830df"
+    },
+    {
+      "name": "hopsesh-testbundle-0.4.4.tar.gz.sha256",
+      "id": "RA_kwDOU4xH5s4mBNUr",
+      "size": 98,
+      "sha256": "4a5b6d86ea50eeccc7454961492962bb276dfd90fa10e09539ee8824c76773b1"
+    },
+    {
+      "name": "hopsesh-windows-amd64-setup.exe",
+      "id": "RA_kwDOU4xH5s4mBNIi",
+      "size": 15077046,
+      "sha256": "693f1436bcb4bf66a83d4ff014e0d1289fb4f65a8f77fade038a8c435e8a8e03"
+    },
+    {
+      "name": "hopsesh-windows-arm64-setup.exe",
+      "id": "RA_kwDOU4xH5s4mBNJk",
+      "size": 12653385,
+      "sha256": "e62f260b43e4721d426662cfd2796549c52eb0e89c07942f2277c5837bb5c097"
+    },
+    {
+      "name": "hopsesh_0.4.4_darwin_amd64.tar.gz",
+      "id": "RA_kwDOU4xH5s4mBPYj",
+      "size": 8869471,
+      "sha256": "3b78a6bdea7897ecd5166216ba52c40f9e2f9c7a0da600fae21c4304815a2ff3"
+    },
+    {
+      "name": "hopsesh_0.4.4_darwin_arm64.tar.gz",
+      "id": "RA_kwDOU4xH5s4mBPYn",
+      "size": 8023410,
+      "sha256": "2d828ac617eb2747b5542b3352d4a51c975c83fba7307105dddb8bc83fa523cc"
+    },
+    {
+      "name": "hopsesh_0.4.4_linux_amd64.apk",
+      "id": "RA_kwDOU4xH5s4mBMb5",
+      "size": 8924314,
+      "sha256": "1c4c2f52f84d928c10f9f24ebc88cf430728dd7015c725a45e6454aa5f002132"
+    },
+    {
+      "name": "hopsesh_0.4.4_linux_amd64.deb",
+      "id": "RA_kwDOU4xH5s4mBMc3",
+      "size": 8607716,
+      "sha256": "dd3f6c7e9852b94dd3ce4ad8bf3e042cf993eb1e32c357840bb4db8b99f24a0f"
+    },
+    {
+      "name": "hopsesh_0.4.4_linux_amd64.rpm",
+      "id": "RA_kwDOU4xH5s4mBMcO",
+      "size": 8608321,
+      "sha256": "37699fe8ba92058daa0f3990cf6325fa2bc2cc2be6415c7d44c0efeb1f4ca36d"
+    },
+    {
+      "name": "hopsesh_0.4.4_linux_amd64.tar.gz",
+      "id": "RA_kwDOU4xH5s4mBMa_",
+      "size": 8645257,
+      "sha256": "610746e125a15c17260847be41e238ae106f6103cb6af3a072d94c7ec5ba0fa1"
+    },
+    {
+      "name": "hopsesh_0.4.4_linux_amd64.tar.gz.sbom.json",
+      "id": "RA_kwDOU4xH5s4mBMdh",
+      "size": 63213,
+      "sha256": "851d0fdee8c6ed059d9a7eb00ed74c60d033baf5345cd0776cfec6ea46d8c83d"
+    },
+    {
+      "name": "hopsesh_0.4.4_linux_arm64.apk",
+      "id": "RA_kwDOU4xH5s4mBMcW",
+      "size": 8200749,
+      "sha256": "cf61abcfa14741e563265abf4431c6b7b736bcb9e076986ea564217942247de8"
+    },
+    {
+      "name": "hopsesh_0.4.4_linux_arm64.deb",
+      "id": "RA_kwDOU4xH5s4mBMcm",
+      "size": 7924792,
+      "sha256": "8a2db888666035ad7555c4587cb7826c77960fdacbd6c70902c65813c455afe2"
+    },
+    {
+      "name": "hopsesh_0.4.4_linux_arm64.rpm",
+      "id": "RA_kwDOU4xH5s4mBMby",
+      "size": 7923914,
+      "sha256": "25d059a7d93bf8385133ea4f6d4b89905668dc2e34300d68f3dd17703b9b375b"
+    },
+    {
+      "name": "hopsesh_0.4.4_linux_arm64.tar.gz",
+      "id": "RA_kwDOU4xH5s4mBMa8",
+      "size": 7957578,
+      "sha256": "bc878ce00c0be8bba4630e6b767cef394c0da6f311f06ab5ce58e667ebd696f1"
+    },
+    {
+      "name": "hopsesh_0.4.4_linux_arm64.tar.gz.sbom.json",
+      "id": "RA_kwDOU4xH5s4mBMdT",
+      "size": 63213,
+      "sha256": "b72a356e6d1d6eccdd569c1cfd62219cb2aca8e229af4aeaafc39ae7e807c9d6"
+    },
+    {
+      "name": "hopsesh_0.4.4_windows_amd64.zip",
+      "id": "RA_kwDOU4xH5s4mBMa9",
+      "size": 8773209,
+      "sha256": "a53ef67f38bb6b4b6d1b484e10eb556e56a3df58118b3fc5985a880df663a9b3"
+    },
+    {
+      "name": "hopsesh_0.4.4_windows_amd64.zip.sbom.json",
+      "id": "RA_kwDOU4xH5s4mBMdZ",
+      "size": 66216,
+      "sha256": "4156333ed2a338de58b880fb34f87c4087e725bd13df7ed0c3975ebd66f31c69"
+    },
+    {
+      "name": "hopsesh_0.4.4_windows_arm64.zip",
+      "id": "RA_kwDOU4xH5s4mBMbD",
+      "size": 7984091,
+      "sha256": "f69912a60b2b8c9fd9820627be3a94a5898178fdc8e5bdba72459fe25fd66638"
+    },
+    {
+      "name": "hopsesh_0.4.4_windows_arm64.zip.sbom.json",
+      "id": "RA_kwDOU4xH5s4mBMdK",
+      "size": 66216,
+      "sha256": "86e5c9d467587d87bc367a85728fd2f20ef0f4bd047ece92742094e995754d27"
+    }
+  ]
+}
