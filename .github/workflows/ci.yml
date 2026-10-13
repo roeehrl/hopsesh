@@ -360,7 +360,9 @@ jobs:
   os-pairs-macos-linux:
     name: os pairs (macos↔linux)
     runs-on: macos-15-intel
-    timeout-minutes: 60
+    # VM setup and both 81-row matrices can consume an hour; leave time to
+    # copy their results without cancelling an otherwise complete test run.
+    timeout-minutes: 75
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
