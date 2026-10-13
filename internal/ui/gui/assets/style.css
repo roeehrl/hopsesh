@@ -636,7 +636,13 @@ code { font-family: var(--mono); font-size: .92em; padding: 0 3px; border-radius
 .account-toolbar input { flex:1; min-width:180px; }
 .account-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr)); gap:16px; margin:16px 0 28px; }
 .account-card { display:flex; flex-direction:column; justify-content:space-between; gap:18px; padding:20px; border:1px solid var(--line); background:var(--panel); border-radius:12px; min-width:0; }
-.account-card h3 { margin:0 0 8px; }.account-card .mono { overflow-wrap:anywhere; }
+.account-card h3 { margin:0 0 8px; }
+.account-status { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:12px 0; }
+.account-status p { margin:0; min-width:0; overflow-wrap:anywhere; }
+.account-checked { font-size:12px; }
+.account-status .btn.icon { width:24px; height:24px; border-color:transparent; background:transparent; color:var(--muted); }
+.account-status .btn.icon:hover:not(:disabled) { background:var(--hover); color:var(--ink); }
+.account-actions .forget { margin-left:auto; }.account-card .mono { overflow-wrap:anywhere; }
 .account-group > summary { cursor:pointer; font-weight:600; padding:12px 0; }
 .account-group > summary > span { margin-right:12px; }
 .account-group > summary .muted { font-size:12px; font-weight:400; }
@@ -795,4 +801,39 @@ body.terminal-right .divider[data-pane="inspector"]{display:none}
 .row .r-status .role-chip { font-size: 11px; }
 @container list (max-width: 599px) {
  .tree .row { height: 50px; min-height: 50px; }
+}
+
+/* The status column is the user's to size (--state-w, from its header's handle); the
+   title gives way first. Chips in it shrink with an ellipsis, never cut mid-word: the
+   account's email shortens, the mirror link folds to its icon, and the full text is in
+   their tooltips and the inspector. */
+:root { --state-w: 220px; }
+.row { grid-template-columns: 22px minmax(0, 1fr) var(--state-w); }
+.tree.compact .row { grid-template-columns: 16px minmax(0, 1fr) var(--state-w) 114px; }
+.row .r-state { container: state / inline-size; width: 100%; }
+.row .r-state > .r-status { width: 100%; }
+.row .r-indicators > .chip { flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.row .r-indicators > .chip > svg { flex: 0 0 auto; }
+.row .r-indicators > .chip .chip-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .r-indicators > .account-chip { flex: 0 100 auto; min-width: 3.5em; }
+.row .r-indicators > .claude-link { flex: 0 1 auto; min-width: 26px; }
+/* Fitting the column measures every chip at its natural width. */
+.tree.measuring .row .r-state > .r-status, .tree.measuring .row .r-indicators, .tree.measuring .row .status-top { width: max-content; overflow: visible; }
+.tree.measuring .row .r-indicators > .chip { flex: none; }
+.tree.measuring .row .r-indicators .chip-t { display: inline !important; overflow: visible; }
+@container state (max-width: 199px) {
+ .row .r-indicators > .claude-link { padding: 0 5px; }
+ .row .r-indicators > .claude-link .chip-t { display: none; }
+}
+.col-head { display: grid; grid-template-columns: 22px minmax(0, 1fr) var(--state-w); gap: 12px; padding: 0 15px; margin-bottom: -6px; position: sticky; top: 0; z-index: 2; background: var(--bg); height: 22px; align-items: center; font-size: 11px; color: var(--muted); user-select: none; }
+.col-head.compact { grid-template-columns: 16px minmax(0, 1fr) var(--state-w) 114px; gap: 10px; }
+.col-head .col-state { position: relative; }
+.col-resize { position: absolute; top: -2px; bottom: -2px; left: -14px; width: 16px; cursor: col-resize; touch-action: none; z-index: 1; }
+.col-resize::after { content: ""; position: absolute; top: 3px; bottom: 3px; left: 7.5px; width: 1px; background: var(--line); transition: background .12s; }
+.col-resize:hover::after, .col-resize.hot::after, .col-resize:focus-visible::after { background: var(--accent); width: 2px; left: 7px; }
+.col-resize:focus-visible { outline: none; }
+.col-resize:focus-visible::before { content: ""; position: absolute; inset: 0 3px; border-radius: 3px; box-shadow: 0 0 0 2px var(--accent); }
+@container list (max-width: 599px) {
+ .col-head { display: none; }
+ .tree .row, .tree.compact .row { grid-template-columns: 16px minmax(0, 1fr) minmax(84px, 128px); }
 }

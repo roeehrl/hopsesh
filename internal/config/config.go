@@ -151,6 +151,8 @@ type Window struct {
 	SidebarHidden   bool `toml:"sidebar_hidden,omitempty"`
 	InspectorWidth  int  `toml:"inspector_width,omitempty"`
 	InspectorHidden bool `toml:"inspector_hidden,omitempty"`
+	// StatusWidth is the session list's status column (0: the default).
+	StatusWidth int `toml:"status_width,omitempty"`
 }
 
 // Inspector is the app inspector's sections the user opened or closed (explicit choices
@@ -165,6 +167,7 @@ type Inspector struct {
 const (
 	SidebarWidth, SidebarMin, SidebarMax = 220, 180, 320
 	InspectorMin, InspectorMax           = 300, 960
+	StatusMin, StatusMax                 = 140, 560
 )
 
 // InspectorSections are the inspector's sections that open and close.
@@ -695,6 +698,9 @@ func (c Config) Check() error {
 	}
 	if w := c.Window.InspectorWidth; w != 0 && (w < InspectorMin || w > InspectorMax) {
 		return fmt.Errorf("window.inspector_width is %d: use %d to %d", w, InspectorMin, InspectorMax)
+	}
+	if w := c.Window.StatusWidth; w != 0 && (w < StatusMin || w > StatusMax) {
+		return fmt.Errorf("window.status_width is %d: use %d to %d", w, StatusMin, StatusMax)
 	}
 	for _, f := range []struct {
 		name string

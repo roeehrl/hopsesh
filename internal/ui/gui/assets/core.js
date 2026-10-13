@@ -46,6 +46,7 @@ export const ICONS = {
   all: ["M4 5h16v14H4z", "M4 10h16"],
   here: ["M3 5h18v11H3z", "M8 20h8M12 16v4"],
   plus: "M12 5v14M5 12h14",
+  refresh: ["M20 11a8 8 0 1 0-2.3 5.7", "M20 4v7h-7"],
   clock: ["M12 8v4l3 2", "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z"],
   arrow: "M5 12h14M13 6l6 6-6 6",
   down: "M12 5v14M6 13l6 6 6-6",
@@ -296,8 +297,24 @@ export function ask({ title, body, ok, danger = false }) {
 
 // Profiles identify state roots, not the historical owner of every conversation.
 export const accountLabel = p => p?.account?.email || p?.name || "No account profile";
-// accountShown is what names an account next to a session: its email, or a profile's own
-// name ("Work"); a default profile's name ("Codex default") only repeats the agent.
-export const accountShown = p => p?.account?.email || (p && !p.default ? p.name : "") || "";
-export const accountTitle = p => p ? `Stored in ${p.name} (${p.root}). ${p.account?.loggedIn ? `${p.error ? "Last known" : "Current"} sign-in: ${p.account.email || p.account.label || p.account.provider}.` : "Current sign-in not confirmed."} ${p.error ? p.error+". " : ""}This does not establish who originally created the session.` : "No registered account profile";
-export const accountGroupLabel = e => e.profile ? `${accountLabel(e.profile)} · ${e.agentName} · ${e.machine === here() ? sys.Here : e.machine}${e.profile.account?.email && !e.profile.default ? " · "+e.profile.name : ""}` : "No account profile";
+// A session's account is the one its agent recorded running it (e.owner), never just
+// the sign-in its profile's root has now: a root signed in to another account before
+// holds that account's sessions too.
+// accountShown names it next to a session: the recorded account's email ("another
+// account" for one no profile is signed in to now); unrecorded, a named profile ("Work")
+// says where it is stored, and a default profile's name would only repeat the agent.
+export const accountShown = e => ownerShown(e) || (e?.profile && !e.profile.default && !e?.owner?.recorded ? e.profile.name : "");
+const signedInNow = p => p?.account?.loggedIn ? `${p.error ? "was last seen signed in" : "is signed in"} as ${p.account.email || p.account.label || p.account.provider} now` : "has no confirmed sign-in now";
+export const accountTitle = e => {
+  const p = e?.profile, o = e?.owner || {};
+  if (!p) return "No registered account profile";
+  const where = `Stored in ${p.name} (${p.root}), which ${signedInNow(p)}.${p.error ? " " + p.error + "." : ""}`;
+  if (o.email && o.current) return `Run by ${o.email}, as ${e.agentName} recorded it. ${where}`;
+  if (o.email) return `Run by ${o.email}, as ${e.agentName} recorded it${o.profile ? ` (signed in to ${o.profile} now)` : ""}. ${where}`;
+  if (o.recorded && !o.current) return `${e.agentName} recorded an account that no profile here is signed in to now. ${where}`;
+  return `${e.agentName} did not record which account ran this session. ${where}`;
+};
+const ownerShown = e => e?.owner?.email || (e?.owner?.recorded && !e.owner.current ? "another account" : "");
+export const accountGroupLabel = e => e.profile ? `${ownerShown(e) || "Account not recorded"} · ${e.agentName} · ${e.machine === here() ? sys.Here : e.machine}${!e.profile.default || !e.owner?.current ? " · in " + e.profile.name : ""}` : "No account profile";
+// accountKey files a session under its root and its recorded account, for filters and groups.
+export const accountKey = e => (e.profile?.id || "") + "\u0000" + (e.owner?.email || (e.owner?.recorded ? (e.owner.current ? "current" : "other") : ""));

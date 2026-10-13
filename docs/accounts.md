@@ -10,9 +10,23 @@ Selection uses the profile ID, never an email or label.
 In the GUI, open **Settings → Accounts**. Scan accounts discovers known default/configured
 roots and registered roots on allowed machines. Add account creates an empty local profile
 or adopts an existing absolute root. It never copies credentials or changes another login.
-Use **Sign in** to run the vendor's own login in that profile, then **Scan accounts** to check
-it. Rename, edit tags, search, group and collapse account groups from this screen. Sessions
-also support Account and Account tag filters and grouping, and show the profile in Details.
+A profile that is signed out (or whose check failed) offers **Sign in**, which runs the
+vendor's own login in it; a signed-in profile does not. To use another account, add a profile
+for it rather than signing an existing one in again. The refresh button beside a profile's
+status checks its sign-in now; stale profiles are rechecked automatically while the screen
+is open. Rename, edit tags, search, group and collapse account groups from this screen.
+
+### Which account ran a session
+
+A profile's sign-in only says who is signed in to that root **now**. A root that was signed
+in to another account before also holds that account's sessions, so a session is labelled
+with the account its agent recorded running it: Claude Code writes the owning account with
+its Remote Control records, and Hopsesh matches it to the profile signed in to that account
+for the email. A recorded account no profile is signed in to now shows as "another account";
+a session without such a record shows no account (Details says it was not recorded and
+where it is stored). Account filters and grouping use the same attribution, keeping each
+root's accounts apart. Codex records its creator only as an internal account ID that its
+public sign-in status does not report, so Codex sessions show no account.
 
 In the TUI, `a` opens Accounts; `1`/`2` adds Claude/Codex, `n` renames, `t` edits tags, `/`
 filters, `u` selects untagged profiles, `g` cycles grouping, and the arrow keys collapse/expand
