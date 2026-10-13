@@ -39,7 +39,7 @@ func TestMovementDetailsFit24RowTerminal(t *testing.T) {
 					if lines > 24 || m.cursor < m.offset || m.cursor >= m.offset+m.listHeight() {
 						t.Fatalf("selected row or footer clipped: %d rows\n%s", lines, view)
 					}
-					if !strings.Contains(view, "q quit") || movement && !strings.Contains(view, "◆ Moved out · moved to Claude Code on studio; blocked until you move back") || returns && !strings.Contains(view, "[R] move back") {
+					if !strings.Contains(view, "q quit") || movement && !strings.Contains(view, "◆ Moved to Claude Code · moved to Claude Code on studio; blocked until you move back") || returns && !strings.Contains(view, "[R] move back") {
 						t.Fatal("movement, return action or footer missing", view)
 					}
 				})

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -151,7 +152,13 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		if err != nil {
 			return nil, err
 		}
-		p.Warnings = append(p.Warnings, "The destination has insufficient verified context capacity. Create a bounded continuation on the same branch; the existing session remains available.")
+		p.Warnings = append(p.Warnings, "The original session is too full to add to, so this starts a new session that continues it; the original stays as it is.")
+		// The original is not written, so whether it is open no longer matters.
+		p.Blockers = slices.DeleteFunc(p.Blockers, func(b string) bool { return b == "the destination copy is open; quit it first" })
+		p.Warnings = slices.DeleteFunc(p.Warnings, func(w string) bool { return w == openBlockedNote(spec.Name) })
+	}
+	if cp.AppendTo != nil && capacity.Existing > capacity.EffectiveWindow()*7/10 {
+		p.Warnings = append(p.Warnings, "The original is near its context limit. It may need the agent's own compaction before answering; complete conversation history remains preserved.")
 	}
 	prof := writer.Profile(tgt.Install)
 	var redact func([]byte) ([]byte, int)
@@ -289,7 +296,7 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 			cp.RolloverCursor = seg.Cursor
 		}
 		if opt.Fork {
-			p.Warnings = append(p.Warnings, "A bounded continuation will be created on a separate fork. The original remains available.")
+			p.Warnings = append(p.Warnings, "A bounded continuation will be created as a separate conversation. The original remains available.")
 		} else {
 			p.Warnings = append(p.Warnings, "A separate bounded continuation will be created on the same conversation branch. The original is kept unchanged and, like any moved original, protected until you move back.")
 		}
@@ -340,7 +347,10 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 		}
 		candidates = selected
 		if len(candidates) == 0 {
-			p.Blockers = append(p.Blockers, "selected destination does not belong to this branch")
+			// The original was deleted, archived or is under another account: say so,
+			// and offer a new session on the same branch instead of a dead end.
+			p.ReviewNewSession = true
+			p.Blockers = append(p.Blockers, "the original destination session is not here any more; continue in a new session on the same branch")
 			return
 		}
 	}
@@ -366,7 +376,7 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 		case lineage.Subset(source, target) && lineage.Subset(target, source):
 			cp.Relation = RelationSame
 			if c.Summary.CWD != "" && realIntended(c.Summary.CWD) != realIntended(p.Target.CWD) {
-				p.Blockers = append(p.Blockers, "destination is synchronized in "+c.Summary.CWD+"; choose that folder or create a separate fork for a different folder")
+				p.Blockers = append(p.Blockers, "destination is synchronized in "+c.Summary.CWD+"; choose that folder or keep them as separate conversations")
 				return
 			}
 			p.NoWork = true
@@ -379,7 +389,7 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 			return
 		case lineage.Subset(target, source):
 			if c.Summary.CWD != "" && realIntended(c.Summary.CWD) != realIntended(p.Target.CWD) {
-				p.Blockers = append(p.Blockers, "the original session belongs to "+c.Summary.CWD+"; choose that folder or create a separate fork for a different folder")
+				p.Blockers = append(p.Blockers, "the original session belongs to "+c.Summary.CWD+"; choose that folder or keep them as separate conversations")
 				return
 			}
 			cp.Relation = RelationAppend
@@ -389,7 +399,11 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 			s.Key.Profile = in.Target.Install.ProfileID()
 			p.Placement.Key = s.Key
 			if c.Live.State == agent.Live {
-				p.Blockers = append(p.Blockers, "the destination copy is open; quit it first")
+				if opt.OpenBlockedOriginal != "" && opt.OpenBlockedOriginal == c.Summary.Key.String() {
+					p.Warnings = append(p.Warnings, openBlockedNote(in.Target.Module.Spec().Name))
+				} else {
+					p.Blockers = append(p.Blockers, "the destination copy is open; quit it first")
+				}
 			}
 			seg.Nodes = missingNodes(seg.Nodes, target)
 			return
@@ -401,7 +415,7 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 	if opt.Conflict == ConflictKeepBoth {
 		forkLine(p)
 		cp.Relation = RelationNew
-		p.Warnings = append(p.Warnings, p.Conflict+"; a separate fork will be created")
+		p.Warnings = append(p.Warnings, p.Conflict+"; it will be kept as a separate conversation")
 	} else {
 		p.Blockers = append(p.Blockers, p.Conflict+"; choose --keep-both")
 	}
@@ -750,4 +764,9 @@ func liveSnapshotNotice(p *Plan) string {
 	}
 	notice := "The source session on " + place + " is still running. This transfer uses a snapshot; later source messages are not automatically synchronized."
 	return notice
+}
+
+// openBlockedNote explains the exact native client restart required before appending.
+func openBlockedNote(agentName string) string {
+	return "The original is open in " + agentName + ". Hopsesh closes only this conversation's agent before adding your new work, then you can reopen the same conversation. Nothing is archived."
 }

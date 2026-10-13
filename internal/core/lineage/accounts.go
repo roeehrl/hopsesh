@@ -39,7 +39,7 @@ func (m *Manifest) ObserveBinding(r Replica, seg *ir.Segment) (ReplicaID, State,
 				}
 			}
 			if previous == nil {
-				return id, State{}, fmt.Errorf("%w: login changed with divergent account receipts; create a separate fork", agent.ErrDiverged)
+				return id, State{}, fmt.Errorf("%w: login changed with divergent account receipts; keep them as separate conversations", agent.ErrDiverged)
 			}
 			m.ReplaceProjection(id, ir.Cursor{Head: previous.Head, Offset: previous.Offset}, previous.Projection, previous.Heads, previous.Loss)
 		}

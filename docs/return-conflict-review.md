@@ -95,6 +95,10 @@ Implemented (stages 1 and 3, part of 2):
   plus the context budget and older-context mode, per operation: in `move.Options`
   and the operation's context (`ir.WithLimits`), never in globals. Defaults equal the
   previous constants; `Normalize` enforces hard ceilings.
+- The movement ledger has its own `history.lineage_mb` budget (64 MiB default,
+  up to 512 MiB), available in Settings → History and `hopsesh history --lineage-mb`.
+  Reading, native-fork checks, planning, hooks, and writing use this budget; the
+  ledger is never truncated to fit.
 - Every reached limit is an `ir.LimitError` naming its stage and the `[history]`
   setting. The Claude and Codex readers, Codex record analysis, the portable archive
   and whole-file fork/recovery/verification reads (`agent.ReadNative`) use them.

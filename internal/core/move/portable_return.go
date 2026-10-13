@@ -29,7 +29,7 @@ func portableTargetState(p *Plan, in Input, c Copy, seg *ir.Segment) (lineage.St
 		}
 	}
 	if !known {
-		return lineage.State{}, fmt.Errorf("destination session has no verified lineage; choose a separate fork")
+		return lineage.State{}, fmt.Errorf("destination session has no verified lineage; keep them as separate conversations")
 	}
 	_, st, err := p.manifest.ObserveBinding(lineage.Replica{
 		Key: key, Endpoint: endpoint, Binding: in.Target.Install.BindingID(),

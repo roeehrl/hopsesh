@@ -536,16 +536,30 @@ func movementHookExecutable() (string, error) {
 	if bin, err := integrate.AppCLI(); err == nil {
 		return bin, nil
 	}
+	// The command is usually a link (~/.local/bin/hopsesh) to the app's bundled binary.
+	// Hooks name the binary itself, so a link resolves to it: otherwise status reports
+	// the app's hooks absent and install would add a second set.
 	if bin, err := os.Executable(); err == nil {
 		name := strings.ToLower(filepath.Base(bin))
 		if name == "hopsesh" || name == "hopsesh.exe" {
-			return bin, nil
+			return realExecutable(bin), nil
 		}
 	}
 	if bin, err := exec.LookPath("hopsesh"); err == nil {
-		return filepath.Abs(bin)
+		abs, err := filepath.Abs(bin)
+		if err != nil {
+			return "", err
+		}
+		return realExecutable(abs), nil
 	}
 	return "", errors.New("install the hopsesh command before installing the protection hooks")
+}
+
+func realExecutable(bin string) string {
+	if real, err := filepath.EvalSymlinks(bin); err == nil {
+		return real
+	}
+	return bin
 }
 
 func (a *App) movementDeliveryPath(id agent.ID, profile, sessionID string) string {

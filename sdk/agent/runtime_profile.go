@@ -51,6 +51,12 @@ func (in Install) ProfileEnv() []string {
 	if in.Profile == nil || in.Accounts == nil {
 		return nil
 	}
+	// Some vendors distinguish an explicit root from their native config lookup,
+	// even when both point at the same directory. Only detection metadata and an
+	// exact default-profile match authorize that lookup; aliases stay pinned.
+	if in.NativeDefaultRoot != "" && in.Profile.Default && in.Profile.Root == in.NativeDefaultRoot {
+		return nil
+	}
 	var env []string
 	for _, key := range in.Accounts.RootEnv {
 		env = append(env, key+"="+in.Profile.Root)

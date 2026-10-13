@@ -332,7 +332,7 @@ func TestContextBoundedForkRemainsASeparateBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Continue.Rollover != nil || !strings.Contains(strings.Join(p.Warnings, " "), "separate fork") {
+	if p.Continue.Rollover != nil || !strings.Contains(strings.Join(p.Warnings, " "), "separate conversation") {
 		t.Fatal("explicit fork treated as rollover")
 	}
 	if _, err = move.Apply(ctx, p, in, move.Env{StateDir: t.TempDir()}); err != nil {

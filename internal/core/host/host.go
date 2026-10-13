@@ -8,6 +8,7 @@ import (
 	"context"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -133,6 +134,9 @@ func (m *Machine) For(ctx context.Context, s agent.Spec, in agent.Install, w Wri
 		return nil, err
 	}
 	h := &moduleHost{m: m, fs: fsys, facts: m.specFacts(s), w: w, install: in}
+	if in.Profile != nil {
+		h.facts.UserEnv = maps.Clone(h.facts.Env)
+	}
 	for _, e := range in.ProfileEnv() {
 		k, v, _ := strings.Cut(e, "=")
 		h.facts.Env[k] = v

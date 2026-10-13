@@ -18,7 +18,8 @@ func CanEndDestination(p *Plan, in Input) bool {
 	t := in.Target
 	_, stop := t.Module.(agent.Stopper)
 	_, live := t.Module.(agent.LiveDetector)
-	return slices.Contains(p.Blockers, "the destination copy is open; quit it first") && t.Machine.Local && !t.Machine.IsSnapshot() && t.Machine.Facts.OS != "windows" && stop && live && agent.Has(t.Module, agent.CapStop)
+	openBlocked := p.Options.OpenBlockedOriginal == p.Continue.AppendTo.Key.String()
+	return (openBlocked || slices.Contains(p.Blockers, "the destination copy is open; quit it first")) && t.Machine.Local && !t.Machine.IsSnapshot() && t.Machine.Facts.OS != "windows" && stop && live && agent.Has(t.Module, agent.CapStop)
 }
 
 // EndDestination ends only the reviewed original session. It does not apply the

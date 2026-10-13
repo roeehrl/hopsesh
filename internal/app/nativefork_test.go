@@ -74,6 +74,35 @@ func TestNativeForkDiscoveredBeforeFirstHopseshMove(t *testing.T) {
 	if len(pg.Revisions) != len(cg.Revisions) {
 		t.Fatal("copied history became new work")
 	}
+	// A new unrelated session changes listing positions without changing any fork
+	// input. Cache replay must follow native identity and leave unrelated receipts
+	// alone, rather than copying a saved array onto the reordered listing.
+	other := agent.Summary{Key: agent.SessionKey{Agent: "codex", Session: "unrelated"}, Path: "/home/u/.codex/unrelated.jsonl", Title: "Unrelated conversation"}
+	reordered := append([]agent.Summary{other}, ls.Sessions...)
+	current := make([]*lineage.Manifest, len(reordered))
+	current[0] = lineage.New("unrelated-family")
+	untouched := current[0]
+	issues := make([]string, len(reordered))
+	reads := contentReads.Load()
+	nativeForkManifests(ctx, hm, h, m, in, reordered, current, issues)
+	if contentReads.Load() != reads {
+		t.Fatal("fixture did not exercise cache replay")
+	}
+	if current[0] != untouched {
+		t.Fatal("fork cache replaced an unrelated session's lineage")
+	}
+	for i, s := range reordered {
+		var want *lineage.Manifest
+		if s.Key == parent.Key {
+			want = pg
+		}
+		if string(s.Key.Session) == childID {
+			want = cg
+		}
+		if want != nil && (current[i] == nil || current[i].Family != want.Family || current[i].Branch != want.Branch) {
+			t.Fatalf("cache attached the wrong lineage to %s", s.Key.String())
+		}
+	}
 }
 
 // Discovery without a stored Hopsesh endpoint reserves different causal IDs on

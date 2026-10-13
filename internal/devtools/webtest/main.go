@@ -204,6 +204,7 @@ func main() {
 		return svc.SetTerminalSettings(gui.TerminalSettingsInput{Where: where, KeepTabs: true, Notify: true, CloseEnded: closeEnded, FontSize: set.FontSize, Scrollback: set.Scrollback})
 	}
 	http.HandleFunc("/events", serveEvents)
+	registerCachedMovementWorld(&mu, h, &svc)
 	gui.SetTerminal(background)
 	if self, err := os.Executable(); err == nil {
 		gui.SetStepProgram(self)
@@ -338,6 +339,17 @@ func main() {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
+		}
+	})
+	http.HandleFunc("/history-ledger", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if err := seedHistoryLedger(w, r, svc, h); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 		}
 	})
 	http.HandleFunc("/dirty", func(w http.ResponseWriter, r *http.Request) {

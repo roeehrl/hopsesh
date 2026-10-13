@@ -20,6 +20,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/repos"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
 	"github.com/roeehrl/hopsesh/sdk/agent"
+	"github.com/roeehrl/hopsesh/sdk/ir"
 )
 
 // Machine statuses.
@@ -195,6 +196,7 @@ type ScanUpdate struct {
 // clouds are listed through this machine once its own sessions are listed (their lineage
 // names the cloud copies hopsesh made), alongside the other machines.
 func (a *App) Scan(ctx context.Context, o ScanOptions) *Inventory {
+	ctx = a.limited(ctx)
 	scans.Add(1)
 	started := time.Now()
 	defer func() {
@@ -265,6 +267,14 @@ func (a *App) Scan(ctx context.Context, o ScanOptions) *Inventory {
 			if st.Error != "" {
 				m.Phase = "error"
 			}
+		}
+		// Local receipts are ready independently of slow remote/cloud sources.
+		// Publish their movement with the completed local batch, rather than
+		// making a retained session list wait for the whole scan to finish.
+		if m.Local && progress != nil {
+			ready := &Inventory{Machines: []*Machine{m}, Entries: es}
+			a.EnrichMovement(ctx, ready)
+			es = ready.Entries
 		}
 		mu.Lock()
 		inv.Machines = append(inv.Machines, m)
@@ -666,7 +676,7 @@ func hopseshVersion(b agent.BinaryFact) string {
 }
 
 // readManifests reads the lineage beside each session, in parallel.
-func readManifests(machine string, fsys host.FS, ss []agent.Summary) ([]*lineage.Manifest, []string) {
+func readManifests(machine string, fsys host.FS, ss []agent.Summary, limits ...ir.Limits) ([]*lineage.Manifest, []string) {
 	problems := make([]string, len(ss))
 	out := make([]*lineage.Manifest, len(ss))
 	var wg sync.WaitGroup
@@ -676,7 +686,7 @@ func readManifests(machine string, fsys host.FS, ss []agent.Summary) ([]*lineage
 		sem <- struct{}{}
 		go func() {
 			defer func() { <-sem; wg.Done() }()
-			out[i], problems[i] = readSidecar(machine, fsys, s.Path)
+			out[i], problems[i] = readSidecar(machine, fsys, s.Path, limits...)
 		}()
 	}
 	wg.Wait()
@@ -828,7 +838,7 @@ func listedEntries(ctx context.Context, hm *host.Machine, fsys host.FS, mod agen
 		}
 		live, _ = ld.Live(ctx, ch, st.Install, ids)
 	}
-	manifests, problems := readManifests(hm.Name, fsys, l.Sessions)
+	manifests, problems := readManifests(hm.Name, fsys, l.Sessions, ir.LimitsFrom(ctx))
 	persistedFamilies := map[string]bool{}
 	for _, m := range manifests {
 		if m != nil {

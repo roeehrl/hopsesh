@@ -6,6 +6,16 @@ import {showWorkspace} from "./terminal-workspace.js";
 import { api, on, h, state, toast, fail, sys, dialog, count, icon } from "./core.js";
 
 export const tabs = new Map(); // id → the tab (TermTab)
+const revisions = new Map(); // retain removals so a delayed startup RPC cannot resurrect them
+function applyTab(t) {
+  const revision = t.revision || 0;
+  // Zero/absent revisions are the legacy unordered contract. Accept repeated
+  // legacy updates until this ID has positive version evidence; afterwards even
+  // a legacy RPC/event cannot overwrite or resurrect its newer metadata.
+  if ((revisions.get(t.id) || 0) > 0 && revision <= revisions.get(t.id)) return;
+  revisions.set(t.id, revision);
+  if (!t.state) tabs.delete(t.id); else tabs.set(t.id, t);
+}
 const listeners = [];
 // onTabs calls fn whenever a tab changes (the screens draw their chips again).
 export function onTabs(fn) { listeners.push(fn); }
@@ -13,7 +23,7 @@ const changed = () => { for (const f of listeners) f(); badge(); };
 
 export async function loadTabs() {
   try {
-    for (const t of await api("TerminalTabs")) tabs.set(t.id, t);
+    for (const t of await api("TerminalTabs")) applyTab(t);
     for (const x of await api("ExternalExits")) exits.set(x.machine + "\u0000" + x.key, x);
     // Native startup can open a tab before this document registers its event
     // listeners. Recover the pending view from backend state, not event timing.
@@ -41,14 +51,14 @@ on("hopsesh:external-exit", (x) => {
 });
 
 on("hopsesh:terminal", (t) => {
-  if (!t.state) tabs.delete(t.id); else tabs.set(t.id, t);
+  applyTab(t);
   changed();
 });
 
 const live = (t) => t.state !== "exited";
 // tabFor is the live tab a session runs in here, if any: its own, or the bring-back's
 // that saved it and still runs it.
-export const tabFor = (e) => [...tabs.values()].find((t) => (t.kind === "session" || t.kind === "bring") && t.association !== "Session association not confirmed" && t.key && t.machine === e.machine && t.key === e.key && live(t));
+export const tabFor = (e) => [...tabs.values()].find((t) => (t.kind === "session" || t.kind === "bring") && t.association !== "Session association not confirmed" && t.association !== "Checking session association" && t.key && t.machine === e.machine && t.key === e.key && live(t));
 export const waiting = () => [...tabs.values()].filter((t) => t.attention);
 export const running = () => [...tabs.values()].filter(live);
 // strayWaiting are the waiting tabs no session row stands for (steps, sign-ins, shells).

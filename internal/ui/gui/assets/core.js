@@ -238,7 +238,18 @@ export function entries() {
 }
 export function selected() {
   const s = state.sel;
-  return s ? entries().find((e) => e.machine === s.machine && e.key === s.key) || null : null;
+  return s ? entries().find((e) => e.machine === s.machine && e.key === s.key) || copyEntry(s.machine, s.key) : null;
+}
+// copyEntry is a copy folded into another session's row (an original left behind by a
+// move), with the group of the row it is folded into; null when it is not in the scan.
+export function copyEntry(machine, key) {
+  for (const g of state.scan?.profileCopies || []) for (const e of g.entries) if (e.machine === machine && e.key === key) {
+    const home = state.scan.groups.find((gr) => gr.entries.some((x) => (x.copies || []).some((c) => c.machine === machine && c.key === key)));
+    return Object.assign({ group: home || g }, e);
+  }
+  const resolved = state.resolvedSelection;
+  if (resolved?.machine === machine && resolved.key === key) return resolved;
+  return null;
 }
 export const here = () => (state.scan?.machines.find((m) => m.local) || {}).name || state.info?.host;
 export const clouds = () => state.scan?.clouds || [];

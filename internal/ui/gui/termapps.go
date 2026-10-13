@@ -111,8 +111,14 @@ type TabDTO struct {
 // EntryTab finds the tab a session on this machine runs in (nil: none hopsesh can show):
 // one of the hopsesh Terminal window's, or one in the user's terminal app.
 func (a *App) EntryTab(machine, key string) (*TabDTO, error) {
-	if a.Terms != nil && a.Terms.liveSessionTab(machine, key) != "" {
-		return &TabDTO{Terminal: TerminalTitle}, nil
+	if a.Terms != nil {
+		id, err := a.Terms.sessionTabRoute(machine, key)
+		if err != nil {
+			return nil, err
+		}
+		if id != "" {
+			return &TabDTO{Terminal: TerminalTitle}, nil
+		}
 	}
 	f, ok, err := a.entryTab(machine, key)
 	if err != nil || !ok {
@@ -125,7 +131,11 @@ func (a *App) EntryTab(machine, key string) (*TabDTO, error) {
 // terminal's name.
 func (a *App) ShowEntry(machine, key string) (string, error) {
 	if a.Terms != nil {
-		if id := a.Terms.liveSessionTab(machine, key); id != "" {
+		id, err := a.Terms.sessionTabRoute(machine, key)
+		if err != nil {
+			return "", err
+		}
+		if id != "" {
 			a.Terms.Focus(id)
 			return TerminalTitle, nil
 		}

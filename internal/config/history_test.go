@@ -20,7 +20,7 @@ func TestHistory(t *testing.T) {
 	if c.History.Limits() != ir.DefaultLimits() {
 		t.Fatal("unset history must be the defaults")
 	}
-	c.History = History{ContextBudget: 32_000, Older: ir.OlderRecent, ReadMemoryMB: 1024, ArchiveMB: 2048}
+	c.History = History{ContextBudget: 32_000, Older: ir.OlderRecent, ReadMemoryMB: 1024, ArchiveMB: 2048, LineageMB: 128}
 	if err := Save(c); err != nil {
 		t.Fatal(err)
 	}
@@ -29,10 +29,10 @@ func TestHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	l := got.History.Limits()
-	if l.ContextBudget != 32_000 || l.Older != ir.OlderRecent || l.ReadBytes != 1<<30 || l.ArchiveBytes != 2<<30 || l.RecordBytes != ir.DefaultRecordBytes {
+	if l.ContextBudget != 32_000 || l.Older != ir.OlderRecent || l.ReadBytes != 1<<30 || l.ArchiveBytes != 2<<30 || l.LineageBytes != 128<<20 || l.RecordBytes != ir.DefaultRecordBytes {
 		t.Fatalf("round trip: %+v", l)
 	}
-	for _, bad := range []History{{ContextBudget: 10}, {Older: "everything"}, {ReadMemoryMB: -1}, {ArchiveMB: 1 << 20}, {RecordMB: 512}, {RecordMB: 256, ReadMemoryMB: 128}} {
+	for _, bad := range []History{{ContextBudget: 10}, {Older: "everything"}, {ReadMemoryMB: -1}, {ArchiveMB: 1 << 20}, {LineageMB: 1024}, {RecordMB: 512}, {RecordMB: 256, ReadMemoryMB: 128}} {
 		c.History = bad
 		if c.Check() == nil {
 			t.Fatalf("accepted %+v", bad)
