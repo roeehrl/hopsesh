@@ -76,7 +76,70 @@ test("caught failures filling the cap cannot hide the fatal input and caller", t
   assert.match(records.at(-1).parseFailure.stack, /\[eval\]/);
 });
 
-test("the actual Playwright worker inherits the recorder and still fails on an uncaught parser error", t => {
+test("the native IPC decoder retains a failed read that bypasses JSON.parse", t => {
+  const { result, records } = run(t, `
+    require('node:child_process').fork('-e', ["require('node:fs').writeSync(3,Buffer.from([10]))"], {silent:true});
+  `);
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /SyntaxError/);
+  const ipc = records.find(r => r.kind === "ipc-read-failure");
+  assert.ok(ipc);
+  assert.match(ipc.stack, /parseChannelMessages/);
+  assert.equal(ipc.rawRead.bytes, 1);
+  assert.equal(ipc.rawRead.headHex, "0a");
+  assert.equal(records.at(-1).ipcFailure.rawRead.headHex, "0a");
+  assert.equal(records.at(-1).parseFailure, undefined);
+});
+
+test("IPC diagnostics retain the buffered prefix of a fragmented invalid frame", t => {
+  const input = '{"text":"' + "x".repeat(65536);
+  const script = `
+    const fs=require('node:fs');
+    const bytes=Buffer.from(${JSON.stringify(input)});let offset=0;
+    function send(){
+      try {offset+=fs.writeSync(3,bytes,offset,bytes.length-offset);}
+      catch(error){if(error.code!=='EAGAIN')throw error;}
+      if(offset<bytes.length)setImmediate(send);
+      else setTimeout(()=>fs.writeSync(3,Buffer.from([10])),30);
+    }send();
+  `;
+  const { result, records } = run(t, `require('node:child_process').fork('-e',[${JSON.stringify(script)}],{silent:true});`);
+  assert.equal(result.status, 1, result.stderr);
+  const ipc = records.find(r => r.kind === "ipc-read-failure");
+  assert.ok(ipc);
+  const prefixBytes = ipc.bufferedJsonPrefix.bytes;
+  assert.ok(prefixBytes > 0 && prefixBytes <= Buffer.byteLength(input));
+  const prefix = Buffer.from(input).subarray(0,prefixBytes);
+  const read = Buffer.from(input.slice(prefixBytes) + "\n");
+  assert.equal(ipc.bufferedJsonPrefix.sha256, crypto.createHash("sha256").update(prefix).digest("hex"));
+  assert.equal(ipc.bufferedJsonPrefix.headHex, prefix.subarray(0,1024).toString("hex"));
+  assert.equal(ipc.rawRead.bytes,read.length);
+  assert.equal(ipc.rawRead.sha256,crypto.createHash("sha256").update(read).digest("hex"));
+});
+
+test("large valid Unicode IPC messages retain their contents and order without diagnostics", t => {
+  const { result, records } = run(t, `
+    const assert=require('node:assert/strict');
+    const c=require('node:child_process').fork('-e',['process.on("message",m=>process.send(m))'],{silent:true});
+    const inputs=[{i:0,text:'😀'.repeat(100000)},{i:1,text:'x'.repeat(1048577)},{i:2,text:'last'}];
+    let i=0;c.on('message',m=>{assert.deepEqual(m,inputs[i++]);if(i===inputs.length)c.disconnect();});
+    for(const input of inputs)c.send(input);
+  `);
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(records, []);
+});
+
+test("failed diagnostic I/O cannot mask a native IPC parser exception", t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hopsesh-json-ipc-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir,"file");fs.writeFileSync(file,"occupied");
+  const { result } = run(t, `require('node:child_process').fork('-e',["require('node:fs').writeSync(3,Buffer.from([10]))"],{silent:true});`,file);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /SyntaxError/);
+  assert.doesNotMatch(result.stderr, /EEXIST|ENOTDIR/);
+});
+
+function workerControl(t, body) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hopsesh-json-worker-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const diagnostics = path.join(dir, "diagnostics");
@@ -84,7 +147,7 @@ test("the actual Playwright worker inherits the recorder and still fails on an u
   fs.writeFileSync(fixture, `
     const {test} = require(${JSON.stringify(require.resolve("@playwright/test"))});
     test('uncaught parser control', () => {
-      process.nextTick(() => JSON.parse('{'));
+      ${body}
       return new Promise(() => {});
     });
   `);
@@ -93,12 +156,28 @@ test("the actual Playwright worker inherits the recorder and still fails on an u
   const result = spawnSync(process.execPath, ["--require", preload, require.resolve("@playwright/test/cli"), "test", "--config", config], {
     encoding: "utf8", timeout: 15000, env: { ...process.env, WEBTEST_JSON_DIAGNOSTICS: diagnostics },
   });
+  const records = fs.readdirSync(diagnostics).flatMap(name => fs.readFileSync(path.join(diagnostics,name),"utf8").trim().split("\n").map(line => JSON.parse(line)));
+  return {result,records,fixture};
+}
+
+test("the actual Playwright worker inherits the recorder and still fails on an uncaught parser error", t => {
+  const {result,records,fixture} = workerControl(t,"process.nextTick(() => JSON.parse('{'));");
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stdout + result.stderr, /SyntaxError/);
-  const records = fs.readdirSync(diagnostics).flatMap(name => fs.readFileSync(path.join(diagnostics,name),"utf8").trim().split("\n").map(line => JSON.parse(line)));
   const failure = records.find(r => r.kind === "json-parse-failure");
   assert.ok(failure);
   assert.equal(failure.inputHead, "{");
   assert.ok(failure.stack.includes(fixture));
   assert.ok(records.some(r => r.kind === "uncaught-exception" && r.pid === failure.pid));
+});
+
+test("the actual Playwright worker retains native IPC bytes and fails without masking the exception", t => {
+  const {result,records} = workerControl(t,`require('node:child_process').fork('-e',["require('node:fs').writeSync(3,Buffer.from([10]))"],{silent:true});`);
+  assert.equal(result.status,1,result.stdout+result.stderr);
+  assert.match(result.stdout+result.stderr,/SyntaxError/);
+  const ipc=records.find(r=>r.kind==="ipc-read-failure");
+  assert.ok(ipc);
+  assert.match(ipc.stack,/parseChannelMessages/);
+  assert.equal(ipc.rawRead.headHex,"0a");
+  assert.ok(records.some(r=>r.kind==="uncaught-exception" && r.pid===ipc.pid && r.ipcFailure?.rawRead.headHex==="0a"));
 });
