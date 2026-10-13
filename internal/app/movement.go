@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -165,8 +166,8 @@ func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
 						}
 					}
 				} else if m != nil && m.Status == StatusOK && m.host != nil && m.host.Facts.Endpoint == r.Endpoint {
-					in, exists := m.InstallProfile(r.Key.Agent, r.Key.Profile)
-					if exists && in.BindingID() == r.Binding && completeAgentListing(m, r.Key) {
+					_, exists := m.InstallProfile(r.Key.Agent, r.Key.Profile)
+					if exists && completeAgentListing(m, r.Key) {
 						c.Status = "missing"
 						c.Reason = "Original session was not found; review creating a new session"
 					}
@@ -357,9 +358,9 @@ func (a *App) describeDeparture(g *lineage.Manifest, id lineage.ReplicaID, hop l
 	case "diverged":
 		n.Text = "This conversation and the copy in " + where + " contain different work. Compare the histories before moving."
 	case "forked":
-		n.Text = "A separate fork was prepared in " + where + ". This original branch remains available."
+		n.Text = "A separate conversation was prepared in " + where + ". This one is not blocked and stays available."
 		if continued {
-			n.Text = "A separate fork continued in " + where + ". This original branch remains available."
+			n.Text = "A separate conversation continued in " + where + ". This one is not blocked and stays available."
 		}
 	default:
 		n.Text = "Prepared in " + where + ". Work there has not yet been observed."
@@ -441,7 +442,7 @@ func (a *App) cacheMovement(e Entry) {
 	}
 	defer movementRecords.put(e.Session.Path, seen)
 	contentReads.Add(1)
-	b, err := host.LocalFS().ReadFile(lineage.PathFor(e.Session.Path), 16<<20)
+	b, err := host.LocalFS().ReadFile(lineage.PathFor(e.Session.Path), a.Cfg.History.Limits().LineageBytes)
 	if err != nil {
 		return
 	}
@@ -459,7 +460,7 @@ func (a *App) cacheMovement(e Entry) {
 			return
 		}
 	}
-	current, err := lineage.Parse(b)
+	current, err := lineage.Parse(b, a.Cfg.History.Limits())
 	if err != nil || digest(current.Encode()) != digest(e.Lineage.Encode()) {
 		return
 	}
@@ -539,11 +540,11 @@ func (a *App) MovementNoticeDetailsForPath(ctx context.Context, id agent.ID, pro
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
 		return details, fmt.Errorf("notice transcript is outside the selected agent profile")
 	}
-	b, err := host.LocalFS().ReadFile(side, 16<<20)
+	b, err := host.LocalFS().ReadFile(side, a.Cfg.History.Limits().LineageBytes)
 	if err != nil {
 		return details, nil
 	}
-	g, err := lineage.Parse(b)
+	g, err := lineage.Parse(b, a.Cfg.History.Limits())
 	if err != nil {
 		return details, err
 	}
@@ -662,7 +663,7 @@ func (a *App) retainMovement(e *Entry) {
 	if err != nil || json.Unmarshal(b, &previous) != nil || previous.Key != e.Session.Key || previous.Notice == nil || previous.Notice.Operation != e.Movement.Operation {
 		return
 	}
-	side, err := host.LocalFS().ReadFile(lineage.PathFor(e.Session.Path), 16<<20)
+	side, err := host.LocalFS().ReadFile(lineage.PathFor(e.Session.Path), a.Cfg.History.Limits().LineageBytes)
 	if err != nil || previous.Digest != digest(side) {
 		return
 	}
@@ -719,7 +720,12 @@ func localNoticeEndpoint(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	m := &host.Machine{Local: true, Name: LocalName(), Facts: host.Facts{Home: home, OS: runtime.GOOS, Env: map[string]string{"HOPSESH_CONFIG_DIR": os.Getenv("HOPSESH_CONFIG_DIR")}}}
+	// The default folder named explicitly is still the default installation.
+	dir := os.Getenv("HOPSESH_CONFIG_DIR")
+	if dir != "" && config.SameDir(dir, config.DefaultDir()) {
+		dir = ""
+	}
+	m := &host.Machine{Local: true, Name: LocalName(), Facts: host.Facts{Home: home, OS: runtime.GOOS, Env: map[string]string{"HOPSESH_CONFIG_DIR": dir}}}
 	defer m.Close()
 	return m.ReadIdentity(ctx)
 }

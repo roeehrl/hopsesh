@@ -374,7 +374,7 @@ func showCmd() *cobra.Command {
 				r.printf("  lineage      branch %s · family %s\n", l.Branch, l.Family)
 				r.printf("  journey      %d transfers · %d round trips to origin · %d returns to visited locations\n", j.Transfers, j.RoundTrips, j.Returns)
 				if j.Fork {
-					r.printf("  ancestry     separate fork\n")
+					r.printf("  ancestry     separate conversation\n")
 				}
 				hops := l.OrderedHops()
 				for _, h := range hops {

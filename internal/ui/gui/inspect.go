@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -286,7 +287,13 @@ type PresenceDTO struct {
 func (a *App) Presence() (*PresenceDTO, error) {
 	out := &PresenceDTO{Entries: map[string]LiveDTO{}}
 	a.mu.Lock()
-	inv := a.inv
+	owned := a.inv
+	var inv *app.Inventory
+	if owned != nil {
+		copy := *owned
+		copy.Entries = slices.Clone(owned.Entries)
+		inv = &copy
+	}
 	a.mu.Unlock()
 	if inv == nil {
 		return out, nil
@@ -294,8 +301,12 @@ func (a *App) Presence() (*PresenceDTO, error) {
 	core := a.snapshot()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	binding := a.beginTerminalBindingRead("presence")
 	live := core.LiveHere(ctx, inv)
-	table, _ := presence.Snapshot(ctx)
+	table, tableErr := presence.Snapshot(ctx)
+	if tableErr == nil {
+		a.bindTerminalPresence(owned, inv, live, table, binding)
+	}
 	self := os.Getpid()
 	here := inv.Local()
 	if here == nil {

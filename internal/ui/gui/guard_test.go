@@ -2,11 +2,39 @@ package gui
 
 import (
 	"testing"
+	"time"
 
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
+
+func TestCachedGuardDoesNotDeclareCurrentHooksMissingOrEffective(t *testing.T) {
+	core := &app.App{Cfg: config.Defaults(), StateDir: t.TempDir()}
+	e := app.Entry{Cached: true, Machine: app.LocalName(), Agent: "codex", Session: agent.Summary{Key: agent.SessionKey{Agent: "codex", Profile: "p1", Session: "s"}}, Departure: &app.MovementNotice{Operation: "op", Status: "prepared"}}
+	set := func(d *HookHealthDTO) { health.mu.Lock(); health.dto = d; health.mu.Unlock() }
+	t.Cleanup(func() { set(nil) })
+	for _, h := range []*HookHealthDTO{nil, {Checked: time.Now()}, {Hooks: []app.MovementHookStatus{{Agent: "codex", Profile: "p1", Installed: true}}}} {
+		set(h)
+		g := guardFor(core, e)
+		if !g.Checking || g.Effective || g.Fix != "" || g.Mode != "block" {
+			t.Fatalf("cache claims present/absent hooks: %+v", g)
+		}
+	}
+	e.Cached = false
+	set(nil)
+	if g := guardFor(core, e); !g.Checking || g.Effective {
+		t.Fatal("unchecked hooks treated as missing")
+	}
+	set(&HookHealthDTO{Problems: []HookProblem{{State: "unknown", Message: "could not check hooks"}}})
+	if g := guardFor(core, e); !g.Checking || g.Effective || g.Fix != "" {
+		t.Fatal("failed health check treated as absent hooks")
+	}
+	set(&HookHealthDTO{Hooks: []app.MovementHookStatus{{Agent: "codex", Profile: "p1", Installed: true}}})
+	if g := guardFor(core, e); g.Checking || !g.Effective {
+		t.Fatal("fresh verified hooks remain pending")
+	}
+}
 
 func TestHookProblemsNameUntrustedCodexHooks(t *testing.T) {
 	hooks := []app.MovementHookStatus{

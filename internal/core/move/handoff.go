@@ -809,7 +809,7 @@ func applyHandoff(ctx context.Context, p *Plan, env Env) (*Result, error) {
 	if e != nil {
 		return fail(StepLineage, "cannot read source lineage", e)
 	}
-	current, e := lineage.Read(sourceFS, s.Path)
+	current, e := lineage.Read(sourceFS, s.Path, ir.LimitsFrom(ctx))
 	if e != nil {
 		return fail(StepLineage, "cannot verify source lineage", e)
 	}

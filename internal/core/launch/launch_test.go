@@ -52,6 +52,17 @@ func TestShellUnset(t *testing.T) {
 	}
 }
 
+// An app link opens without a folder: the shown command has no empty "cd ”".
+func TestShellWithoutFolder(t *testing.T) {
+	c := agent.Command{Argv: []string{"/usr/bin/open", "-a", "/Applications/ChatGPT.app", "codex://threads/ec0eff80"}}
+	if sh := Shell(c, "", "posix"); sh != `/usr/bin/open -a /Applications/ChatGPT.app codex://threads/ec0eff80` {
+		t.Errorf("posix: %s", sh)
+	}
+	if ps := Shell(c, "", "powershell"); strings.Contains(ps, "Set-Location") {
+		t.Errorf("powershell: %s", ps)
+	}
+}
+
 func TestSessionName(t *testing.T) {
 	if got := SessionName("Fix the flaky test!", "Laptop.local"); got != "fix-the-flaky-test@laptop" {
 		t.Errorf("got %q", got)

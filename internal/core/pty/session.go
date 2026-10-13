@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"path/filepath"
 	"sync"
 	"time"
@@ -73,10 +75,11 @@ type Session struct {
 	closing      bool // stop flow control: the program ended or is being ended
 	gone         bool // forgotten: nothing more is kept
 
-	input   chan []byte
-	pending int // bytes in input
-	done    chan struct{}
-	ended   chan struct{} // the output is finished (after done)
+	input    chan []byte
+	pending  int   // bytes in input
+	inputErr error // a failed write stops later keys from extending a partial sequence
+	done     chan struct{}
+	ended    chan struct{} // the output is finished (after done)
 }
 
 func newSession(m *Manager, id string, spec Spec, cols, rows int) *Session {
@@ -265,6 +268,11 @@ func (s *Session) typed(p []byte) error {
 		return nil
 	}
 	s.mu.Lock()
+	if s.inputErr != nil {
+		err := s.inputErr
+		s.mu.Unlock()
+		return err
+	}
 	if s.info.State == Exited || s.gone {
 		s.mu.Unlock()
 		return errors.New("the program has ended")
@@ -301,7 +309,33 @@ func (s *Session) feed() {
 	for {
 		select {
 		case p := <-s.input:
-			_, _ = s.be.Write(p)
+			s.mu.Lock()
+			failed := s.inputErr != nil
+			s.mu.Unlock()
+			if !failed {
+				for written := 0; written < len(p); {
+					n, err := s.be.Write(p[written:])
+					if n < 0 || n > len(p)-written {
+						n, err = 0, io.ErrShortWrite
+					}
+					written += n
+					// io.ErrShortWrite reports known forward progress; complete only
+					// the unsent suffix. Other failures stop the input stream.
+					if n > 0 && written < len(p) && errors.Is(err, io.ErrShortWrite) {
+						err = nil
+					}
+					if err == nil && n == 0 {
+						err = io.ErrShortWrite
+					}
+					if err != nil {
+						s.mu.Lock()
+						s.inputErr = fmt.Errorf("terminal input failed after %d of %d bytes (%w). Further input is stopped; close this tab and resume again", written, len(p), err)
+						s.toViewer(frameError, []byte(s.inputErr.Error()))
+						s.mu.Unlock()
+						break
+					}
+				}
+			}
 			clear(p)
 			s.mu.Lock()
 			s.pending -= len(p)

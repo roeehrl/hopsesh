@@ -66,7 +66,7 @@ async function fixtures(page:Page, returns:any[], movement:any=null) {
 
 test('remote return plans the exact account and native destination; prepared is not working',async({page},info)=>{
  const calls=await fixtures(page,[candidate()],{status:'prepared',text:'Prepared in Codex on studio',agent:'codex',agentName:'Codex',machine:'studio',profile:'work',key:'codex@work/original',checkedAt:'2026-01-02T03:04:05Z',delivery:'pending'});
- await expect(details(page).getByLabel('Moved out',{exact:true})).toContainText('no new work there yet');
+ await expect(details(page).getByLabel('Where it went',{exact:true})).toContainText('no new work there yet');
  await expect(details(page).locator('#act-primary')).toContainText('Move back to Codex');
  await page.screenshot({path:info.outputPath('return-prepared.png'),fullPage:true});
  await details(page).locator('#act-primary').click();
@@ -310,7 +310,7 @@ test('open original opens one review directly and pins the exact original withou
  await expect(card).not.toContainText('claude@personal/original');
  await details(page).getByRole('button',{name:'Move',exact:true}).click();
  const item=page.getByRole('menuitem',{name:/^Move back to Claude Code/});
- await expect(item).toContainText('Review ending it');
+ await expect(item).toContainText('Review how to add your new work');
  await item.click();
  await expect.poll(()=>calls.length).toBe(1);
  await expect(page.getByRole('dialog')).toHaveCount(1);
@@ -467,16 +467,15 @@ test('missing destination reviews a new session without reusing its original key
  await expect(page.locator('#sheet')).toContainText('Test stopped after read-only plan request');
 });
 
-test('source notice has destination, journey and explicit separate continuation controls',async({page})=>{
+test('source notice has destination and journey controls',async({page})=>{
  const calls=await fixtures(page,[],{status:'prepared',text:'Prepared elsewhere',machine:'studio',agent:'codex',key:'codex/original',checkedAt:'0001-01-01T00:00:00Z'});
- const notice=details(page).getByLabel('Moved out',{exact:true});
+ const notice=details(page).getByLabel('Where it went',{exact:true});
  await expect(notice).not.toContainText('Checked');
- await notice.getByRole('button',{name:'Open moved copy',exact:true}).click();
+ await notice.getByRole('button',{name:/^Open in /}).click();
  await expect(page.getByRole('dialog').last()).toContainText('Scan studio');await page.getByRole('dialog').last().getByRole('button',{name:'Close',exact:true}).click();
  await notice.getByRole('button',{name:'View journey',exact:true}).click();
  await expect(details(page).locator('#sec-copies')).toBeVisible();
- await notice.getByRole('button',{name:'Fork here instead…',exact:true}).click();
- await expect.poll(()=>calls.length).toBe(1);expect(calls[0].m).toBe('Plan');expect(calls[0].args[2]).toBe('claude');expect(calls[0].args[3]).toMatchObject({fork:true,newReplica:true,targetSession:''});
+ await expect(notice.getByRole('button',{name:/Fork here instead/})).toHaveCount(0); // a move is never turned into a separate copy from here
 });
 
 test('cross-agent plan exposes the block-the-original override',async({page})=>{
@@ -548,7 +547,7 @@ test('source notice selects the exact listed destination without planning',async
   source.movement={status:'prepared',text:'Prepared in Codex',machine:destination.machine,agent:destination.agent,key:destination.key,profile:destination.profile?.id || ''};
   document.querySelector('#inspector').replaceWith(inspector(source));return destination.title;
  });
- await expect(details(page).locator('#act-primary')).toHaveText('Open moved copy');
+ await expect(details(page).locator('#act-primary')).toHaveText(/^Open in /);
  await expect(details(page).locator('#act-primary')).toBeEnabled();
  await details(page).locator('#act-primary').click();
  await expect(details(page).getByRole('heading',{name:title,exact:true})).toBeVisible();expect(calls).toHaveLength(0);

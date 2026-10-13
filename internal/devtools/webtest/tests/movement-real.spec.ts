@@ -33,19 +33,13 @@ test('real service resolves hidden original and appends return work to that exac
  await details(page).getByRole('button',{name:/Copies & history/}).click();
  await details(page).getByRole('button',{name:'Show copy',exact:true}).first().click();
  await expect(details(page).getByRole('heading',{name:'Find the codeword',exact:true})).toBeVisible();
- await expect(details(page).getByLabel('Moved out',{exact:true})).toContainText('no new work there yet');
- await expect(details(page).locator('#act-primary')).toHaveText('Open moved copy');
+ await expect(details(page).getByLabel('Where it went',{exact:true})).toContainText('no new work there yet');
+ await expect(details(page).locator('#act-primary')).toHaveText(/^Open in /);
  await expect(details(page).locator('#act-primary')).toBeEnabled();
- await expect(details(page).getByLabel('Moved out',{exact:true})).not.toContainText('Last checked');
+ await expect(details(page).getByLabel('Where it went',{exact:true})).not.toContainText('Last checked');
  await expect(details(page).locator('.skel')).toHaveCount(0);
  await page.screenshot({path:info.outputPath('real-source-prepared-hidden-copy.png'),fullPage:true});
- const separatePlan=page.waitForResponse(r=>r.url().endsWith('/call') && r.request().postDataJSON().m==='Plan');
- await details(page).getByLabel('Moved out',{exact:true}).getByRole('button',{name:'Fork here instead…',exact:true}).click();
- const separate=(await (await separatePlan).json()).result;
- await info.attach('separate-plan.json',{body:JSON.stringify(separate,null,2),contentType:'application/json'});
- await page.screenshot({path:info.outputPath('real-separate-plan.png'),fullPage:true});
- expect.soft(separate.blockers || [],'same-agent fork plan must preserve original and permit a new session').toEqual([]);
- await page.locator('#sheet').getByRole('button',{name:'Cancel',exact:true}).click();
+ await expect(details(page).getByLabel('Where it went',{exact:true}).getByRole('button',{name:/Fork here instead/})).toHaveCount(0);
  await details(page).locator('#act-primary').click();
  await expect(details(page).getByRole('heading',{name:'Find the codeword',exact:true})).toBeVisible();
  await expect.poll(()=>page.evaluate(async()=>{const {selected}=await import('/core.js');return selected()?.key;})).toBe(converted.key);
@@ -95,9 +89,12 @@ test('real service resolves hidden original and appends return work to that exac
  expect(returnedGraph.hops).toHaveLength(2);
  expect(returnedGraph.hops.every(h=>!h.fork)).toBe(true);
  expect(returned[0].returns).toEqual(expect.arrayContaining([expect.objectContaining({key:converted.key})]));
- // The Codex copy stays pinned in the list (it was shown last); the returned original is
- // its newest copy, reached through Copies & history.
- await agentRow(page,returned[0].title,'Codex').click();
+ // A settled refresh can make either native copy the parent. The exact Codex
+ // identity remains selectable as a parent or child, independent of role text.
+ const codexCopy=page.locator(`.tree .row[data-key$=${JSON.stringify(converted.key)}]`);
+ await expect(codexCopy).toHaveAttribute('data-key',converted.machine+'\0'+converted.key);
+ await codexCopy.click();
+ await expect.poll(()=>page.evaluate(async()=>{const {selected}=await import('/core.js');return selected()?.key;})).toBe(converted.key);
  const copies=details(page).getByRole('button',{name:/Copies & history/});
  if((await copies.getAttribute('aria-expanded'))!=='true') await copies.click();
  await details(page).locator('#sec-copies span').filter({hasText:'· newest'}).getByRole('button',{name:'Show copy',exact:true}).click();

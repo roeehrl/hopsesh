@@ -57,7 +57,7 @@ moving back later needs a comparison or a separate fork instead of a clean retur
 			}
 			where := n.AgentName + " on " + n.Machine
 			r.printf("%q was moved to %s; that copy stays the active one.\n", e.Session.Title, where)
-			r.printf("If you continue here, the two copies diverge, and moving back will need a comparison or a separate fork instead of a clean return.\n")
+			r.printf("If you continue here, the two copies diverge, and moving back will need a comparison, or keeping both as separate conversations, instead of a clean return.\n")
 			if !r.confirm("Remove the block from this original?") {
 				return errors.New("not unblocked (use --yes to confirm without asking)")
 			}

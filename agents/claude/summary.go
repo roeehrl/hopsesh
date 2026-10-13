@@ -130,6 +130,18 @@ func summarize(fsys agent.FS, pa agent.Path, file string, fi fs.FileInfo, hasSid
 		// stream forward, bounded, until the first record that carries the launch cwd.
 		headRecs = append(headRecs, scanForFirstChained(f, size)...)
 	}
+	// Large compact summaries or diagnostic attachments can leave both bounded
+	// windows with metadata only. The session still has a real conversation.
+	hasMessage := false
+	for _, r := range append(append([]record{}, headRecs...), tailRecs...) {
+		if r.Type == "user" || r.Type == "assistant" {
+			hasMessage = true
+			break
+		}
+	}
+	if !hasMessage {
+		headRecs = append(headRecs, scanForFirstChained(f, size, true)...)
+	}
 	apply(s, headRecs, tailRecs)
 	if hasSidecar == nil || *hasSidecar {
 		if s.TitleSource == "" || s.TitleSource == "prompt" || s.TitleSource == "reply" || s.TitleSource == "none" {
@@ -312,7 +324,7 @@ func hasChainedCWD(rs []record) bool {
 // maxForwardScan bounds how far scanForFirstChained reads (huge first lines are rare).
 const maxForwardScan = 32 << 20
 
-func scanForFirstChained(f io.ReaderAt, size int64) []record {
+func scanForFirstChained(f io.ReaderAt, size int64, message ...bool) []record {
 	limit := size
 	if limit > maxForwardScan {
 		limit = maxForwardScan
@@ -325,7 +337,7 @@ func scanForFirstChained(f io.ReaderAt, size int64) []record {
 			var r record
 			if json.Unmarshal(bytes.TrimSpace(line), &r) == nil && r.Type != "" {
 				out = append(out, r)
-				if isChained(r) && r.CWD != "" {
+				if isChained(r) && r.CWD != "" && (len(message) == 0 || r.Type == "user" || r.Type == "assistant") {
 					return out
 				}
 			}

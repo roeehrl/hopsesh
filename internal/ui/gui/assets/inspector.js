@@ -134,6 +134,7 @@ function openIn(e, m) {
       }
       continue;
     }
+    if (p.kind === "unknown") continue;
     const can = p.kind !== "tmux" && p.kind !== "ssh" && !(p.kind === "ide" && !sys.mac);
     lines.push(h("div", { class: "open-line" }, h("span", { class: "open-ic" }, placeIcon(p.kind) || agentBadge(e.agent, e.agentName)),
       h("span", { class: "open-t" }, placeName(p, e), p.count > 1 ? h("span", { class: "muted" }, ` — ${p.count} processes`) : null,
@@ -321,7 +322,7 @@ function history(e) {
  h("span", { class: "chip" }, `${count(e.journey.roundTrips, "round trip")} to origin${e.journey.originProfile?" profile":""}`),
  h("span", { class: "chip" }, `${count(e.journey.returns, "return")} to visited locations`),
  h("span", {class:"chip"}, `${count(e.journey.machineTransfers||0, "machine transfer")} · ${count(e.journey.machineRoundTrips||0, "machine round trip")}`),
- e.journey.fork ? h("span", { class: "chip",title:`Parent branch: ${e.journey.parentBranch}` }, "Separate fork") : null,
+ e.journey.fork ? h("span", { class: "chip",title:`Parent branch: ${e.journey.parentBranch}` }, "Separate conversation") : null,
  h("span",{class:"muted",style:"font-size:12px"},`Origin: ${e.journey.origin&&e.journey.origin!=="/"?e.journey.origin:"not recorded"}; branch ${e.journey.branch.slice(0,8)}`)) : null,
  others.length ? h("div", { class: "sub-h" }, "Other copies") : null,
     others.map((c) => h("span", {}, copyPlace(c), accountShown(c.profile) ? h("span",{title:accountTitle(c.profile)}," · "+accountShown(c.profile)) : null, h("span", { class: "muted" }, c.newest ? " · newest" : c.leftBehind ? " · moved on" : " · older"), " ", h("button",{class:"link",onclick:()=>resolveDestination(c).then(selectDestination).catch(fail)},"Show copy"))),
