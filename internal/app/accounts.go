@@ -338,7 +338,19 @@ func (a *App) AccountLogin(ctx context.Context, id string) (agent.Command, error
 		if !ok {
 			return agent.Command{}, errors.New("agent is disabled")
 		}
-		in := agent.Install{Accounts: mod.Spec().Accounts, Agent: p.Agent, Profile: &p, Roots: map[string]string{"home": p.Root}, Binary: m.Facts.Binaries[string(p.Agent)].Path}
+		// Detect against the original machine environment before pinning the root,
+		// so login shares the module's verified native-default launch policy.
+		h, e := m.For(ctx, mod.Spec(), agent.Install{}, nil)
+		if e != nil {
+			return agent.Command{}, e
+		}
+		in, e := mod.Detect(ctx, h)
+		if e != nil {
+			return agent.Command{}, e
+		}
+		in.Accounts = mod.Spec().Accounts
+		in.Profile = &p
+		in.Roots = map[string]string{"home": p.Root}
 		if in.Binary == "" {
 			return agent.Command{}, fmt.Errorf("install %s first", mod.Spec().Name)
 		}

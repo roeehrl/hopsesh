@@ -275,9 +275,9 @@ func cloudRebuildCheckpoint(t *testing.T, linkedFork *bool) {
 					if route[hop+1] == 'A' {
 						into = home
 					}
-					current = f.pushSSHTo(t, route[hop], route[hop+1], current, target, false, operation, into)
+					current = f.pushSSHTo(t, route[hop], route[hop+1], current, target, operation, into)
 				} else {
-					current = f.transfer(t, route[hop], route[hop+1], current, target, "push", false, operation)
+					current = f.transfer(t, route[hop], route[hop+1], current, target, "push", operation)
 				}
 				currentAgent = target
 				f.assertText(t, route[hop+1], current, target, work, nil)

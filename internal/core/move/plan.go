@@ -102,27 +102,31 @@ const (
 
 // Options are the user's choices.
 type Options struct {
-	Bounded       bool   `json:"bounded,omitempty"`    // new bounded replica on the same logical branch
-	NewReplica    bool   `json:"newReplica,omitempty"` // explicitly create a new native session; never auto-select an existing one
-	TargetProfile string `json:"targetProfile,omitempty"`
-	OperationID   string `json:"operationId,omitempty"`
-	TargetSession string `json:"targetSession,omitempty"`
-	TargetDir     string // resume here (skips repository matching)
-	Clone         bool   // clone the repository when it is not here
-	ReposDir      string
-	ExtraRoots    []string // more folders to look for checkouts in
-	GHQLayout     bool
-	Worktree      WorktreeMode
-	Fork          bool // keep the source session running (both continue)
-	RemoteControl bool
-	Notify        bool // tell the old session it moved on
-	Redact        bool
-	App           bool // open in the agent's desktop app
-	SyncCode      bool // bring the checkout to the session's commit
-	Push          bool // push unpushed commits on the source first
-	StopLocal     bool // quit a copy of this session that is open here
-	Conflict      string
-	OtherAccount  bool // the target is signed in to another account (set by the planner)
+	// OpenBlockedOriginal names an original that is open in its agent but blocked by
+	// hopsesh: apply closes its exact native client and rebuilds the append plan.
+	// A block does not prevent that client from writing stale bookkeeping.
+	OpenBlockedOriginal string `json:"openBlockedOriginal,omitempty"`
+	Bounded             bool   `json:"bounded,omitempty"`    // new bounded replica on the same logical branch
+	NewReplica          bool   `json:"newReplica,omitempty"` // explicitly create a new native session; never auto-select an existing one
+	TargetProfile       string `json:"targetProfile,omitempty"`
+	OperationID         string `json:"operationId,omitempty"`
+	TargetSession       string `json:"targetSession,omitempty"`
+	TargetDir           string // resume here (skips repository matching)
+	Clone               bool   // clone the repository when it is not here
+	ReposDir            string
+	ExtraRoots          []string // more folders to look for checkouts in
+	GHQLayout           bool
+	Worktree            WorktreeMode
+	Fork                bool // keep the source session running (both continue)
+	RemoteControl       bool
+	Notify              bool // tell the old session it moved on
+	Redact              bool
+	App                 bool // open in the agent's desktop app
+	SyncCode            bool // bring the checkout to the session's commit
+	Push                bool // push unpushed commits on the source first
+	StopLocal           bool // quit a copy of this session that is open here
+	Conflict            string
+	OtherAccount        bool // the target is signed in to another account (set by the planner)
 	// Continuing in another agent.
 	Fidelity convert.Fidelity // history (default) or note
 	Native   bool             // render exact tool calls as the target's own (when it can)
@@ -362,7 +366,7 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 					}
 				}
 				if !selected {
-					p.Blockers = append(p.Blockers, "destination native session already exists outside the selected branch; create a separate fork")
+					p.Blockers = append(p.Blockers, "destination native session already exists outside the selected branch; keep them as separate conversations")
 				}
 			}
 		}
@@ -472,7 +476,7 @@ func changedSinceItLeft(ctx context.Context, p *Plan, in Input, c Copy) string {
 		source, target := p.manifest.Covered(p.sourceState.Heads), p.manifest.Covered(st.Heads)
 		if lineage.Subset(source, target) && lineage.Subset(target, source) {
 			if c.Summary.CWD != "" && realIntended(c.Summary.CWD) != realIntended(p.Target.CWD) {
-				p.Blockers = append(p.Blockers, "destination is synchronized in "+c.Summary.CWD+"; choose that folder or create a separate fork for a different folder")
+				p.Blockers = append(p.Blockers, "destination is synchronized in "+c.Summary.CWD+"; choose that folder or keep them as separate conversations")
 				return ""
 			}
 			p.NoWork = true

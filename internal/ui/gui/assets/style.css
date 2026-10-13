@@ -95,6 +95,7 @@ textarea.field { height: auto; padding: 7px 9px; resize: vertical; line-height: 
 .switch[aria-checked="true"]::after { left: 16px; }
 .opt { display: flex; gap: 10px; align-items: flex-start; font-size: 12.5px; cursor: pointer; }
 .opt input { margin-top: 2px; accent-color: var(--accent); }
+.opt.off { cursor: default; opacity: .6; }
 .opt b { font-weight: 500; }
 .opt .muted { display: block; font-size: 12px; }
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
@@ -403,7 +404,6 @@ code { font-family: var(--mono); font-size: .92em; padding: 0 3px; border-radius
 .gmeta { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
 .gmeta.ok { color: var(--ok); } .gmeta.warn { color: var(--warn); }
 .gremote { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
-.gbody { content-visibility: auto; }
 .grp > .gbody > .row:first-child { border-top: 0; }
 
 /* Rows: comfortable (two lines and the chips) or compact (one line, 32px). */
@@ -764,3 +764,36 @@ body.terminal-right .divider[data-pane="inspector"]{display:none}
 .row .r-state { max-width: 100%; overflow: hidden; }
 .row .r-state .chip { max-width: 100%; min-width: 0; }
 .row .r-state .chip-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A copy folded into a session's row (an original left behind by a move): its own line. */
+.row.subrow { min-height: 30px; padding-top: 4px; padding-bottom: 4px; }
+.row.subrow .sub-ic { color: var(--muted); font-size: 13px; justify-content: center; }
+.row.subrow .r-line { gap: 6px; align-items: center; }
+.row.subrow .t { font-weight: 400; color: var(--muted); }
+.r-line .role-chip { flex: none; margin-left: 6px; }
+
+/* Metadata belongs beside the title, in the status column. */
+.row { grid-template-columns: 22px minmax(0, 1fr) minmax(124px, 180px); }
+.row .r-status { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.row .r-indicators { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
+.row .r-indicators .role-chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree.compact .row { position: relative; grid-template-columns: 16px minmax(0, 1fr) minmax(124px, 170px) 114px; height: auto; min-height: 32px; padding-top: 5px; padding-bottom: 5px; }
+.tree.compact .row .r-main { display: block; }
+.tree.compact .row .r-line { width: 100%; }
+.tree.compact .row .r-indicators > :not(.keep):not(.role-chip) { display: none; }
+.tree.compact .row .act { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); background: var(--panel); }
+@container list (max-width: 599px) {
+ .tree .row { position: relative; grid-template-columns: 16px minmax(0, 1fr) minmax(100px, 160px) 100px; height: auto; min-height: 32px; padding-top: 5px; padding-bottom: 5px; }
+ .tree .row .r-main { display: block; }
+ .tree .row .r-indicators > :not(.keep):not(.role-chip) { display: none; }
+}
+
+/* Metadata arrives incrementally: keep a stable two-line row throughout a scan. */
+.row .status-top { display: flex; gap: 6px; align-items: center; min-width: 0; overflow: hidden; }
+.row .status-top > .chip, .row .status-top > .pchip { flex: 0 0 auto; }
+.row .r-indicators { flex-wrap: nowrap; min-height: 20px; overflow: hidden; }
+.tree.compact .row { height: 50px; min-height: 50px; }
+.tree .row.subrow .copy-label { display: block; }
+.row .r-status .role-chip { font-size: 11px; }
+@container list (max-width: 599px) {
+ .tree .row { height: 50px; min-height: 50px; }
+}

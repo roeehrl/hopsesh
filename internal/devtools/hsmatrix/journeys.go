@@ -65,9 +65,8 @@ func journeyCases() []journeyCase {
 	var cases []journeyCase
 	for _, route := range []string{"ABCA", "ABCBCAB", "ABCACBA"} {
 		for _, agents := range [][]string{{"claude", "claude", "claude"}, {"codex", "codex", "codex"}, {"claude", "codex", "claude"}, {"codex", "claude", "codex"}} {
-			for _, fork := range []bool{false, true} {
-				cases = append(cases, journeyCase{Name: fmt.Sprintf("%s-%s-fork=%t", route, strings.Join(agents, "-"), fork), Route: route, Agents: agents, Fork: fork})
-			}
+			// A move is always a move: there is no separately running fork to route.
+			cases = append(cases, journeyCase{Name: fmt.Sprintf("%s-%s", route, strings.Join(agents, "-")), Route: route, Agents: agents})
 		}
 	}
 	return cases
@@ -290,8 +289,6 @@ func runJourney(c journeyCase, endpoints [3]side, aliases []string) error {
 	}
 	work := []string{marker}
 	currentRef := current.Agent + "/" + current.ID
-	originalRef := currentRef
-	var original Found
 	var family, branch string
 	for hop := 1; hop < len(c.Route); hop++ {
 		from, to := int(c.Route[hop-1]-'A'), int(c.Route[hop]-'A')
@@ -300,23 +297,10 @@ func runJourney(c journeyCase, endpoints [3]side, aliases []string) error {
 		if err := endpoints[from].do("append", AppendReq{Agent: current.Agent, Path: current.Path, ID: current.ID, Text: text}, &struct{}{}); err != nil {
 			return err
 		}
-		if hop == 1 && c.Fork {
-			var err error
-			original, err = journeyFind(endpoints[0], marker, current.Agent, current.ID, nil)
-			if err != nil {
-				return err
-			}
-		}
 		argv := []string{"pull", aliases[from] + ":" + currentRef, "--in", c.Agents[to], "--to", cwd[to], "--new-session", "--yes", "--json", "--operation-id", fmt.Sprintf("journey-%s-%d", id, hop)}
-		if hop == 1 && c.Fork {
-			argv = append(argv, "--fork")
-		}
 		var reply struct{ Plan move.Plan }
 		if err := endpoints[to].do("command", commandReq{Args: argv}, &reply); err != nil {
 			return err
-		}
-		if hop == 1 {
-			originalRef = reply.Plan.Key.String()
 		}
 		arrivalID := string(reply.Plan.Placement.Key.Session)
 		if arrivalID == "" || arrivalID == current.ID || !reply.Plan.Options.NewReplica {
@@ -332,13 +316,13 @@ func runJourney(c journeyCase, endpoints [3]side, aliases []string) error {
 				return fmt.Errorf("hop %d lost %q", hop, needle)
 			}
 		}
-		if err := checkMovement(arrival, hop, true, hop == 1 && c.Fork); err != nil {
+		if err := checkMovement(arrival, hop, true, false); err != nil {
 			return err
 		}
 		if cwd[from] != cwd[to] && arrival.Has[cwd[from]] {
 			return fmt.Errorf("hop %d retained the previous machine's working directory", hop)
 		}
-		if err := checkJourney(arrival.Graph, c.Route[:hop+1], c.Fork); err != nil {
+		if err := checkJourney(arrival.Graph, c.Route[:hop+1], false); err != nil {
 			return err
 		}
 		if hop == 1 {
@@ -365,36 +349,5 @@ func runJourney(c journeyCase, endpoints [3]side, aliases []string) error {
 		current = arrival
 		currentRef = reply.Plan.Placement.Key.String()
 	}
-	if !c.Fork {
-		return nil
-	}
-	preserved, err := journeyFind(endpoints[0], marker, original.Agent, original.ID, nil)
-	if err != nil {
-		return err
-	}
-	if preserved.SHA256 != original.SHA256 || preserved.Graph == nil || preserved.Graph.Branch == branch {
-		return fmt.Errorf("travelling fork changed its original or merged branches")
-	}
-	own := "independent-original-" + marker
-	if err := endpoints[0].do("append", AppendReq{Agent: original.Agent, Path: original.Path, ID: original.ID, Text: own}, &struct{}{}); err != nil {
-		return err
-	}
-	var reply struct{ Plan move.Plan }
-	argv := []string{"pull", aliases[0] + ":" + originalRef, "--in", c.Agents[2], "--to", cwd[2], "--new-session", "--yes", "--json", "--operation-id", "parent-" + id}
-	if err := endpoints[2].do("command", commandReq{Args: argv}, &reply); err != nil {
-		return err
-	}
-	parent, err := journeyFind(endpoints[2], marker, c.Agents[2], string(reply.Plan.Placement.Key.Session), append(slices.Clone(work[2:]), own))
-	if err != nil {
-		return err
-	}
-	if parent.Graph == nil || parent.Graph.Family != family || parent.Graph.Branch == branch || !parent.Has[own] {
-		return fmt.Errorf("parent lost independent family/branch/work")
-	}
-	for _, childOnly := range work[2:] {
-		if parent.Has[childOnly] {
-			return fmt.Errorf("child work leaked into original")
-		}
-	}
-	return checkJourney(parent.Graph, "AC", false)
+	return nil
 }

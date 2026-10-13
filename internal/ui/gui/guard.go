@@ -18,6 +18,7 @@ import (
 type GuardDTO struct {
 	Mode      string `json:"mode"` // block | advise | off | released
 	Effective bool   `json:"effective"`
+	Checking  bool   `json:"checking,omitempty"` // no current hook/protection evidence
 	Problem   string `json:"problem,omitempty"`
 	Fix       string `json:"fix,omitempty"`
 	Operation string `json:"operation,omitempty"`
@@ -127,7 +128,12 @@ func guardFor(core *app.App, e app.Entry) *GuardDTO {
 	if g.Mode == config.OriginalOff || g.Mode == "released" {
 		return g
 	}
+	if e.Cached {
+		g.Checking, g.Problem = true, "Checking current protection; this session is shown from saved information."
+		return g
+	}
 	if e.Machine != app.LocalName() {
+		g.Checking = true
 		g.Problem = "Protected by hopsesh on " + e.Machine + " when its hooks are set up there."
 		return g
 	}
@@ -135,11 +141,13 @@ func guardFor(core *app.App, e app.Entry) *GuardDTO {
 	d := health.dto
 	health.mu.Unlock()
 	if d == nil {
+		g.Checking = true
 		g.Problem = "Checking the agent's hooks…"
 		return g
 	}
 	for _, p := range d.Problems {
-		if p.Agent == e.Agent && (p.Profile == "" || p.Profile == e.Session.Key.Profile) {
+		if (p.Agent == e.Agent || p.Agent == "" && p.State == agent.HookUnknown) && (p.Profile == "" || p.Profile == e.Session.Key.Profile) {
+			g.Checking = p.State == agent.HookUnknown
 			g.Problem, g.Fix = p.Message, p.Fix
 			return g
 		}

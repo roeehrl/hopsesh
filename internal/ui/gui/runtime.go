@@ -201,7 +201,7 @@ func (a *App) acceptRuntimeSnapshot(s observe.Snapshot) {
 	// Keep the latest owner snapshot above, without closing those transports or
 	// acknowledging its sequence; a later update or explicit scan adopts it.
 	a.mu.Lock()
-	reviewing := a.closing || a.selectionReads > 0 || a.plan != nil && a.res == nil || a.push != nil
+	reviewing := a.closing || a.selectionReads > 0 || a.reviewBusyLocked()
 	a.mu.Unlock()
 	if reviewing {
 		return

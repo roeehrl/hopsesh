@@ -321,7 +321,12 @@ func (a *App) PasteCloud(link, checkout string) (*PastedDTO, error) {
 // PlanPicked plans bringing a cloud session that is not a row: id "" leaves the choice to
 // the vendor's own picker (Find in Claude Code…), into the checkout chosen here.
 func (a *App) PlanPicked(cloud, id, checkout, target string, o OptsDTO) (*PlanDTO, error) {
-	core := a.snapshot()
+	done := a.beginSelection()
+	defer done()
+	core, generation, err := a.reviewSnapshot()
+	if err != nil {
+		return nil, err
+	}
 	a.mu.Lock()
 	inv := a.inv
 	a.mu.Unlock()
@@ -335,7 +340,7 @@ func (a *App) PlanPicked(cloud, id, checkout, target string, o OptsDTO) (*PlanDT
 	if checkout != "" {
 		e.Checkout = checkout
 	}
-	return a.planEntry(core, inv, e, target, o)
+	return a.planEntry(core, generation, inv, e, target, o)
 }
 
 // fetchPlanDTO is a fetch plan as the window shows it.
@@ -417,7 +422,11 @@ func (a *App) OpenBrought(journal, where string) (*OpenedDTO, error) {
 	l.Key, _ = agent.ParseKey(b.Key)
 	key := l.Key.String()
 	if a.Terms != nil {
-		if id := a.Terms.liveSessionTab(app.LocalName(), key); id != "" {
+		id, err := a.Terms.sessionTabRoute(app.LocalName(), key)
+		if err != nil {
+			return nil, err
+		}
+		if id != "" {
 			a.Terms.Focus(id)
 			return &OpenedDTO{Where: WhereShown, Tab: id}, nil
 		}

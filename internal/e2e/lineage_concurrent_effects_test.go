@@ -153,8 +153,19 @@ func TestLineageConcurrentNativeTransferEffects(t *testing.T) {
 				if !ok {
 					t.Fatal("original replica missing from merged receipt")
 				}
-				if _, chosen := graph.Departure(original); chosen {
-					t.Fatal("concurrent original/fork movements silently chose a destination")
+				departure, chosen := graph.Departure(original)
+				if forks[0] != forks[1] {
+					// The actual move determines original protection; the independent
+					// fork remains a separate branch and never retires its parent.
+					moveIndex := 0
+					if forks[0] {
+						moveIndex = 1
+					}
+					if !chosen || departure.Fork || departure.ID != plans[moveIndex].OperationID {
+						t.Fatal("original protection lost the actual move")
+					}
+				} else if chosen {
+					t.Fatal("concurrent movements silently chose a destination")
 				}
 				transfers := 0
 				for _, fork := range forks {

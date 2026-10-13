@@ -850,9 +850,6 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		case "n":
 			m.opts.Notify = !m.opts.Notify
 			return m, m.planCmd()
-		case "f":
-			m.opts.Fork = !m.opts.Fork
-			return m, m.planCmd()
 		case "x":
 			m.opts.Redact = !m.opts.Redact
 			return m, m.planCmd()
@@ -1335,7 +1332,7 @@ func (m *model) viewBrowseDetail(b *strings.Builder, w int) {
 			j := e.Lineage.Journey()
 			fork := ""
 			if j.Fork {
-				fork = " · separate fork"
+				fork = " · separate conversation"
 			}
 			fmt.Fprintf(b, "  %d transfers · %d round trips to origin · %d returns%s\n", j.Transfers, j.RoundTrips, j.Returns, fork)
 			fmt.Fprintf(b, "  %d machine transfers · %d machine round trips\n", j.MachineTransfers, j.MachineRoundTrips)
@@ -1480,7 +1477,7 @@ func (m *model) viewPlanBody(b *strings.Builder) {
 		return dim.Render("off")
 	}
 	if m.returnTo != nil {
-		if m.opts.NewReplica && !m.opts.Fork {
+		if m.opts.NewReplica {
 			fmt.Fprintf(b, "  Move back account: %s → %s · new session on the same lineage branch; original preserved\n", p.Source.ProfileName, p.Target.ProfileName)
 		} else {
 			fmt.Fprintf(b, "  Move back account: %s → %s · exact session %s\n", p.Source.ProfileName, p.Target.ProfileName, m.opts.TargetSession)
@@ -1493,8 +1490,8 @@ func (m *model) viewPlanBody(b *strings.Builder) {
 	if m.returnTo != nil {
 		agentLabel = "destination agent"
 	}
-	fmt.Fprintf(b, "\n  %s %s  [c] clone %s  [w] worktree %s  [r] remote control %s  [n] protect original %s  [f] fork %s  [x] redact %s\n",
-		agentLabel, target, on(m.opts.Clone), string(m.opts.Worktree), on(m.opts.RemoteControl), on(m.opts.Notify), on(m.opts.Fork), on(m.opts.Redact))
+	fmt.Fprintf(b, "\n  %s %s  [c] clone %s  [w] worktree %s  [r] remote control %s  [n] protect original %s  [x] redact %s\n",
+		agentLabel, target, on(m.opts.Clone), string(m.opts.Worktree), on(m.opts.RemoteControl), on(m.opts.Notify), on(m.opts.Redact))
 	fmt.Fprintf(b, "  [s] sync code %s  [p] push on %s %s  [k] quit copy open here %s\n",
 		on(m.opts.SyncCode), p.Source.Location, on(m.opts.Push), on(m.opts.StopLocal))
 }

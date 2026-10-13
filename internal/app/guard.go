@@ -171,7 +171,7 @@ func (a *App) arrival(g *lineage.Manifest, id lineage.ReplicaID) *Arrival {
 type RoleInfo struct {
 	Kind  string `json:"kind"`  // blocked | moved-out | diverged | forked-out | moved | returned | fork
 	Glyph string `json:"glyph"` // ◆ ◇ ! ⑂ ● ↩
-	Word  string `json:"word"`  // Moved out, Moved copy, Returned, …
+	Word  string `json:"word"`  // Moved to Codex, Moved from Claude Code, Moved back from Codex, …
 	Line  string `json:"line"`  // where it went or came from, and the protection
 }
 
@@ -186,36 +186,50 @@ func (a *App) Role(e Entry) *RoleInfo {
 		}
 		return agentName + " on " + machine
 	}
+	short := func(agentName string, agentID agent.ID, machine, cloud string) string {
+		if cloud != "" {
+			return cloud
+		}
+		if agentName == "" {
+			agentName = string(agentID)
+		}
+		if machine != "" && machine != e.Machine {
+			return agentName + " on " + machine
+		}
+		return agentName
+	}
 	if n := e.Departure; n != nil {
 		to := place(n.AgentName, n.Agent, n.Machine, n.Cloud)
+		toShort := short(n.AgentName, n.Agent, n.Machine, n.Cloud)
 		if n.Status == "forked" {
-			return &RoleInfo{Kind: "forked-out", Glyph: "⑂", Word: "Fork made", Line: "a separate fork continues in " + to}
+			return &RoleInfo{Kind: "forked-out", Glyph: "⑂", Word: "Separate copy", Line: "a separate conversation continues in " + to}
 		}
 		mode := a.OriginalGuard(e.Session.Key, n.Operation, n.Status)
 		released := a.Cfg.OriginalGuard() != GuardOff && a.Released(e.Session.Key, n.Operation)
 		switch {
 		case n.Status == "diverged":
-			return &RoleInfo{Kind: "diverged", Glyph: "!", Word: "Diverged", Line: "continued here after moving to " + to + "; moving back needs a comparison"}
+			return &RoleInfo{Kind: "diverged", Glyph: "!", Word: "Both changed", Line: "continued here after moving to " + to + "; moving back needs a comparison"}
 		case released:
 			return &RoleInfo{Kind: "diverged", Glyph: "!", Word: "Unblocked", Line: "moved to " + to + "; block removed, continuing here diverges"}
 		case mode == GuardBlock:
-			return &RoleInfo{Kind: "blocked", Glyph: "◆", Word: "Moved out", Line: "moved to " + to + "; blocked until you move back"}
+			return &RoleInfo{Kind: "blocked", Glyph: "◆", Word: "Moved to " + toShort, Line: "moved to " + to + "; blocked until you move back"}
 		case mode == GuardAdvise:
-			return &RoleInfo{Kind: "moved-out", Glyph: "◇", Word: "Moved out", Line: "moved to " + to + "; warns before you continue here"}
+			return &RoleInfo{Kind: "moved-out", Glyph: "◇", Word: "Moved to " + toShort, Line: "moved to " + to + "; warns before you continue here"}
 		}
-		return &RoleInfo{Kind: "moved-out", Glyph: "◇", Word: "Moved out", Line: "moved to " + to}
+		return &RoleInfo{Kind: "moved-out", Glyph: "◇", Word: "Moved to " + toShort, Line: "moved to " + to}
 	}
 	if ar := e.Arrival; ar != nil {
 		from := place(ar.AgentName, ar.Agent, ar.Machine, "")
+		fromShort := short(ar.AgentName, ar.Agent, ar.Machine, "")
 		switch {
 		case ar.Kind == "returned":
-			return &RoleInfo{Kind: "returned", Glyph: "↩", Word: "Returned", Line: "moved back from " + from}
+			return &RoleInfo{Kind: "returned", Glyph: "↩", Word: "Moved back from " + fromShort, Line: "moved back from " + from}
 		case ar.Fork:
-			return &RoleInfo{Kind: "fork", Glyph: "⑂", Word: "Fork", Line: "forked from " + from}
+			return &RoleInfo{Kind: "fork", Glyph: "⑂", Word: "Separate copy", Line: "separate conversation from " + from}
 		case ar.Kind == "continuation":
 			return &RoleInfo{Kind: "continuation", Glyph: "↳", Word: "Continuation", Line: "bounded continuation of " + from + "; the original is kept"}
 		}
-		return &RoleInfo{Kind: "moved", Glyph: "●", Word: "Moved copy", Line: "moved from " + from + "; the active copy"}
+		return &RoleInfo{Kind: "moved", Glyph: "●", Word: "Moved from " + fromShort, Line: "moved from " + from + "; continue here"}
 	}
 	return nil
 }

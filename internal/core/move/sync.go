@@ -7,6 +7,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/journal"
 	"github.com/roeehrl/hopsesh/internal/core/launch"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
+	"github.com/roeehrl/hopsesh/sdk/ir"
 )
 
 // A workless visit synchronizes knowledge, never native transcript bytes or counters.
@@ -45,7 +46,7 @@ func recordSync(ctx context.Context, p *Plan, in Input, j *journal.Journal, res 
 	if err != nil {
 		return err
 	}
-	if actual, e := lineage.Read(fsys, p.SyncTo.Path); e != nil {
+	if actual, e := lineage.Read(fsys, p.SyncTo.Path, ir.LimitsFrom(ctx)); e != nil {
 		return e
 	} else if actual != nil {
 		if e = m.Merge(actual); e != nil {

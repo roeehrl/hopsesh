@@ -7,12 +7,14 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/app"
+	"github.com/roeehrl/hopsesh/internal/core/appicon"
 	"github.com/roeehrl/hopsesh/internal/core/launch"
 	"github.com/roeehrl/hopsesh/internal/core/presence"
 	"github.com/roeehrl/hopsesh/internal/core/proc"
@@ -282,6 +284,12 @@ type PresenceDTO struct {
 // iTerm2, Terminal, an editor, tmux, ssh). It never talks to a terminal app (that happens
 // only when the user asks to show a session).
 func (a *App) Presence() (*PresenceDTO, error) {
+	a.backend.mu.Lock()
+	shared := a.backend.cancel != nil
+	a.backend.mu.Unlock()
+	if !shared {
+		return a.directPresence()
+	}
 	out := &PresenceDTO{Entries: map[string]LiveDTO{}}
 	a.quick.mu.Lock()
 	scan := a.quick.scan
@@ -313,6 +321,62 @@ func (a *App) Presence() (*PresenceDTO, error) {
 		}
 	}
 	return out, nil
+}
+
+func (a *App) directPresence() (*PresenceDTO, error) {
+	out := &PresenceDTO{Entries: map[string]LiveDTO{}}
+	a.mu.Lock()
+	owned := a.inv
+	var inv *app.Inventory
+	if owned != nil {
+		copy := *owned
+		copy.Entries = slices.Clone(owned.Entries)
+		inv = &copy
+	}
+	a.mu.Unlock()
+	if inv == nil {
+		return out, nil
+	}
+	core := a.snapshot()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	binding := a.beginTerminalBindingRead("presence")
+	live := core.LiveHere(ctx, inv)
+	table, tableErr := presence.Snapshot(ctx)
+	if tableErr == nil {
+		a.bindTerminalPresence(owned, inv, live, table, binding)
+	}
+	self := os.Getpid()
+	here := inv.Local()
+	if here == nil {
+		return out, nil
+	}
+	for _, e := range inv.Entries {
+		if e.Machine != here.Name || e.Location.IsCloud() {
+			continue
+		}
+		li, ok := live[e.Session.Key]
+		if !ok {
+			continue
+		}
+		e.Live = li
+		d := LiveDTO{Live: li.State == agent.Live, Status: statusWords(core, e), Needs: li.State == agent.Live && strings.HasPrefix(li.Status, "waiting"),
+			Name: li.Name, Places: placesOf(li, table, self)}
+		if d.Live && li.App {
+			d.App = appName(core, e)
+		}
+		out.Entries[e.Machine+"\x00"+e.Session.Key.String()] = d
+	}
+	return out, nil
+}
+
+// appName is the name of the agent's desktop app ("Claude").
+func appName(core *app.App, e app.Entry) string {
+	name := e.AgentName
+	if m, ok := core.Module(e.Agent); ok {
+		name = nonEmptyStr(appicon.Name(m.Spec().Icon.Apps), name)
+	}
+	return name
 }
 
 // placesOf is where a live session's processes run (besides hopsesh's own tabs): each

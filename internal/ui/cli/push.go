@@ -45,7 +45,6 @@ Nothing changes until you confirm (or pass --yes). hopsesh undo <id> here undoes
 	f.String("to", "", "continue in this directory on the other machine instead of matching the repository")
 	f.Bool("clone", false, "clone the repository there if it is missing")
 	f.String("worktree", "auto", "auto, create or main (as for pull)")
-	f.Bool("fork", false, "keep this session running (both continue) instead of handing off")
 	f.Bool("rc", false, "turn the agent's remote control on there, where it has one")
 	f.Bool("redact", false, "redact likely secrets in the copy")
 	f.Bool("notify", false, "protect the original until you move back: blocked or warned as set by hopsesh's original setting (default on unless set to off; --notify=false leaves it alone)")

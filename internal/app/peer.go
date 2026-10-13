@@ -139,7 +139,7 @@ func (a *App) receiveOptions(o move.Options) move.Options {
 	d.NewReplica, d.Bounded = o.NewReplica, o.Bounded
 	d.TargetDir, d.Clone, d.Worktree = o.TargetDir, o.Clone, o.Worktree
 	d.OperationID, d.TargetSession = o.OperationID, o.TargetSession
-	d.Fork, d.RemoteControl, d.Notify, d.Redact = o.Fork, o.RemoteControl, o.Notify, o.Redact
+	d.RemoteControl, d.Notify, d.Redact = o.RemoteControl, o.Notify, o.Redact
 	d.SyncCode, d.StopLocal, d.Conflict = o.SyncCode, o.StopLocal, o.Conflict
 	d.Fidelity, d.Native, d.Note, d.Go, d.CarryRules, d.Via = o.Fidelity, o.Native, o.Note, o.Go, o.CarryRules, o.Via
 	d.RuleFiles = append([]string(nil), o.RuleFiles...)
@@ -151,6 +151,10 @@ func (a *App) receiveOptions(o move.Options) move.Options {
 }
 
 func (s *peerSession) planReceive(ctx context.Context, req peer.PlanRequest) (*peer.PlanReply, error) {
+	// A move is always a move: no sender may leave its original running unblocked here.
+	if req.Options.Fork {
+		return nil, errors.New("a separate running copy cannot be requested; a move always moves the session")
+	}
 	pkg := req.Package
 	if pkg.Location == "" || strings.EqualFold(pkg.Location, LocalName()) {
 		return nil, errors.New("the session is already on this machine")

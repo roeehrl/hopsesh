@@ -4,7 +4,7 @@
 // chips, and the text filter. It is saved in the config ([list], SaveList); the text
 // filter is not. The list is one tree: group headers, then their sessions, with the
 // keyboard of the WAI-ARIA tree pattern.
-import { accountGroupLabel, api, h, fill, icon, ICONS, state, sys, keys, here, cloudOf, cloudTitle, agentInfo, machineStatus, count, ago, toast, dialog, fail } from "./core.js";
+import { accountGroupLabel, api, h, fill, icon, ICONS, state, sys, keys, copyEntry, here, cloudOf, cloudTitle, agentInfo, machineStatus, count, ago, toast, dialog, fail } from "./core.js";
 import { openMenu, openPopover, update, closeAll, isOpen, openEl, refill } from "./menu.js";
 import { tabs as terminalTabs } from "./term.js";
 import { statusKey, placesOf, key as entryKey } from "./actions.js";
@@ -238,7 +238,7 @@ export function setCollapsed(g, closed) {
 // open opens the group a session is in (a session picked from the palette, a notification
 // or Reveal), whatever the user chose before: the only time the app opens a group itself.
 export function openGroupOf(e, rows) {
-  const g = groupsOf(rows).find((x) => x.rows.some((r) => entryKey(r) === entryKey(e)));
+  const g = groupsOf(rows).find((x) => x.rows.some((r) => entryKey(r) === entryKey(e) || (r.copies || []).some(c => entryKey(c) === entryKey(e))));
   if (g && collapsed(g)) setCollapsed(g, false);
 }
 
@@ -515,11 +515,11 @@ export function tree(groups, row, selKey) {
     const gi = h("div", { class: "grp" + (closed ? " closed" : ""), role: "treeitem", "aria-level": "1", "aria-expanded": closed ? "false" : "true", "aria-label": label,
       tabindex: "-1", "data-gkey": g.key }, head);
     if (!closed) {
-      const body = h("div", { class: "gbody", role: "group", style: `contain-intrinsic-size: auto ${g.rows.length * (list.density === "compact" ? 32 : 60)}px` });
+      const body = h("div", { class: "gbody", role: "group" });
       chunkedRows(body,g.rows,e=>{
-       const item=row(e,2); if(g.family && e.relationship?.parent){
-         item.style.marginLeft=Math.min(e.relationship.depth||1,3)*18+"px";
-         item.prepend(h("span",{class:"family-ancestry muted",title:e.relationship.ancestors?.join(" → ")},"↳ Fork · "+(e.relationship.ancestors?.at(-1)||"Parent unavailable")));
+       const item=row(e,2), main=item.nodeType===11?item.firstElementChild:item; if(g.family && e.relationship?.parent){
+         main.style.marginLeft=Math.min(e.relationship.depth||1,3)*18+"px";
+         main.prepend(h("span",{class:"family-ancestry muted",title:e.relationship.ancestors?.join(" → ")},"↳ Fork · "+(e.relationship.ancestors?.at(-1)||"Parent unavailable")));
        }
        return item;
      });
@@ -537,6 +537,9 @@ export function tree(groups, row, selKey) {
 
 // rowByKey is the row of a session (its data-key holds machine NUL key, which a CSS
 // selector can't name).
+// render may retain the live tree and update its rows in place.
+export function adoptTree(root) { treeEl = root; }
+
 export function rowByKey(root, k) {
  chunksByKey.get(k)?.();
   for (const r of root.querySelectorAll(".row")) if (r.dataset.key === k) return r;
@@ -556,7 +559,7 @@ function groupMark(g) {
 function groupRight(g, closed) {
   const out = [];
   if (closed && g.newest && Date.now() - g.newest > INACTIVE) out.push(h("span", { class: "gmeta" }, `last active ${ago(new Date(g.newest).toISOString())}`));
-  if (g.repo && !g.repo.noRepo) {
+  if (g.repo && !g.repo.noRepo && !g.repo.repoPending) {
     if (g.repo.remote) out.push(h("span", { class: "mono gremote", title: g.repo.remote }, g.repo.remote));
     out.push(h("span", { class: "gmeta " + (g.repo.local ? "ok" : g.repo.noRemote ? "" : "warn") }, g.repo.noRemote ? "A checkout without a remote" : g.repo.local ? "Cloned here" : `Not on ${sys.here}`));
   }
@@ -585,7 +588,8 @@ let typed = "", typedAt = 0;
 // letters go to a title.
 function treeKeys(ev) {
   if (ev.target.closest(".act")) return;
-  const logical=lastGroups.flatMap(g=>g.flat?g.rows.map(e=>({key:entryKey(e),title:e.title})): [{group:g.key},...collapsed(g)?[]:g.rows.map(e=>({key:entryKey(e),title:e.title}))]);
+  const rows = g => g.rows.flatMap(e => [{key:entryKey(e),title:e.title}, ...(e.copies || []).filter(c => !(c.machine === e.machine && c.key === e.key) && copyEntry(c.machine,c.key)).map(c => ({key:entryKey(c),title:c.agentName}))]);
+  const logical=lastGroups.flatMap(g=>g.flat?rows(g):[{group:g.key},...(collapsed(g)?[]:rows(g))]);
   const element=x=>x?.key?rowByKey(treeEl,x.key):x?.group?[...treeEl.querySelectorAll(".grp")].find(g=>g.dataset.gkey===x.group):null;
   const cur = ev.target.closest('[role="treeitem"]');
   const i=logical.findIndex(x=>x.key?x.key===cur?.dataset.key:x.group===cur?.dataset.gkey);

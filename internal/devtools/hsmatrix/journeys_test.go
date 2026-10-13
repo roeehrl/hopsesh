@@ -36,7 +36,7 @@ func TestJourneyProgressNeverQualifiesPartialOrUnverifiedExecution(t *testing.T)
 		if err := json.Unmarshal(body, &report); err != nil {
 			t.Fatal(err)
 		}
-		if report.QualificationComplete || report.ExpectedCases != 24 || report.CompletedCases != len(results) || report.Passed != len(results) || len(report.Cases) != len(results) || report.SourceRevision != "tested-source" {
+		if report.QualificationComplete || report.ExpectedCases != len(journeyCases()) || report.CompletedCases != len(results) || report.Passed != len(results) || len(report.Cases) != len(results) || report.SourceRevision != "tested-source" {
 			t.Fatalf("interrupted or unverified execution misreported: %+v", report)
 		}
 	}
@@ -57,8 +57,8 @@ func TestJourneyRouteCoverage(t *testing.T) {
 			edges[c.Route[i-1:i+1]] = true
 		}
 	}
-	if len(seen) != 24 {
-		t.Fatalf("missing route/agent/fork combinations: %d", len(seen))
+	if len(seen) != 12 {
+		t.Fatalf("missing route/agent combinations: %d", len(seen))
 	}
 	for _, edge := range []string{"AB", "AC", "BA", "BC", "CA", "CB"} {
 		if !edges[edge] {

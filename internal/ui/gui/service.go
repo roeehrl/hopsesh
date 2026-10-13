@@ -40,34 +40,38 @@ const MenuEvent = "hopsesh:menu"
 
 // App is the service bound to the frontend.
 type App struct {
-	backend      runtimeLink
-	relayLogin   relayLoginState
-	cloudStartup cloudStartupState
-	Desktop      DesktopShell `json:"-"`
-	closing      bool
-
-	selectionReads int
-	scanCancel     context.CancelFunc
-	scanRevision   atomic.Uint64
-	desktopMu      sync.Mutex
-	quick          quickState
-	mu             sync.Mutex
-	scanMu         sync.Mutex // serialize inventory refreshes
-	scans          map[string]MachineScan
-	core           *app.App // its Cfg is the saved configuration; calls work on snapshots
-	cfgErr         error    // the configuration file could not be used (see StartFresh)
-	inv            *app.Inventory
-	invAt          time.Time // when inv last read the other machines and the clouds
-	plan           *move.Plan
-	input          move.Input
-	res            *move.Result
-	push           *app.Push // a push planned on another machine, its connection open
-	pw             *pwBroker
-	appIcons       map[agent.ID]string // installed apps' icons, read once ("" when none)
-	pwOnce         sync.Once
-	step           *pendingStep // the terminal step a hand-off waits for
-	quitting       atomic.Bool  // the user confirmed quitting (or an update restarts the app)
-	termName       atomic.Value // the user's terminal app's name, for the terminal window (a string)
+	backend          runtimeLink
+	relayLogin       relayLoginState
+	cloudStartup     cloudStartupState
+	Desktop          DesktopShell `json:"-"`
+	closing          bool
+	selectionReads   int
+	scanCancel       context.CancelFunc
+	scanRevision     atomic.Uint64
+	desktopMu        sync.Mutex
+	quick            quickState
+	mu               sync.Mutex
+	scanMu           sync.Mutex // serialize inventory refreshes
+	scans            map[string]MachineScan
+	core             *app.App // its Cfg is the saved configuration; calls work on snapshots
+	cfgErr           error    // the configuration file could not be used (see StartFresh)
+	inv              *app.Inventory
+	historyStale     map[string]bool // entries requiring a fresh read after History settings change; guarded by mu
+	reviewGeneration uint64          // pending reviews are invalidated independently of borrowed active actions
+	planGeneration   uint64
+	pushGeneration   uint64
+	actionRunning    bool      // an apply owns the published plan/connection until its deferred release
+	invAt            time.Time // when inv last read the other machines and the clouds
+	plan             *move.Plan
+	input            move.Input
+	res              *move.Result
+	push             *app.Push // a push planned on another machine, its connection open
+	pw               *pwBroker
+	appIcons         map[agent.ID]string // installed apps' icons, read once ("" when none)
+	pwOnce           sync.Once
+	step             *pendingStep // the terminal step a hand-off waits for
+	quitting         atomic.Bool  // the user confirmed quitting (or an update restarts the app)
+	termName         atomic.Value // the user's terminal app's name, for the terminal window (a string)
 
 	endDestinationToken string // one use, tied to the latest exact return review
 	endDestinationPlan  *move.Plan

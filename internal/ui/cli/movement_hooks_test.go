@@ -24,7 +24,7 @@ import (
 type movementNoticeLookup func(context.Context, agent.ID, string, string, string, string) (string, error)
 
 func runNoticeHook(ctx context.Context, in io.Reader, out io.Writer, id agent.ID, profile string, lookup movementNoticeLookup) error {
-	return runPreparedNoticeHook(ctx, in, out, id, profile, func(ctx context.Context, id agent.ID, profile, session, path, event string) (preparedMovementNotice, error) {
+	return runPreparedNoticeHook(ctx, in, out, id, profile, func(ctx context.Context, id agent.ID, profile, session, path, event, source string) (preparedMovementNotice, error) {
 		text, err := lookup(ctx, id, profile, session, path, event)
 		return preparedMovementNotice{Text: text}, err
 	})
@@ -272,7 +272,7 @@ func TestNoticeHookFailedOrTimedOutStdoutRetries(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			a := app.New(config.Config{}, all.Registry(), t.TempDir(), nil)
 			const notice = "Prepared on bob-laptop"
-			prepare := func(ctx context.Context, id agent.ID, profile, session, path, event string) (preparedMovementNotice, error) {
+			prepare := func(ctx context.Context, id agent.ID, profile, session, path, event, source string) (preparedMovementNotice, error) {
 				claim, err := a.ClaimMovementNotice(ctx, id, profile, session, event, notice)
 				if err != nil || claim == nil {
 					return preparedMovementNotice{}, err

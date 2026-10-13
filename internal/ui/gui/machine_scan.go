@@ -92,7 +92,7 @@ func (a *App) ScanMachine(name string) error {
 	a.mu.Lock()
 	closing := a.closing
 	owned := a.inv
-	reviewing := a.selectionReads > 0 || a.plan != nil && a.res == nil || a.push != nil
+	reviewing := a.selectionReads > 0 || a.reviewBusyLocked()
 	a.mu.Unlock()
 	if closing || reviewing {
 		a.scanPhase(name, "done", "Scan deferred while a session action is open. Try again after it finishes.")
@@ -136,7 +136,7 @@ func (a *App) ScanMachine(name string) error {
 	a.mu.Lock()
 	// Removing or editing a machine while SSH is running must not resurrect it.
 	h = a.core.Cfg.FindHost(name)
-	if !a.closing && a.inv == owned && a.selectionReads == 0 && !(a.plan != nil && a.res == nil || a.push != nil) && h != nil && h.Allowed && h.Destination == destination && h.RelayID == relayID {
+	if !a.closing && a.inv == owned && a.selectionReads == 0 && !(a.reviewBusyLocked()) && h != nil && h.Allowed && h.Destination == destination && h.RelayID == relayID {
 		if a.inv == nil {
 			a.inv = &app.Inventory{}
 		}

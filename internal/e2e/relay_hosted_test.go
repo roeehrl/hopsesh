@@ -284,7 +284,7 @@ func TestRelayHostedStaging(t *testing.T) {
 		}
 		operation := fmt.Sprintf("hosted-route-hop-%d-12345678", hop)
 		previous := current
-		current = f.transfer(t, from, to, current, target, mode, false, operation)
+		current = f.transfer(t, from, to, current, target, mode, operation)
 		f.assertText(t, to, current, target, sentinels, nil)
 		if hop == 1 {
 			before, err := os.ReadFile(current.Path)
@@ -293,7 +293,7 @@ func TestRelayHostedStaging(t *testing.T) {
 			}
 			f.stop[to]()
 			f.start(t, to)
-			repeated := f.transfer(t, from, to, previous, target, mode, false, operation)
+			repeated := f.transfer(t, from, to, previous, target, mode, operation)
 			after, err := os.ReadFile(repeated.Path)
 			if err != nil || !bytes.Equal(before, after) || repeated.Key != current.Key {
 				t.Fatal("hosted owner restart retry duplicated the native outcome", err)
@@ -312,17 +312,13 @@ func TestRelayHostedStaging(t *testing.T) {
 		t.Fatal("hosted route lost transfer or round-trip count", got)
 	}
 	original := current
-	child := f.transfer(t, 'A', 'B', original, "claude", "push", true, "hosted-independent-fork-12345678")
-	f.appendWork(t, child, "claude", "HOSTED-FORK-ONLY")
-	child = f.transfer(t, 'B', 'C', child, "codex", "pull", false, "hosted-fork-travel-123456789")
-	f.assertText(t, 'C', child, "codex", append(sentinels, "HOSTED-FORK-ONLY"), []string{"HOSTED-ORIGINAL-ONLY"})
 	f.appendWork(t, original, sourceAgent, "HOSTED-ORIGINAL-ONLY")
 	beforeC, err := os.ReadFile(atC.Path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	moved := f.transfer(t, 'A', 'C', original, "claude", "push", false, "hosted-original-travel-12345678")
-	f.assertText(t, 'C', moved, "claude", append(sentinels, "HOSTED-ORIGINAL-ONLY"), []string{"HOSTED-FORK-ONLY"})
+	moved := f.transfer(t, 'A', 'C', original, "claude", "push", "hosted-original-travel-12345678")
+	f.assertText(t, 'C', moved, "claude", append(sentinels, "HOSTED-ORIGINAL-ONLY"), nil)
 	if f.lastResult.Journal == "" {
 		t.Fatal("hosted native transfer has no undo journal")
 	}
@@ -335,5 +331,4 @@ func TestRelayHostedStaging(t *testing.T) {
 	} else if _, err = os.Stat(moved.Path); !os.IsNotExist(err) {
 		t.Fatal("hosted peer undo left the newly written native session", err)
 	}
-	f.assertText(t, 'C', child, "codex", []string{"HOSTED-FORK-ONLY"}, []string{"HOSTED-ORIGINAL-ONLY"})
 }

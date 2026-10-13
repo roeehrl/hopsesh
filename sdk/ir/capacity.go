@@ -25,14 +25,20 @@ func (c Capacity) EffectiveWindow() int {
 	return c.Window
 }
 
-// Allowance reserves 30% for instructions, tools and the next response. A single
-// transfer uses at most 30%. Counts are UTF-8 byte upper estimates, not a tokenizer.
+// Allowance is what one transfer may add. A new session reserves 30% for instructions,
+// tools and the next response. An existing session's measured usage already includes
+// its instructions and tools, so adding to it reserves only the next response (10%):
+// reserving 30% again refused a return of six messages to a session at 87% of 1M.
+// A single transfer uses at most 30%. Counts are UTF-8 byte upper estimates.
 func (c Capacity) Allowance() int {
 	w := c.EffectiveWindow()
 	if c.Unknown {
 		return 0
 	}
-	return max(0, min(w*3/10, w*7/10-c.Existing))
+	if c.Existing > 0 {
+		return max(0, min(w*3/10, w*9/10-c.Existing))
+	}
+	return max(0, w*3/10)
 }
 
 // ItemCost includes every model-visible tool field and message framing. UTF-8 bytes

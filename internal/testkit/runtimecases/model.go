@@ -76,6 +76,10 @@ func (r Row) Validate() error {
 	} else if r.Integration == "disconnected" || r.Scope == "wrong-owner" || r.Failure == "connector-restart" || r.Failure == "rebuild" {
 		return fmt.Errorf("cloud preparation, issuer isolation and incarnation failures require a cloud host")
 	}
+	if r.Host != "cloud" && r.Topology == "fork" {
+		// A move is always a move. Only a vendor's cloud session forks, in that cloud.
+		return fmt.Errorf("no local transfer leaves its original running as a fork")
+	}
 	if r.Host == "one-shot" && r.Transport != "ssh" {
 		return fmt.Errorf("a one-shot sender has no relay runtime owner")
 	}

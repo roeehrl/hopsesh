@@ -149,10 +149,15 @@ func TestMovementConcurrentTips(t *testing.T) {
 		f.check(t, "A", "")
 	})
 	t.Run("move and fork", func(t *testing.T) {
+		// A separate copy never retires its source; a move does. The move decides the
+		// source's notice (and its block) however the two hops are ordered.
 		f := newMovementFixture("A", "B")
-		f.hop(t, "move", "A", "B", true)
 		f.fork(t, "fork", "A", "C", true)
-		f.check(t, "A", "")
+		f.hop(t, "move", "A", "B", true)
+		f.check(t, "A", "move")
+		if h, ok := f.m.Departure(f.ids["A"]); !ok || h.Fork || h.To != f.ids["B"] {
+			t.Fatalf("the move must decide the source's notice: %+v %v", h, ok)
+		}
 	})
 }
 
@@ -207,9 +212,25 @@ func TestIndependentlyObservedForkAndOriginalMoveStayConcurrent(t *testing.T) {
 	if err := left.Merge(right); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := left.Departure(f.ids["A"]); ok {
+	g := left.movementHistory()
+	if g.ancestors([]string{"move"})["fork"] || g.ancestors([]string{"fork"})["move"] {
 		t.Fatal("concurrent original/fork routes were falsely ordered")
 	}
+	// Main intentionally lets the actual move decide protection even when a
+	// separate fork was observed independently. That does not imply causality.
+	if h, ok := left.Departure(f.ids["A"]); !ok || h.ID != "move" {
+		t.Fatal("actual movement lost its departure notice")
+	}
+}
+
+func TestReturnClearsEarlierForkNoticeButKeepsANewFork(t *testing.T) {
+	f := newMovementFixture("A", "B")
+	f.hop(t, "move", "A", "B", true)
+	f.fork(t, "older-fork", "A", "C", true, "move")
+	f.hop(t, "return", "B", "A", true, "move")
+	f.check(t, "A", "", "B")
+	f.fork(t, "new-fork", "A", "D", true, "return")
+	f.check(t, "A", "new-fork", "B")
 }
 
 func TestMovementSiblingAndParentExclusions(t *testing.T) {

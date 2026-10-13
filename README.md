@@ -676,8 +676,8 @@ added to the original, so nothing in the original is lost.
 <details>
 <summary><b>What if the session is still running on the other machine?</b></summary>
 
-By default hopsesh copies it as it is and hands it off: later messages in the copy left
-behind stay there. With `--fork`, both copies continue independently. hopsesh refuses to
+hopsesh copies it as it is and hands it off: later messages in the copy left behind stay
+there, and the original is blocked until you move back. hopsesh refuses to
 replace a session that's open on this machine, unless `--stop-local` quits it first. For
 Codex that works only between turns, because Codex has no graceful way to stop mid-turn: if
 it's working, hopsesh asks you to let it finish. Listings show running sessions as "live

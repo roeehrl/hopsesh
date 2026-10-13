@@ -273,6 +273,13 @@ func TestMovementEnrichmentReadsNativeWorkAndReturnRelations(t *testing.T) {
 	if n := inv.Entries[0].Movement; n == nil || n.Machine != "renamed-laptop" || !strings.Contains(n.Text, "renamed-laptop") {
 		t.Fatalf("renamed notice: %+v", n)
 	}
+	// A complete listing can prove the original is missing even after a binding
+	// observation changes. Offline or incomplete listings still cannot prove absence.
+	missingInv := &Inventory{Machines: inv.Machines, Entries: []Entry{inv.Entries[1]}}
+	a.EnrichMovement(ctx, missingInv)
+	if got := missingInv.Entries[0].Returns; len(got) != 1 || got[0].Status != "missing" {
+		t.Fatalf("binding change hid missing original: %+v", got)
+	}
 	// A local-only refresh retains the last successful remote observation and timestamp.
 	checked := inv.Entries[0].Movement.CheckedAt
 	inv.Entries = inv.Entries[:1]
@@ -439,7 +446,7 @@ func TestMovementForkPreservesObservedContinuation(t *testing.T) {
 	checked := time.Now().UTC()
 	observed := map[lineage.ReplicaID]movementObservation{target: {valid: true, checked: checked, state: continued, agentAnchors: map[string]bool{"node:1": true}}}
 	n := a.movementNotice(g, source, observed)
-	if n == nil || n.Status != "forked" || !strings.Contains(n.Text, "continued") || !strings.Contains(n.Text, "original branch remains available") || n.CheckedAt != checked {
+	if n == nil || n.Status != "forked" || !strings.Contains(n.Text, "continued") || !strings.Contains(n.Text, "not blocked and stays available") || n.CheckedAt != checked {
 		t.Fatalf("fork lost continuation evidence: %+v", n)
 	}
 	if strings.Contains(n.Text, "prepared") {

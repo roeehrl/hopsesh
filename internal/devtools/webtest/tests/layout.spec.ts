@@ -128,7 +128,7 @@ test("the inspector's width follows the window until set: 30% of the room, at mo
   await expect.poll(() => width(page, "#inspector")).toBe(480);
 });
 
-test("the list's own width decides compact rows: below 600px they are one line", async ({ page }) => {
+test("narrow lists keep stable rows and leave actions in the inspector", async ({ page }) => {
   const rowHeight = () => page.evaluate(() => {
     const row = document.querySelector(".row");
     return row ? Math.round(row.getBoundingClientRect().height) : -1;
@@ -137,8 +137,8 @@ test("the list's own width decides compact rows: below 600px they are one line",
   await divider(page, "Resize inspector").focus();
   await page.keyboard.press("End"); // a wide inspector leaves the list under 600px
   await expect.poll(() => width(page, ".content")).toBeLessThan(600);
-  await expect.poll(rowHeight).toBe(32);
-  await expect(page.locator(".row .act").first()).toBeHidden();
+  await expect.poll(rowHeight).toBe(50);
+  await expect(page.locator(".row .act")).toHaveCount(0);
 });
 
 // Page headers share styles with Activity; neither screen should scroll the shell.

@@ -8,6 +8,7 @@
 #   scripts/app-terminal-check.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source scripts/app-check-exit.sh
 WORK=$(mktemp -d "${RUNNER_TEMP:-/tmp}/hsterm.XXXXXX")
 go build -tags e2e -o "$WORK/hopsesh-app" ./cmd/hopsesh-app
 go build -o "$WORK/termprobe" ./internal/devtools/termprobe
@@ -35,8 +36,10 @@ for _ in $(seq 1 120); do
   kill -0 "$pid" 2>/dev/null || break
   sleep 1
 done
-kill "$pid" 2>/dev/null || true
-pkill -f "$WORK/hopsesh-app" 2>/dev/null || true
+# terminalCheck already asks the native app to quit after writing its result.
+# Missing output still needs ordinary termination before reporting the failure.
+if ! [ -s "$WORK/$placement/terminal.txt" ]; then kill "$pid" 2>/dev/null || true; fi
+app_check_exit "$pid" "$WORK/hopsesh-app" "$WORK/$placement/app.log"
 if ! [ -s "$WORK/$placement/terminal.txt" ]; then
   echo "the app's terminal check wrote nothing" >&2
   head -n 60 "$WORK/$placement/app.log" >&2

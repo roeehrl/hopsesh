@@ -114,6 +114,11 @@ async function endOriginal() {
 }
 
 function problem(msg, back) {
+  if (/history\.lineage_mb|lineage exceeds \d+ bytes/.test(msg)) {
+    const limit = msg.match(/\((\d+) MiB/)?.[1];
+    msg = `The saved movement history reached its size limit${limit ? ` (${limit} MiB)` : ""}. Increase “Movement ledger” in Settings → History → Resources, then review the transfer again. Existing history has not been truncated.`;
+    back = {label:"Open history settings",run:()=>{sheet.close();go("settings","history");}};
+  }
   fill(sheet, h("div", { class: "sheet-in" },
     h("div", { class: "sheet-body" }, h("div", { class: "item" }, h("span", { class: "badge err" }, "✕"), h("div", { class: "err", style: "line-height:1.5" }, msg))),
     h("div", { class: "sheet-foot" }, h("span", { class: "spacer" }),
@@ -129,8 +134,8 @@ function item(kind, title, desc, ...extra) {
 // plain drops the command-line advice from a plan's message; the sheet offers buttons.
 const plain = (s) => cap(s.split(/;\s*/).filter((x) => !/--[a-z]/.test(x)).join("; ").replace(/\s*\([^)]*--[a-z][^)]*\)/g, ""));
 
-function check(label, key, desc, value = cur.opts[key], to = (on) => on) {
-  return h("label", { class: "opt" }, h("input", { type: "checkbox", checked: value, onchange: (ev) => set(key, to(ev.target.checked)) }),
+function check(label, key, desc, value = cur.opts[key], to = (on) => on, disabled = false) {
+  return h("label", { class: "opt" + (disabled ? " off" : "") }, h("input", { type: "checkbox", checked: value, disabled, "data-opt": key, onchange: (ev) => set(key, to(ev.target.checked)) }),
     h("span", {}, h("b", {}, label), desc ? h("span", { class: "muted" }, desc) : null));
 }
 
@@ -153,7 +158,7 @@ function summary(p) {
    :h("b",{},identity(chosen)),h("span",{class:"muted"},chosen?`${identity(chosen)!==chosen.name?chosen.name+' · ':''}${chosen.default?'Default profile':'Named profile'}${!chosen.account?.email&&!chosen.account?.label?' · Email unavailable':''}`:"Account not identified"))):null;
  const summaryBody=summaryContent(p);
  return h("div",{},cur.returnCandidate ? h("details",{class:"return-destination-identity"},h("summary",{},`Original destination: ${cur.returnCandidate.agentName}${manyAccounts(cur.returnCandidate.agent) && cur.returnCandidate.profileLabel ? " (" + cur.returnCandidate.profileLabel + ")" : ""} on ${cur.returnCandidate.machine}`),
-  h("code",{},cur.opts.targetSession || (cur.opts.fork ? "New separate conversation branch; the original is preserved" : "New session; the original is preserved"))) : null,accountChoice,summaryBody);
+  h("code",{},cur.opts.targetSession || "New session; the original is preserved")) : null,accountChoice,summaryBody);
 }
 function summaryContent(p) {
  if (p.conflict && (p.blockers || []).length && !cur.opts.conflict) return h("div", {class:"summary", "aria-label":"What changes"}, "Return paused. No session will change until you review a plan and confirm it.");
@@ -300,6 +305,9 @@ function blocker(p, b) {
     `${sessionExitHelp()} ${p.endDestinationToken ? 'Hopsesh can ask only this original session to exit, including its open terminal and desktop instances. This interrupts any work it is running; other conversations are unaffected. Its saved history is preserved. You will review a fresh plan before anything is added.' : 'Ending this session from Hopsesh is unavailable for this destination. End it using your agent’s session controls or terminal exit command, then check again. If your desktop app has no session exit control, quit that app; this also ends its other running conversations.'}`,
     h("div",{style:"display:flex;gap:8px;flex-wrap:wrap"},
       h("button", {class:"btn small",disabled:cur.busy,onclick:()=>replan()}, "Check again")));
+  if (p.reviewNewSession && /^the original destination session is not here any more/.test(b)) return item("err", `The original ${p.agent} session is no longer on this ${sys.mac ? "Mac" : "computer"}`,
+    `It may have been deleted or archived in ${p.agent}. hopsesh can continue this conversation in a new ${p.agent} session instead, on the same branch; nothing else changes.`,
+    h("button", {class:"btn small primary",onclick:()=>{Object.assign(cur.opts,{targetSession:"",fork:false,newReplica:true,conflict:""});return replan();}}, `Continue in a new ${p.agent} session`));
   if (p.reviewNewSession && /cannot update the original session across agent or account profiles/.test(b)) return item("err", "The original session cannot be updated across these agent or account profiles",
     "This does not mean you changed accounts. Hopsesh cannot verify native compatibility for updating the original file across these profiles. Review a fresh session on the same lineage branch; both existing sessions will be preserved. Independent work still requires a separate fork.",
     h("button", {class:"btn small",onclick:()=>{Object.assign(cur.opts,{targetSession:"",fork:false,newReplica:true,conflict:""});return replan();}}, "Review new session on the same branch"));
@@ -335,7 +343,6 @@ function options(p) {
     state.info?.defaults?.original === "advise"
       ? check("Warn in the original", "notify", "Until you move back, the copy left behind warns before you continue there (through the agent's hopsesh hook).")
       : check("Block the original until you move back", "notify", "The copy left behind refuses new prompts until you move the session back, so moving back stays a clean return (through the agent's hopsesh hook). Off: the original is left alone."),
-    p.live && p.can.fork && !p.conflict ? check("Keep the old session running too", "fork", "Both copies continue, instead of a hand-off.") : null,
     check("Redact likely secrets", "redact", "In this copy only."),
   ];
   return h("section", { class: "sec", style: "gap:10px" }, h("span", { class: "sec-h" }, "Options"), h("div", { class: "opts-grid" }, opts),

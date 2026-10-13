@@ -194,16 +194,12 @@ func runRuntimeNativeRow(t *testing.T, bin string, row runtimecases.Row) {
 	} else if wantObserveFailure != "" {
 		f.assertRelayFailure(t, row, "observe", wantObserveFailure)
 	}
-	fork := row.Topology == "fork"
 	operation := fmt.Sprintf("runtime-matrix-row-%d-123456789", row.N)
 	if row.Scope == "receive-disabled" || row.Integration == "observed" || wantObserveFailure != "" {
 		if row.Transport == "ssh" {
-			f.pushSSH(t, 'A', 'B', original, "codex", fork, operation, true)
+			f.pushSSH(t, 'A', 'B', original, "codex", operation, true)
 		} else {
 			args := []string{"push", "claude/" + string(original.Key.Session), f.homes['B'].name, "--in", "codex", "--to", f.homes['B'].repo, "--no-sync", "--notify", "--operation-id", operation, "--yes", "--json"}
-			if fork {
-				args = append(args, "--fork")
-			}
 			cmd := exec.CommandContext(ctx, bin, args...)
 			cmd.Env = f.homes['A'].env()
 			out, err := cmd.CombinedOutput()
@@ -225,9 +221,9 @@ func runRuntimeNativeRow(t *testing.T, bin string, row runtimecases.Row) {
 	} else {
 		var arrival agent.Summary
 		if row.Transport == "ssh" {
-			arrival = f.pushSSH(t, 'A', 'B', original, "codex", fork, operation)
+			arrival = f.pushSSH(t, 'A', 'B', original, "codex", operation)
 		} else {
-			arrival = f.transfer(t, 'A', 'B', original, "codex", "push", fork, operation)
+			arrival = f.transfer(t, 'A', 'B', original, "codex", "push", operation)
 		}
 		f.appendWork(t, arrival, "codex", "NATIVE-MATRIX-DESTINATION-WORK")
 		if row.Failure == "sender-restart-after-apply" || row.Failure == "receiver-restart-after-apply" {
@@ -240,7 +236,7 @@ func runRuntimeNativeRow(t *testing.T, bin string, row runtimecases.Row) {
 				key = 'A'
 			}
 			f.restartRuntime(t, key)
-			retried := f.transfer(t, 'A', 'B', original, "codex", "push", fork, operation)
+			retried := f.transfer(t, 'A', 'B', original, "codex", "push", operation)
 			afterRetry, err := os.ReadFile(retried.Path)
 			if err != nil || arrival.Key != retried.Key || arrival.Path != retried.Path || !bytes.Equal(beforeRetry, afterRetry) {
 				t.Fatal("retry after owner restart replaced destination work or created another native session", err)
@@ -257,7 +253,7 @@ func runRuntimeNativeRow(t *testing.T, bin string, row runtimecases.Row) {
 		}
 		f.assertText(t, 'B', arrival, "codex", []string{"NATIVE-MATRIX-SOURCE-WORK", "NATIVE-MATRIX-DESTINATION-WORK"}, nil)
 		graph, err := lineage.Read(host.LocalFS(), arrival.Path)
-		if err != nil || graph == nil || graph.Journey().Fork != fork || len(graph.ActiveHops()) != 1 || graph.ActiveHops()[0].ID != operation || arrival.Key.Session == original.Key.Session {
+		if err != nil || graph == nil || graph.Journey().Fork || len(graph.ActiveHops()) != 1 || graph.ActiveHops()[0].ID != operation || arrival.Key.Session == original.Key.Session {
 			t.Fatal("runtime matrix lost native account separation or causal lineage", err)
 		}
 	}

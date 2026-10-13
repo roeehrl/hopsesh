@@ -40,162 +40,75 @@ func TestMixedTransportLineageSQLiteR2(t *testing.T) {
 	}
 	bin := buildHopsesh(t)
 	for _, route := range []string{"ABABA", "ABCA", "ABCBCAB"} {
-		for _, fork := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/fork=%t", route, fork), func(t *testing.T) {
-				ctx, _, origin, cert, client := startSQLiteRelayFixture(t, time.Minute)
-				f := newRelayFleet(t, ctx, bin, origin, cert, client)
-				original := f.seed(t, "claude")
-				originalBytes, err := os.ReadFile(original.Path)
-				if err != nil {
-					t.Fatal(err)
+		t.Run(route, func(t *testing.T) {
+			ctx, _, origin, cert, client := startSQLiteRelayFixture(t, time.Minute)
+			f := newRelayFleet(t, ctx, bin, origin, cert, client)
+			current, sourceAgent := f.seed(t, "claude"), "claude"
+			var sentinels []string
+			var family, branch string
+			for hop := 0; hop < len(route)-1; hop++ {
+				from, to := route[hop], route[hop+1]
+				text := fmt.Sprintf("MIXED-TRANSPORT-WORK-%d", hop)
+				sentinels = append(sentinels, text)
+				f.appendWork(t, current, sourceAgent, text)
+				target := "claude"
+				if to == 'B' {
+					target = "codex"
 				}
-				current, sourceAgent := original, "claude"
-				var sentinels []string
-				var family, branch string
-				for hop := 0; hop < len(route)-1; hop++ {
-					from, to := route[hop], route[hop+1]
-					// Fork creation itself carries existing work; subsequent work
-					// belongs solely to the child and must not alter its parent.
-					if !fork || hop > 0 {
-						text := fmt.Sprintf("MIXED-TRANSPORT-WORK-%d", hop)
-						sentinels = append(sentinels, text)
-						f.appendWork(t, current, sourceAgent, text)
+				operation := fmt.Sprintf("mixed-route-hop-%d-123456789", hop)
+				if hop%2 == 0 {
+					current = f.pushSSH(t, from, to, current, target, operation)
+				} else {
+					current = f.transfer(t, from, to, current, target, "push", operation)
+				}
+				if hop == 1 {
+					before, err := os.ReadFile(current.Path)
+					if err != nil {
+						t.Fatal(err)
 					}
-					target := "claude"
-					if to == 'B' {
-						target = "codex"
-					}
-					operation := fmt.Sprintf("mixed-route-hop-%d-123456789", hop)
-					if hop%2 == 0 {
-						current = f.pushSSH(t, from, to, current, target, fork && hop == 0, operation)
-					} else {
-						current = f.transfer(t, from, to, current, target, "push", false, operation)
-					}
-					if hop == 1 {
-						before, err := os.ReadFile(current.Path)
-						if err != nil {
-							t.Fatal(err)
-						}
-						f.stop[to]()
-						f.start(t, to)
-						repeated := f.transfer(t, from, to, f.lastSource, target, "push", false, operation)
-						after, err := os.ReadFile(repeated.Path)
-						if err != nil || repeated.Key != current.Key || !bytes.Equal(before, after) {
-							t.Fatal("restart/retry after transport switch changed native history", err)
-						}
-					}
-					sourceAgent = target
-					f.assertText(t, to, current, target, sentinels, nil)
-					graph, err := lineage.Read(host.LocalFS(), current.Path)
-					if err != nil || graph == nil {
-						t.Fatal("mixed arrival missing lineage", err)
-					}
-					if hop == 0 {
-						family, branch = graph.Family, graph.Branch
-					}
-					transfers, returns := hop+1, strings.Count(route[1:hop+2], "A")
-					if fork {
-						transfers, returns = hop, strings.Count(route[2:hop+2], "B")
-					}
-					if graph.Family != family || graph.Branch != branch || graph.Journey().Fork != fork || graph.Journey().Transfers != transfers || graph.Journey().RoundTrips != returns {
-						t.Fatalf("hop %d transport switch changed journey: %+v", hop, graph.Journey())
-					}
-					hops := graph.ActiveHops()
-					if len(hops) != hop+1 {
-						t.Fatal("mixed transport lost or duplicated a causal hop", len(hops), hop+1)
-					}
-					for i, arrived := range hops {
-						if arrived.ID != fmt.Sprintf("mixed-route-hop-%d-123456789", i) || graph.Replica(arrived.From).Location != f.homes[route[i]].name || graph.Replica(arrived.To).Location != f.homes[route[i+1]].name {
-							t.Fatalf("hop %d lost ordered endpoint ancestry: %+v", i, arrived)
-						}
+					f.stop[to]()
+					f.start(t, to)
+					repeated := f.transfer(t, from, to, f.lastSource, target, "push", operation)
+					after, err := os.ReadFile(repeated.Path)
+					if err != nil || repeated.Key != current.Key || !bytes.Equal(before, after) {
+						t.Fatal("restart/retry after transport switch changed native history", err)
 					}
 				}
-				if fork {
-					// A sibling starts from the original after the first child has
-					// travelled, then switches transports on its own return.
-					sibling := f.transfer(t, 'A', 'C', original, "codex", "push", true, "mixed-sibling-create-123456789")
-					f.appendWork(t, sibling, "codex", "INDEPENDENT-MIXED-SIBLING")
-					sibling = f.pushSSH(t, 'C', 'A', sibling, "claude", false, "mixed-sibling-return-123456789")
-					f.assertText(t, 'A', sibling, "claude", []string{"INDEPENDENT-MIXED-SIBLING"}, sentinels)
-					sg, err := lineage.Read(host.LocalFS(), sibling.Path)
-					if err != nil || sg == nil || sg.Family != family || sg.Branch == branch || !sg.Journey().Fork || sg.Journey().Transfers != 1 {
-						t.Fatal("travelling siblings shared a branch or counter", err)
-					}
-					after, err := os.ReadFile(original.Path)
-					if err != nil || !bytes.Equal(originalBytes, after) {
-						t.Fatal("mixed journey altered original native conversation", err)
-					}
-					f.appendWork(t, original, "claude", "INDEPENDENT-MIXED-PARENT")
-					parent := f.transfer(t, 'A', 'C', original, "codex", "push", false, "mixed-parent-move-123456789")
-					f.assertText(t, 'C', parent, "codex", []string{"INDEPENDENT-MIXED-PARENT"}, append(sentinels, "INDEPENDENT-MIXED-SIBLING"))
-					pg, err := lineage.Read(host.LocalFS(), parent.Path)
-					if err != nil || pg == nil || pg.Family != family || pg.Branch == branch || pg.Branch == sg.Branch {
-						t.Fatal("parent and travelling child lost independent lineage", err)
+				sourceAgent = target
+				f.assertText(t, to, current, target, sentinels, nil)
+				graph, err := lineage.Read(host.LocalFS(), current.Path)
+				if err != nil || graph == nil {
+					t.Fatal("mixed arrival missing lineage", err)
+				}
+				if hop == 0 {
+					family, branch = graph.Family, graph.Branch
+				}
+				transfers, returns := hop+1, strings.Count(route[1:hop+2], "A")
+				if graph.Family != family || graph.Branch != branch || graph.Journey().Fork || graph.Journey().Transfers != transfers || graph.Journey().RoundTrips != returns {
+					t.Fatalf("hop %d transport switch changed journey: %+v", hop, graph.Journey())
+				}
+				hops := graph.ActiveHops()
+				if len(hops) != hop+1 {
+					t.Fatal("mixed transport lost or duplicated a causal hop", len(hops), hop+1)
+				}
+				for i, arrived := range hops {
+					if arrived.ID != fmt.Sprintf("mixed-route-hop-%d-123456789", i) || graph.Replica(arrived.From).Location != f.homes[route[i]].name || graph.Replica(arrived.To).Location != f.homes[route[i+1]].name {
+						t.Fatalf("hop %d lost ordered endpoint ancestry: %+v", i, arrived)
 					}
 				}
-			})
-		}
-	}
-	t.Run("interleaved-parent-and-fork", func(t *testing.T) {
-		ctx, _, origin, cert, client := startSQLiteRelayFixture(t, 2*time.Minute)
-		f := newRelayFleet(t, ctx, bin, origin, cert, client)
-		parent := f.seed(t, "claude")
-		child := f.pushSSH(t, 'A', 'B', parent, "codex", true, "interleaved-fork-birth-123456789")
-		f.appendWork(t, parent, "claude", "INTERLEAVED-PARENT-OUT")
-		parent = f.transfer(t, 'A', 'C', parent, "codex", "push", false, "interleaved-parent-out-123456789")
-		f.appendWork(t, child, "codex", "INTERLEAVED-CHILD-OUT")
-		child = f.transfer(t, 'B', 'A', child, "claude", "push", false, "interleaved-child-out-123456789")
-		f.appendWork(t, parent, "codex", "INTERLEAVED-PARENT-RETURN")
-		parent = f.pushSSH(t, 'C', 'A', parent, "claude", false, "interleaved-parent-return-123456789")
-		f.appendWork(t, child, "claude", "INTERLEAVED-CHILD-RETURN")
-		child = f.pushSSH(t, 'A', 'C', child, "claude", false, "interleaved-child-third-machine-123456789")
-		child = f.transfer(t, 'C', 'B', child, "codex", "push", false, "interleaved-child-return-123456789")
-		parentWork := []string{"INTERLEAVED-PARENT-OUT", "INTERLEAVED-PARENT-RETURN"}
-		childWork := []string{"INTERLEAVED-CHILD-OUT", "INTERLEAVED-CHILD-RETURN"}
-		f.assertText(t, 'A', parent, "claude", parentWork, childWork)
-		f.assertText(t, 'B', child, "codex", childWork, parentWork)
-		pg, err := lineage.Read(host.LocalFS(), parent.Path)
-		if err != nil || pg == nil {
-			t.Fatal("parent receipt missing", err)
-		}
-		cg, err := lineage.Read(host.LocalFS(), child.Path)
-		if err != nil || cg == nil {
-			t.Fatal("child receipt missing", err)
-		}
-		if pg.Family != cg.Family || pg.Branch == cg.Branch || pg.Journey().Fork || !cg.Journey().Fork || pg.Journey().Transfers != 2 || pg.Journey().RoundTrips != 1 || cg.Journey().Transfers != 3 || cg.Journey().RoundTrips != 1 {
-			t.Fatal("interleaved original/fork journeys lost independent ancestry", pg.Journey(), cg.Journey())
-		}
-		// Direct module listing has no app profile scope. Use the actual
-		// destination key from the final native movement plan for receipt lookup.
-		key := f.lastPlan.Placement.Key
-		if key.Agent != child.Key.Agent || key.Session != child.Key.Session || key.Profile == "" {
-			t.Fatal("final movement lost its destination profile identity", key, child.Key)
-		}
-		_, current, ok := cg.FindOnBranch(key, f.homes['B'].name, cg.Branch)
-		if !ok {
-			t.Fatal("current fork replica missing", key)
-		}
-		returned := map[string]bool{}
-		for _, candidate := range cg.ReturnReplicas(current) {
-			if candidate.Line != cg.Branch {
-				t.Fatal("fork offered its parent's return destination")
 			}
-			returned[candidate.Location] = true
-		}
-		if !returned[f.homes['A'].name] || !returned[f.homes['C'].name] {
-			t.Fatal("interleaved fork lost prior return destinations", returned)
-		}
-	})
+		})
+	}
 }
 
-func (f *relayFleet) pushSSH(t *testing.T, from, to byte, source agent.Summary, target string, fork bool, operation string, expectRefused ...bool) agent.Summary {
+func (f *relayFleet) pushSSH(t *testing.T, from, to byte, source agent.Summary, target string, operation string, expectRefused ...bool) agent.Summary {
 	t.Helper()
-	return f.pushSSHTo(t, from, to, source, target, fork, operation, "", expectRefused...)
+	return f.pushSSHTo(t, from, to, source, target, operation, "", expectRefused...)
 }
 
 // pushSSHTo returns into an explicitly chosen destination session, as a person must when
 // several copies of the branch already exist there.
-func (f *relayFleet) pushSSHTo(t *testing.T, from, to byte, source agent.Summary, target string, fork bool, operation, targetSession string, expectRefused ...bool) agent.Summary {
+func (f *relayFleet) pushSSHTo(t *testing.T, from, to byte, source agent.Summary, target string, operation, targetSession string, expectRefused ...bool) agent.Summary {
 	t.Helper()
 	endpoint := newPeerSSH(t, f.ctx, f.bin, f.homes[to])
 	m := f.homes[from]
@@ -221,7 +134,7 @@ func (f *relayFleet) pushSSHTo(t *testing.T, from, to byte, source agent.Summary
 	}
 	// Only the connection is supplied by the fixture. Production planning,
 	// native application and both source/destination receipt writers execute.
-	p, err := a.StartPush(f.ctx, inv, e, config.Host{Name: f.homes[to].name, Destination: endpoint.address, Allowed: true}, agent.ID(target), move.Options{TargetDir: f.homes[to].repo, Notify: true, Fork: fork, OperationID: operation, TargetSession: targetSession})
+	p, err := a.StartPush(f.ctx, inv, e, config.Host{Name: f.homes[to].name, Destination: endpoint.address, Allowed: true}, agent.ID(target), move.Options{TargetDir: f.homes[to].repo, Notify: true, OperationID: operation, TargetSession: targetSession})
 	if len(expectRefused) > 0 && expectRefused[0] {
 		if p != nil {
 			p.Close()

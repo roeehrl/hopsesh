@@ -327,6 +327,7 @@ type History struct {
 	ReadMemoryMB int `toml:"read_memory_mb,omitempty" json:"readMemoryMB"`
 	RecordMB     int `toml:"record_mb,omitempty" json:"recordMB"`
 	ArchiveMB    int `toml:"archive_mb,omitempty" json:"archiveMB"`
+	LineageMB    int `toml:"lineage_mb,omitempty" json:"lineageMB"`
 	NativeFileMB int `toml:"native_file_mb,omitempty" json:"nativeFileMB"`
 }
 
@@ -335,6 +336,7 @@ var (
 	HistoryContextBudgets = []int{0, 16_000, 32_000, 64_000, 128_000, 256_000}
 	HistoryReadMemoryMBs  = []int{256, 512, 1024, 2048, 4096}
 	HistoryRecordMBs      = []int{32, 64, 128, 256}
+	HistoryLineageMBs     = []int{16, 32, 64, 128, 256, 512}
 	HistoryArchiveMBs     = []int{256, 512, 1024, 2048, 4096, 8192}
 	HistoryNativeFileMBs  = []int{1024, 2048, 4096, 8192}
 )
@@ -347,13 +349,13 @@ func (h History) Limits() ir.Limits {
 func (h History) raw() ir.Limits {
 	return ir.Limits{
 		ReadBytes: int64(h.ReadMemoryMB) << 20, RecordBytes: int64(h.RecordMB) << 20,
-		ArchiveBytes: int64(h.ArchiveMB) << 20, NativeFileBytes: int64(h.NativeFileMB) << 20,
+		ArchiveBytes: int64(h.ArchiveMB) << 20, LineageBytes: int64(h.LineageMB) << 20, NativeFileBytes: int64(h.NativeFileMB) << 20,
 		ContextBudget: h.ContextBudget, Older: h.Older,
 	}
 }
 
 func (h History) check() error {
-	if h.ReadMemoryMB < 0 || h.RecordMB < 0 || h.ArchiveMB < 0 || h.NativeFileMB < 0 {
+	if h.ReadMemoryMB < 0 || h.RecordMB < 0 || h.ArchiveMB < 0 || h.LineageMB < 0 || h.NativeFileMB < 0 {
 		return fmt.Errorf("history: sizes must be positive (or left out for the default)")
 	}
 	if err := h.raw().Check(); err != nil {
@@ -377,6 +379,11 @@ func Dir() string {
 	if d := os.Getenv("HOPSESH_CONFIG_DIR"); d != "" {
 		return d
 	}
+	return DefaultDir()
+}
+
+// DefaultDir is the configuration directory when HOPSESH_CONFIG_DIR is not set.
+func DefaultDir() string {
 	if runtime.GOOS == "windows" {
 		if d := os.Getenv("APPDATA"); d != "" {
 			return filepath.Join(d, "hopsesh")
@@ -396,6 +403,11 @@ func StateDir() string {
 	if d := os.Getenv("HOPSESH_STATE_DIR"); d != "" {
 		return d
 	}
+	return DefaultStateDir()
+}
+
+// DefaultStateDir is the state directory when HOPSESH_STATE_DIR is not set.
+func DefaultStateDir() string {
 	if runtime.GOOS == "windows" {
 		if d := os.Getenv("LOCALAPPDATA"); d != "" {
 			return filepath.Join(d, "hopsesh")
@@ -406,6 +418,19 @@ func StateDir() string {
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".local", "state", "hopsesh")
+}
+
+// SameDir reports whether two folder paths name the same folder (cleaned, links resolved
+// when they exist).
+func SameDir(a, b string) bool {
+	clean := func(p string) string {
+		p = filepath.Clean(p)
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			return r
+		}
+		return p
+	}
+	return clean(a) == clean(b)
 }
 
 // Path is the configuration file.

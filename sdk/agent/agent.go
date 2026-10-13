@@ -143,17 +143,21 @@ type Root struct {
 
 // Install is an agent as found on one machine.
 type Install struct {
-	Accounts       *ProfileSpec      `json:"-"`
-	OS             string            `json:"os,omitempty"`
-	Desktop        string            `json:"desktop,omitempty"`
-	DesktopVersion string            `json:"desktopVersion,omitempty"`
-	DesktopWhy     string            `json:"desktopWhy,omitempty"`
-	Profile        *RuntimeProfile   `json:"profile,omitempty"`
-	Agent          ID                `json:"agent"`
-	Version        string            `json:"version,omitempty"` // "" when the binary was not found
-	Binary         string            `json:"binary,omitempty"`  // absolute path
-	Roots          map[string]string `json:"roots"`             // name → absolute path on that machine
-	Present        bool              `json:"present"`           // the main root exists
+	// NativeDefaultRoot is launch metadata verified by the module from the detected
+	// machine's home and original environment. Empty means native config lookup is
+	// unverified or explicitly overridden. It grants no filesystem access.
+	NativeDefaultRoot string            `json:"nativeDefaultRoot,omitempty"`
+	Accounts          *ProfileSpec      `json:"-"`
+	OS                string            `json:"os,omitempty"`
+	Desktop           string            `json:"desktop,omitempty"`
+	DesktopVersion    string            `json:"desktopVersion,omitempty"`
+	DesktopWhy        string            `json:"desktopWhy,omitempty"`
+	Profile           *RuntimeProfile   `json:"profile,omitempty"`
+	Agent             ID                `json:"agent"`
+	Version           string            `json:"version,omitempty"` // "" when the binary was not found
+	Binary            string            `json:"binary,omitempty"`  // absolute path
+	Roots             map[string]string `json:"roots"`             // name → absolute path on that machine
+	Present           bool              `json:"present"`           // the main root exists
 }
 
 // Root returns the path of a named root.

@@ -8,7 +8,6 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 	"github.com/roeehrl/hopsesh/sdk/ir"
-	"slices"
 )
 
 func nativeForkManifests(ctx context.Context, hm *host.Machine, h agent.Host, mod agent.Module, in agent.Install, ss []agent.Summary, manifests []*lineage.Manifest, problems []string) {
@@ -21,13 +20,26 @@ func nativeForkManifests(ctx context.Context, hm *host.Machine, h agent.Host, mo
 		return
 	}
 	// Verification reads and hashes whole transcripts; an unchanged set is not reverified.
-	inputs, cacheable := forkInputs(hm, h, in, ss, manifests, problems)
+	inputs, cacheable := forkInputs(ctx, hm, h, in, ss, manifests, problems)
 	if cacheable && inputs == "" {
 		return // no native forks
 	}
+	subjects := map[agent.SessionID]bool{}
+	for _, s := range ss {
+		if s.NativeParent != "" {
+			subjects[s.Key.Session] = true
+			subjects[s.NativeParent] = true
+		}
+	}
 	if r, ok := forks.get(inputs); cacheable && ok {
-		copy(manifests, r.manifests)
-		copy(problems, r.problems)
+		for i, s := range ss {
+			if subjects[s.Key.Session] {
+				if member, ok := r.members[s.Key.String()+"\x00"+s.Path]; ok {
+					manifests[i] = member.manifest
+					problems[i] = member.problem
+				}
+			}
+		}
 		return
 	}
 	contentReads.Add(1)
@@ -37,7 +49,13 @@ func nativeForkManifests(ctx context.Context, hm *host.Machine, h agent.Host, mo
 			// Problems follow from these file versions; a failed identity or a cancelled
 			// scan may not, so those results are not kept.
 			if !transient && ctx.Err() == nil {
-				forks.put(inputs, forkResult{slices.Clone(manifests), slices.Clone(problems)})
+				members := map[string]forkMember{}
+				for i, s := range ss {
+					if subjects[s.Key.Session] {
+						members[s.Key.String()+"\x00"+s.Path] = forkMember{manifests[i], problems[i]}
+					}
+				}
+				forks.put(inputs, forkResult{members: members})
 			}
 		}()
 	}

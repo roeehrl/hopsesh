@@ -6,6 +6,75 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Fixed
+
+- Local movement updates appear while other machines are still loading, preserving
+  pending remote rows and selection. Return plans recheck the exact destination's
+  current activity instead of requiring an already closed client to be ended again.
+- Claude's verified default profile uses native configuration lookup for account
+  probes and sign-in as well as resuming; explicit and custom roots stay isolated.
+- Raising a History resource limit permits an immediate retry without a manual
+  refresh. Settings invalidate obsolete reviews while preserving active transfers
+  and their transports. Delayed process evidence can confirm terminal association
+  without another scan, and concurrent tab exit does not deadlock that refresh.
+- Background refreshes update list cells in place and keep compact rows at a stable
+  height. Completed session lists stay visible throughout slower background reads.
+- Session actions stay in the inspector instead of appearing over metadata on hover.
+  Ending a reviewed original refreshes both sides before offering the move back.
+- Unknown agent windows no longer display a made-up terminal badge or offer a Show action.
+  Resuming the default Claude profile keeps its existing configuration and onboarding state.
+- Native-fork cache results follow session identity rather than listing position.
+  Reordering or adding sessions no longer attaches another conversation’s originals.
+- Inspecting an original no longer replaces its conversation's parent row or adds
+  duplicate rows after a refresh. Child rows name the actual session; blocked originals
+  show “Blocked” and lead to the destination rather than resuming the protected source.
+- The movement ledger no longer has an invisible 16 MiB cap. Settings → History exposes
+  its size limit (64 MiB by default, up to 512 MiB), and limit failures link to that setting.
+  Complete movement history is preserved, including ledgers larger than the former cap.
+
+- Session list entries show where a conversation moved from or to, with the original
+  visible as a selectable line underneath. The same movement labels appear in details,
+  the terminal UI and CLI.
+- Repository groups render their session rows without deferred WebKit visibility, which
+  could leave an expanded group blank until another redraw.
+- A return whose original is missing offers a reviewed new session on the same branch.
+  A changed account observation no longer hides a missing original after a complete scan.
+
+- A Claude Code session forked after it was compacted can be moved and continued. Its
+  history starts at the compaction boundary, whose link to the earlier conversation
+  points at a message copied after it; hopsesh refused it as "both copies changed:
+  Claude branch has a forward parent reference".
+- A move is always a move. The review no longer offers "Keep the old session running
+  too", the source notice no longer offers "Fork here instead…", and `hopsesh pull` and
+  `push` no longer take `--fork`: that option made a separate copy that was never blocked,
+  silently overriding "Block the original". Separate copies hopsesh still makes on its own
+  (both copies changed, bounded continuations) are called separate conversations.
+- Moving back into a protected open original closes only its exact agent client before
+  appending, then lets you reopen the same conversation without archiving it. Blocked clients
+  still write bookkeeping with an old parent UUID; writing while they stayed open could
+  leave returned messages outside the resumed history.
+- Returning clears notices about forks from an earlier residency, so an unblocked
+  original does not incorrectly say its old separate copy is still the destination.
+- Large compact summaries and diagnostic attachments no longer make a real Claude
+  session disappear when the lightweight head/tail windows contain only metadata.
+- Return capacity accounts for instructions and tools already included in the original's
+  measured usage. Near-limit originals carry a warning that the agent may need its own
+  compaction before answering. When a new session is needed, the review explains why
+  and does not ask you to end an original that will not be written.
+- Blocking or warning in a moved session's original works on a default install. The
+  protection hooks always pass the settings and state folders; naming the default
+  folders explicitly made hopsesh look for this machine's identity in the wrong place,
+  so the hook let every prompt through. A flag naming the default folder now changes
+  nothing.
+- An original that once had a separate copy is blocked again when it is moved. The move
+  and the earlier copy were judged ambiguous, so no notice reached the agent's hook and
+  the original was not blocked, while hopsesh showed it blocked.
+- Opening a moved session in the Codex app shows its command without an empty
+  `cd ''` in front.
+- `hopsesh notices status` (and install and remove) run through the `hopsesh` command link
+  recognise the hooks the app installed, instead of reporting them absent and installing
+  a second set.
+
 ## [0.4.3] - 2026-10-11
 
 ### Changed

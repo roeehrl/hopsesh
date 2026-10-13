@@ -104,24 +104,26 @@ const day = t => { const d = new Date(t); return isNaN(d) ? "" : d.toLocaleDateS
 // role is what a copy is in its session's journey, for chips, glyphs and words.
 export function role(e) {
   const dep = e.departure, ar = e.arrival, g = e.guard;
+  // What a chip names: the agent, and the machine when it is not this copy's own.
+  const short = (name, agent, machine, cloud) => cloud || ((name || agent || "?") + (machine && machine !== e.machine ? ` on ${machine}` : ""));
   if (dep && dep.status !== "forked") {
-    const to = dep.cloud || where(dep.agentName || dep.agent, dep.machine);
-    if (dep.status === "diverged")
-      return { kind: "diverged", glyph: "!", chip: "Diverged", tone: "st-warn", short: `Moved to ${to}`, line: "Both copies changed; moving back needs a comparison" };
+    const to = dep.cloud || where(dep.agentName || dep.agent, dep.machine), toShort = short(dep.agentName, dep.agent, dep.machine, dep.cloud);
+    if (dep.status === "diverged" && (!e.cached || Date.parse(dep.checkedAt) > 0))
+      return { kind: "diverged", glyph: "!", chip: "Both changed", tone: "st-warn", short: `Moved to ${toShort}`, line: (e.cached ? "Last known: " : "") + "Both copies changed; moving back needs a comparison" };
     if (g?.mode === "released")
-      return { kind: "unblocked", glyph: "!", chip: "Unblocked", tone: "st-warn", short: `Moved to ${to}`, line: "Block removed; continuing here makes the copies diverge" };
+      return { kind: "unblocked", glyph: "!", chip: "Unblocked", tone: "st-warn", short: `Moved to ${toShort}`, line: `Moved to ${to}; block removed, continuing here makes the copies diverge` };
     const blocked = g?.mode === "block";
-    return { kind: blocked ? "blocked" : "moved-out", glyph: blocked && g.effective ? "◆" : "◇", chip: "Moved out", tone: blocked && g.effective ? "st-ended" : "st-warn", icon: blocked ? "lock" : "warn",
-      short: `Moved to ${to}`,
-      line: blocked ? (g.effective ? "Blocked until you move it back" : "Not blocked yet: protection isn't set up") : g?.mode === "advise" ? (g.effective ? "Warns before you continue here" : "No warning yet: protection isn't set up") : "Left as it is" };
+    return { kind: blocked ? "blocked" : "moved-out", glyph: blocked && g.effective ? "◆" : "◇", chip: `Moved to ${toShort}`, tone: blocked && g.effective ? "st-ended" : "st-warn", icon: blocked ? "lock" : "warn",
+      short: `Moved to ${toShort}`,
+      line: e.cached || g?.checking ? "Checking current movement and protection status" : blocked ? (g.effective ? "Blocked until you move it back" : "Not blocked yet: protection isn't set up") : g?.mode === "advise" ? (g.effective ? "Warns before you continue here" : "No warning yet: protection isn't set up") : "Left as it is" };
   }
-  if (dep && dep.status === "forked") { const to = dep.cloud || where(dep.agentName || dep.agent, dep.machine); return { kind: "forked-out", glyph: "⑂", chip: "Fork made", tone: "st-idle", short: `Forked to ${to}`, line: `A separate fork continues in ${to}` }; }
+  if (dep && dep.status === "forked") { const to = dep.cloud || where(dep.agentName || dep.agent, dep.machine); return { kind: "forked-out", glyph: "⑂", chip: "Separate copy", tone: "st-idle", short: `Copied to ${short(dep.agentName, dep.agent, dep.machine, dep.cloud)}`, line: `A separate conversation continues in ${to}; this one is not blocked` }; }
   if (ar) {
-    const from = where(ar.agentName || ar.agent, ar.machine);
-    if (ar.kind === "returned") return { kind: "returned", glyph: "↩", chip: "Returned", tone: "st-idle", line: `Moved back from ${from}${day(ar.at) ? " · " + day(ar.at) : ""} · block cleared` };
+    const from = where(ar.agentName || ar.agent, ar.machine), fromShort = short(ar.agentName, ar.agent, ar.machine, "");
+    if (ar.kind === "returned") return { kind: "returned", glyph: "↩", chip: `Moved back from ${fromShort}`, tone: "st-idle", line: `Moved back from ${from}${day(ar.at) ? " · " + day(ar.at) : ""} · block cleared` };
     if (ar.kind === "continuation") return { kind: "continuation", glyph: "↳", chip: "Continuation", tone: "st-idle", line: `Bounded continuation of ${from} · the original is kept` };
-    if (ar.fork) return { kind: "fork", glyph: "⑂", chip: "Fork", tone: "st-idle", line: `Forked from ${from}${day(ar.at) ? " · " + day(ar.at) : ""}` };
-    return { kind: "moved", glyph: "●", chip: "Moved copy", tone: "st-working", line: `Moved from ${from}${day(ar.at) ? " · " + day(ar.at) : ""} · the active copy` };
+    if (ar.fork) return { kind: "fork", glyph: "⑂", chip: "Separate copy", tone: "st-idle", line: `Separate conversation from ${from}${day(ar.at) ? " · " + day(ar.at) : ""}` };
+    return { kind: "moved", glyph: "●", chip: `Moved from ${fromShort}`, tone: "st-working", line: `Moved from ${from}${day(ar.at) ? " · " + day(ar.at) : ""} · continue here` };
   }
   return null;
 }
@@ -138,7 +140,7 @@ export async function removeBlock(e, onDone) {
   const dep = e.departure;
   const to = dep.cloud || where(dep.agentName || dep.agent, dep.machine);
   const yes = await ask({ title: "Remove the block from this original?", ok: "Remove block", danger: true,
-    body: `The moved copy in ${to} stays the active session. If you continue here, the two copies diverge, and moving back will need a comparison or a separate fork instead of a clean return. You can put the block back until you continue here.` });
+    body: `The moved copy in ${to} stays the active session. If you continue here, the two copies diverge, and moving back will need a comparison, or keeping both as separate conversations, instead of a clean return. You can put the block back until you continue here.` });
   if (!yes) return;
   try { await api("ReleaseOriginal", e.machine, e.key); toast("Block removed from this original"); onDone?.(); } catch (err) { fail(err); }
 }

@@ -25,7 +25,10 @@ type CloudCheckpointPlanDTO struct {
 }
 
 func (a *App) RelayCloudPlan(id, target, dir, profile, operation string, fork bool) (CloudCheckpointPlanDTO, error) {
-	core := a.snapshot()
+	core, generation, err := a.reviewSnapshot()
+	if err != nil {
+		return CloudCheckpointPlanDTO{}, err
+	}
 	a.mu.Lock()
 	inv := a.inv
 	a.mu.Unlock()
@@ -35,9 +38,9 @@ func (a *App) RelayCloudPlan(id, target, dir, profile, operation string, fork bo
 	if err != nil {
 		return CloudCheckpointPlanDTO{}, err
 	}
-	a.mu.Lock()
-	a.plan, a.input, a.res = p, in, nil
-	a.mu.Unlock()
+	if err = a.publishReview(generation, p, in); err != nil {
+		return CloudCheckpointPlanDTO{}, err
+	}
 	entry := app.Entry{Agent: in.Source.Module.Spec().ID, AgentName: in.Source.Module.Spec().Name, Machine: in.Source.Machine.Name}
 	return CloudCheckpointPlanDTO{Plan: planDTO(p, entry, in.Target.Module), Checkpoint: e.Checkpoint, SHA256: e.SHA256, Operation: p.OperationID}, nil
 }
@@ -45,15 +48,17 @@ func (a *App) RelayCloudPlan(id, target, dir, profile, operation string, fork bo
 // RelayCloudApply binds the button to the exact reviewed plan, even if another UI surface
 // prepared an operation in the meantime. The core rechecks the current grant.
 func (a *App) RelayCloudApply(operation string) (*DoneDTO, error) {
-	a.mu.Lock()
-	p, in := a.plan, a.input
-	a.mu.Unlock()
-	if p == nil || p.OperationID != operation || in.SourceReceipt == nil {
+	core, p, in, release, err := a.beginPlanAction("")
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	if p.OperationID != operation || in.SourceReceipt == nil {
 		return nil, errors.New("cloud checkpoint review changed; prepare it again")
 	}
 	// Apply uses the shared progress/result path. Native plan identity remains
 	// pinned and each write is protected by the core's operation/destination locks.
-	return a.applyReviewedPlan(a.snapshot(), p, in)
+	return a.applyReviewedPlan(core, p, in)
 }
 func (a *App) RelayCloudPreview(id string) (app.CloudConnectorPreview, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)

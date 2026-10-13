@@ -4,7 +4,9 @@ import (
 	"testing"
 
 	"github.com/roeehrl/hopsesh/internal/agents/all"
+	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/core/move"
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 func TestEndReturnDestinationRejectsStaleReviewAndConsumesPlanOnFailure(t *testing.T) {
@@ -31,5 +33,25 @@ func TestEndReturnDestinationRejectsStaleReviewAndConsumesPlanOnFailure(t *testi
 	}
 	if err := a.EndReturnDestination("latest"); err == nil {
 		t.Fatal("consumed token accepted twice")
+	}
+}
+
+func TestEndingOriginalInvalidatesBothReviewedSidesOnly(t *testing.T) {
+	source := agent.SessionKey{Agent: "codex", Profile: "work", Session: "moved"}
+	target := agent.SessionKey{Agent: "claude", Profile: "work", Session: "original"}
+	a := &App{inv: &app.Inventory{Entries: []app.Entry{
+		{Machine: "studio", Session: agent.Summary{Key: source}, Live: agent.LiveInfo{State: agent.Ended}},
+		{Machine: "studio", Session: agent.Summary{Key: target}, Live: agent.LiveInfo{State: agent.Live}},
+		{Machine: "other", Session: agent.Summary{Key: target}, Live: agent.LiveInfo{State: agent.Live}},
+	}}}
+	p := &move.Plan{Key: source, Source: move.Endpoint{Location: "studio"}, Target: move.Endpoint{Location: "studio"}, Placement: agent.Placement{Key: target}}
+	a.invalidateReturnSelection(p)
+	for _, e := range a.inv.Entries[:2] {
+		if !e.Cached || e.Live.State != agent.Unknown {
+			t.Fatalf("next review can reuse stale evidence: %+v", e)
+		}
+	}
+	if a.inv.Entries[2].Cached || a.inv.Entries[2].Live.State != agent.Live {
+		t.Fatal("unrelated machine's session invalidated")
 	}
 }

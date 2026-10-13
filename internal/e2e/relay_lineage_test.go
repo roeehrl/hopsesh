@@ -63,7 +63,7 @@ func TestRelayLineageSQLiteR2(t *testing.T) {
 								targetAgent = "codex"
 							}
 						}
-						current = fleet.transfer(t, from, to, current, targetAgent, mode, false, fmt.Sprintf("route-hop-%02d-123456789", hop))
+						current = fleet.transfer(t, from, to, current, targetAgent, mode, fmt.Sprintf("route-hop-%02d-123456789", hop))
 						sourceAgent = targetAgent
 						fleet.assertText(t, to, current, sourceAgent, sentinels, nil)
 						graph, err := lineage.Read(host.LocalFS(), current.Path)
@@ -88,7 +88,7 @@ func TestRelayLineageSQLiteR2(t *testing.T) {
 							fleet.stop[to]()
 							fleet.start(t, to)
 							oldSource := fleet.lastSource
-							repeated := fleet.transfer(t, from, to, oldSource, targetAgent, mode, false, fmt.Sprintf("route-hop-%02d-123456789", hop))
+							repeated := fleet.transfer(t, from, to, oldSource, targetAgent, mode, fmt.Sprintf("route-hop-%02d-123456789", hop))
 							after, err := os.ReadFile(repeated.Path)
 							if err != nil || !bytes.Equal(before, after) || repeated.Key.Session != current.Key.Session {
 								t.Fatal("owner restart retry rewrote native history", err)
@@ -110,47 +110,6 @@ func TestRelayLineageSQLiteR2(t *testing.T) {
 				})
 			}
 		}
-		t.Run(mode+"/independent-original-and-sibling-forks", func(t *testing.T) {
-			ctx, _, origin, cert, client := startSQLiteRelayFixture(t, time.Minute)
-			fleet := newRelayFleet(t, ctx, bin, origin, cert, client)
-			original := fleet.seed(t, "claude")
-			before, err := os.ReadFile(original.Path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			left := fleet.transfer(t, 'A', 'B', original, "codex", mode, true, "fork-left-op-123456789")
-			right := fleet.transfer(t, 'A', 'C', original, "codex", mode, true, "fork-right-op-123456789")
-			lg, _ := lineage.Read(host.LocalFS(), left.Path)
-			rg, _ := lineage.Read(host.LocalFS(), right.Path)
-			if lg.Family != rg.Family || lg.Branch == rg.Branch {
-				t.Fatal("fork identities collapsed")
-			}
-			current, currentAgent := left, "codex"
-			route := "BCBCAB"
-			var leftWork []string
-			for hop := 0; hop < len(route)-1; hop++ {
-				sentinel := fmt.Sprintf("LEFT-FORK-ONLY-%d", hop)
-				leftWork = append(leftWork, sentinel)
-				fleet.appendWork(t, current, currentAgent, sentinel)
-				target := "claude"
-				if route[hop+1] == 'B' {
-					target = "codex"
-				}
-				current = fleet.transfer(t, route[hop], route[hop+1], current, target, mode, false, fmt.Sprintf("left-fork-hop-%d-123456789", hop))
-				currentAgent = target
-				fleet.assertText(t, route[hop+1], current, target, leftWork, []string{"RIGHT-FORK-ONLY", "ORIGINAL-ONLY"})
-			}
-			fleet.appendWork(t, right, "codex", "RIGHT-FORK-ONLY")
-			right = fleet.transfer(t, 'C', 'A', right, "claude", mode, false, "right-fork-return-123456789")
-			fleet.assertText(t, 'A', right, "claude", []string{"RIGHT-FORK-ONLY"}, append(leftWork, "ORIGINAL-ONLY"))
-			after, err := os.ReadFile(original.Path)
-			if err != nil || !bytes.Equal(before, after) {
-				t.Fatal("travelling forks changed original native bytes", err)
-			}
-			fleet.appendWork(t, original, "claude", "ORIGINAL-ONLY")
-			original = fleet.transfer(t, 'A', 'C', original, "codex", mode, false, "original-independent-123456789")
-			fleet.assertText(t, 'C', original, "codex", []string{"ORIGINAL-ONLY"}, append(leftWork, "RIGHT-FORK-ONLY"))
-		})
 	}
 }
 
@@ -468,7 +427,7 @@ func (f *relayFleet) appendWork(t *testing.T, s agent.Summary, agentName, sentin
 		appendCodexTurn(t, s.Path, sentinel, "completed this turn")
 	}
 }
-func (f *relayFleet) transfer(t *testing.T, from, to byte, s agent.Summary, target, mode string, fork bool, operation string) agent.Summary {
+func (f *relayFleet) transfer(t *testing.T, from, to byte, s agent.Summary, target, mode string, operation string) agent.Summary {
 	t.Helper()
 	f.lastSource = s
 	src, dst := f.homes[from], f.homes[to]
@@ -479,9 +438,6 @@ func (f *relayFleet) transfer(t *testing.T, from, to byte, s agent.Summary, targ
 		args = []string{"pull", src.name + ":" + string(s.Key.Agent) + "/" + string(s.Key.Session)}
 	}
 	args = append(args, "--in", target, "--to", dst.repo, "--no-sync", "--notify", "--operation-id", operation, "--yes", "--json")
-	if fork {
-		args = append(args, "--fork")
-	}
 	var result struct {
 		Plan   move.Plan   `json:"plan"`
 		Result move.Result `json:"result"`

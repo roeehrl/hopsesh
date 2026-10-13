@@ -22,6 +22,7 @@ type Copy struct {
 	LeftBehind bool                  `json:"leftBehind,omitempty"` // moved on since (Entry.MovedOn)
 	Live       bool                  `json:"live,omitempty"`
 	Newest     bool                  `json:"newest,omitempty"`
+	committed  bool                  // movement receipts, rather than activity, identify the current copy
 }
 
 // Item is one session, shown as its newest copy, with every copy when there are several.
@@ -74,7 +75,8 @@ func (inv *Inventory) Items() []Item {
 		cs := make([]Copy, len(es))
 		for i, e := range es {
 			cs[i] = Copy{Profile: e.Profile, Machine: e.Machine, Agent: e.Agent, AgentName: e.AgentName, Key: e.Session.Key, Local: local[e.Machine],
-				LastActive: e.Session.LastActivity, LeftBehind: e.MovedOn(), Live: e.Live.State == agent.Live}
+				LastActive: e.Session.LastActivity, LeftBehind: e.MovedOn(), Live: e.Live.State == agent.Live,
+				committed: e.Lineage != nil && e.LineageError == "" && len(e.Lineage.ActiveHops()) > 0}
 		}
 		pick := newest(cs)
 		it := Item{Entry: es[pick]}
@@ -106,7 +108,7 @@ func newest(cs []Copy) int {
 	switch {
 	case best < 0:
 		return bestLeft
-	case bestLeft >= 0 && cs[bestLeft].LastActive.Sub(cs[best].LastActive) > keptWorking:
+	case !cs[best].committed && bestLeft >= 0 && cs[bestLeft].LastActive.Sub(cs[best].LastActive) > keptWorking:
 		return bestLeft
 	}
 	return best
