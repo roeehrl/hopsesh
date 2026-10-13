@@ -6,7 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## [0.4.4] - 2026-10-13
+
 ### Fixed
+
+- Closing the desktop app during a refresh now exits normally instead of hanging.
+- The built-in terminal preserves complete input in order and reports write failures
+  instead of silently losing bytes or leaving Codex waiting for an incomplete reply.
+- Repository details say they are still being checked while discovery is pending,
+  instead of incorrectly reporting that the checkout is missing.
+- Movement indicators use the session list's right-hand status column, leaving room
+  for session titles; session actions remain in the inspector.
 
 - Local movement updates appear while other machines are still loading, preserving
   pending remote rows and selection. Return plans recheck the exact destination's
@@ -700,6 +710,7 @@ is refused and set aside (the app offers this), and machines are added again.
 - The terminal UI no longer carries out a plan you pressed `y` on while a changed one was
   still being worked out.
 
+[0.4.4]: https://github.com/roeehrl/hopsesh/releases/tag/v0.4.4
 [0.4.3]: https://github.com/roeehrl/hopsesh/releases/tag/v0.4.3
 [0.4.2]: https://github.com/roeehrl/hopsesh/releases/tag/v0.4.2
 [0.4.1]: https://github.com/roeehrl/hopsesh/releases/tag/v0.4.1
