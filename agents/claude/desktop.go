@@ -61,6 +61,14 @@ func detectDesktop(h agent.Host, in *agent.Install) {
 	}
 	if in.Desktop != "" {
 		in.DesktopAccount = desktopAccount(h, f)
+		// Desktop keeps its own Claude Code, one folder per version.
+		vs, _ := h.FS().ReadDir(h.Path().Join(desktopData(h, f), "claude-code"))
+		for _, v := range vs {
+			_, valid := agent.CompareVersions(v.Name(), v.Name())
+			if c, _ := agent.CompareVersions(v.Name(), in.DesktopEngine); v.IsDir() && valid && (in.DesktopEngine == "" || c > 0) {
+				in.DesktopEngine = v.Name()
+			}
+		}
 	}
 }
 

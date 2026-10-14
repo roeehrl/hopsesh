@@ -595,6 +595,10 @@ func (a *App) RemoveNoticeHooks(ctx context.Context, id agent.ID, profile string
 	return a.MovementNoticeHooks(ctx, "remove", id, profile, bin)
 }
 
+// CLIExecutable is the hopsesh command-line program on this machine (the app's own when
+// in the app).
+func CLIExecutable() (string, error) { return movementHookExecutable() }
+
 func movementHookExecutable() (string, error) {
 	// Prefer the bundled CLI when in the GUI. Never install a hook that starts
 	// hopsesh-app, and never source a login shell to discover the executable.

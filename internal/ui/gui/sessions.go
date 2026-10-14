@@ -45,6 +45,8 @@ type MachineDTO struct {
 	Agents               []string  `json:"agents"`     // "Claude Code 2.1.284"
 	AgentNames           []string  `json:"agentNames"` // detected agents, without versions or duplicate profiles
 	Hopsesh              string    `json:"hopsesh"`    // hopsesh's version there ("" when not installed)
+	// Presence is how hopsesh works with the machine (app.Presence*; "" for this one).
+	Presence string `json:"presence,omitempty"`
 }
 
 // AgentOpt is an agent a session can continue in here.
@@ -401,7 +403,7 @@ func scanDTO(core *app.App, inv *app.Inventory, updated, elsewhere time.Time, ta
 		out.Adopted = append(out.Adopted, core.Brought(f))
 	}
 	for _, m := range inv.Machines {
-		d := MachineDTO{Phase: m.Phase, CheckedAt: m.CheckedAt, Name: m.Name, Status: m.Status, Hint: m.Hint, Error: scanProblem(m), OS: m.OS, Local: m.Local, Hopsesh: m.Hopsesh, Agents: []string{}}
+		d := MachineDTO{Phase: m.Phase, CheckedAt: m.CheckedAt, Name: m.Name, Status: m.Status, Hint: m.Hint, Error: scanProblem(m), OS: m.OS, Local: m.Local, Hopsesh: m.Hopsesh, Presence: m.Presence, Agents: []string{}}
 		d.AccountSetupRequired = !m.Local && m.Status == app.StatusOK && m.Host() != nil && m.Host().Facts.Endpoint == ""
 		for _, e := range inv.Entries {
 			if e.Machine == m.Name {

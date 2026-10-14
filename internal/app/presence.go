@@ -160,6 +160,9 @@ func (m *Machine) withTools(in agent.Install) agent.Install {
 	if t.Desktop != "" {
 		in.Desktop, in.DesktopVersion, in.DesktopWhy = t.Desktop, t.DesktopVersion, t.DesktopWhy
 	}
-	in.DesktopAccount = t.DesktopAccount
+	in.DesktopAccount, in.DesktopEngine = t.DesktopAccount, t.DesktopEngine
+	if in.Binary == "" && t.Runtime != "" {
+		in.Runtime = t.Runtime
+	}
 	return in
 }

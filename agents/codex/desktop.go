@@ -113,6 +113,12 @@ func detectDesktop(h agent.Host, in *agent.Install) {
 	}
 	if bundle != "" {
 		in.Desktop, in.DesktopVersion, in.DesktopWhy = bundle, version, ""
+		var pkg struct {
+			Version string `json:"version"`
+		}
+		if b, err := h.FS().ReadFile(h.Path().Join(bundle, bundledRuntime, "codex-package.json"), 64<<10); err == nil && json.Unmarshal(b, &pkg) == nil {
+			in.DesktopEngine = pkg.Version
+		}
 	}
 }
 

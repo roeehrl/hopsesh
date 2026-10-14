@@ -170,6 +170,9 @@ type Install struct {
 	// DesktopAccount is who the desktop app is signed in as, when it keeps its own
 	// sign-in (Claude desktop): its account and user fingerprints, never more.
 	DesktopAccount *OwnerRun `json:"desktopAccount,omitempty"`
+	// DesktopEngine is the version of the agent the desktop app runs, its own copy
+	// (Claude desktop's Claude Code, the Codex app's codex).
+	DesktopEngine string `json:"desktopEngine,omitempty"`
 	Profile           *RuntimeProfile   `json:"profile,omitempty"`
 	Agent             ID                `json:"agent"`
 	Version           string            `json:"version,omitempty"` // "" when the binary was not found
