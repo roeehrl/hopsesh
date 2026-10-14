@@ -6,8 +6,40 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+Every machine a full place: hopsesh can now run on your other machines, in your login session
+there, set up from here. See [Machines](docs/machines.md).
+
 ### Added
 
+- `hopsesh hosts setup <machine>` (Machines › Set up hopsesh) installs this hopsesh in
+  `~/.hopsesh/bin` on a machine reached over SSH (the same verified release for another kind of
+  machine), turns receiving on, and starts `hopsesh serve` in the login session there at each
+  login (LaunchAgent, systemd user service, sign-in task; no administrator rights). Only on
+  request: scans never install anything.
+- `hopsesh serve` answers other machines from the login session (a Mac's Keychain and desktop
+  apps included) through a private socket behind `hopsesh peer`, and runs sessions for them in
+  terminals it owns. `hopsesh terminals run <machine>` and `terminals attach` show them here;
+  in the app, **Continue on ‹machine›** does, and a new session or an account's sign-in can run
+  there too.
+- Machines says how hopsesh works with each machine (running there, there but not running,
+  older, SSH only), what that lets it do, and sets it up or updates it step by step.
+- Accounts is new: your accounts by email, who each tool (Claude Code, Claude desktop, Codex,
+  the Codex app) is signed in as on every machine and in which folder, accounts only seen in
+  records, when two accounts write to one folder, and each folder's sessions by account.
+  Claude desktop's own sign-in is read from its account id and session index (never its
+  tokens).
+- Account folders live in `~/.hopsesh/accounts/<agent>/<name>` and can be added on any machine
+  with hopsesh, signed in from this machine's browser, with an optional `<agent>-<name>` shell
+  command. Folders made by earlier versions move there after you agree. A Codex folder keeps
+  its sign-in the way your default folder does.
+- Move › **Choose where it continues** lists every machine, folder and tool with who it runs
+  as there, what carries over, and whether the copy left behind is protected. Bringing a
+  session that is working on another machine offers to wait until it is idle, or to join it
+  there. After a send, **Open it there** runs it in a tab here.
+- Settings › **Hooks & skills** shows the command, protection hooks and skill on every machine
+  and sets them up from here; `hopsesh doctor --all-machines` checks the same. The skill goes
+  into every account folder. Sessions points out machines that need hopsesh, an update or
+  their protection set up.
 - A Mac with only the Codex app (ChatGPT.app) uses the app's built-in Codex for sign-in
   checks, resuming and protection hooks; a Codex CLI is still preferred when installed. Local
   and remote Macs alike.
@@ -16,6 +48,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Two machines agree on the newest peer protocol both speak (6, down to 0.4's 5) instead of
+  requiring the same one.
+- hopsesh never writes its files on a machine without hopsesh: the identity of one reached
+  over SSH only is kept here until hopsesh is set up there.
+- A Mac's sign-ins hidden from an SSH login are unknown, never a changed login; an original
+  left on a machine without hopsesh is said to be unprotected (session list, move review,
+  CLI); an unreadable account registry no longer hides a machine's sessions.
+- Hopsesh's record of who ran a session is kept per folder, moves with the session and is
+  shared between machines; inside Claude desktop it records desktop's own account.
+- Agents' versions are probed in parallel.
 - Version checks use semantic version precedence: a pre-release past a minimum counts (the
   Codex app's built-in 0.162.0-alpha), one before it does not. The Codex protection hook
   needs Codex 0.129.0 or newer (hooks and their review), down from 0.160.0.

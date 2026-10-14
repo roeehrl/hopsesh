@@ -321,15 +321,20 @@ function notices() {
 
 // machineNotices are what another machine needs: hopsesh there, an update, or its
 // protection (checked after each scan; "Not now" holds until the findings change).
-let mNotices = null, mNoticesFor = -1;
+let mNotices = null, mNoticesFor = "";
 const mDismissed = new Set(); // answered "Not now" here: a load already under way can't bring it back
 async function loadMachineNotices() {
-  try { mNotices = await api("MachineNotices"); } catch { mNotices = []; }
+  let next;
+  try { next = await api("MachineNotices"); } catch { next = []; }
+  // Render only when they changed: a list being worked in keeps its focus.
+  if (JSON.stringify(next) === JSON.stringify(mNotices)) return;
+  mNotices = next;
   render();
 }
 function machineNotices() {
-  const rev = state.scan?.revision ?? -1;
-  if (rev !== mNoticesFor) { mNoticesFor = rev; loadMachineNotices(); }
+  // Checked again when the machines change, not on every update of the sessions.
+  const key = JSON.stringify((state.scan?.machines || []).map((m) => [m.name, m.status, m.presence, m.hopsesh, m.sessions]));
+  if (key !== mNoticesFor) { mNoticesFor = key; loadMachineNotices(); }
   return (mNotices || []).filter((n) => !mDismissed.has(n.fingerprint)).map((n) => h("section", { class: "card notice", role: "status", "aria-label": n.title, "data-notice": n.kind },
     h("div", { style: "flex:1 1 360px" }, h("b", {}, n.title), " ", h("span", { style: "font-size:12.5px" }, n.text)),
     h("button", { class: "btn primary", onclick: async () => {
