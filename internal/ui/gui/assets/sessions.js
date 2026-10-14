@@ -322,6 +322,7 @@ function notices() {
 // machineNotices are what another machine needs: hopsesh there, an update, or its
 // protection (checked after each scan; "Not now" holds until the findings change).
 let mNotices = null, mNoticesFor = -1;
+const mDismissed = new Set(); // answered "Not now" here: a load already under way can't bring it back
 async function loadMachineNotices() {
   try { mNotices = await api("MachineNotices"); } catch { mNotices = []; }
   render();
@@ -329,7 +330,7 @@ async function loadMachineNotices() {
 function machineNotices() {
   const rev = state.scan?.revision ?? -1;
   if (rev !== mNoticesFor) { mNoticesFor = rev; loadMachineNotices(); }
-  return (mNotices || []).map((n) => h("section", { class: "card notice", role: "status", "aria-label": n.title, "data-notice": n.kind },
+  return (mNotices || []).filter((n) => !mDismissed.has(n.fingerprint)).map((n) => h("section", { class: "card notice", role: "status", "aria-label": n.title, "data-notice": n.kind },
     h("div", { style: "flex:1 1 360px" }, h("b", {}, n.title), " ", h("span", { style: "font-size:12.5px" }, n.text)),
     h("button", { class: "btn primary", onclick: async () => {
       if (n.kind === "protection") {
@@ -338,7 +339,7 @@ function machineNotices() {
       }
       go("machines");
     } }, n.action),
-    h("button", { class: "btn", onclick: async () => { try { await api("DismissMachineNotice", n.fingerprint); } catch (e) { fail(e); } mNotices = (mNotices || []).filter((x) => x !== n); render(); } }, "Not now")));
+    h("button", { class: "btn", onclick: async () => { mDismissed.add(n.fingerprint); render(); try { await api("DismissMachineNotice", n.fingerprint); } catch (e) { mDismissed.delete(n.fingerprint); fail(e); render(); } } }, "Not now")));
 }
 
 // setupLine is the one line of what is left to set up, on All sessions only: each step
