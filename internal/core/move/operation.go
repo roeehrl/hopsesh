@@ -125,6 +125,10 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (result *Result, fai
 	if err := ValidateProfiles(ctx, ProfileInput(p, in)); err != nil {
 		return nil, err
 	}
+	if p.ResumeHere {
+		// Nothing moves: the session continues where it is.
+		return &Result{Command: launch.Shell(p.Resume, "", launch.DefaultShell()), Run: p.Resume}, nil
+	}
 	if p.OperationID == "" {
 		return applyPlan(ctx, p, in, env)
 	}

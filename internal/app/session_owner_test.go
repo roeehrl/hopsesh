@@ -1,9 +1,13 @@
 package app
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/roeehrl/hopsesh/agents/claude"
+	"github.com/roeehrl/hopsesh/agents/codex"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -33,9 +37,9 @@ func TestOwnerOfUsesTheSessionsRecordNotTheRootsSignIn(t *testing.T) {
 	inv := ownersInventory()
 	l := inv.Logins()
 	want := map[agent.SessionID]SessionOwner{
-		"w": {Recorded: true, Email: "work@example.com", Current: true},
-		"p": {Recorded: true, Email: "me@example.com", Profile: "Personal"},
-		"x": {Recorded: true},
+		"w": {Recorded: true, Email: "work@example.com", Current: true, Key: "k:k-work"},
+		"p": {Recorded: true, Email: "me@example.com", Profile: "Personal", Key: "k:k-personal"},
+		"x": {Recorded: true, Key: "k:k-gone"},
 		"n": {},
 	}
 	for _, e := range inv.Entries {
@@ -78,6 +82,58 @@ func TestAccountGroupsFileSessionsUnderTheAccountThatRanThem(t *testing.T) {
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in\n%s", want, got)
+		}
+	}
+}
+
+// Runs that name the user match only that user; a session that changed accounts says so;
+// a run naming only a shared organisation names no one.
+func TestOwnerOfPeopleRunsAndSharedOrganisations(t *testing.T) {
+	inv := ownersInventory()
+	work := inv.Machines[0].Agents[0].Install.Profile
+	work.Account.Person = "u-roy"
+	e := inv.Entries[0]
+	e.Session.Mirror = nil
+	e.Session.Owners = []agent.OwnerRun{{Key: "k-personal"}, {Key: "k-work", Person: "u-roy"}}
+	l := inv.Logins()
+	if got := l.OwnerOf(e); !got.Current || got.Email != "work@example.com" || got.Key != "p:u-roy" || got.Earlier != "me@example.com" {
+		t.Fatalf("changed accounts: %+v", got)
+	}
+	e.Session.Owners = []agent.OwnerRun{{Key: "k-work", Person: "u-colleague"}}
+	if got := l.OwnerOf(e); got.Current || got.Email != "" || OwnerLabel(got) != "another account" {
+		t.Fatalf("a colleague in the same organisation is not the signed-in user: %+v", got)
+	}
+	work.Account.Label = "team"
+	work.Account.Person = ""
+	e.Session.Owners = []agent.OwnerRun{{Key: "k-work"}}
+	if got := l.OwnerOf(e); got.Current || got.Email != "" {
+		t.Fatalf("a shared organisation names no one: %+v", got)
+	}
+}
+
+func TestCrossAccountResumeRefusesOnlyWhatWouldFail(t *testing.T) {
+	dir := t.TempDir()
+	enc, plain := filepath.Join(dir, "enc.jsonl"), filepath.Join(dir, "plain.jsonl")
+	os.WriteFile(enc, []byte(`{"type":"response_item","payload":{"type":"reasoning","encrypted_content":"x"}}`+"\n"), 0o600)
+	os.WriteFile(plain, []byte(`{"type":"response_item","payload":{"type":"message"}}`+"\n"), 0o600)
+	in := agent.Install{Profile: &agent.RuntimeProfile{Account: &agent.Account{LoggedIn: true, Key: "a", Email: "me@example.com"}}}
+	for _, tc := range []struct {
+		name string
+		mod  agent.Module
+		runs []agent.OwnerRun
+		path string
+		fail bool
+	}{
+		{"same account", codex.New(), []agent.OwnerRun{{Key: "a"}}, enc, false},
+		{"other account", codex.New(), []agent.OwnerRun{{Key: "b"}}, enc, true},
+		{"changed accounts", codex.New(), []agent.OwnerRun{{Key: "b"}, {Key: "a"}}, enc, true},
+		{"unknown, encrypted", codex.New(), nil, enc, true},
+		{"unknown, plain", codex.New(), nil, plain, false},
+		{"claude resumes across accounts", claude.New(), []agent.OwnerRun{{Key: "b"}}, enc, false},
+	} {
+		e := Entry{Session: agent.Summary{Path: tc.path, Owners: tc.runs}}
+		if err := crossAccountResume(tc.mod, in, e); (err != nil) != tc.fail {
+			t.Errorf("%s: %v", tc.name, err)
 		}
 	}
 }

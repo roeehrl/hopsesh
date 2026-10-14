@@ -54,10 +54,12 @@ func (*Module) Spec() agent.Spec {
 		Accounts:      &agent.ProfileSpec{RootEnv: []string{"CLAUDE_CONFIG_DIR"}, Unset: []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"}, Login: []string{"auth", "login"}},
 		ID:            id,
 		DesktopScheme: "claude",
-		Name:          "Claude Code",
-		Vendor:        "Anthropic",
-		Stability:     agent.Stable,
-		Tested:        []string{"2.1"},
+		// The API ignores thinking signed for another organisation and the request succeeds.
+		ResumeAcrossAccounts: true,
+		Name:                 "Claude Code",
+		Vendor:               "Anthropic",
+		Stability:            agent.Stable,
+		Tested:               []string{"2.1"},
 		Binaries: []agent.Binary{{
 			Name: "claude",
 			Candidates: map[string][]string{
@@ -228,6 +230,7 @@ func (s *info) summary() agent.Summary {
 		LegacyLabel:  s.LegacyLabel,
 		Path:         s.File,
 		Mirror:       s.Mirror,
+		Owners:       s.Owners,
 	}
 }
 

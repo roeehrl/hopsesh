@@ -442,7 +442,7 @@ func scanDTO(core *app.App, inv *app.Inventory, updated, elsewhere time.Time, ta
 		for _, it := range g.Items {
 			d := entryDTO(core, inv, it, targets)
 			d.Relationship = relations[app.EntryIdentity(it.Entry.Machine, it.Entry.Session.Key.String())]
-			if name := core.Cfg.FamilyNames[d.Relationship.Family]; name != "" {
+			if name := core.FamilyName(d.Relationship); name != "" {
 				d.Relationship.Name = name
 			}
 			if m := inv.Machine(d.Machine); m != nil && m.Local && d.Live {
@@ -459,7 +459,7 @@ func scanDTO(core *app.App, inv *app.Inventory, updated, elsewhere time.Time, ta
 				}
 				copy := entryDTO(core, inv, app.Item{Entry: e, Copies: it.Copies}, targets)
 				copy.Relationship = relations[app.EntryIdentity(e.Machine, e.Session.Key.String())]
-				if name := core.Cfg.FamilyNames[copy.Relationship.Family]; name != "" {
+				if name := core.FamilyName(copy.Relationship); name != "" {
 					copy.Relationship.Name = name
 				}
 				if m := inv.Machine(e.Machine); m != nil && m.Local && copy.Live {
@@ -854,6 +854,7 @@ type PlanDTO struct {
 	SourceEntry   *EntryDTO        `json:"sourceEntry,omitempty"`
 	SourceProfile string           `json:"sourceProfile,omitempty"`
 	TargetProfile string           `json:"targetProfile,omitempty"`
+	ResumeHere    bool             `json:"resumeHere,omitempty"` // already here: continue it where it is
 	NoWork        bool             `json:"noWork"`
 	Destinations  []agent.Summary  `json:"destinations,omitempty"`
 	Kind          string           `json:"kind"` // move | continue
@@ -1005,7 +1006,7 @@ func (a *App) invalidateReturnSelection(p *move.Plan) {
 }
 
 func planDTO(p *move.Plan, e app.Entry, tm agent.Module) *PlanDTO {
-	d := &PlanDTO{SourceProfile: p.Source.ProfileName, TargetProfile: p.Target.ProfileName, NoWork: p.NoWork, Destinations: p.Destinations, Kind: p.Kind, Title: p.Title, Agent: p.Agent, FromAgent: e.AgentName, SourceHost: p.Source.Location,
+	d := &PlanDTO{SourceProfile: p.Source.ProfileName, TargetProfile: p.Target.ProfileName, NoWork: p.NoWork, ResumeHere: p.ResumeHere, Destinations: p.Destinations, Kind: p.Kind, Title: p.Title, Agent: p.Agent, FromAgent: e.AgentName, SourceHost: p.Source.Location,
 		SourceOS: p.Source.OS, SourceCWD: p.Source.CWD, TargetCWD: p.Target.CWD, Live: p.Live, Repo: p.Repo,
 		Mappings: p.Placement.Mappings, Files: len(p.Files.Files), Bytes: p.Bytes, Sync: p.Sync,
 		FromSource: p.SyncFromSource, Push: p.Push, StopHere: p.StopHere, Conflict: p.Conflict,

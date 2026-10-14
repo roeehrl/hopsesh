@@ -106,6 +106,7 @@ type meta struct {
 		Branch string `json:"branch"`
 	} `json:"git"`
 	CreatorAccountID string `json:"creator_account_id"`
+	CreatorUserID    string `json:"creator_user_id"`
 }
 
 // line is one rollout record.
@@ -312,6 +313,8 @@ func summarize(h agent.Host, r rollout) (*agent.Summary, error) {
 		LastActivity: r.info.ModTime().UTC(),
 		Account:      first.CreatorAccountID,
 	}
+	// Codex 0.157+ records the account that created the session (never updated on resume).
+	s.Owners = agent.AddOwner(nil, agent.OwnerRun{Key: accountKey(first.CreatorAccountID), Person: personKey(first.CreatorUserID), Source: "agent"})
 	if first.Git != nil {
 		s.GitBranch = first.Git.Branch
 	}

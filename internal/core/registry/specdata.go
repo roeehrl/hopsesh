@@ -8,26 +8,28 @@ import (
 // agents.json: what the module declares, with the field names the JSON outputs use. The
 // mark (Icon.SVG) is left out; Icon.Apps is desktopApps.
 type SpecData struct {
-	Accounts           *agent.ProfileSpec  `json:"accounts,omitempty"`
-	DesktopScheme      string              `json:"desktopScheme,omitempty"`
-	ID                 agent.ID            `json:"id"`
-	Name               string              `json:"name"`
-	Vendor             string              `json:"vendor"`
-	Stability          agent.Stability     `json:"stability"`
-	Tested             []string            `json:"tested"`
-	Binaries           []BinaryData        `json:"binaries"`
-	Roots              []RootData          `json:"roots"`
-	LoginEnv           []string            `json:"loginEnv"`
-	Secrets            []string            `json:"secrets"`
-	Worktrees          []string            `json:"worktrees"`
-	Instructions       []string            `json:"instructions"`
-	GlobalInstructions []string            `json:"globalInstructions"`
-	Tools              string              `json:"tools,omitempty"`
-	Features           []agent.Capability  `json:"features"`
-	Experimental       []agent.Capability  `json:"experimental"`
-	DesktopApps        map[string][]string `json:"desktopApps"`
-	Clouds             []CloudData         `json:"clouds"`
-	TerminalEnv        []string            `json:"terminalEnv"`
+	Accounts      *agent.ProfileSpec `json:"accounts,omitempty"`
+	DesktopScheme string             `json:"desktopScheme,omitempty"`
+	// ResumeAcrossAccounts: sessions resume under another account (see agent.Spec).
+	ResumeAcrossAccounts bool                `json:"resumeAcrossAccounts,omitempty"`
+	ID                   agent.ID            `json:"id"`
+	Name                 string              `json:"name"`
+	Vendor               string              `json:"vendor"`
+	Stability            agent.Stability     `json:"stability"`
+	Tested               []string            `json:"tested"`
+	Binaries             []BinaryData        `json:"binaries"`
+	Roots                []RootData          `json:"roots"`
+	LoginEnv             []string            `json:"loginEnv"`
+	Secrets              []string            `json:"secrets"`
+	Worktrees            []string            `json:"worktrees"`
+	Instructions         []string            `json:"instructions"`
+	GlobalInstructions   []string            `json:"globalInstructions"`
+	Tools                string              `json:"tools,omitempty"`
+	Features             []agent.Capability  `json:"features"`
+	Experimental         []agent.Capability  `json:"experimental"`
+	DesktopApps          map[string][]string `json:"desktopApps"`
+	Clouds               []CloudData         `json:"clouds"`
+	TerminalEnv          []string            `json:"terminalEnv"`
 }
 
 // BinaryData is a program the module may run.
@@ -99,7 +101,7 @@ type CodeData struct {
 
 // Data returns s as data. Lists and maps are never null, so a reader can iterate them.
 func Data(s agent.Spec) SpecData {
-	d := SpecData{Accounts: s.Accounts, DesktopScheme: s.DesktopScheme,
+	d := SpecData{Accounts: s.Accounts, DesktopScheme: s.DesktopScheme, ResumeAcrossAccounts: s.ResumeAcrossAccounts,
 		ID: s.ID, Name: s.Name, Vendor: s.Vendor, Stability: s.Stability, Tested: list(s.Tested),
 		LoginEnv: list(s.LoginEnv), Secrets: list(s.Secrets), Worktrees: list(s.Worktrees),
 		Instructions: list(s.Instructions), GlobalInstructions: list(s.GlobalInstructions), Tools: s.Tools,

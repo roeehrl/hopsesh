@@ -239,8 +239,9 @@ func (s Store) ObserveFrom(id string, account *agent.Account, problem, source st
 	return out, err
 }
 
-// DecodeRegistrations reads a peer's known non-secret registry. Tags and account
-// keys stay private; vendor-reported email and plan are public identity metadata.
+// DecodeRegistrations reads a peer's known non-secret registry. Tags stay private;
+// vendor-reported email and plan, and the account and person fingerprints (hashes, so the
+// sessions there can be matched to the account that ran them), are identity metadata.
 func DecodeRegistrations(b []byte) ([]agent.RuntimeProfile, error) {
 	var d disk
 	if err := json.Unmarshal(b, &d); err != nil {
@@ -252,11 +253,6 @@ func DecodeRegistrations(b []byte) ([]agent.RuntimeProfile, error) {
 	for i := range d.Profiles {
 		p := &d.Profiles[i]
 		p.Tags = nil
-		if p.Account != nil {
-			a := *p.Account
-			a.Key = ""
-			p.Account = &a
-		}
 		if p.Error != "" {
 			p.Error = "Account check failed on the owner machine; last known sign-in shown"
 		}

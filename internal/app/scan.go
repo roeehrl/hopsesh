@@ -491,7 +491,7 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 					sum.Key.Profile = in.ProfileID()
 					batchMu.Lock()
 					defer batchMu.Unlock()
-					batch = append(batch, Entry{Cached: true, Location: agent.MachineLocation(hm.Name), Machine: hm.Name, Agent: spec.ID, AgentName: spec.Name, Session: sum, Profile: in.Profile, Live: agent.LiveInfo{State: agent.Unknown}})
+					batch = append(batch, Entry{Cached: true, Location: agent.MachineLocation(hm.Name), Machine: hm.Name, Agent: spec.ID, AgentName: spec.Name, Session: a.withLedger(hm.Local, sum), Profile: in.Profile, Live: agent.LiveInfo{State: agent.Unknown}})
 					if firstBatch || len(batch) >= 25 {
 						partial := *m
 						partial.Agents = append([]AgentState(nil), m.Agents...)
@@ -517,7 +517,11 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 					for i := range l.Sessions {
 						l.Sessions[i].Key.Profile = in.ProfileID()
 					}
-					entries = append(entries, listedEntries(ctx, hm, fsys, mod, ch, state, l)...)
+					listed := listedEntries(ctx, hm, fsys, mod, ch, state, l)
+					for i := range listed {
+						listed[i].Session = a.withLedger(hm.Local, listed[i].Session)
+					}
+					entries = append(entries, listed...)
 					if len(l.Errors) > 0 {
 						e = fmt.Errorf("%d session files could not be read; first: %w", len(l.Errors), l.Errors[0].Err)
 					}

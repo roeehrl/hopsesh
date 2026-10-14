@@ -6,14 +6,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/roeehrl/hopsesh/agents/codex"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 // A session's own root, now signed in to another account than the one its record says
-// ran it: continuing it there makes a new portable session for the signed-in account
-// instead of refusing ("already here") or replaying the other account's native data.
-func TestContinueInOwnRootUnderAnotherAccount(t *testing.T) {
+// ran it: Claude Code continues it right there under the signed-in account, instead of
+// refusing ("already here").
+func TestResumeInOwnRootUnderAnotherAccount(t *testing.T) {
 	here := newLocation(t, "here", t.TempDir())
 	seed(t, here)
 	orig := list(t, here)[sid].Path
@@ -53,32 +54,61 @@ func TestContinueInOwnRootUnderAnotherAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(p.Blockers) > 0 {
-		t.Fatalf("blocked: %v", p.Blockers)
+	// Claude Code resumes across accounts (the API ignores the other account's signed
+	// reasoning): the session continues where it is, nothing is copied.
+	if len(p.Blockers) > 0 || !p.ResumeHere || !strings.Contains(strings.Join(p.Warnings, "\n"), "ran under another") {
+		t.Fatalf("want a resume in place: blockers=%v resumeHere=%v warnings=%v", p.Blockers, p.ResumeHere, p.Warnings)
 	}
-	if p.Kind != move.KindContinue || !p.Options.OtherAccount || !p.Placement.OtherAccount || p.Placement.Key.Session == sid {
-		t.Fatalf("want a new portable session for the signed-in account: kind=%s other=%v key=%v", p.Kind, p.Options.OtherAccount, p.Placement.Key)
-	}
-	if !strings.Contains(strings.Join(p.Warnings, "\n"), "run by another") {
-		t.Fatalf("the plan must say the session was run by another account: %v", p.Warnings)
-	}
+	count := len(list(t, here))
 	res, err := move.Apply(context.Background(), p, in, move.Env{StateDir: t.TempDir()})
-	if err != nil {
+	if err != nil || !resumes(res.Command, sid) {
+		t.Fatalf("resume here: %v %+v", err, res)
+	}
+	if now, _ := os.ReadFile(orig); string(now) != string(before) {
+		t.Fatal("resuming in place must not touch the session")
+	}
+	if len(list(t, here)) != count {
+		t.Fatal("nothing may be copied")
+	}
+}
+
+// Codex cannot resume a session under another account (its encrypted reasoning is bound to
+// the one that produced it), so in its own root, now signed in to another account, or
+// with no record of its account, it continues as a cleaned copy and the original stays.
+func TestCodexInOwnRootUnderAnotherAccount(t *testing.T) {
+	here := newLocation(t, "here", t.TempDir())
+	in := seedCodex(t, here)
+	cx := codex.New()
+	var s agent.Summary
+	for _, x := range listAgent(t, here, cx, in) {
+		if x.Key.Session == "01a0fe1c-0000-7000-8000-000000000001" {
+			s = x
+		}
+	}
+	before, _ := os.ReadFile(s.Path)
+	side := move.Side{Machine: here.m, Module: cx, Install: in, Account: &agent.Account{LoggedIn: true, Key: "chatgpt-account:b"}}
+	inp := move.Input{Source: side, Target: side, Session: s}
+	p, err := move.Build(context.Background(), inp, move.Options{TargetDir: here.repo})
+	if err != nil || len(p.Blockers) > 0 {
+		t.Fatalf("%v %v", err, p.Blockers)
+	}
+	if p.ResumeHere || p.Kind != move.KindContinue || !p.Options.OtherAccount || p.Placement.Key.Session == s.Key.Session {
+		t.Fatalf("want a cleaned copy: resumeHere=%v kind=%s other=%v", p.ResumeHere, p.Kind, p.Options.OtherAccount)
+	}
+	if _, err := move.Apply(context.Background(), p, inp, move.Env{StateDir: t.TempDir()}); err != nil {
 		t.Fatal(err)
 	}
-	after := list(t, here)
-	fresh, ok := after[string(p.Placement.Key.Session)]
-	if !ok || fresh.CWD != here.repo {
-		t.Fatalf("new session missing: %+v", fresh)
+	var fresh agent.Summary
+	for _, x := range listAgent(t, here, cx, in) {
+		if x.Key.Session == p.Placement.Key.Session {
+			fresh = x
+		}
 	}
 	b, _ := os.ReadFile(fresh.Path)
-	if strings.Contains(string(b), `"signature"`) || strings.Contains(string(b), "bridge-session") {
-		t.Fatalf("account-bound content carried into the new session:\n%s", b)
+	if fresh.Path == "" || strings.Contains(string(b), "encrypted_content") {
+		t.Fatalf("cleaned copy missing or still carries encrypted reasoning: %q", fresh.Path)
 	}
-	if now, _ := os.ReadFile(orig); !strings.HasPrefix(string(now), string(before)) {
-		t.Fatal("the original session's own history changed")
-	}
-	if !resumes(res.Command, string(p.Placement.Key.Session)) {
-		t.Fatalf("command: %s", res.Command)
+	if now, _ := os.ReadFile(s.Path); !strings.HasPrefix(string(now), string(before)) {
+		t.Fatal("the original changed")
 	}
 }

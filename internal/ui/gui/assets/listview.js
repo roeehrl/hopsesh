@@ -4,7 +4,7 @@
 // chips, and the text filter. It is saved in the config ([list], SaveList); the text
 // filter is not. The list is one tree: group headers, then their sessions, with the
 // keyboard of the WAI-ARIA tree pattern.
-import { accountGroupLabel, accountKey, api, h, fill, icon, ICONS, state, sys, keys, copyEntry, here, cloudOf, cloudTitle, agentInfo, machineStatus, count, ago, toast, dialog, fail } from "./core.js";
+import { accountGroupLabel, accountKey, accountKeyLegacy, api, h, fill, icon, ICONS, state, sys, keys, copyEntry, here, cloudOf, cloudTitle, agentInfo, machineStatus, count, ago, toast, dialog, fail } from "./core.js";
 import { openMenu, openPopover, update, closeAll, isOpen, openEl, refill } from "./menu.js";
 import { tabs as terminalTabs } from "./term.js";
 import { statusKey, placesOf, key as entryKey } from "./actions.js";
@@ -77,7 +77,7 @@ const LOCATION = () => [["here", sys.Here], ["machines", "Other machines"], ["cl
 
 // FACETS are the filters: their words, values (with their names) and each session's.
 const FACETS = {
- account:{name:"Account",values:()=>[...new Map(pool.map(e=>[accountKey(e),accountGroupLabel(e)]))],of:e=>[accountKey(e),e.profile?.id||""]},
+ account:{name:"Account",values:()=>[...new Map(pool.map(e=>[accountKey(e),accountGroupLabel(e)]))],of:e=>[accountKey(e),accountKeyLegacy(e),e.profile?.id||""]},
  tag:{name:"Account tag",values:()=>[...new Map(pool.flatMap(e=>e.profile?.tags?.length?e.profile.tags:["Untagged"]).map(t=>[t.toLowerCase(),t]))].sort((a,b)=>a[0].localeCompare(b[0])),of:e=>(e.profile?.tags?.length?e.profile.tags:["Untagged"]).map(t=>t.toLowerCase())},
   status: { name: "Status", values: () => STATUS.map(([v, n]) => [v, n]), of: (e) => [statusKey(e)] },
   location: { name: "Location", values: LOCATION, of: (e) => [locationOf(e)] },

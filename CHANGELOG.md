@@ -6,14 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Changed
+
+- Sessions are attributed from every record of the account they ran under: Claude Code's
+  per-run organisation stamp (not only Remote Control), Codex's session creator, and a new
+  Hopsesh record written by its prompt hook. Runs that name the user match only that user,
+  a session that changed accounts says so, and shared Team/Enterprise organisations name no
+  one. To match them, Hopsesh reads the public identity next to each login on this machine
+  (Claude Code's `oauthAccount`, Codex's account and user IDs); never tokens.
+- Account filters, account groups, family names and move-back labels no longer change when a
+  profile signs in to another account.
+
 ### Fixed
 
-- A Claude Code session recorded as run by another account can now continue in its own
-  profile under the account signed in there now. hopsesh makes a new session from its
-  portable conversation, leaves out account-bound content such as signed reasoning, and
-  keeps the original. Before, the move refused with "this session is already here".
-  Moves also decide whether accounts differ from the session's recorded account, not
-  from its profile's sign-in now.
+- Claude Code sessions continue in place under the account signed in now (**Continue
+  here**); Codex sessions that ran, or may have run, under another account are not resumed
+  as they are (Codex would fail) but continue as a cleaned copy.
+- The quick panel showed a profile's current email as each session's account.
+- Sessions on other machines were shown as run by "another account" even when their root was
+  signed in to it, because peers dropped the account fingerprint.
 - The move review names the account that ran the session as its source account. It
   names profiles by folder and says who is signed in to each now, so a profile's label
   no longer changes with a new sign-in.

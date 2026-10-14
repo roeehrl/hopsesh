@@ -62,6 +62,10 @@ const (
 // confines writes and refuses secret reads from it, before any module code runs.
 type Spec struct {
 	Accounts *ProfileSpec
+	// ResumeAcrossAccounts: a session resumes under another account than the one that ran
+	// it, the vendor dropping what is bound to that account (Claude Code: signed reasoning).
+	// Without it such a session must continue as a cleaned copy.
+	ResumeAcrossAccounts bool
 	// DesktopScheme is the registered URL protocol a desktop resume uses.
 	DesktopScheme string
 	ID            ID

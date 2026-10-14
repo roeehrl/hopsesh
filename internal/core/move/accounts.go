@@ -13,36 +13,62 @@ func profileBoundary(in Input) bool {
 	return (s.Profile != nil || t.Profile != nil) && (s.ProfileID() != t.ProfileID() || s.Profile != nil && t.Profile != nil && s.Profile.Endpoint != t.Profile.Endpoint)
 }
 
-// sourceAccountKey is the account that ran the session: the one its own record names
-// (Claude Code's Remote Control records), else the account its root is signed in to now.
-// A root that was signed in to another account before holds that account's sessions.
-func sourceAccountKey(in Input) string {
-	if m := in.Session.Mirror; m != nil && m.Account != "" {
-		return m.Account
+// ranUnder: the runs a session recorded, else (an older summary) its Remote Control owner.
+func ranUnder(s agent.Summary) []agent.OwnerRun {
+	if len(s.Owners) > 0 {
+		return s.Owners
 	}
-	return signedInKey(in.Source)
+	if m := s.Mirror; m != nil && m.Account != "" {
+		return []agent.OwnerRun{{Key: m.Account}}
+	}
+	return nil
+}
+
+func signedIn(s Side) *agent.Account {
+	if s.Account != nil {
+		return s.Account
+	}
+	if p := s.Install.Profile; p != nil && p.Account != nil && p.Account.LoggedIn {
+		return p.Account
+	}
+	return nil
 }
 
 func signedInKey(s Side) string {
-	if a := s.Account; a != nil {
+	if a := signedIn(s); a != nil {
 		return a.Key
-	}
-	if p := s.Install.Profile; p != nil && p.Account != nil && p.Account.LoggedIn {
-		return p.Account.Key
 	}
 	return ""
 }
 
-// ownerBoundary: the session's recorded account is not the one its destination is
-// signed in to now. Its account-bound content (such as signed reasoning) cannot be
-// replayed there, even when the destination is the session's own root.
+// sameAccount: a run was under the account a is signed in to. A run naming its user
+// matches only that user.
+func sameAccount(r agent.OwnerRun, a *agent.Account) bool {
+	return a != nil && a.Key != "" && r.Key == a.Key && (r.Person == "" || a.Person == "" || r.Person == a.Person)
+}
+
+// ownerBoundary: the session ran, or may have run, under another account than the one its
+// destination is signed in to now, so what is bound to that account (signed or encrypted
+// reasoning) cannot be replayed there. Any recorded run under another account counts, and
+// so does a session with no record at all; only an unknown destination does not.
 func ownerBoundary(in Input) bool {
 	if in.Source.Module == nil || in.Target.Module == nil || in.Source.Module.Spec().ID != in.Target.Module.Spec().ID {
 		return false
 	}
-	m := in.Session.Mirror
-	t := signedInKey(in.Target)
-	return m != nil && m.Account != "" && t != "" && m.Account != t
+	t := signedIn(in.Target)
+	if t == nil || t.Key == "" {
+		return false
+	}
+	runs := ranUnder(in.Session)
+	if len(runs) == 0 {
+		return true
+	}
+	for _, r := range runs {
+		if !sameAccount(r, t) {
+			return true
+		}
+	}
+	return false
 }
 
 // samePlace: the destination is the session's own root on its own machine.

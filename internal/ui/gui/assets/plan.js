@@ -168,6 +168,7 @@ function summary(p) {
 }
 function summaryContent(p) {
  if (p.conflict && (p.blockers || []).length && !cur.opts.conflict) return h("div", {class:"summary", "aria-label":"What changes"}, "Return paused. No session will change until you review a plan and confirm it.");
+ if(p.resumeHere) return h("div",{class:"summary","aria-label":"What changes"},"Nothing is copied. The session continues where it is, under the account signed in here now.");
  if(p.noWork) return h("div",{class:"summary","aria-label":"What changes"},"Conversation already synchronized. Update lineage receipts; 0 new messages, 0 transfers.");
  if(p.destinations?.length) {return h("label",{class:"summary"},"Choose the destination session",h("select",{onchange:ev=>set("targetSession",ev.target.value)},h("option",{value:""},"Select a session…"),p.destinations.map(s=>h("option",{value:`${s.key.agent}${s.key.profile?"@"+s.key.profile:""}/${s.key.session}`},`${s.title || s.key.session} · ${s.key.session}`))))}
   const cont = p.continue, r = p.repo, there = p.machine ? `on ${p.machine}` : "here";
@@ -257,7 +258,7 @@ function instructionPicker(p) {
 }
 const sourcePlace=p=>p.sourceHost===here()?`${p.sourceHost} (${sys.here})`:p.sourceHost;
 function launchControl(p,blocked) {
- const enabled=!p.machine&&!p.noWork&&p.kind!=="fetch", c=cur;
+ const enabled=!p.machine&&(!p.noWork||p.resumeHere)&&p.kind!=="fetch", c=cur;
  const label=place=>place==='app'?`${p.agent} app`:place==='here'?'Hopsesh Terminal':sys.terminal;
  const choices=[{id:'app',label:`Open in ${p.agent} app`,disabled:!p.can.app,why:p.can.appWhy||(!p.can.app?'Desktop opening is unavailable':null)},{id:'here',label:'Open in Hopsesh Terminal'},{id:'terminal',label:`Open in ${sys.terminal}`}];
  return h("div",{class:"launch-choice"},c.launchNotice?h("span",{class:"muted launch-notice"},c.launchNotice):null,
@@ -363,6 +364,7 @@ function paths(p) {
 }
 
 function verb(p) {
+ if (p.resumeHere) return "Continue here";
  if (p.noWork) return "Sync lineage receipts";
  if (p.continue && p.conflict && cur.opts.conflict === "keep-both") return `Create separate ${p.agent} session`;
   if (p.machine) return `Send to ${p.machine}`;
@@ -417,6 +419,7 @@ async function apply() {
     cur = null; // the plan stays for OpenResult
     state.stale = true;
     sheet.close();
+    if (c.plan.resumeHere) { await openResult((c.launch||opensIn())==='app'?'':(c.launch||opensIn())); return; }
     c.opts.launch = c.launch;
     go("done", d, c.plan, c.opts);
     if(!d.machine&&!d.noWork&&c.launch) await openResult(c.launch==='app'?'':c.launch);

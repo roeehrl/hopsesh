@@ -285,7 +285,7 @@ func (a *App) commitTerminalBinding(owned *app.Inventory, tab TermTab, key agent
 		}
 		tb.checkingControls = nil
 		r := relationships[app.EntryIdentity(e.Machine, e.Session.Key.String())]
-		if name := a.core.Cfg.FamilyNames[r.Family]; name != "" {
+		if name := a.core.FamilyName(r); name != "" {
 			r.Name = name
 		}
 		if m.Key != e.Session.Key.String() {

@@ -211,7 +211,7 @@ func (a *App) sessionTab(c agent.Command, l app.Launch, meta TabMeta, title stri
 		if a.inv != nil {
 			relations := a.inv.Relationships()
 			if r, ok := relations[app.EntryIdentity(meta.Machine, meta.Key)]; ok {
-				if name := a.core.Cfg.FamilyNames[r.Family]; name != "" {
+				if name := a.core.FamilyName(r); name != "" {
 					r.Name = name
 				}
 				meta.Relationship = &r

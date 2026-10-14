@@ -180,8 +180,10 @@ type Plan struct {
 	Live         bool             `json:"live"`
 	Repo         RepoPlan         `json:"repo"`
 	Placement    agent.Placement  `json:"placement"`
-	Files        agent.MovePlan   `json:"files"`
-	Bytes        int64            `json:"bytes"`
+	// ResumeHere: the session is already in the destination; continue it where it is.
+	ResumeHere bool           `json:"resumeHere,omitempty"`
+	Files      agent.MovePlan `json:"files"`
+	Bytes      int64          `json:"bytes"`
 	// SetAside are copies at the target that make way (kept by the journal for undo).
 	SetAside []agent.Summary `json:"setAside,omitempty"`
 	Conflict string          `json:"conflict,omitempty"`
@@ -230,6 +232,23 @@ type Endpoint struct {
 	Version     string `json:"agentVersion,omitempty"`
 }
 
+// resumeHere is the plan for a session already in its destination: nothing to copy; it
+// continues where it is, under the account signed in there now.
+func resumeHere(in Input) *Plan {
+	s, spec := in.Session, in.Target.Module.Spec()
+	p := &Plan{Kind: KindMove, Key: s.Key, Title: s.Title, Agent: spec.Name, ResumeHere: true, NoWork: true, OldName: s.Title,
+		Source: Endpoint{Location: in.Source.Machine.Name, OS: in.Source.Machine.Facts.OS, CWD: s.CWD, Path: s.Path, Version: s.AgentVersion},
+		Target: Endpoint{Location: in.Target.Machine.Name, OS: in.Target.Machine.Facts.OS, CWD: s.CWD, Version: in.Target.Install.Version}}
+	p.Placement = agent.Placement{Key: s.Key, SourceID: s.Key.Session, CWD: s.CWD, Location: in.Target.Machine.Name}
+	p.Resume = in.Target.Module.Resume(in.Target.Install, s.Key, p.Placement, agent.ResumeOptions{})
+	ran := "It ran under another " + spec.Name + " account than the one signed in here now"
+	if len(ranUnder(s)) == 0 {
+		ran = "Hopsesh has no record of the " + spec.Name + " account it ran under"
+	}
+	p.Warnings = append(p.Warnings, ran+"; continuing it here uses the account signed in now, and reasoning recorded under another account is not visible to it. The conversation itself stays.")
+	return p
+}
+
 // Build works out a move. It reads (the bundle's file list, the target's copies) but
 // writes nothing.
 func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
@@ -249,9 +268,13 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		}
 		copies = selected
 	}
-	// The session's own root, now signed in to another account than the one that ran it:
-	// continuing there needs a fresh portable copy, not the original.
-	if ownerBoundary(in) && samePlace(in) && opt.TargetSession == "" {
+	// The session's own root, now signed in to another account than the one that ran it.
+	// An agent that resumes across accounts continues it right there; another needs a
+	// cleaned copy.
+	if ownerBoundary(in) && samePlace(in) && opt.TargetSession == "" && !opt.Bounded && !opt.Fork && !opt.NewReplica {
+		if tgt.Module.Spec().ResumeAcrossAccounts {
+			return resumeHere(in), nil
+		}
 		opt.NewReplica = true
 	}
 	if opt.NewReplica || opt.Bounded || profileBoundary(in) || src.Module.Spec().ID != tgt.Module.Spec().ID || len(copies) == 1 && copies[0].Summary.Key != in.Session.Key {
@@ -277,12 +300,12 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		p.Options.RemoteControl = false
 		p.Warnings = append(p.Warnings, "remote control stays off: "+tgt.Account.Why)
 	}
-	if sk, tk := sourceAccountKey(in), signedInKey(tgt); sk != "" && tk != "" && sk != tk {
+	if ownerBoundary(in) {
 		if _, ok := tgt.Module.(agent.Sanitizer); ok {
 			p.Options.OtherAccount = true
-			p.Warnings = append(p.Warnings, fmt.Sprintf("this machine is signed in to another %s account than %s; content bound to that account (such as signed reasoning) is left out of the copy", spec.Name, src.Machine.Name))
+			p.Warnings = append(p.Warnings, fmt.Sprintf("the destination is signed in to another %s account than the one this session ran under (or hopsesh has no record of that account); content bound to that account (such as signed reasoning) is left out of the copy", spec.Name))
 		} else {
-			p.Blockers = append(p.Blockers, fmt.Sprintf("this machine is signed in to another %s account than %s, and %s sessions cannot move between accounts", spec.Name, src.Machine.Name, spec.Name))
+			p.Blockers = append(p.Blockers, fmt.Sprintf("the destination is signed in to another %s account than the one this session ran under, and %s sessions cannot move between accounts", spec.Name, spec.Name))
 		}
 	}
 
