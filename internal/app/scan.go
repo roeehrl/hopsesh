@@ -56,7 +56,8 @@ type Machine struct {
 	PresenceWhy string `json:"presenceWhy,omitempty"`
 
 	host    *host.Machine
-	account *agent.Account // reported by the machine's own hopsesh (a push)
+	account *agent.Account             // reported by the machine's own hopsesh (a push)
+	tools   map[agent.ID]agent.Install // hopsesh in the login session there (meetHopsesh)
 }
 
 // AgentState is an agent as found on a machine.
@@ -453,6 +454,7 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 		h, err := hm.For(ctx, spec, agent.Install{}, nil)
 		if err == nil {
 			st.Install, err = mod.Detect(ctx, h)
+			st.Install = m.withTools(st.Install)
 		}
 		if err != nil {
 			st.Error = err.Error()

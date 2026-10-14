@@ -178,7 +178,7 @@ func (a *App) OpenTerminal(ctx context.Context, req peer.TerminalRequest) (peer.
 		}
 		c, t.Title, t.Dir = cmd, e.Session.Title, e.Session.CWD
 	case peer.TerminalSignIn:
-		cmd, err := a.AccountLogin(ctx, req.Profile)
+		cmd, err := a.AccountLogin(ctx, req.Profile, !req.AtScreen)
 		if err != nil {
 			return t, err
 		}

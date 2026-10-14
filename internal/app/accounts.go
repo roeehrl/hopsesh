@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -50,7 +49,20 @@ func (a *App) EditAccount(id, name string, tags []string, generation int) error 
 	return a.accountStore().Edit(id, name, tags, generation)
 }
 func (a *App) ForgetAccount(id string, generation int) error {
-	return a.accountStore().Forget(id, generation)
+	ps, _ := a.Accounts()
+	if err := a.accountStore().Forget(id, generation); err != nil {
+		return err
+	}
+	// Its shell command goes with it (on this machine; its folder and sign-in stay).
+	endpoint, _ := a.LocalAccountEndpoint(context.Background())
+	if home, err := os.UserHomeDir(); err == nil {
+		for _, p := range ps {
+			if p.ID == id && p.Command != "" && p.Endpoint == endpoint {
+				removeShellCommand(home, p.Command)
+			}
+		}
+	}
+	return nil
 }
 
 // RegisterAccount adopts a known root, or creates an empty private root on this machine.
@@ -83,19 +95,8 @@ func (a *App) RegisterAccount(ctx context.Context, machine string, id agent.ID, 
 	}
 	p := agent.RuntimeProfile{Machine: m.Name, ID: profiles.ID(), Endpoint: endpoint, Agent: id, Name: name, Tags: tags}
 	if root == "" {
-		if !m.Local {
-			return p, errors.New("create remote accounts using hopsesh accounts add on that machine, then adopt its root here")
-		}
-		p.Managed = true
-		root = filepath.Join(a.StateDir, "profiles", p.ID, string(id))
-		if err = os.MkdirAll(root, 0700); err != nil {
-			return p, err
-		}
-		for file, contents := range mod.Spec().Accounts.InitialFiles {
-			if err = os.WriteFile(filepath.Join(root, file), []byte(contents), 0600); err != nil {
-				return p, err
-			}
-		}
+		m.Close()
+		return a.AddAccount(ctx, machine, id, name, tags, AddAccountOptions{})
 	}
 	if !m.Path().IsAbs(root) {
 		return p, errors.New("account root must be an absolute path on the selected machine")
@@ -340,7 +341,9 @@ func (a *App) profileInstalls(ctx context.Context, m *host.Machine, mod agent.Mo
 
 // AccountLogin returns a vendor-owned login command; callers explicitly run it in a
 // terminal. Desktop deep links are not used because they cannot select this profile.
-func (a *App) AccountLogin(ctx context.Context, id string) (agent.Command, error) {
+// AccountLogin is the sign-in command of an account folder on this machine. elsewhere:
+// the person signs in from another machine's browser (a link and a code are printed).
+func (a *App) AccountLogin(ctx context.Context, id string, elsewhere ...bool) (agent.Command, error) {
 	ps, err := a.Accounts()
 	if err != nil {
 		return agent.Command{}, err
@@ -392,7 +395,11 @@ func (a *App) AccountLogin(ctx context.Context, id string) (agent.Command, error
 		if in.Accounts == nil {
 			return agent.Command{}, errors.New("agent does not support isolated accounts")
 		}
-		args := append([]string{in.Binary}, in.Accounts.Login...)
+		login := in.Accounts.Login
+		if len(elsewhere) > 0 && elsewhere[0] && len(in.Accounts.LoginElsewhere) > 0 {
+			login = in.Accounts.LoginElsewhere
+		}
+		args := append([]string{in.Binary}, login...)
 		return in.ScopeCommand(agent.Command{Argv: args, Dir: m.Facts.Home}), nil
 	}
 	return agent.Command{}, errors.New("account not found")

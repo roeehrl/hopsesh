@@ -156,6 +156,9 @@ type Install struct {
 	Desktop           string            `json:"desktop,omitempty"`
 	DesktopVersion    string            `json:"desktopVersion,omitempty"`
 	DesktopWhy        string            `json:"desktopWhy,omitempty"`
+	// DesktopAccount is who the desktop app is signed in as, when it keeps its own
+	// sign-in (Claude desktop): its account and user fingerprints, never more.
+	DesktopAccount *OwnerRun `json:"desktopAccount,omitempty"`
 	Profile           *RuntimeProfile   `json:"profile,omitempty"`
 	Agent             ID                `json:"agent"`
 	Version           string            `json:"version,omitempty"` // "" when the binary was not found

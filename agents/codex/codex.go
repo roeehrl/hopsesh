@@ -50,7 +50,7 @@ var iconSVG string
 // Spec declares Codex.
 func (*Module) Spec() agent.Spec {
 	return agent.Spec{
-		Accounts:      &agent.ProfileSpec{RootEnv: []string{"CODEX_HOME", "CODEX_SQLITE_HOME"}, Unset: []string{"OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL", "CODEX_APP_SERVER_ADDRESS"}, Login: []string{"login"}, InitialFiles: map[string]string{"config.toml": "cli_auth_credentials_store = \"keyring\"\n"}},
+		Accounts:      &agent.ProfileSpec{RootEnv: []string{"CODEX_HOME", "CODEX_SQLITE_HOME"}, Unset: []string{"OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL", "CODEX_APP_SERVER_ADDRESS"}, Login: []string{"login"}, LoginElsewhere: []string{"login", "--device-auth"}, Inherit: map[string][]string{"config.toml": {"cli_auth_credentials_store"}}},
 		ID:            id,
 		DesktopScheme: "codex",
 		Name:          "Codex",

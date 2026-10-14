@@ -321,3 +321,12 @@ func (p memProcs) Terminate(_ context.Context, pid int) error {
 	}
 	return nil
 }
+
+// ReadIdentity passes a file's bytes to pick, as the core's IdentityFS does on this machine.
+func (m memFS) ReadIdentity(p string, pick func([]byte) (map[string]string, error)) (map[string]string, error) {
+	b, err := m.ReadFile(p, 1<<20)
+	if err != nil {
+		return nil, err
+	}
+	return pick(b)
+}

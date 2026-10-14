@@ -154,6 +154,16 @@ func (s *peerSession) login(ctx context.Context, method string, params json.RawM
 		return s.a.Login.List(), nil
 	case peer.MethodAccounts:
 		return s.a.LocalAccounts(ctx)
+	case peer.MethodTools:
+		return s.a.LocalTools(ctx), nil
+	case peer.MethodAccountAdd:
+		var req peer.AccountAdd
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, err
+		}
+		p, err := s.a.addLocalAccount(ctx, req.Agent, req.Name, nil, AddAccountOptions{Command: req.Command})
+		p.Tags = nil
+		return p, err
 	case peer.MethodTerminalClose:
 		var req peer.TerminalID
 		if err := json.Unmarshal(params, &req); err != nil {

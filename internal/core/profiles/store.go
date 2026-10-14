@@ -309,3 +309,23 @@ func (s Store) SetDefault(endpoint string, id agent.ID, selected string) error {
 		return nil
 	})
 }
+
+// Relocate records that a profile's folder moved (hopsesh moved it): same profile, same
+// sign-in, another path.
+func (s Store) Relocate(id, from, to string) error {
+	return s.Update(func(ps *[]agent.RuntimeProfile) error {
+		for i := range *ps {
+			p := &(*ps)[i]
+			if p.ID != id {
+				continue
+			}
+			if p.Root != from {
+				return errors.New("account folder changed; refresh before moving it")
+			}
+			p.Root = to
+			p.Generation++
+			return nil
+		}
+		return errors.New("account not found")
+	})
+}

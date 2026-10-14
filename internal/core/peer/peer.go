@@ -413,12 +413,21 @@ const (
 	MethodTerminalClose = "terminal/close" // end one
 	MethodAccounts      = "accounts"       // check the sign-ins there, Keychain included
 	MethodLive          = "live"           // whether sessions there are open, and working
+	MethodTools         = "tools"          // the agents' tools there: CLI, desktop app, and their sign-ins
+	MethodAccountAdd    = "accounts/add"   // make a new account folder there
 )
+
+// AccountAdd asks for a new account folder there.
+type AccountAdd struct {
+	Agent   agent.ID `json:"agent"`
+	Name    string   `json:"name"`
+	Command bool     `json:"command,omitempty"` // add <agent>-<name> to the shell there
+}
 
 // LoginMethod: the method needs hopsesh in the login session.
 func LoginMethod(m string) bool {
 	switch m {
-	case MethodTerminalOpen, MethodTerminalList, MethodTerminalClose, MethodAccounts, MethodLive:
+	case MethodTerminalOpen, MethodTerminalList, MethodTerminalClose, MethodAccounts, MethodLive, MethodTools, MethodAccountAdd:
 		return true
 	}
 	return false
@@ -438,8 +447,11 @@ type TerminalRequest struct {
 	Profile string   `json:"profile,omitempty"` // the account's folder ("" its default)
 	Session string   `json:"session,omitempty"` // resume: the session's id there
 	Dir     string   `json:"dir,omitempty"`     // new: the folder to start in
-	Cols    int      `json:"cols,omitempty"`
-	Rows    int      `json:"rows,omitempty"`
+	// AtScreen: a sign-in done at that machine's own screen (its browser opens there);
+	// otherwise it prints a link and a code to sign in from this machine's browser.
+	AtScreen bool `json:"atScreen,omitempty"`
+	Cols     int  `json:"cols,omitempty"`
+	Rows     int  `json:"rows,omitempty"`
 }
 
 // Terminal is a terminal hopsesh runs there, and what runs in it.
