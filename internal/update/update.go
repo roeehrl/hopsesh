@@ -78,6 +78,10 @@ func Latest(ctx context.Context) (*Release, error) {
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("GitHub answered %s", resp.Status)
 	}
+	return decodeRelease(resp.Body)
+}
+
+func decodeRelease(body io.Reader) (*Release, error) {
 	var r struct {
 		Tag    string `json:"tag_name"`
 		URL    string `json:"html_url"`
@@ -86,7 +90,7 @@ func Latest(ctx context.Context) (*Release, error) {
 			URL  string `json:"browser_download_url"`
 		} `json:"assets"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&r); err != nil {
+	if err := json.NewDecoder(io.LimitReader(body, 4<<20)).Decode(&r); err != nil {
 		return nil, err
 	}
 	rel := &Release{Tag: r.Tag, Version: strings.TrimPrefix(r.Tag, "v"), URL: r.URL, Assets: map[string]string{}}
@@ -94,6 +98,42 @@ func Latest(ctx context.Context) (*Release, error) {
 		rel.Assets[a.Name] = a.URL
 	}
 	return rel, nil
+}
+
+// Tagged fetches the release of one version (not only the newest).
+func Tagged(ctx context.Context, version string) (*Release, error) {
+	req, _ := http.NewRequestWithContext(ctx, "GET", API+"/repos/"+Repo+"/releases/tags/v"+strings.TrimPrefix(version, "v"), nil)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := client().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == 404 {
+		return nil, fmt.Errorf("hopsesh %s is not a published release", version)
+	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("GitHub answered %s", resp.Status)
+	}
+	return decodeRelease(resp.Body)
+}
+
+// CLIFor downloads, from rel, the hopsesh program for another machine (goos, goarch),
+// verified as an update is (checksums.txt and its signature), and returns it.
+func CLIFor(ctx context.Context, rel *Release, goos, goarch string) ([]byte, error) {
+	if PublicKey == "" {
+		return nil, ErrNoKey
+	}
+	ext := "tar.gz"
+	if goos == "windows" {
+		ext = "zip"
+	}
+	name := fmt.Sprintf("hopsesh_%s_%s_%s.%s", rel.Version, goos, goarch, ext)
+	data, err := download(ctx, rel, name)
+	if err != nil {
+		return nil, err
+	}
+	return extract(data, name)
 }
 
 // Newer reports whether version a is newer than b (semantic versions, "v" optional;
@@ -465,7 +505,7 @@ func checksumFor(sums []byte, name string) (string, error) {
 
 func extract(archive []byte, name string) ([]byte, error) {
 	want := "hopsesh"
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" || strings.HasSuffix(name, ".zip") {
 		want = "hopsesh.exe"
 	}
 	if strings.HasSuffix(name, ".zip") {

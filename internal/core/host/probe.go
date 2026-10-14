@@ -33,8 +33,8 @@ type probeWants struct {
 var Hopsesh = agent.Binary{
 	Name: "hopsesh",
 	Candidates: map[string][]string{
-		"*":       {"~/.local/bin/hopsesh", "/opt/homebrew/bin/hopsesh", "/usr/local/bin/hopsesh", "/Applications/hopsesh.app/Contents/Resources/bin/hopsesh"},
-		"windows": {"~/AppData/Local/Programs/hopsesh/hopsesh.exe"},
+		"*":       {"~/.hopsesh/bin/hopsesh", "~/.local/bin/hopsesh", "/opt/homebrew/bin/hopsesh", "/usr/local/bin/hopsesh", "/Applications/hopsesh.app/Contents/Resources/bin/hopsesh"},
+		"windows": {"~/.hopsesh/bin/hopsesh.exe", "~/AppData/Local/Programs/hopsesh/hopsesh.exe"},
 	},
 	VersionArgs: []string{"version"},
 }

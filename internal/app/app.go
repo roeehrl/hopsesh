@@ -52,6 +52,9 @@ type App struct {
 	// tests keeps the clouds' recent read-only probes, so replanning a hand-off does not ask
 	// the vendor again each time (shared by copies of the App; nil: never kept).
 	tests *cloudTests
+	// Login is set in hopsesh serve, which runs in the user's login session (nil
+	// elsewhere).
+	Login *Login
 }
 
 // New returns an App for the modules and configuration.

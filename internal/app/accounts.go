@@ -447,6 +447,17 @@ func (a *App) discoverRemoteProfiles(ctx context.Context, m *host.Machine, endpo
 	if err != nil {
 		return err
 	}
+	return a.importRemoteProfiles(ctx, m, endpoint, id, known, ps)
+}
+
+// importRemoteProfiles takes the account folders a machine's own hopsesh registered, and
+// what it last observed of their sign-ins, into this machine's registry.
+func (a *App) importRemoteProfiles(ctx context.Context, m *host.Machine, endpoint string, id agent.ID, known, ps []agent.RuntimeProfile) error {
+	pa := m.Path()
+	fsys, err := m.FS(ctx)
+	if err != nil {
+		return err
+	}
 	for _, p := range ps {
 		if p.Endpoint != endpoint || p.Agent != id || !pa.IsAbs(p.Root) {
 			continue

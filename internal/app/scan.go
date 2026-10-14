@@ -50,6 +50,10 @@ type Machine struct {
 	Agents      []AgentState       `json:"agents"`
 	// Hopsesh is the version of hopsesh installed there ("" when none was found).
 	Hopsesh string `json:"hopsesh,omitempty"`
+	// Presence is how hopsesh works with the machine (see Presence*); PresenceWhy says
+	// why, when it is not PresenceLogin.
+	Presence    string `json:"presence,omitempty"`
+	PresenceWhy string `json:"presenceWhy,omitempty"`
 
 	host    *host.Machine
 	account *agent.Account // reported by the machine's own hopsesh (a push)
@@ -438,6 +442,9 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 	if err != nil {
 		m.Status, m.Error, m.Hint = StatusError, "SFTP: "+err.Error(), "the machine's SSH server must allow the sftp subsystem"
 		return m, nil
+	}
+	if !hm.Local {
+		a.meetHopsesh(ctx, hm, m)
 	}
 	var entries []Entry
 	for _, mod := range a.Modules() {

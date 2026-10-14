@@ -20,6 +20,9 @@ func main() {
 	reg := all.Registry()
 	integrate.SetLoginVars(reg.LoginEnv())
 	if err := cli.NewRoot(os.Stdout, reg).Execute(); err != nil {
+		if code, ok := cli.ExitStatus(err); ok {
+			os.Exit(code)
+		}
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}

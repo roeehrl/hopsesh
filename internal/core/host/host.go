@@ -304,3 +304,16 @@ func (m *Machine) SignInsHidden() bool {
 // LoginSessionEnv is set for hopsesh started in the user's login session (hopsesh serve
 // and what it runs), where a Mac's Keychain is readable even when it was reached by SSH.
 const LoginSessionEnv = "HOPSESH_LOGIN_SESSION"
+
+// RemoteFS is the SFTP side of a machine reached over SSH (for uploads).
+func (m *Machine) RemoteFS() (*transport.RemoteFS, bool) {
+	if m.Local || m.snap != nil {
+		return nil, false
+	}
+	if _, err := m.FS(context.Background()); err != nil {
+		return nil, false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.rfs, m.rfs != nil
+}

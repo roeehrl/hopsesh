@@ -247,5 +247,6 @@ Python API, install its Claude Code integration, or write profiles.`,
 	f.String("use", "", "the terminal app to use (an id above, or auto)")
 	f.String("resume", "", "where the app resumes sessions: terminal, here or ask")
 	f.Bool("json", false, "output JSON")
+	cmd.AddCommand(terminalAttachCmd(), terminalRunCmd())
 	return cmd
 }
