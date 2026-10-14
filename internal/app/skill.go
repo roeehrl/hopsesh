@@ -68,6 +68,25 @@ func (a *App) integrations(ctx context.Context) []integration {
 			continue // not used on this machine
 		}
 		out = append(out, integration{name: mod.Spec().Name, in: in, ig: ig.Integration(h, in)})
+		// Every account folder reads its own copy where the agent keeps skills per folder
+		// (Claude Code: <folder>/skills); copies in one place are one copy.
+		if mod.Spec().Accounts == nil {
+			continue
+		}
+		installs, err := a.profileInstalls(ctx, m, mod, in, false, true)
+		if err != nil {
+			continue
+		}
+		for _, p := range installs {
+			if !p.Present || p.Profile == nil || p.Profile.Default {
+				continue
+			}
+			ph, err := m.For(ctx, mod.Spec(), p, nil)
+			if err != nil {
+				continue
+			}
+			out = append(out, integration{name: mod.Spec().Name + " (" + p.Profile.Name + ")", in: p, ig: ig.Integration(ph, p)})
+		}
 	}
 	return out
 }

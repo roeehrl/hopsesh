@@ -408,15 +408,22 @@ func Serve(ctx context.Context, r io.Reader, w io.Writer, h Handler) error {
 
 // Methods of hopsesh in the login session (protocol 6; HelloReply.Login).
 const (
-	MethodTerminalOpen  = "terminal/open"  // run a session (or a sign-in) in a terminal there
-	MethodTerminalList  = "terminal/list"  // the terminals hopsesh runs there
-	MethodTerminalClose = "terminal/close" // end one
-	MethodAccounts      = "accounts"       // check the sign-ins there, Keychain included
-	MethodLive          = "live"           // whether sessions there are open, and working
-	MethodTools         = "tools"          // the agents' tools there: CLI, desktop app, and their sign-ins
-	MethodAccountAdd    = "accounts/add"   // make a new account folder there
-	MethodOwners        = "owners"         // hopsesh's records there of the accounts sessions ran under
+	MethodTerminalOpen    = "terminal/open"    // run a session (or a sign-in) in a terminal there
+	MethodTerminalList    = "terminal/list"    // the terminals hopsesh runs there
+	MethodTerminalClose   = "terminal/close"   // end one
+	MethodAccounts        = "accounts"         // check the sign-ins there, Keychain included
+	MethodLive            = "live"             // whether sessions there are open, and working
+	MethodTools           = "tools"            // the agents' tools there: CLI, desktop app, and their sign-ins
+	MethodAccountAdd      = "accounts/add"     // make a new account folder there
+	MethodOwners          = "owners"           // hopsesh's records there of the accounts sessions ran under
+	MethodProtection      = "protection"       // the command, protection hooks and skill there
+	MethodProtectionSetUp = "protection/setup" // install the hooks and the skill there
 )
+
+// ProtectionSetUp asks hopsesh there to install its protection hooks and the skill.
+type ProtectionSetUp struct {
+	Rules bool `json:"rules,omitempty"` // let agents run hopsesh's read-only commands without asking
+}
 
 // AccountAdd asks for a new account folder there.
 type AccountAdd struct {
@@ -428,7 +435,7 @@ type AccountAdd struct {
 // LoginMethod: the method needs hopsesh in the login session.
 func LoginMethod(m string) bool {
 	switch m {
-	case MethodTerminalOpen, MethodTerminalList, MethodTerminalClose, MethodAccounts, MethodLive, MethodTools, MethodAccountAdd, MethodOwners:
+	case MethodTerminalOpen, MethodTerminalList, MethodTerminalClose, MethodAccounts, MethodLive, MethodTools, MethodAccountAdd, MethodOwners, MethodProtection, MethodProtectionSetUp:
 		return true
 	}
 	return false

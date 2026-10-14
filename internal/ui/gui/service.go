@@ -21,6 +21,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 
 	"github.com/roeehrl/hopsesh/internal/app"
+	"github.com/roeehrl/hopsesh/internal/ui/skill"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/appicon"
 	"github.com/roeehrl/hopsesh/internal/core/audit"
@@ -113,6 +114,7 @@ func NewApp(reg *registry.Registry, options ...Option) *App {
 		option(a)
 	}
 	a.core = app.New(cfg, reg, config.StateDir(), log)
+	a.core.Skills = skill.For(a.core.Specs)
 	a.core.Passwords = a.passwordFor
 	a.core.Steps = a.runStep
 	a.attachTerminal()

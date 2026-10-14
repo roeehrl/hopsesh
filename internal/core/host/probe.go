@@ -14,6 +14,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/core/proc"
@@ -71,20 +72,32 @@ func probeLocal(ctx context.Context, specs []agent.Spec, detailed bool) Facts {
 	for _, e := range w.env {
 		f.Env[e] = os.Getenv(e)
 	}
+	// Each program's version, all at once: one slow program does not starve the others.
+	var mu sync.Mutex
+	var wg sync.WaitGroup
 	for _, b := range w.bins {
 		p := lookLocal(b, home)
 		if p == "" {
 			continue
 		}
 		bf := agent.BinaryFact{Path: p}
-		if detailed && len(b.VersionArgs) > 0 {
+		if !detailed || len(b.VersionArgs) == 0 {
+			f.Binaries[b.Name] = bf
+			continue
+		}
+		wg.Add(1)
+		go func(b agent.Binary, bf agent.BinaryFact) {
+			defer wg.Done()
 			vctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-			out, _ := proc.CommandContext(vctx, p, b.VersionArgs...).Output()
+			out, _ := proc.CommandContext(vctx, bf.Path, b.VersionArgs...).Output()
 			cancel()
 			bf.Version = firstLine(string(out))
-		}
-		f.Binaries[b.Name] = bf
+			mu.Lock()
+			f.Binaries[b.Name] = bf
+			mu.Unlock()
+		}(b, bf)
 	}
+	wg.Wait()
 	_, err := exec.LookPath("git")
 	f.HasGit = err == nil
 	f.DesktopProtocols = map[string]bool{}

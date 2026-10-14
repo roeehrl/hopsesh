@@ -6,6 +6,9 @@ import (
 	"embed"
 	"strings"
 	"text/template"
+
+	"github.com/roeehrl/hopsesh/internal/version"
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 //go:embed files/*.tmpl
@@ -54,4 +57,21 @@ func Render(p Params) (map[string][]byte, error) {
 		out[name] = bytes.ReplaceAll(b.Bytes(), []byte("\r\n"), []byte("\n"))
 	}
 	return out, nil
+}
+
+// For is the skill renderer for an App: this build's skill for the agents that keep
+// sessions on machines (specs), naming the hopsesh program bin.
+func For(specs func() []agent.Spec) func(bin string) map[string][]byte {
+	return func(bin string) map[string][]byte {
+		var names, ids []string
+		for _, s := range specs() {
+			if len(s.Roots) == 0 {
+				continue
+			}
+			names = append(names, s.Name)
+			ids = append(ids, string(s.ID))
+		}
+		files, _ := Render(NewParams(bin, version.Version, names, ids))
+		return files
+	}
 }

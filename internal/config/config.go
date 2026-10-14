@@ -316,6 +316,9 @@ type Config struct {
 	// ProtectPrompt is the fingerprint of the protection problems the user answered "Not
 	// now" to; the Sessions card stays hidden until the set of problems changes.
 	ProtectPrompt string `toml:"protect_prompt,omitempty"`
+	// MachinesPrompt are the machine notices the user answered "Not now" to (by
+	// fingerprint: a notice whose findings change comes back).
+	MachinesPrompt []string `toml:"machines_prompt,omitempty"`
 	// AppIcons shows an agent's installed desktop app icon in the app (default on).
 	AppIcons *bool            `toml:"app_icons,omitempty"`
 	Agents   map[string]Agent `toml:"agents,omitempty"`

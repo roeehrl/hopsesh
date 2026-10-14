@@ -314,8 +314,31 @@ function notices() {
     h("b", { style: "flex:1 1 360px" }, i.skillState === "stale" ? "The hopsesh skill is out of date" : "The hopsesh skill is damaged"),
     h("button", { class: "btn primary", onclick: async () => { try { await withCLI(() => api("InstallSkill", false, false)); toast("Updated the hopsesh skill"); } catch (e) { fail(e); } state.info = await api("Info"); render(); } }, i.skillState === "stale" ? "Update it" : "Repair it")));
   out.push(healthNotice(render));
+  out.push(...machineNotices());
   out.push(setupLine());
   return out;
+}
+
+// machineNotices are what another machine needs: hopsesh there, an update, or its
+// protection (checked after each scan; "Not now" holds until the findings change).
+let mNotices = null, mNoticesFor = -1;
+async function loadMachineNotices() {
+  try { mNotices = await api("MachineNotices"); } catch { mNotices = []; }
+  render();
+}
+function machineNotices() {
+  const rev = state.scan?.revision ?? -1;
+  if (rev !== mNoticesFor) { mNoticesFor = rev; loadMachineNotices(); }
+  return (mNotices || []).map((n) => h("section", { class: "card notice", role: "status", "aria-label": n.title, "data-notice": n.kind },
+    h("div", { style: "flex:1 1 360px" }, h("b", {}, n.title), " ", h("span", { style: "font-size:12.5px" }, n.text)),
+    h("button", { class: "btn primary", onclick: async () => {
+      if (n.kind === "protection") {
+        try { await api("SetUpProtection", n.machine, false); toast(`Set up on ${n.machine}`); } catch (e) { fail(e); }
+        return loadMachineNotices();
+      }
+      go("machines");
+    } }, n.action),
+    h("button", { class: "btn", onclick: async () => { try { await api("DismissMachineNotice", n.fingerprint); } catch (e) { fail(e); } mNotices = (mNotices || []).filter((x) => x !== n); render(); } }, "Not now")));
 }
 
 // setupLine is the one line of what is left to set up, on All sessions only: each step

@@ -118,7 +118,7 @@ func (a *App) MovementNoticeHooks(ctx context.Context, action string, id agent.I
 	if action == "install" && !a.Cfg.MovementNoticesOn() {
 		return nil, errors.New("movement notices are disabled in hopsesh settings")
 	}
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	m := a.localMachine(ctx)
 	defer m.Close()

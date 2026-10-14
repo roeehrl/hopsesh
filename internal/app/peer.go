@@ -158,6 +158,18 @@ func (s *peerSession) login(ctx context.Context, method string, params json.RawM
 		return s.a.LocalTools(ctx), nil
 	case peer.MethodOwners:
 		return s.a.LocalLedger(), nil
+	case peer.MethodProtection:
+		return s.a.LocalProtection(ctx), nil
+	case peer.MethodProtectionSetUp:
+		var req peer.ProtectionSetUp
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, err
+		}
+		p, err := s.a.SetUpLocalProtection(ctx, req.Rules)
+		if err != nil && p.Error == "" {
+			p.Error = err.Error()
+		}
+		return p, nil
 	case peer.MethodAccountAdd:
 		var req peer.AccountAdd
 		if err := json.Unmarshal(params, &req); err != nil {
