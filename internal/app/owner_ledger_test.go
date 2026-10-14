@@ -50,3 +50,30 @@ func TestEmailOnlyLoginMatchesVerifiedAccount(t *testing.T) {
 		t.Fatal("matched another email, or changed the stored record")
 	}
 }
+
+// Records travel: a session's runs are kept with its folder, read back for another machine
+// (hopsesh serve), and added to that machine's listing of the session.
+func TestOwnerRecordsAreSharedAndCarried(t *testing.T) {
+	a := &App{StateDir: t.TempDir()}
+	root := t.TempDir()
+	a.addRuns("claude", root, "s1", agent.OwnerRun{Key: "a"}, agent.OwnerRun{Key: "b", Person: "u"})
+	recs := a.LocalLedger()
+	if len(recs) != 1 || recs[0].Session != "s1" || len(recs[0].Runs) != 2 {
+		t.Fatalf("%+v", recs)
+	}
+	real, _ := filepath.EvalSymlinks(root)
+	if recs[0].Root != root && recs[0].Root != real {
+		t.Fatalf("root %q", recs[0].Root)
+	}
+	m := map[string][]agent.OwnerRun{}
+	for _, r := range recs {
+		m[string(r.Agent)+"\x00"+r.Root+"\x00"+r.Session] = r.Runs
+	}
+	s := withRecords(m, recs[0].Root, agent.Summary{Key: agent.SessionKey{Agent: "claude", Session: "s1"}})
+	if len(s.Owners) != 2 || s.Owners[1].Key != "b" {
+		t.Fatalf("not merged: %+v", s.Owners)
+	}
+	if s := withRecords(m, "/elsewhere", agent.Summary{Key: agent.SessionKey{Agent: "claude", Session: "s1"}}); len(s.Owners) != 0 {
+		t.Fatal("another folder's record was merged")
+	}
+}

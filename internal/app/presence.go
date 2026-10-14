@@ -62,6 +62,13 @@ func (a *App) meetHopsesh(ctx context.Context, hm *host.Machine, m *Machine) {
 			m.tools[t.Agent] = t
 		}
 	}
+	var records []LedgerRecord
+	if err := c.Call(cctx, peer.MethodOwners, struct{}{}, &records); err == nil {
+		m.records = map[string][]agent.OwnerRun{}
+		for _, r := range records {
+			m.records[string(r.Agent)+"\x00"+r.Root+"\x00"+r.Session] = r.Runs
+		}
+	}
 	var ps []agent.RuntimeProfile
 	if err := c.Call(cctx, peer.MethodAccounts, struct{}{}, &ps); err != nil {
 		a.Log.Warn("accounts from hopsesh there", "machine", hm.Name, "error", err)

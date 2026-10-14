@@ -19,13 +19,13 @@ function defaults() {
 
 // planFor opens the sheet for a session: target "" keeps its agent, sendTo pushes it;
 // codeOnly brings a cloud session's branch alone.
-export async function planFor(e, { target = "", sendTo = "", codeOnly = false, targetProfile = "", targetSession = "", bounded = false, fork = false, returnCandidate = null }) {
+export async function planFor(e, { target = "", sendTo = "", codeOnly = false, targetProfile = "", targetSession = "", bounded = false, fork = false, returnCandidate = null, launch = "" }) {
   cur = { e, target, sendTo, opts: Object.assign(defaults(), { operationId: crypto.randomUUID() }, { codeOnly, targetProfile, targetSession, bounded, fork, newReplica: fork || returnCandidate?.status === "missing", conflict: "" }), returnCandidate, plan: null, busy: false, applying: false };
   fill(sheet, h("div", { class: "sheet-in" }, h("div", { class: "loading", role: "status", style: "min-height:240px" },
     sendTo ? `Asking hopsesh on ${sendTo} to plan it…` : "Working out the plan…")));
   if (!sheet.open) sheet.showModal();
   const c=cur;
-  c.launch = state.info.places?.[target || e.agent] || opensIn();
+  c.launch = launch || state.info.places?.[target || e.agent] || opensIn();
   try {c.profiles = e.cloud?[]:await api("AccountDestinations", sendTo, target || e.agent);} catch (err) { if (cur === c) problem(errText(err), { label: "Try again", run: () => planFor(e, { target, sendTo, codeOnly, targetProfile, targetSession, bounded, fork, returnCandidate }) }); return; }
   if(cur!==c)return;
   if(!c.returnCandidate && !c.opts.targetProfile && c.profiles.length && !c.profiles.some(p=>p.default)) {
@@ -34,6 +34,53 @@ export async function planFor(e, { target = "", sendTo = "", codeOnly = false, t
       h("div",{class:"sheet-foot"},h("button",{class:"btn",onclick:()=>sheet.close()},"Cancel"))));return;
   }
   await replan();
+}
+
+// chooseTarget shows where a session can continue (machine, folder and tool), who it runs
+// as in each, what carries over and what becomes of the copy left behind; the chosen one
+// opens the plan sheet.
+export async function chooseTarget(e) {
+  fill(sheet, h("div", { class: "sheet-in" }, h("div", { class: "loading", role: "status", style: "min-height:200px" }, "Looking at where it can continue…")));
+  if (!sheet.open) sheet.showModal();
+  let ts;
+  try { ts = await api("MoveTargets", e.machine, e.key); } catch (err) { problem(errText(err)); return; }
+  let pick = ts.find((t) => !t.disabled && !t.here) || null;
+  const carriesTone = (t) => ({ everything: "ok", conversation: "warn" }[t.carries] || "muted");
+  const leftWords = (t) => ({ blocked: "Blocked until you move back", advised: "Warns before it's continued", unprotected: "Not protected", kept: "Left as it is" }[t.left] || t.left);
+  const label = (t) => t.local ? sys.Here : t.machine;
+  const go = h("button", { class: "btn primary", id: "go-target" });
+  const sync = () => {
+    go.disabled = !pick;
+    go.textContent = !pick ? "Choose a place" : pick.here ? (pick.local ? "Continue it where it is" : `Continue it on ${pick.machine}`) : `Move to ${label(pick)}${pick.folder !== "default" ? " · " + pick.folder : ""}${pick.tool === "app" ? " in " + pick.opensIn : ""}`;
+    for (const r of sheet.querySelectorAll(".target")) r.classList.toggle("on", r.dataset.i === String(ts.indexOf(pick)));
+  };
+  const rows = ts.map((t, i) => h("label", { class: "target" + (t.disabled ? " off" : ""), "data-i": String(i), "aria-disabled": t.disabled ? "true" : null },
+    h("input", { type: "radio", name: "target", disabled: t.disabled, checked: t === pick, "aria-label": `${label(t)} ${t.folder}`, onchange: () => { pick = t; sync(); } }),
+    h("span", { class: "tc" }, h("b", {}, label(t) + (t.folder && t.folder !== "default" ? " · " + t.folder : "")), h("span", { class: "sub mono" }, t.path || "")),
+    h("span", { class: "tc" }, h("span", {}, t.opensIn), t.opensNote ? h("span", { class: "sub" }, t.opensNote) : null),
+    t.disabled ? h("span", { class: "tc wide muted" }, t.why) : [
+      h("span", { class: "tc" }, t.runsAs || h("span", { class: "muted" }, "Unknown")),
+      h("span", { class: "tc" }, t.here ? h("span", { class: "ok" }, "It's here: nothing moves") : [h("span", { class: carriesTone(t) }, { everything: "Everything", conversation: "The conversation", unknown: "Unknown" }[t.carries]), t.carriesWhy ? h("span", { class: "sub" }, t.carriesWhy) : null]),
+      h("span", { class: "tc" }, t.here ? h("span", { class: "muted" }, "—") : [h("span", { class: t.left === "unprotected" ? "warn" : t.left === "blocked" ? "ok" : "" }, leftWords(t)), t.leftWhy ? h("span", { class: "sub" }, t.leftWhy) : null])]));
+  go.onclick = async () => {
+    const t = pick;
+    if (!t) return;
+    if (t.here) {
+      sheet.close();
+      if (t.local) return import("./actions.js").then((a) => a.resumeIn(e, t.tool === "app" ? "app" : a.defaultPlace(e)));
+      return api("ContinueOnMachine", e.machine, e.key).catch(fail);
+    }
+    await planFor(e, { target: "", sendTo: t.local ? "" : t.machine, targetProfile: t.profile, launch: t.tool === "app" ? "app" : "" });
+  };
+  fill(sheet, h("div", { class: "sheet-in" },
+    h("div", { class: "sheet-body" }, h("h2", {}, `Move “${e.title}”`),
+      h("span", { class: "label" }, "Where it continues"),
+      h("div", { class: "targets", role: "radiogroup", "aria-label": "Where it continues" },
+        h("div", { class: "target head", "aria-hidden": "true" }, h("span", {}), h("span", {}, "Machine · folder"), h("span", {}, "Opens in"), h("span", {}, "Runs as"), h("span", {}, "What carries over"), h("span", {}, "The copy left behind")),
+        rows.length ? rows : h("div", { class: "empty" }, "No other place: add a machine, or an account folder."))),
+    h("div", { class: "sheet-foot" }, h("span", { class: "muted", style: "flex:1 1 200px;font-size:12.5px" }, "Nothing is deleted on either machine."),
+      h("button", { class: "btn", onclick: () => sheet.close() }, "Cancel"), go)));
+  sync();
 }
 
 // planPicked opens the sheet for a cloud session that is not a row: id "" leaves the
@@ -596,6 +643,9 @@ screen("done", (d, p, o) => {
         h("div", { class: "muted" }, `${cap(where)}, in `, h("span", { class: "mono" }, p.targetCwd)))),
     d.continuationHint ? h("div", { class: "card continuation-hint", role: "status" }, h("div", { class: "dlg-body" }, d.continuationHint)) : null,
     h("div", { class: "card" }, h("div", { class: "dlg-body" },
+      d.machine && d.remoteLogin && d.remoteKey ? h("div", { style: "display:flex;gap:8px;flex-wrap:wrap;align-items:center" },
+        h("button", { class: "btn primary", onclick: async () => { try { await api("OpenOnMachine", d.machine, d.remoteKey); sheet.close(); } catch (e) { fail(e); } } }, `Open it on ${d.machine}, here`),
+        h("span", { class: "muted", style: "font-size:12.5px" }, `It runs on ${d.machine}, in your login session there; you work in it here. Or run this there:`)) :
       d.machine ? h("b", {}, `Start it on ${d.machine}`) : h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" },
         h("button", { class: "btn primary big", id: "open", onclick: open }, d.inApp ? `Open in the ${d.agent} app` : resultPlace === "terminal" ? `Resume in ${sys.terminal}` : "Resume in hopsesh Terminal", h("span", { class: "kbd" }, "↩")),
         d.inApp ? null : h("button", { class: "btn big", onclick: other }, resultPlace === "terminal" ? "Resume in hopsesh Terminal" : `Resume in ${sys.terminal}`),

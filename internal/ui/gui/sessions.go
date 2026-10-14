@@ -1068,6 +1068,10 @@ type DoneDTO struct {
 	InApp            bool     `json:"inApp"` // it opens in the agent's desktop app
 	ContinuationHint string   `json:"continuationHint,omitempty"`
 	Machine          string   `json:"machine,omitempty"` // a push: where it went (start it there)
+	// RemoteKey is the pushed copy's session there (to open it there, in a tab here).
+	RemoteKey string `json:"remoteKey,omitempty"`
+	// RemoteLogin: hopsesh runs in the login session there, so it can run it.
+	RemoteLogin bool `json:"remoteLogin,omitempty"`
 	AuditDir         string   `json:"auditDir"`
 	// Fetch is a session brought from a cloud: waiting for the user's terminal, or the
 	// code only.

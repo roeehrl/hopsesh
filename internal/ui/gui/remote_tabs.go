@@ -35,6 +35,21 @@ func (a *App) ContinueOnMachine(machine, key string) (*OpenedDTO, error) {
 	return a.remoteTab(machine, req, TabMeta{Kind: TabRemote, Agent: e.AgentName, Machine: machine, Key: key}, titleOf(e.Session)+" · "+machine)
 }
 
+// OpenOnMachine continues a session on another machine that is not a row yet (one just
+// sent there), by its key there, in a tab here.
+func (a *App) OpenOnMachine(machine, key string) (*OpenedDTO, error) {
+	k, err := agent.ParseKey(key)
+	if err != nil {
+		return nil, err
+	}
+	name := string(k.Agent)
+	if m, ok := a.snapshot().Module(k.Agent); ok {
+		name = m.Spec().Name
+	}
+	req := peer.TerminalRequest{Kind: peer.TerminalResume, Agent: k.Agent, Profile: k.Profile, Session: string(k.Session)}
+	return a.remoteTab(machine, req, TabMeta{Kind: TabRemote, Agent: name, Machine: machine, Key: key}, name+" · "+machine)
+}
+
 // NewSessionOn starts a new session of an agent on a machine, in a folder there, as the
 // account of one of its folders ("" its default), and shows it in a tab here.
 func (a *App) NewSessionOn(machine string, id agent.ID, profile, dir string) (*OpenedDTO, error) {

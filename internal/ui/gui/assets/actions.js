@@ -8,7 +8,7 @@ import { refreshSelection } from "./sessions.js";
 import { role, removeBlock, restoreBlock } from "./guard.js";
 import { go, api, state, sys, here, agentInfo, cloudOf, cloudTitle, toast, fail, errText, cap, entries, count, ago, h, icon, ICONS, agentBadge, pending } from "./core.js";
 import { returnActions, returnChooser, showMovementDestination } from "./returns.js";
-import { planFor } from "./plan.js";
+import { planFor, chooseTarget } from "./plan.js";
 import { tabs, resume, showTerminal, moveToTerminal, openShell, associateShell, signIn } from "./term.js";
 import { planHandoff } from "./handoff.js";
 import { planHop } from "./hop.js";
@@ -308,6 +308,7 @@ function moveGroups(e, local, inTab) {
   const out = [];
   const block = (it) => (inTab ? Object.assign(it, { disabled: true, why: IN_TAB }) : it);
   const machine = [];
+  if (["claude", "codex"].includes(e.agent)) machine.push(block({ id: "targets", label: "Choose where it continues…", sub: "Any machine, folder and tool, with who it runs as there", icon: icon(ICONS.here, 16), run: () => chooseTarget(e) }));
   if (local) {
     const peers = state.scan?.peers || [];
     for (const p of peers) machine.push(block({ id: "send:" + p, label: `Send to ${p}…`, icon: icon(ICONS.here, 16), run: () => planFor(e, { target: "", sendTo: p }) }));

@@ -172,6 +172,15 @@ func (a *App) OpenTerminal(ctx context.Context, req peer.TerminalRequest) (peer.
 				return open, nil // already running here: show that one
 			}
 		}
+		// Open elsewhere on this machine (a terminal app, the desktop app): a second
+		// writer would interleave with it.
+		if e.Live.State == agent.Live {
+			where := "another program"
+			if e.Live.App {
+				where = "its desktop app"
+			}
+			return t, fmt.Errorf("%s is open on %s in %s; continue it there, or close it first", e.Session.Title, LocalName(), where)
+		}
 		cmd, err := a.Resume(inv, e, agent.ResumeOptions{})
 		if err != nil {
 			return t, err

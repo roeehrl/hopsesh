@@ -3,6 +3,7 @@ package claude
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -36,5 +37,30 @@ func TestLocalIdentityReadsOAuthAccountOnly(t *testing.T) {
 	}
 	if _, ok := New().LocalIdentity(t.TempDir(), false); ok {
 		t.Fatal("no identity record, no identity")
+	}
+}
+
+// Inside Claude desktop (its own Claude Code), the run is desktop's account, whatever the
+// terminal's folder is signed in to.
+func TestDesktopRunIsDesktopsAccount(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
+	dir := filepath.Join(home, "Library", "Application Support", "Claude")
+	if runtime.GOOS == "windows" {
+		dir = filepath.Join(home, "AppData", "Roaming", "Claude")
+	}
+	const acct, org = "eb49ab91-6e1e-4066-8188-55844f05f186", "ccd0bf80-f6e6-4528-a58b-efc868608732"
+	os.MkdirAll(filepath.Join(dir, "claude-code-sessions", acct, org), 0o700)
+	os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"lastKnownAccountUuid":"`+acct+`","oauth:tokenCache":"x"}`), 0o600)
+	os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"oauthAccount":{"accountUuid":"terminal-user","organizationUuid":"terminal-org"}}`), 0o600)
+	t.Setenv("CLAUDE_CODE_ENTRYPOINT", "claude-desktop")
+	r, ok := New().LocalIdentity(filepath.Join(home, ".claude"), true)
+	if !ok || r.Key != accountKey(org) || r.Person != personKey(acct) || r.Source != "claude-desktop" {
+		t.Fatalf("%+v %v", r, ok)
+	}
+	t.Setenv("CLAUDE_CODE_ENTRYPOINT", "cli")
+	if r, ok := New().LocalIdentity(filepath.Join(home, ".claude"), true); !ok || r.Key != accountKey("terminal-org") {
+		t.Fatalf("the terminal's run: %+v %v", r, ok)
 	}
 }

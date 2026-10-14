@@ -334,7 +334,12 @@ func (a *App) account(ctx context.Context, m *Machine, mod agent.Module, in agen
 }
 
 // Apply carries out a plan.
-func (a *App) Apply(ctx context.Context, p *move.Plan, in move.Input, progress func(string)) (*move.Result, error) {
+func (a *App) Apply(ctx context.Context, p *move.Plan, in move.Input, progress func(string)) (res *move.Result, err error) {
+	defer func() {
+		if err == nil && res != nil {
+			a.carryOwners(in, res)
+		}
+	}()
 	if p.Kind == move.KindHop {
 		return a.applyHop(ctx, p, progress)
 	}

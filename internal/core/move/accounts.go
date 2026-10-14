@@ -143,3 +143,21 @@ func ProfileInput(p *Plan, in Input) Input {
 	}
 	return in
 }
+
+// Crosses reports whether continuing s as account a crosses accounts: a run under another
+// account, or no record at all. ok is false when a is unknown (nothing can be said).
+func Crosses(s agent.Summary, a *agent.Account) (crosses, ok bool) {
+	if a == nil || a.Key == "" {
+		return false, false
+	}
+	runs := ranUnder(s)
+	if len(runs) == 0 {
+		return true, true
+	}
+	for _, r := range runs {
+		if !sameAccount(r, a) {
+			return true, true
+		}
+	}
+	return false, true
+}

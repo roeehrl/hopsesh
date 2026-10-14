@@ -56,8 +56,9 @@ type Machine struct {
 	PresenceWhy string `json:"presenceWhy,omitempty"`
 
 	host    *host.Machine
-	account *agent.Account             // reported by the machine's own hopsesh (a push)
-	tools   map[agent.ID]agent.Install // hopsesh in the login session there (meetHopsesh)
+	account *agent.Account              // reported by the machine's own hopsesh (a push)
+	tools   map[agent.ID]agent.Install  // hopsesh in the login session there (meetHopsesh)
+	records map[string][]agent.OwnerRun // its records of who ran its sessions
 }
 
 // AgentState is an agent as found on a machine.
@@ -506,7 +507,7 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 					sum.Key.Profile = in.ProfileID()
 					batchMu.Lock()
 					defer batchMu.Unlock()
-					batch = append(batch, Entry{Cached: true, Location: agent.MachineLocation(hm.Name), Machine: hm.Name, Agent: spec.ID, AgentName: spec.Name, Session: a.withLedger(hm.Local, in.Root("home"), sum), Profile: in.Profile, Live: agent.LiveInfo{State: agent.Unknown}})
+					batch = append(batch, Entry{Cached: true, Location: agent.MachineLocation(hm.Name), Machine: hm.Name, Agent: spec.ID, AgentName: spec.Name, Session: withRecords(m.records, in.Root("home"), a.withLedger(hm.Local, in.Root("home"), sum)), Profile: in.Profile, Live: agent.LiveInfo{State: agent.Unknown}})
 					if firstBatch || len(batch) >= 25 {
 						partial := *m
 						partial.Agents = append([]AgentState(nil), m.Agents...)
@@ -535,7 +536,7 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 					}
 					listed := listedEntries(ctx, hm, fsys, mod, ch, state, l)
 					for i := range listed {
-						listed[i].Session = a.withLedger(hm.Local, in.Root("home"), listed[i].Session)
+						listed[i].Session = withRecords(m.records, in.Root("home"), a.withLedger(hm.Local, in.Root("home"), listed[i].Session))
 					}
 					entries = append(entries, listed...)
 					if len(l.Errors) > 0 {

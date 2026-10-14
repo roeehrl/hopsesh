@@ -884,3 +884,14 @@ body.terminal-right .divider[data-pane="inspector"]{display:none}
 .banner { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; padding: 12px 14px; margin: 0 0 14px; border-radius: 10px; background: var(--hover); font-size: 13px; line-height: 1.45; }
 .banner.warn { background: var(--warn-soft, #f6ecd6); }
 .banner > b { flex: 1 1 100%; }
+
+/* Where a session continues: machine · folder, tool, who it runs as, what carries over. */
+.targets { display: flex; flex-direction: column; gap: 6px; overflow-x: auto; }
+.target { display: grid; grid-template-columns: 22px minmax(120px,1fr) minmax(110px,1fr) minmax(130px,1.1fr) minmax(150px,1.3fr) minmax(140px,1.1fr); gap: 10px; align-items: start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; font-size: 12.5px; min-width: 760px; cursor: pointer; }
+.target.head { border: 0; padding: 0 12px; font-size: 11.5px; color: var(--muted); cursor: default; }
+.target.on { border-color: var(--accent); background: var(--hover); }
+.target.off { opacity: .6; cursor: default; }
+.target .tc { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.target .tc.wide { grid-column: span 3; }
+.target .sub { color: var(--muted); font-size: 11.5px; }
+.label { color: var(--muted); font-size: 11.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }

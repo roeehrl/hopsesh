@@ -415,6 +415,7 @@ const (
 	MethodLive          = "live"           // whether sessions there are open, and working
 	MethodTools         = "tools"          // the agents' tools there: CLI, desktop app, and their sign-ins
 	MethodAccountAdd    = "accounts/add"   // make a new account folder there
+	MethodOwners        = "owners"         // hopsesh's records there of the accounts sessions ran under
 )
 
 // AccountAdd asks for a new account folder there.
@@ -427,7 +428,7 @@ type AccountAdd struct {
 // LoginMethod: the method needs hopsesh in the login session.
 func LoginMethod(m string) bool {
 	switch m {
-	case MethodTerminalOpen, MethodTerminalList, MethodTerminalClose, MethodAccounts, MethodLive, MethodTools, MethodAccountAdd:
+	case MethodTerminalOpen, MethodTerminalList, MethodTerminalClose, MethodAccounts, MethodLive, MethodTools, MethodAccountAdd, MethodOwners:
 		return true
 	}
 	return false

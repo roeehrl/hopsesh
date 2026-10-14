@@ -12,6 +12,7 @@ import (
 	"unicode"
 
 	"github.com/roeehrl/hopsesh/internal/core/host"
+	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -20,6 +21,7 @@ import (
 // resumes, sessions without Remote Control, older versions). One small file per session,
 // under its folder: the same session ID in two folders is two sessions.
 type ledgerFile struct {
+	Root string           `json:"root,omitempty"` // the session's folder
 	Runs []agent.OwnerRun `json:"runs"`
 }
 
@@ -73,16 +75,27 @@ func (a *App) RecordOwner(ctx context.Context, id agent.ID, profile, session str
 		}
 		run = agent.OwnerRun{Key: scope.Account.Key, Person: scope.Account.Person}
 	}
-	path := a.ledgerPath(id, scope.Root, session)
+	a.addRuns(id, scope.Root, session, run)
+}
+
+// addRuns adds runs to a session's record here (unless they are its last ones already).
+func (a *App) addRuns(id agent.ID, root, session string, runs ...agent.OwnerRun) {
+	if !validLedgerName(session) || root == "" || len(runs) == 0 {
+		return
+	}
+	path := a.ledgerPath(id, root, session)
 	var f ledgerFile
 	if b, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(b, &f)
 	}
-	next := agent.AddOwner(append([]agent.OwnerRun(nil), f.Runs...), run)
-	if len(next) == len(f.Runs) && len(f.Runs) > 0 {
+	next := append([]agent.OwnerRun(nil), f.Runs...)
+	for _, r := range runs {
+		next = agent.AddOwner(next, r)
+	}
+	if len(next) == len(f.Runs) && len(f.Runs) > 0 && f.Root != "" {
 		return
 	}
-	f.Runs = next
+	f.Runs, f.Root = next, root
 	b, err := json.Marshal(f)
 	if err != nil || os.MkdirAll(filepath.Dir(path), 0o700) != nil {
 		return
@@ -91,6 +104,52 @@ func (a *App) RecordOwner(ctx context.Context, id agent.ID, profile, session str
 	if os.WriteFile(tmp, b, 0o600) == nil {
 		_ = os.Rename(tmp, path)
 	}
+}
+
+// carryOwners keeps, for a session that arrived here, the record of the accounts it ran
+// under elsewhere (the agent's own records travel in its files; hopsesh's travel here).
+func (a *App) carryOwners(in move.Input, res *move.Result) {
+	t := in.Target
+	if t.Machine == nil || !t.Machine.Local || t.Module == nil || res.Key.Session == "" || len(in.Session.Owners) == 0 {
+		return
+	}
+	a.addRuns(t.Module.Spec().ID, t.Install.Root("home"), string(res.Key.Session), in.Session.Owners...)
+}
+
+// LedgerRecord is one session's record of the accounts it ran under, as hopsesh on its
+// machine kept it.
+type LedgerRecord struct {
+	Agent   agent.ID         `json:"agent"`
+	Root    string           `json:"root"`
+	Session string           `json:"session"`
+	Runs    []agent.OwnerRun `json:"runs"`
+}
+
+// LocalLedger is every record hopsesh keeps on this machine (hopsesh serve answering
+// another machine, so its sessions there show who ran them).
+func (a *App) LocalLedger() []LedgerRecord {
+	out := []LedgerRecord{}
+	base := filepath.Join(a.StateDir, "owners")
+	agents, _ := os.ReadDir(base)
+	for _, ag := range agents {
+		folders, _ := os.ReadDir(filepath.Join(base, ag.Name()))
+		for _, fo := range folders {
+			files, _ := os.ReadDir(filepath.Join(base, ag.Name(), fo.Name()))
+			for _, fi := range files {
+				name := strings.TrimSuffix(fi.Name(), ".json")
+				if name == fi.Name() || !validLedgerName(name) {
+					continue
+				}
+				b, err := host.LocalFS().ReadFile(filepath.Join(base, ag.Name(), fo.Name(), fi.Name()), 64<<10)
+				var f ledgerFile
+				if err != nil || json.Unmarshal(b, &f) != nil || f.Root == "" || len(f.Runs) == 0 {
+					continue
+				}
+				out = append(out, LedgerRecord{Agent: agent.ID(ag.Name()), Root: f.Root, Session: name, Runs: f.Runs})
+			}
+		}
+	}
+	return out
 }
 
 // withLedger adds the runs hopsesh recorded for a session on this machine to the ones the
@@ -107,6 +166,19 @@ func (a *App) withLedger(local bool, root string, s agent.Summary) agent.Summary
 	if json.Unmarshal(b, &f) != nil {
 		return s
 	}
+	return mergeRuns(s, f.Runs)
+}
+
+// withRecords adds the runs hopsesh on another machine recorded for one of its sessions.
+func withRecords(records map[string][]agent.OwnerRun, root string, s agent.Summary) agent.Summary {
+	if runs, ok := records[string(s.Key.Agent)+"\x00"+root+"\x00"+string(s.Key.Session)]; ok {
+		return mergeRuns(s, runs)
+	}
+	return s
+}
+
+func mergeRuns(s agent.Summary, recorded []agent.OwnerRun) agent.Summary {
+	f := ledgerFile{Runs: recorded}
 	// The ledger starts when hopsesh first saw the session run; runs the agent recorded
 	// already are not repeated.
 	runs := append([]agent.OwnerRun(nil), s.Owners...)

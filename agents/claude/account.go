@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -135,6 +136,12 @@ func account(a authStatus) agent.Account {
 // LocalIdentity reads the root's oauthAccount record: what Claude Code itself stamps as a
 // run's organisation.
 func (m *Module) LocalIdentity(root string, native bool) (agent.OwnerRun, bool) {
+	// Claude desktop runs its own Claude Code (CLAUDE_CODE_ENTRYPOINT=claude-desktop),
+	// signed in apart from the terminal's: its run is desktop's account, never the
+	// terminal's.
+	if strings.HasPrefix(os.Getenv("CLAUDE_CODE_ENTRYPOINT"), "claude-desktop") {
+		return localDesktopIdentity()
+	}
 	files := []string{filepath.Join(root, ".config.json"), filepath.Join(root, ".claude.json")}
 	if native {
 		home, err := os.UserHomeDir()
@@ -155,4 +162,41 @@ func (m *Module) LocalIdentity(root string, native bool) (agent.OwnerRun, bool) 
 		return agent.OwnerRun{Key: accountKey(id.OAuth.Org), Person: personKey(id.OAuth.Account), Source: "hopsesh"}, true
 	}
 	return agent.OwnerRun{}, false
+}
+
+// localDesktopIdentity is who Claude desktop on this machine is signed in as: its last
+// known account id (config.json, that field alone) and the newest organization folder of
+// its session index.
+func localDesktopIdentity() (agent.OwnerRun, bool) {
+	dir := ""
+	if runtime.GOOS == "windows" {
+		dir = filepath.Join(os.Getenv("APPDATA"), "Claude")
+	} else if home, err := os.UserHomeDir(); err == nil {
+		dir = filepath.Join(home, "Library", "Application Support", "Claude")
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "config.json"))
+	if err != nil {
+		return agent.OwnerRun{}, false
+	}
+	var c struct {
+		Account string `json:"lastKnownAccountUuid"`
+	}
+	err = json.Unmarshal(b, &c)
+	clear(b)
+	if err != nil || !desktopSessionID.MatchString(c.Account) {
+		return agent.OwnerRun{}, false
+	}
+	run := agent.OwnerRun{Person: personKey(c.Account), Source: "claude-desktop"}
+	entries, _ := os.ReadDir(filepath.Join(dir, "claude-code-sessions", c.Account))
+	var newest time.Time
+	for _, e := range entries {
+		info, err := e.Info()
+		if err != nil || !e.IsDir() || !desktopSessionID.MatchString(e.Name()) {
+			continue
+		}
+		if run.Key == "" || info.ModTime().After(newest) {
+			newest, run.Key = info.ModTime(), accountKey(e.Name())
+		}
+	}
+	return run, run.Key != ""
 }
