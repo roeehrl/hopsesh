@@ -33,3 +33,17 @@ test("an older hopsesh there asks for an update first", async ({ page }) => {
   const m = await actionsOn(page, "roys-mbp", "older");
   expect(m.chevron.find((c) => c.label === "Continue on roys-mbp")?.why).toContain("Update hopsesh on roys-mbp");
 });
+
+test("bringing a session that is working on another machine offers to wait or to join it there", async ({ page }) => {
+  await page.evaluate(async () => {
+    const core = await import("/core.js" as string), plan = await import("/plan.js" as string);
+    const e = core.state.scan.groups.flatMap((g: any) => g.entries).find((x: any) => x.title === "Find the codeword");
+    plan.bringLive({ ...e, machine: "atelier", live: true });
+  });
+  const sheet = page.locator("#sheet");
+  await expect(sheet).toContainText("It's working on atelier right now");
+  await expect(sheet.getByRole("button", { name: /Wait until it's idle/ })).toBeVisible();
+  await expect(sheet.getByRole("button", { name: /Join it on atelier instead/ })).toBeVisible();
+  await sheet.getByRole("button", { name: "Cancel" }).click();
+  await expect(sheet).toBeHidden();
+});

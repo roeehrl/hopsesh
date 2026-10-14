@@ -895,3 +895,5 @@ body.terminal-right .divider[data-pane="inspector"]{display:none}
 .target .tc.wide { grid-column: span 3; }
 .target .sub { color: var(--muted); font-size: 11.5px; }
 .label { color: var(--muted); font-size: 11.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.btn.choice { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; text-align: left; padding: 12px 14px; white-space: normal; height: auto; }

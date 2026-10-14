@@ -8,7 +8,7 @@ import { refreshSelection } from "./sessions.js";
 import { role, removeBlock, restoreBlock } from "./guard.js";
 import { go, api, state, sys, here, agentInfo, cloudOf, cloudTitle, toast, fail, errText, cap, entries, count, ago, h, icon, ICONS, agentBadge, pending } from "./core.js";
 import { returnActions, returnChooser, showMovementDestination } from "./returns.js";
-import { planFor, chooseTarget } from "./plan.js";
+import { planFor, chooseTarget, bringLive } from "./plan.js";
 import { tabs, resume, showTerminal, moveToTerminal, openShell, associateShell, signIn } from "./term.js";
 import { planHandoff } from "./handoff.js";
 import { planHop } from "./hop.js";
@@ -204,8 +204,8 @@ function localModel(e) {
     }
     m.move = moveGroups(e, true, !!tab);
   } else {
-    const bring = { id: "bring", label: `Bring to ${sys.here}…`, short: "Bring…", run: () => planFor(e, { target: "" }) };
     const presence = (state.scan?.machines || []).find((x) => x.name === e.machine)?.presence;
+    const bring = { id: "bring", label: `Bring to ${sys.here}…`, short: "Bring…", run: () => (lv.live && presence === "login" ? bringLive(e) : planFor(e, { target: "" })) };
     // A session on a machine with hopsesh in its login session continues right there (its
     // sign-in works there) and is worked in here.
     const there = { id: "continue-there", label: `Continue on ${e.machine}`, short: `Continue on ${e.machine}`, sub: "Runs there, with its files and sign-in; you work in it here",

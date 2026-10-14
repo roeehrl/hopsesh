@@ -83,6 +83,35 @@ export async function chooseTarget(e) {
   sync();
 }
 
+// bringLive is bringing a session that is working on another machine with hopsesh running:
+// wait until its turn ends (then bring it), or join it there instead of copying.
+export function bringLive(e) {
+  let waiting = false;
+  const status = h("span", { class: "muted", role: "status", style: "font-size:12.5px" });
+  const wait = async () => {
+    if (waiting) return;
+    waiting = true;
+    fill(status, `Waiting for it to finish on ${e.machine}…`);
+    for (;;) {
+      try { await api("ScanMachine", e.machine); state.scan = await api("ScanSnapshot"); } catch {}
+      const now = (state.scan?.groups || []).flatMap((g) => g.entries).find((x) => x.machine === e.machine && x.key === e.key);
+      if (!sheet.open || !waiting) return;
+      if (now && !now.live) { waiting = false; return planFor(now, { target: "" }); }
+      await new Promise((r) => setTimeout(r, 10000));
+    }
+  };
+  fill(sheet, h("div", { class: "sheet-in" },
+    h("div", { class: "sheet-body" }, h("h2", {}, `Bring “${e.title}” from ${e.machine}`),
+      h("div", { role: "note", class: "banner warn" }, `It's working on ${e.machine} right now (hopsesh there sees it). Bringing it takes a snapshot; whatever ${e.machine} writes after that stays only on ${e.machine}.`),
+      h("div", { class: "choices" },
+        h("button", { class: "btn choice", onclick: wait }, h("b", {}, "Wait until it's idle, then bring it"), h("span", { class: "muted" }, `hopsesh checks ${e.machine} until the turn ends.`)),
+        h("button", { class: "btn choice", onclick: () => { waiting = false; sheet.close(); api("ContinueOnMachine", e.machine, e.key).catch(fail); } }, h("b", {}, `Join it on ${e.machine} instead`), h("span", { class: "muted" }, "Shows it here when hopsesh runs it there; nothing moves.")),
+        h("button", { class: "btn choice", onclick: () => { waiting = false; planFor(e, { target: "" }); } }, h("b", {}, "Bring the snapshot now"), h("span", { class: "muted" }, `What ${e.machine} writes later stays there.`))),
+      status),
+    h("div", { class: "sheet-foot" }, h("span", { class: "spacer" }), h("button", { class: "btn", onclick: () => { waiting = false; sheet.close(); } }, "Cancel"))));
+  if (!sheet.open) sheet.showModal();
+}
+
 // planPicked opens the sheet for a cloud session that is not a row: id "" leaves the
 // choice to the vendor's own picker, in a new worktree of the checkout chosen here.
 export async function planPicked(cloud, id, checkout, target = "") {
