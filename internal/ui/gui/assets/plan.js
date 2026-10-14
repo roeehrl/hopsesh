@@ -1,6 +1,6 @@
 // The plan sheet (what a hop, continuation or send will do, with its choices), its
 // progress, and the Done screen.
-import { api, on, h, fill, view, state, screen, go, current, toast, fail, errText, cap, agentChip, here, $, count, sys, keys, cloudChip, cloudOf, manyAccounts } from "./core.js";
+import { api, on, h, fill, view, state, screen, go, current, toast, fail, errText, cap, agentChip, here, $, count, sys, keys, cloudChip, cloudOf, manyAccounts, ownerShown } from "./core.js";
 import { openMenu, closeAll } from "./menu.js";
 import { undo } from "./activity.js";
 import { openResult, where as opensIn } from "./term.js";
@@ -147,15 +147,21 @@ async function chooseFolder() {
 function summary(p) {
  const profiles=cur.profiles||[];
  const chosen=profiles.find(x=>x.id===cur.opts.targetProfile)||profiles.find(x=>x.default);
- const identity=x=>x?.account?.email||x?.account?.label||x?.name||"Account not identified";
- const source=cur.e?.profile;
+ // A profile is a folder: whoever signs in to it last is its account now. Name it by the
+ // folder and say who is signed in, so its label never changes with a login.
+ const signedIn=x=>x?.account?.email||x?.account?.label;
+ const now=x=>!x?.account?"sign-in not checked":x.account.loggedIn===false?"signed out":signedIn(x)?`signed in as ${signedIn(x)} now`:"signed in, email unavailable";
+ const source=cur.e?.profile, owner=cur.e?.owner;
+ // The session's own account is the one its record names, never the folder's sign-in now.
+ const ran=ownerShown(cur.e)||(owner?.recorded?signedIn(source)||"Account not identified":"Account not recorded");
  const accountChoice=profiles.length?h("div",{class:"transfer-accounts"},
-  h("div",{},h("span",{class:"sec-h"},"Source account"),h("b",{},identity(source)),h("span",{class:"muted"},source?.account?.email||source?.account?.label ? source?.name||p.sourceProfile||p.fromAgent : "Email unavailable")),
+  h("div",{},h("span",{class:"sec-h"},"Source account"),h("b",{title:owner?.recorded?"The account the agent recorded for this session":"The agent did not record which account ran this session"},ran),
+   h("span",{class:"muted"},source?`In ${source.name||p.sourceProfile||p.fromAgent}, ${now(source)}`:"")),
   h("span",{class:"account-arrow","aria-hidden":"true"},"→"),
   h("div",{},h("span",{class:"sec-h"},"Destination account"),
    !cur.returnCandidate&&profiles.length>1?h("select",{"aria-label":"Destination account",onchange:ev=>{cur.opts.targetSession="";return set("targetProfile",ev.target.value)}},
-    profiles.map(x=>h("option",{value:x.id,selected:chosen?.id===x.id},`${identity(x)}${identity(x)!==x.name?' · '+x.name:''}${x.default?' · Default profile':''}`)))
-   :h("b",{},identity(chosen)),h("span",{class:"muted"},chosen?`${identity(chosen)!==chosen.name?chosen.name+' · ':''}${chosen.default?'Default profile':'Named profile'}${!chosen.account?.email&&!chosen.account?.label?' · Email unavailable':''}`:"Account not identified"))):null;
+    profiles.map(x=>h("option",{value:x.id,selected:chosen?.id===x.id},`${x.name}${signedIn(x)?' · '+signedIn(x):''}`)))
+   :h("b",{},chosen?.name||"Account not identified"),h("span",{class:"muted"},chosen?`${cap(now(chosen))}${chosen.default?' · Default profile':''}`:"Account not identified"))):null;
  const summaryBody=summaryContent(p);
  return h("div",{},cur.returnCandidate ? h("details",{class:"return-destination-identity"},h("summary",{},`Original destination: ${cur.returnCandidate.agentName}${manyAccounts(cur.returnCandidate.agent) && cur.returnCandidate.profileLabel ? " (" + cur.returnCandidate.profileLabel + ")" : ""} on ${cur.returnCandidate.machine}`),
   h("code",{},cur.opts.targetSession || "New session; the original is preserved")) : null,accountChoice,summaryBody);

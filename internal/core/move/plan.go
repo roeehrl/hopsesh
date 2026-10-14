@@ -249,6 +249,11 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		}
 		copies = selected
 	}
+	// The session's own root, now signed in to another account than the one that ran it:
+	// continuing there needs a fresh portable copy, not the original.
+	if ownerBoundary(in) && samePlace(in) && opt.TargetSession == "" {
+		opt.NewReplica = true
+	}
 	if opt.NewReplica || opt.Bounded || profileBoundary(in) || src.Module.Spec().ID != tgt.Module.Spec().ID || len(copies) == 1 && copies[0].Summary.Key != in.Session.Key {
 		return buildContinue(ctx, in, opt)
 	}
@@ -272,7 +277,7 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		p.Options.RemoteControl = false
 		p.Warnings = append(p.Warnings, "remote control stays off: "+tgt.Account.Why)
 	}
-	if src.Account != nil && tgt.Account != nil && src.Account.Key != "" && tgt.Account.Key != "" && src.Account.Key != tgt.Account.Key {
+	if sk, tk := sourceAccountKey(in), signedInKey(tgt); sk != "" && tk != "" && sk != tk {
 		if _, ok := tgt.Module.(agent.Sanitizer); ok {
 			p.Options.OtherAccount = true
 			p.Warnings = append(p.Warnings, fmt.Sprintf("this machine is signed in to another %s account than %s; content bound to that account (such as signed reasoning) is left out of the copy", spec.Name, src.Machine.Name))

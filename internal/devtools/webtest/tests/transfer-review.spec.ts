@@ -118,7 +118,7 @@ test('missing source identity is explained without a duplicate profile label',as
  // Remove only the public observation, never the stable profile ID.
  await page.route('**/call',async route=>{const r=route.request().postDataJSON();if(!['InitialScan','Scan','RefreshHere','Plan'].includes(r.m)){await route.continue();return;}const response=await route.fetch(),body=await response.json();for(const g of body.result.groups||[])for(const e of g.entries||[])if(e.profile)e.profile.account=null;if(body.result.sourceEntry?.profile)body.result.sourceEntry.profile.account=null;await route.fulfill({json:body});});
  await page.reload();await expect(page.locator("#fresh")).toContainText("updated",{timeout:30_000});await plan(page);
- const source=page.locator('.transfer-accounts>div').first();await expect(source).toContainText('Email unavailable');const name=await source.locator('b').innerText();expect((await source.innerText()).split(name).length-1).toBe(1);
+ const source=page.locator('.transfer-accounts>div').first();await expect(source).toContainText('sign-in not checked');const name=await source.locator('b').innerText();expect((await source.innerText()).split(name).length-1).toBe(1);
 });
 
 

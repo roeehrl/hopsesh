@@ -314,7 +314,7 @@ export const accountTitle = e => {
   if (o.recorded && !o.current) return `${e.agentName} recorded an account that no profile here is signed in to now. ${where}`;
   return `${e.agentName} did not record which account ran this session. ${where}`;
 };
-const ownerShown = e => e?.owner?.email || (e?.owner?.recorded && !e.owner.current ? "another account" : "");
+export const ownerShown = e => e?.owner?.email || (e?.owner?.recorded && !e.owner.current ? "another account" : "");
 export const accountGroupLabel = e => e.profile ? `${ownerShown(e) || "Account not recorded"} · ${e.agentName} · ${e.machine === here() ? sys.Here : e.machine}${!e.profile.default || !e.owner?.current ? " · in " + e.profile.name : ""}` : "No account profile";
 // accountKey files a session under its root and its recorded account, for filters and groups.
 export const accountKey = e => (e.profile?.id || "") + "\u0000" + (e.owner?.email || (e.owner?.recorded ? (e.owner.current ? "current" : "other") : ""));

@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Fixed
+
+- A Claude Code session recorded as run by another account can now continue in its own
+  profile under the account signed in there now. hopsesh makes a new session from its
+  portable conversation, leaves out account-bound content such as signed reasoning, and
+  keeps the original. Before, the move refused with "this session is already here".
+  Moves also decide whether accounts differ from the session's recorded account, not
+  from its profile's sign-in now.
+- The move review names the account that ran the session as its source account. It
+  names profiles by folder and says who is signed in to each now, so a profile's label
+  no longer changes with a new sign-in.
+
 ## [0.4.5] - 2026-10-14
 
 ### Fixed

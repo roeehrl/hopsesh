@@ -12,6 +12,44 @@ func profileBoundary(in Input) bool {
 	s, t := in.Source.Install, in.Target.Install
 	return (s.Profile != nil || t.Profile != nil) && (s.ProfileID() != t.ProfileID() || s.Profile != nil && t.Profile != nil && s.Profile.Endpoint != t.Profile.Endpoint)
 }
+
+// sourceAccountKey is the account that ran the session: the one its own record names
+// (Claude Code's Remote Control records), else the account its root is signed in to now.
+// A root that was signed in to another account before holds that account's sessions.
+func sourceAccountKey(in Input) string {
+	if m := in.Session.Mirror; m != nil && m.Account != "" {
+		return m.Account
+	}
+	return signedInKey(in.Source)
+}
+
+func signedInKey(s Side) string {
+	if a := s.Account; a != nil {
+		return a.Key
+	}
+	if p := s.Install.Profile; p != nil && p.Account != nil && p.Account.LoggedIn {
+		return p.Account.Key
+	}
+	return ""
+}
+
+// ownerBoundary: the session's recorded account is not the one its destination is
+// signed in to now. Its account-bound content (such as signed reasoning) cannot be
+// replayed there, even when the destination is the session's own root.
+func ownerBoundary(in Input) bool {
+	if in.Source.Module == nil || in.Target.Module == nil || in.Source.Module.Spec().ID != in.Target.Module.Spec().ID {
+		return false
+	}
+	m := in.Session.Mirror
+	t := signedInKey(in.Target)
+	return m != nil && m.Account != "" && t != "" && m.Account != t
+}
+
+// samePlace: the destination is the session's own root on its own machine.
+func samePlace(in Input) bool {
+	return in.Source.Machine != nil && in.Target.Machine != nil && in.Source.Machine.Name == in.Target.Machine.Name &&
+		in.Source.Install.ProfileID() == in.Target.Install.ProfileID() && in.Source.Install.BindingID() == in.Target.Install.BindingID()
+}
 func ValidateProfiles(ctx context.Context, in Input) error {
 	for _, side := range []Side{in.Source, in.Target} {
 		p := side.Install.Profile

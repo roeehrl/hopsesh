@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { row, details } from "./helpers";
+import { row, details, action } from "./helpers";
 
 // The owners world: Claude Code is signed in to alice@example.com now; "Find the codeword"
 // recorded that another account ran it, "Feature flag" that alice did.
@@ -94,4 +94,14 @@ test("a narrow list keeps titles readable and hides the column handle", async ({
   await expect(page.getByRole("separator", { name: "Resize the status column" })).toBeHidden();
   const title = row(page, "Find the codeword").locator(".t");
   await expect.poll(async () => (await title.boundingBox())!.width).toBeGreaterThan(90);
+});
+
+test("a move names the account that ran the session, not its folder's sign-in now", async ({ page }) => {
+  await owners(page);
+  await row(page, "Find the codeword").click();
+  await action(page, "move", /^Continue with Codex…/);
+  const source = page.locator(".transfer-accounts>div").first();
+  await expect(source.locator("b")).toHaveText("another account");
+  await expect(source).toContainText("signed in as alice@example.com now");
+  await expect(page.locator(".transfer-accounts>div").last()).not.toContainText(/^alice@example\.com/);
 });
