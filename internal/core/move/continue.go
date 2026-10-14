@@ -463,6 +463,7 @@ func instructionGaps(from, to agent.Spec, cwd string) []string {
 
 func planContinueWarnings(p *Plan, in Input, opt Options) {
 	spec := in.Target.Module.Spec()
+	markUnprotected(p, in, opt)
 	if p.Live && !opt.Fork {
 		p.Warnings = append(p.Warnings, liveSnapshotNotice(p))
 	}

@@ -517,12 +517,18 @@ func keepBoth(p *Plan) {
 	p.Warnings = append(p.Warnings, "both copies stay: this one comes in as a separate session, \""+p.Title+"\"")
 }
 
-func planWarnings(p *Plan, in Input, opt Options) {
-	spec := in.Target.Module.Spec()
+// markUnprotected says when the original stays on a machine without hopsesh, whose
+// hooks cannot block or warn it: a move and a continuation alike.
+func markUnprotected(p *Plan, in Input, opt Options) {
 	if opt.Notify && !opt.Fork && in.Source.Machine != nil && !in.Source.Machine.HopseshThere() {
 		p.Unprotected = true
 		p.Warnings = append(p.Warnings, fmt.Sprintf("the original on %s won't be protected: without hopsesh there, nothing stops it from being continued on %s too, and the two copies drift apart; set up hopsesh on %s first to protect it", p.Source.Location, p.Source.Location, p.Source.Location))
 	}
+}
+
+func planWarnings(p *Plan, in Input, opt Options) {
+	spec := in.Target.Module.Spec()
+	markUnprotected(p, in, opt)
 	if p.Live {
 		if opt.Fork {
 			p.Warnings = append(p.Warnings, fmt.Sprintf("the session is still open on %s; you chose fork, so both copies continue independently", p.Source.Location))

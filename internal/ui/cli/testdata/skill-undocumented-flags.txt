@@ -1,0 +1,81 @@
+# Visible flags the hopsesh skill (internal/ui/skill/files) deliberately does not teach
+# agents: "<command path> --flag  # why". TestEveryVisibleFlagDocumented and
+# internal/devtools/skillcheck fail on any other undocumented flag, and on an entry here
+# whose flag is gone or that the skill now mentions.
+
+hopsesh accounts add --machine  # user-only setup: account folders are the user's (rule 4)
+hopsesh accounts add --root  # user-only setup
+hopsesh accounts add --tag  # user-only setup
+hopsesh accounts edit --name  # user-only setup
+hopsesh accounts edit --tag  # user-only setup
+hopsesh accounts scan --machine  # account discovery; agents read accounts through ls
+hopsesh archive --chunk  # archive paging; the briefing itself tells the receiving agent how to read it
+hopsesh archive --offset  # archive paging; taught by the briefing
+hopsesh archive --search  # archive search; taught by the briefing
+hopsesh clouds env --unset  # changes a remembered environment: the user's (rule 4)
+hopsesh doctor --all-machines  # a user diagnostic across machines; agents run doctor <machine>
+hopsesh handoff --operation-id  # retry key for the app and scripts
+hopsesh handoff --to-dir  # bringing back from a cloud into a chosen checkout; the user's choice
+hopsesh history --archive-mb  # user settings (hopsesh history)
+hopsesh history --context-budget  # user settings
+hopsesh history --lineage-mb  # user settings
+hopsesh history --native-file-mb  # user settings
+hopsesh history --older  # user settings
+hopsesh history --read-memory-mb  # user settings
+hopsesh history --record-mb  # user settings
+hopsesh hosts add --keychain  # user-only setup (rule 4); passwords never pass through agents
+hopsesh hosts add --password  # user-only setup; passwords never pass through agents (rule 5)
+hopsesh hosts auth --forget  # user-only setup
+hopsesh hosts auth --keychain  # user-only setup
+hopsesh ls --cached  # interactive display; agents want contacted machines
+hopsesh ls --cloud  # narrower listing; ls without it covers clouds
+hopsesh ls --group-by  # display grouping; the JSON has groups and owners already
+hopsesh ls --no-local  # scripts and tests
+hopsesh notices install --config-dir  # hook plumbing: the installed hooks pass it
+hopsesh notices install --profile  # protection setup is the user's
+hopsesh notices install --state-dir  # hook plumbing
+hopsesh notices remove --config-dir  # hook plumbing
+hopsesh notices remove --profile  # protection setup is the user's
+hopsesh notices remove --state-dir  # hook plumbing
+hopsesh notices status --config-dir  # hook plumbing
+hopsesh notices status --profile  # hook plumbing
+hopsesh notices status --state-dir  # hook plumbing
+hopsesh open --app  # agents never open sessions (rule 3)
+hopsesh open --here  # agents never open sessions (rule 3)
+hopsesh open --terminal  # agents never open sessions (rule 3)
+hopsesh plan --app  # opening is the user's (rule 3)
+hopsesh plan --append  # cloud return into an earlier copy; offered by the plan's own blockers
+hopsesh plan --bounded  # context recovery the plan offers when it is needed
+hopsesh plan --context-budget  # advanced transfer tuning
+hopsesh plan --ghq  # clone layout preference of the user
+hopsesh plan --new-session  # advanced replica choice the plan offers when needed
+hopsesh plan --older  # advanced transfer tuning
+hopsesh plan --operation-id  # retry key for the app and scripts
+hopsesh plan --repos  # clone folder; the configured one is used
+hopsesh plan --target-profile  # account choice the plan offers when several exist
+hopsesh plan --target-session  # advanced replica choice the plan offers when needed
+hopsesh plan --terminal  # with --run, which agents never use (rule 3)
+hopsesh pull --app  # opening is the user's (rule 3)
+hopsesh pull --append  # as plan --append
+hopsesh pull --bounded  # as plan --bounded
+hopsesh pull --context-budget  # as plan --context-budget
+hopsesh pull --ghq  # as plan --ghq
+hopsesh pull --new-session  # as plan --new-session
+hopsesh pull --older  # as plan --older
+hopsesh pull --operation-id  # as plan --operation-id
+hopsesh pull --repos  # as plan --repos
+hopsesh pull --target-profile  # as plan --target-profile
+hopsesh pull --target-session  # as plan --target-session
+hopsesh pull --terminal  # as plan --terminal
+hopsesh push --bounded  # as plan --bounded
+hopsesh push --new-session  # as plan --new-session
+hopsesh push --operation-id  # as plan --operation-id
+hopsesh push --target-profile  # as plan --target-profile
+hopsesh push --target-session  # as plan --target-session
+hopsesh skill install --force  # skill setup is the user's (rule 4)
+hopsesh skill remove --force  # skill setup is the user's (rule 4)
+hopsesh terminals run --dir  # interactive terminal for the user
+hopsesh terminals run --profile  # interactive terminal for the user
+hopsesh unblock --restore  # unblocking is the user's alone
+hopsesh undo --force  # loses later work: the user's decision
+hopsesh update --check  # updating is the user's (rule 4)

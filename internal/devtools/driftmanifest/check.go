@@ -99,7 +99,7 @@ func checkTargets(ts []target, groups []string, external bool) []string {
 		if !targetID.MatchString(x.Group) || groups != nil && !slices.Contains(groups, x.Group) {
 			bad(x, "group %q is not one of %v", x.Group, groups)
 		}
-		if !slices.Contains([]string{"agent", "cloud", "standard"}, x.Kind) || !slices.Contains([]string{"high", "low"}, x.Priority) {
+		if !slices.Contains([]string{"agent", "app", "cloud", "standard"}, x.Kind) || !slices.Contains([]string{"high", "low"}, x.Priority) {
 			bad(x, "kind %q or priority %q", x.Kind, x.Priority)
 		}
 		switch x.Latest.From {
@@ -112,10 +112,41 @@ func checkTargets(ts []target, groups []string, external bool) []string {
 			if !strings.HasPrefix(x.Latest.Ref, "https://") || !strings.HasPrefix(x.Latest.Field, ".") {
 				bad(x, "latest from json needs an https ref and a jq field")
 			}
+		case "feed":
+			if !strings.HasPrefix(x.Latest.Ref, "https://") {
+				bad(x, "latest from feed needs an https ref")
+			}
 		default:
 			bad(x, "latest from %q", x.Latest.From)
 		}
+		// The baseline is what the latest is compared with: never below a floor the code
+		// gates on, nor below the tested version.
+		for _, v := range append([]string{x.Tested}, floorVersions(x)...) {
+			if v != "" && x.Baseline != "" && versionLess(x.Baseline, v) {
+				bad(x, "baseline %s is below %s (the tested version or a floor)", x.Baseline, v)
+			}
+		}
+		for _, f := range x.Floors {
+			if f.Version == "" || f.Gates == "" || f.Source == "" {
+				bad(x, "a floor needs a version, what it gates and its source")
+			}
+			if len(f.Relies) > 0 && len(x.Watch.Help) == 0 || len(f.Methods) > 0 && x.Watch.Schema == nil {
+				bad(x, "floor %s relies on help or a schema the target does not run", f.Version)
+			}
+		}
 		w := x.Watch
+		ids := map[string]bool{}
+		for _, f := range w.Formats {
+			if !targetID.MatchString(f.ID) || ids[f.ID] || f.What == "" || len(f.Fields) == 0 || len(f.Readers) == 0 {
+				bad(x, "format %q needs a unique id, what it is, fields and readers", f.ID)
+			}
+			ids[f.ID] = true
+			for _, s := range f.Fields {
+				if s == "" || strings.ContainsAny(s, "\t\n") {
+					bad(x, "format %s: field %q", f.ID, s)
+				}
+			}
+		}
 		if len(w.Docs) == 0 || w.Grep == "" {
 			bad(x, "every target hashes docs and greps its feeds")
 		}

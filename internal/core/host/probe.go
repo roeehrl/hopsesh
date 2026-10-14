@@ -250,7 +250,7 @@ func parseProbe(out []byte) Facts {
 		case len(parts) == 2 && parts[0] == "os":
 			f.OS = parts[1]
 		case len(parts) == 2 && parts[0] == "arch":
-			f.Arch = strings.ToLower(parts[1])
+			f.Arch = goArch(parts[1])
 		case len(parts) == 2 && parts[0] == "home":
 			f.Home = parts[1]
 		case len(parts) == 2 && parts[0] == "git":
@@ -268,6 +268,22 @@ func parseProbe(out []byte) Facts {
 		}
 	}
 	return f
+}
+
+// goArch names a machine's architecture as Go does (runtime.GOARCH, the release files):
+// uname -m says x86_64 or aarch64, Windows AMD64 or ARM64.
+func goArch(s string) string {
+	switch s = strings.ToLower(strings.TrimSpace(s)); s {
+	case "x86_64", "x64":
+		return "amd64"
+	case "aarch64", "arm64e", "armv8l":
+		return "arm64"
+	case "i386", "i486", "i586", "i686", "x86":
+		return "386"
+	case "armv6l", "armv7l":
+		return "arm"
+	}
+	return s
 }
 
 // windowsUname reports a uname from a Unix layer on Windows (Git for Windows, MSYS2,

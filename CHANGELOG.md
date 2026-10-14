@@ -33,8 +33,17 @@ All notable changes to this project are documented here. The format follows
 - Account filters, account groups, family names and move-back labels no longer change when a
   profile signs in to another account.
 
+- CI: the weekly drift check compares from the code's version floors and watches the identity,
+  record and hook formats hopsesh reads, and the Claude and Codex desktop apps; the skill is
+  checked against the built program (and the release's) and a command-tree golden; remote
+  scenarios run hopsesh over SSH with no hopsesh, nobody logged in, serve, 0.4.5 and offline.
+
 ### Fixed
 
+- `hopsesh hosts setup` copies this hopsesh to a Linux machine of the same kind again
+  instead of looking for a release: `uname -m` (x86_64, aarch64) is read as Go's arch name.
+- Continuing a session from a machine without hopsesh in another agent says the original
+  there is not protected, as a move does.
 - hopsesh never stops the Codex app's process: its one app-server holds every app thread.
   Such a thread shows as open in ChatGPT desktop, with Open instead of a stop.
 - The skill's reference named a `--fork` flag that does not exist.
