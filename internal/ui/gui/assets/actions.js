@@ -33,7 +33,7 @@ export function placeName(p, e) {
     case "terminal": return "Terminal";
     case "wt": return "Windows Terminal";
     case "claude-app": return "Claude app";
-    case "codex-app": return "Codex app";
+    case "codex-app": return `${liveOf(e || {}).app || "ChatGPT"} desktop`; // one shared app process: shown, never quit
     case "ide": return p.app || "an editor";
     case "tmux": return "tmux";
     case "ssh": return "an ssh login";
@@ -58,7 +58,7 @@ export function placesOf(e) {
   if (ts.length) out.push({ kind: "hopsesh", count: ts.length, waiting: ts.some((t) => t.attention), tabs: ts });
   const lv = liveOf(e);
   if (lv.live) for (const p of lv.places || []) out.push(Object.assign({}, p, { waiting: p.waiting || (lv.needs && !ts.length && (lv.places || []).length === 1) }));
-  if (lv.live && !ts.length && !(lv.places || []).length) out.push({ kind: lv.app ? "claude-app" : "unknown", count: 1, waiting: !!lv.needs });
+  if (lv.live && !ts.length && !(lv.places || []).length) out.push({ kind: lv.app ? (e.agent === "codex" ? "codex-app" : "claude-app") : "unknown", count: 1, waiting: !!lv.needs });
   return out;
 }
 export const placeCount = (ps) => ps.reduce((n, p) => n + (p.count || 1), 0);
@@ -160,7 +160,7 @@ function localModel(e) {
     const guardedDeparture = e.guard?.mode === "block" && moved?.machine && moved?.key;
     if (places.length && !guardedDeparture) {
       const first = tab || places.find(canShow) || places[0];
-      const show = (p) => ({ id: "show:" + p.kind, label: canShow(p) ? (p.kind === "ide" ? `Show ${placeName(p, e)}` : `Show in ${placeName(p, e)}`) : `Running in ${placeName(p, e)}`, short: "Show",
+      const show = (p) => ({ id: "show:" + p.kind, label: canShow(p) ? (p.kind === "ide" ? `Show ${placeName(p, e)}` : p.kind === "codex-app" ? `Open in ${placeName(p, e)}` : `Show in ${placeName(p, e)}`) : `Running in ${placeName(p, e)}`, short: "Show",
         disabled: !canShow(p) || ((p.kind === "claude-app" || p.kind === "codex-app") && !e.canApp), why: ((p.kind === "claude-app" || p.kind === "codex-app") && !e.canApp) ? e.appWhy : canShow(p) ? "" : `hopsesh can't show a session in ${placeName(p, e)}`, run: () => showPlace(e, p) });
       m.primary = show(first);
       if (n >= 2) {

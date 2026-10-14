@@ -114,7 +114,7 @@ function agents() {
     return card(
       h("div", { class: "set-row" },
         agentBadge(a.id, a.name),
-        title(a.name, a.version ? `${a.version} on ${sys.here}${a.folder ? " · " + a.folder : ""}` : `Not installed on ${sys.here}`),
+        title(a.name, a.version ? `${a.version}${a.runtime === "app" ? " (built into the desktop app)" : ""} on ${sys.here}${a.folder ? " · " + a.folder : ""}` : `Not installed on ${sys.here}`),
         a.stability === "experimental" ? h("span", { class: "chip st-warn" }, "experimental") : null,
         h("button", { class: "switch", role: "switch", "aria-checked": a.enabled ? "true" : "false", "aria-label": `${a.name} on`,
           onclick: () => set(!a.enabled, a.remoteControl, a.import, a.enabled ? `${a.name} is off` : `${a.name} is on`) })),
@@ -124,7 +124,9 @@ function agents() {
       a.enabled && caps.includes("remote-control") ? h("label", { class: "opt" }, h("input", { type: "checkbox", checked: a.remoteControl, onchange: (e) => set(true, e.target.checked, a.import, "Saved") }),
         h("span", {}, h("b", {}, `Turn on Remote Control for sessions hopped into ${a.name}`), h("span", { class: "muted" }, "Reach them from your phone or other machines. Needs the agent's own subscription login."))) : null,
       a.enabled && caps.includes("import") ? h("label", { class: "opt" }, h("input", { type: "checkbox", checked: a.import, onchange: (e) => set(true, a.remoteControl, e.target.checked, "Saved") }),
-        h("span", {}, h("b", {}, `Continue in ${a.name} with its own importer`), h("span", { class: "muted" }, "Instead of hopsesh's conversion, when it can read the other agent; hopsesh still adds its briefing. The plan can change it each time."))) : null);
+        h("span", {}, h("b", {}, `Continue in ${a.name} with its own importer`), h("span", { class: "muted" }, "Instead of hopsesh's conversion, when it can read the other agent; hopsesh still adds its briefing. The plan can change it each time."))) : null,
+      a.enabled ? (a.kinds || []).map((k) => h("label", { class: "opt" }, h("input", { type: "checkbox", checked: k.shown, onchange: (e) => run(() => api("SetAgentKind", a.id, k.id, e.target.checked), "Saved · applies at the next scan") }),
+        h("span", {}, h("b", {}, `Show ${k.name.toLowerCase()}`), h("span", { class: "muted" }, k.note + " Hidden by default.")))) : null);
   });
 }
 
@@ -432,6 +434,14 @@ function hookName(hook, hooks) {
   return hooks.filter((x) => x.agent === hook.agent).length > 1 ? `${name} (${hook.profileLabel || hook.profile || "default account"})` : name;
 }
 
+// installHooks reports each item's own failure (the call itself succeeds when one agent
+// cannot take the hook).
+const installHooks = (id, profile) => withCLI(() => api("InstallNoticeHooks", id, profile)).then((res) => {
+  const bad = (res || []).filter((x) => x.result === "failed" || id && x.result === "unsupported");
+  if (bad.length) throw new Error(bad.map((x) => `${AGENT_NAMES[x.agent] || x.agent}: ${x.reason}`).join("; "));
+  return res;
+});
+
 function noticeSetup() {
   const hooks = s.noticeHooks || [];
   const off = s.original === "off";
@@ -444,8 +454,8 @@ function noticeSetup() {
       title(hookName(hook, hooks), `${hook.installed ? "Installed" : "Not installed"}${hook.installed ? trustWords(hook.trust) : ""}${hook.reason ? " · " + hook.reason : ""}`),
       hook.trust && hook.trust.state !== "trusted" && hook.trust.fix ? h("span", {class:"muted",style:"font-size:12px"}, hook.trust.fix) : null,
       hook.installed ? h("button", {class:"btn",onclick:()=>run(()=>api("RemoveNoticeHooks",hook.agent,hook.profile),"Hook removed")}, "Remove hook")
-      : h("button", {class:"btn",disabled:!hook.supported || off,onclick:()=>run(()=>withCLI(()=>api("InstallNoticeHooks",hook.agent,hook.profile)),"Hook installed")}, "Install hook"))),
+      : h("button", {class:"btn",disabled:!hook.supported || off,onclick:()=>run(()=>installHooks(hook.agent,hook.profile),"Hook installed")}, "Install hook"))),
     h("div", {style:"display:flex;gap:8px;flex-wrap:wrap"},
-      h("button", {class:"btn",disabled:off,onclick:()=>run(()=>withCLI(()=>api("InstallNoticeHooks","","")),"Hooks installed")}, "Install all hooks"),
+      h("button", {class:"btn",disabled:off,onclick:()=>run(()=>installHooks("",""),"Hooks installed")}, "Install all hooks"),
       h("button", {class:"btn",onclick:()=>run(()=>loadHookHealth(true))}, "Check again")));
 }

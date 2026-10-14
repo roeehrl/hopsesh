@@ -2,12 +2,18 @@ package gui
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
+	"os"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
+	"github.com/roeehrl/hopsesh/internal/core/appicon"
 	"github.com/roeehrl/hopsesh/internal/core/integrate"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
@@ -34,6 +40,9 @@ type HookHealthDTO struct {
 	Problems []HookProblem            `json:"problems"`
 	Mode     string                   `json:"mode"` // config original
 	Checked  time.Time                `json:"checked"`
+	// Fingerprint names this set of problems; Dismissed: the user said "Not now" to it.
+	Fingerprint string `json:"fingerprint"`
+	Dismissed   bool   `json:"dismissed"`
 }
 
 // HookProblem is one agent profile whose protection hook cannot protect originals.
@@ -67,7 +76,7 @@ func (a *App) HookHealth(force bool) (HookHealthDTO, error) {
 	if !force && health.dto != nil && health.app == a && time.Since(health.dto.Checked) < 5*time.Minute {
 		d := *health.dto
 		health.mu.Unlock()
-		return d, nil
+		return a.withDismissal(d), nil
 	}
 	health.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
@@ -81,10 +90,64 @@ func (a *App) HookHealth(force bool) (HookHealthDTO, error) {
 	if err != nil && len(hooks) == 0 && d.CLIReady { // without the command, that card says it
 		d.Problems = append(d.Problems, HookProblem{State: "unknown", Message: "hopsesh could not check the protection hooks: " + err.Error()})
 	}
+	d.Fingerprint = problemFingerprint(d)
 	health.mu.Lock()
 	health.dto, health.app = &d, a
 	health.mu.Unlock()
-	return d, nil
+	return a.withDismissal(d), nil
+}
+
+// problemFingerprint names what protection still needs: the command, then each agent
+// profile's problem. Wording and check times do not change it.
+func problemFingerprint(d HookHealthDTO) string {
+	var keys []string
+	if !d.CLIReady {
+		keys = append(keys, "cli")
+	}
+	for _, p := range d.Problems {
+		keys = append(keys, string(p.Agent)+"\x00"+p.Profile+"\x00"+p.State)
+	}
+	if len(keys) == 0 {
+		return ""
+	}
+	sort.Strings(keys)
+	sum := sha256.Sum256([]byte(fmt.Sprint(keys)))
+	return hex.EncodeToString(sum[:8])
+}
+
+func (a *App) withDismissal(d HookHealthDTO) HookHealthDTO {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	d.Dismissed = d.Fingerprint != "" && a.core.Cfg.ProtectPrompt == d.Fingerprint
+	return d
+}
+
+// DismissProtection remembers "Not now" for this set of protection problems: the card
+// comes back when the set changes (a new agent, a hook that stopped working).
+func (a *App) DismissProtection(fingerprint string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.core.Cfg.ProtectPrompt = fingerprint
+	return a.save()
+}
+
+// OpenAgentApp brings an agent's desktop app forward (to approve its hooks there).
+func (a *App) OpenAgentApp(id string) (string, error) {
+	m, ok := a.snapshot().Module(agent.ID(id))
+	if !ok {
+		return "", fmt.Errorf("unknown agent %s", id)
+	}
+	apps := m.Spec().Icon.Apps
+	name := nonEmptyStr(appicon.Name(apps), m.Spec().Name)
+	if appHook != nil {
+		return name, appHook(name, agent.Command{})
+	}
+	home, _ := os.UserHomeDir()
+	p := appicon.Installed(apps, home)
+	if p == "" {
+		return "", fmt.Errorf("hopsesh can't find the %s app on this machine", name)
+	}
+	return name, openApp(p)
 }
 
 func hookProblems(hooks []app.MovementHookStatus, mode string) []HookProblem {
@@ -97,6 +160,8 @@ func hookProblems(hooks []app.MovementHookStatus, mode string) []HookProblem {
 		switch {
 		case !h.Supported:
 			p.State, p.Message = "unsupported", "Movement protection is not available here: "+h.Reason
+		case h.Result == app.HookFailed:
+			p.State, p.Message = "failed", "hopsesh could not check the protection hook: "+h.Reason
 		case !h.Enabled:
 			p.State, p.Message = "settings", h.Reason
 		case !h.Installed:

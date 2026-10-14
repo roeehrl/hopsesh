@@ -6,7 +6,23 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+
+- A Mac with only the Codex app (ChatGPT.app) uses the app's built-in Codex for sign-in
+  checks, resuming and protection hooks; a Codex CLI is still preferred when installed. Local
+  and remote Macs alike.
+- Codex voice conversations and Work threads from the Codex app are hidden by default;
+  Settings › Agents (or `voice_threads` / `work_threads` under `[agents.codex]`) shows them.
+
 ### Changed
+
+- Version checks use semantic version precedence: a pre-release past a minimum counts (the
+  Codex app's built-in 0.162.0-alpha), one before it does not. The Codex protection hook
+  needs Codex 0.129.0 or newer (hooks and their review), down from 0.160.0.
+- The protection card lists every detected agent, including one that cannot take the hook
+  and why, says what each hook covers (Terminal, the desktop app), and keeps each step's
+  result on screen until Done. "Not now" is remembered until the problems change.
+- A skill copy installed by a newer hopsesh is never replaced by an older one.
 
 - Sessions are attributed from every record of the account they ran under: Claude Code's
   per-run organisation stamp (not only Remote Control), Codex's session creator, and a new
@@ -19,6 +35,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- hopsesh never stops the Codex app's process: its one app-server holds every app thread.
+  Such a thread shows as open in ChatGPT desktop, with Open instead of a stop.
+- The skill's reference named a `--fork` flag that does not exist.
 - Claude Code sessions continue in place under the account signed in now (**Continue
   here**); Codex sessions that ran, or may have run, under another account are not resumed
   as they are (Codex would fail) but continue as a cleaned copy.

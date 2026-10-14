@@ -175,6 +175,9 @@ func noticesCmd() *cobra.Command {
 				default:
 					statuses, err = r.app.NoticeHooksFor(cmd.Context(), agent.ID(id), profile)
 				}
+				if err == nil {
+					err = app.MovementHookErrors(action, statuses)
+				}
 				if r.jsonOut {
 					_ = r.emitJSON(statuses)
 				} else {

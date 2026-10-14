@@ -762,6 +762,11 @@ body.terminal-right .divider[data-pane="inspector"]{display:none}
 .protect-list li.ok .mark { color: var(--ok); }
 .protect-list li.wait .mark { color: var(--warn); }
 .protect-list li.todo .mark { color: var(--muted); }
+.protect-list li.na .mark { color: var(--muted); }
+.protect-list li.fail .mark { color: var(--err); }
+.protect-item { display: flex; flex-direction: column; min-width: 0; }
+.protect-tools { font-size: 11.5px; }
+.protect-error { color: var(--err); }
 .protect-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .protect-actions .link { margin-left: auto; }
 

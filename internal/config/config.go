@@ -57,6 +57,33 @@ type Agent struct {
 	// session's Resume menu: "here" (the hopsesh Terminal window), "terminal" (the
 	// terminal app) or "app" (the agent's desktop app). "" follows [terminal] resume.
 	Place string `toml:"place,omitempty"`
+	// VoiceThreads and WorkThreads show the agent's voice conversations and Work threads
+	// (Codex app), hidden by default.
+	VoiceThreads bool `toml:"voice_threads,omitempty"`
+	WorkThreads  bool `toml:"work_threads,omitempty"`
+}
+
+// Shows reports whether sessions of these kinds (agent.Summary.Kinds) are listed.
+func (a Agent) Shows(kinds []string) bool {
+	for _, k := range kinds {
+		if k == "voice" && !a.VoiceThreads || k == "work" && !a.WorkThreads {
+			return false
+		}
+	}
+	return true
+}
+
+// SetShows turns a kind of session on or off; false for a kind this setting lacks.
+func (a *Agent) SetShows(kind string, show bool) bool {
+	switch kind {
+	case "voice":
+		a.VoiceThreads = show
+	case "work":
+		a.WorkThreads = show
+	default:
+		return false
+	}
+	return true
 }
 
 // Cloud is per-cloud configuration, by the cloud's name ("codex-cloud"). Like a machine,
@@ -286,6 +313,9 @@ type Config struct {
 	CLIPrompt string `toml:"cli_prompt,omitempty"`
 	// SetupPrompt is "declined" once the user closed the app's "Finish setting up" line.
 	SetupPrompt string `toml:"setup_prompt,omitempty"`
+	// ProtectPrompt is the fingerprint of the protection problems the user answered "Not
+	// now" to; the Sessions card stays hidden until the set of problems changes.
+	ProtectPrompt string `toml:"protect_prompt,omitempty"`
 	// AppIcons shows an agent's installed desktop app icon in the app (default on).
 	AppIcons *bool            `toml:"app_icons,omitempty"`
 	Agents   map[string]Agent `toml:"agents,omitempty"`

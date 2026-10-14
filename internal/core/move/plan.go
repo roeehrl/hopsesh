@@ -696,28 +696,8 @@ func nonEmpty(s, d string) string {
 	return s
 }
 
-// versionLess compares dotted versions numerically.
-func versionLess(a, b string) bool {
-	pa, pb := strings.Split(a, "."), strings.Split(b, ".")
-	for i := 0; i < len(pa) && i < len(pb); i++ {
-		x, y := num(pa[i]), num(pb[i])
-		if x != y {
-			return x < y
-		}
-	}
-	return len(pa) < len(pb)
-}
-
-func num(s string) int {
-	n := 0
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			break
-		}
-		n = n*10 + int(c-'0')
-	}
-	return n
-}
+// versionLess orders agent versions (pre-releases below their release).
+func versionLess(a, b string) bool { return agent.VersionLess(a, b) }
 
 // ContinuationHint distinguishes a prepared transcript from an agent turn. Opening
 // an app does not submit a message; a terminal command may include the first prompt.

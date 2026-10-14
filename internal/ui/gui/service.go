@@ -152,6 +152,18 @@ type AgentDTO struct {
 	Icon          string             `json:"icon,omitempty"` // a data URL: the installed app's icon or the module's mark ("": initials)
 	// Clouds are the vendor clouds the agent reaches, with what hopsesh can do there.
 	Clouds []AgentCloudDTO `json:"clouds"`
+	// Runtime is "app" when the agent runs from its desktop app's bundled runtime here.
+	Runtime string `json:"runtime,omitempty"`
+	// Kinds are sessions hidden unless shown (voice conversations, Work threads).
+	Kinds []AgentKindDTO `json:"kinds"`
+}
+
+// AgentKindDTO is a kind of session hidden by default, and whether the user shows it.
+type AgentKindDTO struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Note  string `json:"note"`
+	Shown bool   `json:"shown"`
 }
 
 // AgentCloudDTO is one of an agent's clouds in Settings: the cloud capabilities its
@@ -317,7 +329,10 @@ func (a *App) agentsLocked() []AgentDTO {
 		s := m.Spec()
 		ac := a.core.Cfg.Agents[string(s.ID)]
 		d := AgentDTO{ID: s.ID, Name: s.Name, Stability: s.Stability, Enabled: !ac.Disabled, RemoteControl: ac.RemoteControl,
-			Import: ac.Import, Tested: s.Tested, Capabilities: agent.Capabilities(m), Icon: a.iconLocked(s), Clouds: []AgentCloudDTO{}}
+			Import: ac.Import, Tested: s.Tested, Capabilities: agent.Capabilities(m), Icon: a.iconLocked(s), Clouds: []AgentCloudDTO{}, Kinds: []AgentKindDTO{}}
+		for _, k := range s.Kinds {
+			d.Kinds = append(d.Kinds, AgentKindDTO{ID: k.ID, Name: k.Name, Note: k.Note, Shown: ac.Shows([]string{k.ID})})
+		}
 		for _, c := range s.Clouds {
 			ac := AgentCloudDTO{Name: c.Name, Title: c.Title, Capabilities: []agent.Capability{}, Fidelity: string(c.Down)}
 			for _, cp := range d.Capabilities {
@@ -333,7 +348,7 @@ func (a *App) agentsLocked() []AgentDTO {
 			d.Clouds = append(d.Clouds, ac)
 		}
 		if st, ok := here[s.ID]; ok && (st.Install.Present || st.Install.Binary != "") {
-			d.Version = st.Install.Version
+			d.Version, d.Runtime = st.Install.Version, st.Install.Runtime
 			for _, r := range s.Roots {
 				d.Folder = st.Install.Root(r.Name)
 				break

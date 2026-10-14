@@ -14,7 +14,6 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
-	"github.com/roeehrl/hopsesh/internal/core/appicon"
 	"github.com/roeehrl/hopsesh/internal/core/convert"
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
@@ -446,7 +445,7 @@ func scanDTO(core *app.App, inv *app.Inventory, updated, elsewhere time.Time, ta
 				d.Relationship.Name = name
 			}
 			if m := inv.Machine(d.Machine); m != nil && m.Local && d.Live {
-				d.Places = placesOf(it.Entry.Live, table, os.Getpid())
+				d.Places = placesOf(it.Entry.Live, table, os.Getpid(), appKind(it.Entry.Agent))
 			}
 			gd.Entries = append(gd.Entries, d)
 			for _, c := range it.Copies {
@@ -463,7 +462,7 @@ func scanDTO(core *app.App, inv *app.Inventory, updated, elsewhere time.Time, ta
 					copy.Relationship.Name = name
 				}
 				if m := inv.Machine(e.Machine); m != nil && m.Local && copy.Live {
-					copy.Places = placesOf(e.Live, table, os.Getpid())
+					copy.Places = placesOf(e.Live, table, os.Getpid(), appKind(e.Agent))
 				}
 				extra := GroupDTO{Name: "No repository", NoRepo: true, Entries: []EntryDTO{copy}}
 				if git := e.Git; git != nil && git.Identity != "" {
@@ -601,10 +600,7 @@ func entryDTO(core *app.App, inv *app.Inventory, it app.Item, targets []AgentOpt
 	}
 
 	if e.Live.State == agent.Live && e.Live.App {
-		d.App = e.AgentName
-		if m, ok := core.Module(e.Agent); ok {
-			d.App = nonEmptyStr(appicon.Name(m.Spec().Icon.Apps), d.App)
-		}
+		d.App = appName(core, inv.Machine(e.Machine), e)
 	}
 	if m, ok := core.Module(e.Agent); ok && !e.Location.IsCloud() {
 		_, d.CanPreview = m.(agent.Previewer)

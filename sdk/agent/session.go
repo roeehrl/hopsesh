@@ -34,6 +34,9 @@ type Summary struct {
 	// Mirror is the vendor's cloud copy of this session while it runs here (Claude Code's
 	// Remote Control), when the agent records one: the session is still this one.
 	Mirror *CloudLink `json:"mirror,omitempty"`
+	// Kinds are the Spec.Kinds this session is (Codex: "voice", "work"); the user
+	// interfaces leave such sessions out unless the user shows that kind.
+	Kinds []string `json:"kinds,omitempty"`
 }
 
 // LabelKind is what a legacy label said happened to a copy left behind.

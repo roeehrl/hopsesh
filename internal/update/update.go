@@ -35,13 +35,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/core/proc"
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 // Repo is the GitHub repository releases come from.
@@ -139,38 +138,11 @@ func CLIFor(ctx context.Context, rel *Release, goos, goarch string) ([]byte, err
 // Newer reports whether version a is newer than b (semantic versions, "v" optional;
 // a development build is never newer and is always older than a release).
 func Newer(a, b string) bool {
-	pa, oka := parse(a)
-	pb, okb := parse(b)
-	if !oka {
+	if _, ok := agent.CompareVersions(a, a); !ok {
 		return false
 	}
-	if !okb {
-		return true
-	}
-	for i := 0; i < 3; i++ {
-		if pa[i] != pb[i] {
-			return pa[i] > pb[i]
-		}
-	}
-	// 1.2.3 is newer than 1.2.3-rc1
-	return pa[3] == 0 && pb[3] == 1
-}
-
-var semver = regexp.MustCompile(`^v?(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.-]+)?$`)
-
-func parse(v string) ([4]int, bool) {
-	m := semver.FindStringSubmatch(strings.TrimSpace(v))
-	if m == nil {
-		return [4]int{}, false
-	}
-	var out [4]int
-	for i := 0; i < 3; i++ {
-		out[i], _ = strconv.Atoi(m[i+1])
-	}
-	if m[4] != "" {
-		out[3] = 1
-	}
-	return out, true
+	c, ok := agent.CompareVersions(a, b)
+	return !ok || c > 0
 }
 
 // ArchiveName is the release archive for this platform (matches .goreleaser.yaml).

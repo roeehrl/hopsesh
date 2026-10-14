@@ -37,9 +37,70 @@ type MovementHookStatus struct {
 	// Trust is the agent's own answer for agents that skip untrusted hooks (Codex): an
 	// installed hook delivers nothing until the user trusts it there.
 	Trust *agent.HookTrust `json:"trust,omitempty"`
+	// Result is this item's outcome (HookInstalled ... HookAbsent); Reason says why for a
+	// failed or unsupported one. One item's failure never hides the others.
+	Result string `json:"result,omitempty"`
+	// What the hook covers here: the agent's version, whether that is its CLI or the
+	// runtime bundled in its desktop app (agent.RuntimeApp), and the desktop app's name.
+	Version string `json:"version,omitempty"`
+	Runtime string `json:"runtime,omitempty"`
+	CLI     bool   `json:"cli,omitempty"`
+	App     string `json:"app,omitempty"`
 }
 
-// MovementNoticeHooks manages hooks only on this machine. A nonempty profile is
+// Per-item hook results.
+const (
+	HookInstalled     = "installed"
+	HookNeedsApproval = "needs-approval" // installed; the agent runs it only after the user trusts it there
+	HookRemoved       = "removed"
+	HookAbsent        = "absent"
+	HookUnsupported   = "unsupported"
+	HookFailed        = "failed"
+)
+
+// MovementHookErrors is the error a command-line action reports: every failed item, and
+// for install every agent that cannot take the hook.
+func MovementHookErrors(action string, statuses []MovementHookStatus) error {
+	var errs []error
+	for _, st := range statuses {
+		if st.Result == HookFailed || action == "install" && st.Result == HookUnsupported {
+			errs = append(errs, fmt.Errorf("%s: %s", st.Agent, st.Reason))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// result is an item's outcome after action.
+func (st *MovementHookStatus) result(action string, err error) {
+	switch {
+	case err != nil:
+		st.Result, st.Reason = HookFailed, err.Error()
+	case action == "remove" && !st.Installed:
+		st.Result = HookRemoved
+	case !st.Supported:
+		st.Result = HookUnsupported
+	case st.Installed && st.Trust != nil && (st.Trust.State == agent.HookNeedsReview || st.Trust.State == agent.HookDisabled):
+		st.Result = HookNeedsApproval
+	case st.Installed:
+		st.Result = HookInstalled
+	default:
+		st.Result = HookAbsent
+	}
+}
+
+// coverage describes what the hook covers on this install.
+func (st *MovementHookStatus) coverage(in agent.Install) {
+	st.Version, st.Runtime = in.Version, in.Runtime
+	st.CLI = in.Binary != "" && in.Runtime == ""
+	if strings.HasSuffix(in.Desktop, ".app") || strings.HasSuffix(strings.ToLower(in.Desktop), ".exe") {
+		st.App = strings.TrimSuffix(strings.TrimSuffix(filepath.Base(in.Desktop), ".app"), ".exe")
+	} else if in.Desktop != "" {
+		st.App = "desktop"
+	}
+}
+
+// MovementNoticeHooks manages hooks only on this machine. Each agent profile is one item
+// with its own Result; the error is only for a request that could not be attempted. A nonempty profile is
 // an exact registered ID (never a prefix, label, path, or remote registration).
 // An empty profile selects all registered local profiles plus an unregistered
 // default root. Empty id selects all enabled agents; a profile requires an agent.
@@ -69,7 +130,6 @@ func (a *App) movementNoticeHooks(ctx context.Context, m *host.Machine, action s
 		return nil, errors.New("movement hooks are local only")
 	}
 	var out []MovementHookStatus
-	var errs []error
 	for _, mod := range a.Modules() {
 		if id != "" && mod.Spec().ID != id {
 			continue
@@ -88,7 +148,13 @@ func (a *App) movementNoticeHooks(ctx context.Context, m *host.Machine, action s
 		}
 		installs, err := a.movementHookInstalls(ctx, m, mod, in, profile)
 		if err != nil {
-			errs = append(errs, err)
+			if profile != "" {
+				return out, err // the exact profile asked for is not this machine's
+			}
+			st := MovementHookStatus{Agent: mod.Spec().ID, Enabled: a.Cfg.MovementNoticesOn()}
+			st.coverage(in)
+			st.result(action, err)
+			out = append(out, st)
 			continue
 		}
 		defaultRoot, defaultRootErr := filepath.EvalSymlinks(in.Root("home"))
@@ -116,25 +182,25 @@ func (a *App) movementNoticeHooks(ctx context.Context, m *host.Machine, action s
 				hi.File = migratingMovementHookFile(hi.File, legacy)
 			}
 			st := MovementHookStatus{Agent: mod.Spec().ID, Profile: in.ProfileID(), ProfileLabel: profileLabel(in.Profile), Enabled: a.Cfg.MovementNoticesOn() && hi.DisabledReason == "", Supported: hi.Reason == "", Reason: strings.TrimSpace(hi.Reason + " " + hi.DisabledReason), Evidence: hi.Evidence}
+			st.coverage(in)
 			if hi.File == nil {
 				st.Supported = false
+				st.result(action, nil)
 				out = append(out, st)
 				continue
 			}
 			st.Path = hi.File.Path
 			// A module may only choose a file directly under this known local root.
-			if filepath.Dir(st.Path) != filepath.Clean(in.Root("home")) {
-				return out, errors.New("hook settings path is outside the selected root")
+			var old []byte
+			err = errors.New("hook settings path is outside the selected root")
+			if filepath.Dir(st.Path) == filepath.Clean(in.Root("home")) {
+				old, err = readMovementHookFile(st.Path)
 			}
-			old, err := readMovementHookFile(st.Path)
 			if err == nil {
 				st.Installed = hi.File.Has(old)
 				_, err = hi.File.Merge(old) // validate shared structure even for status
 			}
-			if err == nil && action == "install" && !st.Supported {
-				err = errors.New(st.Reason)
-			}
-			if err == nil && action != "status" {
+			if err == nil && action != "status" && !(action == "install" && !st.Supported) {
 				edit := hi.File.Merge
 				if action == "remove" {
 					edit = hi.File.Remove
@@ -153,17 +219,14 @@ func (a *App) movementNoticeHooks(ctx context.Context, m *host.Machine, action s
 					}
 				}
 			}
-			if err != nil {
-				st.Reason = err.Error()
-				errs = append(errs, fmt.Errorf("%s: %w", st.Agent, err))
-			}
+			st.result(action, err)
 			out = append(out, st)
 		}
 	}
 	if len(out) == 0 {
-		return out, errors.Join(append(errs, errors.New("no matching local agent supports movement hooks"))...)
+		return out, errors.New("no matching local agent supports movement hooks")
 	}
-	return out, errors.Join(errs...)
+	return out, nil
 }
 
 // Include registered roots even if the environment's default is absent. The
@@ -507,7 +570,9 @@ func (a *App) NoticeHooks(ctx context.Context) ([]MovementHookStatus, error) {
 func (a *App) NoticeHooksFor(ctx context.Context, id agent.ID, profile string) ([]MovementHookStatus, error) {
 	bin, err := movementHookExecutable()
 	if err != nil {
-		return nil, err
+		// Without the command no hook can run: report every agent as not installed (and
+		// whether it could take the hook) against a command that is never written.
+		bin = filepath.Join(os.TempDir(), "hopsesh-command-not-installed")
 	}
 	return a.MovementNoticeHooks(ctx, "status", id, profile, bin)
 }

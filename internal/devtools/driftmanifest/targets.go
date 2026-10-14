@@ -322,6 +322,9 @@ func newest(versions []string) string {
 }
 
 func versionLess(a, b string) bool {
+	if c, ok := agent.CompareVersions(a, b); ok {
+		return c < 0
+	}
 	as, bs := strings.Split(a, "."), strings.Split(b, ".")
 	for i := 0; i < len(as) && i < len(bs); i++ {
 		x, errx := strconv.Atoi(as[i])

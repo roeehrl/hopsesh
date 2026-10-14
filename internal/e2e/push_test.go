@@ -60,7 +60,7 @@ func newMachineHome(t *testing.T, root, name string, withSession bool) machineHo
 func (m machineHome) env() []string {
 	return []string{"HOME=" + m.home, "USERPROFILE=" + m.home, "PATH=" + testPath(), "HOPSESH_MACHINE=" + m.name,
 		"HOPSESH_CONFIG_DIR=" + filepath.Join(m.home, "config"), "HOPSESH_STATE_DIR=" + filepath.Join(m.home, "state"),
-		"CLAUDE_CONFIG_DIR=", "CODEX_HOME="}
+		"CLAUDE_CONFIG_DIR=", "CODEX_HOME=", "HOPSESH_APP_RUNTIMES=off"}
 }
 
 func (m machineHome) writeConfig(t *testing.T, c config.Config) {

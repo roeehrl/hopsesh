@@ -498,8 +498,9 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 				var batchMu sync.Mutex
 				var batch []Entry
 				firstBatch := true
+				shows := a.Cfg.Agents[string(spec.ID)].Shows
 				found := func(sum agent.Summary) {
-					if o.Progress == nil {
+					if o.Progress == nil || !shows(sum.Kinds) {
 						return
 					}
 					sum.Key.Profile = in.ProfileID()
@@ -528,6 +529,7 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 					o.Progress(ScanUpdate{Machine: &partial, Entries: batch})
 				}
 				if e == nil {
+					l.Sessions = slices.DeleteFunc(l.Sessions, func(s agent.Summary) bool { return !shows(s.Kinds) })
 					for i := range l.Sessions {
 						l.Sessions[i].Key.Profile = in.ProfileID()
 					}
@@ -564,6 +566,7 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 					if detailed, err := mod.Detect(ctx, h); err == nil {
 						st.Install.Version = detailed.Version
 						st.Install.Binary = detailed.Binary
+						st.Install.Runtime = detailed.Runtime
 						st.Install.Desktop = detailed.Desktop
 						st.Install.DesktopVersion = detailed.DesktopVersion
 						st.Install.DesktopWhy = detailed.DesktopWhy

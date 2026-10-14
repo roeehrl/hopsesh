@@ -60,7 +60,11 @@ func (*Module) Spec() agent.Spec {
 		Binaries: []agent.Binary{{
 			Name: "codex",
 			Candidates: map[string][]string{
-				"*":       {"~/.local/bin/codex", "/opt/homebrew/bin/codex", "/usr/local/bin/codex", "~/.npm-global/bin/codex"},
+				// The Codex app's bundled runtime comes last: a CLI anywhere wins (Detect
+				// verifies the bundle).
+				"*": {"~/.local/bin/codex", "/opt/homebrew/bin/codex", "/usr/local/bin/codex", "~/.npm-global/bin/codex",
+					"/Applications/ChatGPT.app/" + bundledRuntime + "/bin/codex", "~/Applications/ChatGPT.app/" + bundledRuntime + "/bin/codex",
+					"/Applications/Codex.app/" + bundledRuntime + "/bin/codex", "~/Applications/Codex.app/" + bundledRuntime + "/bin/codex"},
 				"windows": {"~/AppData/Roaming/npm/codex.cmd", "~/.local/bin/codex.exe"},
 			},
 			VersionArgs: []string{"--version"},
@@ -73,15 +77,41 @@ func (*Module) Spec() agent.Spec {
 		Tools:              "shell, apply_patch, update_plan",
 		Features:           []agent.Capability{agent.CapFork, agent.CapApp},
 		Icon: agent.Icon{SVG: iconSVG, Apps: map[string][]string{
-			"darwin": {"/Applications/Codex.app", "~/Applications/Codex.app", "/Applications/ChatGPT.app", "~/Applications/ChatGPT.app"},
+			"darwin": {"/Applications/ChatGPT.app", "~/Applications/ChatGPT.app", "/Applications/Codex.app", "~/Applications/Codex.app"},
 		}},
 		Clouds: []agent.Cloud{cloud()},
+		Kinds: []agent.SessionKind{
+			{ID: kindVoice, Name: "Voice conversations", Note: "Threads the Codex app started from a voice conversation."},
+			{ID: kindWork, Name: "Work threads", Note: "Threads from the Codex app's Work mode."},
+		},
 	}
 }
 
-// Detect resolves CODEX_HOME and the codex binary.
+// Session kinds the app hides unless the user shows them. Voice threads record
+// session_meta thread_source "realtime_voice"; Work threads the originator
+// "codex_work_desktop" (Codex app 26.1007, rollouts checked 2026-10-14).
+const (
+	kindVoice = "voice"
+	kindWork  = "work"
+)
+
+// kinds are a rollout's hidden-by-default kinds.
+func kinds(m meta) []string {
+	var out []string
+	if m.ThreadSource == "realtime_voice" {
+		out = append(out, kindVoice)
+	}
+	if m.Originator == "codex_work_desktop" {
+		out = append(out, kindWork)
+	}
+	return out
+}
+
+// Detect resolves CODEX_HOME and the codex binary: the CLI, else the Codex app's bundled
+// runtime.
 func (m *Module) Detect(_ context.Context, h agent.Host) (agent.Install, error) {
 	in := agent.DefaultInstall(m.Spec(), h)
+	appRuntime(h, &in)
 	detectDesktop(h, &in)
 	return in, nil
 }
@@ -94,6 +124,7 @@ type meta struct {
 	Timestamp                   string          `json:"timestamp"`
 	CWD                         string          `json:"cwd"`
 	Originator                  string          `json:"originator"`
+	ThreadSource                string          `json:"thread_source"`
 	CLIVersion                  string          `json:"cli_version"`
 	Source                      json.RawMessage `json:"source"`
 	ModelProvider               string          `json:"model_provider"`
@@ -141,7 +172,7 @@ func (m *Module) List(ctx context.Context, h agent.Host, in agent.Install) (agen
 		sem <- struct{}{}
 		go func() {
 			defer func() { <-sem; wg.Done() }()
-			sums[i], errs[i] = agent.ListingSummary(ctx, h, f.path, f.info, "codex-summary-1:"+titleSalt, nil, func() (*agent.Summary, error) {
+			sums[i], errs[i] = agent.ListingSummary(ctx, h, f.path, f.info, "codex-summary-2:"+titleSalt, nil, func() (*agent.Summary, error) {
 				s, err := summarize(h, f)
 				if s != nil {
 					s.Key.Profile = in.ProfileID()
@@ -312,6 +343,7 @@ func summarize(h agent.Host, r rollout) (*agent.Summary, error) {
 		AgentVersion: first.CLIVersion,
 		LastActivity: r.info.ModTime().UTC(),
 		Account:      first.CreatorAccountID,
+		Kinds:        kinds(first),
 	}
 	// Codex 0.157+ records the account that created the session (never updated on resume).
 	s.Owners = agent.AddOwner(nil, agent.OwnerRun{Key: accountKey(first.CreatorAccountID), Person: personKey(first.CreatorUserID), Source: "agent"})
@@ -612,6 +644,9 @@ func (m *Module) Resume(in agent.Install, key agent.SessionKey, p agent.Placemen
 		verb = "fork"
 	}
 	argv := []string{"codex", verb, string(key.Session)}
+	if in.Runtime == agent.RuntimeApp && in.Binary != "" {
+		argv[0] = in.Binary // not on PATH: the app's own runtime
+	}
 	if o.Prompt != "" {
 		argv = append(argv, o.Prompt)
 	}
@@ -638,6 +673,11 @@ func (m *Module) Live(ctx context.Context, h agent.Host, in agent.Install, ids [
 		}
 	}
 	holders := lockHolders(ctx, h, held)
+	var pids []int
+	for _, ps := range holders {
+		pids = append(pids, ps...)
+	}
+	names, commands := processInfo(ctx, h, pids)
 	var files map[agent.SessionID]string
 	out := make(map[agent.SessionID]agent.LiveInfo, len(ids))
 	for i, sid := range ids {
@@ -651,13 +691,16 @@ func (m *Module) Live(ctx context.Context, h agent.Host, in agent.Install, ids [
 				status = "working"
 			}
 			li := agent.LiveInfo{State: agent.Live, Status: status}
+			li.App = desktopOriginator(originator(h, files[sid]))
 			seen := map[int]bool{}
 			for _, pid := range holders[paths[i]] {
 				if pid <= 0 || seen[pid] {
 					continue
 				}
 				seen[pid] = true
-				li.Procs = append(li.Procs, agent.LiveProc{PID: pid, ObservedAt: time.Now().UTC()})
+				app := li.App || inApp(names[pid], commands[pid])
+				li.App = li.App || app
+				li.Procs = append(li.Procs, agent.LiveProc{PID: pid, App: app, ObservedAt: time.Now().UTC()})
 			}
 			if len(li.Procs) > 0 {
 				li.PID = li.Procs[0].PID
@@ -694,12 +737,75 @@ func lockHolders(ctx context.Context, h agent.Host, held []string) map[string][]
 	out := make(map[string][]int, len(holders))
 	for p, ps := range holders {
 		for _, pid := range ps {
-			if strings.HasPrefix(strings.ToLower(names[pid]), "codex") && !slices.Contains(out[p], pid) {
+			if (strings.HasPrefix(strings.ToLower(names[pid]), "codex") || names[pid] == "ChatGPT") && !slices.Contains(out[p], pid) {
 				out[p] = append(out[p], pid)
 			}
 		}
 	}
 	return out
+}
+
+// cliOriginators start threads in a process of their own: the CLI ("codex_cli_rs", the
+// TUI "codex-tui", "codex_exec") and hopsesh's own rollouts. Any other originator ("Codex
+// Desktop", "codex_work_desktop", editor and browser extensions) is a client of a shared
+// app-server that holds all of its threads.
+var cliOriginators = map[string]bool{"": true, "codex_cli_rs": true, "codex-tui": true, "codex_exec": true, "hopsesh": true}
+
+// desktopOriginator: the Codex desktop app ("Codex Desktop", its Work mode
+// "codex_work_desktop") started the thread.
+func desktopOriginator(o string) bool { return strings.Contains(strings.ToLower(o), "desktop") }
+
+// originator is the rollout's session_meta originator ("" when unknown).
+func originator(h agent.Host, path string) string {
+	if path == "" {
+		return ""
+	}
+	head, err := readHead(h, path)
+	if err != nil {
+		return ""
+	}
+	m, err := firstMeta(head)
+	if err != nil {
+		return ""
+	}
+	return m.Originator
+}
+
+// inApp: the process is the Codex desktop app or runs from inside its bundle (its
+// app-server is a "codex" under ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app).
+func inApp(name, command string) bool {
+	return name == "Codex" || name == "ChatGPT" || strings.HasPrefix(name, "Codex Helper") || strings.HasPrefix(name, "Codex (") ||
+		strings.Contains(command, ".app/Contents/")
+}
+
+// sharedServer: the process is a Codex app-server, which serves several threads.
+func sharedServer(command string) bool { return slices.Contains(strings.Fields(command), "app-server") }
+
+// processInfo names processes and reads their command lines, best effort.
+func processInfo(ctx context.Context, h agent.Host, pids []int) (map[int]string, map[int]string) {
+	if len(pids) == 0 {
+		return map[int]string{}, map[int]string{}
+	}
+	names, _ := h.Procs().Names(ctx, pids)
+	var commands map[int]string
+	if pc, ok := h.Procs().(agent.ProcCommands); ok {
+		commands, _ = pc.Commands(ctx, pids)
+	}
+	if names == nil {
+		names = map[int]string{}
+	}
+	if commands == nil {
+		commands = map[int]string{}
+	}
+	return names, commands
+}
+
+// desktopName is the Codex app's name here ("ChatGPT").
+func desktopName(in agent.Install) string {
+	if n := strings.TrimSuffix(path.Base(strings.ReplaceAll(in.Desktop, `\`, "/")), ".app"); strings.HasSuffix(in.Desktop, ".app") && n != "" {
+		return n
+	}
+	return "ChatGPT"
 }
 
 func lockPath(h agent.Host, in agent.Install, sid agent.SessionID) string {
@@ -763,13 +869,22 @@ func turnOpen(h agent.Host, path string) (bool, error) {
 // ErrBusy means Codex is in the middle of a turn in that thread.
 var ErrBusy = errors.New("the Codex session is working right now; let it finish (or stop it with Esc), then try again")
 
+// ErrInApp means the Codex app holds the thread: its one shared app-server runs every app
+// thread, so ending that process would close them all.
+var ErrInApp = errors.New("hopsesh never closes the app, which holds every thread")
+
+// ErrSharedServer means a shared Codex app-server (a daemon serving several clients)
+// holds the thread.
+var ErrSharedServer = errors.New("the session is held by a shared Codex app-server that other sessions use too; quit it in the Codex window that has it open")
+
 // ErrStillRunning means a stopped thread's process did not exit in time.
 var ErrStillRunning = errors.New("the Codex session did not exit in time; quit it yourself (Ctrl+C twice, or /quit), then try again")
 
 // Stop quits the Codex process that has the thread open. Codex installs no handler for
 // SIGTERM, so it is sent only between turns (Codex writes every item to the rollout as
-// it goes, so nothing finished is lost), and only to a process named codex that holds the
-// thread's writer lock.
+// it goes, so nothing finished is lost), and only to a CLI process named codex (any case)
+// that holds the thread's writer lock. A thread the Codex app (or another shared
+// app-server) holds is never stopped: that process serves every thread of its clients.
 func (m *Module) Stop(ctx context.Context, h agent.Host, in agent.Install, s agent.Summary, grace time.Duration) error {
 	lock := lockPath(h, in, s.Key.Session)
 	holders, err := h.Locks().Holders(ctx, []string{lock})
@@ -791,9 +906,25 @@ func (m *Module) Stop(ctx context.Context, h agent.Host, in agent.Install, s age
 	if err != nil {
 		return err
 	}
+	commands := map[int]string{}
+	if pc, ok := h.Procs().(agent.ProcCommands); ok {
+		commands, _ = pc.Commands(ctx, pids)
+	}
+	o := originator(h, path)
+	app, shared := desktopOriginator(o), !cliOriginators[o]
+	for _, pid := range pids {
+		app = app || inApp(names[pid], commands[pid])
+		shared = shared || sharedServer(commands[pid])
+	}
+	if app {
+		return fmt.Errorf("the session is open in %s desktop; open it in %s desktop. %w", desktopName(in), desktopName(in), ErrInApp)
+	}
+	if shared {
+		return ErrSharedServer
+	}
 	var targets []int
 	for _, pid := range pids {
-		if strings.HasPrefix(names[pid], "codex") {
+		if strings.HasPrefix(strings.ToLower(names[pid]), "codex") {
 			targets = append(targets, pid)
 		}
 	}

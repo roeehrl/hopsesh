@@ -8,6 +8,7 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/core/audit"
 	"github.com/roeehrl/hopsesh/internal/core/integrate"
+	"github.com/roeehrl/hopsesh/internal/version"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -82,7 +83,7 @@ func (a *App) Skill(ctx context.Context, files map[string][]byte, bin string) Sk
 		dir := it.ig.SkillDir + string(os.PathSeparator) + integrate.SkillName
 		c, ok := by[dir]
 		if !ok {
-			c = &SkillCopy{Dir: dir, Status: integrate.CheckSkill(dir, files)}
+			c = &SkillCopy{Dir: dir, Status: integrate.CheckSkill(dir, files, version.Version)}
 			by[dir] = c
 		}
 		c.Agents = append(c.Agents, it.name)
@@ -130,7 +131,7 @@ func (a *App) InstallSkill(ctx context.Context, files map[string][]byte, version
 	seen := map[string]bool{}
 	for _, it := range its {
 		dir := it.ig.SkillDir + string(os.PathSeparator) + integrate.SkillName
-		if st := integrate.CheckSkill(dir, files); !force && (st.State == integrate.Modified || st.State == integrate.Foreign) {
+		if st := integrate.CheckSkill(dir, files, version); !force && (st.State == integrate.Modified || st.State == integrate.Foreign) {
 			if st.State == integrate.Modified {
 				return a.Skill(ctx, files, bin), errors.Join(integrate.ErrModified, errors.New(dir+" (use --force; the old copy is kept)"))
 			}

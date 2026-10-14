@@ -56,8 +56,12 @@ approves hooks on the user's behalf. The hook command stays the same across hops
 updates (the app's bundled CLI path), so an update does not ask for review again. The app
 shows an original as blocked only when its agent's hook is installed and trusted.
 
-The current adapters accept stable Claude Code 2.x from 2.1.284 and stable Codex 0.x from
-0.160.0; unknown or prerelease versions are refused pending validation. Windows commands
+The current adapters accept Claude Code 2.x from 2.1.284 and Codex 0.x from 0.129.0 (user
+hooks shipped in 0.124, hook trust and `hooks/list` in 0.129), by semantic version
+precedence: a pre-release past the floor counts (the Codex app's bundled runtime, such as
+0.162.0-alpha.17.2), one before it does not. Unknown versions and a new major version are
+refused pending validation. Without a Codex CLI, hopsesh uses the Codex app's bundled
+runtime (`ChatGPT.app/Contents/Resources/codex-cli`, from its `codex-package.json`). Windows commands
 use explicit PowerShell handling; macOS and Linux use the configured command shell.
 
 ## Indicators

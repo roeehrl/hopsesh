@@ -109,10 +109,21 @@ type Spec struct {
 	// Clouds are the vendor clouds the module reaches through its agent's CLI. A module
 	// with clouds may have no Roots (a cloud-only module, see NoLocal).
 	Clouds []Cloud
+	// Kinds are kinds of session the module marks (Summary.Kinds) that hopsesh hides
+	// unless the user turns them on for this agent: conversations that are not coding
+	// sessions to move (the Codex app's voice and Work threads).
+	Kinds []SessionKind
 	// TerminalEnv are variables ("NAME=value") the agent's programs get in hopsesh's own
 	// terminal tabs, on top of the user's: settings that suit that terminal
 	// (CLAUDE_CODE_FORCE_SYNC_OUTPUT=1). Never a credential; not used in other terminals.
 	TerminalEnv []string
+}
+
+// SessionKind is a kind of session hidden by default (Spec.Kinds).
+type SessionKind struct {
+	ID   string // "voice"
+	Name string // "Voice conversations"
+	Note string // what they are, for the setting
 }
 
 // Icon pictures an agent. The installed desktop app's own icon comes first (unless the
@@ -163,9 +174,13 @@ type Install struct {
 	Agent             ID                `json:"agent"`
 	Version           string            `json:"version,omitempty"` // "" when the binary was not found
 	Binary            string            `json:"binary,omitempty"`  // absolute path
+	Runtime           string            `json:"runtime,omitempty"` // RuntimeApp: Binary is the desktop app's bundled runtime, no CLI
 	Roots             map[string]string `json:"roots"`             // name → absolute path on that machine
 	Present           bool              `json:"present"`           // the main root exists
 }
+
+// RuntimeApp marks Install.Binary as the desktop app's bundled runtime.
+const RuntimeApp = "app"
 
 // Root returns the path of a named root.
 func (in Install) Root(name string) string { return in.Roots[name] }

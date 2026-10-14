@@ -308,7 +308,7 @@ func (a *App) profileInstalls(ctx context.Context, m *host.Machine, mod agent.Mo
 			ch, e := m.For(ctx, mod.Spec(), in, nil)
 			var acct agent.Account
 			if e == nil && in.Binary == "" {
-				e = fmt.Errorf("%w: %s CLI is unavailable; install it on this machine to check sign-in", agent.ErrNotInstalled, mod.Spec().Name)
+				e = fmt.Errorf("%w: %s is not installed here (neither its CLI nor a desktop app that bundles it); install it to check sign-in", agent.ErrNotInstalled, mod.Spec().Name)
 			}
 			if e == nil {
 				acct, e = ap.Account(ctx, ch, in)
@@ -608,7 +608,7 @@ func (a *App) RefreshAccount(ctx context.Context, id string) (agent.RuntimeProfi
 			return p, agent.ErrUnsupported
 		}
 		if in.Binary == "" {
-			return failed(fmt.Errorf("%w: %s CLI is unavailable; install it on this machine to check sign-in", agent.ErrNotInstalled, mod.Spec().Name))
+			return failed(fmt.Errorf("%w: %s is not installed here (neither its CLI nor a desktop app that bundles it); install it to check sign-in", agent.ErrNotInstalled, mod.Spec().Name))
 		}
 		account, probeErr := prober.Account(ctx, ch, in)
 		probeErr = accountProbeVisibility(m, account, probeErr)

@@ -10,6 +10,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/integrate"
 	"github.com/roeehrl/hopsesh/internal/core/lnp"
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 func doctorCmd() *cobra.Command {
@@ -67,7 +68,11 @@ func doctorCmd() *cobra.Command {
 					case a.Error != "":
 						add(where+": "+a.Name, false, a.Error)
 					case a.Install.Binary != "":
-						add(where+": "+a.Name, true, a.Install.Version+spec+" · "+a.Install.Binary)
+						runtime := ""
+						if a.Install.Runtime == agent.RuntimeApp {
+							runtime = " (built into its desktop app)"
+						}
+						add(where+": "+a.Name, true, a.Install.Version+spec+runtime+" · "+a.Install.Binary)
 					case a.Install.Present:
 						add(where+": "+a.Name, true, "sessions found, but the program is not on the PATH of non-interactive SSH sessions (listing still works)")
 					default:

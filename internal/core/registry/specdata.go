@@ -30,6 +30,7 @@ type SpecData struct {
 	DesktopApps          map[string][]string `json:"desktopApps"`
 	Clouds               []CloudData         `json:"clouds"`
 	TerminalEnv          []string            `json:"terminalEnv"`
+	Kinds                []KindData          `json:"kinds"`
 }
 
 // BinaryData is a program the module may run.
@@ -99,6 +100,13 @@ type CodeData struct {
 	Canaries []string `json:"canaries"`
 }
 
+// KindData is agent.SessionKind: sessions hidden unless the user shows them.
+type KindData struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Note string `json:"note"`
+}
+
 // Data returns s as data. Lists and maps are never null, so a reader can iterate them.
 func Data(s agent.Spec) SpecData {
 	d := SpecData{Accounts: s.Accounts, DesktopScheme: s.DesktopScheme, ResumeAcrossAccounts: s.ResumeAcrossAccounts,
@@ -106,7 +114,10 @@ func Data(s agent.Spec) SpecData {
 		LoginEnv: list(s.LoginEnv), Secrets: list(s.Secrets), Worktrees: list(s.Worktrees),
 		Instructions: list(s.Instructions), GlobalInstructions: list(s.GlobalInstructions), Tools: s.Tools,
 		Features: list(s.Features), Experimental: list(s.Experimental), DesktopApps: lists(s.Icon.Apps),
-		Binaries: []BinaryData{}, Roots: []RootData{}, Clouds: []CloudData{}, TerminalEnv: list(s.TerminalEnv),
+		Binaries: []BinaryData{}, Roots: []RootData{}, Clouds: []CloudData{}, TerminalEnv: list(s.TerminalEnv), Kinds: []KindData{},
+	}
+	for _, k := range s.Kinds {
+		d.Kinds = append(d.Kinds, KindData{ID: k.ID, Name: k.Name, Note: k.Note})
 	}
 	for _, b := range s.Binaries {
 		d.Binaries = append(d.Binaries, BinaryData{Name: b.Name, Candidates: lists(b.Candidates), VersionArgs: list(b.VersionArgs)})

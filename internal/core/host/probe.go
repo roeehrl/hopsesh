@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -113,11 +114,18 @@ func lookLocal(b agent.Binary, home string) string {
 	return ""
 }
 
+// candidates are where to look for b besides PATH. HOPSESH_APP_RUNTIMES=off leaves out
+// runtimes bundled inside desktop apps (".app/"), so a test machine never runs the real
+// app's agent.
 func candidates(b agent.Binary, goos string) []string {
-	if c, ok := b.Candidates[goos]; ok {
-		return c
+	c, ok := b.Candidates[goos]
+	if !ok {
+		c = b.Candidates["*"]
 	}
-	return b.Candidates["*"]
+	if os.Getenv("HOPSESH_APP_RUNTIMES") == "off" {
+		c = slices.DeleteFunc(slices.Clone(c), func(p string) bool { return strings.Contains(p, ".app/") })
+	}
+	return c
 }
 
 // ProbeRemote learns a machine's facts in one round trip, with a script generated from

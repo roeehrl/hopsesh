@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/app"
@@ -165,7 +166,35 @@ func (a *App) SetAgent(id string, enabled, remoteControl, imp bool) error {
 	if a.core.Cfg.Agents == nil {
 		a.core.Cfg.Agents = map[string]config.Agent{}
 	}
-	ac := config.Agent{Disabled: !enabled, RemoteControl: remoteControl, Import: imp, Place: a.core.Cfg.Agents[id].Place}
+	ac := a.core.Cfg.Agents[id]
+	ac.Disabled, ac.RemoteControl, ac.Import = !enabled, remoteControl, imp
+	if ac == (config.Agent{}) {
+		delete(a.core.Cfg.Agents, id)
+	} else {
+		a.core.Cfg.Agents[id] = ac
+	}
+	return a.save()
+}
+
+// SetAgentKind shows or hides one kind of an agent's sessions (Codex voice conversations,
+// Work threads); the next scan lists them or leaves them out.
+func (a *App) SetAgentKind(id, kind string, show bool) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	m, ok := a.core.Reg.Get(agent.ID(id))
+	if !ok {
+		return errors.New("unknown agent " + id)
+	}
+	if !slices.ContainsFunc(m.Spec().Kinds, func(k agent.SessionKind) bool { return k.ID == kind }) {
+		return fmt.Errorf("%s has no %q sessions", m.Spec().Name, kind)
+	}
+	if a.core.Cfg.Agents == nil {
+		a.core.Cfg.Agents = map[string]config.Agent{}
+	}
+	ac := a.core.Cfg.Agents[id]
+	if !ac.SetShows(kind, show) {
+		return fmt.Errorf("hopsesh has no setting for %q sessions", kind)
+	}
 	if ac == (config.Agent{}) {
 		delete(a.core.Cfg.Agents, id)
 	} else {
