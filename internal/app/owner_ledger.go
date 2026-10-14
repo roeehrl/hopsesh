@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -15,13 +17,18 @@ import (
 
 // The owner ledger is hopsesh's own record of the accounts a session ran under on this
 // machine, written by its prompt hook: it covers what the agent does not record (Codex
-// resumes, sessions without Remote Control, older versions). One small file per session.
+// resumes, sessions without Remote Control, older versions). One small file per session,
+// under its folder: the same session ID in two folders is two sessions.
 type ledgerFile struct {
 	Runs []agent.OwnerRun `json:"runs"`
 }
 
-func (a *App) ledgerPath(id agent.ID, session string) string {
-	return filepath.Join(a.StateDir, "owners", string(id), session+".json")
+func (a *App) ledgerPath(id agent.ID, root, session string) string {
+	if real, err := filepath.EvalSymlinks(root); err == nil {
+		root = real
+	}
+	sum := sha256.Sum256([]byte(filepath.Clean(root)))
+	return filepath.Join(a.StateDir, "owners", string(id), hex.EncodeToString(sum[:8]), session+".json")
 }
 
 func validLedgerName(s string) bool {
@@ -59,9 +66,14 @@ func (a *App) RecordOwner(ctx context.Context, id agent.ID, profile, session str
 	}
 	run, ok := li.LocalIdentity(scope.Root, native)
 	if !ok {
-		return
+		// A sign-in hopsesh cannot read here (Codex's keyring): the account last checked
+		// for the folder ran it.
+		if scope.Account == nil || !scope.Account.LoggedIn || scope.Account.Key == "" {
+			return
+		}
+		run = agent.OwnerRun{Key: scope.Account.Key, Person: scope.Account.Person}
 	}
-	path := a.ledgerPath(id, session)
+	path := a.ledgerPath(id, scope.Root, session)
 	var f ledgerFile
 	if b, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(b, &f)
@@ -83,11 +95,11 @@ func (a *App) RecordOwner(ctx context.Context, id agent.ID, profile, session str
 
 // withLedger adds the runs hopsesh recorded for a session on this machine to the ones the
 // agent recorded.
-func (a *App) withLedger(local bool, s agent.Summary) agent.Summary {
-	if !local || !validLedgerName(string(s.Key.Session)) {
+func (a *App) withLedger(local bool, root string, s agent.Summary) agent.Summary {
+	if !local || root == "" || !validLedgerName(string(s.Key.Session)) {
 		return s
 	}
-	b, err := host.LocalFS().ReadFile(a.ledgerPath(s.Key.Agent, string(s.Key.Session)), 64<<10)
+	b, err := host.LocalFS().ReadFile(a.ledgerPath(s.Key.Agent, root, string(s.Key.Session)), 64<<10)
 	if err != nil {
 		return s
 	}

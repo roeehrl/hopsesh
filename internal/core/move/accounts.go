@@ -77,7 +77,7 @@ func samePlace(in Input) bool {
 		in.Source.Install.ProfileID() == in.Target.Install.ProfileID() && in.Source.Install.BindingID() == in.Target.Install.BindingID()
 }
 func ValidateProfiles(ctx context.Context, in Input) error {
-	for _, side := range []Side{in.Source, in.Target} {
+	for i, side := range []Side{in.Source, in.Target} {
 		p := side.Install.Profile
 		if p == nil || side.Machine == nil || side.Machine.IsSnapshot() {
 			continue
@@ -108,6 +108,15 @@ func ValidateProfiles(ctx context.Context, in Input) error {
 			// continuity. Never extend this to native replay, named profiles or
 			// a previously observed login, and still reject a new visible login.
 			if p.Account == nil && p.Default && profileBoundary(in) && !now.LoggedIn && now.Observation != "" {
+				continue
+			}
+			// Hidden sign-ins (a Mac reached over SSH) answer "signed out" whatever they are:
+			// that is unknown, never a changed login. Only a destination whose agent cannot
+			// resume under another account needs the login it was planned with confirmed.
+			if !now.LoggedIn && side.Machine.SignInsHidden() {
+				if i == 1 && !side.Module.Spec().ResumeAcrossAccounts {
+					return fmt.Errorf("cannot confirm account %q on %s: its sign-in is not visible over SSH; set up hopsesh there, or check it on that machine", p.Name, side.Machine.Name)
+				}
 				continue
 			}
 			if p.Account == nil || now.Observation != p.Account.Observation || now.LoggedIn != p.Account.LoggedIn || now.Provider != p.Account.Provider {

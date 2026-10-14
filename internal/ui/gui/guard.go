@@ -22,6 +22,8 @@ type GuardDTO struct {
 	Problem   string `json:"problem,omitempty"`
 	Fix       string `json:"fix,omitempty"`
 	Operation string `json:"operation,omitempty"`
+	// NoHopsesh: the original is on a machine without hopsesh, where nothing can protect it.
+	NoHopsesh bool `json:"noHopsesh,omitempty"`
 }
 
 // HookHealthDTO is what keeps movement protection and the skill working on this machine.
@@ -116,7 +118,8 @@ func hookProblems(hooks []app.MovementHookStatus, mode string) []HookProblem {
 }
 
 // guardFor is the protection of entry e, a copy that moved on (nil otherwise).
-func guardFor(core *app.App, e app.Entry) *GuardDTO {
+// hopsesh is hopsesh's version on the session's machine ("" when it has none).
+func guardFor(core *app.App, e app.Entry, hopsesh string) *GuardDTO {
 	n := e.Departure
 	if n == nil || n.Status == "forked" {
 		return nil
@@ -133,6 +136,12 @@ func guardFor(core *app.App, e app.Entry) *GuardDTO {
 		return g
 	}
 	if e.Machine != app.LocalName() {
+		if hopsesh == "" {
+			g.NoHopsesh = true
+			g.Problem = "Not protected: " + e.Machine + " has no hopsesh, so nothing stops this original from being continued there."
+			g.Fix = "Set up hopsesh on " + e.Machine + " in Machines."
+			return g
+		}
 		g.Checking = true
 		g.Problem = "Protected by hopsesh on " + e.Machine + " when its hooks are set up there."
 		return g

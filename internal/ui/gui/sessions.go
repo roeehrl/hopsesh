@@ -556,11 +556,22 @@ func clipWords(s string, n int) string {
 	return strings.TrimRight(cut, " ,;:.-") + "…"
 }
 
+// hopseshOn is hopsesh's version on a machine of the inventory ("" when it has none, or
+// is not scanned).
+func hopseshOn(inv *app.Inventory, machine string) string {
+	for _, m := range inv.Machines {
+		if m.Name == machine {
+			return m.Hopsesh
+		}
+	}
+	return ""
+}
+
 func entryDTO(core *app.App, inv *app.Inventory, it app.Item, targets []AgentOpt) EntryDTO {
 	e, s := it.Entry, it.Entry.Session
 	e.Cached = e.Cached || inv.Discovering
 	title, source := titleFor(s, e.Live.Name)
-	d := EntryDTO{Cached: e.Cached, ObservedAt: e.ObservedAt, Returns: e.Returns, Movement: e.Movement, Departure: e.Departure, Arrival: e.Arrival, Guard: guardFor(core, e), Profile: e.Profile, Machine: e.Machine, Agent: e.Agent, AgentName: e.AgentName, Key: s.Key.String(), Title: title, TitleSource: source,
+	d := EntryDTO{Cached: e.Cached, ObservedAt: e.ObservedAt, Returns: e.Returns, Movement: e.Movement, Departure: e.Departure, Arrival: e.Arrival, Guard: guardFor(core, e, hopseshOn(inv, e.Machine)), Profile: e.Profile, Machine: e.Machine, Agent: e.Agent, AgentName: e.AgentName, Key: s.Key.String(), Title: title, TitleSource: source,
 		Session: string(s.Key.Session), Path: s.Path, AgentVersion: s.AgentVersion, CanRename: core.CanRename(e), Places: []PlaceDTO{},
 		Status: statusWords(core, e), Live: e.Live.State == agent.Live, LastActive: s.LastActivity.Format(time.RFC3339),
 		ContextOverflow: s.ContextOverflow, LastPrompt: s.LastPrompt, CWD: s.CWD, SizeKB: s.Size / 1024, ContinueIn: []AgentOpt{},

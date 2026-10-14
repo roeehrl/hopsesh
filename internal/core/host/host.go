@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"maps"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +39,9 @@ type Facts struct {
 	Env              map[string]string           `json:"env"`
 	Binaries         map[string]agent.BinaryFact `json:"binaries"`
 	HasGit           bool                        `json:"hasGit"`
+	// LoginSession: the answers come from hopsesh running in the user's login session
+	// there, which sees what an SSH login cannot (a Mac's Keychain, its desktop apps).
+	LoginSession bool `json:"loginSession,omitempty"`
 }
 
 // Machine is a place sessions live: this machine, one reached over SSH, or a snapshot
@@ -48,6 +52,8 @@ type Machine struct {
 	Conn  *transport.Conn // nil for this machine
 	Facts Facts
 	Log   *slog.Logger
+	// Keeper keeps the identity of a machine without hopsesh (see HopseshThere).
+	Keeper Keeper
 
 	mu   sync.Mutex
 	fs   FS
@@ -283,3 +289,18 @@ func (e profileExec) Run(ctx context.Context, argv []string, o agent.RunOptions)
 	o.Env, o.Unset = c.Env, c.Unset
 	return e.base.Run(ctx, c.Argv, o)
 }
+
+// SignInsHidden reports that the machine's sign-ins may be invisible to hopsesh here, so
+// a signed-out answer proves nothing. On a Mac they live in the Keychain, which a process
+// started over SSH cannot read; hopsesh running in the user's login session there
+// (Facts.LoginSession) sees them.
+func (m *Machine) SignInsHidden() bool {
+	if m.snap != nil || m.Facts.OS != "darwin" || m.Facts.LoginSession {
+		return false
+	}
+	return !m.Local || os.Getenv("SSH_CONNECTION") != "" && os.Getenv(LoginSessionEnv) == ""
+}
+
+// LoginSessionEnv is set for hopsesh started in the user's login session (hopsesh serve
+// and what it runs), where a Mac's Keychain is readable even when it was reached by SSH.
+const LoginSessionEnv = "HOPSESH_LOGIN_SESSION"

@@ -327,8 +327,8 @@ func (a *App) account(ctx context.Context, m *Machine, mod agent.Module, in agen
 		return nil
 	}
 	acct, err := ap.Account(ctx, h, in)
-	if err != nil {
-		return nil
+	if err != nil || !acct.LoggedIn && m.host.SignInsHidden() {
+		return nil // unknown: the last known sign-in stands in
 	}
 	return &acct
 }

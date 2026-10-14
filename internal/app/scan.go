@@ -425,7 +425,7 @@ func (a *App) Connect(ctx context.Context, h config.Host) (*host.Machine, error)
 		conn.Close()
 		return nil, err
 	}
-	return &host.Machine{Name: h.Name, Conn: conn, Facts: facts, Log: a.Log}, nil
+	return &host.Machine{Name: h.Name, Conn: conn, Facts: facts, Log: a.Log, Keeper: a.endpointKeeper(h.Name)}, nil
 }
 
 var errNeedsPassword = errors.New("this machine logs in with a password")
@@ -454,8 +454,13 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 		installs, scanErr := a.profileInstalls(ctx, hm, mod, st.Install, o.ForceAccounts, o.Progress != nil)
 		if scanErr != nil {
 			st.Error = scanErr.Error()
-			m.Agents = append(m.Agents, st)
-			continue
+			if !st.Install.Present {
+				m.Agents = append(m.Agents, st)
+				continue
+			}
+			// Its accounts could not be read (an unreadable registry there, say): its
+			// sessions are still listed, from the agent's own folder.
+			installs = []agent.Install{st.Install}
 		}
 		// Registering another default profile changes the inventory namespace.
 		// Carry already discovered rows into that namespace before its listing.
@@ -491,7 +496,7 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 					sum.Key.Profile = in.ProfileID()
 					batchMu.Lock()
 					defer batchMu.Unlock()
-					batch = append(batch, Entry{Cached: true, Location: agent.MachineLocation(hm.Name), Machine: hm.Name, Agent: spec.ID, AgentName: spec.Name, Session: a.withLedger(hm.Local, sum), Profile: in.Profile, Live: agent.LiveInfo{State: agent.Unknown}})
+					batch = append(batch, Entry{Cached: true, Location: agent.MachineLocation(hm.Name), Machine: hm.Name, Agent: spec.ID, AgentName: spec.Name, Session: a.withLedger(hm.Local, in.Root("home"), sum), Profile: in.Profile, Live: agent.LiveInfo{State: agent.Unknown}})
 					if firstBatch || len(batch) >= 25 {
 						partial := *m
 						partial.Agents = append([]AgentState(nil), m.Agents...)
@@ -519,7 +524,7 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 					}
 					listed := listedEntries(ctx, hm, fsys, mod, ch, state, l)
 					for i := range listed {
-						listed[i].Session = a.withLedger(hm.Local, listed[i].Session)
+						listed[i].Session = a.withLedger(hm.Local, in.Root("home"), listed[i].Session)
 					}
 					entries = append(entries, listed...)
 					if len(l.Errors) > 0 {

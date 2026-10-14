@@ -115,7 +115,7 @@ export function role(e) {
     const blocked = g?.mode === "block";
     return { kind: blocked ? "blocked" : "moved-out", glyph: blocked && g.effective ? "◆" : "◇", chip: `Moved to ${toShort}`, tone: blocked && g.effective ? "st-ended" : "st-warn", icon: blocked ? "lock" : "warn",
       short: `Moved to ${toShort}`,
-      line: e.cached || g?.checking ? "Checking current movement and protection status" : blocked ? (g.effective ? "Blocked until you move it back" : "Not blocked yet: protection isn't set up") : g?.mode === "advise" ? (g.effective ? "Warns before you continue here" : "No warning yet: protection isn't set up") : "Left as it is" };
+      line: e.cached || g?.checking ? "Checking current movement and protection status" : g?.noHopsesh ? `Not protected: ${e.machine} has no hopsesh` : blocked ? (g.effective ? "Blocked until you move it back" : "Not blocked yet: protection isn't set up") : g?.mode === "advise" ? (g.effective ? "Warns before you continue here" : "No warning yet: protection isn't set up") : "Left as it is" };
   }
   if (dep && dep.status === "forked") { const to = dep.cloud || where(dep.agentName || dep.agent, dep.machine); return { kind: "forked-out", glyph: "⑂", chip: "Separate copy", tone: "st-idle", short: `Copied to ${short(dep.agentName, dep.agent, dep.machine, dep.cloud)}`, line: `A separate conversation continues in ${to}; this one is not blocked` }; }
   if (ar) {

@@ -17,7 +17,34 @@ import (
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
-func (a *App) Accounts() ([]agent.RuntimeProfile, error) { return a.accountStore().List() }
+func (a *App) Accounts() ([]agent.RuntimeProfile, error) {
+	ps, err := a.accountStore().List()
+	return matchByEmail(ps), err
+}
+
+// matchByEmail gives a login known only by its email (Codex keeping its sign-in in the
+// keyring, where hopsesh reads no IDs) the account of a verified login with the same
+// email, on any machine: the key its sessions record as their creator.
+func matchByEmail(ps []agent.RuntimeProfile) []agent.RuntimeProfile {
+	verified := map[string]*agent.Account{}
+	for _, p := range ps {
+		if acct := p.Account; acct != nil && acct.Confidence == "verified" && acct.Email != "" && acct.Key != "" {
+			verified[string(p.Agent)+"\x00"+strings.ToLower(acct.Email)] = acct
+		}
+	}
+	for i := range ps {
+		acct := ps[i].Account
+		if acct == nil || acct.Confidence != "limited" || acct.Email == "" || !strings.HasPrefix(acct.Key, "chatgpt:") {
+			continue
+		}
+		if v := verified[string(ps[i].Agent)+"\x00"+strings.ToLower(acct.Email)]; v != nil {
+			c := *acct
+			c.Key, c.Person, c.Confidence = v.Key, v.Person, "email"
+			ps[i].Account = &c
+		}
+	}
+	return ps
+}
 func (a *App) accountStore() profiles.Store              { return profiles.Store{Dir: a.StateDir} }
 func (a *App) EditAccount(id, name string, tags []string, generation int) error {
 	return a.accountStore().Edit(id, name, tags, generation)
@@ -593,7 +620,7 @@ func recentAccountObservation(at time.Time) bool {
 // An SSH process on macOS may lack the owner's unlocked Keychain. Absence of a
 // visible login there is not proof that the desktop account signed out.
 func accountProbeVisibility(m *host.Machine, account agent.Account, err error) error {
-	if err == nil && !m.Local && m.Facts.OS == "darwin" && !account.LoggedIn {
+	if err == nil && m.SignInsHidden() && !account.LoggedIn {
 		return fmt.Errorf("no sign-in is visible over SSH on %s. The macOS Keychain may be unavailable; check sign-in in Hopsesh on that machine. Last known account is retained", m.Name)
 	}
 	return err

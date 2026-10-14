@@ -181,9 +181,12 @@ type Plan struct {
 	Repo         RepoPlan         `json:"repo"`
 	Placement    agent.Placement  `json:"placement"`
 	// ResumeHere: the session is already in the destination; continue it where it is.
-	ResumeHere bool           `json:"resumeHere,omitempty"`
-	Files      agent.MovePlan `json:"files"`
-	Bytes      int64          `json:"bytes"`
+	ResumeHere bool `json:"resumeHere,omitempty"`
+	// Unprotected: the original stays on a machine without hopsesh, where nothing can
+	// keep it from being continued too.
+	Unprotected bool           `json:"unprotected,omitempty"`
+	Files       agent.MovePlan `json:"files"`
+	Bytes       int64          `json:"bytes"`
 	// SetAside are copies at the target that make way (kept by the journal for undo).
 	SetAside []agent.Summary `json:"setAside,omitempty"`
 	Conflict string          `json:"conflict,omitempty"`
@@ -516,6 +519,10 @@ func keepBoth(p *Plan) {
 
 func planWarnings(p *Plan, in Input, opt Options) {
 	spec := in.Target.Module.Spec()
+	if opt.Notify && !opt.Fork && in.Source.Machine != nil && !in.Source.Machine.HopseshThere() {
+		p.Unprotected = true
+		p.Warnings = append(p.Warnings, fmt.Sprintf("the original on %s won't be protected: without hopsesh there, nothing stops it from being continued on %s too, and the two copies drift apart; set up hopsesh on %s first to protect it", p.Source.Location, p.Source.Location, p.Source.Location))
+	}
 	if p.Live {
 		if opt.Fork {
 			p.Warnings = append(p.Warnings, fmt.Sprintf("the session is still open on %s; you chose fork, so both copies continue independently", p.Source.Location))
