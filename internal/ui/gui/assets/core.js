@@ -315,7 +315,7 @@ export const accountTitle = e => {
   if (o.recorded && !o.current) return `Run by an account that no profile here is signed in to now, as recorded.${before} ${where}`;
   return `No record says which account ran this session. ${where}`;
 };
-export const ownerShown = e => e?.owner?.email || (e?.owner?.recorded && !e.owner.current ? "another account" : "");
+export const ownerShown = e => e?.owner?.email || (e?.owner?.recorded && !e.owner.current && !e.owner.pending ? "another account" : "");
 export const accountGroupLabel = e => e.profile ? `${ownerShown(e) || "Account not recorded"} · ${e.agentName} · ${e.machine === here() ? sys.Here : e.machine}${!e.profile.default || !e.owner?.current ? " · in " + e.profile.name : ""}` : "No account profile";
 // accountKey files a session under its root and its recorded account's fingerprint, for
 // filters and groups: the same after any sign-in change. accountKeyLegacy is 0.4.5's,

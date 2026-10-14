@@ -137,3 +137,16 @@ func TestCrossAccountResumeRefusesOnlyWhatWouldFail(t *testing.T) {
 		}
 	}
 }
+
+// Before its folder's sign-in is checked, a recorded account no folder is known to be
+// signed in to is not called "another account".
+func TestOwnerPendingUntilTheFolderIsChecked(t *testing.T) {
+	e := Entry{Agent: "claude", Session: agent.Summary{Owners: []agent.OwnerRun{{Key: "org"}}}, Profile: &agent.RuntimeProfile{ID: "p"}}
+	if o := (Logins{}).OwnerOf(e); !o.Pending || OwnerLabel(o) != "" {
+		t.Fatalf("%+v %q", o, OwnerLabel(o))
+	}
+	e.Profile.Account = &agent.Account{LoggedIn: true, Key: "other"}
+	if o := (Logins{}).OwnerOf(e); o.Pending || OwnerLabel(o) != "another account" {
+		t.Fatalf("checked: %+v", o)
+	}
+}

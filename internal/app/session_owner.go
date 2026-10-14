@@ -29,6 +29,9 @@ type SessionOwner struct {
 	Key string `json:"key,omitempty"`
 	// Earlier names the other accounts it ran under before, when it changed accounts.
 	Earlier string `json:"earlier,omitempty"`
+	// Pending: its folder's sign-in has not been checked yet, so whether it ran under
+	// another account is not known yet either.
+	Pending bool `json:"pending,omitempty"`
 }
 
 // Logins maps the account fingerprints the registered profiles are signed in to now to
@@ -118,6 +121,7 @@ func (l Logins) OwnerOf(e Entry) SessionOwner {
 		}
 	}
 	o.Earlier = strings.Join(earlier, ", ")
+	o.Pending = o.Email == "" && !o.Current && (e.Profile == nil || e.Profile.Account == nil)
 	return o
 }
 
@@ -149,7 +153,7 @@ func OwnerLabel(o SessionOwner) string {
 	switch {
 	case o.Email != "":
 		return o.Email
-	case o.Recorded && !o.Current:
+	case o.Recorded && !o.Current && !o.Pending:
 		return "another account"
 	}
 	return ""
