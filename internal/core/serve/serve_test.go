@@ -38,9 +38,9 @@ func TestServeAnswersOnlyOnceAndDialsByMode(t *testing.T) {
 	if _, err := Listen(home); !errors.Is(err, ErrRunning) {
 		t.Fatalf("a second hopsesh serve listened: %v", err)
 	}
-	fi, err := os.Stat(Dir(home))
-	if err != nil || fi.Mode().Perm() != 0o700 {
-		t.Fatalf("socket folder is not private: %v %v", fi.Mode(), err)
+	// Windows has no mode bits: the folder is private through its profile's access lists.
+	if fi, err := os.Stat(Dir(home)); err != nil || runtime.GOOS != "windows" && fi.Mode().Perm() != 0o700 {
+		t.Fatalf("socket folder is not private: %v %v", fi, err)
 	}
 	go func() {
 		for {
