@@ -5,11 +5,18 @@ import (
 	"context"
 	"errors"
 	"os"
+	"runtime"
 	"testing"
 )
 
+// shortHome keeps the socket path under the length limit; Windows has no
+// /tmp, and its temporary folder is short enough.
 func shortHome(t *testing.T) string {
-	d, err := os.MkdirTemp("/tmp", "hs")
+	base := "/tmp"
+	if runtime.GOOS == "windows" {
+		base = ""
+	}
+	d, err := os.MkdirTemp(base, "hs")
 	if err != nil {
 		t.Fatal(err)
 	}
