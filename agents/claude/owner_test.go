@@ -45,6 +45,7 @@ func TestLocalIdentityReadsOAuthAccountOnly(t *testing.T) {
 func TestDesktopRunIsDesktopsAccount(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
 	dir := filepath.Join(home, "Library", "Application Support", "Claude")
 	if runtime.GOOS == "windows" {

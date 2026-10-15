@@ -904,10 +904,13 @@ func voiceWorld(h string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	cwd, _ := json.Marshal(filepath.Join(h, "git", "demo"))
-	b := `{"timestamp":"2026-10-02T06:00:00.000Z","type":"session_meta","payload":{"id":"` + id + `","timestamp":"2026-10-02T06:00:00.000Z","cwd":` + string(cwd) + `,"originator":"Codex Desktop","cli_version":"0.162.0-alpha.17.2","source":"vscode","thread_source":"realtime_voice","model_provider":"openai"}}
-{"timestamp":"2026-10-02T06:00:01.000Z","type":"event_msg","payload":{"type":"user_message","message":"Plan the week out loud","images":[]}}
-`
+	meta, err := json.Marshal(map[string]any{"timestamp": "2026-10-02T06:00:00.000Z", "type": "session_meta", "payload": map[string]any{
+		"id": id, "timestamp": "2026-10-02T06:00:00.000Z", "cwd": filepath.Join(h, "git", "demo"), "originator": "Codex Desktop",
+		"cli_version": "0.162.0-alpha.17.2", "source": "vscode", "thread_source": "realtime_voice", "model_provider": "openai"}})
+	if err != nil {
+		return err
+	}
+	b := string(meta) + "\n" + `{"timestamp":"2026-10-02T06:00:01.000Z","type":"event_msg","payload":{"type":"user_message","message":"Plan the week out loud","images":[]}}` + "\n"
 	return os.WriteFile(filepath.Join(dir, "rollout-2026-10-02T09-00-00-"+id+".jsonl"), []byte(b), 0o600)
 }
 

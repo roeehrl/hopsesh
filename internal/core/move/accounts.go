@@ -34,12 +34,6 @@ func signedIn(s Side) *agent.Account {
 	return nil
 }
 
-func signedInKey(s Side) string {
-	if a := signedIn(s); a != nil {
-		return a.Key
-	}
-	return ""
-}
 
 // sameAccount: a run was under the account a is signed in to. A run naming its user
 // matches only that user.

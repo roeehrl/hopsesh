@@ -295,7 +295,7 @@ func attachHere(r *run, machine, id string) error {
 	if term.IsTerminal(fd) {
 		old, err := term.MakeRaw(fd)
 		if err == nil {
-			defer term.Restore(fd, old)
+			defer func() { _ = term.Restore(fd, old) }()
 		}
 		go watchSize(int(os.Stdout.Fd()), sizes)
 	}

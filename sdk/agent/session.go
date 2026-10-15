@@ -240,8 +240,6 @@ type LiveProc struct {
 	Waiting bool `json:"waiting,omitempty"`
 }
 
-// Account contains public vendor login metadata, never credentials. Key is legacy
-// Remote Control ownership metadata; it does not prove cross-profile identity.
 // OwnerRun is an account a session ran under, as recorded. Key is the module's account
 // fingerprint (comparable with Account.Key); Person, when recorded, the user's (comparable
 // with Account.Person). Source says who recorded it: "agent" or "hopsesh".
@@ -279,6 +277,8 @@ func AddOwner(runs []OwnerRun, r OwnerRun) []OwnerRun {
 	return append(runs, r)
 }
 
+// Account contains public vendor login metadata, never credentials. Key is legacy
+// Remote Control ownership metadata; it does not prove cross-profile identity.
 type Account struct {
 	IsolationWhy string `json:"isolationWhy,omitempty"`
 	LoggedIn     bool   `json:"loggedIn"`

@@ -22,7 +22,7 @@ type Status struct {
 	Detail    string `json:"detail,omitempty"`
 }
 
-// ErrUnsupported: this system has no login service hopsesh knows.
+// ErrUnsupported means this system has no login service hopsesh knows.
 var ErrUnsupported = errors.New("hopsesh cannot start itself at login on this system")
 
 // Service registers one program.

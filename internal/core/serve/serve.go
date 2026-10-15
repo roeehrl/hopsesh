@@ -47,10 +47,10 @@ type Welcome struct {
 	Error   string `json:"error,omitempty"`
 }
 
-// ErrNotRunning: no hopsesh serve answers on this machine.
+// ErrNotRunning means no hopsesh serve answers on this machine.
 var ErrNotRunning = errors.New("hopsesh is not running in the login session on this machine")
 
-// ErrRunning: another hopsesh serve already runs.
+// ErrRunning means another hopsesh serve already runs.
 var ErrRunning = errors.New("hopsesh serve is already running")
 
 // Dir is the private folder of the socket and its lock.

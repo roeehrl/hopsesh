@@ -432,7 +432,7 @@ type AccountAdd struct {
 	Command bool     `json:"command,omitempty"` // add <agent>-<name> to the shell there
 }
 
-// LoginMethod: the method needs hopsesh in the login session.
+// LoginMethod reports whether the method needs hopsesh in the login session.
 func LoginMethod(m string) bool {
 	switch m {
 	case MethodTerminalOpen, MethodTerminalList, MethodTerminalClose, MethodAccounts, MethodLive, MethodTools, MethodAccountAdd, MethodOwners, MethodProtection, MethodProtectionSetUp:
@@ -481,7 +481,7 @@ type TerminalID struct {
 	ID string `json:"id"`
 }
 
-// CodeNoLogin: the request needs hopsesh in the login session, which does not answer.
+// CodeNoLogin means the request needs hopsesh in the login session, which does not answer.
 const CodeNoLogin = "nologin"
 
 // ErrNoLogin classifies it.

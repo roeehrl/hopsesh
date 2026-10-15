@@ -779,6 +779,35 @@ func inApp(name, command string) bool {
 }
 
 // sharedServer: the process is a Codex app-server, which serves several threads.
+// holdsOthers: pid holds the writer lock of another thread than sid (or that cannot be
+// told, which counts as holding one).
+func holdsOthers(ctx context.Context, h agent.Host, in agent.Install, pid int, sid agent.SessionID) bool {
+	dir := h.Path().Join(in.Root(home), "thread-writer-locks")
+	entries, err := h.FS().ReadDir(dir)
+	if err != nil {
+		return true
+	}
+	var paths []string
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".lock") && e.Name() != string(sid)+".lock" {
+			paths = append(paths, h.Path().Join(dir, e.Name()))
+		}
+	}
+	if len(paths) == 0 {
+		return false
+	}
+	holders, err := h.Locks().Holders(ctx, paths)
+	if err != nil {
+		return true
+	}
+	for _, ps := range holders {
+		if slices.Contains(ps, pid) {
+			return true
+		}
+	}
+	return false
+}
+
 func sharedServer(command string) bool { return slices.Contains(strings.Fields(command), "app-server") }
 
 // processInfo names processes and reads their command lines, best effort.
@@ -914,7 +943,9 @@ func (m *Module) Stop(ctx context.Context, h agent.Host, in agent.Install, s age
 	app, shared := desktopOriginator(o), !cliOriginators[o]
 	for _, pid := range pids {
 		app = app || inApp(names[pid], commands[pid])
-		shared = shared || sharedServer(commands[pid])
+		// An app-server (a CLI's own daemon) may be ended only when this is the one
+		// thread it holds: ending it ends every thread it holds.
+		shared = shared || sharedServer(commands[pid]) && holdsOthers(ctx, h, in, pid, s.Key.Session)
 	}
 	if app {
 		return fmt.Errorf("the session is open in %s desktop; open it in %s desktop. %w", desktopName(in), desktopName(in), ErrInApp)

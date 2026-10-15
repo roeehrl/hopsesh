@@ -20,16 +20,17 @@ func TestStopNeverClosesTheApp(t *testing.T) {
 	const server = "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex -c features.code_mode_host=true app-server --analytics-default-enabled"
 	for _, tc := range []struct {
 		name, proc, command, originator string
-		app                             bool
+		app, others                     bool
 		want                            error
 	}{
-		{"app-server inside the bundle", "codex", server, "codex_cli_rs", true, ErrInApp},
-		{"app process", "Codex", "", "codex_cli_rs", true, ErrInApp},
-		{"desktop thread, commands unknown", "codex", "", "Codex Desktop", true, ErrInApp},
-		{"work thread", "codex", "", "codex_work_desktop", true, ErrInApp},
-		{"shared daemon", "codex", "/opt/homebrew/bin/codex app-server --listen unix://", "codex_cli_rs", false, ErrSharedServer},
-		{"extension client", "codex", "", "codex_vscode", false, ErrSharedServer},
-		{"CLI, any case", "CODEX", "/opt/homebrew/bin/codex resume " + t1, "codex_cli_rs", false, nil},
+		{"app-server inside the bundle", "codex", server, "codex_cli_rs", true, false, ErrInApp},
+		{"app process", "Codex", "", "codex_cli_rs", true, false, ErrInApp},
+		{"desktop thread, commands unknown", "codex", "", "Codex Desktop", true, false, ErrInApp},
+		{"work thread", "codex", "", "codex_work_desktop", true, false, ErrInApp},
+		{"shared daemon holding other threads", "codex", "/opt/homebrew/bin/codex app-server --listen unix://", "codex_cli_rs", false, true, ErrSharedServer},
+		{"a CLI's daemon holding only this thread", "codex", "/opt/homebrew/bin/codex app-server --listen unix://", "codex_cli_rs", false, false, nil},
+		{"extension client", "codex", "", "codex_vscode", false, false, ErrSharedServer},
+		{"CLI, any case", "CODEX", "/opt/homebrew/bin/codex resume " + t1, "codex_cli_rs", false, false, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fh := newHost(t)
@@ -38,6 +39,11 @@ func TestStopNeverClosesTheApp(t *testing.T) {
 			fh.PIDCommands = map[int]string{}
 			if tc.command != "" {
 				fh.PIDCommands[4242] = tc.command
+			}
+			if tc.others {
+				other := "/home/u/.codex/thread-writer-locks/other-thread.lock"
+				fh.Put(other, nil, time.Now())
+				fh.LockHolders[other], fh.LocksHeld[other] = []int{4242}, true
 			}
 			in, _ := m.Detect(ctx, fh)
 			in.Desktop = "/Applications/ChatGPT.app"

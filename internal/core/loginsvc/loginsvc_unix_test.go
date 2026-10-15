@@ -23,8 +23,10 @@ func TestInstallWritesTheServiceAndReportsWhatRuns(t *testing.T) {
 				return nil, nil // a login session there
 			case strings.Contains(line, "bootstrap"), strings.Contains(line, "enable --now"):
 				running = true
-			case strings.Contains(line, "print gui/") && running, strings.Contains(line, "is-active") && running:
-				return []byte("state = running\nactive\n"), nil
+			case strings.Contains(line, "print gui/") && running:
+				return []byte("state = running\n"), nil
+			case strings.Contains(line, "is-active") && running:
+				return []byte("active\n"), nil
 			case strings.Contains(line, "print"), strings.Contains(line, "is-active"):
 				return []byte("inactive"), errors.New("exit 3")
 			}
