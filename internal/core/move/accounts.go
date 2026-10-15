@@ -12,8 +12,66 @@ func profileBoundary(in Input) bool {
 	s, t := in.Source.Install, in.Target.Install
 	return (s.Profile != nil || t.Profile != nil) && (s.ProfileID() != t.ProfileID() || s.Profile != nil && t.Profile != nil && s.Profile.Endpoint != t.Profile.Endpoint)
 }
+
+// ranUnder: the runs a session recorded, else (an older summary) its Remote Control owner.
+func ranUnder(s agent.Summary) []agent.OwnerRun {
+	if len(s.Owners) > 0 {
+		return s.Owners
+	}
+	if m := s.Mirror; m != nil && m.Account != "" {
+		return []agent.OwnerRun{{Key: m.Account}}
+	}
+	return nil
+}
+
+func signedIn(s Side) *agent.Account {
+	if s.Account != nil {
+		return s.Account
+	}
+	if p := s.Install.Profile; p != nil && p.Account != nil && p.Account.LoggedIn {
+		return p.Account
+	}
+	return nil
+}
+
+
+// sameAccount: a run was under the account a is signed in to. A run naming its user
+// matches only that user.
+func sameAccount(r agent.OwnerRun, a *agent.Account) bool {
+	return a != nil && a.Key != "" && r.Key == a.Key && (r.Person == "" || a.Person == "" || r.Person == a.Person)
+}
+
+// ownerBoundary: the session ran, or may have run, under another account than the one its
+// destination is signed in to now, so what is bound to that account (signed or encrypted
+// reasoning) cannot be replayed there. Any recorded run under another account counts, and
+// so does a session with no record at all; only an unknown destination does not.
+func ownerBoundary(in Input) bool {
+	if in.Source.Module == nil || in.Target.Module == nil || in.Source.Module.Spec().ID != in.Target.Module.Spec().ID {
+		return false
+	}
+	t := signedIn(in.Target)
+	if t == nil || t.Key == "" {
+		return false
+	}
+	runs := ranUnder(in.Session)
+	if len(runs) == 0 {
+		return true
+	}
+	for _, r := range runs {
+		if !sameAccount(r, t) {
+			return true
+		}
+	}
+	return false
+}
+
+// samePlace: the destination is the session's own root on its own machine.
+func samePlace(in Input) bool {
+	return in.Source.Machine != nil && in.Target.Machine != nil && in.Source.Machine.Name == in.Target.Machine.Name &&
+		in.Source.Install.ProfileID() == in.Target.Install.ProfileID() && in.Source.Install.BindingID() == in.Target.Install.BindingID()
+}
 func ValidateProfiles(ctx context.Context, in Input) error {
-	for _, side := range []Side{in.Source, in.Target} {
+	for i, side := range []Side{in.Source, in.Target} {
 		p := side.Install.Profile
 		if p == nil || side.Machine == nil || side.Machine.IsSnapshot() {
 			continue
@@ -46,6 +104,15 @@ func ValidateProfiles(ctx context.Context, in Input) error {
 			if p.Account == nil && p.Default && profileBoundary(in) && !now.LoggedIn && now.Observation != "" {
 				continue
 			}
+			// Hidden sign-ins (a Mac reached over SSH) answer "signed out" whatever they are:
+			// that is unknown, never a changed login. Only a destination whose agent cannot
+			// resume under another account needs the login it was planned with confirmed.
+			if !now.LoggedIn && side.Machine.SignInsHidden() {
+				if i == 1 && !side.Module.Spec().ResumeAcrossAccounts {
+					return fmt.Errorf("cannot confirm account %q on %s: its sign-in is not visible over SSH; set up hopsesh there, or check it on that machine", p.Name, side.Machine.Name)
+				}
+				continue
+			}
 			if p.Account == nil || now.Observation != p.Account.Observation || now.LoggedIn != p.Account.LoggedIn || now.Provider != p.Account.Provider {
 				return fmt.Errorf("account %q login changed; scan accounts and create a new plan", p.Name)
 			}
@@ -69,4 +136,22 @@ func ProfileInput(p *Plan, in Input) Input {
 		in.Target = Side{Machine: h.Here, Module: h.Module, Install: h.Install}
 	}
 	return in
+}
+
+// Crosses reports whether continuing s as account a crosses accounts: a run under another
+// account, or no record at all. ok is false when a is unknown (nothing can be said).
+func Crosses(s agent.Summary, a *agent.Account) (crosses, ok bool) {
+	if a == nil || a.Key == "" {
+		return false, false
+	}
+	runs := ranUnder(s)
+	if len(runs) == 0 {
+		return true, true
+	}
+	for _, r := range runs {
+		if !sameAccount(r, a) {
+			return true, true
+		}
+	}
+	return false, true
 }

@@ -1,11 +1,15 @@
 package app
 
 import (
+	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
-	"github.com/roeehrl/hopsesh/internal/core/move"
+	"os"
 	"time"
+
+	"github.com/roeehrl/hopsesh/internal/core/move"
 
 	"github.com/roeehrl/hopsesh/internal/core/launch"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -36,6 +40,9 @@ func (a *App) Resume(inv *Inventory, e Entry, o agent.ResumeOptions) (agent.Comm
 		return agent.Command{}, fmt.Errorf("%w: %s", agent.ErrNotInstalled, mod.Spec().Name)
 	}
 	if err := a.checkAccountRegistration(in); err != nil {
+		return agent.Command{}, err
+	}
+	if err := crossAccountResume(mod, in, e); err != nil {
 		return agent.Command{}, err
 	}
 	if o.App && in.Profile != nil && !in.Profile.Default {
@@ -82,4 +89,56 @@ func (a *App) ResumeShell(inv *Inventory, e Entry) (string, error) {
 		return "", err
 	}
 	return launch.Shell(c, "", launch.DefaultShell()), nil
+}
+
+// crossAccountResume refuses to resume, as it is, a session of an agent that cannot
+// resume across accounts when it ran (or, with no record, may have run) under another
+// account than its root is signed in to now and holds reasoning bound to that account:
+// the agent itself would fail. A move to this same place continues it as a cleaned copy.
+func crossAccountResume(mod agent.Module, in agent.Install, e Entry) error {
+	spec := mod.Spec()
+	if spec.ResumeAcrossAccounts || in.Profile == nil || in.Profile.Account == nil || !in.Profile.Account.LoggedIn || in.Profile.Account.Key == "" {
+		return nil
+	}
+	acct := in.Profile.Account
+	runs := Owners(e.Session)
+	other := len(runs) == 0
+	for _, r := range runs {
+		if r.Key != acct.Key || r.Person != "" && acct.Person != "" && r.Person != acct.Person {
+			other = true
+		}
+	}
+	if !other || len(runs) == 0 && !boundReasoning(e.Session.Path) {
+		return nil
+	}
+	who := "another account"
+	if len(runs) == 0 {
+		who = "an account hopsesh has no record of"
+	}
+	return fmt.Errorf("this %s session ran under %s; resumed as it is under %s it would fail on its encrypted reasoning. Use Move and choose this same place to continue a cleaned copy", spec.Name, who, cmp.Or(acct.Email, "the account signed in now"))
+}
+
+// boundReasoning: the transcript holds encrypted reasoning (bound to the account that
+// produced it).
+func boundReasoning(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	buf := make([]byte, 1<<20)
+	tail := []byte{}
+	for {
+		n, err := f.Read(buf)
+		chunk := append(tail, buf[:n]...)
+		if bytes.Contains(chunk, []byte(`"encrypted_content"`)) {
+			return true
+		}
+		if len(chunk) > 32 {
+			tail = append([]byte{}, chunk[len(chunk)-32:]...)
+		}
+		if err != nil {
+			return false
+		}
+	}
 }

@@ -378,6 +378,13 @@ func main() {
 			_ = os.Setenv("FAKE_MOVEMENT_ACCOUNT", "1")
 			_ = os.Setenv("FAKE_CODEX_EMAIL", "alice@example.com")
 		}
+		if r.URL.Query().Get("voice") == "1" {
+			// A Codex app voice conversation: hidden unless Settings › Agents shows them.
+			if err := voiceWorld(h); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
 		if r.URL.Query().Get("owners") == "1" {
 			// Claude Code is signed in to alice@example.com (org-fixture) now; one demo
 			// session records that it ran under another account, one under alice's.
@@ -825,7 +832,7 @@ var (
 
 func relay(name string, data any) {
 	switch name {
-	case gui.AccountEvent, gui.DiscoveryEvent, "hopsesh:terminal-main", gui.TerminalPreferencesEvent, gui.TerminalWorkspaceEvent, gui.AppearanceEvent, gui.TerminalEvent, gui.QuitEvent, gui.SignedInEvent, gui.TerminalAppEvent, gui.ExternalExitEvent:
+	case gui.AccountEvent, gui.MachineSetupEvent, gui.DiscoveryEvent, "hopsesh:terminal-main", gui.TerminalPreferencesEvent, gui.TerminalWorkspaceEvent, gui.AppearanceEvent, gui.TerminalEvent, gui.QuitEvent, gui.SignedInEvent, gui.TerminalAppEvent, gui.ExternalExitEvent:
 	default:
 		return
 	}
@@ -887,6 +894,24 @@ func ownersWorld(h string) error {
 		}
 	}
 	return nil
+}
+
+// voiceWorld adds a thread the Codex app started from a voice conversation
+// (session_meta thread_source "realtime_voice") to the demo repository.
+func voiceWorld(h string) error {
+	const id = "01a0fe1c-0000-7000-8000-00000000f0ce"
+	dir := filepath.Join(h, ".codex", "sessions", "2026", "10", "02")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	meta, err := json.Marshal(map[string]any{"timestamp": "2026-10-02T06:00:00.000Z", "type": "session_meta", "payload": map[string]any{
+		"id": id, "timestamp": "2026-10-02T06:00:00.000Z", "cwd": filepath.Join(h, "git", "demo"), "originator": "Codex Desktop",
+		"cli_version": "0.162.0-alpha.17.2", "source": "vscode", "thread_source": "realtime_voice", "model_provider": "openai"}})
+	if err != nil {
+		return err
+	}
+	b := string(meta) + "\n" + `{"timestamp":"2026-10-02T06:00:01.000Z","type":"event_msg","payload":{"type":"user_message","message":"Plan the week out loud","images":[]}}` + "\n"
+	return os.WriteFile(filepath.Join(dir, "rollout-2026-10-02T09-00-00-"+id+".jsonl"), []byte(b), 0o600)
 }
 
 func protectionWorld(h, mode string) error {

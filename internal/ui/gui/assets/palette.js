@@ -26,6 +26,8 @@ function commands() {
     { label: "Activity and undo", hint: keys("mod+2"), run: () => go("activity") },
     { label: "Machines", hint: keys("mod+3"), run: () => go("machines") },
     { label: "Settings", hint: keys("mod+,"), run: () => go("settings", "general") },
+    { label: "Accounts: who is signed in where", run: () => go("accounts") },
+    { label: "Settings: Hooks & skills on every machine", run: () => go("settings", "hooks") },
     { label: "Refresh: read every machine again", hint: keys("mod+R"), run: () => go("sessions", true) },
     { label: "Undo the last hop", hint: keys("mod+alt+Z"), run: undoLast },
     { label: "Add a machine", run: () => go("machines") },

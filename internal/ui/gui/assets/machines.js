@@ -91,12 +91,72 @@ function statusCell(m) {
   return h("div", { style: "display:flex;flex-direction:column;gap:3px;min-width:0" },
     h("span", { style: "display:flex;gap:7px;align-items:center" }, h("span", { class: "dot " + k }), words),
     m.status === "ok" ? h("span", { class: "muted", style: "font-size:12px" }, [`${m.sessions} session${m.sessions === 1 ? "" : "s"}`, m.agents.join(", ")].filter(Boolean).join(" · ")) : null,
-    m.status === "ok" ? h("span", { class: m.hopsesh ? "muted" : "warn", style: "font-size:12px" }, m.hopsesh ? `hopsesh ${m.hopsesh}: you can send sessions there` : "No hopsesh there: you can bring sessions from it, not send to it") : null,
+    m.status === "ok" ? presenceLine(m) : null,
     m.status !== "ok" && m.hint ? h("span", { class: "muted", style: "font-size:12px" }, rich(cap(m.hint))) : null,
     error && error !== m.error ? h("span", { class: "err" }, error) : null,
     m.scan?.finished ? h("span", { class: "muted", style: "font-size:11px" }, "Last checked " + when(m.scan.finished)) : null,
     m.status !== "ok" && m.error && !url ? h("span", { class: "mono muted", style: "font-size:11px;overflow-wrap:anywhere" }, m.error) : null,
     url ? h("button", { class: "btn small", style: "align-self:flex-start", onclick: () => api("OpenURL", url).catch(fail) }, "Open the Tailscale sign-in") : null);
+}
+
+// presenceLine says how hopsesh works with a machine: running in its login session, there
+// but not running, older, or not there (SSH only).
+function presenceLine(m) {
+  const [cls, words] = {
+    login: ["ok", `hopsesh ${m.hopsesh} running there`],
+    installed: ["warn", `hopsesh ${m.hopsesh} there, not in a login session`],
+    older: ["warn", `hopsesh ${m.hopsesh} there · update needed`],
+    ssh: ["warn", "SSH only: no hopsesh there"],
+  }[m.presence] || [m.hopsesh ? "muted" : "warn", m.hopsesh ? `hopsesh ${m.hopsesh} there` : "SSH only: no hopsesh there"];
+  return h("span", { class: cls, style: "font-size:12px" }, words);
+}
+
+// presenceBlock is what hopsesh can do on a machine, and the step that lets it do more.
+function presenceBlock(m) {
+  if (!m.scanned || m.status !== "ok" || !(m.can || []).length) return null;
+  const why = {
+    older: "Its hopsesh is older than this one, so sending sessions and running sessions there wait until it's updated. Reading sessions still works.",
+    installed: `hopsesh is on ${m.name} but not running in a login session: nobody is logged in there, or it doesn't start at login yet. Until then it works over SSH only, as before.`,
+    ssh: m.os === "darwin" ? `hopsesh reads ${m.name}'s sessions over SSH, but can't see who is signed in there (macOS keeps sign-ins in the Keychain, which is locked to SSH), protect originals left there, or run sessions there.`
+      : `hopsesh reads ${m.name}'s sessions over SSH, but can't protect originals left there or run sessions there.`,
+  }[m.presence];
+  const action = { ssh: `Set up hopsesh on ${m.name}…`, older: `Update hopsesh on ${m.name}`, installed: `Set up hopsesh on ${m.name} again…` }[m.presence];
+  return h("div", { class: "presence", "data-presence": m.presence, "aria-label": `What hopsesh can do on ${m.name}` },
+    h("ul", { class: "can" }, m.can.map((c) => h("li", { class: c.ok ? "ok" : "no" }, h("span", { "aria-hidden": "true" }, c.ok ? "✓" : "✕"), h("span", {}, c.text)))),
+    why ? h("p", { class: "muted", style: "margin:0;font-size:12.5px" }, why) : null,
+    action ? h("div", {}, h("button", { class: "btn small" + (m.presence === "ssh" ? " primary" : ""), onclick: () => setupDialog(m) }, action)) : null);
+}
+
+// setupDialog explains setting hopsesh up on a machine, then does it, step by step.
+function setupDialog(m) {
+  const steps = h("ol", { class: "setup-steps", "aria-live": "polite" });
+  const foot = h("div", { class: "dlg-foot" });
+  const mac = m.os === "darwin";
+  const start = async () => {
+    fill(foot, h("span", { class: "muted", role: "status" }, `Setting up hopsesh on ${m.name}…`));
+    const off = on("hopsesh:machine-setup", (e) => {
+      if (e.machine !== m.name) return;
+      const s = e.step;
+      steps.append(h("li", { class: s.state }, h("b", {}, { done: "✓", skipped: "–", waiting: "…", failed: "✕" }[s.state] || "·", " ", s.name), s.detail ? h("span", { class: "muted" }, " · " + s.detail) : null));
+    });
+    try {
+      const r = await api("SetUpMachine", m.name);
+      fill(foot, h("span", { class: r.login ? "ok" : "warn", role: "status" }, r.login ? `hopsesh ${r.version} runs in the login session on ${m.name}.` : `hopsesh ${r.version} is set up on ${m.name}; it starts when someone logs in there.`),
+        h("span", { class: "spacer" }), h("button", { class: "btn primary", onclick: () => { d.close(); after(true, m.name); } }, "Done"));
+    } catch (e) {
+      fill(foot, h("span", { class: "err", role: "alert" }, errText(e)), h("span", { class: "spacer" }), h("button", { class: "btn", onclick: () => d.close() }, "Close"), h("button", { class: "btn primary", onclick: () => { fill(steps); start(); } }, "Try again"));
+    } finally { off?.(); }
+  };
+  fill(foot, h("button", { class: "btn", onclick: () => d.close() }, "Not now"), h("button", { class: "btn primary", onclick: start }, m.presence === "older" ? `Update hopsesh on ${m.name}` : `Set up hopsesh on ${m.name}`));
+  const d = dialog(
+    h("h2", { style: "margin:0;font-size:16px" }, m.presence === "older" ? `Update hopsesh on ${m.name}` : `Set up hopsesh on ${m.name}`),
+    h("ul", { class: "setup-what" },
+      h("li", {}, `Copies this hopsesh (${state.info?.version || "this version"}) to `, h("span", { class: "mono" }, "~/.hopsesh/bin"), ` on ${m.name} over SSH. A hopsesh you installed there yourself is left as it is.`),
+      h("li", {}, `Starts it in your login session on ${m.name} whenever you log in there${mac ? ", so it can read the Keychain and open apps" : ""}. `, h("span", { class: "mono" }, "hopsesh serve uninstall"), " there turns this off."),
+      h("li", {}, `Lets ${m.name} receive the sessions you send it.`),
+      h("li", {}, `Asks before installing hooks or the skill there; nothing else on ${m.name} changes.`),
+      mac ? h("li", {}, `Needs someone logged in to ${m.name}'s desktop for the Keychain and apps. Until then it works over SSH only.`) : null),
+    steps, foot);
 }
 
 function machineRow(m) {
@@ -112,7 +172,7 @@ function machineRow(m) {
         if (!await ask({ title: `Remove ${m.name}?`, body: "hopsesh stops connecting to it and forgets its remembered password. Its sessions stay where they are.", ok: "Remove", danger: true })) return;
         try { await api("RemoveHost", m.name); toast(`Removed ${m.name}`); } catch (e) { fail(e); }
         await after();
-      } }, "Remove")));
+      } }, "Remove")), presenceBlock(m));
 }
 
 function foundRow(f) {
@@ -248,7 +308,7 @@ function render() {
     } });
   fill(view, h("div", { class: "page" }, h("div", { class: "page-in" },
     h("h1", {}, "Machines"),
-    h("span", { class: "muted" }, "hopsesh connects only to the machines you add, with your own ssh and keys, and only reads your coding agents' session folders until you hop a session."),
+    h("span", { class: "muted" }, "hopsesh connects only to the machines you add, with your own ssh and keys. With hopsesh running on a machine, it checks sign-ins there, protects originals there and runs sessions there for you; over SSH alone it can only read."),
     h("section", { class: "card" }, h("div", { class: "line-item" },
       h("span", { class: "ico push" }, icon(ICONS.here, 15)),
       h("div", { style: "flex:1 1 300px;min-width:0;display:flex;flex-direction:column;gap:3px" },

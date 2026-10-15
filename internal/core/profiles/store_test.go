@@ -79,14 +79,14 @@ func TestRemoteObservationKeepsLocalPreferencesAndIdentity(t *testing.T) {
 	remote.Tags = []string{"Private tag"}
 	remote.Binding = "owner-binding"
 	remote.CheckedAt = time.Now().UTC()
-	remote.Account = &agent.Account{Key: "private-key", Email: "alice@example.com", Label: "Private label", Provider: "chatgpt", LoggedIn: true, Observation: "public-fingerprint", Confidence: "limited"}
+	remote.Account = &agent.Account{Key: "account-fingerprint", Email: "alice@example.com", Label: "Private label", Provider: "chatgpt", LoggedIn: true, Observation: "public-fingerprint", Confidence: "limited"}
 	b, _ := json.Marshal(disk{Version: 1, Profiles: []agent.RuntimeProfile{remote}})
 	decoded, err := DecodeRegistrations(b)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := decoded[0]
-	if len(got.Tags) > 0 || got.Account.Key != "" || got.Account.Email != remote.Account.Email || got.Account.Label != remote.Account.Label || got.Binding != remote.Binding {
+	if len(got.Tags) > 0 || got.Account.Key != remote.Account.Key || got.Account.Email != remote.Account.Email || got.Account.Label != remote.Account.Label || got.Binding != remote.Binding {
 		t.Fatalf("unexpected discovery: %+v", got)
 	}
 	if err = s.ImportObservation(p.ID, got); err != nil {

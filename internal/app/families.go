@@ -22,6 +22,17 @@ type Relationship struct {
 	Issue      string   `json:"issue,omitempty"`
 	Ancestors  []string `json:"ancestors,omitempty"`
 	Branches   int      `json:"branches"`
+	// Former is the ID 0.4.5 and earlier gave an unlinked family (it changed with the
+	// profile's sign-in), so a name saved for it still applies.
+	Former string `json:"-"`
+}
+
+// FamilyName is the name the user gave a family, if any.
+func (a *App) FamilyName(r Relationship) string {
+	if n := a.Cfg.FamilyNames[r.Family]; n != "" || r.Former == "" {
+		return n
+	}
+	return a.Cfg.FamilyNames[r.Former]
 }
 
 func EntryIdentity(machine, key string) string { return machine + "\x00" + key }
@@ -189,9 +200,11 @@ func (inv *Inventory) Relationships() map[string]Relationship {
 				if machine.host != nil && machine.host.Facts.Endpoint != "" {
 					namespace = machine.host.Facts.Endpoint + "\x00" + e.Session.Key.String()
 				}
+				// Not the sign-in: a family's name and grouping outlive a new login.
 				if in, ok := machine.InstallProfile(e.Agent, e.Session.Key.Profile); ok {
-					namespace += "\x00" + in.BindingID()
+					r.Former = fmt.Sprintf("copy-%x", sha256.Sum256([]byte(namespace+"\x00"+in.BindingID())))
 				}
+				namespace += "\x00" + e.Session.Key.Profile
 			}
 			r.Family = fmt.Sprintf("copy-%x", sha256.Sum256([]byte(namespace)))
 			r.Branch = r.Family

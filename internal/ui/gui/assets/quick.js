@@ -1,5 +1,5 @@
 import "./appearance.js";
-import {api,on,h,fill,view,state,setSystem,sys,errText,agentBadge,loadError} from './core.js';
+import {api,on,h,fill,view,state,setSystem,sys,errText,agentBadge,loadError,accountShown} from './core.js';
 import {markdown} from './markdown.js';
 import {desktopSettings} from './desktop-settings.js';
 
@@ -11,7 +11,8 @@ const sessionTabs=e=>(data?.tabs||[]).filter(t=>t.machine===e.machine&&t.key===e
 const needs=e=>local(e)&&(e.needs||sessionTabs(e).some(t=>t.attention));
 const active=e=>local(e)&&(e.live||sessionTabs(e).some(t=>t.state!=='exited'));
 const age=iso=>{const n=Date.parse(iso);if(!Number.isFinite(n)||n<1000)return 'not yet scanned';const s=Math.max(0,Math.floor((Date.now()-n)/1000));return s<60?'just now':s<3600?Math.floor(s/60)+'m ago':s<86400?Math.floor(s/3600)+'h ago':Math.floor(s/86400)+'d ago';};
-const account=e=>[e.profile?.account?.email||e.profile?.name,...e.profile?.tags||[]].filter(Boolean).join(' · ');
+// The account that ran the session, as recorded; never its folder's sign-in now.
+const account=e=>[accountShown(e),...e.profile?.tags||[]].filter(Boolean).join(' · ');
 const status=e=>!local(e)?`${e.status||'Status unknown'} · last scanned ${age(data.scan.elsewhere)}`:needs(e)?'Needs you':sessionTabs(e).length?`${sessionTabs(e).length} terminal tab${sessionTabs(e).length===1?'':'s'} · ${e.status||'Open'}`:e.status||'Status unknown';
 function error(e){let el=document.querySelector('#quick-error');if(!el){el=h('div',{id:'quick-error',class:'desktop-note',role:'alert'});view.append(el)}el.textContent=errText(e);}
 async function action(fn){try{await fn()}catch(e){error(e)}}
@@ -26,7 +27,7 @@ function render(){
  if(screen==='tabs'){const ts=scopedTabs?data.tabs.filter(t=>t.machine===scopedTabs.machine&&t.key===scopedTabs.key):data.tabs;fill(view,head(true),h('div',{class:'quick-body'},h('h2',{},'Open terminal tabs'),ts.length?ts.map(t=>h('button',{class:'quick-row',onclick:()=>action(async()=>{await api('TerminalFocus',t.id);await api('QuickClose')})},h('span',{class:'quick-row-copy'},h('b',{},t.title||t.command||'Terminal'),h('span',{class:'muted'},t.state==='exited'?'Ended':t.attention?'Needs you':'Open')))):h('p',{class:'muted'},'No matching terminal tabs.')));return}
  if(screen==='detail'){
   const e=es.find(e=>key(e)===key(selected));if(!e){screen='home';render();return}selected=e;const ts=sessionTabs(e);
-  const content=h('div',{class:'quick-body'},h('h2',{},e.title),h('p',{class:'muted'},`${e.agentName} · ${e.repository}`),h('p',{class:'quick-meta'},`${local(e)?sys.Here:e.machine} · ${account(e)||'Account not identified'}`),h('p',{class:needs(e)?'desktop-note':'quick-status'},status(e)));
+  const content=h('div',{class:'quick-body'},h('h2',{},e.title),h('p',{class:'muted'},`${e.agentName} · ${e.repository}`),h('p',{class:'quick-meta'},`${local(e)?sys.Here:e.machine} · ${account(e)||'Account not recorded'}`),h('p',{class:needs(e)?'desktop-note':'quick-status'},status(e)));
   if(e.lineageError)content.append(h('p',{class:'desktop-note'},'Transfer history needs review. Open session details to resolve it.'));
   else if(e.journey){const j=e.journey;content.append(h('p',{class:'quick-meta'},[j.fork?'Fork':null,`${j.transfers} transfers`,`${j.roundTrips} round trips`,`${j.returns} returns`].filter(Boolean).join(' · ')));}
   if(data.desktop.preferences.previews!==false){content.append(h('h3',{},'Recent conversation'));if(preview){for(const m of preview.items||[])content.append(h('section',{class:'quick-message '+(m.role==='user'?'user':'agent')},h('b',{},m.role==='user'?'You':m.role==='agent'?e.agentName:m.role),markdown(m.text)));if(preview.note)content.append(h('p',{class:'muted'},preview.note));if(preview.failed)content.append(h('button',{class:'btn',onclick:()=>select(e)},'Try again'));}else content.append(h('p',{class:'muted',role:'status'},'Reading conversation…'));}else content.append(h('p',{class:'muted'},'Message previews are hidden.'));

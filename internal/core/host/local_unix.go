@@ -130,5 +130,23 @@ func processNames(ctx context.Context, pids []int) (map[int]string, error) {
 	return out, nil
 }
 
+// processCommands asks ps for each process's command line.
+func processCommands(ctx context.Context, pids []int) (map[int]string, error) {
+	out := map[int]string{}
+	if len(pids) == 0 {
+		return out, nil
+	}
+	ids := make([]string, len(pids))
+	for i, p := range pids {
+		ids[i] = strconv.Itoa(p)
+	}
+	b, err := proc.CommandContext(ctx, "ps", "-o", "pid=,command=", "-p", strings.Join(ids, ",")).Output()
+	var ee *exec.ExitError
+	if err != nil && !(errors.As(err, &ee) && ee.ExitCode() == 1) {
+		return nil, err
+	}
+	return parseCommands(string(b)), nil
+}
+
 // shortPath: only Windows has short names.
 func shortPath(string) string { return "" }

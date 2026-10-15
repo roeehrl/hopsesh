@@ -57,7 +57,7 @@ func TestPlacesOf(t *testing.T) {
 		{PID: 30, PPID: 1, Name: "Claude"}, {PID: 31, PPID: 30, Name: "claude"},
 	})
 	li := agent.LiveInfo{State: agent.Live, PID: 12, Procs: []agent.LiveProc{{PID: 12}, {PID: 14, Waiting: true}, {PID: 22}, {PID: 101}, {PID: 31, App: true}}}
-	got := placesOf(li, table, self)
+	got := placesOf(li, table, self, presence.KindClaudeApp)
 	want := []PlaceDTO{{Kind: "iterm2", App: "iTerm2", Count: 2, Waiting: true}, {Kind: "ide", App: "VS Code", Count: 1}, {Kind: "claude-app", Count: 1}}
 	if len(got) != len(want) {
 		t.Fatalf("places %+v, want %+v", got, want)
@@ -68,13 +68,13 @@ func TestPlacesOf(t *testing.T) {
 		}
 	}
 	// No process list: the main process, or a generic place.
-	if p := placesOf(agent.LiveInfo{State: agent.Live, PID: 14}, table, self); len(p) != 1 || p[0].Kind != "iterm2" {
+	if p := placesOf(agent.LiveInfo{State: agent.Live, PID: 14}, table, self, presence.KindClaudeApp); len(p) != 1 || p[0].Kind != "iterm2" {
 		t.Errorf("by PID: %+v", p)
 	}
-	if p := placesOf(agent.LiveInfo{State: agent.Live}, nil, self); len(p) != 1 || p[0].Kind != "unknown" {
+	if p := placesOf(agent.LiveInfo{State: agent.Live}, nil, self, presence.KindClaudeApp); len(p) != 1 || p[0].Kind != "unknown" {
 		t.Errorf("nothing known: %+v", p)
 	}
-	if p := placesOf(agent.LiveInfo{State: agent.Ended, PID: 12}, table, self); len(p) != 0 {
+	if p := placesOf(agent.LiveInfo{State: agent.Ended, PID: 12}, table, self, presence.KindClaudeApp); len(p) != 0 {
 		t.Errorf("an ended session is open nowhere: %+v", p)
 	}
 }
@@ -275,12 +275,23 @@ func TestPreviewAndRename(t *testing.T) {
 
 func TestPlacesOfDuplicatePID(t *testing.T) {
 	li := agent.LiveInfo{State: agent.Live, Procs: []agent.LiveProc{{PID: 123}, {PID: 123, Waiting: true}}}
-	got := placesOf(li, nil, 0)
+	got := placesOf(li, nil, 0, presence.KindClaudeApp)
 	if len(got) != 1 || got[0].Count != 1 || !got[0].Waiting {
 		t.Fatalf("%+v", got)
 	}
-	got = placesOf(agent.LiveInfo{State: agent.Live, Status: "waiting for input"}, nil, 0)
+	got = placesOf(agent.LiveInfo{State: agent.Live, Status: "waiting for input"}, nil, 0, presence.KindClaudeApp)
 	if len(got) != 1 || !got[0].Waiting {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// The Codex app's shared app-server is the Codex app's place, never a terminal process.
+func TestPlacesOfCodexApp(t *testing.T) {
+	li := agent.LiveInfo{State: agent.Live, App: true, Procs: []agent.LiveProc{{PID: 4471, App: true}}}
+	if got := placesOf(li, nil, 0, appKind("codex")); len(got) != 1 || got[0].Kind != string(presence.KindCodexApp) {
+		t.Fatalf("%+v", got)
+	}
+	if got := placesOf(agent.LiveInfo{State: agent.Live, App: true}, nil, 0, appKind("claude")); len(got) != 1 || got[0].Kind != string(presence.KindClaudeApp) {
 		t.Fatalf("%+v", got)
 	}
 }

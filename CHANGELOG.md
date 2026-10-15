@@ -6,6 +6,99 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+Every machine a full place: hopsesh can now run on your other machines, in your login session
+there, set up from here. See [Machines](docs/machines.md).
+
+### Added
+
+- `hopsesh hosts setup <machine>` (Machines › Set up hopsesh) installs this hopsesh in
+  `~/.hopsesh/bin` on a machine reached over SSH (the same verified release for another kind of
+  machine), turns receiving on, and starts `hopsesh serve` in the login session there at each
+  login (LaunchAgent, systemd user service, sign-in task; no administrator rights). Only on
+  request: scans never install anything.
+- `hopsesh serve` answers other machines from the login session (a Mac's Keychain and desktop
+  apps included) through a private socket behind `hopsesh peer`, and runs sessions for them in
+  terminals it owns. `hopsesh terminals run <machine>` and `terminals attach` show them here;
+  in the app, **Continue on ‹machine›** does, and a new session or an account's sign-in can run
+  there too.
+- Machines says how hopsesh works with each machine (running there, there but not running,
+  older, SSH only), what that lets it do, and sets it up or updates it step by step.
+- Accounts is new: your accounts by email, who each tool (Claude Code, Claude desktop, Codex,
+  the Codex app) is signed in as on every machine and in which folder, accounts only seen in
+  records, when two accounts write to one folder, and each folder's sessions by account.
+  Claude desktop's own sign-in is read from its account id and session index (never its
+  tokens).
+- Account folders live in `~/.hopsesh/accounts/<agent>/<name>` and can be added on any machine
+  with hopsesh, signed in from this machine's browser, with an optional `<agent>-<name>` shell
+  command. Folders made by earlier versions move there after you agree. A Codex folder keeps
+  its sign-in the way your default folder does.
+- Move › **Choose where it continues** lists every machine, folder and tool with who it runs
+  as there, what carries over, and whether the copy left behind is protected. Bringing a
+  session that is working on another machine offers to wait until it is idle, or to join it
+  there. After a send, **Open it there** runs it in a tab here.
+- Settings › **Hooks & skills** shows the command, protection hooks and skill on every machine
+  and sets them up from here; `hopsesh doctor --all-machines` checks the same. The skill goes
+  into every account folder. Sessions points out machines that need hopsesh, an update or
+  their protection set up.
+- A Mac with only the Codex app (ChatGPT.app) uses the app's built-in Codex for sign-in
+  checks, resuming and protection hooks; a Codex CLI is still preferred when installed. Local
+  and remote Macs alike.
+- Codex voice conversations and Work threads from the Codex app are hidden by default;
+  Settings › Agents (or `voice_threads` / `work_threads` under `[agents.codex]`) shows them.
+
+### Changed
+
+- Two machines agree on the newest peer protocol both speak (6, down to 0.4's 5) instead of
+  requiring the same one.
+- hopsesh never writes its files on a machine without hopsesh: the identity of one reached
+  over SSH only is kept here until hopsesh is set up there.
+- A Mac's sign-ins hidden from an SSH login are unknown, never a changed login; an original
+  left on a machine without hopsesh is said to be unprotected (session list, move review,
+  CLI); an unreadable account registry no longer hides a machine's sessions.
+- Hopsesh's record of who ran a session is kept per folder, moves with the session and is
+  shared between machines; inside Claude desktop it records desktop's own account.
+- Agents' versions are probed in parallel.
+- Version checks use semantic version precedence: a pre-release past a minimum counts (the
+  Codex app's built-in 0.162.0-alpha), one before it does not. The Codex protection hook
+  needs Codex 0.129.0 or newer (hooks and their review), down from 0.160.0.
+- The protection card lists every detected agent, including one that cannot take the hook
+  and why, says what each hook covers (Terminal, the desktop app), and keeps each step's
+  result on screen until Done. "Not now" is remembered until the problems change.
+- A skill copy installed by a newer hopsesh is never replaced by an older one.
+
+- Sessions are attributed from every record of the account they ran under: Claude Code's
+  per-run organisation stamp (not only Remote Control), Codex's session creator, and a new
+  Hopsesh record written by its prompt hook. Runs that name the user match only that user,
+  a session that changed accounts says so, and shared Team/Enterprise organisations name no
+  one. To match them, Hopsesh reads the public identity next to each login on this machine
+  (Claude Code's `oauthAccount`, Codex's account and user IDs); never tokens.
+- Account filters, account groups, family names and move-back labels no longer change when a
+  profile signs in to another account.
+
+- CI: the weekly drift check compares from the code's version floors and watches the identity,
+  record and hook formats hopsesh reads, and the Claude and Codex desktop apps; the skill is
+  checked against the built program (and the release's) and a command-tree golden; remote
+  scenarios run hopsesh over SSH with no hopsesh, nobody logged in, serve, 0.4.5 and offline.
+
+### Fixed
+
+- `hopsesh hosts setup` copies this hopsesh to a Linux machine of the same kind again
+  instead of looking for a release: `uname -m` (x86_64, aarch64) is read as Go's arch name.
+- Continuing a session from a machine without hopsesh in another agent says the original
+  there is not protected, as a move does.
+- hopsesh never stops the Codex app's process: its one app-server holds every app thread.
+  Such a thread shows as open in ChatGPT desktop, with Open instead of a stop.
+- The skill's reference named a `--fork` flag that does not exist.
+- Claude Code sessions continue in place under the account signed in now (**Continue
+  here**); Codex sessions that ran, or may have run, under another account are not resumed
+  as they are (Codex would fail) but continue as a cleaned copy.
+- The quick panel showed a profile's current email as each session's account.
+- Sessions on other machines were shown as run by "another account" even when their root was
+  signed in to it, because peers dropped the account fingerprint.
+- The move review names the account that ran the session as its source account. It
+  names profiles by folder and says who is signed in to each now, so a profile's label
+  no longer changes with a new sign-in.
+
 ## [0.4.5] - 2026-10-14
 
 ### Fixed

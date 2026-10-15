@@ -5,28 +5,97 @@ vendor state directory to a persistent machine identity. Names and tags are labe
 profiles can share the Personal tag, have different emails, or have identical display names.
 Selection uses the profile ID, never an email or label.
 
-## Set up and discover
+## The Accounts screen
 
-In the GUI, open **Settings → Accounts**. Scan accounts discovers known default/configured
-roots and registered roots on allowed machines. Add account creates an empty local profile
-or adopts an existing absolute root. It never copies credentials or changes another login.
-A profile that is signed out (or whose check failed) offers **Sign in**, which runs the
-vendor's own login in it; a signed-in profile does not. To use another account, add a profile
-for it rather than signing an existing one in again. The refresh button beside a profile's
-status checks its sign-in now; stale profiles are rechecked automatically while the screen
-is open. Rename, edit tags, search, group and collapse account groups from this screen.
+**Settings → Accounts** (or the sidebar) shows, across every machine:
+
+- **Your accounts**, by email: the plans they are on, which tool on which machine is signed in
+  to each, and how many sessions each ran. An account seen only in session records (signed in
+  nowhere hopsesh can check) is shown apart, until it is signed in somewhere.
+- **Where you're signed in**: machines × tools (Claude Code in the terminal, Claude desktop,
+  Codex in the terminal, the Codex app), each cell with the tool's version and who it is signed
+  in as in each folder. Claude desktop keeps its own sign-in, apart from the terminal's, and
+  both write to `~/.claude`; when they are different accounts, the screen says so. The Codex
+  app shares the sign-in of the folder it uses. A Mac reached over SSH alone can't show its
+  sign-ins (the Keychain is locked to SSH): set up hopsesh there ([Machines](machines.md)).
+- **Folders**: where each tool keeps its sessions on each machine (`default` is the tool's own
+  `~/.claude` or `~/.codex`), which tools use it, the sessions each account ran in it, and
+  **New session…** to start one there as its account.
+
+**Check all machines** rechecks every sign-in; each folder has its own check.
+
+## Adding an account
+
+**Add an account…** makes a new folder for Claude Code or Codex on this machine or on any
+machine with hopsesh running, `~/.hopsesh/accounts/<agent>/<name>`, and signs it in. On
+another machine the sign-in runs there in a tab here: open its link in your browser on this
+machine (Codex prints a device code), or choose to sign in at that machine's screen. Your other
+sign-ins are not touched, and nothing is copied between machines.
+
+- A Codex folder keeps its sign-in the way your default Codex folder does
+  (`cli_auth_credentials_store`), so its sessions match their account exactly.
+- **Add the `claude-<name>` command** (on by default) adds a small command to `~/.local/bin`
+  there that runs the agent in that folder, for using it outside hopsesh. Forgetting the
+  account removes it; a command of that name that hopsesh didn't add is never replaced.
+- Claude desktop always uses `~/.claude`, so sessions in an added folder open in a terminal.
+
+Afterwards hopsesh reads back which account the folder got. To use another account, add a
+folder for it rather than signing an existing folder in again: two folders for one account only
+split its history.
+
+Folders made by earlier versions live in hopsesh's state folder, where resetting hopsesh would
+delete them; the Accounts screen offers to move them to `~/.hopsesh/accounts` (sessions and
+sign-ins move with them).
+
+Folders that already exist can be adopted with `hopsesh accounts add <agent> <name> --root
+<path>`. Rename, tag and forget folders from the screen; forgetting leaves the folder and its
+sign-in in place.
 
 ### Which account ran a session
 
-A profile's sign-in only says who is signed in to that root **now**. A root that was signed
-in to another account before also holds that account's sessions, so a session is labelled
-with the account its agent recorded running it: Claude Code writes the owning account with
-its Remote Control records, and Hopsesh matches it to the profile signed in to that account
-for the email. A recorded account no profile is signed in to now shows as "another account";
-a session without such a record shows no account (Details says it was not recorded and
-where it is stored). Account filters and grouping use the same attribution, keeping each
-root's accounts apart. Codex records its creator only as an internal account ID that its
-public sign-in status does not report, so Codex sessions show no account.
+A profile is a folder: its sign-in only says who is signed in to that root **now**. A root
+that was signed in to another account before also holds that account's sessions, so a
+session is labelled with the accounts recorded running it, never with its folder's sign-in:
+
+- **Claude Code** stamps the organisation at every launch and resume (a `credential_org`
+  record, since 2.1.281) and, with Remote Control, the owning user (`bridge-session`).
+- **Codex** records the account and user that created a session (`creator_account_id`,
+  `creator_user_id`, since 0.157), never updated on resume.
+- **Hopsesh** records the account a session's root is signed in to each time the agent starts
+  it or takes a prompt, through its hook, in `~/.local/state/hopsesh/owners/` (per folder).
+  This covers Codex resumes, older versions and sessions without Remote Control from then on.
+  Inside Claude desktop it records desktop's own account, never the terminal's. The record
+  moves with a session, and machines running hopsesh share theirs.
+
+Hopsesh matches a recorded account to the profile signed in to it for the email. A run that
+names its user matches only that user; one that names only a shared organisation (Team or
+Enterprise) names no one. A recorded account no profile is signed in to now shows as
+"another account"; a session that changed accounts says so in its tooltip; a session without
+any record shows no account. Account filters and grouping use a stable fingerprint of the
+recorded account, so they do not change when a profile signs in to another account.
+
+To match these records, Hopsesh reads the public identity next to each login on its machine
+(on another machine, hopsesh running there reads it):
+`oauthAccount` in Claude Code's `.claude.json` (account, organisation and email; Claude Code
+keeps its tokens in the Keychain or `.credentials.json`, which are never read), and the account
+and user IDs in Codex's `auth.json` (`tokens.account_id` and the ID token's claims, decoded,
+never verified or used; the tokens themselves are discarded unread), and Claude desktop's last
+known account id (`lastKnownAccountUuid` in its `config.json`, taken alone: never its token
+caches) with the organisation folders of its session index. A Codex folder that keeps its
+sign-in in the keyring has no readable ids; it is matched by email to a verified sign-in of the
+same account. Only fingerprints of these IDs are stored or sent to your other machines.
+
+### Continuing under another account
+
+- **Claude Code** resumes a session under another account: the API ignores reasoning signed
+  for the other organisation, and the conversation continues. A session already in its place
+  continues there (**Continue here** in the move review). Details shows "Continues as …" when
+  its folder is signed in to another account than the one that ran it.
+- **Codex** fails to resume a session under another account (its encrypted reasoning is bound
+  to the one that produced it). Hopsesh refuses that resume and, through **Move** to the same
+  place, continues a cleaned copy instead, keeping the original.
+- A session with no record of its account counts as another account when it holds such
+  reasoning.
 
 In the TUI, `a` opens Accounts; `1`/`2` adds Claude/Codex, `n` renames, `t` edits tags, `/`
 filters, `u` selects untagged profiles, `g` cycles grouping, and the arrow keys collapse/expand
@@ -165,7 +234,9 @@ OS launcher exit confirms dispatch, not that the vendor has loaded or indexed th
   must report the failure. Existing roots retain their own configuration.
 - Hopsesh clears inherited credential/provider/root overrides for scoped launches; credentials
   belong in the vendor's configured storage. It uses public login status (`account/read` with
-  `refreshToken:false` for Codex), and never reads or transports credential files.
+  `refreshToken:false` for Codex) and, on this machine only, the identity fields described in
+  [Which account ran a session](#which-account-ran-a-session). It never uses, stores or
+  transports tokens or other credentials.
 - Account/binding observations have limited confidence. A vendor-hidden change cannot be
   detected from an unchanged public response. Portable copies avoid relying on that distinction.
 - Automated fixtures test root isolation, changed plans, repeated routes, cloud adoption,

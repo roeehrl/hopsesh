@@ -88,6 +88,11 @@ Before tagging:
   the app's terminal checks on macOS and Windows; they are the release gate for the hopsesh
   Terminal window. If they are not green, ship with `config.AppResumeDefault = ResumeTerminal`
   (the app then resumes sessions in the user's terminal app until they choose otherwise).
+- The release workflow checks the program it built against its own skill
+  (`internal/devtools/skillcheck`: commands and flags the skill names, every visible flag
+  documented or allowlisted, the command tree equal to `internal/ui/cli/testdata/cli-tree.golden`)
+  before it attests anything; `scripts/release-sign.sh` signs only attested files, so a
+  failed check leaves a draft that cannot be completed. Fix it on `main` and tag again.
 - The manual checks the stand-ins can't replace, on the Mac, for what the release touches:
   `scripts/cloud-smoke.sh` (real Claude Code cloud and Codex cloud; it starts paid turns),
   `scripts/iterm-smoke.sh` and `scripts/iterm-api-smoke.sh` (iTerm2), and the app's

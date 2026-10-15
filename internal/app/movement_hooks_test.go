@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/roeehrl/hopsesh/agents/claude"
+	"github.com/roeehrl/hopsesh/agents/codex"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
@@ -122,8 +123,11 @@ func TestMovementNoticeHookGateAndSafeFiles(t *testing.T) {
 	defer m.Close()
 	m.Facts.Binaries["claude"] = agent.BinaryFact{Version: "2.0.0"}
 	ss, err := a.movementNoticeHooks(context.Background(), m, "install", "claude", "", "/opt/hopsesh")
-	if err == nil || ss[0].Supported {
+	if err != nil || ss[0].Supported || ss[0].Result != HookUnsupported || ss[0].Reason != "needs Claude Code 2.1.284 or newer; found 2.0.0" {
 		t.Fatalf("unsupported installed: %+v %v", ss, err)
+	}
+	if MovementHookErrors("install", ss) == nil || MovementHookErrors("status", ss) != nil {
+		t.Fatal("the command line must still fail an unsupported install")
 	}
 	path := filepath.Join(root, "settings.json")
 	if _, err = os.Stat(path); !os.IsNotExist(err) {
@@ -184,6 +188,56 @@ func TestMovementNoticeDeliveryResumePromptAndChangedStatus(t *testing.T) {
 		if bytes.Contains(b, []byte("Returned")) || bytes.Contains(b, []byte("session")) {
 			t.Fatalf("receipt contains content: %s", b)
 		}
+	}
+}
+
+// Setup reports every agent profile on its own: one unsupported agent or one broken
+// settings file never fails the others or the whole request.
+func TestMovementNoticeHooksPerItemResults(t *testing.T) {
+	a, m, root := movementHookFixture(t)
+	defer m.Close()
+	reg, err := registry.New(claude.New(), codex.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Reg = reg
+	codexRoot := filepath.Join(filepath.Dir(root), "codex")
+	broken := filepath.Join(filepath.Dir(root), "broken")
+	for _, r := range []string{codexRoot, broken} {
+		if err := os.MkdirAll(r, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(broken, "settings.json"), []byte(`{"hooks":[]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.accountStore().Register(agent.RuntimeProfile{ID: strings.Repeat("2", 32), Agent: "claude", Endpoint: m.Facts.Endpoint, Machine: m.Name, Root: broken, Name: "broken"}); err != nil {
+		t.Fatal(err)
+	}
+	m.Facts.Env["CODEX_HOME"] = codexRoot
+	m.Facts.Binaries["codex"] = agent.BinaryFact{Path: "/fake/codex", Version: "codex-cli 0.120.1"}
+	ss, err := a.movementNoticeHooks(context.Background(), m, "install", "", "", "/opt/hopsesh")
+	if err != nil || len(ss) != 3 {
+		t.Fatalf("%+v %v", ss, err)
+	}
+	got := map[string]MovementHookStatus{}
+	for _, st := range ss {
+		got[string(st.Agent)+"/"+st.Profile] = st
+	}
+	if st := got["claude/"]; st.Result != HookInstalled || !st.Installed || !st.CLI || st.Version != "2.1.284" {
+		t.Fatalf("claude: %+v", st)
+	}
+	if st := got["claude/"+strings.Repeat("2", 32)]; st.Result != HookFailed || st.Reason == "" || st.Installed {
+		t.Fatalf("broken settings: %+v", st)
+	}
+	if st := got["codex/"]; st.Result != HookUnsupported || st.Reason != "needs Codex 0.129.0 or newer; found 0.120.1" {
+		t.Fatalf("codex: %+v", st)
+	}
+	if _, err := os.Stat(filepath.Join(codexRoot, "hooks.json")); !os.IsNotExist(err) {
+		t.Fatal("unsupported Codex got hooks")
+	}
+	if err := MovementHookErrors("install", ss); err == nil || !strings.Contains(err.Error(), "codex: needs Codex") {
+		t.Fatalf("command-line error: %v", err)
 	}
 }
 

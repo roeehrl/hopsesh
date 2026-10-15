@@ -59,6 +59,10 @@ const (
 	TabBring   = "bring"   // a bring-back's teleport (claude --teleport)
 	TabSignIn  = "signin"  // a vendor's sign-in: nothing recorded
 	TabShell   = "shell"   // the user's login shell: nothing recorded
+	// TabRemote shows a terminal hopsesh runs on another machine (Machine): a session
+	// continued there (Key), a new one, or a sign-in there. Closing the tab here leaves it
+	// running there.
+	TabRemote = "remote"
 )
 
 // TabMeta is what the app knows about a tab besides its program's state.
@@ -91,6 +95,8 @@ type TabMeta struct {
 	External bool `json:"external"`
 	// Rerun: the tab offers "Run again" once its program ended.
 	Rerun bool `json:"rerun"`
+	// Remote is the id of the terminal hopsesh runs on Machine (a TabRemote).
+	Remote string `json:"remote,omitempty"`
 }
 
 // TermTab is a tab as the windows show it.
@@ -1113,4 +1119,14 @@ func (a *App) TerminalCloseTab(id string) error {
 		return errors.New("no such tab")
 	}
 	return a.Terms.mgr.Close(id)
+}
+
+// remoteTab is the open tab that shows a session running on another machine ("" none).
+func (t *Terminals) remoteTab(machine, key string) string {
+	for _, d := range t.Tabs() {
+		if d.Kind == TabRemote && d.Machine == machine && d.Key == key && d.State != pty.Exited {
+			return d.ID
+		}
+	}
+	return ""
 }

@@ -43,6 +43,34 @@ type MachineRow struct {
 	Agents      []string    `json:"agents"`
 	Hopsesh     string      `json:"hopsesh"`
 	Sessions    int         `json:"sessions"`
+	// Presence is how hopsesh works with it (app.Presence*; "" before a scan reached it),
+	// and Can what that lets you do there.
+	Presence    string   `json:"presence,omitempty"`
+	PresenceWhy string   `json:"presenceWhy,omitempty"`
+	Can         []AbilityDTO `json:"can"`
+}
+
+// AbilityDTO is one thing hopsesh can (or cannot) do on a machine.
+type AbilityDTO struct {
+	Text string `json:"text"`
+	OK   bool   `json:"ok"`
+}
+
+// canOn is what hopsesh can do on a machine, as it works with it.
+func canOn(presence, os string) []AbilityDTO {
+	switch presence {
+	case app.PresenceLogin:
+		return []AbilityDTO{{"Lists sessions, live and moved", true}, {"Checks sign-ins there" + map[bool]string{true: " (Keychain included)"}[os == "darwin"], true},
+			{"Protects originals left there", true}, {"Runs sessions there; you work in them here", true}, {"Receives sessions you send", true}}
+	case app.PresenceInstalled, app.PresenceOlder:
+		return []AbilityDTO{{"Lists sessions", true}, {"Brings sessions here", true}, {"Receives sessions you send", presence == app.PresenceInstalled},
+			{"Checks sign-ins there" + map[bool]string{true: ": the Keychain is locked to SSH"}[os == "darwin"], os != "darwin"}, {"Runs sessions there", false}}
+	case app.PresenceSSH:
+		return []AbilityDTO{{"Lists sessions (no live status)", true}, {"Brings sessions here", true},
+			{map[bool]string{true: "Sign-ins: the Keychain is locked to SSH", false: "Checks sign-ins over SSH"}[os == "darwin"], os != "darwin"},
+			{"Originals left there aren't protected", false}, {"Can't run sessions there", false}, {"Can't receive sessions", false}}
+	}
+	return []AbilityDTO{}
 }
 
 // FoundRow is a machine discovery found that is not added.
@@ -102,17 +130,19 @@ func (a *App) Machines() MachinesDTO {
 			continue
 		}
 		added[h.Name] = true
-		r := MachineRow{Name: h.Name, Destination: h.Destination, OS: h.OS, Auth: "key", Keychain: h.Keychain, CanRemember: secrets.Available(), Agents: []string{}}
+		r := MachineRow{Name: h.Name, Destination: h.Destination, OS: h.OS, Auth: "key", Keychain: h.Keychain, CanRemember: secrets.Available(), Agents: []string{}, Can: []AbilityDTO{}}
 		r.Scan = a.scans[h.Name]
 		if h.UsesPassword() {
 			r.Auth = "password"
 		}
 		if m := scanned[h.Name]; m != nil {
 			r.Scanned, r.Status, r.Hint, r.Error, r.Hopsesh = true, m.Status, m.Hint, m.Error, m.Hopsesh
+			r.Presence, r.PresenceWhy = m.Presence, m.PresenceWhy
 			r.Agents = agentNames(m)
 			if m.OS != "" {
 				r.OS = m.OS
 			}
+			r.Can = canOn(r.Presence, r.OS)
 			for _, e := range a.inv.Entries {
 				if e.Machine == m.Name {
 					r.Sessions++
@@ -295,4 +325,29 @@ func (a *App) TrustHost(name string) error {
 		return err
 	}
 	return c.Trust(keys)
+}
+
+// MachineSetupEvent tells the window each step of setting hopsesh up on a machine.
+const MachineSetupEvent = "hopsesh:machine-setup"
+
+// MachineSetupStep is one such step.
+type MachineSetupStep struct {
+	Machine string        `json:"machine"`
+	Step    app.SetupStep `json:"step"`
+}
+
+// SetUpMachine installs (or updates) hopsesh on a machine you added and starts it in the
+// login session there, after the user asked; each step is told as it happens. The
+// machine is scanned again after.
+func (a *App) SetUpMachine(name string) (*app.MachineSetup, error) {
+	core := a.snapshot()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	out, err := core.SetUpMachine(ctx, name, func(s app.SetupStep) {
+		a.emit(MachineSetupEvent, MachineSetupStep{Machine: name, Step: s})
+	})
+	if err == nil {
+		go func() { _ = a.ScanMachine(name) }()
+	}
+	return out, err
 }

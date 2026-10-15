@@ -70,12 +70,12 @@ func TestMovementHookCommandQuotesAndVersionGate(t *testing.T) {
 	if _, err = NoticeHookCommand("/bin/hopsesh\nother", "claude", ""); err == nil {
 		t.Fatal("accepted control")
 	}
-	for _, v := range []string{"", "0.159.9", "0.160.0-alpha.1", "1.0.0", "0.160", "0.160.0junk"} {
+	for _, v := range []string{"", "0.159.9", "0.160.0-alpha.1", "1.0.0", "0.160", "0.160.0junk", "0.160.0-"} {
 		if HookVersionAtLeast(v, "0.160.0") {
 			t.Errorf("accepted %s", v)
 		}
 	}
-	for _, v := range []string{"0.160.0", "0.160.1", "0.161.0"} {
+	for _, v := range []string{"0.160.0", "0.160.1", "0.161.0", "0.162.0-alpha.17.2", "v0.160.0+build"} {
 		if !HookVersionAtLeast(v, "0.160.0") {
 			t.Errorf("rejected %s", v)
 		}

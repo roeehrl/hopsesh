@@ -43,19 +43,35 @@ async function conflictFixture(page:Page, comparison=comparisonFixture()) {
  await expect(page.locator('.conflict-review')).toBeVisible();
  return {plans,changes};
 }
-async function fixtures(page:Page, returns:any[], movement:any=null) {
+// edit changes the entry further, given the whole scan.
+async function fixtures(page:Page, returns:any[], movement:any=null, edit?:(e:any,scan:any)=>void) {
  const calls:any[]=[];
+ // Every scan the window can take in carries the fixture: a late account
+ // check or discovery from the shared service must not replace it, and a
+ // background redraw shows the same entry.
+ const patch=(scan:any)=>{
+  for(const g of scan?.groups||[]) for(const e of g.entries||[]) if(e.title==='Find the codeword') {
+   e.returns=returns.map(r=>({...r,machine:r.local?e.machine:r.machine}));e.movement=movement;
+   edit?.(e,scan);
+  }
+ };
+ await page.routeWebSocket(/\/events$/,ws=>{
+  const server=ws.connectToServer();
+  server.onMessage(message=>{
+   const m=JSON.parse(String(message));
+   if(m.name!=='hopsesh:discovery')return ws.send(message);
+   patch(m.data);ws.send(JSON.stringify(m));
+  });
+ });
  await page.route('**/call',async route=>{
   const req=route.request().postDataJSON();
   if(['Plan','PushPlan'].includes(req.m)) {
    calls.push(req);return route.fulfill({json:{error:'Test stopped after read-only plan request'}});
   }
   if(req.m==='AccountDestinations') return route.fulfill({json:{result:[]}});
-  if(['InitialScan','Scan','RefreshHere'].includes(req.m)) {
+  if(['InitialScan','Scan','RefreshHere','CachedScan','ScanSnapshot'].includes(req.m)) {
    const response=await route.fetch();const body=await response.json();
-   for(const g of body.result?.groups||[]) for(const e of g.entries||[]) if(e.title==='Find the codeword') {
-    e.returns=returns.map(r=>({...r,machine:r.local?e.machine:r.machine}));e.movement=movement;
-   }
+   patch(body.result);
    return route.fulfill({json:body});
   }
   return route.continue();
@@ -540,12 +556,12 @@ test('declining the hopsesh command leaves the protection hook uninstalled',asyn
 
 
 test('source notice selects the exact listed destination without planning',async({page})=>{
- const calls=await fixtures(page,[],null);
- const title=await page.evaluate(async()=>{
-  const core=await import('/core.js');const {inspector}=await import('/inspector.js');
-  const source=core.entries().find(e=>e.title==='Find the codeword');const destination=core.entries().find(e=>e.agent==='codex');
+ let title='';
+ const calls=await fixtures(page,[],null,(source,scan)=>{
+  const destination=scan.groups.flatMap((g:any)=>g.entries).find((e:any)=>e.agent==='codex');
+  if(!destination)return; // a partial scan; the complete one has it
   source.movement={status:'prepared',text:'Prepared in Codex',machine:destination.machine,agent:destination.agent,key:destination.key,profile:destination.profile?.id || ''};
-  document.querySelector('#inspector').replaceWith(inspector(source));return destination.title;
+  title=destination.title;
  });
  await expect(details(page).locator('#act-primary')).toHaveText(/^Open in /);
  await expect(details(page).locator('#act-primary')).toBeEnabled();
@@ -554,11 +570,10 @@ test('source notice selects the exact listed destination without planning',async
 });
 
 test('remote Codex source offers move back into the exact local Claude replica',async({page},info)=>{
- const calls=await fixtures(page,[]);
- await page.evaluate(async()=>{
-  const {selected,here}=await import('/core.js');const {inspector}=await import('/inspector.js');
-  const e={...selected(),machine:'remote-fixture',agent:'codex',agentName:'Codex',returns:[{replica:'original',machine:here(),agent:'claude',agentName:'Claude Code',profile:'personal',profileLabel:'Personal',key:'claude@personal/original',status:'available',reason:'New work can return',local:true}]};
-  document.querySelector('#inspector').replaceWith(inspector(e));
+ const calls=await fixtures(page,[],null,(e,scan)=>{
+  const here=scan.machines?.find((m:any)=>m.local)?.name;
+  if(!here)return;
+  Object.assign(e,{machine:'remote-fixture',agent:'codex',agentName:'Codex',returns:[{replica:'original',machine:here,agent:'claude',agentName:'Claude Code',profile:'personal',profileLabel:'Personal',key:'claude@personal/original',status:'available',reason:'New work can return',local:true}]});
  });
  await expect(details(page).locator('#act-primary')).toContainText('Move back to Claude Code');
  await page.screenshot({path:info.outputPath('remote-source-local-return.png'),fullPage:true});

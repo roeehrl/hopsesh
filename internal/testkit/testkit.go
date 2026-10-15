@@ -23,7 +23,8 @@ func Env(h string) map[string]string {
 	env := map[string]string{
 		"HOME": h, "USERPROFILE": h, "HOPSESH_CONFIG_DIR": filepath.Join(h, "config"),
 		"HOPSESH_STATE_DIR": filepath.Join(h, "state"), "HOPSESH_MACHINE": "studio", "CLAUDE_CONFIG_DIR": "", "CODEX_HOME": "",
-		"HOPSESH_TAILSCALE": "off", // never show this machine's real tailnet
+		"HOPSESH_TAILSCALE":    "off", // never show this machine's real tailnet
+		"HOPSESH_APP_RUNTIMES": "off", // never run an agent bundled in this machine's real desktop app
 	}
 	if runtime.GOOS != "windows" {
 		env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin" // git and ssh, no agents

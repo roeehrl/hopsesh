@@ -221,3 +221,20 @@ and local/project context overrides. A changed model window or usage schema affe
 these capacity checks even when CLI flags remain unchanged; report such changes.
 
 Large Codex rollout analysis must stay in the Codex module. Review incremental native record scanning, bounded record/retained-payload memory, cancellation, preserved record indexes/ordinals and cursor offsets. Repeated compaction replacement history is runtime context, not another copy of conversation work; capacity must still count the latest replacement correctly. Validate archive consultation instructions for both receiving agents, exact merged-archive starting offsets and bounded search/pagination, with no new authorization inferred from archived text. A reset branch may acquire its first origin only when the originless manifest has no replica on that branch and fork boundaries match; competing established origins must still fail atomically. Cover `TestAnalysisLargeRepeatedCompaction`, `TestMergeUnobservedBranchOrigin`, and mandatory `TestMovementArchiveConsultation`.
+
+Version floors, formats and desktop apps (phase 4): the code gates features on versions
+(`floors` per target: Claude Code 2.1.284 hooks and 2.1.285 `--desktop`, Codex 0.129.0
+hooks and hooks/list trust and 0.156.0 `--no-daemon`, Claude desktop 2.19675.1 resume
+focus). The help and schema are compared from the baseline (at or above every floor); read
+`help/<target>/floors.tsv` for what each gated feature runs at its floor and at the latest.
+`formats/<target>.tsv` covers the identity and record formats hopsesh reads: Claude
+oauthAccount, `auth status --json`, credential_org attachments and bridge-session records,
+the live registry sessions/<pid>.json and hook payloads; Codex auth.json ids,
+session_meta creator ids, originator (codex_cli_rs, Codex Desktop, codex_work_desktop) and
+thread_source realtime_voice, session_index.jsonl, thread-writer-locks and hooks.json with
+hooks/list trust. The app targets (`claude-desktop`, `codex-desktop`) watch the desktop
+apps' release feeds, docs and URL schemes (claude://resume?session=, codex://threads/),
+Claude desktop's own Claude Code (CLAUDE_CODE_ENTRYPOINT=claude-desktop) and its account
+(config.json lastKnownAccountUuid, claude-code-sessions/<account>/<org>/), and the Codex
+app's bundled runtime (Contents/Resources/codex-cli, codex-package.json). Fixtures stay at
+their recorded versions; a newer upstream is not evidence that the fixtures still match.

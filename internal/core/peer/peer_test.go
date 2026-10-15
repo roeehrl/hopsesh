@@ -177,3 +177,20 @@ func TestNewerPeer(t *testing.T) {
 		t.Fatal("other errors pass through")
 	}
 }
+
+func TestAgreeOnTheNewestProtocolBothSpeak(t *testing.T) {
+	for _, c := range []struct {
+		hi   Hello
+		want int
+	}{
+		{Hello{Protocol: Protocol}, Protocol},
+		{Hello{Protocol: MinProtocol}, MinProtocol},             // hopsesh 0.4: its own only
+		{Hello{Protocol: Protocol + 3, Min: MinProtocol}, Protocol}, // newer, still speaks ours
+		{Hello{Protocol: Protocol + 3, Min: Protocol + 1}, 0},       // newer, no longer ours
+		{Hello{Protocol: MinProtocol - 1}, 0},
+	} {
+		if got := Agree(c.hi); got != c.want {
+			t.Errorf("%+v: %d, want %d", c.hi, got, c.want)
+		}
+	}
+}
