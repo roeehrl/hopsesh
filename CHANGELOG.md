@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## [0.5.0] - 2026-10-15
+
 Every machine a full place: hopsesh can now run on your other machines, in your login session
 there, set up from here. See [Machines](docs/machines.md).
 
@@ -823,6 +825,7 @@ is refused and set aside (the app offers this), and machines are added again.
 - The terminal UI no longer carries out a plan you pressed `y` on while a changed one was
   still being worked out.
 
+[0.5.0]: https://github.com/roeehrl/hopsesh/releases/tag/v0.5.0
 [0.4.5]: https://github.com/roeehrl/hopsesh/releases/tag/v0.4.5
 [0.4.4]: https://github.com/roeehrl/hopsesh/releases/tag/v0.4.4
 [0.4.3]: https://github.com/roeehrl/hopsesh/releases/tag/v0.4.3
