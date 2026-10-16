@@ -122,7 +122,7 @@ jobs:
       label: ${{ steps.setup.outputs.label }}
       title: ${{ steps.setup.outputs.title }}
     steps:
-      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: audit
       - name: check the inputs
@@ -179,7 +179,7 @@ jobs:
         with:
           go-version-file: ${{ inputs.engine-ref != '' && '.drift-engine/go.mod' || 'go.mod' }}
           cache-dependency-path: ${{ inputs.engine-ref != '' && '.drift-engine/go.sum' || 'go.sum' }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
       - name: the engine
@@ -234,7 +234,7 @@ jobs:
             cp "$dir/$g.md" "intel/focus/$g.md"
           done
           echo "groups=$(printf '%s' "$REVIEWS" | jq -c .)" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: drift-intel
           path: intel
@@ -256,7 +256,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.probe.outputs.groups) }}
     steps:
-      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: audit
       # The repository under review: the reviewer reads its code.
@@ -281,7 +281,7 @@ jobs:
           else
             echo "ENGINE=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
           fi
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: drift-intel
           path: intel
@@ -291,7 +291,7 @@ jobs:
         run: |
           "$ENGINE/ci/drift/prompt.sh" "$GROUP" intel intel/focus > "$RUNNER_TEMP/prompt.md"
           printf 'Prompt (%s): %s lines\n' "$GROUP" "$(wc -l < "$RUNNER_TEMP/prompt.md" | tr -d ' ')" >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: needs.probe.outputs.dry-run != 'true'
         with:
           node-version: 24
@@ -330,7 +330,7 @@ jobs:
           jq -n --arg g "$GROUP" --arg b "$BUDGET" --arg n "$(wc -l < "$RUNNER_TEMP/prompt.md" | tr -d ' ')" \
             '{summary: "Dry run: the \($g) prompt has \($n) lines and a budget of $\($b); no review ran.", breaking: false, findings: [], group: $g}' \
             > "report-$GROUP.json"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: drift-report-${{ matrix.group }}
           path: report-${{ matrix.group }}.json
@@ -353,14 +353,14 @@ jobs:
       count: ${{ steps.merge.outputs.count }}
       issue: ${{ steps.issue.outputs.url }}
     steps:
-      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: audit
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: drift-report-*
           merge-multiple: true
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: drift-intel
           path: intel
@@ -409,7 +409,7 @@ jobs:
             + "\n---\nWeekly upstream-drift check. Facts, sources and the full reports: \($run)\n"
           ' findings.json > report.md
           cat report.md >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: drift-findings
           path: |
