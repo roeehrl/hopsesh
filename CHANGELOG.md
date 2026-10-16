@@ -105,6 +105,8 @@ there, set up from here. See [Machines](docs/machines.md).
 
 ### Fixed
 
+- Adding or trusting a machine no longer fails with "reading SSH settings … context
+  deadline exceeded" when ssh is slow to start (common on busy Windows machines).
 - Sessions show the account that ran them, as Claude Code recorded it, instead of
   whichever account their profile is signed in to now. A profile that was signed in to
   another account before no longer labels that account's sessions with the new email;
