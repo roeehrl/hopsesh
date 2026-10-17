@@ -106,8 +106,12 @@ test('Quick routes reveal the exact native copy when family grouping shows a dif
   return route.fallback();
  });
  await page.evaluate(()=>(window as any).__emit('hopsesh:quick-route',null));
- await expect(row(page,source.title)).toHaveAttribute('aria-selected','true');
- await expect(row(page,source.title)).toHaveClass(/flash/);
+ // The exact copy is revealed where it is listed (a child of its family's row), selected
+ // and flashed; the family's representative row stays in place.
+ const exact=page.locator(`.tree .row[data-key$=${JSON.stringify(source.key)}]`);
+ await expect(exact).toHaveAttribute('data-key',source.machine+'\0'+source.key);
+ await expect(exact).toHaveAttribute('aria-selected','true');
+ await expect(exact).toHaveClass(/flash/);
  expect(await page.evaluate(async()=>(await import('/core.js')).state.sel.key)).toBe(source.key);
 });
 

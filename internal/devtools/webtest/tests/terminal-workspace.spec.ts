@@ -72,14 +72,14 @@ test('background session repaint preserves input focus inside the docked termina
  await expect.poll(screen).toContain('termfake: ready');
  const input=embedded.locator('.term:not([hidden]) .xterm-helper-textarea');
  await input.focus();await page.keyboard.type('before refresh ');
- const content=await page.locator('#view .content').elementHandle();
- // Change a listed title so the repaint really rebuilds the list: unchanged markup is reused.
+ // Change a listed title so the repaint really changes the list: unchanged markup is
+ // reused, and changed rows are reconciled in place.
  await page.evaluate(async()=>{
   const {state}=await import('/core.js');
   const e=state.scan.groups.flatMap(g=>g.entries).find(e=>e.title);e.title+=' (renamed)';
   (await import('/sessions.js')).backgroundRender();
  });
- await expect.poll(()=>content!.evaluate(el=>el.isConnected)).toBe(false);
+ await expect(page.locator('#view .content')).toContainText('(renamed)');
  // The parent document sees the iframe as active. Focusing that same iframe
  // again blurs its actual input, silently discarding the rest of a typed line.
  await expect(input).toBeFocused();
