@@ -115,12 +115,15 @@ export async function scan(method = "Scan", background = false) {
 // Explicit source retry shares scan ordering; background collection belongs to the runtime.
 async function refreshHere() { return scan("RefreshHere"); }
 
+// paintedRevision is the scan the list on screen shows. "updated" waits for it, so the
+// freshness line never claims a result the list has not drawn yet.
+let paintedRevision = null;
 function freshness() {
   const el = $("#fresh");
   const rt=state.runtime;
   const observation=rt?.snapshot;
   const stale=observation?.paused || rt?.error || (observation?.sequence>0 && observation?.expiresAt && Date.parse(observation.expiresAt)<Date.now());
-  el.textContent = observation?.paused ? "Observation paused" : state.scanning || state.scan?.discovering ? (entries().length ? `${entries().length} sessions found · Checking for changes…` : "Finding sessions…") : stale ? "Showing cached sessions" : state.scan?.cached ? "Showing saved sessions · Checking for changes…" : state.scan?.updated ? "updated " + ago(state.scan.updated) : "Not checked yet";
+  el.textContent = observation?.paused ? "Observation paused" : state.scanning || state.scan?.discovering || (current === "sessions" && state.scan && state.scan.revision !== paintedRevision) ? (entries().length ? `${entries().length} sessions found · Checking for changes…` : "Finding sessions…") : stale ? "Showing cached sessions" : state.scan?.cached ? "Showing saved sessions · Checking for changes…" : state.scan?.updated ? "updated " + ago(state.scan.updated) : "Not checked yet";
   const other = state.scan && state.scan.elsewhere !== state.scan.updated;
   el.title = other ? `${sys.Here}: ${ago(state.scan.updated)}. Your other machines and the clouds: ${ago(state.scan.elsewhere)}.` : "";
 }
@@ -662,6 +665,7 @@ export function render() {
   } else fill(view, h("div", { class: "three layout" }, side, content, inspector(selected()), dividers()));
   adoptTree(live.querySelector(".tree"));
   built = { content: contentHTML, side: sideHTML };
+  if (paintedRevision !== state.scan?.revision) { paintedRevision = state.scan?.revision; freshness(); }
   counts(shown.length, inScope.length, state.scope);
   lastShown = shown; lastScope = inScope;
   applyLayout();
@@ -899,7 +903,7 @@ async function adoptDiscovery(){
 function drawDiscovery(){
  discoveryTimer=0;
  if(!backgroundDirty||current!=="sessions"||document.hidden)return;
- if(pointerHeld||document.body.classList.contains("resizing")||document.querySelector("dialog[open],button:active")||isOpen()||document.activeElement?.matches("input,textarea,select,.divider"))return;
+ if(pointerHeld||document.body.classList.contains("resizing")||document.querySelector("dialog[open],button:active")||isOpen()||document.activeElement?.matches("textarea,select,.divider"))return; // the filter field is kept, focus and selection, across a render
  backgroundDirty=false;render();
 }
 on("hopsesh:discovery",d=>queueScan(d));
