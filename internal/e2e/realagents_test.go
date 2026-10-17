@@ -2,9 +2,9 @@ package e2e
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,26 +61,66 @@ func codexHome(t *testing.T, home string) string {
 // codexList lists threads the way `codex resume` does: from Codex's index only.
 func codexList(t *testing.T, bin, home string) string {
 	t.Helper()
-	in := `{"id":1,"method":"initialize","params":{"clientInfo":{"name":"hopsesh-test","version":"1"}}}` + "\n" +
-		`{"method":"initialized"}` + "\n" + `{"id":2,"method":"thread/list","params":{"useStateDbOnly":true}}` + "\n"
-	cmd := exec.Command("sh", "-c", `{ cat; sleep 3; } | "$0" app-server`, bin)
-	cmd.Env = append(os.Environ(), "CODEX_HOME="+home)
-	cmd.Stdin = strings.NewReader(in)
-	out, err := cmd.Output()
+	out, err := codexListExchange(t.Context(), []string{bin, "app-server"}, home)
 	if err != nil {
-		t.Fatalf("codex app-server: %v", err)
+		t.Fatal(err)
 	}
-	for _, l := range bytes.Split(out, []byte("\n")) {
+	return out
+}
+
+// Keep stdin open until the requested response, and send no application request
+// until initialize succeeds. This independent client checks Codex's own index;
+// a fixed sleep before EOF can truncate a valid slow response on a busy runner.
+func codexListExchange(ctx context.Context, argv []string, home string) (string, error) {
+	initialize := []byte(`{"id":1,"method":"initialize","params":{"clientInfo":{"name":"hopsesh-test","version":"1"}}}` + "\n")
+	initialized := false
+	var result json.RawMessage
+	var protocolErr error
+	exchange := func(line []byte) ([]byte, bool) {
 		var r struct {
 			ID     int             `json:"id"`
 			Result json.RawMessage `json:"result"`
+			Error  json.RawMessage `json:"error"`
 		}
-		if json.Unmarshal(l, &r) == nil && r.ID == 2 {
-			return string(r.Result)
+		if json.Unmarshal(line, &r) != nil || r.ID != 1 && r.ID != 2 {
+			return nil, false
 		}
+		if len(r.Error) > 0 && string(r.Error) != "null" {
+			protocolErr = fmt.Errorf("codex request %d failed: %s", r.ID, r.Error)
+			return nil, true
+		}
+		if len(r.Result) == 0 {
+			return nil, false
+		}
+		if r.ID == 1 && !initialized {
+			initialized = true
+			return []byte("{\"method\":\"initialized\"}\n{\"id\":2,\"method\":\"thread/list\",\"params\":{\"useStateDbOnly\":true}}\n"), false
+		}
+		if r.ID == 2 {
+			if !initialized {
+				protocolErr = fmt.Errorf("codex thread/list answered before initialization")
+			} else {
+				result = append(json.RawMessage(nil), r.Result...)
+			}
+			return nil, true
+		}
+		return nil, false
 	}
-	t.Fatalf("no thread/list answer: %s", out)
-	return ""
+	m := &host.Machine{Local: true}
+	out, err := m.Exec().Run(ctx, argv, agent.RunOptions{
+		Stdin: initialize, HoldStdin: 15 * time.Second, Timeout: 20 * time.Second,
+		StdinReply: exchange, Env: []string{"CODEX_HOME=" + home},
+	})
+	if err != nil {
+		return "", fmt.Errorf("codex app-server: %w", err)
+	}
+	if protocolErr != nil {
+		return "", protocolErr
+	}
+	if out.Code != 0 || len(result) == 0 {
+		return "", fmt.Errorf("codex thread/list missing (exit %d): %s\n%s", out.Code, out.Stdout, out.Stderr)
+	}
+	return string(result), nil
 }
 
 // A thread hopsesh writes into a Codex home whose index is already built shows up in
@@ -195,6 +235,23 @@ func TestCodexAccount(t *testing.T) {
 	}
 }
 
+func TestCodexTUIFixtureCleanup(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux subreaper ownership")
+	}
+	py, err := exec.LookPath("python3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, py, "testdata/codex_tui_test.py")
+	cmd.WaitDelay = time.Second
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("fixture descendant ownership: %v: %s", err, out)
+	}
+}
+
 // Quitting a real Codex TUI that has a thread open: hopsesh finds the process holding the
 // thread's writer lock, checks it is codex and idle, and quits it; the rollout stays whole.
 func TestCodexStop(t *testing.T) {
@@ -204,6 +261,25 @@ func TestCodexStop(t *testing.T) {
 		t.Skip("python3 drives the TUI")
 	}
 	home, cwd := codexHome(t, t.TempDir()), t.TempDir()
+	t.Cleanup(func() {
+		// Newer Codex TUIs bootstrap a managed server and updater inside this
+		// disposable home. Stopping the thread does not own the updater's
+		// lifetime. Shut down that home's vendor management before TempDir
+		// cleanup removes its PID records; never target the user's daemon.
+		if _, err := os.Stat(filepath.Join(home, "app-server-daemon")); os.IsNotExist(err) {
+			return
+		} else if err != nil {
+			t.Errorf("inspect disposable Codex daemon: %v", err)
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		stop := exec.CommandContext(ctx, bin, "app-server", "daemon", "stop")
+		stop.Env = append(os.Environ(), "CODEX_HOME="+home)
+		if out, err := stop.CombinedOutput(); err != nil {
+			t.Errorf("stop disposable Codex daemon: %v: %s", err, out)
+		}
+	})
 	login := exec.Command(bin, "login", "--with-api-key")
 	login.Env = append(os.Environ(), "CODEX_HOME="+home)
 	login.Stdin = strings.NewReader("sk-hopsesh-test-not-a-real-key") // never used: no prompt is sent
@@ -223,12 +299,23 @@ func TestCodexStop(t *testing.T) {
 		t.Fatal(err)
 	}
 	before, _ := os.ReadFile(w.Path)
-	tui := exec.Command(py, "testdata/codex_tui.py", bin, home, w.SessionID, cwd)
+	tuiCtx, cancelTUI := context.WithCancel(context.Background())
+	defer cancelTUI()
+	tui := exec.CommandContext(tuiCtx, py, "testdata/codex_tui.py", bin, home, w.SessionID, cwd)
+	// Give the fixture time to reap its own detached descendants on Linux.
+	// A wedged fixture still fails and is killed after the bounded grace period.
+	tui.Cancel = func() error { return tui.Process.Signal(os.Interrupt) }
+	tui.WaitDelay = 10 * time.Second
 	out, _ := tui.StdoutPipe()
 	if err := tui.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = tui.Process.Kill(); _ = tui.Wait() }()
+	defer func() {
+		cancelTUI()
+		if err := tui.Wait(); err != nil && err != context.Canceled {
+			t.Errorf("reap Codex TUI fixture: %v", err)
+		}
+	}()
 	line, _ := bufio.NewReader(out).ReadString('\n')
 	if !strings.HasPrefix(line, "open ") {
 		t.Fatalf("Codex did not open the thread: %q", line)

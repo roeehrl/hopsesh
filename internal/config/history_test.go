@@ -11,7 +11,7 @@ import (
 func TestHistory(t *testing.T) {
 	t.Setenv("HOPSESH_CONFIG_DIR", t.TempDir())
 	c := Defaults()
-	if err := Save(c); err != nil {
+	if err := Save(&c); err != nil {
 		t.Fatal(err)
 	}
 	if b, _ := os.ReadFile(Path()); strings.Contains(string(b), "[history") {
@@ -21,7 +21,7 @@ func TestHistory(t *testing.T) {
 		t.Fatal("unset history must be the defaults")
 	}
 	c.History = History{ContextBudget: 32_000, Older: ir.OlderRecent, ReadMemoryMB: 1024, ArchiveMB: 2048, LineageMB: 128}
-	if err := Save(c); err != nil {
+	if err := Save(&c); err != nil {
 		t.Fatal(err)
 	}
 	got, err := Load()

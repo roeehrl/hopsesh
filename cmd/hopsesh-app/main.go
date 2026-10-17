@@ -2,8 +2,6 @@
 package main
 
 import (
-	"crypto/sha256"
-	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -15,6 +13,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/agents/all"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/integrate"
+	localruntime "github.com/roeehrl/hopsesh/internal/core/runtime"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
 	"github.com/roeehrl/hopsesh/internal/ui/gui"
 	"github.com/roeehrl/hopsesh/internal/update"
@@ -25,6 +24,9 @@ func main() {
 	if transport.IsAskpass() {
 		os.Exit(transport.AskpassMain(os.Args[1:])) // ssh asking for a password, see transport
 	}
+	if err := config.NamespaceArgs(os.Args[1:]); err != nil {
+		log.Fatal(err)
+	}
 	update.CleanUp() // what an earlier update moved aside
 	reg := all.Registry()
 	// Started from Finder, the app lacks the login shell's agent variables (for example
@@ -32,6 +34,10 @@ func main() {
 	// folders as the agents in Terminal.
 	integrate.SetLoginVars(reg.LoginEnv())
 	integrate.AdoptLoginEnv()
+	namespace, err := localruntime.NewNamespace(config.Dir(), config.StateDir())
+	if err != nil {
+		log.Fatal(err)
+	}
 	svc := gui.NewApp(reg)
 	app := application.New(application.Options{
 		Name:        "hopsesh",
@@ -45,7 +51,7 @@ func main() {
 		Mac: application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false},
 		// With programs running in terminal tabs, the window asks before quitting.
 		ShouldQuit:     svc.ShouldQuit,
-		SingleInstance: &application.SingleInstanceOptions{UniqueID: fmt.Sprintf("hopsesh-%x", sha256.Sum256([]byte(config.Dir()))), OnSecondInstanceLaunch: func(application.SecondInstanceData) { _ = svc.QuickOpen("sessions", "", "") }},
+		SingleInstance: &application.SingleInstanceOptions{UniqueID: "hopsesh-" + namespace.ID, OnSecondInstanceLaunch: func(application.SecondInstanceData) { _ = svc.QuickOpen("sessions", "", "") }},
 		Windows: application.WindowsOptions{
 			WebviewUserDataPath:   filepath.Join(config.StateDir(), "webview"),
 			AdditionalBrowserArgs: testBrowserArgs(),

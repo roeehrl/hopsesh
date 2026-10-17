@@ -128,7 +128,7 @@ func hostsAllowCmd(allow bool) *cobra.Command {
 				h.Allowed = allow
 				r.printf("%s: %s\n", h.Name, map[bool]string{true: "allowed", false: "denied"}[allow])
 			}
-			return config.Save(r.app.Cfg)
+			return config.Save(&r.app.Cfg)
 		},
 	}
 }
@@ -164,7 +164,7 @@ to be asked every time). hopsesh hosts setup-key <name> later switches it to key
 				}
 			}
 			r.app.Cfg.UpsertHost(h)
-			if err := config.Save(r.app.Cfg); err != nil {
+			if err := config.Save(&r.app.Cfg); err != nil {
 				return err
 			}
 			r.printf("%s → %s: added and allowed (login: %s)\n", args[0], args[1], authLabel(h))

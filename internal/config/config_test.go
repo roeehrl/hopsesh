@@ -19,7 +19,7 @@ func TestLoadSaveAndRefuseOldFormat(t *testing.T) {
 	}
 	c.UpsertHost(Host{Name: "studio", Destination: "me@studio", Allowed: true})
 	c.Agents = map[string]Agent{"codex": {Disabled: true}}
-	if err := Save(c); err != nil {
+	if err := Save(&c); err != nil {
 		t.Fatal(err)
 	}
 	back, err := Load()
@@ -85,7 +85,7 @@ func TestRefuseNewerFormat(t *testing.T) {
 func TestClouds(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOPSESH_CONFIG_DIR", dir)
-	file := `schema = 4
+	file := `schema = 5
 
 [clouds.claude-cloud]
 allowed = true
@@ -121,7 +121,7 @@ allowed = false
 	}
 	c.SetCloudAllowed("codex-cloud", true)
 	c.SetCloudAllowed("jules", true)
-	if err := Save(c); err != nil {
+	if err := Save(&c); err != nil {
 		t.Fatal(err)
 	}
 	back, err := Load()
@@ -139,7 +139,7 @@ allowed = false
 	if back.Clouds["claude-cloud"].Environments != nil {
 		t.Fatalf("the last environment forgotten: %+v", back.Clouds["claude-cloud"])
 	}
-	bad := "schema = 4\n[clouds.claude-cloud]\ncode = \"zip\"\n"
+	bad := "schema = 5\n[clouds.claude-cloud]\ncode = \"zip\"\n"
 	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(bad), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func TestTerminal(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOPSESH_CONFIG_DIR", dir)
 	c := Defaults()
-	if err := Save(c); err != nil {
+	if err := Save(&c); err != nil {
 		t.Fatal(err)
 	}
 	if b, _ := os.ReadFile(Path()); strings.Contains(string(b), "terminal") {
@@ -163,7 +163,7 @@ func TestTerminal(t *testing.T) {
 		t.Fatal(c.ResumeIn())
 	}
 	c.Terminal = Terminal{App: TerminalITerm2, Resume: ResumeAsk}
-	if err := Save(c); err != nil {
+	if err := Save(&c); err != nil {
 		t.Fatal(err)
 	}
 	back, err := Load()
@@ -191,7 +191,7 @@ func TestTerminalWindow(t *testing.T) {
 	off, on := false, true
 	c.Terminal = Terminal{Resume: ResumeTerminal, Font: "JetBrains Mono, Menlo", FontSize: 15, Scrollback: 10000, KeepTabs: &off, Notify: &off,
 		KeepEnded: &on, ScreenReader: "on", SystemConsole: true}
-	if err := Save(c); err != nil {
+	if err := Save(&c); err != nil {
 		t.Fatal(err)
 	}
 	back, err := Load()
@@ -216,7 +216,7 @@ func TestWindowLayout(t *testing.T) {
 	c := Defaults()
 	c.Window = Window{SidebarWidth: 260, SidebarHidden: true, InspectorWidth: 900}
 	c.Inspector = Inspector{Open: []string{"copies"}, Closed: []string{"repository"}}
-	if err := Save(c); err != nil {
+	if err := Save(&c); err != nil {
 		t.Fatal(err)
 	}
 	back, err := Load()
@@ -241,7 +241,7 @@ func TestWindowLayout(t *testing.T) {
 func TestList(t *testing.T) {
 	t.Setenv("HOPSESH_CONFIG_DIR", t.TempDir())
 	c := Defaults()
-	if err := Save(c); err != nil {
+	if err := Save(&c); err != nil {
 		t.Fatal(err)
 	}
 	if b, _ := os.ReadFile(Path()); strings.Contains(string(b), "[list") {
@@ -254,7 +254,7 @@ func TestList(t *testing.T) {
 	c.Agents = map[string]Agent{"claude": {Place: PlaceTerminal}, "codex": {Place: PlaceHere}}
 	off := false
 	c.Previews = &off
-	if err := Save(c); err != nil {
+	if err := Save(&c); err != nil {
 		t.Fatal(err)
 	}
 	b, _ := os.ReadFile(Path())

@@ -42,7 +42,7 @@ func TestHistorySettingsPersistDefaultsAsUnset(t *testing.T) {
 
 func TestHistoryLimitChangeReplansCachedSource(t *testing.T) {
 	home(t)
-	a := NewApp(all.Registry(), WithoutSessionWatching())
+	a := NewApp(all.Registry())
 	t.Cleanup(a.Shutdown)
 	if err := a.SetHistorySettings(config.History{LineageMB: 16}); err != nil {
 		t.Fatal(err)
@@ -88,7 +88,7 @@ func TestHistoryLimitChangeReplansCachedSource(t *testing.T) {
 
 func TestHistoryRejectedSaveKeepsReviewedEvidence(t *testing.T) {
 	home(t)
-	a := NewApp(all.Registry(), WithoutSessionWatching())
+	a := NewApp(all.Registry())
 	t.Cleanup(a.Shutdown)
 	key := agent.SessionKey{Agent: "codex", Session: "source"}
 	a.inv = &app.Inventory{Entries: []app.Entry{{Machine: "here", Session: agent.Summary{Key: key}}}}

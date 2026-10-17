@@ -17,15 +17,67 @@ import { openMenu, isOpen } from "./menu.js";
 export { statusOf, cloudBlock };
 export { actionsFor } from "./actions.js";
 
+// Browsing can outlive first-time default-account registration. Only the same
+// native file on this machine may acquire its default profile; explicit profile
+// keys remain exact, and movement APIs still validate their own current scope.
+export function browsingEntry(scan, selection) {
+  if (!scan || !selection) return null;
+  const all=[...scan.groups,...(scan.profileCopies||[])].flatMap(g=>g.entries);
+  const exact=all.find(e=>e.machine===selection.machine&&e.key===selection.key);
+  if (exact) return exact;
+  const slash=selection.key?.indexOf('/')??-1;
+  if (slash<1 || !selection.path || !scan.machines.some(m=>m.local&&m.name===selection.machine)) return null;
+  const agent=selection.key.slice(0,slash),session=selection.key.slice(slash+1);
+  if (agent.includes('@') || !session) return null;
+  const matches=new Map();
+  for (const e of all) {
+    const p=e.profile;
+    if (e.machine===selection.machine && !e.cached && e.location!=='cloud' && e.path===selection.path &&
+        e.agent===agent && p?.default && p.agent===agent && p.endpoint && p.id && e.key===`${agent}@${p.id}/${session}`) matches.set(e.key,e);
+  }
+  return matches.size===1 ? matches.values().next().value : null;
+}
+
+// A family snapshot chooses one representative, which may differ from the copy
+// explicitly opened in the inspector. Resolve that exact copy from current raw
+// inventory; never keep an old entry after it disappears from the new family.
+export async function preserveSelectedCopy(scan) {
+  if (current !== "sessions" || !view.querySelector("#inspector")) return;
+  let selection = state.sel;
+  if (!selection) return;
+  const matches = e => e.machine === selection.machine && e.key === selection.key;
+  if (scan.groups.some(g => g.entries.some(matches))) return;
+  const old=entries().find(matches);
+  const registered=old&&browsingEntry(scan,old);
+  if (registered) {
+    selection={machine:registered.machine,key:registered.key};
+    state.sel=selection;
+    if (state.list?.groupBy === "account" || scan.groups.some(g => g.entries.some(matches))) return;
+  }
+  const group = scan.groups.find(g => g.entries.some(e => (e.copies || []).some(matches)));
+  if (!group) return;
+  // Selection is independent of the family representative. Keep its exact
+  // fresh native entry in the inspector without changing scan membership.
+  if (registered) return;
+  let copy;
+  try { copy = await api("ResolveEntry", selection.machine, selection.key); }
+  catch { return; }
+  if (state.sel && matches(state.sel) && copy && matches(copy))
+    state.resolvedSelection = Object.assign({}, copy, {group});
+}
+
 // scan reads every machine again. The list stays while it runs.
-let pendingScan=null;
+let pendingScan=null, scanCompletion=Promise.resolve();
 export async function scan(method = "Scan", background = false) {
   if (state.scanning) {
     // A newly pasted cloud link or explicit refresh must not disappear merely
     // because an earlier progressive scan has already queried that source.
-    if(!pendingScan) pendingScan=(async()=>{while(state.scanning)await new Promise(resolve=>setTimeout(resolve,50));pendingScan=null;return scan(method,background)})();
+    if(!pendingScan) pendingScan=scanCompletion.then(()=>{pendingScan=null;return scan(method,background)});
     return pendingScan;
   }
+  const inspecting = current === "sessions" && !!view.querySelector("#inspector");
+  let finished;
+  scanCompletion=new Promise(resolve=>{finished=resolve});
   state.scanning = true;
   state.scanError = "";
   state.stale = false;
@@ -39,6 +91,7 @@ export async function scan(method = "Scan", background = false) {
   }
   try {
     const result=await api(method);
+    if (inspecting) await preserveSelectedCopy(result);
     if(background)queueScan(result);else acceptScan(result);
     state.info = await api("Info");
     state.activity = await api("Activity").catch(() => state.activity);
@@ -46,88 +99,43 @@ export async function scan(method = "Scan", background = false) {
     state.scanError = errText(e);
     state.stale = true;
     state.scanning = false;
+    finished();
     if (!state.scan && current === "sessions") fill(view, loadError(e, () => go("sessions", true)));
     else { fail(e); if (current === "sessions") render(); } // the previous results stay, with Retry
     freshness();
     return;
   }
   state.scanning = false;
+  finished();
   state.presence = {}; // the scan's own is newer
   freshness();
   if (!background && !pendingScan && state.sel && !selected()) state.sel = null;
 }
 
-// refreshHere reads this machine again (RefreshHere), keeping what the last scan found
-// elsewhere: quiet, with the list kept as it is until the answer comes.
-async function refreshHere(background = false) {
-  if (state.scanning || !state.scan) return;
-  state.scanning = true;
-  try {
-    const result=await api("RefreshHere");
-    if(background)queueScan(result);else acceptScan(result);
-    state.presence = {};
-  } catch { /* the next refresh tries again; the list stays */ }
-  state.scanning = false;
-  freshness();
-  if (!background && state.sel && !selected()) state.sel = null;
-}
+// Explicit source retry shares scan ordering; background collection belongs to the runtime.
+async function refreshHere() { return scan("RefreshHere"); }
 
+// paintedRevision is the scan the list on screen shows. "updated" waits for it, so the
+// freshness line never claims a result the list has not drawn yet.
+let paintedRevision = null;
 function freshness() {
   const el = $("#fresh");
-  el.textContent = state.scanning || state.scan?.discovering ? (entries().length ? `${entries().length} sessions found · Checking for changes…` : "Finding sessions…") : state.scan?.cached ? "Showing saved sessions · Checking for changes…" : state.scan?.updated ? "updated " + ago(state.scan.updated) : "Not checked yet";
+  const rt=state.runtime;
+  const observation=rt?.snapshot;
+  const stale=observation?.paused || rt?.error || (observation?.sequence>0 && observation?.expiresAt && Date.parse(observation.expiresAt)<Date.now());
+  el.textContent = observation?.paused ? "Observation paused" : state.scanning || state.scan?.discovering || (current === "sessions" && state.scan && state.scan.revision !== paintedRevision) ? (entries().length ? `${entries().length} sessions found · Checking for changes…` : "Finding sessions…") : stale ? "Showing cached sessions" : state.scan?.cached ? "Showing saved sessions · Checking for changes…" : state.scan?.updated ? "updated " + ago(state.scan.updated) : "Not checked yet";
   const other = state.scan && state.scan.elsewhere !== state.scan.updated;
   el.title = other ? `${sys.Here}: ${ago(state.scan.updated)}. Your other machines and the clouds: ${ago(state.scan.elsewhere)}.` : "";
 }
 setInterval(freshness, 30000);
 
-// The list keeps itself current while the window is in front: this machine every
-// minute (a local read), and everything (SSH to every machine, the clouds' commands) when
-// the window comes back after five minutes or more. Never while a dialog, a plan or a
-// menu is open, or another screen is shown.
-const HERE_EVERY = 60_000, ALL_AFTER = 5 * 60_000;
-const since = (iso) => (iso ? Date.now() - new Date(iso).getTime() : Infinity);
-// A presence response between pointer-down and pointer-up must not replace the
-// button under the pointer: WebKit would then swallow the user's click.
-const busy = () => pointerHeld || !state.scan || state.scanning || current !== "sessions" || document.hidden || !!document.querySelector("dialog[open], button:active") || isOpen();
-async function autoRefresh(all) {
-  if (busy()) return;
-  if (all) await scan("Scan",true); else if (!state.info?.desktopManaged) await refreshHere(true);
-  backgroundRender();
-}
-setInterval(() => { if (document.hasFocus() && (since(state.scan?.elsewhere) >= ALL_AFTER * 2 || since(state.scan?.updated) >= HERE_EVERY)) autoRefresh(since(state.scan?.elsewhere) >= ALL_AFTER * 2); }, 15_000);
-const comeBack = () => { if (!document.hidden && (since(state.scan?.elsewhere) >= ALL_AFTER || since(state.scan?.updated) >= HERE_EVERY / 2)) autoRefresh(since(state.scan?.elsewhere) >= ALL_AFTER); };
-document.addEventListener("visibilitychange", comeBack);
-window.addEventListener("focus", comeBack);
+// Shared backend owns collection. Focus requests one refresh; source events update
+// the list and Quick access. No client polling or duplicate presence collector.
+const comeBack = () => { if (!document.hidden) api("RuntimeRefresh").catch(() => {}); freshness(); };
+document.addEventListener("visibilitychange",comeBack);
+window.addEventListener("focus",comeBack);
+onTabs(() => { freshness(); });
 
-// Presence: where this machine's sessions are open (the agents' registries and the
-// process table; never a terminal app's), every 5 s while the window is in front on
-// Sessions, every 30 s while it is visible, not at all while hidden; at once when the
-// window comes back or a tab changes. Other machines' come with their scans.
-let presTimer = 0, presSig = "", presBusy = false;
-function presenceSoon(ms) {
-  clearTimeout(presTimer);
-  if (state.info?.desktopManaged || document.hidden) return; // backend owns desktop refresh; paused until visible again
-  presTimer = setTimeout(pollPresence, ms);
-}
-const presenceEvery = () => (document.hasFocus() && current === "sessions" ? 5_000 : 30_000);
-async function pollPresence() {
-  if (presBusy || !state.scan || state.scanning || document.hidden) { presenceSoon(presenceEvery()); return; }
-  presBusy = true;
-  const p = await api("Presence").catch(() => null);
-  presBusy = false;
-  if (p) {
-    const sig = JSON.stringify(p.entries);
-    if (sig !== presSig) {
-      presSig = sig;
-      state.presence = p.entries;
-      if (current === "sessions") backgroundRender();
-    }
-  }
-  presenceSoon(presenceEvery());
-}
-document.addEventListener("visibilitychange", () => { if (!document.hidden) presenceSoon(0); });
-window.addEventListener("focus", () => presenceSoon(0));
-onTabs(() => presenceSoon(300));
 
 // needsYou: the session waits for its person (its agent says so, or its tab here does).
 const needsYou = (e) => statusKey(e) === "needs";
@@ -527,7 +535,7 @@ export function select(e, focus = true) {
     if (r) { r.setAttribute("aria-selected", "true"); r.tabIndex = 0; if (focus) { r.focus({ preventScroll: true }); inView(r, false); } }
   }
   const old = $("#inspector");
-  if (old) { old.replaceWith(inspector(e, old)); applyLayout(); }
+  if (old) { old.replaceWith(inspector(e)); applyLayout(); }
 }
 onSelect((e) => showEntry(e));
 
@@ -634,30 +642,39 @@ export function render() {
   // A selection the list doesn't show goes (another place, a filter, a refresh).
   if (!state.scanning && !pendingScan && !state.scan.discovering && state.sel && !showsEntry(shown, state.sel)) { state.sel = null; state.handoffOpen = null; }
   const content = h("section", { class: "content" }, toolbar(scopeTitle(), state.scope), h("div", { class: "list" }, notices(), body(shown, inScope)));
-  const previous=view.querySelector("#inspector"),nextInspector=inspector(selected(),previous),layout=view.querySelector(".three.layout");
+  const layout = view.querySelector(".three.layout");
   // Replace only what changed: rebuilding identical rows makes icons and the list flicker.
   // Compare with the markup as last built: layout and counts adjust the live nodes later.
-  let live=content;
-  const side=sidebar(),contentHTML=content.outerHTML,sideHTML=side.outerHTML;
-  if(layout&&previous&&old){
-    if(sideHTML!==built.side)layout.querySelector(".sidebar").replaceWith(side);
-    if(contentHTML===built.content){
-      live=old;
+  let live = content;
+  const side = sidebar(), contentHTML = content.outerHTML, sideHTML = side.outerHTML;
+  if (layout && old && layout.querySelector("#inspector")) {
+    if (sideHTML !== built.side) layout.querySelector("#sidebar").replaceWith(side);
+    if (contentHTML === built.content) {
+      live = old;
       // The filter field is one element that each new toolbar adopts: give it back.
-      const input=content.querySelector("#list-filter"),label=old.querySelector("label.tb-search");
-      if(input&&label&&input.parentNode!==label)label.insertBefore(input,label.querySelector(".kbd"));
-    }else { reconcileList(old, content); live = old; adoptTree(old.querySelector(".tree")); }
-    if(nextInspector!==previous)previous.replaceWith(nextInspector);
-  }else fill(view,h("div",{class:"three layout"},side,content,nextInspector,dividers()));
+      const input = content.querySelector("#list-filter"), label = old.querySelector("label.tb-search");
+      if (input && label && input.parentNode !== label) label.insertBefore(input, label.querySelector(".kbd"));
+    } else { reconcileList(old, content); live = old; adoptTree(old.querySelector(".tree")); }
+    const pane = layout.querySelector("#inspector");
+    const paneScroll = pane.scrollTop;
+    const next = inspector(selected());
+    if (pane !== next) {
+      pane.replaceWith(next);
+      if (pane.dataset.key === next.dataset.key) next.scrollTop = paneScroll;
+    }
+  } else fill(view, h("div", { class: "three layout" }, side, content, inspector(selected()), dividers()));
   adoptTree(live.querySelector(".tree"));
-  built={content:contentHTML,side:sideHTML};
+  built = { content: contentHTML, side: sideHTML };
+  if (paintedRevision !== state.scan?.revision) { paintedRevision = state.scan?.revision; freshness(); }
   counts(shown.length, inScope.length, state.scope);
   lastShown = shown; lastScope = inScope;
   applyLayout();
   live.scrollTop = top;
   const ins=view.querySelector(".inspector");if(ins)ins.scrollTop=inspectorTop;
   if(inputID){const input=document.getElementById(inputID);input?.focus({preventScroll:true});if(inputSelection)input?.setSelectionRange(...inputSelection)}
-  else if(active?.isConnected && active!==document.body)active.focus({preventScroll:true});
+  // An unchanged iframe can still own a focused input in its child document.
+  // Refocusing the frame itself blurs that input and drops subsequent keys.
+  else if(active?.isConnected && active!==document.body && document.activeElement!==active)active.focus({preventScroll:true});
   if (focusKey) rowByKey(live, focusKey)?.focus({ preventScroll: true });
   else if (focusGroup) live.querySelector(`.grp[data-gkey="${CSS.escape(focusGroup)}"]`)?.focus({ preventScroll: true });
 }
@@ -772,10 +789,9 @@ screen("sessions", async (rescan = false) => {
   loadHookHealth().then((d) => { if (current === "sessions" && JSON.stringify(d?.problems || null) !== before) backgroundRender(); });
   const r = view.querySelector('.row[aria-selected="true"]');
   if (r) inView(r, false);
-  presenceSoon(presenceEvery());
 });
 
-onRenamed(async () => { await refreshHere(); render(); });
+onRenamed(async () => { state.scan=await api("RefreshHere");state.presence={};render(); });
 
 // inView scrolls the list (never the window) to a row: to its middle, or just enough
 // (below the toolbar and its group's sticky header).
@@ -789,12 +805,13 @@ function inView(r, center) {
   else if (rb.bottom > lb.bottom) list.scrollTop += rb.bottom - lb.bottom + 8;
 }
 
-// One latest pending publication. Never replace a control between pointer-down
-// and pointer-up, nor close an open menu, dialog or transfer review.
-let discoveryPending=null,discoveryPresence=null,discoveryTimer=0,pointerHeld=false,backgroundDirty=false;
+// Adopt ordered state promptly; paint only after the current interaction ends.
+// Discovery, Quick access and terminal events share this one coalescer.
+let discoveryPending=null,discoveryPresence=null,discoveryReading=false,discoveryTimer=0,pointerHeld=false,backgroundDirty=false;
 document.addEventListener("pointerdown",()=>{pointerHeld=true},true);
-window.addEventListener("pointerup",()=>{pointerHeld=false},true);
-window.addEventListener("pointercancel",()=>{pointerHeld=false},true);
+for(const event of ["pointerup","pointercancel"])window.addEventListener(event,()=>{pointerHeld=false;scheduleDiscovery()},true);
+for(const event of ["click","keyup","focusout","close","visibilitychange"])document.addEventListener(event,scheduleDiscovery,true);
+window.addEventListener("focus",scheduleDiscovery);
 let readOnce = false; // a complete scan (not saved, not still discovering) has been shown
 // Retain unfinished sources, but a ready local source can change movement and
 // membership before the global scan finishes. Never mutate an older snapshot.
@@ -853,7 +870,7 @@ function mergeLocalScan(previous, scan) {
   total:records.size,revision:scan.revision,discovering:true};
 }
 export function acceptScan(scan){
- if(scan?.revision && state.scan?.revision && scan.revision<=state.scan.revision)return false;
+ if(!scan || (scan.revision && state.scan?.revision && scan.revision<=state.scan.revision))return false;
  const partial=scan.discovering||scan.cached;
  if(partial&&(readOnce||state.scan?.cached)) {
   const merged=mergeLocalScan(state.scan,scan);
@@ -862,22 +879,36 @@ export function acceptScan(scan){
  }
  state.scan=scan;if(!partial)readOnce=true;freshness();return true;
 }
-function scheduleDiscovery(){if(!discoveryTimer)discoveryTimer=setTimeout(drawDiscovery,150)}
+function scheduleDiscovery(){if(backgroundDirty&&!discoveryTimer)discoveryTimer=setTimeout(drawDiscovery,100)}
 export function backgroundRender(){backgroundDirty=true;scheduleDiscovery()}
 export function queueScan(d,presence=null){
  if(!d || (discoveryPending?.revision && d.revision<discoveryPending.revision))return;
- discoveryPending=d;discoveryPresence=presence;scheduleDiscovery();
+ discoveryPending=d;discoveryPresence=presence;
+ if(!discoveryReading)adoptDiscovery();
+}
+async function adoptDiscovery(){
+ discoveryReading=true;
+ try {
+  while(discoveryPending){
+   const d=discoveryPending,presence=discoveryPresence;discoveryPending=null;discoveryPresence=null;
+   if(!d.revision||d.revision>(state.scan?.revision||0)){
+    await preserveSelectedCopy(d);
+    if(acceptScan(d)){state.presence=presence||{};backgroundRender()}
+   }else if(d.revision===state.scan?.revision&&presence!==null&&JSON.stringify(presence)!==JSON.stringify(state.presence||{})){
+    state.presence=presence;backgroundRender();
+   }
+  }
+ } finally {discoveryReading=false}
 }
 function drawDiscovery(){
  discoveryTimer=0;
- if(!discoveryPending&&!backgroundDirty)return;
- if(pointerHeld || document.querySelector("dialog[open],button:active") || isOpen()) {scheduleDiscovery();return}
- let changed=backgroundDirty;backgroundDirty=false;
- if(discoveryPending){
-  const d=discoveryPending,presence=discoveryPresence;discoveryPending=null;discoveryPresence=null;
-  if(acceptScan(d)){state.presence=presence||{};changed=true}
+ if(!backgroundDirty||current!=="sessions"||document.hidden)return;
+ // The filter field is kept, focus and selection, across a render. Anything else the
+ // user is in the middle of only postpones the update: it is retried, never dropped.
+ if(pointerHeld||document.body.classList.contains("resizing")||document.querySelector("dialog[open],button:active")||isOpen()||document.activeElement?.matches("textarea,select,.divider")){
+  discoveryTimer=setTimeout(drawDiscovery,500);return;
  }
- if(changed&&current==="sessions")render();
+ backgroundDirty=false;render();
 }
 on("hopsesh:discovery",d=>queueScan(d));
 on("hopsesh:accounts",async()=>{try{queueScan(await api("ScanSnapshot"))}catch{}});

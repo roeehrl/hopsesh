@@ -88,7 +88,7 @@ func presencePTYFixture(t *testing.T) (*App, *startupCodex, pty.Info, app.Entry)
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := NewApp(reg, WithoutSessionWatching())
+	a := NewApp(reg)
 	t.Cleanup(a.Shutdown)
 	if _, err := a.Scan(); err != nil {
 		t.Fatal(err)

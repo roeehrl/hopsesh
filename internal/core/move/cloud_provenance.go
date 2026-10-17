@@ -2,6 +2,7 @@ package move
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
@@ -96,4 +97,60 @@ func missingNodes(nodes []ir.Node, covered map[ir.NodeID]bool) []ir.Node {
 		out = append(out, n)
 	}
 	return out
+}
+
+// seedCheckpointPrefix inherits only an unambiguous contiguous prefix with both
+// native anchors and content hashes in the same task endpoint, binding and line.
+// A task assertion alone never makes rewritten/compacted records inherited.
+func seedCheckpointPrefix(m *lineage.Manifest, source lineage.Replica, seg *ir.Segment) error {
+	if source.Line != m.Branch {
+		return nil
+	}
+	id := m.Upsert(source)
+	if old, ok := m.LatestState(id); ok && len(old.Projection) > 0 {
+		return nil
+	}
+	known := map[string]ir.Projection{}
+	ambiguous := map[string]bool{}
+	var priorHeads []ir.NodeID
+	for _, replica := range m.Replicas {
+		if replica.ID == id || replica.Endpoint != source.Endpoint || replica.Binding != source.Binding || replica.Line != m.Branch || replica.Key.Agent != source.Key.Agent {
+			continue
+		}
+		state, _ := m.LatestState(replica.ID)
+		priorHeads = append(priorHeads, state.Heads...)
+		for _, p := range state.Projection {
+			k := p.Anchor + "/" + p.Hash
+			if old, ok := known[k]; ok && (!slices.Equal(old.Coverage, p.Coverage) || old.Generated != p.Generated || !slices.EqualFunc(old.Fragments, p.Fragments, func(a, b ir.Fragment) bool { return a.Text == b.Text && slices.Equal(a.Coverage, b.Coverage) })) {
+				ambiguous[k] = true
+			}
+			known[k] = p
+		}
+	}
+	var prefix []ir.Projection
+	for _, node := range seg.Nodes {
+		if node.Native == nil || node.Native.Anchor == "" {
+			break
+		}
+		k := node.Native.Anchor + "/" + ir.ContentHash(node)
+		p, ok := known[k]
+		if !ok || ambiguous[k] {
+			break
+		}
+		prefix = append(prefix, p)
+	}
+	if len(prefix) != len(known) {
+		// Retain historical ancestry for an explicitly requested fork, without
+		// claiming that rewritten records represent any of the previous turns.
+		m.Deliver(id, ir.Cursor{}, nil, priorHeads, nil)
+		return fmt.Errorf("%w: rebuilt cloud task does not preserve its verified native prefix; choose an independent fork", agent.ErrDiverged)
+	}
+	if len(prefix) > 0 {
+		var heads []ir.NodeID
+		for _, p := range prefix {
+			heads = append(heads, p.Coverage...)
+		}
+		m.Deliver(id, ir.Cursor{}, prefix, heads, nil)
+	}
+	return nil
 }

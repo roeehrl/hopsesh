@@ -12,6 +12,11 @@ on:
   schedule:
     - cron: "23 3 * * *"
   workflow_dispatch:
+    inputs:
+      journeys_only:
+        description: Run only ordered three-machine journeys (does not qualify the full pair matrix)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -30,7 +35,9 @@ jobs:
       matrix:
         node: ${{ fromJSON(github.event_name == 'pull_request' && '["macos","windows"]' || '["linux","windows","macos"]') }}
     runs-on: ${{ fromJSON('{"linux":"ubuntu-24.04","windows":"windows-2025","macos":"macos-15"}')[matrix.node] }}
-    timeout-minutes: 75
+    # The full run keeps three native hosts for both directed pairs and 24
+    # ordered journeys. Measured journeys alone exceeded the old 45m peer lease.
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 75 || 240 }}
     env:
       NODE: ${{ matrix.node }}
       NODES: ${{ github.event_name == 'pull_request' && 'macos windows' || 'linux windows macos' }}
@@ -80,6 +87,7 @@ jobs:
           echo "peers=$peers" >> "$GITHUB_ENV"
           bin/meshrdv connect -node "$NODE" -peers "$peers" -dir rdv
       - name: scenario matrix from this runner to each other one
+        if: ${{ !inputs.journeys_only }}
         run: |
           failed=0
           for p in $peers; do
@@ -87,6 +95,29 @@ jobs:
             bin/hsmatrix run -hopsesh "$PWD/bin/hopsesh" -there "hs-$p" -alias "hs-$p" -label "$NODE→$p (mesh)" -out "$RUNNER_TEMP/mesh/$p" || failed=$((failed + 1))
           done
           exit "$failed"
+      # Pairwise coverage does not prove an ordered three-machine journey. All
+      # three native hosts must remain alive while one controller drives the
+      # destination's own CLI for every hop, including B -> C and C -> B.
+      - name: pairs complete marker
+        if: github.event_name != 'pull_request' && !inputs.journeys_only
+        run: mkdir -p rdv/pairs-complete && date -u > rdv/pairs-complete/at
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: github.event_name != 'pull_request' && !inputs.journeys_only
+        with:
+          name: done-pairs-${{ matrix.node }}
+          path: rdv/pairs-complete/
+          retention-days: 1
+      - name: wait for all six directed pairs
+        if: github.event_name != 'pull_request' && matrix.node == 'linux' && !inputs.journeys_only
+        run: bin/meshrdv barrier -peers "pairs-linux pairs-macos pairs-windows" -dir rdv -wait 30m
+      - name: ordered journeys across three native machines
+        if: github.event_name != 'pull_request' && matrix.node == 'linux'
+        env:
+          HOPSESH_MATRIX_SSH_DEBUG: "1"
+        # The measured 20 successful journeys took 85m; four six-hop cases
+        # remained. Keep their individual deadlines and allow the full model.
+        timeout-minutes: 150
+        run: bin/hsmatrix journeys -nodes hs-linux,hs-macos,hs-windows -out "$RUNNER_TEMP/mesh/journeys"
       - name: done marker
         if: always()
         run: mkdir -p rdv/done-me && date -u > rdv/done-me/at
@@ -98,7 +129,23 @@ jobs:
           retention-days: 1
       - name: wait for the other runners (they may still be using this one)
         if: always() && steps.connect.outcome == 'success'
-        run: bin/meshrdv barrier -node "$NODE" -peers "$peers" -dir rdv -wait 30m
+        # Cover pair-completion skew, the 30m barrier, 150m journeys and cleanup.
+        # Individual transfer/assertion deadlines remain unchanged.
+        env:
+          PEER_WAIT: ${{ github.event_name == 'pull_request' && '45m' || '210m' }}
+        run: bin/meshrdv barrier -node "$NODE" -peers "$peers" -dir rdv -wait "$PEER_WAIT"
+      - name: retain disposable SSH server diagnostics
+        if: always()
+        timeout-minutes: 2
+        run: |
+          mkdir -p rdv
+          # Runner owns the output files; dollar expansion belongs to PowerShell.
+          # shellcheck disable=SC2016,SC2024
+          case "$RUNNER_OS" in
+            Linux) sudo journalctl -u ssh -u sshd --since '4 hours ago' --no-pager > rdv/sshd.log 2>&1 || echo 'SSH journal collection unavailable' >> rdv/sshd.log ;;
+            macOS) sudo log show --last 4h --style compact --predicate 'process == "sshd" OR process == "sshd-session"' > rdv/sshd.log 2>&1 || echo 'SSH log collection unavailable' >> rdv/sshd.log ;;
+            Windows) powershell.exe -NoProfile -NonInteractive -Command '$ErrorActionPreference="Stop"; Get-WinEvent -LogName OpenSSH/Operational -MaxEvents 5000 | Select-Object TimeCreated,Id,Message | ConvertTo-Json -Depth 3' > rdv/sshd.log 2>&1 || echo 'SSH event collection unavailable' >> rdv/sshd.log ;;
+          esac
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

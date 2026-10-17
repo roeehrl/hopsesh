@@ -1,13 +1,56 @@
 package repos
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+	"time"
 )
+
+func TestObserverGitProbeLeavesIndexUntouchedAndDoesNotRunFSMonitor(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a POSIX monitor script")
+	}
+	root := t.TempDir()
+	git(t, root, "init", "-q", "-b", "main")
+	tracked := filepath.Join(root, "tracked")
+	if err := os.WriteFile(tracked, []byte("original"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "tracked")
+	git(t, root, "commit", "-qm", "initial")
+	marker := filepath.Join(root, "monitor-ran")
+	monitor := filepath.Join(root, ".git", "test-monitor")
+	if err := os.WriteFile(monitor, []byte("#!/bin/sh\nprintf ran > '"+strings.ReplaceAll(marker, "'", "'\\''")+"'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "config", "core.fsmonitor", monitor)
+	index := filepath.Join(root, ".git", "index")
+	before, err := os.ReadFile(index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stamp := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err = os.Chtimes(tracked, stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	states, err := ProbeLocal(t.Context(), []string{root}, nil)
+	if err != nil || len(states) != 1 || !states[0].IsRepo || states[0].Dirty != 0 {
+		t.Fatal("passive probe did not read clean repository", err, states)
+	}
+	after, err := os.ReadFile(index)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("passive probe refreshed Git index", err)
+	}
+	if _, err = os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatal("repository fsmonitor executed during background observation", err)
+	}
+}
 
 func git(t *testing.T, dir string, args ...string) {
 	t.Helper()

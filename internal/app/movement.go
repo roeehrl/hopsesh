@@ -61,7 +61,8 @@ type movementObservation struct {
 
 // EnrichMovement joins receipt metadata and observes native content in memory. It
 // never writes remote files or alters journaled sidecars during a scan.
-func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
+func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) { a.enrichMovement(ctx, inv, false) }
+func (a *App) enrichMovement(ctx context.Context, inv *Inventory, passive bool) {
 	// Saved rows (Cached) carry a lineage outline, not the revision graph, and keep the
 	// movement they were saved with: only rows read in this scan are compared.
 	families := map[string][]int{}
@@ -99,7 +100,7 @@ func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
 		} else {
 			g = committedGraph(inv, family, families[family])
 			if g != nil {
-				a.observeFamily(ctx, inv, family, g, observed, ids)
+				a.observeFamily(ctx, inv, family, g, observed, ids, passive)
 			}
 			a.movementMemo.put(family, fingerprint, g, inv, observed, ids)
 			if g == nil {
@@ -186,7 +187,7 @@ func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
 
 // observeFamily reads each copy in one lineage family and observes its native content
 // against the family graph g (in memory; nothing is written).
-func (a *App) observeFamily(ctx context.Context, inv *Inventory, family string, g *lineage.Manifest, observed map[lineage.ReplicaID]movementObservation, ids map[int]lineage.ReplicaID) {
+func (a *App) observeFamily(ctx context.Context, inv *Inventory, family string, g *lineage.Manifest, observed map[lineage.ReplicaID]movementObservation, ids map[int]lineage.ReplicaID, passive bool) {
 	committed := committedPrint(inv, family)
 	for i := range inv.Entries {
 		e := &inv.Entries[i]
@@ -220,6 +221,9 @@ func (a *App) observeFamily(ctx context.Context, inv *Inventory, family string, 
 			continue
 		}
 		h, err := m.host.For(ctx, mod.Spec(), in, nil)
+		if err == nil && passive {
+			h = observationHost{h}
+		}
 		var copyKey string
 		var before graphRecords
 		if err == nil {

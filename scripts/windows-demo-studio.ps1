@@ -34,12 +34,18 @@ if (Test-Path $Key) { Remove-Item $Key, "$Key.pub" -Force }
 ssh-keygen -q -t ed25519 -N '' -C 'alice@laptop' -f $Key
 icacls $Key /inheritance:r /grant:r "$($env:USERNAME):F" | Out-Null
 
-# demoseed for Linux, and a stand-in claude that answers --version.
+# demoseed and the shared stand-in agent for Linux. Account rechecks need the
+# real fixture's JSON auth response, not a version-only shell placeholder.
 $seed = Join-Path (Split-Path $Key) 'demoseed'
+$agent = Join-Path (Split-Path $Key) 'fakeagent'
 $env:GOOS = 'linux'; $env:GOARCH = 'amd64'; $env:CGO_ENABLED = '0'
 go build -o $seed ./internal/devtools/demoseed
+if ($LASTEXITCODE -ne 0) { Fail 'building studio seed failed' }
+go build -o $agent ./internal/devtools/fakeagent
+if ($LASTEXITCODE -ne 0) { Fail 'building studio agent fixture failed' }
 Remove-Item Env:GOOS, Env:GOARCH, Env:CGO_ENABLED
 $seedWsl = (wsl -d $distro -- wslpath -a ($seed -replace '\\', '/')).Trim()
+$agentWsl = (wsl -d $distro -- wslpath -a ($agent -replace '\\', '/')).Trim()
 $pubWsl = (wsl -d $distro -- wslpath -a ("$Key.pub" -replace '\\', '/')).Trim()
 
 InWsl @"
@@ -48,8 +54,7 @@ apt-get update -qq
 apt-get install -y -qq openssh-server git >/dev/null
 id alice >/dev/null 2>&1 || useradd -m -s /bin/bash alice
 install -m 755 '$seedWsl' /usr/local/bin/demoseed
-printf '#!/bin/sh\necho "2.1.284 (Claude Code)"\n' > /usr/local/bin/claude
-chmod 755 /usr/local/bin/claude
+install -m 755 '$agentWsl' /usr/local/bin/claude
 install -d -o alice -m 755 /srv/git
 install -d -o alice -m 700 /home/alice/.ssh
 install -o alice -m 600 '$pubWsl' /home/alice/.ssh/authorized_keys

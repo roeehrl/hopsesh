@@ -20,7 +20,7 @@ import (
 
 func TestHistorySaveRejectsLateReviewPublications(t *testing.T) {
 	home(t)
-	a := NewApp(all.Registry(), WithoutSessionWatching())
+	a := NewApp(all.Registry())
 	t.Cleanup(a.Shutdown)
 	for _, kind := range []string{move.KindContinue, move.KindHop, move.KindHandoff} {
 		t.Run(kind, func(t *testing.T) {
@@ -53,7 +53,7 @@ func TestHistorySaveRejectsLateReviewPublications(t *testing.T) {
 
 func TestHistorySaveDuringApplyPreservesActionAndResult(t *testing.T) {
 	home(t)
-	a := NewApp(all.Registry(), WithoutSessionWatching())
+	a := NewApp(all.Registry())
 	t.Cleanup(a.Shutdown)
 	scan, err := a.Scan()
 	if err != nil {
@@ -140,7 +140,7 @@ func peerReviewFixture(t *testing.T) (*App, string, string, *reviewReplyGate, *a
 	}
 	home(t)
 	t.Setenv("HOPSESH_MACHINE", "here")
-	a := NewApp(all.Registry(), WithoutSessionWatching())
+	a := NewApp(all.Registry())
 	t.Cleanup(a.Shutdown)
 	if err := a.AddHost("box", "box", false, false); err != nil {
 		t.Fatal(err)

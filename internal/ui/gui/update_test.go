@@ -32,7 +32,7 @@ func updateApp(t *testing.T) *App {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := NewApp(reg, WithoutSessionWatching())
+	a := NewApp(reg)
 	t.Cleanup(a.Shutdown)
 	return a
 }

@@ -22,20 +22,23 @@ import (
 
 // SettingsDTO is everything the Settings screen shows.
 type SettingsDTO struct {
-	Appearance       string                   `json:"appearance"`
-	NoticeHooks      []app.MovementHookStatus `json:"noticeHooks"`
-	NoticeHooksError string                   `json:"noticeHooksError,omitempty"`
-	MovementNotices  bool                     `json:"movementNotices"` // the original is protected (block or advise)
-	Original         string                   `json:"original"`        // block | advise | off
-	Version          string                   `json:"version"`
-	ReposDir         string                   `json:"reposDir"`
-	Layout           string                   `json:"layout"` // flat | ghq
-	SyncCode         bool                     `json:"syncCode"`
-	PushSource       bool                     `json:"pushSource"`
-	UpdateChk        string                   `json:"updateCheck"`
-	AppIcons         bool                     `json:"appIcons"` // installed desktop apps' icons picture the agents
-	Previews         bool                     `json:"previews"` // the inspector shows the end of a conversation
-	Agents           []AgentDTO               `json:"agents"`
+	Relay              RelaySettingsDTO         `json:"relay"`
+	Runtime            RuntimeDTO               `json:"runtime"`
+	RuntimePreferences config.Runtime           `json:"runtimePreferences"`
+	Appearance         string                   `json:"appearance"`
+	NoticeHooks        []app.MovementHookStatus `json:"noticeHooks"`
+	NoticeHooksError   string                   `json:"noticeHooksError,omitempty"`
+	MovementNotices    bool                     `json:"movementNotices"` // the original is protected (block or advise)
+	Original           string                   `json:"original"`        // block | advise | off
+	Version            string                   `json:"version"`
+	ReposDir           string                   `json:"reposDir"`
+	Layout             string                   `json:"layout"` // flat | ghq
+	SyncCode           bool                     `json:"syncCode"`
+	PushSource         bool                     `json:"pushSource"`
+	UpdateChk          string                   `json:"updateCheck"`
+	AppIcons           bool                     `json:"appIcons"` // installed desktop apps' icons picture the agents
+	Previews           bool                     `json:"previews"` // the inspector shows the end of a conversation
+	Agents             []AgentDTO               `json:"agents"`
 
 	CLI         integrate.CLIStatus `json:"cli"`
 	CLIReady    bool                `json:"cliReady"` // the skill and hooks can run hopsesh
@@ -79,10 +82,11 @@ func (a *App) Settings() SettingsDTO {
 	if hookErr != nil {
 		hookProblem = hookErr.Error()
 	}
+	relaySettings := a.RelaySettings()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	cfg := a.core.Cfg
-	return SettingsDTO{Appearance: cfg.AppearanceMode(), NoticeHooks: hooks, NoticeHooksError: hookProblem, Version: version.Version, ReposDir: cfg.ReposDir, Layout: nonEmpty(cfg.Layout, "flat"),
+	return SettingsDTO{Relay: relaySettings, Runtime: a.RuntimeStatus(), RuntimePreferences: cfg.Runtime, Appearance: cfg.AppearanceMode(), NoticeHooks: hooks, NoticeHooksError: hookProblem, Version: version.Version, ReposDir: cfg.ReposDir, Layout: nonEmpty(cfg.Layout, "flat"),
 		MovementNotices: cfg.MovementNoticesOn(), Original: cfg.OriginalGuard(), SyncCode: cfg.SyncCodeOn(), PushSource: cfg.PushSource, UpdateChk: cfg.UpdateCheck, AppIcons: cfg.AppIconsOn(), Previews: cfg.PreviewsOn(),
 		Agents: a.agentsLocked(), CLI: integrate.CheckCLI(), CLIReady: CLIReady(integrate.CheckCLI()), Skill: rep, SkillBin: bin, SkillPrompt: cfg.SkillPrompt,
 		LocalNetworkGated: lnp.Gated(), ConfigDir: config.Dir(), StateDir: config.StateDir()}

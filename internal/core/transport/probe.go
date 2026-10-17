@@ -21,7 +21,6 @@ import (
 	"unicode/utf16"
 
 	"github.com/roeehrl/hopsesh/internal/core/lnp"
-	"github.com/roeehrl/hopsesh/internal/core/proc"
 )
 
 // RunPowerShell runs a PowerShell script on a Windows machine (whatever its default ssh
@@ -131,7 +130,7 @@ func (c *Conn) Resolve(ctx context.Context) (*ResolvedHost, error) {
 func (c *Conn) sshConfig(ctx context.Context, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	cmd := proc.CommandContext(ctx, c.sshBinary, append([]string{"-G"}, args...)...)
+	cmd := sshCommandContext(ctx, c.sshBinary, append([]string{"-G"}, args...)...)
 	cmd.WaitDelay = 100 * time.Millisecond // a Match child may retain stdout
 	out, err := cmd.Output()
 	if ctx.Err() != nil {
@@ -184,22 +183,34 @@ func (c *Conn) ScanHostKeys(ctx context.Context) ([]HostKey, *ResolvedHost, erro
 			gated = append(gated, t)
 		}
 	}
-	ks := proc.CommandContext(ctx, bin, "-T", "5", "-p", r.Port, r.HostName)
-	var ksErr bytes.Buffer
+	// -T bounds socket inactivity, not the process lifetime. A stalled native
+	// keyscan must leave time for the SSH fallback within the caller's deadline.
+	scanCtx, cancelScan := context.WithTimeout(ctx, 10*time.Second)
+	ks := sshCommandContext(scanCtx, bin, "-T", "5", "-p", r.Port, r.HostName)
+	ks.WaitDelay = 100 * time.Millisecond
+	var ksErr sshDiagnostic
 	ks.Stderr = &ksErr
 	out, err := ks.Output()
+	if scanCtx.Err() != nil {
+		err = scanCtx.Err()
+	}
+	cancelScan()
 	name := r.HostName
 	if r.HostKeyAlias != "" {
+		// OpenSSH uses an explicit HostKeyAlias verbatim, including on a
+		// nonstandard port. Adding [alias]:port would trust a different name.
 		name = r.HostKeyAlias
-	}
-	if r.Port != "22" {
+	} else if r.Port != "22" {
 		name = "[" + name + "]:" + r.Port
 	}
 	keys := parseHostKeys(out, name)
+	var fallbackErr error
 	if len(keys) == 0 {
 		// Windows' ssh-keyscan returns only the banner from some OpenSSH servers (Ubuntu's
 		// 9.6, for one); ssh itself still reads the key.
-		keys = parseHostKeys(c.hostKeyViaSSH(ctx), name)
+		var recorded []byte
+		recorded, fallbackErr = c.hostKeyViaSSH(ctx)
+		keys = parseHostKeys(recorded, name)
 	}
 	if len(keys) == 0 {
 		why := strings.TrimSpace(ksErr.String())
@@ -209,7 +220,7 @@ func (c *Conn) ScanHostKeys(ctx context.Context) ([]HostKey, *ResolvedHost, erro
 		if why == "" {
 			why = "no host keys"
 		}
-		return nil, r, c.explainLocalNetwork(fmt.Errorf("%w: ssh-keyscan %s: %s", ErrUnreachable, r.HostName, firstLine(why)), gated)
+		return nil, r, c.explainLocalNetwork(fmt.Errorf("%w: ssh-keyscan %s: %s; SSH host-key fallback: %w", ErrUnreachable, r.HostName, firstLine(why), fallbackErr), gated)
 	}
 	return keys, r, nil
 }
@@ -237,10 +248,10 @@ func parseHostKeys(out []byte, name string) []HostKey {
 // hopsesh would make it (the destination's user, keys and settings), with a throwaway
 // known_hosts file that accepts the new key. Nothing is trusted by this; the caller shows
 // the key for confirmation. Returns that file's lines.
-func (c *Conn) hostKeyViaSSH(ctx context.Context) []byte {
+func (c *Conn) hostKeyViaSSH(ctx context.Context) ([]byte, error) {
 	dir, err := os.MkdirTemp("", "hopsesh-hostkey-")
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("create temporary host-key directory: %w", err)
 	}
 	defer os.RemoveAll(dir)
 	kh := filepath.Join(dir, "known_hosts")
@@ -256,9 +267,33 @@ func (c *Conn) hostKeyViaSSH(ctx context.Context) []byte {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	_ = proc.CommandContext(ctx, c.sshBinary, append(args, c.Dest, "exit")...).Run() // the login may fail; the key is recorded first
-	b, _ := os.ReadFile(kh)
-	return b
+	cmd := sshCommandContext(ctx, c.sshBinary, append(args, c.Dest, "exit")...)
+	var diagnostic sshDiagnostic
+	cmd.Stderr = &diagnostic
+	cmd.WaitDelay = 100 * time.Millisecond
+	runErr := cmd.Run() // the login may fail; the key is recorded first
+	b, readErr := os.ReadFile(kh)
+	if len(parseHostKeys(b, c.Dest)) > 0 {
+		return b, nil
+	}
+	if ctx.Err() != nil {
+		runErr = ctx.Err()
+	}
+	return nil, fmt.Errorf("%s: %w; reading temporary known_hosts: %v; %s", c.sshBinary, errors.Join(runErr, errors.New("no host keys recorded")), readErr, strings.TrimSpace(diagnostic.String()))
+}
+
+// Keep SSH diagnostics useful without retaining unbounded remote banner output.
+type sshDiagnostic struct{ buffer bytes.Buffer }
+
+func (d *sshDiagnostic) Len() int       { return d.buffer.Len() }
+func (d *sshDiagnostic) String() string { return d.buffer.String() }
+
+func (d *sshDiagnostic) Write(p []byte) (int, error) {
+	n := len(p)
+	if remaining := 2048 - d.Len(); remaining > 0 {
+		_, _ = d.buffer.Write(p[:min(n, remaining)])
+	}
+	return n, nil
 }
 
 // Fingerprint returns the OpenSSH SHA256 fingerprint of a base64 key blob.

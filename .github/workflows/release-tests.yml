@@ -11,6 +11,7 @@ on:
   pull_request: # changes to this run are tested before they land
     paths:
       - .github/workflows/release-tests.yml
+      - .github/workflows/runtime-matrix.yml
 
 permissions:
   contents: read
@@ -20,17 +21,37 @@ concurrency: # a newer push to the same pull request replaces the run; scheduled
   cancel-in-progress: true
 
 jobs:
+  runtime-triples:
+    # Nightly owns this identical matrix on PRs, including changes to this file.
+    # Tags and explicit release qualification still execute their own full copy.
+    if: github.event_name != 'pull_request'
+    # Same-commit reference; retain the supported ./ form until actionlint parses $/.
+    uses: ./.github/workflows/runtime-matrix.yml # zizmor: ignore[self-repository]
+    with:
+      strength: 3
   matrix:
     name: scenarios (${{ matrix.label }})
     strategy:
       fail-fast: false
       matrix:
         include:
-          - {label: linux triples, os: ubuntu-24.04, t: 3}
-          - {label: macos triples, os: macos-15, t: 3}
-          # Windows runs a row in about 40 s: two halves stay well inside the job limit.
-          - {label: windows triples 1/2, os: windows-2025, t: 3, shard: 1/2}
-          - {label: windows triples 2/2, os: windows-2025, t: 3, shard: 2/2}
+          # The full unsharded model reaches only its repeated-return rows
+          # near the two-hour limit. Keep every row and its original deadline
+          # while distributing the long routes across four disjoint shards.
+          - {label: linux triples 1/4, os: ubuntu-24.04, t: 3, shard: 1/4}
+          - {label: linux triples 2/4, os: ubuntu-24.04, t: 3, shard: 2/4}
+          - {label: linux triples 3/4, os: ubuntu-24.04, t: 3, shard: 3/4}
+          - {label: linux triples 4/4, os: ubuntu-24.04, t: 3, shard: 4/4}
+          - {label: macos triples 1/4, os: macos-15, t: 3, shard: 1/4}
+          - {label: macos triples 2/4, os: macos-15, t: 3, shard: 2/4}
+          - {label: macos triples 3/4, os: macos-15, t: 3, shard: 3/4}
+          - {label: macos triples 4/4, os: macos-15, t: 3, shard: 4/4}
+          # Two Windows halves also exhausted 120m before completing their rows.
+          # Preserve the full model and each scenario deadline in four shards.
+          - {label: windows triples 1/4, os: windows-2025, t: 3, shard: 1/4}
+          - {label: windows triples 2/4, os: windows-2025, t: 3, shard: 2/4}
+          - {label: windows triples 3/4, os: windows-2025, t: 3, shard: 3/4}
+          - {label: windows triples 4/4, os: windows-2025, t: 3, shard: 4/4}
           - {label: windows 2022, os: windows-2022, t: 2}
           - {label: macos 26, os: macos-26, t: 2}
           - {label: linux arm64, os: ubuntu-24.04-arm, t: 2}
@@ -72,7 +93,7 @@ jobs:
           SHARD: ${{ matrix.shard || '1/1' }}
         run: ./scripts/matrix-loopback.ps1 -Bin bin -Label $env:LABEL -Out "$env:RUNNER_TEMP\hsmatrix" -Strength $env:T -Shard $env:SHARD
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: ${{ failure() }}
+        if: always() # retain successful shards so their exact union can be audited
         with:
           name: release-scenarios-${{ strategy.job-index }}
           path: |

@@ -56,6 +56,18 @@ func (m *Machine) Writes() []SnapshotWrite {
 	return append([]SnapshotWrite(nil), m.snap.writes...)
 }
 
+// PersistWrites records the intended source acknowledgements before modifying
+// the private snapshot. A failed durable write prevents the in-memory change.
+// The callback must not call back into this snapshot.
+func (m *Machine) PersistWrites(save func([]SnapshotWrite) error) {
+	if m.snap == nil {
+		return
+	}
+	m.snap.mu.Lock()
+	defer m.snap.mu.Unlock()
+	m.snap.save = save
+}
+
 // IsSnapshot reports whether the machine is a snapshot.
 func (m *Machine) IsSnapshot() bool { return m.snap != nil }
 
@@ -65,6 +77,18 @@ type memFS struct {
 	files  map[string]*SnapshotFile
 	writes []SnapshotWrite
 	pa     agent.Path
+	save   func([]SnapshotWrite) error
+}
+
+func (f *memFS) record(w SnapshotWrite) error {
+	writes := append(append([]SnapshotWrite(nil), f.writes...), w)
+	if f.save != nil {
+		if err := f.save(writes); err != nil {
+			return err
+		}
+	}
+	f.writes = writes
+	return nil
 }
 
 type memInfo struct {
@@ -183,7 +207,9 @@ func (f *memFS) WriteFile(p string, b []byte, perm fs.FileMode) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	p = f.pa.Clean(p)
-	f.writes = append(f.writes, SnapshotWrite{Op: "write", Path: p, Data: append([]byte(nil), b...), Perm: perm})
+	if err := f.record(SnapshotWrite{Op: "write", Path: p, Data: append([]byte(nil), b...), Perm: perm}); err != nil {
+		return err
+	}
 	f.files[p] = &SnapshotFile{Path: p, Data: append([]byte(nil), b...), Mode: perm, ModTime: time.Now()}
 	return nil
 }
@@ -192,12 +218,14 @@ func (f *memFS) Append(p string, b []byte, o agent.AppendOptions) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	p = f.pa.Clean(p)
+	if err := f.record(SnapshotWrite{Op: "append", Path: p, Data: append([]byte(nil), b...), Append: o}); err != nil {
+		return err
+	}
 	sf, ok := f.files[p]
 	if !ok { // a new file: the sender's append creates it too
 		sf = &SnapshotFile{Path: p, Mode: 0o600, ModTime: time.Now()}
 		f.files[p] = sf
 	}
-	f.writes = append(f.writes, SnapshotWrite{Op: "append", Path: p, Data: append([]byte(nil), b...), Append: o})
 	if o.NewLine && len(sf.Data) > 0 && sf.Data[len(sf.Data)-1] != '\n' {
 		sf.Data = append(sf.Data, '\n')
 	}
@@ -216,7 +244,9 @@ func (f *memFS) Rename(from, to string) error {
 	if !ok {
 		return notExist("rename", from)
 	}
-	f.writes = append(f.writes, SnapshotWrite{Op: "rename", Path: to, From: from})
+	if err := f.record(SnapshotWrite{Op: "rename", Path: to, From: from}); err != nil {
+		return err
+	}
 	delete(f.files, from)
 	sf.Path = to
 	f.files[to] = sf

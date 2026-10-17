@@ -5,6 +5,8 @@ package host
 import (
 	"bufio"
 	"context"
+	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -13,6 +15,22 @@ import (
 
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
+
+func TestUnknownLockHoldersAreNotReportedFree(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "unreadable.lock")
+	if err := os.Symlink(p, p); err != nil {
+		t.Fatal(err)
+	}
+	l := localLocks{}
+	states, err := l.Probe(t.Context(), []string{p})
+	if err != nil || states[p] != agent.LockUnknown {
+		t.Fatalf("fixture must have unknown lock state: %v, %v", states, err)
+	}
+	holders, err := l.Holders(t.Context(), []string{p})
+	if !errors.Is(err, agent.ErrUnsupported) || holders != nil {
+		t.Fatalf("unknown lock reported as free: holders=%v, error=%v", holders, err)
+	}
+}
 
 // A process holding a flock is found as the holder, and named.
 func TestLockHoldersAndNames(t *testing.T) {

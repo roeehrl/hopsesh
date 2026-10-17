@@ -33,6 +33,26 @@ test('real service resolves hidden original and appends return work to that exac
  await details(page).getByRole('button',{name:/Copies & history/}).click();
  await details(page).getByRole('button',{name:'Show copy',exact:true}).first().click();
  await expect(details(page).getByRole('heading',{name:'Find the codeword',exact:true})).toBeVisible();
+ // A newer background publication still chooses the Codex family representative.
+ // The explicitly inspected Claude copy must remain selected and actionable.
+ const background=(await (await page.request.post('/call',{data:{m:'QuickSnapshot',args:[]}})).json()).result;
+ background.scan.revision=await page.evaluate(async()=>((await import('/core.js')).state.scan.revision)+1);
+ expect(background.scan.groups.flatMap(g=>g.entries).some(e=>e.key===source.key)).toBe(false);
+ const publication=async route=>{
+  if(route.request().postDataJSON().m!=='QuickSnapshot')return route.fallback();
+  await route.fulfill({json:{result:background}});
+ };
+ await page.route('**/call',publication);
+ await page.evaluate(()=>(window as any).__emit('hopsesh:quick',null));
+ await expect.poll(()=>page.evaluate(async()=>(await import('/core.js')).state.scan.revision)).toBe(background.scan.revision);
+ await expect(page.locator(`.tree .row[data-key$=${JSON.stringify(source.key)}]`)).toHaveAttribute('aria-selected','true');
+ await expect(details(page).getByRole('heading',{name:'Find the codeword',exact:true})).toBeVisible();
+ await page.unroute('**/call',publication);
+ const refreshed=page.waitForResponse(r=>r.url().endsWith('/call') && r.request().postDataJSON().m==='Scan');
+ await page.locator('#btn-refresh').click();
+ await refreshed;
+ await expect.poll(()=>page.evaluate(async()=>(await import('/core.js')).state.scanning)).toBe(false);
+ await expect(details(page).getByRole('heading',{name:'Find the codeword',exact:true})).toBeVisible();
  await expect(details(page).getByLabel('Where it went',{exact:true})).toContainText('no new work there yet');
  await expect(details(page).locator('#act-primary')).toHaveText(/^Open in /);
  await expect(details(page).locator('#act-primary')).toBeEnabled();
@@ -89,15 +109,12 @@ test('real service resolves hidden original and appends return work to that exac
  expect(returnedGraph.hops).toHaveLength(2);
  expect(returnedGraph.hops.every(h=>!h.fork)).toBe(true);
  expect(returned[0].returns).toEqual(expect.arrayContaining([expect.objectContaining({key:converted.key})]));
- // A settled refresh can make either native copy the parent. The exact Codex
- // identity remains selectable as a parent or child, independent of role text.
- const codexCopy=page.locator(`.tree .row[data-key$=${JSON.stringify(converted.key)}]`);
- await expect(codexCopy).toHaveAttribute('data-key',converted.machine+'\0'+converted.key);
- await codexCopy.click();
- await expect.poll(()=>page.evaluate(async()=>{const {selected}=await import('/core.js');return selected()?.key;})).toBe(converted.key);
+ // The shared runtime publishes the return at once: the branch's row is now the returned
+ // original (its newest copy), and the Codex copy stays reachable through Copies & history.
+ await agentRow(page,returned[0].title,'Claude Code').click();
  const copies=details(page).getByRole('button',{name:/Copies & history/});
  if((await copies.getAttribute('aria-expanded'))!=='true') await copies.click();
- await details(page).locator('#sec-copies span').filter({hasText:'· newest'}).getByRole('button',{name:'Show copy',exact:true}).click();
+ await expect(details(page).locator('#sec-copies')).toContainText('Codex');
  await expect.poll(()=>page.evaluate(async()=>{const {selected}=await import('/core.js');return selected()?.key;})).toBe(source.key);
  await expect(details(page).getByLabel('Return destinations')).toBeVisible();
  await expect(details(page).locator('.skel')).toHaveCount(0);

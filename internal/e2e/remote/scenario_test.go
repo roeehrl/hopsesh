@@ -283,6 +283,17 @@ func (e *env) versionSkew(t *testing.T) {
 	if err := e.remoteWrite(t, program, b); err != nil {
 		t.Fatal(err)
 	}
+	// An older release refuses settings a newer one wrote (a newer schema), by design.
+	// A machine that really runs 0.4.5 has its own; give it that while it runs here.
+	config := e.home + "/.config/hopsesh/config.toml"
+	if out, err := e.remote(t, "if test -e "+ShQuote(config)+"; then mv "+ShQuote(config)+" "+ShQuote(config+".newer")+"; fi"); err != nil {
+		t.Fatal(err, out)
+	}
+	t.Cleanup(func() {
+		if out, err := e.remote(t, "if test -e "+ShQuote(config+".newer")+"; then mv -f "+ShQuote(config+".newer")+" "+ShQuote(config)+"; fi"); err != nil {
+			t.Error(err, out)
+		}
+	})
 	if out, err := e.remote(t, "chmod 755 "+ShQuote(program)+" && "+ShQuote(program)+" receive on >/dev/null && "+ShQuote(program)+" version"); err != nil || !strings.Contains(out, "0.4.5") {
 		t.Fatalf("hopsesh 0.4.5 there: %v %s", err, out)
 	}

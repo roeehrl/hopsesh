@@ -2,6 +2,7 @@ package host
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -37,5 +38,24 @@ func TestSnapshotReadsAndRecordsWrites(t *testing.T) {
 	}
 	if _, err := m.Exec().Run(context.Background(), []string{"claude"}, agent.RunOptions{}); err == nil {
 		t.Fatal("nothing runs on a snapshot")
+	}
+}
+
+func TestSnapshotDurabilityFailurePreventsAcknowledgementMutation(t *testing.T) {
+	m := NewSnapshot("source", Facts{OS: "linux"}, []SnapshotFile{{Path: "/session", Data: []byte("original\n")}})
+	m.PersistWrites(func([]SnapshotWrite) error { return errors.New("disk full") })
+	f, _ := m.FS(context.Background())
+	for _, apply := range []func() error{
+		func() error { return f.WriteFile("/session", []byte("replacement"), 0600) },
+		func() error { return f.Append("/session", []byte("mark"), agent.AppendOptions{}) },
+		func() error { return f.Rename("/session", "/elsewhere") },
+	} {
+		if err := apply(); err == nil {
+			t.Fatal("in-memory write preceded durable acknowledgement")
+		}
+	}
+	b, _ := f.ReadFile("/session", 100)
+	if string(b) != "original\n" || len(m.Writes()) != 0 {
+		t.Fatal("failed persistence mutated snapshot")
 	}
 }

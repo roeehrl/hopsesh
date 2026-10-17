@@ -13,7 +13,7 @@ func TestDesktopNewAndExistingInstall(t *testing.T) {
 		t.Fatalf("new install: %+v %v", c.Desktop, err)
 	}
 	c.Desktop = Desktop{}
-	if err = Save(c); err != nil {
+	if err = Save(&c); err != nil {
 		t.Fatal(err)
 	}
 	c, err = Load()
@@ -22,7 +22,7 @@ func TestDesktopNewAndExistingInstall(t *testing.T) {
 	}
 	no := false
 	c.Desktop = Desktop{Mode: "tray", Close: "keep", Attention: &no, Previews: &no}
-	if err = Save(c); err != nil {
+	if err = Save(&c); err != nil {
 		t.Fatal(err)
 	}
 	c, err = Load()
@@ -42,7 +42,7 @@ func TestDesktopInvalidSettings(t *testing.T) {
 func TestDesktopMissingSection(t *testing.T) {
 	t.Setenv("HOPSESH_CONFIG_DIR", t.TempDir())
 	// A pre-feature config has no desktop table at all.
-	if err := os.WriteFile(filepath.Join(Dir(), "config.toml"), []byte("schema = 4\nlayout = 'flat'\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(Dir(), "config.toml"), []byte("schema = 5\nlayout = 'flat'\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	c, err := Load()

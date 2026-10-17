@@ -109,7 +109,7 @@ func registerCachedMovementWorld(mu *sync.RWMutex, home string, svc **gui.App) {
 			})
 		}
 		(*svc).Shutdown()
-		*svc = gui.NewApp(all.Registry(), gui.WithoutSessionWatching())
+		*svc = gui.NewApp(all.Registry())
 		(*svc).Emitter = relay
 		_ = json.NewEncoder(w).Encode(map[string]any{"claude": pair[0], "codex": pair[1]})
 	})

@@ -36,7 +36,7 @@ function hp-git {
   $ms = $hpLimit * 1000
   $si = New-Object System.Diagnostics.ProcessStartInfo
   $si.FileName = $hpGit
-  $si.Arguments = (@('-C', $d) + $args | ForEach-Object { hp-quote ([string]$_) }) -join ' '
+  $si.Arguments = (@('--no-optional-locks', '-c', 'core.fsmonitor=false', '-C', $d) + $args | ForEach-Object { hp-quote ([string]$_) }) -join ' '
   $si.UseShellExecute = $false
   $si.CreateNoWindow = $true
   $si.RedirectStandardInput = $true

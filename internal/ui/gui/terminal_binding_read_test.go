@@ -204,7 +204,15 @@ func TestTerminalBindingRejectsOlderPresenceAndScanResults(t *testing.T) {
 			go func() {
 				var err error
 				if source == "scan" {
-					_, err = a.RefreshHere()
+					read := a.beginTerminalBindingRead("scan")
+					owned := a.inv
+					fresh := a.snapshot().Scan(t.Context(), app.ScanOptions{Hosts: []string{app.LocalName()}})
+					defer fresh.Close()
+					table, tableErr := presence.Snapshot(t.Context())
+					err = tableErr
+					if err == nil {
+						a.bindTerminalSnapshot(owned, fresh, table, read)
+					}
 				} else {
 					_, err = a.Presence()
 				}

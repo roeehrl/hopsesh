@@ -329,7 +329,7 @@ function groupKey(t){return prefs.grouping==="none"?"":prefs.grouping==="session
 function groupName(t){const name=prefs.grouping==="session"?(t.info.relationship?.branchName||t.info.title):(t.info.relationship?.name||"Other terminals");return t.info.association==="Checking session association"?"Last verified: "+name:name;}
 function drawGroups(){
  const el=$("#terminal-groups");
- if(prefs.grouping==="none" || tabs.size<2){el.replaceChildren();return;}
+ if(prefs.grouping==="none" || tabs.size<2){scope="";el.replaceChildren();return;}
  const groups=new Map();
  for(const t of tabs.values()){const k=groupKey(t);if(!groups.has(k))groups.set(k,{name:groupName(t),tabs:[]});groups.get(k).tabs.push(t);}
  if(scope && !groups.has(scope))scope="";
@@ -341,7 +341,10 @@ function drawGroups(){
 function strip() {
   drawGroups();
   const list = $("#tabs");
-  const ids = order.filter((id) => tabs.has(id) && (!scope || groupKey(tabs.get(id))===scope) && !collapsedGroups.has(groupKey(tabs.get(id))));
+  // With no group controls, every tab must remain reachable. A late session
+  // association or closing a group's last sibling can change its group key.
+  const grouped = prefs.grouping !== "none" && tabs.size > 1;
+  const ids = order.filter((id) => tabs.has(id) && (!grouped || ((!scope || groupKey(tabs.get(id))===scope) && !collapsedGroups.has(groupKey(tabs.get(id))))));
   list.replaceChildren(...ids.map((id) => {
     const t = tabs.get(id);
     const [cls, words] = chipOf(t);

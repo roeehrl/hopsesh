@@ -95,8 +95,7 @@ and hopsesh reports any copy that drifted.
 			r.printSkill(rep)
 			r.printf("Try it: ask your agent \"what sessions do I have on my other machines?\" or \"continue this in Codex\".\n")
 			r.app.Cfg.SkillPrompt = ""
-			_ = config.Save(r.app.Cfg)
-			return nil
+			return config.Save(&r.app.Cfg)
 		},
 	}
 	install.Flags().Bool("force", false, "replace copies you edited (or that hopsesh did not install); old ones are kept as backups")
@@ -178,7 +177,9 @@ func (r *run) offerSkill() {
 		r.printf("\nYour agents can use hopsesh for you (\"bring my laptop session here\", \"continue this in Codex\"): they show the plan and act only after you say yes.\n")
 		if !r.confirm("Install the hopsesh skill for your agents?") {
 			r.app.Cfg.SkillPrompt = "declined"
-			_ = config.Save(r.app.Cfg)
+			if err := config.Save(&r.app.Cfg); err != nil {
+				r.printf("Could not save skill preference: %v\n", err)
+			}
 			r.printf("OK. You can install it later with: hopsesh skill install\n")
 			return
 		}
@@ -193,7 +194,9 @@ func (r *run) offerSkill() {
 			return
 		}
 		r.app.Cfg.SkillPrompt = "stale:" + version.Version
-		_ = config.Save(r.app.Cfg)
+		if err := config.Save(&r.app.Cfg); err != nil {
+			r.printf("Could not save skill preference: %v\n", err)
+		}
 		if r.confirm("\nThe hopsesh skill is out of date. Update every copy?") {
 			if _, err := r.app.InstallSkill(context.Background(), files, version.Version, bin, false, false); err != nil {
 				r.printf("Could not update the skill: %v\n", err)
