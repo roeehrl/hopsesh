@@ -499,7 +499,7 @@ func (a *App) observeRemote(ctx context.Context, h config.Host) RemoteObservatio
 		state.Status, state.Error, state.Hint = classify(err, h)
 		return state
 	}
-	m := &host.Machine{Name: h.Name, Conn: conn, Facts: facts, Log: a.Log}
+	m := &host.Machine{Name: h.Name, Conn: conn, Facts: facts, Log: a.Log, Keeper: a.endpointKeeper(h.Name)}
 	defer m.Close()
 	obs, err := source.observeMachine(ctx, m)
 	if err != nil {
@@ -557,7 +557,7 @@ func (a *App) RemoteInventory(ctx context.Context, state RemoteObservation) *Inv
 			if h.TailscaleName != "" && h.TailscaleName != h.Destination {
 				conn.Fallbacks = []string{h.TailscaleName}
 			}
-			m.host = &host.Machine{Name: h.Name, Conn: conn, Facts: state.Facts, Log: a.Log}
+			m.host = &host.Machine{Name: h.Name, Conn: conn, Facts: state.Facts, Log: a.Log, Keeper: a.endpointKeeper(h.Name)}
 		}
 	}
 	return inv
