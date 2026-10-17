@@ -11,8 +11,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/core/proc"
@@ -33,8 +35,8 @@ type probeWants struct {
 var Hopsesh = agent.Binary{
 	Name: "hopsesh",
 	Candidates: map[string][]string{
-		"*":       {"~/.local/bin/hopsesh", "/opt/homebrew/bin/hopsesh", "/usr/local/bin/hopsesh", "/Applications/hopsesh.app/Contents/Resources/bin/hopsesh"},
-		"windows": {"~/AppData/Local/Programs/hopsesh/hopsesh.exe"},
+		"*":       {"~/.hopsesh/bin/hopsesh", "~/.local/bin/hopsesh", "/opt/homebrew/bin/hopsesh", "/usr/local/bin/hopsesh", "/Applications/hopsesh.app/Contents/Resources/bin/hopsesh"},
+		"windows": {"~/.hopsesh/bin/hopsesh.exe", "~/AppData/Local/Programs/hopsesh/hopsesh.exe"},
 	},
 	VersionArgs: []string{"version"},
 }
@@ -74,20 +76,32 @@ func probeLocal(ctx context.Context, specs []agent.Spec, detailed bool) Facts {
 	for _, e := range w.env {
 		f.Env[e] = os.Getenv(e)
 	}
+	// Each program's version, all at once: one slow program does not starve the others.
+	var mu sync.Mutex
+	var wg sync.WaitGroup
 	for _, b := range w.bins {
 		p := lookLocal(b, home)
 		if p == "" {
 			continue
 		}
 		bf := agent.BinaryFact{Path: p}
-		if detailed && len(b.VersionArgs) > 0 {
+		if !detailed || len(b.VersionArgs) == 0 {
+			f.Binaries[b.Name] = bf
+			continue
+		}
+		wg.Add(1)
+		go func(b agent.Binary, bf agent.BinaryFact) {
+			defer wg.Done()
 			vctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-			out, _ := proc.CommandContext(vctx, p, b.VersionArgs...).Output()
+			out, _ := proc.CommandContext(vctx, bf.Path, b.VersionArgs...).Output()
 			cancel()
 			bf.Version = firstLine(string(out))
-		}
-		f.Binaries[b.Name] = bf
+			mu.Lock()
+			f.Binaries[b.Name] = bf
+			mu.Unlock()
+		}(b, bf)
 	}
+	wg.Wait()
 	_, err := exec.LookPath("git")
 	f.HasGit = err == nil
 	f.DesktopProtocols = map[string]bool{}
@@ -117,11 +131,18 @@ func lookLocal(b agent.Binary, home string) string {
 	return ""
 }
 
+// candidates are where to look for b besides PATH. HOPSESH_APP_RUNTIMES=off leaves out
+// runtimes bundled inside desktop apps (".app/"), so a test machine never runs the real
+// app's agent.
 func candidates(b agent.Binary, goos string) []string {
-	if c, ok := b.Candidates[goos]; ok {
-		return c
+	c, ok := b.Candidates[goos]
+	if !ok {
+		c = b.Candidates["*"]
 	}
-	return b.Candidates["*"]
+	if os.Getenv("HOPSESH_APP_RUNTIMES") == "off" {
+		c = slices.DeleteFunc(slices.Clone(c), func(p string) bool { return strings.Contains(p, ".app/") })
+	}
+	return c
 }
 
 // ProbeRemote learns a machine's facts in one round trip, with a script generated from
@@ -257,7 +278,7 @@ func parseProbe(out []byte) Facts {
 		case len(parts) == 2 && parts[0] == "os":
 			f.OS = parts[1]
 		case len(parts) == 2 && parts[0] == "arch":
-			f.Arch = strings.ToLower(parts[1])
+			f.Arch = goArch(parts[1])
 		case len(parts) == 2 && parts[0] == "home":
 			f.Home = parts[1]
 		case len(parts) == 2 && parts[0] == "git":
@@ -275,6 +296,22 @@ func parseProbe(out []byte) Facts {
 		}
 	}
 	return f
+}
+
+// goArch names a machine's architecture as Go does (runtime.GOARCH, the release files):
+// uname -m says x86_64 or aarch64, Windows AMD64 or ARM64.
+func goArch(s string) string {
+	switch s = strings.ToLower(strings.TrimSpace(s)); s {
+	case "x86_64", "x64":
+		return "amd64"
+	case "aarch64", "arm64e", "armv8l":
+		return "arm64"
+	case "i386", "i486", "i586", "i686", "x86":
+		return "386"
+	case "armv6l", "armv7l":
+		return "arm"
+	}
+	return s
 }
 
 // windowsUname reports a uname from a Unix layer on Windows (Git for Windows, MSYS2,

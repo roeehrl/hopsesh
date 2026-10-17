@@ -201,8 +201,13 @@ type Plan struct {
 	Live         bool             `json:"live"`
 	Repo         RepoPlan         `json:"repo"`
 	Placement    agent.Placement  `json:"placement"`
-	Files        agent.MovePlan   `json:"files"`
-	Bytes        int64            `json:"bytes"`
+	// ResumeHere: the session is already in the destination; continue it where it is.
+	ResumeHere bool `json:"resumeHere,omitempty"`
+	// Unprotected: the original stays on a machine without hopsesh, where nothing can
+	// keep it from being continued too.
+	Unprotected bool           `json:"unprotected,omitempty"`
+	Files       agent.MovePlan `json:"files"`
+	Bytes       int64          `json:"bytes"`
 	// SetAside are copies at the target that make way (kept by the journal for undo).
 	SetAside []agent.Summary `json:"setAside,omitempty"`
 	Conflict string          `json:"conflict,omitempty"`
@@ -251,6 +256,23 @@ type Endpoint struct {
 	Version     string `json:"agentVersion,omitempty"`
 }
 
+// resumeHere is the plan for a session already in its destination: nothing to copy; it
+// continues where it is, under the account signed in there now.
+func resumeHere(in Input) *Plan {
+	s, spec := in.Session, in.Target.Module.Spec()
+	p := &Plan{Kind: KindMove, Key: s.Key, Title: s.Title, Agent: spec.Name, ResumeHere: true, NoWork: true, OldName: s.Title,
+		Source: Endpoint{Location: in.Source.Machine.Name, OS: in.Source.Machine.Facts.OS, CWD: s.CWD, Path: s.Path, Version: s.AgentVersion},
+		Target: Endpoint{Location: in.Target.Machine.Name, OS: in.Target.Machine.Facts.OS, CWD: s.CWD, Version: in.Target.Install.Version}}
+	p.Placement = agent.Placement{Key: s.Key, SourceID: s.Key.Session, CWD: s.CWD, Location: in.Target.Machine.Name}
+	p.Resume = in.Target.Module.Resume(in.Target.Install, s.Key, p.Placement, agent.ResumeOptions{})
+	ran := "It ran under another " + spec.Name + " account than the one signed in here now"
+	if len(ranUnder(s)) == 0 {
+		ran = "Hopsesh has no record of the " + spec.Name + " account it ran under"
+	}
+	p.Warnings = append(p.Warnings, ran+"; continuing it here uses the account signed in now, and reasoning recorded under another account is not visible to it. The conversation itself stays.")
+	return p
+}
+
 // Build works out a move. It reads (the bundle's file list, the target's copies) but
 // writes nothing.
 func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
@@ -269,6 +291,15 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 			}
 		}
 		copies = selected
+	}
+	// The session's own root, now signed in to another account than the one that ran it.
+	// An agent that resumes across accounts continues it right there; another needs a
+	// cleaned copy.
+	if ownerBoundary(in) && samePlace(in) && opt.TargetSession == "" && !opt.Bounded && !opt.Fork && !opt.NewReplica {
+		if tgt.Module.Spec().ResumeAcrossAccounts {
+			return resumeHere(in), nil
+		}
+		opt.NewReplica = true
 	}
 	if opt.NewReplica || opt.Bounded || profileBoundary(in) || src.Module.Spec().ID != tgt.Module.Spec().ID || len(copies) == 1 && copies[0].Summary.Key != in.Session.Key {
 		return buildContinue(ctx, in, opt)
@@ -293,12 +324,12 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		p.Options.RemoteControl = false
 		p.Warnings = append(p.Warnings, "remote control stays off: "+tgt.Account.Why)
 	}
-	if src.Account != nil && tgt.Account != nil && src.Account.Key != "" && tgt.Account.Key != "" && src.Account.Key != tgt.Account.Key {
+	if ownerBoundary(in) {
 		if _, ok := tgt.Module.(agent.Sanitizer); ok {
 			p.Options.OtherAccount = true
-			p.Warnings = append(p.Warnings, fmt.Sprintf("this machine is signed in to another %s account than %s; content bound to that account (such as signed reasoning) is left out of the copy", spec.Name, src.Machine.Name))
+			p.Warnings = append(p.Warnings, fmt.Sprintf("the destination is signed in to another %s account than the one this session ran under (or hopsesh has no record of that account); content bound to that account (such as signed reasoning) is left out of the copy", spec.Name))
 		} else {
-			p.Blockers = append(p.Blockers, fmt.Sprintf("this machine is signed in to another %s account than %s, and %s sessions cannot move between accounts", spec.Name, src.Machine.Name, spec.Name))
+			p.Blockers = append(p.Blockers, fmt.Sprintf("the destination is signed in to another %s account than the one this session ran under, and %s sessions cannot move between accounts", spec.Name, spec.Name))
 		}
 	}
 
@@ -507,8 +538,18 @@ func keepBoth(p *Plan) {
 	p.Warnings = append(p.Warnings, "both copies stay: this one comes in as a separate session, \""+p.Title+"\"")
 }
 
+// markUnprotected says when the original stays on a machine without hopsesh, whose
+// hooks cannot block or warn it: a move and a continuation alike.
+func markUnprotected(p *Plan, in Input, opt Options) {
+	if opt.Notify && !opt.Fork && in.Source.Machine != nil && !in.Source.Machine.HopseshThere() {
+		p.Unprotected = true
+		p.Warnings = append(p.Warnings, fmt.Sprintf("the original on %s won't be protected: without hopsesh there, nothing stops it from being continued on %s too, and the two copies drift apart; set up hopsesh on %s first to protect it", p.Source.Location, p.Source.Location, p.Source.Location))
+	}
+}
+
 func planWarnings(p *Plan, in Input, opt Options) {
 	spec := in.Target.Module.Spec()
+	markUnprotected(p, in, opt)
 	if p.Live {
 		if opt.Fork {
 			p.Warnings = append(p.Warnings, fmt.Sprintf("the session is still open on %s; you chose fork, so both copies continue independently", p.Source.Location))
@@ -682,28 +723,8 @@ func nonEmpty(s, d string) string {
 	return s
 }
 
-// versionLess compares dotted versions numerically.
-func versionLess(a, b string) bool {
-	pa, pb := strings.Split(a, "."), strings.Split(b, ".")
-	for i := 0; i < len(pa) && i < len(pb); i++ {
-		x, y := num(pa[i]), num(pb[i])
-		if x != y {
-			return x < y
-		}
-	}
-	return len(pa) < len(pb)
-}
-
-func num(s string) int {
-	n := 0
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			break
-		}
-		n = n*10 + int(c-'0')
-	}
-	return n
-}
+// versionLess orders agent versions (pre-releases below their release).
+func versionLess(a, b string) bool { return agent.VersionLess(a, b) }
 
 // ContinuationHint distinguishes a prepared transcript from an agent turn. Opening
 // an app does not submit a message; a terminal command may include the first prompt.

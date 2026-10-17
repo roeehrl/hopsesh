@@ -154,3 +154,10 @@ type Procs interface {
 	// Terminate asks a process to exit (SIGTERM; unsupported on Windows).
 	Terminate(ctx context.Context, pid int) error
 }
+
+// ProcCommands is implemented by a Procs that can read each running process's command
+// line (program path and arguments, as ps shows them); exited ones are left out. Modules
+// use it to tell a shared server from a process they may stop.
+type ProcCommands interface {
+	Commands(ctx context.Context, pids []int) (map[int]string, error)
+}

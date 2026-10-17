@@ -74,9 +74,22 @@ func TestPosixProbe(t *testing.T) {
 	if f.Home != "/home/x" || f.Env["FAKE_AGENT_HOME"] != "/data/agent dir" {
 		t.Fatalf("facts: %+v", f)
 	}
+	// uname -m names it its own way (x86_64, aarch64); hopsesh picks programs by Go's names.
+	if f.Arch != runtime.GOARCH {
+		t.Errorf("arch %q, want %q", f.Arch, runtime.GOARCH)
+	}
 	sh := f.Binaries["sh"]
 	if sh.Path == "" || sh.Version != "v1.2.3 (fake)" {
 		t.Fatalf("binary: %+v", sh)
+	}
+}
+
+func TestGoArch(t *testing.T) {
+	for in, want := range map[string]string{"x86_64": "amd64", "AMD64": "amd64", "aarch64": "arm64", "arm64": "arm64",
+		"ARM64": "arm64", "i686": "386", "x86": "386", "armv7l": "arm", "riscv64": "riscv64", "": ""} {
+		if got := goArch(in); got != want {
+			t.Errorf("goArch(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 

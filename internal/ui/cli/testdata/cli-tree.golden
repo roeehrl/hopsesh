@@ -1,0 +1,385 @@
+hopsesh
+  --config-dir string
+  --password-stdin
+  --state-dir string
+hopsesh accounts
+hopsesh accounts add
+  --json
+  --machine string
+  --root string
+  --tag strings
+hopsesh accounts edit
+  --name string
+  --tag strings
+hopsesh accounts forget
+hopsesh accounts list
+  --json
+hopsesh accounts login
+  --run
+hopsesh accounts refresh
+  --json
+hopsesh accounts scan
+  --json
+  --machine string
+hopsesh agents
+  --json
+hopsesh app
+hopsesh app install
+  --plan
+  --version string
+hopsesh app open
+hopsesh app status
+  --json
+hopsesh archive
+  --chunk int
+  --limit int
+  --offset int
+  --search string
+hopsesh cloud-integration
+hopsesh cloud-integration authorize
+  --fingerprint string
+  --origin string
+  --peer string
+hopsesh cloud-integration checkpoints
+hopsesh cloud-integration checkpoints remove
+  --yes
+hopsesh cloud-integration claim
+  --ca-file string
+  --fingerprint string
+hopsesh cloud-integration current
+  --provider string
+  --session string
+  --workspace string
+hopsesh cloud-integration handoffs
+hopsesh cloud-integration import
+  --dry-run
+  --fork
+  --in string
+  --operation-id string
+  --profile string
+  --redact
+  --to string
+  --yes
+hopsesh cloud-integration inspect
+  --preview
+hopsesh cloud-integration install-startup
+  --allow-transcript-export
+  --dry-run
+  --origin string
+  --provider string
+  --version string
+hopsesh cloud-integration link-handoff
+  --dry-run
+  --fork
+  --yes
+hopsesh cloud-integration plan
+  --allow-transcript-export
+  --origin string
+  --provider string
+  --script
+  --version string
+hopsesh cloud-integration prepare
+  --allow-transcript-export
+  --claude-hook
+  --lease duration
+  --native-root string
+  --provider string
+  --quiet
+  --session string
+  --transcript string
+  --workspace string
+hopsesh cloud-integration revoke-ticket
+hopsesh cloud-integration serve
+hopsesh cloud-integration status-ticket
+hopsesh cloud-integration tasks
+hopsesh cloud-integration ticket
+  --connect-code
+  --lease duration
+  --provider string
+  --resume-task string
+  --session string
+hopsesh clouds
+  --json
+hopsesh clouds allow
+hopsesh clouds cleanup
+  --json
+  --list
+  --yes
+hopsesh clouds continue
+  --json
+hopsesh clouds deny
+hopsesh clouds env
+  --json
+  --unset
+hopsesh clouds test
+  --json
+hopsesh doctor
+  --all-machines
+  --json
+hopsesh handoff
+  --attempts int
+  --brief-file string
+  --bundle
+  --carry-rules
+  --cleanup string
+  --dry-run
+  --env string
+  --history-file
+  --in string
+  --json
+  --note-file string
+  --operation-id string
+  --starting-diff
+  --to string
+  --to-dir string
+  --untracked stringArray
+  --yes
+hopsesh history
+  --archive-mb int
+  --context-budget int
+  --json
+  --lineage-mb int
+  --native-file-mb int
+  --older string
+  --read-memory-mb int
+  --record-mb int
+hopsesh hosts
+  --json
+hopsesh hosts add
+  --keychain
+  --password
+hopsesh hosts allow
+hopsesh hosts auth
+  --forget
+  --keychain
+hopsesh hosts deny
+hopsesh hosts setup
+  --json
+hopsesh hosts setup-key
+  --yes
+hopsesh lineage
+hopsesh lineage archive
+hopsesh lineage retry
+hopsesh ls
+  --agent string
+  --cached
+  --cloud
+  --env string
+  --group-by string
+  --host string
+  --json
+  --limit int
+  --live
+  --no-git
+  --no-local
+  --repo string
+hopsesh notices
+hopsesh notices install
+  --agent string
+  --config-dir string
+  --json
+  --profile string
+  --state-dir string
+hopsesh notices remove
+  --agent string
+  --config-dir string
+  --json
+  --profile string
+  --state-dir string
+hopsesh notices status
+  --agent string
+  --config-dir string
+  --json
+  --profile string
+  --state-dir string
+hopsesh open
+  --app
+  --here
+  --json
+  --terminal string
+hopsesh plan
+  --app
+  --append
+  --attempts int
+  --bounded
+  --brief-file string
+  --bundle
+  --carry-rules
+  --cleanup string
+  --clone
+  --code-only
+  --context-budget int
+  --dry-run
+  --env string
+  --fidelity string
+  --ghq
+  --go
+  --history-file
+  --in string
+  --json
+  --keep-both
+  --native
+  --new-session
+  --no-sync
+  --note-file string
+  --notify
+  --older string
+  --operation-id string
+  --push
+  --rc
+  --redact
+  --replace
+  --repos string
+  --run
+  --starting-diff
+  --stop-local
+  --target-profile string
+  --target-session string
+  --terminal string
+  --to string
+  --untracked stringArray
+  --via string
+  --worktree string
+  --yes
+hopsesh pull
+  --app
+  --append
+  --bounded
+  --carry-rules
+  --clone
+  --code-only
+  --context-budget int
+  --dry-run
+  --fidelity string
+  --ghq
+  --go
+  --in string
+  --json
+  --keep-both
+  --native
+  --new-session
+  --no-sync
+  --note-file string
+  --notify
+  --older string
+  --operation-id string
+  --push
+  --rc
+  --redact
+  --replace
+  --repos string
+  --run
+  --stop-local
+  --target-profile string
+  --target-session string
+  --terminal string
+  --to string
+  --via string
+  --worktree string
+  --yes
+hopsesh push
+  --bounded
+  --carry-rules
+  --clone
+  --dry-run
+  --fidelity string
+  --go
+  --in string
+  --json
+  --keep-both
+  --native
+  --new-session
+  --no-sync
+  --note-file string
+  --notify
+  --operation-id string
+  --push
+  --rc
+  --redact
+  --replace
+  --target-profile string
+  --target-session string
+  --to string
+  --via string
+  --worktree string
+  --yes
+hopsesh receive
+hopsesh relay
+hopsesh relay connect
+hopsesh relay disable
+hopsesh relay init
+hopsesh relay login
+  --ca-file string
+  --origin string
+hopsesh relay pair
+  --bring
+  --expires duration
+  --fingerprint string
+  --kind string
+  --name string
+  --receive
+  --root strings
+  --send
+  --share
+hopsesh relay peers
+hopsesh relay revoke
+hopsesh relay status
+hopsesh runtime
+hopsesh runtime disable
+hopsesh runtime doctor
+hopsesh runtime enable
+  --at-login
+  --mode string
+  --plan
+hopsesh runtime login-status
+hopsesh runtime metrics
+hopsesh runtime observe
+  --reconcile duration
+  --watch
+hopsesh runtime serve
+hopsesh runtime start
+  --headless
+hopsesh runtime status
+  --json
+hopsesh runtime stop
+hopsesh settings
+hopsesh settings get
+  --json
+hopsesh settings set
+  --revision string
+hopsesh show
+  --json
+hopsesh skill
+  --json
+hopsesh skill install
+  --add-rules
+  --force
+  --json
+hopsesh skill remove
+  --force
+hopsesh terminals
+  --json
+  --resume string
+  --use string
+hopsesh terminals attach
+hopsesh terminals run
+  --agent string
+  --dir string
+  --profile string
+  --resume string
+hopsesh trust
+  --yes
+hopsesh unblock
+  --json
+  --restore
+  --yes
+hopsesh undo
+  --force
+  --json
+  --list
+  --yes
+hopsesh update
+  --check
+  --json
+  --yes
+hopsesh version

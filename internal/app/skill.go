@@ -8,6 +8,7 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/core/audit"
 	"github.com/roeehrl/hopsesh/internal/core/integrate"
+	"github.com/roeehrl/hopsesh/internal/version"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -67,6 +68,25 @@ func (a *App) integrations(ctx context.Context) []integration {
 			continue // not used on this machine
 		}
 		out = append(out, integration{name: mod.Spec().Name, in: in, ig: ig.Integration(h, in)})
+		// Every account folder reads its own copy where the agent keeps skills per folder
+		// (Claude Code: <folder>/skills); copies in one place are one copy.
+		if mod.Spec().Accounts == nil {
+			continue
+		}
+		installs, err := a.profileInstalls(ctx, m, mod, in, false, true)
+		if err != nil {
+			continue
+		}
+		for _, p := range installs {
+			if !p.Present || p.Profile == nil || p.Profile.Default {
+				continue
+			}
+			ph, err := m.For(ctx, mod.Spec(), p, nil)
+			if err != nil {
+				continue
+			}
+			out = append(out, integration{name: mod.Spec().Name + " (" + p.Profile.Name + ")", in: p, ig: ig.Integration(ph, p)})
+		}
 	}
 	return out
 }
@@ -82,7 +102,7 @@ func (a *App) Skill(ctx context.Context, files map[string][]byte, bin string) Sk
 		dir := it.ig.SkillDir + string(os.PathSeparator) + integrate.SkillName
 		c, ok := by[dir]
 		if !ok {
-			c = &SkillCopy{Dir: dir, Status: integrate.CheckSkill(dir, files)}
+			c = &SkillCopy{Dir: dir, Status: integrate.CheckSkill(dir, files, version.Version)}
 			by[dir] = c
 		}
 		c.Agents = append(c.Agents, it.name)
@@ -130,7 +150,7 @@ func (a *App) InstallSkill(ctx context.Context, files map[string][]byte, version
 	seen := map[string]bool{}
 	for _, it := range its {
 		dir := it.ig.SkillDir + string(os.PathSeparator) + integrate.SkillName
-		if st := integrate.CheckSkill(dir, files); !force && (st.State == integrate.Modified || st.State == integrate.Foreign) {
+		if st := integrate.CheckSkill(dir, files, version); !force && (st.State == integrate.Modified || st.State == integrate.Foreign) {
 			if st.State == integrate.Modified {
 				return a.Skill(ctx, files, bin), errors.Join(integrate.ErrModified, errors.New(dir+" (use --force; the old copy is kept)"))
 			}

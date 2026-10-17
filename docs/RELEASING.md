@@ -84,13 +84,16 @@ Scoop manifest and a winget pull request. Without it those steps are skipped.
 
 Before tagging:
 
-- Require green `ci` and `nightly` checks for the release source on `main`.
-  `ci` includes native terminal placements on macOS/Linux and the Windows
-  installer, real-window and terminal checks. `nightly` exercises native desktop
-  placement/Quick navigation, current vendor launchers, TUI and triple matrices.
-  Resolve failures before releasing; changing the default launcher does not
-  satisfy these gates.
-- For 0.5, also complete the approved [runtime/cloud/relay acceptance plan](runtime-cloud-relay-design.md#10-test-plan-and-scenario-matrices)
+- `main` is green in `ci`, and the latest `nightly` run on `main` is green. The nightly runs
+  the app's terminal checks on macOS and Windows; they are the release gate for the hopsesh
+  Terminal window. If they are not green, ship with `config.AppResumeDefault = ResumeTerminal`
+  (the app then resumes sessions in the user's terminal app until they choose otherwise).
+- The release workflow checks the program it built against its own skill
+  (`internal/devtools/skillcheck`: commands and flags the skill names, every visible flag
+  documented or allowlisted, the command tree equal to `internal/ui/cli/testdata/cli-tree.golden`)
+  before it attests anything; `scripts/release-sign.sh` signs only attested files, so a
+  failed check leaves a draft that cannot be completed. Fix it on `main` and tag again.
+- For 0.6, also complete the approved [runtime/cloud/relay acceptance plan](runtime-cloud-relay-design.md#10-test-plan-and-scenario-matrices)
   and [remaining implementation gates](0.5-implementation.md#remaining-gates--continue-through-all-of-them):
   native ownership/install/recovery, all ordered multi-machine journeys, real
   advertised provider capabilities, hosted retention and settled cost evidence,

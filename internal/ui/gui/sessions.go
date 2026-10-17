@@ -13,7 +13,6 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
-	"github.com/roeehrl/hopsesh/internal/core/appicon"
 	"github.com/roeehrl/hopsesh/internal/core/convert"
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
@@ -45,6 +44,8 @@ type MachineDTO struct {
 	Agents               []string  `json:"agents"`     // "Claude Code 2.1.284"
 	AgentNames           []string  `json:"agentNames"` // detected agents, without versions or duplicate profiles
 	Hopsesh              string    `json:"hopsesh"`    // hopsesh's version there ("" when not installed)
+	// Presence is how hopsesh works with the machine (app.Presence*; "" for this one).
+	Presence string `json:"presence,omitempty"`
 }
 
 // AgentOpt is an agent a session can continue in here.
@@ -70,11 +71,14 @@ type EntryDTO struct {
 	CanApp          bool                  `json:"canApp"`
 	AppWhy          string                `json:"appWhy,omitempty"`
 	Profile         *agent.RuntimeProfile `json:"profile,omitempty"`
-	Machine         string                `json:"machine"`
-	Agent           agent.ID              `json:"agent"`
-	AgentName       string                `json:"agentName"`
-	Key             string                `json:"key"` // agent/session
-	Title           string                `json:"title"`
+	// Owner is the account that ran it, as the agent recorded it (Profile's sign-in is
+	// only who is signed in to its root now).
+	Owner     app.SessionOwner `json:"owner"`
+	Machine   string           `json:"machine"`
+	Agent     agent.ID         `json:"agent"`
+	AgentName string           `json:"agentName"`
+	Key       string           `json:"key"` // agent/session
+	Title     string           `json:"title"`
 	// TitleSource is where the title comes from: custom (renamed), live (the running
 	// agent's name for it), generated (the agent's own title), prompt (the first prompt),
 	// reply (the first reply) or none ("Untitled · folder").
@@ -335,7 +339,7 @@ func scanDTO(core *app.App, inv *app.Inventory, updated, elsewhere time.Time, ta
 		out.Adopted = append(out.Adopted, core.Brought(f))
 	}
 	for _, m := range inv.Machines {
-		d := MachineDTO{Phase: m.Phase, CheckedAt: m.CheckedAt, Name: m.Name, Status: m.Status, Hint: m.Hint, Error: scanProblem(m), OS: m.OS, Local: m.Local, Hopsesh: m.Hopsesh, Agents: []string{}}
+		d := MachineDTO{Phase: m.Phase, CheckedAt: m.CheckedAt, Name: m.Name, Status: m.Status, Hint: m.Hint, Error: scanProblem(m), OS: m.OS, Local: m.Local, Hopsesh: m.Hopsesh, Presence: m.Presence, Agents: []string{}}
 		d.AccountSetupRequired = !m.Local && m.Status == app.StatusOK && m.Host() != nil && m.Host().Facts.Endpoint == ""
 		for _, e := range inv.Entries {
 			if e.Machine == m.Name {
@@ -375,11 +379,11 @@ func scanDTO(core *app.App, inv *app.Inventory, updated, elsewhere time.Time, ta
 		for _, it := range g.Items {
 			d := entryDTO(core, inv, it, targets)
 			d.Relationship = relations[app.EntryIdentity(it.Entry.Machine, it.Entry.Session.Key.String())]
-			if name := core.Cfg.FamilyNames[d.Relationship.Family]; name != "" {
+			if name := core.FamilyName(d.Relationship); name != "" {
 				d.Relationship.Name = name
 			}
 			if m := inv.Machine(d.Machine); m != nil && m.Local && d.Live {
-				d.Places = placesOf(it.Entry.Live, table, os.Getpid())
+				d.Places = placesOf(it.Entry.Live, table, os.Getpid(), appKind(it.Entry.Agent))
 			}
 			gd.Entries = append(gd.Entries, d)
 			for _, c := range it.Copies {
@@ -392,11 +396,11 @@ func scanDTO(core *app.App, inv *app.Inventory, updated, elsewhere time.Time, ta
 				}
 				copy := entryDTO(core, inv, app.Item{Entry: e, Copies: it.Copies}, targets)
 				copy.Relationship = relations[app.EntryIdentity(e.Machine, e.Session.Key.String())]
-				if name := core.Cfg.FamilyNames[copy.Relationship.Family]; name != "" {
+				if name := core.FamilyName(copy.Relationship); name != "" {
 					copy.Relationship.Name = name
 				}
 				if m := inv.Machine(e.Machine); m != nil && m.Local && copy.Live {
-					copy.Places = placesOf(e.Live, table, os.Getpid())
+					copy.Places = placesOf(e.Live, table, os.Getpid(), appKind(e.Agent))
 				}
 				extra := GroupDTO{Name: "No repository", NoRepo: true, Entries: []EntryDTO{copy}}
 				if git := e.Git; git != nil && git.Identity != "" {
@@ -489,16 +493,27 @@ func clipWords(s string, n int) string {
 	return strings.TrimRight(cut, " ,;:.-") + "…"
 }
 
+// hopseshOn is hopsesh's version on a machine of the inventory ("" when it has none, or
+// is not scanned).
+func hopseshOn(inv *app.Inventory, machine string) string {
+	for _, m := range inv.Machines {
+		if m.Name == machine {
+			return m.Hopsesh
+		}
+	}
+	return ""
+}
+
 func entryDTO(core *app.App, inv *app.Inventory, it app.Item, targets []AgentOpt) EntryDTO {
 	e, s := it.Entry, it.Entry.Session
 	e.Cached = e.Cached || inv.Discovering
 	title, source := titleFor(s, e.Live.Name)
-	d := EntryDTO{Cached: e.Cached, ObservedAt: e.ObservedAt, Returns: e.Returns, Movement: e.Movement, Departure: e.Departure, Arrival: e.Arrival, Guard: guardFor(core, e), Profile: e.Profile, Machine: e.Machine, Agent: e.Agent, AgentName: e.AgentName, Key: s.Key.String(), Title: title, TitleSource: source,
+	d := EntryDTO{Cached: e.Cached, ObservedAt: e.ObservedAt, Returns: e.Returns, Movement: e.Movement, Departure: e.Departure, Arrival: e.Arrival, Guard: guardFor(core, e, hopseshOn(inv, e.Machine)), Profile: e.Profile, Machine: e.Machine, Agent: e.Agent, AgentName: e.AgentName, Key: s.Key.String(), Title: title, TitleSource: source,
 		Session: string(s.Key.Session), Path: s.Path, AgentVersion: s.AgentVersion, CanRename: core.CanRename(e), Places: []PlaceDTO{},
 		Status: statusWords(core, e), Live: e.Live.State == agent.Live, LastActive: s.LastActivity.Format(time.RFC3339),
 		ContextOverflow: s.ContextOverflow, LastPrompt: s.LastPrompt, CWD: s.CWD, SizeKB: s.Size / 1024, ContinueIn: []AgentOpt{},
 		Needs:   e.Live.State == agent.Live && strings.HasPrefix(e.Live.Status, "waiting"),
-		Journey: journey(e.Lineage), LineageError: e.LineageError, CanArchiveLineage: e.CanArchiveLineage, History: history(core, e.Lineage), Location: string(e.Location.Kind), Cloud: cloudEntryDTO(core, e), Mirror: mirrorDTO(s.Mirror)}
+		Journey: journey(e.Lineage), LineageError: e.LineageError, CanArchiveLineage: e.CanArchiveLineage, History: history(core, e.Lineage), Location: string(e.Location.Kind), Cloud: cloudEntryDTO(core, e), Mirror: mirrorDTO(s.Mirror), Owner: inv.Logins().OwnerOf(e)}
 	if e.Machine == app.LocalName() && !e.Location.IsCloud() {
 		if mod, ok := core.Module(e.Agent); ok && agent.Has(mod, agent.CapApp) {
 			d.CanApp = true
@@ -523,10 +538,7 @@ func entryDTO(core *app.App, inv *app.Inventory, it app.Item, targets []AgentOpt
 	}
 
 	if e.Live.State == agent.Live && e.Live.App {
-		d.App = e.AgentName
-		if m, ok := core.Module(e.Agent); ok {
-			d.App = nonEmptyStr(appicon.Name(m.Spec().Icon.Apps), d.App)
-		}
+		d.App = appName(core, inv.Machine(e.Machine), e)
 	}
 	if m, ok := core.Module(e.Agent); ok && !e.Location.IsCloud() {
 		_, d.CanPreview = m.(agent.Previewer)
@@ -789,6 +801,7 @@ type PlanDTO struct {
 	SourceEntry   *EntryDTO        `json:"sourceEntry,omitempty"`
 	SourceProfile string           `json:"sourceProfile,omitempty"`
 	TargetProfile string           `json:"targetProfile,omitempty"`
+	ResumeHere    bool             `json:"resumeHere,omitempty"` // already here: continue it where it is
 	NoWork        bool             `json:"noWork"`
 	Destinations  []agent.Summary  `json:"destinations,omitempty"`
 	Kind          string           `json:"kind"` // move | continue
@@ -940,7 +953,7 @@ func (a *App) invalidateReturnSelection(p *move.Plan) {
 }
 
 func planDTO(p *move.Plan, e app.Entry, tm agent.Module) *PlanDTO {
-	d := &PlanDTO{SourceProfile: p.Source.ProfileName, TargetProfile: p.Target.ProfileName, NoWork: p.NoWork, Destinations: p.Destinations, Kind: p.Kind, Title: p.Title, Agent: p.Agent, FromAgent: e.AgentName, SourceHost: p.Source.Location,
+	d := &PlanDTO{SourceProfile: p.Source.ProfileName, TargetProfile: p.Target.ProfileName, NoWork: p.NoWork, ResumeHere: p.ResumeHere, Destinations: p.Destinations, Kind: p.Kind, Title: p.Title, Agent: p.Agent, FromAgent: e.AgentName, SourceHost: p.Source.Location,
 		SourceOS: p.Source.OS, SourceCWD: p.Source.CWD, TargetCWD: p.Target.CWD, Live: p.Live, Repo: p.Repo,
 		Mappings: p.Placement.Mappings, Files: len(p.Files.Files), Bytes: p.Bytes, Sync: p.Sync,
 		FromSource: p.SyncFromSource, Push: p.Push, StopHere: p.StopHere, Conflict: p.Conflict,
@@ -993,6 +1006,10 @@ type DoneDTO struct {
 	InApp            bool     `json:"inApp"` // it opens in the agent's desktop app
 	ContinuationHint string   `json:"continuationHint,omitempty"`
 	Machine          string   `json:"machine,omitempty"` // a push: where it went (start it there)
+	// RemoteKey is the pushed copy's session there (to open it there, in a tab here).
+	RemoteKey string `json:"remoteKey,omitempty"`
+	// RemoteLogin: hopsesh runs in the login session there, so it can run it.
+	RemoteLogin bool `json:"remoteLogin,omitempty"`
 	AuditDir         string   `json:"auditDir"`
 	// Fetch is a session brought from a cloud: waiting for the user's terminal, or the
 	// code only.

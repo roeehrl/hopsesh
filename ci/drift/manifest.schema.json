@@ -35,21 +35,38 @@
       "properties": {
         "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$", "description": "Unique; a finding names it."},
         "name": {"type": "string", "minLength": 1, "description": "For people: \"Codex cloud\"."},
-        "kind": {"enum": ["agent", "cloud", "standard"]},
+        "kind": {"enum": ["agent", "app", "cloud", "standard"], "description": "app: a desktop app and the runtime it bundles."},
         "group": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$", "description": "The review that reads this target. Every group needs a budget in the workflow's groups input and a <group>.md in its focus folder."},
         "vendor": {"type": "string", "minLength": 1},
         "surface": {"type": "string", "minLength": 1, "description": "What the project uses there, in plain words."},
         "priority": {"enum": ["high", "low"], "description": "low: docs and feeds only (no help, issues or code)."},
         "module": {"type": "string", "description": "hopsesh only: the agent module that drives the target."},
-        "tested": {"type": "string", "description": "The exact version the project was tested with (\"2.1.284\"), or \"\". With a package, the probe diffs the help of this version against the latest."},
+        "tested": {"type": "string", "description": "The exact version the project was tested with (\"2.1.284\"), or \"\". With a package, the probe diffs the help of the baseline against the latest."},
+        "baseline": {"type": "string", "description": "The version the latest is compared with: the highest of tested and the floors (never below either). Empty or absent means tested."},
+        "floors": {
+          "type": ["array", "null"],
+          "description": "Minimum versions the project's code gates features on. With a package, the probe runs the help (and the schema) at each floor; what the gated feature uses must be there at the floor and at the latest.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["version", "gates", "source"],
+            "properties": {
+              "version": {"type": "string", "minLength": 1},
+              "gates": {"type": "string", "minLength": 1, "description": "What the code gates on this version."},
+              "source": {"type": "string", "minLength": 1, "description": "The file with the check."},
+              "relies": {"$ref": "#/$defs/list", "description": "Flags and subcommands of the help that the gated feature runs."},
+              "methods": {"$ref": "#/$defs/list", "description": "Strings of the generated schema it calls (an app-server method)."}
+            }
+          }
+        },
         "latest": {
           "type": "object",
           "additionalProperties": false,
           "required": ["from"],
           "description": "Where the probe reads the newest version.",
           "properties": {
-            "from": {"enum": ["npm", "github-release", "json", "none"]},
-            "ref": {"type": "string", "description": "npm: the package. github-release: owner/repo. json: an https URL."},
+            "from": {"enum": ["npm", "github-release", "json", "feed", "none"]},
+            "ref": {"type": "string", "description": "npm: the package. github-release: owner/repo. json: an https URL. feed: an RSS or Atom (Sparkle appcast) URL; the newest item's title is the version."},
             "field": {"type": "string", "pattern": "^\\.", "description": "json: the jq path to the version (\".info.version\")."}
           }
         },
@@ -100,7 +117,22 @@
                 "keep": {"type": "string"}
               }
             },
-            "tests": {"type": "string", "description": "hopsesh only: a go test -run pattern for its real-agent tests. Refused in a caller's manifest."}
+            "tests": {"type": "string", "description": "hopsesh only: a go test -run pattern for its real-agent tests. Refused in a caller's manifest."},
+            "formats": {
+              "type": ["array", "null"],
+              "description": "Records and identities the project reads in the target's files. The probe counts each field in the target's docs, in the week's changes and in the upstream code it checks out.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["id", "what", "fields", "readers"],
+                "properties": {
+                  "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$"},
+                  "what": {"type": "string", "minLength": 1, "description": "Where it lives and what the project takes from it."},
+                  "fields": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}, "description": "Literal names: keys, record types, values, file names."},
+                  "readers": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}, "description": "The project's files that read it."}
+                }
+              }
+            }
           }
         }
       }

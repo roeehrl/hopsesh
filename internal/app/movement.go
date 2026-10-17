@@ -300,19 +300,12 @@ func (a *App) agentName(id agent.ID) string {
 	}
 	return string(id)
 }
+
+// profileLabel names a copy's profile by its folder, which never changes with a sign-in:
+// the default profile needs no name beside its agent.
 func profileLabel(p *agent.RuntimeProfile) string {
-	if p == nil {
+	if p == nil || p.Default {
 		return ""
-	}
-	// A default profile's name ("Codex default") repeats the agent: the account says it all.
-	if p.Default {
-		if p.Account != nil && p.Account.Email != "" {
-			return p.Account.Email
-		}
-		return ""
-	}
-	if p.Account != nil && p.Account.Email != "" {
-		return p.Name + " · " + p.Account.Email
 	}
 	return p.Name
 }

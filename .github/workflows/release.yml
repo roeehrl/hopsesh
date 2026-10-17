@@ -49,6 +49,15 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOPSESH_RELEASE_PUBKEY: ${{ vars.HOPSESH_RELEASE_PUBKEY }}
           TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+      # The released program against its own skill and the golden command tree. A failure
+      # stops the job before provenance is attested, and scripts/release-sign.sh signs
+      # only attested files, so the draft cannot be published.
+      - name: skill vs the released program
+        run: |
+          set -- dist/hopsesh_linux_amd64*/hopsesh
+          [ -x "$1" ] || { echo "::error::no linux amd64 program in dist/"; exit 1; }
+          go run ./internal/devtools/skillcheck -bin "$1" \
+            -golden internal/ui/cli/testdata/cli-tree.golden -allow internal/ui/cli/testdata/skill-undocumented-flags.txt
       - name: Windows app (app zip and installer, amd64 and arm64)
         env:
           HOPSESH_RELEASE_PUBKEY: ${{ vars.HOPSESH_RELEASE_PUBKEY }}

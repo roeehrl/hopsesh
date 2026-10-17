@@ -82,6 +82,8 @@ type Result struct {
 	SyncNote   string            `json:"syncNote,omitempty"`
 	PromptFile string            `json:"promptFile,omitempty"`
 	Command    string            `json:"command"` // to resume, for this machine's shell
+	// Key is the session as it is now at the destination.
+	Key agent.SessionKey `json:"key,omitzero"`
 	// Run is Command as an argument list (with the start prompt as its last argument when
 	// PromptFile is set), for a terminal hopsesh opens on it.
 	Run      agent.Command `json:"run"`
@@ -162,7 +164,7 @@ func applyPlan(ctx context.Context, p *Plan, in Input, env Env) (*Result, error)
 		return nil, err
 	}
 	j.AddKey(p.Placement.Key)
-	res := &Result{Journal: j.ID}
+	res := &Result{Journal: j.ID, Key: p.Placement.Key}
 	tgtHost, err := tgt.Machine.For(ctx, tgt.Module.Spec(), tgt.Install, j)
 	if err != nil {
 		return nil, err

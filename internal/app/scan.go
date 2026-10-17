@@ -51,9 +51,15 @@ type Machine struct {
 	// Hopsesh is the version of hopsesh installed there ("" when none was found).
 	Hopsesh string `json:"hopsesh,omitempty"`
 	Receive *bool  `json:"receive,omitempty"` // scoped, fresh relay capability; nil for unqualified direct sources
+	// Presence is how hopsesh works with the machine (see Presence*); PresenceWhy says
+	// why, when it is not PresenceLogin.
+	Presence    string `json:"presence,omitempty"`
+	PresenceWhy string `json:"presenceWhy,omitempty"`
 
 	host    *host.Machine
-	account *agent.Account // reported by the machine's own hopsesh (a push)
+	account *agent.Account              // reported by the machine's own hopsesh (a push)
+	tools   map[agent.ID]agent.Install  // hopsesh in the login session there (meetHopsesh)
+	records map[string][]agent.OwnerRun // its records of who ran its sessions
 }
 
 // AgentState is an agent as found on a machine.
@@ -458,7 +464,7 @@ func (a *App) Connect(ctx context.Context, h config.Host) (*host.Machine, error)
 		conn.Close()
 		return nil, err
 	}
-	return &host.Machine{Name: h.Name, Conn: conn, Facts: facts, Log: a.Log}, nil
+	return &host.Machine{Name: h.Name, Conn: conn, Facts: facts, Log: a.Log, Keeper: a.endpointKeeper(h.Name)}, nil
 }
 
 var errNeedsPassword = errors.New("this machine logs in with a password")
@@ -472,6 +478,9 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 		m.Status, m.Error, m.Hint = StatusError, "SFTP: "+err.Error(), "the machine's SSH server must allow the sftp subsystem"
 		return m, nil
 	}
+	if !hm.Local {
+		a.meetHopsesh(ctx, hm, m)
+	}
 	var entries []Entry
 	for _, mod := range a.Modules() {
 		spec := mod.Spec()
@@ -479,6 +488,7 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 		h, err := hm.For(ctx, spec, agent.Install{}, nil)
 		if err == nil {
 			st.Install, err = mod.Detect(ctx, h)
+			st.Install = m.withTools(st.Install)
 		}
 		if err != nil {
 			st.Error = err.Error()
@@ -487,8 +497,13 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 		installs, scanErr := a.profileInstalls(ctx, hm, mod, st.Install, o.ForceAccounts, o.Progress != nil)
 		if scanErr != nil {
 			st.Error = scanErr.Error()
-			m.Agents = append(m.Agents, st)
-			continue
+			if !st.Install.Present {
+				m.Agents = append(m.Agents, st)
+				continue
+			}
+			// Its accounts could not be read (an unreadable registry there, say): its
+			// sessions are still listed, from the agent's own folder.
+			installs = []agent.Install{st.Install}
 		}
 		// Registering another default profile changes the inventory namespace.
 		// Carry already discovered rows into that namespace before its listing.
@@ -517,14 +532,15 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 				var batchMu sync.Mutex
 				var batch []Entry
 				firstBatch := true
+				shows := a.Cfg.Agents[string(spec.ID)].Shows
 				found := func(sum agent.Summary) {
-					if o.Progress == nil {
+					if o.Progress == nil || !shows(sum.Kinds) {
 						return
 					}
 					sum.Key.Profile = in.ProfileID()
 					batchMu.Lock()
 					defer batchMu.Unlock()
-					batch = append(batch, Entry{Cached: true, Location: agent.MachineLocation(hm.Name), Machine: hm.Name, Agent: spec.ID, AgentName: spec.Name, Session: sum, Profile: in.Profile, Live: agent.LiveInfo{State: agent.Unknown}})
+					batch = append(batch, Entry{Cached: true, Location: agent.MachineLocation(hm.Name), Machine: hm.Name, Agent: spec.ID, AgentName: spec.Name, Session: withRecords(m.records, in.Root("home"), a.withLedger(hm.Local, in.Root("home"), sum)), Profile: in.Profile, Live: agent.LiveInfo{State: agent.Unknown}})
 					if firstBatch || len(batch) >= 25 {
 						partial := *m
 						partial.Agents = append([]AgentState(nil), m.Agents...)
@@ -547,10 +563,15 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 					o.Progress(ScanUpdate{Machine: &partial, Entries: batch})
 				}
 				if e == nil {
+					l.Sessions = slices.DeleteFunc(l.Sessions, func(s agent.Summary) bool { return !shows(s.Kinds) })
 					for i := range l.Sessions {
 						l.Sessions[i].Key.Profile = in.ProfileID()
 					}
-					entries = append(entries, listedEntries(ctx, hm, fsys, mod, ch, state, l)...)
+					listed := listedEntries(ctx, hm, fsys, mod, ch, state, l)
+					for i := range listed {
+						listed[i].Session = withRecords(m.records, in.Root("home"), a.withLedger(hm.Local, in.Root("home"), listed[i].Session))
+					}
+					entries = append(entries, listed...)
 					if len(l.Errors) > 0 {
 						e = fmt.Errorf("%d session files could not be read; first: %w", len(l.Errors), l.Errors[0].Err)
 					}
@@ -579,6 +600,7 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 					if detailed, err := mod.Detect(ctx, h); err == nil {
 						st.Install.Version = detailed.Version
 						st.Install.Binary = detailed.Binary
+						st.Install.Runtime = detailed.Runtime
 						st.Install.Desktop = detailed.Desktop
 						st.Install.DesktopVersion = detailed.DesktopVersion
 						st.Install.DesktopWhy = detailed.DesktopWhy

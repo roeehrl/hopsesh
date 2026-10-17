@@ -22,21 +22,17 @@ import (
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
-// peerScript starts hopsesh peer on a Unix-like machine, wherever hopsesh is installed
-// (a non-interactive SSH session often lacks ~/.local/bin on its PATH).
-const peerScript = `for c in hopsesh "$HOME/.local/bin/hopsesh" /opt/homebrew/bin/hopsesh /usr/local/bin/hopsesh /Applications/hopsesh.app/Contents/Resources/bin/hopsesh; do
-  if command -v "$c" >/dev/null 2>&1; then exec "$c" peer --stdio; fi
-done
-echo "hopsesh is not installed" >&2
-exit 127`
+// peerScript starts hopsesh peer on a Unix-like machine, wherever hopsesh is installed.
+var peerScript = remoteHopsesh("peer --stdio")
 
-// peerFindWindows prints where hopsesh.exe is on a Windows machine (its PATH, else where
-// install.ps1 puts it) and the shell its OpenSSH server runs commands with. A path with
+// peerFindWindows prints where hopsesh.exe is on a Windows machine (the copy hopsesh set
+// up itself, its PATH, else where install.ps1 puts it) and the shell its OpenSSH server runs commands with. A path with
 // letters outside ASCII (a user name in Japanese or Chinese) is given in its 8.3 short form
 // when it has one, so no shell or code page can garble it.
 const peerFindWindows = `[Console]::OutputEncoding = [Text.Encoding]::UTF8
+$own = Join-Path $env:USERPROFILE '.hopsesh\bin\hopsesh.exe'
 $c = Get-Command hopsesh.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-$p = if ($c) { $c.Source } else { Join-Path $env:LOCALAPPDATA 'Programs\hopsesh\hopsesh.exe' }
+$p = if (Test-Path -LiteralPath $own) { $own } elseif ($c) { $c.Source } else { Join-Path $env:LOCALAPPDATA 'Programs\hopsesh\hopsesh.exe' }
 if (-not (Test-Path -LiteralPath $p)) { [Console]::Error.WriteLine('hopsesh is not installed'); exit 127 }
 if ($p -match '[^\x00-\x7F]') { $s = (New-Object -ComObject Scripting.FileSystemObject).GetFile($p).ShortPath; if ($s) { $p = $s } }
 $sh = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\OpenSSH' -Name DefaultShell -ErrorAction SilentlyContinue).DefaultShell
@@ -46,15 +42,18 @@ Write-Output $sh`
 // peerCommandWindows is the command line that starts hopsesh peer on a Windows machine,
 // in the form its ssh shell takes: cmd.exe (the default), PowerShell, or a bash (Git Bash,
 // MSYS2). The program runs directly, so its input and output are the connection's.
-func peerCommandWindows(exe, shell string) string {
+func peerCommandWindows(exe, shell string) string { return windowsLine(exe, shell, "peer --stdio") }
+
+// windowsLine runs hopsesh with args (plain words) in a Windows machine's ssh shell.
+func windowsLine(exe, shell, args string) string {
 	s := strings.ToLower(shell)
 	switch {
 	case strings.Contains(s, "powershell") || strings.Contains(s, "pwsh"):
-		return "& " + transport.PSQuote(exe) + " peer --stdio"
+		return "& " + transport.PSQuote(exe) + " " + args
 	case strings.HasSuffix(s, "bash.exe") || strings.HasSuffix(s, `\sh.exe`):
-		return transport.ShQuote(strings.ReplaceAll(exe, `\`, "/")) + " peer --stdio" // C:/… works there
+		return transport.ShQuote(strings.ReplaceAll(exe, `\`, "/")) + " " + args // C:/… works there
 	}
-	return `"` + exe + `" peer --stdio` // Windows OpenSSH quotes the whole line for cmd /c itself
+	return `"` + exe + `" ` + args // Windows OpenSSH quotes the whole line for cmd /c itself
 }
 
 // maxPackage bounds the files of one pushed session.
@@ -72,6 +71,7 @@ func (a *App) Serve(ctx context.Context, r io.Reader, w io.Writer) error {
 // peerSession is one conversation with another machine's hopsesh.
 type peerSession struct {
 	a     *App
+	proto int // the protocol agreed
 	snap  *host.Machine
 	from  string
 	plan  *move.Plan
@@ -79,7 +79,18 @@ type peerSession struct {
 }
 
 func (s *peerSession) handle(ctx context.Context, method string, params json.RawMessage) (any, error) {
-	if method != peer.MethodHello && !s.a.Cfg.Peer.Receive {
+	switch {
+	case peer.LoginMethod(method):
+		// What hopsesh in the login session answers: only hopsesh serve, which runs
+		// because the user set it up there.
+		if s.proto < 6 {
+			return nil, fmt.Errorf("%s needs peer protocol 6; update hopsesh on the other machine", method)
+		}
+		if s.a.Login == nil {
+			return nil, peer.NoLogin(LocalName())
+		}
+		return s.login(ctx, method, params)
+	case method != peer.MethodHello && !s.a.Cfg.Peer.Receive:
 		return nil, peer.Refused(LocalName())
 	}
 	switch method {
@@ -88,7 +99,7 @@ func (s *peerSession) handle(ctx context.Context, method string, params json.Raw
 		if err := json.Unmarshal(params, &hi); err != nil {
 			return nil, err
 		}
-		s.from = hi.From
+		s.from, s.proto = hi.From, peer.Agree(hi)
 		return s.hello(ctx), nil
 	case peer.MethodPlan:
 		var req peer.PlanRequest
@@ -112,7 +123,8 @@ func (s *peerSession) handle(ctx context.Context, method string, params json.Raw
 func (s *peerSession) hello(ctx context.Context) peer.HelloReply {
 	m := s.a.localMachine(ctx)
 	defer m.Close()
-	r := peer.HelloReply{Protocol: peer.Protocol, Version: version.Version, Machine: m.Name, OS: m.Facts.OS, Receive: s.a.Cfg.Peer.Receive, Agents: []peer.AgentInfo{}}
+	r := peer.HelloReply{Protocol: peer.Protocol, Version: version.Version, Machine: m.Name, OS: m.Facts.OS, Arch: m.Facts.Arch, Receive: s.a.Cfg.Peer.Receive, Login: s.a.Login != nil, Agents: []peer.AgentInfo{}}
+	r.Endpoint, _ = m.ReadIdentity(ctx)
 	for _, mod := range s.a.Modules() {
 		spec := mod.Spec()
 		in := agent.Install{}
@@ -129,6 +141,53 @@ func (s *peerSession) hello(ctx context.Context) peer.HelloReply {
 		r.Agents = append(r.Agents, peer.AgentInfo{ID: spec.ID, Name: spec.Name, Version: in.Version, Present: in.Present, Write: agent.Has(mod, agent.CapWrite)})
 	}
 	return r
+}
+
+// login answers the methods of hopsesh in the login session.
+func (s *peerSession) login(ctx context.Context, method string, params json.RawMessage) (any, error) {
+	switch method {
+	case peer.MethodTerminalOpen:
+		var req peer.TerminalRequest
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, err
+		}
+		return s.a.OpenTerminal(ctx, req)
+	case peer.MethodTerminalList:
+		return s.a.Login.List(), nil
+	case peer.MethodAccounts:
+		return s.a.LocalAccounts(ctx)
+	case peer.MethodTools:
+		return s.a.LocalTools(ctx), nil
+	case peer.MethodOwners:
+		return s.a.LocalLedger(), nil
+	case peer.MethodProtection:
+		return s.a.LocalProtection(ctx), nil
+	case peer.MethodProtectionSetUp:
+		var req peer.ProtectionSetUp
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, err
+		}
+		p, err := s.a.SetUpLocalProtection(ctx, req.Rules)
+		if err != nil && p.Error == "" {
+			p.Error = err.Error()
+		}
+		return p, nil
+	case peer.MethodAccountAdd:
+		var req peer.AccountAdd
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, err
+		}
+		p, err := s.a.addLocalAccount(ctx, req.Agent, req.Name, nil, AddAccountOptions{Command: req.Command})
+		p.Tags = nil
+		return p, err
+	case peer.MethodTerminalClose:
+		var req peer.TerminalID
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, err
+		}
+		return struct{}{}, s.a.CloseTerminal(req.ID)
+	}
+	return nil, fmt.Errorf("unknown request %q", method)
 }
 
 // receiveOptions are the sender's choices on top of this machine's own defaults (where
@@ -384,7 +443,12 @@ func (a *App) dialPeer(ctx context.Context, to config.Host, operations ...string
 		return nil, hr, nil, err
 	}
 	c := peer.NewClient(pc.Out, pc.In)
-	err = c.Call(ctx, peer.MethodHello, peer.Hello{Protocol: peer.Protocol, Version: version.Version, From: LocalName()}, &hr)
+	err = c.Call(ctx, peer.MethodHello, peer.Hello{Protocol: peer.Protocol, Min: peer.MinProtocol, Version: version.Version, From: LocalName()}, &hr)
+	var pe *peer.Error
+	if errors.As(err, &pe) && pe.Code == peer.CodeProtocol && pe.Protocol >= peer.MinProtocol && pe.Protocol < peer.Protocol {
+		// An older hopsesh that speaks only its own protocol, which this one still does.
+		err = c.Call(ctx, peer.MethodHello, peer.Hello{Protocol: pe.Protocol, Version: version.Version, From: LocalName()}, &hr)
+	}
 	if err == nil {
 		return c, hr, pc.Close, nil
 	}

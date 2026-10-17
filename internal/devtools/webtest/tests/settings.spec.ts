@@ -42,3 +42,20 @@ test("turning an agent off hides its sessions", async ({ page }) => {
   await expect(row(page, "Find the codeword")).toBeVisible({ timeout: 30_000 });
   await expect(row(page, "What is the codeword in notes.txt?")).toHaveCount(0); // Codex's
 });
+
+test("Codex voice conversations stay hidden until Settings shows them", async ({ page }) => {
+  expect((await page.request.post("/reset?voice=1")).ok()).toBeTruthy();
+  await page.goto("/");
+  await expect(page.locator("#fresh")).toContainText("updated", { timeout: 30_000 });
+  await expect(row(page, "Find the codeword")).toBeVisible({ timeout: 30_000 });
+  await expect(row(page, "Plan the week out loud")).toHaveCount(0);
+  await menu(page, "settings");
+  await page.getByRole("tab", { name: "Agents" }).click();
+  const voice = page.getByRole("checkbox", { name: /Show voice conversations/ });
+  await expect(voice).not.toBeChecked();
+  await expect(page.getByRole("checkbox", { name: /Show work threads/ })).not.toBeChecked();
+  await voice.check();
+  await expect(page.getByRole("checkbox", { name: /Show voice conversations/ })).toBeChecked();
+  await menu(page, "refresh");
+  await expect(row(page, "Plan the week out loud")).toBeVisible({ timeout: 30_000 });
+});

@@ -62,6 +62,33 @@ type Agent struct {
 	// session's Resume menu: "here" (the hopsesh Terminal window), "terminal" (the
 	// terminal app) or "app" (the agent's desktop app). "" follows [terminal] resume.
 	Place string `toml:"place,omitempty"`
+	// VoiceThreads and WorkThreads show the agent's voice conversations and Work threads
+	// (Codex app), hidden by default.
+	VoiceThreads bool `toml:"voice_threads,omitempty"`
+	WorkThreads  bool `toml:"work_threads,omitempty"`
+}
+
+// Shows reports whether sessions of these kinds (agent.Summary.Kinds) are listed.
+func (a Agent) Shows(kinds []string) bool {
+	for _, k := range kinds {
+		if k == "voice" && !a.VoiceThreads || k == "work" && !a.WorkThreads {
+			return false
+		}
+	}
+	return true
+}
+
+// SetShows turns a kind of session on or off; false for a kind this setting lacks.
+func (a *Agent) SetShows(kind string, show bool) bool {
+	switch kind {
+	case "voice":
+		a.VoiceThreads = show
+	case "work":
+		a.WorkThreads = show
+	default:
+		return false
+	}
+	return true
 }
 
 // Cloud is per-cloud configuration, by the cloud's name ("codex-cloud"). Like a machine,
@@ -156,6 +183,8 @@ type Window struct {
 	SidebarHidden   bool `toml:"sidebar_hidden,omitempty"`
 	InspectorWidth  int  `toml:"inspector_width,omitempty"`
 	InspectorHidden bool `toml:"inspector_hidden,omitempty"`
+	// StatusWidth is the session list's status column (0: the default).
+	StatusWidth int `toml:"status_width,omitempty"`
 }
 
 // Inspector is the app inspector's sections the user opened or closed (explicit choices
@@ -170,6 +199,7 @@ type Inspector struct {
 const (
 	SidebarWidth, SidebarMin, SidebarMax = 220, 180, 320
 	InspectorMin, InspectorMax           = 300, 960
+	StatusMin, StatusMax                 = 140, 560
 )
 
 // InspectorSections are the inspector's sections that open and close.
@@ -291,6 +321,12 @@ type Config struct {
 	CLIPrompt string `toml:"cli_prompt,omitempty"`
 	// SetupPrompt is "declined" once the user closed the app's "Finish setting up" line.
 	SetupPrompt string `toml:"setup_prompt,omitempty"`
+	// ProtectPrompt is the fingerprint of the protection problems the user answered "Not
+	// now" to; the Sessions card stays hidden until the set of problems changes.
+	ProtectPrompt string `toml:"protect_prompt,omitempty"`
+	// MachinesPrompt are the machine notices the user answered "Not now" to (by
+	// fingerprint: a notice whose findings change comes back).
+	MachinesPrompt []string `toml:"machines_prompt,omitempty"`
 	// AppIcons shows an agent's installed desktop app icon in the app (default on).
 	AppIcons *bool            `toml:"app_icons,omitempty"`
 	Agents   map[string]Agent `toml:"agents,omitempty"`
@@ -784,6 +820,9 @@ func (c Config) Check() error {
 	}
 	if w := c.Window.InspectorWidth; w != 0 && (w < InspectorMin || w > InspectorMax) {
 		return fmt.Errorf("window.inspector_width is %d: use %d to %d", w, InspectorMin, InspectorMax)
+	}
+	if w := c.Window.StatusWidth; w != 0 && (w < StatusMin || w > StatusMax) {
+		return fmt.Errorf("window.status_width is %d: use %d to %d", w, StatusMin, StatusMax)
 	}
 	for _, f := range []struct {
 		name string

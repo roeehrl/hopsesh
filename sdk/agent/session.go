@@ -28,9 +28,15 @@ type Summary struct {
 	// Account is the module's opaque account fingerprint for the session, when the agent
 	// records one (bound reasoning cannot cross accounts).
 	Account string `json:"account,omitempty"`
+	// Owners are the accounts the agent recorded running the session, oldest first, with
+	// consecutive runs under one account merged. Empty when the agent recorded none.
+	Owners []OwnerRun `json:"owners,omitempty"`
 	// Mirror is the vendor's cloud copy of this session while it runs here (Claude Code's
 	// Remote Control), when the agent records one: the session is still this one.
 	Mirror *CloudLink `json:"mirror,omitempty"`
+	// Kinds are the Spec.Kinds this session is (Codex: "voice", "work"); the user
+	// interfaces leave such sessions out unless the user shows that kind.
+	Kinds []string `json:"kinds,omitempty"`
 }
 
 // LabelKind is what a legacy label said happened to a copy left behind.
@@ -234,6 +240,43 @@ type LiveProc struct {
 	Waiting bool `json:"waiting,omitempty"`
 }
 
+// OwnerRun is an account a session ran under, as recorded. Key is the module's account
+// fingerprint (comparable with Account.Key); Person, when recorded, the user's (comparable
+// with Account.Person). Source says who recorded it: "agent" or "hopsesh".
+type OwnerRun struct {
+	Key    string `json:"key"`
+	Person string `json:"person,omitempty"`
+	Source string `json:"source,omitempty"`
+}
+
+// LocalIdentifier reads which account a root on this machine is signed in to now from the
+// agent's own public identity record (never credentials, never by running the agent), fast
+// enough for a prompt hook. native is true when the root is the agent's default, found
+// without its override variable.
+type LocalIdentifier interface {
+	LocalIdentity(root string, native bool) (OwnerRun, bool)
+}
+
+// AddOwner appends a run, merging it into the last one when it is the same account.
+func AddOwner(runs []OwnerRun, r OwnerRun) []OwnerRun {
+	if r.Key == "" && r.Person == "" {
+		return runs
+	}
+	if n := len(runs); n > 0 {
+		l := &runs[n-1]
+		if (r.Key == "" || l.Key == "" || l.Key == r.Key) && (r.Person == "" || l.Person == "" || l.Person == r.Person) {
+			if l.Key == "" {
+				l.Key = r.Key
+			}
+			if l.Person == "" {
+				l.Person = r.Person
+			}
+			return runs
+		}
+	}
+	return append(runs, r)
+}
+
 // Account contains public vendor login metadata, never credentials. Key is legacy
 // Remote Control ownership metadata; it does not prove cross-profile identity.
 type Account struct {
@@ -244,8 +287,11 @@ type Account struct {
 	Confidence   string `json:"confidence,omitempty"` // verified, limited, unknown
 	// Observation detects visible login changes; never proves account equality.
 	Observation string `json:"observation,omitempty"`
-	Key         string `json:"key"`             // never sufficient for native cross-account replay
-	Label       string `json:"label,omitempty"` // for people: "Max plan", "Team org"
+	Key         string `json:"key"` // never sufficient for native cross-account replay
+	// Person fingerprints the signed-in user within Key's account, when the agent's own
+	// public identity file names one (Claude Code's accountUuid, Codex's user id).
+	Person string `json:"person,omitempty"`
+	Label  string `json:"label,omitempty"` // for people: "Max plan", "Team org"
 	// RemoteControl is whether this login can use the agent's own remote control.
 	RemoteControl bool   `json:"remoteControl"`
 	Why           string `json:"why,omitempty"` // why not

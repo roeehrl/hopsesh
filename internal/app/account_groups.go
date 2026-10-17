@@ -16,16 +16,24 @@ func AccountLabel(p *agent.RuntimeProfile) string {
 	return p.Name
 }
 
-// AccountGroups keeps roots distinct even when emails or native session IDs match.
+// AccountGroups groups sessions by the account that ran them (OwnerOf) within each root:
+// a root signed in to another account before keeps that account's sessions apart, and
+// sessions whose account was not recorded are not filed under the root's sign-in.
 func (inv *Inventory) AccountGroups() []Group {
+	logins := inv.Logins()
 	by := map[string]*Group{}
 	for _, e := range inv.Entries {
-		id := "account:" + e.Machine + ":" + string(e.Agent) + ":" + e.Session.Key.Profile
+		o := logins.OwnerOf(e)
+		label := OwnerLabel(o)
+		if label == "" {
+			label = "Account not recorded"
+		}
+		id := "account:" + e.Machine + ":" + string(e.Agent) + ":" + e.Session.Key.Profile + ":" + label
 		g := by[id]
 		if g == nil {
-			g = &Group{Identity: id, Name: AccountLabel(e.Profile) + " · " + e.AgentName + " · " + e.Machine}
-			if e.Profile != nil && !e.Profile.Default && e.Profile.Account != nil && e.Profile.Account.Email != "" {
-				g.Name += " · " + e.Profile.Name
+			g = &Group{Identity: id, Name: label + " · " + e.AgentName + " · " + e.Machine}
+			if e.Profile != nil && (!e.Profile.Default || !o.Current) {
+				g.Name += " · in " + e.Profile.Name
 			}
 			by[id] = g
 		}

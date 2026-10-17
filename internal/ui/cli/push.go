@@ -153,6 +153,10 @@ func peerCmd() *cobra.Command {
 			if stdio, _ := cmd.Flags().GetBool("stdio"); !stdio {
 				return errors.New("hopsesh peer is started by hopsesh on another machine, with --stdio")
 			}
+			// hopsesh in the login session answers, when it runs here.
+			if handed, err := handToServe(); handed || err != nil {
+				return err
+			}
 			r, err := newRun(cmd)
 			if err != nil {
 				return err

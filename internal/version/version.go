@@ -16,3 +16,6 @@ var (
 func String() string {
 	return fmt.Sprintf("hopsesh %s (commit %s, built %s)", Version, Commit, Date)
 }
+
+// IsRelease reports whether this is a released build (not a local "dev" one).
+func IsRelease() bool { return Version != "dev" && Version != "" }

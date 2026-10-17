@@ -4,7 +4,7 @@
 // chips, and the text filter. It is saved in the config ([list], SaveList); the text
 // filter is not. The list is one tree: group headers, then their sessions, with the
 // keyboard of the WAI-ARIA tree pattern.
-import { accountGroupLabel, api, h, fill, icon, ICONS, state, sys, keys, copyEntry, here, cloudOf, cloudTitle, agentInfo, machineStatus, count, ago, toast, dialog, fail } from "./core.js";
+import { accountGroupLabel, accountKey, accountKeyLegacy, api, h, fill, icon, ICONS, state, sys, keys, copyEntry, here, cloudOf, cloudTitle, agentInfo, machineStatus, count, ago, toast, dialog, fail } from "./core.js";
 import { openMenu, openPopover, update, closeAll, isOpen, openEl, refill } from "./menu.js";
 import { tabs as terminalTabs } from "./term.js";
 import { statusKey, placesOf, key as entryKey } from "./actions.js";
@@ -77,7 +77,7 @@ const LOCATION = () => [["here", sys.Here], ["machines", "Other machines"], ["cl
 
 // FACETS are the filters: their words, values (with their names) and each session's.
 const FACETS = {
- account:{name:"Account",values:()=>[...new Map(pool.map(e=>[e.profile?.id||"",accountGroupLabel(e)]))],of:e=>[e.profile?.id||""]},
+ account:{name:"Account",values:()=>[...new Map(pool.map(e=>[accountKey(e),accountGroupLabel(e)]))],of:e=>[accountKey(e),accountKeyLegacy(e),e.profile?.id||""]},
  tag:{name:"Account tag",values:()=>[...new Map(pool.flatMap(e=>e.profile?.tags?.length?e.profile.tags:["Untagged"]).map(t=>[t.toLowerCase(),t]))].sort((a,b)=>a[0].localeCompare(b[0])),of:e=>(e.profile?.tags?.length?e.profile.tags:["Untagged"]).map(t=>t.toLowerCase())},
   status: { name: "Status", values: () => STATUS.map(([v, n]) => [v, n]), of: (e) => [statusKey(e)] },
   location: { name: "Location", values: LOCATION, of: (e) => [locationOf(e)] },
@@ -130,7 +130,7 @@ function matches(f, e) {
 function textMatch(e) {
   const ws = list.text.toLowerCase().split(/\s+/).filter(Boolean);
   if (!ws.length) return true;
-  const hay = [e.title,e.profile?.name,e.profile?.account?.email,...(e.profile?.tags||[]), e.group.name, e.group.remote, e.branch, e.cloud?.branch, e.cloud ? cloudTitle(e.machine) : e.machine === here() ? sys.here : e.machine, e.lastPrompt].join(" ").toLowerCase();
+  const hay = [e.title,e.profile?.name,e.owner?.email,...(e.profile?.tags||[]), e.group.name, e.group.remote, e.branch, e.cloud?.branch, e.cloud ? cloudTitle(e.machine) : e.machine === here() ? sys.here : e.machine, e.lastPrompt].join(" ").toLowerCase();
   return ws.every((w) => hay.includes(w));
 }
 
@@ -194,7 +194,7 @@ export function groupsOf(rows) {
     } else if (g === "location") {
       const loc = e.cloud ? "cloud:" + e.machine : e.machine;
       add("location:" + loc, () => ({ name: e.cloud ? cloudTitle(e.machine) : e.machine === here() ? sys.Here : e.machine, machine: e.cloud ? null : e.machine, cloud: e.cloud ? e.machine : null }), e);
-    } else if(g==="account") add("account:"+(e.profile?.id||""),()=>({name:accountGroupLabel(e)}),e);
+    } else if(g==="account") add("account:"+accountKey(e),()=>({name:accountGroupLabel(e)}),e);
     else if(g==="tag") for(const t of e.profile?.tags?.length?e.profile.tags:["Untagged"]) add("tag:"+t.toLowerCase(),()=>({name:t}),e);
     else if (g === "agent") add("agent:" + e.agent, () => ({ name: e.agentName, agent: e.agent }), e);
     else if (g === "status") { const k = statusKey(e); add("status:" + k, () => ({ name: STATUS.find(([v]) => v === k)[1], status: k }), e); }

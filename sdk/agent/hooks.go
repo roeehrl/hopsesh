@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
-	"strconv"
 	"strings"
 	"unicode/utf16"
 )
@@ -31,35 +30,6 @@ type HookFile struct {
 	Merge  func([]byte) ([]byte, error)
 	Remove func([]byte) ([]byte, error)
 	Has    func([]byte) bool
-}
-
-// HookVersionAtLeast accepts stable, three-component versions in the same major
-// compatibility family. Unknown versions and prereleases fail closed.
-func HookVersionAtLeast(version, minimum string) bool {
-	parse := func(s string) ([3]int, bool) {
-		var v [3]int
-		parts := strings.Split(s, ".")
-		if len(parts) != 3 {
-			return v, false
-		}
-		for i, p := range parts {
-			if p == "" || strings.Trim(p, "0123456789") != "" {
-				return v, false
-			}
-			n, err := strconv.Atoi(p)
-			if err != nil {
-				return v, false
-			}
-			v[i] = n
-		}
-		return v, true
-	}
-	v, ok := parse(version)
-	m, mok := parse(minimum)
-	if !ok || !mok || v[0] != m[0] {
-		return false
-	}
-	return v[1] > m[1] || v[1] == m[1] && v[2] >= m[2]
 }
 
 // NoticeHookCommand quotes every argument; no hook payload is interpolated into

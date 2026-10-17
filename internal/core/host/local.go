@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -278,6 +279,22 @@ func (localProcs) Terminate(_ context.Context, pid int) error { return terminate
 
 func (localProcs) Names(ctx context.Context, pids []int) (map[int]string, error) {
 	return processNames(ctx, pids)
+}
+
+func (localProcs) Commands(ctx context.Context, pids []int) (map[int]string, error) {
+	return processCommands(ctx, pids)
+}
+
+// parseCommands reads ps "pid command" lines.
+func parseCommands(out string) map[int]string {
+	m := map[int]string{}
+	for _, line := range strings.Split(out, "\n") {
+		pid, command, ok := strings.Cut(strings.TrimSpace(line), " ")
+		if n, err := strconv.Atoi(pid); ok && err == nil {
+			m[n] = strings.TrimSpace(command)
+		}
+	}
+	return m
 }
 
 // localLocks probes advisory locks on this machine.

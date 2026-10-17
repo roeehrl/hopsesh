@@ -353,20 +353,24 @@ func (a *App) account(ctx context.Context, m *Machine, mod agent.Module, in agen
 		return nil
 	}
 	acct, err := ap.Account(ctx, h, in)
-	if err != nil {
-		return nil
+	if err != nil || !acct.LoggedIn && m.host.SignInsHidden() {
+		return nil // unknown: the last known sign-in stands in
 	}
 	return &acct
 }
 
 // Apply carries out a plan.
-func (a *App) Apply(ctx context.Context, p *move.Plan, in move.Input, progress func(string)) (*move.Result, error) {
+func (a *App) Apply(ctx context.Context, p *move.Plan, in move.Input, progress func(string)) (res *move.Result, err error) {
 	finished, activityErr := a.beginRuntimeAction()
 	if activityErr != nil {
 		return nil, activityErr
 	}
 	defer finished()
-
+	defer func() {
+		if err == nil && res != nil {
+			a.carryOwners(in, res)
+		}
+	}()
 	if p.Kind == move.KindHop {
 		return a.applyHop(ctx, p, progress)
 	}
@@ -417,7 +421,7 @@ func (a *App) Apply(ctx context.Context, p *move.Plan, in move.Input, progress f
 		// rather than checking the destination against the pre-close cursor again.
 		*p = *fresh
 	}
-	res, err := move.Apply(ctx, p, in, move.Env{StateDir: a.StateDir, Audit: a.Audit, Progress: progress, Step: a.Steps})
+	res, err = move.Apply(ctx, p, in, move.Env{StateDir: a.StateDir, Audit: a.Audit, Progress: progress, Step: a.Steps})
 	if err == nil && in.AcknowledgeSource != nil {
 		if err = in.AcknowledgeSource(ctx, p, res); err != nil && res != nil {
 			res.Warnings = append(res.Warnings, "Destination committed; source acknowledgment is pending: "+err.Error())

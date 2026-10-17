@@ -6,7 +6,7 @@ import { accountLabel, accountShown, accountTitle, loadError, api, on, h, fill, 
   entries, selected, copyEntry, here, agentInfo, $, count, clouds, cloudOf, cloudState, cloudChip, dialog, errText, rich, cloudTitle } from "./core.js";
 import { planPicked } from "./plan.js";
 import { healthNotice, loadHookHealth, hookHealth, withCLI, chip as roleChip } from "./guard.js";
-import { dividers, apply as applyLayout } from "./layout.js";
+import { dividers, apply as applyLayout, statusHeader } from "./layout.js";
 import { exitOf, exitWords, waiting, strayWaiting, showTerminal, tabs, onTabs } from "./term.js";
 import { model, statusOf, statusKey, placesOf, placeCount, placeName, showPlace, cloudBlock, onSelect, onTurnOn, key as entryKey } from "./actions.js";
 import { list, load as loadList, toolbar, counts, apply as applyFilters, groupsOf, tree, adoptTree, onChange, onRows, decide, toggleDisplay, clearFilters, activeFacets,
@@ -319,8 +319,42 @@ function notices() {
     h("b", { style: "flex:1 1 360px" }, i.skillState === "stale" ? "The hopsesh skill is out of date" : "The hopsesh skill is damaged"),
     h("button", { class: "btn primary", onclick: async () => { try { await withCLI(() => api("InstallSkill", false, false)); toast("Updated the hopsesh skill"); } catch (e) { fail(e); } state.info = await api("Info"); render(); } }, i.skillState === "stale" ? "Update it" : "Repair it")));
   out.push(healthNotice(render));
+  out.push(machineNotices());
   out.push(setupLine());
   return out;
+}
+
+// machineNotices are what another machine needs: hopsesh there, an update, or its
+// protection (checked after each scan; "Not now" holds until the findings change).
+let mNotices = null, mNoticesFor = "";
+const mDismissed = new Set(); // answered "Not now" here: a load already under way can't bring it back
+async function loadMachineNotices() {
+  let next;
+  try { next = await api("MachineNotices"); } catch { next = []; }
+  // Redraw only when they changed, and only the notices: the list and the
+  // details being worked in keep their focus and state.
+  if (JSON.stringify(next) === JSON.stringify(mNotices)) return;
+  mNotices = next;
+  drawMachineNotices();
+}
+const drawMachineNotices = () => document.getElementById("machine-notices")?.replaceChildren(...machineNoticeCards());
+function machineNotices() {
+  // Checked again when the machines change, not on every update of the sessions.
+  const key = JSON.stringify((state.scan?.machines || []).map((m) => [m.name, m.status, m.presence, m.hopsesh, m.sessions]));
+  if (key !== mNoticesFor) { mNoticesFor = key; loadMachineNotices(); }
+  return h("div", { id: "machine-notices", style: "display:contents" }, machineNoticeCards());
+}
+function machineNoticeCards() {
+  return (mNotices || []).filter((n) => !mDismissed.has(n.fingerprint)).map((n) => h("section", { class: "card notice", role: "status", "aria-label": n.title, "data-notice": n.kind },
+    h("div", { style: "flex:1 1 360px" }, h("b", {}, n.title), " ", h("span", { style: "font-size:12.5px" }, n.text)),
+    h("button", { class: "btn primary", onclick: async () => {
+      if (n.kind === "protection") {
+        try { await api("SetUpProtection", n.machine, false); toast(`Set up on ${n.machine}`); } catch (e) { fail(e); }
+        return loadMachineNotices();
+      }
+      go("machines");
+    } }, n.action),
+    h("button", { class: "btn", onclick: async () => { mDismissed.add(n.fingerprint); drawMachineNotices(); try { await api("DismissMachineNotice", n.fingerprint); } catch (e) { mDismissed.delete(n.fingerprint); fail(e); drawMachineNotices(); } } }, "Not now")));
 }
 
 // setupLine is the one line of what is left to set up, on All sessions only: each step
@@ -389,7 +423,7 @@ function presenceChips(e) {
 
 // mirrorChip links a session's copy on the vendor's site (Remote Control).
 function mirrorChip(m) {
-  return h("button", { class: "chip claude-link", tabindex: "-1", title: m.url, onclick: (ev) => { ev.stopPropagation(); api("OpenURL", m.url).catch(fail); } }, icon(ICONS.external, 11), "mirrored on " + m.host);
+  return h("button", { class: "chip claude-link", tabindex: "-1", title: `Mirrored on ${m.host} by Remote Control · open ${m.url}`, "aria-label": `Open the copy mirrored on ${m.host}`, onclick: (ev) => { ev.stopPropagation(); api("OpenURL", m.url).catch(fail); } }, icon(ICONS.external, 11), h("span", { class: "chip-t" }, m.host));
 }
 
 // row is one session in the tree: its agent, title and branch, the last prompt and where
@@ -417,7 +451,7 @@ function row(e, level) {
   if(e.journey?.fork) bits.push("separate conversation");
  if(e.journey?.roundTrips) bits.push(`${e.journey.roundTrips} round trips`);
  const chips = presenceChips(e);
-if(accountShown(e.profile)) chips.push(h("span", {class:"chip account-chip",title:accountTitle(e.profile)},accountShown(e.profile)));
+if(accountShown(e)) chips.push(h("span", {class:"chip account-chip"+(e.owner?.recorded?"":" unrecorded"),title:accountTitle(e)},h("span",{class:"chip-t"},accountShown(e))));
   if (e.cloud) chips.push(cloudChip(e.machine));
   const rc = roleChip(e);
   if (e.cloud?.pr) chips.push(h("span", { class: "chip st-moved" }, "PR " + e.cloud.pr));
@@ -526,7 +560,7 @@ function body(shown, inScope) {
       h("button", { class: "link", onclick: () => { clearFilters(); if (list.text) { list.text = ""; $("#list-filter").value = ""; refreshList(); } } }, "Clear filters")));
     return h("div", { class: "empty" }, state.scope.kind === "needs" ? "Nothing needs you right now." : "No sessions here.");
   }
-  return tree(groupsOf(shown), row, state.sel ? state.sel.machine + "\u0000" + state.sel.key : "");
+  return [statusHeader(list.density === "compact"), tree(groupsOf(shown), row, state.sel ? state.sel.machine + "\u0000" + state.sel.key : "")];
 }
 
 // refreshList draws the list again (a filter, the display, a group) and keeps the
