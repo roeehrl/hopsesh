@@ -43,8 +43,19 @@ async function quickRoute() {
  const snapshot=await api("ScanSnapshot");if(snapshot)acceptScan(snapshot);
  await go("sessions");
  if(!r.machine&&!r.key)return;
- let e=browsingEntry(state.scan,r);
- if(!e&&state.scan?.groups.some(g=>g.entries.some(e=>(e.copies||[]).some(c=>c.machine===r.machine&&c.key===r.key))))e=await api("ResolveEntry",r.machine,r.key);
+ // The backend resolved this row a moment ago; the window's list can still be catching
+ // up with that (account discovery settling). Look again briefly before giving up.
+ const find=async()=>{
+  let e=browsingEntry(state.scan,r);
+  if(!e&&state.scan?.groups.some(g=>g.entries.some(e=>(e.copies||[]).some(c=>c.machine===r.machine&&c.key===r.key))))e=await api("ResolveEntry",r.machine,r.key);
+  return e;
+ };
+ let e=await find();
+ for(let tries=0;!e&&tries<20;tries++){
+  await new Promise(resolve=>setTimeout(resolve,250));
+  const later=await api("ScanSnapshot");if(later)acceptScan(later);
+  e=await find();
+ }
  if(e){showEntry(e);reveal()}
  else toast("This session is no longer in the current list. Refresh its machine.");
 }
