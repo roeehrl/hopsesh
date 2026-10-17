@@ -47,7 +47,10 @@
   }
   if(!await until(()=>document.querySelector('.row[aria-selected="true"]'),10000)){
     const {state,current}=await import('/core.js');
-    phase('Quick selection not rendered: '+JSON.stringify({requested:{machine:entry.machine,key:entry.key},screen:current,selected:state.sel,scanning:state.scanning,revision:state.scan?.revision,current:state.scan?.groups.flatMap(g=>g.entries).map(e=>({machine:e.machine,key:e.key}))}));
+    // Was the route never taken by the window, or taken and lost? A pending route here
+    // means the window never consumed it; a toast says why it gave up.
+    const pending=await call("TakeQuickRoute").catch(e=>({error:String(e)}));
+    phase('Quick selection not rendered: '+JSON.stringify({requested:{machine:entry.machine,key:entry.key},screen:current,selected:state.sel,scanning:state.scanning,revision:state.scan?.revision,pendingRoute:pending,toast:document.querySelector('#toast')?.textContent||'',discovering:!!state.scan?.discovering,cached:!!state.scan?.cached,scope:state.scope,current:state.scan?.groups.flatMap(g=>g.entries).map(e=>({machine:e.machine,key:e.key}))}));
     throw Error("Quick access did not select a row");
   }
   if(d.capabilities.tray){
