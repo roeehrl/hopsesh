@@ -165,6 +165,10 @@ func (a *App) observeMachine(ctx context.Context, m *host.Machine) (Observation,
 				out.Agents[len(out.Agents)-1].Error = err.Error()
 				continue
 			}
+			// Kinds of session the user keeps hidden (Codex voice conversations, Work
+			// threads) are left out here exactly as a scan leaves them out.
+			shows := a.Cfg.Agents[string(spec.ID)].Shows
+			listing.Sessions = slices.DeleteFunc(listing.Sessions, func(s agent.Summary) bool { return !shows(s.Kinds) })
 			if len(listing.Errors) > 0 {
 				out.Agents[len(out.Agents)-1].Error = "Some session files could not be read"
 			}
