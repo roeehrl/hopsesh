@@ -70,6 +70,9 @@ test('background session repaint preserves input focus inside the docked termina
  await expect(embedded.locator('#connection')).toBeHidden();
  const screen=()=>embedded.locator('.term').evaluate(()=>window.hopseshTerminal?.text());
  await expect.poll(screen).toContain('termfake: ready');
+ // Someone typing in the docked terminal has the main window in front; the detached
+ // page opened above can otherwise leave it hidden, where redraws wait by design.
+ await page.bringToFront();
  const input=embedded.locator('.term:not([hidden]) .xterm-helper-textarea');
  await input.focus();await page.keyboard.type('before refresh ');
  // Change a listed title so the repaint really changes the list: unchanged markup is
