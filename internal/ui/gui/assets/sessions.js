@@ -903,7 +903,11 @@ async function adoptDiscovery(){
 function drawDiscovery(){
  discoveryTimer=0;
  if(!backgroundDirty||current!=="sessions"||document.hidden)return;
- if(pointerHeld||document.body.classList.contains("resizing")||document.querySelector("dialog[open],button:active")||isOpen()||document.activeElement?.matches("textarea,select,.divider"))return; // the filter field is kept, focus and selection, across a render
+ // The filter field is kept, focus and selection, across a render. Anything else the
+ // user is in the middle of only postpones the update: it is retried, never dropped.
+ if(pointerHeld||document.body.classList.contains("resizing")||document.querySelector("dialog[open],button:active")||isOpen()||document.activeElement?.matches("textarea,select,.divider")){
+  discoveryTimer=setTimeout(drawDiscovery,500);return;
+ }
  backgroundDirty=false;render();
 }
 on("hopsesh:discovery",d=>queueScan(d));
