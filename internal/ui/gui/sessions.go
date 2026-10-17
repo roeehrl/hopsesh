@@ -702,6 +702,19 @@ func (a *App) find(machine, key string) (app.Entry, error) {
 			return e, nil
 		}
 	}
+	// A key published before the default account was registered has no profile; it
+	// names that same session in the agent's default profile, and nothing else.
+	if k, err := agent.ParseKey(key); err == nil && k.Profile == "" {
+		var found []app.Entry
+		for _, e := range a.inv.Entries {
+			if e.Machine == machine && e.Session.Key.Agent == k.Agent && e.Session.Key.Session == k.Session && e.Profile != nil && e.Profile.Default {
+				found = append(found, e)
+			}
+		}
+		if len(found) == 1 {
+			return found[0], nil
+		}
+	}
 	return app.Entry{}, errors.New("session not found; refresh")
 }
 
