@@ -211,9 +211,17 @@ func (a *App) StartRuntime(ctx context.Context, mode string, guard func() error,
 					}
 				}
 			}
+			slices.Sort(own) // a stable order: a reordered listing is not a change
 			watchMu.Lock()
+			ownChanged := !slices.Equal(ownRoots, own)
 			ownRoots = own
 			watchMu.Unlock()
+			// Settings or relay state written before their watches were (re)armed, such as
+			// a relay enabled just after startup, would otherwise wait for the idle
+			// fallback: observe once more, at once.
+			if ownChanged {
+				defer engine.Request()
+			}
 			roots := own
 			watching := !unwatched(engine)
 			if watching {
