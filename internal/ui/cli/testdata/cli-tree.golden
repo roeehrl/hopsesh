@@ -342,6 +342,13 @@ hopsesh runtime start
 hopsesh runtime status
   --json
 hopsesh runtime stop
+hopsesh serve
+hopsesh serve install
+  --json
+hopsesh serve status
+  --json
+hopsesh serve uninstall
+  --json
 hopsesh settings
 hopsesh settings get
   --json
