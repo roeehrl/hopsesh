@@ -5,6 +5,7 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/ui/desktop"
@@ -289,6 +290,9 @@ func (a *App) quickSelectionKeyLocked(machine, key string) (string, error) {
 	return resolved, nil
 }
 
+// quickSettle is how long a Quick selection waits for discovery to settle its rows.
+const quickSettle = 10 * time.Second
+
 func (a *App) QuickOpen(screen, machine, key string) error {
 	switch screen {
 	case "sessions", "settings", "terminals":
@@ -297,16 +301,28 @@ func (a *App) QuickOpen(screen, machine, key string) error {
 	}
 	path := ""
 	if machine != "" || key != "" {
-		var err error
-		a.mu.Lock()
-		key, err = a.quickSelectionKeyLocked(machine, key)
-		if err == nil {
-			e, _ := a.find(machine, key)
-			path = e.Session.Path
-		}
-		a.mu.Unlock()
-		if err != nil {
-			return err
+		requested := key
+		// A row listed before account discovery finished can name its session by a key
+		// the discovery is still settling. Wait for fresh rows rather than resolving it
+		// from cached ones (the fallback refuses those), then apply the same checks.
+		deadline := time.Now().Add(quickSettle)
+		for {
+			var err error
+			a.mu.Lock()
+			key, err = a.quickSelectionKeyLocked(machine, requested)
+			if err == nil {
+				e, _ := a.find(machine, key)
+				path = e.Session.Path
+			}
+			settling := a.inv != nil && a.inv.Discovering
+			a.mu.Unlock()
+			if err == nil {
+				break
+			}
+			if !settling || time.Now().After(deadline) {
+				return err
+			}
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
 	a.quick.mu.Lock()

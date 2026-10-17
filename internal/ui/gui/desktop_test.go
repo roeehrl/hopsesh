@@ -388,3 +388,37 @@ func TestBackgroundCloseWithoutTrayOrTerminal(t *testing.T) {
 		t.Fatal("explicit Quit choice was ignored")
 	}
 }
+
+// A Quick row listed before account discovery settled waits for fresh rows, and is then
+// resolved with the same checks; it is never resolved from the cached ones.
+func TestQuickSelectionWaitsForDiscoveryToSettle(t *testing.T) {
+	a, _ := desktopApp(t)
+	scan, err := a.ScanAccounts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := findEntry(t, scan, "claude/"+sid)
+	a.mu.Lock()
+	fresh := *a.inv
+	fresh.Entries = append([]app.Entry(nil), a.inv.Entries...)
+	settling := fresh
+	settling.Discovering = true
+	settling.Entries = append([]app.Entry(nil), fresh.Entries...)
+	for i := range settling.Entries {
+		settling.Entries[i].Cached = true
+	}
+	a.inv = &settling
+	a.mu.Unlock()
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		a.mu.Lock()
+		a.inv = &fresh
+		a.mu.Unlock()
+	}()
+	if err := a.QuickOpen("sessions", current.Machine, "claude/"+sid); err != nil {
+		t.Fatalf("a selection made while discovery settled was refused: %v", err)
+	}
+	if route := a.TakeQuickRoute(); route == nil || route.Key != current.Key {
+		t.Fatalf("Quick did not select the settled row: %+v", route)
+	}
+}
