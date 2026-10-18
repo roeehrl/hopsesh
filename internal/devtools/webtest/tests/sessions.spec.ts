@@ -230,10 +230,13 @@ test("an unidentified running window has no invented terminal action or duplicat
   await page.route("**/call", async route => {
     const m = route.request().postDataJSON()?.m;
     if (!["Presence", "InitialScan", "Scan", "RefreshHere", "CachedScan", "ScanSnapshot"].includes(m)) return route.continue();
-    const response = await route.fetch(), body = await response.json();
-    if (m === "Presence") { if (body.result?.entries?.[key!]) body.result.entries[key!] = unidentified; }
-    else patch(body.result);
-    await route.fulfill({ json: body });
+    // A reload or the test's end may cancel a request still being answered.
+    try {
+      const response = await route.fetch(), body = await response.json();
+      if (m === "Presence") { if (body.result?.entries?.[key!]) body.result.entries[key!] = unidentified; }
+      else patch(body.result);
+      await route.fulfill({ json: body });
+    } catch { /* cancelled */ }
   });
   expect((await page.request.post(`/live?session=${id}&entrypoint=cli`)).ok()).toBeTruthy();
   await page.reload();
@@ -246,6 +249,7 @@ test("an unidentified running window has no invented terminal action or duplicat
   await expect(details(page).locator("#act-primary")).toHaveCount(0);
   await expect(details(page).getByRole("button", {name:/^(Show|Resume in)/})).toHaveCount(0);
   await expect(details(page).locator(".ins-status")).toContainText(/^Idle/);
+  await page.unrouteAll({ behavior: "ignoreErrors" });
 });
 
 test("a session in a tab of the hopsesh Terminal: Show it, Move waits until it ends, and two places warn", async ({ page }) => {
