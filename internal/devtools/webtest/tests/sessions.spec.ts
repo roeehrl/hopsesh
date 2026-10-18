@@ -211,16 +211,34 @@ test("a session open in Claude reports unsupported exact opening instead of sile
 test("an unidentified running window has no invented terminal action or duplicate resume", async ({ page }) => {
   const key = await row(page, "Find the codeword").getAttribute("data-key");
   const id = key!.split("\u0000")[1].split("/")[1];
+  // The stand-in process may inherit a real terminal on a developer's Mac but has no
+  // identifiable window on CI. Every answer the window takes in says the latter: a later
+  // presence poll or scan must not bring the developer's terminal back.
+  const unidentified = { live: true, status: "idle", needs: false, app: "", places: [] };
+  const patch = (scan: any) => {
+    for (const g of scan?.groups || []) for (const e of g.entries || []) if (e.title === "Find the codeword") Object.assign(e, unidentified);
+  };
+  await page.routeWebSocket(/\/events$/, ws => {
+    const server = ws.connectToServer();
+    server.onMessage(message => {
+      const m = JSON.parse(String(message));
+      if (m.name !== "hopsesh:discovery") return ws.send(message);
+      patch(m.data);
+      ws.send(JSON.stringify(m));
+    });
+  });
+  await page.route("**/call", async route => {
+    const m = route.request().postDataJSON()?.m;
+    if (!["Presence", "InitialScan", "Scan", "RefreshHere", "CachedScan", "ScanSnapshot"].includes(m)) return route.continue();
+    const response = await route.fetch(), body = await response.json();
+    if (m === "Presence") { if (body.result?.entries?.[key!]) body.result.entries[key!] = unidentified; }
+    else patch(body.result);
+    await route.fulfill({ json: body });
+  });
   expect((await page.request.post(`/live?session=${id}&entrypoint=cli`)).ok()).toBeTruthy();
+  await page.reload();
+  await expect(page.locator("#fresh")).toContainText("updated", { timeout: 30_000 });
   await menu(page, "refresh");
-  // The stand-in process may inherit a real terminal on a developer's Mac but
-  // has no identifiable window on CI. Exercise that latter case explicitly.
-  await page.evaluate(async key => {
-    const {state} = await import('/core.js');
-    const {render} = await import('/sessions.js');
-    state.presence[key] = {live:true,status:'idle',needs:false,app:'',places:[]};
-    render();
-  }, key!);
   const r = row(page, "Find the codeword");
   await expect(r.locator(".pchip")).toHaveCount(0);
   await r.click();
