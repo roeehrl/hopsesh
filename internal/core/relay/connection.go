@@ -135,6 +135,13 @@ func (l Listener) Run(ctx context.Context) error {
 		default:
 		}
 		batch, err := l.Transport.Poll(ctx, cursor)
+		if err == nil && len(batch.Messages) > 0 && l.Notify != nil {
+			// A successful poll proves the relay is reachable and authorized. Say so
+			// before working through the batch: a backlog queued while this owner was
+			// down can hold native work that takes far longer than the poll itself.
+			// An error while processing it is still reported below.
+			l.Notify(nil)
+		}
 		if err == nil {
 			for _, d := range batch.Messages {
 				if d.Envelope.Kind == "response" || d.Envelope.Kind == "observation" {
