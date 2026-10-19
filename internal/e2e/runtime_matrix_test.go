@@ -392,6 +392,14 @@ func (f *relayFleet) applyNetworkPolicy(t *testing.T, origin string, upstream *h
 	}
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	proxy.Transport = upstream.Transport
+	// The fixture relay can close an idle connection just as the proxy reuses it,
+	// and a proxied POST is not retried: that EOF is the proxy's, not the owner's.
+	// Each proxied request gets its own upstream connection.
+	if base, ok := upstream.Transport.(*http.Transport); ok {
+		fresh := base.Clone()
+		fresh.DisableKeepAlives = true
+		proxy.Transport = fresh
+	}
 	// Failure-only, bounded transport evidence distinguishes a blocked upstream
 	// request from mailbox processing inside an owner. Never retain credentials,
 	// request/response bodies, URL values, headers or raw transport errors.
