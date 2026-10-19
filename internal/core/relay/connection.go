@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/localstate"
@@ -109,20 +110,36 @@ type Listener struct {
 // a request alone. Source observation timestamps are never renewed by transport.
 func (l Listener) Run(ctx context.Context) error {
 	child, cancel := context.WithCancel(ctx)
-	wake, state, done := make(chan struct{}, 1), make(chan bool, 1), make(chan struct{})
-	go func() { defer close(done); l.Transport.notifications(child, wake, state) }()
-	defer func() { cancel(); <-done }()
-	connected := false
-	reportState := func(value bool) {
-		connected = value
-		if l.OnDeliveryMode != nil {
-			mode := "http-fallback"
-			if connected {
-				mode = "notifications"
+	wake, stream, state := make(chan struct{}, 1), make(chan bool), make(chan bool, 1)
+	var running sync.WaitGroup
+	running.Go(func() { l.Transport.notifications(child, wake, stream) })
+	// The delivery mode is reported as the stream changes, not when this loop next
+	// looks: working through a long batch must not hide an established stream. The
+	// loop only takes the latest state for its own polling cadence.
+	running.Go(func() {
+		for {
+			select {
+			case <-child.Done():
+				return
+			case value := <-stream:
+				if l.OnDeliveryMode != nil {
+					mode := "http-fallback"
+					if value {
+						mode = "notifications"
+					}
+					l.OnDeliveryMode(mode)
+				}
+				select {
+				case <-state:
+				default:
+				}
+				state <- value
 			}
-			l.OnDeliveryMode(mode)
 		}
-	}
+	})
+	defer func() { cancel(); running.Wait() }()
+	connected := false
+	reportState := func(value bool) { connected = value }
 	var cursor, acknowledged uint64
 	idleDelay, failureDelay := time.Second, time.Second
 	for {
