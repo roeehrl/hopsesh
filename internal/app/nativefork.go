@@ -10,6 +10,43 @@ import (
 	"github.com/roeehrl/hopsesh/sdk/ir"
 )
 
+// remoteForks are the sessions whose native forks are verified on another machine: the
+// native families (each fork with its parents and its other forks) of the sessions want
+// accepts. Verification reads whole transcripts, which over SSH can take longer than a
+// scan may (a few GB of Codex rollouts is common), so a listing verifies none of them: its
+// remote forks are listed as sessions of their own until an action about one (whose scan
+// names it) verifies its family.
+func remoteForks(ss []agent.Summary, want func(agent.Summary) bool) []int {
+	by, parents := map[agent.SessionID]int{}, map[agent.SessionID]bool{}
+	for i, s := range ss {
+		by[s.Key.Session] = i
+		parents[s.NativeParent] = true
+	}
+	root := func(i int) int {
+		for range ss {
+			p, ok := by[ss[i].NativeParent]
+			if ss[i].NativeParent == "" || !ok {
+				break
+			}
+			i = p
+		}
+		return i
+	}
+	families := map[int]bool{}
+	for i, s := range ss {
+		if (s.NativeParent != "" || parents[s.Key.Session]) && want(s) {
+			families[root(i)] = true
+		}
+	}
+	var pick []int
+	for i := range ss {
+		if families[root(i)] {
+			pick = append(pick, i)
+		}
+	}
+	return pick
+}
+
 func nativeForkManifests(ctx context.Context, hm *host.Machine, h agent.Host, mod agent.Module, in agent.Install, ss []agent.Summary, manifests []*lineage.Manifest, problems []string) {
 	verifier, ok := mod.(agent.NativeForkVerifier)
 	if !ok {

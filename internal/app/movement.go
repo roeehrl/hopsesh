@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -61,7 +62,13 @@ type movementObservation struct {
 
 // EnrichMovement joins receipt metadata and observes native content in memory. It
 // never writes remote files or alters journaled sidecars during a scan.
-func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
+func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) { a.enrichMovement(ctx, inv, nil) }
+
+// enrichMovement is EnrichMovement observing the copies on other machines only in the
+// families that hold a session remote accepts (nil: every family). Observing reads whole
+// transcripts, which over SSH can take longer than a scan may; a copy that is not
+// observed asks to be verified before a return, as one that cannot be read does.
+func (a *App) enrichMovement(ctx context.Context, inv *Inventory, remote func(Entry) bool) {
 	// Saved rows (Cached) carry a lineage outline, not the revision graph, and keep the
 	// movement they were saved with: only rows read in this scan are compared.
 	families := map[string][]int{}
@@ -79,7 +86,11 @@ func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
 		observed := map[lineage.ReplicaID]movementObservation{}
 		ids := map[int]lineage.ReplicaID{}
 		var g *lineage.Manifest
+		observeRemote := remote == nil || slices.ContainsFunc(families[family], func(i int) bool { return remote(inv.Entries[i]) })
 		fingerprint := a.movementFingerprint(ctx, inv, family)
+		if !observeRemote {
+			fingerprint += "\x00local"
+		}
 		notices := a.Cfg.MovementNoticesOn()
 		if memo, ok := a.movementMemo.get(family, fingerprint); ok {
 			if memo.graph == nil {
@@ -99,7 +110,7 @@ func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
 		} else {
 			g = committedGraph(inv, family, families[family])
 			if g != nil {
-				a.observeFamily(ctx, inv, family, g, observed, ids)
+				a.observeFamily(ctx, inv, family, g, observed, ids, observeRemote)
 			}
 			a.movementMemo.put(family, fingerprint, g, inv, observed, ids)
 			if g == nil {
@@ -186,7 +197,7 @@ func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
 
 // observeFamily reads each copy in one lineage family and observes its native content
 // against the family graph g (in memory; nothing is written).
-func (a *App) observeFamily(ctx context.Context, inv *Inventory, family string, g *lineage.Manifest, observed map[lineage.ReplicaID]movementObservation, ids map[int]lineage.ReplicaID) {
+func (a *App) observeFamily(ctx context.Context, inv *Inventory, family string, g *lineage.Manifest, observed map[lineage.ReplicaID]movementObservation, ids map[int]lineage.ReplicaID, remote bool) {
 	committed := committedPrint(inv, family)
 	for i := range inv.Entries {
 		e := &inv.Entries[i]
@@ -211,7 +222,7 @@ func (a *App) observeFamily(ctx context.Context, inv *Inventory, family string, 
 		mod, enabled := a.Module(e.Agent)
 		writer, writable := mod.(agent.Writer)
 		portable := writable && writer.Profile(in).PortableAppend
-		if !installed || !enabled || in.BindingID() != r.Binding && !portable {
+		if !installed || !enabled || in.BindingID() != r.Binding && !portable || !remote && !m.Local && !m.host.IsSnapshot() {
 			observed[id] = observation
 			continue
 		}
