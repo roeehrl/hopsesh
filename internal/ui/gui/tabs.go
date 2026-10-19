@@ -205,13 +205,16 @@ func (a *App) sessionTab(c agent.Command, l app.Launch, meta TabMeta, title stri
 	}
 	var info pty.Info
 	if err == nil {
-		meta.Command, meta.External, meta.Rerun = displayCommand(c.Argv), true, true
+		if meta.Command == "" {
+			meta.Command = displayCommand(c.Argv)
+		}
+		meta.External, meta.Rerun = true, true
 		meta.LaunchedKey = meta.Key
 		a.mu.Lock()
 		if a.inv != nil {
 			relations := a.inv.Relationships()
 			if r, ok := relations[app.EntryIdentity(meta.Machine, meta.Key)]; ok {
-				if name := a.core.Cfg.FamilyNames[r.Family]; name != "" {
+				if name := a.core.FamilyName(r); name != "" {
 					r.Name = name
 				}
 				meta.Relationship = &r

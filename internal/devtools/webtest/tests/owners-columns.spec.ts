@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { row, details } from "./helpers";
+import { row, details, action } from "./helpers";
 
 // The owners world: Claude Code is signed in to alice@example.com now; "Find the codeword"
 // recorded that another account ran it, "Feature flag" that alice did.
@@ -28,7 +28,7 @@ test("a session shows the account that ran it, not its root's sign-in now", asyn
   await owners(page);
   const other = row(page, "Find the codeword").locator(".account-chip");
   await expect(other).toHaveText("another account");
-  await expect(other).toHaveAttribute("title", /recorded an account that no profile here is signed in to now.*signed in as alice@example\.com now/);
+  await expect(other).toHaveAttribute("title", /Run by an account that no profile here is signed in to now.*signed in as alice@example\.com now/);
   await expect(row(page, "Feature flag").locator(".account-chip")).toHaveText("alice@example.com");
   // Not recorded: no email is claimed.
   await expect(row(page, "README cleanup").locator(".account-chip")).toHaveCount(0);
@@ -94,4 +94,32 @@ test("a narrow list keeps titles readable and hides the column handle", async ({
   await expect(page.getByRole("separator", { name: "Resize the status column" })).toBeHidden();
   const title = row(page, "Find the codeword").locator(".t");
   await expect.poll(async () => (await title.boundingBox())!.width).toBeGreaterThan(90);
+});
+
+test("a move names the account that ran the session, not its folder's sign-in now", async ({ page }) => {
+  await owners(page);
+  await row(page, "Find the codeword").click();
+  await action(page, "move", /^Continue with Codex…/);
+  const source = page.locator(".transfer-accounts>div").first();
+  await expect(source.locator("b")).toHaveText("another account");
+  await expect(source).toContainText("signed in as alice@example.com now");
+  await expect(page.locator(".transfer-accounts>div").last()).not.toContainText(/^alice@example\.com/);
+});
+
+test("a session already in its place continues there under the account signed in now", async ({ page }) => {
+  await owners(page);
+  // The planner says so for a session already in its destination (TestResumeInOwnRoot…).
+  await page.route("**/call", async (route) => {
+    const r = route.request().postDataJSON();
+    if (r.m !== "Plan") return route.continue();
+    const res = await route.fetch(), body = await res.json();
+    Object.assign(body.result, { resumeHere: true, noWork: true, blockers: [], warnings: ["Hopsesh has no record of the Claude Code account it ran under; continuing it here uses the account signed in now."] });
+    await route.fulfill({ json: body });
+  });
+  await row(page, "Find the codeword").click();
+  await action(page, "move", /^Continue with Codex…/);
+  const sheet = page.locator("#sheet");
+  await expect(sheet).toContainText("Nothing is copied. The session continues where it is");
+  await expect(sheet.locator("#go")).toContainText("Continue here");
+  await expect(sheet.locator("#go")).toBeEnabled();
 });

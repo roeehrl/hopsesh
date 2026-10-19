@@ -30,8 +30,13 @@ brings the one you pick here: in the same agent, or continued in the other one, 
 repository, worktree and paths fixed up. Then it gives you the command to continue.
 
 - **Finds your machines** from Tailscale and `~/.ssh/config`, and connects only to the ones you
-  allow, with your own `ssh`, keys and agent. Nothing to install on the other machines.
-  Machines without SSH keys can log in with a password.
+  allow, with your own `ssh`, keys and agent. Reading needs nothing installed there; machines
+  without SSH keys can log in with a password.
+- **Sets itself up on your other machines when you ask**: `hopsesh hosts setup studio` (or
+  Machines › Set up hopsesh) copies this hopsesh there and starts it in your login session at
+  each login. Then hopsesh sees who is signed in there (a Mac's Keychain included), protects
+  originals left there, and runs sessions there that you work in here. See
+  [Machines](docs/machines.md).
 - **Lists every session of every agent** (Claude Code and Codex) by repository: machine, agent,
   path, branch, worktree, last prompt, last activity, whether it's running, and where else
   it has been.
@@ -50,9 +55,10 @@ repository, worktree and paths fixed up. Then it gives you the command to contin
   as you.
 - **Works from inside your agent**: ask Claude Code or Codex "bring my laptop session here" and
   it plans with hopsesh, then moves only after you say yes.
-- **Multiple accounts**: name and tag independent Claude Code and Codex profiles, discover
-  known roots locally and on allowed machines, and review account-to-account transfers.
-  See [Accounts](docs/accounts.md) for setup and vendor limitations.
+- **Multiple accounts**: see who each tool (Claude Code, Claude desktop, Codex, the Codex app)
+  is signed in as on every machine, add account folders on any machine with hopsesh, start a
+  session as one, and continue any session as another. Every session shows the account that
+  ran it. See [Accounts](docs/accounts.md).
 - **Open a Codex conversation in its desktop app** from the Resume menu, with the exact
   thread selected. Custom account roots use a terminal because desktop links cannot select them.
 - **CLI, TUI and a desktop app for macOS and Windows** on one engine, with `--json` output
@@ -281,9 +287,18 @@ hopsesh push 7f3c2a1e laptop     # on the machine that has the session
 
 The receiver plans with its own agents and settings against a read-only copy of that
 session's files; it can't read or run anything else on the sender. Nothing changes until you
-confirm, and `hopsesh undo` on the sender reverses both machines. Both sides must speak the same
-hopsesh protocol version; otherwise hopsesh asks you to update. Details:
+confirm, and `hopsesh undo` on the sender reverses both machines. The two machines agree on
+the newest protocol both speak; one that is too old is offered an update. Details:
 [docs/design.md §11](docs/design.md#11-peers-working-with-hopsesh-on-the-other-machine).
+
+With hopsesh running in the login session there (`hopsesh hosts setup laptop`), a session can
+also continue right where it is, in a terminal on that machine that you use here:
+
+```sh
+hopsesh terminals run studio --resume 7f3c2a1e   # continue it on studio, work in it here
+hopsesh terminals run studio --dir ~/git/app     # a new session there
+hopsesh doctor --all-machines                     # hopsesh, hooks and skill on every machine
+```
 
 ## Cloud sessions
 

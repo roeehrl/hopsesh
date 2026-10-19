@@ -91,6 +91,11 @@ func processNames(context.Context, []int) (map[int]string, error) {
 	return nil, fmt.Errorf("%w: process names on Windows", agent.ErrUnsupported)
 }
 
+// processCommands is not needed on Windows, where hopsesh quits no session.
+func processCommands(context.Context, []int) (map[int]string, error) {
+	return nil, fmt.Errorf("%w: process command lines on Windows", agent.ErrUnsupported)
+}
+
 // shortPath is a path's 8.3 short form on this machine ("" when it has none).
 func shortPath(p string) string {
 	long, err := windows.UTF16PtrFromString(p)

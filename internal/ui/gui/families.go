@@ -102,7 +102,7 @@ func (a *App) AssociateShell(id, machine, key string) error {
 			return errors.New("the shell runs on this machine; choose a local conversation")
 		}
 		r := a.inv.Relationships()[app.EntryIdentity(e.Machine, key)]
-		if name := a.core.Cfg.FamilyNames[r.Family]; name != "" {
+		if name := a.core.FamilyName(r); name != "" {
 			r.Name = name
 		}
 		relationship = &r

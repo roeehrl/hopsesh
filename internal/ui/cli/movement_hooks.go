@@ -37,10 +37,15 @@ func noticeHookCmd() *cobra.Command {
 			// newRun: no audit log, skill offers, password readers, or session scan.
 			return runPreparedNoticeHook(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), agent.ID(id), profile, func(ctx context.Context, id agent.ID, profile, session, path, event, source string) (preparedMovementNotice, error) {
 				cfg, err := config.Load()
-				if err != nil || cfg.OriginalGuard() == app.GuardOff {
+				if err != nil {
 					return preparedMovementNotice{}, nil
 				}
 				a := app.New(cfg, modules, config.StateDir(), nil)
+				// Which account the session runs under now, for its owner record.
+				a.RecordOwner(ctx, id, profile, session)
+				if cfg.OriginalGuard() == app.GuardOff {
+					return preparedMovementNotice{}, nil
+				}
 				// Work was added while this window was open: reopening loads it.
 				if text, block, handled := a.ReopenNotice(ctx, id, profile, session, event, source); handled {
 					return preparedMovementNotice{Text: text, Block: block}, nil
@@ -169,6 +174,9 @@ func noticesCmd() *cobra.Command {
 					statuses, err = r.app.RemoveNoticeHooks(cmd.Context(), agent.ID(id), profile)
 				default:
 					statuses, err = r.app.NoticeHooksFor(cmd.Context(), agent.ID(id), profile)
+				}
+				if err == nil {
+					err = app.MovementHookErrors(action, statuses)
 				}
 				if r.jsonOut {
 					_ = r.emitJSON(statuses)

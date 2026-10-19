@@ -309,12 +309,16 @@ export const accountTitle = e => {
   const p = e?.profile, o = e?.owner || {};
   if (!p) return "No registered account profile";
   const where = `Stored in ${p.name} (${p.root}), which ${signedInNow(p)}.${p.error ? " " + p.error + "." : ""}`;
-  if (o.email && o.current) return `Run by ${o.email}, as ${e.agentName} recorded it. ${where}`;
-  if (o.email) return `Run by ${o.email}, as ${e.agentName} recorded it${o.profile ? ` (signed in to ${o.profile} now)` : ""}. ${where}`;
-  if (o.recorded && !o.current) return `${e.agentName} recorded an account that no profile here is signed in to now. ${where}`;
-  return `${e.agentName} did not record which account ran this session. ${where}`;
+  const before = o.earlier ? ` Before that it ran under ${o.earlier}.` : "";
+  if (o.email && o.current) return `Run by ${o.email}, as recorded.${before} ${where}`;
+  if (o.email) return `Run by ${o.email}, as recorded${o.profile ? ` (signed in to ${o.profile} now)` : ""}.${before} ${where}`;
+  if (o.recorded && !o.current) return `Run by an account that no profile here is signed in to now, as recorded.${before} ${where}`;
+  return `No record says which account ran this session. ${where}`;
 };
-const ownerShown = e => e?.owner?.email || (e?.owner?.recorded && !e.owner.current ? "another account" : "");
+export const ownerShown = e => e?.owner?.email || (e?.owner?.recorded && !e.owner.current && !e.owner.pending ? "another account" : "");
 export const accountGroupLabel = e => e.profile ? `${ownerShown(e) || "Account not recorded"} · ${e.agentName} · ${e.machine === here() ? sys.Here : e.machine}${!e.profile.default || !e.owner?.current ? " · in " + e.profile.name : ""}` : "No account profile";
-// accountKey files a session under its root and its recorded account, for filters and groups.
-export const accountKey = e => (e.profile?.id || "") + "\u0000" + (e.owner?.email || (e.owner?.recorded ? (e.owner.current ? "current" : "other") : ""));
+// accountKey files a session under its root and its recorded account's fingerprint, for
+// filters and groups: the same after any sign-in change. accountKeyLegacy is 0.4.5's,
+// so a saved filter keeps matching.
+export const accountKey = e => (e.profile?.id || "") + "\u0000" + (e.owner?.key || "");
+export const accountKeyLegacy = e => (e.profile?.id || "") + "\u0000" + (e.owner?.email || (e.owner?.recorded ? (e.owner.current ? "current" : "other") : ""));

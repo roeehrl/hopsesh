@@ -306,6 +306,24 @@ func (p remoteProcs) Names(ctx context.Context, pids []int) (map[int]string, err
 	return out, nil
 }
 
+func (p remoteProcs) Commands(ctx context.Context, pids []int) (map[int]string, error) {
+	if len(pids) == 0 {
+		return map[int]string{}, nil
+	}
+	if p.m.Facts.OS == "windows" {
+		return nil, fmt.Errorf("%w: process command lines on Windows", agent.ErrUnsupported)
+	}
+	ids := make([]string, len(pids))
+	for i, id := range pids {
+		ids[i] = strconv.Itoa(id)
+	}
+	res, err := p.m.Conn.RunSh(ctx, `ps -o pid=,command= -p "$1" 2>/dev/null; exit 0`, strings.Join(ids, ","))
+	if err != nil {
+		return nil, err
+	}
+	return parseCommands(string(res)), nil
+}
+
 // holdersScript prints "path<TAB>pid" for each process holding a lock on each path that is
 // locked: from /proc/locks on Linux, from lsof elsewhere.
 const holdersScript = `for p in "$@"; do

@@ -15,9 +15,12 @@ test("review: the Sessions warning asks to approve the hopsesh hooks in Codex", 
   await world(page, "review");
   const card = page.getByRole("status", { name: "Movement protection" });
   await expect(card).toContainText("Approve hopsesh in Codex to finish", { timeout: 30_000 });
-  await expect(card).toContainText("waiting for your approval in Codex");
+  await expect(card).toContainText("Codex hook · installed · waiting for your approval in Codex");
+  await expect(card).toContainText("never approves hooks for you");
   await expect(card.getByRole("button", { name: "Set up protection" })).toHaveCount(0);
-  await expect(card.getByRole("button")).toHaveText(["Approve in Codex…", "Not now", "Check again"]);
+  // "Open ChatGPT desktop" joins these on a machine where the Codex app is installed.
+  const buttons = await card.getByRole("button").allTextContents();
+  expect(buttons.filter((b) => !/^Open .* desktop$/.test(b))).toEqual(["Approve in Codex…", "Not now", "Check again"]);
   await card.getByRole("button", { name: "Approve in Codex…" }).click();
   const dialog = page.getByRole("dialog").last();
   await expect(dialog).toContainText("/hooks");
@@ -66,8 +69,72 @@ test("setup: one card, one action, agents named without account labels", async (
   await expect(card.getByRole("button", { name: "Set up protection" })).toHaveCount(1);
   await expect(card.getByRole("button", { name: /Install/ })).toHaveCount(0);
   await expect(card).not.toContainText("default ·");
+  // Every detected agent is listed with what its hook covers.
+  await expect(card).toContainText("Claude Code hook · not set up");
+  await expect(card).toContainText("Codex hook · not set up");
+  await expect(card).toContainText("for Terminal");
   await card.getByRole("button", { name: "Not now" }).click();
   await expect(card).toHaveCount(0);
+  // "Not now" is remembered (until the problems change), not only for this page.
+  await page.reload();
+  await expect(page.locator("#fresh")).toContainText("updated", { timeout: 30_000 });
+  await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible();
+  await expect.poll(async () => page.evaluate(async () => (await import("/guard.js")).hookHealth()?.dismissed), { timeout: 30_000 }).toBe(true);
+  await expect(card).toHaveCount(0);
+});
+
+// The card's states, from a scripted backend: a failed step says why and offers Try
+// again, an agent that cannot take the hook says why, results stay until Done, Check
+// again never hides the card, and a Codex hook waiting for approval says where to approve.
+test("setup results stay on the card until Done", async ({ page }) => {
+  const claude = { agent: "claude", profile: "", supported: true, enabled: true, installed: false, cli: true, app: "Claude", version: "2.1.284" };
+  const oldCodex = { agent: "codex", profile: "", supported: false, enabled: true, installed: false, cli: true, version: "0.120.1", reason: "needs Codex 0.129.0 or newer; found 0.120.1" };
+  const appCodex = { agent: "codex", profile: "", supported: true, enabled: true, installed: true, runtime: "app", app: "ChatGPT", version: "0.162.0-alpha.17.2", trust: { state: "needs-review" } };
+  let health: any = { mode: "block", cliReady: true, cli: { state: "ours" }, hooks: [claude, oldCodex], problems: [{ agent: "claude", state: "not-installed" }, { agent: "codex", state: "unsupported" }], fingerprint: "fp1", dismissed: false };
+  let install: any[] = [{ ...claude, result: "failed", reason: "hook settings changed during update; retry" }, { ...oldCodex, result: "unsupported" }];
+  const calls: string[] = [];
+  await page.route("**/call", async (route) => {
+    const req = route.request().postDataJSON();
+    if (req.m === "HookHealth") return route.fulfill({ json: { result: health } });
+    if (req.m === "InstallNoticeHooks") { calls.push("install"); return route.fulfill({ json: { result: install } }); }
+    if (req.m === "OpenAgentApp") { calls.push("open:" + req.args[0]); return route.fulfill({ json: { result: "ChatGPT" } }); }
+    if (req.m === "DismissProtection") { calls.push("dismiss"); return route.fulfill({ json: { result: null } }); }
+    return route.continue();
+  });
+  const r = await page.request.post("/reset?movement=1");
+  expect(r.ok(), await r.text()).toBeTruthy();
+  await page.goto("/");
+  const card = page.getByRole("status", { name: "Movement protection" });
+  await expect(card).toContainText("Protect moved sessions", { timeout: 30_000 });
+  await expect(card).toContainText("Claude Code hook · not set up");
+  await expect(card).toContainText("for Terminal and Claude desktop");
+  await expect(card).toContainText("Codex hook · needs Codex 0.129.0 or newer; found 0.120.1");
+
+  await card.getByRole("button", { name: "Set up protection" }).click();
+  await expect(card).toContainText("Protection isn't fully set up");
+  await expect(card).toContainText("Claude Code hook · couldn't set up: hook settings changed during update; retry");
+  await expect(card).toContainText("Codex hook · needs Codex 0.129.0 or newer; found 0.120.1");
+  await expect(card.getByRole("button", { name: "Not now" })).toHaveCount(0);
+  await expect(card.getByRole("button", { name: "Done" })).toBeVisible();
+
+  install = [{ ...claude, installed: true, result: "installed" }, { ...appCodex, result: "needs-approval" }];
+  health = { ...health, hooks: [{ ...claude, installed: true }, appCodex], problems: [{ agent: "codex", state: "needs-review" }], fingerprint: "fp2" };
+  await card.getByRole("button", { name: "Try again" }).click();
+  await expect(card).toContainText("Approve hopsesh in Codex to finish");
+  await expect(card).toContainText("Claude Code hook · installed");
+  await expect(card).toContainText("Codex hook · installed · waiting for your approval in Codex");
+  await expect(card).toContainText("for ChatGPT desktop (built-in Codex 0.162.0-alpha.17.2)");
+  await expect(card).toContainText("In ChatGPT desktop, open Codex and choose Review hooks (or run /hooks in the terminal), then trust the two hopsesh hooks. hopsesh never approves hooks for you.");
+  await card.getByRole("button", { name: "Open ChatGPT desktop" }).click();
+  await expect.poll(() => calls).toEqual(["install", "install", "open:codex"]);
+
+  health = { ...health, hooks: [{ ...claude, installed: true }, { ...appCodex, trust: { state: "trusted" } }], problems: [], fingerprint: "" };
+  await card.getByRole("button", { name: "Check again" }).click();
+  await expect(card).toContainText("Protection is set up");
+  await expect(card).toContainText("Codex hook · installed");
+  await card.getByRole("button", { name: "Done" }).click();
+  await expect(card).toHaveCount(0);
+  expect(calls).not.toContain("dismiss");
 });
 
 test("original selection preserves conversation parents, row identity and height through refresh", async ({ page }) => {

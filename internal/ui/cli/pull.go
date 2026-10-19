@@ -344,6 +344,9 @@ func (r *run) renderPlan(p *move.Plan) {
 	if r.app != nil {
 		guard += " (" + r.app.Cfg.OriginalGuard() + ")"
 	}
+	if p.Unprotected {
+		guard = "not protected: no hopsesh on " + p.Source.Location
+	}
 	r.printf("  original  %s\n", map[bool]string{true: guard, false: "left alone"}[p.Options.Notify])
 	switch p.Repo.Action {
 	case move.RepoUse:

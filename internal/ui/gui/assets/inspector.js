@@ -92,6 +92,10 @@ function header(e) {
   const g = e.group;
   const facts = [];
   if(e.profile) facts.push(h("span",{title:accountTitle(e)},`${accountShown(e)||"Account not recorded"}${e.profile?.tags?.length?" · "+e.profile.tags.join(", "):""}`));
+  // Continuing it here runs under the folder's sign-in now, which may not be the account
+  // that ran it: say so before anyone continues.
+  const now=e.profile?.account?.loggedIn?(e.profile.account.email||e.profile.account.label):"";
+  if(now&&e.owner?.recorded&&!e.owner.current) facts.push(h("span",{class:"owner-switch",title:e.agent==="claude"?"Claude Code continues it under that account; reasoning recorded under the other account is not visible to it.":"Codex cannot resume it as it is under another account; Move to this same place continues a cleaned copy."},`Continues as ${now}`));
   if (e.cloud) {
     if (e.cloud.repo || !g.noRepo) facts.push(h("span", {}, (e.cloud.repo || g.name).split("/").pop()));
     if (e.cloud.branch) facts.push(h("span", { class: "mono" }, e.cloud.branch));

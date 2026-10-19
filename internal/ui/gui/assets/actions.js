@@ -8,7 +8,7 @@ import { refreshSelection } from "./sessions.js";
 import { role, removeBlock, restoreBlock } from "./guard.js";
 import { go, api, state, sys, here, agentInfo, cloudOf, cloudTitle, toast, fail, errText, cap, entries, count, ago, h, icon, ICONS, agentBadge, pending } from "./core.js";
 import { returnActions, returnChooser, showMovementDestination } from "./returns.js";
-import { planFor } from "./plan.js";
+import { planFor, chooseTarget, bringLive } from "./plan.js";
 import { tabs, resume, showTerminal, moveToTerminal, openShell, associateShell, signIn } from "./term.js";
 import { planHandoff } from "./handoff.js";
 import { planHop } from "./hop.js";
@@ -33,7 +33,7 @@ export function placeName(p, e) {
     case "terminal": return "Terminal";
     case "wt": return "Windows Terminal";
     case "claude-app": return "Claude app";
-    case "codex-app": return "Codex app";
+    case "codex-app": return `${liveOf(e || {}).app || "ChatGPT"} desktop`; // one shared app process: shown, never quit
     case "ide": return p.app || "an editor";
     case "tmux": return "tmux";
     case "ssh": return "an ssh login";
@@ -58,7 +58,7 @@ export function placesOf(e) {
   if (ts.length) out.push({ kind: "hopsesh", count: ts.length, waiting: ts.some((t) => t.attention), tabs: ts });
   const lv = liveOf(e);
   if (lv.live) for (const p of lv.places || []) out.push(Object.assign({}, p, { waiting: p.waiting || (lv.needs && !ts.length && (lv.places || []).length === 1) }));
-  if (lv.live && !ts.length && !(lv.places || []).length) out.push({ kind: lv.app ? "claude-app" : "unknown", count: 1, waiting: !!lv.needs });
+  if (lv.live && !ts.length && !(lv.places || []).length) out.push({ kind: lv.app ? (e.agent === "codex" ? "codex-app" : "claude-app") : "unknown", count: 1, waiting: !!lv.needs });
   return out;
 }
 export const placeCount = (ps) => ps.reduce((n, p) => n + (p.count || 1), 0);
@@ -160,7 +160,7 @@ function localModel(e) {
     const guardedDeparture = e.guard?.mode === "block" && moved?.machine && moved?.key;
     if (places.length && !guardedDeparture) {
       const first = tab || places.find(canShow) || places[0];
-      const show = (p) => ({ id: "show:" + p.kind, label: canShow(p) ? (p.kind === "ide" ? `Show ${placeName(p, e)}` : `Show in ${placeName(p, e)}`) : `Running in ${placeName(p, e)}`, short: "Show",
+      const show = (p) => ({ id: "show:" + p.kind, label: canShow(p) ? (p.kind === "ide" ? `Show ${placeName(p, e)}` : p.kind === "codex-app" ? `Open in ${placeName(p, e)}` : `Show in ${placeName(p, e)}`) : `Running in ${placeName(p, e)}`, short: "Show",
         disabled: !canShow(p) || ((p.kind === "claude-app" || p.kind === "codex-app") && !e.canApp), why: ((p.kind === "claude-app" || p.kind === "codex-app") && !e.canApp) ? e.appWhy : canShow(p) ? "" : `hopsesh can't show a session in ${placeName(p, e)}`, run: () => showPlace(e, p) });
       m.primary = show(first);
       if (n >= 2) {
@@ -204,7 +204,21 @@ function localModel(e) {
     }
     m.move = moveGroups(e, true, !!tab);
   } else {
-    m.primary = { id: "bring", label: `Bring to ${sys.here}…`, short: "Bring…", run: () => planFor(e, { target: "" }) };
+    const presence = (state.scan?.machines || []).find((x) => x.name === e.machine)?.presence;
+    const bring = { id: "bring", label: `Bring to ${sys.here}…`, short: "Bring…", run: () => (lv.live && presence === "login" ? bringLive(e) : planFor(e, { target: "" })) };
+    // A session on a machine with hopsesh in its login session continues right there (its
+    // sign-in works there) and is worked in here.
+    const there = { id: "continue-there", label: `Continue on ${e.machine}`, short: `Continue on ${e.machine}`, sub: "Runs there, with its files and sign-in; you work in it here",
+      run: () => pending(`Opening ${e.title} on ${e.machine}`, () => api("ContinueOnMachine", e.machine, e.key).catch(fail), `remote:${key(e)}`) };
+    if (presence === "login" && ["claude", "codex"].includes(e.agent)) {
+      m.primary = there;
+      m.chevron = [bring];
+      m.chevronLabel = "Other choices";
+    } else {
+      m.primary = bring;
+      const why = { ssh: `Needs hopsesh on ${e.machine}: set it up in Machines`, older: `Update hopsesh on ${e.machine} first (Machines)`, installed: `hopsesh on ${e.machine} isn't running in a login session` }[presence];
+      if (why) { m.chevron = [{ ...there, disabled: true, why }]; m.chevronLabel = "Other choices"; }
+    }
     if (lv.live) m.caption = `Still open on ${e.machine}; later messages there stay there`;
     m.move = moveGroups(e, false, false);
   }
@@ -294,6 +308,7 @@ function moveGroups(e, local, inTab) {
   const out = [];
   const block = (it) => (inTab ? Object.assign(it, { disabled: true, why: IN_TAB }) : it);
   const machine = [];
+  if (["claude", "codex"].includes(e.agent)) machine.push(block({ id: "targets", label: "Choose where it continues…", sub: "Any machine, folder and tool, with who it runs as there", icon: icon(ICONS.here, 16), run: () => chooseTarget(e) }));
   if (local) {
     const peers = state.scan?.peers || [];
     for (const p of peers) machine.push(block({ id: "send:" + p, label: `Send to ${p}…`, icon: icon(ICONS.here, 16), run: () => planFor(e, { target: "", sendTo: p }) }));

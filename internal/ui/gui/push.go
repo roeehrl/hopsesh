@@ -88,6 +88,9 @@ func (a *App) PushApply() (*DoneDTO, error) {
 	if pl.NoWork && pl.SyncTo != nil && pl.SyncTo.Title != "" {
 		d.Title = pl.SyncTo.Title
 	}
+	if res.Key.Session != "" {
+		d.RemoteKey, d.RemoteLogin = res.Key.String(), p.Peer.Login
+	}
 	for _, n := range res.Rewrite.Replacements {
 		d.Paths += n
 	}

@@ -91,3 +91,46 @@ test("adding a machine starts one scan, disables Scan, and explains failures wit
   await page.getByRole("button", { name: "Back to sessions" }).click();
   await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible();
 });
+
+// What hopsesh can do on each machine, and setting it up on one reached over SSH only.
+test("each machine says what hopsesh can do there, and SSH-only ones can be set up", async ({ page }, testInfo) => {
+  const row = (name: string, presence: string, hopsesh: string, can: [string, boolean][]) => ({
+    name, destination: "me@" + name, os: "darwin", auth: "key", keychain: false, canRemember: true, scanned: true,
+    scan: { phase: "done", finished: new Date().toISOString() }, status: "ok", hint: "", error: "", agents: ["Claude Code 2.1.299"], hopsesh, sessions: 4,
+    presence, can: can.map(([text, ok]) => ({ text, ok })) });
+  let setups = 0;
+  await page.route("**/call", async (route) => {
+    const m = route.request().postDataJSON().m;
+    if (m === "SetUpMachine") { setups++; return route.fulfill({ json: { result: { machine: "lurus", version: "0.5.0", login: true, steps: [] } } }); }
+    if (m === "ScanMachine" || m === "MachineScans") return route.fulfill({ json: { result: m === "ScanMachine" ? null : {} } });
+    if (m !== "Machines") return route.continue();
+    const response = await route.fetch(), body = await response.json();
+    body.result.machines = [
+      row("studio", "login", "0.5.0", [["Lists sessions, live and moved", true], ["Checks sign-ins there (Keychain included)", true], ["Runs sessions there; you work in them here", true]]),
+      row("roys-mbp", "older", "0.4.3", [["Lists sessions", true], ["Runs sessions there", false]]),
+      row("lurus", "ssh", "", [["Lists sessions (no live status)", true], ["Sign-ins: the Keychain is locked to SSH", false], ["Originals left there aren't protected", false]]),
+    ];
+    await route.fulfill({ json: body });
+  });
+  await menu(page, "machines");
+  const studio = page.locator(".mgrid", { hasText: "me@studio" }), lurus = page.locator(".mgrid", { hasText: "me@lurus" }), roys = page.locator(".mgrid", { hasText: "me@roys-mbp" });
+  await expect(studio).toContainText("hopsesh 0.5.0 running there");
+  await expect(studio.getByRole("list")).toContainText("Checks sign-ins there (Keychain included)");
+  await expect(studio.getByRole("button", { name: /Set up hopsesh/ })).toHaveCount(0);
+  await expect(roys).toContainText("hopsesh 0.4.3 there · update needed");
+  await expect(roys.getByRole("button", { name: "Update hopsesh on roys-mbp" })).toBeVisible();
+  await expect(lurus).toContainText("SSH only: no hopsesh there");
+  await expect(lurus).toContainText("which is locked to SSH");
+  await page.screenshot({ path: testInfo.outputPath("machines-presence.png"), fullPage: true });
+  await lurus.getByRole("button", { name: "Set up hopsesh on lurus…" }).click();
+  const d = page.locator("#dlg");
+  await expect(d).toContainText("~/.hopsesh/bin");
+  await expect(d).toContainText("A hopsesh you installed there yourself is left as it is.");
+  await expect(d).toContainText("hopsesh serve uninstall");
+  expect(setups).toBe(0);
+  await d.getByRole("button", { name: "Set up hopsesh on lurus", exact: true }).click();
+  await expect(d).toContainText("hopsesh 0.5.0 runs in the login session on lurus.");
+  expect(setups).toBe(1);
+  await d.getByRole("button", { name: "Done" }).click();
+  await expect(d).toBeHidden();
+});

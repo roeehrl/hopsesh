@@ -93,6 +93,12 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 			logins := inv.Logins()
 			if r.jsonOut {
 				out := map[string]any{"machines": inv.Machines, "clouds": inv.Clouds, "groups": groups, "relationships": inv.Relationships()}
+				// The account that ran each session (its profile is only its folder's sign-in now).
+				owners := map[string]app.SessionOwner{}
+				for _, e := range inv.Entries {
+					owners[app.EntryIdentity(e.Machine, e.Session.Key.String())] = logins.OwnerOf(e)
+				}
+				out["owners"] = owners
 				var adopted, waiting []app.Brought
 				for _, f := range inv.Adopted {
 					adopted = append(adopted, r.app.Brought(f))

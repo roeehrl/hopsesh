@@ -16,9 +16,19 @@ Everything you need is on disk; you have no network access and no shell.
   sections first.
 - `intel/manifest.json`: under `project`, what {{project}} is; under `targets`, what each
   target watches. `watch.relies` lists the flags and subcommands {{project}} relies on.
-- `intel/help/<target>/`: help output of the latest CLI (`*.latest.txt`), of the tested one
-  where there is a tested version (`*.tested.txt`), their diffs (`*.diff`; against last week
-  when there is no tested version), `removed-flags.txt`, `added-flags.txt` and `relies.tsv`.
+- `intel/help/<target>/`: help output of the latest CLI (`*.latest.txt`), of the baseline
+  (`*.baseline.txt`: the tested version, raised to the highest version floor the code gates a
+  feature on, `baseline` in the manifest), their diffs (`*.diff`; against last week when there
+  is no baseline), `removed-flags.txt`, `added-flags.txt`, `relies.tsv`, and for targets with
+  `floors` the help at each floor (`*.floor-<version>.txt`) and `floors.tsv`: whether what
+  each gated feature runs (flags, app-server methods) is there at its floor and at the latest
+  (`-` means it could not be checked: incomplete coverage, not absence).
+- `intel/formats/<target>.tsv`: every record and identity field {{project}} reads for the
+  target (`watch.formats` in the manifest: transcripts, sign-in records, live registries,
+  hook payloads and trust, writer locks, desktop app bundles and URL schemes), counted in the
+  target's docs, in this week's changes and in the upstream code now and last week. A field
+  gone from the code, or named in a change, is where to look first; read the format's
+  `readers` before claiming an effect.
 - `intel/docs/*.diff`: docs pages that changed since last week. `intel/sources/` has the
   current pages, `intel/docs-hashes.json` their status.
 - `intel/feeds/<target>/`: changelog and release entries since the tested version, or since
@@ -45,9 +55,11 @@ Rules:
 2. Every finding must name the upstream source and the code it touches. {{cite}} If you
    can't point at the code, it is not a break; make it a risk or leave it out.
 3. A failing real-agent test is a break. So is a flag or subcommand in a target's
-   `watch.relies` that was in the tested help (or last week's) and is gone from the latest;
-   `probe.md` marks it "Relied on and gone". A renamed flag shows in the help diff as a
-   removed flag plus an added one, and counts as removed.
+   `watch.relies` that was in the baseline help (or last week's) and is gone from the latest;
+   `probe.md` marks it "Relied on and gone", and what a floor's gated feature runs "Gated on
+   a floor and gone from the latest". A renamed flag shows in the help diff as a
+   removed flag plus an added one, and counts as removed. A real-agent run in which no test
+   passed (all skipped) is incomplete coverage, not a pass.
 4. New features worth supporting (a new session field, a new resume option, a cloud command
    that lists, fetches or hands off sessions) are `info`, and only when they fit what
    {{project}} does or plans.

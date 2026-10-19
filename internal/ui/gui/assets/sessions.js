@@ -314,8 +314,42 @@ function notices() {
     h("b", { style: "flex:1 1 360px" }, i.skillState === "stale" ? "The hopsesh skill is out of date" : "The hopsesh skill is damaged"),
     h("button", { class: "btn primary", onclick: async () => { try { await withCLI(() => api("InstallSkill", false, false)); toast("Updated the hopsesh skill"); } catch (e) { fail(e); } state.info = await api("Info"); render(); } }, i.skillState === "stale" ? "Update it" : "Repair it")));
   out.push(healthNotice(render));
+  out.push(machineNotices());
   out.push(setupLine());
   return out;
+}
+
+// machineNotices are what another machine needs: hopsesh there, an update, or its
+// protection (checked after each scan; "Not now" holds until the findings change).
+let mNotices = null, mNoticesFor = "";
+const mDismissed = new Set(); // answered "Not now" here: a load already under way can't bring it back
+async function loadMachineNotices() {
+  let next;
+  try { next = await api("MachineNotices"); } catch { next = []; }
+  // Redraw only when they changed, and only the notices: the list and the
+  // details being worked in keep their focus and state.
+  if (JSON.stringify(next) === JSON.stringify(mNotices)) return;
+  mNotices = next;
+  drawMachineNotices();
+}
+const drawMachineNotices = () => document.getElementById("machine-notices")?.replaceChildren(...machineNoticeCards());
+function machineNotices() {
+  // Checked again when the machines change, not on every update of the sessions.
+  const key = JSON.stringify((state.scan?.machines || []).map((m) => [m.name, m.status, m.presence, m.hopsesh, m.sessions]));
+  if (key !== mNoticesFor) { mNoticesFor = key; loadMachineNotices(); }
+  return h("div", { id: "machine-notices", style: "display:contents" }, machineNoticeCards());
+}
+function machineNoticeCards() {
+  return (mNotices || []).filter((n) => !mDismissed.has(n.fingerprint)).map((n) => h("section", { class: "card notice", role: "status", "aria-label": n.title, "data-notice": n.kind },
+    h("div", { style: "flex:1 1 360px" }, h("b", {}, n.title), " ", h("span", { style: "font-size:12.5px" }, n.text)),
+    h("button", { class: "btn primary", onclick: async () => {
+      if (n.kind === "protection") {
+        try { await api("SetUpProtection", n.machine, false); toast(`Set up on ${n.machine}`); } catch (e) { fail(e); }
+        return loadMachineNotices();
+      }
+      go("machines");
+    } }, n.action),
+    h("button", { class: "btn", onclick: async () => { mDismissed.add(n.fingerprint); drawMachineNotices(); try { await api("DismissMachineNotice", n.fingerprint); } catch (e) { mDismissed.delete(n.fingerprint); fail(e); drawMachineNotices(); } } }, "Not now")));
 }
 
 // setupLine is the one line of what is left to set up, on All sessions only: each step
