@@ -39,8 +39,13 @@ func TestRelayRejectedUploadSQLiteR2(t *testing.T) {
 		} else {
 			body, err := io.ReadAll(io.LimitReader(reply.Body, 4096))
 			_ = reply.Body.Close()
-			if err != nil || reply.StatusCode != http.StatusForbidden {
+			if reply.StatusCode != http.StatusForbidden {
 				t.Fatalf("request %d large upload: HTTP %d: %s: %v", i, reply.StatusCode, body, err)
+			}
+			if err != nil {
+				// The refusal arrived; the listener then closed the connection it
+				// never read the body from, as it may while the client still writes.
+				t.Logf("refused upload closed early on round %d: %v", i, err)
 			}
 		}
 		if err := transport.Submit(t.Context(), relay.Envelope{}); !errors.Is(err, relay.ErrAuthorizationRefused) {
