@@ -3,7 +3,7 @@
 // listview.js), the selected session on the right (inspector.js). Every action on a
 // session comes from actions.js, which the palette uses too.
 import { accountLabel, accountShown, accountTitle, loadError, api, on, h, fill, icon, ICONS, view, state, screen, go, current, loading, toast, fail, cap, ago, agentBadge, machineStatus, sys, keys,
-  entries, selected, copyEntry, here, agentInfo, $, count, clouds, cloudOf, cloudState, cloudChip, dialog, errText, rich, cloudTitle } from "./core.js";
+  entries, selected, copyEntry, here, agentInfo, $, count, clouds, cloudOf, cloudState, cloudChip, dialog, errText, rich, cloudTitle, bytes } from "./core.js";
 import { planPicked } from "./plan.js";
 import { healthNotice, loadHookHealth, hookHealth, withCLI, chip as roleChip } from "./guard.js";
 import { dividers, apply as applyLayout, statusHeader } from "./layout.js";
@@ -478,7 +478,7 @@ if(accountShown(e)) chips.push(h("span", {class:"chip account-chip"+(e.owner?.re
       h("span", { class: "r-line" }, h("span", { class: "t", title: e.title }, e.title),
         h("span", { class: "b" }, [repoWord, branch].filter(Boolean).join(" · "))),
       h("span", { class: "s" }, bits.join(" · ") || " ")),
-    rowStatus(k, words, rc, chips, `${where} · ${ago(e.lastActive)}`));
+    rowStatus(k, words, rc, chips, [where, ago(e.lastActive), e.sizeKB ? bytes(e.sizeKB * 1024) : ""].filter(Boolean).join(" · ")));
   if (!lines.length) return el;
   const out = document.createDocumentFragment();
   out.append(el, ...lines);

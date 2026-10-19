@@ -6,6 +6,9 @@ test.beforeEach(async ({ page }) => {
   await menu(page, "settings");
   await page.getByRole("tab", { name: "Internet delivery" }).click();
 });
+// The tests patch Settings responses; let an in-flight one finish before the page
+// closes, or teardown disposes the response its handler is still reading.
+test.afterEach(async ({ page }) => { await page.unrouteAll({ behavior: "wait" }); });
 
 test("saved handoff ancestry requires explicit provider-matched choices and a fresh review", async ({page}) => {
  const task={id:"a".repeat(32),provider:"claude-hosted",session:"rebuilt-native-session"};
