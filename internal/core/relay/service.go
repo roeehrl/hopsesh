@@ -177,6 +177,11 @@ func (s *Service) Run(ctx context.Context) error {
 			s.health.Error = err.Error()
 		} else {
 			s.health.LastSuccess = time.Now().UTC()
+			if s.health.DeliveryMode == "" {
+				// Connected before the notification stream reported: until it does,
+				// delivery is HTTP reconciliation.
+				s.health.DeliveryMode = "http-fallback"
+			}
 		}
 		s.mu.Unlock()
 		if s.Notify != nil {
