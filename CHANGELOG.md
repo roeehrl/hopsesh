@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+
+- Sizes: `hopsesh ls` shows each session's size and each group's total, and ends with what
+  each agent's sessions take on each machine (for example `my-mac (here)  1.3 GB: Claude Code 1.2 GB,
+  Codex 172.7 MB`). In the app, a session's size is beside when it was last active, a
+  group's total is in its heading, and the Machines screen says what each machine's
+  sessions take. `hopsesh show` gives the size in KB, MB or GB.
+
 ### Fixed
 
 - Undo removes the folders an operation's writes made, once they are empty: undoing a push

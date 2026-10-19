@@ -25,6 +25,8 @@ type HereDTO struct {
 	Agents  []string `json:"agents"`
 	Hopsesh string   `json:"hopsesh"`
 	Receive bool     `json:"receive"`
+	// Storage is what each agent's sessions take here.
+	Storage []app.AgentUsage `json:"storage"`
 }
 
 // MachineRow is a machine you added: how hopsesh logs in, and what the last scan found.
@@ -43,10 +45,12 @@ type MachineRow struct {
 	Agents      []string    `json:"agents"`
 	Hopsesh     string      `json:"hopsesh"`
 	Sessions    int         `json:"sessions"`
+	// Storage is what each agent's sessions take there.
+	Storage []app.AgentUsage `json:"storage"`
 	// Presence is how hopsesh works with it (app.Presence*; "" before a scan reached it),
 	// and Can what that lets you do there.
-	Presence    string   `json:"presence,omitempty"`
-	PresenceWhy string   `json:"presenceWhy,omitempty"`
+	Presence    string       `json:"presence,omitempty"`
+	PresenceWhy string       `json:"presenceWhy,omitempty"`
 	Can         []AbilityDTO `json:"can"`
 }
 
@@ -102,7 +106,7 @@ func (a *App) Machines() MachinesDTO {
 	cands, discoveryErr := hosts.Discover(ctx)
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	out := MachinesDTO{Here: HereDTO{Name: app.LocalName(), Hopsesh: version.Version, Receive: a.core.Cfg.Peer.Receive, Agents: []string{}},
+	out := MachinesDTO{Here: HereDTO{Name: app.LocalName(), Hopsesh: version.Version, Receive: a.core.Cfg.Peer.Receive, Agents: []string{}, Storage: []app.AgentUsage{}},
 		Machines: []MachineRow{}, Found: []FoundRow{}, Clouds: []CloudDTO{}}
 	if discoveryErr != nil {
 		out.DiscoveryError = discoveryErr.Error()
@@ -122,6 +126,7 @@ func (a *App) Machines() MachinesDTO {
 		}
 		if here := a.inv.Local(); here != nil {
 			out.Here.Agents = agentNames(here)
+			out.Here.Storage = a.inv.Usage(here.Name)
 		}
 	}
 	added := map[string]bool{}
@@ -130,7 +135,7 @@ func (a *App) Machines() MachinesDTO {
 			continue
 		}
 		added[h.Name] = true
-		r := MachineRow{Name: h.Name, Destination: h.Destination, OS: h.OS, Auth: "key", Keychain: h.Keychain, CanRemember: secrets.Available(), Agents: []string{}, Can: []AbilityDTO{}}
+		r := MachineRow{Name: h.Name, Destination: h.Destination, OS: h.OS, Auth: "key", Keychain: h.Keychain, CanRemember: secrets.Available(), Agents: []string{}, Storage: []app.AgentUsage{}, Can: []AbilityDTO{}}
 		r.Scan = a.scans[h.Name]
 		if h.UsesPassword() {
 			r.Auth = "password"
@@ -148,6 +153,7 @@ func (a *App) Machines() MachinesDTO {
 					r.Sessions++
 				}
 			}
+			r.Storage = a.inv.Usage(m.Name)
 		}
 		out.Machines = append(out.Machines, r)
 	}
