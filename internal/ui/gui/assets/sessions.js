@@ -905,7 +905,7 @@ function drawDiscovery(){
  if(!backgroundDirty||current!=="sessions"||document.hidden)return;
  // The filter field is kept, focus and selection, across a render. Anything else the
  // user is in the middle of only postpones the update: it is retried, never dropped.
- if(pointerHeld||document.body.classList.contains("resizing")||document.querySelector("dialog[open],button:active")||isOpen()||document.activeElement?.matches("textarea,select,.divider")){
+ if(pointerHeld||document.body.classList.contains("resizing")||document.querySelector("dialog[open],button:active")||isOpen()||document.activeElement?.matches("textarea,select,.divider,.col-resize")){
   discoveryTimer=setTimeout(drawDiscovery,500);return;
  }
  backgroundDirty=false;render();

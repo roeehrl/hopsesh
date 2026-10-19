@@ -49,7 +49,11 @@ test("the status column resizes by pointer and keyboard, fits, and is remembered
   await expect(handle).toHaveAttribute("aria-valuenow", "220");
   await noClippedChips(page);
 
-  const box = (await handle.boundingBox())!;
+  // A background publication can redraw the list (and its header) just before the
+  // drag: measure the handle once it is attached, then press on it.
+  let box: { x: number; y: number; width: number; height: number } | null = null;
+  await expect.poll(async () => (box = await handle.boundingBox()) !== null).toBe(true);
+  box = box!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
   await page.mouse.move(box.x - 80, box.y + box.height / 2, { steps: 5 });
