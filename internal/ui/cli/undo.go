@@ -68,6 +68,9 @@ lost; --force undoes it anyway.`,
 				return err
 			}
 			r.printf("Undid %q (%d change(s)).\n", j.Title, j.Changes())
+			for _, l := range j.Left {
+				r.printf("Left the clone %s, so nothing in it is lost.\n", l)
+			}
 			for _, k := range j.Kept {
 				r.printf("Kept the branch %s, as you chose (delete_branch = never).\n", k)
 			}

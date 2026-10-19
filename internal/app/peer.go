@@ -112,8 +112,12 @@ func (s *peerSession) handle(ctx context.Context, method string, params json.Raw
 		if err := json.Unmarshal(params, &req); err != nil {
 			return nil, err
 		}
-		_, err := s.a.Undo(ctx, req.Journal, req.Force)
-		return struct{}{}, err
+		j, err := s.a.Undo(ctx, req.Journal, req.Force)
+		var reply peer.UndoReply
+		if j != nil && err == nil {
+			reply.Left = j.Left
+		}
+		return reply, err
 	}
 	return nil, fmt.Errorf("unknown request %q", method)
 }
@@ -601,19 +605,20 @@ func (p *Push) Close() {
 
 // undoRemote undoes a journal another machine's hopsesh keeps. One already undone there
 // counts as done.
-func (a *App) undoRemote(ctx context.Context, r journal.Remote, force bool) error {
+func (a *App) undoRemote(ctx context.Context, r journal.Remote, force bool) ([]string, error) {
 	h := a.Cfg.FindHost(r.Machine)
 	if h == nil {
-		return fmt.Errorf("%s is not a configured machine", r.Machine)
+		return nil, fmt.Errorf("%s is not a configured machine", r.Machine)
 	}
 	c, _, closeFn, err := a.dialPeer(ctx, *h)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer closeFn()
-	err = c.Call(ctx, peer.MethodUndo, peer.UndoRequest{Journal: r.ID, Force: force}, nil)
+	var reply peer.UndoReply
+	err = c.Call(ctx, peer.MethodUndo, peer.UndoRequest{Journal: r.ID, Force: force}, &reply)
 	if err != nil && strings.HasPrefix(err.Error(), errNothingToUndo) {
-		return nil
+		return nil, nil
 	}
-	return err
+	return reply.Left, err
 }

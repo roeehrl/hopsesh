@@ -633,7 +633,7 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 	}
 	j.AddKey(p.Placement.Key)
 	res := &Result{Journal: j.ID}
-	if err := applyRepo(ctx, p, in, env, res, step); err != nil {
+	if err := applyRepo(ctx, p, in, env, j, res, step); err != nil {
 		return res, err
 	}
 	h, err := tgt.Machine.For(ctx, tgt.Module.Spec(), tgt.Install, j)
