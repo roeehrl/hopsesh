@@ -187,7 +187,9 @@ type ScanOptions struct {
 	NoLocal         bool             // leave this machine out
 	SkipGit         bool             // no git state (faster)
 	// GitFor, when set, limits the git probe to the folders of the sessions it accepts (the
-	// others get no git state); see App.GitFor.
+	// others get no git state); see App.GitFor. On another machine it also chooses the
+	// native forks that are verified (see remoteForks) and the moved copies that are observed
+	// (see enrichMovement).
 	GitFor func(Entry) bool
 }
 
@@ -403,7 +405,7 @@ func (a *App) Scan(ctx context.Context, o ScanOptions) *Inventory {
 			}
 		}
 	}
-	a.EnrichMovement(ctx, inv)
+	a.enrichMovement(ctx, inv, func(e Entry) bool { return o.GitFor != nil && o.GitFor(e) }, false)
 	sort.SliceStable(inv.Machines, func(i, j int) bool {
 		if inv.Machines[i].Local != inv.Machines[j].Local {
 			return inv.Machines[i].Local
@@ -567,7 +569,7 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 					for i := range l.Sessions {
 						l.Sessions[i].Key.Profile = in.ProfileID()
 					}
-					listed := listedEntries(ctx, hm, fsys, mod, ch, state, l)
+					listed := listedEntries(ctx, hm, fsys, mod, ch, state, l, o.GitFor)
 					for i := range listed {
 						listed[i].Session = withRecords(m.records, in.Root("home"), a.withLedger(hm.Local, in.Root("home"), listed[i].Session))
 					}
@@ -882,7 +884,7 @@ func legacyLabelWords(l agent.LegacyLabel) string {
 
 // listedEntries are one agent's listed sessions on a machine, with their live state and
 // lineage.
-func listedEntries(ctx context.Context, hm *host.Machine, fsys host.FS, mod agent.Module, ch agent.Host, st AgentState, l agent.Listing) []Entry {
+func listedEntries(ctx context.Context, hm *host.Machine, fsys host.FS, mod agent.Module, ch agent.Host, st AgentState, l agent.Listing, forksFor func(Entry) bool) []Entry {
 	spec := mod.Spec()
 	var out []Entry
 	live := map[agent.SessionID]agent.LiveInfo{}
@@ -904,7 +906,20 @@ func listedEntries(ctx context.Context, hm *host.Machine, fsys host.FS, mod agen
 	for i, err := range problems {
 		unsupported[i] = err != ""
 	}
-	nativeForkManifests(ctx, hm, ch, mod, st.Install, l.Sessions, manifests, problems)
+	if hm.Local || hm.IsSnapshot() {
+		nativeForkManifests(ctx, hm, ch, mod, st.Install, l.Sessions, manifests, problems)
+	} else if pick := remoteForks(l.Sessions, func(s agent.Summary) bool {
+		return forksFor != nil && forksFor(Entry{Location: agent.MachineLocation(hm.Name), Machine: hm.Name, Agent: spec.ID, Session: s})
+	}); len(pick) > 0 {
+		ss, ms, ps := make([]agent.Summary, len(pick)), make([]*lineage.Manifest, len(pick)), make([]string, len(pick))
+		for j, i := range pick {
+			ss[j], ms[j], ps[j] = l.Sessions[i], manifests[i], problems[i]
+		}
+		nativeForkManifests(ctx, hm, ch, mod, st.Install, ss, ms, ps)
+		for j, i := range pick {
+			manifests[i], problems[i] = ms[j], ps[j]
+		}
+	}
 	for i, s := range l.Sessions {
 		lv := live[s.Key.Session]
 		if lv.State == "" {

@@ -180,6 +180,9 @@ func TestPushToPeer(t *testing.T) {
 	if _, err := os.Stat(moved); !os.IsNotExist(err) {
 		t.Fatal("undo must remove the copy on box")
 	}
+	if _, err := os.Stat(filepath.Dir(moved)); !os.IsNotExist(err) {
+		t.Fatalf("undo must remove the project folder the push made on box: %v", err)
+	}
 	inv.Close()
 	inv = a.Scan(ctx, app.ScanOptions{Hosts: []string{"here"}})
 	if e, _ = inv.Find(app.ParseRef(sid)); e.Status() != "ended" {

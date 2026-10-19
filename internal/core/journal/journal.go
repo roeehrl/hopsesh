@@ -35,6 +35,9 @@ const (
 	OpReplace Op = "replace" // undo: put the backup back
 	OpAppend  Op = "append"  // undo: cut out the appended bytes (Size, Len, Sum)
 	OpRename  Op = "rename"  // undo: move back
+	// OpMkdir is a folder a write made because it was missing. Undo removes it once the
+	// writes in it are undone, while it is empty.
+	OpMkdir Op = "mkdir"
 	// OpPushRef is a ref pushed to a git remote. Undo deletes it, with a lease: only while it
 	// still points at what hopsesh pushed (Sha).
 	OpPushRef Op = "push-ref"
@@ -611,6 +614,47 @@ func (j *Journal) record(e Entry) error {
 	return j.saveLocked()
 }
 
+// recordDirs records the folders above p that do not exist yet, which writing p makes:
+// the outermost first, so undo, which goes backwards, removes the innermost first.
+func (j *Journal) recordDirs(stat func(string) (fs.FileInfo, error), machine, p string) error {
+	var missing []string
+	for d := parentDir(p); d != "" && len(missing) < 64; d = parentDir(d) {
+		// A folder that cannot be checked is not one the write makes: it is left alone.
+		if _, err := stat(d); !errors.Is(err, fs.ErrNotExist) {
+			break
+		}
+		missing = append(missing, d)
+	}
+	for i := len(missing) - 1; i >= 0; i-- {
+		if err := j.record(Entry{Op: OpMkdir, Machine: machine, Path: missing[i]}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// parentDir is the folder holding p, for this machine's paths or another's (/ or \
+// separated); "" at a root.
+func parentDir(p string) string {
+	i := strings.LastIndexAny(p, `/\`)
+	if i <= 0 || i == 2 && p[1] == ':' {
+		return ""
+	}
+	return p[:i]
+}
+
+// Changes counts what the operation changed (the folders its writes made are part of
+// those writes).
+func (j *Journal) Changes() int {
+	n := 0
+	for _, e := range j.Entries {
+		if e.Op != OpMkdir {
+			n++
+		}
+	}
+	return n
+}
+
 // WriteFile replaces or creates a file, keeping a copy of the old one.
 func (j *Journal) WriteFile(fsys host.FS, machine, p string, b []byte, perm fs.FileMode) error {
 	e := Entry{Op: OpCreate, Machine: machine, Path: p}
@@ -620,6 +664,8 @@ func (j *Journal) WriteFile(fsys host.FS, machine, p string, b []byte, perm fs.F
 			return err
 		}
 		e.Op, e.Backup = OpReplace, backup
+	} else if err := j.recordDirs(fsys.Stat, machine, p); err != nil {
+		return err
 	}
 	if err := j.record(e); err != nil {
 		return err
@@ -636,6 +682,9 @@ func (j *Journal) Append(fsys host.FS, machine, p string, b []byte, o agent.Appe
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		e.Created, e.KeepMtime = true, false // undo removes it once nothing else is in it
+		if err := j.recordDirs(fsys.Stat, machine, p); err != nil {
+			return err
+		}
 	case err != nil:
 		return err
 	default:
@@ -720,6 +769,9 @@ func (j *Journal) Rename(fsys host.FS, machine, from, to string) error {
 	if _, err := fsys.Stat(to); err == nil {
 		return fmt.Errorf("%s already exists", to)
 	}
+	if err := j.recordDirs(fsys.Stat, machine, to); err != nil {
+		return err
+	}
 	if err := j.record(Entry{Op: OpRename, Machine: machine, Path: to, From: from}); err != nil {
 		return err
 	}
@@ -736,6 +788,8 @@ func (j *Journal) Place(machine, staged, dst string, perm fs.FileMode) error {
 			return err
 		}
 		e.Op, e.Backup = OpReplace, backup
+	} else if err := j.recordDirs(os.Stat, machine, dst); err != nil {
+		return err
 	}
 	if err := j.record(e); err != nil {
 		return err
@@ -990,6 +1044,12 @@ func undoEntry(fsys host.FS, e Entry) error {
 		return undoAppend(fsys, e)
 	case OpRename:
 		return fsys.Rename(e.Path, e.From)
+	case OpMkdir:
+		// Left alone once it holds something else: what is in it is not the operation's.
+		if in, err := fsys.ReadDir(e.Path); err != nil || len(in) > 0 {
+			return err
+		}
+		return fsys.Remove(e.Path)
 	}
 	return fmt.Errorf("unknown journal operation %q", e.Op)
 }

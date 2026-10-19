@@ -237,7 +237,7 @@ func (a *App) observeMachine(ctx context.Context, m *host.Machine) (Observation,
 		out.Processes = table.Ancestors(pids)
 	}
 	inv := &Inventory{Machines: []*Machine{{Kind: agent.AtMachine, Name: m.Name, Local: m.Local, Status: StatusOK, OS: m.Facts.OS, Agents: out.Agents, host: m}}, Entries: out.Entries}
-	a.enrichMovement(ctx, inv, true)
+	a.enrichMovement(ctx, inv, nil, true)
 	out.Entries = inv.Entries
 	for i := range out.Entries {
 		if out.Entries[i].ObservedAt.IsZero() {
