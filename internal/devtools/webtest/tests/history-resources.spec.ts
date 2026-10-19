@@ -16,9 +16,9 @@ async function saveLedger(page: Page, value: string) {
   await expect(page.locator('.settings-fields')).toBeEnabled();
 }
 
-// The manifest a lineage file holds, as hopsesh reads it.
-async function graphOf(page: Page, path: string) {
-  const res = await page.request.get('/lineage', {params:{path}});
+// The manifest beside a session, as hopsesh reads it.
+async function graphOf(page: Page, session: {machine:string, key:string}) {
+  const res = await page.request.get('/lineage', {params:session});
   expect(res.ok(), await res.text()).toBeTruthy();
   return res.json();
 }
@@ -27,7 +27,9 @@ test('History ledger limit persists, rejects intact history, and retries without
   test.setTimeout(120_000);
   await fresh(page);
   await row(page, 'Find the codeword').click();
-  const original = await page.evaluate(async () => (await import('/core.js')).selected().path);
+  const {path:original, ...originalSession} = await page.evaluate(async () => {
+    const e = (await import('/core.js')).selected(); return {path:e.path, machine:e.machine, key:e.key};
+  });
   await action(page, 'move', /^Continue with Codex/);
   await page.locator('#sheet #go').click();
   await page.getByRole('button', {name:'Back to sessions', exact:true}).click();
@@ -51,8 +53,8 @@ test('History ledger limit persists, rejects intact history, and retries without
   expect(Buffer.byteLength(nativeWork)).toBe(fixture.fragmentBytes);
   expect(digest(nativeWork)).toBe(fixture.fragmentHash);
   expect(originalBefore.includes(Buffer.from('LEDGER-BEGIN\n'))).toBe(false);
-  const seededGraph = await graphOf(page, fixture.ledger);
-  const originalRevisions = new Set((await graphOf(page, original + '.hopsesh.json')).revisions.map((r:any) => r.id));
+  const seededGraph = await graphOf(page, source);
+  const originalRevisions = new Set((await graphOf(page, originalSession)).revisions.map((r:any) => r.id));
   const destinationCoverage = seededGraph.states.flatMap((s:any) => s.projection || [])
     .flatMap((p:any) => p.fragments || []).filter((f:any) => digest(f.text) === fixture.fragmentHash)
     .flatMap((f:any) => f.coverage || []);
@@ -93,8 +95,8 @@ test('History ledger limit persists, rejects intact history, and retries without
   await expect(page.locator('#sheet #go')).toBeEnabled();
   await page.locator('#sheet #go').click();
   await expect(page.getByRole('heading', {name:/is prepared for Claude Code/})).toBeVisible({timeout:30_000});
-  for (const path of [fixture.ledger, original + '.hopsesh.json']) {
-    const graph = await graphOf(page, path);
+  for (const session of [source, originalSession]) {
+    const graph = await graphOf(page, session);
     const states = new Map(graph.states.map((s:any) => [s.id, digest(JSON.stringify(s))]));
     for (const state of seededGraph.states) expect(states.get(state.id)).toBe(digest(JSON.stringify(state)));
     const fragments = graph.states.flatMap((s:any) => s.projection || []).flatMap((p:any) => p.fragments || []);

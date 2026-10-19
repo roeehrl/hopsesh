@@ -342,7 +342,7 @@ func main() {
 		}
 	})
 	http.HandleFunc("/lineage", func(w http.ResponseWriter, r *http.Request) {
-		if err := readLineage(w, r, h); err != nil {
+		if err := readLineage(w, r, svc); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 		}
 	})
