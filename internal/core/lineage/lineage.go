@@ -173,20 +173,30 @@ func Parse(b []byte, limits ...ir.Limits) (*Manifest, error) {
 	if int64(len(b)) > l.LineageBytes {
 		return nil, ledgerSizeError(l.LineageBytes, int64(len(b)))
 	}
-	var m Manifest
-	m.SetLimits(l)
-	decoder := json.NewDecoder(bytes.NewReader(b))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&m); err != nil {
+	format, err := fileFormat(b)
+	if err != nil {
 		return nil, err
 	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		return nil, fmt.Errorf("lineage has trailing JSON")
+	m := new(Manifest)
+	if format == FileFormat {
+		if m, err = unpack(b); err != nil {
+			return nil, err
+		}
+	} else {
+		decoder := json.NewDecoder(bytes.NewReader(b))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(m); err != nil {
+			return nil, err
+		}
+		if err := decoder.Decode(new(any)); err != io.EOF {
+			return nil, fmt.Errorf("lineage has trailing JSON")
+		}
 	}
+	m.SetLimits(l)
 	if err := m.Validate(); err != nil {
 		return nil, err
 	}
-	return &m, nil
+	return m, nil
 }
 func (m *Manifest) Clone() *Manifest {
 	if m == nil {
@@ -218,10 +228,16 @@ func (m *Manifest) Outline() *Manifest {
 	}
 	return out
 }
-// Encode is the manifest as its file holds it: compact JSON, one line (indenting a large
-// graph's revisions made about a fifth of the file whitespace, read on every scan).
+
+// Encode is the manifest as its file holds it: FileFormat, compact, one line (indenting a
+// large graph's revisions made about a fifth of the file whitespace, read on every scan).
 func (m *Manifest) Encode() []byte {
-	b, _ := json.Marshal(m)
+	var b []byte
+	if p, ok := m.pack(); ok {
+		b, _ = json.Marshal(p)
+	} else {
+		b, _ = json.Marshal(m)
+	}
 	return append(b, '\n')
 }
 func (m *Manifest) ForBranch(branch string) *Manifest {
@@ -879,49 +895,22 @@ func (m *Manifest) limit() int {
 	}
 	return maxSize
 }
-func (m *Manifest) tooLarge() error { return ledgerSizeError(int64(m.limit()), int64(m.compactSize())) }
+func (m *Manifest) tooLarge() error { return ledgerSizeError(int64(m.limit()), int64(m.size())) }
 
-// compactSize is a lower bound of the encoded size: each record's compact JSON. It
-// costs one small encoding per record, not one document of the whole graph (hundreds
-// of megabytes for a long native fork, built just to be measured).
-func (m *Manifest) compactSize() int {
-	n := 0
-	add := func(v any) {
-		b, _ := json.Marshal(v)
-		n += len(b)
-	}
-	for _, r := range m.Revisions {
-		add(r)
-		if n > m.limit() {
-			return n
-		}
-	}
-	for _, s := range m.States {
-		add(s)
-		if n > m.limit() {
-			return n
-		}
-	}
-	for _, r := range m.Replicas {
-		add(r)
-	}
-	for _, h := range m.Hops {
-		add(h)
-	}
-	return n
-}
+// size is the manifest's file size.
+func (m *Manifest) size() int { return len(m.Encode()) }
 
-// Writable reports a lineage too large to be written, cheaply (see compactSize).
+// Writable reports a lineage too large to be written.
 func (m *Manifest) Writable() error {
-	if m.compactSize() > m.limit() {
-		return m.tooLarge()
+	if n := m.size(); n > m.limit() {
+		return ledgerSizeError(int64(m.limit()), int64(n))
 	}
 	return nil
 }
 
 func (m *Manifest) Validate() error {
-	if m.compactSize() > m.limit() || len(m.Encode()) > m.limit() {
-		return m.tooLarge()
+	if err := m.Writable(); err != nil {
+		return err
 	}
 	if m.Format != Format {
 		return fmt.Errorf("lineage format %q is not %q", m.Format, Format)
