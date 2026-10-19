@@ -499,8 +499,16 @@ func (f *relayFleet) applyNetworkPolicy(t *testing.T, origin string, upstream *h
 		}
 		f.start(t, key)
 	}
-	if policy != "untrusted-ca" && denied.Load() < int64(len(f.homes)) {
-		t.Fatal("HTTP fallback matrix did not reject every owner's WebSocket upgrade")
+	if policy != "untrusted-ca" {
+		// A connected owner reports HTTP delivery before its notification stream has
+		// tried; every owner's upgrade must still be refused, shortly after.
+		deadline := time.Now().Add(10 * time.Second)
+		for denied.Load() < int64(len(f.homes)) && time.Now().Before(deadline) {
+			time.Sleep(50 * time.Millisecond)
+		}
+		if denied.Load() < int64(len(f.homes)) {
+			t.Fatal("HTTP fallback matrix did not reject every owner's WebSocket upgrade")
+		}
 	}
 	t.Cleanup(func() {
 		if policy == "untrusted-ca" && requests.Load() != 0 {
