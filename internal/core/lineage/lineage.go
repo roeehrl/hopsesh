@@ -218,8 +218,10 @@ func (m *Manifest) Outline() *Manifest {
 	}
 	return out
 }
+// Encode is the manifest as its file holds it: compact JSON, one line (indenting a large
+// graph's revisions made about a fifth of the file whitespace, read on every scan).
 func (m *Manifest) Encode() []byte {
-	b, _ := json.MarshalIndent(m, "", "  ")
+	b, _ := json.Marshal(m)
 	return append(b, '\n')
 }
 func (m *Manifest) ForBranch(branch string) *Manifest {

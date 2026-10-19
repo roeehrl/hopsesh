@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Changed
+
+- Lineage files (`<session>.hopsesh.json`) are written as compact JSON, about a fifth
+  smaller (on a Mac with 39 of them: 226 MB to 176 MB), so scans read less, over SSH too.
+  Each file is rewritten the next time a move updates it, and both forms are read.
+
 ### Added
 
 - Sizes: `hopsesh ls` shows each session's size and each group's total, and ends with what
