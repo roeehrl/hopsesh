@@ -11,6 +11,12 @@ All notable changes to this project are documented here. The format follows
 - Undo removes the folders an operation's writes made, once they are empty: undoing a push
   no longer leaves an empty project folder (such as `~/.claude/projects/<folder>`) on the
   target. A folder that holds something else since, or was there before, stays.
+- Scanning a machine over SSH no longer waits out the scan's 3-minute limit when it holds
+  large Codex forks or moved sessions (a Mac with 10 GB of them: 184 s → 14 s). A listing
+  no longer reads those transcripts over the network. A command about a session still checks
+  its family there: a Codex fork's ancestry, and whether its moved copies are ahead or
+  behind. Until then a listing shows another machine's Codex fork as a session of its own,
+  and asks to verify a return to a copy there, as it does for a copy it cannot read.
 
 ## [0.5.0] - 2026-10-15
 
