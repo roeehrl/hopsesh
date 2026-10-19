@@ -13,8 +13,8 @@ All notable changes to this project are documented here. The format follows
   `lineage/6`: compact JSON that writes each record's ids, anchors and hashes once instead of
   up to three times. The history they hold is unchanged, and machines still exchange it as
   `lineage/5` (peer protocol unchanged). Each file is rewritten the next time a move updates
-  it, and both formats are read. The lineage size limit (`history.lineage_mb`) is of the
-  smaller file, so a longer history fits. An older hopsesh cannot read a `lineage/6` file: it
+  it, and both formats are read. The lineage size limit (`history.lineage_mb`) still
+  measures the history itself, so the same histories fit as before. An older hopsesh cannot read a `lineage/6` file: it
   shows that session's lineage as unsupported and does not move it. Update hopsesh on every
   machine instead of archiving such a file there.
 

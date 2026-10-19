@@ -12,7 +12,7 @@ import (
 func (m *Manifest) AdoptNativeFork(parent ReplicaID, child Replica, proof []agent.NativeInheritance, seg *ir.Segment) (*Manifest, error) {
 	// The fork records a revision per new child node; a graph that cannot be written is
 	// refused before it is built (Validate would refuse it after).
-	if size := m.size(); size > m.limit() || (len(m.Revisions) > 0 && size+len(seg.Nodes)*size/len(m.Revisions) > m.limit()) {
+	if size := m.compactSize(); size > m.limit() || (len(m.Revisions) > 0 && size+len(seg.Nodes)*size/len(m.Revisions) > m.limit()) {
 		return nil, m.tooLarge()
 	}
 	out := m.Clone()

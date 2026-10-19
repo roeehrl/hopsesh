@@ -94,3 +94,28 @@ func seedHistoryLedger(w http.ResponseWriter, r *http.Request, svc *gui.App, hom
 	sum := sha256.Sum256([]byte(text))
 	return json.NewEncoder(w).Encode(map[string]any{"path": path, "ledger": lineage.PathFor(path), "bytes": len(encoded), "fragmentBytes": len(text), "fragmentHash": hex.EncodeToString(sum[:])})
 }
+
+// readLineage is the manifest a demo lineage file holds, as hopsesh reads it (a file is
+// packed: its ids are places in its own lists, which differ from file to file).
+func readLineage(w http.ResponseWriter, r *http.Request, home string) error {
+	root, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		return err
+	}
+	path, err := filepath.EvalSymlinks(r.URL.Query().Get("path"))
+	if err != nil {
+		return err
+	}
+	if rel, err := filepath.Rel(root, path); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || !strings.HasSuffix(path, lineage.Suffix) {
+		return fmt.Errorf("expected a demo lineage file")
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	m, err := lineage.Parse(b, ir.Limits{LineageBytes: ir.CeilingLineageBytes})
+	if err != nil {
+		return err
+	}
+	return json.NewEncoder(w).Encode(m)
+}

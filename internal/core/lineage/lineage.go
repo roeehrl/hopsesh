@@ -895,22 +895,51 @@ func (m *Manifest) limit() int {
 	}
 	return maxSize
 }
-func (m *Manifest) tooLarge() error { return ledgerSizeError(int64(m.limit()), int64(m.size())) }
+func (m *Manifest) tooLarge() error { return ledgerSizeError(int64(m.limit()), int64(m.compactSize())) }
 
-// size is the manifest's file size.
-func (m *Manifest) size() int { return len(m.Encode()) }
+// compactSize is a lower bound of a manifest's size in memory and between machines: each
+// record's compact JSON (the limit is of this, as before files were packed, so a history
+// that fits is one that can be worked with). It
+// costs one small encoding per record, not one document of the whole graph (hundreds
+// of megabytes for a long native fork, built just to be measured).
+func (m *Manifest) compactSize() int {
+	n := 0
+	add := func(v any) {
+		b, _ := json.Marshal(v)
+		n += len(b)
+	}
+	for _, r := range m.Revisions {
+		add(r)
+		if n > m.limit() {
+			return n
+		}
+	}
+	for _, s := range m.States {
+		add(s)
+		if n > m.limit() {
+			return n
+		}
+	}
+	for _, r := range m.Replicas {
+		add(r)
+	}
+	for _, h := range m.Hops {
+		add(h)
+	}
+	return n
+}
 
-// Writable reports a lineage too large to be written.
+// Writable reports a lineage too large to be written, cheaply (see compactSize).
 func (m *Manifest) Writable() error {
-	if n := m.size(); n > m.limit() {
-		return ledgerSizeError(int64(m.limit()), int64(n))
+	if m.compactSize() > m.limit() {
+		return m.tooLarge()
 	}
 	return nil
 }
 
 func (m *Manifest) Validate() error {
-	if err := m.Writable(); err != nil {
-		return err
+	if m.compactSize() > m.limit() || len(m.Encode()) > m.limit() {
+		return m.tooLarge()
 	}
 	if m.Format != Format {
 		return fmt.Errorf("lineage format %q is not %q", m.Format, Format)
