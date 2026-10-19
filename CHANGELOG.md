@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Fixed
+
+- Undo removes the folders an operation's writes made, once they are empty: undoing a push
+  no longer leaves an empty project folder (such as `~/.claude/projects/<folder>`) on the
+  target. A folder that holds something else since, or was there before, stays.
+
 ## [0.5.0] - 2026-10-15
 
 Every machine a full place: hopsesh can now run on your other machines, in your login session

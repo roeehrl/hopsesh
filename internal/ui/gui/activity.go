@@ -72,7 +72,7 @@ func (a *App) Activity() (*ActivityListDTO, error) {
 	}
 	for _, x := range acts {
 		j := x.Journal
-		d := ActivityDTO{ID: j.ID, Kind: j.Kind, Title: j.Title, When: j.Time.Format(time.RFC3339), Changes: len(j.Entries),
+		d := ActivityDTO{ID: j.ID, Kind: j.Kind, Title: j.Title, When: j.Time.Format(time.RFC3339), Changes: j.Changes(),
 			PendingReceipt: j.PendingReceipts(), Remote: []string{}, CanUndo: x.CanUndo, Undone: j.Undone, Why: x.Why, Part: x.Part, PartOf: j.PartOf, Parts: j.Parts}
 		if j.Kind == "hop" {
 			if hop, err := core.LoadHop(j.ID); err == nil {
