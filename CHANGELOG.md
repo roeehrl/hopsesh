@@ -25,6 +25,11 @@ All notable changes to this project are documented here. The format follows
   its family there: a Codex fork's ancestry, and whether its moved copies are ahead or
   behind. Until then a listing shows another machine's Codex fork as a session of its own,
   and asks to verify a return to a copy there, as it does for a copy it cannot read.
+- Undo removes the clone and the worktree a move made (`--clone`, `--worktree create`),
+  with the branch made for the worktree and the folders they made, on this machine or on
+  the machine a push went to. A clone with work of its own (changes, untracked or ignored
+  files such as an `.env`, stashes, commits that are not on its remote, other worktrees)
+  is never removed, even by `--force`: undo leaves it and says so.
 
 ## [0.5.0] - 2026-10-15
 

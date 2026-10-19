@@ -174,6 +174,12 @@ type UndoRequest struct {
 	Force   bool   `json:"force,omitempty"` // undo even what was used since
 }
 
+// UndoReply is what a peer's undo left in place (Journal.Left); an older peer sends
+// nothing.
+type UndoReply struct {
+	Left []string `json:"left,omitempty"`
+}
+
 // message is one line on the wire: a request (Method set) or a reply (to ID).
 type message struct {
 	ID     int             `json:"id"`
