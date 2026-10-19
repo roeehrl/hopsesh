@@ -1,6 +1,6 @@
 // The Machines screen: this machine (and whether it receives sessions), the machines you
 // added, and the ones discovery found. hopsesh connects only to machines you added.
-import { on, api, h, fill, icon, ICONS, view, state, screen, loading, toast, fail, errText, cap, dialog, ask, machineStatus, sys, when, current, rich, navigationID, loadError } from "./core.js";
+import { on, api, h, fill, icon, ICONS, view, state, screen, loading, toast, fail, errText, cap, dialog, ask, machineStatus, sys, when, current, rich, navigationID, loadError, bytes } from "./core.js";
 import { signIn, onSignedIn } from "./term.js";
 
 // A sign-in tab ended well: the card shows the new check.
@@ -80,6 +80,15 @@ setInterval(() => {
   }
 }, 15000);
 
+// storageLine says how much each agent's sessions take on a machine.
+function storageLine(storage) {
+  const shown = (storage || []).filter((u) => u.bytes > 0);
+  if (!shown.length) return null;
+  const total = shown.reduce((n, u) => n + u.bytes, 0);
+  return h("span", { class: "muted storage", style: "font-size:12px", title: shown.map((u) => `${u.name}: ${u.sessions} session${u.sessions === 1 ? "" : "s"}, ${bytes(u.bytes)}`).join("\n") },
+    `Sessions take ${bytes(total)}` + (shown.length > 1 ? `: ${shown.map((u) => `${u.name} ${bytes(u.bytes)}`).join(", ")}` : ""));
+}
+
 function statusCell(m) {
   if (activeScan(m)) return h("div", { role: "status", "aria-live": "polite", class: "scan-status" },
     h("span", {}, m.scan?.phase === "queued" ? "Queued…" : "Scanning…"),
@@ -91,6 +100,7 @@ function statusCell(m) {
   return h("div", { style: "display:flex;flex-direction:column;gap:3px;min-width:0" },
     h("span", { style: "display:flex;gap:7px;align-items:center" }, h("span", { class: "dot " + k }), words),
     m.status === "ok" ? h("span", { class: "muted", style: "font-size:12px" }, [`${m.sessions} session${m.sessions === 1 ? "" : "s"}`, m.agents.join(", ")].filter(Boolean).join(" · ")) : null,
+    m.status === "ok" ? storageLine(m.storage) : null,
     m.status === "ok" ? presenceLine(m) : null,
     m.status !== "ok" && m.hint ? h("span", { class: "muted", style: "font-size:12px" }, rich(cap(m.hint))) : null,
     error && error !== m.error ? h("span", { class: "err" }, error) : null,
@@ -313,7 +323,8 @@ function render() {
       h("span", { class: "ico push" }, icon(ICONS.here, 15)),
       h("div", { style: "flex:1 1 300px;min-width:0;display:flex;flex-direction:column;gap:3px" },
         h("b", { style: "font-weight:500" }, `${sys.Here} · ${d.here.name}`),
-        h("span", { class: "muted", style: "font-size:12px" }, [`hopsesh ${d.here.hopsesh}`, ...d.here.agents].join(" · "))),
+        h("span", { class: "muted", style: "font-size:12px" }, [`hopsesh ${d.here.hopsesh}`, ...d.here.agents].join(" · ")),
+        storageLine(d.here.storage)),
       h("label", { style: "display:flex;gap:10px;align-items:center;max-width:380px" },
         h("span", { style: "display:flex;flex-direction:column;gap:2px" }, h("span", {}, "Receive sessions from my other machines"),
           h("span", { class: "muted", style: "font-size:12px" }, d.here.receive ? "On: “Send to…” on your other machines can deliver sessions here." : `Off: ${sys.here} refuses sessions sent from other machines.`)),
