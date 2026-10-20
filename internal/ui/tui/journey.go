@@ -3,6 +3,8 @@ package tui
 import (
 	"fmt"
 	"strings"
+
+	"github.com/roeehrl/hopsesh/internal/core/lineage"
 )
 
 func (m *model) cycleDestination() bool {
@@ -42,6 +44,9 @@ func (m *model) journeyLines() []string {
 		}
 		from, to := graph.Replica(hop.From), graph.Replica(hop.To)
 		status := string(hop.Kind)
+		if hop.Kind == lineage.HopIdentity {
+			status = "verified cloud task identity; no transfer"
+		}
 		if undone[hop.ID] {
 			status += " · undone"
 		}

@@ -3,15 +3,55 @@
 # internal/devtools/skillcheck fail on any other undocumented flag, and on an entry here
 # whose flag is gone or that the skill now mentions.
 
+hopsesh --config-dir  # an isolated settings/state namespace for tests and services; agents use the user's
+hopsesh --state-dir  # an isolated settings/state namespace for tests and services
 hopsesh accounts add --machine  # user-only setup: account folders are the user's (rule 4)
 hopsesh accounts add --root  # user-only setup
 hopsesh accounts add --tag  # user-only setup
 hopsesh accounts edit --name  # user-only setup
 hopsesh accounts edit --tag  # user-only setup
 hopsesh accounts scan --machine  # account discovery; agents read accounts through ls
+hopsesh app install --plan  # installs or updates the desktop app; the user's (rule 4)
+hopsesh app install --version  # installs or updates the desktop app; the user's (rule 4)
 hopsesh archive --chunk  # archive paging; the briefing itself tells the receiving agent how to read it
 hopsesh archive --offset  # archive paging; taught by the briefing
 hopsesh archive --search  # archive search; taught by the briefing
+hopsesh cloud-integration authorize --fingerprint  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration authorize --origin  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration authorize --peer  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration claim --ca-file  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration claim --fingerprint  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration current --provider  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration current --session  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration current --workspace  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration import --fork  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration import --operation-id  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration import --profile  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration inspect --preview  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration install-startup --allow-transcript-export  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration install-startup --origin  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration install-startup --provider  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration install-startup --version  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration link-handoff --fork  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration plan --allow-transcript-export  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration plan --origin  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration plan --provider  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration plan --script  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration plan --version  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration prepare --allow-transcript-export  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration prepare --claude-hook  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration prepare --lease  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration prepare --native-root  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration prepare --provider  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration prepare --quiet  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration prepare --session  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration prepare --transcript  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration prepare --workspace  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration ticket --connect-code  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration ticket --lease  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration ticket --provider  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration ticket --resume-task  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
+hopsesh cloud-integration ticket --session  # cloud admission, run by the owner or the repository's startup hooks, never by an agent
 hopsesh clouds env --unset  # changes a remembered environment: the user's (rule 4)
 hopsesh doctor --all-machines  # a user diagnostic across machines; agents run doctor <machine>
 hopsesh handoff --operation-id  # retry key for the app and scripts
@@ -72,6 +112,24 @@ hopsesh push --new-session  # as plan --new-session
 hopsesh push --operation-id  # as plan --operation-id
 hopsesh push --target-profile  # as plan --target-profile
 hopsesh push --target-session  # as plan --target-session
+hopsesh relay login --ca-file  # Internet delivery enrollment and pairing; the user's (rule 4)
+hopsesh relay login --origin  # Internet delivery enrollment and pairing; the user's (rule 4)
+hopsesh relay pair --bring  # Internet delivery enrollment and pairing; the user's (rule 4)
+hopsesh relay pair --expires  # Internet delivery enrollment and pairing; the user's (rule 4)
+hopsesh relay pair --fingerprint  # Internet delivery enrollment and pairing; the user's (rule 4)
+hopsesh relay pair --kind  # Internet delivery enrollment and pairing; the user's (rule 4)
+hopsesh relay pair --name  # Internet delivery enrollment and pairing; the user's (rule 4)
+hopsesh relay pair --receive  # Internet delivery enrollment and pairing; the user's (rule 4)
+hopsesh relay pair --root  # Internet delivery enrollment and pairing; the user's (rule 4)
+hopsesh relay pair --send  # Internet delivery enrollment and pairing; the user's (rule 4)
+hopsesh relay pair --share  # Internet delivery enrollment and pairing; the user's (rule 4)
+hopsesh runtime enable --at-login  # the background runtime; the user or the login service starts and stops it
+hopsesh runtime enable --mode  # the background runtime; the user or the login service starts and stops it
+hopsesh runtime enable --plan  # the background runtime; the user or the login service starts and stops it
+hopsesh runtime observe --reconcile  # the background runtime; the user or the login service starts and stops it
+hopsesh runtime observe --watch  # the background runtime; the user or the login service starts and stops it
+hopsesh runtime start --headless  # the background runtime; the user or the login service starts and stops it
+hopsesh settings set --revision  # settings are the user's (rule 4)
 hopsesh skill install --force  # skill setup is the user's (rule 4)
 hopsesh skill remove --force  # skill setup is the user's (rule 4)
 hopsesh terminals run --dir  # interactive terminal for the user

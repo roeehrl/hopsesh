@@ -74,6 +74,7 @@ const (
 	HopMove     = "move"
 	HopContinue = "continue"
 	HopHandoff  = "handoff"
+	HopIdentity = "identity" // verified identity association, never a physical transfer
 	HopFetch    = "fetch"
 )
 
@@ -609,37 +610,35 @@ func (m *Manifest) Merge(o *Manifest) error {
 		return err
 	}
 	next := m.Clone()
+	// A root/fork placeholder is persisted before its first replica exists. Origin
+	// becomes immutable once populated. Completing only that empty placeholder is
+	// a monotonic initialization, never permission to replace an existing origin.
 	incoming := o.Clone()
-	// A freshly reset branch has no origin until its first replica is observed.
-	// Catalog observation may initialize it before the persisted empty manifest
-	// is read during planning. That is additive initialization, not conflicting
-	// ancestry. Only accept an unset origin when that side has no replica on the
-	// branch; two established origins or different fork boundaries still conflict.
-	unobserved := func(graph *Manifest, branch Branch) bool {
-		if branch.Origin != "" {
-			return false
-		}
-		for _, replica := range graph.Replicas {
-			if replica.Line == branch.ID {
-				return false
-			}
-		}
-		return true
-	}
 	for i := range next.Branches {
-		for j := range incoming.Branches {
-			a, b := &next.Branches[i], &incoming.Branches[j]
-			if a.ID != b.ID || a.Parent != b.Parent || !slices.Equal(a.ForkHeads, b.ForkHeads) {
-				continue
-			}
-			if unobserved(next, *a) {
-				a.Origin = b.Origin
-			}
-			if unobserved(incoming, *b) {
-				b.Origin = a.Origin
-			}
+		left := &next.Branches[i]
+		right := incoming.branch(left.ID)
+		if right == nil || left.Origin == right.Origin {
+			continue
+		}
+		a, b := *left, *right
+		a.Origin = ""
+		b.Origin = ""
+		if !reflect.DeepEqual(a, b) {
+			continue
+		}
+		empty, filled, graph := left, right, next
+		if right.Origin == "" {
+			empty, filled, graph = right, left, incoming
+		}
+		if empty.Origin != "" || filled.Origin == "" {
+			continue
+		}
+		hasReplica := slices.ContainsFunc(graph.Replicas, func(r Replica) bool { return r.Line == empty.ID })
+		if !hasReplica {
+			empty.Origin = filled.Origin
 		}
 	}
+	o = incoming
 	union := func(dst, src any, key func(json.RawMessage) string) (json.RawMessage, error) {
 		a, _ := json.Marshal(dst)
 		b, _ := json.Marshal(src)
@@ -693,17 +692,26 @@ func (m *Manifest) Merge(o *Manifest) error {
 }
 func (m *Manifest) hopTips(line string) []string {
 	have := map[string]bool{}
+	parents := map[string][]string{}
+	var ancestors []string
 	for _, h := range m.Hops {
+		parents[h.ID] = h.Parents
 		if h.Line == line && !h.Backup {
 			have[h.ID] = true
+			ancestors = append(ancestors, h.Parents...)
 		}
 	}
-	for _, h := range m.Hops {
-		if h.Backup {
-			continue
-		}
-		for _, p := range h.Parents {
-			delete(have, p)
+	// A different branch observing this tip must not retire it. Remove only
+	// ancestors of this branch's own hops, following intervening cross-branch
+	// edges as well. Otherwise parent work can sever a fork's first movement.
+	seen := map[string]bool{}
+	for len(ancestors) > 0 {
+		id := ancestors[len(ancestors)-1]
+		ancestors = ancestors[:len(ancestors)-1]
+		if !seen[id] {
+			seen[id] = true
+			delete(have, id)
+			ancestors = append(ancestors, parents[id]...)
 		}
 	}
 	var out []string
@@ -713,17 +721,32 @@ func (m *Manifest) hopTips(line string) []string {
 	return unique(out)
 }
 func (m *Manifest) AppendHop(h Hop) error {
+	replayed := false
 	for _, old := range m.Hops {
 		if old.ID == h.ID && len(h.Parents) == 0 {
 			h.Parents = slices.Clone(old.Parents)
+			replayed = true
 			break
 		}
 	}
 	if h.Line == "" {
 		h.Line = m.Replica(h.To).Line
 	}
-	if len(h.Parents) == 0 {
+	if len(h.Parents) == 0 && !replayed {
 		h.Parents = m.hopTips(h.Line)
+		// A new fork observes its source branch, and a later transfer from the
+		// same original observes forks already recorded beside that original.
+		// These are operation ancestry only: content coverage and trip counters
+		// stay branch-local. Independently read/merged graphs retain concurrency.
+		if sourceLine := m.Replica(h.From).Line; sourceLine != h.Line {
+			h.Parents = append(h.Parents, m.hopTips(sourceLine)...)
+		}
+		for _, known := range m.Hops {
+			if known.Fork && !known.Backup && known.From == h.From {
+				h.Parents = append(h.Parents, known.ID)
+			}
+		}
+		h.Parents = unique(h.Parents)
 	}
 	if h.Source == "" {
 		if s, ok := m.LatestState(h.From); ok {
@@ -843,7 +866,7 @@ func (m *Manifest) Journey() Journey {
 		undone[c.Operation] = true
 	}
 	for _, h := range m.OrderedHops() {
-		if h.Line != m.Branch || h.Backup || undone[h.ID] {
+		if h.Line != m.Branch || h.Backup || undone[h.ID] || h.Kind == HopIdentity {
 			continue
 		}
 		from, to := m.Replica(h.From), m.Replica(h.To)
@@ -1012,7 +1035,7 @@ func (m *Manifest) Validate() error {
 	}
 	for _, h := range m.Hops {
 		switch h.Kind {
-		case HopMove, HopContinue, HopHandoff, HopFetch:
+		case HopMove, HopContinue, HopHandoff, HopFetch, HopIdentity:
 		default:
 			return fmt.Errorf("invalid hop kind %q", h.Kind)
 		}
@@ -1023,6 +1046,11 @@ func (m *Manifest) Validate() error {
 			return fmt.Errorf("invalid hop endpoints")
 		}
 		from, to := m.Replica(h.From), m.Replica(h.To)
+		if h.Kind == HopIdentity {
+			if !strings.HasPrefix(from.Endpoint, "cloud:") || !strings.HasPrefix(to.Endpoint, "cloud:") || from.Key.Agent != to.Key.Agent || h.Written != nil || h.Code != nil || h.Notify || h.Backup || h.Rollover != nil || h.Source == "" || h.Target == "" || !slices.Equal(m.State(h.Source).Heads, m.State(h.Target).Heads) {
+				return fmt.Errorf("invalid cloud identity association")
+			}
+		}
 		if h.Rollover != nil {
 			old := m.Replica(h.Rollover.Replica)
 			if old.ID == "" || old.Line != to.Line || old.Endpoint != to.Endpoint || old.Binding != to.Binding || old.Key.Agent != to.Key.Agent || old.Key.Profile != to.Key.Profile || old.ID == to.ID || h.Rollover.Cursor.Offset < 0 {

@@ -168,7 +168,7 @@ func TestNoticeHookCommandEndToEndNeverChangesTranscript(t *testing.T) {
 	// Advise mode: a notice once per event. Block mode is TestNoticeHookBlocksOriginal.
 	advise := config.Defaults()
 	advise.Original = config.OriginalAdvise
-	if err := config.Save(advise); err != nil {
+	if err := config.Save(&advise); err != nil {
 		t.Fatal(err)
 	}
 	wrongConfig := filepath.Join(dir, "wrong config")
@@ -249,9 +249,13 @@ func TestNoticeHookCommandEndToEndNeverChangesTranscript(t *testing.T) {
 	if !bytes.Equal(b, original) || !bytes.Equal(after, side) {
 		t.Fatal("hook appended transcript or lineage work")
 	}
-	cfg := config.Defaults()
+	// Load the advise configuration saved above: a save must start from the current revision.
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
 	cfg.Original = config.OriginalOff
-	if err = config.Save(cfg); err != nil {
+	if err = config.Save(&cfg); err != nil {
 		t.Fatal(err)
 	}
 	if got := run("SessionStart", ""); got != "" {

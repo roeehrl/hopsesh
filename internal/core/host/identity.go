@@ -114,16 +114,26 @@ func (m *Machine) ReadIdentity(ctx context.Context) (string, error) {
 	if m.Facts.Endpoint != "" {
 		return m.Facts.Endpoint, nil
 	}
+	return m.RefreshIdentity(ctx)
+}
+
+// RefreshIdentity rereads the persisted endpoint for observation boundaries.
+// Unlike ReadIdentity, it must detect replacement or removal after an earlier
+// read. A received snapshot has only its supplied immutable identity.
+func (m *Machine) RefreshIdentity(ctx context.Context) (string, error) {
+	if m.IsSnapshot() {
+		return m.Facts.Endpoint, nil
+	}
 	fsys, err := m.FS(ctx)
 	if err != nil {
 		return "", err
 	}
 	b, err := fsys.ReadFile(m.identityPath(), 128)
 	if errors.Is(err, fs.ErrNotExist) {
+		// Removal must be detected; a machine without hopsesh may keep its identity
+		// with this machine instead (see kept).
 		id, err := m.kept()
-		if id != "" {
-			m.Facts.Endpoint = id
-		}
+		m.Facts.Endpoint = id
 		return id, err
 	}
 	if err != nil {

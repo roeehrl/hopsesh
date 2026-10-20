@@ -11,12 +11,25 @@ import (
 // RecoverReceipts retries only the durable metadata acknowledgments of one journal.
 // Native destination guards remain mandatory, and an undone journal cannot be revived.
 func (a *App) RecoverReceipts(ctx context.Context, id string) error {
+	finished, activityErr := a.beginRuntimeAction()
+	if activityErr != nil {
+		return activityErr
+	}
+	defer finished()
+
 	j, err := journal.Load(a.StateDir, id)
 	if err != nil {
 		return err
 	}
 	if j.Undone {
 		return fmt.Errorf("this operation was undone; receipts cannot be retried")
+	}
+	for _, ack := range j.Acknowledgments {
+		if !ack.Applied {
+			if err = a.recoverRelayPullAcknowledgment(ctx, j, ack); err != nil {
+				return err
+			}
+		}
 	}
 	machines := map[string]*host.Machine{}
 	defer func() {

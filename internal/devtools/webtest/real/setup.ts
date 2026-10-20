@@ -51,7 +51,7 @@ function laptopWorld(home: string, env: Record<string, string>, appDir: string):
   // studio machine, and update checks on.
   mkdirSync(env.HOPSESH_CONFIG_DIR, { recursive: true });
   writeFileSync(join(env.HOPSESH_CONFIG_DIR, "config.toml"), [
-    "schema = 4",
+    "schema = 5",
     `repos_dir = '${join(home, "src")}'`,
     'layout = "flat"',
     'update_check = "on"',

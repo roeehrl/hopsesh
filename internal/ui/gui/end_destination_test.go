@@ -11,7 +11,7 @@ import (
 
 func TestEndReturnDestinationRejectsStaleReviewAndConsumesPlanOnFailure(t *testing.T) {
 	home(t)
-	a := NewApp(all.Registry(), WithoutSessionWatching())
+	a := NewApp(all.Registry())
 	a.plan = &move.Plan{}
 	a.endDestinationToken = "latest"
 	a.endDestinationPlan = a.plan

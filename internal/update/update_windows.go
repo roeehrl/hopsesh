@@ -7,7 +7,7 @@ import (
 	"golang.org/x/sys/windows/registry"
 )
 
-func installMacApp(context.Context, string, []byte) error { return errors.New("not macOS") }
+func installMacApp(context.Context, string, []byte, bool) error { return errors.New("not macOS") }
 
 // setInstalledVersion keeps the version Windows lists for the installed app current (the
 // installer's uninstall entry), so it does not look outdated after an update.

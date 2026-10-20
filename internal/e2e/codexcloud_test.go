@@ -32,7 +32,7 @@ func newCodexWorld(t *testing.T) *handoffWorld {
 		t.Fatal(err)
 	}
 	cfg.SetCloudAllowed("codex-cloud", true)
-	if err := config.Save(cfg); err != nil {
+	if err := config.Save(&cfg); err != nil {
 		t.Fatal(err)
 	}
 	return w

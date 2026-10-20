@@ -184,7 +184,8 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	}
 	allowance := capacity.Allowance()
 	r := convert.Render(convert.Request{
-		Nodes: seg.Nodes, From: cp.From, To: spec.Name, Fidelity: fidelity,
+		IncludeGenerated: in.CheckpointHandoff != nil && cp.AppendTo == nil,
+		Nodes:            seg.Nodes, From: cp.From, To: spec.Name, Fidelity: fidelity,
 		Native: opt.Native && prof.NativeReplay, Window: capacity.EffectiveWindow(), Limit: &allowance, Mappings: p.Placement.Mappings, Redact: redact,
 		Briefing: bf, Limits: opt.Limits,
 	})
@@ -742,11 +743,11 @@ func recordContinuation(ctx context.Context, p *Plan, in Input, j *journal.Journ
 			return err
 		}
 	}
-	srcFS, reachErr := in.Source.Machine.FS(ctx)
+	srcFS, receiptMachine, receiptPath, reachErr := sourceReceipt(ctx, in)
 	if reachErr != nil {
 		srcFS = nil
 	}
-	if e := j.WriteReceipt(srcFS, p.Source.Location, lineage.PathFor(in.Session.Path), m.ForBranch(p.sourceLine).Encode(), false); e != nil {
+	if e := writeSourceReceipt(j, in, srcFS, receiptMachine, lineage.PathFor(receiptPath), m.ForBranch(p.sourceLine).Encode()); e != nil {
 		res.Warnings = append(res.Warnings, "destination committed; source receipt acknowledgement pending: "+e.Error())
 	}
 

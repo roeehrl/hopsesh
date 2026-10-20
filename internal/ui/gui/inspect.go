@@ -22,8 +22,7 @@ import (
 )
 
 // The inspector's calls: the end of a session's conversation (Preview, never during a
-// scan), renaming a session, where the sessions on this machine are open (Presence, polled
-// by the window between scans), and the ⋯ menu's Reveal and Copy resume command.
+// scan), renaming a session, cached shared presence on this machine, and the ⋯ menu's Reveal and Copy resume command.
 
 // PreviewDTO is the end of a session's conversation for the inspector. Text is the agents'
 // own words: the window shows it as text only.
@@ -285,6 +284,46 @@ type PresenceDTO struct {
 // iTerm2, Terminal, an editor, tmux, ssh). It never talks to a terminal app (that happens
 // only when the user asks to show a session).
 func (a *App) Presence() (*PresenceDTO, error) {
+	a.backend.mu.Lock()
+	shared := a.backend.cancel != nil
+	a.backend.mu.Unlock()
+	if !shared {
+		return a.directPresence()
+	}
+	out := &PresenceDTO{Entries: map[string]LiveDTO{}}
+	a.quick.mu.Lock()
+	scan := a.quick.scan
+	a.quick.mu.Unlock()
+	if scan == nil {
+		return out, nil
+	}
+	status := a.RuntimeStatus()
+	fresh := status.Snapshot.Fresh(time.Now())
+	for _, g := range scan.Groups {
+		for _, e := range g.Entries {
+			local := false
+			for _, m := range scan.Machines {
+				if m.Name == e.Machine {
+					local = m.Local
+				}
+			}
+			if !local {
+				continue
+			}
+			d := LiveDTO{Live: e.Live, Status: e.Status, Needs: e.Needs, App: e.App, Places: e.Places}
+			if !fresh {
+				d.Live = false
+				d.Needs = false
+				d.Status = "unknown"
+				d.Places = nil
+			}
+			out.Entries[e.Machine+"\x00"+e.Key] = d
+		}
+	}
+	return out, nil
+}
+
+func (a *App) directPresence() (*PresenceDTO, error) {
 	out := &PresenceDTO{Entries: map[string]LiveDTO{}}
 	a.mu.Lock()
 	owned := a.inv

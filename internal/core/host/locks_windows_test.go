@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -213,5 +214,13 @@ func TestWindowsLockProbeErrorsStayUnknown(t *testing.T) {
 	})
 	if got := probeLock(p); got != agent.LockUnknown {
 		t.Fatalf("read access denied: %s", got)
+	}
+}
+
+func TestUnknownLockHoldersAreNotReportedFree(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "thread.lock")
+	holders, err := (localLocks{}).Holders(t.Context(), []string{p})
+	if !errors.Is(err, agent.ErrUnsupported) || holders != nil {
+		t.Fatalf("unsupported lock lookup reported as free: holders=%v, error=%v", holders, err)
 	}
 }

@@ -94,7 +94,7 @@ func TestCodexOwnedPTYBindsFromRealLocksAndRejectsSharedDaemon(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := NewApp(reg, WithoutSessionWatching())
+	a := NewApp(reg)
 	t.Cleanup(a.Shutdown)
 	if _, err := a.Scan(); err != nil {
 		t.Fatal(err)

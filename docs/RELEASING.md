@@ -93,6 +93,13 @@ Before tagging:
   documented or allowlisted, the command tree equal to `internal/ui/cli/testdata/cli-tree.golden`)
   before it attests anything; `scripts/release-sign.sh` signs only attested files, so a
   failed check leaves a draft that cannot be completed. Fix it on `main` and tag again.
+- For 0.6, also complete the approved [runtime/cloud/relay acceptance plan](runtime-cloud-relay-design.md#10-test-plan-and-scenario-matrices)
+  and [remaining implementation gates](0.5-implementation.md#remaining-gates--continue-through-all-of-them):
+  native ownership/install/recovery, all ordered multi-machine journeys, real
+  advertised provider capabilities, hosted retention and settled cost evidence,
+  and disposable provider cleanup. Record the tested revisions and remaining
+  unsupported capabilities explicitly. A staging artifact or partial matrix is
+  not release qualification.
 - The manual checks the stand-ins can't replace, on the Mac, for what the release touches:
   `scripts/cloud-smoke.sh` (real Claude Code cloud and Codex cloud; it starts paid turns),
   `scripts/iterm-smoke.sh` and `scripts/iterm-api-smoke.sh` (iTerm2), and the app's
@@ -103,15 +110,16 @@ Then:
 1. Move the `CHANGELOG.md` entries from "Unreleased" to a `## [X.Y.Z] - date` section
    (leave an empty `## Unreleased` above it, and add the `[X.Y.Z]:` link at the bottom),
    commit, push. That section becomes the release notes (the workflow fails without it).
-2. Tag and push: `git tag -a v0.4.0 -m "hopsesh 0.4.0" && git push origin v0.4.0`
+2. Tag and push: `git tag -a v0.5.0 -m "hopsesh 0.5.0" && git push origin v0.5.0`
    (use `-s` instead of `-a` if git has a signing key configured; only the repository admin
    can create `v*` tags). The tag also starts `release-tests` (the scenario matrix at
    triple coverage).
-3. Wait for the release workflow to finish (`gh run watch`).
-4. On the Mac: `scripts/release-sign.sh v0.4.0`. A rehearsal that notarizes nothing and
-   uploads nothing: `DRY_RUN=1 scripts/release-sign.sh v0.4.0`. It also checks the test
+3. Wait for the release workflow and the tag-triggered `release-tests` to pass
+   (`gh run watch`). Inspect every required job before signing and publishing.
+4. On the Mac: `scripts/release-sign.sh v0.5.0`. A rehearsal that notarizes nothing and
+   uploads nothing: `DRY_RUN=1 scripts/release-sign.sh v0.5.0`. It also checks the test
    bundle's `.sha256` and that the draft is a pre-release exactly when the tag has a suffix.
-5. Review the draft on GitHub, then publish: `gh release edit v0.4.0 --draft=false --latest`.
+5. Review the draft on GitHub, then publish: `gh release edit v0.5.0 --draft=false --latest`.
 6. The website: bump `softwareVersion` in the hopsesh entry of `src/data/apps.ts` in
    [codonic-site](https://github.com/roeehrl/codonic-site) and merge it. It's the only place
    the site writes the version; its download links use `releases/latest/download/…` and

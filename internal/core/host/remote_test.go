@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -38,6 +39,28 @@ exec sh -c "$*"
 		t.Fatal(err)
 	}
 	return c
+}
+
+func TestRemoteUnknownLockHoldersAreNotReportedFree(t *testing.T) {
+	for _, probe := range []string{"unknown", "missing"} {
+		t.Run(probe, func(t *testing.T) {
+			m := &Machine{Name: "box", Conn: fakeSSH(t), Facts: Facts{OS: "linux"}}
+			defer m.Close()
+			dir := t.TempDir()
+			script := "#!/bin/sh\nexit 0\n"
+			if probe == "unknown" {
+				script = "#!/bin/sh\nprintf 'unknown\\t%s\\n' \"$3\"\n"
+			}
+			if err := os.WriteFile(filepath.Join(dir, "perl"), []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			holders, err := m.Locks().Holders(t.Context(), []string{"/fixture/thread.lock"})
+			if !errors.Is(err, agent.ErrUnsupported) || holders != nil {
+				t.Fatalf("%s probe reported free: holders=%v, error=%v", probe, holders, err)
+			}
+		})
+	}
 }
 
 // A program on another machine gets its input and keeps it open until it has answered

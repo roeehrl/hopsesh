@@ -62,13 +62,17 @@ type movementObservation struct {
 
 // EnrichMovement joins receipt metadata and observes native content in memory. It
 // never writes remote files or alters journaled sidecars during a scan.
-func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) { a.enrichMovement(ctx, inv, nil) }
+func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
+	a.enrichMovement(ctx, inv, nil, false)
+}
 
 // enrichMovement is EnrichMovement observing the copies on other machines only in the
 // families that hold a session remote accepts (nil: every family). Observing reads whole
 // transcripts, which over SSH can take longer than a scan may; a copy that is not
 // observed asks to be verified before a return, as one that cannot be read does.
-func (a *App) enrichMovement(ctx context.Context, inv *Inventory, remote func(Entry) bool) {
+// passive reads through observationHost: the shared runtime's collection executes
+// nothing and writes nothing.
+func (a *App) enrichMovement(ctx context.Context, inv *Inventory, remote func(Entry) bool, passive bool) {
 	// Saved rows (Cached) carry a lineage outline, not the revision graph, and keep the
 	// movement they were saved with: only rows read in this scan are compared.
 	families := map[string][]int{}
@@ -110,7 +114,7 @@ func (a *App) enrichMovement(ctx context.Context, inv *Inventory, remote func(En
 		} else {
 			g = committedGraph(inv, family, families[family])
 			if g != nil {
-				a.observeFamily(ctx, inv, family, g, observed, ids, observeRemote)
+				a.observeFamily(ctx, inv, family, g, observed, ids, observeRemote, passive)
 			}
 			a.movementMemo.put(family, fingerprint, g, inv, observed, ids)
 			if g == nil {
@@ -197,7 +201,7 @@ func (a *App) enrichMovement(ctx context.Context, inv *Inventory, remote func(En
 
 // observeFamily reads each copy in one lineage family and observes its native content
 // against the family graph g (in memory; nothing is written).
-func (a *App) observeFamily(ctx context.Context, inv *Inventory, family string, g *lineage.Manifest, observed map[lineage.ReplicaID]movementObservation, ids map[int]lineage.ReplicaID, remote bool) {
+func (a *App) observeFamily(ctx context.Context, inv *Inventory, family string, g *lineage.Manifest, observed map[lineage.ReplicaID]movementObservation, ids map[int]lineage.ReplicaID, remote, passive bool) {
 	committed := committedPrint(inv, family)
 	for i := range inv.Entries {
 		e := &inv.Entries[i]
@@ -231,6 +235,9 @@ func (a *App) observeFamily(ctx context.Context, inv *Inventory, family string, 
 			continue
 		}
 		h, err := m.host.For(ctx, mod.Spec(), in, nil)
+		if err == nil && passive {
+			h = observationHost{h}
+		}
 		var copyKey string
 		var before graphRecords
 		if err == nil {

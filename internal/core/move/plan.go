@@ -36,13 +36,28 @@ type Copy struct {
 
 // Input is what planning needs.
 type Input struct {
-	Source  Side
-	Session agent.Summary
-	Live    agent.LiveInfo
-	Git     *repos.GitState // the session's checkout on the source (nil when unknown)
-	GitErr  string          // why the checkout could not be read ("" when it was)
-	Lineage *lineage.Manifest
-	Target  Side
+	// SourceReceipt is a transport-owned local ledger for a read-only source.
+	// It is supplied only by native code, never by a peer payload or UI path.
+	SourceReceipt *ReceiptOwner
+	// CheckpointIdentity is supplied only after native verification of an
+	// owner-issued logical task and the independently approved fresh claim.
+	// It permits exact native-prefix provenance across changed session IDs.
+	CheckpointIdentity bool
+	// CheckpointHandoff is an owner-reviewed saved local handoff, loaded and
+	// authenticated by native code. Peer payloads cannot supply this provenance.
+	CheckpointHandoff *CheckpointHandoff
+	// CheckSource rechecks current authorization before any destination write.
+	CheckSource func(context.Context) error
+	// AcknowledgeSource is a transport-owned commit of writes made to a source
+	// snapshot. The app invokes it only after the native destination is durable.
+	AcknowledgeSource func(context.Context, *Plan, *Result) error
+	Source            Side
+	Session           agent.Summary
+	Live              agent.LiveInfo
+	Git               *repos.GitState // the session's checkout on the source (nil when unknown)
+	GitErr            string          // why the checkout could not be read ("" when it was)
+	Lineage           *lineage.Manifest
+	Target            Side
 	// Copies are the target agent's sessions with the same key at the target.
 	Copies []Copy
 	// Worktrees are agent-managed worktree folders (from every module).
@@ -54,6 +69,12 @@ type Input struct {
 	// Native is the source's own agent on the target, for a continuation on another
 	// machine: the session is also kept there byte for byte (nil: it is not installed).
 	Native *NativeSide
+}
+
+type ReceiptOwner struct {
+	FS         host.FS
+	Machine    string
+	NativePath string
 }
 
 // NativeSide is the source agent on the target and its copies of the session there.

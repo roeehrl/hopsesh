@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,7 +20,11 @@ import (
 
 func catalogApp(t *testing.T) *App {
 	t.Helper()
-	home := t.TempDir()
+	return catalogAppAt(t, t.TempDir())
+}
+
+func catalogAppAt(t *testing.T, home string) *App {
+	t.Helper()
 	for k, v := range testkit.Env(home) {
 		t.Setenv(k, v)
 	}
@@ -89,6 +94,115 @@ func TestSessionDiscoveryPublishesBeforeSlowAgentCompletes(t *testing.T) {
 	defer inv.Close()
 	if len(inv.Entries) < 4 {
 		t.Fatalf("final inventory lost sessions: %d", len(inv.Entries))
+	}
+}
+
+func TestSessionDiscoveryDefaultRegistrationDoesNotDuplicateObservedFiles(t *testing.T) {
+	// Match normal home paths on macOS too: /var's symlink would give the
+	// observer and registered root different spellings and hide this regression.
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := catalogAppAt(t, home)
+	ctx := context.Background()
+	observed, err := a.ObserveLocal(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(observed.Entries) == 0 || observed.Entries[0].Session.Key.Profile != "" {
+		t.Fatal("fixture must begin with unregistered passive observations")
+	}
+	current := a.ObservationInventory(ctx, observed)
+	defer current.Close()
+	var mu sync.Mutex
+	var duplicated string
+	final := a.Scan(ctx, ScanOptions{SkipGit: true, Progress: func(u ScanUpdate) {
+		mu.Lock()
+		defer mu.Unlock()
+		current = MergeDiscovery(current, u)
+		seen := map[string]string{}
+		for _, e := range current.Entries {
+			if e.Session.Path == "" {
+				continue
+			}
+			file := e.Machine + "/" + string(e.Agent) + "/" + e.Session.Path
+			if previous, ok := seen[file]; ok && duplicated == "" {
+				duplicated = previous + " and " + e.Session.Key.String()
+			}
+			seen[file] = e.Session.Key.String()
+		}
+	}})
+	defer final.Close()
+	registered := false
+	for _, e := range final.Entries {
+		registered = registered || e.Session.Key.Profile != ""
+	}
+	if !registered {
+		t.Fatal("fixture did not register accounts during discovery")
+	}
+	if duplicated != "" {
+		t.Fatalf("registration displayed the same native file twice: %s", duplicated)
+	}
+}
+
+func TestSessionDiscoveryDefaultRebindingKeepsScopeBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(*Inventory, *[]Entry)
+		want   int
+	}{
+		{"same local native file", nil, 1},
+		{"registered copy already present", func(inv *Inventory, in *[]Entry) { inv.Entries = append(inv.Entries, (*in)[0]) }, 1},
+		{"remote", func(inv *Inventory, _ *[]Entry) { inv.Machines[0].Local = false }, 2},
+		{"old cloud", func(inv *Inventory, _ *[]Entry) { inv.Entries[0].Location = agent.CloudLocation("local") }, 2},
+		{"incoming cloud", func(_ *Inventory, in *[]Entry) { (*in)[0].Location = agent.CloudLocation("local") }, 2},
+		{"other machine", func(_ *Inventory, in *[]Entry) { (*in)[0].Machine = "other" }, 2},
+		{"explicit old profile", func(inv *Inventory, _ *[]Entry) { inv.Entries[0].Session.Key.Profile = "other" }, 2},
+		{"nondefault", func(_ *Inventory, in *[]Entry) { (*in)[0].Profile.Default = false }, 2},
+		{"missing endpoint", func(_ *Inventory, in *[]Entry) { (*in)[0].Profile.Endpoint = "" }, 2},
+		{"missing root", func(_ *Inventory, in *[]Entry) { (*in)[0].Profile.Root = "" }, 2},
+		{"different native file", func(_ *Inventory, in *[]Entry) { (*in)[0].Session.Path += ".fork" }, 2},
+		{"different session", func(_ *Inventory, in *[]Entry) { (*in)[0].Session.Key.Session = "fork" }, 2},
+		{"profile agent mismatch", func(_ *Inventory, in *[]Entry) { (*in)[0].Profile.Agent = "codex" }, 2},
+		{"ambiguous nondefault", func(_ *Inventory, in *[]Entry) {
+			e := (*in)[0]
+			p := *e.Profile
+			p.ID, p.Default = "other", false
+			e.Profile, e.Session.Key.Profile = &p, p.ID
+			*in = append(*in, e)
+		}, 3},
+		{"ambiguous defaults", func(_ *Inventory, in *[]Entry) {
+			e := (*in)[0]
+			p := *e.Profile
+			p.ID = "other"
+			e.Profile, e.Session.Key.Profile = &p, p.ID
+			*in = append(*in, e)
+		}, 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			git := &repos.GitState{Identity: "github.com/example/demo", IsRepo: true}
+			old := &Inventory{Machines: []*Machine{{Name: "local", Local: true}}, Entries: []Entry{{Machine: "local", Agent: "claude", Session: agent.Summary{Key: agent.SessionKey{Agent: "claude", Session: "one"}, Path: "/native/session"}, Git: git}}}
+			e := old.Entries[0]
+			e.Session.Key.Profile = "default"
+			e.Profile = &agent.RuntimeProfile{ID: "default", Agent: "claude", Endpoint: "endpoint", Root: "/native", Default: true}
+			e.Git = nil
+			incoming := []Entry{e}
+			if tc.change != nil {
+				tc.change(old, &incoming)
+			}
+			oldKey := old.Entries[0].Session.Key
+			next := MergeDiscovery(old, ScanUpdate{Entries: incoming})
+			if len(next.Entries) != tc.want {
+				t.Fatalf("got %d entries, want %d: %+v", len(next.Entries), tc.want, next.Entries)
+			}
+			if old.Entries[0].Session.Key != oldKey || old.Entries[0].Git != git {
+				t.Fatal("mutated previously published inventory")
+			}
+			if tc.name == "same local native file" && (next.Entries[0].Session.Key != incoming[0].Session.Key || next.Entries[0].Git != git || !next.Entries[0].Cached) {
+				t.Fatal("registration lost provisional repository metadata or kept the old key")
+			}
+		})
 	}
 }
 
@@ -243,5 +357,29 @@ func TestProgressiveRefreshRetainsRepositoryUntilEnrichmentCompletes(t *testing.
 	}
 	if old.Entries[0].Git != git {
 		t.Fatal("published old snapshot was mutated")
+	}
+}
+
+func TestDiscoveryLeaseSeparatesSharedSourceEvidence(t *testing.T) {
+	a := catalogApp(t)
+	for _, test := range []struct {
+		name          string
+		first, second ScanOptions
+	}{
+		{"local snapshots", ScanOptions{LocalSnapshot: &Observation{Machine: "first"}}, ScanOptions{LocalSnapshot: &Observation{Machine: "second"}}},
+		{"shared vs direct", ScanOptions{SharedRemotes: true}, ScanOptions{}},
+		{"remote snapshots", ScanOptions{SharedRemotes: true, RemoteSnapshots: []RemoteObservation{{Phase: "queued"}}}, ScanOptions{SharedRemotes: true, RemoteSnapshots: []RemoteObservation{{Phase: "done"}}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, release := a.discoveryLease(t.Context(), test.first)
+			defer release()
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			followed, stop := a.discoveryLease(ctx, test.second)
+			defer stop()
+			if ctx.Err() != nil || followed != nil {
+				t.Fatal("distinct source evidence waited for or reused another collector")
+			}
+		})
 	}
 }

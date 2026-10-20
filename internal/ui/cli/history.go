@@ -66,7 +66,7 @@ one transfer.`,
 					return err
 				}
 				r.app.Cfg.History = h
-				if err := config.Save(r.app.Cfg); err != nil {
+				if err := config.Save(&r.app.Cfg); err != nil {
 					return err
 				}
 			}

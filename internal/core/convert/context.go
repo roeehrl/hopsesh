@@ -36,7 +36,7 @@ func (res *Result) historyContext(r Request, old []ir.Item, limit int) string {
 			continue
 		}
 		if n.Generated {
-			if r.IncludeGenerated && n.Kind == ir.KindMessage && strings.TrimSpace(n.Text) != "" {
+			if (r.IncludeGenerated || len(n.Coverage) > 0) && n.Kind == ir.KindMessage && strings.TrimSpace(n.Text) != "" {
 				generatedContext = &n
 			}
 			continue

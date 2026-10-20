@@ -358,7 +358,41 @@ func TestFlowControl(t *testing.T) {
 		t.Fatal("the program finished while the window was behind")
 	}
 	w.AckAll()
-	if _, err := w.WaitState(pty.Exited, 60*time.Second); err != nil {
+	// Keep bounded progress evidence for a slow native console without changing
+	// the payload, flow-control assertions or deadline. Successful runs are quiet.
+	type flowSample struct {
+		elapsed time.Duration
+		drawn   int
+		state   pty.State
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	samples := make(chan []flowSample, 1)
+	started := time.Now()
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		trace := make([]flowSample, 0, 12)
+		for {
+			select {
+			case <-ctx.Done():
+				samples <- trace
+				return
+			case <-ticker.C:
+				if len(trace) < 12 {
+					trace = append(trace, flowSample{time.Since(started), w.Drawn(), s.Info().State})
+				}
+			}
+		}
+	}()
+	_, err := w.WaitState(pty.Exited, 60*time.Second)
+	cancel()
+	trace := <-samples
+	if err != nil {
+		t.Logf("flow paused drawn=%d backend=%s; final drawn=%d state=%s", held, s.Info().Backend, w.Drawn(), s.Info().State)
+		for _, sample := range trace {
+			t.Logf("flow progress elapsed=%s drawn=%d state=%s", sample.elapsed.Round(time.Millisecond), sample.drawn, sample.state)
+		}
 		t.Fatal(err)
 	}
 	if d := w.Drawn(); d < total {

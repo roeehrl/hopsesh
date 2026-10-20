@@ -81,8 +81,8 @@ func probeLock(p string) (state agent.LockState) {
 	return agent.LockFree
 }
 
-// lockHolders is not available on Windows yet.
-func lockHolders(context.Context, string) ([]int, error) {
+// Unknown ownership must not look like an unlocked, already stopped session.
+func (localLocks) Holders(context.Context, []string) (map[string][]int, error) {
 	return nil, fmt.Errorf("%w: finding which program holds a lock on Windows", agent.ErrUnsupported)
 }
 

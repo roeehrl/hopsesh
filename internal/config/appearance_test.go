@@ -17,7 +17,7 @@ func TestAppearancePersistenceAndDefault(t *testing.T) {
 		if err := c.Check(); err != nil {
 			t.Fatal(err)
 		}
-		if err := Save(c); err != nil {
+		if err := Save(&c); err != nil {
 			t.Fatal(err)
 		}
 		back, err := Load()

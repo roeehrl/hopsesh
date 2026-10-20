@@ -151,7 +151,7 @@ func Push(ctx context.Context, dir string) (string, error) {
 		return "", ErrNoUpstream
 	}
 	cmd := proc.CommandContext(ctx, "git", "-C", dir, "push", "--quiet")
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never")
+	cmd.Env = proc.PipeEnvironment(append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never"))
 	if os.Getenv("GIT_SSH_COMMAND") == "" {
 		cmd.Env = append(cmd.Env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes")
 	}

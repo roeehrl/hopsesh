@@ -237,3 +237,22 @@ func lookup(name string) (rule, bool) {
 	}
 	return rule{}, false
 }
+
+// Ancestors retains only the bounded process chains needed to classify sessions.
+// Local IPC does not need unrelated process names or any command-line arguments.
+func (t Table) Ancestors(pids []int) Table {
+	out := Table{}
+	for _, pid := range pids {
+		seen := map[int]bool{}
+		for range maxDepth {
+			p, ok := t[pid]
+			if !ok || pid <= 0 || seen[pid] {
+				break
+			}
+			seen[pid] = true
+			out[pid] = p
+			pid = p.PPID
+		}
+	}
+	return out
+}

@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/core/audit"
-	"github.com/roeehrl/hopsesh/internal/core/proc"
 )
 
 // Errors classified from ssh's own output (ssh exits 255 for every connection problem).
@@ -221,14 +220,24 @@ func (c *Conn) run(ctx context.Context, remoteCmd string) ([]byte, error) {
 		defer cancel()
 	}
 	args := append(c.baseArgs(), c.Dest, "--", remoteCmd)
-	cmd := proc.CommandContext(ctx, c.sshBinary, args...)
+	cmd := sshCommandContext(ctx, c.sshBinary, args...)
+	// Proxy helpers can retain inherited output handles after ssh exits or is
+	// canceled. Allow finite output draining after successful exit: a 100ms
+	// grace can discard pending output and turn success into ErrWaitDelay.
+	// Still bound stuck inherited pipes, without killing unrelated descendants.
+	cmd.WaitDelay = time.Second
 	if env != nil {
-		cmd.Env = append(os.Environ(), env...)
+		cmd.Env = append(cmd.Environ(), env...)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	start := time.Now()
 	err = cmd.Run()
+	// CommandContext may return ExitError for the process it killed (exit 1 on
+	// Windows). That is a local cancellation, never a remote command status.
+	if err != nil && ctx.Err() != nil {
+		err = ctx.Err()
+	}
 	c.Log.Write(audit.Entry{Action: "ssh.exec", Host: c.Dest, Detail: map[string]any{
 		"command": firstLine(remoteCmd), "ms": time.Since(start).Milliseconds(), "ok": err == nil}})
 	if err != nil {
@@ -259,9 +268,9 @@ func (c *Conn) sftpCommand(ctx context.Context) *exec.Cmd {
 	// ssh keeps the FIRST value of a repeated option, so these go before baseArgs.
 	args := append([]string{"-o", "Compression=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none"}, c.baseArgs()...)
 	args = append(args, "-s", c.Dest, "sftp")
-	cmd := proc.CommandContext(ctx, c.sshBinary, args...)
+	cmd := sshCommandContext(ctx, c.sshBinary, args...)
 	if env, err := c.passwordEnv(ctx); err == nil && env != nil {
-		cmd.Env = append(os.Environ(), env...)
+		cmd.Env = append(cmd.Environ(), env...)
 	}
 	return cmd
 }
@@ -308,9 +317,9 @@ func (c *Conn) StartPipe(ctx context.Context, remoteCmd string) (*Pipe, error) {
 	pctx, cancel := context.WithCancel(context.Background())
 	args := append([]string{"-o", "Compression=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none"}, c.baseArgs()...)
 	args = append(args, c.Dest, "--", remoteCmd)
-	cmd := proc.CommandContext(pctx, c.sshBinary, args...)
+	cmd := sshCommandContext(pctx, c.sshBinary, args...)
 	if env != nil {
-		cmd.Env = append(os.Environ(), env...)
+		cmd.Env = append(cmd.Environ(), env...)
 	}
 	in, err := cmd.StdinPipe()
 	if err != nil {
@@ -351,7 +360,7 @@ func (c *Conn) Close() {
 	// shutdown) hostage when ssh hangs reading config or contacting its master.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	cmd := proc.CommandContext(ctx, c.sshBinary, args...)
+	cmd := sshCommandContext(ctx, c.sshBinary, args...)
 	cmd.WaitDelay = 100 * time.Millisecond
 	_ = cmd.Run()
 }
@@ -366,7 +375,10 @@ func classify(err error, stderr string) error {
 		return &RemoteError{Code: ee.ExitCode(), Stderr: strings.TrimSpace(stderr)}
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return fmt.Errorf("%w (timed out)", ErrUnreachable)
+		return fmt.Errorf("%w (timed out): %w", ErrUnreachable, err)
+	}
+	if errors.Is(err, context.Canceled) {
+		return err
 	}
 	low := strings.ToLower(stderr)
 	switch {
@@ -383,7 +395,7 @@ func classify(err error, stderr string) error {
 		strings.Contains(low, "network is unreachable"), strings.Contains(low, "operation timed out"):
 		return fmt.Errorf("%w: %s", ErrUnreachable, strings.TrimSpace(stderr))
 	}
-	return fmt.Errorf("ssh: %v: %s", err, strings.TrimSpace(stderr))
+	return fmt.Errorf("ssh: %w: %s", err, strings.TrimSpace(stderr))
 }
 
 // RemoteError is a remote command that ran but failed.

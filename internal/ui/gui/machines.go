@@ -31,6 +31,8 @@ type HereDTO struct {
 
 // MachineRow is a machine you added: how hopsesh logs in, and what the last scan found.
 type MachineRow struct {
+	Relay       bool        `json:"relay"`
+	Receive     *bool       `json:"receive,omitempty"`
 	Name        string      `json:"name"`
 	Destination string      `json:"destination"`
 	OS          string      `json:"os"`
@@ -136,11 +138,16 @@ func (a *App) Machines() MachinesDTO {
 		}
 		added[h.Name] = true
 		r := MachineRow{Name: h.Name, Destination: h.Destination, OS: h.OS, Auth: "key", Keychain: h.Keychain, CanRemember: secrets.Available(), Agents: []string{}, Storage: []app.AgentUsage{}, Can: []AbilityDTO{}}
+		if h.RelayID != "" {
+			r.Relay = true
+			r.Destination = "Internet relay"
+		}
 		r.Scan = a.scans[h.Name]
 		if h.UsesPassword() {
 			r.Auth = "password"
 		}
 		if m := scanned[h.Name]; m != nil {
+			r.Receive = m.Receive
 			r.Scanned, r.Status, r.Hint, r.Error, r.Hopsesh = true, m.Status, m.Hint, m.Error, m.Hopsesh
 			r.Presence, r.PresenceWhy = m.Presence, m.PresenceWhy
 			r.Agents = agentNames(m)

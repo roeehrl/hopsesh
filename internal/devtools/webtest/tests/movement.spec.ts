@@ -1,5 +1,5 @@
 import { test, expect, Page, Route } from '@playwright/test';
-import { fresh, row, details } from './helpers';
+import { fresh, row, details, patchScans } from './helpers';
 import { appendFile, readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 
@@ -69,14 +69,16 @@ async function fixtures(page:Page, returns:any[], movement:any=null, edit?:(e:an
    calls.push(req);return route.fulfill({json:{error:'Test stopped after read-only plan request'}});
   }
   if(req.m==='AccountDestinations') return route.fulfill({json:{result:[]}});
-  if(['InitialScan','Scan','RefreshHere','CachedScan','ScanSnapshot'].includes(req.m)) {
-   const response=await route.fetch();const body=await response.json();
-   patch(body.result);
-   return route.fulfill({json:body});
-  }
   return route.continue();
  });
- await fresh(page);await row(page,'Find the codeword').click();
+ await fresh(page);
+ await patchScans(page,scan=>{
+  for(const g of scan?.groups||[]) for(const e of g.entries||[]) if(e.title==='Find the codeword') {
+   e.returns=returns.map(r=>({...r,machine:r.local?e.machine:r.machine}));e.movement=movement;
+   edit?.(e,scan);
+  }
+ });
+ await row(page,'Find the codeword').click();
  return calls;
 }
 
@@ -575,6 +577,7 @@ test('remote Codex source offers move back into the exact local Claude replica',
   if(!here)return;
   Object.assign(e,{machine:'remote-fixture',agent:'codex',agentName:'Codex',returns:[{replica:'original',machine:here,agent:'claude',agentName:'Claude Code',profile:'personal',profileLabel:'Personal',key:'claude@personal/original',status:'available',reason:'New work can return',local:true}]});
  });
+ await row(page,'Find the codeword').click();
  await expect(details(page).locator('#act-primary')).toContainText('Move back to Claude Code');
  await page.screenshot({path:info.outputPath('remote-source-local-return.png'),fullPage:true});
  await details(page).locator('#act-primary').click();

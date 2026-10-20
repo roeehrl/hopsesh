@@ -20,7 +20,7 @@
 #   back with the teleport (in this terminal too: once the conversation shows, send a message
 #   so Claude Code saves its copy, then leave it with /exit and the script goes on), and
 #   checks that the copy begins with the briefing hopsesh sent and holds the codeword reply. It starts one model turn in the cloud on your plan (there is no
-#   follow-up: Claude Code has no command hopsesh could send one with). Use a throwaway
+#   follow-up: hopsesh has not integrated and qualified that command). Use a throwaway
 #   session in a checkout of a GitHub repository the Claude GitHub App can reach; its work
 #   in progress goes up on a hopsesh/handoff/ branch. HANDOFF_WAIT (seconds, default 240) is
 #   how long it waits for the cloud's turn.
@@ -180,7 +180,7 @@ NOTE
   [ "$(json "$WORK/handoff.json" handoff.pasted)" != True ] || echo "note: the link was pasted by hand; hopsesh did not see it in claude's output"
 
   echo "== 4. no follow-up: Claude Code cloud takes none from hopsesh"
-  if "$BIN" followup "claude-cloud:$CLOUDID" "x" --yes >/dev/null 2>&1; then fail "a follow-up was sent; Claude Code has no command for one"; fi
+  if "$BIN" followup "claude-cloud:$CLOUDID" "x" --yes >/dev/null 2>&1; then fail "an unqualified follow-up was sent"; fi
   WAIT=${HANDOFF_WAIT:-240}
   echo "waiting ${WAIT}s for the cloud's turn (HANDOFF_WAIT)…"
   sleep "$WAIT"

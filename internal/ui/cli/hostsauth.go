@@ -78,7 +78,7 @@ Better still, let hopsesh set that up for you: hopsesh hosts setup-key <machine>
 			default:
 				return fmt.Errorf("unknown login method %q (key or password)", args[1])
 			}
-			if err := config.Save(r.app.Cfg); err != nil {
+			if err := config.Save(&r.app.Cfg); err != nil {
 				return err
 			}
 			r.app.Audit.Write(audit.Entry{Action: "hosts.auth", Host: h.Name, Detail: map[string]any{"auth": authLabel(*h)}})
@@ -164,7 +164,7 @@ the default ~/.ssh/id_* names). When there is none, hopsesh offers to create
 			}
 			h.Auth, h.Keychain = "", false
 			_ = secrets.Delete(secrets.Account(h.Name, h.Destination))
-			if err := config.Save(r.app.Cfg); err != nil {
+			if err := config.Save(&r.app.Cfg); err != nil {
 				return err
 			}
 			r.printf("✓ %s now logs in with your key; its password is no longer used or remembered.\n", h.Name)
