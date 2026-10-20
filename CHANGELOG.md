@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## [0.6.0] - 2026-10-20
+
+Sizes, faster scans of other machines, undo that cleans up clones and worktrees, and lineage
+files a seventh of their size. **Update hopsesh on every machine:** an older hopsesh cannot
+read the new lineage files.
+
 ### Changed
 
 - Lineage files (`<session>.hopsesh.json`) are about a seventh of their size (on a Mac with
@@ -14,9 +20,9 @@ All notable changes to this project are documented here. The format follows
   up to three times. The history they hold is unchanged, and machines still exchange it as
   `lineage/5` (peer protocol unchanged). Each file is rewritten the next time a move updates
   it, and both formats are read. The lineage size limit (`history.lineage_mb`) still
-  measures the history itself, so the same histories fit as before. An older hopsesh cannot read a `lineage/6` file: it
-  shows that session's lineage as unsupported and does not move it. Update hopsesh on every
-  machine instead of archiving such a file there.
+  measures the history itself, so the same histories fit as before. An older hopsesh cannot
+  read a `lineage/6` file: it shows that session's lineage as unsupported and does not move
+  it. Update hopsesh on every machine instead of archiving such a file there.
 
 ### Added
 
@@ -862,6 +868,7 @@ is refused and set aside (the app offers this), and machines are added again.
 - The terminal UI no longer carries out a plan you pressed `y` on while a changed one was
   still being worked out.
 
+[0.6.0]: https://github.com/roeehrl/hopsesh/releases/tag/v0.6.0
 [0.5.0]: https://github.com/roeehrl/hopsesh/releases/tag/v0.5.0
 [0.4.5]: https://github.com/roeehrl/hopsesh/releases/tag/v0.4.5
 [0.4.4]: https://github.com/roeehrl/hopsesh/releases/tag/v0.4.4
