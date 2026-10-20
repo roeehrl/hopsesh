@@ -94,3 +94,17 @@ func seedHistoryLedger(w http.ResponseWriter, r *http.Request, svc *gui.App, hom
 	sum := sha256.Sum256([]byte(text))
 	return json.NewEncoder(w).Encode(map[string]any{"path": path, "ledger": lineage.PathFor(path), "bytes": len(encoded), "fragmentBytes": len(text), "fragmentHash": hex.EncodeToString(sum[:])})
 }
+
+// readLineage is the manifest beside a demo session, as hopsesh reads it (a file is packed:
+// its ids are places in its own lists, which differ from file to file).
+func readLineage(w http.ResponseWriter, r *http.Request, svc *gui.App) error {
+	e, err := svc.ResolveEntry(r.URL.Query().Get("machine"), r.URL.Query().Get("key"))
+	if err != nil {
+		return err
+	}
+	m, err := lineage.Read(host.LocalFS(), e.Path, ir.Limits{LineageBytes: ir.CeilingLineageBytes})
+	if err != nil || m == nil {
+		return fmt.Errorf("no lineage beside the session: %v", err)
+	}
+	return json.NewEncoder(w).Encode(m)
+}
