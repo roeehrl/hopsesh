@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Security
+
+- Built with Go 1.27.3, which distrusts compromised intermediate certificates in
+  `crypto/x509` ([GO-2026-6809](https://pkg.go.dev/vuln/GO-2026-6809)).
+
 ### Fixed
 
 - Codex sessions that Codex has compressed are listed again. Codex rewrites a rollout it has
