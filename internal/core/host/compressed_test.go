@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -147,7 +148,8 @@ func TestWritingCompressedRolloutUnpacksItFirst(t *testing.T) {
 		t.Fatalf("the compressed file should be gone: %v", err)
 	}
 	fi, err := os.Stat(p)
-	if err != nil || !fi.ModTime().Equal(mod) || fi.Mode().Perm() != 0o640 {
+	// Windows keeps no Unix permission bits; the mode is checked elsewhere.
+	if err != nil || !fi.ModTime().Equal(mod) || runtime.GOOS != "windows" && fi.Mode().Perm() != 0o640 {
 		t.Fatalf("unpacked file keeps its mtime and mode: %v %v", fi, err)
 	}
 	if b, _ := os.ReadFile(p); !bytes.Equal(b, append(append([]byte(nil), text...), `{"mark":1}`+"\n"...)) {
