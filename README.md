@@ -148,8 +148,8 @@ on your PATH, run the line for your current shell to enable completion in this s
 | --- | --- |
 | Bash | `source <(hopsesh completion bash)` (requires Bash completion support) |
 | Zsh | `autoload -Uz compinit && compinit && source <(hopsesh completion zsh)` |
-| Fish | `hopsesh completion fish | source` |
-| PowerShell | `hopsesh completion powershell | Out-String | Invoke-Expression` |
+| Fish | `hopsesh completion fish \| source` |
+| PowerShell | `hopsesh completion powershell \| Out-String \| Invoke-Expression` |
 
 To load it in new sessions, add the corresponding line to your shell startup file
 (`~/.bashrc`, `~/.zshrc`, `~/.config/fish/config.fish`, or `$PROFILE`).
