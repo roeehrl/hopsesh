@@ -324,7 +324,7 @@ func (localLocks) Holders(ctx context.Context, paths []string) (map[string][]int
 }
 
 // LocalFS is this machine's filesystem.
-func LocalFS() FS { return localFS{} }
+func LocalFS() FS { return withCompressed(localFS{}) }
 
 func (localFS) CreateExclusive(p string, b []byte, perm fs.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {

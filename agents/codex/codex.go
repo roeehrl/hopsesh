@@ -2,7 +2,8 @@
 // store). Sessions ("threads") are append-only JSON-lines rollouts under
 // $CODEX_HOME/sessions/YYYY/MM/DD/rollout-<local time>-<id>.jsonl. Codex also keeps SQLite
 // indexes; hopsesh never touches them: Codex finds a copied-in rollout by id and indexes it
-// itself.
+// itself. A rollout Codex has compressed (<name>.jsonl.zst) reads as <name>.jsonl: the
+// machine's filesystem shows it so (see host.compressedFS).
 package codex
 
 import (

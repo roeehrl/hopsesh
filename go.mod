@@ -15,6 +15,7 @@ require (
 	github.com/coder/websocket v1.8.15
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/godbus/dbus/v5 v5.2.2
+	github.com/klauspost/compress v1.18.3
 	github.com/muesli/cancelreader v0.2.2
 	github.com/pkg/sftp v1.13.11
 	github.com/rogpeppe/go-internal v1.16.0

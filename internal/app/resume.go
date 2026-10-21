@@ -6,9 +6,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"time"
 
+	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 
 	"github.com/roeehrl/hopsesh/internal/core/launch"
@@ -121,7 +121,7 @@ func crossAccountResume(mod agent.Module, in agent.Install, e Entry) error {
 // boundReasoning: the transcript holds encrypted reasoning (bound to the account that
 // produced it).
 func boundReasoning(path string) bool {
-	f, err := os.Open(path)
+	f, err := host.LocalFS().Open(path)
 	if err != nil {
 		return false
 	}

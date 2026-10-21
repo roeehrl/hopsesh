@@ -69,7 +69,7 @@ func (m *Machine) FS(ctx context.Context) (FS, error) {
 		return m.fs, nil
 	}
 	if m.Local {
-		m.fs = localFS{}
+		m.fs = withCompressed(localFS{})
 		return m.fs, nil
 	}
 	r, err := m.Conn.OpenSFTP(ctx, m.Facts.OS == "windows")
@@ -77,7 +77,7 @@ func (m *Machine) FS(ctx context.Context) (FS, error) {
 		return nil, err
 	}
 	m.rfs = r
-	m.fs = remoteFS{r}
+	m.fs = withCompressed(remoteFS{r})
 	return m.fs, nil
 }
 
