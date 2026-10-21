@@ -93,7 +93,7 @@ func TestChangeDirOfAnOpenSessionWaitsForCd(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 		j, _ := journal.New(t.TempDir(), journal.KindMove, "claude /cd")
 		h, _ := inv.Machines[0].host.For(ctx, m.Spec(), m.install, j)
-		_ = m.Module.ChangeDir(ctx, h, m.install, e.Session, c.Plan)
+		_ = m.ChangeDir(ctx, h, m.install, e.Session, c.Plan)
 	}()
 	wctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
