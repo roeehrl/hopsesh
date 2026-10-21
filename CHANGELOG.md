@@ -8,7 +8,26 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `hopsesh cd <session> <dir>` continues a session on this machine in another folder and
+  keeps it the same session: its id, and every record its agent wrote. Claude Code sessions
+  change folder the way Claude Code's own `/cd` does (the transcript and its side folder move
+  to the new folder's project folder, with a `relocated` record); for one that is open,
+  hopsesh tells you to type `/cd <dir>` in it and waits until Claude Code has moved it. Codex
+  sessions change folder through Codex itself (`codex app-server` resumes the thread in the
+  new folder with no turn, and Codex records it in the rollout and its own index). Codex's
+  `/cd` starts a new thread, so an open Codex session is quit first with `--stop-local`. The
+  folder must be a checkout of the session's repository unless you pass `--other-repo`.
+  `hopsesh undo` reverses it. The weekly upstream-drift check watches what this relies on:
+  `/cd` and its `relocated` record, Codex's `thread/resume` with a folder, its
+  `thread_settings_applied` record, `-C`, and whether Codex's `/cd` still forks.
 - README shell-completion setup for Bash, Zsh, Fish and PowerShell.
+
+### Fixed
+
+- A Codex session resumed in another folder (`codex resume -C`) is listed in that folder:
+  hopsesh reads the folder Codex recorded last, not only the one the thread started in.
+  `hopsesh` resumes Codex sessions with `-C <folder>`, so Codex no longer asks which folder to
+  use, or goes back to the old one when `tui.resume_cwd = "session"`.
 
 ## [0.6.1] - 2026-10-21
 

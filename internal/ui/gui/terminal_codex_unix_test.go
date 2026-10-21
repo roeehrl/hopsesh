@@ -39,7 +39,7 @@ func main() {
    os.WriteFile(filepath.Join(home,"shared-ready"),[]byte("ready"),0600)
    for {time.Sleep(time.Hour)}
  }
- if len(args)!=3 || args[0]!="resume" || args[1]!="--no-daemon" { fmt.Println("owned CLI used shared daemon"); os.Exit(2) }
+ if len(args)!=5 || args[0]!="resume" || args[1]!="--no-daemon" || args[3]!="-C" { fmt.Println("owned CLI used shared daemon"); os.Exit(2) }
  f:=lock(args[2]);defer func(){if f!=nil {f.Close()}}()
  cwd,_:=os.Getwd(); b,_:=json.Marshal(map[string]any{"args":args,"cwd":cwd,"root":home})
  os.WriteFile(filepath.Join(home,"owned-ready"),b,0600)
@@ -133,7 +133,7 @@ func TestCodexOwnedPTYBindsFromRealLocksAndRejectsSharedDaemon(t *testing.T) {
 	if err := json.Unmarshal(waitFile("owned-ready"), &startup); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(c.Argv, original) || startup.Root != root || startup.CWD != repo || !reflect.DeepEqual(startup.Args, []string{"resume", "--no-daemon", ids[0]}) {
+	if !reflect.DeepEqual(c.Argv, original) || startup.Root != root || startup.CWD != repo || !reflect.DeepEqual(startup.Args, []string{"resume", "--no-daemon", ids[0], "-C", repo}) {
 		t.Fatalf("launch: %+v, original %v", startup, c.Argv)
 	}
 	info := a.TerminalTabs()[0].Info

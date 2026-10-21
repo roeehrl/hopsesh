@@ -392,6 +392,13 @@ func summarize(h agent.Host, r rollout) (*agent.Summary, error) {
 		}
 	}
 	tl := lines(tail, size > headChunk)
+	// The folder Codex resumed the thread in last (codex resume -C, hopsesh cd), when it
+	// recorded one; session_meta keeps the folder it started in.
+	if cwd := settingsCWD(tl, first.ID, first.ForkedFromID != ""); cwd != "" {
+		s.CWD = cwd
+	} else if cwd := settingsCWD(lines(head, false), first.ID, first.ForkedFromID != ""); cwd != "" && size > headChunk {
+		s.CWD = cwd
+	}
 	for i := len(tl) - 1; i >= 0; i-- {
 		p := userPrompt(tl[i])
 		talked = talked || p != ""
@@ -631,7 +638,7 @@ func (m *Module) Verify(ctx context.Context, h agent.Host, mp agent.MovePlan, st
 	return errors.New("no rollout was staged")
 }
 
-// Resume is `codex resume <id> [prompt]` (or `codex fork <id>`), run in the thread's folder.
+// Resume is `codex resume <id> -C <folder> [prompt]` (or `codex fork <id>`), run in the thread's folder.
 func (m *Module) Resume(in agent.Install, key agent.SessionKey, p agent.Placement, o agent.ResumeOptions) agent.Command {
 	in.Accounts = m.Spec().Accounts
 	if o.App {
@@ -647,6 +654,11 @@ func (m *Module) Resume(in agent.Install, key agent.SessionKey, p agent.Placemen
 	argv := []string{"codex", verb, string(key.Session)}
 	if in.Runtime == agent.RuntimeApp && in.Binary != "" {
 		argv[0] = in.Binary // not on PATH: the app's own runtime
+	}
+	if p.CWD != "" {
+		// An explicit folder: without it Codex asks which folder to use, or goes back to the
+		// thread's own one (tui.resume_cwd = "session").
+		argv = append(argv, "-C", p.CWD)
 	}
 	if o.Prompt != "" {
 		argv = append(argv, o.Prompt)

@@ -135,21 +135,24 @@ var groups = []string{"local", "anthropic-cloud", "openai-cloud", "third-party-c
 var agentWatch = map[agent.ID]target{
 	"claude": {
 		Group:    "local",
-		Surface:  "transcripts and their records under the Claude config folder, `claude --resume` with its fork and Remote Control flags, `claude auth status --json`, isolated account profiles via CLAUDE_CONFIG_DIR and auth login, public identity and credential-store isolation, `--version` output, CLAUDE.md, skills, settings and the desktop app",
+		Surface:  "transcripts and their records under the Claude config folder, `claude --resume` with its fork and Remote Control flags, the on-disk effect of `/cd` (hopsesh cd mirrors it for a closed session and asks the user to type it in an open one), `claude auth status --json`, isolated account profiles via CLAUDE_CONFIG_DIR and auth login, public identity and credential-store isolation, `--version` output, CLAUDE.md, skills, settings and the desktop app",
 		Priority: "high",
 		Latest:   latest{From: "npm", Ref: "@anthropic-ai/claude-code"},
 		Package:  "@anthropic-ai/claude-code",
 		Watch: watch{
-			Docs:   claudeDocs("sessions", "settings", "skills", "hooks", "headless", "cli-reference", "claude-directory", "permissions", "authentication", "env-vars", "desktop", "memory"),
+			Docs:   claudeDocs("sessions", "settings", "skills", "hooks", "headless", "cli-reference", "claude-directory", "permissions", "authentication", "env-vars", "desktop", "memory", "commands", "worktrees"),
 			Feeds:  []feed{{Kind: "markdown", URL: claudeChangelog}},
-			Grep:   `session|transcript|jsonl|resume|fork|CLAUDE_CONFIG_DIR|hook|SessionStart|UserPromptSubmit|/hooks|skills|CLAUDE\.md|AGENTS\.md|settings|auth|account|login|keychain|credential|Console|oauthAccount|organization|desktop|entrypoint|claude://|deep.link|deprecat|remov|rename|breaking`,
+			Grep:   `session|transcript|jsonl|resume|fork|/cd|relocat|working director|set_cwd|CLAUDE_CODE_PROJECT_DIR_NAME|CLAUDE_CONFIG_DIR|hook|SessionStart|UserPromptSubmit|/hooks|skills|CLAUDE\.md|AGENTS\.md|settings|auth|account|login|keychain|credential|Console|oauthAccount|organization|desktop|entrypoint|claude://|deep.link|deprecat|remov|rename|breaking`,
 			Help:   [][]string{{"claude", "--help"}, {"claude", "auth", "--help"}, {"claude", "auth", "status", "--help"}, {"claude", "auth", "login", "--help"}},
 			Relies: []string{"--resume", "--fork-session", "--remote-control", "--desktop", "--version", "-v", "--json", "auth", "auth login", "auth status"},
+			// /cd refusing a symlinked target; a transcript moved while live splitting its log.
+			Issues: []string{"anthropics/claude-code#86575", "anthropics/claude-code#88277"},
 			Formats: []format{
 				{ID: "claude-oauth-account", What: "~/.claude.json (or <CLAUDE_CONFIG_DIR>/.claude.json) oauthAccount: the signed-in account and organization, ids only", Fields: []string{"oauthAccount", "accountUuid", "organizationUuid", "emailAddress"}, Readers: []string{"agents/claude/account.go"}},
 				{ID: "claude-auth-status", What: "`claude auth status --json`: the public sign-in state and its config directory", Fields: []string{"loggedIn", "authMethod", "apiProvider", "orgId", "configDirectory", "subscriptionType"}, Readers: []string{"agents/claude/account.go"}},
 				{ID: "claude-transcript", What: "transcript records: the conversation tree, titles, compaction and relocation", Fields: []string{"parentUuid", "logicalParentUuid", "isSidechain", "isCompactSummary", "customTitle", "aiTitle", "leafUuid", "relocatedCwd", "sessionId"}, Readers: []string{"agents/claude/reader.go"}},
 				{ID: "claude-transcript-identity", What: "the organization each launch ran under (a credential_org attachment) and Remote Control bridge-session records with their owner", Fields: []string{"credential_org", "attachment", "bridge-session", "bridgeSessionId", "ownerOrganizationUuid", "ownerAccountUuid"}, Readers: []string{"agents/claude/summary.go", "agents/claude/claude.go"}},
+				{ID: "claude-relocated", What: "what /cd does on disk: the transcript and its <id>/ side folder move to projects/<slug of the new folder>/, and a relocated record names the folder (hopsesh cd writes the same for a closed session, and watches for it after the user types /cd in an open one)", Fields: []string{"relocated", "relocatedCwd", "sessionId", "/cd", "projects"}, Readers: []string{"agents/claude/cd.go"}},
 				{ID: "claude-live-registry", What: "sessions/<pid>.json: the live registry of running sessions (what started each, and what it waits for)", Fields: []string{"pid", "sessionId", "status", "waitingFor", "entrypoint", "claude-desktop"}, Readers: []string{"agents/claude/live.go"}},
 				{ID: "claude-hooks", What: "settings.json hooks (SessionStart, UserPromptSubmit), the payload a hook reads and the output it prints", Fields: []string{"hooks", "SessionStart", "UserPromptSubmit", "disableAllHooks", "session_id", "transcript_path", "hook_event_name", "hookSpecificOutput", "hookEventName", "additionalContext", "decision", "systemMessage"}, Readers: []string{"sdk/agent/hooks_json.go", "agents/claude/hooks.go", "internal/ui/cli/movement_hooks.go"}},
 			},
@@ -157,11 +160,12 @@ var agentWatch = map[agent.ID]target{
 		Floors: []floor{
 			{Version: "2.1.284", Gates: "the SessionStart/UserPromptSubmit protection hooks", Source: "agents/claude/hooks.go"},
 			{Version: "2.1.285", Gates: "opening a session in Claude desktop (`claude --desktop --resume <uuid>`)", Source: "agents/claude/desktop.go", Relies: []string{"--desktop", "--resume"}},
+			{Version: "2.1.169", Gates: "hopsesh cd: `/cd`, whose on-disk effect (the transcript moved, a relocated record) it mirrors or asks the user to type", Source: "agents/claude/cd.go", Relies: []string{"--resume"}},
 		},
 	},
 	"codex": {
 		Group:    "local",
-		Surface:  "rollout files under isolated CODEX_HOME and CODEX_SQLITE_HOME profiles and their session_meta, session_index.jsonl, `codex resume` and `codex fork`, the `codex app-server` JSON-RPC methods for threads and accounts (account/read with refreshToken:false), login and keyring credential storage, exact desktop navigation through codex://threads/<uuid> for the default profile, `--version` output, AGENTS.md, skills and config.toml",
+		Surface:  "rollout files under isolated CODEX_HOME and CODEX_SQLITE_HOME profiles and their session_meta, session_index.jsonl, `codex resume` and `codex fork` with `-C`, a thread's folder as Codex records it on resume (thread_settings_applied, which hopsesh cd has Codex write through app-server thread/resume; Codex's own /cd forks a new thread, so hopsesh does not use it), the `codex app-server` JSON-RPC methods for threads and accounts (account/read with refreshToken:false), login and keyring credential storage, exact desktop navigation through codex://threads/<uuid> for the default profile, `--version` output, AGENTS.md, skills and config.toml",
 		Priority: "high",
 		Latest:   latest{From: "npm", Ref: "@openai/codex"},
 		Package:  "@openai/codex",
@@ -170,15 +174,18 @@ var agentWatch = map[agent.ID]target{
 			Feeds: []feed{{Kind: "releases", Repo: "openai/codex", Tag: "rust-v"}},
 			// Track storage evolution without assuming an old limitation is still present;
 			// the reviewer must inspect the current reader and writer.
-			Grep:   `session|rollout|thread|resume|fork|CODEX_HOME|CODEX_SQLITE_HOME|cli_auth_credentials_store|keyring|refreshToken|workspace|identity|desktop|deep.link|codex://|hook|SessionStart|UserPromptSubmit|hooks/list|/hooks|trust|skills|AGENTS\.md|config\.toml|account|auth|id_token|originator|creator_|thread_source|writer.lock|daemon|app-server|paginated|history_mode|jsonl\.zst|zstd|compress|revert|migrate-rollouts|deprecat|remov|rename|breaking`,
+			Grep:   `session|rollout|thread|resume|fork|/cd|working.directory|resume_cwd|thread_settings_applied|cwd|CODEX_HOME|CODEX_SQLITE_HOME|cli_auth_credentials_store|keyring|refreshToken|workspace|identity|desktop|deep.link|codex://|hook|SessionStart|UserPromptSubmit|hooks/list|/hooks|trust|skills|AGENTS\.md|config\.toml|account|auth|id_token|originator|creator_|thread_source|writer.lock|daemon|app-server|paginated|history_mode|jsonl\.zst|zstd|compress|revert|migrate-rollouts|deprecat|remov|rename|breaking`,
 			Help:   [][]string{{"codex", "--help"}, {"codex", "resume", "--help"}, {"codex", "fork", "--help"}, {"codex", "app-server", "--help"}, {"codex", "login", "--help"}, {"codex", "login", "status", "--help"}},
-			Relies: []string{"resume", "fork", "app-server", "--version", "login", "login status", "--no-daemon"},
+			Relies: []string{"resume", "fork", "app-server", "--version", "login", "login status", "--no-daemon", "--cd"},
+			// /cd and resume changing another conversation's folder.
+			Issues: []string{"openai/codex#48705"},
 			Code: &code{
 				Repo: "openai/codex",
 				Paths: []string{"codex-rs/protocol/src/protocol.rs", "codex-rs/rollout", "codex-rs/thread-store", "codex-rs/history/src/rollout_payload.rs", "codex-rs/cli/src/main.rs", "codex-rs/app-server-protocol/src/protocol/v2/account.rs", "codex-rs/app-server/src/request_processors/account_processor", "codex-rs/login", "codex-rs/keyring-store", "codex-rs/core/src/config/auth_keyring.rs", "codex-rs/config/src/lib.rs", "codex-rs/config/src/types.rs", "codex-rs/config/src/config_toml.rs",
 					"codex-rs/core/src/thread_manager.rs", "codex-rs/core/src/session/session.rs", "codex-rs/hooks/schema/generated", "codex-rs/config/src/hook_config.rs", "codex-rs/app-server-protocol/src/protocol/common.rs", "codex-rs/install-context/src/lib.rs", "codex-rs/tui/src/daemon_startup.rs",
-					"codex-rs/otel/src/auth_storage/originator.rs", "codex-rs/app-server-protocol/schema/json/v2/HooksListResponse.json"},
-				Canaries: []string{"history_mode", "ThreadHistoryMode", ".jsonl.zst", "rollout_id", "migrate-rollouts", "refresh_token", "GetAccountResponse", "AccountLogin", "Chatgpt", "cli_auth_credentials_store", "CODEX_SQLITE_HOME", "hooks/list", "no-daemon"},
+					"codex-rs/otel/src/auth_storage/originator.rs", "codex-rs/app-server-protocol/schema/json/v2/HooksListResponse.json",
+					"codex-rs/tui/src/app/working_directory.rs", "codex-rs/tui/src/session_resume.rs", "codex-rs/app-server/src/request_processors/thread_processor.rs"},
+				Canaries: []string{"history_mode", "ThreadHistoryMode", ".jsonl.zst", "rollout_id", "migrate-rollouts", "refresh_token", "GetAccountResponse", "AccountLogin", "Chatgpt", "cli_auth_credentials_store", "CODEX_SQLITE_HOME", "hooks/list", "no-daemon", "fork_thread_at", "ThreadSettingsApplied", "ResumeCwdMode"},
 			},
 			Schema: &schema{
 				Argv: []string{"codex", "app-server", "generate-json-schema", "--out"},
@@ -189,12 +196,14 @@ var agentWatch = map[agent.ID]target{
 				{ID: "codex-auth", What: "auth.json: tokens.account_id and the ID token's claims (ids only; the tokens are never used)", Fields: []string{"tokens", "account_id", "id_token", "chatgpt_account_id", "chatgpt_user_id", "user_id"}, Readers: []string{"agents/codex/identity.go"}},
 				{ID: "codex-session-meta", What: "a rollout's session_meta: who ran it (creator ids), what wrote it (originator: codex_cli_rs, Codex Desktop, codex_work_desktop), voice threads, forks and history mode", Fields: []string{"session_meta", "creator_account_id", "creator_user_id", "originator", "codex_cli_rs", "Codex Desktop", "codex_work_desktop", "thread_source", "realtime_voice", "cli_version", "forked_from_id", "history_mode"}, Readers: []string{"agents/codex/codex.go"}},
 				{ID: "codex-index", What: "session_index.jsonl: thread names the resume picker shows", Fields: []string{"session_index.jsonl", "thread_name"}, Readers: []string{"agents/codex/codex.go"}},
+				{ID: "codex-thread-settings", What: "a rollout's thread_settings_applied events: the folder Codex resumed the thread in last (codex resume -C, app-server thread/resume with cwd), which hopsesh reads as the session's folder and has Codex write for hopsesh cd", Fields: []string{"thread_settings_applied", "thread_settings", "cwd", "thread_id", "thread/resume", "excludeTurns"}, Readers: []string{"agents/codex/cd.go"}},
 				{ID: "codex-writer-lock", What: "thread-writer-locks/<id>.lock: the lock a running thread's writer holds", Fields: []string{"thread-writer-locks", ".lock"}, Readers: []string{"agents/codex/codex.go"}},
 				{ID: "codex-hooks", What: "hooks.json (SessionStart, UserPromptSubmit), its payload and output, and hook trust through app-server hooks/list (/hooks in the TUI)", Fields: []string{"hooks.json", "SessionStart", "UserPromptSubmit", "hooks/list", "trustStatus", "eventName", "enabled", "session_id", "transcript_path", "hook_event_name", "hookSpecificOutput", "additionalContext"}, Readers: []string{"agents/codex/hooks.go", "agents/codex/hooktrust.go", "sdk/agent/hooks_json.go", "internal/ui/cli/movement_hooks.go"}},
 			},
 		},
 		Floors: []floor{
 			{Version: "0.129.0", Gates: "the protection hooks: user hooks and hook trust read through app-server hooks/list", Source: "agents/codex/hooks.go", Methods: []string{"hooks/list"}},
+			{Version: "0.133.0", Gates: "hopsesh cd: app-server thread/resume with a cwd, recorded as thread_settings_applied", Source: "agents/codex/cd.go", Relies: []string{"resume", "--cd", "app-server"}, Methods: []string{"thread/resume"}},
 			{Version: "0.156.0", Gates: "`--no-daemon` on resume and fork in hopsesh's own terminal tabs (native writer-lock evidence)", Source: "internal/ui/gui/terminal_binding.go", Relies: []string{"--no-daemon"}},
 		},
 	},
