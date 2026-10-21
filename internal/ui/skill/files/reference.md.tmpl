@@ -26,7 +26,10 @@ their own terminal (Claude Code starts the session there and may ask them a ques
 `{{.Bin}} clouds cleanup --list --json` lists the branches hand-offs left on the remotes and
 which are merged, and `{{.Bin}} clouds cleanup --yes` deletes the merged ones (undo pushes them
 back); the approval rule covers both. `{{.Bin}} clouds continue <hop>` takes a hop whose first
-leg waited for a terminal on to the next cloud. `{{.Bin}} undo <id>` reverses a pull, a push or
+leg waited for a terminal on to the next cloud. `{{.Bin}} cd <ref> <dir> --json --yes [--other-repo] [--stop-local]` continues a session on this
+machine in another folder, keeping the session (`--dry-run` plans; an open Claude Code session
+changes folder when the user types `/cd <dir>` in it, which hopsesh waits for, up to `--wait`).
+`{{.Bin}} undo <id>` reverses a pull, a push, a folder change or
 a hand-off (a cloud session itself stays in the cloud).
 
 ## handoff flags

@@ -13,6 +13,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/testkit"
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 // jsonOut is a --json output the skill tells agents to read: its real output on a demo
@@ -39,6 +40,8 @@ var (
 		"handoff --yes":  {nil, map[string]reflect.Type{"plan": planType[""], "result": resultType, "handoff": reflect.TypeFor[move.HandoffResult](), "error": reflect.TypeFor[string]()}},
 		"pull <cloud>":   {nil, map[string]reflect.Type{"plan": planType[""], "result": resultType, "brought": reflect.TypeFor[app.Brought]()}},
 		"clouds cleanup": {nil, map[string]reflect.Type{"branches": reflect.TypeFor[[]app.BranchCandidate]()}},
+		"cd --dry-run": {nil, map[string]reflect.Type{"entry": reflect.TypeFor[app.Entry](), "plan": reflect.TypeFor[agent.DirPlan](),
+			"open": reflect.TypeFor[bool](), "inSession": reflect.TypeFor[string]()}},
 	}
 )
 
@@ -89,6 +92,10 @@ var skillJSON = map[string][]struct {
 	"command":         {{"pull", "command", false}, {"pull <cloud>", "brought.command", false}},
 	"journal":         {{"pull", "result.journal", false}},
 	"result.journal":  {{"handoff --yes", "result.journal", false}},
+	"plan.from":       {{"cd --dry-run", "plan.from", false}},
+	"plan.to":         {{"cd --dry-run", "plan.to", false}},
+	"plan.warnings":   {{"cd --dry-run", "plan.warnings", false}},
+	"plan.blockers":   {{"cd --dry-run", "plan.blockers", false}},
 	"syncNote":        {{"pull", "result.syncNote", true}},
 	"result.syncNote": {{"pull", "result.syncNote", true}},
 	"pushed":          {{"pull", "result.pushed", true}},

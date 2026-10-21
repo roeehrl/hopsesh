@@ -26,6 +26,13 @@ hopsesh archive
   --limit int
   --offset int
   --search string
+hopsesh cd
+  --dry-run
+  --json
+  --other-repo
+  --stop-local
+  --wait duration
+  --yes
 hopsesh clouds
   --json
 hopsesh clouds allow

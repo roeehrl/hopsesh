@@ -82,6 +82,20 @@ When continuing *this* session in another agent, you may first write a short han
 (done, open plan, next step) to a file and pass `--note-file <path>`; it goes into the
 briefing the other agent reads.
 
+## Continue a session in another folder on this machine
+
+`{{.Bin}} cd <ref> <dir>` keeps the session itself (same id, every record as the agent wrote
+it) and continues it in another folder here: another worktree or clone of its repository.
+Plan with `{{.Bin}} cd <ref> <dir> --dry-run --json` and show `plan.from`, `plan.to`,
+`plan.warnings` and `plan.blockers`; after a yes, run `{{.Bin}} cd <ref> <dir> --json --yes`.
+A folder in another repository is blocked unless the user asks for `--other-repo`. When
+`open` is true and `inSession` is set (Claude Code's `/cd <dir>`), the change happens inside
+the open session: tell the user to type `inSession` there, and run the command again only if
+they want hopsesh to wait and check (`--wait`). If you run in that session yourself, you
+cannot type it: `/cd` is the user's command. When the session is open and `inSession` is
+empty (Codex: its own /cd starts a new thread), the user quits it first or allows
+`--stop-local`.
+
 ## Hand a session off to an agent's cloud
 
 No cloud takes a conversation: the cloud agent gets a briefing (about 2,000 tokens, secrets
