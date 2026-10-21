@@ -6,28 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## [0.6.1] - 2026-10-21
+
+Compressed Codex sessions listed again, sizes, faster scans of other machines, undo that
+cleans up clones and worktrees, and lineage files a seventh of their size. 0.6.0 was tagged
+but not published, so this release includes its changes. **Update hopsesh on every
+machine:** an older hopsesh cannot read the new lineage files.
+
 ### Security
 
 - Built with Go 1.27.3, which distrusts compromised intermediate certificates in
   `crypto/x509` ([GO-2026-6809](https://pkg.go.dev/vuln/GO-2026-6809)).
-
-### Fixed
-
-- Codex sessions that Codex has compressed are listed again. Codex rewrites a rollout it has
-  not written for a week as `rollout-….jsonl.zst` (with `local_thread_store_compression`),
-  and hopsesh, which read only `.jsonl`, left those sessions out. On a Mac with 432 of them,
-  they included the newest work. hopsesh now reads them as Codex does: a session keeps its
-  `.jsonl` path while its file is compressed, the plain file is the one in use when both
-  exist, and a change to a compressed session (a move's mark, an undo) first writes it back
-  as plain `.jsonl`, with its permissions and modification time, and removes the `.zst`, as
-  Codex does when it resumes one. This works for every agent and on every machine, over SSH
-  too. Claude Code does not compress its transcripts.
-
-## [0.6.0] - 2026-10-20
-
-Sizes, faster scans of other machines, undo that cleans up clones and worktrees, and lineage
-files a seventh of their size. **Update hopsesh on every machine:** an older hopsesh cannot
-read the new lineage files.
 
 ### Changed
 
@@ -51,6 +40,15 @@ read the new lineage files.
 
 ### Fixed
 
+- Codex sessions that Codex has compressed are listed again. Codex rewrites a rollout it has
+  not written for a week as `rollout-….jsonl.zst` (with `local_thread_store_compression`),
+  and hopsesh, which read only `.jsonl`, left those sessions out. On a Mac with 432 of them,
+  they included the newest work. hopsesh now reads them as Codex does: a session keeps its
+  `.jsonl` path while its file is compressed, the plain file is the one in use when both
+  exist, and a change to a compressed session (a move's mark, an undo) first writes it back
+  as plain `.jsonl`, with its permissions and modification time, and removes the `.zst`, as
+  Codex does when it resumes one. This works for every agent and on every machine, over SSH
+  too. Claude Code does not compress its transcripts.
 - Undo removes the folders an operation's writes made, once they are empty: undoing a push
   no longer leaves an empty project folder (such as `~/.claude/projects/<folder>`) on the
   target. A folder that holds something else since, or was there before, stays.
@@ -885,7 +883,7 @@ is refused and set aside (the app offers this), and machines are added again.
 - The terminal UI no longer carries out a plan you pressed `y` on while a changed one was
   still being worked out.
 
-[0.6.0]: https://github.com/roeehrl/hopsesh/releases/tag/v0.6.0
+[0.6.1]: https://github.com/roeehrl/hopsesh/releases/tag/v0.6.1
 [0.5.0]: https://github.com/roeehrl/hopsesh/releases/tag/v0.5.0
 [0.4.5]: https://github.com/roeehrl/hopsesh/releases/tag/v0.4.5
 [0.4.4]: https://github.com/roeehrl/hopsesh/releases/tag/v0.4.4
