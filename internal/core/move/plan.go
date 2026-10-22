@@ -54,6 +54,16 @@ type Input struct {
 	// Native is the source's own agent on the target, for a continuation on another
 	// machine: the session is also kept there byte for byte (nil: it is not installed).
 	Native *NativeSide
+	// Guard is whether the source machine can block or warn the original once the
+	// session moves (nil: only whether hopsesh is there is known).
+	Guard *Guard
+}
+
+// Guard is what the source machine's checks say about protecting the original: hopsesh
+// new enough to read where the session went, and the hook in that agent folder.
+type Guard struct {
+	Ready bool
+	Why   []string // why not, in a few words each
 }
 
 // NativeSide is the source agent on the target and its copies of the session there.
@@ -184,9 +194,12 @@ type Plan struct {
 	ResumeHere bool `json:"resumeHere,omitempty"`
 	// Unprotected: the original stays on a machine without hopsesh, where nothing can
 	// keep it from being continued too.
-	Unprotected bool           `json:"unprotected,omitempty"`
-	Files       agent.MovePlan `json:"files"`
-	Bytes       int64          `json:"bytes"`
+	Unprotected bool `json:"unprotected,omitempty"`
+	// CannotProtect says why the original can't be blocked or warned on its machine,
+	// whether or not that was asked (the app shows the option off, with these reasons).
+	CannotProtect []string       `json:"cannotProtect,omitempty"`
+	Files         agent.MovePlan `json:"files"`
+	Bytes         int64          `json:"bytes"`
 	// SetAside are copies at the target that make way (kept by the journal for undo).
 	SetAside []agent.Summary `json:"setAside,omitempty"`
 	Conflict string          `json:"conflict,omitempty"`
@@ -520,9 +533,26 @@ func keepBoth(p *Plan) {
 // markUnprotected says when the original stays on a machine without hopsesh, whose
 // hooks cannot block or warn it: a move and a continuation alike.
 func markUnprotected(p *Plan, in Input, opt Options) {
-	if opt.Notify && !opt.Fork && in.Source.Machine != nil && !in.Source.Machine.HopseshThere() {
-		p.Unprotected = true
-		p.Warnings = append(p.Warnings, fmt.Sprintf("the original on %s won't be protected: without hopsesh there, nothing stops it from being continued on %s too, and the two copies drift apart; set up hopsesh on %s first to protect it", p.Source.Location, p.Source.Location, p.Source.Location))
+	if opt.Fork || in.Source.Machine == nil {
+		return
+	}
+	if g := in.Guard; g != nil {
+		if g.Ready {
+			return
+		}
+		p.CannotProtect = g.Why
+		if opt.Notify {
+			p.Unprotected = true
+			p.Warnings = append(p.Warnings, fmt.Sprintf("the original on %s can't be blocked or warned: %s; nothing stops it from being continued there too", p.Source.Location, strings.Join(g.Why, "; ")))
+		}
+		return
+	}
+	if !in.Source.Machine.HopseshThere() {
+		p.CannotProtect = []string{"hopsesh isn't installed there"}
+		if opt.Notify {
+			p.Unprotected = true
+			p.Warnings = append(p.Warnings, fmt.Sprintf("the original on %s won't be protected: without hopsesh there, nothing stops it from being continued on %s too, and the two copies drift apart; set up hopsesh on %s first to protect it", p.Source.Location, p.Source.Location, p.Source.Location))
+		}
 	}
 }
 

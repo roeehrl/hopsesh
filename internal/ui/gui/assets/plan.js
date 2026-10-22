@@ -410,7 +410,8 @@ function blocker(p, b) {
 function checks(p) {
   const r = p.repo;
   const shown = /unpushed commit\(s\) and|ran in a worktree on branch|what does not carry over|do not carry over to|uncommitted file\(s\) stay behind/;
-  const warnings = (p.warnings || []).filter((w) => !shown.test(w) && !(p.continue && p.conflict && w.startsWith(p.conflict))).map((w) => item("warn", plain(w), ""));
+  const guarded = (w) => (p.cannotProtect || []).length && /^the original on .* (can't be blocked or warned|won't be protected)/.test(w);
+  const warnings = (p.warnings || []).filter((w) => !shown.test(w) && !guarded(w) && !(p.continue && p.conflict && w.startsWith(p.conflict))).map((w) => item("warn", plain(w), ""));
   const blockers = (p.blockers || []).filter((b) => !(r.action === "needs-clone" && /is not cloned/.test(b))).map((b) => blocker(p, b)).filter(Boolean);
   if (!warnings.length && !blockers.length) return null;
   return h("section", { class: "sec", style: "gap:10px" }, h("span", { class: "sec-h" }, blockers.length ? "Before it can go ahead" : "Worth knowing"), blockers, warnings);
@@ -423,13 +424,38 @@ function options(p) {
     r.unpushed && r.sourceUpstream && !sameFolder(p) ? check(`Push ${count(r.unpushed, "commit")} on ${p.sourceHost} first`, "push", "With that machine's own git credentials.") : null,
     cont && (p.machine || cur.launch !== "app") ? check("Send “Continue” when opening", "go", `The terminal launch sends the first message to ${p.agent}. Progress appears in the agent.`) : null,
     p.can.remoteControl ? check("Turn on Remote Control", "remoteControl", `Reach it from your phone or other machines, as ${p.newName}.`) : null,
-    state.info?.defaults?.original === "advise"
-      ? check("Warn in the original", "notify", "Until you move back, the copy left behind warns before you continue there (through the agent's hopsesh hook).")
-      : check("Block the original until you move back", "notify", "The copy left behind refuses new prompts until you move the session back, so moving back stays a clean return (through the agent's hopsesh hook). Off: the original is left alone."),
+    guardOption(p),
     check("Redact likely secrets", "redact", "In this copy only."),
   ];
   return h("section", { class: "sec", style: "gap:10px" }, h("span", { class: "sec-h" }, "Options"), h("div", { class: "opts-grid" }, opts),
     null);
+}
+
+// guardOption is "Block the original" (or "Warn in the original"). When the machine the
+// session leaves can't do it (no hopsesh, one too old to read where the session went, or
+// no hook in that agent folder), it stays in view but off: focusable, with the reasons
+// and the fixes beneath it, never only a tooltip.
+function guardOption(p) {
+  const advise = state.info?.defaults?.original === "advise";
+  const label = advise ? "Warn in the original" : "Block the original until you move back";
+  const desc = advise ? "Until you move back, the copy left behind warns before you continue there (through the agent's hopsesh hook)."
+    : "The copy left behind refuses new prompts until you move the session back, so moving back stays a clean return (through the agent's hopsesh hook). Off: the original is left alone.";
+  const why = p.cannotProtect || [];
+  if (!why.length) return check(label, "notify", desc);
+  const host = p.sourceHost || "that machine";
+  const id = "guard-why";
+  const box = h("input", { type: "checkbox", checked: false, "aria-disabled": "true", "aria-labelledby": "guard-label", "aria-describedby": id, "data-opt": "notify",
+    onclick: (ev) => { ev.preventDefault(); }, onkeydown: (ev) => { if (ev.key === " ") ev.preventDefault(); } });
+  const update = why.some((w) => /blocking needs|isn't installed there/.test(w));
+  return h("div", { class: "opt off guard-off" }, box,
+    h("span", {}, h("b", { id: "guard-label" }, label),
+      h("div", { id, class: "guard-why" },
+        h("span", {}, `Not available: on ${host}, `),
+        h("ul", {}, why.map((w) => h("li", {}, w))),
+        h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" },
+          update ? h("button", { class: "btn small", onclick: () => go("settings", "machines", host) }, /isn't installed/.test(why.join(" ")) ? `Set up hopsesh on ${host}…` : `Update ${host}…`) : null,
+          h("button", { class: "btn small", onclick: () => go("settings", "machines", host) }, "Machine details")),
+        h("span", { class: "muted", style: "font-size:12px" }, "The original stays as it is; you can still close it there yourself."))));
 }
 
 function paths(p) {

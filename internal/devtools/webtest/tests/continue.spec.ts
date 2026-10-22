@@ -168,6 +168,7 @@ test("a recorded context error offers bounded recovery in session details", asyn
 // session running too" (a separate copy that was never blocked, and silently overrode
 // "Block the original").
 test("an open session's review moves it and blocks the original, with no keep-both option", async ({ page }) => {
+  await fresh(page, "?movement=1&protection=blocked"); // blocking needs hopsesh's hook here
   const key = await row(page, "Find the codeword").getAttribute("data-key");
   const id = key!.split("\u0000")[1].split("/")[1];
   expect((await page.request.post(`/live?session=${id}&entrypoint=cli`)).ok()).toBeTruthy();

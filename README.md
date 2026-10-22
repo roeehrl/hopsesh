@@ -137,6 +137,7 @@ hopsesh push 7f3c2a1e laptop                   # send it to a machine that runs 
 hopsesh cd 7f3c2a1e ~/git/app-2                # same session, another checkout here
 hopsesh hosts add nas alice@192.168.1.20 --password   # a machine without SSH keys
 hopsesh doctor studio                          # agents, SSH, host trust and the skill
+hopsesh hosts status                           # hopsesh, receiving, hooks and skill on each machine
 hopsesh undo                                   # undo the newest move (--list shows more)
 ```
 

@@ -495,7 +495,8 @@ test('source notice has destination and journey controls',async({page})=>{
 });
 
 test('cross-agent plan exposes the block-the-original override',async({page})=>{
- await fresh(page);await row(page,'Find the codeword').click();
+ await fresh(page,'?movement=1&protection=blocked'); // blocking needs hopsesh's hook here
+ await row(page,'Find the codeword').click();
  await details(page).getByRole('button',{name:'Move',exact:true}).click();await page.getByRole('menuitem',{name:/^Continue with Codex/}).click();
  const sheet=page.locator('#sheet');
  await expect(sheet.getByText("The copy left behind refuses new prompts until you move the session back, so moving back stays a clean return (through the agent's hopsesh hook). Off: the original is left alone.",{exact:true})).toBeVisible();

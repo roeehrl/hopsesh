@@ -1,8 +1,10 @@
 import { expect, type Page } from "@playwright/test";
 
-// fresh starts every test from a new demo home and waits for the first scan.
-export async function fresh(page: Page) {
-  const r = await page.request.post("/reset");
+// fresh starts every test from a new demo home and waits for the first scan. world picks
+// a fixture world ("?protection=blocked": hopsesh's hooks installed and trusted here, so
+// a moved original can be blocked).
+export async function fresh(page: Page, world = "") {
+  const r = await page.request.post("/reset" + world);
   expect(r.ok(), await r.text()).toBeTruthy();
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible({ timeout: 30_000 });

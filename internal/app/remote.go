@@ -286,6 +286,16 @@ func (a *App) SetUpMachine(ctx context.Context, machine string, progress func(Se
 		case <-time.After(500 * time.Millisecond):
 		}
 	}
+	if a.Cfg.Peer.SetUpIntegrations {
+		switch _, err := a.SetUpProtectionOn(ctx, machine, false); {
+		case !out.Login:
+			step(SetupStep{Name: "Hooks and skill", State: "waiting", Detail: "added once hopsesh runs in the login session there (Settings › Hooks & skills)"})
+		case err != nil:
+			step(SetupStep{Name: "Hooks and skill", State: "failed", Detail: err.Error()})
+		default:
+			step(SetupStep{Name: "Hooks and skill", State: "done", Detail: "movement hooks and the skill for every agent there"})
+		}
+	}
 	return out, nil
 }
 
