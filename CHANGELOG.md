@@ -6,12 +6,6 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
-## [0.6.2] - 2026-10-22
-
-What hopsesh can do on each machine, at a glance and check by check; `hopsesh cd` to continue
-a session in another folder as the same session; "Block the original" only where it can
-work; and sessions the app opens find hopsesh.
-
 ### Added
 
 - `hopsesh cd` on another machine: `hopsesh cd studio:<session> <dir>` has hopsesh there plan
@@ -24,6 +18,15 @@ work; and sessions the app opens find hopsesh.
   works for sessions on your other machines too.
 - `hopsesh pull <session> --to <dir>` for a session already on this machine, in its own agent
   and account folder, changes its folder as `hopsesh cd` does: the same session, not a copy.
+
+## [0.6.2] - 2026-10-22
+
+What hopsesh can do on each machine, at a glance and check by check; `hopsesh cd` to continue
+a session in another folder as the same session; "Block the original" only where it can
+work; and sessions the app opens find hopsesh.
+
+### Added
+
 - What hopsesh can do on each machine, check by check: whether it is installed and its
   version against the newest on your machines (the baseline), whether it runs in the login
   session and receives sessions, whether its command is on PATH (asked of your own shell

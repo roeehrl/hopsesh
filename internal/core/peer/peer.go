@@ -51,8 +51,8 @@ const (
 	MethodUndo  = "undo"
 	// A session there continued in another folder there (hopsesh cd): hopsesh there plans
 	// it, carries it out in its own journal (undo is MethodUndo), and, for a session open
-	// there that its agent moves itself, waits until it has. A hopsesh older than 0.6.2
-	// answers "unknown request".
+	// there that its agent moves itself, waits until it has. A hopsesh without them (0.6.2
+	// and older) answers "unknown request".
 	MethodCdPlan  = "cd/plan"
 	MethodCdApply = "cd/apply"
 	MethodCdWait  = "cd/wait"
