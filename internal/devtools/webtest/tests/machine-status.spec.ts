@@ -74,7 +74,8 @@ test("Settings › Machines shows one machine, everything about it", async ({ pa
   await menu(page, "settings");
   await page.getByRole("tab", { name: "Machines", exact: true }).click();
   const list = page.getByRole("listbox", { name: "Machines" });
-  await expect(list.getByRole("option", { name: /This Mac/ })).toContainText("1 to do");
+  // This machine is first, named for its system (This Mac, This PC, This computer).
+  await expect(list.getByRole("option").first()).toContainText("1 to do");
   await expect(list.getByRole("option", { name: /roee-macbook/ })).toContainText("2 to do");
   await expect(list.getByRole("option", { name: /nas/ })).toContainText("SSH only");
   await expect(page.getByRole("status").filter({ hasText: "older hopsesh" })).toContainText("roee-macbook (0.5.0)");

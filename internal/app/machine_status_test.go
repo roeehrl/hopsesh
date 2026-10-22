@@ -1,8 +1,10 @@
 package app
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -223,5 +225,46 @@ func TestProtectionSetups(t *testing.T) {
 	}
 	if got[2].Hook.Fix != FixApprove || got[2].Hook.Reason != "open /hooks in Codex" {
 		t.Errorf("codex: %+v", got[2])
+	}
+}
+
+// The planner's guard reads only the hook of the session's agent folder there, and the
+// version the scan found: a hook that runs a program that is there makes the original
+// protectable; a missing hook, or a hopsesh too old for lineage/6, says why not.
+func TestGuardReadsTheHook(t *testing.T) {
+	reg, err := registry.New(claude.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &App{Reg: reg}
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	prog := filepath.Join(root, "hopsesh")
+	os.WriteFile(prog, []byte("#!/bin/sh\n"), 0o700)
+	in := agent.Install{Agent: "claude", Version: "2.1.300", Roots: map[string]string{"home": filepath.Join(root, ".claude")}, Present: true}
+	os.MkdirAll(in.Root("home"), 0o700)
+	hm := &host.Machine{Name: "box", Local: true, Facts: host.Facts{OS: runtime.GOOS, Home: root, Env: map[string]string{}, Binaries: map[string]agent.BinaryFact{}}}
+	m := &Machine{Name: "box", Status: StatusOK, Hopsesh: "0.6.1", host: hm, Agents: []AgentState{{Agent: "claude", Name: "Claude Code", Install: in}}}
+	m.Local = false // a remote machine as the scan saw it (the version is its own)
+	key := agent.SessionKey{Agent: "claude"}
+	ctx := context.Background()
+
+	if g := a.Guard(ctx, m, key); g == nil || g.Ready || !strings.Contains(strings.Join(g.Why, " "), "hook isn't installed") {
+		t.Fatalf("no hook: %+v", g)
+	}
+	settings := `{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"'` + prog + `' notice-hook --agent 'claude' --profile ''"}]}]}}`
+	os.WriteFile(filepath.Join(in.Root("home"), "settings.json"), []byte(settings), 0o600)
+	if g := a.Guard(ctx, m, key); g == nil || !g.Ready {
+		t.Fatalf("hook there: %+v", g)
+	}
+	m.Hopsesh = "0.5.0"
+	if g := a.Guard(ctx, m, key); g == nil || g.Ready || !strings.Contains(g.Why[0], "needs "+MinBlockVersion) {
+		t.Fatalf("too old: %+v", g)
+	}
+	m.Hopsesh = ""
+	if g := a.Guard(ctx, m, key); g != nil {
+		t.Fatalf("no hopsesh there: the planner decides alone: %+v", g)
 	}
 }

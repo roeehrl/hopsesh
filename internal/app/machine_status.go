@@ -160,31 +160,62 @@ func (s MachineStatus) hookFor(id agent.ID, profile string) (Check, bool) {
 	return Check{}, false
 }
 
-// Guard is what a machine's checks say about blocking or warning a session of key's agent
-// left there once it moves. nil when nothing more than whether hopsesh is there is known
-// (its hooks were never read), so the planner decides from that alone.
+// Guard is what the source machine says about blocking or warning a session of key's
+// agent left there once it moves: hopsesh new enough to read where it went (its version
+// is known from the scan), and the hook in that agent folder, read now from its one hook
+// file over the plan's own connection (no agent or shell is asked, nothing is cached).
+// nil when hopsesh isn't there: the planner says so itself.
 func (a *App) Guard(ctx context.Context, src *Machine, key agent.SessionKey) *move.Guard {
 	if src == nil || src.host == nil {
 		return nil
 	}
-	one := &Inventory{Machines: []*Machine{src}}
-	ss := a.MachineStatuses(ctx, one, StatusOptions{})
-	if len(ss) == 0 {
+	v := src.HopseshVersion()
+	if v == "" {
 		return nil
 	}
-	s := ss[0]
-	ok, why := s.CanBlock(key.Agent, key.Profile)
-	if !ok && !s.DetailsAt.IsZero() && atLeast(s.Version, MinBlockVersion) {
-		// A hook installed since the last reading counts: read that machine again.
-		if again := a.MachineStatuses(ctx, one, StatusOptions{Refresh: true}); len(again) > 0 {
-			s = again[0]
-			ok, why = s.CanBlock(key.Agent, key.Profile)
-		}
+	var why []string
+	if !atLeast(v, MinBlockVersion) {
+		why = append(why, fmt.Sprintf("hopsesh there is %s; blocking needs %s or newer", v, MinBlockVersion))
 	}
-	if s.DetailsAt.IsZero() && (s.Version == "" || atLeast(s.Version, MinBlockVersion)) {
-		return nil
+	switch hook := a.hookOn(ctx, src, key); hook.State {
+	case CheckOK, CheckWarn:
+		// Installed (one waiting for approval in the agent is the user's to approve).
+	case CheckUnknown:
+		why = append(why, "its hook couldn't be checked: "+nonEmptyStr(hook.Reason, hook.Text))
+	default:
+		why = append(why, "its hook isn't installed: "+nonEmptyStr(hook.Reason, hook.Text))
 	}
-	return &move.Guard{Ready: ok, Why: why}
+	return &move.Guard{Ready: len(why) == 0, Why: why}
+}
+
+// hookOn reads the hook of key's agent folder on m.
+func (a *App) hookOn(ctx context.Context, m *Machine, key agent.SessionKey) Check {
+	mod, ok := a.Module(key.Agent)
+	if !ok {
+		return Check{State: CheckUnknown, Text: "not checked", Reason: string(key.Agent) + " is turned off"}
+	}
+	hi, ok := mod.(agent.MovementHookIntegrator)
+	if !ok {
+		return Check{State: CheckOff, Text: "not supported", Reason: mod.Spec().Name + " takes no hook"}
+	}
+	in, ok := m.InstallProfile(key.Agent, key.Profile)
+	if !ok {
+		return Check{State: CheckUnknown, Text: "not checked", Reason: mod.Spec().Name + " isn't found there"}
+	}
+	h, err := m.host.For(ctx, mod.Spec(), in, nil)
+	if err != nil {
+		return Check{State: CheckUnknown, Text: "not checked", Reason: err.Error()}
+	}
+	fsys, err := m.host.FS(ctx)
+	if err != nil {
+		return Check{State: CheckUnknown, Text: "not checked", Reason: err.Error()}
+	}
+	bin := nonEmptyStr(m.host.Facts.Binaries[host.Hopsesh.Name].Path, "hopsesh")
+	f := hi.MovementHooks(h, in, bin).File
+	if f == nil {
+		return Check{State: CheckOff, Text: "not supported"}
+	}
+	return remoteHook(fsys, f.Path, key.Agent)
 }
 
 // atLeast compares hopsesh versions; a development build counts as the newest.
