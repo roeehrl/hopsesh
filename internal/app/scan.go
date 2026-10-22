@@ -57,6 +57,10 @@ type Machine struct {
 
 	host    *host.Machine
 	account *agent.Account              // reported by the machine's own hopsesh (a push)
+	// receive is whether hopsesh there accepts sessions (from its hello; nil when it did
+	// not answer); listening, on this machine, whether hopsesh serve runs.
+	receive   *bool
+	listening bool
 	tools   map[agent.ID]agent.Install  // hopsesh in the login session there (meetHopsesh)
 	records map[string][]agent.OwnerRun // its records of who ran its sessions
 }
@@ -449,6 +453,8 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 	}
 	if !hm.Local {
 		a.meetHopsesh(ctx, hm, m)
+	} else {
+		m.listening = serveRunning(ctx)
 	}
 	var entries []Entry
 	for _, mod := range a.Modules() {

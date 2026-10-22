@@ -22,6 +22,10 @@ import (
 // revision's written three times and its anchor and hash twice.
 const FileFormat = "lineage/6"
 
+// FirstFileFormatVersion is the first hopsesh that reads FileFormat: an older one shows
+// such a session's lineage as unsupported (and cannot block a moved session's original).
+const FirstFileFormatVersion = "0.6.0"
+
 type packedManifest struct {
 	Format        string         `json:"hopsesh"`
 	Family        string         `json:"family"`

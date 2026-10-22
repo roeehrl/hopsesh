@@ -201,6 +201,7 @@ func (a *App) Plan(ctx context.Context, inv *Inventory, e Entry, target agent.ID
 		Worktrees: a.Reg.Worktrees(),
 		Push:      pushFunc(src),
 		GitFetch:  gitFetchFunc(src),
+		Guard:     a.Guard(ctx, src, e.Session.Key),
 	}
 	related := map[agent.SessionKey]bool{e.Session.Key: true}
 	if e.Lineage != nil {

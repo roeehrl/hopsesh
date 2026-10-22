@@ -44,6 +44,8 @@ func (a *App) meetHopsesh(ctx context.Context, hm *host.Machine, m *Machine) {
 	}
 	defer done()
 	m.Hopsesh = hr.Version
+	receive := hr.Receive
+	m.receive = &receive
 	switch {
 	case hr.Protocol < 6:
 		m.Presence = PresenceOlder

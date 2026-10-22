@@ -26,6 +26,9 @@ const SkillName = "hopsesh"
 
 const recordFile = ".hopsesh-install.json"
 
+// RecordFile is the install record's name in a skill copy's folder.
+const RecordFile = recordFile
+
 // States of a skill copy.
 const (
 	Absent   = "absent"
