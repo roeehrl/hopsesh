@@ -138,7 +138,8 @@ test("Machines and Activity keep padded section headings and a single page scrol
     for (const screen of ["machines", "activity"]) {
       await menu(page, screen);
       await expect(page.getByRole("heading", { name: screen === "machines" ? "Machines" : "Activity", exact: true })).toBeVisible();
-      const header = page.locator(".card-h").first();
+      // Machines is a Settings tab: its list and details sit in one bordered box.
+      const header = page.locator(screen === "machines" ? ".mdetail" : ".card-h").first();
       await expect(header).toBeVisible();
       expect(await header.evaluate(el => parseFloat(getComputedStyle(el).paddingLeft))).toBeGreaterThanOrEqual(12);
       expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(600);

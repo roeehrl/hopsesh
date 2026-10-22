@@ -42,6 +42,30 @@ export function icon(d, size = 14) {
   }
   return s;
 }
+// hopMark is hopsesh's own mark beside a machine (its arc and two dots): filled and green
+// when hopsesh runs there and receives sessions, hollow and gray when it is installed but
+// not receiving; nothing when it is not installed. The words are its accessible name and
+// tooltip, so the color is never the only signal. A newer hopsesh elsewhere adds an ↑ chip.
+export function hopMark(m, size = 18) {
+  const v = m?.hopsesh;
+  if (!v) return null;
+  const on = !!m.receiving;
+  const words = `hopsesh ${v}${on ? ", receiving sessions" : ", not receiving sessions"}${m.newest ? ` · ${m.newest} is the newest` : ""}`;
+  const ns = "http://www.w3.org/2000/svg";
+  const s = document.createElementNS(ns, "svg");
+  for (const [k, val] of Object.entries({ width: size, height: Math.round(size * 2 / 3), viewBox: "0 0 18 12", "aria-hidden": "true" })) s.setAttribute(k, val);
+  const arc = document.createElementNS(ns, "path");
+  for (const [k, val] of Object.entries({ d: "M3.5 9 A5.5 6.5 0 0 1 14.5 9", fill: "none", stroke: "currentColor", "stroke-width": "1.6", "stroke-linecap": "round" })) arc.setAttribute(k, val);
+  s.append(arc);
+  for (const cx of [3.5, 14.5]) {
+    const c = document.createElementNS(ns, "circle");
+    for (const [k, val] of Object.entries(on ? { cx, cy: 9.6, r: 2.1, fill: "currentColor" } : { cx, cy: 9.6, r: 1.6, fill: "var(--panel)", stroke: "currentColor", "stroke-width": "1.3" })) c.setAttribute(k, val);
+    s.append(c);
+  }
+  return h("span", { class: "hop-mark " + (on ? "on" : "off"), role: "img", "aria-label": words, title: words }, s,
+    m.newest ? h("span", { class: "hop-behind", "aria-hidden": "true" }, "↑") : null);
+}
+
 export const ICONS = {
   all: ["M4 5h16v14H4z", "M4 10h16"],
   here: ["M3 5h18v11H3z", "M8 20h8M12 16v4"],

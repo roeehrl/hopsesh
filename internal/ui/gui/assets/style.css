@@ -905,3 +905,79 @@ body.terminal-right .divider[data-pane="inspector"]{display:none}
 .prow.head > * { border-top: 0; font-size: 12px; color: var(--muted); }
 .pcell { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; font-size: 13px; min-width: 0; }
 .pcell.wide { grid-column: span 4; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 10px; background: var(--hover); }
+
+/* hopsesh's mark beside a machine: green and filled when it receives sessions, gray and
+   hollow when installed but not receiving (the words are its name and tooltip). */
+.hop-mark { display: inline-flex; align-items: center; gap: 3px; vertical-align: middle; color: var(--faint); }
+.hop-mark.on { color: var(--ok-dot); }
+.hop-behind { font-size: 10.5px; line-height: 1; padding: 1px 4px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); font-weight: 600; }
+.side-btn .mname { display: flex; align-items: center; gap: 6px; min-width: 0; }
+/* The sidebar's place names are not the uppercase .label used in sheets. */
+.side-btn .label { color: inherit; font-size: inherit; font-weight: inherit; letter-spacing: normal; text-transform: none; }
+
+/* Settings › Machines: the list beside the selected machine */
+.msplit { display: flex; flex-wrap: wrap; gap: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); overflow: hidden; min-height: 520px; }
+.mmaster { flex: 0 1 270px; min-width: 230px; border-right: 1px solid var(--line); background: var(--bg); padding: 12px 10px; display: flex; flex-direction: column; gap: 6px; }
+.mmaster-h { display: flex; align-items: baseline; gap: 8px; padding: 0 4px 6px; }
+.mlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.mrow { font: inherit; width: 100%; text-align: left; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; padding: 9px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); cursor: pointer; }
+.mrow:hover { background: var(--hover); }
+.mrow[aria-selected="true"] { background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); font-weight: 500; }
+.mrow-mark { display: inline-flex; justify-content: center; }
+.mrow-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mrow-sub { grid-column: 2 / 4; font-size: 12px; color: var(--muted); font-weight: 400; }
+.mbadge { font-size: 11.5px; padding: 1px 8px; border-radius: 999px; white-space: nowrap; font-weight: 500; }
+.mbadge.ok { background: var(--ok-soft); color: var(--ok); }
+.mbadge.warn { background: var(--warn-soft); color: var(--warn); }
+.mbadge.err { background: var(--err-soft); color: var(--err); }
+.mbadge.off { background: var(--line2); color: var(--ink2); }
+.mfound summary { cursor: pointer; font-size: 12.5px; color: var(--muted); padding: 6px 4px; }
+.mdetail { flex: 999 1 460px; min-width: 0; padding: 18px 22px; display: flex; flex-direction: column; gap: 16px; }
+.mdetail-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.mdetail-h h2 { margin: 0; font-size: 18px; font-weight: 600; }
+.mnext { border: 1px solid var(--line2); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; background: var(--warn-soft); }
+.mnext > b { font-size: 13px; color: var(--warn); }
+.mnext.ok-box { background: var(--ok-soft); }
+.mnext.ok-box > b { color: var(--ok); }
+.mnext.err-box { background: var(--err-soft); }
+.msec { border-top: 1px solid var(--line2); padding-top: 14px; display: flex; flex-direction: column; gap: 9px; }
+.msec h3 { margin: 0; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 500; display: flex; gap: 8px; align-items: center; }
+.msec h3 .link { margin-left: auto; text-transform: none; letter-spacing: 0; font-size: 12.5px; text-decoration: none; }
+.mline { display: grid; grid-template-columns: 20px minmax(130px, 190px) minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: 13.5px; }
+.mline .mtext { min-width: 0; overflow-wrap: anywhere; }
+.mline .mfix { display: flex; justify-content: flex-end; }
+.msym { text-align: center; font-weight: 600; }
+.msym.ok { color: var(--ok); } .msym.warn { color: var(--warn); } .msym.error { color: var(--err); } .msym.off, .msym.unknown { color: var(--muted); }
+.mmanage { display: flex; gap: 8px; border-top: 1px solid var(--line2); padding-top: 12px; }
+.mbanner { display: flex; gap: 10px; align-items: center; padding: 10px 14px; border-radius: 8px; background: var(--warn-soft); color: var(--warn); font-size: 13.5px; }
+@media (max-width: 760px) { .mmaster { border-right: 0; border-bottom: 1px solid var(--line); flex-basis: 100%; } .mline { grid-template-columns: 20px minmax(0, 1fr); } .mline .mtext, .mline .mfix { grid-column: 2; justify-content: flex-start; } }
+
+/* The plan sheet's guard option when the original's machine can't block it */
+.guard-off { cursor: default; }
+.guard-off > input { opacity: .45; }
+.guard-off b { color: var(--muted); }
+.guard-why { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; font-size: 12.5px; color: var(--ink2); background: var(--bg); border: 1px solid var(--line2); border-radius: 8px; padding: 9px 11px; }
+.guard-why ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px; }
+
+/* Settings › Hooks & skills: one component on every machine */
+.hooks-top { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.hooks-top > p { flex: 1 1 380px; }
+.hook-defaults { border: 1px solid var(--line2); border-radius: 10px; padding: 10px 14px; margin: 0; display: flex; gap: 10px 22px; flex-wrap: wrap; align-items: center; font-size: 13px; }
+.hook-defaults legend { font-size: 12px; color: var(--muted); padding: 0 6px; }
+.cover { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel); }
+.cover-scroll { overflow-x: auto; }
+.covtable { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 13px; }
+.covtable th, .covtable td { padding: 8px 10px; border-bottom: 1px solid var(--line2); text-align: left; vertical-align: middle; white-space: nowrap; }
+.covtable thead th { font-weight: 500; color: var(--muted); font-size: 12px; background: var(--bg); }
+.covtable tbody th { font-weight: 500; }
+.covtable tbody th .link { text-decoration: none; font-weight: 500; }
+.covtable .cg { border-left: 1px solid var(--line2); }
+.covtable .cbox { width: 28px; }
+.covtable tr.picked { background: var(--sel); }
+.c { display: inline-flex; gap: 5px; align-items: center; padding: 2px 8px; border-radius: 6px; font-size: 12.5px; white-space: nowrap; }
+.cok { background: var(--ok-soft); color: var(--ok); } .cwarn { background: var(--warn-soft); color: var(--warn); } .cerr { background: var(--err-soft); color: var(--err); } .coff { background: var(--line2); color: var(--ink2); }
+.btn.tiny { height: 22px; padding: 0 7px; font-size: 11.5px; margin-left: 4px; }
+.btn.ghost { border-color: transparent; background: transparent; }
+.selbar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--accent-soft); font-size: 13px; flex-wrap: wrap; }
+.lastrun { display: flex; gap: 10px; align-items: center; font-size: 13px; padding: 10px 12px; border-radius: 8px; background: var(--bg); border: 1px solid var(--line2); flex-wrap: wrap; }
+.lastrun > span { flex: 1 1 300px; }

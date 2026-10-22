@@ -17,7 +17,7 @@ import (
 func Rules(bin string) agent.Rules {
 	return agent.Rules{
 		Bin:   bin,
-		Allow: [][]string{{"ls"}, {"show"}, {"plan"}, {"agents"}, {"hosts", "--json"}, {"clouds", "--json"}, {"clouds", "test"}, {"doctor"}, {"version"}},
+		Allow: [][]string{{"ls"}, {"show"}, {"plan"}, {"agents"}, {"hosts", "--json"}, {"hosts", "status"}, {"clouds", "--json"}, {"clouds", "test"}, {"doctor"}, {"version"}},
 		Ask:   [][]string{{"pull"}, {"cd"}, {"push"}, {"handoff"}, {"followup"}, {"undo"}, {"unblock"}, {"history"}, {"notices"}, {"clouds", "cleanup"}, {"clouds", "continue"}},
 	}
 }

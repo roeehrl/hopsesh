@@ -8,6 +8,33 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- What hopsesh can do on each machine, check by check: whether it is installed and its
+  version against the newest on your machines (the baseline), whether it runs in the login
+  session and receives sessions, whether its command is on PATH (asked of your own shell
+  there, as you use it), and each agent folder's movement hook and skill. A machine's hooks
+  and skill are read over SSH when hopsesh there isn't in a login session, so they are known
+  either way; they are read again every 10 minutes and turn "unknown" when too old.
+  - `hopsesh hosts status [machine] [--json] [--refresh]` lists them, with the command that
+    fixes each; it exits 3 when a machine needs something.
+  - The app marks each machine in the sidebar with hopsesh's own mark: green and filled when
+    it receives sessions, gray and hollow when it is installed but not, none without
+    hopsesh, and an ↑ when a newer hopsesh is on another machine.
+  - Settings › Machines is the one place for a machine: your machines beside the selected
+    one's details, with "Up next" (only what is left, each with its fix), its hopsesh, login
+    and receiving, its agents' hooks and skill, how hopsesh logs in, its host key and removing
+    it. The Machines screen opens it; clouds have their own tab, Settings › Clouds.
+  - Settings › Hooks & skills shows the command, hooks and skill on every machine at once,
+    one column per agent folder: fix a column, a selection or everything, with progress in
+    the cells and a summary that says which machines are waiting and why.
+  - The TUI shows the mark beside each machine in its header, and `m` opens the machines
+    and their checks.
+- "Block the original" (or "Warn in the original") is available only when the machine the
+  session leaves can do it: hopsesh 0.6.0 or newer there (older ones can't read where the
+  session went) and the hook in that agent folder. Otherwise the plan shows it off, with
+  the reasons and the fixes, and `pull`/`plan` say why the original won't be protected.
+- Setting hopsesh up on a machine can add its hooks and skill too (Settings › Hooks &
+  skills › "Add hooks and skill when hopsesh is set up on a machine"; off by default, and
+  `[peer] setup_integrations` in the configuration).
 - `hopsesh cd <session> <dir>` continues a session on this machine in another folder and
   keeps it the same session: its id, and every record its agent wrote. Claude Code sessions
   change folder the way Claude Code's own `/cd` does (the transcript and its side folder move
@@ -24,6 +51,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- `hopsesh doctor` names each account folder of an agent (`Claude Code · work`) instead of
+  listing the agent once per folder under the same name.
+- The app's sidebar shows its place names as written, not in capitals.
 - A Codex session resumed in another folder (`codex resume -C`) is listed in that folder:
   hopsesh reads the folder Codex recorded last, not only the one the thread started in.
   `hopsesh` resumes Codex sessions with `-C <folder>`, so Codex no longer asks which folder to

@@ -9,6 +9,7 @@
 | `{{.Bin}} plan <ref> --json [--in A] [flags]` | what pulling it would do; never writes |
 | `{{.Bin}} agents --json` | the agents hopsesh supports and what is installed here |
 | `{{.Bin}} hosts --json` | known machines and whether each is allowed |
+| `{{.Bin}} hosts status [machine] --json [--refresh]` | what hopsesh can do on each machine: its version against the newest, receiving, command, each agent's hook and skill, with the fix for each (exit 3 when one needs something) |
 | `{{.Bin}} clouds --json` | the agents' clouds, whether each is allowed, and their state |
 | `{{.Bin}} clouds test [cloud]` | check a cloud's login and flags, read-only |
 | `{{.Bin}} plan <ref> --to <cloud> --json [flags]` | what handing it off to a cloud would do; never writes |

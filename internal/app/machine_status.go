@@ -167,12 +167,20 @@ func (a *App) Guard(ctx context.Context, src *Machine, key agent.SessionKey) *mo
 	if src == nil || src.host == nil {
 		return nil
 	}
-	ss := a.MachineStatuses(ctx, &Inventory{Machines: []*Machine{src}}, StatusOptions{})
+	one := &Inventory{Machines: []*Machine{src}}
+	ss := a.MachineStatuses(ctx, one, StatusOptions{})
 	if len(ss) == 0 {
 		return nil
 	}
 	s := ss[0]
 	ok, why := s.CanBlock(key.Agent, key.Profile)
+	if !ok && !s.DetailsAt.IsZero() && atLeast(s.Version, MinBlockVersion) {
+		// A hook installed since the last reading counts: read that machine again.
+		if again := a.MachineStatuses(ctx, one, StatusOptions{Refresh: true}); len(again) > 0 {
+			s = again[0]
+			ok, why = s.CanBlock(key.Agent, key.Profile)
+		}
+	}
 	if s.DetailsAt.IsZero() && (s.Version == "" || atLeast(s.Version, MinBlockVersion)) {
 		return nil
 	}
@@ -221,7 +229,6 @@ type statusDetails struct {
 }
 
 type statusCache struct {
-	mu   sync.Mutex
 	path string
 }
 
