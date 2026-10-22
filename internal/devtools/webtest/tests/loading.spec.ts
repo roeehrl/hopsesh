@@ -31,7 +31,8 @@ test('an older Machines visit cannot overwrite a newer visit', async ({ page }) 
     if (r.request().postDataJSON().m === 'Machines' && ++n === 1) { await wait.promise; await error(r); }
     else await r.continue();
   });
-  await menu(page, 'machines'); await expect(page.locator('#view [role=status]')).toBeVisible();
+  // The first visit has asked for the machines (Settings › Machines shows it looking).
+  await menu(page, 'machines'); await expect(page.locator('#view [role=status]')).toContainText('Looking for your machines');
   await page.getByRole('button', { name: 'Back to sessions' }).click(); await menu(page, 'machines');
   await expect(page.getByRole('heading', { name: 'Machines', exact: true })).toBeVisible();
   wait.release(); await expect(page.locator('#view .load-error')).toHaveCount(0);
