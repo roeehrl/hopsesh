@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"runtime"
 	"slices"
 	"sync"
 	"time"
@@ -81,11 +80,7 @@ func (a *App) RunServe(ctx context.Context) error {
 	// The login session's environment: a login service starts with almost none (the
 	// agents are on the PATH the user's shell has).
 	_ = os.Setenv(host.LoginSessionEnv, "1")
-	if runtime.GOOS != "windows" {
-		if p := integrate.LoginEnv()["PATH"]; p != "" {
-			_ = os.Setenv("PATH", p)
-		}
-	}
+	integrate.AdoptLoginPATH()
 	integrate.AdoptLoginEnv()
 	lg := &Login{tabs: map[string]peer.Terminal{}}
 	lg.Terms = pty.NewManager(pty.Options{Version: version.Version, MaxTabs: 32, IdleAfter: -1, OnChange: lg.changed})

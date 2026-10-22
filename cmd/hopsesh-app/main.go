@@ -14,6 +14,7 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/agents/all"
 	"github.com/roeehrl/hopsesh/internal/config"
+	"github.com/roeehrl/hopsesh/internal/core/convert"
 	"github.com/roeehrl/hopsesh/internal/core/integrate"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
 	"github.com/roeehrl/hopsesh/internal/ui/gui"
@@ -32,6 +33,10 @@ func main() {
 	// folders as the agents in Terminal.
 	integrate.SetLoginVars(reg.LoginEnv())
 	integrate.AdoptLoginEnv()
+	// Its PATH too: the agents it opens in its terminal (and their shells) find hopsesh,
+	// the agents and Homebrew's tools where the user's shell does.
+	integrate.AdoptLoginPATH()
+	convert.Program = integrate.SkillBin
 	svc := gui.NewApp(reg)
 	app := application.New(application.Options{
 		Name:        "hopsesh",

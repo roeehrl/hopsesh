@@ -51,6 +51,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A session the macOS app opens in its own terminal finds `hopsesh`, the agents and
+  Homebrew's tools: the app now puts your shell's PATH in front of its own, as
+  `hopsesh serve` does. Started from Finder, it had only the system folders, so a moved
+  session's agent got `command not found: hopsesh` and said hopsesh wasn't installed.
+- The briefing a moved session gets names hopsesh by its full path when your shell doesn't
+  find it by name, so its archive commands run either way.
 - `hopsesh doctor` names each account folder of an agent (`Claude Code · work`) instead of
   listing the agent once per folder under the same name.
 - The app's sidebar shows its place names as written, not in capitals.

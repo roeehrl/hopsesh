@@ -97,3 +97,22 @@ func TestArchiveRetainsTextAndDropsPrivateState(t *testing.T) {
 		t.Fatalf("archive retry duplicated content: %v", err)
 	}
 }
+
+// When the receiving agent's shell doesn't find hopsesh by name, the archive commands name
+// it by its full path (quoted for that shell): "hopsesh" alone would be "command not found".
+func TestArchiveCommandNamesTheProgram(t *testing.T) {
+	defer func(p func() string) { Program = p }(Program)
+	Program = func() string { return "/Users/al ice/.local/bin/hopsesh" }
+	r := Render(Request{Fidelity: Note, Briefing: Briefing{HistoryFile: "/h/a.jsonl", HistoryRecords: 3}})
+	if !strings.Contains(r.Items[0].Text, "'/Users/al ice/.local/bin/hopsesh' archive /h/a.jsonl --offset 0") {
+		t.Fatalf("POSIX: %s", r.Items[0].Text)
+	}
+	r = Render(Request{Fidelity: Note, Briefing: Briefing{HistoryFile: `C:\h\a.jsonl`, HistoryRecords: 3, TargetOS: "windows"}})
+	if !strings.Contains(r.Items[0].Text, `& '/Users/al ice/.local/bin/hopsesh' archive`) {
+		t.Fatalf("PowerShell: %s", r.Items[0].Text)
+	}
+	Program = func() string { return "hopsesh" }
+	if r := Render(Request{Fidelity: Note, Briefing: Briefing{HistoryFile: "/h/a.jsonl", HistoryRecords: 3}}); !strings.Contains(r.Items[0].Text, "\nhopsesh archive ") {
+		t.Fatalf("on PATH: %s", r.Items[0].Text)
+	}
+}
