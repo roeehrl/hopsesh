@@ -66,7 +66,8 @@ func TestPullToOnThisMachineChangesTheFolder(t *testing.T) {
 	if done.CWD != to || done.Journal == "" || !strings.HasSuffix(done.Session, plan.Entry.Session.Key.Session) {
 		t.Fatalf("the same session, in the new folder: %+v", done)
 	}
-	if ls := run("ls", "--agent", "claude", "--no-git", "--json"); !bytes.Contains(ls, []byte(`"cwd": "`+to+`"`)) {
+	quoted, _ := json.Marshal(to) // Windows paths come back with their backslashes escaped
+	if ls := run("ls", "--agent", "claude", "--no-git", "--json"); !bytes.Contains(ls, append([]byte(`"cwd": `), quoted...)) {
 		t.Fatalf("ls does not show the session in %s:\n%s", to, ls)
 	}
 }
