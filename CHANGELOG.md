@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## [0.6.2] - 2026-10-22
+
+What hopsesh can do on each machine, at a glance and check by check; `hopsesh cd` to continue
+a session in another folder as the same session; "Block the original" only where it can
+work; and sessions the app opens find hopsesh.
+
 ### Added
 
 - What hopsesh can do on each machine, check by check: whether it is installed and its
@@ -942,6 +948,7 @@ is refused and set aside (the app offers this), and machines are added again.
 - The terminal UI no longer carries out a plan you pressed `y` on while a changed one was
   still being worked out.
 
+[0.6.2]: https://github.com/roeehrl/hopsesh/releases/tag/v0.6.2
 [0.6.1]: https://github.com/roeehrl/hopsesh/releases/tag/v0.6.1
 [0.5.0]: https://github.com/roeehrl/hopsesh/releases/tag/v0.5.0
 [0.4.5]: https://github.com/roeehrl/hopsesh/releases/tag/v0.4.5
