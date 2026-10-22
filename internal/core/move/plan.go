@@ -198,8 +198,8 @@ type Plan struct {
 	// CannotProtect says why the original can't be blocked or warned on its machine,
 	// whether or not that was asked (the app shows the option off, with these reasons).
 	CannotProtect []string       `json:"cannotProtect,omitempty"`
-	Files       agent.MovePlan `json:"files"`
-	Bytes       int64          `json:"bytes"`
+	Files         agent.MovePlan `json:"files"`
+	Bytes         int64          `json:"bytes"`
 	// SetAside are copies at the target that make way (kept by the journal for undo).
 	SetAside []agent.Summary `json:"setAside,omitempty"`
 	Conflict string          `json:"conflict,omitempty"`
