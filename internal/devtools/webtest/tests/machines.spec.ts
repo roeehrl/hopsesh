@@ -89,7 +89,8 @@ test("adding a machine starts one scan, shows it checking, and explains failures
   await expect(option).toContainText("checking…");
   await option.click();
   await expect(detail(page).getByRole("button", { name: "Checking…" })).toBeDisabled();
-  expect(scans).toBe(1);
+  // "Checking…" also shows while statuses load: wait for the one scan itself.
+  await expect.poll(() => scans).toBe(1);
   release();
   await expect(detail(page)).toContainText("Connection timed out");
   await detail(page).getByRole("button", { name: "Retry" }).click();
