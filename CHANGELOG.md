@@ -24,6 +24,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A session the macOS app opens in its own terminal finds `hopsesh`, the agents and
+  Homebrew's tools: the app now puts your shell's PATH in front of its own, as
+  `hopsesh serve` does. Started from Finder, it had only the system folders, so a moved
+  session's agent got `command not found: hopsesh` and said hopsesh wasn't installed.
+- The briefing a moved session gets names hopsesh by its full path when your shell doesn't
+  find it by name, so its archive commands run either way.
 - A Codex session resumed in another folder (`codex resume -C`) is listed in that folder:
   hopsesh reads the folder Codex recorded last, not only the one the thread started in.
   `hopsesh` resumes Codex sessions with `-C <folder>`, so Codex no longer asks which folder to
