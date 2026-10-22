@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -150,5 +151,55 @@ func TestChangeDirChecksTheFolder(t *testing.T) {
 	}
 	if _, err := a.PlanChangeDir(ctx, inv, e, filepath.Join(to, "missing"), DirOptions{OtherRepo: true}); err == nil {
 		t.Fatal("a missing folder must be refused")
+	}
+}
+
+// A session on another machine changes folder through hopsesh there: it plans and makes
+// the change in its own journal, this machine's journal names that one, and hopsesh undo
+// here has hopsesh there change it back.
+func TestChangeDirOnAnotherMachine(t *testing.T) {
+	box, _, _, e, to := cdFixture(t) // the other machine: its home, its session
+	box.Cfg.Peer.Receive = true
+	cfg := config.Defaults()
+	cfg.Hosts = []config.Host{{Name: "box", Destination: "box", Allowed: true}}
+	here := New(cfg, box.Reg, filepath.Join(t.TempDir(), "state"), nil)
+	t.Cleanup(func() { _ = here.Catalog.Close() })
+	here.PeerDial = func(ctx context.Context, _ config.Host) (*PeerConn, error) {
+		cr, sw := io.Pipe()
+		sr, cw := io.Pipe()
+		go func() { _ = box.Serve(ctx, sr, sw); sw.Close() }()
+		return &PeerConn{Out: cr, In: cw, Close: func() { cw.Close(); sr.Close() }}, nil
+	}
+	ctx := context.Background()
+	rd, err := here.PlanChangeDirOn(ctx, "box", e.Session.Key, to, DirOptions{OtherRepo: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rd.Change.Plan.To != to || len(rd.Change.Plan.Blockers) > 0 || rd.Change.Open {
+		t.Fatalf("plan there: %+v", rd.Change)
+	}
+	id, err := rd.Apply(ctx)
+	rd.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved := rd.Change.Plan.Main
+	if _, err := os.Stat(moved); err != nil {
+		t.Fatalf("the transcript is not in the new folder's project folder there: %v", err)
+	}
+	if _, err := os.Stat(e.Session.Path); err == nil {
+		t.Fatal("the transcript is still in the old project folder there")
+	}
+	if _, err := here.Undo(ctx, id, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(e.Session.Path); err != nil {
+		t.Fatalf("undo here did not move it back there: %v", err)
+	}
+
+	// Receiving turned off there: refused, nothing planned.
+	box.Cfg.Peer.Receive = false
+	if _, err := here.PlanChangeDirOn(ctx, "box", e.Session.Key, to, DirOptions{OtherRepo: true}); err == nil || !strings.Contains(err.Error(), "receive") {
+		t.Fatalf("a machine that does not receive sessions: %v", err)
 	}
 }

@@ -49,7 +49,32 @@ const (
 	MethodPlan  = "plan"  // plan receiving a pushed session (nothing changes)
 	MethodApply = "apply" // carry out the plan made on this connection
 	MethodUndo  = "undo"
+	// A session there continued in another folder there (hopsesh cd): hopsesh there plans
+	// it, carries it out in its own journal (undo is MethodUndo), and, for a session open
+	// there that its agent moves itself, waits until it has. A hopsesh older than 0.6.2
+	// answers "unknown request".
+	MethodCdPlan  = "cd/plan"
+	MethodCdApply = "cd/apply"
+	MethodCdWait  = "cd/wait"
 )
+
+// CdRequest asks hopsesh there to plan a session's folder change there.
+type CdRequest struct {
+	Session   agent.SessionKey `json:"session"`
+	Dir       string           `json:"dir"`
+	OtherRepo bool             `json:"otherRepo,omitempty"`
+	StopLocal bool             `json:"stopLocal,omitempty"` // quit the session there first
+}
+
+// CdApplyReply is the journal hopsesh there keeps of the change.
+type CdApplyReply struct {
+	Journal string `json:"journal"`
+}
+
+// CdWait waits, at most Seconds, for the session open there to be moved by its agent.
+type CdWait struct {
+	Seconds int `json:"seconds"`
+}
 
 // Error codes.
 const (

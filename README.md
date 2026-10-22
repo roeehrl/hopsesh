@@ -320,9 +320,10 @@ hopsesh doctor --all-machines                     # hopsesh, hooks and skill on 
 
 ## Another folder, same session
 
-`hopsesh cd <session> <dir>` continues a session on this machine in another folder (another
+`hopsesh cd <session> <dir>` continues a session in another folder on its machine (another
 worktree or clone of its repository) and keeps it the same session: same id, every message,
-tool call and reasoning block as the agent wrote them. Each agent does it its own way:
+tool call and reasoning block as the agent wrote them. In the app it's **Change folder…** in a
+session's ⋯ menu. Each agent does it its own way:
 
 - **Claude Code:** what its own `/cd` does. The transcript and its side folder move to the new
   folder's project folder and get a `relocated` record. When the session is open, hopsesh
@@ -332,6 +333,11 @@ tool call and reasoning block as the agent wrote them. Each agent does it its ow
   quit first (`--stop-local`) or left alone.
 
 A folder outside the session's repository needs `--other-repo`. `hopsesh undo` reverses it.
+
+On another machine, `hopsesh cd studio:7f3c2a1e ~/git/app-2` has hopsesh there make the change
+(set it up with `hopsesh hosts setup studio`; it must receive sessions), and `hopsesh undo`
+here reverses it there. `hopsesh pull <session> --to <dir>` for a session that is already here,
+in its own agent, changes its folder the same way instead of making a copy.
 
 ## Cloud sessions
 
