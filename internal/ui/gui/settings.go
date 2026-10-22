@@ -43,6 +43,9 @@ type SettingsDTO struct {
 	SkillBin    string              `json:"skillBin"`
 	SkillPrompt string              `json:"skillPrompt"`
 
+	// SetUpIntegrations: setting hopsesh up on a machine also adds its hooks and skill.
+	SetUpIntegrations bool `json:"setUpIntegrations"`
+
 	LocalNetworkGated bool   `json:"localNetworkGated"`
 	ConfigDir         string `json:"configDir"`
 	StateDir          string `json:"stateDir"`
@@ -85,7 +88,7 @@ func (a *App) Settings() SettingsDTO {
 	return SettingsDTO{Appearance: cfg.AppearanceMode(), NoticeHooks: hooks, NoticeHooksError: hookProblem, Version: version.Version, ReposDir: cfg.ReposDir, Layout: nonEmpty(cfg.Layout, "flat"),
 		MovementNotices: cfg.MovementNoticesOn(), Original: cfg.OriginalGuard(), SyncCode: cfg.SyncCodeOn(), PushSource: cfg.PushSource, UpdateChk: cfg.UpdateCheck, AppIcons: cfg.AppIconsOn(), Previews: cfg.PreviewsOn(),
 		Agents: a.agentsLocked(), CLI: integrate.CheckCLI(), CLIReady: CLIReady(integrate.CheckCLI()), Skill: rep, SkillBin: bin, SkillPrompt: cfg.SkillPrompt,
-		LocalNetworkGated: lnp.Gated(), ConfigDir: config.Dir(), StateDir: config.StateDir()}
+		SetUpIntegrations: cfg.Peer.SetUpIntegrations, LocalNetworkGated: lnp.Gated(), ConfigDir: config.Dir(), StateDir: config.StateDir()}
 }
 
 // SettingsInput are the settings the user can change.
@@ -99,6 +102,8 @@ type SettingsInput struct {
 	UpdateChk  string  `json:"updateCheck"`
 	AppIcons   bool    `json:"appIcons"`
 	Previews   bool    `json:"previews"`
+	// SetUpIntegrations: nil keeps the current choice.
+	SetUpIntegrations *bool `json:"setUpIntegrations,omitempty"`
 }
 
 // SaveSettings stores the user's choices.
@@ -146,6 +151,9 @@ func (a *App) saveSettingsLocked(in SettingsInput) error {
 	a.core.Cfg.PushSource = in.PushSource
 	icons := in.AppIcons
 	a.core.Cfg.AppIcons = &icons
+	if in.SetUpIntegrations != nil {
+		a.core.Cfg.Peer.SetUpIntegrations = *in.SetUpIntegrations
+	}
 	a.core.Cfg.Previews = nil
 	if !in.Previews {
 		off := false

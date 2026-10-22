@@ -47,6 +47,11 @@ type MachineDTO struct {
 	Hopsesh              string    `json:"hopsesh"`    // hopsesh's version there ("" when not installed)
 	// Presence is how hopsesh works with the machine (app.Presence*; "" for this one).
 	Presence string `json:"presence,omitempty"`
+	// Receiving: hopsesh there runs in the login session and accepts sessions (the
+	// sidebar's green mark); Newest is the newest hopsesh on your machines when this one
+	// is older ("" otherwise).
+	Receiving bool   `json:"receiving"`
+	Newest    string `json:"newest,omitempty"`
 }
 
 // AgentOpt is an agent a session can continue in here.
@@ -402,8 +407,13 @@ func scanDTO(core *app.App, inv *app.Inventory, updated, elsewhere time.Time, ta
 	for _, f := range inv.Adopted {
 		out.Adopted = append(out.Adopted, core.Brought(f))
 	}
+	newest := app.NewestHopsesh(inv)
 	for _, m := range inv.Machines {
-		d := MachineDTO{Phase: m.Phase, CheckedAt: m.CheckedAt, Name: m.Name, Status: m.Status, Hint: m.Hint, Error: scanProblem(m), OS: m.OS, Local: m.Local, Hopsesh: m.Hopsesh, Presence: m.Presence, Agents: []string{}}
+		d := MachineDTO{Phase: m.Phase, CheckedAt: m.CheckedAt, Name: m.Name, Status: m.Status, Hint: m.Hint, Error: scanProblem(m), OS: m.OS, Local: m.Local, Hopsesh: m.HopseshVersion(), Presence: m.Presence, Agents: []string{},
+			Receiving: core.Receiving(m)}
+		if app.Behind(d.Hopsesh, newest) {
+			d.Newest = newest
+		}
 		d.AccountSetupRequired = !m.Local && m.Status == app.StatusOK && m.Host() != nil && m.Host().Facts.Endpoint == ""
 		for _, e := range inv.Entries {
 			if e.Machine == m.Name {

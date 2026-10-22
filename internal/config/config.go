@@ -127,6 +127,10 @@ const (
 type Peer struct {
 	// Receive lets hopsesh on another machine send sessions here (off by default).
 	Receive bool `toml:"receive,omitempty"`
+	// SetUpIntegrations: setting hopsesh up on a machine (hosts setup) also installs the
+	// movement hooks and the skill there, as Settings › Hooks & skills would (off by
+	// default: hopsesh otherwise asks first).
+	SetUpIntegrations bool `toml:"setup_integrations,omitempty"`
 }
 
 // Terminal is how hopsesh opens sessions and steps in a terminal app.

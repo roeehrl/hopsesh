@@ -303,7 +303,7 @@ func (a *App) MachineStatuses(ctx context.Context, inv *Inventory, o StatusOptio
 }
 
 // reached reports whether the scan reached the machine (its connection is there).
-func (m *Machine) reached() bool { return m.host != nil && m.Status == StatusOK }
+func (m *Machine) reached() bool { return m.Status == StatusOK && (m.host != nil || !m.Local) }
 
 // machineStatus puts a machine's scan and its cached details together.
 func (a *App) machineStatus(m *Machine, d statusDetails, have bool) MachineStatus {
@@ -473,14 +473,20 @@ func (a *App) readStatusDetails(ctx context.Context, m *Machine) (statusDetails,
 	case m.Hopsesh == "":
 		return d, false
 	}
-	d.CLI = a.remoteCLI(ctx, m)
+	// A connection of its own: a long-lived inventory's may have been closed since.
+	hm, err := a.accountMachine(ctx, m.Name)
+	if err != nil {
+		return d, false
+	}
+	defer hm.Close()
+	d.CLI = remoteCLI(ctx, hm)
 	if m.Presence == PresenceLogin {
 		if p, err := a.MachineProtection(ctx, m.Name); err == nil {
 			d.Agents = a.protectionSetups(p, m)
 			return d, true
 		}
 	}
-	d.Agents = a.fileSetups(ctx, m)
+	d.Agents = a.fileSetups(ctx, hm, m)
 	return d, true
 }
 
@@ -508,13 +514,13 @@ func tildePath(p string) string {
 
 // remoteCLI asks the user's own shell there (interactive, as they use it) where hopsesh
 // is: an SSH command runs a plain shell, whose PATH often lacks ~/.local/bin.
-func (a *App) remoteCLI(ctx context.Context, m *Machine) Check {
-	installed := m.host.Facts.Binaries[host.Hopsesh.Name].Path
-	if m.host.Facts.OS == "windows" {
+func remoteCLI(ctx context.Context, hm *host.Machine) Check {
+	installed := hm.Facts.Binaries[host.Hopsesh.Name].Path
+	if hm.Facts.OS == "windows" {
 		// The probe asked PowerShell, which reads the user's PATH.
 		return cliCheck(installed, installed)
 	}
-	r, err := m.host.Exec().Run(ctx, []string{"sh", "-c", loginWhich}, agent.RunOptions{Timeout: 10 * time.Second})
+	r, err := hm.Exec().Run(ctx, []string{"sh", "-c", loginWhich}, agent.RunOptions{Timeout: 10 * time.Second})
 	if err != nil {
 		return Check{State: CheckUnknown, Text: "not checked", Reason: err.Error()}
 	}
@@ -636,13 +642,13 @@ var noticeHookIn = regexp.MustCompile(`'((?:[^'\\]|\\.)+)' notice-hook --agent '
 // hopsesh does not run in the login session (so it cannot answer for itself). A hook is
 // the hopsesh notice hook for that agent, running a program that is there; agent trust
 // (Codex) is only known to hopsesh there.
-func (a *App) fileSetups(ctx context.Context, m *Machine) []AgentSetup {
+func (a *App) fileSetups(ctx context.Context, hm *host.Machine, m *Machine) []AgentSetup {
 	out := []AgentSetup{}
-	fsys, err := m.host.FS(ctx)
+	fsys, err := hm.FS(ctx)
 	if err != nil {
 		return out
 	}
-	bin := nonEmptyStr(m.host.Facts.Binaries[host.Hopsesh.Name].Path, "hopsesh")
+	bin := nonEmptyStr(hm.Facts.Binaries[host.Hopsesh.Name].Path, "hopsesh")
 	for _, st := range m.Agents {
 		if !st.Install.Present {
 			continue
@@ -654,7 +660,7 @@ func (a *App) fileSetups(ctx context.Context, m *Machine) []AgentSetup {
 		in := st.Install
 		as := AgentSetup{Agent: st.Agent, Name: st.Name, Profile: in.ProfileID(), ProfileLabel: profileLabel(in.Profile),
 			Hook: Check{State: CheckOff, Text: "not supported"}, Skill: Check{State: CheckOff, Text: "not supported"}}
-		h, err := m.host.For(ctx, mod.Spec(), in, nil)
+		h, err := hm.For(ctx, mod.Spec(), in, nil)
 		if err != nil {
 			as.Hook = Check{State: CheckUnknown, Text: "not checked", Reason: err.Error()}
 			out = append(out, as)
@@ -736,4 +742,38 @@ func serveRunning(ctx context.Context) bool {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	return serve.Running(ctx, home) != ""
+}
+
+// Receiving reports whether hopsesh on m runs in the login session there and accepts
+// sessions (the green mark beside a machine).
+func (a *App) Receiving(m *Machine) bool {
+	if m.Status != StatusOK {
+		return false
+	}
+	_, r := m.loginChecks(a)
+	return r.State == CheckOK
+}
+
+// HopseshVersion is hopsesh's version on m: this program's own on this machine.
+func (m *Machine) HopseshVersion() string {
+	if m.Local {
+		return version.Version
+	}
+	return m.Hopsesh
+}
+
+// NewestHopsesh is the newest hopsesh on inv's machines ("" when none is a release).
+func NewestHopsesh(inv *Inventory) string {
+	v := ""
+	for _, m := range inv.Machines {
+		if newer(m.HopseshVersion(), v) {
+			v = m.HopseshVersion()
+		}
+	}
+	return v
+}
+
+// Behind reports whether version is older than newest (development builds never are).
+func Behind(version, newest string) bool {
+	return version != "" && !strings.HasPrefix(version, "dev") && newer(newest, version)
 }
