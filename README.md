@@ -290,6 +290,11 @@ Move a session to your laptop, or into Codex, work on it, and bring it back late
 - **The history travels with the session.** A small `<session>.hopsesh.json` beside it records
   its copies and hops, so the next move works from any machine.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/round-trip-dark.png">
+  <img src="docs/assets/round-trip-light.png" alt="After continuing Find the codeword in Codex: the original is marked Moved out and blocked until it moves back, with Open moved copy and Remove block, while the list shows the newest copy is in Codex" width="900">
+</picture>
+
 Details: [docs/design.md §10](docs/design.md#10-round-trips-and-lineage) and
 [§12](docs/design.md#12-code-follows-the-conversation).
 
