@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## [0.6.4] - 2026-10-23
+
+Settings › Machines is the one place for a machine's hooks, skill and command, agent folders
+are named by who is signed in there, and a session in a window hopsesh can't identify can be
+resumed. A machine's Recent conversation waits longer and offers **Try again**.
+
 ### Changed
 
 - Settings › Machines is the one place for a machine's hooks, skill and command. The
@@ -1008,6 +1014,7 @@ is refused and set aside (the app offers this), and machines are added again.
 - The terminal UI no longer carries out a plan you pressed `y` on while a changed one was
   still being worked out.
 
+[0.6.4]: https://github.com/roeehrl/hopsesh/releases/tag/v0.6.4
 [0.6.3]: https://github.com/roeehrl/hopsesh/releases/tag/v0.6.3
 [0.6.2]: https://github.com/roeehrl/hopsesh/releases/tag/v0.6.2
 [0.6.1]: https://github.com/roeehrl/hopsesh/releases/tag/v0.6.1
