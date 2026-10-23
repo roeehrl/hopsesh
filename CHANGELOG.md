@@ -18,9 +18,23 @@ All notable changes to this project are documented here. The format follows
   works for sessions on your other machines too.
 - `hopsesh pull <session> --to <dir>` for a session already on this machine, in its own agent
   and account folder, changes its folder as `hopsesh cd` does: the same session, not a copy.
+- Sessions started in a folder of repositories (`~/git/course` holding `course-core` and
+  `course-sdk`, rather than being a repository itself) move to another machine: the plan
+  continues in the same folder there and lists each repository in it, found there (in the
+  folder first, then your repos folder and the usual places) or cloned into it, with what
+  each one leaves behind (unpushed commits, uncommitted files). Paths in the conversation
+  point at each repository. Other folders in it, such as worktrees, are not brought. The
+  app lists them under "Repository and code" with "Clone … for me"; `pull --clone` and the
+  terminal app's `c` clone them.
 
 ### Fixed
 
+- A session in a folder that is not a repository, brought from another machine, continues
+  in the same folder under this machine's home (`/Users/sam/notes` → `/Users/tnt/notes`),
+  not at the other machine's path, which named another user's home.
+- Continuing a session under another account says so ("This session was run by another …
+  account") when the account it ran under differs, also across account profiles; the
+  "different runtime profiles" warning is for the same account in two profiles.
 - Adding or trusting a machine no longer fails with "reading SSH settings … context
   deadline exceeded" when ssh is slow to start (common on busy Windows machines).
 

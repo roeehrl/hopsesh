@@ -241,11 +241,34 @@ func applyPlan(ctx context.Context, p *Plan, in Input, env Env) (*Result, error)
 	return res, nil
 }
 
+// applyWorkspace makes the workspace folder and clones the repositories the plan clones
+// into it, journaled so undo removes them while they hold nothing new.
+func applyWorkspace(ctx context.Context, p *Plan, env Env, j *journal.Journal, res *Result, machine string, step func(string)) error {
+	for _, m := range p.Repo.Members {
+		if m.Action != RepoClone {
+			continue
+		}
+		step("cloning " + m.Remote + " into " + m.LocalPath)
+		if err := j.Clone(machine, m.LocalPath); err != nil {
+			return err
+		}
+		if err := repos.Clone(ctx, m.Remote, m.LocalPath); err != nil {
+			return fmt.Errorf("clone of %s failed: %w", m.Name(), err)
+		}
+		res.Cloned = true
+		env.Audit.Write(audit.Entry{Action: "git.clone", Session: p.Key.String(), Detail: map[string]any{"remote": m.Remote, "dest": m.LocalPath}})
+	}
+	return j.Mkdir(machine, p.Repo.LocalPath)
+}
+
 // applyRepo clones the repository and adds the worktree the plan names, journaled in j so
 // undo removes them (and a branch made for the worktree) while they hold no work.
 func applyRepo(ctx context.Context, p *Plan, in Input, env Env, j *journal.Journal, res *Result, step func(string)) error {
 	r := p.Repo
 	machine := in.Target.Machine.Name
+	if r.Action == RepoWorkspace {
+		return applyWorkspace(ctx, p, env, j, res, machine, step)
+	}
 	if r.Action == RepoClone {
 		step("cloning " + r.Remote + " into " + r.LocalPath)
 		if err := j.Clone(machine, r.LocalPath); err != nil {

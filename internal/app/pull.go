@@ -203,6 +203,14 @@ func (a *App) Plan(ctx context.Context, inv *Inventory, e Entry, target agent.ID
 		GitFetch:  gitFetchFunc(src),
 		Guard:     a.Guard(ctx, src, e.Session.Key),
 	}
+	if g := e.Git; g != nil && !g.IsRepo && len(g.Children) > 0 && src.Name != here.Name && opt.TargetDir == "" {
+		// A folder of repositories: read each one there, as the session's own checkout is.
+		states, err := src.host.GitProbe(ctx, g.Children, a.Reg.Worktrees())
+		if err != nil {
+			in.Git, in.GitErr = nil, fmt.Sprintf("reading the repositories in %s: %v", e.Session.CWD, err)
+		}
+		in.Workspace = states
+	}
 	related := map[agent.SessionKey]bool{e.Session.Key: true}
 	if e.Lineage != nil {
 		for _, r := range e.Lineage.Replicas {

@@ -238,8 +238,8 @@ func pull(cmd *cobra.Command, refArg string) error {
 	if !r.jsonOut {
 		r.renderPlan(p)
 	}
-	if len(p.Blockers) > 0 && p.Repo.Action == move.RepoNeedsClone && !dry && r.interactive() && !r.yes {
-		if r.confirm(fmt.Sprintf("Clone %s into %s now?", p.Repo.Identity, p.Repo.LocalPath)) {
+	if q := cloneQuestion(p.Repo); len(p.Blockers) > 0 && q != "" && !dry && r.interactive() && !r.yes {
+		if r.confirm(q) {
 			opt.Clone = true
 			if p, input, err = r.app.Plan(ctx, inv, e, agent.ID(in), opt); err != nil {
 				return err
@@ -370,13 +370,25 @@ func (r *run) renderPlan(p *move.Plan) {
 		r.printf("  repo      not here (%s)", p.Repo.Identity)
 	case move.RepoDir:
 		r.printf("  repo      the folder you chose")
+	case move.RepoWorkspace:
+		r.printf("  repos     a folder of %d, in %s", len(p.Repo.Members), p.Repo.LocalPath)
 	default:
-		r.printf("  repo      none (same path)")
+		r.printf("  repo      none (not a git repository)")
 	}
 	if p.Repo.Worktree != "" {
 		r.printf(", worktree %s", p.Repo.Worktree)
 	}
 	r.printf("\n")
+	for _, m := range p.Repo.Members {
+		switch m.Action {
+		case move.RepoUse:
+			r.printf("            %s: use %s\n", m.Name(), m.LocalPath)
+		case move.RepoClone:
+			r.printf("            %s: clone %s into %s\n", m.Name(), m.Remote, m.LocalPath)
+		default:
+			r.printf("            %s: not here (%s)\n", m.Name(), m.Identity)
+		}
+	}
 	if p.Sync != "" {
 		r.printf("  code      %s\n", p.Sync)
 	}
@@ -553,4 +565,21 @@ func (r *run) folderChange(inv *app.Inventory, e app.Entry, in agent.ID, o move.
 	return o.TargetDir != "" && m != nil && m.Local && (in == "" || in == e.Agent) &&
 		(o.TargetProfile == "" || o.TargetProfile == e.Session.Key.Profile) &&
 		!o.Fork && !o.NewReplica && o.TargetSession == "" && r.app.CanChangeDir(inv, e)
+}
+
+// cloneQuestion asks to clone what the plan cannot go ahead without ("" when nothing).
+func cloneQuestion(r move.RepoPlan) string {
+	if r.Action == move.RepoNeedsClone {
+		return fmt.Sprintf("Clone %s into %s now?", r.Identity, r.LocalPath)
+	}
+	var names []string
+	for _, m := range r.Members {
+		if m.Action == move.RepoNeedsClone {
+			names = append(names, m.Name())
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("Clone %s into %s now?", strings.Join(names, " and "), r.LocalPath)
 }

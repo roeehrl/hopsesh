@@ -610,6 +610,21 @@ func (j *Journal) Clone(machine, path string) error {
 	return j.record(Entry{Op: OpClone, Machine: machine, Path: path, Created: created})
 }
 
+// Mkdir makes the folder path on this machine (machine: its name) with the folders above
+// it, recording the ones it makes so undo removes them while they are empty.
+func (j *Journal) Mkdir(machine, path string) error {
+	if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err := j.recordDirs(os.Stat, machine, path); err != nil {
+		return err
+	}
+	if err := j.record(Entry{Op: OpMkdir, Machine: machine, Path: path}); err != nil {
+		return err
+	}
+	return os.MkdirAll(path, 0o755)
+}
+
 // Ref records a ref hopsesh set to sha in the checkout dir on machine (prev: what it was,
 // "" when new), so undo puts it back.
 func (j *Journal) Ref(machine, dir, ref, sha, prev string) error {
