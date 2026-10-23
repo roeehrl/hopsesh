@@ -76,7 +76,7 @@ func (a *App) Undo(ctx context.Context, match string, force bool) (*journal.Jour
 		}
 		return m.FS(ctx)
 	}
-	reach := journal.Reach{FS: fsFor, Refs: a.refsReach(connect), Clouds: a.undoClouds(), Git: repos.LocalGit{}}
+	reach := journal.Reach{FS: fsFor, Refs: a.refsReach(connect), Clouds: a.undoClouds(), Git: repos.LocalGit{}, Dirs: a.undoDirs()}
 	if len(j.Parts) > 0 {
 		err := a.undoHop(ctx, j, reach, force)
 		a.Audit.Write(audit.Entry{Action: "undo", Detail: map[string]any{"journal": j.ID, "ok": err == nil, "force": force, "parts": j.Parts}})
@@ -88,12 +88,23 @@ func (a *App) Undo(ctx context.Context, match string, force bool) (*journal.Jour
 		}
 	}
 	// The other machines' part first: when one cannot be undone, nothing here is either.
+	var left []string
 	for _, r := range j.Remote {
-		if err := a.undoRemote(ctx, r, force); err != nil {
+		l, err := a.undoRemote(ctx, r, force)
+		if err != nil {
 			return j, fmt.Errorf("undo on %s failed, so nothing was undone here: %w", r.Machine, err)
+		}
+		for _, x := range l {
+			left = append(left, x+" (on "+r.Machine+")")
 		}
 	}
 	err = j.Undo(ctx, reach, force)
+	if len(left) > 0 {
+		j.Left = append(j.Left, left...)
+		if e := j.Save(); err == nil {
+			err = e
+		}
+	}
 	a.Audit.Write(audit.Entry{Action: "undo", Detail: map[string]any{"journal": j.ID, "ok": err == nil, "force": force}})
 	return j, err
 }

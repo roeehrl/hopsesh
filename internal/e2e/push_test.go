@@ -60,7 +60,7 @@ func newMachineHome(t *testing.T, root, name string, withSession bool) machineHo
 func (m machineHome) env() []string {
 	return []string{"HOME=" + m.home, "USERPROFILE=" + m.home, "PATH=" + testPath(), "HOPSESH_MACHINE=" + m.name,
 		"HOPSESH_CONFIG_DIR=" + filepath.Join(m.home, "config"), "HOPSESH_STATE_DIR=" + filepath.Join(m.home, "state"),
-		"CLAUDE_CONFIG_DIR=", "CODEX_HOME="}
+		"CLAUDE_CONFIG_DIR=", "CODEX_HOME=", "HOPSESH_APP_RUNTIMES=off"}
 }
 
 func (m machineHome) writeConfig(t *testing.T, c config.Config) {
@@ -165,6 +165,9 @@ func TestPushToPeer(t *testing.T) {
 	}
 	if _, err := os.Stat(moved); !os.IsNotExist(err) {
 		t.Fatal("undo must remove the copy on box")
+	}
+	if _, err := os.Stat(filepath.Dir(moved)); !os.IsNotExist(err) {
+		t.Fatalf("undo must remove the project folder the push made on box: %v", err)
 	}
 	inv.Close()
 	inv = a.Scan(ctx, app.ScanOptions{Hosts: []string{"here"}})

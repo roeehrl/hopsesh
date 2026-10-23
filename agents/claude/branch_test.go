@@ -375,3 +375,43 @@ func TestActiveBranchCompactionReplayOccurrences(t *testing.T) {
 		})
 	}
 }
+
+// A session forked after compaction starts at the compaction boundary. Its logical
+// parent names a preserved message that the fork copied after the boundary, so the
+// link points forward in the file: the boundary starts the history here. (A real
+// session forked from a compacted one, 9,500 records, was refused as "both copies
+// changed: forward parent reference".) A real parent pointing forward still fails.
+func TestActiveBranchForkedAfterCompaction(t *testing.T) {
+	boundary := branchRecord("system", "boundary", "")
+	boundary["parentUuid"], boundary["logicalParentUuid"] = nil, "kept"
+	summary := branchMessage("user", "summary", "boundary", "compact summary")
+	summary["isCompactSummary"] = true
+	answer := branchMessage("assistant", "answer", "summary", "preserved answer")
+	kept := branchMessage("user", "kept", "answer", "preserved question")
+	next := branchMessage("assistant", "next", "kept", "new work in the fork")
+	recs, _, err := readRecords(bytes.NewReader(branchJSON(t, boundary, summary, answer, kept, next, branchCheckpoint("next"))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexes, err := activeBranch(recs)
+	if err != nil {
+		t.Fatalf("forked session after compaction refused: %v", err)
+	}
+	var got []string
+	for _, i := range indexes {
+		got = append(got, recs[i].UUID)
+	}
+	if want := []string{"boundary", "summary", "answer", "kept", "next"}; !slices.Equal(got, want) {
+		t.Fatalf("branch %v, want %v", got, want)
+	}
+
+	early := branchMessage("assistant", "early", "late", "names a later parent")
+	late := branchMessage("user", "late", "", "later record")
+	recs, _, err = readRecords(bytes.NewReader(branchJSON(t, early, late, branchCheckpoint("early"))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := activeBranch(recs); !errors.Is(err, agent.ErrDiverged) {
+		t.Fatalf("a real forward parent was accepted: %v", err)
+	}
+}

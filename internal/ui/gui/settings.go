@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/app"
@@ -41,6 +42,9 @@ type SettingsDTO struct {
 	Skill       app.SkillReport     `json:"skill"`
 	SkillBin    string              `json:"skillBin"`
 	SkillPrompt string              `json:"skillPrompt"`
+
+	// SetUpIntegrations: setting hopsesh up on a machine also adds its hooks and skill.
+	SetUpIntegrations bool `json:"setUpIntegrations"`
 
 	LocalNetworkGated bool   `json:"localNetworkGated"`
 	ConfigDir         string `json:"configDir"`
@@ -84,7 +88,7 @@ func (a *App) Settings() SettingsDTO {
 	return SettingsDTO{Appearance: cfg.AppearanceMode(), NoticeHooks: hooks, NoticeHooksError: hookProblem, Version: version.Version, ReposDir: cfg.ReposDir, Layout: nonEmpty(cfg.Layout, "flat"),
 		MovementNotices: cfg.MovementNoticesOn(), Original: cfg.OriginalGuard(), SyncCode: cfg.SyncCodeOn(), PushSource: cfg.PushSource, UpdateChk: cfg.UpdateCheck, AppIcons: cfg.AppIconsOn(), Previews: cfg.PreviewsOn(),
 		Agents: a.agentsLocked(), CLI: integrate.CheckCLI(), CLIReady: CLIReady(integrate.CheckCLI()), Skill: rep, SkillBin: bin, SkillPrompt: cfg.SkillPrompt,
-		LocalNetworkGated: lnp.Gated(), ConfigDir: config.Dir(), StateDir: config.StateDir()}
+		SetUpIntegrations: cfg.Peer.SetUpIntegrations, LocalNetworkGated: lnp.Gated(), ConfigDir: config.Dir(), StateDir: config.StateDir()}
 }
 
 // SettingsInput are the settings the user can change.
@@ -98,6 +102,8 @@ type SettingsInput struct {
 	UpdateChk  string  `json:"updateCheck"`
 	AppIcons   bool    `json:"appIcons"`
 	Previews   bool    `json:"previews"`
+	// SetUpIntegrations: nil keeps the current choice.
+	SetUpIntegrations *bool `json:"setUpIntegrations,omitempty"`
 }
 
 // SaveSettings stores the user's choices.
@@ -145,6 +151,9 @@ func (a *App) saveSettingsLocked(in SettingsInput) error {
 	a.core.Cfg.PushSource = in.PushSource
 	icons := in.AppIcons
 	a.core.Cfg.AppIcons = &icons
+	if in.SetUpIntegrations != nil {
+		a.core.Cfg.Peer.SetUpIntegrations = *in.SetUpIntegrations
+	}
 	a.core.Cfg.Previews = nil
 	if !in.Previews {
 		off := false
@@ -165,7 +174,35 @@ func (a *App) SetAgent(id string, enabled, remoteControl, imp bool) error {
 	if a.core.Cfg.Agents == nil {
 		a.core.Cfg.Agents = map[string]config.Agent{}
 	}
-	ac := config.Agent{Disabled: !enabled, RemoteControl: remoteControl, Import: imp, Place: a.core.Cfg.Agents[id].Place}
+	ac := a.core.Cfg.Agents[id]
+	ac.Disabled, ac.RemoteControl, ac.Import = !enabled, remoteControl, imp
+	if ac == (config.Agent{}) {
+		delete(a.core.Cfg.Agents, id)
+	} else {
+		a.core.Cfg.Agents[id] = ac
+	}
+	return a.save()
+}
+
+// SetAgentKind shows or hides one kind of an agent's sessions (Codex voice conversations,
+// Work threads); the next scan lists them or leaves them out.
+func (a *App) SetAgentKind(id, kind string, show bool) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	m, ok := a.core.Reg.Get(agent.ID(id))
+	if !ok {
+		return errors.New("unknown agent " + id)
+	}
+	if !slices.ContainsFunc(m.Spec().Kinds, func(k agent.SessionKind) bool { return k.ID == kind }) {
+		return fmt.Errorf("%s has no %q sessions", m.Spec().Name, kind)
+	}
+	if a.core.Cfg.Agents == nil {
+		a.core.Cfg.Agents = map[string]config.Agent{}
+	}
+	ac := a.core.Cfg.Agents[id]
+	if !ac.SetShows(kind, show) {
+		return fmt.Errorf("hopsesh has no setting for %q sessions", kind)
+	}
 	if ac == (config.Agent{}) {
 		delete(a.core.Cfg.Agents, id)
 	} else {

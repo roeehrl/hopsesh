@@ -204,6 +204,7 @@ func main() {
 		return svc.SetTerminalSettings(gui.TerminalSettingsInput{Where: where, KeepTabs: true, Notify: true, CloseEnded: closeEnded, FontSize: set.FontSize, Scrollback: set.Scrollback})
 	}
 	http.HandleFunc("/events", serveEvents)
+	registerCachedMovementWorld(&mu, h, &svc)
 	gui.SetTerminal(background)
 	if self, err := os.Executable(); err == nil {
 		gui.SetStepProgram(self)
@@ -340,6 +341,22 @@ func main() {
 			}
 		}
 	})
+	http.HandleFunc("/lineage", func(w http.ResponseWriter, r *http.Request) {
+		if err := readLineage(w, r, svc); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+	})
+	http.HandleFunc("/history-ledger", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if err := seedHistoryLedger(w, r, svc, h); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+	})
 	http.HandleFunc("/dirty", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "POST only", http.StatusMethodNotAllowed)
@@ -365,6 +382,22 @@ func main() {
 		if r.URL.Query().Get("movement") == "1" {
 			_ = os.Setenv("FAKE_MOVEMENT_ACCOUNT", "1")
 			_ = os.Setenv("FAKE_CODEX_EMAIL", "alice@example.com")
+		}
+		if r.URL.Query().Get("voice") == "1" {
+			// A Codex app voice conversation: hidden unless Settings › Agents shows them.
+			if err := voiceWorld(h); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+		if r.URL.Query().Get("owners") == "1" {
+			// Claude Code is signed in to alice@example.com (org-fixture) now; one demo
+			// session records that it ran under another account, one under alice's.
+			_ = os.Setenv("FAKE_MOVEMENT_ACCOUNT", "1")
+			if err := ownersWorld(h); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
 		}
 		if p := r.URL.Query().Get("protection"); p != "" {
 			// protection=blocked: the hopsesh command is installed and Codex trusts hopsesh's
@@ -804,7 +837,7 @@ var (
 
 func relay(name string, data any) {
 	switch name {
-	case gui.AccountEvent, gui.DiscoveryEvent, "hopsesh:terminal-main", gui.TerminalPreferencesEvent, gui.TerminalWorkspaceEvent, gui.AppearanceEvent, gui.TerminalEvent, gui.QuitEvent, gui.SignedInEvent, gui.TerminalAppEvent, gui.ExternalExitEvent:
+	case gui.AccountEvent, gui.MachineSetupEvent, gui.DiscoveryEvent, "hopsesh:terminal-main", gui.TerminalPreferencesEvent, gui.TerminalWorkspaceEvent, gui.AppearanceEvent, gui.TerminalEvent, gui.QuitEvent, gui.SignedInEvent, gui.TerminalAppEvent, gui.ExternalExitEvent:
 	default:
 		return
 	}
@@ -841,6 +874,51 @@ func serveEvents(w http.ResponseWriter, r *http.Request) {
 // protectionWorld installs a stand-in hopsesh command (a regular file in ~/.local/bin, on
 // PATH) and makes the stand-in Codex a version with hooks whose hooks/list reports them
 // trusted (blocked) or waiting for review (review).
+// ownersWorld appends Remote Control records naming the account that ran two demo Claude
+// Code sessions: the first under another account (org-previous), the second under the one
+// signed in now (org-fixture).
+func ownersWorld(h string) error {
+	files, err := filepath.Glob(filepath.Join(h, ".claude", "projects", "*", "0b6c6a8e-1d2f-4c3b-9a7e-5f4d3c2b1a0[12].jsonl"))
+	if err != nil || len(files) != 2 {
+		return fmt.Errorf("the demo's two Claude Code sessions: %v %v", files, err)
+	}
+	for i, f := range files {
+		org := []string{"org-previous", "org-fixture"}[i]
+		id := strings.TrimSuffix(filepath.Base(f), ".jsonl")
+		rec := fmt.Sprintf(`{"type":"bridge-session","sessionId":%q,"bridgeSessionId":"cse_01Owner%dFixture","lastSequenceNum":0,"ownerAccountUuid":"acct-%s","ownerOrganizationUuid":%q}`+"\n", id, i, org, org)
+		fh, err := os.OpenFile(f, os.O_APPEND|os.O_WRONLY, 0)
+		if err != nil {
+			return err
+		}
+		_, err = fh.WriteString(rec)
+		if cerr := fh.Close(); err == nil {
+			err = cerr
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// voiceWorld adds a thread the Codex app started from a voice conversation
+// (session_meta thread_source "realtime_voice") to the demo repository.
+func voiceWorld(h string) error {
+	const id = "01a0fe1c-0000-7000-8000-00000000f0ce"
+	dir := filepath.Join(h, ".codex", "sessions", "2026", "10", "02")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	meta, err := json.Marshal(map[string]any{"timestamp": "2026-10-02T06:00:00.000Z", "type": "session_meta", "payload": map[string]any{
+		"id": id, "timestamp": "2026-10-02T06:00:00.000Z", "cwd": filepath.Join(h, "git", "demo"), "originator": "Codex Desktop",
+		"cli_version": "0.162.0-alpha.17.2", "source": "vscode", "thread_source": "realtime_voice", "model_provider": "openai"}})
+	if err != nil {
+		return err
+	}
+	b := string(meta) + "\n" + `{"timestamp":"2026-10-02T06:00:01.000Z","type":"event_msg","payload":{"type":"user_message","message":"Plan the week out loud","images":[]}}` + "\n"
+	return os.WriteFile(filepath.Join(dir, "rollout-2026-10-02T09-00-00-"+id+".jsonl"), []byte(b), 0o600)
+}
+
 func protectionWorld(h, mode string) error {
 	trust := map[string]string{"blocked": "trusted", "review": "untrusted"}[mode]
 	if trust == "" {

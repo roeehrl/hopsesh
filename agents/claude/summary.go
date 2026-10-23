@@ -50,6 +50,7 @@ type info struct {
 	HasMessages  bool
 	Subagents    int
 	Mirror       *agent.CloudLink
+	Owners       []agent.OwnerRun
 }
 
 // record is the subset of transcript fields the summary needs.
@@ -81,6 +82,13 @@ type record struct {
 	// A Remote Control link (bridge-session): the claude.ai copy, in cse_ form, and its owner.
 	BridgeSessionID string `json:"bridgeSessionId"`
 	OwnerOrg        string `json:"ownerOrganizationUuid"`
+	OwnerAccount    string `json:"ownerAccountUuid"`
+	// Claude Code records the organisation signed in at each launch and resume as an
+	// attachment of type credential_org.
+	Attachment *struct {
+		Type string `json:"type"`
+		Org  string `json:"organizationUuid"`
+	} `json:"attachment"`
 	// For a preview's walk: a compaction boundary (a system record of subtype
 	// compact_boundary) chains to the conversation before it through its logical parent.
 	LogicalParentUUID string `json:"logicalParentUuid"`
@@ -129,6 +137,18 @@ func summarize(fsys agent.FS, pa agent.Path, file string, fi fs.FileInfo, hasSid
 		// The first records can exceed the 64 KB head (large pasted prompts or attachments);
 		// stream forward, bounded, until the first record that carries the launch cwd.
 		headRecs = append(headRecs, scanForFirstChained(f, size)...)
+	}
+	// Large compact summaries or diagnostic attachments can leave both bounded
+	// windows with metadata only. The session still has a real conversation.
+	hasMessage := false
+	for _, r := range append(append([]record{}, headRecs...), tailRecs...) {
+		if r.Type == "user" || r.Type == "assistant" {
+			hasMessage = true
+			break
+		}
+	}
+	if !hasMessage {
+		headRecs = append(headRecs, scanForFirstChained(f, size, true)...)
 	}
 	apply(s, headRecs, tailRecs)
 	if hasSidecar == nil || *hasSidecar {
@@ -281,6 +301,20 @@ func apply(s *info, head, tail []record) {
 			break
 		}
 	}
+	// The accounts it ran under. The head and the tail hold the first and the latest runs;
+	// a middle run of a long session can be missed.
+	for _, r := range all {
+		var run agent.OwnerRun
+		switch {
+		case r.Type == "attachment" && r.Attachment != nil && r.Attachment.Type == "credential_org":
+			run = agent.OwnerRun{Key: accountKey(r.Attachment.Org), Source: "agent"}
+		case r.Type == "bridge-session":
+			run = agent.OwnerRun{Key: accountKey(r.OwnerOrg), Person: personKey(r.OwnerAccount), Source: "agent"}
+		default:
+			continue
+		}
+		s.Owners = agent.AddOwner(s.Owners, run)
+	}
 	// Remote Control: the newest bridge record names the session's copy on claude.ai.
 	for i := len(all) - 1; i >= 0; i-- {
 		if r := all[i]; r.Type == "bridge-session" && canonical(r.BridgeSessionID) != "" {
@@ -312,7 +346,7 @@ func hasChainedCWD(rs []record) bool {
 // maxForwardScan bounds how far scanForFirstChained reads (huge first lines are rare).
 const maxForwardScan = 32 << 20
 
-func scanForFirstChained(f io.ReaderAt, size int64) []record {
+func scanForFirstChained(f io.ReaderAt, size int64, message ...bool) []record {
 	limit := size
 	if limit > maxForwardScan {
 		limit = maxForwardScan
@@ -325,7 +359,7 @@ func scanForFirstChained(f io.ReaderAt, size int64) []record {
 			var r record
 			if json.Unmarshal(bytes.TrimSpace(line), &r) == nil && r.Type != "" {
 				out = append(out, r)
-				if isChained(r) && r.CWD != "" {
+				if isChained(r) && r.CWD != "" && (len(message) == 0 || r.Type == "user" || r.Type == "assistant") {
 					return out
 				}
 			}

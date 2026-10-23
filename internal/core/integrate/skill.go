@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 // The hopsesh skill is one set of files (SKILL.md and its references) written to every
@@ -16,12 +18,16 @@ import (
 // the hash of every file hopsesh wrote there, so each copy is "current" (exactly this
 // build's files), "stale" (an older hopsesh's files, untouched: safe to replace),
 // "modified" (edited by the user: never overwritten without force), "foreign" (a skill
-// called hopsesh that hopsesh did not write), "broken" or absent.
+// called hopsesh that hopsesh did not write), "broken" or absent. A copy a newer hopsesh
+// wrote is never replaced by an older one: it reports current, with Newer set.
 
 // SkillName is the skill's name and folder.
 const SkillName = "hopsesh"
 
 const recordFile = ".hopsesh-install.json"
+
+// RecordFile is the install record's name in a skill copy's folder.
+const RecordFile = recordFile
 
 // States of a skill copy.
 const (
@@ -45,6 +51,9 @@ type SkillStatus struct {
 	Dir     string   `json:"dir"`
 	Version string   `json:"installedVersion,omitempty"`
 	Changed []string `json:"changedFiles,omitempty"` // files the user edited
+	// Newer: a newer hopsesh than this one installed it (its files differ from this
+	// build's); this build leaves it as it is.
+	Newer bool `json:"newer,omitempty"`
 }
 
 func sum(b []byte) string {
@@ -52,8 +61,8 @@ func sum(b []byte) string {
 	return hex.EncodeToString(h[:])
 }
 
-// CheckSkill compares the skill in dir with the files this build would write.
-func CheckSkill(dir string, files map[string][]byte) SkillStatus {
+// CheckSkill compares the skill in dir with the files this build (version) would write.
+func CheckSkill(dir string, files map[string][]byte, version string) SkillStatus {
 	st := SkillStatus{State: Absent, Dir: dir}
 	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
 		return st
@@ -89,6 +98,9 @@ func CheckSkill(dir string, files map[string][]byte) SkillStatus {
 			st.State = Stale
 		}
 	}
+	if c, ok := agent.CompareVersions(rec.Version, version); st.State == Stale && ok && c > 0 {
+		st.State, st.Newer = Current, true
+	}
 	return st
 }
 
@@ -101,10 +113,10 @@ var ErrForeign = errors.New("a skill called hopsesh already exists and was not i
 // InstallSkill writes the files to dir. An edited copy, or one hopsesh did not write, is
 // replaced only with force (the old folder is kept as hopsesh.bak-N).
 func InstallSkill(dir, version string, files map[string][]byte, force bool) (SkillStatus, error) {
-	st := CheckSkill(dir, files)
+	st := CheckSkill(dir, files, version)
 	switch st.State {
 	case Current:
-		return st, nil
+		return st, nil // including a newer hopsesh's copy: never downgraded
 	case Modified:
 		if !force {
 			return st, fmt.Errorf("%w: %s", ErrModified, dir)
@@ -138,12 +150,12 @@ func InstallSkill(dir, version string, files map[string][]byte, force bool) (Ski
 	if err := writeAtomic(filepath.Join(dir, recordFile), append(b, '\n'), 0o644); err != nil {
 		return st, err
 	}
-	return CheckSkill(dir, files), nil
+	return CheckSkill(dir, files, version), nil
 }
 
 // RemoveSkill deletes a copy hopsesh owns unchanged, or any copy with force.
 func RemoveSkill(dir string, files map[string][]byte, force bool) error {
-	st := CheckSkill(dir, files)
+	st := CheckSkill(dir, files, "")
 	switch st.State {
 	case Absent:
 		return nil

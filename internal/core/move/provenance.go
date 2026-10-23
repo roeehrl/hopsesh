@@ -15,11 +15,14 @@ import (
 // prepareLineage snapshots the entire causal graph. Planning never mutates inventory.
 func prepareLineage(ctx context.Context, p *Plan, in Input, seg *ir.Segment) error {
 	m := in.Lineage.Clone()
+	if m != nil {
+		m.SetLimits(p.Options.Limits)
+	}
 	fsys, err := in.Source.Machine.FS(ctx)
 	if err != nil {
 		return err
 	}
-	actual, err := lineage.Read(fsys, in.Session.Path)
+	actual, err := lineage.Read(fsys, in.Session.Path, p.Options.Limits)
 	if err != nil {
 		return err
 	}
@@ -36,6 +39,7 @@ func prepareLineage(ctx context.Context, p *Plan, in Input, seg *ir.Segment) err
 			return err
 		}
 		m = lineage.NewNative(id, p.Key)
+		m.SetLimits(p.Options.Limits)
 	}
 	for _, c := range in.Copies {
 		if c.Lineage != nil && c.Lineage.Family == m.Family {
@@ -122,7 +126,7 @@ func targetState(ctx context.Context, p *Plan, in Input, c Copy) (lineage.State,
 	}
 	replica, id, ok := p.manifest.FindBinding(c.Summary.Key, in.Target.Machine.Facts.Endpoint, in.Target.Install.BindingID())
 	if !ok || replica.Binding != in.Target.Install.BindingID() {
-		return lineage.State{}, seg, fmt.Errorf("destination session has no verified lineage; choose a separate fork")
+		return lineage.State{}, seg, fmt.Errorf("destination session has no verified lineage; keep them as separate conversations")
 	}
 	if p.ExpectedDestination == nil {
 		p.ExpectedDestination = map[string]ir.Cursor{}

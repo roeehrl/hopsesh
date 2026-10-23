@@ -62,6 +62,10 @@ const (
 // confines writes and refuses secret reads from it, before any module code runs.
 type Spec struct {
 	Accounts *ProfileSpec
+	// ResumeAcrossAccounts: a session resumes under another account than the one that ran
+	// it, the vendor dropping what is bound to that account (Claude Code: signed reasoning).
+	// Without it such a session must continue as a cleaned copy.
+	ResumeAcrossAccounts bool
 	// DesktopScheme is the registered URL protocol a desktop resume uses.
 	DesktopScheme string
 	ID            ID
@@ -105,10 +109,21 @@ type Spec struct {
 	// Clouds are the vendor clouds the module reaches through its agent's CLI. A module
 	// with clouds may have no Roots (a cloud-only module, see NoLocal).
 	Clouds []Cloud
+	// Kinds are kinds of session the module marks (Summary.Kinds) that hopsesh hides
+	// unless the user turns them on for this agent: conversations that are not coding
+	// sessions to move (the Codex app's voice and Work threads).
+	Kinds []SessionKind
 	// TerminalEnv are variables ("NAME=value") the agent's programs get in hopsesh's own
 	// terminal tabs, on top of the user's: settings that suit that terminal
 	// (CLAUDE_CODE_FORCE_SYNC_OUTPUT=1). Never a credential; not used in other terminals.
 	TerminalEnv []string
+}
+
+// SessionKind is a kind of session hidden by default (Spec.Kinds).
+type SessionKind struct {
+	ID   string // "voice"
+	Name string // "Voice conversations"
+	Note string // what they are, for the setting
 }
 
 // Icon pictures an agent. The installed desktop app's own icon comes first (unless the
@@ -143,18 +158,32 @@ type Root struct {
 
 // Install is an agent as found on one machine.
 type Install struct {
-	Accounts       *ProfileSpec      `json:"-"`
-	OS             string            `json:"os,omitempty"`
-	Desktop        string            `json:"desktop,omitempty"`
-	DesktopVersion string            `json:"desktopVersion,omitempty"`
-	DesktopWhy     string            `json:"desktopWhy,omitempty"`
-	Profile        *RuntimeProfile   `json:"profile,omitempty"`
-	Agent          ID                `json:"agent"`
-	Version        string            `json:"version,omitempty"` // "" when the binary was not found
-	Binary         string            `json:"binary,omitempty"`  // absolute path
-	Roots          map[string]string `json:"roots"`             // name → absolute path on that machine
-	Present        bool              `json:"present"`           // the main root exists
+	// NativeDefaultRoot is launch metadata verified by the module from the detected
+	// machine's home and original environment. Empty means native config lookup is
+	// unverified or explicitly overridden. It grants no filesystem access.
+	NativeDefaultRoot string            `json:"nativeDefaultRoot,omitempty"`
+	Accounts          *ProfileSpec      `json:"-"`
+	OS                string            `json:"os,omitempty"`
+	Desktop           string            `json:"desktop,omitempty"`
+	DesktopVersion    string            `json:"desktopVersion,omitempty"`
+	DesktopWhy        string            `json:"desktopWhy,omitempty"`
+	// DesktopAccount is who the desktop app is signed in as, when it keeps its own
+	// sign-in (Claude desktop): its account and user fingerprints, never more.
+	DesktopAccount *OwnerRun `json:"desktopAccount,omitempty"`
+	// DesktopEngine is the version of the agent the desktop app runs, its own copy
+	// (Claude desktop's Claude Code, the Codex app's codex).
+	DesktopEngine string `json:"desktopEngine,omitempty"`
+	Profile           *RuntimeProfile   `json:"profile,omitempty"`
+	Agent             ID                `json:"agent"`
+	Version           string            `json:"version,omitempty"` // "" when the binary was not found
+	Binary            string            `json:"binary,omitempty"`  // absolute path
+	Runtime           string            `json:"runtime,omitempty"` // RuntimeApp: Binary is the desktop app's bundled runtime, no CLI
+	Roots             map[string]string `json:"roots"`             // name → absolute path on that machine
+	Present           bool              `json:"present"`           // the main root exists
 }
+
+// RuntimeApp marks Install.Binary as the desktop app's bundled runtime.
+const RuntimeApp = "app"
 
 // Root returns the path of a named root.
 func (in Install) Root(name string) string { return in.Roots[name] }

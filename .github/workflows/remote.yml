@@ -1,0 +1,54 @@
+name: remote
+
+# hopsesh with another machine over real SSH, played by a throwaway user of the runner
+# (scripts/remote-scenarios.sh, internal/e2e/remote): no hopsesh there, hopsesh set up
+# with nobody logged in, hopsesh serve in the login session, logged out again, hopsesh
+# 0.4.5 there (peer protocol 5) and an unreachable machine. Linux only: the scenarios
+# start and stop hopsesh serve by hand, where a Mac would need a GUI login for launchd.
+# No secrets; the token only reads the public 0.4.5 release.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: remote-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scenarios:
+    name: remote scenarios (linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: build hopsesh, the stand-in agents and the scenarios
+        run: |
+          go build -o bin/hopsesh ./cmd/hopsesh
+          go build -o bin/fakeagent ./internal/devtools/fakeagent
+          go test -c -o bin/remote.test ./internal/e2e/remote
+      - name: hopsesh 0.4.5 for the version-skew scenario (checksum verified)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          d=$RUNNER_TEMP/old
+          mkdir -p "$d"
+          gh release download v0.4.5 --repo roeehrl/hopsesh --dir "$d" -p hopsesh_0.4.5_linux_amd64.tar.gz -p checksums.txt
+          (cd "$d" && grep ' hopsesh_0.4.5_linux_amd64.tar.gz$' checksums.txt | sha256sum -c -)
+          tar -xzf "$d/hopsesh_0.4.5_linux_amd64.tar.gz" -C "$d" hopsesh
+          echo "OLD_HOPSESH=$d/hopsesh" >> "$GITHUB_ENV"
+      - name: scenarios over loopback SSH
+        run: scripts/remote-scenarios.sh bin

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/sdk/agent"
+	"github.com/roeehrl/hopsesh/sdk/ir"
 )
 
 // Refreshing an unchanged machine must cost almost nothing: the memos here key what a
@@ -95,7 +97,7 @@ type sidecarRead struct {
 var sidecars = &boundedMemo[sidecarRead]{limit: 4096}
 
 // readSidecar is lineage.Read, without rereading a sidecar that has not changed.
-func readSidecar(machine string, fsys agent.FS, main string) (*lineage.Manifest, string) {
+func readSidecar(machine string, fsys agent.FS, main string, limits ...ir.Limits) (*lineage.Manifest, string) {
 	path := lineage.PathFor(main)
 	st, err := statOf(fsys, path)
 	if err != nil {
@@ -104,12 +106,16 @@ func readSidecar(machine string, fsys agent.FS, main string) (*lineage.Manifest,
 	if st.Missing {
 		return nil, ""
 	}
-	key := machine + "\x00" + path
+	l := ir.DefaultLimits()
+	if len(limits) > 0 {
+		l = limits[0].Normalize()
+	}
+	key := machine + "\x00" + path + fmt.Sprint(l.LineageBytes)
 	if c, ok := sidecars.get(key); ok && c.stat == st {
 		return c.manifest, c.problem
 	}
 	contentReads.Add(1)
-	m, err := lineage.Read(fsys, main)
+	m, err := lineage.Read(fsys, main, l)
 	problem := ""
 	if err != nil {
 		problem = err.Error()
@@ -141,17 +147,18 @@ func manifestPrint(m *lineage.Manifest) string {
 	return fmt.Sprintf("%x", sha256.Sum256(b))
 }
 
-type forkResult struct {
-	manifests []*lineage.Manifest
-	problems  []string
+type forkMember struct {
+	manifest *lineage.Manifest
+	problem  string
 }
+type forkResult struct{ members map[string]forkMember }
 
 var forks = &boundedMemo[forkResult]{limit: 64}
 
 // forkInputs fingerprints everything native fork verification reads: each fork and its
 // parent (listing, file version, sidecar) and the install. "" when there is nothing to
 // verify; cacheable is false when a file cannot be checked (verify without the memo).
-func forkInputs(hm *host.Machine, h agent.Host, in agent.Install, ss []agent.Summary, manifests []*lineage.Manifest, problems []string) (key string, cacheable bool) {
+func forkInputs(ctx context.Context, hm *host.Machine, h agent.Host, in agent.Install, ss []agent.Summary, manifests []*lineage.Manifest, problems []string) (key string, cacheable bool) {
 	by := map[agent.SessionID]int{}
 	for i, s := range ss {
 		by[s.Key.Session] = i
@@ -186,7 +193,7 @@ func forkInputs(hm *host.Machine, h agent.Host, in agent.Install, ss []agent.Sum
 	if len(inputs) == 0 {
 		return "", true
 	}
-	b, _ := json.Marshal([]any{hm.Name, in.BindingID(), in.Version, inputs})
+	b, _ := json.Marshal([]any{hm.Name, in.BindingID(), in.Version, ir.LimitsFrom(ctx), inputs})
 	return fmt.Sprintf("%x", sha256.Sum256(b)), true
 }
 

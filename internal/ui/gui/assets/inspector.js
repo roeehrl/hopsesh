@@ -3,7 +3,7 @@
 // open, the end of its conversation (safe, locally rendered Markdown), and its
 // repository, copies and details, which open and close app-wide.
 import { role, chip as roleChip } from "./guard.js";
-import { accountLabel, accountTitle, api, h, fill, icon, ICONS, state, sys, here, ago, when, bytes, agentBadge, cloudOf, cloudTitle, count, path, rich, fail, toast, dialog, errText, cap, $, accountShown } from "./core.js";
+import { accountLabel, accountTitle, api, h, fill, icon, ICONS, state, sys, here, ago, when, bytes, agentBadge, cloudOf, cloudTitle, count, path, rich, fail, toast, dialog, errText, cap, $, accountShown, copyEntry } from "./core.js";
 import { selectDestination, model, statusLine, placeName, showPlace, placeCount, onInspector, liveOf, appWord } from "./actions.js";
 import { openMenu, isOpen, openEl, closeAll } from "./menu.js";
 import { sectionOpen, setSection } from "./layout.js";
@@ -91,7 +91,11 @@ function header(e) {
   const [k, lead, rest, cl, twice] = statusLine(e);
   const g = e.group;
   const facts = [];
-  if(accountShown(e.profile)) facts.push(h("span",{title:accountTitle(e.profile)},`${accountShown(e.profile)}${e.profile.tags?.length?" · "+e.profile.tags.join(", "):""}`));
+  if(e.profile) facts.push(h("span",{title:accountTitle(e)},`${accountShown(e)||"Account not recorded"}${e.profile?.tags?.length?" · "+e.profile.tags.join(", "):""}`));
+  // Continuing it here runs under the folder's sign-in now, which may not be the account
+  // that ran it: say so before anyone continues.
+  const now=e.profile?.account?.loggedIn?(e.profile.account.email||e.profile.account.label):"";
+  if(now&&e.owner?.recorded&&!e.owner.current) facts.push(h("span",{class:"owner-switch",title:e.agent==="claude"?"Claude Code continues it under that account; reasoning recorded under the other account is not visible to it.":"Codex cannot resume it as it is under another account; Move to this same place continues a cleaned copy."},`Continues as ${now}`));
   if (e.cloud) {
     if (e.cloud.repo || !g.noRepo) facts.push(h("span", {}, (e.cloud.repo || g.name).split("/").pop()));
     if (e.cloud.branch) facts.push(h("span", { class: "mono" }, e.cloud.branch));
@@ -134,6 +138,7 @@ function openIn(e, m) {
       }
       continue;
     }
+    if (p.kind === "unknown") continue;
     const can = p.kind !== "tmux" && p.kind !== "ssh" && !(p.kind === "ide" && !sys.mac);
     lines.push(h("div", { class: "open-line" }, h("span", { class: "open-ic" }, placeIcon(p.kind) || agentBadge(e.agent, e.agentName)),
       h("span", { class: "open-t" }, placeName(p, e), p.count > 1 ? h("span", { class: "muted" }, ` — ${p.count} processes`) : null,
@@ -321,10 +326,10 @@ function history(e) {
  h("span", { class: "chip" }, `${count(e.journey.roundTrips, "round trip")} to origin${e.journey.originProfile?" profile":""}`),
  h("span", { class: "chip" }, `${count(e.journey.returns, "return")} to visited locations`),
  h("span", {class:"chip"}, `${count(e.journey.machineTransfers||0, "machine transfer")} · ${count(e.journey.machineRoundTrips||0, "machine round trip")}`),
- e.journey.fork ? h("span", { class: "chip",title:`Parent branch: ${e.journey.parentBranch}` }, "Separate fork") : null,
+ e.journey.fork ? h("span", { class: "chip",title:`Parent branch: ${e.journey.parentBranch}` }, "Separate conversation") : null,
  h("span",{class:"muted",style:"font-size:12px"},`Origin: ${e.journey.origin&&e.journey.origin!=="/"?e.journey.origin:"not recorded"}; branch ${e.journey.branch.slice(0,8)}`)) : null,
  others.length ? h("div", { class: "sub-h" }, "Other copies") : null,
-    others.map((c) => h("span", {}, copyPlace(c), accountShown(c.profile) ? h("span",{title:accountTitle(c.profile)}," · "+accountShown(c.profile)) : null, h("span", { class: "muted" }, c.newest ? " · newest" : c.leftBehind ? " · moved on" : " · older"), " ", h("button",{class:"link",onclick:()=>resolveDestination(c).then(selectDestination).catch(fail)},"Show copy"))),
+    others.map((c) => h("span", {}, copyPlace(c), (ce => accountShown(ce) ? h("span",{title:accountTitle(ce)}," · "+accountShown(ce)) : null)(copyEntry(c.machine, c.key) || { profile: c.profile, agentName: c.agentName }), h("span", { class: "muted" }, c.newest ? " · newest" : c.leftBehind ? " · moved on" : " · older"), " ", h("button",{class:"link",onclick:()=>resolveDestination(c).then(selectDestination).catch(fail)},"Show copy"))),
     e.mirror ? [h("div", { class: "sub-h" }, "Mirrored"), h("span", {}, `Remote Control keeps a copy on ${e.mirror.host} while it runs. `,
       h("button", { class: "link", onclick: () => api("OpenURL", e.mirror.url).catch(fail) }, "Open it"))] : null,
     e.history.length ? [h("div", { class: "sub-h" }, e.cloud ? "Lineage" : "Where it has been"),

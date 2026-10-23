@@ -9,7 +9,7 @@ for (const method of ['Machines', 'Accounts', 'Settings', 'Activity']) {
     const wait = gate(); let first = true;
     if (method === 'Accounts') await menu(page, 'settings');
     await page.route('**/call', async r => {
-      if (r.request().postDataJSON().m === method && first) { first = false; await wait.promise; await error(r); }
+      if (r.request().postDataJSON().m === (method === 'Accounts' ? 'AccountsView' : method) && first) { first = false; await wait.promise; await error(r); }
       else await r.continue();
     });
     if (method === 'Accounts') await page.getByRole('button', { name: 'Accounts', exact: true }).click();
@@ -31,7 +31,8 @@ test('an older Machines visit cannot overwrite a newer visit', async ({ page }) 
     if (r.request().postDataJSON().m === 'Machines' && ++n === 1) { await wait.promise; await error(r); }
     else await r.continue();
   });
-  await menu(page, 'machines'); await expect(page.locator('#view [role=status]')).toBeVisible();
+  // The first visit has asked for the machines (Settings › Machines shows it looking).
+  await menu(page, 'machines'); await expect(page.locator('#view [role=status]')).toContainText('Looking for your machines');
   await page.getByRole('button', { name: 'Back to sessions' }).click(); await menu(page, 'machines');
   await expect(page.getByRole('heading', { name: 'Machines', exact: true })).toBeVisible();
   wait.release(); await expect(page.locator('#view .load-error')).toHaveCount(0);
@@ -39,15 +40,15 @@ test('an older Machines visit cannot overwrite a newer visit', async ({ page }) 
 
 test('account save prevents duplicate submissions and preserves values on failure', async ({ page }) => {
   await menu(page, 'settings'); await page.getByRole('button', { name: 'Accounts', exact: true }).click();
-  await page.getByRole('button', { name: 'Add account', exact: true }).click();
-  const d = page.locator('dialog.account-editor'); await d.getByLabel('Name', { exact: true }).fill('Second personal account');
+  await page.getByRole('button', { name: 'Add an account…', exact: true }).click();
+  const d = page.locator('#dlg'); await d.getByLabel('Name', { exact: true }).fill('Second personal account');
   const wait = gate(); let calls = 0;
   await page.route('**/call', async r => {
-    if (r.request().postDataJSON().m === 'RegisterAccount') { calls++; await wait.promise; await error(r); } else await r.continue();
+    if (r.request().postDataJSON().m === 'AddAccountFolder') { calls++; await wait.promise; await error(r); } else await r.continue();
   });
-  const submit = d.getByRole('button', { name: 'Add account', exact: true }); await submit.click();
-  await expect(d.locator('form')).toHaveAttribute('aria-busy', 'true'); await expect(submit).toBeDisabled();
-  await d.locator('form').evaluate((f: HTMLFormElement) => f.requestSubmit()); expect(calls).toBe(1);
+  const submit = d.getByRole('button', { name: 'Create and sign in', exact: true }); await submit.click();
+  await expect(submit).toBeDisabled();
+  await submit.evaluate((b: HTMLButtonElement) => b.click()); expect(calls).toBe(1);
   wait.release(); await expect(d.getByRole('alert')).toContainText('Synthetic slow-service failure');
   await expect(submit).toBeEnabled(); await expect(d.getByLabel('Name', { exact: true })).toHaveValue('Second personal account');
   await expect(page.locator('.operation-status')).toHaveCount(0);

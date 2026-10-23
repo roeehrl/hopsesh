@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -148,7 +149,41 @@ func TestMovementQuietReturnAfterAccountObservation(t *testing.T) {
 								t.Fatal("late live writer guard changed original")
 							}
 						}
-						if _, err := move.Apply(ctx, planned, back, env); err != nil {
+						// An original that is gone (deleted, archived) is said plainly, with a
+						// new session on the same branch as the way on, never a dead end.
+						gone := selected
+						gone.TargetSession = agent.SessionKey{Agent: left.Key.Agent, Profile: left.Key.Profile, Session: "deleted-original"}.String()
+						missing, err := move.Build(ctx, back, gone)
+						if err != nil || !missing.ReviewNewSession || !strings.Contains(strings.Join(missing.Blockers, " "), "not here any more") {
+							t.Fatalf("missing original was a dead end: %+v %v", missing, err)
+						}
+						applyIn := back
+						if from == "claude" {
+							// An original open in its agent but blocked by hopsesh may be added
+							// to; the review says it must be reopened. Without that, still refused.
+							late := back
+							late.Target.Module = &lateClaudeWriter{claude.New()}
+							late.Copies = slices.Clone(back.Copies)
+							for i := range late.Copies {
+								if late.Copies[i].Summary.Key == left.Key {
+									late.Copies[i].Live = agent.LiveInfo{State: agent.Live}
+								}
+							}
+							closed, err := move.Build(ctx, late, selected)
+							if err != nil || !slices.Contains(closed.Blockers, "the destination copy is open; quit it first") {
+								t.Fatalf("open original accepted without its block: %+v %v", closed, err)
+							}
+							withOpen := selected
+							withOpen.OpenBlockedOriginal = left.Key.String()
+							open, err := move.Build(ctx, late, withOpen)
+							if err != nil || len(open.Blockers) != 0 || open.Continue.AppendTo == nil || !strings.Contains(strings.Join(open.Warnings, " "), "The original is open") {
+								t.Fatalf("blocked open original was not added to: %+v %v", open, err)
+							}
+							if _, err := move.Apply(ctx, open, late, env); err == nil || !strings.Contains(err.Error(), "destination copy is open") {
+								t.Fatalf("live blocked destination was written without closing it: %v", err)
+							}
+						}
+						if _, err := move.Apply(ctx, planned, applyIn, env); err != nil {
 							t.Fatal(err)
 						}
 						home := movementProfileSession(t, a, target, planned.Placement.Key)

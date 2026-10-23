@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -17,13 +16,53 @@ import (
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
-func (a *App) Accounts() ([]agent.RuntimeProfile, error) { return a.accountStore().List() }
+func (a *App) Accounts() ([]agent.RuntimeProfile, error) {
+	ps, err := a.accountStore().List()
+	return matchByEmail(ps), err
+}
+
+// matchByEmail gives a login known only by its email (Codex keeping its sign-in in the
+// keyring, where hopsesh reads no IDs) the account of a verified login with the same
+// email, on any machine: the key its sessions record as their creator.
+func matchByEmail(ps []agent.RuntimeProfile) []agent.RuntimeProfile {
+	verified := map[string]*agent.Account{}
+	for _, p := range ps {
+		if acct := p.Account; acct != nil && acct.Confidence == "verified" && acct.Email != "" && acct.Key != "" {
+			verified[string(p.Agent)+"\x00"+strings.ToLower(acct.Email)] = acct
+		}
+	}
+	for i := range ps {
+		acct := ps[i].Account
+		if acct == nil || acct.Confidence != "limited" || acct.Email == "" || !strings.HasPrefix(acct.Key, "chatgpt:") {
+			continue
+		}
+		if v := verified[string(ps[i].Agent)+"\x00"+strings.ToLower(acct.Email)]; v != nil {
+			c := *acct
+			c.Key, c.Person, c.Confidence = v.Key, v.Person, "email"
+			ps[i].Account = &c
+		}
+	}
+	return ps
+}
 func (a *App) accountStore() profiles.Store              { return profiles.Store{Dir: a.StateDir} }
 func (a *App) EditAccount(id, name string, tags []string, generation int) error {
 	return a.accountStore().Edit(id, name, tags, generation)
 }
 func (a *App) ForgetAccount(id string, generation int) error {
-	return a.accountStore().Forget(id, generation)
+	ps, _ := a.Accounts()
+	if err := a.accountStore().Forget(id, generation); err != nil {
+		return err
+	}
+	// Its shell command goes with it (on this machine; its folder and sign-in stay).
+	endpoint, _ := a.LocalAccountEndpoint(context.Background())
+	if home, err := os.UserHomeDir(); err == nil {
+		for _, p := range ps {
+			if p.ID == id && p.Command != "" && p.Endpoint == endpoint {
+				removeShellCommand(home, p.Command)
+			}
+		}
+	}
+	return nil
 }
 
 // RegisterAccount adopts a known root, or creates an empty private root on this machine.
@@ -56,19 +95,8 @@ func (a *App) RegisterAccount(ctx context.Context, machine string, id agent.ID, 
 	}
 	p := agent.RuntimeProfile{Machine: m.Name, ID: profiles.ID(), Endpoint: endpoint, Agent: id, Name: name, Tags: tags}
 	if root == "" {
-		if !m.Local {
-			return p, errors.New("create remote accounts using hopsesh accounts add on that machine, then adopt its root here")
-		}
-		p.Managed = true
-		root = filepath.Join(a.StateDir, "profiles", p.ID, string(id))
-		if err = os.MkdirAll(root, 0700); err != nil {
-			return p, err
-		}
-		for file, contents := range mod.Spec().Accounts.InitialFiles {
-			if err = os.WriteFile(filepath.Join(root, file), []byte(contents), 0600); err != nil {
-				return p, err
-			}
-		}
+		m.Close()
+		return a.AddAccount(ctx, machine, id, name, tags, AddAccountOptions{})
 	}
 	if !m.Path().IsAbs(root) {
 		return p, errors.New("account root must be an absolute path on the selected machine")
@@ -280,7 +308,7 @@ func (a *App) profileInstalls(ctx context.Context, m *host.Machine, mod agent.Mo
 			ch, e := m.For(ctx, mod.Spec(), in, nil)
 			var acct agent.Account
 			if e == nil && in.Binary == "" {
-				e = fmt.Errorf("%w: %s CLI is unavailable; install it on this machine to check sign-in", agent.ErrNotInstalled, mod.Spec().Name)
+				e = fmt.Errorf("%w: %s is not installed here (neither its CLI nor a desktop app that bundles it); install it to check sign-in", agent.ErrNotInstalled, mod.Spec().Name)
 			}
 			if e == nil {
 				acct, e = ap.Account(ctx, ch, in)
@@ -313,7 +341,9 @@ func (a *App) profileInstalls(ctx context.Context, m *host.Machine, mod agent.Mo
 
 // AccountLogin returns a vendor-owned login command; callers explicitly run it in a
 // terminal. Desktop deep links are not used because they cannot select this profile.
-func (a *App) AccountLogin(ctx context.Context, id string) (agent.Command, error) {
+// AccountLogin is the sign-in command of an account folder on this machine. elsewhere:
+// the person signs in from another machine's browser (a link and a code are printed).
+func (a *App) AccountLogin(ctx context.Context, id string, elsewhere ...bool) (agent.Command, error) {
 	ps, err := a.Accounts()
 	if err != nil {
 		return agent.Command{}, err
@@ -338,7 +368,19 @@ func (a *App) AccountLogin(ctx context.Context, id string) (agent.Command, error
 		if !ok {
 			return agent.Command{}, errors.New("agent is disabled")
 		}
-		in := agent.Install{Accounts: mod.Spec().Accounts, Agent: p.Agent, Profile: &p, Roots: map[string]string{"home": p.Root}, Binary: m.Facts.Binaries[string(p.Agent)].Path}
+		// Detect against the original machine environment before pinning the root,
+		// so login shares the module's verified native-default launch policy.
+		h, e := m.For(ctx, mod.Spec(), agent.Install{}, nil)
+		if e != nil {
+			return agent.Command{}, e
+		}
+		in, e := mod.Detect(ctx, h)
+		if e != nil {
+			return agent.Command{}, e
+		}
+		in.Accounts = mod.Spec().Accounts
+		in.Profile = &p
+		in.Roots = map[string]string{"home": p.Root}
 		if in.Binary == "" {
 			return agent.Command{}, fmt.Errorf("install %s first", mod.Spec().Name)
 		}
@@ -353,7 +395,11 @@ func (a *App) AccountLogin(ctx context.Context, id string) (agent.Command, error
 		if in.Accounts == nil {
 			return agent.Command{}, errors.New("agent does not support isolated accounts")
 		}
-		args := append([]string{in.Binary}, in.Accounts.Login...)
+		login := in.Accounts.Login
+		if len(elsewhere) > 0 && elsewhere[0] && len(in.Accounts.LoginElsewhere) > 0 {
+			login = in.Accounts.LoginElsewhere
+		}
+		args := append([]string{in.Binary}, login...)
 		return in.ScopeCommand(agent.Command{Argv: args, Dir: m.Facts.Home}), nil
 	}
 	return agent.Command{}, errors.New("account not found")
@@ -405,6 +451,17 @@ func (a *App) discoverRemoteProfiles(ctx context.Context, m *host.Machine, endpo
 		return fmt.Errorf("remote account registry: %w", err)
 	}
 	ps, err := profiles.DecodeRegistrations(b)
+	if err != nil {
+		return err
+	}
+	return a.importRemoteProfiles(ctx, m, endpoint, id, known, ps)
+}
+
+// importRemoteProfiles takes the account folders a machine's own hopsesh registered, and
+// what it last observed of their sign-ins, into this machine's registry.
+func (a *App) importRemoteProfiles(ctx context.Context, m *host.Machine, endpoint string, id agent.ID, known, ps []agent.RuntimeProfile) error {
+	pa := m.Path()
+	fsys, err := m.FS(ctx)
 	if err != nil {
 		return err
 	}
@@ -551,7 +608,7 @@ func (a *App) RefreshAccount(ctx context.Context, id string) (agent.RuntimeProfi
 			return p, agent.ErrUnsupported
 		}
 		if in.Binary == "" {
-			return failed(fmt.Errorf("%w: %s CLI is unavailable; install it on this machine to check sign-in", agent.ErrNotInstalled, mod.Spec().Name))
+			return failed(fmt.Errorf("%w: %s is not installed here (neither its CLI nor a desktop app that bundles it); install it to check sign-in", agent.ErrNotInstalled, mod.Spec().Name))
 		}
 		account, probeErr := prober.Account(ctx, ch, in)
 		probeErr = accountProbeVisibility(m, account, probeErr)
@@ -581,7 +638,7 @@ func recentAccountObservation(at time.Time) bool {
 // An SSH process on macOS may lack the owner's unlocked Keychain. Absence of a
 // visible login there is not proof that the desktop account signed out.
 func accountProbeVisibility(m *host.Machine, account agent.Account, err error) error {
-	if err == nil && !m.Local && m.Facts.OS == "darwin" && !account.LoggedIn {
+	if err == nil && m.SignInsHidden() && !account.LoggedIn {
 		return fmt.Errorf("no sign-in is visible over SSH on %s. The macOS Keychain may be unavailable; check sign-in in Hopsesh on that machine. Last known account is retained", m.Name)
 	}
 	return err

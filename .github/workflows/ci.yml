@@ -105,6 +105,27 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
+  skill:
+    # The built program against the skill it installs: every command and flag the skill
+    # names exists, every visible flag is in the skill or allowlisted, and the command
+    # tree is the golden (internal/ui/cli/testdata). The release runs the same check.
+    name: skill vs CLI
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: go build -trimpath -o "$RUNNER_TEMP/hopsesh" ./cmd/hopsesh
+      - run: >-
+          go run ./internal/devtools/skillcheck -bin "$RUNNER_TEMP/hopsesh"
+          -golden internal/ui/cli/testdata/cli-tree.golden -allow internal/ui/cli/testdata/skill-undocumented-flags.txt
+
   testbundle:
     name: test bundle
     runs-on: ubuntu-24.04
@@ -222,7 +243,7 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium webkit
       - name: window tests (Chromium and WebKit, the real service on a demo home)
-        run: npx playwright test
+        run: npm test
       - name: test summary
         if: ${{ !cancelled() }}
         uses: test-summary/action@37b508cfee6d4d080eedd00b5bb240a6a784a6a5 # v2.6
@@ -360,7 +381,9 @@ jobs:
   os-pairs-macos-linux:
     name: os pairs (macos↔linux)
     runs-on: macos-15-intel
-    timeout-minutes: 60
+    # VM setup and both 81-row matrices can consume an hour; leave time to
+    # copy their results without cancelling an otherwise complete test run.
+    timeout-minutes: 75
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings

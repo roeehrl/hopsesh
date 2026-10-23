@@ -7,6 +7,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/journal"
 	"github.com/roeehrl/hopsesh/internal/core/launch"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
+	"github.com/roeehrl/hopsesh/sdk/ir"
 )
 
 // A workless visit synchronizes knowledge, never native transcript bytes or counters.
@@ -20,7 +21,7 @@ func applyNoWork(ctx context.Context, p *Plan, in Input, env Env) (*Result, erro
 	}
 	j.AddKey(p.Placement.Key)
 	res := &Result{Journal: j.ID}
-	if err = applyRepo(ctx, p, in, env, res, func(string) {}); err != nil {
+	if err = applyRepo(ctx, p, in, env, j, res, func(string) {}); err != nil {
 		return res, err
 	}
 	if err = operationNative(env, p, p.SyncTo.Path, p.ExpectedDestination[p.SyncTo.Path], res); err != nil {
@@ -45,7 +46,7 @@ func recordSync(ctx context.Context, p *Plan, in Input, j *journal.Journal, res 
 	if err != nil {
 		return err
 	}
-	if actual, e := lineage.Read(fsys, p.SyncTo.Path); e != nil {
+	if actual, e := lineage.Read(fsys, p.SyncTo.Path, ir.LimitsFrom(ctx)); e != nil {
 		return e
 	} else if actual != nil {
 		if e = m.Merge(actual); e != nil {

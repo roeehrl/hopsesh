@@ -30,7 +30,9 @@ type Controller struct {
 	cancel       context.CancelFunc
 	open         func(string)
 	changed      func()
-	attention    bool
+	attention    atomic.Pointer[attentionPublisher]
+	mainFocused  atomic.Bool
+	quickFocused atomic.Bool
 	mainReady    atomic.Bool
 	mainPending  atomic.Bool
 	quickReady   atomic.Bool
@@ -50,6 +52,12 @@ func New(app *application.App, main *application.WebviewWindow, prefs config.Des
 		Windows: application.WindowsWindow{HiddenOnTaskbar: true},
 	})
 	privileged(c.quick)
+	main.RegisterHook(events.Common.WindowFocus, func(*application.WindowEvent) { c.mainFocused.Store(true) })
+	main.RegisterHook(events.Common.WindowLostFocus, func(*application.WindowEvent) { c.mainFocused.Store(false) })
+	main.RegisterHook(events.Common.WindowHide, func(*application.WindowEvent) { c.mainFocused.Store(false) })
+	c.quick.RegisterHook(events.Common.WindowFocus, func(*application.WindowEvent) { c.quickFocused.Store(true) })
+	c.quick.RegisterHook(events.Common.WindowLostFocus, func(*application.WindowEvent) { c.quickFocused.Store(false) })
+	c.quick.RegisterHook(events.Common.WindowHide, func(*application.WindowEvent) { c.quickFocused.Store(false) })
 	c.quick.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) { e.Cancel(); c.quick.Hide() })
 	if c.state.Capabilities.Tray {
 		c.makeTray()
@@ -104,10 +112,26 @@ func (c *Controller) makeTray() {
 		c.tray.ToggleWindow() // retain Wails' Windows focus-loss debounce
 	}).SetTooltip("Hopsesh · Quick access")
 	if runtime.GOOS == "darwin" {
-		c.tray.SetTemplateIcon(icon(true, c.attention))
+		c.tray.SetTemplateIcon(icon(true, false))
 	} else {
-		c.tray.SetIcon(icon(false, c.attention))
+		c.tray.SetIcon(icon(false, false))
 	}
+	// Refreshes hold the scan lock. They must never wait for this UI thread,
+	// which joins scans during shutdown. The queued callback takes no controller lock.
+	tray := c.tray
+	lastAttention := false // only read/written on the UI thread
+	c.attention.Store(newAttentionPublisher(c.ctx, application.InvokeAsync, func(u attentionUpdate) {
+		attention := u.enabled && u.needs > 0
+		if attention != lastAttention {
+			lastAttention = attention
+			if runtime.GOOS == "darwin" {
+				tray.SetTemplateIcon(icon(true, attention))
+			} else {
+				tray.SetIcon(icon(false, attention))
+			}
+		}
+		tray.SetTooltip(fmt.Sprintf("Hopsesh · %d need you · %d open terminal tabs", u.needs, u.tabs))
+	}))
 	m := application.NewMenu()
 	m.Add("Open Quick access").OnClick(func(*application.Context) { c.showQuick(c.tray) })
 	m.Add("Open Hopsesh").OnClick(func(*application.Context) { c.open("sessions") })
@@ -259,21 +283,9 @@ func (c *Controller) flushMain() {
 }
 func (c *Controller) CloseQuick() { c.quickPending.Store(false); c.quick.Hide() }
 func (c *Controller) SetAttention(needs, tabs int) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.tray == nil {
-		return
+	if publisher := c.attention.Load(); publisher != nil {
+		publisher.update(attentionUpdate{needs: needs, tabs: tabs, enabled: c.published.Load().Preferences.AttentionOn()})
 	}
-	attention := needs > 0 && c.state.Preferences.AttentionOn()
-	if attention != c.attention {
-		c.attention = attention
-		if runtime.GOOS == "darwin" {
-			c.tray.SetTemplateIcon(icon(true, attention))
-		} else {
-			c.tray.SetIcon(icon(false, attention))
-		}
-	}
-	c.tray.SetTooltip(fmt.Sprintf("Hopsesh · %d need you · %d open terminal tabs", needs, tabs))
 }
 func (c *Controller) Stop() {
 	if c.cancel != nil {
@@ -293,8 +305,10 @@ func (c *Controller) BackgroundLaunch() bool {
 }
 
 // Attended is whether someone is looking at hopsesh now: its window has focus or the
-// menu bar popup is open. A window left open behind other apps is not.
-func (c *Controller) Attended() bool { return c.main.IsFocused() || c.quick.IsVisible() }
+// menu bar popup has focus (it hides on focus loss). A window behind other apps is not.
+func (c *Controller) Attended() bool {
+	return c.ctx.Err() == nil && !c.suspended.Load() && (c.mainFocused.Load() || c.quickFocused.Load())
+}
 
 func (c *Controller) ShowQuick() {
 	c.mu.Lock()

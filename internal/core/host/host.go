@@ -8,6 +8,8 @@ import (
 	"context"
 	"io/fs"
 	"log/slog"
+	"maps"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -37,6 +39,9 @@ type Facts struct {
 	Env              map[string]string           `json:"env"`
 	Binaries         map[string]agent.BinaryFact `json:"binaries"`
 	HasGit           bool                        `json:"hasGit"`
+	// LoginSession: the answers come from hopsesh running in the user's login session
+	// there, which sees what an SSH login cannot (a Mac's Keychain, its desktop apps).
+	LoginSession bool `json:"loginSession,omitempty"`
 }
 
 // Machine is a place sessions live: this machine, one reached over SSH, or a snapshot
@@ -47,6 +52,8 @@ type Machine struct {
 	Conn  *transport.Conn // nil for this machine
 	Facts Facts
 	Log   *slog.Logger
+	// Keeper keeps the identity of a machine without hopsesh (see HopseshThere).
+	Keeper Keeper
 
 	mu   sync.Mutex
 	fs   FS
@@ -62,7 +69,7 @@ func (m *Machine) FS(ctx context.Context) (FS, error) {
 		return m.fs, nil
 	}
 	if m.Local {
-		m.fs = localFS{}
+		m.fs = withCompressed(localFS{})
 		return m.fs, nil
 	}
 	r, err := m.Conn.OpenSFTP(ctx, m.Facts.OS == "windows")
@@ -70,7 +77,7 @@ func (m *Machine) FS(ctx context.Context) (FS, error) {
 		return nil, err
 	}
 	m.rfs = r
-	m.fs = remoteFS{r}
+	m.fs = withCompressed(remoteFS{r})
 	return m.fs, nil
 }
 
@@ -133,6 +140,9 @@ func (m *Machine) For(ctx context.Context, s agent.Spec, in agent.Install, w Wri
 		return nil, err
 	}
 	h := &moduleHost{m: m, fs: fsys, facts: m.specFacts(s), w: w, install: in}
+	if in.Profile != nil {
+		h.facts.UserEnv = maps.Clone(h.facts.Env)
+	}
 	for _, e := range in.ProfileEnv() {
 		k, v, _ := strings.Cut(e, "=")
 		h.facts.Env[k] = v
@@ -278,4 +288,32 @@ func (e profileExec) Run(ctx context.Context, argv []string, o agent.RunOptions)
 	c := e.install.ScopeCommand(agent.Command{Argv: argv, Env: o.Env, Unset: o.Unset})
 	o.Env, o.Unset = c.Env, c.Unset
 	return e.base.Run(ctx, c.Argv, o)
+}
+
+// SignInsHidden reports that the machine's sign-ins may be invisible to hopsesh here, so
+// a signed-out answer proves nothing. On a Mac they live in the Keychain, which a process
+// started over SSH cannot read; hopsesh running in the user's login session there
+// (Facts.LoginSession) sees them.
+func (m *Machine) SignInsHidden() bool {
+	if m.snap != nil || m.Facts.OS != "darwin" || m.Facts.LoginSession {
+		return false
+	}
+	return !m.Local || os.Getenv("SSH_CONNECTION") != "" && os.Getenv(LoginSessionEnv) == ""
+}
+
+// LoginSessionEnv is set for hopsesh started in the user's login session (hopsesh serve
+// and what it runs), where a Mac's Keychain is readable even when it was reached by SSH.
+const LoginSessionEnv = "HOPSESH_LOGIN_SESSION"
+
+// RemoteFS is the SFTP side of a machine reached over SSH (for uploads).
+func (m *Machine) RemoteFS() (*transport.RemoteFS, bool) {
+	if m.Local || m.snap != nil {
+		return nil, false
+	}
+	if _, err := m.FS(context.Background()); err != nil {
+		return nil, false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.rfs, m.rfs != nil
 }

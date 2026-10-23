@@ -397,8 +397,8 @@ jobs:
             | "## Summary\n\n"
             + (map("- **\(.group)** (\($members[.group] // "")): \(.summary | safe)") | join("\n")) + "\n\n"
             + (if $missing == "" then "" else "No report from the \($missing) review this week; its targets went unchecked.\n\n" end)
-            + "| | tested | latest |\n|---|---|---|\n"
-            + ($v[0] | map("| \(.name) | \(.tested | dash) | \(.latest | dash) |") | join("\n")) + "\n\n"
+            + "| | tested | baseline | latest |\n|---|---|---|---|\n"
+            + ($v[0] | map("| \(.name) | \(.tested | dash) | \(.baseline // "" | dash) | \(.latest | dash) |") | join("\n")) + "\n\n"
             + ([.[].findings[]] as $f | if ($f | length) == 0 then "No findings.\n" else
                 ($f | sort_by({break: 0, risk: 1, info: 2}[.severity]) | map(
                   "### \(.severity | ascii_upcase): \(.title | safe) (\($names[.target] // .target), \(.surface))\n\n\(.evidence | safe)\n\n"

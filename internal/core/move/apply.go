@@ -82,6 +82,8 @@ type Result struct {
 	SyncNote   string            `json:"syncNote,omitempty"`
 	PromptFile string            `json:"promptFile,omitempty"`
 	Command    string            `json:"command"` // to resume, for this machine's shell
+	// Key is the session as it is now at the destination.
+	Key agent.SessionKey `json:"key,omitzero"`
 	// Run is Command as an argument list (with the start prompt as its last argument when
 	// PromptFile is set), for a terminal hopsesh opens on it.
 	Run      agent.Command `json:"run"`
@@ -159,7 +161,7 @@ func applyPlan(ctx context.Context, p *Plan, in Input, env Env) (*Result, error)
 		return nil, err
 	}
 	j.AddKey(p.Placement.Key)
-	res := &Result{Journal: j.ID}
+	res := &Result{Journal: j.ID, Key: p.Placement.Key}
 	tgtHost, err := tgt.Machine.For(ctx, tgt.Module.Spec(), tgt.Install, j)
 	if err != nil {
 		return nil, err
@@ -197,7 +199,7 @@ func applyPlan(ctx context.Context, p *Plan, in Input, env Env) (*Result, error)
 	}
 
 	// 1. Repository and code.
-	if err := applyRepo(ctx, p, in, env, res, step); err != nil {
+	if err := applyRepo(ctx, p, in, env, j, res, step); err != nil {
 		return res, err
 	}
 
@@ -239,10 +241,16 @@ func applyPlan(ctx context.Context, p *Plan, in Input, env Env) (*Result, error)
 	return res, nil
 }
 
-func applyRepo(ctx context.Context, p *Plan, in Input, env Env, res *Result, step func(string)) error {
+// applyRepo clones the repository and adds the worktree the plan names, journaled in j so
+// undo removes them (and a branch made for the worktree) while they hold no work.
+func applyRepo(ctx context.Context, p *Plan, in Input, env Env, j *journal.Journal, res *Result, step func(string)) error {
 	r := p.Repo
+	machine := in.Target.Machine.Name
 	if r.Action == RepoClone {
 		step("cloning " + r.Remote + " into " + r.LocalPath)
+		if err := j.Clone(machine, r.LocalPath); err != nil {
+			return err
+		}
 		if err := repos.Clone(ctx, r.Remote, r.LocalPath); err != nil {
 			return fmt.Errorf("clone failed: %w", err)
 		}
@@ -257,8 +265,22 @@ func applyRepo(ctx context.Context, p *Plan, in Input, env Env, res *Result, ste
 	if r.Worktree != "" {
 		if _, err := os.Stat(r.Worktree); err != nil {
 			step("creating worktree " + r.Worktree + " on " + r.SourceBranch)
+			ref := "refs/heads/" + r.SourceBranch
+			had, err := repos.LocalGit{}.Ref(ctx, r.LocalPath, ref)
+			if err != nil {
+				return fmt.Errorf("worktree: %w", err)
+			}
+			if err := j.Worktree(machine, r.LocalPath, r.Worktree); err != nil {
+				return err
+			}
 			if err := repos.AddWorktree(ctx, r.LocalPath, r.SourceBranch, r.Worktree, from); err != nil {
 				return fmt.Errorf("worktree: %w", err)
+			}
+			// The branch the worktree made, so undo deletes it while it is where it started.
+			if made, err := (repos.LocalGit{}).Ref(ctx, r.LocalPath, ref); had == "" && err == nil && made != "" {
+				if err := j.Ref(machine, r.LocalPath, ref, made, ""); err != nil {
+					return err
+				}
 			}
 			res.Worktree = r.Worktree
 			env.Audit.Write(audit.Entry{Action: "git.worktree", Session: p.Key.String(), Detail: map[string]any{"path": r.Worktree, "branch": r.SourceBranch}})

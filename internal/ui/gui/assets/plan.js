@@ -1,6 +1,6 @@
 // The plan sheet (what a hop, continuation or send will do, with its choices), its
 // progress, and the Done screen.
-import { api, on, h, fill, view, state, screen, go, current, toast, fail, errText, cap, agentChip, here, $, count, sys, keys, cloudChip, cloudOf, manyAccounts } from "./core.js";
+import { api, on, h, fill, view, state, screen, go, current, toast, fail, errText, cap, agentChip, here, $, count, sys, keys, cloudChip, cloudOf, manyAccounts, ownerShown } from "./core.js";
 import { openMenu, closeAll } from "./menu.js";
 import { undo } from "./activity.js";
 import { openResult, where as opensIn } from "./term.js";
@@ -19,13 +19,13 @@ function defaults() {
 
 // planFor opens the sheet for a session: target "" keeps its agent, sendTo pushes it;
 // codeOnly brings a cloud session's branch alone.
-export async function planFor(e, { target = "", sendTo = "", codeOnly = false, targetProfile = "", targetSession = "", bounded = false, fork = false, returnCandidate = null }) {
+export async function planFor(e, { target = "", sendTo = "", codeOnly = false, targetProfile = "", targetSession = "", bounded = false, fork = false, returnCandidate = null, launch = "" }) {
   cur = { e, target, sendTo, opts: Object.assign(defaults(), { operationId: crypto.randomUUID() }, { codeOnly, targetProfile, targetSession, bounded, fork, newReplica: fork || returnCandidate?.status === "missing", conflict: "" }), returnCandidate, plan: null, busy: false, applying: false };
   fill(sheet, h("div", { class: "sheet-in" }, h("div", { class: "loading", role: "status", style: "min-height:240px" },
     sendTo ? `Asking hopsesh on ${sendTo} to plan it…` : "Working out the plan…")));
   if (!sheet.open) sheet.showModal();
   const c=cur;
-  c.launch = state.info.places?.[target || e.agent] || opensIn();
+  c.launch = launch || state.info.places?.[target || e.agent] || opensIn();
   try {c.profiles = e.cloud?[]:await api("AccountDestinations", sendTo, target || e.agent);} catch (err) { if (cur === c) problem(errText(err), { label: "Try again", run: () => planFor(e, { target, sendTo, codeOnly, targetProfile, targetSession, bounded, fork, returnCandidate }) }); return; }
   if(cur!==c)return;
   if(!c.returnCandidate && !c.opts.targetProfile && c.profiles.length && !c.profiles.some(p=>p.default)) {
@@ -34,6 +34,82 @@ export async function planFor(e, { target = "", sendTo = "", codeOnly = false, t
       h("div",{class:"sheet-foot"},h("button",{class:"btn",onclick:()=>sheet.close()},"Cancel"))));return;
   }
   await replan();
+}
+
+// chooseTarget shows where a session can continue (machine, folder and tool), who it runs
+// as in each, what carries over and what becomes of the copy left behind; the chosen one
+// opens the plan sheet.
+export async function chooseTarget(e) {
+  fill(sheet, h("div", { class: "sheet-in" }, h("div", { class: "loading", role: "status", style: "min-height:200px" }, "Looking at where it can continue…")));
+  if (!sheet.open) sheet.showModal();
+  let ts;
+  try { ts = await api("MoveTargets", e.machine, e.key); } catch (err) { problem(errText(err)); return; }
+  let pick = ts.find((t) => !t.disabled && !t.here) || null;
+  const carriesTone = (t) => ({ everything: "ok", conversation: "warn" }[t.carries] || "muted");
+  const leftWords = (t) => ({ blocked: "Blocked until you move back", advised: "Warns before it's continued", unprotected: "Not protected", kept: "Left as it is" }[t.left] || t.left);
+  const label = (t) => t.local ? sys.Here : t.machine;
+  const go = h("button", { class: "btn primary", id: "go-target" });
+  const sync = () => {
+    go.disabled = !pick;
+    go.textContent = !pick ? "Choose a place" : pick.here ? (pick.local ? "Continue it where it is" : `Continue it on ${pick.machine}`) : `Move to ${label(pick)}${pick.folder !== "default" ? " · " + pick.folder : ""}${pick.tool === "app" ? " in " + pick.opensIn : ""}`;
+    for (const r of sheet.querySelectorAll(".target")) r.classList.toggle("on", r.dataset.i === String(ts.indexOf(pick)));
+  };
+  const rows = ts.map((t, i) => h("label", { class: "target" + (t.disabled ? " off" : ""), "data-i": String(i), "aria-disabled": t.disabled ? "true" : null },
+    h("input", { type: "radio", name: "target", disabled: t.disabled, checked: t === pick, "aria-label": `${label(t)} ${t.folder}`, onchange: () => { pick = t; sync(); } }),
+    h("span", { class: "tc" }, h("b", {}, label(t) + (t.folder && t.folder !== "default" ? " · " + t.folder : "")), h("span", { class: "sub mono" }, t.path || "")),
+    h("span", { class: "tc" }, h("span", {}, t.opensIn), t.opensNote ? h("span", { class: "sub" }, t.opensNote) : null),
+    t.disabled ? h("span", { class: "tc wide muted" }, t.why) : [
+      h("span", { class: "tc" }, t.runsAs || h("span", { class: "muted" }, "Unknown")),
+      h("span", { class: "tc" }, t.here ? h("span", { class: "ok" }, "It's here: nothing moves") : [h("span", { class: carriesTone(t) }, { everything: "Everything", conversation: "The conversation", unknown: "Unknown" }[t.carries]), t.carriesWhy ? h("span", { class: "sub" }, t.carriesWhy) : null]),
+      h("span", { class: "tc" }, t.here ? h("span", { class: "muted" }, "—") : [h("span", { class: t.left === "unprotected" ? "warn" : t.left === "blocked" ? "ok" : "" }, leftWords(t)), t.leftWhy ? h("span", { class: "sub" }, t.leftWhy) : null])]));
+  go.onclick = async () => {
+    const t = pick;
+    if (!t) return;
+    if (t.here) {
+      sheet.close();
+      if (t.local) return import("./actions.js").then((a) => a.resumeIn(e, t.tool === "app" ? "app" : a.defaultPlace(e)));
+      return api("ContinueOnMachine", e.machine, e.key).catch(fail);
+    }
+    await planFor(e, { target: "", sendTo: t.local ? "" : t.machine, targetProfile: t.profile, launch: t.tool === "app" ? "app" : "" });
+  };
+  fill(sheet, h("div", { class: "sheet-in" },
+    h("div", { class: "sheet-body" }, h("h2", {}, `Move “${e.title}”`),
+      h("span", { class: "label" }, "Where it continues"),
+      h("div", { class: "targets", role: "radiogroup", "aria-label": "Where it continues" },
+        h("div", { class: "target head", "aria-hidden": "true" }, h("span", {}), h("span", {}, "Machine · folder"), h("span", {}, "Opens in"), h("span", {}, "Runs as"), h("span", {}, "What carries over"), h("span", {}, "The copy left behind")),
+        rows.length ? rows : h("div", { class: "empty" }, "No other place: add a machine, or an account folder."))),
+    h("div", { class: "sheet-foot" }, h("span", { class: "muted", style: "flex:1 1 200px;font-size:12.5px" }, "Nothing is deleted on either machine."),
+      h("button", { class: "btn", onclick: () => sheet.close() }, "Cancel"), go)));
+  sync();
+}
+
+// bringLive is bringing a session that is working on another machine with hopsesh running:
+// wait until its turn ends (then bring it), or join it there instead of copying.
+export function bringLive(e) {
+  let waiting = false;
+  const status = h("span", { class: "muted", role: "status", style: "font-size:12.5px" });
+  const wait = async () => {
+    if (waiting) return;
+    waiting = true;
+    fill(status, `Waiting for it to finish on ${e.machine}…`);
+    for (;;) {
+      try { await api("ScanMachine", e.machine); state.scan = await api("ScanSnapshot"); } catch {}
+      const now = (state.scan?.groups || []).flatMap((g) => g.entries).find((x) => x.machine === e.machine && x.key === e.key);
+      if (!sheet.open || !waiting) return;
+      if (now && !now.live) { waiting = false; return planFor(now, { target: "" }); }
+      await new Promise((r) => setTimeout(r, 10000));
+    }
+  };
+  fill(sheet, h("div", { class: "sheet-in" },
+    h("div", { class: "sheet-body" }, h("h2", {}, `Bring “${e.title}” from ${e.machine}`),
+      h("div", { role: "note", class: "banner warn" }, `It's working on ${e.machine} right now (hopsesh there sees it). Bringing it takes a snapshot; whatever ${e.machine} writes after that stays only on ${e.machine}.`),
+      h("div", { class: "choices" },
+        h("button", { class: "btn choice", onclick: wait }, h("b", {}, "Wait until it's idle, then bring it"), h("span", { class: "muted" }, `hopsesh checks ${e.machine} until the turn ends.`)),
+        h("button", { class: "btn choice", onclick: () => { waiting = false; sheet.close(); api("ContinueOnMachine", e.machine, e.key).catch(fail); } }, h("b", {}, `Join it on ${e.machine} instead`), h("span", { class: "muted" }, "Shows it here when hopsesh runs it there; nothing moves.")),
+        h("button", { class: "btn choice", onclick: () => { waiting = false; planFor(e, { target: "" }); } }, h("b", {}, "Bring the snapshot now"), h("span", { class: "muted" }, `What ${e.machine} writes later stays there.`))),
+      status),
+    h("div", { class: "sheet-foot" }, h("span", { class: "spacer" }), h("button", { class: "btn", onclick: () => { waiting = false; sheet.close(); } }, "Cancel"))));
+  if (!sheet.open) sheet.showModal();
 }
 
 // planPicked opens the sheet for a cloud session that is not a row: id "" leaves the
@@ -114,6 +190,11 @@ async function endOriginal() {
 }
 
 function problem(msg, back) {
+  if (/history\.lineage_mb|lineage exceeds \d+ bytes/.test(msg)) {
+    const limit = msg.match(/\((\d+) MiB/)?.[1];
+    msg = `The saved movement history reached its size limit${limit ? ` (${limit} MiB)` : ""}. Increase “Movement ledger” in Settings → History → Resources, then review the transfer again. Existing history has not been truncated.`;
+    back = {label:"Open history settings",run:()=>{sheet.close();go("settings","history");}};
+  }
   fill(sheet, h("div", { class: "sheet-in" },
     h("div", { class: "sheet-body" }, h("div", { class: "item" }, h("span", { class: "badge err" }, "✕"), h("div", { class: "err", style: "line-height:1.5" }, msg))),
     h("div", { class: "sheet-foot" }, h("span", { class: "spacer" }),
@@ -129,8 +210,8 @@ function item(kind, title, desc, ...extra) {
 // plain drops the command-line advice from a plan's message; the sheet offers buttons.
 const plain = (s) => cap(s.split(/;\s*/).filter((x) => !/--[a-z]/.test(x)).join("; ").replace(/\s*\([^)]*--[a-z][^)]*\)/g, ""));
 
-function check(label, key, desc, value = cur.opts[key], to = (on) => on) {
-  return h("label", { class: "opt" }, h("input", { type: "checkbox", checked: value, onchange: (ev) => set(key, to(ev.target.checked)) }),
+function check(label, key, desc, value = cur.opts[key], to = (on) => on, disabled = false) {
+  return h("label", { class: "opt" + (disabled ? " off" : "") }, h("input", { type: "checkbox", checked: value, disabled, "data-opt": key, onchange: (ev) => set(key, to(ev.target.checked)) }),
     h("span", {}, h("b", {}, label), desc ? h("span", { class: "muted" }, desc) : null));
 }
 
@@ -142,21 +223,28 @@ async function chooseFolder() {
 function summary(p) {
  const profiles=cur.profiles||[];
  const chosen=profiles.find(x=>x.id===cur.opts.targetProfile)||profiles.find(x=>x.default);
- const identity=x=>x?.account?.email||x?.account?.label||x?.name||"Account not identified";
- const source=cur.e?.profile;
+ // A profile is a folder: whoever signs in to it last is its account now. Name it by the
+ // folder and say who is signed in, so its label never changes with a login.
+ const signedIn=x=>x?.account?.email||x?.account?.label;
+ const now=x=>!x?.account?"sign-in not checked":x.account.loggedIn===false?"signed out":signedIn(x)?`signed in as ${signedIn(x)} now`:"signed in, email unavailable";
+ const source=cur.e?.profile, owner=cur.e?.owner;
+ // The session's own account is the one its record names, never the folder's sign-in now.
+ const ran=ownerShown(cur.e)||(owner?.recorded?signedIn(source)||"Account not identified":"Account not recorded");
  const accountChoice=profiles.length?h("div",{class:"transfer-accounts"},
-  h("div",{},h("span",{class:"sec-h"},"Source account"),h("b",{},identity(source)),h("span",{class:"muted"},source?.account?.email||source?.account?.label ? source?.name||p.sourceProfile||p.fromAgent : "Email unavailable")),
+  h("div",{},h("span",{class:"sec-h"},"Source account"),h("b",{title:owner?.recorded?"The account the agent recorded for this session":"The agent did not record which account ran this session"},ran),
+   h("span",{class:"muted"},source?`In ${source.name||p.sourceProfile||p.fromAgent}, ${now(source)}`:"")),
   h("span",{class:"account-arrow","aria-hidden":"true"},"→"),
   h("div",{},h("span",{class:"sec-h"},"Destination account"),
    !cur.returnCandidate&&profiles.length>1?h("select",{"aria-label":"Destination account",onchange:ev=>{cur.opts.targetSession="";return set("targetProfile",ev.target.value)}},
-    profiles.map(x=>h("option",{value:x.id,selected:chosen?.id===x.id},`${identity(x)}${identity(x)!==x.name?' · '+x.name:''}${x.default?' · Default profile':''}`)))
-   :h("b",{},identity(chosen)),h("span",{class:"muted"},chosen?`${identity(chosen)!==chosen.name?chosen.name+' · ':''}${chosen.default?'Default profile':'Named profile'}${!chosen.account?.email&&!chosen.account?.label?' · Email unavailable':''}`:"Account not identified"))):null;
+    profiles.map(x=>h("option",{value:x.id,selected:chosen?.id===x.id},`${x.name}${signedIn(x)?' · '+signedIn(x):''}`)))
+   :h("b",{},chosen?.name||"Account not identified"),h("span",{class:"muted"},chosen?`${cap(now(chosen))}${chosen.default?' · Default profile':''}`:"Account not identified"))):null;
  const summaryBody=summaryContent(p);
  return h("div",{},cur.returnCandidate ? h("details",{class:"return-destination-identity"},h("summary",{},`Original destination: ${cur.returnCandidate.agentName}${manyAccounts(cur.returnCandidate.agent) && cur.returnCandidate.profileLabel ? " (" + cur.returnCandidate.profileLabel + ")" : ""} on ${cur.returnCandidate.machine}`),
-  h("code",{},cur.opts.targetSession || (cur.opts.fork ? "New separate conversation branch; the original is preserved" : "New session; the original is preserved"))) : null,accountChoice,summaryBody);
+  h("code",{},cur.opts.targetSession || "New session; the original is preserved")) : null,accountChoice,summaryBody);
 }
 function summaryContent(p) {
  if (p.conflict && (p.blockers || []).length && !cur.opts.conflict) return h("div", {class:"summary", "aria-label":"What changes"}, "Return paused. No session will change until you review a plan and confirm it.");
+ if(p.resumeHere) return h("div",{class:"summary","aria-label":"What changes"},"Nothing is copied. The session continues where it is, under the account signed in here now.");
  if(p.noWork) return h("div",{class:"summary","aria-label":"What changes"},"Conversation already synchronized. Update lineage receipts; 0 new messages, 0 transfers.");
  if(p.destinations?.length) {return h("label",{class:"summary"},"Choose the destination session",h("select",{onchange:ev=>set("targetSession",ev.target.value)},h("option",{value:""},"Select a session…"),p.destinations.map(s=>h("option",{value:`${s.key.agent}${s.key.profile?"@"+s.key.profile:""}/${s.key.session}`},`${s.title || s.key.session} · ${s.key.session}`))))}
   const cont = p.continue, r = p.repo, there = p.machine ? `on ${p.machine}` : "here";
@@ -246,7 +334,7 @@ function instructionPicker(p) {
 }
 const sourcePlace=p=>p.sourceHost===here()?`${p.sourceHost} (${sys.here})`:p.sourceHost;
 function launchControl(p,blocked) {
- const enabled=!p.machine&&!p.noWork&&p.kind!=="fetch", c=cur;
+ const enabled=!p.machine&&(!p.noWork||p.resumeHere)&&p.kind!=="fetch", c=cur;
  const label=place=>place==='app'?`${p.agent} app`:place==='here'?'Hopsesh Terminal':sys.terminal;
  const choices=[{id:'app',label:`Open in ${p.agent} app`,disabled:!p.can.app,why:p.can.appWhy||(!p.can.app?'Desktop opening is unavailable':null)},{id:'here',label:'Open in Hopsesh Terminal'},{id:'terminal',label:`Open in ${sys.terminal}`}];
  return h("div",{class:"launch-choice"},c.launchNotice?h("span",{class:"muted launch-notice"},c.launchNotice):null,
@@ -300,6 +388,9 @@ function blocker(p, b) {
     `${sessionExitHelp()} ${p.endDestinationToken ? 'Hopsesh can ask only this original session to exit, including its open terminal and desktop instances. This interrupts any work it is running; other conversations are unaffected. Its saved history is preserved. You will review a fresh plan before anything is added.' : 'Ending this session from Hopsesh is unavailable for this destination. End it using your agent’s session controls or terminal exit command, then check again. If your desktop app has no session exit control, quit that app; this also ends its other running conversations.'}`,
     h("div",{style:"display:flex;gap:8px;flex-wrap:wrap"},
       h("button", {class:"btn small",disabled:cur.busy,onclick:()=>replan()}, "Check again")));
+  if (p.reviewNewSession && /^the original destination session is not here any more/.test(b)) return item("err", `The original ${p.agent} session is no longer on this ${sys.mac ? "Mac" : "computer"}`,
+    `It may have been deleted or archived in ${p.agent}. hopsesh can continue this conversation in a new ${p.agent} session instead, on the same branch; nothing else changes.`,
+    h("button", {class:"btn small primary",onclick:()=>{Object.assign(cur.opts,{targetSession:"",fork:false,newReplica:true,conflict:""});return replan();}}, `Continue in a new ${p.agent} session`));
   if (p.reviewNewSession && /cannot update the original session across agent or account profiles/.test(b)) return item("err", "The original session cannot be updated across these agent or account profiles",
     "This does not mean you changed accounts. Hopsesh cannot verify native compatibility for updating the original file across these profiles. Review a fresh session on the same lineage branch; both existing sessions will be preserved. Independent work still requires a separate fork.",
     h("button", {class:"btn small",onclick:()=>{Object.assign(cur.opts,{targetSession:"",fork:false,newReplica:true,conflict:""});return replan();}}, "Review new session on the same branch"));
@@ -319,7 +410,8 @@ function blocker(p, b) {
 function checks(p) {
   const r = p.repo;
   const shown = /unpushed commit\(s\) and|ran in a worktree on branch|what does not carry over|do not carry over to|uncommitted file\(s\) stay behind/;
-  const warnings = (p.warnings || []).filter((w) => !shown.test(w) && !(p.continue && p.conflict && w.startsWith(p.conflict))).map((w) => item("warn", plain(w), ""));
+  const guarded = (w) => (p.cannotProtect || []).length && /^the original on .* (can't be blocked or warned|won't be protected)/.test(w);
+  const warnings = (p.warnings || []).filter((w) => !shown.test(w) && !guarded(w) && !(p.continue && p.conflict && w.startsWith(p.conflict))).map((w) => item("warn", plain(w), ""));
   const blockers = (p.blockers || []).filter((b) => !(r.action === "needs-clone" && /is not cloned/.test(b))).map((b) => blocker(p, b)).filter(Boolean);
   if (!warnings.length && !blockers.length) return null;
   return h("section", { class: "sec", style: "gap:10px" }, h("span", { class: "sec-h" }, blockers.length ? "Before it can go ahead" : "Worth knowing"), blockers, warnings);
@@ -332,14 +424,38 @@ function options(p) {
     r.unpushed && r.sourceUpstream && !sameFolder(p) ? check(`Push ${count(r.unpushed, "commit")} on ${p.sourceHost} first`, "push", "With that machine's own git credentials.") : null,
     cont && (p.machine || cur.launch !== "app") ? check("Send “Continue” when opening", "go", `The terminal launch sends the first message to ${p.agent}. Progress appears in the agent.`) : null,
     p.can.remoteControl ? check("Turn on Remote Control", "remoteControl", `Reach it from your phone or other machines, as ${p.newName}.`) : null,
-    state.info?.defaults?.original === "advise"
-      ? check("Warn in the original", "notify", "Until you move back, the copy left behind warns before you continue there (through the agent's hopsesh hook).")
-      : check("Block the original until you move back", "notify", "The copy left behind refuses new prompts until you move the session back, so moving back stays a clean return (through the agent's hopsesh hook). Off: the original is left alone."),
-    p.live && p.can.fork && !p.conflict ? check("Keep the old session running too", "fork", "Both copies continue, instead of a hand-off.") : null,
+    guardOption(p),
     check("Redact likely secrets", "redact", "In this copy only."),
   ];
   return h("section", { class: "sec", style: "gap:10px" }, h("span", { class: "sec-h" }, "Options"), h("div", { class: "opts-grid" }, opts),
     null);
+}
+
+// guardOption is "Block the original" (or "Warn in the original"). When the machine the
+// session leaves can't do it (no hopsesh, one too old to read where the session went, or
+// no hook in that agent folder), it stays in view but off: focusable, with the reasons
+// and the fixes beneath it, never only a tooltip.
+function guardOption(p) {
+  const advise = state.info?.defaults?.original === "advise";
+  const label = advise ? "Warn in the original" : "Block the original until you move back";
+  const desc = advise ? "Until you move back, the copy left behind warns before you continue there (through the agent's hopsesh hook)."
+    : "The copy left behind refuses new prompts until you move the session back, so moving back stays a clean return (through the agent's hopsesh hook). Off: the original is left alone.";
+  const why = p.cannotProtect || [];
+  if (!why.length) return check(label, "notify", desc);
+  const host = p.sourceHost || "that machine";
+  const id = "guard-why";
+  const box = h("input", { type: "checkbox", checked: false, "aria-disabled": "true", "aria-labelledby": "guard-label", "aria-describedby": id, "data-opt": "notify",
+    onclick: (ev) => { ev.preventDefault(); }, onkeydown: (ev) => { if (ev.key === " ") ev.preventDefault(); } });
+  const update = why.some((w) => /blocking needs|isn't installed there/.test(w));
+  return h("div", { class: "opt off guard-off" }, box,
+    h("span", {}, h("b", { id: "guard-label" }, label),
+      h("div", { id, class: "guard-why" },
+        h("span", {}, `Not available: on ${host}, `),
+        h("ul", {}, why.map((w) => h("li", {}, w))),
+        h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" },
+          update ? h("button", { class: "btn small", onclick: () => go("settings", "machines", host) }, /isn't installed/.test(why.join(" ")) ? `Set up hopsesh on ${host}…` : `Update ${host}…`) : null,
+          h("button", { class: "btn small", onclick: () => go("settings", "machines", host) }, "Machine details")),
+        h("span", { class: "muted", style: "font-size:12px" }, "The original stays as it is; you can still close it there yourself."))));
 }
 
 function paths(p) {
@@ -350,6 +466,7 @@ function paths(p) {
 }
 
 function verb(p) {
+ if (p.resumeHere) return "Continue here";
  if (p.noWork) return "Sync lineage receipts";
  if (p.continue && p.conflict && cur.opts.conflict === "keep-both") return `Create separate ${p.agent} session`;
   if (p.machine) return `Send to ${p.machine}`;
@@ -404,6 +521,7 @@ async function apply() {
     cur = null; // the plan stays for OpenResult
     state.stale = true;
     sheet.close();
+    if (c.plan.resumeHere) { await openResult((c.launch||opensIn())==='app'?'':(c.launch||opensIn())); return; }
     c.opts.launch = c.launch;
     go("done", d, c.plan, c.opts);
     if(!d.machine&&!d.noWork&&c.launch) await openResult(c.launch==='app'?'':c.launch);
@@ -580,6 +698,9 @@ screen("done", (d, p, o) => {
         h("div", { class: "muted" }, `${cap(where)}, in `, h("span", { class: "mono" }, p.targetCwd)))),
     d.continuationHint ? h("div", { class: "card continuation-hint", role: "status" }, h("div", { class: "dlg-body" }, d.continuationHint)) : null,
     h("div", { class: "card" }, h("div", { class: "dlg-body" },
+      d.machine && d.remoteLogin && d.remoteKey ? h("div", { style: "display:flex;gap:8px;flex-wrap:wrap;align-items:center" },
+        h("button", { class: "btn primary", onclick: async () => { try { await api("OpenOnMachine", d.machine, d.remoteKey); sheet.close(); } catch (e) { fail(e); } } }, `Open it on ${d.machine}, here`),
+        h("span", { class: "muted", style: "font-size:12.5px" }, `It runs on ${d.machine}, in your login session there; you work in it here. Or run this there:`)) :
       d.machine ? h("b", {}, `Start it on ${d.machine}`) : h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" },
         h("button", { class: "btn primary big", id: "open", onclick: open }, d.inApp ? `Open in the ${d.agent} app` : resultPlace === "terminal" ? `Resume in ${sys.terminal}` : "Resume in hopsesh Terminal", h("span", { class: "kbd" }, "↩")),
         d.inApp ? null : h("button", { class: "btn big", onclick: other }, resultPlace === "terminal" ? "Resume in hopsesh Terminal" : `Resume in ${sys.terminal}`),

@@ -165,3 +165,23 @@ func (e confinedExec) Run(ctx context.Context, argv []string, o RunOptions) (Res
 	}
 	return Result{}, fmt.Errorf("%w: %s is not one of %s's programs", ErrDenied, argv[0], e.c.spec.Name)
 }
+
+// IdentityFS reads public identity fields out of a credentials file on this machine. The
+// file's bytes go only to pick, which returns the few fields it names (an account id, a
+// user id, an email); nothing else leaves the call. A remote machine's credentials are
+// never read: there it fails with ErrUnsupported.
+type IdentityFS interface {
+	ReadIdentity(p string, pick func([]byte) (map[string]string, error)) (map[string]string, error)
+}
+
+func (f confinedFS) ReadIdentity(p string, pick func([]byte) (map[string]string, error)) (map[string]string, error) {
+	if !f.c.h.Facts().Local {
+		return nil, ErrUnsupported
+	}
+	b, err := f.c.h.FS().ReadFile(p, 1<<20)
+	if err != nil {
+		return nil, err
+	}
+	defer clear(b)
+	return pick(b)
+}

@@ -38,12 +38,15 @@ func TestUndoEverything(t *testing.T) {
 	j.AddKey(agent.SessionKey{Agent: "claude", Session: "s1"})
 
 	back, err := Load(state, j.ID)
-	if err != nil || len(back.Entries) != 4 || back.Keys[0].Session != "s1" {
+	if err != nil || back.Changes() != 4 || back.Keys[0].Session != "s1" {
 		t.Fatalf("reload: %+v %v", back, err)
 	}
 	must(t, back.Undo(ctx, Files(func(string) (host.FS, error) { return fsys, nil }), false))
 	if _, err := os.Stat(created); !os.IsNotExist(err) {
 		t.Error("created file must be removed")
+	}
+	if _, err := os.Stat(filepath.Dir(created)); !os.IsNotExist(err) {
+		t.Error("the folder the write made must be removed")
 	}
 	if b, _ := os.ReadFile(old); string(b) != "old\n" {
 		t.Errorf("replaced file: %q", b)
@@ -60,6 +63,44 @@ func TestUndoEverything(t *testing.T) {
 	list, _ := List(state)
 	if len(list) != 1 || !list[0].Undone {
 		t.Fatalf("list: %+v", list)
+	}
+}
+
+// Undo removes the folders an operation's writes made (a push makes an agent's project
+// folder on the target), innermost first, and keeps a folder that something else uses now
+// and every folder that was there before.
+func TestUndoRemovesFoldersItMade(t *testing.T) {
+	state, data := t.TempDir(), t.TempDir()
+	fsys := host.LocalFS()
+	j, err := New(state, KindMove, "test move")
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(data, "projects", "-repo")
+	must(t, j.WriteFile(fsys, "here", filepath.Join(project, "s1.jsonl"), []byte("new\n"), 0o600))
+	must(t, j.Append(fsys, "here", filepath.Join(project, "s1", "subagents", "a.jsonl"), []byte("x\n"), agent.AppendOptions{}))
+	shared := filepath.Join(data, "shared")
+	must(t, j.WriteFile(fsys, "here", filepath.Join(shared, "s2.jsonl"), []byte("new\n"), 0o600))
+	os.WriteFile(filepath.Join(shared, "theirs.jsonl"), []byte("theirs\n"), 0o600) // written since
+	must(t, j.Undo(ctx, Files(func(string) (host.FS, error) { return fsys, nil }), false))
+	if _, err := os.Stat(filepath.Join(data, "projects")); !os.IsNotExist(err) {
+		t.Errorf("the folders the writes made must be removed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(shared, "theirs.jsonl")); err != nil {
+		t.Errorf("a folder holding someone else's file must stay: %v", err)
+	}
+	if _, err := os.Stat(data); err != nil {
+		t.Errorf("a folder that was there before must stay: %v", err)
+	}
+}
+
+func TestParentDir(t *testing.T) {
+	for p, want := range map[string]string{
+		"/a/b/c.jsonl": "/a/b", "/a": "", "a": "", `C:\Users\me\x.jsonl`: `C:\Users\me`, `C:\Users`: "", "C:/Users/me": "C:/Users",
+	} {
+		if got := parentDir(p); got != want {
+			t.Errorf("parentDir(%q) = %q, want %q", p, got, want)
+		}
 	}
 }
 

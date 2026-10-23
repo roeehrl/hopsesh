@@ -9,6 +9,7 @@
 | `{{.Bin}} plan <ref> --json [--in A] [flags]` | what pulling it would do; never writes |
 | `{{.Bin}} agents --json` | the agents hopsesh supports and what is installed here |
 | `{{.Bin}} hosts --json` | known machines and whether each is allowed |
+| `{{.Bin}} hosts status [machine] --json [--refresh]` | what hopsesh can do on each machine: its version against the newest, receiving, command, each agent's hook and skill, with the fix for each (exit 3 when one needs something) |
 | `{{.Bin}} clouds --json` | the agents' clouds, whether each is allowed, and their state |
 | `{{.Bin}} clouds test [cloud]` | check a cloud's login and flags, read-only |
 | `{{.Bin}} plan <ref> --to <cloud> --json [flags]` | what handing it off to a cloud would do; never writes |
@@ -26,7 +27,10 @@ their own terminal (Claude Code starts the session there and may ask them a ques
 `{{.Bin}} clouds cleanup --list --json` lists the branches hand-offs left on the remotes and
 which are merged, and `{{.Bin}} clouds cleanup --yes` deletes the merged ones (undo pushes them
 back); the approval rule covers both. `{{.Bin}} clouds continue <hop>` takes a hop whose first
-leg waited for a terminal on to the next cloud. `{{.Bin}} undo <id>` reverses a pull, a push or
+leg waited for a terminal on to the next cloud. `{{.Bin}} cd <ref> <dir> --json --yes [--other-repo] [--stop-local]` continues a session on this
+machine in another folder, keeping the session (`--dry-run` plans; an open Claude Code session
+changes folder when the user types `/cd <dir>` in it, which hopsesh waits for, up to `--wait`).
+`{{.Bin}} undo <id>` reverses a pull, a push, a folder change or
 a hand-off (a cloud session itself stays in the cloud).
 
 ## handoff flags
@@ -59,7 +63,6 @@ a hand-off (a cloud session itself stays in the cloud).
 | `--clone` | clone the repository into the repos folder if it is not here |
 | `--to <dir>` | continue in this directory instead of matching the repository |
 | `--worktree auto\|create\|main` | recreate the session's worktree (auto), always use one, or the main checkout |
-| `--fork` | the old session keeps running; both continue |
 | `--rc` | turn the agent's remote control on, where it has one |
 | `--notify` | protect the original until the session moves back: blocked or warned, per the user's setting (default on; `--notify=false` leaves it alone) |
 | `--redact` | redact likely secrets in the copy |

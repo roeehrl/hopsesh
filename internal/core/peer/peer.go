@@ -1,6 +1,7 @@
 // Package peer is how hopsesh on two machines work together over one SSH connection:
 // `hopsesh peer --stdio` on the other machine answers requests, one JSON object per line
-// each way. Both ends must speak the same Protocol; a mismatch is refused, never bridged.
+// each way. The two ends agree on the newest protocol both speak (from MinProtocol on;
+// hopsesh 0.4 speaks only its own); older than that is refused, never bridged.
 package peer
 
 import (
@@ -30,10 +31,16 @@ import (
 //   - 3: pre-release causal lineage/3, persistent endpoints and stable transfer IDs.
 //   - 4: scoped account profiles and binding-aware lineage/4.
 //   - 5: causal movement notices and lineage/5.
-const Protocol = 5
+//   - 6: negotiation (Hello.Min), hopsesh in the login session (HelloReply.Login) and
+//     its methods: accounts, terminals, setup.
+const Protocol = 6
 
-// FirstVersion is the first hopsesh release that speaks Protocol: the version to update an
-// older machine to.
+// MinProtocol is the oldest protocol this hopsesh still speaks: a machine on it can send
+// and receive sessions, without the methods newer ones added.
+const MinProtocol = 5
+
+// FirstVersion is the first hopsesh release that speaks MinProtocol: the version to update
+// an older machine to.
 const FirstVersion = "0.4.0"
 
 // Methods.
@@ -70,7 +77,7 @@ var (
 
 // Is maps codes to the sentinel errors.
 func (e *Error) Is(target error) bool {
-	return target == ErrProtocol && e.Code == CodeProtocol || target == ErrRefused && e.Code == CodeRefused
+	return target == ErrProtocol && e.Code == CodeProtocol || target == ErrRefused && e.Code == CodeRefused || target == ErrNoLogin && e.Code == CodeNoLogin
 }
 
 // Refused is the error a peer returns when receiving is off.
@@ -80,14 +87,35 @@ func Refused(machine string) error {
 
 // Hello opens a conversation.
 type Hello struct {
-	Protocol int    `json:"protocol"`
-	Version  string `json:"version"` // the sender's hopsesh
-	From     string `json:"from"`    // the sender's machine name
+	Protocol int `json:"protocol"`
+	// Min is the oldest protocol the sender speaks (0: only Protocol, as hopsesh 0.4).
+	Min     int    `json:"min,omitempty"`
+	Version string `json:"version"` // the sender's hopsesh
+	From    string `json:"from"`    // the sender's machine name
+}
+
+// Agree is the protocol two ends speak: the newest both do (0 when none).
+func Agree(hi Hello) int {
+	lo := hi.Min
+	if lo == 0 {
+		lo = hi.Protocol
+	}
+	p := min(hi.Protocol, Protocol)
+	if p < lo || p < MinProtocol {
+		return 0
+	}
+	return p
 }
 
 // HelloReply describes the peer.
 type HelloReply struct {
-	Protocol int         `json:"protocol"`
+	Protocol int `json:"protocol"` // the protocol agreed
+	// Login: hopsesh in the user's login session answers (hopsesh serve), seeing what an
+	// SSH login cannot: a Mac's Keychain, the desktop apps, and owning terminals there.
+	Login bool `json:"login,omitempty"`
+	// Endpoint is the machine's persistent identity ("" before it has one).
+	Endpoint string      `json:"endpoint,omitempty"`
+	Arch     string      `json:"arch,omitempty"`
 	Version  string      `json:"version"`
 	Machine  string      `json:"machine"`
 	OS       string      `json:"os"`
@@ -144,6 +172,12 @@ type ApplyReply struct {
 type UndoRequest struct {
 	Journal string `json:"journal"`
 	Force   bool   `json:"force,omitempty"` // undo even what was used since
+}
+
+// UndoReply is what a peer's undo left in place (Journal.Left); an older peer sends
+// nothing.
+type UndoReply struct {
+	Left []string `json:"left,omitempty"`
 }
 
 // message is one line on the wire: a request (Method set) or a reply (to ID).
@@ -279,7 +313,7 @@ func refuseHello(hi Hello) *Error {
 		sender = "unknown version"
 	}
 	e := &Error{Code: CodeProtocol, Protocol: Protocol, Version: version.Version}
-	if hi.Protocol < Protocol {
+	if hi.Protocol < MinProtocol {
 		e.Message = fmt.Sprintf("this machine runs an older hopsesh (%s, peer protocol %d): update it to %s or later to work with the newer hopsesh (%s, protocol %d) on the other machine",
 			sender, hi.Protocol, FirstVersion, version.Version, Protocol)
 	} else {
@@ -309,7 +343,7 @@ func Mismatch(err error, machine string) error {
 	}
 	out := &Error{Code: CodeProtocol, Protocol: theirs, Version: pe.Version}
 	switch {
-	case theirs < Protocol:
+	case theirs < MinProtocol:
 		out.Message = fmt.Sprintf("%s runs an older hopsesh (%s) than this one (%s, peer protocol %d): update hopsesh on %s to %s or later",
 			machine, there, version.Version, Protocol, machine, FirstVersion)
 	case theirs > Protocol:
@@ -347,12 +381,16 @@ func Serve(ctx context.Context, r io.Reader, w io.Writer, h Handler) error {
 			err = &Error{Code: CodeProtocol, Message: "say hello first"}
 		case m.Method == MethodHello:
 			var hi Hello
-			if err = json.Unmarshal(m.Params, &hi); err == nil && hi.Protocol != Protocol {
+			if err = json.Unmarshal(m.Params, &hi); err == nil && Agree(hi) == 0 {
 				err = refuseHello(hi)
 			}
 			if err == nil {
 				greeted = true
 				res, err = h(ctx, m.Method, m.Params)
+				if r, ok := res.(HelloReply); ok {
+					r.Protocol = Agree(hi)
+					res = r
+				}
 			}
 		default:
 			res, err = h(ctx, m.Method, m.Params)
@@ -372,4 +410,90 @@ func Serve(ctx context.Context, r io.Reader, w io.Writer, h Handler) error {
 			return err
 		}
 	}
+}
+
+// Methods of hopsesh in the login session (protocol 6; HelloReply.Login).
+const (
+	MethodTerminalOpen    = "terminal/open"    // run a session (or a sign-in) in a terminal there
+	MethodTerminalList    = "terminal/list"    // the terminals hopsesh runs there
+	MethodTerminalClose   = "terminal/close"   // end one
+	MethodAccounts        = "accounts"         // check the sign-ins there, Keychain included
+	MethodLive            = "live"             // whether sessions there are open, and working
+	MethodTools           = "tools"            // the agents' tools there: CLI, desktop app, and their sign-ins
+	MethodAccountAdd      = "accounts/add"     // make a new account folder there
+	MethodOwners          = "owners"           // hopsesh's records there of the accounts sessions ran under
+	MethodProtection      = "protection"       // the command, protection hooks and skill there
+	MethodProtectionSetUp = "protection/setup" // install the hooks and the skill there
+)
+
+// ProtectionSetUp asks hopsesh there to install its protection hooks and the skill.
+type ProtectionSetUp struct {
+	Rules bool `json:"rules,omitempty"` // let agents run hopsesh's read-only commands without asking
+}
+
+// AccountAdd asks for a new account folder there.
+type AccountAdd struct {
+	Agent   agent.ID `json:"agent"`
+	Name    string   `json:"name"`
+	Command bool     `json:"command,omitempty"` // add <agent>-<name> to the shell there
+}
+
+// LoginMethod reports whether the method needs hopsesh in the login session.
+func LoginMethod(m string) bool {
+	switch m {
+	case MethodTerminalOpen, MethodTerminalList, MethodTerminalClose, MethodAccounts, MethodLive, MethodTools, MethodAccountAdd, MethodOwners, MethodProtection, MethodProtectionSetUp:
+		return true
+	}
+	return false
+}
+
+// Terminal kinds.
+const (
+	TerminalResume = "resume" // continue a session that is on that machine
+	TerminalNew    = "new"    // start a new session, in a folder, as an account
+	TerminalSignIn = "signin" // an account's sign-in (nothing of it is read)
+)
+
+// TerminalRequest asks hopsesh there to run something in a terminal it owns.
+type TerminalRequest struct {
+	Kind    string   `json:"kind"`
+	Agent   agent.ID `json:"agent"`
+	Profile string   `json:"profile,omitempty"` // the account's folder ("" its default)
+	Session string   `json:"session,omitempty"` // resume: the session's id there
+	Dir     string   `json:"dir,omitempty"`     // new: the folder to start in
+	// AtScreen: a sign-in done at that machine's own screen (its browser opens there);
+	// otherwise it prints a link and a code to sign in from this machine's browser.
+	AtScreen bool `json:"atScreen,omitempty"`
+	Cols     int  `json:"cols,omitempty"`
+	Rows     int  `json:"rows,omitempty"`
+}
+
+// Terminal is a terminal hopsesh runs there, and what runs in it.
+type Terminal struct {
+	ID      string   `json:"id"`
+	Kind    string   `json:"kind"`
+	Agent   agent.ID `json:"agent,omitempty"`
+	Profile string   `json:"profile,omitempty"`
+	Session string   `json:"session,omitempty"`
+	Title   string   `json:"title"`
+	Dir     string   `json:"dir,omitempty"`
+	State   string   `json:"state"` // running, waiting, exited
+	Code    int      `json:"code,omitempty"`
+	Started string   `json:"started,omitempty"`
+}
+
+// TerminalID names one terminal.
+type TerminalID struct {
+	ID string `json:"id"`
+}
+
+// CodeNoLogin means the request needs hopsesh in the login session, which does not answer.
+const CodeNoLogin = "nologin"
+
+// ErrNoLogin classifies it.
+var ErrNoLogin = errors.New("hopsesh is not running in the login session there")
+
+// NoLogin is the error for a login method answered outside the login session.
+func NoLogin(machine string) error {
+	return &Error{Code: CodeNoLogin, Message: "hopsesh is not running in the login session on " + machine + " (nobody is logged in there, or hopsesh was not set up to start at login)"}
 }

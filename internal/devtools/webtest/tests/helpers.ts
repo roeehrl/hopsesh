@@ -1,8 +1,10 @@
 import { expect, type Page } from "@playwright/test";
 
-// fresh starts every test from a new demo home and waits for the first scan.
-export async function fresh(page: Page) {
-  const r = await page.request.post("/reset");
+// fresh starts every test from a new demo home and waits for the first scan. world picks
+// a fixture world ("?protection=blocked": hopsesh's hooks installed and trusted here, so
+// a moved original can be blocked).
+export async function fresh(page: Page, world = "") {
+  const r = await page.request.post("/reset" + world);
   expect(r.ok(), await r.text()).toBeTruthy();
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible({ timeout: 30_000 });
@@ -16,7 +18,7 @@ export async function menu(page: Page, cmd: string) {
 
 // row is the session row with exactly this title.
 export const row = (page: Page, title: string) =>
-  page.locator(".row").filter({ has: page.locator(".t").getByText(title, { exact: true }) });
+  page.locator(".row:not(.subrow)").filter({ has: page.locator(".t").getByText(title, { exact: true }) });
 
 // turnOnCloud turns a cloud on the way the window offers it: the sidebar's "Turn on a
 // cloud…" opens Machines at its clouds, the cloud's switch, then back to the sessions
@@ -62,6 +64,6 @@ export const agentRow = (page: Page, title: string, agent: string) =>
   row(page, title).filter({ has: page.locator(`.r-ic img[alt="${agent}"], .r-ic [title="${agent}"]`) });
 
 // roleRow is the session row with exactly this title whose role chip names this role
-// ("Moved out", "Moved copy", "Returned", "Unblocked", "Diverged", …).
+// ("Moved to Codex", "Moved from Claude Code", "Moved back from …", "Unblocked", "Both changed", …).
 export const roleRow = (page: Page, title: string, role: string) =>
   row(page, title).filter({ has: page.locator(".role-chip", { hasText: role }) });

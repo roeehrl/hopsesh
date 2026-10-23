@@ -70,6 +70,7 @@ const (
 	modeJourney
 	modeAccounts
 	modeReturns
+	modeMachines // what hopsesh can do on each machine (m)
 )
 
 type row struct {
@@ -92,6 +93,7 @@ type model struct {
 	returnTo       *app.ReturnCandidate
 	returnPush     *app.Push
 	accts          accountView
+	machines       machinesView
 	deps           Deps
 	copied         bool // the resume command was copied on the done screen
 	mode           mode
@@ -272,7 +274,7 @@ func (m *model) buildRows() {
 			it := &g.Items[i]
 			e := it.Entry
 			s := e.Session
-			if f != "" && !strings.Contains(strings.ToLower(s.Title+" "+s.LastPrompt+" "+app.AccountLabel(e.Profile)+" "+s.CWD+" "+g.Name+" "+e.Machine+" "+e.AgentName), f) {
+			if f != "" && !strings.Contains(strings.ToLower(s.Title+" "+s.LastPrompt+" "+app.OwnerLabel(m.inv.Logins().OwnerOf(e))+" "+s.CWD+" "+g.Name+" "+e.Machine+" "+e.AgentName), f) {
 				continue
 			}
 			rows = append(rows, row{item: it, groupKey: g.Identity, relationship: relations[app.EntryIdentity(e.Machine, s.Key.String())]})
@@ -315,6 +317,12 @@ func (m *model) nextSelectable(from, dir int) int {
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case machinesDone:
+		if msg.gen == m.machines.gen {
+			m.machines.list, m.machines.loading = msg.list, false
+			m.machines.cursor = min(m.machines.cursor, max(0, len(msg.list)-1))
+		}
+		return m, nil
 	case reviewedPlanDone:
 		if msg.generation != m.planGeneration {
 			switch done := msg.msg.(type) {
@@ -519,6 +527,9 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 	if m.mode == modeAccounts {
 		return m.accountKeys(k)
 	}
+	if m.mode == modeMachines {
+		return m.machineKeys(k)
+	}
 	if m.pasting {
 		return m.pasteKey(k)
 	}
@@ -610,6 +621,9 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 			}
 		case "R":
 			m.openReturns()
+		case "m":
+			m.mode = modeMachines
+			return m, m.loadMachines(false)
 		case "D":
 			if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil {
 				c, err := m.deps.App.Resume(m.inv, m.rows[m.cursor].item.Entry, agent.ResumeOptions{App: true})
@@ -1079,6 +1093,8 @@ func (m *model) View() tea.View {
 		m.viewReturns(&b)
 	case modeAccounts:
 		m.viewAccounts(&b)
+	case modeMachines:
+		b.WriteString(renderMachines(m.machines, m.width))
 	case modeJourney:
 		m.viewJourney(&b)
 	case modePlan:
@@ -1152,6 +1168,7 @@ func countAllowed(a *app.App) int {
 
 func (m *model) viewBrowse(b *strings.Builder) {
 	var mach []string
+	newest := app.NewestHopsesh(m.inv)
 	for _, mc := range m.inv.Machines {
 		n := 0
 		for _, e := range m.inv.Entries {
@@ -1160,7 +1177,12 @@ func (m *model) viewBrowse(b *strings.Builder) {
 			}
 		}
 		if mc.Status == app.StatusOK {
-			mach = append(mach, okSt.Render("●")+fmt.Sprintf(" %s %d", mc.Name, n))
+			v := mc.HopseshVersion()
+			mark := hopMark(v != "", m.deps.App.Receiving(mc), app.Behind(v, newest))
+			if mark != "" {
+				mark = " " + mark
+			}
+			mach = append(mach, okSt.Render("●")+" "+mc.Name+mark+fmt.Sprintf(" %d", n))
 		} else {
 			mach = append(mach, errSt.Render("●")+" "+mc.Name+" "+mc.Status)
 		}
@@ -1243,7 +1265,7 @@ func (m *model) viewBrowseDetail(b *strings.Builder, w int) {
 		b.WriteString(dim.Render(strings.Repeat("─", min(w, 120))) + "\n")
 		fmt.Fprintf(b, "  %s  %s\n", bold.Render(truncate(s.Title, w-24)), dim.Render(s.Key.String()))
 		if e.Profile != nil {
-			fmt.Fprintf(b, "  Stored in profile: %s · %s\n", app.AccountLabel(e.Profile), e.Profile.Name)
+			fmt.Fprintf(b, "  %s\n", app.OwnerLine(m.inv.Logins().OwnerOf(e), e.Profile))
 		}
 		if c := e.Cloud; c != nil {
 			head := e.Location.Name + " · " + e.AgentName + " · " + e.Status() + "  "
@@ -1299,7 +1321,7 @@ func (m *model) viewBrowseDetail(b *strings.Builder, w int) {
 			j := e.Lineage.Journey()
 			fork := ""
 			if j.Fork {
-				fork = " · separate fork"
+				fork = " · separate conversation"
 			}
 			fmt.Fprintf(b, "  %d transfers · %d round trips to origin · %d returns%s\n", j.Transfers, j.RoundTrips, j.Returns, fork)
 			fmt.Fprintf(b, "  %d machine transfers · %d machine round trips\n", j.MachineTransfers, j.MachineRoundTrips)
@@ -1328,9 +1350,9 @@ func (m *model) viewBrowseDetail(b *strings.Builder, w int) {
 		m.viewPicker(b)
 		return
 	}
-	hint := "\n  ↑↓ move · enter bring here · i continue in · b bounded copy · c hand off · h journey · a accounts · A move account · / search · g family/repository/account · r refresh · q quit"
+	hint := "\n  ↑↓ move · enter bring here · i continue in · b bounded copy · c hand off · h journey · a accounts · A move account · m machines · / search · g family/repository/account · r refresh · q quit"
 	if m.partialCloud() != nil {
-		hint = "\n  ↑↓ move · enter resume/bring · i continue in · b bounded copy · c hand off · p paste a cloud link · f find in a cloud · / search · g family/repository/account · r refresh · q quit"
+		hint = "\n  ↑↓ move · enter resume/bring · i continue in · b bounded copy · c hand off · p paste a cloud link · f find in a cloud · m machines · / search · g family/repository/account · r refresh · q quit"
 	}
 	b.WriteString(dim.Render(hint) + "\n")
 }

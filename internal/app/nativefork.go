@@ -8,8 +8,44 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 	"github.com/roeehrl/hopsesh/sdk/ir"
-	"slices"
 )
+
+// remoteForks are the sessions whose native forks are verified on another machine: the
+// native families (each fork with its parents and its other forks) of the sessions want
+// accepts. Verification reads whole transcripts, which over SSH can take longer than a
+// scan may (a few GB of Codex rollouts is common), so a listing verifies none of them: its
+// remote forks are listed as sessions of their own until an action about one (whose scan
+// names it) verifies its family.
+func remoteForks(ss []agent.Summary, want func(agent.Summary) bool) []int {
+	by, parents := map[agent.SessionID]int{}, map[agent.SessionID]bool{}
+	for i, s := range ss {
+		by[s.Key.Session] = i
+		parents[s.NativeParent] = true
+	}
+	root := func(i int) int {
+		for range ss {
+			p, ok := by[ss[i].NativeParent]
+			if ss[i].NativeParent == "" || !ok {
+				break
+			}
+			i = p
+		}
+		return i
+	}
+	families := map[int]bool{}
+	for i, s := range ss {
+		if (s.NativeParent != "" || parents[s.Key.Session]) && want(s) {
+			families[root(i)] = true
+		}
+	}
+	var pick []int
+	for i := range ss {
+		if families[root(i)] {
+			pick = append(pick, i)
+		}
+	}
+	return pick
+}
 
 func nativeForkManifests(ctx context.Context, hm *host.Machine, h agent.Host, mod agent.Module, in agent.Install, ss []agent.Summary, manifests []*lineage.Manifest, problems []string) {
 	verifier, ok := mod.(agent.NativeForkVerifier)
@@ -21,13 +57,26 @@ func nativeForkManifests(ctx context.Context, hm *host.Machine, h agent.Host, mo
 		return
 	}
 	// Verification reads and hashes whole transcripts; an unchanged set is not reverified.
-	inputs, cacheable := forkInputs(hm, h, in, ss, manifests, problems)
+	inputs, cacheable := forkInputs(ctx, hm, h, in, ss, manifests, problems)
 	if cacheable && inputs == "" {
 		return // no native forks
 	}
+	subjects := map[agent.SessionID]bool{}
+	for _, s := range ss {
+		if s.NativeParent != "" {
+			subjects[s.Key.Session] = true
+			subjects[s.NativeParent] = true
+		}
+	}
 	if r, ok := forks.get(inputs); cacheable && ok {
-		copy(manifests, r.manifests)
-		copy(problems, r.problems)
+		for i, s := range ss {
+			if subjects[s.Key.Session] {
+				if member, ok := r.members[s.Key.String()+"\x00"+s.Path]; ok {
+					manifests[i] = member.manifest
+					problems[i] = member.problem
+				}
+			}
+		}
 		return
 	}
 	contentReads.Add(1)
@@ -37,7 +86,13 @@ func nativeForkManifests(ctx context.Context, hm *host.Machine, h agent.Host, mo
 			// Problems follow from these file versions; a failed identity or a cancelled
 			// scan may not, so those results are not kept.
 			if !transient && ctx.Err() == nil {
-				forks.put(inputs, forkResult{slices.Clone(manifests), slices.Clone(problems)})
+				members := map[string]forkMember{}
+				for i, s := range ss {
+					if subjects[s.Key.Session] {
+						members[s.Key.String()+"\x00"+s.Path] = forkMember{manifests[i], problems[i]}
+					}
+				}
+				forks.put(inputs, forkResult{members: members})
 			}
 		}()
 	}

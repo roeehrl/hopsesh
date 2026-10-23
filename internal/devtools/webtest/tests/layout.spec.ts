@@ -121,14 +121,14 @@ test("the inspector's width follows the window until set: 30% of the room, at mo
   await expect.poll(() => width(page, "#inspector")).toBe(480);
 });
 
-test("the list's own width decides compact rows: below 600px they are one line", async ({ page }) => {
+test("narrow lists keep stable rows and leave actions in the inspector", async ({ page }) => {
   const rowHeight = () => page.locator(".row").first().evaluate((el) => Math.round(el.getBoundingClientRect().height));
   expect(await rowHeight()).toBeGreaterThan(40); // comfortable
   await divider(page, "Resize inspector").focus();
   await page.keyboard.press("End"); // a wide inspector leaves the list under 600px
   await expect.poll(() => width(page, ".content")).toBeLessThan(600);
-  await expect.poll(rowHeight).toBe(32);
-  await expect(page.locator(".row .act").first()).toBeHidden();
+  await expect.poll(rowHeight).toBe(50);
+  await expect(page.locator(".row .act")).toHaveCount(0);
 });
 
 // Page headers share styles with Activity; neither screen should scroll the shell.
@@ -138,7 +138,8 @@ test("Machines and Activity keep padded section headings and a single page scrol
     for (const screen of ["machines", "activity"]) {
       await menu(page, screen);
       await expect(page.getByRole("heading", { name: screen === "machines" ? "Machines" : "Activity", exact: true })).toBeVisible();
-      const header = page.locator(".card-h").first();
+      // Machines is a Settings tab: its list and details sit in one bordered box.
+      const header = page.locator(screen === "machines" ? ".mdetail" : ".card-h").first();
       await expect(header).toBeVisible();
       expect(await header.evaluate(el => parseFloat(getComputedStyle(el).paddingLeft))).toBeGreaterThanOrEqual(12);
       expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(600);

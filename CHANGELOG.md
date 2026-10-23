@@ -6,6 +6,323 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## [0.6.2] - 2026-10-22
+
+What hopsesh can do on each machine, at a glance and check by check; `hopsesh cd` to continue
+a session in another folder as the same session; "Block the original" only where it can
+work; and sessions the app opens find hopsesh.
+
+### Added
+
+- What hopsesh can do on each machine, check by check: whether it is installed and its
+  version against the newest on your machines (the baseline), whether it runs in the login
+  session and receives sessions, whether its command is on PATH (asked of your own shell
+  there, as you use it), and each agent folder's movement hook and skill. A machine's hooks
+  and skill are read over SSH when hopsesh there isn't in a login session, so they are known
+  either way; they are read again every 10 minutes and turn "unknown" when too old.
+  - `hopsesh hosts status [machine] [--json] [--refresh]` lists them, with the command that
+    fixes each; it exits 3 when a machine needs something.
+  - The app marks each machine in the sidebar with hopsesh's own mark: green and filled when
+    it receives sessions, gray and hollow when it is installed but not, none without
+    hopsesh, and an ↑ when a newer hopsesh is on another machine.
+  - Settings › Machines is the one place for a machine: your machines beside the selected
+    one's details, with "Up next" (only what is left, each with its fix), its hopsesh, login
+    and receiving, its agents' hooks and skill, how hopsesh logs in, its host key and removing
+    it. The Machines screen opens it; clouds have their own tab, Settings › Clouds.
+  - Settings › Hooks & skills shows the command, hooks and skill on every machine at once,
+    one column per agent folder: fix a column, a selection or everything, with progress in
+    the cells and a summary that says which machines are waiting and why.
+  - The TUI shows the mark beside each machine in its header, and `m` opens the machines
+    and their checks.
+- "Block the original" (or "Warn in the original") is available only when the machine the
+  session leaves can do it: hopsesh 0.6.0 or newer there (older ones can't read where the
+  session went) and the hook in that agent folder. Otherwise the plan shows it off, with
+  the reasons and the fixes, and `pull`/`plan` say why the original won't be protected.
+- Setting hopsesh up on a machine can add its hooks and skill too (Settings › Hooks &
+  skills › "Add hooks and skill when hopsesh is set up on a machine"; off by default, and
+  `[peer] setup_integrations` in the configuration).
+- `hopsesh cd <session> <dir>` continues a session on this machine in another folder and
+  keeps it the same session: its id, and every record its agent wrote. Claude Code sessions
+  change folder the way Claude Code's own `/cd` does (the transcript and its side folder move
+  to the new folder's project folder, with a `relocated` record); for one that is open,
+  hopsesh tells you to type `/cd <dir>` in it and waits until Claude Code has moved it. Codex
+  sessions change folder through Codex itself (`codex app-server` resumes the thread in the
+  new folder with no turn, and Codex records it in the rollout and its own index). Codex's
+  `/cd` starts a new thread, so an open Codex session is quit first with `--stop-local`. The
+  folder must be a checkout of the session's repository unless you pass `--other-repo`.
+  `hopsesh undo` reverses it. The weekly upstream-drift check watches what this relies on:
+  `/cd` and its `relocated` record, Codex's `thread/resume` with a folder, its
+  `thread_settings_applied` record, `-C`, and whether Codex's `/cd` still forks.
+- README shell-completion setup for Bash, Zsh, Fish and PowerShell.
+
+### Fixed
+
+- A session the macOS app opens in its own terminal finds `hopsesh`, the agents and
+  Homebrew's tools: the app now puts your shell's PATH in front of its own, as
+  `hopsesh serve` does. Started from Finder, it had only the system folders, so a moved
+  session's agent got `command not found: hopsesh` and said hopsesh wasn't installed.
+- The briefing a moved session gets names hopsesh by its full path when your shell doesn't
+  find it by name, so its archive commands run either way.
+- `hopsesh doctor` names each account folder of an agent (`Claude Code · work`) instead of
+  listing the agent once per folder under the same name.
+- The app's sidebar shows its place names as written, not in capitals.
+- A Codex session resumed in another folder (`codex resume -C`) is listed in that folder:
+  hopsesh reads the folder Codex recorded last, not only the one the thread started in.
+  `hopsesh` resumes Codex sessions with `-C <folder>`, so Codex no longer asks which folder to
+  use, or goes back to the old one when `tui.resume_cwd = "session"`.
+
+## [0.6.1] - 2026-10-21
+
+Compressed Codex sessions listed again, sizes, faster scans of other machines, undo that
+cleans up clones and worktrees, and lineage files a seventh of their size. 0.6.0 was tagged
+but not published, so this release includes its changes. **Update hopsesh on every
+machine:** an older hopsesh cannot read the new lineage files.
+
+### Security
+
+- Built with Go 1.27.3, which distrusts compromised intermediate certificates in
+  `crypto/x509` ([GO-2026-6809](https://pkg.go.dev/vuln/GO-2026-6809)).
+
+### Changed
+
+- Lineage files (`<session>.hopsesh.json`) are about a seventh of their size (on a Mac with
+  39 of them: 226 MB to 32 MB), so scans read less, over SSH too. They are written in
+  `lineage/6`: compact JSON that writes each record's ids, anchors and hashes once instead of
+  up to three times. The history they hold is unchanged, and machines still exchange it as
+  `lineage/5` (peer protocol unchanged). Each file is rewritten the next time a move updates
+  it, and both formats are read. The lineage size limit (`history.lineage_mb`) still
+  measures the history itself, so the same histories fit as before. An older hopsesh cannot
+  read a `lineage/6` file: it shows that session's lineage as unsupported and does not move
+  it. Update hopsesh on every machine instead of archiving such a file there.
+
+### Added
+
+- Sizes: `hopsesh ls` shows each session's size and each group's total, and ends with what
+  each agent's sessions take on each machine (for example `my-mac (here)  1.3 GB: Claude Code 1.2 GB,
+  Codex 172.7 MB`). In the app, a session's size is beside when it was last active, a
+  group's total is in its heading, and the Machines screen says what each machine's
+  sessions take. `hopsesh show` gives the size in KB, MB or GB.
+
+### Fixed
+
+- Codex sessions that Codex has compressed are listed again. Codex rewrites a rollout it has
+  not written for a week as `rollout-….jsonl.zst` (with `local_thread_store_compression`),
+  and hopsesh, which read only `.jsonl`, left those sessions out. On a Mac with 432 of them,
+  they included the newest work. hopsesh now reads them as Codex does: a session keeps its
+  `.jsonl` path while its file is compressed, the plain file is the one in use when both
+  exist, and a change to a compressed session (a move's mark, an undo) first writes it back
+  as plain `.jsonl`, with its permissions and modification time, and removes the `.zst`, as
+  Codex does when it resumes one. This works for every agent and on every machine, over SSH
+  too. Claude Code does not compress its transcripts.
+- Undo removes the folders an operation's writes made, once they are empty: undoing a push
+  no longer leaves an empty project folder (such as `~/.claude/projects/<folder>`) on the
+  target. A folder that holds something else since, or was there before, stays.
+- Scanning a machine over SSH no longer waits out the scan's 3-minute limit when it holds
+  large Codex forks or moved sessions (a Mac with 10 GB of them: 184 s → 14 s). A listing
+  no longer reads those transcripts over the network. A command about a session still checks
+  its family there: a Codex fork's ancestry, and whether its moved copies are ahead or
+  behind. Until then a listing shows another machine's Codex fork as a session of its own,
+  and asks to verify a return to a copy there, as it does for a copy it cannot read.
+- Undo removes the clone and the worktree a move made (`--clone`, `--worktree create`),
+  with the branch made for the worktree and the folders they made, on this machine or on
+  the machine a push went to. A clone with work of its own (changes, untracked or ignored
+  files such as an `.env`, stashes, commits that are not on its remote, other worktrees)
+  is never removed, even by `--force`: undo leaves it and says so.
+
+## [0.5.0] - 2026-10-15
+
+Every machine a full place: hopsesh can now run on your other machines, in your login session
+there, set up from here. See [Machines](docs/machines.md).
+
+### Added
+
+- `hopsesh hosts setup <machine>` (Machines › Set up hopsesh) installs this hopsesh in
+  `~/.hopsesh/bin` on a machine reached over SSH (the same verified release for another kind of
+  machine), turns receiving on, and starts `hopsesh serve` in the login session there at each
+  login (LaunchAgent, systemd user service, sign-in task; no administrator rights). Only on
+  request: scans never install anything.
+- `hopsesh serve` answers other machines from the login session (a Mac's Keychain and desktop
+  apps included) through a private socket behind `hopsesh peer`, and runs sessions for them in
+  terminals it owns. `hopsesh terminals run <machine>` and `terminals attach` show them here;
+  in the app, **Continue on ‹machine›** does, and a new session or an account's sign-in can run
+  there too.
+- Machines says how hopsesh works with each machine (running there, there but not running,
+  older, SSH only), what that lets it do, and sets it up or updates it step by step.
+- Accounts is new: your accounts by email, who each tool (Claude Code, Claude desktop, Codex,
+  the Codex app) is signed in as on every machine and in which folder, accounts only seen in
+  records, when two accounts write to one folder, and each folder's sessions by account.
+  Claude desktop's own sign-in is read from its account id and session index (never its
+  tokens).
+- Account folders live in `~/.hopsesh/accounts/<agent>/<name>` and can be added on any machine
+  with hopsesh, signed in from this machine's browser, with an optional `<agent>-<name>` shell
+  command. Folders made by earlier versions move there after you agree. A Codex folder keeps
+  its sign-in the way your default folder does.
+- Move › **Choose where it continues** lists every machine, folder and tool with who it runs
+  as there, what carries over, and whether the copy left behind is protected. Bringing a
+  session that is working on another machine offers to wait until it is idle, or to join it
+  there. After a send, **Open it there** runs it in a tab here.
+- Settings › **Hooks & skills** shows the command, protection hooks and skill on every machine
+  and sets them up from here; `hopsesh doctor --all-machines` checks the same. The skill goes
+  into every account folder. Sessions points out machines that need hopsesh, an update or
+  their protection set up.
+- A Mac with only the Codex app (ChatGPT.app) uses the app's built-in Codex for sign-in
+  checks, resuming and protection hooks; a Codex CLI is still preferred when installed. Local
+  and remote Macs alike.
+- Codex voice conversations and Work threads from the Codex app are hidden by default;
+  Settings › Agents (or `voice_threads` / `work_threads` under `[agents.codex]`) shows them.
+
+### Changed
+
+- Two machines agree on the newest peer protocol both speak (6, down to 0.4's 5) instead of
+  requiring the same one.
+- hopsesh never writes its files on a machine without hopsesh: the identity of one reached
+  over SSH only is kept here until hopsesh is set up there.
+- A Mac's sign-ins hidden from an SSH login are unknown, never a changed login; an original
+  left on a machine without hopsesh is said to be unprotected (session list, move review,
+  CLI); an unreadable account registry no longer hides a machine's sessions.
+- Hopsesh's record of who ran a session is kept per folder, moves with the session and is
+  shared between machines; inside Claude desktop it records desktop's own account.
+- Agents' versions are probed in parallel.
+- Version checks use semantic version precedence: a pre-release past a minimum counts (the
+  Codex app's built-in 0.162.0-alpha), one before it does not. The Codex protection hook
+  needs Codex 0.129.0 or newer (hooks and their review), down from 0.160.0.
+- The protection card lists every detected agent, including one that cannot take the hook
+  and why, says what each hook covers (Terminal, the desktop app), and keeps each step's
+  result on screen until Done. "Not now" is remembered until the problems change.
+- A skill copy installed by a newer hopsesh is never replaced by an older one.
+
+- Sessions are attributed from every record of the account they ran under: Claude Code's
+  per-run organisation stamp (not only Remote Control), Codex's session creator, and a new
+  Hopsesh record written by its prompt hook. Runs that name the user match only that user,
+  a session that changed accounts says so, and shared Team/Enterprise organisations name no
+  one. To match them, Hopsesh reads the public identity next to each login on this machine
+  (Claude Code's `oauthAccount`, Codex's account and user IDs); never tokens.
+- Account filters, account groups, family names and move-back labels no longer change when a
+  profile signs in to another account.
+
+- CI: the weekly drift check compares from the code's version floors and watches the identity,
+  record and hook formats hopsesh reads, and the Claude and Codex desktop apps; the skill is
+  checked against the built program (and the release's) and a command-tree golden; remote
+  scenarios run hopsesh over SSH with no hopsesh, nobody logged in, serve, 0.4.5 and offline.
+
+### Fixed
+
+- `hopsesh hosts setup` copies this hopsesh to a Linux machine of the same kind again
+  instead of looking for a release: `uname -m` (x86_64, aarch64) is read as Go's arch name.
+- Continuing a session from a machine without hopsesh in another agent says the original
+  there is not protected, as a move does.
+- hopsesh never stops the Codex app's process: its one app-server holds every app thread.
+  Such a thread shows as open in ChatGPT desktop, with Open instead of a stop.
+- The skill's reference named a `--fork` flag that does not exist.
+- Claude Code sessions continue in place under the account signed in now (**Continue
+  here**); Codex sessions that ran, or may have run, under another account are not resumed
+  as they are (Codex would fail) but continue as a cleaned copy.
+- The quick panel showed a profile's current email as each session's account.
+- Sessions on other machines were shown as run by "another account" even when their root was
+  signed in to it, because peers dropped the account fingerprint.
+- The move review names the account that ran the session as its source account. It
+  names profiles by folder and says who is signed in to each now, so a profile's label
+  no longer changes with a new sign-in.
+
+## [0.4.5] - 2026-10-14
+
+### Fixed
+
+- Sessions show the account that ran them, as Claude Code recorded it, instead of
+  whichever account their profile is signed in to now. A profile that was signed in to
+  another account before no longer labels that account's sessions with the new email;
+  unrecorded sessions claim no account. Account filters and grouping follow suit.
+- Status chips in the session list no longer get cut off mid-word: the account email
+  shortens with an ellipsis and the Remote Control link folds to its icon when space is
+  short, with the full text in tooltips and Details.
+- Accounts offer **Sign in** only when a profile is signed out or its check failed; the
+  sign-in check is a refresh button beside the status.
+
+### Added
+
+- The session list's status column is resizable from its header: drag, use the arrow
+  keys (Shift for larger steps, Home/End, Enter to reset), or double-click to fit what the
+  rows show. The width is remembered.
+
+## [0.4.4] - 2026-10-13
+
+### Fixed
+
+- Closing the desktop app during a refresh now exits normally instead of hanging.
+- The built-in terminal preserves complete input in order and reports write failures
+  instead of silently losing bytes or leaving Codex waiting for an incomplete reply.
+- Repository details say they are still being checked while discovery is pending,
+  instead of incorrectly reporting that the checkout is missing.
+- Movement indicators use the session list's right-hand status column, leaving room
+  for session titles; session actions remain in the inspector.
+
+- Local movement updates appear while other machines are still loading, preserving
+  pending remote rows and selection. Return plans recheck the exact destination's
+  current activity instead of requiring an already closed client to be ended again.
+- Claude's verified default profile uses native configuration lookup for account
+  probes and sign-in as well as resuming; explicit and custom roots stay isolated.
+- Raising a History resource limit permits an immediate retry without a manual
+  refresh. Settings invalidate obsolete reviews while preserving active transfers
+  and their transports. Delayed process evidence can confirm terminal association
+  without another scan, and concurrent tab exit does not deadlock that refresh.
+- Background refreshes update list cells in place and keep compact rows at a stable
+  height. Completed session lists stay visible throughout slower background reads.
+- Session actions stay in the inspector instead of appearing over metadata on hover.
+  Ending a reviewed original refreshes both sides before offering the move back.
+- Unknown agent windows no longer display a made-up terminal badge or offer a Show action.
+  Resuming the default Claude profile keeps its existing configuration and onboarding state.
+- Native-fork cache results follow session identity rather than listing position.
+  Reordering or adding sessions no longer attaches another conversation’s originals.
+- Inspecting an original no longer replaces its conversation's parent row or adds
+  duplicate rows after a refresh. Child rows name the actual session; blocked originals
+  show “Blocked” and lead to the destination rather than resuming the protected source.
+- The movement ledger no longer has an invisible 16 MiB cap. Settings → History exposes
+  its size limit (64 MiB by default, up to 512 MiB), and limit failures link to that setting.
+  Complete movement history is preserved, including ledgers larger than the former cap.
+
+- Session list entries show where a conversation moved from or to, with the original
+  visible as a selectable line underneath. The same movement labels appear in details,
+  the terminal UI and CLI.
+- Repository groups render their session rows without deferred WebKit visibility, which
+  could leave an expanded group blank until another redraw.
+- A return whose original is missing offers a reviewed new session on the same branch.
+  A changed account observation no longer hides a missing original after a complete scan.
+
+- A Claude Code session forked after it was compacted can be moved and continued. Its
+  history starts at the compaction boundary, whose link to the earlier conversation
+  points at a message copied after it; hopsesh refused it as "both copies changed:
+  Claude branch has a forward parent reference".
+- A move is always a move. The review no longer offers "Keep the old session running
+  too", the source notice no longer offers "Fork here instead…", and `hopsesh pull` and
+  `push` no longer take `--fork`: that option made a separate copy that was never blocked,
+  silently overriding "Block the original". Separate copies hopsesh still makes on its own
+  (both copies changed, bounded continuations) are called separate conversations.
+- Moving back into a protected open original closes only its exact agent client before
+  appending, then lets you reopen the same conversation without archiving it. Blocked clients
+  still write bookkeeping with an old parent UUID; writing while they stayed open could
+  leave returned messages outside the resumed history.
+- Returning clears notices about forks from an earlier residency, so an unblocked
+  original does not incorrectly say its old separate copy is still the destination.
+- Large compact summaries and diagnostic attachments no longer make a real Claude
+  session disappear when the lightweight head/tail windows contain only metadata.
+- Return capacity accounts for instructions and tools already included in the original's
+  measured usage. Near-limit originals carry a warning that the agent may need its own
+  compaction before answering. When a new session is needed, the review explains why
+  and does not ask you to end an original that will not be written.
+- Blocking or warning in a moved session's original works on a default install. The
+  protection hooks always pass the settings and state folders; naming the default
+  folders explicitly made hopsesh look for this machine's identity in the wrong place,
+  so the hook let every prompt through. A flag naming the default folder now changes
+  nothing.
+- An original that once had a separate copy is blocked again when it is moved. The move
+  and the earlier copy were judged ambiguous, so no notice reached the agent's hook and
+  the original was not blocked, while hopsesh showed it blocked.
+- Opening a moved session in the Codex app shows its command without an empty
+  `cd ''` in front.
+- `hopsesh notices status` (and install and remove) run through the `hopsesh` command link
+  recognise the hooks the app installed, instead of reporting them absent and installing
+  a second set.
+
 ## [0.4.3] - 2026-10-11
 
 ### Changed
@@ -631,6 +948,11 @@ is refused and set aside (the app offers this), and machines are added again.
 - The terminal UI no longer carries out a plan you pressed `y` on while a changed one was
   still being worked out.
 
+[0.6.2]: https://github.com/roeehrl/hopsesh/releases/tag/v0.6.2
+[0.6.1]: https://github.com/roeehrl/hopsesh/releases/tag/v0.6.1
+[0.5.0]: https://github.com/roeehrl/hopsesh/releases/tag/v0.5.0
+[0.4.5]: https://github.com/roeehrl/hopsesh/releases/tag/v0.4.5
+[0.4.4]: https://github.com/roeehrl/hopsesh/releases/tag/v0.4.4
 [0.4.3]: https://github.com/roeehrl/hopsesh/releases/tag/v0.4.3
 [0.4.2]: https://github.com/roeehrl/hopsesh/releases/tag/v0.4.2
 [0.4.1]: https://github.com/roeehrl/hopsesh/releases/tag/v0.4.1

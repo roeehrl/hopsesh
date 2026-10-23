@@ -54,10 +54,12 @@ func (*Module) Spec() agent.Spec {
 		Accounts:      &agent.ProfileSpec{RootEnv: []string{"CLAUDE_CONFIG_DIR"}, Unset: []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"}, Login: []string{"auth", "login"}},
 		ID:            id,
 		DesktopScheme: "claude",
-		Name:          "Claude Code",
-		Vendor:        "Anthropic",
-		Stability:     agent.Stable,
-		Tested:        []string{"2.1"},
+		// The API ignores thinking signed for another organisation and the request succeeds.
+		ResumeAcrossAccounts: true,
+		Name:                 "Claude Code",
+		Vendor:               "Anthropic",
+		Stability:            agent.Stable,
+		Tested:               []string{"2.1"},
 		Binaries: []agent.Binary{{
 			Name: "claude",
 			Candidates: map[string][]string{
@@ -88,6 +90,15 @@ func (*Module) Spec() agent.Spec {
 // Detect resolves the config folder and the claude binary.
 func (m *Module) Detect(_ context.Context, h agent.Host) (agent.Install, error) {
 	in := agent.DefaultInstall(m.Spec(), h)
+	userEnv := h.Facts().UserEnv
+	if userEnv == nil {
+		userEnv = h.Facts().Env
+	}
+	if h.Facts().Home != "" && userEnv["CLAUDE_CONFIG_DIR"] == "" {
+		// Commands without a Host need this machine's verified native lookup.
+		// An explicit override, even at ~/.claude, may use alternate credentials.
+		in.NativeDefaultRoot = h.Path().Join(h.Facts().Home, ".claude")
+	}
 	detectDesktop(h, &in)
 	return in, nil
 }
@@ -219,6 +230,7 @@ func (s *info) summary() agent.Summary {
 		LegacyLabel:  s.LegacyLabel,
 		Path:         s.File,
 		Mirror:       s.Mirror,
+		Owners:       s.Owners,
 	}
 }
 
@@ -413,7 +425,13 @@ func (m *Module) Resume(in agent.Install, key agent.SessionKey, p agent.Placemen
 	if o.Prompt != "" {
 		argv = append(argv, o.Prompt)
 	}
-	return in.ScopeCommand(agent.Command{Argv: argv, Dir: p.CWD, Unset: sessionMarkers, Wait: o.App, TTY: o.App})
+	c := in.ScopeCommand(agent.Command{Argv: argv, Dir: p.CWD, Unset: sessionMarkers, Wait: o.App, TTY: o.App})
+	// Unregistered installs have no profile to scope. Preserve native lookup for
+	// them too; registered profiles share ProfileEnv with probes and login.
+	if in.Profile == nil && in.NativeDefaultRoot != "" && in.Root(home) == in.NativeDefaultRoot {
+		c.Unset = append(c.Unset, "CLAUDE_CONFIG_DIR")
+	}
+	return c
 }
 
 // sessionMarkers are variables a Claude Code session sets for the programs it starts. A

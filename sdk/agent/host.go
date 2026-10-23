@@ -29,9 +29,13 @@ type Facts struct {
 	OS               string          `json:"os"`      // darwin | linux | windows
 	Arch             string          `json:"arch"`
 	Home             string          `json:"home"`
-	// Env holds the variables the module's Spec declares (Roots[].Env, LoginEnv), as set on
-	// that machine ("" when unset).
+	// Env holds the variables the module's Spec declares (Roots[].Env, LoginEnv),
+	// with pinned profile roots applied ("" when unset).
 	Env map[string]string `json:"env"`
+	// UserEnv preserves the declared machine environment before profile scoping.
+	// Nil means Env has not been scoped. Detection can distinguish a user's
+	// explicit config override from a root injected for a pinned profile.
+	UserEnv map[string]string `json:"userEnv,omitempty"`
 	// Binaries are the module's Spec binaries as found there.
 	Binaries map[string]BinaryFact `json:"binaries"`
 }
@@ -149,4 +153,11 @@ type Procs interface {
 	Names(ctx context.Context, pids []int) (map[int]string, error)
 	// Terminate asks a process to exit (SIGTERM; unsupported on Windows).
 	Terminate(ctx context.Context, pid int) error
+}
+
+// ProcCommands is implemented by a Procs that can read each running process's command
+// line (program path and arguments, as ps shows them); exited ones are left out. Modules
+// use it to tell a shared server from a process they may stop.
+type ProcCommands interface {
+	Commands(ctx context.Context, pids []int) (map[int]string, error)
 }

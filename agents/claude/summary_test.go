@@ -128,6 +128,20 @@ func TestSummarizeLargeFileHeadTail(t *testing.T) {
 	}
 }
 
+func TestMetadataOnlyWindowsDoNotHideARealConversation(t *testing.T) {
+	root := "/t/" + t.Name()
+	p := writeTranscript(t, root, "metadata-windows", []line{
+		{"type": "system", "uuid": "start", "sessionId": "metadata-windows", "cwd": "/repo"},
+		user("/repo", "2026-10-11T10:00:00Z", strings.Repeat("conversation", 20000), nil),
+		{"type": "attachment", "uuid": "large", "cwd": "/repo", "payload": strings.Repeat("x", 200000)},
+		{"type": "system", "uuid": "end", "sessionId": "metadata-windows", "cwd": "/repo"},
+	})
+	s, err := summ(p)
+	if err != nil || !s.HasMessages || s.CWD != "/repo" {
+		t.Fatalf("real session disappeared behind metadata: %+v %v", s, err)
+	}
+}
+
 func TestRealPromptFilters(t *testing.T) {
 	mk := func(content any, extra line) record {
 		j, _ := json.Marshal(user("/r", "t", content, extra))

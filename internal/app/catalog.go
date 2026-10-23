@@ -6,10 +6,12 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 	"maps"
 	"os"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -44,14 +46,71 @@ func (a *App) CachedInventory() *Inventory {
 		e.Cached = true
 		e.Live = agent.LiveInfo{State: agent.Unknown}
 		e.Returns = nil
-		e.Movement = nil
+		// Older caches could attach fork results by listing position. Never publish
+		// another native session's receipt as this entry's original relationship.
+		if e.Lineage != nil {
+			owns := false
+			for _, r := range e.Lineage.Replicas {
+				if r.Key.Agent == e.Session.Key.Agent && r.Key.Session == e.Session.Key.Session {
+					owns = true
+					break
+				}
+			}
+			if !owns {
+				e.Lineage = nil
+				e.Departure = nil
+				e.Arrival = nil
+				e.Movement = nil
+			}
+		}
 		if e.Cloud != nil {
 			c := *e.Cloud
 			c.State = agent.CloudUnknown
 			e.Cloud = &c
 		}
+		a.restoreCachedMovement(e)
 	}
 	return inv
+}
+
+// Older catalogs omitted movement notices, and preliminary batches could omit
+// roles too. Recover routing from the saved receipt without probing live state
+// or reading transcripts; preserve any previously verified divergence status.
+func (a *App) restoreCachedMovement(e *Entry) {
+	g := e.Lineage
+	if g == nil || e.LineageError != "" {
+		return
+	}
+	var id lineage.ReplicaID
+	for _, r := range g.Replicas {
+		if r.Key == e.Session.Key && r.Location == e.Machine && r.Line == g.Branch {
+			if id != "" {
+				return // ambiguous physical identity
+			}
+			id = r.ID
+		}
+	}
+	if id == "" {
+		return
+	}
+	if hop, departed := g.Departed(id); departed {
+		e.Arrival = nil
+		if e.Departure == nil || e.Departure.Operation != hop.ID {
+			e.Departure = a.describeDeparture(g, id, hop, nil)
+		}
+		if e.Movement != nil && e.Movement.Operation != hop.ID {
+			e.Movement = nil
+		}
+	} else {
+		e.Departure = nil
+		e.Arrival = a.arrival(g, id)
+		if hop, ok := g.Departure(id); !ok || e.Movement != nil && e.Movement.Operation != hop.ID {
+			e.Movement = nil
+		}
+	}
+	if e.Movement == nil && e.Departure != nil && a.Cfg.MovementNoticesOn() {
+		e.Movement = copyNotice(e.Departure)
+	}
 }
 
 // MergeDiscovery removes unseen rows only after a successful complete source scan.
@@ -105,6 +164,11 @@ func MergeDiscovery(old *Inventory, u ScanUpdate) *Inventory {
 			// Retained metadata is provisional; every action revalidates it.
 			if !u.Complete {
 				old := next.Entries[i]
+				// Listing and lineage precede movement observation. Keep the saved
+				// role until this source's completed batch carries fresh evidence.
+				if e.Departure == nil && e.Arrival == nil && e.Movement == nil && e.LineageError == "" {
+					e.Departure, e.Arrival, e.Movement = old.Departure, old.Arrival, old.Movement
+				}
 				if e.Git == nil {
 					e.Git = old.Git
 				}
@@ -217,7 +281,6 @@ func catalogEntry(e Entry) Entry {
 	e.Lineage = e.Lineage.Outline()
 	e.Live = agent.LiveInfo{}
 	e.Returns = nil
-	e.Movement = nil
 	return e
 }
 
@@ -237,6 +300,13 @@ func catalogContent(inv *Inventory) []byte {
 	strip = func(v any) any {
 		switch x := v.(type) {
 		case map[string]any:
+			if at, ok := x["checkedAt"].(string); ok {
+				if checked, err := time.Parse(time.RFC3339Nano, at); err == nil {
+					if text, ok := x["text"].(string); ok {
+						x["text"] = strings.TrimSuffix(text, " Last checked "+checked.UTC().Format(time.RFC3339)+".")
+					}
+				}
+			}
 			delete(x, "checkedAt")
 			delete(x, "observedAt")
 			delete(x, "phase")

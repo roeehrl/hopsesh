@@ -3,6 +3,7 @@ package gui
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/app"
@@ -33,9 +34,20 @@ func (a *App) CachedScan() *ScanDTO {
 // selectionInventory upgrades just the selected source and local destination.
 // Replacing a.inv also relinquishes an in-flight scan's publication ownership,
 // so its late result cannot close transports used by this action/review.
-func (a *App) selectionInventory(ctx context.Context, core *app.App, inv *app.Inventory, e app.Entry) (*app.Inventory, app.Entry, error) {
+func (a *App) selectionInventory(ctx context.Context, core *app.App, inv *app.Inventory, e app.Entry, review ...uint64) (*app.Inventory, app.Entry, error) {
+	a.mu.Lock()
+	generation := a.reviewGeneration
+	if len(review) != 0 {
+		generation = review[0]
+	}
+	if err := a.checkSelectionLocked(core, inv, generation); err != nil {
+		a.mu.Unlock()
+		return inv, e, err
+	}
+	stale := a.historyStale[app.EntryIdentity(e.Machine, e.Session.Key.String())]
+	a.mu.Unlock()
 	m := inv.Machine(e.Machine)
-	if !e.Cached && !inv.Discovering && m != nil && m.Host() != nil {
+	if !stale && !e.Cached && !inv.Discovering && m != nil && m.Host() != nil {
 		return inv, e, nil
 	}
 	fresh, entry, err := core.FreshSelection(ctx, e)
@@ -43,6 +55,14 @@ func (a *App) selectionInventory(ctx context.Context, core *app.App, inv *app.In
 		return inv, e, err
 	}
 	a.mu.Lock()
+	// Validate before clearing stale markers, publishing, or closing anything
+	// held by the currently published inventory. FreshSelection owns only fresh.
+	if err := a.checkSelectionLocked(core, inv, generation); err != nil {
+		a.mu.Unlock()
+		fresh.Close()
+		return inv, e, err
+	}
+	a.historyObservedLocked(fresh)
 	old := a.inv
 	if old != nil {
 		// Keep other sources visible, but detach their old transports and live evidence.
@@ -71,6 +91,21 @@ func (a *App) selectionInventory(ctx context.Context, core *app.App, inv *app.In
 	a.inv = fresh
 	a.mu.Unlock()
 	return fresh, entry, nil
+}
+
+// Callers hold mu. An old read cannot replace or close a newer review/action's
+// inventory, even if the History settings happen to equal its old snapshot.
+func (a *App) checkSelectionLocked(core *app.App, owned *app.Inventory, generation uint64) error {
+	if err := a.checkReviewLocked(generation); err != nil {
+		return err
+	}
+	if a.inv != owned {
+		return errReviewChanged
+	}
+	if core.Cfg.History != a.core.Cfg.History {
+		return errors.New("history settings changed; review the session again")
+	}
+	return nil
 }
 
 func (a *App) beginSelection() func() {

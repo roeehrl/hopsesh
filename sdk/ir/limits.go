@@ -15,6 +15,7 @@ type Limits struct {
 	ReadBytes       int64 `json:"readBytes,omitempty"`
 	RecordBytes     int64 `json:"recordBytes,omitempty"`
 	ArchiveBytes    int64 `json:"archiveBytes,omitempty"`
+	LineageBytes    int64 `json:"lineageBytes,omitempty"`
 	NativeFileBytes int64 `json:"nativeFileBytes,omitempty"`
 	// ContextBudget optionally lowers the receiving context (upper-estimate units, as
 	// Capacity.Allowance). 0 is automatic. It can never raise the model's allowance.
@@ -36,11 +37,13 @@ const (
 	DefaultReadBytes       int64 = MaxTranscriptBytes
 	DefaultRecordBytes     int64 = 32 << 20
 	DefaultArchiveBytes    int64 = MaxTranscriptBytes
+	DefaultLineageBytes    int64 = 64 << 20
 	DefaultNativeFileBytes int64 = 1 << 30
 
 	CeilingReadBytes       int64 = 4 << 30
 	CeilingRecordBytes     int64 = 256 << 20
 	CeilingArchiveBytes    int64 = 8 << 30
+	CeilingLineageBytes    int64 = 512 << 20
 	CeilingNativeFileBytes int64 = 8 << 30
 	// MinContextBudget keeps a user budget large enough for a briefing and a request.
 	MinContextBudget = 4096
@@ -60,6 +63,7 @@ func (l Limits) Normalize() Limits {
 	l.ReadBytes = fill(l.ReadBytes, DefaultReadBytes, CeilingReadBytes)
 	l.RecordBytes = fill(l.RecordBytes, DefaultRecordBytes, CeilingRecordBytes)
 	l.ArchiveBytes = fill(l.ArchiveBytes, DefaultArchiveBytes, CeilingArchiveBytes)
+	l.LineageBytes = fill(l.LineageBytes, DefaultLineageBytes, CeilingLineageBytes)
 	l.NativeFileBytes = fill(l.NativeFileBytes, DefaultNativeFileBytes, CeilingNativeFileBytes)
 	switch {
 	case l.ContextBudget < 0:
@@ -85,6 +89,7 @@ func (l Limits) Check() error {
 		check("read memory", l.ReadBytes, CeilingReadBytes),
 		check("record size", l.RecordBytes, CeilingRecordBytes),
 		check("archive size", l.ArchiveBytes, CeilingArchiveBytes),
+		check("movement ledger", l.LineageBytes, CeilingLineageBytes),
 		check("native file size", l.NativeFileBytes, CeilingNativeFileBytes),
 	); err != nil {
 		return err
@@ -129,6 +134,7 @@ func LimitsFrom(ctx context.Context) Limits {
 const (
 	StageRead    = "read"    // decoding a native transcript
 	StageRecord  = "record"  // one native record
+	StageLineage = "lineage" // persisted movement ledger
 	StageArchive = "archive" // building or merging the portable archive
 	StageNative  = "native"  // reading a whole native file (fork, recovery, verification)
 	StageContext = "context" // the receiving agent's context
@@ -140,6 +146,7 @@ var limitSettings = map[string]string{
 	StageRead:    "history.read_memory_mb",
 	StageRecord:  "history.record_mb",
 	StageArchive: "history.archive_mb",
+	StageLineage: "history.lineage_mb",
 	StageNative:  "history.native_file_mb",
 	StageContext: "history.context_budget",
 	StageDisk:    "",
@@ -166,6 +173,7 @@ func (e *LimitError) Error() string {
 		StageRead:    "transcript exceeds the analysis memory limit",
 		StageRecord:  "a native record exceeds the record size limit",
 		StageArchive: "portable archive exceeds the archive size limit",
+		StageLineage: "movement ledger exceeds its size limit",
 		StageNative:  "native file exceeds the native file size limit",
 		StageContext: "incoming context exceeds the context budget",
 		StageDisk:    "not enough free disk space",

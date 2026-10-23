@@ -20,6 +20,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/repos"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
 	"github.com/roeehrl/hopsesh/sdk/agent"
+	"github.com/roeehrl/hopsesh/sdk/ir"
 )
 
 // Machine statuses.
@@ -49,9 +50,19 @@ type Machine struct {
 	Agents      []AgentState       `json:"agents"`
 	// Hopsesh is the version of hopsesh installed there ("" when none was found).
 	Hopsesh string `json:"hopsesh,omitempty"`
+	// Presence is how hopsesh works with the machine (see Presence*); PresenceWhy says
+	// why, when it is not PresenceLogin.
+	Presence    string `json:"presence,omitempty"`
+	PresenceWhy string `json:"presenceWhy,omitempty"`
 
 	host    *host.Machine
 	account *agent.Account // reported by the machine's own hopsesh (a push)
+	// receive is whether hopsesh there accepts sessions (from its hello; nil when it did
+	// not answer); listening, on this machine, whether hopsesh serve runs.
+	receive   *bool
+	listening bool
+	tools     map[agent.ID]agent.Install  // hopsesh in the login session there (meetHopsesh)
+	records   map[string][]agent.OwnerRun // its records of who ran its sessions
 }
 
 // AgentState is an agent as found on a machine.
@@ -176,7 +187,9 @@ type ScanOptions struct {
 	NoLocal       bool             // leave this machine out
 	SkipGit       bool             // no git state (faster)
 	// GitFor, when set, limits the git probe to the folders of the sessions it accepts (the
-	// others get no git state); see App.GitFor.
+	// others get no git state); see App.GitFor. On another machine it also chooses the
+	// native forks that are verified (see remoteForks) and the moved copies that are observed
+	// (see enrichMovement).
 	GitFor func(Entry) bool
 }
 
@@ -195,6 +208,7 @@ type ScanUpdate struct {
 // clouds are listed through this machine once its own sessions are listed (their lineage
 // names the cloud copies hopsesh made), alongside the other machines.
 func (a *App) Scan(ctx context.Context, o ScanOptions) *Inventory {
+	ctx = a.limited(ctx)
 	scans.Add(1)
 	started := time.Now()
 	defer func() {
@@ -265,6 +279,14 @@ func (a *App) Scan(ctx context.Context, o ScanOptions) *Inventory {
 			if st.Error != "" {
 				m.Phase = "error"
 			}
+		}
+		// Local receipts are ready independently of slow remote/cloud sources.
+		// Publish their movement with the completed local batch, rather than
+		// making a retained session list wait for the whole scan to finish.
+		if m.Local && progress != nil {
+			ready := &Inventory{Machines: []*Machine{m}, Entries: es}
+			a.EnrichMovement(ctx, ready)
+			es = ready.Entries
 		}
 		mu.Lock()
 		inv.Machines = append(inv.Machines, m)
@@ -357,7 +379,7 @@ func (a *App) Scan(ctx context.Context, o ScanOptions) *Inventory {
 			}
 		}
 	}
-	a.EnrichMovement(ctx, inv)
+	a.enrichMovement(ctx, inv, func(e Entry) bool { return o.GitFor != nil && o.GitFor(e) })
 	sort.SliceStable(inv.Machines, func(i, j int) bool {
 		if inv.Machines[i].Local != inv.Machines[j].Local {
 			return inv.Machines[i].Local
@@ -415,7 +437,7 @@ func (a *App) Connect(ctx context.Context, h config.Host) (*host.Machine, error)
 		conn.Close()
 		return nil, err
 	}
-	return &host.Machine{Name: h.Name, Conn: conn, Facts: facts, Log: a.Log}, nil
+	return &host.Machine{Name: h.Name, Conn: conn, Facts: facts, Log: a.Log, Keeper: a.endpointKeeper(h.Name)}, nil
 }
 
 var errNeedsPassword = errors.New("this machine logs in with a password")
@@ -429,6 +451,11 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 		m.Status, m.Error, m.Hint = StatusError, "SFTP: "+err.Error(), "the machine's SSH server must allow the sftp subsystem"
 		return m, nil
 	}
+	if !hm.Local {
+		a.meetHopsesh(ctx, hm, m)
+	} else {
+		m.listening = serveRunning(ctx)
+	}
 	var entries []Entry
 	for _, mod := range a.Modules() {
 		spec := mod.Spec()
@@ -436,6 +463,7 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 		h, err := hm.For(ctx, spec, agent.Install{}, nil)
 		if err == nil {
 			st.Install, err = mod.Detect(ctx, h)
+			st.Install = m.withTools(st.Install)
 		}
 		if err != nil {
 			st.Error = err.Error()
@@ -444,8 +472,13 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 		installs, scanErr := a.profileInstalls(ctx, hm, mod, st.Install, o.ForceAccounts, o.Progress != nil)
 		if scanErr != nil {
 			st.Error = scanErr.Error()
-			m.Agents = append(m.Agents, st)
-			continue
+			if !st.Install.Present {
+				m.Agents = append(m.Agents, st)
+				continue
+			}
+			// Its accounts could not be read (an unreadable registry there, say): its
+			// sessions are still listed, from the agent's own folder.
+			installs = []agent.Install{st.Install}
 		}
 		// Registering another default profile changes the inventory namespace.
 		// Carry already discovered rows into that namespace before its listing.
@@ -474,14 +507,15 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 				var batchMu sync.Mutex
 				var batch []Entry
 				firstBatch := true
+				shows := a.Cfg.Agents[string(spec.ID)].Shows
 				found := func(sum agent.Summary) {
-					if o.Progress == nil {
+					if o.Progress == nil || !shows(sum.Kinds) {
 						return
 					}
 					sum.Key.Profile = in.ProfileID()
 					batchMu.Lock()
 					defer batchMu.Unlock()
-					batch = append(batch, Entry{Cached: true, Location: agent.MachineLocation(hm.Name), Machine: hm.Name, Agent: spec.ID, AgentName: spec.Name, Session: sum, Profile: in.Profile, Live: agent.LiveInfo{State: agent.Unknown}})
+					batch = append(batch, Entry{Cached: true, Location: agent.MachineLocation(hm.Name), Machine: hm.Name, Agent: spec.ID, AgentName: spec.Name, Session: withRecords(m.records, in.Root("home"), a.withLedger(hm.Local, in.Root("home"), sum)), Profile: in.Profile, Live: agent.LiveInfo{State: agent.Unknown}})
 					if firstBatch || len(batch) >= 25 {
 						partial := *m
 						partial.Agents = append([]AgentState(nil), m.Agents...)
@@ -504,10 +538,15 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 					o.Progress(ScanUpdate{Machine: &partial, Entries: batch})
 				}
 				if e == nil {
+					l.Sessions = slices.DeleteFunc(l.Sessions, func(s agent.Summary) bool { return !shows(s.Kinds) })
 					for i := range l.Sessions {
 						l.Sessions[i].Key.Profile = in.ProfileID()
 					}
-					entries = append(entries, listedEntries(ctx, hm, fsys, mod, ch, state, l)...)
+					listed := listedEntries(ctx, hm, fsys, mod, ch, state, l, o.GitFor)
+					for i := range listed {
+						listed[i].Session = withRecords(m.records, in.Root("home"), a.withLedger(hm.Local, in.Root("home"), listed[i].Session))
+					}
+					entries = append(entries, listed...)
 					if len(l.Errors) > 0 {
 						e = fmt.Errorf("%d session files could not be read; first: %w", len(l.Errors), l.Errors[0].Err)
 					}
@@ -536,6 +575,7 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 					if detailed, err := mod.Detect(ctx, h); err == nil {
 						st.Install.Version = detailed.Version
 						st.Install.Binary = detailed.Binary
+						st.Install.Runtime = detailed.Runtime
 						st.Install.Desktop = detailed.Desktop
 						st.Install.DesktopVersion = detailed.DesktopVersion
 						st.Install.DesktopWhy = detailed.DesktopWhy
@@ -666,7 +706,7 @@ func hopseshVersion(b agent.BinaryFact) string {
 }
 
 // readManifests reads the lineage beside each session, in parallel.
-func readManifests(machine string, fsys host.FS, ss []agent.Summary) ([]*lineage.Manifest, []string) {
+func readManifests(machine string, fsys host.FS, ss []agent.Summary, limits ...ir.Limits) ([]*lineage.Manifest, []string) {
 	problems := make([]string, len(ss))
 	out := make([]*lineage.Manifest, len(ss))
 	var wg sync.WaitGroup
@@ -676,7 +716,7 @@ func readManifests(machine string, fsys host.FS, ss []agent.Summary) ([]*lineage
 		sem <- struct{}{}
 		go func() {
 			defer func() { <-sem; wg.Done() }()
-			out[i], problems[i] = readSidecar(machine, fsys, s.Path)
+			out[i], problems[i] = readSidecar(machine, fsys, s.Path, limits...)
 		}()
 	}
 	wg.Wait()
@@ -817,7 +857,7 @@ func legacyLabelWords(l agent.LegacyLabel) string {
 
 // listedEntries are one agent's listed sessions on a machine, with their live state and
 // lineage.
-func listedEntries(ctx context.Context, hm *host.Machine, fsys host.FS, mod agent.Module, ch agent.Host, st AgentState, l agent.Listing) []Entry {
+func listedEntries(ctx context.Context, hm *host.Machine, fsys host.FS, mod agent.Module, ch agent.Host, st AgentState, l agent.Listing, forksFor func(Entry) bool) []Entry {
 	spec := mod.Spec()
 	var out []Entry
 	live := map[agent.SessionID]agent.LiveInfo{}
@@ -828,7 +868,7 @@ func listedEntries(ctx context.Context, hm *host.Machine, fsys host.FS, mod agen
 		}
 		live, _ = ld.Live(ctx, ch, st.Install, ids)
 	}
-	manifests, problems := readManifests(hm.Name, fsys, l.Sessions)
+	manifests, problems := readManifests(hm.Name, fsys, l.Sessions, ir.LimitsFrom(ctx))
 	persistedFamilies := map[string]bool{}
 	for _, m := range manifests {
 		if m != nil {
@@ -839,7 +879,20 @@ func listedEntries(ctx context.Context, hm *host.Machine, fsys host.FS, mod agen
 	for i, err := range problems {
 		unsupported[i] = err != ""
 	}
-	nativeForkManifests(ctx, hm, ch, mod, st.Install, l.Sessions, manifests, problems)
+	if hm.Local || hm.IsSnapshot() {
+		nativeForkManifests(ctx, hm, ch, mod, st.Install, l.Sessions, manifests, problems)
+	} else if pick := remoteForks(l.Sessions, func(s agent.Summary) bool {
+		return forksFor != nil && forksFor(Entry{Location: agent.MachineLocation(hm.Name), Machine: hm.Name, Agent: spec.ID, Session: s})
+	}); len(pick) > 0 {
+		ss, ms, ps := make([]agent.Summary, len(pick)), make([]*lineage.Manifest, len(pick)), make([]string, len(pick))
+		for j, i := range pick {
+			ss[j], ms[j], ps[j] = l.Sessions[i], manifests[i], problems[i]
+		}
+		nativeForkManifests(ctx, hm, ch, mod, st.Install, ss, ms, ps)
+		for j, i := range pick {
+			manifests[i], problems[i] = ms[j], ps[j]
+		}
+	}
 	for i, s := range l.Sessions {
 		lv := live[s.Key.Session]
 		if lv.State == "" {

@@ -1,9 +1,11 @@
-// The Settings screen, in tabs: General, Desktop presence, Agents, History, Terminal, Skill,
-// Command line, Updates.
+// The Settings screen, in tabs: General, Machines (one machine, everything about it),
+// Hooks & skills (one component, every machine), Clouds, Desktop presence, Agents,
+// History, Terminal, Skill, Command line, Updates.
 import { api, on, h, fill, view, state, screen, go, loading, toast, fail, dialog, agentBadge, sys, cliHow, icon, ask, count, current, loadError, navigationID, errText } from "./core.js";
 import { desktopSettings } from "./desktop-settings.js";
 import { running } from "./term.js";
 import { withCLI, loadHookHealth } from "./guard.js";
+import { bindMachines, machinesPanel, cloudsPanel, hooksPanel, pickMachine } from "./machines.js";
 
 const SKILL_TEXT = {
   absent: ["Not installed", "st-ended"],
@@ -99,7 +101,7 @@ function general() {
       toggle("previews", "Show conversation previews", "The inspector shows the end of the selected session's conversation, with Markdown formatting, read on its machine. Turn it off when you share your screen.")),
     card(h("span", { class: "sec-h" }, sys.Here),
       h("div", { class: "set-row" }, title("Receiving sessions", state.info.receive ? "On: your other machines can send sessions here." : `Off: ${sys.here} refuses sessions sent from other machines.`),
-        h("button", { class: "btn", onclick: () => go("machines") }, "Machines…")),
+        h("button", { class: "btn", onclick: () => { tab = "machines"; render(); } }, "Machines…")),
       s.localNetworkGated ? h("div", { class: "set-row" }, title("Local network access", "macOS asks before hopsesh reaches machines on your local network. Machines on Tailscale don't need it."),
         h("button", { class: "btn", onclick: () => api("OpenLocalNetworkSettings").catch(fail) }, "Privacy & Security…")) : null,
       h("div", { class: "set-row" }, title("Settings", s.configDir), h("button", { class: "btn", onclick: () => api("Reveal", s.configDir).catch(fail) }, "Show")),
@@ -114,7 +116,7 @@ function agents() {
     return card(
       h("div", { class: "set-row" },
         agentBadge(a.id, a.name),
-        title(a.name, a.version ? `${a.version} on ${sys.here}${a.folder ? " · " + a.folder : ""}` : `Not installed on ${sys.here}`),
+        title(a.name, a.version ? `${a.version}${a.runtime === "app" ? " (built into the desktop app)" : ""} on ${sys.here}${a.folder ? " · " + a.folder : ""}` : `Not installed on ${sys.here}`),
         a.stability === "experimental" ? h("span", { class: "chip st-warn" }, "experimental") : null,
         h("button", { class: "switch", role: "switch", "aria-checked": a.enabled ? "true" : "false", "aria-label": `${a.name} on`,
           onclick: () => set(!a.enabled, a.remoteControl, a.import, a.enabled ? `${a.name} is off` : `${a.name} is on`) })),
@@ -124,7 +126,9 @@ function agents() {
       a.enabled && caps.includes("remote-control") ? h("label", { class: "opt" }, h("input", { type: "checkbox", checked: a.remoteControl, onchange: (e) => set(true, e.target.checked, a.import, "Saved") }),
         h("span", {}, h("b", {}, `Turn on Remote Control for sessions hopped into ${a.name}`), h("span", { class: "muted" }, "Reach them from your phone or other machines. Needs the agent's own subscription login."))) : null,
       a.enabled && caps.includes("import") ? h("label", { class: "opt" }, h("input", { type: "checkbox", checked: a.import, onchange: (e) => set(true, a.remoteControl, e.target.checked, "Saved") }),
-        h("span", {}, h("b", {}, `Continue in ${a.name} with its own importer`), h("span", { class: "muted" }, "Instead of hopsesh's conversion, when it can read the other agent; hopsesh still adds its briefing. The plan can change it each time."))) : null);
+        h("span", {}, h("b", {}, `Continue in ${a.name} with its own importer`), h("span", { class: "muted" }, "Instead of hopsesh's conversion, when it can read the other agent; hopsesh still adds its briefing. The plan can change it each time."))) : null,
+      a.enabled ? (a.kinds || []).map((k) => h("label", { class: "opt" }, h("input", { type: "checkbox", checked: k.shown, onchange: (e) => run(() => api("SetAgentKind", a.id, k.id, e.target.checked), "Saved · applies at the next scan") }),
+        h("span", {}, h("b", {}, `Show ${k.name.toLowerCase()}`), h("span", { class: "muted" }, k.note + " Hidden by default.")))) : null);
   });
 }
 
@@ -220,6 +224,19 @@ function terminal() {
         ["Links open only after you confirm them.", "Only web links (http and https) open from a terminal, and hopsesh shows you the whole address first."]]
         .map(([b, t]) => h("div", { class: "safety" }, icon(SHIELD, 15), h("span", {}, h("b", {}, b), " ", h("span", { class: "muted" }, t))))),
   ];
+}
+
+// ---- Hooks & skills on every machine --------------------------------------------------
+// hooks is the coverage view (machines.js hooksPanel) with the choices that are not about
+// one machine: what happens to an original, and whether setting hopsesh up on a machine
+// adds its hooks and skill too.
+function hooks() {
+  const defaults = h("fieldset", { class: "hook-defaults" }, h("legend", {}, "Defaults"),
+    h("span", {}, "When a session moves away, its original"),
+    seg("When a session moves, the original", s.original || "block", [["block", "Is blocked"], ["advise", "Shows a warning"], ["off", "Is left alone"]], (v) => save({ original: v })),
+    h("label", { class: "opt" }, h("input", { type: "checkbox", checked: !!s.setUpIntegrations, onchange: (e) => save({ setUpIntegrations: e.target.checked }) }),
+      h("span", {}, h("b", {}, "Add hooks and skill when hopsesh is set up on a machine"), h("span", { class: "muted" }, "Off: hopsesh asks first, here."))));
+  return hooksPanel(defaults);
 }
 
 function skill() {
@@ -331,7 +348,7 @@ const mib = (n) => n >= 1024 ? `${n / 1024} GB` : `${n} MB`;
 async function setHistory(patch) {
   if (saving) return;
   saving = true;
-  const next = Object.assign({ contextBudget: hs.contextBudget, older: hs.older, readMemoryMB: hs.readMemoryMB, recordMB: hs.recordMB, archiveMB: hs.archiveMB, nativeFileMB: hs.nativeFileMB }, patch);
+  const next = Object.assign({ contextBudget: hs.contextBudget, older: hs.older, readMemoryMB: hs.readMemoryMB, recordMB: hs.recordMB, archiveMB: hs.archiveMB, lineageMB: hs.lineageMB, nativeFileMB: hs.nativeFileMB }, patch);
   hs = Object.assign({}, hs, patch);
   render();
   try { await api("SetHistorySettings", next); toast("Saved"); } catch (e) { fail(e); }
@@ -367,6 +384,7 @@ function history() {
       sizeRow("readMemoryMB", "Reading memory", "Conversation a native transcript may hold in memory while hopsesh reads it.", hs.readMemoryMBs, d.readBytes),
       sizeRow("recordMB", "Largest record", "One native record (a single message or tool result). Cannot exceed reading memory.", hs.recordMBs, d.recordBytes),
       sizeRow("archiveMB", "Portable archive", "The preserved archive, including earlier transfers. Also the disk it may use per session.", hs.archiveMBs, d.archiveBytes),
+      sizeRow("lineageMB", "Movement ledger", "Saved transfer history and return checkpoints. Raising this limit preserves the complete ledger; nothing is truncated.", hs.lineageMBs, d.lineageBytes),
       sizeRow("nativeFileMB", "Native file checks", "Whole native files read to verify forks, recover an interrupted write, or check a staged copy.", hs.nativeFileMBs, d.nativeFileBytes)),
   ];
 }
@@ -376,7 +394,11 @@ async function loadHistory() {
   if (current === "settings" && tab === "history") render();
 }
 
-const TABS = [["general", "General", general], ["desktop", "Desktop presence", desktop], ["agents", "Agents", agents], ["history", "History", history], ["terminal", "Terminal", terminal], ["skill", "Skill", skill], ["cli", "Command line", cli], ["updates", "Updates", updates]];
+const TABS = [["general", "General", general], ["machines", "Machines", machinesPanel], ["hooks", "Hooks & skills", hooks], ["clouds", "Clouds", cloudsPanel], ["desktop", "Desktop presence", desktop], ["agents", "Agents", agents], ["history", "History", history], ["terminal", "Terminal", terminal], ["skill", "Skill", skill], ["cli", "Command line", cli], ["updates", "Updates", updates]];
+
+// The machine and coverage tabs need room for a list beside details, and a table.
+const WIDE = ["machines", "hooks"];
+bindMachines(() => current === "settings" && ["machines", "clouds", "hooks"].includes(tab), () => render());
 
 function render() {
   if (current !== "settings") return;
@@ -394,7 +416,7 @@ function render() {
         } }, label)),
       h("button", {class:"tab",onclick:()=>go("accounts")}, "Accounts"),
       h("span", { class: "spacer" })),
-    h("div", { class: "page", role: "tabpanel", "aria-labelledby": "tab-" + tab }, h("div", { class: "page-in", style: "max-width:760px" }, h("h1", {}, name), saving ? h("p", { role: "status" }, "Saving changes…") : null, h("fieldset", { class: "settings-fields", disabled: saving, "aria-busy": String(saving) }, body())))));
+    h("div", { class: "page", role: "tabpanel", "aria-labelledby": "tab-" + tab }, h("div", { class: "page-in", style: WIDE.includes(tab) ? "max-width:1180px" : "max-width:760px" }, h("h1", {}, name), saving ? h("p", { role: "status" }, "Saving changes…") : null, h("fieldset", { class: "settings-fields", disabled: saving, "aria-busy": String(saving) }, body())))));
   view.querySelector(".page").scrollTop = scrollTop;
 }
 
@@ -418,8 +440,9 @@ async function load() {
   await Promise.all([loadTerminal(), loadHistory()]);
 }
 
-screen("settings", async (which) => {
+screen("settings", async (which, pick) => {
   if (which) tab = which;
+  if (pick) pickMachine(pick);
   if (!s) loading("Reading the settings…");
   await load();
 });
@@ -430,6 +453,14 @@ function hookName(hook, hooks) {
   const name = AGENT_NAMES[hook.agent] || hook.agent;
   return hooks.filter((x) => x.agent === hook.agent).length > 1 ? `${name} (${hook.profileLabel || hook.profile || "default account"})` : name;
 }
+
+// installHooks reports each item's own failure (the call itself succeeds when one agent
+// cannot take the hook).
+const installHooks = (id, profile) => withCLI(() => api("InstallNoticeHooks", id, profile)).then((res) => {
+  const bad = (res || []).filter((x) => x.result === "failed" || id && x.result === "unsupported");
+  if (bad.length) throw new Error(bad.map((x) => `${AGENT_NAMES[x.agent] || x.agent}: ${x.reason}`).join("; "));
+  return res;
+});
 
 function noticeSetup() {
   const hooks = s.noticeHooks || [];
@@ -443,8 +474,8 @@ function noticeSetup() {
       title(hookName(hook, hooks), `${hook.installed ? "Installed" : "Not installed"}${hook.installed ? trustWords(hook.trust) : ""}${hook.reason ? " · " + hook.reason : ""}`),
       hook.trust && hook.trust.state !== "trusted" && hook.trust.fix ? h("span", {class:"muted",style:"font-size:12px"}, hook.trust.fix) : null,
       hook.installed ? h("button", {class:"btn",onclick:()=>run(()=>api("RemoveNoticeHooks",hook.agent,hook.profile),"Hook removed")}, "Remove hook")
-      : h("button", {class:"btn",disabled:!hook.supported || off,onclick:()=>run(()=>withCLI(()=>api("InstallNoticeHooks",hook.agent,hook.profile)),"Hook installed")}, "Install hook"))),
+      : h("button", {class:"btn",disabled:!hook.supported || off,onclick:()=>run(()=>installHooks(hook.agent,hook.profile),"Hook installed")}, "Install hook"))),
     h("div", {style:"display:flex;gap:8px;flex-wrap:wrap"},
-      h("button", {class:"btn",disabled:off,onclick:()=>run(()=>withCLI(()=>api("InstallNoticeHooks","","")),"Hooks installed")}, "Install all hooks"),
+      h("button", {class:"btn",disabled:off,onclick:()=>run(()=>installHooks("",""),"Hooks installed")}, "Install all hooks"),
       h("button", {class:"btn",onclick:()=>run(()=>loadHookHealth(true))}, "Check again")));
 }

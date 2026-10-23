@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -280,6 +281,22 @@ func (localProcs) Names(ctx context.Context, pids []int) (map[int]string, error)
 	return processNames(ctx, pids)
 }
 
+func (localProcs) Commands(ctx context.Context, pids []int) (map[int]string, error) {
+	return processCommands(ctx, pids)
+}
+
+// parseCommands reads ps "pid command" lines.
+func parseCommands(out string) map[int]string {
+	m := map[int]string{}
+	for _, line := range strings.Split(out, "\n") {
+		pid, command, ok := strings.Cut(strings.TrimSpace(line), " ")
+		if n, err := strconv.Atoi(pid); ok && err == nil {
+			m[n] = strings.TrimSpace(command)
+		}
+	}
+	return m
+}
+
 // localLocks probes advisory locks on this machine.
 type localLocks struct{}
 
@@ -307,7 +324,7 @@ func (localLocks) Holders(ctx context.Context, paths []string) (map[string][]int
 }
 
 // LocalFS is this machine's filesystem.
-func LocalFS() FS { return localFS{} }
+func LocalFS() FS { return withCompressed(localFS{}) }
 
 func (localFS) CreateExclusive(p string, b []byte, perm fs.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {

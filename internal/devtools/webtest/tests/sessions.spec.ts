@@ -191,10 +191,10 @@ test("a session open in Claude reports unsupported exact opening instead of sile
   expect((await page.request.post(`/live?session=${id}&entrypoint=claude-desktop`)).ok()).toBeTruthy();
   await menu(page, "refresh");
   const r = row(page, "Find the codeword");
-  await expect(r.getByRole("button", { name: "Show in Claude app" })).toBeVisible({ timeout: 30_000 });
   await expect(r.locator(".pchip")).toContainText("Claude app");
   await r.click();
   const d = details(page);
+  await expect(d.getByRole("button", { name: "Show in Claude app" })).toBeVisible({ timeout: 30_000 });
   await expect(d.locator(".ins-status")).toContainText("in Claude app");
   await expect(d).not.toContainText("The app opens on its last view");
   await expect(d.getByText("Open in", { exact: true })).toBeVisible();
@@ -208,17 +208,48 @@ test("a session open in Claude reports unsupported exact opening instead of sile
   await expect(r).toHaveCount(0); // A desktop-app window is not a terminal tab.
 });
 
-test("a session open in a terminal is shown where it runs, never opened twice", async ({ page }) => {
+test("an unidentified running window has no invented terminal action or duplicate resume", async ({ page }) => {
   const key = await row(page, "Find the codeword").getAttribute("data-key");
   const id = key!.split("\u0000")[1].split("/")[1];
+  // The stand-in process may inherit a real terminal on a developer's Mac but has no
+  // identifiable window on CI. Every answer the window takes in says the latter: a later
+  // presence poll or scan must not bring the developer's terminal back.
+  const unidentified = { live: true, status: "idle", needs: false, app: "", places: [] };
+  const patch = (scan: any) => {
+    for (const g of scan?.groups || []) for (const e of g.entries || []) if (e.title === "Find the codeword") Object.assign(e, unidentified);
+  };
+  await page.routeWebSocket(/\/events$/, ws => {
+    const server = ws.connectToServer();
+    server.onMessage(message => {
+      const m = JSON.parse(String(message));
+      if (m.name !== "hopsesh:discovery") return ws.send(message);
+      patch(m.data);
+      ws.send(JSON.stringify(m));
+    });
+  });
+  await page.route("**/call", async route => {
+    const m = route.request().postDataJSON()?.m;
+    if (!["Presence", "InitialScan", "Scan", "RefreshHere", "CachedScan", "ScanSnapshot"].includes(m)) return route.continue();
+    // A reload or the test's end may cancel a request still being answered.
+    try {
+      const response = await route.fetch(), body = await response.json();
+      if (m === "Presence") { if (body.result?.entries?.[key!]) body.result.entries[key!] = unidentified; }
+      else patch(body.result);
+      await route.fulfill({ json: body });
+    } catch { /* cancelled */ }
+  });
   expect((await page.request.post(`/live?session=${id}&entrypoint=cli`)).ok()).toBeTruthy();
+  await page.reload();
+  await expect(page.locator("#fresh")).toContainText("updated", { timeout: 30_000 });
   await menu(page, "refresh");
   const r = row(page, "Find the codeword");
-  await expect(r.getByRole("button", { name: /^Show/ })).toBeVisible({ timeout: 30_000 });
-  await expect(r.locator(".pchip")).toHaveCount(1);
+  await expect(r.locator(".pchip")).toHaveCount(0);
   await r.click();
-  await expect(details(page).locator("#act-primary")).toHaveText(/^Show/);
-  await expect(details(page).locator(".ins-status")).toContainText(/^(Idle|Working) in /);
+  await expect(details(page)).toContainText("This session is running; its window could not be identified.");
+  await expect(details(page).locator("#act-primary")).toHaveCount(0);
+  await expect(details(page).getByRole("button", {name:/^(Show|Resume in)/})).toHaveCount(0);
+  await expect(details(page).locator(".ins-status")).toContainText(/^Idle/);
+  await page.unrouteAll({ behavior: "ignoreErrors" });
 });
 
 test("a session in a tab of the hopsesh Terminal: Show it, Move waits until it ends, and two places warn", async ({ page }) => {
@@ -228,9 +259,9 @@ test("a session in a tab of the hopsesh Terminal: Show it, Move waits until it e
     { id: "t9", kind: "session", machine, key, title: "Find the codeword · claude", state: "running", attention: true }), [machine, k]);
   const r = row(page, "Find the codeword");
   await expect(r.locator(".pchip")).toContainText("1 tab");
-  await expect(r.getByRole("button", { name: "Show in hopsesh Terminal" })).toBeVisible();
   await r.click();
   const d = details(page);
+  await expect(d.getByRole("button", { name: "Show in hopsesh Terminal" })).toBeVisible();
   await expect(d.locator("#act-primary")).toHaveText("Show in hopsesh Terminal");
   await expect(d.locator(".ins-status")).toContainText("Waiting for you in hopsesh Terminal");
   await expect(d.locator(".open-line")).toContainText("“Find the codeword · claude”");
@@ -326,7 +357,8 @@ test("mod+Enter cannot bypass a disabled desktop action or run a different actio
   const id = key!.split("\u0000")[1].split("/")[1];
   expect((await page.request.post(`/live?session=${id}&entrypoint=claude-desktop`)).ok()).toBeTruthy();
   await menu(page, "refresh");
-  await expect(row(page, "Find the codeword").getByRole("button", { name: "Show in Claude app" })).toBeVisible({ timeout: 30_000 });
+  await row(page, "Find the codeword").click();
+  await expect(details(page).getByRole("button", { name: "Show in Claude app" })).toBeVisible({ timeout: 30_000 });
   await page.getByRole("button", { name: "Search sessions or run a command" }).click();
   const input = page.getByRole("combobox", { name: "Search sessions or run a command" });
   await input.fill("Find the codeword");

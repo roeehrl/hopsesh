@@ -118,8 +118,12 @@ func TestPlanMoveAndRules(t *testing.T) {
 	if !strings.Contains(r, `prefix_rule(pattern=["hopsesh", "ls"], decision="allow")`) || !strings.Contains(r, `prefix_rule(pattern=["hopsesh", "pull"], decision="prompt")`) {
 		t.Fatalf("rules:\n%s", r)
 	}
-	if c := m.Resume(in, agent.SessionKey{Agent: id, Session: "x"}, agent.Placement{CWD: "/r"}, agent.ResumeOptions{Fork: true}); strings.Join(c.Argv, " ") != "codex fork x" {
+	if c := m.Resume(in, agent.SessionKey{Agent: id, Session: "x"}, agent.Placement{CWD: "/r"}, agent.ResumeOptions{Fork: true}); strings.Join(c.Argv, " ") != "codex fork x -C /r" {
 		t.Fatalf("fork: %v", c.Argv)
+	}
+	// An explicit folder, or Codex asks which one (or goes back to the thread's own).
+	if c := m.Resume(in, agent.SessionKey{Agent: id, Session: "x"}, agent.Placement{CWD: "/r"}, agent.ResumeOptions{}); strings.Join(c.Argv, " ") != "codex resume x -C /r" || c.Dir != "/r" {
+		t.Fatalf("resume: %v in %s", c.Argv, c.Dir)
 	}
 }
 

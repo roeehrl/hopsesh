@@ -42,10 +42,35 @@ export function icon(d, size = 14) {
   }
   return s;
 }
+// hopMark is hopsesh's own mark beside a machine (its arc and two dots): filled and green
+// when hopsesh runs there and receives sessions, hollow and gray when it is installed but
+// not receiving; nothing when it is not installed. The words are its accessible name and
+// tooltip, so the color is never the only signal. A newer hopsesh elsewhere adds an ↑ chip.
+export function hopMark(m, size = 18) {
+  const v = m?.hopsesh;
+  if (!v) return null;
+  const on = !!m.receiving;
+  const words = `hopsesh ${v}${on ? ", receiving sessions" : ", not receiving sessions"}${m.newest ? ` · ${m.newest} is the newest` : ""}`;
+  const ns = "http://www.w3.org/2000/svg";
+  const s = document.createElementNS(ns, "svg");
+  for (const [k, val] of Object.entries({ width: size, height: Math.round(size * 2 / 3), viewBox: "0 0 18 12", "aria-hidden": "true" })) s.setAttribute(k, val);
+  const arc = document.createElementNS(ns, "path");
+  for (const [k, val] of Object.entries({ d: "M3.5 9 A5.5 6.5 0 0 1 14.5 9", fill: "none", stroke: "currentColor", "stroke-width": "1.6", "stroke-linecap": "round" })) arc.setAttribute(k, val);
+  s.append(arc);
+  for (const cx of [3.5, 14.5]) {
+    const c = document.createElementNS(ns, "circle");
+    for (const [k, val] of Object.entries(on ? { cx, cy: 9.6, r: 2.1, fill: "currentColor" } : { cx, cy: 9.6, r: 1.6, fill: "var(--panel)", stroke: "currentColor", "stroke-width": "1.3" })) c.setAttribute(k, val);
+    s.append(c);
+  }
+  return h("span", { class: "hop-mark " + (on ? "on" : "off"), role: "img", "aria-label": words, title: words }, s,
+    m.newest ? h("span", { class: "hop-behind", "aria-hidden": "true" }, "↑") : null);
+}
+
 export const ICONS = {
   all: ["M4 5h16v14H4z", "M4 10h16"],
   here: ["M3 5h18v11H3z", "M8 20h8M12 16v4"],
   plus: "M12 5v14M5 12h14",
+  refresh: ["M20 11a8 8 0 1 0-2.3 5.7", "M20 4v7h-7"],
   clock: ["M12 8v4l3 2", "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z"],
   arrow: "M5 12h14M13 6l6 6-6 6",
   down: "M12 5v14M6 13l6 6 6-6",
@@ -238,7 +263,18 @@ export function entries() {
 }
 export function selected() {
   const s = state.sel;
-  return s ? entries().find((e) => e.machine === s.machine && e.key === s.key) || null : null;
+  return s ? entries().find((e) => e.machine === s.machine && e.key === s.key) || copyEntry(s.machine, s.key) : null;
+}
+// copyEntry is a copy folded into another session's row (an original left behind by a
+// move), with the group of the row it is folded into; null when it is not in the scan.
+export function copyEntry(machine, key) {
+  for (const g of state.scan?.profileCopies || []) for (const e of g.entries) if (e.machine === machine && e.key === key) {
+    const home = state.scan.groups.find((gr) => gr.entries.some((x) => (x.copies || []).some((c) => c.machine === machine && c.key === key)));
+    return Object.assign({ group: home || g }, e);
+  }
+  const resolved = state.resolvedSelection;
+  if (resolved?.machine === machine && resolved.key === key) return resolved;
+  return null;
 }
 export const here = () => (state.scan?.machines.find((m) => m.local) || {}).name || state.info?.host;
 export const clouds = () => state.scan?.clouds || [];
@@ -285,8 +321,28 @@ export function ask({ title, body, ok, danger = false }) {
 
 // Profiles identify state roots, not the historical owner of every conversation.
 export const accountLabel = p => p?.account?.email || p?.name || "No account profile";
-// accountShown is what names an account next to a session: its email, or a profile's own
-// name ("Work"); a default profile's name ("Codex default") only repeats the agent.
-export const accountShown = p => p?.account?.email || (p && !p.default ? p.name : "") || "";
-export const accountTitle = p => p ? `Stored in ${p.name} (${p.root}). ${p.account?.loggedIn ? `${p.error ? "Last known" : "Current"} sign-in: ${p.account.email || p.account.label || p.account.provider}.` : "Current sign-in not confirmed."} ${p.error ? p.error+". " : ""}This does not establish who originally created the session.` : "No registered account profile";
-export const accountGroupLabel = e => e.profile ? `${accountLabel(e.profile)} · ${e.agentName} · ${e.machine === here() ? sys.Here : e.machine}${e.profile.account?.email && !e.profile.default ? " · "+e.profile.name : ""}` : "No account profile";
+// A session's account is the one its agent recorded running it (e.owner), never just
+// the sign-in its profile's root has now: a root signed in to another account before
+// holds that account's sessions too.
+// accountShown names it next to a session: the recorded account's email ("another
+// account" for one no profile is signed in to now); unrecorded, a named profile ("Work")
+// says where it is stored, and a default profile's name would only repeat the agent.
+export const accountShown = e => ownerShown(e) || (e?.profile && !e.profile.default && !e?.owner?.recorded ? e.profile.name : "");
+const signedInNow = p => p?.account?.loggedIn ? `${p.error ? "was last seen signed in" : "is signed in"} as ${p.account.email || p.account.label || p.account.provider} now` : "has no confirmed sign-in now";
+export const accountTitle = e => {
+  const p = e?.profile, o = e?.owner || {};
+  if (!p) return "No registered account profile";
+  const where = `Stored in ${p.name} (${p.root}), which ${signedInNow(p)}.${p.error ? " " + p.error + "." : ""}`;
+  const before = o.earlier ? ` Before that it ran under ${o.earlier}.` : "";
+  if (o.email && o.current) return `Run by ${o.email}, as recorded.${before} ${where}`;
+  if (o.email) return `Run by ${o.email}, as recorded${o.profile ? ` (signed in to ${o.profile} now)` : ""}.${before} ${where}`;
+  if (o.recorded && !o.current) return `Run by an account that no profile here is signed in to now, as recorded.${before} ${where}`;
+  return `No record says which account ran this session. ${where}`;
+};
+export const ownerShown = e => e?.owner?.email || (e?.owner?.recorded && !e.owner.current && !e.owner.pending ? "another account" : "");
+export const accountGroupLabel = e => e.profile ? `${ownerShown(e) || "Account not recorded"} · ${e.agentName} · ${e.machine === here() ? sys.Here : e.machine}${!e.profile.default || !e.owner?.current ? " · in " + e.profile.name : ""}` : "No account profile";
+// accountKey files a session under its root and its recorded account's fingerprint, for
+// filters and groups: the same after any sign-in change. accountKeyLegacy is 0.4.5's,
+// so a saved filter keeps matching.
+export const accountKey = e => (e.profile?.id || "") + "\u0000" + (e.owner?.key || "");
+export const accountKeyLegacy = e => (e.profile?.id || "") + "\u0000" + (e.owner?.email || (e.owner?.recorded ? (e.owner.current ? "current" : "other") : ""));

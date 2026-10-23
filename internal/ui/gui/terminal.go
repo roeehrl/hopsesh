@@ -59,6 +59,10 @@ const (
 	TabBring   = "bring"   // a bring-back's teleport (claude --teleport)
 	TabSignIn  = "signin"  // a vendor's sign-in: nothing recorded
 	TabShell   = "shell"   // the user's login shell: nothing recorded
+	// TabRemote shows a terminal hopsesh runs on another machine (Machine): a session
+	// continued there (Key), a new one, or a sign-in there. Closing the tab here leaves it
+	// running there.
+	TabRemote = "remote"
 )
 
 // TabMeta is what the app knows about a tab besides its program's state.
@@ -91,12 +95,15 @@ type TabMeta struct {
 	External bool `json:"external"`
 	// Rerun: the tab offers "Run again" once its program ended.
 	Rerun bool `json:"rerun"`
+	// Remote is the id of the terminal hopsesh runs on Machine (a TabRemote).
+	Remote string `json:"remote,omitempty"`
 }
 
 // TermTab is a tab as the windows show it.
 type TermTab struct {
 	pty.Info
 	TabMeta
+	Revision uint64 `json:"revision"` // orders full metadata snapshots and removals
 	// Attention: the tab waits for the user (a bell or a notification from its program, a
 	// step that asks or stays quiet, a bring-back until it ends); it counts in "Needs you".
 	Attention bool `json:"attention"`
@@ -106,6 +113,9 @@ type TermTab struct {
 type tab struct {
 	meta TabMeta
 	spec pty.Spec
+
+	bindingSequence  uint64 // newest committed native read; guarded by Terms.mu
+	checkingControls *terminalBindingControls
 	// external ends the tab and runs its command in the user's terminal app (nil: not
 	// offered); rerun starts the same spec in a new tab.
 	external func(id string) error
@@ -173,6 +183,9 @@ type Terminals struct {
 	tabs    map[string]*tab
 	active  string // the tab the terminal window shows
 	badge   int
+
+	bindingSequence uint64 // native reads are ordered when they begin, not finish
+	revision        uint64 // metadata/event revision; guarded by mu
 
 	// Prefs are the window's settings (nil: defaults); SavePrefs stores what the window
 	// changed (a font size, the screen reader mode; nil: unchanged); Shell opens a shell
@@ -562,6 +575,10 @@ func (t *Terminals) rerun(id string, tb *tab) {
 	if s, ok := t.mgr.Get(id); !ok || s.Info().State != pty.Exited {
 		return
 	}
+	if _, err := t.sessionTabRoute(tb.meta.Machine, tb.meta.Key); tb.meta.Kind == TabSession && err != nil {
+		t.notice(id, err.Error())
+		return
+	}
 	if tb.meta.Kind == TabSession && t.liveSessionTab(tb.meta.Machine, tb.meta.Key) != "" {
 		t.notice(id, "It is running in another tab already.")
 		return
@@ -576,6 +593,8 @@ func (t *Terminals) rerun(id string, tb *tab) {
 // user when a tab they cannot see starts waiting, and tells a tab's opener that it ended.
 func (t *Terminals) changed(i pty.Info) {
 	t.mu.Lock()
+	t.revision++
+	revision := t.revision
 	tb := t.tabs[i.ID]
 	app := t.app
 	var (
@@ -634,7 +653,7 @@ func (t *Terminals) changed(i pty.Info) {
 	t.mu.Unlock()
 	t.sendList()
 	if t.Emit != nil {
-		t.Emit(TerminalEvent, TermTab{Info: i, TabMeta: meta, Attention: tb != nil && attention(i, meta)})
+		t.Emit(TerminalEvent, TermTab{Info: i, TabMeta: meta, Revision: revision, Attention: tb != nil && attention(i, meta)})
 	}
 	if app != nil {
 		t.updateBadge()
@@ -977,7 +996,7 @@ func (t *Terminals) Tabs() []TermTab {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for _, i := range infos {
-		d := TermTab{Info: i}
+		d := TermTab{Info: i, Revision: t.revision}
 		if tb := t.tabs[i.ID]; tb != nil {
 			d.TabMeta = tb.meta
 			d.Attention = attention(i, tb.meta)
@@ -1013,12 +1032,28 @@ func (t *Terminals) setMeta(id string, f func(*TabMeta)) {
 // liveSessionTab is the tab whose program still runs a session (machine, key), if any: a
 // session's, or the bring-back's that saved it.
 func (t *Terminals) liveSessionTab(machine, key string) string {
+	id, _ := t.sessionTabRoute(machine, key)
+	return id
+}
+
+var errCheckingSession = errors.New("the session association is still being checked; wait for native verification or end that terminal client, then try again")
+
+// Last-known identity cannot focus a current session, but remains a duplicate
+// guard until the exact owned process exits or native evidence verifies it.
+func (t *Terminals) sessionTabRoute(machine, key string) (string, error) {
+	var id string
 	for _, d := range t.Tabs() {
-		if (d.Kind == TabSession || d.Kind == TabBring) && d.Machine == machine && d.Key == key && d.State != pty.Exited {
-			return d.ID
+		if (d.Kind != TabSession && d.Kind != TabBring) || d.Machine != machine || d.State == pty.Exited {
+			continue
+		}
+		if d.Association == associationChecking && (d.Key == key || d.LaunchedKey == key) {
+			return "", errCheckingSession
+		}
+		if d.Key == key {
+			id = d.ID
 		}
 	}
-	return ""
+	return id, nil
 }
 
 // close ends a tab and waits for its program.
@@ -1084,4 +1119,14 @@ func (a *App) TerminalCloseTab(id string) error {
 		return errors.New("no such tab")
 	}
 	return a.Terms.mgr.Close(id)
+}
+
+// remoteTab is the open tab that shows a session running on another machine ("" none).
+func (t *Terminals) remoteTab(machine, key string) string {
+	for _, d := range t.Tabs() {
+		if d.Kind == TabRemote && d.Machine == machine && d.Key == key && d.State != pty.Exited {
+			return d.ID
+		}
+	}
+	return ""
 }

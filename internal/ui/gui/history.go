@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/sdk/ir"
 )
@@ -13,6 +14,7 @@ type HistorySettingsDTO struct {
 	ReadMemoryMBs  []int `json:"readMemoryMBs"`
 	RecordMBs      []int `json:"recordMBs"`
 	ArchiveMBs     []int `json:"archiveMBs"`
+	LineageMBs     []int `json:"lineageMBs"`
 	NativeFileMBs  []int `json:"nativeFileMBs"`
 	// Effective values after defaults, shown next to "Default".
 	Effective ir.Limits `json:"effective"`
@@ -25,7 +27,7 @@ func (a *App) HistorySettings() HistorySettingsDTO {
 	h := a.core.Cfg.History
 	a.mu.Unlock()
 	return HistorySettingsDTO{History: h, ContextBudgets: config.HistoryContextBudgets, ReadMemoryMBs: config.HistoryReadMemoryMBs,
-		RecordMBs: config.HistoryRecordMBs, ArchiveMBs: config.HistoryArchiveMBs, NativeFileMBs: config.HistoryNativeFileMBs,
+		RecordMBs: config.HistoryRecordMBs, ArchiveMBs: config.HistoryArchiveMBs, LineageMBs: config.HistoryLineageMBs, NativeFileMBs: config.HistoryNativeFileMBs,
 		Effective: h.Limits(), Defaults: ir.DefaultLimits()}
 }
 
@@ -41,6 +43,7 @@ func (a *App) SetHistorySettings(in config.History) error {
 	zero(&in.ReadMemoryMB, d.ReadBytes)
 	zero(&in.RecordMB, d.RecordBytes)
 	zero(&in.ArchiveMB, d.ArchiveBytes)
+	zero(&in.LineageMB, d.LineageBytes)
 	zero(&in.NativeFileMB, d.NativeFileBytes)
 	if in.Older == ir.OlderExtract {
 		in.Older = ""
@@ -58,5 +61,27 @@ func (a *App) SetHistorySettings(in config.History) error {
 		a.core.Cfg.History = prev
 		return err
 	}
+	if prev != in {
+		// Do not mutate a published inventory while scans/actions still read it.
+		// The next selection re-reads its source with the newly saved limits.
+		if a.historyStale == nil {
+			a.historyStale = map[string]bool{}
+		}
+		if a.inv != nil {
+			for _, e := range a.inv.Entries {
+				a.historyStale[app.EntryIdentity(e.Machine, e.Session.Key.String())] = true
+			}
+		}
+		a.invalidateReviewsLocked()
+	}
 	return nil
+}
+
+// Call only after publishing observations made under the current settings.
+func (a *App) historyObservedLocked(inv *app.Inventory) {
+	for _, e := range inv.Entries {
+		if !e.Cached {
+			delete(a.historyStale, app.EntryIdentity(e.Machine, e.Session.Key.String()))
+		}
+	}
 }

@@ -38,7 +38,6 @@ func addPullFlags(cmd *cobra.Command) {
 	f.String("repos", "", "folder for clones (default from config, ~/git)")
 	f.Bool("ghq", false, "clone into <repos>/<host>/<owner>/<repo>")
 	f.String("worktree", "auto", "auto: recreate the worktree if the session used one; create: always use a worktree on the session's branch; main: use the main checkout")
-	f.Bool("fork", false, "keep the source session running (both continue) instead of handing off")
 	f.Bool("rc", false, "turn the agent's remote control on, where it has one")
 	f.Bool("notify", false, "protect the original until you move back: blocked or warned as set by hopsesh's original setting (default on unless set to off; --notify=false leaves it alone)")
 	f.Bool("redact", false, "redact likely secrets in the copy")
@@ -77,7 +76,6 @@ func (r *run) pullOptions(cmd *cobra.Command) (move.Options, error) {
 	w, _ := f.GetString("worktree")
 	o.Worktree = move.WorktreeMode(w)
 	o.Clone, _ = f.GetBool("clone")
-	o.Fork, _ = f.GetBool("fork")
 	o.RemoteControl, _ = f.GetBool("rc")
 	if f.Changed("notify") {
 		o.Notify, _ = f.GetBool("notify")
@@ -345,6 +343,9 @@ func (r *run) renderPlan(p *move.Plan) {
 	guard := "protected until you move back"
 	if r.app != nil {
 		guard += " (" + r.app.Cfg.OriginalGuard() + ")"
+	}
+	if p.Unprotected {
+		guard = "not protected: no hopsesh on " + p.Source.Location
 	}
 	r.printf("  original  %s\n", map[bool]string{true: guard, false: "left alone"}[p.Options.Notify])
 	switch p.Repo.Action {

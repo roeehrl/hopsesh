@@ -118,7 +118,7 @@ test("Display: group by each property, sort, rows, and reset", async ({ page }) 
   // Rows.
   await d.getByRole("radio", { name: "Compact" }).click();
   await expect(page.locator(".tree.compact")).toBeVisible();
-  expect(await page.locator(".row").first().evaluate((el) => Math.round(el.getBoundingClientRect().height))).toBe(32);
+  expect(await page.locator(".row").first().evaluate((el) => Math.round(el.getBoundingClientRect().height))).toBe(50);
   // Kept across a reload, then reset.
   await page.waitForTimeout(600);
   await page.reload();

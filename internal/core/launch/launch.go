@@ -109,6 +109,9 @@ func Shell(c agent.Command, promptFile, family string) string {
 				unset += "Set-Item " + PSQuote("Env:"+k) + " " + PSQuote(v) + "; "
 			}
 		}
+		if c.Dir == "" {
+			return unset + "& " + strings.Join(parts, " ")
+		}
 		return "Set-Location " + PSQuote(c.Dir) + "; " + unset + "& " + strings.Join(parts, " ")
 	}
 	parts := make([]string, len(argv))
@@ -128,6 +131,9 @@ func Shell(c agent.Command, promptFile, family string) string {
 			env += " " + ShQuote(kv)
 		}
 		env += " "
+	}
+	if c.Dir == "" { // an app link (codex://…) opens without a folder
+		return env + strings.Join(parts, " ")
 	}
 	return "cd " + ShQuote(c.Dir) + " && " + env + strings.Join(parts, " ")
 }

@@ -28,6 +28,7 @@ when reached, naming the limit. History is never silently truncated:
   --read-memory-mb   conversation a native transcript may hold in memory while read
   --record-mb        one native record
   --archive-mb       the portable archive, including earlier transfers
+  --lineage-mb       saved movement ledger and return checkpoints
   --native-file-mb   whole native files read for fork checks, recovery and verification
 
 Without flags it shows the current values. pull --context-budget/--older override them for
@@ -45,7 +46,7 @@ one transfer.`,
 			for _, fl := range []struct {
 				name string
 				dst  *int
-			}{{"context-budget", &h.ContextBudget}, {"read-memory-mb", &h.ReadMemoryMB}, {"record-mb", &h.RecordMB}, {"archive-mb", &h.ArchiveMB}, {"native-file-mb", &h.NativeFileMB}} {
+			}{{"context-budget", &h.ContextBudget}, {"read-memory-mb", &h.ReadMemoryMB}, {"record-mb", &h.RecordMB}, {"archive-mb", &h.ArchiveMB}, {"lineage-mb", &h.LineageMB}, {"native-file-mb", &h.NativeFileMB}} {
 				if f.Changed(fl.name) {
 					*fl.dst, _ = f.GetInt(fl.name)
 					changed = true
@@ -90,6 +91,7 @@ one transfer.`,
 			r.printf("Reading memory:    %s\n", size(l.ReadBytes, d.ReadBytes))
 			r.printf("Largest record:    %s\n", size(l.RecordBytes, d.RecordBytes))
 			r.printf("Portable archive:  %s\n", size(l.ArchiveBytes, d.ArchiveBytes))
+			r.printf("Movement ledger:   %s\n", size(l.LineageBytes, d.LineageBytes))
 			r.printf("Native file checks: %s\n", size(l.NativeFileBytes, d.NativeFileBytes))
 			return nil
 		},
@@ -100,6 +102,7 @@ one transfer.`,
 	f.Int("read-memory-mb", 0, "reading memory, MiB (0: default)")
 	f.Int("record-mb", 0, "largest native record, MiB (0: default)")
 	f.Int("archive-mb", 0, "portable archive size, MiB (0: default)")
+	f.Int("lineage-mb", 0, "movement ledger size, MiB (0: default)")
 	f.Int("native-file-mb", 0, "native file checks, MiB (0: default)")
 	f.Bool("json", false, "output JSON")
 	return cmd

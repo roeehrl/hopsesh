@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/testkit/fakecloud"
 )
 
@@ -212,7 +213,7 @@ func (r *runner) scenario(row Row) error {
 	}
 	s.dstCwd = tr.Cwd
 	switch row.Op {
-	case "move", "continue", "bounded", "fork":
+	case "move", "continue", "bounded", "new-session":
 		return r.pullAndUndo(s)
 	case "push":
 		return r.push(s)
@@ -230,8 +231,8 @@ func (s *sc) ref() string { return s.host + ":" + s.row.From + "/" + s.id }
 
 func (s *sc) pullArgs(extra ...string) []string {
 	args := []string{"pull", s.ref(), "--yes", "--json"}
-	if s.row.Op == "fork" {
-		args = append(args, "--fork")
+	if s.row.Op == "new-session" {
+		args = append(args, "--new-session")
 	}
 	if s.row.Op == "quiet-roundtrip" {
 		args = append(args, "--notify=false")
@@ -335,14 +336,28 @@ func (r *runner) codeCame(s *sc) error {
 }
 
 func (r *runner) pullAndUndo(s *sc) error {
-	if _, err := r.hs(true, s.pullArgs()...); err != nil {
+	out, err := r.hs(true, s.pullArgs()...)
+	if err != nil {
 		return err
 	}
 	f, err := r.arrived(s, r.here, s.row.To, s.dstCwd, s.srcCwd)
 	if err != nil {
 		return err
 	}
-	if err := checkMovement(f, 1, true, s.row.Op == "fork"); err != nil {
+	// A fresh native replica is still a move on the same logical branch. The CLI
+	// no longer supports making an independently running copy with --fork.
+	if s.row.Op == "new-session" {
+		var reply struct{ Plan move.Plan }
+		if err := json.Unmarshal([]byte(out), &reply); err != nil {
+			return fmt.Errorf("new-session pull result: %w", err)
+		}
+		p := reply.Plan
+		if !p.Options.NewReplica || p.Options.Fork || p.NoWork || p.Continue == nil || p.Continue.AppendTo != nil ||
+			f.ID == s.id || f.ID != string(p.Placement.Key.Session) {
+			return fmt.Errorf("new-session did not create the planned fresh native replica")
+		}
+	}
+	if err := checkMovement(f, 1, true, false); err != nil {
 		return err
 	}
 	if err := r.codeCame(s); err != nil {

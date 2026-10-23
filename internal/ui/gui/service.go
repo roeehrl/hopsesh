@@ -29,6 +29,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/proc"
 	"github.com/roeehrl/hopsesh/internal/core/pty"
 	"github.com/roeehrl/hopsesh/internal/core/registry"
+	"github.com/roeehrl/hopsesh/internal/ui/skill"
 	"github.com/roeehrl/hopsesh/internal/update"
 	"github.com/roeehrl/hopsesh/internal/version"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -40,34 +41,39 @@ const MenuEvent = "hopsesh:menu"
 
 // App is the service bound to the frontend.
 type App struct {
-	Desktop        DesktopShell `json:"-"`
-	closing        bool
-	watchDone      chan struct{}
-	watchOnce      sync.Once
-	watchLocal     bool
-	watchCancel    context.CancelFunc
-	selectionReads int
-	scanCancel     context.CancelFunc
-	scanRevision   atomic.Uint64
-	desktopMu      sync.Mutex
-	quick          quickState
-	mu             sync.Mutex
-	scanMu         sync.Mutex // serialize inventory refreshes
-	scans          map[string]MachineScan
-	core           *app.App // its Cfg is the saved configuration; calls work on snapshots
-	cfgErr         error    // the configuration file could not be used (see StartFresh)
-	inv            *app.Inventory
-	invAt          time.Time // when inv last read the other machines and the clouds
-	plan           *move.Plan
-	input          move.Input
-	res            *move.Result
-	push           *app.Push // a push planned on another machine, its connection open
-	pw             *pwBroker
-	appIcons       map[agent.ID]string // installed apps' icons, read once ("" when none)
-	pwOnce         sync.Once
-	step           *pendingStep // the terminal step a hand-off waits for
-	quitting       atomic.Bool  // the user confirmed quitting (or an update restarts the app)
-	termName       atomic.Value // the user's terminal app's name, for the terminal window (a string)
+	Desktop          DesktopShell `json:"-"`
+	closing          bool
+	watchDone        chan struct{}
+	watchOnce        sync.Once
+	watchLocal       bool
+	watchCancel      context.CancelFunc
+	selectionReads   int
+	scanCancel       context.CancelFunc
+	scanRevision     atomic.Uint64
+	desktopMu        sync.Mutex
+	quick            quickState
+	mu               sync.Mutex
+	scanMu           sync.Mutex // serialize inventory refreshes
+	scans            map[string]MachineScan
+	core             *app.App // its Cfg is the saved configuration; calls work on snapshots
+	cfgErr           error    // the configuration file could not be used (see StartFresh)
+	inv              *app.Inventory
+	historyStale     map[string]bool // entries requiring a fresh read after History settings change; guarded by mu
+	reviewGeneration uint64          // pending reviews are invalidated independently of borrowed active actions
+	planGeneration   uint64
+	pushGeneration   uint64
+	actionRunning    bool      // an apply owns the published plan/connection until its deferred release
+	invAt            time.Time // when inv last read the other machines and the clouds
+	plan             *move.Plan
+	input            move.Input
+	res              *move.Result
+	push             *app.Push // a push planned on another machine, its connection open
+	pw               *pwBroker
+	appIcons         map[agent.ID]string // installed apps' icons, read once ("" when none)
+	pwOnce           sync.Once
+	step             *pendingStep // the terminal step a hand-off waits for
+	quitting         atomic.Bool  // the user confirmed quitting (or an update restarts the app)
+	termName         atomic.Value // the user's terminal app's name, for the terminal window (a string)
 
 	endDestinationToken string // one use, tied to the latest exact return review
 	endDestinationPlan  *move.Plan
@@ -108,6 +114,7 @@ func NewApp(reg *registry.Registry, options ...Option) *App {
 		option(a)
 	}
 	a.core = app.New(cfg, reg, config.StateDir(), log)
+	a.core.Skills = skill.For(a.core.Specs)
 	a.core.Passwords = a.passwordFor
 	a.core.Steps = a.runStep
 	a.attachTerminal()
@@ -147,6 +154,18 @@ type AgentDTO struct {
 	Icon          string             `json:"icon,omitempty"` // a data URL: the installed app's icon or the module's mark ("": initials)
 	// Clouds are the vendor clouds the agent reaches, with what hopsesh can do there.
 	Clouds []AgentCloudDTO `json:"clouds"`
+	// Runtime is "app" when the agent runs from its desktop app's bundled runtime here.
+	Runtime string `json:"runtime,omitempty"`
+	// Kinds are sessions hidden unless shown (voice conversations, Work threads).
+	Kinds []AgentKindDTO `json:"kinds"`
+}
+
+// AgentKindDTO is a kind of session hidden by default, and whether the user shows it.
+type AgentKindDTO struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Note  string `json:"note"`
+	Shown bool   `json:"shown"`
 }
 
 // AgentCloudDTO is one of an agent's clouds in Settings: the cloud capabilities its
@@ -201,7 +220,9 @@ type Info struct {
 	// Previews: the inspector shows the end of a session's conversation.
 	Previews bool `json:"previews"`
 	Receive  bool `json:"receive"` // other machines' hopsesh may send sessions here
-	Defaults struct {
+	// SetUpIntegrations: setting hopsesh up on a machine adds its hooks and skill too.
+	SetUpIntegrations bool `json:"setUpIntegrations"`
+	Defaults          struct {
 		MovementNotices bool   `json:"movementNotices"`
 		Original        string `json:"original"`
 		SyncCode        bool   `json:"syncCode"`
@@ -227,7 +248,7 @@ func (a *App) info(fast bool) Info {
 	cfg := a.core.Cfg
 	info := Info{DesktopManaged: a.Desktop != nil, Version: version.Version, OS: runtime.GOOS, Host: app.LocalName(), ReposDir: cfg.ReposDir,
 		AuditDir: filepath.Join(config.StateDir(), "log"), UpdateCheck: cfg.UpdateCheck,
-		SkillState: skillState, SkillPrompt: cfg.SkillPrompt, Receive: cfg.Peer.Receive,
+		SkillState: skillState, SkillPrompt: cfg.SkillPrompt, Receive: cfg.Peer.Receive, SetUpIntegrations: cfg.Peer.SetUpIntegrations,
 		SetupDismissed: cfg.SetupPrompt == "declined", Layout: layoutOf(cfg.Window, cfg.Inspector),
 		List: listOf(cfg.List), Places: map[string]string{}, Previews: cfg.PreviewsOn()}
 	for k, ag := range cfg.Agents {
@@ -312,7 +333,10 @@ func (a *App) agentsLocked() []AgentDTO {
 		s := m.Spec()
 		ac := a.core.Cfg.Agents[string(s.ID)]
 		d := AgentDTO{ID: s.ID, Name: s.Name, Stability: s.Stability, Enabled: !ac.Disabled, RemoteControl: ac.RemoteControl,
-			Import: ac.Import, Tested: s.Tested, Capabilities: agent.Capabilities(m), Icon: a.iconLocked(s), Clouds: []AgentCloudDTO{}}
+			Import: ac.Import, Tested: s.Tested, Capabilities: agent.Capabilities(m), Icon: a.iconLocked(s), Clouds: []AgentCloudDTO{}, Kinds: []AgentKindDTO{}}
+		for _, k := range s.Kinds {
+			d.Kinds = append(d.Kinds, AgentKindDTO{ID: k.ID, Name: k.Name, Note: k.Note, Shown: ac.Shows([]string{k.ID})})
+		}
 		for _, c := range s.Clouds {
 			ac := AgentCloudDTO{Name: c.Name, Title: c.Title, Capabilities: []agent.Capability{}, Fidelity: string(c.Down)}
 			for _, cp := range d.Capabilities {
@@ -328,7 +352,7 @@ func (a *App) agentsLocked() []AgentDTO {
 			d.Clouds = append(d.Clouds, ac)
 		}
 		if st, ok := here[s.ID]; ok && (st.Install.Present || st.Install.Binary != "") {
-			d.Version = st.Install.Version
+			d.Version, d.Runtime = st.Install.Version, st.Install.Runtime
 			for _, r := range s.Roots {
 				d.Folder = st.Install.Root(r.Name)
 				break

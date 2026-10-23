@@ -90,8 +90,15 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 			if groupBy == "account" {
 				groups = inv.AccountGroups()
 			}
+			logins := inv.Logins()
 			if r.jsonOut {
 				out := map[string]any{"machines": inv.Machines, "clouds": inv.Clouds, "groups": groups, "relationships": inv.Relationships()}
+				// The account that ran each session (its profile is only its folder's sign-in now).
+				owners := map[string]app.SessionOwner{}
+				for _, e := range inv.Entries {
+					owners[app.EntryIdentity(e.Machine, e.Session.Key.String())] = logins.OwnerOf(e)
+				}
+				out["owners"] = owners
 				var adopted, waiting []app.Brought
 				for _, f := range inv.Adopted {
 					adopted = append(adopted, r.app.Brought(f))
@@ -150,6 +157,13 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 				case g.Identity != "" && !strings.HasPrefix(g.Identity, "local:"):
 					head += "  [not cloned here]"
 				}
+				var size int64
+				for _, it := range g.Items {
+					size += it.Entry.Session.Size
+				}
+				if size > 0 {
+					head += "  " + app.HumanBytes(size)
+				}
 				r.printf("▾ %s\n", head)
 				tw := tabwriter.NewWriter(r.out, 0, 2, 2, ' ', 0)
 				for n, it := range g.Items {
@@ -159,9 +173,9 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 					}
 					e := it.Entry
 					s := e.Session
-					fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\t%s\n", e.Machine, e.AgentName, truncate(s.Title, 40), r.movementStatus(e), ago(s.LastActivity), shortID(s.Key.Session), truncate(s.CWD, 44))
+					fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", e.Machine, e.AgentName, truncate(s.Title, 40), r.movementStatus(e), ago(s.LastActivity), sizeCell(s.Size), shortID(s.Key.Session), truncate(s.CWD, 44))
 					if e.Profile != nil {
-						fmt.Fprintf(tw, "  \t\t  profile: %s\t\t\t\t\n", app.AccountLabel(e.Profile))
+						fmt.Fprintf(tw, "  \t\t  %s\t\t\t\t\n", app.OwnerLine(logins.OwnerOf(e), e.Profile))
 					}
 					if ro := r.app.Role(e); ro != nil && e.Departure == nil {
 						fmt.Fprintf(tw, "  \t\t  %s %s · %s\t\t\t\t\n", ro.Glyph, ro.Word, ro.Line)
@@ -173,17 +187,18 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 						fmt.Fprintf(tw, "  \t\t  %s\t\t\t\t\n", copiesLine(it))
 					}
 					if e.Cloud != nil {
-						fmt.Fprintf(tw, "  \t\t  %s\t\t\t\t%s\n", e.Cloud.URL, cloudBranchInfo(e))
+						fmt.Fprintf(tw, "  \t\t  %s\t\t\t\t\t%s\n", e.Cloud.URL, cloudBranchInfo(e))
 					} else if bi := branchInfo(e.Git); bi != "" || s.LastPrompt != "" {
-						fmt.Fprintf(tw, "  \t\t  %s\t\t\t\t%s\n", truncate("“"+s.LastPrompt+"”", 60), bi)
+						fmt.Fprintf(tw, "  \t\t  %s\t\t\t\t\t%s\n", truncate("“"+s.LastPrompt+"”", 60), bi)
 					}
 					if mr := s.Mirror; mr != nil {
-						fmt.Fprintf(tw, "  \t\t  mirrored on %s\t\t\t\t%s\n", mr.Cloud, mr.URL)
+						fmt.Fprintf(tw, "  \t\t  mirrored on %s\t\t\t\t\t%s\n", mr.Cloud, mr.URL)
 					}
 				}
 				tw.Flush()
 				r.printf("\n")
 			}
+			r.printUsage(inv)
 			r.printf("Move one here: hopsesh pull [<machine>:]<id-or-title>   Continue in another agent: add --in <%s>\n", strings.Join(writerIDs(), "|"))
 			if cloudOnly {
 				r.printf("Bring one from a cloud: hopsesh pull <cloud>:<id> (or its link)\n")
@@ -354,7 +369,7 @@ func showCmd() *cobra.Command {
 			r.printf("  status       %s, last active %s\n", r.movementStatus(e), ago(s.LastActivity))
 			r.printf("  directory    %s\n", s.CWD)
 			r.printf("  last prompt  “%s”\n", s.LastPrompt)
-			r.printf("  size         %d KB", s.Size/1024)
+			r.printf("  size         %s", app.HumanBytes(s.Size))
 			if s.Subagents > 0 {
 				r.printf(", %d subagent(s)", s.Subagents)
 			}
@@ -374,7 +389,7 @@ func showCmd() *cobra.Command {
 				r.printf("  lineage      branch %s · family %s\n", l.Branch, l.Family)
 				r.printf("  journey      %d transfers · %d round trips to origin · %d returns to visited locations\n", j.Transfers, j.RoundTrips, j.Returns)
 				if j.Fork {
-					r.printf("  ancestry     separate fork\n")
+					r.printf("  ancestry     separate conversation\n")
 				}
 				hops := l.OrderedHops()
 				for _, h := range hops {
@@ -537,4 +552,37 @@ func (r *run) movementStatus(e app.Entry) string {
 		return "previously " + s
 	}
 	return s
+}
+
+// sizeCell is a session's size in a listing ("" when its agent does not say).
+func sizeCell(n int64) string {
+	if n <= 0 {
+		return ""
+	}
+	return app.HumanBytes(n)
+}
+
+// printUsage says how much each agent's sessions take on each machine the listing read.
+func (r *run) printUsage(inv *app.Inventory) {
+	var lines []string
+	for _, m := range inv.Machines {
+		var parts []string
+		var total int64
+		for _, u := range inv.Usage(m.Name) {
+			if u.Bytes > 0 {
+				parts = append(parts, fmt.Sprintf("%s %s", u.Name, app.HumanBytes(u.Bytes)))
+				total += u.Bytes
+			}
+		}
+		if len(parts) > 0 {
+			name := m.Name
+			if m.Local {
+				name += " (here)"
+			}
+			lines = append(lines, fmt.Sprintf("  %s  %s: %s", name, app.HumanBytes(total), strings.Join(parts, ", ")))
+		}
+	}
+	if len(lines) > 0 {
+		r.printf("Sessions take:\n%s\n\n", strings.Join(lines, "\n"))
+	}
 }

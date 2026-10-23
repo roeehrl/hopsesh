@@ -35,6 +35,8 @@ type FakeHost struct {
 	PIDs        map[int]bool
 	LockHolders map[string][]int
 	PIDNames    map[int]string
+	// PIDCommands are processes' command lines (ProcCommands); nil leaves it unsupported.
+	PIDCommands map[int]string
 	// Writes records every write, in order.
 	Writes []string
 }
@@ -67,6 +69,11 @@ func (h *FakeHost) SetEnv(k, v string) { h.facts.Env[k] = v }
 // AddBinary makes a binary present with a version line.
 func (h *FakeHost) AddBinary(name, versionLine string) {
 	h.facts.Binaries[name] = agent.BinaryFact{Path: "/bin/" + name, Version: versionLine}
+}
+
+// AddBinaryAt makes a binary present at an absolute path with a version line.
+func (h *FakeHost) AddBinaryAt(name, p, versionLine string) {
+	h.facts.Binaries[name] = agent.BinaryFact{Path: p, Version: versionLine}
 }
 
 // Put creates a file (and its folders) with a modification time.
@@ -301,6 +308,19 @@ func (p memProcs) Names(_ context.Context, pids []int) (map[int]string, error) {
 	return out, nil
 }
 
+func (p memProcs) Commands(_ context.Context, pids []int) (map[int]string, error) {
+	if p.h.PIDCommands == nil {
+		return nil, agent.ErrUnsupported
+	}
+	out := map[int]string{}
+	for _, id := range pids {
+		if c, ok := p.h.PIDCommands[id]; ok && p.h.PIDs[id] {
+			out[id] = c
+		}
+	}
+	return out, nil
+}
+
 func (p memProcs) Alive(_ context.Context, pids []int) (map[int]bool, error) {
 	out := map[int]bool{}
 	for _, id := range pids {
@@ -320,4 +340,13 @@ func (p memProcs) Terminate(_ context.Context, pid int) error {
 		}
 	}
 	return nil
+}
+
+// ReadIdentity passes a file's bytes to pick, as the core's IdentityFS does on this machine.
+func (m memFS) ReadIdentity(p string, pick func([]byte) (map[string]string, error)) (map[string]string, error) {
+	b, err := m.ReadFile(p, 1<<20)
+	if err != nil {
+		return nil, err
+	}
+	return pick(b)
 }
