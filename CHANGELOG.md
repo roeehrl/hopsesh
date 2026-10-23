@@ -24,6 +24,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A session's Recent conversation from another machine waits 10 seconds instead of 3 before
+  saying the machine "is slow to answer", and that note (or any failed read) now offers
+  **Try again**.
 - After updating hopsesh on a machine, its page checks the machine again at once, however
   the dialog is closed, instead of showing the old version.
 - The sidebar keeps a gap between a machine's name and hopsesh's mark.
