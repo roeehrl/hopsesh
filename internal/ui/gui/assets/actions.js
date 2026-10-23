@@ -173,7 +173,15 @@ function localModel(e) {
         m.chevronLabel = "Move it";
       } else if (first.kind === "ide") m.caption = sys.mac ? `hopsesh can't pick the tab inside ${placeName(first, e)}` : `hopsesh can't show a session in ${placeName(first, e)}`;
       else if (first.kind === "tmux" || first.kind === "ssh") { m.primary = null; m.caption = `Running in ${placeName(first, e)}; hopsesh can't show it`; }
-      else if (first.kind === "unknown") { m.primary = null; m.caption = "This session is running; its window could not be identified."; }
+      else if (first.kind === "unknown") {
+        // Open somewhere hopsesh can't see (or its program is left over): it can still be
+        // resumed in a place of your choice.
+        const ps = resumePlaces(e), d = ps.find((p) => p.id === defaultPlace(e)) || ps[0];
+        m.primary = { id: "resume:" + d.id, label: `Resume in ${d.name}`, short: "Resume", run: () => resumeIn(e, d.id) };
+        m.chevron = ps.filter((p) => p !== d).map((p) => resumeItem(p));
+        m.chevronLabel = "Resume elsewhere";
+        m.caption = "Its window could not be identified. If it is still open somewhere, close it there first: two copies writing one session can interleave.";
+      }
       else if (first.kind === "claude-app" || first.kind === "codex-app") m.caption = e.canApp ? "Opens this conversation in the desktop app" : e.appWhy;
     } else if ((e.departure || e.movement)?.machine && (e.departure || e.movement)?.key) {
       const n = e.departure || e.movement;

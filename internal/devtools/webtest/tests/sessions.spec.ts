@@ -208,7 +208,7 @@ test("a session open in Claude reports unsupported exact opening instead of sile
   await expect(r).toHaveCount(0); // A desktop-app window is not a terminal tab.
 });
 
-test("an unidentified running window has no invented terminal action or duplicate resume", async ({ page }) => {
+test("an unidentified running window offers Resume in a place you choose, with a warning, never Show", async ({ page }) => {
   const key = await row(page, "Find the codeword").getAttribute("data-key");
   const id = key!.split("\u0000")[1].split("/")[1];
   // The stand-in process may inherit a real terminal on a developer's Mac but has no
@@ -245,9 +245,12 @@ test("an unidentified running window has no invented terminal action or duplicat
   const r = row(page, "Find the codeword");
   await expect(r.locator(".pchip")).toHaveCount(0);
   await r.click();
-  await expect(details(page)).toContainText("This session is running; its window could not be identified.");
-  await expect(details(page).locator("#act-primary")).toHaveCount(0);
-  await expect(details(page).getByRole("button", {name:/^(Show|Resume in)/})).toHaveCount(0);
+  await expect(details(page)).toContainText("Its window could not be identified. If it is still open somewhere, close it there first");
+  await expect(details(page).locator("#act-primary")).toHaveText(/^Resume/);
+  await expect(details(page).getByRole("button", {name:/^Show/})).toHaveCount(0);
+  await details(page).locator("#act-chevron").click();
+  await expect(page.getByRole("menuitem", { name: /^Resume in / }).first()).toBeVisible();
+  await page.keyboard.press("Escape");
   await expect(details(page).locator(".ins-status")).toContainText(/^Idle/);
   await page.unrouteAll({ behavior: "ignoreErrors" });
 });
@@ -309,7 +312,9 @@ test("one line of setup left, on All sessions only, closed for good with ✕", a
   await expect(setup).toHaveCount(0);
   await sidebar(page).getByRole("button", { name: /All sessions/ }).click();
   await setup.getByRole("button", { name: "Install the skill" }).click();
-  await expect(page.getByRole("heading", { name: "Skill", exact: true })).toBeVisible();
+  // The skill is on this machine's page in Settings › Machines.
+  await expect(page.getByRole("heading", { name: "Machines", exact: true })).toBeVisible();
+  await expect(page.locator(".mdetail")).toContainText("The hopsesh skill");
   await menu(page, "sessions");
   await setup.getByRole("button", { name: "Close: don't show this again" }).click();
   await expect(setup).toHaveCount(0);

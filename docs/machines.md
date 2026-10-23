@@ -65,5 +65,6 @@ no credential ever crosses machines.
 ## Checking every machine
 
 `hopsesh doctor --all-machines` checks each allowed machine: SSH, hopsesh there and how it runs,
-its agents, its protection hooks and its skill. Settings › **Hooks & skills** shows the same at a
-glance and sets up what it can from here.
+its agents, its protection hooks and its skill. Settings › **Machines** shows the same for each
+machine, sets up what it can from here (every agent folder's hooks and skill in one step), and
+holds this machine's command, skill and protection hooks in full.

@@ -335,5 +335,5 @@ func requireCLI() error {
 	case integrate.CLIDangling:
 		why = "the hopsesh command points to an app that moved or was removed"
 	}
-	return errors.New(ErrCLIRequired + why + "; the skill and the protection hooks run it. Install the command first (Settings › Command line).")
+	return errors.New(ErrCLIRequired + why + "; the skill and the protection hooks run it. Install the command first (Settings › Machines).")
 }

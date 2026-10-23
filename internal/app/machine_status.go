@@ -45,6 +45,7 @@ const (
 	FixSetUp   = "setup"   // set hopsesh up there (hosts setup)
 	FixUpdate  = "update"  // update hopsesh there (hosts setup)
 	FixReceive = "receive" // turn receiving on
+	FixServe   = "serve"   // start hopsesh serve at login (hopsesh serve install)
 	FixHooks   = "hooks"   // install the movement hooks
 	FixSkill   = "skill"   // install or update the skill
 	FixCLI     = "cli"     // put the hopsesh command on PATH
@@ -72,8 +73,12 @@ type AgentSetup struct {
 	Name         string   `json:"name"`              // "Claude Code"
 	Profile      string   `json:"profile,omitempty"` // "" for the default folder
 	ProfileLabel string   `json:"profileLabel,omitempty"`
-	Hook         Check    `json:"hook"`
-	Skill        Check    `json:"skill"`
+	// Account is who is signed in there (an email, when the agent says), and Folder the
+	// agent folder itself: what tells two folders of one agent apart.
+	Account string `json:"account,omitempty"`
+	Folder  string `json:"folder,omitempty"`
+	Hook    Check  `json:"hook"`
+	Skill   Check  `json:"skill"`
 }
 
 // MachineStatus is what hopsesh can do on one machine.
@@ -327,6 +332,7 @@ func (a *App) MachineStatuses(ctx context.Context, inv *Inventory, o StatusOptio
 				}
 			}
 			out[i] = a.machineStatus(m, d, have)
+			nameFolders(m, out[i].Agents)
 		}()
 	}
 	wg.Wait()
@@ -338,6 +344,22 @@ func (a *App) MachineStatuses(ctx context.Context, inv *Inventory, o StatusOptio
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Local && !out[j].Local })
 	return out
+}
+
+// nameFolders adds each agent folder's account and path, from the scan.
+func nameFolders(m *Machine, as []AgentSetup) {
+	for i := range as {
+		for _, st := range m.Agents {
+			p := st.Install.Profile
+			if st.Agent != as[i].Agent || p == nil || p.ID != as[i].Profile {
+				continue
+			}
+			as[i].Folder = p.Root
+			if p.Account != nil && p.Account.LoggedIn {
+				as[i].Account = p.Account.Email
+			}
+		}
+	}
 }
 
 // reached reports whether the scan reached the machine (its connection is there).
@@ -420,7 +442,7 @@ func staled(c Check, ago string) Check {
 func (m *Machine) loginChecks(a *App) (Check, Check) {
 	if m.Local {
 		listening := m.listening
-		login := Check{State: CheckOff, Text: "not running", Reason: "hopsesh serve isn't running here; hopsesh serve install starts it at each login"}
+		login := Check{State: CheckOff, Text: "not started", Reason: "hopsesh doesn't start at login here (hopsesh serve install)", Fix: FixServe}
 		if listening {
 			login = Check{State: CheckOK, Text: "in your login session"}
 		}
@@ -428,7 +450,7 @@ func (m *Machine) loginChecks(a *App) (Check, Check) {
 		case !a.Cfg.Peer.Receive:
 			return login, Check{State: CheckOff, Text: "off", Reason: "receiving is turned off", Fix: FixReceive}
 		case !listening:
-			return login, Check{State: CheckOff, Text: "on, not listening", Reason: login.Reason}
+			return login, Check{State: CheckOff, Text: "switched on, not receiving yet", Reason: "it starts when hopsesh starts at login"}
 		}
 		return login, Check{State: CheckOK, Text: "on, listening"}
 	}
@@ -487,6 +509,9 @@ func (s *MachineStatus) count() {
 	}
 	for _, c := range []Check{s.Hopsesh, s.Receiving, s.CLI} {
 		add(c)
+	}
+	if s.Login.Fix != "" {
+		add(s.Login)
 	}
 	for _, a := range s.Agents {
 		add(a.Hook)
