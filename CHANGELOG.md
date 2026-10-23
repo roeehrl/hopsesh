@@ -6,43 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
-### Added
+## [0.6.3] - 2026-10-23
 
-- `hopsesh cd` on another machine: `hopsesh cd studio:<session> <dir>` has hopsesh there plan
-  and make the change (it must run there and receive sessions; a hopsesh too old for it says
-  so), and `hopsesh undo` here reverses it there. The peer protocol gains `cd/plan`,
-  `cd/apply` and `cd/wait`.
-- The app's **Change folder…** (a session's ⋯ menu): plans the change as you choose a folder
-  (other checkouts of its repository are offered), says what moves, and makes it, with Undo;
-  for a session open in Claude Code it shows the `/cd` to type there and waits for it. It
-  works for sessions on your other machines too.
-- `hopsesh pull <session> --to <dir>` for a session already on this machine, in its own agent
-  and account folder, changes its folder as `hopsesh cd` does: the same session, not a copy.
-- Sessions started in a folder of repositories (`~/git/course` holding `course-core` and
-  `course-sdk`, rather than being a repository itself) move to another machine: the plan
-  continues in the same folder there and lists each repository in it, found there (in the
-  folder first, then your repos folder and the usual places) or cloned into it, with what
-  each one leaves behind (unpushed commits, uncommitted files). Paths in the conversation
-  point at each repository. Other folders in it, such as worktrees, are not brought. The
-  app lists them under "Repository and code" with "Clone … for me"; `pull --clone` and the
-  terminal app's `c` clone them.
-
-### Fixed
-
-- A session in a folder that is not a repository, brought from another machine, continues
-  in the same folder under this machine's home (`/Users/sam/notes` → `/Users/tnt/notes`),
-  not at the other machine's path, which named another user's home.
-- Continuing a session under another account says so ("This session was run by another …
-  account") when the account it ran under differs, also across account profiles; the
-  "different runtime profiles" warning is for the same account in two profiles.
-- Adding or trusting a machine no longer fails with "reading SSH settings … context
-  deadline exceeded" when ssh is slow to start (common on busy Windows machines).
-
-## [0.6.2] - 2026-10-22
-
-What hopsesh can do on each machine, at a glance and check by check; `hopsesh cd` to continue
-a session in another folder as the same session; "Block the original" only where it can
-work; and sessions the app opens find hopsesh.
+Sessions started in a folder of repositories move between machines, each repository found
+or cloned there; `hopsesh cd` and the app's **Change folder…** reach your other machines.
+This release also carries 0.6.2, which was tagged but not released: what hopsesh can do on
+each machine, `hopsesh cd`, "Block the original" only where it can work, and sessions the
+app opens find hopsesh.
 
 ### Added
 
@@ -87,6 +57,25 @@ work; and sessions the app opens find hopsesh.
   `thread_settings_applied` record, `-C`, and whether Codex's `/cd` still forks.
 - README shell-completion setup for Bash, Zsh, Fish and PowerShell.
 
+- `hopsesh cd` on another machine: `hopsesh cd studio:<session> <dir>` has hopsesh there plan
+  and make the change (it must run there and receive sessions; a hopsesh too old for it says
+  so), and `hopsesh undo` here reverses it there. The peer protocol gains `cd/plan`,
+  `cd/apply` and `cd/wait`.
+- The app's **Change folder…** (a session's ⋯ menu): plans the change as you choose a folder
+  (other checkouts of its repository are offered), says what moves, and makes it, with Undo;
+  for a session open in Claude Code it shows the `/cd` to type there and waits for it. It
+  works for sessions on your other machines too.
+- `hopsesh pull <session> --to <dir>` for a session already on this machine, in its own agent
+  and account folder, changes its folder as `hopsesh cd` does: the same session, not a copy.
+- Sessions started in a folder of repositories (`~/git/course` holding `course-core` and
+  `course-sdk`, rather than being a repository itself) move to another machine: the plan
+  continues in the same folder there and lists each repository in it, found there (in the
+  folder first, then your repos folder and the usual places) or cloned into it, with what
+  each one leaves behind (unpushed commits, uncommitted files). Paths in the conversation
+  point at each repository. Other folders in it, such as worktrees, are not brought. The
+  app lists them under "Repository and code" with "Clone … for me"; `pull --clone` and the
+  terminal app's `c` clone them.
+
 ### Fixed
 
 - A session the macOS app opens in its own terminal finds `hopsesh`, the agents and
@@ -102,6 +91,19 @@ work; and sessions the app opens find hopsesh.
   hopsesh reads the folder Codex recorded last, not only the one the thread started in.
   `hopsesh` resumes Codex sessions with `-C <folder>`, so Codex no longer asks which folder to
   use, or goes back to the old one when `tui.resume_cwd = "session"`.
+
+- A session in a folder that is not a repository, brought from another machine, continues
+  in the same folder under this machine's home (`/Users/sam/notes` → `/Users/tnt/notes`),
+  not at the other machine's path, which named another user's home.
+- Continuing a session under another account says so ("This session was run by another …
+  account") when the account it ran under differs, also across account profiles; the
+  "different runtime profiles" warning is for the same account in two profiles.
+- Adding or trusting a machine no longer fails with "reading SSH settings … context
+  deadline exceeded" when ssh is slow to start (common on busy Windows machines).
+
+## [0.6.2] - 2026-10-22
+
+Tagged but not released; its changes are in 0.6.3.
 
 ## [0.6.1] - 2026-10-21
 
@@ -980,6 +982,7 @@ is refused and set aside (the app offers this), and machines are added again.
 - The terminal UI no longer carries out a plan you pressed `y` on while a changed one was
   still being worked out.
 
+[0.6.3]: https://github.com/roeehrl/hopsesh/releases/tag/v0.6.3
 [0.6.2]: https://github.com/roeehrl/hopsesh/releases/tag/v0.6.2
 [0.6.1]: https://github.com/roeehrl/hopsesh/releases/tag/v0.6.1
 [0.5.0]: https://github.com/roeehrl/hopsesh/releases/tag/v0.5.0
