@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+
+- `hopsesh cd` on another machine: `hopsesh cd studio:<session> <dir>` has hopsesh there plan
+  and make the change (it must run there and receive sessions; a hopsesh too old for it says
+  so), and `hopsesh undo` here reverses it there. The peer protocol gains `cd/plan`,
+  `cd/apply` and `cd/wait`.
+- The app's **Change folder…** (a session's ⋯ menu): plans the change as you choose a folder
+  (other checkouts of its repository are offered), says what moves, and makes it, with Undo;
+  for a session open in Claude Code it shows the `/cd` to type there and waits for it. It
+  works for sessions on your other machines too.
+- `hopsesh pull <session> --to <dir>` for a session already on this machine, in its own agent
+  and account folder, changes its folder as `hopsesh cd` does: the same session, not a copy.
+
 ## [0.6.2] - 2026-10-22
 
 What hopsesh can do on each machine, at a glance and check by check; `hopsesh cd` to continue

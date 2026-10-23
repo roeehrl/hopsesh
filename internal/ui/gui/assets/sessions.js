@@ -12,6 +12,7 @@ import { model, statusOf, statusKey, placesOf, placeCount, placeName, showPlace,
 import { list, load as loadList, toolbar, counts, apply as applyFilters, groupsOf, tree, adoptTree, onChange, onRows, decide, toggleDisplay, clearFilters, activeFacets,
   openGroupOf, focusTree, rowByKey, setAll, displayCommand, toggleFilter, save as saveList } from "./listview.js";
 import { inspector, openChevron, onRenamed, placeIcon } from "./inspector.js";
+import { onChangedDir } from "./cd-dialog.js";
 import { openMenu, isOpen } from "./menu.js";
 
 export { statusOf, cloudBlock };
@@ -776,6 +777,7 @@ screen("sessions", async (rescan = false) => {
 });
 
 onRenamed(async () => { await refreshHere(); render(); });
+onChangedDir(async () => { await refreshHere(); render(); });
 
 // inView scrolls the list (never the window) to a row: to its middle, or just enough
 // (below the toolbar and its group's sticky header).

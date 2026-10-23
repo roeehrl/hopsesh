@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/audit"
@@ -74,6 +75,9 @@ type peerSession struct {
 	from  string
 	plan  *move.Plan
 	input move.Input
+	// cd is the folder change planned on this connection (cd/plan), in its inventory.
+	cd    *DirChange
+	cdInv *Inventory
 }
 
 func (s *peerSession) handle(ctx context.Context, method string, params json.RawMessage) (any, error) {
@@ -107,6 +111,29 @@ func (s *peerSession) handle(ctx context.Context, method string, params json.Raw
 		return s.planReceive(ctx, req)
 	case peer.MethodApply:
 		return s.applyReceive(ctx)
+	case peer.MethodCdPlan:
+		var req peer.CdRequest
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, err
+		}
+		return s.cdPlan(ctx, req)
+	case peer.MethodCdApply:
+		if s.cd == nil {
+			return nil, errors.New("plan the folder change first")
+		}
+		id, err := s.a.ChangeDir(ctx, s.cd)
+		return peer.CdApplyReply{Journal: id}, err
+	case peer.MethodCdWait:
+		var req peer.CdWait
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, err
+		}
+		if s.cd == nil {
+			return nil, errors.New("plan the folder change first")
+		}
+		wctx, cancel := context.WithTimeout(ctx, time.Duration(min(max(req.Seconds, 1), 3600))*time.Second)
+		defer cancel()
+		return struct{}{}, s.a.WaitChangedDir(wctx, s.cd, time.Second)
 	case peer.MethodUndo:
 		var req peer.UndoRequest
 		if err := json.Unmarshal(params, &req); err != nil {

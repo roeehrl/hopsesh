@@ -97,6 +97,8 @@ type EntryDTO struct {
 	// CanRename: its agent's own title can be changed (Rename); CanPreview: the end of its
 	// conversation can be shown (Preview).
 	CanRename  bool       `json:"canRename"`
+	// CanChangeDir: it can continue in another folder on its machine (Change folder…).
+	CanChangeDir bool `json:"canChangeDir"`
 	CanPreview bool       `json:"canPreview"`
 	Places     []PlaceDTO `json:"places"` // where it is open on this machine, besides hopsesh's tabs
 	Status     string     `json:"status"`
@@ -583,7 +585,7 @@ func entryDTO(core *app.App, inv *app.Inventory, it app.Item, targets []AgentOpt
 	e.Cached = e.Cached || inv.Discovering
 	title, source := titleFor(s, e.Live.Name)
 	d := EntryDTO{Cached: e.Cached, ObservedAt: e.ObservedAt, Returns: e.Returns, Movement: e.Movement, Departure: e.Departure, Arrival: e.Arrival, Guard: guardFor(core, e, hopseshOn(inv, e.Machine)), Profile: e.Profile, Machine: e.Machine, Agent: e.Agent, AgentName: e.AgentName, Key: s.Key.String(), Title: title, TitleSource: source,
-		Session: string(s.Key.Session), Path: s.Path, AgentVersion: s.AgentVersion, CanRename: core.CanRename(e), Places: []PlaceDTO{},
+		Session: string(s.Key.Session), Path: s.Path, AgentVersion: s.AgentVersion, CanRename: core.CanRename(e), CanChangeDir: core.CanChangeDir(inv, e), Places: []PlaceDTO{},
 		Status: statusWords(core, e), Live: e.Live.State == agent.Live, LastActive: s.LastActivity.Format(time.RFC3339),
 		ContextOverflow: s.ContextOverflow, LastPrompt: s.LastPrompt, CWD: s.CWD, SizeKB: s.Size / 1024, ContinueIn: []AgentOpt{},
 		Needs:   e.Live.State == agent.Live && strings.HasPrefix(e.Live.Status, "waiting"),
