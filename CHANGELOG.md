@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Fixed
+
+- A session's Recent conversation from another machine waits 10 seconds instead of 3 before
+  saying the machine "is slow to answer", and that note (or any failed read) now offers
+  **Try again**.
+
 ## [0.6.3] - 2026-10-23
 
 Sessions started in a folder of repositories move between machines, each repository found
