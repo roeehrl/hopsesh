@@ -19,6 +19,11 @@ All notable changes to this project are documented here. The format follows
 - `hopsesh pull <session> --to <dir>` for a session already on this machine, in its own agent
   and account folder, changes its folder as `hopsesh cd` does: the same session, not a copy.
 
+### Fixed
+
+- Adding or trusting a machine no longer fails with "reading SSH settings … context
+  deadline exceeded" when ssh is slow to start (common on busy Windows machines).
+
 ## [0.6.2] - 2026-10-22
 
 What hopsesh can do on each machine, at a glance and check by check; `hopsesh cd` to continue
