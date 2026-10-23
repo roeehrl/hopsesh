@@ -79,7 +79,7 @@ func planRepo(ctx context.Context, p *Plan, in Input, opt Options) (string, erro
 			return s.CWD, nil
 		}
 		// The same folder under this machine's home: /Users/sam/notes on the laptop is
-		// /Users/tnt/notes here, never a path in another user's home.
+		// /Users/kim/notes here, never a path in another user's home.
 		cwd := underHome(s.CWD, in.Source.Machine.Facts.Home, in.Target.Machine.Facts.Home)
 		if planWorkspace(ctx, p, in, opt, cwd) {
 			return cwd, nil
