@@ -314,6 +314,14 @@ confirm, and `hopsesh undo` on the sender reverses both machines. The two machin
 the newest protocol both speak; one that is too old is offered an update. Details:
 [docs/design.md §11](docs/design.md#11-peers-working-with-hopsesh-on-the-other-machine).
 
+A session started in a folder that holds several repositories (`~/git/course` with
+`course-core` and `course-sdk`, rather than a repository itself) continues in the same folder
+on the other machine. Each repository in it is found there (in that folder first, then your
+repos folder and the usual places) or cloned into it: `pull --clone`, `c` in the TUI,
+or **Clone … for me** in the app. The plan lists each repository and what it leaves behind
+(unpushed commits, uncommitted files), and paths in the conversation point at each one. Other
+folders in it, such as worktrees, are not brought.
+
 With hopsesh running in the login session there (`hopsesh hosts setup laptop`), a session can
 also continue right where it is, in a terminal on that machine that you use here:
 
@@ -322,6 +330,22 @@ hopsesh terminals run studio --resume 7f3c2a1e   # continue it on studio, work i
 hopsesh terminals run studio --dir ~/git/app     # a new session there
 hopsesh doctor --all-machines                     # hopsesh, hooks and skill on every machine
 ```
+
+### What each machine can do
+
+`hopsesh hosts status` checks every machine: whether hopsesh is installed and its version
+against the newest on your machines, whether it runs in your login session and receives
+sessions, whether its command is on PATH, and each agent folder's hook and skill. It prints the
+command that fixes each check and exits 3 when a machine needs something. In the app,
+**Settings › Machines** shows the same for the machine you select, with **Up next**: only what
+is left, each with its fix. Beside every machine is hopsesh's mark: green and filled when it
+receives sessions, gray and hollow when hopsesh is installed but doesn't receive, none without
+hopsesh, and ↑ when a newer hopsesh is on another machine.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/machines-dark.png">
+  <img src="docs/assets/machines-light.png" alt="Settings › Machines in the hopsesh app: This Mac and studio are all set and receive sessions; laptop is selected, marked gray and hollow with an up arrow, and its Up next lists updating hopsesh from 0.6.2 to 0.6.3 and turning on receiving; nas has no hopsesh and is reached over SSH only" width="900">
+</picture>
 
 ## Another folder, same session
 
