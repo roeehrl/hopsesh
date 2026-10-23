@@ -5,6 +5,7 @@
 // the primary (a split button whose menu lists the other places), Move ▾ and ⋯; the row's
 // button, ↩, ⌘↩ and the palette all come from it.
 import { refreshSelection } from "./sessions.js";
+import { changeDirDialog } from "./cd-dialog.js";
 import { role, removeBlock, restoreBlock } from "./guard.js";
 import { go, api, state, sys, here, agentInfo, cloudOf, cloudTitle, toast, fail, errText, cap, entries, count, ago, h, icon, ICONS, agentBadge, pending } from "./core.js";
 import { returnActions, returnChooser, showMovementDestination } from "./returns.js";
@@ -342,6 +343,7 @@ function more(e, local) {
   out.push({ id: "copy-id", label: "Copy session ID", run: async () => { await api("CopyText", e.cloud ? e.cloud.id : e.session || e.key.split("/").pop()); toast("Copied the session ID"); } });
   if (!e.cloud) {
     out.push({ id: "rename", label: "Rename…", disabled: !e.canRename, why: e.canRename ? "" : `hopsesh can't rename ${e.agentName} sessions`, run: () => renameFn(e) });
+    out.push({ id: "cd", label: "Change folder…", disabled: !e.canChangeDir, why: e.canChangeDir ? "" : e.machine === here() ? `hopsesh can't change the folder of ${e.agentName} sessions` : `Set up hopsesh on ${e.machine} to change folders there`, run: () => changeDirDialog(e) });
     out.push({ id: "transcript", label: "Open transcript", disabled: !e.canPreview || !state.info?.previews,
       why: !e.canPreview ? `hopsesh can't read ${e.agentName} transcripts` : !state.info?.previews ? "Conversation previews are off (Settings → General)" : "", run: () => transcriptFn(e) });
   } else {

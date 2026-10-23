@@ -5,13 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/core/audit"
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/journal"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
+	"github.com/roeehrl/hopsesh/internal/core/peer"
 	"github.com/roeehrl/hopsesh/internal/core/repos"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
@@ -44,8 +47,9 @@ type DirChange struct {
 	in  agent.Install
 }
 
-// CanChangeDir reports whether a session's folder can be changed (its agent's module has
-// the capability and the session is on this machine).
+// CanChangeDir reports whether a session's folder can be changed: its agent's module has
+// the capability, and the session is on this machine or on one where hopsesh runs (it
+// makes the change there).
 func (a *App) CanChangeDir(inv *Inventory, e Entry) bool {
 	mod, ok := a.Module(e.Agent)
 	if !ok || e.Location.IsCloud() {
@@ -53,7 +57,7 @@ func (a *App) CanChangeDir(inv *Inventory, e Entry) bool {
 	}
 	m := inv.Machine(e.Machine)
 	_, ok = mod.(agent.DirChanger)
-	return ok && m != nil && m.Local
+	return ok && m != nil && (m.Local || m.Hopsesh != "" && m.Presence != PresenceSSH && m.Presence != PresenceOlder)
 }
 
 // PlanChangeDir says what moving a session on this machine to dir does.
@@ -325,4 +329,119 @@ func (u undoDirs) ChangeDir(ctx context.Context, machine string, key agent.Sessi
 		return dc.ChangeDir(ctx, h, in, e.Session, p)
 	}
 	return fmt.Errorf("the session %s is no longer listed", key.Session)
+}
+
+// cdPlan plans, here, the folder change another machine's hopsesh asks for: a session on
+// this machine, found by its key, moved to a folder here.
+func (s *peerSession) cdPlan(ctx context.Context, req peer.CdRequest) (*DirChange, error) {
+	if s.cdInv != nil {
+		s.cdInv.Close()
+	}
+	s.cd, s.cdInv = nil, nil
+	if home, err := os.UserHomeDir(); err == nil && (req.Dir == "~" || strings.HasPrefix(req.Dir, "~/")) {
+		req.Dir = filepath.Join(home, strings.TrimPrefix(req.Dir, "~"))
+	}
+	inv := s.a.Scan(ctx, ScanOptions{Hosts: []string{LocalName()}, NoCache: true, SkipGit: true})
+	// The other machine names this machine's account folders its own way: the session is
+	// its agent's session id here, in the folder of the same id when there are several.
+	var found []Entry
+	for _, e := range inv.Entries {
+		k := e.Session.Key
+		if e.Location.IsCloud() || k.Agent != req.Session.Agent || k.Session != req.Session.Session {
+			continue
+		}
+		if k.Profile == req.Session.Profile {
+			found = []Entry{e}
+			break
+		}
+		found = append(found, e)
+	}
+	switch len(found) {
+	case 0:
+		inv.Close()
+		return nil, fmt.Errorf("no session %s here", req.Session.Session)
+	case 1:
+	default:
+		inv.Close()
+		return nil, fmt.Errorf("session %s is in %d account folders here; move it from this machine (hopsesh cd)", req.Session.Session, len(found))
+	}
+	c, err := s.a.PlanChangeDir(ctx, inv, found[0], req.Dir, DirOptions{OtherRepo: req.OtherRepo, StopLocal: req.StopLocal})
+	if err != nil {
+		inv.Close()
+		return nil, err
+	}
+	s.cd, s.cdInv = c, inv
+	return c, nil
+}
+
+// RemoteDir is a folder change of a session on another machine, planned and carried out by
+// hopsesh there (it writes nothing there over SSH itself): this machine keeps a journal
+// that names the one hopsesh there keeps, so hopsesh undo here reverses it there.
+type RemoteDir struct {
+	Machine string
+	Change  DirChange // as hopsesh there planned it
+
+	a      *App
+	client *peer.Client
+	done   func()
+}
+
+// PlanChangeDirOn asks hopsesh on machine to plan moving its session key to dir there (dir
+// is a folder there; ~ is that machine's home).
+func (a *App) PlanChangeDirOn(ctx context.Context, machine string, key agent.SessionKey, dir string, o DirOptions) (*RemoteDir, error) {
+	h, err := a.allowedHost(machine)
+	if err != nil {
+		return nil, err
+	}
+	c, hr, done, err := a.dialPeer(ctx, h)
+	if err != nil {
+		return nil, fmt.Errorf("hopsesh on %s: %w (set it up with: hopsesh hosts setup %s)", machine, err, machine)
+	}
+	r := &RemoteDir{Machine: machine, a: a, client: c, done: done}
+	if err := c.Call(ctx, peer.MethodCdPlan, peer.CdRequest{Session: key, Dir: dir, OtherRepo: o.OtherRepo, StopLocal: o.StopLocal}, &r.Change); err != nil {
+		r.Close()
+		if strings.Contains(err.Error(), "unknown request") {
+			return nil, fmt.Errorf("hopsesh %s on %s can't change a session's folder; update it (hopsesh hosts setup %s)", hr.Version, machine, machine)
+		}
+		return nil, err
+	}
+	return r, nil
+}
+
+// Apply has hopsesh there carry out the change, and records here which journal it keeps.
+func (r *RemoteDir) Apply(ctx context.Context) (string, error) {
+	if len(r.Change.Plan.Blockers) > 0 {
+		return "", errors.New(r.Change.Plan.Blockers[0])
+	}
+	var reply peer.CdApplyReply
+	if err := r.client.Call(ctx, peer.MethodCdApply, struct{}{}, &reply); err != nil {
+		return "", fmt.Errorf("on %s: %w", r.Machine, err)
+	}
+	e := r.Change.Entry
+	j, err := journal.New(r.a.StateDir, journal.KindChangeDir, fmt.Sprintf("change the folder of “%s” to %s on %s", e.Session.Title, r.Change.Plan.To, r.Machine))
+	if err != nil {
+		return reply.Journal, err
+	}
+	j.AddKey(e.Session.Key)
+	if err := j.AddRemote(r.Machine, reply.Journal); err != nil {
+		return j.ID, err
+	}
+	if r.a.Audit != nil {
+		r.a.Audit.Write(audit.Entry{Action: "cd", Host: r.Machine, Session: e.Session.Key.String(), Detail: map[string]any{"ok": true, "to": r.Change.Plan.To, "remote": reply.Journal}})
+	}
+	return j.ID, nil
+}
+
+// Wait has hopsesh there wait, at most d, until the open session's agent has moved it (the
+// user typed Change.InSession in it there).
+func (r *RemoteDir) Wait(ctx context.Context, d time.Duration) error {
+	return r.client.Call(ctx, peer.MethodCdWait, peer.CdWait{Seconds: int(d / time.Second)}, nil)
+}
+
+// Close ends the conversation with hopsesh there.
+func (r *RemoteDir) Close() {
+	if r.done != nil {
+		r.done()
+		r.done = nil
+	}
 }

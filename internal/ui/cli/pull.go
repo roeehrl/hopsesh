@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/spf13/cobra"
@@ -214,6 +215,18 @@ func pull(cmd *cobra.Command, refArg string) error {
 	}
 	ctx, cancel := ctxTimeout(30)
 	defer cancel()
+	if r.folderChange(inv, e, agent.ID(in), opt) {
+		// The session is here, in the same agent and account folder: --to only changes
+		// its folder, so it stays the same session (hopsesh cd) instead of a copy.
+		c, err := r.app.PlanChangeDir(ctx, inv, e, expandHome(opt.TargetDir), app.DirOptions{OtherRepo: true, StopLocal: opt.StopLocal})
+		if err != nil {
+			return err
+		}
+		if !r.jsonOut {
+			r.printf("%q is on this machine already: hopsesh continues it in %s as the same session (as hopsesh cd does).\n", e.Session.Title, c.Plan.To)
+		}
+		return r.finishDir(ctx, cmd, inv, c, 10*time.Minute, false)
+	}
 	p, input, err := r.app.Plan(ctx, inv, e, agent.ID(in), opt)
 	if err != nil {
 		return err
@@ -530,4 +543,14 @@ func (r *run) renderResult(p *move.Plan, res *move.Result) {
 		r.printf("\nThe original:\n  %s\n", res.Notice)
 	}
 	r.offerSkill()
+}
+
+// folderChange reports whether a pull only changes a session's folder: it is on this
+// machine, continues in its own agent and account folder, --to names a folder, and no
+// separate copy is asked for.
+func (r *run) folderChange(inv *app.Inventory, e app.Entry, in agent.ID, o move.Options) bool {
+	m := inv.Machine(e.Machine)
+	return o.TargetDir != "" && m != nil && m.Local && (in == "" || in == e.Agent) &&
+		(o.TargetProfile == "" || o.TargetProfile == e.Session.Key.Profile) &&
+		!o.Fork && !o.NewReplica && o.TargetSession == "" && r.app.CanChangeDir(inv, e)
 }

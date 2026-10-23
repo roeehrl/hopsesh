@@ -981,3 +981,16 @@ body.terminal-right .divider[data-pane="inspector"]{display:none}
 .selbar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--accent-soft); font-size: 13px; flex-wrap: wrap; }
 .lastrun { display: flex; gap: 10px; align-items: center; font-size: 13px; padding: 10px 12px; border-radius: 8px; background: var(--bg); border: 1px solid var(--line2); flex-wrap: wrap; }
 .lastrun > span { flex: 1 1 300px; }
+
+/* Change folder… */
+.cd-pick { display: flex; gap: 8px; }
+.cd-pick .field { flex: 1 1 auto; min-width: 0; }
+.cd-suggest { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.cd-suggest .btn { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.cd-plan { display: flex; flex-direction: column; gap: 8px; font-size: 13px; min-height: 20px; }
+.cd-fromto { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; align-items: center; font-size: 12px; }
+.cd-fromto .mono { overflow-wrap: anywhere; }
+.cd-steps { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; }
+.cd-insession { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 8px; background: var(--accent-soft); }
+.cd-cmd { display: flex; gap: 8px; align-items: center; }
+.cd-cmd code { font-family: var(--mono); font-size: 12.5px; padding: 3px 8px; border-radius: 6px; background: var(--panel); border: 1px solid var(--line); overflow-wrap: anywhere; }

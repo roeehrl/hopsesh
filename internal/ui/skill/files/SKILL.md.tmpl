@@ -90,10 +90,13 @@ error, off, unknown), a `reason`, and a `fix` when one exists. When a move's pla
 original can't be blocked (`cannotProtect`), these say why; tell the user the fix (an
 update is `hopsesh hosts setup <machine>`, which is theirs to run).
 
-## Continue a session in another folder on this machine
+## Continue a session in another folder on its machine
 
 `{{.Bin}} cd <ref> <dir>` keeps the session itself (same id, every record as the agent wrote
-it) and continues it in another folder here: another worktree or clone of its repository.
+it) and continues it in another folder on its machine: another worktree or clone of its
+repository. For a session on another machine (`studio:<id>`), `<dir>` is a folder there and
+hopsesh there makes the change; it must be set up there and receive sessions.
+`{{.Bin}} pull <ref> --to <dir>` for a session already here, in its own agent, does the same.
 Plan with `{{.Bin}} cd <ref> <dir> --dry-run --json` and show `plan.from`, `plan.to`,
 `plan.warnings` and `plan.blockers`; after a yes, run `{{.Bin}} cd <ref> <dir> --json --yes`.
 A folder in another repository is blocked unless the user asks for `--other-repo`. When
