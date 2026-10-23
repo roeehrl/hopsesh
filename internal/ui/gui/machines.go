@@ -13,6 +13,8 @@ import (
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/hosts"
+	"github.com/roeehrl/hopsesh/internal/core/integrate"
+	"github.com/roeehrl/hopsesh/internal/core/proc"
 	"github.com/roeehrl/hopsesh/internal/core/secrets"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
 	"github.com/roeehrl/hopsesh/internal/version"
@@ -213,6 +215,22 @@ func (a *App) SetReceive(on bool) error {
 	defer a.mu.Unlock()
 	a.core.Cfg.Peer.Receive = on
 	return a.save()
+}
+
+// StartAtLogin has this machine start hopsesh serve at each login, and now (hopsesh
+// serve install, run by the app's own command), so it receives sessions while the app
+// is closed. Only on the user's click.
+func (a *App) StartAtLogin() error {
+	cli, err := integrate.AppCLI()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	if out, err := proc.CommandContext(ctx, cli, "serve", "install").CombinedOutput(); err != nil {
+		return fmt.Errorf("hopsesh serve install: %s", strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // RemoveHost forgets a machine: hopsesh stops connecting to it and drops its remembered

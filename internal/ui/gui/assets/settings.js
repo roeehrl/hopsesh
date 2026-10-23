@@ -1,11 +1,11 @@
-// The Settings screen, in tabs: General, Machines (one machine, everything about it),
-// Hooks & skills (one component, every machine), Clouds, Desktop presence, Agents,
-// History, Terminal, Skill, Command line, Updates.
+// The Settings screen, in tabs: General, Machines (one machine, everything about it:
+// hopsesh, the command, hooks and skill), Clouds, Desktop presence, Agents, History,
+// Terminal, Updates.
 import { api, on, h, fill, view, state, screen, go, loading, toast, fail, dialog, agentBadge, sys, cliHow, icon, ask, count, current, loadError, navigationID, errText } from "./core.js";
 import { desktopSettings } from "./desktop-settings.js";
 import { running } from "./term.js";
 import { withCLI, loadHookHealth } from "./guard.js";
-import { bindMachines, machinesPanel, cloudsPanel, hooksPanel, pickMachine } from "./machines.js";
+import { bindMachines, machinesPanel, cloudsPanel, pickMachine } from "./machines.js";
 
 const SKILL_TEXT = {
   absent: ["Not installed", "st-ended"],
@@ -91,8 +91,8 @@ function general() {
       h("div", { class: "set-row" }, title("When a session moves, the original", "Blocked: the copy left behind refuses new prompts until you move the session back, so moving back stays a clean return (recommended). Warned: you can still continue it, but the copies may diverge. Moving back always clears this; you can also remove it from one original."),
         seg("When a session moves, the original", s.original || "block", [["block", "Is blocked"], ["advise", "Shows a warning"], ["off", "Is left alone"]], (v) => save({ original: v }))),
       toggle("syncCode", "Bring the code along", "Fetch the session's commit (from the other machine if it isn't pushed) and fast-forward a clean checkout."),
-      toggle("pushSource", "Push unpushed commits on the other machine first", "Off: commits are fetched straight from the other machine.")),
-    noticeSetup(),
+      toggle("pushSource", "Push unpushed commits on the other machine first", "Off: commits are fetched straight from the other machine."),
+      toggle("setUpIntegrations", "Add hooks and skill when hopsesh is set up on a machine", "Off: hopsesh asks first. Each machine's hooks and skill are in Machines.")),
     card(h("span", { class: "sec-h" }, "Appearance"),
       h("div", { class: "set-row" }, title("Color scheme", "Choose the look for Hopsesh, Quick access and the built-in terminal. System follows your device's appearance."),
         h("select", { "aria-label": "Color scheme", disabled: saving, onchange: e => save({ appearance: e.target.value }) },
@@ -224,19 +224,6 @@ function terminal() {
         ["Links open only after you confirm them.", "Only web links (http and https) open from a terminal, and hopsesh shows you the whole address first."]]
         .map(([b, t]) => h("div", { class: "safety" }, icon(SHIELD, 15), h("span", {}, h("b", {}, b), " ", h("span", { class: "muted" }, t))))),
   ];
-}
-
-// ---- Hooks & skills on every machine --------------------------------------------------
-// hooks is the coverage view (machines.js hooksPanel) with the choices that are not about
-// one machine: what happens to an original, and whether setting hopsesh up on a machine
-// adds its hooks and skill too.
-function hooks() {
-  const defaults = h("fieldset", { class: "hook-defaults" }, h("legend", {}, "Defaults"),
-    h("span", {}, "When a session moves away, its original"),
-    seg("When a session moves, the original", s.original || "block", [["block", "Is blocked"], ["advise", "Shows a warning"], ["off", "Is left alone"]], (v) => save({ original: v })),
-    h("label", { class: "opt" }, h("input", { type: "checkbox", checked: !!s.setUpIntegrations, onchange: (e) => save({ setUpIntegrations: e.target.checked }) }),
-      h("span", {}, h("b", {}, "Add hooks and skill when hopsesh is set up on a machine"), h("span", { class: "muted" }, "Off: hopsesh asks first, here."))));
-  return hooksPanel(defaults);
 }
 
 function skill() {
@@ -394,11 +381,15 @@ async function loadHistory() {
   if (current === "settings" && tab === "history") render();
 }
 
-const TABS = [["general", "General", general], ["machines", "Machines", machinesPanel], ["hooks", "Hooks & skills", hooks], ["clouds", "Clouds", cloudsPanel], ["desktop", "Desktop presence", desktop], ["agents", "Agents", agents], ["history", "History", history], ["terminal", "Terminal", terminal], ["skill", "Skill", skill], ["cli", "Command line", cli], ["updates", "Updates", updates]];
+// This machine's command, skill and protection hooks are shown on its page in Machines.
+const machines = () => machinesPanel({ here: () => [...cli(), ...skill(), noticeSetup()] });
+const TABS = [["general", "General", general], ["machines", "Machines", machines], ["clouds", "Clouds", cloudsPanel], ["desktop", "Desktop presence", desktop], ["agents", "Agents", agents], ["history", "History", history], ["terminal", "Terminal", terminal], ["updates", "Updates", updates]];
+// Tabs that became part of This machine's page in Machines.
+const HERE_TABS = ["hooks", "skill", "cli"];
 
-// The machine and coverage tabs need room for a list beside details, and a table.
-const WIDE = ["machines", "hooks"];
-bindMachines(() => current === "settings" && ["machines", "clouds", "hooks"].includes(tab), () => render());
+// The machine tab needs room for a list beside details.
+const WIDE = ["machines"];
+bindMachines(() => current === "settings" && ["machines", "clouds"].includes(tab), () => render());
 
 function render() {
   if (current !== "settings") return;
@@ -441,6 +432,7 @@ async function load() {
 }
 
 screen("settings", async (which, pick) => {
+  if (HERE_TABS.includes(which)) { which = "machines"; pick = "here"; }
   if (which) tab = which;
   if (pick) pickMachine(pick);
   if (!s) loading("Reading the settings…");

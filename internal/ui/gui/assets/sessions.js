@@ -361,8 +361,8 @@ function setupLine() {
   if (i.setupDismissed) return null;
   const steps = [
     !i.hasHosts && ["Add machines", "Your other machines' sessions, here too", () => go("machines")],
-    i.skillState === "absent" && i.skillPrompt !== "declined" && ["Install the skill", "Your agents can find and hop sessions, after asking you", () => go("settings", "skill")],
-    i.cliOffer && ["Install the command", `${cliHowText()}`, () => go("settings", "cli")],
+    i.skillState === "absent" && i.skillPrompt !== "declined" && ["Install the skill", "Your agents can find and hop sessions, after asking you", () => go("settings", "machines", "here")],
+    i.cliOffer && ["Install the command", `${cliHowText()}`, () => go("settings", "machines", "here")],
   ].filter(Boolean);
   if (!steps.length) return null;
   const close = async () => { try { await api("DismissSetup"); state.info = await api("Info"); } catch (e) { fail(e); } render(); };

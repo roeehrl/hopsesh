@@ -289,7 +289,7 @@ func (a *App) SetUpMachine(ctx context.Context, machine string, progress func(Se
 	if a.Cfg.Peer.SetUpIntegrations {
 		switch _, err := a.SetUpProtectionOn(ctx, machine, false); {
 		case !out.Login:
-			step(SetupStep{Name: "Hooks and skill", State: "waiting", Detail: "added once hopsesh runs in the login session there (Settings › Hooks & skills)"})
+			step(SetupStep{Name: "Hooks and skill", State: "waiting", Detail: "added once hopsesh runs in the login session there (Settings › Machines)"})
 		case err != nil:
 			step(SetupStep{Name: "Hooks and skill", State: "failed", Detail: err.Error()})
 		default:

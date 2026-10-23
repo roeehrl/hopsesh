@@ -27,7 +27,7 @@ function commands() {
     { label: "Machines", hint: keys("mod+3"), run: () => go("machines") },
     { label: "Settings", hint: keys("mod+,"), run: () => go("settings", "general") },
     { label: "Accounts: who is signed in where", run: () => go("accounts") },
-    { label: "Settings: Hooks & skills on every machine", run: () => go("settings", "hooks") },
+    { label: "Settings: this machine's command, skill and hooks", run: () => go("settings", "machines", "here") },
     { label: "Refresh: read every machine again", hint: keys("mod+R"), run: () => go("sessions", true) },
     { label: "Undo the last hop", hint: keys("mod+alt+Z"), run: undoLast },
     { label: "Add a machine", run: () => go("machines") },
@@ -55,8 +55,6 @@ function commands() {
     { label: i.receive ? "Stop receiving sessions from my other machines" : "Receive sessions from my other machines",
       run: async () => { try { await api("SetReceive", !i.receive); state.info = await api("Info"); toast(state.info.receive ? `${sys.Here} now receives sessions` : `${sys.Here} no longer receives sessions`); } catch (e) { fail(e); } if (current === "sessions") renderSessions(); } },
     { label: "Settings: agents", run: () => go("settings", "agents") },
-    { label: "Settings: the hopsesh skill", run: () => go("settings", "skill") },
-    { label: "Settings: the command-line tool", run: () => go("settings", "cli") },
     { label: "Settings: updates", run: () => go("settings", "updates") },
   ];
 }

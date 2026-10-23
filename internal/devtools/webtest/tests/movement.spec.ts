@@ -512,7 +512,7 @@ test('protection hook setup is explicit and asks for the hopsesh command first',
   const req=route.request().postDataJSON();
   if(req.m==='InstallNoticeHooks'){
    installs.push(req);
-   if(!cliInstalled) return route.fulfill({json:{error:'cli-required: the hopsesh command is not installed; the skill and the protection hooks run it. Install the command first (Settings › Command line).'}});
+   if(!cliInstalled) return route.fulfill({json:{error:'cli-required: the hopsesh command is not installed; the skill and the protection hooks run it. Install the command first (Settings › Machines).'}});
    return route.fulfill({json:{result:[]}});
   }
   if(req.m==='InstallCLI'){cli.push(req);cliInstalled=true;return route.fulfill({json:{result:null}})}
@@ -523,7 +523,8 @@ test('protection hook setup is explicit and asks for the hopsesh command first',
   }
   return route.continue();
  });
- await fresh(page);await page.locator('#btn-settings').click();
+ // The protection hooks are on this machine's page in Settings › Machines.
+ await fresh(page);await page.locator('#btn-settings').click();await page.getByRole('tab',{name:'Machines',exact:true}).click();
  await expect(page.getByText('Protection hooks',{exact:true})).toBeVisible();expect(installs).toHaveLength(0);
  await expect(page.getByText('Movement notice delivery')).toHaveCount(0);
  await expect(page.getByText('Claude Code',{exact:true}).first()).toBeVisible(); // one account: no account label
@@ -543,11 +544,11 @@ test('declining the hopsesh command leaves the protection hook uninstalled',asyn
  const installs:any[]=[],cli:any[]=[];
  await page.route('**/call',async route=>{
   const req=route.request().postDataJSON();
-  if(req.m==='InstallNoticeHooks'){installs.push(req);return route.fulfill({json:{error:'cli-required: the hopsesh command is not installed; the skill and the protection hooks run it. Install the command first (Settings › Command line).'}});}
+  if(req.m==='InstallNoticeHooks'){installs.push(req);return route.fulfill({json:{error:'cli-required: the hopsesh command is not installed; the skill and the protection hooks run it. Install the command first (Settings › Machines).'}});}
   if(req.m==='InstallCLI'){cli.push(req);return route.fulfill({json:{result:null}})}
   return route.continue();
  });
- await fresh(page);await page.locator('#btn-settings').click();
+ await fresh(page);await page.locator('#btn-settings').click();await page.getByRole('tab',{name:'Machines',exact:true}).click();
  await page.getByRole('button',{name:'Install all hooks',exact:true}).click();
  const ask=page.getByRole('dialog').filter({hasText:'Install the hopsesh command first?'});
  await ask.getByRole('button',{name:'Cancel',exact:true}).click();

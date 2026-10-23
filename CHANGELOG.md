@@ -6,11 +6,31 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Changed
+
+- Settings › Machines is the one place for a machine's hooks, skill and command. The
+  separate Hooks & skills, Skill and Command line tabs are gone: this machine's page holds
+  its command, skill and protection hooks in full, and "Add hooks and skill when hopsesh is
+  set up on a machine" is in General. Up next sets up every agent folder's hooks and skill in
+  one line ("both agent folders need the hook and skill" · Set up), the list's "to do" counts
+  those lines, and "Set up hooks and skill on all …" covers every machine at once.
+- An agent folder is named by who is signed in there (`Claude Code · you@example.com`), so
+  several folders of one agent are told apart; `hopsesh hosts status` names them the same way.
+- This machine's login session says when hopsesh doesn't start at login, with **Start at
+  login** (`hopsesh serve install`, on your click), and receiving says "switched on, not
+  receiving yet" instead of "on, not listening".
+- A session running in a window hopsesh can't identify can be resumed: **Resume in …**, with
+  the other places beside it and a warning to close it first if it is still open.
+
 ### Fixed
 
 - A session's Recent conversation from another machine waits 10 seconds instead of 3 before
   saying the machine "is slow to answer", and that note (or any failed read) now offers
   **Try again**.
+- After updating hopsesh on a machine, its page checks the machine again at once, however
+  the dialog is closed, instead of showing the old version.
+- The sidebar keeps a gap between a machine's name and hopsesh's mark.
+- What hopsesh can do on a machine no longer overlaps the text beneath it on its page.
 
 ## [0.6.3] - 2026-10-23
 

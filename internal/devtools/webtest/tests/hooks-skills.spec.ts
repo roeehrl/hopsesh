@@ -3,7 +3,7 @@ import { fresh } from "./helpers";
 
 test.beforeEach(async ({ page }) => fresh(page));
 
-// The coverage view itself (Settings › Hooks & skills) is in machine-status.spec.ts.
+// Each machine's hooks and skill (Settings › Machines) are in machine-status.spec.ts.
 
 test("a machine with sessions but no hopsesh is pointed out once, until its findings change", async ({ page }) => {
   let dismissed: string[] = [];

@@ -21,7 +21,7 @@ var protections struct {
 	running bool
 }
 
-// ProtectionRowDTO is one machine in Settings › Hooks & skills: how hopsesh works with
+// ProtectionRowDTO is one machine in Settings › Machines: how hopsesh works with
 // it, and, where hopsesh can check, its command, hooks and skill.
 type ProtectionRowDTO struct {
 	Machine    string          `json:"machine"`
