@@ -119,7 +119,7 @@ app opens find hopsesh.
   use, or goes back to the old one when `tui.resume_cwd = "session"`.
 
 - A session in a folder that is not a repository, brought from another machine, continues
-  in the same folder under this machine's home (`/Users/sam/notes` → `/Users/tnt/notes`),
+  in the same folder under this machine's home (`/Users/sam/notes` → `/Users/kim/notes`),
   not at the other machine's path, which named another user's home.
 - Continuing a session under another account says so ("This session was run by another …
   account") when the account it ran under differs, also across account profiles; the

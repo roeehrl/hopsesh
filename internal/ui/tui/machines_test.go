@@ -63,7 +63,7 @@ func TestMachinesPanel(t *testing.T) {
 	ok := func(t string) app.Check { return app.Check{State: app.CheckOK, Text: t} }
 	v := machinesView{cursor: 1, list: []app.MachineStatus{
 		{Machine: "studio", Local: true, Version: "0.6.1", Reach: ok("this machine"), Hopsesh: ok("0.6.1"), Receiving: ok("on, listening"), Login: ok("in your login session"), CLI: ok("on PATH")},
-		{Machine: "roee-macbook", Version: "0.5.0", Newest: "0.6.1", NewestOn: "studio", Todo: 2, Reach: ok("reached over SSH"),
+		{Machine: "sam-macbook", Version: "0.5.0", Newest: "0.6.1", NewestOn: "studio", Todo: 2, Reach: ok("reached over SSH"),
 			Hopsesh:   app.Check{State: app.CheckWarn, Text: "0.5.0", Reason: "0.6.1 is the newest, on studio", Fix: app.FixUpdate},
 			Receiving: app.Check{State: app.CheckOff, Text: "not listening", Reason: "until hopsesh runs in a login session there"},
 			Login:     app.Check{State: app.CheckOff, Text: "not running", Reason: "nobody is logged in there"},
@@ -78,7 +78,7 @@ func TestMachinesPanel(t *testing.T) {
 	out := ansi.Strip(renderMachines(v, 120))
 	for _, want := range []string{
 		"studio (here)", "✓ 0.6.1 · all set",
-		"▸ roee-macbook", "↑ 0.5.0 · 2 to do",
+		"▸ sam-macbook", "↑ 0.5.0 · 2 to do",
 		"○ not installed",
 		"↑ hopsesh      0.5.0 (newest 0.6.1, studio)",
 		"○ receiving    not listening — until hopsesh runs in a login session there",
@@ -93,7 +93,7 @@ func TestMachinesPanel(t *testing.T) {
 		}
 	}
 	v.loading = true
-	if out := ansi.Strip(renderMachines(v, 120)); !strings.Contains(out, "checking…") || !strings.Contains(out, "roee-macbook") {
+	if out := ansi.Strip(renderMachines(v, 120)); !strings.Contains(out, "checking…") || !strings.Contains(out, "sam-macbook") {
 		t.Errorf("a new read keeps the last result shown:\n%s", out)
 	}
 	if out := ansi.Strip(renderMachines(machinesView{loading: true}, 80)); !strings.Contains(out, "reading every machine") {
