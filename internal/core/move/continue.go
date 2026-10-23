@@ -118,10 +118,10 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	if opt.OtherAccount {
 		if src.Module.Spec().ID != spec.ID {
 			p.Warnings = append(p.Warnings, "Moving between agents uses portable conversation text. Agent-private reasoning and internal state are not transferred; the original session is kept unchanged.")
-		} else if !profileBoundary(in) {
+		} else if !profileBoundary(in) || ownerBoundary(in) || otherEmail(in) {
 			p.Warnings = append(p.Warnings, fmt.Sprintf("This session was run by another %s account than the one signed in here now. Hopsesh carries its portable conversation text into a new session for this account; account-bound content such as signed reasoning is left out, and the original session is kept unchanged.", spec.Name))
 		} else {
-			p.Warnings = append(p.Warnings, "These are different runtime profiles. Login metadata cannot prove that account-bound session data is reusable, even when email addresses match. Hopsesh carries portable conversation text and keeps the original session.")
+			p.Warnings = append(p.Warnings, "These are different runtime profiles. Even with the same email address, login details cannot prove that account-bound session data is reusable. Hopsesh carries portable conversation text and keeps the original session.")
 		}
 	}
 

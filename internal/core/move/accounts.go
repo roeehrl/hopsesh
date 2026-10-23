@@ -3,6 +3,7 @@ package move
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
@@ -11,6 +12,12 @@ import (
 func profileBoundary(in Input) bool {
 	s, t := in.Source.Install, in.Target.Install
 	return (s.Profile != nil || t.Profile != nil) && (s.ProfileID() != t.ProfileID() || s.Profile != nil && t.Profile != nil && s.Profile.Endpoint != t.Profile.Endpoint)
+}
+
+// otherEmail: both sides are signed in with a known email, and they differ.
+func otherEmail(in Input) bool {
+	s, t := in.Source.Account, in.Target.Account
+	return s != nil && t != nil && s.Email != "" && t.Email != "" && !strings.EqualFold(s.Email, t.Email)
 }
 
 // ranUnder: the runs a session recorded, else (an older summary) its Remote Control owner.
@@ -33,7 +40,6 @@ func signedIn(s Side) *agent.Account {
 	}
 	return nil
 }
-
 
 // sameAccount: a run was under the account a is signed in to. A run naming its user
 // matches only that user.

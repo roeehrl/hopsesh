@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -19,7 +20,8 @@ const (
 	RepoClone      = "clone"       // clone it
 	RepoNeedsClone = "needs-clone" // not here and cloning was not asked for
 	RepoDir        = "dir"         // the folder the user chose
-	RepoNone       = "none"        // not a git repository: the same path
+	RepoNone       = "none"        // not a git repository: the same folder, under this home
+	RepoWorkspace  = "workspace"   // a folder of repositories: Members say each one's action
 )
 
 // RepoPlan is how the session's repository is found or made here.
@@ -41,6 +43,14 @@ type RepoPlan struct {
 	Worktree     string   `json:"worktree,omitempty"` // to create
 	SourceHead   string   `json:"sourceHead,omitempty"`
 	HasUpstream  bool     `json:"sourceUpstream,omitempty"`
+	// Members are the repositories of a workspace folder (Action RepoWorkspace), each found
+	// here or cloned into the folder.
+	Members []RepoPlan `json:"members,omitempty"`
+}
+
+// Name is the repository's folder name on the source (course-core).
+func (r RepoPlan) Name() string {
+	return path.Base(strings.ReplaceAll(nonEmpty(r.SourceMain, r.SourceTop), `\`, "/"))
 }
 
 // planRepo decides the target folder and fills p.Repo; it returns the target cwd.
@@ -65,12 +75,19 @@ func planRepo(ctx context.Context, p *Plan, in Input, opt Options) (string, erro
 	}
 	if g == nil || !g.IsRepo || g.Identity == "" {
 		p.Repo.Action = RepoNone
-		if in.Source.Machine.Name != in.Target.Machine.Name {
-			if _, err := os.Stat(s.CWD); err != nil {
-				p.Blockers = append(p.Blockers, "the session's folder is not a git repository with a remote, so hopsesh cannot match or clone it; choose a folder here with --to")
-			}
+		if in.Source.Machine.Name == in.Target.Machine.Name {
+			return s.CWD, nil
 		}
-		return s.CWD, nil
+		// The same folder under this machine's home: /Users/sam/notes on the laptop is
+		// /Users/tnt/notes here, never a path in another user's home.
+		cwd := underHome(s.CWD, in.Source.Machine.Facts.Home, in.Target.Machine.Facts.Home)
+		if planWorkspace(ctx, p, in, opt, cwd) {
+			return cwd, nil
+		}
+		if _, err := os.Stat(cwd); err != nil {
+			p.Blockers = append(p.Blockers, fmt.Sprintf("the session's folder is not a git repository with a remote, so hopsesh cannot match or clone it, and %s is not on this machine; choose a folder here with --to", cwd))
+		}
+		return cwd, nil
 	}
 	fillSource(&p.Repo, g)
 	if in.Source.Machine.Name == in.Target.Machine.Name {
@@ -128,6 +145,89 @@ func planRepo(ctx context.Context, p *Plan, in Input, opt Options) (string, erro
 		p.Warnings = append(p.Warnings, fmt.Sprintf("the local checkout is on %s but the session was on %s; use --worktree create to work on %s in a separate worktree", p.Repo.LocalBranch, g.Branch, g.Branch))
 	}
 	return joinLocal(base, relUnder(s.CWD, g.Toplevel)), nil
+}
+
+// planWorkspace plans a folder that holds repositories rather than being one (~/git/course
+// with course-core and course-sdk in it): it continues in the same folder here, and each
+// repository is the checkout already here (in that folder first, then the usual places)
+// or a clone into the folder. It reports whether the folder holds any repository with a
+// remote.
+func planWorkspace(ctx context.Context, p *Plan, in Input, opt Options, dir string) bool {
+	var members []RepoPlan
+	var missing []string
+	roots := append([]string{dir, opt.ReposDir}, opt.ExtraRoots...)
+	roots = append(roots, repos.DefaultRoots(in.Target.Machine.Facts.Home)...)
+	for i := range in.Workspace {
+		g := &in.Workspace[i]
+		if !g.IsRepo || g.Identity == "" {
+			continue
+		}
+		var m RepoPlan
+		fillSource(&m, g)
+		want := filepath.Join(dir, m.Name())
+		found := repos.FindLocal(g.Identity, roots)
+		for i, f := range found {
+			if filepath.Clean(f.Path) == want {
+				found[0], found[i] = found[i], found[0]
+			}
+		}
+		switch {
+		case len(found) > 0:
+			m.Action, m.LocalPath = RepoUse, found[0].Path
+			for _, f := range found[1:] {
+				m.Alternatives = append(m.Alternatives, f.Path)
+			}
+			m.LocalBranch = repos.CurrentBranch(ctx, m.LocalPath)
+		case opt.Clone:
+			m.Action, m.LocalPath = RepoClone, want
+		default:
+			m.Action, m.LocalPath = RepoNeedsClone, want
+			missing = append(missing, m.Name())
+		}
+		members = append(members, m)
+	}
+	if len(members) == 0 {
+		return false
+	}
+	p.Repo.Action, p.Repo.LocalPath, p.Repo.Members = RepoWorkspace, dir, members
+	if len(missing) > 0 {
+		p.Blockers = append(p.Blockers, fmt.Sprintf("%s %s not cloned on this machine; clone %s into %s (pass --clone, or clone %s yourself)",
+			strings.Join(missing, ", "), pick(len(missing), "is", "are"), pick(len(missing), "it", "them"), dir, pick(len(missing), "it", "them")))
+	}
+	src := in.Source.Machine.Name
+	for _, m := range members {
+		if m.Action == RepoUse && filepath.Dir(m.LocalPath) != dir {
+			p.Warnings = append(p.Warnings, fmt.Sprintf("%s is at %s here, outside %s; paths in the conversation point there", m.Name(), m.LocalPath, dir))
+		}
+		if m.Unpushed > 0 || m.Dirty > 0 {
+			p.Warnings = append(p.Warnings, fmt.Sprintf("on %s %s has %d unpushed commit(s) and %d uncommitted file(s) that a checkout here will not contain", src, m.Name(), m.Unpushed, m.Dirty))
+		}
+	}
+	p.Warnings = append(p.Warnings, fmt.Sprintf("%s holds %d repositories on %s; hopsesh brings each one, not other folders in it (such as worktrees)", in.Session.CWD, len(members), src))
+	return true
+}
+
+func pick(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
+// underHome is p moved from one home folder to another (both given in their machine's
+// form); p itself when it is not under from.
+func underHome(p, from, to string) string {
+	if from == "" || to == "" {
+		return p
+	}
+	norm := func(s string) string { return strings.TrimRight(strings.ReplaceAll(s, `\`, "/"), "/") }
+	if norm(p) == norm(from) {
+		return to
+	}
+	if rel := relUnder(p, from); rel != "" {
+		return joinLocal(to, rel)
+	}
+	return p
 }
 
 func fillSource(r *RepoPlan, g *repos.GitState) {

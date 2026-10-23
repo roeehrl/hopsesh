@@ -41,8 +41,11 @@ type Input struct {
 	Live    agent.LiveInfo
 	Git     *repos.GitState // the session's checkout on the source (nil when unknown)
 	GitErr  string          // why the checkout could not be read ("" when it was)
-	Lineage *lineage.Manifest
-	Target  Side
+	// Workspace is the repositories directly inside the session's folder on the source,
+	// when that folder is not a repository itself (a workspace holding several).
+	Workspace []repos.GitState
+	Lineage   *lineage.Manifest
+	Target    Side
 	// Copies are the target agent's sessions with the same key at the target.
 	Copies []Copy
 	// Worktrees are agent-managed worktree folders (from every module).
@@ -676,8 +679,12 @@ func mappings(p *Plan, src, tgt Side) []agent.Mapping {
 	if r.SourceTop != "" && r.Worktree == "" {
 		add(r.SourceTop, top)
 	}
-	if r.Action == RepoNone {
+	if r.Action == RepoNone || r.Action == RepoWorkspace {
 		add(p.Source.CWD, p.Target.CWD)
+	}
+	for _, m := range r.Members {
+		add(m.SourceTop, m.LocalPath)
+		add(m.SourceMain, m.LocalPath)
 	}
 	for name, dir := range src.Install.Roots {
 		add(dir, tgt.Install.Roots[name])

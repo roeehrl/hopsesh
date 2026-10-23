@@ -51,6 +51,10 @@ type GitState struct {
 	MainBranch     string     `json:"mainBranch,omitempty"`
 	Worktrees      []Worktree `json:"worktrees,omitempty"`
 	RootCommit     string     `json:"rootCommit,omitempty"`
+	// Children are the repositories directly inside a folder that is not one itself (a
+	// workspace such as ~/git/course holding course-core and course-sdk): main checkouts
+	// only, at most MaxChildren of them.
+	Children []string `json:"children,omitempty"`
 	// Error says why git could not read the folder (it did not answer in time); every other
 	// field is then unknown, which is not the same as "no repository".
 	Error string `json:"error,omitempty"`
@@ -116,11 +120,19 @@ func TimeoutError(seconds string) string {
 // holding none of the script's output, so the script still ends.
 const probeScript = `
 hp_git() { git "$@"; hp_rc=$?; printf . >&3; return $hp_rc; }
+hp_children() {
+  hp_c=0
+  for c in "$1"/*/; do
+    [ -d "${c}.git" ] || continue
+    hp_c=$((hp_c + 1)); [ "$hp_c" -gt @MAXCHILDREN@ ] && break
+    printf 'child\t%s\n' "${c%/}"
+  done
+}
 hp_one() {
   d=$1
   if [ ! -d "$d" ]; then printf 'exists\t0\n'; return 0; fi
   printf 'exists\t1\n'
-  top=$(hp_git -C "$d" rev-parse --show-toplevel 2>/dev/null) || { printf 'repo\t0\n'; return 0; }
+  top=$(hp_git -C "$d" rev-parse --show-toplevel 2>/dev/null) || { printf 'repo\t0\n'; hp_children "$d"; return 0; }
   printf 'repo\t1\ntop\t%s\n' "$top"
   printf 'branch\t%s\n' "$(hp_git -C "$d" branch --show-current 2>/dev/null)"
   printf 'head\t%s\n' "$(hp_git -C "$d" rev-parse --short HEAD 2>/dev/null)"
@@ -170,6 +182,9 @@ done
 exit 0
 `
 
+// MaxChildren bounds how many repositories a workspace folder's probe lists.
+const MaxChildren = 20
+
 // ProbeScript returns the shell program and its arguments for the given directories.
 // excl are agent-managed worktree folders (".claude/worktrees") that never count as
 // uncommitted changes; limit is how long one git call may go without answering
@@ -181,6 +196,7 @@ func ProbeScript(dirs, excl []string, limit time.Duration) (script string, args 
 	}
 	script = strings.Replace(probeScript, "@EXCLUDES@", b.String(), 1)
 	script = strings.Replace(script, "@LIMIT@", strconv.Itoa(seconds(limit)), 1)
+	script = strings.Replace(script, "@MAXCHILDREN@", strconv.Itoa(MaxChildren), 1)
 	return script, append([]string{"--"}, dirs...)
 }
 
@@ -282,6 +298,8 @@ func ParseProbe(out []byte, excl []string) []GitState {
 			commonDir = v
 		case "root":
 			cur.RootCommit = v
+		case "child":
+			cur.Children = append(cur.Children, v)
 		case "wt":
 			wk, wv, _ := strings.Cut(v, " ")
 			switch wk {
@@ -314,6 +332,9 @@ func WindowsPaths(states []GitState) []GitState {
 		s := &states[i]
 		s.Toplevel = windowsPath(s.Toplevel)
 		s.MainWorktree = windowsPath(s.MainWorktree)
+		for j := range s.Children {
+			s.Children[j] = windowsPath(s.Children[j])
+		}
 		for j := range s.Worktrees {
 			s.Worktrees[j].Path = windowsPath(s.Worktrees[j].Path)
 		}

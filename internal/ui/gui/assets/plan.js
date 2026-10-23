@@ -254,7 +254,8 @@ function summaryContent(p) {
     else if (cont.relation === "new") add.push(`1 new ${p.agent} session ${there}`);
     if (p.nativeCopy) add.push(`1 ${p.nativeCopy.agent} copy kept ${there}`);
   } else add.push(`1 ${p.agent} session ${there}`);
-  if (r.action === "clone") add.push("1 clone");
+  const clones = r.action === "clone" ? 1 : (r.members || []).filter((m) => m.action === "clone").length;
+  if (clones) add.push(count(clones, "clone"));
   if (r.worktree) add.push("1 worktree");
   if (p.setAside) chg.push(`${count(p.setAside, "older copy", "older copies")} set aside`);
   if (p.stopHere) chg.push("1 quit here first");
@@ -362,6 +363,7 @@ function repository(p) {
         h("button", { class: "btn primary small", onclick: () => { o.clone = true; o.reposDir = dest.value.replace(/[/\\][^/\\]+[/\\]?$/, ""); return replan(); } }, "Clone for me"),
         p.machine ? null : h("button", { class: "btn small", onclick: chooseFolder }, "I already have it…"))));
   }
+  if (r.action === "workspace") out.push(...workspace(p, there));
   if (r.action === "none") out.push(p.sourceCwd === p.targetCwd ? item("ok", "The same folder", "The session stays where it was started.")
     : item("warn", "No repository to match", "The folder has no git remote, so hopsesh cannot find or clone it.", p.machine ? null : h("button", { class: "btn small", style: "align-self:flex-start", onclick: chooseFolder }, "Choose a folder…")));
   if (r.sourceBranch) {
@@ -379,6 +381,29 @@ function repository(p) {
   if (p.sync) out.push(item("ok", "Code: " + p.sync, ""));
   if (p.stopHere) out.push(item("warn", "The copy open here is quit first", "It gets the normal quit signal and saves its session before the newer copy replaces it."));
   return h("section", { class: "sec", style: "gap:10px" }, h("span", { class: "sec-h" }, "Repository and code"), out);
+}
+
+// repoName is a repository's folder name on the source machine (course-core).
+const repoName = (m) => (m.sourceMain || m.sourceTop || "").split(/[\\/]/).filter(Boolean).pop() || m.identity;
+
+// workspace: a folder holding repositories rather than being one. It continues in the same
+// folder; each repository is found here or cloned into it.
+function workspace(p, there) {
+  const r = p.repo, o = cur.opts, ms = r.members || [];
+  const out = [item("ok", `Continues in ${r.localPath}`, `On ${p.sourceHost} this folder holds ${count(ms.length, "repository", "repositories")}. Each one is found ${there} or cloned into it; other folders in it, such as worktrees, stay on ${p.sourceHost}.`,
+    p.machine ? null : h("button", { class: "btn small", style: "align-self:flex-start", onclick: chooseFolder }, "Choose another folder…"))];
+  for (const m of ms) {
+    const name = repoName(m), left = [];
+    if (m.unpushed) left.push(count(m.unpushed, "unpushed commit"));
+    if (m.dirty) left.push(count(m.dirty, "uncommitted file"));
+    const behind = left.length ? ` ${left.join(" and ")} ${m.unpushed + m.dirty === 1 ? "stays" : "stay"} on ${p.sourceHost}.` : "";
+    if (m.action === "use") out.push(item(left.length ? "warn" : "ok", `${name}: found ${there} at ${m.localPath}` + (m.localBranch ? ` (on ${m.localBranch})` : ""), `Matched by its remote, ${m.identity}.` + behind));
+    if (m.action === "clone") out.push(item(left.length ? "warn" : "ok", `${name}: will clone into ${m.localPath}`, `From ${m.remote}.` + behind));
+    if (m.action === "needs-clone") out.push(item("warn", `${name}: not found ${there}`, `Matched by its remote, ${m.identity}. hopsesh looked in this folder, your repos folder and the usual places.` + behind));
+  }
+  if (ms.some((m) => m.action === "needs-clone")) out.push(h("button", { class: "btn primary small", style: "align-self:flex-start", onclick: () => { o.clone = true; return replan(); } },
+    `Clone ${ms.filter((m) => m.action === "needs-clone").map(repoName).join(" and ")} for me`));
+  return out;
 }
 
 // blocker turns a reason the plan cannot go ahead into words and the buttons that fix it.
@@ -409,10 +434,10 @@ function blocker(p, b) {
 
 function checks(p) {
   const r = p.repo;
-  const shown = /unpushed commit\(s\) and|ran in a worktree on branch|what does not carry over|do not carry over to|uncommitted file\(s\) stay behind/;
+  const shown = /unpushed commit\(s\) and|holds \d+ repositories on|, outside .*; paths in the conversation point there|ran in a worktree on branch|what does not carry over|do not carry over to|uncommitted file\(s\) stay behind/;
   const guarded = (w) => (p.cannotProtect || []).length && /^the original on .* (can't be blocked or warned|won't be protected)/.test(w);
   const warnings = (p.warnings || []).filter((w) => !shown.test(w) && !guarded(w) && !(p.continue && p.conflict && w.startsWith(p.conflict))).map((w) => item("warn", plain(w), ""));
-  const blockers = (p.blockers || []).filter((b) => !(r.action === "needs-clone" && /is not cloned/.test(b))).map((b) => blocker(p, b)).filter(Boolean);
+  const blockers = (p.blockers || []).filter((b) => !(r.action === "needs-clone" && /is not cloned/.test(b)) && !(r.action === "workspace" && / not cloned on this machine/.test(b))).map((b) => blocker(p, b)).filter(Boolean);
   if (!warnings.length && !blockers.length) return null;
   return h("section", { class: "sec", style: "gap:10px" }, h("span", { class: "sec-h" }, blockers.length ? "Before it can go ahead" : "Worth knowing"), blockers, warnings);
 }
@@ -471,7 +496,7 @@ function verb(p) {
  if (p.continue && p.conflict && cur.opts.conflict === "keep-both") return `Create separate ${p.agent} session`;
   if (p.machine) return `Send to ${p.machine}`;
   if (p.continue) return `Continue in ${p.agent}`;
-  return p.repo.action === "clone" ? "Clone and hop here" : "Hop here";
+  return p.repo.action === "clone" || (p.repo.members || []).some((m) => m.action === "clone") ? "Clone and hop here" : "Hop here";
 }
 
 function render() {

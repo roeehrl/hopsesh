@@ -1418,6 +1418,18 @@ func (m *model) viewPlanBody(b *strings.Builder) {
 		fmt.Fprintf(b, "  repo  %s is not here — press c to clone into %s\n", r.Identity, r.LocalPath)
 	case move.RepoNone:
 		b.WriteString("  dir   not a git repository\n")
+	case move.RepoWorkspace:
+		fmt.Fprintf(b, "  dir   %s, a folder of %d repositories\n", r.LocalPath, len(r.Members))
+		for _, mb := range r.Members {
+			switch mb.Action {
+			case move.RepoUse:
+				fmt.Fprintf(b, "  repo  %s at %s\n", mb.Name(), mb.LocalPath)
+			case move.RepoClone:
+				fmt.Fprintf(b, "  repo  %s → will clone into %s\n", mb.Name(), mb.LocalPath)
+			default:
+				fmt.Fprintf(b, "  repo  %s is not here — press c to clone into %s\n", mb.Name(), mb.LocalPath)
+			}
+		}
 	}
 	if r.Worktree != "" {
 		fmt.Fprintf(b, "  worktree → %s\n", r.Worktree)
