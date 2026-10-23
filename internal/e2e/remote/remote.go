@@ -118,3 +118,42 @@ func ShQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) 
 func Crashed(out string) bool {
 	return strings.Contains(out, "panic:") || strings.Contains(out, "fatal error:") || strings.Contains(out, "goroutine 1 [")
 }
+
+// Status is one machine of `hopsesh hosts status --json`, as far as the scenarios read it.
+type Status struct {
+	Machine   string      `json:"machine"`
+	Version   string      `json:"version"`
+	Reach     StatusCheck `json:"reach"`
+	Hopsesh   StatusCheck `json:"hopsesh"`
+	Login     StatusCheck `json:"login"`
+	Receiving StatusCheck `json:"receiving"`
+	CLI       StatusCheck `json:"cli"`
+	Agents    []struct {
+		Agent string      `json:"agent"`
+		Hook  StatusCheck `json:"hook"`
+		Skill StatusCheck `json:"skill"`
+	} `json:"agents"`
+	Todo int `json:"todo"`
+}
+
+// StatusCheck is one check of a machine.
+type StatusCheck struct {
+	State  string `json:"state"`
+	Text   string `json:"text"`
+	Reason string `json:"reason"`
+	Fix    string `json:"fix"`
+}
+
+// FindStatus is the machine called name in `hosts status --json`.
+func FindStatus(doc []byte, name string) (Status, error) {
+	var all []Status
+	if err := json.Unmarshal(doc, &all); err != nil {
+		return Status{}, fmt.Errorf("hosts status --json: %w\n%s", err, doc)
+	}
+	for _, s := range all {
+		if s.Machine == name {
+			return s, nil
+		}
+	}
+	return Status{}, fmt.Errorf("hosts status --json has no %s:\n%s", name, doc)
+}

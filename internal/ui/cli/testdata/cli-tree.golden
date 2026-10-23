@@ -26,6 +26,13 @@ hopsesh archive
   --limit int
   --offset int
   --search string
+hopsesh cd
+  --dry-run
+  --json
+  --other-repo
+  --stop-local
+  --wait duration
+  --yes
 hopsesh clouds
   --json
 hopsesh clouds allow
@@ -85,6 +92,9 @@ hopsesh hosts setup
   --json
 hopsesh hosts setup-key
   --yes
+hopsesh hosts status
+  --json
+  --refresh
 hopsesh lineage
 hopsesh lineage archive
 hopsesh lineage retry

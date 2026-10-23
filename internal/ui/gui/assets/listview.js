@@ -4,7 +4,7 @@
 // chips, and the text filter. It is saved in the config ([list], SaveList); the text
 // filter is not. The list is one tree: group headers, then their sessions, with the
 // keyboard of the WAI-ARIA tree pattern.
-import { accountGroupLabel, accountKey, accountKeyLegacy, api, h, fill, icon, ICONS, state, sys, keys, copyEntry, here, cloudOf, cloudTitle, agentInfo, machineStatus, count, ago, toast, dialog, fail } from "./core.js";
+import { accountGroupLabel, accountKey, accountKeyLegacy, api, h, fill, icon, ICONS, state, sys, keys, copyEntry, here, cloudOf, cloudTitle, agentInfo, machineStatus, count, ago, toast, dialog, fail, bytes } from "./core.js";
 import { openMenu, openPopover, update, closeAll, isOpen, openEl, refill } from "./menu.js";
 import { tabs as terminalTabs } from "./term.js";
 import { statusKey, placesOf, key as entryKey } from "./actions.js";
@@ -558,6 +558,8 @@ function groupMark(g) {
 
 function groupRight(g, closed) {
   const out = [];
+  const size = g.rows.reduce((n, e) => n + (e.sizeKB || 0), 0);
+  if (size) out.push(h("span", { class: "gmeta gsize", title: "What these sessions take on disk" }, bytes(size * 1024)));
   if (closed && g.newest && Date.now() - g.newest > INACTIVE) out.push(h("span", { class: "gmeta" }, `last active ${ago(new Date(g.newest).toISOString())}`));
   if (g.repo && !g.repo.noRepo && !g.repo.repoPending) {
     if (g.repo.remote) out.push(h("span", { class: "mono gremote", title: g.repo.remote }, g.repo.remote));

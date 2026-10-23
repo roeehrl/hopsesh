@@ -21,7 +21,6 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 
 	"github.com/roeehrl/hopsesh/internal/app"
-	"github.com/roeehrl/hopsesh/internal/ui/skill"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/appicon"
 	"github.com/roeehrl/hopsesh/internal/core/audit"
@@ -30,6 +29,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/proc"
 	"github.com/roeehrl/hopsesh/internal/core/pty"
 	"github.com/roeehrl/hopsesh/internal/core/registry"
+	"github.com/roeehrl/hopsesh/internal/ui/skill"
 	"github.com/roeehrl/hopsesh/internal/update"
 	"github.com/roeehrl/hopsesh/internal/version"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -220,7 +220,9 @@ type Info struct {
 	// Previews: the inspector shows the end of a session's conversation.
 	Previews bool `json:"previews"`
 	Receive  bool `json:"receive"` // other machines' hopsesh may send sessions here
-	Defaults struct {
+	// SetUpIntegrations: setting hopsesh up on a machine adds its hooks and skill too.
+	SetUpIntegrations bool `json:"setUpIntegrations"`
+	Defaults          struct {
 		MovementNotices bool   `json:"movementNotices"`
 		Original        string `json:"original"`
 		SyncCode        bool   `json:"syncCode"`
@@ -246,7 +248,7 @@ func (a *App) info(fast bool) Info {
 	cfg := a.core.Cfg
 	info := Info{DesktopManaged: a.Desktop != nil, Version: version.Version, OS: runtime.GOOS, Host: app.LocalName(), ReposDir: cfg.ReposDir,
 		AuditDir: filepath.Join(config.StateDir(), "log"), UpdateCheck: cfg.UpdateCheck,
-		SkillState: skillState, SkillPrompt: cfg.SkillPrompt, Receive: cfg.Peer.Receive,
+		SkillState: skillState, SkillPrompt: cfg.SkillPrompt, Receive: cfg.Peer.Receive, SetUpIntegrations: cfg.Peer.SetUpIntegrations,
 		SetupDismissed: cfg.SetupPrompt == "declined", Layout: layoutOf(cfg.Window, cfg.Inspector),
 		List: listOf(cfg.List), Places: map[string]string{}, Previews: cfg.PreviewsOn()}
 	for k, ag := range cfg.Agents {

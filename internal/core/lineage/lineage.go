@@ -173,20 +173,30 @@ func Parse(b []byte, limits ...ir.Limits) (*Manifest, error) {
 	if int64(len(b)) > l.LineageBytes {
 		return nil, ledgerSizeError(l.LineageBytes, int64(len(b)))
 	}
-	var m Manifest
-	m.SetLimits(l)
-	decoder := json.NewDecoder(bytes.NewReader(b))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&m); err != nil {
+	format, err := fileFormat(b)
+	if err != nil {
 		return nil, err
 	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		return nil, fmt.Errorf("lineage has trailing JSON")
+	m := new(Manifest)
+	if format == FileFormat {
+		if m, err = unpack(b); err != nil {
+			return nil, err
+		}
+	} else {
+		decoder := json.NewDecoder(bytes.NewReader(b))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(m); err != nil {
+			return nil, err
+		}
+		if err := decoder.Decode(new(any)); err != io.EOF {
+			return nil, fmt.Errorf("lineage has trailing JSON")
+		}
 	}
+	m.SetLimits(l)
 	if err := m.Validate(); err != nil {
 		return nil, err
 	}
-	return &m, nil
+	return m, nil
 }
 func (m *Manifest) Clone() *Manifest {
 	if m == nil {
@@ -218,8 +228,16 @@ func (m *Manifest) Outline() *Manifest {
 	}
 	return out
 }
+
+// Encode is the manifest as its file holds it: FileFormat, compact, one line (indenting a
+// large graph's revisions made about a fifth of the file whitespace, read on every scan).
 func (m *Manifest) Encode() []byte {
-	b, _ := json.MarshalIndent(m, "", "  ")
+	var b []byte
+	if p, ok := m.pack(); ok {
+		b, _ = json.Marshal(p)
+	} else {
+		b, _ = json.Marshal(m)
+	}
 	return append(b, '\n')
 }
 func (m *Manifest) ForBranch(branch string) *Manifest {
@@ -879,7 +897,9 @@ func (m *Manifest) limit() int {
 }
 func (m *Manifest) tooLarge() error { return ledgerSizeError(int64(m.limit()), int64(m.compactSize())) }
 
-// compactSize is a lower bound of the encoded size: each record's compact JSON. It
+// compactSize is a lower bound of a manifest's size in memory and between machines: each
+// record's compact JSON (the limit is of this, as before files were packed, so a history
+// that fits is one that can be worked with). It
 // costs one small encoding per record, not one document of the whole graph (hundreds
 // of megabytes for a long native fork, built just to be measured).
 func (m *Manifest) compactSize() int {

@@ -99,6 +99,7 @@ function row(x) {
     h("div", { style: "flex:1 1 300px;min-width:0;display:flex;flex-direction:column;gap:3px" },
       h("div", {}, h("b", { style: "font-weight:500" }, k.label), " · ", ft ? ft.title : x.title),
       h("span", { class: "muted", style: "font-size:12px" }, ft?.detail || [`${x.changes} change${x.changes === 1 ? "" : "s"}`, x.remote.length ? `also on ${x.remote.join(", ")}` : ""].filter(Boolean).join(" · ")),
+      ...(x.undone ? x.left || [] : []).map((l) => h("span", { class: "muted", style: "font-size:12px" }, `Left the clone ${l}, so nothing in it is lost.`)),
       x.pendingReceipt && !x.undone ? h("span",{class:"warn",style:"font-size:12px"},"Receipt acknowledgement pending.") : null,
       x.pendingReceipt && !x.undone ? h("button",{class:"btn small",onclick:async(ev)=>{const b=ev.currentTarget;b.disabled=true;b.textContent="Retrying acknowledgement…";try{await api("RetryReceipts",x.id);toast("Lineage acknowledgement recovered");state.stale=true;await render(true);}catch(err){fail(err);b.disabled=false;b.textContent="Retry acknowledgement";}}},"Retry acknowledgement") : null,
       ft?.note && !x.undone ? h("span", { class: x.fetch?.outcome === "partial" || x.kind === "handoff" || x.hop?.state === "failed" ? "warn" : "muted", style: "font-size:12px" }, ft.note) : null,

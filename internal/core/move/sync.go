@@ -21,7 +21,7 @@ func applyNoWork(ctx context.Context, p *Plan, in Input, env Env) (*Result, erro
 	}
 	j.AddKey(p.Placement.Key)
 	res := &Result{Journal: j.ID}
-	if err = applyRepo(ctx, p, in, env, res, func(string) {}); err != nil {
+	if err = applyRepo(ctx, p, in, env, j, res, func(string) {}); err != nil {
 		return res, err
 	}
 	if err = operationNative(env, p, p.SyncTo.Path, p.ExpectedDestination[p.SyncTo.Path], res); err != nil {

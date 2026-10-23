@@ -77,19 +77,24 @@ func doctorCmd() *cobra.Command {
 					if mod, ok := r.app.Module(a.Agent); ok && a.Install.Version != "" && !mod.Spec().TestedWith(a.Install.Version) {
 						spec = " (not tested with hopsesh yet)"
 					}
+					// One line per account folder: name the ones besides the default.
+					name := a.Name
+					if p := a.Install.Profile; p != nil && !p.Default && p.Name != "" {
+						name += " · " + p.Name
+					}
 					switch {
 					case a.Error != "":
-						add(where+": "+a.Name, false, a.Error)
+						add(where+": "+name, false, a.Error)
 					case a.Install.Binary != "":
 						runtime := ""
 						if a.Install.Runtime == agent.RuntimeApp {
 							runtime = " (built into its desktop app)"
 						}
-						add(where+": "+a.Name, true, a.Install.Version+spec+runtime+" · "+a.Install.Binary)
+						add(where+": "+name, true, a.Install.Version+spec+runtime+" · "+a.Install.Binary)
 					case a.Install.Present:
-						add(where+": "+a.Name, true, "sessions found, but the program is not on the PATH of non-interactive SSH sessions (listing still works)")
+						add(where+": "+name, true, "sessions found, but the program is not on the PATH of non-interactive SSH sessions (listing still works)")
 					default:
-						add(where+": "+a.Name, true, "not installed")
+						add(where+": "+name, true, "not installed")
 					}
 				}
 			}

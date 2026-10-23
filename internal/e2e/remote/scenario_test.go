@@ -100,6 +100,9 @@ func (e *env) sshOnly(t *testing.T) {
 	if m.Status != "ok" || m.Presence != "ssh" || m.Hopsesh != "" {
 		t.Fatalf("a machine without hopsesh: %+v", m)
 	}
+	if st, code := e.status(t, "box", false); st.Version != "" || st.Hopsesh.Fix != "setup" || st.Receiving.State != "off" || code != 3 {
+		t.Fatalf("hosts status of a machine without hopsesh (exit %d): %+v", code, st)
+	}
 	ls := e.mustHS(t, "ls", "--host", "box", "--no-local", "--json")
 	if !bytes.Contains(ls, []byte(sessionID)) {
 		t.Fatalf("ls did not list the session there:\n%s", ls)
@@ -115,6 +118,9 @@ func (e *env) sshOnly(t *testing.T) {
 	}
 	if !bytes.Contains(plan, []byte("won't be protected")) {
 		t.Errorf("the plan's warnings do not explain it:\n%s", plan)
+	}
+	if v, _ := Lookup(plan, "cannotProtect"); !strings.Contains(fmt.Sprint(v), "hopsesh isn't installed there") {
+		t.Errorf("the plan does not say why it can't protect the original: %v", v)
 	}
 	pull := e.mustHS(t, "pull", "box:"+sessionID, "--to", target, "--yes", "--json")
 	if v, _ := Lookup(pull, "plan.unprotected"); v != true {
@@ -189,9 +195,36 @@ func (e *env) setUp(t *testing.T) {
 	if m.Presence != "installed" || !strings.Contains(m.PresenceWhy, "not running in the login session") {
 		t.Fatalf("set up, nobody logged in: %+v", m)
 	}
-	plan := e.mustHS(t, "plan", "box:"+sessionID, "--to", filepath.Join(e.work, "here", "proj2"), "--json")
+	// Its hooks and skill are read over SSH (hopsesh there can't answer for itself yet).
+	st, code := e.status(t, "box", true)
+	if st.Version == "" || st.Login.State != "off" || st.Receiving.State != "off" || code != 3 {
+		t.Fatalf("hosts status, set up with nobody logged in (exit %d): %+v", code, st)
+	}
+	hook := ""
+	for _, a := range st.Agents {
+		if a.Agent == "claude" {
+			hook = a.Hook.State
+		}
+	}
+	if hook != "off" {
+		t.Fatalf("the Claude Code hook there is not installed yet: %+v", st.Agents)
+	}
+	proj2 := filepath.Join(e.work, "here", "proj2")
+	plan := e.mustHS(t, "plan", "box:"+sessionID, "--to", proj2, "--json")
+	if v, _ := Lookup(plan, "unprotected"); v != true {
+		t.Errorf("without the hook there, the original can't be blocked:\n%s", plan)
+	}
+	if v, _ := Lookup(plan, "cannotProtect"); !strings.Contains(fmt.Sprint(v), "hook isn't installed") {
+		t.Errorf("the plan does not name the missing hook: %v", v)
+	}
+	// The hook as hopsesh there writes it: the plan reads the machine again and protects it.
+	settings := `{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"'` + program + `' notice-hook --agent 'claude' --profile ''"}]}]}}`
+	if err := e.remoteWrite(t, e.home+"/.claude/settings.json", []byte(settings)); err != nil {
+		t.Fatal(err)
+	}
+	plan = e.mustHS(t, "plan", "box:"+sessionID, "--to", proj2, "--json")
 	if v, _ := Lookup(plan, "unprotected"); v == true {
-		t.Errorf("an original on a machine with hopsesh is still called unprotected:\n%s", plan)
+		t.Errorf("with hopsesh and its hook there, the original is still called unprotected:\n%s", plan)
 	}
 }
 
@@ -302,6 +335,9 @@ func (e *env) versionSkew(t *testing.T) {
 	if m := e.machine(t, "box"); m.Presence != "older" || m.Hopsesh != "0.4.5" {
 		t.Fatalf("hopsesh 0.4.5 there: %+v", m)
 	}
+	if st, code := e.status(t, "box", false); st.Version != "0.4.5" || st.Login.State != "error" || st.Login.Fix != "update" || code != 3 {
+		t.Fatalf("hosts status of hopsesh 0.4.5 (exit %d): %+v", code, st)
+	}
 
 	// A session of this machine goes there.
 	const id = "0b6c6a8e-1d2f-4c3b-9a7e-5f4d3c2b1a11"
@@ -346,6 +382,9 @@ func (e *env) offlineMachine(t *testing.T) {
 	m, ferr := FindMachine(out, "off")
 	if ferr != nil || m.Status != "unreachable" || m.Hint == "" {
 		t.Fatalf("an unreachable machine: %+v %v (exit %v)\n%s\n%s", m, ferr, err, out, stderr)
+	}
+	if st, code := e.status(t, "off", false); st.Reach.State != "error" || code != 3 {
+		t.Fatalf("hosts status of an unreachable machine (exit %d): %+v", code, st)
 	}
 	doctor, stderr, err := e.hs(t, "doctor", "--all-machines", "--json")
 	if Crashed(stderr) {
@@ -410,6 +449,32 @@ func (e *env) mustHS(t *testing.T, args ...string) []byte {
 		t.Fatalf("hopsesh %s: %v\n%s\n%s", strings.Join(args, " "), err, out, stderr)
 	}
 	return out
+}
+
+// status is what `hosts status <name> --json` says of a machine; exit 3 (it needs
+// something) is an answer, not a failure.
+func (e *env) status(t *testing.T, name string, refresh bool) (Status, int) {
+	t.Helper()
+	args := []string{"hosts", "status", name, "--json"}
+	if refresh {
+		args = append(args, "--refresh")
+	}
+	out, stderr, err := e.hs(t, args...)
+	code := 0
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		code = exit.ExitCode()
+	} else if err != nil {
+		t.Fatalf("hosts status: %v\n%s", err, stderr)
+	}
+	if Crashed(stderr) || code != 0 && code != 3 {
+		t.Fatalf("hosts status exited %d:\n%s\n%s", code, out, stderr)
+	}
+	st, ferr := FindStatus(out, name)
+	if ferr != nil {
+		t.Fatal(ferr)
+	}
+	return st, code
 }
 
 func (e *env) machine(t *testing.T, name string) Machine {

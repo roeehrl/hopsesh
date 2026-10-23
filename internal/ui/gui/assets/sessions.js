@@ -2,8 +2,8 @@
 // clouds), the sessions in the middle as one tree (grouped, sorted and filtered by
 // listview.js), the selected session on the right (inspector.js). Every action on a
 // session comes from actions.js, which the palette uses too.
-import { accountLabel, accountShown, accountTitle, loadError, api, on, h, fill, icon, ICONS, view, state, screen, go, current, loading, toast, fail, cap, ago, agentBadge, machineStatus, sys, keys,
-  entries, selected, copyEntry, here, agentInfo, $, count, clouds, cloudOf, cloudState, cloudChip, dialog, errText, rich, cloudTitle } from "./core.js";
+import { hopMark, accountLabel, accountShown, accountTitle, loadError, api, on, h, fill, icon, ICONS, view, state, screen, go, current, loading, toast, fail, cap, ago, agentBadge, machineStatus, sys, keys,
+  entries, selected, copyEntry, here, agentInfo, $, count, clouds, cloudOf, cloudState, cloudChip, dialog, errText, rich, cloudTitle, bytes } from "./core.js";
 import { planPicked } from "./plan.js";
 import { healthNotice, loadHookHealth, hookHealth, withCLI, chip as roleChip } from "./guard.js";
 import { dividers, apply as applyLayout, statusHeader } from "./layout.js";
@@ -172,11 +172,11 @@ function sidebar() {
     h("button", { class: "side-btn", "aria-current": cur("all"), onclick: () => setScope({ kind: "all" }) }, icon(ICONS.all), "All sessions", h("span", { class: "count" }, all.length)),
     h("div", { class: "side-h" }, "Machines"),
     h("button", { class: "side-btn", "aria-current": cur("here"), onclick: () => setScope({ kind: "here" }) },
-      h("span", { class: "dot ok" }), h("span", { class: "label" }, h("span", {}, sys.Here), h("small", { title: (local?.agents || []).join(", ") }, agentSubtitle(local)), scanSubtitle(local) ? h("small",{},scanSubtitle(local)) : null),
+      h("span", { class: "dot ok" }), h("span", { class: "label" }, h("span", { class: "mname" }, sys.Here, hopMark(local)), h("small", { title: (local?.agents || []).join(", ") }, agentSubtitle(local)), scanSubtitle(local) ? h("small",{},scanSubtitle(local)) : null),
       h("span", { class: "count" }, mine.length)),
     machines.map((m) => h("button", { class: "side-btn", "aria-current": cur("machine", m.name), onclick: () => setScope({ kind: "machine", value: m.name }) },
       h("span", { class: "dot " + dotFor(m) }),
-      h("span", { class: "label" }, h("span", {}, m.name), h("small", { class: dotFor(m) === "ok" ? "" : "warn", title: dotFor(m) === "ok" ? (m.agents || []).join(", ") : m.hint || m.error }, dotFor(m) === "ok" ? agentSubtitle(m) : machineStatus(m.status)[1]),scanSubtitle(m) ? h("small",{},scanSubtitle(m)) : null),
+      h("span", { class: "label" }, h("span", { class: "mname" }, m.name, hopMark(m)), h("small", { class: dotFor(m) === "ok" ? "" : "warn", title: dotFor(m) === "ok" ? (m.agents || []).join(", ") : m.hint || m.error }, dotFor(m) === "ok" ? agentSubtitle(m) : machineStatus(m.status)[1]),scanSubtitle(m) ? h("small",{},scanSubtitle(m)) : null),
       h("span", { class: "count" }, m.status === "ok" ? m.sessions : ""))),
     h("button", { class: "side-btn", style: "color:var(--accent)", onclick: () => go("machines") }, icon(ICONS.plus), machines.length ? "Add a machine" : "Add your other machines"),
     clouds().length ? h("div", { class: "side-h" }, "Clouds") : null,
@@ -470,7 +470,7 @@ if(accountShown(e)) chips.push(h("span", {class:"chip account-chip"+(e.owner?.re
       h("span", { class: "r-line" }, h("span", { class: "t", title: e.title }, e.title),
         h("span", { class: "b" }, [repoWord, branch].filter(Boolean).join(" · "))),
       h("span", { class: "s" }, bits.join(" · ") || " ")),
-    rowStatus(k, words, rc, chips, `${where} · ${ago(e.lastActive)}`));
+    rowStatus(k, words, rc, chips, [where, ago(e.lastActive), e.sizeKB ? bytes(e.sizeKB * 1024) : ""].filter(Boolean).join(" · ")));
   if (!lines.length) return el;
   const out = document.createDocumentFragment();
   out.append(el, ...lines);

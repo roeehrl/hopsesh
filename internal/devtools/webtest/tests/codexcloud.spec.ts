@@ -133,8 +133,9 @@ test("a Codex cloud task comes back: its code committed on a branch, a Codex ses
 test("Machines: the Codex cloud card sets each repository's environment", async ({ page }) => {
   await codexTask(page);
   await turnOnCodex(page);
-  await menu(page, "machines");
-  await expect(page.getByRole("heading", { name: "Machines", exact: true })).toBeVisible();
+  await menu(page, "settings");
+  await page.getByRole("tab", { name: "Clouds", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Clouds", exact: true })).toBeVisible();
   const card = page.locator(".cloud-card", { has: page.getByRole("heading", { name: "Codex cloud" }) });
   await expect(card).toContainText("a hand-off branch");
   await expect(card).toContainText("GitHub only");

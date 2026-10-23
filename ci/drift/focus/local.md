@@ -238,3 +238,20 @@ Claude desktop's own Claude Code (CLAUDE_CODE_ENTRYPOINT=claude-desktop) and its
 (config.json lastKnownAccountUuid, claude-code-sessions/<account>/<org>/), and the Codex
 app's bundled runtime (Contents/Resources/codex-cli, codex-package.json). Fixtures stay at
 their recorded versions; a newer upstream is not evidence that the fixtures still match.
+
+Changing a session's folder (`hopsesh cd`, floors Claude Code 2.1.169 and Codex 0.133.0):
+for a closed Claude Code session hopsesh does what `/cd` does on disk (the transcript and its
+`<id>/` side folder move to `projects/<slug of the new folder>/`, and one
+`{"type":"relocated","relocatedCwd":…,"sessionId":…}` record is appended; nothing else is
+rewritten), and for an open one it asks the user to type `/cd <dir>` and watches for exactly
+that result. Report any change to what `/cd` moves, the relocated record's fields, the slug,
+`CLAUDE_CODE_PROJECT_DIR_NAME`, the SDK's `set_cwd` control request, or `/cd` becoming
+model-invocable or unavailable in some surface. For Codex, hopsesh has `codex app-server`
+resume the closed thread with a `cwd` (`thread/resume`, `excludeTurns`) and reads the folder
+back from the newest `thread_settings_applied` event (`thread_settings.cwd`, `thread_id`);
+`codex resume`/`fork` get `-C`. hopsesh never uses Codex's TUI `/cd`, because it forks a new
+thread (`fork_thread_at` in `codex-rs/tui/src/app/working_directory.rs`). A release that
+makes `/cd` keep the thread id is an opportunity, not a break: report it as info, with the
+version, so hopsesh can ask the user to type it in an open session as it does for Claude
+Code. A change to `thread/resume`'s cwd, to `thread_settings_applied`, or to `resume_cwd` /
+`ResumeCwdMode` is a risk. Cover `TestCodexChangeDirThroughAppServer`.

@@ -1,9 +1,11 @@
-// The Settings screen, in tabs: General, Desktop presence, Agents, History, Terminal, Hooks
-// & skills (every machine), Skill, Command line, Updates.
+// The Settings screen, in tabs: General, Machines (one machine, everything about it),
+// Hooks & skills (one component, every machine), Clouds, Desktop presence, Agents,
+// History, Terminal, Skill, Command line, Updates.
 import { api, on, h, fill, view, state, screen, go, loading, toast, fail, dialog, agentBadge, sys, cliHow, icon, ask, count, current, loadError, navigationID, errText } from "./core.js";
 import { desktopSettings } from "./desktop-settings.js";
 import { running } from "./term.js";
 import { withCLI, loadHookHealth } from "./guard.js";
+import { bindMachines, machinesPanel, cloudsPanel, hooksPanel, pickMachine } from "./machines.js";
 
 const SKILL_TEXT = {
   absent: ["Not installed", "st-ended"],
@@ -99,7 +101,7 @@ function general() {
       toggle("previews", "Show conversation previews", "The inspector shows the end of the selected session's conversation, with Markdown formatting, read on its machine. Turn it off when you share your screen.")),
     card(h("span", { class: "sec-h" }, sys.Here),
       h("div", { class: "set-row" }, title("Receiving sessions", state.info.receive ? "On: your other machines can send sessions here." : `Off: ${sys.here} refuses sessions sent from other machines.`),
-        h("button", { class: "btn", onclick: () => go("machines") }, "Machines…")),
+        h("button", { class: "btn", onclick: () => { tab = "machines"; render(); } }, "Machines…")),
       s.localNetworkGated ? h("div", { class: "set-row" }, title("Local network access", "macOS asks before hopsesh reaches machines on your local network. Machines on Tailscale don't need it."),
         h("button", { class: "btn", onclick: () => api("OpenLocalNetworkSettings").catch(fail) }, "Privacy & Security…")) : null,
       h("div", { class: "set-row" }, title("Settings", s.configDir), h("button", { class: "btn", onclick: () => api("Reveal", s.configDir).catch(fail) }, "Show")),
@@ -225,86 +227,16 @@ function terminal() {
 }
 
 // ---- Hooks & skills on every machine --------------------------------------------------
-let prot = null, protBusy = false, protErr = "", protPick = "", setting = new Set();
-async function loadProt() {
-  protBusy = true; protErr = "";
-  if (current === "settings" && tab === "hooks") render();
-  try { prot = await api("ProtectionAll"); } catch (e) { protErr = errText(e); }
-  finally { protBusy = false; if (current === "settings" && tab === "hooks") render(); }
-}
-const AGENT_NAME = { claude: "Claude Code", codex: "Codex" };
-// hookCell is one agent's protection hooks on a machine, folder by folder.
-function hookCell(p, id) {
-  const hs = (p.hooks || []).filter((x) => x.agent === id);
-  if (!hs.length) return [h("span", { class: "chip st-ended" }, "—"), h("span", { class: "muted", style: "font-size:12px" }, `No ${AGENT_NAME[id]} here`)];
-  const out = [];
-  for (const x of hs) {
-    const where = x.profileLabel || "default";
-    if (!x.supported) out.push(h("span", { class: "chip st-ended", title: x.reason }, "✕ " + where), h("span", { class: "muted", style: "font-size:12px" }, x.reason));
-    else if (!x.installed) out.push(h("span", { class: "chip st-ended" }, "○ " + where));
-    else if (x.trust && x.trust.state === "needs-review") out.push(h("span", { class: "chip st-warn", title: x.trust.fix }, "! Approve in " + AGENT_NAME[id]));
-    else if (x.trust && x.trust.state !== "trusted" && x.trust.state !== "unknown") out.push(h("span", { class: "chip st-warn", title: x.trust.fix || x.trust.detail }, "! " + x.trust.state));
-    else out.push(h("span", { class: "chip st-idle" }, "✓ " + where));
-  }
-  return out;
-}
-const skillChip = (sk) => {
-  const [words, cls] = SKILL_TEXT[sk?.state] || ["Unknown", "st-ended"];
-  return h("span", { class: "chip " + cls }, words);
-};
-// needs counts what a machine's protection still needs from the user.
-function needs(r) {
-  const p = r.protection;
-  if (!p) return r.local || r.presence === "login" ? 1 : r.presence ? 1 : 0;
-  let n = p.command ? 0 : 1;
-  for (const x of p.hooks || []) if (x.supported && (!x.installed || x.trust && ["needs-review", "disabled", "missing"].includes(x.trust.state))) n++;
-  if ((p.skill?.state || "absent") !== "current") n++;
-  return n;
-}
-async function setUp(machine) {
-  setting.add(machine); render();
-  try { await api("SetUpProtection", machine, false); toast(`Set up on ${machine}`); } catch (e) { fail(e); }
-  finally { setting.delete(machine); await loadProt(); }
-}
+// hooks is the coverage view (machines.js hooksPanel) with the choices that are not about
+// one machine: what happens to an original, and whether setting hopsesh up on a machine
+// adds its hooks and skill too.
 function hooks() {
-  if (!prot && !protBusy && !protErr) loadProt();
-  const intro = h("p", { class: "muted", style: "margin:0" }, "On each machine: the hopsesh command, a protection hook that keeps a moved session's original from drifting, and a skill that teaches your agents hopsesh.");
-  if (protErr) return [intro, h("p", { class: "err", role: "alert" }, protErr), h("button", { class: "btn", onclick: loadProt }, "Try again")];
-  if (!prot) return [intro, h("div", { class: "loading", role: "status" }, "Checking every reachable machine…")];
-  const rows = prot, total = rows.reduce((n, r) => n + needs(r), 0), machines = rows.filter((r) => needs(r) > 0).length;
-  const settable = rows.filter((r) => (r.local || r.presence === "login") && needs(r) > 0);
-  const name = (r) => (r.local ? sys.Here : r.machine);
-  const grid = h("div", { class: "pgrid", role: "table", "aria-label": "Hooks and skills on every machine" },
-    h("div", { class: "prow head", role: "row" }, ["Machine", "hopsesh command", "Claude Code hook", "Codex hook", "Skill"].map((t) => h("div", { role: "columnheader" }, t))),
-    rows.map((r) => {
-      const p = r.protection;
-      const head = h("div", { role: "rowheader", class: "pcell" }, h("b", {}, name(r)), !r.local && r.presence !== "login" ? h("span", { class: "warn", style: "font-size:12px" }, { ssh: "SSH only", older: `hopsesh ${r.hopsesh}`, installed: "not in a login session" }[r.presence] || "not reached") : null);
-      if (!p) return h("div", { class: "prow", role: "row" }, head, h("div", { class: "pcell wide", role: "cell" },
-        h("span", {}, r.error ? r.error : r.presence === "ssh" ? `Nothing can be set up on ${r.machine} without hopsesh there. Originals left on ${r.machine} after a move aren't protected.` : r.presence === "older" ? `Update hopsesh on ${r.machine} first.` : `hopsesh on ${r.machine} isn't running in a login session.`),
-        r.presence === "ssh" || r.presence === "older" ? h("button", { class: "btn small", onclick: () => go("machines") }, r.presence === "ssh" ? `Set up hopsesh on ${r.machine}…` : `Update hopsesh on ${r.machine}`) : null));
-      return h("div", { class: "prow", role: "row", "data-machine": r.machine }, head,
-        h("div", { class: "pcell", role: "cell" }, p.command ? h("span", { class: "chip st-idle" }, r.local ? "✓ Installed" : "✓ " + p.version) : h("span", { class: "chip st-ended" }, "○ Not installed"),
-          !p.command && r.local ? h("button", { class: "btn small", onclick: () => { tab = "cli"; render(); } }, "Install…") : null),
-        h("div", { class: "pcell", role: "cell" }, hookCell(p, "claude")),
-        h("div", { class: "pcell", role: "cell" }, hookCell(p, "codex")),
-        h("div", { class: "pcell", role: "cell" }, skillChip(p.skill), p.skill?.state && p.skill.state !== "current" ? h("button", { class: "btn small", disabled: setting.has(r.machine), onclick: () => setUp(r.machine) }, setting.has(r.machine) ? "Setting up…" : p.skill.state === "absent" ? "Install" : "Update") : null));
-    }));
-  const pick = rows.find((r) => r.machine === protPick && r.protection) || rows.find((r) => r.protection);
-  const details = pick ? h("section", { class: "card", style: "padding:14px 16px;display:flex;flex-direction:column;gap:10px" },
-    h("div", { role: "tablist", "aria-label": "Machine", style: "display:flex;gap:4px;flex-wrap:wrap" }, rows.filter((r) => r.protection).map((r) => h("button", { class: "btn small" + (r === pick ? " primary" : ""), role: "tab", "aria-selected": String(r === pick), onclick: () => { protPick = r.machine; render(); } }, name(r)))),
-    (pick.protection.hooks || []).map((x) => h("div", { class: "set-row", style: "align-items:flex-start" },
-      h("span", { style: "display:flex;flex-direction:column;gap:2px;min-width:0;flex:1 1 260px" }, h("b", {}, `${AGENT_NAME[x.agent] || x.agent} · ${x.profileLabel || "default"}`),
-        h("span", { class: "muted", style: "font-size:12px" }, [x.version ? `${x.runtime === "app" ? "the app's built-in " : ""}${AGENT_NAME[x.agent]} ${x.version}` : "", x.path].filter(Boolean).join(" · ")),
-        x.reason ? h("span", { class: "warn", style: "font-size:12px" }, x.reason) : null,
-        x.trust?.state === "needs-review" ? h("span", { class: "warn", style: "font-size:12px" }, x.trust.fix || `Approve the hopsesh hooks in ${AGENT_NAME[x.agent]}. hopsesh never approves hooks for you.`) : null),
-      hookCell({ hooks: [x] }, x.agent))),
-    (pick.protection.skill?.copies || []).map((c) => h("div", { class: "set-row" }, h("span", { style: "flex:1 1 260px;min-width:0" }, h("b", {}, "Skill · " + (c.agents || []).join(", ")), h("span", { class: "muted mono", style: "display:block;font-size:11.5px;overflow-wrap:anywhere" }, c.dir)), skillChip(c.status)))) : null;
-  return [intro,
-    h("div", { role: "status", class: "banner" + (total ? " warn" : "") }, h("b", { style: "flex:1 1 auto" }, total ? `${count(total, "thing")} need${total === 1 ? "s" : ""} you on ${count(machines, "machine")}` : "Everything is set up on every machine hopsesh can check"),
-      h("button", { class: "btn small", disabled: protBusy, onclick: loadProt }, protBusy ? "Checking…" : "Check again"),
-      settable.length ? h("button", { class: "btn small primary", disabled: protBusy || setting.size > 0, onclick: async () => { for (const r of settable) await setUp(r.local ? "" : r.machine); } }, "Set up everything I can") : null),
-    h("div", { class: "pgrid-wrap" }, grid), details,
-    h("p", { class: "muted", style: "font-size:13px;margin:0" }, "The same check in a terminal: ", h("span", { class: "mono" }, "hopsesh doctor --all-machines"))];
+  const defaults = h("fieldset", { class: "hook-defaults" }, h("legend", {}, "Defaults"),
+    h("span", {}, "When a session moves away, its original"),
+    seg("When a session moves, the original", s.original || "block", [["block", "Is blocked"], ["advise", "Shows a warning"], ["off", "Is left alone"]], (v) => save({ original: v })),
+    h("label", { class: "opt" }, h("input", { type: "checkbox", checked: !!s.setUpIntegrations, onchange: (e) => save({ setUpIntegrations: e.target.checked }) }),
+      h("span", {}, h("b", {}, "Add hooks and skill when hopsesh is set up on a machine"), h("span", { class: "muted" }, "Off: hopsesh asks first, here."))));
+  return hooksPanel(defaults);
 }
 
 function skill() {
@@ -462,7 +394,11 @@ async function loadHistory() {
   if (current === "settings" && tab === "history") render();
 }
 
-const TABS = [["general", "General", general], ["desktop", "Desktop presence", desktop], ["agents", "Agents", agents], ["history", "History", history], ["terminal", "Terminal", terminal], ["hooks", "Hooks & skills", hooks], ["skill", "Skill", skill], ["cli", "Command line", cli], ["updates", "Updates", updates]];
+const TABS = [["general", "General", general], ["machines", "Machines", machinesPanel], ["hooks", "Hooks & skills", hooks], ["clouds", "Clouds", cloudsPanel], ["desktop", "Desktop presence", desktop], ["agents", "Agents", agents], ["history", "History", history], ["terminal", "Terminal", terminal], ["skill", "Skill", skill], ["cli", "Command line", cli], ["updates", "Updates", updates]];
+
+// The machine and coverage tabs need room for a list beside details, and a table.
+const WIDE = ["machines", "hooks"];
+bindMachines(() => current === "settings" && ["machines", "clouds", "hooks"].includes(tab), () => render());
 
 function render() {
   if (current !== "settings") return;
@@ -480,7 +416,7 @@ function render() {
         } }, label)),
       h("button", {class:"tab",onclick:()=>go("accounts")}, "Accounts"),
       h("span", { class: "spacer" })),
-    h("div", { class: "page", role: "tabpanel", "aria-labelledby": "tab-" + tab }, h("div", { class: "page-in", style: "max-width:760px" }, h("h1", {}, name), saving ? h("p", { role: "status" }, "Saving changes…") : null, h("fieldset", { class: "settings-fields", disabled: saving, "aria-busy": String(saving) }, body())))));
+    h("div", { class: "page", role: "tabpanel", "aria-labelledby": "tab-" + tab }, h("div", { class: "page-in", style: WIDE.includes(tab) ? "max-width:1180px" : "max-width:760px" }, h("h1", {}, name), saving ? h("p", { role: "status" }, "Saving changes…") : null, h("fieldset", { class: "settings-fields", disabled: saving, "aria-busy": String(saving) }, body())))));
   view.querySelector(".page").scrollTop = scrollTop;
 }
 
@@ -504,8 +440,9 @@ async function load() {
   await Promise.all([loadTerminal(), loadHistory()]);
 }
 
-screen("settings", async (which) => {
+screen("settings", async (which, pick) => {
   if (which) tab = which;
+  if (pick) pickMachine(pick);
   if (!s) loading("Reading the settings…");
   await load();
 });

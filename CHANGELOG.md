@@ -10,9 +10,129 @@ All notable changes to this project are documented here. The format follows
 
 - Adding or trusting a machine no longer fails with "reading SSH settings … context
   deadline exceeded" when ssh is slow to start (common on busy Windows machines).
+
+## [0.6.2] - 2026-10-22
+
+What hopsesh can do on each machine, at a glance and check by check; `hopsesh cd` to continue
+a session in another folder as the same session; "Block the original" only where it can
+work; and sessions the app opens find hopsesh.
+
+### Added
+
+- What hopsesh can do on each machine, check by check: whether it is installed and its
+  version against the newest on your machines (the baseline), whether it runs in the login
+  session and receives sessions, whether its command is on PATH (asked of your own shell
+  there, as you use it), and each agent folder's movement hook and skill. A machine's hooks
+  and skill are read over SSH when hopsesh there isn't in a login session, so they are known
+  either way; they are read again every 10 minutes and turn "unknown" when too old.
+  - `hopsesh hosts status [machine] [--json] [--refresh]` lists them, with the command that
+    fixes each; it exits 3 when a machine needs something.
+  - The app marks each machine in the sidebar with hopsesh's own mark: green and filled when
+    it receives sessions, gray and hollow when it is installed but not, none without
+    hopsesh, and an ↑ when a newer hopsesh is on another machine.
+  - Settings › Machines is the one place for a machine: your machines beside the selected
+    one's details, with "Up next" (only what is left, each with its fix), its hopsesh, login
+    and receiving, its agents' hooks and skill, how hopsesh logs in, its host key and removing
+    it. The Machines screen opens it; clouds have their own tab, Settings › Clouds.
+  - Settings › Hooks & skills shows the command, hooks and skill on every machine at once,
+    one column per agent folder: fix a column, a selection or everything, with progress in
+    the cells and a summary that says which machines are waiting and why.
+  - The TUI shows the mark beside each machine in its header, and `m` opens the machines
+    and their checks.
+- "Block the original" (or "Warn in the original") is available only when the machine the
+  session leaves can do it: hopsesh 0.6.0 or newer there (older ones can't read where the
+  session went) and the hook in that agent folder. Otherwise the plan shows it off, with
+  the reasons and the fixes, and `pull`/`plan` say why the original won't be protected.
+- Setting hopsesh up on a machine can add its hooks and skill too (Settings › Hooks &
+  skills › "Add hooks and skill when hopsesh is set up on a machine"; off by default, and
+  `[peer] setup_integrations` in the configuration).
+- `hopsesh cd <session> <dir>` continues a session on this machine in another folder and
+  keeps it the same session: its id, and every record its agent wrote. Claude Code sessions
+  change folder the way Claude Code's own `/cd` does (the transcript and its side folder move
+  to the new folder's project folder, with a `relocated` record); for one that is open,
+  hopsesh tells you to type `/cd <dir>` in it and waits until Claude Code has moved it. Codex
+  sessions change folder through Codex itself (`codex app-server` resumes the thread in the
+  new folder with no turn, and Codex records it in the rollout and its own index). Codex's
+  `/cd` starts a new thread, so an open Codex session is quit first with `--stop-local`. The
+  folder must be a checkout of the session's repository unless you pass `--other-repo`.
+  `hopsesh undo` reverses it. The weekly upstream-drift check watches what this relies on:
+  `/cd` and its `relocated` record, Codex's `thread/resume` with a folder, its
+  `thread_settings_applied` record, `-C`, and whether Codex's `/cd` still forks.
+- README shell-completion setup for Bash, Zsh, Fish and PowerShell.
+
+### Fixed
+
+- A session the macOS app opens in its own terminal finds `hopsesh`, the agents and
+  Homebrew's tools: the app now puts your shell's PATH in front of its own, as
+  `hopsesh serve` does. Started from Finder, it had only the system folders, so a moved
+  session's agent got `command not found: hopsesh` and said hopsesh wasn't installed.
+- The briefing a moved session gets names hopsesh by its full path when your shell doesn't
+  find it by name, so its archive commands run either way.
+- `hopsesh doctor` names each account folder of an agent (`Claude Code · work`) instead of
+  listing the agent once per folder under the same name.
+- The app's sidebar shows its place names as written, not in capitals.
+- A Codex session resumed in another folder (`codex resume -C`) is listed in that folder:
+  hopsesh reads the folder Codex recorded last, not only the one the thread started in.
+  `hopsesh` resumes Codex sessions with `-C <folder>`, so Codex no longer asks which folder to
+  use, or goes back to the old one when `tui.resume_cwd = "session"`.
+
+## [0.6.1] - 2026-10-21
+
+Compressed Codex sessions listed again, sizes, faster scans of other machines, undo that
+cleans up clones and worktrees, and lineage files a seventh of their size. 0.6.0 was tagged
+but not published, so this release includes its changes. **Update hopsesh on every
+machine:** an older hopsesh cannot read the new lineage files.
+
+### Security
+
+- Built with Go 1.27.3, which distrusts compromised intermediate certificates in
+  `crypto/x509` ([GO-2026-6809](https://pkg.go.dev/vuln/GO-2026-6809)).
+
+### Changed
+
+- Lineage files (`<session>.hopsesh.json`) are about a seventh of their size (on a Mac with
+  39 of them: 226 MB to 32 MB), so scans read less, over SSH too. They are written in
+  `lineage/6`: compact JSON that writes each record's ids, anchors and hashes once instead of
+  up to three times. The history they hold is unchanged, and machines still exchange it as
+  `lineage/5` (peer protocol unchanged). Each file is rewritten the next time a move updates
+  it, and both formats are read. The lineage size limit (`history.lineage_mb`) still
+  measures the history itself, so the same histories fit as before. An older hopsesh cannot
+  read a `lineage/6` file: it shows that session's lineage as unsupported and does not move
+  it. Update hopsesh on every machine instead of archiving such a file there.
+
+### Added
+
+- Sizes: `hopsesh ls` shows each session's size and each group's total, and ends with what
+  each agent's sessions take on each machine (for example `my-mac (here)  1.3 GB: Claude Code 1.2 GB,
+  Codex 172.7 MB`). In the app, a session's size is beside when it was last active, a
+  group's total is in its heading, and the Machines screen says what each machine's
+  sessions take. `hopsesh show` gives the size in KB, MB or GB.
+
+### Fixed
+
+- Codex sessions that Codex has compressed are listed again. Codex rewrites a rollout it has
+  not written for a week as `rollout-….jsonl.zst` (with `local_thread_store_compression`),
+  and hopsesh, which read only `.jsonl`, left those sessions out. On a Mac with 432 of them,
+  they included the newest work. hopsesh now reads them as Codex does: a session keeps its
+  `.jsonl` path while its file is compressed, the plain file is the one in use when both
+  exist, and a change to a compressed session (a move's mark, an undo) first writes it back
+  as plain `.jsonl`, with its permissions and modification time, and removes the `.zst`, as
+  Codex does when it resumes one. This works for every agent and on every machine, over SSH
+  too. Claude Code does not compress its transcripts.
 - Undo removes the folders an operation's writes made, once they are empty: undoing a push
   no longer leaves an empty project folder (such as `~/.claude/projects/<folder>`) on the
   target. A folder that holds something else since, or was there before, stays.
+- Scanning a machine over SSH no longer waits out the scan's 3-minute limit when it holds
+  large Codex forks or moved sessions (a Mac with 10 GB of them: 184 s → 14 s). A listing
+  no longer reads those transcripts over the network. A command about a session still checks
+  its family there: a Codex fork's ancestry, and whether its moved copies are ahead or
+  behind. Until then a listing shows another machine's Codex fork as a session of its own,
+  and asks to verify a return to a copy there, as it does for a copy it cannot read.
+- Undo removes the clone and the worktree a move made (`--clone`, `--worktree create`),
+  with the branch made for the worktree and the folders they made, on this machine or on
+  the machine a push went to. A clone with work of its own (changes, untracked or ignored
+  files such as an `.env`, stashes, commits that are not on its remote, other worktrees)
+  is never removed, even by `--force`: undo leaves it and says so.
 
 ## [0.5.0] - 2026-10-15
 
@@ -833,6 +953,8 @@ is refused and set aside (the app offers this), and machines are added again.
 - The terminal UI no longer carries out a plan you pressed `y` on while a changed one was
   still being worked out.
 
+[0.6.2]: https://github.com/roeehrl/hopsesh/releases/tag/v0.6.2
+[0.6.1]: https://github.com/roeehrl/hopsesh/releases/tag/v0.6.1
 [0.5.0]: https://github.com/roeehrl/hopsesh/releases/tag/v0.5.0
 [0.4.5]: https://github.com/roeehrl/hopsesh/releases/tag/v0.4.5
 [0.4.4]: https://github.com/roeehrl/hopsesh/releases/tag/v0.4.4

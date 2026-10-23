@@ -47,6 +47,11 @@ type MachineDTO struct {
 	Hopsesh              string    `json:"hopsesh"`    // hopsesh's version there ("" when not installed)
 	// Presence is how hopsesh works with the machine (app.Presence*; "" for this one).
 	Presence string `json:"presence,omitempty"`
+	// Receiving: hopsesh there runs in the login session and accepts sessions (the
+	// sidebar's green mark); Newest is the newest hopsesh on your machines when this one
+	// is older ("" otherwise).
+	Receiving bool   `json:"receiving"`
+	Newest    string `json:"newest,omitempty"`
 }
 
 // AgentOpt is an agent a session can continue in here.
@@ -402,8 +407,13 @@ func scanDTO(core *app.App, inv *app.Inventory, updated, elsewhere time.Time, ta
 	for _, f := range inv.Adopted {
 		out.Adopted = append(out.Adopted, core.Brought(f))
 	}
+	newest := app.NewestHopsesh(inv)
 	for _, m := range inv.Machines {
-		d := MachineDTO{Phase: m.Phase, CheckedAt: m.CheckedAt, Name: m.Name, Status: m.Status, Hint: m.Hint, Error: scanProblem(m), OS: m.OS, Local: m.Local, Hopsesh: m.Hopsesh, Presence: m.Presence, Agents: []string{}}
+		d := MachineDTO{Phase: m.Phase, CheckedAt: m.CheckedAt, Name: m.Name, Status: m.Status, Hint: m.Hint, Error: scanProblem(m), OS: m.OS, Local: m.Local, Hopsesh: m.HopseshVersion(), Presence: m.Presence, Agents: []string{},
+			Receiving: core.Receiving(m)}
+		if app.Behind(d.Hopsesh, newest) {
+			d.Newest = newest
+		}
 		d.AccountSetupRequired = !m.Local && m.Status == app.StatusOK && m.Host() != nil && m.Host().Facts.Endpoint == ""
 		for _, e := range inv.Entries {
 			if e.Machine == m.Name {
@@ -860,32 +870,35 @@ type PlanDTO struct {
 	EndDestinationToken string `json:"endDestinationToken,omitempty"`
 	ReviewNewSession    bool   `json:"reviewNewSession,omitempty"`
 
-	SourceEntry   *EntryDTO        `json:"sourceEntry,omitempty"`
-	SourceProfile string           `json:"sourceProfile,omitempty"`
-	TargetProfile string           `json:"targetProfile,omitempty"`
-	ResumeHere    bool             `json:"resumeHere,omitempty"` // already here: continue it where it is
-	NoWork        bool             `json:"noWork"`
-	Destinations  []agent.Summary  `json:"destinations,omitempty"`
-	Kind          string           `json:"kind"` // move | continue
-	Title         string           `json:"title"`
-	Agent         string           `json:"agent"`     // the agent it lands in
-	FromAgent     string           `json:"fromAgent"` // the agent it comes from
-	SourceHost    string           `json:"sourceHost"`
-	SourceOS      string           `json:"sourceOs"`
-	SourceCWD     string           `json:"sourceCwd"`
-	TargetCWD     string           `json:"targetCwd"`
-	Live          bool             `json:"live"`
-	Repo          move.RepoPlan    `json:"repo"`
-	Mappings      []agent.Mapping  `json:"mappings"`
-	Files         int              `json:"files"`
-	Bytes         int64            `json:"bytes"`
-	Sync          string           `json:"sync"`
-	FromSource    bool             `json:"syncFromSource"`
-	Push          bool             `json:"push"`
-	StopHere      bool             `json:"stopHere"`
-	Conflict      string           `json:"conflict"`
-	Warnings      []string         `json:"warnings"`
-	Blockers      []string         `json:"blockers"`
+	SourceEntry   *EntryDTO       `json:"sourceEntry,omitempty"`
+	SourceProfile string          `json:"sourceProfile,omitempty"`
+	TargetProfile string          `json:"targetProfile,omitempty"`
+	ResumeHere    bool            `json:"resumeHere,omitempty"` // already here: continue it where it is
+	NoWork        bool            `json:"noWork"`
+	Destinations  []agent.Summary `json:"destinations,omitempty"`
+	Kind          string          `json:"kind"` // move | continue
+	Title         string          `json:"title"`
+	Agent         string          `json:"agent"`     // the agent it lands in
+	FromAgent     string          `json:"fromAgent"` // the agent it comes from
+	SourceHost    string          `json:"sourceHost"`
+	SourceOS      string          `json:"sourceOs"`
+	SourceCWD     string          `json:"sourceCwd"`
+	TargetCWD     string          `json:"targetCwd"`
+	Live          bool            `json:"live"`
+	Repo          move.RepoPlan   `json:"repo"`
+	Mappings      []agent.Mapping `json:"mappings"`
+	Files         int             `json:"files"`
+	Bytes         int64           `json:"bytes"`
+	Sync          string          `json:"sync"`
+	FromSource    bool            `json:"syncFromSource"`
+	Push          bool            `json:"push"`
+	StopHere      bool            `json:"stopHere"`
+	Conflict      string          `json:"conflict"`
+	Warnings      []string        `json:"warnings"`
+	Blockers      []string        `json:"blockers"`
+	// CannotProtect says why the original can't be blocked or warned on its machine: the
+	// sheet shows that option off, with these reasons and the fixes.
+	CannotProtect []string         `json:"cannotProtect,omitempty"`
 	NewName       string           `json:"newName"`
 	OtherAcct     bool             `json:"otherAccount"`
 	Continue      *ContinueDTO     `json:"continue,omitempty"`
@@ -1015,7 +1028,7 @@ func (a *App) invalidateReturnSelection(p *move.Plan) {
 }
 
 func planDTO(p *move.Plan, e app.Entry, tm agent.Module) *PlanDTO {
-	d := &PlanDTO{SourceProfile: p.Source.ProfileName, TargetProfile: p.Target.ProfileName, NoWork: p.NoWork, ResumeHere: p.ResumeHere, Destinations: p.Destinations, Kind: p.Kind, Title: p.Title, Agent: p.Agent, FromAgent: e.AgentName, SourceHost: p.Source.Location,
+	d := &PlanDTO{CannotProtect: p.CannotProtect, SourceProfile: p.Source.ProfileName, TargetProfile: p.Target.ProfileName, NoWork: p.NoWork, ResumeHere: p.ResumeHere, Destinations: p.Destinations, Kind: p.Kind, Title: p.Title, Agent: p.Agent, FromAgent: e.AgentName, SourceHost: p.Source.Location,
 		SourceOS: p.Source.OS, SourceCWD: p.Source.CWD, TargetCWD: p.Target.CWD, Live: p.Live, Repo: p.Repo,
 		Mappings: p.Placement.Mappings, Files: len(p.Files.Files), Bytes: p.Bytes, Sync: p.Sync,
 		FromSource: p.SyncFromSource, Push: p.Push, StopHere: p.StopHere, Conflict: p.Conflict,
@@ -1071,8 +1084,8 @@ type DoneDTO struct {
 	// RemoteKey is the pushed copy's session there (to open it there, in a tab here).
 	RemoteKey string `json:"remoteKey,omitempty"`
 	// RemoteLogin: hopsesh runs in the login session there, so it can run it.
-	RemoteLogin bool `json:"remoteLogin,omitempty"`
-	AuditDir         string   `json:"auditDir"`
+	RemoteLogin bool   `json:"remoteLogin,omitempty"`
+	AuditDir    string `json:"auditDir"`
 	// Fetch is a session brought from a cloud: waiting for the user's terminal, or the
 	// code only.
 	Fetch *BroughtDTO `json:"fetch,omitempty"`

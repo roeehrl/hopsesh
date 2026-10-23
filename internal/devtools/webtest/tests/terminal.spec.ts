@@ -155,8 +155,9 @@ async function clickText(t: Page, text: string) {
 
 test("a sign-in tab records nothing and says so; the cloud card checks the login after it", async ({ page, context }) => {
   const t = await terminal(context);
-  // From the Machines page: Claude Code cloud, allowed, has its own sign-in command.
-  await page.evaluate(() => (window as any).__emit("hopsesh:menu", "machines"));
+  // From Settings › Clouds: Claude Code cloud, allowed, has its own sign-in command.
+  await page.evaluate(() => (window as any).__emit("hopsesh:menu", "settings"));
+  await page.getByRole("tab", { name: "Clouds", exact: true }).click();
   const card = page.locator(".cloud-card", { hasText: "Claude Code cloud" });
   await card.getByRole("switch", { name: "Turn on Claude Code cloud" }).click();
   await expect(card).toContainText("Signing in runs claude auth login");

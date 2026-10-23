@@ -341,6 +341,11 @@ func main() {
 			}
 		}
 	})
+	http.HandleFunc("/lineage", func(w http.ResponseWriter, r *http.Request) {
+		if err := readLineage(w, r, svc); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+	})
 	http.HandleFunc("/history-ledger", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "POST only", http.StatusMethodNotAllowed)

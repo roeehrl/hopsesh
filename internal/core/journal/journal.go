@@ -59,6 +59,17 @@ const (
 	// Sha the commit it pointed at. Undo pushes it back, and refuses when the remote has a
 	// branch of that name again.
 	OpDeletedRef Op = "deleted-ref"
+	// OpClone is a repository hopsesh cloned on this machine (Path: the clone; Created: the
+	// folder was not there before). Undo removes it, after the worktrees and branches the
+	// operation made in it, while everything in it is on its remote. A clone with work of
+	// its own (changes, stashes, unpushed commits, other worktrees) is never lost: undo
+	// leaves it where it is, even forced, and says so (Journal.Left), so it does not stop
+	// an undo either.
+	OpClone Op = "clone"
+	// OpChangeDir is a session whose agent recorded a new folder for it (Key; From: the
+	// folder before; Dir: the new one; Path: its file, Size and Sum as the change left it).
+	// Undo has the agent change it back, and refuses when the file changed since.
+	OpChangeDir Op = "cd"
 )
 
 // Entry is one journaled write.
@@ -88,7 +99,8 @@ type Entry struct {
 	Key     *agent.SessionKey `json:"key,omitempty"`
 	URL     string            `json:"url,omitempty"`
 	Updated time.Time         `json:"updated,omitempty"`
-	// OpAdopt uses Size and Sum for the whole file as adopted.
+	Dir     string            `json:"dir,omitempty"` // OpChangeDir: the new folder
+	// OpAdopt and OpChangeDir use Size and Sum for the whole file as adopted.
 	// Keep (OpPushRef): the user chose to keep the branch (delete_branch = "never"), so undo
 	// leaves it where it is and says so.
 	Keep bool `json:"keep,omitempty"`
@@ -118,6 +130,9 @@ type Journal struct {
 	// Kept are the branches undo left on their remotes because the user chose to keep them
 	// ("origin hopsesh/handoff/…").
 	Kept []string `json:"kept,omitempty"`
+	// Left are the clones undo left in place because they hold work of their own, each
+	// with why ("~/src/app: it has commits that are not on its remote").
+	Left []string `json:"left,omitempty"`
 	// Parts are the journals of the legs of a composite operation (a cloud-to-cloud hop:
 	// the fetch, then the hand-off), in order; undoing it undoes them, last first. PartOf
 	// is the composite operation a leg belongs to.
@@ -133,14 +148,15 @@ func Dir(stateDir string) string { return filepath.Join(stateDir, "journal") }
 
 // Kinds of operations.
 const (
-	KindMove     = "move"     // a session brought here in its own agent
-	KindContinue = "continue" // a session continued in another agent
-	KindPush     = "push"     // a session sent to another machine (its lineage here)
-	KindHandoff  = "handoff"  // a session handed off to a cloud (a branch, a cloud session, lineage)
-	KindFetch    = "fetch"    // a session brought from a cloud (a worktree, an adopted session)
-	KindHop      = "hop"      // a cloud session handed on to another cloud through this machine (Parts)
-	KindCleanup  = "cleanup"  // branches deleted on a remote once their work was merged
-	KindRename   = "rename"   // a session given a new title in its agent's own data
+	KindMove      = "move"     // a session brought here in its own agent
+	KindContinue  = "continue" // a session continued in another agent
+	KindPush      = "push"     // a session sent to another machine (its lineage here)
+	KindHandoff   = "handoff"  // a session handed off to a cloud (a branch, a cloud session, lineage)
+	KindFetch     = "fetch"    // a session brought from a cloud (a worktree, an adopted session)
+	KindHop       = "hop"      // a cloud session handed on to another cloud through this machine (Parts)
+	KindCleanup   = "cleanup"  // branches deleted on a remote once their work was merged
+	KindRename    = "rename"   // a session given a new title in its agent's own data
+	KindChangeDir = "cd"       // a session continued in another folder
 )
 
 // New starts a journal of one operation.
@@ -300,7 +316,7 @@ func (j *Journal) changed(ctx context.Context, r Reach, skip func(machine, p str
 				}
 				return fmt.Errorf("%w: %s on %s (%s)", ErrChanged, filepath.Base(e.Path), e.Machine, what)
 			}
-		case OpAdopt:
+		case OpAdopt, OpChangeDir:
 			fsys, err := r.fs(e.Machine)
 			if err != nil {
 				continue
@@ -397,6 +413,12 @@ type Git interface {
 	WorktreeDirty(ctx context.Context, worktree string) (bool, error)
 	// RemoveWorktree removes a worktree of the checkout dir (force: with its changes).
 	RemoveWorktree(ctx context.Context, dir, worktree string, force bool) error
+	// CloneWork says what a clone holds that is not on its remote ("" when nothing is, or
+	// when it is gone).
+	CloneWork(ctx context.Context, dir string) (string, error)
+	// RemoveClone removes the clone dir, while CloneWork finds nothing in it (one already
+	// gone is fine).
+	RemoveClone(ctx context.Context, dir string) error
 }
 
 func short(sha string) string {
@@ -464,6 +486,14 @@ type Reach struct {
 	// Git reaches checkouts on this machine (nil: worktrees and refs are reported, not
 	// undone).
 	Git Git
+	// Dirs reaches the agents that recorded a session's new folder (nil: reported, not
+	// undone).
+	Dirs Dirs
+}
+
+// Dirs has an agent change a session's folder, for undo.
+type Dirs interface {
+	ChangeDir(ctx context.Context, machine string, key agent.SessionKey, dir string) error
 }
 
 // Files is a Reach of files only.
@@ -547,10 +577,37 @@ func (j *Journal) Adopt(fsys host.FS, machine, p string) error {
 	return j.record(Entry{Op: OpAdopt, Machine: machine, Path: p, Size: st.Size, Sum: st.Sum})
 }
 
-// Worktree records a worktree hopsesh added at path to the checkout dir on machine, so
-// undo removes it.
+// ChangedDir records that the agent itself moved key to dir (from from), and the state
+// it left its file in, so undo can change it back while nothing used the session since.
+func (j *Journal) ChangedDir(fsys host.FS, machine string, key agent.SessionKey, file, from, dir string) error {
+	st, err := fileState(fsys, machine, file)
+	if err != nil {
+		return err
+	}
+	return j.record(Entry{Op: OpChangeDir, Machine: machine, Path: file, Key: &key, From: from, Dir: dir, Size: st.Size, Sum: st.Sum})
+}
+
+// Worktree records a worktree hopsesh is about to add at path to the checkout dir on
+// machine, with the folders above it that adding it makes, so undo removes them.
 func (j *Journal) Worktree(machine, dir, path string) error {
+	if err := j.recordDirs(os.Stat, machine, path); err != nil {
+		return err
+	}
 	return j.record(Entry{Op: OpWorktree, Machine: machine, Path: path, From: dir})
+}
+
+// Clone records a repository hopsesh is about to clone at path on this machine (machine:
+// its name), with the folders above it the clone makes, so undo removes them while
+// nothing in them is new.
+func (j *Journal) Clone(machine, path string) error {
+	_, err := os.Stat(path)
+	created := errors.Is(err, fs.ErrNotExist)
+	if created {
+		if err := j.recordDirs(os.Stat, machine, path); err != nil {
+			return err
+		}
+	}
+	return j.record(Entry{Op: OpClone, Machine: machine, Path: path, Created: created})
 }
 
 // Ref records a ref hopsesh set to sha in the checkout dir on machine (prev: what it was,
@@ -878,7 +935,7 @@ func (j *Journal) undo(ctx context.Context, r Reach, force bool, skip func(strin
 		}
 	}
 	captured := j.captureLineage(r)
-	var problems, kept []string
+	var problems, kept, left []string
 	var manual []Manual
 	// Worktrees go first: a branch is only renamed or deleted once no worktree hopsesh made
 	// has it checked out.
@@ -893,6 +950,13 @@ func (j *Journal) undo(ctx context.Context, r Reach, force bool, skip func(strin
 		e := j.Entries[i]
 		switch e.Op {
 		case OpWorktree:
+			continue
+		case OpClone:
+			if work, err := undoClone(ctx, r, e); err != nil {
+				problems = append(problems, fmt.Sprintf("the clone %s: %v", e.Path, err))
+			} else if work != "" {
+				left = append(left, e.Path+": "+work)
+			}
 			continue
 		case OpRef:
 			if err := undoRef(ctx, r, e, force); err != nil {
@@ -913,6 +977,17 @@ func (j *Journal) undo(ctx context.Context, r Reach, force bool, skip func(strin
 				problems = append(problems, fmt.Sprintf("%s on %s: the remote cannot be reached from here", shortRef(e.Ref), e.Remote))
 			} else if err := r.Refs.RestoreRef(ctx, e.Machine, e.Path, e.Remote, e.Ref, e.Sha); err != nil {
 				problems = append(problems, fmt.Sprintf("%s on %s: %v", shortRef(e.Ref), e.Remote, err))
+			}
+			continue
+		case OpChangeDir:
+			switch {
+			case e.Key == nil:
+			case r.Dirs == nil:
+				problems = append(problems, fmt.Sprintf("%s: its folder can't be changed back from here", e.Key.Session))
+			default:
+				if err := r.Dirs.ChangeDir(ctx, e.Machine, *e.Key, e.From); err != nil {
+					problems = append(problems, fmt.Sprintf("changing %s back to %s: %v", e.Key.Session, e.From, err))
+				}
 			}
 			continue
 		case OpCloud:
@@ -951,7 +1026,7 @@ func (j *Journal) undo(ctx context.Context, r Reach, force bool, skip func(strin
 		}
 	}
 	j.mu.Lock()
-	j.Undone, j.Manual, j.Kept = len(problems) == 0, manual, kept
+	j.Undone, j.Manual, j.Kept, j.Left = len(problems) == 0, manual, kept, left
 	err := j.saveLocked()
 	j.mu.Unlock()
 	if err != nil {
@@ -989,6 +1064,26 @@ func undoWorktree(ctx context.Context, r Reach, e Entry, force bool) error {
 		return errors.New("git cannot be reached from here")
 	}
 	return r.Git.RemoveWorktree(ctx, e.From, e.Path, force)
+}
+
+// undoClone removes a clone hopsesh made while everything in it is on its remote, and
+// puts back the empty folder it was cloned into. A clone with work of its own stays: it
+// returns what that work is.
+func undoClone(ctx context.Context, r Reach, e Entry) (string, error) {
+	if r.Git == nil {
+		return "", errors.New("git cannot be reached from here")
+	}
+	work, err := r.Git.CloneWork(ctx, e.Path)
+	if err != nil || work != "" {
+		return work, err
+	}
+	if err := r.Git.RemoveClone(ctx, e.Path); err != nil {
+		return "", err
+	}
+	if !e.Created {
+		return "", os.MkdirAll(e.Path, 0o755)
+	}
+	return "", nil
 }
 
 // undoRef puts a ref back while it points at what hopsesh left; forced, wherever it points.

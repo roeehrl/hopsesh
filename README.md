@@ -134,10 +134,28 @@ hopsesh pull studio:"fix flaky tests"          # plan, confirm, move, print the 
 hopsesh pull studio:claude/7f3c2a1e --in codex # continue a Claude Code session in Codex
 hopsesh pull 7f3c2a1e                          # no machine name: bring back the newest copy
 hopsesh push 7f3c2a1e laptop                   # send it to a machine that runs hopsesh
+hopsesh cd 7f3c2a1e ~/git/app-2                # same session, another checkout here
 hopsesh hosts add nas alice@192.168.1.20 --password   # a machine without SSH keys
 hopsesh doctor studio                          # agents, SSH, host trust and the skill
+hopsesh hosts status                           # hopsesh, receiving, hooks and skill on each machine
 hopsesh undo                                   # undo the newest move (--list shows more)
 ```
+
+### Shell completion
+
+The `completion` command generates scripts for Bash, Zsh, Fish and PowerShell. With `hopsesh`
+on your PATH, run the line for your current shell to enable completion in this session:
+
+| Shell | Setup |
+| --- | --- |
+| Bash | `source <(hopsesh completion bash)` (requires Bash completion support) |
+| Zsh | `autoload -Uz compinit && compinit && source <(hopsesh completion zsh)` |
+| Fish | `hopsesh completion fish \| source` |
+| PowerShell | `hopsesh completion powershell \| Out-String \| Invoke-Expression` |
+
+To load it in new sessions, add the corresponding line to your shell startup file
+(`~/.bashrc`, `~/.zshrc`, `~/.config/fish/config.fish`, or `$PROFILE`).
+For installation options and prerequisites, run `hopsesh completion <shell> --help`.
 
 ### The app
 
@@ -299,6 +317,21 @@ hopsesh terminals run studio --resume 7f3c2a1e   # continue it on studio, work i
 hopsesh terminals run studio --dir ~/git/app     # a new session there
 hopsesh doctor --all-machines                     # hopsesh, hooks and skill on every machine
 ```
+
+## Another folder, same session
+
+`hopsesh cd <session> <dir>` continues a session on this machine in another folder (another
+worktree or clone of its repository) and keeps it the same session: same id, every message,
+tool call and reasoning block as the agent wrote them. Each agent does it its own way:
+
+- **Claude Code:** what its own `/cd` does. The transcript and its side folder move to the new
+  folder's project folder and get a `relocated` record. When the session is open, hopsesh
+  tells you to type `/cd <dir>` in it and waits until Claude Code has moved it.
+- **Codex:** Codex itself resumes the thread in the new folder (as `codex resume -C` does, with
+  no turn) and records it. Codex's own `/cd` starts a new thread, so an open Codex session is
+  quit first (`--stop-local`) or left alone.
+
+A folder outside the session's repository needs `--other-repo`. `hopsesh undo` reverses it.
 
 ## Cloud sessions
 
