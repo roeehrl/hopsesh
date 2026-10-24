@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/core/host"
+	"github.com/roeehrl/hopsesh/internal/core/installs"
 	"github.com/roeehrl/hopsesh/internal/core/integrate"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/internal/core/move"
@@ -49,6 +50,7 @@ const (
 	FixHooks   = "hooks"   // install the movement hooks
 	FixSkill   = "skill"   // install or update the skill
 	FixCLI     = "cli"     // put the hopsesh command on PATH
+	FixAlign   = "align"   // bring this machine's other copies of hopsesh to this version
 	FixApprove = "approve" // the user approves the hook in the agent (hopsesh never does)
 )
 
@@ -87,15 +89,19 @@ type MachineStatus struct {
 	Local   bool   `json:"local"`
 	// Version is hopsesh's version there ("" when it is not installed); Newest is the
 	// newest on any of your machines, and NewestOn the machine that has it.
-	Version   string       `json:"version,omitempty"`
-	Newest    string       `json:"newest,omitempty"`
-	NewestOn  string       `json:"newestOn,omitempty"`
-	Reach     Check        `json:"reach"`
-	Hopsesh   Check        `json:"hopsesh"`
-	Login     Check        `json:"login"`
-	Receiving Check        `json:"receiving"`
-	CLI       Check        `json:"cli"`
-	Agents    []AgentSetup `json:"agents"`
+	Version   string `json:"version,omitempty"`
+	Newest    string `json:"newest,omitempty"`
+	NewestOn  string `json:"newestOn,omitempty"`
+	Reach     Check  `json:"reach"`
+	Hopsesh   Check  `json:"hopsesh"`
+	Login     Check  `json:"login"`
+	Receiving Check  `json:"receiving"`
+	CLI       Check  `json:"cli"`
+	// Copies is whether every hopsesh there is one version (Installs lists them); nil
+	// Installs: not read yet.
+	Copies   Check          `json:"copies"`
+	Installs *installs.List `json:"installs,omitempty"`
+	Agents   []AgentSetup   `json:"agents"`
 	// Todo counts the checks that have a fix; Total every check there is.
 	Todo  int `json:"todo"`
 	Total int `json:"total"`
@@ -258,10 +264,11 @@ func Newest(ss []MachineStatus) (string, string) {
 
 // statusDetails are the slower readings of a machine, cached in the state folder.
 type statusDetails struct {
-	Version string       `json:"version"` // hopsesh there when they were read
-	CLI     Check        `json:"cli"`
-	Agents  []AgentSetup `json:"agents"`
-	At      time.Time    `json:"at"`
+	Version  string         `json:"version"` // hopsesh there when they were read
+	CLI      Check          `json:"cli"`
+	Installs *installs.List `json:"installs,omitempty"`
+	Agents   []AgentSetup   `json:"agents"`
+	At       time.Time      `json:"at"`
 }
 
 type statusCache struct {
@@ -419,15 +426,56 @@ func (a *App) machineStatus(m *Machine, d statusDetails, have bool) MachineStatu
 		return s
 	}
 	s.CLI, s.Agents, s.DetailsAt = d.CLI, append([]AgentSetup{}, d.Agents...), d.At
+	s.Installs = d.Installs
+	s.Copies = copiesCheck(d.Installs, m.Local)
 	if time.Since(d.At) > statusStale || !reached && time.Since(d.At) > statusDetailsTTL {
 		s.Stale = true
 		ago := "checked " + d.At.Local().Format("Jan 2 15:04")
 		s.CLI = staled(s.CLI, ago)
+		s.Copies = staled(s.Copies, ago)
 		for i := range s.Agents {
 			s.Agents[i].Hook, s.Agents[i].Skill = staled(s.Agents[i].Hook, ago), staled(s.Agents[i].Skill, ago)
 		}
 	}
 	return s
+}
+
+// copiesCheck is whether every hopsesh on a machine is one version, and the login
+// service runs one that is there.
+func copiesCheck(l *installs.List, local bool) Check {
+	if l == nil || len(l.Installs) == 0 {
+		return Check{}
+	}
+	fix := FixUpdate
+	if local {
+		fix = FixAlign
+	}
+	var names []string
+	for _, in := range l.Installs {
+		names = append(names, installName(in, l.Home)+" "+nonEmptyStr(in.Version, "?"))
+	}
+	switch {
+	case l.ServiceGone:
+		return Check{State: CheckError, Text: "starts a missing hopsesh", Reason: "hopsesh's login service runs " + tildePath(l.Service) + ", which isn't there any more", Fix: fix}
+	case l.Mixed():
+		return Check{State: CheckWarn, Text: strings.Join(names, " · "), Reason: "these copies of hopsesh share its settings and history there; an older one can misread what a newer one wrote", Fix: fix}
+	case len(l.Installs) == 1:
+		return Check{State: CheckOK, Text: names[0]}
+	}
+	return Check{State: CheckOK, Text: strings.Join(names, " · ")}
+}
+
+// installName names an install in a few words.
+func installName(in installs.Install, home string) string {
+	switch in.Kind {
+	case installs.App:
+		return "app"
+	case installs.Own:
+		return "hopsesh's copy"
+	case installs.Package:
+		return in.Manager
+	}
+	return installs.Tilde(in.Path, home)
 }
 
 // staled is a check whose reading is too old to be shown as it was.
@@ -507,7 +555,7 @@ func (s *MachineStatus) count() {
 			s.Todo++
 		}
 	}
-	for _, c := range []Check{s.Hopsesh, s.Receiving, s.CLI} {
+	for _, c := range []Check{s.Hopsesh, s.Receiving, s.CLI, s.Copies} {
 		add(c)
 	}
 	if s.Login.Fix != "" {
@@ -531,6 +579,8 @@ func (a *App) readStatusDetails(ctx context.Context, m *Machine) (statusDetails,
 		d.Version = version.Version
 		st := integrate.CheckCLI()
 		d.CLI = cliCheck(st.Resolves, st.Path)
+		l := LocalInstalls(ctx)
+		d.Installs = &l
 		d.Agents = a.protectionSetups(a.LocalProtection(ctx), m)
 		return d, true
 	case m.Hopsesh == "":
@@ -543,6 +593,9 @@ func (a *App) readStatusDetails(ctx context.Context, m *Machine) (statusDetails,
 	}
 	defer hm.Close()
 	d.CLI = remoteCLI(ctx, hm)
+	if l, err := a.remoteInstalls(ctx, hm); err == nil {
+		d.Installs = &l
+	}
 	if m.Presence == PresenceLogin {
 		if p, err := a.MachineProtection(ctx, m.Name); err == nil {
 			d.Agents = a.protectionSetups(p, m)

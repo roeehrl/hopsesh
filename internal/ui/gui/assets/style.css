@@ -941,6 +941,9 @@ body.terminal-right .divider[data-pane="inspector"]{display:none}
 .mline { display: grid; grid-template-columns: 20px minmax(130px, 270px) minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: 13.5px; }
 .mline .mtext { min-width: 0; overflow-wrap: anywhere; }
 .mline .mfix { display: flex; justify-content: flex-end; }
+.installs { list-style: none; margin: -2px 0 2px 28px; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
+.installs li { display: flex; flex-wrap: wrap; gap: 0 8px; min-width: 0; }
+.installs .mono { overflow-wrap: anywhere; }
 .msym { text-align: center; font-weight: 600; }
 .msym.ok { color: var(--ok); } .msym.warn { color: var(--warn); } .msym.error { color: var(--err); } .msym.off, .msym.unknown { color: var(--muted); }
 .mmanage { display: flex; gap: 8px; border-top: 1px solid var(--line2); padding-top: 12px; }

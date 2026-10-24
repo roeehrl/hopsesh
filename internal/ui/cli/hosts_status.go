@@ -196,6 +196,13 @@ func fixes(s app.MachineStatus) []string {
 		setup = ""
 	}
 	add("hopsesh", s.Hopsesh, setup)
+	if s.Hopsesh.Fix == "" || s.Hopsesh.State == app.CheckOK {
+		copies := setup
+		if s.Local {
+			copies = "hopsesh installs --align"
+		}
+		add("copies", s.Copies, copies)
+	}
 	add("login session", s.Login, "hopsesh serve install")
 	receive := "hopsesh receive on"
 	if !s.Local {

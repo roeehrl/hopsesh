@@ -6,6 +6,34 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Changed
+
+- Every hopsesh on a machine is one version. A machine can have the app, a command you
+  installed, one a package manager owns and the copy hopsesh puts in `~/.hopsesh/bin`; they
+  share hopsesh's settings and history. Setting a machine up or updating it now updates each
+  copy older than this one: the app with its own verified updater, a command in place, and
+  hopsesh's own copy becomes a link to the machine's own hopsesh (or, if that couldn't be
+  updated, stays and runs the machine). A package manager's copy is left to it, with its
+  command. The login service runs the machine's own hopsesh. Before, Update refreshed only
+  `~/.hopsesh/bin` and left an app there at its old version.
+- The Update dialog lists what happens to each hopsesh on that machine before you agree, and
+  how many terminals hopsesh runs there the restart ends.
+- Each machine's page lists its copies of hopsesh (where, which version, which one the
+  machine, your terminal and the login service run), and Up next says when they differ or
+  when the login service starts one that isn't there any more. `hopsesh installs` lists them
+  here and `hopsesh installs --align` brings them to this version; `hopsesh hosts status`
+  says when they differ.
+- The app's **Install the command** over a hopsesh you installed says which version it is,
+  and offers to use the app's (keeping a backup) or keep both.
+
+### Fixed
+
+- `install.sh` stops before downloading when `~/.local/bin/hopsesh` links into the hopsesh
+  app, and `install.ps1` no longer replaces the app's own `hopsesh.exe` (`HOPSESH_FORCE=1`
+  overrides both). After installing, `install.sh` says when the app is there too.
+- A hopsesh from a Linux package (`.deb`, `.rpm`, `.apk`) no longer replaces itself with
+  `hopsesh update`; it names the package command instead.
+
 ## [0.6.4] - 2026-10-23
 
 Settings › Machines is the one place for a machine's hooks, skill and command, agent folders

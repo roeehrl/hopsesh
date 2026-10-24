@@ -47,7 +47,7 @@ Unofficial; not affiliated with or endorsed by Anthropic or OpenAI.`,
 	root.SetOut(out)
 	root.SetErr(out)
 	root.AddCommand(
-		versionCmd(), updateCmd(), accountsCmd(), agentsCmd(), hostsCmd(), cloudsCmd(), trustCmd(), doctorCmd(),
+		versionCmd(), updateCmd(), installsCmd(), accountsCmd(), agentsCmd(), hostsCmd(), cloudsCmd(), trustCmd(), doctorCmd(),
 		lsCmd(), showCmd(), archiveCmd(), lineageCmd(), pullCmd(), planCmd(), cdCmd(), pushCmd(), handoffCmd(), followupCmd(), receiveCmd(), historyCmd(), unblockCmd(), peerCmd(), undoCmd(), skillCmd(), noticesCmd(), noticeHookCmd(), serveCmd(),
 		openCmd(), terminalsCmd(), terminalStepCmd(), terminalOpenCmd(),
 	)

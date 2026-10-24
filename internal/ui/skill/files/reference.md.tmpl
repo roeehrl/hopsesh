@@ -10,6 +10,7 @@
 | `{{.Bin}} agents --json` | the agents hopsesh supports and what is installed here |
 | `{{.Bin}} hosts --json` | known machines and whether each is allowed |
 | `{{.Bin}} hosts status [machine] --json [--refresh]` | what hopsesh can do on each machine: its version against the newest, receiving, command, each agent's hook and skill, with the fix for each (exit 3 when one needs something) |
+| `{{.Bin}} installs --json` | every hopsesh on this machine (the app, commands, packages, hopsesh's own copy): version, owner, which one the machine runs |
 | `{{.Bin}} clouds --json` | the agents' clouds, whether each is allowed, and their state |
 | `{{.Bin}} clouds test [cloud]` | check a cloud's login and flags, read-only |
 | `{{.Bin}} plan <ref> --to <cloud> --json [flags]` | what handing it off to a cloud would do; never writes |
@@ -30,7 +31,8 @@ back); the approval rule covers both. `{{.Bin}} clouds continue <hop>` takes a h
 leg waited for a terminal on to the next cloud. `{{.Bin}} cd <ref> <dir> --json --yes [--other-repo] [--stop-local]` continues a session on this
 machine in another folder, keeping the session (`--dry-run` plans; an open Claude Code session
 changes folder when the user types `/cd <dir>` in it, which hopsesh waits for, up to `--wait`).
-`{{.Bin}} undo <id>` reverses a pull, a push, a folder change or
+`{{.Bin}} installs --align --yes` brings the other copies of hopsesh on this machine to this
+version (the app with its own updater). `{{.Bin}} undo <id>` reverses a pull, a push, a folder change or
 a hand-off (a cloud session itself stays in the cloud).
 
 ## handoff flags
