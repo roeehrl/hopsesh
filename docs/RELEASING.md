@@ -93,6 +93,9 @@ Before tagging:
   documented or allowlisted, the command tree equal to `internal/ui/cli/testdata/cli-tree.golden`)
   before it attests anything; `scripts/release-sign.sh` signs only attested files, so a
   failed check leaves a draft that cannot be completed. Fix it on `main` and tag again.
+- The real-window specs (`internal/devtools/webtest/real`) run only in CI, on the installed
+  apps. `go test ./internal/ui/gui` checks that each Settings tab and heading they look for
+  still exists; anything else they drive is checked only there.
 - The manual checks the stand-ins can't replace, on the Mac, for what the release touches:
   `scripts/cloud-smoke.sh` (real Claude Code cloud and Codex cloud; it starts paid turns),
   `scripts/iterm-smoke.sh` and `scripts/iterm-api-smoke.sh` (iTerm2), and the app's
@@ -112,6 +115,10 @@ Then:
    uploads nothing: `DRY_RUN=1 scripts/release-sign.sh v0.4.0`. It also checks the test
    bundle's `.sha256` and that the draft is a pre-release exactly when the tag has a suffix.
 5. Review the draft on GitHub, then publish: `gh release edit v0.4.0 --draft=false --latest`.
+   Then check that the previous release's app updates itself in place to this one, on the
+   Mac, in a folder of its own: `scripts/app-update-check.sh v0.3.9` (the tag before). It
+   needs the published release, which is why it isn't part of signing; updating another
+   machine's app from the app does exactly this there.
 6. The website: bump `softwareVersion` in the hopsesh entry of `src/data/apps.ts` in
    [codonic-site](https://github.com/roeehrl/codonic-site) and merge it. It's the only place
    the site writes the version; its download links use `releases/latest/download/…` and

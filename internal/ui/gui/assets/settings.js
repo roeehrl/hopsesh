@@ -262,8 +262,12 @@ function cli() {
   if (c.cannotInstall && c.state !== "ours") acts.push(h("span", { class: "muted", style: "font-size:12px" }, c.cannotInstall));
   else if (["missing", "other-app", "dangling"].includes(c.state)) acts.push(h("button", { class: "btn primary", onclick: () => run(() => api("InstallCLI", false), "The hopsesh command now runs this app's version") },
     c.state === "missing" ? "Install command" : c.state === "dangling" ? "Repair" : "Use this app's version"));
-  else if (c.state === "standalone" || c.state === "foreign") acts.push(h("button", { class: "btn", onclick: () => run(() => api("InstallCLI", true), sys.win ? "New terminal windows now run this app's hopsesh" : "Replaced; the previous one is kept as a backup") },
-    sys.win ? "Use this app's first" : "Replace with this app's (keeps a backup)"));
+  else if (c.state === "standalone" || c.state === "foreign") {
+    acts.push(h("span", { class: "muted", style: "font-size:12px;flex-basis:100%" },
+      `You have hopsesh ${c.version || ""}${c.version ? " " : ""}at `, h("span", { class: "mono" }, c.target || c.path), `, installed separately. Use this app's instead${sys.win ? "" : " (the old one is kept as a backup)"}, or keep both: updating hopsesh then updates both, and Machines shows when they differ.`));
+    acts.push(h("button", { class: "btn", onclick: () => run(() => api("InstallCLI", true), sys.win ? "New terminal windows now run this app's hopsesh" : "Replaced; the previous one is kept as a backup") },
+      sys.win ? "Use this app's first" : "Use this app's (keeps a backup)"));
+  }
   if (["ours", "other-app", "dangling"].includes(c.state)) acts.push(h("button", { class: "btn", onclick: () => run(() => api("UninstallCLI"), "Removed the hopsesh command") }, "Uninstall command"));
   return [card(
     h("div", { class: "set-row" }, title("The hopsesh command", `${cliHow()}, so any terminal, your agents and your other machines can run it. It updates with the app.`), chip(CLI_TEXT[c.state] || [c.state, ""])),

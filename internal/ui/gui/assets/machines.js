@@ -175,13 +175,19 @@ function presenceBlock(m) {
 function setupDialog(m) {
   const steps = h("ol", { class: "setup-steps", "aria-live": "polite" });
   const foot = h("div", { class: "dlg-foot" });
-  const mac = m.os === "darwin";
+  const mac = m.os === "darwin", updating = m.presence === "older" || m.update || m.presence === "login";
+  // What it does to each hopsesh there, read from the machine before asking.
+  const plan = h("li", { class: "muted", role: "status" }, `Checking which hopsesh ${m.name} has…`);
+  api("PlanUpdate", m.name).then((p) => {
+    const items = p.steps.map((s) => h("li", { "data-step": s.do }, s.text, s.command ? [": ", h("span", { class: "mono" }, s.command)] : null));
+    if (p.ends) items.push(h("li", { class: "warn" }, `Restarts hopsesh in the login session there, which ends the ${p.ends === 1 ? "terminal" : p.ends + " terminals"} it runs there. Claude Code and Codex keep each conversation up to its last finished turn.`));
+    plan.replaceWith(...(items.length ? items : [h("li", {}, `Every hopsesh on ${m.name} is ${p.version} or newer already.`)]));
+  }).catch(() => fill(plan, `Copies this hopsesh (${state.info?.version || "this version"}) to `, h("span", { class: "mono" }, "~/.hopsesh/bin"), ` on ${m.name} over SSH, or updates the ones there.`));
   const start = async () => {
     fill(foot, h("span", { class: "muted", role: "status" }, `Setting up hopsesh on ${m.name}…`));
     const off = on("hopsesh:machine-setup", (e) => {
       if (e.machine !== m.name) return;
-      const s = e.step;
-      steps.append(h("li", { class: s.state }, h("b", {}, { done: "✓", skipped: "–", waiting: "…", failed: "✕" }[s.state] || "·", " ", s.name), s.detail ? h("span", { class: "muted" }, " · " + s.detail) : null));
+      steps.append(stepItem(e.step));
     });
     try {
       const r = await api("SetUpMachine", m.name);
@@ -191,17 +197,21 @@ function setupDialog(m) {
       after(true, m.name);
     } catch (e) {
       fill(foot, h("span", { class: "err", role: "alert" }, errText(e)), h("span", { class: "spacer" }), h("button", { class: "btn", onclick: () => d.close() }, "Close"), h("button", { class: "btn primary", onclick: () => { fill(steps); start(); } }, "Try again"));
+      // Part of it may be done (an app that couldn't be updated): show the machine as it is.
+      if (steps.querySelector("li.done")) after(true, m.name);
     } finally { off?.(); }
   };
   fill(foot, h("button", { class: "btn", onclick: () => d.close() }, "Not now"), h("button", { class: "btn primary", onclick: start }, m.presence === "older" || m.update ? `Update hopsesh on ${m.name}` : `Set up hopsesh on ${m.name}`));
   const d = dialog(
     h("h2", { style: "margin:0;font-size:16px" }, m.presence === "older" || m.update ? `Update hopsesh on ${m.name}` : `Set up hopsesh on ${m.name}`),
     h("ul", { class: "setup-what" },
-      h("li", {}, `Copies this hopsesh (${state.info?.version || "this version"}) to `, h("span", { class: "mono" }, "~/.hopsesh/bin"), ` on ${m.name} over SSH. A hopsesh you installed there yourself is left as it is.`),
-      h("li", {}, `Starts it in your login session on ${m.name} whenever you log in there${mac ? ", so it can read the Keychain and open apps" : ""}. `, h("span", { class: "mono" }, "hopsesh serve uninstall"), " there turns this off."),
-      h("li", {}, `Lets ${m.name} receive the sessions you send it.`),
-      h("li", {}, state.info?.setUpIntegrations ? `Adds the movement hooks and the skill there once hopsesh runs in the login session; nothing else on ${m.name} changes.` : `Asks before installing hooks or the skill there; nothing else on ${m.name} changes.`),
-      mac ? h("li", {}, `Needs someone logged in to ${m.name}'s desktop for the Keychain and apps. Until then it works over SSH only.`) : null),
+      plan,
+      // Setting it up for the first time says what that means; an update says only what it changes.
+      updating ? null : [
+        h("li", {}, `Starts it in your login session on ${m.name} whenever you log in there${mac ? ", so it can read the Keychain and open apps" : ""}. `, h("span", { class: "mono" }, "hopsesh serve uninstall"), " there turns this off."),
+        h("li", {}, `Lets ${m.name} receive the sessions you send it.`),
+        h("li", {}, state.info?.setUpIntegrations ? `Adds the movement hooks and the skill there once hopsesh runs in the login session; nothing else on ${m.name} changes.` : `Asks before installing hooks or the skill there; nothing else on ${m.name} changes.`),
+        mac ? h("li", {}, `Needs someone logged in to ${m.name}'s desktop for the Keychain and apps. Until then it works over SSH only.`) : null]),
     steps, foot);
 }
 
@@ -447,6 +457,8 @@ function fixButton(st, c, m, label) {
   switch (c.fix) {
     case "setup": case "update":
       return m ? h("button", { class: "btn small" + (c.fix === "setup" ? " primary" : ""), onclick: () => setupDialog({ ...m, update: c.fix === "update" }) }, label || (c.fix === "update" ? `Update to ${st.newest}` : "Set up hopsesh…")) : null;
+    case "align":
+      return st.local ? h("button", { class: "btn small primary", onclick: () => alignDialog(st) }, "Update them…") : null;
     case "receive":
       return st.local ? h("button", { class: "btn small", onclick: async () => { try { await api("SetReceive", true); toast(`${sys.Here} now receives sessions`); } catch (e) { fail(e); } await after(false); loadStatus(); } }, "Turn on")
         : h("span", { class: "muted", style: "font-size:12px" }, "On ", name, ": ", h("span", { class: "mono" }, "hopsesh receive on"));
@@ -485,6 +497,42 @@ export async function fixMachines(list) {
   else toast(`Hooks and skill set up on ${total === 1 ? run.done[0] : total + " machines"}`);
   await loadStatus(true);
 }
+
+// installList is every hopsesh on a machine: where, what it is, its version, and which one
+// the machine runs.
+const KIND = { app: "the app", command: "installed by you", own: "set up by hopsesh", package: "" };
+function installList(l) {
+  const tilde = (p) => (l.home && p.startsWith(l.home + (l.os === "windows" ? "\\" : "/")) ? "~" + p.slice(l.home.length) : p);
+  return h("ul", { class: "installs", "aria-label": "Copies of hopsesh" }, l.installs.map((i) => h("li", {},
+    h("span", { class: "mono" }, tilde(i.bundle || i.path)),
+    h("span", { class: "muted" }, [i.version || "version unknown", i.kind === "package" ? `from ${i.manager}` : KIND[i.kind],
+      i.main ? "the one this machine runs" : "", i.terminal ? "your terminal runs it" : "", i.service ? "starts at login" : "", i.open ? "open" : "",
+      ...(i.links || []).map((x) => "also " + tilde(x))].filter(Boolean).join(" · ")))));
+}
+
+// alignDialog brings this machine's other copies of hopsesh to this version, step by step.
+function alignDialog(st) {
+  const steps = h("ol", { class: "setup-steps", "aria-live": "polite" });
+  const foot = h("div", { class: "dlg-foot" });
+  const start = async () => {
+    fill(foot, h("span", { class: "muted", role: "status" }, "Updating…"));
+    const off = on("hopsesh:machine-setup", (e) => { if (e.machine === st.machine) steps.append(stepItem(e.step)); });
+    try {
+      await api("AlignHere");
+      fill(foot, h("span", { class: "ok", role: "status" }, `Every hopsesh on ${sys.here} is ${state.info?.version} now.`), h("span", { class: "spacer" }), h("button", { class: "btn primary", onclick: () => d.close() }, "Done"));
+      loadStatus(true);
+    } catch (e) {
+      fill(foot, h("span", { class: "err", role: "alert" }, errText(e)), h("span", { class: "spacer" }), h("button", { class: "btn", onclick: () => d.close() }, "Close"));
+      loadStatus(true);
+    } finally { off?.(); }
+  };
+  fill(foot, h("button", { class: "btn", onclick: () => d.close() }, "Not now"), h("button", { class: "btn primary", onclick: start }, "Update them"));
+  const d = dialog(h("h2", { style: "margin:0;font-size:16px" }, `Bring every hopsesh on ${sys.here} to ${state.info?.version || "this version"}`),
+    h("p", { class: "muted", style: "margin:0;font-size:13px" }, "They share hopsesh's settings and history here, so an older one can misread what a newer one wrote. hopsesh updates the copies it may replace (the app with its own updater, which checks the release's signature) and leaves one a package manager owns to it."),
+    installList(st.installs), steps, foot);
+}
+
+const stepItem = (s) => h("li", { class: s.state }, h("b", {}, { done: "✓", skipped: "–", waiting: "…", failed: "✕" }[s.state] || "·", " ", s.name), s.detail ? h("span", { class: "muted" }, " · " + s.detail) : null);
 
 const line = (c, label, extra) => h("div", { class: "mline", "data-check": label },
   h("span", { class: "msym " + c.state, "aria-hidden": "true" }, symOf(c)),
@@ -542,9 +590,13 @@ export function machinesPanel(extras = {}) {
 // todoCount is the number of lines in a machine's Up next: one per check with a fix, and
 // one for all its agent folders' hooks and skill.
 function todoCount(st) {
-  const n = [st.hopsesh, st.login, st.receiving, st.cli].filter((c) => c?.fix && c.state !== "ok").length;
+  const n = [st.hopsesh, st.login, st.receiving, st.cli, copiesTodo(st)].filter((c) => c?.fix && c.state !== "ok").length;
   return n + (st.agents.some((a) => needsFix(a.hook) || needsFix(a.skill)) ? 1 : 0);
 }
+
+// copiesTodo is the copies check when it is a line of its own: updating hopsesh there
+// brings its copies along, so it is not repeated then.
+const copiesTodo = (st) => (["update", "setup"].includes(st.hopsesh?.fix) && st.hopsesh.state !== "ok" ? null : st.copies);
 
 // needsFix: a hook or skill hopsesh can put right from here.
 const needsFix = (c) => c && c.fix && c.state !== "ok" && ["hooks", "skill"].includes(c.fix);
@@ -574,6 +626,7 @@ function machineDetail(r, d, extras = {}) {
   const todo = [];
   const want = (c, label) => { if (c.fix && c.state !== "ok") todo.push(line(c, label, fixButton(st, c, m))); };
   want(st.hopsesh, "hopsesh");
+  if (copiesTodo(st)?.fix && st.copies.state !== "ok") todo.push(line(st.copies, "Copies of hopsesh", fixButton(st, st.copies, m, st.copies.fix === "update" ? "Update them…" : undefined)));
   want(st.login, "Start at login");
   want(st.receiving, "Receive sessions");
   want(st.cli, "Command line");
@@ -594,6 +647,7 @@ function machineDetail(r, d, extras = {}) {
   return [head, next,
     h("section", { class: "msec" }, h("h3", {}, "hopsesh"),
       line(ver, "Version"),
+      st.installs?.installs?.length > 1 || st.copies?.state && st.copies.state !== "ok" ? [line({ state: st.copies.state, text: `${st.installs.installs.length} on ${r.local ? sys.here : r.name}` }, "Copies"), installList(st.installs)] : null,
       st.version ? line(st.login, "Login session") : null,
       line(st.receiving, "Receiving sessions", receive),
       m ? line({ state: "ok", text: m.auth === "password" ? (m.keychain ? `Password, in ${sys.vault}` : "Password, asked each time") : "SSH key" }, "Login from here", h("button", { class: "btn small", onclick: () => loginDialog(m) }, "Change…")) : null,
