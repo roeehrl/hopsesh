@@ -36,5 +36,7 @@ echo "==> the app in its place is $latest, signed and accepted by macOS"
 codesign --verify --deep --strict "$work/Applications/hopsesh.app" || fail "the new app's signature does not verify"
 codesign -dv "$work/Applications/hopsesh.app" 2>&1 | grep -q "TeamIdentifier=MKNM96EU7J" || fail "the new app is not signed by the release team"
 spctl --assess --type execute "$work/Applications/hopsesh.app" || fail "macOS does not accept the new app"
-ls "$work/Applications" | grep -v '^hopsesh.app$' && fail "the update left something beside the app"
+for f in "$work/Applications"/* "$work/Applications"/.[!.]*; do
+  if [ -e "$f" ] && [ "$f" != "$work/Applications/hopsesh.app" ]; then fail "the update left $f beside the app"; fi
+done
 echo "OK: $from → $latest in place"
