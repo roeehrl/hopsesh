@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+
+- hopsesh resumes the sessions its terminal tabs ran when it quit. The next time it starts it
+  offers to resume them, each in a tab again; after installing an update it does so without
+  asking. A session hopsesh shows from another machine, which keeps running there, is shown
+  again.
+- Quitting, or installing an update, while an agent in a tab is in the middle of a turn names
+  it and offers to wait: **Quit when they're idle** and **Update when they're idle** go ahead
+  once no agent has worked for 10 seconds.
+
 ### Changed
 
 - Every hopsesh on a machine is one version. A machine can have the app, a command you
@@ -28,6 +38,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Update hopsesh** on the screen for settings from a newer version asks before ending the
+  programs in the terminal's tabs, as Settings › Updates does.
+- The quit dialog no longer counts a session shown from another machine as a program it
+  ends: it keeps running there.
 - `install.sh` stops before downloading when `~/.local/bin/hopsesh` links into the hopsesh
   app, and `install.ps1` no longer replaces the app's own `hopsesh.exe` (`HOPSESH_FORCE=1`
   overrides both). After installing, `install.sh` says when the app is there too.

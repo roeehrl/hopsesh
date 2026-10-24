@@ -198,8 +198,10 @@ question included. Each tab shows whether its program runs, waits for you or end
 exit code), and keeps **Open in my terminal**, which ends it and runs the same command in your
 own terminal app. A session runs in one tab at most, and the sessions list shows which ones
 run in a tab and wait for you. Ctrl+` moves between the terminal and your sessions. Quitting
-hopsesh ends the programs in its tabs, so it asks first; for work that must outlive the app,
-use your terminal app.
+hopsesh ends the programs in its tabs, so it asks first, names the agents still in the middle
+of a turn and offers to quit once they are idle. The next time it starts, it offers to resume
+the sessions its tabs ran, each in a tab again (after an update, it does so by itself). For
+work that must outlive the app, use your terminal app.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/terminal-dark.png">

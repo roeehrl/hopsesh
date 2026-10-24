@@ -18,10 +18,11 @@ async function start(page: Page, preference: "on" | "off" | "", manual: (r: Rout
     const set = await page.request.post("/call", { data: { m: "SetUpdateCheck", args: [preference === "on"] } });
     expect((await set.json()).error).toBeUndefined();
   }
-  const calls = { manual: 0, daily: 0 };
+  const calls = { manual: 0, daily: 0, install: 0 };
   await page.route("**/call", async r => {
     const method = r.request().postDataJSON().m;
     if (method === "LatestRelease") { calls.manual++; await manual(r); }
+    else if (method === "InstallUpdate") { calls.install++; await r.fulfill({ json: { result: null } }); }
     else if (method === "CheckUpdate") {
       calls.daily++;
       if (daily) await daily(r);
@@ -168,4 +169,57 @@ test("newer-settings recovery checks manually with daily checks off and reports 
   await expect(page.getByRole("button", { name: "Update hopsesh", exact: true })).toBeEnabled();
   expect(calls.manual).toBe(1);
   expect(calls.daily).toBe(0);
+});
+
+// A tab as the service reports it (the page's list of tabs follows these events).
+const busyTab = (state: string, reason = "") => ({ id: "busy1", revision: Date.now(), kind: "session", machine: "studio", key: "claude/default/busy", agent: "Claude Code", title: "Busy agent · claude", state, reason, attention: false });
+const installable = { ...release("0.4.1"), canInstall: true };
+
+test("installing while an agent works asks first, and can wait until it is idle", async ({ page }) => {
+  const calls = await start(page, "off", r => r.fulfill({ json: { result: installable } }));
+  await page.evaluate((t) => (window as any).__emit("hopsesh:terminal", t), busyTab("running"));
+  await updates(page);
+  await page.getByRole("button", { name: "Check now", exact: true }).click();
+  await page.getByRole("button", { name: "Install and restart", exact: true }).click();
+  const dlg = page.locator("#dlg");
+  await expect(dlg.getByRole("heading", { name: "Restart and end 1 program?" })).toBeVisible();
+  await expect(dlg).toContainText("the new version resumes them in tabs");
+  await expect(dlg).toContainText("1 agent is in the middle of a turn: “Busy agent · claude”");
+  await expect(dlg.getByRole("list", { name: "Programs running in tabs" })).toContainText("hopsesh resumes it after the update");
+  await dlg.getByRole("button", { name: "Update when they're idle" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Installs once the agents in your tabs finish their turns" })).toBeVisible();
+  await page.waitForTimeout(1_500);
+  expect(calls.install).toBe(0);
+  await page.evaluate((t) => (window as any).__emit("hopsesh:terminal", t), busyTab("waiting", "idle"));
+  await expect.poll(() => calls.install, { timeout: 20_000 }).toBe(1);
+  await expect(page.getByRole("button", { name: "Restarting…", exact: true })).toBeDisabled();
+});
+
+test("Don't wait cancels a deferred update", async ({ page }) => {
+  const calls = await start(page, "off", r => r.fulfill({ json: { result: installable } }));
+  await page.evaluate((t) => (window as any).__emit("hopsesh:terminal", t), busyTab("running"));
+  await updates(page);
+  await page.getByRole("button", { name: "Check now", exact: true }).click();
+  await page.getByRole("button", { name: "Install and restart", exact: true }).click();
+  await page.locator("#dlg").getByRole("button", { name: "Update when they're idle" }).click();
+  await page.getByRole("button", { name: "Don't wait", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Install and restart", exact: true })).toBeEnabled();
+  await page.evaluate((t) => (window as any).__emit("hopsesh:terminal", t), busyTab("waiting", "idle"));
+  await page.waitForTimeout(12_000);
+  expect(calls.install).toBe(0);
+});
+
+test("updating from the newer-settings screen asks about the programs in tabs too", async ({ page }) => {
+  const calls = await start(page, "", r => r.fulfill({ json: { result: installable } }), undefined, true);
+  await page.evaluate((t) => (window as any).__emit("hopsesh:terminal", t), busyTab("waiting", "idle"));
+  await page.getByRole("button", { name: "Update hopsesh", exact: true }).click();
+  const dlg = page.locator("#dlg");
+  await expect(dlg.getByRole("heading", { name: "Restart and end 1 program?" })).toBeVisible();
+  await expect(dlg.getByRole("button", { name: "Update when they're idle" })).toHaveCount(0); // nobody works
+  await dlg.getByRole("button", { name: "Cancel", exact: true }).click();
+  expect(calls.install).toBe(0);
+  await expect(page.getByRole("button", { name: "Update hopsesh", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "Update hopsesh", exact: true }).click();
+  await dlg.getByRole("button", { name: "Install and end 1 program" }).click();
+  await expect.poll(() => calls.install).toBe(1);
 });

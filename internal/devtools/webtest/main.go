@@ -445,7 +445,7 @@ func main() {
 		mu.RLock()
 		terms := svc.Terms
 		mu.RUnlock()
-		info, err := openFake(terms, r.URL.Query().Get("title"), r.URL.Query().Get("trust") == "1", r.URL.Query().Get("quiet") == "1", r.URL.Query().Get("kind"), r.URL.Query().Get("as"))
+		info, err := openFake(terms, r.URL.Query().Get("title"), r.URL.Query().Get("trust") == "1", r.URL.Query().Get("quiet") == "1", r.URL.Query().Get("kind"), r.URL.Query().Get("as"), r.URL.Query().Get("machine"), r.URL.Query().Get("key"))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -767,7 +767,7 @@ func (w *wsConn) Close() error {
 // openFake opens a tab running termfake (this program), as one of the app's entry points
 // would: kind session (default), step (with the hand-off's banner), signin (recorded
 // nowhere) or shell.
-func openFake(terms *gui.Terminals, title string, trust, quiet bool, kind, as string) (any, error) {
+func openFake(terms *gui.Terminals, title string, trust, quiet bool, kind, as, machine, key string) (any, error) {
 	self, err := os.Executable()
 	if err != nil {
 		return nil, err
@@ -807,7 +807,9 @@ func openFake(terms *gui.Terminals, title string, trust, quiet bool, kind, as st
 	}
 	home, _ := os.UserHomeDir()
 	spec := pty.Spec{Argv: argv, Dir: home, Title: title, Private: kind == gui.TabSignIn || kind == gui.TabShell}
-	meta := gui.TabMeta{Kind: kind, Command: strings.Join(append([]string{"termfake"}, argv[1:]...), " "), Agent: "Termfake", Rerun: kind != gui.TabStep, External: false}
+	// machine and key: the tab stands for a listed session (hopsesh resumes that one when
+	// it reopens the tabs).
+	meta := gui.TabMeta{Kind: kind, Command: strings.Join(append([]string{"termfake"}, argv[1:]...), " "), Agent: "Termfake", Rerun: kind != gui.TabStep, External: false, Machine: machine, Key: key}
 	if as == "claude" && kind == gui.TabStep {
 		// For screenshots: the tab presents itself as a real hand-off step does, the stand-in
 		// running in the demo repository's hand-off folder.

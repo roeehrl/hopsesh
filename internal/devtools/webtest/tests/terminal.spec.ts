@@ -324,12 +324,61 @@ test("quitting with a program running asks first, lists it, and ends it", async 
   expect((await r.json()).result).toBe(false);
   const dlg = page.locator("#dlg");
   await expect(dlg.getByRole("heading", { name: "Quit hopsesh and end 1 program?" })).toBeVisible();
-  await expect(dlg).toContainText("Quitting ends every program in hopsesh's tabs.");
+  await expect(dlg).toContainText("Quitting ends the programs in hopsesh's tabs.");
   await expect(dlg.getByRole("list", { name: "Programs running in tabs" })).toContainText("Tidy request logging · termfake");
   await expect(dlg.getByRole("button", { name: "Show the tabs" })).toBeVisible();
   await dlg.getByRole("button", { name: "Quit and end 1 program" }).click();
   await expect(tab(t, /Tidy request logging/)).toBeHidden();
   await expect(t.getByText("No programs are running here")).toBeVisible();
+});
+
+// An agent mid-turn: the dialog names it, and quitting can wait until no agent works.
+test("quitting while an agent works names it, and can wait until it is idle", async ({ page, context }) => {
+  await openFake(page, "title=" + encodeURIComponent("Busy agent · termfake"));
+  const t = await terminal(context);
+  await ready(t);
+  await focusTerminal(t);
+  await t.keyboard.press("W");
+  await expect.poll(() => screen(t)).toContain("working");
+  const r = await page.request.post("/call", { data: { m: "ShouldQuit", args: [] } });
+  expect((await r.json()).result).toBe(false);
+  const dlg = page.locator("#dlg");
+  await expect(dlg).toContainText("1 agent is in the middle of a turn: “Busy agent · termfake”");
+  await expect(dlg.getByRole("list", { name: "Programs running in tabs" }).locator(".chip")).toHaveText("working");
+  await expect(dlg.getByRole("list", { name: "Programs running in tabs" })).toContainText("its turn in progress stops");
+  await dlg.getByRole("button", { name: "Quit when they're idle" }).click();
+  await expect(page.locator("#toast")).toContainText("hopsesh quits once the agent finishes its turn.");
+  // Still working: nothing ends.
+  await page.waitForTimeout(2_000);
+  await expect(tab(t, /Busy agent/)).toBeVisible();
+  await focusTerminal(t);
+  await t.keyboard.press("D");
+  await expect(tab(t, /Busy agent/)).toBeHidden({ timeout: 30_000 });
+});
+
+// Quitting writes down the sessions the tabs ran; the next start offers to resume them.
+test("after quitting, the next start offers to resume the sessions its tabs ran", async ({ page, context }) => {
+  const key = await row(page, "Find the codeword").getAttribute("data-key");
+  const [machine, k] = key!.split("\u0000");
+  await openFake(page, `title=${encodeURIComponent("Find the codeword · termfake")}&machine=${encodeURIComponent(machine)}&key=${encodeURIComponent(k)}`);
+  const t = await terminal(context);
+  await ready(t);
+  await page.request.post("/call", { data: { m: "ShouldQuit", args: [] } });
+  const dlg = page.locator("#dlg");
+  await expect(dlg.getByRole("list", { name: "Programs running in tabs" })).toContainText("hopsesh offers to resume it next time");
+  await dlg.getByRole("button", { name: "Quit and end 1 program" }).click();
+  await expect(tab(t, /Find the codeword/)).toBeHidden();
+  const offer = (await (await page.request.post("/call", { data: { m: "ReopenOffer", args: [] } })).json()).result;
+  expect(offer.update).toBe(false);
+  expect(offer.tabs.map((x: any) => [x.machine, x.key])).toEqual([[machine, k]]);
+
+  await page.goto("/");
+  await expect(dlg.getByRole("heading", { name: "Resume 1 session that was running?" })).toBeVisible({ timeout: 30_000 });
+  await expect(dlg.getByRole("list", { name: "Sessions to resume" })).toContainText("Find the codeword · termfake");
+  await dlg.getByRole("button", { name: "Resume 1 session" }).click();
+  await expect(page.locator("#toast")).toContainText("Resumed 1 session in tabs");
+  await expect(tab(t, /Find the codeword · claude/)).toBeVisible();
+  expect((await (await page.request.post("/call", { data: { m: "ReopenOffer", args: [] } })).json()).result).toBeNull();
 });
 
 // A session opened in the user's terminal app that can report its end (iTerm2 with its
