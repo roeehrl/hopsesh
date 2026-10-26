@@ -108,6 +108,29 @@ func (a *App) OriginalGuard(key agent.SessionKey, operation, status string) stri
 	return GuardAdvise
 }
 
+// OldCopy reports whether e is the copy a move left behind, which must not be continued,
+// resumed elsewhere or moved again: the session went on from where it moved (a separate
+// fork leaves its original current, and a released one is the user's choice to go on).
+func (a *App) OldCopy(e Entry) bool {
+	n := e.Departure
+	return n != nil && n.Status != "forked" && !a.Released(e.Session.Key, n.Operation)
+}
+
+// MovedOriginal starts the error that refuses to continue an old copy, so the window can
+// tell it from other failures and offer to continue it anyway.
+const MovedOriginal = "moved-original: "
+
+// OldCopyError refuses to continue e, an old copy, and says where its session went.
+func OldCopyError(e Entry) error {
+	n := e.Departure
+	to := nonEmptyStr(n.Cloud, nonEmptyStr(n.AgentName, string(n.Agent))+" on "+nonEmptyStr(n.Machine, "another machine"))
+	when := ""
+	if !n.At.IsZero() {
+		when = " on " + n.At.Local().Format("2 Jan")
+	}
+	return errors.New(MovedOriginal + "This copy moved to " + to + when + "; continue that copy instead.")
+}
+
 // BlockReason is what the agent shows when it refuses a prompt in a blocked original.
 func BlockReason(notice string, key agent.SessionKey) string {
 	return "Blocked by hopsesh. " + notice +
@@ -206,13 +229,21 @@ func (a *App) Role(e Entry) *RoleInfo {
 		}
 		mode := a.OriginalGuard(e.Session.Key, n.Operation, n.Status)
 		released := a.Cfg.OriginalGuard() != GuardOff && a.Released(e.Session.Key, n.Operation)
+		// Another machine's own hook blocks it there; nothing here checked that it does.
+		elsewhere := e.Machine != "" && e.Machine != LocalName()
 		switch {
-		case n.Status == "diverged":
+		case n.Status == "diverged" || n.SourceChanged && n.Status == "continued":
 			return &RoleInfo{Kind: "diverged", Glyph: "!", Word: "Both changed", Line: "continued here after moving to " + to + "; moving back needs a comparison"}
+		case n.SourceChanged:
+			return &RoleInfo{Kind: "diverged", Glyph: "!", Word: "Used after moving", Line: "continued here after moving to " + to + "; moving back needs a comparison"}
 		case released:
 			return &RoleInfo{Kind: "diverged", Glyph: "!", Word: "Unblocked", Line: "moved to " + to + "; block removed, continuing here diverges"}
+		case mode == GuardBlock && elsewhere:
+			return &RoleInfo{Kind: "moved-out", Glyph: "◇", Word: "Moved to " + toShort, Line: "moved to " + to + "; blocked only if hopsesh's hook is set up on " + e.Machine + " (not checked here)"}
 		case mode == GuardBlock:
 			return &RoleInfo{Kind: "blocked", Glyph: "◆", Word: "Moved to " + toShort, Line: "moved to " + to + "; blocked until you move back"}
+		case mode == GuardAdvise && elsewhere:
+			return &RoleInfo{Kind: "moved-out", Glyph: "◇", Word: "Moved to " + toShort, Line: "moved to " + to + "; warns only if hopsesh's hook is set up on " + e.Machine + " (not checked here)"}
 		case mode == GuardAdvise:
 			return &RoleInfo{Kind: "moved-out", Glyph: "◇", Word: "Moved to " + toShort, Line: "moved to " + to + "; warns before you continue here"}
 		}

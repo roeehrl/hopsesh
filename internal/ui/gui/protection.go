@@ -191,15 +191,37 @@ func (a *App) DismissMachineNotice(fingerprint string) error {
 // SetUpProtection installs the protection hooks and the skill on a machine (this one, or
 // one with hopsesh running in its login session). rules also lets agents run hopsesh's
 // read-only commands without asking.
+//
+// What it changed shows at once: the notices check every machine again, and that machine's
+// hooks are read again for the copies left there (which the window is shown).
 func (a *App) SetUpProtection(machine string, rules bool) (*app.Protection, error) {
 	core := a.snapshot()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+	defer func() {
+		protections.mu.Lock()
+		protections.rows, protections.checked = nil, time.Time{}
+		protections.mu.Unlock()
+	}()
 	if machine == "" || machine == app.LocalName() {
 		p, err := core.SetUpLocalProtection(ctx, rules)
-		_, _ = a.HookHealth(true)
+		_, _ = a.HookHealth(true) // shows the window what changed itself
 		return &p, err
 	}
 	p, err := core.SetUpProtectionOn(ctx, machine, rules)
+	a.mu.Lock()
+	var m *app.Machine
+	if a.inv != nil {
+		if found := a.inv.Machine(machine); found != nil {
+			mm := *found // read outside the lock
+			m = &mm
+		}
+	}
+	a.mu.Unlock()
+	if m != nil {
+		core.RefreshMachineStatus(ctx, m, true)
+		forgetStatuses()
+		a.guardsChanged()
+	}
 	return &p, err
 }

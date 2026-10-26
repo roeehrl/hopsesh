@@ -1,5 +1,5 @@
 import {test,expect} from '@playwright/test';
-import {fresh,row,details} from './helpers';
+import {fresh,row,oldRow,details} from './helpers';
 import {readFile,appendFile} from 'node:fs/promises';
 const gate=()=>{let release!:()=>void;const promise=new Promise<void>(r=>release=r);return {promise,release};};
 test('pending repository details make no claim about local checkout availability',async({page})=>{
@@ -175,10 +175,10 @@ test('real cached movement survives startup partials, presence and bookkeeping w
  });
  await page.goto('/');await expect(row(page,claude.title)).toBeVisible();
  await expect(row(page,claude.title).locator('.role-chip')).toContainText('Moved back from Codex');
- const child=page.locator('.subrow').filter({has:page.locator('.t').getByText(codex.title,{exact:true})});
- await expect(child).toContainText('Codex original');await expect(child.locator('.role-chip')).toHaveText(/Both changed/);
- await child.click();await expect(details(page).locator('#act-primary')).toHaveText('Open in Claude Code');
- await expect(details(page)).toContainText('Both changed');
+ const child=oldRow(page,codex.title);
+ await expect(child.locator('.chip.st-away')).toContainText('Moved to Claude Code');await expect(child.locator('.chip.mark.st-error')).toHaveText('Diverged');
+ await child.click();await expect(details(page).locator('#act-primary')).toHaveText('Go to the active copy here');
+ await expect(details(page).getByLabel('Old copy',{exact:true})).toContainText('Both copies changed after the move');
  const before=await page.evaluate(async()=>{const {state}=await import('/core.js');return structuredClone(state.scan)});
  expect(before.cached).toBe(true);
  expect(before.groups.flatMap(g=>g.entries).find(e=>e.key===claudeKey).journey.transfers).toBe(4);
@@ -196,12 +196,12 @@ test('real cached movement survives startup partials, presence and bookkeeping w
  },{before,key:pair.codex.machine+'\0'+codexKey});
  expect(status.accepted).toBe(false);expect(status.primary).toBe('destination');expect(status.movement).toBe('diverged');expect(status.unchanged).toBe(true);
  expect(status.parents).toContain(claudeKey);expect(status.parents).not.toContain(codexKey);
- await expect(child.locator('.role-chip')).toHaveText(/Both changed/);
+ await expect(child.locator('.chip.mark.st-error')).toHaveText('Diverged');
  const nativeBefore=await readFile(codex.path);
  await appendFile(codex.path,JSON.stringify({timestamp:'2099-01-01T00:00:00Z',type:'event_msg',payload:{type:'thread_settings_applied',plugins:[]}})+'\n');
  wait.release();await expect(page.locator('#fresh')).toContainText('updated',{timeout:30000});
  await page.locator('#btn-refresh').click();await expect(page.locator('#fresh')).toContainText('updated',{timeout:30000});
- await expect(row(page,claude.title)).toBeVisible();await expect(child).toContainText('Codex original');
+ await expect(row(page,claude.title)).toBeVisible();await expect(child.locator('.chip.st-away')).toContainText('Moved to Claude Code');
  const after=await page.evaluate(async()=>{const {state,selected}=await import('/core.js');return {parents:state.scan.groups.flatMap(g=>g.entries).map(e=>e.key),selected:selected()?.key};});
  expect(after.parents).toContain(claudeKey);expect(after.parents).not.toContain(codexKey);
  expect(after.selected).toBe(status.selected);

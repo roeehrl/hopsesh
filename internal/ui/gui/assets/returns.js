@@ -1,8 +1,8 @@
 // Candidates come only from the app's verified branch inventory. Never infer a
 // return from copy timestamps or from a fork's parent journey.
 import { refreshSelection } from "./sessions.js";
-import { api, h, dialog, here, sys, state, entries, when, agentBadge, fail, go, manyAccounts } from "./core.js";
-import { removeBlock, restoreBlock } from "./guard.js";
+import { api, h, dialog, here, sys, state, entries, when, ago, agentBadge, fail, go, manyAccounts, icon, ICONS, toast } from "./core.js";
+import { removeBlock, restoreBlock, withCLI, loadHookHealth, movedTo, activeAt, protectionOf, protectionLine, driftOf, stillOpen, oldCopiesOf, day } from "./guard.js";
 import { planFor } from "./plan.js";
 import { sessionExitHelp } from "./session-exit.js";
 
@@ -104,11 +104,97 @@ export function movementNotice(e, show, viewJourney) {
     h("span", {class:"muted"}, explanation),
     protection ? h("span", {class: protection[0]}, protection[1]) : null,
     g && !g.effective && g.fix ? h("span", {class:"muted", style:"font-size:12px"}, g.fix) : null,
-    checked ? h("span", {class:"muted"}, `${e.cached ? "Last checked" : "Checked"} ${when(n.checkedAt)}`) : null,
+    checked ? h("span", {class:"muted"}, `${e.cached ? "Destination last checked" : "Destination checked"} ${when(n.checkedAt)}`) : null,
     h("div", {style:"display:flex;gap:6px;flex-wrap:wrap"},
       h("button", {class:"btn small primary",onclick:()=>showMovementDestination(n,show)}, `Open in ${n.cloud || n.agentName || n.agent}`),
       local && g?.mode === "block" ? h("button", {class:"btn small danger",onclick:()=>removeBlock(e,()=>refreshSelection())}, "Remove block…") : null,
       local && g?.mode === "released" ? h("button", {class:"btn small",onclick:()=>restoreBlock(e,()=>refreshSelection())}, "Block again") : null,
       h("button", {class:"btn small",onclick:viewJourney}, "View journey"),
       null));
+}
+
+// ---- Old copies ----
+
+const machineWord = (m) => (m === here() ? sys.here : m);
+
+// recheck reads a machine's hooks again (this machine's, or every machine's status), then
+// the selected session and the list.
+async function recheck(machine) {
+  if (machine === here()) await loadHookHealth(true);
+  else await api("MachineStatuses", true).catch(() => null);
+  return refreshSelection();
+}
+
+// fixFor is the one fix a protection problem offers: set the hooks up on that machine now,
+// or the place that can (Machines, Settings).
+function fixFor(p) {
+  const m = machineWord(p.machine);
+  switch (p.action) {
+    case "setup": return h("button", { class: "btn small primary", onclick: async () => {
+      try { await withCLI(() => api("SetUpProtection", p.machine === here() ? "" : p.machine, false)); toast(`Protection set up on ${m}`); } catch (err) { fail(err); return; }
+      return recheck(p.machine);
+    } }, `Set up protection on ${m}`);
+    case "update": return h("button", { class: "btn small", onclick: () => go("machines") }, `Update hopsesh on ${m}…`);
+    case "approve": return h("button", { class: "btn small", onclick: () => go("machines") }, `Approve the hook on ${m}…`);
+    case "machines": return h("button", { class: "btn small", onclick: () => go("machines") }, "Open Machines");
+    case "settings": return h("button", { class: "btn small", onclick: () => go("settings", "general") }, "Open Settings");
+  }
+  return null;
+}
+
+const ocLine = (tone, d, text, ...extra) => h("div", { class: "oc-line " + tone }, icon(d, 14), h("span", { class: "oc-t" }, text), extra.length ? h("span", { class: "oc-acts" }, extra) : null);
+
+// protectionRow is an old copy's protection: its words, and the one thing to do about it.
+function protectionRow(e) {
+  const p = protectionOf(e), l = protectionLine(e), local = e.machine === here();
+  const words = [l.text, l.checked ? ` · checked ${ago(l.checked)}` : ""].join("");
+  const acts = p.state === "unprotected" ? [fixFor(p)]
+    : p.state === "unknown" && !p.checking ? [h("button", { class: "btn small", onclick: () => recheck(p.machine) }, "Check again")]
+    : p.state === "released" && local ? [h("button", { class: "btn small", onclick: () => restoreBlock(e, () => refreshSelection()) }, "Block again")]
+    : [];
+  const row = ocLine(l.tone, l.icon, words, ...acts.filter(Boolean));
+  if (l.checking) row.firstChild.replaceWith(h("span", { class: "mini-spin", "aria-hidden": "true" }));
+  return row;
+}
+
+// driftRow and openRow say the copies drifted apart, and that the old copy is still open
+// (from the active copy: fromActive).
+function driftRow(e, fromActive = false) {
+  const drift = driftOf(e), last = when(e.departure.sourceChangedAt || e.lastActive);
+  if (drift === "diverged") return ocLine("err", ICONS.diverged, "Both copies changed after the move: they have diverged. Moving back will need a comparison, or keep them as separate conversations.");
+  if (drift === "used") return ocLine("err", ICONS.usedAfter, fromActive ? `The old copy was used after the move (last on ${last}): that work isn't in this copy.` : `This copy was used after the move (last on ${last}): that work isn't in the active copy.`);
+  return null;
+}
+const openRow = (e) => stillOpen(e) ? ocLine("warn", ICONS.open, `Still open on ${machineWord(e.machine)}. Close it there: a session that was already open may not pick up protection set up later, and anything typed there won't reach the active copy.`) : null;
+const toneOf = (e) => driftOf(e) ? "err" : protectionLine(e).tone === "warn" || stillOpen(e) ? "warn" : "neutral";
+
+// oldCopyBanner stands under an old copy's title, in place of its journey line, and can't
+// be dismissed: where the session went and where to continue, whether the copies drifted
+// apart, whether this one is still open, and how it is protected. Its tone is its most
+// severe line.
+export function oldCopyBanner(e, viewJourney) {
+  const n = e.departure, tone = toneOf(e);
+  const checked = Date.parse(n.checkedAt) > 0;
+  const work = !checked ? `Checking for work in the active copy; the saved movement receipt doesn't show its current state.`
+    : driftOf(e) === "diverged" ? "" : (e.cached ? "Last known: " : "") + ({ prepared: "the active copy has no new work yet.", continued: "work continued in the active copy." }[n.status] || "");
+  return h("section", { class: "oldcopy " + tone, role: tone === "err" ? "alert" : "status", "aria-label": "Old copy" },
+    h("b", { class: "oc-h" }, icon(ICONS.movedOut, 14), `Old copy · moved to ${movedTo(e)}${day(n.at) ? " on " + day(n.at) : ""}`),
+    h("span", {}, `The active copy is ${activeAt(e)}. Continue there so the work stays in one conversation.`),
+    driftRow(e), openRow(e), protectionRow(e),
+    work || checked ? h("span", { class: "oc-note" }, work ? work[0].toUpperCase() + work.slice(1) : "", checked ? `${work ? " · " : ""}Active copy ${e.cached ? "last checked" : "checked"} ${when(n.checkedAt)}` : "") : null,
+    h("span", { class: "oc-foot" }, h("button", { class: "link", onclick: viewJourney }, "View journey")));
+}
+
+// oldCopiesSection is the active copy's view of the copies its moves left behind: where
+// each is and when it was last used, whether it drifted, is still open or is protected,
+// and the way to it (another place in the sidebar when this one doesn't show it).
+export function oldCopiesSection(e, show) {
+  const xs = oldCopiesOf(e);
+  if (!xs.length) return null;
+  const title = xs.length === 1 ? "Old copy" : "Old copies";
+  return h("section", { class: "sec oldcopies", "aria-label": title }, h("span", { class: "sec-h" }, title),
+    xs.map((x) => h("div", { class: "oc-item " + toneOf(x) },
+      h("span", { class: "oc-where" }, agentBadge(x.agent, x.agentName), `On ${machineWord(x.machine)}${x.agent !== e.agent ? " in " + x.agentName : ""} · last used ${ago(x.lastActive)}`),
+      driftRow(x, true), openRow(x), protectionRow(x),
+      h("span", { class: "oc-foot" }, h("button", { class: "btn small", onclick: () => show(x) }, "Show old copy")))));
 }

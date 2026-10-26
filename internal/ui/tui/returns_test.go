@@ -13,6 +13,7 @@ import (
 )
 
 func TestMovementDetailsFit24RowTerminal(t *testing.T) {
+	t.Setenv("HOPSESH_MACHINE", "studio") // the original is here, where its block is known
 	for _, width := range []int{80, 120} {
 		for _, movement := range []bool{false, true} {
 			for _, returns := range []bool{false, true} {

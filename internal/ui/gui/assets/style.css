@@ -119,6 +119,7 @@ textarea.field { height: auto; padding: 7px 9px; resize: vertical; line-height: 
 .dot.idle { border: 2px solid var(--ok-dot); background: transparent; }
 .dot.needs { background: var(--needs-dot); }
 .dot.moved { border: 2px solid var(--moved-dot); background: transparent; }
+.dot.away { border: 2px solid var(--faint); background: transparent; }
 .dot.ok { background: var(--ok-dot); }
 .dot.warn { background: var(--needs-dot); }
 .dot.err { background: var(--err-dot); }
@@ -509,6 +510,7 @@ code { font-family: var(--mono); font-size: .92em; padding: 0 3px; border-radius
 .pop-t { font-weight: 500; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .pop-s { font-size: 11.5px; color: var(--ink2); }
 .pop-s.why { color: var(--err); }
+.pop-item.danger:not([aria-disabled="true"]) .pop-t { color: var(--err); }
 .pop-n { margin-left: auto; font-size: 11.5px; color: var(--muted); padding-left: 10px; }
 .pop-check { flex: 0 0 auto; width: 14px; height: 14px; border: 1.5px solid var(--faint); border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; line-height: 1; color: var(--accent-ink); }
 .pop-item[aria-checked="true"] .pop-check { background: var(--accent); border-color: var(--accent); }
@@ -548,6 +550,7 @@ code { font-family: var(--mono); font-size: .92em; padding: 0 3px; border-radius
 .ins-status b.st-working, .ins-status b.st-idle, .ins-status b.st-done { color: var(--ok); }
 .ins-status b.st-needs, .ins-status b.st-twice { color: var(--needs); }
 .ins-status b.st-moved { color: var(--moved); }
+.ins-status b.st-away { color: var(--muted); }
 .ins-status b.st-running, .ins-status b.st-unknown { color: var(--cloud); }
 .ins-status b.st-error { color: var(--err); }
 .ins-status .link { text-decoration: none; }
@@ -712,6 +715,9 @@ code { font-family: var(--mono); font-size: .92em; padding: 0 3px; border-radius
 .terminal-divider:hover,.terminal-divider:focus-visible{background:var(--accent);outline:none}
 #terminal-workspace.resizing iframe{pointer-events:none}
 body.terminal-bottom #view{padding-bottom:var(--terminal-size,320px)}
+body.terminal-beside-sidebar #view{padding-bottom:0}
+body.terminal-beside-sidebar .layout>:not(.sidebar):not(.divider){margin-bottom:var(--terminal-size,320px)}
+body.terminal-beside-sidebar .divider[data-pane="inspector"]{bottom:var(--terminal-size,320px)}
 body.terminal-right #terminal-workspace{top:52px;left:auto;width:var(--terminal-size,640px);height:auto;border-left:1px solid var(--line);border-top:0}
 body.terminal-right #view{padding-right:var(--terminal-size,640px)}
 body.terminal-right #inspector{display:none}
@@ -763,6 +769,30 @@ body.terminal-right .divider[data-pane="inspector"]{display:none}
 .ins-lineage { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; }
 .chip.role-chip { white-space: nowrap; }
 
+/* An old copy's banner (under its title, never dismissed) and the active copy's Old copy
+   section: neutral, amber or red by their most severe line, each line an icon and words. */
+.oldcopy { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-left: 3px solid var(--faint); border-radius: 8px; background: var(--hover); color: var(--ink); font-size: 12.5px; line-height: 1.45; }
+.oldcopy.warn { border-color: var(--needs-dot); background: var(--warn-soft); }
+.oldcopy.err { border-color: var(--err-dot); background: color-mix(in srgb, var(--err-soft) 70%, var(--panel)); }
+.oc-h { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; }
+.oc-h > svg { flex: 0 0 auto; color: var(--muted); }
+.oc-line { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 6px; }
+.oc-line > svg, .oc-line > .mini-spin { flex: 0 0 auto; margin-top: 2px; }
+.oc-line .oc-t { flex: 1 1 180px; min-width: 0; }
+.oc-line .oc-acts { display: flex; flex-wrap: wrap; gap: 6px; flex: 0 0 auto; margin-left: 20px; }
+.oc-line.err { color: var(--err); font-weight: 500; }
+.oc-line.warn { color: var(--warn); }
+.oc-line.neutral { color: var(--ink2); }
+.oc-note { font-size: 12px; color: var(--muted); }
+.oc-foot { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.oldcopies .oc-item { display: flex; flex-direction: column; gap: 5px; padding: 8px 10px; border: 1px solid var(--line2); border-left: 3px solid var(--faint); border-radius: 8px; font-size: 12.5px; }
+.oldcopies .oc-item.warn { border-left-color: var(--needs-dot); }
+.oldcopies .oc-item.err { border-left-color: var(--err-dot); }
+.oc-where { display: flex; align-items: center; gap: 6px; font-weight: 500; }
+.oc-where .agent-ico, .oc-where > .chip { width: 16px; height: 16px; font-size: 8px; padding: 0; justify-content: center; }
+.oc-ask p { margin: 0 0 8px; line-height: 1.5; }
+.oc-ask p:last-child { margin-bottom: 0; }
+
 /* Movement protection: one card, a checklist, one action. */
 .protect-card { flex-direction: column; align-items: stretch; gap: 10px; }
 .protect-body { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
@@ -785,12 +815,14 @@ body.terminal-right .divider[data-pane="inspector"]{display:none}
 .row .r-state { max-width: 100%; overflow: hidden; }
 .row .r-state .chip { max-width: 100%; min-width: 0; }
 .row .r-state .chip-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* A copy folded into a session's row (an original left behind by a move): its own line. */
-.row.subrow { min-height: 30px; padding-top: 4px; padding-bottom: 4px; }
-.row.subrow .sub-ic { color: var(--muted); font-size: 13px; justify-content: center; }
-.row.subrow .r-line { gap: 6px; align-items: center; }
-.row.subrow .t { font-weight: 400; color: var(--muted); }
+/* An old copy (the copy a move left behind) is a row like any other, its words in the
+   muted colour (still AA, never a faded row): where it went, then what to watch for. */
+.row.moved-away .t, .row.moved-away .s, .row.moved-away .b { color: var(--muted); }
+.row.moved-away .t { font-weight: 400; }
+.chip.st-away { background: var(--hover); color: var(--muted); }
+.chip > svg { flex: 0 0 auto; }
 .r-line .role-chip { flex: none; margin-left: 6px; }
+.mini-spin { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 50%; border: 1.5px solid currentColor; border-right-color: transparent; animation: spin 1s linear infinite; }
 
 /* Metadata belongs beside the title, in the status column. */
 .row { grid-template-columns: 22px minmax(0, 1fr) minmax(124px, 180px); }
@@ -813,7 +845,10 @@ body.terminal-right .divider[data-pane="inspector"]{display:none}
 .row .status-top > .chip, .row .status-top > .pchip { flex: 0 0 auto; }
 .row .r-indicators { flex-wrap: nowrap; min-height: 20px; overflow: hidden; }
 .tree.compact .row { height: 50px; min-height: 50px; }
-.tree .row.subrow .copy-label { display: block; }
+/* Plain chips in narrow and compact rows keep an old copy's warnings in their colour. */
+.tree .row.moved-away .r-state .chip.st-away, .tree.compact .row.moved-away .r-state .chip.st-away { color: var(--muted); }
+.tree .row .r-state .chip.mark.st-error, .tree.compact .row .r-state .chip.mark.st-error { color: var(--err); }
+.tree .row .r-state .chip.mark.st-warn, .tree.compact .row .r-state .chip.mark.st-warn { color: var(--warn); }
 .row .r-status .role-chip { font-size: 11px; }
 @container list (max-width: 599px) {
  .tree .row { height: 50px; min-height: 50px; }

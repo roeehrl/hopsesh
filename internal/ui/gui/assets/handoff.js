@@ -5,6 +5,7 @@
 import { api, on, h, fill, view, state, screen, go, current, toast, fail, errText, cap, agentChip, cloudChip, $, count, sys, keys, ask, dialog, icon, ICONS, rich, cloudOf } from "./core.js";
 import { undo } from "./activity.js";
 import { showTerminal, tabFor, IN_A_TAB } from "./term.js";
+import { heldBack, refused, isRefusal } from "./guard.js";
 
 const sheet = $("#sheet");
 let hc = null; // { e, cloud, opts, plan, busy, applying }
@@ -24,6 +25,7 @@ export function menuItem(t, pick) {
 
 // pickHandoff asks which cloud (the palette's Hand off to…).
 export function pickHandoff(e) {
+  if (heldBack(e)) return;
   if (tabFor(e)) { toast(IN_A_TAB); return; }
   const d = dialog(h("h2", { style: "margin:0;font-size:16px" }, `Hand off “${e.title}” to…`),
     h("div", { class: "menu", role: "menu", "aria-label": "Hand off to", style: "position:static" },
@@ -33,6 +35,7 @@ export function pickHandoff(e) {
 
 // planHandoff opens the hand-off sheet for a session.
 export async function planHandoff(e, cloud, bundle = false) {
+  if (heldBack(e)) return;
   if (tabFor(e)) { toast(IN_A_TAB); return; }
   const opening = {};
   hc = opening;
@@ -71,6 +74,7 @@ async function replan() {
   } catch (err) {
     if (hc !== c || c.revision !== revision) return;
     c.busy = false;
+    if (isRefusal(err)) { sheet.close(); refused(err, c.e); return; }
     if (hc === c) problem(errText(err));
   }
 }

@@ -42,6 +42,9 @@ func (a *App) PlanHop(machine, key, cloud string, o HandoffOptsDTO) (*HopPlanDTO
 	if err != nil {
 		return nil, err
 	}
+	if err := refuseOldCopy(core, e); err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	inv, e, err = a.selectionInventory(ctx, core, inv, e, generation)

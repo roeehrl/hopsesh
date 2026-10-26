@@ -137,6 +137,19 @@ func (a *App) serveConn(ctx context.Context, c net.Conn, r *bufio.Reader, h serv
 	}
 }
 
+// resumeGate refuses to resume e here when it is the copy a move left behind (the session
+// goes on where it moved), unless the user confirmed continuing it anyway: then release,
+// called once it is certain to run, releases it so its hook here lets it go on.
+func (a *App) resumeGate(e Entry, anyway bool) (release func() error, err error) {
+	if !a.OldCopy(e) {
+		return func() error { return nil }, nil
+	}
+	if !anyway {
+		return nil, OldCopyError(e)
+	}
+	return func() error { return a.ReleaseOriginal(e.Session.Key, e.Departure.Operation) }, nil
+}
+
 // OpenTerminal runs what req asks in a terminal this hopsesh serve owns.
 func (a *App) OpenTerminal(ctx context.Context, req peer.TerminalRequest) (peer.Terminal, error) {
 	if a.Login == nil {
@@ -162,9 +175,13 @@ func (a *App) OpenTerminal(ctx context.Context, req peer.TerminalRequest) (peer.
 			return t, fmt.Errorf("found %d sessions %s of %s on %s", len(found), req.Session, mod.Spec().Name, LocalName())
 		}
 		e := found[0]
+		release, err := a.resumeGate(e, req.Anyway)
+		if err != nil {
+			return t, err
+		}
 		for _, open := range a.Login.List() {
 			if open.Session == req.Session && open.Agent == req.Agent && open.State != string(pty.Exited) {
-				return open, nil // already running here: show that one
+				return open, release() // already running here: show that one
 			}
 		}
 		// Open elsewhere on this machine (a terminal app, the desktop app): a second
@@ -178,6 +195,9 @@ func (a *App) OpenTerminal(ctx context.Context, req peer.TerminalRequest) (peer.
 		}
 		cmd, err := a.Resume(inv, e, agent.ResumeOptions{})
 		if err != nil {
+			return t, err
+		}
+		if err := release(); err != nil {
 			return t, err
 		}
 		c, t.Title, t.Dir = cmd, e.Session.Title, e.Session.CWD

@@ -35,6 +35,9 @@ func (a *App) PushPlan(key, machine, target string, o OptsDTO) (*PlanDTO, error)
 	if err != nil {
 		return nil, err
 	}
+	if err := refuseOldCopy(core, e); err != nil {
+		return nil, err
+	}
 	to := core.Cfg.FindHost(machine)
 	if to == nil || !to.Allowed {
 		return nil, fmt.Errorf("%s is not an allowed machine", machine)

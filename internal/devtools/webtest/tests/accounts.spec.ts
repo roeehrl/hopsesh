@@ -1,5 +1,5 @@
 import {test,expect,Page} from '@playwright/test';
-import {fresh,row,agentRow,details} from './helpers';
+import {fresh,row,agentRow,details,oldRow} from './helpers';
 test.beforeEach(async({page})=>fresh(page));
 
 const accounts=async(page:Page)=>{await page.locator('#btn-settings').click();await page.getByRole('button',{name:'Accounts',exact:true}).click();await expect(page.getByRole('heading',{name:'Accounts',exact:true})).toBeVisible();};
@@ -128,7 +128,8 @@ test('account grouping shows retained source and destination copies after a tran
  await expect(page.getByText('Claude Code session written',{exact:true})).toBeVisible({timeout:30000});await page.getByRole('button',{name:'Back to sessions',exact:true}).click();
  await page.locator('#btn-display').click();await page.locator('#dp-group').selectOption('account');await page.keyboard.press('Escape');
  await expect(page.locator('.gname').filter({hasText:'Second personal'})).toHaveCount(1);
- await expect(row(page,'Find the codeword')).toHaveCount(2);
+ // The source is the old copy the move left behind, a row of its own beside the destination.
+ await expect(row(page,'Find the codeword')).toHaveCount(1);await expect(oldRow(page,'Find the codeword')).toHaveCount(1);
  const second=page.locator('[role="treeitem"][aria-level="1"]').filter({has:page.locator('.gname',{hasText:'Second personal'})});
  await expect(second.locator('.row').filter({has:page.locator('.t').getByText('Find the codeword',{exact:true})})).toHaveCount(1);
 });

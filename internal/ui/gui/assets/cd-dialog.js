@@ -4,11 +4,13 @@
 // inside (Claude Code's /cd) is moved there: the dialog says what to type and waits.
 import { api, h, fill, dialog, toast, errText, cap, sys, here, state } from "./core.js";
 import { undo } from "./activity.js";
+import { heldBack, refused, isRefusal } from "./guard.js";
 
 let changed = async () => {};
 export function onChangedDir(fn) { changed = fn; }
 
 export function changeDirDialog(e) {
+  if (heldBack(e)) return;
   const local = e.machine === here();
   const where = local ? sys.here : e.machine;
   const input = h("input", { class: "field mono", id: "cd-dir", value: "", placeholder: local ? "~/git/app-2" : `a folder on ${e.machine}`, autocomplete: "off", spellcheck: "false" });
@@ -32,7 +34,12 @@ export function changeDirDialog(e) {
     fill(plan, h("span", { class: "muted", role: "status" }, "Planning…"));
     let p;
     try { p = await api("PlanChangeDir", e.machine, e.key, dir, other.checked, stop.checked); }
-    catch (err) { if (n === seq) fill(plan, h("p", { class: "err", role: "alert" }, cap(errText(err)))); return; }
+    catch (err) {
+      // The same dialog asks about continuing a copy that already moved: this one goes first.
+      if (n === seq && isRefusal(err)) { d.close(); refused(err, e); }
+      else if (n === seq) fill(plan, h("p", { class: "err", role: "alert" }, cap(errText(err))));
+      return;
+    }
     if (n !== seq) return;
     current = p;
     const c = p.change, x = c.plan;

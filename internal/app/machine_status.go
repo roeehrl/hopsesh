@@ -120,55 +120,84 @@ const (
 	statusStale      = 3 * statusDetailsTTL
 )
 
-// CanBlock reports whether a session of agent (in profile) moved from this machine can
-// block or warn its original there, and why not: hopsesh there must be new enough to read
-// where the session went, and that agent folder's hook must be installed.
-func (s MachineStatus) CanBlock(id agent.ID, profile string) (bool, []string) {
-	var why []string
+// StatusDetailsTTL is how long a machine's hooks, as read, are current: reading them again
+// sooner gives the same answer.
+const StatusDetailsTTL = statusDetailsTTL
+
+// Verdicts of OriginalProtection.
+const (
+	ProtectedYes     = "yes"
+	ProtectedNo      = "no"
+	ProtectedUnknown = "unknown"
+)
+
+// OriginalProtection is whether hopsesh on s.Machine blocks or warns a copy of agent id in
+// profile left there by a move, as its hooks were last read (nothing is read now): yes, no
+// or unknown, why not in a few words, and the Fix* that puts it right. Only that agent
+// folder's hook counts, or the agent's only folder there: another folder's hook says
+// nothing about this copy. A hook waiting for approval doesn't block yet.
+func (s MachineStatus) OriginalProtection(id agent.ID, profile string) (verdict, why, fix string) {
 	switch {
+	case s.Version == "" && s.Hopsesh.State == CheckUnknown:
+		return ProtectedUnknown, "it hasn't been reached yet", ""
 	case s.Version == "":
-		why = append(why, "hopsesh isn't installed there")
+		return ProtectedNo, "hopsesh isn't installed there", FixSetUp
 	case !atLeast(s.Version, MinBlockVersion):
-		why = append(why, fmt.Sprintf("hopsesh there is %s; blocking needs %s or newer", s.Version, MinBlockVersion))
+		return ProtectedNo, fmt.Sprintf("hopsesh there is %s; blocking needs %s or newer", s.Version, MinBlockVersion), FixUpdate
+	case s.DetailsAt.IsZero():
+		return ProtectedUnknown, "its hooks haven't been checked yet", ""
 	}
-	if s.Version != "" {
-		hook, found := s.hookFor(id, profile)
-		switch {
-		case !found && s.DetailsAt.IsZero():
-			why = append(why, "its hooks haven't been checked yet")
-		case !found:
-			why = append(why, "that agent folder has no hook there")
-		case hook.State == CheckUnknown:
-			why = append(why, "its hook couldn't be checked: "+nonEmptyStr(hook.Reason, "unknown"))
-		case hook.State == CheckOff || hook.State == CheckError:
-			why = append(why, "its hook isn't installed: "+nonEmptyStr(hook.Reason, hook.Text))
+	folder, found := s.AgentFolder(id, profile)
+	if !found {
+		return ProtectedUnknown, "that agent folder wasn't found there", ""
+	}
+	hook := folder.Hook
+	switch hook.State {
+	case CheckOK:
+		if id == "codex" && strings.Contains(hook.Text, "trust checked at login") {
+			return ProtectedUnknown, "Codex's approval of the hook can't be checked over SSH", FixServe
 		}
+		return ProtectedYes, "", ""
+	case CheckOff, CheckError:
+		return ProtectedNo, "its hook isn't installed: " + nonEmptyStr(hook.Reason, hook.Text), hook.Fix
+	case CheckWarn:
+		why = "its hook doesn't run yet: " + hook.Text
+		if hook.Reason != "" {
+			why += "; " + hook.Reason
+		}
+		return ProtectedNo, why, hook.Fix
 	}
-	return len(why) == 0, why
+	return ProtectedUnknown, "its hook couldn't be checked: " + nonEmptyStr(hook.Reason, nonEmptyStr(hook.Text, "unknown")), ""
 }
 
-// hookFor is the hook of agent id's folder for profile: the folder with that profile, else
-// the agent's only folder, else its default one (another machine names its profiles itself).
-func (s MachineStatus) hookFor(id agent.ID, profile string) (Check, bool) {
+// CanBlock reports whether a session of agent (in profile) moved from this machine can
+// block or warn its original there, and why not (OriginalProtection: only a yes can).
+func (s MachineStatus) CanBlock(id agent.ID, profile string) (bool, []string) {
+	verdict, why, _ := s.OriginalProtection(id, profile)
+	if verdict == ProtectedYes {
+		return true, nil
+	}
+	return false, []string{why}
+}
+
+// AgentFolder is agent id's folder for profile as last read: the folder with exactly that
+// profile, else the agent's only folder there. Never the default folder of several: its
+// hook would vouch for a folder it doesn't cover.
+func (s MachineStatus) AgentFolder(id agent.ID, profile string) (AgentSetup, bool) {
 	var mine []AgentSetup
 	for _, a := range s.Agents {
 		if a.Agent != id {
 			continue
 		}
-		if a.Profile == profile && profile != "" {
-			return a.Hook, true
+		if a.Profile == profile {
+			return a, true
 		}
 		mine = append(mine, a)
 	}
 	if len(mine) == 1 {
-		return mine[0].Hook, true
+		return mine[0], true
 	}
-	for _, a := range mine {
-		if a.ProfileLabel == "" {
-			return a.Hook, true
-		}
-	}
-	return Check{}, false
+	return AgentSetup{}, false
 }
 
 // Guard is what the source machine says about blocking or warning a session of key's
@@ -189,8 +218,10 @@ func (a *App) Guard(ctx context.Context, src *Machine, key agent.SessionKey) *mo
 		why = append(why, fmt.Sprintf("hopsesh there is %s; blocking needs %s or newer", v, MinBlockVersion))
 	}
 	switch hook := a.hookOn(ctx, src, key); hook.State {
-	case CheckOK, CheckWarn:
-		// Installed (one waiting for approval in the agent is the user's to approve).
+	case CheckOK:
+	case CheckWarn:
+		// Installed but not running yet (waiting for approval in the agent, or turned off).
+		why = append(why, "its hook doesn't run yet: "+nonEmptyStr(hook.Reason, hook.Text))
 	case CheckUnknown:
 		why = append(why, "its hook couldn't be checked: "+nonEmptyStr(hook.Reason, hook.Text))
 	default:
@@ -351,6 +382,34 @@ func (a *App) MachineStatuses(ctx context.Context, inv *Inventory, o StatusOptio
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Local && !out[j].Local })
 	return out
+}
+
+// RefreshMachineStatus reads one machine's hooks, skill and command again when they are
+// older than statusDetailsTTL (always, with force), and keeps them for MachineStatuses.
+// false: they could not be read (the machine isn't reached, or has no hopsesh).
+func (a *App) RefreshMachineStatus(ctx context.Context, m *Machine, force bool) bool {
+	cache := a.statusCache()
+	if d, have := cache.load()[m.Name]; have && !force && time.Since(d.At) < statusDetailsTTL && d.Version == m.Hopsesh {
+		return true
+	}
+	if !m.reached() {
+		return false
+	}
+	d, ok := a.readStatusDetails(ctx, m)
+	if ok {
+		cache.save(m.Name, d)
+	}
+	return ok
+}
+
+// StatusCachedAt is when what MachineStatuses read last was written (zero: never), for a
+// caller that keeps a CachedOnly result until it changes.
+func (a *App) StatusCachedAt() time.Time {
+	st, err := os.Stat(a.statusCache().path)
+	if err != nil {
+		return time.Time{}
+	}
+	return st.ModTime()
 }
 
 // nameFolders adds each agent folder's account and path, from the scan.
@@ -721,8 +780,10 @@ func hookCheck(h MovementHookStatus) Check {
 		return Check{State: CheckOff, Text: "not installed", Reason: "originals moved from here aren't blocked or warned", Fix: FixHooks}
 	case h.Trust != nil && (h.Trust.State == agent.HookNeedsReview || h.Trust.State == agent.HookDisabled):
 		return Check{State: CheckWarn, Text: "approve in " + nonEmptyStr(agentDisplay(h.Agent), string(h.Agent)), Reason: nonEmptyStr(h.Trust.Fix, "the agent runs it only once you approve it"), Fix: FixApprove}
-	case !h.Enabled && h.Reason != "":
-		return Check{State: CheckWarn, Text: "installed, turned off", Reason: h.Reason}
+	case !h.Enabled:
+		// Turned off by the agent, or protection of originals is off in hopsesh there (no
+		// reason): either way it blocks nothing.
+		return Check{State: CheckWarn, Text: "installed, turned off", Reason: nonEmptyStr(h.Reason, "protection of originals is off in hopsesh there")}
 	case h.Trust != nil && h.Trust.State == agent.HookTrusted:
 		return Check{State: CheckOK, Text: "installed · trusted"}
 	}

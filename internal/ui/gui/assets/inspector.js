@@ -2,13 +2,13 @@
 // it runs, one line of facts), its action row ([Primary ▾] [Move ▾] [⋯]), where it is
 // open, the end of its conversation (safe, locally rendered Markdown), and its
 // repository, copies and details, which open and close app-wide.
-import { role, chip as roleChip } from "./guard.js";
+import { role, chip as roleChip, isOldCopy, oldCopiesOf } from "./guard.js";
 import { accountLabel, accountTitle, api, h, fill, icon, ICONS, state, sys, here, ago, when, bytes, agentBadge, cloudOf, cloudTitle, count, path, rich, fail, toast, dialog, errText, cap, $, accountShown, copyEntry } from "./core.js";
 import { selectDestination, model, statusLine, placeName, showPlace, placeCount, onInspector, liveOf, appWord } from "./actions.js";
 import { openMenu, isOpen, openEl, closeAll } from "./menu.js";
 import { sectionOpen, setSection } from "./layout.js";
 import { markdown } from "./markdown.js";
-import { movementNotice, resolveDestination, returnCard } from "./returns.js";
+import { movementNotice, resolveDestination, returnCard, oldCopyBanner, oldCopiesSection } from "./returns.js";
 import { tabs } from "./term.js";
 
 const AGENT_SHORT = { claude: "Claude", codex: "Codex" };
@@ -80,14 +80,16 @@ function section(name, title, def, badge, ...kids) {
 }
 
 // header is the title, the status line and the facts.
-// lineageLine says what this copy is in its journey, under the title (never in it).
-function lineageLine(e) {
+// lineageLine says what this copy is in its journey, under the title (never in it); an
+// old copy has its banner there instead.
+function lineageLine(e, viewJourney) {
+  if (isOldCopy(e)) return oldCopyBanner(e, viewJourney);
   const r = role(e);
   if (!r) return null;
   return h("span", { class: "ins-lineage", "aria-label": `${r.chip}. ${r.line}` }, roleChip(e), " ", h("span", { class: "muted" }, r.line));
 }
 
-function header(e) {
+function header(e, viewJourney) {
   const [k, lead, rest, cl, twice] = statusLine(e);
   const g = e.group;
   const facts = [];
@@ -113,7 +115,7 @@ function header(e) {
   return h("div", { class: "ins-head" },
     h("div", { class: "ins-title" }, agentBadge(e.agent, e.agentName, e.cloud ? cloudTitle(e.machine) : ""),
       h("h2", { title: e.title + (e.canRename ? " (double-click to rename)" : ""), ondblclick: e.canRename ? () => renameDialog(e) : null }, e.title)),
-    lineageLine(e),
+    lineageLine(e, viewJourney),
     derived && e.canRename ? h("span", { class: "ins-derived" }, e.titleSource === "none" ? "No title yet · " : `Title from ${e.titleSource === "reply" ? "first reply" : "first prompt"} · `,
       h("button", { class: "link", onclick: () => renameDialog(e) }, "Rename…")) : null,
     h("span", { class: "ins-status" }, h("span", { class: "dot " + (twice ? "needs" : k) }),
@@ -329,7 +331,7 @@ function history(e) {
  e.journey.fork ? h("span", { class: "chip",title:`Parent branch: ${e.journey.parentBranch}` }, "Separate conversation") : null,
  h("span",{class:"muted",style:"font-size:12px"},`Origin: ${e.journey.origin&&e.journey.origin!=="/"?e.journey.origin:"not recorded"}; branch ${e.journey.branch.slice(0,8)}`)) : null,
  others.length ? h("div", { class: "sub-h" }, "Other copies") : null,
-    others.map((c) => h("span", {}, copyPlace(c), (ce => accountShown(ce) ? h("span",{title:accountTitle(ce)}," · "+accountShown(ce)) : null)(copyEntry(c.machine, c.key) || { profile: c.profile, agentName: c.agentName }), h("span", { class: "muted" }, c.newest ? " · newest" : c.leftBehind ? " · moved on" : " · older"), " ", h("button",{class:"link",onclick:()=>resolveDestination(c).then(selectDestination).catch(fail)},"Show copy"))),
+    others.map((c) => h("span", {}, copyPlace(c), (ce => accountShown(ce) ? h("span",{title:accountTitle(ce)}," · "+accountShown(ce)) : null)(copyEntry(c.machine, c.key) || { profile: c.profile, agentName: c.agentName }), h("span", { class: "muted" }, c.newest ? " · newest" : c.leftBehind ? " · old copy" : " · older"), " ", h("button",{class:"link",onclick:()=>resolveDestination(c).then(selectDestination).catch(fail)},"Show copy"))),
     e.mirror ? [h("div", { class: "sub-h" }, "Mirrored"), h("span", {}, `Remote Control keeps a copy on ${e.mirror.host} while it runs. `,
       h("button", { class: "link", onclick: () => api("OpenURL", e.mirror.url).catch(fail) }, "Open it"))] : null,
     e.history.length ? [h("div", { class: "sub-h" }, e.cloud ? "Lineage" : "Where it has been"),
@@ -368,15 +370,17 @@ export function inspector(e, previous=null) {
   if (!e) return previous && !previous.dataset.key ? previous : h("aside", { class: "inspector", id: "inspector", "aria-label": "Session details" }, h("div", { class: "empty" }, "Select a session to see what you can do with it."));
   const m = model(e);
   const {group,observedAt,...item}=e;
-  const signature=JSON.stringify([item,{...group,entries:undefined},statusLine(e),m.primary?.label,m.primary?.disabled,state.info?.previews,state.info?.agents,[...tabs.values()].filter(t=>t.machine===e.machine&&t.key===e.key).map(t=>[t.id,t.state,t.attention])]);
+  // An old copy's banner and the active copy's view of its old copies change with them.
+  const copies=[e,...oldCopiesOf(e)].map(x=>[x.guard,x.departure,liveOf(x).live,x.lastActive]);
+  const signature=JSON.stringify([item,{...group,entries:undefined},statusLine(e),m.primary?.label,m.primary?.disabled,state.info?.previews,state.info?.agents,[...tabs.values()].filter(t=>t.machine===e.machine&&t.key===e.key).map(t=>[t.id,t.state,t.attention]),copies]);
   const same=previous?.dataset.key===e.machine+"\u0000"+e.key;
   if(same && previous.dataset.signature===signature) return previous;
   const conversationKey=JSON.stringify([e.machine,e.key,e.lastActive,e.sizeKB,e.canPreview,state.info?.previews]);
   const retained=same && previous.dataset.conversationKey===conversationKey ? previous.querySelector('#sec-conversation')?.parentElement : null;
+  const journey = () => { setSection("copies", true); refresh(e); $("#sec-copies")?.scrollIntoView({block:"nearest"}); };
   return h("aside", { class: "inspector", id: "inspector", "aria-label": e.cloud ? `Cloud ${e.cloud.noun || "session"} details` : "Session details", "data-key": e.machine + "\u0000" + e.key, "data-signature":signature, "data-conversation-key":conversationKey },
-    header(e), actionRow(e, m), movementNotice(e, selectDestination, () => {
-      setSection("copies", true); refresh(e); $("#sec-copies")?.scrollIntoView({block:"nearest"});
-    }), returnSection(m), openIn(e, m), retained || conversation(e), repository(e), history(e), details(e), e.cloud ? cloudNotes(e) : null);
+    header(e, journey), actionRow(e, m), oldCopiesSection(e, selectDestination), isOldCopy(e) ? null : movementNotice(e, selectDestination, journey),
+    returnSection(m), openIn(e, m), retained || conversation(e), repository(e), history(e), details(e), e.cloud ? cloudNotes(e) : null);
 }
 
 function returnSection(m) {
