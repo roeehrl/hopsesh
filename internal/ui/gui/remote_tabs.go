@@ -9,6 +9,7 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/core/peer"
+	"github.com/roeehrl/hopsesh/internal/core/pty"
 	"github.com/roeehrl/hopsesh/internal/core/termapp"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
@@ -90,6 +91,36 @@ func (a *App) remoteTab(machine string, req peer.TerminalRequest, meta TabMeta, 
 	if err != nil {
 		return nil, err
 	}
+	return a.attachTab(machine, t, meta, title)
+}
+
+// reattach shows again a terminal hopsesh still runs on another machine (a tab the app
+// showed when it quit): false when it is not there any more.
+func (a *App) reattach(r ReopenTab) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	ts, err := a.snapshot().RemoteTerminals(ctx, r.Machine)
+	if err != nil {
+		return false, err
+	}
+	for _, t := range ts {
+		if t.ID == r.Remote && t.State != "exited" {
+			if a.Terms != nil {
+				for _, d := range a.Terms.Tabs() {
+					if d.Kind == TabRemote && d.Machine == r.Machine && d.Remote == t.ID && d.State != pty.Exited {
+						return true, nil // shown already
+					}
+				}
+			}
+			_, err := a.attachTab(r.Machine, t, TabMeta{Kind: TabRemote, Agent: r.Agent, Machine: r.Machine, Key: r.Key}, r.Title)
+			return true, err
+		}
+	}
+	return false, nil
+}
+
+// attachTab opens a tab here that shows terminal t, which hopsesh runs on machine.
+func (a *App) attachTab(machine string, t peer.Terminal, meta TabMeta, title string) (*OpenedDTO, error) {
 	cli, err := app.CLIExecutable()
 	if err != nil {
 		return nil, fmt.Errorf("showing a session from %s needs the hopsesh command here: %w", machine, err)

@@ -12,7 +12,7 @@ import "./settings.js";
 import "./accounts.js";
 import { undoLast } from "./activity.js";
 import { openPalette } from "./palette.js";
-import { loadTabs, onTabs, showTerminal, tabs, exits } from "./term.js";
+import { loadTabs, onTabs, showTerminal, tabs, exits, installGuarded, waitingFor, reopenOffer } from "./term.js";
 import { render as renderSessions, listCommand, showEntry, reveal, scan, acceptScan, queueScan, backgroundRender } from "./sessions.js";
 import { load as loadLayout, toggle as togglePane } from "./layout.js";
 
@@ -148,9 +148,11 @@ function configError() {
     try {
       const u = await api("LatestRelease");
       if (u.newer && u.canInstall) {
-        fill(btn, `Downloading and checking ${u.latest}…`);
-        await api("InstallUpdate");
-        fill(btn, "Restarting…");
+        let left = "";
+        await installGuarded(u.latest, (t) => { left = t; if (t) fill(btn, t); });
+        if (left) return;
+        btn.disabled = false;
+        fill(btn, waitingFor() ? "Installs once the agents finish their turns" : "Update hopsesh");
         return;
       }
       if (u.newer) await api("OpenURL", u.url);
@@ -179,12 +181,13 @@ export async function start() {
   state.info = await api("Bootstrap");
   setSystem(state.info.os, state.info.terminal);
   loadLayout(state.info.layout);
-  if (state.info.configError) { configError(); mainReady = true; return; }
+  // The tabs, too: updating from here restarts the app, and asks about them first.
+  if (state.info.configError) { await loadTabs().catch(() => {}); configError(); mainReady = true; return; }
   state.scan = await api("CachedScan");
   mainReady = true;
   await go("sessions");
   loadTabs().catch(fail);
-  scan("InitialScan").then(()=>{if(current==="sessions")renderSessions();return quickRoute()}).catch(fail);
+  scan("InitialScan").then(()=>{if(current==="sessions")renderSessions();reopenOffer();return quickRoute()}).catch(fail);
   if (state.info.updateCheck === "on") {
     const revision = state.updateCheckRevision;
     api("CheckUpdate").then((update) => {

@@ -3,7 +3,7 @@
 // Terminal, Updates.
 import { api, on, h, fill, view, state, screen, go, loading, toast, fail, dialog, agentBadge, sys, cliHow, icon, ask, count, current, loadError, navigationID, errText } from "./core.js";
 import { desktopSettings } from "./desktop-settings.js";
-import { running } from "./term.js";
+import { installGuarded, waitingFor, cancelDeferred, onDeferred } from "./term.js";
 import { withCLI, loadHookHealth } from "./guard.js";
 import { bindMachines, machinesPanel, cloudsPanel, pickMachine } from "./machines.js";
 
@@ -46,7 +46,7 @@ function cloudRow(a, c) {
 
 let tab = "general";
 let s = null, saving = false;
-let checkingUpdate = false, updateError = "";
+let checkingUpdate = false, updateError = "", installing = "";
 
 const chip = ([text, cls]) => h("span", { class: "chip " + cls }, text);
 const title = (t, desc) => h("div", { style: "display:flex;flex-direction:column;gap:2px;min-width:0;flex:1 1 300px" }, h("span", { style: "font-weight:500" }, t), desc ? h("span", { class: "muted", style: "font-size:12px" }, desc) : null);
@@ -286,7 +286,9 @@ function updates() {
   const u = checkingUpdate || updateError ? null : state.update;
   return [card(
     h("div", { class: "set-row" }, title(`hopsesh ${s.version}`, checkingUpdate ? "Checking GitHub for the newest release…" : u?.newer ? `hopsesh ${u.latest} is available.` : u?.latest ? "This is the newest version." : ""),
-      u?.newer && u.canInstall ? h("button", { class: "btn primary", onclick: (ev) => installUpdate(ev.currentTarget, u) }, "Install and restart") : null,
+      u?.newer && u.canInstall && waitingFor() === "update" ? [h("span", { class: "muted", role: "status" }, "Installs once the agents in your tabs finish their turns"),
+        h("button", { class: "btn", onclick: cancelDeferred }, "Don't wait"), h("button", { class: "btn", onclick: () => { cancelDeferred(); installUpdate(u); } }, "Install now…")] : null,
+      u?.newer && u.canInstall && waitingFor() !== "update" ? h("button", { class: "btn primary", disabled: !!installing, onclick: () => installUpdate(u) }, installing || "Install and restart") : null,
       u?.newer ? h("button", { class: u.canInstall ? "btn" : "btn primary", onclick: () => api("OpenURL", u.url).catch(fail) }, "See what's new") : null,
       h("button", { class: "btn", disabled: checkingUpdate, onclick: checkUpdateNow }, checkingUpdate ? "Checking…" : "Check now")),
     updateError ? h("div", { role: "alert", class: "warn" }, updateError) : null,
@@ -306,21 +308,12 @@ async function checkUpdateNow() {
 }
 
 // installUpdate installs the new version over this app (the backend verifies it first),
-// which then reopens.
-async function installUpdate(btn, u) {
-  const n = running().length;
-  if (n && !await ask({ title: `Restart and end ${count(n, "program")}?`, body: "Installing the update restarts hopsesh, which ends every program in its terminal tabs. Claude Code and Codex keep each conversation up to its last finished turn.", ok: "Install and restart", danger: true })) return;
-  btn.disabled = true;
-  fill(btn, `Downloading and checking ${u.latest}…`);
-  try {
-    await api("InstallUpdate");
-    fill(btn, "Restarting…");
-  } catch (e) {
-    fail(e);
-    btn.disabled = false;
-    fill(btn, "Install and restart");
-  }
+// which then reopens, with the sessions its tabs ran.
+async function installUpdate(u) {
+  await installGuarded(u.latest, (t) => { installing = t; render(); });
+  render();
 }
+onDeferred(() => render());
 
 async function preview() {
   try {
