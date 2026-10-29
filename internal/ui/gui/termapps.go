@@ -244,3 +244,45 @@ func (a *App) entryTab(machine, key string) (termapp.Found, bool, error) {
 	}
 	return a.snapshot().SessionTab(ctx, e.Session.Key, pid)
 }
+
+// TurnOnRemoteControl connects a session running in a hopsesh Terminal tab here to its
+// agent's Remote Control (reachable from the agent's website and phone app) by typing the
+// agent's own command into the tab, while the agent waits for input. A session running
+// elsewhere (the desktop app, another terminal) is turned on there.
+func (a *App) TurnOnRemoteControl(machine, key string) error {
+	a.mu.Lock()
+	e, err := a.find(machine, key)
+	var one app.Inventory
+	if a.inv != nil {
+		one = *a.inv
+	}
+	a.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	one.Entries = []app.Entry{e}
+	if e.Agent != "claude" {
+		return fmt.Errorf("hopsesh can't turn on %s's remote control", e.AgentName)
+	}
+	if machine != app.LocalName() || a.Terms == nil {
+		return errors.New("turn on Remote Control where the session runs")
+	}
+	id, err := a.Terms.sessionTabRoute(machine, key)
+	if err != nil {
+		return err
+	}
+	if id == "" {
+		return errors.New("the session isn't in a hopsesh Terminal tab here: type /remote-control where it runs")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	li := a.snapshot().LiveHere(ctx, &one)[e.Session.Key]
+	if li.State != agent.Live || li.Status != "idle" {
+		return errors.New("the session is working: turn on Remote Control once it waits for you")
+	}
+	s, ok := a.Terms.Manager().Get(id)
+	if !ok {
+		return errors.New("the tab has closed")
+	}
+	return s.Type("/remote-control\r")
+}

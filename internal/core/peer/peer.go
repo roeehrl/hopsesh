@@ -146,7 +146,12 @@ type HelloReply struct {
 	OS       string      `json:"os"`
 	Receive  bool        `json:"receive"` // it accepts pushed sessions
 	Agents   []AgentInfo `json:"agents"`
+	// Features are requests added after protocol 6 that this hopsesh answers.
+	Features []string `json:"features,omitempty"`
 }
+
+// FeatureRemoteDefault says a hopsesh answers MethodRemoteDefault.
+const FeatureRemoteDefault = "remote-control-default"
 
 // AgentInfo is an agent on the peer.
 type AgentInfo struct {
@@ -439,17 +444,24 @@ func Serve(ctx context.Context, r io.Reader, w io.Writer, h Handler) error {
 
 // Methods of hopsesh in the login session (protocol 6; HelloReply.Login).
 const (
-	MethodTerminalOpen    = "terminal/open"    // run a session (or a sign-in) in a terminal there
-	MethodTerminalList    = "terminal/list"    // the terminals hopsesh runs there
-	MethodTerminalClose   = "terminal/close"   // end one
-	MethodAccounts        = "accounts"         // check the sign-ins there, Keychain included
-	MethodLive            = "live"             // whether sessions there are open, and working
-	MethodTools           = "tools"            // the agents' tools there: CLI, desktop app, and their sign-ins
-	MethodAccountAdd      = "accounts/add"     // make a new account folder there
-	MethodOwners          = "owners"           // hopsesh's records there of the accounts sessions ran under
-	MethodProtection      = "protection"       // the command, protection hooks and skill there
-	MethodProtectionSetUp = "protection/setup" // install the hooks and the skill there
+	MethodTerminalOpen    = "terminal/open"          // run a session (or a sign-in) in a terminal there
+	MethodTerminalList    = "terminal/list"          // the terminals hopsesh runs there
+	MethodTerminalClose   = "terminal/close"         // end one
+	MethodAccounts        = "accounts"               // check the sign-ins there, Keychain included
+	MethodLive            = "live"                   // whether sessions there are open, and working
+	MethodTools           = "tools"                  // the agents' tools there: CLI, desktop app, and their sign-ins
+	MethodAccountAdd      = "accounts/add"           // make a new account folder there
+	MethodOwners          = "owners"                 // hopsesh's records there of the accounts sessions ran under
+	MethodProtection      = "protection"             // the command, protection hooks and skill there
+	MethodProtectionSetUp = "protection/setup"       // install the hooks and the skill there
+	MethodRemoteDefault   = "remote-control/default" // read or set the agents' Remote Control default there (FeatureRemoteDefault)
 )
+
+// RemoteDefault reads the agents' "start Remote Control for every session" setting
+// there, and with Set turns it on or off first.
+type RemoteDefault struct {
+	Set *bool `json:"set,omitempty"`
+}
 
 // ProtectionSetUp asks hopsesh there to install its protection hooks and the skill.
 type ProtectionSetUp struct {
@@ -466,7 +478,7 @@ type AccountAdd struct {
 // LoginMethod reports whether the method needs hopsesh in the login session.
 func LoginMethod(m string) bool {
 	switch m {
-	case MethodTerminalOpen, MethodTerminalList, MethodTerminalClose, MethodAccounts, MethodLive, MethodTools, MethodAccountAdd, MethodOwners, MethodProtection, MethodProtectionSetUp:
+	case MethodTerminalOpen, MethodTerminalList, MethodTerminalClose, MethodAccounts, MethodLive, MethodTools, MethodAccountAdd, MethodOwners, MethodProtection, MethodProtectionSetUp, MethodRemoteDefault:
 		return true
 	}
 	return false

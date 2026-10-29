@@ -18,9 +18,10 @@ jq -e '
 jq -e '
   ([.targets[] | select(.id == "claude" or .id == "codex") | (.floors | length > 0) and .baseline != .tested] | all) and
   ([.targets[] | select(.kind == "app") | .id] | sort == ["claude-desktop", "codex-desktop"]) and
-  ([.targets[].watch.formats // [] | .[].id] | index("codex-session-meta") != null and index("claude-live-registry") != null)
+  ([.targets[].watch.formats // [] | .[].id] | index("codex-session-meta") != null and index("claude-live-registry") != null and
+    index("claude-remote-control-default") != null and index("claude-desktop-handoff") != null)
 ' "$OUT/manifest.json" > /dev/null
-jq -e 'map(select(.id == "claude")) | .[0].baseline == "2.1.285"' "$OUT/versions.json" > /dev/null
+jq -e 'map(select(.id == "claude")) | .[0].baseline == "2.1.300"' "$OUT/versions.json" > /dev/null
 for id in claude codex claude-desktop codex-desktop; do test -s "$OUT/formats/$id.tsv"; done
 grep -q '^auth status	' "$OUT/help/claude/relies.tsv" 2> /dev/null || ! command -v claude > /dev/null
 mkdir -p "$OUT/prompts"

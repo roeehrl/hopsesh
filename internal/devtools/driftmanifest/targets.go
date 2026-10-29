@@ -135,14 +135,14 @@ var groups = []string{"local", "anthropic-cloud", "openai-cloud", "third-party-c
 var agentWatch = map[agent.ID]target{
 	"claude": {
 		Group:    "local",
-		Surface:  "transcripts and their records under the Claude config folder, `claude --resume` with its fork and Remote Control flags, the on-disk effect of `/cd` (hopsesh cd mirrors it for a closed session and asks the user to type it in an open one), `claude auth status --json`, isolated account profiles via CLAUDE_CONFIG_DIR and auth login, public identity and credential-store isolation, `--version` output, CLAUDE.md, skills, settings and the desktop app",
+		Surface:  "transcripts and their records under the Claude config folder, `claude --resume` with its fork and Remote Control flags, whether a running session is connected to Remote Control (the live registry) and the remoteControlAtStartup setting hopsesh turns on per machine, typing /remote-control into a session in a hopsesh tab, `claude --desktop` (which can't start Remote Control for the session it hands over), the on-disk effect of `/cd` (hopsesh cd mirrors it for a closed session and asks the user to type it in an open one), `claude auth status --json`, isolated account profiles via CLAUDE_CONFIG_DIR and auth login, public identity and credential-store isolation, `--version` output, CLAUDE.md, skills, settings and the desktop app",
 		Priority: "high",
 		Latest:   latest{From: "npm", Ref: "@anthropic-ai/claude-code"},
 		Package:  "@anthropic-ai/claude-code",
 		Watch: watch{
-			Docs:   claudeDocs("sessions", "settings", "skills", "hooks", "headless", "cli-reference", "claude-directory", "permissions", "authentication", "env-vars", "desktop", "memory", "commands", "worktrees"),
+			Docs:   claudeDocs("sessions", "settings", "settings-reference", "skills", "hooks", "headless", "cli-reference", "claude-directory", "permissions", "authentication", "env-vars", "desktop", "remote-control", "memory", "commands", "worktrees"),
 			Feeds:  []feed{{Kind: "markdown", URL: claudeChangelog}},
-			Grep:   `session|transcript|jsonl|resume|fork|/cd|relocat|working director|set_cwd|CLAUDE_CODE_PROJECT_DIR_NAME|CLAUDE_CONFIG_DIR|hook|SessionStart|UserPromptSubmit|/hooks|skills|CLAUDE\.md|AGENTS\.md|settings|auth|account|login|keychain|credential|Console|oauthAccount|organization|desktop|entrypoint|claude://|deep.link|deprecat|remov|rename|breaking`,
+			Grep:   `session|transcript|jsonl|resume|fork|/cd|relocat|working director|set_cwd|CLAUDE_CODE_PROJECT_DIR_NAME|CLAUDE_CONFIG_DIR|hook|SessionStart|UserPromptSubmit|/hooks|skills|CLAUDE\.md|AGENTS\.md|settings|auth|account|login|keychain|credential|Console|oauthAccount|organization|desktop|entrypoint|claude://|deep.link|remote.control|remoteControl|bridgeSessionId|disableRemoteControl|/rc\b|--rc\b|deprecat|remov|rename|breaking`,
 			Help:   [][]string{{"claude", "--help"}, {"claude", "auth", "--help"}, {"claude", "auth", "status", "--help"}, {"claude", "auth", "login", "--help"}},
 			Relies: []string{"--resume", "--fork-session", "--remote-control", "--desktop", "--version", "-v", "--json", "auth", "auth login", "auth status"},
 			// /cd refusing a symlinked target; a transcript moved while live splitting its log.
@@ -153,13 +153,18 @@ var agentWatch = map[agent.ID]target{
 				{ID: "claude-transcript", What: "transcript records: the conversation tree, titles, compaction and relocation", Fields: []string{"parentUuid", "logicalParentUuid", "isSidechain", "isCompactSummary", "customTitle", "aiTitle", "leafUuid", "relocatedCwd", "sessionId"}, Readers: []string{"agents/claude/reader.go"}},
 				{ID: "claude-transcript-identity", What: "the organization each launch ran under (a credential_org attachment) and Remote Control bridge-session records with their owner", Fields: []string{"credential_org", "attachment", "bridge-session", "bridgeSessionId", "ownerOrganizationUuid", "ownerAccountUuid"}, Readers: []string{"agents/claude/summary.go", "agents/claude/claude.go"}},
 				{ID: "claude-relocated", What: "what /cd does on disk: the transcript and its <id>/ side folder move to projects/<slug of the new folder>/, and a relocated record names the folder (hopsesh cd writes the same for a closed session, and watches for it after the user types /cd in an open one)", Fields: []string{"relocated", "relocatedCwd", "sessionId", "/cd", "projects"}, Readers: []string{"agents/claude/cd.go"}},
-				{ID: "claude-live-registry", What: "sessions/<pid>.json: the live registry of running sessions (what started each, and what it waits for)", Fields: []string{"pid", "sessionId", "status", "waitingFor", "entrypoint", "claude-desktop"}, Readers: []string{"agents/claude/live.go"}},
+				{ID: "claude-live-registry", What: "sessions/<pid>.json: the live registry of running sessions (what started each, what it waits for, and the Remote Control session it is connected to: an id while connected, null after it disconnects, none if it never connected)", Fields: []string{"pid", "sessionId", "status", "waitingFor", "entrypoint", "claude-desktop", "bridgeSessionId", "version"}, Readers: []string{"agents/claude/live.go"}},
+				{ID: "claude-remote-control-default", What: "settings.json remoteControlAtStartup in each Claude folder's user settings: hopsesh's per-machine \"Remote Control for every session\" switch writes true or removes it (a project's settings can turn it off, not on, since 2.1.222)", Fields: []string{"remoteControlAtStartup", "settings.json"}, Readers: []string{"agents/claude/remote_default.go"}},
+				{ID: "claude-desktop-handoff", What: "`claude --desktop --resume <id>`: hands a session to Claude desktop. It accepts only --resume, --continue, --debug and --verbose, so not --remote-control, and Desktop leaves the session it is handed off Remote Control even with its own \"connect new sessions\" setting on (checked with 2.1.311); hopsesh checks after the app opens and asks the person to flip the session's switch. A change here can let hopsesh start it", Fields: []string{"--desktop", "--remote-control", "--resume"}, Readers: []string{"agents/claude/claude.go"}},
+				{ID: "claude-remote-control-command", What: "/remote-control typed into an idle interactive session connects it (hopsesh types it into a session in its own Terminal tab when the person asks)", Fields: []string{"/remote-control"}, Readers: []string{"internal/ui/gui/termapps.go"}},
 				{ID: "claude-hooks", What: "settings.json hooks (SessionStart, UserPromptSubmit), the payload a hook reads and the output it prints", Fields: []string{"hooks", "SessionStart", "UserPromptSubmit", "disableAllHooks", "session_id", "transcript_path", "hook_event_name", "hookSpecificOutput", "hookEventName", "additionalContext", "decision", "systemMessage"}, Readers: []string{"sdk/agent/hooks_json.go", "agents/claude/hooks.go", "internal/ui/cli/movement_hooks.go"}},
 			},
 		},
 		Floors: []floor{
 			{Version: "2.1.284", Gates: "the SessionStart/UserPromptSubmit protection hooks", Source: "agents/claude/hooks.go"},
 			{Version: "2.1.285", Gates: "opening a session in Claude desktop (`claude --desktop --resume <uuid>`)", Source: "agents/claude/desktop.go", Relies: []string{"--desktop", "--resume"}},
+			{Version: "2.1.222", Gates: "the per-machine Remote Control default: remoteControlAtStartup in user settings, which since 2.1.222 is where only user or managed settings can turn it on", Source: "agents/claude/remote_default.go"},
+			{Version: "2.1.300", Gates: "reading a running session's Remote Control state: a version this old or newer records bridgeSessionId in sessions/<pid>.json, so none there means never connected", Source: "agents/claude/live.go"},
 			{Version: "2.1.169", Gates: "hopsesh cd: `/cd`, whose on-disk effect (the transcript moved, a relocated record) it mirrors or asks the user to type", Source: "agents/claude/cd.go", Relies: []string{"--resume"}},
 		},
 	},
@@ -238,16 +243,17 @@ var apps = []target{
 		ID: "claude-desktop", Name: "Claude desktop", Kind: "app", Group: "local", Vendor: "Anthropic",
 		Surface: "the Claude desktop app (bundle com.anthropic.claudefordesktop, its public version), its own Claude Code under Application Support/Claude/claude-code/<version>/ " +
 			"(CLAUDE_CODE_ENTRYPOINT=claude-desktop), its signed-in account (config.json lastKnownAccountUuid, claude-code-sessions/<account>/<org>/), " +
-			"and claude://resume?session=<id>, the route that focuses a session Desktop already runs",
+			"claude://resume?session=<id>, the route that focuses a session Desktop already runs, " +
+			"and Remote Control there: Desktop's per-session switch and its \"Connect new sessions to Remote Control\" setting, which hopsesh can't drive and which leave a session handed over by `claude --desktop` off (hopsesh checks the live registry after opening and points to the switch)",
 		Priority: "high",
 		Latest:   latest{From: "json", Ref: "https://downloads.claude.ai/releases/darwin/universal/RELEASES.json", Field: ".currentRelease"},
 		Floors: []floor{
 			{Version: "2.19675.1", Gates: "focusing a session Desktop already runs through claude://resume?session=<id> (older builds can duplicate the chat)", Source: "agents/claude/desktop.go"},
 		},
 		Watch: watch{
-			Docs:   claudeDocs("desktop", "desktop-quickstart", "desktop-linux", "deep-links"),
+			Docs:   claudeDocs("desktop", "desktop-quickstart", "desktop-linux", "deep-links", "remote-control"),
 			Feeds:  []feed{{Kind: "markdown", URL: claudeChangelog}},
-			Grep:   `desktop|Desktop|claude://|claude-cli://|deep.link|url scheme|protocol|resume|entrypoint|claude-code-sessions|lastKnownAccount|bundle|Code tab|deprecat|remov|rename|breaking`,
+			Grep:   `desktop|Desktop|claude://|claude-cli://|deep.link|url scheme|protocol|resume|entrypoint|claude-code-sessions|lastKnownAccount|bundle|Code tab|remote.control|Remote Control|connect new sessions|deprecat|remov|rename|breaking`,
 			Issues: []string{"anthropics/claude-code#80773"},
 			Formats: []format{
 				{ID: "claude-desktop-identity", What: "Desktop's config.json and its Code sessions folder: the account it is signed in to, ids only", Fields: []string{"lastKnownAccountUuid", "claude-code-sessions"}, Readers: []string{"agents/claude/desktop.go", "agents/claude/account.go"}},

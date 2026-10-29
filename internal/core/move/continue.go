@@ -228,6 +228,7 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		RemoteControl: opt.RemoteControl && agent.Has(tgt.Module, agent.CapRemoteControl), Name: p.NewName, Prompt: prompt,
 		App: opt.App && agent.Has(tgt.Module, agent.CapApp),
 	}
+	p.appRemoteControl()
 	if p.resumeOpts.App {
 		if tgt.Install.Profile != nil && !tgt.Install.Profile.Default {
 			p.Blockers = append(p.Blockers, "desktop opening cannot select an account profile; use a terminal")
@@ -539,6 +540,7 @@ func importThen(ctx context.Context, p *Plan, in Input, h agent.Host, j *journal
 		return ir.WriteResult{}, fmt.Errorf("source changed while importing; imported file retained for undo; refresh the plan")
 	}
 	p.Placement.Key = s.Key
+	p.appRemoteControl()
 	if p.resumeOpts.App {
 		if checker, ok := tgt.Module.(agent.AppChecker); ok {
 			if err := checker.CheckApp(tgt.Install, p.Placement.Key, p.resumeOpts); err != nil {

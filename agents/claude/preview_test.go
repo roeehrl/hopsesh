@@ -2,6 +2,7 @@ package claude
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -304,5 +305,41 @@ func TestLiveInfoDeduplicatesPID(t *testing.T) {
 	})
 	if len(li.Procs) != 2 || li.Name != "new" || li.Status != "working" || li.Procs[0].Waiting {
 		t.Fatalf("%+v", li)
+	}
+}
+
+// The registry's bridgeSessionId is Remote Control: an id while connected, null once
+// disconnected, absent in versions that don't record it.
+func TestLiveInfoRemoteControl(t *testing.T) {
+	now := time.Now()
+	on := json.RawMessage(`"session_01W49ntRitSA2wFvjbENSNVP"`)
+	off := json.RawMessage(`null`)
+	for _, c := range []struct {
+		name      string
+		bridges   []json.RawMessage
+		want, url string
+	}{
+		{"connected", []json.RawMessage{on}, agent.RemoteOn, "https://claude.ai/code/session_01W49ntRitSA2wFvjbENSNVP"},
+		{"disconnected", []json.RawMessage{off}, agent.RemoteOff, ""},
+		{"not recorded by an older Claude Code", []json.RawMessage{nil}, "", ""},
+		{"one of two connected", []json.RawMessage{off, on}, agent.RemoteOn, "https://claude.ai/code/session_01W49ntRitSA2wFvjbENSNVP"},
+		{"one off, one unknown", []json.RawMessage{off, nil}, "", ""},
+		{"an id of another shape", []json.RawMessage{json.RawMessage(`"cse_x/../y"`)}, agent.RemoteOn, ""},
+	} {
+		var les []liveEntry
+		for i, b := range c.bridges {
+			les = append(les, liveEntry{PID: i + 1, Status: "idle", Bridge: b, written: now})
+		}
+		li := liveInfo(les)
+		if li.RemoteControl != c.want || li.RemoteURL != c.url {
+			t.Errorf("%s: %q %q", c.name, li.RemoteControl, li.RemoteURL)
+		}
+	}
+	// A Claude Code that records connections and has none never connected.
+	if li := liveInfo([]liveEntry{{PID: 1, Version: "2.1.311", written: now}}); li.RemoteControl != agent.RemoteOff {
+		t.Errorf("never connected: %q", li.RemoteControl)
+	}
+	if li := liveInfo([]liveEntry{{PID: 1, Version: "2.1.120", written: now}}); li.RemoteControl != "" {
+		t.Errorf("too old to say: %q", li.RemoteControl)
 	}
 }

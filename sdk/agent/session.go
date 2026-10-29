@@ -228,7 +228,19 @@ type LiveInfo struct {
 	// Name is the session's name as the running agent reports it (the Claude app names
 	// sessions), "" when none.
 	Name string `json:"name,omitempty"`
+	// RemoteControl is whether a process has the session connected to the agent's
+	// Remote Control (reachable from its website and phone app): RemoteOn, RemoteOff, or
+	// "" when the agent doesn't say.
+	RemoteControl string `json:"remoteControl,omitempty"`
+	// RemoteURL is the page Remote Control reaches the session at, when it is on.
+	RemoteURL string `json:"remoteUrl,omitempty"`
 }
+
+// Remote Control states (LiveInfo.RemoteControl).
+const (
+	RemoteOn  = "on"
+	RemoteOff = "off"
+)
 
 // LiveProc is one process that has a session open.
 type LiveProc struct {
@@ -238,6 +250,8 @@ type LiveProc struct {
 	App bool `json:"app,omitempty"`
 	// Waiting is true when it waits for the person (a question, a permission).
 	Waiting bool `json:"waiting,omitempty"`
+	// RemoteControl is this process's Remote Control state, as LiveInfo.RemoteControl.
+	RemoteControl string `json:"remoteControl,omitempty"`
 }
 
 // OwnerRun is an account a session ran under, as recorded. Key is the module's account

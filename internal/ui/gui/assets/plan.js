@@ -7,6 +7,7 @@ import { openResult, where as opensIn } from "./term.js";
 import { sessionExitHelp } from "./session-exit.js";
 import { conflictReview } from "./conflict-review.js";
 import { heldBack, refused, isRefusal } from "./guard.js";
+import { watchRemote } from "./actions.js";
 
 const sheet = $("#sheet");
 let cur = null; // { e, target, sendTo, opts, plan, busy, applying }
@@ -719,7 +720,7 @@ function happened(d, p) {
 screen("done", (d, p, o) => {
   const where = d.machine ? `on ${d.machine}` : `on ${sys.here}`;
   const resultPlace=o.launch==='here'||o.launch==='terminal'?o.launch:opensIn();
-  const open = () => (d.inApp ? api("OpenResult", "").catch(fail) : openResult(resultPlace));
+  const open = () => (d.inApp ? api("OpenResult", "").then(() => d.remoteControlInApp && watchRemote(here(), d.key, d.title)).catch(fail) : openResult(resultPlace));
   const other = () => openResult(resultPlace === "terminal" ? "here" : "terminal");
   const copy = async () => { await api("CopyText", d.command); toast("Copied"); };
   const doUndo = async () => { if (await undo(d.journal, d.title)) go("sessions", true); };

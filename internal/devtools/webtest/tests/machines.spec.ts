@@ -139,3 +139,21 @@ test("an SSH-only machine says what hopsesh would do there, and is set up on req
   await d.getByRole("button", { name: "Done" }).click();
   await expect(d).toBeHidden();
 });
+
+// Remote Control for every session: one switch on this machine's page sets Claude Code's
+// own remoteControlAtStartup in its folder, read back from the file.
+test("Remote Control for every session is switched on this machine's page", async ({ page }) => {
+  await machinesTab(page);
+  const section = detail(page).locator("#remote-control-here");
+  const sw = section.getByRole("switch", { name: /^Start Remote Control for every Claude Code session on / });
+  await expect(sw).toHaveAttribute("aria-checked", "false", { timeout: 30_000 });
+  await expect(section).toContainText("Off");
+  await sw.click();
+  await expect(sw).toHaveAttribute("aria-checked", "true");
+  await expect(section).toContainText("On: every new session connects");
+  // Read again from the file, not the window's memory.
+  await detail(page).locator(".mdetail-h").getByRole("button", { name: "Check again" }).click();
+  await expect(sw).toHaveAttribute("aria-checked", "true", { timeout: 30_000 });
+  await sw.click();
+  await expect(sw).toHaveAttribute("aria-checked", "false");
+});

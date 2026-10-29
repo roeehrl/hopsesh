@@ -8,6 +8,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- A running Claude Code session says whether Remote Control reaches it now, on this machine
+  and on your others: a **Remote Control** chip on its row links its page on claude.ai, the
+  details say when it is off and how to turn it on, and `hopsesh show` has a `remote` line.
+  hopsesh reads it from Claude Code's own record of its running sessions (2.1.300 or newer).
+- **Turn on** in a session's details connects a Claude Code session running in a hopsesh
+  Terminal tab to Remote Control, by typing its own `/remote-control` once it waits for you.
+- Settings › Machines has a **Remote Control** switch for each machine: every new Claude
+  Code session there starts connected (Claude Code's own `remoteControlAtStartup`, set in
+  each of its folders' settings; off removes it). On another machine it goes through
+  hopsesh there, which needs this version.
 - hopsesh is in Homebrew (`brew install roeehrl/tap/hopsesh`, and the app as
   `--cask roeehrl/tap/hopsesh-app`) and Scoop (the `roeehrl` bucket), and each published
   release goes there, and to winget as `roeehrl.hopsesh`, by itself
@@ -26,6 +36,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Moving or continuing a session into Claude desktop with Remote Control turned on (the
+  option, or the agent's default in Settings › Agents) no longer stops the move. Claude
+  desktop can't be told to start Remote Control for a session it is handed, and its own
+  "Connect new sessions" setting doesn't cover one, so the plan says so; once the app opens
+  it, hopsesh checks and, if it isn't connected, says to turn on the session's Remote Control
+  switch there, with **Show in Claude**.
 - Every hopsesh on a machine is one version. A machine can have the app, a command you
   installed, one a package manager owns and the copy hopsesh puts in `~/.hopsesh/bin`; they
   share hopsesh's settings and history. Setting a machine up or updating it now updates each

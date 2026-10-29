@@ -208,6 +208,29 @@ test("a session open in Claude reports unsupported exact opening instead of sile
   await expect(r).toHaveCount(0); // A desktop-app window is not a terminal tab.
 });
 
+test("a running session says whether Remote Control reaches it, from the agent's own record", async ({ page }) => {
+  const key = await row(page, "Find the codeword").getAttribute("data-key");
+  const id = key!.split("\u0000")[1].split("/")[1];
+  expect((await page.request.post(`/live?session=${id}&entrypoint=claude-desktop&bridge=session_01W49ntRitSA2wFvjbENSNVP`)).ok()).toBeTruthy();
+  await menu(page, "refresh");
+  const r = row(page, "Find the codeword");
+  await expect(r.locator(".chip.rc-on")).toBeVisible({ timeout: 30_000 });
+  await expect(r.locator(".chip.rc-on")).toHaveAttribute("aria-label", "Remote Control is on: open its page");
+  await r.click();
+  const line = details(page).locator(".rc-line");
+  await expect(line).toContainText("Remote Control — reach it from claude.ai or the Claude app");
+  await expect(line.getByRole("button", { name: "Open" })).toBeVisible();
+  // Disconnected: no chip on the row, and the details say how to turn it on.
+  expect((await page.request.post(`/live?session=${id}&entrypoint=claude-desktop&bridge=none`)).ok()).toBeTruthy();
+  await menu(page, "refresh");
+  await expect(r.locator(".chip.rc-on")).toHaveCount(0, { timeout: 30_000 });
+  await expect(line).toContainText("Remote Control is off — turn it on with the session's Remote Control switch in");
+  // A Claude Code that doesn't record it: nothing is claimed either way.
+  expect((await page.request.post(`/live?session=${id}&entrypoint=cli`)).ok()).toBeTruthy();
+  await menu(page, "refresh");
+  await expect(details(page).locator(".rc-line")).toHaveCount(0, { timeout: 30_000 });
+});
+
 test("an unidentified running window offers Resume in a place you choose, with a warning, never Show", async ({ page }) => {
   const key = await row(page, "Find the codeword").getAttribute("data-key");
   const id = key!.split("\u0000")[1].split("/")[1];

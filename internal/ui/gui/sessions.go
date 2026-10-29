@@ -96,30 +96,34 @@ type EntryDTO struct {
 	AgentVersion string `json:"agentVersion"`
 	// CanRename: its agent's own title can be changed (Rename); CanPreview: the end of its
 	// conversation can be shown (Preview).
-	CanRename  bool       `json:"canRename"`
+	CanRename bool `json:"canRename"`
 	// CanChangeDir: it can continue in another folder on its machine (Change folder…).
-	CanChangeDir bool `json:"canChangeDir"`
-	CanPreview bool       `json:"canPreview"`
-	Places     []PlaceDTO `json:"places"` // where it is open on this machine, besides hopsesh's tabs
-	Status     string     `json:"status"`
-	Live       bool       `json:"live"`
-	LastActive string     `json:"lastActive"`
-	LastPrompt string     `json:"lastPrompt"`
-	CWD        string     `json:"cwd"`
-	Branch     string     `json:"branch"`
-	Worktree   string     `json:"worktree"`
-	MainBranch string     `json:"mainBranch"`
-	Unpushed   int        `json:"unpushed"`
-	Dirty      int        `json:"dirty"`
-	SizeKB     int64      `json:"sizeKB"`
-	Copies     []CopyDTO  `json:"copies,omitempty"` // every copy, across machines and agents
-	HereNewest bool       `json:"hereNewest"`       // the newest copy is on this machine
-	StaleHere  bool       `json:"staleHere"`        // an older copy is on this machine
-	ContinueIn []AgentOpt `json:"continueIn"`       // other agents here it can continue in
-	Needs      bool       `json:"needs"`            // the agent waits for the person (an approval)
+	CanChangeDir bool       `json:"canChangeDir"`
+	CanPreview   bool       `json:"canPreview"`
+	Places       []PlaceDTO `json:"places"` // where it is open on this machine, besides hopsesh's tabs
+	Status       string     `json:"status"`
+	Live         bool       `json:"live"`
+	LastActive   string     `json:"lastActive"`
+	LastPrompt   string     `json:"lastPrompt"`
+	CWD          string     `json:"cwd"`
+	Branch       string     `json:"branch"`
+	Worktree     string     `json:"worktree"`
+	MainBranch   string     `json:"mainBranch"`
+	Unpushed     int        `json:"unpushed"`
+	Dirty        int        `json:"dirty"`
+	SizeKB       int64      `json:"sizeKB"`
+	Copies       []CopyDTO  `json:"copies,omitempty"` // every copy, across machines and agents
+	HereNewest   bool       `json:"hereNewest"`       // the newest copy is on this machine
+	StaleHere    bool       `json:"staleHere"`        // an older copy is on this machine
+	ContinueIn   []AgentOpt `json:"continueIn"`       // other agents here it can continue in
+	Needs        bool       `json:"needs"`            // the agent waits for the person (an approval)
 	// App names the agent's desktop app ("Claude") when that app, not a terminal, runs the
 	// open session.
-	App               string           `json:"app,omitempty"`
+	App string `json:"app,omitempty"`
+	// RemoteControl is "on" or "off" when the open session says whether Remote Control
+	// reaches it ("" when it doesn't say or isn't open); RemoteURL is its page then.
+	RemoteControl     string           `json:"remoteControl,omitempty"`
+	RemoteURL         string           `json:"remoteUrl,omitempty"`
 	Journey           *lineage.Journey `json:"journey,omitempty"`
 	CanArchiveLineage bool             `json:"canArchiveLineage"`
 	LineageError      string           `json:"lineageError,omitempty"`
@@ -605,6 +609,9 @@ func entryDTO(core *app.App, inv *app.Inventory, it app.Item, targets []AgentOpt
 	if e.Live.State == agent.Live && e.Live.App {
 		d.App = appName(core, inv.Machine(e.Machine), e)
 	}
+	if e.Live.State == agent.Live {
+		d.RemoteControl, d.RemoteURL = e.Live.RemoteControl, e.Live.RemoteURL
+	}
 	if m, ok := core.Module(e.Agent); ok && !e.Location.IsCloud() {
 		_, d.CanPreview = m.(agent.Previewer)
 	}
@@ -1051,30 +1058,34 @@ func importsFrom(m agent.Module, from agent.ID) bool {
 
 // DoneDTO reports a finished move or continuation.
 type DoneDTO struct {
-	NoWork           bool     `json:"noWork"`
-	Kind             string   `json:"kind"`
-	Title            string   `json:"title"`
-	Agent            string   `json:"agent"`
-	Command          string   `json:"command"`
-	Files            int      `json:"files"`
-	Bytes            string   `json:"bytes"`
-	Paths            int      `json:"paths"`
-	Secrets          int      `json:"secrets"`
-	Redacted         bool     `json:"redacted"`
-	Cloned           bool     `json:"cloned"`
-	Worktree         string   `json:"worktree"`
-	Journal          string   `json:"journal"`
-	SourceHost       string   `json:"sourceHost"`
-	Stopped          bool     `json:"stopped"`
-	Pushed           string   `json:"pushed"`
-	PushError        string   `json:"pushError"`
-	SyncNote         string   `json:"syncNote"`
-	SyncState        string   `json:"syncState"`
-	Notice           string   `json:"notice"`
-	Warnings         []string `json:"warnings"`
-	InApp            bool     `json:"inApp"` // it opens in the agent's desktop app
-	ContinuationHint string   `json:"continuationHint,omitempty"`
-	Machine          string   `json:"machine,omitempty"` // a push: where it went (start it there)
+	NoWork     bool     `json:"noWork"`
+	Kind       string   `json:"kind"`
+	Title      string   `json:"title"`
+	Agent      string   `json:"agent"`
+	Command    string   `json:"command"`
+	Files      int      `json:"files"`
+	Bytes      string   `json:"bytes"`
+	Paths      int      `json:"paths"`
+	Secrets    int      `json:"secrets"`
+	Redacted   bool     `json:"redacted"`
+	Cloned     bool     `json:"cloned"`
+	Worktree   string   `json:"worktree"`
+	Journal    string   `json:"journal"`
+	SourceHost string   `json:"sourceHost"`
+	Stopped    bool     `json:"stopped"`
+	Pushed     string   `json:"pushed"`
+	PushError  string   `json:"pushError"`
+	SyncNote   string   `json:"syncNote"`
+	SyncState  string   `json:"syncState"`
+	Notice     string   `json:"notice"`
+	Warnings   []string `json:"warnings"`
+	InApp      bool     `json:"inApp"` // it opens in the agent's desktop app
+	// RemoteControlInApp: Remote Control was asked for, and the desktop app can't start
+	// it; Key is the session the window then checks.
+	RemoteControlInApp bool   `json:"remoteControlInApp,omitempty"`
+	Key                string `json:"key,omitempty"`
+	ContinuationHint   string `json:"continuationHint,omitempty"`
+	Machine            string `json:"machine,omitempty"` // a push: where it went (start it there)
 	// RemoteKey is the pushed copy's session there (to open it there, in a tab here).
 	RemoteKey string `json:"remoteKey,omitempty"`
 	// RemoteLogin: hopsesh runs in the login session there, so it can run it.
@@ -1108,7 +1119,7 @@ func (a *App) Apply() (*DoneDTO, error) {
 	d := &DoneDTO{NoWork: p.NoWork, Kind: p.Kind, Title: p.Title, Agent: p.Agent, Command: res.Command, Files: res.Files, Bytes: move.Human(res.Bytes),
 		Secrets: res.Secrets.Total, Redacted: p.Options.Redact, Cloned: res.Cloned, Worktree: res.Worktree, Journal: res.Journal,
 		SourceHost: p.Source.Location, Stopped: res.Stopped, Pushed: res.Pushed, PushError: res.PushError, SyncNote: res.SyncNote,
-		Notice: res.Notice, Warnings: res.Warnings, InApp: p.Options.App,
+		Notice: res.Notice, Warnings: res.Warnings, InApp: p.Options.App, RemoteControlInApp: p.RemoteControlInApp, Key: p.Placement.Key.String(),
 		AuditDir: filepath.Join(config.StateDir(), "log"), ContinuationHint: p.ContinuationHint()}
 	if p.NoWork && p.SyncTo != nil && p.SyncTo.Title != "" {
 		d.Title = p.SyncTo.Title

@@ -267,6 +267,8 @@ dialog::backdrop { background: rgba(30,29,26,.5); }
 .chip.cloud { background: var(--cloud-soft); color: var(--cloud); }
 .chip.cloud svg { flex: 0 0 auto; }
 .chip.claude-link { border: 0; cursor: pointer; background: var(--claude-soft); color: var(--claude); }
+.chip.rc-on { border: 0; background: var(--claude-soft); color: var(--claude); }
+button.chip.rc-on { cursor: pointer; }
 .chip.st-running { background: var(--cloud-soft); color: var(--cloud); }
 .chip.st-done { background: var(--ok-soft); color: var(--ok); }
 .chip.st-unknown { background: var(--cloud-soft); color: var(--cloud); }
@@ -867,14 +869,14 @@ body.terminal-right .divider[data-pane="inspector"]{display:none}
 .row .r-indicators > .chip > svg { flex: 0 0 auto; }
 .row .r-indicators > .chip .chip-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row .r-indicators > .account-chip { flex: 0 100 auto; min-width: 3.5em; }
-.row .r-indicators > .claude-link { flex: 0 1 auto; min-width: 26px; }
+.row .r-indicators > .claude-link, .row .r-indicators > .rc-on { flex: 0 1 auto; min-width: 26px; }
 /* Fitting the column measures every chip at its natural width. */
 .tree.measuring .row .r-state > .r-status, .tree.measuring .row .r-indicators, .tree.measuring .row .status-top { width: max-content; overflow: visible; }
 .tree.measuring .row .r-indicators > .chip { flex: none; }
 .tree.measuring .row .r-indicators .chip-t { display: inline !important; overflow: visible; }
 @container state (max-width: 199px) {
- .row .r-indicators > .claude-link { padding: 0 5px; }
- .row .r-indicators > .claude-link .chip-t { display: none; }
+ .row .r-indicators > .claude-link, .row .r-indicators > .rc-on { padding: 0 5px; }
+ .row .r-indicators > .claude-link .chip-t, .row .r-indicators > .rc-on .chip-t { display: none; }
 }
 .col-head { display: grid; grid-template-columns: 22px minmax(0, 1fr) var(--state-w); gap: 12px; padding: 0 15px; margin-bottom: -6px; position: sticky; top: 0; z-index: 2; background: var(--bg); height: 22px; align-items: center; font-size: 11px; color: var(--muted); user-select: none; }
 .col-head.compact { grid-template-columns: 16px minmax(0, 1fr) var(--state-w) 114px; gap: 10px; }

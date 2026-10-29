@@ -19,7 +19,7 @@ export const key = (e) => e.machine + "\u0000" + e.key;
 // liveOf is how a session runs now: what presence last read (every few seconds), else
 // the scan's.
 export function liveOf(e) {
-  return state.presence?.[key(e)] || { live: e.live, status: e.status, needs: e.needs, app: e.app, places: e.places || [] };
+  return state.presence?.[key(e)] || { live: e.live, status: e.status, needs: e.needs, app: e.app, places: e.places || [], remoteControl: e.remoteControl, remoteUrl: e.remoteUrl };
 }
 
 // appWord names an agent's desktop app: "Claude" for Claude Code.
@@ -78,6 +78,26 @@ export function showPlace(e, p) {
   return api("ShowEntry", e.machine, e.key).catch((err) => toast(`Couldn't show “${e.title}”: ${errText(err)}`));
 }
 
+// remoteDefault is whether Remote Control is to start for every session continued in this
+// agent (its setting in Settings › Agents).
+export const remoteDefault = (agent) => !!(state.info?.agents || []).find((a) => a.id === agent)?.remoteControl;
+
+// watchRemote follows a session just opened in the agent's desktop app, which can't be
+// told to start Remote Control: it says when the session connects (someone turned on its
+// switch, or the app did), or, after half a minute without, how to turn it on.
+export function watchRemote(machine, k, title) {
+  const started = Date.now();
+  const tick = () => {
+    const lv = state.presence?.[machine + "\u0000" + k];
+    if (lv?.live && lv.remoteControl === "on") return toast(`Remote Control is on for “${title}”`, lv.remoteUrl ? { label: "Open its page", run: () => api("OpenURL", lv.remoteUrl).catch(fail) } : null);
+    if (Date.now() - started < 30_000) return setTimeout(tick, 2000);
+    if (lv?.live && lv.remoteControl === "off")
+      toast(`“${title}” isn't on Remote Control: ${lv.app || "the app"} doesn't connect a session it is handed. Turn on its Remote Control switch there.`,
+        { label: `Show in ${lv.app || "the app"}`, run: () => api("ShowApp", machine, k).catch((err) => toast(cap(errText(err)))) });
+  };
+  setTimeout(tick, 2000);
+}
+
 // resumePlaces are where a session on this machine can resume, with what each means.
 export function resumePlaces(e) {
   const out = [{ id: "here", name: "hopsesh Terminal", note: "Tab ends when hopsesh quits" },
@@ -125,7 +145,7 @@ async function resumeOnce(e, place, remember) {
       state.info.places = Object.assign({}, state.info.places, { [e.agent]: place });
     } catch (err) { fail(err); }
   }
-  if (place === "app") return api("ResumeEntry", e.machine, e.key, true).catch(fail);
+  if (place === "app") return api("ResumeEntry", e.machine, e.key, true).then(() => remoteDefault(e.agent) && watchRemote(e.machine, e.key, e.title)).catch(fail);
   return resume(e, place);
 }
 

@@ -262,6 +262,10 @@ func (s *Session) setState(st State, reason string) *Info {
 	return &i
 }
 
+// Type sends text to the program as if the person typed it in the tab (hopsesh types an
+// agent's own command the person asked for, such as Claude Code's /remote-control).
+func (s *Session) Type(text string) error { return s.typed([]byte(text)) }
+
 // typed is the user's input, from the tab's window: queued for the program.
 func (s *Session) typed(p []byte) error {
 	if len(p) == 0 {

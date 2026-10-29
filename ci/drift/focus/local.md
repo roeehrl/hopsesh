@@ -157,6 +157,30 @@ no fallback merely activates the app. Check TTY launch timeout/exit status/clean
 no visible tab, session UUID propagation, and default-profile/root gates with module,
 GUI service and browser tests.
 
+Claude Remote Control: review `agents/claude/{live,remote_default}.go`,
+`internal/app/remote_default.go`, `internal/core/move/plan.go` (appRemoteControl),
+`internal/ui/gui/{termapps,remote_default}.go` and `assets/{sessions,inspector,machines}.js`.
+- Live state: the registry's `bridgeSessionId` in `sessions/<pid>.json` is an id while
+  connected and null after a disconnect. A process that never connected has none: in
+  2.1.300+ that means off, and older versions say nothing. Check that the field, its null
+  and its absence still mean that; a rename or a move into another file breaks the
+  indicator silently. The page link is https://claude.ai/code/<session_…>.
+- Per-machine default: `remoteControlAtStartup` in each Claude folder's user
+  `settings.json`. On writes true and off removes the key. Check that it is still
+  honoured from user settings (2.1.222+), still refused from project settings, and that
+  `disableRemoteControl` and organization policy still override it. The remote path is the
+  login-only peer request `remote-control/default`, announced in hello as Features
+  `remote-control-default`.
+- Desktop: `claude --desktop` accepts only --resume, --continue, --debug and --verbose,
+  and Claude desktop leaves a handed-over session off Remote Control (checked 2.1.311). If
+  the help, docs or changelog show `--desktop` taking `--remote-control`/`--rc`, or Desktop
+  applying "Connect new sessions to Remote Control" to sessions it is handed, hopsesh can
+  start it itself: report it as an opportunity. hopsesh never reads or writes Claude
+  desktop's own settings files.
+- Turn on: hopsesh types `/remote-control` and Enter into a session in its own Terminal
+  tab only while the registry says idle. Watch for the command being renamed, gaining a
+  confirmation, or `/rc` changing meaning.
+
 Transfer review instructions: inspect `internal/core/move/instructions.go` and the
 source-file packaging in `internal/app/peer.go`. The GUI previews declared global and
 current-project instruction files and carries only the selected text snapshot in the
