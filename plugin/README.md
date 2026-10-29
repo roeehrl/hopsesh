@@ -9,12 +9,19 @@ it to a cloud, or undo a move. It always shows the plan first and moves only aft
 The plugin needs the hopsesh command on this machine:
 
 ```sh
-brew install roeehrl/tap/hopsesh   # or: curl -fsSL https://raw.githubusercontent.com/roeehrl/hopsesh/main/scripts/install.sh | sh
+brew install roeehrl/tap/hopsesh
 ```
 
-On Windows: `scoop install hopsesh` from the `roeehrl` bucket, or the installer from the
-[releases](https://github.com/roeehrl/hopsesh/releases/latest). Other machines need only an SSH
-server.
+On Windows: `scoop install hopsesh` from the `roeehrl` bucket. Other ways to install, Linux
+included, are in the [README](https://github.com/roeehrl/hopsesh#install). Other machines need
+only an SSH server.
 
-Source, documentation and issues: https://github.com/roeehrl/hopsesh. Apache-2.0. hopsesh is
+**Data.** Sessions go directly between your own machines over SSH. hopsesh has no server
+and no telemetry, and it never calls the Anthropic or OpenAI API. Data leaves your machines
+only when you hand a session off to a cloud (Claude Code on the web, Codex cloud, or another
+you chose): then a briefing and a branch go to that cloud through the vendor's own command,
+signed in as you.
+
+Source and documentation: <https://github.com/roeehrl/hopsesh>. Issues:
+<https://github.com/roeehrl/hopsesh/issues>. Apache-2.0. hopsesh is
 unofficial and not affiliated with Anthropic or OpenAI.
