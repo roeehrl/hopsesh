@@ -25,7 +25,7 @@ const machines = (here: string) => ({ here: { name: here, agents: ["Claude Code"
   machines: [
     { name: "sam-macbook", destination: "sam-macbook", os: "darwin", auth: "key", scanned: true, scan: {}, status: "ok", hint: "", error: "", agents: ["Claude Code"], hopsesh: "0.5.0", sessions: 4, storage: [], presence: "installed", can: [] },
     { name: "nas", destination: "alice@192.168.1.20", os: "linux", auth: "password", keychain: true, scanned: true, scan: {}, status: "ok", hint: "", error: "", agents: [], hopsesh: "", sessions: 0, storage: [], presence: "ssh", can: [] },
-  ], found: [{ name: "tnt-pc", destination: "tnt-pc", via: ["ssh-config"], os: "", online: null, owner: "" }], clouds: [] });
+  ], found: [{ name: "build-pc", destination: "build-pc", via: ["ssh-config"], os: "", online: null, owner: "" }], clouds: [] });
 
 async function fixtures(page: Page) {
   const calls: { m: string; a: any[] }[] = [];
