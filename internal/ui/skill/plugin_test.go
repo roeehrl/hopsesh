@@ -59,7 +59,7 @@ func TestPlugin(t *testing.T) {
 		}
 	}
 	skill := read("plugin/skills/hopsesh/SKILL.md")
-	if !regexp.MustCompile(`(?m)^name: hopsesh$`).Match(skill) || !regexp.MustCompile(`(?m)^  hopsesh-version: "` + regexp.QuoteMeta(newest) + `"$`).Match(skill) {
+	if !regexp.MustCompile(`(?m)^name: hopsesh$`).Match(skill) || !regexp.MustCompile(`(?m)^  hopsesh-version: "`+regexp.QuoteMeta(newest)+`"$`).Match(skill) {
 		t.Errorf("plugin/skills/hopsesh/SKILL.md is not the %s skill (run scripts/update-plugin.sh)", newest)
 	}
 	if _, err := os.Stat(filepath.Join(root, "plugin", "skills", "hopsesh", "reference.md")); err != nil {
