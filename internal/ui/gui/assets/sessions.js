@@ -8,7 +8,7 @@ import { planPicked } from "./plan.js";
 import { healthNotice, loadHookHealth, hookHealth, withCLI, chip as roleChip, isOldCopy, movedTo, oldCopyMarks, oldCopySummary, markChip } from "./guard.js";
 import { dividers, apply as applyLayout, statusHeader } from "./layout.js";
 import { exitOf, exitWords, waiting, strayWaiting, showTerminal, tabs, onTabs } from "./term.js";
-import { model, statusOf, statusKey, placesOf, placeCount, placeName, showPlace, cloudBlock, onSelect, onTurnOn, key as entryKey } from "./actions.js";
+import { model, statusOf, statusKey, placesOf, liveOf, placeCount, placeName, showPlace, cloudBlock, onSelect, onTurnOn, key as entryKey } from "./actions.js";
 import { list, load as loadList, toolbar, counts, apply as applyFilters, groupsOf, tree, adoptTree, onChange, onRows, decide, toggleDisplay, clearFilters, activeFacets,
   openGroupOf, focusTree, rowByKey, setAll, displayCommand, toggleFilter, save as saveList } from "./listview.js";
 import { inspector, openChevron, onRenamed, placeIcon } from "./inspector.js";
@@ -422,6 +422,18 @@ function mirrorChip(m) {
   return h("button", { class: "chip claude-link", tabindex: "-1", title: `Mirrored on ${m.host} by Remote Control · open ${m.url}`, "aria-label": `Open the copy mirrored on ${m.host}`, onclick: (ev) => { ev.stopPropagation(); api("OpenURL", m.url).catch(fail); } }, icon(ICONS.external, 11), h("span", { class: "chip-t" }, m.host));
 }
 
+// remoteChip says a running session is connected to Remote Control now (from the
+// agent's own live record), linking its page; a session not open falls back to the
+// copy its transcript says Remote Control mirrored.
+function remoteChip(e) {
+  const lv = liveOf(e);
+  if (!lv.live || lv.remoteControl !== "on") return e.mirror ? mirrorChip(e.mirror) : null;
+  const url = lv.remoteUrl || e.mirror?.url;
+  return h(url ? "button" : "span", { class: "chip rc-on", tabindex: "-1", title: url ? `Connected to Remote Control · open ${url}` : "Connected to Remote Control",
+    "aria-label": "Remote Control is on" + (url ? ": open its page" : ""), onclick: url ? (ev) => { ev.stopPropagation(); api("OpenURL", url).catch(fail); } : null },
+    icon(ICONS.external, 11), h("span", { class: "chip-t" }, "Remote Control"));
+}
+
 // row is one session in the tree: its agent, title and branch, the last prompt and where
 // it is open (comfortable rows), and its state with where and when.
 function row(e, level) {
@@ -456,7 +468,8 @@ if(accountShown(e)) chips.push(h("span", {class:"chip account-chip"+(e.owner?.re
   const summary = away ? null : oldCopySummary(e);
   const rc = away ? marks.map((m, i) => markChip(m, i ? "" : "keep")) : [summary ? markChip(summary, "keep oldcopy-chip") : null, roleChip(e)];
   if (e.cloud?.pr) chips.push(h("span", { class: "chip st-moved" }, "PR " + e.cloud.pr));
-  if (e.mirror) chips.push(mirrorChip(e.mirror));
+  const remote = remoteChip(e);
+  if (remote) chips.push(remote);
   const ext = !e.live && e.machine === here() && !placesOf(e).length ? exitOf(e) : null;
   if (ext) chips.push(h("span", { class: "chip " + (ext.code === 0 ? "st-idle" : ext.closed ? "st-ended" : "st-error"), title: `How its last run in ${ext.terminal} ended` }, `${exitWords(ext)} in ${ext.terminal}`));
   // The other copies the scan carries are rows of their own; one it doesn't stays a chip.

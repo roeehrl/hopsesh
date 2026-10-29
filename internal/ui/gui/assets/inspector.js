@@ -126,7 +126,8 @@ function header(e, viewJourney) {
 
 // openIn is where a running session is open, one line per place, each with Show.
 function openIn(e, m) {
-  if (!m.places.length) return null;
+  const rc = remoteLine(e, liveOf(e), m.places);
+  if (!m.places.length && !rc) return null;
   const lines = [];
   for (const p of m.places) {
     if (p.kind === "hopsesh") {
@@ -147,7 +148,23 @@ function openIn(e, m) {
         p.waiting ? h("span", { class: "needs-word" }, " · ", h("span", { class: "dot needs" }), "waiting for you") : null),
       can ? h("button", { class: "btn small", onclick: () => showPlace(e, p) }, "Show") : null));
   }
+  if (rc) lines.push(rc);
   return h("div", { class: "sec" }, h("span", { class: "sec-h" }, "Open in"), lines);
+}
+
+// remoteLine says whether the running session is connected to Remote Control (reachable
+// from claude.ai and the Claude app), as the agent records it; nothing when it doesn't say.
+function remoteLine(e, m, places) {
+  if (!m.live || (m.remoteControl !== "on" && m.remoteControl !== "off")) return null;
+  const on = m.remoteControl === "on";
+  // In a hopsesh Terminal tab here, hopsesh types the agent's own command for you.
+  const inTab = !on && e.agent === "claude" && e.machine === here() && places.some((p) => p.kind === "hopsesh");
+  const turnOn = async () => { try { await api("TurnOnRemoteControl", e.machine, e.key); toast("Turning on Remote Control…"); } catch (err) { toast(cap(errText(err))); } };
+  return h("div", { class: "open-line rc-line" }, h("span", { class: "open-ic" + (on ? " accent" : "") }, icon(ICONS.external, 13)),
+    h("span", { class: "open-t" }, on ? "Remote Control" : "Remote Control is off",
+      h("span", { class: "muted" }, on ? " — reach it from claude.ai or the Claude app" : inTab ? " — reach it from claude.ai or the Claude app once it's on" : m.app ? ` — turn it on with the session's Remote Control switch in ${m.app}` : " — type /remote-control in the session to reach it from claude.ai or the Claude app")),
+    on && m.remoteUrl ? h("button", { class: "btn small", onclick: () => api("OpenURL", m.remoteUrl).catch(fail) }, "Open") : null,
+    inTab ? h("button", { class: "btn small", onclick: turnOn }, "Turn on") : null);
 }
 
 // ---- The conversation ----
@@ -371,7 +388,7 @@ export function inspector(e, previous=null) {
   const m = model(e);
   const {group,observedAt,...item}=e;
   // An old copy's banner and the active copy's view of its old copies change with them.
-  const copies=[e,...oldCopiesOf(e)].map(x=>[x.guard,x.departure,liveOf(x).live,x.lastActive]);
+  const copies=[e,...oldCopiesOf(e)].map(x=>[x.guard,x.departure,liveOf(x).live,liveOf(x).remoteControl,x.lastActive]);
   const signature=JSON.stringify([item,{...group,entries:undefined},statusLine(e),m.primary?.label,m.primary?.disabled,state.info?.previews,state.info?.agents,[...tabs.values()].filter(t=>t.machine===e.machine&&t.key===e.key).map(t=>[t.id,t.state,t.attention]),copies]);
   const same=previous?.dataset.key===e.machine+"\u0000"+e.key;
   if(same && previous.dataset.signature===signature) return previous;

@@ -367,6 +367,11 @@ func showCmd() *cobra.Command {
 			r.printf("  agent        %s %s\n", e.AgentName, s.AgentVersion)
 			r.printf("  session      %s\n", s.Key)
 			r.printf("  status       %s, last active %s\n", r.movementStatus(e), ago(s.LastActivity))
+			if e.Live.State == agent.Live && e.Live.RemoteControl == agent.RemoteOn {
+				r.printf("  remote       Remote Control on%s\n", prefixed(" · ", e.Live.RemoteURL))
+			} else if e.Live.State == agent.Live && e.Live.RemoteControl == agent.RemoteOff {
+				r.printf("  remote       Remote Control off\n")
+			}
 			r.printf("  directory    %s\n", s.CWD)
 			r.printf("  last prompt  “%s”\n", s.LastPrompt)
 			r.printf("  size         %s", app.HumanBytes(s.Size))
@@ -585,4 +590,12 @@ func (r *run) printUsage(inv *app.Inventory) {
 	if len(lines) > 0 {
 		r.printf("Sessions take:\n%s\n\n", strings.Join(lines, "\n"))
 	}
+}
+
+// prefixed is s after p, or "" when s is.
+func prefixed(p, s string) string {
+	if s == "" {
+		return ""
+	}
+	return p + s
 }

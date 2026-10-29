@@ -60,8 +60,9 @@ import (
 
 // live makes a demo Claude Code session open (in Claude Code's own process registry, with
 // this program's pid, which runs): started by entrypoint ("cli" in a terminal,
-// "claude-desktop" in the Claude app).
-func live(home, session, entrypoint string) error {
+// "claude-desktop" in the Claude app); bridge, when set, is the Remote Control session it
+// is connected to ("none" records it disconnected).
+func live(home, session, entrypoint, bridge string) error {
 	if session == "" {
 		return fmt.Errorf("session is required")
 	}
@@ -69,7 +70,15 @@ func live(home, session, entrypoint string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	b, err := json.Marshal(map[string]any{"pid": os.Getpid(), "sessionId": session, "kind": "interactive", "entrypoint": entrypoint, "status": "idle"})
+	rec := map[string]any{"pid": os.Getpid(), "sessionId": session, "kind": "interactive", "entrypoint": entrypoint, "status": "idle"}
+	switch bridge {
+	case "":
+	case "none":
+		rec["bridgeSessionId"] = nil
+	default:
+		rec["bridgeSessionId"] = bridge
+	}
+	b, err := json.Marshal(rec)
 	if err != nil {
 		return err
 	}
@@ -283,7 +292,7 @@ func main() {
 		}
 		mu.Lock()
 		defer mu.Unlock()
-		if err := live(h, r.URL.Query().Get("session"), r.URL.Query().Get("entrypoint")); err != nil {
+		if err := live(h, r.URL.Query().Get("session"), r.URL.Query().Get("entrypoint"), r.URL.Query().Get("bridge")); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 	})

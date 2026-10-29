@@ -176,6 +176,9 @@ const (
 
 // Plan is a move, worked out without changing anything.
 type Plan struct {
+	// RemoteControlInApp: Remote Control was asked for an opening in the desktop app, which
+	// can't start it (see appRemoteControl); the window checks it once the app opens.
+	RemoteControlInApp bool `json:"remoteControlInApp,omitempty"`
 	// ReviewNewSession offers a fresh portable plan, not permission to apply this
 	// blocked one. The new plan must still check destination coverage and divergence.
 	ReviewNewSession bool `json:"reviewNewSession,omitempty"`
@@ -408,6 +411,7 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		Redacted: opt.Redact, OtherAccount: p.Options.OtherAccount, Live: p.Live, Fork: opt.Fork && p.Live,
 	})
 	p.resumeOpts = agent.ResumeOptions{RemoteControl: p.Options.RemoteControl, App: opt.App && agent.Has(tgt.Module, agent.CapApp), Name: p.NewName, Prompt: p.StartPrompt}
+	p.appRemoteControl()
 	if p.resumeOpts.App {
 		if tgt.Install.Profile != nil && !tgt.Install.Profile.Default {
 			p.Blockers = append(p.Blockers, "desktop opening cannot select an account profile; use a terminal")
@@ -422,6 +426,18 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	}
 	p.Resume = tgt.Module.Resume(tgt.Install, p.Placement.Key, p.Placement, p.resumeOpts)
 	return p, nil
+}
+
+// appRemoteControl takes a Remote Control request off an opening in the desktop app: its
+// launcher takes no --remote-control, and Claude desktop leaves a session it is handed
+// unconnected (its "connect new sessions" setting covers only sessions started in it).
+// The person turns it on there; the window checks and says.
+func (p *Plan) appRemoteControl() {
+	if p.resumeOpts.App && p.resumeOpts.RemoteControl {
+		p.resumeOpts.RemoteControl = false
+		p.RemoteControlInApp = true
+		p.Warnings = append(p.Warnings, "the desktop app doesn't connect a session it is handed to Remote Control: once it opens, turn on the session's Remote Control switch there (hopsesh checks and tells you)")
+	}
 }
 
 // relate compares the incoming session with copies already here.

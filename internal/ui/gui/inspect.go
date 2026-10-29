@@ -276,6 +276,9 @@ type LiveDTO struct {
 	App    string     `json:"app,omitempty"`
 	Name   string     `json:"name,omitempty"` // the name the running agent gives it
 	Places []PlaceDTO `json:"places"`
+	// RemoteControl and RemoteURL are as in EntryDTO.
+	RemoteControl string `json:"remoteControl,omitempty"`
+	RemoteURL     string `json:"remoteUrl,omitempty"`
 }
 
 // PresenceDTO is where this machine's sessions are open now, by machine + "\x00" + key.
@@ -327,6 +330,9 @@ func (a *App) Presence() (*PresenceDTO, error) {
 		e.Live = li
 		d := LiveDTO{Live: li.State == agent.Live, Status: statusWords(core, e), Needs: li.State == agent.Live && strings.HasPrefix(li.Status, "waiting"),
 			Name: li.Name, Places: placesOf(li, table, self, appKind(e.Agent))}
+		if d.Live {
+			d.RemoteControl, d.RemoteURL = li.RemoteControl, li.RemoteURL
+		}
 		if d.Live && li.App {
 			d.App = appName(core, here, e)
 		}

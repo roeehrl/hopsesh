@@ -8,6 +8,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- A running Claude Code session says whether Remote Control reaches it now, on this machine
+  and on your others: a **Remote Control** chip on its row links its page on claude.ai, the
+  details say when it is off and how to turn it on, and `hopsesh show` has a `remote` line.
+  hopsesh reads it from Claude Code's own record of its running sessions (2.1.300 or newer).
+- **Turn on** in a session's details connects a Claude Code session running in a hopsesh
+  Terminal tab to Remote Control, by typing its own `/remote-control` once it waits for you.
 - hopsesh resumes the sessions its terminal tabs ran when it quit. The next time it starts it
   offers to resume them, each in a tab again; after installing an update it does so without
   asking. A session hopsesh shows from another machine, which keeps running there, is shown
@@ -18,6 +24,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Moving or continuing a session into Claude desktop with Remote Control turned on (the
+  option, or the agent's default in Settings › Agents) no longer stops the move. Claude
+  desktop can't be told to start Remote Control for a session it is handed, and its own
+  "Connect new sessions" setting doesn't cover one, so the plan says so; once the app opens
+  it, hopsesh checks and, if it isn't connected, says to turn on the session's Remote Control
+  switch there, with **Show in Claude**.
 - Every hopsesh on a machine is one version. A machine can have the app, a command you
   installed, one a package manager owns and the copy hopsesh puts in `~/.hopsesh/bin`; they
   share hopsesh's settings and history. Setting a machine up or updating it now updates each
