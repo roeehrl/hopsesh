@@ -63,7 +63,7 @@ test("blocked: a moved original is an old copy, blocked, and says so", async ({ 
   await expect(original).toBeFocused();
   const banner = details(page).getByRole("status", { name: "Old copy", exact: true });
   await expect(banner).toContainText("Old copy · moved to Codex", { timeout: 30_000 });
-  await expect(banner).toContainText("Blocked on this Mac: new prompts in this copy are refused.");
+  await expect(banner).toContainText(/Blocked on this (Mac|PC|computer): new prompts in this copy are refused\./);
   // The real backend's answer, not one the window derived: protected by this Mac's hook,
   // read at a known time, nothing left to fix and no check still running.
   const guard = await page.evaluate(async () => { const { selected } = await import("/core.js"); const e = selected(); return { machine: e.machine, departure: e.departure, ...e.guard }; });
@@ -75,7 +75,7 @@ test("blocked: a moved original is an old copy, blocked, and says so", async ({ 
   expect(guard.departure.sourceChanged).toBeFalsy();
   await expect(details(page).locator(".ins-lineage")).toHaveCount(0);
   await expect(details(page).getByLabel("Where it went", { exact: true })).toHaveCount(0);
-  await expect(details(page).locator(".ins-status")).toContainText(/^Moved away · last used on this Mac/);
+  await expect(details(page).locator(".ins-status")).toContainText(/^Moved away · last used on this (Mac|PC|computer)/);
   await expect(details(page).locator("#act-primary")).toHaveText("Go to the active copy here");
   // The active copy names its old copy's state only when it needs attention: here it is blocked.
   await expect(roleRow(page, "Find the codeword", "Moved from").locator(".oldcopy-chip")).toHaveCount(0);
