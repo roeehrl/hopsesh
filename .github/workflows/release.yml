@@ -48,7 +48,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOPSESH_RELEASE_PUBKEY: ${{ vars.HOPSESH_RELEASE_PUBKEY }}
-          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
       # The released program against its own skill and the golden command tree. A failure
       # stops the job before provenance is attested, and scripts/release-sign.sh signs
       # only attested files, so the draft cannot be published.

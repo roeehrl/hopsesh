@@ -1,0 +1,83 @@
+name: packages
+
+# A published release (not a pre-release) goes to the package managers, from its signed
+# checksums.txt: the Homebrew formula (the CLI) and cask (hopsesh-app, the macOS app) to
+# roeehrl/homebrew-tap, the Scoop manifest to roeehrl/scoop-bucket, and a pull request to
+# microsoft/winget-pkgs (roeehrl.hopsesh) from the roeehrl fork. It runs only once the
+# release is complete: the macOS files and checksums.txt come from scripts/release-sign.sh
+# after the tag's draft is built. Without the TAP_GITHUB_TOKEN secret (a token that may push
+# to the tap and bucket and to the roeehrl fork of winget-pkgs) every step is skipped.
+# Run it by hand for a release that is already out: Actions › packages › Run workflow.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, e.g. v0.6.4"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  tap-and-bucket:
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-24.04
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      HAS_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN != '' }}
+    steps:
+      - name: Without TAP_GITHUB_TOKEN, nothing is published
+        if: env.HAS_TOKEN != 'true'
+        run: echo "::notice::TAP_GITHUB_TOKEN is not set; Homebrew and Scoop are skipped"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.HAS_TOKEN == 'true'
+        with:
+          persist-credentials: false
+      - name: Write the formula, cask and manifest
+        if: env.HAS_TOKEN == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p checksums.txt -D "$RUNNER_TEMP"
+          scripts/package-manifests.sh "${TAG#v}" "$RUNNER_TEMP/checksums.txt" "$RUNNER_TEMP/out"
+      - name: Push to roeehrl/homebrew-tap and roeehrl/scoop-bucket
+        if: env.HAS_TOKEN == 'true'
+        env:
+          TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          set -eu
+          publish() { # repo, then the folders to copy into it
+            repo=$1; shift
+            git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/roeehrl/${repo}.git" "$RUNNER_TEMP/$repo"
+            for d in "$@"; do mkdir -p "$RUNNER_TEMP/$repo/$d" && cp "$RUNNER_TEMP/out/$d/"* "$RUNNER_TEMP/$repo/$d/"; done
+            cd "$RUNNER_TEMP/$repo"
+            git add -A
+            if git diff --cached --quiet; then echo "$repo already has $TAG"; return; fi
+            git -c user.name=roeehrl -c user.email=82368940+roeehrl@users.noreply.github.com commit -qm "hopsesh ${TAG#v}"
+            git push -q origin HEAD
+          }
+          publish homebrew-tap Formula Casks
+          publish scoop-bucket bucket
+
+  winget:
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: windows-2025
+    env:
+      HAS_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN != '' }}
+    steps:
+      - name: Without TAP_GITHUB_TOKEN, nothing is published
+        if: env.HAS_TOKEN != 'true'
+        run: echo "::notice::TAP_GITHUB_TOKEN is not set; winget is skipped"
+      # Updates a package already in winget-pkgs; the first version was submitted by hand
+      # (docs/RELEASING.md).
+      - uses: vedantmgoyal9/winget-releaser@b7370d4d152efdce803a26cc6ca9eee58cb2ad54 # v2
+        if: env.HAS_TOKEN == 'true'
+        with:
+          identifier: roeehrl.hopsesh
+          release-tag: ${{ github.event.release.tag_name || inputs.tag }}
+          installers-regex: '^hopsesh_[0-9.]+_windows_(amd64|arm64)\.zip$'
+          token: ${{ secrets.TAP_GITHUB_TOKEN }}
+          fork-user: roeehrl
