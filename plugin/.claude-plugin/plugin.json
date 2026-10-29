@@ -8,7 +8,7 @@
   "repository": "https://github.com/roeehrl/hopsesh",
   "documentationUrl": "https://github.com/roeehrl/hopsesh#readme",
   "supportUrl": "https://github.com/roeehrl/hopsesh/issues",
-  "privacyPolicyUrl": "https://codonic.dev/privacy",
+  "privacyPolicyUrl": "https://codonic.dev/privacy/hopsesh",
   "termsOfServiceUrl": "https://codonic.dev/terms",
   "license": "Apache-2.0",
   "keywords": ["sessions", "claude-code", "codex", "resume", "handoff", "ssh", "tailscale", "multi-machine"]
