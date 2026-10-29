@@ -86,6 +86,16 @@ irm https://raw.githubusercontent.com/roeehrl/hopsesh/main/scripts/install.ps1 |
 Both check the download against the release's `checksums.txt` and its signature, and
 `hopsesh update` installs later releases with the same checks.
 
+With a package manager:
+
+```sh
+brew install roeehrl/tap/hopsesh            # macOS and Linux: the command
+brew install --cask roeehrl/tap/hopsesh-app # macOS: the app
+scoop bucket add roeehrl https://github.com/roeehrl/scoop-bucket; scoop install hopsesh   # Windows
+```
+
+A copy a package manager installed is updated by it (`brew upgrade`, `scoop update hopsesh`).
+
 - **macOS app:** [download the signed, notarized `.dmg`](https://github.com/roeehrl/hopsesh/releases/latest/download/hopsesh-macos-universal.dmg)
   (macOS 13+, Apple silicon and Intel).
 - **Windows app:** [download the installer](https://github.com/roeehrl/hopsesh/releases/latest/download/hopsesh-windows-amd64-setup.exe)
@@ -505,6 +515,15 @@ saw it. Undo pushes them back. `delete_branch = "never"` or `"on-undo"` under
 ```sh
 hopsesh skill install              # your agent asks before each hopsesh command
 hopsesh skill install --add-rules  # read-only hopsesh commands run without asking
+```
+
+Or add the skill from inside your agent, as a plugin (it still needs the `hopsesh` command
+above; `hopsesh skill install` makes the plugin unnecessary):
+
+```sh
+/plugin marketplace add roeehrl/hopsesh      # Claude Code, then /plugin install hopsesh@hopsesh
+codex plugin marketplace add roeehrl/hopsesh # Codex
+npx skills add roeehrl/hopsesh               # any agent that reads Agent Skills
 ```
 
 The skill goes into every installed agent (Claude Code and Codex) as identical files. Then ask

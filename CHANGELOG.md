@@ -18,6 +18,14 @@ All notable changes to this project are documented here. The format follows
   Code session there starts connected (Claude Code's own `remoteControlAtStartup`, set in
   each of its folders' settings; off removes it). On another machine it goes through
   hopsesh there, which needs this version.
+- hopsesh is in Homebrew (`brew install roeehrl/tap/hopsesh`, and the app as
+  `--cask roeehrl/tap/hopsesh-app`) and Scoop (the `roeehrl` bucket), and each published
+  release goes there, and to winget as `roeehrl.hopsesh`, by itself
+  (`.github/workflows/packages.yml`), once it is complete.
+- The hopsesh skill installs from inside the agents as a plugin:
+  `/plugin marketplace add roeehrl/hopsesh` in Claude Code, `codex plugin marketplace add
+  roeehrl/hopsesh` in Codex, or `npx skills add roeehrl/hopsesh`. It carries the newest
+  release's skill and still needs the `hopsesh` command.
 - hopsesh resumes the sessions its terminal tabs ran when it quit. The next time it starts it
   offers to resume them, each in a tab again; after installing an update it does so without
   asking. A session hopsesh shows from another machine, which keeps running there, is shown
