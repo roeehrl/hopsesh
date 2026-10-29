@@ -73,6 +73,7 @@ type App struct {
 	pwOnce           sync.Once
 	step             *pendingStep // the terminal step a hand-off waits for
 	quitting         atomic.Bool  // the user confirmed quitting (or an update restarts the app)
+	remembered       atomic.Bool  // the tabs' sessions are written down for the next launch (rememberTabs)
 	termName         atomic.Value // the user's terminal app's name, for the terminal window (a string)
 
 	endDestinationToken string // one use, tied to the latest exact return review
@@ -435,7 +436,10 @@ func (a *App) InstallUpdate() error {
 		return err
 	}
 	a.core.Audit.Write(audit.Entry{Action: "update", Detail: map[string]any{"from": version.Version, "to": rel.Version, "what": string(t.Kind)}})
+	// Before the new version starts: it reopens these tabs.
+	a.rememberTabs(true)
 	if err := update.Relaunch(t); err != nil {
+		a.remembered.Store(false) // quitting later writes them down again, as a quit
 		return fmt.Errorf("installed hopsesh %s; quit and reopen the app to use it (%w)", rel.Version, err)
 	}
 	if a.Wails != nil {
@@ -582,6 +586,7 @@ func (a *App) Shutdown() {
 		a.Desktop.Stop()
 	}
 	if a.Terms != nil {
+		a.rememberTabs(false)
 		a.Terms.CloseAll()
 	}
 	a.scanMu.Lock()

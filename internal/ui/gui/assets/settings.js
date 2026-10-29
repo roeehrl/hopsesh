@@ -1,11 +1,11 @@
-// The Settings screen, in tabs: General, Machines (one machine, everything about it),
-// Hooks & skills (one component, every machine), Clouds, Desktop presence, Agents,
-// History, Terminal, Skill, Command line, Updates.
+// The Settings screen, in tabs: General, Machines (one machine, everything about it:
+// hopsesh, the command, hooks and skill), Clouds, Desktop presence, Agents, History,
+// Terminal, Updates.
 import { api, on, h, fill, view, state, screen, go, loading, toast, fail, dialog, agentBadge, sys, cliHow, icon, ask, count, current, loadError, navigationID, errText } from "./core.js";
 import { desktopSettings } from "./desktop-settings.js";
-import { running } from "./term.js";
+import { installGuarded, waitingFor, cancelDeferred, onDeferred } from "./term.js";
 import { withCLI, loadHookHealth } from "./guard.js";
-import { bindMachines, machinesPanel, cloudsPanel, hooksPanel, pickMachine } from "./machines.js";
+import { bindMachines, machinesPanel, cloudsPanel, pickMachine } from "./machines.js";
 
 const SKILL_TEXT = {
   absent: ["Not installed", "st-ended"],
@@ -46,7 +46,7 @@ function cloudRow(a, c) {
 
 let tab = "general";
 let s = null, saving = false;
-let checkingUpdate = false, updateError = "";
+let checkingUpdate = false, updateError = "", installing = "";
 
 const chip = ([text, cls]) => h("span", { class: "chip " + cls }, text);
 const title = (t, desc) => h("div", { style: "display:flex;flex-direction:column;gap:2px;min-width:0;flex:1 1 300px" }, h("span", { style: "font-weight:500" }, t), desc ? h("span", { class: "muted", style: "font-size:12px" }, desc) : null);
@@ -91,8 +91,8 @@ function general() {
       h("div", { class: "set-row" }, title("When a session moves, the original", "Blocked: the copy left behind refuses new prompts until you move the session back, so moving back stays a clean return (recommended). Warned: you can still continue it, but the copies may diverge. Moving back always clears this; you can also remove it from one original."),
         seg("When a session moves, the original", s.original || "block", [["block", "Is blocked"], ["advise", "Shows a warning"], ["off", "Is left alone"]], (v) => save({ original: v }))),
       toggle("syncCode", "Bring the code along", "Fetch the session's commit (from the other machine if it isn't pushed) and fast-forward a clean checkout."),
-      toggle("pushSource", "Push unpushed commits on the other machine first", "Off: commits are fetched straight from the other machine.")),
-    noticeSetup(),
+      toggle("pushSource", "Push unpushed commits on the other machine first", "Off: commits are fetched straight from the other machine."),
+      toggle("setUpIntegrations", "Add hooks and skill when hopsesh is set up on a machine", "Off: hopsesh asks first. Each machine's hooks and skill are in Machines.")),
     card(h("span", { class: "sec-h" }, "Appearance"),
       h("div", { class: "set-row" }, title("Color scheme", "Choose the look for Hopsesh, Quick access and the built-in terminal. System follows your device's appearance."),
         h("select", { "aria-label": "Color scheme", disabled: saving, onchange: e => save({ appearance: e.target.value }) },
@@ -226,19 +226,6 @@ function terminal() {
   ];
 }
 
-// ---- Hooks & skills on every machine --------------------------------------------------
-// hooks is the coverage view (machines.js hooksPanel) with the choices that are not about
-// one machine: what happens to an original, and whether setting hopsesh up on a machine
-// adds its hooks and skill too.
-function hooks() {
-  const defaults = h("fieldset", { class: "hook-defaults" }, h("legend", {}, "Defaults"),
-    h("span", {}, "When a session moves away, its original"),
-    seg("When a session moves, the original", s.original || "block", [["block", "Is blocked"], ["advise", "Shows a warning"], ["off", "Is left alone"]], (v) => save({ original: v })),
-    h("label", { class: "opt" }, h("input", { type: "checkbox", checked: !!s.setUpIntegrations, onchange: (e) => save({ setUpIntegrations: e.target.checked }) }),
-      h("span", {}, h("b", {}, "Add hooks and skill when hopsesh is set up on a machine"), h("span", { class: "muted" }, "Off: hopsesh asks first, here."))));
-  return hooksPanel(defaults);
-}
-
 function skill() {
   const sk = s.skill || {}, copies = sk.copies || [], rules = sk.rules || [];
   const addRules = h("input", { type: "checkbox" });
@@ -275,8 +262,12 @@ function cli() {
   if (c.cannotInstall && c.state !== "ours") acts.push(h("span", { class: "muted", style: "font-size:12px" }, c.cannotInstall));
   else if (["missing", "other-app", "dangling"].includes(c.state)) acts.push(h("button", { class: "btn primary", onclick: () => run(() => api("InstallCLI", false), "The hopsesh command now runs this app's version") },
     c.state === "missing" ? "Install command" : c.state === "dangling" ? "Repair" : "Use this app's version"));
-  else if (c.state === "standalone" || c.state === "foreign") acts.push(h("button", { class: "btn", onclick: () => run(() => api("InstallCLI", true), sys.win ? "New terminal windows now run this app's hopsesh" : "Replaced; the previous one is kept as a backup") },
-    sys.win ? "Use this app's first" : "Replace with this app's (keeps a backup)"));
+  else if (c.state === "standalone" || c.state === "foreign") {
+    acts.push(h("span", { class: "muted", style: "font-size:12px;flex-basis:100%" },
+      `You have hopsesh ${c.version || ""}${c.version ? " " : ""}at `, h("span", { class: "mono" }, c.target || c.path), `, installed separately. Use this app's instead${sys.win ? "" : " (the old one is kept as a backup)"}, or keep both: updating hopsesh then updates both, and Machines shows when they differ.`));
+    acts.push(h("button", { class: "btn", onclick: () => run(() => api("InstallCLI", true), sys.win ? "New terminal windows now run this app's hopsesh" : "Replaced; the previous one is kept as a backup") },
+      sys.win ? "Use this app's first" : "Use this app's (keeps a backup)"));
+  }
   if (["ours", "other-app", "dangling"].includes(c.state)) acts.push(h("button", { class: "btn", onclick: () => run(() => api("UninstallCLI"), "Removed the hopsesh command") }, "Uninstall command"));
   return [card(
     h("div", { class: "set-row" }, title("The hopsesh command", `${cliHow()}, so any terminal, your agents and your other machines can run it. It updates with the app.`), chip(CLI_TEXT[c.state] || [c.state, ""])),
@@ -295,7 +286,9 @@ function updates() {
   const u = checkingUpdate || updateError ? null : state.update;
   return [card(
     h("div", { class: "set-row" }, title(`hopsesh ${s.version}`, checkingUpdate ? "Checking GitHub for the newest release…" : u?.newer ? `hopsesh ${u.latest} is available.` : u?.latest ? "This is the newest version." : ""),
-      u?.newer && u.canInstall ? h("button", { class: "btn primary", onclick: (ev) => installUpdate(ev.currentTarget, u) }, "Install and restart") : null,
+      u?.newer && u.canInstall && waitingFor() === "update" ? [h("span", { class: "muted", role: "status" }, "Installs once the agents in your tabs finish their turns"),
+        h("button", { class: "btn", onclick: cancelDeferred }, "Don't wait"), h("button", { class: "btn", onclick: () => { cancelDeferred(); installUpdate(u); } }, "Install now…")] : null,
+      u?.newer && u.canInstall && waitingFor() !== "update" ? h("button", { class: "btn primary", disabled: !!installing, onclick: () => installUpdate(u) }, installing || "Install and restart") : null,
       u?.newer ? h("button", { class: u.canInstall ? "btn" : "btn primary", onclick: () => api("OpenURL", u.url).catch(fail) }, "See what's new") : null,
       h("button", { class: "btn", disabled: checkingUpdate, onclick: checkUpdateNow }, checkingUpdate ? "Checking…" : "Check now")),
     updateError ? h("div", { role: "alert", class: "warn" }, updateError) : null,
@@ -315,21 +308,12 @@ async function checkUpdateNow() {
 }
 
 // installUpdate installs the new version over this app (the backend verifies it first),
-// which then reopens.
-async function installUpdate(btn, u) {
-  const n = running().length;
-  if (n && !await ask({ title: `Restart and end ${count(n, "program")}?`, body: "Installing the update restarts hopsesh, which ends every program in its terminal tabs. Claude Code and Codex keep each conversation up to its last finished turn.", ok: "Install and restart", danger: true })) return;
-  btn.disabled = true;
-  fill(btn, `Downloading and checking ${u.latest}…`);
-  try {
-    await api("InstallUpdate");
-    fill(btn, "Restarting…");
-  } catch (e) {
-    fail(e);
-    btn.disabled = false;
-    fill(btn, "Install and restart");
-  }
+// which then reopens, with the sessions its tabs ran.
+async function installUpdate(u) {
+  await installGuarded(u.latest, (t) => { installing = t; render(); });
+  render();
 }
+onDeferred(() => render());
 
 async function preview() {
   try {
@@ -394,11 +378,15 @@ async function loadHistory() {
   if (current === "settings" && tab === "history") render();
 }
 
-const TABS = [["general", "General", general], ["machines", "Machines", machinesPanel], ["hooks", "Hooks & skills", hooks], ["clouds", "Clouds", cloudsPanel], ["desktop", "Desktop presence", desktop], ["agents", "Agents", agents], ["history", "History", history], ["terminal", "Terminal", terminal], ["skill", "Skill", skill], ["cli", "Command line", cli], ["updates", "Updates", updates]];
+// This machine's command, skill and protection hooks are shown on its page in Machines.
+const machines = () => machinesPanel({ here: () => [...cli(), ...skill(), noticeSetup()] });
+const TABS = [["general", "General", general], ["machines", "Machines", machines], ["clouds", "Clouds", cloudsPanel], ["desktop", "Desktop presence", desktop], ["agents", "Agents", agents], ["history", "History", history], ["terminal", "Terminal", terminal], ["updates", "Updates", updates]];
+// Tabs that became part of This machine's page in Machines.
+const HERE_TABS = ["hooks", "skill", "cli"];
 
-// The machine and coverage tabs need room for a list beside details, and a table.
-const WIDE = ["machines", "hooks"];
-bindMachines(() => current === "settings" && ["machines", "clouds", "hooks"].includes(tab), () => render());
+// The machine tab needs room for a list beside details.
+const WIDE = ["machines"];
+bindMachines(() => current === "settings" && ["machines", "clouds"].includes(tab), () => render());
 
 function render() {
   if (current !== "settings") return;
@@ -441,6 +429,7 @@ async function load() {
 }
 
 screen("settings", async (which, pick) => {
+  if (HERE_TABS.includes(which)) { which = "machines"; pick = "here"; }
   if (which) tab = which;
   if (pick) pickMachine(pick);
   if (!s) loading("Reading the settings…");

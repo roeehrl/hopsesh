@@ -196,6 +196,14 @@ func fixes(s app.MachineStatus) []string {
 		setup = ""
 	}
 	add("hopsesh", s.Hopsesh, setup)
+	if s.Hopsesh.Fix == "" || s.Hopsesh.State == app.CheckOK {
+		copies := setup
+		if s.Local {
+			copies = "hopsesh installs --align"
+		}
+		add("copies", s.Copies, copies)
+	}
+	add("login session", s.Login, "hopsesh serve install")
 	receive := "hopsesh receive on"
 	if !s.Local {
 		receive = "on " + s.Machine + ": hopsesh receive on"
@@ -204,12 +212,14 @@ func fixes(s app.MachineStatus) []string {
 	add("command", s.CLI, "add the folder that holds hopsesh to your shell's PATH"+map[bool]string{true: "", false: " on " + s.Machine}[s.Local])
 	for _, a := range s.Agents {
 		where := a.Name
-		if a.ProfileLabel != "" {
+		if a.Account != "" {
+			where += " · " + a.Account
+		} else if a.ProfileLabel != "" {
 			where += " · " + a.ProfileLabel
 		}
 		hooks, skill := "hopsesh notices install", "hopsesh skill install"
 		if !s.Local {
-			hooks, skill = "Settings › Hooks & skills in the app, or on "+s.Machine+": "+hooks, "on "+s.Machine+": "+skill
+			hooks, skill = "Settings › Machines in the app, or on "+s.Machine+": "+hooks, "on "+s.Machine+": "+skill
 		}
 		if a.Hook.Fix == app.FixApprove {
 			hooks = ""

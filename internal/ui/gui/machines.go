@@ -13,6 +13,8 @@ import (
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/hosts"
+	"github.com/roeehrl/hopsesh/internal/core/integrate"
+	"github.com/roeehrl/hopsesh/internal/core/proc"
 	"github.com/roeehrl/hopsesh/internal/core/secrets"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
 	"github.com/roeehrl/hopsesh/internal/version"
@@ -215,6 +217,22 @@ func (a *App) SetReceive(on bool) error {
 	return a.save()
 }
 
+// StartAtLogin has this machine start hopsesh serve at each login, and now (hopsesh
+// serve install, run by the app's own command), so it receives sessions while the app
+// is closed. Only on the user's click.
+func (a *App) StartAtLogin() error {
+	cli, err := integrate.AppCLI()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	if out, err := proc.CommandContext(ctx, cli, "serve", "install").CombinedOutput(); err != nil {
+		return fmt.Errorf("hopsesh serve install: %s", strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // RemoveHost forgets a machine: hopsesh stops connecting to it and drops its remembered
 // password (discovery may still list it).
 func (a *App) RemoveHost(name string) error {
@@ -347,13 +365,43 @@ type MachineSetupStep struct {
 // machine is scanned again after.
 func (a *App) SetUpMachine(name string) (*app.MachineSetup, error) {
 	core := a.snapshot()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	// Updating an app there downloads and checks it there: give it time.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	out, err := core.SetUpMachine(ctx, name, func(s app.SetupStep) {
 		a.emit(MachineSetupEvent, MachineSetupStep{Machine: name, Step: s})
 	})
-	if err == nil {
+	if err == nil || out != nil && stepsDone(out.Steps) {
 		go func() { _ = a.ScanMachine(name) }()
 	}
 	return out, err
+}
+
+// stepsDone reports whether a setup changed anything there (one that failed part-way did).
+func stepsDone(steps []app.SetupStep) bool {
+	for _, s := range steps {
+		if s.State == "done" {
+			return true
+		}
+	}
+	return false
+}
+
+// PlanUpdate says what setting hopsesh up or updating it on a machine would do there:
+// each copy of hopsesh found and what happens to it, for the dialog that asks.
+func (a *App) PlanUpdate(name string) (*app.UpdatePlan, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	return a.snapshot().PlanUpdate(ctx, name)
+}
+
+// AlignHere brings this machine's other copies of hopsesh to this version, after the user
+// asked; each step is told as it happens (as the machine's own setup).
+func (a *App) AlignHere() (*app.MachineSetup, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	here := app.LocalName()
+	return a.snapshot().AlignHere(ctx, func(s app.SetupStep) {
+		a.emit(MachineSetupEvent, MachineSetupStep{Machine: here, Step: s})
+	})
 }

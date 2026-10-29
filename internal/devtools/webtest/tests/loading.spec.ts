@@ -96,6 +96,15 @@ test('conversation preview has spoken loading feedback and an explicit retry', a
   await details(page).getByRole('button', { name: 'Try again' }).click(); await expect(details(page).locator('.msg').first()).toBeVisible();
 });
 
+test('a machine slow to answer gets a retry for its preview', async ({ page }) => {
+  let first = true;
+  await page.route('**/call', async r => {
+    if (r.request().postDataJSON().m === 'Preview' && first) { first = false; await r.fulfill({ json: { result: { items: [], note: 'Preview not available: laptop is slow to answer.', failed: true } } }); } else await r.continue();
+  });
+  await row(page, 'Find the codeword').click(); await expect(details(page).getByText(/slow to answer/)).toBeVisible();
+  await details(page).getByRole('button', { name: 'Try again' }).click(); await expect(details(page).locator('.msg').first()).toBeVisible();
+});
+
 test('quick access initial failure and refresh failure recover', async ({ page }) => {
   let initial = true;
   await page.route('**/call', async r => {

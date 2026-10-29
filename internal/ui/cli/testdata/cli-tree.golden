@@ -95,6 +95,10 @@ hopsesh hosts setup-key
 hopsesh hosts status
   --json
   --refresh
+hopsesh installs
+  --align
+  --json
+  --yes
 hopsesh lineage
 hopsesh lineage archive
 hopsesh lineage retry

@@ -87,7 +87,7 @@ func (a *App) Settings() SettingsDTO {
 	cfg := a.core.Cfg
 	return SettingsDTO{Appearance: cfg.AppearanceMode(), NoticeHooks: hooks, NoticeHooksError: hookProblem, Version: version.Version, ReposDir: cfg.ReposDir, Layout: nonEmpty(cfg.Layout, "flat"),
 		MovementNotices: cfg.MovementNoticesOn(), Original: cfg.OriginalGuard(), SyncCode: cfg.SyncCodeOn(), PushSource: cfg.PushSource, UpdateChk: cfg.UpdateCheck, AppIcons: cfg.AppIconsOn(), Previews: cfg.PreviewsOn(),
-		Agents: a.agentsLocked(), CLI: integrate.CheckCLI(), CLIReady: CLIReady(integrate.CheckCLI()), Skill: rep, SkillBin: bin, SkillPrompt: cfg.SkillPrompt,
+		Agents: a.agentsLocked(), CLI: integrate.CheckCLI().WithVersion(), CLIReady: CLIReady(integrate.CheckCLI()), Skill: rep, SkillBin: bin, SkillPrompt: cfg.SkillPrompt,
 		SetUpIntegrations: cfg.Peer.SetUpIntegrations, LocalNetworkGated: lnp.Gated(), ConfigDir: config.Dir(), StateDir: config.StateDir()}
 }
 
@@ -335,5 +335,5 @@ func requireCLI() error {
 	case integrate.CLIDangling:
 		why = "the hopsesh command points to an app that moved or was removed"
 	}
-	return errors.New(ErrCLIRequired + why + "; the skill and the protection hooks run it. Install the command first (Settings › Command line).")
+	return errors.New(ErrCLIRequired + why + "; the skill and the protection hooks run it. Install the command first (Settings › Machines).")
 }

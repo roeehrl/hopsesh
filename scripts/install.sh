@@ -4,7 +4,8 @@
 #   curl -fsSL https://raw.githubusercontent.com/roeehrl/hopsesh/main/scripts/install.sh | sh
 #
 # Environment: HOPSESH_VERSION (default: latest release), HOPSESH_INSTALL_DIR
-# (default: ~/.local/bin). The archive is checked against the release's checksums.txt,
+# (default: ~/.local/bin), HOPSESH_FORCE=1 (replace a link to the hopsesh app's command
+# there, which the app otherwise keeps). The archive is checked against the release's checksums.txt,
 # and checksums.txt against the release signing key below (with openssl).
 set -eu
 
@@ -32,6 +33,15 @@ case "$(uname -m)" in
   arm64 | aarch64) arch=arm64 ;;
   *) die "unsupported architecture $(uname -m)" ;;
 esac
+
+dir="${HOPSESH_INSTALL_DIR:-$HOME/.local/bin}"
+# A link into hopsesh.app belongs to the app (it updates with it): leave it alone, and say so
+# before downloading anything.
+if [ -L "$dir/hopsesh" ] && [ -z "${HOPSESH_FORCE:-}" ]; then
+  case "$(readlink "$dir/hopsesh")" in
+    *.app/Contents/*) die "$dir/hopsesh comes from the hopsesh app, which keeps it up to date; update the app instead (or rerun with HOPSESH_FORCE=1 to replace it)" ;;
+  esac
+fi
 
 tag="${HOPSESH_VERSION:-}"
 if [ -z "$tag" ]; then
@@ -66,17 +76,16 @@ else got=$(shasum -a 256 "$tmp/$archive" | cut -d' ' -f1); fi
 [ "$got" = "$want" ] || die "checksum mismatch for $archive; not installing"
 
 tar -xzf "$tmp/$archive" -C "$tmp" hopsesh
-dir="${HOPSESH_INSTALL_DIR:-$HOME/.local/bin}"
 mkdir -p "$dir"
-# A link into hopsesh.app belongs to the app (it updates with it): leave it alone.
-if [ -L "$dir/hopsesh" ] && [ -z "${HOPSESH_FORCE:-}" ]; then
-  case "$(readlink "$dir/hopsesh")" in
-    *.app/Contents/*) die "$dir/hopsesh comes from the hopsesh app, which keeps it up to date; update the app instead (or rerun with HOPSESH_FORCE=1 to replace it)" ;;
-  esac
-fi
 install -m 0755 "$tmp/hopsesh" "$dir/hopsesh.new" 2>/dev/null || { cp "$tmp/hopsesh" "$dir/hopsesh.new"; chmod 0755 "$dir/hopsesh.new"; }
 mv -f "$dir/hopsesh.new" "$dir/hopsesh"
 say "Installed $("$dir/hopsesh" version) at $dir/hopsesh"
+# The app has a hopsesh of its own: the two share hopsesh's settings and history, so keep
+# them one version (hopsesh installs lists them; the app can use its own command instead).
+for app in /Applications/hopsesh.app "$HOME/Applications/hopsesh.app"; do
+  [ -x "$app/Contents/Resources/bin/hopsesh" ] || continue
+  say "The hopsesh app is here too ($("$app/Contents/Resources/bin/hopsesh" version 2>/dev/null | cut -d' ' -f2)). Keep them one version: update both, or use the app's command (Settings › Machines in the app)."
+done
 case ":$PATH:" in
   *":$dir:"*) ;;
   *)

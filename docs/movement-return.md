@@ -41,7 +41,7 @@ prompt and show the reason); `SessionStart` cannot block, so it explains the blo
 mode adds context once per movement and status. Hooks never start a model turn, stop a
 session, or edit its transcript; they fail open on errors and time out after 2 seconds.
 
-Install them in **Settings › General › Protection hooks**, or with
+Install them in **Settings › Machines**, on this machine's page, or with
 `hopsesh notices install` (`--agent claude --profile <profile-id>` for one profile);
 `hopsesh notices status` and `remove` report and remove only hopsesh's hooks. The hooks
 and the skill run the hopsesh command, so installing either from the app requires it

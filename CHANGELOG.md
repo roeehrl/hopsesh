@@ -6,6 +6,80 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+
+- hopsesh resumes the sessions its terminal tabs ran when it quit. The next time it starts it
+  offers to resume them, each in a tab again; after installing an update it does so without
+  asking. A session hopsesh shows from another machine, which keeps running there, is shown
+  again.
+- Quitting, or installing an update, while an agent in a tab is in the middle of a turn names
+  it and offers to wait: **Quit when they're idle** and **Update when they're idle** go ahead
+  once no agent has worked for 10 seconds.
+
+### Changed
+
+- Every hopsesh on a machine is one version. A machine can have the app, a command you
+  installed, one a package manager owns and the copy hopsesh puts in `~/.hopsesh/bin`; they
+  share hopsesh's settings and history. Setting a machine up or updating it now updates each
+  copy older than this one: the app with its own verified updater, a command in place, and
+  hopsesh's own copy becomes a link to the machine's own hopsesh (or, if that couldn't be
+  updated, stays and runs the machine). A package manager's copy is left to it, with its
+  command. The login service runs the machine's own hopsesh. Before, Update refreshed only
+  `~/.hopsesh/bin` and left an app there at its old version.
+- The Update dialog lists what happens to each hopsesh on that machine before you agree, and
+  how many terminals hopsesh runs there the restart ends.
+- Each machine's page lists its copies of hopsesh (where, which version, which one the
+  machine, your terminal and the login service run), and Up next says when they differ or
+  when the login service starts one that isn't there any more. `hopsesh installs` lists them
+  here and `hopsesh installs --align` brings them to this version; `hopsesh hosts status`
+  says when they differ.
+- The app's **Install the command** over a hopsesh you installed says which version it is,
+  and offers to use the app's (keeping a backup) or keep both.
+
+### Fixed
+
+- **Update hopsesh** on the screen for settings from a newer version asks before ending the
+  programs in the terminal's tabs, as Settings › Updates does.
+- The quit dialog no longer counts a session shown from another machine as a program it
+  ends: it keeps running there.
+- `install.sh` stops before downloading when `~/.local/bin/hopsesh` links into the hopsesh
+  app, and `install.ps1` no longer replaces the app's own `hopsesh.exe` (`HOPSESH_FORCE=1`
+  overrides both). After installing, `install.sh` says when the app is there too.
+- A hopsesh from a Linux package (`.deb`, `.rpm`, `.apk`) no longer replaces itself with
+  `hopsesh update`; it names the package command instead.
+
+## [0.6.4] - 2026-10-23
+
+Settings › Machines is the one place for a machine's hooks, skill and command, agent folders
+are named by who is signed in there, and a session in a window hopsesh can't identify can be
+resumed. A machine's Recent conversation waits longer and offers **Try again**.
+
+### Changed
+
+- Settings › Machines is the one place for a machine's hooks, skill and command. The
+  separate Hooks & skills, Skill and Command line tabs are gone: this machine's page holds
+  its command, skill and protection hooks in full, and "Add hooks and skill when hopsesh is
+  set up on a machine" is in General. Up next sets up every agent folder's hooks and skill in
+  one line ("both agent folders need the hook and skill" · Set up), the list's "to do" counts
+  those lines, and "Set up hooks and skill on all …" covers every machine at once.
+- An agent folder is named by who is signed in there (`Claude Code · you@example.com`), so
+  several folders of one agent are told apart; `hopsesh hosts status` names them the same way.
+- This machine's login session says when hopsesh doesn't start at login, with **Start at
+  login** (`hopsesh serve install`, on your click), and receiving says "switched on, not
+  receiving yet" instead of "on, not listening".
+- A session running in a window hopsesh can't identify can be resumed: **Resume in …**, with
+  the other places beside it and a warning to close it first if it is still open.
+
+### Fixed
+
+- A session's Recent conversation from another machine waits 10 seconds instead of 3 before
+  saying the machine "is slow to answer", and that note (or any failed read) now offers
+  **Try again**.
+- After updating hopsesh on a machine, its page checks the machine again at once, however
+  the dialog is closed, instead of showing the old version.
+- The sidebar keeps a gap between a machine's name and hopsesh's mark.
+- What hopsesh can do on a machine no longer overlaps the text beneath it on its page.
+
 ## [0.6.3] - 2026-10-23
 
 Sessions started in a folder of repositories move between machines, each repository found
@@ -93,7 +167,7 @@ app opens find hopsesh.
   use, or goes back to the old one when `tui.resume_cwd = "session"`.
 
 - A session in a folder that is not a repository, brought from another machine, continues
-  in the same folder under this machine's home (`/Users/sam/notes` → `/Users/tnt/notes`),
+  in the same folder under this machine's home (`/Users/sam/notes` → `/Users/kim/notes`),
   not at the other machine's path, which named another user's home.
 - Continuing a session under another account says so ("This session was run by another …
   account") when the account it ran under differs, also across account profiles; the
@@ -982,6 +1056,7 @@ is refused and set aside (the app offers this), and machines are added again.
 - The terminal UI no longer carries out a plan you pressed `y` on while a changed one was
   still being worked out.
 
+[0.6.4]: https://github.com/roeehrl/hopsesh/releases/tag/v0.6.4
 [0.6.3]: https://github.com/roeehrl/hopsesh/releases/tag/v0.6.3
 [0.6.2]: https://github.com/roeehrl/hopsesh/releases/tag/v0.6.2
 [0.6.1]: https://github.com/roeehrl/hopsesh/releases/tag/v0.6.1

@@ -112,8 +112,8 @@ func TestLoginAndReceiving(t *testing.T) {
 	if _, r := (&Machine{Local: true, listening: true}).loginChecks(a); r.State != CheckOK {
 		t.Fatalf("here, receiving on and serve running: %+v", r)
 	}
-	if _, r := (&Machine{Local: true}).loginChecks(a); r.State != CheckOff || r.Text != "on, not listening" {
-		t.Fatalf("here, receiving on without serve: %+v", r)
+	if l, r := (&Machine{Local: true}).loginChecks(a); r.State != CheckOff || r.Text != "switched on, not receiving yet" || l.Fix != FixServe {
+		t.Fatalf("here, receiving on without serve: login %+v receiving %+v", l, r)
 	}
 }
 

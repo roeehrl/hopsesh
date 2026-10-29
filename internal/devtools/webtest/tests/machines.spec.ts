@@ -108,6 +108,8 @@ test("an SSH-only machine says what hopsesh would do there, and is set up on req
   await page.route("**/call", async (route) => {
     const m = route.request().postDataJSON().m;
     if (m === "SetUpMachine") { setups++; return route.fulfill({ json: { result: { machine: "lurus", version: "0.6.1", login: true, steps: [] } } }); }
+    if (m === "PlanUpdate") return route.fulfill({ json: { result: { machine: "lurus", version: "0.6.1", ends: 0, installs: { installs: [] },
+      steps: [{ do: "install", path: "/Users/me/.hopsesh/bin/hopsesh", text: "Copy hopsesh 0.6.1 to ~/.hopsesh/bin/hopsesh" }, { do: "service", path: "/Users/me/.hopsesh/bin/hopsesh", text: "Start it at login" }] } } });
     if (m === "ScanMachine" || m === "MachineScans") return route.fulfill({ json: { result: m === "ScanMachine" ? null : {} } });
     if (m === "MachineStatuses") return route.fulfill({ json: { result: [
       { machine: "lurus", version: "", reach: ok("reached over SSH"), hopsesh: { state: "off", text: "not installed", fix: "setup", reason: "sessions can still be brought from it over SSH" },
@@ -126,8 +128,8 @@ test("an SSH-only machine says what hopsesh would do there, and is set up on req
   await expect(detail(page)).toContainText("which is locked to SSH");
   await detail(page).locator(".mnext").getByRole("button", { name: "Set up hopsesh…" }).click();
   const d = page.locator("#dlg");
-  await expect(d).toContainText("~/.hopsesh/bin");
-  await expect(d).toContainText("A hopsesh you installed there yourself is left as it is.");
+  // What it does there comes from the machine: nothing is there, so a copy of its own.
+  await expect(d.locator('[data-step="install"]')).toHaveText("Copy hopsesh 0.6.1 to ~/.hopsesh/bin/hopsesh");
   await expect(d).toContainText("hopsesh serve uninstall");
   await expect(d).toContainText("Asks before installing hooks or the skill there");
   expect(setups).toBe(0);

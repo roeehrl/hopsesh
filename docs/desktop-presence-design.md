@@ -90,7 +90,7 @@ Background local discovery should be event-driven where reliable; use a conserva
 
 ## Implementation findings and plan
 
-Inspected checkout: `/Users/tnt/git/hopsesh-accounts`, Wails `v3.0.0-beta.27`.
+Inspected checkout: a working checkout, Wails `v3.0.0-beta.27`.
 
 The current desktop entrypoint terminates after the last window closes on macOS and has existing terminal-aware close/quit hooks. Its frontend refresh logic depends partly on focus/visibility. Adding a tray icon alone would not make its status trustworthy while the main window is hidden. These are explicit integration changes, not a new background executable.
 

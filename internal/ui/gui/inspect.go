@@ -34,6 +34,9 @@ type PreviewDTO struct {
 	// Note says why there is no preview ("Preview not available: laptop is slow to
 	// answer"); "" when there is one.
 	Note string `json:"note,omitempty"`
+	// Failed says the read did not finish (a slow or unreachable machine), so the window
+	// offers Try again.
+	Failed bool `json:"failed,omitempty"`
 }
 
 // PreviewItemDTO is one message, one turn's tool calls in words, or a compaction.
@@ -88,12 +91,13 @@ func (c *previewCache) touch(k string) {
 
 var previews previewCache
 
-// previewTimeout bounds a preview from another machine.
-const previewTimeout = 3 * time.Second
+// previewTimeout bounds a preview from another machine. It covers the SSH connection (a
+// second or two over Tailscale without connection sharing) and the remote read.
+const previewTimeout = 10 * time.Second
 
 // Preview returns the end of a session's conversation: its last n messages (4 when n is
 // 0), with a line for each turn's tool calls. A machine that is slow to answer gets a
-// note, not an error.
+// note and Failed, not an error.
 func (a *App) Preview(machine, key string, n int) (*PreviewDTO, error) {
 	if n <= 0 {
 		n = 4
@@ -140,9 +144,9 @@ func (a *App) Preview(machine, key string, n int) (*PreviewDTO, error) {
 	case errors.Is(err, app.ErrNoPreview):
 		return &PreviewDTO{Items: []PreviewItemDTO{}, Note: fmt.Sprintf("%s's conversations can't be previewed yet.", e.AgentName)}, nil
 	case errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil:
-		return &PreviewDTO{Items: []PreviewItemDTO{}, Note: fmt.Sprintf("Preview not available: %s is slow to answer.", machine)}, nil
+		return &PreviewDTO{Items: []PreviewItemDTO{}, Note: fmt.Sprintf("Preview not available: %s is slow to answer.", machine), Failed: true}, nil
 	case err != nil:
-		return &PreviewDTO{Items: []PreviewItemDTO{}, Note: "Preview not available: " + err.Error()}, nil
+		return &PreviewDTO{Items: []PreviewItemDTO{}, Note: "Preview not available: " + err.Error(), Failed: true}, nil
 	}
 	a.mu.Lock()
 	on = a.core.Cfg.PreviewsOn()

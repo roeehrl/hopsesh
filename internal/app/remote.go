@@ -1,7 +1,6 @@
 package app
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/host"
+	"github.com/roeehrl/hopsesh/internal/core/installs"
 	"github.com/roeehrl/hopsesh/internal/core/loginsvc"
 	"github.com/roeehrl/hopsesh/internal/core/peer"
 	"github.com/roeehrl/hopsesh/internal/core/pty"
@@ -202,36 +202,25 @@ func (a *App) SetUpMachine(ctx context.Context, machine string, progress func(Se
 	}
 	defer m.Close()
 	step(SetupStep{Name: "Connect", State: "done", Detail: m.Facts.OS + "/" + m.Facts.Arch})
-	there := m.Facts.Binaries[host.Hopsesh.Name]
-	have := hopseshVersion(there)
-	program := remoteProgram(m)
-	switch {
-	case there.Path != "" && (have == version.Version || version.IsRelease() && update.Newer(have, version.Version)):
-		program = there.Path
-		out.Version = have
-		step(SetupStep{Name: "Install hopsesh", State: "skipped", Detail: "hopsesh " + have + " is there already, at " + there.Path})
-	default:
-		bin, err := a.hopseshFor(ctx, m.Facts.OS, m.Facts.Arch)
-		if err != nil {
-			return fail("Install hopsesh", err)
+	// Every hopsesh there is brought to this version (the app with its own updater) and the
+	// machine's own one runs it; a copy a package manager owns is left to it.
+	list, err := a.remoteInstalls(ctx, m)
+	if err != nil {
+		return fail("Install hopsesh", err)
+	}
+	steps := installs.Plan(list, version.Version, remoteProgram(m))
+	// A copy that couldn't be updated is reported at the end: hopsesh still runs there.
+	program, list, applyErr := applyInstalls(ctx, remoteInstaller{a, m}, list, steps, step)
+	if program == "" {
+		return out, nonNil(applyErr, errors.New("hopsesh could not be installed on "+machine))
+	}
+	for _, in := range list.Installs {
+		if in.Path == program && in.Version != "" {
+			out.Version = in.Version
 		}
-		fsys, err := m.FS(ctx)
-		if err != nil {
-			return fail("Install hopsesh", err)
-		}
-		_ = fsys.MkdirAll(m.Path().Dir(program))
-		rfs, ok := m.RemoteFS()
-		if !ok {
-			return fail("Install hopsesh", errors.New("no file transfer to "+machine))
-		}
-		if err := rfs.WriteFile(program, bytes.NewReader(bin), 0o755); err != nil {
-			return fail("Install hopsesh", err)
-		}
-		detail := "copied to " + program
-		if have != "" {
-			detail = "updated " + have + " → " + version.Version + " at " + program
-		}
-		step(SetupStep{Name: "Install hopsesh", State: "done", Detail: detail})
+	}
+	if !stepped(out.Steps) {
+		step(SetupStep{Name: "Install hopsesh", State: "skipped", Detail: "hopsesh " + out.Version + " is there already, at " + installs.Tilde(program, list.Home)})
 	}
 	out.Program = program
 	// The identity kept here while it had no hopsesh becomes its own, so the lineage
@@ -289,14 +278,14 @@ func (a *App) SetUpMachine(ctx context.Context, machine string, progress func(Se
 	if a.Cfg.Peer.SetUpIntegrations {
 		switch _, err := a.SetUpProtectionOn(ctx, machine, false); {
 		case !out.Login:
-			step(SetupStep{Name: "Hooks and skill", State: "waiting", Detail: "added once hopsesh runs in the login session there (Settings › Hooks & skills)"})
+			step(SetupStep{Name: "Hooks and skill", State: "waiting", Detail: "added once hopsesh runs in the login session there (Settings › Machines)"})
 		case err != nil:
 			step(SetupStep{Name: "Hooks and skill", State: "failed", Detail: err.Error()})
 		default:
 			step(SetupStep{Name: "Hooks and skill", State: "done", Detail: "movement hooks and the skill for every agent there"})
 		}
 	}
-	return out, nil
+	return out, applyErr
 }
 
 // remoteProgram is where hopsesh sets itself up on m: a folder of its own, so a copy the
@@ -379,6 +368,24 @@ func outputOr(out string, err error) string {
 func nonEmptyStr(s, otherwise string) string {
 	if s != "" {
 		return s
+	}
+	return otherwise
+}
+
+// stepped reports whether any step touched a hopsesh program.
+func stepped(steps []SetupStep) bool {
+	for _, s := range steps {
+		switch s.Name {
+		case "Install hopsesh", "Update hopsesh", "Update the app", "One hopsesh":
+			return true
+		}
+	}
+	return false
+}
+
+func nonNil(err, otherwise error) error {
+	if err != nil {
+		return err
 	}
 	return otherwise
 }

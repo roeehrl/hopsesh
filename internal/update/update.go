@@ -34,11 +34,13 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
 
+	"github.com/roeehrl/hopsesh/internal/core/installs"
 	"github.com/roeehrl/hopsesh/internal/core/proc"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
@@ -228,8 +230,35 @@ func ManagedBy() (string, string) {
 		return "Scoop", "scoop update hopsesh"
 	case strings.Contains(low, "/winget/") || strings.Contains(low, "/microsoft/winget/"):
 		return "winget", "winget upgrade hopsesh"
+	case runtime.GOOS == "linux" && systemPath(exe):
+		if m := linuxPackage(exe); m != "" {
+			return m, installs.UpdateCommand(m, "", runtime.GOARCH) + " (the package from the release page)"
+		}
 	}
 	return "", ""
+}
+
+// systemPath: where only the system's package manager installs (not /usr/local).
+func systemPath(p string) bool {
+	return !strings.HasPrefix(p, "/usr/local/") && (strings.HasPrefix(p, "/usr/") || strings.HasPrefix(p, "/bin/") || strings.HasPrefix(p, "/sbin/"))
+}
+
+// linuxPackage names the package manager whose package installed p (apt, dnf, apk), or "".
+func linuxPackage(p string) string {
+	for _, q := range []struct {
+		manager, name string
+		args          []string
+	}{
+		{"apt", "dpkg", []string{"-S", p}}, {"dnf", "rpm", []string{"-qf", p}}, {"apk", "apk", []string{"info", "--who-owns", p}},
+	} {
+		if _, err := exec.LookPath(q.name); err != nil {
+			continue
+		}
+		if proc.Command(q.name, q.args...).Run() == nil {
+			return q.manager
+		}
+	}
+	return ""
 }
 
 // ErrNoReleases means the repository has no published release (yet).

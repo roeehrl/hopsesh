@@ -4,7 +4,7 @@ import { fresh, menu, row, action } from "./helpers";
 test.beforeEach(async ({ page }) => fresh(page));
 
 // What hopsesh can do on each machine (MachineStatuses): this Mac on 0.6.1 receiving,
-// roee-macbook on 0.5.0 not in a login session, nas without hopsesh.
+// sam-macbook on 0.5.0 not in a login session, nas without hopsesh.
 const ok = (text: string) => ({ state: "ok", text });
 const off = (text: string, fix = "", reason = "") => ({ state: "off", text, fix, reason });
 const setup = (agent: string, name: string, hook: any, skill: any, profileLabel = "") => ({ agent, name, profileLabel, hook, skill });
@@ -13,7 +13,7 @@ const statuses = () => [
     receiving: ok("on, listening"), cli: ok("on PATH · ~/.local/bin/hopsesh"), todo: 1, total: 7, checkedAt: new Date().toISOString(), detailsAt: new Date().toISOString(),
     agents: [setup("claude", "Claude Code", ok("installed"), ok("installed")), setup("claude", "Claude Code", ok("installed"), { state: "warn", text: "outdated", fix: "skill", reason: "written by hopsesh 0.6.0" }, "work"),
       setup("codex", "Codex", ok("installed · trusted"), ok("installed"))] },
-  { machine: "roee-macbook", local: false, version: "0.5.0", newest: "0.6.1", newestOn: "here", reach: ok("reached over SSH"),
+  { machine: "sam-macbook", local: false, version: "0.5.0", newest: "0.6.1", newestOn: "here", reach: ok("reached over SSH"),
     hopsesh: { state: "warn", text: "0.5.0", reason: "0.6.1 is the newest, on here", fix: "update" }, login: off("not running", "", "nobody is logged in there"),
     receiving: off("not listening", "", "until hopsesh runs in a login session there"), cli: ok("on PATH · ~/.local/bin/hopsesh"), todo: 2, total: 7,
     checkedAt: new Date().toISOString(), detailsAt: new Date().toISOString(),
@@ -23,7 +23,7 @@ const statuses = () => [
 ];
 const machines = (here: string) => ({ here: { name: here, agents: ["Claude Code", "Codex"], hopsesh: "0.6.1", receive: true, storage: [] },
   machines: [
-    { name: "roee-macbook", destination: "roee-macbook", os: "darwin", auth: "key", scanned: true, scan: {}, status: "ok", hint: "", error: "", agents: ["Claude Code"], hopsesh: "0.5.0", sessions: 4, storage: [], presence: "installed", can: [] },
+    { name: "sam-macbook", destination: "sam-macbook", os: "darwin", auth: "key", scanned: true, scan: {}, status: "ok", hint: "", error: "", agents: ["Claude Code"], hopsesh: "0.5.0", sessions: 4, storage: [], presence: "installed", can: [] },
     { name: "nas", destination: "alice@192.168.1.20", os: "linux", auth: "password", keychain: true, scanned: true, scan: {}, status: "ok", hint: "", error: "", agents: [], hopsesh: "", sessions: 0, storage: [], presence: "ssh", can: [] },
   ], found: [{ name: "tnt-pc", destination: "tnt-pc", via: ["ssh-config"], os: "", online: null, owner: "" }], clouds: [] });
 
@@ -51,7 +51,7 @@ test("the sidebar marks the machines hopsesh runs on", async ({ page }) => {
       const res = await route.fetch(), body = await res.json(), scan = body.result?.scan || body.result;
       if (scan?.machines) {
         for (const x of scan.machines) if (x.local) Object.assign(x, { hopsesh: "0.6.1", receiving: true });
-        scan.machines.push({ name: "roee-macbook", status: "ok", sessions: 0, local: false, agents: [], agentNames: ["Claude Code"], hopsesh: "0.5.0", receiving: false, newest: "0.6.1", presence: "installed", os: "darwin" },
+        scan.machines.push({ name: "sam-macbook", status: "ok", sessions: 0, local: false, agents: [], agentNames: ["Claude Code"], hopsesh: "0.5.0", receiving: false, newest: "0.6.1", presence: "installed", os: "darwin" },
           { name: "nas", status: "ok", sessions: 0, local: false, agents: [], agentNames: [], hopsesh: "", receiving: false, presence: "ssh", os: "linux" });
       }
       await route.fulfill({ json: body });
@@ -60,7 +60,7 @@ test("the sidebar marks the machines hopsesh runs on", async ({ page }) => {
   await page.reload();
   const side = page.getByRole("navigation", { name: "Places" });
   await expect(side.getByRole("img", { name: "hopsesh 0.6.1, receiving sessions" })).toBeVisible({ timeout: 30_000 });
-  const mb = side.getByRole("button", { name: /roee-macbook/ });
+  const mb = side.getByRole("button", { name: /sam-macbook/ });
   await expect(mb.getByRole("img", { name: "hopsesh 0.5.0, not receiving sessions · 0.6.1 is the newest" })).toBeVisible();
   await expect(mb.locator(".hop-mark.off")).toBeVisible();
   await expect(mb.locator(".hop-behind")).toHaveText("↑");
@@ -76,19 +76,21 @@ test("Settings › Machines shows one machine, everything about it", async ({ pa
   const list = page.getByRole("listbox", { name: "Machines" });
   // This machine is first, named for its system (This Mac, This PC, This computer).
   await expect(list.getByRole("option").first()).toContainText("1 to do");
-  await expect(list.getByRole("option", { name: /roee-macbook/ })).toContainText("2 to do");
+  await expect(list.getByRole("option", { name: /sam-macbook/ })).toContainText("2 to do");
   await expect(list.getByRole("option", { name: /nas/ })).toContainText("SSH only");
-  await expect(page.getByRole("status").filter({ hasText: "older hopsesh" })).toContainText("roee-macbook (0.5.0)");
-  await list.getByRole("option", { name: /roee-macbook/ }).click();
-  await expect(list.getByRole("option", { name: /roee-macbook/ })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("status").filter({ hasText: "older hopsesh" })).toContainText("sam-macbook (0.5.0)");
+  await list.getByRole("option", { name: /sam-macbook/ }).click();
+  await expect(list.getByRole("option", { name: /sam-macbook/ })).toHaveAttribute("aria-selected", "true");
   const detail = page.locator(".mdetail");
-  await expect(detail.getByRole("heading", { name: "roee-macbook" })).toBeVisible();
-  await expect(detail.locator(".mnext")).toContainText("Up next · 2 of 7 left");
-  await expect(detail.locator(".mnext")).toContainText("Claude Code skill");
+  await expect(detail.getByRole("heading", { name: "sam-macbook" })).toBeVisible();
+  await expect(detail.locator(".mnext")).toContainText("Up next · 2");
+  // Every agent folder's hook and skill are one line, set up in one step.
+  await expect(detail.locator(".mnext")).toContainText("Hooks and skill");
+  await expect(detail.locator(".mnext")).toContainText("1 of 2 agent folders need the skill");
   await expect(detail).toContainText("nobody is logged in there");
   await page.screenshot({ path: testInfo.outputPath("settings-machines.png"), fullPage: true });
   await detail.locator(".mnext").getByRole("button", { name: "Update to 0.6.1" }).click();
-  await expect(page.locator("#dlg").getByRole("heading", { name: "Update hopsesh on roee-macbook" })).toBeVisible();
+  await expect(page.locator("#dlg").getByRole("heading", { name: "Update hopsesh on sam-macbook" })).toBeVisible();
   await page.locator("#dlg").getByRole("button", { name: "Not now" }).click();
   await list.getByRole("option", { name: /nas/ }).click();
   await expect(detail.locator(".mnext")).toContainText("not installed");
@@ -98,32 +100,25 @@ test("Settings › Machines shows one machine, everything about it", async ({ pa
   await expect(page.getByRole("tab", { name: "Machines", exact: true })).toHaveAttribute("aria-selected", "true");
 });
 
-// Settings › Hooks & skills: one component on every machine. Columns per agent folder,
-// a fix per column and for a selection, progress in the cells, and an honest summary:
-// a machine whose hopsesh isn't in a login session waits.
-test("Settings › Hooks & skills fixes a component on every machine", async ({ page }, testInfo) => {
+// This machine's page holds its command, skill and protection hooks (there is no separate
+// Hooks & skills, Skill or Command line tab), and its agent folders' hooks and skill are
+// set up from Up next in one step.
+test("This Mac's page sets up its hooks and skill, and holds its command and skill", async ({ page }, testInfo) => {
   const calls = await fixtures(page);
   await menu(page, "settings");
-  await page.getByRole("tab", { name: "Hooks & skills", exact: true }).click();
-  const table = page.locator(".covtable");
-  await expect(table.getByRole("columnheader", { name: "Claude Code · work" })).toBeVisible();
-  await expect(table.locator('tr[data-machine="roee-macbook"]')).toContainText("trust checked at login");
-  await expect(table.locator('tr[data-machine="nas"]')).toContainText("Needs hopsesh first.");
-  await expect(page.getByRole("button", { name: "Fix everything (1)" })).toBeEnabled();
-  await page.screenshot({ path: testInfo.outputPath("hooks-coverage.png"), fullPage: true });
-  // roee-macbook isn't in a login session: it can't be selected; this machine can.
-  await expect(table.getByRole("checkbox", { name: "Select roee-macbook" })).toBeDisabled();
-  await table.getByRole("checkbox", { name: /^Select (?!every)/ }).first().check();
-  const bar = page.getByRole("region", { name: "Selection actions" });
-  await expect(bar).toContainText("1 machine selected");
-  await bar.getByRole("button", { name: "Install and update hooks and skill" }).click();
+  const tabs = page.getByRole("tablist", { name: "Settings" });
+  for (const gone of ["Hooks & skills", "Skill", "Command line"]) await expect(tabs.getByRole("tab", { name: gone, exact: true })).toHaveCount(0);
+  await tabs.getByRole("tab", { name: "Machines", exact: true }).click();
+  const detail = page.locator(".mdetail");
+  await expect(detail.locator(".mnext")).toContainText("1 of 3 agent folders need the skill");
+  await expect(detail.getByRole("heading", { name: "Command, skill and hooks" })).toBeVisible();
+  await expect(detail).toContainText("The hopsesh command");
+  await expect(detail).toContainText("The hopsesh skill");
+  await expect(detail).toContainText("Protection hooks");
+  await page.screenshot({ path: testInfo.outputPath("settings-this-mac.png"), fullPage: true });
+  await detail.locator(".mnext").getByRole("button", { name: "Set up" }).click();
   await expect.poll(() => calls.filter((c) => c.m === "SetUpProtection").length).toBe(1);
   expect(calls.find((c) => c.m === "SetUpProtection")!.a[0]).toBe("");
-  await expect(page.getByRole("status").filter({ hasText: "Set up on" })).toContainText("Set up on 1 of 1 machine.");
-  // A machine name opens it in Machines.
-  await table.getByRole("button", { name: "roee-macbook" }).click();
-  await expect(page.getByRole("tab", { name: "Machines", exact: true })).toHaveAttribute("aria-selected", "true");
-  await expect(page.locator(".mdetail").getByRole("heading", { name: "roee-macbook" })).toBeVisible();
 });
 
 // The plan sheet keeps "Block the original" in view but off when the machine the session
@@ -134,8 +129,8 @@ test("the plan keeps Block the original off, with why, when the source can't blo
     const r = route.request().postDataJSON();
     if (r.m !== "Plan") return route.continue();
     const res = await route.fetch(), body = await res.json();
-    Object.assign(body.result, { sourceHost: "roee-macbook", cannotProtect: ["hopsesh there is 0.5.0; blocking needs 0.6.0 or newer"],
-      warnings: [...(body.result.warnings || []), "the original on roee-macbook can't be blocked or warned: hopsesh there is 0.5.0; blocking needs 0.6.0 or newer; nothing stops it from being continued there too"] });
+    Object.assign(body.result, { sourceHost: "sam-macbook", cannotProtect: ["hopsesh there is 0.5.0; blocking needs 0.6.0 or newer"],
+      warnings: [...(body.result.warnings || []), "the original on sam-macbook can't be blocked or warned: hopsesh there is 0.5.0; blocking needs 0.6.0 or newer; nothing stops it from being continued there too"] });
     await route.fulfill({ json: body });
   });
   await row(page, "Find the codeword").click();
@@ -149,7 +144,7 @@ test("the plan keeps Block the original off, with why, when the source can't blo
   await box.press("Space");
   await expect(box).not.toBeChecked();
   await expect(sheet.locator(".guard-why")).toContainText("blocking needs 0.6.0 or newer");
-  await expect(sheet.locator(".guard-why").getByRole("button", { name: "Update roee-macbook…" })).toBeVisible();
+  await expect(sheet.locator(".guard-why").getByRole("button", { name: "Update sam-macbook…" })).toBeVisible();
   await expect(sheet).not.toContainText("can't be blocked or warned: hopsesh there");
   await sheet.locator(".guard-why").scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("plan-guard.png") });
