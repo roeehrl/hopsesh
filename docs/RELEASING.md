@@ -80,9 +80,12 @@ Integrations → App Store Connect API.
 to `roeehrl/homebrew-tap`, `roeehrl/scoop-bucket` and `roeehrl/winget-pkgs`, the fork of
 `microsoft/winget-pkgs`) lets `.github/workflows/packages.yml` publish each release once it
 is published: the Homebrew formula `hopsesh` and cask `hopsesh-app`, the Scoop manifest, and a
-winget pull request for `roeehrl.hopsesh`. Without it those steps are skipped. The winget step
-updates a package already there, so the first version went in by hand (a pull request with
-its three manifests). Run the workflow by hand for a release that is already out.
+winget pull request for `roeehrl.hopsesh`. Without it (or with an expired one) the run fails.
+Every Monday it runs again for the latest release: it rewrites the tap and the bucket (a
+no-op when they are current) and fails when winget still lacks a release older than a week,
+so a missed release shows up as a failed run, not as silent drift. The winget step updates a
+package already there, so the first version went in by hand (a pull request with its three
+manifests). Run the workflow by hand for any release: Actions › packages › Run workflow.
 
 ## Cutting a release
 

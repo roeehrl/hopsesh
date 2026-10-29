@@ -5,46 +5,72 @@ name: packages
 # roeehrl/homebrew-tap, the Scoop manifest to roeehrl/scoop-bucket, and a pull request to
 # microsoft/winget-pkgs (roeehrl.hopsesh) from the roeehrl fork. It runs only once the
 # release is complete: the macOS files and checksums.txt come from scripts/release-sign.sh
-# after the tag's draft is built. Without the TAP_GITHUB_TOKEN secret (a token that may push
-# to the tap and bucket and to the roeehrl fork of winget-pkgs) every step is skipped.
-# Run it by hand for a release that is already out: Actions › packages › Run workflow.
+# after the tag's draft is built.
+#
+# They never drift quietly: without the TAP_GITHUB_TOKEN secret (or with an expired one) the
+# run fails, and every Monday it runs for the latest release again. Homebrew and Scoop are
+# rewritten (nothing changes when they are current, so the run is a check), and the run fails
+# when winget still lacks a release older than a week. Run it by hand for any release:
+# Actions › packages › Run workflow.
 
 on:
   release:
     types: [published]
+  schedule:
+    - cron: "17 6 * * 1"
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag, e.g. v0.6.4"
-        required: true
+        description: "Release tag, e.g. v0.6.4 (empty: the latest release)"
+        required: false
 
 permissions:
   contents: read
 
 jobs:
-  tap-and-bucket:
+  resolve:
     if: ${{ !github.event.release.prerelease }}
     runs-on: ubuntu-24.04
-    env:
-      TAG: ${{ github.event.release.tag_name || inputs.tag }}
-      HAS_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN != '' }}
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      published: ${{ steps.tag.outputs.published }}
     steps:
-      - name: Without TAP_GITHUB_TOKEN, nothing is published
-        if: env.HAS_TOKEN != 'true'
-        run: echo "::notice::TAP_GITHUB_TOKEN is not set; Homebrew and Scoop are skipped"
+      - id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          set -eu
+          [ -n "$TAG" ] || TAG=$(gh release view -R "$GITHUB_REPOSITORY" --json tagName -q .tagName)
+          published=$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json publishedAt -q .publishedAt)
+          echo "tag=$TAG" >>"$GITHUB_OUTPUT"
+          echo "published=$published" >>"$GITHUB_OUTPUT"
+          echo "Release $TAG, published $published"
+
+  tap-and-bucket:
+    needs: resolve
+    runs-on: ubuntu-24.04
+    env:
+      TAG: ${{ needs.resolve.outputs.tag }}
+    steps:
+      - name: TAP_GITHUB_TOKEN is required
+        env:
+          TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::TAP_GITHUB_TOKEN is not set: Homebrew, Scoop and winget don't get $TAG (docs/RELEASING.md)"
+            exit 1
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: env.HAS_TOKEN == 'true'
         with:
           persist-credentials: false
       - name: Write the formula, cask and manifest
-        if: env.HAS_TOKEN == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p checksums.txt -D "$RUNNER_TEMP"
           scripts/package-manifests.sh "${TAG#v}" "$RUNNER_TEMP/checksums.txt" "$RUNNER_TEMP/out"
       - name: Push to roeehrl/homebrew-tap and roeehrl/scoop-bucket
-        if: env.HAS_TOKEN == 'true'
         env:
           TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
         run: |
@@ -55,29 +81,49 @@ jobs:
             for d in "$@"; do mkdir -p "$RUNNER_TEMP/$repo/$d" && cp "$RUNNER_TEMP/out/$d/"* "$RUNNER_TEMP/$repo/$d/"; done
             cd "$RUNNER_TEMP/$repo"
             git add -A
-            if git diff --cached --quiet; then echo "$repo already has $TAG"; return; fi
+            if git diff --cached --quiet; then echo "$repo is current ($TAG)"; return; fi
             git -c user.name=roeehrl -c user.email=82368940+roeehrl@users.noreply.github.com commit -qm "hopsesh ${TAG#v}"
             git push -q origin HEAD
+            echo "::notice::$repo now has $TAG"
           }
           publish homebrew-tap Formula Casks
           publish scoop-bucket bucket
 
   winget:
-    if: ${{ !github.event.release.prerelease }}
+    needs: resolve
     runs-on: windows-2025
     env:
-      HAS_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN != '' }}
+      TAG: ${{ needs.resolve.outputs.tag }}
+      PUBLISHED: ${{ needs.resolve.outputs.published }}
     steps:
-      - name: Without TAP_GITHUB_TOKEN, nothing is published
-        if: env.HAS_TOKEN != 'true'
-        run: echo "::notice::TAP_GITHUB_TOKEN is not set; winget is skipped"
-      # Updates a package already in winget-pkgs; the first version was submitted by hand
-      # (docs/RELEASING.md).
+      - name: TAP_GITHUB_TOKEN is required
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then echo "::error::TAP_GITHUB_TOKEN is not set: winget doesn't get $TAG"; exit 1; fi
+      # A release opens its pull request; the weekly run only checks that winget has it.
+      # The first version went in by hand (docs/RELEASING.md); this updates it after that.
       - uses: vedantmgoyal9/winget-releaser@b7370d4d152efdce803a26cc6ca9eee58cb2ad54 # v2
-        if: env.HAS_TOKEN == 'true'
+        if: github.event_name != 'schedule'
         with:
           identifier: roeehrl.hopsesh
-          release-tag: ${{ github.event.release.tag_name || inputs.tag }}
+          release-tag: ${{ needs.resolve.outputs.tag }}
           installers-regex: '^hopsesh_[0-9.]+_windows_(amd64|arm64)\.zip$'
           token: ${{ secrets.TAP_GITHUB_TOKEN }}
           fork-user: roeehrl
+      - name: winget has the release, or it is less than a week old
+        if: github.event_name == 'schedule'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          v=${TAG#v}
+          if gh api "repos/microsoft/winget-pkgs/contents/manifests/r/roeehrl/hopsesh/$v" --silent 2>/dev/null; then
+            echo "winget has $v"; exit 0
+          fi
+          age=$(( ($(date -u +%s) - $(date -u -d "$PUBLISHED" +%s)) / 86400 ))
+          if [ "$age" -lt 7 ]; then echo "::notice::winget doesn't have $v yet ($age days since the release)"; exit 0; fi
+          echo "::error::winget still lacks $v, $age days after the release: check the roeehrl.hopsesh pull request on microsoft/winget-pkgs, or run this workflow for $TAG"
+          exit 1
