@@ -489,8 +489,12 @@ type TerminalRequest struct {
 	// AtScreen: a sign-in done at that machine's own screen (its browser opens there);
 	// otherwise it prints a link and a code to sign in from this machine's browser.
 	AtScreen bool `json:"atScreen,omitempty"`
-	Cols     int  `json:"cols,omitempty"`
-	Rows     int  `json:"rows,omitempty"`
+	// Anyway: resume a copy a move left behind there, which hopsesh there otherwise
+	// refuses. The user confirmed it; hopsesh there releases that copy first. An older
+	// hopsesh ignores it (it never refused).
+	Anyway bool `json:"anyway,omitempty"`
+	Cols   int  `json:"cols,omitempty"`
+	Rows   int  `json:"rows,omitempty"`
 }
 
 // Terminal is a terminal hopsesh runs there, and what runs in it.

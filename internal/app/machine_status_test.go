@@ -50,7 +50,7 @@ func TestNewestIsTheBaseline(t *testing.T) {
 }
 
 // A session moved from a machine blocks its original there only with a hopsesh that reads
-// where it went and that agent folder's hook in place.
+// where it went and that agent folder's own hook running.
 func TestCanBlock(t *testing.T) {
 	ok := Check{State: CheckOK, Text: "installed"}
 	base := MachineStatus{Version: "0.6.1", DetailsAt: time.Now(), Agents: []AgentSetup{
@@ -68,8 +68,8 @@ func TestCanBlock(t *testing.T) {
 	}{
 		{"ready", base, "claude", "p-default", true, ""},
 		{"that folder has no hook", base, "claude", "p-work", false, "isn't installed"},
-		{"unknown profile falls back to the default folder", base, "claude", "elsewhere", true, ""},
-		{"a hook waiting for approval still blocks once approved; it is there", base, "codex", "x", true, ""},
+		{"another folder's hook says nothing about this one", base, "claude", "elsewhere", false, "wasn't found"},
+		{"a hook waiting for approval doesn't block yet", base, "codex", "x", false, "approve in Codex"},
 		{"too old to read lineage/6", func() MachineStatus { s := base; s.Version = "0.5.0"; return s }(), "claude", "p-default", false, "needs " + MinBlockVersion},
 		{"no hopsesh", MachineStatus{}, "claude", "", false, "isn't installed there"},
 		{"hooks never read", MachineStatus{Version: "0.6.1"}, "claude", "", false, "haven't been checked"},
@@ -83,6 +83,72 @@ func TestCanBlock(t *testing.T) {
 	}
 	if MinBlockVersion != "0.6.0" {
 		t.Fatalf("blocking needs the first hopsesh that reads lineage/6, not %s", MinBlockVersion)
+	}
+}
+
+// Whether a copy left on a machine is protected is that agent folder's own hook, as last
+// read: the default folder's hook never vouches for another folder, a reading too old or
+// never made is unknown (not a yes), and Codex's approval can't be told over SSH.
+func TestOriginalProtection(t *testing.T) {
+	a := &App{}
+	m := &Machine{Name: "roee-macbook", Status: StatusOK, Hopsesh: "0.6.4", Presence: PresenceLogin}
+	read := statusDetails{Version: "0.6.4", At: time.Now(), Agents: []AgentSetup{
+		{Agent: "claude", Name: "Claude Code", Profile: "0d5e", Hook: Check{State: CheckOK, Text: "installed"}},
+		{Agent: "claude", Name: "Claude Code", Profile: "9ed8", ProfileLabel: "claude code personal", Hook: Check{State: CheckOff, Text: "not installed", Fix: FixHooks}},
+		{Agent: "claude", Name: "Claude Code", Profile: "9f5c", ProfileLabel: "Claude Code default", Hook: Check{State: CheckOff, Text: "not installed", Fix: FixHooks}},
+		{Agent: "codex", Name: "Codex", Profile: "7ae2", Hook: Check{State: CheckOK, Text: "installed · trust checked at login"}},
+	}}
+	s := a.machineStatus(m, read, true)
+	cases := []struct {
+		name, profile    string
+		id               agent.ID
+		verdict, fix, in string
+	}{
+		{"the copy's folder has no hook, though the default one has", "9f5c", "claude", ProtectedNo, FixHooks, "isn't installed"},
+		{"the default folder's own copy", "0d5e", "claude", ProtectedYes, "", ""},
+		{"a folder that isn't there", "beef", "claude", ProtectedUnknown, "", "wasn't found"},
+		{"Codex's trust over SSH", "7ae2", "codex", ProtectedUnknown, FixServe, "over SSH"},
+	}
+	for _, c := range cases {
+		v, why, fix := s.OriginalProtection(c.id, c.profile)
+		if v != c.verdict || fix != c.fix || !strings.Contains(why, c.in) {
+			t.Errorf("%s: %s %q %s", c.name, v, why, fix)
+		}
+	}
+	// Stale: an installed hook last seen long ago is unknown; a missing one stays missing.
+	read.At = time.Now().Add(-2 * statusStale)
+	s = a.machineStatus(m, read, true)
+	if v, why, _ := s.OriginalProtection("claude", "0d5e"); v != ProtectedUnknown || !strings.Contains(why, "last seen like this") {
+		t.Errorf("stale installed hook: %s %q", v, why)
+	}
+	if v, _, _ := s.OriginalProtection("claude", "9f5c"); v != ProtectedNo {
+		t.Errorf("stale missing hook: %s", v)
+	}
+	// Never read: unknown, whatever the folders.
+	s = a.machineStatus(m, statusDetails{}, false)
+	if v, why, _ := s.OriginalProtection("claude", "9f5c"); v != ProtectedUnknown || !strings.Contains(why, "haven't been checked") {
+		t.Errorf("never read: %s %q", v, why)
+	}
+	// Not reached, hopsesh not known there: unknown, not "no hopsesh".
+	s = a.machineStatus(&Machine{Name: "away", Status: StatusError}, statusDetails{}, false)
+	if v, _, fix := s.OriginalProtection("claude", ""); v != ProtectedUnknown || fix != "" {
+		t.Errorf("not reached: %s %s", v, fix)
+	}
+}
+
+// A hook turned off reads as turned off, whether the agent says why or protection of
+// originals is off in hopsesh there (it gives no reason).
+func TestHookTurnedOffIsNotOK(t *testing.T) {
+	for _, h := range []MovementHookStatus{
+		{Agent: "claude", Supported: true, Installed: true},
+		{Agent: "claude", Supported: true, Installed: true, Reason: "disableAllHooks is set"},
+	} {
+		if c := hookCheck(h); c.State != CheckWarn || c.Reason == "" {
+			t.Errorf("%+v: %+v", h, c)
+		}
+	}
+	if c := hookCheck(MovementHookStatus{Agent: "claude", Supported: true, Installed: true, Enabled: true}); c.State != CheckOK {
+		t.Fatalf("enabled: %+v", c)
 	}
 }
 

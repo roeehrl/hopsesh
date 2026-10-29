@@ -119,6 +119,9 @@ func NewApp(reg *registry.Registry, options ...Option) *App {
 	a.core.Passwords = a.passwordFor
 	a.core.Steps = a.runStep
 	a.attachTerminal()
+	guardReads.mu.Lock()
+	guardReads.window = a // shown the copies' protection when a reading of hooks ends
+	guardReads.mu.Unlock()
 	return a
 }
 
@@ -589,6 +592,11 @@ func (a *App) Shutdown() {
 		a.rememberTabs(false)
 		a.Terms.CloseAll()
 	}
+	guardReads.mu.Lock()
+	if guardReads.window == a {
+		guardReads.window = nil
+	}
+	guardReads.mu.Unlock()
 	a.scanMu.Lock()
 	defer a.scanMu.Unlock()
 	a.mu.Lock()

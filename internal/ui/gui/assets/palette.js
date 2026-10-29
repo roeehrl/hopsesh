@@ -4,6 +4,7 @@ import { pickHandoff } from "./handoff.js";
 import { actionsFor, statusOf, render as renderSessions, reveal, pasteDialog, showEntry, listCommand } from "./sessions.js";
 import { list } from "./listview.js";
 import { model } from "./actions.js";
+import { isOldCopy } from "./guard.js";
 import { undoLast } from "./activity.js";
 import { showTerminal, openShell } from "./term.js";
 
@@ -72,11 +73,11 @@ async function toggleReader() {
 }
 
 // handOff is "Hand off to…" for the selected session (or the newest one), when it can go
-// to a cloud.
+// to a cloud; never for a copy a move left behind.
 function handOff() {
   const sel = selected();
-  const e = sel && !sel.cloud ? sel : entries().filter((x) => !x.cloud).sort((a, b) => (b.lastActive > a.lastActive ? 1 : -1))[0];
-  if (!e || !(e.handoff || []).some((t) => cloudOf(t.cloud)?.allowed)) return [];
+  const e = sel && !sel.cloud ? sel : entries().filter((x) => !x.cloud && !isOldCopy(x)).sort((a, b) => (b.lastActive > a.lastActive ? 1 : -1))[0];
+  if (!e || isOldCopy(e) || !(e.handoff || []).some((t) => cloudOf(t.cloud)?.allowed)) return [];
   return [{ label: "Hand off to…", sub: `“${e.title}”`, hint: "Pick a cloud", run: () => pickHandoff(e) }];
 }
 
@@ -105,10 +106,12 @@ function sessionItem(e, group) {
 function build(q) {
   const ws = words(q);
   const all = entries();
+  // A copy a move left behind comes after the copies that can be continued.
+  const away = (a, b) => isOldCopy(a) - isOldCopy(b);
   let found = ws.length
     ? all.filter((e) => matches([e.title, e.lastPrompt, e.group.name, e.machine, e.agentName, e.branch, e.cwd].join(" "), ws))
-      .sort((a, b) => (matches(b.title, ws) - matches(a.title, ws)) || (b.lastActive > a.lastActive ? 1 : -1))
-    : all.filter((e) => e.needs).concat(all.filter((e) => !e.needs).sort((a, b) => (b.lastActive > a.lastActive ? 1 : -1))).slice(0, 6);
+      .sort((a, b) => (matches(b.title, ws) - matches(a.title, ws)) || away(a, b) || (b.lastActive > a.lastActive ? 1 : -1))
+    : all.filter((e) => e.needs && !isOldCopy(e)).concat(all.filter((e) => !e.needs || isOldCopy(e)).sort((a, b) => away(a, b) || (b.lastActive > a.lastActive ? 1 : -1))).slice(0, 6);
   const out = [];
   if (found.length) {
     const top = found[0];

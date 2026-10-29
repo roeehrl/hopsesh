@@ -50,6 +50,14 @@ type MovementNotice struct {
 	Profile   string    `json:"profile"`
 	CheckedAt time.Time `json:"checkedAt"`
 	Delivery  string    `json:"delivery"`
+	// At is when the move left this copy.
+	At time.Time `json:"at,omitzero"`
+	// SourceChanged: this copy gained work after the move (its transcript grew past where
+	// the move read it, and it was active well after the move). Its listing alone tells,
+	// so it is known for a copy on another machine too, which a scan never reads whole.
+	// SourceChangedAt is its last activity.
+	SourceChanged   bool      `json:"sourceChanged,omitempty"`
+	SourceChangedAt time.Time `json:"sourceChangedAt,omitzero"`
 }
 
 type movementObservation struct {
@@ -329,7 +337,12 @@ func (a *App) movementNotice(g *lineage.Manifest, id lineage.ReplicaID, observed
 // work there (prepared, continued, diverged or forked), from lineage and observation.
 func (a *App) describeDeparture(g *lineage.Manifest, id lineage.ReplicaID, hop lineage.Hop, observed map[lineage.ReplicaID]movementObservation) *MovementNotice {
 	dst := g.Replica(hop.To)
-	n := &MovementNotice{Operation: hop.ID, Status: "prepared", Machine: dst.Location, Agent: dst.Key.Agent, AgentName: a.agentName(dst.Key.Agent), Key: dst.Key.String(), Profile: dst.Key.Profile, Delivery: "pending"}
+	n := &MovementNotice{Operation: hop.ID, Status: "prepared", Machine: dst.Location, Agent: dst.Key.Agent, AgentName: a.agentName(dst.Key.Agent), Key: dst.Key.String(), Profile: dst.Key.Profile, Delivery: "pending", At: hop.Time}
+	if source := observed[id].entry; source != nil && !hop.Fork {
+		if at, ok := sourceDrift(g, id, hop, *source); ok {
+			n.SourceChanged, n.SourceChangedAt = true, at
+		}
+	}
 	if _, cl, ok := a.cloudModule(dst.Location); ok {
 		n.Cloud = cl.Title
 	}
@@ -373,6 +386,59 @@ func (a *App) describeDeparture(g *lineage.Manifest, id lineage.ReplicaID, hop l
 		n.Text += " Last checked " + n.CheckedAt.UTC().Format(time.RFC3339) + "."
 	}
 	return n
+}
+
+// driftAfter is how long after a move a copy left behind must still have been active for
+// its growth to count as work: the move's own last writes and a reply to its notice land
+// within it.
+const driftAfter = time.Minute
+
+// sourceDrift reports whether e, replica id's copy, gained work after hop took the session
+// away from it, and when it was last active: its transcript is longer than the byte offset
+// the move read it to, and it was active more than driftAfter after the move. Only the
+// listing is needed (no transcript is read). The offset is the byte end of the agent's
+// own transcript file for Claude Code and Codex (a compressed Codex rollout is listed at
+// its uncompressed size, as it is read); agents that record none, saved rows and a
+// departure read from another copy's file say nothing.
+func sourceDrift(g *lineage.Manifest, id lineage.ReplicaID, hop lineage.Hop, e Entry) (time.Time, bool) {
+	if e.Cached || e.Session.Size <= 0 {
+		return time.Time{}, false
+	}
+	hop, ok := leftThisCopy(g, id, hop)
+	if !ok || hop.Time.IsZero() {
+		return time.Time{}, false
+	}
+	st := g.State(hop.Source)
+	if st.Offset <= 0 || st.Replica != hop.From {
+		return time.Time{}, false
+	}
+	last := e.Session.LastActivity
+	if e.Session.Size > st.Offset && last.Sub(hop.Time) > driftAfter {
+		return last, true
+	}
+	return time.Time{}, false
+}
+
+// leftThisCopy is the move that left id's own transcript: the departure itself, or, when
+// the session moved on again from the copy it went to, the latest move away from id's
+// file (the same session on the same machine) on its line.
+func leftThisCopy(g *lineage.Manifest, id lineage.ReplicaID, hop lineage.Hop) (lineage.Hop, bool) {
+	me := g.Replica(id)
+	same := func(r lineage.ReplicaID) bool {
+		x := g.Replica(r)
+		return x.ID != "" && x.Key == me.Key && x.Endpoint == me.Endpoint
+	}
+	if same(hop.From) {
+		return hop, true
+	}
+	var out lineage.Hop
+	found := false
+	for _, h := range g.ActiveHops() {
+		if !h.Fork && h.Line == me.Line && same(h.From) && (!found || h.Time.After(out.Time)) {
+			out, found = h, true
+		}
+	}
+	return out, found
 }
 
 // Imported projections, title records and delivery bookkeeping do not establish
@@ -672,7 +738,10 @@ func (a *App) retainMovement(e *Entry) {
 		return
 	}
 	if !previous.Notice.CheckedAt.IsZero() {
-		e.Movement = previous.Notice
+		// The destination's last check; this copy's own growth is read from it now.
+		kept := *previous.Notice
+		kept.At, kept.SourceChanged, kept.SourceChangedAt = e.Movement.At, e.Movement.SourceChanged, e.Movement.SourceChangedAt
+		e.Movement = &kept
 	}
 }
 

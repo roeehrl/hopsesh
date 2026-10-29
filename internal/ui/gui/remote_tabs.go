@@ -26,6 +26,9 @@ func (a *App) ContinueOnMachine(machine, key string) (*OpenedDTO, error) {
 	if machine == app.LocalName() {
 		return nil, errors.New("the session is on this machine; resume it here")
 	}
+	if err := refuseOldCopy(a.snapshot(), e); err != nil {
+		return nil, err
+	}
 	if a.Terms != nil {
 		if id := a.Terms.remoteTab(machine, key); id != "" {
 			a.Terms.Focus(id)
@@ -36,12 +39,58 @@ func (a *App) ContinueOnMachine(machine, key string) (*OpenedDTO, error) {
 	return a.remoteTab(machine, req, TabMeta{Kind: TabRemote, Agent: e.AgentName, Machine: machine, Key: key}, titleOf(e.Session)+" · "+machine)
 }
 
+// ContinueOriginalAnyway continues on its machine a copy a move left there, which the
+// user confirmed: hopsesh there releases that copy (its hook stops refusing prompts) and
+// runs it, and the release is kept here too, so the copy shows as released and its tab
+// opens again after a restart. The copies then differ: moving back needs a comparison.
+func (a *App) ContinueOriginalAnyway(machine, key string) (*OpenedDTO, error) {
+	a.mu.Lock()
+	e, err := a.find(machine, key)
+	a.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	if machine == app.LocalName() {
+		return nil, errors.New("the session is on this machine; remove its block and resume it here")
+	}
+	core := a.snapshot()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	// Asked even when a tab shows it already: hopsesh there releases it then too.
+	req := peer.TerminalRequest{Kind: peer.TerminalResume, Agent: e.Agent, Profile: e.Session.Key.Profile, Session: string(e.Session.Key.Session), Anyway: true}
+	t, err := core.RemoteTerminal(ctx, machine, req)
+	if err != nil {
+		return nil, err
+	}
+	if core.OldCopy(e) {
+		if err := core.ReleaseOriginal(e.Session.Key, e.Departure.Operation); err != nil {
+			return nil, err
+		}
+	}
+	if a.Terms != nil {
+		if id := a.Terms.remoteTab(machine, key); id != "" {
+			a.Terms.Focus(id)
+			return &OpenedDTO{Where: WhereShown, Tab: id}, nil
+		}
+	}
+	return a.attachTab(machine, t, TabMeta{Kind: TabRemote, Agent: e.AgentName, Machine: machine, Key: key}, titleOf(e.Session)+" · "+machine)
+}
+
 // OpenOnMachine continues a session on another machine that is not a row yet (one just
-// sent there), by its key there, in a tab here.
+// sent there), by its key there, in a tab here. A copy a move left there is refused, as
+// ContinueOnMachine refuses it.
 func (a *App) OpenOnMachine(machine, key string) (*OpenedDTO, error) {
 	k, err := agent.ParseKey(key)
 	if err != nil {
 		return nil, err
+	}
+	a.mu.Lock()
+	e, ferr := a.find(machine, key)
+	a.mu.Unlock()
+	if ferr == nil {
+		if err := refuseOldCopy(a.snapshot(), e); err != nil {
+			return nil, err
+		}
 	}
 	name := string(k.Agent)
 	if m, ok := a.snapshot().Module(k.Agent); ok {

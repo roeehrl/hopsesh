@@ -16,9 +16,15 @@ export async function menu(page: Page, cmd: string) {
   await page.evaluate((c) => (window as any).__emit("hopsesh:menu", c), cmd);
 }
 
-// row is the session row with exactly this title.
+// row is the session row with exactly this title (not an old copy a move left behind,
+// which shares its title: oldRow).
 export const row = (page: Page, title: string) =>
-  page.locator(".row:not(.subrow)").filter({ has: page.locator(".t").getByText(title, { exact: true }) });
+  page.locator(".row:not(.moved-away)").filter({ has: page.locator(".t").getByText(title, { exact: true }) });
+
+// oldRow is the row of an old copy with this title: the copy a move left behind, a row
+// of its own, shown only where its machine is.
+export const oldRow = (page: Page, title: string) =>
+  page.locator(".row.moved-away").filter({ has: page.locator(".t").getByText(title, { exact: true }) });
 
 // turnOnCloud turns a cloud on the way the window offers it: the sidebar's "Turn on a
 // cloud…" opens Machines at its clouds, the cloud's switch, then back to the sessions
@@ -64,6 +70,6 @@ export const agentRow = (page: Page, title: string, agent: string) =>
   row(page, title).filter({ has: page.locator(`.r-ic img[alt="${agent}"], .r-ic [title="${agent}"]`) });
 
 // roleRow is the session row with exactly this title whose role chip names this role
-// ("Moved to Codex", "Moved from Claude Code", "Moved back from …", "Unblocked", "Both changed", …).
+// ("Moved from Claude Code", "Moved back from …", …).
 export const roleRow = (page: Page, title: string, role: string) =>
   row(page, title).filter({ has: page.locator(".role-chip", { hasText: role }) });

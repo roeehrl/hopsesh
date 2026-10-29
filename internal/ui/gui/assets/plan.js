@@ -6,6 +6,7 @@ import { undo } from "./activity.js";
 import { openResult, where as opensIn } from "./term.js";
 import { sessionExitHelp } from "./session-exit.js";
 import { conflictReview } from "./conflict-review.js";
+import { heldBack, refused, isRefusal } from "./guard.js";
 
 const sheet = $("#sheet");
 let cur = null; // { e, target, sendTo, opts, plan, busy, applying }
@@ -20,6 +21,8 @@ function defaults() {
 // planFor opens the sheet for a session: target "" keeps its agent, sendTo pushes it;
 // codeOnly brings a cloud session's branch alone.
 export async function planFor(e, { target = "", sendTo = "", codeOnly = false, targetProfile = "", targetSession = "", bounded = false, fork = false, returnCandidate = null, launch = "" }) {
+  // Nothing is planned from a copy a move left behind: that would make a third copy.
+  if (heldBack(e)) return;
   cur = { e, target, sendTo, opts: Object.assign(defaults(), { operationId: crypto.randomUUID() }, { codeOnly, targetProfile, targetSession, bounded, fork, newReplica: fork || returnCandidate?.status === "missing", conflict: "" }), returnCandidate, plan: null, busy: false, applying: false };
   fill(sheet, h("div", { class: "sheet-in" }, h("div", { class: "loading", role: "status", style: "min-height:240px" },
     sendTo ? `Asking hopsesh on ${sendTo} to plan it…` : "Working out the plan…")));
@@ -40,6 +43,7 @@ export async function planFor(e, { target = "", sendTo = "", codeOnly = false, t
 // as in each, what carries over and what becomes of the copy left behind; the chosen one
 // opens the plan sheet.
 export async function chooseTarget(e) {
+  if (heldBack(e)) return;
   fill(sheet, h("div", { class: "sheet-in" }, h("div", { class: "loading", role: "status", style: "min-height:200px" }, "Looking at where it can continue…")));
   if (!sheet.open) sheet.showModal();
   let ts;
@@ -86,6 +90,7 @@ export async function chooseTarget(e) {
 // bringLive is bringing a session that is working on another machine with hopsesh running:
 // wait until its turn ends (then bring it), or join it there instead of copying.
 export function bringLive(e) {
+  if (heldBack(e)) return;
   let waiting = false;
   const status = h("span", { class: "muted", role: "status", style: "font-size:12.5px" });
   const wait = async () => {
@@ -154,6 +159,7 @@ if(p.sourceEntry && c.e) c.e={...c.e,...p.sourceEntry};
   } catch (err) {
     if (cur !== c || c.revision !== revision) return;
     c.busy = false;
+    if (c.e && isRefusal(err)) { sheet.close(); refused(err, c.e); return; }
     if (cur === c) problem(errText(err), { label: "Try again", run: replan });
   }
 }

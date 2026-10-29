@@ -51,6 +51,9 @@ func (a *App) PlanChangeDir(machine, key, dir string, otherRepo, stopLocal bool)
 	if err != nil {
 		return nil, err
 	}
+	if err := refuseOldCopy(core, e); err != nil {
+		return nil, err
+	}
 	if dir == "" {
 		return nil, errors.New("choose a folder")
 	}

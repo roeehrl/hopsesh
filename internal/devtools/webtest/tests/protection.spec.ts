@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { row, details, action, roleRow } from "./helpers";
+import { row, oldRow, details, action, roleRow } from "./helpers";
 
 // The capture worlds for movement protection: /reset?protection=review (Codex has not
 // trusted hopsesh's hooks) and /reset?protection=blocked (hooks installed and trusted).
@@ -27,7 +27,7 @@ test("review: the Sessions warning asks to approve the hopsesh hooks in Codex", 
   await expect(dialog).toContainText("never approves hooks for you");
 });
 
-test("blocked: a moved original is blocked and says so", async ({ page }) => {
+test("blocked: a moved original is an old copy, blocked, and says so", async ({ page }) => {
   test.setTimeout(120_000);
   await world(page, "blocked");
   await expect(page.getByRole("status", { name: "Movement protection" })).toHaveCount(0, { timeout: 30_000 });
@@ -37,8 +37,14 @@ test("blocked: a moved original is blocked and says so", async ({ page }) => {
   await expect(page.getByRole("heading", { name: /is prepared for Codex/ })).toBeVisible({ timeout: 30_000 });
   await page.getByRole("button", { name: "Back to sessions", exact: true }).click();
   await roleRow(page, "Find the codeword", "Moved from").click();
-  const original = page.locator(".subrow").filter({hasText:"Claude Code original"});
-  await expect(original).toContainText("Moved to Codex");
+  // The original is an old copy: a row of its own at the same level, drawn right after
+  // its active copy, saying where it went and that it is blocked.
+  const original = oldRow(page, "Find the codeword");
+  await expect(original.locator(".chip.st-away")).toContainText("Moved to Codex");
+  await expect(original.locator(".chip.mark")).toContainText("Blocked", { timeout: 30_000 });
+  await expect(original).toHaveAttribute("aria-level", await roleRow(page, "Find the codeword", "Moved from").getAttribute("aria-level") || "");
+  await expect(original).toHaveAttribute("aria-label", /^Old copy of “Find the codeword” on .+, moved to Codex · Blocked$/);
+  await expect(original).not.toContainText("↳");
   await page.evaluate(async () => {
     const {list} = await import('/listview.js');
     const {render} = await import('/sessions.js');
@@ -55,9 +61,24 @@ test("blocked: a moved original is blocked and says so", async ({ page }) => {
   expect(originalBox!.y).toBeGreaterThanOrEqual(movedBox!.y + movedBox!.height);
   await roleRow(page, "Find the codeword", "Moved from").press("ArrowDown");
   await expect(original).toBeFocused();
-  await expect(details(page).locator(".ins-lineage")).toContainText("◆", { timeout: 30_000 });
-  await expect(details(page).locator(".ins-lineage")).toContainText("Blocked until you move it back");
-  await expect(details(page).getByLabel("Where it went", { exact: true })).toContainText("Blocked until you move the session back");
+  const banner = details(page).getByRole("status", { name: "Old copy", exact: true });
+  await expect(banner).toContainText("Old copy · moved to Codex", { timeout: 30_000 });
+  await expect(banner).toContainText(/Blocked on this (Mac|PC|computer): new prompts in this copy are refused\./);
+  // The real backend's answer, not one the window derived: protected by this Mac's hook,
+  // read at a known time, nothing left to fix and no check still running.
+  const guard = await page.evaluate(async () => { const { selected } = await import("/core.js"); const e = selected(); return { machine: e.machine, departure: e.departure, ...e.guard }; });
+  expect(guard).toMatchObject({ state: "protected", effective: true, mode: "block", machine: guard.machine });
+  expect(guard.checking).toBeFalsy();
+  expect(guard.action ?? "").toBe("");
+  expect(Date.parse(guard.checkedAt)).toBeGreaterThan(0);
+  expect(Date.parse(guard.departure.at)).toBeGreaterThan(0);
+  expect(guard.departure.sourceChanged).toBeFalsy();
+  await expect(details(page).locator(".ins-lineage")).toHaveCount(0);
+  await expect(details(page).getByLabel("Where it went", { exact: true })).toHaveCount(0);
+  await expect(details(page).locator(".ins-status")).toContainText(/^Moved away · last used on this (Mac|PC|computer)/);
+  await expect(details(page).locator("#act-primary")).toHaveText("Go to the active copy here");
+  // The active copy names its old copy's state only when it needs attention: here it is blocked.
+  await expect(roleRow(page, "Find the codeword", "Moved from").locator(".oldcopy-chip")).toHaveCount(0);
 });
 
 test("setup: one card, one action, agents named without account labels", async ({ page }) => {
@@ -179,7 +200,7 @@ test("original selection preserves conversation parents, row identity and height
   expect(result.parents).toEqual(['Conversation A','Conversation B']);
   expect(result.selected).toBe('claude/A');
   expect(result.heading).toBe('Conversation A');
-  expect(result.primary).toBe('Open in Codex');
+  expect(result.primary).toBe('Go to the active copy here');
   expect(result.count).toBe(4);expect(result.unique).toBe(4);
   expect(result.sameMain).toBe(true);expect(result.sameChild).toBe(true);
   expect(result.heightAfter).toBe(result.heightBefore);

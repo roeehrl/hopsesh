@@ -7,7 +7,7 @@ import { h, fill } from "./core.js";
 const stack = []; // the open popups, outermost first: { el, anchor, onclose }
 
 // item is one entry of a menu: { label, sub (a second line), icon (a node), chip, hint,
-// disabled, why (the reason, as its second line), run, check (true/false: a checkbox
+// disabled, why (the reason, as its second line), danger, run, check (true/false: a checkbox
 // item), radio, keep (stays open after it runs), submenu (() => items), count }. A
 // heading is { heading }, a separator { sep: true }.
 function item(it, level) {
@@ -18,7 +18,7 @@ function item(it, level) {
   const checked = it.check !== undefined ? it.check : it.radio;
   const second = it.why || it.sub;
   const el = h("button", {
-    class: "pop-item" + (it.submenu ? " has-sub" : "") + (second ? " two" : ""), role, tabindex: "-1", type: "button",
+    class: "pop-item" + (it.submenu ? " has-sub" : "") + (second ? " two" : "") + (it.danger ? " danger" : ""), role, tabindex: "-1", type: "button",
     "aria-checked": checked === undefined ? null : checked ? "true" : "false",
     "aria-disabled": it.disabled ? "true" : null, "aria-haspopup": it.submenu ? "menu" : null, "aria-expanded": it.submenu ? "false" : null,
     title: it.title || null,

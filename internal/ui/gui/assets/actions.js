@@ -6,7 +6,7 @@
 // button, ↩, ⌘↩ and the palette all come from it.
 import { refreshSelection } from "./sessions.js";
 import { changeDirDialog } from "./cd-dialog.js";
-import { role, removeBlock, restoreBlock } from "./guard.js";
+import { role, removeBlock, restoreBlock, isOldCopy, askOldCopy, onContinueOld, destination, movedTo } from "./guard.js";
 import { go, api, state, sys, here, agentInfo, cloudOf, cloudTitle, toast, fail, errText, cap, entries, count, ago, h, icon, ICONS, agentBadge, pending } from "./core.js";
 import { returnActions, returnChooser, showMovementDestination } from "./returns.js";
 import { planFor, chooseTarget, bringLive } from "./plan.js";
@@ -95,10 +95,29 @@ export function defaultPlace(e) {
 }
 
 // resumeIn resumes a session in a place; picked from the menu, the place becomes the
-// agent's default.
-export function resumeIn(e, place, remember = false) {
+// agent's default. A copy a move left behind asks first, unless this is a move back to it
+// (returning: a verified return, the same conversation or newer there).
+export function resumeIn(e, place, remember = false, returning = false) {
+  if (isOldCopy(e) && !returning) return continueOldCopy(e);
   return pending(`Opening ${e.title}`, () => resumeOnce(e, place, remember), `resume:${key(e)}`);
 }
+
+// continueOldCopy continues a copy a move left behind, only once asked (askOldCopy):
+// here, its block removed first; on another machine, through hopsesh there, which removes
+// its own block first. "Go to the active copy" there selects the active copy instead.
+export async function continueOldCopy(e) {
+  const choice = await askOldCopy(e);
+  if (choice === "go") return showMovementDestination(e.departure, selectFn);
+  if (choice !== "continue") return;
+  if (e.machine !== here())
+    return pending(`Opening ${e.title} on ${e.machine}`, () => api("ContinueOriginalAnyway", e.machine, e.key).catch(fail), `remote:${key(e)}`);
+  if (e.guard?.mode === "block" || e.guard?.mode === "advise") {
+    try { await api("ReleaseOriginal", e.machine, e.key); } catch (err) { fail(err); return; }
+  }
+  await pending(`Opening ${e.title}`, () => resumeOnce(e, defaultPlace(e), false), `resume:${key(e)}`);
+  refreshSelection();
+}
+onContinueOld(continueOldCopy);
 async function resumeOnce(e, place, remember) {
   if (remember && place !== defaultPlace(e)) {
     try {
@@ -143,7 +162,24 @@ export function selectDestination(e) { selectFn(e); }
 
 // model is a session's actions and the words around them.
 export function model(e) {
-  return e.cloud ? cloudModel(e) : localModel(e);
+  return e.cloud ? cloudModel(e) : isOldCopy(e) ? oldCopyModel(e) : localModel(e);
+}
+
+// oldCopyModel is what an old copy offers: the active copy first; continuing this one
+// only through the question; nothing that moves, brings or plans from it (those would
+// make a third copy), and no Move ▾.
+function oldCopyModel(e) {
+  const local = e.machine === here(), g = e.guard || {};
+  const m = { primary: null, chevron: [], fix: null, caption: "", move: [], more: more(e, local), places: local ? placesOf(e).filter((p) => p.kind !== "unknown") : [], twice: false, chevronLabel: "Other choices", returns: [] };
+  m.primary = { id: "destination", label: `Go to the active copy ${destination(e)}`, short: "Go to the active copy", run: () => showMovementDestination(e.departure, selectFn) };
+  const presence = local ? "" : (state.scan?.machines || []).find((x) => x.name === e.machine)?.presence;
+  const why = local ? "" : !["claude", "codex"].includes(e.agent) ? `hopsesh can't continue ${e.agentName} sessions on ${e.machine}`
+    : presence === "login" ? "" : { ssh: `Needs hopsesh on ${e.machine}: set it up in Machines`, older: `Update hopsesh on ${e.machine} first (Machines)`, installed: `hopsesh on ${e.machine} isn't running in a login session` }[presence] || `hopsesh on ${e.machine} isn't reached now`;
+  // Not awaited: the question is not work in progress (what follows it shows its own).
+  m.chevron.push({ id: "continue-old", label: "Continue this old copy anyway…", sub: why ? "" : "Not recommended: the two copies diverge", danger: true, disabled: !!why, why, run: () => { continueOldCopy(e); } });
+  if (local && g.mode === "block") m.chevron.push({ id: "remove-block", label: "Remove block…", sub: "Continue here; moving back then needs a comparison", run: () => removeBlock(e, () => refreshSelection()) });
+  if (local && g.mode === "released") m.chevron.push({ id: "restore-block", label: "Block again", sub: "Until you move the session back", run: () => restoreBlock(e, () => refreshSelection()) });
+  return m;
 }
 
 function localModel(e) {
@@ -241,7 +277,7 @@ function localModel(e) {
     const show = places.find(canShow);
     if (show) return showPlace(destination, show);
     if (showOnly || liveOf(destination).live) return selectFn(destination);
-    return resumeIn(destination, defaultPlace(destination));
+    return resumeIn(destination, defaultPlace(destination), false, true);
   });
   if (m.returns.length) {
     // A matching return takes the place of a generic local-agent continuation.
@@ -351,7 +387,9 @@ function more(e, local) {
   out.push({ id: "copy-id", label: "Copy session ID", run: async () => { await api("CopyText", e.cloud ? e.cloud.id : e.session || e.key.split("/").pop()); toast("Copied the session ID"); } });
   if (!e.cloud) {
     out.push({ id: "rename", label: "Rename…", disabled: !e.canRename, why: e.canRename ? "" : `hopsesh can't rename ${e.agentName} sessions`, run: () => renameFn(e) });
-    out.push({ id: "cd", label: "Change folder…", disabled: !e.canChangeDir, why: e.canChangeDir ? "" : e.machine === here() ? `hopsesh can't change the folder of ${e.agentName} sessions` : `Set up hopsesh on ${e.machine} to change folders there`, run: () => changeDirDialog(e) });
+    const cdWhy = isOldCopy(e) ? `This copy moved to ${movedTo(e)}: change the active copy's folder instead`
+      : e.canChangeDir ? "" : e.machine === here() ? `hopsesh can't change the folder of ${e.agentName} sessions` : `Set up hopsesh on ${e.machine} to change folders there`;
+    out.push({ id: "cd", label: "Change folder…", disabled: !!cdWhy, why: cdWhy, run: () => changeDirDialog(e) });
     out.push({ id: "transcript", label: "Open transcript", disabled: !e.canPreview || !state.info?.previews,
       why: !e.canPreview ? `hopsesh can't read ${e.agentName} transcripts` : !state.info?.previews ? "Conversation previews are off (Settings → General)" : "", run: () => transcriptFn(e) });
   } else {
@@ -397,8 +435,9 @@ function statusNow(e) {
     const host = (e.cloud.url.match(/^https:\/\/([^/]+)/) || [])[1];
     return ["unknown", host ? `Status on ${host}` : CLOUD_STATES.unknown[1]];
   }
+  // An old copy is where the session was, whatever runs it still (the indicators say so).
+  if (isOldCopy(e)) return ["moved", `Moved to ${movedTo(e)}`];
   const lv = liveOf(e);
-  if (e.departure && e.guard?.mode === "block" && e.guard.effective) return ["moved", "Blocked"];
   const ts = e.machine === here() ? sessionTabs(e) : [];
   if (ts.length) return ts.some((t) => t.attention) ? ["needs", "Waiting for you"] : ["working", "Working"];
   if (lv.needs) return ["needs", "Needs you"];
@@ -439,7 +478,7 @@ export function statusLine(e) {
   const ps = placesOf(e);
   const n = placeCount(ps);
   const where = e.machine === here() ? sys.here : e.machine;
-  if (e.departure && e.guard?.mode === "block" && e.guard.effective) return ["moved", "Blocked", `${where} · ${ago(e.lastActive)}`];
+  if (isOldCopy(e)) return ["away", "Moved away", `last used on ${where} ${ago(e.lastActive)}`];
   if (n >= 2) return ["needs", `${k === "needs" ? "Waiting for you" : k === "idle" ? "Idle" : "Working"} in ${count(ps.length > 1 ? ps.length : n, "place")}`, `${where} · ${ago(e.lastActive)}`, null, true];
   if (ps.length) {
     const p = ps[0];

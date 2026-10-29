@@ -1,6 +1,6 @@
 import { test,expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
-import { row,agentRow,details,action } from './helpers';
+import { row,oldRow,agentRow,details,action } from './helpers';
 
 test('real service resolves hidden original and appends return work to that exact session',async({page},info)=>{
  test.setTimeout(120000);
@@ -24,8 +24,9 @@ test('real service resolves hidden original and appends return work to that exac
   const {selected}=await import('/core.js');const e=selected();return {machine:e.machine,key:e.key,returns:e.returns};
  });
  expect(converted.returns).toEqual(expect.arrayContaining([expect.objectContaining({key:source.key,status:'same'})]));
- // The original is collapsed into the branch's displayed Codex copy (same title).
+ // The original is an old copy: a dimmed row of its own beside the branch's Codex copy (same title).
  await expect(row(page,'Find the codeword')).toHaveCount(1);await expect(agentRow(page,'Find the codeword','Codex')).toHaveCount(1);
+ await expect(oldRow(page,'Find the codeword')).toHaveCount(1);
  const resolve=await page.request.post('/call',{data:{m:'ResolveEntry',args:[source.machine,source.key]}});
  const original=(await resolve.json()).result;
  expect(original.key).toBe(source.key);
@@ -33,13 +34,21 @@ test('real service resolves hidden original and appends return work to that exac
  await details(page).getByRole('button',{name:/Copies & history/}).click();
  await details(page).getByRole('button',{name:'Show copy',exact:true}).first().click();
  await expect(details(page).getByRole('heading',{name:'Find the codeword',exact:true})).toBeVisible();
- await expect(details(page).getByLabel('Where it went',{exact:true})).toContainText('no new work there yet');
- await expect(details(page).locator('#act-primary')).toHaveText(/^Open in /);
+ await expect(details(page).getByLabel('Old copy',{exact:true})).toContainText('The active copy has no new work yet');
+ await expect(details(page).locator('#act-primary')).toHaveText('Go to the active copy here');
  await expect(details(page).locator('#act-primary')).toBeEnabled();
- await expect(details(page).getByLabel('Where it went',{exact:true})).not.toContainText('Last checked');
+ await expect(details(page).getByLabel('Old copy',{exact:true})).not.toContainText('Last checked');
+ // No protection hooks in this world: the real backend says this copy is unprotected,
+ // offers to set them up, and is never left checking; the banner says the same.
+ const guard=await page.evaluate(async()=>{const {selected}=await import('/core.js');const e=selected();return {machine:e.machine,departure:e.departure,...e.guard};});
+ expect(guard).toMatchObject({state:'unprotected',effective:false,action:'setup',machine:source.machine});
+ expect(guard.checking).toBeFalsy();expect(guard.problem).toBeTruthy();
+ expect(Date.parse(guard.departure.at)).toBeGreaterThan(0);expect(guard.departure.sourceChanged).toBeFalsy();
+ await expect(details(page).getByLabel('Old copy',{exact:true})).toContainText('Not blocked');
+ await expect(details(page).getByLabel('Old copy',{exact:true})).not.toContainText('Checking');
  await expect(details(page).locator('.skel')).toHaveCount(0);
  await page.screenshot({path:info.outputPath('real-source-prepared-hidden-copy.png'),fullPage:true});
- await expect(details(page).getByLabel('Where it went',{exact:true}).getByRole('button',{name:/Fork here instead/})).toHaveCount(0);
+ await expect(details(page).getByLabel('Old copy',{exact:true}).getByRole('button',{name:/Fork here instead/})).toHaveCount(0);
  await details(page).locator('#act-primary').click();
  await expect(details(page).getByRole('heading',{name:'Find the codeword',exact:true})).toBeVisible();
  await expect.poll(()=>page.evaluate(async()=>{const {selected}=await import('/core.js');return selected()?.key;})).toBe(converted.key);

@@ -35,9 +35,28 @@ All notable changes to this project are documented here. The format follows
   says when they differ.
 - The app's **Install the command** over a hopsesh you installed says which version it is,
   and offers to use the app's (keeping a backup) or keep both.
+- The copy a move leaves behind is an old copy, not a fork. It is its own dimmed row under
+  its own machine (a copy on another machine no longer shows as a "↳" line under this Mac's
+  row), right after the copy it moved to, and says "Moved to …". Its chips say when it was
+  used after the move (red), when it isn't blocked or is still open (amber) and when its
+  protection is unknown. The copy it moved to says when its old copy needs attention, and its
+  details have an **Old copy** section.
+- An old copy's details open with a banner that says where the session went and whether the
+  old copy is protected, with the button that fixes it (set up protection, update or open the
+  machine). Its main action is **Go to the active copy**; **Continue this old copy anyway…**
+  asks first and then removes its block. Continue, Move, Hand off and Change folder no longer
+  start from an old copy, in the window, the palette, the plan and on the machine that has it.
+- Protection of a copy on another machine is read from that machine's last status instead of
+  "Checking current movement and protection status" forever; hopsesh rereads it in the
+  background at most every 10 minutes, and says when it's unknown. A hook turned off, or set
+  up only for another agent folder, counts as not protected.
 
 ### Fixed
 
+- A moved session whose old copy was used after the move now shows as diverged on both
+  copies; before, only a change on the copy it moved to was noticed.
+- The bottom terminal no longer leaves an empty strip under the sidebar: the sidebar keeps the
+  window's full height beside it.
 - **Update hopsesh** on the screen for settings from a newer version asks before ending the
   programs in the terminal's tabs, as Settings › Updates does.
 - The quit dialog no longer counts a session shown from another machine as a program it

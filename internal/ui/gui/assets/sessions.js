@@ -3,9 +3,9 @@
 // listview.js), the selected session on the right (inspector.js). Every action on a
 // session comes from actions.js, which the palette uses too.
 import { hopMark, accountLabel, accountShown, accountTitle, loadError, api, on, h, fill, icon, ICONS, view, state, screen, go, current, loading, toast, fail, cap, ago, agentBadge, machineStatus, sys, keys,
-  entries, selected, copyEntry, here, agentInfo, $, count, clouds, cloudOf, cloudState, cloudChip, dialog, errText, rich, cloudTitle, bytes } from "./core.js";
+  entries, selected, copyEntry, scanEntry, here, agentInfo, $, count, clouds, cloudOf, cloudState, cloudChip, dialog, errText, rich, cloudTitle, bytes } from "./core.js";
 import { planPicked } from "./plan.js";
-import { healthNotice, loadHookHealth, hookHealth, withCLI, chip as roleChip } from "./guard.js";
+import { healthNotice, loadHookHealth, hookHealth, withCLI, chip as roleChip, isOldCopy, movedTo, oldCopyMarks, oldCopySummary, markChip } from "./guard.js";
 import { dividers, apply as applyLayout, statusHeader } from "./layout.js";
 import { exitOf, exitWords, waiting, strayWaiting, showTerminal, tabs, onTabs } from "./term.js";
 import { model, statusOf, statusKey, placesOf, placeCount, placeName, showPlace, cloudBlock, onSelect, onTurnOn, key as entryKey } from "./actions.js";
@@ -449,61 +449,41 @@ function row(e, level) {
  const chips = presenceChips(e);
 if(accountShown(e)) chips.push(h("span", {class:"chip account-chip"+(e.owner?.recorded?"":" unrecorded"),title:accountTitle(e)},h("span",{class:"chip-t"},accountShown(e))));
   if (e.cloud) chips.push(cloudChip(e.machine));
-  const rc = roleChip(e);
+  // An old copy (the copy a move left behind) says where it went and what to watch for
+  // instead of its role; the active copy carries one chip for its old copies' worst.
+  const away = isOldCopy(e);
+  const marks = away ? oldCopyMarks(e) : [];
+  const summary = away ? null : oldCopySummary(e);
+  const rc = away ? marks.map((m, i) => markChip(m, i ? "" : "keep")) : [summary ? markChip(summary, "keep oldcopy-chip") : null, roleChip(e)];
   if (e.cloud?.pr) chips.push(h("span", { class: "chip st-moved" }, "PR " + e.cloud.pr));
   if (e.mirror) chips.push(mirrorChip(e.mirror));
   const ext = !e.live && e.machine === here() && !placesOf(e).length ? exitOf(e) : null;
   if (ext) chips.push(h("span", { class: "chip " + (ext.code === 0 ? "st-idle" : ext.closed ? "st-ended" : "st-error"), title: `How its last run in ${ext.terminal} ended` }, `${exitWords(ext)} in ${ext.terminal}`));
-  // Other copies of this conversation are lines of their own under it (an original left
-  // behind by a move among them); one not in this scan stays a chip.
-  const lines = [];
-  for (const c of (e.copies || []).filter((c) => !(c.machine === e.machine && c.key === e.key))) {
-    const ce = copyEntry(c.machine, c.key);
-    if (ce && !entries().some(x => entryKey(x) === entryKey(ce))) lines.push(copyLine(e, c, ce, level + 1));
-    else if (ce) continue;
-    else chips.push(h("span", { class: "chip" + (c.newest ? " st-warn" : "") }, `${c.newest ? "newest: " : "also "}${copyWhere(c)}`));
-  }
+  // The other copies the scan carries are rows of their own; one it doesn't stays a chip.
+  for (const c of (e.copies || []).filter((c) => !(c.machine === e.machine && c.key === e.key)))
+    if (!scanEntry(c.machine, c.key)) chips.push(h("span", { class: "chip" + (c.newest ? " st-warn" : "") }, `${c.newest ? "newest: " : "also "}${copyWhere(c)}`));
   const where = e.cloud ? "cloud" : e.machine === here() ? sys.here : e.machine;
-  const el = h("div", { class: "row" + (rc ? " has-role" : ""), role: "treeitem", "aria-level": String(level), "aria-selected": sel ? "true" : "false", tabindex: sel ? "0" : "-1", "data-key": entryKey(e),
+  return h("div", { class: "row" + (rc.some(Boolean) ? " has-role" : "") + (away ? " moved-away" : ""), role: "treeitem", "aria-level": String(level), "aria-selected": sel ? "true" : "false", tabindex: sel ? "0" : "-1", "data-key": entryKey(e),
+      "aria-label": away ? [`Old copy of “${e.title}” on ${where}, moved to ${movedTo(e)}`, ...marks.map((m) => m.words)].join(" · ") : null,
       onclick: () => select(e), ondblclick: () => { const fresh = entries().find(x => entryKey(x) === entryKey(e)) || copyEntry(e.machine, e.key) || e; const action = model(fresh).primary; if (action && !action.disabled) return action.run(); } },
     h("span", { class: "r-ic" }, agentBadge(e.agent, e.agentName, e.cloud ? cloudTitle(e.machine) : "")),
     h("div", { class: "r-main" },
       h("span", { class: "r-line" }, h("span", { class: "t", title: e.title }, e.title),
         h("span", { class: "b" }, [repoWord, branch].filter(Boolean).join(" · "))),
       h("span", { class: "s" }, bits.join(" · ") || " ")),
-    rowStatus(k, words, rc, chips, [where, ago(e.lastActive), e.sizeKB ? bytes(e.sizeKB * 1024) : ""].filter(Boolean).join(" · ")));
-  if (!lines.length) return el;
-  const out = document.createDocumentFragment();
-  out.append(el, ...lines);
-  return out;
+    rowStatus(k, words, rc, chips, [where, ago(e.lastActive), e.sizeKB ? bytes(e.sizeKB * 1024) : ""].filter(Boolean).join(" · "), away));
 }
 
-// copyLine is another copy of a session's conversation, as a line under its row: which
-// copy it is ("Claude Code original" for one left behind by a move), its role (where it
-// moved, whether it is blocked), its state and when it was last used. It selects that copy.
-function copyLine(e, c, ce, level) {
-  const [k, words] = statusOf(ce);
-  const sel = state.sel && state.sel.machine === ce.machine && state.sel.key === ce.key;
-  const which = c.leftBehind ? `${ce.agentName} original` : ce.agentName;
-  const where = ce.machine === here() ? sys.here : ce.machine;
-  return h("div", { class: "row subrow", role: "treeitem", "aria-level": String(level), "aria-selected": sel ? "true" : "false", tabindex: sel ? "0" : "-1", "data-key": entryKey(ce),
-      "aria-label": `${which}: ${roleChip(ce)?.textContent?.trim() || words}`, onclick: (ev) => { ev.stopPropagation(); select(Object.assign({ group: e.group }, ce)); } },
-    h("span", { class: "r-ic sub-ic", "aria-hidden": "true" }, "↳"),
-    h("div", { class: "r-main" },
-      h("span", { class: "r-line" }, agentBadge(ce.agent, ce.agentName, ""), h("span", { class: "t", title: ce.title || e.title }, ce.title || e.title)),
-      h("span", {class:"s copy-label"}, which)),
-    rowStatus(k, words, roleChip(ce), [], `${where} · ${ago(ce.lastActive)}`));
-}
-
-// Status and movement indicators share the metadata column, clear of the title.
-function rowStatus(k, words, role, chips, when) {
+// Status and movement indicators share the metadata column, clear of the title. An old
+// copy's state is where it went, with a "moved out" mark in place of the dot.
+function rowStatus(k, words, role, chips, when, away = false) {
   const presence = chips.find(c => c.matches?.(".pchip.keep"));
   const extras = chips.filter(c => c !== presence);
   const age = when.startsWith(sys.here + " · ") ? when.slice(sys.here.length + 3) : when;
   return h("div", {class:"r-state"},
     h("div", {class:"r-status"},
       h("div", {class:"status-top"},
-        h("span", {class:"chip st-" + k, title:words}, h("span", {class:"dot " + k}), h("span", {class:"chip-t"}, words)), presence),
+        h("span", {class:"chip st-" + (away ? "away" : k), title:words}, away ? icon(ICONS.movedOut, 11) : h("span", {class:"dot " + k}), h("span", {class:"chip-t"}, words)), presence),
       h("div", {class:"r-indicators"}, role, extras)),
     h("span", {class:"w", title:when}, age));
 }
@@ -522,6 +502,7 @@ export function select(e, focus = true) {
   const t = view.querySelector(".tree");
   const k = entryKey(e);
   if (t) {
+    built.content = ""; // the rows no longer match the markup render last built
     for (const r of t.querySelectorAll('[aria-selected="true"]')) r.setAttribute("aria-selected", "false");
     for (const r of t.querySelectorAll('[tabindex="0"]')) r.tabIndex = -1;
     const r = rowByKey(t, k);
@@ -666,11 +647,11 @@ export function render() {
 // showEntry selects a session from elsewhere (the palette, Go to the newer copy, a
 // notification): its place if it isn't in this one, no filter that hides it, its group
 // open; then it is shown landing.
-// A child selection belongs to its conversation's row without replacing or
-// inserting entries in the scan. Native identities stay attached to their parent.
+// Every copy the scan carries is a row the list shows or not; a copy resolved from a
+// history (not in the scan) belongs to its conversation's row.
 function showsEntry(rows, selection) {
-  return rows.some(e => e.machine === selection.machine && e.key === selection.key ||
-    (e.copies || []).some(c => c.machine === selection.machine && c.key === selection.key));
+  const same = (x) => x.machine === selection.machine && x.key === selection.key;
+  return rows.some(same) || (!scanEntry(selection.machine, selection.key) && rows.some(e => (e.copies || []).some(same)));
 }
 
 // refreshSelection reads the selected session again (after removing or restoring its block)

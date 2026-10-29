@@ -79,6 +79,16 @@ export const ICONS = {
   chevron: "m6 9 6 6 6-6",
   cloud: "M7 18h10a4 4 0 0 0 .5-7.97A6 6 0 0 0 6.1 9.1 4.5 4.5 0 0 0 7 18z",
   external: ["M14 4h6v6", "M20 4l-9 9", "M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"],
+  // A move's two ends, and how a copy left behind stands.
+  movedOut: ["M3 5v14", "M21 12H7", "m15 18 6-6-6-6"],
+  movedIn: ["M17 12H3", "m11 18 6-6-6-6", "M21 5v14"],
+  shieldCheck: ["M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z", "m9 12 2 2 4-4"],
+  shieldAlert: ["M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z", "M12 8v4", "M12 16h.01"],
+  shieldUnknown: ["M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z", "M9.1 9a3 3 0 0 1 5.82 1c0 2-3 3-3 3", "M12 17h.01"],
+  shieldOff: ["m2 2 20 20", "M5 5a1 1 0 0 0-1 1v7c0 5 3.5 7.5 7.67 8.94a1 1 0 0 0 .67.01c2.35-.82 4.48-1.97 5.9-3.71", "M9.31 3.65a12.25 12.25 0 0 0 1.93-1.37 1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1v7a9.78 9.78 0 0 1-.08 1.26"],
+  diverged: ["M5 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6z", "M12 6h5a2 2 0 0 1 2 2v7", "m15 9-3-3 3-3", "M19 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6z", "M12 18H7a2 2 0 0 1-2-2V9", "m9 15 3 3-3 3"],
+  usedAfter: ["M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", "M3 3v5h5", "M12 7v5l4 2"],
+  open: ["M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z", "M12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"],
 };
 
 export function fill(el, ...kids) {
@@ -102,7 +112,11 @@ export function toast(msg, action) {
 export const count = (n, one, many = one + "s") => `${n} ${n === 1 ? one : many}`;
 export const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 export const errText = (e) => String((e && e.message) || e);
-export const fail = (e) => toast(errText(e));
+// A refusal the window answers with a question instead of a toast (guard.js: continuing
+// a copy that already moved).
+let refusal = () => false;
+export function onRefusal(fn) { refusal = fn; }
+export const fail = (e) => { if (!refusal(e)) toast(errText(e)); };
 
 export function ago(iso) {
   if (!iso) return "";
@@ -255,26 +269,60 @@ export function manyAccounts(agent) {
   return ids.size > 1;
 }
 
-// The entry for the current selection, from the last scan.
+// entries are the list's sessions: each conversation's row, and every other copy of it the
+// scan carries (profileCopies: an old copy a move left behind, another agent's copy) as a
+// row of its own, which the sidebar's place and the filters judge by its own machine and
+// state. A copy names the row it belongs to (home), so the list can draw it right after.
 export function entries() {
-  if(!state.scan)return [];
-  const groups=state.list?.groupBy==='account' ? [...state.scan.groups,...(state.scan.profileCopies||[])] : state.scan.groups;
-  return groups.flatMap(g=>g.entries.map(e=>Object.assign({group:g},e)));
+  if (!state.scan) return [];
+  const out = [], seen = new Set(), homes = new Map();
+  for (const g of state.scan.groups) for (const e of g.entries) {
+    const k = e.machine + "\u0000" + e.key;
+    seen.add(k);
+    out.push(Object.assign({ group: g }, e));
+    for (const c of e.copies || []) if (!homes.has(c.machine + "\u0000" + c.key)) homes.set(c.machine + "\u0000" + c.key, { e, g });
+  }
+  for (const g of state.scan.profileCopies || []) for (const e of g.entries) {
+    const k = e.machine + "\u0000" + e.key;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    const home = homes.get(k);
+    // Without repository facts of its own (another machine's copy not read yet), a copy
+    // stays with its conversation's repository.
+    const group = home && (g.noRepo || g.repoPending) ? home.g : g;
+    out.push(Object.assign({ group }, e, home ? { home: home.e.machine + "\u0000" + home.e.key } : null));
+  }
+  return out;
 }
 export function selected() {
   const s = state.sel;
   return s ? entries().find((e) => e.machine === s.machine && e.key === s.key) || copyEntry(s.machine, s.key) : null;
 }
-// copyEntry is a copy folded into another session's row (an original left behind by a
-// move), with the group of the row it is folded into; null when it is not in the scan.
+// copyEntry is another copy of a conversation (a row of its own), or a copy resolved from
+// a history (not in the scan, attached to its conversation's row); null when neither.
 export function copyEntry(machine, key) {
-  for (const g of state.scan?.profileCopies || []) for (const e of g.entries) if (e.machine === machine && e.key === key) {
-    const home = state.scan.groups.find((gr) => gr.entries.some((x) => (x.copies || []).some((c) => c.machine === machine && c.key === key)));
-    return Object.assign({ group: home || g }, e);
+  if (scanEntry(machine, key)) {
+    const e = entries().find((x) => x.machine === machine && x.key === key);
+    if (e) return e;
   }
   const resolved = state.resolvedSelection;
   if (resolved?.machine === machine && resolved.key === key) return resolved;
   return null;
+}
+// scanEntry is a session's record in the last scan (a row or another copy), without its
+// group: cheap enough for every row to look up its copies.
+const scanIndex = new WeakMap();
+export function scanEntry(machine, key) {
+  const s = state.scan;
+  if (!s) return null;
+  const k = machine + "\u0000" + key;
+  let idx = scanIndex.get(s);
+  if (!idx || !idx.has(k)) {
+    idx = new Map();
+    for (const g of [...(s.groups || []), ...(s.profileCopies || [])]) for (const e of g.entries) if (!idx.has(e.machine + "\u0000" + e.key)) idx.set(e.machine + "\u0000" + e.key, e);
+    scanIndex.set(s, idx);
+  }
+  return idx.get(k) || null;
 }
 export const here = () => (state.scan?.machines.find((m) => m.local) || {}).name || state.info?.host;
 export const clouds = () => state.scan?.clouds || [];
