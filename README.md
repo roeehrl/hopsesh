@@ -337,16 +337,18 @@ hopsesh doctor --all-machines                     # hopsesh, hooks and skill on 
 
 `hopsesh hosts status` checks every machine: whether hopsesh is installed and its version
 against the newest on your machines, whether it runs in your login session and receives
-sessions, whether its command is on PATH, and each agent folder's hook and skill. It prints the
-command that fixes each check and exits 3 when a machine needs something. In the app,
-**Settings › Machines** shows the same for the machine you select, with **Up next**: only what
-is left, each with its fix. Beside every machine is hopsesh's mark: green and filled when it
+sessions, whether its command is on PATH, and the hook and skill in each agent folder, named by
+who is signed in there (`Claude Code · you@example.com`). It prints the command that fixes each
+check and exits 3 when a machine needs something. In the app, **Settings › Machines** is the
+one place for all of it: select a machine to see the same checks, with **Up next** listing only
+what is left, each with its fix (one **Set up** covers every agent folder's hooks and skill).
+Beside every machine is hopsesh's mark: green and filled when it
 receives sessions, gray and hollow when hopsesh is installed but doesn't receive, none without
 hopsesh, and ↑ when a newer hopsesh is on another machine.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/machines-dark.png">
-  <img src="docs/assets/machines-light.png" alt="Settings › Machines in the hopsesh app: This Mac and studio are all set and receive sessions; laptop is selected, marked gray and hollow with an up arrow, and its Up next lists updating hopsesh from 0.6.2 to 0.6.3 and turning on receiving; nas has no hopsesh and is reached over SSH only" width="900">
+  <img src="docs/assets/machines-light.png" alt="Settings › Machines in the hopsesh app: This Mac and studio are all set and receive sessions; laptop is selected, marked gray and hollow with an up arrow, and its Up next lists updating hopsesh from 0.6.3 to 0.6.4, turning on receiving, and setting up the skill in one of its three agent folders; nas has no hopsesh and is reached over SSH only" width="900">
 </picture>
 
 ## Another folder, same session
@@ -566,6 +568,12 @@ including the file-format traps hopsesh handles, are in [docs/design.md](docs/de
 - **Codex's own import of Claude Code sessions?** It converts on one machine. hopsesh uses it
   when you ask (`--via import`) and adds machines, the repository, a loss report, a briefing
   and a way home that keeps the original session intact.
+- **Claude Code's session list on every device?** A session you open from another device
+  still runs on the machine it started on, with that machine's files. hopsesh moves it: it
+  continues where you are, in your copy of the repository, and can come back.
+- **The Codex app's hand-off to an SSH host?** It moves a Codex chat and its Git state to a
+  connected host with a saved project. hopsesh does that for Claude Code and Codex alike,
+  between any of your machines, into another agent, and to and from the clouds.
 - **Remote Control?** Remote Control lets you drive a session that keeps running where it
   is. hopsesh moves the session, so it continues on the machine you're at, with that
   machine's files and tools. It can turn Remote Control on for the moved session.
