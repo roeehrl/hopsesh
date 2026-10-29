@@ -152,7 +152,8 @@ func (s *peerSession) handle(ctx context.Context, method string, params json.Raw
 func (s *peerSession) hello(ctx context.Context) peer.HelloReply {
 	m := s.a.localMachine(ctx)
 	defer m.Close()
-	r := peer.HelloReply{Protocol: peer.Protocol, Version: version.Version, Machine: m.Name, OS: m.Facts.OS, Arch: m.Facts.Arch, Receive: s.a.Cfg.Peer.Receive, Login: s.a.Login != nil, Agents: []peer.AgentInfo{}}
+	r := peer.HelloReply{Protocol: peer.Protocol, Version: version.Version, Machine: m.Name, OS: m.Facts.OS, Arch: m.Facts.Arch, Receive: s.a.Cfg.Peer.Receive, Login: s.a.Login != nil, Agents: []peer.AgentInfo{},
+		Features: []string{peer.FeatureRemoteDefault}}
 	r.Endpoint, _ = m.ReadIdentity(ctx)
 	for _, mod := range s.a.Modules() {
 		spec := mod.Spec()
@@ -201,6 +202,14 @@ func (s *peerSession) login(ctx context.Context, method string, params json.RawM
 			p.Error = err.Error()
 		}
 		return p, nil
+	case peer.MethodRemoteDefault:
+		var req peer.RemoteDefault
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, err
+		}
+		// Errors travel in the answer: one folder's failure leaves the others' state.
+		r, _ := s.a.localRemoteDefaults(ctx, req.Set)
+		return r, nil
 	case peer.MethodAccountAdd:
 		var req peer.AccountAdd
 		if err := json.Unmarshal(params, &req); err != nil {

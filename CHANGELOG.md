@@ -14,6 +14,10 @@ All notable changes to this project are documented here. The format follows
   hopsesh reads it from Claude Code's own record of its running sessions (2.1.300 or newer).
 - **Turn on** in a session's details connects a Claude Code session running in a hopsesh
   Terminal tab to Remote Control, by typing its own `/remote-control` once it waits for you.
+- Settings › Machines has a **Remote Control** switch for each machine: every new Claude
+  Code session there starts connected (Claude Code's own `remoteControlAtStartup`, set in
+  each of its folders' settings; off removes it). On another machine it goes through
+  hopsesh there, which needs this version.
 - hopsesh resumes the sessions its terminal tabs ran when it quit. The next time it starts it
   offers to resume them, each in a tab again; after installing an update it does so without
   asking. A session hopsesh shows from another machine, which keeps running there, is shown

@@ -293,7 +293,7 @@ func (e *env) loggedOut(t *testing.T) {
 	if hr.Login {
 		t.Fatalf("hello claims the login session: %+v", hr)
 	}
-	for _, method := range []string{peer.MethodTerminalList, peer.MethodAccounts, peer.MethodProtection} {
+	for _, method := range []string{peer.MethodTerminalList, peer.MethodAccounts, peer.MethodProtection, peer.MethodRemoteDefault} {
 		e.wantNoLogin(t, c.Call(context.Background(), method, struct{}{}, nil))
 	}
 	out, stderr, err := e.hs(t, "terminals", "run", "box", "--agent", "claude")

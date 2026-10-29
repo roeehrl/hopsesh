@@ -424,6 +424,7 @@ const fixing = new Map(); // machine → "installing" while its hooks and skill 
 // meanwhile (an update, an install) is never left showing its old state.
 let statusAgain = null;
 export async function loadStatus(refreshAll = false) {
+  if (refreshAll) remote.clear(); // Check again reads the Remote Control setting again too
   if (statusBusy) { statusAgain = statusAgain || refreshAll; return; }
   statusBusy = true; statusErr = "";
   if (showing()) refresh();
@@ -660,8 +661,43 @@ function machineDetail(r, d, extras = {}) {
           h("span", { class: "mlabel", title: a.folder || "" }, agentLabel(a)),
           h("span", { class: "mtext" }, "Hook: ", a.hook.text, " · Skill: ", a.skill.text),
           h("span", { class: "mfix" })))) : null,
+    st.version || r.local ? remoteSection(r.local ? "" : r.name, r.local ? sys.here : r.name) : null,
     m ? presenceBlock(m) : null,
     m ? manage(m) : null];
+}
+
+// Remote Control for every session: each agent folder's own setting there (Claude Code's
+// remoteControlAtStartup), read when the page shows and changed with one switch for all.
+const remote = new Map(); // machine ("" here) → { data, err, busy }
+function remoteSection(machine, where) {
+  const r = remote.get(machine);
+  if (!r) {
+    remote.set(machine, { busy: true });
+    api("RemoteDefaults", machine).then((data) => remote.set(machine, { data }), (err) => remote.set(machine, { err: errText(err) })).finally(() => refresh());
+  }
+  const folders = (r?.data?.folders || []).filter((f) => !f.reason);
+  const on = folders.length > 0 && folders.every((f) => f.on);
+  const set = async () => {
+    remote.set(machine, { ...r, busy: true }); refresh();
+    try {
+      const data = await api("SetRemoteDefault", machine, !on);
+      remote.set(machine, { data });
+      const failed = (data.folders || []).filter((f) => f.error);
+      toast(failed.length ? cap(`${failed[0].agentName}${failed[0].profileLabel ? ` (${failed[0].profileLabel})` : ""}: ${failed[0].error}`)
+        : !on ? `New Claude Code sessions on ${where} start with Remote Control` : `New Claude Code sessions on ${where} start without Remote Control`);
+    } catch (err) { remote.set(machine, { ...r, busy: false }); fail(err); }
+    refresh();
+  };
+  const sw = h("button", { class: "switch", role: "switch", "aria-checked": on ? "true" : "false", "aria-label": `Start Remote Control for every Claude Code session on ${where}`,
+    disabled: !folders.length || !!r?.busy, onclick: set });
+  const state = !r || r.busy ? { state: "unknown", text: "Checking…" } : r.err ? { state: "warn", text: r.err }
+    : !r.data.folders.length ? { state: "off", text: "No Claude Code folder here" }
+    : { state: on ? "ok" : "off", text: on ? "On: every new session connects" : folders.some((f) => f.on) ? "On in some folders" : "Off" };
+  const many = (r?.data?.folders || []).length > 1 || (r?.data?.folders || []).some((f) => f.reason || f.error);
+  return h("section", { class: "msec", id: "remote-control-" + (machine || "here") }, h("h3", {}, "Remote Control"),
+    line(state, "Every session", sw),
+    many ? r.data.folders.map((f) => line({ state: f.error ? "error" : f.reason ? "unknown" : f.on ? "ok" : "off", text: f.error || f.reason || (f.on ? "On" : "Off") }, f.agentName + (f.profileLabel ? " · " + f.profileLabel : ""))) : null,
+    h("span", { class: "muted", style: "font-size:12px" }, "Reach new sessions from claude.ai or the Claude app. Sets remoteControlAtStartup in each Claude Code folder's settings; Claude desktop's own setting covers sessions started there."));
 }
 
 const RANK = { ok: 0, off: 1, unknown: 2, warn: 3, error: 4 };
