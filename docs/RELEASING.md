@@ -76,9 +76,16 @@ xcrun notarytool store-credentials hopsesh-notary \
 The issuer id is shown above the key list in App Store Connect → Users and Access →
 Integrations → App Store Connect API.
 
-**Optional:** the repository secret `TAP_GITHUB_TOKEN` (a fine-grained token with write
-access to `roeehrl/scoop-bucket` and a fork of `microsoft/winget-pkgs`) lets CI publish the
-Scoop manifest and a winget pull request. Without it those steps are skipped.
+**Package managers:** the repository secret `TAP_GITHUB_TOKEN` (a token with write access
+to `roeehrl/homebrew-tap`, `roeehrl/scoop-bucket` and `roeehrl/winget-pkgs`, the fork of
+`microsoft/winget-pkgs`) lets `.github/workflows/packages.yml` publish each release once it
+is published: the Homebrew formula `hopsesh` and cask `hopsesh-app`, the Scoop manifest, and a
+winget pull request for `roeehrl.hopsesh`. Without it (or with an expired one) the run fails.
+Every Monday it runs again for the latest release: it rewrites the tap and the bucket (a
+no-op when they are current) and fails when winget still lacks a release older than a week,
+so a missed release shows up as a failed run, not as silent drift. The winget step updates a
+package already there, so the first version went in by hand (a pull request with its three
+manifests). Run the workflow by hand for any release: Actions › packages › Run workflow.
 
 ## Cutting a release
 
@@ -105,6 +112,7 @@ Then:
 
 1. Move the `CHANGELOG.md` entries from "Unreleased" to a `## [X.Y.Z] - date` section
    (leave an empty `## Unreleased` above it, and add the `[X.Y.Z]:` link at the bottom),
+   run `scripts/update-plugin.sh` (the plugin in `plugin/` carries this release's skill),
    commit, push. That section becomes the release notes (the workflow fails without it).
 2. Tag and push: `git tag -a v0.4.0 -m "hopsesh 0.4.0" && git push origin v0.4.0`
    (use `-s` instead of `-a` if git has a signing key configured; only the repository admin
@@ -127,8 +135,7 @@ Then:
 To test the whole pipeline without publishing, use a pre-release tag such as
 `v0.5.0-rc.1`. A tag with a pre-release suffix (`-rc.N`, `-beta.N`) makes a draft marked as
 a **pre-release** (GoReleaser's `release.prerelease: auto`), gets placeholder notes unless
-`CHANGELOG.md` has a section for that exact version, and never publishes the Scoop manifest or a winget pull
-request. GitHub's "latest release", which `hopsesh update`, the apps and the install scripts
+`CHANGELOG.md` has a section for that exact version, and never reaches Homebrew, Scoop or winget. GitHub's "latest release", which `hopsesh update`, the apps and the install scripts
 read, never points to a pre-release, so even a published one updates nobody. When you are
 done, delete the draft and the tag (`gh release delete v0.5.0-rc.1 --cleanup-tag`).
 
