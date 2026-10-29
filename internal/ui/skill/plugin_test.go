@@ -1,6 +1,7 @@
 package skill
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"os"
@@ -23,7 +24,7 @@ func TestPlugin(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return b
+		return bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n")) // a Windows checkout's line endings
 	}
 	m := regexp.MustCompile(`(?m)^## \[(\d+\.\d+\.\d+)\]`).FindSubmatch(read("CHANGELOG.md"))
 	if m == nil {
