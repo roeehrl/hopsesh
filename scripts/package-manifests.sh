@@ -68,7 +68,7 @@ cask "hopsesh-app" do
   homepage "https://codonic.dev/apps/hopsesh"
 
   auto_updates true
-  depends_on macos: ">= :ventura"
+  depends_on macos: :ventura
 
   app "hopsesh.app"
 end
