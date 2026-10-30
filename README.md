@@ -4,7 +4,7 @@
 
 # hopsesh
 
-**Move coding-agent sessions between your machines, between Claude Code and Codex, and to and from their clouds.**
+**Move a Claude Code or Codex session to another computer, continue it in the other agent, or hand it to the cloud, and bring it back.**
 
 [![Release](https://img.shields.io/github/v/release/roeehrl/hopsesh)](https://github.com/roeehrl/hopsesh/releases/latest)
 [![CI](https://github.com/roeehrl/hopsesh/actions/workflows/ci.yml/badge.svg)](https://github.com/roeehrl/hopsesh/actions/workflows/ci.yml)
@@ -21,6 +21,8 @@
 </picture>
 
 <sub>The macOS app, recorded with made-up machines and sessions (<a href="demo/README.md">demo/</a>).</sub>
+
+Guides: [move a Claude Code session to another computer](https://codonic.dev/guides/move-claude-code-session-to-another-computer) · [continue it in Codex](https://codonic.dev/guides/continue-claude-code-session-in-codex) · [after moving a project folder](https://codonic.dev/guides/claude-code-history-after-moving-project-folder)
 
 </div>
 
