@@ -27,7 +27,7 @@ jobs:
           - {family: windows, os: windows-2025}
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
         with:
           egress-policy: audit
@@ -74,7 +74,7 @@ jobs:
   lint:
     runs-on: ubuntu-24.04
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
         with:
           egress-policy: audit
@@ -92,7 +92,7 @@ jobs:
   govulncheck:
     runs-on: ubuntu-24.04
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
         with:
           egress-policy: audit
@@ -112,7 +112,7 @@ jobs:
     name: skill vs CLI
     runs-on: ubuntu-24.04
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -130,7 +130,7 @@ jobs:
     name: test bundle
     runs-on: ubuntu-24.04
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -165,14 +165,14 @@ jobs:
     name: workflow audit
     runs-on: ubuntu-24.04
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: zizmorcore/zizmor-action@85b2b9fb8e3325e7a23d7d0a9d7ba5ae0f999e3e # v0.7.1
+      - uses: zizmorcore/zizmor-action@53290badfa369cb0bf7ad16342cb62c2fa47ac7b # v0.8.0
         with:
           version: 1.30.1
           advanced-security: false
@@ -193,7 +193,7 @@ jobs:
           - {family: macos, os: macos-15}
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -223,7 +223,7 @@ jobs:
       run:
         working-directory: internal/devtools/webtest
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
         with:
           egress-policy: audit
@@ -268,7 +268,7 @@ jobs:
           - {family: macos, os: macos-15}
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
         with:
           egress-policy: audit
@@ -295,7 +295,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
         with:
           egress-policy: audit
@@ -351,7 +351,7 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 45
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
         with:
           egress-policy: audit
@@ -385,7 +385,7 @@ jobs:
     # copy their results without cancelling an otherwise complete test run.
     timeout-minutes: 75
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
         with:
           egress-policy: audit
@@ -414,7 +414,7 @@ jobs:
     name: ssh (windows)
     runs-on: windows-2025
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
         with:
           egress-policy: audit
@@ -437,7 +437,7 @@ jobs:
     name: windows app (build)
     runs-on: ubuntu-24.04
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
         with:
           egress-policy: audit
@@ -463,7 +463,7 @@ jobs:
     needs: windows-app-build
     runs-on: windows-2025
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
         with:
           egress-policy: audit
@@ -564,7 +564,7 @@ jobs:
   install-scripts:
     runs-on: ubuntu-24.04
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
         with:
           egress-policy: audit
@@ -585,7 +585,7 @@ jobs:
   release-config:
     runs-on: ubuntu-24.04
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
         with:
           egress-policy: audit
@@ -613,7 +613,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
