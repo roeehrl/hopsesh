@@ -41,7 +41,7 @@ func companionPresence() string {
 	home, _ := os.UserHomeDir()
 	switch runtime.GOOS {
 	case "darwin":
-		return filepath.Join(home, "Library", "Application Support", "MyCNC Host", "presence.json")
+		return filepath.Join(home, "Library", "Application Support", "MyCNCHost", "presence.json")
 	case "windows":
 		if d := os.Getenv("LOCALAPPDATA"); d != "" {
 			return filepath.Join(d, "MyCNC", "presence.json")
