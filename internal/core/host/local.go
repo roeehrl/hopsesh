@@ -264,6 +264,9 @@ func (w *watchWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
+// ProcessExists reports whether a process with this id runs on this machine.
+func ProcessExists(pid int) bool { return processExists(pid) }
+
 // localProcs checks and stops processes on this machine.
 type localProcs struct{}
 

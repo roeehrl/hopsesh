@@ -32,6 +32,9 @@ const (
 	ModeTerminal = "terminal"
 	// ModePing asks only whether hopsesh serve is there, and which.
 	ModePing = "ping"
+	// ModeClient is hopsesh's client API (internal/core/clientapi), for other programs
+	// on this machine.
+	ModeClient = "client"
 )
 
 // Hello is a connection's first line.
