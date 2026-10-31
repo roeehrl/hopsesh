@@ -15,7 +15,7 @@
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 ![macOS · Linux · Windows](https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-0b6b62)
 
-[Install](#install) · [Quick start](#quick-start) · [Another agent](#continue-in-another-agent) · [Round trips](#round-trips) · [Push](#send-a-session-to-another-machine) · [Cloud sessions](#cloud-sessions) · [Ask your agent](#use-it-from-your-agent) · [Why not…?](#why-not) · [FAQ](#faq)
+[Install](#install) · [Quick start](#quick-start) · [Another agent](#continue-in-another-agent) · [Round trips](#round-trips) · [Push](#send-a-session-to-another-machine) · [Cloud sessions](#cloud-sessions) · [Ask your agent](#use-it-from-your-agent) · [On your phone](#on-your-phone) · [Why not…?](#why-not) · [FAQ](#faq)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hero-dark.gif">
@@ -543,6 +543,20 @@ never starts another agent and never handles passwords: for a machine that logs 
 password, the agent asks you to run `hopsesh hosts setup-key` yourself. `hopsesh skill remove`
 takes it out again. Details: [docs/design.md §13](docs/design.md#13-the-hopsesh-skill-for-every-agent)
 and [§14](docs/design.md#14-the-command-line-tool-from-the-app).
+
+## On your phone
+
+[MyCNC](https://codonic.dev/apps/mycnc/) is hopsesh's companion: approvals, terminals and the
+desktop of your Macs from iPhone, iPad or Mac. It needs MyCNC Host on the Mac (macOS 14 or
+later) and, like hopsesh, connects over your own network (LAN, Tailscale or ZeroTier), with
+no relay and no account. On a Mac with MyCNC Host, a running session's details offer **Follow on your
+phone**, and Settings › Machines says whether MyCNC Host runs there. hopsesh only links to
+MyCNC; it never installs it.
+
+Other programs on the same machine can use hopsesh's [client API](docs/client-api.md). They
+can list every session and machine and watch for changes, then plan, apply and undo moves.
+A `hopsesh://session/<machine id>/<agent>/<session>` link opens a session in the hopsesh
+app.
 
 ## How it works
 

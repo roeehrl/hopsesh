@@ -101,6 +101,17 @@ func doctorCmd() *cobra.Command {
 			_, gitErr := exec.LookPath("git")
 			add("this machine: git", gitErr == nil, map[bool]string{true: "found", false: "not found (needed to match and clone repositories)"}[gitErr == nil])
 			add("this machine: repos folder", true, r.app.Cfg.ReposDir)
+			if c := app.DetectCompanion(); c.Supported {
+				// Optional: never a failed check.
+				detail := "not installed (optional: control this machine from your phone, " + c.Page + ")"
+				switch {
+				case c.Running:
+					detail = c.Name + " Host runs here" + map[bool]string{true: " · " + c.Version, false: ""}[c.Version != ""]
+				case c.Installed:
+					detail = c.Name + " Host is installed, not running"
+				}
+				add("this machine: phone ("+c.Name+")", true, detail)
+			}
 			files, bin := r.skillFiles()
 			rep := r.app.Skill(context.Background(), files, bin)
 			add("skill", rep.State == integrate.Current, skillLine(rep))

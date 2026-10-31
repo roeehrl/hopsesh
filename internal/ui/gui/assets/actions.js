@@ -404,6 +404,9 @@ function more(e, local) {
       try { await api("CopyText", await api("ResumeCommand", e.machine, e.key)); toast("Copied the resume command"); } catch (err) { fail(err); }
     } });
   }
+  if (!e.cloud) out.push({ id: "copy-link", label: "Copy hopsesh link", run: async () => {
+    try { await api("CopyText", await api("SessionLink", e.machine, e.key)); toast("Copied the link: it opens this session in hopsesh"); } catch (err) { fail(err); }
+  } });
   out.push({ id: "copy-id", label: "Copy session ID", run: async () => { await api("CopyText", e.cloud ? e.cloud.id : e.session || e.key.split("/").pop()); toast("Copied the session ID"); } });
   if (!e.cloud) {
     out.push({ id: "rename", label: "Rename…", disabled: !e.canRename, why: e.canRename ? "" : `hopsesh can't rename ${e.agentName} sessions`, run: () => renameFn(e) });

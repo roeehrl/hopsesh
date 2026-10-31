@@ -157,3 +157,23 @@ test("Remote Control for every session is switched on this machine's page", asyn
   await sw.click();
   await expect(sw).toHaveAttribute("aria-checked", "false");
 });
+
+test("this Mac's page suggests MyCNC for the phone, and the suggestion can be hidden", async ({ page }) => {
+  await machinesTab(page);
+  const section = detail(page).locator("#phone-companion");
+  if (process.platform !== "darwin") {
+    // MyCNC Host runs on macOS only.
+    await expect(detail(page).locator("#remote-control-here")).toBeVisible({ timeout: 30_000 });
+    await expect(section).toHaveCount(0);
+    return;
+  }
+  await expect(section).toContainText("Control this machine from your phone: MyCNC", { timeout: 30_000 });
+  await expect(section.getByRole("button", { name: "Learn more" })).toBeVisible();
+  await section.getByRole("button", { name: "Hide" }).click();
+  await expect(section).toHaveCount(0);
+  // It stays hidden when the page is shown again.
+  await menu(page, "sessions");
+  await machinesTab(page);
+  await expect(detail(page).locator("#remote-control-here")).toBeVisible({ timeout: 30_000 });
+  await expect(detail(page).locator("#phone-companion")).toHaveCount(0);
+});

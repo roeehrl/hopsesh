@@ -74,7 +74,7 @@ test("the details pane: a status line, one action row, the conversation and the 
   await expect(d.getByRole("button", { name: "Move", exact: true })).toBeFocused();
   // ⋯ holds the rest.
   await d.getByRole("button", { name: "More actions" }).click();
-  for (const name of ["Open a shell in its folder", /^(Reveal in Finder|Show in Explorer|Show in Files)/, "Copy resume command", "Copy session ID", "Rename…", "Open transcript"]) {
+  for (const name of ["Open a shell in its folder", /^(Reveal in Finder|Show in Explorer|Show in Files)/, "Copy resume command", "Copy hopsesh link", "Copy session ID", "Rename…", "Open transcript"]) {
     await expect(page.getByRole("menuitem", { name })).toBeEnabled();
   }
   await page.keyboard.press("Escape");

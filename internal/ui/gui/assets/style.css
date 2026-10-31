@@ -1006,3 +1006,6 @@ body.terminal-right .divider[data-pane="inspector"]{display:none}
 .cd-insession { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 8px; background: var(--accent-soft); }
 .cd-cmd { display: flex; gap: 8px; align-items: center; }
 .cd-cmd code { font-family: var(--mono); font-size: 12.5px; padding: 3px 8px; border-radius: 6px; background: var(--panel); border: 1px solid var(--line); overflow-wrap: anywhere; }
+
+/* The phone companion line on Settings › Machines: Learn more, and Hide. */
+.mline-actions { display: inline-flex; align-items: center; gap: 10px; }
