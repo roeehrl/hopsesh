@@ -12,7 +12,7 @@ description: >-
 license: Apache-2.0
 compatibility: Requires the hopsesh CLI; other machines need SSH access.
 metadata:
-  hopsesh-version: "0.6.4"
+  hopsesh-version: "0.7.0"
 ---
 
 # Moving coding-agent sessions with hopsesh
@@ -85,7 +85,8 @@ briefing the other agent reads.
 ## Check what hopsesh can do on a machine
 
 `hopsesh hosts status --json` lists every machine's checks (`hopsesh`, `receiving`,
-`login`, `cli`, and each agent folder's `hook` and `skill`), each with a `state` (ok, warn,
+`login`, `cli`, `copies` (every hopsesh there one version; `installs` lists them), and each
+agent folder's `hook` and `skill`), each with a `state` (ok, warn,
 error, off, unknown), a `reason`, and a `fix` when one exists. When a move's plan says the
 original can't be blocked (`cannotProtect`), these say why; tell the user the fix (an
 update is `hopsesh hosts setup <machine>`, which is theirs to run).
