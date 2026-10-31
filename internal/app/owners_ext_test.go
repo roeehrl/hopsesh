@@ -52,6 +52,11 @@ func TestOwnerRecords(t *testing.T) {
 	if r := OwnerOf(got, unknown); r == nil {
 		t.Fatal("when the agent can't say which process has it, the running record counts")
 	}
+	profiled := open
+	profiled.Session.Key.Profile = "b7de7f2b"
+	if r := OwnerOf(got, profiled); r == nil {
+		t.Fatal("a record without an account folder names the session in any folder")
+	}
 	if got := readOwnerRecords(filepath.Join(dir, "missing"), alive); got != nil {
 		t.Fatalf("no folder: %+v", got)
 	}

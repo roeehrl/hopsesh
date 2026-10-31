@@ -18,8 +18,10 @@ There are two ways in. Both carry the same messages.
    - Send one line, `{"mode":"client"}`. The answer is one line,
      `{"ok":true,"version":"…","pid":…}` (or `{"error":"…"}`), and then the API starts.
 2. **`hopsesh client --stdio`**, a process whose standard input and output carry the API. When
-   hopsesh serve runs it passes the connection on to it; otherwise it answers itself. The only
-   difference is that `terminal.open` then needs hopsesh serve (error `nologin`).
+   hopsesh serve runs and knows the client API, it passes the connection on to it. Otherwise,
+   when serve isn't running or is an older hopsesh, it answers itself. The only difference is
+   that `terminal.open` then needs hopsesh serve (error `nologin`); `hello`'s `login` and
+   `features` say which you got.
 
 If there is no socket, hopsesh may still be installed but not serving. Run `hopsesh client
 --stdio`, or point the user to *Start at login* (`hopsesh serve install`). Don't offer to
@@ -61,8 +63,7 @@ not for a version.
 
 - `api` is the version both ends agreed. If they share none, the error is `api`, with a fix.
 - `endpoint` is this machine's identity (see Identity below). On a machine where hopsesh has
-  never run, it is empty until the first `catalog` creates it; read it from the catalog's
-  local machine then.
+  never run, hello creates it.
 - `login` is true when hopsesh serve answers, from the user's login session.
 - `features`:
 
@@ -97,7 +98,7 @@ Sessions come newest first.
 | Field | Meaning |
 |---|---|
 | `ref` | Names it in `plan` and `terminal.open`: `<machine>:<agent>[@profile]/<session>`. Opaque: don't build or parse it. |
-| `key` | `{agent, profile, session}`: unique together with `endpoint`. `profile` is the account folder there; `""` is its default. |
+| `key` | `{agent, profile, session}`: unique together with `endpoint`. `profile` is the account folder there, as an opaque id (often a hash, also for the agent's default folder). Copy it; don't compare it with `""`. |
 | `machine` | hopsesh's name for the machine (or the cloud) |
 | `endpoint` | the machine's identity (`""` for a cloud session) |
 | `cloud` | true for a cloud session |
@@ -120,7 +121,7 @@ Sessions come newest first.
 | `name`, `endpoint`, `local`, `os` | which machine |
 | `status` | `ok`, or why it can't be read now |
 | `problem`, `fix` | when `status` isn't `ok`: what went wrong, and what the user can do |
-| `hopsesh` | the hopsesh version there |
+| `hopsesh` | the hopsesh version installed there (on this machine, the installed copy, which can differ from the one answering: `hello` has that one's `version`) |
 | `presence` | `login` (hopsesh serve answers there), `ssh` (reached over SSH only) or `none` |
 | `agents` | the agents found there |
 | `checked` | when it was read |
@@ -264,6 +265,8 @@ per process: `~/.hopsesh/owners/<program>/<pid>.json`. On Windows that is
 - `<program>` is lowercase letters, digits and dashes (at most 40 characters), and equals
   `owner`.
 - The file is named by `pid`, and the folder is created 0700.
+- `session` is the session's `key` as the catalog shows it. A record without `profile` (or with
+  `""`) matches that agent's session id in any account folder.
 - Write it atomically (to a temporary file, then rename) when the process starts, and remove it
   when the process ends. A file under 16 KiB is read.
 - `stop` is shown to the user as written; hopsesh never runs it.
