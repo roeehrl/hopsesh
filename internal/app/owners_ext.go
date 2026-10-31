@@ -106,6 +106,10 @@ func readOwnerRecord(path string) (OwnerRecord, bool) {
 // so a reused process id never names an owner.
 func OwnerOf(records map[agent.SessionKey][]OwnerRecord, e Entry) *OwnerRecord {
 	rs := records[e.Session.Key]
+	// A record that leaves the account folder out names the session by agent and id.
+	if k := e.Session.Key; k.Profile != "" {
+		rs = append(slices.Clone(rs), records[agent.SessionKey{Agent: k.Agent, Session: k.Session}]...)
+	}
 	if len(rs) == 0 || e.Live.State == agent.Ended {
 		return nil
 	}

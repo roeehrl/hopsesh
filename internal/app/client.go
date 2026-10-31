@@ -142,6 +142,15 @@ func (s *clientSession) handle(ctx context.Context, c *clientapi.Conn, id json.R
 
 func (s *clientSession) hello(ctx context.Context) clientapi.HelloResult {
 	endpoint, _ := s.a.LocalAccountEndpoint(ctx)
+	if endpoint == "" {
+		// hopsesh never ran here: give this machine its identity now, as its first scan
+		// would, so a client can rely on it from hello on.
+		m := s.a.localMachine(ctx)
+		if err := m.CommitIdentity(ctx); err == nil {
+			endpoint, _ = m.ReadIdentity(ctx)
+		}
+		m.Close()
+	}
 	features := []string{clientapi.FeatureCatalogWatch, clientapi.FeaturePush, clientapi.FeatureOwners}
 	if s.a.Login != nil {
 		features = append(features, clientapi.FeatureTerminal)

@@ -184,11 +184,13 @@ func clientCmd() *cobra.Command {
 			// terminals and sees the Keychain.
 			if os.Getenv("HOPSESH_CLIENT_HERE") == "" {
 				if home, err := os.UserHomeDir(); err == nil {
-					c, br, _, err := serve.Dial(context.Background(), home, serve.ModeClient)
+					// An older hopsesh serve doesn't know the client API (it refuses the
+					// mode): this one answers instead, without serve's terminals.
+					c, br, w, err := serve.Dial(context.Background(), home, serve.ModeClient)
 					switch {
 					case err == nil:
 						return serve.Proxy(c, br, os.Stdin, os.Stdout)
-					case !errors.Is(err, serve.ErrNotRunning):
+					case !errors.Is(err, serve.ErrNotRunning) && w.Error == "":
 						return err
 					}
 				}
