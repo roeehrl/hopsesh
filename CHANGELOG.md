@@ -6,6 +6,23 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+
+- A client API for other programs on the same machine, such as a phone companion's host
+  ([docs/client-api.md](docs/client-api.md)). It is versioned on its own (API 1) and
+  reached through hopsesh serve's socket (`{"mode":"client"}`) or `hopsesh client --stdio`.
+  - **The catalog:** every session and machine hopsesh knows, with each machine's identity,
+    a session's live state and Remote Control, and its lineage replica and last hop. It
+    also lists what needs the user: an old copy that is open or was used after a move, or
+    a machine that needs something.
+  - **Watching:** changes arrive as events, this machine's within seconds.
+  - **Moving:** plan a move or continuation here, or a push to another machine, then
+    apply it with each step as an event and a receipt. Undo it by its journal.
+  - **Terminals:** run a session in a terminal hopsesh serve owns.
+- Owner records: a program that runs agent processes itself writes
+  `~/.hopsesh/owners/<program>/<pid>.json`. hopsesh then names it as the session's owner,
+  and the client API won't apply a move of that session until the program has stopped it.
+
 ## [0.7.0] - 2026-10-31
 
 A running Claude Code session says whether Remote Control reaches it, and Settings ›

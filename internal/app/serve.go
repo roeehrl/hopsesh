@@ -122,6 +122,14 @@ func (a *App) serveConn(ctx context.Context, c net.Conn, r *bufio.Reader, h serv
 		if serve.Reply(c, ok) == nil {
 			_ = conv.Serve(ctx, r, c)
 		}
+	case serve.ModeClient:
+		conv := *a
+		if cfg, err := config.Load(); err == nil {
+			conv.Cfg = cfg
+		}
+		if serve.Reply(c, ok) == nil {
+			_ = conv.ServeClient(ctx, r, c)
+		}
 	case serve.ModeTerminal:
 		if serve.Reply(c, ok) != nil {
 			return

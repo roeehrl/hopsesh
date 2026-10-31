@@ -12,6 +12,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/move"
+	"github.com/roeehrl/hopsesh/internal/core/serve"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -166,6 +167,41 @@ func peerCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().Bool("stdio", false, "speak the peer protocol on standard input and output")
+	return cmd
+}
+
+func clientCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:    "client",
+		Short:  "Speak hopsesh's client API on standard input and output (for other programs; docs/client-api.md)",
+		Hidden: true,
+		Args:   cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if stdio, _ := cmd.Flags().GetBool("stdio"); !stdio {
+				return errors.New("hopsesh client is for programs: run it with --stdio")
+			}
+			// hopsesh in the login session answers, when it runs here: it can open
+			// terminals and sees the Keychain.
+			if os.Getenv("HOPSESH_CLIENT_HERE") == "" {
+				if home, err := os.UserHomeDir(); err == nil {
+					c, br, _, err := serve.Dial(context.Background(), home, serve.ModeClient)
+					switch {
+					case err == nil:
+						return serve.Proxy(c, br, os.Stdin, os.Stdout)
+					case !errors.Is(err, serve.ErrNotRunning):
+						return err
+					}
+				}
+			}
+			r, err := newRun(cmd)
+			if err != nil {
+				return err
+			}
+			defer r.app.Catalog.Close()
+			return r.app.ServeClient(context.Background(), os.Stdin, os.Stdout)
+		},
+	}
+	cmd.Flags().Bool("stdio", false, "speak the client API on standard input and output")
 	return cmd
 }
 
