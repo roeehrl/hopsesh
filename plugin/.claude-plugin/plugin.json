@@ -1,7 +1,7 @@
 {
   "name": "hopsesh",
   "displayName": "hopsesh",
-  "version": "0.6.4",
+  "version": "0.7.0",
   "description": "Move Claude Code and Codex sessions to another computer, continue one in the other agent and back, or hand it to the cloud. The hopsesh skill lets your agent do it for you. Needs the hopsesh CLI.",
   "author": { "name": "Codonic", "url": "https://codonic.dev" },
   "homepage": "https://codonic.dev/apps/hopsesh",

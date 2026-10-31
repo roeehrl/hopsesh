@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## [0.7.0] - 2026-10-31
+
+A running Claude Code session says whether Remote Control reaches it, and Settings ›
+Machines can start every session there connected. hopsesh installs from Homebrew, Scoop and
+winget, and its skill as a plugin from inside the agents. Every hopsesh on a machine is one
+version, the terminal's sessions come back after quitting or updating, and the copy a move
+leaves behind shows as an old copy.
+
 ### Added
 
 - A running Claude Code session says whether Remote Control reaches it now, on this machine
@@ -1099,6 +1107,7 @@ is refused and set aside (the app offers this), and machines are added again.
 - The terminal UI no longer carries out a plan you pressed `y` on while a changed one was
   still being worked out.
 
+[0.7.0]: https://github.com/roeehrl/hopsesh/releases/tag/v0.7.0
 [0.6.4]: https://github.com/roeehrl/hopsesh/releases/tag/v0.6.4
 [0.6.3]: https://github.com/roeehrl/hopsesh/releases/tag/v0.6.3
 [0.6.2]: https://github.com/roeehrl/hopsesh/releases/tag/v0.6.2
