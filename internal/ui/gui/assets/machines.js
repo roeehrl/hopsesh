@@ -715,12 +715,12 @@ function phoneSection() {
   const hide = c.installed ? null : h("button", { class: "link", onclick: () => { try { localStorage.setItem(PHONE_HIDDEN, "1"); } catch { /* ignore */ } refresh(); } }, "Hide");
   const st = c.running ? { state: "ok", text: `${c.name} Host runs here${c.version ? " · " + c.version : ""}` }
     : c.installed ? { state: "warn", text: `${c.name} Host is installed but not running: open it to reach ${sys.here} from your phone` }
-    : { state: "off", text: `Control ${sys.here} from your iPhone or iPad with ${c.name}` };
+    : { state: "off", text: `Control this machine from your phone: ${c.name}` };
   return h("section", { class: "msec", id: "phone-companion" }, h("h3", {}, "Phone"),
     line(st, c.name, h("span", { class: "mline-actions" }, learn, hide)),
     h("span", { class: "muted", style: "font-size:12px" }, c.installed
       ? `Sessions here have “Follow on your phone”, which opens them in ${c.name}.`
-      : `${c.name} shows your agents on your phone, flags the ones that need you, and lets you answer them. It works over your own network, with no relay, beside hopsesh.`));
+      : `Approvals, terminals and the desktop of your Macs from iPhone, iPad or Mac. It needs ${c.name} Host on the Mac (macOS 14 or later) and connects over your LAN, Tailscale or ZeroTier, with no relay and no account.`));
 }
 
 const RANK = { ok: 0, off: 1, unknown: 2, warn: 3, error: 4 };

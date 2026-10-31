@@ -103,7 +103,7 @@ func doctorCmd() *cobra.Command {
 			add("this machine: repos folder", true, r.app.Cfg.ReposDir)
 			if c := app.DetectCompanion(); c.Supported {
 				// Optional: never a failed check.
-				detail := "not installed (optional: control this Mac from your iPhone or iPad, " + c.Page + ")"
+				detail := "not installed (optional: control this machine from your phone, " + c.Page + ")"
 				switch {
 				case c.Running:
 					detail = c.Name + " Host runs here" + map[bool]string{true: " · " + c.Version, false: ""}[c.Version != ""]

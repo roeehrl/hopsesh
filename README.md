@@ -546,10 +546,10 @@ and [§14](docs/design.md#14-the-command-line-tool-from-the-app).
 
 ## On your phone
 
-[MyCNC](https://codonic.dev/apps/mycnc) is hopsesh's companion for iPhone and iPad. It
-shows the agents on a Mac running MyCNC Host, flags the ones that need you, and lets you
-answer them. Like hopsesh, it works over your own network (LAN, Tailscale or ZeroTier), with
-no relay. On a Mac with MyCNC Host, a running session's details offer **Follow on your
+[MyCNC](https://codonic.dev/apps/mycnc/) is hopsesh's companion: approvals, terminals and the
+desktop of your Macs from iPhone, iPad or Mac. It needs MyCNC Host on the Mac (macOS 14 or
+later) and, like hopsesh, connects over your own network (LAN, Tailscale or ZeroTier), with
+no relay and no account. On a Mac with MyCNC Host, a running session's details offer **Follow on your
 phone**, and Settings › Machines says whether MyCNC Host runs there. hopsesh only links to
 MyCNC; it never installs it.
 

@@ -1,15 +1,17 @@
 package app
 
 import (
+	"bufio"
 	"encoding/json"
 	"io"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
-	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -18,7 +20,7 @@ import (
 // (its presence file) and opens its links; it never installs or starts it.
 const (
 	CompanionName = "MyCNC"
-	CompanionPage = "https://codonic.dev/apps/mycnc"
+	CompanionPage = "https://codonic.dev/apps/mycnc/"
 )
 
 // Companion is MyCNC Host on this machine, as far as hopsesh can tell.
@@ -27,7 +29,8 @@ type Companion struct {
 	Page string `json:"page"`
 	// Supported: MyCNC Host runs on this kind of machine (macOS).
 	Supported bool `json:"supported"`
-	// Installed: its presence file is here; Running: the process it names runs.
+	// Installed: its presence file is here (MyCNC Host writes it at every launch and
+	// removes it only when uninstalled); Running: its socket answers a ping.
 	Installed bool   `json:"installed"`
 	Running   bool   `json:"running"`
 	Version   string `json:"version,omitempty"`
@@ -51,12 +54,36 @@ func companionPresence() string {
 	return filepath.Join(home, ".local", "state", "mycnc", "presence.json")
 }
 
-// DetectCompanion reads MyCNC Host's presence file.
+// DetectCompanion reads MyCNC Host's presence file and pings its socket.
 func DetectCompanion() Companion {
-	return detectCompanion(companionPresence(), runtime.GOOS == "darwin", host.ProcessExists)
+	return detectCompanion(companionPresence(), runtime.GOOS == "darwin", pingCompanion)
 }
 
-func detectCompanion(path string, supported bool, alive func(int) bool) Companion {
+// pingCompanion asks MyCNC Host's socket whether it runs: {"ping":1} → {"pong":1,…}.
+func pingCompanion(socket string) bool {
+	if socket == "" {
+		return false
+	}
+	c, err := net.DialTimeout("unix", socket, 300*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(500 * time.Millisecond))
+	if _, err := c.Write([]byte(`{"ping":1}` + "\n")); err != nil {
+		return false
+	}
+	line, err := bufio.NewReader(io.LimitReader(c, 4<<10)).ReadBytes('\n')
+	if err != nil && len(line) == 0 {
+		return false
+	}
+	var pong struct {
+		Pong int `json:"pong"`
+	}
+	return json.Unmarshal(line, &pong) == nil && pong.Pong == 1
+}
+
+func detectCompanion(path string, supported bool, ping func(socket string) bool) Companion {
 	c := Companion{Name: CompanionName, Page: CompanionPage, Supported: supported}
 	if path == "" {
 		return c
@@ -68,21 +95,26 @@ func detectCompanion(path string, supported bool, alive func(int) bool) Companio
 	defer f.Close()
 	var p struct {
 		Version string `json:"version"`
-		PID     int    `json:"pid"`
+		Socket  string `json:"socket"`
 	}
 	b, err := io.ReadAll(io.LimitReader(f, 16<<10))
 	if err != nil || json.Unmarshal(b, &p) != nil {
 		return c
 	}
 	c.Installed, c.Version = true, p.Version
-	c.Running = p.PID > 0 && alive(p.PID)
+	c.Running = ping(p.Socket)
 	return c
 }
 
-// CompanionLink is the link that opens a session in MyCNC.
-func CompanionLink(endpoint string, k agent.SessionKey) string {
+// CompanionLink is the link that opens a session in MyCNC (it only ever opens a view);
+// machine is hopsesh's name for the session's machine, which MyCNC shows when it isn't
+// connected to it.
+func CompanionLink(endpoint, machine string, k agent.SessionKey) string {
 	q := url.Values{}
 	q.Set("endpoint", endpoint)
+	if machine != "" {
+		q.Set("machine", machine)
+	}
 	q.Set("agent", string(k.Agent))
 	if k.Profile != "" {
 		q.Set("profile", k.Profile)

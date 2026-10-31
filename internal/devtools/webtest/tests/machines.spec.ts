@@ -167,7 +167,7 @@ test("this Mac's page suggests MyCNC for the phone, and the suggestion can be hi
     await expect(section).toHaveCount(0);
     return;
   }
-  await expect(section).toContainText("from your iPhone or iPad with MyCNC", { timeout: 30_000 });
+  await expect(section).toContainText("Control this machine from your phone: MyCNC", { timeout: 30_000 });
   await expect(section.getByRole("button", { name: "Learn more" })).toBeVisible();
   await section.getByRole("button", { name: "Hide" }).click();
   await expect(section).toHaveCount(0);

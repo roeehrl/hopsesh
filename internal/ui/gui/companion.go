@@ -44,7 +44,7 @@ func (a *App) FollowOnPhone(machine, key string) error {
 	if endpoint == "" {
 		return errors.New(machine + " has no hopsesh identity yet: set hopsesh up there first")
 	}
-	return openInBrowser(app.CompanionLink(endpoint, e.Session.Key))
+	return openInBrowser(app.CompanionLink(endpoint, machine, e.Session.Key))
 }
 
 // SessionLink is hopsesh's link to a session, which opens it in hopsesh (Copy link).

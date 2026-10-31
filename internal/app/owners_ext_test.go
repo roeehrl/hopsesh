@@ -60,17 +60,17 @@ func TestOwnerRecords(t *testing.T) {
 func TestCompanion(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "presence.json")
-	alive := func(pid int) bool { return pid == 42 }
-	if c := detectCompanion(path, true, alive); c.Installed || c.Running || !c.Supported || c.Page == "" {
+	ping := func(socket string) bool { return socket == "/answers" }
+	if c := detectCompanion(path, true, ping); c.Installed || c.Running || !c.Supported || c.Page == "" {
 		t.Fatalf("no presence file: %+v", c)
 	}
-	os.WriteFile(path, []byte(`{"version":"0.2.0","socket":"/x","pid":42}`), 0o600)
-	if c := detectCompanion(path, true, alive); !c.Installed || !c.Running || c.Version != "0.2.0" {
+	os.WriteFile(path, []byte(`{"version":"0.2.0","socket":"/answers","pid":42}`), 0o600)
+	if c := detectCompanion(path, true, ping); !c.Installed || !c.Running || c.Version != "0.2.0" {
 		t.Fatalf("running: %+v", c)
 	}
-	os.WriteFile(path, []byte(`{"version":"0.2.0","pid":7}`), 0o600)
-	if c := detectCompanion(path, true, alive); !c.Installed || c.Running {
-		t.Fatalf("installed, not running: %+v", c)
+	os.WriteFile(path, []byte(`{"version":"0.2.0","socket":"/gone","pid":42}`), 0o600)
+	if c := detectCompanion(path, true, ping); !c.Installed || c.Running {
+		t.Fatalf("installed, not running (pid is only a hint): %+v", c)
 	}
 }
 
@@ -90,7 +90,7 @@ func TestSessionLinks(t *testing.T) {
 	if _, _, ok := ParseSessionLink("https://session/b536/claude/x"); ok {
 		t.Fatal("another scheme")
 	}
-	if m := CompanionLink("b536", agent.SessionKey{Agent: "codex", Session: "s 1"}); m != "mycnc://session?agent=codex&endpoint=b536&session=s+1" {
+	if m := CompanionLink("b536", "studio", agent.SessionKey{Agent: "codex", Session: "s 1"}); m != "mycnc://session?agent=codex&endpoint=b536&machine=studio&session=s+1" {
 		t.Fatalf("companion link: %s", m)
 	}
 }
