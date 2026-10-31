@@ -127,7 +127,8 @@ function header(e, viewJourney) {
 // openIn is where a running session is open, one line per place, each with Show.
 function openIn(e, m) {
   const rc = remoteLine(e, liveOf(e), m.places);
-  if (!m.places.length && !rc) return null;
+  const phone = phoneLine(e, liveOf(e));
+  if (!m.places.length && !rc && !phone) return null;
   const lines = [];
   for (const p of m.places) {
     if (p.kind === "hopsesh") {
@@ -149,7 +150,18 @@ function openIn(e, m) {
       can ? h("button", { class: "btn small", onclick: () => showPlace(e, p) }, "Show") : null));
   }
   if (rc) lines.push(rc);
+  if (phone) lines.push(phone);
   return h("div", { class: "sec" }, h("span", { class: "sec-h" }, "Open in"), lines);
+}
+
+// phoneLine follows a running session on the phone, in MyCNC, when MyCNC Host is here.
+function phoneLine(e, m) {
+  const c = state.info?.companion;
+  if (!m.live || e.cloud || !c?.installed) return null;
+  const follow = async () => { try { await api("FollowOnPhone", e.machine, e.key); } catch (err) { toast(cap(errText(err))); } };
+  return h("div", { class: "open-line phone-line" }, h("span", { class: "open-ic" }, icon(ICONS.external, 13)),
+    h("span", { class: "open-t" }, c.name, h("span", { class: "muted" }, c.running ? " — follow it on your phone" : ` — open ${c.name} Host to follow it on your phone`)),
+    h("button", { class: "btn small", onclick: follow }, "Follow on your phone"));
 }
 
 // remoteLine says whether the running session is connected to Remote Control (reachable

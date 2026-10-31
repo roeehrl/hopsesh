@@ -56,3 +56,41 @@ func TestOwnerRecords(t *testing.T) {
 		t.Fatalf("no folder: %+v", got)
 	}
 }
+
+func TestCompanion(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "presence.json")
+	alive := func(pid int) bool { return pid == 42 }
+	if c := detectCompanion(path, true, alive); c.Installed || c.Running || !c.Supported || c.Page == "" {
+		t.Fatalf("no presence file: %+v", c)
+	}
+	os.WriteFile(path, []byte(`{"version":"0.2.0","socket":"/x","pid":42}`), 0o600)
+	if c := detectCompanion(path, true, alive); !c.Installed || !c.Running || c.Version != "0.2.0" {
+		t.Fatalf("running: %+v", c)
+	}
+	os.WriteFile(path, []byte(`{"version":"0.2.0","pid":7}`), 0o600)
+	if c := detectCompanion(path, true, alive); !c.Installed || c.Running {
+		t.Fatalf("installed, not running: %+v", c)
+	}
+}
+
+func TestSessionLinks(t *testing.T) {
+	k := agent.SessionKey{Agent: "claude", Profile: "work", Session: "6149fe06"}
+	l := SessionLink("b536", k)
+	if l != "hopsesh://session/b536/claude/6149fe06?profile=work" {
+		t.Fatalf("link: %s", l)
+	}
+	ep, got, ok := ParseSessionLink(l)
+	if !ok || ep != "b536" || got != k {
+		t.Fatalf("parse: %v %s %+v", ok, ep, got)
+	}
+	if _, _, ok := ParseSessionLink("hopsesh://session/b536/claude"); ok {
+		t.Fatal("a link without a session")
+	}
+	if _, _, ok := ParseSessionLink("https://session/b536/claude/x"); ok {
+		t.Fatal("another scheme")
+	}
+	if m := CompanionLink("b536", agent.SessionKey{Agent: "codex", Session: "s 1"}); m != "mycnc://session?agent=codex&endpoint=b536&session=s+1" {
+		t.Fatalf("companion link: %s", m)
+	}
+}

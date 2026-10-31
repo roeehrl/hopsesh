@@ -184,7 +184,9 @@ type AgentCloudDTO struct {
 
 // Info is static information for the window.
 type Info struct {
-	DesktopManaged bool   `json:"desktopManaged"`
+	// Companion is MyCNC Host here, which the window recommends and links to.
+	Companion      app.Companion `json:"companion"`
+	DesktopManaged bool          `json:"desktopManaged"`
 	Version        string `json:"version"`
 	OS             string `json:"os"` // runtime.GOOS: the window words things for its system
 	Host           string `json:"host"`
@@ -291,6 +293,7 @@ func (a *App) info(fast bool) Info {
 	if f := listMenu; f != nil {
 		f(info.List.GroupBy, info.List.SortBy, info.List.Density == "compact")
 	}
+	info.Companion = app.DetectCompanion()
 	info.Where = cfg.AppResume()
 	if info.Where == config.ResumeAsk {
 		info.Where = config.AppResumeDefault // the app's Resume menu is the asking

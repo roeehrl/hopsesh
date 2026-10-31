@@ -19,6 +19,13 @@ All notable changes to this project are documented here. The format follows
   - **Moving:** plan a move or continuation here, or a push to another machine, then
     apply it with each step as an event and a receipt. Undo it by its journal.
   - **Terminals:** run a session in a terminal hopsesh serve owns.
+- On a Mac, Settings › Machines suggests [MyCNC](https://codonic.dev/apps/mycnc), the
+  companion for iPhone and iPad, and says whether MyCNC Host runs there (Hide puts the
+  suggestion away). With MyCNC Host there, a running session's details offer **Follow on
+  your phone**. `hopsesh doctor` lists it as optional. hopsesh only links to MyCNC.
+- `hopsesh://session/<machine id>/<agent>/<session>` links open a session in the hopsesh
+  app (macOS, and Windows through its installer). **Copy hopsesh link** in a session's ⋯
+  menu copies one.
 - Owner records: a program that runs agent processes itself writes
   `~/.hopsesh/owners/<program>/<pid>.json`. hopsesh then names it as the session's owner,
   and the client API won't apply a move of that session until the program has stopped it.

@@ -662,6 +662,7 @@ function machineDetail(r, d, extras = {}) {
           h("span", { class: "mtext" }, "Hook: ", a.hook.text, " · Skill: ", a.skill.text),
           h("span", { class: "mfix" })))) : null,
     st.version || r.local ? remoteSection(r.local ? "" : r.name, r.local ? sys.here : r.name) : null,
+    r.local ? phoneSection() : null,
     m ? presenceBlock(m) : null,
     m ? manage(m) : null];
 }
@@ -698,6 +699,28 @@ function remoteSection(machine, where) {
     line(state, "Every session", sw),
     many ? r.data.folders.map((f) => line({ state: f.error ? "error" : f.reason ? "unknown" : f.on ? "ok" : "off", text: f.error || f.reason || (f.on ? "On" : "Off") }, f.agentName + (f.profileLabel ? " · " + f.profileLabel : ""))) : null,
     h("span", { class: "muted", style: "font-size:12px" }, "Reach new sessions from claude.ai or the Claude app. Sets remoteControlAtStartup in each Claude Code folder's settings; Claude desktop's own setting covers sessions started there."));
+}
+
+// The phone: MyCNC, an iPhone and iPad app for the agents on a Mac running MyCNC Host.
+// hopsesh says whether MyCNC Host is here and links to it; it never installs it. The
+// suggestion can be hidden, in this window only.
+const PHONE_HIDDEN = "hopsesh.phone.hidden";
+function phoneSection() {
+  const c = state.info?.companion;
+  if (!c || !c.supported) return null;
+  let hidden = false;
+  try { hidden = localStorage.getItem(PHONE_HIDDEN) === "1"; } catch { /* storage off: show it */ }
+  if (hidden && !c.installed) return null;
+  const learn = h("button", { class: "btn small", onclick: () => api("OpenCompanionPage").catch(fail) }, c.installed ? "About " + c.name : "Learn more");
+  const hide = c.installed ? null : h("button", { class: "link", onclick: () => { try { localStorage.setItem(PHONE_HIDDEN, "1"); } catch { /* ignore */ } refresh(); } }, "Hide");
+  const st = c.running ? { state: "ok", text: `${c.name} Host runs here${c.version ? " · " + c.version : ""}` }
+    : c.installed ? { state: "warn", text: `${c.name} Host is installed but not running: open it to reach ${sys.here} from your phone` }
+    : { state: "off", text: `Control ${sys.here} from your iPhone or iPad with ${c.name}` };
+  return h("section", { class: "msec", id: "phone-companion" }, h("h3", {}, "Phone"),
+    line(st, c.name, h("span", { class: "mline-actions" }, learn, hide)),
+    h("span", { class: "muted", style: "font-size:12px" }, c.installed
+      ? `Sessions here have “Follow on your phone”, which opens them in ${c.name}.`
+      : `${c.name} shows your agents on your phone, flags the ones that need you, and lets you answer them. It works over your own network, with no relay, beside hopsesh.`));
 }
 
 const RANK = { ok: 0, off: 1, unknown: 2, warn: 3, error: 4 };
