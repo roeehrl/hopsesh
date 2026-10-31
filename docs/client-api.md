@@ -60,7 +60,9 @@ not for a version.
 ```
 
 - `api` is the version both ends agreed. If they share none, the error is `api`, with a fix.
-- `endpoint` is this machine's identity (see Identity below).
+- `endpoint` is this machine's identity (see Identity below). On a machine where hopsesh has
+  never run, it is empty until the first `catalog` creates it; read it from the catalog's
+  local machine then.
 - `login` is true when hopsesh serve answers, from the user's login session.
 - `features`:
 
