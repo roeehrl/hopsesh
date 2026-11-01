@@ -30,10 +30,12 @@ const (
 // Features are what this hopsesh answers beyond API 1's required methods. A client checks
 // for a feature instead of comparing versions.
 const (
-	FeatureCatalogWatch = "catalog.watch" // catalog changes as events
-	FeaturePush         = "plan.push"     // plan and apply a move from here to another machine
-	FeatureOwners       = "owners"        // reads other programs' owner records (owners/<name>/<pid>.json)
-	FeatureTerminal     = "terminal.open" // runs a session in a terminal hopsesh owns (needs hopsesh serve)
+	FeatureCatalogWatch = "catalog.watch"  // catalog changes as events
+	FeaturePush         = "plan.push"      // plan and apply a move from here to another machine
+	FeatureOwners       = "owners"         // reads other programs' owner records (owners/<name>/<pid>.json)
+	FeatureTerminal     = "terminal.open"  // runs a session in a terminal hopsesh owns (needs hopsesh serve)
+	FeatureNotes        = "plan.notes"     // plans carry notes: each warning and blocker with its fix and actions
+	FeatureSetup        = "machines.setup" // sets hopsesh up on a machine reached over SSH
 )
 
 // Methods.
@@ -48,12 +50,14 @@ const (
 	MethodCancel         = "cancel"          // drop a plan that was not applied
 	MethodUndo           = "undo"            // reverse an applied plan by its journal id
 	MethodTerminalOpen   = "terminal.open"   // run a session here in a terminal hopsesh owns
+	MethodSetup          = "machines.setup"  // set hopsesh up on a machine; step events, then a report
 )
 
 // Events.
 const (
 	EventCatalogChanged = "catalog.changed"
 	EventStep           = "apply.step"
+	EventSetupStep      = "setup.step"
 )
 
 // Error codes.

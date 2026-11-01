@@ -145,26 +145,79 @@ type PlanParams struct {
 	Dir string `json:"dir,omitempty"`
 	// Fork keeps the original usable instead of blocking it.
 	Fork bool `json:"fork,omitempty"`
+	// Clone clones the repository there when it isn't (into hopsesh's repositories folder).
+	Clone bool `json:"clone,omitempty"`
+	// StopOpen lets hopsesh quit a copy of the session that is open where it goes.
+	StopOpen bool `json:"stopOpen,omitempty"`
+	// Conflict chooses what happens to a copy already there: "replace" (kept for undo) or
+	// "keep-both" (this one comes in as a separate session).
+	Conflict string `json:"conflict,omitempty"`
+	// Worktree is "create" (work in a worktree on the session's branch), "main" (the main
+	// checkout as it is) or "" (a worktree only when the session ran in one).
+	Worktree string `json:"worktree,omitempty"`
+	// CarryRules adds the user's instructions for every project of the session's agent to
+	// the briefing, when it is continued in another agent.
+	CarryRules bool `json:"carryRules,omitempty"`
 }
 
 // Plan is what a move or continuation would do. Nothing has changed yet.
 type Plan struct {
-	ID        string    `json:"id"` // apply or cancel it by this, on this connection
-	Kind      string    `json:"kind"`
-	Title     string    `json:"title"`
-	Agent     string    `json:"agent"`
-	From      PlanSide  `json:"from"`
-	To        PlanSide  `json:"to"`
-	Files     int       `json:"files"`
-	Bytes     int64     `json:"bytes"`
-	Repo      *PlanRepo `json:"repo,omitempty"`
-	Conflict  string    `json:"conflict,omitempty"`
-	Warnings  []string  `json:"warnings,omitempty"`
-	Blockers  []string  `json:"blockers,omitempty"`
-	NoWork    bool      `json:"noWork,omitempty"` // it is there already
-	Protected bool      `json:"protected"`        // the original will be blocked from going on
-	Owner     *Owner    `json:"owner,omitempty"`  // another program runs the original: it must stop it first
-	Live      bool      `json:"live,omitempty"`   // the original is open now
+	ID       string    `json:"id"` // apply or cancel it by this, on this connection
+	Kind     string    `json:"kind"`
+	Title    string    `json:"title"`
+	Agent    string    `json:"agent"`
+	From     PlanSide  `json:"from"`
+	To       PlanSide  `json:"to"`
+	Files    int       `json:"files"`
+	Bytes    int64     `json:"bytes"`
+	Repo     *PlanRepo `json:"repo,omitempty"`
+	Conflict string    `json:"conflict,omitempty"`
+	Warnings []string  `json:"warnings,omitempty"` // each note's text, for warnings
+	Blockers []string  `json:"blockers,omitempty"` // each note's text, for blockers
+	// Notes are the warnings and blockers with what the user can do about each.
+	Notes     []PlanNote `json:"notes,omitempty"`
+	NoWork    bool       `json:"noWork,omitempty"` // it is there already
+	Protected bool       `json:"protected"`        // the original will be blocked from going on
+	Owner     *Owner     `json:"owner,omitempty"`  // another program runs the original: it must stop it first
+	Live      bool       `json:"live,omitempty"`   // the original is open now
+}
+
+// Note levels.
+const (
+	NoteBlocker = "blocker" // the plan cannot be applied while it stands
+	NoteWarning = "warning" // the user should know before applying
+)
+
+// Action kinds.
+const (
+	// ActionPlan plans again with the plan's params changed by Params; Ask names params the
+	// user fills in first (such as "dir").
+	ActionPlan = "plan"
+	// ActionSetup sets hopsesh up on Machine (machines.setup), then plans again.
+	ActionSetup = "setup"
+)
+
+// PlanNote is one warning or blocker of a plan.
+type PlanNote struct {
+	Level string `json:"level"`
+	// Text says what is so, in words for anyone (no command-line flags).
+	Text string `json:"text"`
+	// Fix is what the user can do about it, in words, when there is something.
+	Fix string `json:"fix,omitempty"`
+	// Actions are what a client can offer for it, best first.
+	Actions []PlanAction `json:"actions,omitempty"`
+}
+
+// PlanAction is something a client can offer to resolve a note.
+type PlanAction struct {
+	Kind  string `json:"kind"`
+	Label string `json:"label"` // a button's words
+	// Params change the plan's params, for an ActionPlan.
+	Params map[string]any `json:"params,omitempty"`
+	// Ask names the params the user chooses first, for an ActionPlan.
+	Ask []string `json:"ask,omitempty"`
+	// Machine is the machine to set hopsesh up on, for an ActionSetup.
+	Machine string `json:"machine,omitempty"`
 }
 
 // PlanSide is one end of a plan.
@@ -250,6 +303,29 @@ type Terminal struct {
 	Dir     string `json:"dir,omitempty"`
 	State   string `json:"state"`
 	Started string `json:"started,omitempty"`
+}
+
+// SetupParams sets hopsesh up on a machine hopsesh reaches over SSH: it installs this
+// hopsesh there and has it start at each login there. Nothing needs administrator rights.
+type SetupParams struct {
+	Machine string `json:"machine"`
+}
+
+// SetupStep is a machines.setup step event. State is done, skipped, waiting or failed.
+type SetupStep struct {
+	Machine string `json:"machine"`
+	Name    string `json:"name"`
+	State   string `json:"state"`
+	Detail  string `json:"detail,omitempty"`
+}
+
+// Setup reports a machines.setup.
+type Setup struct {
+	Machine string `json:"machine"`
+	Version string `json:"version"`
+	// Login: hopsesh answers from the login session there now.
+	Login bool        `json:"login"`
+	Steps []SetupStep `json:"steps"`
 }
 
 // WatchParams starts a catalog watch.
