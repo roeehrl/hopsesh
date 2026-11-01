@@ -147,6 +147,11 @@ func TestClientAPIContinueApplyUndo(t *testing.T) {
 	if bl, _ := plan["blockers"].([]any); len(bl) > 0 {
 		t.Fatalf("blockers: %v", bl)
 	}
+	if ws, _ := plan["warnings"].([]any); len(ws) > 0 {
+		if ns, _ := plan["notes"].([]any); len(ns) != len(ws) {
+			t.Fatalf("each warning is a note: %v, %v", ws, ns)
+		}
+	}
 
 	receipt, steps := c.call(clientapi.MethodApply, clientapi.ApplyParams{Plan: plan["id"].(string)})
 	if receipt["error"] != nil {

@@ -58,7 +58,7 @@ not for a version.
 
 ```json
 {"id":1,"result":{"api":1,"minApi":1,"version":"0.8.0","endpoint":"b536…bf49","machine":"studio","os":"darwin","login":true,
-  "features":["catalog.watch","plan.push","owners","terminal.open"]}}
+  "features":["catalog.watch","plan.push","owners","plan.notes","machines.setup","terminal.open"]}}
 ```
 
 - `api` is the version both ends agreed. If they share none, the error is `api`, with a fix.
@@ -72,6 +72,8 @@ not for a version.
   | `catalog.watch` | `catalog.watch` sends changes |
   | `plan.push` | `plan` can send a session from this machine to another |
   | `owners` | hopsesh reads owner records (see Owner records below) |
+  | `plan.notes` | a plan carries `notes`: each warning and blocker with its fix and actions |
+  | `machines.setup` | `machines.setup` sets hopsesh up on another machine |
   | `terminal.open` | `terminal.open` works (hopsesh serve runs) |
 
 ### catalog
@@ -169,6 +171,13 @@ Works out a move or continuation. Nothing changes.
 | `agent` | continue it in another agent (`"claude"`, `"codex"`); `""` keeps its own |
 | `dir` | the folder it goes to (`""`: hopsesh finds or clones the same repository) |
 | `fork` | keep the original usable instead of blocking it |
+| `clone` | clone the repository there when it isn't (into hopsesh's repositories folder) |
+| `stopOpen` | let hopsesh quit a copy of the session that is open where it goes |
+| `conflict` | a copy is already there: `"replace"` it (kept for undo) or `"keep-both"` (this one comes in as a separate session) |
+| `worktree` | `"create"`: work in a worktree on the session's branch; `"main"`: the main checkout as it is; `""`: a worktree only when the session ran in one |
+| `carryRules` | continuing in another agent: add the user's instructions for every project of the session's agent to the briefing |
+
+A client rarely sets these up front: a note's action says when one is needed (below).
 
 **Result:** a Plan.
 
@@ -181,12 +190,41 @@ Works out a move or continuation. Nothing changes.
 | `repo` | `{action, path, branch, remote}`: what happens to the code there (use, clone, worktree …) |
 | `conflict`, `warnings` | what the user should know |
 | `blockers` | when not empty, the plan cannot be applied: show them |
+| `notes` | the blockers, then the warnings, each with what the user can do (below). `blockers` and `warnings` are their texts. |
 | `noWork` | it is there already |
 | `protected` | the original will be blocked from going on, so it isn't continued twice |
 | `live` | the original is open now |
 | `owner` | another program runs the original (see Owner records below) |
 
 Show the plan and get the user's explicit confirmation before `apply`.
+
+**Notes.** Each is `{level, text, fix, actions}`:
+
+- `level` is `"blocker"` or `"warning"`.
+- `text` says what is so, in words for anyone: no command-line flags.
+- `fix`, when present, is what the user can do about it, in words.
+- `actions`, best first, are what the client can offer for it, each with a `label` for its
+  button:
+  - `{"kind":"plan","params":{…},"ask":[…]}`: plan again with the same params, changed by
+    `params`. `ask` names params the user chooses first, such as `"dir"` (a folder where the
+    session goes). With neither, it is "try again".
+  - `{"kind":"setup","machine":"…"}`: set hopsesh up on that machine (`machines.setup`), then
+    plan again.
+
+```json
+{"level":"blocker","text":"github.com/acme/api is not cloned on this machine",
+ "fix":"let hopsesh clone it into ~/src/api, or choose a folder where it is cloned",
+ "actions":[{"kind":"plan","label":"Clone it","params":{"clone":true}},
+            {"kind":"plan","label":"Choose a folder","ask":["dir"]}]}
+```
+
+```json
+{"level":"warning","text":"the original on demo2 won't be protected: without hopsesh there, nothing stops it from being continued on demo2 too, and the two copies drift apart",
+ "fix":"set up hopsesh on demo2 first",
+ "actions":[{"kind":"setup","label":"Set up hopsesh on demo2","machine":"demo2"}]}
+```
+
+`apply` of a plan with blockers fails with `blocked`; its `fix` joins the blockers' fixes.
 
 ### apply
 
@@ -229,6 +267,24 @@ Show the plan and get the user's explicit confirmation before `apply`.
 `{"method":"undo","params":{"journal":"<journal id>","force":false}}` reverses an applied move,
 on both machines for a push. It refuses when the session was used since, unless `force` is set
 (that later work is lost). The result is `{"journal":"…","title":"…"}`.
+
+### machines.setup
+
+```json
+{"id":9,"method":"machines.setup","params":{"machine":"demo2"}}
+```
+
+Sets hopsesh up on another machine hopsesh reaches over SSH, as `hopsesh hosts setup` does
+(feature `machines.setup`): it copies this hopsesh there (into `~/.local/bin`), lets it
+receive sessions, and has it start in the user's login session there at each login. Nothing
+needs administrator rights, and nothing is installed anywhere unless a client asks. Ask the
+user first.
+
+- **Steps:** `setup.step` events, `{"machine":"demo2","name":"…","state":"done","detail":"…"}`,
+  with `state` done, skipped, waiting or failed.
+- **Result:** `{machine, version, login, steps}`; `login` is true when hopsesh answers from the
+  login session there now.
+- **Errors:** `not-found` for a machine hopsesh doesn't know; `failed` with what went wrong.
 
 ### terminal.open
 

@@ -19,6 +19,10 @@ All notable changes to this project are documented here. The format follows
   - **Moving:** plan a move or continuation here, or a push to another machine, then
     apply it with each step as an event and a receipt. Undo it by its journal.
   - **Terminals:** run a session in a terminal hopsesh serve owns.
+  - **Plan notes:** each warning and blocker says what the user can do, in words without
+    command-line flags, with actions a client can offer as buttons: plan again with a
+    folder, a clone, the open copy quit, the copy there replaced or kept, a worktree, or the
+    user's instructions carried; or set hopsesh up on the machine (`machines.setup`).
 - On a Mac, Settings › Machines suggests [MyCNC](https://codonic.dev/apps/mycnc/), the
   companion for iPhone, iPad and Mac, and says whether MyCNC Host runs there (Hide puts the
   suggestion away). With MyCNC Host there, a running session's details offer **Follow on

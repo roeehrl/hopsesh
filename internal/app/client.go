@@ -136,6 +136,12 @@ func (s *clientSession) handle(ctx context.Context, c *clientapi.Conn, id json.R
 			return nil, err
 		}
 		return s.terminal(ctx, p)
+	case clientapi.MethodSetup:
+		var p clientapi.SetupParams
+		if err := read(&p); err != nil {
+			return nil, err
+		}
+		return s.setup(ctx, c, id, p)
 	}
 	return nil, clientapi.Errorf(clientapi.CodeUnknown, "this hopsesh does not know %q", method)
 }
@@ -151,7 +157,7 @@ func (s *clientSession) hello(ctx context.Context) clientapi.HelloResult {
 		}
 		m.Close()
 	}
-	features := []string{clientapi.FeatureCatalogWatch, clientapi.FeaturePush, clientapi.FeatureOwners}
+	features := []string{clientapi.FeatureCatalogWatch, clientapi.FeaturePush, clientapi.FeatureOwners, clientapi.FeatureNotes, clientapi.FeatureSetup}
 	if s.a.Login != nil {
 		features = append(features, clientapi.FeatureTerminal)
 	}
@@ -510,7 +516,20 @@ func (s *clientSession) plan(ctx context.Context, p clientapi.PlanParams) (*clie
 	}
 	cp.e = e
 	opts := s.a.DefaultOptions()
-	opts.Fork, opts.TargetDir = p.Fork, p.Dir
+	opts.Fork, opts.TargetDir, opts.Clone, opts.StopLocal, opts.CarryRules = p.Fork, p.Dir, p.Clone, p.StopOpen, p.CarryRules
+	switch p.Conflict {
+	case "", move.ConflictReplace, move.ConflictKeepBoth:
+		opts.Conflict = p.Conflict
+	default:
+		return nil, clientapi.Errorf(clientapi.CodeBadRequest, "conflict is \"replace\" or \"keep-both\", not %q", p.Conflict)
+	}
+	switch move.WorktreeMode(p.Worktree) {
+	case "":
+	case move.WorktreeCreate, move.WorktreeMain:
+		opts.Worktree = move.WorktreeMode(p.Worktree)
+	default:
+		return nil, clientapi.Errorf(clientapi.CodeBadRequest, "worktree is \"create\" or \"main\", not %q", p.Worktree)
+	}
 	if to == "" {
 		cp.plan, cp.in, err = s.a.Plan(ctx, inv, e, agent.ID(p.Agent), opts)
 	} else {
@@ -540,10 +559,11 @@ func (s *clientSession) plan(ctx context.Context, p clientapi.PlanParams) (*clie
 func clientPlanOf(cp *clientPlan) *clientapi.Plan {
 	p := cp.plan
 	out := &clientapi.Plan{ID: cp.id, Kind: p.Kind, Title: p.Title, Agent: p.Agent, Files: len(p.Files.Files), Bytes: p.Bytes,
-		Conflict: p.Conflict, Warnings: p.Warnings, Blockers: p.Blockers, NoWork: p.NoWork,
+		Conflict: p.Conflict, Notes: planNotes(p.Blockers, p.Warnings), NoWork: p.NoWork,
 		Protected: len(p.CannotProtect) == 0 && !p.Options.Fork, Live: p.Live,
 		From: clientapi.PlanSide{Machine: p.Source.Location, Key: clientKey(p.Key), Dir: p.Source.CWD, Account: p.Source.ProfileName},
 		To:   clientapi.PlanSide{Machine: p.Target.Location, Key: clientKey(p.Placement.Key), Dir: p.Target.CWD, Account: p.Target.ProfileName}}
+	out.Blockers, out.Warnings = noteTexts(out.Notes, clientapi.NoteBlocker), noteTexts(out.Notes, clientapi.NoteWarning)
 	if r := p.Repo; r.Action != "" {
 		out.Repo = &clientapi.PlanRepo{Action: r.Action, Path: r.LocalPath, Branch: nonEmptyStr(r.LocalBranch, r.SourceBranch), Remote: r.Remote}
 	}
@@ -594,7 +614,7 @@ func (s *clientSession) apply(ctx context.Context, c *clientapi.Conn, rid json.R
 	// A plan is used once: applied, or failed (plan again from what is there now).
 	defer s.drop(p.Plan)
 	if len(cp.plan.Blockers) > 0 {
-		return nil, clientapi.Errorf(clientapi.CodeBlocked, "%s", strings.Join(cp.plan.Blockers, "; "))
+		return nil, blockedError(planNotes(cp.plan.Blockers, nil))
 	}
 	if cp.owner != nil && !p.OwnerStopped {
 		e := clientapi.Errorf(clientapi.CodeOwned, "%s runs this session (process %d); it must stop it first", cp.owner.Owner, cp.owner.PID)
@@ -728,4 +748,26 @@ func (s *clientSession) terminal(ctx context.Context, p clientapi.TerminalParams
 func terminalResume(k agent.SessionKey, p clientapi.TerminalParams) peer.TerminalRequest {
 	return peer.TerminalRequest{Kind: peer.TerminalResume, Agent: k.Agent, Profile: k.Profile, Session: string(k.Session),
 		Cols: p.Cols, Rows: p.Rows, Anyway: p.Anyway}
+}
+
+// setup sets hopsesh up on a machine, as hopsesh hosts setup does, sending each step.
+func (s *clientSession) setup(ctx context.Context, c *clientapi.Conn, rid json.RawMessage, p clientapi.SetupParams) (*clientapi.Setup, error) {
+	if p.Machine == "" || p.Machine == LocalName() {
+		return nil, clientapi.Errorf(clientapi.CodeBadRequest, "machines.setup names another machine hopsesh reaches")
+	}
+	if s.a.Cfg.FindHost(p.Machine) == nil {
+		return nil, clientapi.Errorf(clientapi.CodeNotFound, "hopsesh knows no machine %s", p.Machine)
+	}
+	stepOf := func(st SetupStep) clientapi.SetupStep {
+		return clientapi.SetupStep{Machine: p.Machine, Name: st.Name, State: st.State, Detail: st.Detail}
+	}
+	out, err := s.a.SetUpMachine(ctx, p.Machine, func(st SetupStep) { _ = c.Event(rid, clientapi.EventSetupStep, stepOf(st)) })
+	if err != nil {
+		return nil, err
+	}
+	r := &clientapi.Setup{Machine: out.Machine, Version: out.Version, Login: out.Login}
+	for _, st := range out.Steps {
+		r.Steps = append(r.Steps, stepOf(st))
+	}
+	return r, nil
 }
