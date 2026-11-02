@@ -3,6 +3,8 @@ package app
 import (
 	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/roeehrl/hopsesh/internal/core/clientapi"
 )
@@ -83,10 +85,29 @@ func planNote(level, text string) clientapi.PlanNote {
 	for _, r := range noteRules {
 		if m := r.re.FindStringSubmatch(text); m != nil {
 			t, fix, actions := r.note(m)
-			return clientapi.PlanNote{Level: level, Text: t, Fix: fix, Actions: actions}
+			return clientapi.PlanNote{Level: level, Text: sentence(t), Fix: sentence(fix), Actions: actions}
 		}
 	}
-	return clientapi.PlanNote{Level: level, Text: text}
+	return clientapi.PlanNote{Level: level, Text: sentence(text)}
+}
+
+// sentence makes the planner's clause a sentence a client can show alone: a capital first
+// letter, unless it starts with a name written in lowercase (hopsesh, a path, a repository),
+// and a full stop, unless it ends in a path or has its own.
+func sentence(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	first, _, _ := strings.Cut(s, " ")
+	if r, n := utf8.DecodeRuneInString(s); unicode.IsLower(r) && first != "hopsesh" && !strings.ContainsAny(first, "/._-~0123456789") {
+		s = string(unicode.ToUpper(r)) + s[n:]
+	}
+	fields := strings.Fields(s)
+	if last := fields[len(fields)-1]; !strings.ContainsAny(last, "/\\") && !strings.ContainsAny(s[len(s)-1:], ".!?") {
+		s += "."
+	}
+	return s
 }
 
 // planNotes are a plan's blockers, then its warnings, as notes.
@@ -123,7 +144,7 @@ func blockedError(notes []clientapi.PlanNote) *clientapi.Error {
 			}
 		}
 	}
-	e := clientapi.Errorf(clientapi.CodeBlocked, "%s", strings.Join(texts, "; "))
-	e.Fix = strings.Join(fixes, "; ")
+	e := clientapi.Errorf(clientapi.CodeBlocked, "%s", strings.Join(texts, " "))
+	e.Fix = strings.Join(fixes, " ")
 	return e
 }

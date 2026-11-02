@@ -201,8 +201,8 @@ Show the plan and get the user's explicit confirmation before `apply`.
 **Notes.** Each is `{level, text, fix, actions}`:
 
 - `level` is `"blocker"` or `"warning"`.
-- `text` says what is so, in words for anyone: no command-line flags.
-- `fix`, when present, is what the user can do about it, in words.
+- `text` says what is so, as a sentence for anyone: no command-line flags.
+- `fix`, when present, is what the user can do about it, as a sentence.
 - `actions`, best first, are what the client can offer for it, each with a `label` for its
   button:
   - `{"kind":"plan","params":{…},"ask":[…]}`: plan again with the same params, changed by
@@ -212,15 +212,15 @@ Show the plan and get the user's explicit confirmation before `apply`.
     plan again.
 
 ```json
-{"level":"blocker","text":"github.com/acme/api is not cloned on this machine",
- "fix":"let hopsesh clone it into ~/src/api, or choose a folder where it is cloned",
+{"level":"blocker","text":"github.com/acme/api is not cloned on this machine.",
+ "fix":"Let hopsesh clone it into ~/src/api, or choose a folder where it is cloned.",
  "actions":[{"kind":"plan","label":"Clone it","params":{"clone":true}},
             {"kind":"plan","label":"Choose a folder","ask":["dir"]}]}
 ```
 
 ```json
-{"level":"warning","text":"the original on demo2 won't be protected: without hopsesh there, nothing stops it from being continued on demo2 too, and the two copies drift apart",
- "fix":"set up hopsesh on demo2 first",
+{"level":"warning","text":"The original on demo2 won't be protected: without hopsesh there, nothing stops it from being continued on demo2 too, and the two copies drift apart.",
+ "fix":"Set up hopsesh on demo2 first.",
  "actions":[{"kind":"setup","label":"Set up hopsesh on demo2","machine":"demo2"}]}
 ```
 

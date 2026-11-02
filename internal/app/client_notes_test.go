@@ -53,7 +53,7 @@ func TestPlanNotes(t *testing.T) {
 		{"this session is large (300 MB)", "this session is large (300 MB)", "", clientapi.PlanAction{}},
 	} {
 		n := planNote(clientapi.NoteWarning, c.text)
-		if n.Text != c.want || n.Fix != c.fix {
+		if n.Text != sentence(c.want) || n.Fix != sentence(c.fix) {
 			t.Errorf("%q:\n text %q\n fix  %q", c.text, n.Text, n.Fix)
 			continue
 		}
@@ -78,15 +78,33 @@ func TestPlanNotes(t *testing.T) {
 		}
 	}
 
-	notes := planNotes([]string{"b1; choose --keep-both"}, []string{"w1"})
+	notes := planNotes([]string{"a blocker; choose --keep-both"}, []string{"w1"})
 	if len(notes) != 2 || notes[0].Level != "blocker" || notes[1].Level != "warning" {
 		t.Fatalf("notes: %+v", notes)
 	}
-	if got := noteTexts(notes, "blocker"); len(got) != 1 || got[0] != "b1" {
+	if got := noteTexts(notes, "blocker"); len(got) != 1 || got[0] != "A blocker." {
 		t.Fatalf("blocker texts: %v", got)
 	}
-	if e := blockedError(notes); e.Code != clientapi.CodeBlocked || e.Message != "b1" || e.Fix != "keep both" {
+	if e := blockedError(notes); e.Code != clientapi.CodeBlocked || e.Message != "A blocker." || e.Fix != "Keep both." {
 		t.Fatalf("blocked: %+v", e)
+	}
+}
+
+func TestSentence(t *testing.T) {
+	for in, want := range map[string]string{
+		"the original on demo2 won't be protected: x":                             "The original on demo2 won't be protected: x.",
+		"set up hopsesh on demo2 first":                                           "Set up hopsesh on demo2 first.",
+		"Claude Code was not found on this machine; install it before continuing": "Claude Code was not found on this machine; install it before continuing.",
+		"hopsesh could not read it":                                               "hopsesh could not read it.",
+		"github.com/a/b is not cloned on this machine":                            "github.com/a/b is not cloned on this machine.",
+		"this session is large (300 MB)":                                          "This session is large (300 MB).",
+		"the copy here is set aside: /Users/x/s.jsonl":                            "The copy here is set aside: /Users/x/s.jsonl",
+		"Already one.": "Already one.",
+		"":             "",
+	} {
+		if got := sentence(in); got != want {
+			t.Errorf("sentence(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 
