@@ -12,7 +12,7 @@ description: >-
 license: Apache-2.0
 compatibility: Requires the hopsesh CLI; other machines need SSH access.
 metadata:
-  hopsesh-version: "0.7.0"
+  hopsesh-version: "0.8.0"
 ---
 
 # Moving coding-agent sessions with hopsesh
