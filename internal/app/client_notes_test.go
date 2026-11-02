@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/roeehrl/hopsesh/internal/core/clientapi"
+	"github.com/roeehrl/hopsesh/internal/core/move"
 )
 
 func TestPlanNotes(t *testing.T) {
@@ -38,6 +39,10 @@ func TestPlanNotes(t *testing.T) {
 			clientapi.PlanAction{Kind: "plan", Params: map[string]any{"conflict": "replace"}}},
 		{"destination has independent work; use --keep-both to preserve a separate branch",
 			"destination has independent work", "keep both, as separate branches",
+			clientapi.PlanAction{Kind: "plan", Params: map[string]any{"conflict": "keep-both"}}},
+		{move.HistoryChangedBlocker("history was compacted or rewound"),
+			"this conversation's history no longer matches what hopsesh recorded when it last moved it (history was compacted or rewound)",
+			"take it as a separate conversation from where it is now; the copies made before stay as they are",
 			clientapi.PlanAction{Kind: "plan", Params: map[string]any{"conflict": "keep-both"}}},
 		{"it diverged; choose --keep-both", "it diverged", "keep both",
 			clientapi.PlanAction{Kind: "plan", Params: map[string]any{"conflict": "keep-both"}}},

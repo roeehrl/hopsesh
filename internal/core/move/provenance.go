@@ -2,8 +2,10 @@ package move
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/core/convert"
@@ -88,9 +90,12 @@ func prepareLineage(ctx context.Context, p *Plan, in Input, seg *ir.Segment) err
 		st, err = m.Observe(p.sourceReplica, seg)
 		snapshot = true
 		p.Options.Fork = true
-		p.Warnings = append(p.Warnings, "Native history changed; this transfer starts a separate branch from its current snapshot.")
+		p.Warnings = append(p.Warnings, "This conversation's history no longer matches what hopsesh recorded when it last moved it, so it goes as a separate conversation from where it is now. The copies made before are kept as they are.")
 	}
 	if err != nil {
+		if errors.Is(err, agent.ErrDiverged) && !snapshot {
+			return historyChanged{err}
+		}
 		return err
 	}
 	p.sourceState = st
@@ -99,6 +104,36 @@ func prepareLineage(ctx context.Context, p *Plan, in Input, seg *ir.Segment) err
 	}
 	return nil
 }
+
+// historyChanged: the source's own history no longer matches the receipts hopsesh
+// recorded for it (records rewound, rewritten or gone). Unlike other lineage refusals it
+// has a way forward: keep-both takes it as a separate conversation, a new branch from its
+// current snapshot (prepareLineage).
+type historyChanged struct{ err error }
+
+func (e historyChanged) Error() string { return e.err.Error() }
+func (e historyChanged) Unwrap() error { return e.err }
+
+// lineageRefused records why lineage could not be verified. A changed history names its
+// way forward in every surface: the blocker for the command line and the client API's
+// notes, HistoryChanged for the windows. Other refusals have none to offer.
+func lineageRefused(p *Plan, err error) {
+	p.lineageRefused = true
+	var changed historyChanged
+	if !errors.As(err, &changed) {
+		p.Blockers = append(p.Blockers, "cannot verify session lineage: "+err.Error())
+		return
+	}
+	p.HistoryChanged = strings.TrimPrefix(changed.err.Error(), agent.ErrDiverged.Error()+": ")
+	p.Blockers = append(p.Blockers, HistoryChangedBlocker(p.HistoryChanged))
+}
+
+// HistoryChangedBlocker is the blocker for a source whose history no longer matches its
+// receipts; reason is HistoryChanged.
+func HistoryChangedBlocker(reason string) string {
+	return "this conversation's history no longer matches what hopsesh recorded when it last moved it (" + reason + "); choose --keep-both to take it as a separate conversation"
+}
+
 func forkLine(p *Plan) {
 	p.targetLine = p.manifest.Fork(p.OperationID, p.sourceState.Heads)
 	p.Options.Fork = true

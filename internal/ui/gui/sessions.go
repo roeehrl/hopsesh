@@ -892,8 +892,11 @@ type PlanDTO struct {
 	Push          bool            `json:"push"`
 	StopHere      bool            `json:"stopHere"`
 	Conflict      string          `json:"conflict"`
-	Warnings      []string        `json:"warnings"`
-	Blockers      []string        `json:"blockers"`
+	// HistoryChanged: the session's own history no longer matches what hopsesh recorded
+	// (the reason); the sheet offers to continue it as a separate conversation.
+	HistoryChanged string   `json:"historyChanged,omitempty"`
+	Warnings       []string `json:"warnings"`
+	Blockers       []string `json:"blockers"`
 	// CannotProtect says why the original can't be blocked or warned on its machine: the
 	// sheet shows that option off, with these reasons and the fixes.
 	CannotProtect []string         `json:"cannotProtect,omitempty"`
@@ -1032,7 +1035,7 @@ func planDTO(p *move.Plan, e app.Entry, tm agent.Module) *PlanDTO {
 	d := &PlanDTO{CannotProtect: p.CannotProtect, SourceProfile: p.Source.ProfileName, TargetProfile: p.Target.ProfileName, NoWork: p.NoWork, ResumeHere: p.ResumeHere, Destinations: p.Destinations, Kind: p.Kind, Title: p.Title, Agent: p.Agent, FromAgent: e.AgentName, SourceHost: p.Source.Location,
 		SourceOS: p.Source.OS, SourceCWD: p.Source.CWD, TargetCWD: p.Target.CWD, Live: p.Live, Repo: p.Repo,
 		Mappings: p.Placement.Mappings, Files: len(p.Files.Files), Bytes: p.Bytes, Sync: p.Sync,
-		FromSource: p.SyncFromSource, Push: p.Push, StopHere: p.StopHere, Conflict: p.Conflict,
+		FromSource: p.SyncFromSource, Push: p.Push, StopHere: p.StopHere, Conflict: p.Conflict, HistoryChanged: p.HistoryChanged,
 		Warnings: p.Warnings, Blockers: p.Blockers, NewName: p.NewName, OtherAcct: p.Placement.OtherAccount, ReviewNewSession: p.ReviewNewSession,
 		SetAside: len(p.SetAside), NativeCopy: p.NativeCopy, Options: p.Options, SessionKey: p.Key, SourceAgent: e.Agent,
 		Can: CanDTO{Fork: agent.Has(tm, agent.CapFork), RemoteControl: agent.Has(tm, agent.CapRemoteControl),

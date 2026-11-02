@@ -173,7 +173,7 @@ Works out a move or continuation. Nothing changes.
 | `fork` | keep the original usable instead of blocking it |
 | `clone` | clone the repository there when it isn't (into hopsesh's repositories folder) |
 | `stopOpen` | let hopsesh quit a copy of the session that is open where it goes |
-| `conflict` | a copy is already there: `"replace"` it (kept for undo) or `"keep-both"` (this one comes in as a separate session) |
+| `conflict` | a copy is already there: `"replace"` it (kept for undo) or `"keep-both"` (this one comes in as a separate session). `"keep-both"` also takes a session whose own history changed since hopsesh moved it (it was rewound) as a separate conversation. |
 | `worktree` | `"create"`: work in a worktree on the session's branch; `"main"`: the main checkout as it is; `""`: a worktree only when the session ran in one |
 | `carryRules` | continuing in another agent: add the user's instructions for every project of the session's agent to the briefing |
 

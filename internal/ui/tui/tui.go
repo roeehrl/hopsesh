@@ -855,7 +855,7 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 			m.opts.Conflict = map[bool]string{true: "", false: move.ConflictReplace}[m.opts.Conflict == move.ConflictReplace]
 			return m, m.planCmd()
 		case "B":
-			if m.planning || m.plan.Conflict == "" && m.opts.Conflict == "" {
+			if m.planning || m.plan.Conflict == "" && m.plan.HistoryChanged == "" && m.opts.Conflict == "" {
 				return m, nil
 			}
 			m.opts.Conflict = move.ConflictKeepBoth
@@ -1499,6 +1499,9 @@ func (m *model) viewPlanBody(b *strings.Builder) {
 
 func (m *model) viewPlanFooter(b *strings.Builder) {
 	p := m.plan
+	if p.HistoryChanged != "" && p.Conflict == "" && m.opts.Conflict == "" {
+		b.WriteString("  [B] continue it as a separate conversation; the copies made before stay as they are\n")
+	}
 	if p.Conflict != "" || m.opts.Conflict != "" {
 		if m.returnTo == nil && p.Kind != move.KindContinue && p.Continue == nil {
 			fmt.Fprintf(b, "  [R] replace the one here (selected: %t)\n", m.opts.Conflict == move.ConflictReplace)

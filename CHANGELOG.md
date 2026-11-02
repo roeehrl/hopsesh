@@ -36,6 +36,22 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A Claude Code session that had been moved once could not be moved or continued again,
+  to any account or agent: "cannot verify session lineage: both copies changed: history
+  was compacted or rewound", and nothing in the review could get past it. Claude Code
+  leaves parent links that hopsesh's reader stopped at, dropping all history before them:
+  - A record naming a parent that was never written: the first reply of a turn in some
+    Claude Code versions (hundreds per long session), records lost to a full disk, and a
+    compaction boundary whose logical parent is missing. The conversation now continues
+    from the record just before, when that record has no other child. The live preview
+    reads past them too, instead of showing one turn.
+  - A child written one record before its parent (a tool result ahead of its tool call):
+    refused as "forward parent reference". Such a session can now be moved; a parent
+    further ahead is still refused.
+- When a session's own history really no longer matches what hopsesh recorded for it (it
+  was rewound after a move), the review says so in plain words and offers **Continue as a
+  separate conversation** (`--keep-both`, `[B]` in the terminal view, a "Continue
+  separately" action for client API plans). Before, it was a blocker with no way past it.
 - The Accounts screen:
   - A sign-in hopsesh couldn't read showed as a tall oval, and long folder paths ran into
     the next column. Avatars are round, and paths wrap at their slashes.

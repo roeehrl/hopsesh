@@ -129,3 +129,25 @@ test('transfer review uses the freshly checked source sign-in',async({page})=>{
  await plan(page);
  await expect(page.locator('.transfer-accounts>div').first()).toContainText('alice@example.com');
 });
+
+test('a changed conversation history offers a separate conversation instead of a dead end',async({page})=>{
+ const conflicts=[];
+ const blocker="this conversation's history no longer matches what hopsesh recorded when it last moved it (history was compacted or rewound); choose --keep-both to take it as a separate conversation";
+ await page.route('**/call',async route=>{
+  const r=route.request().postDataJSON();if(r.m!=='Plan'){await route.continue();return;}
+  conflicts.push(r.args[3].conflict||'');
+  const response=await route.fetch(),body=await response.json();
+  if(r.args[3].conflict!=='keep-both'){body.result.blockers=[blocker];body.result.historyChanged='history was compacted or rewound';}
+  await route.fulfill({json:body});
+ });
+ await row(page,'Find the codeword').click();await action(page,'move',/^Continue with Codex…/);
+ const sheet=page.locator('#sheet');
+ await expect(sheet).toContainText('This conversation changed since hopsesh last moved it');
+ await expect(sheet).toContainText('history was compacted or rewound');
+ await expect(sheet).not.toContainText('--keep-both');
+ await expect(page.locator('#sheet #go')).toBeDisabled();
+ await sheet.getByRole('button',{name:'Continue as a separate conversation'}).click();
+ await expect(page.locator('#sheet #go')).toBeEnabled();
+ await expect(sheet).not.toContainText('This conversation changed since hopsesh last moved it');
+ expect(conflicts.at(-1)).toBe('keep-both');
+});

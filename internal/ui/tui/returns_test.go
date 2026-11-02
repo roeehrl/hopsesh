@@ -209,3 +209,23 @@ func TestUnverifiedReturnReviewsSameBranchWithoutBypassingConflict(t *testing.T)
 		t.Fatal("offered a resolution absent from the current plan")
 	}
 }
+
+// A source whose own history changed since hopsesh moved it is not a dead end: B plans it
+// again as a separate conversation, and the footer says so.
+func TestChangedHistoryOffersSeparateConversation(t *testing.T) {
+	m := newModel(t)
+	m.sel = row{item: &app.Item{Entry: app.Entry{Machine: app.LocalName(), Agent: "claude"}}}
+	m.mode, m.plan = modePlan, &move.Plan{Kind: move.KindContinue, Agent: "Codex", HistoryChanged: "history was compacted or rewound",
+		Blockers: []string{move.HistoryChangedBlocker("history was compacted or rewound")}}
+	var b strings.Builder
+	m.viewPlanFooter(&b)
+	if !strings.Contains(b.String(), "[B] continue it as a separate conversation") {
+		t.Fatalf("footer does not offer the way forward:\n%s", b.String())
+	}
+	if _, cmd := m.key("enter"); cmd != nil {
+		t.Fatal("a blocked plan was applied")
+	}
+	if _, cmd := m.key("B"); cmd == nil || m.opts.Conflict != move.ConflictKeepBoth || !m.planning {
+		t.Fatalf("B must plan a separate conversation: %+v", m.opts)
+	}
+}

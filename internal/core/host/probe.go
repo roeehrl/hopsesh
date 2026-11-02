@@ -82,7 +82,9 @@ func probeLocal(ctx context.Context, specs []agent.Spec, detailed bool) Facts {
 		}
 		bf := agent.BinaryFact{Path: p}
 		if !detailed || len(b.VersionArgs) == 0 {
+			mu.Lock() // the version probes started above write the map too
 			f.Binaries[b.Name] = bf
+			mu.Unlock()
 			continue
 		}
 		wg.Add(1)

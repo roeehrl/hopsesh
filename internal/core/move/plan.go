@@ -209,11 +209,15 @@ type Plan struct {
 	// SetAside are copies at the target that make way (kept by the journal for undo).
 	SetAside []agent.Summary `json:"setAside,omitempty"`
 	Conflict string          `json:"conflict,omitempty"`
-	Warnings []string        `json:"warnings,omitempty"`
-	Blockers []string        `json:"blockers,omitempty"`
-	StopHere bool            `json:"stopHere,omitempty"` // quit the copy open here first
-	Push     bool            `json:"push,omitempty"`
-	Sync     string          `json:"sync,omitempty"`
+	// HistoryChanged: the session's own history no longer matches what hopsesh recorded
+	// when it last moved it (the reason). Keep-both (Options.Conflict) takes it as a
+	// separate conversation from its current state.
+	HistoryChanged string   `json:"historyChanged,omitempty"`
+	Warnings       []string `json:"warnings,omitempty"`
+	Blockers       []string `json:"blockers,omitempty"`
+	StopHere       bool     `json:"stopHere,omitempty"` // quit the copy open here first
+	Push           bool     `json:"push,omitempty"`
+	Sync           string   `json:"sync,omitempty"`
 	// SyncFromSource: unpushed commits are fetched straight from the source machine.
 	SyncFromSource bool          `json:"syncFromSource,omitempty"`
 	NewName        string        `json:"newName"`
@@ -233,6 +237,7 @@ type Plan struct {
 	sourceLine, targetLine string
 	sourceReplica          lineage.ReplicaID
 	sourceState            lineage.State
+	lineageRefused         bool // the source's lineage could not be verified (see lineageRefused)
 	bundle                 agent.Bundle
 	native                 *Plan // the move that keeps NativeCopy
 	nativeIn               Input
@@ -366,7 +371,7 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 			return nil, e
 		}
 		if e = prepareLineage(ctx, p, in, &seg); e != nil {
-			p.Blockers = append(p.Blockers, "cannot verify session lineage: "+e.Error())
+			lineageRefused(p, e)
 		}
 	}
 	relate(ctx, p, in, opt)
@@ -510,6 +515,11 @@ func relate(ctx context.Context, p *Plan, in Input, opt Options) {
 // the incoming copy was taken from it. Lineage tells exactly (the head it had when it
 // left); without lineage, a copy newer than the incoming one is treated as changed.
 func changedSinceItLeft(ctx context.Context, p *Plan, in Input, c Copy) string {
+	if p.lineageRefused {
+		// The source's own state is unverified, so no comparison would mean anything. The
+		// plan is blocked already; keep-both, its way forward, plans again on a new branch.
+		return ""
+	}
 	if p.manifest != nil {
 		st, _, err := targetState(ctx, p, in, c)
 		if err != nil {

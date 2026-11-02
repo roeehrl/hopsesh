@@ -405,13 +405,108 @@ func TestActiveBranchForkedAfterCompaction(t *testing.T) {
 		t.Fatalf("branch %v, want %v", got, want)
 	}
 
+	// A real parent far ahead in the file still fails (an adjacent one is a write race:
+	// TestActiveBranchWriteOrder).
 	early := branchMessage("assistant", "early", "late", "names a later parent")
 	late := branchMessage("user", "late", "", "later record")
-	recs, _, err = readRecords(bytes.NewReader(branchJSON(t, early, late, branchCheckpoint("early"))))
+	records := []map[string]any{early}
+	for i := range reorderWindow {
+		records = append(records, branchMessage("user", fmt.Sprint("other", i), "", "unrelated"))
+	}
+	recs, _, err = readRecords(bytes.NewReader(branchJSON(t, append(records, late, branchCheckpoint("early"))...)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := activeBranch(recs); !errors.Is(err, agent.ErrDiverged) {
 		t.Fatalf("a real forward parent was accepted: %v", err)
+	}
+}
+
+func branchUUIDs(t *testing.T, records ...map[string]any) []string {
+	t.Helper()
+	recs, _, err := readRecords(bytes.NewReader(branchJSON(t, records...)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexes, err := activeBranch(recs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, i := range indexes {
+		got = append(got, recs[i].UUID)
+	}
+	return got
+}
+
+// Claude Code can write a child one record before its parent: a tool result ahead of
+// its tool call, a reply ahead of the attachment it follows (two real sessions, 12,000
+// and 560 records, were refused as "forward parent reference"). The walk takes them in
+// write order; the indexes it returns are still positions in the file.
+func TestActiveBranchWriteOrder(t *testing.T) {
+	u := branchMessage("user", "u", "", "run it")
+	call := branchMessage("assistant", "call", "u", "tool call")
+	result := branchMessage("user", "result", "call", "tool result")
+	reply := branchMessage("assistant", "reply", "result", "done")
+	got := branchUUIDs(t, u, result, call, reply, branchCheckpoint("reply"))
+	if want := []string{"u", "call", "result", "reply"}; !slices.Equal(got, want) {
+		t.Fatalf("branch %v, want %v", got, want)
+	}
+	// The last record written is the early child's parent: the leaf is still the child.
+	got = branchUUIDs(t, u, result, call)
+	if want := []string{"u", "call", "result"}; !slices.Equal(got, want) {
+		t.Fatalf("leaf written before its parent: branch %v, want %v", got, want)
+	}
+	// A cycle is not a write race.
+	recs, _, err := readRecords(bytes.NewReader(branchJSON(t, branchMessage("user", "a", "b", "a"), branchMessage("assistant", "b", "a", "b"))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := activeBranch(recs); !errors.Is(err, agent.ErrDiverged) {
+		t.Fatalf("cyclic parents accepted: %v", err)
+	}
+}
+
+// A parent Claude Code never wrote does not end the history. The shapes are from real
+// sessions: a turn's first reply naming an unsaved record (294 times in one session),
+// two records lost to a full disk, and a compaction boundary whose logical parent is
+// missing. Before, the walk stopped at the first one and dropped everything earlier.
+func TestActiveBranchBridgesUnwrittenParents(t *testing.T) {
+	u := branchMessage("user", "u", "", "first question")
+	att := branchRecord("attachment", "att", "u")
+	reply := branchMessage("assistant", "reply", "never-written", "first reply")
+	u2 := branchMessage("user", "u2", "reply", "second question")
+	reply2 := branchMessage("assistant", "reply2", "also-never-written", "second reply")
+	if got, want := branchUUIDs(t, u, att, reply, u2, reply2, branchCheckpoint("reply2")), []string{"u", "att", "reply", "u2", "reply2"}; !slices.Equal(got, want) {
+		t.Fatalf("unsaved turn parents: branch %v, want %v", got, want)
+	}
+
+	call := branchMessage("assistant", "call", "u", "tool call")
+	lost1 := branchRecord("attachment", "lost1", "result-lost-to-disk")
+	lost2 := branchRecord("attachment", "lost2", "second-result-lost")
+	stop := branchMessage("assistant", "stop", "lost2", "the disk is full")
+	if got, want := branchUUIDs(t, u, call, lost1, lost2, stop), []string{"u", "call", "lost1", "lost2", "stop"}; !slices.Equal(got, want) {
+		t.Fatalf("records lost to a full disk: branch %v, want %v", got, want)
+	}
+
+	boundary := branchRecord("system", "boundary", "")
+	boundary["parentUuid"], boundary["logicalParentUuid"] = nil, "unsaved-tail"
+	summary := branchMessage("user", "summary", "boundary", "compact summary")
+	summary["isCompactSummary"] = true
+	after := branchMessage("assistant", "after", "summary", "after compaction")
+	if got, want := branchUUIDs(t, u, call, boundary, summary, after), []string{"u", "call", "boundary", "summary", "after"}; !slices.Equal(got, want) {
+		t.Fatalf("boundary with an unsaved logical parent: branch %v, want %v", got, want)
+	}
+
+	// A checkpoint is extended across a gap too.
+	if got, want := branchUUIDs(t, u, branchCheckpoint("u"), reply), []string{"u", "reply"}; !slices.Equal(got, want) {
+		t.Fatalf("continuation across a gap: branch %v, want %v", got, want)
+	}
+
+	// The record before the gap already has a child: there is no telling where the
+	// conversation went on, so the history starts at the gap, as before.
+	sibling := branchMessage("assistant", "sibling", "att", "another branch")
+	if got, want := branchUUIDs(t, u, att, reply, sibling, branchCheckpoint("reply")), []string{"reply"}; !slices.Equal(got, want) {
+		t.Fatalf("ambiguous gap: branch %v, want %v", got, want)
 	}
 }

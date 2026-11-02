@@ -111,7 +111,7 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	cp := &ContinuePlan{From: src.Module.Spec().Name, Fidelity: opt.Fidelity, Relation: RelationNew, head: seg.Cursor}
 	p.Continue = cp
 	if err := prepareLineage(ctx, p, in, &seg); err != nil {
-		p.Blockers = append(p.Blockers, "cannot verify session lineage: "+err.Error())
+		lineageRefused(p, err)
 	}
 	fullNodes := append([]ir.Node(nil), seg.Nodes...)
 	relateContinue(ctx, p, in, &seg, opt)
@@ -305,8 +305,8 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 		}
 		return
 	}
-	if p.manifest == nil || opt.Fork {
-		return
+	if p.manifest == nil || opt.Fork || p.lineageRefused {
+		return // without a verified source state there is nothing to compare
 	}
 	// A portable text append does not replay the source's native account-bound
 	// state. Modules explicitly opt in; lineage, root, cursor and live-writer
