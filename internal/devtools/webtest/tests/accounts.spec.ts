@@ -10,7 +10,7 @@ async function add(page:Page,name:string,agent='Claude Code'){
  await d.getByRole('radio',{name:agent,exact:true}).check();await d.getByLabel('Name',{exact:true}).fill(name);
  await d.getByRole('button',{name:'Create and sign in',exact:true}).click();await expect(d).toBeHidden({timeout:30000});await idle(page);
 }
-const folder=(page:Page,name:string)=>page.locator('.folder-card').filter({hasText:name+' · '});
+const folder=(page:Page,name:string)=>page.locator('.folder-card').filter({has:page.locator('.folder-name').getByText(name,{exact:true})});
 
 test('a new account folder lives in ~/.hopsesh/accounts, can be renamed and is a transfer destination',async({page},testInfo)=>{
  await accounts(page);
@@ -54,7 +54,7 @@ function view(base:any){
  return {...base,
   people:[{id:'email:me@gmail.com',email:'me@gmail.com',initials:'M',hue:170,labels:['Claude Max','ChatGPT Pro'],where:['This machine: Claude desktop, Codex in the terminal','studio: Claude Code in the terminal'],sessions:64,machines:2},
    {id:'email:roy@conduct.security',email:'roy@conduct.security',initials:'RC',hue:260,labels:['Claude Team'],where:['This machine: Claude Code in the terminal'],sessions:41,machines:2},
-   {id:'unknown:claude:x',initials:'?',hue:0,labels:[],where:[],sessions:5,machines:1,unknown:true,agent:'claude'}],
+   {id:'unknown:claude:x',initials:'1',number:1,hue:0,labels:[],where:[],sessions:5,machines:1,ranOn:['studio'],unknown:true,agent:'claude'}],
   machines:[{machine:here,local:true,os:'darwin',scanned:true,checked:new Date().toISOString(),cells:[
     {tool:'claude-terminal',installed:true,version:'Claude Code 2.1.299',signIns:[{person:'email:roy@conduct.security',email:'roy@conduct.security',folder:'default',path:'~/.claude',status:'signed-in'},{person:'email:me@gmail.com',email:'me@gmail.com',folder:'personal',path:'~/.hopsesh/accounts/claude/personal',status:'signed-in'}]},
     {tool:'claude-desktop',installed:true,version:'Claude desktop 2.31226.1, running its own Claude Code 2.1.295',signIns:[{person:'email:me@gmail.com',email:'me@gmail.com',folder:'default',path:'~/.claude',status:'signed-in'}]},
@@ -85,18 +85,18 @@ async function routeView(page:Page,moved:{n:number}={n:0}){
 test('accounts by email, the machines × tools grid, and an account only seen in records',async({page},testInfo)=>{
  await routeView(page);await accounts(page);
  const me=page.locator('.person-card').filter({hasText:'me@gmail.com'});
- await expect(me).toContainText('Claude Max · ChatGPT Pro');await expect(me).toContainText('Ran 64 sessions on 2 machines');await expect(me).toContainText('studio: Claude Code in the terminal');
- const unknown=page.locator('.person-card').filter({hasText:'A Claude account not signed in anywhere'});
- await expect(unknown).toContainText('Ran 5 sessions');await expect(unknown.getByRole('button',{name:'Sign it in on a machine…'})).toBeVisible();
+ await expect(me).toContainText('Claude Max · ChatGPT Pro');await expect(me).toContainText('Ran 64 sessions on 2 machines');await expect(me.locator('li').filter({hasText:'studio'})).toContainText('Claude Code in the terminal');
+ const unknown=page.locator('.person-card').filter({hasText:'An account not signed in anywhere'});
+ await expect(unknown).toContainText('Claude account 1');await expect(unknown).toContainText('5 sessions');await expect(unknown.getByRole('button',{name:'Sign one in on a machine…'})).toBeVisible();
  const grid=page.getByRole('table',{name:"Where you're signed in"});
  await expect(grid).toContainText('Claude desktop 2.31226.1, running its own Claude Code 2.1.295');
- await expect(grid).toContainText('in personal · ~/.hopsesh/accounts/claude/personal');
+ await expect(grid).toContainText('personal ~/.hopsesh/accounts/claude/personal');
  await expect(grid).toContainText("hopsesh reads lurus's sessions over SSH, but can't see who is signed in there");
  await expect(grid.getByRole('button',{name:'Set up hopsesh on lurus…'})).toBeVisible();
  await expect(grid).toContainText("No Codex CLI; the app's Codex 0.162.0-alpha.17.2 is used");
  await expect(grid).toContainText('Signed out');await expect(grid).toContainText('Check failed');
  await expect(page.getByRole('note').filter({hasText:'two accounts write to ~/.claude'})).toBeVisible();
- const def=folder(page,'default');await expect(def).toContainText('9 unrecorded');await expect(def).toContainText('26');
+ const def=folder(page,'default');await expect(def).toContainText('9 with no account recorded');await expect(def).toContainText('26');
  await page.screenshot({path:testInfo.outputPath('accounts-grid.png'),fullPage:true});
  await grid.getByRole('button',{name:'Set up hopsesh on lurus…'}).click();await expect(page.getByRole('heading',{name:'Machines',exact:true})).toBeVisible();
 });

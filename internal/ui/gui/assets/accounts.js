@@ -41,18 +41,38 @@ function avatar(p, size = 22) {
   return h('span', { class: 'avatar' + (x.unknown ? ' unknown' : ''), style: `width:${size}px;height:${size}px;--hue:${x.hue}`, 'aria-hidden': 'true', 'data-person': id }, x.initials);
 }
 
+// pathText is a path that wraps after its slashes, not inside a folder's name.
+const pathText = (p) => p.split(/(?<=\/)/).flatMap((part, i) => (i ? [h('wbr'), part] : [part]));
+
 // ---- Your accounts ----------------------------------------------------------------
+const agentWord = (a) => (a === 'codex' ? 'Codex' : 'Claude');
+const sessionsWord = (n) => `${n} session${n === 1 ? '' : 's'}`;
+// unknownName tells an account seen only in records apart from the others: "Claude account 1".
+const unknownName = (p) => `${agentWord(p.agent)} account ${p.number || ''}`.trim();
+
 function personCard(p) {
-  const agent = p.agent === 'codex' ? 'Codex' : 'Claude';
   return h('article', { class: 'person-card', 'data-person': p.id },
-    h('div', { class: 'person-head' }, avatar(p, 34),
-      h('div', { style: 'display:flex;flex-direction:column;gap:2px;min-width:0' },
-        h('b', { class: 'person-name' }, p.unknown ? `A ${agent} account not signed in anywhere` : p.email),
-        h('span', { class: 'muted', style: 'font-size:12.5px' }, p.unknown ? 'Seen only in session records' : p.labels.join(' · ') || 'Signed in'))),
-    p.where.length ? h('ul', { class: 'person-where' }, p.where.map((w) => h('li', {}, w))) : null,
-    p.unknown ? h('p', { class: 'muted', style: 'margin:0;font-size:12.5px' }, `Ran ${p.sessions} session${p.sessions === 1 ? '' : 's'}. Its email shows once it's signed in to any tool on any machine.`)
-      : h('span', { class: 'muted', style: 'font-size:12.5px' }, p.sessions ? `Ran ${p.sessions} session${p.sessions === 1 ? '' : 's'} on ${p.machines} machine${p.machines === 1 ? '' : 's'}` : 'No sessions recorded yet'),
-    p.unknown ? h('div', {}, h('button', { class: 'btn small', onclick: () => addDialog({ agent: p.agent || 'claude' }) }, 'Sign it in on a machine…')) : null);
+    h('div', { class: 'person-head' }, avatar(p, 32),
+      h('div', { class: 'person-id' },
+        h('b', { class: 'person-name' }, p.email),
+        h('span', { class: 'muted' }, p.labels.join(' · ') || 'Signed in'))),
+    p.where.length ? h('ul', { class: 'person-where' }, p.where.map((w) => {
+      const [machine, tools] = w.split(/: (.*)/s);
+      return h('li', {}, h('b', {}, machine), h('span', {}, tools));
+    })) : null,
+    h('span', { class: 'person-foot muted' }, p.sessions ? `Ran ${sessionsWord(p.sessions)} on ${p.machines} machine${p.machines === 1 ? '' : 's'}` : 'No sessions recorded yet'));
+}
+
+// unknownCard is every account seen only in session records, in one card: each ran
+// sessions, but no tool on any machine is signed in to it now, so its email isn't known.
+function unknownCard(ps) {
+  return h('article', { class: 'person-card unknown-card', 'data-person': 'unknown' },
+    h('div', { class: 'person-id' },
+      h('b', { class: 'person-name' }, ps.length === 1 ? 'An account not signed in anywhere' : `${ps.length} accounts not signed in anywhere`),
+      h('span', { class: 'muted' }, 'They ran sessions, but no tool on any machine is signed in to them now. Sign one in to see its email.')),
+    h('ul', { class: 'unknown-list' }, ps.map((p) => h('li', { 'data-person': p.id }, avatar(p, 22),
+      h('span', {}, h('b', {}, unknownName(p)), h('span', { class: 'muted' }, ` · ${sessionsWord(p.sessions)}${p.ranOn?.length ? ' on ' + p.ranOn.join(', ') : ''}`))))),
+    h('div', { class: 'person-foot' }, h('button', { class: 'btn small', onclick: () => addDialog({ agent: ps[0].agent || 'claude' }) }, 'Sign one in on a machine…')));
 }
 
 // ---- Where you're signed in ---------------------------------------------------------
@@ -65,14 +85,14 @@ const TOOLS = [
 
 function signInLine(s) {
   const p = person(s.person);
-  const who = s.status === 'signed-in' ? (s.email || (p?.unknown ? 'an account not signed in to any tool here' : 'signed in'))
-    : s.status === 'signed-out' ? 'Signed out' : s.status === 'failed' ? 'Check failed' : 'Unknown';
-  return h('div', { class: 'signin ' + s.status, title: s.detail || '' },
-    s.status === 'signed-in' ? avatar(s.person, 20) : h('span', { class: 'avatar empty', 'aria-hidden': 'true' }, s.status === 'signed-out' ? '–' : '?'),
-    h('div', { style: 'display:flex;flex-direction:column;min-width:0' },
-      h('span', { class: s.status === 'signed-in' ? '' : 'warn' }, who),
-      h('span', { class: 'muted mono', style: 'font-size:11px' }, `in ${s.folder} · ${s.path}`),
-      s.detail && s.status !== 'signed-in' ? h('span', { class: 'muted', style: 'font-size:11px' }, s.detail) : null));
+  const who = s.status === 'signed-in' ? (s.email || (p?.unknown ? unknownName(p) : 'Signed in'))
+    : s.status === 'signed-out' ? 'Signed out' : s.status === 'failed' ? 'Check failed' : 'Not known';
+  return h('div', { class: 'signin ' + s.status },
+    s.status === 'signed-in' ? avatar(s.person, 20) : h('span', { class: 'avatar none', 'aria-hidden': 'true' }, s.status === 'signed-out' ? '–' : '?'),
+    h('div', { class: 'signin-text' },
+      h('span', { class: s.status === 'signed-in' ? 'si-who' : 'si-who warn' }, who),
+      h('span', { class: 'si-where muted', title: s.path }, h('span', {}, s.folder === 'default' ? 'default folder' : s.folder), ' ', h('span', { class: 'mono si-path' }, pathText(s.path))),
+      s.detail && s.status !== 'signed-in' ? h('span', { class: 'si-detail muted' }, s.detail) : null));
 }
 
 function cell(c) {
@@ -81,7 +101,7 @@ function cell(c) {
     c.version ? h('span', { class: 'tver' }, c.version) : null,
     c.note && !c.version ? h('span', { class: 'tver' }, c.note) : null,
     c.signIns.map(signInLine),
-    c.note && c.version ? h('span', { class: 'muted', style: 'font-size:11.5px' }, c.note) : null);
+    c.note && c.version ? h('span', { class: 'tnote muted' }, c.note) : null);
 }
 
 function machineHead(m) {
@@ -103,7 +123,7 @@ function grid(d) {
   });
   return h('section', { class: 'card', 'aria-labelledby': 'where-h' },
     h('div', { class: 'card-h stacked' }, h('h2', { class: 'name', id: 'where-h' }, "Where you're signed in"),
-      h('span', { class: 'muted', style: 'font-size:12.5px' }, "Each cell: the tool's version, then who it's signed in as in each folder. A folder is where a tool keeps its sessions; default is the tool's own (~/.claude, ~/.codex), others are ones you added. Each machine checks its own tools.")),
+      h('span', { class: 'muted card-sub' }, "Who each tool is signed in as, in each folder it keeps sessions in.")),
     h('div', { class: 'tgrid-wrap' }, h('div', { class: 'tgrid', role: 'table', 'aria-label': "Where you're signed in" },
       h('div', { class: 'trow head', role: 'row' }, h('div', { role: 'columnheader' }, 'Machine'), TOOLS.map(([, name]) => h('div', { role: 'columnheader' }, name))),
       rows.length ? rows : h('div', { class: 'empty' }, 'Check all machines to see their tools.'))));
@@ -111,9 +131,14 @@ function grid(d) {
 
 // ---- Folders ------------------------------------------------------------------------------
 function counts(f) {
-  const parts = f.counts.map((c) => h('span', { class: 'count' }, `${c.n} `, avatar(c.person, 16), h('span', { class: 'sr-only' }, person(c.person)?.email || 'an unknown account')));
-  if (f.unrecorded) parts.push(h('span', { class: 'count muted' }, `${f.unrecorded} unrecorded`));
-  return parts.length ? h('div', { class: 'counts', 'aria-label': 'Sessions by the account that ran them' }, parts) : h('span', { class: 'muted', style: 'font-size:12px' }, 'No sessions yet');
+  const total = f.counts.reduce((n, c) => n + c.n, 0) + f.unrecorded;
+  if (!total) return h('span', { class: 'counts muted' }, 'No sessions yet');
+  const parts = f.counts.map((c) => {
+    const p = person(c.person), who = p?.unknown ? unknownName(p) : p?.email || 'an unknown account';
+    return h('span', { class: 'count', title: `${sessionsWord(c.n)} by ${who}` }, avatar(c.person, 16), `${c.n}`, h('span', { class: 'sr-only' }, ` by ${who}`));
+  });
+  if (f.unrecorded) parts.push(h('span', { class: 'count muted', title: "Sessions that don't record which account ran them" }, `${f.unrecorded} with no account recorded`));
+  return h('div', { class: 'counts', 'aria-label': 'Sessions by the account that ran them' }, h('span', { class: 'muted' }, sessionsWord(total)), parts);
 }
 
 function folderCard(f) {
@@ -126,19 +151,20 @@ function folderCard(f) {
     } catch (e) { fail(e); }
   };
   return h('article', { class: 'folder-card', 'data-profile': f.profile },
-    h('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap' },
+    h('div', { class: 'folder-head' },
       h('span', { class: 'chip agent-' + f.agent }, f.agentName),
-      h('b', { class: 'mono', style: 'font-size:12.5px;overflow-wrap:anywhere' }, `${f.name} · ${f.path}`)),
-    h('span', { style: 'font-size:12.5px' }, f.tools),
-    f.command ? h('span', { class: 'muted', style: 'font-size:12px' }, 'Run it yourself with ', h('span', { class: 'mono' }, f.command)) : null,
-    f.error ? h('span', { class: 'err', style: 'font-size:12px' }, f.error) : null,
+      h('b', { class: 'folder-name' }, f.name)),
+    h('span', { class: 'folder-path mono muted', title: f.path }, pathText(f.path)),
+    h('span', { class: 'folder-tools' }, f.tools),
+    f.command ? h('span', { class: 'muted folder-line' }, 'Run it yourself with ', h('span', { class: 'mono' }, f.command)) : null,
+    f.error ? h('span', { class: 'err folder-line' }, f.error) : null,
     counts(f),
     h('div', { class: 'account-actions' },
       f.canRun ? h('button', { class: 'btn small', onclick: () => newSessionDialog(f) }, 'New session…') : null,
       !f.signedIn ? h('button', { class: 'btn small primary', disabled: !f.local && !f.canRun, title: !f.local && !f.canRun ? `Needs hopsesh running on ${f.machine}` : '', onclick: () => signIn() }, f.error ? 'Sign in again' : 'Sign in') : null,
       h('button', { class: 'btn icon small', disabled: checking.has(f.profile), title: 'Check the sign-in again', 'aria-label': `Check sign-in of ${f.name} on ${f.machine} again`, onclick: () => check(f) }, icon(ICONS.refresh, 13)),
       !f.default ? h('button', { class: 'btn small', onclick: () => editDialog(f) }, 'Edit') : null,
-      !f.default ? h('button', { class: 'btn small danger forget', onclick: async () => {
+      !f.default ? h('button', { class: 'btn small quiet forget', onclick: async () => {
         if (!await ask({ title: `Forget “${f.name}”?`, body: `hopsesh stops listing it${f.command ? ' and removes the ' + f.command + ' command' : ''}. The folder ${f.path} and its sign-in stay on ${machineWord(f.machine)}.`, ok: 'Forget' })) return;
         try { await api('ForgetAccount', f.profile, f.generation); await scan(); } catch (e) { fail(e); }
       } }, 'Forget') : null));
@@ -272,7 +298,7 @@ function render() {
     d.notes.map((n) => h('div', { class: 'banner', role: 'note' }, h('b', {}, n.title), h('span', {}, n.text))),
     h('section', { class: 'card', 'aria-labelledby': 'people-h' },
       h('div', { class: 'card-h' }, h('h2', { class: 'name', id: 'people-h' }, 'Your accounts')),
-      known.length || unknown.length ? h('div', { class: 'person-grid' }, [...known, ...unknown].map(personCard))
+      known.length || unknown.length ? h('div', { class: 'person-grid' }, known.map(personCard), unknown.length ? unknownCard(unknown) : null)
         : h('div', { class: 'empty' }, busy ? 'Checking your machines…' : 'No accounts yet. Check all machines, or add one.')),
     grid(d), folders(d))));
 }

@@ -122,14 +122,14 @@ func TestChangingConfiguredDefaultPreservesIdentityAndInvalidatesPlans(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = s.SetDefault("endpoint", "codex", b.ID); err != nil {
+	if err = s.SetDefault("endpoint", "codex", b.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	ps, _ := s.List()
 	if ps[0].Default || !ps[1].Default || ps[0].Generation != a.Generation+1 || ps[1].Generation != b.Generation+1 || ps[0].ID != a.ID || ps[1].ID != b.ID {
 		t.Fatalf("default switch: %+v", ps)
 	}
-	if err = s.SetDefault("endpoint", "codex", b.ID); err != nil {
+	if err = s.SetDefault("endpoint", "codex", b.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	same, _ := s.List()
@@ -165,5 +165,34 @@ func TestFailedOwnerObservationPreservesPublicIdentityAndSanitizesError(t *testi
 	ps, _ := s.List()
 	if ps[0].Account.Email != p.Account.Email || ps[0].Error == "" || ps[0].Binding != p.Binding {
 		t.Fatal("failed owner check lost last known identity")
+	}
+}
+
+// A folder once taken for the default keeps the name hopsesh gave the default; when it is
+// no longer the default, it is named after its folder.
+func TestFolderNoLongerDefaultLosesTheDefaultName(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	home, _ := s.Register(agent.RuntimeProfile{Endpoint: "e", Agent: "claude", Name: "Claude Code default", Root: "/u/.claude"})
+	de, _ := s.Register(agent.RuntimeProfile{Endpoint: "e", Agent: "claude", Name: "Claude Code default", Root: "/u/.hopsesh/accounts/claude/de", Default: true})
+	own, _ := s.Register(agent.RuntimeProfile{Endpoint: "e", Agent: "claude", Name: "de", Root: "/u/elsewhere/de"})
+	state, _ := s.Register(agent.RuntimeProfile{Endpoint: "e", Agent: "claude", Name: "Claude Code default", Root: "/u/.local/state/hopsesh/profiles/9ed8/claude"})
+	if err := s.SetDefault("e", "claude", home.ID, "Claude Code default"); err != nil {
+		t.Fatal(err)
+	}
+	ps, _ := s.List()
+	names := map[string]string{}
+	for _, p := range ps {
+		names[p.ID] = p.Name
+	}
+	if names[home.ID] != "Claude Code default" || names[de.ID] != "de 2" || names[own.ID] != "de" || names[state.ID] != "9ed8" {
+		t.Fatalf("names: %v", names)
+	}
+}
+
+func TestFolderName(t *testing.T) {
+	for in, want := range map[string]string{"/u/.hopsesh/accounts/claude/de": "de", `C:\Users\u\.codex`: "codex", "/u/.claude": "claude", "/claude": "other", "/p/9ed8/claude": "9ed8", "/u/work/": "work"} {
+		if got := FolderName(in); got != want {
+			t.Errorf("FolderName(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

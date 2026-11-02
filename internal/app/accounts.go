@@ -258,14 +258,15 @@ func (a *App) profileInstalls(ctx context.Context, m *host.Machine, mod agent.Mo
 			}
 		}
 	}
+	autoName := mod.Spec().Name + " default"
 	needsDefaultUpdate := false
 	for _, p := range ps {
-		if p.Endpoint == endpoint && p.Agent == base.Agent && p.Default != (p.ID == defaultID) {
+		if p.Endpoint == endpoint && p.Agent == base.Agent && (p.Default != (p.ID == defaultID) || p.ID != defaultID && p.Name == autoName) {
 			needsDefaultUpdate = true
 		}
 	}
 	if needsDefaultUpdate {
-		if err = a.accountStore().SetDefault(endpoint, base.Agent, defaultID); err != nil {
+		if err = a.accountStore().SetDefault(endpoint, base.Agent, defaultID, autoName); err != nil {
 			return nil, err
 		}
 		ps, err = a.Accounts()

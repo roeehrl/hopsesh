@@ -54,7 +54,7 @@ func TestAccountsViewJoinsSignInsAcrossToolsAndMachines(t *testing.T) {
 	if me.Sessions != 2 || me.Machines != 2 || me.Initials != "M" || rc.Initials != "RC" || rc.Sessions != 1 {
 		t.Fatalf("people: %+v", v.People)
 	}
-	if len(unknown) != 1 || unknown[0].Sessions != 1 || unknown[0].Initials != "?" {
+	if len(unknown) != 1 || unknown[0].Sessions != 1 || unknown[0].Number != 1 || unknown[0].Initials != "1" || len(unknown[0].RanOn) != 1 || unknown[0].RanOn[0] != "This machine" {
 		t.Fatalf("unknown account: %+v", unknown)
 	}
 	if !strings.Contains(strings.Join(me.Where, "\n"), "This machine: Claude desktop") {

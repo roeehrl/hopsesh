@@ -293,8 +293,16 @@ func (s Store) ImportObservation(id string, remote agent.RuntimeProfile) error {
 
 // SetDefault tracks the vendor's currently configured root, without changing profile
 // identity. Switching that root invalidates plans which could launch the desktop app.
-func (s Store) SetDefault(endpoint string, id agent.ID, selected string) error {
+// A folder that is no longer the default and still has the name hopsesh gave the default
+// (autoName, "Claude Code default") is named after its folder instead.
+func (s Store) SetDefault(endpoint string, id agent.ID, selected, autoName string) error {
 	return s.Update(func(ps *[]agent.RuntimeProfile) error {
+		taken := map[string]bool{}
+		for _, p := range *ps {
+			if p.Endpoint == endpoint && p.Agent == id {
+				taken[p.Name] = true
+			}
+		}
 		for i := range *ps {
 			p := &(*ps)[i]
 			if p.Endpoint != endpoint || p.Agent != id {
@@ -305,9 +313,40 @@ func (s Store) SetDefault(endpoint string, id agent.ID, selected string) error {
 				p.Default = want
 				p.Generation++
 			}
+			if !want && autoName != "" && p.Name == autoName {
+				p.Name = unusedName(FolderName(p.Root), taken)
+				taken[p.Name] = true
+				p.Generation++
+			}
 		}
 		return nil
 	})
+}
+
+// FolderName is a name for an account folder from its path: its last element, or the one
+// before for a folder named after its agent (…/profiles/<id>/claude).
+func FolderName(root string) string {
+	parts := strings.FieldsFunc(root, func(r rune) bool { return r == '/' || r == '\\' })
+	for i := len(parts) - 1; i >= 0; i-- {
+		if parts[i] == "claude" || parts[i] == "codex" {
+			continue
+		}
+		if name := strings.TrimPrefix(parts[i], "."); name != "" {
+			return name
+		}
+	}
+	return "other"
+}
+
+func unusedName(name string, taken map[string]bool) string {
+	if !taken[name] {
+		return name
+	}
+	for n := 2; ; n++ {
+		if c := fmt.Sprintf("%s %d", name, n); !taken[c] {
+			return c
+		}
+	}
 }
 
 // Relocate records that a profile's folder moved (hopsesh moved it): same profile, same
