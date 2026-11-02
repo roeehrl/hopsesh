@@ -29,6 +29,7 @@ func TestSummaryOwnersFromRecords(t *testing.T) {
 }
 
 func TestLocalIdentityReadsOAuthAccountOnly(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_ENTRYPOINT", "") // run inside Claude desktop, the run would be desktop's
 	root := t.TempDir()
 	os.WriteFile(filepath.Join(root, ".claude.json"), []byte(`{"oauthAccount":{"accountUuid":"user-a","organizationUuid":"org-a","emailAddress":"a@example.com"}}`), 0o600)
 	run, ok := New().LocalIdentity(root, false)

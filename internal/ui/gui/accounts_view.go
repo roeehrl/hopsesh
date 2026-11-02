@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,12 +17,12 @@ import (
 // AccountsViewDTO is the Accounts screen: the accounts you use, who each tool is signed
 // in as on every machine, and the folders sessions are kept in.
 type AccountsViewDTO struct {
-	People   []PersonDTO     `json:"people"`
-	Machines []ToolRowDTO    `json:"machines"`
-	Folders  []FolderDTO     `json:"folders"`
-	Notes    []NoteDTO       `json:"notes"`
+	People   []PersonDTO      `json:"people"`
+	Machines []ToolRowDTO     `json:"machines"`
+	Folders  []FolderDTO      `json:"folders"`
+	Notes    []NoteDTO        `json:"notes"`
 	Move     []app.FolderMove `json:"move"`
-	Profiles []AccountDTO    `json:"profiles"`
+	Profiles []AccountDTO     `json:"profiles"`
 }
 
 // PersonDTO is one account: an email, or one only seen in sessions' records.
@@ -34,9 +35,12 @@ type PersonDTO struct {
 	Where    []string `json:"where"` // "This Mac: Claude desktop, Codex (terminal and app)"
 	Sessions int      `json:"sessions"`
 	Machines int      `json:"machines"`
+	RanOn    []string `json:"ranOn"` // the machines its sessions are on ("This machine" first)
 	// Unknown: no tool hopsesh checks is signed in to it; Agent is whose account it is.
+	// Number tells unknown accounts of one agent apart (1, 2 ...); it is also its initials.
 	Unknown bool     `json:"unknown,omitempty"`
 	Agent   agent.ID `json:"agent,omitempty"`
+	Number  int      `json:"number,omitempty"`
 }
 
 // ToolRowDTO is one machine's tools and who each is signed in as.
@@ -221,6 +225,9 @@ func (a *App) AccountsView() (*AccountsViewDTO, error) {
 		return strings.Compare(x.Name, y.Name)
 	})
 	for _, m := range machines {
+		if m.Local {
+			v.local = m.Name
+		}
 		row := ToolRowDTO{Machine: m.Name, Local: m.Local, OS: m.OS, Presence: m.Presence, PresenceWhy: m.PresenceWhy, Hopsesh: m.Hopsesh, Checked: m.CheckedAt, Scanned: true, Status: m.Status}
 		var claude, codex []agent.Install
 		for _, st := range m.Agents {
@@ -291,6 +298,8 @@ func (a *App) AccountsView() (*AccountsViewDTO, error) {
 				v.where(s.Person, m, "Claude desktop")
 			} else if m.Presence != app.PresenceLogin && !m.Local {
 				s.Detail = "its sign-in is seen by hopsesh running on " + m.Name
+			} else {
+				s.Detail = "Claude desktop hasn't said who is signed in: open it once, signed in"
 			}
 			desk.SignIns = append(desk.SignIns, s)
 		}
@@ -394,7 +403,6 @@ func machineWords(m *app.Machine) string {
 	return m.Name
 }
 
-
 // shortVersion is a desktop app's version for people: 26.1007.30912 → 26.1007.
 func shortVersion(v string) string {
 	if f := strings.Split(v, "."); len(f) == 3 && len(f[2]) >= 4 {
@@ -412,6 +420,7 @@ type people struct {
 	persons map[string]string // agent \x00 person → id
 	tools   map[string]map[string][]string
 	ranOn   map[string]map[string]bool
+	local   string // this machine's name
 }
 
 func newPeople() *people {
@@ -544,6 +553,24 @@ func (v *people) list() []PersonDTO {
 			p.Where = append(p.Where, label+": "+strings.Join(v.tools[id][name], ", "))
 		}
 		p.Machines = len(v.ranOn[id])
+		p.RanOn = []string{}
+		for name := range v.ranOn[id] {
+			p.RanOn = append(p.RanOn, name)
+		}
+		slices.SortFunc(p.RanOn, func(x, y string) int {
+			if (x == v.local) != (y == v.local) {
+				if x == v.local {
+					return -1
+				}
+				return 1
+			}
+			return strings.Compare(x, y)
+		})
+		for i, name := range p.RanOn {
+			if name == v.local {
+				p.RanOn[i] = "This machine"
+			}
+		}
 		if p.Unknown && p.Sessions == 0 {
 			continue
 		}
@@ -558,6 +585,15 @@ func (v *people) list() []PersonDTO {
 		}
 		return y.Sessions - x.Sessions
 	})
+	// Accounts seen only in records are told apart by number, most sessions first.
+	n := map[agent.ID]int{}
+	for i := range out {
+		if p := &out[i]; p.Unknown {
+			n[p.Agent]++
+			p.Number = n[p.Agent]
+			p.Initials = strconv.Itoa(p.Number)
+		}
+	}
 	return out
 }
 
@@ -608,4 +644,3 @@ func (a *App) AddAccountFolder(machine, id, name string, tags []string, command 
 	defer cancel()
 	return a.snapshot().AddAccount(ctx, machine, agent.ID(id), name, tags, app.AddAccountOptions{Command: command})
 }
-

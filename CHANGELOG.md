@@ -34,6 +34,19 @@ All notable changes to this project are documented here. The format follows
   `~/.hopsesh/owners/<program>/<pid>.json`. hopsesh then names it as the session's owner,
   and the client API won't apply a move of that session until the program has stopped it.
 
+### Fixed
+
+- The Accounts screen:
+  - A sign-in hopsesh couldn't read showed as a tall oval, and long folder paths ran into
+    the next column. Avatars are round, and paths wrap at their slashes.
+  - Accounts seen only in session records are one card, numbered so each can be told
+    apart ("Claude account 1 · 16 sessions on laptop"), in the folders' counts too.
+  - A folder's name and path are on lines of their own, its sessions are counted in
+    words, and Forget no longer stands out.
+  - An extra account folder that was once taken for the default kept the name "Claude
+    Code default"; it now takes its folder's name.
+  - Claude desktop's sign-in on another machine says why it's not known.
+
 ## [0.7.0] - 2026-10-31
 
 A running Claude Code session says whether Remote Control reaches it, and Settings ›
