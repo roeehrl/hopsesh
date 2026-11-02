@@ -61,6 +61,11 @@ var noteRules = []noteRule{
 		func(m []string) (string, string, []clientapi.PlanAction) {
 			return m[1], "keep both, as separate branches", []clientapi.PlanAction{replan("Keep both", map[string]any{"conflict": "keep-both"})}
 		}},
+	{regexp.MustCompile(`^(this conversation's history no longer matches .*); choose --keep-both to take it as a separate conversation$`),
+		func(m []string) (string, string, []clientapi.PlanAction) {
+			return m[1], "take it as a separate conversation from where it is now; the copies made before stay as they are",
+				[]clientapi.PlanAction{replan("Continue separately", map[string]any{"conflict": "keep-both"})}
+		}},
 	{regexp.MustCompile(`^(.*); choose --keep-both$`),
 		func(m []string) (string, string, []clientapi.PlanAction) {
 			return m[1], "keep both", []clientapi.PlanAction{replan("Keep both", map[string]any{"conflict": "keep-both"})}

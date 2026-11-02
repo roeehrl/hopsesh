@@ -168,7 +168,30 @@ func (r chained) parentUUID() string {
 // it must not hide descendants already present when a transfer reads the file.
 // Record order and parent links establish continuation, never timestamps. A later
 // checkpoint selecting an earlier leaf remains an explicit rewind.
-func activeBranch(recs []chained) ([]int, error) {
+//
+// Records are walked in write order (see chain.go): an early child follows its parent,
+// and a record whose parent was never written continues from the record before it. The
+// indexes returned are positions in file.
+func activeBranch(file []chained) ([]int, error) {
+	links := make([]link, len(file))
+	for i, r := range file {
+		links[i] = chainLink(r.Type, r.UUID, r.ParentUUID, r.LogicalParentUUID, r.IsSidechain)
+	}
+	order := writeOrder(links)
+	recs := make([]chained, len(order))
+	ordered := make([]link, len(order))
+	for k, i := range order {
+		recs[k], ordered[k] = file[i], links[i]
+	}
+	gap := gaps(ordered)
+	branch, err := walkBranch(recs, gap)
+	for k := range branch {
+		branch[k] = order[branch[k]]
+	}
+	return branch, err
+}
+
+func walkBranch(recs []chained, gap map[int]int) ([]int, error) {
 	byUUID := map[string]int{}
 	occurrences := map[string][]int{}
 	leaf := -1
@@ -204,6 +227,9 @@ func activeBranch(recs []chained) ([]int, error) {
 					continue
 				}
 				parent, extends := reachable[r.parentUUID()]
+				if j, bridged := gap[k]; !extends && bridged && reachable[recs[j].UUID] == j {
+					parent, extends = j, true
+				}
 				if !extends {
 					continue // unrelated branches cannot extend this checkpoint
 				}
@@ -240,6 +266,10 @@ func activeBranch(recs []chained) ([]int, error) {
 		// latest-UUID lookup can loop from a boundary into its own retained tail.
 		j, ok := before(r.parentUUID(), i)
 		if !ok {
+			if j, bridged := gap[i]; bridged {
+				i = j // across records Claude Code never wrote
+				continue
+			}
 			// A compaction boundary's logical parent is the conversation before it. A
 			// session forked after compaction starts at the boundary, and the record its
 			// logical parent names is a preserved message copied after it: the history

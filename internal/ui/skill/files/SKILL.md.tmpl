@@ -69,6 +69,8 @@ It moves a session here in the same agent, or continues it in another agent. Run
    - the session is open here: `--stop-local`;
    - both copies changed (`conflict`): `--keep-both`, or for the same agent `--replace`. Never
      pick for the user.
+   - the session's own history changed since hopsesh moved it (`historyChanged`, e.g. it was
+     rewound): `--keep-both` takes it as a separate conversation; ask first.
 3. After a clear yes: `{{.Bin}} pull <ref> --json --yes` with the same flags.
 4. Report `result.syncNote`, any `pushError`, the `command`, and that
    `{{.Bin}} undo <id>` reverses it.

@@ -86,7 +86,21 @@ func (m *Module) Preview(ctx context.Context, h agent.Host, in agent.Install, s 
 // previewItems walks the active branch back from the newest message (the tail-only form of
 // activeBranch) and returns its items, oldest first. rooted reports that the walk reached
 // the start of the conversation inside the window.
-func previewItems(recs []record) (items []agent.PreviewItem, rooted bool) {
+// Like activeBranch it walks in write order and continues across records Claude Code
+// never wrote (chain.go); a parent missing with nothing before it in the window is still
+// read as the branch going on before the window.
+func previewItems(file []record) (items []agent.PreviewItem, rooted bool) {
+	links := make([]link, len(file))
+	for i, r := range file {
+		links[i] = chainLink(r.Type, r.UUID, r.ParentUUID, r.LogicalParentUUID, r.IsSidechain)
+	}
+	order := writeOrder(links)
+	recs := make([]record, len(order))
+	ordered := make([]link, len(order))
+	for k, i := range order {
+		recs[k], ordered[k] = file[i], links[i]
+	}
+	gap := gaps(ordered)
 	byUUID := map[string]int{}
 	leaf := -1
 	for i, r := range recs {
@@ -116,6 +130,12 @@ func previewItems(recs []record) (items []agent.PreviewItem, rooted bool) {
 			break
 		}
 		j, ok := byUUID[parent]
+		if !ok || j >= i {
+			if j, bridged := gap[i]; bridged {
+				i = j
+				continue
+			}
+		}
 		if !ok {
 			break // the branch goes on before the window
 		}

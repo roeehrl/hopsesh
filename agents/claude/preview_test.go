@@ -343,3 +343,18 @@ func TestLiveInfoRemoteControl(t *testing.T) {
 		t.Errorf("too old to say: %q", li.RemoteControl)
 	}
 }
+
+// A turn whose first reply names a record Claude Code never wrote is still on the branch:
+// the preview shows the turns before it instead of stopping there.
+func TestPreviewAcrossUnwrittenParent(t *testing.T) {
+	file := writeTranscript(t, "/t/"+t.Name(), "p1", []line{
+		{"type": "user", "uuid": "u1", "parentUuid": nil, "message": map[string]any{"role": "user", "content": "first question"}},
+		{"type": "assistant", "uuid": "a1", "parentUuid": "never-written", "message": map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "text", "text": "first answer"}}}},
+		{"type": "user", "uuid": "u2", "parentUuid": "a1", "message": map[string]any{"role": "user", "content": "second question"}},
+		{"type": "assistant", "uuid": "a2", "parentUuid": "also-never-written", "message": map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "text", "text": "second answer"}}}},
+	})
+	p := preview(t, fake, file, 10)
+	if got, want := shape(p), "user:first question | agent:first answer | user:second question | agent:second answer"; got != want {
+		t.Fatalf("preview:\n got %s\nwant %s", got, want)
+	}
+}

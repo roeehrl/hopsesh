@@ -279,3 +279,110 @@ func TestUnreadCheckoutBlocks(t *testing.T) {
 		t.Fatalf("blockers with --to: %v", p.Blockers)
 	}
 }
+
+// firstUUID is the first user or assistant record's uuid in a transcript.
+func firstUUID(t *testing.T, file string) string {
+	t.Helper()
+	b, _ := os.ReadFile(file)
+	for _, line := range strings.Split(string(b), "\n") {
+		var r struct{ Type, UUID string }
+		if json.Unmarshal([]byte(line), &r) == nil && r.UUID != "" && (r.Type == "user" || r.Type == "assistant") {
+			return r.UUID
+		}
+	}
+	t.Fatal("no message in " + file)
+	return ""
+}
+
+// appendRecords adds raw transcript records.
+func appendRecords(t *testing.T, file string, records ...map[string]any) {
+	t.Helper()
+	f, err := os.OpenFile(file, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	for _, r := range records {
+		b, _ := json.Marshal(r)
+		f.Write(append(b, '\n'))
+	}
+}
+
+// Claude Code lost two records to a full disk after a move, and later records still name
+// them as parents. Moving the session on is not "history compacted or rewound": the
+// conversation continues across the gap. (A real session was refused for every account
+// and agent until it was read past the gap.)
+func TestMoveAcrossRecordsClaudeNeverWrote(t *testing.T) {
+	root := t.TempDir()
+	box, here := newLocation(t, "box", root), newLocation(t, "here", root)
+	seed(t, box)
+	env := move.Env{StateDir: t.TempDir()}
+	ctx := context.Background()
+	in := input(t, box, here)
+	p, err := move.Build(ctx, in, move.Options{TargetDir: here.repo})
+	if err != nil || len(p.Blockers) > 0 {
+		t.Fatalf("first move: %v %v", err, p.Blockers)
+	}
+	if _, err := move.Apply(ctx, p, in, env); err != nil {
+		t.Fatal(err)
+	}
+	moved := list(t, here)[sid]
+	appendTurn(t, moved.Path, "work before the disk filled")
+	appendRecords(t, moved.Path,
+		map[string]any{"type": "attachment", "uuid": "lost-1", "parentUuid": "tool-result-never-written", "isSidechain": false, "sessionId": sid, "attachment": map[string]any{"type": "total_tokens_reminder"}},
+		map[string]any{"type": "assistant", "uuid": "after-gap", "parentUuid": "lost-1", "isSidechain": false, "sessionId": sid,
+			"message": map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "text", "text": "the disk is full"}}}},
+		map[string]any{"type": "last-prompt", "leafUuid": "after-gap", "sessionId": sid})
+
+	back := input(t, here, box)
+	p, err = move.Build(ctx, back, move.Options{TargetDir: box.repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Blockers) > 0 || p.HistoryChanged != "" {
+		t.Fatalf("a gap Claude Code left is not a changed history: %v %q", p.Blockers, p.HistoryChanged)
+	}
+}
+
+// A session rewound after a move no longer has the records hopsesh recorded. The plan
+// says so and names its way forward instead of a dead end: keep-both takes it as a
+// separate conversation, and that plan can go ahead.
+func TestRewoundSourceOffersSeparateConversation(t *testing.T) {
+	root := t.TempDir()
+	box, here := newLocation(t, "box", root), newLocation(t, "here", root)
+	seed(t, box)
+	env := move.Env{StateDir: t.TempDir()}
+	ctx := context.Background()
+	in := input(t, box, here)
+	p, err := move.Build(ctx, in, move.Options{TargetDir: here.repo})
+	if err != nil || len(p.Blockers) > 0 {
+		t.Fatalf("first move: %v %v", err, p.Blockers)
+	}
+	if _, err := move.Apply(ctx, p, in, env); err != nil {
+		t.Fatal(err)
+	}
+	moved := list(t, here)[sid]
+	appendRecords(t, moved.Path, map[string]any{"type": "last-prompt", "leafUuid": firstUUID(t, moved.Path), "sessionId": sid})
+
+	back := input(t, here, box)
+	p, err = move.Build(ctx, back, move.Options{TargetDir: box.repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.HistoryChanged == "" || len(p.Blockers) != 1 || p.Blockers[0] != move.HistoryChangedBlocker(p.HistoryChanged) {
+		t.Fatalf("a rewound source: historyChanged %q, blockers %v", p.HistoryChanged, p.Blockers)
+	}
+	if strings.Contains(p.Blockers[0], "both copies changed") {
+		t.Fatalf("only this copy changed: %q", p.Blockers[0])
+	}
+	p, err = move.Build(ctx, back, move.Options{TargetDir: box.repo, Conflict: move.ConflictKeepBoth})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Blockers) > 0 || p.HistoryChanged != "" || !p.Options.Fork {
+		t.Fatalf("separate conversation: blockers %v, historyChanged %q, fork %v", p.Blockers, p.HistoryChanged, p.Options.Fork)
+	}
+	if _, err := move.Apply(ctx, p, back, env); err != nil {
+		t.Fatal(err)
+	}
+}
