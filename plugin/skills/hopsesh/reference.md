@@ -1,4 +1,4 @@
-# hopsesh reference (version 0.7.0)
+# hopsesh reference (version 0.8.0)
 
 ## Read-only commands
 

@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## [0.8.0] - 2026-11-02
+
+A Claude Code session that was moved once can be moved and continued again: hopsesh reads
+past the parent links Claude Code leaves unwritten, and a session whose history really
+changed can go on as a separate conversation. Other programs on the same machine, such as
+a phone companion, can list, watch and move sessions through a client API, and
+`hopsesh://` links open a session in the app.
+
 ### Added
 
 - A client API for other programs on the same machine, such as a phone companion's host
@@ -1164,6 +1172,7 @@ is refused and set aside (the app offers this), and machines are added again.
 - The terminal UI no longer carries out a plan you pressed `y` on while a changed one was
   still being worked out.
 
+[0.8.0]: https://github.com/roeehrl/hopsesh/releases/tag/v0.8.0
 [0.7.0]: https://github.com/roeehrl/hopsesh/releases/tag/v0.7.0
 [0.6.4]: https://github.com/roeehrl/hopsesh/releases/tag/v0.6.4
 [0.6.3]: https://github.com/roeehrl/hopsesh/releases/tag/v0.6.3
