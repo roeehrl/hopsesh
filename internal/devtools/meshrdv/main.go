@@ -3,9 +3,9 @@
 // what they need through the workflow run's own artifacts.
 //
 //	meshrdv listen  -node linux -user hsremote -out rdv/public     # start the listener, write peer.json
-//	(upload rdv/public as artifact peer-<node>)
+//	(upload rdv/public as artifact peer-<node>-<run attempt>)
 //	meshrdv connect -node linux -peers "windows macos" -dir rdv     # fetch peers, authorize, tunnel, ssh config
-//	(run the matrix against hs-<peer>; upload artifact done-<node>)
+//	(run the matrix against hs-<peer>; upload artifact done-<node>-<run attempt>)
 //	meshrdv barrier -node linux -peers "windows macos" -dir rdv     # wait until every peer is done
 //
 // A ticket lets anyone reach this runner's sshd while the job runs; logins are by key only
@@ -126,6 +126,16 @@ func listen(node, user, out string) error {
 }
 
 // artifact downloads one artifact of this run when it exists (false when not yet).
+// attempt names an artifact for this attempt of the run. A rerun keeps the earlier
+// attempts' artifacts, so an unsuffixed peer-<node> would hand a rerun the previous
+// runner's ticket and key: its tunnel goes nowhere and its login is refused.
+func attempt(name string) string {
+	if a := os.Getenv("GITHUB_RUN_ATTEMPT"); a != "" {
+		return name + "-" + a
+	}
+	return name
+}
+
 func artifact(name, dest string) (bool, error) {
 	repo, run := os.Getenv("GITHUB_REPOSITORY"), os.Getenv("GITHUB_RUN_ID")
 	out, err := exec.Command("gh", "api", fmt.Sprintf("repos/%s/actions/runs/%s/artifacts?name=%s", repo, run, name), "--jq", ".total_count").Output()
@@ -172,7 +182,7 @@ func connect(node string, peers []string, dir string, d time.Duration) error {
 	cfg := &strings.Builder{}
 	for i, p := range peers {
 		dest := filepath.Join(dir, "peers", p)
-		if err := waitFor("peer-"+p, dest, d); err != nil {
+		if err := waitFor(attempt("peer-"+p), dest, d); err != nil {
 			return err
 		}
 		b, err := os.ReadFile(filepath.Join(dest, "peer.json"))
@@ -242,11 +252,11 @@ func authorize(key string) error {
 	return nil
 }
 
-// barrier waits until every peer has uploaded done-<peer>, so no runner goes away while
+// barrier waits until every peer has uploaded done-<peer> in this attempt, so no runner goes away while
 // another still uses it.
 func barrier(peers []string, dir string, d time.Duration) error {
 	for _, p := range peers {
-		if err := waitFor("done-"+p, filepath.Join(dir, "done", p), d); err != nil {
+		if err := waitFor(attempt("done-"+p), filepath.Join(dir, "done", p), d); err != nil {
 			return err
 		}
 	}
