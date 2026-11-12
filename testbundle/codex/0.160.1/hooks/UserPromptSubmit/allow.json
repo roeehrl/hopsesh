@@ -1,0 +1,10 @@
+{
+  "cwd": "/Users/alice/git/demo",
+  "hook_event_name": "UserPromptSubmit",
+  "model": "fixture",
+  "permission_mode": "default",
+  "prompt": "Fixture hook test",
+  "session_id": "00000000-0000-4000-8000-000000000001",
+  "transcript_path": "/Users/alice/.agent/sessions/00000000-0000-4000-8000-000000000001.jsonl",
+  "turn_id": "00000000-0000-4000-8000-000000000003"
+}

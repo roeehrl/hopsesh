@@ -1,0 +1,26 @@
+{
+  "cwd": "/Users/alice/git/demo",
+  "duration_ms": 3,
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "PostToolUse",
+  "permission_mode": "default",
+  "prompt_id": "00000000-0000-4000-8000-000000000002",
+  "session_id": "00000000-0000-4000-8000-000000000001",
+  "tool_input": {
+    "content": "mycnc-hook-fixture",
+    "file_path": "/Users/alice/git/demo/effect.txt"
+  },
+  "tool_name": "Write",
+  "tool_response": {
+    "content": "mycnc-hook-fixture",
+    "filePath": "/Users/alice/git/demo/effect.txt",
+    "originalFile": null,
+    "structuredPatch": [],
+    "type": "create",
+    "userModified": false
+  },
+  "tool_use_id": "toolu_fixture",
+  "transcript_path": "/Users/alice/.agent/sessions/00000000-0000-4000-8000-000000000001.jsonl"
+}
