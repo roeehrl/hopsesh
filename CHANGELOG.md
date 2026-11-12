@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Security
+
+- Built with Go 1.27.4, which fixes a vulnerability in `net/http`
+  ([GO-2026-6859](https://pkg.go.dev/vuln/GO-2026-6859)).
+
 ## [0.8.0] - 2026-11-02
 
 A Claude Code session that was moved once can be moved and continued again: hopsesh reads
