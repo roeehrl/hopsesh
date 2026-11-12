@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/roeehrl/hopsesh/blob/main/testbundle/schemas/codex-hook.schema.json",
+  "title": "Codex hook input",
+  "description": "What Codex writes to a hook command standard input (https://learn.chatgpt.com/docs/hooks), captured and scrubbed. Common fields are checked; event-specific fields remain as captured. Stored in codex/<CLI version>/hooks/<hook_event_name>/.",
+  "type": "object",
+  "required": [
+    "session_id",
+    "transcript_path",
+    "cwd",
+    "hook_event_name"
+  ],
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "transcript_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "cwd": {
+      "type": "string",
+      "minLength": 1
+    },
+    "hook_event_name": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Za-z]{2,40}$"
+    },
+    "permission_mode": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}
