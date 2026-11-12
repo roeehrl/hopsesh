@@ -13,8 +13,9 @@ upstream targets, and its findings go into an issue in its own repository.
 Three jobs:
 
 1. **probe** (no secrets) reads the manifest, the list of targets and what to watch for each,
-   and gathers the facts into an `intel/` folder: the tested and latest versions, help output
-   at both (and which relied-on flags disappeared), docs pages hashed and diffed against last
+   and gathers the facts into an `intel/` folder: the tested, baseline and latest versions,
+   help output at the baseline, the version floors and the latest (and which relied-on flags
+   disappeared), the record formats hopsesh reads, docs pages hashed and diffed against last
    week's run, changelog and release entries, watched issues, and upstream code canaries.
    The CLIs only print their help, with an empty home folder and no token: nothing signs in
    to a vendor or calls a cloud. Last week's facts come from the previous successful run's
@@ -213,6 +214,45 @@ matrices test account/lineage routes; weekly upstream probes are narrower and do
 live authenticated round trips or that a desktop displayed the requested chat. The four
 review groups, their model budgets and the main-only protected review environment are
 unchanged. Scheduled runs acquire the new coverage when this change lands on main.
+
+### Version floors, formats and desktop apps
+
+**Floors.** The code gates features on versions (`agent.VersionAtLeast`,
+`HookVersionAtLeast`): Claude Code 2.1.284 (protection hooks) and 2.1.285 (`--desktop
+--resume`), Codex 0.129.0 (hooks and hook trust through app-server `hooks/list`) and 0.156.0
+(`--no-daemon` in hopsesh's own tabs), Claude desktop 2.19675.1 (focusing a running session
+through `claude://resume`). Each is a `floors` entry on its target, with its source file;
+`TestFloorsDeclared` parses the code and fails on a floor no target declares. A target's
+`baseline` is the highest of its tested version (the newest fixture folder) and its floors,
+and the probe compares the latest help and app-server schema with the baseline's, so a
+feature newer than the fixtures is still covered. With a package, it also runs the help and
+schema at each floor and checks that what the gated feature runs (`relies`, `methods`) is
+there at the floor and at the latest (`help/<target>/floors.tsv`). The fixtures stay at the
+versions they were recorded with (Claude Code 2.1.284, Codex 0.153.2): they are recorded
+evidence and are not relabelled.
+
+**Formats.** `watch.formats` lists the identity and record formats hopsesh reads, with the
+literal field names and the files that read them (`TestFormatsRead` keeps the list honest):
+Claude's oauthAccount, `auth status --json`, transcripts, credential_org attachments and
+bridge-session records, the live registry `sessions/<pid>.json` and hook payloads and
+output; Codex's auth.json ids, session_meta (creator ids, originator, thread_source),
+session_index.jsonl, thread-writer-locks and hooks.json with `hooks/list` trust. The probe
+counts each field in the docs, in the week's changes and in the upstream code it checks out
+(`formats/<target>.tsv`); a field that leaves the code, or one a change names, is flagged.
+No credential or real data is read: these are names, not samples.
+
+**Desktop apps** are `app` targets: `claude-desktop` (latest from its update feed
+RELEASES.json; desktop, deep-link and Linux docs; the Claude Code changelog; issue #80773)
+and `codex-desktop` (latest from the app's Sparkle appcast, `latest.from: feed`; app,
+commands, settings, Windows, update-management and remote-connection docs). Their formats
+are the bundles, the bundled runtimes, the desktop sign-in and the URL schemes
+(`claude://resume?session=`, `codex://threads/`).
+
+**Probe fixes.** `claude auth --help` is probed; a relied-on command of several words
+(`auth status`, `login status`) is one token, matched on its usage line; one-letter flags
+(`-v`) count in the removed/added lists; the real-agent tests run with `-v` and the probe
+counts passed, failed and skipped tests (all skipped is incomplete coverage), and it says
+when the installed CLI does not report the latest version.
 
 ### Movement and return coverage
 

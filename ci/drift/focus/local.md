@@ -97,7 +97,7 @@ paid model turn.
 
 Movement notices and returns: read `docs/movement-return.md`,
 `internal/e2e/movement_test.go`, `internal/app/movement.go`, module `hooks.go`,
-`sdk/agent/hooks*.go`, `sdk/agent/mark.go` and `internal/devtools/hsmatrix`.
+`sdk/agent/hooks*.go`, `sdk/agent/label.go` and `internal/devtools/hsmatrix`.
 The contract is lineage/5 and peer protocol 5; strict decoding refuses old versions.
 Watch upstream SessionStart/UserPromptSubmit hook payloads, session/transcript identity,
 profile-root precedence, output visibility, synchronous command behavior and trust gates.
@@ -110,6 +110,23 @@ lineage and return discovery remain available. Return candidates use the actual 
 and profile/binding, not labels; available/verify/same/behind/diverged/missing/live must
 remain honest as upstream readers, live detection and fork metadata change. No paid calls
 or writes to live vendor configuration are needed to validate these fixture scenarios.
+
+Conversation conflict review: inspect `docs/return-conflict-review.md`,
+`internal/core/move/comparison.go`, `agents/claude/branch_test.go` and
+`internal/e2e/movement_comparison_test.go`. Claude's last-prompt is a checkpoint,
+not necessarily the final saved response: follow only unambiguous descendants written
+after it, preserve explicit later rewinds, and reject ambiguous native branches inside
+the Claude module. Compaction replay ancestry uses preceding physical UUID occurrences;
+identical authored messages are deduplicated, while changed replay content and forward
+references remain rejected. Shutdown/checkpoint metadata alone must not invent new authored work.
+Never grant legacy incomplete receipts coverage of omitted messages. Comparison evidence
+uses fresh causal coverage and bounded ordinary-message/tool-name excerpts; private
+reasoning and raw tool input/output stay hidden. Unavailable evidence is not divergence.
+An old receipt that rejects newly exposed historical records can show bounded saved
+messages explicitly labeled relationship-unverified, without exclusive counts or coverage.
+GUI/TUI/CLI must identify both histories, explain that a difference does not establish
+when work was written, and require explicit review then confirmation for a separate
+conversation. Cancellation preserves both originals; notices are not ownership locks.
 
 Portable return comparisons after a first account observation must verify the original
 native anchors across the binding rotation (`internal/core/move/portable_return.go`,
@@ -139,6 +156,30 @@ metadata is the only Desktop file read. Unsupported live focus remains explicit;
 no fallback merely activates the app. Check TTY launch timeout/exit status/cleanup,
 no visible tab, session UUID propagation, and default-profile/root gates with module,
 GUI service and browser tests.
+
+Claude Remote Control: review `agents/claude/{live,remote_default}.go`,
+`internal/app/remote_default.go`, `internal/core/move/plan.go` (appRemoteControl),
+`internal/ui/gui/{termapps,remote_default}.go` and `assets/{sessions,inspector,machines}.js`.
+- Live state: the registry's `bridgeSessionId` in `sessions/<pid>.json` is an id while
+  connected and null after a disconnect. A process that never connected has none: in
+  2.1.300+ that means off, and older versions say nothing. Check that the field, its null
+  and its absence still mean that; a rename or a move into another file breaks the
+  indicator silently. The page link is https://claude.ai/code/<session_…>.
+- Per-machine default: `remoteControlAtStartup` in each Claude folder's user
+  `settings.json`. On writes true and off removes the key. Check that it is still
+  honoured from user settings (2.1.222+), still refused from project settings, and that
+  `disableRemoteControl` and organization policy still override it. The remote path is the
+  login-only peer request `remote-control/default`, announced in hello as Features
+  `remote-control-default`.
+- Desktop: `claude --desktop` accepts only --resume, --continue, --debug and --verbose,
+  and Claude desktop leaves a handed-over session off Remote Control (checked 2.1.311). If
+  the help, docs or changelog show `--desktop` taking `--remote-control`/`--rc`, or Desktop
+  applying "Connect new sessions to Remote Control" to sessions it is handed, hopsesh can
+  start it itself: report it as an opportunity. hopsesh never reads or writes Claude
+  desktop's own settings files.
+- Turn on: hopsesh types `/remote-control` and Enter into a session in its own Terminal
+  tab only while the registry says idle. Watch for the command being renamed, gaining a
+  confirmation, or `/rc` changing meaning.
 
 Transfer review instructions: inspect `internal/core/move/instructions.go` and the
 source-file packaging in `internal/app/peer.go`. The GUI previews declared global and
@@ -174,7 +215,7 @@ storage probe does not prove native window rehosting or account continuity.
 
 Session discovery shares a disposable SQLite summary catalog across GUI, Quick,
 TUI and CLI (`internal/core/catalog`, `internal/app/{catalog,watch,scan}.go`,
-`sdk/agent/listing.go`). Check storage layouts, title/rename/mark sidecars, Claude
+`sdk/agent/listing.go`). Check storage layouts, title/rename sidecars (and legacy title labels), Claude
 subagent directories and Codex session_index.jsonl dependencies: changes must
 invalidate summaries. Parser changes require a new summary salt. Watch events are
 hints with reconciliation and overflow handling. SessionWatchProvider paths must
@@ -192,3 +233,49 @@ login-completion refresh, SSH keychain limitations, owner registry metadata prov
 and independent same-email roots. Tailscale scripts must force TAILSCALE_BE_CLI=1;
 cover DNS-less peers, BackendState and visible partial discovery errors. Refreshing
 metadata must preserve a selected conversation DOM, focus and source-only scan scope.
+
+Portable original-session returns are a separate contract from native replay:
+Claude/Codex `Profile.PortableAppend` permits ordinary text deltas in a pinned
+receiving root, with verified native anchors, historical binding segments,
+current-login rechecks and no active writer. Check adapter changes against this
+contract, binding-scoped selection, GUI return discovery and retry deduplication.
+Claude context sizing also relies on assistant usage input/cache/output totals,
+active-branch/compaction semantics, exact model IDs with documented default windows,
+and local/project context overrides. A changed model window or usage schema affects
+these capacity checks even when CLI flags remain unchanged; report such changes.
+
+Large Codex rollout analysis must stay in the Codex module. Review incremental native record scanning, bounded record/retained-payload memory, cancellation, preserved record indexes/ordinals and cursor offsets. Repeated compaction replacement history is runtime context, not another copy of conversation work; capacity must still count the latest replacement correctly. Validate archive consultation instructions for both receiving agents, exact merged-archive starting offsets and bounded search/pagination, with no new authorization inferred from archived text. A reset branch may acquire its first origin only when the originless manifest has no replica on that branch and fork boundaries match; competing established origins must still fail atomically. Cover `TestAnalysisLargeRepeatedCompaction`, `TestMergeUnobservedBranchOrigin`, and mandatory `TestMovementArchiveConsultation`.
+
+Version floors, formats and desktop apps (phase 4): the code gates features on versions
+(`floors` per target: Claude Code 2.1.284 hooks and 2.1.285 `--desktop`, Codex 0.129.0
+hooks and hooks/list trust and 0.156.0 `--no-daemon`, Claude desktop 2.19675.1 resume
+focus). The help and schema are compared from the baseline (at or above every floor); read
+`help/<target>/floors.tsv` for what each gated feature runs at its floor and at the latest.
+`formats/<target>.tsv` covers the identity and record formats hopsesh reads: Claude
+oauthAccount, `auth status --json`, credential_org attachments and bridge-session records,
+the live registry sessions/<pid>.json and hook payloads; Codex auth.json ids,
+session_meta creator ids, originator (codex_cli_rs, Codex Desktop, codex_work_desktop) and
+thread_source realtime_voice, session_index.jsonl, thread-writer-locks and hooks.json with
+hooks/list trust. The app targets (`claude-desktop`, `codex-desktop`) watch the desktop
+apps' release feeds, docs and URL schemes (claude://resume?session=, codex://threads/),
+Claude desktop's own Claude Code (CLAUDE_CODE_ENTRYPOINT=claude-desktop) and its account
+(config.json lastKnownAccountUuid, claude-code-sessions/<account>/<org>/), and the Codex
+app's bundled runtime (Contents/Resources/codex-cli, codex-package.json). Fixtures stay at
+their recorded versions; a newer upstream is not evidence that the fixtures still match.
+
+Changing a session's folder (`hopsesh cd`, floors Claude Code 2.1.169 and Codex 0.133.0):
+for a closed Claude Code session hopsesh does what `/cd` does on disk (the transcript and its
+`<id>/` side folder move to `projects/<slug of the new folder>/`, and one
+`{"type":"relocated","relocatedCwd":…,"sessionId":…}` record is appended; nothing else is
+rewritten), and for an open one it asks the user to type `/cd <dir>` and watches for exactly
+that result. Report any change to what `/cd` moves, the relocated record's fields, the slug,
+`CLAUDE_CODE_PROJECT_DIR_NAME`, the SDK's `set_cwd` control request, or `/cd` becoming
+model-invocable or unavailable in some surface. For Codex, hopsesh has `codex app-server`
+resume the closed thread with a `cwd` (`thread/resume`, `excludeTurns`) and reads the folder
+back from the newest `thread_settings_applied` event (`thread_settings.cwd`, `thread_id`);
+`codex resume`/`fork` get `-C`. hopsesh never uses Codex's TUI `/cd`, because it forks a new
+thread (`fork_thread_at` in `codex-rs/tui/src/app/working_directory.rs`). A release that
+makes `/cd` keep the thread id is an opportunity, not a break: report it as info, with the
+version, so hopsesh can ask the user to type it in an open session as it does for Claude
+Code. A change to `thread/resume`'s cwd, to `thread_settings_applied`, or to `resume_cwd` /
+`ResumeCwdMode` is a risk. Cover `TestCodexChangeDirThroughAppServer`.

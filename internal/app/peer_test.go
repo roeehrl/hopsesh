@@ -11,6 +11,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/peer"
+	"github.com/roeehrl/hopsesh/sdk/ir"
 )
 
 // hopsesh peer starts directly in the form the Windows machine's ssh shell takes.
@@ -69,5 +70,17 @@ func TestReceiveOptionsRetainsTransferIdentityAndSelectedReplica(t *testing.T) {
 		if got.NewReplica != o.NewReplica || got.Bounded != o.Bounded {
 			t.Fatalf("peer lost explicit new-session intent: %+v", got)
 		}
+	}
+}
+
+func TestReceiveOptionsTakesContextPolicyButKeepsLocalResources(t *testing.T) {
+	a := &App{Cfg: config.Defaults()}
+	a.Cfg.History.ReadMemoryMB = 512
+	got := a.receiveOptions(move.Options{Limits: ir.Limits{ContextBudget: 16_000, Older: ir.OlderRecent, ReadBytes: 4 << 30, ArchiveBytes: 8 << 30}})
+	if got.Limits.ContextBudget != 16_000 || got.Limits.Older != ir.OlderRecent {
+		t.Fatalf("receiver dropped the sender's context policy: %+v", got.Limits)
+	}
+	if got.Limits.ReadBytes != 512<<20 || got.Limits.ArchiveBytes != ir.DefaultArchiveBytes {
+		t.Fatalf("a sender set this machine's resource budgets: %+v", got.Limits)
 	}
 }

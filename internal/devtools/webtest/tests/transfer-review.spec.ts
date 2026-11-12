@@ -118,7 +118,7 @@ test('missing source identity is explained without a duplicate profile label',as
  // Remove only the public observation, never the stable profile ID.
  await page.route('**/call',async route=>{const r=route.request().postDataJSON();if(!['InitialScan','Scan','RefreshHere','Plan'].includes(r.m)){await route.continue();return;}const response=await route.fetch(),body=await response.json();for(const g of body.result.groups||[])for(const e of g.entries||[])if(e.profile)e.profile.account=null;if(body.result.sourceEntry?.profile)body.result.sourceEntry.profile.account=null;await route.fulfill({json:body});});
  await page.reload();await expect(page.locator("#fresh")).toContainText("updated",{timeout:30_000});await plan(page);
- const source=page.locator('.transfer-accounts>div').first();await expect(source).toContainText('Email unavailable');const name=await source.locator('b').innerText();expect((await source.innerText()).split(name).length-1).toBe(1);
+ const source=page.locator('.transfer-accounts>div').first();await expect(source).toContainText('sign-in not checked');const name=await source.locator('b').innerText();expect((await source.innerText()).split(name).length-1).toBe(1);
 });
 
 
@@ -128,4 +128,26 @@ test('transfer review uses the freshly checked source sign-in',async({page})=>{
  await page.evaluate(async()=>{const path='/core.js',core=await import(path);const entry=core.entries().find((e:any)=>e.title==='Find the codeword');entry.profile.account=null});
  await plan(page);
  await expect(page.locator('.transfer-accounts>div').first()).toContainText('alice@example.com');
+});
+
+test('a changed conversation history offers a separate conversation instead of a dead end',async({page})=>{
+ const conflicts=[];
+ const blocker="this conversation's history no longer matches what hopsesh recorded when it last moved it (history was compacted or rewound); choose --keep-both to take it as a separate conversation";
+ await page.route('**/call',async route=>{
+  const r=route.request().postDataJSON();if(r.m!=='Plan'){await route.continue();return;}
+  conflicts.push(r.args[3].conflict||'');
+  const response=await route.fetch(),body=await response.json();
+  if(r.args[3].conflict!=='keep-both'){body.result.blockers=[blocker];body.result.historyChanged='history was compacted or rewound';}
+  await route.fulfill({json:body});
+ });
+ await row(page,'Find the codeword').click();await action(page,'move',/^Continue with Codex…/);
+ const sheet=page.locator('#sheet');
+ await expect(sheet).toContainText('This conversation changed since hopsesh last moved it');
+ await expect(sheet).toContainText('history was compacted or rewound');
+ await expect(sheet).not.toContainText('--keep-both');
+ await expect(page.locator('#sheet #go')).toBeDisabled();
+ await sheet.getByRole('button',{name:'Continue as a separate conversation'}).click();
+ await expect(page.locator('#sheet #go')).toBeEnabled();
+ await expect(sheet).not.toContainText('This conversation changed since hopsesh last moved it');
+ expect(conflicts.at(-1)).toBe('keep-both');
 });

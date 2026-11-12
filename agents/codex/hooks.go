@@ -9,9 +9,14 @@ import (
 
 var _ agent.MovementHookIntegrator = (*Module)(nil)
 
-// MovementHooks uses the current user-layer hooks.json contract. 0.160.0 is a
-// conservative compatibility baseline, not a claim about initial hook support.
-// Contract and stable version checked 2026-10-06:
+// hookFloor is the first Codex with both user hooks (0.124) and hook trust with
+// app-server hooks/list (0.129), which tells hopsesh whether an installed hook runs.
+// The Codex app's bundled runtime (0.162.0-alpha and later) passes: pre-releases past the
+// floor count.
+const hookFloor = "0.129.0"
+
+// MovementHooks uses the current user-layer hooks.json contract. Contract checked
+// 2026-10-06:
 // https://developers.openai.com/codex/hooks
 // https://developers.openai.com/codex/changelog#october-2026
 // Windows runner/source checked at rust-v0.160.0:
@@ -33,8 +38,8 @@ func (m *Module) MovementHooks(h agent.Host, in agent.Install, bin string, args 
 	}
 	out.File = agent.JSONMovementHookFileWithHandler(h.Path().Join(in.Root(home), "hooks.json"), handler)
 	out.DisabledReason = codexHookPolicy(h, in)
-	if !agent.HookVersionAtLeast(in.Version, "0.160.0") {
-		out.Reason = "movement hooks require a verified Codex version >= 0.160.0 (major 0)"
+	if !agent.HookVersionAtLeast(in.Version, hookFloor) {
+		out.Reason = agent.NeedsVersion("Codex", in.Version, hookFloor)
 	}
 	return out
 }

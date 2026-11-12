@@ -2,12 +2,13 @@
 // it runs, one line of facts), its action row ([Primary ▾] [Move ▾] [⋯]), where it is
 // open, the end of its conversation (safe, locally rendered Markdown), and its
 // repository, copies and details, which open and close app-wide.
-import { accountLabel, accountTitle, api, h, fill, icon, ICONS, state, sys, here, ago, when, bytes, agentBadge, cloudOf, cloudTitle, count, path, rich, fail, toast, dialog, errText, cap, $ } from "./core.js";
+import { role, chip as roleChip, isOldCopy, oldCopiesOf } from "./guard.js";
+import { accountLabel, accountTitle, api, h, fill, icon, ICONS, state, sys, here, ago, when, bytes, agentBadge, cloudOf, cloudTitle, count, path, rich, fail, toast, dialog, errText, cap, $, accountShown, copyEntry } from "./core.js";
 import { selectDestination, model, statusLine, placeName, showPlace, placeCount, onInspector, liveOf, appWord } from "./actions.js";
 import { openMenu, isOpen, openEl, closeAll } from "./menu.js";
 import { sectionOpen, setSection } from "./layout.js";
 import { markdown } from "./markdown.js";
-import { movementNotice, resolveDestination } from "./returns.js";
+import { movementNotice, resolveDestination, returnCard, oldCopyBanner, oldCopiesSection } from "./returns.js";
 import { tabs } from "./term.js";
 
 const AGENT_SHORT = { claude: "Claude", codex: "Codex" };
@@ -38,7 +39,7 @@ function toggle(btn, items, label, align) {
 // moveItems flattens Move ▾'s groups into a menu with headings.
 function moveItems(groups) {
   const out = [];
-  groups.forEach((g, i) => { if (i) out.push({ sep: true }); out.push({ heading: g.heading }, ...g.items); });
+  groups.filter(g=>g.items.length).forEach((g, i) => { if (i) out.push({ sep: true }); out.push({ heading: g.heading }, ...g.items); });
   return out;
 }
 
@@ -79,11 +80,24 @@ function section(name, title, def, badge, ...kids) {
 }
 
 // header is the title, the status line and the facts.
-function header(e) {
+// lineageLine says what this copy is in its journey, under the title (never in it); an
+// old copy has its banner there instead.
+function lineageLine(e, viewJourney) {
+  if (isOldCopy(e)) return oldCopyBanner(e, viewJourney);
+  const r = role(e);
+  if (!r) return null;
+  return h("span", { class: "ins-lineage", "aria-label": `${r.chip}. ${r.line}` }, roleChip(e), " ", h("span", { class: "muted" }, r.line));
+}
+
+function header(e, viewJourney) {
   const [k, lead, rest, cl, twice] = statusLine(e);
   const g = e.group;
   const facts = [];
-  if(e.profile) facts.push(h("span",{title:accountTitle(e.profile)},`${accountLabel(e.profile)}${e.profile.tags?.length?" · "+e.profile.tags.join(", "):""}`));
+  if(e.profile) facts.push(h("span",{title:accountTitle(e)},`${accountShown(e)||"Account not recorded"}${e.profile?.tags?.length?" · "+e.profile.tags.join(", "):""}`));
+  // Continuing it here runs under the folder's sign-in now, which may not be the account
+  // that ran it: say so before anyone continues.
+  const now=e.profile?.account?.loggedIn?(e.profile.account.email||e.profile.account.label):"";
+  if(now&&e.owner?.recorded&&!e.owner.current) facts.push(h("span",{class:"owner-switch",title:e.agent==="claude"?"Claude Code continues it under that account; reasoning recorded under the other account is not visible to it.":"Codex cannot resume it as it is under another account; Move to this same place continues a cleaned copy."},`Continues as ${now}`));
   if (e.cloud) {
     if (e.cloud.repo || !g.noRepo) facts.push(h("span", {}, (e.cloud.repo || g.name).split("/").pop()));
     if (e.cloud.branch) facts.push(h("span", { class: "mono" }, e.cloud.branch));
@@ -101,6 +115,7 @@ function header(e) {
   return h("div", { class: "ins-head" },
     h("div", { class: "ins-title" }, agentBadge(e.agent, e.agentName, e.cloud ? cloudTitle(e.machine) : ""),
       h("h2", { title: e.title + (e.canRename ? " (double-click to rename)" : ""), ondblclick: e.canRename ? () => renameDialog(e) : null }, e.title)),
+    lineageLine(e, viewJourney),
     derived && e.canRename ? h("span", { class: "ins-derived" }, e.titleSource === "none" ? "No title yet · " : `Title from ${e.titleSource === "reply" ? "first reply" : "first prompt"} · `,
       h("button", { class: "link", onclick: () => renameDialog(e) }, "Rename…")) : null,
     h("span", { class: "ins-status" }, h("span", { class: "dot " + (twice ? "needs" : k) }),
@@ -111,7 +126,9 @@ function header(e) {
 
 // openIn is where a running session is open, one line per place, each with Show.
 function openIn(e, m) {
-  if (!m.places.length) return null;
+  const rc = remoteLine(e, liveOf(e), m.places);
+  const phone = phoneLine(e, liveOf(e));
+  if (!m.places.length && !rc && !phone) return null;
   const lines = [];
   for (const p of m.places) {
     if (p.kind === "hopsesh") {
@@ -125,13 +142,41 @@ function openIn(e, m) {
       }
       continue;
     }
+    if (p.kind === "unknown") continue;
     const can = p.kind !== "tmux" && p.kind !== "ssh" && !(p.kind === "ide" && !sys.mac);
     lines.push(h("div", { class: "open-line" }, h("span", { class: "open-ic" }, placeIcon(p.kind) || agentBadge(e.agent, e.agentName)),
       h("span", { class: "open-t" }, placeName(p, e), p.count > 1 ? h("span", { class: "muted" }, ` — ${p.count} processes`) : null,
         p.waiting ? h("span", { class: "needs-word" }, " · ", h("span", { class: "dot needs" }), "waiting for you") : null),
       can ? h("button", { class: "btn small", onclick: () => showPlace(e, p) }, "Show") : null));
   }
+  if (rc) lines.push(rc);
+  if (phone) lines.push(phone);
   return h("div", { class: "sec" }, h("span", { class: "sec-h" }, "Open in"), lines);
+}
+
+// phoneLine follows a running session on the phone, in MyCNC, when MyCNC Host is here.
+function phoneLine(e, m) {
+  const c = state.info?.companion;
+  if (!m.live || e.cloud || !c?.installed) return null;
+  const follow = async () => { try { await api("FollowOnPhone", e.machine, e.key); } catch (err) { toast(cap(errText(err))); } };
+  return h("div", { class: "open-line phone-line" }, h("span", { class: "open-ic" }, icon(ICONS.external, 13)),
+    h("span", { class: "open-t" }, c.name, h("span", { class: "muted" }, c.running ? " — follow it on your phone" : ` — open ${c.name} Host to follow it on your phone`)),
+    h("button", { class: "btn small", onclick: follow }, "Follow on your phone"));
+}
+
+// remoteLine says whether the running session is connected to Remote Control (reachable
+// from claude.ai and the Claude app), as the agent records it; nothing when it doesn't say.
+function remoteLine(e, m, places) {
+  if (!m.live || (m.remoteControl !== "on" && m.remoteControl !== "off")) return null;
+  const on = m.remoteControl === "on";
+  // In a hopsesh Terminal tab here, hopsesh types the agent's own command for you.
+  const inTab = !on && e.agent === "claude" && e.machine === here() && places.some((p) => p.kind === "hopsesh");
+  const turnOn = async () => { try { await api("TurnOnRemoteControl", e.machine, e.key); toast("Turning on Remote Control…"); } catch (err) { toast(cap(errText(err))); } };
+  return h("div", { class: "open-line rc-line" }, h("span", { class: "open-ic" + (on ? " accent" : "") }, icon(ICONS.external, 13)),
+    h("span", { class: "open-t" }, on ? "Remote Control" : "Remote Control is off",
+      h("span", { class: "muted" }, on ? " — reach it from claude.ai or the Claude app" : inTab ? " — reach it from claude.ai or the Claude app once it's on" : m.app ? ` — turn it on with the session's Remote Control switch in ${m.app}` : " — type /remote-control in the session to reach it from claude.ai or the Claude app")),
+    on && m.remoteUrl ? h("button", { class: "btn small", onclick: () => api("OpenURL", m.remoteUrl).catch(fail) }, "Open") : null,
+    inTab ? h("button", { class: "btn small", onclick: turnOn }, "Turn on") : null);
 }
 
 // ---- The conversation ----
@@ -304,19 +349,18 @@ function history(e) {
   if (!n && !e.journey && !e.lineageError && !e.movement && !e.relationship?.parent && !e.relationship?.issue) return null;
   return section("copies", "Copies & history", false, h("span", { class: "chip disc-n" }, String(n)),
     e.relationship?.parent ? h("div",{class:"item"},h("strong",{},"Conversation family: "+e.relationship.name),h("span",{class:"muted"},(e.relationship.ancestors||[]).join(" → ")+" → "+e.relationship.branchName),h("span",{class:"muted"},e.relationship.evidence)) : null,
-    e.relationship?.issue ? h("div",{class:"item warn"},e.relationship.issue) : null,
-    e.movement ? h("div", {class:"muted"}, `Movement operation: ${e.movement.operation || "Not available in this scan"}`) : null,
-    e.lineageError ? h("div", { class: "item warn" }, `Lineage unavailable: ${e.lineageError}`, e.canArchiveLineage ? h("p", {}, "Archive this metadata to start a new family. The native conversation is preserved; Activity can undo this.") : h("p",{},"Ancestry cannot be verified. Create a separate fork to transfer it independently."),
+    e.relationship?.issue && e.relationship.issue !== e.lineageError ? h("div",{class:"item warn"},e.relationship.issue) : null,
+    e.lineageError ? h("div", { class: "item warn" }, `Lineage unavailable: ${e.lineageError}`, e.canArchiveLineage ? h("p", {}, "Archive this metadata to start a new family. The native conversation is preserved; Activity can undo this.") : h("p",{},"Its parent conversation is archived, unreadable or depended on for history. If the parent is archived, unarchive it in its agent and refresh."),
  e.canArchiveLineage ? h("button", {class:"btn small",onclick:async()=>{try{await api("ArchiveLineage",e.machine,e.key);toast("Lineage metadata archived. Activity can undo it.");await renamed();}catch(err){fail(err);}}},"Archive unsupported lineage") : null) : null,
  e.journey ? h("div", { class: "journey-counts" },
- h("span", { class: "chip" }, `${e.journey.transfers} transfers`),
- h("span", { class: "chip" }, `${e.journey.roundTrips} round trips to origin${e.journey.originProfile?" profile":""}`),
- h("span", { class: "chip" }, `${e.journey.returns} returns to visited locations`),
- h("span", {class:"chip"}, `${e.journey.machineTransfers||0} machine transfers · ${e.journey.machineRoundTrips||0} machine round trips`),
- e.journey.fork ? h("span", { class: "chip",title:`Parent branch: ${e.journey.parentBranch}` }, "Separate fork") : null,
+ h("span", { class: "chip" }, count(e.journey.transfers, "transfer")),
+ h("span", { class: "chip" }, `${count(e.journey.roundTrips, "round trip")} to origin${e.journey.originProfile?" profile":""}`),
+ h("span", { class: "chip" }, `${count(e.journey.returns, "return")} to visited locations`),
+ h("span", {class:"chip"}, `${count(e.journey.machineTransfers||0, "machine transfer")} · ${count(e.journey.machineRoundTrips||0, "machine round trip")}`),
+ e.journey.fork ? h("span", { class: "chip",title:`Parent branch: ${e.journey.parentBranch}` }, "Separate conversation") : null,
  h("span",{class:"muted",style:"font-size:12px"},`Origin: ${e.journey.origin&&e.journey.origin!=="/"?e.journey.origin:"not recorded"}; branch ${e.journey.branch.slice(0,8)}`)) : null,
  others.length ? h("div", { class: "sub-h" }, "Other copies") : null,
-    others.map((c) => h("span", {}, copyPlace(c), c.profile ? h("span",{title:accountTitle(c.profile)}," · "+accountLabel(c.profile)) : null, h("span", { class: "muted" }, c.newest ? " · newest" : c.mark ? " · marked" : " · older"), " ", h("button",{class:"link",onclick:()=>resolveDestination(c).then(selectDestination).catch(fail)},"Show copy"))),
+    others.map((c) => h("span", {}, copyPlace(c), (ce => accountShown(ce) ? h("span",{title:accountTitle(ce)}," · "+accountShown(ce)) : null)(copyEntry(c.machine, c.key) || { profile: c.profile, agentName: c.agentName }), h("span", { class: "muted" }, c.newest ? " · newest" : c.leftBehind ? " · old copy" : " · older"), " ", h("button",{class:"link",onclick:()=>resolveDestination(c).then(selectDestination).catch(fail)},"Show copy"))),
     e.mirror ? [h("div", { class: "sub-h" }, "Mirrored"), h("span", {}, `Remote Control keeps a copy on ${e.mirror.host} while it runs. `,
       h("button", { class: "link", onclick: () => api("OpenURL", e.mirror.url).catch(fail) }, "Open it"))] : null,
     e.history.length ? [h("div", { class: "sub-h" }, e.cloud ? "Lineage" : "Where it has been"),
@@ -352,23 +396,24 @@ function cloudNotes(e) {
 
 // inspector is the selected session's pane (or what selecting one does).
 export function inspector(e, previous=null) {
-  if (!e) return h("aside", { class: "inspector", id: "inspector", "aria-label": "Session details" }, h("div", { class: "empty" }, "Select a session to see what you can do with it."));
+  if (!e) return previous && !previous.dataset.key ? previous : h("aside", { class: "inspector", id: "inspector", "aria-label": "Session details" }, h("div", { class: "empty" }, "Select a session to see what you can do with it."));
   const m = model(e);
   const {group,observedAt,...item}=e;
-  const signature=JSON.stringify([item,{...group,entries:undefined},statusLine(e),m.primary?.label,m.primary?.disabled,state.info?.previews,state.info?.agents,[...tabs.values()].filter(t=>t.machine===e.machine&&t.key===e.key).map(t=>[t.id,t.state,t.attention])]);
+  // An old copy's banner and the active copy's view of its old copies change with them.
+  const copies=[e,...oldCopiesOf(e)].map(x=>[x.guard,x.departure,liveOf(x).live,liveOf(x).remoteControl,x.lastActive]);
+  const signature=JSON.stringify([item,{...group,entries:undefined},statusLine(e),m.primary?.label,m.primary?.disabled,state.info?.previews,state.info?.agents,[...tabs.values()].filter(t=>t.machine===e.machine&&t.key===e.key).map(t=>[t.id,t.state,t.attention]),copies]);
   const same=previous?.dataset.key===e.machine+"\u0000"+e.key;
   if(same && previous.dataset.signature===signature) return previous;
   const conversationKey=JSON.stringify([e.machine,e.key,e.lastActive,e.sizeKB,e.canPreview,state.info?.previews]);
   const retained=same && previous.dataset.conversationKey===conversationKey ? previous.querySelector('#sec-conversation')?.parentElement : null;
+  const journey = () => { setSection("copies", true); refresh(e); $("#sec-copies")?.scrollIntoView({block:"nearest"}); };
   return h("aside", { class: "inspector", id: "inspector", "aria-label": e.cloud ? `Cloud ${e.cloud.noun || "session"} details` : "Session details", "data-key": e.machine + "\u0000" + e.key, "data-signature":signature, "data-conversation-key":conversationKey },
-    header(e), actionRow(e, m), movementNotice(e, selectDestination, () => {
-      setSection("copies", true); refresh(e); $("#sec-copies")?.scrollIntoView({block:"nearest"});
-    }), returnSection(m), openIn(e, m), retained || conversation(e), repository(e), history(e), details(e), e.cloud ? cloudNotes(e) : null);
+    header(e, journey), actionRow(e, m), oldCopiesSection(e, selectDestination), isOldCopy(e) ? null : movementNotice(e, selectDestination, journey),
+    returnSection(m), openIn(e, m), retained || conversation(e), repository(e), history(e), details(e), e.cloud ? cloudNotes(e) : null);
 }
 
 function returnSection(m) {
   if (!m.returns?.length) return null;
   return h("section", {class:"sec", "aria-label":"Return destinations"}, h("span", {class:"sec-h"}, "Move back to an existing session"),
-    m.returns.map(a => h("div", {class:"return-choice"}, h("button", {class:"btn",onclick:a.run}, a.label),
-      h("span", {class:"muted"}, a.sub), h("span", {class:"mono"}, a.candidate.key))));
+    m.returns.map(returnCard));
 }

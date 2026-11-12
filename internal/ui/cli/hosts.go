@@ -81,7 +81,7 @@ merged with the ones you configured. Only machines you allow are ever contacted.
 		},
 	}
 	cmd.Flags().Bool("json", false, "output JSON")
-	cmd.AddCommand(hostsAllowCmd(true), hostsAllowCmd(false), hostsAddCmd(), hostsAuthCmd(), hostsSetupKeyCmd())
+	cmd.AddCommand(hostsAllowCmd(true), hostsAllowCmd(false), hostsAddCmd(), hostsAuthCmd(), hostsSetupKeyCmd(), hostsSetupCmd(), hostsStatusCmd())
 	return cmd
 }
 

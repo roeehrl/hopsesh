@@ -22,6 +22,7 @@ import (
 // The test binary is the stand-in claude (or gh, jules, devin, amp) when it runs under
 // that name.
 func TestMain(m *testing.M) {
+	os.Setenv("HOPSESH_APP_RUNTIMES", "off") // never the real Codex app's bundled codex
 	name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
 	switch name {
 	case "hopsesh-notice-probe":
@@ -68,7 +69,7 @@ func newCloudWorld(t *testing.T, work bool) *cloudWorld {
 	}
 	gitConfig := filepath.Join(root, "gitconfig")
 	for k, v := range map[string]string{"HOME": w.home, "USERPROFILE": w.home, "PATH": bin + ":" + testPath(), "HOPSESH_MACHINE": "here",
-		"HOPSESH_CONFIG_DIR": filepath.Join(w.home, "config"), "HOPSESH_STATE_DIR": filepath.Join(w.home, "state"), "HOPSESH_TAILSCALE": "off",
+		"HOPSESH_CONFIG_DIR": filepath.Join(w.home, "config"), "HOPSESH_STATE_DIR": filepath.Join(w.home, "state"), "HOPSESH_TAILSCALE": "off", "HOPSESH_APP_RUNTIMES": "off",
 		"CLAUDE_CONFIG_DIR": "", "CODEX_HOME": "", "FAKE_CLOUD_DIR": w.store, "FAKE_CLOUD_FAIL": "", "FAKE_CLAUDE_SAYS": "ok", "FAKE_AGENT_LOG": filepath.Join(root, "agents.log"),
 		"GIT_CONFIG_GLOBAL": gitConfig, "GIT_CONFIG_NOSYSTEM": "1", "GIT_AUTHOR_NAME": "Sam Doe", "GIT_AUTHOR_EMAIL": "sam@example.com",
 		"GIT_COMMITTER_NAME": "Sam Doe", "GIT_COMMITTER_EMAIL": "sam@example.com",

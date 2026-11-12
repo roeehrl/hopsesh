@@ -76,9 +76,16 @@ xcrun notarytool store-credentials hopsesh-notary \
 The issuer id is shown above the key list in App Store Connect → Users and Access →
 Integrations → App Store Connect API.
 
-**Optional:** the repository secret `TAP_GITHUB_TOKEN` (a fine-grained token with write
-access to `roeehrl/scoop-bucket` and a fork of `microsoft/winget-pkgs`) lets CI publish the
-Scoop manifest and a winget pull request. Without it those steps are skipped.
+**Package managers:** the repository secret `TAP_GITHUB_TOKEN` (a token with write access
+to `roeehrl/homebrew-tap`, `roeehrl/scoop-bucket` and `roeehrl/winget-pkgs`, the fork of
+`microsoft/winget-pkgs`) lets `.github/workflows/packages.yml` publish each release once it
+is published: the Homebrew formula `hopsesh` and cask `hopsesh-app`, the Scoop manifest, and a
+winget pull request for `roeehrl.hopsesh`. Without it (or with an expired one) the run fails.
+Every Monday it runs again for the latest release: it rewrites the tap and the bucket (a
+no-op when they are current) and fails when winget still lacks a release older than a week,
+so a missed release shows up as a failed run, not as silent drift. The winget step updates a
+package already there, so the first version went in by hand (a pull request with its three
+manifests). Run the workflow by hand for any release: Actions › packages › Run workflow.
 
 ## Cutting a release
 
@@ -88,6 +95,14 @@ Before tagging:
   the app's terminal checks on macOS and Windows; they are the release gate for the hopsesh
   Terminal window. If they are not green, ship with `config.AppResumeDefault = ResumeTerminal`
   (the app then resumes sessions in the user's terminal app until they choose otherwise).
+- The release workflow checks the program it built against its own skill
+  (`internal/devtools/skillcheck`: commands and flags the skill names, every visible flag
+  documented or allowlisted, the command tree equal to `internal/ui/cli/testdata/cli-tree.golden`)
+  before it attests anything; `scripts/release-sign.sh` signs only attested files, so a
+  failed check leaves a draft that cannot be completed. Fix it on `main` and tag again.
+- The real-window specs (`internal/devtools/webtest/real`) run only in CI, on the installed
+  apps. `go test ./internal/ui/gui` checks that each Settings tab and heading they look for
+  still exists; anything else they drive is checked only there.
 - The manual checks the stand-ins can't replace, on the Mac, for what the release touches:
   `scripts/cloud-smoke.sh` (real Claude Code cloud and Codex cloud; it starts paid turns),
   `scripts/iterm-smoke.sh` and `scripts/iterm-api-smoke.sh` (iTerm2), and the app's
@@ -97,6 +112,7 @@ Then:
 
 1. Move the `CHANGELOG.md` entries from "Unreleased" to a `## [X.Y.Z] - date` section
    (leave an empty `## Unreleased` above it, and add the `[X.Y.Z]:` link at the bottom),
+   run `scripts/update-plugin.sh` (the plugin in `plugin/` carries this release's skill),
    commit, push. That section becomes the release notes (the workflow fails without it).
 2. Tag and push: `git tag -a v0.4.0 -m "hopsesh 0.4.0" && git push origin v0.4.0`
    (use `-s` instead of `-a` if git has a signing key configured; only the repository admin
@@ -107,6 +123,10 @@ Then:
    uploads nothing: `DRY_RUN=1 scripts/release-sign.sh v0.4.0`. It also checks the test
    bundle's `.sha256` and that the draft is a pre-release exactly when the tag has a suffix.
 5. Review the draft on GitHub, then publish: `gh release edit v0.4.0 --draft=false --latest`.
+   Then check that the previous release's app updates itself in place to this one, on the
+   Mac, in a folder of its own: `scripts/app-update-check.sh v0.3.9` (the tag before). It
+   needs the published release, which is why it isn't part of signing; updating another
+   machine's app from the app does exactly this there.
 6. The website: bump `softwareVersion` in the hopsesh entry of `src/data/apps.ts` in
    [codonic-site](https://github.com/roeehrl/codonic-site) and merge it. It's the only place
    the site writes the version; its download links use `releases/latest/download/…` and
@@ -115,8 +135,7 @@ Then:
 To test the whole pipeline without publishing, use a pre-release tag such as
 `v0.5.0-rc.1`. A tag with a pre-release suffix (`-rc.N`, `-beta.N`) makes a draft marked as
 a **pre-release** (GoReleaser's `release.prerelease: auto`), gets placeholder notes unless
-`CHANGELOG.md` has a section for that exact version, and never publishes the Scoop manifest or a winget pull
-request. GitHub's "latest release", which `hopsesh update`, the apps and the install scripts
+`CHANGELOG.md` has a section for that exact version, and never reaches Homebrew, Scoop or winget. GitHub's "latest release", which `hopsesh update`, the apps and the install scripts
 read, never points to a pre-release, so even a published one updates nobody. When you are
 done, delete the draft and the tag (`gh release delete v0.5.0-rc.1 --cleanup-tag`).
 

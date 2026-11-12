@@ -34,7 +34,8 @@ test("Back to sessions stays in one toolbar position across pages and scrolling"
   }
 });
 
-for (const method of ["Activity", "Machines", "Settings"]) {
+// Machines is a Settings tab: its own case is Settings'.
+for (const method of ["Activity", "Settings"]) {
   test(`Back leaves a loading ${method} page and late responses cannot replace Sessions`, async ({ page }) => {
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });

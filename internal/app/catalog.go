@@ -1,13 +1,17 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/sdk/agent"
+	"maps"
 	"os"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -42,14 +46,71 @@ func (a *App) CachedInventory() *Inventory {
 		e.Cached = true
 		e.Live = agent.LiveInfo{State: agent.Unknown}
 		e.Returns = nil
-		e.Movement = nil
+		// Older caches could attach fork results by listing position. Never publish
+		// another native session's receipt as this entry's original relationship.
+		if e.Lineage != nil {
+			owns := false
+			for _, r := range e.Lineage.Replicas {
+				if r.Key.Agent == e.Session.Key.Agent && r.Key.Session == e.Session.Key.Session {
+					owns = true
+					break
+				}
+			}
+			if !owns {
+				e.Lineage = nil
+				e.Departure = nil
+				e.Arrival = nil
+				e.Movement = nil
+			}
+		}
 		if e.Cloud != nil {
 			c := *e.Cloud
 			c.State = agent.CloudUnknown
 			e.Cloud = &c
 		}
+		a.restoreCachedMovement(e)
 	}
 	return inv
+}
+
+// Older catalogs omitted movement notices, and preliminary batches could omit
+// roles too. Recover routing from the saved receipt without probing live state
+// or reading transcripts; preserve any previously verified divergence status.
+func (a *App) restoreCachedMovement(e *Entry) {
+	g := e.Lineage
+	if g == nil || e.LineageError != "" {
+		return
+	}
+	var id lineage.ReplicaID
+	for _, r := range g.Replicas {
+		if r.Key == e.Session.Key && r.Location == e.Machine && r.Line == g.Branch {
+			if id != "" {
+				return // ambiguous physical identity
+			}
+			id = r.ID
+		}
+	}
+	if id == "" {
+		return
+	}
+	if hop, departed := g.Departed(id); departed {
+		e.Arrival = nil
+		if e.Departure == nil || e.Departure.Operation != hop.ID {
+			e.Departure = a.describeDeparture(g, id, hop, nil)
+		}
+		if e.Movement != nil && e.Movement.Operation != hop.ID {
+			e.Movement = nil
+		}
+	} else {
+		e.Departure = nil
+		e.Arrival = a.arrival(g, id)
+		if hop, ok := g.Departure(id); !ok || e.Movement != nil && e.Movement.Operation != hop.ID {
+			e.Movement = nil
+		}
+	}
+	if e.Movement == nil && e.Departure != nil && a.Cfg.MovementNoticesOn() {
+		e.Movement = copyNotice(e.Departure)
+	}
 }
 
 // MergeDiscovery removes unseen rows only after a successful complete source scan.
@@ -103,6 +164,11 @@ func MergeDiscovery(old *Inventory, u ScanUpdate) *Inventory {
 			// Retained metadata is provisional; every action revalidates it.
 			if !u.Complete {
 				old := next.Entries[i]
+				// Listing and lineage precede movement observation. Keep the saved
+				// role until this source's completed batch carries fresh evidence.
+				if e.Departure == nil && e.Arrival == nil && e.Movement == nil && e.LineageError == "" {
+					e.Departure, e.Arrival, e.Movement = old.Departure, old.Arrival, old.Movement
+				}
 				if e.Git == nil {
 					e.Git = old.Git
 				}
@@ -166,30 +232,110 @@ func (a *App) saveCatalog(inv *Inventory, started time.Time) {
 	a.Catalog.Update(a.CatalogScope(), func(old []byte) any {
 		saved := catalogSnapshot{}
 		_ = json.Unmarshal(old, &saved)
-		if saved.Sources == nil {
-			saved.Sources = map[string]time.Time{}
+		previous := saved.Inventory
+		previous.Entries = slices.Clone(previous.Entries)
+		sources := maps.Clone(saved.Sources)
+		if sources == nil {
+			sources = map[string]time.Time{}
 		}
 		merged := &saved.Inventory
 		for _, m := range inv.Machines {
-			if saved.Sources[m.Name].After(started) {
+			if sources[m.Name].After(started) {
 				continue
 			}
 			merged = MergeDiscovery(merged, ScanUpdate{Machine: m, Entries: machineEntries(inv, m.Name), Complete: !inv.Discovering})
-			saved.Sources[m.Name] = started
+			sources[m.Name] = started
 		}
 		for _, c := range inv.Clouds {
-			if saved.Sources[c.Name].After(started) {
+			if sources[c.Name].After(started) {
 				continue
 			}
 			merged = MergeDiscovery(merged, ScanUpdate{Clouds: []*Cloud{c}, Entries: machineEntries(inv, c.Name), Complete: !inv.Discovering})
-			saved.Sources[c.Name] = started
+			sources[c.Name] = started
 		}
 		merged.Discovering = false
 		merged.Adopted = nil
 		merged.Waiting = nil
+		for i := range merged.Entries {
+			merged.Entries[i] = catalogEntry(merged.Entries[i])
+		}
+		// An idle app rescans the same sessions: keep the stored snapshot, and write
+		// nothing, unless what browsing shows changed. Saved check times then show the
+		// last change, which is all a saved row claims.
+		if sameCatalog(&previous, merged) {
+			return json.RawMessage(old)
+		}
+		saved.Sources = sources
 		saved.Inventory = *merged
 		return saved
 	})
+}
+
+// catalogProgressEvery spaces the partial saves other front ends follow during a scan.
+const catalogProgressEvery = 2 * time.Second
+
+// catalogEntry is what the catalog keeps of a row: what browsing shows before the first
+// scan, without live state (CachedInventory resets it) or the lineage revision graph.
+// Transfers never plan from a saved row (Plan refuses cached rows).
+func catalogEntry(e Entry) Entry {
+	e.Lineage = e.Lineage.Outline()
+	e.Live = agent.LiveInfo{}
+	e.Returns = nil
+	return e
+}
+
+// sameCatalog compares two snapshots without the times every scan refreshes (any
+// "checkedAt" or "observedAt"), the scan phase, and the order rows were listed in.
+func sameCatalog(a, b *Inventory) bool {
+	return bytes.Equal(catalogContent(a), catalogContent(b))
+}
+
+func catalogContent(inv *Inventory) []byte {
+	raw, _ := json.Marshal(inv)
+	var v any
+	if json.Unmarshal(raw, &v) != nil {
+		return raw
+	}
+	var strip func(any) any
+	strip = func(v any) any {
+		switch x := v.(type) {
+		case map[string]any:
+			if at, ok := x["checkedAt"].(string); ok {
+				if checked, err := time.Parse(time.RFC3339Nano, at); err == nil {
+					if text, ok := x["text"].(string); ok {
+						x["text"] = strings.TrimSuffix(text, " Last checked "+checked.UTC().Format(time.RFC3339)+".")
+					}
+				}
+			}
+			delete(x, "checkedAt")
+			delete(x, "observedAt")
+			delete(x, "phase")
+			for k, c := range x {
+				x[k] = strip(c)
+			}
+		case []any:
+			for i, c := range x {
+				x[i] = strip(c)
+			}
+		}
+		return v
+	}
+	v = strip(v)
+	if m, ok := v.(map[string]any); ok {
+		for _, list := range []string{"entries", "machines", "clouds"} {
+			if rows, ok := m[list].([]any); ok {
+				keys := make([]string, len(rows))
+				for i, r := range rows {
+					b, _ := json.Marshal(r)
+					keys[i] = string(b)
+				}
+				slices.Sort(keys)
+				m[list] = keys
+			}
+		}
+	}
+	b, _ := json.Marshal(v)
+	return b
 }
 
 // discoveryLease lets simultaneous GUI, Quick, TUI and CLI browsers follow one

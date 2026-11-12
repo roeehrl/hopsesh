@@ -203,6 +203,61 @@ func (LocalGit) RemoveWorktree(ctx context.Context, dir, worktree string, force 
 	return err
 }
 
+// CloneWork says what the clone dir holds that is not on its remote: changes, untracked
+// or ignored files (an .env, a build), stashes, commits no remote branch has, or other
+// worktrees ("" when there is nothing, or the clone is gone).
+func (LocalGit) CloneWork(ctx context.Context, dir string) (string, error) {
+	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if top, err := runGit(ctx, dir, "rev-parse", "--show-toplevel"); err != nil {
+		return "", err
+	} else if !sameFolder(top, dir) {
+		return "is no longer a repository of its own", nil
+	}
+	checks := []struct {
+		args []string
+		what string
+	}{
+		{[]string{"status", "--porcelain", "--ignored", "--untracked-files=all"}, "has files that are not committed"},
+		{[]string{"stash", "list"}, "has stashed changes"},
+		{[]string{"log", "--branches", "--tags", "--not", "--remotes", "--oneline", "-1"}, "has commits that are not on its remote"},
+	}
+	for _, c := range checks {
+		out, err := runGit(ctx, dir, c.args...)
+		if err != nil {
+			return "", err
+		}
+		if out != "" {
+			return c.what, nil
+		}
+	}
+	out, err := runGit(ctx, dir, "worktree", "list", "--porcelain")
+	if err != nil {
+		return "", err
+	}
+	if strings.Count(out, "worktree ") > 1 {
+		return "has other worktrees", nil
+	}
+	return "", nil
+}
+
+// RemoveClone removes the clone dir while CloneWork finds nothing in it (one already gone
+// is fine).
+func (g LocalGit) RemoveClone(ctx context.Context, dir string) error {
+	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	work, err := g.CloneWork(ctx, dir)
+	if err != nil {
+		return err
+	}
+	if work != "" {
+		return errors.New("it " + work)
+	}
+	return os.RemoveAll(dir)
+}
+
 // CommitPatch applies a unified diff in a worktree (unless the driver applied it there
 // already) and commits the worktree's changes as one commit, without running the
 // repository's hooks; it returns the commit.

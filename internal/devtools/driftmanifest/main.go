@@ -7,7 +7,8 @@
 // targets; the review reads all of it next to the vendors' changelogs and docs.
 //
 // `driftmanifest feed FILE SINCE` prints the items of an RSS or Atom file published
-// after SINCE (RFC 3339) as Markdown, for the probe. `driftmanifest check SCHEMA FILE`
+// after SINCE (RFC 3339) as Markdown, for the probe; `driftmanifest feed-latest FILE`
+// prints the title of its newest dated item (a Sparkle appcast's version). `driftmanifest check SCHEMA FILE`
 // validates a manifest that another repository wrote for the reusable workflow
 // (ci/drift/manifest.schema.json, and the rules a schema cannot say). It is not shipped.
 package main
@@ -58,6 +59,15 @@ func main() {
 			fmt.Fprintln(os.Stderr, "driftmanifest feed:", err)
 			os.Exit(1)
 		}
+		return
+	}
+	if len(os.Args) == 3 && os.Args[1] == "feed-latest" {
+		v, err := feedLatest(os.Args[2])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "driftmanifest feed-latest:", err)
+			os.Exit(1)
+		}
+		fmt.Println(v)
 		return
 	}
 	if len(os.Args) == 4 && os.Args[1] == "check" {
@@ -125,6 +135,7 @@ func modules() []module {
 // Upstream changes can break shared consumers even when the adapter still compiles.
 // These paths also give the reviewer the regression scenarios and current contracts.
 var profileIntegrationFiles = []string{
+	"sdk/ir/ir.go", "sdk/ir/capacity.go", "sdk/agent/capacity.go",
 	"sdk/agent/runtime_profile.go", "internal/core/profiles", "internal/core/lineage",
 	"internal/core/move", "internal/core/peer", "internal/core/host", "internal/app",
 	"internal/ui/gui", "internal/ui/tui", "internal/ui/cli",
@@ -135,7 +146,7 @@ var profileIntegrationFiles = []string{
 	"internal/e2e/scenario/testdata/accounts.txtar",
 	"internal/devtools/webtest/tests/accounts.spec.ts",
 	"internal/devtools/webtest/tests/movement.spec.ts", "internal/devtools/webtest/tests/movement-real.spec.ts",
-	"docs/movement-return.md", "sdk/agent/mark.go", "sdk/agent/hooks.go", "sdk/agent/hooks_json.go",
+	"docs/movement-return.md", "sdk/agent/label.go", "sdk/agent/hooks.go", "sdk/agent/hooks_json.go",
 	"internal/config/config.go",
 	"internal/devtools/hsmatrix", ".github/workflows/ci.yml", ".github/workflows/nightly.yml",
 	"docs/accounts.md", "docs/account-lineage-contract.md",

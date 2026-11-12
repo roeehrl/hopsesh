@@ -245,7 +245,7 @@ not a substitute for Git credentials or permission to access the destination rep
 | A → B → A → B → A | Four committed transfers, two round trips to that line's origin; retries and scans add none |
 | A → B → C → A | Each receiving replica gets its missing revisions; one return to origin, with B and C contributions preserved |
 | A → B → C → B → C → A → B | Six transfers, one origin round trip; returns to other stops are shown separately |
-| Original and fork both move | Separate Line IDs, selection, receipts, marks and counters; family grouping does not collapse them |
+| Original and fork both move | Separate Line IDs, selection, receipts, statuses and counters; family grouping does not collapse them |
 | Source also gains work while away | Divergence: Keep both defaults to a new line; no automatic conversation merge |
 | Login changes during a plan | Reject on observed mismatch; re-plan under the new binding; never silently choose another profile |
 | Historical account unknown | Fresh portable projection with an explicit limitation; no assertion of native protected-state compatibility |

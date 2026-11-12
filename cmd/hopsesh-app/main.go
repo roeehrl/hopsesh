@@ -14,6 +14,7 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/agents/all"
 	"github.com/roeehrl/hopsesh/internal/config"
+	"github.com/roeehrl/hopsesh/internal/core/convert"
 	"github.com/roeehrl/hopsesh/internal/core/integrate"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
 	"github.com/roeehrl/hopsesh/internal/ui/gui"
@@ -21,6 +22,7 @@ import (
 )
 
 func main() {
+	gui.LimitMemory()
 	if transport.IsAskpass() {
 		os.Exit(transport.AskpassMain(os.Args[1:])) // ssh asking for a password, see transport
 	}
@@ -31,6 +33,10 @@ func main() {
 	// folders as the agents in Terminal.
 	integrate.SetLoginVars(reg.LoginEnv())
 	integrate.AdoptLoginEnv()
+	// Its PATH too: the agents it opens in its terminal (and their shells) find hopsesh,
+	// the agents and Homebrew's tools where the user's shell does.
+	integrate.AdoptLoginPATH()
+	convert.Program = integrate.SkillBin
 	svc := gui.NewApp(reg)
 	app := application.New(application.Options{
 		Name:        "hopsesh",
@@ -44,7 +50,13 @@ func main() {
 		Mac: application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false},
 		// With programs running in terminal tabs, the window asks before quitting.
 		ShouldQuit:     svc.ShouldQuit,
-		SingleInstance: &application.SingleInstanceOptions{UniqueID: fmt.Sprintf("hopsesh-%x", sha256.Sum256([]byte(config.Dir()))), OnSecondInstanceLaunch: func(application.SecondInstanceData) { _ = svc.QuickOpen("sessions", "", "") }},
+		SingleInstance: &application.SingleInstanceOptions{UniqueID: fmt.Sprintf("hopsesh-%x", sha256.Sum256([]byte(config.Dir()))), OnSecondInstanceLaunch: func(d application.SecondInstanceData) {
+			if link := gui.LinkArg(d.Args); link != "" {
+				_ = svc.OpenLink(link) // Windows: a hopsesh:// link opened while hopsesh runs
+				return
+			}
+			_ = svc.QuickOpen("sessions", "", "")
+		}},
 		Windows: application.WindowsOptions{
 			WebviewUserDataPath:   filepath.Join(config.StateDir(), "webview"),
 			AdditionalBrowserArgs: testBrowserArgs(),
@@ -52,6 +64,14 @@ func main() {
 		OnShutdown: svc.Shutdown,
 	})
 	svc.Wails = app
+	// hopsesh:// links: macOS sends them as an event, also the one that launched it;
+	// Windows starts hopsesh with the link as an argument.
+	app.Event.OnApplicationEvent(events.Common.ApplicationLaunchedWithUrl, func(e *application.ApplicationEvent) {
+		_ = svc.OpenLink(e.Context().URL())
+	})
+	if link := gui.LinkArg(os.Args[1:]); link != "" {
+		app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) { _ = svc.OpenLink(link) })
+	}
 	svc.AttachAppearance()
 	svc.Terms.Attach(app)
 	app.Menu.Set(menu(func(cmd string) { app.Event.Emit(gui.MenuEvent, cmd) }, svc.Terms.Toggle))

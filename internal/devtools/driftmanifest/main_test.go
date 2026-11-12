@@ -131,6 +131,12 @@ func TestCheckRefuses(t *testing.T) {
 		"bad grep":    {`{"project": {"name": "p", "about": "a", "cite": "c"}, "targets": [` + strings.Replace(good, `"grep": "x"`, `"grep": "("`, 1) + `]}`, "grep:"},
 		"relies only": {`{"project": {"name": "p", "about": "a", "cite": "c"}, "targets": [` + strings.Replace(good, `"grep": "x"`, `"grep": "x", "relies": ["--x"]`, 1) + `]}`, "relies on help"},
 		"unknown key": {`{"project": {"name": "p", "about": "a", "cite": "c"}, "targets": [` + strings.Replace(good, `"tested"`, `"tset": "", "tested"`, 1) + `]}`, "tset is not allowed"},
+		"below floor": {`{"project": {"name": "p", "about": "a", "cite": "c"}, "targets": [` + strings.Replace(good, `"tested": ""`,
+			`"tested": "1.2.0", "baseline": "1.2.0", "floors": [{"version": "1.3.0", "gates": "x", "source": "x.go"}]`, 1) + `]}`, "below 1.3.0"},
+		"floor methods": {`{"project": {"name": "p", "about": "a", "cite": "c"}, "targets": [` + strings.Replace(good, `"tested": ""`,
+			`"tested": "", "floors": [{"version": "1.3.0", "gates": "x", "source": "x.go", "methods": ["m/x"]}]`, 1) + `]}`, "does not run"},
+		"format": {`{"project": {"name": "p", "about": "a", "cite": "c"}, "targets": [` + strings.Replace(good, `"grep": "x"`,
+			`"grep": "x", "formats": [{"id": "fa", "what": "w", "fields": ["a"], "readers": ["r.go"]}, {"id": "fa", "what": "w", "fields": ["b"], "readers": ["r.go"]}]`, 1) + `]}`, "needs a unique id"},
 	} {
 		p := filepath.Join(t.TempDir(), "m.json")
 		if err := os.WriteFile(p, []byte(c.doc), 0o600); err != nil {

@@ -1,28 +1,42 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { fresh, menu } from "./helpers";
 
 test.beforeEach(async ({ page }) => fresh(page));
 
-test("add a machine, receive sessions, and remove the machine", async ({ page }) => {
+// Settings › Machines: the list beside the selected machine (machine-status.spec.ts has
+// its checks). Opening the old Machines screen opens this tab.
+async function machinesTab(page: Page) {
   await menu(page, "machines");
   await expect(page.getByRole("heading", { name: "Machines", exact: true })).toBeVisible();
+  return page.getByRole("listbox", { name: "Machines" });
+}
+const detail = (page: Page) => page.locator(".mdetail");
 
-  const receive = page.getByRole("switch", { name: "Receive sessions from my other machines" });
+async function add(page: Page, name: string) {
+  await page.getByRole("button", { name: "Add by address…" }).click();
+  await page.getByLabel("Name").fill(name);
+  await page.getByLabel("SSH destination").fill(`me@${name}.invalid`);
+  await page.locator("#dlg").getByRole("button", { name: "Add", exact: true }).click();
+}
+
+test("add a machine, receive sessions, and remove the machine", async ({ page }) => {
+  const list = await machinesTab(page);
+  // This machine is selected first: receiving is switched on its card.
+  const receive = detail(page).getByRole("switch", { name: "Receive sessions from my other machines" });
   await expect(receive).toHaveAttribute("aria-checked", "false");
   await receive.click();
   await expect(receive).toHaveAttribute("aria-checked", "true");
 
-  await page.getByRole("button", { name: "Add by address…" }).click();
-  await page.getByLabel("Name").fill("build-box");
-  await page.getByLabel("SSH destination").fill("me@build-box.invalid");
-  await page.locator("#dlg").getByRole("button", { name: "Add", exact: true }).click();
-  const added = page.locator(".mgrid", { hasText: "build-box" });
+  await add(page, "build-box");
+  const added = list.getByRole("option", { name: /build-box/ });
   await expect(added).toBeVisible();
-  await expect(added.getByRole("button", { name: "SSH key" })).toBeVisible();
+  await added.click();
+  await expect(detail(page).getByRole("heading", { name: "build-box" })).toBeVisible();
+  await expect(detail(page)).toContainText("me@build-box.invalid");
 
-  await added.getByRole("button", { name: "Remove" }).click();
+  await detail(page).getByRole("button", { name: "Remove" }).click();
   await page.locator("#dlg").getByRole("button", { name: "Remove" }).click();
-  await expect(page.locator(".mgrid", { hasText: "build-box" })).toHaveCount(0);
+  await expect(list.getByRole("option", { name: /build-box/ })).toHaveCount(0);
 });
 
 test("a completed machine scan cannot replace a pressed Remove button", async ({ page }) => {
@@ -43,14 +57,11 @@ test("a completed machine scan cannot replace a pressed Remove button", async ({
     }
     return route.continue();
   });
-  await menu(page, "machines");
-  await page.getByRole("button", { name: "Add by address…" }).click();
-  await page.getByLabel("Name").fill("press-box");
-  await page.getByLabel("SSH destination").fill("me@press-box.invalid");
-  await page.locator("#dlg").getByRole("button", { name: "Add", exact: true }).click();
-  const added = page.locator('.mgrid[data-machine="press-box"]');
-  await expect(added).toHaveAttribute("aria-busy", "true");
-  const remove = added.getByRole("button", { name: "Remove", exact: true });
+  const list = await machinesTab(page);
+  await add(page, "press-box");
+  await list.getByRole("option", { name: /press-box/ }).click();
+  await expect(detail(page).getByRole("button", { name: "Checking…" })).toBeDisabled();
+  const remove = detail(page).getByRole("button", { name: "Remove", exact: true });
   await remove.hover();
   await page.mouse.down();
   await remove.evaluate(button => { (window as any).__pressedRemove = button; });
@@ -61,33 +72,108 @@ test("a completed machine scan cannot replace a pressed Remove button", async ({
   await page.mouse.up();
   await expect(page.locator("#dlg").getByRole("heading", { name: "Remove press-box?" })).toBeVisible();
   await page.locator("#dlg").getByRole("button", { name: "Cancel" }).click();
-  await expect(added).toHaveAttribute("aria-busy", "false");
 });
 
-test("adding a machine starts one scan, disables Scan, and explains failures with Retry", async ({ page }) => {
+test("adding a machine starts one scan, shows it checking, and explains failures with Retry", async ({ page }) => {
   let scans = 0, release!: () => void;
   const pending = new Promise<void>(resolve => { release = resolve; });
-  await page.route("**/call", async route => {
+  await page.route("**/call", async (route) => {
     if (route.request().postDataJSON().m !== "ScanMachine") return route.continue();
     scans++;
     await pending;
     return route.fulfill({ json: { error: "Connection timed out: check the machine's address" } });
   });
-  await menu(page, "machines");
-  await page.getByRole("button", { name: "Add by address…" }).click();
-  await page.getByLabel("Name").fill("scan-box");
-  await page.getByLabel("SSH destination").fill("me@scan-box.invalid");
-  await page.locator("#dlg").getByRole("button", { name: "Add", exact: true }).click();
-  const machine = page.locator('[data-machine="scan-box"]');
-  await expect(machine.getByRole("button", { name: "Scanning scan-box" })).toBeDisabled();
-  await expect(machine).toHaveAttribute("aria-busy", "true");
-  expect(scans).toBe(1);
+  const list = await machinesTab(page);
+  await add(page, "scan-box");
+  const option = list.getByRole("option", { name: /scan-box/ });
+  await expect(option).toContainText("checking…");
+  await option.click();
+  await expect(detail(page).getByRole("button", { name: "Checking…" })).toBeDisabled();
+  // "Checking…" also shows while statuses load: wait for the one scan itself.
+  await expect.poll(() => scans).toBe(1);
   release();
-  await expect(machine).toContainText("Connection timed out");
-  await expect(machine).toHaveAttribute("aria-busy", "false");
-  await machine.getByRole("button", { name: "Retry scan scan-box" }).click();
+  await expect(detail(page)).toContainText("Connection timed out");
+  await detail(page).getByRole("button", { name: "Retry" }).click();
   await expect.poll(() => scans).toBe(2);
-  await expect(machine.getByRole("button", { name: "Retry scan scan-box" })).toBeEnabled();
+  await expect(detail(page).getByRole("button", { name: "Retry" })).toBeEnabled();
   await page.getByRole("button", { name: "Back to sessions" }).click();
   await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible();
+});
+
+// A machine reached over SSH only is set up from its Up next, after the dialog says what
+// setting it up does; nothing happens before that.
+test("an SSH-only machine says what hopsesh would do there, and is set up on request", async ({ page }) => {
+  const ok = (text: string) => ({ state: "ok", text });
+  let setups = 0;
+  await page.route("**/call", async (route) => {
+    const m = route.request().postDataJSON().m;
+    if (m === "SetUpMachine") { setups++; return route.fulfill({ json: { result: { machine: "lurus", version: "0.6.1", login: true, steps: [] } } }); }
+    if (m === "PlanUpdate") return route.fulfill({ json: { result: { machine: "lurus", version: "0.6.1", ends: 0, installs: { installs: [] },
+      steps: [{ do: "install", path: "/Users/me/.hopsesh/bin/hopsesh", text: "Copy hopsesh 0.6.1 to ~/.hopsesh/bin/hopsesh" }, { do: "service", path: "/Users/me/.hopsesh/bin/hopsesh", text: "Start it at login" }] } } });
+    if (m === "ScanMachine" || m === "MachineScans") return route.fulfill({ json: { result: m === "ScanMachine" ? null : {} } });
+    if (m === "MachineStatuses") return route.fulfill({ json: { result: [
+      { machine: "lurus", version: "", reach: ok("reached over SSH"), hopsesh: { state: "off", text: "not installed", fix: "setup", reason: "sessions can still be brought from it over SSH" },
+        login: { state: "off", text: "–" }, receiving: { state: "off", text: "can't receive", reason: "hopsesh isn't installed there" }, cli: { state: "off", text: "–" }, agents: [], todo: 1, total: 3, checkedAt: new Date().toISOString() }] } });
+    if (m !== "Machines") return route.continue();
+    const response = await route.fetch(), body = await response.json();
+    body.result.machines = [{ name: "lurus", destination: "me@lurus", os: "darwin", auth: "key", keychain: false, canRemember: true, scanned: true,
+      scan: { phase: "done", finished: new Date().toISOString() }, status: "ok", hint: "", error: "", agents: ["Claude Code 2.1.299"], hopsesh: "", sessions: 4, presence: "ssh",
+      can: [{ text: "Lists sessions (no live status)", ok: true }, { text: "Sign-ins: the Keychain is locked to SSH", ok: false }, { text: "Originals left there aren't protected", ok: false }] }];
+    await route.fulfill({ json: body });
+  });
+  const list = await machinesTab(page);
+  await expect(list.getByRole("option", { name: /lurus/ })).toContainText("SSH only");
+  await list.getByRole("option", { name: /lurus/ }).click();
+  await expect(detail(page).locator(".mnext")).toContainText("not installed");
+  await expect(detail(page)).toContainText("which is locked to SSH");
+  await detail(page).locator(".mnext").getByRole("button", { name: "Set up hopsesh…" }).click();
+  const d = page.locator("#dlg");
+  // What it does there comes from the machine: nothing is there, so a copy of its own.
+  await expect(d.locator('[data-step="install"]')).toHaveText("Copy hopsesh 0.6.1 to ~/.hopsesh/bin/hopsesh");
+  await expect(d).toContainText("hopsesh serve uninstall");
+  await expect(d).toContainText("Asks before installing hooks or the skill there");
+  expect(setups).toBe(0);
+  await d.getByRole("button", { name: "Set up hopsesh on lurus", exact: true }).click();
+  await expect(d).toContainText("hopsesh 0.6.1 runs in the login session on lurus.");
+  expect(setups).toBe(1);
+  await d.getByRole("button", { name: "Done" }).click();
+  await expect(d).toBeHidden();
+});
+
+// Remote Control for every session: one switch on this machine's page sets Claude Code's
+// own remoteControlAtStartup in its folder, read back from the file.
+test("Remote Control for every session is switched on this machine's page", async ({ page }) => {
+  await machinesTab(page);
+  const section = detail(page).locator("#remote-control-here");
+  const sw = section.getByRole("switch", { name: /^Start Remote Control for every Claude Code session on / });
+  await expect(sw).toHaveAttribute("aria-checked", "false", { timeout: 30_000 });
+  await expect(section).toContainText("Off");
+  await sw.click();
+  await expect(sw).toHaveAttribute("aria-checked", "true");
+  await expect(section).toContainText("On: every new session connects");
+  // Read again from the file, not the window's memory.
+  await detail(page).locator(".mdetail-h").getByRole("button", { name: "Check again" }).click();
+  await expect(sw).toHaveAttribute("aria-checked", "true", { timeout: 30_000 });
+  await sw.click();
+  await expect(sw).toHaveAttribute("aria-checked", "false");
+});
+
+test("this Mac's page suggests MyCNC for the phone, and the suggestion can be hidden", async ({ page }) => {
+  await machinesTab(page);
+  const section = detail(page).locator("#phone-companion");
+  if (process.platform !== "darwin") {
+    // MyCNC Host runs on macOS only.
+    await expect(detail(page).locator("#remote-control-here")).toBeVisible({ timeout: 30_000 });
+    await expect(section).toHaveCount(0);
+    return;
+  }
+  await expect(section).toContainText("Control this machine from your phone: MyCNC", { timeout: 30_000 });
+  await expect(section.getByRole("button", { name: "Learn more" })).toBeVisible();
+  await section.getByRole("button", { name: "Hide" }).click();
+  await expect(section).toHaveCount(0);
+  // It stays hidden when the page is shown again.
+  await menu(page, "sessions");
+  await machinesTab(page);
+  await expect(detail(page).locator("#remote-control-here")).toBeVisible({ timeout: 30_000 });
+  await expect(detail(page).locator("#phone-companion")).toHaveCount(0);
 });

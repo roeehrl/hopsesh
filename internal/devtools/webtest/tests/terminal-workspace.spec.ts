@@ -165,3 +165,28 @@ test('startup recovers an embedded terminal whose initial presentation event was
   return (await response.json()).result.placement;
  }).toBe('bottom');
 });
+
+// The bottom panel starts at the sidebar's edge, so the sidebar keeps the full height
+// beside it: nothing is left empty to the panel's left, and the list and inspector end
+// where the panel begins.
+test('bottom panel leaves no empty column beside the sidebar',async({page})=>{
+ await page.setViewportSize({width:1400,height:900});
+ await page.request.post('/terminal-test/open?title=Dock%20width');
+ await menu(page,'settings');await page.getByRole('tab',{name:'Terminal',exact:true}).click();
+ await page.getByRole('radio',{name:'Bottom panel',exact:true}).click();
+ await expect(page.locator('#terminal-workspace')).toBeVisible();
+ await page.getByRole('button',{name:'Back to sessions',exact:true}).click();
+ await expect(page.locator('#sidebar')).toBeVisible();
+ const box=async(sel:string)=>{const l=page.locator(sel).first();await expect(l).toBeVisible();let b=await l.boundingBox();await expect.poll(async()=>(b=await l.boundingBox())!=null).toBe(true);return b!;};
+ const panel=await box('#terminal-workspace'), side=await box('#sidebar');
+ expect(Math.abs(panel.x-(side.x+side.width))).toBeLessThanOrEqual(1);
+ expect(side.y+side.height).toBeGreaterThanOrEqual(900-1);
+ for(const sel of ['#inspector','.layout > :not(.sidebar):not(.divider):not(#inspector)']){
+  const b=await box(sel);expect(b.y+b.height).toBeLessThanOrEqual(panel.y+1);
+ }
+ // A view without the sidebar keeps the full width above the panel.
+ await menu(page,'settings');
+ await expect(page.locator('#sidebar')).toHaveCount(0);
+ const wide=await box('#terminal-workspace');expect(wide.x).toBe(0);
+ const view=await box('#view');expect(view.y+view.height).toBeGreaterThanOrEqual(900-1);
+});

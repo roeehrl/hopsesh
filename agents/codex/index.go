@@ -92,16 +92,17 @@ type reply struct {
 // `codex app-server` to (thread/read), and to record the name (thread/name/set). Codex
 // not installed here is not an error: it finds the session by id when resumed.
 func (m *Module) AfterInstall(ctx context.Context, h agent.Host, in agent.Install, key agent.SessionKey, p agent.Placement) error {
-	// A copy coming home replaces one hopsesh marked. Codex keeps the mark as the thread's
-	// name in the shared index, where it outlives the replaced file: name it again.
+	// A copy coming home may replace one an older hopsesh labelled. Codex keeps the label
+	// as the thread's name in the shared index, where it outlives the replaced file: name
+	// it again.
 	if cur := names(h, in)[string(key.Session)]; cur != "" {
-		if _, orig, ok := agent.ParseMarkTitle(cur); ok {
+		if _, orig, ok := agent.StripLegacyLabel(cur); ok {
 			name := p.Name
 			if name == "" {
 				name = orig
 			}
 			if err := setName(h, in, string(key.Session), name); err != nil {
-				return fmt.Errorf("clearing the mark of the copy this replaced: %w", err)
+				return fmt.Errorf("clearing the legacy label of the copy this replaced: %w", err)
 			}
 		}
 	}
@@ -221,9 +222,11 @@ func (m *Module) Import(ctx context.Context, h agent.Host, in agent.Install, fro
 	return "", errors.New("the Codex importer did not finish in time")
 }
 
-// Account identifies the Codex login on a machine through Codex itself (account/read),
-// never by reading auth.json. ChatGPT logins are keyed by a hash of the account's email;
-// an API key or another provider has no identity to compare.
+// Account identifies the Codex login on a machine through Codex itself (account/read). On
+// this machine it also takes the account and user ids from auth.json's public identity
+// (never its tokens), the same ids Codex records as a session's creator; elsewhere, or
+// when Codex keeps its login in the keyring, ChatGPT logins are keyed by a hash of the
+// email. An API key or another provider has no identity to compare.
 func (m *Module) Account(ctx context.Context, h agent.Host, in agent.Install) (agent.Account, error) {
 	if in.Binary == "" {
 		return agent.Account{}, fmt.Errorf("%w: codex is not installed there", agent.ErrNotInstalled)
@@ -258,7 +261,11 @@ func (m *Module) Account(ctx context.Context, h agent.Host, in agent.Install) (a
 			return agent.Account{Label: "not logged in", Confidence: "unknown", Observation: "signed-out"}, nil
 		case a.Type == "chatgpt" && a.Email != "":
 			sum := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(a.Email))))
-			return agent.Account{Key: "chatgpt:" + hex.EncodeToString(sum[:8]), Label: "ChatGPT " + a.Plan, LoggedIn: true, Email: a.Email, Provider: a.Type, Confidence: "limited", Observation: "chatgpt:" + hex.EncodeToString(sum[:])}, nil
+			acct := agent.Account{Key: "chatgpt:" + hex.EncodeToString(sum[:8]), Label: "ChatGPT " + a.Plan, LoggedIn: true, Email: a.Email, Provider: a.Type, Confidence: "limited", Observation: "chatgpt:" + hex.EncodeToString(sum[:])}
+			if id, ok := identityOf(h, in, a.Email); ok {
+				acct.Key, acct.Person, acct.Confidence = accountKey(id.Account), personKey(id.User), "verified"
+			}
+			return acct, nil
 		default:
 			return agent.Account{Label: a.Type, LoggedIn: true, Provider: a.Type, Confidence: "unknown", Observation: a.Type}, nil
 		}

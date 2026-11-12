@@ -3,7 +3,8 @@
 #   irm https://raw.githubusercontent.com/roeehrl/hopsesh/main/scripts/install.ps1 | iex
 #
 # Environment: HOPSESH_VERSION (default: latest), HOPSESH_INSTALL_DIR
-# (default: %LOCALAPPDATA%\Programs\hopsesh). The archive is checked against the
+# (default: %LOCALAPPDATA%\Programs\hopsesh; not the hopsesh app's folder unless
+# HOPSESH_FORCE=1). The archive is checked against the
 # release's checksums.txt, and checksums.txt against the release signing key below
 # (PowerShell 7 or later; Windows PowerShell 5.1 checks the checksum only).
 $ErrorActionPreference = 'Stop'
@@ -23,6 +24,12 @@ if (-not $tag.StartsWith('v')) { $tag = "v$tag" }
 $version = $tag.Substring(1)
 $archive = "hopsesh_${version}_windows_${arch}.zip"
 $base = "https://github.com/$Repo/releases/download/$tag"
+$dir = if ($env:HOPSESH_INSTALL_DIR) { $env:HOPSESH_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\hopsesh' }
+# The hopsesh app's folder holds its own hopsesh.exe, which updates with the app: replacing it
+# would leave the app and its command at different versions.
+if ((Test-Path (Join-Path $dir 'hopsesh-app.exe')) -and -not $env:HOPSESH_FORCE) {
+  Fail "$dir is the hopsesh app's folder, which keeps its hopsesh.exe up to date; update the app instead (or set HOPSESH_INSTALL_DIR to install a separate copy elsewhere)"
+}
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("hopsesh-" + [Guid]::NewGuid())
 New-Item -ItemType Directory -Path $tmp | Out-Null
 try {
@@ -51,7 +58,6 @@ try {
   if ($got -ne $want.ToLower()) { Fail "checksum mismatch for $archive; not installing" }
 
   Expand-Archive -Path "$tmp\$archive" -DestinationPath "$tmp\x" -Force
-  $dir = if ($env:HOPSESH_INSTALL_DIR) { $env:HOPSESH_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\hopsesh' }
   New-Item -ItemType Directory -Force -Path $dir | Out-Null
   $dest = Join-Path $dir 'hopsesh.exe'
   if (Test-Path $dest) { Move-Item -Force $dest "$dest.old" }

@@ -42,6 +42,7 @@ func TestProbeLocalWorktreesAndState(t *testing.T) {
 	os.WriteFile(filepath.Join(repo, "dirty"), []byte("x"), 0o644)
 	wt := filepath.Join(repo, ".claude", "worktrees", "feat")
 	git(t, repo, "worktree", "add", "-q", "-b", "feat", wt)
+	git(t, repo, "worktree", "add", "-q", "-b", "side", filepath.Join(root, "side")) // a linked worktree is no child
 
 	states, err := ProbeLocal(context.Background(), []string{repo, wt, filepath.Join(root, "missing"), root}, []string{".claude/worktrees"})
 	if err != nil {
@@ -54,7 +55,7 @@ func TestProbeLocalWorktreesAndState(t *testing.T) {
 	if !m.IsRepo || m.Branch != "main" || m.Ahead != 1 || m.Behind != 0 || m.Dirty != 1 || m.LinkedWorktree || m.Upstream != "origin/main" {
 		t.Errorf("main: %+v", m)
 	}
-	if len(m.Worktrees) != 2 || m.MainBranch != "main" || m.MainWorktree != repo {
+	if len(m.Worktrees) != 3 || m.MainBranch != "main" || m.MainWorktree != repo {
 		t.Errorf("worktrees: %+v", m.Worktrees)
 	}
 	if !w.LinkedWorktree || !w.AgentWorktree || w.Branch != "feat" || w.Unpushed != 0 && w.Upstream == "" && w.Unpushed != 1 {
@@ -66,11 +67,23 @@ func TestProbeLocalWorktreesAndState(t *testing.T) {
 	if missing.Exists || notRepo.IsRepo || !notRepo.Exists {
 		t.Errorf("missing/notRepo: %+v %+v", missing, notRepo)
 	}
+	// A folder that is not a repository lists the repositories directly inside it.
+	if len(notRepo.Children) != 1 || notRepo.Children[0] != repo || len(m.Children) != 0 {
+		t.Errorf("workspace children: %q (repo: %q)", notRepo.Children, m.Children)
+	}
 	if m.RootCommit == "" || m.RootCommit != w.RootCommit {
 		t.Errorf("root commits: %q %q", m.RootCommit, w.RootCommit)
 	}
 	if Identity(m.Remote) != "" { // local bare path remote has no identity
 		t.Errorf("local remote identity should be empty")
+	}
+}
+
+func TestParseProbeChildren(t *testing.T) {
+	out := "@@dir\t/w\nexists\t1\nrepo\t0\nchild\t/w/a\nchild\t/w/b\n@@dir\t/x\nexists\t1\nrepo\t0\n"
+	st := ParseProbe([]byte(out), nil)
+	if len(st) != 2 || len(st[0].Children) != 2 || st[0].Children[1] != "/w/b" || len(st[1].Children) != 0 {
+		t.Fatalf("%+v", st)
 	}
 }
 

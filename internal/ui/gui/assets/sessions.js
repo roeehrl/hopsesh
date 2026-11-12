@@ -2,15 +2,17 @@
 // clouds), the sessions in the middle as one tree (grouped, sorted and filtered by
 // listview.js), the selected session on the right (inspector.js). Every action on a
 // session comes from actions.js, which the palette uses too.
-import { accountLabel, accountTitle, loadError, api, on, h, fill, icon, ICONS, view, state, screen, go, current, loading, toast, fail, cap, ago, agentBadge, machineStatus, sys, keys,
-  entries, selected, here, agentInfo, $, count, clouds, cloudOf, cloudState, cloudChip, dialog, errText, rich, cloudTitle } from "./core.js";
+import { hopMark, accountLabel, accountShown, accountTitle, loadError, api, on, h, fill, icon, ICONS, view, state, screen, go, current, loading, toast, fail, cap, ago, agentBadge, machineStatus, sys, keys,
+  entries, selected, copyEntry, scanEntry, here, agentInfo, $, count, clouds, cloudOf, cloudState, cloudChip, dialog, errText, rich, cloudTitle, bytes } from "./core.js";
 import { planPicked } from "./plan.js";
-import { dividers, apply as applyLayout } from "./layout.js";
+import { healthNotice, loadHookHealth, hookHealth, withCLI, chip as roleChip, isOldCopy, movedTo, oldCopyMarks, oldCopySummary, markChip } from "./guard.js";
+import { dividers, apply as applyLayout, statusHeader } from "./layout.js";
 import { exitOf, exitWords, waiting, strayWaiting, showTerminal, tabs, onTabs } from "./term.js";
-import { model, statusOf, statusKey, placesOf, placeCount, placeName, showPlace, cloudBlock, onSelect, onTurnOn, key as entryKey } from "./actions.js";
-import { list, load as loadList, toolbar, counts, apply as applyFilters, groupsOf, tree, onChange, onRows, decide, toggleDisplay, clearFilters, activeFacets,
+import { model, statusOf, statusKey, placesOf, liveOf, placeCount, placeName, showPlace, cloudBlock, onSelect, onTurnOn, key as entryKey } from "./actions.js";
+import { list, load as loadList, toolbar, counts, apply as applyFilters, groupsOf, tree, adoptTree, onChange, onRows, decide, toggleDisplay, clearFilters, activeFacets,
   openGroupOf, focusTree, rowByKey, setAll, displayCommand, toggleFilter, save as saveList } from "./listview.js";
 import { inspector, openChevron, onRenamed, placeIcon } from "./inspector.js";
+import { onChangedDir } from "./cd-dialog.js";
 import { openMenu, isOpen } from "./menu.js";
 
 export { statusOf, cloudBlock };
@@ -46,7 +48,7 @@ export async function scan(method = "Scan", background = false) {
     state.stale = true;
     state.scanning = false;
     if (!state.scan && current === "sessions") fill(view, loadError(e, () => go("sessions", true)));
-    else fail(e);
+    else { fail(e); if (current === "sessions") render(); } // the previous results stay, with Retry
     freshness();
     return;
   }
@@ -171,11 +173,11 @@ function sidebar() {
     h("button", { class: "side-btn", "aria-current": cur("all"), onclick: () => setScope({ kind: "all" }) }, icon(ICONS.all), "All sessions", h("span", { class: "count" }, all.length)),
     h("div", { class: "side-h" }, "Machines"),
     h("button", { class: "side-btn", "aria-current": cur("here"), onclick: () => setScope({ kind: "here" }) },
-      h("span", { class: "dot ok" }), h("span", { class: "label" }, h("span", {}, sys.Here), h("small", { title: (local?.agents || []).join(", ") }, agentSubtitle(local)), scanSubtitle(local) ? h("small",{},scanSubtitle(local)) : null),
+      h("span", { class: "dot ok" }), h("span", { class: "label" }, h("span", { class: "mname" }, sys.Here, hopMark(local)), h("small", { title: (local?.agents || []).join(", ") }, agentSubtitle(local)), scanSubtitle(local) ? h("small",{},scanSubtitle(local)) : null),
       h("span", { class: "count" }, mine.length)),
     machines.map((m) => h("button", { class: "side-btn", "aria-current": cur("machine", m.name), onclick: () => setScope({ kind: "machine", value: m.name }) },
       h("span", { class: "dot " + dotFor(m) }),
-      h("span", { class: "label" }, h("span", {}, m.name), h("small", { class: dotFor(m) === "ok" ? "" : "warn", title: dotFor(m) === "ok" ? (m.agents || []).join(", ") : m.hint || m.error }, dotFor(m) === "ok" ? agentSubtitle(m) : machineStatus(m.status)[1]),scanSubtitle(m) ? h("small",{},scanSubtitle(m)) : null),
+      h("span", { class: "label" }, h("span", { class: "mname" }, m.name, hopMark(m)), h("small", { class: dotFor(m) === "ok" ? "" : "warn", title: dotFor(m) === "ok" ? (m.agents || []).join(", ") : m.hint || m.error }, dotFor(m) === "ok" ? agentSubtitle(m) : machineStatus(m.status)[1]),scanSubtitle(m) ? h("small",{},scanSubtitle(m)) : null),
       h("span", { class: "count" }, m.status === "ok" ? m.sessions : ""))),
     h("button", { class: "side-btn", style: "color:var(--accent)", onclick: () => go("machines") }, icon(ICONS.plus), machines.length ? "Add a machine" : "Add your other machines"),
     clouds().length ? h("div", { class: "side-h" }, "Clouds") : null,
@@ -266,7 +268,16 @@ function repoSelect(checkouts) {
 // updateNote asks once whether hopsesh may check for releases, then links a newer one.
 function updateNote() {
   if (state.info.updateCheck === "") {
-    const answer = async (yes) => { await api("SetUpdateCheck", yes).catch(fail); state.info = await api("Info"); if (yes) state.update = await api("CheckUpdate").catch(() => null); render(); };
+    const answer = async (yes) => {
+      await api("SetUpdateCheck", yes).catch(fail);
+      state.info = await api("Info");
+      if (yes) {
+        const revision = state.updateCheckRevision;
+        const update = await api("CheckUpdate").catch(() => null);
+        if (revision === state.updateCheckRevision) state.update = update;
+      }
+      render();
+    };
     return h("span", {}, "Check GitHub daily for new versions? ", h("button", { class: "link", onclick: () => answer(true) }, "Yes"), " · ", h("button", { class: "link", onclick: () => answer(false) }, "No"));
   }
   if (state.update?.newer) return h("button", { class: "link", style: "text-align:left", onclick: () => go("settings", "updates") }, `hopsesh ${state.update.latest} is available`);
@@ -276,7 +287,9 @@ function updateNote() {
 // notices are things to set up, shown above the list until done or dismissed.
 function notices() {
   const out = [], i = state.info, s = state.scan;
-  if (state.scanning || s.discovering || s.cached) out.push(h("div",{class:"discovery-note",role:"status","aria-live":"polite"},s.cached ? "Showing saved sessions. Checking for changes…" : `${entries().length} sessions found. Other sources may still be loading.`,h("button",{class:"link",onclick:()=>api("CancelScan")},"Stop checking")));
+  // Only until the first complete read: later refreshes say so in the header, so the list
+  // does not jump as a banner comes and goes.
+  if (!readOnce && (state.scanning || s.discovering || s.cached)) out.push(h("div",{class:"discovery-note",role:"status","aria-live":"polite"},s.cached ? "Showing saved sessions. Checking for changes…" : `${entries().length} sessions found. Other sources may still be loading.`,h("button",{class:"link",onclick:()=>api("CancelScan")},"Stop checking")));
   if(state.scope.kind==="all") for(const m of s.machines.filter(m=>m.status!=="ok" || m.phase==="error")) out.push(h("div",{class:"card notice warn-card",role:"status"},h("span",{},`${m.name===here()?sys.Here:m.name}: ${m.error||machineStatus(m.status)[1]}. Saved sessions remain available.`),h("button",{class:"btn",onclick:async()=>{if(m.local)await refreshHere();else {await api("ScanMachine",m.name);acceptScan(await api("ScanSnapshot"))}render()}},"Retry")));
   if (state.scanError) out.push(h("div", { class: "card notice warn-card", role: "alert" }, h("span", {}, "Refresh failed. Showing the previous results. " + state.scanError), h("button", { class: "btn", onclick: () => go("sessions", true) }, "Retry refresh")));
   const picked = state.scope.kind === "machine" && s.machines.find((m) => m.name === state.scope.value);
@@ -300,9 +313,44 @@ function notices() {
   if (state.scope.kind !== "all") return out;
   if (i.skillState === "stale" || i.skillState === "broken") out.push(h("div", { class: "card notice" },
     h("b", { style: "flex:1 1 360px" }, i.skillState === "stale" ? "The hopsesh skill is out of date" : "The hopsesh skill is damaged"),
-    h("button", { class: "btn primary", onclick: async () => { try { await api("InstallSkill", false, false); toast("Updated the hopsesh skill"); } catch (e) { fail(e); } state.info = await api("Info"); render(); } }, i.skillState === "stale" ? "Update it" : "Repair it")));
+    h("button", { class: "btn primary", onclick: async () => { try { await withCLI(() => api("InstallSkill", false, false)); toast("Updated the hopsesh skill"); } catch (e) { fail(e); } state.info = await api("Info"); render(); } }, i.skillState === "stale" ? "Update it" : "Repair it")));
+  out.push(healthNotice(render));
+  out.push(machineNotices());
   out.push(setupLine());
   return out;
+}
+
+// machineNotices are what another machine needs: hopsesh there, an update, or its
+// protection (checked after each scan; "Not now" holds until the findings change).
+let mNotices = null, mNoticesFor = "";
+const mDismissed = new Set(); // answered "Not now" here: a load already under way can't bring it back
+async function loadMachineNotices() {
+  let next;
+  try { next = await api("MachineNotices"); } catch { next = []; }
+  // Redraw only when they changed, and only the notices: the list and the
+  // details being worked in keep their focus and state.
+  if (JSON.stringify(next) === JSON.stringify(mNotices)) return;
+  mNotices = next;
+  drawMachineNotices();
+}
+const drawMachineNotices = () => document.getElementById("machine-notices")?.replaceChildren(...machineNoticeCards());
+function machineNotices() {
+  // Checked again when the machines change, not on every update of the sessions.
+  const key = JSON.stringify((state.scan?.machines || []).map((m) => [m.name, m.status, m.presence, m.hopsesh, m.sessions]));
+  if (key !== mNoticesFor) { mNoticesFor = key; loadMachineNotices(); }
+  return h("div", { id: "machine-notices", style: "display:contents" }, machineNoticeCards());
+}
+function machineNoticeCards() {
+  return (mNotices || []).filter((n) => !mDismissed.has(n.fingerprint)).map((n) => h("section", { class: "card notice", role: "status", "aria-label": n.title, "data-notice": n.kind },
+    h("div", { style: "flex:1 1 360px" }, h("b", {}, n.title), " ", h("span", { style: "font-size:12.5px" }, n.text)),
+    h("button", { class: "btn primary", onclick: async () => {
+      if (n.kind === "protection") {
+        try { await api("SetUpProtection", n.machine, false); toast(`Set up on ${n.machine}`); } catch (e) { fail(e); }
+        return loadMachineNotices();
+      }
+      go("machines");
+    } }, n.action),
+    h("button", { class: "btn", onclick: async () => { mDismissed.add(n.fingerprint); drawMachineNotices(); try { await api("DismissMachineNotice", n.fingerprint); } catch (e) { mDismissed.delete(n.fingerprint); fail(e); drawMachineNotices(); } } }, "Not now")));
 }
 
 // setupLine is the one line of what is left to set up, on All sessions only: each step
@@ -313,8 +361,8 @@ function setupLine() {
   if (i.setupDismissed) return null;
   const steps = [
     !i.hasHosts && ["Add machines", "Your other machines' sessions, here too", () => go("machines")],
-    i.skillState === "absent" && i.skillPrompt !== "declined" && ["Install the skill", "Your agents can find and hop sessions, after asking you", () => go("settings", "skill")],
-    i.cliOffer && ["Install the command", `${cliHowText()}`, () => go("settings", "cli")],
+    i.skillState === "absent" && i.skillPrompt !== "declined" && ["Install the skill", "Your agents can find and hop sessions, after asking you", () => go("settings", "machines", "here")],
+    i.cliOffer && ["Install the command", `${cliHowText()}`, () => go("settings", "machines", "here")],
   ].filter(Boolean);
   if (!steps.length) return null;
   const close = async () => { try { await api("DismissSetup"); state.info = await api("Info"); } catch (e) { fail(e); } render(); };
@@ -359,7 +407,7 @@ function chipFor(e, p) {
 // presenceChips are at most two places, then "+N" (a popover lists them all), and
 // "Open twice" when two processes write one session.
 function presenceChips(e) {
-  const ps = placesOf(e);
+  const ps = placesOf(e).filter(p => p.kind !== "unknown");
   if (!ps.length) return [];
   const out = ps.slice(0, 2).map((p, i) => { const c = chipFor(e, p); if (!i) c.classList.add("keep"); return c; });
   if (ps.length > 2) out.push(h("button", { class: "pchip more", type: "button", tabindex: "-1", title: ps.slice(2).map((p) => placeName(p, e)).join(", "),
@@ -371,15 +419,25 @@ function presenceChips(e) {
 
 // mirrorChip links a session's copy on the vendor's site (Remote Control).
 function mirrorChip(m) {
-  return h("button", { class: "chip claude-link", tabindex: "-1", title: m.url, onclick: (ev) => { ev.stopPropagation(); api("OpenURL", m.url).catch(fail); } }, icon(ICONS.external, 11), "mirrored on " + m.host);
+  return h("button", { class: "chip claude-link", tabindex: "-1", title: `Mirrored on ${m.host} by Remote Control · open ${m.url}`, "aria-label": `Open the copy mirrored on ${m.host}`, onclick: (ev) => { ev.stopPropagation(); api("OpenURL", m.url).catch(fail); } }, icon(ICONS.external, 11), h("span", { class: "chip-t" }, m.host));
+}
+
+// remoteChip says a running session is connected to Remote Control now (from the
+// agent's own live record), linking its page; a session not open falls back to the
+// copy its transcript says Remote Control mirrored.
+function remoteChip(e) {
+  const lv = liveOf(e);
+  if (!lv.live || lv.remoteControl !== "on") return e.mirror ? mirrorChip(e.mirror) : null;
+  const url = lv.remoteUrl || e.mirror?.url;
+  return h(url ? "button" : "span", { class: "chip rc-on", tabindex: "-1", title: url ? `Connected to Remote Control · open ${url}` : "Connected to Remote Control",
+    "aria-label": "Remote Control is on" + (url ? ": open its page" : ""), onclick: url ? (ev) => { ev.stopPropagation(); api("OpenURL", url).catch(fail); } : null },
+    icon(ICONS.external, 11), h("span", { class: "chip-t" }, "Remote Control"));
 }
 
 // row is one session in the tree: its agent, title and branch, the last prompt and where
-// it is open (comfortable rows), its state with where and when, and its main action.
+// it is open (comfortable rows), and its state with where and when.
 function row(e, level) {
   const [k, words] = statusOf(e);
-  const m = model(e);
-  const p = m.primary;
   const sel = state.sel && state.sel.machine === e.machine && state.sel.key === e.key;
   const bits = [];
   let branch = "";
@@ -398,28 +456,49 @@ function row(e, level) {
     else if (e.lastPrompt) bits.push(`“${e.lastPrompt}”`);
   }
   const repoWord = list.groupBy === "repository" || e.group.noRepo ? "" : e.group.name.replace(/ \(no remote\)$/, "");
-  if(e.journey?.fork) bits.push("separate fork");
+  if(e.journey?.fork) bits.push("separate conversation");
  if(e.journey?.roundTrips) bits.push(`${e.journey.roundTrips} round trips`);
  const chips = presenceChips(e);
-if(e.profile) chips.push(h("span", {class:"chip account-chip",title:accountTitle(e.profile)},accountLabel(e.profile)));
+if(accountShown(e)) chips.push(h("span", {class:"chip account-chip"+(e.owner?.recorded?"":" unrecorded"),title:accountTitle(e)},h("span",{class:"chip-t"},accountShown(e))));
   if (e.cloud) chips.push(cloudChip(e.machine));
+  // An old copy (the copy a move left behind) says where it went and what to watch for
+  // instead of its role; the active copy carries one chip for its old copies' worst.
+  const away = isOldCopy(e);
+  const marks = away ? oldCopyMarks(e) : [];
+  const summary = away ? null : oldCopySummary(e);
+  const rc = away ? marks.map((m, i) => markChip(m, i ? "" : "keep")) : [summary ? markChip(summary, "keep oldcopy-chip") : null, roleChip(e)];
   if (e.cloud?.pr) chips.push(h("span", { class: "chip st-moved" }, "PR " + e.cloud.pr));
-  if (e.mirror) chips.push(mirrorChip(e.mirror));
+  const remote = remoteChip(e);
+  if (remote) chips.push(remote);
   const ext = !e.live && e.machine === here() && !placesOf(e).length ? exitOf(e) : null;
   if (ext) chips.push(h("span", { class: "chip " + (ext.code === 0 ? "st-idle" : ext.closed ? "st-ended" : "st-error"), title: `How its last run in ${ext.terminal} ended` }, `${exitWords(ext)} in ${ext.terminal}`));
-  for (const c of (e.copies || []).filter((c) => !(c.machine === e.machine && c.key === e.key))) chips.push(h("span", { class: "chip" + (c.newest ? " st-warn" : "") }, `${c.newest ? "newest: " : "also "}${copyWhere(c)}`));
+  // The other copies the scan carries are rows of their own; one it doesn't stays a chip.
+  for (const c of (e.copies || []).filter((c) => !(c.machine === e.machine && c.key === e.key)))
+    if (!scanEntry(c.machine, c.key)) chips.push(h("span", { class: "chip" + (c.newest ? " st-warn" : "") }, `${c.newest ? "newest: " : "also "}${copyWhere(c)}`));
   const where = e.cloud ? "cloud" : e.machine === here() ? sys.here : e.machine;
-  return h("div", { class: "row", role: "treeitem", "aria-level": String(level), "aria-selected": sel ? "true" : "false", tabindex: sel ? "0" : "-1", "data-key": entryKey(e),
-      onclick: () => select(e), ondblclick: () => { if (p && !p.disabled) return p.run(); } },
+  return h("div", { class: "row" + (rc.some(Boolean) ? " has-role" : "") + (away ? " moved-away" : ""), role: "treeitem", "aria-level": String(level), "aria-selected": sel ? "true" : "false", tabindex: sel ? "0" : "-1", "data-key": entryKey(e),
+      "aria-label": away ? [`Old copy of “${e.title}” on ${where}, moved to ${movedTo(e)}`, ...marks.map((m) => m.words)].join(" · ") : null,
+      onclick: () => select(e), ondblclick: () => { const fresh = entries().find(x => entryKey(x) === entryKey(e)) || copyEntry(e.machine, e.key) || e; const action = model(fresh).primary; if (action && !action.disabled) return action.run(); } },
     h("span", { class: "r-ic" }, agentBadge(e.agent, e.agentName, e.cloud ? cloudTitle(e.machine) : "")),
     h("div", { class: "r-main" },
       h("span", { class: "r-line" }, h("span", { class: "t", title: e.title }, e.title),
         h("span", { class: "b" }, [repoWord, branch].filter(Boolean).join(" · "))),
-      h("span", { class: "s" }, bits.join(" · ") || " "),
-      chips.length ? h("div", { class: "copies" }, chips) : null),
-    h("div", { class: "r-state" }, h("span", { class: "chip st-" + k }, h("span", { class: "dot " + k }), words), h("span", { class: "w" }, `${where} · ${ago(e.lastActive)}`)),
-    h("div", { class: "act" }, p ? h("button", { class: "btn small outline", tabindex: "-1", disabled: !!p.disabled, title: p.why || p.label, "aria-label": p.label,
-      onclick: (ev) => { ev.stopPropagation(); return p.run(); } }, h("span", { class: "btn-t" }, p.short || p.label)) : null));
+      h("span", { class: "s" }, bits.join(" · ") || " ")),
+    rowStatus(k, words, rc, chips, [where, ago(e.lastActive), e.sizeKB ? bytes(e.sizeKB * 1024) : ""].filter(Boolean).join(" · "), away));
+}
+
+// Status and movement indicators share the metadata column, clear of the title. An old
+// copy's state is where it went, with a "moved out" mark in place of the dot.
+function rowStatus(k, words, role, chips, when, away = false) {
+  const presence = chips.find(c => c.matches?.(".pchip.keep"));
+  const extras = chips.filter(c => c !== presence);
+  const age = when.startsWith(sys.here + " · ") ? when.slice(sys.here.length + 3) : when;
+  return h("div", {class:"r-state"},
+    h("div", {class:"r-status"},
+      h("div", {class:"status-top"},
+        h("span", {class:"chip st-" + (away ? "away" : k), title:words}, away ? icon(ICONS.movedOut, 11) : h("span", {class:"dot " + k}), h("span", {class:"chip-t"}, words)), presence),
+      h("div", {class:"r-indicators"}, role, extras)),
+    h("span", {class:"w", title:when}, age));
 }
 
 function copyWhere(c) {
@@ -430,11 +509,13 @@ function copyWhere(c) {
 // ---- Selection: attributes change, the inspector is drawn again; the list stays ----
 
 export function select(e, focus = true) {
+  e = entries().find(x => entryKey(x) === entryKey(e)) || copyEntry(e.machine, e.key) || e;
   state.sel = { machine: e.machine, key: e.key };
   state.handoffOpen = null;
   const t = view.querySelector(".tree");
   const k = entryKey(e);
   if (t) {
+    built.content = ""; // the rows no longer match the markup render last built
     for (const r of t.querySelectorAll('[aria-selected="true"]')) r.setAttribute("aria-selected", "false");
     for (const r of t.querySelectorAll('[tabindex="0"]')) r.tabIndex = -1;
     const r = rowByKey(t, k);
@@ -448,7 +529,7 @@ onSelect((e) => showEntry(e));
 // The tree's keys select rows and run their actions.
 onRows((el) => {
   const [machine, key] = el.dataset.key.split("\u0000");
-  const e = entries().find((x) => x.machine === machine && x.key === key);
+  const e = entries().find((x) => x.machine === machine && x.key === key) || copyEntry(machine, key);
   if (e) select(e);
 }, (el, mod) => {
   const e = selected();
@@ -469,7 +550,7 @@ function body(shown, inScope) {
       h("button", { class: "link", onclick: () => { clearFilters(); if (list.text) { list.text = ""; $("#list-filter").value = ""; refreshList(); } } }, "Clear filters")));
     return h("div", { class: "empty" }, state.scope.kind === "needs" ? "Nothing needs you right now." : "No sessions here.");
   }
-  return tree(groupsOf(shown), row, state.sel ? state.sel.machine + "\u0000" + state.sel.key : "");
+  return [statusHeader(list.density === "compact"), tree(groupsOf(shown), row, state.sel ? state.sel.machine + "\u0000" + state.sel.key : "")];
 }
 
 // refreshList draws the list again (a filter, the display, a group) and keeps the
@@ -479,7 +560,7 @@ export function refreshList() {
   if (!l) return render();
   const inScope = scoped();
   const shown = applyFilters(inScope, state.scope);
-  const dropped = state.sel && !shown.some((x) => x.machine === state.sel.machine && x.key === state.sel.key);
+  const dropped = state.sel && !showsEntry(shown, state.sel);
   if (dropped) state.sel = null;
   const focusIn = l.contains(document.activeElement) ? document.activeElement.closest("[data-key],[data-gkey]") : null;
   const fk = focusIn?.dataset.key, gk = focusIn?.dataset.gkey;
@@ -493,6 +574,45 @@ export function refreshList() {
 }
 onChange((full = true) => (full ? render() : refreshList()));
 
+// Preserve row identity, focus and loaded icons during metadata refreshes. Only
+// changed cells are replaced; copy selection never changes the scan's grouping.
+function reconcileList(old, next, rows = null, usedRows = new Set()) {
+  if (!old || old.nodeType !== next.nodeType || old.nodeName !== next.nodeName) return next;
+  if (!rows) rows = new Map([...old.querySelectorAll('.row[data-key]')].map(n => [n.dataset.key, n]));
+  if (old.nodeType !== 1) { if (old.textContent !== next.textContent) old.textContent = next.textContent; return old; }
+  if (next.classList.contains("session-chunk")) return next;
+  if (old.outerHTML === next.outerHTML) return old;
+  const structural = next.matches(".content,.list,.tree,.grp,.gbody,.row,.r-state,.r-status,.status-top,.r-indicators");
+  if (!structural) return next;
+  for (const a of [...old.attributes]) if (!next.hasAttribute(a.name)) old.removeAttribute(a.name);
+  for (const a of next.attributes) if (old.getAttribute(a.name) !== a.value) old.setAttribute(a.name,a.value);
+  const key = n => n.nodeType === 1 ? n.dataset.key || n.dataset.gkey : null;
+  const children = [...old.childNodes], used = new Set();
+  let at = old.firstChild;
+  for (const n of [...next.childNodes]) {
+    const k = key(n);
+    const candidate = k ? children.find(c => !used.has(c) && key(c) === k) || (n.matches?.('.row') && !usedRows.has(k) ? rows.get(k) : null)
+      : children.find(c => !used.has(c) && !key(c) && c.nodeName === n.nodeName && (c.nodeType !== 1 || c.className === n.className));
+    const child = candidate ? reconcileList(candidate,n,rows,usedRows) : n;
+    if (candidate && n.matches?.('.row')) usedRows.add(k);
+    // A new repository/group can still contain an existing native row. Move its
+    // node with its identity instead of rebuilding it when membership changes.
+    if (!candidate && n.nodeType === 1) for (const row of [...n.querySelectorAll('.row[data-key]')]) {
+      const previous = rows.get(row.dataset.key);
+      if (previous && !usedRows.has(row.dataset.key)) {
+        usedRows.add(row.dataset.key);
+        row.replaceWith(reconcileList(previous,row,rows,usedRows));
+      }
+    }
+    if (candidate) used.add(candidate);
+    if (child !== at) old.insertBefore(child,at);
+    at = child.nextSibling;
+  }
+  while (at) { const remove = at; at = at.nextSibling; remove.remove(); }
+  return old;
+}
+
+let built = { content: "", side: "" }; // the list and sidebar markup as render last built them
 export function render() {
   if (!state.scan || current !== "sessions") return;
   decide(entries().length, () => toggleDisplay());
@@ -507,47 +627,72 @@ export function render() {
   const inScope = scoped();
   const shown = applyFilters(inScope, state.scope);
   // A selection the list doesn't show goes (another place, a filter, a refresh).
-  if (!state.scanning && !pendingScan && !state.scan.discovering && state.sel && !shown.some((x) => x.machine === state.sel.machine && x.key === state.sel.key)) { state.sel = null; state.handoffOpen = null; }
+  if (!state.scanning && !pendingScan && !state.scan.discovering && state.sel && !showsEntry(shown, state.sel)) { state.sel = null; state.handoffOpen = null; }
   const content = h("section", { class: "content" }, toolbar(scopeTitle(), state.scope), h("div", { class: "list" }, notices(), body(shown, inScope)));
   const previous=view.querySelector("#inspector"),nextInspector=inspector(selected(),previous),layout=view.querySelector(".three.layout");
+  // Replace only what changed: rebuilding identical rows makes icons and the list flicker.
+  // Compare with the markup as last built: layout and counts adjust the live nodes later.
+  let live=content;
+  const side=sidebar(),contentHTML=content.outerHTML,sideHTML=side.outerHTML;
   if(layout&&previous&&old){
-    layout.querySelector(".sidebar").replaceWith(sidebar());
-    old.replaceWith(content);
+    if(sideHTML!==built.side)layout.querySelector(".sidebar").replaceWith(side);
+    if(contentHTML===built.content){
+      live=old;
+      // The filter field is one element that each new toolbar adopts: give it back.
+      const input=content.querySelector("#list-filter"),label=old.querySelector("label.tb-search");
+      if(input&&label&&input.parentNode!==label)label.insertBefore(input,label.querySelector(".kbd"));
+    }else { reconcileList(old, content); live = old; adoptTree(old.querySelector(".tree")); }
     if(nextInspector!==previous)previous.replaceWith(nextInspector);
-  }else fill(view,h("div",{class:"three layout"},sidebar(),content,nextInspector,dividers()));
+  }else fill(view,h("div",{class:"three layout"},side,content,nextInspector,dividers()));
+  adoptTree(live.querySelector(".tree"));
+  built={content:contentHTML,side:sideHTML};
   counts(shown.length, inScope.length, state.scope);
   lastShown = shown; lastScope = inScope;
   applyLayout();
-  content.scrollTop = top;
+  live.scrollTop = top;
   const ins=view.querySelector(".inspector");if(ins)ins.scrollTop=inspectorTop;
   if(inputID){const input=document.getElementById(inputID);input?.focus({preventScroll:true});if(inputSelection)input?.setSelectionRange(...inputSelection)}
   else if(active?.isConnected && active!==document.body)active.focus({preventScroll:true});
-  if (focusKey) rowByKey(content, focusKey)?.focus({ preventScroll: true });
-  else if (focusGroup) content.querySelector(`.grp[data-gkey="${CSS.escape(focusGroup)}"]`)?.focus({ preventScroll: true });
+  if (focusKey) rowByKey(live, focusKey)?.focus({ preventScroll: true });
+  else if (focusGroup) live.querySelector(`.grp[data-gkey="${CSS.escape(focusGroup)}"]`)?.focus({ preventScroll: true });
 }
 
 // showEntry selects a session from elsewhere (the palette, Go to the newer copy, a
 // notification): its place if it isn't in this one, no filter that hides it, its group
 // open; then it is shown landing.
+// Every copy the scan carries is a row the list shows or not; a copy resolved from a
+// history (not in the scan) belongs to its conversation's row.
+function showsEntry(rows, selection) {
+  const same = (x) => x.machine === selection.machine && x.key === selection.key;
+  return rows.some(same) || (!scanEntry(selection.machine, selection.key) && rows.some(e => (e.copies || []).some(same)));
+}
+
+// refreshSelection reads the selected session again (after removing or restoring its block)
+// and redraws it in place, then reads everything again quietly.
+export async function refreshSelection() {
+  const s = state.sel;
+  if (s) {
+    try {
+      const fresh = await api("ResolveEntry", s.machine, s.key);
+      for (const g of [...(state.scan?.groups || []), ...(state.scan?.profileCopies || [])]) for (const x of g.entries) if (x.machine === s.machine && x.key === s.key) Object.assign(x, fresh);
+      if (state.resolvedSelection?.machine === s.machine && state.resolvedSelection.key === s.key) Object.assign(state.resolvedSelection, fresh);
+      if (current === "sessions") render();
+    } catch { /* the background scan below shows it */ }
+  }
+  scan("Scan", true);
+}
+
 export function showEntry(e) {
   const k = entryKey(e);
-  if (!entries().some(x=>entryKey(x)===k)) {
-    const group=e.group || state.scan?.groups.find(g=>g.entries.some(x=>(x.copies || []).some(c=>c.machine===e.machine && c.key===e.key)));
-    if (!group) { toast("This copy is not in the current scan; refresh its machine."); return; }
-    const i=group.entries.findIndex(x=>(x.copies || []).some(c=>c.machine===e.machine && c.key===e.key));
-    if (i<0) return;
-    const {group:ignored,...copy}=e;
-    group.entries[i]=copy;
-    e=Object.assign({group},copy);
-    toast(`Showing ${e.agentName} on ${e.machine === here() ? sys.here : e.machine}; other copies remain in Copies & history.`);
+  if (!entries().some(x => entryKey(x) === k) && !copyEntry(e.machine, e.key)) {
+    const group = state.scan?.groups.find(g => g.entries.some(x => (x.copies || []).some(c => c.machine === e.machine && c.key === e.key)));
+    if (!group) { toast("This session is not in the current scan; refresh its machine."); return; }
+    state.resolvedSelection = Object.assign({}, e, {group});
   }
-  const inScope = () => scoped().some((x) => entryKey(x) === k);
-  if (!inScope()) state.scope = { kind: "all" };
-  if (!applyFilters(scoped(), state.scope).some((x) => entryKey(x) === k)) {
-    if (activeFacets(state.scope).length) toast("Filters cleared to show it");
+  if (!showsEntry(scoped(), e)) state.scope = {kind:"all"};
+  if (!showsEntry(applyFilters(scoped(), state.scope), e)) {
     list.text = "";
-    const f = $("#list-filter");
-    if (f) f.value = "";
+    const f = $("#list-filter"); if (f) f.value = "";
     clearFilters();
   }
   openGroupOf(e, applyFilters(scoped(), state.scope));
@@ -606,16 +751,27 @@ export function listCommand(cmd) {
 
 screen("sessions", async (rescan = false) => {
   loadList(state.info?.list);
-  if (!state.scan || rescan || state.stale) await scan();
+  // With sessions already read, show them at once and read again in the background: the
+  // list updates in place when the answer comes, never through a blocking screen.
+  const again = state.scan && (rescan || state.stale);
+  if (!state.scan) await scan();
   if (!state.scan || current !== "sessions") return;
   decide(entries().length, () => toggleDisplay());
   render();
+  if (again) scan("Scan", true);
+  // Asking Codex whether it trusts the hooks starts its app-server: off the first paint,
+  // and the list is drawn again only when the answer changes what it shows.
+  const before = JSON.stringify(hookHealth()?.problems || null);
+  // Through backgroundRender: a direct render while the pointer is down replaces the row
+  // under it, and the click is lost.
+  loadHookHealth().then((d) => { if (current === "sessions" && JSON.stringify(d?.problems || null) !== before) backgroundRender(); });
   const r = view.querySelector('.row[aria-selected="true"]');
   if (r) inView(r, false);
   presenceSoon(presenceEvery());
 });
 
 onRenamed(async () => { await refreshHere(); render(); });
+onChangedDir(async () => { await refreshHere(); render(); });
 
 // inView scrolls the list (never the window) to a row: to its middle, or just enough
 // (below the toolbar and its group's sticky header).
@@ -635,9 +791,72 @@ let discoveryPending=null,discoveryPresence=null,discoveryTimer=0,pointerHeld=fa
 document.addEventListener("pointerdown",()=>{pointerHeld=true},true);
 window.addEventListener("pointerup",()=>{pointerHeld=false},true);
 window.addEventListener("pointercancel",()=>{pointerHeld=false},true);
+let readOnce = false; // a complete scan (not saved, not still discovering) has been shown
+// Retain unfinished sources, but a ready local source can change movement and
+// membership before the global scan finishes. Never mutate an older snapshot.
+function mergeLocalScan(previous, scan) {
+ if(scan.cached)return null;
+ const newer=(at,before)=>{
+  const time=Date.parse(at),old=Date.parse(before);
+  if(!Number.isFinite(time))return false;
+  if(!Number.isFinite(old))return true;
+  if(time!==old)return time>old;
+  const fraction=value=>Number((value.match(/\.(\d+)/)?.[1]||'').padEnd(9,'0'));
+  return fraction(at)>fraction(before);
+ };
+ const oldMachines=new Map((previous.machines||[]).map(m=>[m.name,m]));
+ const local=new Set((scan.machines||[]).filter(m=>m.local).map(m=>m.name));
+ const finished=new Set((scan.machines||[]).filter(m=>m.local&&['done','error'].includes(m.phase)&&
+  newer(m.checkedAt,oldMachines.get(m.name)?.checkedAt)).map(m=>m.name));
+ const complete=new Set((scan.machines||[]).filter(m=>finished.has(m.name)&&m.phase==='done'&&m.status==='ok'&&!m.error).map(m=>m.name));
+ const records=new Map();
+ for(const lane of ['groups','profileCopies'])for(const group of previous[lane]||[])for(const entry of group.entries)
+  records.set(entryKey(entry),{entry,group,lane});
+ const incoming=[];
+ for(const lane of ['groups','profileCopies'])for(const group of scan[lane]||[])for(const entry of group.entries)
+  incoming.push({entry,group,lane});
+ const ready=new Set(incoming.filter(({entry:e})=>local.has(e.machine)&&(finished.has(e.machine)&&newer(e.observedAt,records.get(entryKey(e))?.entry.observedAt)||complete.has(e.machine)||!e.cached&&
+  newer(e.observedAt,records.get(entryKey(e))?.entry.observedAt))).map(({entry})=>entryKey(entry)));
+ if(!complete.size&&!ready.size)return null;
+ const previousRecords=new Map(records);
+ for(const [key,{entry}] of records)if(complete.has(entry.machine)||ready.has(key))records.delete(key);
+ for(const record of incoming) {
+  const {entry:e}=record,key=entryKey(e);
+  if(ready.has(key))records.set(key,record);
+  else if(records.has(key)&&(e.copies||[]).some(c=>ready.has(entryKey(c)))) {
+   // A pending copy keeps its metadata, but may become a child of the
+   // newly current local copy. Its native identity must appear only once.
+   records.set(key,{...record,entry:{...previousRecords.get(key).entry,copies:e.copies}});
+  }
+ }
+ const children=new Set([...records.values()].filter(r=>r.lane==='groups').flatMap(r=>(r.entry.copies||[]).map(entryKey)));
+ for(const record of records.values())if(record.lane==='profileCopies'&&!children.has(entryKey(record.entry)))
+  record.lane='groups'; // an unfinished remote copy must remain visible if its local parent disappeared
+ const lanes={groups:[],profileCopies:[]},groups={groups:new Map(),profileCopies:new Map()};
+ for(const {entry,group,lane} of records.values()) {
+  const key=JSON.stringify([group.name,group.remote,group.local,group.noRepo,group.noRemote,group.repoPending]);
+  if(!groups[lane].has(key)) {
+   const copy={...group,entries:[]};groups[lane].set(key,copy);lanes[lane].push(copy);
+  }
+  groups[lane].get(key).entries.push(entry);
+ }
+ const machines=[...(previous.machines||[])];
+ for(const m of scan.machines||[])if(finished.has(m.name)) {
+  const i=machines.findIndex(old=>old.name===m.name);
+  if(i<0)machines.push(m);else machines[i]=m;
+ }
+ return {...previous,...lanes,machines:machines.map(m=>({...m,sessions:[...records.values()].filter(r=>r.entry.machine===m.name).length})),
+  total:records.size,revision:scan.revision,discovering:true};
+}
 export function acceptScan(scan){
  if(scan?.revision && state.scan?.revision && scan.revision<=state.scan.revision)return false;
- state.scan=scan;freshness();return true;
+ const partial=scan.discovering||scan.cached;
+ if(partial&&(readOnce||state.scan?.cached)) {
+  const merged=mergeLocalScan(state.scan,scan);
+  if(!merged)return false;
+  scan=merged;
+ }
+ state.scan=scan;if(!partial)readOnce=true;freshness();return true;
 }
 function scheduleDiscovery(){if(!discoveryTimer)discoveryTimer=setTimeout(drawDiscovery,150)}
 export function backgroundRender(){backgroundDirty=true;scheduleDiscovery()}

@@ -57,7 +57,7 @@ type Found struct {
 	Path   string            `json:"path"`
 	Bytes  int64             `json:"bytes"`
 	Has    map[string]bool   `json:"has"`
-	Mark   string            `json:"mark"` // the mark title, or ""
+	Label  string            `json:"label"` // a title label older hopsesh versions wrote ("↪ …"), or ""
 }
 
 // AppendReq adds a user turn to a session file.
@@ -330,22 +330,22 @@ func codexNames() map[string]string {
 	return names
 }
 
-// claudeMark is the last custom-title of a transcript when it is a mark.
-func claudeMark(text string) string {
-	mark := ""
+// claudeLabel is the last custom-title of a transcript when it is a title label.
+func claudeLabel(text string) string {
+	label := ""
 	for _, line := range strings.Split(text, "\n") {
 		var r struct {
 			Type  string `json:"type"`
 			Title string `json:"customTitle"`
 		}
 		if json.Unmarshal([]byte(line), &r) == nil && r.Type == "custom-title" {
-			mark = ""
+			label = ""
 			if strings.HasPrefix(r.Title, "↪ ") {
-				mark = r.Title
+				label = r.Title
 			}
 		}
 	}
-	return mark
+	return label
 }
 
 func find(r FindReq) ([]Found, error) {
@@ -366,9 +366,9 @@ func find(r FindReq) ([]Found, error) {
 				f.Has[n] = strings.Contains(text, n) || strings.Contains(text, jsonEscape(n))
 			}
 			if agent == "claude" {
-				f.Mark = claudeMark(text)
+				f.Label = claudeLabel(text)
 			} else if strings.HasPrefix(names[f.ID], "↪ ") {
-				f.Mark = names[f.ID]
+				f.Label = names[f.ID]
 			}
 			f.Graph, err = lineage.Read(host.LocalFS(), p)
 			if err != nil {

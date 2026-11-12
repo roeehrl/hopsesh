@@ -73,13 +73,13 @@ func TestNoLocal(t *testing.T) {
 	}
 }
 
-// Cloud names are locations a mark title carries.
-func TestCloudLocationInMarks(t *testing.T) {
+// Cloud names read back from the labels older hopsesh versions wrote.
+func TestCloudLocationInLegacyLabels(t *testing.T) {
 	l := CloudLocation("codex-cloud")
 	if !l.IsCloud() || MachineLocation("studio").IsCloud() || l.String() != "codex-cloud" {
 		t.Fatalf("%+v", l)
 	}
-	m, title, ok := ParseMarkTitle(MarkTitle(Mark{Kind: MarkContinued, AgentName: "Codex", Location: l.Name}, "Fix it"))
+	m, title, ok := StripLegacyLabel("↪ continued in Codex on " + l.Name + " · Fix it")
 	if !ok || m.Location != "codex-cloud" || m.AgentName != "Codex" || title != "Fix it" {
 		t.Fatalf("%+v %q", m, title)
 	}

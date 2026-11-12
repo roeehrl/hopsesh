@@ -20,7 +20,11 @@ function layout(){
  const detailsButton=panel.querySelector('#terminal-details-button');
  detailsButton.hidden=!side||!document.querySelector('#inspector');detailsButton.textContent=details?'Back to terminal':'Session details';
  detailsButton.setAttribute('aria-expanded',String(details));
- panel.style.left=maximized?'0':side?'':document.querySelector('#sidebar')?'var(--sb-w)':'0';
+ // Below a view with the sidebar, the panel starts at the sidebar's edge and the sidebar
+ // keeps the full height beside it; only the panes to its right end above the panel.
+ const beside=!side&&!maximized&&!!document.querySelector('#sidebar');
+ document.body.classList.toggle('terminal-beside-sidebar',beside&&!panel.hidden);
+ panel.style.left=maximized?'0':side?'':beside?'var(--sb-w)':'0';
  document.documentElement.style.setProperty('--terminal-details-top',(panel.querySelector('.terminal-workspace-bar').getBoundingClientRect().bottom)+'px');
  const handle=panel.querySelector('[role=separator]');
  handle.setAttribute('aria-orientation',side?'vertical':'horizontal');

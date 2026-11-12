@@ -95,6 +95,32 @@ func adoptLoginEnv(getenv func(string) string, login func() map[string]string) {
 	}
 }
 
+// AdoptLoginPATH puts the login shell's PATH in front of this process's (an app started from
+// Finder or by launchd has only the system folders), so the agents it starts, and the
+// commands they run, find what the user's own shell finds (~/.local/bin, Homebrew, ...).
+// Folders only this process had stay, after them.
+func AdoptLoginPATH() {
+	if runtime.GOOS == "windows" {
+		return // programs inherit the user's PATH there
+	}
+	if p := LoginEnv()["PATH"]; p != "" {
+		_ = os.Setenv("PATH", mergePath(p, os.Getenv("PATH")))
+	}
+}
+
+// mergePath is first's folders, then those of second not in first.
+func mergePath(first, second string) string {
+	seen := map[string]bool{}
+	var out []string
+	for _, d := range append(filepath.SplitList(first), filepath.SplitList(second)...) {
+		if d != "" && !seen[d] {
+			seen[d] = true
+			out = append(out, d)
+		}
+	}
+	return strings.Join(out, string(os.PathListSeparator))
+}
+
 // LoginPathHas reports whether dir is on the PATH a new terminal gets.
 func LoginPathHas(dir string) bool {
 	for _, e := range filepath.SplitList(loginPATH()) {

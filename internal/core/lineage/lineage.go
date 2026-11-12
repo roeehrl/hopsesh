@@ -23,7 +23,7 @@ import (
 
 const Suffix = ".hopsesh.json"
 const Format = "lineage/5"
-const maxSize = 16 << 20
+const maxSize = int(ir.DefaultLineageBytes)
 
 type ReplicaID string
 type StateID string
@@ -123,6 +123,7 @@ type Compensation struct {
 }
 
 type Manifest struct {
+	sizeLimit     int
 	Format        string         `json:"hopsesh"`
 	Family        string         `json:"family"`
 	Branch        string         `json:"branch"` // branch of the native session beside this manifest
@@ -147,33 +148,55 @@ func NewNative(endpoint string, key agent.SessionKey) *Manifest {
 	return New(hash([]string{"native-family", endpoint, key.String()}))
 }
 func PathFor(main string) string { return main + Suffix }
-func Read(fsys agent.FS, main string) (*Manifest, error) {
-	b, err := fsys.ReadFile(PathFor(main), maxSize)
+func Read(fsys agent.FS, main string, limits ...ir.Limits) (*Manifest, error) {
+	l := ir.DefaultLimits()
+	if len(limits) > 0 {
+		l = limits[0].Normalize()
+	}
+	if stat, err := fsys.Stat(PathFor(main)); err == nil && stat.Size() > l.LineageBytes {
+		return nil, ledgerSizeError(l.LineageBytes, stat.Size())
+	}
+	b, err := fsys.ReadFile(PathFor(main), l.LineageBytes)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return Parse(b)
+	return Parse(b, l)
 }
-func Parse(b []byte) (*Manifest, error) {
-	if len(b) > maxSize {
-		return nil, fmt.Errorf("lineage exceeds %d bytes", maxSize)
+func Parse(b []byte, limits ...ir.Limits) (*Manifest, error) {
+	l := ir.DefaultLimits()
+	if len(limits) > 0 {
+		l = limits[0].Normalize()
 	}
-	var m Manifest
-	decoder := json.NewDecoder(bytes.NewReader(b))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&m); err != nil {
+	if int64(len(b)) > l.LineageBytes {
+		return nil, ledgerSizeError(l.LineageBytes, int64(len(b)))
+	}
+	format, err := fileFormat(b)
+	if err != nil {
 		return nil, err
 	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		return nil, fmt.Errorf("lineage has trailing JSON")
+	m := new(Manifest)
+	if format == FileFormat {
+		if m, err = unpack(b); err != nil {
+			return nil, err
+		}
+	} else {
+		decoder := json.NewDecoder(bytes.NewReader(b))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(m); err != nil {
+			return nil, err
+		}
+		if err := decoder.Decode(new(any)); err != io.EOF {
+			return nil, fmt.Errorf("lineage has trailing JSON")
+		}
 	}
+	m.SetLimits(l)
 	if err := m.Validate(); err != nil {
 		return nil, err
 	}
-	return &m, nil
+	return m, nil
 }
 func (m *Manifest) Clone() *Manifest {
 	if m == nil {
@@ -182,10 +205,39 @@ func (m *Manifest) Clone() *Manifest {
 	b, _ := json.Marshal(m)
 	var out Manifest
 	_ = json.Unmarshal(b, &out)
+	out.sizeLimit = m.sizeLimit
 	return &out
 }
+
+// Outline is what browsing shows (family, branches, replicas, hops and the losses their
+// states record) without the revision graph, which can run to many megabytes per session.
+// It is for display only: it does not validate, and transfers read the full manifest.
+func (m *Manifest) Outline() *Manifest {
+	if m == nil {
+		return nil
+	}
+	out := &Manifest{Format: m.Format, Family: m.Family, Branch: m.Branch, Branches: slices.Clone(m.Branches), Replicas: slices.Clone(m.Replicas), Hops: slices.Clone(m.Hops), Compensations: slices.Clone(m.Compensations)}
+	used := map[StateID]bool{}
+	for _, h := range m.Hops {
+		used[h.Source], used[h.Target] = true, true
+	}
+	for _, s := range m.States {
+		if used[s.ID] && len(s.Loss) > 0 {
+			out.States = append(out.States, State{ID: s.ID, Replica: s.Replica, Loss: s.Loss})
+		}
+	}
+	return out
+}
+
+// Encode is the manifest as its file holds it: FileFormat, compact, one line (indenting a
+// large graph's revisions made about a fifth of the file whitespace, read on every scan).
 func (m *Manifest) Encode() []byte {
-	b, _ := json.MarshalIndent(m, "", "  ")
+	var b []byte
+	if p, ok := m.pack(); ok {
+		b, _ = json.Marshal(p)
+	} else {
+		b, _ = json.Marshal(m)
+	}
 	return append(b, '\n')
 }
 func (m *Manifest) ForBranch(branch string) *Manifest {
@@ -272,6 +324,20 @@ func (m *Manifest) FindEndpoint(key agent.SessionKey, endpoint string) (Replica,
 	}
 	return found, found.ID, found.ID != ""
 }
+
+// FindBinding selects the current segment of one physical session without
+// confusing it with its retained historical login segments.
+func (m *Manifest) FindBinding(key agent.SessionKey, endpoint, binding string) (Replica, ReplicaID, bool) {
+	if m == nil {
+		return Replica{}, "", false
+	}
+	for _, r := range m.Replicas {
+		if r.Key == key && r.Endpoint == endpoint && r.Binding == binding && r.Line == m.Branch {
+			return m.Replica(r.ID), r.ID, true
+		}
+	}
+	return Replica{}, "", false
+}
 func (m *Manifest) FindOnBranch(key agent.SessionKey, location, line string) (Replica, ReplicaID, bool) {
 	if m == nil {
 		return Replica{}, "", false
@@ -350,22 +416,34 @@ func (m *Manifest) Covered(heads []ir.NodeID) map[ir.NodeID]bool {
 	}
 	return out
 }
+
+// Heads keeps the ids no other id descends from. One walk over the ancestors of the
+// whole set (it was one graph walk per id, quadratic for a long native fork).
 func (m *Manifest) Heads(ids []ir.NodeID) []ir.NodeID {
 	ids = unique(ids)
-	keep := map[ir.NodeID]bool{}
-	for _, id := range ids {
-		keep[id] = true
+	by := make(map[ir.NodeID]Revision, len(m.Revisions))
+	for _, r := range m.Revisions {
+		by[r.ID] = r
 	}
+	ancestor := map[ir.NodeID]bool{}
+	var todo []ir.NodeID
 	for _, id := range ids {
-		for a := range m.Covered([]ir.NodeID{id}) {
-			if a != id {
-				delete(keep, a)
-			}
+		todo = append(todo, by[id].Parents...)
+	}
+	for len(todo) > 0 {
+		id := todo[len(todo)-1]
+		todo = todo[:len(todo)-1]
+		if ancestor[id] {
+			continue
 		}
+		ancestor[id] = true
+		todo = append(todo, by[id].Parents...)
 	}
 	var out []ir.NodeID
-	for id := range keep {
-		out = append(out, id)
+	for _, id := range ids {
+		if !ancestor[id] {
+			out = append(out, id)
+		}
 	}
 	return unique(out)
 }
@@ -405,7 +483,7 @@ func (m *Manifest) Observe(replica ReplicaID, seg *ir.Segment) (State, error) {
 	}
 	for anchor := range by {
 		if !seen[anchor] {
-			return State{}, fmt.Errorf("%w: history was compacted or rewound; create a separate fork", agent.ErrDiverged)
+			return State{}, fmt.Errorf("%w: history was compacted or rewound", agent.ErrDiverged)
 		}
 	}
 	lastKnown := -1
@@ -531,6 +609,37 @@ func (m *Manifest) Merge(o *Manifest) error {
 		return err
 	}
 	next := m.Clone()
+	incoming := o.Clone()
+	// A freshly reset branch has no origin until its first replica is observed.
+	// Catalog observation may initialize it before the persisted empty manifest
+	// is read during planning. That is additive initialization, not conflicting
+	// ancestry. Only accept an unset origin when that side has no replica on the
+	// branch; two established origins or different fork boundaries still conflict.
+	unobserved := func(graph *Manifest, branch Branch) bool {
+		if branch.Origin != "" {
+			return false
+		}
+		for _, replica := range graph.Replicas {
+			if replica.Line == branch.ID {
+				return false
+			}
+		}
+		return true
+	}
+	for i := range next.Branches {
+		for j := range incoming.Branches {
+			a, b := &next.Branches[i], &incoming.Branches[j]
+			if a.ID != b.ID || a.Parent != b.Parent || !slices.Equal(a.ForkHeads, b.ForkHeads) {
+				continue
+			}
+			if unobserved(next, *a) {
+				a.Origin = b.Origin
+			}
+			if unobserved(incoming, *b) {
+				b.Origin = a.Origin
+			}
+		}
+	}
 	union := func(dst, src any, key func(json.RawMessage) string) (json.RawMessage, error) {
 		a, _ := json.Marshal(dst)
 		b, _ := json.Marshal(src)
@@ -566,7 +675,7 @@ func (m *Manifest) Merge(o *Manifest) error {
 		_ = json.Unmarshal(b, &x)
 		return x.ID
 	}
-	for _, pair := range [][2]any{{&next.Branches, o.Branches}, {&next.Replicas, o.Replicas}, {&next.Revisions, o.Revisions}, {&next.States, o.States}, {&next.Hops, o.Hops}, {&next.Compensations, o.Compensations}} {
+	for _, pair := range [][2]any{{&next.Branches, incoming.Branches}, {&next.Replicas, incoming.Replicas}, {&next.Revisions, incoming.Revisions}, {&next.States, incoming.States}, {&next.Hops, incoming.Hops}, {&next.Compensations, incoming.Compensations}} {
 		b, err := union(pair[0], pair[1], key)
 		if err != nil {
 			return err
@@ -766,9 +875,71 @@ func (m *Manifest) Journey() Journey {
 	return j
 }
 
+// ErrTooLarge is a lineage that cannot be written (Read refuses more than maxSize).
+var ErrTooLarge = errors.New("movement ledger exceeds its size limit")
+
+type ledgerLimitError struct{ *ir.LimitError }
+
+func (e *ledgerLimitError) Unwrap() error { return e.LimitError }
+
+func (e *ledgerLimitError) Is(target error) bool {
+	return target == ErrTooLarge || target == ir.ErrLimit
+}
+func ledgerSizeError(limit, size int64) error {
+	return &ledgerLimitError{&ir.LimitError{Stage: ir.StageLineage, Limit: limit, Size: size}}
+}
+func (m *Manifest) SetLimits(l ir.Limits) { m.sizeLimit = int(l.Normalize().LineageBytes) }
+func (m *Manifest) limit() int {
+	if m.sizeLimit > 0 {
+		return m.sizeLimit
+	}
+	return maxSize
+}
+func (m *Manifest) tooLarge() error { return ledgerSizeError(int64(m.limit()), int64(m.compactSize())) }
+
+// compactSize is a lower bound of a manifest's size in memory and between machines: each
+// record's compact JSON (the limit is of this, as before files were packed, so a history
+// that fits is one that can be worked with). It
+// costs one small encoding per record, not one document of the whole graph (hundreds
+// of megabytes for a long native fork, built just to be measured).
+func (m *Manifest) compactSize() int {
+	n := 0
+	add := func(v any) {
+		b, _ := json.Marshal(v)
+		n += len(b)
+	}
+	for _, r := range m.Revisions {
+		add(r)
+		if n > m.limit() {
+			return n
+		}
+	}
+	for _, s := range m.States {
+		add(s)
+		if n > m.limit() {
+			return n
+		}
+	}
+	for _, r := range m.Replicas {
+		add(r)
+	}
+	for _, h := range m.Hops {
+		add(h)
+	}
+	return n
+}
+
+// Writable reports a lineage too large to be written, cheaply (see compactSize).
+func (m *Manifest) Writable() error {
+	if m.compactSize() > m.limit() {
+		return m.tooLarge()
+	}
+	return nil
+}
+
 func (m *Manifest) Validate() error {
-	if len(m.Encode()) > maxSize {
-		return fmt.Errorf("lineage exceeds %d bytes", maxSize)
+	if m.compactSize() > m.limit() || len(m.Encode()) > m.limit() {
+		return m.tooLarge()
 	}
 	if m.Format != Format {
 		return fmt.Errorf("lineage format %q is not %q", m.Format, Format)

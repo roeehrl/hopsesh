@@ -3,8 +3,8 @@
 # machine:
 #   "box"  = user hsremote (the session starts there)
 #   "back" = user hsback   (runs hopsesh first)
-# box → back: code comes along straight from box (never pushed), box's copy gets marked.
-# back → box: portable history returns as a fresh copy, back is marked.
+# box → back: code comes along straight from box (never pushed); box's copy keeps its title
+# and the listing shows where it went. back → box: portable history returns as a fresh copy.
 # Without verified login identity each account boundary uses a fresh native ID; originals remain.
 # Then both copies change and a move is refused until --keep-both.
 # Run by CI on Linux and macOS; needs sudo, sshd and git. The account running it is not changed.
@@ -78,8 +78,7 @@ as_a "$HS" pull "box:$ID" --yes --json > "$WORK/pull1.json" || { cat "$WORK/pull
 grep -q '"fromSource": *true' "$WORK/pull1.json" || { cat "$WORK/pull1.json"; fail "the unpushed commit should come straight from box"; }
 grep -q '"state": *"fast-forwarded"' "$WORK/pull1.json" || fail "back's checkout should be fast-forwarded"
 [ "$(sh_a 'git -C ~/git/rt rev-parse HEAD')" = "$TWO" ] || fail "back's checkout is not at box's commit"
-grep -q '"mark": *"done"' "$WORK/pull1.json" || fail "box's copy should be marked"
-sudo tail -n 1 "$BFILE" | grep -q 'prepared in Claude Code on back' || fail "box's transcript has no prepared mark"
+sudo grep -q '↪' "$BFILE" && fail "box's transcript was relabelled: titles must stay as they were"
 SLUG_A=$(sh_a 'cd ~/git/rt && pwd -P' | sed 's/[^A-Za-z0-9]/-/g')
 AID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["plan"]["placement"]["key"]["session"])' "$WORK/pull1.json")
 if [ -z "$AID" ] || [ "$AID" = "$ID" ]; then
@@ -88,7 +87,7 @@ fi
 AFILE="$AHOME/.claude/projects/$SLUG_A/$AID.jsonl"
 sudo test -f "$AFILE" || fail "no copy on back at $AFILE"
 as_a "$HS" ls --json --no-git > "$WORK/ls.json"
-grep -q '"kind": *"prepared"' "$WORK/ls.json" || fail "the listing should show box's copy as prepared"
+grep -q '"departure"' "$WORK/ls.json" || fail "the listing should show where box's copy went"
 
 say "work continues on back"
 ALEAF=$(sudo cat "$AFILE" | python3 -c 'import json,sys; records=[json.loads(l) for l in sys.stdin]; print([r["uuid"] for r in records if r.get("type") in ("user","assistant")][-1])')
@@ -102,16 +101,13 @@ as_b "$HS" hosts add back "$A@127.0.0.1" >/dev/null
 as_b "$HS" trust back --yes >/dev/null
 as_b "$HS" pull "back:$AID" --yes --json > "$WORK/pull2.json" 2>&1 || { cat "$WORK/pull2.json"; fail "hop back"; }
 RETURN_ID=$(python3 -c 'import json,sys; p=json.load(open(sys.argv[1]))["plan"]; assert p["kind"]=="continue" and not p.get("conflict"); print(p["placement"]["key"]["session"])' "$WORK/pull2.json")
-if [ -z "$RETURN_ID" ] || [ "$RETURN_ID" = "$ID" ]; then
-  fail "unverified return did not use a fresh ID"
-fi
-sudo grep -q "continued on back" "$BFILE" && fail "return changed the preserved original"
-BFILE="$BHOME/.claude/projects/$SLUG_B/$RETURN_ID.jsonl"
-sudo test -f "$BFILE" || fail "no reported return copy on box"
-sudo grep -q "continued on back" "$BFILE" || fail "box should now have the newer copy"
-if sudo cat "$BFILE" | grep '"type":"custom-title"' | tail -n 1 | grep -Eq 'moved to|continued in|prepared in'; then fail "the copy that came home must not carry a moved mark"; fi
+# A return adds only the new work to box's exact original session.
+[ "$RETURN_ID" = "$ID" ] || { cat "$WORK/pull2.json"; fail "the return did not go back to box's original session"; }
+sudo test -f "$BFILE" || fail "box's original session is missing"
+sudo grep -q "continued on back" "$BFILE" || fail "box's original should now have back's new work"
+if sudo cat "$BFILE" | grep '"type":"custom-title"' | tail -n 1 | grep -q '↪'; then fail "the copy that came home must not carry a title label"; fi
 [ "$(sh_b 'git -C ~/rt rev-parse HEAD')" = "$THREE" ] || fail "box's checkout should be at back's commit"
-sudo tail -n 1 "$AFILE" | grep -q 'prepared in Claude Code on box' || fail "back's copy should now be marked prepared"
+sudo grep -q '↪' "$AFILE" && fail "back's copy was relabelled: titles must stay as they were"
 
 say "both change: a conflict"
 # Follow the active native leaf on the returned copy.

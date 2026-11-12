@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -33,6 +34,9 @@ type PreviewDTO struct {
 	// Note says why there is no preview ("Preview not available: laptop is slow to
 	// answer"); "" when there is one.
 	Note string `json:"note,omitempty"`
+	// Failed says the read did not finish (a slow or unreachable machine), so the window
+	// offers Try again.
+	Failed bool `json:"failed,omitempty"`
 }
 
 // PreviewItemDTO is one message, one turn's tool calls in words, or a compaction.
@@ -87,12 +91,13 @@ func (c *previewCache) touch(k string) {
 
 var previews previewCache
 
-// previewTimeout bounds a preview from another machine.
-const previewTimeout = 3 * time.Second
+// previewTimeout bounds a preview from another machine. It covers the SSH connection (a
+// second or two over Tailscale without connection sharing) and the remote read.
+const previewTimeout = 10 * time.Second
 
 // Preview returns the end of a session's conversation: its last n messages (4 when n is
 // 0), with a line for each turn's tool calls. A machine that is slow to answer gets a
-// note, not an error.
+// note and Failed, not an error.
 func (a *App) Preview(machine, key string, n int) (*PreviewDTO, error) {
 	if n <= 0 {
 		n = 4
@@ -139,9 +144,9 @@ func (a *App) Preview(machine, key string, n int) (*PreviewDTO, error) {
 	case errors.Is(err, app.ErrNoPreview):
 		return &PreviewDTO{Items: []PreviewItemDTO{}, Note: fmt.Sprintf("%s's conversations can't be previewed yet.", e.AgentName)}, nil
 	case errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil:
-		return &PreviewDTO{Items: []PreviewItemDTO{}, Note: fmt.Sprintf("Preview not available: %s is slow to answer.", machine)}, nil
+		return &PreviewDTO{Items: []PreviewItemDTO{}, Note: fmt.Sprintf("Preview not available: %s is slow to answer.", machine), Failed: true}, nil
 	case err != nil:
-		return &PreviewDTO{Items: []PreviewItemDTO{}, Note: "Preview not available: " + err.Error()}, nil
+		return &PreviewDTO{Items: []PreviewItemDTO{}, Note: "Preview not available: " + err.Error(), Failed: true}, nil
 	}
 	a.mu.Lock()
 	on = a.core.Cfg.PreviewsOn()
@@ -271,6 +276,9 @@ type LiveDTO struct {
 	App    string     `json:"app,omitempty"`
 	Name   string     `json:"name,omitempty"` // the name the running agent gives it
 	Places []PlaceDTO `json:"places"`
+	// RemoteControl and RemoteURL are as in EntryDTO.
+	RemoteControl string `json:"remoteControl,omitempty"`
+	RemoteURL     string `json:"remoteUrl,omitempty"`
 }
 
 // PresenceDTO is where this machine's sessions are open now, by machine + "\x00" + key.
@@ -286,7 +294,13 @@ type PresenceDTO struct {
 func (a *App) Presence() (*PresenceDTO, error) {
 	out := &PresenceDTO{Entries: map[string]LiveDTO{}}
 	a.mu.Lock()
-	inv := a.inv
+	owned := a.inv
+	var inv *app.Inventory
+	if owned != nil {
+		copy := *owned
+		copy.Entries = slices.Clone(owned.Entries)
+		inv = &copy
+	}
 	a.mu.Unlock()
 	if inv == nil {
 		return out, nil
@@ -294,8 +308,12 @@ func (a *App) Presence() (*PresenceDTO, error) {
 	core := a.snapshot()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	binding := a.beginTerminalBindingRead("presence")
 	live := core.LiveHere(ctx, inv)
-	table, _ := presence.Snapshot(ctx)
+	table, tableErr := presence.Snapshot(ctx)
+	if tableErr == nil {
+		a.bindTerminalPresence(owned, inv, live, table, binding)
+	}
 	self := os.Getpid()
 	here := inv.Local()
 	if here == nil {
@@ -311,27 +329,48 @@ func (a *App) Presence() (*PresenceDTO, error) {
 		}
 		e.Live = li
 		d := LiveDTO{Live: li.State == agent.Live, Status: statusWords(core, e), Needs: li.State == agent.Live && strings.HasPrefix(li.Status, "waiting"),
-			Name: li.Name, Places: placesOf(li, table, self)}
+			Name: li.Name, Places: placesOf(li, table, self, appKind(e.Agent))}
+		if d.Live {
+			d.RemoteControl, d.RemoteURL = li.RemoteControl, li.RemoteURL
+		}
 		if d.Live && li.App {
-			d.App = appName(core, e)
+			d.App = appName(core, here, e)
 		}
 		out.Entries[e.Machine+"\x00"+e.Session.Key.String()] = d
 	}
 	return out, nil
 }
 
-// appName is the name of the agent's desktop app ("Claude").
-func appName(core *app.App, e app.Entry) string {
+// appName is the name of the agent's desktop app ("Claude", "ChatGPT"): the installed
+// bundle's when the machine's scan found one, else the module's first known app.
+func appName(core *app.App, m *app.Machine, e app.Entry) string {
+	if m != nil {
+		if in, ok := m.InstallProfile(e.Agent, e.Session.Key.Profile); ok && strings.HasSuffix(in.Desktop, ".app") {
+			if n := strings.TrimSuffix(filepath.Base(in.Desktop), ".app"); n != "" {
+				return n
+			}
+		}
+	}
 	name := e.AgentName
-	if m, ok := core.Module(e.Agent); ok {
-		name = nonEmptyStr(appicon.Name(m.Spec().Icon.Apps), name)
+	if mod, ok := core.Module(e.Agent); ok {
+		name = nonEmptyStr(appicon.Name(mod.Spec().Icon.Apps), name)
 	}
 	return name
 }
 
+// appKind is the place an agent's desktop app is: the Codex app (ChatGPT.app) runs every
+// Codex thread in one shared process, so it is shown and opened, never quit.
+func appKind(id agent.ID) presence.Kind {
+	if id == "codex" {
+		return presence.KindCodexApp
+	}
+	return presence.KindClaudeApp
+}
+
 // placesOf is where a live session's processes run (besides hopsesh's own tabs): each
-// process by its first known ancestor, counted by place.
-func placesOf(li agent.LiveInfo, t presence.Table, self int) []PlaceDTO {
+// process by its first known ancestor, counted by place; a process the module says is
+// the agent's desktop app is that app's place (kind).
+func placesOf(li agent.LiveInfo, t presence.Table, self int, kind presence.Kind) []PlaceDTO {
 	out := []PlaceDTO{}
 	if li.State != agent.Live {
 		return out
@@ -352,7 +391,7 @@ func placesOf(li agent.LiveInfo, t presence.Table, self int) []PlaceDTO {
 	}
 	if len(procs) == 0 {
 		if li.App {
-			add(string(presence.KindClaudeApp), "", strings.HasPrefix(li.Status, "waiting"))
+			add(string(kind), "", strings.HasPrefix(li.Status, "waiting"))
 		} else {
 			add(string(presence.KindUnknown), "", strings.HasPrefix(li.Status, "waiting"))
 		}
@@ -373,7 +412,7 @@ func placesOf(li agent.LiveInfo, t presence.Table, self int) []PlaceDTO {
 	}
 	for _, p := range unique {
 		if p.App {
-			add(string(presence.KindClaudeApp), "", p.Waiting)
+			add(string(kind), "", p.Waiting)
 			continue
 		}
 		h := presence.Host{Kind: presence.KindUnknown}

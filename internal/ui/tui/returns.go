@@ -8,7 +8,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/roeehrl/hopsesh/internal/app"
-	"github.com/roeehrl/hopsesh/internal/core/move"
 )
 
 type returnPlanDone struct {
@@ -26,13 +25,18 @@ func (m *model) openReturns() bool {
 }
 
 func (m *model) returnKeys(k string) (tea.Model, tea.Cmd) {
+	if k == "esc" || k == "q" {
+		m.planGeneration++
+		m.planning = false
+		m.closeReturnPush()
+		m.returnTo, m.mode, m.opts.Conflict = nil, modeBrowse, ""
+		return m, nil
+	}
 	if m.planning {
 		return m, nil
 	}
 	candidates := m.sel.item.Entry.Returns
 	switch k {
-	case "esc", "q":
-		m.mode = modeBrowse
 	case "down", "j":
 		m.returnCursor = min(len(candidates)-1, m.returnCursor+1)
 	case "up", "k":
@@ -77,9 +81,8 @@ func (m *model) returnKeys(k string) (tea.Model, tea.Cmd) {
 			m.opts.TargetSession = ""
 			m.opts.NewReplica = true
 		}
-		if r.Status == "diverged" {
-			m.opts.Conflict = move.ConflictKeepBoth
-		}
+		// A catalog status is evidence to review, never a conflict choice.
+		m.opts.Conflict = ""
 		m.target, m.returnTo, m.picked, m.ho = r.Agent, &r, nil, handoff{}
 		return m, m.planCmd()
 	}

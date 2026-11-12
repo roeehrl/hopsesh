@@ -14,6 +14,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/roeehrl/hopsesh/internal/app"
+	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/termapp"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -114,10 +115,18 @@ func addDirFlags(cmd *cobra.Command) {
 	cmd.Flags().String("state-dir", "", "hopsesh's state folder (as HOPSESH_STATE_DIR)")
 }
 
+// useDirFlags applies --config-dir and --state-dir. A flag naming the default folder sets
+// nothing: an explicit HOPSESH_CONFIG_DIR is a separate installation (its own endpoint
+// identity), and the protection hooks always pass both folders. Treating the default as
+// explicit made every hook on a default install miss this machine's identity and never
+// block an original.
 func useDirFlags(cmd *cobra.Command) {
-	for flag, env := range map[string]string{"config-dir": "HOPSESH_CONFIG_DIR", "state-dir": "HOPSESH_STATE_DIR"} {
-		if v, _ := cmd.Flags().GetString(flag); v != "" {
-			_ = os.Setenv(env, v)
+	for flag, dir := range map[string]struct {
+		env string
+		def func() string
+	}{"config-dir": {"HOPSESH_CONFIG_DIR", config.DefaultDir}, "state-dir": {"HOPSESH_STATE_DIR", config.DefaultStateDir}} {
+		if v, _ := cmd.Flags().GetString(flag); v != "" && (os.Getenv(dir.env) != "" || !config.SameDir(v, dir.def())) {
+			_ = os.Setenv(dir.env, v)
 		}
 	}
 }

@@ -128,6 +128,20 @@ func TestSummarizeLargeFileHeadTail(t *testing.T) {
 	}
 }
 
+func TestMetadataOnlyWindowsDoNotHideARealConversation(t *testing.T) {
+	root := "/t/" + t.Name()
+	p := writeTranscript(t, root, "metadata-windows", []line{
+		{"type": "system", "uuid": "start", "sessionId": "metadata-windows", "cwd": "/repo"},
+		user("/repo", "2026-10-11T10:00:00Z", strings.Repeat("conversation", 20000), nil),
+		{"type": "attachment", "uuid": "large", "cwd": "/repo", "payload": strings.Repeat("x", 200000)},
+		{"type": "system", "uuid": "end", "sessionId": "metadata-windows", "cwd": "/repo"},
+	})
+	s, err := summ(p)
+	if err != nil || !s.HasMessages || s.CWD != "/repo" {
+		t.Fatalf("real session disappeared behind metadata: %+v %v", s, err)
+	}
+}
+
 func TestRealPromptFilters(t *testing.T) {
 	mk := func(content any, extra line) record {
 		j, _ := json.Marshal(user("/r", "t", content, extra))
@@ -162,7 +176,7 @@ func TestRealPromptFilters(t *testing.T) {
 	}
 }
 
-func TestMovedMark(t *testing.T) {
+func TestLegacyLabel(t *testing.T) {
 	f := "/t/moved/s1.jsonl"
 	body := `{"type":"user","uuid":"u1","parentUuid":null,"sessionId":"s1","cwd":"/Users/alice/p","timestamp":"2026-10-01T10:00:00Z","message":{"role":"user","content":"hello"}}` + "\n" +
 		`{"type":"custom-title","customTitle":"fix tests","sessionId":"s1"}` + "\n" +
@@ -172,11 +186,11 @@ func TestMovedMark(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.Mark == nil || s.Mark.Location != "laptop" || s.Title != "fix tests" {
-		t.Fatalf("got mark=%+v title=%q", s.Mark, s.Title)
+	if s.LegacyLabel == nil || s.LegacyLabel.Location != "laptop" || s.Title != "fix tests" {
+		t.Fatalf("got label=%+v title=%q", s.LegacyLabel, s.Title)
 	}
 	if s.LastActivity.Format(time.RFC3339) != "2026-10-01T10:00:00Z" {
-		t.Fatalf("the mark must not change last activity: %v", s.LastActivity)
+		t.Fatalf("a title label must not change last activity: %v", s.LastActivity)
 	}
 }
 

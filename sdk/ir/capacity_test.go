@@ -18,7 +18,13 @@ func TestCapacityBoundary(t *testing.T) {
 	if c.Check(items) == nil {
 		t.Fatal("one over boundary accepted")
 	}
+	// An existing session's usage includes its instructions and tools: adding to it
+	// keeps 10% for the next response.
 	c.Existing = 699
+	if c.Allowance() != 201 {
+		t.Fatalf("existing session allowance %d, want 201", c.Allowance())
+	}
+	c.Existing = 899
 	if c.Allowance() != 1 {
 		t.Fatal("existing context ignored")
 	}

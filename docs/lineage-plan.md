@@ -86,7 +86,7 @@ does not claim that the target agent possesses all original bytes or hidden stat
    destructive writes. There is no automatic conversation merge.
 5. Journal intent locally and at the receiving peer; stage data; install/append under the
    existing destination lock; durably record the destination receipt and committed operation;
-   then acknowledge it to the source and update its moved mark. Source acknowledgment failure
+   then acknowledge it to the source. Source acknowledgment failure
    becomes recoverable pending acknowledgment, not a second transfer.
 6. Retry with the same operation ID and fingerprint. Return its committed result, or resume
    the prepared transaction. Reject the same ID with different input. Follow the explicit
@@ -101,7 +101,7 @@ motivates durable intent and recovery ordering; merely putting the index in SQLi
 not make external native files transactional. The portable per-session lineage remains
 authoritative; a local index is rebuildable.
 
-## Forks and moved marks
+## Forks and movement status
 
 Keep both creates a new Branch ID with an explicit parent revision and parent branch. The
 original remains unchanged. Both branches can move, return and fork independently. Native
@@ -114,8 +114,8 @@ Unplanned concurrent work is displayed as divergence until the user chooses how 
 it. Copies of one branch may share a row; distinct branches never do. Family grouping is an
 optional expandable group above those rows.
 
-Moved marks reference a committed operation, source branch and destination replica. Returning
-clears only the matching source mark after destination acknowledgment. A fork's mark and
+A copy's "moved on" status is derived from committed operations on its own branch (the latest
+hop away from it with no return since); titles are never changed. A fork's status and
 counter cannot be cleared or advanced by moving its parent or sibling.
 
 ## Counts and visible history
@@ -164,7 +164,7 @@ Scan progress uses an indeterminate status and accessible announcements, followi
 4. Replace pull/continue/push/handoff/fetch target selection and apply protocols together.
    Peers negotiate this format before any mutation; incompatible peers fail clearly.
 5. Replace family-wide inventory collapsing and replace-all-related-copy behavior. Add fork
-   adoption, marks, derived counters, GUI/TUI journey views and exact branch selectors.
+   adoption, derived statuses and counters, GUI/TUI journey views and exact branch selectors.
 6. Delete superseded grouping/selection helpers, old fixtures and obsolete documentation;
    remove unused IR fields or wire them completely. Run the full matrix and real-agent smoke
    gates before merging or releasing this replacement.
@@ -185,7 +185,7 @@ long seeded random histories; PR CI runs every mandatory route with bounded fixt
 
 Assert each authored sentinel appears exactly once where expected, missing work is never
 reported synchronized, original native prefixes stay intact on append, branches retain
-separate rows and IDs, only the selected destination is replaced, and counters/marks match
+separate rows and IDs, only the selected destination is replaced, and counters/statuses match
 committed events regardless of metadata serialization order or clock skew. Assert loss
 annotations survive every subsequent hop. Crash recovery must leave a complete receipt or
 a recoverable pending operation, never an untracked successful native write.
@@ -216,8 +216,8 @@ Record the tested versions and inspect the installed GUI/TUI before release.
   selected on return. Fork creation starts independent route counters at the fork endpoint.
 - The GUI inspector displays branch/origin, transfer and origin-return counts, causal history,
   undone events and fidelity losses. CLI/TUI show the same branch-derived counts. Plans
-  require a selected destination when multiple replicas qualify. Deferred native titles are
-  tied to the committed operation, source replica and branch, and cannot mark a later return.
+  require a selected destination when multiple replicas qualify. Movement status comes from
+  the committed operations of the copy's branch, so a later return clears it.
 - Mandatory `TestLineage` E2E scenarios run in each Linux/macOS/Windows scenario job, alongside
   the existing SSH transport matrix and real OS pairs. The suite has 48 work-at-every-stop
   route cases plus 12 workless/alternating cases across ABABA, ABCA and ABCBCAB, both starting

@@ -67,6 +67,10 @@ func TestCodexMoveAcrossAccounts(t *testing.T) {
 		{"another account", "chatgpt:aa", "chatgpt:bb", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			// The session records the account that created it (Codex 0.157+); an
+			// unrecorded one counts as another account (TestCodexInOwnRootUnderAnotherAccount).
+			s := s
+			s.Owners = []agent.OwnerRun{{Key: tc.src}}
 			in := move.Input{Source: move.Side{Machine: box.m, Module: cx, Install: boxIn, Account: &agent.Account{Key: tc.src}}, Session: s,
 				Target: move.Side{Machine: here.m, Module: cx, Install: hereIn, Account: &agent.Account{Key: tc.dst}}}
 			p, err := move.Build(ctx, in, move.Options{TargetDir: here.repo})

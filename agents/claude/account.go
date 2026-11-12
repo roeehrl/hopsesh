@@ -1,11 +1,15 @@
 package claude
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -24,7 +28,8 @@ type authStatus struct {
 }
 
 // Account asks claude which login it uses (it reads its own credentials; hopsesh never
-// does). The key is a hash of the organisation id.
+// does). The key is a hash of the organisation id; the person, of the user id in the
+// root's public identity record.
 func (m *Module) Account(ctx context.Context, h agent.Host, in agent.Install) (agent.Account, error) {
 	binary := in.Binary
 	if binary == "" {
@@ -44,7 +49,48 @@ func (m *Module) Account(ctx context.Context, h agent.Host, in agent.Install) (a
 	if r.Code > 1 || r.Code != 0 && a.LoggedIn {
 		return agent.Account{}, fmt.Errorf("claude auth status exited %d", r.Code)
 	}
-	return account(a), nil
+	acct := account(a)
+	if a.LoggedIn {
+		acct.Person = person(h, in, a)
+	}
+	return acct, nil
+}
+
+// identity is the public part of Claude Code's own record of its login (oauthAccount in
+// .claude.json). Its credentials live elsewhere (the Keychain, .credentials.json) and are
+// never read.
+type identity struct {
+	OAuth *struct {
+		Account string `json:"accountUuid"`
+		Org     string `json:"organizationUuid"`
+		Email   string `json:"emailAddress"`
+	} `json:"oauthAccount"`
+}
+
+// person fingerprints the signed-in user from the root's .claude.json, when that record
+// agrees with what claude reported (it can be stale); "" otherwise.
+func person(h agent.Host, in agent.Install, a authStatus) string {
+	var files []string
+	if root := in.Root("home"); in.NativeDefaultRoot != "" && root == in.NativeDefaultRoot {
+		files = []string{h.Path().Join(h.Facts().Home, ".claude.json")}
+	} else if root != "" {
+		files = []string{h.Path().Join(root, ".config.json"), h.Path().Join(root, ".claude.json")}
+	}
+	for _, f := range files {
+		b, err := h.FS().ReadFile(f, 64<<20)
+		if err != nil || len(bytes.TrimSpace(b)) == 0 {
+			continue
+		}
+		var id identity
+		if json.Unmarshal(b, &id) != nil || id.OAuth == nil {
+			return ""
+		}
+		if id.OAuth.Org != a.OrgID || !strings.EqualFold(id.OAuth.Email, a.Email) {
+			return ""
+		}
+		return personKey(id.OAuth.Account)
+	}
+	return ""
 }
 
 // accountKey fingerprints an organisation id ("" for none): the same for a login and for
@@ -54,6 +100,15 @@ func accountKey(org string) string {
 		return ""
 	}
 	sum := sha256.Sum256([]byte("claude:" + org))
+	return hex.EncodeToString(sum[:8])
+}
+
+// personKey fingerprints a Claude account (user) id ("" for none).
+func personKey(id string) string {
+	if id == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte("claude-person:" + id))
 	return hex.EncodeToString(sum[:8])
 }
 
@@ -76,4 +131,72 @@ func account(a authStatus) agent.Account {
 		acct.RemoteControl = true
 	}
 	return acct
+}
+
+// LocalIdentity reads the root's oauthAccount record: what Claude Code itself stamps as a
+// run's organisation.
+func (m *Module) LocalIdentity(root string, native bool) (agent.OwnerRun, bool) {
+	// Claude desktop runs its own Claude Code (CLAUDE_CODE_ENTRYPOINT=claude-desktop),
+	// signed in apart from the terminal's: its run is desktop's account, never the
+	// terminal's.
+	if strings.HasPrefix(os.Getenv("CLAUDE_CODE_ENTRYPOINT"), "claude-desktop") {
+		return localDesktopIdentity()
+	}
+	files := []string{filepath.Join(root, ".config.json"), filepath.Join(root, ".claude.json")}
+	if native {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return agent.OwnerRun{}, false
+		}
+		files = []string{filepath.Join(home, ".claude.json")}
+	}
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil || len(bytes.TrimSpace(b)) == 0 {
+			continue
+		}
+		var id identity
+		if json.Unmarshal(b, &id) != nil || id.OAuth == nil || id.OAuth.Org == "" {
+			return agent.OwnerRun{}, false
+		}
+		return agent.OwnerRun{Key: accountKey(id.OAuth.Org), Person: personKey(id.OAuth.Account), Source: "hopsesh"}, true
+	}
+	return agent.OwnerRun{}, false
+}
+
+// localDesktopIdentity is who Claude desktop on this machine is signed in as: its last
+// known account id (config.json, that field alone) and the newest organization folder of
+// its session index.
+func localDesktopIdentity() (agent.OwnerRun, bool) {
+	dir := ""
+	if runtime.GOOS == "windows" {
+		dir = filepath.Join(os.Getenv("APPDATA"), "Claude")
+	} else if home, err := os.UserHomeDir(); err == nil {
+		dir = filepath.Join(home, "Library", "Application Support", "Claude")
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "config.json"))
+	if err != nil {
+		return agent.OwnerRun{}, false
+	}
+	var c struct {
+		Account string `json:"lastKnownAccountUuid"`
+	}
+	err = json.Unmarshal(b, &c)
+	clear(b)
+	if err != nil || !desktopSessionID.MatchString(c.Account) {
+		return agent.OwnerRun{}, false
+	}
+	run := agent.OwnerRun{Person: personKey(c.Account), Source: "claude-desktop"}
+	entries, _ := os.ReadDir(filepath.Join(dir, "claude-code-sessions", c.Account))
+	var newest time.Time
+	for _, e := range entries {
+		info, err := e.Info()
+		if err != nil || !e.IsDir() || !desktopSessionID.MatchString(e.Name()) {
+			continue
+		}
+		if run.Key == "" || info.ModTime().After(newest) {
+			newest, run.Key = info.ModTime(), accountKey(e.Name())
+		}
+	}
+	return run, run.Key != ""
 }

@@ -21,7 +21,6 @@ type HandoffOptsDTO struct {
 	Untracked   []string `json:"untracked"`   // untracked files to carry (paths)
 	HistoryFile bool     `json:"historyFile"` // also commit the conversation on the branch
 	Bundle      bool     `json:"bundle"`      // the agent uploads the repository instead
-	Mark        bool     `json:"mark"`
 	Cleanup     string   `json:"cleanup"`
 	Brief       string   `json:"brief"` // the user's edit of the briefing ("" : hopsesh's)
 	Note        string   `json:"note"`
@@ -36,14 +35,13 @@ type HandoffOptsDTO struct {
 type HandoffDefaultsDTO struct {
 	HistoryFile bool   `json:"historyFile"`
 	Bundle      bool   `json:"bundle"`
-	Mark        bool   `json:"mark"`
 	Cleanup     string `json:"cleanup"`
 }
 
 // HandoffDefaults are a cloud's hand-off defaults.
 func (a *App) HandoffDefaults(cloud string) HandoffDefaultsDTO {
 	o := a.snapshot().HandoffDefaults(cloud)
-	return HandoffDefaultsDTO{HistoryFile: o.HistoryFile, Bundle: o.Bundle, Mark: o.Mark, Cleanup: o.Cleanup}
+	return HandoffDefaultsDTO{HistoryFile: o.HistoryFile, Bundle: o.Bundle, Cleanup: o.Cleanup}
 }
 
 // HandoffPlanDTO is a hand-off plan as the sheet shows it.
@@ -54,7 +52,6 @@ type HandoffPlanDTO struct {
 	AgentID    agent.ID          `json:"agentId"`
 	SourceHost string            `json:"sourceHost"`
 	Local      bool              `json:"local"`
-	Mark       string            `json:"mark"`
 	Warnings   []string          `json:"warnings"`
 	Blockers   []string          `json:"blockers"`
 	Handoff    *move.HandoffPlan `json:"handoff"`
@@ -65,7 +62,10 @@ type HandoffPlanDTO struct {
 func (a *App) PlanHandoff(machine, key, cloud string, o HandoffOptsDTO) (*HandoffPlanDTO, error) {
 	doneSelection := a.beginSelection()
 	defer doneSelection()
-	core := a.snapshot()
+	core, generation, err := a.reviewSnapshot()
+	if err != nil {
+		return nil, err
+	}
 	a.mu.Lock()
 	e, err := a.find(machine, key)
 	inv := a.inv
@@ -73,14 +73,17 @@ func (a *App) PlanHandoff(machine, key, cloud string, o HandoffOptsDTO) (*Handof
 	if err != nil {
 		return nil, err
 	}
+	if err := refuseOldCopy(core, e); err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	inv, e, err = a.selectionInventory(ctx, core, inv, e)
+	inv, e, err = a.selectionInventory(ctx, core, inv, e, generation)
 	if err != nil {
 		return nil, err
 	}
 	opt := core.HandoffDefaults(cloud)
-	opt.Untracked, opt.HistoryFile, opt.Bundle, opt.Mark = o.Untracked, o.HistoryFile, o.Bundle, o.Mark
+	opt.Untracked, opt.HistoryFile, opt.Bundle = o.Untracked, o.HistoryFile, o.Bundle
 	opt.Brief, opt.Note, opt.CarryRules = o.Brief, o.Note, o.CarryRules
 	opt.Env, opt.StartingDiff = o.Env, o.StartingDiff
 	if o.Cleanup != "" {
@@ -90,11 +93,11 @@ func (a *App) PlanHandoff(machine, key, cloud string, o HandoffOptsDTO) (*Handof
 	if err != nil {
 		return nil, err
 	}
-	a.mu.Lock()
-	a.plan, a.input, a.res = p, move.Input{}, nil
-	a.mu.Unlock()
+	if err := a.publishReview(generation, p, move.Input{}); err != nil {
+		return nil, err
+	}
 	d := &HandoffPlanDTO{Kind: p.Kind, Title: p.Title, Agent: e.AgentName, AgentID: e.Agent, SourceHost: p.Source.Location, Local: e.Machine == app.LocalName(),
-		Mark: p.Mark, Warnings: p.Warnings, Blockers: p.Blockers, Handoff: p.Handoff}
+		Warnings: p.Warnings, Blockers: p.Blockers, Handoff: p.Handoff}
 	if d.Warnings == nil {
 		d.Warnings = []string{}
 	}
@@ -110,7 +113,6 @@ type HandedOffDTO struct {
 	Journal  string              `json:"journal"`
 	Title    string              `json:"title"`
 	Agent    string              `json:"agent"`
-	Mark     string              `json:"mark"`
 	Warnings []string            `json:"warnings"`
 	Error    string              `json:"error,omitempty"`
 	Handoff  *move.HandoffResult `json:"handoff"`
@@ -126,13 +128,11 @@ var (
 // ApplyHandoff carries out the last hand-off plan, sending each step to the window. A step
 // that fails is reported in the result (with what had happened by then), not as an error.
 func (a *App) ApplyHandoff() (*HandedOffDTO, error) {
-	core := a.snapshot()
-	a.mu.Lock()
-	p := a.plan
-	a.mu.Unlock()
-	if p == nil || p.Kind != move.KindHandoff {
-		return nil, errors.New("no hand-off planned; choose the session again")
+	core, p, _, release, err := a.beginPlanAction(move.KindHandoff)
+	if err != nil {
+		return nil, err
 	}
+	defer release()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 	res, err := core.Apply(ctx, p, move.Input{}, func(step string) { a.emit(ProgressEvent, step) })
@@ -150,7 +150,7 @@ func (a *App) ApplyHandoff() (*HandedOffDTO, error) {
 		}
 	}
 	a.mu.Unlock()
-	d := &HandedOffDTO{Journal: res.Journal, Title: p.Title, Agent: p.Agent, Mark: res.Mark, Warnings: res.Warnings, Handoff: res.Handoff}
+	d := &HandedOffDTO{Journal: res.Journal, Title: p.Title, Agent: p.Agent, Warnings: res.Warnings, Handoff: res.Handoff}
 	if d.Warnings == nil {
 		d.Warnings = []string{}
 	}

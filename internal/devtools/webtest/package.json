@@ -3,7 +3,8 @@
   "private": true,
   "description": "Browser tests of hopsesh's desktop window against the real service",
   "scripts": {
-    "test": "playwright test"
+    "test": "npm run test:diagnostics && node --require ./json-diagnostics.cjs ./node_modules/@playwright/test/cli.js test",
+    "test:diagnostics": "node --test json-diagnostics.test.cjs"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0"

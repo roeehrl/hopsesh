@@ -4,7 +4,9 @@
 
 # hopsesh
 
-**Move coding-agent sessions between your machines, between Claude Code and Codex, and to and from their clouds.**
+**Move a Claude Code or Codex session to another computer, continue it in the other agent, or hand it to the cloud, and bring it back.**
+
+<p><a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.ja.md">日本語</a></p>
 
 [![Release](https://img.shields.io/github/v/release/roeehrl/hopsesh)](https://github.com/roeehrl/hopsesh/releases/latest)
 [![CI](https://github.com/roeehrl/hopsesh/actions/workflows/ci.yml/badge.svg)](https://github.com/roeehrl/hopsesh/actions/workflows/ci.yml)
@@ -13,7 +15,7 @@
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 ![macOS · Linux · Windows](https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-0b6b62)
 
-[Install](#install) · [Quick start](#quick-start) · [Another agent](#continue-in-another-agent) · [Round trips](#round-trips) · [Push](#send-a-session-to-another-machine) · [Cloud sessions](#cloud-sessions) · [Ask your agent](#use-it-from-your-agent) · [Why not…?](#why-not) · [FAQ](#faq)
+[Install](#install) · [Quick start](#quick-start) · [Another agent](#continue-in-another-agent) · [Round trips](#round-trips) · [Push](#send-a-session-to-another-machine) · [Cloud sessions](#cloud-sessions) · [Ask your agent](#use-it-from-your-agent) · [On your phone](#on-your-phone) · [Why not…?](#why-not) · [FAQ](#faq)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hero-dark.gif">
@@ -21,6 +23,8 @@
 </picture>
 
 <sub>The macOS app, recorded with made-up machines and sessions (<a href="demo/README.md">demo/</a>).</sub>
+
+Guides: [move a Claude Code session to another computer](https://codonic.dev/guides/move-claude-code-session-to-another-computer) · [continue it in Codex](https://codonic.dev/guides/continue-claude-code-session-in-codex) · [after moving a project folder](https://codonic.dev/guides/claude-code-history-after-moving-project-folder)
 
 </div>
 
@@ -30,8 +34,13 @@ brings the one you pick here: in the same agent, or continued in the other one, 
 repository, worktree and paths fixed up. Then it gives you the command to continue.
 
 - **Finds your machines** from Tailscale and `~/.ssh/config`, and connects only to the ones you
-  allow, with your own `ssh`, keys and agent. Nothing to install on the other machines.
-  Machines without SSH keys can log in with a password.
+  allow, with your own `ssh`, keys and agent. Reading needs nothing installed there; machines
+  without SSH keys can log in with a password.
+- **Sets itself up on your other machines when you ask**: `hopsesh hosts setup studio` (or
+  Machines › Set up hopsesh) copies this hopsesh there and starts it in your login session at
+  each login. Then hopsesh sees who is signed in there (a Mac's Keychain included), protects
+  originals left there, and runs sessions there that you work in here. See
+  [Machines](docs/machines.md).
 - **Lists every session of every agent** (Claude Code and Codex) by repository: machine, agent,
   path, branch, worktree, last prompt, last activity, whether it's running, and where else
   it has been.
@@ -50,9 +59,10 @@ repository, worktree and paths fixed up. Then it gives you the command to contin
   as you.
 - **Works from inside your agent**: ask Claude Code or Codex "bring my laptop session here" and
   it plans with hopsesh, then moves only after you say yes.
-- **Multiple accounts**: name and tag independent Claude Code and Codex profiles, discover
-  known roots locally and on allowed machines, and review account-to-account transfers.
-  See [Accounts](docs/accounts.md) for setup and vendor limitations.
+- **Multiple accounts**: see who each tool (Claude Code, Claude desktop, Codex, the Codex app)
+  is signed in as on every machine, add account folders on any machine with hopsesh, start a
+  session as one, and continue any session as another. Every session shows the account that
+  ran it. See [Accounts](docs/accounts.md).
 - **Open a Codex conversation in its desktop app** from the Resume menu, with the exact
   thread selected. Custom account roots use a terminal because desktop links cannot select them.
 - **CLI, TUI and a desktop app for macOS and Windows** on one engine, with `--json` output
@@ -79,6 +89,16 @@ irm https://raw.githubusercontent.com/roeehrl/hopsesh/main/scripts/install.ps1 |
 
 Both check the download against the release's `checksums.txt` and its signature, and
 `hopsesh update` installs later releases with the same checks.
+
+With a package manager:
+
+```sh
+brew install roeehrl/tap/hopsesh            # macOS and Linux: the command
+brew install --cask roeehrl/tap/hopsesh-app # macOS: the app
+scoop bucket add roeehrl https://github.com/roeehrl/scoop-bucket; scoop install hopsesh   # Windows
+```
+
+A copy a package manager installed is updated by it (`brew upgrade`, `scoop update hopsesh`).
 
 - **macOS app:** [download the signed, notarized `.dmg`](https://github.com/roeehrl/hopsesh/releases/latest/download/hopsesh-macos-universal.dmg)
   (macOS 13+, Apple silicon and Intel).
@@ -128,10 +148,28 @@ hopsesh pull studio:"fix flaky tests"          # plan, confirm, move, print the 
 hopsesh pull studio:claude/7f3c2a1e --in codex # continue a Claude Code session in Codex
 hopsesh pull 7f3c2a1e                          # no machine name: bring back the newest copy
 hopsesh push 7f3c2a1e laptop                   # send it to a machine that runs hopsesh
+hopsesh cd 7f3c2a1e ~/git/app-2                # same session, another checkout here
 hopsesh hosts add nas alice@192.168.1.20 --password   # a machine without SSH keys
 hopsesh doctor studio                          # agents, SSH, host trust and the skill
+hopsesh hosts status                           # hopsesh, receiving, hooks and skill on each machine
 hopsesh undo                                   # undo the newest move (--list shows more)
 ```
+
+### Shell completion
+
+The `completion` command generates scripts for Bash, Zsh, Fish and PowerShell. With `hopsesh`
+on your PATH, run the line for your current shell to enable completion in this session:
+
+| Shell | Setup |
+| --- | --- |
+| Bash | `source <(hopsesh completion bash)` (requires Bash completion support) |
+| Zsh | `autoload -Uz compinit && compinit && source <(hopsesh completion zsh)` |
+| Fish | `hopsesh completion fish \| source` |
+| PowerShell | `hopsesh completion powershell \| Out-String \| Invoke-Expression` |
+
+To load it in new sessions, add the corresponding line to your shell startup file
+(`~/.bashrc`, `~/.zshrc`, `~/.config/fish/config.fish`, or `$PROFILE`).
+For installation options and prerequisites, run `hopsesh completion <shell> --help`.
 
 ### The app
 
@@ -164,7 +202,8 @@ PowerShell) and keeps passwords in Windows Credential Manager. It updates itself
 
 ### The hopsesh Terminal
 
-The app has a terminal of its own: a **hopsesh Terminal** window with tabs. **Resume in
+The app has a terminal of its own: the **hopsesh Terminal**, with tabs, docked below or beside
+your sessions or in a window of its own. **Resume in
 hopsesh Terminal** runs a session there, and so do the steps Claude Code needs a terminal for
 (a hand-off to its cloud, bringing a session back), cloud sign-ins and **Open a shell in its
 folder**. hopsesh starts the
@@ -173,10 +212,18 @@ question included. Each tab shows whether its program runs, waits for you or end
 exit code), and keeps **Open in my terminal**, which ends it and runs the same command in your
 own terminal app. A session runs in one tab at most, and the sessions list shows which ones
 run in a tab and wait for you. Ctrl+` moves between the terminal and your sessions. Quitting
-hopsesh ends the programs in its tabs, so it asks first; for work that must outlive the app,
-use your terminal app.
+hopsesh ends the programs in its tabs, so it asks first, names the agents still in the middle
+of a turn and offers to quit once they are idle. The next time it starts, it offers to resume
+the sessions its tabs ran, each in a tab again (after an update, it does so by itself). For
+work that must outlive the app, use your terminal app.
 
-Settings → Terminal chooses where sessions and steps open (**In this window** or **In my
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/terminal-dark.png">
+  <img src="docs/assets/terminal-light.png" alt="The hopsesh Terminal docked below the sessions list: a tab where Claude Code asks whether it trusts hopsesh's hand-off folder, with a note that hopsesh never answers for you, and a second tab running a resumed session" width="900">
+</picture>
+
+Settings → Terminal chooses where the terminal sits (bottom panel, right panel or separate
+window), where sessions and steps open (**In this window** or **In my
 terminal**; a session's Resume menu picks another place, remembered for that agent), your terminal app, the font, its size and how much scrollback each tab keeps
 (in memory only). Programs in a tab can never read your clipboard, links open only after you
 confirm the whole address, and nothing a tab shows is written to disk or a log. Sign-in and
@@ -236,8 +283,15 @@ start it. Details: [docs/design.md §8](docs/design.md#8-continuing-in-another-a
 
 Move a session to your laptop, or into Codex, work on it, and bring it back later:
 
-- **The copy left behind is marked** in its agent's own list: `↪ moved to <machine> · <title>`
-  or `↪ continued in Codex on <machine> · <title>`.
+- **Titles stay as they are.** hopsesh never renames a session to show where it went: the
+  copy left behind and the new copy keep the session's title. hopsesh's own list, TUI and
+  app show the movement instead (`◆ Moved out · moved to Codex on <machine>`, `● Moved
+  copy`, `↩ Returned`).
+- **The original waits for you.** By default the copy left behind refuses new prompts until
+  you move the session back, so the two never drift apart and moving back is a clean
+  return. Choose "Shows a warning" or "Is left alone" in Settings, or remove the block from
+  one original with a warning (`hopsesh unblock`). Codex asks you to approve hopsesh's hook
+  once (`/hooks`); hopsesh tells you when it is waiting.
 - **One row per session.** Listings combine the copies of a session across machines and
   agents. `hopsesh pull <id-or-title>` without a machine name brings back the newest one,
   into the folder it came from.
@@ -251,6 +305,11 @@ Move a session to your laptop, or into Codex, work on it, and bring it back late
   stashes; otherwise it says exactly what's missing.
 - **The history travels with the session.** A small `<session>.hopsesh.json` beside it records
   its copies and hops, so the next move works from any machine.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/round-trip-dark.png">
+  <img src="docs/assets/round-trip-light.png" alt="After continuing Find the codeword in Codex: the original is marked Moved out and blocked until it moves back, with Open moved copy and Remove block, while the list shows the newest copy is in Codex" width="900">
+</picture>
 
 Details: [docs/design.md §10](docs/design.md#10-round-trips-and-lineage) and
 [§12](docs/design.md#12-code-follows-the-conversation).
@@ -267,9 +326,65 @@ hopsesh push 7f3c2a1e laptop     # on the machine that has the session
 
 The receiver plans with its own agents and settings against a read-only copy of that
 session's files; it can't read or run anything else on the sender. Nothing changes until you
-confirm, and `hopsesh undo` on the sender reverses both machines. Both sides must speak the same
-hopsesh protocol version; otherwise hopsesh asks you to update. Details:
+confirm, and `hopsesh undo` on the sender reverses both machines. The two machines agree on
+the newest protocol both speak; one that is too old is offered an update. Details:
 [docs/design.md §11](docs/design.md#11-peers-working-with-hopsesh-on-the-other-machine).
+
+A session started in a folder that holds several repositories (`~/git/course` with
+`course-core` and `course-sdk`, rather than a repository itself) continues in the same folder
+on the other machine. Each repository in it is found there (in that folder first, then your
+repos folder and the usual places) or cloned into it: `pull --clone`, `c` in the TUI,
+or **Clone … for me** in the app. The plan lists each repository and what it leaves behind
+(unpushed commits, uncommitted files), and paths in the conversation point at each one. Other
+folders in it, such as worktrees, are not brought.
+
+With hopsesh running in the login session there (`hopsesh hosts setup laptop`), a session can
+also continue right where it is, in a terminal on that machine that you use here:
+
+```sh
+hopsesh terminals run studio --resume 7f3c2a1e   # continue it on studio, work in it here
+hopsesh terminals run studio --dir ~/git/app     # a new session there
+hopsesh doctor --all-machines                     # hopsesh, hooks and skill on every machine
+```
+
+### What each machine can do
+
+`hopsesh hosts status` checks every machine: whether hopsesh is installed and its version
+against the newest on your machines, whether it runs in your login session and receives
+sessions, whether its command is on PATH, and the hook and skill in each agent folder, named by
+who is signed in there (`Claude Code · you@example.com`). It prints the command that fixes each
+check and exits 3 when a machine needs something. In the app, **Settings › Machines** is the
+one place for all of it: select a machine to see the same checks, with **Up next** listing only
+what is left, each with its fix (one **Set up** covers every agent folder's hooks and skill).
+Beside every machine is hopsesh's mark: green and filled when it
+receives sessions, gray and hollow when hopsesh is installed but doesn't receive, none without
+hopsesh, and ↑ when a newer hopsesh is on another machine.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/machines-dark.png">
+  <img src="docs/assets/machines-light.png" alt="Settings › Machines in the hopsesh app: This Mac and studio are all set and receive sessions; laptop is selected, marked gray and hollow with an up arrow, and its Up next lists updating hopsesh from 0.6.3 to 0.6.4, turning on receiving, and setting up the skill in one of its three agent folders; nas has no hopsesh and is reached over SSH only" width="900">
+</picture>
+
+## Another folder, same session
+
+`hopsesh cd <session> <dir>` continues a session in another folder on its machine (another
+worktree or clone of its repository) and keeps it the same session: same id, every message,
+tool call and reasoning block as the agent wrote them. In the app it's **Change folder…** in a
+session's ⋯ menu. Each agent does it its own way:
+
+- **Claude Code:** what its own `/cd` does. The transcript and its side folder move to the new
+  folder's project folder and get a `relocated` record. When the session is open, hopsesh
+  tells you to type `/cd <dir>` in it and waits until Claude Code has moved it.
+- **Codex:** Codex itself resumes the thread in the new folder (as `codex resume -C` does, with
+  no turn) and records it. Codex's own `/cd` starts a new thread, so an open Codex session is
+  quit first (`--stop-local`) or left alone.
+
+A folder outside the session's repository needs `--other-repo`. `hopsesh undo` reverses it.
+
+On another machine, `hopsesh cd studio:7f3c2a1e ~/git/app-2` has hopsesh there make the change
+(set it up with `hopsesh hosts setup studio`; it must receive sessions), and `hopsesh undo`
+here reverses it there. `hopsesh pull <session> --to <dir>` for a session that is already here,
+in its own agent, changes its folder the same way instead of making a copy.
 
 ## Cloud sessions
 
@@ -301,6 +416,11 @@ cloud session too), **Bring to this Mac…** on a cloud session, and a card per 
 **Machines** (Turn on, Test and **Sign in**, which runs the vendor's own login command in a
 terminal tab that records nothing). In the terminal UI, `c`
 hands off and `enter` brings a cloud session here.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/handoff-dark.png">
+  <img src="docs/assets/handoff-light.png" alt="Handing a Claude Code session to Claude Code cloud: the plan shows what carries over, what changes and what stays, the briefing the cloud agent gets, the branch hopsesh pushes, and the files that stay on this Mac" width="900">
+</picture>
 
 ### What goes up: a briefing and the code
 
@@ -370,7 +490,7 @@ both back.
 ### Undo and branch clean-up
 
 `hopsesh undo` takes back what a hand-off did here: the handoff branch (only while the cloud
-hasn't pushed to it, and not when you chose to keep it) and the mark on the session. The
+hasn't pushed to it, and not when you chose to keep it) and its record of the hand-off. The
 cloud session itself stays in the vendor's list, for you to archive there: no vendor's
 command line can archive one. Undoing a bring-back removes the worktree, the copy and the
 branches it made. Once a hand-off's work is merged into the default branch,
@@ -401,6 +521,15 @@ hopsesh skill install              # your agent asks before each hopsesh command
 hopsesh skill install --add-rules  # read-only hopsesh commands run without asking
 ```
 
+Or add the skill from inside your agent, as a plugin (it still needs the `hopsesh` command
+above; `hopsesh skill install` makes the plugin unnecessary):
+
+```sh
+/plugin marketplace add roeehrl/hopsesh      # Claude Code, then /plugin install hopsesh@hopsesh
+codex plugin marketplace add roeehrl/hopsesh # Codex
+npx skills add roeehrl/hopsesh               # any agent that reads Agent Skills
+```
+
 The skill goes into every installed agent (Claude Code and Codex) as identical files. Then ask
 things like "bring my laptop session here", "continue this in Codex" or "which sessions are
 running on the studio?". The agent plans first and **moves only after you say yes**.
@@ -414,6 +543,20 @@ never starts another agent and never handles passwords: for a machine that logs 
 password, the agent asks you to run `hopsesh hosts setup-key` yourself. `hopsesh skill remove`
 takes it out again. Details: [docs/design.md §13](docs/design.md#13-the-hopsesh-skill-for-every-agent)
 and [§14](docs/design.md#14-the-command-line-tool-from-the-app).
+
+## On your phone
+
+[MyCNC](https://codonic.dev/apps/mycnc/) is hopsesh's companion: approvals, terminals and the
+desktop of your Macs from iPhone, iPad or Mac. It needs MyCNC Host on the Mac (macOS 14 or
+later) and, like hopsesh, connects over your own network (LAN, Tailscale or ZeroTier), with
+no relay and no account. On a Mac with MyCNC Host, a running session's details offer **Follow on your
+phone**, and Settings › Machines says whether MyCNC Host runs there. hopsesh only links to
+MyCNC; it never installs it.
+
+Other programs on the same machine can use hopsesh's [client API](docs/client-api.md). They
+can list every session and machine and watch for changes, then plan, apply and undo moves.
+A `hopsesh://session/<machine id>/<agent>/<session>` link opens a session in the hopsesh
+app.
 
 ## How it works
 
@@ -462,6 +605,12 @@ including the file-format traps hopsesh handles, are in [docs/design.md](docs/de
 - **Codex's own import of Claude Code sessions?** It converts on one machine. hopsesh uses it
   when you ask (`--via import`) and adds machines, the repository, a loss report, a briefing
   and a way home that keeps the original session intact.
+- **Claude Code's session list on every device?** A session you open from another device
+  still runs on the machine it started on, with that machine's files. hopsesh moves it: it
+  continues where you are, in your copy of the repository, and can come back.
+- **The Codex app's hand-off to an SSH host?** It moves a Codex chat and its Git state to a
+  connected host with a saved project. hopsesh does that for Claude Code and Codex alike,
+  between any of your machines, into another agent, and to and from the clouds.
 - **Remote Control?** Remote Control lets you drive a session that keeps running where it
   is. hopsesh moves the session, so it continues on the machine you're at, with that
   machine's files and tools. It can turn Remote Control on for the moved session.
@@ -544,8 +693,8 @@ added to the original, so nothing in the original is lost.
 <details>
 <summary><b>What if the session is still running on the other machine?</b></summary>
 
-By default hopsesh copies it as it is and hands it off: the copy left behind is marked when
-that session ends. With `--fork`, both copies continue independently. hopsesh refuses to
+hopsesh copies it as it is and hands it off: later messages in the copy left behind stay
+there, and the original is blocked until you move back. hopsesh refuses to
 replace a session that's open on this machine, unless `--stop-local` quits it first. For
 Codex that works only between turns, because Codex has no graceful way to stop mid-turn: if
 it's working, hopsesh asks you to let it finish. Listings show running sessions as "live

@@ -8,14 +8,19 @@
 # for the review:
 #   probe.md        the facts per target; read first
 #   manifest.json   the project, what each target watches (and hopsesh's modules)
-#   versions.json   [{id, kind, name, tested, latest}]
-#   help/<id>/      help at the tested and latest versions, diffs, removed flags, relies.tsv
+#   versions.json   [{id, kind, name, tested, baseline, latest}]
+#   help/<id>/      help at the baseline (the highest of the tested version and the code's
+#                   version floors), at each floor and at the latest; diffs, removed flags,
+#                   relies.tsv, floors.tsv (what each floor's gated feature runs, there and latest)
+#   formats/<id>.tsv  each record or identity field hopsesh reads: in the docs, in the
+#                   week's changes, in the upstream code now and last week
 #   sources/        the docs pages; docs-hashes.json; docs/*.diff for pages changed since last week
 #   feeds/<id>/     changelog and release entries since the tested version or the last run
 #   grep/<id>.txt   lines of those entries and docs diffs that match the target's words
 #   issues.json     watched issues: state, last update, comments, changed since last week
 #   issues/<id>-search.json, code/<id>-commits.txt, code/<id>-canaries.tsv
-#   schema/         Codex app-server schema diffs; real-agents-<id>.txt
+#   schema/         Codex app-server schema diffs (baseline → latest, and each floor's methods)
+#   real-agents-<id>.txt  hopsesh's real-agent tests against the latest CLI (go test -v)
 # The engine is the hopsesh checkout this script is in; it can run from any folder. Needs
 # node, go, gh, git, jq and curl.
 #   DRIFT_MANIFEST=file   a manifest another repository wrote (ci/drift/manifest.schema.json);
@@ -93,18 +98,28 @@ install() {
   printf '%s\n' "$d"
 }
 
-# flags FILE...: the long flags in help output, one per line.
-flags() { cat "$@" 2> /dev/null | grep -oE -- '--[A-Za-z0-9][A-Za-z0-9-]*' | sort -u; }
+# flags FILE...: the long flags and the one-letter ones (-v) in help output, one per line.
+flags() {
+  cat "$@" 2> /dev/null | tr -cs 'A-Za-z0-9-' '\n' | grep -E -- '^(--[A-Za-z0-9][A-Za-z0-9-]*|-[A-Za-z])$' | sort -u
+}
 
-# has TOKEN FILE...: a flag anywhere, or a subcommand at the start of a help line.
+# has TOKEN FILE...: a flag anywhere; a subcommand at the start of a help line; or a
+# command of several words ("auth status") as its usage line names it.
 has() {
   t=$1
   shift
   case $t in
     -*) cat "$@" 2> /dev/null | grep -qE -- "(^|[^A-Za-z0-9-])$t([^A-Za-z0-9-]|\$)" ;;
+    *' '*) cat "$@" 2> /dev/null | grep -qE "(^|[[:space:]])$(printf '%s' "$t" | sed 's/  */[[:space:]]+/g')([[:space:]:,]|\$)" ;;
     *) cat "$@" 2> /dev/null | grep -qE "^[[:space:]]+$t([[:space:]:,]|\$)" ;;
   esac
 }
+
+# argvname ARGV...: the file name of a help command's output.
+argvname() { printf '%s_' "$@" | sed -e 's/[^A-Za-z0-9._-]/_/g' -e 's/_$//'; }
+
+# grepc FIXED FILE: the lines of FILE with FIXED in them (0 without a file).
+grepc() { if [ -f "$2" ]; then grep -cF -- "$1" "$2" || true; else echo 0; fi; }
 
 note "# Upstream drift probe, $(date -u +%Y-%m-%d)" ""
 (cd "$ENGINE" && go build -o "$SCRATCH/driftmanifest" ./internal/devtools/driftmanifest) || { note "- driftmanifest does not build"; exit 1; }
@@ -143,13 +158,17 @@ SINCE=${SINCE:-$(ago 7)}
 jq -n --arg d "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg s "$SINCE" '{date: $d, since: $s}' > "$OUT/run.json"
 
 # Empty lists come out of Go as null.
-jq -c '.targets[] | .watch |= ({docs: [], feeds: [], help: [], relies: [], issues: [], searches: []}
+jq -c '.targets[] | .floors //= [] | .watch |= ({docs: [], feeds: [], help: [], relies: [], issues: [], searches: [], formats: []}
   + with_entries(select(.value != null)))' "$OUT/manifest.json" > "$SCRATCH/targets.jsonl"
 while read -r T <&3; do
   get() { printf '%s' "$T" | jq -r "$1"; }
   ID=$(get .id)
   NAME=$(get .name)
   TESTED=$(get .tested)
+  # The help and schema are compared from the baseline: never below a version floor the
+  # code gates on (the feeds still start at the tested version).
+  FROM=$(get '.baseline // empty')
+  FROM=${FROM:-$TESTED}
   GREP=$(get .watch.grep)
   say "" "## $NAME ($ID, $(get .kind), $(get .priority) priority)" ""
 
@@ -161,14 +180,20 @@ while read -r T <&3; do
       npm) LATEST=$(npm view "$ref" version 2> /dev/null) ;;
       github-release) LATEST=$(gh api "repos/$ref/releases/latest" --jq .tag_name 2> /dev/null) ;;
       json) LATEST=$(f=$(fetched "$ref") && jq -r "$(get .latest.field)" "$f" 2> /dev/null) ;;
+      feed) LATEST=$(f=$(fetched "$ref") && "$SCRATCH/driftmanifest" feed-latest "$f" 2> /dev/null) ;;
     esac
   fi
-  jq --arg id "$ID" --arg k "$(get .kind)" --arg n "$NAME" --arg t "$TESTED" --arg l "$LATEST" \
-    '. + [{id: $id, kind: $k, name: $n, tested: $t, latest: $l}]' "$OUT/versions.json" > "$SCRATCH/v.json" \
+  jq --arg id "$ID" --arg k "$(get .kind)" --arg n "$NAME" --arg t "$TESTED" --arg b "$FROM" --arg l "$LATEST" \
+    '. + [{id: $id, kind: $k, name: $n, tested: $t, baseline: $b, latest: $l}]' "$OUT/versions.json" > "$SCRATCH/v.json" \
     && mv "$SCRATCH/v.json" "$OUT/versions.json"
-  say "Tested: ${TESTED:-none}. Latest: ${LATEST:-unknown}."
+  if [ "$FROM" != "$TESTED" ]; then
+    say "Tested: ${TESTED:-none}. Baseline: $FROM (the code's highest version floor; help and schema are compared from it). Latest: ${LATEST:-unknown}."
+  else
+    say "Tested: ${TESTED:-none}. Latest: ${LATEST:-unknown}."
+  fi
+  [ "$(get '.floors | length')" -gt 0 ] && say "Floors: $(get '[.floors[] | "\(.version) (\(.gates))"] | join("; ")')."
 
-  # The CLI that prints the help, at the tested and the latest version.
+  # The CLI that prints the help, at the baseline and the latest version.
   PKG=$(get '.package // empty')
   OLD=
   NEW=
@@ -177,20 +202,24 @@ while read -r T <&3; do
     pv=$LATEST
     [ "$(get .latest.from)" = npm ] || pv=$(npm view "$PKG" version 2> /dev/null)
     NEW=$(install "$PKG" "$pv") || say "- could not install $PKG@$pv"
-    if [ -n "$TESTED" ]; then
-      if OLD=$(install "$PKG" "$TESTED"); then HAVE_OLD=1; else say "- could not install $PKG@$TESTED"; fi
+    if [ -n "$FROM" ]; then
+      if OLD=$(install "$PKG" "$FROM"); then HAVE_OLD=1; else say "- could not install $PKG@$FROM"; fi
     fi
   fi
+  VERSION_OUT=
   if [ -n "$(get '.versionArgv // empty')" ]; then
     eval "set -- $(get '.versionArgv | @sh')"
     if [ -n "$NEW" ] || command -v "$1" > /dev/null 2>&1; then
-      say "" "Version output of the latest CLI (the project parses it):" "" '```'
-      cli "$NEW" "$@" >> "$SECTIONS"
-      say '```'
+      VERSION_OUT=$(cli "$NEW" "$@")
+      say "" "Version output of the latest CLI (the project parses it):" "" '```' "$VERSION_OUT" '```'
+      case $VERSION_OUT in
+        *"$LATEST"*) ;;
+        *) [ -n "$LATEST" ] && say "- **the installed CLI does not report $LATEST**: the help and the real-agent tests below are of another version" ;;
+      esac
     fi
   fi
 
-  # Help, which needs no login. Diffed tested → latest, or with no tested version against
+  # Help, which needs no login. Diffed baseline → latest, or with no tested version against
   # last week's. A relied-on flag or subcommand that was there and is gone is a break.
   if [ "$(get '.watch.help | length')" -gt 0 ]; then
     H=$OUT/help/$ID
@@ -202,14 +231,14 @@ while read -r T <&3; do
         say "- \`$*\`: $1 is not installed here"
         continue
       fi
-      n=$(printf '%s_' "$@" | sed -e 's/[^A-Za-z0-9._-]/_/g' -e 's/_$//')
+      n=$(argvname "$@")
       cli "$NEW" "$@" > "$H/$n.latest.txt"
       st=$?
       # A help that keeps running after printing reaches the time limit.
       [ $st = 0 ] || [ $st = 124 ] || [ $st = 142 ] || say "- \`$*\` exited $st"
       if [ -n "$HAVE_OLD" ]; then
-        cli "$OLD" "$@" > "$H/$n.tested.txt"
-        diff -u --label "$n, tested $TESTED" --label "$n, latest $LATEST" "$H/$n.tested.txt" "$H/$n.latest.txt" > "$H/$n.diff"
+        cli "$OLD" "$@" > "$H/$n.baseline.txt"
+        diff -u --label "$n, baseline $FROM" --label "$n, latest $LATEST" "$H/$n.baseline.txt" "$H/$n.latest.txt" > "$H/$n.diff"
       elif [ -f "$BASE/help/$ID/$n.latest.txt" ]; then
         diff -u --label "$n, last week" --label "$n, this week" "$BASE/help/$ID/$n.latest.txt" "$H/$n.latest.txt" > "$H/$n.diff"
       fi
@@ -220,8 +249,8 @@ while read -r T <&3; do
       rm -rf "$H"
     else
       if [ -n "$HAVE_OLD" ]; then
-        against="tested $TESTED"
-        set -- "$H"/*.tested.txt
+        against="baseline $FROM"
+        set -- "$H"/*.baseline.txt
       else
         against="last week"
         set -- "$BASE/help/$ID"/*.latest.txt
@@ -235,14 +264,16 @@ while read -r T <&3; do
       fi
       printf 'token\tlatest\t%s\n' "$against" > "$H/relies.tsv"
       gone=
-      for r in $(get '.watch.relies[]'); do
+      # One token per line: a command of several words ("auth status") stays one token.
+      get '.watch.relies[]' > "$SCRATCH/relies.txt"
+      while IFS= read -r r <&4; do
         a=no
         b=-
         has "$r" "$H"/*.latest.txt && a=yes
         if [ $# -gt 0 ]; then b=no && has "$r" "$@" && b=yes; fi
         printf '%s\t%s\t%s\n' "$r" "$a" "$b" >> "$H/relies.tsv"
-        [ "$a" = no ] && [ "$b" = yes ] && gone="$gone $r"
-      done
+        [ "$a" = no ] && [ "$b" = yes ] && gone="$gone \`$r\`"
+      done 4< "$SCRATCH/relies.txt"
       say "" "Help ($(count "$H" '*.latest.txt') commands, against $against): $(count "$H" '*.diff') differ (help/$ID/*.diff)."
       [ $# -gt 0 ] && say "Flags removed: $(lines "$H/removed-flags.txt"); added: $(lines "$H/added-flags.txt")."
       [ -n "$gone" ] && say "**Relied on and gone from the latest help:$gone** (help/$ID/relies.tsv)."
@@ -251,16 +282,17 @@ while read -r T <&3; do
     fi
   fi
 
-  # A protocol schema the CLI generates (the Codex app-server), tested against latest.
+  # A protocol schema the CLI generates (the Codex app-server), baseline against latest.
+  S=$OUT/schema/$ID
+  rm -rf "$SCRATCH/schema-latest"
   if [ "$(get '.watch.schema // empty')" != "" ] && [ -n "$HAVE_OLD" ] && [ -n "$NEW" ]; then
     eval "set -- $(get '.watch.schema.argv | @sh')"
     keep=$(get .watch.schema.keep)
-    say "" "Schema from \`$*\`, $TESTED → $LATEST:"
-    S=$OUT/schema/$ID
+    say "" "Schema from \`$*\`, $FROM → $LATEST:"
     mkdir -p "$S"
-    if cli "$OLD" "$@" "$SCRATCH/schema-tested" > "$S/tested-generation.txt" &&
+    if cli "$OLD" "$@" "$SCRATCH/schema-baseline" > "$S/baseline-generation.txt" &&
        cli "$NEW" "$@" "$SCRATCH/schema-latest" > "$S/latest-generation.txt"; then
-      if "$SCRATCH/driftmanifest" schema-diff "$SCRATCH/schema-tested" "$SCRATCH/schema-latest" "$S" "$keep" > "$S/comparison.txt" 2>&1; then
+      if "$SCRATCH/driftmanifest" schema-diff "$SCRATCH/schema-baseline" "$SCRATCH/schema-latest" "$S" "$keep" > "$S/comparison.txt" 2>&1; then
         say "$(lines "$S/changed-files.txt") files differ (schema/$ID/changed-files.txt); full recursive diffs of the ones the manifest keeps: $(count "$S" '*.diff') (schema/$ID/**/*.diff)."
       else
         say "- schema comparison failed; coverage is incomplete (schema/$ID/comparison.txt)"
@@ -268,16 +300,86 @@ while read -r T <&3; do
     else
       say "- schema generation failed; coverage is incomplete (schema/$ID/*-generation.txt)"
     fi
-    rm -rf "$SCRATCH/schema-tested" "$SCRATCH/schema-latest"
+    rm -rf "$SCRATCH/schema-baseline"
   fi
 
+  # Floors: the versions the code gates features on. The help (and schema) at each floor:
+  # what the gated feature runs must be there at its floor and at the latest.
+  if [ "$(get '.floors | length')" -gt 0 ] && [ -n "$PKG" ] && installing; then
+    H=$OUT/help/$ID
+    mkdir -p "$H"
+    printf 'floor\tkind\ttoken\tat floor\tlatest\n' > "$H/floors.tsv"
+    get '.watch.help[] | @sh' > "$SCRATCH/help.txt"
+    get '.floors[] | @json' > "$SCRATCH/floors.txt"
+    gone=
+    short=
+    while read -r fl <&4; do
+      v=$(printf '%s' "$fl" | jq -r .version)
+      if ! FV=$(install "$PKG" "$v"); then
+        say "- could not install $PKG@$v (a floor); coverage is incomplete"
+        continue
+      fi
+      while read -r argv <&5; do
+        eval "set -- $argv"
+        cli "$FV" "$@" > "$H/$(argvname "$@").floor-$v.txt"
+      done 5< "$SCRATCH/help.txt"
+      printf '%s' "$fl" | jq -r '.relies // [] | .[]' > "$SCRATCH/floor-relies.txt"
+      while IFS= read -r r <&5; do
+        a=no
+        b=-
+        has "$r" "$H"/*.floor-"$v".txt && a=yes
+        if [ "$(count "$H" '*.latest.txt')" != 0 ]; then b=no && has "$r" "$H"/*.latest.txt && b=yes; fi
+        printf '%s\thelp\t%s\t%s\t%s\n' "$v" "$r" "$a" "$b" >> "$H/floors.tsv"
+        [ "$b" = no ] && gone="$gone \`$r\` ($v)"
+        [ "$a" = no ] && short="$short \`$r\` ($v)"
+      done 5< "$SCRATCH/floor-relies.txt"
+      printf '%s' "$fl" | jq -r '.methods // [] | .[]' > "$SCRATCH/floor-methods.txt"
+      if [ -s "$SCRATCH/floor-methods.txt" ] && [ "$(get '.watch.schema // empty')" != "" ]; then
+        eval "set -- $(get '.watch.schema.argv | @sh')"
+        mkdir -p "$S"
+        rm -rf "$SCRATCH/schema-floor"
+        fa=no
+        fb=no
+        if cli "$FV" "$@" "$SCRATCH/schema-floor" > "$S/floor-$v-generation.txt"; then fa=yes; else
+          say "- schema generation at the floor $v failed; coverage is incomplete (schema/$ID/floor-$v-generation.txt)"
+        fi
+        if [ ! -d "$SCRATCH/schema-latest" ] && [ -n "$NEW" ]; then
+          cli "$NEW" "$@" "$SCRATCH/schema-latest" > "$S/latest-generation.txt" || say "- schema generation at the latest failed"
+        fi
+        [ -d "$SCRATCH/schema-latest" ] && fb=yes
+        while IFS= read -r m <&5; do
+          # - when there is no schema to look in: unknown, not absent.
+          a=-
+          b=-
+          [ $fa = yes ] && { a=no; grep -rqF -- "\"$m\"" "$SCRATCH/schema-floor" && a=yes; }
+          [ $fb = yes ] && { b=no; grep -rqF -- "\"$m\"" "$SCRATCH/schema-latest" && b=yes; }
+          printf '%s\tschema\t%s\t%s\t%s\n' "$v" "$m" "$a" "$b" >> "$H/floors.tsv"
+          [ "$b" = no ] && gone="$gone \`$m\` ($v)"
+          [ "$a" = no ] && short="$short \`$m\` ($v)"
+        done 5< "$SCRATCH/floor-methods.txt"
+        rm -rf "$SCRATCH/schema-floor"
+      fi
+    done 4< "$SCRATCH/floors.txt"
+    say "" "Floors: help (and schema) at each floor, what the gated feature runs there and at the latest (help/$ID/floors.tsv, help/$ID/*.floor-<version>.txt)."
+    [ -n "$gone" ] && say "**Gated on a floor and gone from the latest:$gone**."
+    [ -n "$short" ] && say "Not there at its floor (the floor is too low, or it is hidden):$short."
+  fi
+  rm -rf "$SCRATCH/schema-latest"
+
   # hopsesh's real-agent tests against the latest CLI (no model calls). Only hopsesh's own
-  # manifest has them.
+  # manifest has them. -v lists every test: a run where everything skipped (the CLI was
+  # not found) proves nothing, and says so.
   tests=$(get '.watch.tests // empty')
   if [ -n "$tests" ] && [ -n "$NEW" ]; then
-    (cd "$ENGINE" && env -u GH_TOKEN PATH="$NEW/bin:$PATH" HOPSESH_REAL_AGENTS=1 go test ./internal/e2e/ -run "$tests" -count=1) > "$OUT/real-agents-$ID.txt" 2>&1
-    say "" "Real-agent tests ($tests) against $LATEST:" "" '```'
-    tail -n 25 "$OUT/real-agents-$ID.txt" >> "$SECTIONS"
+    (cd "$ENGINE" && env -u GH_TOKEN PATH="$NEW/bin:$PATH" HOPSESH_REAL_AGENTS=1 go test ./internal/e2e/ -run "$tests" -count=1 -v) > "$OUT/real-agents-$ID.txt" 2>&1
+    st=$?
+    pass=$(grep -cE '^ *--- PASS' "$OUT/real-agents-$ID.txt" || true)
+    fail=$(grep -cE '^ *--- FAIL' "$OUT/real-agents-$ID.txt" || true)
+    skip=$(grep -cE '^ *--- SKIP' "$OUT/real-agents-$ID.txt" || true)
+    say "" "Real-agent tests ($tests) against $LATEST: $pass passed, $fail failed, $skip skipped (go test exit $st; real-agents-$ID.txt)."
+    [ "$pass" = 0 ] && say "- **no real-agent test passed: coverage is incomplete**"
+    say "" '```'
+    grep -E '^ *--- (FAIL|SKIP)|^(FAIL|ok|panic)' "$OUT/real-agents-$ID.txt" | tail -n 25 >> "$SECTIONS"
     say '```'
   fi
 
@@ -434,19 +536,68 @@ while read -r T <&3; do
       awk -F '\t' 'NR == 1 { print "| " $1 " | " $2 " | " $3 " |"; print "|---|---|---|"; next }
         { flag = ($3 != "-" && ($2 == 0) != ($3 == 0)) ? " **changed**" : ""; print "| `" $1 "` | " $2 flag " | " $3 " |" }' \
         "$OUT/code/$ID-canaries.tsv" >> "$SECTIONS"
+      # The format fields, counted the same way, for the formats table below.
+      get '.watch.formats[].fields[]' | sort -u > "$SCRATCH/fields.txt"
+      while IFS= read -r fld <&4; do
+        n=$(cd "$C" && xargs grep -rlF -- "$fld" < "$SCRATCH/paths.txt" 2> /dev/null | wc -l | tr -d ' ')
+        printf '%s\t%s\n' "$fld" "$n" >> "$SCRATCH/fields-code-$ID.tsv"
+      done 4< "$SCRATCH/fields.txt"
     else
       say "- could not check out $repo"
     fi
     rm -rf "$C"
   fi
 
-  printf '| %s | %s | %s | %s | %s |\n' "$NAME" "${TESTED:-}" "${LATEST:-unknown}" "$changed/$ndocs" \
+  # Formats: each record or identity field hopsesh reads, in the target's docs, in this
+  # week's changes (new feed entries, changed docs, help and schema diffs) and in the
+  # upstream code (now and last week). A field that leaves the code, or that a change
+  # names, is what the review reads first.
+  if [ "$(get '.watch.formats | length')" -gt 0 ]; then
+    mkdir -p "$OUT/formats"
+    : > "$SCRATCH/changes.txt"
+    cat "$F"/* >> "$SCRATCH/changes.txt" 2> /dev/null
+    while read -r url <&4; do
+      d=$OUT/docs/$(slug "$url").diff
+      [ -s "$d" ] && grep -E '^[-+][^-+]' "$d" >> "$SCRATCH/changes.txt"
+    done 4< "$SCRATCH/docs.txt"
+    find "$OUT/help/$ID" "$OUT/schema/$ID" -name '*.diff' -type f 2> /dev/null | while read -r d; do
+      grep -E '^[-+][^-+]' "$d"
+    done >> "$SCRATCH/changes.txt"
+    FT=$OUT/formats/$ID.tsv
+    printf 'format\tfield\tdocs\tchanges\tcode\tcode last week\n' > "$FT"
+    # shellcheck disable=SC2016 # $i is jq's
+    get '.watch.formats[] | .id as $i | .fields[] | [$i, .] | @tsv' > "$SCRATCH/format-fields.tsv"
+    named=
+    left=
+    nowhere=
+    tab=$(printf '\t')
+    while IFS=$tab read -r fid fld <&4; do
+      docs=0
+      while read -r url <&5; do
+        grep -qF -- "$fld" "$OUT/sources/$(slug "$url")" 2> /dev/null && docs=$((docs + 1))
+      done 5< "$SCRATCH/docs.txt"
+      ch=$(grepc "$fld" "$SCRATCH/changes.txt")
+      code=$(awk -F '\t' -v f="$fld" '$1 == f { print $2 }' "$SCRATCH/fields-code-$ID.tsv" 2> /dev/null)
+      was=$(awk -F '\t' -v a="$fid" -v f="$fld" '$1 == a && $2 == f { print $5 }' "$BASE/formats/$ID.tsv" 2> /dev/null)
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$fid" "$fld" "$docs" "$ch" "${code:--}" "${was:--}" >> "$FT"
+      [ "$ch" -gt 0 ] && named="$named \`$fld\`"
+      if [ "${code:--}" = 0 ]; then
+        case ${was:--} in -|0) nowhere="$nowhere \`$fld\`" ;; *) left="$left \`$fld\` ($fid)" ;; esac
+      fi
+    done 4< "$SCRATCH/format-fields.tsv"
+    say "" "Formats: $(lines "$SCRATCH/format-fields.tsv") fields of $(get '.watch.formats | length') formats hopsesh reads (formats/$ID.tsv)."
+    [ -n "$named" ] && say "Named in this week's changes:$named."
+    [ -n "$left" ] && say "**Gone from the upstream code since last week:$left**."
+    [ -n "$nowhere" ] && say "In none of the watched code paths (a path to add, or not in code):$nowhere."
+  fi
+
+  printf '| %s | %s | %s | %s | %s | %s |\n' "$NAME" "${TESTED:-}" "${FROM:-}" "${LATEST:-unknown}" "$changed/$ndocs" \
     "$(lines "$OUT/grep/$ID.txt")" >> "$ROWS"
 done 3< "$SCRATCH/targets.jsonl"
 
 jq -s '.' "$SCRATCH/docs.jsonl" > "$OUT/docs-hashes.json"
 jq -s '.' "$SCRATCH/issues.jsonl" > "$OUT/issues.json"
-note "" "| target | tested | latest | docs changed | matching lines |" "|---|---|---|---|---|"
+note "" "| target | tested | baseline | latest | docs changed | matching lines |" "|---|---|---|---|---|---|"
 cat "$ROWS" >> "$OUT/probe.md"
 cat "$SECTIONS" >> "$OUT/probe.md"
 note "" "Docs and feeds fetched: $(count "$OUT/sources") pages (sources/), $(count "$OUT/feeds/full") changelogs."

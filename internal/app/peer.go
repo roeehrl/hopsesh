@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/audit"
@@ -20,21 +21,17 @@ import (
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
-// peerScript starts hopsesh peer on a Unix-like machine, wherever hopsesh is installed
-// (a non-interactive SSH session often lacks ~/.local/bin on its PATH).
-const peerScript = `for c in hopsesh "$HOME/.local/bin/hopsesh" /opt/homebrew/bin/hopsesh /usr/local/bin/hopsesh /Applications/hopsesh.app/Contents/Resources/bin/hopsesh; do
-  if command -v "$c" >/dev/null 2>&1; then exec "$c" peer --stdio; fi
-done
-echo "hopsesh is not installed" >&2
-exit 127`
+// peerScript starts hopsesh peer on a Unix-like machine, wherever hopsesh is installed.
+var peerScript = remoteHopsesh("peer --stdio")
 
-// peerFindWindows prints where hopsesh.exe is on a Windows machine (its PATH, else where
-// install.ps1 puts it) and the shell its OpenSSH server runs commands with. A path with
+// peerFindWindows prints where hopsesh.exe is on a Windows machine (the copy hopsesh set
+// up itself, its PATH, else where install.ps1 puts it) and the shell its OpenSSH server runs commands with. A path with
 // letters outside ASCII (a user name in Japanese or Chinese) is given in its 8.3 short form
 // when it has one, so no shell or code page can garble it.
 const peerFindWindows = `[Console]::OutputEncoding = [Text.Encoding]::UTF8
+$own = Join-Path $env:USERPROFILE '.hopsesh\bin\hopsesh.exe'
 $c = Get-Command hopsesh.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-$p = if ($c) { $c.Source } else { Join-Path $env:LOCALAPPDATA 'Programs\hopsesh\hopsesh.exe' }
+$p = if (Test-Path -LiteralPath $own) { $own } elseif ($c) { $c.Source } else { Join-Path $env:LOCALAPPDATA 'Programs\hopsesh\hopsesh.exe' }
 if (-not (Test-Path -LiteralPath $p)) { [Console]::Error.WriteLine('hopsesh is not installed'); exit 127 }
 if ($p -match '[^\x00-\x7F]') { $s = (New-Object -ComObject Scripting.FileSystemObject).GetFile($p).ShortPath; if ($s) { $p = $s } }
 $sh = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\OpenSSH' -Name DefaultShell -ErrorAction SilentlyContinue).DefaultShell
@@ -44,15 +41,18 @@ Write-Output $sh`
 // peerCommandWindows is the command line that starts hopsesh peer on a Windows machine,
 // in the form its ssh shell takes: cmd.exe (the default), PowerShell, or a bash (Git Bash,
 // MSYS2). The program runs directly, so its input and output are the connection's.
-func peerCommandWindows(exe, shell string) string {
+func peerCommandWindows(exe, shell string) string { return windowsLine(exe, shell, "peer --stdio") }
+
+// windowsLine runs hopsesh with args (plain words) in a Windows machine's ssh shell.
+func windowsLine(exe, shell, args string) string {
 	s := strings.ToLower(shell)
 	switch {
 	case strings.Contains(s, "powershell") || strings.Contains(s, "pwsh"):
-		return "& " + transport.PSQuote(exe) + " peer --stdio"
+		return "& " + transport.PSQuote(exe) + " " + args
 	case strings.HasSuffix(s, "bash.exe") || strings.HasSuffix(s, `\sh.exe`):
-		return transport.ShQuote(strings.ReplaceAll(exe, `\`, "/")) + " peer --stdio" // C:/… works there
+		return transport.ShQuote(strings.ReplaceAll(exe, `\`, "/")) + " " + args // C:/… works there
 	}
-	return `"` + exe + `" peer --stdio` // Windows OpenSSH quotes the whole line for cmd /c itself
+	return `"` + exe + `" ` + args // Windows OpenSSH quotes the whole line for cmd /c itself
 }
 
 // maxPackage bounds the files of one pushed session.
@@ -70,14 +70,29 @@ func (a *App) Serve(ctx context.Context, r io.Reader, w io.Writer) error {
 // peerSession is one conversation with another machine's hopsesh.
 type peerSession struct {
 	a     *App
+	proto int // the protocol agreed
 	snap  *host.Machine
 	from  string
 	plan  *move.Plan
 	input move.Input
+	// cd is the folder change planned on this connection (cd/plan), in its inventory.
+	cd    *DirChange
+	cdInv *Inventory
 }
 
 func (s *peerSession) handle(ctx context.Context, method string, params json.RawMessage) (any, error) {
-	if method != peer.MethodHello && !s.a.Cfg.Peer.Receive {
+	switch {
+	case peer.LoginMethod(method):
+		// What hopsesh in the login session answers: only hopsesh serve, which runs
+		// because the user set it up there.
+		if s.proto < 6 {
+			return nil, fmt.Errorf("%s needs peer protocol 6; update hopsesh on the other machine", method)
+		}
+		if s.a.Login == nil {
+			return nil, peer.NoLogin(LocalName())
+		}
+		return s.login(ctx, method, params)
+	case method != peer.MethodHello && !s.a.Cfg.Peer.Receive:
 		return nil, peer.Refused(LocalName())
 	}
 	switch method {
@@ -86,7 +101,7 @@ func (s *peerSession) handle(ctx context.Context, method string, params json.Raw
 		if err := json.Unmarshal(params, &hi); err != nil {
 			return nil, err
 		}
-		s.from = hi.From
+		s.from, s.proto = hi.From, peer.Agree(hi)
 		return s.hello(ctx), nil
 	case peer.MethodPlan:
 		var req peer.PlanRequest
@@ -96,13 +111,40 @@ func (s *peerSession) handle(ctx context.Context, method string, params json.Raw
 		return s.planReceive(ctx, req)
 	case peer.MethodApply:
 		return s.applyReceive(ctx)
+	case peer.MethodCdPlan:
+		var req peer.CdRequest
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, err
+		}
+		return s.cdPlan(ctx, req)
+	case peer.MethodCdApply:
+		if s.cd == nil {
+			return nil, errors.New("plan the folder change first")
+		}
+		id, err := s.a.ChangeDir(ctx, s.cd)
+		return peer.CdApplyReply{Journal: id}, err
+	case peer.MethodCdWait:
+		var req peer.CdWait
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, err
+		}
+		if s.cd == nil {
+			return nil, errors.New("plan the folder change first")
+		}
+		wctx, cancel := context.WithTimeout(ctx, time.Duration(min(max(req.Seconds, 1), 3600))*time.Second)
+		defer cancel()
+		return struct{}{}, s.a.WaitChangedDir(wctx, s.cd, time.Second)
 	case peer.MethodUndo:
 		var req peer.UndoRequest
 		if err := json.Unmarshal(params, &req); err != nil {
 			return nil, err
 		}
-		_, err := s.a.Undo(ctx, req.Journal, req.Force)
-		return struct{}{}, err
+		j, err := s.a.Undo(ctx, req.Journal, req.Force)
+		var reply peer.UndoReply
+		if j != nil && err == nil {
+			reply.Left = j.Left
+		}
+		return reply, err
 	}
 	return nil, fmt.Errorf("unknown request %q", method)
 }
@@ -110,7 +152,9 @@ func (s *peerSession) handle(ctx context.Context, method string, params json.Raw
 func (s *peerSession) hello(ctx context.Context) peer.HelloReply {
 	m := s.a.localMachine(ctx)
 	defer m.Close()
-	r := peer.HelloReply{Protocol: peer.Protocol, Version: version.Version, Machine: m.Name, OS: m.Facts.OS, Receive: s.a.Cfg.Peer.Receive, Agents: []peer.AgentInfo{}}
+	r := peer.HelloReply{Protocol: peer.Protocol, Version: version.Version, Machine: m.Name, OS: m.Facts.OS, Arch: m.Facts.Arch, Receive: s.a.Cfg.Peer.Receive, Login: s.a.Login != nil, Agents: []peer.AgentInfo{},
+		Features: []string{peer.FeatureRemoteDefault}}
+	r.Endpoint, _ = m.ReadIdentity(ctx)
 	for _, mod := range s.a.Modules() {
 		spec := mod.Spec()
 		in := agent.Install{}
@@ -129,6 +173,61 @@ func (s *peerSession) hello(ctx context.Context) peer.HelloReply {
 	return r
 }
 
+// login answers the methods of hopsesh in the login session.
+func (s *peerSession) login(ctx context.Context, method string, params json.RawMessage) (any, error) {
+	switch method {
+	case peer.MethodTerminalOpen:
+		var req peer.TerminalRequest
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, err
+		}
+		return s.a.OpenTerminal(ctx, req)
+	case peer.MethodTerminalList:
+		return s.a.Login.List(), nil
+	case peer.MethodAccounts:
+		return s.a.LocalAccounts(ctx)
+	case peer.MethodTools:
+		return s.a.LocalTools(ctx), nil
+	case peer.MethodOwners:
+		return s.a.LocalLedger(), nil
+	case peer.MethodProtection:
+		return s.a.LocalProtection(ctx), nil
+	case peer.MethodProtectionSetUp:
+		var req peer.ProtectionSetUp
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, err
+		}
+		p, err := s.a.SetUpLocalProtection(ctx, req.Rules)
+		if err != nil && p.Error == "" {
+			p.Error = err.Error()
+		}
+		return p, nil
+	case peer.MethodRemoteDefault:
+		var req peer.RemoteDefault
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, err
+		}
+		// Errors travel in the answer: one folder's failure leaves the others' state.
+		r, _ := s.a.localRemoteDefaults(ctx, req.Set)
+		return r, nil
+	case peer.MethodAccountAdd:
+		var req peer.AccountAdd
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, err
+		}
+		p, err := s.a.addLocalAccount(ctx, req.Agent, req.Name, nil, AddAccountOptions{Command: req.Command})
+		p.Tags = nil
+		return p, err
+	case peer.MethodTerminalClose:
+		var req peer.TerminalID
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, err
+		}
+		return struct{}{}, s.a.CloseTerminal(req.ID)
+	}
+	return nil, fmt.Errorf("unknown request %q", method)
+}
+
 // receiveOptions are the sender's choices on top of this machine's own defaults (where
 // repositories go is this machine's business).
 func (a *App) receiveOptions(o move.Options) move.Options {
@@ -138,9 +237,13 @@ func (a *App) receiveOptions(o move.Options) move.Options {
 	d.TargetDir, d.Clone, d.Worktree = o.TargetDir, o.Clone, o.Worktree
 	d.OperationID, d.TargetSession = o.OperationID, o.TargetSession
 	d.Fork, d.RemoteControl, d.Notify, d.Redact = o.Fork, o.RemoteControl, o.Notify, o.Redact
-	d.Mark, d.SyncCode, d.StopLocal, d.Conflict = o.Mark, o.SyncCode, o.StopLocal, o.Conflict
+	d.SyncCode, d.StopLocal, d.Conflict = o.SyncCode, o.StopLocal, o.Conflict
 	d.Fidelity, d.Native, d.Note, d.Go, d.CarryRules, d.Via = o.Fidelity, o.Native, o.Note, o.Go, o.CarryRules, o.Via
 	d.RuleFiles = append([]string(nil), o.RuleFiles...)
+	// How much history the destination receives is the sender's choice; memory, record,
+	// archive and file budgets are this machine's resources.
+	d.Limits.ContextBudget, d.Limits.Older = o.Limits.ContextBudget, o.Limits.Older
+	d.Limits = d.Limits.Normalize()
 	return d // never Push: the sender pushed before sending, if asked to
 }
 
@@ -305,7 +408,12 @@ func (a *App) dialPeer(ctx context.Context, to config.Host) (*peer.Client, peer.
 		return nil, hr, nil, err
 	}
 	c := peer.NewClient(pc.Out, pc.In)
-	err = c.Call(ctx, peer.MethodHello, peer.Hello{Protocol: peer.Protocol, Version: version.Version, From: LocalName()}, &hr)
+	err = c.Call(ctx, peer.MethodHello, peer.Hello{Protocol: peer.Protocol, Min: peer.MinProtocol, Version: version.Version, From: LocalName()}, &hr)
+	var pe *peer.Error
+	if errors.As(err, &pe) && pe.Code == peer.CodeProtocol && pe.Protocol >= peer.MinProtocol && pe.Protocol < peer.Protocol {
+		// An older hopsesh that speaks only its own protocol, which this one still does.
+		err = c.Call(ctx, peer.MethodHello, peer.Hello{Protocol: pe.Protocol, Version: version.Version, From: LocalName()}, &hr)
+	}
 	if err == nil {
 		return c, hr, pc.Close, nil
 	}
@@ -424,8 +532,7 @@ func (a *App) packageOf(ctx context.Context, here *Machine, e Entry) (peer.Packa
 }
 
 // Commit carries out the push: the other machine installs or converts the session, then
-// this machine records, in its own journal, what changes for its copy (the mark and the
-// lineage), and keeps a mark owed while the copy here is still open.
+// this machine records, in its own journal, what changes for its copy (its lineage).
 func (p *Push) Commit(ctx context.Context) (*PushResult, error) {
 	if err := p.a.checkAccountRegistration(p.source.Install); err != nil {
 		return nil, err
@@ -457,11 +564,6 @@ func (p *Push) Commit(ctx context.Context) (*PushResult, error) {
 	}
 	if err := j.Seal(func(string) (host.FS, error) { return host.LocalFS(), nil }); err != nil {
 		reply.Result.Warnings = append(reply.Result.Warnings, "could not record what this changed here, for a safe undo: "+err.Error())
-	}
-	if o := reply.Result.Owed; o != nil {
-		if err := lineage.AddPending(a.StateDir, *o); err != nil {
-			reply.Result.Mark, reply.Result.MarkError = "failed", err.Error()
-		}
 	}
 	a.Audit.Write(audit.Entry{Action: "push", Host: p.to.Name, Session: e.Session.Key.String(), Detail: map[string]any{"journal": j.ID, "remote": reply.Journal, "writes": len(reply.Writes)}})
 	return out, nil
@@ -539,19 +641,20 @@ func (p *Push) Close() {
 
 // undoRemote undoes a journal another machine's hopsesh keeps. One already undone there
 // counts as done.
-func (a *App) undoRemote(ctx context.Context, r journal.Remote, force bool) error {
+func (a *App) undoRemote(ctx context.Context, r journal.Remote, force bool) ([]string, error) {
 	h := a.Cfg.FindHost(r.Machine)
 	if h == nil {
-		return fmt.Errorf("%s is not a configured machine", r.Machine)
+		return nil, fmt.Errorf("%s is not a configured machine", r.Machine)
 	}
 	c, _, closeFn, err := a.dialPeer(ctx, *h)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer closeFn()
-	err = c.Call(ctx, peer.MethodUndo, peer.UndoRequest{Journal: r.ID, Force: force}, nil)
+	var reply peer.UndoReply
+	err = c.Call(ctx, peer.MethodUndo, peer.UndoRequest{Journal: r.ID, Force: force}, &reply)
 	if err != nil && strings.HasPrefix(err.Error(), errNothingToUndo) {
-		return nil
+		return nil, nil
 	}
-	return err
+	return reply.Left, err
 }

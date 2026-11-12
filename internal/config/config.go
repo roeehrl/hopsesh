@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/roeehrl/hopsesh/sdk/ir"
 )
 
 // Schema is the configuration format. Files in another format are refused, never read:
@@ -56,6 +57,33 @@ type Agent struct {
 	// session's Resume menu: "here" (the hopsesh Terminal window), "terminal" (the
 	// terminal app) or "app" (the agent's desktop app). "" follows [terminal] resume.
 	Place string `toml:"place,omitempty"`
+	// VoiceThreads and WorkThreads show the agent's voice conversations and Work threads
+	// (Codex app), hidden by default.
+	VoiceThreads bool `toml:"voice_threads,omitempty"`
+	WorkThreads  bool `toml:"work_threads,omitempty"`
+}
+
+// Shows reports whether sessions of these kinds (agent.Summary.Kinds) are listed.
+func (a Agent) Shows(kinds []string) bool {
+	for _, k := range kinds {
+		if k == "voice" && !a.VoiceThreads || k == "work" && !a.WorkThreads {
+			return false
+		}
+	}
+	return true
+}
+
+// SetShows turns a kind of session on or off; false for a kind this setting lacks.
+func (a *Agent) SetShows(kind string, show bool) bool {
+	switch kind {
+	case "voice":
+		a.VoiceThreads = show
+	case "work":
+		a.WorkThreads = show
+	default:
+		return false
+	}
+	return true
 }
 
 // Cloud is per-cloud configuration, by the cloud's name ("codex-cloud"). Like a machine,
@@ -99,6 +127,10 @@ const (
 type Peer struct {
 	// Receive lets hopsesh on another machine send sessions here (off by default).
 	Receive bool `toml:"receive,omitempty"`
+	// SetUpIntegrations: setting hopsesh up on a machine (hosts setup) also installs the
+	// movement hooks and the skill there, as Settings › Machines would (off by
+	// default: hopsesh otherwise asks first).
+	SetUpIntegrations bool `toml:"setup_integrations,omitempty"`
 }
 
 // Terminal is how hopsesh opens sessions and steps in a terminal app.
@@ -150,6 +182,8 @@ type Window struct {
 	SidebarHidden   bool `toml:"sidebar_hidden,omitempty"`
 	InspectorWidth  int  `toml:"inspector_width,omitempty"`
 	InspectorHidden bool `toml:"inspector_hidden,omitempty"`
+	// StatusWidth is the session list's status column (0: the default).
+	StatusWidth int `toml:"status_width,omitempty"`
 }
 
 // Inspector is the app inspector's sections the user opened or closed (explicit choices
@@ -164,6 +198,7 @@ type Inspector struct {
 const (
 	SidebarWidth, SidebarMin, SidebarMax = 220, 180, 320
 	InspectorMin, InspectorMax           = 300, 960
+	StatusMin, StatusMax                 = 140, 560
 )
 
 // InspectorSections are the inspector's sections that open and close.
@@ -268,11 +303,12 @@ type Config struct {
 	// UpdateCheck is "on" or "off" once the person has answered whether the app may
 	// look for new releases once a day ("" = not asked yet).
 	UpdateCheck string `toml:"update_check,omitempty"`
-	// Round trips. MarkMoved and SyncCode default to on (nil); PushSource to off.
-	MovementNotices *bool `toml:"movement_notices,omitempty"` // show movement notices (default on)
-	MarkMoved       *bool `toml:"mark_moved,omitempty"`       // mark the copy left behind
-	SyncCode        *bool `toml:"sync_code,omitempty"`        // fetch and fast-forward the checkout here
-	PushSource      bool  `toml:"push_source,omitempty"`      // push unpushed commits on the source first
+	// Original is how the copy left behind by a move is protected until the session moves
+	// back: "block" (the default, ""), "advise" or "off". SyncCode defaults to on (nil),
+	// PushSource to off.
+	Original   string `toml:"original,omitempty"`
+	SyncCode   *bool  `toml:"sync_code,omitempty"`   // fetch and fast-forward the checkout here
+	PushSource bool   `toml:"push_source,omitempty"` // push unpushed commits on the source first
 	// SkillPrompt remembers the answer to "let your agents use hopsesh?": "" (not asked),
 	// "declined", or the skill revision last offered.
 	SkillPrompt string `toml:"skill_prompt,omitempty"`
@@ -281,6 +317,12 @@ type Config struct {
 	CLIPrompt string `toml:"cli_prompt,omitempty"`
 	// SetupPrompt is "declined" once the user closed the app's "Finish setting up" line.
 	SetupPrompt string `toml:"setup_prompt,omitempty"`
+	// ProtectPrompt is the fingerprint of the protection problems the user answered "Not
+	// now" to; the Sessions card stays hidden until the set of problems changes.
+	ProtectPrompt string `toml:"protect_prompt,omitempty"`
+	// MachinesPrompt are the machine notices the user answered "Not now" to (by
+	// fingerprint: a notice whose findings change comes back).
+	MachinesPrompt []string `toml:"machines_prompt,omitempty"`
 	// AppIcons shows an agent's installed desktop app icon in the app (default on).
 	AppIcons *bool            `toml:"app_icons,omitempty"`
 	Agents   map[string]Agent `toml:"agents,omitempty"`
@@ -296,8 +338,65 @@ type Config struct {
 	List List `toml:"list,omitempty"`
 	// Previews shows the end of a session's conversation in the app's inspector (default
 	// on; off for people who share their screen).
-	Previews *bool  `toml:"previews,omitempty"`
-	Hosts    []Host `toml:"hosts"`
+	Previews *bool `toml:"previews,omitempty"`
+	// History is how much history a transfer carries and the resources it may use.
+	History History `toml:"history,omitempty"`
+	Hosts   []Host  `toml:"hosts"`
+}
+
+// History limits. Zero means automatic or the default; see ir.Limits. Canonical history
+// is never truncated: reaching a resource limit stops the transfer with the setting
+// named, and only the receiving context keeps a labeled subset (the rest stays in the
+// portable archive).
+type History struct {
+	// ContextBudget optionally lowers the receiving context (0: automatic, from the
+	// destination model). It can never raise what the model allows.
+	ContextBudget int `toml:"context_budget,omitempty" json:"contextBudget"`
+	// Older is how history older than the recent turns is carried: "extract" (default)
+	// or "recent" (recent turns only).
+	Older string `toml:"older,omitempty" json:"older"`
+	// Advanced resource budgets, in MiB.
+	ReadMemoryMB int `toml:"read_memory_mb,omitempty" json:"readMemoryMB"`
+	RecordMB     int `toml:"record_mb,omitempty" json:"recordMB"`
+	ArchiveMB    int `toml:"archive_mb,omitempty" json:"archiveMB"`
+	LineageMB    int `toml:"lineage_mb,omitempty" json:"lineageMB"`
+	NativeFileMB int `toml:"native_file_mb,omitempty" json:"nativeFileMB"`
+}
+
+// History choices offered by the app (any value within the ceilings is valid in the file).
+var (
+	HistoryContextBudgets = []int{0, 16_000, 32_000, 64_000, 128_000, 256_000}
+	HistoryReadMemoryMBs  = []int{256, 512, 1024, 2048, 4096}
+	HistoryRecordMBs      = []int{32, 64, 128, 256}
+	HistoryLineageMBs     = []int{16, 32, 64, 128, 256, 512}
+	HistoryArchiveMBs     = []int{256, 512, 1024, 2048, 4096, 8192}
+	HistoryNativeFileMBs  = []int{1024, 2048, 4096, 8192}
+)
+
+// Limits is the operation policy for these settings, with defaults and ceilings applied.
+func (h History) Limits() ir.Limits {
+	return h.raw().Normalize()
+}
+
+func (h History) raw() ir.Limits {
+	return ir.Limits{
+		ReadBytes: int64(h.ReadMemoryMB) << 20, RecordBytes: int64(h.RecordMB) << 20,
+		ArchiveBytes: int64(h.ArchiveMB) << 20, LineageBytes: int64(h.LineageMB) << 20, NativeFileBytes: int64(h.NativeFileMB) << 20,
+		ContextBudget: h.ContextBudget, Older: h.Older,
+	}
+}
+
+func (h History) check() error {
+	if h.ReadMemoryMB < 0 || h.RecordMB < 0 || h.ArchiveMB < 0 || h.LineageMB < 0 || h.NativeFileMB < 0 {
+		return fmt.Errorf("history: sizes must be positive (or left out for the default)")
+	}
+	if err := h.raw().Check(); err != nil {
+		return fmt.Errorf("history: %w", err)
+	}
+	if l := h.Limits(); h.RecordMB > 0 && l.RecordBytes > l.ReadBytes {
+		return fmt.Errorf("history.record_mb (%d) cannot exceed history.read_memory_mb", h.RecordMB)
+	}
+	return nil
 }
 
 // Defaults returns the configuration used when no file exists.
@@ -312,6 +411,11 @@ func Dir() string {
 	if d := os.Getenv("HOPSESH_CONFIG_DIR"); d != "" {
 		return d
 	}
+	return DefaultDir()
+}
+
+// DefaultDir is the configuration directory when HOPSESH_CONFIG_DIR is not set.
+func DefaultDir() string {
 	if runtime.GOOS == "windows" {
 		if d := os.Getenv("APPDATA"); d != "" {
 			return filepath.Join(d, "hopsesh")
@@ -331,6 +435,11 @@ func StateDir() string {
 	if d := os.Getenv("HOPSESH_STATE_DIR"); d != "" {
 		return d
 	}
+	return DefaultStateDir()
+}
+
+// DefaultStateDir is the state directory when HOPSESH_STATE_DIR is not set.
+func DefaultStateDir() string {
 	if runtime.GOOS == "windows" {
 		if d := os.Getenv("LOCALAPPDATA"); d != "" {
 			return filepath.Join(d, "hopsesh")
@@ -341,6 +450,19 @@ func StateDir() string {
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".local", "state", "hopsesh")
+}
+
+// SameDir reports whether two folder paths name the same folder (cleaned, links resolved
+// when they exist).
+func SameDir(a, b string) bool {
+	clean := func(p string) string {
+		p = filepath.Clean(p)
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			return r
+		}
+		return p
+	}
+	return clean(a) == clean(b)
 }
 
 // Path is the configuration file.
@@ -441,9 +563,6 @@ func (c *Config) UpsertHost(h Host) {
 
 // AgentEnabled reports whether an agent module is in use.
 func (c Config) AgentEnabled(id string) bool { return !c.Agents[id].Disabled }
-
-// MarkMovedOn reports whether copies left behind are marked (default on).
-func (c Config) MarkMovedOn() bool { return c.MarkMoved == nil || *c.MarkMoved }
 
 // PreviewsOn reports whether the app shows conversation previews (default on).
 func (c Config) PreviewsOn() bool { return c.Previews == nil || *c.Previews }
@@ -558,6 +677,14 @@ func (c Config) Check() error {
 	if err := CheckAppearance(c.Appearance); err != nil {
 		return err
 	}
+	if err := c.History.check(); err != nil {
+		return err
+	}
+	switch c.Original {
+	case "", OriginalBlock, OriginalAdvise, OriginalOff:
+	default:
+		return fmt.Errorf("original is %q: use %q, %q or %q", c.Original, OriginalBlock, OriginalAdvise, OriginalOff)
+	}
 	if err := c.Desktop.Check(); err != nil {
 		return err
 	}
@@ -608,6 +735,9 @@ func (c Config) Check() error {
 	}
 	if w := c.Window.InspectorWidth; w != 0 && (w < InspectorMin || w > InspectorMax) {
 		return fmt.Errorf("window.inspector_width is %d: use %d to %d", w, InspectorMin, InspectorMax)
+	}
+	if w := c.Window.StatusWidth; w != 0 && (w < StatusMin || w > StatusMax) {
+		return fmt.Errorf("window.status_width is %d: use %d to %d", w, StatusMin, StatusMax)
 	}
 	for _, f := range []struct {
 		name string
@@ -705,5 +835,21 @@ func oneOfEach(name string, vals, allowed []string) error {
 // UsesPassword reports whether the machine logs in with a password.
 func (h Host) UsesPassword() bool { return h.Auth == "password" }
 
-// MovementNoticesOn controls source-session notices independently of lineage.
-func (c Config) MovementNoticesOn() bool { return c.MovementNotices == nil || *c.MovementNotices }
+// Protection choices for the copy left behind (config "original").
+const (
+	OriginalBlock  = "block"
+	OriginalAdvise = "advise"
+	OriginalOff    = "off"
+)
+
+// OriginalGuard is how the copy left behind is protected: block (default), advise or off.
+func (c Config) OriginalGuard() string {
+	if c.Original == "" {
+		return OriginalBlock
+	}
+	return c.Original
+}
+
+// MovementNoticesOn reports whether moves record a notice for the copy left behind (the
+// block or the advice needs one); independent of lineage, which is always kept.
+func (c Config) MovementNoticesOn() bool { return c.OriginalGuard() != OriginalOff }

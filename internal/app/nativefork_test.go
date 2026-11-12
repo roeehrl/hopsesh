@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -74,6 +76,35 @@ func TestNativeForkDiscoveredBeforeFirstHopseshMove(t *testing.T) {
 	if len(pg.Revisions) != len(cg.Revisions) {
 		t.Fatal("copied history became new work")
 	}
+	// A new unrelated session changes listing positions without changing any fork
+	// input. Cache replay must follow native identity and leave unrelated receipts
+	// alone, rather than copying a saved array onto the reordered listing.
+	other := agent.Summary{Key: agent.SessionKey{Agent: "codex", Session: "unrelated"}, Path: "/home/u/.codex/unrelated.jsonl", Title: "Unrelated conversation"}
+	reordered := append([]agent.Summary{other}, ls.Sessions...)
+	current := make([]*lineage.Manifest, len(reordered))
+	current[0] = lineage.New("unrelated-family")
+	untouched := current[0]
+	issues := make([]string, len(reordered))
+	reads := contentReads.Load()
+	nativeForkManifests(ctx, hm, h, m, in, reordered, current, issues)
+	if contentReads.Load() != reads {
+		t.Fatal("fixture did not exercise cache replay")
+	}
+	if current[0] != untouched {
+		t.Fatal("fork cache replaced an unrelated session's lineage")
+	}
+	for i, s := range reordered {
+		var want *lineage.Manifest
+		if s.Key == parent.Key {
+			want = pg
+		}
+		if string(s.Key.Session) == childID {
+			want = cg
+		}
+		if want != nil && (current[i] == nil || current[i].Family != want.Family || current[i].Branch != want.Branch) {
+			t.Fatalf("cache attached the wrong lineage to %s", s.Key.String())
+		}
+	}
 }
 
 // Discovery without a stored Hopsesh endpoint reserves different causal IDs on
@@ -101,3 +132,173 @@ func TestNativeFamilyPresentationDoesNotDependOnReservedEndpoint(t *testing.T) {
 		t.Fatal("presentation identity rewrote causal manifest")
 	}
 }
+
+// A legacy fork holds its parent's records, so once Codex deletes the parent the fork is a
+// conversation of its own. An archived parent or a paginated fork still needs the parent.
+func TestNativeForkWithDeletedParent(t *testing.T) {
+	const goneID = "01a0fe1c-0000-7000-8000-0000000000aa"
+	const childID = "01a0fe1c-0000-7000-8000-00000000000b"
+	for _, tc := range []struct {
+		name     string
+		archived bool
+		paged    bool
+		blocked  bool
+	}{
+		{name: "deleted"},
+		{name: "archived", archived: true, blocked: true},
+		{name: "paginated", paged: true, blocked: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			fh := agenttest.NewFakeHost("/home/u")
+			if err := fh.Load("../../agents/codex/testdata/0.153.2", "/home/u/.codex"); err != nil {
+				t.Fatal(err)
+			}
+			fh.AddBinary("codex", "codex-cli 0.153.2")
+			m := codex.New()
+			in, err := m.Detect(ctx, fh)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h := agent.Confine(fh, m.Spec(), in)
+			ls, _ := m.List(ctx, h, in)
+			src := ls.Sessions[0]
+			raw, _ := h.FS().ReadFile(src.Path, 1<<20)
+			lines := strings.Split(string(raw), "\n")
+			var meta map[string]any
+			json.Unmarshal([]byte(lines[0]), &meta)
+			payload := meta["payload"].(map[string]any)
+			payload["id"] = childID
+			payload["forked_from_id"] = goneID
+			payload["history_mode"] = "legacy"
+			if tc.paged {
+				payload["history_base"] = map[string]any{"thread_id": goneID}
+			}
+			first, _ := json.Marshal(meta)
+			lines[0] = string(first)
+			fh.Put(path.Join(path.Dir(src.Path), "rollout-2026-10-01T13-00-00-"+childID+".jsonl"), []byte(strings.Join(lines, "\n")), time.Now())
+			if tc.archived {
+				fh.Put("/home/u/.codex/archived_sessions/rollout-2026-10-01T12-00-00-"+goneID+".jsonl", []byte(lines[0]+"\n"), time.Now())
+			}
+			ls, err = m.List(ctx, h, in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			graphs := make([]*lineage.Manifest, len(ls.Sessions))
+			problems := make([]string, len(ls.Sessions))
+			hm := &host.Machine{Name: "A", Local: true, Facts: host.Facts{Home: "/home/u", Endpoint: strings.Repeat("ab", 32)}}
+			nativeForkManifests(ctx, hm, h, m, in, ls.Sessions, graphs, problems)
+			found := false
+			for i, s := range ls.Sessions {
+				if string(s.Key.Session) != childID {
+					continue
+				}
+				found = true
+				if blocked := problems[i] != ""; blocked != tc.blocked {
+					t.Fatalf("blocked = %v (%q), want %v", blocked, problems[i], tc.blocked)
+				}
+				if graphs[i] != nil {
+					t.Fatal("an orphaned fork must not join a family it cannot verify")
+				}
+			}
+			if !found {
+				t.Fatal("child not listed")
+			}
+		})
+	}
+}
+
+// A listing of another machine verifies none of its native forks (that reads whole
+// transcripts over SSH), and neither does an action about another session; which
+// families an action verifies is TestRemoteForksPicksWholeFamilies.
+func TestRemoteNativeForksNotVerifiedByAListing(t *testing.T) {
+	ctx := context.Background()
+	fh := agenttest.NewFakeHost("/home/u")
+	if err := fh.Load("../../agents/codex/testdata/0.153.2", "/home/u/.codex"); err != nil {
+		t.Fatal(err)
+	}
+	fh.AddBinary("codex", "codex-cli 0.153.2")
+	m := codex.New()
+	in, err := m.Detect(ctx, fh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := agent.Confine(fh, m.Spec(), in)
+	ls, _ := m.List(ctx, h, in)
+	var parent agent.Summary
+	for _, s := range ls.Sessions {
+		if strings.HasSuffix(string(s.Key.Session), "0001") {
+			parent = s
+		}
+	}
+	raw, _ := h.FS().ReadFile(parent.Path, 1<<20)
+	lines := strings.Split(string(raw), "\n")
+	var meta map[string]any
+	json.Unmarshal([]byte(lines[0]), &meta)
+	payload := meta["payload"].(map[string]any)
+	childID := "01a0fe1c-0000-7000-8000-00000000000a"
+	payload["id"] = childID
+	payload["forked_from_id"] = string(parent.Key.Session)
+	payload["history_mode"] = "legacy"
+	first, _ := json.Marshal(meta)
+	lines[0] = string(first)
+	fh.Put(path.Join(path.Dir(parent.Path), "rollout-2026-10-01T14-00-00-"+childID+".jsonl"), []byte(strings.Join(lines, "\n")), time.Now())
+	ls, err = m.List(ctx, h, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hm := &host.Machine{Name: "B", Facts: host.Facts{Home: "/home/u", Endpoint: strings.Repeat("cd", 32)}}
+	family := func(entries []Entry) (p, c *Entry) {
+		for i, e := range entries {
+			switch {
+			case e.Session.Key == parent.Key:
+				p = &entries[i]
+			case string(e.Session.Key.Session) == childID:
+				c = &entries[i]
+			}
+		}
+		return p, c
+	}
+	st := AgentState{Agent: m.Spec().ID, Install: in}
+	reads := contentReads.Load()
+	p, c := family(listedEntries(ctx, hm, readOnlyFS{h.FS()}, m, h, st, ls, nil))
+	if p == nil || c == nil || p.Lineage != nil || c.Lineage != nil || c.LineageError != "" || contentReads.Load() != reads {
+		t.Fatalf("a listing verified another machine's fork: %+v %+v", p, c)
+	}
+	unrelated := func(e Entry) bool { return e.Session.Key.Session == "nothing-listed" }
+	if _, c := family(listedEntries(ctx, hm, readOnlyFS{h.FS()}, m, h, st, ls, unrelated)); c.Lineage != nil {
+		t.Fatal("an action about another session verified this fork")
+	}
+}
+
+func TestRemoteForksPicksWholeFamilies(t *testing.T) {
+	s := func(id, parent string) agent.Summary {
+		return agent.Summary{Key: agent.SessionKey{Agent: "codex", Session: agent.SessionID(id)}, NativeParent: agent.SessionID(parent)}
+	}
+	ss := []agent.Summary{s("root", ""), s("a", "root"), s("b", "a"), s("solo", ""), s("x", "gone"), s("other", ""), s("y", "other")}
+	for _, c := range []struct {
+		want string
+		pick []int
+	}{
+		{"b", []int{0, 1, 2}},
+		{"root", []int{0, 1, 2}},
+		{"solo", nil},
+		{"x", []int{4}},
+		{"other", []int{5, 6}},
+	} {
+		got := remoteForks(ss, func(s agent.Summary) bool { return string(s.Key.Session) == c.want })
+		if !slices.Equal(got, c.pick) {
+			t.Errorf("%s: picked %v, want %v", c.want, got, c.pick)
+		}
+	}
+}
+
+// readOnlyFS is an agent.FS a scan can read sidecars through.
+type readOnlyFS struct{ agent.FS }
+
+func (readOnlyFS) Remove(string) error             { return errReadOnly }
+func (readOnlyFS) Truncate(string, int64) error    { return errReadOnly }
+func (readOnlyFS) Chtimes(string, time.Time) error { return errReadOnly }
+func (readOnlyFS) MkdirAll(string) error           { return errReadOnly }
+
+var errReadOnly = errors.New("read-only")

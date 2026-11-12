@@ -101,7 +101,7 @@ func TestHandoffToCodexCloudAndBack(t *testing.T) {
 	defer inv2.Close()
 	hp = p.Handoff
 	if len(p.Blockers) > 0 || hp.Env != "env_api" || hp.EnvName != "acme-api" || !hp.Remember || hp.Noun != "task" || hp.Follow ||
-		strings.Join(hp.Steps, ",") != "snapshot,push,start,lineage,mark" || hp.MarkTitle != "↪ continued in Codex cloud" ||
+		strings.Join(hp.Steps, ",") != "snapshot,push,start,lineage" ||
 		hp.Usage != "Cloud tasks use your plan's allowance." || hp.CanStartingDiff {
 		t.Fatalf("plan: %v %+v", p.Blockers, hp)
 	}
@@ -223,8 +223,8 @@ func TestHandoffToCodexCloudAndBack(t *testing.T) {
 	if _, err := os.Stat(f.Worktree); err == nil {
 		t.Error("undo leaves the worktree")
 	}
-	// The hand-off: the task moved on since, so undo asks first; forced, the branch and the
-	// mark go and the task is a step the user owes.
+	// The hand-off: the task moved on since, so undo asks first; forced, the branch goes
+	// and the task is a step the user owes.
 	if _, err := a.Undo(ctx, res.Journal, false); err == nil || !strings.Contains(err.Error(), "new activity") {
 		t.Fatalf("undo after the task worked: %v", err)
 	}
@@ -309,7 +309,7 @@ func TestCodexStartingDiff(t *testing.T) {
 	inv2, p := planCodex(t, a, opt)
 	defer inv2.Close()
 	hp = p.Handoff
-	if len(p.Blockers) > 0 || hp.Code != agent.ViaStartingDiff || hp.Branch != "main" || strings.Join(hp.Steps, ",") != "snapshot,start,lineage,mark" {
+	if len(p.Blockers) > 0 || hp.Code != agent.ViaStartingDiff || hp.Branch != "main" || strings.Join(hp.Steps, ",") != "snapshot,start,lineage" {
 		t.Fatalf("plan: %v %+v", p.Blockers, hp)
 	}
 	res, err := a.Apply(ctx, p, move.Input{}, nil)

@@ -63,6 +63,11 @@ func seed(t *testing.T, l location) {
 			return err
 		}
 		rel, _ := filepath.Rel(fix, p)
+		// Static fixture PIDs can alias unrelated runner processes during fresh
+		// activity checks. Live-session tests create their own owned registries.
+		if strings.HasPrefix(filepath.ToSlash(rel), "sessions/") {
+			return nil
+		}
 		b, _ := os.ReadFile(p)
 		b = []byte(strings.ReplaceAll(string(b), "/home/u/git/demo", jsonText(l.repo)))
 		rel = strings.ReplaceAll(rel, "-home-u-git-demo", claude.Slug(l.repo))
@@ -117,7 +122,7 @@ func TestMoveRoundTripAndUndo(t *testing.T) {
 
 	// box → here
 	in := input(t, box, here)
-	p, err := move.Build(ctx, in, move.Options{TargetDir: here.repo, Mark: true})
+	p, err := move.Build(ctx, in, move.Options{TargetDir: here.repo})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,13 +150,19 @@ func TestMoveRoundTripAndUndo(t *testing.T) {
 		t.Fatal("the Remote Control bridge record must be dropped")
 	}
 	left := list(t, box)[sid]
-	if left.Mark == nil || left.Mark.Location != "here" || res.Mark != "done" {
-		t.Fatalf("the copy left behind must be marked: %+v %s", left.Mark, res.MarkError)
+	if left.LegacyLabel != nil || left.Title != moved.Title {
+		t.Fatalf("the copy left behind keeps its title: %q %+v", left.Title, left.LegacyLabel)
 	}
 	for _, s := range []agent.Summary{moved, left} {
 		m, err := lineage.Read(host.LocalFS(), s.Path)
 		if err != nil || m == nil || len(m.Replicas) != 2 || len(m.Hops) != 1 || m.Replica(m.Replicas[0].ID).Head == "" || m.Replica(m.Replicas[1].ID).Head == "" {
 			t.Fatalf("lineage beside %s: %+v %v", s.Path, m, err)
+		}
+		if s.Path == left.Path {
+			hop, ok := m.Departed(m.Hops[0].From)
+			if !ok || m.Replica(hop.To).Location != "here" {
+				t.Fatalf("the lineage beside the copy left behind says where it went: %+v %v", hop, ok)
+			}
 		}
 	}
 	if !resumes(res.Command, sid) {
@@ -169,24 +180,24 @@ func TestMoveRoundTripAndUndo(t *testing.T) {
 	if _, ok := list(t, here)[sid]; ok {
 		t.Fatal("undo must remove the moved copy")
 	}
-	if list(t, box)[sid].Mark != nil {
-		t.Fatal("undo must remove the mark")
-	}
 	undone, e := lineage.Read(host.LocalFS(), left.Path)
 	if e != nil || undone == nil || len(undone.Compensations) != 1 || undone.Journey().Transfers != 0 {
 		t.Fatalf("undo must preserve the compensated journey: %+v %v", undone, e)
 	}
+	if _, moved := undone.Departed(undone.Hops[0].From); moved {
+		t.Fatal("after undo the copy at box is no longer moved on")
+	}
 
 	// Again, then home: the copy at box was not touched, so it is simply replaced.
 	in = input(t, box, here)
-	p, _ = move.Build(ctx, in, move.Options{TargetDir: here.repo, Mark: true})
+	p, _ = move.Build(ctx, in, move.Options{TargetDir: here.repo})
 	if _, err := move.Apply(ctx, p, in, env); err != nil {
 		t.Fatal(err)
 	}
 	moved = list(t, here)[sid]
 	appendTurn(t, moved.Path, "a turn added on here")
 	back := input(t, here, box)
-	p, err = move.Build(ctx, back, move.Options{TargetDir: box.repo, Mark: true})
+	p, err = move.Build(ctx, back, move.Options{TargetDir: box.repo})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,8 +209,8 @@ func TestMoveRoundTripAndUndo(t *testing.T) {
 	}
 	home := list(t, box)[sid]
 	b, _ = os.ReadFile(home.Path)
-	if home.Mark != nil || !strings.Contains(string(b), "a turn added on here") || !strings.Contains(string(b), `"cwd":"`+jsonText(box.repo)) {
-		t.Fatalf("home copy: mark %+v\n%s", home.Mark, b)
+	if home.LegacyLabel != nil || !strings.Contains(string(b), "a turn added on here") || !strings.Contains(string(b), `"cwd":"`+jsonText(box.repo)) {
+		t.Fatalf("home copy: label %+v\n%s", home.LegacyLabel, b)
 	}
 
 	// Both changed: refused unless the user chooses.
@@ -266,5 +277,112 @@ func TestUnreadCheckoutBlocks(t *testing.T) {
 	}
 	if len(p.Blockers) > 0 {
 		t.Fatalf("blockers with --to: %v", p.Blockers)
+	}
+}
+
+// firstUUID is the first user or assistant record's uuid in a transcript.
+func firstUUID(t *testing.T, file string) string {
+	t.Helper()
+	b, _ := os.ReadFile(file)
+	for _, line := range strings.Split(string(b), "\n") {
+		var r struct{ Type, UUID string }
+		if json.Unmarshal([]byte(line), &r) == nil && r.UUID != "" && (r.Type == "user" || r.Type == "assistant") {
+			return r.UUID
+		}
+	}
+	t.Fatal("no message in " + file)
+	return ""
+}
+
+// appendRecords adds raw transcript records.
+func appendRecords(t *testing.T, file string, records ...map[string]any) {
+	t.Helper()
+	f, err := os.OpenFile(file, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	for _, r := range records {
+		b, _ := json.Marshal(r)
+		f.Write(append(b, '\n'))
+	}
+}
+
+// Claude Code lost two records to a full disk after a move, and later records still name
+// them as parents. Moving the session on is not "history compacted or rewound": the
+// conversation continues across the gap. (A real session was refused for every account
+// and agent until it was read past the gap.)
+func TestMoveAcrossRecordsClaudeNeverWrote(t *testing.T) {
+	root := t.TempDir()
+	box, here := newLocation(t, "box", root), newLocation(t, "here", root)
+	seed(t, box)
+	env := move.Env{StateDir: t.TempDir()}
+	ctx := context.Background()
+	in := input(t, box, here)
+	p, err := move.Build(ctx, in, move.Options{TargetDir: here.repo})
+	if err != nil || len(p.Blockers) > 0 {
+		t.Fatalf("first move: %v %v", err, p.Blockers)
+	}
+	if _, err := move.Apply(ctx, p, in, env); err != nil {
+		t.Fatal(err)
+	}
+	moved := list(t, here)[sid]
+	appendTurn(t, moved.Path, "work before the disk filled")
+	appendRecords(t, moved.Path,
+		map[string]any{"type": "attachment", "uuid": "lost-1", "parentUuid": "tool-result-never-written", "isSidechain": false, "sessionId": sid, "attachment": map[string]any{"type": "total_tokens_reminder"}},
+		map[string]any{"type": "assistant", "uuid": "after-gap", "parentUuid": "lost-1", "isSidechain": false, "sessionId": sid,
+			"message": map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "text", "text": "the disk is full"}}}},
+		map[string]any{"type": "last-prompt", "leafUuid": "after-gap", "sessionId": sid})
+
+	back := input(t, here, box)
+	p, err = move.Build(ctx, back, move.Options{TargetDir: box.repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Blockers) > 0 || p.HistoryChanged != "" {
+		t.Fatalf("a gap Claude Code left is not a changed history: %v %q", p.Blockers, p.HistoryChanged)
+	}
+}
+
+// A session rewound after a move no longer has the records hopsesh recorded. The plan
+// says so and names its way forward instead of a dead end: keep-both takes it as a
+// separate conversation, and that plan can go ahead.
+func TestRewoundSourceOffersSeparateConversation(t *testing.T) {
+	root := t.TempDir()
+	box, here := newLocation(t, "box", root), newLocation(t, "here", root)
+	seed(t, box)
+	env := move.Env{StateDir: t.TempDir()}
+	ctx := context.Background()
+	in := input(t, box, here)
+	p, err := move.Build(ctx, in, move.Options{TargetDir: here.repo})
+	if err != nil || len(p.Blockers) > 0 {
+		t.Fatalf("first move: %v %v", err, p.Blockers)
+	}
+	if _, err := move.Apply(ctx, p, in, env); err != nil {
+		t.Fatal(err)
+	}
+	moved := list(t, here)[sid]
+	appendRecords(t, moved.Path, map[string]any{"type": "last-prompt", "leafUuid": firstUUID(t, moved.Path), "sessionId": sid})
+
+	back := input(t, here, box)
+	p, err = move.Build(ctx, back, move.Options{TargetDir: box.repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.HistoryChanged == "" || len(p.Blockers) != 1 || p.Blockers[0] != move.HistoryChangedBlocker(p.HistoryChanged) {
+		t.Fatalf("a rewound source: historyChanged %q, blockers %v", p.HistoryChanged, p.Blockers)
+	}
+	if strings.Contains(p.Blockers[0], "both copies changed") {
+		t.Fatalf("only this copy changed: %q", p.Blockers[0])
+	}
+	p, err = move.Build(ctx, back, move.Options{TargetDir: box.repo, Conflict: move.ConflictKeepBoth})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Blockers) > 0 || p.HistoryChanged != "" || !p.Options.Fork {
+		t.Fatalf("separate conversation: blockers %v, historyChanged %q, fork %v", p.Blockers, p.HistoryChanged, p.Options.Fork)
+	}
+	if _, err := move.Apply(ctx, p, back, env); err != nil {
+		t.Fatal(err)
 	}
 }

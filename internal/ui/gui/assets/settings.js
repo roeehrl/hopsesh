@@ -1,7 +1,11 @@
-// The Settings screen, in tabs: General, Agents, Terminal, Skill, Command line, Updates.
+// The Settings screen, in tabs: General, Machines (one machine, everything about it:
+// hopsesh, the command, hooks and skill), Clouds, Desktop presence, Agents, History,
+// Terminal, Updates.
 import { api, on, h, fill, view, state, screen, go, loading, toast, fail, dialog, agentBadge, sys, cliHow, icon, ask, count, current, loadError, navigationID, errText } from "./core.js";
 import { desktopSettings } from "./desktop-settings.js";
-import { running } from "./term.js";
+import { installGuarded, waitingFor, cancelDeferred, onDeferred } from "./term.js";
+import { withCLI, loadHookHealth } from "./guard.js";
+import { bindMachines, machinesPanel, cloudsPanel, pickMachine } from "./machines.js";
 
 const SKILL_TEXT = {
   absent: ["Not installed", "st-ended"],
@@ -20,7 +24,7 @@ const CLI_TEXT = {
   foreign: ["Points to a different program", "st-warn"],
 };
 const CAPS = {
-  live: "sees open sessions", stop: "quits open sessions", mark: "marks copies left behind", account: "knows its account",
+  live: "sees open sessions", stop: "quits open sessions", account: "knows its account",
   sanitize: "moves between accounts", read: "continues in other agents", write: "takes sessions from other agents",
   "native-replay": "replays commands natively", integrate: "can use the hopsesh skill", fork: "can fork", "remote-control": "remote control",
   app: "desktop app", import: "has its own importer", "post-install": "registers moved sessions",
@@ -42,6 +46,7 @@ function cloudRow(a, c) {
 
 let tab = "general";
 let s = null, saving = false;
+let checkingUpdate = false, updateError = "", installing = "";
 
 const chip = ([text, cls]) => h("span", { class: "chip " + cls }, text);
 const title = (t, desc) => h("div", { style: "display:flex;flex-direction:column;gap:2px;min-width:0;flex:1 1 300px" }, h("span", { style: "font-weight:500" }, t), desc ? h("span", { class: "muted", style: "font-size:12px" }, desc) : null);
@@ -67,7 +72,7 @@ function save(patch) {
   // never briefly reveal a preview while SaveSettings/Info are still in flight.
   if (patch.previews !== undefined) state.info.previews = patch.previews;
   Object.assign(s, patch);
-  return run(() => api("SaveSettings", Object.assign({ appearance: s.appearance, layout: s.layout, movementNotices: s.movementNotices, markMoved: s.markMoved, syncCode: s.syncCode, pushSource: s.pushSource, updateCheck: s.updateCheck || "off", appIcons: s.appIcons, previews: s.previews }, patch)), "Saved");
+  return run(() => api("SaveSettings", Object.assign({ appearance: s.appearance, layout: s.layout, original: s.original, syncCode: s.syncCode, pushSource: s.pushSource, updateCheck: s.updateCheck || "off", appIcons: s.appIcons, previews: s.previews }, patch)), "Saved");
 }
 
 function toggle(key, label, desc) {
@@ -83,11 +88,11 @@ function general() {
       h("div", { class: "set-row" }, title("Clone layout", "Where a repository goes inside the repos folder."),
         h("select", { "aria-label": "Clone layout", onchange: (e) => save({ layout: e.target.value }) },
           h("option", { value: "flat", selected: s.layout === "flat" }, "<repos>/<name>"), h("option", { value: "ghq", selected: s.layout === "ghq" }, "<repos>/<host>/<owner>/<name>"))),
-      toggle("movementNotices", "Record movement notices", "Keep a durable notice of where work was prepared or continued. Each move can override this default."),
-      toggle("markMoved", "Mark the copy left behind", "Its title says where the work went (“↪ moved to …”), so it isn't resumed by mistake."),
+      h("div", { class: "set-row" }, title("When a session moves, the original", "Blocked: the copy left behind refuses new prompts until you move the session back, so moving back stays a clean return (recommended). Warned: you can still continue it, but the copies may diverge. Moving back always clears this; you can also remove it from one original."),
+        seg("When a session moves, the original", s.original || "block", [["block", "Is blocked"], ["advise", "Shows a warning"], ["off", "Is left alone"]], (v) => save({ original: v }))),
       toggle("syncCode", "Bring the code along", "Fetch the session's commit (from the other machine if it isn't pushed) and fast-forward a clean checkout."),
-      toggle("pushSource", "Push unpushed commits on the other machine first", "Off: commits are fetched straight from the other machine.")),
-    noticeSetup(),
+      toggle("pushSource", "Push unpushed commits on the other machine first", "Off: commits are fetched straight from the other machine."),
+      toggle("setUpIntegrations", "Add hooks and skill when hopsesh is set up on a machine", "Off: hopsesh asks first. Each machine's hooks and skill are in Machines.")),
     card(h("span", { class: "sec-h" }, "Appearance"),
       h("div", { class: "set-row" }, title("Color scheme", "Choose the look for Hopsesh, Quick access and the built-in terminal. System follows your device's appearance."),
         h("select", { "aria-label": "Color scheme", disabled: saving, onchange: e => save({ appearance: e.target.value }) },
@@ -96,7 +101,7 @@ function general() {
       toggle("previews", "Show conversation previews", "The inspector shows the end of the selected session's conversation, with Markdown formatting, read on its machine. Turn it off when you share your screen.")),
     card(h("span", { class: "sec-h" }, sys.Here),
       h("div", { class: "set-row" }, title("Receiving sessions", state.info.receive ? "On: your other machines can send sessions here." : `Off: ${sys.here} refuses sessions sent from other machines.`),
-        h("button", { class: "btn", onclick: () => go("machines") }, "Machines…")),
+        h("button", { class: "btn", onclick: () => { tab = "machines"; render(); } }, "Machines…")),
       s.localNetworkGated ? h("div", { class: "set-row" }, title("Local network access", "macOS asks before hopsesh reaches machines on your local network. Machines on Tailscale don't need it."),
         h("button", { class: "btn", onclick: () => api("OpenLocalNetworkSettings").catch(fail) }, "Privacy & Security…")) : null,
       h("div", { class: "set-row" }, title("Settings", s.configDir), h("button", { class: "btn", onclick: () => api("Reveal", s.configDir).catch(fail) }, "Show")),
@@ -111,7 +116,7 @@ function agents() {
     return card(
       h("div", { class: "set-row" },
         agentBadge(a.id, a.name),
-        title(a.name, a.version ? `${a.version} on ${sys.here}${a.folder ? " · " + a.folder : ""}` : `Not installed on ${sys.here}`),
+        title(a.name, a.version ? `${a.version}${a.runtime === "app" ? " (built into the desktop app)" : ""} on ${sys.here}${a.folder ? " · " + a.folder : ""}` : `Not installed on ${sys.here}`),
         a.stability === "experimental" ? h("span", { class: "chip st-warn" }, "experimental") : null,
         h("button", { class: "switch", role: "switch", "aria-checked": a.enabled ? "true" : "false", "aria-label": `${a.name} on`,
           onclick: () => set(!a.enabled, a.remoteControl, a.import, a.enabled ? `${a.name} is off` : `${a.name} is on`) })),
@@ -121,7 +126,9 @@ function agents() {
       a.enabled && caps.includes("remote-control") ? h("label", { class: "opt" }, h("input", { type: "checkbox", checked: a.remoteControl, onchange: (e) => set(true, e.target.checked, a.import, "Saved") }),
         h("span", {}, h("b", {}, `Turn on Remote Control for sessions hopped into ${a.name}`), h("span", { class: "muted" }, "Reach them from your phone or other machines. Needs the agent's own subscription login."))) : null,
       a.enabled && caps.includes("import") ? h("label", { class: "opt" }, h("input", { type: "checkbox", checked: a.import, onchange: (e) => set(true, a.remoteControl, e.target.checked, "Saved") }),
-        h("span", {}, h("b", {}, `Continue in ${a.name} with its own importer`), h("span", { class: "muted" }, "Instead of hopsesh's conversion, when it can read the other agent; hopsesh still adds its briefing. The plan can change it each time."))) : null);
+        h("span", {}, h("b", {}, `Continue in ${a.name} with its own importer`), h("span", { class: "muted" }, "Instead of hopsesh's conversion, when it can read the other agent; hopsesh still adds its briefing. The plan can change it each time."))) : null,
+      a.enabled ? (a.kinds || []).map((k) => h("label", { class: "opt" }, h("input", { type: "checkbox", checked: k.shown, onchange: (e) => run(() => api("SetAgentKind", a.id, k.id, e.target.checked), "Saved · applies at the next scan") }),
+        h("span", {}, h("b", {}, `Show ${k.name.toLowerCase()}`), h("span", { class: "muted" }, k.note + " Hidden by default.")))) : null);
   });
 }
 
@@ -222,7 +229,7 @@ function terminal() {
 function skill() {
   const sk = s.skill || {}, copies = sk.copies || [], rules = sk.rules || [];
   const addRules = h("input", { type: "checkbox" });
-  const install = (force, withRules, done) => run(() => api("InstallSkill", force, withRules), done);
+  const install = (force, withRules, done) => run(() => withCLI(() => api("InstallSkill", force, withRules)), done);
   const acts = [];
   if (sk.state === "absent") acts.push(h("button", { class: "btn primary", onclick: () => install(false, addRules.checked, "Installed the hopsesh skill") }, "Install the skill"));
   if (sk.state === "stale" || sk.state === "broken") acts.push(h("button", { class: "btn primary", onclick: () => install(false, addRules.checked, "Updated the hopsesh skill") }, sk.state === "broken" ? "Repair" : "Update"));
@@ -255,8 +262,12 @@ function cli() {
   if (c.cannotInstall && c.state !== "ours") acts.push(h("span", { class: "muted", style: "font-size:12px" }, c.cannotInstall));
   else if (["missing", "other-app", "dangling"].includes(c.state)) acts.push(h("button", { class: "btn primary", onclick: () => run(() => api("InstallCLI", false), "The hopsesh command now runs this app's version") },
     c.state === "missing" ? "Install command" : c.state === "dangling" ? "Repair" : "Use this app's version"));
-  else if (c.state === "standalone" || c.state === "foreign") acts.push(h("button", { class: "btn", onclick: () => run(() => api("InstallCLI", true), sys.win ? "New terminal windows now run this app's hopsesh" : "Replaced; the previous one is kept as a backup") },
-    sys.win ? "Use this app's first" : "Replace with this app's (keeps a backup)"));
+  else if (c.state === "standalone" || c.state === "foreign") {
+    acts.push(h("span", { class: "muted", style: "font-size:12px;flex-basis:100%" },
+      `You have hopsesh ${c.version || ""}${c.version ? " " : ""}at `, h("span", { class: "mono" }, c.target || c.path), `, installed separately. Use this app's instead${sys.win ? "" : " (the old one is kept as a backup)"}, or keep both: updating hopsesh then updates both, and Machines shows when they differ.`));
+    acts.push(h("button", { class: "btn", onclick: () => run(() => api("InstallCLI", true), sys.win ? "New terminal windows now run this app's hopsesh" : "Replaced; the previous one is kept as a backup") },
+      sys.win ? "Use this app's first" : "Use this app's (keeps a backup)"));
+  }
   if (["ours", "other-app", "dangling"].includes(c.state)) acts.push(h("button", { class: "btn", onclick: () => run(() => api("UninstallCLI"), "Removed the hopsesh command") }, "Uninstall command"));
   return [card(
     h("div", { class: "set-row" }, title("The hopsesh command", `${cliHow()}, so any terminal, your agents and your other machines can run it. It updates with the app.`), chip(CLI_TEXT[c.state] || [c.state, ""])),
@@ -272,32 +283,37 @@ function cli() {
 }
 
 function updates() {
-  const u = state.update;
+  const u = checkingUpdate || updateError ? null : state.update;
   return [card(
-    h("div", { class: "set-row" }, title(`hopsesh ${s.version}`, u?.newer ? `hopsesh ${u.latest} is available.` : u ? "This is the newest version." : ""),
-      u?.newer && u.canInstall ? h("button", { class: "btn primary", onclick: (ev) => installUpdate(ev.currentTarget, u) }, "Install and restart") : null,
+    h("div", { class: "set-row" }, title(`hopsesh ${s.version}`, checkingUpdate ? "Checking GitHub for the newest release…" : u?.newer ? `hopsesh ${u.latest} is available.` : u?.latest ? "This is the newest version." : ""),
+      u?.newer && u.canInstall && waitingFor() === "update" ? [h("span", { class: "muted", role: "status" }, "Installs once the agents in your tabs finish their turns"),
+        h("button", { class: "btn", onclick: cancelDeferred }, "Don't wait"), h("button", { class: "btn", onclick: () => { cancelDeferred(); installUpdate(u); } }, "Install now…")] : null,
+      u?.newer && u.canInstall && waitingFor() !== "update" ? h("button", { class: "btn primary", disabled: !!installing, onclick: () => installUpdate(u) }, installing || "Install and restart") : null,
       u?.newer ? h("button", { class: u.canInstall ? "btn" : "btn primary", onclick: () => api("OpenURL", u.url).catch(fail) }, "See what's new") : null,
-      s.updateCheck === "on" ? h("button", { class: "btn", onclick: async () => { try { state.update = await api("CheckUpdate"); } catch (e) { fail(e); } render(); } }, "Check now") : null),
+      h("button", { class: "btn", disabled: checkingUpdate, onclick: checkUpdateNow }, checkingUpdate ? "Checking…" : "Check now")),
+    updateError ? h("div", { role: "alert", class: "warn" }, updateError) : null,
     h("label", { class: "opt" }, h("input", { type: "checkbox", checked: s.updateCheck === "on", onchange: (e) => save({ updateCheck: e.target.checked ? "on" : "off" }) }),
       h("span", {}, h("b", {}, "Check GitHub once a day for new versions"), h("span", { class: "muted" }, "Only the release list is fetched; nothing about you is sent."))))];
 }
 
-// installUpdate installs the new version over this app (the backend verifies it first),
-// which then reopens.
-async function installUpdate(btn, u) {
-  const n = running().length;
-  if (n && !await ask({ title: `Restart and end ${count(n, "program")}?`, body: "Installing the update restarts hopsesh, which ends every program in its terminal tabs. Claude Code and Codex keep each conversation up to its last finished turn.", ok: "Install and restart", danger: true })) return;
-  btn.disabled = true;
-  fill(btn, `Downloading and checking ${u.latest}…`);
-  try {
-    await api("InstallUpdate");
-    fill(btn, "Restarting…");
-  } catch (e) {
-    fail(e);
-    btn.disabled = false;
-    fill(btn, "Install and restart");
-  }
+async function checkUpdateNow() {
+  if (checkingUpdate) return;
+  checkingUpdate = true; updateError = "";
+  ++state.updateCheckRevision;
+  state.update = null;
+  render();
+  try { state.update = await api("LatestRelease"); }
+  catch (e) { updateError = errText(e); fail(e); }
+  finally { checkingUpdate = false; render(); }
 }
+
+// installUpdate installs the new version over this app (the backend verifies it first),
+// which then reopens, with the sessions its tabs ran.
+async function installUpdate(u) {
+  await installGuarded(u.latest, (t) => { installing = t; render(); });
+  render();
+}
+onDeferred(() => render());
 
 async function preview() {
   try {
@@ -308,7 +324,69 @@ async function preview() {
   } catch (e) { fail(e); }
 }
 
-const TABS = [["general", "General", general], ["desktop", "Desktop presence", desktop], ["agents", "Agents", agents], ["terminal", "Terminal", terminal], ["skill", "Skill", skill], ["cli", "Command line", cli], ["updates", "Updates", updates]];
+// history is Settings → History: how much conversation a transfer carries into the
+// destination's context, and the resources reading and preserving history may use.
+let hs = null, historyError = "";
+const kib = (n) => n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
+const mib = (n) => n >= 1024 ? `${n / 1024} GB` : `${n} MB`;
+async function setHistory(patch) {
+  if (saving) return;
+  saving = true;
+  const next = Object.assign({ contextBudget: hs.contextBudget, older: hs.older, readMemoryMB: hs.readMemoryMB, recordMB: hs.recordMB, archiveMB: hs.archiveMB, lineageMB: hs.lineageMB, nativeFileMB: hs.nativeFileMB }, patch);
+  hs = Object.assign({}, hs, patch);
+  render();
+  try { await api("SetHistorySettings", next); toast("Saved"); } catch (e) { fail(e); }
+  hs = await api("HistorySettings").catch(() => hs);
+  saving = false;
+  if (current === "settings") render();
+}
+function sizeRow(key, label, desc, choices, defBytes) {
+  const def = defBytes / (1 << 20);
+  const value = hs[key] || def;
+  return h("div", { class: "set-row" }, title(label, desc),
+    h("select", { "aria-label": label, onchange: (e) => setHistory({ [key]: Number(e.target.value) }) },
+      [...new Set([...choices, value])].sort((a, b) => a - b).map((n) => h("option", { value: n, selected: value === n }, mib(n) + (n === def ? " (default)" : "")))));
+}
+function history() {
+  if (historyError) return [loadError(historyError, loadHistory)];
+  if (!hs) return [h("div", { class: "loading", role: "status" }, "Reading the history settings…")];
+  const d = hs.defaults;
+  return [
+    h("span", { class: "muted", style: "font-size:12.5px" }, "When a session continues in another agent, hopsesh gives the destination a bounded working context and keeps the complete conversation in a portable archive the agent can consult."),
+    card(h("span", { class: "sec-h" }, "Handoff context"),
+      h("div", { class: "set-row" }, title("Context budget", "Automatic uses up to 30% of the destination model's context, less what the session already holds. A smaller budget leaves the agent more room to work; it can never exceed what the model allows."),
+        h("select", { "aria-label": "Context budget", onchange: (e) => setHistory({ contextBudget: Number(e.target.value) }) },
+          hs.contextBudgets.map((n) => h("option", { value: n, selected: (hs.contextBudget || 0) === n }, n ? `Up to ${kib(n)} (estimate)` : "Automatic (recommended)")))),
+      h("div", { class: "set-row" }, title("Older conversation", "What happens to history that does not fit. Either way, nothing is lost: omitted history stays in the portable archive, and the agent is told it was left out."),
+        seg("Older conversation", hs.older || "extract", [["extract", "Extract + recent turns"], ["recent", "Recent turns only"]], (v) => setHistory({ older: v }))),
+      h("span", { class: "muted", style: "font-size:12px" }, (hs.older === "recent"
+        ? "Recent turns only: the destination gets the newest complete turns and a note saying how many older entries were left out."
+        : "Extract: the latest native summary or earlier briefing, recent requests and the last agent reply, condensed and labeled as an extract (not an AI summary), then the recent turns.")
+        + " Sizes are conservative upper estimates, not exact token counts.")),
+    card(h("span", { class: "sec-h" }, "Resources (advanced)"),
+      h("span", { class: "muted", style: "font-size:12px" }, "Limits that keep a very large session from exhausting memory or disk. When one is reached, the transfer stops before anything is written, names the limit, and leaves the source and any existing destination unchanged. History is never silently truncated."),
+      sizeRow("readMemoryMB", "Reading memory", "Conversation a native transcript may hold in memory while hopsesh reads it.", hs.readMemoryMBs, d.readBytes),
+      sizeRow("recordMB", "Largest record", "One native record (a single message or tool result). Cannot exceed reading memory.", hs.recordMBs, d.recordBytes),
+      sizeRow("archiveMB", "Portable archive", "The preserved archive, including earlier transfers. Also the disk it may use per session.", hs.archiveMBs, d.archiveBytes),
+      sizeRow("lineageMB", "Movement ledger", "Saved transfer history and return checkpoints. Raising this limit preserves the complete ledger; nothing is truncated.", hs.lineageMBs, d.lineageBytes),
+      sizeRow("nativeFileMB", "Native file checks", "Whole native files read to verify forks, recover an interrupted write, or check a staged copy.", hs.nativeFileMBs, d.nativeFileBytes)),
+  ];
+}
+async function loadHistory() {
+  historyError = ""; hs = null;
+  try { hs = await api("HistorySettings"); } catch (e) { historyError = errText(e); }
+  if (current === "settings" && tab === "history") render();
+}
+
+// This machine's command, skill and protection hooks are shown on its page in Machines.
+const machines = () => machinesPanel({ here: () => [...cli(), ...skill(), noticeSetup()] });
+const TABS = [["general", "General", general], ["machines", "Machines", machines], ["clouds", "Clouds", cloudsPanel], ["desktop", "Desktop presence", desktop], ["agents", "Agents", agents], ["history", "History", history], ["terminal", "Terminal", terminal], ["updates", "Updates", updates]];
+// Tabs that became part of This machine's page in Machines.
+const HERE_TABS = ["hooks", "skill", "cli"];
+
+// The machine tab needs room for a list beside details.
+const WIDE = ["machines"];
+bindMachines(() => current === "settings" && ["machines", "clouds"].includes(tab), () => render());
 
 function render() {
   if (current !== "settings") return;
@@ -326,7 +404,7 @@ function render() {
         } }, label)),
       h("button", {class:"tab",onclick:()=>go("accounts")}, "Accounts"),
       h("span", { class: "spacer" })),
-    h("div", { class: "page", role: "tabpanel", "aria-labelledby": "tab-" + tab }, h("div", { class: "page-in", style: "max-width:760px" }, h("h1", {}, name), saving ? h("p", { role: "status" }, "Saving changes…") : null, h("fieldset", { class: "settings-fields", disabled: saving, "aria-busy": String(saving) }, body())))));
+    h("div", { class: "page", role: "tabpanel", "aria-labelledby": "tab-" + tab }, h("div", { class: "page-in", style: WIDE.includes(tab) ? "max-width:1180px" : "max-width:760px" }, h("h1", {}, name), saving ? h("p", { role: "status" }, "Saving changes…") : null, h("fieldset", { class: "settings-fields", disabled: saving, "aria-busy": String(saving) }, body())))));
   view.querySelector(".page").scrollTop = scrollTop;
 }
 
@@ -347,24 +425,46 @@ async function load() {
   ds = desktop.status === "fulfilled" ? desktop.value : null;
   desktopError = desktop.status === "rejected" ? desktop.reason : null;
   render();
-  await loadTerminal();
+  await Promise.all([loadTerminal(), loadHistory()]);
 }
 
-screen("settings", async (which) => {
+screen("settings", async (which, pick) => {
+  if (HERE_TABS.includes(which)) { which = "machines"; pick = "here"; }
   if (which) tab = which;
+  if (pick) pickMachine(pick);
   if (!s) loading("Reading the settings…");
   await load();
 });
 
+// hookName is the agent's name, with the account only when the agent has several here.
+const AGENT_NAMES = { claude: "Claude Code", codex: "Codex" };
+function hookName(hook, hooks) {
+  const name = AGENT_NAMES[hook.agent] || hook.agent;
+  return hooks.filter((x) => x.agent === hook.agent).length > 1 ? `${name} (${hook.profileLabel || hook.profile || "default account"})` : name;
+}
+
+// installHooks reports each item's own failure (the call itself succeeds when one agent
+// cannot take the hook).
+const installHooks = (id, profile) => withCLI(() => api("InstallNoticeHooks", id, profile)).then((res) => {
+  const bad = (res || []).filter((x) => x.result === "failed" || id && x.result === "unsupported");
+  if (bad.length) throw new Error(bad.map((x) => `${AGENT_NAMES[x.agent] || x.agent}: ${x.reason}`).join("; "));
+  return res;
+});
+
 function noticeSetup() {
   const hooks = s.noticeHooks || [];
-  return card(h("span", {class:"sec-h"}, "Movement notice delivery"),
-    h("span", {class:"muted"}, "Hopsesh keeps movement notices. Install local hooks to show them when an agent session starts. Installation does not prove delivery; the agent's hook trust settings still apply."),
-    s.noticeHooksError ? h("span", {class:"warn"}, s.noticeHooksError) : null,
+  const off = s.original === "off";
+  const trustWords = (t) => !t ? "" : t.state === "trusted" ? " · trusted by the agent" : t.state === "needs-review" ? " · waiting for your approval in the agent" : t.state === "disabled" ? " · turned off in the agent" : t.state === "missing" ? " · not seen by the agent" : " · trust not verified";
+  return card(h("span", {class:"sec-h"}, "Protection hooks"),
+    h("span", {class:"muted"}, "Blocking and warnings work through a small hook each agent runs before a prompt. The hooks run the hopsesh command. Codex runs a new hook only after you approve it in Codex (/hooks); hopsesh checks and tells you, and never approves hooks for you."),
+    s.noticeHooksError && s.cliReady ? h("span", {class:"warn"}, s.noticeHooksError) : null,
+    !s.cliReady ? h("span", {class:"warn"}, "The hopsesh command is not installed; installing a hook installs it first.") : null,
     ...hooks.map(hook => h("div", {class:"set-row"},
-      title(`${hook.agent} · ${hook.profileLabel || hook.profile || "Default account"}`, `${hook.installed ? "Installed" : "Not installed"}${!hook.enabled ? " · notices disabled" : ""}${hook.reason ? " · " + hook.reason : ""}${hook.evidence ? " · " + hook.evidence : ""}`),
-      hook.path ? h("span", {class:"mono",style:"font-size:11px;overflow-wrap:anywhere"}, hook.path) : null,
-      hook.installed ? h("button", {class:"btn",onclick:()=>run(()=>api("RemoveNoticeHooks",hook.agent,hook.profile),"Notice hook removed")}, "Remove hook")
-      : h("button", {class:"btn",disabled:!hook.supported || !s.movementNotices,onclick:()=>run(()=>api("InstallNoticeHooks",hook.agent,hook.profile),"Notice hook installed; delivery depends on agent settings")}, "Install hook"))),
-    h("button", {class:"btn",disabled:!s.movementNotices,onclick:()=>run(()=>api("InstallNoticeHooks","",""),"Local notice hooks installed; delivery depends on agent settings")}, "Set up local notice hooks"));
+      title(hookName(hook, hooks), `${hook.installed ? "Installed" : "Not installed"}${hook.installed ? trustWords(hook.trust) : ""}${hook.reason ? " · " + hook.reason : ""}`),
+      hook.trust && hook.trust.state !== "trusted" && hook.trust.fix ? h("span", {class:"muted",style:"font-size:12px"}, hook.trust.fix) : null,
+      hook.installed ? h("button", {class:"btn",onclick:()=>run(()=>api("RemoveNoticeHooks",hook.agent,hook.profile),"Hook removed")}, "Remove hook")
+      : h("button", {class:"btn",disabled:!hook.supported || off,onclick:()=>run(()=>installHooks(hook.agent,hook.profile),"Hook installed")}, "Install hook"))),
+    h("div", {style:"display:flex;gap:8px;flex-wrap:wrap"},
+      h("button", {class:"btn",disabled:off,onclick:()=>run(()=>installHooks("",""),"Hooks installed")}, "Install all hooks"),
+      h("button", {class:"btn",onclick:()=>run(()=>loadHookHealth(true))}, "Check again")));
 }

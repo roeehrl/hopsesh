@@ -149,10 +149,15 @@ func TestMovementConcurrentTips(t *testing.T) {
 		f.check(t, "A", "")
 	})
 	t.Run("move and fork", func(t *testing.T) {
+		// A separate copy never retires its source; a move does. The move decides the
+		// source's notice (and its block) however the two hops are ordered.
 		f := newMovementFixture("A", "B")
-		f.hop(t, "move", "A", "B", true)
 		f.fork(t, "fork", "A", "C", true)
-		f.check(t, "A", "")
+		f.hop(t, "move", "A", "B", true)
+		f.check(t, "A", "move")
+		if h, ok := f.m.Departure(f.ids["A"]); !ok || h.Fork || h.To != f.ids["B"] {
+			t.Fatalf("the move must decide the source's notice: %+v %v", h, ok)
+		}
 	})
 }
 
@@ -168,6 +173,16 @@ func TestMovementForkKeepsOriginalAvailable(t *testing.T) {
 	}
 	f.undo(t, "fork")
 	f.check(t, "B", "", "A")
+}
+
+func TestReturnClearsEarlierForkNoticeButKeepsANewFork(t *testing.T) {
+	f := newMovementFixture("A", "B")
+	f.hop(t, "move", "A", "B", true)
+	f.fork(t, "older-fork", "A", "C", true, "move")
+	f.hop(t, "return", "B", "A", true, "move")
+	f.check(t, "A", "", "B")
+	f.fork(t, "new-fork", "A", "D", true, "return")
+	f.check(t, "A", "new-fork", "B")
 }
 
 func TestMovementSiblingAndParentExclusions(t *testing.T) {
@@ -300,4 +315,33 @@ func TestMovementReturnIdentityIsReplicaScoped(t *testing.T) {
 	f.check(t, "other", "", "B", "A")
 	f.hop(t, "actual-return", "other", "A", true, "other-profile")
 	f.check(t, "A", "", "other", "B")
+}
+
+// Departed is the committed movement record behind "moved to …" statuses: it does not
+// depend on notices, a return clears it, a fork does not set it, and undo restores it.
+func TestDepartedIgnoresNoticesAndForks(t *testing.T) {
+	f := newMovementFixture("A", "B", "C")
+	departed := func(current, want string) {
+		t.Helper()
+		h, ok := f.m.Departed(f.ids[current])
+		if ok != (want != "") || h.ID != want {
+			t.Errorf("Departed(%s) = (%s, %t), want %q", current, h.ID, ok, want)
+		}
+	}
+	f.hop(t, "h1", "A", "B", false)
+	departed("A", "h1")
+	departed("B", "")
+	f.hop(t, "h2", "B", "C", false, "h1")
+	departed("A", "h2") // where the branch is now
+	departed("B", "h2")
+	departed("C", "")
+	f.hop(t, "h3", "C", "A", true, "h2")
+	departed("A", "")
+	departed("C", "h3")
+	f.fork(t, "f1", "A", "F", true, "h3")
+	departed("A", "")
+	departed("F", "")
+	f.undo(t, "h3")
+	departed("A", "h2")
+	departed("C", "")
 }

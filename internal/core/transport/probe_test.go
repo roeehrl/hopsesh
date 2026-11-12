@@ -20,10 +20,12 @@ func TestSSHConfigLookupIsBounded(t *testing.T) {
 	if err := os.WriteFile(fake, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	defer func(d time.Duration) { sshConfigTimeout = d }(sshConfigTimeout)
+	sshConfigTimeout = 2 * time.Second
 	c := &Conn{Dest: "offline", sshBinary: fake}
 	start := time.Now()
 	_, err := c.Resolve(t.Context())
-	if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 10*time.Second {
+	if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > sshConfigTimeout+5*time.Second {
 		t.Fatalf("unbounded settings lookup: %v after %v", err, time.Since(start))
 	}
 	// The optional local-network preflight obeys a shorter caller deadline too.

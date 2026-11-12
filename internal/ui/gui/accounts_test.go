@@ -232,14 +232,22 @@ func TestAccountSignInCompletionRefreshesTheSelectedProfile(t *testing.T) {
 case "$1" in
  --version) echo '2.1.284'; exit 0;;
 esac
-if [ "$1" = auth ] && [ "$2" = login ]; then touch "$CLAUDE_CONFIG_DIR/signed-in"; exit 0; fi
+# Native lookup and explicit configuration at the same root use different state
+# files, matching Claude's config lookup without touching real credentials.
+config="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+state="$HOME/.claude.json"
+if [ -n "$CLAUDE_CONFIG_DIR" ]; then state="$CLAUDE_CONFIG_DIR/.claude.json"; fi
+if [ "$1" = auth ] && [ "$2" = login ]; then
+ printf '{"loggedIn":true,"email":"signed-in@example.com","authMethod":"claude.ai","configDirectory":"%s"}\n' "$config" > "$state"
+ exit $?
+fi
 if [ "$1" = auth ] && [ "$2" = status ]; then
- if [ -f "$CLAUDE_CONFIG_DIR/signed-in" ]; then
-  printf '{"loggedIn":true,"email":"signed-in@example.com","authMethod":"claude.ai","configDirectory":"%s"}\n' "$CLAUDE_CONFIG_DIR"
+ if [ -f "$state" ]; then
+  cat "$state"
+  exit $?
  else
-  printf '{"loggedIn":false,"configDirectory":"%s"}\n' "$CLAUDE_CONFIG_DIR"; exit 1
+  printf '{"loggedIn":false,"configDirectory":"%s"}\n' "$config"; exit 1
  fi
- exit 0
 fi
 exit 1
 `
@@ -263,7 +271,7 @@ exit 1
 			break
 		}
 	}
-	if profile.ID == "" || profile.Account == nil || profile.Account.LoggedIn {
+	if profile.ID == "" || !profile.Default || profile.Root != filepath.Join(os.Getenv("HOME"), ".claude") || profile.Account == nil || profile.Account.LoggedIn {
 		t.Fatalf("initial account: %+v", profile)
 	}
 	before := a.inv
@@ -290,6 +298,12 @@ exit 1
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("sign-in exited without refreshing account")
+	}
+	if _, err := os.Stat(filepath.Join(os.Getenv("HOME"), ".claude.json")); err != nil {
+		t.Fatal("native sign-in did not write its default config state", err)
+	}
+	if _, err := os.Stat(filepath.Join(profile.Root, ".claude.json")); !os.IsNotExist(err) {
+		t.Fatal("native sign-in used alternate explicit-root config state", err)
 	}
 	a.mu.Lock()
 	after := a.inv

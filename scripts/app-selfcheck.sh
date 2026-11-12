@@ -6,6 +6,7 @@
 #   scripts/app-selfcheck.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source scripts/app-check-exit.sh
 WORK=$(mktemp -d "${RUNNER_TEMP:-/tmp}/hsapp.XXXXXX")
 go build -tags e2e -o "$WORK/hopsesh-app" ./cmd/hopsesh-app
 go run ./internal/devtools/webtest -home "$WORK/home" -prepare > "$WORK/env.json"
@@ -30,7 +31,7 @@ for _ in $(seq 1 120); do
   sleep 1
 done
 kill "$pid" 2>/dev/null || true
-pkill -f "$WORK/hopsesh-app" 2>/dev/null || true
+app_check_exit "$pid" "$WORK/hopsesh-app" "$WORK/app.log"
 if [ -z "$ok" ]; then
   echo "the app did not list the demo sessions and answer through its backend in time" >&2
   echo "--- the app's log, first lines" >&2

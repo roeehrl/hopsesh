@@ -24,6 +24,7 @@ import (
 type App struct {
 	Catalog       *catalog.Store
 	movementReads *movementReadCache
+	movementMemo  *movementMemo
 	Cfg           config.Config
 	Reg           *registry.Registry // every compiled-in module
 	StateDir      string
@@ -51,11 +52,16 @@ type App struct {
 	// tests keeps the clouds' recent read-only probes, so replanning a hand-off does not ask
 	// the vendor again each time (shared by copies of the App; nil: never kept).
 	tests *cloudTests
+	// Skills renders the hopsesh skill (nil: this front end installs no skill).
+	Skills SkillFiles
+	// Login is set in hopsesh serve, which runs in the user's login session (nil
+	// elsewhere).
+	Login *Login
 }
 
 // New returns an App for the modules and configuration.
 func New(cfg config.Config, reg *registry.Registry, stateDir string, log *audit.Log) *App {
-	return &App{Catalog: catalog.New(stateDir), movementReads: &movementReadCache{entries: map[string]movementRead{}}, Cfg: cfg, Reg: reg, StateDir: stateDir, Audit: log, Log: slog.Default(), tests: &cloudTests{m: map[string]cloudTest{}}}
+	return &App{Catalog: catalog.New(stateDir), movementReads: &movementReadCache{entries: map[string]movementRead{}}, movementMemo: &movementMemo{}, Cfg: cfg, Reg: reg, StateDir: stateDir, Audit: log, Log: slog.Default(), tests: &cloudTests{m: map[string]cloudTest{}}}
 }
 
 // Modules returns the enabled modules.
@@ -88,7 +94,7 @@ func (a *App) Module(id agent.ID) (agent.Module, bool) {
 	return nil, false
 }
 
-// LocalName is this machine's name in marks and lineage: $HOPSESH_MACHINE, else its short
+// LocalName is this machine's name in lineage: $HOPSESH_MACHINE, else its short
 // host name.
 func LocalName() string {
 	if n := strings.TrimSpace(os.Getenv("HOPSESH_MACHINE")); n != "" {

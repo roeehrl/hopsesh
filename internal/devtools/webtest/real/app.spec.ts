@@ -46,8 +46,9 @@ test("the details pane and settings work against the real service", async () => 
   await expect(page.getByRole("menuitem", { name: /^Continue with Codex…/ })).toBeVisible();
   await page.keyboard.press("Escape");
   await page.keyboard.press("Control+,");
-  await page.getByRole("tab", { name: "Command line" }).click();
-  await expect(page.getByText(/Puts the app's folder on your PATH/)).toBeVisible();
+  await page.getByRole("tab", { name: "Machines", exact: true }).click();
+  await page.getByRole("listbox", { name: "Machines" }).getByRole("option", { name: /This PC/ }).click();
+  await expect(page.locator("#here-setup").getByText(/Puts the app's folder on your PATH/)).toBeVisible();
   await page.getByRole("tab", { name: "Agents" }).click();
   await expect(page.locator(".cap", { hasText: "continues in other agents" }).first()).toBeVisible();
 });

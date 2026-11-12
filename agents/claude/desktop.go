@@ -2,8 +2,10 @@ package claude
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
+	"time"
 
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
@@ -57,6 +59,63 @@ func detectDesktop(h agent.Host, in *agent.Install) {
 			break
 		}
 	}
+	if in.Desktop != "" {
+		in.DesktopAccount = desktopAccount(h, f)
+		// Desktop keeps its own Claude Code, one folder per version.
+		vs, _ := h.FS().ReadDir(h.Path().Join(desktopData(h, f), "claude-code"))
+		for _, v := range vs {
+			_, valid := agent.CompareVersions(v.Name(), v.Name())
+			if c, _ := agent.CompareVersions(v.Name(), in.DesktopEngine); v.IsDir() && valid && (in.DesktopEngine == "" || c > 0) {
+				in.DesktopEngine = v.Name()
+			}
+		}
+	}
+}
+
+// desktopData is Claude desktop's own folder.
+func desktopData(h agent.Host, f agent.Facts) string {
+	if f.OS == "windows" {
+		if ad := f.Env["APPDATA"]; ad != "" {
+			return h.Path().Join(ad, "Claude")
+		}
+		return h.Path().Join(f.Home, "AppData", "Roaming", "Claude")
+	}
+	return h.Path().Join(f.Home, "Library", "Application Support", "Claude")
+}
+
+// desktopAccount is who Claude desktop is signed in as: the account id it last knew (its
+// config.json's lastKnownAccountUuid, taken alone: never its token caches) and the
+// organization it files that account's sessions under (a folder name of its session
+// index). Desktop keeps its own sign-in, apart from the terminal's.
+func desktopAccount(h agent.Host, f agent.Facts) *agent.OwnerRun {
+	r, ok := h.FS().(agent.IdentityFS)
+	if !ok {
+		return nil
+	}
+	dir := desktopData(h, f)
+	got, err := r.ReadIdentity(h.Path().Join(dir, "config.json"), func(b []byte) (map[string]string, error) {
+		var c struct {
+			Account string `json:"lastKnownAccountUuid"`
+		}
+		if err := json.Unmarshal(b, &c); err != nil {
+			return nil, err
+		}
+		return map[string]string{"account": c.Account}, nil
+	})
+	acct := got["account"]
+	if err != nil || !desktopSessionID.MatchString(acct) {
+		return nil
+	}
+	run := &agent.OwnerRun{Person: personKey(acct), Source: "claude-desktop"}
+	// The organization: the newest folder of that account's session index.
+	orgs, _ := h.FS().ReadDir(h.Path().Join(dir, "claude-code-sessions", acct))
+	var newest time.Time
+	for _, o := range orgs {
+		if o.IsDir() && desktopSessionID.MatchString(o.Name()) && (run.Key == "" || o.ModTime().After(newest)) {
+			newest, run.Key = o.ModTime(), accountKey(o.Name())
+		}
+	}
+	return run
 }
 
 func (*Module) CheckApp(in agent.Install, key agent.SessionKey, o agent.ResumeOptions) error {

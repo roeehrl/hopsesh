@@ -2,6 +2,7 @@ package claude
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -227,7 +228,7 @@ func TestRename(t *testing.T) {
 	if after, _ := fh.FS().Stat(a.Path); !after.ModTime().Equal(before.ModTime()) {
 		t.Fatal("a rename must keep the file's time")
 	}
-	// A moved copy keeps its mark.
+	// Renaming a copy an older hopsesh labelled drops the label with the old title.
 	if err := m.Rename(ctx, h, in, b, "Flags"); err != nil {
 		t.Fatal(err)
 	}
@@ -239,8 +240,8 @@ func TestRename(t *testing.T) {
 				t.Errorf("renamed: %q/%q", s.Title, s.TitleSource)
 			}
 		case s2:
-			if s.Title != "Flags" || s.Mark == nil || s.Mark.Location != "studio" {
-				t.Errorf("renamed copy: %q %+v", s.Title, s.Mark)
+			if s.Title != "Flags" || s.LegacyLabel != nil {
+				t.Errorf("renamed copy: %q %+v", s.Title, s.LegacyLabel)
 			}
 		}
 	}
@@ -304,5 +305,56 @@ func TestLiveInfoDeduplicatesPID(t *testing.T) {
 	})
 	if len(li.Procs) != 2 || li.Name != "new" || li.Status != "working" || li.Procs[0].Waiting {
 		t.Fatalf("%+v", li)
+	}
+}
+
+// The registry's bridgeSessionId is Remote Control: an id while connected, null once
+// disconnected, absent in versions that don't record it.
+func TestLiveInfoRemoteControl(t *testing.T) {
+	now := time.Now()
+	on := json.RawMessage(`"session_01W49ntRitSA2wFvjbENSNVP"`)
+	off := json.RawMessage(`null`)
+	for _, c := range []struct {
+		name      string
+		bridges   []json.RawMessage
+		want, url string
+	}{
+		{"connected", []json.RawMessage{on}, agent.RemoteOn, "https://claude.ai/code/session_01W49ntRitSA2wFvjbENSNVP"},
+		{"disconnected", []json.RawMessage{off}, agent.RemoteOff, ""},
+		{"not recorded by an older Claude Code", []json.RawMessage{nil}, "", ""},
+		{"one of two connected", []json.RawMessage{off, on}, agent.RemoteOn, "https://claude.ai/code/session_01W49ntRitSA2wFvjbENSNVP"},
+		{"one off, one unknown", []json.RawMessage{off, nil}, "", ""},
+		{"an id of another shape", []json.RawMessage{json.RawMessage(`"cse_x/../y"`)}, agent.RemoteOn, ""},
+	} {
+		var les []liveEntry
+		for i, b := range c.bridges {
+			les = append(les, liveEntry{PID: i + 1, Status: "idle", Bridge: b, written: now})
+		}
+		li := liveInfo(les)
+		if li.RemoteControl != c.want || li.RemoteURL != c.url {
+			t.Errorf("%s: %q %q", c.name, li.RemoteControl, li.RemoteURL)
+		}
+	}
+	// A Claude Code that records connections and has none never connected.
+	if li := liveInfo([]liveEntry{{PID: 1, Version: "2.1.311", written: now}}); li.RemoteControl != agent.RemoteOff {
+		t.Errorf("never connected: %q", li.RemoteControl)
+	}
+	if li := liveInfo([]liveEntry{{PID: 1, Version: "2.1.120", written: now}}); li.RemoteControl != "" {
+		t.Errorf("too old to say: %q", li.RemoteControl)
+	}
+}
+
+// A turn whose first reply names a record Claude Code never wrote is still on the branch:
+// the preview shows the turns before it instead of stopping there.
+func TestPreviewAcrossUnwrittenParent(t *testing.T) {
+	file := writeTranscript(t, "/t/"+t.Name(), "p1", []line{
+		{"type": "user", "uuid": "u1", "parentUuid": nil, "message": map[string]any{"role": "user", "content": "first question"}},
+		{"type": "assistant", "uuid": "a1", "parentUuid": "never-written", "message": map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "text", "text": "first answer"}}}},
+		{"type": "user", "uuid": "u2", "parentUuid": "a1", "message": map[string]any{"role": "user", "content": "second question"}},
+		{"type": "assistant", "uuid": "a2", "parentUuid": "also-never-written", "message": map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "text", "text": "second answer"}}}},
+	})
+	p := preview(t, fake, file, 10)
+	if got, want := shape(p), "user:first question | agent:first answer | user:second question | agent:second answer"; got != want {
+		t.Fatalf("preview:\n got %s\nwant %s", got, want)
 	}
 }

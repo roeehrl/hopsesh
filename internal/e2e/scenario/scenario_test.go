@@ -56,6 +56,7 @@ func TestScenarios(t *testing.T) {
 			env.Setenv("HOPSESH_STATE_DIR", filepath.Join(home, "hopsesh-state"))
 			env.Setenv("HOPSESH_MACHINE", "here")
 			env.Setenv("HOPSESH_TAILSCALE", "off")
+			env.Setenv("HOPSESH_APP_RUNTIMES", "off")
 			env.Setenv("FAKE_AGENT_LOG", filepath.Join(env.WorkDir, "agents.log"))
 			env.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(home, ".gitconfig"))
 			env.Setenv("GIT_AUTHOR_NAME", "Sam Doe")

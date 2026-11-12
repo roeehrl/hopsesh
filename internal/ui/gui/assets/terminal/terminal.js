@@ -211,6 +211,7 @@ function watchTrust(t, text) {
 // update takes a tab's new state (from its stream or the list).
 function update(t, i) {
   const before = t.info;
+  if (i.kind && before.revision !== undefined && (i.revision || 0) < before.revision) return;
   // List messages are complete metadata snapshots; omitted optional fields clear
   // earlier associations. Per-PTY state frames contain only Info and are merged.
   t.info = i.kind ? {...i} : Object.assign({}, t.info, i);
@@ -325,7 +326,7 @@ function shortcuts() {
 // ---- drawing the window ------------------------------------------------------------------
 
 function groupKey(t){return prefs.grouping==="none"?"":prefs.grouping==="session"?(t.info.machine+"/"+(t.info.key||t.id)):(t.info.relationship?.family||"other");}
-function groupName(t){return prefs.grouping==="session"?(t.info.relationship?.branchName||t.info.title):(t.info.relationship?.name||"Other terminals");}
+function groupName(t){const name=prefs.grouping==="session"?(t.info.relationship?.branchName||t.info.title):(t.info.relationship?.name||"Other terminals");return t.info.association==="Checking session association"?"Last verified: "+name:name;}
 function drawGroups(){
  const el=$("#terminal-groups");
  if(prefs.grouping==="none" || tabs.size<2){el.replaceChildren();return;}
@@ -404,10 +405,14 @@ function paint() {
   $("#reads").hidden = i.kind !== "step";
   if (i.kind === "signin") runs.replaceChildren("Runs ", h("span", { class: "mono" }, i.command), " · your browser opens the sign-in page; hopsesh never sees it");
   else if (i.kind === "shell") runs.replaceChildren("Your login shell ", h("span", { class: "mono" }, (i.command || "").replace(/^your login shell /, "")), " in ", h("span", { class: "mono" }, home(i.dir)));
+  else if (i.kind === "remote") runs.replaceChildren("Runs on ", h("b", {}, i.machine), ` · ${i.command} · started ` + ago(i.started));
   else runs.replaceChildren(t.info.machine ? `${t.info.machine}${t.info.account ? " · "+t.info.account : ""} · ` : "", "Runs ", h("span", { class: "mono" }, i.command || i.program), " in ", h("span", { class: "mono" }, home(i.dir)), " · started " + ago(i.started));
-  if(i.relationship?.branchName) runs.append(" · "+i.relationship.branchName);
- if (i.association === "Session association not confirmed") runs.append(" · Session association not confirmed");
- runs.title = `${i.command || i.program}\n${i.dir}`;
+  if(i.relationship?.branchName) runs.append(" · "+(i.association === "Checking session association" ? "Last verified branch: " : "")+i.relationship.branchName);
+ if (i.association === "Session association not confirmed" || i.association === "Checking session association") {
+  runs.append(" · " + i.association);
+  if(i.pid) runs.append(` · PTY PID ${i.pid}`);
+ }
+ runs.title = `${i.command || i.program}\n${i.dir}\nPTY PID: ${i.pid || "not available"}\nStarted: ${i.started || "not available"}`;
   $("#t-external").hidden = !i.external || (done && i.kind === "step");
   $("#t-reader").setAttribute("aria-pressed", prefs.screenReader ? "true" : "false");
 
@@ -426,6 +431,8 @@ function paint() {
     }
   } else if (i.kind === "bring" && !done) {
     show("warn", svg(ICON_INFO, 16), h("span", {}, `Send a message to keep this session here. ${agent} saves its copy once you do.`));
+  } else if (i.kind === "remote" && !done) {
+    show("ok", svg(ICON_INFO, 16), h("span", {}, `This runs on ${i.machine}, in your login session there. Closing this tab leaves it running there; continue it again to see it.`));
   } else if (i.kind === "signin") {
     show("lock", padlock(), h("span", {}, "Nothing in a sign-in tab is recorded. hopsesh doesn't watch, match or keep what appears here, and it's gone when you close the tab."));
   }
@@ -458,7 +465,7 @@ function ask({ title, body, ok, danger = false, extra }) {
 async function closeTab(t) {
   if (!t) return;
   const i = t.info;
-  if (i.state !== "exited" && i.kind !== "shell") {
+  if (i.state !== "exited" && i.kind !== "shell" && i.kind !== "remote") {
     const body = i.kind === "session" ? "The conversation is kept up to its last finished turn." : i.kind === "step" ? "The hand-off stops waiting for it." : "";
     if (!await ask({ title: `End ${program(t)} in “${i.title}”?`, body, ok: "End and close", danger: true })) return;
   }
@@ -472,6 +479,7 @@ async function moveOut(t) {
   const body = i.kind === "step"
     ? `hopsesh ends this tab and starts ${i.command} again in ${where}. Nothing is in the cloud until you answer its question there.`
     : i.state === "exited" ? `hopsesh runs ${i.command} again in ${where}.`
+    : i.kind === "remote" ? `It keeps running on ${i.machine}; ${where} shows it instead of this tab.`
     : `hopsesh ends it here and runs the same ${i.command} in ${where}.${i.kind === "session" ? " A turn in progress stops." : ""}`;
   if (await ask({ title, body, ok: i.state === "exited" ? `Open in ${where}` : `End here and open in ${where}` })) request({ op: "external", id: t.id });
 }

@@ -40,7 +40,7 @@ func (m *Module) MovementHooks(h agent.Host, in agent.Install, bin string, args 
 		out.DisabledReason = "cannot read Claude hook policy from settings.json"
 	}
 	if !agent.HookVersionAtLeast(in.Version, "2.1.284") {
-		out.Reason = "movement hooks require a verified Claude Code version >= 2.1.284 (major 2)"
+		out.Reason = agent.NeedsVersion("Claude Code", in.Version, "2.1.284")
 	}
 	return out
 }

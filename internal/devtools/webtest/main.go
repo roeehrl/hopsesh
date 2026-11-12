@@ -60,8 +60,9 @@ import (
 
 // live makes a demo Claude Code session open (in Claude Code's own process registry, with
 // this program's pid, which runs): started by entrypoint ("cli" in a terminal,
-// "claude-desktop" in the Claude app).
-func live(home, session, entrypoint string) error {
+// "claude-desktop" in the Claude app); bridge, when set, is the Remote Control session it
+// is connected to ("none" records it disconnected).
+func live(home, session, entrypoint, bridge string) error {
 	if session == "" {
 		return fmt.Errorf("session is required")
 	}
@@ -69,7 +70,15 @@ func live(home, session, entrypoint string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	b, err := json.Marshal(map[string]any{"pid": os.Getpid(), "sessionId": session, "kind": "interactive", "entrypoint": entrypoint, "status": "idle"})
+	rec := map[string]any{"pid": os.Getpid(), "sessionId": session, "kind": "interactive", "entrypoint": entrypoint, "status": "idle"}
+	switch bridge {
+	case "":
+	case "none":
+		rec["bridgeSessionId"] = nil
+	default:
+		rec["bridgeSessionId"] = bridge
+	}
+	b, err := json.Marshal(rec)
 	if err != nil {
 		return err
 	}
@@ -181,6 +190,8 @@ func main() {
 		}
 		_ = os.Unsetenv("FAKE_MOVEMENT_ACCOUNT")
 		_ = os.Unsetenv("FAKE_CODEX_EMAIL")
+		_ = os.Unsetenv("FAKE_CODEX_VERSION")
+		_ = os.Unsetenv("FAKE_CODEX_HOOKS")
 		if err := os.RemoveAll(h); err != nil {
 			return err
 		}
@@ -202,6 +213,7 @@ func main() {
 		return svc.SetTerminalSettings(gui.TerminalSettingsInput{Where: where, KeepTabs: true, Notify: true, CloseEnded: closeEnded, FontSize: set.FontSize, Scrollback: set.Scrollback})
 	}
 	http.HandleFunc("/events", serveEvents)
+	registerCachedMovementWorld(&mu, h, &svc)
 	gui.SetTerminal(background)
 	if self, err := os.Executable(); err == nil {
 		gui.SetStepProgram(self)
@@ -280,7 +292,7 @@ func main() {
 		}
 		mu.Lock()
 		defer mu.Unlock()
-		if err := live(h, r.URL.Query().Get("session"), r.URL.Query().Get("entrypoint")); err != nil {
+		if err := live(h, r.URL.Query().Get("session"), r.URL.Query().Get("entrypoint"), r.URL.Query().Get("bridge")); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 	})
@@ -338,6 +350,22 @@ func main() {
 			}
 		}
 	})
+	http.HandleFunc("/lineage", func(w http.ResponseWriter, r *http.Request) {
+		if err := readLineage(w, r, svc); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+	})
+	http.HandleFunc("/history-ledger", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if err := seedHistoryLedger(w, r, svc, h); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+	})
 	http.HandleFunc("/dirty", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "POST only", http.StatusMethodNotAllowed)
@@ -364,6 +392,43 @@ func main() {
 			_ = os.Setenv("FAKE_MOVEMENT_ACCOUNT", "1")
 			_ = os.Setenv("FAKE_CODEX_EMAIL", "alice@example.com")
 		}
+		if r.URL.Query().Get("voice") == "1" {
+			// A Codex app voice conversation: hidden unless Settings › Agents shows them.
+			if err := voiceWorld(h); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+		if r.URL.Query().Get("owners") == "1" {
+			// Claude Code is signed in to alice@example.com (org-fixture) now; one demo
+			// session records that it ran under another account, one under alice's.
+			_ = os.Setenv("FAKE_MOVEMENT_ACCOUNT", "1")
+			if err := ownersWorld(h); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+		if p := r.URL.Query().Get("protection"); p != "" {
+			// protection=blocked: the hopsesh command is installed and Codex trusts hopsesh's
+			// protection hooks, so a moved original is blocked. protection=review: the hooks
+			// are installed but wait for the user's approval in Codex (/hooks).
+			if err := protectionWorld(h, p); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			mu.RLock()
+			app := svc
+			mu.RUnlock()
+			// Scan first: it registers the Codex account profile the hooks are installed for.
+			if _, err := app.Scan(); err != nil {
+				http.Error(w, "scanning: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if _, err := app.InstallNoticeHooks("", ""); err != nil {
+				http.Error(w, "installing the protection hooks: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
 		if r.URL.Query().Get("terminal") == gui.WhereHere {
 			// In the app's own terminal the stand-in Claude Code asks whether it trusts a
 			// folder it has not seen (the user answers in the tab).
@@ -389,7 +454,7 @@ func main() {
 		mu.RLock()
 		terms := svc.Terms
 		mu.RUnlock()
-		info, err := openFake(terms, r.URL.Query().Get("title"), r.URL.Query().Get("trust") == "1", r.URL.Query().Get("quiet") == "1", r.URL.Query().Get("kind"), r.URL.Query().Get("as"))
+		info, err := openFake(terms, r.URL.Query().Get("title"), r.URL.Query().Get("trust") == "1", r.URL.Query().Get("quiet") == "1", r.URL.Query().Get("kind"), r.URL.Query().Get("as"), r.URL.Query().Get("machine"), r.URL.Query().Get("key"))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -711,7 +776,7 @@ func (w *wsConn) Close() error {
 // openFake opens a tab running termfake (this program), as one of the app's entry points
 // would: kind session (default), step (with the hand-off's banner), signin (recorded
 // nowhere) or shell.
-func openFake(terms *gui.Terminals, title string, trust, quiet bool, kind, as string) (any, error) {
+func openFake(terms *gui.Terminals, title string, trust, quiet bool, kind, as, machine, key string) (any, error) {
 	self, err := os.Executable()
 	if err != nil {
 		return nil, err
@@ -751,7 +816,9 @@ func openFake(terms *gui.Terminals, title string, trust, quiet bool, kind, as st
 	}
 	home, _ := os.UserHomeDir()
 	spec := pty.Spec{Argv: argv, Dir: home, Title: title, Private: kind == gui.TabSignIn || kind == gui.TabShell}
-	meta := gui.TabMeta{Kind: kind, Command: strings.Join(append([]string{"termfake"}, argv[1:]...), " "), Agent: "Termfake", Rerun: kind != gui.TabStep, External: false}
+	// machine and key: the tab stands for a listed session (hopsesh resumes that one when
+	// it reopens the tabs).
+	meta := gui.TabMeta{Kind: kind, Command: strings.Join(append([]string{"termfake"}, argv[1:]...), " "), Agent: "Termfake", Rerun: kind != gui.TabStep, External: false, Machine: machine, Key: key}
 	if as == "claude" && kind == gui.TabStep {
 		// For screenshots: the tab presents itself as a real hand-off step does, the stand-in
 		// running in the demo repository's hand-off folder.
@@ -781,7 +848,7 @@ var (
 
 func relay(name string, data any) {
 	switch name {
-	case gui.AccountEvent, gui.DiscoveryEvent, "hopsesh:terminal-main", gui.TerminalPreferencesEvent, gui.TerminalWorkspaceEvent, gui.AppearanceEvent, gui.TerminalEvent, gui.QuitEvent, gui.SignedInEvent, gui.TerminalAppEvent, gui.ExternalExitEvent:
+	case gui.AccountEvent, gui.MachineSetupEvent, gui.DiscoveryEvent, "hopsesh:terminal-main", gui.TerminalPreferencesEvent, gui.TerminalWorkspaceEvent, gui.AppearanceEvent, gui.TerminalEvent, gui.QuitEvent, gui.SignedInEvent, gui.TerminalAppEvent, gui.ExternalExitEvent:
 	default:
 		return
 	}
@@ -813,4 +880,75 @@ func serveEvents(w http.ResponseWriter, r *http.Request) {
 	delete(eventWS, c)
 	eventsMu.Unlock()
 	_ = c.CloseNow()
+}
+
+// protectionWorld installs a stand-in hopsesh command (a regular file in ~/.local/bin, on
+// PATH) and makes the stand-in Codex a version with hooks whose hooks/list reports them
+// trusted (blocked) or waiting for review (review).
+// ownersWorld appends Remote Control records naming the account that ran two demo Claude
+// Code sessions: the first under another account (org-previous), the second under the one
+// signed in now (org-fixture).
+func ownersWorld(h string) error {
+	files, err := filepath.Glob(filepath.Join(h, ".claude", "projects", "*", "0b6c6a8e-1d2f-4c3b-9a7e-5f4d3c2b1a0[12].jsonl"))
+	if err != nil || len(files) != 2 {
+		return fmt.Errorf("the demo's two Claude Code sessions: %v %v", files, err)
+	}
+	for i, f := range files {
+		org := []string{"org-previous", "org-fixture"}[i]
+		id := strings.TrimSuffix(filepath.Base(f), ".jsonl")
+		rec := fmt.Sprintf(`{"type":"bridge-session","sessionId":%q,"bridgeSessionId":"cse_01Owner%dFixture","lastSequenceNum":0,"ownerAccountUuid":"acct-%s","ownerOrganizationUuid":%q}`+"\n", id, i, org, org)
+		fh, err := os.OpenFile(f, os.O_APPEND|os.O_WRONLY, 0)
+		if err != nil {
+			return err
+		}
+		_, err = fh.WriteString(rec)
+		if cerr := fh.Close(); err == nil {
+			err = cerr
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// voiceWorld adds a thread the Codex app started from a voice conversation
+// (session_meta thread_source "realtime_voice") to the demo repository.
+func voiceWorld(h string) error {
+	const id = "01a0fe1c-0000-7000-8000-00000000f0ce"
+	dir := filepath.Join(h, ".codex", "sessions", "2026", "10", "02")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	meta, err := json.Marshal(map[string]any{"timestamp": "2026-10-02T06:00:00.000Z", "type": "session_meta", "payload": map[string]any{
+		"id": id, "timestamp": "2026-10-02T06:00:00.000Z", "cwd": filepath.Join(h, "git", "demo"), "originator": "Codex Desktop",
+		"cli_version": "0.162.0-alpha.17.2", "source": "vscode", "thread_source": "realtime_voice", "model_provider": "openai"}})
+	if err != nil {
+		return err
+	}
+	b := string(meta) + "\n" + `{"timestamp":"2026-10-02T06:00:01.000Z","type":"event_msg","payload":{"type":"user_message","message":"Plan the week out loud","images":[]}}` + "\n"
+	return os.WriteFile(filepath.Join(dir, "rollout-2026-10-02T09-00-00-"+id+".jsonl"), []byte(b), 0o600)
+}
+
+func protectionWorld(h, mode string) error {
+	trust := map[string]string{"blocked": "trusted", "review": "untrusted"}[mode]
+	if trust == "" {
+		return fmt.Errorf("protection is blocked or review, not %q", mode)
+	}
+	bin := filepath.Join(h, ".local", "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		return err
+	}
+	name := "hopsesh"
+	script := "#!/bin/sh\necho \"hopsesh (webtest stand-in)\"\n"
+	if runtime.GOOS == "windows" {
+		name, script = "hopsesh.cmd", "@echo hopsesh (webtest stand-in)\r\n"
+	}
+	if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o755); err != nil {
+		return err
+	}
+	os.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	os.Setenv("FAKE_CODEX_VERSION", "0.160.1")
+	os.Setenv("FAKE_CODEX_HOOKS", trust)
+	return nil
 }

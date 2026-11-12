@@ -10,12 +10,16 @@ import { api, h, state, sys, $ } from "./core.js";
 
 export const SIDEBAR = { def: 220, min: 180, max: 320, snap: 90 };
 export const INSPECTOR = { min: 300, max: 960, snap: 150 };
+// The session list's status column (status, account, mirror and when): resizable from its
+// header, the WAI-ARIA window splitter again; double-click fits it to what the rows show.
+export const STATUS = { def: 220, min: 140, max: 560 };
+const TITLE_MIN = 220; // what the title column keeps when the status column widens
 const LIST_MIN = 440, NARROW = 1000, STEP = 16, BIG_STEP = 64;
 
 // lay is what the user chose (an inspector width of 0 is its default); preview a pane's
 // width while a drag passes its collapse point (0) or moves it.
-const lay = { sidebarWidth: SIDEBAR.def, sidebarHidden: false, inspectorWidth: 0, inspectorHidden: false, sectionsOpen: [], sectionsClosed: [] };
-const preview = { sidebar: null, inspector: null };
+const lay = { sidebarWidth: SIDEBAR.def, sidebarHidden: false, inspectorWidth: 0, inspectorHidden: false, statusWidth: 0, sectionsOpen: [], sectionsClosed: [] };
+const preview = { sidebar: null, inspector: null, status: null };
 let loaded = false;
 
 // load takes the saved layout (Info), before the first paint.
@@ -25,6 +29,7 @@ export function load(l) {
   Object.assign(lay, {
     sidebarWidth: clamp(l.sidebarWidth || SIDEBAR.def, SIDEBAR.min, SIDEBAR.max), sidebarHidden: !!l.sidebarHidden,
     inspectorWidth: l.inspectorWidth ? clamp(l.inspectorWidth, INSPECTOR.min, INSPECTOR.max) : 0, inspectorHidden: !!l.inspectorHidden,
+    statusWidth: l.statusWidth ? clamp(l.statusWidth, STATUS.min, STATUS.max) : 0,
     sectionsOpen: [...(l.sectionsOpen || [])], sectionsClosed: [...(l.sectionsClosed || [])],
   });
   apply();
@@ -77,6 +82,7 @@ export function apply() {
   const side = $("#sidebar"), ins = $("#inspector");
   if (side) side.inert = sb === 0;
   if (ins) ins.inert = insp === 0;
+  applyStatus();
   divider("sidebar", sb, SIDEBAR.min, SIDEBAR.max);
   divider("inspector", insp, INSPECTOR.min, inspectorMax(sb));
   button("#btn-sidebar", sidebarShown(), "Sidebar", sys.mac ? "⌃⌘S" : "Ctrl+B");
@@ -221,6 +227,111 @@ function keys(ev, which) {
   else Object.assign(lay, { inspectorWidth: w, inspectorHidden: false });
   apply();
   save();
+}
+
+// ---- The status column ----
+
+// statusMax keeps the title column at least TITLE_MIN wide in the list as it is now.
+function statusMax() {
+  const list = document.querySelector(".content .list");
+  if (!list) return STATUS.max;
+  return Math.max(STATUS.min, Math.min(STATUS.max, list.clientWidth - 2 * 18 - 2 - 2 * 14 - 22 - 2 * 12 - TITLE_MIN));
+}
+// statusWidth is the column's width now: the user's (or the default), within what the
+// list has room for (a narrower window shrinks it for now; the saved width stays).
+const statusWidth = () => clamp(preview.status ?? (lay.statusWidth || STATUS.def), STATUS.min, statusMax());
+
+function applyStatus() {
+  const w = statusWidth();
+  document.documentElement.style.setProperty("--state-w", w + "px");
+  for (const d of document.querySelectorAll('.col-resize')) {
+    d.setAttribute("aria-valuenow", String(w));
+    d.setAttribute("aria-valuetext", `${w} pixels`);
+    d.setAttribute("aria-valuemin", String(STATUS.min));
+    d.setAttribute("aria-valuemax", String(statusMax()));
+  }
+}
+
+function setStatus(w) {
+  lay.statusWidth = w === STATUS.def ? 0 : w;
+  applyStatus();
+  save();
+}
+
+// fitStatus is the width that shows every visible row's status column whole.
+function fitStatus() {
+  const t = document.querySelector(".tree");
+  if (!t) return STATUS.def;
+  t.classList.add("measuring");
+  let need = STATUS.min;
+  for (const part of t.querySelectorAll(".row .status-top, .row .r-indicators, .row .r-state > .w")) need = Math.max(need, Math.ceil(part.getBoundingClientRect().width));
+  t.classList.remove("measuring");
+  return clamp(need + 2, STATUS.min, statusMax());
+}
+
+// statusHeader is the list's column header: the columns' names and, between them, the
+// status column's resize handle (pointer, keyboard, double-click to fit).
+export function statusHeader(compact) {
+  const handle = h("div", {
+    class: "col-resize", role: "separator", tabindex: "0", "aria-orientation": "vertical", "aria-label": "Resize the status column",
+    title: "Drag to resize · double-click to fit", onpointerdown: statusDrag, ondblclick: () => setStatus(fitStatus()), onkeydown: statusKeys,
+    onpointerenter: (ev) => { const d = ev.currentTarget; d.hoverTimer = setTimeout(() => d.classList.add("hot"), 300); },
+    onpointerleave: (ev) => { const d = ev.currentTarget; clearTimeout(d.hoverTimer); if (!d.hasPointerCapture?.(ev.pointerId)) d.classList.remove("hot"); },
+  });
+  const w = statusWidth();
+  for (const [k, v] of [["aria-valuenow", w], ["aria-valuetext", `${w} pixels`], ["aria-valuemin", STATUS.min], ["aria-valuemax", STATUS.max]]) handle.setAttribute(k, String(v));
+  return h("div", { class: "col-head" + (compact ? " compact" : ""), role: "presentation" },
+    h("span", {}), h("span", { class: "col-name" }, "Session"), h("span", { class: "col-name col-state" }, handle, "Status"));
+}
+
+function statusDrag(ev) {
+  if (ev.button !== 0) return;
+  ev.preventDefault();
+  const d = ev.currentTarget, start = ev.clientX, from = statusWidth();
+  d.setPointerCapture(ev.pointerId);
+  document.body.classList.add("resizing");
+  d.classList.add("hot");
+  let frame = 0, last = start, cancelled = false;
+  const at = (x) => clamp(from + start - x, STATUS.min, statusMax());
+  const move = (e) => {
+    last = e.clientX;
+    if (frame) return;
+    frame = requestAnimationFrame(() => { frame = 0; preview.status = at(last); applyStatus(); });
+  };
+  const esc = (e) => { if (e.key === "Escape") { cancelled = true; d.releasePointerCapture(ev.pointerId); } };
+  const end = () => {
+    d.removeEventListener("pointermove", move);
+    d.removeEventListener("pointerup", end);
+    d.removeEventListener("lostpointercapture", end);
+    window.removeEventListener("keydown", esc, true);
+    cancelAnimationFrame(frame);
+    document.body.classList.remove("resizing");
+    d.classList.remove("hot");
+    preview.status = null;
+    if (cancelled || last === start) applyStatus();
+    else setStatus(at(last));
+  };
+  d.addEventListener("pointermove", move);
+  d.addEventListener("pointerup", end);
+  d.addEventListener("lostpointercapture", end);
+  window.addEventListener("keydown", esc, true);
+}
+
+// Left widens the status column (its handle moves left), Right narrows it; Shift: further.
+// Home and End: its minimum and maximum; Enter: back to the default.
+function statusKeys(ev) {
+  const cur = statusWidth(), step = ev.shiftKey ? BIG_STEP : STEP;
+  let w;
+  switch (ev.key) {
+    case "ArrowLeft": w = cur + step; break;
+    case "ArrowRight": w = cur - step; break;
+    case "Home": w = STATUS.min; break;
+    case "End": w = statusMax(); break;
+    case "Enter": w = STATUS.def; break;
+    default: return;
+  }
+  ev.preventDefault();
+  setStatus(clamp(w, STATUS.min, statusMax()));
 }
 
 // The window's width decides whether the sidebar shows (below 1000px it hides, for now).

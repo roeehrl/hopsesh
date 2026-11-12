@@ -5,11 +5,31 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/roeehrl/hopsesh/internal/agents/all"
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
+
+func TestRepositoryAvailabilityRemainsPendingUntilDiscoveryCompletes(t *testing.T) {
+	home(t)
+	a := NewApp(all.Registry())
+	defer a.Shutdown()
+	inv := &app.Inventory{Discovering: true, Machines: []*app.Machine{{Name: "here", Local: true}}, Entries: []app.Entry{{
+		Machine: "here", Agent: "claude", AgentName: "Claude Code",
+		Session: agent.Summary{Key: agent.SessionKey{Agent: "claude", Session: "pending-repo"}, CWD: t.TempDir()},
+	}}}
+	first := scanDTO(a.core, inv, time.Now(), time.Now(), nil)
+	if len(first.Groups) != 1 || !first.Groups[0].RepoPending || first.Groups[0].NoRepo {
+		t.Fatalf("unknown repository became an availability claim: %+v", first.Groups)
+	}
+	inv.Discovering = false
+	final := scanDTO(a.core, inv, time.Now(), time.Now(), nil)
+	if len(final.Groups) != 1 || final.Groups[0].RepoPending || !final.Groups[0].NoRepo {
+		t.Fatalf("completed no-repository discovery remained pending: %+v", final.Groups)
+	}
+}
 
 func TestCheckoutsBeforeRepositoryEnrichment(t *testing.T) {
 	repo := home(t)

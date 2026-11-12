@@ -31,6 +31,22 @@ make app      # macOS only: builds dist/macos/hopsesh.app (unsigned unless SIGN_
 - Go 1.26+. On Linux the desktop-app packages need GTK 4 and WebKitGTK 6
   (`libgtk-4-dev libwebkitgtk-6.0-dev` on Debian/Ubuntu) for `go vet ./...` and the tests.
 - `scripts/integration-test.sh` runs a real SSH round trip (Linux, needs sudo; CI runs it).
+- `scripts/remote-scenarios.sh` runs the remote-behaviour scenarios (`internal/e2e/remote`,
+  `.github/workflows/remote.yml`): hopsesh here with another machine played by a throwaway
+  user over loopback SSH, in turn with no hopsesh there (read over SSH, endpoint identity
+  kept here, presence `ssh`, originals unprotected), after `hopsesh hosts setup` with
+  nobody logged in (presence `installed`, protocol 6, login methods refused with
+  `nologin`), with `hopsesh serve` started by hand as a login would (presence `login`,
+  `terminals run`, `doctor --all-machines`), logged out again, with hopsesh 0.4.5 there
+  (`OLD_HOPSESH=`: protocol 5, presence `older`, push and undo), and unreachable. On Linux
+  with sudo: `scripts/remote-scenarios.sh <bin dir with hopsesh, fakeagent, remote.test>`;
+  on a Mac with Docker, nothing changed on the Mac: `scripts/remote-scenarios.sh --docker
+  [path to hopsesh 0.4.5 for linux/<docker arch>]`. `go test ./...` skips them
+  (`HOPSESH_REMOTE_SCENARIOS=1` runs them).
+- `scripts/update-cli-golden.sh` rewrites `internal/ui/cli/testdata/cli-tree.golden` after a
+  command or flag change. Every visible flag must be in the skill or in
+  `internal/ui/cli/testdata/skill-undocumented-flags.txt` with a reason; CI and the release
+  run `internal/devtools/skillcheck` on the built program.
 - The Windows app: `scripts/build-windows-app.sh` builds `hopsesh-app.exe` and `hopsesh.exe`
   for amd64 and arm64, the app `.zip` (what the app updates itself from) and the per-user
   installer. It needs `makensis` (`apt install nsis`); Homebrew's makensis 3.13 crashes on
@@ -48,6 +64,20 @@ make app      # macOS only: builds dist/macos/hopsesh.app (unsigned unless SIGN_
   running `internal/testkit/termfake`). `playwright.real.config.ts` drives the real Windows window instead and needs
   `HOPSESH_APP_EXE` pointing at a `-tags e2e` build. That build tag opens a debugging port:
   never ship it.
+  Run `npm test` from `internal/devtools/webtest` for the browser suite. Its test-process
+  recorder saves failing JSON parser stacks, input hashes, and bounded excerpts in
+  `test-results/json-diagnostics/`, included in CI's failure artifacts. It rethrows the
+  original exception. Native worker IPC reads are also observed because Node's internal
+  JSON decoder bypasses `JSON.parse`; those records keep the buffered prefix and current
+  wire bytes separately. The optional Node handle adapter is qualified by real fork and
+  Playwright-worker controls. `WEBTEST_JSON_DIAGNOSTICS` selects a different diagnostic directory.
+- Resource budgets: an app nobody is looking at must do almost nothing. Tests count work
+  (`app.ResourceCounters`: rescans, transcript and sidecar reads) and catalog writes instead
+  of timing anything, and `go run ./internal/devtools/idlebench` runs the real app service on
+  a generated busy home while another "agent" writes a session, failing when rescans, CPU,
+  disk writes, content reads or memory exceed their budgets (CI: `idle resources`). If a
+  change makes refreshes do more, make it stat-gated, or raise a budget in the same PR and
+  say why.
 - `demo/record.sh shell` gives you two made-up machines (see [demo/README.md](demo/README.md)),
   so you can test listing and moving sessions without a second computer. If you change what
   the TUI or app shows, re-record the demo with `demo/record.sh`.
@@ -100,7 +130,6 @@ issue or discussion first so we can agree on the approach.
 |---|---|
 | `LiveDetector` | open / working / idle state |
 | `Stopper` | `--stop-local` (quit an open session) |
-| `Marker` | the "↪ moved to …" mark in the agent's own list |
 | `AccountProber`, `Sanitizer` | detecting the account, and moves across accounts |
 | `PostInstaller` | registering an installed session with the agent |
 | `Reader` | being the source of "continue in" |

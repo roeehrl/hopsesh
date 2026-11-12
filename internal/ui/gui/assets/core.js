@@ -42,10 +42,35 @@ export function icon(d, size = 14) {
   }
   return s;
 }
+// hopMark is hopsesh's own mark beside a machine (its arc and two dots): filled and green
+// when hopsesh runs there and receives sessions, hollow and gray when it is installed but
+// not receiving; nothing when it is not installed. The words are its accessible name and
+// tooltip, so the color is never the only signal. A newer hopsesh elsewhere adds an ↑ chip.
+export function hopMark(m, size = 18) {
+  const v = m?.hopsesh;
+  if (!v) return null;
+  const on = !!m.receiving;
+  const words = `hopsesh ${v}${on ? ", receiving sessions" : ", not receiving sessions"}${m.newest ? ` · ${m.newest} is the newest` : ""}`;
+  const ns = "http://www.w3.org/2000/svg";
+  const s = document.createElementNS(ns, "svg");
+  for (const [k, val] of Object.entries({ width: size, height: Math.round(size * 2 / 3), viewBox: "0 0 18 12", "aria-hidden": "true" })) s.setAttribute(k, val);
+  const arc = document.createElementNS(ns, "path");
+  for (const [k, val] of Object.entries({ d: "M3.5 9 A5.5 6.5 0 0 1 14.5 9", fill: "none", stroke: "currentColor", "stroke-width": "1.6", "stroke-linecap": "round" })) arc.setAttribute(k, val);
+  s.append(arc);
+  for (const cx of [3.5, 14.5]) {
+    const c = document.createElementNS(ns, "circle");
+    for (const [k, val] of Object.entries(on ? { cx, cy: 9.6, r: 2.1, fill: "currentColor" } : { cx, cy: 9.6, r: 1.6, fill: "var(--panel)", stroke: "currentColor", "stroke-width": "1.3" })) c.setAttribute(k, val);
+    s.append(c);
+  }
+  return h("span", { class: "hop-mark " + (on ? "on" : "off"), role: "img", "aria-label": words, title: words }, s,
+    m.newest ? h("span", { class: "hop-behind", "aria-hidden": "true" }, "↑") : null);
+}
+
 export const ICONS = {
   all: ["M4 5h16v14H4z", "M4 10h16"],
   here: ["M3 5h18v11H3z", "M8 20h8M12 16v4"],
   plus: "M12 5v14M5 12h14",
+  refresh: ["M20 11a8 8 0 1 0-2.3 5.7", "M20 4v7h-7"],
   clock: ["M12 8v4l3 2", "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z"],
   arrow: "M5 12h14M13 6l6 6-6 6",
   down: "M12 5v14M6 13l6 6 6-6",
@@ -54,6 +79,16 @@ export const ICONS = {
   chevron: "m6 9 6 6 6-6",
   cloud: "M7 18h10a4 4 0 0 0 .5-7.97A6 6 0 0 0 6.1 9.1 4.5 4.5 0 0 0 7 18z",
   external: ["M14 4h6v6", "M20 4l-9 9", "M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"],
+  // A move's two ends, and how a copy left behind stands.
+  movedOut: ["M3 5v14", "M21 12H7", "m15 18 6-6-6-6"],
+  movedIn: ["M17 12H3", "m11 18 6-6-6-6", "M21 5v14"],
+  shieldCheck: ["M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z", "m9 12 2 2 4-4"],
+  shieldAlert: ["M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z", "M12 8v4", "M12 16h.01"],
+  shieldUnknown: ["M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z", "M9.1 9a3 3 0 0 1 5.82 1c0 2-3 3-3 3", "M12 17h.01"],
+  shieldOff: ["m2 2 20 20", "M5 5a1 1 0 0 0-1 1v7c0 5 3.5 7.5 7.67 8.94a1 1 0 0 0 .67.01c2.35-.82 4.48-1.97 5.9-3.71", "M9.31 3.65a12.25 12.25 0 0 0 1.93-1.37 1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1v7a9.78 9.78 0 0 1-.08 1.26"],
+  diverged: ["M5 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6z", "M12 6h5a2 2 0 0 1 2 2v7", "m15 9-3-3 3-3", "M19 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6z", "M12 18H7a2 2 0 0 1-2-2V9", "m9 15 3 3-3 3"],
+  usedAfter: ["M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", "M3 3v5h5", "M12 7v5l4 2"],
+  open: ["M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z", "M12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"],
 };
 
 export function fill(el, ...kids) {
@@ -77,7 +112,11 @@ export function toast(msg, action) {
 export const count = (n, one, many = one + "s") => `${n} ${n === 1 ? one : many}`;
 export const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 export const errText = (e) => String((e && e.message) || e);
-export const fail = (e) => toast(errText(e));
+// A refusal the window answers with a question instead of a toast (guard.js: continuing
+// a copy that already moved).
+let refusal = () => false;
+export function onRefusal(fn) { refusal = fn; }
+export const fail = (e) => { if (!refusal(e)) toast(errText(e)); };
 
 export function ago(iso) {
   if (!iso) return "";
@@ -155,6 +194,7 @@ export const state = {
   presence: {}, // where this machine's sessions are open now, by machine NUL key (Presence)
   sel: null, // { machine, key }
   update: null,
+  updateCheckRevision: 0, // a manual check supersedes any pending daily check
   activity: null, // the last Activity list, for the sidebar's undo count
 };
 
@@ -200,7 +240,8 @@ export async function go(name, ...args) {
   state.handoffOpen = null;
   $("#where").textContent = { sessions: "", activity: "Activity", machines: "Machines", settings: "Settings", accounts: "Accounts", done: "", brought: "" }[name] ?? "";
   document.body.dataset.screen = name; // the panes' buttons work on Sessions only
-  if (changed) loading({ sessions: "Reading sessions…", machines: "Reading machines…", accounts: "Reading accounts…", settings: "Reading settings…", activity: "Reading activity…" }[name] || "Loading…");
+  // Sessions already read stay on screen while they are read again (no blank "Reading…").
+  if (changed && !(name === "sessions" && state.scan)) loading({ sessions: "Reading sessions…", machines: "Reading machines…", accounts: "Reading accounts…", settings: "Reading settings…", activity: "Reading activity…" }[name] || "Loading…");
   try { return await screens[name](...args); }
   catch (error) { if (visit === navigation) fill(view, loadError(error, () => go(name, ...args))); }
 }
@@ -216,15 +257,72 @@ export function loading(text) {
   fill(view, h("div", { class: "loading", role: "status", "aria-live": "polite" }, text));
 }
 
-// The entry for the current selection, from the last scan.
+// manyAccounts: the agent is signed in with more than one account among the sessions read,
+// so naming the account tells copies apart (otherwise the agent's name is enough).
+export function manyAccounts(agent) {
+  const ids = new Set();
+  for (const e of entries()) {
+    if (e.agent === agent && e.profile?.id) ids.add(e.profile.id);
+    for (const r of e.returns || []) if (r.agent === agent && r.profile) ids.add(r.profile);
+    for (const c of e.copies || []) if (c.agent === agent && c.profile?.id) ids.add(c.profile.id);
+  }
+  return ids.size > 1;
+}
+
+// entries are the list's sessions: each conversation's row, and every other copy of it the
+// scan carries (profileCopies: an old copy a move left behind, another agent's copy) as a
+// row of its own, which the sidebar's place and the filters judge by its own machine and
+// state. A copy names the row it belongs to (home), so the list can draw it right after.
 export function entries() {
-  if(!state.scan)return [];
-  const groups=state.list?.groupBy==='account' ? [...state.scan.groups,...(state.scan.profileCopies||[])] : state.scan.groups;
-  return groups.flatMap(g=>g.entries.map(e=>Object.assign({group:g},e)));
+  if (!state.scan) return [];
+  const out = [], seen = new Set(), homes = new Map();
+  for (const g of state.scan.groups) for (const e of g.entries) {
+    const k = e.machine + "\u0000" + e.key;
+    seen.add(k);
+    out.push(Object.assign({ group: g }, e));
+    for (const c of e.copies || []) if (!homes.has(c.machine + "\u0000" + c.key)) homes.set(c.machine + "\u0000" + c.key, { e, g });
+  }
+  for (const g of state.scan.profileCopies || []) for (const e of g.entries) {
+    const k = e.machine + "\u0000" + e.key;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    const home = homes.get(k);
+    // Without repository facts of its own (another machine's copy not read yet), a copy
+    // stays with its conversation's repository.
+    const group = home && (g.noRepo || g.repoPending) ? home.g : g;
+    out.push(Object.assign({ group }, e, home ? { home: home.e.machine + "\u0000" + home.e.key } : null));
+  }
+  return out;
 }
 export function selected() {
   const s = state.sel;
-  return s ? entries().find((e) => e.machine === s.machine && e.key === s.key) || null : null;
+  return s ? entries().find((e) => e.machine === s.machine && e.key === s.key) || copyEntry(s.machine, s.key) : null;
+}
+// copyEntry is another copy of a conversation (a row of its own), or a copy resolved from
+// a history (not in the scan, attached to its conversation's row); null when neither.
+export function copyEntry(machine, key) {
+  if (scanEntry(machine, key)) {
+    const e = entries().find((x) => x.machine === machine && x.key === key);
+    if (e) return e;
+  }
+  const resolved = state.resolvedSelection;
+  if (resolved?.machine === machine && resolved.key === key) return resolved;
+  return null;
+}
+// scanEntry is a session's record in the last scan (a row or another copy), without its
+// group: cheap enough for every row to look up its copies.
+const scanIndex = new WeakMap();
+export function scanEntry(machine, key) {
+  const s = state.scan;
+  if (!s) return null;
+  const k = machine + "\u0000" + key;
+  let idx = scanIndex.get(s);
+  if (!idx || !idx.has(k)) {
+    idx = new Map();
+    for (const g of [...(s.groups || []), ...(s.profileCopies || [])]) for (const e of g.entries) if (!idx.has(e.machine + "\u0000" + e.key)) idx.set(e.machine + "\u0000" + e.key, e);
+    scanIndex.set(s, idx);
+  }
+  return idx.get(k) || null;
 }
 export const here = () => (state.scan?.machines.find((m) => m.local) || {}).name || state.info?.host;
 export const clouds = () => state.scan?.clouds || [];
@@ -271,5 +369,28 @@ export function ask({ title, body, ok, danger = false }) {
 
 // Profiles identify state roots, not the historical owner of every conversation.
 export const accountLabel = p => p?.account?.email || p?.name || "No account profile";
-export const accountTitle = p => p ? `Stored in ${p.name} (${p.root}). ${p.account?.loggedIn ? `${p.error ? "Last known" : "Current"} sign-in: ${p.account.email || p.account.label || p.account.provider}.` : "Current sign-in not confirmed."} ${p.error ? p.error+". " : ""}This does not establish who originally created the session.` : "No registered account profile";
-export const accountGroupLabel = e => e.profile ? `${accountLabel(e.profile)} · ${e.agentName} · ${e.machine === here() ? sys.Here : e.machine}${e.profile.account?.email && !e.profile.default ? " · "+e.profile.name : ""}` : "No account profile";
+// A session's account is the one its agent recorded running it (e.owner), never just
+// the sign-in its profile's root has now: a root signed in to another account before
+// holds that account's sessions too.
+// accountShown names it next to a session: the recorded account's email ("another
+// account" for one no profile is signed in to now); unrecorded, a named profile ("Work")
+// says where it is stored, and a default profile's name would only repeat the agent.
+export const accountShown = e => ownerShown(e) || (e?.profile && !e.profile.default && !e?.owner?.recorded ? e.profile.name : "");
+const signedInNow = p => p?.account?.loggedIn ? `${p.error ? "was last seen signed in" : "is signed in"} as ${p.account.email || p.account.label || p.account.provider} now` : "has no confirmed sign-in now";
+export const accountTitle = e => {
+  const p = e?.profile, o = e?.owner || {};
+  if (!p) return "No registered account profile";
+  const where = `Stored in ${p.name} (${p.root}), which ${signedInNow(p)}.${p.error ? " " + p.error + "." : ""}`;
+  const before = o.earlier ? ` Before that it ran under ${o.earlier}.` : "";
+  if (o.email && o.current) return `Run by ${o.email}, as recorded.${before} ${where}`;
+  if (o.email) return `Run by ${o.email}, as recorded${o.profile ? ` (signed in to ${o.profile} now)` : ""}.${before} ${where}`;
+  if (o.recorded && !o.current) return `Run by an account that no profile here is signed in to now, as recorded.${before} ${where}`;
+  return `No record says which account ran this session. ${where}`;
+};
+export const ownerShown = e => e?.owner?.email || (e?.owner?.recorded && !e.owner.current && !e.owner.pending ? "another account" : "");
+export const accountGroupLabel = e => e.profile ? `${ownerShown(e) || "Account not recorded"} · ${e.agentName} · ${e.machine === here() ? sys.Here : e.machine}${!e.profile.default || !e.owner?.current ? " · in " + e.profile.name : ""}` : "No account profile";
+// accountKey files a session under its root and its recorded account's fingerprint, for
+// filters and groups: the same after any sign-in change. accountKeyLegacy is 0.4.5's,
+// so a saved filter keeps matching.
+export const accountKey = e => (e.profile?.id || "") + "\u0000" + (e.owner?.key || "");
+export const accountKeyLegacy = e => (e.profile?.id || "") + "\u0000" + (e.owner?.email || (e.owner?.recorded ? (e.owner.current ? "current" : "other") : ""));

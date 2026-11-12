@@ -1,8 +1,13 @@
 package integrate
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/roeehrl/hopsesh/internal/core/proc"
 )
 
 // States of the hopsesh command: on macOS and Linux a link at ~/.local/bin/hopsesh; on
@@ -28,6 +33,23 @@ type CLIStatus struct {
 	PathLine   string `json:"pathLine"`            // the line to add to Profile; Windows: the folder
 	PathAdded  bool   `json:"pathAdded,omitempty"` // hopsesh's block is in the profile
 	CanInstall string `json:"cannotInstall,omitempty"`
+	// Version is what a hopsesh that isn't this app's says it is (WithVersion fills it).
+	Version string `json:"version,omitempty"`
+}
+
+// WithVersion adds the version of a separately installed hopsesh at the command's place,
+// so the choice to replace it can say what it replaces.
+func (st CLIStatus) WithVersion() CLIStatus {
+	if st.State != CLIStandalone && st.State != CLIForeign {
+		return st
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, _ := proc.CommandContext(ctx, st.Path, "version").Output()
+	if f := strings.Fields(string(out)); len(f) >= 2 && f[0] == "hopsesh" {
+		st.Version = f[1]
+	}
+	return st
 }
 
 // SkillBin is how agents should run hopsesh: plain "hopsesh" when the user's login shell

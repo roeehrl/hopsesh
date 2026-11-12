@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -28,6 +29,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/proc"
 	"github.com/roeehrl/hopsesh/internal/core/pty"
 	"github.com/roeehrl/hopsesh/internal/core/registry"
+	"github.com/roeehrl/hopsesh/internal/ui/skill"
 	"github.com/roeehrl/hopsesh/internal/update"
 	"github.com/roeehrl/hopsesh/internal/version"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -39,34 +41,43 @@ const MenuEvent = "hopsesh:menu"
 
 // App is the service bound to the frontend.
 type App struct {
-	Desktop        DesktopShell `json:"-"`
-	closing        bool
-	watchDone      chan struct{}
-	watchOnce      sync.Once
-	watchLocal     bool
-	watchCancel    context.CancelFunc
-	selectionReads int
-	scanCancel     context.CancelFunc
-	scanRevision   atomic.Uint64
-	desktopMu      sync.Mutex
-	quick          quickState
-	mu             sync.Mutex
-	scanMu         sync.Mutex // serialize inventory refreshes
-	scans          map[string]MachineScan
-	core           *app.App // its Cfg is the saved configuration; calls work on snapshots
-	cfgErr         error    // the configuration file could not be used (see StartFresh)
-	inv            *app.Inventory
-	invAt          time.Time // when inv last read the other machines and the clouds
-	plan           *move.Plan
-	input          move.Input
-	res            *move.Result
-	push           *app.Push // a push planned on another machine, its connection open
-	pw             *pwBroker
-	appIcons       map[agent.ID]string // installed apps' icons, read once ("" when none)
-	pwOnce         sync.Once
-	step           *pendingStep // the terminal step a hand-off waits for
-	quitting       atomic.Bool  // the user confirmed quitting (or an update restarts the app)
-	termName       atomic.Value // the user's terminal app's name, for the terminal window (a string)
+	Desktop          DesktopShell `json:"-"`
+	closing          bool
+	watchDone        chan struct{}
+	watchOnce        sync.Once
+	watchLocal       bool
+	watchCancel      context.CancelFunc
+	selectionReads   int
+	scanCancel       context.CancelFunc
+	scanRevision     atomic.Uint64
+	desktopMu        sync.Mutex
+	quick            quickState
+	mu               sync.Mutex
+	scanMu           sync.Mutex // serialize inventory refreshes
+	scans            map[string]MachineScan
+	core             *app.App // its Cfg is the saved configuration; calls work on snapshots
+	cfgErr           error    // the configuration file could not be used (see StartFresh)
+	inv              *app.Inventory
+	historyStale     map[string]bool // entries requiring a fresh read after History settings change; guarded by mu
+	reviewGeneration uint64          // pending reviews are invalidated independently of borrowed active actions
+	planGeneration   uint64
+	pushGeneration   uint64
+	actionRunning    bool      // an apply owns the published plan/connection until its deferred release
+	invAt            time.Time // when inv last read the other machines and the clouds
+	plan             *move.Plan
+	input            move.Input
+	res              *move.Result
+	push             *app.Push // a push planned on another machine, its connection open
+	pw               *pwBroker
+	appIcons         map[agent.ID]string // installed apps' icons, read once ("" when none)
+	pwOnce           sync.Once
+	step             *pendingStep // the terminal step a hand-off waits for
+	quitting         atomic.Bool  // the user confirmed quitting (or an update restarts the app)
+	remembered       atomic.Bool  // the tabs' sessions are written down for the next launch (rememberTabs)
+	termName         atomic.Value // the user's terminal app's name, for the terminal window (a string)
+
+	endDestinationToken string // one use, tied to the latest exact return review
+	endDestinationPlan  *move.Plan
 	// Wails is the running application (events, clipboard, dialogs).
 	Wails *application.App `json:"-"`
 	// Terms are the terminal's tabs and window (not bound to the window: see terminal.go).
@@ -77,6 +88,18 @@ type App struct {
 
 // Option configures service behavior before any discovery starts.
 type Option func(*App)
+
+// MemoryLimit keeps the desktop app's resident memory near what it uses: Go's collector
+// otherwise lets the heap grow to twice the live data before collecting, so one large
+// session read left hundreds of megabytes resident. It costs nothing while idle.
+const MemoryLimit = 384 << 20
+
+// LimitMemory applies MemoryLimit unless GOMEMLIMIT sets one.
+func LimitMemory() {
+	if os.Getenv("GOMEMLIMIT") == "" {
+		debug.SetMemoryLimit(MemoryLimit)
+	}
+}
 
 // WithoutSessionWatching lets headless fixture services publish changes explicitly.
 // Desktop applications watch local session files by default.
@@ -92,9 +115,13 @@ func NewApp(reg *registry.Registry, options ...Option) *App {
 		option(a)
 	}
 	a.core = app.New(cfg, reg, config.StateDir(), log)
+	a.core.Skills = skill.For(a.core.Specs)
 	a.core.Passwords = a.passwordFor
 	a.core.Steps = a.runStep
 	a.attachTerminal()
+	guardReads.mu.Lock()
+	guardReads.window = a // shown the copies' protection when a reading of hooks ends
+	guardReads.mu.Unlock()
 	return a
 }
 
@@ -131,6 +158,18 @@ type AgentDTO struct {
 	Icon          string             `json:"icon,omitempty"` // a data URL: the installed app's icon or the module's mark ("": initials)
 	// Clouds are the vendor clouds the agent reaches, with what hopsesh can do there.
 	Clouds []AgentCloudDTO `json:"clouds"`
+	// Runtime is "app" when the agent runs from its desktop app's bundled runtime here.
+	Runtime string `json:"runtime,omitempty"`
+	// Kinds are sessions hidden unless shown (voice conversations, Work threads).
+	Kinds []AgentKindDTO `json:"kinds"`
+}
+
+// AgentKindDTO is a kind of session hidden by default, and whether the user shows it.
+type AgentKindDTO struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Note  string `json:"note"`
+	Shown bool   `json:"shown"`
 }
 
 // AgentCloudDTO is one of an agent's clouds in Settings: the cloud capabilities its
@@ -145,7 +184,9 @@ type AgentCloudDTO struct {
 
 // Info is static information for the window.
 type Info struct {
-	DesktopManaged bool   `json:"desktopManaged"`
+	// Companion is MyCNC Host here, which the window recommends and links to.
+	Companion      app.Companion `json:"companion"`
+	DesktopManaged bool          `json:"desktopManaged"`
 	Version        string `json:"version"`
 	OS             string `json:"os"` // runtime.GOOS: the window words things for its system
 	Host           string `json:"host"`
@@ -185,11 +226,13 @@ type Info struct {
 	// Previews: the inspector shows the end of a session's conversation.
 	Previews bool `json:"previews"`
 	Receive  bool `json:"receive"` // other machines' hopsesh may send sessions here
-	Defaults struct {
-		MovementNotices bool `json:"movementNotices"`
-		MarkMoved       bool `json:"markMoved"`
-		SyncCode        bool `json:"syncCode"`
-		PushSource      bool `json:"pushSource"`
+	// SetUpIntegrations: setting hopsesh up on a machine adds its hooks and skill too.
+	SetUpIntegrations bool `json:"setUpIntegrations"`
+	Defaults          struct {
+		MovementNotices bool   `json:"movementNotices"`
+		Original        string `json:"original"`
+		SyncCode        bool   `json:"syncCode"`
+		PushSource      bool   `json:"pushSource"`
 	} `json:"defaults"`
 }
 
@@ -211,7 +254,7 @@ func (a *App) info(fast bool) Info {
 	cfg := a.core.Cfg
 	info := Info{DesktopManaged: a.Desktop != nil, Version: version.Version, OS: runtime.GOOS, Host: app.LocalName(), ReposDir: cfg.ReposDir,
 		AuditDir: filepath.Join(config.StateDir(), "log"), UpdateCheck: cfg.UpdateCheck,
-		SkillState: skillState, SkillPrompt: cfg.SkillPrompt, Receive: cfg.Peer.Receive,
+		SkillState: skillState, SkillPrompt: cfg.SkillPrompt, Receive: cfg.Peer.Receive, SetUpIntegrations: cfg.Peer.SetUpIntegrations,
 		SetupDismissed: cfg.SetupPrompt == "declined", Layout: layoutOf(cfg.Window, cfg.Inspector),
 		List: listOf(cfg.List), Places: map[string]string{}, Previews: cfg.PreviewsOn()}
 	for k, ag := range cfg.Agents {
@@ -238,7 +281,8 @@ func (a *App) info(fast bool) Info {
 		info.CLIOffer = cliOffer()
 	}
 	info.Defaults.MovementNotices = cfg.MovementNoticesOn()
-	info.Defaults.MarkMoved, info.Defaults.SyncCode, info.Defaults.PushSource = cfg.MarkMovedOn(), cfg.SyncCodeOn(), cfg.PushSource
+	info.Defaults.Original = cfg.OriginalGuard()
+	info.Defaults.SyncCode, info.Defaults.PushSource = cfg.SyncCodeOn(), cfg.PushSource
 	info.LocalNetwork.Gated = lnp.Gated()
 	info.LocalNetwork.FirstRun = lnp.FirstRun(config.StateDir())
 	if !fast {
@@ -249,6 +293,7 @@ func (a *App) info(fast bool) Info {
 	if f := listMenu; f != nil {
 		f(info.List.GroupBy, info.List.SortBy, info.List.Density == "compact")
 	}
+	info.Companion = app.DetectCompanion()
 	info.Where = cfg.AppResume()
 	if info.Where == config.ResumeAsk {
 		info.Where = config.AppResumeDefault // the app's Resume menu is the asking
@@ -295,7 +340,10 @@ func (a *App) agentsLocked() []AgentDTO {
 		s := m.Spec()
 		ac := a.core.Cfg.Agents[string(s.ID)]
 		d := AgentDTO{ID: s.ID, Name: s.Name, Stability: s.Stability, Enabled: !ac.Disabled, RemoteControl: ac.RemoteControl,
-			Import: ac.Import, Tested: s.Tested, Capabilities: agent.Capabilities(m), Icon: a.iconLocked(s), Clouds: []AgentCloudDTO{}}
+			Import: ac.Import, Tested: s.Tested, Capabilities: agent.Capabilities(m), Icon: a.iconLocked(s), Clouds: []AgentCloudDTO{}, Kinds: []AgentKindDTO{}}
+		for _, k := range s.Kinds {
+			d.Kinds = append(d.Kinds, AgentKindDTO{ID: k.ID, Name: k.Name, Note: k.Note, Shown: ac.Shows([]string{k.ID})})
+		}
 		for _, c := range s.Clouds {
 			ac := AgentCloudDTO{Name: c.Name, Title: c.Title, Capabilities: []agent.Capability{}, Fidelity: string(c.Down)}
 			for _, cp := range d.Capabilities {
@@ -311,7 +359,7 @@ func (a *App) agentsLocked() []AgentDTO {
 			d.Clouds = append(d.Clouds, ac)
 		}
 		if st, ok := here[s.ID]; ok && (st.Install.Present || st.Install.Binary != "") {
-			d.Version = st.Install.Version
+			d.Version, d.Runtime = st.Install.Version, st.Install.Runtime
 			for _, r := range s.Roots {
 				d.Folder = st.Install.Root(r.Name)
 				break
@@ -394,7 +442,10 @@ func (a *App) InstallUpdate() error {
 		return err
 	}
 	a.core.Audit.Write(audit.Entry{Action: "update", Detail: map[string]any{"from": version.Version, "to": rel.Version, "what": string(t.Kind)}})
+	// Before the new version starts: it reopens these tabs.
+	a.rememberTabs(true)
 	if err := update.Relaunch(t); err != nil {
+		a.remembered.Store(false) // quitting later writes them down again, as a quit
 		return fmt.Errorf("installed hopsesh %s; quit and reopen the app to use it (%w)", rel.Version, err)
 	}
 	if a.Wails != nil {
@@ -404,8 +455,8 @@ func (a *App) InstallUpdate() error {
 	return nil
 }
 
-// LatestRelease looks for the newest release now, whatever the daily check is set to: the
-// user asked, from the page that says a newer hopsesh wrote the configuration.
+// LatestRelease is a user-requested check: always fetch now, regardless of the daily
+// check's opt-in or cached result, and report failures to the window.
 func (a *App) LatestRelease() (*UpdateDTO, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -541,8 +592,14 @@ func (a *App) Shutdown() {
 		a.Desktop.Stop()
 	}
 	if a.Terms != nil {
+		a.rememberTabs(false)
 		a.Terms.CloseAll()
 	}
+	guardReads.mu.Lock()
+	if guardReads.window == a {
+		guardReads.window = nil
+	}
+	guardReads.mu.Unlock()
 	a.scanMu.Lock()
 	defer a.scanMu.Unlock()
 	a.mu.Lock()

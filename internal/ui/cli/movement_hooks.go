@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"os"
 	"strings"
 	"time"
 	"unicode"
@@ -23,25 +22,40 @@ const noticeHookTimeout = 2 * time.Second
 type preparedMovementNotice struct {
 	Text    string
 	Written func(context.Context) error
+	// Block refuses the prompt (UserPromptSubmit) instead of adding context; Text is
+	// then the reason the agent shows. A block repeats on every prompt.
+	Block bool
 }
-type movementNoticePrepare func(context.Context, agent.ID, string, string, string, string) (preparedMovementNotice, error)
+type movementNoticePrepare func(ctx context.Context, id agent.ID, profile, session, path, event, source string) (preparedMovementNotice, error)
 
 func noticeHookCmd() *cobra.Command {
 	var id, profile string
-	cmd := &cobra.Command{Use: "notice-hook", Short: "Read a local movement notice for an agent lifecycle hook", Hidden: true, Args: cobra.NoArgs,
+	cmd := &cobra.Command{Use: "notice-hook", Short: "Block or advise a moved session's original from an agent lifecycle hook", Hidden: true, Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			useDirFlags(cmd)
 			// A hook fails open and emits no diagnostics or non-JSON output. Do not use
 			// newRun: no audit log, skill offers, password readers, or session scan.
-			return runPreparedNoticeHook(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), agent.ID(id), profile, func(ctx context.Context, id agent.ID, profile, session, path, event string) (preparedMovementNotice, error) {
+			return runPreparedNoticeHook(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), agent.ID(id), profile, func(ctx context.Context, id agent.ID, profile, session, path, event, source string) (preparedMovementNotice, error) {
 				cfg, err := config.Load()
-				if err != nil || !cfg.MovementNoticesOn() {
+				if err != nil {
 					return preparedMovementNotice{}, nil
 				}
 				a := app.New(cfg, modules, config.StateDir(), nil)
+				// Which account the session runs under now, for its owner record.
+				a.RecordOwner(ctx, id, profile, session)
+				if cfg.OriginalGuard() == app.GuardOff {
+					return preparedMovementNotice{}, nil
+				}
+				// Work was added while this window was open: reopening loads it.
+				if text, block, handled := a.ReopenNotice(ctx, id, profile, session, event, source); handled {
+					return preparedMovementNotice{Text: text, Block: block}, nil
+				}
 				details, err := a.MovementNoticeDetailsForPath(ctx, id, profile, session, path)
 				if err != nil || details.Key.Session == "" {
 					return preparedMovementNotice{}, err
+				}
+				if a.OriginalGuard(details.Key, details.Operation, details.Status) == app.GuardBlock {
+					return preparedMovementNotice{Text: app.BlockReason(details.Summary, details.Key), Block: true}, nil
 				}
 				identity := app.MovementNoticeIdentity{Operation: details.Operation, Status: details.Status}
 				claim, err := a.ClaimMovementNotice(ctx, details.Key.Agent, details.Key.Profile, string(details.Key.Session), event, details.Text, identity)
@@ -78,12 +92,13 @@ func runPreparedNoticeHook(ctx context.Context, in io.Reader, out io.Writer, id 
 			SessionID      string `json:"session_id"`
 			TranscriptPath string `json:"transcript_path"`
 			Event          string `json:"hook_event_name"`
+			Source         string `json:"source"` // SessionStart: startup, resume, clear or compact
 		}
 		if json.Unmarshal(raw, &payload) != nil || payload.SessionID == "" || len(payload.SessionID) > 256 || strings.ContainsFunc(payload.SessionID, unicode.IsControl) || len(payload.TranscriptPath) > 4096 || strings.ContainsRune(payload.TranscriptPath, 0) || payload.Event != "SessionStart" && payload.Event != "UserPromptSubmit" {
 			return
 		}
 		// Path is untrusted input, used solely by the app's bounded local resolver.
-		prepared, err := prepare(ctx, id, profile, payload.SessionID, payload.TranscriptPath, payload.Event)
+		prepared, err := prepare(ctx, id, profile, payload.SessionID, payload.TranscriptPath, payload.Event, payload.Source)
 		notice := prepared.Text
 		if err != nil || notice == "" || ctx.Err() != nil {
 			return
@@ -100,16 +115,26 @@ func runPreparedNoticeHook(ctx context.Context, in io.Reader, out io.Writer, id 
 				notice = notice[:len(notice)-1]
 			}
 		}
-		b, _ := json.Marshal(struct {
-			SystemMessage      string `json:"systemMessage"`
-			HookSpecificOutput struct {
+		var b []byte
+		switch {
+		case prepared.Block && payload.Event == "UserPromptSubmit":
+			// Claude Code and Codex both refuse the prompt and show the reason.
+			b, _ = json.Marshal(struct {
+				Decision string `json:"decision"`
+				Reason   string `json:"reason"`
+			}{"block", notice})
+		default:
+			b, _ = json.Marshal(struct {
+				SystemMessage      string `json:"systemMessage"`
+				HookSpecificOutput struct {
+					Event   string `json:"hookEventName"`
+					Context string `json:"additionalContext"`
+				} `json:"hookSpecificOutput"`
+			}{SystemMessage: notice, HookSpecificOutput: struct {
 				Event   string `json:"hookEventName"`
 				Context string `json:"additionalContext"`
-			} `json:"hookSpecificOutput"`
-		}{SystemMessage: notice, HookSpecificOutput: struct {
-			Event   string `json:"hookEventName"`
-			Context string `json:"additionalContext"`
-		}{payload.Event, notice}})
+			}{payload.Event, notice}})
+		}
 		b = append(b, '\n')
 		if ctx.Err() != nil {
 			return
@@ -128,10 +153,10 @@ func runPreparedNoticeHook(ctx context.Context, in io.Reader, out io.Writer, id 
 }
 
 func noticesCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "notices", Short: "Install, remove, or inspect local movement notice hooks", Args: cobra.NoArgs}
+	cmd := &cobra.Command{Use: "notices", Short: "Install, remove, or inspect the protection hooks that block or advise moved sessions' originals", Args: cobra.NoArgs}
 	for _, action := range []string{"install", "remove", "status"} {
 		var id, profile string
-		sub := &cobra.Command{Use: action, Short: strings.ToUpper(action[:1]) + action[1:] + " movement notice hooks", Args: cobra.NoArgs,
+		sub := &cobra.Command{Use: action, Short: strings.ToUpper(action[:1]) + action[1:] + " protection hooks", Args: cobra.NoArgs,
 			RunE: func(cmd *cobra.Command, _ []string) error {
 				useDirFlags(cmd)
 				r, err := newRun(cmd)
@@ -139,25 +164,40 @@ func noticesCmd() *cobra.Command {
 					return err
 				}
 				defer r.app.Catalog.Close()
-				bin, err := os.Executable()
-				if err != nil {
-					return err
+				// The same executable as the app chooses: a different command string would be a
+				// second hook, and Codex would ask the user to review it again.
+				var statuses []app.MovementHookStatus
+				switch action {
+				case "install":
+					statuses, err = r.app.InstallNoticeHooks(cmd.Context(), agent.ID(id), profile)
+				case "remove":
+					statuses, err = r.app.RemoveNoticeHooks(cmd.Context(), agent.ID(id), profile)
+				default:
+					statuses, err = r.app.NoticeHooksFor(cmd.Context(), agent.ID(id), profile)
 				}
-				statuses, err := r.app.MovementNoticeHooks(cmd.Context(), action, agent.ID(id), profile, bin)
+				if err == nil {
+					err = app.MovementHookErrors(action, statuses)
+				}
 				if r.jsonOut {
 					_ = r.emitJSON(statuses)
 				} else {
 					for _, st := range statuses {
 						state := "absent"
 						if st.Installed {
-							state = "installed (vendor trust and policy still apply)"
+							state = "installed"
+						}
+						if t := st.Trust; t != nil {
+							state += map[string]string{agent.HookTrusted: "; trusted by the agent", agent.HookNeedsReview: "; NOT RUNNING: waiting for your approval in the agent", agent.HookDisabled: "; NOT RUNNING: turned off in the agent", agent.HookMissing: "; not seen by the agent", agent.HookUnknown: "; trust not verified"}[t.State]
 						}
 						if !st.Enabled {
-							state += "; delivery disabled"
+							state += "; protection off"
 						}
 						r.printf("%s profile=%q: %s\n  %s\n", st.Agent, st.Profile, state, st.Path)
 						if st.Reason != "" {
 							r.printf("  %s\n", st.Reason)
+						}
+						if t := st.Trust; t != nil && t.State != agent.HookTrusted && t.Fix != "" {
+							r.printf("  %s\n", t.Fix)
 						}
 					}
 				}

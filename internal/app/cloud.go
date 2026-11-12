@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -369,20 +368,11 @@ func olderThanTested(version string, tested []string) bool {
 	return versionBelow(version, oldest) && !strings.HasPrefix(version, oldest+".")
 }
 
-// versionBelow compares dotted numeric versions, as far as the shorter one goes.
+// versionBelow orders dotted release versions, partial ones ("0.153") included. A suffix
+// ("-gfe04cc", a build of that release) is not a pre-release here: it is left out.
 func versionBelow(a, b string) bool {
-	as, bs := strings.Split(a, "."), strings.Split(b, ".")
-	for i := 0; i < len(as) && i < len(bs); i++ {
-		x, errx := strconv.Atoi(as[i])
-		y, erry := strconv.Atoi(bs[i])
-		if errx != nil || erry != nil {
-			return false
-		}
-		if x != y {
-			return x < y
-		}
-	}
-	return false
+	release := func(v string) string { v, _, _ = strings.Cut(v, "+"); v, _, _ = strings.Cut(v, "-"); return v }
+	return agent.VersionLess(release(a), release(b))
 }
 
 // undoClouds reaches the clouds for undo through the modules' cloud capabilities.

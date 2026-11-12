@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 func TestEndpointIdentitySurvivesAliasesAndRejectsConcurrentInitialization(t *testing.T) {
@@ -62,5 +64,52 @@ func TestEndpointIdentitySeparatesExplicitProfilesUnderOneAccount(t *testing.T) 
 	got, err := alias.PrepareIdentity(ctx)
 	if err != nil || got != ai {
 		t.Fatalf("profile alias lost identity: %s %v", got, err)
+	}
+}
+
+type memKeeper struct{ id string }
+
+func (k *memKeeper) Kept() (string, error) { return k.id, nil }
+func (k *memKeeper) Keep(id string) error {
+	if k.id != "" && k.id != id {
+		return os.ErrExist
+	}
+	k.id = id
+	return nil
+}
+
+func TestEndpointIdentityOfMachineWithoutHopseshIsKeptHere(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	keeper := &memKeeper{}
+	ssh := func() *Machine {
+		m := &Machine{Name: "lurus", Facts: Facts{Home: home}, Keeper: keeper}
+		m.fs = localFS{}
+		return m
+	}
+	m := ssh()
+	id, err := m.PrepareIdentity(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = m.CommitIdentity(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = os.Stat(filepath.Join(home, ".hopsesh", "endpoint-id")); !os.IsNotExist(err) {
+		t.Fatal("reaching a machine without hopsesh wrote its identity there")
+	}
+	if keeper.id != id {
+		t.Fatalf("identity not kept here: %q", keeper.id)
+	}
+	if got, err := ssh().ReadIdentity(ctx); err != nil || got != id {
+		t.Fatalf("kept identity not read back: %q %v", got, err)
+	}
+	if got, err := ssh().PrepareIdentity(ctx); err != nil || got != id {
+		t.Fatalf("kept identity not reused: %q %v", got, err)
+	}
+	with := ssh()
+	with.Facts.Binaries = map[string]agent.BinaryFact{Hopsesh.Name: {Path: "/usr/local/bin/hopsesh"}}
+	if got, _ := with.ReadIdentity(ctx); got != "" {
+		t.Fatal("a machine with hopsesh answered with the identity kept for it here")
 	}
 }

@@ -27,7 +27,7 @@ const (
 type Location struct {
 	Kind LocationKind `json:"kind"`
 	// Name is the machine's name, or the cloud's ("codex-cloud"). Cloud names match
-	// CloudNameSyntax, so a mark title can carry them.
+	// CloudNameSyntax, so names in legacy title labels read back.
 	Name string `json:"name"`
 }
 
@@ -43,7 +43,7 @@ func (l Location) IsCloud() bool { return l.Kind == AtCloud }
 func (l Location) String() string { return l.Name }
 
 // CloudNameSyntax is what a cloud's name looks like: lower case letters, digits and
-// dashes, no spaces (mark titles end the location at a space).
+// dashes, no spaces (legacy title labels end the location at a space).
 var CloudNameSyntax = regexp.MustCompile(`^[a-z][a-z0-9-]{1,31}$`)
 
 // Fidelity is how much of a conversation survives one direction between a cloud and a
@@ -278,7 +278,7 @@ type CloudLister interface {
 type CloudQuery struct {
 	Cloud string
 	Repo  string // only this repository's sessions ("" for all)
-	// Known are ids hopsesh recorded for this cloud (lineage, marks): refresh them even
+	// Known are ids hopsesh recorded for this cloud (lineage): refresh them even
 	// when the vendor's own listing leaves them out.
 	Known []SessionID
 	// Local are the module's sessions on this machine from the same scan, so a module can
@@ -536,7 +536,7 @@ func (s Spec) FindCloud(name string) (Cloud, bool) {
 func (c Cloud) TestedWith(version string) bool { return Spec{Tested: c.Tested}.TestedWith(version) }
 
 // CheckClouds checks a module's clouds the way the registry and the conformance kit do:
-// every cloud is named for a mark title, driven by one of the Spec's binaries and
+// every cloud has a name of CloudNameSyntax, driven by one of the Spec's binaries and
 // declares what it carries each way; a module that implements a cloud capability declares
 // at least one cloud.
 func CheckClouds(m Module) error {

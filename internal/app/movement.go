@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -9,10 +10,12 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
 
+	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -26,6 +29,7 @@ type ReturnCandidate struct {
 	AgentName    string   `json:"agentName"`
 	Profile      string   `json:"profile"`
 	ProfileLabel string   `json:"profileLabel"`
+	Title        string   `json:"title,omitempty"`
 	Key          string   `json:"key"`
 	Status       string   `json:"status"`
 	Reason       string   `json:"reason"`
@@ -33,17 +37,27 @@ type ReturnCandidate struct {
 }
 
 type MovementNotice struct {
-	ProfileLabel string    `json:"profileLabel,omitempty"`
-	Operation    string    `json:"operation"`
-	Status       string    `json:"status"`
-	Text         string    `json:"text"`
-	Machine      string    `json:"machine"`
-	Agent        agent.ID  `json:"agent"`
-	AgentName    string    `json:"agentName"`
-	Key          string    `json:"key"`
-	Profile      string    `json:"profile"`
-	CheckedAt    time.Time `json:"checkedAt"`
-	Delivery     string    `json:"delivery"`
+	ProfileLabel string   `json:"profileLabel,omitempty"`
+	Operation    string   `json:"operation"`
+	Status       string   `json:"status"`
+	Text         string   `json:"text"`
+	Machine      string   `json:"machine"`
+	Agent        agent.ID `json:"agent"`
+	AgentName    string   `json:"agentName"`
+	// Cloud is the destination cloud's title, when the session went to a cloud.
+	Cloud     string    `json:"cloud,omitempty"`
+	Key       string    `json:"key"`
+	Profile   string    `json:"profile"`
+	CheckedAt time.Time `json:"checkedAt"`
+	Delivery  string    `json:"delivery"`
+	// At is when the move left this copy.
+	At time.Time `json:"at,omitzero"`
+	// SourceChanged: this copy gained work after the move (its transcript grew past where
+	// the move read it, and it was active well after the move). Its listing alone tells,
+	// so it is known for a copy on another machine too, which a scan never reads whole.
+	// SourceChangedAt is its last activity.
+	SourceChanged   bool      `json:"sourceChanged,omitempty"`
+	SourceChangedAt time.Time `json:"sourceChangedAt,omitzero"`
 }
 
 type movementObservation struct {
@@ -56,77 +70,80 @@ type movementObservation struct {
 
 // EnrichMovement joins receipt metadata and observes native content in memory. It
 // never writes remote files or alters journaled sidecars during a scan.
-func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
-	graphs := map[string]*lineage.Manifest{}
-	invalid := map[string]bool{}
-	for _, e := range inv.Entries {
-		if e.Lineage == nil || e.LineageError != "" {
+func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) { a.enrichMovement(ctx, inv, nil) }
+
+// enrichMovement is EnrichMovement observing the copies on other machines only in the
+// families that hold a session remote accepts (nil: every family). Observing reads whole
+// transcripts, which over SSH can take longer than a scan may; a copy that is not
+// observed asks to be verified before a return, as one that cannot be read does.
+func (a *App) enrichMovement(ctx context.Context, inv *Inventory, remote func(Entry) bool) {
+	// Saved rows (Cached) carry a lineage outline, not the revision graph, and keep the
+	// movement they were saved with: only rows read in this scan are compared.
+	families := map[string][]int{}
+	var order []string
+	for i, e := range inv.Entries {
+		if e.Lineage == nil || e.LineageError != "" || e.Cached {
 			continue
 		}
-		family := e.Lineage.Family
-		if graphs[family] == nil {
-			graphs[family] = e.Lineage.Clone()
-		} else if graphs[family].Merge(e.Lineage) != nil {
-			invalid[family] = true
+		if _, ok := families[e.Lineage.Family]; !ok {
+			order = append(order, e.Lineage.Family)
 		}
+		families[e.Lineage.Family] = append(families[e.Lineage.Family], i)
 	}
-	for family, g := range graphs {
-		if invalid[family] {
-			continue
-		}
+	for _, family := range order {
 		observed := map[lineage.ReplicaID]movementObservation{}
 		ids := map[int]lineage.ReplicaID{}
-		for i := range inv.Entries {
-			e := &inv.Entries[i]
-			if e.Lineage == nil || e.Lineage.Family != family || e.LineageError != "" {
-				continue
-			}
-			m := inv.Machine(e.Machine)
-			if m == nil || m.host == nil {
-				continue
-			}
-			r, id, ok := g.ForBranch(e.Lineage.Branch).FindEndpoint(e.Session.Key, m.host.Facts.Endpoint)
-			if !ok {
-				continue
-			}
-			ids[i] = id
-			observation := movementObservation{entry: e}
-			in, ok := m.InstallProfile(e.Agent, e.Session.Key.Profile)
-			mod, enabled := a.Module(e.Agent)
-			if !ok || !enabled || in.BindingID() != r.Binding {
-				observed[id] = observation
-				continue
-			}
-			reader, ok := mod.(agent.Reader)
-			if !ok {
-				continue
-			}
-			h, err := m.host.For(ctx, mod.Spec(), in, nil)
-			if err == nil {
-				seg, readErr := a.readMovementSegment(ctx, reader, h, in, *e, m.host.Facts.Endpoint)
-				if readErr == nil {
-					observation.agentAnchors = map[string]bool{}
-					for ni, n := range seg.Nodes {
-						if n.Actor == ir.Agent || n.Kind == ir.KindToolCall {
-							anchor := fmt.Sprintf("node:%d", ni)
-							if n.Native != nil && n.Native.Anchor != "" {
-								anchor = n.Native.Anchor
-							}
-							observation.agentAnchors[anchor] = true
-						}
-					}
-					observation.state, err = g.Observe(id, &seg)
-					observation.valid = err == nil
-					observation.checked = e.ObservedAt
-				}
-			}
-			observed[id] = observation
+		var g *lineage.Manifest
+		observeRemote := remote == nil || slices.ContainsFunc(families[family], func(i int) bool { return remote(inv.Entries[i]) })
+		fingerprint := a.movementFingerprint(ctx, inv, family)
+		if !observeRemote {
+			fingerprint += "\x00local"
 		}
+		notices := a.Cfg.MovementNoticesOn()
+		if memo, ok := a.movementMemo.get(family, fingerprint); ok {
+			if memo.graph == nil {
+				continue // the family's receipts conflict
+			}
+			g = memo.recall(inv, observed, ids)
+			// Same copies, same receipts: the statuses are the ones computed last time
+			// (deriving them walks the whole revision graph per copy).
+			if memo.outputs != nil && memo.notices == notices {
+				for i := range ids {
+					e := &inv.Entries[i]
+					memo.outputs[EntryIdentity(e.Machine, e.Session.Key.String())].apply(e, e.ObservedAt)
+					a.publishMovement(inv, e)
+				}
+				continue
+			}
+		} else {
+			g = committedGraph(inv, family, families[family])
+			if g != nil {
+				a.observeFamily(ctx, inv, family, g, observed, ids, observeRemote)
+			}
+			a.movementMemo.put(family, fingerprint, g, inv, observed, ids)
+			if g == nil {
+				continue
+			}
+		}
+		outputs := map[string]familyOutput{}
 		for i, id := range ids {
 			e := &inv.Entries[i]
 			e.Returns = nil
 			e.Movement = nil
+			e.Departure, e.Arrival = nil, nil
+			if hop, ok := g.Departed(id); ok {
+				e.Departure = a.describeDeparture(g, id, hop, observed)
+			} else {
+				e.Arrival = a.arrival(g, id)
+			}
+			seen := map[string]bool{}
 			for _, r := range g.ReturnReplicas(id) {
+				physical := r.Endpoint + "\x00" + r.Key.String()
+				current := g.Replica(id)
+				if seen[physical] || r.Endpoint == current.Endpoint && r.Key == current.Key {
+					continue
+				}
+				seen[physical] = true
 				if retiredReturn(g, r.ID, observed) {
 					continue
 				}
@@ -142,6 +159,10 @@ func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
 						c.Local = current.Local
 					}
 					c.ProfileLabel = profileLabel(o.entry.Profile)
+					c.Title = o.entry.Session.Title
+					if o.entry.Live.Name != "" {
+						c.Title = o.entry.Live.Name
+					}
 					if o.valid && observed[id].valid {
 						s, t := g.Covered(observed[id].state.Heads), g.Covered(o.state.Heads)
 						switch {
@@ -156,33 +177,135 @@ func (a *App) EnrichMovement(ctx context.Context, inv *Inventory) {
 							c.Reason = "Review and add the missing conversation"
 						default:
 							c.Status = "diverged"
-							c.Reason = "Both copies contain independent work; preserve separate branches"
+							c.Reason = "Conversation histories differ; review the messages before returning"
 						}
 						if o.entry.Live.State == agent.Live && c.Status == "available" {
 							c.Status = "live"
-							c.Reason = "Destination is open; review before returning"
+							c.Reason = "Exit the original conversation before adding new work; its saved history is preserved"
 						}
 					}
 				} else if m != nil && m.Status == StatusOK && m.host != nil && m.host.Facts.Endpoint == r.Endpoint {
-					in, exists := m.InstallProfile(r.Key.Agent, r.Key.Profile)
-					if exists && in.BindingID() == r.Binding && completeAgentListing(m, r.Key) {
+					_, exists := m.InstallProfile(r.Key.Agent, r.Key.Profile)
+					if exists && completeAgentListing(m, r.Key) {
 						c.Status = "missing"
 						c.Reason = "Original session was not found; review creating a new session"
 					}
 				}
 				e.Returns = append(e.Returns, c)
 			}
-			if a.Cfg.MovementNoticesOn() {
+			if notices {
 				e.Movement = a.movementNotice(g, id, observed)
 			}
-			if m := inv.Machine(e.Machine); m != nil && m.Local {
-				a.retainMovement(e)
-				a.cacheMovement(*e)
-				if e.Movement != nil && a.MovementNoticeDelivery(e.Agent, e.Session.Key.Profile, string(e.Session.Key.Session), hookNoticeText(e.Movement), MovementNoticeIdentity{Operation: e.Movement.Operation, Status: e.Movement.Status}) {
-					e.Movement.Delivery = "supplied-to-hook"
+			outputs[EntryIdentity(e.Machine, e.Session.Key.String())] = outputOf(*e)
+			a.publishMovement(inv, e)
+		}
+		a.movementMemo.keepOutputs(family, fingerprint, notices, outputs)
+	}
+}
+
+// observeFamily reads each copy in one lineage family and observes its native content
+// against the family graph g (in memory; nothing is written).
+func (a *App) observeFamily(ctx context.Context, inv *Inventory, family string, g *lineage.Manifest, observed map[lineage.ReplicaID]movementObservation, ids map[int]lineage.ReplicaID, remote bool) {
+	committed := committedPrint(inv, family)
+	for i := range inv.Entries {
+		e := &inv.Entries[i]
+		if e.Lineage == nil || e.Lineage.Family != family || e.LineageError != "" || e.Cached {
+			continue
+		}
+		m := inv.Machine(e.Machine)
+		if m == nil || m.host == nil {
+			continue
+		}
+		in, installed := m.InstallProfile(e.Agent, e.Session.Key.Profile)
+		branch := recordCopy(g, e.Lineage.Branch)
+		r, id, ok := branch.FindBinding(e.Session.Key, m.host.Facts.Endpoint, in.BindingID())
+		if !ok {
+			r, id, ok = branch.FindEndpoint(e.Session.Key, m.host.Facts.Endpoint)
+		}
+		if !ok {
+			continue
+		}
+		ids[i] = id
+		observation := movementObservation{entry: e}
+		mod, enabled := a.Module(e.Agent)
+		writer, writable := mod.(agent.Writer)
+		portable := writable && writer.Profile(in).PortableAppend
+		if !installed || !enabled || in.BindingID() != r.Binding && !portable || !remote && !m.Local && !m.host.IsSnapshot() {
+			observed[id] = observation
+			continue
+		}
+		reader, ok := mod.(agent.Reader)
+		if !ok {
+			continue
+		}
+		h, err := m.host.For(ctx, mod.Spec(), in, nil)
+		var copyKey string
+		var before graphRecords
+		if err == nil {
+			// An unchanged copy against unchanged receipts observes the same way: replay
+			// it instead of rereading and rehashing its whole transcript.
+			if st, statErr := statOf(h.FS(), e.Session.Path); statErr == nil && !st.Missing {
+				copyKey = copyObservationKey(committed, *e, st, in, r, id)
+				if c, ok := copyObservations.get(copyKey); ok {
+					c.replay(g)
+					observation.state, observation.valid, observation.agentAnchors, observation.checked = c.state, c.valid, c.agentAnchors, e.ObservedAt
+					err = errRecalled
+				} else {
+					before = recordsOf(g)
 				}
 			}
 		}
+		if err == nil {
+			seg, readErr := a.readMovementSegment(ctx, reader, h, in, *e, m.host.Facts.Endpoint)
+			if readErr == nil {
+				observation.agentAnchors = map[string]bool{}
+				for ni, n := range seg.Nodes {
+					if n.Actor == ir.Agent || n.Kind == ir.KindToolCall {
+						anchor := fmt.Sprintf("node:%d", ni)
+						if n.Native != nil && n.Native.Anchor != "" {
+							anchor = n.Native.Anchor
+						}
+						observation.agentAnchors[anchor] = true
+					}
+				}
+				if in.BindingID() != r.Binding {
+					_, observation.state, err = branch.ObserveBinding(lineage.Replica{Key: r.Key, Endpoint: r.Endpoint, Binding: in.BindingID(), Location: r.Location, Line: r.Line}, &seg)
+					if err == nil {
+						err = g.Merge(branch)
+					}
+					// Observation is ephemeral; route ancestry remains the committed graph.
+				} else {
+					observation.state, err = g.Observe(id, &seg)
+				}
+				observation.valid = err == nil
+				observation.checked = e.ObservedAt
+				if copyKey != "" && ctx.Err() == nil {
+					copyObservations.put(copyKey, copyObservation{state: observation.state, valid: observation.valid, agentAnchors: observation.agentAnchors, added: recordsOf(g).since(before)})
+				}
+			}
+		}
+		observed[id] = observation
+		// Historical bindings name the same native file. They share the fresh
+		// observation for presentation, without rewriting their authorship.
+		for _, old := range g.Replicas {
+			if old.Key == r.Key && old.Endpoint == r.Endpoint && old.Line == r.Line {
+				observed[old.ID] = observation
+			}
+		}
+	}
+}
+
+// publishMovement hands a local copy's movement to its agent's hook and keeps its
+// record current (both skip work when nothing changed).
+func (a *App) publishMovement(inv *Inventory, e *Entry) {
+	m := inv.Machine(e.Machine)
+	if m == nil || !m.Local {
+		return
+	}
+	a.retainMovement(e)
+	a.cacheMovement(*e)
+	if e.Movement != nil && a.MovementNoticeDelivery(e.Agent, e.Session.Key.Profile, string(e.Session.Key.Session), hookNoticeText(e.Movement), MovementNoticeIdentity{Operation: e.Movement.Operation, Status: e.Movement.Status}) {
+		e.Movement.Delivery = "supplied-to-hook"
 	}
 }
 
@@ -192,12 +315,12 @@ func (a *App) agentName(id agent.ID) string {
 	}
 	return string(id)
 }
+
+// profileLabel names a copy's profile by its folder, which never changes with a sign-in:
+// the default profile needs no name beside its agent.
 func profileLabel(p *agent.RuntimeProfile) string {
-	if p == nil {
+	if p == nil || p.Default {
 		return ""
-	}
-	if p.Account != nil && p.Account.Email != "" {
-		return p.Name + " · " + p.Account.Email
 	}
 	return p.Name
 }
@@ -207,8 +330,22 @@ func (a *App) movementNotice(g *lineage.Manifest, id lineage.ReplicaID, observed
 	if !ok {
 		return nil
 	}
+	return a.describeDeparture(g, id, hop, observed)
+}
+
+// describeDeparture says where a hop away from replica id went and what is known of the
+// work there (prepared, continued, diverged or forked), from lineage and observation.
+func (a *App) describeDeparture(g *lineage.Manifest, id lineage.ReplicaID, hop lineage.Hop, observed map[lineage.ReplicaID]movementObservation) *MovementNotice {
 	dst := g.Replica(hop.To)
-	n := &MovementNotice{Operation: hop.ID, Status: "prepared", Machine: dst.Location, Agent: dst.Key.Agent, AgentName: a.agentName(dst.Key.Agent), Key: dst.Key.String(), Profile: dst.Key.Profile, Delivery: "pending"}
+	n := &MovementNotice{Operation: hop.ID, Status: "prepared", Machine: dst.Location, Agent: dst.Key.Agent, AgentName: a.agentName(dst.Key.Agent), Key: dst.Key.String(), Profile: dst.Key.Profile, Delivery: "pending", At: hop.Time}
+	if source := observed[id].entry; source != nil && !hop.Fork {
+		if at, ok := sourceDrift(g, id, hop, *source); ok {
+			n.SourceChanged, n.SourceChangedAt = true, at
+		}
+	}
+	if _, cl, ok := a.cloudModule(dst.Location); ok {
+		n.Cloud = cl.Title
+	}
 	target := observed[hop.To]
 	if target.entry != nil {
 		n.Machine = target.entry.Machine
@@ -236,11 +373,11 @@ func (a *App) movementNotice(g *lineage.Manifest, id lineage.ReplicaID, observed
 	case "continued":
 		n.Text = "This branch continued in " + where + ". This copy may lack later work."
 	case "diverged":
-		n.Text = "Both this copy and the copy in " + where + " contain independent work. Review before moving."
+		n.Text = "This conversation and the copy in " + where + " contain different work. Compare the histories before moving."
 	case "forked":
-		n.Text = "A separate fork was prepared in " + where + ". This original branch remains available."
+		n.Text = "A separate conversation was prepared in " + where + ". This one is not blocked and stays available."
 		if continued {
-			n.Text = "A separate fork continued in " + where + ". This original branch remains available."
+			n.Text = "A separate conversation continued in " + where + ". This one is not blocked and stays available."
 		}
 	default:
 		n.Text = "Prepared in " + where + ". Work there has not yet been observed."
@@ -249,6 +386,59 @@ func (a *App) movementNotice(g *lineage.Manifest, id lineage.ReplicaID, observed
 		n.Text += " Last checked " + n.CheckedAt.UTC().Format(time.RFC3339) + "."
 	}
 	return n
+}
+
+// driftAfter is how long after a move a copy left behind must still have been active for
+// its growth to count as work: the move's own last writes and a reply to its notice land
+// within it.
+const driftAfter = time.Minute
+
+// sourceDrift reports whether e, replica id's copy, gained work after hop took the session
+// away from it, and when it was last active: its transcript is longer than the byte offset
+// the move read it to, and it was active more than driftAfter after the move. Only the
+// listing is needed (no transcript is read). The offset is the byte end of the agent's
+// own transcript file for Claude Code and Codex (a compressed Codex rollout is listed at
+// its uncompressed size, as it is read); agents that record none, saved rows and a
+// departure read from another copy's file say nothing.
+func sourceDrift(g *lineage.Manifest, id lineage.ReplicaID, hop lineage.Hop, e Entry) (time.Time, bool) {
+	if e.Cached || e.Session.Size <= 0 {
+		return time.Time{}, false
+	}
+	hop, ok := leftThisCopy(g, id, hop)
+	if !ok || hop.Time.IsZero() {
+		return time.Time{}, false
+	}
+	st := g.State(hop.Source)
+	if st.Offset <= 0 || st.Replica != hop.From {
+		return time.Time{}, false
+	}
+	last := e.Session.LastActivity
+	if e.Session.Size > st.Offset && last.Sub(hop.Time) > driftAfter {
+		return last, true
+	}
+	return time.Time{}, false
+}
+
+// leftThisCopy is the move that left id's own transcript: the departure itself, or, when
+// the session moved on again from the copy it went to, the latest move away from id's
+// file (the same session on the same machine) on its line.
+func leftThisCopy(g *lineage.Manifest, id lineage.ReplicaID, hop lineage.Hop) (lineage.Hop, bool) {
+	me := g.Replica(id)
+	same := func(r lineage.ReplicaID) bool {
+		x := g.Replica(r)
+		return x.ID != "" && x.Key == me.Key && x.Endpoint == me.Endpoint
+	}
+	if same(hop.From) {
+		return hop, true
+	}
+	var out lineage.Hop
+	found := false
+	for _, h := range g.ActiveHops() {
+		if !h.Fork && h.Line == me.Line && same(h.From) && (!found || h.Time.After(out.Time)) {
+			out, found = h, true
+		}
+	}
+	return out, found
 }
 
 // Imported projections, title records and delivery bookkeeping do not establish
@@ -282,6 +472,27 @@ type cachedMovement struct {
 	Notice *MovementNotice  `json:"notice"`
 }
 
+// sameMovementRecord ignores a check time less than an hour newer.
+func sameMovementRecord(old, now cachedMovement) bool {
+	strip := func(r cachedMovement) cachedMovement {
+		if r.Notice != nil {
+			n := *r.Notice
+			if !n.CheckedAt.IsZero() {
+				n.Text = strings.TrimSuffix(n.Text, " Last checked "+n.CheckedAt.UTC().Format(time.RFC3339)+".")
+			}
+			n.CheckedAt = time.Time{}
+			r.Notice = &n
+		}
+		return r
+	}
+	if old.Notice != nil && now.Notice != nil && now.Notice.CheckedAt.Sub(old.Notice.CheckedAt) >= time.Hour {
+		return false
+	}
+	a, _ := json.Marshal(strip(old))
+	b, _ := json.Marshal(strip(now))
+	return bytes.Equal(a, b)
+}
+
 func digest(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
 func (a *App) movementCachePath(key agent.SessionKey) string {
 	return filepath.Join(a.StateDir, "movement", digest([]byte(key.String()))+".json")
@@ -290,21 +501,40 @@ func (a *App) cacheMovement(e Entry) {
 	if e.Lineage == nil || e.Session.Path == "" {
 		return
 	}
-	b, err := host.LocalFS().ReadFile(lineage.PathFor(e.Session.Path), 16<<20)
-	if err != nil {
+	// Unchanged sidecar, same notice: the record is current without reading anything.
+	st, err := statOf(host.LocalFS(), lineage.PathFor(e.Session.Path))
+	if err != nil || st.Missing {
 		return
 	}
-	current, err := lineage.Parse(b)
-	if err != nil || digest(current.Encode()) != digest(e.Lineage.Encode()) {
+	seen := movementRecords.key(e, st)
+	if prev, ok := movementRecords.get(e.Session.Path); ok && prev == seen {
+		return
+	}
+	defer movementRecords.put(e.Session.Path, seen)
+	contentReads.Add(1)
+	b, err := host.LocalFS().ReadFile(lineage.PathFor(e.Session.Path), a.Cfg.History.Limits().LineageBytes)
+	if err != nil {
 		return
 	}
 	rec := cachedMovement{Key: e.Session.Key, Path: e.Session.Path, Digest: digest(b), Notice: e.Movement}
 	path := a.movementCachePath(e.Session.Key)
-	if os.MkdirAll(filepath.Dir(path), 0700) != nil {
-		return
-	}
 	data, err := json.Marshal(rec)
 	if err != nil {
+		return
+	}
+	// The record already says this for this exact sidecar: nothing to check or write.
+	// Only the check time moving on is refreshed at most hourly.
+	if old, err := os.ReadFile(path); err == nil {
+		var prev cachedMovement
+		if bytes.Equal(old, data) || json.Unmarshal(old, &prev) == nil && sameMovementRecord(prev, rec) {
+			return
+		}
+	}
+	current, err := lineage.Parse(b, a.Cfg.History.Limits())
+	if err != nil || digest(current.Encode()) != digest(e.Lineage.Encode()) {
+		return
+	}
+	if os.MkdirAll(filepath.Dir(path), 0700) != nil {
 		return
 	}
 	f, err := os.CreateTemp(filepath.Dir(path), ".notice-")
@@ -333,6 +563,7 @@ func (a *App) SessionMovementNotice(ctx context.Context, id agent.ID, profile, s
 type MovementNoticeDetails struct {
 	Key       agent.SessionKey
 	Text      string
+	Summary   string // where the session went, without the advice (for a block reason)
 	Operation string
 	Status    string
 }
@@ -379,11 +610,11 @@ func (a *App) MovementNoticeDetailsForPath(ctx context.Context, id agent.ID, pro
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
 		return details, fmt.Errorf("notice transcript is outside the selected agent profile")
 	}
-	b, err := host.LocalFS().ReadFile(side, 16<<20)
+	b, err := host.LocalFS().ReadFile(side, a.Cfg.History.Limits().LineageBytes)
 	if err != nil {
 		return details, nil
 	}
-	g, err := lineage.Parse(b)
+	g, err := lineage.Parse(b, a.Cfg.History.Limits())
 	if err != nil {
 		return details, err
 	}
@@ -409,6 +640,7 @@ func (a *App) MovementNoticeDetailsForPath(ctx context.Context, id agent.ID, pro
 		return details, nil
 	}
 	details.Text, details.Operation, details.Status = hookNoticeText(n), n.Operation, n.Status
+	details.Summary = strings.TrimSuffix(strings.TrimPrefix(hookNoticeText(n), "Hopsesh status: "), " Check the destination before continuing; continuing here may create separate work.")
 	return details, nil
 }
 
@@ -501,12 +733,15 @@ func (a *App) retainMovement(e *Entry) {
 	if err != nil || json.Unmarshal(b, &previous) != nil || previous.Key != e.Session.Key || previous.Notice == nil || previous.Notice.Operation != e.Movement.Operation {
 		return
 	}
-	side, err := host.LocalFS().ReadFile(lineage.PathFor(e.Session.Path), 16<<20)
+	side, err := host.LocalFS().ReadFile(lineage.PathFor(e.Session.Path), a.Cfg.History.Limits().LineageBytes)
 	if err != nil || previous.Digest != digest(side) {
 		return
 	}
 	if !previous.Notice.CheckedAt.IsZero() {
-		e.Movement = previous.Notice
+		// The destination's last check; this copy's own growth is read from it now.
+		kept := *previous.Notice
+		kept.At, kept.SourceChanged, kept.SourceChangedAt = e.Movement.At, e.Movement.SourceChanged, e.Movement.SourceChangedAt
+		e.Movement = &kept
 	}
 }
 
@@ -558,7 +793,12 @@ func localNoticeEndpoint(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	m := &host.Machine{Local: true, Name: LocalName(), Facts: host.Facts{Home: home, OS: runtime.GOOS, Env: map[string]string{"HOPSESH_CONFIG_DIR": os.Getenv("HOPSESH_CONFIG_DIR")}}}
+	// The default folder named explicitly is still the default installation.
+	dir := os.Getenv("HOPSESH_CONFIG_DIR")
+	if dir != "" && config.SameDir(dir, config.DefaultDir()) {
+		dir = ""
+	}
+	m := &host.Machine{Local: true, Name: LocalName(), Facts: host.Facts{Home: home, OS: runtime.GOOS, Env: map[string]string{"HOPSESH_CONFIG_DIR": dir}}}
 	defer m.Close()
 	return m.ReadIdentity(ctx)
 }

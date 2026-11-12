@@ -23,6 +23,9 @@ type RuntimeProfile struct {
 	Binding        string    `json:"binding,omitempty"`
 	Account        *Account  `json:"account,omitempty"`
 	Error          string    `json:"error,omitempty"`
+	// Command is the shell command hopsesh added on its machine to run the agent in this
+	// folder ("claude-work"; "" none).
+	Command string `json:"command,omitempty"`
 }
 
 func (in Install) ProfileID() string {
@@ -41,14 +44,27 @@ func (in Install) BindingID() string {
 // ProfileSpec is the module's declaration of vendor-supported account isolation.
 // Only module code supplies it; peer payloads never control launch policy.
 type ProfileSpec struct {
-	RootEnv      []string          `json:"rootEnv,omitempty"`
-	Unset        []string          `json:"unset,omitempty"`
-	Login        []string          `json:"login,omitempty"`
-	InitialFiles map[string]string `json:"initialFiles,omitempty"`
+	RootEnv []string `json:"rootEnv,omitempty"`
+	Unset   []string `json:"unset,omitempty"`
+	Login   []string `json:"login,omitempty"`
+	// LoginElsewhere signs in from another machine's browser: the agent prints a link
+	// and a code instead of opening a browser where it runs (empty: Login).
+	LoginElsewhere []string          `json:"loginElsewhere,omitempty"`
+	InitialFiles   map[string]string `json:"initialFiles,omitempty"`
+	// Inherit are settings a new folder copies from the agent's default folder, by
+	// root-relative TOML file: top-level keys (Codex's cli_auth_credentials_store, so a
+	// new folder keeps its sign-in where the default one does).
+	Inherit map[string][]string `json:"inherit,omitempty"`
 }
 
 func (in Install) ProfileEnv() []string {
 	if in.Profile == nil || in.Accounts == nil {
+		return nil
+	}
+	// Some vendors distinguish an explicit root from their native config lookup,
+	// even when both point at the same directory. Only detection metadata and an
+	// exact default-profile match authorize that lookup; aliases stay pinned.
+	if in.NativeDefaultRoot != "" && in.Profile.Default && in.Profile.Root == in.NativeDefaultRoot {
 		return nil
 	}
 	var env []string

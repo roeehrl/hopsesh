@@ -1,5 +1,5 @@
-# Unknown account continuity returns a new portable copy. The original is preserved.
-# Undo refuses to discard later work, and forced undo removes only the new copy.
+# A cross-agent return adds the new work to the exact original session. Undo refuses to
+# discard later work, and forced undo takes out only what the return appended.
 git-repo proj https://github.com/example/proj.git
 claude-session 11111111-2222-4333-8444-555555555555 proj 'Fix the parser' 'please fix the parser in'
 
@@ -22,7 +22,10 @@ stderr 'changed since'
 grep 'claude continues from the test' $SESSION
 
 exec hopsesh undo --yes --force
-! exists $SESSION
+exists $SESSION
+! grep 'claude continues from the test' $SESSION
+! grep 'codex wrote the parser test' $SESSION
+grep 'please fix the parser in' $SESSION
 exec hopsesh ls --json --no-git
 stdout '11111111-2222-4333-8444-555555555555'
 ! stdout 'claude continues from the test'

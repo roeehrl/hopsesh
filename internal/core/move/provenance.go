@@ -2,8 +2,10 @@ package move
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/core/convert"
@@ -15,11 +17,14 @@ import (
 // prepareLineage snapshots the entire causal graph. Planning never mutates inventory.
 func prepareLineage(ctx context.Context, p *Plan, in Input, seg *ir.Segment) error {
 	m := in.Lineage.Clone()
+	if m != nil {
+		m.SetLimits(p.Options.Limits)
+	}
 	fsys, err := in.Source.Machine.FS(ctx)
 	if err != nil {
 		return err
 	}
-	actual, err := lineage.Read(fsys, in.Session.Path)
+	actual, err := lineage.Read(fsys, in.Session.Path, p.Options.Limits)
 	if err != nil {
 		return err
 	}
@@ -36,6 +41,7 @@ func prepareLineage(ctx context.Context, p *Plan, in Input, seg *ir.Segment) err
 			return err
 		}
 		m = lineage.NewNative(id, p.Key)
+		m.SetLimits(p.Options.Limits)
 	}
 	for _, c := range in.Copies {
 		if c.Lineage != nil && c.Lineage.Family == m.Family {
@@ -84,10 +90,12 @@ func prepareLineage(ctx context.Context, p *Plan, in Input, seg *ir.Segment) err
 		st, err = m.Observe(p.sourceReplica, seg)
 		snapshot = true
 		p.Options.Fork = true
-		p.Mark = MarkOff
-		p.Warnings = append(p.Warnings, "Native history changed; this transfer starts a separate branch from its current snapshot.")
+		p.Warnings = append(p.Warnings, "This conversation's history no longer matches what hopsesh recorded when it last moved it, so it goes as a separate conversation from where it is now. The copies made before are kept as they are.")
 	}
 	if err != nil {
+		if errors.Is(err, agent.ErrDiverged) && !snapshot {
+			return historyChanged{err}
+		}
 		return err
 	}
 	p.sourceState = st
@@ -96,10 +104,39 @@ func prepareLineage(ctx context.Context, p *Plan, in Input, seg *ir.Segment) err
 	}
 	return nil
 }
+
+// historyChanged: the source's own history no longer matches the receipts hopsesh
+// recorded for it (records rewound, rewritten or gone). Unlike other lineage refusals it
+// has a way forward: keep-both takes it as a separate conversation, a new branch from its
+// current snapshot (prepareLineage).
+type historyChanged struct{ err error }
+
+func (e historyChanged) Error() string { return e.err.Error() }
+func (e historyChanged) Unwrap() error { return e.err }
+
+// lineageRefused records why lineage could not be verified. A changed history names its
+// way forward in every surface: the blocker for the command line and the client API's
+// notes, HistoryChanged for the windows. Other refusals have none to offer.
+func lineageRefused(p *Plan, err error) {
+	p.lineageRefused = true
+	var changed historyChanged
+	if !errors.As(err, &changed) {
+		p.Blockers = append(p.Blockers, "cannot verify session lineage: "+err.Error())
+		return
+	}
+	p.HistoryChanged = strings.TrimPrefix(changed.err.Error(), agent.ErrDiverged.Error()+": ")
+	p.Blockers = append(p.Blockers, HistoryChangedBlocker(p.HistoryChanged))
+}
+
+// HistoryChangedBlocker is the blocker for a source whose history no longer matches its
+// receipts; reason is HistoryChanged.
+func HistoryChangedBlocker(reason string) string {
+	return "this conversation's history no longer matches what hopsesh recorded when it last moved it (" + reason + "); choose --keep-both to take it as a separate conversation"
+}
+
 func forkLine(p *Plan) {
 	p.targetLine = p.manifest.Fork(p.OperationID, p.sourceState.Heads)
 	p.Options.Fork = true
-	p.Mark = MarkOff
 }
 func targetState(ctx context.Context, p *Plan, in Input, c Copy) (lineage.State, ir.Segment, error) {
 	reader, ok := in.Target.Module.(agent.Reader)
@@ -122,9 +159,9 @@ func targetState(ctx context.Context, p *Plan, in Input, c Copy) (lineage.State,
 		st, err := portableTargetState(p, in, c, &seg)
 		return st, seg, err
 	}
-	replica, id, ok := p.manifest.FindEndpoint(c.Summary.Key, in.Target.Machine.Facts.Endpoint)
+	replica, id, ok := p.manifest.FindBinding(c.Summary.Key, in.Target.Machine.Facts.Endpoint, in.Target.Install.BindingID())
 	if !ok || replica.Binding != in.Target.Install.BindingID() {
-		return lineage.State{}, seg, fmt.Errorf("destination session has no verified lineage; choose a separate fork")
+		return lineage.State{}, seg, fmt.Errorf("destination session has no verified lineage; keep them as separate conversations")
 	}
 	if p.ExpectedDestination == nil {
 		p.ExpectedDestination = map[string]ir.Cursor{}

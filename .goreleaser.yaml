@@ -5,7 +5,7 @@
 # maintainer's Mac by scripts/release-sign.sh, so no signing key or Apple credential is
 # ever stored in GitHub (docs/RELEASING.md).
 #
-# Optional: TAP_GITHUB_TOKEN publishes the Scoop manifest and the winget pull request.
+# Homebrew, Scoop and winget follow once the release is published (.github/workflows/packages.yml).
 version: 2
 
 project_name: hopsesh
@@ -63,41 +63,6 @@ nfpms:
         dependencies: [openssh-clients]
       apk:
         dependencies: [openssh-client]
-
-scoops:
-  - name: hopsesh
-    ids: [default]
-    repository:
-      owner: roeehrl
-      name: scoop-bucket
-      token: '{{ envOrDefault "TAP_GITHUB_TOKEN" "" }}'
-    homepage: https://github.com/roeehrl/hopsesh
-    description: Move Claude Code sessions between your machines
-    license: Apache-2.0
-    # A pre-release tag (v0.4.0-rc.1) never reaches Scoop or winget.
-    skip_upload: '{{ if and (isEnvSet "TAP_GITHUB_TOKEN") (not .Prerelease) }}false{{ else }}true{{ end }}'
-
-winget:
-  - name: hopsesh
-    publisher: roeehrl
-    short_description: Move Claude Code sessions between your machines
-    license: Apache-2.0
-    homepage: https://github.com/roeehrl/hopsesh
-    publisher_url: https://github.com/roeehrl
-    ids: [default]
-    repository:
-      owner: roeehrl
-      name: winget-pkgs
-      branch: "hopsesh-{{ .Version }}"
-      token: '{{ envOrDefault "TAP_GITHUB_TOKEN" "" }}'
-      pull_request:
-        enabled: true
-        base:
-          owner: microsoft
-          name: winget-pkgs
-          branch: master
-    # A pre-release tag (v0.4.0-rc.1) never reaches Scoop or winget.
-    skip_upload: '{{ if and (isEnvSet "TAP_GITHUB_TOKEN") (not .Prerelease) }}false{{ else }}true{{ end }}'
 
 # Release notes are this version's CHANGELOG.md section, passed with --release-notes (see
 # release.yml), which replaces GoReleaser's own changelog. "changelog: disable: true" would

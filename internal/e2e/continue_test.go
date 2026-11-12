@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -68,7 +69,7 @@ func TestContinueInCodexAndBack(t *testing.T) {
 	src := list(t, box)[sid]
 	in := move.Input{Source: move.Side{Machine: box.m, Module: cl, Install: box.in}, Session: src,
 		Target: move.Side{Machine: here.m, Module: cx, Install: hereCodex}}
-	p, err := move.Build(ctx, in, move.Options{TargetDir: here.repo, Mark: true})
+	p, err := move.Build(ctx, in, move.Options{TargetDir: here.repo})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,6 +79,7 @@ func TestContinueInCodexAndBack(t *testing.T) {
 	if p.Continue.Report.Reasoning != 1 || p.Continue.Report.ToolCalls != 1 {
 		t.Fatalf("report: %+v", p.Continue.Report)
 	}
+	before, _ := os.ReadFile(src.Path)
 	res, err := move.Apply(ctx, p, in, env)
 	if err != nil {
 		t.Fatal(err)
@@ -100,11 +102,19 @@ func TestContinueInCodexAndBack(t *testing.T) {
 	if !resumes(res.Command, string(th.Key.Session)) {
 		t.Fatalf("command: %s", res.Command)
 	}
-	left := list(t, box)[sid]
-	if left.Mark == nil || left.Mark.Kind != agent.MarkPrepared || left.Mark.AgentName != "Codex" {
-		t.Fatalf("the Claude session must say it is prepared in Codex: %+v", left.Mark)
+	// Titles never show movement: the destination has the source's own title, and the
+	// source is left exactly as it was (hopsesh's views show where it went, from lineage).
+	if th.Title != src.Title || strings.Contains(th.Title, "↪") || strings.Contains(th.Title, "(from") {
+		t.Fatalf("the Codex thread must keep the session's title %q: %q", src.Title, th.Title)
 	}
+	left := list(t, box)[sid]
 	original, _ := os.ReadFile(left.Path)
+	if left.LegacyLabel != nil || left.Title != src.Title || !bytes.Equal(original, before) {
+		t.Fatalf("the Claude session must not be relabelled: %q %+v", left.Title, left.LegacyLabel)
+	}
+	if index, _ := os.ReadFile(filepath.Join(hereCodex.Root("home"), "session_index.jsonl")); bytes.Contains(index, []byte("↪")) {
+		t.Fatalf("no label in Codex's index: %s", index)
+	}
 
 	// Codex works on.
 	appendCodexTurn(t, th.Path, "Now also check the second file.", "The second codeword is FIG-3.")
@@ -117,7 +127,7 @@ func TestContinueInCodexAndBack(t *testing.T) {
 	}
 	backIn := move.Input{Source: move.Side{Machine: here.m, Module: cx, Install: hereCodex}, Session: threads[0], Lineage: lin,
 		Target: move.Side{Machine: box.m, Module: cl, Install: box.in}, Copies: []move.Copy{{Summary: list(t, box)[sid]}}}
-	back, err := move.Build(ctx, backIn, move.Options{TargetDir: box.repo, Mark: true})
+	back, err := move.Build(ctx, backIn, move.Options{TargetDir: box.repo})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,8 +146,8 @@ func TestContinueInCodexAndBack(t *testing.T) {
 	if !mentions(homeSeg, "FIG-3") || !mentions(homeSeg, "Now also check the second file.") {
 		t.Fatal("the Codex work must come back")
 	}
-	if home.Mark != nil || home.Title != "Find the codeword" {
-		t.Fatalf("back home the session has its own title again: %q %+v", home.Title, home.Mark)
+	if home.LegacyLabel != nil || home.Title != "Find the codeword" {
+		t.Fatalf("back home the session keeps its own title: %q %+v", home.Title, home.LegacyLabel)
 	}
 	if mentions(homeSeg, "PLUM-7 (from") == false {
 		t.Fatal("the original turns are still there")
@@ -154,7 +164,7 @@ func TestContinueInCodexAndBack(t *testing.T) {
 }
 
 // Continuing on another machine keeps the source agent's own copy there too, byte for
-// byte and marked; coming back to that agent there adds only the new work to it.
+// byte with its own title; coming back to that agent there adds only the new work to it.
 func TestContinueKeepsNativeCopy(t *testing.T) {
 	root := t.TempDir()
 	box, here := newLocation(t, "box", root), newLocation(t, "here", root)
@@ -169,7 +179,7 @@ func TestContinueKeepsNativeCopy(t *testing.T) {
 	in := move.Input{Source: move.Side{Machine: box.m, Module: cl, Install: box.in}, Session: list(t, box)[sid],
 		Target: move.Side{Machine: here.m, Module: cx, Install: hereCodex},
 		Native: &move.NativeSide{Target: move.Side{Machine: here.m, Module: cl, Install: here.in}}}
-	p, err := move.Build(ctx, in, move.Options{TargetDir: here.repo, Mark: true})
+	p, err := move.Build(ctx, in, move.Options{TargetDir: here.repo})
 	if err != nil || len(p.Blockers) > 0 {
 		t.Fatalf("%v %v", err, p.Blockers)
 	}
@@ -180,8 +190,8 @@ func TestContinueKeepsNativeCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	native, ok := list(t, here)[sid]
-	if !ok || native.CWD != here.repo || native.Mark == nil || native.Mark.Kind != agent.MarkPrepared || native.Mark.AgentName != "Codex" {
-		t.Fatalf("the native copy here: %+v %+v", native, native.Mark)
+	if !ok || native.CWD != here.repo || native.LegacyLabel != nil || native.Title != list(t, box)[sid].Title {
+		t.Fatalf("the native copy here keeps the session's title: %+v", native)
 	}
 	lin, _ := lineage.Read(host.LocalFS(), native.Path)
 	if lin == nil || len(lin.Replicas) != 3 {
@@ -196,7 +206,7 @@ func TestContinueKeepsNativeCopy(t *testing.T) {
 	tl, _ := lineage.Read(host.LocalFS(), th.Path)
 	backIn := move.Input{Source: move.Side{Machine: here.m, Module: cx, Install: hereCodex}, Session: th, Lineage: tl,
 		Target: move.Side{Machine: here.m, Module: cl, Install: here.in}, Copies: []move.Copy{{Summary: native, Lineage: lin}}}
-	back, err := move.Build(ctx, backIn, move.Options{Mark: true})
+	back, err := move.Build(ctx, backIn, move.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +263,7 @@ func TestContinueOnTheSameMachine(t *testing.T) {
 	os.MkdirAll(ci.Root("home"), 0o700)
 	in := move.Input{Source: move.Side{Machine: here.m, Module: claude.New(), Install: here.in}, Session: list(t, here)[sid],
 		Target: move.Side{Machine: here.m, Module: cx, Install: ci}}
-	p, err := move.Build(ctx, in, move.Options{Mark: true, Fidelity: "note"})
+	p, err := move.Build(ctx, in, move.Options{Fidelity: "note"})
 	if err != nil || len(p.Blockers) > 0 {
 		t.Fatalf("%v %v", err, p.Blockers)
 	}
@@ -268,8 +278,8 @@ func TestContinueOnTheSameMachine(t *testing.T) {
 	if mentions(seg, "PLUM-7") || !mentions(seg, "moved from Claude Code") {
 		t.Fatal("a note carries only the briefing")
 	}
-	if m := list(t, here)[sid].Mark; m == nil || m.Kind != agent.MarkPrepared {
-		t.Fatal("the Claude session must be marked")
+	if s := list(t, here)[sid]; s.LegacyLabel != nil || th[0].Title != s.Title {
+		t.Fatalf("titles stay as they were: %q / %q", s.Title, th[0].Title)
 	}
 }
 

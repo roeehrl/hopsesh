@@ -86,7 +86,21 @@ func (m *Module) Preview(ctx context.Context, h agent.Host, in agent.Install, s 
 // previewItems walks the active branch back from the newest message (the tail-only form of
 // activeBranch) and returns its items, oldest first. rooted reports that the walk reached
 // the start of the conversation inside the window.
-func previewItems(recs []record) (items []agent.PreviewItem, rooted bool) {
+// Like activeBranch it walks in write order and continues across records Claude Code
+// never wrote (chain.go); a parent missing with nothing before it in the window is still
+// read as the branch going on before the window.
+func previewItems(file []record) (items []agent.PreviewItem, rooted bool) {
+	links := make([]link, len(file))
+	for i, r := range file {
+		links[i] = chainLink(r.Type, r.UUID, r.ParentUUID, r.LogicalParentUUID, r.IsSidechain)
+	}
+	order := writeOrder(links)
+	recs := make([]record, len(order))
+	ordered := make([]link, len(order))
+	for k, i := range order {
+		recs[k], ordered[k] = file[i], links[i]
+	}
+	gap := gaps(ordered)
 	byUUID := map[string]int{}
 	leaf := -1
 	for i, r := range recs {
@@ -116,6 +130,12 @@ func previewItems(recs []record) (items []agent.PreviewItem, rooted bool) {
 			break
 		}
 		j, ok := byUUID[parent]
+		if !ok || j >= i {
+			if j, bridged := gap[i]; bridged {
+				i = j
+				continue
+			}
+		}
 		if !ok {
 			break // the branch goes on before the window
 		}
@@ -197,15 +217,12 @@ func hasImage(raw json.RawMessage) bool {
 	return false
 }
 
-// Rename retitles the session with a custom-title record, what /rename writes, keeping a
-// copy's "moved" mark and the file's time.
+// Rename retitles the session with a custom-title record, what /rename writes, keeping
+// the file's time (a legacy title label goes with the old title).
 func (m *Module) Rename(_ context.Context, h agent.Host, in agent.Install, s agent.Summary, title string) error {
 	t, err := agent.CheckTitle(title)
 	if err != nil {
 		return err
-	}
-	if s.Mark != nil {
-		t = agent.MarkTitle(*s.Mark, t)
 	}
 	rec := encodeRecord(map[string]any{"type": "custom-title", "customTitle": t, "sessionId": string(s.Key.Session)})
 	return h.FS().Append(s.Path, append(rec, '\n'), agent.AppendOptions{NewLine: true, KeepMtime: true, Standalone: true})

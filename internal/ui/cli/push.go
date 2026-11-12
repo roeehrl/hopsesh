@@ -12,6 +12,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/move"
+	"github.com/roeehrl/hopsesh/internal/core/serve"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -22,7 +23,7 @@ func pushCmd() *cobra.Command {
 		Long: `Sends a session on this machine to another machine where hopsesh is installed and set to
 receive sessions ([peer] receive = true in its configuration). hopsesh there finds or clones
 the repository, installs or converts the session with its own agents, and keeps its own
-undo record; this machine marks its copy and records where the work went.
+undo record; this machine records where the work went.
 
 Only the session's own files are sent: the other machine cannot read or run anything here.
 Nothing changes until you confirm (or pass --yes). hopsesh undo <id> here undoes both sides.`,
@@ -45,15 +46,13 @@ Nothing changes until you confirm (or pass --yes). hopsesh undo <id> here undoes
 	f.String("to", "", "continue in this directory on the other machine instead of matching the repository")
 	f.Bool("clone", false, "clone the repository there if it is missing")
 	f.String("worktree", "auto", "auto, create or main (as for pull)")
-	f.Bool("fork", false, "keep this session running (both continue) instead of handing off")
 	f.Bool("rc", false, "turn the agent's remote control on there, where it has one")
 	f.Bool("redact", false, "redact likely secrets in the copy")
-	f.Bool("no-mark", false, "do not mark the copy here")
-	f.Bool("notify", false, "record a durable movement notice (default from config; --notify=false disables it)")
+	f.Bool("notify", false, "protect the original until you move back: blocked or warned as set by hopsesh's original setting (default on unless set to off; --notify=false leaves it alone)")
 	f.Bool("no-sync", false, "do not fetch or fast-forward the checkout there")
 	f.Bool("push", false, "first push the session branch's unpushed commits from here")
 	f.Bool("replace", false, "when the copy there changed too, replace it anyway")
-	f.Bool("keep-both", false, "when both copies changed, keep both")
+	f.Bool("keep-both", false, "preserve different conversation histories by creating a separate session")
 	f.Bool("dry-run", false, "show the plan and stop")
 	f.Bool("yes", false, "do not ask for confirmation")
 	f.Bool("json", false, "output JSON")
@@ -135,14 +134,6 @@ func (r *run) renderPushResult(p *move.Plan, pr *app.PushResult) {
 	} else {
 		r.printf("\n✓ %q is on %s: %d file(s), %s.\n", p.Title, pr.Machine, res.Files, move.Human(res.Bytes))
 	}
-	switch res.Mark {
-	case "done":
-		r.printf("  The copy here is marked.\n")
-	case "pending":
-		r.printf("  The copy here is still open; it is marked once it ends (on a later scan).\n")
-	case "failed":
-		r.printf("  ! Could not mark the copy here: %s\n", res.MarkError)
-	}
 	if res.SyncNote != "" {
 		r.printf("  Code there: %s.\n", res.SyncNote)
 	}
@@ -163,6 +154,10 @@ func peerCmd() *cobra.Command {
 			if stdio, _ := cmd.Flags().GetBool("stdio"); !stdio {
 				return errors.New("hopsesh peer is started by hopsesh on another machine, with --stdio")
 			}
+			// hopsesh in the login session answers, when it runs here.
+			if handed, err := handToServe(); handed || err != nil {
+				return err
+			}
 			r, err := newRun(cmd)
 			if err != nil {
 				return err
@@ -172,6 +167,43 @@ func peerCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().Bool("stdio", false, "speak the peer protocol on standard input and output")
+	return cmd
+}
+
+func clientCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:    "client",
+		Short:  "Speak hopsesh's client API on standard input and output (for other programs; docs/client-api.md)",
+		Hidden: true,
+		Args:   cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if stdio, _ := cmd.Flags().GetBool("stdio"); !stdio {
+				return errors.New("hopsesh client is for programs: run it with --stdio")
+			}
+			// hopsesh in the login session answers, when it runs here: it can open
+			// terminals and sees the Keychain.
+			if os.Getenv("HOPSESH_CLIENT_HERE") == "" {
+				if home, err := os.UserHomeDir(); err == nil {
+					// An older hopsesh serve doesn't know the client API (it refuses the
+					// mode): this one answers instead, without serve's terminals.
+					c, br, w, err := serve.Dial(context.Background(), home, serve.ModeClient)
+					switch {
+					case err == nil:
+						return serve.Proxy(c, br, os.Stdin, os.Stdout)
+					case !errors.Is(err, serve.ErrNotRunning) && w.Error == "":
+						return err
+					}
+				}
+			}
+			r, err := newRun(cmd)
+			if err != nil {
+				return err
+			}
+			defer r.app.Catalog.Close()
+			return r.app.ServeClient(context.Background(), os.Stdin, os.Stdout)
+		},
+	}
+	cmd.Flags().Bool("stdio", false, "speak the client API on standard input and output")
 	return cmd
 }
 

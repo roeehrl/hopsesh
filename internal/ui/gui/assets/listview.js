@@ -4,7 +4,7 @@
 // chips, and the text filter. It is saved in the config ([list], SaveList); the text
 // filter is not. The list is one tree: group headers, then their sessions, with the
 // keyboard of the WAI-ARIA tree pattern.
-import { accountGroupLabel, api, h, fill, icon, ICONS, state, sys, keys, here, cloudOf, cloudTitle, agentInfo, machineStatus, count, ago, toast, dialog, fail } from "./core.js";
+import { accountGroupLabel, accountKey, accountKeyLegacy, api, h, fill, icon, ICONS, state, sys, keys, here, cloudOf, cloudTitle, agentInfo, machineStatus, count, ago, toast, dialog, fail, bytes } from "./core.js";
 import { openMenu, openPopover, update, closeAll, isOpen, openEl, refill } from "./menu.js";
 import { tabs as terminalTabs } from "./term.js";
 import { statusKey, placesOf, key as entryKey } from "./actions.js";
@@ -77,7 +77,7 @@ const LOCATION = () => [["here", sys.Here], ["machines", "Other machines"], ["cl
 
 // FACETS are the filters: their words, values (with their names) and each session's.
 const FACETS = {
- account:{name:"Account",values:()=>[...new Map(pool.map(e=>[e.profile?.id||"",accountGroupLabel(e)]))],of:e=>[e.profile?.id||""]},
+ account:{name:"Account",values:()=>[...new Map(pool.map(e=>[accountKey(e),accountGroupLabel(e)]))],of:e=>[accountKey(e),accountKeyLegacy(e),e.profile?.id||""]},
  tag:{name:"Account tag",values:()=>[...new Map(pool.flatMap(e=>e.profile?.tags?.length?e.profile.tags:["Untagged"]).map(t=>[t.toLowerCase(),t]))].sort((a,b)=>a[0].localeCompare(b[0])),of:e=>(e.profile?.tags?.length?e.profile.tags:["Untagged"]).map(t=>t.toLowerCase())},
   status: { name: "Status", values: () => STATUS.map(([v, n]) => [v, n]), of: (e) => [statusKey(e)] },
   location: { name: "Location", values: LOCATION, of: (e) => [locationOf(e)] },
@@ -130,7 +130,7 @@ function matches(f, e) {
 function textMatch(e) {
   const ws = list.text.toLowerCase().split(/\s+/).filter(Boolean);
   if (!ws.length) return true;
-  const hay = [e.title,e.profile?.name,e.profile?.account?.email,...(e.profile?.tags||[]), e.group.name, e.group.remote, e.branch, e.cloud?.branch, e.cloud ? cloudTitle(e.machine) : e.machine === here() ? sys.here : e.machine, e.lastPrompt].join(" ").toLowerCase();
+  const hay = [e.title,e.profile?.name,e.owner?.email,...(e.profile?.tags||[]), e.group.name, e.group.remote, e.branch, e.cloud?.branch, e.cloud ? cloudTitle(e.machine) : e.machine === here() ? sys.here : e.machine, e.lastPrompt].join(" ").toLowerCase();
   return ws.every((w) => hay.includes(w));
 }
 
@@ -178,11 +178,25 @@ function sortRows(rows) {
   return list.sortReverse ? s.reverse() : s;
 }
 
+// afterHome draws each other copy of a conversation right after its conversation's row
+// when both are in the same group (their own order among themselves); a copy whose row
+// is elsewhere keeps its place.
+function afterHome(rows) {
+  const shown = new Set(rows.map(entryKey));
+  const copies = new Map();
+  for (const e of rows) if (e.home && shown.has(e.home) && e.home !== entryKey(e)) { if (!copies.has(e.home)) copies.set(e.home, []); copies.get(e.home).push(e); }
+  if (!copies.size) return rows;
+  const out = [];
+  const put = (e) => { out.push(e); for (const c of copies.get(entryKey(e)) || []) put(c); };
+  for (const e of rows) if (!(e.home && shown.has(e.home) && e.home !== entryKey(e))) put(e);
+  return out.length === rows.length ? out : rows;
+}
+
 // groupsOf puts sessions in groups for the chosen property, in an order that means
 // something (by activity, or A–Z when sorting by title; fixed for status and age).
 export function groupsOf(rows) {
   const g = list.groupBy;
-  if (g === "none") return [{ key: "none", name: "", rows: sortRows(rows), flat: true }];
+  if (g === "none") return [{ key: "none", name: "", rows: afterHome(sortRows(rows)), flat: true }];
   const map = new Map();
   const add = (k, make, e) => { if (!map.has(k)) map.set(k, Object.assign({ key: k, rows: [] }, make())); map.get(k).rows.push(e); };
   for (const e of rows) {
@@ -194,14 +208,14 @@ export function groupsOf(rows) {
     } else if (g === "location") {
       const loc = e.cloud ? "cloud:" + e.machine : e.machine;
       add("location:" + loc, () => ({ name: e.cloud ? cloudTitle(e.machine) : e.machine === here() ? sys.Here : e.machine, machine: e.cloud ? null : e.machine, cloud: e.cloud ? e.machine : null }), e);
-    } else if(g==="account") add("account:"+(e.profile?.id||""),()=>({name:accountGroupLabel(e)}),e);
+    } else if(g==="account") add("account:"+accountKey(e),()=>({name:accountGroupLabel(e)}),e);
     else if(g==="tag") for(const t of e.profile?.tags?.length?e.profile.tags:["Untagged"]) add("tag:"+t.toLowerCase(),()=>({name:t}),e);
     else if (g === "agent") add("agent:" + e.agent, () => ({ name: e.agentName, agent: e.agent }), e);
     else if (g === "status") { const k = statusKey(e); add("status:" + k, () => ({ name: STATUS.find(([v]) => v === k)[1], status: k }), e); }
     else if (g === "last-active") { const b = bucket(e); add("last-active:" + b, () => ({ name: BUCKETS.find(([v]) => v === b)[1], bucket: b }), e); }
   }
   const out = [...map.values()];
-  for (const x of out) { x.rows = sortRows(x.rows); if(g === "family") x.rows.sort((a,b)=>(a.relationship?.depth||0)-(b.relationship?.depth||0)); x.newest = Math.max(...x.rows.map(at)); }
+  for (const x of out) { x.rows = afterHome(sortRows(x.rows)); if(g === "family") x.rows = afterHome(x.rows.sort((a,b)=>(a.relationship?.depth||0)-(b.relationship?.depth||0))); x.newest = Math.max(...x.rows.map(at)); }
   const byActivity = (a, b) => (a.last ? 1 : 0) - (b.last ? 1 : 0) || b.newest - a.newest;
   const az = (a, b) => (a.last ? 1 : 0) - (b.last ? 1 : 0) || a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
   if (g === "family" || g === "repository" || g === "agent" || g === "account" || g === "tag") out.sort(list.sortBy === "title" ? az : byActivity);
@@ -238,7 +252,8 @@ export function setCollapsed(g, closed) {
 // open opens the group a session is in (a session picked from the palette, a notification
 // or Reveal), whatever the user chose before: the only time the app opens a group itself.
 export function openGroupOf(e, rows) {
-  const g = groupsOf(rows).find((x) => x.rows.some((r) => entryKey(r) === entryKey(e)));
+  const gs = groupsOf(rows);
+  const g = gs.find((x) => x.rows.some((r) => entryKey(r) === entryKey(e))) || gs.find((x) => x.rows.some((r) => (r.copies || []).some(c => entryKey(c) === entryKey(e))));
   if (g && collapsed(g)) setCollapsed(g, false);
 }
 
@@ -515,11 +530,11 @@ export function tree(groups, row, selKey) {
     const gi = h("div", { class: "grp" + (closed ? " closed" : ""), role: "treeitem", "aria-level": "1", "aria-expanded": closed ? "false" : "true", "aria-label": label,
       tabindex: "-1", "data-gkey": g.key }, head);
     if (!closed) {
-      const body = h("div", { class: "gbody", role: "group", style: `contain-intrinsic-size: auto ${g.rows.length * (list.density === "compact" ? 32 : 60)}px` });
+      const body = h("div", { class: "gbody", role: "group" });
       chunkedRows(body,g.rows,e=>{
        const item=row(e,2); if(g.family && e.relationship?.parent){
          item.style.marginLeft=Math.min(e.relationship.depth||1,3)*18+"px";
-         item.prepend(h("span",{class:"family-ancestry muted",title:e.relationship.ancestors?.join(" → ")},"↳ Fork · "+(e.relationship.ancestors?.at(-1)||"Parent unavailable")));
+         item.prepend(h("span",{class:"family-ancestry muted",title:e.relationship.ancestors?.join(" → ")},"⑂ Fork of "+(e.relationship.ancestors?.at(-1)||"a parent not listed")));
        }
        return item;
      });
@@ -537,6 +552,9 @@ export function tree(groups, row, selKey) {
 
 // rowByKey is the row of a session (its data-key holds machine NUL key, which a CSS
 // selector can't name).
+// render may retain the live tree and update its rows in place.
+export function adoptTree(root) { treeEl = root; }
+
 export function rowByKey(root, k) {
  chunksByKey.get(k)?.();
   for (const r of root.querySelectorAll(".row")) if (r.dataset.key === k) return r;
@@ -555,8 +573,10 @@ function groupMark(g) {
 
 function groupRight(g, closed) {
   const out = [];
+  const size = g.rows.reduce((n, e) => n + (e.sizeKB || 0), 0);
+  if (size) out.push(h("span", { class: "gmeta gsize", title: "What these sessions take on disk" }, bytes(size * 1024)));
   if (closed && g.newest && Date.now() - g.newest > INACTIVE) out.push(h("span", { class: "gmeta" }, `last active ${ago(new Date(g.newest).toISOString())}`));
-  if (g.repo && !g.repo.noRepo) {
+  if (g.repo && !g.repo.noRepo && !g.repo.repoPending) {
     if (g.repo.remote) out.push(h("span", { class: "mono gremote", title: g.repo.remote }, g.repo.remote));
     out.push(h("span", { class: "gmeta " + (g.repo.local ? "ok" : g.repo.noRemote ? "" : "warn") }, g.repo.noRemote ? "A checkout without a remote" : g.repo.local ? "Cloned here" : `Not on ${sys.here}`));
   }
@@ -585,7 +605,8 @@ let typed = "", typedAt = 0;
 // letters go to a title.
 function treeKeys(ev) {
   if (ev.target.closest(".act")) return;
-  const logical=lastGroups.flatMap(g=>g.flat?g.rows.map(e=>({key:entryKey(e),title:e.title})): [{group:g.key},...collapsed(g)?[]:g.rows.map(e=>({key:entryKey(e),title:e.title}))]);
+  const rows = g => g.rows.map(e => ({key:entryKey(e),title:e.title}));
+  const logical=lastGroups.flatMap(g=>g.flat?rows(g):[{group:g.key},...(collapsed(g)?[]:rows(g))]);
   const element=x=>x?.key?rowByKey(treeEl,x.key):x?.group?[...treeEl.querySelectorAll(".grp")].find(g=>g.dataset.gkey===x.group):null;
   const cur = ev.target.closest('[role="treeitem"]');
   const i=logical.findIndex(x=>x.key?x.key===cur?.dataset.key:x.group===cur?.dataset.gkey);

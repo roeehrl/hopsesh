@@ -29,7 +29,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false # a release never builds from a cache another run could have filled
-      - uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
       # Release notes are this version's section of CHANGELOG.md.
       - name: release notes
         run: |
@@ -41,14 +41,22 @@ jobs:
               *) echo "::error::CHANGELOG.md has no section for $v"; exit 1 ;;
             esac
           fi
-      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           version: "~> v2"
           args: release --clean --release-notes=${{ runner.temp }}/notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOPSESH_RELEASE_PUBKEY: ${{ vars.HOPSESH_RELEASE_PUBKEY }}
-          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+      # The released program against its own skill and the golden command tree. A failure
+      # stops the job before provenance is attested, and scripts/release-sign.sh signs
+      # only attested files, so the draft cannot be published.
+      - name: skill vs the released program
+        run: |
+          set -- dist/hopsesh_linux_amd64*/hopsesh
+          [ -x "$1" ] || { echo "::error::no linux amd64 program in dist/"; exit 1; }
+          go run ./internal/devtools/skillcheck -bin "$1" \
+            -golden internal/ui/cli/testdata/cli-tree.golden -allow internal/ui/cli/testdata/skill-undocumented-flags.txt
       - name: Windows app (app zip and installer, amd64 and arm64)
         env:
           HOPSESH_RELEASE_PUBKEY: ${{ vars.HOPSESH_RELEASE_PUBKEY }}

@@ -96,3 +96,24 @@ func TestUnknownDefaultLoginAllowsOnlyPortableProfileBoundary(t *testing.T) {
 		})
 	}
 }
+
+func TestHiddenSignInIsUnknownNotChanged(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SSH_CONNECTION", "100.64.0.1 50000 100.64.0.2 22")
+	t.Setenv(host.LoginSessionEnv, "")
+	known := agent.Account{LoggedIn: true, Provider: "firstParty", Observation: "login-one", Key: "claude:one"}
+	mod := &observedAccountModule{Module: claude.New(), observed: agent.Account{Provider: "firstParty", Observation: "signed-out"}}
+	m := &host.Machine{Local: true, Facts: host.Facts{Home: root, OS: "darwin"}}
+	p := &agent.RuntimeProfile{ID: "one", Root: root, Name: "Work", Account: &known}
+	side := Side{Machine: m, Module: mod, Install: agent.Install{Agent: "claude", Binary: "vendor", Profile: p, Roots: map[string]string{"home": root}}}
+	if err := ValidateProfiles(context.Background(), Input{Source: side, Target: side}); err != nil {
+		t.Fatalf("a Keychain hidden over SSH failed the move: %v", err)
+	}
+	m.Facts.LoginSession = true
+	if err := ValidateProfiles(context.Background(), Input{Source: side}); err == nil || !strings.Contains(err.Error(), "login changed") {
+		t.Fatalf("a signed-out answer from the login session was not a change: %v", err)
+	}
+}

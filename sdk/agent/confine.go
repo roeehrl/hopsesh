@@ -106,6 +106,14 @@ func (f confinedFS) Open(p string) (File, error) {
 	return f.c.h.FS().Open(p)
 }
 
+// FreeSpace passes through when the confined filesystem can tell (see SpaceReporter).
+func (f confinedFS) FreeSpace(p string) (int64, error) {
+	if sr, ok := f.c.h.FS().(SpaceReporter); ok {
+		return sr.FreeSpace(p)
+	}
+	return 0, ErrUnsupported
+}
+
 func (f confinedFS) ReadFile(p string, limit int64) ([]byte, error) {
 	if err := f.c.readable(p); err != nil {
 		return nil, err
@@ -156,4 +164,24 @@ func (e confinedExec) Run(ctx context.Context, argv []string, o RunOptions) (Res
 		return e.c.h.Exec().Run(ctx, run, o)
 	}
 	return Result{}, fmt.Errorf("%w: %s is not one of %s's programs", ErrDenied, argv[0], e.c.spec.Name)
+}
+
+// IdentityFS reads public identity fields out of a credentials file on this machine. The
+// file's bytes go only to pick, which returns the few fields it names (an account id, a
+// user id, an email); nothing else leaves the call. A remote machine's credentials are
+// never read: there it fails with ErrUnsupported.
+type IdentityFS interface {
+	ReadIdentity(p string, pick func([]byte) (map[string]string, error)) (map[string]string, error)
+}
+
+func (f confinedFS) ReadIdentity(p string, pick func([]byte) (map[string]string, error)) (map[string]string, error) {
+	if !f.c.h.Facts().Local {
+		return nil, ErrUnsupported
+	}
+	b, err := f.c.h.FS().ReadFile(p, 1<<20)
+	if err != nil {
+		return nil, err
+	}
+	defer clear(b)
+	return pick(b)
 }

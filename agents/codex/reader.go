@@ -72,7 +72,7 @@ func (m *Module) Read(ctx context.Context, h agent.Host, in agent.Install, s age
 		return ir.Segment{}, err
 	}
 	defer f.Close()
-	recs, end, err := readLines(&ir.BoundedReader{Context: ctx, Reader: f})
+	recs, end, err := readAnalysisLines(ctx, f)
 	if err != nil {
 		return ir.Segment{}, &agent.FormatError{Path: s.Path, Err: err}
 	}

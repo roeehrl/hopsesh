@@ -60,7 +60,13 @@ foreach ($d in $dirs) {
       if (-not (Test-Path -LiteralPath $d -PathType Container)) { "exists` + "`t" + `0"; return }
       "exists` + "`t" + `1"
       $top = hp-git rev-parse '--show-toplevel'
-      if ($LASTEXITCODE -ne 0) { "repo` + "`t" + `0"; return }
+      if ($LASTEXITCODE -ne 0) {
+        "repo` + "`t" + `0"
+        Get-ChildItem -LiteralPath $d -Directory -ErrorAction SilentlyContinue |
+          Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName '.git') -PathType Container } |
+          Select-Object -First @MAXCHILDREN@ | ForEach-Object { "child` + "`t" + `$($_.FullName)" }
+        return
+      }
       "repo` + "`t" + `1"; "top` + "`t" + `$top"
       "branch` + "`t" + `$(hp-git branch '--show-current')"
       "head` + "`t" + `$(hp-git rev-parse '--short' HEAD)"
@@ -89,5 +95,6 @@ foreach ($d in $dirs) {
 		ex.WriteString(" '" + strings.ReplaceAll(p, "'", "''") + "'")
 	}
 	s := strings.Replace(b.String(), "@EXCLUDES@", ex.String(), 1)
+	s = strings.Replace(s, "@MAXCHILDREN@", strconv.Itoa(MaxChildren), 1)
 	return strings.Replace(s, "@LIMIT@", strconv.Itoa(seconds(limit)), 1)
 }

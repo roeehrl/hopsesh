@@ -39,6 +39,10 @@ func (m *Machine) PrepareIdentity(ctx context.Context) (string, error) {
 	if m.snap != nil {
 		return "", fmt.Errorf("sender did not supply an endpoint identity")
 	}
+	if kept, err := m.kept(); err != nil || kept != "" {
+		m.Facts.Endpoint = kept
+		return kept, err
+	}
 	raw := make([]byte, 32)
 	if _, err = rand.Read(raw); err != nil {
 		return "", err
@@ -68,6 +72,14 @@ func (m *Machine) CommitIdentity(ctx context.Context) error {
 	}
 	if !errors.Is(err, fs.ErrNotExist) {
 		return err
+	}
+	if !m.HopseshThere() {
+		// Reaching a machine over SSH never writes hopsesh's files there: this machine
+		// keeps its identity until hopsesh is set up on it.
+		if m.Keeper == nil {
+			return fmt.Errorf("%s has no hopsesh, and nothing here keeps its identity", m.Name)
+		}
+		return m.Keeper.Keep(id)
 	}
 	exclusive, ok := fsys.(interface {
 		CreateExclusive(string, []byte, fs.FileMode) error
@@ -108,7 +120,11 @@ func (m *Machine) ReadIdentity(ctx context.Context) (string, error) {
 	}
 	b, err := fsys.ReadFile(m.identityPath(), 128)
 	if errors.Is(err, fs.ErrNotExist) {
-		return "", nil
+		id, err := m.kept()
+		if id != "" {
+			m.Facts.Endpoint = id
+		}
+		return id, err
 	}
 	if err != nil {
 		return "", err
@@ -119,5 +135,34 @@ func (m *Machine) ReadIdentity(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("invalid endpoint identity")
 	}
 	m.Facts.Endpoint = id
+	return id, nil
+}
+
+// Keeper remembers, on this machine, the identity of a machine hopsesh is not installed
+// on (Machine.HopseshThere), so that reaching it over SSH writes nothing there.
+type Keeper interface {
+	Kept() (string, error) // "" when none was kept
+	// Keep records id, unless another one is kept already (an error then).
+	Keep(id string) error
+}
+
+// HopseshThere reports whether hopsesh runs on the machine, so its own files may be
+// written there: this machine, a sender's snapshot, or a probe that found hopsesh.
+func (m *Machine) HopseshThere() bool {
+	return m.Local || m.snap != nil || m.Facts.Binaries[Hopsesh.Name].Path != ""
+}
+
+// kept is the identity this machine keeps for one without hopsesh ("" when none).
+func (m *Machine) kept() (string, error) {
+	if m.HopseshThere() || m.Keeper == nil {
+		return "", nil
+	}
+	id, err := m.Keeper.Kept()
+	if err != nil || id == "" {
+		return "", err
+	}
+	if raw, e := hex.DecodeString(id); e != nil || len(raw) != 32 {
+		return "", fmt.Errorf("invalid kept endpoint identity for %s", m.Name)
+	}
 	return id, nil
 }

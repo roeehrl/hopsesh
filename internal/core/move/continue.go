@@ -1,10 +1,12 @@
 package move
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -30,6 +32,7 @@ const (
 
 // ContinuePlan is how a session continues in another agent.
 type ContinuePlan struct {
+	Comparison     *Comparison         `json:"comparison,omitempty"`
 	Instructions   []InstructionSource `json:"instructions"`
 	From           string              `json:"from"` // source agent name
 	Fidelity       convert.Fidelity    `json:"fidelity"`
@@ -65,7 +68,7 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		opt.Via = ""
 		opt.Native = false
 	}
-	if profileBoundary(in) {
+	if profileBoundary(in) || ownerBoundary(in) {
 		if opt.Native || opt.Via == ViaImport {
 			return nil, fmt.Errorf("account transfers require portable history; native replay and vendor import are not supported")
 		}
@@ -108,21 +111,26 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	cp := &ContinuePlan{From: src.Module.Spec().Name, Fidelity: opt.Fidelity, Relation: RelationNew, head: seg.Cursor}
 	p.Continue = cp
 	if err := prepareLineage(ctx, p, in, &seg); err != nil {
-		p.Blockers = append(p.Blockers, "cannot verify session lineage: "+err.Error())
+		lineageRefused(p, err)
 	}
 	fullNodes := append([]ir.Node(nil), seg.Nodes...)
 	relateContinue(ctx, p, in, &seg, opt)
 	if opt.OtherAccount {
 		if src.Module.Spec().ID != spec.ID {
-			p.Warnings = append(p.Warnings, "Moving between agents uses portable conversation text. Agent-private reasoning and internal state are not transferred; the original session remains available.")
+			p.Warnings = append(p.Warnings, "Moving between agents uses portable conversation text. Agent-private reasoning and internal state are not transferred; the original session is kept unchanged.")
+		} else if !profileBoundary(in) || ownerBoundary(in) || otherEmail(in) {
+			p.Warnings = append(p.Warnings, fmt.Sprintf("This session was run by another %s account than the one signed in here now. Hopsesh carries its portable conversation text into a new session for this account; account-bound content such as signed reasoning is left out, and the original session is kept unchanged.", spec.Name))
 		} else {
-			p.Warnings = append(p.Warnings, "These are different runtime profiles. Login metadata cannot prove that account-bound session data is reusable, even when email addresses match. Hopsesh carries portable conversation text and keeps the original session.")
+			p.Warnings = append(p.Warnings, "These are different runtime profiles. Even with the same email address, login details cannot prove that account-bound session data is reusable. Hopsesh carries portable conversation text and keeps the original session.")
 		}
 	}
 
-	title := fmt.Sprintf("%s (from %s)", nonEmpty(s.Title, "session"), cp.From)
+	// The destination keeps the session's own title: hopsesh shows movement in its own
+	// views, never in titles. A return keeps the destination's title (which also clears a
+	// legacy label an older hopsesh wrote there).
+	title := s.Title
 	if cp.AppendTo != nil {
-		title = cp.AppendTo.Title // its own title again, in place of a "continued in" mark
+		title = cp.AppendTo.Title
 	}
 	cp.header = ir.Header{CWD: cwd, Title: title, GitBranch: nonEmpty(p.Repo.SourceBranch, s.GitBranch), Model: seg.Header.Model, Created: seg.Header.Created}
 	targetHost, err := tgt.Machine.For(ctx, spec, tgt.Install, nil)
@@ -146,7 +154,13 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		if err != nil {
 			return nil, err
 		}
-		p.Warnings = append(p.Warnings, "The destination has insufficient verified context capacity. Create a bounded continuation on the same branch; the existing session remains available.")
+		p.Warnings = append(p.Warnings, "The original session is too full to add to, so this starts a new session that continues it; the original stays as it is.")
+		// The original is not written, so whether it is open no longer matters.
+		p.Blockers = slices.DeleteFunc(p.Blockers, func(b string) bool { return b == "the destination copy is open; quit it first" })
+		p.Warnings = slices.DeleteFunc(p.Warnings, func(w string) bool { return w == openBlockedNote(spec.Name) })
+	}
+	if cp.AppendTo != nil && capacity.Existing > capacity.EffectiveWindow()*7/10 {
+		p.Warnings = append(p.Warnings, "The original is near its context limit. It may need the agent's own compaction before answering; complete conversation history remains preserved.")
 	}
 	prof := writer.Profile(tgt.Install)
 	var redact func([]byte) ([]byte, int)
@@ -159,16 +173,20 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	}
 	archivePath := targetHost.Path().Join(tgt.Install.Root(spec.Roots[0].Name), "hopsesh", "archives", string(p.Placement.Key.Session)+".jsonl")
 	bf := briefingFor(p, srcHost, src, s, spec, tgt.Machine.Name, cwd, opt)
-	cp.archive, err = preservedArchive(srcHost, src.Module, src.Install, string(s.Key.Session), fullNodes, convert.Request{Mappings: p.Placement.Mappings, Redact: redact, Briefing: bf})
+	cp.archive, err = preservedArchive(srcHost, src.Module, src.Install, string(s.Key.Session), fullNodes, convert.Request{Mappings: p.Placement.Mappings, Redact: redact, Briefing: bf, Limits: opt.Limits})
 	if err != nil {
 		return nil, err
 	}
 	bf.HistoryFile = archivePath
+	bf.HistoryRecords = bytes.Count(cp.archive, []byte{'\n'})
+	if err := agent.CheckSpace(targetHost.FS(), archivePath, int64(len(cp.archive))); err != nil {
+		p.Blockers = append(p.Blockers, err.Error())
+	}
 	allowance := capacity.Allowance()
 	r := convert.Render(convert.Request{
 		Nodes: seg.Nodes, From: cp.From, To: spec.Name, Fidelity: fidelity,
 		Native: opt.Native && prof.NativeReplay, Window: capacity.EffectiveWindow(), Limit: &allowance, Mappings: p.Placement.Mappings, Redact: redact,
-		Briefing: bf,
+		Briefing: bf, Limits: opt.Limits,
 	})
 	cp.items, cp.Report = r.Items, r.Report
 	cp.Report.Capacity = capacity
@@ -199,9 +217,6 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 			cp.Briefing = it.Text
 		}
 	}
-	if cp.Report.Reasoning > 0 || cp.Report.Truncated > 0 || cp.Report.Summarised > 0 {
-		p.Warnings = append(p.Warnings, "what does not carry over: "+cp.Report.Summary)
-	}
 	planContinueWarnings(p, in, opt)
 	planRoundTrip(p, in, opt)
 	p.NewName = launch.SessionName(p.Title, tgt.Machine.Name)
@@ -213,6 +228,7 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		RemoteControl: opt.RemoteControl && agent.Has(tgt.Module, agent.CapRemoteControl), Name: p.NewName, Prompt: prompt,
 		App: opt.App && agent.Has(tgt.Module, agent.CapApp),
 	}
+	p.appRemoteControl()
 	if p.resumeOpts.App {
 		if tgt.Install.Profile != nil && !tgt.Install.Profile.Default {
 			p.Blockers = append(p.Blockers, "desktop opening cannot select an account profile; use a terminal")
@@ -283,23 +299,29 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 			cp.RolloverCursor = seg.Cursor
 		}
 		if opt.Fork {
-			p.Warnings = append(p.Warnings, "A bounded continuation will be created on a separate fork. The original remains available.")
+			p.Warnings = append(p.Warnings, "A bounded continuation will be created as a separate conversation. The original remains available.")
 		} else {
-			p.Warnings = append(p.Warnings, "A separate bounded continuation will be created. The original remains available; this is not a new conversation branch.")
+			p.Warnings = append(p.Warnings, "A separate bounded continuation will be created on the same conversation branch. The original is kept unchanged and, like any moved original, protected until you move back.")
 		}
 		return
 	}
-	if p.manifest == nil || opt.Fork {
-		return
+	if p.manifest == nil || opt.Fork || p.lineageRefused {
+		return // without a verified source state there is nothing to compare
 	}
-	if opt.OtherAccount || opt.NewReplica {
+	// A portable text append does not replay the source's native account-bound
+	// state. Modules explicitly opt in; lineage, root, cursor and live-writer
+	// checks below still apply to the exact original in the selected profile.
+	portableAppend := in.Target.Module.(agent.Writer).Profile(in.Target.Install).PortableAppend
+	if opt.NewReplica || opt.OtherAccount && !portableAppend {
 		if opt.TargetSession != "" {
-			p.Blockers = append(p.Blockers, "cannot append to a native replica under an unverified account binding; clear the destination session to create a portable copy")
+			p.ReviewNewSession = true
+			p.Blockers = append(p.Blockers, "cannot update the original session across agent or account profiles without verified native compatibility; remove --target-session and use --new-session to review a portable session on the same lineage branch")
 		}
 		// A fresh return preserves existing copies, but must still detect independent
 		// destination work instead of silently treating divergent histories as one line.
 		for _, c := range currentBranchCopies(in) {
-			st, _, err := targetState(ctx, p, in, c)
+			st, targetSegment, err := targetState(ctx, p, in, c)
+			cp.Comparison = BuildComparison(p, in, c, *seg, targetSegment, st, err)
 			if err != nil || !lineage.Subset(p.manifest.Covered(st.Heads), p.manifest.Covered(p.sourceState.Heads)) {
 				if opt.Conflict == ConflictKeepBoth {
 					forkLine(p)
@@ -328,7 +350,10 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 		}
 		candidates = selected
 		if len(candidates) == 0 {
-			p.Blockers = append(p.Blockers, "selected destination does not belong to this branch")
+			// The original was deleted, archived or is under another account: say so,
+			// and offer a new session on the same branch instead of a dead end.
+			p.ReviewNewSession = true
+			p.Blockers = append(p.Blockers, "the original destination session is not here any more; continue in a new session on the same branch")
 			return
 		}
 	}
@@ -343,7 +368,8 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 		return
 	}
 	c := candidates[0]
-	st, _, err := targetState(ctx, p, in, c)
+	st, targetSegment, err := targetState(ctx, p, in, c)
+	cp.Comparison = BuildComparison(p, in, c, *seg, targetSegment, st, err)
 	if err != nil {
 		p.Conflict = "cannot safely append: " + err.Error()
 		cp.Relation = RelationDiverged
@@ -353,7 +379,7 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 		case lineage.Subset(source, target) && lineage.Subset(target, source):
 			cp.Relation = RelationSame
 			if c.Summary.CWD != "" && realIntended(c.Summary.CWD) != realIntended(p.Target.CWD) {
-				p.Blockers = append(p.Blockers, "destination is synchronized in "+c.Summary.CWD+"; choose that folder or create a separate fork for a different folder")
+				p.Blockers = append(p.Blockers, "destination is synchronized in "+c.Summary.CWD+"; choose that folder or keep them as separate conversations")
 				return
 			}
 			p.NoWork = true
@@ -365,6 +391,10 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 			p.Blockers = append(p.Blockers, "only the destination copy has new work; continue it there")
 			return
 		case lineage.Subset(target, source):
+			if c.Summary.CWD != "" && realIntended(c.Summary.CWD) != realIntended(p.Target.CWD) {
+				p.Blockers = append(p.Blockers, "the original session belongs to "+c.Summary.CWD+"; choose that folder or keep them as separate conversations")
+				return
+			}
 			cp.Relation = RelationAppend
 			s := c.Summary
 			cp.AppendTo = &s
@@ -372,19 +402,23 @@ func relateContinue(ctx context.Context, p *Plan, in Input, seg *ir.Segment, opt
 			s.Key.Profile = in.Target.Install.ProfileID()
 			p.Placement.Key = s.Key
 			if c.Live.State == agent.Live {
-				p.Blockers = append(p.Blockers, "the destination copy is open; quit it first")
+				if opt.OpenBlockedOriginal != "" && opt.OpenBlockedOriginal == c.Summary.Key.String() {
+					p.Warnings = append(p.Warnings, openBlockedNote(in.Target.Module.Spec().Name))
+				} else {
+					p.Blockers = append(p.Blockers, "the destination copy is open; quit it first")
+				}
 			}
 			seg.Nodes = missingNodes(seg.Nodes, target)
 			return
 		default:
 			cp.Relation = RelationDiverged
-			p.Conflict = "both sessions contain independent work; preserve them as separate branches"
+			p.Conflict = "conversation histories contain different work; review the differences before returning"
 		}
 	}
 	if opt.Conflict == ConflictKeepBoth {
 		forkLine(p)
 		cp.Relation = RelationNew
-		p.Warnings = append(p.Warnings, p.Conflict+"; a separate fork will be created")
+		p.Warnings = append(p.Warnings, p.Conflict+"; it will be kept as a separate conversation")
 	} else {
 		p.Blockers = append(p.Blockers, p.Conflict+"; choose --keep-both")
 	}
@@ -430,6 +464,7 @@ func instructionGaps(from, to agent.Spec, cwd string) []string {
 
 func planContinueWarnings(p *Plan, in Input, opt Options) {
 	spec := in.Target.Module.Spec()
+	markUnprotected(p, in, opt)
 	if p.Live && !opt.Fork {
 		p.Warnings = append(p.Warnings, liveSnapshotNotice(p))
 	}
@@ -490,6 +525,9 @@ func importThen(ctx context.Context, p *Plan, in Input, h agent.Host, j *journal
 		return ir.WriteResult{}, importErr
 	}
 	newArchive := h.Path().Join(tgt.Install.Root(tgt.Module.Spec().Roots[0].Name), "hopsesh", "archives", string(id)+".jsonl")
+	if err = agent.CheckSpace(h.FS(), newArchive, int64(len(cp.archive))); err != nil {
+		return ir.WriteResult{}, err
+	}
 	if err = h.FS().WriteFile(newArchive, cp.archive, 0o600); err != nil {
 		return ir.WriteResult{}, err
 	}
@@ -502,6 +540,7 @@ func importThen(ctx context.Context, p *Plan, in Input, h agent.Host, j *journal
 		return ir.WriteResult{}, fmt.Errorf("source changed while importing; imported file retained for undo; refresh the plan")
 	}
 	p.Placement.Key = s.Key
+	p.appRemoteControl()
 	if p.resumeOpts.App {
 		if checker, ok := tgt.Module.(agent.AppChecker); ok {
 			if err := checker.CheckApp(tgt.Install, p.Placement.Key, p.resumeOpts); err != nil {
@@ -543,24 +582,6 @@ func importThen(ctx context.Context, p *Plan, in Input, h agent.Host, j *journal
 	return w, nil
 }
 
-// markNative marks the source agent's copy kept here as continued in the target agent, so
-// it is not resumed by mistake (returning to it with hopsesh clears the mark).
-func markNative(ctx context.Context, p *Plan, j *journal.Journal, path string, res *Result) {
-	ns := p.nativeIn.Target
-	marker, ok := ns.Module.(agent.Marker)
-	if !ok {
-		return
-	}
-	h, err := ns.Machine.For(ctx, ns.Module.Spec(), ns.Install, j)
-	if err == nil {
-		s := agent.Summary{Key: p.native.Placement.Key, Title: p.Title, CWD: p.Target.CWD, Path: path}
-		err = marker.Mark(ctx, h, ns.Install, s, agent.Mark{Kind: agent.MarkPrepared, Location: p.Target.Location, AgentName: p.Agent})
-	}
-	if err != nil {
-		res.Warnings = append(res.Warnings, "could not mark the native copy here: "+err.Error())
-	}
-}
-
 // applyContinue writes the converted session and records the hop.
 func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, error) {
 	step := func(s string) {
@@ -577,6 +598,17 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 	capacity, err := agent.CapacityFor(ctx, tgt.Module, preflightHost, tgt.Install, cp.AppendTo)
 	if err != nil {
 		return nil, err
+	}
+	if cp.AppendTo != nil {
+		if detector, ok := tgt.Module.(agent.LiveDetector); ok {
+			live, err := detector.Live(ctx, preflightHost, tgt.Install, []agent.SessionID{cp.AppendTo.Key.Session})
+			if err != nil {
+				return nil, fmt.Errorf("cannot recheck destination activity: %w", err)
+			}
+			if live[cp.AppendTo.Key.Session].State == agent.Live {
+				return nil, fmt.Errorf("the destination copy is open; quit it first and refresh the plan")
+			}
+		}
 	}
 	if capacity != cp.Report.Capacity {
 		return nil, fmt.Errorf("destination capacity changed since planning; refresh the plan")
@@ -603,12 +635,15 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 	}
 	j.AddKey(p.Placement.Key)
 	res := &Result{Journal: j.ID}
-	if err := applyRepo(ctx, p, in, env, res, step); err != nil {
+	if err := applyRepo(ctx, p, in, env, j, res, step); err != nil {
 		return res, err
 	}
 	h, err := tgt.Machine.For(ctx, tgt.Module.Spec(), tgt.Install, j)
 	if err != nil {
 		return res, err
+	}
+	if err := agent.CheckSpace(h.FS(), cp.Report.Archive, int64(len(cp.archive))); err != nil {
+		return nil, err
 	}
 	if err := h.FS().WriteFile(cp.Report.Archive, cp.archive, 0o600); err != nil {
 		return res, fmt.Errorf("preserving portable archive: %w", err)
@@ -668,8 +703,6 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 			res.Warnings = append(res.Warnings, "after writing: "+err.Error())
 		}
 	}
-	mark := agent.Mark{Kind: agent.MarkPrepared, Location: p.Target.Location, AgentName: tgt.Module.Spec().Name}
-	markWith(ctx, p, in, j, env, cp.head, mark, res)
 	res.Command, res.Run = launch.Shell(p.Resume, "", launch.DefaultShell()), p.Resume
 	if err := j.Seal(machinesOf(ctx, in)); err != nil {
 		res.Warnings = append(res.Warnings, "could not record what this changed, for a safe undo: "+err.Error())
@@ -687,7 +720,7 @@ func recordContinuation(ctx context.Context, p *Plan, in Input, j *journal.Journ
 	st := m.Deliver(to, w.Cursor, w.Projection, p.sourceState.Heads, append(append([]string(nil), p.sourceState.Loss...), conversionLoss(p.Continue.Report)...))
 	var rollover *lineage.Rollover
 	if p.Continue.Rollover != nil {
-		_, id, ok := m.FindEndpoint(p.Continue.Rollover.Key, in.Target.Machine.Facts.Endpoint)
+		_, id, ok := m.FindBinding(p.Continue.Rollover.Key, in.Target.Machine.Facts.Endpoint, in.Target.Install.BindingID())
 		if ok {
 			rollover = &lineage.Rollover{Replica: id, Cursor: p.Continue.RolloverCursor}
 		}
@@ -709,9 +742,6 @@ func recordContinuation(ctx context.Context, p *Plan, in Input, j *journal.Journ
 	if nativeDst != "" {
 		if err := j.WriteReceipt(host.LocalFS(), p.Target.Location, lineage.PathFor(nativeDst), m.ForBranch(p.sourceLine).Encode(), true); err != nil {
 			return err
-		}
-		if !p.Options.Fork {
-			markNative(ctx, p, j, nativeDst, res)
 		}
 	}
 	srcFS, reachErr := in.Source.Machine.FS(ctx)
@@ -738,8 +768,10 @@ func liveSnapshotNotice(p *Plan) string {
 		place += " (this machine)"
 	}
 	notice := "The source session on " + place + " is still running. This transfer uses a snapshot; later source messages are not automatically synchronized."
-	if p.Mark == MarkWhenStopped || p.Options.Mark {
-		notice += " Its moved label is deferred until it stops; marking does not stop the process."
-	}
 	return notice
+}
+
+// openBlockedNote explains the exact native client restart required before appending.
+func openBlockedNote(agentName string) string {
+	return "The original is open in " + agentName + ". Hopsesh closes only this conversation's agent before adding your new work, then you can reopen the same conversation. Nothing is archived."
 }

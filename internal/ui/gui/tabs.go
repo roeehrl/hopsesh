@@ -138,7 +138,11 @@ func (a *App) ResumeSession(machine, key, where string) (*OpenedDTO, error) {
 	doneSelection := a.beginSelection()
 	defer doneSelection()
 	if a.Terms != nil {
-		if id := a.Terms.liveSessionTab(machine, key); id != "" {
+		id, err := a.Terms.sessionTabRoute(machine, key)
+		if err != nil {
+			return nil, err
+		}
+		if id != "" {
 			a.Terms.Focus(id)
 			return &OpenedDTO{Where: WhereShown, Tab: id}, nil
 		}
@@ -189,19 +193,28 @@ func (a *App) ResumeSession(machine, key, where string) (*OpenedDTO, error) {
 // sessionTab opens a session's command in a tab; when the terminal cannot start it, the
 // same launch opens in the user's terminal app instead.
 func (a *App) sessionTab(c agent.Command, l app.Launch, meta TabMeta, title string) (*OpenedDTO, error) {
+	if a.Terms != nil {
+		if _, err := a.Terms.sessionTabRoute(meta.Machine, meta.Key); err != nil {
+			return nil, err
+		}
+	}
+	c = a.ownedSessionCommand(c, meta)
 	spec, err := a.tabSpec(c, tabTitle(title, strings.TrimSuffix(filepath.Base(c.Argv[0]), ".exe")))
 	if err == nil && a.Terms == nil {
 		err = errors.New("no terminal")
 	}
 	var info pty.Info
 	if err == nil {
-		meta.Command, meta.External, meta.Rerun = displayCommand(c.Argv), true, true
+		if meta.Command == "" {
+			meta.Command = displayCommand(c.Argv)
+		}
+		meta.External, meta.Rerun = true, true
 		meta.LaunchedKey = meta.Key
 		a.mu.Lock()
 		if a.inv != nil {
 			relations := a.inv.Relationships()
 			if r, ok := relations[app.EntryIdentity(meta.Machine, meta.Key)]; ok {
-				if name := a.core.Cfg.FamilyNames[r.Family]; name != "" {
+				if name := a.core.FamilyName(r); name != "" {
 					r.Name = name
 				}
 				meta.Relationship = &r

@@ -21,7 +21,7 @@ export async function planHop(e, cloud) {
   let d = {};
   try { d = await api("HandoffDefaults", cloud); } catch { /* the defaults below */ }
   if (hop !== opening || !sheet.open) return;
-  hop = { e, cloud, opts: { untracked: [], historyFile: false, bundle: false, mark: d.mark !== false, cleanup: d.cleanup || "", brief: "", note: "", carryRules: false, env: "", startingDiff: false },
+  hop = { e, cloud, opts: { untracked: [], historyFile: false, bundle: false, cleanup: d.cleanup || "", brief: "", note: "", carryRules: false, env: "", startingDiff: false },
     plan: null, busy: false, applying: false };
   fill(sheet, h("div", { class: "sheet-in" }, h("div", { class: "loading", role: "status", style: "min-height:240px" }, "Working out both legs…")));
   if (!sheet.open) sheet.showModal();
@@ -98,10 +98,7 @@ function render() {
         h("span", { style: "font-size:12.5px" }, x.code),
         x.terminal ? h("span", { class: "warn", id: "hop-terminal", style: "font-size:12.5px;line-height:1.5" }, x.terminal) : null,
         t.terminal ? h("span", { class: "muted", style: "font-size:12px;line-height:1.5" }, t.terminal) : null),
-      h("section", { class: "sec", style: "gap:12px" }, h("span", { class: "sec-h" }, "Options"),
-        t.envNeeded ? envPicker(t) : null,
-        h("label", { class: "opt" }, h("input", { type: "checkbox", checked: p.mark !== "off" && hop.opts.mark, onchange: (ev) => set("mark", ev.target.checked) }),
-          h("span", {}, `Mark the copy here “${(t.markTitle || "").replace(/^↪\s*/, "")}”`))),
+      t.envNeeded ? h("section", { class: "sec", style: "gap:12px" }, h("span", { class: "sec-h" }, "Options"), envPicker(t)) : null,
       h("section", { class: "sec", style: "gap:8px" }, h("span", { class: "sec-h" }, "Checks"),
         h("div", { class: "checks-line" }, checks.map((c) => h("span", {}, tick(c.state === "warn" ? "warn" : "ok"), " ", c.text))),
         (p.blockers || []).map((b) => h("div", { class: "item" }, tick("err"), h("span", { class: "err" }, cap(b)))),

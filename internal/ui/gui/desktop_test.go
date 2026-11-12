@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/roeehrl/hopsesh/internal/agents/all"
@@ -13,11 +14,12 @@ import (
 )
 
 type fakeDesktop struct {
-	mu    sync.Mutex
-	s     desktop.State
-	fail  bool
-	opens int
-	attn  int
+	attended atomic.Bool
+	mu       sync.Mutex
+	s        desktop.State
+	fail     bool
+	opens    int
+	attn     int
 }
 
 func (f *fakeDesktop) Snapshot() desktop.State { f.mu.Lock(); defer f.mu.Unlock(); return f.s }
@@ -44,6 +46,7 @@ func (f *fakeDesktop) OpenMain()             { f.mu.Lock(); defer f.mu.Unlock();
 func (f *fakeDesktop) CloseQuick()           {}
 func (f *fakeDesktop) SetAttention(n, _ int) { f.mu.Lock(); defer f.mu.Unlock(); f.attn = n }
 func (f *fakeDesktop) Stop()                 {}
+func (f *fakeDesktop) Attended() bool        { return f.attended.Load() }
 func desktopApp(t *testing.T) (*App, *fakeDesktop) {
 	t.Helper()
 	home(t)

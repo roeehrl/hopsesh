@@ -88,7 +88,7 @@ func bringsSession(cl agent.Cloud) bool {
 // PlanHop works out handing a cloud session on to another cloud through this machine: the
 // bring-back (into via, or the cloud's own agent: "" picks as Bring here does) and the
 // hand-off, as far as it can be planned before the session is here. opt holds the hand-off's
-// choices (the environment, the mark, the clean-up); opt.TargetDir chooses the repository's
+// choices (the environment, the clean-up); opt.TargetDir chooses the repository's
 // checkout here. Nothing changes.
 func (a *App) PlanHop(ctx context.Context, inv *Inventory, e Entry, to string, via agent.ID, opt move.Options) (*move.Plan, error) {
 	if !e.Location.IsCloud() {
@@ -145,7 +145,7 @@ func (a *App) PlanHop(ctx context.Context, inv *Inventory, e Entry, to string, v
 	then := move.PreviewHandoff(ctx, hin, fp.Repo, hopt)
 
 	p := &move.Plan{Kind: move.KindHop, Key: bring.Key, Title: bring.Title, Agent: bring.Agent, Source: bring.Source,
-		Target: move.Endpoint{Location: to, Version: in.Version}, Options: hopt, Mark: then.Mark}
+		Target: move.Endpoint{Location: to, Version: in.Version}, Options: hopt}
 	p.Blockers = append(append(p.Blockers, bring.Blockers...), then.Blockers...)
 	p.Warnings = append(append(p.Warnings, bring.Warnings...), then.Warnings...)
 	agentName := nonEmpty(fp.Writer, fp.ContinueName)
@@ -180,9 +180,6 @@ func (a *App) PlanHop(ctx context.Context, inv *Inventory, e Entry, to string, v
 	hp.Loss = append(append(hp.Loss, fp.Loss...), then.Handoff.Loss...)
 	hp.Loss = append(hp.Loss, fmt.Sprintf("Both cloud sessions stay where they are: %s and %s", fromCloud.Title, toCloud.Title))
 	p.Hop = hp
-	if p.Mark == "" {
-		p.Mark = move.MarkOff
-	}
 	return p, nil
 }
 
@@ -247,7 +244,7 @@ func (a *App) applyHop(ctx context.Context, p *move.Plan, progress func(string))
 	hj.AddKey(p.Key)
 	rec := &Hop{Journal: hj.ID, Time: time.Now().UTC(), Title: p.Title, From: hp.From, Session: p.Key.Session, To: hp.To, ToTitle: hp.ToTitle, Options: p.Options,
 		Result: move.HopResult{From: hp.From, To: hp.To, ToTitle: hp.ToTitle}}
-	res := &move.Result{Journal: hj.ID, Mark: move.MarkOff, Hop: &rec.Result}
+	res := &move.Result{Journal: hj.ID, Hop: &rec.Result}
 	say := func(s string) {
 		if progress != nil {
 			progress(s)
@@ -314,7 +311,7 @@ func (a *App) ContinueHop(ctx context.Context, id string, progress func(string))
 	if err != nil {
 		return nil, err
 	}
-	res := &move.Result{Journal: hj.ID, Mark: move.MarkOff, Hop: &rec.Result}
+	res := &move.Result{Journal: hj.ID, Hop: &rec.Result}
 	if hj.Undone {
 		return res, errors.New("the hop was undone")
 	}
@@ -386,7 +383,7 @@ func (a *App) continueHop(ctx context.Context, rec *Hop, hj *journal.Journal, re
 			rec.Handoff, rec.Result.Handoff = r2.Journal, r2.Journal
 			a.addPart(hj, r2.Journal)
 		}
-		res.Handoff, res.Mark, res.MarkError = r2.Handoff, r2.Mark, r2.MarkError
+		res.Handoff = r2.Handoff
 		res.Warnings = append(res.Warnings, r2.Warnings...)
 	}
 	if err != nil {

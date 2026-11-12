@@ -4,9 +4,12 @@
 // off to ‹cloud›… (to a cloud). model(e) is a session's whole action row: its status line,
 // the primary (a split button whose menu lists the other places), Move ▾ and ⋯; the row's
 // button, ↩, ⌘↩ and the palette all come from it.
-import { api, state, sys, here, agentInfo, cloudOf, cloudTitle, toast, fail, errText, cap, entries, count, ago, h, icon, ICONS, agentBadge, pending } from "./core.js";
+import { refreshSelection } from "./sessions.js";
+import { changeDirDialog } from "./cd-dialog.js";
+import { role, removeBlock, restoreBlock, isOldCopy, askOldCopy, onContinueOld, destination, movedTo } from "./guard.js";
+import { go, api, state, sys, here, agentInfo, cloudOf, cloudTitle, toast, fail, errText, cap, entries, count, ago, h, icon, ICONS, agentBadge, pending } from "./core.js";
 import { returnActions, returnChooser, showMovementDestination } from "./returns.js";
-import { planFor } from "./plan.js";
+import { planFor, chooseTarget, bringLive } from "./plan.js";
 import { tabs, resume, showTerminal, moveToTerminal, openShell, associateShell, signIn } from "./term.js";
 import { planHandoff } from "./handoff.js";
 import { planHop } from "./hop.js";
@@ -16,7 +19,7 @@ export const key = (e) => e.machine + "\u0000" + e.key;
 // liveOf is how a session runs now: what presence last read (every few seconds), else
 // the scan's.
 export function liveOf(e) {
-  return state.presence?.[key(e)] || { live: e.live, status: e.status, needs: e.needs, app: e.app, places: e.places || [] };
+  return state.presence?.[key(e)] || { live: e.live, status: e.status, needs: e.needs, app: e.app, places: e.places || [], remoteControl: e.remoteControl, remoteUrl: e.remoteUrl };
 }
 
 // appWord names an agent's desktop app: "Claude" for Claude Code.
@@ -31,12 +34,12 @@ export function placeName(p, e) {
     case "terminal": return "Terminal";
     case "wt": return "Windows Terminal";
     case "claude-app": return "Claude app";
-    case "codex-app": return "Codex app";
+    case "codex-app": return `${liveOf(e || {}).app || "ChatGPT"} desktop`; // one shared app process: shown, never quit
     case "ide": return p.app || "an editor";
     case "tmux": return "tmux";
     case "ssh": return "an ssh login";
   }
-  return e?.app ? `${e.app} app` : "a terminal";
+  return e?.app ? `${e.app} app` : "Unknown window";
 }
 
 // sessionTabs are the live hopsesh Terminal tabs that run a session (its own, and a
@@ -48,7 +51,7 @@ export function sessionTabs(e) {
 
 // placesOf is where a session on this machine is open: hopsesh's own tabs (the window
 // knows them), then what presence found (terminal apps, the agent's app, editors, tmux,
-// ssh). A session that runs where nothing tells is "a terminal".
+// ssh). Unknown hosts retain liveness without claiming a particular window.
 export function placesOf(e) {
   if (e.cloud || e.machine !== here()) return [];
   const out = [];
@@ -56,13 +59,13 @@ export function placesOf(e) {
   if (ts.length) out.push({ kind: "hopsesh", count: ts.length, waiting: ts.some((t) => t.attention), tabs: ts });
   const lv = liveOf(e);
   if (lv.live) for (const p of lv.places || []) out.push(Object.assign({}, p, { waiting: p.waiting || (lv.needs && !ts.length && (lv.places || []).length === 1) }));
-  if (lv.live && !ts.length && !(lv.places || []).length) out.push({ kind: lv.app ? "claude-app" : "unknown", count: 1, waiting: !!lv.needs });
+  if (lv.live && !ts.length && !(lv.places || []).length) out.push({ kind: lv.app ? (e.agent === "codex" ? "codex-app" : "claude-app") : "unknown", count: 1, waiting: !!lv.needs });
   return out;
 }
 export const placeCount = (ps) => ps.reduce((n, p) => n + (p.count || 1), 0);
 
 // canShow: hopsesh can bring that place forward (tmux and ssh: it can't).
-const canShow = (p) => p.kind !== "tmux" && p.kind !== "ssh" && !(p.kind === "ide" && !sys.mac);
+const canShow = (p) => p.kind !== "unknown" && p.kind !== "tmux" && p.kind !== "ssh" && !(p.kind === "ide" && !sys.mac);
 
 // show brings a place forward: a tab of the hopsesh Terminal window, the terminal app's
 // tab (found only now, by FindTab), the agent's app, or the editor.
@@ -73,6 +76,26 @@ export function showPlace(e, p) {
     case "ide": return api("ShowPlace", p.app).catch((err) => toast(cap(errText(err))));
   }
   return api("ShowEntry", e.machine, e.key).catch((err) => toast(`Couldn't show “${e.title}”: ${errText(err)}`));
+}
+
+// remoteDefault is whether Remote Control is to start for every session continued in this
+// agent (its setting in Settings › Agents).
+export const remoteDefault = (agent) => !!(state.info?.agents || []).find((a) => a.id === agent)?.remoteControl;
+
+// watchRemote follows a session just opened in the agent's desktop app, which can't be
+// told to start Remote Control: it says when the session connects (someone turned on its
+// switch, or the app did), or, after half a minute without, how to turn it on.
+export function watchRemote(machine, k, title) {
+  const started = Date.now();
+  const tick = () => {
+    const lv = state.presence?.[machine + "\u0000" + k];
+    if (lv?.live && lv.remoteControl === "on") return toast(`Remote Control is on for “${title}”`, lv.remoteUrl ? { label: "Open its page", run: () => api("OpenURL", lv.remoteUrl).catch(fail) } : null);
+    if (Date.now() - started < 30_000) return setTimeout(tick, 2000);
+    if (lv?.live && lv.remoteControl === "off")
+      toast(`“${title}” isn't on Remote Control: ${lv.app || "the app"} doesn't connect a session it is handed. Turn on its Remote Control switch there.`,
+        { label: `Show in ${lv.app || "the app"}`, run: () => api("ShowApp", machine, k).catch((err) => toast(cap(errText(err)))) });
+  };
+  setTimeout(tick, 2000);
 }
 
 // resumePlaces are where a session on this machine can resume, with what each means.
@@ -92,10 +115,29 @@ export function defaultPlace(e) {
 }
 
 // resumeIn resumes a session in a place; picked from the menu, the place becomes the
-// agent's default.
-export function resumeIn(e, place, remember = false) {
+// agent's default. A copy a move left behind asks first, unless this is a move back to it
+// (returning: a verified return, the same conversation or newer there).
+export function resumeIn(e, place, remember = false, returning = false) {
+  if (isOldCopy(e) && !returning) return continueOldCopy(e);
   return pending(`Opening ${e.title}`, () => resumeOnce(e, place, remember), `resume:${key(e)}`);
 }
+
+// continueOldCopy continues a copy a move left behind, only once asked (askOldCopy):
+// here, its block removed first; on another machine, through hopsesh there, which removes
+// its own block first. "Go to the active copy" there selects the active copy instead.
+export async function continueOldCopy(e) {
+  const choice = await askOldCopy(e);
+  if (choice === "go") return showMovementDestination(e.departure, selectFn);
+  if (choice !== "continue") return;
+  if (e.machine !== here())
+    return pending(`Opening ${e.title} on ${e.machine}`, () => api("ContinueOriginalAnyway", e.machine, e.key).catch(fail), `remote:${key(e)}`);
+  if (e.guard?.mode === "block" || e.guard?.mode === "advise") {
+    try { await api("ReleaseOriginal", e.machine, e.key); } catch (err) { fail(err); return; }
+  }
+  await pending(`Opening ${e.title}`, () => resumeOnce(e, defaultPlace(e), false), `resume:${key(e)}`);
+  refreshSelection();
+}
+onContinueOld(continueOldCopy);
 async function resumeOnce(e, place, remember) {
   if (remember && place !== defaultPlace(e)) {
     try {
@@ -103,7 +145,7 @@ async function resumeOnce(e, place, remember) {
       state.info.places = Object.assign({}, state.info.places, { [e.agent]: place });
     } catch (err) { fail(err); }
   }
-  if (place === "app") return api("ResumeEntry", e.machine, e.key, true).catch(fail);
+  if (place === "app") return api("ResumeEntry", e.machine, e.key, true).then(() => remoteDefault(e.agent) && watchRemote(e.machine, e.key, e.title)).catch(fail);
   return resume(e, place);
 }
 
@@ -140,7 +182,24 @@ export function selectDestination(e) { selectFn(e); }
 
 // model is a session's actions and the words around them.
 export function model(e) {
-  return e.cloud ? cloudModel(e) : localModel(e);
+  return e.cloud ? cloudModel(e) : isOldCopy(e) ? oldCopyModel(e) : localModel(e);
+}
+
+// oldCopyModel is what an old copy offers: the active copy first; continuing this one
+// only through the question; nothing that moves, brings or plans from it (those would
+// make a third copy), and no Move ▾.
+function oldCopyModel(e) {
+  const local = e.machine === here(), g = e.guard || {};
+  const m = { primary: null, chevron: [], fix: null, caption: "", move: [], more: more(e, local), places: local ? placesOf(e).filter((p) => p.kind !== "unknown") : [], twice: false, chevronLabel: "Other choices", returns: [] };
+  m.primary = { id: "destination", label: `Go to the active copy ${destination(e)}`, short: "Go to the active copy", run: () => showMovementDestination(e.departure, selectFn) };
+  const presence = local ? "" : (state.scan?.machines || []).find((x) => x.name === e.machine)?.presence;
+  const why = local ? "" : !["claude", "codex"].includes(e.agent) ? `hopsesh can't continue ${e.agentName} sessions on ${e.machine}`
+    : presence === "login" ? "" : { ssh: `Needs hopsesh on ${e.machine}: set it up in Machines`, older: `Update hopsesh on ${e.machine} first (Machines)`, installed: `hopsesh on ${e.machine} isn't running in a login session` }[presence] || `hopsesh on ${e.machine} isn't reached now`;
+  // Not awaited: the question is not work in progress (what follows it shows its own).
+  m.chevron.push({ id: "continue-old", label: "Continue this old copy anyway…", sub: why ? "" : "Not recommended: the two copies diverge", danger: true, disabled: !!why, why, run: () => { continueOldCopy(e); } });
+  if (local && g.mode === "block") m.chevron.push({ id: "remove-block", label: "Remove block…", sub: "Continue here; moving back then needs a comparison", run: () => removeBlock(e, () => refreshSelection()) });
+  if (local && g.mode === "released") m.chevron.push({ id: "restore-block", label: "Block again", sub: "Until you move the session back", run: () => restoreBlock(e, () => refreshSelection()) });
+  return m;
 }
 
 function localModel(e) {
@@ -151,12 +210,14 @@ function localModel(e) {
     icon: p.id === "app" ? agentBadge(e.agent, e.agentName) : icon(p.id === "here" ? ["M3 4h18v16H3z", "m7 10 3 2.5L7 15M12 15h5"] : ["M3 4h18v16H3z", "M3 9h18"], 16) });
   if (local) {
     const places = placesOf(e);
-    m.places = places;
+    m.places = places.filter(p => p.kind !== "unknown");
     const n = placeCount(places);
     const tab = places.find((p) => p.kind === "hopsesh");
-    if (places.length) {
+    const moved = e.departure || e.movement;
+    const guardedDeparture = e.guard?.mode === "block" && moved?.machine && moved?.key;
+    if (places.length && !guardedDeparture) {
       const first = tab || places.find(canShow) || places[0];
-      const show = (p) => ({ id: "show:" + p.kind, label: canShow(p) ? (p.kind === "ide" ? `Show ${placeName(p, e)}` : `Show in ${placeName(p, e)}`) : `Running in ${placeName(p, e)}`, short: "Show",
+      const show = (p) => ({ id: "show:" + p.kind, label: canShow(p) ? (p.kind === "ide" ? `Show ${placeName(p, e)}` : p.kind === "codex-app" ? `Open in ${placeName(p, e)}` : `Show in ${placeName(p, e)}`) : `Running in ${placeName(p, e)}`, short: "Show",
         disabled: !canShow(p) || ((p.kind === "claude-app" || p.kind === "codex-app") && !e.canApp), why: ((p.kind === "claude-app" || p.kind === "codex-app") && !e.canApp) ? e.appWhy : canShow(p) ? "" : `hopsesh can't show a session in ${placeName(p, e)}`, run: () => showPlace(e, p) });
       m.primary = show(first);
       if (n >= 2) {
@@ -168,11 +229,24 @@ function localModel(e) {
         m.chevronLabel = "Move it";
       } else if (first.kind === "ide") m.caption = sys.mac ? `hopsesh can't pick the tab inside ${placeName(first, e)}` : `hopsesh can't show a session in ${placeName(first, e)}`;
       else if (first.kind === "tmux" || first.kind === "ssh") { m.primary = null; m.caption = `Running in ${placeName(first, e)}; hopsesh can't show it`; }
+      else if (first.kind === "unknown") {
+        // Open somewhere hopsesh can't see (or its program is left over): it can still be
+        // resumed in a place of your choice.
+        const ps = resumePlaces(e), d = ps.find((p) => p.id === defaultPlace(e)) || ps[0];
+        m.primary = { id: "resume:" + d.id, label: `Resume in ${d.name}`, short: "Resume", run: () => resumeIn(e, d.id) };
+        m.chevron = ps.filter((p) => p !== d).map((p) => resumeItem(p));
+        m.chevronLabel = "Resume elsewhere";
+        m.caption = "Its window could not be identified. If it is still open somewhere, close it there first: two copies writing one session can interleave.";
+      }
       else if (first.kind === "claude-app" || first.kind === "codex-app") m.caption = e.canApp ? "Opens this conversation in the desktop app" : e.appWhy;
-    } else if (e.movement?.machine && e.movement?.key) {
-      m.primary = { id: "destination", label: "Show destination", run: () => showMovementDestination(e.movement, selectFn) };
+    } else if ((e.departure || e.movement)?.machine && (e.departure || e.movement)?.key) {
+      const n = e.departure || e.movement;
+      const there = n.cloud || n.agentName || n.agent;
+      m.primary = { id: "destination", label: `Open in ${there}`, short: `Open in ${there}`, run: () => showMovementDestination(n, selectFn) };
       m.chevron = resumePlaces(e).map(p => resumeItem(p));
-      m.chevronLabel = "Resume this copy";
+      if (e.guard?.mode === "block" && e.machine === here()) m.chevron.push({ id: "remove-block", label: "Remove block…", sub: "Continue here; moving back then needs a comparison", run: () => removeBlock(e, () => refreshSelection()) });
+      if (e.guard?.mode === "released" && e.machine === here()) m.chevron.push({ id: "restore-block", label: "Block again", sub: "Until you move the session back", run: () => restoreBlock(e, () => refreshSelection()) });
+      m.chevronLabel = "Other choices";
     } else if (/^(moved|continued|prepared|previously continued)/.test(lv.status || "")) {
       const [c, newer] = newestCopy(e);
       const other = !c ? "" : c.machine === e.machine ? `the copy in ${c.agentName} is newer` : `the copy on ${c.machine} is newer`;
@@ -195,21 +269,35 @@ function localModel(e) {
     }
     m.move = moveGroups(e, true, !!tab);
   } else {
-    m.primary = { id: "bring", label: `Bring to ${sys.here}…`, short: "Bring…", run: () => planFor(e, { target: "" }) };
-    if (lv.live) m.caption = `Still open on ${e.machine}; hopsesh marks that copy when it ends`;
+    const presence = (state.scan?.machines || []).find((x) => x.name === e.machine)?.presence;
+    const bring = { id: "bring", label: `Bring to ${sys.here}…`, short: "Bring…", run: () => (lv.live && presence === "login" ? bringLive(e) : planFor(e, { target: "" })) };
+    // A session on a machine with hopsesh in its login session continues right there (its
+    // sign-in works there) and is worked in here.
+    const there = { id: "continue-there", label: `Continue on ${e.machine}`, short: `Continue on ${e.machine}`, sub: "Runs there, with its files and sign-in; you work in it here",
+      run: () => pending(`Opening ${e.title} on ${e.machine}`, () => api("ContinueOnMachine", e.machine, e.key).catch(fail), `remote:${key(e)}`) };
+    if (presence === "login" && ["claude", "codex"].includes(e.agent)) {
+      m.primary = there;
+      m.chevron = [bring];
+      m.chevronLabel = "Other choices";
+    } else {
+      m.primary = bring;
+      const why = { ssh: `Needs hopsesh on ${e.machine}: set it up in Machines`, older: `Update hopsesh on ${e.machine} first (Machines)`, installed: `hopsesh on ${e.machine} isn't running in a login session` }[presence];
+      if (why) { m.chevron = [{ ...there, disabled: true, why }]; m.chevronLabel = "Other choices"; }
+    }
+    if (lv.live) m.caption = `Still open on ${e.machine}; later messages there stay there`;
     m.move = moveGroups(e, false, false);
   }
   if(local && e.contextOverflow) {
     m.caption="The agent reported a context limit. The original is preserved; prepare a bounded continuation to recover.";
     if(!sessionTabs(e).length && !lv.live) m.fix={label:"Create bounded continuation…",run:()=>planFor(e,{target:e.agent,bounded:true,targetProfile:e.profile?.id||""})};
   }
-  m.returns = returnActions(e, (destination) => {
+  m.returns = returnActions(e, (destination, {showOnly=false}={}) => {
     if (destination.machine !== here()) return selectFn(destination);
     const places = placesOf(destination);
     const show = places.find(canShow);
     if (show) return showPlace(destination, show);
-    if (liveOf(destination).live) return selectFn(destination);
-    return resumeIn(destination, defaultPlace(destination));
+    if (showOnly || liveOf(destination).live) return selectFn(destination);
+    return resumeIn(destination, defaultPlace(destination), false, true);
   });
   if (m.returns.length) {
     // A matching return takes the place of a generic local-agent continuation.
@@ -217,7 +305,7 @@ function localModel(e) {
     for (const group of m.move) group.items = group.items.filter(a => !a.id?.startsWith("continue:") || !agents.has(a.id.slice(9)));
     m.move.unshift({heading:"Return",items:m.returns});
     const promoted = m.returns.length === 1 ? m.returns[0] : {id:"return",label:"Choose where to move back…",run:()=>returnChooser(m.returns)};
-    if (!lv.live && !sessionTabs(e).length && !e.contextOverflow) {
+    if (!(e.guard?.mode === "block" && (e.departure || e.movement)) && !lv.live && !sessionTabs(e).length && !e.contextOverflow) {
       m.chevron = [m.primary, ...m.chevron].filter(Boolean);
       m.primary = promoted;
       m.chevronLabel = "Other actions";
@@ -285,6 +373,7 @@ function moveGroups(e, local, inTab) {
   const out = [];
   const block = (it) => (inTab ? Object.assign(it, { disabled: true, why: IN_TAB }) : it);
   const machine = [];
+  if (["claude", "codex"].includes(e.agent)) machine.push(block({ id: "targets", label: "Choose where it continues…", sub: "Any machine, folder and tool, with who it runs as there", icon: icon(ICONS.here, 16), run: () => chooseTarget(e) }));
   if (local) {
     const peers = state.scan?.peers || [];
     for (const p of peers) machine.push(block({ id: "send:" + p, label: `Send to ${p}…`, icon: icon(ICONS.here, 16), run: () => planFor(e, { target: "", sendTo: p }) }));
@@ -315,9 +404,15 @@ function more(e, local) {
       try { await api("CopyText", await api("ResumeCommand", e.machine, e.key)); toast("Copied the resume command"); } catch (err) { fail(err); }
     } });
   }
+  if (!e.cloud) out.push({ id: "copy-link", label: "Copy hopsesh link", run: async () => {
+    try { await api("CopyText", await api("SessionLink", e.machine, e.key)); toast("Copied the link: it opens this session in hopsesh"); } catch (err) { fail(err); }
+  } });
   out.push({ id: "copy-id", label: "Copy session ID", run: async () => { await api("CopyText", e.cloud ? e.cloud.id : e.session || e.key.split("/").pop()); toast("Copied the session ID"); } });
   if (!e.cloud) {
     out.push({ id: "rename", label: "Rename…", disabled: !e.canRename, why: e.canRename ? "" : `hopsesh can't rename ${e.agentName} sessions`, run: () => renameFn(e) });
+    const cdWhy = isOldCopy(e) ? `This copy moved to ${movedTo(e)}: change the active copy's folder instead`
+      : e.canChangeDir ? "" : e.machine === here() ? `hopsesh can't change the folder of ${e.agentName} sessions` : `Set up hopsesh on ${e.machine} to change folders there`;
+    out.push({ id: "cd", label: "Change folder…", disabled: !!cdWhy, why: cdWhy, run: () => changeDirDialog(e) });
     out.push({ id: "transcript", label: "Open transcript", disabled: !e.canPreview || !state.info?.previews,
       why: !e.canPreview ? `hopsesh can't read ${e.agentName} transcripts` : !state.info?.previews ? "Conversation previews are off (Settings → General)" : "", run: () => transcriptFn(e) });
   } else {
@@ -345,7 +440,17 @@ export function actionsFor(e) {
 // statusOf is a session's state for its row: [kind, words].
 const CLOUD_STATES = { running: ["running", "Running"], idle: ["idle", "Idle"], done: ["done", "Done"], failed: ["error", "Failed"],
   archived: ["ended", "Archived"], unknown: ["unknown", "State not known"] };
+// known keeps each session's last settled status, so a background read (whose rows are
+// "checking" until presence answers) shows what was known instead of flickering.
+const known = new Map();
 export function statusOf(e) {
+  const st = statusNow(e);
+  const k = key(e);
+  if (st[0] === "unknown" && st[1] === "Checking status" && known.has(k)) return known.get(k);
+  if (!(st[0] === "unknown" && st[1] === "Checking status")) known.set(k, st);
+  return st;
+}
+function statusNow(e) {
   if (e.cloud) {
     if(e.cached)return ["unknown","Checking status"];
     const st = CLOUD_STATES[e.cloud.state];
@@ -353,13 +458,16 @@ export function statusOf(e) {
     const host = (e.cloud.url.match(/^https:\/\/([^/]+)/) || [])[1];
     return ["unknown", host ? `Status on ${host}` : CLOUD_STATES.unknown[1]];
   }
+  // An old copy is where the session was, whatever runs it still (the indicators say so).
+  if (isOldCopy(e)) return ["moved", `Moved to ${movedTo(e)}`];
   const lv = liveOf(e);
   const ts = e.machine === here() ? sessionTabs(e) : [];
   if (ts.length) return ts.some((t) => t.attention) ? ["needs", "Waiting for you"] : ["working", "Working"];
   if (lv.needs) return ["needs", "Needs you"];
   if (lv.live) return /idle/i.test(lv.status) ? ["idle", "Idle"] : ["working", "Working"];
   if (e.cached && !state.presence?.[key(e)]) return ["unknown", "Checking status"];
-  if (e.movement) return ["moved", `Movement ${e.movement.status}`];
+  const r = role(e);
+  if (r && e.departure) return ["moved", r.short];
   if (/^(moved|continued|prepared|previously continued)/.test(lv.status || "")) return ["moved", cap((lv.status || "").replace(/^continued /, "previously continued "))];
   return ["ended", "Ended"];
 }
@@ -393,6 +501,7 @@ export function statusLine(e) {
   const ps = placesOf(e);
   const n = placeCount(ps);
   const where = e.machine === here() ? sys.here : e.machine;
+  if (isOldCopy(e)) return ["away", "Moved away", `last used on ${where} ${ago(e.lastActive)}`];
   if (n >= 2) return ["needs", `${k === "needs" ? "Waiting for you" : k === "idle" ? "Idle" : "Working"} in ${count(ps.length > 1 ? ps.length : n, "place")}`, `${where} · ${ago(e.lastActive)}`, null, true];
   if (ps.length) {
     const p = ps[0];
@@ -401,7 +510,7 @@ export function statusLine(e) {
   }
   const lv = liveOf(e);
   if (lv.live && e.machine !== here()) return [k, `${k === "needs" ? "Waiting for you" : k === "idle" ? "Idle" : "Working"} on ${e.machine}`, ago(e.lastActive)];
-  if (k === "moved") return [k, words, e.movement ? (Date.parse(e.movement.checkedAt) > 0 ? `checked ${ago(e.movement.checkedAt)}` : "Observation time unavailable") : ago(e.lastActive)];
+  if (k === "moved") { const n = e.departure || e.movement; return [k, words, n && Date.parse(n.checkedAt) > 0 ? `checked ${ago(n.checkedAt)}` : ago(e.lastActive)]; }
   if (!e.hereNewest && e.machine === here()) {
     const [c] = newestCopy(e);
     if (c) return ["ended", "Older copy", `newest on ${whereWord(c.machine)}`];

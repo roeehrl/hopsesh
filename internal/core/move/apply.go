@@ -80,18 +80,15 @@ type Result struct {
 	PushError  string            `json:"pushError,omitempty"`
 	Sync       *repos.SyncResult `json:"sync,omitempty"`
 	SyncNote   string            `json:"syncNote,omitempty"`
-	Mark       string            `json:"mark"` // done | pending | off | failed
-	MarkError  string            `json:"markError,omitempty"`
 	PromptFile string            `json:"promptFile,omitempty"`
 	Command    string            `json:"command"` // to resume, for this machine's shell
+	// Key is the session as it is now at the destination.
+	Key agent.SessionKey `json:"key,omitzero"`
 	// Run is Command as an argument list (with the start prompt as its last argument when
 	// PromptFile is set), for a terminal hopsesh opens on it.
 	Run      agent.Command `json:"run"`
 	Notice   string        `json:"notice,omitempty"`
 	Warnings []string      `json:"warnings,omitempty"`
-	// Owed is a mark the source still needs once its open copy ends, when the source is a
-	// snapshot: its sender keeps it (on other sources hopsesh keeps it here).
-	Owed *lineage.Pending `json:"owed,omitempty"`
 	// Fetch is what a fetch from a cloud did.
 	Fetch *FetchResult `json:"fetch,omitempty"`
 	// Handoff is what a hand-off to a cloud did (also when a step failed).
@@ -164,7 +161,7 @@ func applyPlan(ctx context.Context, p *Plan, in Input, env Env) (*Result, error)
 		return nil, err
 	}
 	j.AddKey(p.Placement.Key)
-	res := &Result{Journal: j.ID}
+	res := &Result{Journal: j.ID, Key: p.Placement.Key}
 	tgtHost, err := tgt.Machine.For(ctx, tgt.Module.Spec(), tgt.Install, j)
 	if err != nil {
 		return nil, err
@@ -202,7 +199,7 @@ func applyPlan(ctx context.Context, p *Plan, in Input, env Env) (*Result, error)
 	}
 
 	// 1. Repository and code.
-	if err := applyRepo(ctx, p, in, env, res, step); err != nil {
+	if err := applyRepo(ctx, p, in, env, j, res, step); err != nil {
 		return res, err
 	}
 
@@ -231,8 +228,7 @@ func applyPlan(ctx context.Context, p *Plan, in Input, env Env) (*Result, error)
 		}
 	}
 
-	// 6. Mark the copy left behind, and save the start prompt.
-	markWith(ctx, p, in, j, env, srcHead, agent.Mark{Kind: agent.MarkMoved, Location: p.Target.Location}, res)
+	// 6. Save the start prompt.
 	promptFile := filepath.Join(env.StateDir, "prompts", string(p.Placement.Key.Agent)+"-"+string(p.Placement.Key.Session)+".md")
 	if p.StartPrompt != "" && os.MkdirAll(filepath.Dir(promptFile), 0o700) == nil && os.WriteFile(promptFile, []byte(p.StartPrompt), 0o600) == nil {
 		res.PromptFile = promptFile
@@ -245,10 +241,39 @@ func applyPlan(ctx context.Context, p *Plan, in Input, env Env) (*Result, error)
 	return res, nil
 }
 
-func applyRepo(ctx context.Context, p *Plan, in Input, env Env, res *Result, step func(string)) error {
+// applyWorkspace makes the workspace folder and clones the repositories the plan clones
+// into it, journaled so undo removes them while they hold nothing new.
+func applyWorkspace(ctx context.Context, p *Plan, env Env, j *journal.Journal, res *Result, machine string, step func(string)) error {
+	for _, m := range p.Repo.Members {
+		if m.Action != RepoClone {
+			continue
+		}
+		step("cloning " + m.Remote + " into " + m.LocalPath)
+		if err := j.Clone(machine, m.LocalPath); err != nil {
+			return err
+		}
+		if err := repos.Clone(ctx, m.Remote, m.LocalPath); err != nil {
+			return fmt.Errorf("clone of %s failed: %w", m.Name(), err)
+		}
+		res.Cloned = true
+		env.Audit.Write(audit.Entry{Action: "git.clone", Session: p.Key.String(), Detail: map[string]any{"remote": m.Remote, "dest": m.LocalPath}})
+	}
+	return j.Mkdir(machine, p.Repo.LocalPath)
+}
+
+// applyRepo clones the repository and adds the worktree the plan names, journaled in j so
+// undo removes them (and a branch made for the worktree) while they hold no work.
+func applyRepo(ctx context.Context, p *Plan, in Input, env Env, j *journal.Journal, res *Result, step func(string)) error {
 	r := p.Repo
+	machine := in.Target.Machine.Name
+	if r.Action == RepoWorkspace {
+		return applyWorkspace(ctx, p, env, j, res, machine, step)
+	}
 	if r.Action == RepoClone {
 		step("cloning " + r.Remote + " into " + r.LocalPath)
+		if err := j.Clone(machine, r.LocalPath); err != nil {
+			return err
+		}
 		if err := repos.Clone(ctx, r.Remote, r.LocalPath); err != nil {
 			return fmt.Errorf("clone failed: %w", err)
 		}
@@ -263,8 +288,22 @@ func applyRepo(ctx context.Context, p *Plan, in Input, env Env, res *Result, ste
 	if r.Worktree != "" {
 		if _, err := os.Stat(r.Worktree); err != nil {
 			step("creating worktree " + r.Worktree + " on " + r.SourceBranch)
+			ref := "refs/heads/" + r.SourceBranch
+			had, err := repos.LocalGit{}.Ref(ctx, r.LocalPath, ref)
+			if err != nil {
+				return fmt.Errorf("worktree: %w", err)
+			}
+			if err := j.Worktree(machine, r.LocalPath, r.Worktree); err != nil {
+				return err
+			}
 			if err := repos.AddWorktree(ctx, r.LocalPath, r.SourceBranch, r.Worktree, from); err != nil {
 				return fmt.Errorf("worktree: %w", err)
+			}
+			// The branch the worktree made, so undo deletes it while it is where it started.
+			if made, err := (repos.LocalGit{}).Ref(ctx, r.LocalPath, ref); had == "" && err == nil && made != "" {
+				if err := j.Ref(machine, r.LocalPath, ref, made, ""); err != nil {
+					return err
+				}
 			}
 			res.Worktree = r.Worktree
 			env.Audit.Write(audit.Entry{Action: "git.worktree", Session: p.Key.String(), Detail: map[string]any{"path": r.Worktree, "branch": r.SourceBranch}})
@@ -525,39 +564,6 @@ func recordLineage(ctx context.Context, p *Plan, in Input, j *journal.Journal, m
 		res.Warnings = append(res.Warnings, "destination committed; source receipt acknowledgement pending: "+err.Error())
 	}
 	return nil
-}
-
-// markWith marks the copy left behind now, or records an owed mark when it is still open.
-func markWith(ctx context.Context, p *Plan, in Input, j *journal.Journal, env Env, src ir.Cursor, mark agent.Mark, res *Result) {
-	if m := in.Session.Mark; m != nil && *m == mark {
-		res.Mark = "done" // already marked so
-		return
-	}
-	switch p.Mark {
-	case MarkNow:
-		res.Mark = "done"
-		if marker, ok := in.Source.Module.(agent.Marker); ok {
-			h, err := in.Source.Machine.For(ctx, in.Source.Module.Spec(), in.Source.Install, j)
-			if err == nil {
-				err = marker.Mark(ctx, h, in.Source.Install, in.Session, mark)
-			}
-			if err != nil {
-				res.Mark, res.MarkError = "failed", err.Error()
-			}
-		}
-	case MarkWhenStopped:
-		res.Mark = "pending"
-		owed := lineage.Pending{Operation: p.OperationID, Branch: p.sourceLine, Replica: p.sourceReplica, Time: time.Now().UTC(), Location: p.Source.Location, Key: p.Key,
-			Path: in.Session.Path, Title: p.Title, Mark: mark, Head: string(src.Head)}
-		if in.Source.Machine.IsSnapshot() {
-			res.Owed = &owed
-		} else if err := lineage.AddPending(env.StateDir, owed); err != nil {
-			res.Mark, res.MarkError = "failed", err.Error()
-		}
-	default:
-		res.Mark = "off"
-	}
-	env.Audit.Write(audit.Entry{Action: "move.mark", Host: p.Source.Location, Session: p.Key.String(), Detail: map[string]any{"mark": res.Mark, "error": res.MarkError}})
 }
 
 // rewriteFile writes a staged file's rewritten form, then the module's appended records.

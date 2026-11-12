@@ -1,6 +1,6 @@
 // Package move moves a session between locations with the same agent: plan (pure
 // decisions, nothing written) and apply (stage, rewrite, verify, install with a journal,
-// record lineage, mark the copy left behind). Every agent-specific step is the module's.
+// record lineage). Every agent-specific step is the module's.
 package move
 
 import (
@@ -41,8 +41,11 @@ type Input struct {
 	Live    agent.LiveInfo
 	Git     *repos.GitState // the session's checkout on the source (nil when unknown)
 	GitErr  string          // why the checkout could not be read ("" when it was)
-	Lineage *lineage.Manifest
-	Target  Side
+	// Workspace is the repositories directly inside the session's folder on the source,
+	// when that folder is not a repository itself (a workspace holding several).
+	Workspace []repos.GitState
+	Lineage   *lineage.Manifest
+	Target    Side
 	// Copies are the target agent's sessions with the same key at the target.
 	Copies []Copy
 	// Worktrees are agent-managed worktree folders (from every module).
@@ -54,6 +57,16 @@ type Input struct {
 	// Native is the source's own agent on the target, for a continuation on another
 	// machine: the session is also kept there byte for byte (nil: it is not installed).
 	Native *NativeSide
+	// Guard is whether the source machine can block or warn the original once the
+	// session moves (nil: only whether hopsesh is there is known).
+	Guard *Guard
+}
+
+// Guard is what the source machine's checks say about protecting the original: hopsesh
+// new enough to read where the session went, and the hook in that agent folder.
+type Guard struct {
+	Ready bool
+	Why   []string // why not, in a few words each
 }
 
 // NativeSide is the source agent on the target and its copies of the session there.
@@ -81,28 +94,31 @@ const (
 
 // Options are the user's choices.
 type Options struct {
-	Bounded       bool   `json:"bounded,omitempty"`    // new bounded replica on the same logical branch
-	NewReplica    bool   `json:"newReplica,omitempty"` // explicitly create a new native session; never auto-select an existing one
-	TargetProfile string `json:"targetProfile,omitempty"`
-	OperationID   string `json:"operationId,omitempty"`
-	TargetSession string `json:"targetSession,omitempty"`
-	TargetDir     string // resume here (skips repository matching)
-	Clone         bool   // clone the repository when it is not here
-	ReposDir      string
-	ExtraRoots    []string // more folders to look for checkouts in
-	GHQLayout     bool
-	Worktree      WorktreeMode
-	Fork          bool // keep the source session running (both continue)
-	RemoteControl bool
-	Notify        bool // tell the old session it moved on
-	Redact        bool
-	App           bool // open in the agent's desktop app
-	Mark          bool // mark the copy left behind
-	SyncCode      bool // bring the checkout to the session's commit
-	Push          bool // push unpushed commits on the source first
-	StopLocal     bool // quit a copy of this session that is open here
-	Conflict      string
-	OtherAccount  bool // the target is signed in to another account (set by the planner)
+	// OpenBlockedOriginal names an original that is open in its agent but blocked by
+	// hopsesh: apply closes its exact native client and rebuilds the append plan.
+	// A block does not prevent that client from writing stale bookkeeping.
+	OpenBlockedOriginal string `json:"openBlockedOriginal,omitempty"`
+	Bounded             bool   `json:"bounded,omitempty"`    // new bounded replica on the same logical branch
+	NewReplica          bool   `json:"newReplica,omitempty"` // explicitly create a new native session; never auto-select an existing one
+	TargetProfile       string `json:"targetProfile,omitempty"`
+	OperationID         string `json:"operationId,omitempty"`
+	TargetSession       string `json:"targetSession,omitempty"`
+	TargetDir           string // resume here (skips repository matching)
+	Clone               bool   // clone the repository when it is not here
+	ReposDir            string
+	ExtraRoots          []string // more folders to look for checkouts in
+	GHQLayout           bool
+	Worktree            WorktreeMode
+	Fork                bool // keep the source session running (both continue)
+	RemoteControl       bool
+	Notify              bool // tell the old session it moved on
+	Redact              bool
+	App                 bool // open in the agent's desktop app
+	SyncCode            bool // bring the checkout to the session's commit
+	Push                bool // push unpushed commits on the source first
+	StopLocal           bool // quit a copy of this session that is open here
+	Conflict            string
+	OtherAccount        bool // the target is signed in to another account (set by the planner)
 	// Continuing in another agent.
 	Fidelity convert.Fidelity // history (default) or note
 	Native   bool             // render exact tool calls as the target's own (when it can)
@@ -132,6 +148,9 @@ type Options struct {
 	// StartingDiff sends the changes with the cloud session as a starting diff, on a branch
 	// already on the remote, instead of pushing a handoff branch.
 	StartingDiff bool
+	// Limits is the history and resource policy for this operation (ir.Limits). Readers,
+	// writers and the archive see it through the operation's context.
+	Limits ir.Limits `json:"limits,omitempty"`
 }
 
 // Via choices: the target agent's own importer, or hopsesh's conversion even when the
@@ -147,13 +166,6 @@ const (
 	ConflictKeepBoth = "keep-both"
 )
 
-// Mark states.
-const (
-	MarkNow         = "now"          // right after the move
-	MarkWhenStopped = "when-stopped" // the copy left behind is still open: on a later scan
-	MarkOff         = "off"
-)
-
 // Kinds of plans.
 const (
 	KindMove     = "move"     // the same agent, another place
@@ -164,6 +176,13 @@ const (
 
 // Plan is a move, worked out without changing anything.
 type Plan struct {
+	// RemoteControlInApp: Remote Control was asked for an opening in the desktop app, which
+	// can't start it (see appRemoteControl); the window checks it once the app opens.
+	RemoteControlInApp bool `json:"remoteControlInApp,omitempty"`
+	// ReviewNewSession offers a fresh portable plan, not permission to apply this
+	// blocked one. The new plan must still check destination coverage and divergence.
+	ReviewNewSession bool `json:"reviewNewSession,omitempty"`
+
 	NoWork       bool             `json:"noWork,omitempty"`
 	SyncTo       *agent.Summary   `json:"syncTo,omitempty"`
 	OperationID  string           `json:"operationId"`
@@ -177,17 +196,28 @@ type Plan struct {
 	Live         bool             `json:"live"`
 	Repo         RepoPlan         `json:"repo"`
 	Placement    agent.Placement  `json:"placement"`
-	Files        agent.MovePlan   `json:"files"`
-	Bytes        int64            `json:"bytes"`
+	// ResumeHere: the session is already in the destination; continue it where it is.
+	ResumeHere bool `json:"resumeHere,omitempty"`
+	// Unprotected: the original stays on a machine without hopsesh, where nothing can
+	// keep it from being continued too.
+	Unprotected bool `json:"unprotected,omitempty"`
+	// CannotProtect says why the original can't be blocked or warned on its machine,
+	// whether or not that was asked (the app shows the option off, with these reasons).
+	CannotProtect []string       `json:"cannotProtect,omitempty"`
+	Files         agent.MovePlan `json:"files"`
+	Bytes         int64          `json:"bytes"`
 	// SetAside are copies at the target that make way (kept by the journal for undo).
 	SetAside []agent.Summary `json:"setAside,omitempty"`
 	Conflict string          `json:"conflict,omitempty"`
-	Warnings []string        `json:"warnings,omitempty"`
-	Blockers []string        `json:"blockers,omitempty"`
-	Mark     string          `json:"mark"`
-	StopHere bool            `json:"stopHere,omitempty"` // quit the copy open here first
-	Push     bool            `json:"push,omitempty"`
-	Sync     string          `json:"sync,omitempty"`
+	// HistoryChanged: the session's own history no longer matches what hopsesh recorded
+	// when it last moved it (the reason). Keep-both (Options.Conflict) takes it as a
+	// separate conversation from its current state.
+	HistoryChanged string   `json:"historyChanged,omitempty"`
+	Warnings       []string `json:"warnings,omitempty"`
+	Blockers       []string `json:"blockers,omitempty"`
+	StopHere       bool     `json:"stopHere,omitempty"` // quit the copy open here first
+	Push           bool     `json:"push,omitempty"`
+	Sync           string   `json:"sync,omitempty"`
 	// SyncFromSource: unpushed commits are fetched straight from the source machine.
 	SyncFromSource bool          `json:"syncFromSource,omitempty"`
 	NewName        string        `json:"newName"`
@@ -207,6 +237,7 @@ type Plan struct {
 	sourceLine, targetLine string
 	sourceReplica          lineage.ReplicaID
 	sourceState            lineage.State
+	lineageRefused         bool // the source's lineage could not be verified (see lineageRefused)
 	bundle                 agent.Bundle
 	native                 *Plan // the move that keeps NativeCopy
 	nativeIn               Input
@@ -228,9 +259,27 @@ type Endpoint struct {
 	Version     string `json:"agentVersion,omitempty"`
 }
 
+// resumeHere is the plan for a session already in its destination: nothing to copy; it
+// continues where it is, under the account signed in there now.
+func resumeHere(in Input) *Plan {
+	s, spec := in.Session, in.Target.Module.Spec()
+	p := &Plan{Kind: KindMove, Key: s.Key, Title: s.Title, Agent: spec.Name, ResumeHere: true, NoWork: true, OldName: s.Title,
+		Source: Endpoint{Location: in.Source.Machine.Name, OS: in.Source.Machine.Facts.OS, CWD: s.CWD, Path: s.Path, Version: s.AgentVersion},
+		Target: Endpoint{Location: in.Target.Machine.Name, OS: in.Target.Machine.Facts.OS, CWD: s.CWD, Version: in.Target.Install.Version}}
+	p.Placement = agent.Placement{Key: s.Key, SourceID: s.Key.Session, CWD: s.CWD, Location: in.Target.Machine.Name}
+	p.Resume = in.Target.Module.Resume(in.Target.Install, s.Key, p.Placement, agent.ResumeOptions{})
+	ran := "It ran under another " + spec.Name + " account than the one signed in here now"
+	if len(ranUnder(s)) == 0 {
+		ran = "Hopsesh has no record of the " + spec.Name + " account it ran under"
+	}
+	p.Warnings = append(p.Warnings, ran+"; continuing it here uses the account signed in now, and reasoning recorded under another account is not visible to it. The conversation itself stays.")
+	return p
+}
+
 // Build works out a move. It reads (the bundle's file list, the target's copies) but
 // writes nothing.
 func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
+	ctx = ir.WithLimits(ctx, opt.Limits)
 	if opt.NewReplica && opt.TargetSession != "" {
 		return nil, fmt.Errorf("a new session cannot also select an existing destination session")
 	}
@@ -245,6 +294,15 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 			}
 		}
 		copies = selected
+	}
+	// The session's own root, now signed in to another account than the one that ran it.
+	// An agent that resumes across accounts continues it right there; another needs a
+	// cleaned copy.
+	if ownerBoundary(in) && samePlace(in) && opt.TargetSession == "" && !opt.Bounded && !opt.Fork && !opt.NewReplica {
+		if tgt.Module.Spec().ResumeAcrossAccounts {
+			return resumeHere(in), nil
+		}
+		opt.NewReplica = true
 	}
 	if opt.NewReplica || opt.Bounded || profileBoundary(in) || src.Module.Spec().ID != tgt.Module.Spec().ID || len(copies) == 1 && copies[0].Summary.Key != in.Session.Key {
 		return buildContinue(ctx, in, opt)
@@ -269,12 +327,12 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		p.Options.RemoteControl = false
 		p.Warnings = append(p.Warnings, "remote control stays off: "+tgt.Account.Why)
 	}
-	if src.Account != nil && tgt.Account != nil && src.Account.Key != "" && tgt.Account.Key != "" && src.Account.Key != tgt.Account.Key {
+	if ownerBoundary(in) {
 		if _, ok := tgt.Module.(agent.Sanitizer); ok {
 			p.Options.OtherAccount = true
-			p.Warnings = append(p.Warnings, fmt.Sprintf("this machine is signed in to another %s account than %s; content bound to that account (such as signed reasoning) is left out of the copy", spec.Name, src.Machine.Name))
+			p.Warnings = append(p.Warnings, fmt.Sprintf("the destination is signed in to another %s account than the one this session ran under (or hopsesh has no record of that account); content bound to that account (such as signed reasoning) is left out of the copy", spec.Name))
 		} else {
-			p.Blockers = append(p.Blockers, fmt.Sprintf("this machine is signed in to another %s account than %s, and %s sessions cannot move between accounts", spec.Name, src.Machine.Name, spec.Name))
+			p.Blockers = append(p.Blockers, fmt.Sprintf("the destination is signed in to another %s account than the one this session ran under, and %s sessions cannot move between accounts", spec.Name, spec.Name))
 		}
 	}
 
@@ -313,7 +371,7 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 			return nil, e
 		}
 		if e = prepareLineage(ctx, p, in, &seg); e != nil {
-			p.Blockers = append(p.Blockers, "cannot verify session lineage: "+e.Error())
+			lineageRefused(p, e)
 		}
 	}
 	relate(ctx, p, in, opt)
@@ -342,7 +400,7 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 					}
 				}
 				if !selected {
-					p.Blockers = append(p.Blockers, "destination native session already exists outside the selected branch; create a separate fork")
+					p.Blockers = append(p.Blockers, "destination native session already exists outside the selected branch; keep them as separate conversations")
 				}
 			}
 		}
@@ -358,6 +416,7 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		Redacted: opt.Redact, OtherAccount: p.Options.OtherAccount, Live: p.Live, Fork: opt.Fork && p.Live,
 	})
 	p.resumeOpts = agent.ResumeOptions{RemoteControl: p.Options.RemoteControl, App: opt.App && agent.Has(tgt.Module, agent.CapApp), Name: p.NewName, Prompt: p.StartPrompt}
+	p.appRemoteControl()
 	if p.resumeOpts.App {
 		if tgt.Install.Profile != nil && !tgt.Install.Profile.Default {
 			p.Blockers = append(p.Blockers, "desktop opening cannot select an account profile; use a terminal")
@@ -372,6 +431,18 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	}
 	p.Resume = tgt.Module.Resume(tgt.Install, p.Placement.Key, p.Placement, p.resumeOpts)
 	return p, nil
+}
+
+// appRemoteControl takes a Remote Control request off an opening in the desktop app: its
+// launcher takes no --remote-control, and Claude desktop leaves a session it is handed
+// unconnected (its "connect new sessions" setting covers only sessions started in it).
+// The person turns it on there; the window checks and says.
+func (p *Plan) appRemoteControl() {
+	if p.resumeOpts.App && p.resumeOpts.RemoteControl {
+		p.resumeOpts.RemoteControl = false
+		p.RemoteControlInApp = true
+		p.Warnings = append(p.Warnings, "the desktop app doesn't connect a session it is handed to Remote Control: once it opens, turn on the session's Remote Control switch there (hopsesh checks and tells you)")
+	}
 }
 
 // relate compares the incoming session with copies already here.
@@ -444,6 +515,11 @@ func relate(ctx context.Context, p *Plan, in Input, opt Options) {
 // the incoming copy was taken from it. Lineage tells exactly (the head it had when it
 // left); without lineage, a copy newer than the incoming one is treated as changed.
 func changedSinceItLeft(ctx context.Context, p *Plan, in Input, c Copy) string {
+	if p.lineageRefused {
+		// The source's own state is unverified, so no comparison would mean anything. The
+		// plan is blocked already; keep-both, its way forward, plans again on a new branch.
+		return ""
+	}
 	if p.manifest != nil {
 		st, _, err := targetState(ctx, p, in, c)
 		if err != nil {
@@ -452,7 +528,7 @@ func changedSinceItLeft(ctx context.Context, p *Plan, in Input, c Copy) string {
 		source, target := p.manifest.Covered(p.sourceState.Heads), p.manifest.Covered(st.Heads)
 		if lineage.Subset(source, target) && lineage.Subset(target, source) {
 			if c.Summary.CWD != "" && realIntended(c.Summary.CWD) != realIntended(p.Target.CWD) {
-				p.Blockers = append(p.Blockers, "destination is synchronized in "+c.Summary.CWD+"; choose that folder or create a separate fork for a different folder")
+				p.Blockers = append(p.Blockers, "destination is synchronized in "+c.Summary.CWD+"; choose that folder or keep them as separate conversations")
 				return ""
 			}
 			p.NoWork = true
@@ -483,8 +559,35 @@ func keepBoth(p *Plan) {
 	p.Warnings = append(p.Warnings, "both copies stay: this one comes in as a separate session, \""+p.Title+"\"")
 }
 
+// markUnprotected says when the original stays on a machine without hopsesh, whose
+// hooks cannot block or warn it: a move and a continuation alike.
+func markUnprotected(p *Plan, in Input, opt Options) {
+	if opt.Fork || in.Source.Machine == nil {
+		return
+	}
+	if g := in.Guard; g != nil {
+		if g.Ready {
+			return
+		}
+		p.CannotProtect = g.Why
+		if opt.Notify {
+			p.Unprotected = true
+			p.Warnings = append(p.Warnings, fmt.Sprintf("the original on %s can't be blocked or warned: %s; nothing stops it from being continued there too", p.Source.Location, strings.Join(g.Why, "; ")))
+		}
+		return
+	}
+	if !in.Source.Machine.HopseshThere() {
+		p.CannotProtect = []string{"hopsesh isn't installed there"}
+		if opt.Notify {
+			p.Unprotected = true
+			p.Warnings = append(p.Warnings, fmt.Sprintf("the original on %s won't be protected: without hopsesh there, nothing stops it from being continued on %s too, and the two copies drift apart; set up hopsesh on %s first to protect it", p.Source.Location, p.Source.Location, p.Source.Location))
+		}
+	}
+}
+
 func planWarnings(p *Plan, in Input, opt Options) {
 	spec := in.Target.Module.Spec()
+	markUnprotected(p, in, opt)
 	if p.Live {
 		if opt.Fork {
 			p.Warnings = append(p.Warnings, fmt.Sprintf("the session is still open on %s; you chose fork, so both copies continue independently", p.Source.Location))
@@ -521,24 +624,10 @@ func planWarnings(p *Plan, in Input, opt Options) {
 	}
 }
 
-// planRoundTrip decides marking, pushing and code sync.
+// planRoundTrip warns about a copy already moved on, and decides pushing and code sync.
 func planRoundTrip(p *Plan, in Input, opt Options) {
-	switch {
-	case p.NoWork:
-		p.Mark = MarkOff
-	case p.Kind == KindMove && p.Placement.Key != p.Key:
-		p.Mark = MarkOff // keep-both: both copies stay
-	case !opt.Mark || (p.Kind == KindMove && p.Source.Location == p.Target.Location):
-		p.Mark = MarkOff
-	case p.Options.Fork:
-		p.Mark = MarkOff // both continue on purpose
-	case p.Live:
-		p.Mark = MarkWhenStopped
-	default:
-		p.Mark = MarkNow
-	}
-	if m := in.Session.Mark; m != nil {
-		p.Warnings = append(p.Warnings, fmt.Sprintf("this copy on %s was already moved on (%s); the newest copy is probably elsewhere", p.Source.Location, agent.MarkTitle(*m, "")))
+	if hop, ok := p.manifest.Departed(p.sourceReplica); ok {
+		p.Warnings = append(p.Warnings, fmt.Sprintf("this copy on %s was already moved on (to %s); the newest copy is probably elsewhere", p.Source.Location, p.manifest.Replica(hop.To).Location))
 	}
 	r := p.Repo
 	remote := p.Source.Location != p.Target.Location
@@ -616,8 +705,12 @@ func mappings(p *Plan, src, tgt Side) []agent.Mapping {
 	if r.SourceTop != "" && r.Worktree == "" {
 		add(r.SourceTop, top)
 	}
-	if r.Action == RepoNone {
+	if r.Action == RepoNone || r.Action == RepoWorkspace {
 		add(p.Source.CWD, p.Target.CWD)
+	}
+	for _, m := range r.Members {
+		add(m.SourceTop, m.LocalPath)
+		add(m.SourceMain, m.LocalPath)
 	}
 	for name, dir := range src.Install.Roots {
 		add(dir, tgt.Install.Roots[name])
@@ -672,28 +765,8 @@ func nonEmpty(s, d string) string {
 	return s
 }
 
-// versionLess compares dotted versions numerically.
-func versionLess(a, b string) bool {
-	pa, pb := strings.Split(a, "."), strings.Split(b, ".")
-	for i := 0; i < len(pa) && i < len(pb); i++ {
-		x, y := num(pa[i]), num(pb[i])
-		if x != y {
-			return x < y
-		}
-	}
-	return len(pa) < len(pb)
-}
-
-func num(s string) int {
-	n := 0
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			break
-		}
-		n = n*10 + int(c-'0')
-	}
-	return n
-}
+// versionLess orders agent versions (pre-releases below their release).
+func versionLess(a, b string) bool { return agent.VersionLess(a, b) }
 
 // ContinuationHint distinguishes a prepared transcript from an agent turn. Opening
 // an app does not submit a message; a terminal command may include the first prompt.

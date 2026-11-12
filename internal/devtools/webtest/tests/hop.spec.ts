@@ -67,7 +67,7 @@ test("a Claude Code cloud session goes on to Codex cloud through this machine, a
   await expect(page.locator(".page")).toContainText(/Task task_e_\w+ is running/);
   await expect(page.locator("#ho-via")).toContainText("Brought here from Claude Code cloud first");
   await expect(page.locator(".page")).toContainText("Environment acme-api");
-  await expect(page.locator(".page")).toContainText("The session here is marked “continued in Codex cloud”");
+  await expect(page.locator(".page")).not.toContainText("marked");
 
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   const dlg = page.locator("#dlg");

@@ -253,7 +253,9 @@ func (a *App) QuitAndEnd() {
 		go a.Wails.Quit()
 		return
 	}
-	for _, t := range a.TerminalTabs() { // no app (the browser tests): only the tabs end
+	// No app (the browser tests): only the tabs end, written down as Shutdown would.
+	a.rememberTabs(false)
+	for _, t := range a.TerminalTabs() {
 		_ = a.Terms.close(t.ID)
 	}
 }

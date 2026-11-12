@@ -102,7 +102,7 @@ func PreviewHandoff(ctx context.Context, in HandoffInput, repo string, opt Optio
 		hp.NoFollowUp = cl.NoFollowUp
 	}
 	hp.Host, _, _ = strings.Cut(repo, "/")
-	p := &Plan{Kind: KindHandoff, Target: Endpoint{Location: cl.Name, Version: in.Install.Version}, Options: opt, Handoff: hp, Mark: MarkOff}
+	p := &Plan{Kind: KindHandoff, Target: Endpoint{Location: cl.Name, Version: in.Install.Version}, Options: opt, Handoff: hp}
 	check := func(state, text string) {
 		hp.Checks = append(hp.Checks, Check{State: state, Text: text})
 		switch state {
@@ -137,12 +137,7 @@ func PreviewHandoff(ctx context.Context, in HandoffInput, repo string, opt Optio
 		}
 	}
 	hp.Cleanup = nonEmpty(opt.Cleanup, nonEmpty(in.Settings.DeleteBranch, CleanupAfterMerge))
-	hp.MarkTitle = agent.MarkTitle(agent.Mark{Kind: agent.MarkContinued, AgentName: cl.Title}, "") // the cloud by its name for people
 	hp.Steps = []string{StepSnapshot, StepPush, StepStart, StepLineage}
-	if opt.Mark {
-		hp.Steps = append(hp.Steps, StepMark)
-		p.Mark = MarkNow
-	}
 	hp.Loss = append([]string{fmt.Sprintf("%s gets a briefing of the session here, not the session itself: its messages, tool calls and reasoning stay here", cl.Title)}, cl.Limits...)
 	return p
 }

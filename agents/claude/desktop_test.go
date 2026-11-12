@@ -2,6 +2,8 @@ package claude
 
 import (
 	"context"
+	"encoding/json"
+	"time"
 	"reflect"
 	"strings"
 	"testing"
@@ -120,5 +122,36 @@ func TestDesktopFocusRequiresCurrentAppOwnershipAndVerifiedBundle(t *testing.T) 
 		if !c.TTY || len(c.Argv) != 4 || c.Argv[1] != "--desktop" {
 			t.Fatalf("bypassed CLI checks: %+v", c)
 		}
+	}
+}
+
+// Claude desktop's own sign-in is read from its last known account id and its session
+// index's organization folder; its token caches are never part of the answer.
+func TestDesktopAccountIsItsOwnSignIn(t *testing.T) {
+	base := agenttest.NewFakeHost("/Users/alice")
+	f := base.Facts()
+	f.OS, f.Arch = "darwin", "arm64"
+	f.Binaries = map[string]agent.BinaryFact{"claude": {Path: "/test/claude", Version: "2.1.299"}}
+	f.Env = map[string]string{"CLAUDE_CONFIG_DIR": ""}
+	now := time.Now()
+	base.Put("/Applications/Claude.app/Contents/Info.plist", []byte(`<key>CFBundleIdentifier</key><string>com.anthropic.claudefordesktop</string><key>CFBundleShortVersionString</key><string>2.31226.1</string>`), now)
+	const acct, oldOrg, org = "eb49ab91-6e1e-4066-8188-55844f05f186", "11111111-1111-4111-8111-111111111111", "ccd0bf80-f6e6-4528-a58b-efc868608732"
+	dir := "/Users/alice/Library/Application Support/Claude"
+	base.Put(dir+"/config.json", []byte(`{"lastKnownAccountUuid":"`+acct+`","oauth:tokenCacheV2":"secret"}`), now)
+	base.Put(dir+"/claude-code-sessions/"+acct+"/"+oldOrg+"/local_a.json", []byte(`{}`), now.Add(-time.Hour))
+	base.Put(dir+"/claude-code-sessions/"+acct+"/"+org+"/local_b.json", []byte(`{}`), now)
+	in, err := New().Detect(context.Background(), desktopHost{base, f})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := in.DesktopAccount
+	if got == nil || got.Person != personKey(acct) || got.Source != "claude-desktop" {
+		t.Fatalf("desktop account: %+v", got)
+	}
+	if got.Key != accountKey(org) && got.Key != accountKey(oldOrg) {
+		t.Fatalf("organization not taken from the session index: %+v", got)
+	}
+	if b, _ := json.Marshal(in); strings.Contains(string(b), "secret") {
+		t.Fatal("a token cache leaked into the install")
 	}
 }

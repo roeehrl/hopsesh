@@ -74,7 +74,7 @@ test("the details pane: a status line, one action row, the conversation and the 
   await expect(d.getByRole("button", { name: "Move", exact: true })).toBeFocused();
   // ⋯ holds the rest.
   await d.getByRole("button", { name: "More actions" }).click();
-  for (const name of ["Open a shell in its folder", /^(Reveal in Finder|Show in Explorer|Show in Files)/, "Copy resume command", "Copy session ID", "Rename…", "Open transcript"]) {
+  for (const name of ["Open a shell in its folder", /^(Reveal in Finder|Show in Explorer|Show in Files)/, "Copy resume command", "Copy hopsesh link", "Copy session ID", "Rename…", "Open transcript"]) {
     await expect(page.getByRole("menuitem", { name })).toBeEnabled();
   }
   await page.keyboard.press("Escape");
@@ -191,10 +191,10 @@ test("a session open in Claude reports unsupported exact opening instead of sile
   expect((await page.request.post(`/live?session=${id}&entrypoint=claude-desktop`)).ok()).toBeTruthy();
   await menu(page, "refresh");
   const r = row(page, "Find the codeword");
-  await expect(r.getByRole("button", { name: "Show in Claude app" })).toBeVisible({ timeout: 30_000 });
   await expect(r.locator(".pchip")).toContainText("Claude app");
   await r.click();
   const d = details(page);
+  await expect(d.getByRole("button", { name: "Show in Claude app" })).toBeVisible({ timeout: 30_000 });
   await expect(d.locator(".ins-status")).toContainText("in Claude app");
   await expect(d).not.toContainText("The app opens on its last view");
   await expect(d.getByText("Open in", { exact: true })).toBeVisible();
@@ -208,17 +208,74 @@ test("a session open in Claude reports unsupported exact opening instead of sile
   await expect(r).toHaveCount(0); // A desktop-app window is not a terminal tab.
 });
 
-test("a session open in a terminal is shown where it runs, never opened twice", async ({ page }) => {
+test("a running session says whether Remote Control reaches it, from the agent's own record", async ({ page }) => {
   const key = await row(page, "Find the codeword").getAttribute("data-key");
   const id = key!.split("\u0000")[1].split("/")[1];
-  expect((await page.request.post(`/live?session=${id}&entrypoint=cli`)).ok()).toBeTruthy();
+  expect((await page.request.post(`/live?session=${id}&entrypoint=claude-desktop&bridge=session_01W49ntRitSA2wFvjbENSNVP`)).ok()).toBeTruthy();
   await menu(page, "refresh");
   const r = row(page, "Find the codeword");
-  await expect(r.getByRole("button", { name: /^Show/ })).toBeVisible({ timeout: 30_000 });
-  await expect(r.locator(".pchip")).toHaveCount(1);
+  await expect(r.locator(".chip.rc-on")).toBeVisible({ timeout: 30_000 });
+  await expect(r.locator(".chip.rc-on")).toHaveAttribute("aria-label", "Remote Control is on: open its page");
   await r.click();
-  await expect(details(page).locator("#act-primary")).toHaveText(/^Show/);
-  await expect(details(page).locator(".ins-status")).toContainText(/^(Idle|Working) in /);
+  const line = details(page).locator(".rc-line");
+  await expect(line).toContainText("Remote Control — reach it from claude.ai or the Claude app");
+  await expect(line.getByRole("button", { name: "Open" })).toBeVisible();
+  // Disconnected: no chip on the row, and the details say how to turn it on.
+  expect((await page.request.post(`/live?session=${id}&entrypoint=claude-desktop&bridge=none`)).ok()).toBeTruthy();
+  await menu(page, "refresh");
+  await expect(r.locator(".chip.rc-on")).toHaveCount(0, { timeout: 30_000 });
+  await expect(line).toContainText("Remote Control is off — turn it on with the session's Remote Control switch in");
+  // A Claude Code that doesn't record it: nothing is claimed either way.
+  expect((await page.request.post(`/live?session=${id}&entrypoint=cli`)).ok()).toBeTruthy();
+  await menu(page, "refresh");
+  await expect(details(page).locator(".rc-line")).toHaveCount(0, { timeout: 30_000 });
+});
+
+test("an unidentified running window offers Resume in a place you choose, with a warning, never Show", async ({ page }) => {
+  const key = await row(page, "Find the codeword").getAttribute("data-key");
+  const id = key!.split("\u0000")[1].split("/")[1];
+  // The stand-in process may inherit a real terminal on a developer's Mac but has no
+  // identifiable window on CI. Every answer the window takes in says the latter: a later
+  // presence poll or scan must not bring the developer's terminal back.
+  const unidentified = { live: true, status: "idle", needs: false, app: "", places: [] };
+  const patch = (scan: any) => {
+    for (const g of scan?.groups || []) for (const e of g.entries || []) if (e.title === "Find the codeword") Object.assign(e, unidentified);
+  };
+  await page.routeWebSocket(/\/events$/, ws => {
+    const server = ws.connectToServer();
+    server.onMessage(message => {
+      const m = JSON.parse(String(message));
+      if (m.name !== "hopsesh:discovery") return ws.send(message);
+      patch(m.data);
+      ws.send(JSON.stringify(m));
+    });
+  });
+  await page.route("**/call", async route => {
+    const m = route.request().postDataJSON()?.m;
+    if (!["Presence", "InitialScan", "Scan", "RefreshHere", "CachedScan", "ScanSnapshot"].includes(m)) return route.continue();
+    // A reload or the test's end may cancel a request still being answered.
+    try {
+      const response = await route.fetch(), body = await response.json();
+      if (m === "Presence") { if (body.result?.entries?.[key!]) body.result.entries[key!] = unidentified; }
+      else patch(body.result);
+      await route.fulfill({ json: body });
+    } catch { /* cancelled */ }
+  });
+  expect((await page.request.post(`/live?session=${id}&entrypoint=cli`)).ok()).toBeTruthy();
+  await page.reload();
+  await expect(page.locator("#fresh")).toContainText("updated", { timeout: 30_000 });
+  await menu(page, "refresh");
+  const r = row(page, "Find the codeword");
+  await expect(r.locator(".pchip")).toHaveCount(0);
+  await r.click();
+  await expect(details(page)).toContainText("Its window could not be identified. If it is still open somewhere, close it there first");
+  await expect(details(page).locator("#act-primary")).toHaveText(/^Resume/);
+  await expect(details(page).getByRole("button", {name:/^Show/})).toHaveCount(0);
+  await details(page).locator("#act-chevron").click();
+  await expect(page.getByRole("menuitem", { name: /^Resume in / }).first()).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(details(page).locator(".ins-status")).toContainText(/^Idle/);
+  await page.unrouteAll({ behavior: "ignoreErrors" });
 });
 
 test("a session in a tab of the hopsesh Terminal: Show it, Move waits until it ends, and two places warn", async ({ page }) => {
@@ -228,9 +285,9 @@ test("a session in a tab of the hopsesh Terminal: Show it, Move waits until it e
     { id: "t9", kind: "session", machine, key, title: "Find the codeword · claude", state: "running", attention: true }), [machine, k]);
   const r = row(page, "Find the codeword");
   await expect(r.locator(".pchip")).toContainText("1 tab");
-  await expect(r.getByRole("button", { name: "Show in hopsesh Terminal" })).toBeVisible();
   await r.click();
   const d = details(page);
+  await expect(d.getByRole("button", { name: "Show in hopsesh Terminal" })).toBeVisible();
   await expect(d.locator("#act-primary")).toHaveText("Show in hopsesh Terminal");
   await expect(d.locator(".ins-status")).toContainText("Waiting for you in hopsesh Terminal");
   await expect(d.locator(".open-line")).toContainText("“Find the codeword · claude”");
@@ -273,12 +330,14 @@ test("one line of setup left, on All sessions only, closed for good with ✕", a
   const setup = page.getByRole("note", { name: "Finish setting up" });
   await expect(setup).toContainText(/Finish setting up \(\d of 3 done\):/);
   await expect(setup.getByRole("button", { name: "Add machines" })).toBeVisible();
-  await expect(page.locator(".notice")).toHaveCount(0); // no setup cards
+  await expect(page.locator(".notice:not([aria-label=\"Movement protection\"])")).toHaveCount(0); // no setup cards (the protection-health warning is separate)
   await sidebar(page).getByRole("button", { name: /^This (Mac|PC|computer)/ }).click();
   await expect(setup).toHaveCount(0);
   await sidebar(page).getByRole("button", { name: /All sessions/ }).click();
   await setup.getByRole("button", { name: "Install the skill" }).click();
-  await expect(page.getByRole("heading", { name: "Skill", exact: true })).toBeVisible();
+  // The skill is on this machine's page in Settings › Machines.
+  await expect(page.getByRole("heading", { name: "Machines", exact: true })).toBeVisible();
+  await expect(page.locator(".mdetail")).toContainText("The hopsesh skill");
   await menu(page, "sessions");
   await setup.getByRole("button", { name: "Close: don't show this again" }).click();
   await expect(setup).toHaveCount(0);
@@ -326,7 +385,8 @@ test("mod+Enter cannot bypass a disabled desktop action or run a different actio
   const id = key!.split("\u0000")[1].split("/")[1];
   expect((await page.request.post(`/live?session=${id}&entrypoint=claude-desktop`)).ok()).toBeTruthy();
   await menu(page, "refresh");
-  await expect(row(page, "Find the codeword").getByRole("button", { name: "Show in Claude app" })).toBeVisible({ timeout: 30_000 });
+  await row(page, "Find the codeword").click();
+  await expect(details(page).getByRole("button", { name: "Show in Claude app" })).toBeVisible({ timeout: 30_000 });
   await page.getByRole("button", { name: "Search sessions or run a command" }).click();
   const input = page.getByRole("combobox", { name: "Search sessions or run a command" });
   await input.fill("Find the codeword");

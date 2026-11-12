@@ -10,7 +10,7 @@ func TestCloneSeparatesMutableSettings(t *testing.T) {
 	c := Defaults()
 	c.Desktop.Previews = &off
 	c.Terminal.KeepTabs = &off
-	c.MovementNotices = &off
+	c.SyncCode = &off
 	c.Hosts = []Host{{Name: "studio", Destination: "studio", Allowed: true}}
 	c.FamilyNames = map[string]string{"family": "Before"}
 	c.Agents = map[string]Agent{"claude": {Place: PlaceHere}}
@@ -24,7 +24,7 @@ func TestCloneSeparatesMutableSettings(t *testing.T) {
 	}
 	*copy.Desktop.Previews = true
 	*copy.Terminal.KeepTabs = true
-	*copy.MovementNotices = true
+	*copy.SyncCode = true
 	copy.Hosts[0].Allowed = false
 	copy.FamilyNames["family"] = "After"
 	copy.Agents["claude"] = Agent{Disabled: true}

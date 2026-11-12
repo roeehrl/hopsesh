@@ -45,8 +45,6 @@ func (m *model) hopKeys(k string) (tea.Model, tea.Cmd) {
 	case "L":
 		m.ho.showLoss = !m.ho.showLoss
 		return m, nil
-	case "m":
-		m.ho.opts.Mark = !m.ho.opts.Mark
 	case "e":
 		if t == nil || !t.EnvNeeded || len(t.Envs) == 0 {
 			return m, nil
@@ -106,11 +104,7 @@ func (m *model) viewHopPlan(b *strings.Builder) {
 			b.WriteString("   · " + l + "\n")
 		}
 	}
-	mark := "off"
-	if p.Mark == move.MarkNow {
-		mark = "on"
-	}
-	keys := fmt.Sprintf("[m] mark the copy here: %s · [L] what stays", mark)
+	keys := "[L] what stays"
 	if len(p.Blockers) == 0 {
 		b.WriteString(dim.Render("\n  " + keys + "\n  y/enter: hand it on · esc: back\n"))
 	} else {
@@ -149,9 +143,6 @@ func (m *model) viewHopDone(b *strings.Builder) {
 		}
 		if h.Branch != "" {
 			fmt.Fprintf(b, "   branch  %s\n", h.Branch)
-		}
-		if h.MarkText != "" {
-			fmt.Fprintf(b, "   ↪ the copy here is marked “%s”\n", strings.TrimPrefix(h.MarkText, "↪ "))
 		}
 	}
 	for _, w := range m.result.Warnings {

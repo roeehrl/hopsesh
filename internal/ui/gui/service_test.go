@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -83,7 +84,7 @@ func TestWindowContinuesInAnotherAgent(t *testing.T) {
 	if !e.HereNewest || len(e.ContinueIn) != 1 || e.ContinueIn[0].ID != "codex" {
 		t.Fatalf("entry: %+v", e)
 	}
-	opts := OptsDTO{Mark: true, Fidelity: "history"}
+	opts := OptsDTO{Fidelity: "history"}
 	p, err := a.Plan(e.Machine, e.Key, "codex", opts)
 	if err != nil {
 		t.Fatal(err)
@@ -133,7 +134,7 @@ func TestWindowContinuesInAnotherAgent(t *testing.T) {
 	scan, _ = a.Scan()
 	e = findEntry(t, scan, "claude/"+sid)
 	if e.Status != "ended" {
-		t.Fatalf("undo must remove the mark too: %+v", e)
+		t.Fatalf("after undo the source is no longer moved on: %+v", e)
 	}
 	for _, g := range scan.Groups {
 		for _, x := range g.Entries {
@@ -145,14 +146,14 @@ func TestWindowContinuesInAnotherAgent(t *testing.T) {
 }
 
 // Continue in Codex, work there, and continue back: the Claude Code original gets only the
-// new work, keeps its title, and the Codex thread is marked in Codex's own list.
+// new work, keeps its title, and the Codex thread shows as moved on in hopsesh's list.
 func TestWindowRoundTrip(t *testing.T) {
 	home(t)
 	a := NewApp(all.Registry())
 	t.Cleanup(func() { _ = a.core.Catalog.Close() })
 	scan, _ := a.Scan()
 	e := findEntry(t, scan, "claude/"+sid)
-	if _, err := a.Plan(e.Machine, e.Key, "codex", OptsDTO{Mark: true}); err != nil {
+	if _, err := a.Plan(e.Machine, e.Key, "codex", OptsDTO{}); err != nil {
 		t.Fatal(err)
 	}
 	there, err := a.Apply()
@@ -184,32 +185,36 @@ func TestWindowRoundTrip(t *testing.T) {
 			}
 		}
 	}
-	if !strings.HasPrefix(cx.Title, there.Title) || cx.LastPrompt != "Now in uppercase" {
-		t.Fatalf("the Codex thread has the session's title and its real last prompt: %+v", cx)
+	if cx.Title != e.Title || there.Title != e.Title || cx.LastPrompt != "Now in uppercase" {
+		t.Fatalf("the Codex thread has the session's own title and its real last prompt: %q %+v", e.Title, cx)
 	}
-	p, err := a.Plan(cx.Machine, cx.Key, "claude", OptsDTO{Mark: true})
+	beforeReturn, err := os.ReadFile(e.Path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Continue.Relation != "new" || p.Continue.AppendTo != "" {
+	p, err := a.Plan(cx.Machine, cx.Key, "claude", OptsDTO{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Continue.Relation != "append" || p.Continue.AppendTo != e.Title {
 		t.Fatalf("back: %+v", p.Continue)
 	}
 	back, err := a.Apply()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(back.Command, sid) {
+	if !strings.Contains(back.Command, sid) {
 		t.Fatalf("done: %+v", back)
 	}
 	scan, _ = a.Scan()
 	original, readErr := os.ReadFile(e.Path)
-	if readErr != nil || strings.Contains(string(original), "Now in uppercase") {
-		t.Fatal("portable return modified protected original", readErr)
+	if readErr != nil || !bytes.HasPrefix(original, beforeReturn) || !strings.Contains(string(original[len(beforeReturn):]), "Now in uppercase") {
+		t.Fatal("portable return must preserve original records and append the new work", readErr)
 	}
 	var cl EntryDTO
 	for _, group := range scan.Groups {
 		for _, entry := range group.Entries {
-			if entry.Agent == "claude" && entry.Session != sid && entry.LastPrompt == "Now in uppercase" {
+			if entry.Agent == "claude" && entry.Session == sid && entry.LastPrompt == "Now in uppercase" {
 				cl = entry
 			}
 		}
@@ -217,12 +222,15 @@ func TestWindowRoundTrip(t *testing.T) {
 	if cl.LastPrompt != "Now in uppercase" || !cl.HereNewest {
 		t.Fatalf("the original is newest again, without hopsesh's briefing as its prompt: %+v", cl)
 	}
-	var marked bool
+	var movedOn bool
 	for _, c := range cl.Copies {
-		marked = marked || c.Agent == "codex" && c.Mark != nil && c.Mark.AgentName == "Claude Code"
+		movedOn = movedOn || c.Agent == "codex" && c.LeftBehind
 	}
-	if !marked {
-		t.Fatalf("the Codex thread is marked as continued in Claude Code: %+v", cl.Copies)
+	if !movedOn {
+		t.Fatalf("lineage shows the Codex thread moved on: %+v", cl.Copies)
+	}
+	if cl.Title != e.Title {
+		t.Fatalf("the original keeps its title: %q, was %q", cl.Title, e.Title)
 	}
 	if len(cl.History) < 2 || !strings.HasPrefix(cl.History[1].What, "Continued in Codex") {
 		t.Fatalf("history: %+v", cl.History)
@@ -410,14 +418,14 @@ func TestWindowSendsToAnotherMachine(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := findEntry(t, scan, "claude/"+sid).Key
-	if _, err := a.PushPlan(key, "box", "", OptsDTO{Mark: true, TargetDir: boxRepo}); err != nil {
+	if _, err := a.PushPlan(key, "box", "", OptsDTO{TargetDir: boxRepo}); err != nil {
 		t.Fatal(err)
 	}
 	a.ClosePlan() // the window closed the plan: its connection ends
 	if _, err := a.PushApply(); err == nil {
 		t.Fatal("a closed plan cannot be applied")
 	}
-	p, err := a.PushPlan(key, "box", "", OptsDTO{Mark: true, TargetDir: boxRepo})
+	p, err := a.PushPlan(key, "box", "", OptsDTO{TargetDir: boxRepo})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -438,7 +446,7 @@ func TestWindowSendsToAnotherMachine(t *testing.T) {
 	}
 	scan, _ = a.Scan()
 	if e := findEntry(t, scan, "claude/"+sid); !strings.Contains(e.Status, "box") {
-		t.Fatalf("the copy here is marked: %+v", e.Status)
+		t.Fatalf("the copy here shows where it went: %+v", e.Status)
 	}
 	if err := a.Undo(d.Journal, false); err != nil {
 		t.Fatal(err)
@@ -448,7 +456,7 @@ func TestWindowSendsToAnotherMachine(t *testing.T) {
 	}
 	scan, _ = a.Scan()
 	if e := findEntry(t, scan, "claude/"+sid); e.Status != "ended" {
-		t.Fatalf("undo removes the mark here: %+v", e.Status)
+		t.Fatalf("after undo the copy here is no longer moved on: %+v", e.Status)
 	}
 }
 
@@ -509,7 +517,7 @@ func TestWindowAgentIcons(t *testing.T) {
 		t.Fatalf("the installed app's icon first: %.40q / %.40q", got["claude"], got["codex"])
 	}
 	s := a.Settings()
-	if err := a.SaveSettings(SettingsInput{Layout: s.Layout, MarkMoved: s.MarkMoved, SyncCode: s.SyncCode, UpdateChk: "off", AppIcons: false}); err != nil {
+	if err := a.SaveSettings(SettingsInput{Layout: s.Layout, SyncCode: s.SyncCode, UpdateChk: "off", AppIcons: false}); err != nil {
 		t.Fatal(err)
 	}
 	if got := icons(); !strings.HasPrefix(got["claude"], "data:image/svg+xml") {

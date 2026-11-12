@@ -13,6 +13,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/repos"
 	"github.com/roeehrl/hopsesh/internal/core/transport"
 	"github.com/roeehrl/hopsesh/sdk/agent"
+	"github.com/roeehrl/hopsesh/sdk/ir"
 )
 
 // Ref names a session: [machine:][agent/]<id, id prefix or title>.
@@ -143,15 +144,23 @@ func (inv *Inventory) copiesOf(it Item) []Entry {
 // DefaultOptions are move options from the configuration.
 func (a *App) DefaultOptions() move.Options {
 	return move.Options{
-		ReposDir: a.Cfg.ReposDir, GHQLayout: a.Cfg.Layout == "ghq", Mark: a.Cfg.MarkMovedOn(),
+		ReposDir: a.Cfg.ReposDir, GHQLayout: a.Cfg.Layout == "ghq",
 		SyncCode: a.Cfg.SyncCodeOn(), Push: a.Cfg.PushSource, Notify: a.Cfg.MovementNoticesOn(),
+		Limits: a.Cfg.History.Limits(),
 	}
 }
 
 // Plan works out how a session comes here, in the same agent or (target set) another. A
 // cloud session is brought from its cloud (a fetch).
 func (a *App) Plan(ctx context.Context, inv *Inventory, e Entry, target agent.ID, opt move.Options) (*move.Plan, move.Input, error) {
+	if e.Cached {
+		// A saved row is for browsing; its lineage is an outline. Plan from a fresh read.
+		return nil, move.Input{}, fmt.Errorf("this session on %s was not read just now; refresh %s and try again", e.Machine, e.Machine)
+	}
 	if e.LineageError != "" && (e.CanArchiveLineage || !opt.Fork) {
+		if !e.CanArchiveLineage {
+			return nil, move.Input{}, fmt.Errorf("cannot transfer until its ancestry can be verified: %s; if the parent conversation is archived, unarchive it and refresh", e.LineageError)
+		}
 		return nil, move.Input{}, fmt.Errorf("cannot transfer with unsupported or damaged lineage: %s; archive the sidecar explicitly to start a new family", e.LineageError)
 	}
 	if e.Location.IsCloud() {
@@ -192,6 +201,15 @@ func (a *App) Plan(ctx context.Context, inv *Inventory, e Entry, target agent.ID
 		Worktrees: a.Reg.Worktrees(),
 		Push:      pushFunc(src),
 		GitFetch:  gitFetchFunc(src),
+		Guard:     a.Guard(ctx, src, e.Session.Key),
+	}
+	if g := e.Git; g != nil && !g.IsRepo && len(g.Children) > 0 && src.Name != here.Name && opt.TargetDir == "" {
+		// A folder of repositories: read each one there, as the session's own checkout is.
+		states, err := src.host.GitProbe(ctx, g.Children, a.Reg.Worktrees())
+		if err != nil {
+			in.Git, in.GitErr = nil, fmt.Sprintf("reading the repositories in %s: %v", e.Session.CWD, err)
+		}
+		in.Workspace = states
 	}
 	related := map[agent.SessionKey]bool{e.Session.Key: true}
 	if e.Lineage != nil {
@@ -202,9 +220,24 @@ func (a *App) Plan(ctx context.Context, inv *Inventory, e Entry, target agent.ID
 			related[r.Key] = true
 		}
 	}
+	var destinationEntries []Entry
 	for _, c := range inv.Entries {
 		if c.Machine == here.Name && c.Agent == target && c.Session.Key.Profile == tin.ProfileID() && related[c.Session.Key] {
-			in.Copies = append(in.Copies, move.Copy{Summary: c.Session, Live: c.Live, Lineage: c.Lineage})
+			destinationEntries = append(destinationEntries, c)
+		}
+	}
+	if !opt.Fork && !opt.NewReplica {
+		if err := recheckDestinationLive(ctx, in.Target, destinationEntries, opt.TargetSession); err != nil {
+			return nil, move.Input{}, err
+		}
+	}
+	// These are private entry copies: browsing publications keep their observation,
+	// while both the append gate and protected-original handling use fresh evidence.
+	returnInventory := &Inventory{}
+	for _, c := range destinationEntries {
+		in.Copies = append(in.Copies, move.Copy{Summary: c.Session, Live: c.Live, Lineage: c.Lineage})
+		if opt.TargetSession == "" || c.Session.Key.String() == opt.TargetSession || string(c.Session.Key.Session) == opt.TargetSession {
+			returnInventory.Entries = append(returnInventory.Entries, c)
 		}
 	}
 	if target == e.Agent {
@@ -231,8 +264,63 @@ func (a *App) Plan(ctx context.Context, inv *Inventory, e Entry, target agent.ID
 			opt.Via = move.ViaImport
 		}
 	}
+	if opt.OpenBlockedOriginal == "" {
+		opt.OpenBlockedOriginal = a.openBlockedOriginal(ctx, returnInventory, e)
+	}
 	p, err := move.Build(ctx, in, opt)
 	return p, in, err
+}
+
+// recheckDestinationLive probes only related local copies eligible for this plan.
+// A complete browsing inventory can still predate a close or a restart.
+func recheckDestinationLive(ctx context.Context, target move.Side, entries []Entry, selected string) error {
+	if !target.Machine.Local || target.Machine.IsSnapshot() {
+		return nil
+	}
+	detector, ok := target.Module.(agent.LiveDetector)
+	if !ok {
+		return nil
+	}
+	var ids []agent.SessionID
+	seen := map[agent.SessionID]bool{}
+	for _, e := range entries {
+		key := e.Session.Key
+		if selected != "" && key.String() != selected && string(key.Session) != selected {
+			continue
+		}
+		if !seen[key.Session] {
+			ids = append(ids, key.Session)
+			seen[key.Session] = true
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	h, err := target.Machine.For(ctx, target.Module.Spec(), target.Install, nil)
+	if err != nil {
+		return fmt.Errorf("cannot recheck destination activity: %w", err)
+	}
+	live, err := detector.Live(ctx, h, target.Install, ids)
+	if err != nil {
+		return fmt.Errorf("cannot recheck destination activity: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if live[id].State != agent.Live && live[id].State != agent.Ended {
+			return fmt.Errorf("cannot verify whether destination session %s is open; check again before returning", id)
+		}
+	}
+	for i := range entries {
+		if seen[entries[i].Session.Key.Session] {
+			entries[i].Live = live[entries[i].Session.Key.Session]
+		}
+	}
+	return nil
 }
 
 func (a *App) account(ctx context.Context, m *Machine, mod agent.Module, in agent.Install) *agent.Account {
@@ -248,14 +336,19 @@ func (a *App) account(ctx context.Context, m *Machine, mod agent.Module, in agen
 		return nil
 	}
 	acct, err := ap.Account(ctx, h, in)
-	if err != nil {
-		return nil
+	if err != nil || !acct.LoggedIn && m.host.SignInsHidden() {
+		return nil // unknown: the last known sign-in stands in
 	}
 	return &acct
 }
 
 // Apply carries out a plan.
-func (a *App) Apply(ctx context.Context, p *move.Plan, in move.Input, progress func(string)) (*move.Result, error) {
+func (a *App) Apply(ctx context.Context, p *move.Plan, in move.Input, progress func(string)) (res *move.Result, err error) {
+	defer func() {
+		if err == nil && res != nil {
+			a.carryOwners(in, res)
+		}
+	}()
 	if p.Kind == move.KindHop {
 		return a.applyHop(ctx, p, progress)
 	}
@@ -266,6 +359,45 @@ func (a *App) Apply(ctx context.Context, p *move.Plan, in move.Input, progress f
 				return nil, err
 			}
 		}
+	}
+	if p.Continue != nil && p.Continue.AppendTo != nil && p.Options.OpenBlockedOriginal == p.Continue.AppendTo.Key.String() {
+		if len(p.Blockers) > 0 {
+			return nil, fmt.Errorf("%w: %s", move.ErrBlocked, strings.Join(p.Blockers, "; "))
+		}
+		if err := move.ValidateSource(ctx, p, in); err != nil {
+			return nil, err
+		}
+		// Blocked clients still append diagnostics using their old parent UUID.
+		// Close this exact native client before writing, then re-read the destination
+		// because exiting can flush metadata. No conversation is archived.
+		if err := a.checkBlockedOriginal(p); err != nil {
+			return nil, err
+		}
+		if err := move.EndDestination(ctx, p, in); err != nil {
+			return nil, err
+		}
+		for i := range in.Copies {
+			if in.Copies[i].Summary.Key == p.Continue.AppendTo.Key {
+				in.Copies[i].Live = agent.LiveInfo{State: agent.Ended}
+			}
+		}
+		opt := p.Options
+		opt.OpenBlockedOriginal = ""
+		opt.OperationID = p.OperationID
+		fresh, err := move.Build(ctx, in, opt)
+		if err != nil {
+			return nil, err
+		}
+		if fresh.Kind != p.Kind || fresh.Placement.Key != p.Placement.Key || fresh.Continue == nil || fresh.Continue.Relation != move.RelationAppend || len(fresh.Blockers) > 0 {
+			return nil, fmt.Errorf("return destination changed while closing its client; review a fresh plan")
+		}
+		if fresh.SourceCursor() != p.SourceCursor() {
+			return nil, fmt.Errorf("source changed while closing the original; review a fresh plan")
+		}
+		// Keep the rebuilt cursor and cleared teardown option in the caller's plan.
+		// Retrying an interrupted write must reach move.Apply's operation recovery,
+		// rather than checking the destination against the pre-close cursor again.
+		*p = *fresh
 	}
 	return move.Apply(ctx, p, in, move.Env{StateDir: a.StateDir, Audit: a.Audit, Progress: progress, Step: a.Steps})
 }
@@ -376,4 +508,10 @@ func windowsBundle(h *host.Machine, dir string) func(context.Context, string) (s
 		f.Close()
 		return f.Name(), func() { os.Remove(f.Name()) }, nil
 	}
+}
+
+// limited scopes the configured history limits to work outside a move plan (movement
+// reads, pending labels, native fork checks).
+func (a *App) limited(ctx context.Context) context.Context {
+	return ir.WithLimits(ctx, a.Cfg.History.Limits())
 }

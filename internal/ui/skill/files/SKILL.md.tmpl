@@ -44,8 +44,13 @@ It moves a session here in the same agent, or continues it in another agent. Run
   `--no-git` (faster). Remote machines can take a minute; use a generous timeout.
 - The JSON has `machines` (status, hint, the agents found) and `groups` (one per repository).
   Each item's `entry` has `machine`, `agent`, `session` (`key`, `title`, `cwd`, `lastActive`,
-  `lastPrompt`, `mark`), `live` and `git`. `copies` lists every place and agent that has the
-  session when it moved before; the entry is the newest copy.
+  `lastPrompt`), `live`, `git` and, for a copy that was moved on, `departure` (where it went,
+  from lineage; hopsesh never changes titles). `copies` lists every place and agent that has
+  the session when it moved before; the entry is the newest copy.
+- After a move, hopsesh usually **blocks the original**: prompts there are refused with a
+  "Blocked by hopsesh" reason until the session moves back. If you run in such a session,
+  tell the user where the moved copy is. Never run `{{.Bin}} unblock` yourself: only the
+  user decides to continue an original, because the copies then diverge.
 - A session reference is `[<machine>:][<agent>/]<id-prefix-or-title>`. Without a machine,
   hopsesh takes the newest copy: that is how a session comes back after working on it elsewhere.
 - To act on the session you are running in, find it in `{{.Bin}} ls --host <this machine> --json`:
@@ -55,7 +60,7 @@ It moves a session here in the same agent, or continues it in another agent. Run
 
 1. `{{.Bin}} plan <ref> --json`, adding `--in <{{.AgentIDs}}>` to continue in another agent.
    Summarise: where it comes from, the folder it continues in, the repository action
-   (`repo.action`: `use`, `clone`, `needs-clone`), `sync` (code), `mark` (the copy left behind),
+   (`repo.action`: `use`, `clone`, `needs-clone`), `sync` (code),
    `warnings` and `blockers`. For another agent also `continue.relation` (`new`, or `append`
    when only the new work goes to an earlier copy there) and `continue.report.summary` (what
    does not carry over, such as hidden reasoning).
@@ -64,8 +69,10 @@ It moves a session here in the same agent, or continues it in another agent. Run
    - the session is open here: `--stop-local`;
    - both copies changed (`conflict`): `--keep-both`, or for the same agent `--replace`. Never
      pick for the user.
+   - the session's own history changed since hopsesh moved it (`historyChanged`, e.g. it was
+     rewound): `--keep-both` takes it as a separate conversation; ask first.
 3. After a clear yes: `{{.Bin}} pull <ref> --json --yes` with the same flags.
-4. Report `result.syncNote`, `result.mark`, any `pushError`, the `command`, and that
+4. Report `result.syncNote`, any `pushError`, the `command`, and that
    `{{.Bin}} undo <id>` reverses it.
 
 To send a session from *this* machine to another one instead (the user is leaving this
@@ -76,6 +83,32 @@ receives sessions; if it refuses, tell the user, and do not change its settings.
 When continuing *this* session in another agent, you may first write a short handoff note
 (done, open plan, next step) to a file and pass `--note-file <path>`; it goes into the
 briefing the other agent reads.
+
+## Check what hopsesh can do on a machine
+
+`{{.Bin}} hosts status --json` lists every machine's checks (`hopsesh`, `receiving`,
+`login`, `cli`, `copies` (every hopsesh there one version; `installs` lists them), and each
+agent folder's `hook` and `skill`), each with a `state` (ok, warn,
+error, off, unknown), a `reason`, and a `fix` when one exists. When a move's plan says the
+original can't be blocked (`cannotProtect`), these say why; tell the user the fix (an
+update is `hopsesh hosts setup <machine>`, which is theirs to run).
+
+## Continue a session in another folder on its machine
+
+`{{.Bin}} cd <ref> <dir>` keeps the session itself (same id, every record as the agent wrote
+it) and continues it in another folder on its machine: another worktree or clone of its
+repository. For a session on another machine (`studio:<id>`), `<dir>` is a folder there and
+hopsesh there makes the change; it must be set up there and receive sessions.
+`{{.Bin}} pull <ref> --to <dir>` for a session already here, in its own agent, does the same.
+Plan with `{{.Bin}} cd <ref> <dir> --dry-run --json` and show `plan.from`, `plan.to`,
+`plan.warnings` and `plan.blockers`; after a yes, run `{{.Bin}} cd <ref> <dir> --json --yes`.
+A folder in another repository is blocked unless the user asks for `--other-repo`. When
+`open` is true and `inSession` is set (Claude Code's `/cd <dir>`), the change happens inside
+the open session: tell the user to type `inSession` there, and run the command again only if
+they want hopsesh to wait and check (`--wait`). If you run in that session yourself, you
+cannot type it: `/cd` is the user's command. When the session is open and `inSession` is
+empty (Codex: its own /cd starts a new thread), the user quits it first or allows
+`--stop-local`.
 
 ## Hand a session off to an agent's cloud
 
@@ -91,7 +124,7 @@ so). `{{.Bin}} clouds --json` lists the clouds and their state.
    lost: `handoff.stays`, `handoff.loss`), the code (`handoff.reuse` means the session's own
    branch goes as it is; otherwise `handoff.branch` is a new branch with
    `handoff.unpushed` commits and `handoff.tracked` files), what stays on the machine
-   (`handoff.withheld`, `handoff.offered`), `handoff.markTitle`, `handoff.checks`,
+   (`handoff.withheld`, `handoff.offered`), `handoff.checks`,
    `warnings` and `blockers`, and that it uses the user's plan allowance. Offer to show
    `handoff.brief`.
 2. Resolve blockers by asking: the cloud is not allowed (the user runs
@@ -113,7 +146,7 @@ so). `{{.Bin}} clouds --json` lists the clouds and their state.
    `{{.Bin}} handoff <ref> --to claude-cloud` with the same flags (or the app's Hand off ▸),
    and let them answer Claude Code there.
 4. Report `handoff.url`, `handoff.branch`, what stayed (`handoff.stayed`), and that
-   `{{.Bin}} undo <result.journal>` deletes the branch and the mark but leaves the cloud
+   `{{.Bin}} undo <result.journal>` deletes the branch but leaves the cloud
    session (or Codex cloud task) to archive on the web. If `error` is set, report
    `handoff.message` and the failed step.
 

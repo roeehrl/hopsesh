@@ -6,6 +6,8 @@
 //	B         ring the bell (the tab waits for the user)
 //	L         print an https link
 //	O         print an OSC 8 link to a vscode:// address (which must stay blocked)
+//	W         work: redraw a status line every 250 ms, as an agent does through a turn
+//	D         done: stop working
 //	0-9       exit with that code
 //	Return    a new line
 //	anything else is echoed back as "typed=<text>" once Return comes
@@ -101,8 +103,25 @@ func Main() int {
 	}
 	note("termfake: ready")
 	var line strings.Builder
+	var stop chan struct{}
 	for k := range keys {
 		switch {
+		case k == 'W' && stop == nil:
+			stop = make(chan struct{})
+			go func(stop chan struct{}) {
+				for i := 0; ; i++ {
+					select {
+					case <-stop:
+						return
+					case <-time.After(250 * time.Millisecond):
+						fmt.Printf("\r\x1b[Kworking %c", `|/-\`[i%4])
+					}
+				}
+			}(stop)
+		case k == 'D' && stop != nil:
+			close(stop)
+			stop = nil
+			say("\r\x1b[Kdone")
 		case k == 'A':
 			fmt.Print("\x1b[?1049h\x1b[2J\x1b[3;9Halternate-screen-proof\x1b[5;12H")
 		case k == 'N':

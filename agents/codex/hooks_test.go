@@ -12,7 +12,7 @@ func TestMovementHooksContractAndGate(t *testing.T) {
 	h := newHost(t)
 	m := New()
 	in, _ := m.Detect(context.Background(), h)
-	in.Version = "0.160.0"
+	in.Version = "0.129.0"
 	in.Profile = &agent.RuntimeProfile{ID: "exact-profile"}
 	hi := m.MovementHooks(h, in, "/opt/hopsesh")
 	if hi.Reason != "" || hi.File.Path != "/home/u/.codex/hooks.json" {
@@ -25,11 +25,21 @@ func TestMovementHooksContractAndGate(t *testing.T) {
 	if !strings.Contains(string(b), "--profile 'exact-profile'") || !strings.Contains(string(b), "UserPromptSubmit") || !strings.Contains(string(b), "SessionStart") || !strings.Contains(string(b), "my hooks") {
 		t.Fatalf("%s", b)
 	}
-	for _, v := range []string{"", "0.159.9", "0.160.0-alpha.1", "1.0.0"} {
+	for _, v := range []string{"", "0.128.9", "0.129.0-alpha.1", "1.0.0", "0.129"} {
 		in.Version = v
 		hi = m.MovementHooks(h, in, "/opt/hopsesh")
-		if hi.Reason == "" || hi.File == nil {
+		if hi.Reason == "" || hi.File == nil || !strings.HasPrefix(hi.Reason, "needs Codex 0.129.0 or newer") {
 			t.Fatalf("gate %s: %+v", v, hi)
+		}
+	}
+	in.Version = "0.120.1"
+	if hi = m.MovementHooks(h, in, "/opt/hopsesh"); hi.Reason != "needs Codex 0.129.0 or newer; found 0.120.1" {
+		t.Fatal(hi.Reason)
+	}
+	for _, v := range []string{"0.129.0", "0.153.2", "0.162.0-alpha.17.2"} { // the app's bundled runtime is a pre-release
+		in.Version = v
+		if hi = m.MovementHooks(h, in, "/opt/hopsesh"); hi.Reason != "" {
+			t.Fatalf("gate %s: %s", v, hi.Reason)
 		}
 	}
 }
@@ -43,7 +53,7 @@ func TestMovementHooksWindowsAndDisabledFeatures(t *testing.T) {
 	fh := newHost(t)
 	m := New()
 	in, _ := m.Detect(context.Background(), fh)
-	in.Version = "0.160.0"
+	in.Version = "0.129.0"
 	for _, cfg := range []string{"[features]\nhooks = false\n", "[features]\ncodex_hooks = false\n", "allow_managed_hooks_only = true\n", "profile = 'work'\n[features]\nhooks = true\n[profiles.work.features]\nhooks = false\n"} {
 		fh.Put(in.Root(home)+"/config.toml", []byte(cfg), time.Time{})
 		hi := m.MovementHooks(fh, in, "/opt/hopsesh")

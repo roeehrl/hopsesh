@@ -140,6 +140,12 @@ Section "hopsesh"
     SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
   ${EndIf}
 
+  ; hopsesh:// links open the session in hopsesh (another app, such as MyCNC, links to it).
+  WriteRegStr HKCU "Software\Classes\hopsesh" "" "URL:hopsesh"
+  WriteRegStr HKCU "Software\Classes\hopsesh" "URL Protocol" ""
+  WriteRegStr HKCU "Software\Classes\hopsesh\DefaultIcon" "" "$INSTDIR\hopsesh-app.exe,0"
+  WriteRegStr HKCU "Software\Classes\hopsesh\shell\open\command" "" '"$INSTDIR\hopsesh-app.exe" "%1"'
+
   WriteRegStr HKCU "${UNINST_KEY}" "DisplayName" "hopsesh"
   WriteRegStr HKCU "${UNINST_KEY}" "DisplayVersion" "${VERSION}"
   WriteRegStr HKCU "${UNINST_KEY}" "Publisher" "hopsesh"
@@ -187,5 +193,6 @@ Section "Uninstall"
   SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
 
   DeleteRegKey HKCU "${UNINST_KEY}"
+  DeleteRegKey HKCU "Software\Classes\hopsesh"
   ; Settings and session history stay (%APPDATA%\hopsesh, %LOCALAPPDATA%\hopsesh).
 SectionEnd

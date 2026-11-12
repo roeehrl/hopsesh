@@ -50,7 +50,7 @@ test("the hand-off sheet: briefing, branch, what stays, options; done, then undo
   await expect(sheet.getByRole("heading", { name: "Hand off “Find the codeword” to Claude Code cloud" })).toBeVisible({ timeout: 30_000 });
   await expect(sheet.getByLabel("What changes")).toContainText("+ 1 Claude Code cloud session");
   await expect(sheet.getByLabel("What changes")).toContainText("+ 1 branch on github.com");
-  await expect(sheet.getByLabel("What changes")).toContainText("~ this session marked");
+  await expect(sheet.getByLabel("What changes")).not.toContainText("marked");
   await expect(sheet).toContainText("The cloud agent receives a briefing, not this conversation. Tool calls and hidden reasoning stay here.");
   const brief = sheet.getByLabel("Briefing");
   await expect(brief).toHaveValue(/^\[hopsesh\] This task continues a Claude Code session/);
@@ -65,7 +65,7 @@ test("the hand-off sheet: briefing, branch, what stays, options; done, then undo
   const history = sheet.getByRole("checkbox", { name: /Also commit the conversation as \.hopsesh\/handoff\.md/ });
   await expect(history).not.toBeChecked();
   await expect(sheet).toContainText("hopsesh can't tell whether github.com/example/demo is public. Anyone who can see the branch could read this file.");
-  await expect(sheet.getByRole("checkbox", { name: "Mark this session “continued in Claude Code cloud”" })).toBeChecked();
+  await expect(sheet).not.toContainText("Mark this session");
   await expect(sheet).toContainText("Cloud sessions use your plan's allowance.");
   await expect(sheet.locator("#ho-terminal")).toContainText("Claude Code starts the session in a terminal: it runs claude in hopsesh's hand-off folder for this repository");
   await expect(sheet.locator("#ho-terminal")).toContainText("handoff/github.com/example/demo");
@@ -82,7 +82,7 @@ test("the hand-off sheet: briefing, branch, what stays, options; done, then undo
   await expect(page.getByRole("button", { name: /^hopsesh\/handoff\// })).toBeVisible();
   await expect(page.locator(".page")).toContainText("Stayed on this");
   await expect(page.locator(".page")).toContainText(".env, certs/dev.pem");
-  await expect(page.locator(".page")).toContainText("The session here is marked “continued in Claude Code cloud”");
+  await expect(page.locator(".page")).not.toContainText("marked");
   await expect(page.getByRole("note")).toHaveText("When it finishes: Clouds → Claude Code cloud → Bring here");
   // No cloud takes a follow-up from hopsesh: there is no button, and Claude Code's cloud
   // says where to write to the session instead.
@@ -92,7 +92,7 @@ test("the hand-off sheet: briefing, branch, what stays, options; done, then undo
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   const dlg = page.locator("#dlg");
   await expect(dlg.getByRole("heading", { name: "Undo the hand-off?" })).toBeVisible();
-  await expect(dlg).toContainText(/This deletes the branch hopsesh\/handoff\/\d{8}-0b6c6a8e and the mark on the session here\./);
+  await expect(dlg).toContainText(/This deletes the branch hopsesh\/handoff\/\d{8}-0b6c6a8e\./);
   await expect(dlg).toContainText("The session stays in Claude Code on the web; archive it there if you want it gone.");
   await dlg.getByRole("button", { name: "Undo hand-off" }).click();
   await expect(page.locator("#toast")).toContainText("Undone", { timeout: 30_000 });

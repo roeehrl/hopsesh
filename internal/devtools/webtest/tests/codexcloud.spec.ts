@@ -44,7 +44,7 @@ test("the hand-off sheet asks for a Codex cloud environment; the done screen nam
   await expect(sheet.locator("#ho-env-note")).toHaveText("Pick a Codex cloud environment for github.com/example/demo. If you have none, open codex cloud once to create one.");
   await expect(sheet.getByRole("button", { name: /^Hand off/ })).toBeDisabled();
   await expect(sheet).toContainText("Cloud tasks use your plan's allowance.");
-  await expect(sheet.getByRole("checkbox", { name: "Mark this session “continued in Codex cloud”" })).toBeChecked();
+  await expect(sheet).not.toContainText("Mark this session");
 
   await env.selectOption({ label: "acme-api (used by 1 of your recent tasks)" });
   await expect(sheet.locator("#ho-env-note")).toHaveCount(0, { timeout: 30_000 });
@@ -59,13 +59,13 @@ test("the hand-off sheet asks for a Codex cloud environment; the done screen nam
   await expect(page.getByRole("button", { name: "Copy link" })).toBeVisible();
   await expect(page.locator(".page")).toContainText("Environment acme-api");
   await expect(page.getByRole("button", { name: /^hopsesh\/handoff\// })).toBeVisible();
-  await expect(page.locator(".page")).toContainText("The session here is marked “continued in Codex cloud”");
+  await expect(page.locator(".page")).not.toContainText("marked");
   await expect(page.getByRole("note")).toHaveText("When it finishes: Clouds → Codex cloud → Bring here");
   await expect(page.getByRole("button", { name: "Send a follow-up…" })).toHaveCount(0);
 
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   const dlg = page.locator("#dlg");
-  await expect(dlg).toContainText(/This deletes the branch hopsesh\/handoff\/\d{8}-0b6c6a8e and the mark on the session here\./);
+  await expect(dlg).toContainText(/This deletes the branch hopsesh\/handoff\/\d{8}-0b6c6a8e\./);
   await expect(dlg).toContainText("The task stays in your Codex cloud list; archive it there if you want it gone.");
   await dlg.getByRole("button", { name: "Undo hand-off" }).click();
   await expect(page.locator("#toast")).toContainText("Undone", { timeout: 30_000 });
@@ -133,8 +133,9 @@ test("a Codex cloud task comes back: its code committed on a branch, a Codex ses
 test("Machines: the Codex cloud card sets each repository's environment", async ({ page }) => {
   await codexTask(page);
   await turnOnCodex(page);
-  await menu(page, "machines");
-  await expect(page.getByRole("heading", { name: "Machines", exact: true })).toBeVisible();
+  await menu(page, "settings");
+  await page.getByRole("tab", { name: "Clouds", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Clouds", exact: true })).toBeVisible();
   const card = page.locator(".cloud-card", { has: page.getByRole("heading", { name: "Codex cloud" }) });
   await expect(card).toContainText("a hand-off branch");
   await expect(card).toContainText("GitHub only");

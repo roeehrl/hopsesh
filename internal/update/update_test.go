@@ -242,3 +242,14 @@ func TestDownloadVerifies(t *testing.T) {
 		t.Fatal("checksums.txt without a valid signature must be refused")
 	}
 }
+
+func TestSystemPath(t *testing.T) {
+	for p, want := range map[string]bool{
+		"/usr/bin/hopsesh": true, "/bin/hopsesh": true, "/usr/local/bin/hopsesh": false,
+		"/home/sam/.local/bin/hopsesh": false, "/opt/hopsesh/hopsesh": false,
+	} {
+		if systemPath(p) != want {
+			t.Errorf("%s: %v", p, !want)
+		}
+	}
+}

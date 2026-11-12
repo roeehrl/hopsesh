@@ -70,7 +70,7 @@ func TestCloudRows(t *testing.T) {
 // triples and OS-pair jobs use the same model and receipt assertions.
 func TestMovementRows(t *testing.T) {
 	rows := pairwise(1)
-	for _, op := range []string{"roundtrip", "quiet-roundtrip", "fork"} {
+	for _, op := range []string{"roundtrip", "quiet-roundtrip", "new-session"} {
 		for _, agents := range []string{"claude>claude", "codex>codex", "claude>codex", "codex>claude"} {
 			found := false
 			for _, r := range rows {

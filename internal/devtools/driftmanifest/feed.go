@@ -48,15 +48,8 @@ func printFeed(w io.Writer, path, since string) error {
 	if err != nil {
 		return fmt.Errorf("since: %w", err)
 	}
-	b, err := os.ReadFile(path)
+	d, err := readFeed(path)
 	if err != nil {
-		return err
-	}
-	var d feedDoc
-	dec := xml.NewDecoder(strings.NewReader(string(b)))
-	dec.Strict = false
-	dec.Entity = xml.HTMLEntity
-	if err := dec.Decode(&d); err != nil {
 		return err
 	}
 	items := append(d.Items, d.Entries...)
@@ -79,6 +72,38 @@ func printFeed(w io.Writer, path, since string) error {
 	}
 	fmt.Fprintln(w, " -->")
 	return nil
+}
+
+// feedLatest is the title of the newest dated item of the RSS or Atom file at path: the
+// version, in a Sparkle appcast.
+func feedLatest(path string) (string, error) {
+	d, err := readFeed(path)
+	if err != nil {
+		return "", err
+	}
+	var best feedItem
+	var at time.Time
+	for _, it := range append(d.Items, d.Entries...) {
+		if when, ok := it.date(); ok && strings.TrimSpace(it.Title) != "" && when.After(at) {
+			best, at = it, when
+		}
+	}
+	if at.IsZero() {
+		return "", fmt.Errorf("no dated item with a title in %s", path)
+	}
+	return oneLine(best.Title), nil
+}
+
+func readFeed(path string) (feedDoc, error) {
+	var d feedDoc
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return d, err
+	}
+	dec := xml.NewDecoder(strings.NewReader(string(b)))
+	dec.Strict = false
+	dec.Entity = xml.HTMLEntity
+	return d, dec.Decode(&d)
 }
 
 var dateLayouts = []string{time.RFC3339, time.RFC1123Z, time.RFC1123, "Mon, 2 Jan 2006 15:04:05 -0700", "Mon, 2 Jan 2006 15:04:05 MST", "2006-01-02"}

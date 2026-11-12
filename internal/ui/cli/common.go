@@ -15,6 +15,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/roeehrl/hopsesh/internal/app"
+	"github.com/roeehrl/hopsesh/internal/ui/skill"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/audit"
 	"github.com/roeehrl/hopsesh/internal/core/registry"
@@ -44,6 +45,7 @@ func newRun(cmd *cobra.Command) (*run, error) {
 	log, _ := audit.Open(filepath.Join(config.StateDir(), "log"))
 	r := &run{out: cmd.OutOrStdout(), in: cmd.InOrStdin(), app: app.New(cfg, modules, config.StateDir(), log)}
 	r.app.Passwords = r.passwordFor
+	r.app.Skills = skill.For(r.app.Specs)
 	r.jsonOut, _ = cmd.Flags().GetBool("json")
 	r.yes, _ = cmd.Flags().GetBool("yes")
 	r.pwStdin, _ = cmd.Flags().GetBool("password-stdin")

@@ -17,7 +17,7 @@ test("the palette finds sessions and runs commands", async ({ page }) => {
 });
 
 test("the menu's commands open each screen", async ({ page }) => {
-  for (const [cmd, heading] of [["machines", "Machines"], ["settings", "General"], ["activity", "Activity"], ["sessions", "All sessions"]]) {
+  for (const [cmd, heading] of [["settings", "General"], ["machines", "Machines"], ["activity", "Activity"], ["sessions", "All sessions"]]) {
     await menu(page, cmd);
     await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
   }

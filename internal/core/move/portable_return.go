@@ -11,8 +11,10 @@ import (
 // The first public account observation (or a later login change) can rotate that
 // binding without changing a single native record. ObserveBinding verifies the
 // old projection before carrying its authorship into the new binding segment.
-// This is only a comparison for OtherAccount's fresh portable copy: it never
-// authorizes a native append, which still requires the exact verified binding.
+// It does not authorize replay of source-private state. A module may separately
+// opt into appending ordinary portable text to this exact target; earlier records
+// and their historical binding remain unchanged, while new work uses the current
+// binding. No email comparison or cross-provider identity claim is involved.
 func portableTargetState(p *Plan, in Input, c Copy, seg *ir.Segment) (lineage.State, error) {
 	key, endpoint := c.Summary.Key, in.Target.Machine.Facts.Endpoint
 	if key.Agent != in.Target.Module.Spec().ID || key.Profile != in.Target.Install.ProfileID() {
@@ -27,7 +29,7 @@ func portableTargetState(p *Plan, in Input, c Copy, seg *ir.Segment) (lineage.St
 		}
 	}
 	if !known {
-		return lineage.State{}, fmt.Errorf("destination session has no verified lineage; choose a separate fork")
+		return lineage.State{}, fmt.Errorf("destination session has no verified lineage; keep them as separate conversations")
 	}
 	_, st, err := p.manifest.ObserveBinding(lineage.Replica{
 		Key: key, Endpoint: endpoint, Binding: in.Target.Install.BindingID(),

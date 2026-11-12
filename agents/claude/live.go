@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -24,6 +25,12 @@ type liveEntry struct {
 	Entrypoint string `json:"entrypoint"`
 	// Name is the session's name, set by the Claude app.
 	Name string `json:"name"`
+	// Bridge is the Remote Control session the process is connected to: Claude Code
+	// writes its id when Remote Control connects and null when it disconnects; a process
+	// that never connected has none.
+	Bridge json.RawMessage `json:"bridgeSessionId"`
+	// Version is the Claude Code that wrote the entry.
+	Version string `json:"version"`
 	// written is the registry file's modification time (not in the file).
 	written time.Time
 }
@@ -101,6 +108,36 @@ func (m *Module) Live(ctx context.Context, h agent.Host, in agent.Install, ids [
 	return out, nil
 }
 
+// bridgeRecorded is the oldest Claude Code seen writing bridgeSessionId to its registry.
+const bridgeRecorded = "2.1.300"
+
+// bridgeID is the Remote Control session id ("session_…") in a bridgeSessionId value.
+var bridgeID = regexp.MustCompile(`^session_[A-Za-z0-9]{8,64}$`)
+
+// remote is the process's Remote Control state and, when on, the page it reaches the
+// session at.
+func (le liveEntry) remote() (state, url string) {
+	if len(le.Bridge) == 0 {
+		// Never connected, in a version that records the connection (2.1.300 is the
+		// oldest seen recording it); an older one doesn't say.
+		if agent.HookVersionAtLeast(le.Version, bridgeRecorded) {
+			return agent.RemoteOff, ""
+		}
+		return "", ""
+	}
+	var id *string
+	if json.Unmarshal(le.Bridge, &id) != nil {
+		return "", ""
+	}
+	if id == nil || *id == "" {
+		return agent.RemoteOff, ""
+	}
+	if bridgeID.MatchString(*id) {
+		return agent.RemoteOn, "https://claude.ai/code/" + *id
+	}
+	return agent.RemoteOn, ""
+}
+
 // liveInfo describes a session from its running processes' entries.
 func liveInfo(les []liveEntry) agent.LiveInfo {
 
@@ -138,10 +175,18 @@ func liveInfo(les []liveEntry) agent.LiveInfo {
 	li := agent.LiveInfo{State: agent.Live, PID: top.PID, Status: status, App: top.Entrypoint == "claude-desktop"}
 	var named time.Time
 	for _, le := range les {
-		li.Procs = append(li.Procs, agent.LiveProc{PID: le.PID, ObservedAt: le.written, App: le.Entrypoint == "claude-desktop", Waiting: le.WaitingFor != ""})
+		rc, url := le.remote()
+		li.Procs = append(li.Procs, agent.LiveProc{PID: le.PID, ObservedAt: le.written, App: le.Entrypoint == "claude-desktop", Waiting: le.WaitingFor != "", RemoteControl: rc})
+		if rc == agent.RemoteOn && li.RemoteControl != agent.RemoteOn {
+			li.RemoteControl, li.RemoteURL = agent.RemoteOn, url
+		}
 		if le.Name != "" && (li.Name == "" || le.written.After(named)) {
 			li.Name, named = le.Name, le.written
 		}
+	}
+	// Off only when every process says so; a process that doesn't say leaves it unknown.
+	if li.RemoteControl == "" && !slices.ContainsFunc(li.Procs, func(p agent.LiveProc) bool { return p.RemoteControl != agent.RemoteOff }) {
+		li.RemoteControl = agent.RemoteOff
 	}
 	return li
 }

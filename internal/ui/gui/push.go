@@ -19,7 +19,10 @@ import (
 func (a *App) PushPlan(key, machine, target string, o OptsDTO) (*PlanDTO, error) {
 	doneSelection := a.beginSelection()
 	defer doneSelection()
-	core := a.snapshot()
+	core, generation, err := a.reviewSnapshot()
+	if err != nil {
+		return nil, err
+	}
 	a.mu.Lock()
 	inv := a.inv
 	var here string
@@ -32,13 +35,16 @@ func (a *App) PushPlan(key, machine, target string, o OptsDTO) (*PlanDTO, error)
 	if err != nil {
 		return nil, err
 	}
+	if err := refuseOldCopy(core, e); err != nil {
+		return nil, err
+	}
 	to := core.Cfg.FindHost(machine)
 	if to == nil || !to.Allowed {
 		return nil, fmt.Errorf("%s is not an allowed machine", machine)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	inv, e, err = a.selectionInventory(ctx, core, inv, e)
+	inv, e, err = a.selectionInventory(ctx, core, inv, e, generation)
 	if err != nil {
 		return nil, err
 	}
@@ -49,9 +55,9 @@ func (a *App) PushPlan(key, machine, target string, o OptsDTO) (*PlanDTO, error)
 	if err != nil {
 		return nil, err
 	}
-	a.mu.Lock()
-	a.push, a.plan, a.res = p, nil, nil
-	a.mu.Unlock()
+	if err := a.publishPushReview(generation, p); err != nil {
+		return nil, err
+	}
 	tm, ok := core.Module(p.Plan.Placement.Key.Agent)
 	if !ok {
 		tm, _ = core.Module(e.Agent)
@@ -65,29 +71,28 @@ func (a *App) PushPlan(key, machine, target string, o OptsDTO) (*PlanDTO, error)
 
 // PushApply carries out the planned push.
 func (a *App) PushApply() (*DoneDTO, error) {
-	a.mu.Lock()
-	p := a.push
-	a.mu.Unlock()
-	if p == nil {
-		return nil, errors.New("no plan; choose the session again")
+	p, release, err := a.beginPushAction()
+	if err != nil {
+		return nil, err
 	}
+	defer release()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 	a.emit(ProgressEvent, "sending the session to "+p.Plan.Target.Location)
 	r, err := p.Commit(ctx)
-	a.mu.Lock()
-	a.closePushLocked()
-	a.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
 	res, pl := r.Result, p.Plan
 	d := &DoneDTO{NoWork: pl.NoWork, Kind: pl.Kind, Title: pl.Title, Agent: pl.Agent, Command: res.Command, Files: res.Files, Bytes: move.Human(res.Bytes),
 		Secrets: res.Secrets.Total, Redacted: pl.Options.Redact, Cloned: res.Cloned, Worktree: res.Worktree, Journal: r.Journal,
-		SourceHost: pl.Source.Location, Pushed: r.Pushed, SyncNote: res.SyncNote, Mark: res.Mark, MarkError: res.MarkError, Notice: res.Notice,
+		SourceHost: pl.Source.Location, Pushed: r.Pushed, SyncNote: res.SyncNote, Notice: res.Notice,
 		Warnings: res.Warnings, Machine: r.Machine, AuditDir: filepath.Join(config.StateDir(), "log"), ContinuationHint: pl.ContinuationHint()}
 	if pl.NoWork && pl.SyncTo != nil && pl.SyncTo.Title != "" {
 		d.Title = pl.SyncTo.Title
+	}
+	if res.Key.Session != "" {
+		d.RemoteKey, d.RemoteLogin = res.Key.String(), p.Peer.Login
 	}
 	for _, n := range res.Rewrite.Replacements {
 		d.Paths += n
@@ -102,13 +107,15 @@ func (a *App) PushApply() (*DoneDTO, error) {
 func (a *App) ClosePlan() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.plan, a.input, a.res = nil, move.Input{}, nil
-	a.closePushLocked()
+	a.invalidateReviewsLocked()
+	if !a.actionRunning {
+		a.res = nil
+	}
 }
 
 // closePushLocked ends an open push connection (callers hold a.mu).
 func (a *App) closePushLocked() {
-	if a.push != nil {
+	if a.push != nil && !a.actionRunning {
 		a.push.Close()
 		a.push = nil
 	}
