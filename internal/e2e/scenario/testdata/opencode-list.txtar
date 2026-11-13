@@ -42,11 +42,13 @@ stdout '"title": "Read main.go"'
 cd $WORK
 grep '^opencode api --standalone PATCH /api/session/ses_e29a40000ffeHandMadeImport' $WORK/agents.log
 
-# Moving OpenCode sessions comes later: hopsesh refuses this one before changing anything,
-# and OpenCode still has it, unchanged.
+# A move to another folder of this machine is refused before changing anything, and
+# OpenCode still has the session, unchanged. The refusal is hopsesh's same-machine rule
+# (the session's copy here is the synchronized one), which comes before OpenCode's own
+# move support (PR 4) is asked.
 mkdir elsewhere
 ! exec hopsesh pull opencode/ses_e29a40000ffeHandMadeImport --to $WORK/elsewhere --yes
-stderr 'cannot continue'
+stderr 'cannot continue: destination is synchronized in .*repo; choose that folder'
 grep -count=2 '^opencode session import' $WORK/agents.log
 ! grep '^opencode session delete|^opencode api .*(DELETE|/move)' $WORK/agents.log
 exec opencode session export ses_e29a40000ffeHandMadeImport --standalone
