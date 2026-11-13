@@ -208,10 +208,10 @@ func agentFacts(m agent.Module, goos string) AgentFacts {
 		f.Desktop = &DesktopDTO{Tool: d.Tool, Product: d.Product, OwnSignIn: d.OwnSignIn, Shared: d.Shared}
 	}
 	if s.Accounts != nil {
-		f.InheritsSignIn = len(s.Accounts.Inherit) > 0
+		f.InheritsSignIn = s.Accounts.InheritsSignIn
 	}
 	if r := s.MainRoot(); r.Name != "" {
-		f.DefaultRoot = nonEmptyStr(r.Default[goos], r.Default["*"])
+		f.DefaultRoot = r.DefaultFor(goos)
 	}
 	if f.Local && agent.Has(m, agent.CapAccount) {
 		f.Tools = accountTools(s)

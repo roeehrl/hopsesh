@@ -59,7 +59,7 @@ func (a *App) RecordOwner(ctx context.Context, id agent.ID, profile, session str
 	if scope.ID == "" || scope.Default {
 		native = true
 		for _, r := range mod.Spec().Roots {
-			for _, env := range r.Env {
+			for _, env := range r.Vars() {
 				if os.Getenv(env) != "" {
 					native = false
 				}

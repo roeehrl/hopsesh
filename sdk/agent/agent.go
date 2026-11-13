@@ -187,6 +187,29 @@ type Root struct {
 	Default map[string]string
 }
 
+// Vars are the environment variables that can set the root. Code that keys on or
+// resolves a root's environment goes through Vars and Locate, never Env itself.
+func (r Root) Vars() []string { return r.Env }
+
+// DefaultFor is the root's folder on goos when no variable sets it ("~/.claude").
+func (r Root) DefaultFor(goos string) string {
+	if p := r.Default[goos]; p != "" {
+		return p
+	}
+	return r.Default["*"]
+}
+
+// Locate is the root's folder on a machine, before Expand: its first set variable, else
+// its default for goos. getenv reads that machine's environment.
+func (r Root) Locate(goos string, getenv func(string) string) string {
+	for _, e := range r.Env {
+		if v := getenv(e); v != "" {
+			return v
+		}
+	}
+	return r.DefaultFor(goos)
+}
+
 // MainRoot is the main data folder: the first declared root (zero for a cloud-only module).
 func (s Spec) MainRoot() Root {
 	if len(s.Roots) == 0 {

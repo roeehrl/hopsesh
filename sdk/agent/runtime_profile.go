@@ -55,6 +55,9 @@ type ProfileSpec struct {
 	// root-relative TOML file: top-level keys (Codex's cli_auth_credentials_store, so a
 	// new folder keeps its sign-in where the default one does).
 	Inherit map[string][]string `json:"inherit,omitempty"`
+	// InheritsSignIn: a new folder keeps its sign-in where the default folder does, so
+	// the user interfaces say so (Codex). Inherit may carry other settings too.
+	InheritsSignIn bool `json:"inheritsSignIn,omitempty"`
 }
 
 func (in Install) ProfileEnv() []string {

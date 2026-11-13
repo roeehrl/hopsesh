@@ -674,20 +674,7 @@ func (a *App) noticeScope(ctx context.Context, id agent.ID, profile string) (age
 		if r.Name == "" {
 			return empty, fmt.Errorf("agent has no local root")
 		}
-		for _, env := range r.Env {
-			if root = os.Getenv(env); root != "" {
-				break
-			}
-		}
-		if root == "" {
-			root = r.Default[runtime.GOOS]
-			if root == "" {
-				root = r.Default["*"]
-			}
-		}
-		if strings.HasPrefix(root, "~/") {
-			root = filepath.Join(home, root[2:])
-		}
+		root = agent.Expand(r.Locate(runtime.GOOS, os.Getenv), home, nil, agent.PathFor(runtime.GOOS))
 		if !filepath.IsAbs(root) {
 			return empty, fmt.Errorf("default agent root is not absolute")
 		}

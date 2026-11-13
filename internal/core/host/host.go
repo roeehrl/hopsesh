@@ -180,7 +180,7 @@ func SpecEnv(s agent.Spec) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, r := range s.Roots {
-		for _, e := range r.Env {
+		for _, e := range r.Vars() {
 			if !seen[e] {
 				seen[e] = true
 				out = append(out, e)

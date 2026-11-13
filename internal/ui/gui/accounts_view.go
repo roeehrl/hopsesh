@@ -444,10 +444,7 @@ func defaultRoot(s agent.Spec, m *app.Machine) string {
 	if m.Host() != nil && m.Host().Facts.OS != "" {
 		os = m.Host().Facts.OS
 	}
-	if p := r.Default[os]; p != "" {
-		return p
-	}
-	return r.Default["*"]
+	return r.DefaultFor(os)
 }
 
 func machineWords(m *app.Machine) string {
