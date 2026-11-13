@@ -22,38 +22,28 @@ import (
 // data.sql, and synthetic rows on top of them) and the exports OpenCode printed. The
 // bundle checks that the SQL builds a database whose JSON columns are JSON, that every
 // export is a transfer OpenCode would import (the schema's envelope, each message type's
-// members here), and that none holds what looks real.
+// members, as OpenCode's own schemas decode them), and that none holds what looks real.
 
-// messageMembers are the members each message type requires (OpenCode 2.3.0,
-// packages/schema/src/session-message.ts), besides id, type and time.
-var messageMembers = map[string][]string{
-	"user":              {"text"},
-	"assistant":         {"agent", "model", "content"},
-	"synthetic":         {"text"},
-	"system":            {"text"},
-	"skill":             {"skill", "name", "text"},
-	"shell":             {"shellID", "command", "status"},
-	"compaction":        {"status", "reason"},
-	"idle":              {"outcome"},
-	"agent-switched":    {"agent"},
-	"model-switched":    {"model"},
-	"location-switched": {"location"},
-}
-
-// checkTransfer checks what the transfer schema cannot: each message's members by its
-// type, ids that are not repeated, and an assistant reply's content items.
+// checkTransfer checks what the transfer schema cannot: that OpenCode 2.3.0's schemas
+// decode it (each message type's members, content items, tool states; the stand-in
+// decodes as OpenCode does) and keep all of it, that no message id is repeated, and that
+// it holds settled messages only, as an export does.
 func checkTransfer(b []byte) error {
+	dropped, err := fakeopencode.CheckTransfer(b)
+	if err != nil {
+		return fmt.Errorf("OpenCode would refuse it (Bad Request): %w", err)
+	}
+	var errs []string
+	for _, d := range dropped {
+		errs = append(errs, d+": OpenCode does not know this member and drops it on import")
+	}
 	var t struct {
-		Info struct {
-			ID string `json:"id"`
-		} `json:"info"`
 		Messages []map[string]any `json:"messages"`
 	}
 	if err := json.Unmarshal(b, &t); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
-	var errs []string
 	for i, m := range t.Messages {
 		id, _ := m["id"].(string)
 		typ, _ := m["type"].(string)
@@ -62,45 +52,10 @@ func checkTransfer(b []byte) error {
 			errs = append(errs, at+": the id "+id+" is repeated")
 		}
 		seen[id] = true
-		for _, k := range messageMembers[typ] {
-			if _, ok := m[k]; !ok {
-				errs = append(errs, at+": "+k+" is required")
-			}
-		}
 		switch typ {
 		case "assistant":
-			if model, _ := m["model"].(map[string]any); model["id"] == nil || model["providerID"] == nil {
-				errs = append(errs, at+": model needs id and providerID")
-			}
-			content, ok := m["content"].([]any)
-			if !ok {
-				errs = append(errs, at+": content is not a list")
-			}
-			for j, c := range content {
-				item, _ := c.(map[string]any)
-				where := fmt.Sprintf("%s: content[%d]", at, j)
-				switch item["type"] {
-				case "text", "reasoning":
-					if _, ok := item["text"].(string); !ok {
-						errs = append(errs, where+": text is required")
-					}
-				case "tool":
-					state, _ := item["state"].(map[string]any)
-					if item["id"] == nil || item["name"] == nil || state == nil {
-						errs = append(errs, where+": a tool call needs id, name and state")
-					} else if !slices.Contains([]any{"streaming", "running", "completed", "error"}, state["status"]) {
-						errs = append(errs, fmt.Sprintf("%s: tool state %v", where, state["status"]))
-					}
-				default:
-					errs = append(errs, fmt.Sprintf("%s: unknown content type %v", where, item["type"]))
-				}
-			}
 			if tm, _ := m["time"].(map[string]any); tm["completed"] == nil {
 				errs = append(errs, at+": an export holds settled replies only (time.completed)")
-			}
-		case "idle":
-			if !slices.Contains([]any{"succeeded", "failed", "interrupted"}, m["outcome"]) {
-				errs = append(errs, fmt.Sprintf("%s: outcome %v", at, m["outcome"]))
 			}
 		case "shell", "compaction":
 			if m["status"] == "running" {
@@ -157,7 +112,7 @@ func openCodeImports(b []byte) error {
 		}
 	}
 	if !reflect.DeepEqual(got, want) {
-		return errors.New("OpenCode would not export it as it is after importing it (a member it does not keep, or a message that is not settled)")
+		return errors.New("OpenCode would not export it as it is after importing it (a member it drops, a time it rounds, or a message that is not settled)")
 	}
 	return nil
 }

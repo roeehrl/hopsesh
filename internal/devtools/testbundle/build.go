@@ -117,7 +117,7 @@ func build(root, version, commit, out string) (string, error) {
 		"FAKE_OPENCODE_SERVICE":         "opencode: \"running\" (or a URL) for a running background service; stopped otherwise, until a command without --standalone starts it",
 		"FAKE_OPENCODE_SERVICE_VERSION": "opencode: the running service's version (GET /api/info), default the program's",
 		"FAKE_OPENCODE_VERSION":         "opencode: the program's version, default " + fakeopencode.Version,
-		"FAKE_OPENCODE_ACTIVE":          "opencode: session ids with a turn running (GET /api/session/active), comma-separated",
+		"FAKE_OPENCODE_ACTIVE":          "opencode: session ids with a turn running in the background service (GET /api/session/active; their rows claim the turn), comma-separated",
 		"FAKE_OPENCODE_AUTH":            "opencode: what `auth list --format json` prints, default []",
 	}
 

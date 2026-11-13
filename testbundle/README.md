@@ -68,12 +68,16 @@ As `opencode` it plays OpenCode 2.3.0 with a SQLite database of its own, where O
 it (`$XDG_DATA_HOME/opencode/opencode.db`, or `$OPENCODE_DB`): `--version`, `debug paths`,
 `service status`, `session list|export|import|delete`, `auth list --format json`, and the
 `opencode api` calls hopsesh makes (sessions: list, get, rename, delete, move, fork,
-interrupt, messages; `/api/session/active`, `/api/info`, `/api/plugin`). Its exports are
-OpenCode's byte for byte; its import answers as OpenCode's does (`Session already exists` on
-standard error with exit status 0 when the id is taken, `Not Found` for a child without its
-parent). The background service is make-believe and stopped unless `$FAKE_OPENCODE_SERVICE`
-says otherwise; a command run without `--standalone` "starts" it and logs that, so a test
-can check nothing did. It prints an error for anything else it is asked.
+interrupt, messages; `/api/session/active`, `/api/info`, `/api/plugin`). Its exports match
+the 2.3.0 exports captured in a sandbox byte for byte (sessions without media). Its import
+decodes the file with OpenCode 2.3.0's schemas: a wrong shape is `Bad Request`, members the
+schemas do not declare are dropped, `Session already exists` goes to standard error with
+exit status 0 when the id is taken, and a child without its parent is `Not Found`. A
+differential run against the real 2.3.0 matched it on the cases it covers; anything it does
+not cover (media in `blob`, events, `--sanitize`, rows from before 2.1) may differ. The
+background service is make-believe and stopped unless `$FAKE_OPENCODE_SERVICE` says
+otherwise; a command run without `--standalone`, or the TUI, "starts" it and logs that, so a
+test can check nothing did. It prints an error for anything else it is asked.
 
 ## Contributing payloads
 
@@ -91,7 +95,7 @@ testbundle/<agent>/<agent version>/<slot>/[<Event>/]<name>.json
 | `claude` | `registry/` | a running-session registry entry (`<config>/sessions/<pid>.json`), such as one with `waitingFor` | `claude-registry.schema.json` |
 | `codex` | `hooks/<Event>/` | JSON on hook command standard input, under its `hook_event_name` | `codex-hook.schema.json` |
 | `codex` | `notify/` | the JSON Codex passes to its `notify` program | `codex-notify.schema.json` |
-| `opencode` | `export/` | a session as `opencode session export <id>` prints it; it must also import into OpenCode (as the stand-in plays it) and export again unchanged | `opencode-transfer.schema.json` |
+| `opencode` | `export/` | a session as `opencode session export <id>` prints it; OpenCode 2.3.0's schemas must decode it without dropping a member, and it must import into the stand-in and export again unchanged | `opencode-transfer.schema.json` |
 
 The rules:
 

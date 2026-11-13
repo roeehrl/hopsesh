@@ -20,10 +20,13 @@ import (
 var madeUpUsers = []string{"alice", "bob", "carol", "u", "demo", "user"}
 
 var (
-	homeDir = regexp.MustCompile(`(?i)(?:/Users/|/home/|[A-Z]:[\\/]+Users[\\/]+)([^/\\\s"'` + "`" + `]+)`)
-	email   = regexp.MustCompile(`[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)`)
-	ipv4    = regexp.MustCompile(`\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b`)
-	secrets = []struct {
+	// A home folder as a folder name ("-Users-jsmith-git-x", as Claude names a project's
+	// folder and capture tools name their temporary ones).
+	homeDash = regexp.MustCompile(`-(?:Users|home)-([A-Za-z0-9._]+)-`)
+	homeDir  = regexp.MustCompile(`(?i)(?:/Users/|/home/|[A-Z]:[\\/]+Users[\\/]+)([^/\\\s"'` + "`" + `]+)`)
+	email    = regexp.MustCompile(`[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)`)
+	ipv4     = regexp.MustCompile(`\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b`)
+	secrets  = []struct {
 		what string
 		re   *regexp.Regexp
 	}{
@@ -39,7 +42,7 @@ var (
 		{"a Groq key", regexp.MustCompile(`\bgsk_[A-Za-z0-9]{20,}`)},
 		{"an xAI key", regexp.MustCompile(`\bxai-[A-Za-z0-9]{20,}`)},
 		{"a machine's local network name", regexp.MustCompile(`(?i)\b[a-z0-9][a-z0-9-]*\.(?:local|lan|home\.arpa|internal)\b`)},
-		{"a temporary folder of the capturing machine", regexp.MustCompile(`/private/(?:tmp|var)/|/var/folders/|\$bunfs/`)},
+		{"a temporary folder of the capturing machine", regexp.MustCompile(`/private/(?:tmp|var)/|/var/(?:folders|tmp)/|/tmp/claude-[0-9]+|\$bunfs/`)},
 	}
 	// The documentation and loopback ranges, and 100.64.0.0/24 (CONTRIBUTING's made-up peers).
 	madeUpNets = []netip.Prefix{
@@ -88,6 +91,11 @@ func scrubString(s string) []string {
 	for _, m := range homeDir.FindAllStringSubmatch(s, -1) {
 		if !slices.Contains(madeUpUsers, strings.ToLower(m[1])) {
 			out = append(out, fmt.Sprintf("a home folder of %q: use one of %s", m[1], strings.Join(madeUpUsers, ", ")))
+		}
+	}
+	for _, m := range homeDash.FindAllStringSubmatch(s, -1) {
+		if !slices.Contains(madeUpUsers, strings.ToLower(m[1])) {
+			out = append(out, fmt.Sprintf("a home folder of %q in a folder name: use one of %s", m[1], strings.Join(madeUpUsers, ", ")))
 		}
 	}
 	for _, m := range email.FindAllStringSubmatch(s, -1) {

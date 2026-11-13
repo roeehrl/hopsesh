@@ -138,10 +138,27 @@ func TestClaudeReads(t *testing.T) {
 	}
 }
 
+// Capture folders name the capturer: Claude's temporary folder and a project folder named
+// after a home are caught.
+func TestScrubRefuses(t *testing.T) {
+	for s, want := range map[string]string{
+		"/tmp/claude-501/-Users-jsmith-git-demo/x":     "temporary folder",
+		"/tmp/claude-1000/-home-jsmith-git-demo/x":     `home folder of "jsmith" in a folder name`,
+		"/var/tmp/opencode/x":                          "temporary folder",
+		"/private/tmp/x":                               "temporary folder",
+		"~/.claude/projects/-Users-jsmith-git-x/a.txt": `home folder of "jsmith" in a folder name`,
+	} {
+		if got := scrubString(s); !slices.ContainsFunc(got, func(f string) bool { return strings.Contains(f, want) }) {
+			t.Errorf("%q: %q, want %q", s, got, want)
+		}
+	}
+}
+
 func TestScrubAllows(t *testing.T) {
 	for _, s := range []string{
 		"/home/u/git/demo", "/Users/alice/x", `C:\Users\bob\demo`, "alice@example.com", "x@sub.example.com",
 		"127.0.0.1:8080", "100.64.0.2", "192.0.2.10", "version 2.1.284", "0b6c6a8e-1d2f-4c3b-9a7e-5f4d3c2b1a01", "sk-short",
+		"/tmp/opencode", "-Users-alice-git-demo", "~/.claude/projects/-home-u-git-demo/x.jsonl",
 	} {
 		if got := scrubString(s); len(got) > 0 {
 			t.Errorf("%q: %q", s, got)
@@ -202,9 +219,12 @@ func TestOpenCodeExports(t *testing.T) {
 	for name, c := range map[string]struct{ doc, want string }{
 		"no project":       {strings.Replace(doc, `"projectID"`, `"project"`, 1), "projectID is required"},
 		"unknown type":     {strings.Replace(doc, `"type": "idle"`, `"type": "nap"`, 1), "$.messages[2].type"},
-		"no prompt text":   {strings.Replace(doc, `"text": "Reply with exactly: hi there",`, ``, 1), "messages[0] (user): text is required"},
+		"no prompt text":   {strings.Replace(doc, `"text": "Reply with exactly: hi there",`, ``, 1), "messages[0].text: is required"},
+		"no agent":         {strings.Replace(doc, `"agent": "build",`, ``, 1), "messages[1].agent: is required"},
+		"unknown member":   {strings.Replace(doc, `"text": "Reply with exactly: hi there",`, `"text": "Reply with exactly: hi there", "mood": "calm",`, 1), "messages[0].mood: OpenCode does not know this member and drops it on import"},
+		"unknown in info":  {strings.Replace(doc, `"cost": 0,`, `"cost": 0, "hopsesh": true,`, 1), "hopsesh"},
 		"unsettled reply":  {strings.Replace(doc, `"completed": 1794597379064`, `"x": 1`, 1), "settled replies only"},
-		"bad outcome":      {strings.Replace(doc, `"outcome": "succeeded"`+"\n    }", `"outcome": "done"`+"\n    }", 1), "outcome done"},
+		"bad outcome":      {strings.Replace(doc, `"outcome": "succeeded"`+"\n    }", `"outcome": "done"`+"\n    }", 1), `outcome: expected one of succeeded, failed, interrupted, got "done"`},
 		"real home":        {strings.Replace(doc, `/home/u/git/demo`, `/Users/jsmith/git/demo`, 1), `home folder of "jsmith"`},
 		"machine name":     {strings.Replace(doc, `hi there"`, `hi from studio.local"`, 1), "local network name"},
 		"capture folder":   {strings.Replace(doc, `/home/u/git/demo`, `/private/tmp/capture/demo`, 1), "temporary folder"},

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/roeehrl/hopsesh/blob/main/testbundle/schemas/opencode-transfer.schema.json",
   "title": "OpenCode session transfer",
-  "description": "A session as `opencode session export <id>` prints it and `opencode session import <file>` reads it (OpenCode 2.x): the session's info and its settled messages, in order. This schema checks the envelope every message shares (id, type, creation time); each message type's own members are checked by internal/devtools/testbundle (check.go), as this schema language has no oneOf. The file lives in opencode/<OpenCode version>/export/.",
+  "description": "A session as `opencode session export <id>` prints it and `opencode session import <file>` reads it (OpenCode 2.x): the session's info and its settled messages, in order. This schema checks the session's info and the envelope every message shares (id, type, creation time); each message type's own members are checked by internal/devtools/testbundle with OpenCode 2.3.0's schemas as the stand-in decodes them (internal/testkit/fakeopencode/decode.go), as this schema language has no oneOf. OpenCode drops members its schemas do not declare, so the check refuses them. The file lives in opencode/<OpenCode version>/export/.",
   "type": "object",
   "required": ["info", "messages"],
   "additionalProperties": false,
@@ -17,10 +17,22 @@
     "info": {
       "type": "object",
       "required": ["id", "projectID", "cost", "tokens", "time", "location"],
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "id": {"$ref": "#/$defs/sessionID"},
         "parentID": {"$ref": "#/$defs/sessionID"},
+        "fork": {
+          "type": "object",
+          "required": ["sessionID", "boundary"],
+          "properties": {
+            "sessionID": {"$ref": "#/$defs/sessionID"},
+            "boundary": {
+              "type": "object",
+              "required": ["type", "messageID"],
+              "properties": {"type": {"enum": ["before", "through"]}, "messageID": {"$ref": "#/$defs/messageID"}}
+            }
+          }
+        },
         "projectID": {"type": "string", "minLength": 1},
         "agent": {"type": "string", "minLength": 1},
         "model": {
@@ -65,7 +77,17 @@
           "required": ["directory"],
           "properties": {"directory": {"type": "string", "minLength": 1}, "workspaceID": {"type": "string"}}
         },
-        "subpath": {"type": "string"}
+        "subpath": {"type": "string"},
+        "metadata": {"type": "object"},
+        "permissions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["action", "resource", "effect"],
+            "properties": {"action": {"type": "string"}, "resource": {"type": "string"}, "effect": {"enum": ["allow", "deny", "ask"]}}
+          }
+        },
+        "revert": {"type": "object", "required": ["messageID"], "properties": {"messageID": {"$ref": "#/$defs/messageID"}}}
       }
     },
     "message": {
