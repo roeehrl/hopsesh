@@ -218,13 +218,14 @@ as `[]map[string]any` with max-rows and max-bytes guards. A `Batch` form runs se
 read transaction (consistent WAL snapshot across message and part queries).
 
 **Local** (`internal/core/host/sql_local.go`, modernc.org/sqlite v1.61.0, already in `go.mod`):
-- DSN `file:<db>?mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(2000)`. `immutable=1` only for a
-  closed WAL database: with neither a `-wal` nor a `-shm` file (no program has it open) SQLite
-  cannot open it read only, and the file holds everything. The read counts only if none of the
-  three files changed by its end (also when it failed); otherwise it is busy and done again. A
-  closed WAL database is told from its header, so it is never opened through a WAL (some builds
-  would make empty `-wal`/`-shm` files in the agent's folder). Remotely the check is over SFTP,
-  whose times have a resolution of one second.
+- DSN `file:<db>?mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(2000)`. Never `immutable=1`: it
+  takes no lock, so a read could overlap OpenCode (or a short `opencode … --standalone`) writing and
+  checkpointing, and return torn pages as rows. A WAL database no program has open has no `-wal` or
+  `-shm` file; the local reader (modernc) then makes them, as any reader does, and leaves them
+  (owned by the user, empty, harmless to OpenCode). Where the folder cannot be written, the read
+  fails and says so; it never falls back to an immutable read.
+- A missing database file is `ErrNotInstalled`, never `ErrNotFound`: the core reads `ErrNotFound`
+  from a stamp as "the session was deleted" (undo, receipts, Seal).
 - One `BEGIN` read transaction per batch; close after each operation so no reader blocks checkpoints.
 - `SQLITE_BUSY` → three retries with backoff. Never checkpoint, vacuum or write.
 - **Main guard: modernc's authorizer** (`RegisterAuthorizer` via `conn.Raw`): `SQLITE_READ` on a table
@@ -232,15 +233,18 @@ read transaction (consistent WAL snapshot across message and part queries).
 
 **Remote tiers** (`internal/core/host/sql_remote.go`), chosen per machine and cached:
 1. `sqlite3 -readonly -json 'file:…?mode=ro' "<query>"` over SSH Exec (always on macOS, common on Linux),
-   when the shell marks BLOBs in its JSON (`.mode json --blob-quote sql`, current shells).
+   when the shell marks BLOBs in its JSON (`.mode json --blob-quote sql`, current shells). A batch
+   whose SQL is over 96 KiB (sshd passes the command line as one argument, which Linux caps at
+   128 KiB) is read with python3, or refused (`ErrTooLarge`) where there is none.
 2. `python3 -I` with a fixed embedded script using the `sqlite3` module (read-only URI, JSON out, the
-   same authorizer as locally). Chosen over an older sqlite3 shell, which prints a BLOB as text.
-   An older shell (3.37+) is the tier only where python3 is missing; a module reads a BLOB column
-   there with `hex()`.
+   same authorizer as locally), its request on stdin. An older sqlite3 shell, which prints a BLOB as
+   text, is never used: without python3 the machine has tier 3.
 3. **No SQL:** the module falls back to `opencode service status`, then `opencode api GET /api/session`,
    `GET /api/session/{id}/message` and `session export`, with `--standalone` when the service is stopped.
    This returns projected JSON (parts merged, legacy shapes decoded) and no credential bytes. Slower;
-   used on Windows and minimal Linux.
+   used on Windows and minimal Linux, and for a WAL database no program has open: the C SQLite of
+   tiers 1 and 2 cannot open it read only (no `-shm` to read through), so the read returns
+   `ErrUnsupported` instead of reading it as immutable.
 
 For tiers 1 and 2: arguments are bound by literal quoting in a vetted helper (`sqlquote.go`), only the
 module's fixed queries are sent, and a token scan rejects any query naming a denied table.
@@ -756,16 +760,28 @@ in a database; `internal/testkit/dbagent` is a stand-in module that keeps them i
 program writes in the test's process) and the e2e and app tests run moves, continuations, cd, peer
 packages and undo through it.
 - PR 2/4/5 (the module): keep `Summary.Path` at `agent.AnchorRel` (the notice hook finds lineage
-  from the session id alone); `Write` uses `WriteRequest.SessionID` (the core minted it with
+  from the session id alone). `Write` uses `WriteRequest.SessionID` (the core minted it with
   `agent.NewSessionID` and journaled the session before the write; a writer that picks another id
-  is followed, and that id is journaled after the write); `AfterInstall` imports idempotently (it
-  runs again after an interrupted move or continuation); `Restore` refuses over newer work.
-- Undo of a session kept in a database runs on this machine only, as cd undo does; the activity
-  list checks this machine's sessions and leaves other machines' to the undo
-  (`journal.ErrOutOfReach`). A receipt whose session is gone is dropped (stale), not retried.
+  is followed, and that id is journaled after the write) and imports the session itself: the core
+  runs no `AfterInstall` after a write. `RecoverWrite` imports again when the interrupted write had
+  not, and finds a session `Write` gave its own id (derive it from `OperationID`). `AfterInstall`
+  (moves) imports idempotently (it runs again after an interrupted move), and a session already at
+  the id with other content than the placed anchor is `ErrDiverged`, never success: it may be work
+  done since a first, interrupted run, and the core then leaves it out of the undo unless it
+  stamped it as the operation's. `Restore` refuses over newer work (the core also checks the
+  stamp first and restores only a session that is gone).
+- PR 2 (reads): a missing database is `ErrNotInstalled` from the Host's SQL, and `ErrNotFound`
+  means only "no such session". On another machine a WAL database no program has open reads as
+  `ErrUnsupported`: use tier 3 then.
+- The core stamps a session the agent made right after the import or write, so a later Seal (a
+  recovery's) keeps that stamp. Undo keeps a set-aside session's backup until it is imported
+  again; a set-aside the agent refused (used between backup and delete) leaves the journal.
+- Undo of a session kept in a database reaches other machines over SSH, as the move did (cd undo
+  still runs on this machine only); the activity list checks this machine's sessions and leaves
+  other machines' to the undo (`journal.ErrOutOfReach`). A receipt whose session is gone is
+  dropped (stale), not retried; one whose database is missing stays pending.
 - The remote SQL probe still runs on its own 20-second context (`SQLHost.SQL()` takes none); a
-  failed probe is kept 30 seconds. On a machine with only an older sqlite3 shell (no python3),
-  BLOBs read as text.
+  failed probe is kept 30 seconds.
 - PR 11 (append into an existing session): the continue path reads an expected destination by its
   key (`Copies`), but appending and its rollback are not exercised with a virtual target yet.
 
