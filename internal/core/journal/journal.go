@@ -310,10 +310,14 @@ func (j *Journal) SealWith(ctx context.Context, r Reach) error {
 		return err
 	}
 	if len(unstamped) > 0 {
-		return fmt.Errorf("not recorded, so undoing it will need force: %s", strings.Join(unstamped, "; "))
+		return fmt.Errorf("%w, so undoing it will need force: %s", ErrUnstamped, strings.Join(unstamped, "; "))
 	}
 	return nil
 }
+
+// ErrUnstamped is SealWith's report of a session whose state it could not record; the rest
+// is recorded.
+var ErrUnstamped = errors.New("not recorded")
 
 // Changed reports the first thing that changed since the operation (ErrChanged with what
 // changed), or nil: a file it created or replaced, or one it appended to (not Standalone)

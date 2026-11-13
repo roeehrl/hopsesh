@@ -21,7 +21,7 @@ type SideSessions []Side
 
 // sessionsOf reaches the sessions of a move's sides, and of the source agent's own copy a
 // continuation keeps here.
-func sessionsOf(p *Plan, in Input) journal.Sessions {
+func sessionsOf(p *Plan, in Input) SideSessions {
 	sides := SideSessions{in.Source, in.Target}
 	if p != nil && p.native != nil && p.nativeIn.Target.Module != nil {
 		sides = append(sides, p.nativeIn.Target)
@@ -32,6 +32,32 @@ func sessionsOf(p *Plan, in Input) journal.Sessions {
 // reachOf is how a move's journal reaches its machines and their agents' sessions.
 func reachOf(ctx context.Context, p *Plan, in Input) journal.Reach {
 	return journal.Reach{FS: machinesOf(ctx, in), Sessions: sessionsOf(p, in)}
+}
+
+// renamedSessions is SideSessions for a journal written when the machines had other names
+// (recovering an interrupted operation after a rename): old names lead to the sides.
+type renamedSessions struct {
+	SideSessions
+	names map[string]string
+}
+
+func (r renamedSessions) name(machine string) string {
+	if n, ok := r.names[machine]; ok {
+		return n
+	}
+	return machine
+}
+
+func (r renamedSessions) Stamp(ctx context.Context, machine string, key agent.SessionKey) (agent.SessionStamp, error) {
+	return r.SideSessions.Stamp(ctx, r.name(machine), key)
+}
+
+func (r renamedSessions) Delete(ctx context.Context, machine string, key agent.SessionKey, expect agent.SessionStamp) error {
+	return r.SideSessions.Delete(ctx, r.name(machine), key, expect)
+}
+
+func (r renamedSessions) Restore(ctx context.Context, machine string, key agent.SessionKey, backup string) (agent.SessionStamp, error) {
+	return r.SideSessions.Restore(ctx, r.name(machine), key, backup)
 }
 
 func (s SideSessions) side(ctx context.Context, machine string, key agent.SessionKey) (Side, agent.Host, error) {

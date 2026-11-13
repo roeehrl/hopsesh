@@ -192,7 +192,9 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (result *Result, fai
 		if j.Undone {
 			return nil, fmt.Errorf("this transfer was undone; use a new operation ID")
 		}
-		sessions := journal.Reach{FS: reach, Sessions: sessionsOf(p, in)}
+		// The journal names the machines as they were named then.
+		sessions := journal.Reach{FS: reach, Sessions: renamedSessions{sessionsOf(p, in), map[string]string{
+			r.Plan.Source.Location: in.Source.Machine.Name, r.Plan.Target.Location: in.Target.Machine.Name}}}
 		if r.Phase == "complete" {
 			if e = j.RecoverReceiptsWith(ctx, sessions); e != nil {
 				return r.Result, e
@@ -262,7 +264,9 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (result *Result, fai
 			return res, e
 		}
 		res.Command, res.Run = launch.Shell(p.Resume, "", launch.DefaultShell()), p.Resume
-		if e = j.SealWith(ctx, journal.Reach{FS: reach, Sessions: sessionsOf(p, in)}); e != nil {
+		if e = j.SealWith(ctx, sessions); errors.Is(e, journal.ErrUnstamped) {
+			res.Warnings = append(res.Warnings, "could not record what this changed, for a safe undo: "+e.Error())
+		} else if e != nil {
 			return res, e
 		}
 		r.Phase = "complete"
