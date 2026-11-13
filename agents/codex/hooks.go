@@ -37,6 +37,7 @@ func (m *Module) MovementHooks(h agent.Host, in agent.Install, bin string, args 
 		handler["commandWindows"] = agent.EncodedPowerShellHook(script)
 	}
 	out.File = agent.JSONMovementHookFileWithHandler(h.Path().Join(in.Root(home), "hooks.json"), handler)
+	out.File.Runs = func(b []byte) (string, bool) { return agent.NoticeHookProgram(b, m.Spec().ID) }
 	out.DisabledReason = codexHookPolicy(h, in)
 	if !agent.HookVersionAtLeast(in.Version, hookFloor) {
 		out.Reason = agent.NeedsVersion("Codex", in.Version, hookFloor)

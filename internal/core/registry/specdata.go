@@ -31,6 +31,18 @@ type SpecData struct {
 	Clouds               []CloudData         `json:"clouds"`
 	TerminalEnv          []string            `json:"terminalEnv"`
 	Kinds                []KindData          `json:"kinds"`
+	// Desktop is how the agent's desktop app signs in and runs sessions (agent.Desktop).
+	Desktop *DesktopData `json:"desktop,omitempty"`
+	// Plans names what a bare account plan belongs to ("Claude").
+	Plans string `json:"plans,omitempty"`
+}
+
+// DesktopData is agent.Desktop.
+type DesktopData struct {
+	Tool      string `json:"tool"`
+	Product   string `json:"product"`
+	OwnSignIn bool   `json:"ownSignIn"`
+	Shared    bool   `json:"shared"`
 }
 
 // BinaryData is a program the module may run.
@@ -118,6 +130,10 @@ func Data(s agent.Spec) SpecData {
 	}
 	for _, k := range s.Kinds {
 		d.Kinds = append(d.Kinds, KindData{ID: k.ID, Name: k.Name, Note: k.Note})
+	}
+	d.Plans = s.Plans
+	if x := s.Desktop; x != nil {
+		d.Desktop = &DesktopData{Tool: x.Tool, Product: x.Product, OwnSignIn: x.OwnSignIn, Shared: x.Shared}
 	}
 	for _, b := range s.Binaries {
 		d.Binaries = append(d.Binaries, BinaryData{Name: b.Name, Candidates: lists(b.Candidates), VersionArgs: list(b.VersionArgs)})

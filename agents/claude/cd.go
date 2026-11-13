@@ -80,6 +80,12 @@ func (m *Module) ChangeDir(_ context.Context, h agent.Host, _ agent.Install, s a
 // InSession is Claude Code's own /cd, which keeps the session.
 func (m *Module) InSession(_ agent.Install, dir string) string { return "/cd " + dir }
 
+// ChangeDirHelp is how the cd command's help describes Claude Code's folder change.
+func (m *Module) ChangeDirHelp() (how, undo string) {
+	return "what its own /cd does: the transcript and its side folder move to the new folder's project folder, and a relocated record is added.",
+		"Claude Code's files move back"
+}
+
 // isClaudeWorktree reports a folder inside a Claude-managed worktree (<repo>/.claude/worktrees/<name>).
 func isClaudeWorktree(dir string) bool {
 	return strings.Contains(path.Clean(toSlash(dir))+"/", "/.claude/worktrees/")

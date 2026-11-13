@@ -106,6 +106,12 @@ type Spec struct {
 	Experimental []Capability
 	// Icon is how the user interfaces picture the agent (optional; its initials otherwise).
 	Icon Icon
+	// Desktop is how the agent's desktop app signs in and runs sessions, for the user
+	// interfaces (nil: it has none, or nothing to say).
+	Desktop *Desktop
+	// Plans is what an account's plan is named after when the module's Account.Label is a
+	// bare plan ("max" reads "Claude Max"); empty when the label names it ("ChatGPT Pro").
+	Plans string
 	// Clouds are the vendor clouds the module reaches through its agent's CLI. A module
 	// with clouds may have no Roots (a cloud-only module, see NoLocal).
 	Clouds []Cloud
@@ -117,6 +123,31 @@ type Spec struct {
 	// terminal tabs, on top of the user's: settings that suit that terminal
 	// (CLAUDE_CODE_FORCE_SYNC_OUTPUT=1). Never a credential; not used in other terminals.
 	TerminalEnv []string
+}
+
+// Desktop is an agent's desktop app as the user interfaces show it.
+type Desktop struct {
+	// Tool names the app beside the agent's command-line tool ("Claude desktop", "Codex
+	// app").
+	Tool string
+	// Product is the app as it names itself, before its version ("Claude desktop",
+	// "ChatGPT desktop").
+	Product string
+	// OwnSignIn: the app keeps a sign-in of its own (Install.DesktopAccount) and its
+	// sessions go in the main root's default folder, whatever the environment says (Claude
+	// desktop). Otherwise it shares that folder's sign-in with the terminal (the Codex app).
+	OwnSignIn bool
+	// Shared: one app process runs every session, so the app is shown and opened, never
+	// quit (the Codex app).
+	Shared bool
+}
+
+// Short is the agent's name where space is tight: the first word of its Name ("Claude").
+func (s Spec) Short() string {
+	if f := strings.Fields(s.Name); len(f) > 0 {
+		return f[0]
+	}
+	return string(s.ID)
 }
 
 // SessionKind is a kind of session hidden by default (Spec.Kinds).

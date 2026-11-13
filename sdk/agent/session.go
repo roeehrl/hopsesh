@@ -205,6 +205,21 @@ type Command struct {
 	Env []string `json:"env,omitempty"`
 }
 
+// OwnedTabCommander adjusts the command that resumes a session in a terminal tab hopsesh
+// owns on this machine (it started the process and can stop it): Codex runs its own
+// server there instead of the shared one. getenv reads hopsesh's environment, which the
+// tab inherits. It returns c as it is when nothing applies, and never changes c's Dir,
+// Env or Unset; applying it twice changes nothing more.
+type OwnedTabCommander interface {
+	OwnedTabCommand(in Install, c Command, getenv func(string) string) Command
+}
+
+// RemoteControlTyper is what to type in an open, idle session to turn its agent's remote
+// control on there ("/remote-control"); optional beside CapRemoteControl.
+type RemoteControlTyper interface {
+	RemoteControlInSession() string
+}
+
 // Liveness says whether a session is open right now.
 type Liveness string
 

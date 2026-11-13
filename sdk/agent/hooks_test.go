@@ -86,3 +86,18 @@ func TestMovementHookCommandQuotesAndVersionGate(t *testing.T) {
 		t.Fatal("bad JSON")
 	}
 }
+
+// A notice hook is found by its agent whatever arguments follow, also inside JSON.
+func TestNoticeHookProgram(t *testing.T) {
+	cmd, err := NoticeHookCommand("/opt/hop sesh/hopsesh", "claude", "p1", "--config-dir", "/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(map[string]string{"command": cmd})
+	if prog, ok := NoticeHookProgram(b, "claude"); !ok || prog != "/opt/hop sesh/hopsesh" {
+		t.Fatalf("got %q %v in %s", prog, ok, b)
+	}
+	if _, ok := NoticeHookProgram(b, "codex"); ok {
+		t.Fatal("another agent's hook matched")
+	}
+}

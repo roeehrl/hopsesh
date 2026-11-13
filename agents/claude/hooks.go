@@ -27,6 +27,7 @@ func (m *Module) MovementHooks(h agent.Host, in agent.Install, bin string, args 
 		handler["shell"] = "powershell"
 	}
 	out.File = agent.JSONMovementHookFileWithHandler(path, handler)
+	out.File.Runs = func(b []byte) (string, bool) { return agent.NoticeHookProgram(b, m.Spec().ID) }
 	if b, err := h.FS().ReadFile(path, 1<<20); err == nil {
 		var cfg struct {
 			Disable bool `json:"disableAllHooks"`

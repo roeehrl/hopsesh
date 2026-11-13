@@ -82,6 +82,12 @@ func (m *Module) ChangeDir(ctx context.Context, h agent.Host, in agent.Install, 
 // only change folder while it is closed.
 func (m *Module) InSession(agent.Install, string) string { return "" }
 
+// ChangeDirHelp is how the cd command's help describes Codex's folder change.
+func (m *Module) ChangeDirHelp() (how, undo string) {
+	return "Codex resumes the thread in the new folder (as codex resume -C does, with no turn) and records the folder itself. Codex's own /cd is not used: it starts a new thread.",
+		"Codex is asked to change the folder back"
+}
+
 // recordedCWD is the folder the newest thread_settings_applied in the rollout's end names
 // for this thread ("" when there is none).
 func recordedCWD(h agent.Host, path, id string, forked bool) (string, error) {

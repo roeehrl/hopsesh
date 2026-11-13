@@ -80,7 +80,8 @@ func (*Module) Spec() agent.Spec {
 		Icon: agent.Icon{SVG: iconSVG, Apps: map[string][]string{
 			"darwin": {"/Applications/ChatGPT.app", "~/Applications/ChatGPT.app", "/Applications/Codex.app", "~/Applications/Codex.app"},
 		}},
-		Clouds: []agent.Cloud{cloud()},
+		Desktop: &agent.Desktop{Tool: "Codex app", Product: "ChatGPT desktop", Shared: true},
+		Clouds:  []agent.Cloud{cloud()},
 		Kinds: []agent.SessionKind{
 			{ID: kindVoice, Name: "Voice conversations", Note: "Threads the Codex app started from a voice conversation."},
 			{ID: kindWork, Name: "Work threads", Note: "Threads from the Codex app's Work mode."},

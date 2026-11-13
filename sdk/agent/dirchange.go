@@ -22,6 +22,13 @@ type DirChanger interface {
 	InSession(in Install, dir string) string
 }
 
+// DirChangeHelp tells people how a module's agent changes a session's folder (how) and how
+// undo puts it back (undo), each a phrase ("Claude Code's files move back"). Optional, beside
+// DirChanger.
+type DirChangeHelp interface {
+	ChangeDirHelp() (how, undo string)
+}
+
 // DirMethod is how a module changes a session's folder.
 type DirMethod string
 

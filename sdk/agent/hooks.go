@@ -1,9 +1,11 @@
 package agent
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode/utf16"
 )
@@ -30,6 +32,24 @@ type HookFile struct {
 	Merge  func([]byte) ([]byte, error)
 	Remove func([]byte) ([]byte, error)
 	Has    func([]byte) bool
+	// Runs finds this agent's notice hook in the file whatever its arguments, and returns
+	// the program it runs: how another machine's hook is checked from here, where the
+	// exact arguments hopsesh there used are unknown. nil: only Has is known.
+	Runs func([]byte) (program string, ok bool)
+}
+
+// noticeHookIn finds a notice hook command (NoticeHookCommand) and its agent.
+var noticeHookIn = regexp.MustCompile(`'((?:[^'\\]|\\.)+)' notice-hook --agent '([a-z0-9-]+)'`)
+
+// NoticeHookProgram finds agent id's notice hook command (NoticeHookCommand, also inside
+// a JSON string) in a hook file, and returns the program it runs.
+func NoticeHookProgram(b []byte, id ID) (string, bool) {
+	for _, m := range noticeHookIn.FindAllSubmatch(bytes.ReplaceAll(b, []byte(`\"`), []byte(`"`)), -1) {
+		if string(m[2]) == string(id) {
+			return string(m[1]), true
+		}
+	}
+	return "", false
 }
 
 // NoticeHookCommand quotes every argument; no hook payload is interpolated into
